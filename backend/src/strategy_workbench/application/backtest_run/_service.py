@@ -31,6 +31,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestStartResponse,
     DataWarning,
     InlineDraft,
+    RunFailureCode,
     RunProgressEvent,
     RunStatus,
     SavedRevisionReference,
@@ -50,9 +51,27 @@ from .ports.outgoing.backtest_executor import (
 
 logger = logging.getLogger(__name__)
 
-# run `error` 문자열에서 서버 절대 경로를 가린다. 어댑터 detail 이 `root=C:\...`·`/home/...` 를
-# 싣는데 화면(role=alert)에 그대로 나가면 서버 레이아웃·계정명이 새어 나간다. 원문은 서버 로그에.
-_ABSOLUTE_PATH = re.compile(r"(?:[A-Za-z]:[\\/]|(?<![\w.])/(?=[\w.]))[^\s'\"`]*")
+# run `error` 문자열에서 서버 절대 경로를 가린다. 어댑터 detail 이 `root=C:\...`·`/home/...`·
+# `\\server\share` 를 싣는데 화면(role=alert)에 그대로 나가면 서버 레이아웃·계정명·호스트명이
+# 새어 나간다. 원문은 서버 로그에. URL(`scheme://`)은 경로가 아니므로 그대로 둔다.
+_PATH_CHARS = r"[^\s'\"`()<>]"
+_ABSOLUTE_PATH = re.compile(
+    r"(?P<url>\b[a-z][a-z0-9+.\-]*://" + _PATH_CHARS + r"*)"
+    r"|(?P<path>"
+    r"\\\\" + _PATH_CHARS + r"+"  # UNC \\host\share
+    r"|(?<!\w)[A-Za-z]:[\\/]" + _PATH_CHARS + r"*"  # 드라이브 C:\ C:/
+    # POSIX 는 흔한 루트 디렉터리로 시작하는 것만 — `/factors/0/graph` 같은 JSON Pointer 진단 경로와
+    # `/s` 같은 단위 표기는 파일 경로가 아니다.
+    r"|(?<![\w.:])/(?:home|Users|tmp|var|mnt|opt|srv|data|root|etc|usr|media|run|private|Volumes)"
+    r"(?:/[\w.\-~%+]*)+"
+    r")"
+)
+
+
+def _mask_paths(text: str) -> str:
+    return _ABSOLUTE_PATH.sub(
+        lambda match: match.group("url") if match.group("url") is not None else "<path>", text
+    )
 
 
 class InvalidBacktestRunError(ValueError):
@@ -164,7 +183,9 @@ class BacktestRunService:
                 schema_version=strategy.identity.schema_version,
                 source_hash=source_hash,
             )
-        elif provenance.spec_hash != executed_hash:
+        elif provenance.spec_hash != executed_hash:  # pragma: no cover - 도달 불가 방어 분기
+            # StrategyRevisionRecord.__post_init__ 이 비동결 리비전에 같은 등식을 강제하고, 동결
+            # 리비전은 _resolve 가 앞에서 requires_upgrade 로 거부한다.
             raise RuntimeError(
                 "saved strategy repository hash differs from the executed StrategySpec — "
                 f"strategy_id={provenance.strategy_id!r} revision={provenance.revision!r} "
@@ -203,9 +224,10 @@ class BacktestRunService:
                 name=f"backtest-{run_id}",
                 daemon=True,
             ).start()
-        except RuntimeError as error:
-            # 스레드 상한 등으로 기동에 실패하면 레코드가 `queued` 로 영구 고착한다(관측자 없음).
-            # 접수 취소 대신 `failed` 로 종결해 폴링·목록·취소가 막다른 상태를 보지 않게 한다.
+        except (RuntimeError, MemoryError) as error:
+            # 스레드 상한(RuntimeError)·메모리 압박(MemoryError)으로 기동에 실패하면 레코드가
+            # `queued` 로 영구 고착한다(관측자 없음). `failed` 로 종결해 폴링·목록·취소가 막다른
+            # 상태를 보지 않게 한다.
             with self._lock:
                 record.state = replace(
                     record.state,
@@ -213,7 +235,7 @@ class BacktestRunService:
                     error_code=_failure_code(error),
                 )
                 self._emit(record, RunStatus.FAILED, 0.0, "failed", "Run thread failed to start")
-            logger.error("backtest run thread failed to start — run_id=%s error=%s", run_id, error)
+            logger.exception("backtest run thread failed to start — run_id=%s", run_id)
             raise
         return BacktestStartResponse(accepted)
 
@@ -450,14 +472,16 @@ class BacktestRunService:
                 record, RunStatus.CANCELLED, record.state.progress, "cancelled", "Run cancelled"
             )
         except BaseException as error:
-            # 실패 사유 원문(절대 경로 포함)은 서버 로그에만 남기고 상태에는 가린 문자열을 싣는다.
-            # 어댑터 계약 위반은 사용자 오류가 아니라 어댑터 버그라 로그로 반드시 드러나야 한다.
-            logger.error(
-                "backtest run failed — run_id=%s stage=%s error=%s: %s",
+            # 실패 사유 원문(절대 경로 포함)과 stack trace 는 서버 로그에만 남기고 상태에는 가린
+            # 문자열을 싣는다. 어댑터 계약 위반은 사용자 오류가 아니라 어댑터 버그라 로그로 반드시
+            # 드러나야 한다 — 이 로그가 유일한 진단 채널이다(HTTP 500 이 없다).
+            with self._lock:
+                failed_stage = record.state.stage
+            logger.exception(
+                "backtest run failed — run_id=%s stage=%s error_code=%s",
                 run_id,
-                record.state.stage,
-                type(error).__name__,
-                error,
+                failed_stage,
+                _failure_code(error),
             )
             with self._lock:
                 # 취소와 겹쳐도 실패 사유는 버리지 않는다 — "내가 취소했다" 와 "데이터가 없었다" 를
@@ -538,8 +562,8 @@ class BacktestRunService:
             raise RunCancelledError("run cancelled")
 
 
-def _failure_code(error: BaseException) -> str:
-    """run `error_code`. 시작 요청의 422 코드 어휘를 그대로 써서 프론트 번역 키를 공유한다."""
+def _failure_code(error: BaseException) -> RunFailureCode:
+    """run `error_code`. 어휘 SoT 는 `RunFailureCode`(422 코드와 같은 문자열 → 번역 키 공유)."""
 
     if isinstance(error, InvalidPortfolioRequestError):
         return "portfolio.strategy.invalid"
@@ -567,7 +591,7 @@ def _describe_failure(error: BaseException) -> str:
         text = f"{text} — {issues}" if issues else text
     elif isinstance(error, IncompatiblePortfolioRequestError):
         text = f"{text} — {_describe_engine_issues(error.compatibility)}"
-    return _ABSOLUTE_PATH.sub("<path>", text)
+    return _mask_paths(text)
 
 
 def _describe_engine_issues(engine: EngineCompatibility) -> str:

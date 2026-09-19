@@ -289,6 +289,13 @@
           "error_code": {
             "anyOf": [
               {
+                "enum": [
+                  "portfolio.strategy.invalid",
+                  "portfolio.data.unavailable",
+                  "portfolio.raw_observation.invalid",
+                  "backtest.run.invalid",
+                  "backtest.run.internal"
+                ],
                 "type": "string"
               },
               {

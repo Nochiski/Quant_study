@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { StartBacktestErrors } from "../generated/types.gen";
+import { tOptional } from "../../config";
+import type {
+  BacktestRunState,
+  StartBacktestErrors,
+} from "../generated/types.gen";
 
 type StartBacktest422 = StartBacktestErrors[422];
 
@@ -24,6 +28,26 @@ const classify = (response: StartBacktest422): string => {
     }
   }
 };
+
+type RunFailureCode = NonNullable<BacktestRunState["error_code"]>;
+
+// backend `RunFailureCode` 어휘(OpenAPI enum → 생성 타입)와 run 페이지 번역 키의 동기화. 코드가 늘면 이 표가
+// 타입 오류로 먼저 깨지고, 번역이 빠지면 아래 단언이 깨진다(이슈 #158).
+const RUN_FAILURE_CODES: Record<RunFailureCode, true> = {
+  "portfolio.strategy.invalid": true,
+  "portfolio.data.unavailable": true,
+  "portfolio.raw_observation.invalid": true,
+  "backtest.run.invalid": true,
+  "backtest.run.internal": true,
+};
+
+describe("backtest run failure code vocabulary", () => {
+  it("has a translated recovery message for every run failure code", () => {
+    for (const code of Object.keys(RUN_FAILURE_CODES)) {
+      expect(tOptional(`backtest.run.error.${code}`), code).not.toBeNull();
+    }
+  });
+});
 
 describe("generated startBacktest error contract", () => {
   it("narrows malformed and coded 422 responses without a handwritten DTO", () => {

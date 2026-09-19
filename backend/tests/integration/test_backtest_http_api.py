@@ -375,8 +375,14 @@ def test_cancel_during_raw_observation_loading_ends_cancelled_without_a_tape(
     assert '"stage":"data"' not in events
 
 
-def test_data_failure_in_the_tape_stage_is_coded_and_hides_server_paths(tmp_path: Path) -> None:
-    """이슈 #158: 데이터 의존 실패는 run `failed` + `error_code` 로 오고, 절대 경로는 가린다."""
+def test_data_failure_in_the_tape_stage_is_coded_and_hides_server_paths(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """이슈 #158: 데이터 의존 실패는 run `failed` + `error_code` 로 오고, 절대 경로는 가린다.
+
+    원문과 stack trace 는 서버 로그(ERROR)에 남는다 — HTTP 500 이 없으므로 유일한 진단 채널이다.
+    """
+    caplog.set_level("ERROR", logger="strategy_workbench.application.backtest_run._service")
     run_id = "run-data-unavailable"
     container = build_container(artifact_root=tmp_path / "unused")
     failure = RawObservationUnavailableError(
@@ -390,8 +396,8 @@ def test_data_failure_in_the_tape_stage_is_coded_and_hides_server_paths(tmp_path
     client = TestClient(_app_with_backtests(container, backtests))
 
     accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    barrier.release.set()  # 단언보다 먼저 해제 — 실패해도 run 스레드가 30초를 태우지 않게
     assert accepted.status_code == 202, accepted.text
-    barrier.release.set()
 
     state = _wait(client, run_id)
     assert state["status"] == "failed", state
@@ -400,6 +406,16 @@ def test_data_failure_in_the_tape_stage_is_coded_and_hides_server_paths(tmp_path
     assert "status=no_data" in state["error"]
     assert "Users" not in state["error"] and "quant-ledger" not in state["error"]
     assert "root=<path>" in state["error"]
+    failure_logs = [r for r in caplog.records if "backtest run failed" in r.getMessage()]
+    assert len(failure_logs) == 1, caplog.text
+    assert failure_logs[0].exc_info is not None
+    assert failure_logs[0].exc_info[0] is RawObservationUnavailableError
+    assert "quant-ledger" in caplog.text  # 원문 경로는 로그에만 남는다
+    failure_logs = [r for r in caplog.records if "backtest run failed" in r.getMessage()]
+    assert len(failure_logs) == 1, caplog.text
+    assert failure_logs[0].exc_info is not None
+    assert failure_logs[0].exc_info[0] is RawObservationUnavailableError
+    assert "quant-ledger" in caplog.text  # 원문 경로는 로그에만 남는다
 
 
 def test_failure_that_races_a_cancel_keeps_its_reason(tmp_path: Path) -> None:
@@ -491,8 +507,8 @@ def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
     client = TestClient(_app_with_backtests(container, backtests))
 
     accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    barrier.release.set()  # 단언보다 먼저 해제 — 실패해도 run 스레드가 30초를 태우지 않게
     assert accepted.status_code == 202, accepted.text
-    barrier.release.set()
 
     state = _wait(client, run_id)
     assert state["status"] == "failed", state
@@ -500,6 +516,109 @@ def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
     assert "differs from the accepted strategy provenance" in state["error"]
     assert "provenance='" + "0" * 64 + "'" in state["error"]
     assert client.get(f"/api/v1/backtests/{run_id}/result").status_code == 409
+
+
+def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """스레드 기동 실패(상한·메모리)는 500 으로 나가되 run 은 `failed` 로 종결된다."""
+
+    class _UnstartableThread:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def start(self) -> None:
+            raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(
+        "strategy_workbench.application.backtest_run._service.Thread", _UnstartableThread
+    )
+    run_id = "run-thread-unstartable"
+    container = build_container(artifact_root=tmp_path / "unused")
+    backtests, _barrier = _backtests_with_raw_load_barrier(container, tmp_path, run_id)
+    client = TestClient(_app_with_backtests(container, backtests), raise_server_exceptions=False)
+
+    response = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+
+    assert response.status_code == 500
+    state = client.get(f"/api/v1/backtests/{run_id}").json()
+    assert state["status"] == "failed", state
+    assert state["error_code"] == "backtest.run.internal"
+    assert "can't start new thread" in state["error"]
+    assert client.post(f"/api/v1/backtests/{run_id}/cancel").json()["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("raw", "masked"),
+    [
+        (r"root=C:\Users\someone\quant-ledger\data\equity end", "root=<path> end"),
+        ("root=/home/kael/quant-ledger/data/equity detail", "root=<path> detail"),
+        (r"root=\\fileserver\quant\ledger\equity", "root=<path>"),
+        ("path C:/Users/a/b.parquet end", "path <path> end"),
+        ("(/tmp/foo)", "(<path>)"),
+        ("see https://example.com/docs for detail", "see https://example.com/docs for detail"),
+        ("source file:///C:/data/x.parquet", "source file:///C:/data/x.parquet"),
+        ("units 10 m/s and 3 /s", "units 10 m/s and 3 /s"),
+        ("value 1.5/2.0 ratio and/or n/a", "value 1.5/2.0 ratio and/or n/a"),
+        ("status=no_data detail=None", "status=no_data detail=None"),
+        # JSON Pointer 표기의 진단 경로는 파일 경로가 아니다.
+        ("invalid pointer /factors/0/graph/nodes/2", "invalid pointer /factors/0/graph/nodes/2"),
+        ("root=/srv/ledger/equity and /var/data/x", "root=<path> and <path>"),
+        (
+            "strategy.expression.calculation_non_finite@factors.0.graph.nodes.2: x",
+            "strategy.expression.calculation_non_finite@factors.0.graph.nodes.2: x",
+        ),
+    ],
+)
+def test_run_error_masks_server_paths_but_keeps_urls_and_units(raw: str, masked: str) -> None:
+    from strategy_workbench.application.backtest_run._service import _mask_paths
+
+    assert _mask_paths(raw) == masked
+
+
+def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() -> None:
+    """`_failure_code` 산출 집합 == `RunFailureCode` 어휘, 그중 422 코드는 계약 Literal 과 같다."""
+    from typing import get_args, get_type_hints
+
+    from strategy_workbench.adapters.inbound.http_api._backtest_contract import (
+        BacktestRunInvalidDetail,
+    )
+    from strategy_workbench.adapters.inbound.http_api._execution_error_contract import (
+        PortfolioDataUnavailableDetail,
+        PortfolioRawObservationInvalidDetail,
+        PortfolioStrategyInvalidDetail,
+    )
+    from strategy_workbench.application.backtest_run._service import (
+        InvalidBacktestRunError,
+        _failure_code,
+    )
+    from strategy_workbench.application.portfolio_design.facade.design import (
+        InvalidPortfolioRequestError,
+        PortfolioSnapshotMismatchError,
+    )
+    from strategy_workbench.domain.backtest.facade.runs import RUN_FAILURE_CODES
+    from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
+
+    produced = {
+        _failure_code(InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=()))),
+        _failure_code(RawObservationUnavailableError(DataLoadStatus.NO_DATA, None)),
+        _failure_code(PortfolioSnapshotMismatchError(expected="a", actual="b")),
+        _failure_code(InvalidBacktestRunError("x")),
+        _failure_code(RuntimeError("x")),
+    }
+    assert produced == RUN_FAILURE_CODES
+
+    def contract_code(detail_type: type) -> str:
+        # future annotations 라 필드 타입이 문자열이다 — 평가해서 Literal 인자를 꺼낸다.
+        (code,) = get_args(get_type_hints(detail_type)["code"])
+        return code
+
+    assert {
+        contract_code(PortfolioStrategyInvalidDetail),
+        contract_code(PortfolioDataUnavailableDetail),
+        contract_code(PortfolioRawObservationInvalidDetail),
+        contract_code(BacktestRunInvalidDetail),
+    } == RUN_FAILURE_CODES - {"backtest.run.internal"}
 
 
 def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -> None:

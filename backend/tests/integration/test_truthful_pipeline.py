@@ -7,7 +7,6 @@ output, TargetTape and backtest inputs agree. Every-session rebalance keeps the 
 
 from __future__ import annotations
 
-import time
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
@@ -263,12 +262,7 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
     assert explain_valid.json()["validation"]["valid"] is True
     assert backtest_valid.status_code == 202, backtest_valid.text
     run_id = backtest_valid.json()["run"]["run_id"]
-    state: dict[str, Any] = {}
-    for _ in range(200):
-        state = client.get(f"/api/v1/backtests/{run_id}").json()
-        if state["status"] in {"completed", "failed", "cancelled"}:
-            break
-        time.sleep(0.025)
+    state = wait_for_terminal_state(client, run_id)
     assert state["status"] == "completed", state
     result = client.get(f"/api/v1/backtests/{run_id}/result")
     assert result.status_code == 200
@@ -830,12 +824,7 @@ def test_backtest_consumes_the_same_truthful_tape_as_preview() -> None:
 
     assert accepted.status_code == 202, accepted.text
     run_id = accepted.json()["run"]["run_id"]
-    state: dict[str, object] = {}
-    for _ in range(200):
-        state = client.get(f"/api/v1/backtests/{run_id}").json()
-        if state["status"] in {"completed", "failed", "cancelled"}:
-            break
-        time.sleep(0.025)
+    state = wait_for_terminal_state(client, run_id)
     assert state["status"] == "completed", state
     manifest = client.get(f"/api/v1/backtests/{run_id}/result").json()["manifest"]
     # The run consumed the very tape the preview showed: same hash, same adapter snapshot.
@@ -997,12 +986,7 @@ def test_preview_warnings_are_recorded_in_the_run_manifest() -> None:
     accepted = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
     assert accepted.status_code == 202, accepted.text
     run_id = accepted.json()["run"]["run_id"]
-    state: dict[str, object] = {}
-    for _ in range(400):
-        state = client.get(f"/api/v1/backtests/{run_id}").json()
-        if state["status"] in {"completed", "failed", "cancelled"}:
-            break
-        time.sleep(0.025)
+    state = wait_for_terminal_state(client, run_id)
     assert state["status"] == "completed", state
 
     manifest = client.get(f"/api/v1/backtests/{run_id}/result").json()["manifest"]

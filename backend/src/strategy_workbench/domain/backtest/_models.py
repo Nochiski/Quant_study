@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Literal, get_args
 
 from strategy_workbench.domain.analytics.facade.metrics import (
     DrawdownPoint,
@@ -236,6 +237,42 @@ class RunProgressEvent:
     occurred_at: datetime
 
 
+# run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이라
+# 프론트 번역 키(`backtest.error.<code>`)를 공유하고, 마지막은 분류되지 않은 내부 오류다.
+RunFailureCode = Literal[
+    "portfolio.strategy.invalid",
+    "portfolio.data.unavailable",
+    "portfolio.raw_observation.invalid",
+    "backtest.run.invalid",
+    "backtest.run.internal",
+]
+RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
+
+
+# run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이라
+# 프론트 번역 키(`backtest.error.<code>`)를 공유하고, 마지막은 분류되지 않은 내부 오류다.
+RunFailureCode = Literal[
+    "portfolio.strategy.invalid",
+    "portfolio.data.unavailable",
+    "portfolio.raw_observation.invalid",
+    "backtest.run.invalid",
+    "backtest.run.internal",
+]
+RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
+
+
+# run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이라
+# 프론트 번역 키(`backtest.error.<code>`)를 공유하고, 마지막은 분류되지 않은 내부 오류다.
+RunFailureCode = Literal[
+    "portfolio.strategy.invalid",
+    "portfolio.data.unavailable",
+    "portfolio.raw_observation.invalid",
+    "backtest.run.invalid",
+    "backtest.run.internal",
+]
+RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
+
+
 @dataclass(frozen=True)
 class BacktestRunState:
     run_id: str
@@ -246,9 +283,10 @@ class BacktestRunState:
     created_at: datetime
     updated_at: datetime
     error: str | None = None
-    # `failed` 의 기계 판독 분류. 시작 요청이 데이터를 읽지 않게 되면서(#158) 데이터 의존 실패가
-    # 422 코드 대신 이 필드로 온다 — 어휘는 422 의 `portfolio.*`·`backtest.run.*` 코드와 같다.
-    error_code: str | None = None
+    # 실패의 기계 판독 분류(`failed`, 그리고 실패와 취소가 겹쳐 `cancelled` 로 끝난 run 에도 사유
+    # 보존을 위해 실린다). 시작 요청이 데이터를 읽지 않게 되면서(#158) 데이터 의존 실패가 422
+    # 코드 대신 이 필드로 온다 — 어휘 SoT 는 `RunFailureCode`.
+    error_code: RunFailureCode | None = None
     artifact_uri: str | None = None
     artifact_sha256: str | None = None
 

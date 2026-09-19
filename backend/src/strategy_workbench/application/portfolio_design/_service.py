@@ -173,7 +173,10 @@ class FactorEvaluationRecord:
 
 @dataclass(frozen=True, eq=False)
 class _PreparedPipeline:
-    """관측 데이터를 읽기 전에 확정되는 파이프라인 입력(엔진 판정·필드 메타데이터·실행 플랜)."""
+    """관측 데이터를 읽기 전에 확정되는 파이프라인 입력(엔진 판정·필드 메타데이터·실행 플랜).
+
+    `plans` 가 dict 라 frozen 이 만드는 `__hash__` 가 깨지므로 `eq=False`(비교·해시 용도 없음).
+    """
 
     engine: EngineCompatibility
     metadata: FactorMetadataSnapshot

@@ -575,9 +575,7 @@ def test_trace_rejects_non_session_and_unknown_security_but_accepts_non_member()
     assert {row["security_id"] for row in non_member.json()["trace"]["rows"]} == {"sec-035420-1"}
 
 
-def test_finite_factor_overflow_is_coded_on_preview_and_trace_and_fails_the_backtest_run() -> (
-    None
-):
+def test_finite_factor_overflow_is_coded_on_preview_and_trace_and_fails_the_run() -> None:
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
     factor = spec["factors"][0]

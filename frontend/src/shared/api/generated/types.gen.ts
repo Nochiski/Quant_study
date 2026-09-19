@@ -177,7 +177,13 @@ export type BacktestRunState = {
   /**
    * Error Code
    */
-  error_code?: string | null;
+  error_code?:
+    | "portfolio.strategy.invalid"
+    | "portfolio.data.unavailable"
+    | "portfolio.raw_observation.invalid"
+    | "backtest.run.invalid"
+    | "backtest.run.internal"
+    | null;
   /**
    * Message
    */

@@ -37,7 +37,6 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
-    BacktestRunState,
 )
 from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataPort,
@@ -104,6 +103,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     WeightingMethod,
 )
 from strategy_workbench.domain.strategy.facade.validation import validate_strategy
+from tests.backtest_run_wait import wait_for_terminal_run, wait_for_terminal_state
 
 WINDOW = (date(2024, 1, 8), date(2024, 1, 12))
 
@@ -153,16 +153,6 @@ def _spec(*factors: FactorSignal) -> StrategySpec:
             rebalance_every_n_sessions=1,
         ),
     )
-
-
-def _wait_terminal(backtests: BacktestRunService, run_id: str) -> BacktestRunState:
-    state = backtests.state(run_id)
-    for _ in range(500):
-        state = backtests.state(run_id)
-        if state.status.value in {"completed", "failed", "cancelled"}:
-            return state
-        time.sleep(0.01)
-    raise AssertionError(f"run did not finish: run_id={run_id} state={state}")
 
 
 def _service(
@@ -450,7 +440,7 @@ def _spec_using_market_cap_outside_the_factor(role: str) -> StrategySpec:
 
 @pytest.mark.parametrize("role", ["eligibility", "liquidity", "risk"])
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
-def test_unused_by_factor_non_finite_raw_field_fails_before_every_execution_route(
+def test_unused_by_factor_non_finite_raw_field_fails_preview_trace_and_the_backtest_run(
     role: str,
     value: float,
     tmp_path: Path,
@@ -486,10 +476,10 @@ def test_unused_by_factor_non_finite_raw_field_fails_before_every_execution_rout
     )
     # 시작 요청은 데이터를 읽지 않으므로 접수되고, 계약 위반은 tape 단계에서 run 을 실패시킨다.
     accepted = backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
-    state = _wait_terminal(backtests, accepted.run.run_id)
+    state = wait_for_terminal_run(backtests, accepted.run.run_id)
     assert state.status.value == "failed", state
+    assert state.error_code == "portfolio.raw_observation.invalid"
     assert state.error is not None
-    assert "RawObservationContractError" in state.error
     assert "raw numeric field value must be finite" in state.error
 
 
@@ -563,14 +553,9 @@ def test_duplicate_raw_fields_fail_closed_with_one_code_on_every_http_execution_
     # 백테스트 시작은 데이터를 읽지 않아 접수되고, 같은 위반이 tape 단계에서 run 을 실패시킨다.
     backtest = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
     assert backtest.status_code == 202, backtest.text
-    run_id = backtest.json()["run"]["run_id"]
-    state: dict[str, Any] = {}
-    for _ in range(500):
-        state = client.get(f"/api/v1/backtests/{run_id}").json()
-        if state["status"] in {"completed", "failed", "cancelled"}:
-            break
-        time.sleep(0.01)
+    state = wait_for_terminal_state(client, backtest.json()["run"]["run_id"])
     assert state["status"] == "failed", state
+    assert state["error_code"] == "portfolio.raw_observation.invalid"
     assert "field_ids must be unique" in state["error"]
 
 
@@ -593,7 +578,7 @@ def test_legacy_raw_port_keeps_preview_and_backtest_compatible(tmp_path: Path) -
     accepted = backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
 
     assert accepted.run.run_id == "legacy-port-run"
-    state = _wait_terminal(backtests, "legacy-port-run")
+    state = wait_for_terminal_run(backtests, "legacy-port-run")
     assert state.status.value == "completed", state
     # preview 1회 + run 의 tape 단계 1회. 시작 요청 자체는 관측 포트를 부르지 않는다(#158).
     assert legacy.calls == 2
@@ -616,10 +601,10 @@ def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: 
     )
     # 스냅샷 대조는 원시 관측을 읽은 뒤에만 가능하므로 tape 단계에서 run 을 실패시킨다(#158).
     accepted = backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
-    state = _wait_terminal(backtests, accepted.run.run_id)
+    state = wait_for_terminal_run(backtests, accepted.run.run_id)
     assert state.status.value == "failed", state
+    assert state.error_code == "portfolio.raw_observation.invalid"
     assert state.error is not None
-    assert "PortfolioSnapshotMismatchError" in state.error
     assert "snapshot mismatch" in state.error
 
 
@@ -787,7 +772,7 @@ def test_unknown_universe_is_a_422_with_the_adapter_detail() -> None:
     assert "nope.universe" in detail["detail"]
 
 
-def test_backtest_route_rejects_what_preview_rejects_with_the_same_codes() -> None:
+def test_structural_rejections_share_a_code_and_data_failures_fail_the_backtest_run() -> None:
     client = TestClient(build_http_app())
     template = client.get("/api/v1/strategies/template").json()
     unknown_universe = {**template, "data": {**template["data"], "universe_id": "nope.universe"}}
@@ -825,15 +810,9 @@ def test_backtest_route_rejects_what_preview_rejects_with_the_same_codes() -> No
     assert preview.json()["detail"]["code"] == "portfolio.data.unavailable"
     run = client.post("/api/v1/backtests", json={"strategy": unknown_universe, "core": "python"})
     assert run.status_code == 202, run.text
-    run_id = run.json()["run"]["run_id"]
-    state: dict[str, Any] = {}
-    for _ in range(500):
-        state = client.get(f"/api/v1/backtests/{run_id}").json()
-        if state["status"] in {"completed", "failed", "cancelled"}:
-            break
-        time.sleep(0.01)
+    state = wait_for_terminal_state(client, run.json()["run"]["run_id"])
     assert state["status"] == "failed", state
-    assert "RawObservationUnavailableError" in state["error"]
+    assert state["error_code"] == "portfolio.data.unavailable"
     assert "nope.universe" in state["error"]
 
 

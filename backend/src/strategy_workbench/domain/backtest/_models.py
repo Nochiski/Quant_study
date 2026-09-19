@@ -246,6 +246,9 @@ class BacktestRunState:
     created_at: datetime
     updated_at: datetime
     error: str | None = None
+    # `failed` 의 기계 판독 분류. 시작 요청이 데이터를 읽지 않게 되면서(#158) 데이터 의존 실패가
+    # 422 코드 대신 이 필드로 온다 — 어휘는 422 의 `portfolio.*`·`backtest.run.*` 코드와 같다.
+    error_code: str | None = None
     artifact_uri: str | None = None
     artifact_sha256: str | None = None
 

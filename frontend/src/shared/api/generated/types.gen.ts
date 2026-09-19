@@ -175,6 +175,10 @@ export type BacktestRunState = {
    */
   error?: string | null;
   /**
+   * Error Code
+   */
+  error_code?: string | null;
+  /**
    * Message
    */
   message: string;

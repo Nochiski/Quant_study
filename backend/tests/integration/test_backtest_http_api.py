@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 from typing import Any, cast
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
@@ -16,22 +16,35 @@ from strategy_workbench.adapters.outbound.artifact_local.facade.store import Loc
 from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import (
     BacktestEngineExecutorAdapter,
 )
+from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
+    BacktestEnginePortfolioAdapter,
+)
+from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
+    MockEquityDataAdapter,
+)
 from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
     BacktestDataPort,
 )
 from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
 from strategy_workbench.application.portfolio_design.facade.design import (
+    EngineCapabilityIssue,
     EngineCompatibility,
+    EngineRequirementSummary,
     PortfolioDesignService,
-    PortfolioPipelineOptions,
-    PortfolioPipelineResult,
-    PortfolioPreviewRequest,
+    RawObservationUnavailableError,
+)
+from strategy_workbench.application.portfolio_design.facade.ports import (
+    RawObservationQuery,
+    RawObservationSet,
 )
 from strategy_workbench.bootstrap.facade.container import BackendContainer, build_container
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
+from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
+from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
+from tests.backtest_run_wait import wait_for_terminal_state
 
 
 class _CommitBarrierStore:
@@ -56,39 +69,62 @@ class _CommitBarrierStore:
         self._delegate.discard(run_id)
 
 
-class _TapeBarrierDesign:
-    """run 스레드의 tape 단계(`run_pipeline`) 진입에서 멈추는 테스트용 포트폴리오 설계 서비스."""
+class _RawLoadBarrierPort:
+    """tape 단계의 원시 관측 로딩 안에서 멈추는 테스트용 관측 포트.
 
-    def __init__(self, delegate: PortfolioDesignService) -> None:
+    실제 mock 어댑터에 위임하되, 로딩 진입 시점에 `entered` 를 올리고 `release` 까지 기다린다.
+    해제 뒤 어댑터의 checkpoint 가 취소 플래그를 보므로 "로딩 도중 취소" 경로를 그대로 탄다.
+    `failure` 가 있으면 로딩 대신 그 예외를 던진다(데이터 부재 경로).
+    """
+
+    def __init__(
+        self,
+        delegate: MockEquityDataAdapter,
+        *,
+        failure: Exception | None = None,
+    ) -> None:
         self._delegate = delegate
+        self._failure = failure
         self.entered = Event()
         self.release = Event()
-        self.compiled = False
+        self.loaded = False
 
-    def preflight(self, request: PortfolioPreviewRequest) -> EngineCompatibility:
-        return self._delegate.preflight(request)
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        return self.load_raw_observations_cancellable(query, checkpoint=lambda: None)
 
-    def run_pipeline(
+    def load_raw_observations_cancellable(
         self,
-        request: PortfolioPreviewRequest,
+        query: RawObservationQuery,
         *,
-        options: PortfolioPipelineOptions | None = None,
-        cancelled: Callable[[], bool] = lambda: False,
-    ) -> PortfolioPipelineResult:
+        checkpoint: Callable[[], None],
+    ) -> RawObservationSet:
         self.entered.set()
         if not self.release.wait(timeout=30):
-            raise TimeoutError("target tape test barrier was not released")
-        result = self._delegate.run_pipeline(request, options=options, cancelled=cancelled)
-        self.compiled = True
+            raise TimeoutError("raw observation test barrier was not released")
+        if self._failure is not None:
+            raise self._failure
+        result = self._delegate.load_raw_observations_cancellable(query, checkpoint=checkpoint)
+        self.loaded = True
         return result
 
 
-def _backtests_with_tape_barrier(
-    container: BackendContainer, tmp_path: Path, run_id: str
-) -> tuple[BacktestRunService, _TapeBarrierDesign]:
-    barrier = _TapeBarrierDesign(container.portfolio_design)
+def _backtests_with_raw_load_barrier(
+    container: BackendContainer,
+    tmp_path: Path,
+    run_id: str,
+    *,
+    failure: Exception | None = None,
+) -> tuple[BacktestRunService, _RawLoadBarrierPort]:
+    adapter = cast(MockEquityDataAdapter, container.equity_data)
+    barrier = _RawLoadBarrierPort(adapter, failure=failure)
+    portfolio_design = PortfolioDesignService(
+        barrier,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=adapter,
+        factor_registry_version=build_default_factor_registry().version,
+    )
     backtests = BacktestRunService(
-        cast(PortfolioDesignService, barrier),
+        portfolio_design,
         container.strategy_repository,
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
@@ -139,13 +175,7 @@ def _run_body(client: TestClient, core: str = "rust") -> dict[str, Any]:
 
 
 def _wait(client: TestClient, run_id: str) -> dict[str, Any]:
-    state: dict[str, Any] = {}
-    for _ in range(200):
-        state = client.get(f"/api/v1/backtests/{run_id}").json()
-        if state["status"] in {"completed", "failed", "cancelled"}:
-            return state
-        time.sleep(0.025)
-    raise AssertionError(f"run did not finish: {state}")
+    return wait_for_terminal_state(client, run_id)
 
 
 def _execute(client: TestClient, core: str) -> dict[str, Any]:
@@ -276,48 +306,54 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
     assert replay_result.json()["manifest"]["run_spec"] == accepted_request.json()
 
 
-def test_start_accepts_the_run_before_the_target_tape_is_compiled(tmp_path: Path) -> None:
-    """이슈 #158: 시작 요청은 TargetTape 계산을 기다리지 않고 202 `queued` 를 돌려준다."""
+def test_start_accepts_the_run_before_raw_observations_are_loaded(tmp_path: Path) -> None:
+    """이슈 #158: 시작 요청은 관측 로딩·TargetTape 계산을 기다리지 않고 202 `queued` 를 돌려준다.
+
+    누군가 start() 에 preview/run_pipeline 을 되돌려 넣으면 POST 가 배리어에 막혀 이 테스트가
+    30초 타임아웃으로 실패한다.
+    """
     run_id = "run-accepted-before-tape"
     container = build_container(artifact_root=tmp_path / "unused")
-    backtests, barrier = _backtests_with_tape_barrier(container, tmp_path, run_id)
+    backtests, barrier = _backtests_with_raw_load_barrier(container, tmp_path, run_id)
     client = TestClient(_app_with_backtests(container, backtests))
 
     accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
 
-    assert accepted.status_code == 202
-    assert accepted.json()["run"]["run_id"] == run_id
-    assert accepted.json()["run"]["status"] == "queued"
-    assert barrier.entered.wait(timeout=30), "run never entered the tape stage"
-    assert barrier.compiled is False
-    in_tape = client.get(f"/api/v1/backtests/{run_id}").json()
-    assert in_tape["status"] == "running"
-    assert in_tape["stage"] == "tape"
-    not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
-    assert not_ready.status_code == 409
-
-    barrier.release.set()
+    try:
+        assert accepted.status_code == 202
+        assert accepted.json()["run"]["run_id"] == run_id
+        assert accepted.json()["run"]["status"] == "queued"
+        assert barrier.entered.wait(timeout=30), "run never entered raw observation loading"
+        assert barrier.loaded is False
+        # 배리어는 tape 단계의 `_update` 뒤(run_pipeline 안)에서 잡히므로 여기서는 반드시 tape 다.
+        in_tape = client.get(f"/api/v1/backtests/{run_id}").json()
+        assert in_tape["status"] == "running"
+        assert in_tape["stage"] == "tape"
+        not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
+        assert not_ready.status_code == 409
+    finally:
+        barrier.release.set()
     state = _wait(client, run_id)
     assert state["status"] == "completed", state
-    assert barrier.compiled is True
+    assert barrier.loaded is True
     events = client.get(f"/api/v1/backtests/{run_id}/events").text
     assert '"stage":"tape"' in events
     assert '"stage":"data"' in events
     assert events.index('"stage":"tape"') < events.index('"stage":"data"')
 
 
-def test_cancel_during_target_tape_compilation_ends_cancelled_without_a_tape(
+def test_cancel_during_raw_observation_loading_ends_cancelled_without_a_tape(
     tmp_path: Path,
 ) -> None:
-    """이슈 #158: tape 단계에서 취소하면 파이프라인 checkpoint 가 멈추고 `cancelled` 로 끝난다."""
+    """이슈 #158: 관측 로딩 도중 취소하면 어댑터 checkpoint 가 멈추고 `cancelled` 로 끝난다."""
     run_id = "run-cancel-during-tape"
     container = build_container(artifact_root=tmp_path / "unused")
-    backtests, barrier = _backtests_with_tape_barrier(container, tmp_path, run_id)
+    backtests, barrier = _backtests_with_raw_load_barrier(container, tmp_path, run_id)
     client = TestClient(_app_with_backtests(container, backtests))
 
     accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
     assert accepted.status_code == 202
-    assert barrier.entered.wait(timeout=30), "run never entered the tape stage"
+    assert barrier.entered.wait(timeout=30), "run never entered raw observation loading"
     try:
         cancellation = client.post(f"/api/v1/backtests/{run_id}/cancel")
         assert cancellation.status_code == 200
@@ -328,14 +364,142 @@ def test_cancel_during_target_tape_compilation_ends_cancelled_without_a_tape(
     state = _wait(client, run_id)
     assert state["status"] == "cancelled", state
     assert state["error"] is None
+    assert state["error_code"] is None
     assert state["artifact_uri"] is None
-    # 취소는 파이프라인 첫 checkpoint 에서 관측되므로 tape 는 끝까지 만들어지지 않는다.
-    assert barrier.compiled is False
+    # 취소는 mock 어댑터의 로딩 checkpoint 에서 관측되므로 로딩이 끝까지 가지 않는다.
+    assert barrier.loaded is False
     events = client.get(f"/api/v1/backtests/{run_id}/events").text
     assert '"status":"cancel_requested"' in events
     assert '"status":"cancelled"' in events
     assert '"status":"completed"' not in events
     assert '"stage":"data"' not in events
+
+
+def test_data_failure_in_the_tape_stage_is_coded_and_hides_server_paths(tmp_path: Path) -> None:
+    """이슈 #158: 데이터 의존 실패는 run `failed` + `error_code` 로 오고, 절대 경로는 가린다."""
+    run_id = "run-data-unavailable"
+    container = build_container(artifact_root=tmp_path / "unused")
+    failure = RawObservationUnavailableError(
+        DataLoadStatus.NO_DATA,
+        "no members in universe — universe_id=krx.common-stok "
+        "root=C:\\Users\\someone\\quant-ledger\\data\\equity",
+    )
+    backtests, barrier = _backtests_with_raw_load_barrier(
+        container, tmp_path, run_id, failure=failure
+    )
+    client = TestClient(_app_with_backtests(container, backtests))
+
+    accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    assert accepted.status_code == 202, accepted.text
+    barrier.release.set()
+
+    state = _wait(client, run_id)
+    assert state["status"] == "failed", state
+    assert state["error_code"] == "portfolio.data.unavailable"
+    assert "universe_id=krx.common-stok" in state["error"]
+    assert "status=no_data" in state["error"]
+    assert "Users" not in state["error"] and "quant-ledger" not in state["error"]
+    assert "root=<path>" in state["error"]
+
+
+def test_failure_that_races_a_cancel_keeps_its_reason(tmp_path: Path) -> None:
+    """tape 단계 실패와 취소가 겹쳐도 사유(`error`·`error_code`)는 버리지 않는다."""
+    run_id = "run-failure-races-cancel"
+    container = build_container(artifact_root=tmp_path / "unused")
+    failure = RawObservationUnavailableError(DataLoadStatus.NO_DATA, "no members in universe")
+    backtests, barrier = _backtests_with_raw_load_barrier(
+        container, tmp_path, run_id, failure=failure
+    )
+    client = TestClient(_app_with_backtests(container, backtests))
+
+    accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    assert accepted.status_code == 202, accepted.text
+    assert barrier.entered.wait(timeout=30), "run never entered raw observation loading"
+    try:
+        assert client.post(f"/api/v1/backtests/{run_id}/cancel").status_code == 200
+    finally:
+        barrier.release.set()
+
+    state = _wait(client, run_id)
+    assert state["status"] == "cancelled", state
+    assert state["error_code"] == "portfolio.data.unavailable"
+    assert "no members in universe" in state["error"]
+
+
+class _RejectingEngine:
+    """엔진이 구현하지 못하는 스펙으로 판정하는 포트 — preflight 반환값 소비 분기를 고정한다."""
+
+    def assess(self, spec: object) -> EngineCompatibility:
+        return EngineCompatibility(
+            compatible=False,
+            requirements=EngineRequirementSummary("EverySession", (), (), ("unsupported",)),
+            issues=(
+                EngineCapabilityIssue("feature", "unsupported", "not_implemented", "no kernel"),
+            ),
+        )
+
+    def to_target_action(self, frame: object, *, max_participation: object = None) -> object:
+        raise AssertionError((frame, max_participation))  # pragma: no cover
+
+
+def test_engine_incompatible_strategy_is_rejected_at_start_with_the_issue_list(
+    tmp_path: Path,
+) -> None:
+    """preflight 의 `compatible=False` 는 202 가 아니라 422 `backtest.run.invalid` 로 거부된다."""
+    container = build_container(artifact_root=tmp_path / "unused")
+    adapter = cast(MockEquityDataAdapter, container.equity_data)
+    portfolio_design = PortfolioDesignService(
+        adapter,
+        _RejectingEngine(),
+        factor_metadata=adapter,
+        factor_registry_version=build_default_factor_registry().version,
+    )
+    backtests = BacktestRunService(
+        portfolio_design,
+        container.strategy_repository,
+        cast(BacktestDataPort, container.equity_data),
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path / "artifacts"),
+        new_id=lambda: "must-not-be-accepted",
+    )
+    client = TestClient(_app_with_backtests(container, backtests))
+
+    response = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "backtest.run.invalid"
+    assert "feature.unsupported=not_implemented (no kernel)" in detail["message"]
+    assert client.get("/api/v1/backtests/must-not-be-accepted").status_code == 404
+
+
+def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """start() 의 provenance 해시와 컴파일된 tape 해시가 갈리면 run 은 500 대신 `failed` 로 끝난다.
+
+    두 값은 같은 `strategy_spec_hash` 의 출력이라 정상 경로에서는 갈릴 수 없다 — 접수 쪽 계산만
+    바꿔 분기를 강제로 연다.
+    """
+    monkeypatch.setattr(
+        "strategy_workbench.application.backtest_run._service.strategy_spec_hash",
+        lambda spec: "0" * 64,
+    )
+    run_id = "run-tape-hash-mismatch"
+    container = build_container(artifact_root=tmp_path / "unused")
+    backtests, barrier = _backtests_with_raw_load_barrier(container, tmp_path, run_id)
+    client = TestClient(_app_with_backtests(container, backtests))
+
+    accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    assert accepted.status_code == 202, accepted.text
+    barrier.release.set()
+
+    state = _wait(client, run_id)
+    assert state["status"] == "failed", state
+    assert state["error_code"] == "backtest.run.internal"
+    assert "differs from the accepted strategy provenance" in state["error"]
+    assert "provenance='" + "0" * 64 + "'" in state["error"]
+    assert client.get(f"/api/v1/backtests/{run_id}/result").status_code == 409
 
 
 def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -> None:

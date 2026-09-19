@@ -171,7 +171,7 @@ class FactorEvaluationRecord:
     trace: FactorTrace | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class _PreparedPipeline:
     """관측 데이터를 읽기 전에 확정되는 파이프라인 입력(엔진 판정·필드 메타데이터·실행 플랜)."""
 
@@ -211,14 +211,17 @@ class PortfolioDesignService:
         """관측 데이터를 읽지 않고 끝나는 검사만 돌려 엔진 호환성을 답한다.
 
         `run_pipeline` 의 앞부분(스펙 검증·엔진 판정·팩터 메타데이터·실행 플랜·출력 타입/저장 참조
-        거부)과 같은 코드를 타므로, 여기서 통과한 스펙이 파이프라인 앞부분에서 다시 거부되는 일은
-        없다. 원시 관측 로딩과 TargetTape 컴파일은 하지 않으므로 응답 시간이 데이터 구간·유니버스
-        크기에 비례하지 않는다 — 백테스트 시작 요청이 즉시 202 를 돌려주기 위한 사전 검사다(이슈
-        #158). 데이터에 의존하는 실패(관측 계약 위반·스냅샷 불일치·비유한 계산)는 여기서 잡히지
-        않는다.
+        거부)과 같은 `_prepare` 를 타므로, 여기서 예외 없이 끝난 스펙이 그 앞부분에서 예외로
+        거부되는 일은 없다. 엔진 호환성만은 예외가 아니라 반환값으로 답하므로 호출자가
+        `.compatible` 을 검사해야 한다. 원시 관측 로딩과 TargetTape 컴파일은 하지 않으므로 응답
+        시간이 데이터 구간·유니버스 크기에 비례하지 않는다 — 백테스트 시작 요청이 즉시 202 를
+        돌려주기 위한 사전 검사다(이슈 #158). 데이터에 의존하는 실패(관측 부재·계약 위반·스냅샷
+        불일치·비유한 계산)는 여기서 잡히지 않는다.
         """
 
-        return self._prepare(request.spec, PortfolioPipelineOptions()).engine
+        # 호환성은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게 명시한다.
+        options = PortfolioPipelineOptions(require_engine_compatible=False)
+        return self._prepare(request.spec, options).engine
 
     def run_pipeline(
         self,

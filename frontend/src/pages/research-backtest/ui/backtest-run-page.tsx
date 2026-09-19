@@ -5,7 +5,7 @@ import {
   useBacktestStatus,
 } from "../../../entities/backtest";
 import { BacktestRunActions } from "../../../features/run-backtest";
-import { t } from "../../../shared/config";
+import { t, tOptional } from "../../../shared/config";
 import { useNavigate, useParams } from "../../../shared/lib/router";
 import { Badge } from "../../../shared/ui";
 
@@ -67,13 +67,19 @@ export const BacktestRunPage = () => {
         {state.stage} · {Math.round(state.progress * 100)}% · {state.message}
       </p>
       {state.error ? (
-        // 서버가 남긴 실패 사유를 그대로 보여 준다 — "failed" 배지만으로는 원인을 알 수 없다(이슈 #154).
+        // 서버가 남긴 실패 사유를 보여 준다 — "failed" 배지만으로는 원인을 알 수 없다(이슈 #154).
+        // `error_code` 가 있으면 번역된 복구 문구를 앞에 두고, 서버 사유(경로는 서버가 가린다)는
+        // 진단용으로 뒤에 붙인다(이슈 #158).
         <p
           className="page-state page-state--error"
           role="alert"
           aria-label={t("page.backtest.runError")}
         >
-          {t("page.backtest.runError")}: {state.error}
+          {t("page.backtest.runError")}:{" "}
+          {(state.error_code &&
+            tOptional(`backtest.error.${state.error_code}`)) ??
+            null}{" "}
+          {state.error}
         </p>
       ) : null}
       {completed && result.isPending ? (

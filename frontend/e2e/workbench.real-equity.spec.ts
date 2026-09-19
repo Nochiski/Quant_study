@@ -41,16 +41,22 @@ const REWIRED_FIELD = "price.open";
 // 실데이터 security_id 어휘는 `{ticker}:{span_seq}`(GAP-11). 실행 설정 기본값은 비어 있어(벤치마크 없음,
 // 이슈 #154) 벤치마크 경로까지 검증하려면 어댑터 어휘의 ID 를 명시해야 한다 — 삼성전자 첫 상장 구간.
 const BENCHMARK_SECURITY_ID = "005930:1";
-// 시작 요청은 데이터를 읽지 않는 사전 검사만 하고 즉시 202 를 돌려준다(이슈 #158). TargetTape 계산은
-// run 의 `tape` 단계로 옮겨졌다 — 실측(2026-09-19) 6개월 구간 약 80초 + 엔진 2초가 완료 예산에 든다.
+// 시작 요청은 데이터를 읽지 않는 사전 검사만 하고 즉시 202 를 돌려준다(이슈 #158). 시작 예산을
+// 밀리초 단위 실측보다 훨씬 크지만 데이터 크기에 비례할 수 없는 값으로 조여 두어, 누군가 시작
+// 경로에 데이터 읽기를 되돌려 넣으면 여기서 잡힌다. TargetTape 계산은 run 의 `tape` 단계로
+// 옮겨졌다 — 실측(2026-09-19) 6개월 구간 약 80초 + 엔진 2초를 완료 예산이 5배 여유로 흡수한다.
 // 하위 예산 합이 테스트 예산 안에 들어와야 하위 단계가 먼저 실패해 원인을 말한다.
-const START_TIMEOUT_MS = 60_000;
-const COMPLETE_TIMEOUT_MS = 300_000;
+const START_TIMEOUT_MS = 15_000;
+const COMPLETE_TIMEOUT_MS = 480_000;
 const TEST_TIMEOUT_MS = 900_000;
 
 const realDataSource = (title: string): string => {
   const titled = mustReplace(GOLDEN, "퀄리티 모멘텀", title);
-  const started = mustReplace(titled, 'start: "2021-01-01"', `start: "${BACKTEST_START}"`);
+  const started = mustReplace(
+    titled,
+    'start: "2021-01-01"',
+    `start: "${BACKTEST_START}"`,
+  );
   return mustReplace(started, 'end: "2026-08-31"', `end: "${BACKTEST_END}"`);
 };
 
@@ -95,7 +101,9 @@ test.describe("real equity data", () => {
     await fieldId.selectOption(REWIRED_FIELD);
     await expect(fieldId).toHaveValue(REWIRED_FIELD);
     await expectApplied("field_id");
-    await graphEditor.getByRole("button", { name: "노드 편집: mom_252" }).click();
+    await graphEditor
+      .getByRole("button", { name: "노드 편집: mom_252" })
+      .click();
     await selected
       .getByRole("combobox", { name: /^input_node_id/ })
       .selectOption("field");
@@ -134,7 +142,9 @@ test.describe("real equity data", () => {
     // 백테스트: 실데이터 duckdb 어댑터 + Rust core. 저장된 revision 을 그대로 실행한다.
     const settingsToggle = page.getByLabel("실행 설정 열기");
     await settingsToggle.click();
-    await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue("rust");
+    await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue(
+      "rust",
+    );
     await page
       .getByRole("textbox", { name: "벤치마크 종목 ID" })
       .fill(BENCHMARK_SECURITY_ID);
@@ -171,13 +181,23 @@ test.describe("real equity data", () => {
       timeout: 60_000,
     });
     const runId = new URL(page.url()).pathname.split("/").at(-1)!;
+    // tape 단계는 실데이터에서 수십 초 이상 이어지므로 run 페이지가 그 단계를 실제로 보여 주는지 본다.
+    await expect(page.getByRole("status", { name: "실행 진행" })).toContainText(
+      "tape",
+      { timeout: 30_000 },
+    );
     // 실패하면 화면의 "오류 failed" 만으로는 원인을 알 수 없다 — 서버 run 상태의 error 를 단언 메시지에 싣는다.
     let finalState: BacktestRunState | undefined;
     await expect
       .poll(
         async () => {
           finalState = requireData(
-            (await getBacktestStatus({ client: apiClient, path: { run_id: runId } })).data,
+            (
+              await getBacktestStatus({
+                client: apiClient,
+                path: { run_id: runId },
+              })
+            ).data,
             "poll backtest run state",
           );
           return finalState.status;
@@ -224,7 +244,8 @@ test.describe("real equity data", () => {
     expect(result.series.equity.length).toBeGreaterThan(0);
     const totalReturn = requireData(
       result.metrics.find(
-        (metric) => metric.metric_id === "total_return" && metric.scope === "full",
+        (metric) =>
+          metric.metric_id === "total_return" && metric.scope === "full",
       ),
       "total_return (full) metric",
     );

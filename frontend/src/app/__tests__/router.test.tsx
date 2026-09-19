@@ -864,6 +864,33 @@ describe("App Shell routes", () => {
     );
   });
 
+  it("translates a coded tape-stage failure and keeps the server reason", async () => {
+    // 이슈 #158: 데이터 의존 실패는 시작 422 대신 run `failed` + `error_code` 로 온다.
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "failed",
+          progress: 0.02,
+          stage: "tape",
+          message: "Run failed",
+          error:
+            "RawObservationUnavailableError: raw observations unavailable — status=no_data detail=no members in universe — universe_id=krx.common-stok root=<path>",
+          error_code: "portfolio.data.unavailable",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:01Z",
+        }),
+      ),
+    );
+    mount("/research/backtests/run-failed-tape");
+    const alert = await screen.findByRole("alert", { name: "실행 오류" });
+    expect(alert).toHaveTextContent("유니버스 ID 와 데이터 기간을 확인하세요");
+    expect(alert).toHaveTextContent("universe_id=krx.common-stok");
+    expect(screen.getByRole("status", { name: "실행 진행" })).toHaveTextContent(
+      "tape · 2%",
+    );
+  });
+
   it("supports back and forward between routes", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests/run-1");

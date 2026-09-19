@@ -555,8 +555,12 @@ FROM correction_link;
 -- 통과: rate >= bl('correction_link','link_rate_min')
 
 -- EG6-P06 : E-G6b (기록형 — 값만 남긴다)
+-- 분모 제외 어휘 정본은 `rules_s11.DATE_CHECK_UNMEASURED` 다. 2026-09-19 감사(DEFECT-F02)가
+-- `not_parsed`(ZIP 은 있고 문서층이 아직 안 본 정정)를 더했다 — `no_page` 는 "ZIP 에 정정신고
+-- 첫 장이 없다" 는 문서 품질 사실이고, 파이프라인 상태를 그 라벨로 접으면 안 된다.
 SELECT count(*) FILTER (WHERE date_check IN ('exact','off_1d'))::DOUBLE
-       / nullif(count(*) FILTER (WHERE date_check NOT IN ('unparsed','no_page','no_zip','n/a')), 0)
+       / nullif(count(*) FILTER (WHERE date_check
+                NOT IN ('unparsed','not_parsed','no_page','no_zip','n/a')), 0)
        AS date_exact_rate
 FROM correction_link;
 

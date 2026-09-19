@@ -234,8 +234,11 @@ def test_격자_3테이블은_어댑터가_내는_6필드만_선언한다(built)
         assert freq == "session" and cov == "grid_session", field_id
         # available_date = date(basis default) 인 팩트 축이고, 공표 랙은 여기서만 낸다
         assert basis == "default", field_id
-        # 세 원장 전부 stage lag_known=false — STAGE_HANDOFF §2 · FIELD_MAP §1 「나머지 1 세션」
-        assert (lag_s, lag_d) == (1, 1), field_id
+        # 세 원장 전부 stage lag_known=false — STAGE_HANDOFF §2 · FIELD_MAP §1 「나머지 1 세션」.
+        # 예외는 `credit.margin_balance` 3 세션 — 공표 랙이 아니라 **실입수**가 정본이고 원장
+        # 실측이 전 구간 T+3 이다(09-19 감사 DEFECT-E01).
+        expected_lag = (3, 4) if field_id == "credit.margin_balance" else (1, 1)
+        assert (lag_s, lag_d) == expected_lag, field_id
         assert pit is True, field_id
 
 

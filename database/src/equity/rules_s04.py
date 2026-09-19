@@ -27,6 +27,8 @@ e1.15.0(플랜 v2 §4 B.2 · 결정 V2-2)이 **저녁 잠정 T 행**을 더했�
                     다른 행 0. **basis='krx' 행만** — 저녁 행은 KRX 원장에 없다
   EG14            — 최신 구간 수집 완결성: 최신 KRX 세션 `recent_session_window` 개의 행수가
                     유니버스 대비 하한 이상이고 종가 NULL 0 (e1.15.0)
+  저녁 잠정 행은 **상장 축**(`EVENING_LISTED_SQL`)으로 거른다 — 키움은 정리매매가 끝난 종목도
+  하루 더 준다(DEFECT-E07). 빠진 행수는 기록형 `n_evening_rows_not_listed` 로 남긴다.
   EG8-P01(KIS 수정종가 대조)은 독립 KIS 가격 stage 테이블이 없고 계수(S06)가 있어야 대조가 되므로
   S06 이후로 미룬다 — 여기서는 붙이지 않는다.
 """
@@ -55,6 +57,23 @@ SQL_DIR = Path(__file__).parent / "sql"
 PRICE_KINDS: tuple[str, ...] = ("trade", "reference")
 # EG7-P01 격리 사유 + 캘린더 밖 날짜. `_reject/<reason>/` 디렉토리 이름이자 EG3 어휘 폐쇄 대상.
 REJECT_REASONS: tuple[str, ...] = ("nonpositive_price", "off_calendar")
+
+# 저녁 잠정 행의 **상장 축** — KRX 일별 마스터 최신일 ∪ ETF 가격 원장 최신일(= EG14 `universe_n`
+# 과 같은 정의). `sql/price_daily.sql` 의 `listed_now` CTE 와 `eg1_rhs_sql` 이 이 문자열 하나를
+# 나눠 쓴다(tests 가 공백 정규화로 대조). 키움 ka10060 은 정리매매가 끝난 종목도 하루 더 `dt`
+# 행을 주므로(DEFECT-E07, 09-19 감사) 이 축으로 거른다.
+EVENING_LISTED_SQL = (
+    "SELECT ticker FROM stg_listing_daily "
+    "WHERE date = (SELECT max(date) FROM stg_listing_daily) "
+    "UNION "
+    "SELECT ticker FROM stg_etf_price_daily "
+    "WHERE date = (SELECT max(date) FROM stg_etf_price_daily)")
+
+
+def evening_listed_predicate(alias: str = "f") -> str:
+    """`listed_now` 에 그 티커가 있는가 — `kw` CTE 와 EG1 우변의 단일 정의."""
+    return f"EXISTS (SELECT 1 FROM listed_now n WHERE n.ticker = {alias}.ticker)"
+
 
 # EG20 이 대조하는 (산출 컬럼, stage 컬럼) 쌍 — 원칙 ② 가 지키는 원값 축 전부.
 _RAW_COLUMNS: tuple[tuple[str, str], ...] = (
@@ -159,6 +178,14 @@ def eg3_price_daily(ctx: EquityGateContext) -> GateResult:
     n_evening_pending_null = _row(ctx, f"""
         SELECT count(*) FROM {v}
          WHERE basis = '{PRICE_BASIS_EVENING}' AND corp_action_pending IS NULL""")[0]
+    # 상장 축에 걸려 빠진 키움 행수(DEFECT-E07) — **기록형**이다. 정상 운영에서도 폐지 직후
+    # 종목 때문에 0 이 아닐 수 있고, 값이 갑자기 커지면 마스터 수집이 밀린 것이다.
+    n_evening_not_listed = _row(ctx, f"""
+        WITH listed_now AS ({EVENING_LISTED_SQL})
+        SELECT count(*) FROM stg_flow_daily_kiwoom f
+         WHERE f.date > (SELECT max(date) FROM stg_price_daily)
+           AND f.date = (SELECT max(date) FROM stg_flow_daily_kiwoom)
+           AND NOT {evening_listed_predicate()}""")[0]
     (n_basis_vocab, n_basis_null, n_evening, n_evening_dates, n_evening_pending,
      n_krx_pending, evening_date, n_evening_mismatch) = _row(ctx, f"""
         SELECT
@@ -218,6 +245,7 @@ def eg3_price_daily(ctx: EquityGateContext) -> GateResult:
         "price_kind_counts": kinds,
         "price_kind_vocab": list(PRICE_KINDS),
         "n_evening_rows": int(str(n_evening)),                       # 저녁 잠정판 축(기록형)
+        "n_evening_rows_not_listed": int(str(n_evening_not_listed)),
         "evening_date": None if evening_date is None else str(evening_date),
         "n_evening_corp_action_pending": int(str(n_evening_pending)),
         "basis_vocab": list(PRICE_BASIS_VOCAB), "build_basis": build_basis,
@@ -422,12 +450,14 @@ PRICE_DAILY = register(EquityTable(
     # GATES §3 ⑧: 좌변 행수 = 두 원천 행수 합 − reject. 교집합 0 은 EG3-P01·EG3_price_daily 가 본다.
     eg1_lhs_sql="SELECT count(*) FROM out_pq",
     # 세 번째 항 = 저녁 잠정 T 행. `sql/price_daily.sql` 의 `kw` CTE 와 **글자 그대로 같은 술어**
-    # 여야 한다 — 한쪽만 고치면 등식이 조용히 깨진다(e1.15.0).
-    eg1_rhs_sql=("SELECT (SELECT count(*) FROM stg_price_daily) "
+    # 여야 한다 — 한쪽만 고치면 등식이 조용히 깨진다(e1.15.0). 상장 축 필터(DEFECT-E07)도 같다.
+    eg1_rhs_sql=(f"WITH listed_now AS ({EVENING_LISTED_SQL}) "
+                 "SELECT (SELECT count(*) FROM stg_price_daily) "
                  "+ (SELECT count(*) FROM stg_etf_price_daily) "
                  "+ (SELECT count(*) FROM stg_flow_daily_kiwoom f "
                  "    WHERE f.date > (SELECT max(date) FROM stg_price_daily) "
-                 "      AND f.date = (SELECT max(date) FROM stg_flow_daily_kiwoom))"),
+                 "      AND f.date = (SELECT max(date) FROM stg_flow_daily_kiwoom) "
+                 f"      AND {evening_listed_predicate()})"),
     sql_path=SQL_DIR / "price_daily.sql",
     input_columns={
         "stg_price_daily": ("ticker", "date", "open_krw", "high_krw", "low_krw", "close_krw",

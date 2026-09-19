@@ -73,14 +73,23 @@ krx AS (
            change_krw, shares_out, par_value_krw
     FROM etf
 ),
+listed_now AS (
+    -- 저녁 잠정 행의 상장 축 — KRX 일별 마스터 최신일(저녁에는 T-1) ∪ ETF 가격 원장 최신일.
+    -- 정본은 `rules_s04.EVENING_LISTED_SQL` 이고 EG1 우변이 같은 문자열을 쓴다.
+    SELECT ticker FROM stg_listing_daily WHERE date = (SELECT max(date) FROM stg_listing_daily) UNION SELECT ticker FROM stg_etf_price_daily WHERE date = (SELECT max(date) FROM stg_etf_price_daily)
+),
 kw AS (
     -- 저녁 잠정 T — KRX 가격 원장의 상한을 넘어선 **키움의 최신 날짜 하나**뿐이다. 두 조건을 다
     -- 걸어야 한다: `> KRX max` 만 걸면 키움이 앞서 있는 여러 날이 한꺼번에 들어오고,
     -- `= 키움 max` 만 걸면 아침 확정판에서 KRX 와 겹쳐 (ticker, date) 가 중복된다.
+    -- 세 번째 조건은 상장 축이다 — 키움 ka10060 은 정리매매가 끝난 종목도 하루 더 `dt` 행을
+    -- 주므로(거래량 0·극단 가격) 그대로 실으면 저녁판 소비자가 폐지 종목을 마지막 날 유니버스에
+    -- 넣는다(DEFECT-E07, 09-19 감사). 아침 확정판은 KRX 축이라 애초에 안 생긴다.
     SELECT f.ticker, f.date, f.close_krw, f.volume_shr
     FROM stg_flow_daily_kiwoom f
     WHERE f.date > (SELECT max(date) FROM stg_price_daily)
       AND f.date = (SELECT max(date) FROM stg_flow_daily_kiwoom)
+      AND EXISTS (SELECT 1 FROM listed_now n WHERE n.ticker = f.ticker)
 ),
 kw_prev AS (
     -- 직전 종가 = 그 티커의 **마지막 KRX 종가**(참고가 행 포함). 정지 중이던 종목도 마지막으로

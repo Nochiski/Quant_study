@@ -6,6 +6,7 @@
 
 `--basis` 접두어 규약(e_/m_/b_)은 C1 의 판정 근거라 여기서 함께 검증한다.
 """
+import datetime as dt
 import json
 from pathlib import Path
 
@@ -165,12 +166,85 @@ def test_c3_flags_an_append_only_table_that_lost_rows(tmp_path: Path, make_stage
     assert c3.metrics["decreased"] == [{"table": "stg_a", "previous": 10, "current": 9}]
 
 
-def test_c3_ignores_row_loss_on_tables_that_are_not_append_only(tmp_path: Path,
-                                                                make_stage_tree) -> None:
+def test_c3_ignores_whole_table_row_loss_on_tables_that_are_not_append_only(
+        tmp_path: Path, make_stage_tree) -> None:
+    """upsert 표는 표 전체 행수로는 판정하지 않는다 — 파티션 축이 판정 단위다(아래 C3 파티션 절)."""
     root = _all(tmp_path, make_stage_tree)
     _commit(root / "stg_b", CUR_BID, n_rows=9, content_hash="9:cc", n_src=9,
-            built_at_utc=CUR_BUILT_AT)          # upsert 표는 행이 줄 수 있다
+            built_at_utc=CUR_BUILT_AT)
     assert _check(_run(root), "C3").status is health.Status.PASS
+
+
+# ── C3 파티션 축 — upsert·first_write_wins 표의 조용한 행 손실 (DEFECT-B03) ──────
+# 09-19 감사: C3 이 append_only 46표만 봐서 stg_price_daily(9,259,578행)·키움 수급 5표·
+# v3 4표 등 16표의 과거 구간 손실이 어떤 게이트에도 안 걸렸다. G1·G5 는 등식이라 Δsrc=Δstage
+# 인 감소를 정상 처리하고, C4 는 계수가 움직였다며 대조를 건너뛴다.
+
+THIS_YEAR = dt.datetime.now(health.KST).year
+
+
+def _part(rows: dict[str, int]) -> list[dict[str, object]]:
+    return [{"path": f"v=x/{label}", "n_rows": n} for label, n in rows.items()]
+
+
+def _c3_tree(tmp_path: Path, make_stage_tree, table: str, mode: str,
+             prev: dict[str, int], cur: dict[str, int]) -> Path:
+    tree = make_stage_tree(tmp_path, table, [{"k": "1"}], build_id=f"b_seed_{table}")
+    _commit(tree.table_root, PREV_BID, n_rows=sum(prev.values()), content_hash="10:aa",
+            n_src=10, built_at_utc="2026-09-10T23:30:00+00:00", partitions=_part(prev))
+    _commit(tree.table_root, CUR_BID, n_rows=sum(cur.values()), content_hash="12:bb",
+            n_src=12, built_at_utc=CUR_BUILT_AT, partitions=_part(cur))
+    return tree.stage_root
+
+
+def test_c3_는_upsert_표의_닫힌_연도_파티션_손실을_잡는다(tmp_path: Path,
+                                                        make_stage_tree) -> None:
+    root = _c3_tree(tmp_path, make_stage_tree, "stg_price_daily", "upsert",
+                    {"year=2018": 100, f"year={THIS_YEAR}": 50},
+                    {"year=2018": 88, f"year={THIS_YEAR}": 60})
+    c3 = _check(_run(root, tables={"stg_price_daily": "upsert"}), "C3")
+    assert c3.status is health.Status.FAIL
+    assert c3.metrics["decreased"] == [{"table": "stg_price_daily", "partition": "year=2018",
+                                        "previous": 100, "current": 88}]
+
+
+def test_c3_는_upsert_표의_올해_파티션_감소는_넘어간다(tmp_path: Path,
+                                                     make_stage_tree) -> None:
+    """올해 파티션은 원장이 아직 쓰고 있다 — 닫힌 연도만 '줄면 손실' 이 성립한다."""
+    root = _c3_tree(tmp_path, make_stage_tree, "stg_price_daily", "upsert",
+                    {"year=2018": 100, f"year={THIS_YEAR}": 50},
+                    {"year=2018": 100, f"year={THIS_YEAR}": 40})
+    assert _check(_run(root, tables={"stg_price_daily": "upsert"}), "C3").status \
+        is health.Status.PASS
+
+
+def test_c3_는_first_write_wins_표를_전_파티션에서_본다(tmp_path: Path,
+                                                      make_stage_tree) -> None:
+    """first_write_wins 는 기존 행을 덮지 않으므로 올해 파티션도 줄면 안 된다."""
+    root = _c3_tree(tmp_path, make_stage_tree, "stg_master_daily", "first_write_wins",
+                    {f"year={THIS_YEAR}": 50}, {f"year={THIS_YEAR}": 40})
+    c3 = _check(_run(root, tables={"stg_master_daily": "first_write_wins"}), "C3")
+    assert c3.status is health.Status.FAIL
+    assert c3.metrics["decreased"][0]["partition"] == f"year={THIS_YEAR}"
+
+
+def test_c3_는_사라진_닫힌_연도_파티션도_손실로_센다(tmp_path: Path,
+                                                   make_stage_tree) -> None:
+    root = _c3_tree(tmp_path, make_stage_tree, "stg_price_daily", "upsert",
+                    {"year=2018": 100, "year=2019": 7}, {"year=2018": 100})
+    c3 = _check(_run(root, tables={"stg_price_daily": "upsert"}), "C3")
+    assert c3.status is health.Status.FAIL
+    assert c3.metrics["decreased"] == [{"table": "stg_price_daily", "partition": "year=2019",
+                                        "previous": 7, "current": 0}]
+
+
+def test_c3_는_year_라벨이_없는_파티션을_비교하지_않는다(tmp_path: Path,
+                                                      make_stage_tree) -> None:
+    """문서층·whole 표는 라벨이 `v=<build>` 뿐이라 연도 축이 없다 — 비교 대상 밖이다."""
+    root = _c3_tree(tmp_path, make_stage_tree, "stg_wise_coverage", "upsert",
+                    {"whole": 2614}, {"whole": 2000})
+    c3 = _check(_run(root, tables={"stg_wise_coverage": "upsert"}), "C3")
+    assert c3.status is health.Status.PASS and c3.metrics["n_partition_tables"] == 0
 
 
 # ── C4 무비용 재현성 ────────────────────────────────────────────────────────

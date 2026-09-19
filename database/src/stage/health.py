@@ -8,7 +8,7 @@
 
   C1  선언된 표 전부가 오늘(KST) 판이고 basis 가 일치한다
   C2  오늘 날짜의 `_failed/<build_id>.json` 이 0건이다
-  C3  append_only 표의 행수가 직전 판보다 줄지 않았다
+  C3  행수가 직전 판보다 줄지 않았다 — append_only 는 표 전체, 그 밖은 파티션 축
   C4  소스 계수가 동결된 표는 content_hash 도 동결이다
   C5  빌드 소요가 예산(기본 40분) 안이다
   C6  판이 담은 최신 사실(`max_available_date`)이 대상일 D 의 허용 지연 안이다
@@ -201,20 +201,61 @@ def _c2_failed(stage_root: Path, date_kst: str, started_at: str | None = None) -
                  {"today": today, "n_files": len(files), "since": started_at})
 
 
+def _year_rows(rec: manifest.BuildRecord) -> dict[str, int]:
+    """`{"year=YYYY": n_rows}`. `year=` 라벨이 없는 파티션(whole 표·문서층)은 연도 축이 없어 뺀다."""
+    out: dict[str, int] = {}
+    for part in rec.partitions:
+        label = str(part.get("path", "")).rsplit("/", 1)[-1]
+        if label.startswith("year="):
+            out[label] = int(str(part.get("n_rows", 0)))
+    return out
+
+
 def _c3_monotonic(pairs: list[_Pair], write_modes: Mapping[str, str]) -> Check:
+    """행 손실 비감소. append_only 는 표 전체, 그 밖은 **파티션 축**으로 본다 (DEFECT-B03).
+
+    09-19 감사: C3 이 append_only 46표만 봐서 upsert 11 + first_write_wins 5 표가 대상 밖이었다 —
+    `stg_price_daily`(9,259,578행)·`stg_listing_daily`·키움 수급 5표·v3 4표가 전부 여기 든다. 원장
+    재적재 사고로 과거 구간이 줄면 G1·G5 는 등식(Δsrc=Δstage)이라 정상 처리하고 C4 는 계수가
+    움직였다며 대조를 건너뛰어, **가격 정본이 조용히 줄어도 아무 데도 안 걸린다.**
+
+    upsert 는 **닫힌 연도 파티션**만 본다(올해 파티션은 원장이 아직 쓰고 있어 감소가 정상일 수
+    있다). `first_write_wins` 는 기존 행을 덮지 않으므로 전 파티션을 본다.
+    """
+    this_year = dt.datetime.now(KST).year
     decreased: list[dict[str, object]] = []
-    n_checked = 0
+    n_checked = n_partition_tables = 0
     for p in pairs:
-        if write_modes.get(p.table) != "append_only" or p.current is None or p.previous is None:
+        if p.current is None or p.previous is None:
             continue
-        n_checked += 1
-        if p.current.n_rows < p.previous.n_rows:
-            decreased.append({"table": p.table, "previous": p.previous.n_rows,
-                              "current": p.current.n_rows})
-    detail = f"append_only {n_checked}표 행수 비감소" + _listed(
-        "감소", [f"{d['table']} {d['previous']}→{d['current']}" for d in decreased])
+        mode = write_modes.get(p.table)
+        if mode == "append_only":
+            n_checked += 1
+            if p.current.n_rows < p.previous.n_rows:
+                decreased.append({"table": p.table, "previous": p.previous.n_rows,
+                                  "current": p.current.n_rows})
+            continue
+        if mode not in ("upsert", "first_write_wins"):
+            continue
+        prev_years, cur_years = _year_rows(p.previous), _year_rows(p.current)
+        if not prev_years:
+            continue
+        n_partition_tables += 1
+        for label, before in sorted(prev_years.items()):
+            year = int(label[5:]) if label[5:].isdigit() else None
+            if mode == "upsert" and (year is None or year >= this_year):
+                continue
+            after = cur_years.get(label, 0)     # 파티션이 통째로 사라진 것도 손실이다
+            if after < before:
+                decreased.append({"table": p.table, "partition": label,
+                                  "previous": before, "current": after})
+    detail = (f"append_only {n_checked}표 행수 비감소 · 파티션 축 {n_partition_tables}표"
+              f"(upsert 는 {this_year}년 이전 파티션만)" + _listed(
+                  "감소", [f"{d['table']}{'/' + str(d['partition']) if 'partition' in d else ''} "
+                           f"{d['previous']}→{d['current']}" for d in decreased]))
     return Check("C3", Status.FAIL if decreased else Status.PASS, detail,
-                 {"n_checked": n_checked, "decreased": decreased})
+                 {"n_checked": n_checked, "n_partition_tables": n_partition_tables,
+                  "decreased": decreased})
 
 
 def _c4_frozen(pairs: list[_Pair], unversioned: Collection[str] = ()) -> Check:

@@ -68,5 +68,5 @@ def test_three_consecutive_failures_abort(tmp_path: Path) -> None:
 
 
 def test_resolve_codes() -> None:
-    assert len(ws.resolve_codes("all")) == 38 and len(ws.resolve_codes("l2")) == 28 and len(ws.resolve_codes("l1")) == 10
+    assert len(ws.resolve_codes("all")) == 39 and len(ws.resolve_codes("l2")) == 29 and len(ws.resolve_codes("l1")) == 10
     assert ws.resolve_codes("g4535, G45") == ("G4535", "G45")

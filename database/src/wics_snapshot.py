@@ -8,7 +8,8 @@
 빈 list(CNT=0)도 저장한다 — "코드 없음/휴장일" 판정 근거. 미수집을 0 으로 적재하지 않는다.
 L2 코드로 부르면 행의 SEC_CD 는 L1, L2 라벨은 IDX_CD·IDX_NM_KOR 에 온다(WICS_PROBE §6).
 
-사용: PYTHONPATH=src python -m wics_snapshot --dt 20260918 [--codes all|l1|l2|G4535,…] [--db …] [--dry-run]
+사용: PYTHONPATH=src python -m wics_snapshot --dt 20260918 [--codes all|l1|l2|G4535,…]
+휴장일 dt 는 CNT=0 이 온다(09-20 실측) — 직전 거래일로 당겨 주지 않으므로 dt 는 반드시 거래일. [--db …] [--dry-run]
 """
 from __future__ import annotations
 
@@ -28,11 +29,13 @@ URL = "https://www.wiseindex.com/Index/GetIndexComponets"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 L1: tuple[str, ...] = ("G10", "G15", "G20", "G25", "G30", "G35", "G40", "G45", "G50", "G55")
-# L2 28개 — 26개는 WICS_PROBE §6 참고 목록, G4535·G4540 은 09-03 실측. 첫 콜의 IDX_NM_KOR 로 라벨을 확정한다.
+# L2 29개 — 2026-09-18 스냅샷(09-20 실측)에서 라벨 전부 확정. G2540(미디어, 경기관련소비재 소속)은 2018 GICS
+# 개편으로 G5020(미디어와엔터테인먼트, 커뮤니케이션서비스 소속)에 흡수돼 지금은 CNT=0 이지만 2018 이전 백필에
+# 필요하므로 둘 다 부른다. L1 검산(Σ L2 CNT = L1 CNT)이 10/10 성립하는 목록이다.
 L2: tuple[str, ...] = (
     "G1010", "G1510", "G2010", "G2020", "G2030", "G2510", "G2520", "G2530", "G2540", "G2550", "G2560",
     "G3010", "G3020", "G3030", "G3510", "G3520", "G4010", "G4020", "G4030", "G4040", "G4050",
-    "G4510", "G4520", "G4530", "G4535", "G4540", "G5010", "G5510")
+    "G4510", "G4520", "G4530", "G4535", "G4540", "G5010", "G5020", "G5510")
 DEFAULT_DB = "data/raw/wiseindex.db"
 MAX_CONSECUTIVE_FAIL = 3
 

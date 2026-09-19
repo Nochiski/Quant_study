@@ -1,6 +1,7 @@
 """doc_prepass — ZIP 1회 파싱 → 테이블 × 연도 JSON Lines 캐시 (DOC_DESIGN v1.1 §2.2·§2.5 ①)."""
 import io
 import json
+import shutil
 import sqlite3
 import zipfile
 from pathlib import Path
@@ -140,3 +141,100 @@ def test_repair_replaces_only_listed_documents_and_recomputes_summary(tmp_path: 
     assert summary["repairs"][0]["parser_version"] and summary["tables"] == s1.tables
     with pytest.raises(ValueError, match="outside"):
         doc_prepass.repair(db, docs, cache, "snap_t", {"20240100000000"}, workers=1)
+
+
+def _next_snapshot(tmp_path: Path, docs: Path, db: Path) -> Path:
+    """base 스냅샷에 문서 1건(2024_q2)을 더하고 1건(2024_q1)을 뺀 새 스냅샷 DB."""
+    (docs / "2024" / "20240515000001.zip").write_bytes(
+        _zip({"20240515000001.xml": FULL_G1.encode("cp949")}))
+    db2 = tmp_path / "dart_next.db"
+    shutil.copyfile(db, db2)
+    con = sqlite3.connect(db2)
+    con.execute("DELETE FROM doc_store WHERE rcept_no = '20240311901285'")
+    con.execute("INSERT INTO doc_store VALUES ('20240515000001',10,'s',1,1,'000',"
+                "'2026-09-19T00:00:00')")
+    con.commit()
+    con.close()
+    return db2
+
+
+def _cache_bytes(cache: Path) -> dict[str, bytes]:
+    return {str(f.relative_to(cache)): f.read_bytes() for f in sorted(cache.rglob("*"))
+            if f.is_file()}
+
+
+_TIMING = ("t_decode_ms", "t_sanitize_ms", "t_parse_ms")
+
+
+def _rows(cache: Path, table: str) -> list[str]:
+    """샤드 전체 행(정렬). 파싱 소요 시간은 실행마다 달라서 뺀다(TECH_DEBT B-1)."""
+    out: list[str] = []
+    for f in sorted((cache / table).glob("year=*.jsonl")):
+        for line in f.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            r = {k: v for k, v in json.loads(line).items() if k not in _TIMING}
+            out.append(json.dumps(r, ensure_ascii=False, sort_keys=True))
+    return sorted(out)
+
+
+def test_incremental_parses_only_the_diff_and_matches_a_full_rerun(tmp_path: Path) -> None:
+    docs, db = _setup(tmp_path)
+    root = tmp_path / "cache"
+    base = doc_prepass.run(db, docs, root, snapshot_id="snap_base", workers=1)
+    assert base.status == "ok"
+    db2 = _next_snapshot(tmp_path, docs, db)
+    ref = doc_prepass.run(db2, docs, root, snapshot_id="snap_ref", workers=1)
+    before = _cache_bytes(root / "snap_base")
+    inc = doc_prepass.incremental(db2, docs, root, "snap_next", "snap_base", workers=1)
+    assert (inc.n_docs, inc.modes, inc.tables, inc.status) == (ref.n_docs, ref.modes, ref.tables,
+                                                               ref.status)
+    assert inc.input_hash == ref.input_hash == doc_prepass.input_hash_for(db2)
+    assert inc.d0_zip_missing == ref.d0_zip_missing == 0
+    for t in doc_prepass.TABLES:
+        assert _rows(root / "snap_next", t) == _rows(root / "snap_ref", t), t
+    assert _cache_bytes(root / "snap_base") == before          # base 캐시 불변(하드링크 오염 금지)
+    assert len(inc.increments) == 1
+    e = inc.increments[0]
+    assert (e["from"], e["added"], e["removed"]) == ("snap_base", 1, 1)
+    summary = json.loads((root / "snap_next" / "summary.json").read_text())
+    assert summary["increments"][0]["parser_version"] and summary["tables"] == inc.tables
+
+
+def test_incremental_hardlinks_untouched_shards_and_breaks_the_link_on_change(
+        tmp_path: Path) -> None:
+    docs, db = _setup(tmp_path)
+    root = tmp_path / "cache"
+    doc_prepass.run(db, docs, root, snapshot_id="snap_base", workers=1)
+    db2 = _next_snapshot(tmp_path, docs, db)
+    doc_prepass.incremental(db2, docs, root, "snap_next", "snap_base", workers=1)
+    kept = ("stg_doc_meta", "year=2020_q1.jsonl")
+    changed = ("stg_doc_meta", "year=2024_q1.jsonl")
+    assert ((root / "snap_next" / kept[0] / kept[1]).stat().st_ino
+            == (root / "snap_base" / kept[0] / kept[1]).stat().st_ino)
+    assert ((root / "snap_next" / changed[0] / changed[1]).stat().st_ino
+            != (root / "snap_base" / changed[0] / changed[1]).stat().st_ino)
+    assert (root / "snap_base" / changed[0] / changed[1]).read_text().strip()   # 원본 행 그대로
+
+
+def test_incremental_with_no_diff_only_links_and_keeps_the_summary_equal(tmp_path: Path) -> None:
+    docs, db = _setup(tmp_path)
+    root = tmp_path / "cache"
+    base = doc_prepass.run(db, docs, root, snapshot_id="snap_base", workers=1)
+    inc = doc_prepass.incremental(db, docs, root, "snap_next", "snap_base", workers=1)
+    assert (inc.n_docs, inc.modes, inc.tables) == (base.n_docs, base.modes, base.tables)
+    assert inc.input_hash == base.input_hash and inc.snapshot_id == "snap_next"
+    assert inc.increments[0]["added"] == 0 and inc.increments[0]["removed"] == 0
+    for t in doc_prepass.TABLES:
+        for f in (root / "snap_next" / t).glob("year=*.jsonl"):
+            assert f.stat().st_ino == (root / "snap_base" / t / f.name).stat().st_ino
+
+
+def test_incremental_rejects_a_missing_base_and_its_own_snapshot(tmp_path: Path) -> None:
+    docs, db = _setup(tmp_path)
+    root = tmp_path / "cache"
+    with pytest.raises(FileNotFoundError, match="base"):
+        doc_prepass.incremental(db, docs, root, "snap_next", "snap_base", workers=1)
+    doc_prepass.run(db, docs, root, snapshot_id="snap_base", workers=1)
+    with pytest.raises(ValueError, match="same snapshot"):
+        doc_prepass.incremental(db, docs, root, "snap_base", "snap_base", workers=1)

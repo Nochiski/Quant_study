@@ -277,7 +277,7 @@ FileSource(doc_store 스냅샷 → zip 경로)                     ← BlobSourc
 ### 2.5 코드 배치와 빌더 변경 4건 (결정 ⑧)
 `src/stage/rules_doc.py`(7테이블 선언 — `partition_class`·자연키·컬럼맵·(p,s)·miss 마커) · `src/stage/parsers_doc.py`(정제·파서·격자 전개·`parse_document`) · `src/stage/doc_prepass.py`(아래 ①) · `src/stage/doc_vocab/*.json` · `src/stage/fixtures/stg_doc_*.json`(D4) · `survey/doc_census.py`. `manifest.py`·`baseline.py`·`snapshot.py` 는 그대로. 테스트는 표본에서 오린 XML 조각 픽스처(파일 의존 금지, `testing.md`).
 현 빌더는 **테이블 1개 = 파서 1회 = `src_all` 1개**(`build.py` `build_table`, `__main__.py` 테이블당 1회)이고 G1 은 `n_src × fanout` 등식, G8 은 `n_parse_failed=0 ∧ emitted=n_src` 등식이며, 전 행을 `stage_all` 하나에 넣고 윈도우 함수를 돈다. 문서는 ZIP 1개가 7테이블에 서로 다른 수의 행을 내므로 그대로는 안 맞는다. 필요한 변경:
-1. **파싱 프리패스(`doc_prepass.py`)**: 스냅샷의 ZIP 을 한 번만 파싱해 테이블 × 연도 샤드 JSON Lines 를 `data/stage/_tmp/doc/<snapshot>/<table>/year=YYYY_qN.jsonl` 에 캐시(관측일 `fetched_at` 을 행 컬럼으로 주입). `FileSource` 는 이 캐시를 가리키는 소스다 — 테이블 빌드가 4~7회 돌아도 ZIP 은 1회만 연다. 캐시는 빌드 완료 후 삭제(keep 0), 크기 약 44GB(P2 포함) 는 `_tmp` 에 여유 확인.
+1. **파싱 프리패스(`doc_prepass.py`)**: 스냅샷의 ZIP 을 한 번만 파싱해 테이블 × 연도 샤드 JSON Lines 를 `data/stage/_tmp/doc/<snapshot>/<table>/year=YYYY_qN.jsonl` 에 캐시(관측일 `fetched_at` 을 행 컬럼으로 주입). `FileSource` 는 이 캐시를 가리키는 소스다 — 테이블 빌드가 4~7회 돌아도 ZIP 은 1회만 연다. 캐시 크기 약 44GB(P2 포함) 는 `_tmp` 에 여유 확인. **캐시 수명은 09-19 에 바뀌었다** — 빌드 후 삭제(keep 0)가 아니라 **현재 판이 선 스냅샷의 캐시는 남긴다**(다음 날 증분의 base, §7 '일일 증분').
 2. **문서 전용 등식**: G1 을 `stage 행수 = 프리패스가 그 테이블에 낸 행수(parse_log 집계)` 로, G8 을 `프리패스 문서 수 = ok+lenient+failed+html` 로 대체(D1·D2). 파싱 실패는 예외가 아니라 `parse_log` 행이므로 G8 의 `n_parse_failed=0` 은 항상 성립.
 3. **연도 샤드 빌드**: `stg_fin_asreported`·`stg_doc_form_cell`·`stg_doc_table` 은 `stage_all` 한 번이 아니라 연도 샤드 루프(샤드마다 CAST→게이트→COPY, MANIFEST 는 마지막에 원자 교체). stg_fin 1,540만 행에 스필 15~18GB 였으므로 2.2억 행은 샤드 없이는 디스크(여유 297GB)를 넘긴다.
 4. **`observed_src=column`**: `fetched_at` 이 원장 테이블이 아니라 프리패스 행 컬럼에서 온다(`AvailableRule` 은 lookup 그대로).
@@ -394,6 +394,7 @@ P1 첫 세션(승인 후): `git checkout -b stage/doc-p1 origin/main` → `doc_v
 | — | 사용자 결정: Claude API 미사용, 골든셋 판정은 이 세션에서 | 09-03 |
 | **①~⑮** | **사용자 승인 — 권고안 그대로 진행** (아티팩트 "문서층 결정 15"로 검토). 다음: PR #37 병합 → `stage/doc-p1` 에서 P1+P2 구현 | **09-04 사용자 확정** |
 | P1 | **구현·전량 실행 완료** (`stage/doc-p1`) — 아래 "P1 실측" | 09-04~05 |
+| — | **일일 증분 도입**(파이프라인 감사 갈래 5, DEFECT-F01·F03) — `--base-snapshot` · 캐시 무결성 가드 · `scripts/doc_prepass_daily.sh`. 아래 "일일 증분" | 09-19 |
 | — | 전량 프리패스 3회(2h44m·3h16m·4h34m): 검증기 결함 2종(속성값 안 `>`, `&#13;` 순서)·정제 규칙 5 세 꼴·밑줄 멤버 1건·다섯 자리 연도 1건 발견·수정. 재실행 대신 `--scan`/`--repair` 도입 | 09-04~05 |
 | — | 사고: 첫 `--repair` 가 summary 재집계에서 section 790만 행을 메모리에 올려 서버 스왑·SSH 무응답 → 사용자 재부팅. 집계를 스트리밍(O(1))으로 수정 | 09-05 01:03 |
 
@@ -418,6 +419,31 @@ P1 첫 세션(승인 후): `git checkout -b stage/doc-p1 origin/main` → `doc_v
 ① ZIP 첫 멤버 = 본문 가정 — 멤버는 basename 으로. ② 앞부분만 디코딩한 인코딩 판정 — 전문 strict 로만. ③ `XMLParser.entity` 는 DTD 없는 문서에 무력 — 정제로 치환. ④ `<P>` 기반 필드 추출 — 2025~ 는 `<TD>`; 요소 평문에 정규식. ⑤ 속성 복구 정규식 부작용 — 전수 표본 재검증 후 확정. ⑥ "`<`+영문자 = 태그" — 화이트리스트로만. ⑦ 게이트 상수의 방향 — 2×2 표 통째로. ⑧ 측정 술어 ≠ 게이트 술어 — 같은 코드로 잰 값만. ⑨ **세대 특징의 오귀속** — `SECTION-3`·`XII`·`L-0-2` 를 G3 로 적었다가 접수월×개정일 실측으로 2021-08 로 정정. 구조 전환은 "세대" 가 아니라 서식 개정일(`formula_date`)로 잰다. ⑩ 셸 안 파이썬은 파일로 — 작은따옴표가 ssh 인용을 깨뜨려 f-string 이 변수로 해석됐다. ⑭ **표본엔 최신 연도를 넣는다** — S26 에 2025~ 가 없어 편집기 따옴표 버그 284건을 전량에서야 봤다. ⑮ **규칙이 바뀌면 전량이 아니라 `--scan` → `--repair`** — 문제 1건에 3시간을 세 번 썼다. ⑯ **검증기도 검증 대상** — D10 위반 100건이 전부 검증기 결함이었다(태그 정규식·줄끝 정규화 순서). 실패가 나오면 트리보다 검증기를 먼저 의심한다. ⑰ **전량 집계는 스트리밍으로** — 790만 행을 dict 로 올려 15GB 서버를 스왑에 빠뜨렸다. 큰 테이블은 줄 수만 세고 문서 단위로 흘린다.
 
 **미결(P1 후속)**: 규칙 5c 정규식 성능(정제 117ms/멤버, 결과 불변이라 재실행 없이 교체 가능) · `stg_doc_parse_log` 의 `t_*_ms` 가 payload 라 content_hash 가 실행마다 달라짐(payload_exclude 로 뺄 것) · lenient 65건의 D10 을 기록형으로 낮출지(깨진 마크업은 정답 텍스트가 유일하지 않음) · 카엘 AI 머신 분산은 P2 프리패스부터 · `section_kind=NULL` 소제목의 상위 종류 상속.
+
+**일일 증분 (09-19, 파이프라인 감사 갈래 5 — DEFECT-F01·F03)**
+
+09-04 전량 판 이후 4표가 동결된 원인은 캐시 키가 스냅샷 id 라는 것이다 — 일일 체인이 매판 새 스냅샷을 뜨므로
+`run_stage_all.sh` 의 캐시 게이트가 **구조적으로 매번 실패**했고 4표가 조용히 skip 됐다. 하류에서 `fin_std` 는
+신규 재무 그룹의 `period_end` 정본(`stg_doc_meta`)을 잃고 `corp.fiscal_month` 추정으로 떨어졌으며, 결산월이
+어긋나거나 없는 법인(리츠·결산월 변경)은 행째로 격리됐다(F01, 09-01~18 신규 그룹 14 중 4 손실).
+
+| 항목 | 내용 |
+|---|---|
+| 증분 | `doc_prepass.incremental(db, docs_dir, cache_root, snapshot_id, base_snapshot_id, workers)` — base 캐시 샤드를 `os.link` 로 새 캐시에 잇고(디스크 0, 거부하는 파일시스템이면 복사), `doc_store(zip_ok=1)` 과 **base 캐시가 담은 접수번호**(parse_log 기준)의 차집합만 파싱한다. CLI `--base-snapshot ID` |
+| base 집합을 캐시에서 읽는 이유 | base 스냅샷 DB 는 GC 로 사라졌을 수 있고, ZIP 이 없어 행이 안 나온 문서는 다음 증분에서 다시 시도해야 한다(늦게 도착한 ZIP 이 그때 들어온다) |
+| 쓰기 규약 | 행이 바뀌는 샤드는 쓰기 전에 `shutil.copyfile` 로 링크를 끊고(`_break_link`) `_replace_rows` 로 원자 교체 — **base 캐시는 바이트 불변**(테스트가 증명). `removed` 는 샤드에서 drop, `added` 는 파싱해 덧붙인다 |
+| 재계산 | `input_hash`·D0(`d0_zip_missing`) 는 **새 스냅샷 기준으로 다시 계산**한다. `repair()` 처럼 이전 summary 에서 이어받으면 어제 문서 집합의 해시가 오늘 판에 실린다(F03). 이력은 summary 의 `increments: [{at, from, added, removed, parser_version}]` |
+| 캐시 포맷 | 그대로 — `<snapshot>/<table>/year=YYYY_qN.jsonl` + `summary.json`(키만 추가). 09-19 전량 캐시와 호환 |
+| 가드 | `build._load_file_source` 가 `summary["input_hash"]` 를 그 스냅샷 `doc_store(zip_ok=1)` 해시와 대조해 다르면 `RuntimeError`. 디렉터리 이름(스냅샷 id)만 맞는 캐시는 이제 빌드에 못 들어간다(F03) |
+| 일일 호출 | `scripts/doc_prepass_daily.sh <snap> [workers]` — `data/stage/_tmp/doc/*/summary.json` 중 `status=ok` 이고 mtime 최신인 것을 base 로. base 가 없으면 rc 0 로 건너뛰고(4표는 종전대로 skip), 같은 스냅샷 캐시가 이미 ok 면 no-op. 로그 `logs/doc_prepass/<snap>.log`, rc 전파. 빌드 체인의 stage 전량 **앞** 단계 |
+| **gc 보존 규약** | `scripts/gc.sh` 의 무조건 `rm -rf data/stage/_tmp/doc` 는 **현재 4표 판이 선 스냅샷의 캐시(= 다음 증분의 base)를 남겨야 한다**. 안 남기면 매주 일요일 04:30 KST 이후 전량 재파싱(4h34m) 또는 그 주 내내 4표 동결이다. `plans/2026-09-09-daily-incremental.md` R9 개정 대상 |
+| 비용 | 평시 수~수십 문서 = 수 초(+ summary 재집계는 캐시 스트리밍) · 마감 피크(3·5·8·11월) ~1,500문서 ≈ 2.5분. 4표 duckdb 빌드는 증분과 무관하게 ≈85초 |
+| 첫 따라잡기 | 캐시가 09-12 이전에 소멸해 1회 전량이 필요했다 — 09-19 `snap_20260918T232444Z` 전량 프리패스(3워커) 후 그 캐시가 증분의 base |
+
+증분이 바꾸는 미결 판정: `t_*_ms` 의 content_hash 비결정은 **하드링크 증분에서는 자동 해소**된다(옛 행을 다시 파싱하지
+않으므로 신규 문서가 없는 날은 hash 가 그대로) — `payload_exclude` 는 여전히 방어적으로 권장. 반대로 **D10 은 새 위험**이다:
+현행은 전량 폐기형이라 신규 문서 1건의 텍스트 등식 위반이 그날 4표를 통째로 skip 시킨다 — 문서 단위 격리형으로 낮출지
+결정 필요(미결). `doc_checks.py`(D6·D8·D12)는 여전히 어느 체인에서도 호출되지 않아 09-04 이후 재측정이 없다(미결).
 
 **미결**: STAGE_HANDOFF §4 의 "정정 있음 그룹 20,759" 가 §1.7 정정 접수 20,579 보다 커서 술어가 다름(그룹 술어에 `[첨부추가]`·`stg_disclosure.is_correction` 포함 추정) — E-G7 분모 확정 전에 대응 · 첨부 `TOT_ASSETS` 단위 · `IS2/IS3` 의미(손익·포괄손익 분리 추정) · `[첨부정정]` 정정대상이 감사보고서일 때 `kind` 매칭 · 2010~2012 K-GAAP `SA` 표·`scope='U'` 의 equity 해석 · 킥오프 "정정 ZIP 18,013/21,138" 과 §1.7 전수의 술어 대응 · `stg_fin_asreported` long 2.2억 행 벤치 · 2010 `A01`~`A26` 코드 라벨 역산.
 

@@ -32,6 +32,7 @@ kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_build_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
 FAILED=""
+FAILED_SOFT=""     # 판은 쓸 수 있는 부분 실패(build_chain rc 1 — GC 만 실패). crit 이 아니라 warn 이다
 step() {
   local name="$1"; shift
   echo "──── $name 시작 $(kst) ────"
@@ -105,7 +106,17 @@ if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then
   # 원장 게이트가 통과한 날만 확정판을 짓는다. 빌드 락은 build_chain 이 새로 잡고(raw 락은 물려준다),
   # stage·equity·인계 JSON·스냅샷 GC·알림은 전부 build_morning 안에 있다.
   export QL_BUILD_LOCK_HELD=""
-  step "build_morning" bash scripts/build_morning.sh --date "$D" || true
+  # build_chain 은 stage·equity·인계가 다 ok 이고 스냅샷 GC 만 실패하면 rc 1 로 끝난다(결정 V2-7 —
+  # 판은 쓸 수 있다). 그걸 step() 에 맡기면 같은 사건에 info("준비")·warn("부분 실패")·crit("실패") 세
+  # 등급이 동시에 나갔다(DEFECT-D07). rc 1 은 warn, rc >= 2 만 crit 이다.
+  echo "──── build_morning 시작 $(kst) ────"
+  bash scripts/build_morning.sh --date "$D"; BRC=$?
+  echo "──── build_morning 종료 rc=$BRC $(kst) ────"
+  if [ "$BRC" -eq 1 ]; then
+    FAILED_SOFT="build_morning(rc=1)"
+  elif [ "$BRC" -ne 0 ]; then
+    FAILED="build_morning(rc=$BRC)"
+  fi
 fi
 # 통합 일일 리포트는 읽기 전용이라 게이트 실패일·--no-build 에도 돈다(가장 필요한 날이 실패일이다. 검수 R4-03).
 [ -z "$DRY" ] && [ -x scripts/daily_report.py ] && { $PY scripts/daily_report.py --date "$D" || true; }
@@ -121,6 +132,11 @@ fi
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_build 실패: $FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2
+fi
+if [ -n "$FAILED_SOFT" ]; then
+  [ -z "$DRY" ] && scripts/notify.sh warn "daily_build 확정 빌드 후처리 실패: $FAILED_SOFT" \
+    "$SUMMARY | 확정판 자체는 쓸 수 있다(build_chain 이 준비 info + 부분 실패 warn 을 이미 보냈다) | 로그 $LOG"
+  rm -f "$RUN"; exit 1
 fi
 [ -z "$DRY" ] && scripts/notify.sh info "daily_build 완료" "$SUMMARY"
 rm -f "$RUN"

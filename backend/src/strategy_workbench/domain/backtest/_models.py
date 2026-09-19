@@ -249,30 +249,6 @@ RunFailureCode = Literal[
 RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
 
 
-# run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이라
-# 프론트 번역 키(`backtest.error.<code>`)를 공유하고, 마지막은 분류되지 않은 내부 오류다.
-RunFailureCode = Literal[
-    "portfolio.strategy.invalid",
-    "portfolio.data.unavailable",
-    "portfolio.raw_observation.invalid",
-    "backtest.run.invalid",
-    "backtest.run.internal",
-]
-RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
-
-
-# run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이라
-# 프론트 번역 키(`backtest.error.<code>`)를 공유하고, 마지막은 분류되지 않은 내부 오류다.
-RunFailureCode = Literal[
-    "portfolio.strategy.invalid",
-    "portfolio.data.unavailable",
-    "portfolio.raw_observation.invalid",
-    "backtest.run.invalid",
-    "backtest.run.internal",
-]
-RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
-
-
 @dataclass(frozen=True)
 class BacktestRunState:
     run_id: str

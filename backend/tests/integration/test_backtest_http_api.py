@@ -411,11 +411,6 @@ def test_data_failure_in_the_tape_stage_is_coded_and_hides_server_paths(
     assert failure_logs[0].exc_info is not None
     assert failure_logs[0].exc_info[0] is RawObservationUnavailableError
     assert "quant-ledger" in caplog.text  # 원문 경로는 로그에만 남는다
-    failure_logs = [r for r in caplog.records if "backtest run failed" in r.getMessage()]
-    assert len(failure_logs) == 1, caplog.text
-    assert failure_logs[0].exc_info is not None
-    assert failure_logs[0].exc_info[0] is RawObservationUnavailableError
-    assert "quant-ledger" in caplog.text  # 원문 경로는 로그에만 남는다
 
 
 def test_failure_that_races_a_cancel_keeps_its_reason(tmp_path: Path) -> None:
@@ -518,17 +513,18 @@ def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
     assert client.get(f"/api/v1/backtests/{run_id}/result").status_code == 409
 
 
+@pytest.mark.parametrize("failure", [RuntimeError("can't start new thread"), MemoryError()])
 def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException
 ) -> None:
-    """스레드 기동 실패(상한·메모리)는 500 으로 나가되 run 은 `failed` 로 종결된다."""
+    """스레드 기동 실패(상한 RuntimeError·메모리 압박 MemoryError)는 500 이되 run 은 `failed`."""
 
     class _UnstartableThread:
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
 
         def start(self) -> None:
-            raise RuntimeError("can't start new thread")
+            raise failure
 
     monkeypatch.setattr(
         "strategy_workbench.application.backtest_run._service.Thread", _UnstartableThread
@@ -544,26 +540,33 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     state = client.get(f"/api/v1/backtests/{run_id}").json()
     assert state["status"] == "failed", state
     assert state["error_code"] == "backtest.run.internal"
-    assert "can't start new thread" in state["error"]
+    assert type(failure).__name__ in state["error"]
     assert client.post(f"/api/v1/backtests/{run_id}/cancel").json()["status"] == "failed"
 
 
 @pytest.mark.parametrize(
     ("raw", "masked"),
     [
+        # 키가 붙은 값은 모양·루트와 무관하게 전부 가린다.
         (r"root=C:\Users\someone\quant-ledger\data\equity end", "root=<path> end"),
         ("root=/home/kael/quant-ledger/data/equity detail", "root=<path> detail"),
+        ("root=/app/quant-ledger/data/equity", "root=<path>"),
+        ("root=/c/Users/sangmok/quant-ledger", "root=<path>"),
+        ("path=/workspace/quant-ledger/data x", "path=<path> x"),
         (r"root=\\fileserver\quant\ledger\equity", "root=<path>"),
+        # 모양만으로 경로인 것: 드라이브·UNC·file://·확장자 있는 POSIX 파일.
         ("path C:/Users/a/b.parquet end", "path <path> end"),
-        ("(/tmp/foo)", "(<path>)"),
+        (r"UNC \\fileserver\share\x.parquet", "UNC <path>"),
+        ("source file:///C:/Users/sangmok/data/x.parquet", "source <path>"),
+        ("(/tmp/foo/part0.parquet)", "(<path>)"),
+        # 가리지 않아야 하는 것: 다른 URL·단위 표기·비율·JSON Pointer 진단 경로·키 없는 디렉터리.
         ("see https://example.com/docs for detail", "see https://example.com/docs for detail"),
-        ("source file:///C:/data/x.parquet", "source file:///C:/data/x.parquet"),
         ("units 10 m/s and 3 /s", "units 10 m/s and 3 /s"),
         ("value 1.5/2.0 ratio and/or n/a", "value 1.5/2.0 ratio and/or n/a"),
         ("status=no_data detail=None", "status=no_data detail=None"),
-        # JSON Pointer 표기의 진단 경로는 파일 경로가 아니다.
         ("invalid pointer /factors/0/graph/nodes/2", "invalid pointer /factors/0/graph/nodes/2"),
-        ("root=/srv/ledger/equity and /var/data/x", "root=<path> and <path>"),
+        ("/data/universe_id is invalid", "/data/universe_id is invalid"),
+        ("(/tmp/foo)", "(/tmp/foo)"),
         (
             "strategy.expression.calculation_non_finite@factors.0.graph.nodes.2: x",
             "strategy.expression.calculation_non_finite@factors.0.graph.nodes.2: x",

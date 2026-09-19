@@ -75,6 +75,10 @@ KRX 가격(stg_price_daily)의 기준가/체결가 구분은 별도 컬럼 없�
 - **커밋 입자 = 테이블**: 섀도 버전에 전 파티션 생성 → 게이트 전량 통과 → `MANIFEST.json`
   을 `os.replace` 원자 교체(포인터 1회 — **파일 교체에만 원자적이므로 디렉토리가 아니라 `MANIFEST.json` 을 바꾼다**). 게이트 실패 = 새 버전 폐기, 구 버전 무손.
   tmp 는 `data/stage/_tmp/<빌드ID>/`(테이블 밖) · 구버전 GC keep=3 · 동시 실행 금지 `flock -n`
+  (원장 스냅샷 GC 도 keep=3 — `snapshot.KEEP_DEFAULT`, 결정 9(09-14): 판당 ≈18GB 라 디스크 우선.
+  하루 2판이므로 **표별 `v=` 의 실효 보존은 1.5거래일**이고 keep 밖 판은 `manifest.commit` 이 즉시
+  `rmtree` 한다. equity 는 `data/equity/_pinned/` 하드링크로 입력을 고정해 보호받지만 SFTP 소비자는
+  그런 장치가 없다 — 09-19 감사 DEFECT-B09, 연기 항목(TECH_DEBT))
 - **실패 처리**: 게이트 실패 시 `_tmp/<빌드ID>/` 즉시 삭제, 판정은 `data/stage/_failed/<빌드ID>.json`
   (게이트별 pass/fail/skip + reject 키 샘플 경로)에 남기고 stdout 요약. 알림 채널은 운영 몫. 실패 파일은 GC 대상 아님
 - **산출물 스키마 3종 + baseline** (v2.2):
@@ -84,7 +88,7 @@ KRX 가격(stg_price_daily)의 기준가/체결가 구분은 별도 컬럼 없�
     `src_mtime`, `snapshot_id`, `rules_version`, `coverage_from`, `version_loss_upstream`, `observed_date_exempt`,
     `rcept_map_miss`, `gates`}
   - reject parquet = `stg_x/v=<빌드ID>/_reject/part.parquet` — 원장 원문 전 컬럼(TEXT 그대로) + `reject_gate` + `reject_reason` + `_src`
-  - `data/stage/baseline.json` = 회귀 기준값 (§9). 게이트 상수는 전부 여기서 읽는다
+  - `data/stage/baseline.json` = 회귀 기준값 (§9). 게이트 상수는 전부 여기서 읽는다 — **단, 지금 게이트가 실제로 읽는 것은 3종뿐이다**(09-19 감사 DEFECT-B06): 표별 `thresholds`(G2·G7, 6표) · `stg_price_daily.volume_match_ratio`(G9) · `volume_match_ratio_tol`(G9 허용폭). 나머지 24지표는 **기록형**이라 저하해도 아무 게이트가 실패하지 않는다. "갱신했으니 안전" 이 성립하지 않는다는 뜻이다
 - **`partition_expr` 테이블별 필수 선언 — 클래스 3종** (실측: 관측일 축이 없는 테이블 실재):
   `date_axis`(내용일 연도 — 가격·수급 등) / `receipt_axis`(rcept 연도 — DART. `bsns_year`
   금지: 접수지연 max 2,875일) / `whole`(단일 파티션 — 참조표·소형·관리). **61테이블 전수 선언은 §4-파티션 표**(v2.2 — v2.1 은 KRX 표에만 열이 있었다)
@@ -319,7 +323,7 @@ ka10099 로 적립) ⓑ 08-21~31 상장·폐지 재구성 불가.
 | G2 | 손실 임계 | **`miss_kind='cast_failed'` 만** 카운트 (원장 정상 결측 제외 — 67% 오염 방지). 임계 = survey v2 실측(어휘 측정 기반 — §5). 행 격리형 |
 | G3 | 불변식 | stage 산출물에 duckdb DECIMAL 재작성 실행 (원장 문법·REAL 금지). **`key_unique` 는 upsert·first_write_wins·참조표(rcept_dt_map·corp_map)에만** — append_only 내용 테이블은 재수집 판본이 같은 키로 공존하므로(§7) 유일성은 (키, observed_date) 축의 G6 이 본다(09-03 5단계 리뷰 DEFECT-E1) |
 | G4 | 골든 픽스처 | 불변형/시변형 분리. 정정 반영: 회귀 **125**(price)+**2**(etf) · 정지행 125(OHL=0∧거래량>0 — DEFECT-001 계열) · 원주가 2,650,000 · abs 금지 3행 · **unit≠1 선언 전 컬럼에 픽스처 강제**(×1e6 오적용 = SPEC 최대 결함 클래스의 유일 방어). **픽스처 파일** = `data/stage/fixtures/<table>.json` [{`key`, `column`, `expect`, `measured_sql`, `measured_at`}] — 강제 주체는 `gates.py`(unit≠1 컬럼에 픽스처 없음 = G4 실패). WISE 처럼 단위가 데이터 값인 테이블은 `unit` 컬럼 분포 픽스처 |
-| G5 | 회귀 Δ등식 | `Δstage = Δn_src×fanout − Δdedup − Δreject` — 설명 안 되는 증감 실패 (v2 의 "증가 허용"은 payload 접기 하에서 탐지력 상실 — 정정). 기준 = MANIFEST `current_build` 의 `_meta.json`, **첫 빌드는 `skip(no_baseline)`** · 스냅샷 콘텐츠 해시(`src_bytes`·`src_mtime`)도 비교해 upsert 소스의 값 변경(n_src 불변)을 잡는다 |
+| G5 | 회귀 Δ등식 | `Δstage = Δn_src×fanout − Δdedup − Δreject` — 설명 안 되는 증감 실패 (v2 의 "증가 허용"은 payload 접기 하에서 탐지력 상실 — 정정). 기준 = MANIFEST `current_build` 의 `_meta.json`, **첫 빌드는 `skip(no_baseline)`**. ~~스냅샷 콘텐츠 해시(`src_bytes`·`src_mtime`)도 비교해 upsert 소스의 값 변경(n_src 불변)을 잡는다~~ — **미구현**(09-09 리뷰 부록 B-3, 09-19 감사 DEFECT-B08 재확인): `gates.g5_regression_delta` 는 Δ등식만 본다. `src_mtime` 은 `_meta.json` 에 기록만 되고 아무도 읽지 않는다(원장 5개를 매일 쓰므로 판정에 쓰면 공집합이 된다 — health C4 가 같은 이유로 테이블 단위 술어를 쓴다). upsert 소스의 조용한 값 변경은 **health C4**(계수 동결 ↔ 해시 동결)와 **C3 파티션 축**(닫힌 연도 행수 비감소)이 나눠 맡는다 |
 | G6 | 판본 보존 | (자연키, observed_date) 유일성 위반 0 + **자연키 중복 중 payload 동일 비율 기록**(임계 초과 = 재수집 잡음 과다) — **append_only 소스에만** (§3 write_mode) |
 | G7 | 범위 — **행 격리형** | 범위 밖 값은 NULL + `miss_kind='out_of_range'` + reject 계상(원문 보존). 테이블 실패는 격리 비율 > 임계(기본 0.1%, survey v2 후 확정)일 때만. 축: **관측일**(BAS_DD·dt·deal_date·rcept) 연도 **[1999(DART 전자공시 최초 연도 — 접수번호 `19990403000009` 실재), 현재+1]**(09-03 정정: 하한 2000 은 1999 공시를 행째 reject 했다) / **내용일**(만기·상환·증감자일·상장일 — pymd·*_edd·isu_dcrs_de·LIST_DD) 연도 **[1900, 현재+40]**(09-03 정정 2회: 하한 1990 은 삼성전자 상장일 19750611 을, 1956 은 dart_capital 현물출자일 1952~1954 8셀을 격리했다 — 풀 빌드 표본 검수에서 발견) · 부호 교차 · 비율 범위. 실측: CB 만기 2053 정상 · **오타 2106(tsstk_dp)·2120~2923(dart_capital 7행) 실재** — v2.1 의 테이블 폐기형은 두 테이블을 영구 빌드 불가로 만들었다(v2 가 축 분리로 잡았다던 사고 클래스의 상한값 재발) |
 | G8 | 파싱 등식 | blob=parse_log ∧ Σn_rows=stage — **ep 별 분리 산출** + 조인 테이블은 좌표 합집합 등식 (예외 e) · coverage 급락 감지(v3 일별 행수 < 직전 중앙값 50% 플래그) |
@@ -331,6 +335,27 @@ ka10099 로 적립) ⓑ 08-21~31 상장·폐지 재구성 불가.
 ★ 목록은 §2 통합 목록. 갱신은 diff 를 커밋 메시지에 남기고 사람이 승인한다. "게이트가 깨졌다"와 "원장이 자랐다"는
 `baseline.json` 의 `measured_at` 과 `_meta.json` 의 `src_mtime` 으로 가른다.
 **전량 재측정(`python -m stage.baseline --snapshot-id …`)은 그날 원장 상태로 24지표를 통째로 느슨하게 만든다** — 한 지표만 고쳐야 하면 `--only <table>.<metric> --note "<사유>"` 로 그것만 재고 나머지 값·`measured_at` 은 보존한다(09-19 감사 DEFECT-B02, 09-09 리뷰 D5-(b) 의 금지 권고와 같은 취지). `baseline.CONSTANTS`(예: `volume_match_ratio_tol`)는 측정값이 아니라 선언값이라 두 경로 모두 그대로 싣는다.
+
+### 9-1. 체인 건전성 C1~C6 (`python -m stage.health`)
+
+게이트 G0~G9 는 **판 하나**를 판정한다(실패 = 그 판 폐기). 건전성 C1~C6 은 **체인 한 번**을
+판정한다(실패 = equity 를 건너뛰고 `latest_<basis>.json` 을 갱신하지 않는다). 입력은
+`MANIFEST.json` 과 `_failed/` 뿐이라 비용이 0이고 빌드 뒤 아무 때나 같은 답이 나온다.
+
+| 검사 | 술어 | 근거 |
+|---|---|---|
+| C1 | 선언 표 전부가 **체인 시작(`--started-at`) 이후** 커밋된 판이고 basis 일치 | 자정을 넘긴 체인이 날짜 기준에서 갈라졌다(09-17 00:14 실측) |
+| C2 | 체인 시작 이후 `_failed/` 0건 | 같은 날 앞선 실행의 폐기 파일을 세면 재실행이 영영 통과 못 한다(09-12 실측) |
+| C3 | append_only 는 표 전체 행수, **upsert 는 닫힌 연도 파티션 · first_write_wins 는 전 파티션** 비감소 | 09-19 감사 DEFECT-B03 — append_only 46표만 보던 탓에 `stg_price_daily` 등 16표의 과거 구간 손실이 무검출이었다. G1·G5 는 등식이라 Δsrc=Δstage 감소를 정상 처리한다 |
+| C4 | 소스 계수(n_src·n_dedup·n_reject) 동결 표는 `content_hash` 도 동결 | 재빌드 없는 재현성 검사. `stg_doc_parse_log`·`stg_wise_coverage` 와 `versioned=False` 표는 제외(계수 불변·내용 가변이 정상) |
+| C5 | 소요 ≤ 예산(기본 40분) — **기록형**(`over_budget`) | 2026-09-12 계약 변경: 느린 것은 슬롯을 놓친 것이지 판이 틀린 것이 아니다. 실측 아침 43~54분·저녁 61~70분으로 상시 초과이고, 시각 판정은 워치독이 한다 |
+| C6 | 판이 담은 최신 사실(`max_available_date`)이 `D − 허용지연` 이상 | 09-19 감사 DEFECT-B01 — C1~C5 는 "언제 지었나" 만 봐서 KIS 3표 5주·v3 4표 2주 정지에도 5/5 OK 였다 |
+
+**C6 허용 지연은 `src/stage/freshness.py` 선언이 정본**이고 단위는 **캘린더일**이다 — stage 는
+거래일 캘린더를 모르므로(그건 daily 층의 일이다) 주말·연휴와 소스별 도착 규약을 흡수할 만큼
+넉넉히 잡는다. 판정하지 않는 표(일일 체인 범위 밖 KIS 4표·동결된 v3 4표·희소 DS005 이벤트
+15표·available 비부여 표)는 **사유 문자열과 함께** 리포트 `skipped` 에 남는다 — `--skip` 과 같은
+원칙으로 조용히 통과시키지 않는다.
 
 ## 10. 빌더
 

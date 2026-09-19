@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import math
 import os
 import re
 import shutil
@@ -44,6 +45,10 @@ RATE_PER_SEC = 4.4          # TR 당. 실측 상한 5.0 아래(backfill_kw.py:27
 BACKOFF_SEC = 0.5           # 429 복구 실측 419~759ms(backfill_kw.py:28)
 MAX_RETRY = 4
 STALE_PCT_MAX = 30.0        # 오염 게이트 (b). 실측 정상일 9.7% / 오염일 99.0% (findings A §3-2)
+# 저녁 직행(--commit) 전용 결손 게이트 (DEFECT-A01). 아침 경로는 08:10 KRX 대조가 판정하므로 적용하지 않는다.
+COMMIT_MIN_RATIO = 0.98     # dt=D 를 받은 종목 / 요청 종목. ledger_health 의 kiwoom.*.rows 하한과 같은 값
+COMMIT_ERROR_FLOOR = 5      # 산발 실패(폐지 직전 종목 등)까지 막지는 않는다
+COMMIT_ERROR_RATE = 0.005   # 그 위로는 콜 수의 0.5%
 GRACE_DAYS = 5              # 유니버스 유예(R5)
 INCOMING_PREFIX = "_kw_incoming_"
 # 요청 창 안에서 0 부터 다시 세는 누적값 — 같은 dt 라도 창이 움직이면 값이 달라진다(STAGE_SPEC §2 ka10014
@@ -161,6 +166,7 @@ class StaleGate:
 class FetchStatus(Enum):
     OK = "ok"
     GATE_FAILED = "gate_failed"
+    COVERAGE_FAILED = "coverage_failed"      # 저녁 직행 결손·오류(A01)
     TOKEN_FAILED = "token_failed"
     TOO_EARLY = "too_early"
 
@@ -456,6 +462,32 @@ def fetch_tr(spec: TrSpec, tickers: Sequence[str], *, date: str, prev_date: str,
                    "; ".join(errors), holdings_d, holdings_prev)
 
 
+def commit_error_max(n_calls: int) -> int:
+    """저녁 직행 오류 허용 상한 — `max(5, ceil(0.5% × 콜 수))`. 2,651콜이면 14건."""
+    return max(COMMIT_ERROR_FLOOR, math.ceil(COMMIT_ERROR_RATE * n_calls))
+
+
+def incoming_coverage(db_path: str, api_ids: Sequence[str], date: str) -> dict[str, int]:
+    """TR 별 `_kw_incoming_<tr>` 에서 `dt=date` 를 받은 **종목 수**. 테이블이 없으면 0.
+
+    행수가 아니라 종목 수다 — 결손은 "그 종목이 통째로 빠지는" 모양으로 온다(A01 실측 경로).
+    """
+    out: dict[str, int] = {}
+    con = sqlite3.connect(db_path, timeout=60)
+    try:
+        for api_id in api_ids:
+            table = INCOMING_PREFIX + api_id
+            if not _table_exists(con, table):
+                out[api_id] = 0
+                continue
+            row = con.execute(
+                f'SELECT COUNT(DISTINCT ticker) FROM "{table}" WHERE dt = ?', (date,)).fetchone()
+            out[api_id] = 0 if row is None else int(row[0])
+    finally:
+        con.close()
+    return out
+
+
 def stale_gate(db_path: str, prev_date: str, holdings_d: Mapping[str, str],
                holdings_prev: Mapping[str, str]) -> StaleGate:
     """오염 게이트 (b). 비교 기준은 원장 `dt=D-1`, 원장에 그 날이 없으면 같은 응답의 `D-1` 행.
@@ -483,7 +515,7 @@ def stale_gate(db_path: str, prev_date: str, holdings_d: Mapping[str, str],
 
 def fetch(tickers: Sequence[str], *, date: str, prev_date: str, db_path: str,
           client: ModuleType, dry_run: bool = False,
-          trs: Sequence[str] | None = None) -> FetchResult:
+          trs: Sequence[str] | None = None, commit: bool = False) -> FetchResult:
     """유니버스 × 선택 TR 을 종목당 1콜씩 받아 `_kw_incoming_<tr>` 에 세우고 오염 게이트를 판정한다.
 
     `trs` 가 None 이면 4 TR 전부. 운영은 둘로 나눈다 — 06:00 체인은 ka10014·ka20068·ka10060(T-1 행이
@@ -492,6 +524,10 @@ def fetch(tickers: Sequence[str], *, date: str, prev_date: str, db_path: str,
     ka10008 대상이라 그 TR 이 없는 호출에서는 `basis='skipped'` 로 통과시킨다.
     dry_run 이어도 incoming(스크래치 테이블)은 쓴다 — 원장(`ka*` 본 테이블)·runlog·유니버스 상태만 안 쓴다.
     그래야 `--merge --dry-run` 이 대조할 대상이 생긴다(G1 서버 드라이런).
+
+    `commit=True`(저녁 직행, 18:05)는 KRX 대조가 없으므로 결손 게이트를 여기서 판정한다(DEFECT-A01) —
+    TR 마다 오류 건수가 `commit_error_max` 를 넘거나 `dt=D` 커버리지가 `COMMIT_MIN_RATIO` 미만이면
+    `COVERAGE_FAILED`(rc 2). 아침 경로는 08:10 크로스소스 게이트가 판정하므로 종전대로 둔다.
     """
     selected = [TRS[a] for a in (trs if trs is not None else tuple(TRS))]
     con = sqlite3.connect(db_path, timeout=60)
@@ -513,9 +549,15 @@ def fetch(tickers: Sequence[str], *, date: str, prev_date: str, db_path: str,
             else stale_gate(db_path, prev_date, gate_stat.holdings_d, gate_stat.holdings_prev))
     n_calls = sum(s.n_calls for s in stats)
     n_rows = sum(s.n_rows for s in stats)
+    n_error = sum(s.n_error for s in stats)
+    # 커버리지는 통과해도 detail 에 싣는다 — 결손이 어느 선까지 왔는지 로그에서 추세로 보여야 한다.
+    cover = incoming_coverage(db_path, [s.api_id for s in selected], date)
+    n_cover = min(cover.values()) if cover else 0
     detail = (f"trs={','.join(s.api_id for s in selected)} universe={len(tickers)} calls={n_calls} rows={n_rows} "
               f"stale={gate.n_stale}/{gate.n_compared} pct={gate.pct} basis={gate.basis} "
-              f"errors={sum(s.n_error for s in stats)}")
+              f"coverage={n_cover}/{len(tickers)} "
+              f"coverage_by_tr={[(a, cover[a]) for a in sorted(cover)]} "
+              f"errors={n_error}")
     bad = [s for s in stats if s.token_failed]
     if bad:
         return FetchResult(FetchStatus.TOKEN_FAILED, date, len(tickers), n_calls, n_rows, gate,
@@ -524,6 +566,21 @@ def fetch(tickers: Sequence[str], *, date: str, prev_date: str, db_path: str,
         return FetchResult(FetchStatus.GATE_FAILED, date, len(tickers), n_calls, n_rows, gate,
                            detail + f" | stale_pct={gate.pct} > {STALE_PCT_MAX} "
                                     f"(정상일 실측 9.7% · 오염일 99.0%)")
+    if commit:
+        broken: list[str] = []
+        for st in stats:
+            cap = commit_error_max(st.n_calls)
+            if st.n_error > cap:
+                broken.append(f"{st.api_id} errors={st.n_error} > {cap}")
+            got = cover.get(st.api_id, 0)
+            ratio = (got / len(tickers)) if tickers else 0.0
+            if ratio < COMMIT_MIN_RATIO:
+                broken.append(f"{st.api_id} coverage={got}/{len(tickers)} "
+                              f"ratio={ratio:.4f} < {COMMIT_MIN_RATIO}")
+        if broken:
+            return FetchResult(FetchStatus.COVERAGE_FAILED, date, len(tickers), n_calls, n_rows, gate,
+                               detail + " | 저녁 직행 결손 게이트 실패(KRX 대조가 없는 경로라 여기서 막는다): "
+                                        + "; ".join(broken))
     return FetchResult(FetchStatus.OK, date, len(tickers), n_calls, n_rows, gate, detail)
 
 
@@ -661,8 +718,8 @@ def commit_incoming(*, date: str, db_path: str, api_ids: Sequence[str]) -> Commi
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
-_FETCH_RC = {FetchStatus.OK: 0, FetchStatus.GATE_FAILED: 2, FetchStatus.TOKEN_FAILED: 2,
-             FetchStatus.TOO_EARLY: 3}
+_FETCH_RC = {FetchStatus.OK: 0, FetchStatus.GATE_FAILED: 2, FetchStatus.COVERAGE_FAILED: 2,
+             FetchStatus.TOKEN_FAILED: 2, FetchStatus.TOO_EARLY: 3}
 _MERGE_RC = {MergeStatus.OK: 0, MergeStatus.NO_INCOMING: 2, MergeStatus.CROSS_SOURCE_FAILED: 2,
              MergeStatus.KRX_PENDING: 3, MergeStatus.TOO_EARLY: 3}
 _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -730,7 +787,7 @@ def _run_fetch(*, date: str, prev_date: str, db_path: str, run_db: str, base: st
               + (f" (마지막 등장일 데이터 미수신: {','.join(req.tail_missing)})" if req.tail_missing else ""))
     rid = None if dry_run else runlog.start(run_db, date=date, source=FETCH_SOURCE)
     result = fetch(tickers, date=date, prev_date=prev_date, db_path=db_path,
-                   client=_kiwoom_module(), dry_run=dry_run, trs=trs)
+                   client=_kiwoom_module(), dry_run=dry_run, trs=trs, commit=commit)
     print(f"[kw_daily] fetch status={result.status.value} {result.detail}")
     detail = result.detail
     if commit:

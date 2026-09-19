@@ -492,3 +492,81 @@ def test_commit_with_merge_is_rejected():
     import pytest
     with pytest.raises(SystemExit):
         kw_daily.main(["--merge", "--date", D, "--commit"])
+
+
+# ── (h) 저녁 직행 커버리지·오류 게이트 (DEFECT-A01) ──────────────────────────
+def _many_db(tmp_path, n):
+    """n종목 마스터만 있는 원장(저녁 직행 게이트용). 원장 본 테이블은 커밋이 만든다."""
+    path = tmp_path / "data" / "raw" / "kiwoom.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE ka10099_stock_master (snap_date TEXT, code TEXT, upSizeName TEXT, "
+                "marketName TEXT DEFAULT '거래소')")
+    con.executemany("INSERT INTO ka10099_stock_master (snap_date, code, upSizeName) VALUES (?,?,?)",
+                    [(D, f"{i:06d}", "대형주") for i in range(n)])
+    con.commit()
+    con.close()
+    return tuple(f"{i:06d}" for i in range(n))
+
+
+def _prepare_many(tmp_path, monkeypatch, n, *, nodata=(), error=()):
+    """n종목 유니버스 · 지정 종목만 무응답(1901)·오류(9999) 로 돌려주는 ka10060 스텁."""
+    monkeypatch.setenv("QL_HOME", str(tmp_path))
+    monkeypatch.setattr(kw_daily, "RATE_PER_SEC", 10_000.0)
+    tickers = _many_db(tmp_path, n)
+    bad_nodata, bad_error = set(nodata), set(error)
+
+    def kiwoom(api_id, url, body, cont=None, next_key=None):
+        tk = body["stk_cd"]
+        if tk in bad_nodata:
+            return {"return_code": 3, "return_msg": "[1901:종목정보가 없습니다]"}, {}
+        if tk in bad_error:
+            return {"return_code": 3, "return_msg": "[9999:서버 오류]"}, {}
+        return {"return_code": 0, "return_msg": "정상",
+                "invsr_trde": [{"dt": D, "ind_invsr": "1", "frgnr_invsr": "2"}]}, {}
+
+    module = types.ModuleType("api")
+    module.kiwoom = kiwoom
+    monkeypatch.setitem(sys.modules, "api", module)
+    return tickers
+
+
+def test_commit_fails_when_coverage_below_threshold(tmp_path, monkeypatch):
+    # 2,651종목 중 일부가 유량·HTTP 로 빠져도 status=ok 로 원장 직행하던 경로(A01).
+    tickers = _prepare_many(tmp_path, monkeypatch, 100, nodata=("000001", "000002", "000003"))
+    assert len(tickers) == 100
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060", "--commit"]) == 2
+    detail = _run_detail(tmp_path, "kiwoom_fetch")
+    assert "coverage=97/100" in detail and "commit=1" not in detail
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "daily_run.db")
+    try:
+        status = con.execute("SELECT status FROM run ORDER BY run_id DESC LIMIT 1").fetchone()[0]
+    finally:
+        con.close()
+    assert status == "coverage_failed"
+    assert "ka10060_investor_flows" not in _tables(tmp_path)      # 결손판은 원장에 넣지 않는다
+
+
+def test_commit_passes_at_98_percent_coverage_and_reports_it(tmp_path, monkeypatch):
+    _prepare_many(tmp_path, monkeypatch, 100, nodata=("000001",))
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060", "--commit"]) == 0
+    detail = _run_detail(tmp_path, "kiwoom_fetch")
+    assert "coverage=99/100" in detail and "errors=0" in detail   # 통과해도 항상 싣는다
+    assert _count(tmp_path, "ka10060_investor_flows") == 99
+
+
+def test_commit_fails_when_errors_exceed_budget(tmp_path, monkeypatch):
+    # 300콜 → ERROR_MAX = max(5, ceil(0.005×300)) = 5. 오류 6건은 커버리지(294/300 = 0.98)를
+    # 통과해도 실패다 — 오류가 쌓이는 날은 결손이 다음 TR·다음 슬롯으로 번진다.
+    _prepare_many(tmp_path, monkeypatch, 300, error=tuple(f"{i:06d}" for i in range(6)))
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060", "--commit"]) == 2
+    detail = _run_detail(tmp_path, "kiwoom_fetch")
+    assert "coverage=294/300" in detail and "errors=6" in detail
+    assert "ka10060_investor_flows" not in _tables(tmp_path)
+
+
+def test_morning_fetch_path_is_untouched_by_coverage_gate(tmp_path, monkeypatch):
+    # 아침 경로(--commit 없음)는 결손이 있어도 종전대로 rc 0 — 08:10 은 KRX 대조가 판정한다.
+    _prepare_many(tmp_path, monkeypatch, 100, nodata=("000001", "000002", "000003"))
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060"]) == 0
+    assert "coverage=97/100" in _run_detail(tmp_path, "kiwoom_fetch")

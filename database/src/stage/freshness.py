@@ -10,8 +10,9 @@ C6 는 판이 담은 **최신 사실의 날짜**(`manifest.BuildRecord.max_avail
 **허용 지연은 캘린더일 단순 정수다.** stage 는 캘린더를 모른다(거래일 계산은 daily 층의 일이고
 stage 가 daily 를 import 하면 층 경계가 깨진다 — DESIGN §1). 그래서 주말·연휴와 소스별 도착
 규약을 흡수할 만큼 넉넉히 잡는다. C6 는 "몇 시간 늦었나" 가 아니라 **"소스가 조용히 멈췄나"** 를
-잡는 검사다 — 잡아야 할 실제 사고는 2~5주 정지였다. 아래 값은 전부 **저녁 판(D = 오늘 KST)**
-에서 정상 운영이 통과하는 하한이다. 아침 확정판은 D = 직전 거래일이라 항상 더 여유롭다.
+잡는 검사다 — 잡아야 할 실제 사고는 2~5주 정지였다. 아래 값은 전부 **저녁 판(D = 오늘 KST,
+`build_evening.sh` 의 `is_trading_day` 가드 덕에 늘 거래일)** 에서 연휴 뒤 첫 거래일까지 정상
+운영이 통과하도록 잡은 값이다. 아침 확정판은 D = 직전 거래일이라 항상 더 여유롭다.
 
 판정하지 않는 표는 **사유를 남긴다** — 조용히 통과시키지 않는다(health 리포트 `skipped`,
 `--skip` 규약과 같은 원칙).
@@ -20,36 +21,45 @@ from __future__ import annotations
 
 # ── 허용 지연(캘린더일). 판정 = max_available_date >= D − allow ─────────────────
 #
-# KRX 4표 7일   : KRX 는 T+1 08:00 도착(SPEC §2-20)이라 저녁 판(D=T)에 D 행이 아예 없다.
-#                 월요일 저녁이면 최신이 금요일(3일), 연휴가 끼면 최대 6일 → 7.
-# 키움 5표 5일  : 키움 저녁 수집은 당일 21:05(SPEC §2-21)이라 저녁 판에 D 가 있다. 저녁 체인이
-#                 주말·연휴로 한 번 빠져도 다음 아침 판이 통과하도록 5.
-# KIS 신용 7일  : 공표 T+2, 실입수 T+3(09-19 실측 전 구간 +3일 — 감사 E01). 저녁 판 D=월요일이면
-#                 최신 deal_date 가 직전 수요일(5일) → 연휴 여유까지 7.
-# DART 7일      : 공시·보조원장은 접수일 축(rcept_dt)이라 영업일마다 들어온다.
-# 재무·주식수 120일: 정기보고서 주기 축이라 분기 공백이 정상이다(DEFECT 가 아니라 사실).
-# WISE 7일      : `fetched_date` = 수집일 축, 18:05 저녁 슬롯.
-# 문서층 4표 7일: available 은 rcept_dt lookup — 공시와 같은 축.
+# 최악의 정상 케이스는 **긴 연휴 뒤 첫 거래일 저녁 판**이다(저녁 체인은 `build_evening.sh` 의
+# `is_trading_day` 가드 때문에 휴장일엔 아예 안 돈다 — D 는 늘 거래일이다). 설·추석은 연속 휴장
+# 5일이 나오므로 그 다음 거래일의 직전 거래일이 D−6 이 된다. 아래 값은 거기에 여유를 더한 것이다.
+#
+# KRX 4표 10일  : KRX 는 T+1 08:00 도착(SPEC §2-20)이라 저녁 판(D=T)에는 D 행이 **아예 없다**.
+#                 연휴 뒤 첫 거래일 저녁이면 최신이 D−6 → 10.
+# 키움 5표 7일  : 저녁 수집이 당일 21:05(SPEC §2-21)이라 저녁 판에 D 가 그대로 들어온다. 저녁
+#                 수집이 하루 빠져도 다음 아침 판이 통과하도록 7.
+# KIS 신용 10일 : 공표 T+2, 실입수 T+3(09-19 실측 전 구간 +3일 — 감사 E01). 조회창이 `d2=오늘`
+#                 이라 `deal_date <= T-2` 만 오고, 연휴 뒤 첫 거래일이면 최신 deal_date 가 D−6 → 10.
+# DART 10일     : 공시·보조원장은 접수일 축(rcept_dt)이라 영업일마다 들어온다. 연휴 여유 포함 10.
+# 재무·주식수 120일: 정기보고서 주기 축이라 분기 공백이 정상이다(결함이 아니라 사실).
+# WISE 10일     : `fetched_date` = 수집일 축, 18:05 저녁 슬롯. 연휴 여유 포함 10.
+# 문서층 4표 10일: available 이 rcept_dt lookup — 공시와 같은 축.
+#
+# 값을 더 죄고 싶으면 거래일 캘린더가 먼저 필요하다. **지금은 느슨한 쪽이 옳다** — C6 가 잡아야
+# 할 실제 사고는 2~5주 정지였고, 상시 오탐은 이 시스템을 여섯 번 멈춰 세운 실패 클래스다.
 ALLOW_DAYS: dict[str, int] = {
     # KRX
-    "stg_price_daily": 7, "stg_etf_price_daily": 7, "stg_index_daily": 7,
-    "stg_listing_daily": 7,
+    "stg_price_daily": 10, "stg_etf_price_daily": 10, "stg_index_daily": 10,
+    "stg_listing_daily": 10,
     # 키움
-    "stg_flow_daily_kiwoom": 5, "stg_short_daily_kiwoom": 5, "stg_foreign_daily": 5,
-    "stg_lending_daily": 5, "stg_master_daily": 5,
+    "stg_flow_daily_kiwoom": 7, "stg_short_daily_kiwoom": 7, "stg_foreign_daily": 7,
+    "stg_lending_daily": 7, "stg_master_daily": 7,
     # KIS (일일 체인 대상은 신용잔고 하나 — 나머지 4표는 FROZEN)
-    "stg_credit_daily": 7,
+    "stg_credit_daily": 10,
     # DART 공시·보조원장
-    "stg_disclosure": 7, "stg_holder_elestock": 7, "stg_holder_majorstock": 7,
-    "stg_dividend": 7, "stg_capital": 7, "stg_tesstk": 7, "stg_hyslr": 7, "stg_audit": 7,
+    "stg_disclosure": 10, "stg_holder_elestock": 10, "stg_holder_majorstock": 10,
+    "stg_dividend": 10, "stg_capital": 10, "stg_tesstk": 10, "stg_hyslr": 10,
+    "stg_audit": 10,
     # DART 재무·주식수 (정기보고서 주기)
     "stg_fin": 120, "stg_shares": 120,
     # WISE
-    "stg_consensus_monthly": 7, "stg_consensus_annual": 7, "stg_consensus_quarterly": 7,
-    "stg_consensus_matrix": 7, "stg_analyst_summary": 7, "stg_analyst_broker": 7,
-    "stg_fin_wise": 7,
+    "stg_consensus_monthly": 10, "stg_consensus_annual": 10, "stg_consensus_quarterly": 10,
+    "stg_consensus_matrix": 10, "stg_analyst_summary": 10, "stg_analyst_broker": 10,
+    "stg_fin_wise": 10,
     # 문서층
-    "stg_doc_meta": 7, "stg_doc_section": 7, "stg_doc_correction": 7, "stg_doc_parse_log": 7,
+    "stg_doc_meta": 10, "stg_doc_section": 10, "stg_doc_correction": 10,
+    "stg_doc_parse_log": 10,
 }
 
 _KIS_OUT_OF_SCOPE = (
@@ -58,7 +68,7 @@ _KIS_OUT_OF_SCOPE = (
     "멈춘 것은 설계이지 정지가 아니다. 일일 수집에 편입하면 여기서 빼고 허용 지연을 선언할 것")
 _V3_FROZEN = (
     "v3 미러 동결 — `sync_v3_wise.py` 가 2026-09-02 복사 이후 멈췄다(09-19 감사 E03). "
-    "동결 유지 여부가 사용자 결정 대기라 판정하지 않는다. 재개 시 여기서 빼고 허용 지연 7 을 선언할 것")
+    "동결 유지 여부가 사용자 결정 대기라 판정하지 않는다. 재개 시 여기서 빼고 허용 지연 10 을 선언할 것")
 
 # ── 동결(판정 안 함) — 사유 문자열 필수 ────────────────────────────────────────
 FROZEN: dict[str, str] = {

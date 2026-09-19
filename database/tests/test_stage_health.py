@@ -437,12 +437,12 @@ def test_c6_는_신선도_기록이_없는_옛_판을_건너뛴다(tmp_path: Pat
 
 def test_c6_는_대상일_D_기준이다(tmp_path: Path, make_stage_tree) -> None:
     """아침 확정판은 D=T-1 이라 같은 데이터가 저녁 판보다 하루 더 여유롭다."""
-    root = _c6_tree(tmp_path, make_stage_tree, {"stg_price_daily": "2026-09-04"})
+    root = _c6_tree(tmp_path, make_stage_tree, {"stg_price_daily": "2026-09-01"})
     tables = {"stg_price_daily": "upsert"}
     fail = health.check_stage(root, basis="evening", date_kst="20260912", tables=tables)
-    assert _check(fail, "C6").status is health.Status.FAIL     # D-7 = 09-05 > 09-04
+    assert _check(fail, "C6").status is health.Status.FAIL     # D−10 = 09-02 > 09-01
     ok = health.check_stage(root, basis="evening", date_kst="20260911", tables=tables)
-    assert _check(ok, "C6").status is health.Status.PASS       # D-7 = 09-04
+    assert _check(ok, "C6").status is health.Status.PASS       # D−10 = 09-01
 
 
 def test_freshness_는_stage_66표를_빠짐없이_선언한다() -> None:

@@ -163,6 +163,9 @@ PY
 RC=$?
 STAMP=$(printf '%s\n' "$OUT" | head -1)
 BODY=$(printf '%s\n' "$OUT" | tail -n +2 | tr '\n' ' ' | cut -c1-900)
+# 알림 자체가 죽으면 판정 결과도 같이 사라진다 — notify.sh 가 남긴 실패 줄을 세어 본문에 싣는다(D04).
+NOTIFY_FAILED=$(awk -v since="$(date -u -d '24 hours ago' +%FT%TZ)" '$1 >= since' logs/notify_failed.log 2>/dev/null | wc -l | tr -d ' ')
+BODY="$BODY | 알림 실패(24h) ${NOTIFY_FAILED:-0}건"
 if [ "$RC" -eq 0 ]; then
   scripts/notify.sh info "$TITLE_OK ${STAMP:-$(TZ=Asia/Seoul date +%H:%M)}" "$BODY"
   exit 0

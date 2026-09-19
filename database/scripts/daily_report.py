@@ -37,6 +37,8 @@ MAX_TEXT = 3900                 # notify.sh 가 텔레그램에 넘기는 상한
 DISK_CRIT_GB = 50.0             # COLLECT_PLAN §4-4 즉시 등급
 BASES = ("evening", "morning")  # 잠정판 · 확정판
 LOCK_GLOB = "/tmp/quant_ledger_*.lock"
+NOTIFY_FAILED_LOG = "logs/notify_failed.log"   # notify.sh 가 전송 실패 때만 한 줄 append (DEFECT-D04)
+NOTIFY_WINDOW_H = 24
 
 
 class ReportStatus(str, Enum):
@@ -52,6 +54,7 @@ class ReportResult:
     status: ReportStatus
     text: str
     missing: tuple[str, ...]
+    notify_failed_24h: int = 0     # 최근 24h 텔레그램 전송 실패 건수 — 0 이 아니면 제목에 붙는다
 
 
 # ── 읽기 도우미 ────────────────────────────────────────────────────────────
@@ -112,6 +115,29 @@ def _hhmm_kst(utc_iso: object) -> str:
     except ValueError:
         return utc_iso[:19]
     return stamp.astimezone(KST).strftime("%H:%M")
+
+
+def _notify_failed_24h(home: str, now: dt.datetime) -> int:
+    """`logs/notify_failed.log` 의 최근 24시간 줄 수. 파일이 없으면 0(= 실패 없음).
+
+    알림 경로가 죽으면 이 리포트 자신도 못 나가므로 "0 이 아닌데 리포트가 왔다" 는 상태가 정상이다
+    (일부 실패 후 복구). 줄 형식은 `<utc ISO> <level> <title> curl_rc=… resp=…`(notify.sh).
+    """
+    since = now.astimezone(dt.UTC) - dt.timedelta(hours=NOTIFY_WINDOW_H)
+    n = 0
+    try:
+        with open(os.path.join(home, NOTIFY_FAILED_LOG), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    when = dt.datetime.strptime(
+                        line.split(" ", 1)[0], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.UTC)
+                except ValueError:
+                    continue            # 형식이 낯선 줄은 세지 않는다 — 건수를 부풀리지 않는다
+                if when >= since:
+                    n += 1
+    except OSError:
+        return 0
+    return n
 
 
 def _disk_free_gb(path: str) -> float:
@@ -254,6 +280,7 @@ def build_report(home: str, date: str, *, now_kst: dt.datetime | None = None,
     """
     now = now_kst or dt.datetime.now(KST)
     free_gb = _disk_free_gb(home) if disk_free_gb is None else disk_free_gb
+    notify_failed = _notify_failed_24h(home, now)
     missing: list[str] = []
 
     def _load(rel: str) -> dict[str, object] | None:
@@ -301,7 +328,8 @@ def build_report(home: str, date: str, *, now_kst: dt.datetime | None = None,
         lines.append("■ 없음: " + ", ".join(missing))
 
     status = ReportStatus.CRIT if crit else (ReportStatus.WARN if warns else ReportStatus.INFO)
-    head = [f"일일 리포트 D={date} · 작성 {now.strftime('%m-%d %H:%M')} KST · 판정 {status.value}"]
+    head = [(f"일일 리포트 D={date} · 작성 {now.strftime('%m-%d %H:%M')} KST · 판정 {status.value}"
+             f" · 알림 실패(24h) {notify_failed}건")]
     if crit:
         head.append("■ 즉시: " + "; ".join(crit))
     if warns:
@@ -309,7 +337,7 @@ def build_report(home: str, date: str, *, now_kst: dt.datetime | None = None,
     text = "\n".join(head + lines)
     if len(text) > MAX_TEXT:
         text = text[:MAX_TEXT - 4] + " …"
-    return ReportResult(status, text, tuple(missing))
+    return ReportResult(status, text, tuple(missing), notify_failed)
 
 
 def _send(home: str, status: ReportStatus, title: str, body: str) -> bool:
@@ -342,7 +370,10 @@ def main(argv: list[str] | None = None) -> int:
     print(r.text)
     if a.dry_run:
         return 0
-    return 0 if _send(a.home, r.status, f"일일 리포트 {a.date}", r.text) else 1
+    title = f"일일 리포트 {a.date}"
+    if r.notify_failed_24h:
+        title = f"⚠ 알림 실패 {r.notify_failed_24h} · {title}"
+    return 0 if _send(a.home, r.status, title, r.text) else 1
 
 
 if __name__ == "__main__":

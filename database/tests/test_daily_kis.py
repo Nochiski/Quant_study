@@ -338,6 +338,9 @@ def test_kis_token_error_does_not_carry_the_response_body(api_mod, monkeypatch):
             return {"error_description": "x" * 200, "error_code": "E", "access_token_secret": "s3cret"}
 
     monkeypatch.setattr(api_mod.requests, "post", lambda *a, **k: _Resp())
+    # `api` 는 import 시점에 .env 를 읽는다 — 다른 테스트가 먼저 import 했으면 KIS 키가 없다
+    monkeypatch.setitem(api_mod._K, "KIS_APP_KEY", "appkey")
+    monkeypatch.setitem(api_mod._K, "KIS_APP_SECRET", "secret")
     monkeypatch.setattr(api_mod, "_kis_tok", None)
     monkeypatch.setattr(api_mod, "_KIS_CACHE", "/nonexistent/kis_token.json")
     with pytest.raises(RuntimeError) as e:

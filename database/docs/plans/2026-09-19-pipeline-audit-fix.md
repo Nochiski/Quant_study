@@ -16,7 +16,7 @@
 
 | 단계 | 상태 | 비고 |
 |---|---|---|
-| P0 서버 즉시 조치(크론·프리패스 재생성) | 진행 중 | 프리패스 `snap_20260918T232444Z` 09-19 18:34 KST 시작, 19:49 KST 1.1GB(≈30%) |
+| P0 서버 즉시 조치 | **완료 09-19 23:24 KST** | 프리패스 전량 ok(171,217문서, D0·D2·D3·D10 0, 4h34m) → 문서층 4표 빌드 ok(`stg_doc_meta` max rcept 20260918000488) |
 | 갈래 1 daily | **완료** | 14커밋(`fix/audit-daily`), A01 은 TR 별 기준(ka10060 유니버스 0.98 / ka10014 20세션 평균 0.80) |
 | 갈래 2 stage | **완료** | 7커밋, C6 허용 지연 실측 기반(KRX 10·키움 7·KIS 10·DART 10·재무 120), 이벤트 15표 SPARSE skip |
 | 갈래 3 equity | **완료** | 13커밋, e1.16.0, EG21 4표(consensus_daily·holder_daily 제외 — 실측 근거), baseline 상수 18건은 `baseline_locked.json` scp 로 서버 반영 |
@@ -26,7 +26,9 @@
 | 통합·테스트 | **완료 09-19 19:45 KST** | 6갈래 머지 충돌 0, `database/tests` **1,280 passed**, 어댑터 30 passed |
 | G-E 리뷰 | **완료** | 차단 2·권장 17 → 차단 2 + 권장 10건 배포 전 반영(3c058cc), 나머지 TECH_DEBT B-32~B-38 |
 | 배포(G-B) | **완료 09-19 20:26 KST** | rev 319efeb, `DEPLOYED.json` tests=ok, 체크섬 동일, 크론 5줄 갱신, MANIFEST 백업 `~/backups/quant-ledger/manifests_20260919_pre_audit_fix.tgz` |
-| 실전 게이트(G-C) | 진행 중 | §4 순서: 배포 → 문서층 4표 → equity baseline scp → stage baseline --only → 수동 equity 재빌드 + EG5c 재승인(e1.16.0) → `build_chain.sh morning --date 20260918` |
+| 서버 단계 ②~⑤ | **완료 23:38 KST** | equity 수동 재빌드 29/29(547s, e1.16.0), fin_std 8/31 이후 14행 전부 document(추정 0), EG5c pass(n_diff 0 — 재승인 불필요), EG21 마진 0.999 vs 0.8, opinion_daily skip(no_coverage), equity baseline 설치(백업 .bak_pre_e116_20260919) |
+| 실전 게이트(G-C-1) | **진행 중 23:39 KST~** | `build_chain.sh morning --date 20260918` 수동 실행(`logs/morning/manual_audit_20260919.out`) |
+| 실전 게이트(G-C-2) | 대기 | §4 순서: 배포 → 문서층 4표 → equity baseline scp → stage baseline --only → 수동 equity 재빌드 + EG5c 재승인(e1.16.0) → `build_chain.sh morning --date 20260918` |
 
 ## 1. 검증 게이트 (전 갈래 공통)
 

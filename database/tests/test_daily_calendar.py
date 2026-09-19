@@ -2,6 +2,8 @@
 import datetime as dt
 import json
 
+import pytest
+
 from daily import calendar as cal
 
 
@@ -49,3 +51,42 @@ def test_invalid_cache_falls_back(tmp_path):
     c = cal.load(p)
     assert c.source == "weekend_only"
     assert c.detail  # 왜 폴백했는지 남긴다
+
+
+# ── 연 경계 (DEFECT-A07) ────────────────────────────────────────────────────
+def _write_year(tmp_path, year, holidays):
+    p = tmp_path / f"kis_holidays_{year}.json"
+    p.write_text(json.dumps({"year": year, "holidays": holidays}), encoding="utf-8")
+    return p
+
+
+def test_load_merges_every_year_file_in_the_directory(tmp_path):
+    # v3 원천은 단일 연도 파일이라 12월에 2027 판으로 교체되면 2026 성탄절·연말이 사라졌다.
+    _write_year(tmp_path, 2026, ["20261225", "20261231"])
+    _write_year(tmp_path, 2027, ["20270101"])
+    c = cal.load(tmp_path / "kis_holidays.json")        # 옛 경로를 줘도 디렉터리를 합쳐 읽는다
+    assert c.source == "kis_cache" and c.years == frozenset({"2026", "2027"})
+    assert c.is_trading_day(dt.date(2026, 12, 31)) is False
+    assert c.is_trading_day(dt.date(2027, 1, 1)) is False
+    assert c.prev_trading_day(dt.date(2027, 1, 4)) == dt.date(2026, 12, 30)
+
+
+def test_single_file_cache_still_works(tmp_path):
+    c = cal.load(_write(tmp_path, ["20260924", "20260925"]))
+    assert c.source == "kis_cache" and c.years == frozenset({"2026"})
+    assert c.is_trading_day(dt.date(2026, 9, 24)) is False
+
+
+def test_year_without_a_cache_file_raises_instead_of_assuming_weekdays(tmp_path):
+    # 폴백으로 넘어가면 신정·설 연휴가 통째로 거래일이 된다 — 조용히 틀리느니 체인을 세운다.
+    c = cal.load(_write(tmp_path, ["20261225"]))
+    with pytest.raises(KeyError):
+        c.is_trading_day(dt.date(2027, 1, 4))
+    with pytest.raises(KeyError):
+        c.prev_trading_day(dt.date(2027, 1, 4))
+
+
+def test_weekend_only_fallback_does_not_gain_a_year_check(tmp_path):
+    c = cal.load(tmp_path / "nope.json")
+    assert c.source == "weekend_only"
+    assert c.is_trading_day(dt.date(2027, 1, 4)) is True    # 캐시가 없을 때의 규약은 그대로(§4-1 0단계)

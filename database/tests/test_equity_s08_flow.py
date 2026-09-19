@@ -68,7 +68,8 @@ GAP_TABLE = "stg_flow_split_daily"
 UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
             rules_s01.CORP, rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT,
             rules_s06.ADJ_FACTOR, rules_s03.UNIVERSE_DAILY)
-GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG1_ledger", "EG3_flow_daily", "EG4", "EG5a"]
+GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG1_ledger", "EG3_flow_daily", "EG21",
+              "EG4", "EG5a"]
 
 N_GRID = 36972                       # universe_daily 41,066 − ETF 4,094
 N_LEDGER_KIWOOM = 20313

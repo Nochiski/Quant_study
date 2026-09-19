@@ -59,7 +59,7 @@ from pathlib import Path
 
 from stage.gates import GateResult, GateStatus
 
-from .gates import EquityGateContext
+from .gates import EquityGateContext, eg21_recent_grid
 from .model import (
     BASIS_VOCAB,
     FILL_EVIDENCE,
@@ -510,7 +510,8 @@ SHORT_DAILY = register(EquityTable(
     available_basis=("default",),
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
-    extra_gates=(eg1_short_daily, eg3_short_daily),
+    # EG21 — 최신 구간 행수 완결성(DEFECT-C06). flow_daily 와 같은 규약.
+    extra_gates=(eg1_short_daily, eg3_short_daily, eg21_recent_grid),
     field_profiles=FIELDS,
 ))
 

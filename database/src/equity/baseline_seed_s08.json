@@ -3,6 +3,10 @@
  "measured_at": "2026-09-06",
  "flow_daily": {
   "investor_sum_tol_krw": 6000000,
+  "recent_grid_baseline_window": 20,
+  "recent_grid_lag_sessions": 0,
+  "recent_grid_row_ratio_min": 0.8,
+  "recent_grid_window": 3,
   "threshold_EG7": 0.05
  },
  "_measured": [
@@ -29,6 +33,54 @@
    "growing": true,
    "used_by": "gates.eg7_range (GATES §1 EG7 — 코드 기본값 0.001 을 테이블 상수로 이관)",
    "note": "**제안값 — 서버 재측정 필요.** 격자 테이블의 EG7 격리는 '결함 행' 이 아니라 **원장이 격자보다 넓다는 사실**이다: 캘린더 하한 이전(P11 서버 flow 7,609행)과 폐지·재상장 사이 티커 재사용 구간이 전부 여기로 온다. 코드 기본값 0.001 은 열(cell) 격리형 테이블 기준이라 격자 테이블에 그대로 쓰면 첫 빌드가 반드시 폐기된다. 0.05 는 절단본 0.0448 + 여유이며, 절단본은 재상장 2종이 15티커 중 2 라 서버(3,478 중 2)보다 off_grid 비중이 극단적으로 높다 — 서버 비율은 pre_calendar 7,609/7,621,338 = 0.001 에 티커 재사용·폐지 구간이 더해진 값이라 0.05 보다 훨씬 작을 것으로 본다. 서버 첫 빌드 뒤 실측값으로 조인다. 사유별 건수 회귀(GATES §3 ⑪ (d))가 붙으면 이 비율 임계는 보조축이 된다."
+  },
+  {
+   "table": "flow_daily",
+   "metric": "recent_grid_window",
+   "value": 3,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM flow_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(격자 크기 = universe_daily 의 grid_predicate 행)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 판정할 최신 세션 수. 하루만 보면 휴장 직후 한 날의 튐에 흔들리고, 넓히면 이미 지난 결손을 매일 다시 폐기한다."
+  },
+  {
+   "table": "flow_daily",
+   "metric": "recent_grid_baseline_window",
+   "value": 20,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM flow_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(격자 크기 = universe_daily 의 grid_predicate 행)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 비교 중앙값을 내는 직전 세션 수. 20 세션 ≈ 1개월이라 유니버스 증감은 흡수하고 수집 사고는 남는다."
+  },
+  {
+   "table": "flow_daily",
+   "metric": "recent_grid_row_ratio_min",
+   "value": 0.8,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM flow_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(격자 크기 = universe_daily 의 grid_predicate 행)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 중앙값 대비 행수 하한. 격자 표의 일별 진폭이 ±0.15%(2,762~2,766) 이고 opinion_daily 도 ±2% 라 0.8 은 20배 이상 여유가 있다 — '반쯤 비었다' 만 잡는다."
+  },
+  {
+   "table": "flow_daily",
+   "metric": "recent_grid_lag_sessions",
+   "value": 0,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM flow_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(격자 크기 = universe_daily 의 grid_predicate 행)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 판정에서 빼는 최신 세션 수. 키움 ka10060 은 당일 저녁에 들어온다 — 최신 세션부터 판정한다."
   }
  ]
 }

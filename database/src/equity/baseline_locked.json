@@ -4,7 +4,7 @@
     "security.backfill_end": "규칙 e1.15.0 에서 **유도값으로 전환**. `security.sql` 이 자기 거래일 축(td = stg_index_daily distinct date)의 max 를 쓴다. trading_calendar 쪽과 같은 날짜임은 EG17 이 증명한다.",
     "trading_calendar.backfill_end": "규칙 e1.15.0 에서 **유도값으로 전환**(플랜 v2 §4 B.2 · v1 §8 Task 5.1). EG17 이 `max(trading_calendar.date) == max(stg_price_daily.date)` 와 `>= 직전 빌드 max`(퇴행 금지) 두 술어로 대신 본다. 상수로 두면 거래일이 하루 늘 때마다 사람이 올려야 하고 안 올리면 매일 빌드가 폐기된다."
   },
-  "_lock": "S22 확정본 (2026-09-06). 서버 data/equity/baseline.json 과 **바이트 동일**해야 한다 — 검사는 database/scripts/check_baseline_lock.py, 설치는 이 파일을 그대로 scp 로 덮어쓰기. baseline_seed_s*.json 은 슬라이스별 제안 시드이고 정본이 아니다. _measured[] 는 등재된 상수 전건의 근거이며 server_evidence 는 그 표의 커밋된 current_build 게이트 metrics 에서 그대로 읽은 값이다. 2026-09-11(규칙 e1.15.0 · 플랜 v2 §4 B.2): 날짜 상수 3건(trading_calendar.backfill_end · security.backfill_end · adj_factor.asof_for_jump_check)을 **등재 해제**하고 유도값으로 바꿨다 — 사유는 _derived[] 에 남긴다. price_daily 에 저녁 잠정판 상수 3건(evening_jump_abs_max · recent_session_window · recent_session_row_ratio_min)을 새로 등재했다. server_evidence 는 첫 서버 빌드 뒤 오케스트레이터가 채운다.",
+  "_lock": "S22 확정본 (2026-09-06). 서버 data/equity/baseline.json 과 **바이트 동일**해야 한다 — 검사는 database/scripts/check_baseline_lock.py, 설치는 이 파일을 그대로 scp 로 덮어쓰기. baseline_seed_s*.json 은 슬라이스별 제안 시드이고 정본이 아니다. _measured[] 는 등재된 상수 전건의 근거이며 server_evidence 는 그 표의 커밋된 current_build 게이트 metrics 에서 그대로 읽은 값이다. 2026-09-11(규칙 e1.15.0 · 플랜 v2 §4 B.2): 날짜 상수 3건(trading_calendar.backfill_end · security.backfill_end · adj_factor.asof_for_jump_check)을 **등재 해제**하고 유도값으로 바꿨다 — 사유는 _derived[] 에 남긴다. price_daily 에 저녁 잠정판 상수 3건(evening_jump_abs_max · recent_session_window · recent_session_row_ratio_min)을 새로 등재했다. server_evidence 는 첫 서버 빌드 뒤 오케스트레이터가 채운다. 2026-09-19(감사 수정): EG21(최신 구간 행수 완결성, DEFECT-C06) 상수 16건을 flow_daily·short_daily·credit_daily·opinion_daily 에, fin_std 에 `fin_std_inferred_recent_ratio_max`(DEFECT-F01) 를 새로 등재했다 — **서버 data/equity/baseline.json 을 이 파일로 덮어써야 EG21·EG3_fin_std 가 skip(no_baseline) 를 벗어난다**.",
   "_locked_at": "2026-09-11",
   "_measured": [
     {
@@ -1029,6 +1029,182 @@
       "table": "universe_policy",
       "used_by": "sql/universe_policy.sql version 컬럼",
       "value": "s03c-v4"
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_window",
+      "seed": "baseline_seed_s08.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 판정할 최신 세션 수. 하루만 보면 휴장 직후 한 날의 튐에 흔들리고, 넓히면 이미 지난 결손을 매일 다시 폐기한다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(격자 = universe_daily 의 grid_predicate 행). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM flow_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "flow_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 3
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_baseline_window",
+      "seed": "baseline_seed_s08.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 비교 중앙값을 내는 직전 세션 수. 20 세션 ≈ 1개월이라 유니버스·커버 종목의 완만한 증감은 흡수하고 수집 사고는 남는다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(격자 = universe_daily 의 grid_predicate 행). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM flow_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "flow_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 20
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_row_ratio_min",
+      "seed": "baseline_seed_s08.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 중앙값 대비 행수 하한. 실측 진폭이 하한에서 멀어 '반쯤 비었다' 만 잡는다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(격자 = universe_daily 의 grid_predicate 행). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM flow_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "flow_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 0.8
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_lag_sessions",
+      "seed": "baseline_seed_s08.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 판정에서 빼는 최신 세션 수. 키움 ka10060 은 당일 저녁에 들어오므로 최신 세션부터 판정한다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(격자 = universe_daily 의 grid_predicate 행). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM flow_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "flow_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 0
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_window",
+      "seed": "baseline_seed_s09.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 판정할 최신 세션 수. 하루만 보면 휴장 직후 한 날의 튐에 흔들리고, 넓히면 이미 지난 결손을 매일 다시 폐기한다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(flow_daily 와 같은 격자). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM short_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "short_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 3
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_baseline_window",
+      "seed": "baseline_seed_s09.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 비교 중앙값을 내는 직전 세션 수. 20 세션 ≈ 1개월이라 유니버스·커버 종목의 완만한 증감은 흡수하고 수집 사고는 남는다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(flow_daily 와 같은 격자). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM short_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "short_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 20
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_row_ratio_min",
+      "seed": "baseline_seed_s09.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 중앙값 대비 행수 하한. 실측 진폭이 하한에서 멀어 '반쯤 비었다' 만 잡는다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(flow_daily 와 같은 격자). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM short_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "short_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 0.8
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_lag_sessions",
+      "seed": "baseline_seed_s09.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 판정에서 빼는 최신 세션 수. 키움 축은 당일 저녁 입수라 최신 세션부터 판정한다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(flow_daily 와 같은 격자). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM short_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "short_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 0
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_window",
+      "seed": "baseline_seed_s10.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 판정할 최신 세션 수. 하루만 보면 휴장 직후 한 날의 튐에 흔들리고, 넓히면 이미 지난 결손을 매일 다시 폐기한다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(flow_daily 와 같은 격자). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM credit_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "credit_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 3
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_baseline_window",
+      "seed": "baseline_seed_s10.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 비교 중앙값을 내는 직전 세션 수. 20 세션 ≈ 1개월이라 유니버스·커버 종목의 완만한 증감은 흡수하고 수집 사고는 남는다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(flow_daily 와 같은 격자). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM credit_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "credit_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 20
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_row_ratio_min",
+      "seed": "baseline_seed_s10.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 중앙값 대비 행수 하한. 실측 진폭이 하한에서 멀어 '반쯤 비었다' 만 잡는다. 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(flow_daily 와 같은 격자). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM credit_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "credit_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 0.8
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_lag_sessions",
+      "seed": "baseline_seed_s10.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 판정에서 빼는 최신 세션 수. KIS 신용잔고 실입수가 T+3 이라 최신 3세션은 판정 밖이다(DEFECT-E01 과 같은 근거). 서버 실측 2026-09-09~09-18 date 별 행수 2,762~2,766(flow_daily 와 같은 격자). 진폭 ±0.15%.",
+      "sql": "-- SELECT <date_col>, count(*) FROM credit_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "credit_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 3
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_window",
+      "seed": "baseline_seed_s18.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 판정할 최신 세션 수. 하루만 보면 휴장 직후 한 날의 튐에 흔들리고, 넓히면 이미 지난 결손을 매일 다시 폐기한다. 서버 실측 2026-08-31~09-17 base_date 별 행수 800~817(09-04 만 2,412). base_date NULL 254,925행(v3 축)은 술어가 뺀다.",
+      "sql": "-- SELECT <date_col>, count(*) FROM opinion_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "opinion_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 3
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_baseline_window",
+      "seed": "baseline_seed_s18.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 비교 중앙값을 내는 직전 세션 수. 20 세션 ≈ 1개월이라 유니버스·커버 종목의 완만한 증감은 흡수하고 수집 사고는 남는다. 서버 실측 2026-08-31~09-17 base_date 별 행수 800~817(09-04 만 2,412). base_date NULL 254,925행(v3 축)은 술어가 뺀다.",
+      "sql": "-- SELECT <date_col>, count(*) FROM opinion_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "opinion_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 20
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_row_ratio_min",
+      "seed": "baseline_seed_s18.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 중앙값 대비 행수 하한. 실측 진폭이 하한에서 멀어 '반쯤 비었다' 만 잡는다. 서버 실측 2026-08-31~09-17 base_date 별 행수 800~817(09-04 만 2,412). base_date NULL 254,925행(v3 축)은 술어가 뺀다.",
+      "sql": "-- SELECT <date_col>, count(*) FROM opinion_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "opinion_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 0.8
+    },
+    {
+      "growing": false,
+      "kind": "convention",
+      "metric": "recent_grid_lag_sessions",
+      "seed": "baseline_seed_s18.json",
+      "seed_note": "2026-09-19 감사 DEFECT-C06(EG21 최신 구간 행수 완결성)으로 신설. 판정에서 빼는 최신 세션 수. WISE 저녁 수집분이 그날 판에 들어오므로 최신 세션부터 판정한다. 서버 실측 2026-08-31~09-17 base_date 별 행수 800~817(09-04 만 2,412). base_date NULL 254,925행(v3 축)은 술어가 뺀다.",
+      "sql": "-- SELECT <date_col>, count(*) FROM opinion_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25",
+      "table": "opinion_daily",
+      "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+      "value": 0
     }
   ],
   "_pending": {
@@ -1075,6 +1251,10 @@
     "isin8_len": 8
   },
   "credit_daily": {
+    "recent_grid_baseline_window": 20,
+    "recent_grid_lag_sessions": 3,
+    "recent_grid_row_ratio_min": 0.8,
+    "recent_grid_window": 3,
     "thresholds": {
       "EG7": 0.005
     }
@@ -1111,6 +1291,10 @@
   },
   "flow_daily": {
     "investor_sum_tol_krw": 6000000,
+    "recent_grid_baseline_window": 20,
+    "recent_grid_lag_sessions": 0,
+    "recent_grid_row_ratio_min": 0.8,
+    "recent_grid_window": 3,
     "threshold_EG7": 0.05
   },
   "holder_daily": {
@@ -1122,6 +1306,10 @@
   "measured_at": "2026-09-05",
   "opinion_broker_daily": {},
   "opinion_daily": {
+    "recent_grid_baseline_window": 20,
+    "recent_grid_lag_sessions": 0,
+    "recent_grid_row_ratio_min": 0.8,
+    "recent_grid_window": 3,
     "src_overlap_agree_min": 0.99
   },
   "ownership_snapshot": {
@@ -1150,6 +1338,10 @@
     }
   },
   "short_daily": {
+    "recent_grid_baseline_window": 20,
+    "recent_grid_lag_sessions": 0,
+    "recent_grid_row_ratio_min": 0.8,
+    "recent_grid_window": 3,
     "thresholds": {
       "EG7": 0.05
     }

@@ -43,7 +43,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 from stage.rules_kiwoom import STG_FLOW_DAILY_KIWOOM
 
-from .gates import EquityGateContext
+from .gates import EquityGateContext, eg21_recent_grid
 from .model import FILL_EVIDENCE, FILL_KINDS, EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
@@ -523,7 +523,9 @@ FLOW_DAILY = register(EquityTable(
     available_basis=("default",),
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
-    extra_gates=(eg1_ledger, eg3_flow_daily),
+    # EG21 = 최신 구간 행수 완결성(09-19 감사 DEFECT-C06). 격자 행수는 구조적이라
+    # 여기서 잡는 것은 '날짜 파티션이 통째로/반쯤 빈' 경우다 — 셀 값 축은 EG3 의 fill_kind.
+    extra_gates=(eg1_ledger, eg3_flow_daily, eg21_recent_grid),
     field_profiles=FIELDS,
 ))
 

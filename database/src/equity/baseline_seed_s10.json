@@ -2,6 +2,10 @@
  "_seed": "S10 (credit_daily) 이 요구하는 baseline 상수 — 격리 비율 임계 하나뿐이다. 산출식에 숫자 임계·리터럴이 없으므로 `_const` 로 주입할 규칙 상수는 없다(EquityTable.consts = ()): 격자 술어·fill_kind 판정·채움 규약은 전부 어휘 비교이고 유일한 숫자 0 은 src_omitted 셀의 가산 축 채움값이다. 기본 격리 임계(gates.DEFAULT_THRESHOLDS['EG7'] = 0.001)를 쓸 수 없는 테이블이라 threshold_EG7 을 첫 빌드부터 등재한다 — `_reject/pre_calendar` 는 KIS 신용잔고가 KRX 지수 캘린더 하한(2010-01-04)보다 이른 날짜를 돌려주기 때문에 생기는 구조적 격리이고(DESIGN §10 P11: 서버 credit 24,497), 이 비율은 원천 품질이 아니라 두 원장의 시작일 차이다. 기록형 metric(fill_kind 분포·KIS 수정종가 대조·`*_amt` 단위 추정비·잔고비율 대 상장주식수·음수 신규/상환/증감율·net_buy 판정 근거)은 _meta.gates[EG3_credit_daily].metrics 에 남고 승격 여부는 서버 실측 뒤 판단한다. FX-3-008 골든 픽스처는 src/equity/fixtures/credit_daily.json (상수 아님).",
  "measured_at": "2026-09-06",
  "credit_daily": {
+  "recent_grid_baseline_window": 20,
+  "recent_grid_lag_sessions": 3,
+  "recent_grid_row_ratio_min": 0.8,
+  "recent_grid_window": 3,
   "thresholds": {
    "EG7": 0.005
   }
@@ -22,6 +26,54 @@
    "growing": false,
    "used_by": "EG7 (gates.eg7_range) — n_reject / (n_out + n_reject) <= threshold",
    "note": "★ 서버 재측정 필요. 절단본 실측 0.002536(pre_calendar 85 = 2009년 행 · off_grid 9 = 상장 전·재상장 공백 회신), 코드 기본값 0.001 을 구조적으로 넘는다. 서버 추정은 DESIGN §10 P11 의 credit pre_calendar 24,497 을 격자(universe_daily 의 비-ETF 행, 10.9M 급)로 나눈 ~0.0023 이라 절단본과 같은 자릿수다. 0.005 는 두 값에 여유 2배를 준 사람 선택값이고, 원천 품질이 아니라 KIS 신용잔고 시작일(2009-11)과 KRX 지수 캘린더 하한(2010-01-04)의 차이를 담는 크기다. 서버 1차 빌드 뒤 실측치의 1.5~2배로 조인다."
+  },
+  {
+   "table": "credit_daily",
+   "metric": "recent_grid_window",
+   "value": 3,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM credit_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(flow_daily 와 같은 격자)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 판정할 최신 세션 수. 하루만 보면 휴장 직후 한 날의 튐에 흔들리고, 넓히면 이미 지난 결손을 매일 다시 폐기한다."
+  },
+  {
+   "table": "credit_daily",
+   "metric": "recent_grid_baseline_window",
+   "value": 20,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM credit_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(flow_daily 와 같은 격자)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 비교 중앙값을 내는 직전 세션 수. 20 세션 ≈ 1개월이라 유니버스 증감은 흡수하고 수집 사고는 남는다."
+  },
+  {
+   "table": "credit_daily",
+   "metric": "recent_grid_row_ratio_min",
+   "value": 0.8,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM credit_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(flow_daily 와 같은 격자)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 중앙값 대비 행수 하한. 격자 표의 일별 진폭이 ±0.15%(2,762~2,766) 이고 opinion_daily 도 ±2% 라 0.8 은 20배 이상 여유가 있다 — '반쯤 비었다' 만 잡는다."
+  },
+  {
+   "table": "credit_daily",
+   "metric": "recent_grid_lag_sessions",
+   "value": 3,
+   "kind": "convention",
+   "sql": "SELECT date_col, count(*) FROM credit_daily GROUP BY 1 ORDER BY 1 DESC LIMIT 25  -- 서버 실측 2026-09-09~09-18 행수 2,762~2,766(flow_daily 와 같은 격자)",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "gates.eg21_recent_grid (EQUITY_GATES §11 EG21)",
+   "note": "2026-09-19 감사 DEFECT-C06 으로 신설. 판정에서 빼는 최신 세션 수. KIS 신용잔고 실입수가 T+3 이라 최신 3세션은 판정 밖이다(DEFECT-E01 과 같은 근거)."
   }
  ]
 }

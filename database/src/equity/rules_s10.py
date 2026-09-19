@@ -81,7 +81,7 @@ from pathlib import Path
 
 from stage.gates import GateResult, GateStatus
 
-from .gates import EquityGateContext
+from .gates import EquityGateContext, eg21_recent_grid
 from .model import FILL_EVIDENCE, FILL_KINDS, EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
@@ -621,7 +621,9 @@ CREDIT_DAILY = register(EquityTable(
     available_basis=("default",),
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
-    extra_gates=(eg1_credit_daily, eg3_credit_daily),
+    # EG21 — 최신 구간 행수 완결성(DEFECT-C06). 실입수가 T+3 이라 lag 3 으로 등재한다
+    # (baseline `credit_daily.recent_grid_lag_sessions`, DEFECT-E01 과 같은 근거).
+    extra_gates=(eg1_credit_daily, eg3_credit_daily, eg21_recent_grid),
     field_profiles=FIELDS,
 ))
 

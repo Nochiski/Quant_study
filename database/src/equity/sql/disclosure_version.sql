@@ -99,6 +99,13 @@ idx AS (
     QUALIFY row_number() OVER (PARTITION BY rcept_no
                                ORDER BY observed_date NULLS LAST, zip_ok NULLS LAST) = 1
 ),
+meta AS (
+    -- 문서층이 이 접수를 **파싱했는가**. `stg_doc_meta` 는 이미 입력으로 고정돼 있고
+    -- (WORKFLOW §3-1 4A) `stg_doc_correction` 과 같은 프리패스 판에서 나온다 — 그래서
+    -- "정정 첫 장이 없다"(문서 품질)와 "아직 안 파싱했다"(파이프라인 상태)를 가를 수 있다.
+    -- rcept_no 당 여러 member 행이 있으므로 distinct 로 접는다(LEFT JOIN 팬아웃 방어).
+    SELECT DISTINCT rcept_no FROM stg_doc_meta
+),
 cand AS (
     SELECT c.rcept_no,
            o.rcept_no                                                   AS orig_rcept_no,
@@ -135,6 +142,7 @@ linked AS (
            k.reason_raw,
            k.items,
            i.zip_ok,
+           dm.rcept_no IS NOT NULL                                      AS has_doc_meta,
            a.n_cand,
            a.n_date_hit,
            CASE WHEN NOT l.is_correction                    THEN 'n/a'
@@ -159,6 +167,7 @@ linked AS (
     FROM labeled l
     LEFT JOIN corr k ON k.rcept_no = l.rcept_no
     LEFT JOIN idx i ON i.rcept_no = l.rcept_no
+    LEFT JOIN meta dm ON dm.rcept_no = l.rcept_no
     LEFT JOIN picked a ON a.rcept_no = l.rcept_no
 ),
 back AS (
@@ -182,13 +191,19 @@ SELECT
     v.corr_prefix,
     v.orig_rcept_no,
     v.candidate_status,
-    -- 날짜 확인축. `unparsed`·`no_page`·`no_zip`·`n/a` 는 E-G6b 분모에서 빠진다(GATES EG6-P06).
-    -- 링크가 아예 없는 정정(`none`·`multi_unresolved`)은 대조할 원본 접수일이 없으므로
-    -- `mismatch` 로 떨어진다 — 링크 성립률은 E-G6a(candidate_status)가 따로 잰다.
-    -- 하루 차이는 `off_1d`, 그 위 `date_check_near_days`(어휘가 못박은 7일) 까지가 `off_2_7d` 다.
+    -- 날짜 확인축. `unparsed`·`not_parsed`·`no_page`·`no_zip`·`n/a` 는 E-G6b 분모에서
+    -- 빠진다(GATES EG6-P06). 링크가 아예 없는 정정(`none`·`multi_unresolved`)은 대조할 원본
+    -- 접수일이 없으므로 `mismatch` 로 떨어진다 — 링크 성립률은 E-G6a(candidate_status)가 따로
+    -- 잰다. 하루 차이는 `off_1d`, 그 위 `date_check_near_days`(7일) 까지가 `off_2_7d` 다.
+    -- `stg_doc_correction` 행이 없는 갈래는 셋으로 나뉜다(DEFECT-F02, 09-19 감사):
+    --   ZIP 이 없다 → `no_zip` / ZIP 은 있는데 문서층이 아직 안 봤다 → `not_parsed`
+    --   / ZIP 도 있고 문서층도 봤는데 정정신고 첫 장이 없다 → `no_page`(문서 품질 사실)
+    -- 파싱 여부 판정은 같은 입력으로 고정된 `stg_doc_meta` 의 rcept_no 존재다.
     CASE WHEN NOT v.is_correction                                     THEN 'n/a'
          WHEN NOT v.has_corr_row
-              THEN CASE WHEN coalesce(v.zip_ok, FALSE) THEN 'no_page' ELSE 'no_zip' END
+              THEN CASE WHEN NOT coalesce(v.zip_ok, FALSE)    THEN 'no_zip'
+                        WHEN NOT v.has_doc_meta               THEN 'not_parsed'
+                        ELSE 'no_page' END
          WHEN NOT coalesce(v.page_found, FALSE)                       THEN 'no_page'
          WHEN v.filed_date_status <> 'parsed' OR v.filed_date IS NULL  THEN 'unparsed'
          WHEN v.orig_rcept_dt IS NULL                                 THEN 'mismatch'

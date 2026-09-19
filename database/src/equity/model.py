@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.15.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.16.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -131,6 +131,23 @@ RULES_VERSION = "e1.15.0"                # BuildRecord.rules_version 에 실린�
 #            굳은 대신 최신 구간을 보는 축이다.
 #         빌드 축에도 판(basis)이 생겼다 — `--basis evening|morning` → build_id 접두 `e_`/`m_`
 #         (기본 `b_`)이고 `_meta.json`·MANIFEST `BuildRecord.basis` 에 실린다(어휘는 stage 정본).
+# e1.16.0: 2026-09-19 파이프라인 전수 감사 수정(플랜 §3 갈래 3). 다섯이 산출·판정을 바꾼다:
+#         ① `price_daily` 저녁 잠정 행을 **상장 축**으로 제한(DEFECT-E07) — `listed_now` =
+#            KRX 일별 마스터 최신일 ∪ ETF 가격 원장 최신일. 키움 ka10060 이 정리매매 끝난 종목도
+#            하루 더 주기 때문이다. EG1 우변도 같은 술어를 쓰고, 걸러진 행수는 기록형
+#            `n_evening_rows_not_listed` 다. `price_adj_daily` 도 따라서 줄어든다.
+#         ② `disclosure_version.date_check` 어휘에 **`not_parsed`** 추가(DEFECT-F02) — ZIP 은
+#            있는데 문서층이 아직 안 본 정정을 `no_page`(문서 품질 사실)와 가른다. 판정 축은
+#            같은 판으로 고정된 `stg_doc_meta` 의 rcept_no 존재다.
+#         ③ 새 공용 게이트 **EG21**(최신 구간 행수 완결성, DEFECT-C06) — `flow_daily`·
+#            `short_daily`·`credit_daily`·`opinion_daily` 에 등록. 일일 운영에서 EG5a 가 항상
+#            skip(inputs_changed) 이고 EG5c 표본이 과거로 굳어 생긴 감시 공백을 메운다.
+#         ④ `EG3_fin_std` 에 최근 구간 `period_end` 추정 폴백 비율(DEFECT-F01) — 상수
+#            `fin_std_inferred_recent_ratio_max` 등재 시 폐기형, 미등재면 기록형.
+#         ⑤ `credit.margin_balance` 권장 랙 1 → 3 세션(DEFECT-E01) · KIS 축 4필드를 내부
+#            스코프로 선언(DEFECT-E02) → `dataset_profile` 79 → 83행.
+#         산출 자체가 안 바뀌는 항목(카탈로그·계약 자원 제한 C04 · rebase 승인 기록 C08 ·
+#         롤백 C03 · 빌드 순서 파일 C09)도 같은 판에 들어간다.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

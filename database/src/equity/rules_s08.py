@@ -43,7 +43,7 @@ from pathlib import Path
 from stage.gates import GateResult, GateStatus
 from stage.rules_kiwoom import STG_FLOW_DAILY_KIWOOM
 
-from .gates import EquityGateContext
+from .gates import EquityGateContext, eg21_recent_grid
 from .model import FILL_EVIDENCE, FILL_KINDS, EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
@@ -380,7 +380,36 @@ _FLOW_SRC_NOTE = ("grain 에 `src` 가 들어 한 격자 셀에 원장 행이 �
                   "(FIELD_MAP §2 · S21-3 어댑터 `pick_order`). 값을 섞지 않는다. 절단본 겹침 0, "
                   "서버는 `EG3_flow_daily.n_src_overlap` 이 매 빌드 센다.")
 
+_KIS_SRC_NOTE = (
+    "**일일 수집 범위 밖**이다 — 일일 체인의 KIS 단계는 신용잔고 하나뿐이고(플랜 R10 · "
+    "`daily_ledger.sh` kis credit) `stg_flow_split_daily` 는 백필 전용 경로였다. 원장 실측 "
+    "`kis_investor_flow.max(collected_at)=2026-08-26` · stage `max(date)=2026-08-14` 라 "
+    "**2026-08-15 이후 `src='kis'` 행이 없다**(2026-09 실측 0행, 같은 달 키움 37,087행). "
+    "그 종료일은 이 행의 `coverage_to` 가 말한다 — 선언이 없으면 카탈로그만 보는 소비자는 "
+    "상보 원천이 멈춘 것을 알 수 없다(DEFECT-E02, 2026-09-19 감사). `scope='internal'` 이라 "
+    "FIELD_MAP §2 어휘와 어댑터 `list_fields()` 는 그대로다. 정본 축은 원천을 합친 "
+    "`flow.foreign_net_buy`·`flow.institution_net_buy` 이고 이 축은 커버 관측용이다.")
+
 FIELDS: tuple[FieldProfile, ...] = (
+    # ── KIS 축(내부 스코프) — `src='kis'` 행만. DEFECT-E02 (2026-09-19 감사) ──────
+    FieldProfile(
+        field_id="flow.foreign_net_buy_kis", columns=("frgnr_invsr_krw",),
+        label="외국인 순매수(대금, KIS 축, 수집 정지)", unit="KRW", value_type="amount",
+        frequency="session", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=True, disclosure_basis=_FLOW_DISCLOSURE,
+        evidence="flow_daily.frgnr_invsr_krw 의 `src='kis'` 행 ← "
+                 "stg_flow_split_daily.frgn_ntby_tr_pbmn_krw. " + _KIS_SRC_NOTE,
+        coverage_axis="grid_session", scope="internal", row_filter="src = 'kis'",
+        axis_columns=_FAXIS),
+    FieldProfile(
+        field_id="flow.institution_net_buy_kis", columns=("orgn_krw",),
+        label="기관 순매수(대금, KIS 축, 수집 정지)", unit="KRW", value_type="amount",
+        frequency="session", recommended_lag_sessions=1, recommended_lag_days=1,
+        point_in_time=True, requires_confirmation=True, disclosure_basis=_FLOW_DISCLOSURE,
+        evidence="flow_daily.orgn_krw 의 `src='kis'` 행 ← "
+                 "stg_flow_split_daily.orgn_ntby_tr_pbmn_krw. " + _KIS_SRC_NOTE,
+        coverage_axis="grid_session", scope="internal", row_filter="src = 'kis'",
+        axis_columns=_FAXIS),
     FieldProfile(
         field_id="flow.foreign_net_buy", columns=("frgnr_invsr_krw",),
         label="외국인 순매수(대금)", unit="KRW", value_type="amount", frequency="session",
@@ -523,7 +552,9 @@ FLOW_DAILY = register(EquityTable(
     available_basis=("default",),
     content_date_column="date",
     reject_reasons=REJECT_REASONS,
-    extra_gates=(eg1_ledger, eg3_flow_daily),
+    # EG21 = 최신 구간 행수 완결성(09-19 감사 DEFECT-C06). 격자 행수는 구조적이라
+    # 여기서 잡는 것은 '날짜 파티션이 통째로/반쯤 빈' 경우다 — 셀 값 축은 EG3 의 fill_kind.
+    extra_gates=(eg1_ledger, eg3_flow_daily, eg21_recent_grid),
     field_profiles=FIELDS,
 ))
 

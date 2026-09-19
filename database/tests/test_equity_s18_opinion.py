@@ -39,7 +39,7 @@ N_OVERLAP = 5                   # 두 원천이 같은 (ticker, obs_date) 를 �
 N_V3_NULL = 301                 # v3 값 전 축이 NULL 인 행 (커버 안 되는 종목·날)
 
 OPINION_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_opinion_daily", "EG6", "EG8", "EG9",
-                 "EG4", "EG5a"]
+                 "EG21", "EG4", "EG5a"]
 BROKER_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG3_opinion_broker_daily", "EG9",
                 "EG4", "EG5a"]
 
@@ -571,9 +571,12 @@ def test_선언이_DESIGN_4_6과_같다() -> None:
     assert od.content_date_column == "base_date" and ob.content_date_column == "opinion_date"
     # 현재값 라벨(`_current`)을 팩트 컬럼으로 내리지 않는다 — EG6-P03
     assert not [c for c in {**od.columns, **ob.columns} if c.endswith("_current")]
-    # baseline 상수는 등재하지 않는다(EG8 만 사람 승인 대기)
+    # baseline 상수는 EG21(09-19 감사 DEFECT-C06) 4건뿐이다 — EG8 은 사람 승인 대기
     seed = json.loads(rules_s18.BASELINE_SEED.read_text(encoding="utf-8"))
-    assert seed["opinion_daily"] == {} and seed["opinion_broker_daily"] == {}
+    assert set(seed["opinion_daily"]) == {
+        "recent_grid_window", "recent_grid_baseline_window",
+        "recent_grid_row_ratio_min", "recent_grid_lag_sessions"}
+    assert seed["opinion_broker_daily"] == {}
     assert any(m["metric"] == "src_overlap_agree_min" for m in seed["_measured"])
 
 

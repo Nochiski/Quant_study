@@ -42,7 +42,7 @@ from pathlib import Path
 
 from stage.gates import GateResult, GateStatus
 
-from .gates import EquityGateContext, SkipGate, require_const
+from .gates import EquityGateContext, SkipGate, eg21_recent_grid, require_const
 from .model import EquityTable, FieldProfile, register
 from .rules_s01 import TICKER_LEN
 
@@ -520,8 +520,10 @@ OPINION_DAILY = register(EquityTable(
     # 내용일 = 기준일(WISE '[기준: YYYY.MM.DD]'). v3 는 NULL 이라 술어에 걸리지 않는다.
     content_date_column="base_date",
     reject_reasons=OPINION_REJECT_REASONS,
+    # EG21 — 최신 구간 행수 완결성(DEFECT-C06). 이 표는 커버리지 급감이 곧 행수 급감이라
+    # (09-02 WISE v3 정지로 종목 2,533 → 839) 행수 축이 그대로 신호다.
     extra_gates=(eg3_opinion_daily, eg6_first_observation, eg8_src_overlap,
-                 eg9_coverage_opinion),
+                 eg9_coverage_opinion, eg21_recent_grid),
     field_profiles=FIELDS_OPINION,
 ))
 

@@ -38,11 +38,30 @@ CATALOG_NAME = "equity.duckdb"
 META_NAME = "_catalog_meta.json"
 ASOF_DIR = "_asof"
 ASOF_KEEP = 3
+# duckdb 기본값은 코어 수(서버 4) 스레드 · RAM 80% 다. 표 빌드는 `equity_rebuild_all.sh:47` 이
+# `--threads 3 --memory-limit 8GB` 로 묶는데 카탈로그·계약 단계만 안 묶여 379% CPU 를 썼다
+# (DEFECT-C04, 09-19 감사). 같은 4코어 서버에서 kael-system-v3 가 평일 20:05 KST 체인을 돌리고
+# 빌드 락(`/tmp/quant_ledger_build.lock`)은 quant-ledger 안에서만 직렬화한다.
+DUCKDB_THREADS = 3
+DUCKDB_MEMORY_LIMIT = "8GB"
+
+
+def connect(path: Path | None = None, *, read_only: bool = False
+            ) -> duckdb.DuckDBPyConnection:
+    """자원을 묶은 duckdb 연결. 카탈로그·계약 단계의 모든 연결이 이것을 쓴다(DEFECT-C04)."""
+    con = (duckdb.connect(str(path), read_only=read_only) if path is not None
+           else duckdb.connect())
+    con.execute(f"SET threads = {DUCKDB_THREADS}")
+    con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
+    return con
 ASOF_VIEWS: tuple[str, ...] = (                                 # 표본을 남기는 뷰
     "v_cum_adj", "v_adj_price",                                  # S06 (base = as_of)
     "v_adj_price_fwd", "v_adj_volume_fwd")                       # S21 후속 (전방 조정)
 ASOF_PART = "part0.parquet"
 ASOF_META = "_meta.json"
+# 승인 기록은 `_asof/<view>/` **밖**에 산다 — 그 안이면 keep=3(≈1.5일) GC 가 지운다
+# (DEFECT-C08: 9/16 승인의 유일한 흔적이 그렇게 사라졌다).
+ASOF_APPROVALS = "_approvals"
 SAMPLE_DATES = ("trading_calendar", "asof_sample_dates")
 SAMPLE_TICKERS = ("trading_calendar", "asof_sample_tickers")
 DIFF_SAMPLE_ROWS = 10
@@ -112,7 +131,7 @@ def build_catalog_file(path: Path, macros: dict[str, str]) -> None:
                          f"expected=<identifier>[(<args>)] path={path}")
     if path.exists():
         path.unlink()
-    con = duckdb.connect(str(path))
+    con = connect(path)
     try:
         for name in _creation_order(macros):
             con.execute(f"CREATE OR REPLACE MACRO {name} AS TABLE {macros[name]}")
@@ -205,7 +224,7 @@ def _hash(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[int, str]:
 
 
 def _read_only(path: Path) -> duckdb.DuckDBPyConnection:
-    return duckdb.connect(str(path), read_only=True)
+    return connect(path, read_only=True)
 
 
 def eg11_determinism(tmp_catalog: Path, macros: dict[str, str], sample: tuple[list[str], list[str]]
@@ -286,7 +305,7 @@ def eg5c_asof_invariance(equity_root: Path, written: dict[str, dict[str, object]
             per_view[view] = {"previous_snapshot_id": None}
             continue
         _, prev_dir, prev_meta = snaps[0]
-        con = duckdb.connect()
+        con = connect()
         try:
             con.execute(f"CREATE TEMP VIEW cur AS SELECT * FROM read_parquet('{info['path']}')")
             con.execute(f"CREATE TEMP VIEW prv AS SELECT * FROM "
@@ -308,26 +327,38 @@ def eg5c_asof_invariance(equity_root: Path, written: dict[str, dict[str, object]
             keys = [f"{r[0]}|{r[1]}|{r[2]}|{r[3]}" for r in con.execute(
                 "SELECT as_of, ticker, date, kind FROM _d WHERE kind IS NOT NULL "
                 f"ORDER BY 1, 2, 3 LIMIT {DIFF_SAMPLE_ROWS}").fetchall()]
+            cur_cols = [str(r[0]) for r in con.execute("DESCRIBE cur").fetchall()]
+            prv_cols = [str(r[0]) for r in con.execute("DESCRIBE prv").fetchall()]
         finally:
             con.close()
         n_diff = sum(kinds.values())
         n_diff_total += n_diff
+        added = [c for c in cur_cols if c not in prv_cols]
+        removed = [c for c in prv_cols if c not in cur_cols]
         per_view[view] = {"previous_snapshot_id": prev_dir.name,
                           "previous_builds": prev_meta.get("builds"),
                           "previous_written_at_utc": prev_meta.get("written_at_utc"),
-                          "n_diff": n_diff, "diff_by_kind": kinds, "diff_keys": keys}
+                          "n_diff": n_diff, "diff_by_kind": kinds, "diff_keys": keys,
+                          # 행 전체 해시 비교라 `changed` 하나로는 '컬럼이 늘었다' 와 '과거 값이
+                          # 다시 쓰였다' 를 못 가른다 — 승인 판단의 갈림길이라 따로 적는다.
+                          "columns_added": added, "columns_removed": removed,
+                          "schema_changed": bool(added or removed)}
+    schema_changed = sorted(v for v, d in per_view.items() if d.get("schema_changed"))
     metrics: dict[str, object] = {"views": per_view, "n_diff_total": n_diff_total,
-                                  "rebase_asof": rebase}
+                                  "rebase_asof": rebase,
+                                  "schema_changed_views": schema_changed}
     if all(v.get("previous_snapshot_id") is None for v in per_view.values()):
         return GateResult("EG5c", GateStatus.SKIP, "no_previous_snapshot", metrics)
     if n_diff_total == 0:
         return GateResult("EG5c", GateStatus.PASS, "직전 표본과 동일", metrics)
+    schema_note = (f" schema_changed={schema_changed}" if schema_changed else "")
     if rebase:
         return GateResult("EG5c", GateStatus.PASS,
-                          f"rebased(approved --rebase-asof): n_diff={n_diff_total}", metrics)
+                          f"rebased(approved --rebase-asof): n_diff={n_diff_total}"
+                          f"{schema_note}", metrics)
     return GateResult("EG5c", GateStatus.FAIL,
-                      f"as-of sample differs from previous snapshot: n_diff={n_diff_total} "
-                      f"(승인하려면 catalog --rebase-asof)", metrics)
+                      f"as-of sample differs from previous snapshot: n_diff={n_diff_total}"
+                      f"{schema_note} (승인하려면 catalog --rebase-asof --reason '…')", metrics)
 
 
 def eg3_firm_mktcap(tmp_catalog: Path, equity_root: Path, macros: dict[str, str],
@@ -416,9 +447,48 @@ def _record_asof(equity_root: Path, written: dict[str, dict[str, object]], sid: 
     return out
 
 
+def record_rebase_approval(equity_root: Path, reason: str, sid: str,
+                           eg5c: GateResult) -> Path:
+    """`--rebase-asof` 승인을 **영구** 기록한다 (DEFECT-C08, 09-19 감사).
+
+    EG5c 는 "과거가 다시 쓰였다" 를 잡는 유일한 장치인데, 승인하면 사유·승인자·대상 diff 가
+    어디에도 남지 않았다. 결과는 `_catalog_meta.json` 의 `gates[]` 에만 들어가고 다음 catalog
+    실행이 덮어쓰며, `_asof/<view>/<sid>/_meta.json` 은 keep=3(≈1.5일)이라 곧 GC 된다.
+    2026-09-16 의 n_diff=319,310 이 '값 변경' 이 아니라 '컬럼 추가' 였다는 판정도 그때 기록되지
+    않아 09-19 에 역추적해야 했다.
+
+    기록 위치는 `_asof/_approvals/<utcstamp>.json` — `_asof/<view>/` 밖이라 GC 대상이 아니다.
+    """
+    views_meta = eg5c.metrics.get("views")
+    per_view = views_meta if isinstance(views_meta, dict) else {}
+    payload = {
+        "reason": reason,
+        "approver": os.environ.get("USER"),
+        "approved_at_utc": _now(),
+        "snapshot_id": sid,
+        "n_diff_total": eg5c.metrics.get("n_diff_total"),
+        "schema_changed_views": eg5c.metrics.get("schema_changed_views"),
+        "gate_detail": eg5c.detail,
+        "views": {v: {k: d.get(k) for k in
+                      ("previous_snapshot_id", "previous_written_at_utc", "n_diff",
+                       "diff_by_kind", "diff_keys", "columns_added", "columns_removed",
+                       "schema_changed")}
+                  for v, d in per_view.items() if isinstance(d, dict)},
+    }
+    path = equity_root / ASOF_DIR / ASOF_APPROVALS / f"{_now().replace(':', '')}.json"
+    _write_json(path, payload)
+    return path
+
+
 def publish(equity_root: Path, baseline: Baseline, *, keep: int = ASOF_KEEP,
-            rebase_asof: bool = False) -> CatalogResult:
-    """매크로 렌더 → 임시 카탈로그 → EG11·EG5c·EG3-P05 → 통과 시 교체 + `_asof/` 기록."""
+            rebase_asof: bool = False, rebase_reason: str | None = None) -> CatalogResult:
+    """매크로 렌더 → 임시 카탈로그 → EG11·EG5c·EG3-P05 → 통과 시 교체 + `_asof/` 기록.
+
+    `rebase_asof` 는 사람 승인이므로 `rebase_reason` 이 **필수**다(DEFECT-C08).
+    """
+    if rebase_asof and not (rebase_reason or "").strip():
+        raise ValueError("catalog --rebase-asof 는 --reason '<왜 승인하는가>' 가 필요하다 — "
+                         "승인 사유·승인자·대상 diff 는 _asof/_approvals/ 에 영구 기록된다")
     equity_root.mkdir(parents=True, exist_ok=True)
     macros, skipped = views.render_macros(equity_root)
     builds = table_builds(equity_root)
@@ -431,8 +501,10 @@ def publish(equity_root: Path, baseline: Baseline, *, keep: int = ASOF_KEEP,
     build_catalog_file(tmp, macros)
     try:
         eg11, written = eg11_determinism(tmp, macros, sample, work)
-        results = [eg11, eg5c_asof_invariance(equity_root, written, sample, rebase_asof),
-                   eg3_firm_mktcap(tmp, equity_root, macros, sample)]
+        eg5c = eg5c_asof_invariance(equity_root, written, sample, rebase_asof)
+        results = [eg11, eg5c, eg3_firm_mktcap(tmp, equity_root, macros, sample)]
+        if rebase_asof and int(str(eg5c.metrics.get("n_diff_total") or 0)) > 0:
+            record_rebase_approval(equity_root, str(rebase_reason), sid, eg5c)
         if any(g.status is GateStatus.FAIL for g in results):
             tmp.unlink()
             shutil.rmtree(work, ignore_errors=True)
@@ -453,6 +525,7 @@ def publish(equity_root: Path, baseline: Baseline, *, keep: int = ASOF_KEEP,
     return CatalogResult(True, path, sid, builds, macros, skipped, results, asof, None)
 
 
-__all__ = ["ASOF_DIR", "ASOF_KEEP", "ASOF_VIEWS", "CATALOG_NAME", "META_NAME", "CatalogResult",
-           "build_catalog_file", "publish", "sample_sql", "snapshot_id", "table_bases",
-           "table_builds", "write_catalog"]
+__all__ = ["ASOF_APPROVALS", "ASOF_DIR", "ASOF_KEEP", "ASOF_VIEWS", "CATALOG_NAME",
+           "META_NAME", "CatalogResult", "build_catalog_file", "publish",
+           "record_rebase_approval", "sample_sql", "snapshot_id", "table_bases", "table_builds",
+           "write_catalog"]

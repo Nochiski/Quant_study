@@ -483,8 +483,11 @@ def test_결산월이_있으면_문서_없이도_후보_규칙이_기간을_찾�
         _fin_row("00000002", "2020", "11011", "20210330000002", sj="IS",
                  account_id="ifrs-full_Revenue", account_nm="매출액", amount=200.0),
     ]
+    # 이 손 트리는 2행 중 1행이 `inferred` 라 seed 임계(0.2)를 구조적으로 넘는다 — 여기서 보는
+    # 것은 후보 규칙이지 최근 구간 비율이 아니므로 임계를 등재 해제한다(DEFECT-F01 게이트).
     r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
-                    ("20210330000002", "period_end_basis", "inferred"))
+                    ("20210330000002", "period_end_basis", "inferred"),
+                    fin_std_inferred_recent_ratio_max=None)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     assert (r.n_rows, r.n_reject) == (2, 0)
     rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
@@ -733,3 +736,69 @@ def test_기준이_바뀌면_직전_기준이_남아_가짜_성장률을_막는�
     for k in ("n_revenue_basis_prev_outside_vocab", "n_revenue_basis_prev_unwitnessed",
               "n_revenue_basis_prev_missing"):
         assert m[k] == 0, k
+
+
+# ── DEFECT-F01: period_end 추정 폴백 가시화 (감사 09-19) ──────────────────────
+
+
+def _recent_reports() -> tuple[list[tuple[str, str | None]],
+                               list[tuple[str, str, str, str, date, date | None, str | None]],
+                               list[dict[str, object]]]:
+    """같은 접수일의 그룹 둘 — 하나는 문서 정본, 하나는 문서가 없어 추정 폴백."""
+    corps = [("00000001", "12"), ("00000002", "12")]
+    reports = [
+        ("20260330000001", "00000001", "2025", "11011", date(2026, 3, 30),
+         date(2025, 12, 31), "11011"),
+        # 문서 짝이 없다 — `corp.fiscal_month` 추정으로 폴백한다(period_end_basis='inferred')
+        ("20260330000002", "00000002", "2025", "11011", date(2026, 3, 30), None, None),
+    ]
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=100.0),
+        _fin_row("00000002", "2025", "11011", "20260330000002", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=200.0),
+    ]
+    return corps, reports, fin
+
+
+def test_최근_구간_추정_폴백_비율이_기록된다(make_stage_tree, tmp_path: Path) -> None:
+    """DEFECT-F01 — 문서층이 뒤처지면 신규 그룹이 `period_end` 정본을 잃고 `corp.fiscal_month`
+    추정으로 폴백한다. 결산월이 어긋나거나 없는 법인은 후보가 0개가 되어 행째로 사라지는데
+    (09-19 실측 8/31 이후 그룹 14 → 10) 기존 게이트는 전부 못 잡는다: EG7 격리 비율 1.28% <
+    임계 3% · `n_by_period_end_basis` 는 임계 없음 · `n_period_end_not_document` 는 정의상 0.
+    상수가 없으면 **기록만** 하고 판정하지 않는다(GATES §0-3).
+    """
+    corps, reports, fin = _recent_reports()
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "period_end_basis", "document"),
+                    fin_std_inferred_recent_ratio_max=None)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_recent_rows"] == 2
+    assert m["n_period_end_inferred_recent"] == 1
+    assert m["ratio_period_end_inferred_recent"] == 0.5
+    assert m["recent_from"] == "2026-02-28"          # max(available_date) − 30일
+    assert m["fin_std_inferred_recent_ratio_max"] is None
+    assert m["n_period_end_inferred_recent_over_max"] == 0
+
+
+def test_추정_폴백이_임계를_넘으면_EG3_fin_std가_폐기한다(make_stage_tree,
+                                                        tmp_path: Path) -> None:
+    corps, reports, fin = _recent_reports()
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "period_end_basis", "document"),
+                    fin_std_inferred_recent_ratio_max=0.2, inferred_recent_days=30)
+    assert r.status is build.BuildStatus.GATE_FAILED
+    g = _gate(r, "EG3_fin_std")
+    assert g.status is GateStatus.FAIL
+    assert g.metrics["n_period_end_inferred_recent_over_max"] == 1
+    assert "n_period_end_inferred_recent_over_max" in g.detail
+
+
+def test_추정_폴백이_임계_아래면_통과한다(make_stage_tree, tmp_path: Path) -> None:
+    corps, reports, fin = _recent_reports()
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "period_end_basis", "document"),
+                    fin_std_inferred_recent_ratio_max=0.6, inferred_recent_days=30)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert _gate(r, "EG3_fin_std").metrics["n_period_end_inferred_recent_over_max"] == 0

@@ -41,12 +41,15 @@ KIND_VOCAB: tuple[str, ...] = ("annual", "half", "quarter")
 CANDIDATE_STATUS_VOCAB: tuple[str, ...] = ("unique", "none", "multi_resolved",
                                            "multi_unresolved", "n/a")
 DATE_CHECK_VOCAB: tuple[str, ...] = ("exact", "off_1d", "off_2_7d", "mismatch", "unparsed",
-                                     "no_page", "no_zip", "n/a")
+                                     "no_page", "not_parsed", "no_zip", "n/a")
 GROUP_KEY_BASIS_VOCAB: tuple[str, ...] = ("label", "no_label")
 LINK_BASIS_VOCAB: tuple[str, ...] = ("parsed", "n/a")
 REJECT_REASONS: tuple[str, ...] = ("rcept_dt_missing",)
-# E-G6b 분모에서 빠지는 값 — 원본 접수일과 대조할 재료 자체가 없는 행 (GATES EG6-P06)
-DATE_CHECK_UNMEASURED: tuple[str, ...] = ("unparsed", "no_page", "no_zip", "n/a")
+# E-G6b 분모에서 빠지는 값 — 원본 접수일과 대조할 재료 자체가 없는 행 (GATES EG6-P06).
+# `not_parsed` 는 문서 품질이 아니라 **파이프라인 상태**다(문서층이 이 접수를 아직 안 봤다) —
+# `no_page`(ZIP 에 정정신고 첫 장이 없다는 사실)와 섞으면 소비자가 최근 정정을 통째로
+# 이상 문서로 버린다(DEFECT-F02, 09-19 감사).
+DATE_CHECK_UNMEASURED: tuple[str, ...] = ("unparsed", "no_page", "not_parsed", "no_zip", "n/a")
 # 링크가 성립한 것으로 세는 후보 판정 (GATES EG6-P05 = DOC §8.1 E-G6a)
 LINKED_STATUS: tuple[str, ...] = ("unique", "multi_resolved")
 
@@ -118,7 +121,8 @@ POPULATION_DUP_SQL = (f"SELECT count(*) - count(DISTINCT d.rcept_no) {_PERIODIC_
 # 산출에서 같은 다섯 단을 다시 센다. L1·L3 은 산출 컬럼만으로, L2·L4·L5 는 stage 축과 조인해서
 # 센다 — 뒤 세 단이 검사하는 축은 "산출의 정기보고서·정정 집합이 stage 의 그것과 같은가"다
 # (`stg_doc_correction` 조인 자체는 양변이 공유한다). 정정 문서의 **재료 유무**가 `date_check`
-# 의 no_zip·no_page·unparsed 갈래와 맞는지는 EG3 의 `n_date_check_material_mismatch` 가 따로 본다.
+# 의 no_zip·no_page·not_parsed·unparsed 갈래와 맞는지는 EG3 의
+# `n_date_check_material_mismatch` 가 따로 본다.
 LADDER_OUT: tuple[tuple[str, str], ...] = (
     ("n_periodic", 'SELECT count(*) FROM "{v}"'),
     ("n_rm_corrected_later",
@@ -222,11 +226,13 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
         "n_date_check_exact_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" c JOIN "{v}" o ON o.rcept_no = c.orig_rcept_no '
                  "WHERE c.date_check = 'exact' AND c.filed_date IS DISTINCT FROM o.rcept_dt"),
-        # `date_check` 의 "대조 재료 없음" 갈래(no_zip·no_page·unparsed)는 ZIP 정정신고 페이지가
-        # 파싱된 접수와 정확히 여집합이어야 한다 — 산출이 만들지 않은 stage 축으로 다시 판정한다.
+        # `date_check` 의 "대조 재료 없음" 갈래(no_zip·no_page·not_parsed·unparsed)는 ZIP
+        # 정정신고 페이지가 파싱된 접수와 정확히 여집합이어야 한다 — 산출이 만들지 않은 stage
+        # 축으로 다시 판정한다. `not_parsed`(DEFECT-F02)도 같은 갈래라 좌변에 든다.
         "n_date_check_material_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" o WHERE o.is_correction AND '
-                 "(o.date_check IN ('no_zip', 'no_page', 'unparsed')) <> NOT EXISTS "
+                 "(o.date_check IN ('no_zip', 'no_page', 'not_parsed', 'unparsed')) "
+                 "<> NOT EXISTS "
                  "(SELECT 1 FROM stg_doc_correction c WHERE c.rcept_no = o.rcept_no "
                  "AND c.page_found AND c.filed_date_status = 'parsed' "
                  "AND c.filed_date IS NOT NULL)"),

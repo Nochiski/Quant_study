@@ -44,7 +44,7 @@ from equity.model import BASIS_VOCAB, FILL_EVIDENCE, FILL_KINDS, EquityTable
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 SHORT = rules_s09.SHORT_DAILY
 GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG1_short_daily", "EG3_short_daily",
-              "EG4", "EG5a"]
+              "EG21", "EG4", "EG5a"]
 # S09 격자는 universe_daily(S03) 위에 선다 — S03C 가 adj_factor 를 읽으므로 계수 체인까지 앞세운다
 UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
             rules_s01.CORP, rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT,
@@ -793,9 +793,10 @@ def test_키움_대차_잔고의_단위는_원장_안_항등식으로_확정된�
 def test_대차잔고_필드가_커버가_넓은_키움_축으로_옮겨진다(built: build.BuildResult) -> None:
     """`short.borrowed_quantity`(F07) 의 원천 이동. 커버가 넓은 쪽이 정본이라는 이 층의 규칙.
 
-    KIS 축은 컬럼으로 그대로 남지만 field_id 를 갖지 않는다 — **폴백 병합하지 않는다**.
-    두 축을 coalesce 하면 한 시계열 안에서 원천이 바뀌고 그 자리가 값의 점프로 보인다
-    (`short.short_sale_value` 와 같은 규약).
+    KIS 축은 **폴백 병합하지 않는다** — 두 축을 coalesce 하면 한 시계열 안에서 원천이 바뀌고
+    그 자리가 값의 점프로 보인다(`short.short_sale_value` 와 같은 규약). KIS 축은 2026-09-19
+    감사(DEFECT-E02)로 `scope='internal'` field_id 를 따로 받았다 — 커버 종료일을 드러내기
+    위해서이고, FIELD_MAP §2 어휘(= `scope='field_map'`)는 그대로다.
     """
     assert built.ok
     decl = {f.field_id: f for f in rules_s09.FIELDS}
@@ -803,11 +804,16 @@ def test_대차잔고_필드가_커버가_넓은_키움_축으로_옮겨진다(b
     assert f.columns == ("lending_balance_kiwoom_shr",)
     assert f.unit == "주" and f.value_type == "count"
     assert f.recommended_lag_sessions == 1 and not f.requires_confirmation
-    # KIS 축·두 금액축은 컬럼으로 살아 있고 어느 field_id 도 가리키지 않는다
-    claimed = {c for fp in rules_s09.FIELDS for c in fp.columns}
+    assert f.scope == "field_map"
+    # KIS 축은 대응표 스코프의 어느 field_id 도 가리키지 않는다
+    claimed = {c for fp in rules_s09.FIELDS if fp.scope == "field_map" for c in fp.columns}
     assert "lending_balance_kis_shr" in SHORT.columns and "lending_balance_kis_shr" not in claimed
     assert "lending_balance_kiwoom_krw" in SHORT.columns
     assert "lending_balance_kiwoom_krw" not in claimed
+    # 금액축·비율축은 어느 스코프에서도 선언하지 않는다
+    all_claimed = {c for fp in rules_s09.FIELDS for c in fp.columns}
+    assert "lending_balance_kis_krw" not in all_claimed
+    assert "short_value_kis_krw" not in all_claimed
     # 절단본에서도 키움 축이 KIS 축보다 넓다(17,414 대 1,959)
     assert N_MEASURED["lending_kiwoom"] > N_MEASURED["loan_kis"]
 

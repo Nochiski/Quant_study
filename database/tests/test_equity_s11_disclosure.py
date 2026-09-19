@@ -258,17 +258,25 @@ def _correction(rcept_no: str, filed: date | None, status: str = "parsed",
 
 
 def _hand_tree(make_stage_tree, tmp_path: Path, disclosures: list[dict[str, object]],
-               corrections: list[dict[str, object]]) -> Path:
-    """S11 이 요구하는 stage 4테이블을 손으로 깐다. 반환값은 stage_root."""
+               corrections: list[dict[str, object]],
+               no_zip: frozenset[str] = frozenset(),
+               no_doc_meta: frozenset[str] = frozenset()) -> Path:
+    """S11 이 요구하는 stage 4테이블을 손으로 깐다. 반환값은 stage_root.
+
+    `no_zip`·`no_doc_meta` 는 그 접수번호를 각각 `stg_doc_index.zip_ok=FALSE` ·
+    `stg_doc_meta` 부재로 깐다 — 문서층이 뒤처진 상태(DEFECT-F02)를 손으로 만든다.
+    """
     tree = make_stage_tree(tmp_path, "stg_disclosure", disclosures,
                            partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_correction", corrections,
                     partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_index",
-                    [{"rcept_no": d["rcept_no"], "zip_ok": True, "observed_date": OBSERVED}
+                    [{"rcept_no": d["rcept_no"],
+                      "zip_ok": str(d["rcept_no"]) not in no_zip, "observed_date": OBSERVED}
                      for d in disclosures], partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_meta",
-                    [{"rcept_no": d["rcept_no"], "member_role": "main"} for d in disclosures],
+                    [{"rcept_no": d["rcept_no"], "member_role": "main"} for d in disclosures
+                     if str(d["rcept_no"]) not in no_doc_meta],
                     partition_class="receipt_axis")
     return tree.stage_root
 
@@ -284,8 +292,11 @@ def _hand_fixture(tmp_path: Path, rcept_no: str, column: str, expect: object) ->
 
 
 def _build_hand(make_stage_tree, tmp_path: Path, disclosures: list[dict[str, object]],
-                corrections: list[dict[str, object]], **bl: object) -> build.BuildResult:
-    stage_root = _hand_tree(make_stage_tree, tmp_path, disclosures, corrections)
+                corrections: list[dict[str, object]],
+                no_zip: frozenset[str] = frozenset(),
+                no_doc_meta: frozenset[str] = frozenset(), **bl: object) -> build.BuildResult:
+    stage_root = _hand_tree(make_stage_tree, tmp_path, disclosures, corrections,
+                            no_zip=no_zip, no_doc_meta=no_doc_meta)
     base = _with(_seed(), reach_rate_min=0.0, link_rate_min=0.0, **bl)
     return build.build_table(
         DV, stage_root, tmp_path / "equity", base, build_id="b_hand",
@@ -467,3 +478,50 @@ def test_baseline_미등재면_임계를_걸지_않고_기록만_한다(built: b
         g = next(x for x in r.gates if x.name == name)
         assert g.status is GateStatus.SKIP and g.detail == "no_baseline"
         assert g.metrics[metric] == 1.0            # 판정은 안 해도 값은 남는다
+
+
+# ── DEFECT-F02: 미파싱 정정은 `not_parsed` (감사 09-19) ───────────────────────
+
+
+def test_문서층이_뒤처진_정정은_no_page가_아니라_not_parsed다(
+        make_stage_tree, tmp_path: Path) -> None:
+    """DEFECT-F02 — `no_page` 는 "ZIP 은 있는데 정정신고 첫 장이 없다" 는 **문서 품질 사실**이다.
+
+    `stg_doc_correction` 이 뒤처져 있으면 아직 파싱하지 않은 접수도 같은 라벨로 접혀
+    소비자가 "이상 문서" 로 읽고 최근 정정을 통째로 버린다. 판정 축은 **같은 입력으로 고정된**
+    `stg_doc_meta` 의 `rcept_no` 존재 여부다 — 없으면 파이프라인 상태(`not_parsed`),
+    있으면 문서 품질 사실(`no_page`).
+    """
+    disclosures = [
+        _disclosure("20200101000001", date(2020, 3, 30), "00000001",
+                    "사업보고서 (2019.12)", False),
+        # ① ZIP 있고 문서층도 봤는데 정정신고 첫 장이 없다 → no_page
+        _disclosure("20200101000003", date(2020, 5, 20), "00000001",
+                    "[기재정정]사업보고서 (2019.12)", True),
+        # ② ZIP 있는데 문서층이 아직 안 봤다 → not_parsed
+        _disclosure("20200101000004", date(2020, 5, 21), "00000001",
+                    "[기재정정]사업보고서 (2019.12)", True),
+        # ③ ZIP 자체가 없다 → no_zip (기존 갈래 보존)
+        _disclosure("20200101000005", date(2020, 5, 22), "00000001",
+                    "[기재정정]사업보고서 (2019.12)", True),
+        # ④ 정상 파싱 대조군 → exact
+        _disclosure("20200101000006", date(2020, 5, 23), "00000001",
+                    "[기재정정]사업보고서 (2019.12)", True),
+    ]
+    r = _build_hand(make_stage_tree, tmp_path, disclosures,
+                    [_correction("20200101000006", date(2020, 3, 30))],
+                    no_zip=frozenset({"20200101000005"}),
+                    no_doc_meta=frozenset({"20200101000004"}))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert r.out_dir is not None
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}
+    assert rows["20200101000003"]["date_check"] == "no_page"
+    assert rows["20200101000004"]["date_check"] == "not_parsed"
+    assert rows["20200101000005"]["date_check"] == "no_zip"
+    assert rows["20200101000006"]["date_check"] == "exact"
+    # 대조 재료 없음 갈래라 E-G6b 분모 밖이고, EG3 의 재료 대조도 통과해야 한다
+    assert "not_parsed" in rules_s11.DATE_CHECK_UNMEASURED
+    assert "not_parsed" in rules_s11.DATE_CHECK_VOCAB
+    g3 = _gate(r, "EG3_disclosure_version")
+    assert g3.status is GateStatus.PASS
+    assert g3.metrics["n_date_check_material_mismatch"] == 0

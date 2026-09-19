@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import statistics
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,7 +25,7 @@ from stage.manifest import BuildRecord
 
 from . import inputs as inputs_mod
 from .baseline import Baseline
-from .model import RULES_VERSION, EquityTable
+from .model import PRICE_BASIS_KRX, RULES_VERSION, EquityTable
 
 DEFAULT_THRESHOLDS: dict[str, float] = {
     "EG7": 0.001,     # 격리 비율 상한 — stage DEFAULT_THRESHOLDS["G7"] 초기값 계승 (GATES §1 EG7)
@@ -302,6 +303,74 @@ def eg4_fixtures(ctx: EquityGateContext) -> GateResult:
     return GateResult("EG4", GateStatus.PASS if ok else GateStatus.FAIL,
                       "골든 픽스처 일치" if ok else "; ".join(detail[:10]),
                       {"n_fixtures": len(ctx.fixtures), "n_mismatch": n_mismatch})
+
+
+def eg21_recent_grid(ctx: EquityGateContext) -> GateResult:
+    """EG21 (09-19 감사 DEFECT-C06) — **최신 구간 행수 완결성**. 폐기형.
+
+    일일 운영에서 EG5a 는 매 빌드가 새 stage 판을 고정하므로 **항상** `skip(inputs_changed)`
+    이고, EG5c 의 as-of 표본은 과거 고정일(`asof_sample_dates`)로 굳어 있다. 그래서
+    "어제 들어온 것이 반쯤 비었다" 를 보는 폐기형 검사가 `price_daily` 의 EG14 하나뿐이었다
+    (09-19 실측: 29표 전부 EG5a skip · EG5c n_diff 0). 그 자리를 격자·관측 축 표에서 이 게이트가
+    맡는다.
+
+    술어 — 표 자신의 `content_date_column` 축에서 날짜를 최신순으로 늘어놓고:
+      · 최신 `recent_grid_lag_sessions` 개는 **판정 밖**이다(원천이 아직 안 들어온 구간.
+        신용잔고는 실입수 T+3 이라 3 — DEFECT-E01)
+      · 그다음 `recent_grid_window` 개가 **판정 대상**
+      · 그 뒤 `recent_grid_baseline_window` 개의 행수 **중앙값** × `recent_grid_row_ratio_min`
+        미만인 판정 세션이 하나라도 있으면 FAIL
+    중앙값을 쓰는 이유는 월말 스냅샷·휴장 전후 같은 한두 날의 튐에 흔들리지 않기 위해서다.
+
+    `basis` 열이 있는 표는 확정(`krx`) 행만 센다 — 저녁 잠정 T 세션은 키움 커버가 구조적으로
+    작아 같은 잣대를 대면 매일 저녁 폐기된다(EG14 가 같은 규약을 쓴다).
+
+    상수가 없으면 `skip(no_baseline)`, 창을 채울 세션이 모자라면 `skip(no_coverage)` 다.
+    """
+    window = int(require_const(ctx, "recent_grid_window"))
+    base_window = int(require_const(ctx, "recent_grid_baseline_window"))
+    ratio_min = require_const(ctx, "recent_grid_row_ratio_min")
+    lag = int(require_const(ctx, "recent_grid_lag_sessions"))
+    col = ctx.rule.content_date_column
+    if not col:
+        raise SkipGate("not_grid", {"reason": "content_date_column 미선언"})
+    v = _q(ctx.out_view)
+    where = f"{_q(col)} IS NOT NULL"
+    if "basis" in _actual_columns(ctx, ctx.out_view):
+        where += f" AND basis = '{PRICE_BASIS_KRX}'"
+    rows = ctx.con.execute(
+        f"SELECT CAST({_q(col)} AS VARCHAR), count(*) FROM {v} WHERE {where} "
+        f"GROUP BY 1 ORDER BY 1 DESC LIMIT {lag + window + base_window}").fetchall()
+    sessions = [(str(r[0]), int(str(r[1]))) for r in rows]
+    consts: dict[str, object] = {
+        "recent_grid_window": window, "recent_grid_baseline_window": base_window,
+        "recent_grid_row_ratio_min": ratio_min, "recent_grid_lag_sessions": lag,
+        "date_column": col, "n_sessions_seen": len(sessions)}
+    if len(sessions) < lag + window + base_window:
+        raise SkipGate("no_coverage", consts)
+    judged = sessions[lag:lag + window]
+    base = sessions[lag + window:lag + window + base_window]
+    median = statistics.median(n for _, n in base)
+    floor = ratio_min * median
+    thin = [d for d, n in judged if n < floor]
+    metrics: dict[str, object] = {
+        **consts,
+        "baseline_median_rows": median,
+        "row_floor": floor,
+        "recent_sessions": [{"date": d, "n_rows": n,
+                             "row_ratio": (n / median) if median else None}
+                            for d, n in judged],
+        "thin_sessions": thin,
+        "n_thin_recent_sessions": len(thin),
+    }
+    if thin:
+        return GateResult("EG21", GateStatus.FAIL,
+                          f"n_thin_recent_sessions={len(thin)} sessions={thin} "
+                          f"floor={floor} median={median}", metrics)
+    return GateResult("EG21", GateStatus.PASS, "최신 구간 행수 유지", metrics)
+
+
+eg21_recent_grid.gate_name = "EG21"             # type: ignore[attr-defined]
 
 
 def _previous_partition_hashes(prev: BuildRecord) -> dict[str, str]:

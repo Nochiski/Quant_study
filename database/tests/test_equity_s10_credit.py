@@ -60,7 +60,7 @@ UPSTREAM = (rules_s02.TRADING_CALENDAR, rules_s01.SECURITY, rules_s02.SECURITY_S
             rules_s06.ADJ_FACTOR, rules_s03.UNIVERSE_DAILY)
 CREDIT = rules_s10.CREDIT_DAILY
 GATE_ORDER = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG1_credit_daily", "EG3_credit_daily",
-              "EG4", "EG5a"]
+              "EG21", "EG4", "EG5a"]
 
 N_UNIVERSE = 41066                   # universe_daily 전 행 (test_equity_s03_universe.N_GRID)
 N_ETF = 4094                         # 069500 격자 행 — 격자에서 빠진다
@@ -808,3 +808,31 @@ def test_격자_밖_행을_채택하면_EG3_credit_daily가_폐기한다(chain: 
     g = _gate(r, "EG3_credit_daily")
     assert g.status is GateStatus.FAIL
     assert g.metrics["n_grid_extra"] == N_OFF_GRID
+
+
+# ── DEFECT-E01: 실입수 랙 (감사 09-19) ────────────────────────────────────────
+
+
+def test_신용잔고_권장랙은_실입수_기준_3세션이다() -> None:
+    """DEFECT-E01 — `available_date = deal_date` 인데 원장에는 **+3일 뒤**에 들어온다.
+
+    09-19 실측(`stg_credit_daily` observed_date − date): 09-16→09-19 · 09-15→09-18 ·
+    09-14→09-17 · 09-11→09-16 — 전 구간 최소 +3 캘린더일. 랙 1 세션으로 선언하면 규약대로
+    `available_date ≤ T−1` 로 거르는 소비자가 **2 세션 앞선 정보**를 쓴다(look-ahead).
+    """
+    decl = {f.field_id: f for f in rules_s10.FIELDS}
+    f = decl["credit.margin_balance"]
+    assert f.recommended_lag_sessions == 3
+    assert f.recommended_lag_days == 4
+    assert "T+3" in f.disclosure_basis
+
+
+def test_EG21은_최신_구간_행수를_실제_격자에서_판정한다(built: build.BuildResult) -> None:
+    """DEFECT-C06 — 일일 운영에서 EG5a 는 항상 skip(inputs_changed) 이고 EG5c 표본은 과거로
+    굳어 있다. 신용잔고는 실입수가 T+3 이라 최신 3세션을 판정에서 뺀다(DEFECT-E01)."""
+    g = _gate(built, "EG21")
+    assert g.status is GateStatus.PASS
+    assert g.metrics["recent_grid_lag_sessions"] == 3
+    assert g.metrics["recent_grid_window"] == 3
+    assert g.metrics["n_thin_recent_sessions"] == 0
+    assert len(g.metrics["recent_sessions"]) == 3

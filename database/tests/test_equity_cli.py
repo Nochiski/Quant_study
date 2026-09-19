@@ -167,3 +167,42 @@ def test_catalog_meta에_판이_실린다(tmp_path: Path, make_stage_tree, capsy
     meta = json.loads((eq / "_catalog_meta.json").read_text(encoding="utf-8"))
     assert meta["basis"] == "evening"
     assert meta["table_basis"]["sample_table"] == "evening"
+
+
+# ── DEFECT-C09: 빌드 순서 정본 하나 (감사 09-19) ──────────────────────────────
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+ORDER_FILE = SCRIPTS / "equity_order.txt"
+# 수집 시점의 등록표 — 다른 테스트가 합성 테이블을 RULES 에 넣으므로 여기서 굳힌다.
+REGISTERED = frozenset(RULES)
+
+
+def _order() -> list[str]:
+    return [ln.strip() for ln in ORDER_FILE.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")]
+
+
+def test_빌드_순서는_등록된_29표_전건이다() -> None:
+    """`equity_gate_all.sh` 의 ORDER 가 28낱말이라 `coverage_daily`(S24, 09-10 신설)가 재판정에서
+    통째로 빠졌고, `summary.txt` 에는 아무 표시도 남지 않아 '28표 전부 통과' 를 29로 오독했다."""
+    order = _order()
+    assert len(order) == len(set(order)) == 29
+    # `sample_table` 은 T0 샘플이라 빌드 대상이 아니다
+    assert set(order) == {n for n in REGISTERED if n != "sample_table"}
+
+
+def test_두_스크립트가_순서_파일_하나만_읽는다() -> None:
+    for name in ("equity_rebuild_all.sh", "equity_gate_all.sh"):
+        body = (SCRIPTS / name).read_text(encoding="utf-8")
+        assert "scripts/equity_order.txt" in body, name
+        # 표 이름을 스크립트에 다시 적지 않는다 — 두 벌이면 또 어긋난다
+        assert "trading_calendar corp security" not in body, name
+
+
+def test_선행표가_뒤에_오지_않는다() -> None:
+    """위상 정렬 — 어떤 표도 자기보다 뒤에 오는 equity 표를 입력으로 읽지 않는다."""
+    pos = {t: i for i, t in enumerate(_order())}
+    for name, i in pos.items():
+        for dep in RULES[name].inputs:
+            if dep in pos:
+                assert pos[dep] < i, f"{name} 이 뒤의 {dep} 을 읽는다"

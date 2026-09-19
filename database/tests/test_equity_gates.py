@@ -388,3 +388,78 @@ def test_load_fixtures는_equity_root_폴백을_받는다(tmp_path: Path) -> Non
                               "source": "hand"}]), encoding="utf-8")
     fx = gates.load_fixtures("t", tmp_path)
     assert fx is not None and fx[0]["case"] == "c"
+
+
+# ── EG21 최신 구간 격자 행수 (09-19 감사 DEFECT-C06) ──────────────────────────
+
+_EG21_CONSTS = {"recent_grid_window": 3, "recent_grid_baseline_window": 20,
+                "recent_grid_row_ratio_min": 0.8, "recent_grid_lag_sessions": 0}
+
+
+def _eg21_sql(counts: list[int]) -> str:
+    """`counts[i]` 행을 가진 세션 i(오래된 것부터)로 합성 격자를 만든다."""
+    vals = ", ".join(f"(DATE '2026-01-01' + {i}, {j})"
+                     for i, n in enumerate(counts) for j in range(n))
+    return f"SELECT * FROM (VALUES {vals}) AS t(date, k)"
+
+
+def _eg21_ctx(con: duckdb.DuckDBPyConnection, counts: list[int],
+              consts: dict[str, object] | None = None) -> EquityGateContext:
+    _out(con, _eg21_sql(counts))
+    rule = _rule(name="grid", columns={"date": "DATE", "k": "BIGINT"},
+                 content_date_column="date")
+    bl = Baseline({"grid": {**_EG21_CONSTS, **(consts or {})}})
+    return _ctx(con, rule, baseline=bl)
+
+
+def test_eg21_최신_세션_행수가_유지되면_pass(con: duckdb.DuckDBPyConnection) -> None:
+    r = gates.eg21_recent_grid(_eg21_ctx(con, [1000] * 23))
+    assert r.status is GateStatus.PASS
+    assert r.metrics["n_thin_recent_sessions"] == 0
+    assert r.metrics["baseline_median_rows"] == 1000
+
+
+def test_eg21_최신_세션이_반쪽이면_fail(con: duckdb.DuckDBPyConnection) -> None:
+    """EG5a 는 일일 운영에서 항상 skip(inputs_changed) 이고 EG5c 표본은 과거로 굳어 있다.
+    격자 표에서 '어제 들어온 것이 반쯤 비었다' 를 보는 게이트가 이것 하나다(DEFECT-C06)."""
+    r = gates.eg21_recent_grid(_eg21_ctx(con, [1000] * 20 + [1000, 1000, 500]))
+    assert r.status is GateStatus.FAIL
+    assert r.metrics["n_thin_recent_sessions"] == 1
+    assert r.metrics["thin_sessions"] == ["2026-01-23"]
+    assert "n_thin_recent_sessions" in r.detail
+
+
+def test_eg21_lag_안쪽_세션은_판정하지_않는다(con: duckdb.DuckDBPyConnection) -> None:
+    """신용잔고는 실입수가 T+3 이라 최신 3세션이 아직 안 찬 것이 정상이다(DEFECT-E01)."""
+    counts = [1000] * 20 + [1000, 1000, 1000] + [1, 1, 1]
+    assert gates.eg21_recent_grid(
+        _eg21_ctx(con, counts, {"recent_grid_lag_sessions": 3})).status is GateStatus.PASS
+    assert gates.eg21_recent_grid(
+        _eg21_ctx(con, counts, {"recent_grid_lag_sessions": 0})).status is GateStatus.FAIL
+
+
+def test_eg21_상수가_없으면_skip(con: duckdb.DuckDBPyConnection) -> None:
+    _out(con, _eg21_sql([10] * 23))
+    rule = _rule(name="grid", columns={"date": "DATE", "k": "BIGINT"},
+                 content_date_column="date")
+    with pytest.raises(SkipGate) as e:
+        gates.eg21_recent_grid(_ctx(con, rule))
+    assert e.value.reason == "no_baseline"
+
+
+def test_eg21_세션이_모자라면_skip(con: duckdb.DuckDBPyConnection) -> None:
+    with pytest.raises(SkipGate) as e:
+        gates.eg21_recent_grid(_eg21_ctx(con, [10] * 5))
+    assert e.value.reason == "no_coverage"
+
+
+def test_eg21은_저녁_잠정_행을_판정에서_뺀다(con: duckdb.DuckDBPyConnection) -> None:
+    """`basis` 열이 있는 표에서는 확정(krx) 행만 센다 — 저녁 T 세션은 커버가 구조적으로 작다."""
+    base = _eg21_sql([1000] * 23)
+    _out(con, f"SELECT date, k, 'krx' AS basis FROM ({base}) "
+              "UNION ALL SELECT DATE '2026-01-24', 1, 'evening'")
+    rule = _rule(name="grid", columns={"date": "DATE", "k": "BIGINT", "basis": "VARCHAR"},
+                 content_date_column="date")
+    r = gates.eg21_recent_grid(_ctx(con, rule, baseline=Baseline({"grid": _EG21_CONSTS})))
+    assert r.status is GateStatus.PASS
+    assert r.metrics["recent_sessions"][0]["date"] == "2026-01-23"

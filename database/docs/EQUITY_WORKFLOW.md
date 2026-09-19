@@ -221,3 +221,49 @@ Opus 제안서 4건(`reviews/`): 문서층 통합 · 게이트 명세 · 목적 
 | 문서층 통합 | `disclosure_version` grain `rcept_no`·링크 흡수 · `has_correction` → 팩트+뷰 판정 · `period_end` 문서 정본 · `stg_doc_section` 미사용 · 4A/4C/4B′ · `vintage_kind` · items 값 미사용 · stage 요청 8건 | — |
 | 게이트 | GATES v1.0 채택(EG7→EG1 순서, 항진명제 제거, 부정 픽스처, EG10~EG20) | A13(엔진 별도 저장소) 기각 — 같은 모노레포 · C17(consensus 4테이블) 기각 — 실재 |
 | 구현 골격 | 모듈 배치·`.sql` 빌드·`content_hash` tmp·카탈로그 재생성·T0~T11 | 어댑터 배치: 커널 = pyarrow(A안), 워크벤치 = duckdb(결정 7) |
+
+---
+
+## 9. 2026-09-19 감사 반영 (파이프라인 전수 감사 플랜 §3 갈래 3)
+
+### 9-1. 전량 빌드 중단 시 되돌리기 — `equity rollback --pass <PASS>` (DEFECT-C03)
+
+`equity_rebuild_all.sh` 는 표를 하나씩 짓고 성공할 때마다 그 표의 `current_build` 를 즉시 바꾼다.
+**층 전체 트랜잭션은 없다.** 중간에 실패하면 앞선 표는 새 판, 뒤의 표는 어제 판으로 남는데
+`inputs.py`·`build_chain.sh` 가 "MANIFEST 포인터가 정본" 을 계약으로 못박았으므로 그 상태가 곧
+**표마다 다른 날의 판**을 소비자에게 내보내는 것이다. 실측: 09-11 확정 빌드가 14표 커밋 뒤
+`credit_daily` 에서 멈췄고 혼합 판본이 09-13 03:35 ~ 09-16 15:14 약 3.5일 유지됐다. 그 사이
+catalog 도 안 돌아 `equity.duckdb` 매크로는 옛 `v=` 를 가리켰고, 그 판이 keep=10(≈5거래일) 밖으로
+밀리면 매크로가 `No files found` 로 조용히 깨진다.
+
+```
+PYTHONPATH=src .venv/bin/python -m equity --root data/equity rollback --pass morning_20260918
+```
+
+규약:
+
+| 항목 | 내용 |
+|---|---|
+| 되돌리는 것 | `MANIFEST.current_build` **하나뿐**. `builds[]` 목록과 `v=<build_id>` 디렉터리는 **그대로 둔다** — keep=10 이라 이전 판이 살아 있고, 지우면 그 판으로 다시 못 돌아간다 |
+| 대상 | `logs/equity/rebuild_<PASS>/summary.tsv` 에서 **rc 0 인 표만**. rc≠0 인 표는 이번 판을 커밋하지 못했으므로 current 가 이미 어제 판이다 — 한 칸 더 되돌리면 멀쩡한 판을 잃는다 |
+| 대상 판 | 기본은 `builds[]` 에서 현재 판 **바로 앞**. `rollback_table(..., to_build_id=...)` 로 특정 판 지정 가능(없는 판이면 `ValueError`) |
+| 자동 호출 | `equity_rebuild_all.sh` 가 `QL_EQUITY_CONTINUE` 없는(= 운영) 경로에서 첫 실패 직후 부른다. 로그는 `logs/equity/rebuild_<PASS>/rollback.log`, 되돌리기가 실패해도 스크립트는 원래 실패 코드로 나간다 |
+| 구현 | `src/equity/rollback.py`. `stage.manifest` 는 stage 층 소유라 읽기·원자쓰기 유틸만 쓴다 |
+
+되돌린 뒤에도 `equity.duckdb` 는 실패 시점의 판을 가리킬 수 있다 — 되돌리기 후에는 `equity
+catalog` 를 한 번 더 돌려 매크로를 현재 포인터에 맞춘다(체인은 equity 실패 시 catalog 를 건너뛴다).
+
+### 9-2. `equity contract` 의 체인 편입 (DEFECT-C05)
+
+`equity contract` 는 어느 스케줄에도 없어 `_contract_meta.json` 이 2026-09-09 판(rules e1.14
+이전, 28표)에 멈춰 있었다. 그 뒤 e1.15.0 이 `price_daily`·`price_adj_daily` 에 `basis`·
+`corp_action_pending` 을 더하고 `coverage_daily`(29번째 표)가 생겼는데 **어댑터가 그 변화를
+견디는지 한 번도 검사되지 않았다**. 대조 대상인 `~/quant-ledger/_engine/backtest_engine` 도
+2026-09-05 rsync 사본이고 갱신 스크립트가 없어, 돌려도 "9/5 엔진이 오늘 데이터를 읽는가" 를
+답한다.
+
+편입 규약(구현은 갈래 4 — `build_chain.sh`·`deploy.sh`):
+
+- `build_chain.sh` 의 catalog 단계 **뒤**에 `contract_step() { $PY -m equity contract --engine-src "$QL_HOME/_engine"; }` 를 두고, 실패는 **기록형 warn**(`FAILED_SOFT`)으로 남긴다 — 계약 검사는 소비 경계 회귀 신호이지 그날 산출의 폐기 사유가 아니다.
+- `deploy.sh` 가 `backend/src/backtest_engine/` → 서버 `_engine/backtest_engine/` 를 동기화한다. 이것이 없으면 계약이 옛 엔진을 대조한다.
+- 확인축: `_contract_meta.json.builds` 의 값 접두가 `m_`/`e_`(체인 판)여야 한다. `b_`(수동 판)이면 체인에서 안 돌고 있다는 뜻이다.

@@ -8,6 +8,8 @@
   "thresholds": {
    "EG7": 0.03
   },
+  "fin_std_inferred_recent_ratio_max": 0.2,
+  "inferred_recent_days": 30,
   "quarter_months": 3,
   "half_months": 6,
   "three_quarter_months": 9
@@ -115,6 +117,30 @@
     "source": "STAGE_DESIGN §baseline 28지표 · EQUITY_DESIGN §10 P14",
     "note": "fin_std 예상 행수 = (corp, bsns_year, reprt_code, fs_div) distinct 로 stg_fin 15.4M 행이 수십만 그룹으로 접힌다. 절단본 비 41,740행 → 226그룹(184:1)을 그대로 쓰면 8.3만, `stg_doc_meta` main 170,762 를 상한으로 보면 그 사이다."
    }
+  },
+  {
+   "table": "fin_std",
+   "metric": "fin_std_inferred_recent_ratio_max",
+   "value": 0.2,
+   "kind": "convention",
+   "sql": "-- SELECT period_end_basis, count(*) FROM fin_std WHERE available_date > max(available_date) - INTERVAL 30 DAY GROUP BY 1",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "rules_s12.eg3_fin_std n_period_end_inferred_recent_over_max (EQUITY_GATES §11-4)",
+   "note": "2026-09-19 감사 DEFECT-F01 로 신설. 최근 접수 구간에서 `period_end_basis='inferred'` 인 채택 행의 비율 상한(폐기형). 문서층이 살아 있을 때 이 값은 0 에 가깝다 — 09-19 서버 실측 전체 document 92,880 / inferred 1,125(1.2%)이고 8월분은 document 2,701 / inferred 0 이다. 문서층이 8/31 에 멈춘 뒤 접수된 행은 10행 전부 inferred(100%)였다. **배포 순서**: 문서층 따라잡기 뒤에 반영할 것 — 뒤처진 상태에서 켜면 fin_std 가 매일 폐기된다."
+  },
+  {
+   "table": "fin_std",
+   "metric": "inferred_recent_days",
+   "value": 30,
+   "kind": "convention",
+   "sql": "-- SELECT period_end_basis, count(*) FROM fin_std WHERE available_date > max(available_date) - INTERVAL 30 DAY GROUP BY 1",
+   "inputs": {},
+   "measured_at": "2026-09-19",
+   "growing": false,
+   "used_by": "rules_s12.eg3_fin_std n_period_end_inferred_recent_over_max (EQUITY_GATES §11-4)",
+   "note": "2026-09-19 감사 DEFECT-F01 로 신설. 비율을 재는 창의 길이(캘린더일). 상한은 max(available_date) 에서 유도한다 — 날짜 상수를 박으면 매일 사람이 올려야 한다(규칙 e1.15.0). **배포 순서**: 문서층 따라잡기 뒤에 반영할 것 — 뒤처진 상태에서 켜면 fin_std 가 매일 폐기된다."
   }
  ]
 }

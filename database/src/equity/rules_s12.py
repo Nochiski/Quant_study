@@ -215,6 +215,44 @@ def _coverage(ctx: EquityGateContext, columns: tuple[str, ...]) -> dict[str, flo
     return {c: round(int(str(v)) / ctx.n_out, 6) for c, v in zip(columns, row, strict=True)}
 
 
+_INFERRED_RECENT_DAYS_DEFAULT = 30
+
+
+def _inferred_recent(ctx: EquityGateContext) -> dict[str, object]:
+    """최근 접수 구간에서 `period_end_basis='inferred'` 인 채택 행의 비율 (DEFECT-F01).
+
+    창의 상한은 이 표의 `max(available_date)`(= 최신 접수일)이고 하한은 거기서
+    `inferred_recent_days`(기본 30일)를 뺀 날이다 — 날짜를 상수로 박으면 매일 사람이 올려야
+    한다(규칙 e1.15.0 의 날짜 파생화와 같은 규약). 임계 `fin_std_inferred_recent_ratio_max` 가
+    baseline 에 없으면 `over_max = 0` 으로 두어 **기록형**으로만 남는다 — 상수를 등재하는 순간
+    폐기형이 된다. **배포 순서 주의**: 문서층이 뒤처진 상태에서 임계를 켜면 최근 구간이 100%
+    `inferred` 라 `fin_std` 가 매일 폐기된다.
+    """
+    v = ctx.out_view
+    days = ctx.baseline.get(ctx.rule.name, "inferred_recent_days")
+    n_days = int(str(days)) if days is not None else _INFERRED_RECENT_DAYS_DEFAULT
+    ratio_max = ctx.baseline.get(ctx.rule.name, "fin_std_inferred_recent_ratio_max")
+    row = ctx.con.execute(
+        f'WITH w AS (SELECT max(available_date) - INTERVAL {n_days} DAY AS lo '
+        f'FROM "{v}") '
+        'SELECT CAST((SELECT CAST(lo AS DATE) FROM w) AS VARCHAR), '
+        'count(*) FILTER (WHERE o.available_date > (SELECT lo FROM w)), '
+        'count(*) FILTER (WHERE o.available_date > (SELECT lo FROM w) '
+        "AND o.period_end_basis = 'inferred') "
+        f'FROM "{v}" o').fetchone()
+    if row is None:
+        raise RuntimeError(f"gate query returned no row — table={ctx.rule.name} "
+                           "metric=inferred_recent")
+    recent_from, n_recent, n_inferred = str(row[0]), int(str(row[1])), int(str(row[2]))
+    ratio = (n_inferred / n_recent) if n_recent else None
+    over = int(ratio_max is not None and ratio is not None
+               and ratio > float(str(ratio_max)))
+    return {"recent_from": recent_from, "days": n_days, "n_recent": n_recent,
+            "n_inferred": n_inferred, "ratio": ratio,
+            "ratio_max": None if ratio_max is None else float(str(ratio_max)),
+            "over_max": over}
+
+
 def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
     """EG3-P01 보강 — 어휘 폐쇄 · 기간 판정 재계산 · 파생 부분합 금지 · 계정 커버율(기록형).
 
@@ -224,7 +262,15 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
     """
     v = ctx.out_view
     q1 = int(str(ctx.baseline.require(ctx.rule.name, "quarter_months")))
+    inferred = _inferred_recent(ctx)
     checks = {
+        # DEFECT-F01(09-19 감사) — 문서층(`stg_doc_meta`)이 뒤처지면 신규 재무 그룹이
+        # `period_end` 정본을 잃고 `corp.fiscal_month` 추정으로 폴백한다. 결산월이 어긋나거나
+        # 없는 법인은 후보가 0개라 `period_unresolved` 로 격리 — **행째로 사라진다**(8/31 이후
+        # 그룹 14 -> 10). 기존 게이트는 전부 못 잡는다: EG7 격리 비율 1.28% < 임계 3% ·
+        # `n_by_period_end_basis` 는 임계 없음 · `n_period_end_not_document` 는
+        # `period_end_basis='document'` 행만 보므로 정의상 0. 상수 미등재면 기록만 한다.
+        "n_period_end_inferred_recent_over_max": inferred["over_max"],
         "n_vintage_outside_vocab": _outside_vocab(ctx, "vintage_kind", (VINTAGE_KIND,)),
         "n_report_code_outside_vocab": _outside_vocab(ctx, "report_code", REPORT_CODE_VOCAB),
         "n_fs_div_outside_vocab": _outside_vocab(ctx, "fs_div", FS_DIV_VOCAB),
@@ -313,6 +359,14 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         "n_by_report_code": _counts(ctx, "report_code"),
         "n_by_fs_div": _counts(ctx, "fs_div"),
         "n_by_period_end_basis": _counts(ctx, "period_end_basis"),
+        # 최근 접수 구간의 추정 폴백(DEFECT-F01). 창은 이 표의 `max(available_date)` 에서
+        # 유도한다 — 날짜를 상수로 박으면 매일 사람이 올려야 한다(e1.15.0 날짜 파생화 규약).
+        "recent_from": inferred["recent_from"],
+        "inferred_recent_days": inferred["days"],
+        "n_recent_rows": inferred["n_recent"],
+        "n_period_end_inferred_recent": inferred["n_inferred"],
+        "ratio_period_end_inferred_recent": inferred["ratio"],
+        "fin_std_inferred_recent_ratio_max": inferred["ratio_max"],
         "n_by_revenue_basis": _counts(ctx, "revenue_basis"),
         "n_by_revenue_basis_prev": _counts(ctx, "revenue_basis_prev"),
         # **기록형**. 매출 기준이 해를 넘기며 바뀐 행·법인 수 — 「가짜 성장률」이 날 수 있는

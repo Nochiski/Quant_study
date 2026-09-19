@@ -71,9 +71,20 @@ def _kw(tmp_path, *, n=2563, stale=250, cross_bad=0, vol_bad=0):
     return str(tmp_path / "kiwoom.db")
 
 
+def _kis(tmp_path, max_deal, n=2500):
+    """신용잔고 원장 — `deal_date` 최신일만 바꿔 신선도 게이트를 본다."""
+    con = sqlite3.connect(tmp_path / "kis.db")
+    con.execute("CREATE TABLE kis_credit_balance (row_hash TEXT, req_ticker TEXT, deal_date TEXT, "
+                "dup_seq TEXT, collected_at TEXT)")
+    con.executemany("INSERT INTO kis_credit_balance VALUES (?,?,?,?,?)",
+                    [(f"h{i}", f"{i:06d}", max_deal, "0", "t") for i in range(n)])
+    con.commit(); con.close()
+    return str(tmp_path / "kis.db")
+
+
 def _paths(tmp_path, **kw):
     p = lh.Paths(krx=kw.get("krx", str(tmp_path / "none1.db")), kiwoom=kw.get("kiwoom", str(tmp_path / "none2.db")),
-                 kis=str(tmp_path / "none3.db"), dart=str(tmp_path / "none4.db"), wise=kw.get("wise", str(tmp_path / "none5.db")),
+                 kis=kw.get("kis", str(tmp_path / "none3.db")), dart=str(tmp_path / "none4.db"), wise=kw.get("wise", str(tmp_path / "none5.db")),
                  calendar=_cal(tmp_path), universe_state=str(tmp_path / "universe_kw.json"))
     (tmp_path / "universe_kw.json").write_text(json.dumps({"asof": D, "grace": {}, "n_requested": 2563}), encoding="utf-8")
     return p
@@ -293,3 +304,24 @@ def test_KRX_지수가_줄면_행수_검사는_실패한다(tmp_path) -> None:
     krx = _krx(tmp_path, kospi=50)
     rep = lh.run(D, _paths(tmp_path, krx=krx))
     assert _by(rep)["krx.rows"].status is lh.Status.FAIL
+
+
+# ── KIS 신용잔고 신선도 (DEFECT-A06·E01) ────────────────────────────────────
+def test_kis_credit_fresh_passes_at_d_minus_2(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260904")))   # D-2 세션 = 정상
+    c = _by(rep)["kis.credit.fresh"]
+    assert c.level is lh.Level.REQUIRED and c.status is lh.Status.PASS and rep.ok
+
+
+def test_kis_credit_fresh_warns_one_session_behind(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260903")))   # D-3 — 하루 밀렸다
+    c = _by(rep)["kis.credit.fresh"]
+    assert c.level is lh.Level.WARN and c.status is lh.Status.FAIL
+    assert rep.ok                                                        # 경고는 체인을 세우지 않는다
+
+
+def test_kis_credit_fresh_fails_when_two_sessions_behind(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, kis=_kis(tmp_path, "20260902")))   # D-4 — 무음 정지
+    c = _by(rep)["kis.credit.fresh"]
+    assert c.level is lh.Level.REQUIRED and c.status is lh.Status.FAIL
+    assert not rep.ok

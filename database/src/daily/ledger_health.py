@@ -300,10 +300,28 @@ def check_kiwoom(con: sqlite3.Connection, krx: sqlite3.Connection | None, d: str
 
 
 # ── KIS (A §6-3) ───────────────────────────────────────────────────────────
-def check_kis(con: sqlite3.Connection, d_prev: str, d_minus40: str, n_req: int, prev_pairs: int | None) -> list[Check]:
+def check_kis(con: sqlite3.Connection, d_prev: str, d_prev3: str, d_minus40: str, n_req: int,
+              prev_pairs: int | None) -> list[Check]:
+    """`d_prev` = D−2 세션(신용잔고 판정일, 실측) · `d_prev3` = D−3 세션(신선도 하한)."""
     out: list[Check] = []
     if not _has_table(con, "kis_credit_balance"):
         return out
+    # 신선도 — 오늘 콜이 전멸해도 게이트가 옛 행으로 통과하던 무음 정지(A06)를 원장 쪽에서 한 번 더 막는다.
+    # 정상은 max(deal_date) = D−2 다(실측: 조회일 기준 T−3 까지 온다). 한 세션 밀린 D−3 은 경고,
+    # 그보다 오래 멈춰 있으면 체인을 세운다.
+    mx = _one(con, "SELECT MAX(deal_date) FROM kis_credit_balance")
+    max_deal = "" if mx is None else str(mx)
+    expected = (f"max(deal_date) >= {d_prev}(D-2, 정상) · {d_prev3}(D-3) 이면 WARN · "
+                f"그보다 오래 멈춰 있으면 REQUIRED FAIL")
+    if max_deal >= d_prev and max_deal:
+        out.append(Check("kis.credit.fresh", Level.REQUIRED, Status.PASS, max_deal, expected))
+    elif max_deal >= d_prev3 and max_deal:
+        out.append(Check("kis.credit.fresh", Level.WARN, Status.FAIL, max_deal, expected,
+                         f"신용잔고가 한 세션 뒤처졌다 — max(deal_date)={max_deal}, 기대 {d_prev}"))
+    else:
+        out.append(Check("kis.credit.fresh", Level.REQUIRED, Status.FAIL, max_deal or None, expected,
+                         f"신용잔고 수집이 멈춰 있다 — max(deal_date)={max_deal or '없음'}, "
+                         f"두 세션 이상 뒤처졌다(kis_daily 의 status·rc 를 확인한다)"))
     row = con.execute("SELECT COUNT(*), COUNT(DISTINCT req_ticker) FROM kis_credit_balance WHERE deal_date=?", (d_prev,)).fetchone()
     n, tk = (int(row[0]), int(row[1])) if row else (0, 0)
     if n_req <= 0:
@@ -414,6 +432,7 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
     dd = dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
     d_prev = cal.prev_trading_day(dd).strftime("%Y%m%d")
     d_prev2 = cal.prev_trading_day(dd, n=2).strftime("%Y%m%d")   # KIS 신용잔고 판정일(실측: 조회일 기준 T-3 = D-2)
+    d_prev3 = cal.prev_trading_day(dd, n=3).strftime("%Y%m%d")   # 그 한 세션 앞 — 신선도 경고선(A06)
     d_minus40 = (dd - dt.timedelta(days=40)).strftime("%Y%m%d")
     today = today or dt.datetime.now(KST).date()
     kst_start_utc = (dt.datetime.combine(today, dt.time(0), KST).astimezone(dt.UTC)).strftime("%Y-%m-%dT%H:%M:%S")
@@ -443,7 +462,7 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
         if kw is not None and "kiwoom" not in skip:
             checks += check_kiwoom(kw, krx, d, d_prev, n_req)
         if kis is not None and "kis" not in skip:
-            checks += check_kis(kis, d_prev2, d_minus40, n_req, prev_pairs)
+            checks += check_kis(kis, d_prev2, d_prev3, d_minus40, n_req, prev_pairs)
         if dart is not None and "dart" not in skip:
             checks += check_dart(dart, d, cal.is_trading_day(dd), kst_start_utc)
         if wise is not None and "wise" not in skip:

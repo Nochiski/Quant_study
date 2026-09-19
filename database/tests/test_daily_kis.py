@@ -258,3 +258,62 @@ def test_full_run_writes_the_ledger_and_the_universe_state(  # 판정일 D-2 = 2
     assert _n_rows(con) == 3
     assert (home / "data" / "raw" / "daily_run.db").exists()
     assert (home / "data" / "daily" / "universe_kw.json").exists()
+
+
+# ── 완료 게이트는 "이번 런이 넣은 행" 을 본다 (DEFECT-A06) ───────────────────
+
+def _err(_rows: list[dict[str, str]]) -> dict[str, object]:
+    return {"rt_cd": "1", "msg_cd": "OPSQ9999", "msg1": "조회 실패"}
+
+
+def test_gate_counts_only_rows_inserted_by_this_run(api_mod, monkeypatch, tmp_path):
+    """오늘 콜이 전멸해도 어제 넣어 둔 행으로 통과하던 경로 — 무음 정지(A06)."""
+    tickers = ("000660", "005930", "035420", "051910")
+    con = _con(tmp_path)
+    for t in tickers:
+        kis_daily.store_new_facts(con, t, "20260726", "20260905", [_fact("20260907")])
+    con.execute("UPDATE kis_credit_balance SET collected_at='2026-09-07T21:00:00'")
+    con.commit()
+    monkeypatch.setattr(api_mod, "kis", lambda url, tr_id, params: _err([]))
+    res = kis_daily.run(con, date="20260908", gate_date="20260907", d1="20260730", d2="20260909",
+                        tickers=tickers, run_db=tmp_path / "daily_run.db")
+    assert res.status is kis_daily.Status.GATE_FAILED and res.rc == 2
+    assert "n_rows(this run)=0" in res.detail and "ledger_rows=4" in res.detail
+
+
+def test_gate_passes_when_this_run_brought_the_rows(api_mod, monkeypatch, tmp_path):
+    tickers = ("000660", "005930", "035420", "051910")
+    con = _con(tmp_path)
+    monkeypatch.setattr(api_mod, "kis", _fake_kis({t: [_fact("20260907")] for t in tickers}))
+    res = kis_daily.run(con, date="20260908", gate_date="20260907", d1="20260730", d2="20260909",
+                        tickers=tickers, run_db=tmp_path / "daily_run.db")
+    assert res.status is kis_daily.Status.OK
+    assert "n_rows(this run)=4" in res.detail
+
+
+def _many(api_mod, monkeypatch, n_bad: int):
+    tickers = tuple(f"{i:06d}" for i in range(100))
+    bad = set(tickers[:n_bad])
+
+    def kis(url: str, tr_id: str, params: dict[str, str]) -> dict[str, object]:
+        tk = params["FID_INPUT_ISCD"]
+        return _err([]) if tk in bad else _ok([_fact("20260907")])
+
+    monkeypatch.setattr(api_mod, "kis", kis)
+    return tickers
+
+
+def test_failure_rate_above_two_percent_is_gate_failed_not_partial(api_mod, monkeypatch, tmp_path):
+    # 97/100 행이면 비율 게이트(0.95)는 통과한다 — 그래도 3% 실패는 rc 0 으로 넘기지 않는다.
+    tickers = _many(api_mod, monkeypatch, 3)
+    res = kis_daily.run(_con(tmp_path), date="20260908", gate_date="20260907", d1="20260730",
+                        d2="20260909", tickers=tickers, run_db=tmp_path / "daily_run.db")
+    assert res.status is kis_daily.Status.GATE_FAILED and res.rc == 2
+    assert "failures=3" in res.detail
+
+
+def test_isolated_failures_stay_partial(api_mod, monkeypatch, tmp_path):
+    tickers = _many(api_mod, monkeypatch, 1)
+    res = kis_daily.run(_con(tmp_path), date="20260908", gate_date="20260907", d1="20260730",
+                        d2="20260909", tickers=tickers, run_db=tmp_path / "daily_run.db")
+    assert res.status is kis_daily.Status.PARTIAL and res.rc == 0

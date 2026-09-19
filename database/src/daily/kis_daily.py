@@ -46,6 +46,7 @@ REQ_NAME = "credit"                       # `req_name` — 백필이 남긴 값�
 META_COLS = frozenset({"row_hash", "dup_seq", "collected_at"})
 WINDOW_DAYS = 40                          # 응답 30행(30영업일) 을 덮는 캘린더 폭
 GATE_MIN_RATIO = 0.95                     # A §6-3 A · 플랜 Task 1.7 Step 2
+FAILURE_RATIO_MAX = 0.02                  # 이 비율을 넘는 종목 실패는 PARTIAL(rc 0)로 넘기지 않는다(A06)
 KST = dt.timezone(dt.timedelta(hours=9))
 
 
@@ -315,19 +316,31 @@ def dup_pairs(con: sqlite3.Connection, since: str) -> int:
 
 
 def gate(con: sqlite3.Connection, gate_date: str, n_requested: int,
-         min_ratio: float = GATE_MIN_RATIO) -> GateResult:
-    """완료 판정. `gate_date`(= D−2, 실측) 행수 / 요청 유니버스 ≥ min_ratio 이고 종목당 1행."""
-    n_rows = n_tk = 0
+         min_ratio: float = GATE_MIN_RATIO, since: str | None = None) -> GateResult:
+    """완료 판정. `gate_date`(= D−2, 실측) 행수 / 요청 유니버스 ≥ min_ratio 이고 종목당 1행.
+
+    `since`(= 이번 런 시작 UTC)를 주면 **그 시각 이후에 적재된 행만** 센다(DEFECT-A06). 그러지 않으면
+    전날 런이 넣어 둔 같은 날짜 행으로 오늘의 전멸이 통과한다 — 창(`d1=T−40일`)이 매일 같은 구간을
+    다시 덮기 때문이다. DART 쪽은 같은 함정을 `dart_call_log` 로 피했다(`dart_daily.py:432-435`).
+    """
+    n_rows = n_tk = n_ledger = 0
     if _table_exists(con):
         row = con.execute(
             f"SELECT COUNT(*), COUNT(DISTINCT req_ticker) FROM {TABLE} WHERE {DATE_COL} = ?",
             (gate_date,)).fetchone()
         if row is not None:
-            n_rows, n_tk = int(row[0]), int(row[1])
+            n_ledger, n_rows, n_tk = int(row[0]), int(row[0]), int(row[1])
+        if since is not None:
+            row = con.execute(
+                f"SELECT COUNT(*), COUNT(DISTINCT req_ticker) FROM {TABLE} "
+                f"WHERE {DATE_COL} = ? AND collected_at >= ?", (gate_date, since)).fetchone()
+            n_rows, n_tk = (int(row[0]), int(row[1])) if row is not None else (0, 0)
     ratio = (n_rows / n_requested) if n_requested else 0.0
     ok = n_requested > 0 and ratio >= min_ratio and n_tk == n_rows
-    detail = (f"deal_date={gate_date} n_rows={n_rows} n_tickers={n_tk} "
-              f"requested={n_requested} ratio={ratio:.4f} min_ratio={min_ratio:.2f}")
+    label = "n_rows(this run)" if since is not None else "n_rows"
+    detail = (f"deal_date={gate_date} {label}={n_rows} n_tickers={n_tk} "
+              f"requested={n_requested} ratio={ratio:.4f} min_ratio={min_ratio:.2f}"
+              + (f" ledger_rows={n_ledger} since={since}" if since is not None else ""))
     if not ok:
         if n_requested == 0:
             detail += " — 요청 유니버스가 비었다(키움 마스터 스냅샷 확인)"
@@ -351,6 +364,8 @@ def run(con: sqlite3.Connection, *, date: str, gate_date: str, d1: str, d2: str,
     from backfill_kis import QUOTA_STREAK  # 지연 import 이유는 `fetch_credit` 주석 참고
 
     targets = list(tickers[:limit] if limit else tickers)
+    # 완료 게이트가 볼 "이번 런" 의 경계. `store_new_facts` 의 `collected_at` 과 같은 형식이라 문자열 비교로 족하다.
+    run_started_at = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S")
     dup_before = dup_pairs(con, d1)
     run_id = None
     if not dry_run and run_db is not None:
@@ -387,7 +402,7 @@ def run(con: sqlite3.Connection, *, date: str, gate_date: str, d1: str, d2: str,
             n_new += st.n_new
             n_dup += st.n_dup_skipped
 
-    g = gate(con, gate_date, len(tickers), min_ratio)
+    g = gate(con, gate_date, len(tickers), min_ratio, since=run_started_at)
     dup_after = dup_pairs(con, d1)
     detail = (f"{g.detail} | calls={n_calls} new_rows={n_new} dup_skipped={n_dup} "
               f"tickers={len(targets)}/{len(tickers)} window={d1}~{d2} "
@@ -405,6 +420,10 @@ def run(con: sqlite3.Connection, *, date: str, gate_date: str, d1: str, d2: str,
                    f"기대 {dup_before}, 실제 {dup_after}")
     elif not g.ok:
         status = Status.GATE_FAILED
+    elif targets and len(failures) / len(targets) > FAILURE_RATIO_MAX:
+        status = Status.GATE_FAILED
+        detail += (f" — 실패 종목 비율 {len(failures)}/{len(targets)} > {FAILURE_RATIO_MAX:.0%} "
+                   f"(산발 실패는 PARTIAL 이지만 이 선을 넘으면 결손이다)")
     elif failures:
         status = Status.PARTIAL
     else:

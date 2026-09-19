@@ -75,8 +75,10 @@ else
     && step "dart company gap" bash scripts/dart_company_gap.sh ${DRY:+--dry-run}
   fi
   RC=$?
+  # `RC` 는 수집 체인의 rc 라 `|| true` 로 흘려보낸 daily_wise 실패를 모른다 — 런로그가 ok 인데 알림은
+  # crit 이던 관측 불일치(DEFECT-A10). 런로그도 FAILED 를 함께 본다.
   if [ -n "$RID" ]; then
-    $PY -c 'import sys; from daily import runlog; runlog.finish("data/raw/daily_run.db", int(sys.argv[1]), status=sys.argv[2], detail=sys.argv[3])' "$RID" "$([ $RC -eq 0 ] && echo ok || echo failed)" "${FAILED:-}"
+    $PY -c 'import sys; from daily import runlog; runlog.finish("data/raw/daily_run.db", int(sys.argv[1]), status=sys.argv[2], detail=sys.argv[3])' "$RID" "$([ $RC -eq 0 ] && [ -z "$FAILED" ] && echo ok || echo failed)" "${FAILED:-}"
   fi
   echo "════ 종료 rc=$RC $(kst) ════"
 fi

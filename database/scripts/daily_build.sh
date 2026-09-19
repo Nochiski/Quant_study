@@ -4,6 +4,7 @@
 # (플랜 v2 Task B.1). `--no-build` 를 주면 원장 단계에서 멈춘다 — 크론의 --no-build 는 오케스트레이터가 뗀다.
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
 #   환경: QL_SKIP_KW=1 이면 키움 merge 를 건너뛰고 건전성 판정의 kiwoom 항목을 skip 한다(앱키 분리 전 임시)
+#         QL_FORCE=1 이면 "이미 확정판 있음" 가드를 무시하고 다시 돈다(--date 명시도 같은 효과)
 set -uo pipefail
 cd /home/kael/quant-ledger
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
@@ -17,7 +18,7 @@ if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
   fi
   export QL_RAW_LOCK_HELD=1
 fi
-DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""
+DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""; SKIPPED=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --date) DATE_ARG="$2"; shift 2 ;;
@@ -31,6 +32,7 @@ kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_build_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
 FAILED=""
+FAILED_SOFT=""     # 판은 쓸 수 있는 부분 실패(build_chain rc 1 — GC 만 실패). crit 이 아니라 warn 이다
 step() {
   local name="$1"; shift
   echo "──── $name 시작 $(kst) ────"
@@ -39,16 +41,22 @@ step() {
   if [ "$rc" -ne 0 ]; then FAILED="$name(rc=$rc)"; return 1; fi
   return 0
 }
-krx_step() {  # KRX D + 최근 10거래일 pending 재수집. pending 이면 10분 간격 최대 6회(08:10→09:10)
+krx_step() {  # KRX D + 최근 10거래일 미완료 재수집. 미공표·유량·오류면 10분 간격 최대 6회(08:10→09:10)
+  # 종전에는 `pending` 만 재시도 조건이라 네트워크·유량(rate)·응답오류(error)는 재시도 0회로 rc 0 이었다
+  # (DEFECT-A05). 401(fatal)은 재시도해도 소용없으므로 즉시 실패로 올린다.
   local d="$1" from to pend
   from=$($PY -c 'import datetime as dt,sys; from daily import calendar as c
 d=sys.argv[1]; print(c.load().prev_trading_day(dt.date(int(d[:4]),int(d[4:6]),int(d[6:8])), n=10).strftime("%Y-%m-%d"))' "$d")
   to="${d:0:4}-${d:4:2}-${d:6:2}"
   for attempt in 1 2 3 4 5 6; do
-    pend=$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT group_concat(DISTINCT bas_dd) FROM ingest_log WHERE status='pending' AND bas_dd>='${from//-/}'" 2>/dev/null || true)
-    $PY src/backfill_krx.py --from "$from" --to "$to" ${pend:+--refetch "$pend"} ${LIMIT:+$LIMIT} || return 1
-    if [ "$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT COUNT(*) FROM ingest_log WHERE bas_dd='$d' AND status='pending'")" = "0" ]; then return 0; fi
-    echo "  KRX D=$d 아직 미공표(pending) — 10분 뒤 재시도 ($attempt/6)"
+    pend=$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT group_concat(DISTINCT bas_dd) FROM ingest_log WHERE status IN ('pending','rate','error') AND bas_dd>='${from//-/}'" 2>/dev/null || true)
+    $PY src/backfill_krx.py --from "$from" --to "$to" ${pend:+--refetch "$pend"} ${LIMIT:+$LIMIT} || true
+    if [ "$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT COUNT(*) FROM ingest_log WHERE status='fatal' AND bas_dd>='${from//-/}'")" != "0" ]; then
+      echo "  KRX 401 Unauthorized — AUTH_KEY 만료·권한 없음. 재시도해도 소용없어 중단한다 (KRX 401)"
+      return 1
+    fi
+    if [ "$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT COUNT(*) FROM ingest_log WHERE bas_dd='$d' AND status IN ('pending','rate','error')")" = "0" ]; then return 0; fi
+    echo "  KRX D=$d 아직 미완료(pending·rate·error) — 10분 뒤 재시도 ($attempt/6)"
     [ -n "$DRY" ] && return 3
     sleep 600
   done
@@ -59,6 +67,20 @@ echo "════ [$(kst)] daily_build 시작 dry=${DRY:-no} no_build=${NOBUILD
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 echo "  대상 거래일 D=$D"
+# D 의 확정판(stage·equity 둘 다 ok)이 이미 있으면 여기서 끝 — 주말·연휴에 같은 D 를 재수집·재빌드하지
+# 않는다(DEFECT-D01·A03·B10). 판정 근거는 인계 이력 `data/deliver/history/<D>_morning.json` 의 health 다.
+# `--date` 를 명시했거나 QL_FORCE=1 이면 가드 없이 다시 돈다(재빌드는 사람이 요구한 것이다).
+if [ -z "$DATE_ARG" ] && [ -z "${QL_FORCE:-}" ] && [ -z "$DRY" ] && $PY -c 'import json, sys
+from pathlib import Path
+p = Path(f"data/deliver/history/{sys.argv[1]}_morning.json")
+if not p.exists():
+    sys.exit(1)
+h = json.loads(p.read_text(encoding="utf-8")).get("health") or {}
+sys.exit(0 if h.get("stage") == "ok" and h.get("equity") == "ok" else 1)' "$D"; then
+  SKIPPED="건너뜀(D=$D 확정판 완료)"
+  echo "  D=$D 는 확정판이 이미 있다(data/deliver/history/${D}_morning.json health stage=ok equity=ok) — 종료"
+  echo "════ 종료 rc=0 $(kst) ════"
+else
 HSKIP=""
 if [ -n "${QL_SKIP_KW:-}" ]; then
   echo "  QL_SKIP_KW=1 — 키움 merge 건너뜀, 건전성 판정에서 kiwoom 항목은 skip"
@@ -84,17 +106,37 @@ if [ "$RC" -eq 0 ] && [ -z "$NOBUILD" ] && [ -z "$DRY" ]; then
   # 원장 게이트가 통과한 날만 확정판을 짓는다. 빌드 락은 build_chain 이 새로 잡고(raw 락은 물려준다),
   # stage·equity·인계 JSON·스냅샷 GC·알림은 전부 build_morning 안에 있다.
   export QL_BUILD_LOCK_HELD=""
-  step "build_morning" bash scripts/build_morning.sh --date "$D" || true
+  # build_chain 은 stage·equity·인계가 다 ok 이고 스냅샷 GC 만 실패하면 rc 1 로 끝난다(결정 V2-7 —
+  # 판은 쓸 수 있다). 그걸 step() 에 맡기면 같은 사건에 info("준비")·warn("부분 실패")·crit("실패") 세
+  # 등급이 동시에 나갔다(DEFECT-D07). rc 1 은 warn, rc >= 2 만 crit 이다.
+  echo "──── build_morning 시작 $(kst) ────"
+  bash scripts/build_morning.sh --date "$D"; BRC=$?
+  echo "──── build_morning 종료 rc=$BRC $(kst) ────"
+  if [ "$BRC" -eq 1 ]; then
+    FAILED_SOFT="build_morning(rc=1)"
+  elif [ "$BRC" -ne 0 ]; then
+    FAILED="build_morning(rc=$BRC)"
+  fi
 fi
 # 통합 일일 리포트는 읽기 전용이라 게이트 실패일·--no-build 에도 돈다(가장 필요한 날이 실패일이다. 검수 R4-03).
 [ -z "$DRY" ] && [ -x scripts/daily_report.py ] && { $PY scripts/daily_report.py --date "$D" || true; }
 echo "════ 종료 rc=$RC $(kst) ════"
+fi
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
-SUMMARY=$(grep -E "^원장 건전성|──── .* 종료|아직 미공표" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
+SUMMARY=$(grep -E "^원장 건전성|──── .* 종료|아직 미완료|KRX 401" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
+if [ -n "$SKIPPED" ]; then
+  [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 확정판이 이미 있어 재수집·재빌드하지 않았다 — 다시 돌리려면 QL_FORCE=1 또는 --date $D | 로그 $LOG"
+  rm -f "$RUN"; exit 0
+fi
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_build 실패: $FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2
+fi
+if [ -n "$FAILED_SOFT" ]; then
+  [ -z "$DRY" ] && scripts/notify.sh warn "daily_build 확정 빌드 후처리 실패: $FAILED_SOFT" \
+    "$SUMMARY | 확정판 자체는 쓸 수 있다(build_chain 이 준비 info + 부분 실패 warn 을 이미 보냈다) | 로그 $LOG"
+  rm -f "$RUN"; exit 1
 fi
 [ -z "$DRY" ] && scripts/notify.sh info "daily_build 완료" "$SUMMARY"
 rm -f "$RUN"

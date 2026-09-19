@@ -50,6 +50,17 @@ def krx(path, basDd):
     r.raise_for_status()
     return r.json().get("OutBlock_1") or []
 
+def _write_token_cache(path, payload):
+    """토큰 캐시를 0600 으로 쓴다 — 24시간 유효한 자격증명이다(DEFECT-A12·D11).
+
+    `os.open` 의 모드는 **생성할 때만** 적용되므로 이미 있는 파일(옛 판이 umask 대로 만든 0664)은
+    chmod 로 함께 좁힌다. 원천 `.env`·휴장 캐시와 같은 권한이 된다.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+    os.chmod(path, 0o600)
+
 # ── KIS ──────────────────────────────────────────────────────────
 KIS_BASE = "https://openapi.koreainvestment.com:9443"
 _KIS_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".kis_token.json")
@@ -71,10 +82,12 @@ def _kis_token():
         json={"grant_type":"client_credentials","appkey":_K["KIS_APP_KEY"],
               "appsecret":_K["KIS_APP_SECRET"]}).json()
     if "access_token" not in r:
-        raise RuntimeError(f"KIS 토큰 발급 실패: {r}")
+        # 응답 전문을 메시지에 실으면 로그·런로그로 자격증명이 흘러간다 — 키 목록과 사유만 남긴다(A12).
+        keys = sorted(r) if isinstance(r, dict) else type(r).__name__
+        why = str(r.get("error_description", ""))[:80] if isinstance(r, dict) else ""
+        raise RuntimeError(f"KIS 토큰 발급 실패: keys={keys} msg={why}")
     _kis_tok = r["access_token"]
-    with open(_KIS_CACHE, "w") as _f:
-        _json.dump({"token": _kis_tok, "issued_at": time.time()}, _f)
+    _write_token_cache(_KIS_CACHE, {"token": _kis_tok, "issued_at": time.time()})
     return _kis_tok
 
 def kis(url, tr_id, params):
@@ -115,8 +128,7 @@ def _kw_token(force=False):
             exp = _dt.strptime(str(r["expires_dt"]), "%Y%m%d%H%M%S").timestamp()  # noqa: DTZ007  # reason: 키움 expires_dt 는 KST 벽시계 문자열, 서버 TZ 기준 epoch 비교에만 쓴다
         except Exception:  # noqa: BLE001, S110  # reason: expires_dt 형식이 바뀌어도 토큰은 유효하다 — exp=None 으로 두고 다음 콜에서 재발급
             pass
-    with open(_KW_CACHE, "w") as _f:
-        json.dump({"token": _kw_tok, "exp": exp, "t": time.time()}, _f)
+    _write_token_cache(_KW_CACHE, {"token": _kw_tok, "exp": exp, "t": time.time()})
     return _kw_tok
 
 def kiwoom(api_id, url, body, cont=None, next_key=None):

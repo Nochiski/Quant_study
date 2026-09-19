@@ -50,6 +50,11 @@ scripts/sync_calendar.sh || echo "  ! 캘린더 동기화 실패 — 이전 복�
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 echo "  대상 거래일 D=$D"
+if [ -z "$D" ]; then
+  echo "  ✗ 대상 거래일 D 산출 실패(캘린더 오류) — 중단"
+  [ -z "$DRY" ] && scripts/notify.sh crit "daily_ledger 중단 — 대상 거래일 산출 실패" "daily.calendar.prev_trading_day 가 값을 주지 않았다(연도 파일 부재?) | 로그 $LOG"
+  cat "$RUN" >> "$LOG"; rm -f "$RUN"; exit 2
+fi
 # ① 소멸성 축(키움 마스터)은 매일 — daily_wise.sh 는 raw 락을 물려받는다(WISE 는 18:05 로 이동)
 if [ -z "$DRY" ]; then step "daily_wise" bash scripts/daily_wise.sh || true; fi
 # D 가 이미 수집·판정 완료면 여기서 끝(주말·연휴에 같은 D 를 반복하지 않는다)

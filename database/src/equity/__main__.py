@@ -163,7 +163,8 @@ def _cmd_contract(a: argparse.Namespace) -> int:
 
 
 def _cmd_rollback(a: argparse.Namespace) -> int:
-    done = rollback.rollback_pass(a.root, getattr(a, "pass"), log_root=a.log_root)
+    done = rollback.rollback_pass(a.root, getattr(a, "pass"), log_root=a.log_root,
+                                  before=a.before)
     if not done:
         print(f"ok rollback root={a.root} pass={getattr(a, 'pass')} — 되돌린 표 없음")
         return 0
@@ -224,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
                       help="logs/equity/rebuild_<PASS>/summary.tsv 의 PASS 이름")
     p_rb.add_argument("--log-root", type=Path, default=base / "logs" / "equity",
                       help="rebuild_<PASS>/ 가 사는 디렉터리")
+    p_rb.add_argument("--before", type=Path, default=None,
+                      help="패스 시작 시점의 {표: current_build} JSON — 있으면 직전 판이 아니라 그 판으로")
     p_rb.set_defaults(fn=_cmd_rollback)
 
     a = ap.parse_args(argv)

@@ -27,12 +27,14 @@ from __future__ import annotations
 #
 # KRX 4표 10일  : KRX 는 T+1 08:00 도착(SPEC §2-20)이라 저녁 판(D=T)에는 D 행이 **아예 없다**.
 #                 연휴 뒤 첫 거래일 저녁이면 최신이 D−6 → 10.
-# 키움 5표 7일  : 저녁 수집이 당일 21:05(SPEC §2-21)이라 저녁 판에 D 가 그대로 들어온다. 저녁
-#                 수집이 하루 빠져도 다음 아침 판이 통과하도록 7.
+# 키움 5표 10일 : 저녁 수집이 당일 21:05(SPEC §2-21)이라 저녁 판에 D 가 그대로 들어온다. 다만
+#                 외국인 보유(stg_foreign_daily)는 08:10 축(D−1)이라 연휴 5일 + 직전 2세션 결손이면
+#                 7 로는 여유가 2일뿐이다 — KRX 와 같은 10(리뷰 REC-16).
 # KIS 신용 10일 : 공표 T+2, 실입수 T+3(09-19 실측 전 구간 +3일 — 감사 E01). 조회창이 `d2=오늘`
 #                 이라 `deal_date <= T-2` 만 오고, 연휴 뒤 첫 거래일이면 최신 deal_date 가 D−6 → 10.
 # DART 10일     : 공시·보조원장은 접수일 축(rcept_dt)이라 영업일마다 들어온다. 연휴 여유 포함 10.
-# 재무·주식수 120일: 정기보고서 주기 축이라 분기 공백이 정상이다(결함이 아니라 사실).
+# 재무·주식수 150일: 정기보고서 주기 축이라 분기 공백이 정상이다. 11/14(3분기) → 3/31(사업보고서)
+#                 사이가 최대 137 캘린더일이라 120 이면 2~3월에 오탐한다(리뷰 REC-16) → 150.
 # WISE 10일     : `fetched_date` = 수집일 축, 18:05 저녁 슬롯. 연휴 여유 포함 10.
 # 문서층 4표 10일: available 이 rcept_dt lookup — 공시와 같은 축.
 #
@@ -43,8 +45,8 @@ ALLOW_DAYS: dict[str, int] = {
     "stg_price_daily": 10, "stg_etf_price_daily": 10, "stg_index_daily": 10,
     "stg_listing_daily": 10,
     # 키움
-    "stg_flow_daily_kiwoom": 7, "stg_short_daily_kiwoom": 7, "stg_foreign_daily": 7,
-    "stg_lending_daily": 7, "stg_master_daily": 7,
+    "stg_flow_daily_kiwoom": 10, "stg_short_daily_kiwoom": 10, "stg_foreign_daily": 10,
+    "stg_lending_daily": 10, "stg_master_daily": 10,
     # KIS (일일 체인 대상은 신용잔고 하나 — 나머지 4표는 FROZEN)
     "stg_credit_daily": 10,
     # DART 공시·보조원장
@@ -52,7 +54,7 @@ ALLOW_DAYS: dict[str, int] = {
     "stg_dividend": 10, "stg_capital": 10, "stg_tesstk": 10, "stg_hyslr": 10,
     "stg_audit": 10,
     # DART 재무·주식수 (정기보고서 주기)
-    "stg_fin": 120, "stg_shares": 120,
+    "stg_fin": 150, "stg_shares": 150,
     # WISE
     "stg_consensus_monthly": 10, "stg_consensus_annual": 10, "stg_consensus_quarterly": 10,
     "stg_consensus_matrix": 10, "stg_analyst_summary": 10, "stg_analyst_broker": 10,

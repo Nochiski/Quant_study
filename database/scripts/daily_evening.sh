@@ -98,10 +98,22 @@ echo "════ [$(kst)] daily_evening 시작 dry=${DRY:-no} ════"
 scripts/sync_calendar.sh || echo "  ! 캘린더 동기화 실패 — 이전 복사본으로 진행"
 D="${DATE_ARG:-$(TZ=Asia/Seoul date +%Y%m%d)}"
 echo "  대상 거래일 D=$D (기본은 오늘 KST — 저녁 슬롯은 당일 데이터를 받는다)"
-if ! $PY -c 'import datetime as dt, sys
+# rc 0 거래일 · 1 휴장 · 2 판정 불가. 종전 `if ! …` 는 KeyError(연도 파일 부재)의 exit 1 을 휴장으로 읽어
+# 소멸성 축(키움 수급·공매도)의 그 세션을 info 한 줄로 영구 결손시켰다(리뷰 REC-2) — build_evening.sh 와 같은 삼분기.
+$PY -c 'import datetime as dt, sys
 from daily import calendar as c
 d = sys.argv[1]
-sys.exit(0 if c.load().is_trading_day(dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))) else 1)' "$D"; then
+try:
+    ok = c.load().is_trading_day(dt.date(int(d[:4]), int(d[4:6]), int(d[6:8])))
+except Exception as e:  # noqa: BLE001  # reason: 어떤 예외든 "판정 불가" 로 올려 crit 을 내야 한다
+    print(f"calendar error: {type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(2)
+sys.exit(0 if ok else 1)' "$D"; TD=$?
+if [ "$TD" -eq 2 ]; then
+  echo "  ✗ 캘린더 판정 불가(연도 파일 부재?) — 휴장으로 위장하지 않는다. 중단"
+  [ -z "$DRY" ] && scripts/notify.sh crit "daily_evening 중단 — 캘린더 판정 불가" "D=$D | 로그 $LOG"
+  cat "$RUN" >> "$LOG"; rm -f "$RUN"; exit 2
+elif [ "$TD" -eq 1 ]; then
   SKIPPED="휴장"
   echo "  D=$D 는 거래일이 아니다 — 건너뜀"
 elif [ -z "$DRY" ] && $PY -c 'import sys; from daily import runlog

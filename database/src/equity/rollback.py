@@ -17,6 +17,8 @@
 """
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 from stage import manifest
@@ -66,11 +68,18 @@ def _rc_by_table(summary: Path) -> list[tuple[str, int]]:
 
 
 def rollback_pass(equity_root: Path, pass_name: str, *,
-                  log_root: Path | None = None) -> dict[str, str]:
-    """`logs/equity/rebuild_<PASS>/summary.tsv` 의 **rc 0 표만** 직전 판으로 되돌린다.
+                  log_root: Path | None = None, before: Path | None = None) -> dict[str, str]:
+    """`logs/equity/rebuild_<PASS>/summary.tsv` 의 **rc 0 표만** 되돌린다.
 
-    반환값은 `{표: 되돌아간 build_id}` — 되돌릴 것이 없던 표는 빠진다.
+    `before`(패스 시작 시점의 `{표: current_build}` JSON)가 있으면 **그 판**으로, 없으면 직전 판으로.
+    아침 확정 빌드가 중간에 실패하면 "직전 판" 은 대개 전날 저녁 잠정판(`e_`)이라 MANIFEST 를 직접
+    읽는 공유 소비자가 확정 자리에서 잠정판을 보게 된다(리뷰 REC-13) — 시작 시점 판이 정답이다.
+    시작 시점 판이 이미 GC 됐으면 직전 판으로 폴백한다. 반환값은 `{표: 되돌아간 build_id}`.
     """
+    targets: dict[str, str] = {}
+    if before is not None:
+        raw = json.loads(Path(before).read_text(encoding="utf-8"))
+        targets = {str(k): str(v) for k, v in raw.items() if v}
     root = log_root if log_root is not None else LOG_ROOT_DEFAULT
     summary = root / f"rebuild_{pass_name}" / SUMMARY_NAME
     if not summary.exists():
@@ -80,7 +89,10 @@ def rollback_pass(equity_root: Path, pass_name: str, *,
     for table, rc in _rc_by_table(summary):
         if rc != 0:
             continue                          # 커밋 자체가 없다 — 되돌리면 어제 판을 잃는다
-        prev = rollback_table(equity_root / table)
+        try:
+            prev = rollback_table(equity_root / table, to_build_id=targets.get(table))
+        except ValueError:
+            prev = rollback_table(equity_root / table)     # 시작 시점 판이 GC 됨 — 직전 판으로
         if prev is not None:
             out[table] = prev
     return out

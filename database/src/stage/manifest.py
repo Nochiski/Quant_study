@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from .model import basis_of_build_id
@@ -52,13 +52,19 @@ class Manifest:
     builds: list[BuildRecord] = field(default_factory=list)
 
 
+_RECORD_FIELDS = frozenset(f.name for f in fields(BuildRecord))
+
+
 def load(path: Path) -> Manifest:
     if not path.exists():
         return Manifest(table=path.parent.name)
     raw = json.loads(path.read_text(encoding="utf-8"))
+    # 모르는 키는 버린다 — 새 코드가 쓴 MANIFEST(max_available_date 등)를 옛 코드로 되돌려 읽어도
+    # TypeError 로 전 경로가 죽지 않게(리뷰 REC-4). 필드 추가가 양방향으로 안전해진다.
     return Manifest(table=raw["table"], current_build=raw.get("current_build"),
                     keep=int(raw.get("keep", KEEP_DEFAULT)),
-                    builds=[BuildRecord(**b) for b in raw.get("builds", [])])
+                    builds=[BuildRecord(**{k: v for k, v in b.items() if k in _RECORD_FIELDS})
+                            for b in raw.get("builds", [])])
 
 
 def _write_atomic(path: Path, m: Manifest) -> None:

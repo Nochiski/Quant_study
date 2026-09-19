@@ -1045,3 +1045,50 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
   락(`check_baseline_lock.py`·`baseline_locked.json` md5 동일성)의 의미가 달라진다. 락 규약과 같이 설계해야 한다.
 - **위치**: `src/equity/baseline_seed_s02.json`, `src/equity/baseline_seed_s07.json`, `data/equity/baseline.json`
 
+
+
+## 09-19 통합 코드리뷰(G-E) 후속 — 배포에서 뺀 항목
+
+리뷰 원문은 세션 산출물(플랜 `2026-09-19-pipeline-audit-fix.md` §1 G-E). 배포 전에 닫은 것: BLK-1(`_READY.json` 실패 판 기록), REC-1(gc 캐시 보존), REC-2(저녁 캘린더 삼분기), REC-3(KRX rc 회귀), REC-4(MANIFEST 관용 로드), REC-8(캘린더 원자 쓰기), REC-9a/b(deploy fetch·엔진 소스 검사), REC-10(D 빈값 가드), REC-11(doc_prepass_daily cd), REC-13(롤백 시작 판), REC-16(C6 허용 지연). 아래는 남긴 것.
+
+### B-32: fin_std 의 `period_unresolved` 격리(행째 소실)는 최근 구간 게이트 밖이다 (리뷰 REC-6)
+- **상황**: 문서층이 뒤처진 구간의 신규 재무 그룹이 `corp.fiscal_month` 없는 법인에 몰릴 때.
+- **인풋**: `equity_rebuild_all.sh` → `fin_std` 빌드. `_inferred_recent`(`rules_s12.py`)는 **채택 행**의 `period_end_basis='inferred'` 비율만 본다.
+- **에러 위치**: `src/equity/rules_s12.py::_inferred_recent` — `_reject/period_unresolved` 행은 `out_view` 에 없어 분자·분모 어디에도 안 잡힌다. EG7 전역 격리 비율(1.28%/3%)도 최근 구간 100% 소실을 못 본다.
+- **위험성**: silent 데이터 손실 — 최근 30일 그룹이 전부 격리돼도 두 게이트 다 통과. 조치: 같은 창에서 `period_unresolved` 격리 건수·비율을 기록형으로 추가하거나, 창 안 정기보고서 접수 건수 대비 채택 그룹 수의 비를 기록.
+
+### B-33: 문서 프리패스 D0 무관용 + `step_soft` 결합 — ZIP 1건 결손이 fin_std 폐기로 번진다 (리뷰 REC-7)
+- **상황**: 증분 프리패스가 붙은 일일 체인. `doc_prepass._judge` 는 `n_missing or n_open_failed` 면 `status=gate_failed`.
+- **인풋**: 새 스냅샷의 `doc_store(zip_ok=1)` 중 ZIP 파일 1건이 디스크에 없음.
+- **에러 위치**: `src/stage/doc_prepass.py::_judge`(전량 폐기형) → `run_stage_all.sh` 4표 skip → `fin_std` 신규 그룹 inferred → `fin_std_inferred_recent_ratio_max` 등재 뒤 이틀이면 EG3_fin_std FAIL. 경보는 `build_chain.sh` 의 `step_soft` warn 한 줄.
+- **위험성**: 운영 정지(fin_std 매일 폐기)로 증폭되는 경로가 새로 생겼다. 조치: D0 에 소량 허용폭(문서 단위 격리) 또는 `doc_prepass_daily.sh` 실패를 별도 제목의 warn 으로 승격. `doc_checks.py`(D6·D8·D12)가 어느 체인에서도 안 불리는 것도 같은 묶음.
+
+### B-34: KRX `--refetch` 가 날짜 단위 전삭제라 재시도 조건 확대 뒤 콜이 최대 6배 (리뷰 REC-15)
+- **상황**: `daily_build.sh krx_step` 의 `pend` 가 `pending`→`pending·rate·error` 로 넓어짐(A05).
+- **인풋**: 최근 10거래일 중 여러 날에 `rate`/`error` 가 남은 아침.
+- **에러 위치**: `src/backfill_krx.py` `--refetch` 처리 — `DELETE FROM ingest_log WHERE bas_dd=?` 로 그 날짜 6엔드포인트를 통째로 재수집.
+- **위험성**: 자원 — 최악 10일×6×6회 = 360콜/아침(종전 6~36). 조치: `(endpoint, bas_dd)` 단위 삭제.
+
+### B-35: EG21 상수 점화 전 표별 마진 실측 필요 — `opinion_daily`(base_date, lag 0)·`flow_daily`(src 축) (리뷰 REC-5)
+- **상황**: `data/equity/baseline.json` 에 `recent_grid_*` 상수를 넣는 순간 폐기형이 활성.
+- **인풋**: 저녁 판에서 최신 `base_date` 가 일부만 도착한 `opinion_daily`; E03 결정으로 v3·KIS 가 재개되는 첫날의 `flow_daily`(grain 에 `src`).
+- **에러 위치**: `src/equity/gates.py::eg21_recent_grid` — 직전 20세션 중앙값 × 0.8 미만이면 FAIL. 정당한 영구 감소는 ≈20세션 동안 매일 폐기.
+- **위험성**: 운영 정지(오탐). 조치: 배포 절차에 "임시 baseline 으로 `equity gate` 4표 재판정 → `recent_sessions[].row_ratio` 확인 → scp" 를 두고(09-19 는 그렇게 함), 얇으면 표별 `recent_grid_row_ratio_min` 하향 또는 `opinion_daily` lag 1.
+
+### B-36: stage G3 판정이 `_violations` 접미사 관례에 의존한다 (리뷰 REC-14)
+- **상황**: `gates.g3_invariants` 가 기록형 지표(E08 `n_rcept_dt_*`)를 같은 metrics 에 싣기 위해 판정 키를 `endswith("_violations")` 로 좁혔다.
+- **인풋**: 앞으로 `_violations` 로 끝나는 기록형 지표가 하나 추가되는 경우.
+- **에러 위치**: `src/stage/gates.py::g3_invariants` 의 `bad` 선별.
+- **위험성**: 조용히 폐기형으로 승격(반대는 판정 누락). 조치: `recorded` 키 집합을 명시하고 `k not in recorded` 로 거른다.
+
+### B-37: `deploy.sh` rsync 부분 실패(rc 23/24) 시 DEPLOYED.json 이 이전 rev 를 가리킨다 (리뷰 REC-9c)
+- **상황**: 세 rsync 중 하나가 부분 실패.
+- **인풋**: `deploy.sh --apply` 도중 원격 권한·디스크 오류.
+- **에러 위치**: `scripts/deploy.sh` — DEPLOYED.json 은 전부 성공해야 쓰이고, 부분 실패는 rc 만 남는다.
+- **위험성**: 드리프트 조사 출발점이 거짓이 된다. 조치: rc 를 모아 `"partial": true` 로 기록 후 non-zero 종료.
+
+### B-38: E01 은 선언 축(recommended_lag_sessions=3)만 고쳤다 — `available_date ≤ T−1` 만 거는 소비자는 여전히 2세션 앞선다
+- **상황**: `credit_daily.available_date = deal_date` 유지(플랜 §2 결정 1 — 백필 구간 PIT 보존).
+- **인풋**: 워크벤치·엔진이 `dataset_profile.recommended_lag_sessions` 를 실제로 적용하는지 미확인.
+- **에러 위치**: `src/equity/rules_s10.py`(선언) vs 소비 측 어댑터의 lag 적용 코드.
+- **위험성**: look-ahead 잔존 가능. 조치: 어댑터가 lag 를 읽어 필터하는지 확인, 안 하면 `available_date` 를 `deal_date + 3세션` 파생으로 바꾸는 규칙 변경 검토.

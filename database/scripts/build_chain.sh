@@ -289,10 +289,12 @@ else
   echo "  stage 건전성 실패 — equity 는 어제 판을 유지한다(잘못된 stage 위에 짓지 않는다)"
 fi
 step "인계 파일" deliver_step
-if [ "$H_STAGE" = "ok" ] && [ "$H_EQUITY" = "ok" ]; then
+# 인계 파일이 실패한 판은 crit 이다(아래 판정) — 그 판에 완료 신호를 쓰면 latest_* 는 어제 판인데
+# _READY.json 만 오늘 판을 선언한다(리뷰 BLK-1). 세 조건이 다 맞을 때만 쓴다.
+if [ "$H_STAGE" = "ok" ] && [ "$H_EQUITY" = "ok" ] && [[ "$FAILED" != *"인계 파일"* ]]; then
   step "완료 신호" ready_step
 else
-  echo "  _READY.json 갱신 안 함 (stage=$H_STAGE equity=$H_EQUITY) — 소비자는 마지막 성공 판 신호를 계속 본다"
+  echo "  _READY.json 갱신 안 함 (stage=$H_STAGE equity=$H_EQUITY failed=${FAILED:-없음}) — 소비자는 마지막 성공 판 신호를 계속 본다"
 fi
 step "스냅샷 GC" gc_step
 echo "════ 종료 stage=$H_STAGE equity=$H_EQUITY ${STAGE_S}s+${EQUITY_S}s $(kst) ════"

@@ -7,7 +7,7 @@
 #   · 이 스냅샷 캐시가 이미 ok 면 아무것도 하지 않고 rc 0 — 체인 재실행은 멱등이어야 한다.
 #   · 로그 logs/doc_prepass/<snap>.log. rc 는 그대로 전파한다(호출자가 기록형으로 다룬다).
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 4
 SNAP="${1:?usage: doc_prepass_daily.sh <snapshot-id> [workers]}"
 WORKERS="${2:-3}"
 CACHE=data/stage/_tmp/doc

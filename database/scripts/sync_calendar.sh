@@ -11,7 +11,8 @@ cd "${QL_HOME:-/home/kael/quant-ledger}"
 SRC="${1:-/home/kael/kael-system-v3/data/.kis_holidays.json}"
 DST=data/calendar/kis_holidays.json
 mkdir -p data/calendar
-TMP=$(mktemp)
+# 같은 파일시스템에 만들어야 마지막 mv 가 rename(2) 원자 교체가 된다(리뷰 REC-8)
+TMP=$(mktemp data/calendar/.sync.XXXXXX)
 trap 'rm -f "$TMP"' EXIT
 if ! cp "$SRC" "$TMP" 2>/dev/null; then
   scripts/notify.sh warn "캘린더 동기화 실패" "$SRC 를 읽을 수 없다 — 이전 복사본($DST) 유지"
@@ -39,9 +40,16 @@ then
     scripts/notify.sh warn "캘린더 검증 실패" "$SRC 에서 연도를 읽지 못했다 — 이전 복사본($DST) 유지"
     exit 1
   fi
-  cp "$TMP" "data/calendar/kis_holidays_${YEAR}.json"
-  chmod 600 "data/calendar/kis_holidays_${YEAR}.json"
-  mv "$TMP" "$DST"
+  # cp 는 truncate 뒤 재기록이라 중간에 죽으면 절단된 JSON 이 남고 calendar.load() 가 weekend_only 로
+  # 조용히 폴백한다 — 임시 파일에 쓰고 rename 으로 교체한다. 실패는 rc 1 + warn(리뷰 REC-8).
+  YEAR_TMP=$(mktemp data/calendar/.sync_year.XXXXXX)
+  if ! { cp "$TMP" "$YEAR_TMP" && chmod 600 "$YEAR_TMP" && mv -f "$YEAR_TMP" "data/calendar/kis_holidays_${YEAR}.json"; }; then
+    rm -f "$YEAR_TMP"
+    scripts/notify.sh warn "캘린더 저장 실패" "data/calendar/kis_holidays_${YEAR}.json 을 쓰지 못했다 — 이전 파일 유지"
+    exit 1
+  fi
+  chmod 600 "$TMP"
+  mv -f "$TMP" "$DST"
   trap - EXIT
 else
   scripts/notify.sh warn "캘린더 검증 실패" "$SRC 형식·건수 이상 — 이전 복사본($DST) 유지"

@@ -459,3 +459,17 @@ def test_freshness_동결표는_사유_문자열이_필수다() -> None:
     for table, why in freshness.FROZEN.items():
         assert why.strip(), table
         assert freshness.judgement(table) == (None, why)
+
+
+def test_manifest_load_는_모르는_키를_버린다(tmp_path: Path) -> None:
+    """새 코드가 쓴 MANIFEST(max_available_date 등)를 옛 코드로 읽어도 죽지 않아야 코드 롤백이
+    복구 수단이 된다(리뷰 REC-4). 반대로 아직 모르는 미래 키도 같은 규칙으로 버린다."""
+    path = tmp_path / "MANIFEST.json"
+    path.write_text(json.dumps({
+        "table": "stg_x", "current_build": "m_1", "keep": 3,
+        "builds": [{"build_id": "m_1", "snapshot_id": "s", "rules_version": "2.2.3",
+                    "built_at_utc": "2026-09-19T00:00:00+00:00", "n_rows": 1,
+                    "content_hash": "1:x", "future_key_from_v9": {"a": 1}}]}), encoding="utf-8")
+    m = manifest.load(path)
+    assert m.builds[0].build_id == "m_1"
+    assert not hasattr(m.builds[0], "future_key_from_v9")

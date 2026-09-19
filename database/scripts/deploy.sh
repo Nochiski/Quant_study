@@ -52,6 +52,8 @@ SRC_KEEP=(--exclude '.kw_token.json' --exclude '.kis_token.json'
 # 멈춰 있었고 갱신 경로가 어디에도 없었다(DEFECT-C05) — 배포가 같이 민다.
 ENGINE_SRC="$WORKTREE/backend/src/backtest_engine"
 [ -d "$ENGINE_SRC" ] || { echo "거부: $ENGINE_SRC 가 없다 — 엔진 사본을 밀 수 없다." >&2; exit 2; }
+# 비었거나 sparse-checkout 인 소스를 --delete 로 밀면 서버 _engine 이 전멸하고 contract 는 기록형이라 묻힌다(리뷰 REC-9)
+[ -f "$ENGINE_SRC/__init__.py" ] || { echo "거부: $ENGINE_SRC/__init__.py 가 없다 — 빈 소스로 서버 _engine 을 지울 수 없다." >&2; exit 2; }
 
 BRANCH="$(git -C "$REPO" rev-parse --abbrev-ref HEAD)"
 REV="$(git -C "$REPO" rev-parse HEAD)"
@@ -65,6 +67,8 @@ if [ "$APPLY" -eq 1 ]; then
     exit 2
   fi
   # ② 리비전 — 미머지 브랜치를 모르고 밀면 서버의 운영 시간표·핫픽스가 되돌아간다
+  # 낡은 remote-tracking ref 로 판정하면 통과 도장이 찍힌 채 서버의 최신 운영 변경을 덮는다 — 먼저 받아온다
+  git -C "$REPO" fetch --quiet origin main || { echo "거부: origin/main 을 받아오지 못했다 — 리비전을 판정할 수 없다." >&2; exit 2; }
   if [ -n "$ALLOW_BRANCH" ] && [ "$ALLOW_BRANCH" = "$BRANCH" ]; then
     echo "== 브랜치 면제: HEAD=$BRANCH ($REV) — --allow-branch 로 main 포함 조건을 건너뛴다"
   elif git -C "$REPO" merge-base --is-ancestor origin/main HEAD; then

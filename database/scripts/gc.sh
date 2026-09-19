@@ -37,6 +37,7 @@ if [ -d data/stage/_tmp/doc ]; then
   # 보존 = 현재 stage 판이 선 스냅샷의 캐시(그 판을 같은 입력으로 재빌드할 수 있어야 한다)
   #      + 가장 최근 mtime 캐시 1개(다음 증분 프리패스의 base).
   if DOC_KEEP=$($PY - <<'PYEOF'
+import json
 from pathlib import Path
 
 from stage import snapshot
@@ -44,8 +45,22 @@ from stage import snapshot
 root = Path("data/stage/_tmp/doc")
 keep = set(snapshot.current_snapshot_ids(Path("data/stage")))
 caches = [d for d in root.iterdir() if d.is_dir()]
+
+
+def _ok(d):
+    # 증분 프리패스가 실패한 캐시(status != ok)가 최신일 수 있다 — 그것만 남기면 유일한 base 를
+    # 지워 문서층이 전량 재파싱(3~4.5h) 전까지 동결된다(리뷰 REC-1). ok 최신 1개도 함께 남긴다.
+    try:
+        return json.loads((d / "summary.json").read_text(encoding="utf-8")).get("status") == "ok"
+    except (OSError, ValueError):
+        return False
+
+
 if caches:
     keep.add(max(caches, key=lambda d: d.stat().st_mtime).name)
+    oks = [d for d in caches if _ok(d)]
+    if oks:
+        keep.add(max(oks, key=lambda d: d.stat().st_mtime).name)
 print(" ".join(sorted(keep)))
 PYEOF
   ); then

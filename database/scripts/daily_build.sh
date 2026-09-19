@@ -32,7 +32,7 @@ kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 LOG="logs/daily_build_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
 FAILED=""
-FAILED_SOFT=""     # 판은 쓸 수 있는 부분 실패(build_chain rc 1 — GC 만 실패). crit 이 아니라 warn 이다
+FAILED_SOFT=""     # 판은 쓸 수 있는 부분 실패(build_chain rc 1 — GC·완료 신호·contract 같은 후처리 실패). crit 이 아니라 warn 이다
 step() {
   local name="$1"; shift
   echo "──── $name 시작 $(kst) ────"
@@ -44,15 +44,22 @@ step() {
 krx_step() {  # KRX D + 최근 10거래일 미완료 재수집. 미공표·유량·오류면 10분 간격 최대 6회(08:10→09:10)
   # 종전에는 `pending` 만 재시도 조건이라 네트워크·유량(rate)·응답오류(error)는 재시도 0회로 rc 0 이었다
   # (DEFECT-A05). 401(fatal)은 재시도해도 소용없으므로 즉시 실패로 올린다.
-  local d="$1" from to pend
+  local d="$1" from to pend KRC n_any
   from=$($PY -c 'import datetime as dt,sys; from daily import calendar as c
 d=sys.argv[1]; print(c.load().prev_trading_day(dt.date(int(d[:4]),int(d[4:6]),int(d[6:8])), n=10).strftime("%Y-%m-%d"))' "$d")
   to="${d:0:4}-${d:4:2}-${d:6:2}"
   for attempt in 1 2 3 4 5 6; do
     pend=$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT group_concat(DISTINCT bas_dd) FROM ingest_log WHERE status IN ('pending','rate','error') AND bas_dd>='${from//-/}'" 2>/dev/null || true)
-    $PY src/backfill_krx.py --from "$from" --to "$to" ${pend:+--refetch "$pend"} ${LIMIT:+$LIMIT} || true
+    $PY src/backfill_krx.py --from "$from" --to "$to" ${pend:+--refetch "$pend"} ${LIMIT:+$LIMIT}; KRC=$?
     if [ "$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT COUNT(*) FROM ingest_log WHERE status='fatal' AND bas_dd>='${from//-/}'")" != "0" ]; then
       echo "  KRX 401 Unauthorized — AUTH_KEY 만료·권한 없음. 재시도해도 소용없어 중단한다 (KRX 401)"
+      return 1
+    fi
+    # 수집 프로세스가 D 행을 하나도 못 남기고 죽으면(sqlite 락·import 예외·OOM) "미완료 0건" 과 "전부 성공" 이
+    # 같은 판정이 된다 — 기록이 없으면 성공이 아니다(리뷰 REC-3).
+    n_any=$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT COUNT(*) FROM ingest_log WHERE bas_dd='$d'" 2>/dev/null || echo 0)
+    if [ "${n_any:-0}" = "0" ]; then
+      echo "  KRX D=$d 의 ingest_log 기록이 없다(backfill rc=$KRC) — 수집 0건은 성공이 아니다. 중단"
       return 1
     fi
     if [ "$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT COUNT(*) FROM ingest_log WHERE bas_dd='$d' AND status IN ('pending','rate','error')")" = "0" ]; then return 0; fi
@@ -67,6 +74,12 @@ echo "════ [$(kst)] daily_build 시작 dry=${DRY:-no} no_build=${NOBUILD
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 echo "  대상 거래일 D=$D"
+if [ -z "$D" ]; then
+  # 캘린더를 못 읽으면(연도 파일 부재 → KeyError) 명령치환이 빈 문자열을 준다 — --date "" 로 체인이 돌면 안 된다
+  echo "  ✗ 대상 거래일 D 산출 실패(캘린더 오류) — 중단"
+  [ -z "$DRY" ] && scripts/notify.sh crit "daily_build 중단 — 대상 거래일 산출 실패" "daily.calendar.prev_trading_day 가 값을 주지 않았다(연도 파일 부재?) | 로그 $LOG"
+  cat "$RUN" >> "$LOG"; rm -f "$RUN"; exit 2
+fi
 # D 의 확정판(stage·equity 둘 다 ok)이 이미 있으면 여기서 끝 — 주말·연휴에 같은 D 를 재수집·재빌드하지
 # 않는다(DEFECT-D01·A03·B10). 판정 근거는 인계 이력 `data/deliver/history/<D>_morning.json` 의 health 다.
 # `--date` 를 명시했거나 QL_FORCE=1 이면 가드 없이 다시 돈다(재빌드는 사람이 요구한 것이다).

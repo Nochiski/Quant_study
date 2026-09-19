@@ -47,7 +47,7 @@ uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
 | 팩터 그래프, TargetTape와 노드별 중간 결과 추적             | 구현 완료                                                        |
 | Python reference·Persistent Rust 백테스트와 전문 결과 화면  | 구현 완료                                                        |
 | 전략·리비전·백테스트 이력과 실행 provenance                 | 구현 완료                                                        |
-| 실제 시장 DB                                                | 기본은 PIT mock adapter이며 실제 DB outbound adapter는 후속 연결 |
+| 실제 시장 DB                                                | 카엘 서버 equity 층을 `ledger_sync`로 로컬에 받아 duckdb 어댑터로 연결(기본은 PIT mock adapter) |
 | 배포·실시간·주문·운영 리스크                                | 자동매매 확장을 위한 `향후` 경계이며 아직 실제 주문 기능이 아님  |
 
 YAML 원문은 authoring source, backend의 typed `StrategySpec`은 실행 의미의 단일 정본이다.
@@ -70,7 +70,7 @@ backend/
 └─ reference/               # 2026-08-17 설계·Zipline 관찰 아카이브
 frontend/                   # workbench UI: FSD app→pages→widgets→features→entities→shared
 docs/                       # 공용 설계·로드맵·리포트
-database/                   # 원장 수집(KRX·키움·KIS·DART·WISE)·stage·문서층 파이프라인 — src·docs·tests 추적, data/·logs/ 는 git 제외
+database/                   # 원장 수집(KRX·키움·KIS·DART·WISE)·stage·equity 파이프라인 + 서버 SFTP 동기화(ledger_sync) — src·docs·tests 추적, data/·logs/ 는 git 제외
 workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추적, data/·logs/ 는 git 제외
 ```
 
@@ -81,8 +81,9 @@ YAML-first authoring 전환은 완료됐으며 계약은
 PR 진행은 [docs/planning/strategy-workbench-yaml-ui/PLAN.md](docs/planning/strategy-workbench-yaml-ui/PLAN.md)가
 완료 상태를 추적한다. 전략 작성 화면의 YAML source와 JSON/Form/Graph/Diff projection은 같은
 StrategySpec 계약을 사용한다. Parameter Search는 이 route 위에 연결할 후속 milestone이다.
-Equity DB 계약이 확정되기 전에는 `backend`의 PIT mock adapter가 기준 구현이며, 실제 DB는 같은
-application port를 구현하는 outbound adapter로 교체한다.
+Equity 층은 `backend`의 duckdb outbound adapter(`STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb`)가 읽고,
+환경변수를 주지 않으면 같은 application port를 구현하는 PIT mock adapter로 뜬다. 실데이터 연결 절차는
+아래 [실데이터 연결](#실데이터-연결) 절 참고.
 
 ## 설계 아티팩트 요약
 
@@ -193,6 +194,31 @@ npm run dev
 매뉴얼 스크린샷은 두 서버를 격리 DB로 실행한 뒤 `frontend`에서
 `npm run docs:capture`로 실제 브라우저 시나리오를 다시 실행해 갱신한다.
 
+## 실데이터 연결
+
+카엘 서버의 equity 층(29표, 현재 빌드 약 1.5GB)을 SFTP 읽기 전용 계정으로 로컬에 받아 워크벤치와
+엔진이 읽는다. 절차·판단 기준의 정본은 [database/docs/LEDGER_SYNC.md](database/docs/LEDGER_SYNC.md)다.
+
+```powershell
+# 1) 전량 수신 + 판본·파일·내용 검증 + 카탈로그 재생성 (~/quant-ledger/data/equity)
+database\scripts\ledger_sync.ps1 sync
+
+# 2) 매일 10:00 KST 증분 동기화 등록(서버 아침 확정판 뒤). 판본이 바뀐 표만 받고 같은 파티션은 재사용한다
+database\scriptsegister_daily_sync.ps1
+
+# 3) 워크벤치를 실데이터로 기동
+$env:STRATEGY_WORKBENCH_EQUITY_ADAPTER = "duckdb"
+$env:STRATEGY_WORKBENCH_EQUITY_ROOT = "$HOME\quant-ledger\data\equity"
+uv run server
+```
+
+`ledger_sync verify`는 서버 MANIFEST의 current_build·파일 크기·파티션 `content_hash`(duckdb 재계산) 세
+층위로 사본이 서버와 같은지 확인하고, `status --remote`는 서버보다 뒤처진 표를 보여 준다. 실데이터 위에서
+그래프를 편집한 전략의 백테스트가 끝까지 도는 브라우저 시나리오는 `frontend`에서
+`$env:E2E_REAL_EQUITY_ROOT = <루트>; npm run test:e2e`로 돌린다(변수가 없으면 mock 릴리스 게이트만 돈다,
+`frontend/e2e/README.md`). 실데이터 security_id는 `{ticker}:{span_seq}`(예: `005930:1`)이며 실행 설정의
+벤치마크는 비우면 벤치마크 없이 실행한다.
+
 ## 검증: Zipline 대조
 
 엔진 회계는 Zipline과의 세션 단위 equity 대조로 검증됐다 — buy-hold, 골든크로스, 슬리피지
@@ -203,8 +229,9 @@ npm run dev
 ## 데이터
 
 원장(KRX·키움·KIS·DART·WISE 수집분)은 카엘 서버가 정본이다. 저장소에는 데이터를 넣지 않는다.
-공유 방식은 `docs/superpowers/specs/2026-08-25-quant-ledger-sharing-design.md`, 수집·stage 설계는
-`database/README.md` 참고.
+협업자는 서버 SFTP로 equity 층만 받는다(`database/docs/LEDGER_SYNC.md`, 설계
+`docs/superpowers/specs/2026-09-19-ledger-sftp-sync-design.md`). 원장 SQLite(`raw/`)는 매일 갱신되는
+라이브 파일이라 받지 않는다. 수집·stage·equity 설계는 `database/README.md` 참고.
 
 ## 작업 규칙
 

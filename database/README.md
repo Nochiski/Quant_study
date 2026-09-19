@@ -12,7 +12,7 @@ KRX·키움·KIS·DART·WISE 원장 수집기, stage 층 빌더, 문서층(L1) �
 | stage | 66테이블 커밋(09-05), 원장 정지 날짜까지 |
 | equity | 29표(`coverage_daily` S24 추가)·규칙 **e1.15.0**(코드 반영 09-11, 서버 첫 빌드 대기 — 아래는 e1.14.0 서버 상태)·규칙 e1.14.0(09-09 전량 재빌드로 단일화)·팩터 준비도 54/54. catalog `2c38be1d58fb03be`·contract pass, baseline 락 바이트 동일(09-09 정렬) |
 | 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` — R1~R10 승인(09-09), **P0·P1·P2 완료(키움 갭은 09-09 저녁 즉시 실행), P3 크론 가동(09-09), 관찰 1/5 통과(09-10)** — 06:00 수집·08:10 빌드 체인, 키움 단계 포함(사용자 결정: 공유 앱키로 콜). **첫 적재분 검수**(09-10): high 5·mid 9 → `docs/reviews/2026-09-10-intake-audit-summary.md`. 수집기 핫픽스 3건(WISE 커버 판정·키움 유예·DART 분기 창) 배포 `52d0f48`, 사용자 결정 3건 반영(결정 6: 키움 머지 신규 행만·KIS 최초 관측판(P5)·G3 개정). **사용자 행동 필요: 키움 앱키 추가 발급**(DECISIONS_PENDING R5 후속) |
-| 크론 | **18:05 `daily_evening.sh`**(당일: 키움 투자자·공매도 원장 직행 ∥ DART ∥ WISE 스냅샷, 플랜 v2 페이즈 A) · 18:50/09:15 `watchdog.sh` · 06:00 `daily_ledger.sh`(키움 마스터, 대차, KIS, DART 재스윕) · 08:10 `daily_build.sh --no-build`(KRX → 외국인 보유 → 머지 → 건전성) · 매시 키움 프로브(임시, 09-15 제거) |
+| 크론 | **18:05 `daily_evening.sh`**(당일: 키움 투자자·공매도는 21:05 원장 직행 ∥ DART ∥ WISE 스냅샷) · 21:20 `build_evening.sh`(잠정 빌드) · 06:00 `daily_ledger.sh`(키움 마스터, 대차, KIS, DART 재스윕) · 08:10 `daily_build.sh`(KRX → 외국인 보유 → 머지 → 건전성 → **확정 빌드 포함**, 09-17 `--no-build` 제거) · 워치독 21:50/23:30/10:00 · 토 03:30 백업 · 일 04:30 gc. 전체는 아래 "운영 (P6) → 크론 전체표" |
 
 ## 층 구조
 
@@ -141,31 +141,54 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 | 토 03:30 | `30 18 * * 5` | `backup_raw.sh` — 원장 6 DB 온라인 백업, 금요일 장마감분. 성공 시 최신 1세트만 보관(결정 9, 09-14) | 가동 |
 | 06:00 | `0 21 * * *` | `daily_ledger.sh` — 캘린더 → 키움 마스터 → 대차(ka20068) → KIS 신용 → DART 재스윕 | 가동 |
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
-| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(확정판, ≈09:20) → `daily_report.py` | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") |
-| 09:45 | `45 0 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다). 09:15 → 09:45(stage 실측 38.5분) | 가동 (09-17) |
-| 18:05 | `5 9 * * 1-5` | `daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **21:05 까지 기다렸다** 원장 직행(결정 11: KRX 애프터마켓 20:00 마감, 키움 집계 20:15 정착, kael-v3 20:05 앱키 공유 회피) | 가동 |
-| 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`, ≈22:15), 한도 21:45 | 가동 (09-17) |
+| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(**확정 빌드 포함**, 실측 종료 09:23~09:30) → `daily_report.py` | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") |
+| 10:00 | `0 1 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다). 09:45 → 10:00(DEFECT-D03: 실측 종료 09:30 에 `krx_step` 재시도 1회 +10분까지 흡수) | 가동 |
+| 18:05 | `5 9 * * 1-5` | `QL_KW_EVENING_HHMM=2105 daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **21:05 까지 기다렸다** 원장 직행(결정 11: KRX 애프터마켓 20:00 마감, 키움 집계 20:15 정착, kael-v3 20:05 앱키 공유 회피) | 가동 |
+| 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`, 실측 종료 22:38~22:41), 한도 21:45 | 가동 (09-17) |
 | 21:50 | `50 12 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
-| 23:00 | `0 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit (키움 21:05 + 빌드 21:20 + stage 38.5분 + equity 9분) | 가동 (09-17) |
+| 23:30 | `30 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 23:00 → 23:30(DEFECT-D02: 한도 21:45 에 시작한 정상 판은 stage 43~66분 + equity 9~11분이라 23:06 에 끝난다) | 가동 |
 | 22:30 | — | Kael-alpha 스코어 보고 목표(결정 11; 옛 19:00 목표는 애프터마켓으로 무효). 저녁 단축 빌드(B.1)로 ≈21:35 까지 당길 수 있다 | 예정 (페이즈 C) |
-| 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 가동 (09-11 18:50 등록) |
+| 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 빌드 락을 잡고 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 가동 (09-11 18:50 등록) |
 | ~~매시~~ | — | ~~키움 확정 시각 프로브~~ (09-16 제거 — 09-14 촘촘 프로브로 20:15 정착 확인, `data/evidence/after_market_20260914.db`) | 제거 |
+
+crontab 복구용 원문 9줄(이 표와 같은 값이다. 서버가 초기화되면 이대로 넣는다 — 예전 표는 잠정 빌드를
+18:15 로 적어 두어 그대로 복구하면 매 평일 crit 이 났다). 수집 체인 3개의 `>> logs/cron_*.log` 는
+알림 전송 실패를 사후에 확인하기 위한 것이다(DEFECT-D04, `logs/notify_failed.log` 와 짝):
+
+```cron
+0 21 * * * /bin/bash /home/kael/quant-ledger/scripts/daily_ledger.sh >> /home/kael/quant-ledger/logs/cron_daily_ledger.log 2>&1
+10 23 * * * /bin/bash /home/kael/quant-ledger/scripts/daily_build.sh >> /home/kael/quant-ledger/logs/cron_daily_build.log 2>&1
+5 9 * * 1-5 QL_KW_EVENING_HHMM=2105 /bin/bash /home/kael/quant-ledger/scripts/daily_evening.sh >> /home/kael/quant-ledger/logs/cron_daily_evening.log 2>&1
+50 12 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh evening_ledger >> logs/watchdog.log 2>&1
+0 1 * * * cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh morning_build >> logs/watchdog.log 2>&1
+20 12 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/build_evening.sh >> logs/build_evening.log 2>&1
+30 14 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh evening_build >> logs/watchdog.log 2>&1
+30 18 * * 5 cd /home/kael/quant-ledger && /bin/bash scripts/backup_raw.sh >> logs/backup_raw.log 2>&1
+30 19 * * 6 cd /home/kael/quant-ledger && /bin/bash scripts/gc.sh --apply >> logs/gc.log 2>&1
+```
+
+문서에 없던 환경변수: `QL_KW_EVENING_HHMM`(키움 저녁 수집 하한, 크론에 2105) · `QL_EVENING_BUILD_DEADLINE`
+(잠정 빌드 시작 한도, 기본 21:45) · `QL_KW_FH_NOT_BEFORE` · `QL_BACKUP_TIMEOUT` · `QL_BACKUP_ROOT` ·
+`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy).
 
 ### 원장 백업 — `scripts/backup_raw.sh`
 
-- 위치: `~/backups/quant-ledger/<YYYYMMDD>/{krx,kiwoom,kis,dart,wisereport,daily_run}.db` (`QL_BACKUP_ROOT` 로 변경). 원장 합계 18.3 GB(09-11 실측).
+- 위치: `~/backups/quant-ledger/<YYYYMMDD>/{krx,kiwoom,kis,dart,wisereport,daily_run}.db` (`QL_BACKUP_ROOT` 로 변경). 한 세트 19 GB(09-19 실측. `data/raw` 전체는 46 GB 지만 `documents/` 27 GB 는 백업 대상이 아니다).
 - 방식: `sqlite3 .backup` **온라인 백업만**(DB 당 `timeout 25m`, 외부 쓰기가 계속되면 재시작만 반복하므로). 원장이 18 GB 라 `cp`·`rsync`·하드링크는 금지고, 원장 락도 잡지
   않는다(18 GB 를 뜨는 동안 수집 체인이 막힌다). 03:30 은 어느 체인과도 겹치지 않는다.
 - 판정: DB 별로 격리해 하나가 실패해도 나머지를 끝까지 뜨고, 실패 목록을 모아 crit 한 번. 사본마다
   `PRAGMA integrity_check` 가 `ok` 여야 하며 실패한 사본은 지운다. 성공한 사본은 `journal_mode=DELETE` 로
   바꿔 WAL 잔재(`-wal`·`-shm`)를 남기지 않는다.
-- 보관: **주 1회(토요일 03:30), 최신 1세트만**(사용자 결정 9, 09-14). 이번 백업이 성공하면 이전 세트를 지운다(다음 주가 덮어쓰는 셈). 실패한 주는 이전 세트를 남긴다. 순간 최대 2세트 ≈38 GB.
+- 보관: **주 1회(토요일 03:30), 최신 1세트만**(사용자 결정 9, 09-14 — `backup_raw.sh:19 KEEP_SETS=1`). 이번 백업이 성공하면 이전 세트를 지운다(다음 주가 덮어쓰는 셈). 실패한 주는 이전 세트를 남긴다. 순간 최대 2세트 ≈38 GB. 09-19 실측 소요 8.1분, 보관 1세트 19 GB.
 - 중단 조건: 백업 대상 파일시스템 여유 < 60 GB 면 뜨기 전에 crit 후 중단.
 
 ### 로그 — `scripts/gc.sh` · `scripts/rotate_logs.sh`
 
 - 체인 로그는 `logs/<체인>_<YYYYMMDD>.log`, 저녁 슬롯의 병렬 갈래는 `logs/evening_{kiwoom,dart,wise}_<D>.log`.
-- `gc.sh`(일요일, 기본 dry-run / `--apply`): `data/stage/_tmp/doc` 캐시 삭제, `_failed` 30일 초과 삭제.
+- `gc.sh`(일요일, 기본 dry-run / `--apply`): `/tmp/quant_ledger_build.lock` 을 잡고(수동 빌드·프리패스와 겹치면
+  warn 후 rc 0 으로 물러난다 — DEFECT-D12) `data/stage/_tmp/doc` 프리패스 캐시를 **현재 stage 판이 선 스냅샷
+  + 가장 최근 1개만 남기고** 삭제, `_failed` 30일 초과 삭제. 전삭제가 아닌 이유는 캐시 재생성이 3~4.5시간이고
+  다음 증분 프리패스가 최근 캐시를 base 로 쓰기 때문이다. 보존 목록을 계산하지 못하면 아무것도 지우지 않는다.
   로그는 직접 건드리지 않고 끝에서 같은 모드로 `rotate_logs.sh` 를 호출한다(2026-09-11 자체 7일 gzip 줄 제거).
 - `rotate_logs.sh`: `*.log` 14일 초과 gzip, `*.log.gz` 90일 초과 삭제. `logs/health/**` 는 **절대 건드리지
   않는다** — 워치독과 일일 리포트가 `logs/health/<D>.json`·`stage_<D>_<basis>.json` 을 읽고, 건전성 판정이
@@ -186,3 +209,28 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 
 입력 파일이 없거나 날짜가 D 와 다르면 메시지 끝 "없음" 목록에만 적고 **등급을 올리지 않는다** —
 보고 누락 판정은 워치독(`watchdog.sh`)의 몫이다(플랜 v2 §2-1).
+
+### 배포 — `scripts/deploy.sh`
+
+저장소 `database/{src,scripts}` + `backend/src/backtest_engine/` 을 서버로 민다. 기본은 dry-run 이고
+`--apply` 만 실제로 전송한다(`rsync --delete`).
+
+- `--apply` 전 검사: ① 작업 트리가 깨끗한가 ② HEAD 가 `origin/main` 을 포함하는가 — 미머지 브랜치는
+  `--allow-branch <그 브랜치 이름>` 으로만 허용 ③ `uv run --project backend pytest database/tests -q` 통과
+  (`--skip-tests` 로 생략 가능하며 생략 사실이 서버에 남는다).
+- 전송 결과는 서버 `~/quant-ledger/DEPLOYED.json` 에 `{rev, branch, at_utc, by, tests}` 로 기록한다.
+  **드리프트 조사는 여기서 시작한다** — 서버가 어느 리비전인지 알 수 없어 운영 시간표가 조용히
+  되돌아간 사고가 있었다(DEFECT-D05).
+- 두 모드 모두 첫 줄에 "내용이 바뀔 파일 n개" 를 체크섬 기준으로 출력한다(워크트리 체크아웃은 mtime 이
+  전부 달라 크기·시각 비교로는 못 센다).
+- `_engine/backtest_engine/` 은 `equity contract` 가 대조하는 커널 사본이다. 갱신 경로가 없어 2026-09-05
+  판에서 멈춰 있었다(DEFECT-C05) — 이제 배포가 같이 민다.
+- 서버에만 있어야 하는 것(제외): 토큰 캐시 2종, `sync_v3_wise.py`, `rebuild_share.py`(정본은 `backend/ops/`).
+
+### 공유 소비자 완료 신호 — `data/{stage,equity}/_READY.json`
+
+`/srv/quant-share` 에 바인드된 것은 `raw`·`stage`·`equity` 3개뿐이라 소비자는 `data/deliver` 를 볼 수 없다.
+체인은 **stage·equity 건전성이 둘 다 ok 일 때만** 두 루트에 `_READY.json` 을 `os.replace` 로 원자 기록한다
+(`{date, basis, generated_at_utc, builds}`). 실패한 판에서는 갱신하지 않으므로 마지막 성공 판 신호가 남는다.
+빌드 중에 표별 `MANIFEST.json` 을 직접 읽으면 신·구 판이 섞인 상태를 보게 된다(DEFECT-B04) — 소비자는
+`_READY.json` 의 `builds` 맵을 읽고 그 판만 쓴다.

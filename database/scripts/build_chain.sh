@@ -2,8 +2,9 @@
 # 잠정·확정 빌드 공통 체인 — 플랜 v2 §4 Task B.1. 저녁(잠정)·아침(확정)이 같은 순서를 돈다.
 #   사용: scripts/build_chain.sh <evening|morning> --date YYYYMMDD [--dry-run]
 #   호출: scripts/build_evening.sh (21:20 KST 크론, 결정 11) · scripts/build_morning.sh (daily_build.sh 안)
-#   순서: 빌드 락 → 원장 스냅샷 5 DB → stage 전량(basis) → stage 건전성 C1~C5
-#         → equity 전량(basis) → equity catalog → 인계 JSON → 스냅샷·_pinned GC → 알림
+#   순서: 빌드 락 → 원장 스냅샷 5 DB → 문서 프리패스(있을 때) → stage 전량(basis) → stage 건전성 C1~C6
+#         → equity 전량(basis) → equity catalog → equity contract(기록형) → 인계 JSON
+#         → _READY.json 완료 신호 → 스냅샷·_pinned GC → 알림
 #   저녁·아침의 차이는 basis(빌드 id 접두어 e_/m_)·대상일·로그 디렉토리뿐이라 한 파일에 둔다.
 #   두 체인이 갈라지면 잠정판과 확정판이 조용히 다른 규칙으로 지어진다.
 #   로그: logs/<basis>/build_<D>.log (단계별 상세는 기존 위치 logs/stage_all/·logs/equity/ 그대로)
@@ -35,13 +36,16 @@ if [ -n "$DRY" ]; then
   echo "════ dry-run build_chain basis=$BASIS D=$D $(kst) ════"
   echo "  1. 빌드 락 /tmp/quant_ledger_build.lock flock -n (자식은 QL_BUILD_LOCK_HELD=1)"
   echo "  2. 스냅샷: stage.snapshot.make_snapshot(data/raw 5 DB → data/snapshots/snap_<ts>)"
-  echo "  3. stage:  scripts/run_stage_all.sh <snap> --basis $BASIS   (66표, ≈22.5분)"
-  echo "  4. 건전성: $PY -m stage.health --basis $BASIS --date $D --built-on $(TZ=Asia/Seoul date +%Y%m%d) --out logs/health/stage_${D}_${BASIS}.json"
-  echo "  5. equity: scripts/equity_rebuild_all.sh $BASIS --basis $BASIS   (29표, ≈8분)"
-  echo "  6. 카탈로그: $PY -m equity catalog"
-  echo "  7. 인계:   data/deliver/latest_${BASIS}.json + data/deliver/history/${D}_${BASIS}.json"
-  echo "  8. GC:     stage.snapshot.gc(keep=6, protect=현재 판이 선 snapshot_id) + equity.inputs.gc_pinned(이력 30일·월말 보호)"
-  echo "  9. 알림:   info \"$LABEL 준비 hh:mm\" (실패 단계에서 crit)"
+  echo "  3. 문서:   scripts/doc_prepass_daily.sh <snap>   (스크립트가 있을 때만·기록형)"
+  echo "  4. stage:  scripts/run_stage_all.sh <snap> --basis $BASIS   (62표 — doc 4표는 skipped.txt, 실측 43~66분)"
+  echo "  5. 건전성: $PY -m stage.health --basis $BASIS --date $D --built-on $(TZ=Asia/Seoul date +%Y%m%d) --out logs/health/stage_${D}_${BASIS}.json"
+  echo "  6. equity: scripts/equity_rebuild_all.sh $BASIS --basis $BASIS   (29표, 실측 9~11분)"
+  echo "  7. 카탈로그: $PY -m equity catalog"
+  echo "  8. 계약:   $PY -m equity contract --engine-src \$QL_HOME/_engine   (기록형 — 판정에 넣지 않는다)"
+  echo "  9. 인계:   data/deliver/latest_${BASIS}.json + data/deliver/history/${D}_${BASIS}.json"
+  echo " 10. 완료신호: data/stage/_READY.json · data/equity/_READY.json   (stage·equity 둘 다 ok 일 때만)"
+  echo " 11. GC:     stage.snapshot.gc(keep=3 = snapshot.KEEP_DEFAULT, protect=현재 판이 선 snapshot_id) + equity.inputs.gc_pinned(이력 30일·월말 보호)"
+  echo " 12. 알림:   info \"$LABEL 준비 hh:mm\" (실패 단계에서 crit)"
   echo "════ dry-run 종료 (원장·스냅샷·판 무변경, 알림 없음) ════"
   exit 0
 fi
@@ -60,6 +64,7 @@ mkdir -p "logs/$BASIS" logs/health data/deliver/history
 LOG="logs/$BASIS/build_${D}.log"
 RUN=$(mktemp)
 FAILED=""
+FAILED_SOFT=""     # 기록형 단계(문서 프리패스·소비자 계약) — warn 만 내고 판정·rc 는 건드리지 않는다
 SNAP=""; STARTED_ISO=""; STAGE_S=0; EQUITY_S=0; H_STAGE="fail"; H_EQUITY="fail"
 step() {
   local name="$1"; shift
@@ -67,6 +72,16 @@ step() {
   "$@"; local rc=$?
   echo "──── $name 종료 rc=$rc $(kst) ────"
   if [ "$rc" -ne 0 ]; then FAILED="$FAILED $name(rc=$rc)"; return 1; fi
+  return 0
+}
+step_soft() {
+  # 판이 서는지와 무관한 단계. 실패해도 H_* 도 rc 도 안 바꾸고 FAILED_SOFT 에만 남긴다 —
+  # 문서 프리패스가 없어서, 또는 엔진 사본이 낡아서 확정판을 못 내보내는 일은 없어야 한다.
+  local name="$1"; shift
+  echo "──── $name 시작 $(kst) ────"
+  "$@"; local rc=$?
+  echo "──── $name 종료 rc=$rc $(kst) ────"
+  if [ "$rc" -ne 0 ]; then FAILED_SOFT="$FAILED_SOFT $name(rc=$rc)"; fi
   return 0
 }
 snapshot_step() {
@@ -108,6 +123,9 @@ health_step() {
 }
 equity_step() { scripts/equity_rebuild_all.sh "${BASIS}_${D}" --basis "$BASIS"; }   # 로그 logs/equity/rebuild_<basis>_<D>/
 catalog_step() { $PY -m equity catalog; }
+# EGC 소비자 계약 — 커널 어댑터(`_engine/backtest_engine`)가 이 판을 읽을 수 있는지 본다(DEFECT-C05).
+# `_engine` 은 deploy.sh 가 저장소 backend/src/backtest_engine/ 에서 민다.
+contract_step() { $PY -m equity contract --engine-src "$QL_HOME/_engine"; }
 deliver_step() {
   # Kael-alpha·워치독이 읽는 인계 파일. latest_* 는 덮어쓰고 history/ 는 영구 보관한다(B.3 ①층).
   $PY - "$D" "$BASIS" "$SNAP" "$STAGE_S" "$EQUITY_S" "$H_STAGE" "$H_EQUITY" <<'PY'
@@ -156,8 +174,42 @@ else:
           f"latest_{basis}.json 은 마지막 성공 판 유지)")
 PY
 }
+ready_step() {
+  # 공유 소비자(상목 SFTP)는 `data/deliver` 를 볼 수 없다 — 바인드된 것은 raw·stage·equity 3개뿐이라
+  # 표별 MANIFEST.json 을 직접 읽을 수밖에 없고, 빌드가 도는 중인지 끝났는지 알 방법이 없었다(DEFECT-B04).
+  # 두 루트에 완료 신호를 원자 기록한다. 실패 판에서는 부르지 않으므로 마지막 성공 판 신호가 남는다.
+  $PY - "$D" "$BASIS" <<'PY'
+import datetime as dt
+import json
+import os
+import sys
+from pathlib import Path
+
+date, basis = sys.argv[1], sys.argv[2]
+stamp = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def current_builds(root: Path) -> dict[str, str]:
+    """표 → 현재 판 build_id. deliver_step 과 같은 규약(MANIFEST 포인터가 정본)."""
+    out: dict[str, str] = {}
+    for path in sorted(root.glob("*/MANIFEST.json")):
+        cur = json.loads(path.read_text(encoding="utf-8")).get("current_build")
+        if cur:
+            out[path.parent.name] = cur
+    return out
+
+
+for root in (Path("data/stage"), Path("data/equity")):
+    payload = {"date": date, "basis": basis, "generated_at_utc": stamp,
+               "builds": current_builds(root)}
+    tmp = root / "_READY.json.tmp"
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, root / "_READY.json")       # 부분 기록을 읽히지 않는다
+    print(f"  완료 신호 {root}/_READY.json {len(payload['builds'])}표 basis={basis} {stamp}")
+PY
+}
 gc_step() {
-  # ① 원장 스냅샷 GC(keep=6, 현재 stage 판이 선 스냅샷 보호)
+  # ① 원장 스냅샷 GC(keep=3 = snapshot.KEEP_DEFAULT, 현재 stage 판이 선 스냅샷 보호 — 결정 9)
   # ② equity `_pinned/` GC(플랜 v2 §4 B.3 ③) — 인계 이력 `data/deliver/history/*.json` 이 가리키는
   #    stage 판을 30일간, 월말 확정판(그 달의 마지막 morning 판)은 영구 보호한다. 참조된 stage 판이
   #    남아 있으면 equity 판이 keep 밖으로 지워진 뒤에도 같은 입력으로 재빌드(EG5a)해 스코어를 되짚을 수 있다.
@@ -218,18 +270,30 @@ PY
 echo "════ [$(kst)] build_chain basis=$BASIS D=$D 시작 ════"
 T0=$(date +%s)
 STARTED_ISO=$(date -u +%FT%TZ)
-if step "스냅샷" snapshot_step && step "stage 전량" stage_step; then
-  STAGE_S=$(( $(date +%s) - T0 ))
-  if step "stage 건전성" health_step; then H_STAGE="ok"; fi
+if step "스냅샷" snapshot_step; then
+  # 문서층 증분 프리패스(갈래 5). 스크립트가 없거나 실패하면 stg_doc_* 4표가 종전대로
+  # skipped.txt 로 빠질 뿐이라 체인은 계속 간다 — 기록형이다.
+  [ -x scripts/doc_prepass_daily.sh ] && step_soft "doc prepass" bash scripts/doc_prepass_daily.sh "$SNAP"
+  if step "stage 전량" stage_step; then
+    STAGE_S=$(( $(date +%s) - T0 ))
+    if step "stage 건전성" health_step; then H_STAGE="ok"; fi
+  fi
 fi
 if [ "$H_STAGE" = "ok" ]; then
   T1=$(date +%s)
   if step "equity 전량" equity_step && step "equity catalog" catalog_step; then H_EQUITY="ok"; fi
   EQUITY_S=$(( $(date +%s) - T1 ))
+  # 계약은 판이 선 뒤에만 의미가 있다. 실패해도 판은 쓸 수 있으므로 elapsed·판정에서 뺀다.
+  [ "$H_EQUITY" = "ok" ] && step_soft "equity contract" contract_step
 else
   echo "  stage 건전성 실패 — equity 는 어제 판을 유지한다(잘못된 stage 위에 짓지 않는다)"
 fi
 step "인계 파일" deliver_step
+if [ "$H_STAGE" = "ok" ] && [ "$H_EQUITY" = "ok" ]; then
+  step "완료 신호" ready_step
+else
+  echo "  _READY.json 갱신 안 함 (stage=$H_STAGE equity=$H_EQUITY) — 소비자는 마지막 성공 판 신호를 계속 본다"
+fi
 step "스냅샷 GC" gc_step
 echo "════ 종료 stage=$H_STAGE equity=$H_EQUITY ${STAGE_S}s+${EQUITY_S}s $(kst) ════"
 } > "$RUN" 2>&1
@@ -246,6 +310,10 @@ if [ "$H_STAGE" != "ok" ] || [ "$H_EQUITY" != "ok" ] || [[ "$FAILED" == *"인계
 fi
 scripts/notify.sh info "$LABEL 준비 $(TZ=Asia/Seoul date +%H:%M)" \
   "$LABEL D=$D 준비 완료 (stage $((STAGE_S / 60))분 · equity $((EQUITY_S / 60))분) | $SUMMARY"
+if [ -n "$FAILED_SOFT" ]; then
+  scripts/notify.sh warn "$LABEL 기록형 단계 실패:$FAILED_SOFT" \
+    "판정에는 넣지 않는다(문서 프리패스·소비자 계약) — $SUMMARY | 로그 $LOG"
+fi
 if [ -n "$FAILED" ]; then
   scripts/notify.sh warn "$LABEL 빌드 부분 실패: $FAILED" "판은 준비됐으나 후처리가 실패했다 — $SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 1

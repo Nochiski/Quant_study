@@ -3,6 +3,8 @@
 #   사용: scripts/notify.sh <crit|warn|info> <title> [body]
 #   · 같은 title 은 30분 쿨다운(/tmp/ql_notify_<hash>) — crit 은 쿨다운 없이 항상 보낸다
 #   · 토큰·채팅방 ID 는 QL_ENV(없으면 ~/kael-system-v3/.env)에서 BOT_TOKEN·CHAT_ID_LOG 만 읽는다
+#   · 전송 실패는 stderr 뿐 아니라 logs/notify_failed.log 에도 한 줄 남긴다(DEFECT-D04) —
+#     수집 체인 3개는 크론 리다이렉트가 없어 stderr 가 버려지므로, 그 파일이 유일한 사후 증거다
 #   · v3 infra/gpu_alert.sh 의 패턴을 그대로 옮겼다(실측으로 동작이 확인된 최소 구현)
 set -uo pipefail
 LEVEL="${1:?usage: notify.sh <crit|warn|info> <title> [body]}"
@@ -45,6 +47,12 @@ if [ "$CRC" -eq 0 ] && printf '%s' "$RESP" | grep -q '"ok":true'; then
   touch "$STAMP"
   echo "notify: sent ($LEVEL: $TITLE)"
 else
+  # stderr 는 호출부(크론 리다이렉트 없는 체인)에서 버려진다 — "알림이 나가지 않았다" 는 사실을 파일로 남긴다.
+  # 호출부 6곳이 전부 rc 를 안 보므로 이 줄이 없으면 침묵이 흔적 없이 지나간다(D04).
+  FAIL_LOG="${QL_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)}/logs/notify_failed.log"
+  mkdir -p "$(dirname "$FAIL_LOG")" 2>/dev/null
+  printf '%s %s %s curl_rc=%s resp=%s\n' "$(date -u +%FT%TZ)" "$LEVEL" "$TITLE" "$CRC" \
+    "$(printf '%s' "${RESP:0:200}" | tr '\n\t' '  ')" >> "$FAIL_LOG" 2>/dev/null
   echo "notify: send failed ($LEVEL: $TITLE) curl_rc=$CRC resp=${RESP:0:200}" >&2
   exit 1
 fi

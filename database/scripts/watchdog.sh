@@ -3,8 +3,8 @@
 #   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build>
 #   예정 크론(서버 TZ=UTC. 등록은 오케스트레이터가 한다):
 #     50 12 * * 1-5 cd /home/kael/quant-ledger && scripts/watchdog.sh evening_ledger   # 21:50 KST (결정 11: 키움 저녁 수집 21:05)
-#     0 14 * * 1-5  cd /home/kael/quant-ledger && scripts/watchdog.sh evening_build    # 23:00 KST (키움 21:05 + 빌드 21:20 + stage 30~50분 + equity 8분)
-#     45 0 * * *    cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 09:45 KST 매일 (09-17: stage 38.5분 + equity 9분 → 확정판 ≈09:20) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
+#     30 14 * * 1-5 cd /home/kael/quant-ledger && scripts/watchdog.sh evening_build    # 23:30 KST (D02: 빌드 시작 한도 21:45 + stage 실측 43~66분 + equity 9~11분 = 상한 23:06. 옛 23:00 은 한도에 시작한 정상 판을 오탐했다)
+#     0 1 * * *     cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 10:00 KST 매일 (D03: 08:10 시작 + 실측 종료 09:23~09:30, krx_step 재시도 1회 +10분까지 흡수. 옛 09:45 은 여유 14.6분) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
 #   휴장일(오늘 KST)은 info 후 rc 0. 스코어 워치독은 페이즈 C 에서 case 에 추가한다.
 set -uo pipefail
@@ -14,8 +14,8 @@ PY=.venv/bin/python
 CHECK="${1:?usage: watchdog.sh <evening_ledger|evening_build|morning_build>}"
 case "$CHECK" in
   evening_ledger) TITLE_OK="watchdog evening_ledger 정상"; TITLE_BAD="watchdog: 21:50 까지 저녁 원장 보고 없음/실패" ;;
-  evening_build)  TITLE_OK="watchdog evening_build 정상";  TITLE_BAD="watchdog: 23:00 까지 잠정판 보고 없음/실패" ;;
-  morning_build)  TITLE_OK="watchdog morning_build 정상";  TITLE_BAD="watchdog: 09:45 까지 확정 빌드 보고 없음/실패" ;;
+  evening_build)  TITLE_OK="watchdog evening_build 정상";  TITLE_BAD="watchdog: 23:30 까지 잠정판 보고 없음/실패" ;;
+  morning_build)  TITLE_OK="watchdog morning_build 정상";  TITLE_BAD="watchdog: 10:00 까지 확정 빌드 보고 없음/실패" ;;
   *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build)" >&2; exit 2 ;;
 esac
 TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
@@ -71,7 +71,14 @@ if check == "evening_ledger":
     bad = [k for k in ("kiwoom_rc", "wise_rc") if rep.get(k) != 0]
     if bad:
         out("", f"실패/미완 단계 {', '.join(bad)} — {summary}", 1)
-    out(fin.replace(" ", "T").split("T")[-1][:5], summary, 0)
+    # finished_at 은 UTC 다(daily_evening.sh 가 dt.datetime.now(dt.UTC) 로 쓴다) — 제목 시각은 KST 로 바꾼다.
+    # 아래 evening_build 와 같은 규약이다. 문자열을 그대로 자르면 21:19 종료가 12:19 로 보인다(D06).
+    try:
+        stamp = dt.datetime.strptime(fin, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=dt.timezone.utc).astimezone(KST).strftime("%H:%M")
+    except ValueError:
+        stamp = ""
+    out(stamp, summary, 0)
 
 if check == "evening_build":
     # 18:15 잠정 빌드가 남긴 인계 파일. stage·equity 둘 다 ok 여야 Kael-alpha 가 스코어를 낼 수 있다.
@@ -156,6 +163,9 @@ PY
 RC=$?
 STAMP=$(printf '%s\n' "$OUT" | head -1)
 BODY=$(printf '%s\n' "$OUT" | tail -n +2 | tr '\n' ' ' | cut -c1-900)
+# 알림 자체가 죽으면 판정 결과도 같이 사라진다 — notify.sh 가 남긴 실패 줄을 세어 본문에 싣는다(D04).
+NOTIFY_FAILED=$(awk -v since="$(date -u -d '24 hours ago' +%FT%TZ)" '$1 >= since' logs/notify_failed.log 2>/dev/null | wc -l | tr -d ' ')
+BODY="$BODY | 알림 실패(24h) ${NOTIFY_FAILED:-0}건"
 if [ "$RC" -eq 0 ]; then
   scripts/notify.sh info "$TITLE_OK ${STAMP:-$(TZ=Asia/Seoul date +%H:%M)}" "$BODY"
   exit 0

@@ -27,7 +27,7 @@
 | G-E 리뷰 | **완료** | 차단 2·권장 17 → 차단 2 + 권장 10건 배포 전 반영(3c058cc), 나머지 TECH_DEBT B-32~B-38 |
 | 배포(G-B) | **완료 09-19 20:26 KST** | rev 319efeb, `DEPLOYED.json` tests=ok, 체크섬 동일, 크론 5줄 갱신, MANIFEST 백업 `~/backups/quant-ledger/manifests_20260919_pre_audit_fix.tgz` |
 | 서버 단계 ②~⑤ | **완료 23:38 KST** | equity 수동 재빌드 29/29(547s, e1.16.0), fin_std 8/31 이후 14행 전부 document(추정 0), EG5c pass(n_diff 0 — 재승인 불필요), EG21 마진 0.999 vs 0.8, opinion_daily skip(no_coverage), equity baseline 설치(백업 .bak_pre_e116_20260919) |
-| 실전 게이트(G-C-1) | **진행 중 23:39 KST~** | `build_chain.sh morning --date 20260918` 수동 실행(`logs/morning/manual_audit_20260919.out`) |
+| 실전 게이트(G-C-1) | **통과 09-20 01:56 KST** | 1차(23:39) C4 실패 — E08 규칙 변경에 판본 미상승, C4 가 맞게 잡음 → stage 2.3.0 + C4 rules_changed 제외(8c2fc6c) → 2차(00:43) rc 0: 건전성 6/6·equity 29/29·EG21 pass·contract pass·`_READY.json` |
 | 실전 게이트(G-C-2) | 대기 | §4 순서: 배포 → 문서층 4표 → equity baseline scp → stage baseline --only → 수동 equity 재빌드 + EG5c 재승인(e1.16.0) → `build_chain.sh morning --date 20260918` |
 
 ## 1. 검증 게이트 (전 갈래 공통)

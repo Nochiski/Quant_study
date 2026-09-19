@@ -188,6 +188,14 @@ SECURITY = register(EquityTable(
     columns={"ticker": "VARCHAR", "corp_code": "VARCHAR", "isin": "VARCHAR",
              "name_current": "VARCHAR", "sec_type": "VARCHAR", "list_date": "DATE",
              "list_date_basis": "VARCHAR", "delist_date_krx": "DATE",
+             # `delist_date_kis` 의 원천 `stg_delisted_master`(= `kis.kis_stock_info`)는 **일일
+             # 체인에 없다** — KIS 단계는 신용잔고 하나뿐이다(`daily_ledger.sh`, 플랜 R10).
+             # 652행 전건이 `collected_at = 2026-08-26` 단일 조회이고, 09-19 실측
+             # `max(delist_date_kis) = 2026-08-18` vs `max(delist_date_krx) = 2026-09-17` 다.
+             # 폐지 보완 소스로 쓰던 축이 그 뒤로 무효이고 `delist_conflict` 13종목의 판정
+             # 근거도 한쪽만 신선한 비대칭 상태다(DEFECT-E06, 2026-09-19 감사). 정본은 KRX
+             # (`delist_date_krx`)이고 `delist_date` 는 coalesce 라 KRX 가 있으면 영향이 없다 —
+             # 위험은 KRX 가 놓친 폐지(비상장 이관 등)를 KIS 로 메우는 설계가 조용히 멈춘 것이다.
              "delist_date_kis": "DATE", "delist_conflict": "BOOLEAN", "delist_date": "DATE",
              "delist_date_basis": "VARCHAR"},
     inputs=("stg_listing_daily", "stg_etf_price_daily", "stg_delisted_master",

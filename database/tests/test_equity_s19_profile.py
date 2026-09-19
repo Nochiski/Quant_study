@@ -51,9 +51,12 @@ CHAIN: tuple[str, ...] = (
 # 2026-09-07 S02-2: `benchmark.close` 선언(75 → 76, R04 시장 베타).
 # 2026-09-08 병렬 4슬라이스: revenue_basis·revenue_basis_prev(내부 2) + pension_net_buy(대응표 1)
 # → 79.
-N_FIELDS = 79                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+# 2026-09-19 감사 DEFECT-E02: KIS 축 4(flow 2 · short 2)를 **내부 스코프**로 선언 → 83.
+# 카탈로그만 보는 소비자에게 원천 정지(2026-08-14)를 `coverage_to` 로 알리는 것이 목적이고,
+# FIELD_MAP §2 어휘·어댑터 `list_fields()` 는 그대로다.
+N_FIELDS = 83                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
 N_FIELD_MAP_SCOPE = 35           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
-N_INTERNAL_SCOPE = 44            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
+N_INTERNAL_SCOPE = 48            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
 N_FIELD_MAP_VOCAB = 45           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
                                  # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
 PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG2_dataset_profile", "EG9", "EG4", "EG5a"]
@@ -227,7 +230,7 @@ def test_격자_3테이블은_어댑터가_내는_6필드만_선언한다(built)
                             "frequency, available_date_basis, recommended_lag_sessions, "
                             "recommended_lag_days, point_in_time, coverage_basis "
                             "FROM dp WHERE table_name IN ('flow_daily', 'short_daily', "
-                            "'credit_daily') ORDER BY 1")
+                            "'credit_daily') AND field_scope = 'field_map' ORDER BY 1")
     assert {r0[0] for r0 in rows} == set(GRID_FIELDS)
     for field_id, table, col, unit, value_type, freq, basis, lag_s, lag_d, pit, cov in rows:
         assert (table, col, unit, value_type) == GRID_FIELDS[field_id], field_id
@@ -255,7 +258,7 @@ def test_격자_필드에_미결_조건이_남지_않았다(built) -> None:
     _, r = built
     got = dict(_rows(r.out_dir, "SELECT field_id, requires_confirmation FROM dp "
                                 "WHERE table_name IN ('flow_daily', 'short_daily', "
-                                "'credit_daily') ORDER BY 1"))
+                                "'credit_daily') AND field_scope = 'field_map' ORDER BY 1"))
     assert {k for k, v in got.items() if v} == set()
 
 

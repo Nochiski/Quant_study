@@ -477,7 +477,14 @@ STG_DISCLOSURE = TableRule(
     fanout=1,
     payload_exclude=_LEDGER_META,
     lag_known=False,
-    available=AvailableRule("column", column="rcept_dt", basis="measured"),
+    # E08(09-19 감사): 원천 `rcept_dt` 를 무검증으로 승격하면 원천 오타가 그대로 PIT 축이 된다.
+    # ① `rcept_dt` 가 접수번호 접두(=DART 규약상 접수일, SPEC §2-19)보다 **과거**인 행이 원장 전수
+    #    12,697행·164사 실재한다(박셀바이오 정기보고서는 최소 −654일). 그 판본이 DART 에 존재한
+    #    것은 접수번호 날짜부터이므로 rcept_dt 를 그대로 쓰면 **look-ahead** 다.
+    # ② 반대로 **미래**로 들어온 오타도 실재한다(rcept_no 20260918000503 / rcept_dt 20260921).
+    # 둘 중 **늦은 쪽**을 쓴다 — 양방향 모두 보수적이다(늦게 보일 뿐 앞당겨 보이지 않는다).
+    available=AvailableRule("greatest_ymd8", column="rcept_dt", fallback_column="rcept_no",
+                            basis="measured"),
     key_unique=False,        # append_only: 재수집 판본은 G6 축 (§7). S1b 실측 충돌 0
     extras=(
         ExtraColumn("is_correction", "s.\"report_nm\" LIKE '[%정정]%'"),

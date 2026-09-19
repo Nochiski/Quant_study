@@ -362,6 +362,27 @@ def _current_build_glob(stage_root: Path, table: str) -> str:
     return str(stage_root / table / f"v={m.current_build}" / "**" / "*.parquet")
 
 
+def _recorded_metrics(con: duckdb.DuckDBPyConnection, rule: TableRule, view: str
+                      ) -> dict[str, object]:
+    """판정하지 않는 기록형 지표 — G3 metrics 에 실린다. 원천 품질이 움직이면 여기서 보인다."""
+    a = rule.available
+    if a.kind != "greatest_ymd8" or a.column is None or a.fallback_column is None:
+        return {}
+    col, pfx = _q(a.column), _ymd8_prefix_sql(a.fallback_column)
+    # E08: 접두보다 과거인 행은 available 을 **뒤로 밀었고**(look-ahead 차단), 미래인 행은 그대로다.
+    row = con.execute(f"SELECT count(*) FILTER (WHERE {col} < {pfx}), "
+                      f"count(*) FILTER (WHERE {col} > {pfx}) FROM {view}").fetchone()
+    if row is None:
+        return {}
+    return {"n_rcept_dt_before_no_prefix": int(str(row[0])),
+            "n_rcept_dt_after_no_prefix": int(str(row[1]))}
+
+
+def _ymd8_prefix_sql(column: str) -> str:
+    """텍스트 컬럼 앞 8자리를 DATE 로. 읽히지 않으면 NULL (E08 — 접수번호 접두 = 접수일)."""
+    return f"TRY_CAST(try_strptime(substr({_q(column)}, 1, 8), '%Y%m%d') AS DATE)"
+
+
 def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
                    stage_root: Path) -> tuple[str, str]:
     """(SELECT 절 조각, JOIN 절 조각). available_date·available_basis 두 컬럼을 낸다."""
@@ -373,6 +394,15 @@ def _available_sql(rule: TableRule, con: duckdb.DuckDBPyConnection,
         fb = _q(a.fallback_column)      # §6 v3 revision: collected_date NULL 행 → base_date/default
         basis = f"CASE WHEN {col} IS NULL THEN 'default' ELSE '{a.basis}' END"
         return f"COALESCE({col}, {fb}) AS available_date, {basis} AS available_basis", ""
+    if a.kind == "greatest_ymd8":
+        # 날짜 컬럼과 "앞 8자리가 YYYYMMDD 인 텍스트 컬럼" 중 **늦은 쪽**. 원천 날짜 오타가
+        # available 을 앞당기는(=look-ahead) 방향을 막는다 (E08 — rules_dart.STG_DISCLOSURE).
+        # 접두가 날짜로 안 읽히면 날짜 컬럼을 그대로 쓴다.
+        if a.column is None or a.fallback_column is None:
+            raise ValueError(f"greatest_ymd8 needs column and fallback_column: table={rule.name}")
+        col, pfx = _q(a.column), _ymd8_prefix_sql(a.fallback_column)
+        return ((f"greatest({col}, COALESCE({pfx}, {col})) AS available_date, "
+                 f"'{a.basis}' AS available_basis"), "")
     if a.kind == "lookup":
         if not (a.table and a.local_key and a.lookup_key and a.lookup_value):
             raise ValueError(f"incomplete lookup rule: table={rule.name} available={a}")
@@ -537,6 +567,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
         # NULL(available 비부여 표)이면 None 을 싣고 C6 가 사유와 함께 건너뛴다.
         max_available_date = _max_date(con, "stage_pq", "available_date")
         max_observed_date = _max_date(con, "stage_pq", "observed_date")
+        recorded = _recorded_metrics(con, rule, "stage_pq")
 
         fpath = fixtures_path or (stage_root / "fixtures" / f"{rule.name}.json")
         fixtures = json.loads(fpath.read_text(encoding="utf-8")) if fpath.exists() else None
@@ -548,7 +579,8 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             n_src=n_src, n_dedup=n_dedup, n_dedup_same_day=n_dedup_same_day, n_reject=n_reject, n_stage=n_stage,
             thresholds=thresholds, fixtures=fixtures, baseline=baseline,
             previous_g1=_previous_g1(table_root), cross_alias=cross_alias, current_year=now_year,
-            lookup_miss=lookup_miss, parse_metrics=parse_metrics)
+            lookup_miss=lookup_miss, parse_metrics=parse_metrics,
+            recorded_metrics=recorded)
         results = gates.run_all(ctx)
         gate_dicts = [g.as_dict() for g in results]
         failed = [g for g in results if g.status is gates.GateStatus.FAIL]

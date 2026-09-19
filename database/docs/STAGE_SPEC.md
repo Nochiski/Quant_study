@@ -399,6 +399,25 @@ look-ahead다. 정기보고서는 마감일(3월 말)에 몰리므로 그날 전
 
 ~~**규칙: `available_at = rcept_dt + 1영업일 09:00`.**~~ `[→ DESIGN 결정 ⑥: available_date = rcept_dt 그대로(사실), +1영업일 랙은 dataset_profile·엔진. rcept_no[:8] 폴백은 v2.2 에서 폐기 — 미스는 NULL]` 시각을 얻을 방법이 없다는 관찰은 유효하다.
 
+**정정 (2026-09-19 감사 DEFECT-E08) — `stg_disclosure` 는 둘 중 늦은 쪽을 쓴다.**
+`available_date = greatest(rcept_dt, rcept_no[:8])`. 근거는 원장 전수 실측 두 가지다.
+
+```
+dart_disclosure 전수
+  rcept_dt < rcept_no[:8]   12,697행 · 164사   (대부분 자산운용사 펀드 공시)
+      예: 박셀바이오(01335851) 정기보고서 8건 — rcept_no 20250828000123 / rcept_dt 20231113 (−654일)
+  rcept_dt > rcept_no[:8]   실재 (09-18 스윕 1행)
+      rcept_no 20260918000503 / rcept_dt 20260921 — 엠젠솔루션, 같은 날 다른 4건은 20260918 정상
+```
+
+`rcept_dt` 를 무검증으로 승격하면 위쪽 12,697행이 **최대 654일 look-ahead** 가 된다 — 그 판본이
+DART 에 존재한 것은 접수번호 날짜부터인데 "2023-11-13 에 알 수 있었다" 가 되기 때문이다.
+아래쪽 오타는 반대로 보수적이라 그대로 둔다(그 공시는 2026-09-21 까지 `available_date <= t` 에
+안 잡힌다 — 사라지는 게 아니라 늦게 보인다). **`greatest` 는 양방향 모두 보수적이다.**
+갭 분포는 기록형 지표 `n_rcept_dt_before_no_prefix`·`n_rcept_dt_after_no_prefix` 로 G3 metrics 에
+남는다(판정 안 함). 위 elestock 136행 관찰(전건 rcept_dt 가 뒤)은 그대로 유효하다 —
+`stg_holder_elestock`·`stg_holder_majorstock` 은 접두보다 과거인 사례가 없어 종전 규칙을 유지한다.
+
 ### 2-20. KRX 가용시각은 T+1 08:00이다
 
 `data/evidence/krx_timing.db` 프로브 154행 (2026-09-02 `data/raw/` 에서 이동 — 측정 종료,

@@ -49,7 +49,7 @@ def _krx(tmp_path, *, statuses="ok", stk=942, ksq=1820, kospi=51, kosdaq=40, etf
     return str(tmp_path / "krx.db")
 
 
-def _kw(tmp_path, *, n=2563, stale=250, cross_bad=0):
+def _kw(tmp_path, *, n=2563, stale=250, cross_bad=0, vol_bad=0):
     con = sqlite3.connect(tmp_path / "kiwoom.db")
     for tbl in ("ka10008_foreign_holdings", "ka10060_investor_flows", "ka20068_lending_balance", "ka10014_short_selling"):
         con.execute(f"CREATE TABLE {tbl} (ticker TEXT, dt TEXT, poss_stkcnt TEXT, close_pric TEXT, trde_qty TEXT)")
@@ -59,7 +59,8 @@ def _kw(tmp_path, *, n=2563, stale=250, cross_bad=0):
         prev = "100"
         today = "100" if i < stale else "101"
         close = "-1000" if i >= cross_bad else "-999"
-        rows_today.append((tk, D, today, close, "10")); rows_prev.append((tk, DP, prev, "-1000", "10"))
+        vol = "10" if i >= vol_bad else "11"
+        rows_today.append((tk, D, today, close, vol)); rows_prev.append((tk, DP, prev, "-1000", "10"))
     for tbl in ("ka10008_foreign_holdings", "ka10060_investor_flows", "ka20068_lending_balance"):
         con.executemany(f"INSERT INTO {tbl} VALUES (?,?,?,?,?)", rows_today + rows_prev)
     con.executemany("INSERT INTO ka10014_short_selling VALUES (?,?,?,?,?)", rows_today[:2200] + rows_prev[:2250])
@@ -148,10 +149,18 @@ def test_kiwoom_relative_gates_and_cross_source(tmp_path):
 
 
 def test_kiwoom_contamination_and_cross_mismatch_fail(tmp_path):
-    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path, stale=2540, cross_bad=1)))
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path, stale=2540, vol_bad=1)))
     c = _by(rep)
     assert c["kiwoom.ka10008.stale_pct"].status is lh.Status.FAIL     # 99.1%
-    assert c["kiwoom.krx_cross"].status is lh.Status.FAIL and c["kiwoom.krx_cross"].value["same_close"] == 2562
+    assert c["kiwoom.krx_cross"].status is lh.Status.FAIL and c["kiwoom.krx_cross"].value["same_vol"] == 2562
+
+
+def test_kiwoom_cross_close_mismatch_is_recorded_only(tmp_path):
+    # 09-14 애프터마켓 뒤 키움 종가는 장후 체결가 — 종가만 다르면 PASS, 수는 기록(결정 11)
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path, stk=2563), kiwoom=_kw(tmp_path, cross_bad=1)))
+    c = _by(rep)
+    assert c["kiwoom.krx_cross"].status is lh.Status.PASS
+    assert c["kiwoom.krx_cross"].value == {"matched": 2563, "same_close": 2562, "same_vol": 2563}
 
 
 def test_report_json_roundtrip(tmp_path):

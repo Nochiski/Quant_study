@@ -63,15 +63,38 @@ def _result(name: str, checks: dict[str, int], metrics: dict[str, object],
 
 
 # ── corp ─────────────────────────────────────────────────────────────────────
+COMPANY_MISSING_ABS_MAX = 20        # 회사 정보 미수집 corp 허용 상한(건) — 아래 비율과 큰 쪽
+COMPANY_MISSING_RATIO_MAX = 0.01    # 전체 corp 대비 1%
+
+
 def eg3_corp(ctx: EquityGateContext) -> GateResult:
-    """EG3-P08(`induty_code` 공란 0) + `induty_class` 어휘 폐쇄. `fiscal_month` 결측은 기록형."""
+    """EG3-P08(`induty_code` 공란 0) + `induty_class` 어휘 폐쇄. `fiscal_month` 결측은 기록형.
+
+    공란은 두 종류로 가른다(2026-09-13): ① `stg_company` 에 행이 있는데 업종이 공란 — 원천 결함, 폐기형
+    ② `stg_corp_map` 에는 있는데 `stg_company` 관측이 아직 없는 corp — 신규 상장사가 유니버스에 들어온 뒤
+    회사 정보를 받기 전 상태. 09-12 확정 빌드에서 5곳(기도산업 등)이 ②로 표 전체를 폐기시켰다. ②는
+    `n_company_missing` 으로 기록하고 상한(max(20건, 1%))을 넘을 때만 폐기한다. 공백 메우기는 06:00 체인의
+    `scripts/dart_company_gap.sh` 몫이다(TECH_DEBT B-21).
+    """
     v = ctx.out_view
+    n_blank = _n(ctx, f"SELECT count(*) FROM \"{v}\" WHERE coalesce(trim(induty_code), '') = ''")
+    missing_rows = ctx.con.execute(
+        "SELECT DISTINCT m.corp_code FROM stg_corp_map m "
+        "LEFT JOIN (SELECT DISTINCT corp_code FROM stg_company) c USING (corp_code) "
+        "WHERE c.corp_code IS NULL ORDER BY 1").fetchall()
+    missing = [str(r[0]) for r in missing_rows]
+    n_corp = _n(ctx, f"SELECT count(*) FROM \"{v}\"")
+    limit = max(COMPANY_MISSING_ABS_MAX, int(n_corp * COMPANY_MISSING_RATIO_MAX))
     checks = {
-        "n_induty_code_blank": _n(ctx, f"SELECT count(*) FROM \"{v}\" "
-                                       "WHERE coalesce(trim(induty_code), '') = ''"),
+        # 회사 정보가 있는데 업종이 공란인 corp 만 폐기형 — 미수집 corp 의 공란은 아래 기록형으로 뺀다
+        "n_induty_code_blank": max(n_blank - len(missing), 0),
         "n_induty_class_outside_vocab": _outside_vocab(ctx, "induty_class", INDUTY_CLASS_VOCAB),
+        "n_company_missing_over_limit": int(len(missing) > limit),
     }
     metrics: dict[str, object] = {
+        "n_company_missing": len(missing),
+        "company_missing_sample": missing[:20],
+        "company_missing_limit": limit,
         "n_fiscal_month_null": _n(ctx, f'SELECT count(*) FROM "{v}" WHERE fiscal_month IS NULL'),
         "n_induty_class_null": _n(ctx, f'SELECT count(*) FROM "{v}" WHERE induty_class IS NULL'),
         "n_financial": _n(ctx, f'SELECT count(*) FROM "{v}" '

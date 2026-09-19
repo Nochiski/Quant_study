@@ -140,18 +140,18 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 
 | KST | crontab (UTC) | 스크립트 | 상태 |
 |---|---|---|---|
-| 03:30 | `30 18 * * *` | `backup_raw.sh` — 원장 6 DB 온라인 백업 (v3 자기 백업 03:00 뒤) | 가동 (09-11 18:50 등록, 첫 실행 09-12) |
+| 토 03:30 | `30 18 * * 5` | `backup_raw.sh` — 원장 6 DB 온라인 백업, 금요일 장마감분. 성공 시 최신 1세트만 보관(결정 9, 09-14) | 가동 |
 | 06:00 | `0 21 * * *` | `daily_ledger.sh` — 캘린더 → 키움 마스터 → 대차(ka20068) → KIS 신용 → DART 재스윕 | 가동 |
 | 07:10 | (08:10 체인 안) | 키움 외국인 보유 ka10008 — `daily_build.sh` 의 `--not-before 07:10` 하한 (결정 7) | 가동 |
-| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(확정판) → `daily_report.py` | 가동 (09-11 18:50 `--no-build` 제거, 첫 확정 빌드 09-12 08:10) |
-| 09:15 | `15 0 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다) | 가동 (09-11 18:50 매일로 등록) |
-| 18:05 | `5 9 * * 1-5` | `daily_evening.sh` — 키움 ka10060·ka10014 원장 직행 ∥ DART ∥ WISE | 가동 |
-| 18:15 | `15 9 * * 1-5` | `build_evening.sh` — 잠정 빌드(stage → equity, `basis=evening`) | 가동 (09-11 18:50 등록) |
-| 18:50 | `50 9 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
-| 19:20 | `20 10 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 09-12 19:00→19:20(stage 실측 30~43분; 19:00 목표는 B.1 단축 옵션 뒤) | 가동 |
-| 19:00 | — | Kael-alpha 스코어 보고 목표 (상한 19:30) | 예정 (페이즈 C) |
+| 08:10 | `10 23 * * *` | `daily_build.sh` — KRX → ka10008 → 머지 → `ledger_health` → `build_morning.sh`(확정판, ≈09:20) → `daily_report.py` | 가동 (09-17 00:45 `--no-build` 제거 — 결정 11 뒤 사용자 "전체 체인을 켜보자") |
+| 09:45 | `45 0 * * *` | `watchdog.sh morning_build` — 직전 거래일 원장 건전성 + `latest_morning.json`(D+1 08:00 이후·health ok) 없음/실패면 crit. 매일(금요일 판은 토요일에 지어진다). 09:15 → 09:45(stage 실측 38.5분) | 가동 (09-17) |
+| 18:05 | `5 9 * * 1-5` | `daily_evening.sh` — DART ∥ WISE 즉시, 키움 ka10060·ka10014 는 **21:05 까지 기다렸다** 원장 직행(결정 11: KRX 애프터마켓 20:00 마감, 키움 집계 20:15 정착, kael-v3 20:05 앱키 공유 회피) | 가동 |
+| 21:20 | `20 12 * * 1-5` | `build_evening.sh` — 키움·WISE 인계(≈21:20)를 기다렸다 잠정 빌드(stage → equity, `basis=evening`, ≈22:15), 한도 21:45 | 가동 (09-17) |
+| 21:50 | `50 12 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
+| 23:00 | `0 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit (키움 21:05 + 빌드 21:20 + stage 38.5분 + equity 9분) | 가동 (09-17) |
+| 22:30 | — | Kael-alpha 스코어 보고 목표(결정 11; 옛 19:00 목표는 애프터마켓으로 무효). 저녁 단축 빌드(B.1)로 ≈21:35 까지 당길 수 있다 | 예정 (페이즈 C) |
 | 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 가동 (09-11 18:50 등록) |
-| 매시 | — | 키움 확정 시각 프로브 (임시, 09-15 판독 후 제거) | 가동 |
+| ~~매시~~ | — | ~~키움 확정 시각 프로브~~ (09-16 제거 — 09-14 촘촘 프로브로 20:15 정착 확인, `data/evidence/after_market_20260914.db`) | 제거 |
 
 ### 원장 백업 — `scripts/backup_raw.sh`
 
@@ -161,8 +161,7 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 - 판정: DB 별로 격리해 하나가 실패해도 나머지를 끝까지 뜨고, 실패 목록을 모아 crit 한 번. 사본마다
   `PRAGMA integrity_check` 가 `ok` 여야 하며 실패한 사본은 지운다. 성공한 사본은 `journal_mode=DELETE` 로
   바꿔 WAL 잔재(`-wal`·`-shm`)를 남기지 않는다.
-- 보관: **최근 7일 + 매월 1일 사본은 영구**(디렉터리 이름 끝 두 자리로 판별). 보관 정리는 디스크 검사와 백업
-  **앞**에서 돈다 — 여유 부족으로 중단한 날 정리까지 건너뛰면 스스로 잠기기 때문이다. 순간 최대 = 뜨는 중 8세트 ≈ 146 GB.
+- 보관: **주 1회(토요일 03:30), 최신 1세트만**(사용자 결정 9, 09-14). 이번 백업이 성공하면 이전 세트를 지운다(다음 주가 덮어쓰는 셈). 실패한 주는 이전 세트를 남긴다. 순간 최대 2세트 ≈38 GB.
 - 중단 조건: 백업 대상 파일시스템 여유 < 60 GB 면 뜨기 전에 crit 후 중단.
 
 ### 로그 — `scripts/gc.sh` · `scripts/rotate_logs.sh`

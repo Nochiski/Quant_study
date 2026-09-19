@@ -52,7 +52,7 @@ def _kiwoom_db(tmp_path, ledger_rows=()):
     return path
 
 
-def _krx_db(tmp_path, date=D, close=None):
+def _krx_db(tmp_path, date=D, close=None, volume=None):
     path = tmp_path / "data" / "raw" / "krx.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
@@ -60,8 +60,9 @@ def _krx_db(tmp_path, date=D, close=None):
         con.execute(f"CREATE TABLE {tbl} (bas_dd_req TEXT, ISU_CD TEXT, TDD_CLSPRC TEXT, "
                     "ACC_TRDVOL TEXT)")
     prices = dict(KRX_CLOSE if close is None else close)
+    vols = dict(VOL if volume is None else volume)
     con.executemany("INSERT INTO krx_stk_bydd_trd VALUES (?,?,?,?)",
-                    [(date, t, prices[t], VOL[t]) for t in TICKERS])
+                    [(date, t, prices[t], vols[t]) for t in TICKERS])
     con.commit()
     con.close()
     return path
@@ -216,11 +217,11 @@ def test_merge_writes_only_dates_up_to_d_and_keeps_existing_rows(tmp_path, monke
     assert "changed=2" in row[3] and f"new={len(TICKERS) * 3 * len(kw_daily.TRS) - 2}" in row[3]
 
 
-# ── (d) 크로스소스 불일치 1행이면 머지하지 않는다 ────────────────────────────
-def test_merge_refuses_when_krx_close_differs(tmp_path, monkeypatch):
+# ── (d) 거래량 불일치 1행이면 머지하지 않는다 (종가 불일치는 기록만 — 결정 11, 09-14 애프터마켓) ──
+def test_merge_refuses_when_krx_volume_differs(tmp_path, monkeypatch):
     calls = []
     _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
-    _krx_db(tmp_path, close={"005930": "70000", "000660": "999999"})
+    _krx_db(tmp_path, volume={"005930": VOL["005930"], "000660": "1"})
     assert kw_daily.main(["--fetch", "--date", D]) == 0
     before = _ledger(tmp_path)
     assert kw_daily.main(["--merge", "--date", D]) == 2
@@ -232,6 +233,22 @@ def test_merge_refuses_when_krx_close_differs(tmp_path, monkeypatch):
     finally:
         con.close()
     assert row[0] == "cross_source_failed" and "000660" in row[1]
+
+
+def test_merge_proceeds_when_only_krx_close_differs(tmp_path, monkeypatch):
+    # 09-14 이후 키움 종가는 장후 체결가라 KRX 종가와 다르다 — 거래량이 전건 같으면 머지한다(결정 11)
+    calls = []
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=_seed_prev())
+    _krx_db(tmp_path, close={"005930": "70000", "000660": "999999"})
+    assert kw_daily.main(["--fetch", "--date", D]) == 0
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "daily_run.db")
+    try:
+        row = con.execute("SELECT status, detail FROM run WHERE source=? ORDER BY run_id DESC "
+                          "LIMIT 1", ("kiwoom_merge",)).fetchone()
+    finally:
+        con.close()
+    assert row[0] == "ok" and "same_close=1 same_vol=2" in row[1]
 
 
 # ── (e) KRX 에 D 가 아직 없으면 대기(rc 3) ───────────────────────────────────
@@ -330,6 +347,10 @@ def test_cross_source_requires_full_match_and_nonzero_overlap():
     off = {"005930": kw_daily.Quote(70000, 1000), "000660": kw_daily.Quote(250000, 1)}
     check = kw_daily.cross_source(krx, off)
     assert not check.passed and check.n_same_close == 2 and check.n_same_vol == 1
+    assert check.samples == ("000660(krx 250000/2000 vs kw 250000/1)",)   # 표본은 거래량 불일치만
+    close_off = {"005930": kw_daily.Quote(70001, 1000), "000660": kw_daily.Quote(250000, 2000)}
+    check = kw_daily.cross_source(krx, close_off)
+    assert check.passed and check.n_same_close == 1 and check.samples == ()   # 종가만 다르면 통과(결정 11)
     assert kw_daily.cross_source(krx, {}).passed is False          # 겹치는 종목이 0이면 실패
 
 

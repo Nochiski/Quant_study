@@ -9,7 +9,7 @@
 #   ①·③ 의 종료 시각을 로그와 deliver JSON 에 남긴다 — 18:15 잠정 빌드의 트리거 근거다.
 #   휴장·이미 완료도 info 로 보고한다(결정 V2-7: 무소식과 고장을 구분한다). dry-run 만 알림 없음.
 #   사용: daily_evening.sh [--date YYYYMMDD] [--dry-run] [--limit N]
-#   환경: QL_EVENING_NOT_BEFORE=HH:MM (키움 fetch 하한 시각. 기본 18:00)
+#   환경: QL_EVENING_NOT_BEFORE=HH:MM (키움 fetch 하한 시각. 기본 20:00 = 애프터마켓 마감) · QL_KW_EVENING_HHMM (대기 시각, 기본 2105)
 set -uo pipefail
 cd /home/kael/quant-ledger
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
@@ -58,9 +58,16 @@ KW_LOG=""; DART_LOG=""; WISE_LOG=""; KW_DONE=""; WISE_DONE=""
 # 세 갈래는 서로 다른 원장(kiwoom.db · dart.db · wise.db)만 건드리므로 병렬이 안전하다.
 # 각자 자기 로그에 쓰고 rc 는 `wait <pid>` 로 따로 받는다 — 하나가 죽어도 나머지는 끝까지 간다.
 branch_kiwoom() {
-  echo "──── 키움 fetch+commit 시작 $(kst) ────"
+  # 키움 일별 집계는 KRX 애프터마켓(16:00~20:00, 09-14 시행) 마감 뒤 20:15 안에 정착한다(09-14 촘촘 프로브:
+  # 20:15 값 = 22:05 값). kael-v3 daily_all 이 20:05~20:47 에 같은 앱키를 쓰므로 키움 갈래만 21:05 까지
+  # 기다렸다 받는다(결정 10-(d) 19:05 → 결정 11). DART·WISE 는 18:05 그대로. dry-run 은 기다리지 않는다.
+  local wait_until="${QL_KW_EVENING_HHMM:-2105}"
+  if [ -z "$DRY" ]; then
+    while [ "$(TZ=Asia/Seoul date +%H%M)" -lt "$wait_until" ]; do sleep 60; done
+  fi
+  echo "──── 키움 fetch+commit 시작 $(kst) (하한 ${wait_until:0:2}:${wait_until:2:2} KST) ────"
   $PY -m daily.kw_daily --date "$D" --fetch --tr ka10060,ka10014 --commit \
-     --not-before "${QL_EVENING_NOT_BEFORE:-18:00}" $DRY $LIMIT
+     --not-before "${QL_EVENING_NOT_BEFORE:-20:00}" $DRY $LIMIT
   local rc=$?
   echo "DONE_AT=$(TZ=Asia/Seoul date '+%Y-%m-%dT%H:%M:%S+09:00')"
   echo "──── 키움 종료 rc=$rc $(kst) ────"

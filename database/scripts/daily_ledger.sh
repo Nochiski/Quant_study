@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 06:00 KST 수집 체인 — KRX 를 뺀 전 소스. 플랜 P1 Task 1.8 / 결정 R1.
 #   순서: 캘린더 동기화 → D(직전 거래일) 판정 → 키움 마스터(daily_wise.sh, 매일) →
-#         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → DART 스윕·상세·문서 → 수집 요약 알림
+#         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → DART 스윕·상세·문서 → 신규 corp 회사정보 공백 메우기 → 수집 요약 알림
 #   어느 단계든 rc≠0 이면 그 단계에서 멈추고 crit. 07:00(v3 토큰 재발급) 전에 끝나야 한다(예산 36분).
 #   사용: daily_ledger.sh [--date YYYYMMDD] [--dry-run] [--limit N]
 #   환경: QL_KW_NOT_BEFORE=HH:MM (키움 fetch 하한 시각, P0 프로브 판독값. 기본 06:00)
@@ -66,11 +66,13 @@ else
   if [ -n "${QL_SKIP_KW:-}" ]; then
     echo "  QL_SKIP_KW=1 — 키움 시계열 fetch 건너뜀(앱키 분리 전, DECISIONS_PENDING 결정 5 R5 후속)"
     step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT \
-    && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT
+    && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT \
+    && step "dart company gap" bash scripts/dart_company_gap.sh ${DRY:+--dry-run}
   else
     step "kiwoom fetch" $PY -m daily.kw_daily --date "$D" --fetch --tr ka20068 --not-before "${QL_KW_NOT_BEFORE:-06:00}" $DRY $LIMIT \
     && step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT \
-    && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT
+    && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT \
+    && step "dart company gap" bash scripts/dart_company_gap.sh ${DRY:+--dry-run}
   fi
   RC=$?
   if [ -n "$RID" ]; then

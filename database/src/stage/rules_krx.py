@@ -66,13 +66,15 @@ STG_PRICE_DAILY = TableRule(
         Invariant("ohl_pattern", "((open_krw IS NULL)::INT + (high_krw IS NULL)::INT "
                                  "+ (low_krw IS NULL)::INT) NOT IN (0, 3)"),
     ),
-    # G9 는 **다음 날 이후 관측**만 대조한다(2026-09-12, 결정 10): 18:05 저녁 슬롯이 원장에 바로 넣는 당일
-    # 키움 행은 거래량이 시간외 반영 전 잠정치라(09-11 실측 315/2,650 불일치, 다음 날 관측은 0) KRX 확정값과
-    # 다른 것이 정상이다. 당일 관측을 대조하면 확정 빌드가 매일 폐기된다.
+    # G9 는 **당일 20:00 KST 이후 관측**만 대조한다(결정 10 → 결정 11): KRX 애프터마켓이 20:00 에 닫히고
+    # 키움 일별 집계는 20:15 안에 정착한다(09-14 촘촘 프로브: 20:15 값 = 22:05 값). 그 전 관측은 거래량이
+    # 반영 중인 잠정치라 KRX 확정값과 다른 것이 정상이다. 저녁 수집은 21:05(kael-v3 20:05 앱키 공유 회피).
+    # 종가는 대조하되 판정에 넣지 않는다 — 키움 종가는 장후 체결가다(gates.g9_cross_source).
     cross_check=CrossCheck(
         db="kiwoom", table="ka10060_investor_flows",
         join_sql="o.ticker = s.ticker AND o.dt = strftime(s.date, '%Y%m%d') "
-                 "AND CAST(TRY_CAST(o.collected_at AS TIMESTAMP) + INTERVAL 9 HOUR AS DATE) > s.date",
+                 "AND (TRY_CAST(o.collected_at AS TIMESTAMP) + INTERVAL 9 HOUR) "
+                 ">= (CAST(s.date AS TIMESTAMP) + INTERVAL 20 HOUR)",
         close_match_sql="abs(TRY_CAST(o.cur_prc AS BIGINT)) = s.close_krw",
         volume_match_sql="TRY_CAST(o.acc_trde_prica AS BIGINT) = s.volume_shr",
     ),

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 잠정·확정 빌드 공통 체인 — 플랜 v2 §4 Task B.1. 저녁(잠정)·아침(확정)이 같은 순서를 돈다.
 #   사용: scripts/build_chain.sh <evening|morning> --date YYYYMMDD [--dry-run]
-#   호출: scripts/build_evening.sh (18:15 KST 크론) · scripts/build_morning.sh (daily_build.sh 안)
+#   호출: scripts/build_evening.sh (21:20 KST 크론, 결정 11) · scripts/build_morning.sh (daily_build.sh 안)
 #   순서: 빌드 락 → 원장 스냅샷 5 DB → stage 전량(basis) → stage 건전성 C1~C5
 #         → equity 전량(basis) → equity catalog → 인계 JSON → 스냅샷·_pinned GC → 알림
 #   저녁·아침의 차이는 basis(빌드 id 접두어 e_/m_)·대상일·로그 디렉토리뿐이라 한 파일에 둔다.

@@ -491,7 +491,7 @@ V2-2 가 「잠정 가격 축 = 키움 종가, 그날 ±30% 넘게 뛴 종목은
 | 컬럼 | `basis='krx'` | `basis='evening'` |
 |---|---|---|
 | 원천 | `stg_price_daily` ∪ `stg_etf_price_daily` | `stg_flow_daily_kiwoom` (ka10060) |
-| `close` · `volume_shr` | KRX 원장 그대로 | 키움 원장 그대로 |
+| `close` · `volume_shr` | KRX 원장 그대로 | 키움 원장 그대로 — **09-14 이후 `close` 는 KRX 애프터마켓 장후 마지막 체결가**(KRX 공식 종가 15:30 과 다르다, 결정 11), `volume_shr` 는 애프터마켓 포함(KRX 와 동일 정의) |
 | `open`·`high`·`low`·`value_krw`·`shares_out`·`mktcap_krw`·`change_krw`·`base_price_krw`·`par_value_krw` | KRX | **전부 NULL** (원칙 ④ — 채우지 않는다) |
 | `price_kind` | volume 부호 | volume 부호(같은 규칙) |
 | `corp_action_pending` | 항상 FALSE | `prev_close` 없음 ∨ `abs(close/prev_close − 1) > _const.evening_jump_abs_max`(0.30) |

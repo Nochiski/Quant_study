@@ -199,8 +199,10 @@ class CrossCheck:
 
     @property
     def passed(self) -> bool:
-        return self.n_matched > 0 and self.n_same_close == self.n_matched and \
-            self.n_same_vol == self.n_matched
+        # 거래량만 판정한다. 종가는 2026-09-14 KRX 애프터마켓(16:00~20:00) 뒤 키움 `close_pric` 가 장후
+        # 마지막 체결가라 KRX 공식 종가(15:30)와 다른 것이 정상이다(09-14 실측 2,135/2,649 불일치, 거래량은
+        # 2,649/2,649 일치). `n_same_close` 는 기록만 남긴다(결정 11).
+        return self.n_matched > 0 and self.n_same_vol == self.n_matched
 
 
 @dataclass(frozen=True)
@@ -557,7 +559,9 @@ def incoming_quotes(con: sqlite3.Connection, date: str) -> dict[str, Quote]:
 
 
 def cross_source(krx: Mapping[str, Quote], kiwoom: Mapping[str, Quote]) -> CrossCheck:
-    """게이트 (c). 실측 20260820 은 2,602종목 전건 일치이므로 100% 를 요구한다(findings A §6-2 D)."""
+    """게이트 (c). 거래량은 전건 일치를 요구한다(실측 20260820 2,602/2,602, findings A §6-2 D). 종가 일치
+    수는 세되 판정에 넣지 않는다 — 09-14 애프터마켓 뒤 키움 종가는 장후 체결가다(결정 11). 불일치 표본은
+    거래량이 다른 종목만 싣는다."""
     matched = sorted(set(krx) & set(kiwoom))
     same_close = same_vol = 0
     samples: list[str] = []
@@ -567,7 +571,7 @@ def cross_source(krx: Mapping[str, Quote], kiwoom: Mapping[str, Quote]) -> Cross
         ok_vol = k.volume is not None and k.volume == w.volume
         same_close += int(ok_close)
         same_vol += int(ok_vol)
-        if not (ok_close and ok_vol) and len(samples) < 5:
+        if not ok_vol and len(samples) < 5:
             samples.append(f"{ticker}(krx {k.close_krw}/{k.volume} vs kw {w.close_krw}/{w.volume})")
     return CrossCheck(len(matched), same_close, same_vol, tuple(samples))
 
@@ -624,7 +628,7 @@ def merge(*, date: str, db_path: str, krx_db: str, dry_run: bool = False) -> Mer
                 f"same_vol={cross.n_same_vol} krx_rows={len(krx)} kw_rows={len(kiwoom)}")
         if not cross.passed:
             return MergeResult(MergeStatus.CROSS_SOURCE_FAILED, date, cross, (),
-                               head + " | 전건 일치가 아니다(실측 기대 100%) "
+                               head + " | 거래량 전건 일치가 아니다(종가는 기록만, 결정 11) "
                                       f"불일치예시={list(cross.samples)}")
         merged = tuple(merge_tr(con, spec, date, dry_run) for spec in TRS.values())
     finally:

@@ -15,8 +15,7 @@ from .model import DATE_FORMATS, CrossCheck, TableRule
 DEFAULT_THRESHOLDS: dict[str, float] = {
     "G2": 0.0,        # cast_failed 행 비율 상한 (survey v2: 숫자 컬럼 비숫자 0 → 0)
     "G7": 0.001,      # out_of_range 격리 비율 상한 (survey v2 후 확정, 기본 0.1%)
-    "G9_close": 1.0,  # 종가 교차 일치율 하한 (SPEC 100.0000%)
-}
+}   # G9 종가 임계(옛 G9_close 1.0)는 결정 11(09-14 애프터마켓)로 없앴다 — 종가 일치율은 기록만
 YEAR_RANGE_OBSERVED = (1999, 1)   # 관측일 축 [1999(DART 최초 공시), 현재+1] — 키/파티션, reject
 YEAR_RANGE_CONTENT = (1900, 40)   # 내용일 축 [1900, 현재+40] — 비키 날짜, 위반 = 셀 격리
                                   # 1990 은 상장일 1975 를, 1956 은 현물출자일 1952~54 를 격리했다
@@ -262,13 +261,12 @@ def g9_cross_source(ctx: GateContext) -> GateResult:
     reasons: list[str] = []
     if joined_i == 0:
         reasons.append("joined=0")
-    if close_r < ctx.thresholds["G9_close"]:
-        reasons.append(f"close_match_ratio {close_r:.6f} < {ctx.thresholds['G9_close']}")
+    # 종가 일치율은 기록만 한다(결정 11): 09-14 KRX 애프터마켓 뒤 키움 cur_prc 는 장후 마지막 체결가라
+    # KRX 종가(15:30)와 다른 것이 정상이다(09-14 실측 종가 514/2,649 · 거래량 2,649/2,649). 판정은 거래량 회귀뿐.
     if ctx.baseline is not None:
-        for k in ("close_match_ratio", "volume_match_ratio"):
-            base = ctx.baseline.get(k)
-            if isinstance(base, int | float) and float(str(metrics[k])) < float(base) - 1e-9:
-                reasons.append(f"{k} {metrics[k]} < baseline {base}")
+        base = ctx.baseline.get("volume_match_ratio")
+        if isinstance(base, int | float) and vol_r < float(base) - 1e-9:
+            reasons.append(f"volume_match_ratio {vol_r} < baseline {base}")
     ok = not reasons
     return GateResult("G9", GateStatus.PASS if ok else GateStatus.FAIL,
                       "교차 소스 회귀 유지" if ok else "; ".join(reasons), metrics)

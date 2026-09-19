@@ -31,11 +31,17 @@
   "source": "hand — 삼성전자는 절단본 전 거래일에 존재(4,094행)",
   "expect_source": "hand", "fixture_class": "positive"},
 
- {"case": "continuous_005930_n_days",
-  "key": {"ticker": "005930", "span_seq": "1"}, "column": "n_days", "expect": "4094",
-  "source": "hand — 절단본 stg_listing_daily 005930 행수 = 캘린더 거래일 수",
+ {"case": "continuous_005930_first",
+  "key": {"ticker": "005930", "span_seq": "1"}, "column": "first_date", "expect": "2010-01-04",
+  "source": "hand — 절단본 stg_listing_daily 005930 최소일 = 캘린더 시작일",
   "expect_source": "hand", "fixture_class": "positive",
-  "note": "구간이 하나라도 쪼개지면 이 값이 줄어든다. 행수 등식(EG1)은 Σ 라서 못 본다"},
+  "note": "옛 case continuous_005930_n_days(=4094)는 상한이 매일 늘어나는 e1.15.0 부터 서버에서 깨진다(09-13 4차 확정 빌드 4110). 연속성은 아래 '2구간 없음' 으로 본다"},
+
+ {"case": "continuous_005930_no_second_span",
+  "key": {"ticker": "005930", "span_seq": "2"}, "column": "first_date", "expect": null,
+  "source": "hand — 행이 없어야 한다(구간이 쪼개지면 span_seq 2 가 생긴다)",
+  "expect_source": "hand", "fixture_class": "negative",
+  "note": "EG4 는 행이 없으면 got=None 이라 expect null 과 맞는다 — '없어야 할 행' 을 고정하는 규약"},
 
  {"case": "continuous_005930_end_reason",
   "key": {"ticker": "005930", "span_seq": "1"}, "column": "end_reason", "expect": "coverage_gap",
@@ -53,11 +59,16 @@
   "source": "hand — last_date 2019-02-12 < 커버리지 끝",
   "expect_source": "hand", "fixture_class": "positive"},
 
- {"case": "etf_069500_n_days",
-  "key": {"ticker": "069500", "span_seq": "1"}, "column": "n_days", "expect": "4094",
-  "source": "hand — 절단본 stg_etf_price_daily 069500 4,094행. ETF 는 listing 원장에 없다",
+ {"case": "etf_069500_first",
+  "key": {"ticker": "069500", "span_seq": "1"}, "column": "first_date", "expect": "2010-01-04",
+  "source": "hand — 절단본 stg_etf_price_daily 069500 최소일. ETF 는 listing 원장에 없다",
   "expect_source": "hand", "fixture_class": "positive",
-  "note": "listing ∪ etf 합집합을 빠뜨리면 이 행 자체가 사라진다(ETF 전량 유니버스 이탈)"},
+  "note": "옛 case etf_069500_n_days(=4094)는 상한 비의존 관계로 교체(09-13). listing ∪ etf 합집합을 빠뜨리면 이 행 자체가 사라진다"},
+
+ {"case": "etf_069500_no_second_span",
+  "key": {"ticker": "069500", "span_seq": "2"}, "column": "first_date", "expect": null,
+  "source": "hand — 행이 없어야 한다",
+  "expect_source": "hand", "fixture_class": "negative"},
 
  {"case": "etf_069500_end_reason",
   "key": {"ticker": "069500", "span_seq": "1"}, "column": "end_reason", "expect": "coverage_gap",

@@ -101,12 +101,19 @@ def _dec4(values: Sequence[float | int | None]) -> pa.Array:
     )
 
 
-def price_table(rows: list[PriceRow], shares_out: dict[str, int] | None = None) -> pa.Table:
+def price_table(
+    rows: list[PriceRow],
+    shares_out: dict[str, int] | None = None,
+    basis: list[str] | None = None,
+) -> pa.Table:
     """`price_daily` 관심 컬럼. `price_kind` 는 S04 규칙대로 volume>0 → trade, =0 → reference.
 
     `shares_out` 을 주면 S04 파생 셋을 붙인다 — `shares_out`(KRX 상장주식수, FIELD_MAP
     `price.shares_outstanding`) · `mktcap_krw = close × shares_out` · `value_krw = close × volume`.
     없는 티커는 NULL(결측은 결측 — 035420 이 그 자리다).
+
+    `basis` 를 주면 e1.15.0 이 추가한 행 단위 판 컬럼을 붙인다(`'krx'` 확정 / `'evening'` 저녁
+    잠정). 주지 않으면 그 컬럼이 아예 없는 옛 판 루트(e1.5.0 등) 모양 그대로다.
     """
     volumes = [r[6] for r in rows]
     columns: dict[str, pa.Array] = {
@@ -137,6 +144,8 @@ def price_table(rows: list[PriceRow], shares_out: dict[str, int] | None = None) 
             ],
             pa.decimal128(18, 0),
         )
+    if basis is not None:
+        columns["basis"] = pa.array(basis, type=pa.string())
     return pa.table(columns)
 
 
@@ -919,6 +928,9 @@ WB_SESSIONS: tuple[date, ...] = (
 )
 WB_SPLIT_DATE = date(2024, 1, 8)
 WB_HALT_DATE = date(2024, 1, 10)
+# 저녁 잠정판(e1.15.0)의 T 세션 — 캘린더·격자·`security_span` 밖이다(그 셋은 KRX 축이라 저녁
+# 빌드에서도 D 에 멈춘다). `price_daily` 에만 `basis='evening'` 행으로 얹힌다.
+WB_EVENING_SESSION = date(2024, 1, 15)
 WB_SPANS: list[SpanRow] = [
     ("005930", 1, WB_SESSIONS[0], WB_SESSIONS[-1], "coverage_gap"),
     ("000660", 1, WB_SESSIONS[0], WB_SESSIONS[-1], "coverage_gap"),
@@ -1140,12 +1152,17 @@ def build_workbench_root(
     catalog: bool = True,
     profile: bool = True,
     extra_factor_rows: list[FactorRow] | None = None,
+    evening_session: date | None = None,
 ) -> Path:
     """워크벤치 어댑터 손 픽스처 equity_root 를 만든다.
 
     `catalog=False` 면 equity.duckdb 없음, `profile=False` 면 `dataset_profile` 없음
     (어댑터가 원천 상수로 폴백하는 구판 루트). `extra_factor_rows` 는 `adj_factor` 에 덧붙일
     사건 행(apply_date = available_date = effective_date).
+
+    `evening_session` 을 주면 e1.15.0 저녁 잠정판 모양이 된다 — `price_daily` 에 `basis` 컬럼이
+    생기고 그 세션에 005930 잠정 행 1개(키움 종가·거래량만, OHL NULL)가 붙는다. 주지 않으면
+    `basis` 컬럼 자체가 없는 옛 판 루트다.
     """
     prices: list[PriceRow] = []
     universe: list[UniverseRow] = []
@@ -1163,6 +1180,16 @@ def build_workbench_root(
             universe.append(
                 (ticker, session, WB_SEC_TYPES[ticker], "suspended" if halted else "listed")
             )
+    price_basis: list[str] | None = None
+    if evening_session is not None:
+        # 저녁 잠정 행 — 키움 종가·거래량만 있고 OHL 은 NULL 이다(`sql/price_daily.sql:76-110`).
+        # 파생 컬럼(value_krw·mktcap_krw)은 실물에서 NULL 이지만 이 경로가 읽는 것은
+        # OHLC·volume_shr·price_kind·basis 뿐이라 픽스처는 그대로 둔다.
+        price_basis = ["krx"] * len(prices) + ["evening"]
+        prices.append(
+            ("005930", evening_session, None, None, None,
+             wb_close("005930", WB_SESSIONS[-1]) + 500, 1_000)
+        )
     write_equity_table(root, "trading_calendar", calendar_table(list(WB_SESSIONS)))
     write_equity_table(root, "security_span", span_table(WB_SPANS))
     write_equity_table(
@@ -1174,7 +1201,10 @@ def build_workbench_root(
         ),
     )
     write_equity_table(
-        root, "price_daily", price_table(prices, shares_out=WB_SHARES), year_column="date"
+        root,
+        "price_daily",
+        price_table(prices, shares_out=WB_SHARES, basis=price_basis),
+        year_column="date",
     )
     write_equity_table(root, "universe_daily", universe_table(universe), year_column="date")
     write_equity_table(

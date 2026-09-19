@@ -1012,6 +1012,8 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
   `coverage_degraded` 의 방향뿐인데, 그 의미도 결정에 딸려 있다.
 - **위치**: `src/equity/rules_s17.py`·`rules_s18.py`, `src/stage/rules_wise.py`, `scripts/daily_evening.sh`
 
+**09-20 확인 결과 — 조치 불필요(종결 후보).** 원장 `wisereport.db` 실측: v3 마지막 스냅샷(9/1) 2,533종목 중 **목표가·의견점수·애널리스트 수가 실제로 있는 종목은 509** 뿐이고 나머지 2,024행은 값이 빈 자리표시 행이다(그래서 `coverage_degraded=True` 로 표시됐다 — 표식 방향은 옳았다). WISE 직접 수집은 하루 ≈817종목이 실제 커버다. 즉 "2,533→839 −67%" 는 빈 행이 빠진 착시이고 **실제 커버는 509→817 로 늘었다**. 남는 것은 백테스트가 9/2 경계를 걸칠 때 `src` 열로 구분하라는 소비자 안내뿐이다.
+
 ### B-30 — 일일 증분에서 EG5a 는 항상 skip, EG5c 표본은 08-20 고정 (감사 C06 의 남은 절반)
 
 - **상황**: 매 빌드가 새 stage 판을 고정하므로 `BuildRecord.inputs` 가 반드시 바뀐다.

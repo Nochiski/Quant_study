@@ -75,6 +75,23 @@ def _shard_of(rcept_no: str) -> str:
     return f"{rcept_no[:4]}_q{q}"
 
 
+def _hash_rcept(rcept_nos: list[str]) -> str:
+    return hashlib.sha256("\n".join(rcept_nos).encode()).hexdigest()[:16]
+
+
+def input_hash_for(db: Path) -> str:
+    """스냅샷 doc_store(zip_ok=1) 접수번호 집합의 해시 — `run()` 이 summary 에 남기는 값과 같다(D5).
+
+    빌드가 "이 캐시가 이 스냅샷 것인가" 를 확인하는 데 쓴다(`build._load_file_source`).
+    """
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = con.execute("SELECT rcept_no FROM doc_store WHERE zip_ok = 1").fetchall()
+    finally:
+        con.close()
+    return _hash_rcept(sorted(str(r[0]) for r in rows))
+
+
 def _docs_by_shard(db: Path, years: set[str] | None,
                    rcept_list: set[str] | None) -> dict[str, list[tuple[str, str]]]:
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -194,7 +211,7 @@ def run(db: Path, docs_dir: Path, cache_root: Path, snapshot_id: str, workers: i
     if limit_per_year is not None:
         by_shard = {k: d[:limit_per_year] for k, d in by_shard.items()}
     all_rno = sorted(r for docs in by_shard.values() for r, _ in docs)
-    input_hash = hashlib.sha256("\n".join(all_rno).encode()).hexdigest()[:16]
+    input_hash = _hash_rcept(all_rno)
     jobs = [(k, d, docs_dir, cache) for k, d in sorted(by_shard.items())]
     if workers <= 1:
         results = [_run_shard(j) for j in jobs]

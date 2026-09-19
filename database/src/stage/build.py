@@ -20,7 +20,7 @@ from pathlib import Path
 
 import duckdb
 
-from . import gates, manifest, parsers
+from . import doc_prepass, gates, manifest, parsers
 from .model import (
     DATE_FORMATS,
     KIND_BOOL,
@@ -420,6 +420,15 @@ def _load_file_source(con: duckdb.DuckDBPyConnection, rule: TableRule, snap: Sna
     if summary.get("status") != "ok":
         raise RuntimeError(f"doc prepass gate_failed for snapshot={snap.snapshot_id}: "
                            f"{summary.get('detail')}")
+    # F03 — 캐시는 디렉터리 이름이 아니라 문서 집합으로 본다. 옛 캐시를
+    # 새 스냅샷 id 로 복사·하드링크해도 조용히 통과하던 구멍을 막는다.
+    want = doc_prepass.input_hash_for(snap.files[rule.sources[0].db].path)
+    if summary.get("input_hash") != want:
+        raise RuntimeError(
+            f"doc prepass cache is for a different document set — snapshot={snap.snapshot_id} "
+            f"table={rule.name} cache_input_hash={summary.get('input_hash')} "
+            f"snapshot_input_hash={want}: re-run `python -m stage.doc_prepass --snapshot-id "
+            f"{snap.snapshot_id} [--base-snapshot <prev>]` (cache {cache})")
     glob = str(cache / fs.table / "year=*.jsonl")
     schema = ", ".join(f"{_q(c)}: 'VARCHAR'" for c in fs.columns)
     con.execute(f"CREATE OR REPLACE TEMP TABLE src_all AS SELECT *, 'doc_zip' AS _src "

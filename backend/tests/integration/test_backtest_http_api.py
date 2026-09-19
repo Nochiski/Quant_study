@@ -513,7 +513,10 @@ def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
     assert client.get(f"/api/v1/backtests/{run_id}/result").status_code == 409
 
 
-@pytest.mark.parametrize("failure", [RuntimeError("can't start new thread"), MemoryError()])
+@pytest.mark.parametrize(
+    "failure",
+    [RuntimeError("can't start new thread"), MemoryError("cannot allocate thread stack")],
+)
 def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException
 ) -> None:
@@ -540,33 +543,42 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     state = client.get(f"/api/v1/backtests/{run_id}").json()
     assert state["status"] == "failed", state
     assert state["error_code"] == "backtest.run.internal"
-    assert type(failure).__name__ in state["error"]
+    assert state["error"] == f"{type(failure).__name__}: {failure}"
     assert client.post(f"/api/v1/backtests/{run_id}/cancel").json()["status"] == "failed"
 
 
 @pytest.mark.parametrize(
     ("raw", "masked"),
     [
-        # 키가 붙은 값은 모양·루트와 무관하게 전부 가린다.
+        # 키가 붙은 값은 모양·루트와 무관하게 전부 가린다(접미형 키·값 끝 문장부호 포함).
         (r"root=C:\Users\someone\quant-ledger\data\equity end", "root=<path> end"),
         ("root=/home/kael/quant-ledger/data/equity detail", "root=<path> detail"),
         ("root=/app/quant-ledger/data/equity", "root=<path>"),
         ("root=/c/Users/sangmok/quant-ledger", "root=<path>"),
         ("path=/workspace/quant-ledger/data x", "path=<path> x"),
+        ("equity_root=/x/y, retry later", "equity_root=<path>, retry later"),
+        ("manifest=/x/MANIFEST.json.", "manifest=<path>."),
         (r"root=\\fileserver\quant\ledger\equity", "root=<path>"),
-        # 모양만으로 경로인 것: 드라이브·UNC·file://·확장자 있는 POSIX 파일.
+        # 모양만으로 경로인 것: 드라이브·UNC·file://·확장자 있는 POSIX 파일·계정 루트 아래 디렉터리.
         ("path C:/Users/a/b.parquet end", "path <path> end"),
         (r"UNC \\fileserver\share\x.parquet", "UNC <path>"),
         ("source file:///C:/Users/sangmok/data/x.parquet", "source <path>"),
+        ("source FILE:///C:/Users/sangmok/secret", "source <path>"),
         ("(/tmp/foo/part0.parquet)", "(<path>)"),
-        # 가리지 않아야 하는 것: 다른 URL·단위 표기·비율·JSON Pointer 진단 경로·키 없는 디렉터리.
+        ("(/tmp/foo)", "(<path>)"),
+        (
+            "OSError: [Errno 13] Permission denied: '/home/kael/quant-ledger/data/equity'",
+            "OSError: [Errno 13] Permission denied: '<path>'",
+        ),
+        ("cannot open /Users/sangmok/Library/x", "cannot open <path>"),
+        # 가리지 않아야 하는 것: 다른 URL·단위 표기·비율·JSON Pointer 진단 경로·흔한 영단어 루트.
         ("see https://example.com/docs for detail", "see https://example.com/docs for detail"),
         ("units 10 m/s and 3 /s", "units 10 m/s and 3 /s"),
         ("value 1.5/2.0 ratio and/or n/a", "value 1.5/2.0 ratio and/or n/a"),
         ("status=no_data detail=None", "status=no_data detail=None"),
         ("invalid pointer /factors/0/graph/nodes/2", "invalid pointer /factors/0/graph/nodes/2"),
         ("/data/universe_id is invalid", "/data/universe_id is invalid"),
-        ("(/tmp/foo)", "(/tmp/foo)"),
+        ("pointer /usr/count and /run/id", "pointer /usr/count and /run/id"),
         (
             "strategy.expression.calculation_non_finite@factors.0.graph.nodes.2: x",
             "strategy.expression.calculation_non_finite@factors.0.graph.nodes.2: x",

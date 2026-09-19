@@ -54,32 +54,41 @@ logger = logging.getLogger(__name__)
 # run `error` 문자열에서 서버 절대 경로를 가린다. 어댑터 detail 이 `root=C:\...`·`/home/...`·
 # `\\server\share` 를 싣는데 화면(role=alert)에 그대로 나가면 서버 레이아웃·계정명·호스트명이
 # 새어 나간다. 원문은 서버 로그에. 규칙(오탐·미탐을 모두 줄이는 쪽으로):
-#   - `root=`·`path=`·`file=`·`dir=` 처럼 경로임이 명시된 값은 모양과 무관하게 전부 가린다
-#     (컨테이너 `/app`, MSYS `/c/Users`, 임의 루트 포함).
+#   - `root=`·`path=`·`file=`·`dir=`·`manifest=`(접미형 `equity_root=` 포함) 값은 모양과 무관하게
+#     전부 가린다(컨테이너 `/app`, MSYS `/c/Users`, 임의 루트 포함).
 #   - 드라이브(`C:\`)·UNC(`\\host\share`)·`file://` 은 어디 있든 가린다(모양만으로 경로).
-#   - 키 없는 POSIX 문자열은 확장자 있는 파일(`/x/y/z.parquet`)만 가린다 — `/data/universe_id`
-#     같은 JSON Pointer 진단 경로와 `/s` 단위 표기는 파일 경로가 아니다.
-#   - `https://` 등 다른 URL 은 그대로 둔다.
+#   - 키 없는 POSIX 문자열은 (a) 확장자 있는 파일(`/x/y/z.parquet`)과 (b) 계정명·서버 레이아웃을
+#     담는 루트(`/home`·`/Users`·`/tmp` 등) 아래 디렉터리만 가린다 — 서드파티 예외(`OSError`,
+#     duckdb)가 싣는 `'/home/<user>/...'` 를 잡되, `/data/universe_id` 같은 JSON Pointer 진단
+#     경로와 `/s` 단위 표기는 파일 경로가 아니다.
+#   - `https://` 등 다른 URL 은 그대로 둔다. 값 끝의 문장부호(`,`·`.`)는 경로에 넣지 않는다.
 _PATH_CHARS = r"[^\s'\"`()<>]"
+_POSIX_ROOTS = r"(?:home|Users|root|tmp|var|srv|opt|mnt|app|workspace|Library|private|Volumes)"
 _ABSOLUTE_PATH = re.compile(
-    r"(?P<url>\b(?!file://)[a-z][a-z0-9+.\-]*://" + _PATH_CHARS + r"*)"
-    r"|(?P<key>\b(?:root|path|file|dir|directory)=)(?P<value>" + _PATH_CHARS + r"+)"
+    r"(?P<url>\b(?!file://)[A-Za-z][A-Za-z0-9+.\-]*://" + _PATH_CHARS + r"*)"
+    r"|(?P<key>\b\w*(?:root|path|file|dir|directory|manifest)=)(?P<value>" + _PATH_CHARS + r"+)"
     r"|(?P<path>"
     r"\bfile://" + _PATH_CHARS + r"*"
     r"|\\\\" + _PATH_CHARS + r"+"
     r"|(?<!\w)[A-Za-z]:[\\/]" + _PATH_CHARS + r"*"
     r"|(?<![\w.:])/(?:[\w.\-~%+]+/)+[\w\-~%+]+\.\w+"
-    r")"
+    r"|(?<![\w.:])/" + _POSIX_ROOTS + r"(?:/[\w.\-~%+]*)+"
+    r")",
+    re.IGNORECASE,
 )
+_TRAILING_PUNCTUATION = ",.;:"
 
 
 def _mask_paths(text: str) -> str:
     def replace(match: re.Match[str]) -> str:
+        whole = match.group(0)
         if match.group("url") is not None:
-            return match.group("url")
+            return whole
+        kept = whole.rstrip(_TRAILING_PUNCTUATION)
+        trailing = whole[len(kept) :]
         if match.group("key") is not None:
-            return match.group("key") + "<path>"
-        return "<path>"
+            return match.group("key") + "<path>" + trailing
+        return "<path>" + trailing
 
     return _ABSOLUTE_PATH.sub(replace, text)
 

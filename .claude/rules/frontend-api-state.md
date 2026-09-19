@@ -4,6 +4,7 @@ paths:
   - "frontend/src/**/model/**"
   - "frontend/src/**/hooks/**"
   - "frontend/src/app/**"
+  - "frontend/src/pages/**"
   - "frontend/src/shared/**"
 ---
 

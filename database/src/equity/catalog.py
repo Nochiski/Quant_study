@@ -38,6 +38,22 @@ CATALOG_NAME = "equity.duckdb"
 META_NAME = "_catalog_meta.json"
 ASOF_DIR = "_asof"
 ASOF_KEEP = 3
+# duckdb 기본값은 코어 수(서버 4) 스레드 · RAM 80% 다. 표 빌드는 `equity_rebuild_all.sh:47` 이
+# `--threads 3 --memory-limit 8GB` 로 묶는데 카탈로그·계약 단계만 안 묶여 379% CPU 를 썼다
+# (DEFECT-C04, 09-19 감사). 같은 4코어 서버에서 kael-system-v3 가 평일 20:05 KST 체인을 돌리고
+# 빌드 락(`/tmp/quant_ledger_build.lock`)은 quant-ledger 안에서만 직렬화한다.
+DUCKDB_THREADS = 3
+DUCKDB_MEMORY_LIMIT = "8GB"
+
+
+def connect(path: Path | None = None, *, read_only: bool = False
+            ) -> duckdb.DuckDBPyConnection:
+    """자원을 묶은 duckdb 연결. 카탈로그·계약 단계의 모든 연결이 이것을 쓴다(DEFECT-C04)."""
+    con = (duckdb.connect(str(path), read_only=read_only) if path is not None
+           else duckdb.connect())
+    con.execute(f"SET threads = {DUCKDB_THREADS}")
+    con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
+    return con
 ASOF_VIEWS: tuple[str, ...] = (                                 # 표본을 남기는 뷰
     "v_cum_adj", "v_adj_price",                                  # S06 (base = as_of)
     "v_adj_price_fwd", "v_adj_volume_fwd")                       # S21 후속 (전방 조정)
@@ -112,7 +128,7 @@ def build_catalog_file(path: Path, macros: dict[str, str]) -> None:
                          f"expected=<identifier>[(<args>)] path={path}")
     if path.exists():
         path.unlink()
-    con = duckdb.connect(str(path))
+    con = connect(path)
     try:
         for name in _creation_order(macros):
             con.execute(f"CREATE OR REPLACE MACRO {name} AS TABLE {macros[name]}")
@@ -205,7 +221,7 @@ def _hash(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[int, str]:
 
 
 def _read_only(path: Path) -> duckdb.DuckDBPyConnection:
-    return duckdb.connect(str(path), read_only=True)
+    return connect(path, read_only=True)
 
 
 def eg11_determinism(tmp_catalog: Path, macros: dict[str, str], sample: tuple[list[str], list[str]]
@@ -286,7 +302,7 @@ def eg5c_asof_invariance(equity_root: Path, written: dict[str, dict[str, object]
             per_view[view] = {"previous_snapshot_id": None}
             continue
         _, prev_dir, prev_meta = snaps[0]
-        con = duckdb.connect()
+        con = connect()
         try:
             con.execute(f"CREATE TEMP VIEW cur AS SELECT * FROM read_parquet('{info['path']}')")
             con.execute(f"CREATE TEMP VIEW prv AS SELECT * FROM "

@@ -57,6 +57,7 @@ from stage.gates import GateResult, GateStatus
 
 from . import inputs, views
 from .baseline import Baseline
+from .catalog import connect as duckdb_connect
 from .catalog import snapshot_id, table_builds
 from .gates import SkipGate
 
@@ -516,7 +517,8 @@ def run(equity_root: Path, baseline: Baseline, *, engine_src: Path | None = None
     mod = load_adapter(src)
     builds = table_builds(equity_root)
     sid = snapshot_id(builds)
-    con = duckdb.connect()
+    # 자원 제한은 카탈로그 단계와 같은 값을 쓴다(DEFECT-C04)
+    con = duckdb_connect()
     try:
         ctx = _Ctx(equity_root, con, mod, baseline, venue,
                    {t: views.parquet_source(equity_root, t) for t in builds})

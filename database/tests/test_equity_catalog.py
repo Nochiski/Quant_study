@@ -90,3 +90,30 @@ def test_매크로가_없어도_빈_카탈로그를_만든다(tmp_path: Path) ->
     finally:
         ro.close()
     assert catalog.table_builds(tmp_path) == {}
+
+
+# ── DEFECT-C04: duckdb 자원 제한 (감사 09-19) ────────────────────────────────
+
+
+def test_카탈로그_연결은_스레드와_메모리를_묶는다(tmp_path: Path) -> None:
+    """DEFECT-C04 — `build.py` 는 `--threads 3 --memory-limit 8GB` 로 묶여 있는데 카탈로그·계약
+    단계의 duckdb 연결은 기본값(코어 수 4 · RAM 80%)으로 열려 379% CPU 를 썼다.
+
+    같은 4코어 N150 서버에서 kael-system-v3 가 평일 20:05 KST `daily_all` 체인을 돌린다 —
+    빌드 락은 quant-ledger 안에서만 직렬화하므로 겹치면 v3 수집이 타임아웃할 수 있다.
+    """
+    assert (catalog.DUCKDB_THREADS, catalog.DUCKDB_MEMORY_LIMIT) == (3, "8GB")
+    ctl = duckdb.connect()
+    ctl.execute(f"SET memory_limit = '{catalog.DUCKDB_MEMORY_LIMIT}'")
+    want_mem = ctl.execute("SELECT current_setting('memory_limit')").fetchone()[0]
+    default_mem = duckdb.connect().execute(
+        "SELECT current_setting('memory_limit')").fetchone()[0]
+    ctl.close()
+    assert want_mem != default_mem            # 기본값(RAM 80%)과 다른 값을 실제로 건다
+    with catalog.connect() as con:
+        assert con.execute("SELECT current_setting('threads')").fetchone()[0] == 3
+        assert con.execute("SELECT current_setting('memory_limit')").fetchone()[0] == want_mem
+    path = tmp_path / "c.duckdb"
+    catalog.build_catalog_file(path, {})
+    with catalog.connect(path, read_only=True) as con:
+        assert con.execute("SELECT current_setting('threads')").fetchone()[0] == 3

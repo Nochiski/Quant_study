@@ -464,9 +464,19 @@ def test_EG5c_차이는_fail이고_rebase_asof로만_승인된다(
     assert _gate(p, "EG11").status is GateStatus.PASS
     assert (root / catalog.META_NAME).read_text(encoding="utf-8") == meta_before
     assert not list((root / "_tmp").glob("catalog_*"))
-    # 사람 승인: 이번 표본이 새 기준이 된다
-    p_ok = catalog.publish(root, seed(), rebase_asof=True)
+    # 사람 승인: 사유가 없으면 거부하고(DEFECT-C08), 승인하면 이번 표본이 새 기준이 된다
+    with pytest.raises(ValueError, match="--reason"):
+        catalog.publish(root, seed(), rebase_asof=True)
+    p_ok = catalog.publish(root, seed(), rebase_asof=True,
+                           rebase_reason="표본 변조 회귀 테스트 — 승인 경로 확인")
     assert p_ok.ok and _gate(p_ok, "EG5c").detail.startswith("rebased")
+    # 승인 기록은 `_asof/<view>/` 밖에 남아 GC 대상이 아니다
+    approvals = sorted((root / catalog.ASOF_DIR / catalog.ASOF_APPROVALS).glob("*.json"))
+    assert len(approvals) == 1
+    rec = json.loads(approvals[0].read_text(encoding="utf-8"))
+    assert rec["reason"] == "표본 변조 회귀 테스트 — 승인 경로 확인"
+    assert rec["n_diff_total"] == 2
+    assert rec["views"]["v_adj_price"]["schema_changed"] is False
     con = duckdb.connect()
     try:
         assert con.execute(f"SELECT count(*) FROM read_parquet('{part}')").fetchone() == (

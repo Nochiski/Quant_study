@@ -15,7 +15,10 @@ import {
 } from "vitest";
 
 import type { BacktestRunSpec } from "../../../shared/api";
-import { buildBacktestRunOptions } from "../model/run-settings";
+import {
+  buildBacktestRunOptions,
+  DEFAULT_BACKTEST_RUN_SETTINGS,
+} from "../model/run-settings";
 import { useBacktestRunSettings } from "../model/use-backtest-run-settings";
 import { BacktestRunActions } from "../ui/backtest-run-actions";
 import { BacktestRunSettings } from "../ui/backtest-run-settings";
@@ -205,6 +208,32 @@ describe("backtest run settings", () => {
       });
     },
   );
+
+  it("sends no benchmark by default because the security ID vocabulary is adapter-owned", () => {
+    // 이슈 #154: mock 은 `sec-005930-1`, 실데이터는 `005930:1` — 어느 어휘도 frontend 가 굽지 않는다.
+    expect(DEFAULT_BACKTEST_RUN_SETTINGS.benchmarkSecurityId).toBe("");
+    const result = buildBacktestRunOptions(DEFAULT_BACKTEST_RUN_SETTINGS, null);
+    expect(result.valid).toBe(true);
+    expect(result.options?.benchmark_security_id).toBeNull();
+  });
+
+  it("explains that an empty benchmark runs without one", async () => {
+    const Harness = () => {
+      const controller = useBacktestRunSettings({
+        start: "2021-01-01",
+        end: "2026-08-31",
+      });
+      return <BacktestRunSettings controller={controller} />;
+    };
+    render(<Harness />);
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    const benchmark = screen.getByRole("textbox", { name: /벤치마크 종목 ID/ });
+    expect(benchmark).toHaveValue("");
+    expect(
+      screen.getByText("비우면 벤치마크 없이 실행합니다.", { exact: false }),
+    ).toBeInTheDocument();
+  });
 
   it("exposes every assumption through accessible controls and reports invalid input", async () => {
     const Harness = () => {

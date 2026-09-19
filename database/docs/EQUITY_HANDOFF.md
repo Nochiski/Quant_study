@@ -752,7 +752,9 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 
 ## 13. 소비자 기동 (워크벤치 · 로컬 데이터)
 
-**로컬 데이터 내려받기** — `database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]`
+**로컬 데이터 내려받기(협업자, SFTP 계정)** — `database/scripts/ledger_sync.ps1 sync` (2026-09-19, `docs/LEDGER_SYNC.md`). `quantshare` 계정은 쉘이 없어 아래 rsync 스크립트를 쓸 수 없다. 29표 현재 빌드 전부(≈1.5GB)를 받고 카탈로그까지 재생성한다.
+
+**로컬 데이터 내려받기(운영자, rsync)** — `database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]`
 - `minimal`(기본) 12표 ≈ 2.1GB: 가격·**조정가**·유니버스·조정계수·기업행위·식별 4표
   + **대장 2표**(`dataset_profile`·`factor_readiness`). 가격/모멘텀/변동성 전략용.
 - `full` 21표 ≈ 3.7GB: 재무·컨센서스·의견·수급·공매도·신용·배당·지분 추가.

@@ -30,3 +30,31 @@ The npm test/update commands atomically create a unique random directory under t
 system temp root, pass its SQLite path only to the backend process, and delete the whole directory
 after Playwright exits. Calling `playwright test` directly is rejected so a reused PID or abandoned
 database cannot leak state into a later run.
+
+## Real equity data (opt-in)
+
+`workbench.real-equity.spec.ts` runs the graph-edit → save → backtest scenario against the duckdb
+equity adapter instead of the mock. Set `E2E_REAL_EQUITY_ROOT` to the local equity root produced by
+`database/scripts/ledger_sync.ps1 sync` (see `database/docs/LEDGER_SYNC.md`):
+
+```text
+$env:E2E_REAL_EQUITY_ROOT = "$HOME\quant-ledger\data\equity"
+npm run test:e2e
+```
+
+With that variable set, `playwright.config.ts` starts the backend with the duckdb adapter and collects
+only the `real-equity` project; without it, the backend runs the mock adapter and only the release-gate
+projects are collected. The two sets never share a run, so a shell that still has the variable set
+cannot turn the mock baselines into real-data failures. CI never sets the variable.
+
+Requirements and expectations:
+
+- The local copy must cover sessions from at least 2023-01 so the 252-session momentum window has
+  history for the 2024 backtest window; otherwise the failure shows up as a backtest error, not as a
+  data-coverage message.
+- The backend builds the TargetTape synchronously before it returns the run id, so the backtest start
+  request dominates the run: about 80 seconds of a 1.2-minute spec on the full common-stock universe
+  (measured 2026-09-19, Rust core; the engine itself finishes in about 2 seconds).
+- The run-settings benchmark defaults to empty (run without a benchmark; the ID vocabulary is
+  adapter-owned, issue #154). The spec sets `005930:1` explicitly so the benchmark path is exercised
+  against real data.

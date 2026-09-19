@@ -77,6 +77,9 @@ export const BacktestRunSettings = ({
                 setField("benchmarkSecurityId", event.target.value)
               }
             />
+            <small className="backtest-settings__hint">
+              {t("backtest.settings.benchmark.hint")}
+            </small>
           </label>
           <label>
             <span>{t("backtest.settings.annualizationDays")}</span>

@@ -38,6 +38,7 @@ const ko = {
   "page.backtest.loadError": "백테스트 상태를 불러올 수 없습니다.",
   "page.backtest.status": "실행 상태",
   "page.backtest.progress": "실행 진행",
+  "page.backtest.runError": "실행 오류",
   "backtest.settings.title": "실행 설정",
   "backtest.settings.open": "실행 설정 열기",
   "backtest.settings.ready": "준비됨",
@@ -47,6 +48,8 @@ const ko = {
   "backtest.settings.core.python": "Python reference",
   "backtest.settings.initialCash": "초기 자본 (KRW)",
   "backtest.settings.benchmark": "벤치마크 종목 ID",
+  "backtest.settings.benchmark.hint":
+    "비우면 벤치마크 없이 실행합니다. ID 형식은 연결된 데이터 어댑터가 정합니다(유니버스의 종목 ID 그대로).",
   "backtest.settings.annualizationDays": "연환산 거래일",
   "backtest.settings.oosStart": "OOS 시작일 (선택)",
   "backtest.settings.rangeUnavailable":
@@ -916,6 +919,7 @@ export const messages = {
     "page.backtest.loadError": "The backtest status could not be loaded.",
     "page.backtest.status": "Run status",
     "page.backtest.progress": "Run progress",
+    "page.backtest.runError": "Run error",
     "backtest.settings.title": "Run settings",
     "backtest.settings.open": "Open run settings",
     "backtest.settings.ready": "Ready",
@@ -925,6 +929,8 @@ export const messages = {
     "backtest.settings.core.python": "Python reference",
     "backtest.settings.initialCash": "Initial capital (KRW)",
     "backtest.settings.benchmark": "Benchmark security ID",
+    "backtest.settings.benchmark.hint":
+      "Leave empty to run without a benchmark. The ID format is owned by the connected data adapter (use a universe security ID as is).",
     "backtest.settings.annualizationDays": "Annualization sessions",
     "backtest.settings.oosStart": "OOS start date (optional)",
     "backtest.settings.rangeUnavailable":

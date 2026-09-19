@@ -570,3 +570,30 @@ def test_morning_fetch_path_is_untouched_by_coverage_gate(tmp_path, monkeypatch)
     _prepare_many(tmp_path, monkeypatch, 100, nodata=("000001", "000002", "000003"))
     assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10060"]) == 0
     assert "coverage=97/100" in _run_detail(tmp_path, "kiwoom_fetch")
+
+
+# ── (i) 정정 카운터 잡음 (DEFECT-A02) ────────────────────────────────────────
+def test_merge_ignores_number_formatting_and_newly_added_columns(tmp_path, monkeypatch):
+    # 9/17~9/19 머지가 사흘 연속 changed=4 를 냈는데 그 중 3건은 "+0.00" vs "0" 표기차였고,
+    # 9/11 의 changed=685,981 은 ensure_table 이 그날 붙인 새 컬럼(기존 행 전부 NULL)이었다.
+    calls = []
+    ledger = [("005930", D_PREV, "-70000.00", "1,000", CLEAN_POSS[D_PREV]["005930"], "ka10008", "old"),
+              ("000660", D_PREV, "250000", "2000", CLEAN_POSS[D_PREV]["000660"], "ka10008", "old")]
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=ledger)   # chg_qty·wght 는 머지가 새로 붙인다
+    _krx_db(tmp_path)
+    assert kw_daily.main(["--fetch", "--date", D]) == 0
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    assert "('ka10008', 6, 4, 0)" in _run_detail(tmp_path, "kiwoom_merge")
+
+
+def test_merge_reports_real_corrections_with_values(tmp_path, monkeypatch, capsys):
+    # 진짜 정정(000660 poss_stkcnt +11,745주 류)은 세고, 무엇이 바뀌었는지 로그에 남긴다.
+    calls = []
+    ledger = [(t, D_PREV, CLOSE[t], VOL[t], "999", "ka10008", "old") for t in TICKERS]
+    _prepare(tmp_path, monkeypatch, calls, ledger_rows=ledger)
+    _krx_db(tmp_path)
+    assert kw_daily.main(["--fetch", "--date", D]) == 0
+    assert kw_daily.main(["--merge", "--date", D]) == 0
+    assert "('ka10008', 6, 4, 2)" in _run_detail(tmp_path, "kiwoom_merge")
+    out = capsys.readouterr().out
+    assert "poss_stkcnt" in out and "'999' → '20'" in out

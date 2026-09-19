@@ -633,6 +633,26 @@ def cross_source(krx: Mapping[str, Quote], kiwoom: Mapping[str, Quote]) -> Cross
     return CrossCheck(len(matched), same_close, same_vol, tuple(samples))
 
 
+_NUMERIC_CHARS = "-.0123456789"
+CHANGE_SAMPLE = 20          # 로그에 싣는 정정 표본 상한
+
+
+def _changed_sql(col: str) -> str:
+    """`i.<col>` 과 `m.<col>` 이 **값으로** 다른가. 원천 표기차는 정정이 아니다(DEFECT-A02).
+
+    `"+0.00"` vs `"0"`, `"1,000"` vs `"1000"` 같은 표기차가 changed 를 오염시켜 9/17~9/19 사흘 내내
+    같은 `changed=4` 가 찍혔다. 둘 다 순수 수치 표기일 때만 수치로 비교하고, 그 밖에는 문자열 그대로 본다
+    (빈 문자열은 수치로 치지 않는다 — 결측과 0 은 다른 사실이다).
+    """
+    a, b = f'i."{col}"', f'm."{col}"'
+    na = f"REPLACE(REPLACE({a}, '+', ''), ',', '')"
+    nb = f"REPLACE(REPLACE({b}, '+', ''), ',', '')"
+    same_number = (f"({a} IS NOT NULL AND {b} IS NOT NULL AND {a} <> '' AND {b} <> '' "
+                   f"AND ltrim({na}, '{_NUMERIC_CHARS}') = '' AND ltrim({nb}, '{_NUMERIC_CHARS}') = '' "
+                   f"AND CAST({na} AS REAL) = CAST({nb} AS REAL))")
+    return f"({a} IS NOT {b} AND NOT {same_number})"
+
+
 def merge_tr(con: sqlite3.Connection, spec: TrSpec, date: str, dry_run: bool) -> TrMerge:
     """incoming 의 `dt <= date` 행 중 **원장에 없는 (ticker, dt) 만** 본 테이블에 넣는다.
 
@@ -651,13 +671,28 @@ def merge_tr(con: sqlite3.Connection, spec: TrSpec, date: str, dry_run: bool) ->
     n_take = 0 if row_take is None else int(row_take[0])
     if dry_run or n_take == 0:
         return TrMerge(spec.api_id, n_take, n_future)
+    # `ensure_table` 이 이번에 붙인 컬럼은 기존 행이 전부 NULL 이라 "정정" 으로 세면 안 된다(DEFECT-A02).
+    had = set(_columns(con, spec.table)) if _table_exists(con, spec.table) else set()
     ensure_table(con, spec.table, cols)
     names = ",".join(f'"{c}"' for c in ["ticker", *cols, "src_api", "collected_at"])
-    differs = " OR ".join(f'i."{c}" IS NOT m."{c}"' for c in cols if c != "dt" and c not in WINDOW_RELATIVE_COLS)
-    row_changed = con.execute(
-        f'SELECT COUNT(*) FROM "{incoming}" i JOIN "{spec.table}" m ON m.ticker = i.ticker AND m.dt = i.dt '
-        f'WHERE i.dt <= ? AND ({differs})', (date,)).fetchone()
-    n_changed = 0 if row_changed is None else int(row_changed[0])
+    compared = [c for c in cols if c != "dt" and c not in WINDOW_RELATIVE_COLS and c in had]
+    join = (f'"{incoming}" i JOIN "{spec.table}" m ON m.ticker = i.ticker AND m.dt = i.dt '
+            f'WHERE i.dt <= ?')
+    n_changed = 0
+    if compared:
+        differs = " OR ".join(_changed_sql(c) for c in compared)
+        row_changed = con.execute(f'SELECT COUNT(*) FROM {join} AND ({differs})', (date,)).fetchone()
+        n_changed = 0 if row_changed is None else int(row_changed[0])
+    if n_changed:
+        # 무엇이 어떻게 바뀌었는지 남긴다 — 건수만으로는 "가정을 다시 본다" 는 재검토를 할 수 없다.
+        parts = [f'SELECT i.ticker, i.dt, \'{c}\', m."{c}", i."{c}" FROM {join} AND {_changed_sql(c)}'
+                 for c in compared]
+        sample = con.execute(" UNION ALL ".join(parts) + f" LIMIT {CHANGE_SAMPLE}",
+                             tuple([date] * len(parts))).fetchall()
+        print(f"[kw_daily] 원천 정정 {spec.api_id} changed={n_changed} (원장은 최초 관측판을 지킨다 — "
+              f"상위 {len(sample)}건)")
+        for tk, dd, col, old_v, new_v in sample:
+            print(f"    {tk} dt={dd} {col}: {old_v!r} → {new_v!r}")
     before = con.total_changes
     con.execute(f'INSERT OR IGNORE INTO "{spec.table}" ({names}) '
                 f'SELECT {names} FROM "{incoming}" WHERE dt <= ?', (date,))

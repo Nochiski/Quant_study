@@ -11,6 +11,9 @@
   contract              EG-C 소비자 계약 ①②③④⑤⑩ — 커널 어댑터(backend/src, pyarrow)를 이 루트 위에서
                         돌려 duckdb 독립 읽기와 대조 → `_contract_meta.json`. 엔진 소스는
                         `--engine-src`(기본 `<repo>/backend/src` 또는 `$QL_ENGINE_SRC`)
+  rollback              `--pass <PASS>` 의 `summary.tsv` 에서 rc 0 인 표만 직전 판으로 되돌린다
+                        (포인터만 — `v=` 는 남는다). 전량 빌드가 중간에 실패해 표마다 다른 날의
+                        판이 섞인 상태를 푼다(DEFECT-C03)
 
 루트는 `--root`(기본 `$QL_HOME/data/equity`), stage 는 `--stage-root`.
 """
@@ -32,6 +35,7 @@ from . import (
     contract,
     gates,
     inputs,
+    rollback,
     rules_s01,  # noqa: F401  # reason: 등록 부작용 — S01 corp·security·corp_ticker
     rules_s02,  # noqa: F401  # reason: 등록 부작용 — S02 캘린더·구간·지수
     rules_s03,  # noqa: F401  # reason: 등록 부작용 — S03 유니버스 존재·상태·정책
@@ -158,6 +162,17 @@ def _cmd_contract(a: argparse.Namespace) -> int:
     return 0 if r.ok else 1
 
 
+def _cmd_rollback(a: argparse.Namespace) -> int:
+    done = rollback.rollback_pass(a.root, getattr(a, "pass"), log_root=a.log_root)
+    if not done:
+        print(f"ok rollback root={a.root} pass={getattr(a, 'pass')} — 되돌린 표 없음")
+        return 0
+    print(f"ok rollback root={a.root} pass={getattr(a, 'pass')} tables={len(done)}")
+    for table, prev in sorted(done.items()):
+        print(f"  {table} -> {prev}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     base = Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
     ap = argparse.ArgumentParser(prog="equity", description=__doc__)
@@ -202,6 +217,14 @@ def main(argv: list[str] | None = None) -> int:
     p_con.add_argument("--engine-src", type=Path, default=None,
                        help="backend/src 경로 (기본 <repo>/backend/src 또는 $QL_ENGINE_SRC)")
     p_con.set_defaults(fn=_cmd_contract)
+
+    p_rb = sub.add_parser("rollback", help="부분 커밋된 판을 직전 판으로 되돌린다 "
+                                           "(포인터만 — v= 디렉터리는 남는다)")
+    p_rb.add_argument("--pass", required=True,
+                      help="logs/equity/rebuild_<PASS>/summary.tsv 의 PASS 이름")
+    p_rb.add_argument("--log-root", type=Path, default=base / "logs" / "equity",
+                      help="rebuild_<PASS>/ 가 사는 디렉터리")
+    p_rb.set_defaults(fn=_cmd_rollback)
 
     a = ap.parse_args(argv)
     return int(a.fn(a))

@@ -60,7 +60,14 @@ for t in $ORDER; do
       # 상류 실패 판(이전 판)을 입력으로 쓰므로 결과 판은 운영에 쓰지 않는다 — summary.tsv 만 읽는다.
       echo "!!! FAILED $t (rc=$RC) — QL_EQUITY_CONTINUE 라 계속"; ANY_FAIL=1; continue
     fi
-    echo "!!! FAILED $t (rc=$RC) — 중단"; exit "$RC"
+    # 층 전체 트랜잭션이 없어 여기까지 커밋된 표는 새 판, 뒤의 표는 어제 판으로 남는다 —
+    # 소비자는 MANIFEST 포인터를 정본으로 읽으므로 그 상태가 곧 혼합 판본이다(DEFECT-C03,
+    # 09-11 사례에서 3.5일 유지). 포인터만 직전 판으로 되돌린다(`v=` 는 keep=10 이라 남아 있고
+    # 지우지 않는다). 되돌리기 자체가 실패해도 원래 실패 코드로 나간다.
+    echo "!!! FAILED $t (rc=$RC) — 중단, 이번 판 커밋분을 되돌린다"
+    .venv/bin/python -m equity --root data/equity rollback --pass "$PASS" \
+      >> "$OUT/rollback.log" 2>&1 || echo "!!! rollback 실패 — $OUT/rollback.log 확인"
+    exit "$RC"
   fi
 done
 T_ALL1=$(date +%s)

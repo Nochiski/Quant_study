@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useEffect, useState } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemePreferenceProvider } from "../../../shared/lib/theme";
 import { StrategyIde } from "..";
@@ -8,19 +8,13 @@ import { StrategyIde } from "..";
 /**
  * 단축키 게이트 경합(Phase 5 backlog 20). 버튼의 `disabled`는 commit에서 바로 바뀌지만 `window` keydown 리스너가
  * passive effect(`useEffect`)로 교체되면 그 사이 틈이 생겨 단축키가 옛 닫힌 값(비활성)으로 버려졌다. 이 테스트는
- * act 환경을 끄고 게이트를 비동기(DefaultLane) 업데이트로 열어, `MutationObserver`가 `disabled` 제거를 본
- * microtask에서 즉시 단축키를 보낸다 — layout effect면 이미 새 리스너다.
+ * 게이트를 act 밖의 promise(프로덕션과 같은 스케줄: passive effect는 commit과 별개의 매크로태스크)로 열고,
+ * `MutationObserver`가 `disabled` 제거를 본 microtask — passive effect가 돌기 전 — 에 즉시 단축키를 보낸다.
+ * layout effect면 commit 안에서 이미 새 리스너다(#155 리뷰: red/green을 가르는 것은 이 타이밍 하나다).
  */
 
-const IS_ACT = "IS_REACT_ACT_ENVIRONMENT";
-const previous = (globalThis as Record<string, unknown>)[IS_ACT];
-
-beforeEach(() => {
-  (globalThis as Record<string, unknown>)[IS_ACT] = false;
-});
 afterEach(() => {
   cleanup();
-  (globalThis as Record<string, unknown>)[IS_ACT] = previous;
   vi.unstubAllGlobals();
 });
 
@@ -64,7 +58,6 @@ const GateOpensLater = ({
   );
 };
 
-// act 환경이 꺼져 있어 첫 렌더도 비동기다 — 버튼은 나타날 때까지 기다린다.
 const button = async (name: string): Promise<HTMLButtonElement> =>
   (await screen.findByRole("button", { name })) as HTMLButtonElement;
 

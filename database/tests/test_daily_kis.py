@@ -6,6 +6,7 @@
 콜은 전부 `api.kis` monkeypatch 다 — 이 파일은 네트워크를 쓰지 않는다.
 """
 import importlib
+import os
 import sqlite3
 from pathlib import Path
 
@@ -317,3 +318,28 @@ def test_isolated_failures_stay_partial(api_mod, monkeypatch, tmp_path):
     res = kis_daily.run(_con(tmp_path), date="20260908", gate_date="20260907", d1="20260730",
                         d2="20260909", tickers=tickers, run_db=tmp_path / "daily_run.db")
     assert res.status is kis_daily.Status.PARTIAL and res.rc == 0
+
+
+# ── 토큰 캐시 권한 (DEFECT-A12·D11) ─────────────────────────────────────────
+def test_token_cache_is_written_owner_only(api_mod, tmp_path):
+    path = tmp_path / "tok.json"
+    api_mod._write_token_cache(str(path), {"token": "t", "issued_at": 0})
+    assert oct(os.stat(path).st_mode & 0o777) == "0o600"
+    path.chmod(0o664)                                  # 옛 판이 남긴 664 파일도 좁힌다
+    api_mod._write_token_cache(str(path), {"token": "t2", "issued_at": 1})
+    assert oct(os.stat(path).st_mode & 0o777) == "0o600"
+    assert path.read_text(encoding="utf-8").count("t2") == 1
+
+
+def test_kis_token_error_does_not_carry_the_response_body(api_mod, monkeypatch):
+    class _Resp:
+        @staticmethod
+        def json():
+            return {"error_description": "x" * 200, "error_code": "E", "access_token_secret": "s3cret"}
+
+    monkeypatch.setattr(api_mod.requests, "post", lambda *a, **k: _Resp())
+    monkeypatch.setattr(api_mod, "_kis_tok", None)
+    monkeypatch.setattr(api_mod, "_KIS_CACHE", "/nonexistent/kis_token.json")
+    with pytest.raises(RuntimeError) as e:
+        api_mod._kis_token()
+    assert "s3cret" not in str(e.value) and "keys=" in str(e.value)

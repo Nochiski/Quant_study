@@ -126,7 +126,7 @@ fi
 cat "$RUN" >> "$LOG"
 SUMMARY=$(grep -E "^원장 건전성|──── .* 종료|아직 미완료|KRX 401" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
 if [ -n "$SKIPPED" ]; then
-  [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 재수집·재빌드하지 않았다(QL_FORCE=1 또는 --date 로 강제) | 로그 $LOG"
+  [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 확정판이 이미 있어 재수집·재빌드하지 않았다 — 다시 돌리려면 QL_FORCE=1 또는 --date $D | 로그 $LOG"
   rm -f "$RUN"; exit 0
 fi
 if [ -n "$FAILED" ]; then

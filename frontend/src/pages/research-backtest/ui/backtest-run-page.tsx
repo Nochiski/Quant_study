@@ -9,6 +9,7 @@ import { BacktestRunActions } from "../../../features/run-backtest";
 import { t, tOptional } from "../../../shared/config";
 import { useNavigate, useParams } from "../../../shared/lib/router";
 import { Badge } from "../../../shared/ui";
+import "./backtest-run-page.css";
 
 const TONE = {
   queued: "info",
@@ -22,7 +23,7 @@ const TONE = {
 type BacktestRunErrorProps = {
   status: BacktestRunState["status"];
   error: string;
-  errorCode: string | null;
+  errorCode: NonNullable<BacktestRunState["error_code"]> | null;
 };
 
 /**
@@ -44,13 +45,13 @@ const BacktestRunError = ({
     errorCode === null ? null : tOptional(`backtest.run.error.${errorCode}`);
   return (
     <div
-      className="page-state page-state--error"
+      className="page-state page-state--error backtest-run-error"
       role="alert"
       aria-label={label}
     >
       {label}: {translated ?? error}
       {translated === null ? null : (
-        <details>
+        <details className="backtest-run-error__reason">
           <summary>{t("page.backtest.serverReason")}</summary>
           {error}
         </details>

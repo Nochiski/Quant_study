@@ -237,8 +237,10 @@ class RunProgressEvent:
     occurred_at: datetime
 
 
-# run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이라
-# 프론트 번역 키(`backtest.error.<code>`)를 공유하고, 마지막은 분류되지 않은 내부 오류다.
+# run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이고,
+# 마지막은 분류되지 않은 내부 오류다. 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다
+# (시작 422 의 `backtest.error.*` 와 namespace 가 다르다 — 툴바는 서버 detail 을 그대로 쓰는
+# 화면이라 키를 합치면 detail 이 덮인다).
 RunFailureCode = Literal[
     "portfolio.strategy.invalid",
     "portfolio.data.unavailable",

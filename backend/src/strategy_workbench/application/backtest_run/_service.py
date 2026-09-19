@@ -573,7 +573,7 @@ class BacktestRunService:
 
 
 def _failure_code(error: BaseException) -> RunFailureCode:
-    """run `error_code`. 어휘 SoT 는 `RunFailureCode`(422 코드와 같은 문자열 → 번역 키 공유)."""
+    """run `error_code`. 어휘 SoT 는 `RunFailureCode`(프론트 번역 키 `backtest.run.error.*`)."""
 
     if isinstance(error, InvalidPortfolioRequestError):
         return "portfolio.strategy.invalid"

@@ -33,6 +33,10 @@ class BuildRecord:
     # 저녁 잠정판 evening · 아침 확정판 morning · 그 밖 manual (플랜 v2 Task B.1).
     # 비워 두면 빌드 id 접두어에서 채운다 — 필드가 없는 구 레코드도 같은 규칙으로 읽힌다.
     basis: str = ""
+    # 이 판이 담은 **최신 사실·최신 관측**의 날짜(ISO). 건전성 C6 의 판정 입력이다 (DEFECT-B01).
+    # 기본값 None = 안 싣던 옛 판 또는 축이 없는 표 → C6 는 판정하지 않고 사유를 남긴다.
+    max_available_date: str | None = None
+    max_observed_date: str | None = None
 
     def __post_init__(self) -> None:
         if not self.basis:

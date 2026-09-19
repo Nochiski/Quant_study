@@ -1,4 +1,4 @@
-"""stage 건전성 C1~C5 (v1 플랜 P4 Task 4.3 / v2 Task B.1).
+"""stage 건전성 C1~C6 (v1 플랜 P4 Task 4.3 / v2 Task B.1 / C6 = 09-19 감사 B01).
 
 판정은 MANIFEST 와 `_failed/` 만 읽는다 — 원장·스냅샷·parquet 를 열지 않으므로 비용이 0이고
 빌드 직후 어느 시점에 돌려도 같은 답이 나온다. C4 의 "재현성" 도 재빌드가 아니라 **직전 판 대비
@@ -9,7 +9,7 @@
 import json
 from pathlib import Path
 
-from stage import health, manifest, model
+from stage import freshness, health, manifest, model
 
 DATE = "20260911"
 # KST 2026-09-11 08:10 — 아침 확정판(UTC 로는 전날 23:10 이다)
@@ -21,13 +21,17 @@ TABLES = {"stg_a": "append_only", "stg_b": "upsert"}
 
 
 def _commit(table_root: Path, build_id: str, *, n_rows: int, content_hash: str, n_src: int,
-            built_at_utc: str, n_dedup: int = 0, n_reject: int = 0) -> None:
+            built_at_utc: str, n_dedup: int = 0, n_reject: int = 0,
+            max_available_date: str | None = None, max_observed_date: str | None = None,
+            partitions: list[dict[str, object]] | None = None) -> None:
     manifest.commit(table_root, manifest.BuildRecord(
         build_id=build_id, snapshot_id="snap_t", rules_version="2.2.3",
         built_at_utc=built_at_utc, n_rows=n_rows, content_hash=content_hash,
+        partitions=partitions or [],
         gates=[{"name": "G1", "status": "pass", "detail": "",
                 "metrics": {"n_src": n_src, "fanout": 1, "n_dedup": n_dedup,
-                            "n_reject": n_reject, "n_stage": n_rows}}]))
+                            "n_reject": n_reject, "n_stage": n_rows}}],
+        max_available_date=max_available_date, max_observed_date=max_observed_date))
 
 
 def _tree(tmp_path: Path, make_stage_tree, table: str) -> Path:
@@ -63,8 +67,9 @@ def _all(tmp_path: Path, make_stage_tree) -> Path:
 def test_every_check_passes_on_a_clean_two_build_tree(tmp_path: Path, make_stage_tree) -> None:
     r = _run(_all(tmp_path, make_stage_tree))
     assert r.ok, [(c.name, c.detail) for c in r.checks if c.status is health.Status.FAIL]
-    assert [c.name for c in r.checks] == ["C1", "C2", "C3", "C4", "C5"]
-    assert "pass 5/5" in r.summary() and r.basis == "evening" and r.date == DATE
+    assert [c.name for c in r.checks] == ["C1", "C2", "C3", "C4", "C5", "C6"]
+    # stg_a·stg_b 는 freshness 미선언 표라 C6 는 사유를 남기고 SKIP 한다
+    assert "pass 5/6" in r.summary() and r.basis == "evening" and r.date == DATE
 
 
 def test_c1_flags_a_table_left_on_yesterdays_build(tmp_path: Path, make_stage_tree) -> None:
@@ -240,7 +245,7 @@ def test_report_serializes_status_and_metrics_as_json(tmp_path: Path, make_stage
     r = _run(_all(tmp_path, make_stage_tree))
     d = json.loads(json.dumps(r.as_dict(), ensure_ascii=False))
     assert d["date"] == DATE and d["basis"] == "evening" and d["ok"] is True
-    assert [c["name"] for c in d["checks"]] == ["C1", "C2", "C3", "C4", "C5"]
+    assert [c["name"] for c in d["checks"]] == ["C1", "C2", "C3", "C4", "C5", "C6"]
     assert d["checks"][0]["status"] == "pass"
 
 
@@ -299,3 +304,84 @@ def test_built_on_생략이면_대상일과_같다(tmp_path: Path, make_stage_tr
     r = _run(root)
     assert r.built_on == DATE
     assert _check(r, "C1").status is health.Status.PASS
+
+
+# ── C6 데이터 축 신선도 (DEFECT-B01) ─────────────────────────────────────────
+# C1~C5 는 판이 언제 **커밋**됐나만 본다 — 원장이 5주 멈춰도 표는 매일 새 판으로 지어지고
+# 계수도 안 움직여 5/5 OK 가 나갔다(09-19 감사: KIS 3표 2026-08-14 · v3 4표 2026-09-02 정지).
+# C6 는 판이 담은 **최신 사실의 날짜**(BuildRecord.max_available_date)를 D 와 대조한다.
+
+C6_TABLES = {"stg_price_daily": "upsert", "stg_credit_daily": "append_only",
+             "stg_short_daily_kis": "append_only"}
+
+
+def _c6_tree(tmp_path: Path, make_stage_tree, avail: dict[str, str | None]) -> Path:
+    root = Path()
+    for t, a in avail.items():
+        tree = make_stage_tree(tmp_path, t, [{"k": "1"}], build_id=f"b_seed_{t}")
+        for bid, when in ((PREV_BID, "2026-09-10T23:30:00+00:00"), (CUR_BID, CUR_BUILT_AT)):
+            _commit(tree.table_root, bid, n_rows=10, content_hash="10:aa", n_src=10,
+                    built_at_utc=when, max_available_date=a, max_observed_date=a)
+        root = tree.stage_root
+    return root
+
+
+def test_c6_통과_동결표는_사유와_함께_건너뛴다(tmp_path: Path, make_stage_tree) -> None:
+    root = _c6_tree(tmp_path, make_stage_tree,
+                    {"stg_price_daily": "2026-09-10", "stg_credit_daily": "2026-09-08",
+                     "stg_short_daily_kis": "2026-08-14"})
+    r = health.check_stage(root, basis="evening", date_kst=DATE, tables=C6_TABLES)
+    c6 = _check(r, "C6")
+    assert c6.status is health.Status.PASS, c6.detail
+    assert c6.metrics["n_checked"] == 2 and c6.metrics["stale"] == []
+    skipped = c6.metrics["skipped"]
+    assert isinstance(skipped, dict) and "stg_short_daily_kis" in skipped
+    assert "일일 체인 범위 밖" in str(skipped["stg_short_daily_kis"])
+
+
+def test_c6_는_원장이_멈춘_표를_FAIL_한다(tmp_path: Path, make_stage_tree) -> None:
+    root = _c6_tree(tmp_path, make_stage_tree,
+                    {"stg_price_daily": "2026-08-14", "stg_credit_daily": "2026-09-08",
+                     "stg_short_daily_kis": "2026-08-14"})
+    c6 = _check(health.check_stage(root, basis="evening", date_kst=DATE, tables=C6_TABLES), "C6")
+    assert c6.status is health.Status.FAIL
+    assert [s["table"] for s in c6.metrics["stale"]] == ["stg_price_daily"]
+    assert c6.metrics["stale"][0]["max_available_date"] == "2026-08-14"
+    assert "stg_price_daily" in c6.detail
+
+
+def test_c6_는_신선도_기록이_없는_옛_판을_건너뛴다(tmp_path: Path, make_stage_tree) -> None:
+    """max_available_date 필드가 없던 판(옛 MANIFEST)은 판정 불가 — 조용히 통과가 아니라 SKIP 이다."""
+    root = _c6_tree(tmp_path, make_stage_tree,
+                    {"stg_price_daily": None, "stg_credit_daily": "2026-09-08",
+                     "stg_short_daily_kis": None})
+    c6 = _check(health.check_stage(root, basis="evening", date_kst=DATE, tables=C6_TABLES), "C6")
+    assert c6.status is health.Status.PASS
+    assert c6.metrics["n_checked"] == 1
+    assert "기록 없음" in str(c6.metrics["skipped"]["stg_price_daily"])
+
+
+def test_c6_는_대상일_D_기준이다(tmp_path: Path, make_stage_tree) -> None:
+    """아침 확정판은 D=T-1 이라 같은 데이터가 저녁 판보다 하루 더 여유롭다."""
+    root = _c6_tree(tmp_path, make_stage_tree, {"stg_price_daily": "2026-09-04"})
+    tables = {"stg_price_daily": "upsert"}
+    fail = health.check_stage(root, basis="evening", date_kst="20260912", tables=tables)
+    assert _check(fail, "C6").status is health.Status.FAIL     # D-7 = 09-05 > 09-04
+    ok = health.check_stage(root, basis="evening", date_kst="20260911", tables=tables)
+    assert _check(ok, "C6").status is health.Status.PASS       # D-7 = 09-04
+
+
+def test_freshness_는_stage_66표를_빠짐없이_선언한다() -> None:
+    from stage import rules
+    undeclared = [t for t in rules.RULES if freshness.judgement(t)[1] == freshness.UNDECLARED]
+    assert undeclared == []
+    # available 비부여 표(kind=none)는 정확히 NO_AVAILABLE 집합과 같아야 한다
+    none_kind = {t for t, r in rules.RULES.items() if r.available.kind == "none"}
+    assert none_kind - set(freshness.FROZEN) == freshness.NO_AVAILABLE - set(freshness.FROZEN)
+    assert len(freshness.FROZEN) == 8
+
+
+def test_freshness_동결표는_사유_문자열이_필수다() -> None:
+    for table, why in freshness.FROZEN.items():
+        assert why.strip(), table
+        assert freshness.judgement(table) == (None, why)

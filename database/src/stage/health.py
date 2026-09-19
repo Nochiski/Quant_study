@@ -1,4 +1,4 @@
-"""stage 건전성 C1~C5 — `python -m stage.health` (v1 플랜 P4 Task 4.3 / v2 Task B.1).
+"""stage 건전성 C1~C6 — `python -m stage.health` (v1 플랜 P4 Task 4.3 / v2 Task B.1).
 
 판정은 **MANIFEST.json 과 `_failed/` 만** 읽는다. 원장·스냅샷·parquet 를 열지 않으므로 비용이 0이고
 빌드 뒤 아무 때나 돌려도 같은 답이 나온다. 그래서 C4 "재현성" 도 재빌드가 아니라 다음 술어다 —
@@ -11,6 +11,11 @@
   C3  append_only 표의 행수가 직전 판보다 줄지 않았다
   C4  소스 계수가 동결된 표는 content_hash 도 동결이다
   C5  빌드 소요가 예산(기본 40분) 안이다
+  C6  판이 담은 최신 사실(`max_available_date`)이 대상일 D 의 허용 지연 안이다
+
+C1~C5 는 판이 **언제 커밋됐나**만 본다 — 그래서 어떤 소스의 수집이 조용히 멈춰도 표는 매일 새
+판으로 다시 지어지고 계수도 안 변해 전부 통과한다(09-19 감사 DEFECT-B01: KIS 3표 5주·v3 4표
+2주 정지인데 "5/5 OK"). C6 가 **데이터 축**을 본다 — 허용 지연 선언은 `freshness.py`.
 
 프리패스 캐시가 없어 `run_stage_all.sh` 가 건너뛴 문서층 4표처럼 **의도적으로 안 지은 표**는
 `--skip` 으로 빼며, 뺀 사실은 리포트에 남는다(조용히 통과시키지 않는다).
@@ -22,12 +27,12 @@ import datetime as dt
 import json
 import os
 import sys
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from . import manifest, model, rules
+from . import freshness, manifest, model, rules
 
 KST = dt.timezone(dt.timedelta(hours=9))
 BUDGET_S_DEFAULT = 2400          # C5 — 스냅샷 3.8분 + 전량 빌드 22.5분 실측에 여유를 준 40분
@@ -281,16 +286,57 @@ def _c5_elapsed(pairs: list[_Pair], date_kst: str, started_at: str | None,
                   "finished_at": end.isoformat(timespec="seconds")})
 
 
+def _c6_fresh(pairs: list[_Pair], date_kst: str,
+              allow: Callable[[str], tuple[int | None, str]] = freshness.judgement) -> Check:
+    """데이터 축 신선도 — 판이 담은 **최신 사실의 날짜**가 D − 허용지연 이상인가 (DEFECT-B01).
+
+    C1 이 "오늘 새로 지었다" 를 보는 동안 원장이 5주 멈춰 있어도 아무도 못 봤다. 허용 지연은
+    캘린더일 단순 정수이고 표별 선언은 `freshness.py` 에 있다 — 동결·희소·비부여 표는 판정하지
+    않고 **사유를 남긴다**(`--skip` 과 같은 원칙: 조용히 통과시키지 않는다).
+    """
+    d = dt.date(int(date_kst[:4]), int(date_kst[4:6]), int(date_kst[6:8]))
+    stale: list[dict[str, object]] = []
+    skipped: dict[str, str] = {}
+    n_checked = 0
+    for p in pairs:
+        if p.current is None:
+            continue                       # 판 자체가 없다 — C1 이 잡는다
+        allow_days, why = allow(p.table)
+        if allow_days is None:
+            skipped[p.table] = why
+            continue
+        got = p.current.max_available_date
+        if not got:
+            skipped[p.table] = freshness.NO_RECORD
+            continue
+        n_checked += 1
+        limit = d - dt.timedelta(days=allow_days)
+        if dt.date.fromisoformat(got) < limit:
+            stale.append({"table": p.table, "max_available_date": got,
+                          "limit": limit.isoformat(), "allow_days": allow_days})
+    detail = (f"{n_checked}표 신선도 (D={date_kst}, 건너뜀 {len(skipped)}표)" + _listed(
+        "지연", [f"{s['table']} {s['max_available_date']}<{s['limit']}" for s in stale]))
+    if stale:
+        status = Status.FAIL
+    elif n_checked:
+        status = Status.PASS
+    else:
+        status = Status.SKIP            # 판정한 표가 0 — 통과로 세지 않는다
+    return Check("C6", status, detail,
+                 {"n_checked": n_checked, "stale": stale, "skipped": skipped})
+
+
 def check_stage(stage_root: Path, basis: str, date_kst: str, *,
                 built_on: str | None = None,
                 tables: Mapping[str, str] | None = None, skip: Collection[str] = (),
                 started_at: str | None = None,
                 budget_s: int = BUDGET_S_DEFAULT) -> StageHealth:
-    """C1~C5 를 판정한다. `tables` 는 표 이름 → write_mode (기본은 stage 규칙 전수).
+    """C1~C6 을 판정한다. `tables` 는 표 이름 → write_mode (기본은 stage 규칙 전수).
 
     `date_kst` 는 대상 거래일(리포트·파일명의 D), `built_on` 은 판이 커밋된 KST 날짜다. 저녁 잠정판은
     둘이 같지만 아침 확정판은 D=T-1 이고 커밋은 T 아침이라 다르다 — C1(오늘 판)·C2(오늘 폐기)·C5(오늘
     소요)는 `built_on` 으로 본다. 생략하면 `date_kst` 와 같다(저녁·수동 빌드 규약).
+    C6(데이터 신선도)만 대상 거래일 `date_kst` 로 본다 — 판이 담아야 할 최신 사실이 D 이기 때문이다.
     """
     if len(date_kst) != 8 or not date_kst.isdigit():
         raise ValueError(f"date must be YYYYMMDD: date_kst={date_kst!r}")
@@ -310,7 +356,8 @@ def check_stage(stage_root: Path, basis: str, date_kst: str, *,
               _c2_failed(stage_root, built_on, started_at),
               _c3_monotonic(judged, write_modes),
               _c4_frozen(judged, unversioned),
-              _c5_elapsed(judged, built_on, started_at, budget_s))
+              _c5_elapsed(judged, built_on, started_at, budget_s),
+              _c6_fresh(judged, date_kst))
     return StageHealth(date_kst, basis, str(stage_root), checks, built_on)
 
 
@@ -320,7 +367,7 @@ def _split(raw: str) -> tuple[str, ...]:
 
 def main(argv: list[str] | None = None) -> int:
     base = Path(os.environ.get("QL_HOME") or Path(__file__).resolve().parents[2])
-    ap = argparse.ArgumentParser(description="stage 건전성 C1~C5 (읽기 전용)")
+    ap = argparse.ArgumentParser(description="stage 건전성 C1~C6 (읽기 전용)")
     ap.add_argument("--stage-root", type=Path, default=base / "data" / "stage")
     ap.add_argument("--basis", required=True, choices=sorted(model.BASIS_PREFIX))
     ap.add_argument("--date", default=dt.datetime.now(KST).strftime("%Y%m%d"),

@@ -84,6 +84,16 @@ def _count(con: duckdb.DuckDBPyConnection, sql: str) -> int:
     return int(str(row[0]))
 
 
+def _max_date(con: duckdb.DuckDBPyConnection, view: str, column: str) -> str | None:
+    """`view.column` 의 최댓값을 ISO 날짜 문자열로. 열이 없거나 전 행 NULL 이면 None (C6 입력)."""
+    cols = {str(d[0]) for d in con.execute(f"SELECT * FROM {view} LIMIT 0").description or ()}
+    if column not in cols:
+        return None
+    row = con.execute(f"SELECT max({_q(column)}) FROM {view}").fetchone()
+    v = None if row is None else row[0]
+    return None if v is None else str(v)[:10]
+
+
 def _signed(expr: str, policy: str) -> str:
     if policy == "abs":
         return f"ltrim({expr}, '+-')"
@@ -523,6 +533,10 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
             con.execute("CREATE OR REPLACE TEMP VIEW stage_pq AS SELECT * FROM stage_ok")
             content_hash = "0:empty"
         n_stage = _count(con, "SELECT count(*) FROM stage_pq")
+        # C6 신선도 입력 (DEFECT-B01): 이 판이 담은 최신 사실·최신 관측의 날짜. 열이 없거나 전 행
+        # NULL(available 비부여 표)이면 None 을 싣고 C6 가 사유와 함께 건너뛴다.
+        max_available_date = _max_date(con, "stage_pq", "available_date")
+        max_observed_date = _max_date(con, "stage_pq", "observed_date")
 
         fpath = fixtures_path or (stage_root / "fixtures" / f"{rule.name}.json")
         fixtures = json.loads(fpath.read_text(encoding="utf-8")) if fpath.exists() else None
@@ -587,6 +601,7 @@ def build_table(rule: TableRule, snap: Snapshot, stage_root: Path, build_id: str
     manifest.commit(table_root, manifest.BuildRecord(
         build_id=bid, snapshot_id=snap.snapshot_id, rules_version=RULES_VERSION,
         built_at_utc=datetime.now(UTC).isoformat(timespec="seconds"), n_rows=n_stage,
-        content_hash=content_hash, partitions=partitions, gates=gate_dicts))
+        content_hash=content_hash, partitions=partitions, gates=gate_dicts,
+        max_available_date=max_available_date, max_observed_date=max_observed_date))
     return BuildResult(BuildStatus.OK, rule.name, bid, snap.snapshot_id, n_stage, n_src, n_dedup,
                        n_reject, content_hash, results, round(time.time() - t0, 1), final_dir, None)

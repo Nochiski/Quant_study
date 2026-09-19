@@ -426,12 +426,13 @@ def _parse_date(s: str) -> dt.date:
 
 
 def _requested_tickers(kw_db: str, *, state_path: str, seed_path: str,
+                       cal: trading_calendar.Calendar,
                        dry_run: bool) -> universe.RequestedUniverse:
     """요청 유니버스. dry-run 은 유예 상태 파일도 건드리지 않는다(사본에 쓰게 한다)."""
     def _read(path: str) -> universe.RequestedUniverse:
         con = sqlite3.connect(f"file:{kw_db}?mode=ro", uri=True)
         try:
-            return universe.requested(con, state_path=path, seed_path=seed_path)
+            return universe.requested(con, state_path=path, seed_path=seed_path, cal=cal)
         finally:
             con.close()
 
@@ -474,7 +475,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     req = _requested_tickers(kw_db, state_path=os.path.join(base, "data", "daily",
                                                             "universe_kw.json"),
                              seed_path=os.path.join(base, "data", "jsonl", "tickers.txt"),
-                             dry_run=a.dry_run)
+                             cal=cal, dry_run=a.dry_run)
     print(f"  요청 유니버스 {len(req.tickers):,}종목 (asof={req.asof} "
           f"seeded_only={len(req.seeded_only)} dropped={len(req.dropped)}) · "
           f"창 {d1}~{d2} · 판정일 {gate_date} · D={d:%Y%m%d}"

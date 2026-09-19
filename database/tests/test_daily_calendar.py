@@ -26,6 +26,16 @@ def test_prev_trading_day_skips_holiday_and_weekend(tmp_path):
     assert c.prev_trading_day(dt.date(2026, 9, 14), n=2) == dt.date(2026, 9, 10)
 
 
+def test_count_trading_days_is_exclusive_start_inclusive_end(tmp_path):
+    # 유예 카운터가 쓰는 정의(A04) — 금요일 이탈 뒤 화요일이면 9/21·9/22 두 세션이다.
+    c = cal.load(_write(tmp_path, ["20260924", "20260925"]))
+    assert c.count_trading_days(dt.date(2026, 9, 18), dt.date(2026, 9, 22)) == 2
+    assert c.count_trading_days(dt.date(2026, 9, 18), dt.date(2026, 9, 20)) == 0   # 주말만 지났다
+    assert c.count_trading_days(dt.date(2026, 9, 23), dt.date(2026, 9, 28)) == 1   # 추석 9/24·9/25 휴장
+    assert c.count_trading_days(dt.date(2026, 9, 22), dt.date(2026, 9, 22)) == 0   # 같은 날은 0
+    assert c.count_trading_days(dt.date(2026, 9, 23), dt.date(2026, 9, 22)) == 0   # 역순도 0
+
+
 def test_missing_cache_assumes_business_days(tmp_path):
     c = cal.load(tmp_path / "nope.json")
     assert c.source == "weekend_only"

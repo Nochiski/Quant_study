@@ -25,6 +25,20 @@ class Calendar:
     def is_trading_day(self, d: dt.date) -> bool:
         return d.weekday() < 5 and d.strftime("%Y%m%d") not in self.holidays
 
+    def count_trading_days(self, a: dt.date, b: dt.date) -> int:
+        """`a` 초과 `b` 이하 구간의 거래일 수. `b <= a` 면 0.
+
+        유예 카운터(`universe.requested`)가 쓴다 — 달력일로 세면 주말·연휴가 유예를 잡아먹는다
+        (DEFECT-A04: 5거래일 약속이 주말에 3거래일, 추석 연휴에 1거래일로 줄었다).
+        """
+        n = 0
+        cur = a
+        while cur < b:
+            cur += dt.timedelta(days=1)
+            if self.is_trading_day(cur):
+                n += 1
+        return n
+
     def prev_trading_day(self, d: dt.date, n: int = 1) -> dt.date:
         """d 직전 n번째 거래일(d 자신은 제외)."""
         if n < 1:

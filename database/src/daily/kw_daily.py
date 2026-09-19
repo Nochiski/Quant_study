@@ -749,22 +749,24 @@ def _too_early(not_before: str | None) -> str | None:
     return None
 
 
-def _requested_universe(con: sqlite3.Connection, base: str,
+def _requested_universe(con: sqlite3.Connection, base: str, cal: trading_calendar.Calendar,
                         dry_run: bool) -> universe.RequestedUniverse:
     """요청 유니버스. dry-run 은 상태 파일 사본으로 돌려 유예 카운터를 전진시키지 않는다."""
     state = os.path.join(base, "data", "daily", "universe_kw.json")
     seed = os.path.join(base, "data", "jsonl", "tickers.txt")
     if not dry_run:
-        return universe.requested(con, state_path=state, seed_path=seed, grace_days=GRACE_DAYS)
+        return universe.requested(con, state_path=state, seed_path=seed, cal=cal,
+                                  grace_days=GRACE_DAYS)
     with tempfile.TemporaryDirectory(prefix="kw_daily_dry_") as tmp:
         shadow = os.path.join(tmp, "universe_kw.json")
         if os.path.exists(state):
             shutil.copyfile(state, shadow)
-        return universe.requested(con, state_path=shadow, seed_path=seed, grace_days=GRACE_DAYS)
+        return universe.requested(con, state_path=shadow, seed_path=seed, cal=cal,
+                                  grace_days=GRACE_DAYS)
 
 
 def _run_fetch(*, date: str, prev_date: str, db_path: str, run_db: str, base: str,
-               limit: int, dry_run: bool, not_before: str | None,
+               cal: trading_calendar.Calendar, limit: int, dry_run: bool, not_before: str | None,
                trs: Sequence[str] | None = None, commit: bool = False) -> int:
     early = _too_early(not_before)
     if early is not None:
@@ -775,7 +777,7 @@ def _run_fetch(*, date: str, prev_date: str, db_path: str, run_db: str, base: st
         return _FETCH_RC[FetchStatus.TOO_EARLY]
     con = sqlite3.connect(db_path)
     try:
-        req = _requested_universe(con, base, dry_run)
+        req = _requested_universe(con, base, cal, dry_run)
     finally:
         con.close()
     tickers = req.tickers[:limit] if limit > 0 else req.tickers
@@ -868,7 +870,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if a.fetch:
         return _run_fetch(date=date, prev_date=prev_date, db_path=db_path, run_db=run_db,
-                          base=base, limit=a.limit, dry_run=a.dry_run, not_before=a.not_before,
+                          base=base, cal=cal, limit=a.limit, dry_run=a.dry_run,
+                          not_before=a.not_before,
                           trs=trs, commit=a.commit)
     return _run_merge(date=date, db_path=db_path, krx_db=krx_db, run_db=run_db,
                       dry_run=a.dry_run, not_before=a.not_before)

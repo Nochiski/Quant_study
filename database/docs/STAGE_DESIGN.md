@@ -323,13 +323,14 @@ ka10099 로 적립) ⓑ 08-21~31 상장·폐지 재구성 불가.
 | G6 | 판본 보존 | (자연키, observed_date) 유일성 위반 0 + **자연키 중복 중 payload 동일 비율 기록**(임계 초과 = 재수집 잡음 과다) — **append_only 소스에만** (§3 write_mode) |
 | G7 | 범위 — **행 격리형** | 범위 밖 값은 NULL + `miss_kind='out_of_range'` + reject 계상(원문 보존). 테이블 실패는 격리 비율 > 임계(기본 0.1%, survey v2 후 확정)일 때만. 축: **관측일**(BAS_DD·dt·deal_date·rcept) 연도 **[1999(DART 전자공시 최초 연도 — 접수번호 `19990403000009` 실재), 현재+1]**(09-03 정정: 하한 2000 은 1999 공시를 행째 reject 했다) / **내용일**(만기·상환·증감자일·상장일 — pymd·*_edd·isu_dcrs_de·LIST_DD) 연도 **[1900, 현재+40]**(09-03 정정 2회: 하한 1990 은 삼성전자 상장일 19750611 을, 1956 은 dart_capital 현물출자일 1952~1954 8셀을 격리했다 — 풀 빌드 표본 검수에서 발견) · 부호 교차 · 비율 범위. 실측: CB 만기 2053 정상 · **오타 2106(tsstk_dp)·2120~2923(dart_capital 7행) 실재** — v2.1 의 테이블 폐기형은 두 테이블을 영구 빌드 불가로 만들었다(v2 가 축 분리로 잡았다던 사고 클래스의 상한값 재발) |
 | G8 | 파싱 등식 | blob=parse_log ∧ Σn_rows=stage — **ep 별 분리 산출** + 조인 테이블은 좌표 합집합 등식 (예외 e) · coverage 급락 감지(v3 일별 행수 < 직전 중앙값 50% 플래그) |
-| G9 | **교차 소스 회귀** | **원장 직접 대조**(stage 간 아님 — S1 단독 실행 가능): (stk_bydd ∪ ksq_bydd) ⋈ ka10060 ON (ISU_CD=ticker, BAS_DD=dt), `CAST(TDD_CLSPRC AS INT) = abs(CAST(cur_prc AS INT))` **7,537,984행 100.0000%**(v2.1 의 2,864,871 은 survey_cross 조인 수 — 09-02 재측정) · 거래량 `ACC_TRDVOL = acc_trde_prica` 99.9864% · `MKTCAP = TDD_CLSPRC × LIST_SHRS` 위반 0 — 기준값은 baseline.json, 저하 = 실패 |
+| G9 | **교차 소스 회귀** | **원장 직접 대조**(stage 간 아님 — S1 단독 실행 가능): (stk_bydd ∪ ksq_bydd) ⋈ ka10060 ON (ISU_CD=ticker, BAS_DD=dt) **+ 거래일 20:00 KST 이후 관측만**(결정 10→11: KRX 애프터마켓이 20:00 에 닫히고 키움 일별 집계는 20:15 안에 정착한다. 그 전 관측은 잠정치다). 술어는 `rules_krx.CROSS_JOIN_PREDICATE_SQL` **한 곳**에서만 나오며 `stage.baseline` 의 측정 SQL 도 같은 상수를 쓴다 — 두 술어가 갈라져 기준값과 게이트가 다른 모집단을 세던 사고의 재발 방지(09-19 감사 DEFECT-B02). **판정은 거래량 일치율 하나뿐**: `volume_match_ratio < baseline − `volume_match_ratio_tol`(baseline 선언 **5e-5** ≈ 380행/759만) 이면 폐기. **종가 일치율은 기록만** 한다(결정 11, 09-14 애프터마켓 이후 키움 `cur_prc` 는 장후 마지막 체결가라 KRX 종가와 다른 것이 정상 — v2.2 가 적었던 '7,537,984행 100.0000%' 는 09-14 이전 사실이다). `MKTCAP = TDD_CLSPRC × LIST_SHRS` 위반 0 은 G3 불변식이 본다 |
 
 **회귀 baseline** (`data/stage/baseline.json`, v2.2): [{`table`, `metric`, `sql`, `value`, `measured_at`, `growing`(★)}].
 게이트 상수는 전부 여기서 읽는다 — **코드 하드코딩 금지**. 상수마다 조인 키·술어를 `sql` 에 병기해야 재현 가능하다
 (v2.1 의 상수 3개 — G9 2,864,871행, disclosure 중복 491, whol_loan_gvrt 범위 — 가 술어 없이 적혀 지금 원장과 달랐다).
 ★ 목록은 §2 통합 목록. 갱신은 diff 를 커밋 메시지에 남기고 사람이 승인한다. "게이트가 깨졌다"와 "원장이 자랐다"는
 `baseline.json` 의 `measured_at` 과 `_meta.json` 의 `src_mtime` 으로 가른다.
+**전량 재측정(`python -m stage.baseline --snapshot-id …`)은 그날 원장 상태로 24지표를 통째로 느슨하게 만든다** — 한 지표만 고쳐야 하면 `--only <table>.<metric> --note "<사유>"` 로 그것만 재고 나머지 값·`measured_at` 은 보존한다(09-19 감사 DEFECT-B02, 09-09 리뷰 D5-(b) 의 금지 권고와 같은 취지). `baseline.CONSTANTS`(예: `volume_match_ratio_tol`)는 측정값이 아니라 선언값이라 두 경로 모두 그대로 싣는다.
 
 ## 10. 빌더
 

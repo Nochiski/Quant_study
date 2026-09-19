@@ -289,3 +289,64 @@ def test_gate_g4_fixture_null_expectation_matches_sql_null(
     r = _built(snap, tmp_path, fixtures_path=fx)
     g = _gate(r, "G4")
     assert g.metrics == {"n_fixtures": 2, "n_mismatch": 1}  # open NULL 일치, close 9000 ≠ NULL
+
+
+# ── G9 회귀 baseline 과 게이트의 모집단 일치 (DEFECT-B02) ───────────────────────
+def _price_metrics() -> tuple[object, ...]:
+    from stage import baseline
+    return tuple(m for m in baseline.METRICS if m.db == "krx+kiwoom")
+
+
+def test_baseline_이_G9_와_같은_교차조인_술어로_잰다(snap: snapshot.Snapshot,
+                                                    tmp_path: Path) -> None:
+    """baseline 은 09-02 에 **시각 조건 없는** 조인으로 쟀고 게이트는 20:00 KST 컷오프를 쓴다 —
+    두 값이 서로 다른 모집단이라 '회귀' 가 성립하지 않았고 여유가 7행까지 좁아졌다(DEFECT-B02)."""
+    from stage import baseline
+    g = _gate(_built(snap, tmp_path), "G9")
+    data = baseline.measure(snap, _price_metrics(), {}, measured_at="2026-09-19")
+    assert data["stg_price_daily"]["close_joined"] == g.metrics["close_joined"] == 4
+    assert data["stg_price_daily"]["volume_match_ratio"] == pytest.approx(
+        g.metrics["volume_match_ratio"])
+
+
+def test_gate_g9_는_baseline_허용폭_안의_저하를_통과시킨다(snap: snapshot.Snapshot,
+                                                          tmp_path: Path) -> None:
+    """결정 11 후속: 기준값 −tol 까지는 통과한다. tol 이 없으면 1행 차이에도 판이 폐기된다."""
+    bp = tmp_path / "baseline.json"
+    bp.write_text(json.dumps({"stg_price_daily": {
+        "volume_match_ratio": 0.80, "volume_match_ratio_tol": 0.06}}), encoding="utf-8")
+    r = _built(snap, tmp_path, baseline_path=bp)
+    assert _gate(r, "G9").status is gates.GateStatus.PASS      # 실측 0.75 ≥ 0.80 − 0.06
+    bp.write_text(json.dumps({"stg_price_daily": {"volume_match_ratio": 0.80}}),
+                  encoding="utf-8")
+    r = _built(snap, tmp_path, baseline_path=bp)
+    g = _gate(r, "G9")
+    assert g.status is gates.GateStatus.FAIL and "tol" in g.detail
+
+
+def test_baseline_only_cli_가_G9_기준값만_갈아끼운다(snap: snapshot.Snapshot,
+                                                    tmp_path: Path) -> None:
+    """서버 재측정 경로 그대로 — 옛 술어로 측정된 기준값 하나만 결정 11 술어로 갱신한다."""
+    from stage import baseline
+    out = tmp_path / "baseline.json"
+    baseline.write(out, {
+        "snapshot_id": "snap_20260902T154207Z", "measured_at": "2026-09-02",
+        "stg_price_daily": {"volume_match_ratio": 0.9998641546599197,
+                            "close_joined": 7537984, "ohl_zero_vol_pos_rows": 125},
+        "stg_fin": {"n_rows": 15375024},
+        "_measured": [{"table": "stg_price_daily", "metric": "volume_match_ratio",
+                       "db": "krx+kiwoom", "sql": "-", "value": 0.9998641546599197,
+                       "measured_at": "2026-09-02", "growing": False}]})
+    rc = baseline.main(["--snapshot-id", "snap_test",
+                        "--snapshot-root", str(snap.dir.parent),
+                        "--out", str(out), "--only", "stg_price_daily.volume_match_ratio",
+                        "--note", "결정 11 술어(20:00 KST 컷오프)로 재측정"])
+    assert rc == 0
+    got = json.loads(out.read_text(encoding="utf-8"))
+    assert got["stg_price_daily"]["volume_match_ratio"] == pytest.approx(3 / 4)   # 재측정됨
+    assert got["stg_price_daily"]["volume_match_ratio_tol"] == 5e-5               # 선언 상수 주입
+    assert got["stg_price_daily"]["close_joined"] == 7537984                      # 보존
+    assert got["stg_fin"]["n_rows"] == 15375024 and got["measured_at"] == "2026-09-02"
+    e = next(x for x in got["_measured"] if x["metric"] == "volume_match_ratio")
+    assert e["snapshot_id"] == "snap_test" and "결정 11" in e["note"]
+    assert "INTERVAL 20 HOUR" in e["sql"]

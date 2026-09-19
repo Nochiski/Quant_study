@@ -265,8 +265,13 @@ def g9_cross_source(ctx: GateContext) -> GateResult:
     # KRX 종가(15:30)와 다른 것이 정상이다(09-14 실측 종가 514/2,649 · 거래량 2,649/2,649). 판정은 거래량 회귀뿐.
     if ctx.baseline is not None:
         base = ctx.baseline.get("volume_match_ratio")
-        if isinstance(base, int | float) and vol_r < float(base) - 1e-9:
-            reasons.append(f"volume_match_ratio {vol_r} < baseline {base}")
+        # 허용폭은 baseline 선언값이다(DEFECT-B02). 기준값이 서로 다른 술어로 측정돼 여유가 7행까지
+        # 좁아졌던 탓에, 하루치 불일치 증가만으로 stg_price_daily 가 폐기되고 equity 전체가 멈췄다.
+        tol = ctx.baseline.get("volume_match_ratio_tol", 0.0)
+        tol_f = float(tol) if isinstance(tol, int | float) else 0.0
+        metrics["volume_match_ratio_tol"] = tol_f
+        if isinstance(base, int | float) and vol_r < float(base) - tol_f - 1e-9:
+            reasons.append(f"volume_match_ratio {vol_r} < baseline {base} - tol {tol_f}")
     ok = not reasons
     return GateResult("G9", GateStatus.PASS if ok else GateStatus.FAIL,
                       "교차 소스 회귀 유지" if ok else "; ".join(reasons), metrics)

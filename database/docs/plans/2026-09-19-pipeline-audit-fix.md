@@ -24,8 +24,9 @@
 | 갈래 5 doc 증분 | **완료** | 4커밋, `doc_prepass_daily.sh` |
 | 갈래 6 workbench | **완료** | 1커밋 |
 | 통합·테스트 | **완료 09-19 19:45 KST** | 6갈래 머지 충돌 0, `database/tests` **1,280 passed**, 어댑터 30 passed |
-| G-E 리뷰 | 진행 중 | code-reviewer 서브에이전트 |
-| 배포·실전 게이트 | 대기 | §4 순서: 배포 → 문서층 4표 → equity baseline scp → stage baseline --only → 수동 equity 재빌드 + EG5c 재승인(e1.16.0) → `build_chain.sh morning --date 20260918` |
+| G-E 리뷰 | **완료** | 차단 2·권장 17 → 차단 2 + 권장 10건 배포 전 반영(3c058cc), 나머지 TECH_DEBT B-32~B-38 |
+| 배포(G-B) | **완료 09-19 20:26 KST** | rev 319efeb, `DEPLOYED.json` tests=ok, 체크섬 동일, 크론 5줄 갱신, MANIFEST 백업 `~/backups/quant-ledger/manifests_20260919_pre_audit_fix.tgz` |
+| 실전 게이트(G-C) | 진행 중 | §4 순서: 배포 → 문서층 4표 → equity baseline scp → stage baseline --only → 수동 equity 재빌드 + EG5c 재승인(e1.16.0) → `build_chain.sh morning --date 20260918` |
 
 ## 1. 검증 게이트 (전 갈래 공통)
 

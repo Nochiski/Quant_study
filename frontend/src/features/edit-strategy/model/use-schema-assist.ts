@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 
 import { useDatasetCatalog } from "../../../entities/dataset";
 import { useFactorCatalog } from "../../../entities/factor";
+import { useCommittedRef } from "../../../shared/lib/react";
 import {
   strategyContractQuery,
   strategySchemaQuery,
@@ -62,14 +63,6 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
   const fields = useDatasetCatalog(CATALOG_PAGE);
   const factors = useFactorCatalog(CATALOG_PAGE);
 
-  // The sources are two stable functions the editor registers once; they read the latest
-  // document state and data through refs at call time (after commit), never during render.
-  const latest = useRef<AssistDeps>({
-    schema: null,
-    contract: [],
-    catalogs: { equityFields: [], factors: [] },
-    getState: () => state,
-  });
   const schemaData = schema.data?.schema;
   const contractData = contract.data?.contract;
   const assistMetadata = useMemo(
@@ -82,20 +75,22 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       ),
     [schema.data, contract.data, fields.data, factors.data],
   );
-  useEffect(() => {
-    latest.current = {
-      ...assistMetadata,
-      getState: () => state,
-    };
-  }, [assistMetadata, state]);
+  // 편집기가 한 번 등록해 두고 부르는 두 소스는 호출 시점의 문서 상태·메타데이터를 ref로 읽는다. commit과
+  // 같은 시점에 비춘다 — 타이핑이 곧 completion을 부르므로 passive effect 거울이면 한 편집 전 상태로
+  // 후보가 계산됐다(backlog 21, `.claude/rules/frontend-react-effects.md`).
+  const deps = useMemo<AssistDeps>(
+    () => ({ ...assistMetadata, getState: () => state }),
+    [assistMetadata, state],
+  );
+  const latest = useCommittedRef(deps);
 
   const completionSource = useCallback<EditorCompletionSource>(
     (context) => buildCompletionSource(latest.current)(context),
-    [],
+    [latest],
   );
   const hoverSource = useCallback<EditorHoverSource>(
     (offset) => buildHoverSource(latest.current)(offset),
-    [],
+    [latest],
   );
   const loading =
     schema.isPending ||

@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import {
   Outlet,
   RouterProvider,
+  createBrowserHistory,
   createMemoryHistory,
   createRootRoute,
   createRoute,
@@ -33,7 +34,7 @@ const Editor = ({ open }: { open: Promise<void> }) => {
   );
 };
 
-const mount = (open: Promise<void>) => {
+const mount = (open: Promise<void>, history = createMemoryHistory({ initialEntries: ["/"] })) => {
   const rootRoute = createRootRoute({ component: () => <Outlet /> });
   const editorRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -47,7 +48,7 @@ const mount = (open: Promise<void>) => {
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([editorRoute, awayRoute]),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history,
   });
   render(<RouterProvider router={router} />);
   return router;
@@ -76,6 +77,26 @@ describe("DirtyLeaveGuard (backlog 21)", () => {
     expect(dialog).toHaveTextContent("저장하지 않은 변경이 있습니다");
     expect(router.state.location.pathname).toBe("/");
     expect(screen.queryByText("away")).toBeNull();
+  });
+
+  it("arms the browser unload warning only while dirty (blocker stays registered, judgement is in the callback)", async () => {
+    // 브라우저 history만 `beforeunload`를 건다(#157 리뷰 P2-4). blocker를 항상 등록하므로 clean일 때 경고가 뜨면 퇴행이다.
+    window.history.replaceState(null, "", "/");
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    mount(gate, createBrowserHistory());
+    await screen.findByText("clean");
+    const unload = () => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(unload()).toBe(false);
+    open();
+    await screen.findByText("dirty");
+    expect(unload()).toBe(true);
   });
 
   it("lets a clean draft leave without a dialog", async () => {

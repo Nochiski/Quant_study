@@ -55,7 +55,8 @@ describe("useCommittedRef", () => {
     open();
     const seen = await observed;
     expect(seen.committed).toBe(1);
-    // 대조군: passive effect는 아직 돌지 않았다 — 이 틈이 backlog 20·21의 원인이다.
+    // 대조군: passive effect는 아직 돌지 않았다 — 이 틈이 backlog 20·21의 원인이다. 이 줄이 깨지면 훅이 아니라
+    // 전제(React/jsdom 스케줄러가 passive effect를 commit 뒤로 미룬다)가 바뀐 것이다 — 그때는 계열 자체를 다시 본다.
     expect(seen.lagging).toBe(0);
   });
 });

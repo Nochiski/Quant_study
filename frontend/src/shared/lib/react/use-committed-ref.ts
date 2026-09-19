@@ -10,6 +10,9 @@ import { useLayoutEffect, useRef, type RefObject } from "react";
  * DOM이 새 상태를 보이는 어떤 시점에도 ref는 같은 상태다.
  *
  * 렌더 중에 `.current`를 읽지 않는다(`react-hooks/refs`). 읽는 쪽은 언제나 이벤트·콜백이다.
+ *
+ * 반환 ref는 가변이다: 호출자가 `.current`에 직접 써도 되지만(예: 요청 흐름이 세션을 미리 바꿔 둠) 그 값은
+ * 다음 `value` 변경의 commit에서 다시 덮인다. "거울"과 "예약 슬롯"을 겹쳐 쓰는 곳은 그 순서를 주석으로 남긴다.
  */
 export const useCommittedRef = <T>(value: T): RefObject<T> => {
   const ref = useRef<T>(value);

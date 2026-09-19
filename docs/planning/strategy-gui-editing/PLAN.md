@@ -6,8 +6,8 @@ current_phase: complete
 current_pr: none
 active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
-last_updated: 2026-09-19T10:48:36+09:00
-last_updated: 2026-09-19T10:48:36+09:00
+last_updated: 2026-09-19T11:32:10+09:00
+last_updated: 2026-09-19T11:32:10+09:00
 planned_prs: 19
 merged_prs: 19
 approved_prs: 19
@@ -30,7 +30,7 @@ progress_percent: 100
 | Active PR | none |
 | Progress | `19 / 19 merged (100%)` |
 | Approved | `19 / 19` |
-| Aggregated at | `2026-09-19 10:48 KST` |
+| Aggregated at | `2026-09-19 11:32 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -250,7 +250,7 @@ Phase exit:
 
 | 시각 | 작성자 | 변경 | 근거 |
 |---|---|---|---|
-| 2026-09-18 KST | Claude | backlog 21 처리 PR [#157](https://github.com/Nochiski/Quant_study/pull/157) `fix/gui-backlog-21-leave-guard`: 계열 전체 — `shared/lib/react` `useCommittedRef`(layout effect) 신설, 이탈 가드(`disabled` 제거·blocker 한 번 등록)·편집기 콜백 ref·저장 타이머 ref 이관, 좁은 화면 Escape 리스너 layout effect, 규칙 `frontend-react-effects.md`. 회귀 테스트 훅·이탈 가드(수정 전 red). Vitest 전체·eslint·tsc·Playwright 19/19. 리뷰 `review_gui_backlog_157` | 머지 뒤 backlog |
+| 2026-09-19 KST | Claude | backlog 21 처리 PR [#157](https://github.com/Nochiski/Quant_study/pull/157) `fix/gui-backlog-21-leave-guard`: 계열 전체 — `shared/lib/react` `useCommittedRef`(layout effect) 신설, 이탈 가드(`disabled` 제거·blocker 한 번 등록)·편집기 콜백 ref·저장 타이머 ref 이관, 좁은 화면 Escape 리스너 layout effect, 규칙 `frontend-react-effects.md`. 회귀 테스트 훅·이탈 가드(수정 전 red). Vitest 전체·eslint·tsc·Playwright 19/19. 리뷰 `review_gui_backlog_157` APPROVE(변형 실측: committed ref만·`disabled` 제거만은 각각 red, 둘 다면 green — 두 변경이 각각 필수 절반; P2: 규칙 frontmatter·README 색인 누락, `use-schema-assist` 거울 1건 잔존, `beforeunload` 회귀 테스트 없음, 렌더 중 대입 예외(`code-editor-view.tsx`) 미기록, 훅 docstring 계약, 대조군 단언 주석, 날짜) → 후속 커밋에서 전부 반영 | 머지 뒤 backlog |
 | 2026-09-19 KST | Claude | backlog 20 처리 PR [#155](https://github.com/Nochiski/Quant_study/pull/155) `fix/gui-backlog-20-route-flake`: 원인은 부하가 아니라 `strategy-ide.tsx` 단축키 리스너의 passive effect 교체 틈(버튼 `disabled` commit ↔ 새 닫힌 값 설치 사이의 keydown이 조용히 버려짐) — `useLayoutEffect`로 전환. act 환경을 끈 MutationObserver 회귀 테스트가 `useEffect`에서 red. `--project routes` 6회(cold 1) 전부 초록, Vitest 전체·eslint·tsc·Playwright 19/19. 리뷰 `review_gui_backlog_155` APPROVE(원인 3갈래 확인: RTL `waitFor` 구간은 act 밖·passive effect는 별도 매크로태스크·과거 실패 2건 모두 keydown 뒤 대기에서 터짐; 수정 전 코드로 3회 red 재현. P2: 테스트 주석의 act 플래그 서술 오류 → 플래그 조작 제거·주석 정정, 이탈 가드 같은 계열 → 21행, 기록 날짜, 설계 결정 절) | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 18·19 처리 PR [#150](https://github.com/Nochiski/Quant_study/pull/150) `fix/gui-backlog-c2`(main 기반): `planRemove`도 flow 부모면 `replaceFlowContainer`(빈 결과는 `{}`/`[]` 인라인), vitest `projects`(unit / routes, `groupOrder: 1`)로 route 파일을 나머지 뒤에 혼자 실행. Vitest 626/54·eslint·tsc·Playwright 19/19. 리뷰 `review_gui_backlog_150` 1차 REQUEST_CHANGES(P1: SoT에 삭제·빈 결과 규칙 누락, backlog 19를 근본 해결로 닫음 — 격리 뒤에도 cold 1회 실패·전체 시간 증가; P2: 값 줄 앞 자기 줄 주석 소실, 루트 `{}`와 주석 불일치, docstring, property 생성기 flow 미커버, exclude 정본 중복, `ROUTE_TESTS` 문자열) → 후속: SoT 문장, 값 줄부터 교체(자기 줄 주석 보존), 주석·docstring, flow property test 상설, `EXCLUDE`·`ISOLATED_TESTS`, 백테스트 게이트 케이스에 compile 대기, 19 재서술·20 신설 → 재검토 APPROVE(P2-1 생성기 4000회 위반 0; 신규 P2-7 생성기가 다음 줄 flow 표본을 못 만듦 → 컨테이너 앞 주석 보존, P2-8 Ctrl+S 케이스에도 compile 대기, 관측: 입력 지연 예산 테스트도 병렬 flake → `ISOLATED_TESTS`에 추가) | 머지 뒤 backlog |
 | 2026-09-18 KST | Claude | backlog 14·15·16·17 처리 PR [#149](https://github.com/Nochiski/Quant_study/pull/149) `fix/gui-backlog-c1`(main 기반): flow 컨테이너 삽입은 가장 바깥 flow부터 block으로(`topmostFlowAncestor`·`replaceFlowContainer`, `detectIndentUnit` flow 키 제외), route 테스트 `asyncUtilTimeout` 5초, `invalidDocumentSummary`(첫 error 진단 → detail), trace 코드 6종 번역(`{detail}` 슬롯). Vitest 622/54·eslint·tsc·Playwright 19/19(stale `backtest_core` 재빌드 뒤). 리뷰 `review_gui_backlog_149` 1차 REQUEST_CHANGES(P1: 파일 안 `asyncUtilTimeout` 5초는 test-setup이 이미 5초라 no-op·flake 재현; P2: `trace.engine.incompatible`은 detail에 message가 없어 디버그 문자열 노출, docstring 모순, flow 뒤 줄 끝 주석 재부착, 비-2칸 문서 출력 변화 미기록, flow 삭제 비대칭 미기록) → 후속: 단일 owner `test-setup.ts` 예산 10초, incompatible 고정 문장 + 빈 슬롯 처리, docstring, 줄 끝 주석을 `key:`/`-` 줄에 유지, 5칸 문서 테스트, backlog 18·19 → 재검토 APPROVE(P2-4 property test 4000회 주석 손실 0; 새 P2-7: 키 줄 주석 뒤 다음 줄 flow 값이면 키 줄 주석 소실 → 후속에서 값 줄부터 교체, 전역 `testTimeout` 15초를 `vite.config.ts`로) | 머지 뒤 backlog |

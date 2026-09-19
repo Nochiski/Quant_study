@@ -39,6 +39,21 @@ const ko = {
   "page.backtest.status": "실행 상태",
   "page.backtest.progress": "실행 진행",
   "page.backtest.runError": "실행 오류",
+  "page.backtest.cancelledError": "취소 전 발생한 오류",
+  "page.backtest.serverReason": "서버 사유",
+  // run 상태 `error_code` 번역 — 어휘 SoT 는 backend `RunFailureCode`(이슈 #158). 시작 422 의
+  // `backtest.error.*` 와 namespace 를 나눈 이유: 툴바(422)는 서버 detail 을 그대로 보여 주는 화면이라
+  // 같은 키를 쓰면 그 문구가 detail 을 덮어쓴다.
+  "backtest.run.error.portfolio.data.unavailable":
+    "데이터 소스가 이 유니버스·기간의 관측을 제공하지 못했습니다. 유니버스 ID 와 데이터 기간을 확인하세요.",
+  "backtest.run.error.portfolio.raw_observation.invalid":
+    "데이터 어댑터가 계약을 어긴 관측을 돌려주었습니다. 데이터 소스 쪽 문제이므로 운영자에게 알리세요.",
+  "backtest.run.error.portfolio.strategy.invalid":
+    "전략 계산이 유효하지 않습니다. 서버 사유의 노드·경로를 확인하세요.",
+  "backtest.run.error.backtest.run.invalid":
+    "실행 요청이 이 환경에서 처리될 수 없습니다. 실행 설정과 엔진 능력을 확인하세요.",
+  "backtest.run.error.backtest.run.internal":
+    "서버 내부 오류로 실행이 중단되었습니다. 서버 로그를 확인하세요.",
   "backtest.settings.title": "실행 설정",
   "backtest.settings.open": "실행 설정 열기",
   "backtest.settings.ready": "준비됨",
@@ -920,6 +935,18 @@ export const messages = {
     "page.backtest.status": "Run status",
     "page.backtest.progress": "Run progress",
     "page.backtest.runError": "Run error",
+    "page.backtest.cancelledError": "Error before cancellation",
+    "page.backtest.serverReason": "Server reason",
+    "backtest.run.error.portfolio.data.unavailable":
+      "The data source could not serve observations for this universe and period. Check the universe id and data range.",
+    "backtest.run.error.portfolio.raw_observation.invalid":
+      "The data adapter returned observations that violate its contract. This is a data-source problem; notify the operator.",
+    "backtest.run.error.portfolio.strategy.invalid":
+      "The strategy calculation is invalid. Check the node and path in the server reason.",
+    "backtest.run.error.backtest.run.invalid":
+      "The run request cannot be processed in this environment. Check the run settings and engine capabilities.",
+    "backtest.run.error.backtest.run.internal":
+      "The run stopped because of an internal server error. Check the server logs.",
     "backtest.settings.title": "Run settings",
     "backtest.settings.open": "Open run settings",
     "backtest.settings.ready": "Ready",

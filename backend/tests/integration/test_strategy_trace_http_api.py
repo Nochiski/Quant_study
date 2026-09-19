@@ -10,13 +10,13 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
-from strategy_workbench.adapters.inbound.http_api._backtest_contract import Backtest422Response
 from strategy_workbench.adapters.inbound.http_api._trace_contract import (
     Trace422Response,
     TraceStrategyNotFoundResponse,
     TraceStrategyStaleResponse,
 )
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from tests.backtest_run_wait import wait_for_terminal_state
 
 
 def _scope(client: TestClient, spec: dict[str, Any]) -> tuple[str, list[str], str]:
@@ -575,7 +575,7 @@ def test_trace_rejects_non_session_and_unknown_security_but_accepts_non_member()
     assert {row["security_id"] for row in non_member.json()["trace"]["rows"]} == {"sec-035420-1"}
 
 
-def test_finite_factor_overflow_is_the_same_coded_failure_for_all_execution_routes() -> None:
+def test_finite_factor_overflow_is_coded_on_preview_and_trace_and_fails_the_run() -> None:
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
     factor = spec["factors"][0]
@@ -607,7 +607,6 @@ def test_finite_factor_overflow_is_the_same_coded_failure_for_all_execution_rout
     responses = (
         client.post("/api/v1/portfolio/preview", json={"spec": spec}),
         client.post("/api/v1/strategies/debug/trace", json=trace_request),
-        client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"}),
     )
 
     for response in responses:
@@ -624,7 +623,16 @@ def test_finite_factor_overflow_is_the_same_coded_failure_for_all_execution_rout
                 "overflow",
             )
         }
-    TypeAdapter(Backtest422Response).validate_python(responses[-1].json())
+
+    # 오버플로는 팩터를 평가해야 드러난다. 백테스트 시작은 데이터를 읽지 않아 접수되고(이슈 #158)
+    # run 의 tape 단계가 같은 issue 코드·경로를 error 에 실어 실패한다.
+    backtest = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
+    assert backtest.status_code == 202, backtest.text
+    state = wait_for_terminal_state(client, backtest.json()["run"]["run_id"])
+    assert state["status"] == "failed", state
+    assert state["error_code"] == "portfolio.strategy.invalid"
+    assert "strategy.expression.calculation_non_finite" in state["error"]
+    assert "factors.0.graph.nodes.2" in state["error"]
 
 
 def test_starting_holdings_without_a_target_frame_return_a_typed_preflight_error() -> None:

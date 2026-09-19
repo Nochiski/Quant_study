@@ -175,6 +175,16 @@ export type BacktestRunState = {
    */
   error?: string | null;
   /**
+   * Error Code
+   */
+  error_code?:
+    | "portfolio.strategy.invalid"
+    | "portfolio.data.unavailable"
+    | "portfolio.raw_observation.invalid"
+    | "backtest.run.invalid"
+    | "backtest.run.internal"
+    | null;
+  /**
    * Message
    */
   message: string;
@@ -308,13 +318,7 @@ export type BacktestUnprocessableResponse = {
       } & BacktestStrategyRequiresUpgradeDetail)
     | ({
         code: "portfolio.strategy.invalid";
-      } & PortfolioStrategyInvalidDetail)
-    | ({
-        code: "portfolio.data.unavailable";
-      } & PortfolioDataUnavailableDetail)
-    | ({
-        code: "portfolio.raw_observation.invalid";
-      } & PortfolioRawObservationInvalidDetail);
+      } & PortfolioStrategyInvalidDetail);
 };
 
 /**

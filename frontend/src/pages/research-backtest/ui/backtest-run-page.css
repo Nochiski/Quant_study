@@ -1,0 +1,14 @@
+/* run 실패 표시. 서버 사유는 접힌 disclosure 로 — `manifest-drawer`(entities/backtest) 와 같은 시각 신호. */
+.backtest-run-error {
+  overflow-wrap: anywhere;
+}
+
+.backtest-run-error__reason {
+  margin-top: var(--space-2);
+}
+
+.backtest-run-error__reason > summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: var(--font-weight-strong);
+}

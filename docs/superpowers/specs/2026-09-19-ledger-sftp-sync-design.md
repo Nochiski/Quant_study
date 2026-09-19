@@ -107,7 +107,7 @@
 ### E2E (실데이터 백테스트)
 
 - `frontend/e2e/workbench.real-equity.spec.ts`, Playwright project `real-equity`(1440×900 light 한 개). opt-in 변수 `E2E_REAL_EQUITY_ROOT` 가 있을 때만 config 가 이 project 를 수집하고 backend 를 duckdb 어댑터로 띄운다(없으면 mock 릴리스 게이트 project 만) — 한 실행에 두 어댑터가 섞이지 않는다. 공용 헬퍼는 `frontend/e2e/workbench-helpers.ts`.
-- 시나리오: 워크벤치에서 골든 fixture(252 세션 모멘텀, 유니버스 `krx.common-stock`)의 기간만 2024-01-02~2024-06-28 로 바꿔 저장 → Graph 편집기에서 `price.open` field 노드 추가·`mom_252` 입력 재배선 → YAML 재검증·리비전 2 저장(spec_hash = compile 결과) → 백테스트 실행(`POST /api/v1/backtests` 는 TargetTape 를 동기로 만들어 실데이터에서 약 80초 뒤 202) → 완료 상태, 실데이터 snapshot id(16 hex), 체결·스냅샷·자본곡선 > 0, `total_return` 값 존재 확인.
+- 시나리오: 워크벤치에서 골든 fixture(252 세션 모멘텀, 유니버스 `krx.common-stock`)의 기간만 2024-01-02~2024-06-28 로 바꿔 저장 → Graph 편집기에서 `price.open` field 노드 추가·`mom_252` 입력 재배선 → YAML 재검증·리비전 2 저장(spec_hash = compile 결과) → 백테스트 실행(`POST /api/v1/backtests` 는 즉시 202, TargetTape 는 run 의 `tape` 단계에서 — 6개월 구간 run 전체 약 30초 실측; 이슈 #158 이전에는 시작 요청이 이 계산을 동기로 품어 약 80초 뒤에야 202 가 왔다 — 이슈 원보고 시점 관측치로 부하 조건이 다르다) → 완료 상태, 실데이터 snapshot id(16 hex), 체결·스냅샷·자본곡선 > 0, `total_return` 값 존재 확인.
 - 실행: `$env:E2E_REAL_EQUITY_ROOT = "$HOME\quant-ledger\data\equity"; npm run test:e2e`.
 
 ## 제약사항

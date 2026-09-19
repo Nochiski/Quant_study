@@ -4,6 +4,7 @@ paths:
   - "frontend/src/**/model/**"
   - "frontend/src/**/hooks/**"
   - "frontend/src/app/**"
+  - "frontend/src/pages/**"
   - "frontend/src/shared/**"
 ---
 
@@ -24,6 +25,10 @@ paths:
 - backend가 코드로 분기하는 422(`ApiRequestError.code`)는 `upgrade.error.<code>`·
   `backtest.error.<code>`처럼 코드를 키로 하는 문구로 번역한다. 번역이 없으면 일반 문구로
   떨어지되 원문 detail을 그대로 노출하지 않는다.
+- 폴링 본문의 실패 코드(`BacktestRunState.error_code`, 어휘 SoT는 backend `RunFailureCode`)는
+  `backtest.run.error.<code>`로 번역하고, 번역이 있으면 서버 원문(`error`)은 접힌 진단 상세로
+  내린다. 422의 `backtest.error.*`와 키를 공유하지 않는다 — 편집기 툴바는 서버 detail을 본문으로
+  쓰는 화면이라 같은 키가 있으면 detail이 덮인다.
 
 ## 상태
 

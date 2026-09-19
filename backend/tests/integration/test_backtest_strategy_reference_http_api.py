@@ -7,7 +7,6 @@ same tape regardless of core.
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import Any
 
@@ -19,18 +18,13 @@ from strategy_workbench.adapters.inbound.http_api._backtest_contract import (
     BacktestStrategyStaleResponse,
 )
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from tests.backtest_run_wait import wait_for_terminal_state
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 
 
 def _wait(client: TestClient, run_id: str) -> dict[str, Any]:
-    state: dict[str, Any] = {}
-    for _ in range(400):
-        state = client.get(f"/api/v1/backtests/{run_id}").json()
-        if state["status"] in {"completed", "failed", "cancelled"}:
-            return state
-        time.sleep(0.025)
-    return state
+    return wait_for_terminal_state(client, run_id)
 
 
 def _saved_template(client: TestClient) -> dict[str, Any]:

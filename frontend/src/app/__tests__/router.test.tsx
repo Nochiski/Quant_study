@@ -864,6 +864,67 @@ describe("App Shell routes", () => {
     );
   });
 
+  it("translates a coded tape-stage failure and keeps the server reason", async () => {
+    // 이슈 #158: 데이터 의존 실패는 시작 422 대신 run `failed` + `error_code` 로 온다.
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "failed",
+          progress: 0.02,
+          stage: "tape",
+          message: "Run failed",
+          error:
+            "RawObservationUnavailableError: raw observations unavailable — status=no_data detail=no members in universe — universe_id=krx.common-stok root=<path>",
+          error_code: "portfolio.data.unavailable",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:01Z",
+        }),
+      ),
+    );
+    mount("/research/backtests/run-failed-tape");
+    const alert = await screen.findByRole("alert", { name: "실행 오류" });
+    expect(alert).toHaveTextContent("유니버스 ID 와 데이터 기간을 확인하세요");
+    // 서버 원문은 본문이 아니라 접힌 진단 상세("서버 사유") 안에만 있다.
+    const detail = within(alert).getByRole("group");
+    expect(detail).toHaveTextContent("universe_id=krx.common-stok");
+    expect(alert.textContent?.indexOf("유니버스 ID")).toBeLessThan(
+      alert.textContent?.indexOf("universe_id=") ?? -1,
+    );
+    expect(screen.getByRole("status", { name: "실행 진행" })).toHaveTextContent(
+      "tape · 2%",
+    );
+  });
+
+  it("labels a failure that raced a cancellation as an error before cancellation", async () => {
+    // 이슈 #158: 실패와 취소가 겹친 run 은 `cancelled` 배지에 사유가 같이 온다 — "실행 오류" 로 부르지 않는다.
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "cancelled",
+          progress: 0.02,
+          stage: "cancelled",
+          message: "Run cancelled",
+          error:
+            "RawObservationUnavailableError: raw observations unavailable — status=no_data",
+          error_code: "portfolio.data.unavailable",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:01Z",
+        }),
+      ),
+    );
+    mount("/research/backtests/run-cancelled-with-error");
+    const alert = await screen.findByRole("alert", {
+      name: "취소 전 발생한 오류",
+    });
+    expect(alert).toHaveTextContent("유니버스 ID 와 데이터 기간을 확인하세요");
+    expect(screen.queryByRole("alert", { name: "실행 오류" })).toBeNull();
+    expect(screen.getByRole("status", { name: "실행 상태" })).toHaveTextContent(
+      "cancelled",
+    );
+  });
+
   it("supports back and forward between routes", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests/run-1");

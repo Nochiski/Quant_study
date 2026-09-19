@@ -1,5 +1,6 @@
 from strategy_workbench.domain.backtest._canonical import backtest_run_fingerprint
 from strategy_workbench.domain.backtest._models import (
+    RUN_FAILURE_CODES,
     BacktestRunResult,
     BacktestRunSpec,
     BacktestRunState,
@@ -15,6 +16,7 @@ from strategy_workbench.domain.backtest._models import (
     RawPosition,
     RawSnapshot,
     RawTrade,
+    RunFailureCode,
     RunManifest,
     RunProgressEvent,
     RunStatus,
@@ -31,7 +33,9 @@ from strategy_workbench.domain.strategy.facade.provenance import (
 __all__ = [
     "BacktestRunResult",
     "BacktestRunSpec",
+    "RUN_FAILURE_CODES",
     "BacktestRunState",
+    "RunFailureCode",
     "BacktestSeries",
     "BacktestStartResponse",
     "DataWarning",

@@ -41,10 +41,14 @@ const REWIRED_FIELD = "price.open";
 // 실데이터 security_id 어휘는 `{ticker}:{span_seq}`(GAP-11). 실행 설정 기본값은 비어 있어(벤치마크 없음,
 // 이슈 #154) 벤치마크 경로까지 검증하려면 어댑터 어휘의 ID 를 명시해야 한다 — 삼성전자 첫 상장 구간.
 const BENCHMARK_SECURITY_ID = "005930:1";
-// 실측(2026-09-19): 시작 요청(TargetTape 동기 계산) 약 80초 + 실행 2초. 하위 예산 합이 테스트 예산 안에
-// 들어와야 하위 단계가 먼저 실패해 원인을 말한다.
-const START_TIMEOUT_MS = 300_000;
-const COMPLETE_TIMEOUT_MS = 300_000;
+// 시작 요청은 데이터를 읽지 않는 사전 검사만 하고 즉시 202 를 돌려준다(이슈 #158). 시작 예산은
+// 밀리초 단위 실측보다 훨씬 크지만 데이터 크기에 비례할 수 없는 값으로 조여 두어, 누군가 시작 경로에
+// 데이터 읽기를 되돌려 넣으면 여기서 잡힌다. TargetTape 계산은 run 의 `tape` 단계로 옮겨졌다 —
+// 실측(2026-09-19, 6개월 구간) run 전체(tape + 엔진) 약 30초(상태 폴링 119회 × 250ms), 테스트 본문
+// 1.1분. 완료 예산은 그 10배 이상이다. 실행 구간 하위 예산 합(15+60+30+420+60+60 = 645s)이 테스트
+// 예산(900s) 안에 들어와야 하위 단계가 먼저 실패해 원인을 말한다.
+const START_TIMEOUT_MS = 15_000;
+const COMPLETE_TIMEOUT_MS = 420_000;
 const TEST_TIMEOUT_MS = 900_000;
 
 const realDataSource = (title: string): string => {
@@ -145,8 +149,9 @@ test.describe("real equity data", () => {
         request.method() === "POST" &&
         new URL(request.url()).pathname === "/api/v1/backtests",
     );
-    // POST /api/v1/backtests 는 run id 를 돌려주기 전에 TargetTape(전 유니버스 팩터 평가)를 동기로
-    // 만든다. mock 은 순간이지만 실데이터(공통주 ~2천 종목 × 6개월 + 252 세션 이력)는 약 80초가 걸린다.
+    // POST /api/v1/backtests 는 사전 검사만 하고 바로 run id 를 돌려준다. TargetTape(전 유니버스 팩터
+    // 평가)는 run 의 tape 단계에서 만들어지며 실데이터(공통주 ~2천 종목 × 6개월 + 252 세션 이력)는
+    // 수십 초가 걸린다 — 아래 완료 폴링이 그 시간을 흡수한다.
     const acceptedRun = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&
@@ -169,6 +174,11 @@ test.describe("real equity data", () => {
       timeout: 60_000,
     });
     const runId = new URL(page.url()).pathname.split("/").at(-1)!;
+    // tape 단계는 실데이터에서 수십 초 이상 이어지므로 run 페이지가 그 단계를 실제로 보여 주는지 본다.
+    await expect(page.getByRole("status", { name: "실행 진행" })).toContainText(
+      "tape",
+      { timeout: 30_000 },
+    );
     // 실패하면 화면의 "오류 failed" 만으로는 원인을 알 수 없다 — 서버 run 상태의 error 를 단언 메시지에 싣는다.
     let finalState: BacktestRunState | undefined;
     await expect

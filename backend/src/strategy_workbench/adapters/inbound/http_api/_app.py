@@ -338,11 +338,9 @@ def create_app(
                 detail={"code": "backtest.strategy.requires_upgrade", "message": str(error)},
             ) from error
 
-        except (
-            InvalidPortfolioRequestError,
-            RawObservationUnavailableError,
-            RawObservationContractError,
-        ) as error:
+        except InvalidPortfolioRequestError as error:
+            # 시작 요청은 데이터를 읽지 않는 사전 검사만 한다(이슈 #158). 관측 데이터 부재·계약
+            # 위반은 run 스레드의 tape 단계에서 run 상태 `failed` + `error` 로 기록된다.
             raise _portfolio_http_error(error) from error
 
     @app.get(

@@ -4,6 +4,7 @@
 # (플랜 v2 Task B.1). `--no-build` 를 주면 원장 단계에서 멈춘다 — 크론의 --no-build 는 오케스트레이터가 뗀다.
 #   사용: daily_build.sh [--date YYYYMMDD] [--no-build] [--dry-run] [--limit N]
 #   환경: QL_SKIP_KW=1 이면 키움 merge 를 건너뛰고 건전성 판정의 kiwoom 항목을 skip 한다(앱키 분리 전 임시)
+#         QL_FORCE=1 이면 "이미 확정판 있음" 가드를 무시하고 다시 돈다(--date 명시도 같은 효과)
 set -uo pipefail
 cd /home/kael/quant-ledger
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
@@ -17,7 +18,7 @@ if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
   fi
   export QL_RAW_LOCK_HELD=1
 fi
-DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""
+DATE_ARG=""; DRY=""; LIMIT=""; NOBUILD=""; SKIPPED=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --date) DATE_ARG="$2"; shift 2 ;;
@@ -59,6 +60,20 @@ echo "════ [$(kst)] daily_build 시작 dry=${DRY:-no} no_build=${NOBUILD
 D="${DATE_ARG:-$($PY -c 'import datetime as dt; from daily import calendar as c
 print(c.load().prev_trading_day(dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()).strftime("%Y%m%d"))')}"
 echo "  대상 거래일 D=$D"
+# D 의 확정판(stage·equity 둘 다 ok)이 이미 있으면 여기서 끝 — 주말·연휴에 같은 D 를 재수집·재빌드하지
+# 않는다(DEFECT-D01·A03·B10). 판정 근거는 인계 이력 `data/deliver/history/<D>_morning.json` 의 health 다.
+# `--date` 를 명시했거나 QL_FORCE=1 이면 가드 없이 다시 돈다(재빌드는 사람이 요구한 것이다).
+if [ -z "$DATE_ARG" ] && [ -z "${QL_FORCE:-}" ] && [ -z "$DRY" ] && $PY -c 'import json, sys
+from pathlib import Path
+p = Path(f"data/deliver/history/{sys.argv[1]}_morning.json")
+if not p.exists():
+    sys.exit(1)
+h = json.loads(p.read_text(encoding="utf-8")).get("health") or {}
+sys.exit(0 if h.get("stage") == "ok" and h.get("equity") == "ok" else 1)' "$D"; then
+  SKIPPED="건너뜀(D=$D 확정판 완료)"
+  echo "  D=$D 는 확정판이 이미 있다(data/deliver/history/${D}_morning.json health stage=ok equity=ok) — 종료"
+  echo "════ 종료 rc=0 $(kst) ════"
+else
 HSKIP=""
 if [ -n "${QL_SKIP_KW:-}" ]; then
   echo "  QL_SKIP_KW=1 — 키움 merge 건너뜀, 건전성 판정에서 kiwoom 항목은 skip"
@@ -89,9 +104,14 @@ fi
 # 통합 일일 리포트는 읽기 전용이라 게이트 실패일·--no-build 에도 돈다(가장 필요한 날이 실패일이다. 검수 R4-03).
 [ -z "$DRY" ] && [ -x scripts/daily_report.py ] && { $PY scripts/daily_report.py --date "$D" || true; }
 echo "════ 종료 rc=$RC $(kst) ════"
+fi
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
 SUMMARY=$(grep -E "^원장 건전성|──── .* 종료|아직 미공표" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
+if [ -n "$SKIPPED" ]; then
+  [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 재수집·재빌드하지 않았다(QL_FORCE=1 또는 --date 로 강제) | 로그 $LOG"
+  rm -f "$RUN"; exit 0
+fi
 if [ -n "$FAILED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh crit "daily_build 실패: $FAILED" "$SUMMARY | 로그 $LOG"
   rm -f "$RUN"; exit 2

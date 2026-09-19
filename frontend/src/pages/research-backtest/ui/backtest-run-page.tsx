@@ -66,6 +66,16 @@ export const BacktestRunPage = () => {
       >
         {state.stage} · {Math.round(state.progress * 100)}% · {state.message}
       </p>
+      {state.error ? (
+        // 서버가 남긴 실패 사유를 그대로 보여 준다 — "failed" 배지만으로는 원인을 알 수 없다(이슈 #154).
+        <p
+          className="page-state page-state--error"
+          role="alert"
+          aria-label={t("page.backtest.runError")}
+        >
+          {t("page.backtest.runError")}: {state.error}
+        </p>
+      ) : null}
       {completed && result.isPending ? (
         <p className="page-state" role="status">
           {t("page.loading")}

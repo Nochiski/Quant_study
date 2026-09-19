@@ -2701,7 +2701,7 @@ describe("backtest from the editor (P3-05)", () => {
       {
         core: "rust",
         initial_cash: 100_000_000,
-        benchmark_security_id: "005930",
+        benchmark_security_id: null,
         annualization_days: 252,
         metric_windows: [],
         strategy_source: {
@@ -2730,7 +2730,7 @@ describe("backtest from the editor (P3-05)", () => {
     expect(started[0]).toEqual({
       core: "rust",
       initial_cash: 100_000_000,
-      benchmark_security_id: "005930",
+      benchmark_security_id: null,
       annualization_days: 252,
       metric_windows: [],
       strategy_source: {

@@ -55,5 +55,6 @@ Requirements and expectations:
 - The backend builds the TargetTape synchronously before it returns the run id, so the backtest start
   request dominates the run: about 80 seconds of a 1.2-minute spec on the full common-stock universe
   (measured 2026-09-19, Rust core; the engine itself finishes in about 2 seconds).
-- The run-settings default benchmark id `005930` is rejected by the real adapter (issue #154); the
-  spec sets `005930:1` explicitly.
+- The run-settings benchmark defaults to empty (run without a benchmark; the ID vocabulary is
+  adapter-owned, issue #154). The spec sets `005930:1` explicitly so the benchmark path is exercised
+  against real data.

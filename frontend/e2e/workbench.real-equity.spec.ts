@@ -38,9 +38,8 @@ const REAL_EQUITY_ENABLED = (process.env[REAL_EQUITY_ROOT_ENV] ?? "") !== "";
 const BACKTEST_START = "2024-01-02";
 const BACKTEST_END = "2024-06-28";
 const REWIRED_FIELD = "price.open";
-// 실데이터 security_id 어휘는 `{ticker}:{span_seq}`(GAP-11). 실행 설정 기본값 "005930" 은 이 형식이
-// 아니라 duckdb 어댑터 `load_backtest_dataset` 이 `malformed security_id` 로 거절한다 — 이슈 #154.
-// 삼성전자 첫 상장 구간을 명시한다.
+// 실데이터 security_id 어휘는 `{ticker}:{span_seq}`(GAP-11). 실행 설정 기본값은 비어 있어(벤치마크 없음,
+// 이슈 #154) 벤치마크 경로까지 검증하려면 어댑터 어휘의 ID 를 명시해야 한다 — 삼성전자 첫 상장 구간.
 const BENCHMARK_SECURITY_ID = "005930:1";
 // 실측(2026-09-19): 시작 요청(TargetTape 동기 계산) 약 80초 + 실행 2초. 하위 예산 합이 테스트 예산 안에
 // 들어와야 하위 단계가 먼저 실패해 원인을 말한다.

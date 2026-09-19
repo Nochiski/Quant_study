@@ -838,6 +838,32 @@ describe("App Shell routes", () => {
     expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
   });
 
+  it("shows the server-owned failure reason of a failed backtest run", async () => {
+    // 이슈 #154: 어댑터가 거절한 실행은 "failed" 배지만 보이고 원인이 화면에 없었다.
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "failed",
+          progress: 0.05,
+          stage: "data",
+          message: "Run failed",
+          error:
+            "ValueError: malformed security_id — expected <ticker>:<span_seq> got='005930'",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:01Z",
+        }),
+      ),
+    );
+    mount("/research/backtests/run-failed");
+    expect(
+      await screen.findByRole("alert", { name: "실행 오류" }),
+    ).toHaveTextContent("malformed security_id");
+    expect(screen.getByRole("status", { name: "실행 상태" })).toHaveTextContent(
+      "failed",
+    );
+  });
+
   it("supports back and forward between routes", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests/run-1");

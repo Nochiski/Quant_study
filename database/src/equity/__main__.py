@@ -135,7 +135,8 @@ def _cmd_gate(a: argparse.Namespace) -> int:
 
 def _cmd_catalog(a: argparse.Namespace) -> int:
     bl = baseline_mod.load(a.baseline or baseline_mod.path_for(a.root))
-    r = catalog.publish(a.root, bl, keep=a.keep, rebase_asof=a.rebase_asof)
+    r = catalog.publish(a.root, bl, keep=a.keep, rebase_asof=a.rebase_asof,
+                        rebase_reason=a.reason)
     print(f"{'ok' if r.ok else 'gate_failed'} catalog={r.path} macros={len(r.macros)} "
           f"skipped={sorted(r.skipped)} tables={len(r.builds)} snapshot_id={r.snapshot_id}")
     _print_gates(r.gates)
@@ -191,6 +192,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="_asof/<view>/ 에 남길 스냅샷 수")
     p_cat.add_argument("--rebase-asof", action="store_true",
                        help="EG5c 차이를 승인하고 _asof/ 표본을 새 기준으로 삼는다(사람 승인)")
+    p_cat.add_argument("--reason", default=None,
+                       help="--rebase-asof 승인 사유(필수). 승인자·대상 diff 와 함께 "
+                            "_asof/_approvals/<utc>.json 에 영구 기록된다")
     p_cat.set_defaults(fn=_cmd_catalog)
 
     p_con = sub.add_parser("contract", help="EG-C 소비자 계약 ①②③④⑤⑩ (커널 어댑터 실행 → "

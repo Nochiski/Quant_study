@@ -2471,3 +2471,23 @@ EG20(원주가 불변)은 **`basis='krx'` 행만** 대조한다 — 저녁 행�
 | 기록형 | `n_period_end_inferred_recent` · `n_recent_rows` · `recent_from` |
 | 상수 | `fin_std.fin_std_inferred_recent_ratio_max` = 0.2 · `fin_std.inferred_recent_days` = 30. 미등재면 `skip(no_baseline)` |
 | **배포 순서** | 문서층 따라잡기(프리패스 전량 재생성 → `stg_doc_*` 4표 재빌드) **뒤에** 서버에 반영해야 한다. 문서층이 8/31 에 멈춘 상태에서 이 게이트를 켜면 최근 구간이 100% `inferred` 라 `fin_std` 가 매일 폐기된다 |
+
+### 11-5. EG5c 승인 기록 — `catalog --rebase-asof --reason` (DEFECT-C08)
+
+`--rebase-asof` 는 **사람 승인**이므로 `--reason "<왜 승인하는가>"` 가 필수다. 없으면
+`catalog.publish` 가 `ValueError` 로 거부한다. 승인이 실제로 쓰이면(= `n_diff_total > 0`)
+`data/equity/_asof/_approvals/<utcstamp>.json` 에 **영구 기록**한다:
+`{reason, approver(=$USER), approved_at_utc, snapshot_id, n_diff_total, schema_changed_views,
+gate_detail, views{previous_snapshot_id, previous_written_at_utc, n_diff, diff_by_kind,
+diff_keys, columns_added, columns_removed, schema_changed}}`.
+
+위치가 `_asof/<view>/` **밖**인 것이 핵심이다 — 그 안이면 `keep=3`(하루 2판이면 ≈1.5일) GC 가
+지운다. 2026-09-16 22:31 UTC 승인의 유일한 흔적(`_asof/<view>/42aea220.../_meta.json`)이 실제로
+그렇게 사라져 `_failed/catalog_*.json` 만 남았고, 그것은 감사 기록이 아니라 아무도 지우지 않아
+남은 파일이다.
+
+EG5c metrics 에 뷰별 `columns_added`·`columns_removed`·`schema_changed` 와 전체
+`schema_changed_views` 가 실린다. 행 전체 해시 비교라 `changed` 하나로는 **컬럼 추가**와
+**과거 값 변경**을 구별할 수 없었다 — 9/16 의 `n_diff=319,310` 은 전자였고(가격 축이 아닌
+`v_cum_adj`·`v_adj_volume_fwd` 의 n_diff 0 이 증거) 그 판정을 09-19 에 역추적해야 했다.
+이제 FAIL·PASS detail 에도 `schema_changed=[...]` 가 붙는다.

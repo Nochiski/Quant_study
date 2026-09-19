@@ -5,7 +5,7 @@
 #   · logs/**                          로테이션은 scripts/rotate_logs.sh 에 위임(14일 gzip · 90일 삭제 · health 보존)
 #   스냅샷(data/snapshots) GC 는 여기 없다 — stage 빌드에 내장한다(플랜 Task 4.2). 한 곳에서만.
 set -euo pipefail
-cd "${QL_HOME:-/home/kael/quant-ledger}"
+cd "${QL_HOME:-$HOME/quant-ledger}"
 APPLY=0
 # 주간 정리도 보고한다(결정 V2-7). set -e 로 죽는 어느 줄이든 warn 이 나간다.
 trap 'rc=$?; [ "$APPLY" -eq 1 ] && scripts/notify.sh warn "gc 실패" "gc.sh line $LINENO rc=$rc — 로그를 확인한다" || true' ERR

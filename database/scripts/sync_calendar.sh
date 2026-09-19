@@ -4,8 +4,8 @@
 #   형식(실측 09-09): {"year": 2026, "fetched_at", "last_reviewed_at", "holidays": ["20260101", ...121건], "review_history"}
 #   검증 규칙은 v3 holiday.py 와 같다 — 100건 이상 · 전건 해당 연도 · 주말(토·일) 90건 이상.
 set -uo pipefail
-cd "${QL_HOME:-/home/kael/quant-ledger}"
-SRC="${1:-/home/kael/kael-system-v3/data/.kis_holidays.json}"
+cd "${QL_HOME:-$HOME/quant-ledger}"
+SRC="${1:-$HOME/kael-system-v3/data/.kis_holidays.json}"
 DST=data/calendar/kis_holidays.json
 mkdir -p data/calendar
 TMP=$(mktemp)

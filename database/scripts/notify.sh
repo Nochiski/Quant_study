@@ -8,7 +8,7 @@ set -uo pipefail
 LEVEL="${1:?usage: notify.sh <crit|warn|info> <title> [body]}"
 TITLE="${2:?title required}"
 BODY="${3:-}"
-ENV_FILE="${QL_ENV:-/home/kael/kael-system-v3/.env}"
+ENV_FILE="${QL_ENV:-$HOME/kael-system-v3/.env}"
 if [ ! -f "$ENV_FILE" ]; then
   echo "notify: env file not found: $ENV_FILE" >&2
   exit 2

@@ -59,3 +59,35 @@ def test_refetch_clears_done_dates(tmp_path, monkeypatch):
     assert len(n) == 14                                                   # 09-08 재수집 7 + 09-09 7
     con = sqlite3.connect(tmp_path / "data" / "raw" / "krx.db")
     assert con.execute("SELECT X FROM krx_stk_bydd_trd WHERE bas_dd_req='20260908'").fetchone()[0] == "2"
+
+
+# ── 실패가 rc 0 으로 끝나지 않는다 (DEFECT-A05) ──────────────────────────────
+def test_rate_exhaustion_is_recorded_and_exits_nonzero(tmp_path, monkeypatch):
+    import pytest
+    m = _load(tmp_path, monkeypatch, holidays=[])
+    monkeypatch.setattr(m, "call", lambda path, bas_dd: (None, "rate"))   # 429/타임아웃 소진
+    monkeypatch.setattr(sys, "argv", ["x", "--from", "2026-09-08", "--to", "2026-09-08"])
+    with pytest.raises(SystemExit) as e:
+        m.main()
+    assert e.value.code == 1                                   # 재시도 창을 쓰려면 셸이 실패를 봐야 한다
+    assert set(_statuses(tmp_path, "20260908").values()) == {"rate"}
+
+
+def test_fatal_401_is_recorded_as_fatal_and_exits_nonzero(tmp_path, monkeypatch):
+    import pytest
+    m = _load(tmp_path, monkeypatch, holidays=[])
+    monkeypatch.setattr(m, "call", lambda path, bas_dd: (None, "fatal"))  # AUTH_KEY 만료
+    monkeypatch.setattr(sys, "argv", ["x", "--from", "2026-09-08", "--to", "2026-09-08"])
+    with pytest.raises(SystemExit) as e:
+        m.main()
+    assert e.value.code == 1
+    # 종전에는 ingest_log 에 행조차 남기지 않아 krx_step 이 "할 일 없음" 으로 읽었다
+    assert _statuses(tmp_path, "20260908") == {"sto/stk_bydd_trd": "fatal"}
+
+
+def test_all_ok_still_exits_zero(tmp_path, monkeypatch):
+    m = _load(tmp_path, monkeypatch, holidays=[])
+    monkeypatch.setattr(m, "call", lambda path, bas_dd: ([{"ISU_CD": "005930", "IDX_NM": "KOSPI", "X": "1"}], "ok"))
+    monkeypatch.setattr(sys, "argv", ["x", "--from", "2026-09-08", "--to", "2026-09-08"])
+    m.main()                                                   # 정상 경로는 예외 없이 끝난다
+    assert set(_statuses(tmp_path, "20260908").values()) == {"ok"}

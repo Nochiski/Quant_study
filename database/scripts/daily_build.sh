@@ -40,16 +40,22 @@ step() {
   if [ "$rc" -ne 0 ]; then FAILED="$name(rc=$rc)"; return 1; fi
   return 0
 }
-krx_step() {  # KRX D + 최근 10거래일 pending 재수집. pending 이면 10분 간격 최대 6회(08:10→09:10)
+krx_step() {  # KRX D + 최근 10거래일 미완료 재수집. 미공표·유량·오류면 10분 간격 최대 6회(08:10→09:10)
+  # 종전에는 `pending` 만 재시도 조건이라 네트워크·유량(rate)·응답오류(error)는 재시도 0회로 rc 0 이었다
+  # (DEFECT-A05). 401(fatal)은 재시도해도 소용없으므로 즉시 실패로 올린다.
   local d="$1" from to pend
   from=$($PY -c 'import datetime as dt,sys; from daily import calendar as c
 d=sys.argv[1]; print(c.load().prev_trading_day(dt.date(int(d[:4]),int(d[4:6]),int(d[6:8])), n=10).strftime("%Y-%m-%d"))' "$d")
   to="${d:0:4}-${d:4:2}-${d:6:2}"
   for attempt in 1 2 3 4 5 6; do
-    pend=$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT group_concat(DISTINCT bas_dd) FROM ingest_log WHERE status='pending' AND bas_dd>='${from//-/}'" 2>/dev/null || true)
-    $PY src/backfill_krx.py --from "$from" --to "$to" ${pend:+--refetch "$pend"} ${LIMIT:+$LIMIT} || return 1
-    if [ "$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT COUNT(*) FROM ingest_log WHERE bas_dd='$d' AND status='pending'")" = "0" ]; then return 0; fi
-    echo "  KRX D=$d 아직 미공표(pending) — 10분 뒤 재시도 ($attempt/6)"
+    pend=$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT group_concat(DISTINCT bas_dd) FROM ingest_log WHERE status IN ('pending','rate','error') AND bas_dd>='${from//-/}'" 2>/dev/null || true)
+    $PY src/backfill_krx.py --from "$from" --to "$to" ${pend:+--refetch "$pend"} ${LIMIT:+$LIMIT} || true
+    if [ "$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT COUNT(*) FROM ingest_log WHERE status='fatal' AND bas_dd>='${from//-/}'")" != "0" ]; then
+      echo "  KRX 401 Unauthorized — AUTH_KEY 만료·권한 없음. 재시도해도 소용없어 중단한다 (KRX 401)"
+      return 1
+    fi
+    if [ "$(sqlite3 "file:data/raw/krx.db?mode=ro" "SELECT COUNT(*) FROM ingest_log WHERE bas_dd='$d' AND status IN ('pending','rate','error')")" = "0" ]; then return 0; fi
+    echo "  KRX D=$d 아직 미완료(pending·rate·error) — 10분 뒤 재시도 ($attempt/6)"
     [ -n "$DRY" ] && return 3
     sleep 600
   done
@@ -107,7 +113,7 @@ echo "════ 종료 rc=$RC $(kst) ════"
 fi
 } > "$RUN" 2>&1
 cat "$RUN" >> "$LOG"
-SUMMARY=$(grep -E "^원장 건전성|──── .* 종료|아직 미공표" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
+SUMMARY=$(grep -E "^원장 건전성|──── .* 종료|아직 미완료|KRX 401" "$RUN" | tail -8 | tr '\n' ' ' | cut -c1-900)
 if [ -n "$SKIPPED" ]; then
   [ -z "$DRY" ] && scripts/notify.sh info "daily_build $SKIPPED" "D=$D | 재수집·재빌드하지 않았다(QL_FORCE=1 또는 --date 로 강제) | 로그 $LOG"
   rm -f "$RUN"; exit 0

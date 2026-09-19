@@ -47,6 +47,12 @@ MAX_RETRY = 4
 STALE_PCT_MAX = 30.0        # 오염 게이트 (b). 실측 정상일 9.7% / 오염일 99.0% (findings A §3-2)
 # 저녁 직행(--commit) 전용 결손 게이트 (DEFECT-A01). 아침 경로는 08:10 KRX 대조가 판정하므로 적용하지 않는다.
 COMMIT_MIN_RATIO = 0.98     # dt=D 를 받은 종목 / 요청 종목. ledger_health 의 kiwoom.*.rows 하한과 같은 값
+# 종목축이 요청 유니버스인 TR 만 위 비율로 잰다. ka10014(공매도)는 아니다 — 서버 실측 09-16~09-18
+# 2,129~2,273 / 2,651(80~86%). 그래서 ledger_health 의 `kiwoom.ka10014.trend` 와 같은 술어로
+# **자기 최근 20세션 평균**과 견준다.
+COMMIT_UNIVERSE_TRS = frozenset({"ka10008", "ka10060", "ka20068"})
+COMMIT_TREND_MIN_RATIO = 0.80
+COMMIT_TREND_SESSIONS = 20
 COMMIT_ERROR_FLOOR = 5      # 산발 실패(폐지 직전 종목 등)까지 막지는 않는다
 COMMIT_ERROR_RATE = 0.005   # 그 위로는 콜 수의 0.5%
 GRACE_DAYS = 5              # 유니버스 유예(R5)
@@ -488,6 +494,25 @@ def incoming_coverage(db_path: str, api_ids: Sequence[str], date: str) -> dict[s
     return out
 
 
+def recent_ticker_avg(db_path: str, table: str, date: str,
+                      n_sessions: int = COMMIT_TREND_SESSIONS) -> float | None:
+    """원장 `table` 의 `dt < date` 최근 n세션 **세션당 종목 수** 평균. 이력이 없으면 None(판정 불가).
+
+    `ledger_health.check_kiwoom` 의 `kiwoom.ka10014.trend` 와 같은 술어다 — 종목축이 요청 유니버스가
+    아닌 TR 은 절대 비율로 재면 매일 실패한다(변동 12%, 실측 80~86%).
+    """
+    con = sqlite3.connect(db_path, timeout=60)
+    try:
+        if not _table_exists(con, table):
+            return None
+        row = con.execute(
+            f'SELECT AVG(n) FROM (SELECT COUNT(DISTINCT ticker) n FROM "{table}" '
+            f'WHERE dt < ? GROUP BY dt ORDER BY dt DESC LIMIT ?)', (date, n_sessions)).fetchone()
+    finally:
+        con.close()
+    return None if row is None or row[0] is None else float(row[0])
+
+
 def stale_gate(db_path: str, prev_date: str, holdings_d: Mapping[str, str],
                holdings_prev: Mapping[str, str]) -> StaleGate:
     """오염 게이트 (b). 비교 기준은 원장 `dt=D-1`, 원장에 그 날이 없으면 같은 응답의 `D-1` 행.
@@ -552,7 +577,9 @@ def fetch(tickers: Sequence[str], *, date: str, prev_date: str, db_path: str,
     n_error = sum(s.n_error for s in stats)
     # 커버리지는 통과해도 detail 에 싣는다 — 결손이 어느 선까지 왔는지 로그에서 추세로 보여야 한다.
     cover = incoming_coverage(db_path, [s.api_id for s in selected], date)
-    n_cover = min(cover.values()) if cover else 0
+    # 헤드라인 커버리지는 종목축이 유니버스인 TR 기준이다(ka10014 를 섞으면 매일 80%대로 읽힌다).
+    on_universe = [n for a, n in cover.items() if a in COMMIT_UNIVERSE_TRS]
+    n_cover = min(on_universe) if on_universe else (min(cover.values()) if cover else 0)
     detail = (f"trs={','.join(s.api_id for s in selected)} universe={len(tickers)} calls={n_calls} rows={n_rows} "
               f"stale={gate.n_stale}/{gate.n_compared} pct={gate.pct} basis={gate.basis} "
               f"coverage={n_cover}/{len(tickers)} "
@@ -568,15 +595,26 @@ def fetch(tickers: Sequence[str], *, date: str, prev_date: str, db_path: str,
                                     f"(정상일 실측 9.7% · 오염일 99.0%)")
     if commit:
         broken: list[str] = []
+        bases: list[str] = []
         for st in stats:
             cap = commit_error_max(st.n_calls)
             if st.n_error > cap:
                 broken.append(f"{st.api_id} errors={st.n_error} > {cap}")
             got = cover.get(st.api_id, 0)
-            ratio = (got / len(tickers)) if tickers else 0.0
-            if ratio < COMMIT_MIN_RATIO:
-                broken.append(f"{st.api_id} coverage={got}/{len(tickers)} "
-                              f"ratio={ratio:.4f} < {COMMIT_MIN_RATIO}")
+            if st.api_id in COMMIT_UNIVERSE_TRS:
+                base, min_ratio, basis = float(len(tickers)), COMMIT_MIN_RATIO, "universe"
+            else:
+                avg = recent_ticker_avg(db_path, TRS[st.api_id].table, date)
+                basis = f"avg{COMMIT_TREND_SESSIONS}" if avg else "none"
+                base, min_ratio = (avg or 0.0), COMMIT_TREND_MIN_RATIO
+            bases.append(f"{st.api_id}:{basis}")
+            if base <= 0:               # 기준선이 없다 — 조용히 통과시키되 basis 를 남긴다
+                continue
+            ratio = got / base
+            if ratio < min_ratio:
+                broken.append(f"{st.api_id} coverage={got}/{base:.0f}({basis}) "
+                              f"ratio={ratio:.4f} < {min_ratio}")
+        detail += f" coverage_basis={','.join(bases)}"
         if broken:
             return FetchResult(FetchStatus.COVERAGE_FAILED, date, len(tickers), n_calls, n_rows, gate,
                                detail + " | 저녁 직행 결손 게이트 실패(KRX 대조가 없는 경로라 여기서 막는다): "

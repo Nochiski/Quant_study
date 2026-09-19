@@ -516,14 +516,17 @@ def _prepare_many(tmp_path, monkeypatch, n, *, nodata=(), error=()):
     tickers = _many_db(tmp_path, n)
     bad_nodata, bad_error = set(nodata), set(error)
 
+    rows = {"ka10014": ("shrts_trnsn", {"dt": D, "close_pric": "-1", "shrts_qty": "1",
+                                        "ovr_shrts_qty": "1"})}
+
     def kiwoom(api_id, url, body, cont=None, next_key=None):
         tk = body["stk_cd"]
         if tk in bad_nodata:
             return {"return_code": 3, "return_msg": "[1901:종목정보가 없습니다]"}, {}
         if tk in bad_error:
             return {"return_code": 3, "return_msg": "[9999:서버 오류]"}, {}
-        return {"return_code": 0, "return_msg": "정상",
-                "invsr_trde": [{"dt": D, "ind_invsr": "1", "frgnr_invsr": "2"}]}, {}
+        key, row = rows.get(api_id, ("invsr_trde", {"dt": D, "ind_invsr": "1", "frgnr_invsr": "2"}))
+        return {"return_code": 0, "return_msg": "정상", key: [row]}, {}
 
     module = types.ModuleType("api")
     module.kiwoom = kiwoom
@@ -597,3 +600,45 @@ def test_merge_reports_real_corrections_with_values(tmp_path, monkeypatch, capsy
     assert "('ka10008', 6, 4, 2)" in _run_detail(tmp_path, "kiwoom_merge")
     out = capsys.readouterr().out
     assert "poss_stkcnt" in out and "'999' → '20'" in out
+
+
+def _ledger_history(tmp_path, table, sessions, tickers):
+    """원장에 과거 세션별 행을 심는다 — 종목축이 유니버스가 아닌 TR 의 추세 기준선."""
+    con = sqlite3.connect(tmp_path / "data" / "raw" / "kiwoom.db")
+    con.execute(f'CREATE TABLE IF NOT EXISTS "{table}" ("ticker" TEXT NOT NULL, "dt" TEXT, '
+                '"close_pric" TEXT, "shrts_qty" TEXT, "ovr_shrts_qty" TEXT, "src_api" TEXT, '
+                '"collected_at" TEXT, PRIMARY KEY ("ticker", "dt"))')
+    con.executemany(f'INSERT INTO "{table}" VALUES (?,?,?,?,?,?,?)',
+                    [(t, d, "1", "1", "1", "ka10014", "old") for d in sessions for t in tickers])
+    con.commit()
+    con.close()
+
+
+def test_commit_judges_short_selling_against_its_own_history(tmp_path, monkeypatch):
+    # ka10014 의 종목축은 요청 유니버스가 아니다 — 09-16~09-18 서버 실측 2,129~2,273 / 2,651(80~86%).
+    # 유니버스 비율 0.98 을 그대로 물리면 저녁 체인이 매일 실패한다. 자기 최근 이력과 견준다.
+    tickers = _prepare_many(tmp_path, monkeypatch, 100, nodata=tuple(f"{i:06d}" for i in range(30)))
+    assert len(tickers) == 100
+    _ledger_history(tmp_path, "ka10014_short_selling",
+                    [f"202609{d:02d}" for d in range(1, 6)], [f"{i:06d}" for i in range(80)])
+    # 오늘 70종목(= 최근 평균 80 의 0.875) → 유니버스로 보면 0.70 이지만 추세로는 통과
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10014", "--commit"]) == 0
+    detail = _run_detail(tmp_path, "kiwoom_fetch")
+    assert "('ka10014', 70)" in detail
+
+
+def test_commit_fails_when_short_selling_coverage_collapses(tmp_path, monkeypatch):
+    _prepare_many(tmp_path, monkeypatch, 100, nodata=tuple(f"{i:06d}" for i in range(60)))
+    _ledger_history(tmp_path, "ka10014_short_selling",
+                    [f"202609{d:02d}" for d in range(1, 6)], [f"{i:06d}" for i in range(80)])
+    # 오늘 40종목 = 평균 80 의 0.50 → 실패
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10014", "--commit"]) == 2
+    assert "ka10014_short_selling" not in _tables(tmp_path) or _count(tmp_path, "ka10014_short_selling",
+                                                                     "dt=?", (D,)) == 0
+
+
+def test_commit_records_but_does_not_fail_without_history(tmp_path, monkeypatch):
+    _prepare_many(tmp_path, monkeypatch, 100, nodata=tuple(f"{i:06d}" for i in range(60)))
+    assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10014", "--commit"]) == 0
+    # 기준선이 없으면 판정하지 않는다 — 왜 판정을 못 했는지는 남긴다
+    assert "coverage_basis=ka10014:none" in _run_detail(tmp_path, "kiwoom_fetch")

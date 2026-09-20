@@ -6,9 +6,9 @@
 1. **설정의 모양.** 경로·플래그는 `AssistantSettings`로 한 번에 받는다. 환경 변수를 실제로 읽는
    것은 서버 프로세스뿐이고(`_http.py`), 이 함수는 값만 받는다 — 테스트가 임시 경로로 같은
    그래프를 세울 수 있어야 하기 때문이다.
-2. **공급자 adapter 레지스트리.** `kind → 팩토리`를 두고 A-05·A-06이 자기 항목을 채운다. 지금은
-   비어 있으므로 `ProviderProfileService`가 모든 종류를 "설치 필요"로 답하고 프로파일 생성을
-   거절한다(spec D4: 설치되지 않은 공급자는 프로파일을 만들 수 없다).
+2. **공급자 adapter 레지스트리.** `kind → 팩토리`를 두고 A-05·A-06이 자기 항목을 채운다.
+   공급자 SDK는 optional extra(`llm`)이므로 **설치된 것만** 등록한다. 등록되지 않은 종류는
+   `ProviderProfileService`가 "설치 필요"로 답하고 프로파일 생성을 거절한다(spec D4).
 
    **팩토리는 시작할 때 부르지 않는다.** 공급자 SDK는 optional extra(`llm`)라 설치되지 않은
    환경이 정상이고, 시작 시점에 부르면 그 `ImportError`가 `build_container`를 타고 올라가
@@ -103,9 +103,29 @@ PROVIDER_SDK_MODULES: Mapping[ProviderKind, str] = MappingProxyType(
     }
 )
 
-# A-05(`llm_anthropic`)·A-06(`llm_openai`)이 자기 항목을 등록한다. 비어 있는 동안에도 설정
-# 화면은 두 종류를 모두 보여 주고 "설치 필요"로 표시한다(`ProviderProfileService.available_kinds`).
-PROVIDER_ADAPTER_FACTORIES: Mapping[ProviderKind, ProviderAdapterFactory] = MappingProxyType({})
+
+def _anthropic_adapter() -> LlmProviderPort:
+    """A-05 Anthropic adapter(`llm_anthropic`). SDK 미설치는 `ModuleNotFoundError`로 알린다.
+
+    import가 함수 본문 안에 있는 것이 위 계약 1이다. 최상단으로 올리면 이 파일이 읽히는 순간
+    optional extra 없는 환경에서 터지고, 지연 레지스트리가 아무것도 막지 못한다.
+
+    `find_spec`으로 미리 확인하지도, `ImportError`를 가로채지도 않는다. 판정은 한 곳
+    (`is_missing_provider_sdk`)만 한다 — 두 곳에서 하면 한쪽만 고쳐졌을 때 "미설치"와
+    "우리 버그"의 경계가 조용히 어긋난다.
+    """
+    from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (
+        AnthropicLlmAdapter,
+    )
+
+    return AnthropicLlmAdapter()
+
+
+# A-06(`llm_openai`)이 자기 항목을 여기에 더한다. 등록되지 않은 종류도 설정 화면에는 보이고
+# "설치 필요"로 표시된다(`ProviderProfileService.available_kinds`).
+PROVIDER_ADAPTER_FACTORIES: Mapping[ProviderKind, ProviderAdapterFactory] = MappingProxyType(
+    {ProviderKind.ANTHROPIC: _anthropic_adapter}
+)
 
 
 def is_missing_provider_sdk(kind: ProviderKind, error: ImportError) -> bool:

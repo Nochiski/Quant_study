@@ -1,8 +1,12 @@
 """`/api/v1/assistant/*` 계약 (설계 spec D6, WORKFLOW A-04).
 
 앱은 **실제 bootstrap 그래프**로 세운다(`build_http_app`). 가짜로 바꾸는 것은 공급자 adapter
-하나뿐이고 — A-05·A-06 전이라 진짜가 없다 — 저장소·비밀 파일·컴파일러는 전부 진짜다. 그래야
-라우트가 아니라 배선이 틀렸을 때도 이 테스트가 깨진다.
+하나뿐이고, 저장소·비밀 파일·컴파일러는 전부 진짜다. 그래야 라우트가 아니라 배선이 틀렸을
+때도 이 테스트가 깨진다.
+
+마지막 두 건(A-05)은 가짜를 한 겹 더 벗긴다. 진짜 `AnthropicLlmAdapter`를 쓰고 SDK
+클라이언트만 대본으로 바꿔, bootstrap 레지스트리에 등록된 그 클래스가 HTTP 왕복에서
+"설치 필요"가 아니라 probe 경로로 가는지 본다.
 
 비밀은 이 파일 전체에서 `_API_KEY` 하나만 쓴다. 마지막 테스트가 그 문자열이 어떤 응답 본문과
 로그에도 없음을 단언하므로, 새 라우트를 추가하면서 키를 응답에 흘리면 여기서 걸린다.
@@ -27,7 +31,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
-from strategy_workbench.bootstrap.facade.container import AssistantSettings
+from strategy_workbench.bootstrap.facade.container import (
+    PROVIDER_ADAPTER_FACTORIES,
+    AssistantSettings,
+)
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.assistant.facade.models import (
     ChatEvent,
@@ -757,3 +764,62 @@ def _wait_for_terminal_turn(client: httpx.Client, session_id: str) -> dict[str, 
         if statuses and TurnStatus.RUNNING.value not in statuses:
             return history
     raise AssertionError(f"turn never reached a terminal state — session_id={session_id}")
+
+
+# -- 등록된 진짜 adapter (A-05) ---------------------------------------------------------------
+
+
+def test_the_anthropic_adapter_is_registered_in_the_default_bootstrap_registry() -> None:
+    """레지스트리가 비어 있으면 아래 왕복 테스트가 가짜만 검증하게 된다."""
+    pytest.importorskip("anthropic", reason="공급자 SDK는 optional extra `llm`이다")
+    from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (
+        DEFAULT_MODEL,
+        AnthropicLlmAdapter,
+    )
+
+    factory = PROVIDER_ADAPTER_FACTORIES[ProviderKind.ANTHROPIC]
+
+    provider = factory()
+
+    assert isinstance(provider, AnthropicLlmAdapter)
+    assert provider.kind is ProviderKind.ANTHROPIC
+    assert provider.default_model() == DEFAULT_MODEL
+
+
+def test_creating_an_anthropic_profile_reaches_the_real_adapters_probe(tmp_path: Path) -> None:
+    """등록된 adapter 클래스를 그대로 쓰고 SDK 클라이언트만 대본으로 바꾼다.
+
+    "설치 필요"(422 `assistant.provider_not_installed`)가 아니라 probe를 거쳐 201이 나와야
+    레지스트리 배선이 살아 있는 것이다. 네트워크는 타지 않는다.
+    """
+    pytest.importorskip("anthropic", reason="공급자 SDK는 optional extra `llm`이다")
+    from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (
+        DEFAULT_MODEL,
+        AnthropicLlmAdapter,
+    )
+
+    from ..anthropic_stream_script import RecordingClientFactory, ScriptedMessagesClient
+
+    sdk = ScriptedMessagesClient()
+    factory = RecordingClientFactory(sdk)
+    app = build_http_app(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={
+                ProviderKind.ANTHROPIC: lambda: AnthropicLlmAdapter(client_factory=factory)
+            },
+        )
+    )
+    client = TestClient(app)
+
+    created = _create_profile(client)
+
+    assert created["status"] == 201, created["json"]
+    assert created["json"]["model"] == DEFAULT_MODEL
+    assert created["json"]["secret_tail"] == _API_KEY[-4:]
+    # probe가 실제로 SDK 경계를 한 번 두드렸고, 비밀은 그 호출에만 쓰였다.
+    assert factory.seen == [(_API_KEY, None)]
+    assert [model for _, model in sdk.create_payloads] == [DEFAULT_MODEL]
+    kinds = {item["kind"]: item for item in client.get(f"{_ASSISTANT}/providers").json()["kinds"]}
+    assert kinds["anthropic"]["installed"] is True

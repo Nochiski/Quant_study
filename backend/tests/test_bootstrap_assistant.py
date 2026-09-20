@@ -2,7 +2,7 @@
 
 HTTP 계약은 `tests/integration/test_assistant_http_api.py`가 본다. 여기서 보는 것은 composition
 root가 **무엇을 어디서 읽어 무엇을 조립하는가**다: 환경 변수 이름, 저장소 밖으로 강제되는 비밀
-파일, 공급자 레지스트리가 비었을 때의 상태, authoring compile을 감싼 `StrategyCompilerPort`.
+파일, 공급자 레지스트리에 없는 종류의 상태, authoring compile을 감싼 `StrategyCompilerPort`.
 """
 
 from __future__ import annotations
@@ -72,18 +72,52 @@ def test_the_container_builds_the_three_assistant_services_together(tmp_path: Pa
     assert container.assistant_turns is not None
 
 
-def test_an_empty_provider_registry_reports_every_kind_as_not_installed(tmp_path: Path) -> None:
-    """A-05·A-06 전에는 레지스트리가 비어 있고, 그 사실이 화면까지 그대로 전달된다."""
-    assert PROVIDER_ADAPTER_FACTORIES == {}
+def test_a_kind_with_no_registered_factory_is_listed_as_not_installed(tmp_path: Path) -> None:
+    """레지스트리에 없는 종류도 숨기지 않고 "설치 필요"로 화면까지 전달된다.
+
+    화면은 선언된 종류를 **전부** 보여 주어야 한다 — 사용자가 왜 그 공급자를 못 고르는지
+    알아야 한다.
+
+    레지스트리를 **주입해서** 본다. 전역 `PROVIDER_ADAPTER_FACTORIES`를 읽으면 이 테스트가
+    "지금 누가 등록돼 있는가"에 묶여, A-06이 `openai`를 등록할 때 같이 고쳐야 한다. 여기서
+    보려는 것은 "등록되지 않은 종류의 표현"이고 그건 등록 현황과 무관하다.
+
+    "등록은 됐는데 SDK가 없다"는 경우는 `_refuse_import` 계열 테스트가 따로 본다.
+    """
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={},
+        )
+    )
+
+    availability = {item.kind: item for item in container.assistant_profiles.available_kinds()}
+
+    assert set(availability) == set(ProviderKind)
+    assert not any(item.installed for item in availability.values())
+    assert not any(item.default_model for item in availability.values())
+
+
+def test_the_default_registry_offers_the_installed_anthropic_adapter(tmp_path: Path) -> None:
+    """기본 레지스트리에 A-05 adapter가 등록돼 있고, SDK가 있으면 설치됨으로 해소된다.
+
+    SDK가 있어야 뜻이 있는 단언이라 `importorskip`으로 이 테스트만 건너뛴다. 모듈 최상단에서
+    adapter facade를 import하면 extra 없이는 이 파일 전체가 수집되지 않는다 — A-06도 같은
+    자리에 `llm_openai`를 더하므로 이 모양을 따른다.
+    """
+    pytest.importorskip("anthropic", reason="공급자 SDK는 optional extra `llm`이다")
+    from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import DEFAULT_MODEL
+
+    assert ProviderKind.ANTHROPIC in PROVIDER_ADAPTER_FACTORIES
     container = build_container(
         assistant=AssistantSettings(db_path=None, secrets_path=tmp_path / "secrets.json")
     )
 
-    availability = container.assistant_profiles.available_kinds()
+    availability = {item.kind: item for item in container.assistant_profiles.available_kinds()}
 
-    assert {item.kind for item in availability} == set(ProviderKind)
-    assert not any(item.installed for item in availability)
-    assert not any(item.default_model for item in availability)
+    assert availability[ProviderKind.ANTHROPIC].installed is True
+    assert availability[ProviderKind.ANTHROPIC].default_model == DEFAULT_MODEL
 
 
 def test_the_secrets_file_may_not_live_inside_the_repository() -> None:

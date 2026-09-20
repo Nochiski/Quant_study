@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
 from enum import StrEnum
 from typing import Literal, TypeAlias
 
 from strategy_workbench.domain.factor.facade.expression import FactorGraph
 
 # 새 문서로 받는 유일한 authoring schema 버전. 모델 기본값·hydrate·스키마·어댑터가 전부 이 상수를
-# 읽는다(Phase 1 감사 DEFECT-P1X-001: 리터럴을 두 곳에 적지 않는다). 1.0 문서·저장 row는
+# 읽는다(Phase 1 감사 DEFECT-P1X-001: 리터럴을 두 곳에 적지 않는다). 은퇴한 버전의 문서·저장 row는
 # `_upgrade.py`의 변환을 거쳐서만 들어온다(spec D2·D3).
-CURRENT_SCHEMA_VERSION = "1.1"
+CURRENT_SCHEMA_VERSION = "1.2"
 
 # Editor metadata for identifier fields (see domain.factor._nodes for the node-side markers).
-CATALOG_UNIVERSE = {"catalog": "universe"}
 CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
 DEFINES_PARAMETER = {"defines": "parameter"}
 # 생략 시 hydrate가 같은 mapping의 다른 필드 값을 넣는 파생 기본값 (schema 1.1, spec D1 S3).
@@ -26,14 +24,6 @@ def _factor_authoring(source: str, *, identity: bool = False) -> dict[str, objec
     if identity:
         metadata["authoring-identity"] = True
     return metadata
-
-
-class Market(StrEnum):
-    KRX = "KRX"
-
-
-class DataFrequency(StrEnum):
-    DAILY = "daily"
 
 
 class ComparisonOperator(StrEnum):
@@ -73,24 +63,11 @@ class RebalanceFrequency(StrEnum):
     QUARTERLY = "quarterly"
 
 
-class ExecutionTiming(StrEnum):
-    NEXT_OPEN = "next_open"
-
-
 @dataclass(frozen=True)
 class StrategyIdentity:
     strategy_id: str
     revision: int
     schema_version: str = CURRENT_SCHEMA_VERSION
-
-
-@dataclass(frozen=True, kw_only=True)
-class DataStep:
-    market: Market = Market.KRX
-    start: date
-    end: date
-    universe_id: str = field(metadata=CATALOG_UNIVERSE)
-    frequency: DataFrequency = DataFrequency.DAILY
 
 
 @dataclass(frozen=True)
@@ -148,14 +125,6 @@ class RiskStep:
     risk_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
 
 
-@dataclass(frozen=True)
-class ExecutionStep:
-    timing: ExecutionTiming = ExecutionTiming.NEXT_OPEN
-    participation_rate: float = 0.1
-    fee_bps: float = 15.0
-    slippage_bps: float = 10.0
-
-
 ParameterValue: TypeAlias = float | int | str | bool
 
 
@@ -195,11 +164,12 @@ class StrategySpec:
     identity: StrategyIdentity
     title: str
     description: str = ""
-    data: DataStep
     eligibility: EligibilityStep = EligibilityStep()
-    factors: tuple[FactorSignal, ...]
+    # 생략해도 빈 배열이어도 구조 오류가 아니다(spec D3). 두 경우 모두 semantic
+    # `strategy.factor.required`가 나서, 새 전략이 "구조 오류"가 아니라 "팩터를 추가하세요"로
+    # 시작한다 — 실행 설정이 빠진 1.2 최상위 필수 키는 `schema_version`·`title` 둘뿐이다.
+    factors: tuple[FactorSignal, ...] = ()
     signal: SignalStep = SignalStep()
     portfolio: PortfolioStep = PortfolioStep()
     risk: RiskStep = RiskStep()
-    execution: ExecutionStep = ExecutionStep()
     parameters: tuple[ParameterDefinition, ...] = field(default=(), metadata=DEFINES_PARAMETER)

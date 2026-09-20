@@ -18,6 +18,8 @@ from strategy_workbench.domain.strategy.facade.document import (
     SourceFormat,
     hydrate_strategy_document,
     is_frozen_schema_version,
+    is_legacy_document,
+    strip_retired_execution_settings,
     upgrade_document_1_0,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -152,10 +154,15 @@ def _decode_frozen_spec(
 ) -> StrategySpec:
     """Read a retired-schema row without a model for that schema (spec D2).
 
-    The 1.0 model no longer exists, so "the source compiles to the stored spec" cannot be
-    re-proven. The row is immutable and was proven when written; what is verified here is that
-    the stored bytes are what the hash column claims and that the domain upgrade transform still
-    understands them. The spec keeps the row's retired `schema_version` as its frozen marker.
+    은퇴 버전의 모델은 더 이상 없으므로 "source 가 저장된 spec 으로 컴파일된다"를 다시 증명할 수
+    없다. row 는 immutable 이고 기록 시점에 이미 증명됐다. 여기서 검증하는 것은 저장된 바이트가
+    hash 컬럼이 말하는 그 바이트인지와, 도메인 업그레이드 변환이 아직 그 문서를 이해하는지다.
+    spec 은 row 가 저장된 은퇴 버전을 동결 표식으로 그대로 들고 나간다.
+
+    변환은 현재 버전까지 이어 붙인다: 1.0 row 는 1.0 → 1.1 step 을 먼저 타고, 그다음 1.1 row 와
+    같은 실행 설정 제거(1.2)를 거친다. 두 단계를 다 태우지 않으면 은퇴 row 가
+    `structure.unknown_key`/`unsupported_schema_version` 으로 hydrate 에 실패해 목록·이력 조회가
+    통째로 500 이 된다. 버전 디스패치 공개 API 와 업그레이드 응답의 `environment` 는 P2-09 다.
     """
     computed = canonical_json_spec_hash(spec_json)
     if computed != spec_hash:
@@ -163,7 +170,9 @@ def _decode_frozen_spec(
             "frozen spec_json bytes do not match the stored spec_hash -- "
             f"strategy_id={strategy_id} revision={revision} computed={computed} stored={spec_hash}"
         )
-    upgraded = upgrade_document_1_0(payload)
+    upgraded = upgrade_document_1_0(payload) if is_legacy_document(payload) else dict(payload)
+    strip_retired_execution_settings(upgraded)
+    upgraded["schema_version"] = CURRENT_SCHEMA_VERSION
     hydration = hydrate_strategy_document(
         upgraded, identity=StrategyIdentity(strategy_id, revision, CURRENT_SCHEMA_VERSION)
     )

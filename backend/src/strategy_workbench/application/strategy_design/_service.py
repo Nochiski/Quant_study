@@ -2,21 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime
 
 from strategy_workbench.domain.strategy.facade.explanation import (
     StrategyExplanation,
     explain_strategy,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
-    DataStep,
     EligibilityStep,
-    ExecutionStep,
     FactorDirection,
     FactorGraph,
     FactorSignal,
     FieldNode,
-    Market,
     PortfolioStep,
     RiskStep,
     SignalStep,
@@ -59,26 +56,23 @@ class StrategyDesignService:
         repository: StrategyRepositoryPort,
         *,
         new_id: Callable[[], str],
-        today: Callable[[], date] = date.today,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._repository = repository
         self._new_id = new_id
-        self._today = today
         self._now = now
 
     def template(self) -> StrategySpec:
-        end = self._today()
+        """새 전략 초안. 1.2 부터 실행 설정(시장·기간·유니버스·체결)은 담지 않는다.
+
+        팩터 하나를 남겨 두는 이유는 이 초안이 곧바로 `create()` 로 들어가기 때문이다 —
+        비우면 `strategy.factor.required` 로 저장이 막힌다. 편집 화면이 여는 빈 시작 문서
+        (`schema_version`·`title` 만)는 저장 전 원문이라 규칙이 다르다(P4-04).
+        """
         return StrategySpec(
             identity=StrategyIdentity(strategy_id="draft", revision=0),
             title="새 팩터 전략",
             description="",
-            data=DataStep(
-                market=Market.KRX,
-                start=end - timedelta(days=365 * 5),
-                end=end,
-                universe_id="krx.common-stock",
-            ),
             eligibility=EligibilityStep(),
             factors=(
                 FactorSignal(
@@ -101,7 +95,6 @@ class StrategyDesignService:
             signal=SignalStep(),
             portfolio=PortfolioStep(),
             risk=RiskStep(),
-            execution=ExecutionStep(),
         )
 
     def validate(self, spec: StrategySpec) -> StrategyValidation:

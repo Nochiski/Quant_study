@@ -81,6 +81,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.analytics.facade.metrics import MetricScope
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
@@ -228,6 +229,11 @@ def synthetic_dataset(
     return dataset, security_ids, sessions
 
 
+def bench_environment(sessions: tuple[date, ...]) -> RunEnvironment:
+    """벤치가 쓰는 실행 설정. 1.2 부터 기간·유니버스는 전략 문서가 아니라 실행이 소유한다."""
+    return RunEnvironment(start=sessions[0], end=sessions[-1], universe_id="bench.synthetic")
+
+
 def bench_strategy_spec(
     security_ids: tuple[str, ...], sessions: tuple[date, ...], rebalance_every: int
 ) -> StrategySpec:
@@ -235,11 +241,9 @@ def bench_strategy_spec(
     template = StrategyDesignService(
         InMemoryStrategyRepository(),
         new_id=lambda: "bench-workbench",
-        today=lambda: sessions[-1],
     ).template()
     return replace(
         template,
-        data=replace(template.data, start=sessions[0], end=sessions[-1]),
         portfolio=replace(
             template.portfolio,
             selection_count=len(security_ids),
@@ -252,6 +256,7 @@ def bench_strategy_spec(
 
 def compile_bench_tape(
     spec: StrategySpec,
+    environment: RunEnvironment,
     dataset: BacktestDataset,
     security_ids: tuple[str, ...],
     sessions: tuple[date, ...],
@@ -288,6 +293,7 @@ def compile_bench_tape(
     )
     return compile_target_tape(
         spec,
+        environment=environment,
         data_snapshot_id=dataset.data_snapshot_id,
         sessions=sessions,
         observations=observations,
@@ -313,6 +319,7 @@ def out_of_sample_window(sessions: tuple[date, ...]) -> MetricWindow:
 def execution_request(
     core: ExecutionCore,
     spec: StrategySpec,
+    environment: RunEnvironment,
     tape: TargetTape,
     dataset: BacktestDataset,
     metric_windows: tuple[MetricWindow, ...],
@@ -323,6 +330,7 @@ def execution_request(
         spec=BacktestRunSpec(
             strategy=spec,
             core=core,
+            environment=environment,
             initial_cash=1_000_000_000.0,
             metric_windows=metric_windows,
         ),
@@ -422,9 +430,7 @@ def _first_difference(left: tuple[object, ...], right: tuple[object, ...]) -> st
             continue
         left_items = tuple(left_part) if isinstance(left_part, tuple) else (left_part,)
         right_items = tuple(right_part) if isinstance(right_part, tuple) else (right_part,)
-        for index, (left_item, right_item) in enumerate(
-            zip(left_items, right_items, strict=False)
-        ):
+        for index, (left_item, right_item) in enumerate(zip(left_items, right_items, strict=False)):
             if left_item != right_item:
                 return f"{label}[{index}]: {left_item!r} != {right_item!r}"
         return f"{label}: length {len(left_items)} != {len(right_items)}"
@@ -452,7 +458,8 @@ def main(argv: Sequence[str]) -> int:
         args.root, args.instruments, args.start, args.end
     )
     spec = bench_strategy_spec(security_ids, sessions, args.rebalance_every)
-    tape = compile_bench_tape(spec, dataset, security_ids, sessions)
+    environment = bench_environment(sessions)
+    tape = compile_bench_tape(spec, environment, dataset, security_ids, sessions)
     metric_windows = () if args.no_metric_windows else (out_of_sample_window(sessions),)
     cores = (
         (ExecutionCore.PYTHON, ExecutionCore.RUST)
@@ -479,7 +486,8 @@ def main(argv: Sequence[str]) -> int:
             # 구간에 붙어 그 구간만 부풀어 보인다.
             gc.collect()
             stages, total, result = measure_once(
-                adapter, execution_request(core, spec, tape, dataset, metric_windows)
+                adapter,
+                execution_request(core, spec, environment, tape, dataset, metric_windows),
             )
             peak_rss_by_core[core] = peak_rss_bytes()
             stage_samples[core].append(stages)

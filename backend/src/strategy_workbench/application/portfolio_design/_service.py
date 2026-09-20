@@ -29,9 +29,9 @@ from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataSnapshot,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
-    LegacyMissingPolicyConflictError,
+    MissingRunEnvironmentError,
     RunEnvironment,
-    resolve_environment,
+    require_environment,
 )
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
@@ -228,12 +228,10 @@ class PortfolioDesignService:
         돌려주기 위한 사전 검사다(이슈 #158). 데이터에 의존하는 실패(관측 부재·계약 위반·스냅샷
         불일치·비유한 계산)는 여기서 잡히지 않는다.
 
-        **`request.environment` 를 읽는다**(P2-02). `_prepare` 가 문서 검증 뒤에 실행 설정을
-        해소하고 그 `missing` 으로 플랜을 컴파일하기 때문이다. 호출자는 해소 전 값을 그대로
-        넘겨야 검증이 브리지보다 먼저 돈다. 그래서 이 메서드는 엔진 호환성 말고도 문서·실행
-        설정 문제로 예외를 던진다 — `InvalidPortfolioRequestError`(팩터별 결측 정책 충돌
-        `run_environment.missing_policy_conflict` 포함)와 `RunEnvironment` 생성자 검증이다.
-        `run_pipeline` 과 같은 `spec.environment` 를 넘기는 한 두 경로의 해소 결과는 같다.
+        **`request.environment` 를 읽는다.** 1.2 부터 참여율(엔진 능력)과 결측 정책(플랜)이
+        실행 설정의 값이라 문서만으로는 같은 판정을 낼 수 없다. 그래서 실행 설정이 없으면 여기서도
+        코드화된 진단으로 거절한다 — 해소 단계가 사라져(문서 브리지 없음) `start()` 와 `_run` 이
+        서로 다른 값을 넘길 여지 자체가 없다(P2-03 결정 항목 종결).
         """
 
         # 엔진 호환성만은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게
@@ -369,6 +367,7 @@ class PortfolioDesignService:
             if pipeline_options.construction_trace_selection is None:
                 tape = compile_target_tape(
                     spec,
+                    environment=environment,
                     data_snapshot_id=raw.data_snapshot_id,
                     sessions=raw.sessions,
                     observations=observations,
@@ -379,6 +378,7 @@ class PortfolioDesignService:
             else:
                 compiled = compile_target_tape_with_trace(
                     spec,
+                    environment=environment,
                     data_snapshot_id=raw.data_snapshot_id,
                     sessions=raw.sessions,
                     observations=observations,
@@ -421,17 +421,18 @@ class PortfolioDesignService:
     ) -> _PreparedPipeline:
         """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다.
 
-        실행 설정 해소도 여기서 한다: 문서 검증이 먼저고(코드화된 진단의 owner 는 validator),
-        플랜 컴파일은 `environment.missing` 을 인자로 받아야 한다(P2-02).
+        실행 설정 확정도 여기서 한다: 문서 검증이 먼저고(코드화된 진단의 owner 는 validator),
+        엔진 능력 판정은 `environment.participation_rate` 를, 플랜 컴파일은 `environment.missing`
+        을 인자로 받아야 한다(P2-02·P2-03).
         """
 
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
         checkpoint()
-        resolved = _resolve_environment_or_reject(spec, environment)
+        resolved = _require_environment_or_reject(spec, environment)
 
-        engine = self._engine_portfolio.assess(spec)
+        engine = self._engine_portfolio.assess(spec, resolved)
         if pipeline_options.require_engine_compatible and not engine.compatible:
             raise IncompatiblePortfolioRequestError(engine)
         trace_requested = (
@@ -506,18 +507,19 @@ class PortfolioDesignService:
         return plans
 
 
-def _resolve_environment_or_reject(
+def _require_environment_or_reject(
     spec: StrategySpec, environment: RunEnvironment | None
 ) -> RunEnvironment:
-    """실행 설정을 확정하고, 1.1 문서에서 못 만드는 경우는 요청 거부로 바꾼다.
+    """요청이 실은 실행 설정을 확정하고, 없으면 요청 거부로 바꾼다.
 
-    브리지 실패는 서버 오류가 아니라 문서/요청 문제라 `portfolio.strategy.invalid` 진단으로
+    실행 설정 부재는 서버 오류가 아니라 요청 문제라 `portfolio.strategy.invalid` 진단으로
     나간다. `run_environment.*` 코드는 `strategy.*` 레지스트리 밖이라 그대로 전달된다.
+    `spec` 은 진단 문장에 실을 호출 맥락(전략 이름)을 주기 위해서만 읽는다.
     """
     try:
-        return resolve_environment(spec, environment)
-    except LegacyMissingPolicyConflictError as error:
-        issue = semantic_issue(error.code, "factors", str(error))
+        return require_environment(environment, requested_by=f"portfolio.preview({spec.title!r})")
+    except MissingRunEnvironmentError as error:
+        issue = semantic_issue(error.code, "environment", str(error))
         raise InvalidPortfolioRequestError(
             StrategyValidation(valid=False, issues=(issue,))
         ) from error

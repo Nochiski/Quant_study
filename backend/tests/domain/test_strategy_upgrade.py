@@ -1,4 +1,8 @@
-"""schema 1.0 → 1.1 업그레이드 변환 (spec D3, P1-03)."""
+"""schema 1.0 → 1.1 업그레이드 변환 (spec D3, P1-03).
+
+**현재 버전은 1.2 다.** 이 모듈이 아직 1.1 까지만 올리므로 결과는 저장·실행할 수 없는 중간
+산출물이다 — 1.1 → 1.2 step 과 버전 디스패치는 P2-09 가 붙인다(spec D7).
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ from ruamel.yaml import YAML
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
     LEGACY_SCHEMA_VERSION,
+    LEGACY_UPGRADE_TARGET_VERSION,
     UPGRADE_STEPS,
     NotALegacyDocumentError,
     apply_upgrade_steps,
@@ -25,7 +30,6 @@ from strategy_workbench.domain.strategy.facade.document import (
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
-    strategy_spec_hash,
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
@@ -43,17 +47,31 @@ def _upgrade(document: dict[str, Any]) -> dict[str, Any]:
     return dict(upgrade_document_1_0(document))
 
 
-def test_upgrade_golden_matches_the_1_1_fixture_and_its_hash() -> None:
-    """1.0 golden을 올리면 1.1 verbose fixture와 같은 tree(빈 `signal`만 남음)·같은 hash다."""
+def test_upgrade_golden_matches_the_preserved_1_1_fixture() -> None:
+    """1.0 golden 을 올리면 보존된 1.1 원본과 같은 tree 다(빈 `signal` 만 남는다).
+
+    step 이 찍는 버전은 **자기 목표 버전**(1.1)이다. `CURRENT_SCHEMA_VERSION` 을 찍으면
+    "1.2 라고 적혀 있지만 `data`·`execution` 이 남은 문서"가 나와 중간 단계 검증이 사라진다.
+    """
     upgraded = upgrade_document_1_0(_yaml("quality_momentum.v1_0.yaml"))
 
-    expected = _yaml("quality_momentum.yaml")
+    expected = _yaml("quality_momentum.v1_1.yaml")
     assert upgraded == {**expected, "signal": {}}
+    assert upgraded["schema_version"] == LEGACY_UPGRADE_TARGET_VERSION
+
+
+def test_the_1_1_upgrade_output_is_not_runnable_until_the_1_2_step_exists() -> None:
+    """P2-09 전까지의 중간 상태를 명시적으로 고정한다(WORKFLOW P2-03 제약사항).
+
+    1.0 문서의 업그레이드 결과는 은퇴 버전이라 hydrate 되지 않는다. 이 단언이 사라지는 시점이
+    P2-09 가 1.1 → 1.2 step 을 붙였다는 신호다.
+    """
+    upgraded = upgrade_document_1_0(_yaml("quality_momentum.v1_0.yaml"))
+
     hydrated = hydrate_strategy_document(upgraded, identity=DRAFT)
-    assert hydrated.ok and hydrated.spec is not None
-    reference = hydrate_strategy_document(expected, identity=DRAFT)
-    assert reference.ok and reference.spec is not None
-    assert strategy_spec_hash(hydrated.spec) == strategy_spec_hash(reference.spec)
+
+    assert not hydrated.ok
+    assert [issue.code for issue in hydrated.issues] == ["structure.unsupported_schema_version"]
 
 
 def test_upgrade_does_not_mutate_its_input() -> None:
@@ -72,7 +90,7 @@ def test_frozen_means_any_version_other_than_current() -> None:
     assert not is_frozen_schema_version(CURRENT_SCHEMA_VERSION)
     assert is_frozen_schema_version(LEGACY_SCHEMA_VERSION)
     assert is_frozen_schema_version("0.9")
-    assert is_frozen_schema_version("1.2")
+    assert is_frozen_schema_version("1.1")
 
 
 @pytest.mark.parametrize("version", [CURRENT_SCHEMA_VERSION, "2.0", 1.0, None])
@@ -129,8 +147,6 @@ def test_unary_aliases_move_to_cross_sectional_and_drop_periods() -> None:
         "kind": "unary",
     }
     assert by_id["l"]["kind"] == "unary" and by_id["l"]["periods"] == 2
-    hydrated = hydrate_strategy_document(upgraded, identity=DRAFT)
-    assert hydrated.ok, hydrated.issues
 
 
 def test_removed_fields_go_and_nothing_else_changes() -> None:
@@ -174,6 +190,6 @@ def test_steps_apply_identically_to_ruamel_round_trip_containers() -> None:
     )
     assert dumped.startswith("# P0-01 golden authoring fixture")  # 선두 주석 보존
     assert (
-        f"schema_version: '{CURRENT_SCHEMA_VERSION}'" in dumped
-        or f'schema_version: "{CURRENT_SCHEMA_VERSION}"' in dumped
+        f"schema_version: '{LEGACY_UPGRADE_TARGET_VERSION}'" in dumped
+        or f'schema_version: "{LEGACY_UPGRADE_TARGET_VERSION}"' in dumped
     )

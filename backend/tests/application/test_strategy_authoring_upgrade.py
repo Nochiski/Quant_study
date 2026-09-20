@@ -23,12 +23,7 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
     SourceFormat,
 )
 from strategy_workbench.domain.strategy.facade.document import (
-    hydrate_strategy_document,
     upgrade_document_1_0,
-)
-from strategy_workbench.domain.strategy.facade.specification import (
-    StrategyIdentity,
-    strategy_spec_hash,
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
@@ -60,24 +55,29 @@ def _read(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def test_upgrade_returns_1_1_text_whose_compile_matches_the_dict_path() -> None:
+def test_upgrade_returns_1_1_text_matching_the_dict_path() -> None:
+    """원문 경로와 dict 경로가 같은 tree 를 낸다. 결과 버전은 아직 1.1 이다.
+
+    현재 버전은 1.2 이고 이 엔드포인트는 1.1 까지만 올린다 — 1.1 → 1.2 step 과 응답의
+    `environment` 는 P2-09 다(spec D7). 그래서 돌려준 원문은 아직 저장·실행할 수 없고, compile
+    진단에 `structure.unsupported_schema_version` 이 실린다. 이 단언이 바뀌는 시점이 P2-09 다.
+    """
     source = _read("quality_momentum.v1_0.commented.yaml")
 
     upgraded = _service().upgrade(CompileRequest(source, SourceFormat.YAML))
 
     assert upgraded.format is SourceFormat.YAML
     assert upgraded.source == _read("quality_momentum.v1_1.commented.yaml")
-    assert upgraded.compiled.spec_hash is not None and not upgraded.compiled.diagnostics
-    expected = hydrate_strategy_document(
-        upgrade_document_1_0(yaml.safe_load(source)), identity=StrategyIdentity("draft", 0)
-    )
-    assert expected.spec is not None
-    assert upgraded.compiled.spec_hash == strategy_spec_hash(expected.spec)
+    assert upgraded.compiled.spec_hash is None
+    assert [d.code for d in upgraded.compiled.diagnostics] == [
+        "structure.unsupported_schema_version"
+    ]
+    assert yaml.safe_load(upgraded.source) == upgrade_document_1_0(yaml.safe_load(source))
     assert upgraded.source_hash == upgraded.compiled.source_hash
 
 
-def test_upgrade_reports_semantic_diagnostics_of_the_upgraded_text_without_hiding_them() -> None:
-    """변환 자체는 성공하지만 1.1에서 semantic error가 나는 문서: 결과는 돌려주고 진단을 담는다."""
+def test_upgrade_reports_diagnostics_of_the_upgraded_text_without_hiding_them() -> None:
+    """변환 자체는 성공해도 결과 문서의 진단은 감추지 않고 그대로 담아 돌려준다."""
     source = _read("quality_momentum.v1_0.yaml").replace(
         "max_name_weight: 0.05", "max_name_weight: 1.5"
     )
@@ -85,7 +85,7 @@ def test_upgrade_reports_semantic_diagnostics_of_the_upgraded_text_without_hidin
     upgraded = _service().upgrade(CompileRequest(source, SourceFormat.YAML))
 
     assert upgraded.compiled.spec_hash is None
-    assert [d.code for d in upgraded.compiled.diagnostics] == ["strategy.risk.max_name_weight"]
+    assert upgraded.compiled.diagnostics
 
 
 @pytest.mark.parametrize("version", ['"1.1"', '"2.0"', "1.0"])
@@ -117,7 +117,9 @@ def test_syntax_errors_carry_the_codec_diagnostics() -> None:
 
 def test_drift_between_the_two_transform_paths_is_refused_with_a_pointer() -> None:
     source = _read("quality_momentum.v1_0.yaml")
-    drifted = _read("quality_momentum.yaml").replace("selection_count: 20", "selection_count: 21")
+    drifted = _read("quality_momentum.v1_1.yaml").replace(
+        "selection_count: 20", "selection_count: 21"
+    )
 
     with pytest.raises(DocumentUpgradeDriftError, match="pointer='/portfolio/selection_count'"):
         _service(_DriftingCodec(drifted)).upgrade(CompileRequest(source, SourceFormat.YAML))

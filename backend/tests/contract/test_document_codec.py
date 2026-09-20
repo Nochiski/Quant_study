@@ -29,7 +29,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-QUALITY_MOMENTUM_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
+QUALITY_MOMENTUM_SPEC_HASH = "f14a9eaacf1214e8d697288ebed1047b723ef3de75fd222aafa19b400e6b43df"
 
 
 def _source(name: str) -> str:
@@ -106,7 +106,7 @@ def test_source_map_points_at_the_exact_scalar_and_key() -> None:
 def test_missing_pointer_falls_back_to_the_nearest_parent_range() -> None:
     parsed = _codec().parse(_source("quality_momentum.yaml"), format=SourceFormat.YAML)
 
-    assert parsed.locate("/data/end_date") == parsed.value_ranges["/data"]
+    assert parsed.locate("/risk/max_name_wieght") == parsed.value_ranges["/risk"]
     assert (
         parsed.locate("/factors/0/graph/nodes/9/kind")
         == parsed.value_ranges["/factors/0/graph/nodes"]

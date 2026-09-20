@@ -12,7 +12,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.backtest.facade.environment import (
-    environment_from_legacy_spec,
+    RunEnvironment,
     environment_hash,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -39,7 +39,7 @@ def _fingerprint(spec: BacktestRunSpec) -> str:
 
 def test_fingerprint_ignores_how_the_strategy_was_referenced() -> None:
     strategy = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
     legacy = BacktestRunSpec(strategy=strategy)
     saved = replace(
@@ -56,9 +56,11 @@ def test_fingerprint_ignores_how_the_strategy_was_referenced() -> None:
 def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:
     created = datetime(2026, 9, 3, tzinfo=UTC)
     strategy = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
-    environment = environment_from_legacy_spec(strategy)
+    environment = RunEnvironment(
+        start=date(2021, 1, 1), end=date(2026, 8, 31), universe_id="krx.common-stock"
+    )
     return RunManifest(
         run_id="run-001",
         created_at=created,
@@ -79,7 +81,7 @@ def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:
         environment=environment,
         environment_hash=environment_hash(environment),
         strategy_provenance=StrategyProvenance(
-            StrategySourceKind.SAVED_REVISION, spec_hash, "1.1", "s1", 3, "b" * 64
+            StrategySourceKind.SAVED_REVISION, spec_hash, "1.2", "s1", 3, "b" * 64
         ),
     )
 

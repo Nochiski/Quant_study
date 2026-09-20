@@ -10,19 +10,24 @@ from strategy_workbench.domain.strategy._hydrate import (
 from strategy_workbench.domain.strategy._source import SourceFormat, source_hash_of
 from strategy_workbench.domain.strategy._upgrade import (
     LEGACY_SCHEMA_VERSION,
+    LEGACY_UPGRADE_TARGET_VERSION,
     REMOVED_FIELDS,
+    RETIRED_EXECUTION_SECTIONS,
     UPGRADE_STEPS,
     NotALegacyDocumentError,
     apply_upgrade_steps,
     is_frozen_schema_version,
     is_legacy_document,
+    strip_retired_execution_settings,
     upgrade_document_1_0,
 )
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
     "LEGACY_SCHEMA_VERSION",
+    "LEGACY_UPGRADE_TARGET_VERSION",
     "REMOVED_FIELDS",
+    "RETIRED_EXECUTION_SECTIONS",
     "SUPPORTED_SCHEMA_VERSIONS",
     "UPGRADE_STEPS",
     "NotALegacyDocumentError",
@@ -36,5 +41,6 @@ __all__ = [
     "is_frozen_schema_version",
     "is_legacy_document",
     "source_hash_of",
+    "strip_retired_execution_settings",
     "upgrade_document_1_0",
 ]

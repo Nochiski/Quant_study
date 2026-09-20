@@ -22,7 +22,6 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import replace
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +44,7 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_docum
 
 # 같은 의미의 YAML/JSON/legacy JSON fixture가 공유하는 canonical hash.
 # 재생성: strategy_spec_hash(hydrate_authoring_document(yaml.safe_load(quality_momentum.yaml)))
-QUALITY_MOMENTUM_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
+QUALITY_MOMENTUM_SPEC_HASH = "f14a9eaacf1214e8d697288ebed1047b723ef3de75fd222aafa19b400e6b43df"
 # hash 알고리즘 golden. 모델 모양과 무관하게 canonical 직렬화 규칙(sort_keys·최소 separator·
 # allow_nan=False·sha256)만 고정한다. payload는 2026-09-04 schema 1.0 fixture의 canonical payload를
 # literal 파일로 옮긴 것이라 모델이 1.1로 바뀌어도 값이 변하지 않는다. 값이 바뀌면 알고리즘이 바뀐
@@ -95,7 +94,6 @@ def test_verbose_yaml_example_hydrates_to_strategy_spec() -> None:
 
     assert spec.identity == DRAFT_IDENTITY
     assert spec.title == "퀄리티 모멘텀"
-    assert spec.data.start == date(2021, 1, 1)
     assert spec.risk.max_name_weight == 0.05
     assert spec.factors[0].graph.output_node_id == "mom_252"
     assert strategy_spec_hash(spec) == QUALITY_MOMENTUM_SPEC_HASH
@@ -122,8 +120,7 @@ def test_same_meaning_sources_share_one_spec_hash(name: str) -> None:
 
 def test_int_and_float_literals_hydrate_to_the_same_spec() -> None:
     document = _load_json("quality_momentum.json")
-    assert document["execution"]["fee_bps"] == 15  # fixture는 일부러 int로 적는다.
-    document["factors"][0]["weight"] = 1
+    document["factors"][0]["weight"] = 1  # fixture는 일부러 int로 적는다.
     variant = dict(document)
     variant["factors"] = json.loads(json.dumps(document["factors"]))
     variant["factors"][0]["weight"] = 1.0
@@ -159,7 +156,6 @@ def test_minimal_document_hydrates_to_the_same_hash() -> None:
     minimal_document = _load_yaml("quality_momentum.minimal.yaml")
     for key in ("description", "eligibility", "parameters"):
         assert key not in minimal_document
-    assert "market" not in minimal_document["data"]
     minimal = hydrate_authoring_document(minimal_document)
 
     assert strategy_spec_hash(minimal) == strategy_spec_hash(verbose) == QUALITY_MOMENTUM_SPEC_HASH
@@ -210,7 +206,7 @@ def test_syntax_invalid_yaml_never_becomes_a_spec() -> None:
 
 def test_structurally_invalid_document_fails_closed() -> None:
     document = _load_yaml("quality_momentum.yaml")
-    del document["data"]["start"]
+    del document["title"]
 
     with pytest.raises(StructuralError, match="structure.missing_field"):
         hydrate_authoring_document(document)

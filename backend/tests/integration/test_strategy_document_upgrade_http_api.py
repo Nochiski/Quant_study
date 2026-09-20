@@ -31,20 +31,23 @@ def test_upgrade_returns_rewritten_source_and_its_compile_outcome() -> None:
     body = response.json()
     assert body["format"] == "yaml"
     assert body["source"] == _read("quality_momentum.v1_1.commented.yaml")
-    assert body["compiled"]["spec_hash"] and body["compiled"]["diagnostics"] == []
     assert body["compiled"]["schema_version"] == "1.1"
     assert body["source_hash"] == body["compiled"]["source_hash"]
 
-    # 돌려준 원문은 그대로 저장 가능한 1.1 문서다
+    # 현재 버전은 1.2 인데 이 엔드포인트는 아직 1.1 까지만 올린다 — 1.1 → 1.2 step 과 응답의
+    # `environment` 는 P2-09 다(spec D7). 그래서 돌려준 원문은 아직 저장할 수 없고, 진단이
+    # 은퇴 버전을 지목한다. 이 단언이 바뀌는 시점이 P2-09 다(WORKFLOW P2-03 제약사항).
+    assert body["compiled"]["spec_hash"] is None
+    assert [item["code"] for item in body["compiled"]["diagnostics"]] == [
+        "structure.unsupported_schema_version"
+    ]
     saved = client.post(
         "/api/v1/strategy-documents", json={"source": body["source"], "format": "yaml"}
     )
-    assert saved.status_code == 201, saved.text
-    assert saved.json()["spec_hash"] == body["compiled"]["spec_hash"]
-    assert saved.json()["requires_upgrade"] is False
+    assert saved.status_code == 422, saved.text
 
 
-def test_upgrade_of_a_1_1_document_is_422_not_upgradeable() -> None:
+def test_upgrade_of_a_current_version_document_is_422_not_upgradeable() -> None:
     client = TestClient(build_http_app())
 
     response = client.post(
@@ -55,7 +58,7 @@ def test_upgrade_of_a_1_1_document_is_422_not_upgradeable() -> None:
     assert response.status_code == 422, response.text
     detail = response.json()["detail"]
     assert detail["code"] == "strategy_document.not_upgradeable"
-    assert detail["schema_version"] == "1.1"
+    assert detail["schema_version"] == "1.2"
     TypeAdapter(StrategyDocumentUpgrade422Response).validate_python(response.json())
 
 
@@ -87,7 +90,8 @@ def test_upgrade_json_source_keeps_json_format() -> None:
     assert body["format"] == "json"
     assert '"schema_version": "1.1"' in body["source"]
     assert '"factors": [' in body["source"]
-    assert body["compiled"]["spec_hash"]
+    # 1.1 은 은퇴 버전이라 결과가 아직 컴파일되지 않는다(P2-09 까지의 중간 상태).
+    assert body["compiled"]["spec_hash"] is None
 
 
 def test_openapi_declares_the_upgrade_operation_and_its_422_union() -> None:

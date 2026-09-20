@@ -13,6 +13,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.portfolio.facade.construction import (
     ExclusionReason,
     FactorContributionStatus,
@@ -38,11 +39,17 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from strategy_workbench.domain.strategy.facade.validation import validate_strategy
 
 
+def _environment() -> RunEnvironment:
+    """체결 시점은 1.2 부터 실행 설정의 사실이라 tape 컴파일이 인자로 받는다(P2-03)."""
+    return RunEnvironment(
+        start=date(2026, 1, 1), end=date(2026, 12, 31), universe_id="krx.common-stock"
+    )
+
+
 def _spec():
     template = StrategyDesignService(
         InMemoryStrategyRepository(),
         new_id=lambda: "unused",
-        today=lambda: date(2026, 9, 3),
     ).template()
     return replace(
         template,
@@ -89,6 +96,7 @@ def _compile(spec, observations, sessions=None):
     signal_day = observations[0].as_of if observations else date(2026, 1, 2)
     return compile_target_tape(
         spec,
+        environment=_environment(),
         data_snapshot_id="snapshot-1",
         sessions=sessions or (signal_day, signal_day + timedelta(days=1)),
         observations=tuple(observations),
@@ -109,6 +117,7 @@ def test_preflight_and_target_tape_share_the_compiler_owned_schedule(monkeypatch
     monkeypatch.setattr(compiler_module, "_rebalance_pairs", fail_if_recomputed)
     tape = compile_target_tape(
         spec,
+        environment=_environment(),
         data_snapshot_id="snapshot-1",
         sessions=sessions,
         observations=(_observation(sessions[0], "a", 1.0),),
@@ -347,6 +356,7 @@ def test_target_tape_hash_is_immutable_and_snapshot_sensitive() -> None:
     second = _compile(spec, observations)
     different_snapshot = compile_target_tape(
         spec,
+        environment=_environment(),
         data_snapshot_id="snapshot-2",
         sessions=(day, day + timedelta(days=1)),
         observations=observations,
@@ -393,9 +403,10 @@ def test_construction_trace_is_out_of_band_and_contributions_sum_to_the_same_sco
         "observations": observations,
     }
 
-    plain = compile_target_tape(spec, **kwargs)
+    plain = compile_target_tape(spec, environment=_environment(), **kwargs)
     traced = compile_target_tape_with_trace(
         spec,
+        environment=_environment(),
         **kwargs,
         trace_selection=PortfolioTraceSelection(day, ("a", "b")),
     )
@@ -428,6 +439,7 @@ def test_omitted_construction_trace_date_uses_the_schedule_latest_signal() -> No
 
     result = compile_target_tape_with_trace(
         spec,
+        environment=_environment(),
         data_snapshot_id="snapshot-1",
         sessions=sessions,
         observations=observations,
@@ -467,6 +479,7 @@ def test_construction_trace_explains_missing_future_removed_and_explicit_order_d
 
     result = compile_target_tape_with_trace(
         spec,
+        environment=_environment(),
         data_snapshot_id="snapshot-1",
         sessions=(day, day + timedelta(days=1)),
         observations=observations,
@@ -562,6 +575,7 @@ def test_target_tape_cancellation_reaches_canonical_materialization_and_hash(
     with pytest.raises(RuntimeError, match=f"cancelled during {stage}"):
         compile_target_tape(
             spec,
+            environment=_environment(),
             data_snapshot_id="snapshot-1",
             sessions=(day, day + timedelta(days=1)),
             observations=(_observation(day, "a", 1.0),),

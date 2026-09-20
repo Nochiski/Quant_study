@@ -9,10 +9,18 @@ from strategy_workbench.application.strategy_design.facade.ports import PageRequ
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 
+def _environment() -> dict[str, Any]:
+    """실행 설정은 1.2 부터 요청 본문이 싣는다(P2-03).
+
+    템플릿 기본 리밸런싱이 월간이라 구간이 한 달을 넘어야 tape 에 프레임이 생긴다.
+    """
+    return {"start": "2025-01-02", "end": "2026-01-16", "universe_id": "krx.common-stock"}
+
+
 def _saved_document(client: TestClient) -> dict[str, Any]:
     template = client.get("/api/v1/strategies/template").json()
     template.pop("identity")
-    template["schema_version"] = "1.1"
+    template["schema_version"] = "1.2"
     response = client.post(
         "/api/v1/strategy-documents",
         json={
@@ -35,7 +43,11 @@ def test_backtest_history_is_newest_first_paginated_and_filterable() -> None:
     }
     saved = client.post(
         "/api/v1/backtests",
-        json={"strategy_source": saved_source, "core": "python"},
+        json={
+            "strategy_source": saved_source,
+            "core": "python",
+            "environment": _environment(),
+        },
     )
     inline_source_hash = "ab" * 32
     inline = client.post(
@@ -47,6 +59,7 @@ def test_backtest_history_is_newest_first_paginated_and_filterable() -> None:
                 "source_hash": inline_source_hash,
             },
             "core": "python",
+            "environment": _environment(),
         },
     )
     assert saved.status_code == inline.status_code == 202
@@ -63,7 +76,7 @@ def test_backtest_history_is_newest_first_paginated_and_filterable() -> None:
     assert payload["items"][0]["strategy_provenance"] == {
         "kind": "inline_draft",
         "spec_hash": document["spec_hash"],
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "strategy_id": None,
         "revision": None,
         "source_hash": inline_source_hash,
@@ -71,7 +84,7 @@ def test_backtest_history_is_newest_first_paginated_and_filterable() -> None:
     assert payload["items"][1]["strategy_provenance"] == {
         "kind": "saved_revision",
         "spec_hash": document["spec_hash"],
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "strategy_id": document["strategy_id"],
         "revision": document["revision"],
         "source_hash": document["source_hash"],
@@ -91,9 +104,7 @@ def test_backtest_history_is_newest_first_paginated_and_filterable() -> None:
     assert filtered.status_code == 200
     assert filtered.json()["total"] == 1
     assert filtered.json()["items"][0]["run"]["run_id"] == saved.json()["run"]["run_id"]
-    assert client.get(
-        "/api/v1/backtests", params={"strategy_id": "missing"}
-    ).json()["items"] == []
+    assert client.get("/api/v1/backtests", params={"strategy_id": "missing"}).json()["items"] == []
 
 
 def test_backtest_history_uses_shared_page_bounds_and_rejected_runs_do_not_appear() -> None:

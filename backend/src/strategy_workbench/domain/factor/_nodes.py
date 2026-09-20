@@ -14,8 +14,9 @@ REFERENCE_NODE = {"reference": "node"}
 REFERENCE_PARAMETER = {"reference": "parameter"}
 # The array that declares a namespace; its items carry the `<namespace>_id` definition.
 DEFINES_NODE = {"defines": "node"}
-# 1.2 에서 사라지는 1.1 호환 필드. 런타임 스키마가 `x-deprecated` 로 표시해 편집 화면
-# 어휘에서 뺄 수 있게 한다(P2-02).
+# 다음 schema 버전에서 사라지는 호환 전용 필드의 마커. 런타임 스키마가 `x-deprecated` 로
+# 표시해 편집 화면 어휘에서 뺄 수 있게 한다(P2-02의 `graph.missing_policy`가 첫 사용자였고
+# 1.2가 그 필드를 지웠다 — 표기 자체는 published contract 라 다음 호환 필드를 위해 남긴다).
 DEPRECATED_FIELD = {"deprecated": True}
 
 
@@ -203,11 +204,6 @@ ExpressionNode: TypeAlias = (
 class FactorGraph:
     nodes: tuple[ExpressionNode, ...] = field(metadata=DEFINES_NODE)
     output_node_id: str = field(metadata=REFERENCE_NODE)
-    # 결측 정책은 P2-02 에서 실행 설정(`RunEnvironment.missing`)으로 옮겼다. 평가도 플랜도
-    # 이 값을 읽지 않는다 — 1.1 문서에서 실행 설정을 만들 때 브리지
-    # (`environment_from_legacy_spec`)만 읽는 legacy 입력이고, 1.2 문서에서는 사라진다
-    # (P2-03·P2-09). 새 코드는 `missing` 인자를 넘겨라.
-    missing_policy: MissingPolicy = field(default=MissingPolicy.DROP, metadata=DEPRECATED_FIELD)
 
 
 def _kind_of(node_type: type) -> str:

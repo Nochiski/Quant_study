@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import fields as dataclass_fields
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -36,9 +35,7 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_docum
 
 
 def _template_document() -> dict[str, Any]:
-    spec = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
-    ).template()
+    spec = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template()
     return json.loads(json.dumps(canonical_strategy_payload(spec), default=str))
 
 
@@ -185,14 +182,13 @@ def test_factor_label_is_optional_and_derived_from_factor_id() -> None:
 
 
 def test_minimal_document_passes_the_runtime_schema() -> None:
-    """schema 1.1 S3: hydrate가 받아 주는 생략형 문서를 runtime schema도 통과시킨다."""
+    """schema 1.2 S3: hydrate가 받아 주는 생략형 문서를 runtime schema도 통과시킨다."""
     schema = strategy_document_schema()
     minimal = yaml.safe_load(
         (FIXTURES / "quality_momentum.minimal.yaml").read_text(encoding="utf-8")
     )
     for key in ("description", "eligibility", "parameters"):
         assert key not in minimal
-    assert "market" not in minimal["data"]
     _check(schema, schema, minimal, "")
     without_label = json.loads(json.dumps(minimal))
     del without_label["factors"][0]["label"]
@@ -244,17 +240,18 @@ def test_schema_properties_are_exactly_the_model_fields_and_nothing_is_hand_writ
     schema = strategy_document_schema()
     model_fields = [f.name for f in dataclass_fields(StrategySpec) if f.name != "identity"]
     assert list(schema["properties"]) == ["schema_version", *model_fields]
-    assert schema["properties"]["schema_version"] == {"type": "string", "const": "1.1"}
+    assert schema["properties"]["schema_version"] == {"type": "string", "const": "1.2"}
     assert schema["required"][0] == "schema_version"
     assert schema["additionalProperties"] is False
-    data = schema["$defs"]["DataStep"]
-    assert data["properties"]["start"] == {
+    # 1.2 최상위 필수 키는 `schema_version`·`title` 둘뿐이다(spec D3).
+    assert schema["required"] == ["schema_version", "title"]
+    portfolio = schema["$defs"]["PortfolioStep"]
+    assert portfolio["properties"]["side"] == {
         "type": "string",
-        "format": "date",
-        "pattern": r"^\d{4}-\d{2}-\d{2}$",
+        "enum": ["long_only", "long_short"],
+        "default": "long_only",
     }
-    assert data["properties"]["market"] == {"type": "string", "enum": ["KRX"], "default": "KRX"}
-    assert data["required"] == ["start", "end", "universe_id"]
+    assert portfolio["required"] == []
 
 
 def test_schema_hash_is_stable_and_order_independent() -> None:
@@ -267,7 +264,7 @@ def test_schema_hash_is_stable_and_order_independent() -> None:
 
 def test_field_contracts_cover_every_scalar_path_with_catalog_metadata() -> None:
     contracts = {c.pointer: c for c in strategy_field_contracts()}
-    assert contracts["/schema_version"].const == "1.1"
+    assert contracts["/schema_version"].const == "1.2"
     weight = contracts["/factors/*/weight"]
     assert weight.type == "number" and not weight.required and weight.has_default
     name_weight = contracts["/risk/max_name_weight"]
@@ -344,7 +341,6 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
     schema = strategy_document_schema()
     catalogs, references, unmarked = _identifier_markers(schema)
     assert catalogs == {
-        "#/$defs/DataStep/universe_id": "universe",
         "#/$defs/EligibilityRule/field_id": "equity-field",
         "#/$defs/FieldNode/field_id": "equity-field",
         "#/$defs/GroupNode/group_field_id": "equity-field",
@@ -418,15 +414,18 @@ def test_runtime_schema_fixture_is_current() -> None:
     )
 
 
-def test_deprecated_compat_field_is_marked_in_schema_and_contract() -> None:
-    """P2-02: `graph.missing_policy` 는 1.1 문서에서 여전히 유효하지만 화면 어휘에서 뺄 수 있다."""
-    schema = strategy_document_schema()
-    prop = schema["$defs"]["FactorGraph"]["properties"]["missing_policy"]
-    contracts = {row.pointer: row for row in strategy_field_contracts()}
-    row = contracts["/factors/*/graph/missing_policy"]
+def test_execution_settings_left_the_authoring_schema() -> None:
+    """P2-03: 실행 설정 세 자리는 1.2 문서 스키마에서 사라졌다(spec D3 S1~S3).
 
-    assert prop["x-deprecated"] is True
-    assert prop["default"] == "drop"  # 여전히 유효한 입력이다
-    assert row.deprecated is True
-    # 표시가 이 한 필드에만 붙어 있는지: 다른 행이 딸려 오면 편집기가 멀쩡한 필드를 감춘다.
-    assert [r.pointer for r in strategy_field_contracts() if r.deprecated] == [row.pointer]
+    스키마에 남아 있으면 편집 화면이 값을 받아 주고, hydrate 는 `structure.unknown_key` 로
+    거부한다 — 화면과 서버가 서로 다른 문법을 말하게 된다.
+    """
+    schema = strategy_document_schema()
+    pointers = {row.pointer for row in strategy_field_contracts()}
+
+    assert "data" not in schema["properties"] and "execution" not in schema["properties"]
+    assert "DataStep" not in schema["$defs"] and "ExecutionStep" not in schema["$defs"]
+    assert "missing_policy" not in schema["$defs"]["FactorGraph"]["properties"]
+    assert not [pointer for pointer in pointers if pointer.startswith(("/data/", "/execution/"))]
+    # `x-deprecated` 표기 자체는 published contract 로 남는다(다음 호환 필드용).
+    assert [row.pointer for row in strategy_field_contracts() if row.deprecated] == []

@@ -16,20 +16,15 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
 from strategy_workbench.domain.strategy.facade.constraints import (
+    AppliedStage,
+    ContractUnit,
     ScalarConstraint,
-    scalar_constraint_index,
 )
 from strategy_workbench.domain.strategy.facade.provenance import (
     StrategyProvenance,
     StrategySource,
 )
-from strategy_workbench.domain.strategy.facade.specification import (
-    CATALOG_UNIVERSE,
-    DataFrequency,
-    ExecutionTiming,
-    Market,
-    StrategySpec,
-)
+from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 
 
 class ExecutionCore(StrEnum):
@@ -51,39 +46,74 @@ class WarningSeverity(StrEnum):
     WARNING = "warning"
 
 
-# 실행 설정 수치 필드의 범위는 전략 제약 카탈로그(`domain/strategy/_constraints.py`)의
-# `/execution/*` 행이 이미 SoT 다. 값을 여기에 다시 적지 않고 필드 이름으로만 다시 건다 —
-# 같은 수치를 두 곳에 두면 한쪽이 조용히 stale 된다. `__post_init__` 검증과 런타임 스키마의
-# `minimum`/`maximum` 이 같은 행을 읽는다. P2-03 이 `execution` 섹션을 지울 때 이 행들의 최종
-# owner 를 `domain/backtest` 로 옮긴다.
-NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = (
-    "participation_rate",
-    "fee_bps",
-    "slippage_bps",
-)
+# 유니버스 식별자의 편집기 카탈로그 마커. 1.1 까지는 `DataStep.universe_id` 와 공유해서
+# `domain/strategy` 가 갖고 있었지만, 1.2 에서 유니버스는 전략 문서가 아니라 실행 설정의
+# 사실이므로 owner 가 여기로 왔다(P2-03).
+CATALOG_UNIVERSE = {"catalog": "universe"}
 
 
-def _execution_constraint_rows(names: tuple[str, ...]) -> dict[str, ScalarConstraint]:
-    """전략 제약 카탈로그의 `/execution/<name>` 행을 실행 설정 필드 이름으로 다시 건다.
-
-    카탈로그에서 포인터 이름이 바뀌면 이 모듈은 import 시점에 죽는다 — 실패 지점이 테스트가
-    아니라 부팅이다. bare `KeyError: '/execution/fee_bps'` 로 떨어지면 무엇이 왜 사라졌는지
-    알 수 없으므로, 없어진 포인터와 현재 카탈로그를 메시지에 싣는다.
-    """
-    catalog = scalar_constraint_index()
-    wanted = {name: f"/execution/{name}" for name in names}
-    missing = sorted(pointer for pointer in wanted.values() if pointer not in catalog)
-    if missing:
-        raise LookupError(
-            "run environment references strategy constraint rows that no longer exist — "
-            f"missing={missing} fields={list(names)} available={sorted(catalog)}"
-        )
-    return {name: catalog[pointer] for name, pointer in wanted.items()}
+class Market(StrEnum):
+    KRX = "KRX"
 
 
-RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = _execution_constraint_rows(
-    NUMERIC_ENVIRONMENT_FIELDS
-)
+class DataFrequency(StrEnum):
+    DAILY = "daily"
+
+
+class ExecutionTiming(StrEnum):
+    NEXT_OPEN = "next_open"
+
+
+# 실행 설정 수치 필드의 범위·단위·설명 키. 1.1 까지는 전략 제약 카탈로그의 `/execution/*` 행이
+# SoT 였고 여기서 필드 이름으로 다시 걸어 썼지만, 1.2 가 `execution` 섹션을 지우면서 그 행들이
+# 전략 문서 포인터를 잃었다. 그래서 owner 를 실행 설정이 있는 이 노드로 옮긴다(P2-03 결정 항목).
+# 포인터는 실행 설정 문서 기준(`/fee_bps` …)이고, `__post_init__` 검증과 런타임 스키마의
+# `minimum`/`maximum` 이 같은 행을 읽는다 — 수치를 두 곳에 적지 않는다.
+#
+# `code` 는 `strategy.*` 진단 레지스트리 밖의 `run_environment.*` 어휘다. 실행 설정 값은 전략
+# 문서 검증이 아니라 요청 검증에서 걸리므로 validator 코드 소유 규칙(`SEMANTIC_ONLY_CODES`)과
+# 섞이면 안 된다.
+RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
+    "participation_rate": ScalarConstraint(
+        pointer="/participation_rate",
+        code="run_environment.participation",
+        stage=AppliedStage.EXECUTION,
+        unit=ContractUnit.RATIO,
+        display_unit="%",
+        minimum=0.0,
+        exclusive_minimum=True,
+        maximum=1.0,
+        example=0.1,
+        description_key="run_environment.contract.participation_rate",
+        message="참여율은 0보다 크고 1 이하여야 합니다.",
+    ),
+    "fee_bps": ScalarConstraint(
+        pointer="/fee_bps",
+        code="run_environment.cost",
+        stage=AppliedStage.EXECUTION,
+        unit=ContractUnit.BASIS_POINTS,
+        display_unit="bp",
+        minimum=0.0,
+        example=15.0,
+        description_key="run_environment.contract.fee_bps",
+        message="수수료는 0 이상의 숫자여야 합니다.",
+    ),
+    "slippage_bps": ScalarConstraint(
+        pointer="/slippage_bps",
+        code="run_environment.cost",
+        stage=AppliedStage.EXECUTION,
+        unit=ContractUnit.BASIS_POINTS,
+        display_unit="bp",
+        minimum=0.0,
+        example=10.0,
+        description_key="run_environment.contract.slippage_bps",
+        message="슬리피지는 0 이상의 숫자여야 합니다.",
+    ),
+}
+
+# canonical JSON 이 `15` 와 `15.0` 으로 갈리지 않게 float 으로 정규화할 필드. 제약 행과 같은
+# 집합이므로 이름을 다시 적지 않는다.
+NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = tuple(RUN_ENVIRONMENT_CONSTRAINTS)
 
 
 def _describe_bound(constraint: ScalarConstraint) -> str:
@@ -104,10 +134,10 @@ class RunEnvironment:
     돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도
     전략 revision 이 늘지 않는다.
 
-    enum 은 현재 소유 위치(`domain.strategy` 의 `Market`·`DataFrequency`·`ExecutionTiming`,
-    `domain.factor` 의 `MissingPolicy`)를 그대로 읽는다. 물리 이동은 `DataStep`·`ExecutionStep`
-    이 사라지는 P2-03 이다 — 지금 옮기면 `domain.strategy` 가 재수출해야 하고 의존 화살표가
-    순환한다.
+    `Market`·`DataFrequency`·`ExecutionTiming` 은 `DataStep`·`ExecutionStep` 이 사라진 P2-03
+    에서 이 모듈로 옮겨 왔다. `domain/strategy` 는 이 enum 을 더 이상 공개하지 않는다 —
+    호환 재수출을 두면 `domain.strategy → domain.backtest` 화살표가 생겨 기존 반대 방향과
+    순환이 된다. `MissingPolicy` 는 `domain.factor` 가 계속 소유한다.
     """
 
     market: Market = Market.KRX
@@ -173,8 +203,9 @@ class BacktestRunSpec:
 
     strategy: StrategySpec | None = None
     strategy_source: StrategySource | None = None
-    # 실행 설정. 없으면 서비스가 1.1 문서에서 브리지로 만든다(P2-01). 주어지면 문서의
-    # `data`·`execution` 보다 우선한다. P2-03 에서 필수가 된다.
+    # 실행 설정(1.2 부터 필수). 타입은 optional 로 남긴다 — 요청 본문에서 빠졌을 때
+    # pydantic 의 타입 오류가 아니라 코드화된 진단(`backtest_run.environment_required`)으로
+    # 거절해야 프론트가 번역할 코드를 얻는다. 해소는 `require_environment` 하나가 한다.
     environment: RunEnvironment | None = None
     core: ExecutionCore = ExecutionCore.RUST
     initial_cash: float = 100_000_000.0
@@ -242,9 +273,9 @@ class RunManifest:
                 f"strategy_id={self.strategy_provenance.strategy_id} "
                 f"revision={self.strategy_provenance.revision}"
             )
-        # 비용·참여율은 `environment` 가 owner 다. 평면 필드는 1.1 소비자 호환으로 남아 있을
-        # 뿐이라 두 축이 갈리면 리포트가 읽는 축에 따라 같은 run 의 수수료가 달라진다. 평면
-        # 필드 제거는 소비자 정리가 끝나는 P2-03 이다.
+        # 비용·참여율은 `environment` 가 owner 다. 평면 필드는 매니페스트 소비자 호환으로
+        # 남아 있을 뿐이라 두 축이 갈리면 리포트가 읽는 축에 따라 같은 run 의 수수료가
+        # 달라진다. 평면 필드 제거는 소비자(프론트 실행 결과 화면) 정리와 같이 간다.
         divergent = {
             name: (getattr(self, name), getattr(self.environment, name))
             for name in NUMERIC_ENVIRONMENT_FIELDS

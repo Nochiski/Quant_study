@@ -24,7 +24,10 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
-from strategy_workbench.domain.backtest.facade.environment import resolve_environment
+from strategy_workbench.domain.backtest.facade.environment import (
+    MissingRunEnvironmentError,
+    require_environment,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
@@ -96,6 +99,17 @@ def _mask_paths(text: str) -> str:
 
 class InvalidBacktestRunError(ValueError):
     pass
+
+
+class MissingBacktestRunEnvironmentError(InvalidBacktestRunError):
+    """실행 요청에 실행 설정이 없다(spec D3·D6, P2-03).
+
+    `InvalidBacktestRunError` 의 하위 타입으로 두되 HTTP 코드를 따로 준다. 프론트는 이 한
+    코드를 보고 "실행 설정을 채우라"는 화면(P3-02 실행 설정 패널)으로 보내야 하고,
+    `backtest.run.invalid` 에 묻으면 문장 파싱 말고는 구분할 방법이 없다. 하위 타입이므로
+    run 스레드의 방어 분기(`_run`)와 실패 코드 분류는 기존 `backtest.run.invalid` 를 그대로
+    쓴다 — 시작 요청이 앞에서 거르므로 그 경로로는 도달하지 않는다.
+    """
 
 
 class StrategyReferenceNotFoundError(LookupError):
@@ -177,23 +191,25 @@ class BacktestRunService:
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - _resolve always fills it
             raise InvalidBacktestRunError("resolved run spec has no strategy")
-        # preflight 가 스펙 검증(InvalidPortfolioRequestError)·실행 설정 해소·플랜 컴파일까지
-        # 대신한다. 해소 전 `spec.environment` 를 그대로 넘겨 `_prepare` 안의 순서(문서 검증 →
-        # 브리지)를 타게 한다 — 그래야 잘못된 문서가 코드화된 진단으로 거절된다. 팩터별
-        # 결측 정책이 충돌하는 1.1 문서도 여기서 `portfolio.strategy.invalid` 안의
-        # `run_environment.missing_policy_conflict` 로 거절된다(P2-02 리뷰 P2).
+        # 실행 설정을 **preflight 앞에서** 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·
+        # tape·데이터 조회와 preflight 가 모두 같은 객체를 읽어야 명시 `environment` 가 조용히
+        # 무시되지 않는다(P2-01 P0). 1.2 는 문서에서 만드는 대체 경로가 없으므로 해소 단계가
+        # 사라졌고, 그래서 두 호출부가 다른 값을 볼 여지도 없다(P2-03 결정 항목).
+        try:
+            environment = require_environment(
+                spec.environment, requested_by=f"backtest.run({strategy.title!r})"
+            )
+        except MissingRunEnvironmentError as error:
+            raise MissingBacktestRunEnvironmentError(str(error)) from error
+        spec = replace(spec, environment=environment)
+        # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
         engine = self._portfolio_design.preflight(
-            PortfolioPreviewRequest(strategy, environment=spec.environment)
+            PortfolioPreviewRequest(strategy, environment=environment)
         )
         if not engine.compatible:
             raise InvalidBacktestRunError(
                 "strategy exceeds engine capabilities — " + _describe_engine_issues(engine)
             )
-        # 실행 설정을 여기서 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·tape·데이터 조회가
-        # 모두 같은 값을 읽어야 명시 `environment` 가 조용히 무시되지 않는다(P2-01).
-        # preflight 가 이미 같은 해소를 통과시켰으므로 여기서는 예외가 남지 않는다.
-        environment = resolve_environment(strategy, spec.environment)
-        spec = replace(spec, environment=environment)
         for window in spec.metric_windows:
             if window.start < environment.start or window.end > environment.end:
                 raise InvalidBacktestRunError(
@@ -419,7 +435,7 @@ class BacktestRunService:
             raise InvalidBacktestRunError("resolved run spec has no strategy")
         environment = spec.environment
         if environment is None:  # pragma: no cover - start() pins it before the thread starts
-            raise InvalidBacktestRunError(
+            raise MissingBacktestRunEnvironmentError(
                 f"resolved run spec has no run environment — run_id={run_id}"
             )
         try:

@@ -32,6 +32,8 @@ class ContractUnit(StrEnum):
 
 
 class AppliedStage(StrEnum):
+    # `DATA`·`EXECUTION` 은 실행 설정(`domain/backtest`)이 자기 제약 행에 붙이는 단계다.
+    # 전략 문서에는 1.2 부터 해당 행이 없다.
     DATA = "data"
     ELIGIBILITY = "eligibility"
     SIGNAL = "signal"
@@ -318,41 +320,6 @@ STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
         description_key="strategy.contract.risk.max_sector_weight",
         message="섹터 한도는 0보다 크고 1 이하여야 합니다.",
     ),
-    ScalarConstraint(
-        pointer="/execution/participation_rate",
-        code="strategy.execution.participation",
-        stage=AppliedStage.EXECUTION,
-        unit=ContractUnit.RATIO,
-        display_unit="%",
-        minimum=0.0,
-        exclusive_minimum=True,
-        maximum=1.0,
-        example=0.1,
-        description_key="strategy.contract.execution.participation_rate",
-        message="참여율은 0보다 크고 1 이하여야 합니다.",
-    ),
-    ScalarConstraint(
-        pointer="/execution/fee_bps",
-        code="strategy.execution.cost",
-        stage=AppliedStage.EXECUTION,
-        unit=ContractUnit.BASIS_POINTS,
-        display_unit="bp",
-        minimum=0.0,
-        example=15.0,
-        description_key="strategy.contract.execution.fee_bps",
-        message="수수료는 0 이상의 숫자여야 합니다.",
-    ),
-    ScalarConstraint(
-        pointer="/execution/slippage_bps",
-        code="strategy.execution.cost",
-        stage=AppliedStage.EXECUTION,
-        unit=ContractUnit.BASIS_POINTS,
-        display_unit="bp",
-        minimum=0.0,
-        example=10.0,
-        description_key="strategy.contract.execution.slippage_bps",
-        message="슬리피지는 0 이상의 숫자여야 합니다.",
-    ),
 )
 
 # Validation codes that are cross-field, graph or parameter rules: owned by the validator only.
@@ -361,8 +328,6 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.schema_version.unsupported",
         "strategy.field.inapplicable",
         "strategy.title.empty",
-        "strategy.data.date_order",
-        "strategy.data.universe_empty",
         "strategy.factor.required",
         "strategy.factor.duplicate",
         "strategy.portfolio.liquidity_field",

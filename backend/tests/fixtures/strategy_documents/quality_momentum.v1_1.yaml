@@ -1,9 +1,15 @@
-# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).
+# 보존된 schema 1.1 원본 (P2-03 이전의 `quality_momentum.yaml`).
+# 1.1 → 1.2 업그레이드(P2-09)의 입력이고, 그때까지는 은퇴 버전 입력 거절의 fixture다.
 # identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.
-# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 아니라 요청의 environment가 소유한다.
-schema_version: "1.2"
+schema_version: "1.1"
 title: "퀄리티 모멘텀"
 description: ""
+data:
+  market: KRX
+  start: "2021-01-01"
+  end: "2026-08-31"
+  universe_id: krx.common-stock
+  frequency: daily
 eligibility:
   rules: []
 factors:
@@ -22,9 +28,13 @@ factors:
           input_node_id: close
           window: 252
       output_node_id: mom_252
+      missing_policy: drop
 portfolio:
   selection_count: 20
   rebalance: monthly
 risk:
   max_name_weight: 0.05
+execution:
+  timing: next_open
+  fee_bps: 15.0
 parameters: []

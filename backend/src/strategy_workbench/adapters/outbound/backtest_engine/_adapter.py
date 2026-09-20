@@ -41,7 +41,10 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     compute_analytics,
     unavailable_metric_values,
 )
-from strategy_workbench.domain.backtest.facade.environment import environment_hash
+from strategy_workbench.domain.backtest.facade.environment import (
+    RunEnvironment,
+    environment_hash,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestSeries,
@@ -140,14 +143,15 @@ class TargetTapeStrategy(DeclarativeTapeStrategy):
         tape: TargetTape,
         portfolio_bridge: BacktestEnginePortfolioAdapter,
         *,
-        max_participation: float,
+        environment: RunEnvironment,
     ) -> None:
         self._spec = spec
+        self._environment = environment
         self._bridge = portfolio_bridge
         self._frames: dict[date, TapeFrame] = {
             frame.signal_as_of: TapeFrame(
                 action=portfolio_bridge.to_target_action(
-                    frame, max_participation=max_participation
+                    frame, max_participation=environment.participation_rate
                 ),
                 reason=f"target_tape:{frame.signal_as_of.isoformat()}",
             )
@@ -155,7 +159,7 @@ class TargetTapeStrategy(DeclarativeTapeStrategy):
         }
 
     def requirements(self) -> StrategyRequirements:
-        return self._bridge.requirements(self._spec)
+        return self._bridge.requirements(self._spec, self._environment)
 
     def tape_frames(self) -> Mapping[date, TapeFrame]:
         return self._frames
@@ -233,7 +237,7 @@ class BacktestEngineExecutorAdapter:
                 strategy,
                 request.target_tape,
                 self._portfolio_bridge,
-                max_participation=environment.participation_rate,
+                environment=environment,
             ),
             _columnar_feed(request.dataset.bars),
             corporate_actions=corporate_actions,

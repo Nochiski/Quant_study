@@ -2,7 +2,7 @@
 
 1.0 row는 immutable trigger로 보호된 이력이다. codec은 dict 업그레이드 변환으로 spec을 만들고,
 무결성은 (a) spec_json 바이트 sha256 == spec_hash, (b) source_text sha256 == source_hash,
-(c) 업그레이드 payload가 1.1로 hydrate, 세 가지로 검증한다. 변조는 전부 fail-closed다.
+(c) 업그레이드 payload가 현재 버전으로 hydrate, 세 가지로 검증한다. 변조는 전부 fail-closed다.
 """
 
 from __future__ import annotations
@@ -91,8 +91,8 @@ def test_tampered_frozen_rows_fail_closed(tmp_path: Path, tamper: str) -> None:
         seed_frozen_rows(path, legacy_row=False, source_hash="f" * 64)
     else:
         broken = spec_json.replace(
-            '"market":"KRX"', '"market":"NYSE"'
-        )  # 1.1 enum 밖 → hydrate 불가
+            '"rebalance":"monthly"', '"rebalance":"never"'
+        )  # 1.2 enum 밖 → hydrate 불가
         assert broken != spec_json
         seed_frozen_rows(
             path, spec_json=broken, spec_hash=hashlib.sha256(broken.encode("utf-8")).hexdigest()
@@ -117,7 +117,7 @@ def test_frozen_records_cannot_be_written(tmp_path: Path) -> None:
             repository.add(clone)
 
 
-def test_document_view_reports_requires_upgrade_and_regenerates_legacy_source_as_1_1(
+def test_document_view_reports_requires_upgrade_and_regenerates_legacy_source_as_current(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "view.sqlite3"
@@ -136,17 +136,17 @@ def test_document_view_reports_requires_upgrade_and_regenerates_legacy_source_as
     compiled = authoring.compile(CompileRequest(document.source, SourceFormat.YAML))
     assert [d.code for d in compiled.diagnostics] == ["structure.unsupported_schema_version"]
 
-    # legacy row: generated source는 1.1 canonical이라 바로 컴파일되고, hash는 저장된 1.0 hash와
-    # 다르다.
+    # legacy row: generated source는 현재 버전 canonical이라 바로 컴파일되고, hash는 저장된 1.0
+    # hash와 다르다.
     assert legacy.requires_upgrade and legacy.generated and legacy.format is SourceFormat.JSON
-    assert '"schema_version": "1.1"' in legacy.source
+    assert '"schema_version": "1.2"' in legacy.source
     recompiled = authoring.compile(CompileRequest(legacy.source, SourceFormat.JSON))
     assert recompiled.spec_hash is not None and recompiled.spec_hash != FROZEN_SPEC_HASH
     assert recompiled.spec_hash == source_spec_hash(legacy.source, SourceFormat.JSON)
 
 
 def test_current_schema_records_keep_the_strict_source_binding(tmp_path: Path) -> None:
-    """동결 완화는 1.0 row에만 적용된다: 1.1 row의 source drift는 여전히 거부된다."""
+    """동결 완화는 은퇴 버전 row에만 적용된다: 현재 버전 row의 source drift는 여전히 거부된다."""
     path = tmp_path / "current.sqlite3"
     seed_frozen_rows(path, document_row=False, legacy_row=False)
     text = (FIXTURES / "quality_momentum.yaml").read_text(encoding="utf-8")
@@ -161,7 +161,7 @@ def test_current_schema_records_keep_the_strict_source_binding(tmp_path: Path) -
             (
                 "cur",
                 1,
-                "1.1",
+                "1.2",
                 canonical_strategy_json(compiled.spec),
                 compiled.spec_hash,
                 "yaml",
@@ -184,7 +184,7 @@ def test_current_schema_records_keep_the_strict_source_binding(tmp_path: Path) -
 def test_frozen_row_source_text_is_not_rebound_to_the_stored_spec(tmp_path: Path) -> None:
     """의식적으로 포기한 검증을 계약으로 고정한다(spec D2): 1.0 row에서는 "source가 stored spec으로
     컴파일된다"를 재증명할 1.0 모델이 없다. source_hash가 맞는 한 원문이 spec과 무관해도 읽힌다.
-    1.1 row의 같은 변조는 `test_current_schema_records_keep_the_strict_source_binding`이
+    현재 버전 row의 같은 변조는 `test_current_schema_records_keep_the_strict_source_binding`이
     거부한다."""
     path = tmp_path / "rebound.sqlite3"
     seed_frozen_rows(path, document_row=False, legacy_row=False)

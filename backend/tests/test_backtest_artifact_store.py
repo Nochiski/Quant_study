@@ -18,7 +18,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
-    environment_from_legacy_spec,
+    RunEnvironment,
     environment_hash,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -40,9 +40,10 @@ def _result() -> BacktestRunResult:
     strategy = StrategyDesignService(
         InMemoryStrategyRepository(),
         new_id=lambda: "unused",
-        today=lambda: date(2026, 9, 3),
     ).template()
-    environment = environment_from_legacy_spec(strategy)
+    environment = RunEnvironment(
+        start=date(2021, 1, 1), end=date(2026, 8, 31), universe_id="krx.common-stock"
+    )
     run_spec = BacktestRunSpec(strategy, environment=environment)
     return BacktestRunResult(
         manifest=RunManifest(

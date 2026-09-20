@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:strategy-workbench:strategy-document:1.1",
+  "$id": "urn:strategy-workbench:strategy-document:1.2",
   "title": "StrategyDocument",
   "type": "object",
   "properties": {
     "schema_version": {
       "type": "string",
-      "const": "1.1"
+      "const": "1.2"
     },
     "title": {
       "type": "string"
@@ -14,9 +14,6 @@
     "description": {
       "type": "string",
       "default": ""
-    },
-    "data": {
-      "$ref": "#/$defs/DataStep"
     },
     "eligibility": {
       "$ref": "#/$defs/EligibilityStep",
@@ -28,7 +25,8 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/FactorSignal"
-      }
+      },
+      "default": []
     },
     "signal": {
       "$ref": "#/$defs/SignalStep",
@@ -66,15 +64,6 @@
         "risk_field_id": null
       }
     },
-    "execution": {
-      "$ref": "#/$defs/ExecutionStep",
-      "default": {
-        "timing": "next_open",
-        "participation_rate": 0.1,
-        "fee_bps": 15.0,
-        "slippage_bps": 10.0
-      }
-    },
     "parameters": {
       "type": "array",
       "items": {
@@ -99,52 +88,10 @@
   },
   "required": [
     "schema_version",
-    "title",
-    "data",
-    "factors"
+    "title"
   ],
   "additionalProperties": false,
   "$defs": {
-    "DataStep": {
-      "type": "object",
-      "title": "DataStep",
-      "properties": {
-        "market": {
-          "type": "string",
-          "enum": [
-            "KRX"
-          ],
-          "default": "KRX"
-        },
-        "start": {
-          "type": "string",
-          "format": "date",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-        },
-        "end": {
-          "type": "string",
-          "format": "date",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-        },
-        "universe_id": {
-          "type": "string",
-          "x-catalog": "universe"
-        },
-        "frequency": {
-          "type": "string",
-          "enum": [
-            "daily"
-          ],
-          "default": "daily"
-        }
-      },
-      "required": [
-        "start",
-        "end",
-        "universe_id"
-      ],
-      "additionalProperties": false
-    },
     "EligibilityRule": {
       "type": "object",
       "title": "EligibilityRule",
@@ -629,17 +576,6 @@
         "output_node_id": {
           "type": "string",
           "x-reference": "node"
-        },
-        "missing_policy": {
-          "type": "string",
-          "enum": [
-            "drop",
-            "keep",
-            "zero",
-            "cross_sectional_median"
-          ],
-          "default": "drop",
-          "x-deprecated": true
         }
       },
       "required": [
@@ -1024,58 +960,6 @@
             "owned_by_error": null
           },
           "x-catalog": "equity-field"
-        }
-      },
-      "required": [],
-      "additionalProperties": false
-    },
-    "ExecutionStep": {
-      "type": "object",
-      "title": "ExecutionStep",
-      "properties": {
-        "timing": {
-          "type": "string",
-          "enum": [
-            "next_open"
-          ],
-          "default": "next_open"
-        },
-        "participation_rate": {
-          "type": "number",
-          "default": 0.1,
-          "x-unit": "ratio",
-          "x-applied-stage": "execution",
-          "exclusiveMinimum": 0.0,
-          "maximum": 1.0,
-          "x-display-unit": "%",
-          "examples": [
-            0.1
-          ],
-          "x-description-key": "strategy.contract.execution.participation_rate"
-        },
-        "fee_bps": {
-          "type": "number",
-          "default": 15.0,
-          "x-unit": "bps",
-          "x-applied-stage": "execution",
-          "minimum": 0.0,
-          "x-display-unit": "bp",
-          "examples": [
-            15.0
-          ],
-          "x-description-key": "strategy.contract.execution.fee_bps"
-        },
-        "slippage_bps": {
-          "type": "number",
-          "default": 10.0,
-          "x-unit": "bps",
-          "x-applied-stage": "execution",
-          "minimum": 0.0,
-          "x-display-unit": "bp",
-          "examples": [
-            10.0
-          ],
-          "x-description-key": "strategy.contract.execution.slippage_bps"
         }
       },
       "required": [],

@@ -1,8 +1,9 @@
-"""P2-01: optional `environment` 가 preview·trace·run 을 통과하는 경로.
+"""P2-01·P2-03: `environment` 가 preview·trace·run 을 통과하는 경로.
 
-두 가지를 고정한다. (1) 브리지 동등성 — `environment` 를 주지 않은 1.1 요청은 브리지가 만든
-값을 명시한 요청과 같은 결과를 낸다. (2) 우선순위 — 명시한 `environment` 가 문서의
-`data`·`execution` 보다 먼저 읽힌다.
+1.2 부터 실행 설정은 요청만 싣는다(문서 브리지 없음). 그래서 이 파일이 고정하는 것은 두 가지다.
+(1) 요청이 실은 값이 관측 조회·tape·엔진·매니페스트까지 **한 축으로** 내려간다. 한 곳이라도
+문서 값으로 되돌아가면 매니페스트가 실행하지 않은 설정을 기록한다. (2) 실행 설정이 없으면 세
+경로가 같은 코드로 거절한다 — 기본값을 지어내지 않는다.
 
 P2-02 부터 `environment.missing` 도 같은 경로를 탄다: 실행 설정의 결측 정책이 팩터 실행 plan 과
 `plan_hash` 까지 내려간다.
@@ -32,6 +33,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
     InvalidBacktestRunError,
+    MissingBacktestRunEnvironmentError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
     InvalidPortfolioRequestError,
@@ -50,7 +52,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
-    environment_from_legacy_spec,
+    RunEnvironment,
     environment_hash,
 )
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
@@ -63,10 +65,8 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
 from strategy_workbench.domain.strategy.facade.specification import (
-    DataStep,
     FactorDirection,
     FactorSignal,
-    Market,
     RebalanceFrequency,
     StrategySpec,
 )
@@ -77,7 +77,7 @@ WINDOW = (date(2024, 1, 8), date(2024, 1, 12))
 
 def _spec() -> StrategySpec:
     template = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: WINDOW[1]
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
     momentum = FactorSignal(
         factor_id="momentum_3",
@@ -94,9 +94,6 @@ def _spec() -> StrategySpec:
     )
     return replace(
         template,
-        data=DataStep(
-            market=Market.KRX, start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock"
-        ),
         factors=(momentum,),
         portfolio=replace(
             template.portfolio,
@@ -104,6 +101,10 @@ def _spec() -> StrategySpec:
             rebalance_every_n_sessions=1,
         ),
     )
+
+
+def _environment() -> RunEnvironment:
+    return RunEnvironment(start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock")
 
 
 def _portfolio() -> PortfolioDesignService:
@@ -127,24 +128,49 @@ def _runs(portfolio: PortfolioDesignService, tmp_path: Path, run_id: str) -> Bac
     )
 
 
-def test_bridged_and_explicit_environment_preview_identically() -> None:
-    spec = _spec()
+def test_preview_without_an_environment_is_a_coded_request_error() -> None:
+    """P2-03: 문서에 기간·유니버스가 없으므로 되돌아갈 기본값이 없다."""
+    with pytest.raises(InvalidPortfolioRequestError) as info:
+        _portfolio().run_pipeline(PortfolioPreviewRequest(_spec()))
 
-    bridged = _portfolio().run_pipeline(PortfolioPreviewRequest(spec))
-    explicit = _portfolio().run_pipeline(
-        PortfolioPreviewRequest(spec, environment=environment_from_legacy_spec(spec))
-    )
+    issues = info.value.validation.issues
+    assert [issue.code for issue in issues] == ["run_environment.required"]
+    assert issues[0].path == "environment"
 
-    assert bridged.preview.tape.frames
-    assert bridged.preview.tape.tape_hash == explicit.preview.tape.tape_hash
-    assert bridged.observations == explicit.observations
+
+def test_preflight_without_an_environment_is_refused_too() -> None:
+    """엔진 능력 판정이 참여율을 읽으므로 preflight 도 문서만으로는 끝나지 않는다."""
+    with pytest.raises(InvalidPortfolioRequestError) as info:
+        _portfolio().preflight(PortfolioPreviewRequest(_spec()))
+
+    assert [issue.code for issue in info.value.validation.issues] == ["run_environment.required"]
+
+
+def test_trace_without_an_environment_is_refused() -> None:
+    traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
+
+    with pytest.raises(InvalidStrategyTraceRequestError, match="run_environment.required"):
+        traces.trace(
+            StrategyTraceRequest(
+                strategy_source=InlineDraft(_spec(), "inline_draft", "a" * 64),
+                security_ids=("005930",),
+                factor_id="momentum_3",
+            )
+        )
+
+
+def test_run_without_an_environment_is_refused_before_it_is_queued(tmp_path: Path) -> None:
+    runs = _runs(_portfolio(), tmp_path, "no-environment-run")
+
+    with pytest.raises(MissingBacktestRunEnvironmentError, match="run_environment.required"):
+        runs.start(BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON))
 
 
 def test_explicit_environment_narrows_the_observation_window() -> None:
     spec = _spec()
-    narrowed = replace(environment_from_legacy_spec(spec), end=date(2024, 1, 10))
+    narrowed = replace(_environment(), end=date(2024, 1, 10))
 
-    full = _portfolio().run_pipeline(PortfolioPreviewRequest(spec))
+    full = _portfolio().run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
     cut = _portfolio().run_pipeline(PortfolioPreviewRequest(spec, environment=narrowed))
 
     assert max(item.as_of for item in cut.observations) <= date(2024, 1, 10)
@@ -153,10 +179,9 @@ def test_explicit_environment_narrows_the_observation_window() -> None:
 
 def test_trace_reads_the_explicit_environment_range() -> None:
     spec = _spec()
-    portfolio = _portfolio()
-    traces = StrategyTraceService(portfolio, InMemoryStrategyRepository())
+    traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
     source = InlineDraft(spec, "inline_draft", "a" * 64)
-    narrowed = replace(environment_from_legacy_spec(spec), end=date(2024, 1, 10))
+    narrowed = replace(_environment(), end=date(2024, 1, 10))
 
     with pytest.raises(InvalidStrategyTraceRequestError, match="outside the run range"):
         traces.trace(
@@ -172,26 +197,29 @@ def test_trace_reads_the_explicit_environment_range() -> None:
 
 def test_manifest_records_the_environment_it_ran_with(tmp_path: Path) -> None:
     spec = _spec()
-    runs = _runs(_portfolio(), tmp_path, "bridged-run")
+    environment = _environment()
+    runs = _runs(_portfolio(), tmp_path, "explicit-run")
 
-    accepted = runs.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
+    accepted = runs.start(
+        BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON, environment=environment)
+    )
     state = wait_for_terminal_run(runs, accepted.run.run_id)
 
     assert state.status.value == "completed", state
     manifest = runs.result(accepted.run.run_id).manifest
-    expected = environment_from_legacy_spec(spec)
-    assert manifest.environment == expected
-    assert manifest.environment_hash == environment_hash(expected)
-    assert manifest.run_spec.environment == expected
+    assert manifest.environment == environment
+    assert manifest.environment_hash == environment_hash(environment)
+    assert manifest.run_spec.environment == environment
 
 
 def test_explicit_costs_reach_the_engine_and_the_run_fingerprint(tmp_path: Path) -> None:
     spec = _spec()
-    dearer = replace(environment_from_legacy_spec(spec), fee_bps=250.0, slippage_bps=250.0)
+    cheap_env = _environment()
+    dearer = replace(cheap_env, fee_bps=250.0, slippage_bps=250.0)
 
     cheap = _runs(_portfolio(), tmp_path / "cheap", "cheap-run")
     expensive = _runs(_portfolio(), tmp_path / "dear", "dear-run")
-    cheap.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
+    cheap.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON, environment=cheap_env))
     expensive.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON, environment=dearer))
     assert wait_for_terminal_run(cheap, "cheap-run").status.value == "completed"
     assert wait_for_terminal_run(expensive, "dear-run").status.value == "completed"
@@ -208,13 +236,13 @@ def test_explicit_costs_reach_the_engine_and_the_run_fingerprint(tmp_path: Path)
 
 def test_metric_window_is_checked_against_the_explicit_environment(tmp_path: Path) -> None:
     spec = _spec()
-    widened = replace(environment_from_legacy_spec(spec), end=date(2024, 3, 29))
+    widened = replace(_environment(), end=date(2024, 3, 29))
     window = MetricWindow(scope=MetricScope.OUT_OF_SAMPLE, start=WINDOW[1], end=date(2024, 3, 1))
     runs = _runs(_portfolio(), tmp_path, "window-run")
 
-    # 창이 문서의 `data.end` 는 넘지만 명시한 실행 기간 안이므로 접수된다. 그리고 실제로 그
-    # 구간까지 리밸런싱한다 — 접수만 되고 tape 가 문서 구간에서 멈추면 OOS 지표가 전략이 한
-    # 번도 매매하지 않은 구간 위에서 계산된다(리뷰 P0).
+    # 창이 넓힌 실행 기간 안이므로 접수된다. 그리고 실제로 그 구간까지 리밸런싱한다 — 접수만
+    # 되고 tape 가 좁은 구간에서 멈추면 OOS 지표가 전략이 한 번도 매매하지 않은 구간 위에서
+    # 계산된다(P2-01 리뷰 P0).
     accepted = runs.start(
         BacktestRunSpec(
             strategy=spec,
@@ -229,29 +257,34 @@ def test_metric_window_is_checked_against_the_explicit_environment(tmp_path: Pat
     assert manifest.environment.end == date(2024, 3, 29)
 
     with pytest.raises(InvalidBacktestRunError, match="metric window exceeds"):
-        _runs(_portfolio(), tmp_path / "bridged", "bridged-window-run").start(
-            BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON, metric_windows=(window,))
+        _runs(_portfolio(), tmp_path / "narrow", "narrow-window-run").start(
+            BacktestRunSpec(
+                strategy=spec,
+                core=ExecutionCore.PYTHON,
+                environment=_environment(),
+                metric_windows=(window,),
+            )
         )
 
 
-def test_explicit_environment_extends_the_tape_past_the_document_range() -> None:
+def test_explicit_environment_extends_the_tape_past_the_narrow_range() -> None:
     """명시 `environment` 가 tape 파이프라인까지 가야 한다. 안 가면 매니페스트·데이터셋은 넓은
-    구간을, tape 는 문서 구간을 쓰고 뒷구간이 신호 없는 buy-and-hold 가 된다(리뷰 P0)."""
+    구간을, tape 는 좁은 구간을 쓰고 뒷구간이 신호 없는 buy-and-hold 가 된다(P2-01 리뷰 P0)."""
     spec = _spec()
-    widened = replace(environment_from_legacy_spec(spec), end=date(2024, 3, 29))
+    widened = replace(_environment(), end=date(2024, 3, 29))
 
-    bridged = _portfolio().run_pipeline(PortfolioPreviewRequest(spec))
+    narrow = _portfolio().run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
     extended = _portfolio().run_pipeline(PortfolioPreviewRequest(spec, environment=widened))
 
-    assert max(frame.signal_as_of for frame in bridged.preview.tape.frames) <= WINDOW[1]
+    assert max(frame.signal_as_of for frame in narrow.preview.tape.frames) <= WINDOW[1]
     assert max(frame.signal_as_of for frame in extended.preview.tape.frames) > WINDOW[1]
 
 
 def test_run_with_an_unknown_universe_fails_the_way_preview_does(tmp_path: Path) -> None:
     """미리보기가 거부하는 실행 설정을 run 이 completed 로 기록하면 매니페스트가 허위가 된다.
-    같은 환경이면 두 경로가 같은 사유로 실패해야 한다(리뷰 P0)."""
+    같은 환경이면 두 경로가 같은 사유로 실패해야 한다(P2-01 리뷰 P0)."""
     spec = _spec()
-    bogus = replace(environment_from_legacy_spec(spec), universe_id="totally.bogus.universe")
+    bogus = replace(_environment(), universe_id="totally.bogus.universe")
 
     with pytest.raises(RawObservationUnavailableError):
         _portfolio().run_pipeline(PortfolioPreviewRequest(spec, environment=bogus))
@@ -269,36 +302,30 @@ def test_run_with_an_unknown_universe_fails_the_way_preview_does(tmp_path: Path)
 def test_environment_missing_reaches_the_factor_execution_plan() -> None:
     """실행 설정의 결측 정책이 plan 과 `plan_hash` 로 내려간다(캐시 키 회귀)."""
     spec = _spec()
-    zeroed = replace(environment_from_legacy_spec(spec), missing=MissingPolicy.ZERO)
+    dropped = _environment()
+    zeroed = replace(dropped, missing=MissingPolicy.ZERO)
 
-    bridged = _portfolio().run_pipeline(PortfolioPreviewRequest(spec))
+    default = _portfolio().run_pipeline(PortfolioPreviewRequest(spec, environment=dropped))
     explicit = _portfolio().run_pipeline(PortfolioPreviewRequest(spec, environment=zeroed))
 
-    bridged_plan = bridged.factor_evaluations[0].plan
+    default_plan = default.factor_evaluations[0].plan
     explicit_plan = explicit.factor_evaluations[0].plan
-    assert (bridged_plan.missing_policy, explicit_plan.missing_policy) == ("drop", "zero")
+    assert (default_plan.missing_policy, explicit_plan.missing_policy) == ("drop", "zero")
     # 결측 처리만 다른 두 실행이 같은 팩터 행렬 캐시 키를 공유하면 두 번째가 첫 결과를 재사용한다.
-    assert bridged_plan.plan_hash != explicit_plan.plan_hash
-    assert bridged_plan.graph_hash == explicit_plan.graph_hash
+    assert default_plan.plan_hash != explicit_plan.plan_hash
+    assert default_plan.graph_hash == explicit_plan.graph_hash
 
 
-def test_conflicting_legacy_missing_policies_are_refused_as_an_invalid_request() -> None:
-    """팩터마다 결측 정책이 다른 1.1 문서는 조용히 하나를 고르지 않고 거부된다."""
+def test_partial_fill_is_declared_from_the_environment_not_the_document() -> None:
+    """P2-03 잔여 이관: 참여율의 owner 가 실행 설정이다.
+
+    틀리는 방향이 과소 선언이라 그쪽으로 고정한다 — 참여율 1.0 짜리 요구 집합을 쓰면서 실제로는
+    0.1 로 체결하면 능력 게이트가 조용히 약해진다.
+    """
     spec = _spec()
-    conflicting = replace(
-        spec,
-        factors=(
-            spec.factors[0],
-            replace(
-                spec.factors[0],
-                factor_id="momentum_3_zero",
-                graph=replace(spec.factors[0].graph, missing_policy=MissingPolicy.ZERO),
-            ),
-        ),
-    )
+    full = replace(_environment(), participation_rate=1.0)
+    partial = replace(_environment(), participation_rate=0.1)
+    bridge = BacktestEnginePortfolioAdapter()
 
-    with pytest.raises(InvalidPortfolioRequestError) as info:
-        _portfolio().preflight(PortfolioPreviewRequest(conflicting))
-
-    codes = [issue.code for issue in info.value.validation.issues]
-    assert codes == ["run_environment.missing_policy_conflict"]
+    assert "partial_fill" not in {item.value for item in bridge.requirements(spec, full).features}
+    assert "partial_fill" in {item.value for item in bridge.requirements(spec, partial).features}

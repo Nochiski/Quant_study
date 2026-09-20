@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, delay, http } from "msw";
 import { setupServer } from "msw/node";
 import type { ReactElement, ReactNode } from "react";
 import {
@@ -432,6 +432,41 @@ describe("AI 공급자 설정 섹션", () => {
     expect(deleted).toEqual([]);
     expect(card.queryByRole("button", { name: "삭제 확인" })).toBeNull();
     expect(card.getByRole("button", { name: "삭제" })).toHaveFocus();
+  });
+
+  it("먼저 끝난 연결 테스트가 느린 카드의 잠금을 풀지 않는다", async () => {
+    const user = userEvent.setup();
+    view = {
+      ...view,
+      profiles: [
+        profile({ label: "첫째" }),
+        profile({ profile_id: "p-2", label: "둘째", active: false }),
+      ],
+    };
+    server.use(
+      http.post(
+        `${API}/api/v1/assistant/providers/:profileId/test`,
+        async ({ params }) => {
+          await delay(String(params.profileId) === "p-1" ? 400 : 20);
+          return HttpResponse.json({
+            ok: true,
+            failure: null,
+            latency_ms: 10,
+            message: "ok",
+          });
+        },
+      ),
+    );
+    renderSettings(<AiProviderSettings />);
+
+    const slow = await cardOf("첫째");
+    const fast = await cardOf("둘째");
+    await user.click(slow.getByRole("button", { name: "연결 테스트" }));
+    await user.click(fast.getByRole("button", { name: "연결 테스트" }));
+
+    expect(await fast.findByText(/연결 확인됨/)).toBeInTheDocument();
+    expect(slow.queryByText(/연결 확인됨/)).toBeNull();
+    expect(slow.getByRole("button", { name: "연결 테스트" })).toBeDisabled();
   });
 
   it("404가 오면 목록을 다시 읽어 유령 카드를 지운다", async () => {

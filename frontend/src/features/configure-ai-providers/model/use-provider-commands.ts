@@ -55,16 +55,19 @@ export const useCreateProvider = () => {
 /**
  * 연결 테스트 명령.
  *
- * 저장된 프로파일 id만 보내므로 키를 싣지 않지만, 생성과 같은 모양으로 둔다 — 공유 mutation의
- * `variables`를 읽어 "진행 중인 카드"를 판정하면 두 카드를 잇달아 누를 때 먼저 누른 카드의 잠금이
- * 풀린다(리뷰 P3-2). 진행 중 id를 여기서 직접 들면 그 문제가 생기지 않는다.
+ * 저장된 프로파일 id만 보내므로 키를 싣지 않지만, 생성과 같은 모양으로 둔다.
+ *
+ * 진행 중인 id를 **집합으로** 든다. 슬롯 하나짜리 state(또는 공유 mutation의 `variables`)로 판정하면
+ * 응답이 빠른 카드가 먼저 끝나면서 아직 비행 중인 느린 카드의 잠금까지 풀어 버린다 — 공급자마다
+ * 응답 속도가 다른 실전에서 흔한 경우다(리뷰 P3-2·R2-1). 집합에서 끝난 id만 빼면 카드별 잠금이
+ * 실제로 성립한다. B-02 이후의 멱등하지 않은 명령(턴 시작·취소)이 이 파일을 본보기로 삼는다.
  */
 export const useProbeProvider = () => {
   const queryClient = useQueryClient();
-  const [probingId, setProbingId] = useState<string | null>(null);
+  const [probingIds, setProbingIds] = useState<ReadonlySet<string>>(new Set());
 
   const probe = async (profileId: string): Promise<ProbeOutcome> => {
-    setProbingId(profileId);
+    setProbingIds((previous) => new Set(previous).add(profileId));
     try {
       const result = await assistantProviderApi.testProvider(profileId);
       return {
@@ -82,9 +85,13 @@ export const useProbeProvider = () => {
         latencyMs: null,
       };
     } finally {
-      setProbingId(null);
+      setProbingIds((previous) => {
+        const next = new Set(previous);
+        next.delete(profileId);
+        return next;
+      });
     }
   };
 
-  return { probingId, probe };
+  return { isProbing: (profileId: string) => probingIds.has(profileId), probe };
 };

@@ -178,17 +178,18 @@ export const AiProviderSettings = () => {
   const providers = useQuery(assistantProvidersQuery());
   const activate = useActivateAssistantProvider();
   const remove = useDeleteAssistantProvider();
-  const { probingId, probe } = useProbeProvider();
+  const { isProbing, probe } = useProbeProvider();
   const [probes, setProbes] = useState<Record<string, ProbeOutcome>>({});
   const [confirming, setConfirming] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // 변이가 끝나도 `variables`는 남으므로 진행 중 여부와 함께 봐야 한다. 연결 테스트는 진행 중 id를
-  // 직접 들어(`useProbeProvider`) 두 카드를 잇달아 눌러도 먼저 누른 쪽이 풀리지 않는다.
+  // 변이가 끝나도 `variables`는 남으므로 진행 중 여부와 함께 봐야 한다. 활성 전환·삭제는 확인 단계가
+  // 한 카드만 허용해 동시에 두 장이 뜨지 않지만, 연결 테스트는 여러 카드가 동시에 비행할 수 있어
+  // `useProbeProvider`가 진행 중 id를 집합으로 든다(리뷰 R2-1).
   const busyProfile = (profileId: string): boolean =>
     (activate.isPending && activate.variables === profileId) ||
     (remove.isPending && remove.variables === profileId) ||
-    probingId === profileId;
+    isProbing(profileId);
 
   const runTest = (profileId: string) => {
     setActionError(null);

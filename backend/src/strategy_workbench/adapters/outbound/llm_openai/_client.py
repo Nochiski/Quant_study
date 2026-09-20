@@ -80,9 +80,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from types import TracebackType
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
-import httpx2
 import openai
 from openai import omit
 from openai.types.responses import (
@@ -93,6 +92,12 @@ from openai.types.responses import (
     ToolParam,
 )
 from openai.types.shared_params import Reasoning
+
+if TYPE_CHECKING:
+    # `httpx2`는 SDK가 끌고 오는 전송 계층이고 우리 의존성 선언에는 없다. 여기서 쓰는 곳이
+    # `http_client` 인자의 타입 하나뿐이라(`from __future__ import annotations`로 문자열이다)
+    # 런타임 import를 만들지 않는다 — extra 없이 이 모듈을 읽는 경로가 생겨도 깨지지 않는다.
+    import httpx2
 
 __all__ = [
     "DEFAULT_BASE_URL",

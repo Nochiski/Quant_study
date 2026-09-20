@@ -324,18 +324,20 @@ def test_usage_splits_the_cache_details_out_of_the_input_total() -> None:
             cache_write_tokens=250,
         )
     ]
-    # 원시 총입력은 세 칸의 합으로 복원된다(domain `total_input_tokens`가 하는 일).
+    # 정상 경로에서는 원시 총입력이 세 칸의 합으로 복원된다(domain `total_input_tokens`가 하는
+    # 일). 이 불변식이 성립하지 않는 경우는 아래 clamp 테스트 하나뿐이다.
     recovered = usages[0].input_tokens + usages[0].cache_read_tokens + usages[0].cache_write_tokens
     assert recovered == raw_input_tokens
 
 
-def test_cache_details_larger_than_the_input_total_clamp_to_zero_and_warn(
+def test_cache_details_larger_than_the_input_total_clamp_to_zero_and_break_the_sum(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """빼기가 음수면 우리가 모르는 방식으로 계약이 바뀐 것이다.
+    """clamp는 합 복원 불변식의 **유일한 예외**다. 경고가 그 사실을 알리는 유일한 통로다.
 
-    음수 토큰 수는 화면에도 집계에도 넣을 수 없어 0으로 깎는다. 진단에 필요한 원시 세 값은
-    로그가 들고 있다. 턴을 `Failure`로 끝내지는 않는다.
+    빼기가 음수면 우리가 모르는 방식으로 계약이 바뀐 것이다. 음수 토큰 수는 화면에도 집계에도
+    넣을 수 없어 0으로 깎는다. 그러면 세 칸의 합이 공급자가 보고한 총입력보다 커진다 — 의도된
+    예외이고, 진단에 필요한 원시 세 값은 경고 로그가 들고 있다. 턴을 `Failure`로 끝내지는 않는다.
     """
     client = one_call(
         final_event(
@@ -360,6 +362,10 @@ def test_cache_details_larger_than_the_input_total_clamp_to_zero_and_warn(
         )
     ]
     # 원시 세 값이 로그에 남아 진단이 가능하다. 토큰 수는 비밀이 아니다.
+    # 정상 경로의 불변식(세 칸 합 == 원시 총입력)이 여기서만 깨진다. 깨진 방향도 고정한다.
+    usage = usages[0]
+    recovered = usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens
+    assert recovered > 100
     assert "cache details exceed the input total" in caplog.text
     assert "input_tokens=100" in caplog.text
     assert "cached_tokens=90" in caplog.text
@@ -1355,6 +1361,31 @@ def test_ambient_custom_headers_cannot_reroute_the_billing_org(
     assert "openai-project" not in headers
     assert "org-EVIL" not in str(headers)
     assert "proj-EVIL" not in str(headers)
+
+
+def test_a_non_credential_ambient_header_is_deliberately_left_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """막지 **않기로 한** 한 칸을 고정한다.
+
+    `OPENAI_CUSTOM_HEADERS`의 `Authorization`·`OpenAI-Organization`·`OpenAI-Project` 아닌 줄은
+    여전히 요청에 붙는다. 그걸 막으려면 SDK private(`_custom_headers`)을 비워야 해서 자격 증명과
+    과금 귀속이 닫힌 선에서 멈췄다(spec D6 표의 유일한 ✗). 결정을 바꿀 때 이 테스트가 먼저
+    빨개지므로 "언제 막혔는지 모르는" 상태가 생기지 않는다.
+    """
+    monkeypatch.setenv("OPENAI_CUSTOM_HEADERS", "X-Ambient-Note: kept-on-purpose")
+    factory, seen = _probe_on_the_wire()
+
+    factory(SECRET, None).create(
+        input="ping",
+        max_output_tokens=PROBE_MAX_OUTPUT_TOKENS,
+        model="gpt-6-astra",
+        store=STORE_RESPONSES,
+    )
+
+    assert seen[0].headers["x-ambient-note"] == "kept-on-purpose"
+    # 자격 증명은 그래도 프로파일 비밀 하나다.
+    assert seen[0].headers["authorization"] == f"Bearer {SECRET}"
 
 
 def test_the_only_credential_on_the_wire_is_the_profile_secret(

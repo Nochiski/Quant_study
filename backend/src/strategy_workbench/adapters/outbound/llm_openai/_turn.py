@@ -399,8 +399,8 @@ def _usage_of(usage: ResponseUsage) -> Usage:
     """OpenAI 원시값(내역 포함)을 domain 분리형으로 변환한다.
 
     domain `Usage`의 세 입력 칸은 **서로 겹치지 않는다.** `input_tokens`는 캐시 읽기·쓰기를
-    제외한 입력이고, 나머지 둘이 캐시분이다. 원시 총입력은 세 칸을 더해 복원한다
-    (domain이 `total_input_tokens`로 제공한다).
+    제외한 입력이고, 나머지 둘이 캐시분이다. **정상 경로에서는** 원시 총입력이 세 칸의 합으로
+    복원된다(domain이 `total_input_tokens`로 제공한다).
 
     OpenAI는 반대 모양이다. `input_tokens_details`는 이름 그대로 `input_tokens`의 *내역*이라
     `cached_tokens`·`cache_write_tokens`가 `input_tokens` **안에** 이미 들어 있다. 그래서 여기서
@@ -412,6 +412,11 @@ def _usage_of(usage: ResponseUsage) -> Usage:
     이상하게 터진다. 진단에 필요한 원시 세 값은 로그가 들고 있으므로 잃지 않는다(토큰 수는 비밀이
     아니다). 턴을 `Failure`로 끝내지는 않는다 — 토큰 회계 하나 때문에 사용자가 답변을 잃을 이유가
     없다.
+
+    **깎은 경우에만 합 복원이 성립하지 않는다.** `total_input_tokens`가 원시 총입력보다 커진다.
+    의도된 예외이며, 그 사실을 아는 유일한 방법이 위 경고 로그다 — 이벤트에는 남길 자리가 없고
+    (domain `Usage`에 "추정값" 표시가 없다) 만들 만큼 흔한 일도 아니다. 집계가 이 차이에 기대는
+    일이 생기면 그때 domain에 표시를 더한다.
     """
     details = usage.input_tokens_details
     cache_read_tokens = details.cached_tokens

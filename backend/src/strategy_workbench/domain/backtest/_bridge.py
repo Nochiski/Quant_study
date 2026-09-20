@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.factor.facade.expression import FactorGraph, MissingPolicy
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 
 from ._models import RunEnvironment
@@ -35,16 +35,47 @@ class LegacyMissingPolicyConflictError(ValueError):
         self.by_factor = by_factor
 
 
-def _missing_from_legacy_factors(spec: StrategySpec) -> MissingPolicy:
-    """팩터별 `graph.missing_policy` 를 실행 설정의 단일 값으로 접는다.
+def missing_from_legacy_graphs(
+    graphs: tuple[tuple[str, FactorGraph], ...],
+) -> MissingPolicy:
+    """1.1 그래프들의 `graph.missing_policy` 를 실행 설정의 단일 값으로 접는다.
 
-    전부 같으면 그 값, 팩터가 없으면 모델 기본값, 서로 다르면 거부한다.
+    전부 같으면 그 값, 그래프가 없으면 모델 기본값, 서로 다르면 거부한다. 라벨은 진단에만
+    쓰이며 전략 문서에서는 `factor_id` 다.
+
+    Raises:
+        LegacyMissingPolicyConflictError: 그래프마다 `missing_policy` 가 다를 때.
     """
-    by_factor = tuple((factor.factor_id, factor.graph.missing_policy) for factor in spec.factors)
-    distinct = {policy for _factor_id, policy in by_factor}
+    observed = tuple((label, graph.missing_policy) for label, graph in graphs)
+    distinct = {policy for _label, policy in observed}
     if len(distinct) > 1:
-        raise LegacyMissingPolicyConflictError(by_factor)
+        raise LegacyMissingPolicyConflictError(observed)
     return next(iter(distinct), MissingPolicy.DROP)
+
+
+def resolve_graph_missing_policy(
+    graph: FactorGraph, missing: MissingPolicy | None
+) -> MissingPolicy:
+    """실행 설정이 없는 단일 그래프 요청의 결측 정책 우선순위(P2-02 리뷰 P1).
+
+    `resolve_environment` 이 전략 실행에 대해 하는 판정을, 실행 설정을 갖지 않는 팩터
+    sandbox(`/factors/explain`·`/factors/preview`) 요청에 대해 한다. 명시값이 없을 때 1.1
+    문서 값으로 떨어지지 않으면 편집 화면의 실행 플랜 패널이 실제 실행과 다른 결측 정책과
+    다른 `plan_hash` 를 보인다 — 화면과 실행이 갈리는 silent divergence 다.
+
+    호출자가 `graph.missing_policy` 를 직접 읽지 않게 이 판정을 브리지가 소유한다
+    (`tests/architecture/test_run_environment_ownership.py` 가 그 0건을 고정한다).
+    """
+    if missing is not None:
+        return missing
+    return missing_from_legacy_graphs((("graph", graph),))
+
+
+def _missing_from_legacy_factors(spec: StrategySpec) -> MissingPolicy:
+    """전략 문서의 팩터별 결측 정책을 실행 설정의 단일 값으로 접는다."""
+    return missing_from_legacy_graphs(
+        tuple((factor.factor_id, factor.graph) for factor in spec.factors)
+    )
 
 
 def environment_from_legacy_spec(spec: StrategySpec) -> RunEnvironment:

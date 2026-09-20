@@ -2083,8 +2083,14 @@
             "$ref": "#/components/schemas/FactorGraph"
           },
           "missing": {
-            "$ref": "#/components/schemas/MissingPolicy",
-            "default": "drop"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MissingPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "parameter_ids": {
             "default": [],
@@ -2272,8 +2278,14 @@
             "$ref": "#/components/schemas/FactorGraph"
           },
           "missing": {
-            "$ref": "#/components/schemas/MissingPolicy",
-            "default": "drop"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MissingPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "parameters": {
             "default": [],

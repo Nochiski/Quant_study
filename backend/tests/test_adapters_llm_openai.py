@@ -1075,6 +1075,22 @@ def test_an_ambient_base_url_env_var_cannot_redirect_a_profile_without_one(
     assert str(_sdk_of(client).base_url).startswith(DEFAULT_BASE_URL)
 
 
+def test_an_ambient_api_key_env_var_is_never_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    """키는 언제나 프로파일 비밀이다.
+
+    `api_key`를 넘기지 않으면 SDK가 `OPENAI_API_KEY`를 읽는다. 그렇게 되면 사용자가 지운
+    프로파일로도 호출이 성립하고, 설정 화면의 "꼬리 4자리"가 실제로 쓰인 키와 달라진다 — 누가
+    어떤 키로 호출했는지 이력으로 되짚을 수 없게 된다. 속성만이 아니라 실제로 나가는
+    Authorization 헤더까지 본다.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-AMBIENT-ENV-KEY")
+
+    client = sdk_client_factory()(SECRET, None)
+
+    assert _sdk_of(client).api_key == SECRET
+    assert _sdk_of(client).auth_headers == {"Authorization": f"Bearer {SECRET}"}
+
+
 def test_the_default_base_url_matches_the_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
     """우리가 적어 둔 기본값이 SDK 기본과 어긋나면 모든 호출이 엉뚱한 곳으로 간다."""
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)

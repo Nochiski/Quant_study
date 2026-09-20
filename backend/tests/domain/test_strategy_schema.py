@@ -167,7 +167,7 @@ def test_kind_is_the_first_property_of_every_discriminated_branch() -> None:
     assert branches
     for option in branches:
         branch = _resolve(schema, option)
-        assert list(branch["properties"])[0] == "kind", branch["title"]
+        assert list(branch["properties"])[0] == "kind", branch["x-description-key"]
 
 
 def test_factor_label_is_optional_and_derived_from_factor_id() -> None:
@@ -244,7 +244,11 @@ def test_schema_properties_are_exactly_the_model_fields_and_nothing_is_hand_writ
     schema = strategy_document_schema()
     model_fields = [f.name for f in dataclass_fields(StrategySpec) if f.name != "identity"]
     assert list(schema["properties"]) == ["schema_version", *model_fields]
-    assert schema["properties"]["schema_version"] == {"type": "string", "const": "1.1"}
+    assert schema["properties"]["schema_version"] == {
+        "type": "string",
+        "const": "1.1",
+        "x-description-key": "strategy.section.schema_version",
+    }
     assert schema["required"][0] == "schema_version"
     assert schema["additionalProperties"] is False
     data = schema["$defs"]["DataStep"]
@@ -252,8 +256,14 @@ def test_schema_properties_are_exactly_the_model_fields_and_nothing_is_hand_writ
         "type": "string",
         "format": "date",
         "pattern": r"^\d{4}-\d{2}-\d{2}$",
+        "x-description-key": "strategy.field.data_step.start",
     }
-    assert data["properties"]["market"] == {"type": "string", "enum": ["KRX"], "default": "KRX"}
+    assert data["properties"]["market"] == {
+        "type": "string",
+        "enum": ["KRX"],
+        "default": "KRX",
+        "x-description-key": "strategy.field.data_step.market",
+    }
     assert data["required"] == ["start", "end", "universe_id"]
 
 
@@ -303,9 +313,15 @@ def test_scalar_unions_keep_integer_unless_number_is_present() -> None:
 
     builder = _schema._SchemaBuilder({})  # pyright: ignore[reportPrivateUsage]  # reason: unit
     schema = builder.dataclass_schema(Probe, "")
-    assert schema["properties"]["int_or_str"] == {"type": ["integer", "string"]}
-    assert schema["properties"]["bool_or_int"] == {"type": ["boolean", "integer"]}
-    assert schema["properties"]["number_union"] == {"type": ["number", "string"]}
+    # `x-description-key`는 property마다 파생되므로(P1-03) 타입 판정만 떼어 본다.
+    types = {
+        name: property_schema["type"] for name, property_schema in schema["properties"].items()
+    }
+    assert types == {
+        "int_or_str": ["integer", "string"],
+        "bool_or_int": ["boolean", "integer"],
+        "number_union": ["number", "string"],
+    }
 
 
 def test_contract_rows_are_unique_per_pointer_and_branch() -> None:
@@ -398,11 +414,7 @@ def test_field_contracts_carry_the_identifier_markers() -> None:
 def test_factor_authoring_mapping_is_owned_by_the_runtime_schema() -> None:
     properties = strategy_document_schema()["$defs"]["FactorSignal"]["properties"]
     assert {
-        name: {
-            key: value
-            for key, value in schema.items()
-            if key.startswith("x-authoring-")
-        }
+        name: {key: value for key, value in schema.items() if key.startswith("x-authoring-")}
         for name, schema in properties.items()
     } == {
         "factor_id": {"x-authoring-source": "factor_id", "x-authoring-identity": True},

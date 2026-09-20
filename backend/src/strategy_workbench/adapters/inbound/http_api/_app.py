@@ -90,6 +90,7 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyDocumentService,
     StrategyDraft,
     StrategyDraftService,
+    StrategyOperatorCatalog,
     UpgradedDocument,
 )
 from strategy_workbench.application.strategy_authoring.facade.ports import (
@@ -905,6 +906,27 @@ def create_app(
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
         response.headers["ETag"] = etag
         return schema
+
+    @app.get(
+        "/api/v1/strategy-documents/operators",
+        operation_id="getStrategyOperatorCatalog",
+        response_model=StrategyOperatorCatalog,
+        responses={304: {"description": "Not modified (ETag matched If-None-Match)"}},
+    )
+    def strategy_operator_catalog(
+        response: Response, if_none_match: Annotated[str | None, Header()] = None
+    ) -> StrategyOperatorCatalog | Response:
+        """Graph node operator definitions (arity, params, output rules, availability, i18n keys).
+
+        The catalog is the only source of the operator list a palette or a node label may show;
+        clients never restate it. ETag = catalog hash (304 on match).
+        """
+        catalog = strategy_authoring.operators()
+        etag = _etag(catalog.catalog_hash)
+        if if_none_match is not None and _matches(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        return catalog
 
     @app.get(
         "/api/v1/strategy-documents/contract",

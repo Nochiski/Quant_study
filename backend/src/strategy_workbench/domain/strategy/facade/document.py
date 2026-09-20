@@ -18,6 +18,8 @@ from strategy_workbench.domain.strategy._upgrade import (
     apply_upgrade_steps,
     is_frozen_schema_version,
     is_legacy_document,
+    is_upgradeable_document,
+    legacy_shape_hints,
     upgrade_document_1_0,
 )
 
@@ -39,6 +41,8 @@ __all__ = [
     "hydrate_strategy_document",
     "is_frozen_schema_version",
     "is_legacy_document",
+    "is_upgradeable_document",
+    "legacy_shape_hints",
     "source_hash_of",
     "upgrade_document_1_0",
 ]

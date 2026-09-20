@@ -105,7 +105,25 @@ UPGRADE_STEPS: tuple[tuple[str, UpgradeStep], ...] = (
 
 
 def is_legacy_document(document: Mapping[str, object]) -> bool:
+    """문서가 스스로 은퇴 버전이라고 적었는가. 버전 **문자열만** 본다."""
     return document.get("schema_version") == LEGACY_SCHEMA_VERSION
+
+
+def is_upgradeable_document(document: Mapping[str, object]) -> bool:
+    """이 문서에 1.0 → 1.1 변환을 적용할 수 있는가 — 업그레이드 가능 판정의 유일한 owner.
+
+    버전 문자열이 은퇴 버전이거나, 버전 줄은 현재 판인데 **본문이 옛 판 모양**이면 참이다. 두
+    번째 갈래가 필요한 이유는 진단과 판정이 갈라지면 화면이 모순되기 때문이다(P1-05 1차 리뷰
+    DEFECT-P105-001): `structure.legacy_shape` 진단은 "업그레이드하세요"라고 시키고 배너까지
+    띄우는데, 판정이 버전 문자열만 보면 버튼이 반드시 422로 끝나 사용자에게 남는 길이 없다.
+    진단이 시키는 일은 눌러서 되는 것이 계약이라, 진단을 만드는 `legacy_shape_hints`와 이 판정이
+    같은 조건을 읽는다.
+
+    변환 자체는 어느 갈래든 같다. step 들은 옛 판 모양에만 반응하고(`flatten_factors` 는 factors
+    가 mapping 일 때만, `unary_aliases` 는 `kind: unary` 일 때만), `schema_version` step 이 버전
+    줄을 결과 버전으로 정규화한다. 그래서 버전 줄이 이미 현재 판이어도 결과는 같다.
+    """
+    return is_legacy_document(document) or bool(legacy_shape_hints(document))
 
 
 # 1.0에서만 쓰던 문법이 놓이는 JSON Pointer → 사용자가 읽을 한글 힌트(P1-05).
@@ -157,12 +175,17 @@ def legacy_shape_hints(document: Mapping[str, object]) -> dict[str, str]:
 
 
 def apply_upgrade_steps(document: MutableMapping[str, object]) -> None:
-    """Mutate a 1.0 document (plain or ruamel containers) into 1.1 in place."""
-    if not is_legacy_document(document):
+    """Mutate a 1.0 document (plain or ruamel containers) into 1.1 in place.
+
+    받아 주는 조건의 owner 는 `is_upgradeable_document` 하나다 — 버전 줄이 은퇴 버전이거나 본문이
+    옛 판 모양이면 변환한다. 어느 쪽도 아닌 문서는 그대로 fail-closed 다(저장 row 읽기 경로가
+    이 예외에 기대고 있다: `adapters/outbound/strategy_sqlite/_record_codec.py`).
+    """
+    if not is_upgradeable_document(document):
         raise NotALegacyDocumentError(
-            "only schema 1.0 documents can be upgraded — "
+            "only schema 1.0 documents or bodies still written in 1.0 shapes can be upgraded — "
             f"schema_version={document.get('schema_version')!r} "
-            f"expected={LEGACY_SCHEMA_VERSION!r}"
+            f"expected={LEGACY_SCHEMA_VERSION!r} legacy_shapes=0"
         )
     for _name, step in UPGRADE_STEPS:
         step(document)

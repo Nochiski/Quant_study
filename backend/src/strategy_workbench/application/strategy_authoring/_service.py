@@ -31,7 +31,7 @@ from strategy_workbench.domain.factor.facade.operators import (
 from strategy_workbench.domain.strategy.facade.document import (
     LEGACY_SHAPE_CODE,
     hydrate_strategy_document,
-    is_legacy_document,
+    is_upgradeable_document,
     upgrade_document_1_0,
 )
 from strategy_workbench.domain.strategy.facade.schema import (
@@ -247,7 +247,7 @@ class StrategyAuthoringService:
         parsed = self._codec.parse(request.source, format=request.format)
         if not parsed.ok or parsed.tree is None:
             raise DocumentUpgradeSyntaxError(_rejected(parsed, None, parsed.diagnostics))
-        if not is_legacy_document(parsed.tree):
+        if not is_upgradeable_document(parsed.tree):
             raise DocumentNotUpgradeableError(parsed.tree.get("schema_version"))
         expected = upgrade_document_1_0(parsed.tree)
         try:

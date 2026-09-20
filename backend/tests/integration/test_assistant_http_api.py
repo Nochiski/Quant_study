@@ -24,7 +24,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 
 import httpx
 import pytest
@@ -55,6 +55,15 @@ from strategy_workbench.domain.assistant.facade.models import (
     TurnRequest,
     TurnStatus,
 )
+
+# 헬퍼가 받는 HTTP 클라이언트. 두 종류가 섞이는 데에는 이유가 있다.
+#
+# `TestClient`는 ASGI 앱을 in-process로 부르고, `_live_client`는 진짜 소켓으로 부른다(SSE를
+# 보려면 후자가 필요하다 — `_live_client` docstring). 그런데 starlette 1.6의 `TestClient`는
+# **설치된 전송 계층에 따라** `httpx` 또는 `httpx2`를 상속한다: `anthropic`(extra `llm`)이
+# `httpx2`를 끌고 오면 그쪽이고, 없으면 `httpx`다. 둘은 서로의 하위 타입이 아니므로 헬퍼를
+# 한쪽으로만 적으면 extra 설치 여부에 따라 타입 검사가 갈린다.
+AssistantClient: TypeAlias = TestClient | httpx.Client
 
 _API_KEY = "sk-secret-workbench-ABCD1234"
 _ASSISTANT = "/api/v1/assistant"
@@ -174,14 +183,14 @@ def _live_client(tmp_path: Path, provider: _GatedProvider) -> Iterator[httpx.Cli
         thread.join(timeout=15.0)
 
 
-def _create_profile(client: httpx.Client, **overrides: Any) -> dict[str, Any]:
+def _create_profile(client: AssistantClient, **overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {"kind": "anthropic", "label": "내 Claude", "secret": _API_KEY}
     body.update(overrides)
     response = client.post(f"{_ASSISTANT}/providers", json=body)
     return {"status": response.status_code, "json": response.json()}
 
 
-def _start_session(client: httpx.Client) -> str:
+def _start_session(client: AssistantClient) -> str:
     response = client.post(f"{_ASSISTANT}/sessions", json={"document_ref": _DOCUMENT_REF})
     assert response.status_code == 201, response.text
     return response.json()["session_id"]
@@ -661,7 +670,7 @@ _DECLARED_ASSISTANT_CODES = frozenset(
 )
 
 
-def _openapi_assistant_codes(client: httpx.Client) -> set[str]:
+def _openapi_assistant_codes(client: AssistantClient) -> set[str]:
     """OpenAPI의 `Assistant*Detail` 스키마가 선언한 `code` 값 전부."""
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
     declared: set[str] = set()
@@ -753,7 +762,7 @@ def _code(response: httpx.Response) -> str:
     return str(detail["code"])
 
 
-def _wait_for_terminal_turn(client: httpx.Client, session_id: str) -> dict[str, Any]:
+def _wait_for_terminal_turn(client: AssistantClient, session_id: str) -> dict[str, Any]:
     """턴이 종료 상태로 기록될 때까지 이력을 다시 읽는다.
 
     턴은 진짜 스레드에서 돌고 종료 기록은 스트림이 끝난 뒤에 남는다. 고정된 `sleep`으로

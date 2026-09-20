@@ -3,10 +3,10 @@ plan_version: 2
 project: ai-assistant
 project_status: IN_PROGRESS
 current_phase: P0,A
-current_pr: P0-01,A-01,A-02,A-03,A-04,A-05
-active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05]
-parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05]
-last_updated: 2026-09-21T00:17:04+09:00
+current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06
+active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06]
+parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06]
+last_updated: 2026-09-21T00:29:01+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 4
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,A` |
-| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05` |
-| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05` |
+| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06` |
+| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `4 / 13` |
-| Aggregated at | `2026-09-21 00:17 KST` |
+| Aggregated at | `2026-09-21 00:29 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -99,7 +99,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `7649967`(c6d70de + P3 후속) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_PROGRESS` | 구현자 `impl-ai-a04`, 워크트리 `wt-ai-a04`, 브랜치 `feat/ai-a-04-http-sse`(base A-03) |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_PROGRESS` | 구현자 `impl-ai-a05`, 워크트리 `wt-ai-a05`, 브랜치 `feat/ai-a-05-llm-anthropic`(임시 base A-02 `84570df`, A-04 tip 위로 rebase 예정) |
-| [ ] | `A-06` | `llm_openai` adapter | A-05 | `WAITING` | — |
+| [ ] | `A-06` | `llm_openai` adapter | A-05 | `IN_PROGRESS` | 구현자 `impl-ai-a06`, 워크트리 `wt-ai-a06`, 브랜치 `feat/ai-a-06-llm-openai`(임시 base A-02 `8324ebc`, A-05 tip 위로 rebase 예정) |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
 
 Phase exit:

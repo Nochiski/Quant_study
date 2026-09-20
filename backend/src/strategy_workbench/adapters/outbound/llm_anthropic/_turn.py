@@ -16,6 +16,7 @@ SDK에는 도구 루프를 대신 돌려 주는 `tool_runner`가 있지만 쓰�
 | 도구 라운드 | `request.max_tool_rounds` 초과 | `TOOL_ROUNDS_EXCEEDED` |
 | 턴 토큰 예산 | `max_tokens = min(호출당, 남은 예산)`, 잔량 < 최소 호출 | `TOKEN_BUDGET_EXCEEDED` |
 | 검색 횟수 | 턴 누적을 세어 호출마다 `max_uses`를 줄이고, 0이면 도구를 뺀다 | (도구 없음) |
+| 재개 | 진전 없는 연속 재개 `MAX_PAUSE_RESUMES`, 총량 `검색예산 + 5` | `PROVIDER` |
 
 **검색은 턴 누적이다.** SDK의 `max_uses`는 호출당 한도라, 한 번 계산해 모든 호출에 같은 값을
 보내면 라운드가 12번 도는 턴이 예산의 12배를 쓴다. 검색은 과금 대상이고 spec D9는 집행을
@@ -100,14 +101,32 @@ __all__ = ["MAX_PAUSE_RESUMES", "MIN_CALL_OUTPUT_TOKENS", "stream_turn"]
 
 logger = logging.getLogger(__name__)
 
-# `pause_turn` 재개 횟수 상한. 서버 도구가 반복 한도에 닿을 때마다 재개하므로 상한이 없으면
-# 루프가 끝나지 않을 수 있다. 라운드 상한과 따로 세는 이유는 재개가 우리 도구를 부른 것이
-# 아니어서 "도구 라운드"로 세면 사용자가 허락한 라운드를 서버 도구가 먹어 버리기 때문이다.
+# **진전 없는** `pause_turn` 재개의 상한. 서버 도구가 반복 한도에 닿을 때마다 턴이 멈추므로
+# 상한이 없으면 루프가 끝나지 않을 수 있다. 라운드 상한과 따로 세는 이유는 재개가 우리 도구를
+# 부른 것이 아니어서, "도구 라운드"로 세면 사용자가 허락한 라운드를 서버 도구가 먹어 버리기
+# 때문이다.
+#
+# **재개를 무조건 세면 안 된다.** 검색 한 번마다 턴이 멈추는 공급자 동작에서는 검색 예산
+# (기본 8)이 이 상한(5)보다 크므로, 예산의 62%를 쓴 시점에 "서버 도구가 계속 턴을 멈춥니다"로
+# 끝난다. 사용자는 허락한 검색을 다 쓰지도 못하고 원인도 알 수 없다. 그래서 **직전 호출에서
+# 새 검색이 있었으면 진전으로 보고 카운터를 되돌린다.** 여기서 세는 것은 "아무것도 하지 않고
+# 멈추기만 하는" 재개다.
 MAX_PAUSE_RESUMES = 5
 
 # 의미 있는 호출 하나의 최소 출력 토큰. 남은 예산이 이보다 작으면 호출하지 않고 예산 소진으로
 # 끝낸다. 값 자체는 A-07 실측으로 확정한다(spec D3: 기본값은 실측 뒤 확정).
 MIN_CALL_OUTPUT_TOKENS = 256
+
+
+def _max_total_pause_resumes(max_search_uses: int) -> int:
+    """재개 총량의 하드캡.
+
+    진전 있는 재개는 검색 예산이 이미 막고(검색마다 하나씩이면 `max_search_uses`개), 진전 없는
+    재개는 `MAX_PAUSE_RESUMES`가 막는다. 그 합이 정상 턴이 쓸 수 있는 최대다. 둘 다 통과하는
+    재개가 그보다 많다면 우리가 예상하지 못한 동작이므로 거기서 멈춘다.
+    """
+    return max_search_uses + MAX_PAUSE_RESUMES
+
 
 # `Done`으로 흘려보내도 되는 정상 종료 사유. SDK가 종류를 늘렸을 때 새 **실패성** 사유가
 # 화면에 "정상 종료"로 보이지 않게 화이트리스트로 둔다.
@@ -162,7 +181,8 @@ def stream_turn(
     search = _SearchTrace()
     spent_output_tokens = 0
     tool_rounds = 0
-    pause_resumes = 0
+    idle_pause_resumes = 0
+    total_pause_resumes = 0
 
     while True:
         if cancelled():
@@ -193,6 +213,7 @@ def stream_turn(
                 tool_rounds,
             )
         tools = build_tools(request, remaining_search_uses=remaining_search_uses)
+        searches_before_call = search.uses
 
         try:
             outcome = yield from _stream_once(
@@ -261,14 +282,34 @@ def stream_turn(
             return
 
         if stop_reason == "pause_turn":
-            pause_resumes += 1
-            if pause_resumes > MAX_PAUSE_RESUMES:
+            total_pause_resumes += 1
+            # 멈추기 전에 새 검색을 했다면 그 재개는 일을 하고 멈춘 것이다. 진전으로 보고
+            # 연속 카운터를 되돌린다(상수 주석: 검색 예산이 재개 상한보다 크다).
+            if search.uses > searches_before_call:
+                idle_pause_resumes = 0
+            else:
+                idle_pause_resumes += 1
+            if idle_pause_resumes > MAX_PAUSE_RESUMES:
                 yield Failure(
                     code=FailureCode.PROVIDER,
                     message=(
-                        "서버 도구가 계속 턴을 멈춰 재개 상한에 닿았습니다 — "
-                        f"kind=anthropic model={model} pause_resumes={pause_resumes} "
-                        f"max_pause_resumes={MAX_PAUSE_RESUMES}"
+                        "서버 도구가 진전 없이 턴을 계속 멈춰 재개 상한에 닿았습니다 — "
+                        f"kind=anthropic model={model} reason=pause_turn_no_progress "
+                        f"idle_pause_resumes={idle_pause_resumes} "
+                        f"max_pause_resumes={MAX_PAUSE_RESUMES} "
+                        f"total_pause_resumes={total_pause_resumes} search_uses={search.uses}"
+                    ),
+                )
+                return
+            max_total = _max_total_pause_resumes(request.max_search_uses)
+            if total_pause_resumes > max_total:
+                yield Failure(
+                    code=FailureCode.PROVIDER,
+                    message=(
+                        "`pause_turn` 재개 총량 상한을 넘겼습니다 — "
+                        f"kind=anthropic model={model} reason=pause_turn_total_exceeded "
+                        f"total_pause_resumes={total_pause_resumes} max_total={max_total} "
+                        f"max_search_uses={request.max_search_uses} search_uses={search.uses}"
                     ),
                 )
                 return

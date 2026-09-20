@@ -570,7 +570,8 @@ def test_pause_turn_resumes_by_replaying_the_paused_assistant_turn() -> None:
     assert [message["role"] for message in resumed] == ["user", "assistant"]
 
 
-def test_endless_pause_turn_stops_at_the_resume_limit() -> None:
+def test_endless_pause_turn_with_no_progress_stops_at_the_resume_limit() -> None:
+    """아무것도 하지 않고 멈추기만 하는 재개는 상한에서 끊는다."""
     client = ScriptedMessagesClient(
         *[
             CallScript(message=final_message(stop_reason="pause_turn"))
@@ -580,8 +581,96 @@ def test_endless_pause_turn_stops_at_the_resume_limit() -> None:
 
     events = run_turn(client)
 
-    assert failures(events)[0].code is FailureCode.PROVIDER
+    failure = failures(events)[0]
+    assert failure.code is FailureCode.PROVIDER
+    # 사유가 메시지에 드러나야 한다. "서버 도구가 멈춘다"만으로는 무엇이 한도였는지 모른다.
+    assert "reason=pause_turn_no_progress" in failure.message
     assert len(client.payloads) == MAX_PAUSE_RESUMES + 1
+
+
+def test_a_pause_after_every_search_does_not_eat_the_search_budget() -> None:
+    """검색마다 턴이 멈추는 동작에서도 허락한 검색 예산을 다 쓸 수 있어야 한다.
+
+    재개를 무조건 세면 `DEFAULT_MAX_SEARCH_USES`(8)가 `MAX_PAUSE_RESUMES`(5)보다 커서, 예산의
+    62%를 쓴 시점에 `Failure(PROVIDER)`로 끝나고 사용자는 원인을 알 수 없다. 진전 있는 재개는
+    세지 않으므로 여기서는 8회 검색 + 8회 재개가 전부 지나간다.
+    """
+    searches = 8
+    client = ScriptedMessagesClient(
+        *[
+            CallScript(
+                events=(
+                    server_tool_use_stop(f"srvtoolu-{index}", f"질의 {index}"),
+                    search_result_stop(f"srvtoolu-{index}", (("제목", "https://a.test"),)),
+                ),
+                message=final_message(stop_reason="pause_turn"),
+            )
+            for index in range(searches)
+        ],
+        CallScript(events=(text_event("정리"),), message=final_message(stop_reason="end_turn")),
+    )
+
+    events = run_turn(client, request=make_request(max_search_uses=searches))
+
+    assert failures(events) == []
+    assert events[-1] == Done(stop_reason="end_turn")
+    assert len(client.payloads) == searches + 1
+    # 마지막 호출에는 예산이 소진돼 검색 도구가 없다.
+    assert [tool.get("type") for tool in as_dicts(client.payloads[-1].tools)] == [None, None]
+
+
+def test_a_no_progress_streak_after_real_searches_still_stops() -> None:
+    """진전이 카운터를 되돌려도, 그 뒤 진전 없는 연속 재개는 여전히 끊는다."""
+    client = ScriptedMessagesClient(
+        CallScript(
+            events=(
+                server_tool_use_stop("srvtoolu-1", "질의"),
+                search_result_stop("srvtoolu-1", (("제목", "https://a.test"),)),
+            ),
+            message=final_message(stop_reason="pause_turn"),
+        ),
+        *[
+            CallScript(message=final_message(stop_reason="pause_turn"))
+            for _ in range(MAX_PAUSE_RESUMES + 1)
+        ],
+    )
+
+    events = run_turn(client, request=make_request(max_search_uses=8))
+
+    failure = failures(events)[0]
+    assert failure.code is FailureCode.PROVIDER
+    assert "reason=pause_turn_no_progress" in failure.message
+    # 검색 1회 + 진전 없는 재개 6회 = 7번 호출하고 멈춘다.
+    assert len(client.payloads) == MAX_PAUSE_RESUMES + 2
+
+
+def test_the_total_resume_cap_names_its_reason() -> None:
+    """진전이 계속 있어도 재개 총량에는 하드캡이 있다.
+
+    검색 예산이 1이면 총량 상한은 1 + 5 = 6이다. 매 재개가 새 검색을 동반해 연속 카운터가
+    계속 0으로 돌아가더라도 7번째 재개에서 멈춘다.
+    """
+    budget = 1
+    cap = budget + MAX_PAUSE_RESUMES
+    client = ScriptedMessagesClient(
+        *[
+            CallScript(
+                events=(
+                    server_tool_use_stop(f"srvtoolu-{index}", f"질의 {index}"),
+                    search_result_stop(f"srvtoolu-{index}", ()),
+                ),
+                message=final_message(stop_reason="pause_turn"),
+            )
+            for index in range(cap + 1)
+        ]
+    )
+
+    events = run_turn(client, request=make_request(max_search_uses=budget))
+
+    failure = failures(events)[0]
+    assert failure.code is FailureCode.PROVIDER
+    assert "reason=pause_turn_total_exceeded" in failure.message
+    assert len(client.payloads) == cap + 1
 
 
 # -- 종료 사유 -------------------------------------------------------------------------------

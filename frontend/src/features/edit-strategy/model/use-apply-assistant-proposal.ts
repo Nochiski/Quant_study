@@ -17,10 +17,30 @@ export type AssistantProposal = {
   baseSource: string | null;
 };
 
-/** 바로 적용하지 않고 확인을 받는 이유. */
-export type ProposalApplyBlock = "changed" | "unknown";
+/**
+ * 사이드바의 제안 동작을 적용 훅의 입력으로 옮긴다. 구조형 인자라 이 feature가 채팅 feature의 타입을
+ * 들여오지 않는다(feature가 feature를 import하지 않는다).
+ */
+export const assistantProposalOf = (action: {
+  proposal: { source_text: string };
+  baseSourceText: string | null;
+}): AssistantProposal => ({
+  source: action.proposal.source_text,
+  baseSource: action.baseSourceText,
+});
 
-export type ProposalApplyFailure = "editor-unavailable" | "composing" | "stale";
+/**
+ * 확인 창이 열린 이유. `changed`·`unknown`은 덮어쓰기 전 확인이고, `preview`는 사용자가 카드의
+ * "미리보기"로 직접 연 것이다(문서는 아직 그대로다).
+ */
+export type ProposalApplyBlock = "changed" | "unknown" | "preview";
+
+export type ProposalApplyFailure =
+  | "editor-unavailable"
+  | "composing"
+  | "stale"
+  /** 제안은 YAML 전문이라 JSON 문서에는 적용하지 않는다. */
+  | "yaml-only";
 
 export type ProposalApplyStatus =
   | { kind: "idle" }
@@ -41,6 +61,8 @@ export type AssistantProposalApply = {
   onEditorReady: (editor: CodeEditorHandle | null) => void;
   /** 기준 텍스트가 현재 텍스트와 같으면 즉시 적용하고, 다르면 확인 상태로 둔다. */
   apply: (proposal: AssistantProposal) => void;
+  /** 적용하지 않고 현재 문서와의 차이만 보여 준다. 거기서 바로 적용할 수도 있다. */
+  preview: (proposal: AssistantProposal) => void;
   /** 확인 화면의 "그래도 덮어쓰기". */
   confirm: () => void;
   /** 확인 화면의 "취소". 텍스트를 건드리지 않는다. */
@@ -75,6 +97,7 @@ export const useApplyAssistantProposal = (
   } | null>(null);
   const documentEpoch = state.documentEpoch;
   const composing = state.composing;
+  const format = state.format;
 
   const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
     editor.current = next;
@@ -98,18 +121,44 @@ export const useApplyAssistantProposal = (
     [setStatus],
   );
 
+  /** 적용·미리보기가 함께 지키는 전제. 통과하면 지금 편집기 텍스트를 돌려준다. */
+  const readCurrent = useCallback((): string | null => {
+    if (format !== "yaml") {
+      setStatus({ kind: "failed", reason: "yaml-only" });
+      return null;
+    }
+    if (composing) {
+      setStatus({ kind: "failed", reason: "composing" });
+      return null;
+    }
+    const handle = editor.current;
+    if (handle === null) {
+      setStatus({ kind: "failed", reason: "editor-unavailable" });
+      return null;
+    }
+    return handle.getText();
+  }, [composing, format, setStatus]);
+
+  const preview = useCallback(
+    (proposal: AssistantProposal): void => {
+      const currentSource = readCurrent();
+      if (currentSource === null) return;
+      setStatus({
+        kind: "confirming",
+        proposal,
+        reason: "preview",
+        currentSource,
+      });
+    },
+    [readCurrent, setStatus],
+  );
+
   const apply = useCallback(
     (proposal: AssistantProposal): void => {
-      if (composing) {
-        setStatus({ kind: "failed", reason: "composing" });
-        return;
-      }
+      const currentSource = readCurrent();
+      if (currentSource === null) return;
       const handle = editor.current;
-      if (handle === null) {
-        setStatus({ kind: "failed", reason: "editor-unavailable" });
-        return;
-      }
-      const currentSource = handle.getText();
+      if (handle === null) return;
       if (proposal.baseSource === currentSource) {
         overwrite(handle, proposal.source);
         return;
@@ -121,7 +170,7 @@ export const useApplyAssistantProposal = (
         currentSource,
       });
     },
-    [composing, overwrite, setStatus],
+    [overwrite, readCurrent, setStatus],
   );
 
   // 다른 문서를 열면 결과·확인 상태는 사라진다(feedback 슬롯과 같은 방식).
@@ -135,30 +184,26 @@ export const useApplyAssistantProposal = (
 
   const confirm = useCallback((): void => {
     if (status.kind !== "confirming") return;
-    if (composing) {
-      setStatus({ kind: "failed", reason: "composing" });
-      return;
-    }
+    const currentSource = readCurrent();
+    if (currentSource === null) return;
     const handle = editor.current;
-    if (handle === null) {
-      setStatus({ kind: "failed", reason: "editor-unavailable" });
-      return;
-    }
+    if (handle === null) return;
     // 사용자가 확인 화면에서 본 텍스트가 아직 그대로일 때만 덮어쓴다.
-    if (handle.getText() !== status.currentSource) {
+    if (currentSource !== status.currentSource) {
       setStatus({ kind: "failed", reason: "stale" });
       return;
     }
     overwrite(handle, status.proposal.source);
-  }, [composing, overwrite, setStatus, status]);
+  }, [overwrite, readCurrent, setStatus, status]);
 
   const cancel = useCallback((): void => setStatus(IDLE), [setStatus]);
 
   return {
     status,
-    canApply: editorReady && !composing,
+    canApply: editorReady && !composing && format === "yaml",
     onEditorReady,
     apply,
+    preview,
     confirm,
     cancel,
   };

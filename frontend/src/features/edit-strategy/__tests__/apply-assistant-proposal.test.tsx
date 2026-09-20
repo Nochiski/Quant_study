@@ -183,6 +183,37 @@ describe("useApplyAssistantProposal", () => {
     });
   });
 
+  it("미리보기는 문서를 건드리지 않고 차이만 연다", () => {
+    const { editor, hook } = mountHook();
+    act(() =>
+      hook.result.current.preview({ source: PROPOSED, baseSource: BASE }),
+    );
+
+    expect(editor.handle.replaceRange).not.toHaveBeenCalled();
+    expect(hook.result.current.status).toMatchObject({
+      kind: "confirming",
+      reason: "preview",
+      currentSource: BASE,
+    });
+    // 미리보기에서 그대로 적용할 수 있다.
+    act(() => hook.result.current.confirm());
+    expect(editor.text()).toBe(PROPOSED);
+  });
+
+  it("JSON 문서에는 제안을 적용하지 않는다", () => {
+    const { editor, hook } = mountHook(BASE, state({ format: "json" }));
+    expect(hook.result.current.canApply).toBe(false);
+    act(() =>
+      hook.result.current.apply({ source: PROPOSED, baseSource: BASE }),
+    );
+
+    expect(editor.handle.replaceRange).not.toHaveBeenCalled();
+    expect(hook.result.current.status).toEqual({
+      kind: "failed",
+      reason: "yaml-only",
+    });
+  });
+
   it("실제 편집기에서 실행 취소 한 번으로 이전 문서가 돌아온다", async () => {
     const Harness = () => {
       const apply = useApplyAssistantProposal(state());

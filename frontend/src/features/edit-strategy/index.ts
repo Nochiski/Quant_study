@@ -90,12 +90,11 @@ export {
   type UpgradeStatus,
 } from "./model/use-upgrade-document";
 export {
-  assistantDocumentContext,
-  type AssistantContextOptions,
-  type AssistantDocumentContext,
-  type AssistantSlotRender,
+  assistantDocumentRef,
+  assistantTurnContext,
 } from "./model/assistant-turn-context";
 export {
+  assistantProposalOf,
   useApplyAssistantProposal,
   type AssistantProposal,
   type AssistantProposalApply,

@@ -458,7 +458,8 @@ export const StrategyIde = ({
       style={assistantFloating ? undefined : { width: layout.assistantWidth }}
     >
       <header className="ide__panel-header">
-        <h2>{t("ide.assistant")}</h2>
+        {/* 슬롯 내용이 자기 제목을 그리므로 패널 제목은 이름표로만 둔다(중복 제목 방지). */}
+        <h2 className="sr-only">{t("ide.assistant")}</h2>
         <Button
           ref={assistantCollapse}
           size="small"

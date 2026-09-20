@@ -37,6 +37,10 @@ import {
   type StrategyTraceRequest,
   type StrategyTraceResponse,
 } from "../../shared/api";
+import type {
+  AssistantEventEnvelopeView,
+  TurnContextPayload,
+} from "../../entities/assistant";
 import { readBackendFixture } from "../../shared/testing/backend-fixtures";
 import { t } from "../../shared/config";
 import { App } from "../app";
@@ -201,6 +205,21 @@ const acceptedRun = (runId = "run-7") => ({
     updated_at: "2026-09-04T00:00:00Z",
   },
 });
+
+type AssistantSessionRow = {
+  session_id: string;
+  title: string;
+  provider_profile_id: string;
+  document_ref: unknown;
+  created_at: string;
+};
+
+let assistantSessions: AssistantSessionRow[] = [];
+const assistantTurns: { text: string; context: TurnContextPayload }[] = [];
+let assistantStream: {
+  push: (envelope: AssistantEventEnvelopeView) => void;
+  close: () => void;
+} | null = null;
 
 const server = setupServer(
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
@@ -398,6 +417,103 @@ const server = setupServer(
   http.get(`${API}/api/v1/strategies/template`, () =>
     HttpResponse.json(spec("", 0, "새 팩터 전략")),
   ),
+  // AI 어시스턴트 사이드바는 전략 화면 우측 슬롯에 늘 붙어 있다(B-04). 공급자 목록은 첫 렌더에
+  // 조회되고, 나머지는 사용자가 질문을 보낼 때만 불린다.
+  http.get(`${API}/api/v1/assistant/providers`, () =>
+    HttpResponse.json({
+      kinds: [
+        { kind: "anthropic", installed: true, default_model: "claude-sonnet-5" },
+        { kind: "openai", installed: false, default_model: null },
+      ],
+      profiles: [
+        {
+          profile_id: "p-1",
+          kind: "anthropic",
+          label: "작업용 Claude",
+          model: "claude-sonnet-5",
+          base_url: null,
+          secret_tail: "9876",
+          active: true,
+          created_at: "2026-09-20T00:00:00Z",
+        },
+      ],
+    }),
+  ),
+  http.get(`${API}/api/v1/assistant/sessions`, () =>
+    HttpResponse.json(assistantSessions),
+  ),
+  http.post(`${API}/api/v1/assistant/sessions`, async ({ request }) => {
+    const body = (await request.json()) as { document_ref: unknown };
+    const created = {
+      session_id: "s-1",
+      title: "새 대화",
+      provider_profile_id: "p-1",
+      document_ref: body.document_ref,
+      created_at: "2026-09-20T00:00:00Z",
+    };
+    assistantSessions = [created];
+    return HttpResponse.json(created, { status: 201 });
+  }),
+  http.get(`${API}/api/v1/assistant/sessions/:sessionId`, ({ params }) => {
+    const found = assistantSessions.find(
+      (item) => item.session_id === String(params.sessionId),
+    );
+    return found === undefined
+      ? HttpResponse.json(
+          { detail: { code: "assistant.session.not_found", message: "" } },
+          { status: 404 },
+        )
+      : HttpResponse.json({
+          session: found,
+          messages: [],
+          turns: [],
+          events: [],
+        });
+  }),
+  http.post(
+    `${API}/api/v1/assistant/sessions/:sessionId/turns`,
+    async ({ params, request }) => {
+      assistantTurns.push(
+        (await request.json()) as { text: string; context: TurnContextPayload },
+      );
+      return HttpResponse.json(
+        {
+          turn_id: "t-1",
+          session_id: String(params.sessionId),
+          status: "running",
+          accepted_sequence: -1,
+          started_at: "2026-09-20T00:01:00Z",
+        },
+        { status: 202 },
+      );
+    },
+  ),
+  http.get(`${API}/api/v1/assistant/sessions/:sessionId/events`, () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({
+      start: (value) => {
+        controller = value;
+      },
+    });
+    assistantStream = {
+      push: (envelope) =>
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              `id: ${envelope.sequence}`,
+              "event: assistant",
+              `data: ${JSON.stringify(envelope)}`,
+              "",
+              "",
+            ].join("\n"),
+          ),
+        ),
+      close: () => controller.close(),
+    };
+    return new HttpResponse(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -411,6 +527,9 @@ afterEach(() => {
   compiledSources.length = 0;
   explainedGraphs.length = 0;
   tracedStrategies.length = 0;
+  assistantSessions = [];
+  assistantTurns.length = 0;
+  assistantStream = null;
 });
 afterAll(() => server.close());
 
@@ -3104,5 +3223,95 @@ describe("dirty guard follow-ups (P2-04 review)", () => {
     expect(history.location.pathname).toBe(
       "/research/strategies/s1/revisions/2",
     );
+  });
+});
+
+describe("AI 어시스턴트 제안 적용 (B-04)", () => {
+  /** 사이드바를 열고 질문 하나를 보낸 뒤 그 턴의 SSE 연결을 돌려준다. */
+  const askAssistant = async (user: ReturnType<typeof userEvent.setup>) => {
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    const input = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    await user.type(input, "지금 시장에 맞는 전략을 제안해 줘");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(assistantTurns).toHaveLength(1));
+    await waitFor(() => expect(assistantStream).not.toBeNull());
+    return assistantStream!;
+  };
+
+  const proposal = (source: string) => ({
+    title: "저변동 모멘텀",
+    summary: "변동성이 낮은 모멘텀 상위 종목을 매수합니다.",
+    rationale: "최근 국내 시장은 저변동 구간입니다.",
+    sources: [],
+    source_format: "yaml" as const,
+    source_text: source,
+    compile: { ok: true, spec_hash: "hash-1", diagnostics: [] },
+  });
+
+  it("사이드바 제안을 편집기에 적용하고 실행 취소 한 번으로 되돌린다", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const view = await editor();
+    const before = view.state.doc.toString();
+    const stream = await askAssistant(user);
+
+    // 턴에는 지금 편집기 텍스트가 실린다(서버가 문서를 따로 들지 않는다).
+    expect(assistantTurns[0].context.source_text).toBe(before);
+    expect(assistantTurns[0].context.source_format).toBe("yaml");
+
+    const proposed = 'schema_version: "1.1"\ntitle: "저변동 모멘텀"\n';
+    act(() =>
+      stream.push({
+        sequence: 1,
+        turn_id: "t-1",
+        event: { type: "proposal", proposal: proposal(proposed) },
+      }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "문서에 적용" }),
+    );
+    expect(view.state.doc.toString()).toBe(proposed);
+    expect(
+      screen.getByText("제안을 문서에 적용했습니다."),
+    ).toBeInTheDocument();
+
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(before);
+  });
+
+  it("기다리는 동안 문서를 고쳤으면 확인을 거쳐 덮어쓴다", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const view = await editor();
+    const stream = await askAssistant(user);
+
+    const typed = 'schema_version: "1.1"\ntitle: "직접 쓴 제목"\n';
+    replaceText(view, typed);
+    const proposed = 'schema_version: "1.1"\ntitle: "저변동 모멘텀"\n';
+    act(() =>
+      stream.push({
+        sequence: 1,
+        turn_id: "t-1",
+        event: { type: "proposal", proposal: proposal(proposed) },
+      }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "문서에 적용" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "문서가 바뀌었습니다",
+    });
+    expect(view.state.doc.toString()).toBe(typed);
+
+    await user.click(
+      within(dialog).getByRole("button", { name: "그래도 덮어쓰기" }),
+    );
+    expect(view.state.doc.toString()).toBe(proposed);
+    act(() => expect(undo(view)).toBe(true));
+    expect(view.state.doc.toString()).toBe(typed);
   });
 });

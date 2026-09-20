@@ -24,7 +24,9 @@ import {
   revisionDraftId,
   saveStatusText,
   saveStatusTone,
-  assistantDocumentContext,
+  assistantDocumentRef,
+  assistantProposalOf,
+  assistantTurnContext,
   useApplyAssistantProposal,
   useApplyProposalThenBacktest,
   useAutosave,
@@ -39,15 +41,16 @@ import {
   useFormProjection,
   useSourceTransactions,
   useStrategyDocument,
-  type AssistantSlotRender,
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
+import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
   useBacktestRunSettings,
 } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
+import { useCommittedRef } from "../../../shared/lib/react";
 import { useNavigate, useSearch } from "../../../shared/lib/router";
 import { Badge, type CodeEditorHandle } from "../../../shared/ui";
 import {
@@ -71,17 +74,7 @@ const NEW_DRAFT: DocumentSource = {
  * New-strategy entry (WORKFLOW P2-04): a draft with no base. Saving creates the strategy, after
  * which the URL moves to revision 1 so a reload lands on the saved document (router ADR D3).
  */
-export type NewStrategyPageProps = {
-  /**
-   * IDE 우측 `assistant` 슬롯에 들어갈 사이드바. B-03의 채팅 사이드바가 합류하면 페이지가 직접
-   * 렌더하고 이 prop은 사라진다 — 지금은 슬롯 배선과 제안 적용 경로만 완성한다.
-   */
-  renderAssistant?: AssistantSlotRender;
-};
-
-export const NewStrategyPage = ({
-  renderAssistant,
-}: NewStrategyPageProps = {}) => {
+export const NewStrategyPage = () => {
   const navigate = useNavigate();
   const search = useSearch({ from: ROUTE });
   const [document, dispatch] = useStrategyDocument(NEW_DRAFT);
@@ -215,13 +208,27 @@ export const NewStrategyPage = ({
       onTransactionsEditorReady,
     ],
   );
-  const assistantDocument = useMemo(
+  // 세션이 붙은 문서는 타자마다 바뀌지 않는다 — 문서 텍스트가 아니라 이 세 값에만 묶는다.
+  const assistantDocumentRefValue = useMemo(
     () =>
-      assistantDocumentContext(document, {
-        draftId: serverDraftId,
-        environment: runSettings.requestOptions,
-      }),
-    [document, serverDraftId, runSettings.requestOptions],
+      assistantDocumentRef(
+        document.strategyId,
+        document.baseRevision,
+        serverDraftId,
+      ),
+    [document.strategyId, document.baseRevision, serverDraftId],
+  );
+  // 턴을 시작하는 순간의 문서·실행 설정을 읽는 손잡이. commit된 값을 비추는 ref라 사이드바에 넘기는
+  // 함수는 그대로 두고도 늘 지금 화면의 값을 읽는다(`.claude/rules/frontend-react-effects.md`).
+  const assistantContext = useCommittedRef(
+    useMemo(
+      () => () => assistantTurnContext(document, runSettings.requestOptions),
+      [document, runSettings.requestOptions],
+    ),
+  );
+  const readAssistantContext = useCallback(
+    () => assistantContext.current(),
+    [assistantContext],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
   // "적용 후 백테스트"는 적용 → 검증 → 실행을 한 동작으로 잇는다(WORKFLOW B-04).
@@ -410,19 +417,25 @@ export const NewStrategyPage = ({
           />
         }
         assistant={
-          renderAssistant === undefined ? undefined : (
-            <>
-              <ProposalApplyFeedback
-                apply={proposalApply}
-                chain={proposalBacktest}
-              />
-              {renderAssistant({
-                document: assistantDocument,
-                apply: proposalApply,
-                backtest: proposalBacktest,
-              })}
-            </>
-          )
+          <>
+            <ProposalApplyFeedback
+              apply={proposalApply}
+              chain={proposalBacktest}
+            />
+            <AssistStrategySidebar
+              documentRef={assistantDocumentRefValue}
+              readContext={readAssistantContext}
+              onPreviewProposal={(action) =>
+                proposalApply.preview(assistantProposalOf(action))
+              }
+              onApplyProposal={(action) =>
+                proposalApply.apply(assistantProposalOf(action))
+              }
+              onApplyProposalAndBacktest={(action) =>
+                proposalBacktest.applyThenBacktest(assistantProposalOf(action))
+              }
+            />
+          </>
         }
         debugger={
           <StrategyDebuggerPanel

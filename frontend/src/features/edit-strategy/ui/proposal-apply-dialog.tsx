@@ -65,7 +65,12 @@ const OpenProposalApplyDialog = ({
   const preview = useRef<HTMLButtonElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const [showDiff, setShowDiff] = useState(false);
+  // "미리보기"로 연 창은 차이를 처음부터 편다 — 그것이 열린 이유다.
+  const [showDiff, setShowDiff] = useState(status.reason === "preview");
+  const title =
+    status.reason === "preview"
+      ? t("assistant.apply.previewTitle")
+      : t("assistant.apply.title");
 
   useEffect(() => {
     opener.current = document.activeElement as HTMLElement | null;
@@ -108,11 +113,19 @@ const OpenProposalApplyDialog = ({
         className="proposal-apply"
         role="dialog"
         aria-modal="true"
-        aria-label={t("assistant.apply.title")}
+        aria-label={title}
       >
         <header className="proposal-apply__header">
-          <Badge tone="warn">{t("assistant.apply.title")}</Badge>
-          <p>{t(`assistant.apply.${status.reason}`)}</p>
+          <Badge tone={status.reason === "preview" ? "info" : "warn"}>
+            {title}
+          </Badge>
+          <p>
+            {t(
+              status.reason === "preview"
+                ? "assistant.apply.previewBody"
+                : `assistant.apply.${status.reason}`,
+            )}
+          </p>
           <p className="proposal-apply__note">{t("assistant.apply.undoNote")}</p>
         </header>
         {diff === null ? null : (
@@ -176,7 +189,11 @@ const OpenProposalApplyDialog = ({
               : t("assistant.apply.preview")}
           </Button>
           <Button size="small" tone="primary" onClick={apply.confirm}>
-            {t("assistant.apply.overwrite")}
+            {t(
+              status.reason === "preview"
+                ? "assistant.apply.applyFromPreview"
+                : "assistant.apply.overwrite",
+            )}
           </Button>
           <Button ref={cancel} size="small" tone="ghost" onClick={apply.cancel}>
             {t("assistant.apply.cancel")}

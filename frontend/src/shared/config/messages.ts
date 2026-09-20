@@ -152,6 +152,9 @@ const ko = {
   "ide.collapseInspector": "계약 접기",
   "ide.collapseDebugger": "중간 결과 접기",
   "assistant.apply.title": "문서가 바뀌었습니다",
+  "assistant.apply.previewTitle": "제안 미리보기",
+  "assistant.apply.previewBody":
+    "제안을 현재 문서와 비교합니다. 적용하면 현재 내용이 제안으로 바뀝니다.",
   "assistant.apply.changed":
     "제안을 만든 뒤 편집기 문서가 바뀌었습니다. 덮어쓰면 지금 편집기에 있는 내용이 제안으로 바뀝니다.",
   "assistant.apply.unknown":
@@ -162,6 +165,7 @@ const ko = {
   "assistant.apply.previewHide": "미리보기 닫기",
   "assistant.apply.previewLabel": "제안과 현재 문서의 차이",
   "assistant.apply.overwrite": "그래도 덮어쓰기",
+  "assistant.apply.applyFromPreview": "문서에 적용",
   "assistant.apply.cancel": "취소",
   "assistant.apply.applied": "제안을 문서에 적용했습니다.",
   "assistant.apply.backtestWaiting":
@@ -170,6 +174,8 @@ const ko = {
     "편집기를 사용할 수 없어 제안을 적용하지 못했습니다.",
   "assistant.apply.error.composing":
     "입력기 조합 중에는 제안을 적용할 수 없습니다. 조합을 끝내고 다시 적용하세요.",
+  "assistant.apply.error.yaml-only":
+    "제안은 YAML 문서에만 적용할 수 있습니다. YAML 문서를 열고 다시 적용하세요.",
   "assistant.apply.error.stale":
     "확인하는 동안 문서가 또 바뀌어 적용을 멈췄습니다. 다시 적용하세요.",
   "ide.assistant": "AI 어시스턴트",
@@ -1215,6 +1221,9 @@ export const messages = {
     "ide.collapseInspector": "Collapse contract panel",
     "ide.collapseDebugger": "Collapse intermediate results",
     "assistant.apply.title": "The document changed",
+    "assistant.apply.previewTitle": "Proposal preview",
+    "assistant.apply.previewBody":
+      "This compares the proposal with the current document. Applying replaces the current content.",
     "assistant.apply.changed":
       "The document changed after this proposal was made. Overwriting replaces what is in the editor now.",
     "assistant.apply.unknown":
@@ -1225,6 +1234,7 @@ export const messages = {
     "assistant.apply.previewHide": "Hide preview",
     "assistant.apply.previewLabel": "Difference between the proposal and the current document",
     "assistant.apply.overwrite": "Overwrite anyway",
+    "assistant.apply.applyFromPreview": "Apply to the document",
     "assistant.apply.cancel": "Cancel",
     "assistant.apply.applied": "The proposal was applied to the document.",
     "assistant.apply.backtestWaiting":
@@ -1233,7 +1243,9 @@ export const messages = {
       "The editor is unavailable, so the proposal was not applied.",
     "assistant.apply.error.composing":
       "A proposal cannot be applied while an input method is composing. Finish composing and apply again.",
-    "assistant.apply.error.stale":
+    "assistant.apply.error.yaml-only":
+    "제안은 YAML 문서에만 적용할 수 있습니다. YAML 문서를 열고 다시 적용하세요.",
+  "assistant.apply.error.stale":
       "The document changed again while you were confirming, so applying stopped. Apply again.",
     "ide.assistant": "AI assistant",
     "ide.collapseAssistant": "Collapse AI assistant",

@@ -5,6 +5,7 @@ import {
   AssistantRequestError,
   assistantChatReducer,
   assistantSessionKey,
+  assistantTurn,
   assistantSessionQuery,
   assistantSessionsQuery,
   assistantStreamTarget,
@@ -23,6 +24,7 @@ import {
   type SessionView,
   type TurnContextPayload,
 } from "../../../entities/assistant";
+import { t } from "../../../shared/config";
 import { TURN_IN_PROGRESS, assistRejection } from "./assist-copy";
 import { assistTranscript, type AssistTranscriptEntry } from "./transcript";
 
@@ -42,6 +44,9 @@ export type UseAssistChatOptions = {
   readContext: () => TurnContextPayload;
 };
 
+/** 보내지 못한 질문을 입력칸으로 되돌리는 지시. `nonce`가 바뀔 때만 복원한다. */
+export type AssistDraftRestore = { text: string; nonce: number };
+
 export type AssistChat = {
   sessions: readonly SessionView[];
   sessionId: string | null;
@@ -50,7 +55,15 @@ export type AssistChat = {
   entries: readonly AssistTranscriptEntry[];
   /** 서버가 아직 턴 id를 주지 않은 질문. 도착하면 `entries`로 옮겨 간다. */
   pendingPrompt: string | null;
+  /** 서버가 받지 않아 되돌려 줄 질문. 입력칸이 이 값을 다시 채운다. */
+  draftRestore: AssistDraftRestore | null;
   running: AssistantTurnState | null;
+  /**
+   * 화면이 진행을 지켜본 뒤 끝난 턴. 완료를 한 번 announce할 자리다.
+   *
+   * 이력을 열자마자 "완료"를 읽지 않도록, 진행 중이던 것을 실제로 본 턴만 여기 온다.
+   */
+  finishedTurn: AssistantTurnState | null;
   busy: boolean;
   rejection: string | null;
   historyFailed: boolean;
@@ -87,6 +100,10 @@ export const useAssistChat = ({
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [rejection, setRejection] = useState<string | null>(null);
   const [droppedFrames, setDroppedFrames] = useState(0);
+  const [draftRestore, setDraftRestore] = useState<AssistDraftRestore | null>(
+    null,
+  );
+  const [watchedTurnId, setWatchedTurnId] = useState<string | null>(null);
   const [state, dispatch] = useReducer(
     assistantChatReducer,
     emptyAssistantChatState,
@@ -126,13 +143,29 @@ export const useAssistChat = ({
     setPendingPrompt(null);
     setRejection(null);
     setDroppedFrames(0);
+    setDraftRestore(null);
+    setWatchedTurnId(null);
+    // 턴 시점 원문은 항목 하나가 수 KB다. 앞 대화의 턴은 다시 그려지지 않으므로 함께 버린다.
+    setPrompts({});
     openSession(next);
   };
 
-  // 목록에서 저절로 고른 대화(auto)만 여기로 온다. 이미 그 세션이면 리듀서가 아무 것도 하지 않는다.
-  useEffect(() => {
+  /**
+   * 목록에서 저절로 고른 대화(auto)가 바뀌면 투영을 그 자리에서 맞춘다.
+   *
+   * passive effect로 미루면 커밋과 reset 사이에 한 프레임이 생기고, 그 틈에 들어온 이벤트가
+   * 쓸려 나간다(`frontend-react-effects.md`, B-03 리뷰 P3). React가 권하는 "입력이 바뀔 때 렌더
+   * 중에 상태를 조정하는" 자리이며, 리듀서가 같은 id에는 아무 것도 하지 않으므로 한 번에 수렴한다.
+   */
+  if (sessionId !== state.sessionId) {
     dispatch({ type: "session", sessionId });
-  }, [sessionId]);
+  }
+
+  // 진행을 지켜본 턴만 기억한다 — 이력을 열자마자 완료를 알리지 않기 위해서다.
+  const runningNow = runningAssistantTurn(state);
+  if (runningNow !== null && runningNow.turnId !== watchedTurnId) {
+    setWatchedTurnId(runningNow.turnId);
+  }
 
   useEffect(() => {
     if (history.data !== undefined) {
@@ -174,7 +207,11 @@ export const useAssistChat = ({
   const createSession = useCreateAssistantSession();
   const startTurn = useStartAssistantTurn();
   const cancelTurn = useCancelAssistantTurn();
-  const running = runningAssistantTurn(state);
+  const running = runningNow;
+  const finishedTurn =
+    running === null && watchedTurnId !== null
+      ? assistantTurn(state, watchedTurnId)
+      : null;
   const busy = createSession.isPending || startTurn.isPending;
 
   const promptTexts = useMemo(
@@ -212,6 +249,10 @@ export const useAssistChat = ({
             error instanceof AssistantRequestError &&
             error.code === TURN_IN_PROGRESS
           ) {
+            // 이 질문은 서버에 닿지 않았다. 입력칸으로 되돌리지 않으면 친 문장이 어디에도 남지
+            // 않고, 사용자는 진행 중인 **다른** 턴의 답을 자기 질문의 답으로 읽는다(리뷰 P2).
+            setDraftRestore({ text, nonce: Date.now() });
+            setRejection(t("assistant.chat.turnInProgress"));
             void queryClient.invalidateQueries({
               queryKey: assistantSessionKey(id),
             });
@@ -265,7 +306,9 @@ export const useAssistChat = ({
     startNewSession: () => switchSession(null),
     entries,
     pendingPrompt,
+    draftRestore,
     running,
+    finishedTurn,
     busy,
     rejection,
     historyFailed: history.isError,

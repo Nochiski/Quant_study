@@ -556,7 +556,7 @@ describe("AssistStrategySidebar", () => {
     ).toBeInTheDocument();
   });
 
-  it("진행 중 턴이 있으면 닫기 전에 취소를 확인한다", async () => {
+  it("진행 중 턴이 있으면 닫기를 막고 무엇을 확인하는지 설명한다", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     mount({ onClose });
@@ -568,22 +568,59 @@ describe("AssistStrategySidebar", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent("진행 중인 답변이 있습니다");
     expect(onClose).not.toHaveBeenCalled();
+    // 대화상자 이름만으로는 무엇을 묻는지 알 수 없다 — 본문을 설명으로 잇는다.
+    expect(dialog).toHaveAccessibleDescription(/진행 중인 답변이 있습니다/);
     // 처음 초점은 답변을 버리지 않는 쪽에 둔다.
     expect(
       within(dialog).getByRole("button", { name: "계속 두기" }),
     ).toHaveFocus();
+  });
 
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(onClose).not.toHaveBeenCalled();
+  it("Escape로 확인을 물리면 초점이 닫기 버튼으로 돌아온다", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mount({ onClose });
+    await ask(user);
 
     await user.click(
       await screen.findByRole("button", { name: "사이드바 닫기" }),
     );
+    await screen.findByRole("alertdialog");
+    await user.keyboard("{Escape}");
 
-    await user.click(within(dialog).getByRole("button", { name: "계속 두기" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     expect(cancelled).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "사이드바 닫기" })).toHaveFocus();
+  });
+
+  it("계속 두기는 대화상자만 닫고 턴을 취소하지 않는다", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mount({ onClose });
+    await ask(user);
+
+    await user.click(
+      await screen.findByRole("button", { name: "사이드바 닫기" }),
+    );
+    // 대화상자는 조건 렌더라 다시 열 때마다 새 노드다 — 그때그때 다시 잡는다.
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "계속 두기",
+      }),
+    );
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(cancelled).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "사이드바 닫기" })).toHaveFocus();
+  });
+
+  it("취소하고 닫기는 턴을 취소한 뒤 닫는다", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mount({ onClose });
+    await ask(user);
 
     await user.click(
       await screen.findByRole("button", { name: "사이드바 닫기" }),
@@ -608,6 +645,94 @@ describe("AssistStrategySidebar", () => {
     );
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("진행 중 턴이 있다고 서버가 거절하면 질문을 입력칸으로 되돌린다", async () => {
+    server.use(
+      http.post(`${API}/api/v1/assistant/sessions/:sessionId/turns`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "assistant.turn_in_progress",
+              message: "",
+              turn_id: "t-other",
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    mount();
+    const input = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    await user.type(input, "길게 쓴 질문");
+    await user.keyboard("{Enter}");
+
+    expect(
+      await screen.findByText(/진행 중인 답변이 있어 보내지 못했습니다/),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(input).toHaveValue("길게 쓴 질문"));
+  });
+
+  it("출처 링크는 제목 옆에 실제 도착지 호스트를 보인다", async () => {
+    const user = userEvent.setup();
+    mount();
+    const connection = await ask(user);
+    connection.push({
+      sequence: 0,
+      turn_id: "t-1",
+      event: {
+        type: "search_activity",
+        query: "공시",
+        sources: [
+          {
+            title: "금융감독원 공시 https://dart.fss.or.kr",
+            url: "https://dart-fss.example-evil.com/notice",
+          },
+        ],
+      },
+    });
+
+    expect(
+      await screen.findByText(/dart-fss\.example-evil\.com/),
+    ).toBeInTheDocument();
+  });
+
+  it("스트리밍 본문은 라이브 영역 밖이고 완료는 상태로 한 번 알린다", async () => {
+    const user = userEvent.setup();
+    mount();
+    const connection = await ask(user);
+    connection.push(textDelta(0, "본문"));
+
+    const body = await screen.findByText("본문");
+    expect(body).toHaveAttribute("aria-live", "off");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "답변을 작성하는 중입니다",
+    );
+
+    histories["s-new"] = {
+      ...emptyHistory("s-new", "새 대화"),
+      turns: [
+        {
+          turn_id: "t-1",
+          session_id: "s-new",
+          status: "completed",
+          accepted_sequence: -1,
+          started_at: "2026-09-20T00:01:00Z",
+          finished_at: "2026-09-20T00:02:00Z",
+        },
+      ],
+      events: [],
+    };
+    connection.close();
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "답변이 완료되었습니다",
+      ),
+    );
   });
 
   it("대화를 고르면 그 세션의 이력을 보여 준다", async () => {

@@ -1014,6 +1014,12 @@ const ko = {
   "assistant.chat.stream.exhausted":
     "연결이 끊겼습니다. 답변은 서버에서 계속 진행되고 있습니다.",
   "assistant.chat.stream.retry": "다시 연결",
+  "assistant.chat.turnInProgress":
+    "진행 중인 답변이 있어 보내지 못했습니다. 답변이 끝나면 다시 보내세요.",
+  "assistant.chat.finished": "답변이 완료되었습니다.",
+  "assistant.chat.finished.proposal":
+    "답변이 완료되었습니다. 전략 제안이 도착했습니다.",
+  "assistant.chat.source.host": "도착지 {host}",
   "assistant.chat.stream.dropped":
     "표시하지 못한 진행 정보가 있습니다. 서버와 화면의 이벤트 계약이 어긋났을 수 있습니다.",
   "assistant.chat.proposal.compileOk": "검증 통과",
@@ -2068,6 +2074,12 @@ export const messages = {
     "assistant.chat.stream.exhausted":
       "The connection dropped. The answer keeps running on the server.",
     "assistant.chat.stream.retry": "Reconnect",
+    "assistant.chat.turnInProgress":
+      "An answer is still running, so this message was not sent. Send it again once the answer finishes.",
+    "assistant.chat.finished": "The answer is complete.",
+    "assistant.chat.finished.proposal":
+      "The answer is complete. A strategy proposal arrived.",
+    "assistant.chat.source.host": "goes to {host}",
     "assistant.chat.stream.dropped":
       "Some progress events could not be shown. The server and this screen may disagree on the event contract.",
     "assistant.chat.proposal.compileOk": "Validation passed",

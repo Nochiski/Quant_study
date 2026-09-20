@@ -165,7 +165,13 @@ const AssistTurnBlock = ({
           {turn.searches.length === 0 ? null : (
             <AssistSearchList searches={turn.searches} />
           )}
-          {turn.text === "" ? null : <p className="assist-text">{turn.text}</p>}
+          {turn.text === "" ? null : (
+            // 델타마다 같은 텍스트 노드가 갈리므로 라이브 영역에서 뺀다 — 그러지 않으면 토큰 하나마다
+            // 누적된 문단 전체가 다시 낭독된다. 진행·완료는 사이드바의 status가 한 번씩 알린다.
+            <p className="assist-text" aria-live="off">
+              {turn.text}
+            </p>
+          )}
           {proposal === null ? null : (
             <AssistProposalCard
               proposal={proposal}
@@ -200,7 +206,11 @@ const AssistTurnBlock = ({
 /**
  * 대화 본문.
  *
- * `role="log"` + `aria-live="polite"`라 스트리밍으로 붙는 텍스트가 보조 기술에 이어서 읽힌다.
+ * `role="log"`는 "대화가 한 덩어리 늘었다"만 알린다. `aria-relevant="additions"`로 추가만 보고,
+ * 토큰마다 갈리는 스트리밍 본문과 제안 카드는 `aria-live="off"`로 빼 둔다 — 그러지 않으면 델타
+ * 하나마다 누적된 문단 전체가 다시 낭독된다(B-03 리뷰 P2). 진행과 완료는 사이드바의 `role="status"`
+ * 영역이 한 번씩 알린다.
+ *
  * 서버가 보낸 문자열은 전부 React 자식으로만 들어가므로 HTML로 해석될 자리가 없다.
  */
 export const AssistTranscript = ({
@@ -216,6 +226,7 @@ export const AssistTranscript = ({
     className="assist__log"
     role="log"
     aria-live="polite"
+    aria-relevant="additions"
     aria-label={t("assistant.chat.log")}
   >
     {entries.map((entry) => (

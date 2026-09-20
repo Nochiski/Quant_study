@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
@@ -54,9 +54,11 @@ export const AssistStrategySidebar = ({
   onClose,
 }: AssistStrategySidebarProps) => {
   const titleId = useId();
+  const confirmTextId = useId();
   const providers = useQuery(assistantProvidersQuery());
   const chat = useAssistChat({ documentRef, readContext });
   const [closeConfirm, setCloseConfirm] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const hasActiveProvider =
     providers.data?.profiles.some((profile) => profile.active) ?? false;
@@ -78,11 +80,29 @@ export const AssistStrategySidebar = ({
     setCloseConfirm(true);
   };
 
+  /** 확인을 물리면 초점을 부른 자리로 되돌린다 — 대화상자가 사라지며 body로 떨어지지 않게. */
+  const dismissConfirm = () => {
+    setCloseConfirm(false);
+    closeButtonRef.current?.focus();
+  };
+
   const cancelAndClose = () => {
     chat.cancel();
     setCloseConfirm(false);
     onClose?.();
   };
+
+  /** 진행 상태를 한 번만 알리는 문구. 스트리밍 본문은 라이브 영역 밖이다(B-03 리뷰 P2). */
+  const announcement =
+    chat.running !== null
+      ? t("assistant.chat.running")
+      : chat.finishedTurn === null
+        ? null
+        : t(
+            chat.finishedTurn.proposal === null
+              ? "assistant.chat.finished"
+              : "assistant.chat.finished.proposal",
+          );
 
   return (
     <aside className="assist" aria-labelledby={titleId}>
@@ -96,7 +116,12 @@ export const AssistStrategySidebar = ({
               className="assist__sessions"
               aria-label={t("assistant.chat.session")}
               value={chat.sessionId ?? ""}
-              onChange={(event) => chat.selectSession(event.target.value)}
+              onChange={(event) =>
+                // 빈 값은 "아직 서버에 없는 대화"다. 세션 id로 넘기면 빈 id를 조회한다.
+                event.target.value === ""
+                  ? chat.startNewSession()
+                  : chat.selectSession(event.target.value)
+              }
             >
               {chat.sessionId === null ? (
                 <option value="">{t("assistant.chat.session.new")}</option>
@@ -113,6 +138,7 @@ export const AssistStrategySidebar = ({
           </Button>
           {onClose === undefined ? null : (
             <Button
+              ref={closeButtonRef}
               size="small"
               tone="ghost"
               aria-label={t("assistant.chat.close")}
@@ -129,11 +155,12 @@ export const AssistStrategySidebar = ({
           className="assist__confirm"
           role="alertdialog"
           aria-label={t("assistant.chat.close")}
+          aria-describedby={confirmTextId}
           onKeyDown={(event) => {
-            if (event.key === "Escape") setCloseConfirm(false);
+            if (event.key === "Escape") dismissConfirm();
           }}
         >
-          <p className="assist__confirm-text">
+          <p className="assist__confirm-text" id={confirmTextId}>
             {t("assistant.chat.close.confirm")}
           </p>
           <div className="assist__confirm-actions">
@@ -145,7 +172,7 @@ export const AssistStrategySidebar = ({
               size="small"
               tone="ghost"
               autoFocus
-              onClick={() => setCloseConfirm(false)}
+              onClick={dismissConfirm}
             >
               {t("assistant.chat.close.confirm.cancel")}
             </Button>
@@ -230,12 +257,13 @@ export const AssistStrategySidebar = ({
               {t("assistant.chat.stream.dropped")}
             </p>
           )}
-          {chat.running === null ? null : (
+          {announcement === null ? null : (
             <p className="assist__progress" role="status">
-              {t("assistant.chat.running")}
+              {announcement}
             </p>
           )}
           <AssistComposer
+            restore={chat.draftRestore}
             running={chat.running !== null}
             busy={chat.busy}
             onSend={chat.send}

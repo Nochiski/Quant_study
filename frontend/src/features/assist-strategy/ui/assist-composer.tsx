@@ -1,9 +1,12 @@
 import { useId, useState, type KeyboardEvent } from "react";
 
 import { t } from "../../../shared/config";
+import type { AssistDraftRestore } from "../model/use-assist-chat";
 import { Button } from "../../../shared/ui";
 
 type AssistComposerProps = {
+  /** 서버가 받지 않아 되돌아온 질문. `nonce`가 바뀔 때만 입력칸을 다시 채운다. */
+  restore: AssistDraftRestore | null;
   /** 진행 중 턴이 있으면 전송 대신 중지를 보여 준다. */
   running: boolean;
   /** 세션 생성·턴 시작 요청이 도는 중. 같은 질문을 두 번 보내지 않게 막는다. */
@@ -20,6 +23,7 @@ type AssistComposerProps = {
  * 보내 버린다.
  */
 export const AssistComposer = ({
+  restore,
   running,
   busy,
   onSend,
@@ -27,6 +31,14 @@ export const AssistComposer = ({
 }: AssistComposerProps) => {
   const inputId = useId();
   const [text, setText] = useState("");
+  const [restoredNonce, setRestoredNonce] = useState<number | null>(null);
+
+  // 되돌아온 질문을 렌더 중에 입력칸으로 옮긴다. effect로 미루면 빈 칸이 한 프레임 보이고,
+  // 그 사이 타이핑은 다음 렌더에 덮인다(`frontend-react-effects.md`).
+  if (restore !== null && restore.nonce !== restoredNonce) {
+    setRestoredNonce(restore.nonce);
+    setText(restore.text);
+  }
 
   const submit = () => {
     if (running || busy || text.trim() === "") return;

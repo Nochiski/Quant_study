@@ -13,6 +13,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
+from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
+from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
@@ -117,6 +120,7 @@ from strategy_workbench.domain.strategy.facade.explanation import StrategyExplan
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
 
+from ._assistant_routes import register_assistant_routes
 from ._backtest_contract import (
     Backtest422Response,
     BacktestResultNotReadyResponse,
@@ -249,8 +253,17 @@ def create_app(
     portfolio_design: PortfolioDesignService,
     strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
+    assistant_profiles: ProviderProfileService | None = None,
+    assistant_chat: AssistantChatService | None = None,
+    assistant_turns: AssistantTurnRunner | None = None,
     allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
 ) -> FastAPI:
+    """Compose the HTTP surface; the assistant routes appear only when their services arrive.
+
+    The three assistant services travel together: a container that builds one builds all three.
+    Tests that never touch `/api/v1/assistant` keep passing none of them, and the routes are then
+    absent rather than present-and-failing.
+    """
     app = FastAPI(
         title="Quant Strategy Workbench API",
         version="0.1.0",
@@ -1029,6 +1042,11 @@ def create_app(
             raise _strategy_not_found(error) from error
         except StrategyRevisionConflictError as error:
             raise _revision_conflict(error) from error
+
+    if assistant_profiles and assistant_chat and assistant_turns:
+        register_assistant_routes(
+            app, profiles=assistant_profiles, chat=assistant_chat, turns=assistant_turns
+        )
 
     # FastAPI sees plain dataclasses, while this inbound adapter owns wire-only constraints and
     # discriminator metadata. Mutate the cached schema once after every route is registered.

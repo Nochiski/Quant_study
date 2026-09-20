@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P2-01
-active_prs: [P0-01, P1-01, P1-02, P2-01]
-parallel_window: [P0-01, P1-01, P1-02, P2-01]
-last_updated: 2026-09-21T00:35:56+09:00
+current_pr: P0-01,P1-01,P1-02,P2-01,P2-02
+active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02]
+parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02]
+last_updated: 2026-09-21T01:00:44+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 1
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P2-01` |
-| Active PR | `P0-01, P1-01, P1-02, P2-01` |
+| Current/next PR | `P0-01,P1-01,P1-02,P2-01,P2-02` |
+| Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `1 / 28` |
-| Aggregated at | `2026-09-21 00:35 KST` |
+| Aggregated at | `2026-09-21 01:00 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -81,7 +81,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 0 | `APPROVED` |
 | P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_PROGRESS` |
-| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_REVIEW` |
+| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `SELF_CHECK` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
@@ -138,6 +138,58 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
   `tests/integration/test_truthful_pipeline.py`·`test_backtest_http_api.py`·
   `test_backtest_strategy_reference_http_api.py`
 
+| 항목 | 값 |
+|---|---|
+| PR | `P2-02` |
+| Intent | 결측 정책을 팩터 그래프에서 실행 설정으로 옮기되 plan의 일부로 남긴다 |
+| Acceptance | WORKFLOW P2-02 |
+| Non-goals | `data`·`execution` 제거·`schema_version` 1.2(P2-03), 업그레이더(P2-09), frontend 실행 설정 배선(P3-01) |
+| Branch/worktree | `feat/lang2-p2-02-missing-policy` / `wt-lang2-p2-02` |
+| Base SHA | `fff33fd` (`feat/lang2-p2-01-run-environment`) |
+| Head SHA | `6692d9d` (코드 마지막 커밋. 브랜치 head는 이 PLAN 갱신 커밋) |
+| Diff stat | 커밋 4개 · 29파일(신규 1). `e3dd414` domain·application 배선과 계약 산출물(23파일) → `13fc203` 생성 SDK(1파일) → `78b9c5c` frontend 카탈로그 소비자(5파일) → `6692d9d` 포매팅 부채 정리(2파일, 동작 불변) |
+| Focused tests | `uv run pytest tests/domain/test_factor_missing_policy.py tests/domain/test_run_environment.py tests/domain/test_factor_trace.py tests/architecture tests/application/test_run_environment_wiring.py -q` |
+| Full gate | backend `uv run pytest -q`(1548 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 21개 clean, 저장소의 기존 부채 21파일은 그대로) · `pyright`(0 errors, `uv sync --all-extras` 후) / frontend `npm run api:generate`(diff 0)·`typecheck`·`lint`·`test`(639, 57파일)·`build` / `uv run --project backend pytest database/tests/test_equity_s21_workbench.py -q`(14 passed) |
+
+작업 파일(신규 1 + 수정 28):
+
+- 신규 backend tests — `tests/domain/test_factor_missing_policy.py`
+- domain/factor — `_nodes.py`(`missing_policy`에 `x-deprecated` 마커), `_planning.py`·`_evaluation.py`·
+  `_trace.py`(`missing` 키워드 인자), `_registry.py`(`FactorDefinition.missing_policy` 제거)
+- domain/strategy — `_schema.py`(`x-deprecated` 마커와 `FieldContract.deprecated`)
+- domain/backtest — `_bridge.py`(`_missing_from_legacy_factors`,
+  `LegacyMissingPolicyConflictError`), `facade/environment.py`
+- application — `portfolio_design/_service.py`(`_prepare`가 검증 뒤 실행 설정을 해소해
+  `_PreparedPipeline.environment`로 돌려줌)·`_trace_service.py`, `backtest_run/_service.py`,
+  `factor_research/_models.py`·`_service.py`(연구 요청이 `missing`을 직접 가짐)
+- 계약 산출물 — `backend/openapi.json`, `tests/fixtures/strategy_documents/runtime-schema.json`,
+  `frontend/src/shared/api/generated/types.gen.ts`
+- frontend 소비자 — `contract-inspector.tsx`(팩터 카탈로그 결측 정책 행 제거), `messages.ts`,
+  테스트 fixture 3개
+- 기존 테스트 갱신 — `tests/domain/test_factor_research.py`·`test_factor_trace.py`·
+  `test_run_environment.py`·`test_strategy_schema.py`,
+  `tests/architecture/test_run_environment_ownership.py`,
+  `tests/application/test_run_environment_wiring.py`,
+  `tests/integration/test_truthful_pipeline.py`
+
+P2-02 결정 3건(WORKFLOW 원문과 다르게 간 곳):
+
+1. **`FactorGraph.missing_policy`를 물리 삭제하지 않고 `x-deprecated`로 표시했다.** WORKFLOW
+   P2-02는 "`FactorGraph`에서 `missing_policy` 제거"라고 적지만, `CURRENT_SCHEMA_VERSION`이 아직
+   `"1.1"`이라 필드를 지우면 1.1 문서가 `structure.unknown_field`로 깨지고 1.0 → 1.1 업그레이드
+   출력(`quality_momentum.v1_1.commented.yaml`, WORKFLOW가 "건드리지 않는다"고 못 박은 fixture)이
+   곧바로 compile 실패가 된다(`tests/application/test_strategy_authoring_upgrade.py`가
+   `not upgraded.compiled.diagnostics`를 단언). spec D3 S3의 "unknown key"는 1.2 문법 변경표의
+   항목이므로 물리 제거는 `CURRENT_SCHEMA_VERSION` 1.2와 업그레이더가 함께 오는 P2-03·P2-09에서
+   한다. 이 PR이 고정하는 invariant(소비자 0건·`plan_hash` 분기)는 그대로 달성된다.
+2. **팩터별 값 충돌은 warning이 아니라 거부다.** spec D7의 업그레이더 규칙은 "첫 팩터 값 + warning"
+   이지만, 런타임 브리지가 같은 규칙을 쓰면 팩터 일부가 조용히 다른 결측 처리로 계산된다. 명시
+   `environment`를 주면 통과하는 경로가 있으므로 거부해도 막다른 길이 아니다. P2-09 업그레이더는
+   spec대로 warning을 낸다.
+3. **`FactorGraphRequest`·`FactorPreviewRequest`가 `missing`을 갖는다.** 팩터 연구는 전략 실행
+   설정 밖에서 도는 sandbox라 `RunEnvironment`가 없다. WORKFLOW의 소비자 목록에는 없지만
+   `compile_factor_plan` 호출자라 어디선가는 정책을 말해야 한다.
+
 ---
 
 ## P0 — 기획 패키지와 계약 문서
@@ -171,7 +223,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_REVIEW` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · 2차 APPROVE 대상 `1e0b095` + P3 후속 커밋 1개 · 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 반영, 2차 APPROVE(P3 6 → 코드 2 반영, 문서 3 이관, 본문 1 리드). 커밋 7개(backend 3 + 생성 SDK 1 + 리뷰 반영 3). 31파일은 12절 상한(8파일)을 넘어 논리 단위로 쪼갰다 — 모델·브리지 / 세 요청 배선 / 스키마 엔드포인트, 그리고 CI `api:generate` 게이트가 요구하는 생성 SDK. 게이트: pytest 1494·ruff·pyright(duckdb 4건 기존) · frontend typecheck·lint·Vitest 639·build |
-| [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `WAITING` | — |
+| [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `SELF_CHECK` | 구현 완료·게이트 통과, 리뷰 대기. 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy`, head `6692d9d`(뒤에 이 문서 커밋 1개). 커밋 4개(backend 1 + 생성 SDK 1 + frontend 소비자 1 + style 1). 게이트: pytest 1548 · ruff · pyright 0 · frontend typecheck·lint·Vitest 639·build · `api:generate` diff 0 |
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `WAITING` | — |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `WAITING` | — |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `WAITING` | — |

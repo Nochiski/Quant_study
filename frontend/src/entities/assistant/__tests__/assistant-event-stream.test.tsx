@@ -167,6 +167,8 @@ afterEach(() => {
 type Harness = {
   target: AssistantStreamTarget | null;
   lastSequence: number;
+  /** 재시도 대기만 바꿔 다시 여는 경로를 확인할 때 쓴다. */
+  retryDelayMs?: number;
 };
 
 const onEvent = vi.fn<(item: AssistantEventEnvelopeView) => void>();
@@ -197,7 +199,7 @@ const mount = (initial: Harness) => {
         onHistory,
         onClose,
         // 재시도 대기를 1ms로 줄인다 — 기본 3초는 재연결 경로를 테스트할 수 없게 만든다.
-        retryDelayMs: 1,
+        retryDelayMs: props.retryDelayMs ?? 1,
       }),
     { wrapper, initialProps: initial },
   );
@@ -380,23 +382,27 @@ describe("어시스턴트 SSE 리더", () => {
     mount({ target, lastSequence: -1 });
     await waitFor(() => expect(connections).toHaveLength(1));
 
-    connections[0].pushFrame(
-      `id: 0
+    for (const sequence of [0, 1, 2]) {
+      connections[0].pushFrame(
+        `id: ${sequence}
 event: assistant
 data: ${JSON.stringify({
-        sequence: 0,
-        turn_id: TURN,
-        event: { type: "brand_new_event" },
-      })}
+          sequence,
+          turn_id: TURN,
+          event: { type: "brand_new_event" },
+        })}
 
 `,
-    );
-    connections[0].push(envelope(1, "정상 프레임"));
+      );
+    }
+    connections[0].push(envelope(3, "정상 프레임"));
     await waitFor(() => expect(onEvent).toHaveBeenCalledTimes(1));
 
     connections[0].close();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(onClose.mock.calls[0][0]).toMatchObject({ droppedFrames: 1 });
+    expect(onClose.mock.calls[0][0]).toMatchObject({ droppedFrames: 3 });
+    // 같은 갈래는 한 번만 남긴다 — 토큰 단위로 오면 콘솔이 묻힌다.
+    expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("brand_new_event");
     warn.mockRestore();
   });
@@ -439,6 +445,35 @@ data: ${JSON.stringify({
 
     await waitFor(() => expect(attempts[0].signal.aborted).toBe(true));
     expect(attempts).toHaveLength(1);
+  });
+
+  it("떠났다 같은 턴으로 돌아오면 앞 연결의 종료 사유가 되살아나지 않는다", async () => {
+    const view = mount({ target, lastSequence: -1 });
+    await waitFor(() => expect(connections).toHaveLength(1));
+    expect(view.result.current.status).toBe("open");
+
+    connections[0].close();
+    await waitFor(() => expect(view.result.current.status).toBe("ended"));
+
+    // 투영이 비면 대상이 사라지고(세션 이탈), 돌아와 이력을 다시 읽으면 같은 턴이 다시 선다.
+    view.rerender({ target: null, lastSequence: -1 });
+    expect(view.result.current.status).toBe("idle");
+
+    view.rerender({ target, lastSequence: -1 });
+    await waitFor(() => expect(connections).toHaveLength(2));
+    expect(view.result.current.status).toBe("open");
+  });
+
+  it("재시도 설정만 바뀌어 다시 열려도 앞 사유가 남지 않는다", async () => {
+    const view = mount({ target, lastSequence: -1 });
+    await waitFor(() => expect(connections).toHaveLength(1));
+
+    connections[0].close();
+    await waitFor(() => expect(view.result.current.status).toBe("ended"));
+
+    view.rerender({ target, lastSequence: -1, retryDelayMs: 2 });
+    await waitFor(() => expect(connections).toHaveLength(2));
+    expect(view.result.current.status).toBe("open");
   });
 
   it("세션을 바꾸면 앞 세션 연결을 끊고 새 세션으로 연다", async () => {

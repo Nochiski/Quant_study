@@ -72,13 +72,19 @@ export type UseAssistantEventStreamOptions = {
    * 이미 반영한 마지막 sequence. 최초 연결의 `after_sequence`로 나간다.
    *
    * 이력을 읽고 연 사이드바에서는 이 값이 턴 시작 응답의 `accepted_sequence`와 같다(둘 다 턴
-   * 직전 세션의 마지막 번호다). 이력 없이 연 경우에는 더 앞이라 서버가 이미 반영한 프레임을 몇 개
-   * 다시 보내는데, 리듀서가 턴별 watermark로 무시한다.
+   * 직전 세션의 마지막 번호다). 이력 없이 연 경우에는 번호가 그보다 앞이라 서버가 그 턴의 앞부분을
+   * 다시 흘리는데, 아직 반영한 적이 없으므로 그대로 적용된다 — 흘려보내는 것보다 안전하다. 중복이
+   * 실제로 겹치는 자리는 이력 병합이고, 거기서는 턴별 watermark가 막는다.
    */
   lastSequence: number;
   onEvent: (envelope: AssistantEventEnvelopeView) => void;
   /** 스트림이 닫힌 뒤 이력으로 확정한 결과. 턴의 최종 상태는 여기서만 온다(spec D3). */
   onHistory: (history: SessionHistoryView) => void;
+  /**
+   * 스트림이 닫히고 **이력 복구까지 끝난 뒤** 온다(`turnStatus`·`recovered`를 채우려면 그 순서여야
+   * 한다). 그 사이에 대상이 바뀌거나 언마운트되면 오지 않으므로 자원 정리를 여기에 걸지 않는다 —
+   * 정리는 `status`와 effect cleanup의 몫이다(리뷰 R2-6).
+   */
   onClose?: (close: AssistantStreamClose) => void;
   maxRetryAttempts?: number;
   /** 첫 재시도까지의 대기(ms). 생략하면 생성 SSE 클라이언트 기본값. */
@@ -93,20 +99,25 @@ export type UseAssistantEventStreamResult = {
    * 훅은 상한을 소진한 뒤 스스로 되살아나지 않는다. 되살릴지는 화면이 정한다 — 턴이 아직
    * `running`인지, 사용자가 사이드바를 보고 있는지는 화면만 안다. 훅이 무한히 다시 열면 서버가
    * 죽은 동안 탭이 조용히 재연결을 반복한다(리뷰 P1-1).
+   *
+   * `status`가 `open`일 때 부르면 **살아 있는 연결을 끊고 처음부터 다시 연다.** 보통은 `status`가
+   * 종료 사유(`exhausted`가 대표)일 때만 부른다(리뷰 R2-7).
    */
   retry: () => void;
 };
 
 /** 좁히지 못한 프레임을 로그에 남길 때 쓰는 최소 단서. 본문은 싣지 않는다. */
-const frameLabel = (frame: unknown): string => {
-  if (typeof frame !== "object" || frame === null) return `frame=${typeof frame}`;
+const frameLabel = (frame: unknown): { type: string; text: string } => {
+  if (typeof frame !== "object" || frame === null) {
+    return { type: typeof frame, text: `frame=${typeof frame}` };
+  }
   const sequence = "sequence" in frame ? String(frame.sequence) : "-";
   const event = "event" in frame ? frame.event : null;
   const type =
     typeof event === "object" && event !== null && "type" in event
       ? String(event.type)
       : "-";
-  return `sequence=${sequence} type=${type}`;
+  return { type, text: `sequence=${sequence} type=${type}` };
 };
 
 /**
@@ -135,13 +146,28 @@ export const useAssistantEventStream = ({
   const sessionId = target?.sessionId ?? null;
   const turnId = target?.turnId ?? null;
   const [attempt, setAttempt] = useState(0);
-  // 닫힌 사유는 스트림 한 번(세션·턴·재시도 횟수)에 매인다. 상태를 effect 본문에서 동기로 쓰지 않고
-  // 이 값에서 파생하면 연결이 바뀔 때 옛 사유가 남지 않는다(`react-hooks/set-state-in-effect`).
-  const streamKey = `${sessionId ?? "-"}:${turnId ?? "-"}:${attempt}`;
+  /**
+   * 연결을 다시 여는 입력. 이 문자열이 바뀌면 새 스트림이고, 앞 연결의 종료 사유는 버려야 한다.
+   *
+   * 종료 사유를 이 입력에 매달면 안 된다 — 같은 조합이 다시 나타나기 때문이다(진행 중 턴을 두고
+   * 세션을 떠났다 돌아오면 `attempt`가 0인 채로 같은 세션·턴이 다시 선다). 그래서 사유는 아래
+   * **단조 증가하는 실행 번호**에 매단다(리뷰 R2-1).
+   */
+  const streamInputs = `${sessionId ?? "-"}:${turnId ?? "-"}:${attempt}:${maxRetryAttempts}:${retryDelayMs ?? "-"}`;
+  const [openedFor, setOpenedFor] = useState(streamInputs);
+  const [run, setRun] = useState(0);
   const [closed, setClosed] = useState<{
-    streamKey: string;
+    run: number;
     reason: AssistantStreamCloseReason;
   } | null>(null);
+
+  if (openedFor !== streamInputs) {
+    // 렌더 중 상태 조정 — React가 "입력이 바뀔 때 상태를 버리는" 자리로 권하는 형태다. effect로
+    // 미루면 새 연결이 열린 렌더에서 옛 사유가 한 번 보이고, effect 본문의 setState는 lint가 막는다.
+    setOpenedFor(streamInputs);
+    setRun(run + 1);
+    setClosed(null);
+  }
   const lastSequenceRef = useCommittedRef(lastSequence);
   const onEventRef = useCommittedRef(onEvent);
   const onHistoryRef = useCommittedRef(onHistory);
@@ -155,6 +181,9 @@ export const useAssistantEventStream = ({
     let rejection: AssistantStreamRejection | null = null;
     let lastOutcomeOk = false;
     let droppedFrames = 0;
+    // 좁히지 못한 갈래는 처음 볼 때만 남긴다. 서버가 늘린 갈래가 토큰 단위로 오면 한 턴에 수백 줄이
+    // 쌓여 정작 봐야 할 경고가 묻힌다 — 개수는 `droppedFrames`가 전한다(리뷰 R2-5).
+    const warnedFrameTypes = new Set<string>();
 
     const recover = async (): Promise<SessionHistoryView | null> => {
       try {
@@ -195,9 +224,13 @@ export const useAssistantEventStream = ({
             // 버리는 것 자체는 옳다(누적 텍스트에 `undefined`가 섞이는 것보다 낫다). 다만 서버가
             // 갈래를 늘렸을 때 화면이 조용히 비어 가는 것을 막으려면 흔적이 필요하다.
             droppedFrames += 1;
-            console.warn(
-              `어시스턴트 SSE 프레임을 좁히지 못해 버린다 — session_id=${sessionId} ${frameLabel(frame)}`,
-            );
+            const label = frameLabel(frame);
+            if (!warnedFrameTypes.has(label.type)) {
+              warnedFrameTypes.add(label.type);
+              console.warn(
+                `어시스턴트 SSE 프레임을 좁히지 못해 버린다 — session_id=${sessionId} ${label.text}`,
+              );
+            }
             continue;
           }
           onEventRef.current(envelope);
@@ -222,7 +255,7 @@ export const useAssistantEventStream = ({
         recovered: history !== null,
         droppedFrames,
       });
-      setClosed({ streamKey, reason });
+      setClosed({ run, reason });
     };
 
     void read();
@@ -230,9 +263,9 @@ export const useAssistantEventStream = ({
     // 콜백·lastSequence는 committed ref로 읽으므로 스트림을 다시 열 이유가 아니다. `attempt`는
     // 화면이 `retry()`로 올리는 재연결 손잡이다.
   }, [
+    run,
     sessionId,
     turnId,
-    streamKey,
     maxRetryAttempts,
     retryDelayMs,
     queryClient,
@@ -245,7 +278,7 @@ export const useAssistantEventStream = ({
   const status: AssistantStreamStatus =
     sessionId === null || turnId === null
       ? "idle"
-      : closed !== null && closed.streamKey === streamKey
+      : closed !== null && closed.run === run
         ? closed.reason
         : "open";
 

@@ -5,6 +5,8 @@ paths:
   - "docs/superpowers/specs/*strategy-workbench*"
   - "docs/superpowers/specs/2026-09-04-*-adr.md"
   - "docs/planning/strategy-workbench-yaml-ui/**"
+  - "docs/planning/ai-assistant/**"
+  - "docs/superpowers/specs/2026-09-20-ai-assistant-design.md"
 ---
 
 # Strategy Workbench의 사실은 한 곳만 소유한다
@@ -32,16 +34,16 @@ paths:
 | 후보 선택 | 명시적인 사용자 selection record | composite score는 view일 뿐 |
 | 미저장 편집 상태·그래프 좌표 | frontend feature/local UI state | 서버 정본으로 승격 금지 |
 | 저장된 authoring source 텍스트·`source_hash` | strategy revision envelope (`source`, `source_hash`) | 서버는 exact text를 그대로 보관, UI는 표시·편집 시작점으로만 사용 |
-| 편집기 source 트랜잭션(범위 계산·들여쓰기 폭·EOL·빈 컨테이너 표기) | `features/edit-strategy/model/source-transactions.ts`의 `planSourceOperation` | 범위는 `shared/lib/yaml12`의 `parseSource`가 낸 `valueRanges`/`keyRanges` offset을 그대로 쓰고 CST를 다시 걷지 않는다. 모든 연산은 완성된 다음 원문을 `parseSource`로 preflight하고 tree가 `applyToTree` 결과와 같을 때만 성공을 반환한다. 스니펫·Form·Graph는 이 함수에 연산을 넘기기만 하고 fragment 문자열을 직접 조립하지 않는다. 연산 여러 개(빈 그래프의 첫 노드 + 출력 지정)는 `planSourceOperations`가 같은 함수로 순차 계획해 편집 한 번으로 합친다. flow 표기(`{ … }`·`[ … ]`) 컨테이너에 키·항목을 넣거나 거기서 지울 때는 가장 바깥 flow 컨테이너부터 block으로 다시 쓰고, 지워서 비면 `{}`/`[]`를 그 자리에 둔다(루트 flow 포함). flow 안 주석은 보존하지 않고 컨테이너 뒤 줄 끝 주석·`key:`/`-` 줄·그 사이 자기 줄 주석은 남기며, preflight가 tree 동치를 검증한다. source 트랜잭션의 편집기 적용(`replaceRange` 한 번·feedback scope)은 `use-source-transactions.ts`의 `useSourceTransactions` 하나가 하고, 스니펫 훅은 그 `run`을 쓴다(backend 업그레이드 응답 적용 `use-upgrade-document.ts`는 아래 '금지' 절이 따로 허용한 전체 범위 교체다). Form·Graph는 `enabled`가 참일 때만 연산을 넘긴다(계획은 편집기 live 텍스트로 세우므로 stale pointer는 preflight가 잡지 못한다). 편집기(CodeMirror 적재)는 CRLF를 LF로 정규화하고 보존하지 않는다 — 편집 없이 저장해도 `source_hash`는 바뀔 수 있고 `spec_hash`는 불변이다(Phase 5 감사 P5X-005 결정, 매뉴얼 4절 안내). `planSourceOperation`의 `detectEol`(`Eol`)은 CRLF를 감지·보존하지만 계획 입력이 항상 편집기 live 텍스트라 실전에서는 `\n`만 관측된다 — 편집기를 우회하는 적재 경로가 생기면 그때 유효해지는 방어이며(P3-01 리뷰 P2-9), 죽은 코드가 아니다 |
+| 편집기 source 트랜잭션(범위 계산·들여쓰기 폭·EOL·빈 컨테이너 표기) | `features/edit-strategy/model/source-transactions.ts`의 `planSourceOperation` | 범위는 `shared/lib/yaml12`의 `parseSource`가 낸 `valueRanges`/`keyRanges` offset을 그대로 쓰고 CST를 다시 걷지 않는다. 모든 연산은 완성된 다음 원문을 `parseSource`로 preflight하고 tree가 `applyToTree` 결과와 같을 때만 성공을 반환한다. 스니펫·Form·Graph는 이 함수에 연산을 넘기기만 하고 fragment 문자열을 직접 조립하지 않는다. 연산 여러 개(빈 그래프의 첫 노드 + 출력 지정)는 `planSourceOperations`가 같은 함수로 순차 계획해 편집 한 번으로 합친다. flow 표기(`{ … }`·`[ … ]`) 컨테이너에 키·항목을 넣거나 거기서 지울 때는 가장 바깥 flow 컨테이너부터 block으로 다시 쓰고, 지워서 비면 `{}`/`[]`를 그 자리에 둔다(루트 flow 포함). flow 안 주석은 보존하지 않고 컨테이너 뒤 줄 끝 주석·`key:`/`-` 줄·그 사이 자기 줄 주석은 남기며, preflight가 tree 동치를 검증한다. source 트랜잭션의 편집기 적용(`replaceRange` 한 번·feedback scope)은 `use-source-transactions.ts`의 `useSourceTransactions` 하나가 하고, 스니펫 훅은 그 `run`을 쓴다(backend 업그레이드 응답 적용 `use-upgrade-document.ts`와 AI 어시스턴트 제안 적용(B-04)은 아래 '금지' 절이 따로 허용한 전체 범위 교체다 — 둘 다 `replaceRange(0, length, text)`로 history를 격리하고 응답 도착 시 편집기 텍스트가 요청 시점과 다르면 적용하지 않는다). Form·Graph는 `enabled`가 참일 때만 연산을 넘긴다(계획은 편집기 live 텍스트로 세우므로 stale pointer는 preflight가 잡지 못한다). 편집기(CodeMirror 적재)는 CRLF를 LF로 정규화하고 보존하지 않는다 — 편집 없이 저장해도 `source_hash`는 바뀔 수 있고 `spec_hash`는 불변이다(Phase 5 감사 P5X-005 결정, 매뉴얼 4절 안내). `planSourceOperation`의 `detectEol`(`Eol`)은 CRLF를 감지·보존하지만 계획 입력이 항상 편집기 live 텍스트라 실전에서는 `\n`만 관측된다 — 편집기를 우회하는 적재 경로가 생기면 그때 유효해지는 방어이며(P3-01 리뷰 P2-9), 죽은 코드가 아니다 |
 | runtime schema 노드의 필드 표시 사실(type·enum·기본값·범위·format·단위·카탈로그·참조·적용 조건) | `features/edit-strategy/model/schema-navigator.ts`의 `schemaFacts`·`referenceCandidates` | Contract Inspector·Form projection이 같은 함수를 호출하고 typed contract 행이 있으면 그 행이 우선한다. authoring·구조 마커(`x-authoring-*`는 스니펫·목록 항목 이름, `x-defines`는 참조 정의 배열 탐색)는 스니펫·projection·outline이 직접 읽는 별개 계약이다. 스니펫 materialize(`materializeSchemaValue`)는 값 생성을 위해 `const`·`enum`·범위·`default`를 직접 읽으며 P4-03에서 `schema-navigator.ts`로 옮겼다. 편집기 완성(`schema-assist.ts`)도 `x-catalog`/`x-reference`를 `schemaFacts`로 읽는다(P4-03, Phase 3 감사 R5) |
 | YAML 1.2 허용/거부 집합 | `backend/tests/fixtures/strategy_documents/yaml12/manifest.json` | backend codec test와 frontend `yaml` cross-runtime test가 같은 manifest를 실행 |
 | 실행 차단(blocking) 판정 | backend compile diagnostics의 error severity | frontend syntax marker는 advisory, 실행 가능 여부를 판단하지 않음 |
 | authoring 진단 코드 | `strategy.*`는 domain 코드 레지스트리, `structure.*`는 domain hydrate, codec 코드(`document.*`/`yaml.*`/`<format>.syntax`)는 `ports/outgoing/document_codec.py` | frontend는 코드 → 마커 매핑과 422 코드 번역(`upgrade.error.<code>`·`backtest.error.<code>`)만 한다. compile 진단의 `message`는 backend가 한글 문장으로 완성해 보내고 Problems panel은 그대로 보여준다(frontend가 다시 조립·번역하지 않음, Phase 2 감사 DEFECT-P2X-005(b)); 코드를 새로 만들지 않는다 |
 | URL 선택 상태(view/path/date/security) | TanStack Router search (`validateSearch`) | widget은 읽기만, 기본값은 URL에 쓰지 않음 |
 | AI 어시스턴트 공급자 프로파일·활성 여부 | `application/assistant_chat`의 `ProviderProfileRepository` port 뒤 adapter(`assistant_sqlite`) | frontend는 목록·활성 배지만 표시. 키는 프로파일과 분리 저장 |
-| AI 공급자 비밀(API 키) | `adapters/outbound/secrets_local`(사용자 설정 디렉터리, 0600) | backend를 떠나지 않는다. 응답·로그·DB·OpenAPI에 평문 금지, frontend는 꼬리 4자리만 |
+| AI 공급자 비밀(API 키) | `adapters/outbound/secrets_local`(사용자 설정 디렉터리, POSIX 0600 / Windows 현재 사용자 전용 ACL) | backend를 떠나지 않는다. 응답·로그·DB·OpenAPI에 평문 금지, frontend는 꼬리 4자리만 |
 | AI 어시스턴트 도구 정의·시스템 프롬프트·제안 검증 | `application/assistant_chat`(`_prompt.py`, 도구 실행), 도구 이름·스키마 상수는 `domain/assistant` | 공급자 adapter(`llm_anthropic`·`llm_openai`)는 `ToolSpec`을 자기 형식으로 변환하고 루프만 돈다. 공급자 SDK import는 두 adapter 밖 금지(architecture 테스트) |
-| AI 채팅 세션·메시지·이벤트 이력 | `assistant_sqlite` | 사이드바 열림·폭·현재 세션 id는 frontend local UI state. 제안은 사용자의 "적용"으로만 edit-strategy source 트랜잭션에 들어간다 |
+| AI 채팅 세션·턴·메시지·이벤트 이력(sequence) | `assistant_sqlite` | 진행 중 턴 레지스트리·취소 신호는 `application/assistant_chat`의 `AssistantTurnRunner`(프로세스 내, 단일 워커 전제). 사이드바 열림·폭·현재 세션 id·제안 카드의 기준 텍스트는 frontend local UI state. 제안은 사용자의 "적용"으로만, 업그레이드 적용과 같은 편집기 전체 범위 교체(`replaceRange`, stale 가드) 경로로 문서에 들어간다 — source 트랜잭션 행의 두 번째 명시 예외 |
 
 ## 금지
 
@@ -58,5 +60,6 @@ paths:
 - 실패·pruned trial을 결과에서 지우지 않는다. 전체 trial 수와 실패 이유는 audit 대상이다.
 - frontend에 1.0 → 1.1 업그레이드 규칙과 필드 적용 조건표를 복제하지 않는다. 업그레이드는
   `POST /api/v1/strategy-documents/upgrade`가 돌려준 원문을 편집기 범위 교체 한 번으로 적용한다.
+  AI 어시스턴트의 전략 제안도 같은 방식(편집기 전체 범위 교체 한 번 + stale 가드)으로만 적용한다.
 
 같은 사실이 두 위치에서 변경되어야 한다면 구현을 멈추고 owner를 한 곳으로 합친다.

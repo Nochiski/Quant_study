@@ -1,14 +1,16 @@
 # 설계: AI 어시스턴트 — LLM 연결 설정과 전략 사이드바 채팅
 
-> 작성: 2026-09-20
+> 작성: 2026-09-20 (P0-01 리뷰 반영 개정: 제안 적용 경로, 턴·취소 owner, PR 분할, 검색 상한,
+> base_url·비밀 스크럽·렌더 안전 규칙)
 >
 > 상태: Accepted (제품 소유자 요청 2026-09-20: "설정 화면에 클로드·코덱스 연결, 그래프든 YAML이든
 > 우측 사이드바에 AI 채팅창. LLM은 들어온 데이터 + 인터넷 검색으로 시장을 서치해 적절한 전략을
 > 준다. 추후 확장 여지가 있으니 코드 책임 분리를 잘 해 둔다")
 >
-> 관련: [schema 1.2·그래프 표현 설계](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md)
-> (어시스턴트는 그 언어와 실행 설정을 읽고 쓴다), 규칙 `backend-package-boundary.md`,
-> `frontend-fsd.md`, `strategy-workbench-sot.md`
+> 관련 규칙: `backend-package-boundary.md`, `frontend-fsd.md`, `strategy-workbench-sot.md`. 병행
+> initiative: schema 1.2·그래프 표현(PR #167). 어시스턴트는 전략 언어를 runtime schema에서 읽으므로
+> 스키마 버전과 무관하게 동작하지만, 그 initiative가 머지되면 시나리오 fixture(A-07)와 e2e(B-05)를
+> 1.2 문서로 갱신해야 한다.
 >
 > PR 진행은 [docs/planning/ai-assistant/PLAN.md](../../planning/ai-assistant/PLAN.md)
 
@@ -25,39 +27,43 @@ Strategy Workbench는 전략을 YAML 정본과 그래프 표현으로 편집하�
 확장 여지(다른 공급자, 자체 검색, 백테스트 실행 도구, 자율 리서치)를 남기려면 **공급자 SDK와
 도구 실행과 화면이 서로를 모르는 구조**여야 한다.
 
+전제: 이 앱은 로컬 단일 사용자 도구이고 backend는 uvicorn 단일 워커로 돈다. 진행 중 턴 레지스트리와
+취소는 이 전제 위에 있다(D3). 워커를 늘리려면 레지스트리를 프로세스 밖으로 옮겨야 한다.
+
 ## 2. 결정
 
 ### D1. 책임 경계
 
 ```text
-frontend                       backend
-────────────────────────────   ───────────────────────────────────────────────────────
-pages/settings                 adapters/inbound/http_api      /api/v1/assistant/*
-features/configure-ai-providers  │
-features/chat-assistant          ▼
-entities/assistant             application/assistant_chat    유스케이스 + ports/outgoing
-widgets/strategy-ide (슬롯)      │  ├─ LlmProviderPort      ← adapters/outbound/llm_anthropic
-                                 │  ├─ ProviderProfileRepo   ← adapters/outbound/llm_openai
-                                 │  ├─ ProviderSecretStore   ← adapters/outbound/assistant_sqlite
-                                 │  └─ ChatSessionRepo       ← adapters/outbound/secrets_local
-                                 ▼
-                               domain/assistant              순수 타입·도구 계약·제안 검증 규칙
+frontend                          backend
+───────────────────────────────   ─────────────────────────────────────────────────────────
+pages/settings                    adapters/inbound/http_api        /api/v1/assistant/*
+features/configure-ai-providers     │
+features/assist-strategy            ▼
+entities/assistant                application/assistant_chat       유스케이스 + 턴 러너 + ports/outgoing
+widgets/strategy-ide (슬롯)         │
+                                    ├─ LlmProviderPort ──────────── adapters/outbound/llm_anthropic
+                                    │                               adapters/outbound/llm_openai
+                                    ├─ StrategyCompilerPort ──────── bootstrap이 StrategyAuthoringService.compile을 감싼다
+                                    ├─ ProviderProfileRepository ── adapters/outbound/assistant_sqlite
+                                    ├─ ChatSessionRepository ────── adapters/outbound/assistant_sqlite
+                                    └─ ProviderSecretStore ──────── adapters/outbound/secrets_local
+                                    ▼
+                                  domain/assistant                 순수 타입·도구 계약(이름·JSON Schema)
 ```
 
 - **공급자 SDK는 outbound adapter에만 있다.** `anthropic`·`openai` import는
   `adapters/outbound/llm_anthropic`, `llm_openai` 밖에서 금지(architecture 테스트로 강제).
 - **도구는 application이 소유하고 실행한다.** 공급자 adapter는 "도구 정의 목록을 모델에 주고,
-  모델이 부른 도구를 콜백으로 실행해 결과를 돌려주는 루프"만 안다. 어떤 도구가 있고 무엇을
-  하는지는 `application/assistant_chat`이 정한다. 새 도구(백테스트 실행, 자체 검색)는 application에
-  추가하면 모든 공급자에서 동작한다.
+  모델이 부른 도구를 콜백으로 실행해 결과를 돌려주는 루프"만 안다. 새 도구(백테스트 실행, 자체
+  검색)는 application에 추가하면 모든 공급자에서 동작한다.
 - **인터넷 검색은 v1에서 공급자 내장 도구다**(Anthropic `web_search_20260209`, OpenAI Responses
-  `web_search`). 포트에는 `ResearchCapability.WEB_SEARCH`로 선언만 하고, adapter가 자기 방식으로
+  `web_search`). 포트에는 `ResearchCapability.WEB_SEARCH`로 선언만 하고 adapter가 자기 방식으로
   켠다. 자체 검색 adapter는 같은 capability를 application 도구로 구현하는 후속 범위다.
 - **비밀은 backend를 떠나지 않는다.** frontend는 마스킹된 꼬리 4자리와 연결 상태만 본다. 키는
-  로컬 사용자 디렉터리 파일(0600)에 저장하고 저장소·DB 덤프·로그·OpenAPI에 나오지 않는다.
-- **제안은 문서 트랜잭션으로만 적용된다.** 어시스턴트가 문서를 직접 쓰지 않는다. 제안(YAML)을
-  사용자가 "적용"하면 edit-strategy의 전체 범위 교체(업그레이드 적용과 같은 경로)로 들어가고,
-  compile이 검증한다. 자동 적용·자동 실행은 없다.
+  사용자 설정 디렉터리 파일에 저장하고 저장소·DB·로그·응답·OpenAPI에 나오지 않는다(D5).
+- **제안은 사용자의 "적용"으로만 문서에 들어간다.** 어시스턴트가 문서를 직접 쓰지 않는다. 적용
+  경로는 D7이 정한다. 자동 적용·자동 실행은 없다.
 
 ### D2. 도메인 모델 (`domain/assistant`)
 
@@ -72,7 +78,7 @@ class ProviderProfile:
     kind: ProviderKind
     label: str
     model: str                 # 공급자별 기본값은 adapter가 제안, 사용자가 바꿀 수 있다
-    base_url: str | None
+    base_url: str | None       # D6의 base_url 규칙을 통과한 값만
     created_at: datetime
     active: bool
 
@@ -80,10 +86,16 @@ class ProviderProfile:
 class ToolSpec:                # application이 선언, adapter가 공급자 형식으로 변환
     name: str
     description: str
-    input_schema: Mapping[str, object]   # JSON Schema, strict
+    input_schema: Mapping[str, object]   # JSON Schema. strict 변환을 위해 최상위에
+                                         # additionalProperties: false 와 required 를 반드시 둔다
 
 class ResearchCapability(StrEnum):
     WEB_SEARCH = "web_search"
+
+@dataclass(frozen=True)
+class Source:
+    title: str
+    url: str
 
 @dataclass(frozen=True)
 class TurnRequest:
@@ -92,54 +104,67 @@ class TurnRequest:
     tools: tuple[ToolSpec, ...]
     research: frozenset[ResearchCapability]
     max_tool_rounds: int
+    max_search_uses: int       # 공급자 내장 검색의 max_uses (D4)
+    max_output_tokens: int     # 턴당 출력 토큰 상한
 
-# 공급자 → application 이벤트 (SSE로 그대로 나간다)
+# 공급자·application → 화면 이벤트 (세션 저장소에 sequence 번호와 함께 남는다)
 ChatEvent = TextDelta | ThinkingSummary | ToolCall | ToolResultSummary | SearchActivity
           | Proposal | Usage | Done | Failure
+
+class TurnStatus(StrEnum): RUNNING, COMPLETED, FAILED, CANCELLED
+Turn(turn_id, session_id, status, started_at, finished_at)
+SequencedEvent(sequence, turn_id, event)     # sequence는 세션 안에서 단조 증가
+
+class FailureCode(StrEnum):
+    AUTH, RATE_LIMIT, NETWORK, REFUSAL, PROVIDER, TOOL_ROUNDS_EXCEEDED, TIMEOUT, CANCELLED,
+    PROPOSAL_INVALID
 
 @dataclass(frozen=True)
 class StrategyProposal:
     title: str
     summary: str               # 한 문장
     rationale: str             # 근거, 출처 인용 포함
-    sources: tuple[Source, ...)
-    source_text: str           # 전략 YAML(현재 schema 버전)
-    environment: RunEnvironmentDraft | None   # 기간·유니버스 제안(1.2 이후)
-    compile: ProposalCompileResult            # application이 채운다: ok / diagnostics
+    sources: tuple[Source, ...]
+    source_text: str           # 전략 YAML(현재 CURRENT_SCHEMA_VERSION 문서)
+    compile: ProposalCompileResult   # application이 채운다: ok / spec_hash / diagnostics
 ```
 
-- 도구 이름과 스키마는 domain 상수다. 공급자 adapter는 `ToolSpec`을 자기 형식으로 변환할 뿐
+- 도구 이름과 JSON Schema는 domain 상수다. 공급자 adapter는 `ToolSpec`을 자기 형식으로 변환할 뿐
   이름을 알지 않는다.
-- `StrategyProposal.source_text`는 반드시 현재 `CURRENT_SCHEMA_VERSION` 문서다. 검증은
-  `domain/strategy`의 hydrate·validate로 application이 한다.
+- `Failure.message`는 자유 문자열이지만 **SDK 예외 문자열·응답 본문을 그대로 넣지 않는다.** 예외는
+  `FailureCode`로만 매핑하고 message는 코드별 고정 문장 + 예외 타입 이름까지만 허용한다(비밀
+  스크럽, 완료 정의 3).
 
 ### D3. 유스케이스 (`application/assistant_chat`)
 
 | 서비스 | 책임 |
 |---|---|
-| `ProviderProfileService` | 프로파일 목록·생성(키 포함)·삭제·활성 전환·연결 테스트(`probe`). 키는 `ProviderSecretStore`에, 나머지는 `ProviderProfileRepository`에 |
-| `AssistantChatService` | 세션 생성·조회, `send(session_id, user_text, context) -> Iterator[ChatEvent]`. 컨텍스트 조립, 도구 루프 실행, 제안 검증, 세션 저장 |
-| `AssistantContextBuilder` | 시스템 프롬프트와 도구 결과에 넣을 사실을 모은다: runtime schema 요약(필드·연산자·enum은 스키마에서 생성, 손으로 적지 않는다), 데이터 필드 카탈로그(`EquityDataPort`), 팩터 카탈로그(domain registry), 현재 문서 원문·compile 진단, 실행 설정, 오늘 날짜 |
+| `ProviderProfileService` | 프로파일 목록·생성(키 포함)·삭제·활성 전환·연결 테스트(`probe`). 키는 `ProviderSecretStore`에, 나머지는 `ProviderProfileRepository`에. 생성은 `probe` 통과가 필수 |
+| `AssistantContextBuilder` | 시스템 프롬프트와 도구 결과의 사실: runtime schema 요약(필드·연산자·enum은 스키마에서 생성, 손으로 적지 않는다), 데이터 필드 카탈로그(`EquityDataPort.list_fields`), 팩터 카탈로그(domain `FactorRegistry`), 현재 문서 원문·compile 진단·실행 설정, 오늘 날짜 |
+| `AssistantChatService` | 세션 생성·조회, `send(session_id, text, context, *, cancelled) -> Iterator[ChatEvent]`: 컨텍스트 조립, 공급자 `stream_turn` 호출, 도구 실행 콜백, 제안 검증, 메시지 저장 |
+| `AssistantTurnRunner` | **진행 중 턴의 owner.** `start(session_id, text, context) -> Turn`은 세션에 RUNNING 턴이 있으면 `TurnInProgressError`, 아니면 스레드에서 `send`를 돌리며 이벤트를 나오는 대로 `ChatSessionRepository.append_events`로 영속화한다. `cancel(turn_id)`는 프로세스 내 `threading.Event`를 set(이것이 `send`의 `cancelled` 콜백)하고 턴을 CANCELLED로 기록한다. `events(session_id, after_sequence)`·`state(turn_id)`는 저장소를 읽는다. backtest_run의 `BacktestRunService`와 같은 구조(스레드 + sequence + 폴링 스트림). 레지스트리는 프로세스 내(dict + RLock), 단일 워커 전제 |
 
-application이 선언하는 도구(v1):
+application이 선언하는 도구(v1). 모든 스키마는 `additionalProperties: false`와 `required`를 갖는다.
 
 | 도구 | 하는 일 | 실행 |
 |---|---|---|
 | `read_current_strategy` | 현재 문서 원문·진단·실행 설정 | 요청에 실린 컨텍스트에서 |
 | `list_equity_fields` | 데이터 필드 id·이름·단위·설명 | `EquityDataPort` 카탈로그 |
 | `list_factor_catalog` | 팩터 정의·방향·필요 필드·구현 여부 | domain factor registry |
-| `validate_strategy_yaml` | YAML을 hydrate·validate해 진단 반환 | `domain/strategy` |
-| `propose_strategy` | 최종 제안 제출(제목·요약·근거·출처·YAML) | application이 검증 후 `Proposal` 이벤트. 실패하면 도구 오류로 돌려줘 모델이 고친다(최대 3회) |
+| `validate_strategy_yaml` | YAML을 parse·hydrate·validate해 진단 반환 | `StrategyCompilerPort` |
+| `propose_strategy` | 최종 제안 제출(제목·요약·근거·출처·YAML) | application이 `StrategyCompilerPort`로 검증 후 `Proposal` 이벤트. 실패하면 진단을 담은 도구 오류로 돌려줘 모델이 고친다 |
 
-- 웹 검색은 `research={WEB_SEARCH}`로 요청하고, adapter가 공급자 내장 도구를 켠다. 검색 활동은
-  `SearchActivity(query, sources)` 이벤트로 화면에 보인다.
-- 도구 루프 상한 `max_tool_rounds`(기본 12), 취소 토큰, 공급자 예외 → `Failure(code, message)`
-  (키 오류·요금 한도·네트워크·거부 구분).
-- 세션은 전략 문서 단위(`strategy_id` 또는 초안 id)로 묶이고, 메시지·이벤트를 저장한다.
+턴의 상한과 종료:
 
-**의존 선언**: `application.assistant_chat` `DEPENDS_ON = ("domain.assistant", "domain.strategy",
-"domain.factor", "application.equity_workspace")`. `equity_workspace`는 outgoing port(`EquityDataPort`)
-소비다(경계 규칙의 허용 사유). 다른 유스케이스 로직을 빌리지 않는다.
+- `max_tool_rounds`(기본 12)를 넘으면 `Failure(TOOL_ROUNDS_EXCEEDED)`로 턴을 끝낸다.
+- `propose_strategy`가 3회 연속 검증에 실패하면 `Failure(PROPOSAL_INVALID)`로 끝낸다. 제안 없이 루프가
+  자연 종료되면 `Done("end_turn")`이고 화면은 "제안 없이 답변만"으로 보인다.
+- 턴당 벽시계 타임아웃(기본 300초) 초과는 `Failure(TIMEOUT)`. 턴당 출력 토큰 상한
+  `max_output_tokens`(기본 16000)와 검색 `max_search_uses`(기본 8)는 `TurnRequest`로 adapter에 전달된다.
+- 취소는 `Failure(CANCELLED)`. 이미 스트리밍된 텍스트는 assistant 메시지로 보존한다.
+- 클라이언트가 이벤트 스트림 연결을 끊어도 턴은 위 상한 안에서 계속 돌고 이벤트는 저장된다
+  (backtest와 같은 의미). 멈추려면 취소를 부른다. 프론트는 사이드바를 닫을 때 진행 중 턴이 있으면
+  취소를 묻는다.
 
 **포트** (`application/assistant_chat/ports/outgoing/`):
 
@@ -152,34 +177,54 @@ class LlmProviderPort(Protocol):
                     execute_tool: Callable[[ToolCall], ToolResult],
                     cancelled: Callable[[], bool]) -> Iterator[ChatEvent]: ...
 
+class StrategyCompilerPort(Protocol):
+    def compile(self, source_text: str) -> ProposalCompileResult: ...   # bootstrap이 authoring compile을 감싼다
+
 class ProviderSecretStore(Protocol): get / put / delete (profile_id)
 class ProviderProfileRepository(Protocol): list / get / add / delete / set_active
-class ChatSessionRepository(Protocol): create / get / list_for_document / append(message) / events
+class ChatSessionRepository(Protocol):
+    create / get / list_for_document / append_message
+    create_turn / update_turn / get_turn / append_events(turn_id, events) -> sequences
+    events(session_id, *, after_sequence=-1) -> tuple[SequencedEvent, ...]
 ```
+
+**의존 선언**: `application.assistant_chat` `DEPENDS_ON = ("domain.assistant", "domain.strategy",
+"domain.factor", "application.equity_workspace")`. `equity_workspace`는 outgoing port(`EquityDataPort`)
+소비다. 이 6번째 application 간 화살표를 `backend-package-boundary.md`의 선언 목록에 추가한다(A-01).
+compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존하지 않는다.
 
 ### D4. 공급자 adapter
 
 | adapter | SDK | 기본 모델 | 검색 | 스트리밍 |
 |---|---|---|---|---|
-| `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, adaptive thinking, `output_config.effort: high` | `web_search_20260209` 서버 도구 | `client.messages.stream`, 도구 루프는 adapter가 수동 루프로(`pause_turn` 재개 포함) |
-| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(구현 시 SDK 문서로 확정) | Responses `web_search` 도구 | Responses 스트리밍 |
+| `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high` | `web_search_20260209` 서버 도구, `max_uses = request.max_search_uses`, 도메인 제한 없음 | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
+| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거) | Responses `web_search` 도구 | Responses 스트리밍 |
 
 - `probe`는 최소 토큰 요청 한 번으로 키·모델·네트워크를 확인하고 `ProbeResult(ok, message,
-  latency_ms)`를 돌려준다. 실패 종류를 구분한다(인증·모델 없음·네트워크·요금 한도).
-- 도구 정의 변환: `ToolSpec` → Anthropic `tools[]`(`strict: true`, `input_schema`) / OpenAI
-  function tools. 이름·스키마는 그대로.
+  latency_ms, failure)`를 돌려준다. 실패 종류를 구분한다(인증·모델 없음·네트워크·요금 한도).
+- 도구 정의 변환: `ToolSpec` → Anthropic `tools[]`(`strict: true`, `input_schema`) / OpenAI function
+  tools. 이름·스키마는 그대로. `strict`가 요구하는 `additionalProperties: false`·`required`는 domain
+  상수가 이미 갖는다.
+- **서버 도구 오류 블록**: 검색 결과 블록의 `content`는 성공이면 리스트, 오류면 단일 오류 객체다.
+  adapter는 분기해서 오류를 `SearchActivity(query, sources=())` + 이어지는 텍스트로 넘기거나, 턴을
+  이어갈 수 없으면 `Failure(PROVIDER)`로 매핑한다. 예외를 던지지 않는다.
+- 예외 → `Failure`: SDK 예외 종류를 `FailureCode`로 매핑하고 message에는 예외 타입 이름만 쓴다.
+  단위 테스트가 "예외 메시지에 키 문자열이 섞여도 `Failure.message`에 나오지 않는다"를 고정한다.
+- 프롬프트 캐싱: 시스템 프롬프트와 카탈로그(안정 부분)에 `cache_control`, 오늘 날짜·현재 문서·질문은
+  마지막 breakpoint 뒤에 둔다. breakpoint는 최대 4개.
 - 의존성은 optional extra `llm = ["anthropic>=1.0", "openai>=2.0"]`. 설치되지 않은 공급자는 설정
   화면에서 "설치 필요"로 표시되고 프로파일을 만들 수 없다(bootstrap이 가용 adapter만 등록).
 
 ### D5. 저장
 
-- 프로파일·세션·메시지는 `adapters/outbound/assistant_sqlite`가 별도 파일
+- 프로파일·세션·턴·메시지·이벤트는 `adapters/outbound/assistant_sqlite`가 별도 파일
   (`.local/assistant.sqlite3`, env `STRATEGY_WORKBENCH_ASSISTANT_DB_PATH`)에 저장한다. 전략
   revision DB의 immutable trigger 스키마를 건드리지 않는다.
 - 비밀은 `adapters/outbound/secrets_local`이 사용자 설정 디렉터리(Windows `%APPDATA%/quant-workbench/
-  secrets.json`, POSIX `~/.config/quant-workbench/secrets.json`, 0600)에 저장한다. env
-  `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH`로 바꿀 수 있다. 저장소 안 경로는 금지. OS 키체인
-  adapter는 후속.
+  secrets.json`, POSIX `~/.config/quant-workbench/secrets.json`)에 저장한다. 파일 권한은 **POSIX는
+  0600, Windows는 현재 사용자만 접근 가능한 ACL**(`icacls`로 상속 제거 후 사용자 F만). 권한 테스트는
+  플랫폼별로 분기한다. env `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH`로 경로를 바꿀 수 있고 저장소 안
+  경로는 거부한다. OS 키체인 adapter는 후속.
 - 세션 저장에는 키·시스템 프롬프트 원문을 넣지 않는다(카탈로그 스냅샷 해시만).
 
 ### D6. HTTP API (`/api/v1/assistant`)
@@ -187,37 +232,45 @@ class ChatSessionRepository(Protocol): create / get / list_for_document / append
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET | `/providers` | 가용 공급자 종류(설치 여부·기본 모델)와 프로파일 목록(키 꼬리 4자리) |
-| POST | `/providers` | 프로파일 생성 `{kind, label, model?, base_url?, secret}` → 저장 전 `probe` 필수 통과 |
+| POST | `/providers` | 프로파일 생성 `{kind, label, model?, base_url?, secret}` → base_url 규칙 검사 → `probe` 통과 후 저장 |
 | POST | `/providers/{id}/test` | 연결 테스트 |
 | POST | `/providers/{id}/activate` | 활성 프로파일 전환 |
 | DELETE | `/providers/{id}` | 삭제(키 포함) |
 | POST | `/sessions` | 세션 생성 `{document_ref}` |
 | GET | `/sessions?document_ref=` | 문서의 세션 목록 |
-| GET | `/sessions/{id}` | 메시지·이벤트 이력 |
-| POST | `/sessions/{id}/messages` | `{text, context: {source_text, source_format, environment?, diagnostics?}}` → **SSE** `ChatEvent` 스트림(`id`·`event`·`data`, 기존 backtest 이벤트 스트림과 같은 모양) |
-| POST | `/sessions/{id}/cancel` | 진행 중 턴 취소 |
+| GET | `/sessions/{id}` | 메시지·턴 이력 |
+| POST | `/sessions/{id}/turns` | 턴 시작 `{text, context: {source_text, source_format, environment?, diagnostics?}}` → 202 `{turn_id, accepted_sequence}`. RUNNING 턴이 있으면 409 `assistant.turn_in_progress` |
+| GET | `/sessions/{id}/events?after_sequence=` | **SSE** `SequencedEvent` 스트림. backtest 이벤트 스트림(`/api/v1/backtests/{run_id}/events`)과 같은 프레이밍·재개 규칙(`id`=sequence, 마지막 턴이 종료 상태가 되면 닫힘). 새로고침·중복 탭은 `after_sequence`로 이어 받는다 |
+| POST | `/sessions/{id}/turns/{turn_id}/cancel` | 취소(영속 상태 CANCELLED + 프로세스 내 신호) |
 
 - 422 코드: `assistant.provider_not_installed`, `assistant.no_active_provider`,
-  `assistant.probe_failed`, `assistant.turn_in_progress`. 공급자 오류는 `Failure` 이벤트로.
-- OpenAPI에 반영하고 frontend SDK를 재생성한다. 비밀 필드는 요청 전용(`writeOnly`).
+  `assistant.probe_failed`, `assistant.base_url_rejected`. 409: `assistant.turn_in_progress`. 공급자
+  오류는 `Failure` 이벤트로.
+- **base_url 규칙**: 없으면 공급자 기본. 있으면 `https` 스킴만, 호스트는 루프백·사설 대역·IP 리터럴
+  금지. 로컬 프록시 개발용 예외는 env `STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL=1`일
+  때만 `http`·루프백 허용. 검사는 application(`ProviderProfileService`)이 하고 위반은
+  `assistant.base_url_rejected`.
+- OpenAPI와 frontend generated SDK를 **같은 PR(A-04)에서** 갱신한다(12절). 비밀 필드는 요청 전용
+  (`writeOnly`), 응답 스키마에 없다.
 
 ### D7. Frontend
 
 | slice | 책임 |
 |---|---|
-| `entities/assistant` | 생성 SDK 타입, 프로파일·세션 query, SSE 리더(`EventSource`가 POST를 못 하므로 `fetch` + `ReadableStream` 파서), `ChatEvent` 리듀서 |
-| `features/configure-ai-providers` | 설정 화면 "AI 연결" 섹션. michelo DB 프로파일 섹션 패턴: 카드 목록(공급자 아이콘·라벨·모델·꼬리 4자리·활성 배지), 활성 전환, 삭제 확인, 추가 폼(공급자 선택 → 라벨·키·모델), "연결 테스트" 결과 인라인. 설치 안 된 공급자는 비활성 + 이유 |
-| `features/chat-assistant` | 우측 사이드바 채팅: 메시지 목록, 스트리밍 텍스트, 검색 활동 칩(질의·출처 링크), 도구 활동 접힘, 제안 카드(제목·한 문장·근거·출처·"미리보기"·"문서에 적용"·"적용 후 백테스트"), 취소, 세션 전환. 적용은 `onApplyProposal(sourceText)` 콜백으로 밖에 넘긴다(feature가 feature를 import하지 않는다) |
-| `pages/settings` | `/settings` 라우트. 섹션: AI 연결(위 feature), 실행 설정 기본값(후속) |
+| `entities/assistant` | 생성 SDK 타입, 프로파일·세션 query, SSE 리더(`EventSource`로 `after_sequence`를 붙여 GET; 재연결 시 마지막 sequence부터), `SequencedEvent` → 화면 상태 리듀서 |
+| `features/configure-ai-providers` | 설정 화면 "AI 연결" 섹션. michelo DB 프로파일 섹션 패턴: 카드 목록(공급자 이름·라벨·모델·꼬리 4자리·활성 배지), 활성 전환, 삭제 확인, 추가 폼(공급자 선택 → 라벨·키·모델·base_url), "연결 테스트" 결과 인라인. 설치 안 된 공급자는 비활성 + 이유 |
+| `features/assist-strategy` | 우측 사이드바 채팅: 메시지 목록, 스트리밍 텍스트, 검색 활동 칩(질의·출처 링크), 도구 활동 접힘, 제안 카드(제목·한 문장·근거·출처·"미리보기"·"문서에 적용"·"적용 후 백테스트"), 취소, 세션 전환, 닫을 때 진행 중 턴 취소 확인. 적용은 `onApplyProposal(proposal)` 콜백으로 밖에 넘긴다(feature가 feature를 import하지 않는다) |
+| `pages/settings` | `/settings` 라우트. 섹션: AI 연결(위 feature) |
 | `widgets/app-shell` | 내비 하단 "설정" 링크 |
 | `widgets/strategy-ide` | 우측 레일에 `assistant` 슬롯. 계약 인스펙터와 탭으로 공존("계약 · AI"), 폭·펼침은 기존 `use-panel-layout` |
-| `pages/research-strategy-*` | 조합: chat-assistant의 `onApplyProposal` → edit-strategy의 전체 범위 교체(`use-upgrade-document`와 같은 `setText` 한 번, undo 한 단계) → compile → 진단. "적용 후 백테스트"는 적용 뒤 기존 run-backtest 실행 |
+| `pages/research-strategy-*` | 조합: `onApplyProposal` → **업그레이드 적용과 같은 전체 범위 교체 경로**(`CodeEditorHandle.replaceRange(0, length, source)`; `setText`가 아니라 `replaceRange`인 이유는 history 격리(`isolateHistory`)로 직후 타이핑과 undo가 섞이지 않게 하기 위함, `use-upgrade-document.ts:93-99`와 동일) → compile → 진단. **stale 가드**: 제안 카드가 만들어질 때의 편집기 텍스트와 적용 시점 텍스트가 다르면 적용하지 않고 "문서가 바뀌었습니다. 미리보기로 확인하세요"를 보인다. "적용 후 백테스트"는 적용 뒤 기존 run-backtest 실행 |
 
-- 사이드바는 그래프·YAML 어느 탭에서도 같은 세션이다. 컨텍스트는 보낼 때마다 현재 편집기
-  텍스트·진단·실행 설정을 실어 보낸다(서버가 문서를 따로 들지 않는다).
+- 사이드바는 그래프·YAML 어느 탭에서도 같은 세션이다. 턴을 시작할 때마다 현재 편집기 텍스트·진단·
+  실행 설정을 실어 보낸다(서버가 문서를 따로 들지 않는다).
 - 제안 미리보기는 기존 diff 투영(`diff-projection.ts`)으로 현재 문서와의 차이를 보인다.
-- 키 입력 필드는 `autocomplete="off"`, 붙여넣기 후 마스킹. 프론트 상태·localStorage에 키를 두지
-  않는다.
+- **렌더 안전**: 모델 텍스트·제안 본문은 평문(줄바꿈만)으로 렌더한다. 출처 URL은 `http`·`https`만
+  링크로 만들고 나머지는 텍스트로 둔다. 링크는 `target="_blank" rel="noopener noreferrer"`.
+- 키 입력 필드는 `autocomplete="off"`, 붙여넣기 후 마스킹. 프론트 상태·localStorage에 키를 두지 않는다.
 
 ### D8. 프롬프트와 컨텍스트 원칙
 
@@ -227,7 +280,9 @@ class ChatSessionRepository(Protocol): create / get / list_for_document / append
   아이디어(지원 안 되는 연산자·필드)는 제안하지 않도록 지시한다.
 - 모델은 먼저 `validate_strategy_yaml`로 자기 제안을 검증하고 통과한 것만 제출하도록 지시한다.
   application은 제출 시 다시 검증한다(모델을 믿지 않는다).
-- 프롬프트 캐싱: 시스템 프롬프트 + 카탈로그(안정 부분)에 `cache_control`, 문서·질문은 뒤에.
+- 검색 결과는 이 기능의 유일한 비신뢰 입력이다. 도구는 전부 읽기 전용이고 문서 변경은 사용자
+  클릭 + compile 검증을 거치므로 인젝션의 영향 범위는 제안 내용에 한정된다. 화면 표면은 D7 렌더
+  안전 규칙이 막는다.
 
 ### D9. 상태 소유권
 
@@ -235,46 +290,50 @@ class ChatSessionRepository(Protocol): create / get / list_for_document / append
 |---|---|
 | 공급자 프로파일·활성 여부 | `assistant_sqlite` (application port 뒤) |
 | 비밀 | `secrets_local` |
-| 세션·메시지·이벤트 이력 | `assistant_sqlite` |
-| 도구 정의·프롬프트·검증 규칙 | `application/assistant_chat` |
-| 공급자별 요청 형식·스트리밍·검색 도구 켜기 | 각 `llm_*` adapter |
-| 사이드바 열림·폭·현재 세션 id | frontend local UI state |
-| 제안 적용 결과(문서 텍스트) | edit-strategy source 트랜잭션(정본 YAML) |
+| 세션·턴·메시지·이벤트 이력(sequence) | `assistant_sqlite` |
+| 진행 중 턴 레지스트리·취소 신호 | `application/assistant_chat`의 `AssistantTurnRunner`(프로세스 내, 단일 워커 전제) |
+| 도구 정의·프롬프트·검증 규칙·턴 상한 | `application/assistant_chat`(도구 이름·스키마 상수는 `domain/assistant`) |
+| 공급자별 요청 형식·스트리밍·검색 도구 켜기·예외→코드 매핑 | 각 `llm_*` adapter |
+| 사이드바 열림·폭·현재 세션 id·제안 카드의 기준 텍스트 | frontend local UI state |
+| 제안 적용 결과(문서 텍스트) | edit-strategy 편집기(전체 범위 교체, 업그레이드 적용과 같은 예외 경로) |
 
 ## 3. Non-goals
 
 - 자동 적용·자동 백테스트·자동 매매. 모든 문서 변경은 사용자의 "적용" 클릭.
 - Claude Agent SDK·Managed Agents. 이 기능은 Messages/Responses API 위의 자체 도구 루프다.
 - 자체 웹 검색 adapter(후속), 백테스트 실행 도구(후속, application 도구로 추가).
-- 다중 사용자·권한. 로컬 단일 사용자 도구다.
+- 다중 사용자·권한·다중 워커. 로컬 단일 사용자 도구다.
 - 채팅으로 문서를 부분 편집(레시피 단계 수정 등). v1은 전체 제안 적용만.
+- 마크다운·HTML 렌더. 모델 텍스트는 평문이다.
 
 ## 4. Phase와 PR
 
 | Phase | 목표 | PR |
 |---|---|---|
-| A | backend: 도메인·포트·서비스(가짜 공급자로 테스트), 저장 adapter, HTTP API, Anthropic·OpenAI adapter | A-01 ~ A-05 |
-| B | frontend: 설정 화면·공급자 연결, 어시스턴트 entity·SSE, 사이드바 채팅·제안 적용, e2e·문서 | B-01 ~ B-04 |
+| A | backend: 도메인·포트·프로파일(A-01), 채팅·턴 러너(A-02), 저장 adapter(A-03), HTTP·SSE·bootstrap·OpenAPI·SDK(A-04), Anthropic(A-05), OpenAI(A-06), 프롬프트·fixture(A-07) | A-01 ~ A-07 |
+| B | frontend: 설정 화면(B-01), entity·SSE(B-02), 사이드바 feature(B-03), IDE 슬롯·제안 적용(B-04), e2e·문서(B-05) | B-01 ~ B-05 |
 
 ## 5. 완료 정의
 
 1. 설정에서 Claude 프로파일을 키로 등록하면 연결 테스트가 통과하고 활성으로 표시된다. Codex도 같다.
 2. 전략 화면 우측 사이드바에서 "요즘 KRX에서 통할 만한 모멘텀 전략 하나 만들어 줘"를 보내면
    검색 활동이 보이고, 제안 카드가 뜨며, "문서에 적용"이 YAML을 바꾸고 compile "검증 통과"가 뜬다.
-   "적용 후 백테스트"가 실행 페이지로 간다.
-3. 키가 응답·로그·DB·OpenAPI 어디에도 평문으로 나오지 않는다(테스트로 고정).
+   "적용 후 백테스트"가 실행 페이지로 간다. 새로고침해도 진행 중 턴의 이벤트를 이어 받는다.
+3. 키가 응답·로그·DB·OpenAPI·`Failure.message` 어디에도 평문으로 나오지 않는다(테스트로 고정).
 4. `anthropic`·`openai` import가 두 adapter 밖에 없다(architecture 테스트).
 5. 공급자 adapter 없이(가짜 공급자) application·HTTP·frontend 테스트가 전부 돈다.
 
 ## 6. 테스트
 
-- backend: 가짜 `LlmProviderPort`로 도구 루프·제안 검증·재시도·취소·실패 이벤트; 프로파일 서비스
-  probe 필수; secrets_local 권한·경로; sqlite 세션 저장; HTTP SSE 계약(이벤트 순서·id); architecture
-  import 게이트; 실제 SDK adapter는 SDK의 응답 객체를 흉내 낸 단위 테스트 + `RUN_LLM_LIVE=1`일
-  때만 도는 실연결 smoke.
-- frontend: SSE 파서·리듀서 property test; 설정 섹션 MSW(생성·테스트·활성·삭제·거부 사유);
-  사이드바 스트리밍·제안 카드·적용 콜백; e2e(MSW로 공급자 응답 고정): 설정 등록 → 사이드바 제안 →
-  적용 → 검증 통과 → 백테스트 페이지.
+- backend: 가짜 `LlmProviderPort`로 도구 루프·제안 검증·재시도·취소·타임아웃·상한·실패 이벤트; 턴
+  러너 스레드·sequence·중복 턴 거부; 프로파일 서비스 probe 필수·base_url 규칙; secrets_local 권한(플랫폼
+  분기)·경로 거부; sqlite 세션·턴·이벤트 저장; HTTP SSE 계약(이벤트 순서·id·재개); architecture import
+  게이트; 비밀 평문 검사(응답·로그·DB 덤프·`Failure.message`); 실제 SDK adapter는 SDK 응답 객체를 흉내
+  낸 단위 테스트(서버 도구 오류 객체 분기 포함) + `RUN_LLM_LIVE=1`일 때만 도는 실연결 smoke.
+- frontend: SSE 리더 재개·리듀서 property test; 설정 섹션 MSW(생성·테스트·활성·삭제·거부 사유·설치
+  안 됨); 사이드바 스트리밍·제안 카드·stale 가드·렌더 안전(javascript: URL은 링크가 아님); e2e(MSW로
+  공급자 응답 고정): 설정 등록 → 사이드바 제안 → 적용 → 검증 통과 → 백테스트 페이지, 새로고침 재개,
+  취소.
 
 ## 7. 롤백
 

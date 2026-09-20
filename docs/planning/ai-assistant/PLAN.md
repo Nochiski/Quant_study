@@ -6,8 +6,8 @@ current_phase: P0,A
 current_pr: P0-01,A-01
 active_prs: [P0-01, A-01]
 parallel_window: [P0-01, A-01]
-last_updated: 2026-09-20T22:23:41+09:00
-planned_prs: 10
+last_updated: 2026-09-20T22:38:46+09:00
+planned_prs: 13
 merged_prs: 0
 approved_prs: 0
 progress_percent: 0
@@ -27,9 +27,9 @@ progress_percent: 0
 | Current phase | `P0,A` |
 | Current/next PR | `P0-01,A-01` |
 | Active PR | `P0-01, A-01` |
-| Progress | `0 / 10 merged (0%)` |
-| Approved | `0 / 10` |
-| Aggregated at | `2026-09-20 22:23 KST` |
+| Progress | `0 / 13 merged (0%)` |
+| Approved | `0 / 13` |
+| Aggregated at | `2026-09-20 22:38 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -41,13 +41,20 @@ progress_percent: 0
   toast). 그 저장소 main에는 Claude·Codex 연결 코드가 없어 패턴만 차용한다.
 - 공급자 SDK는 outbound adapter에만. 도구는 application이 선언·실행. 검색은 v1에서 공급자 내장
   도구. 비밀은 backend 로컬 파일. 제안은 사용자의 "적용"으로만 문서에 들어간다(자동 적용 없음).
-- Anthropic 기본 모델 `claude-opus-5`(adaptive thinking, effort high). OpenAI 기본 모델은 A-04
+- P0-01 리뷰 반영(2026-09-20): 턴은 backtest_run 패턴(POST로 시작, GET `after_sequence` SSE, cancel은
+  영속 상태 + 프로세스 내 신호, `AssistantTurnRunner`가 owner, 단일 워커 전제). 제안 적용은 업그레이드와
+  같은 `replaceRange` 전체 교체 + stale 가드. 검색 `max_uses`·출력 토큰·벽시계 상한. base_url은 https만.
+  `Failure.message`에 SDK 예외 문자열 금지. 출처 링크는 http/https만 + noopener. PR을 13개로 분할.
+- Anthropic 기본 모델 `claude-opus-5`(adaptive thinking, effort high). OpenAI 기본 모델은 A-06
   구현 시 SDK 문서로 확정한다.
+- OpenAPI와 frontend SDK는 A-04가 같은 PR에서 갱신한다(12절).
 - reviewer 서브에이전트는 Opus로만. Phase 종료마다 SoT·책임분리 점검.
 
 ## 상태 값
 
-`docs/planning/strategy-language-2-0/PLAN.md`의 상태 값과 같다.
+[YAML Strategy Workbench WORKFLOW 13.7절](../strategy-workbench-yaml-ui/WORKFLOW.md)의 상태 값과
+tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_CHECK`·`IN_REVIEW`·
+`CHANGES_REQUESTED`·`APPROVED`·`MERGED`·`PAUSED`).
 
 ## Phase 자동 집계
 
@@ -55,9 +62,9 @@ progress_percent: 0
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `IN_REVIEW` |
-| A | Backend: ports, storage, HTTP, providers | 5 | 0 | `IN_PROGRESS` |
-| B | Frontend: settings, entity, sidebar, e2e | 4 | 0 | `WAITING` |
-| **Total** |  | **10** | **0** | **0%** |
+| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `IN_PROGRESS` |
+| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `WAITING` |
+| **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -68,12 +75,12 @@ progress_percent: 0
 | Intent | 기획 패키지·spec을 main에 올린다 |
 | Acceptance | WORKFLOW P0-01 |
 | Non-goals | 코드 변경 |
-| Branch/worktree | `docs/ai-assistant-plan` (PR #166) · A-01은 `wt-ai-a01` / `feat/ai-a-01-domain-ports` |
+| Branch/worktree | `docs/ai-assistant-plan` (PR #166) · A-01/A-02는 `wt-ai-a01` / `feat/ai-a-01-domain-ports` |
 | Base SHA | `5f97f8c` (origin/main) |
-| Head SHA | 리뷰 중 |
-| Diff stat | — |
+| Head SHA | 리뷰 반영 후 재검토 중 |
+| Diff stat | 문서 8개 |
 | Focused tests | `tools/update-plan-progress.ps1 -Check` |
-| Full gate | — |
+| Full gate | CI(문서만) |
 
 ---
 
@@ -81,21 +88,23 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P0-01` | 기획 패키지·설계 spec·SoT 행 예약 | 없음 | `IN_REVIEW` | [#166](https://github.com/Nochiski/Quant_study/pull/166) · `review_ai_p0_01` 진행 중 |
+| [ ] | `P0-01` | 기획 패키지·설계 spec·SoT 행 예약 | 없음 | `IN_REVIEW` | [#166](https://github.com/Nochiski/Quant_study/pull/166) · `review_ai_p0_01` 1차 REQUEST_CHANGES(P1 3·P2 10·P3 8) → 반영 후 재검토 |
 
 ## A — backend
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `A-01` | `domain/assistant`, `application/assistant_chat` 포트·서비스·도구 루프·제안 검증, 가짜 공급자 테스트, SDK import 게이트 | P0-01 | `IN_PROGRESS` | 구현자 `impl-ai-a01`, 워크트리 `wt-ai-a01`, 브랜치 `feat/ai-a-01-domain-ports` |
-| [ ] | `A-02` | `assistant_sqlite`·`secrets_local` adapter, `/api/v1/assistant/*` + SSE, bootstrap, OpenAPI | A-01 | `WAITING` | — |
-| [ ] | `A-03` | `llm_anthropic` adapter (claude-opus-5, web_search 서버 도구, 스트리밍, probe) | A-02 | `WAITING` | — |
-| [ ] | `A-04` | `llm_openai` adapter (Responses API, web_search, 스트리밍, probe) | A-03 | `WAITING` | — |
-| [ ] | `A-05` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-04 | `WAITING` | — |
+| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `IN_PROGRESS` | 구현자 `impl-ai-a01`, 워크트리 `wt-ai-a01`, 브랜치 `feat/ai-a-01-domain-ports` |
+| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `WAITING` | — |
+| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `WAITING` | — |
+| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `WAITING` | — |
+| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `WAITING` | — |
+| [ ] | `A-06` | `llm_openai` adapter | A-05 | `WAITING` | — |
+| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
 
 Phase exit:
 
-- [ ] 가짜 공급자 SSE 시나리오 3개 green, live smoke 2건 로컬 통과 기록.
+- [ ] 가짜 공급자 SSE 시나리오 3개 green(재개 포함), live smoke 2건 로컬 통과 기록.
 - [ ] SDK import 게이트·비밀 평문 검사 green.
 - [ ] SoT·책임분리 점검 blocking 0.
 
@@ -103,10 +112,11 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query, SDK 재생성 | A-05 | `WAITING` | — |
-| [ ] | `B-02` | 세션 query, SSE 리더, `ChatEvent` 리듀서, property test | B-01 | `WAITING` | — |
-| [ ] | `B-03` | `chat-assistant` 사이드바, IDE `assistant` 슬롯, 제안 적용·미리보기·적용 후 백테스트 | B-02 | `WAITING` | — |
-| [ ] | `B-04` | e2e(MSW 공급자), 매뉴얼·README·SoT·FSD 규칙 | B-03 | `WAITING` | — |
+| [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `WAITING` | — |
+| [ ] | `B-02` | 세션·턴 query, `EventSource` 리더(재개), 이벤트 리듀서, property test | B-01 | `WAITING` | — |
+| [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `WAITING` | — |
+| [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `WAITING` | — |
+| [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `WAITING` | — |
 
 Phase exit:
 
@@ -117,18 +127,24 @@ Phase exit:
 
 | PR | Reviewer | 회차 | 결과 | 비고 |
 |---|---|---|---|---|
+| P0-01 | `review_ai_p0_01` | 1 | REQUEST_CHANGES | P1 3(적용 경로·턴 owner·PR 분할), P2 10, P3 8 → 전부 반영 |
 
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
 |---|---|---|---|
+| P0-01 | `update-plan-progress.ps1 -Check` | 통과 | 2026-09-20 |
 
 ## 변경 기록
 
+- 2026-09-20 — P0-01 1차 리뷰 반영: spec D2·D3·D4·D5·D6·D7·D9 개정, WORKFLOW 13 PR로 분할(A 7, B 5),
+  PLAN·README의 lang2 링크 제거(정본은 yaml-ui WORKFLOW 13.7절), SoT `paths:`·행 문구, 경계 규칙 목록.
 - 2026-09-20 — P0-01 PR #166 생성, 리뷰 배정. A-01 구현 착수(P1·P2 스택과 독립이라 병렬).
 - 2026-09-20 — 패키지 생성. 제품 소유자 요청(설정에서 Claude·Codex 연결, 우측 사이드바 AI 채팅,
-  검색 기반 전략 제안, 책임 분리)을 spec D1~D9와 Phase 0·A·B, 10 PR로 정리.
+  검색 기반 전략 제안, 책임 분리)을 spec과 Phase 0·A·B로 정리.
 
 ## 갱신 절차
 
-`docs/planning/strategy-language-2-0/PLAN.md`의 갱신 절차와 같다(도구 경로만 이 패키지).
+[YAML Strategy Workbench WORKFLOW 13.7절](../strategy-workbench-yaml-ui/WORKFLOW.md)을 따른다.
+집계는 `powershell -NoProfile -ExecutionPolicy Bypass -File docs/planning/ai-assistant/tools/update-plan-progress.ps1`
+(`-Check`는 검증만).

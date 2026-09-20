@@ -6,10 +6,10 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
-last_updated: 2026-09-21T03:42:15+09:00
+last_updated: 2026-09-21T03:45:47+09:00
 planned_prs: 13
 merged_prs: 0
-approved_prs: 7
+approved_prs: 8
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05` |
 | Progress | `0 / 13 merged (0%)` |
-| Approved | `7 / 13` |
-| Aggregated at | `2026-09-21 03:42 KST` |
+| Approved | `8 / 13` |
+| Aggregated at | `2026-09-21 03:45 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -99,7 +99,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `APPROVED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `APPROVED` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `c0219894`(A-04 최종 `9f39faec` 위 15커밋) · `review_ai_a_05` 3차 APPROVE(세 라운드 24건 전부 닫힘, 비인증 헤더 통과는 docstring 한 문장 P3 — A-06 rebase 뒤 A-05에 fast-forward) · live smoke 최우선: 선언되지 않은 서버 도구 결과 블록 history 수용 여부 |
-| [ ] | `A-06` | `llm_openai` adapter | A-05 | `IN_REVIEW` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `6c3859e7`(A-05 `fad379e7` 위 12커밋, 리뷰 반영 + Usage 분리형 정규화; A-05 최종 `c0219894` 위 replay 예정) · `review_ai_a_06` 1차 REQUEST_CHANGES(P1 2: `OPENAI_CUSTOM_HEADERS`가 Authorization 덮어씀·예산 잔량 API 최소 미만 호출, P2 3: `store=true`·통지 경로 spec 불일치·도구 제거 호출 조합 미테스트, P3 7) 반영 → 2차 재검토 중 · 게이트: pytest 1895(extras)/1718(없음)·ruff·pyright 0 · 기본 모델 `gpt-6-astra` · Usage 분리형 정규화(OpenAI 원시 내역 뺄셈) rebase 때 반영 |
+| [ ] | `A-06` | `llm_openai` adapter | A-05 | `APPROVED` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `6c3859e7`(A-05 `fad379e7` 위) · `review_ai_a_06` 2차 APPROVE(P1 2 되돌리기 실증, Usage 분리형 정규화 채택) · A-05 최종 `c0219894` 위 replay + P3 4(clamp 예외 명시, `httpx2` TYPE_CHECKING, 비인증 헤더 단언, spec D4 store) 커밋 뒤 확정 |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `SELF_CHECK` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring: 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) |
 
 Phase exit:
@@ -152,6 +152,7 @@ Phase exit:
 | B-03 | `review_ai_b_03` | 1 | REQUEST_CHANGES | P1 1(`reduceHistory`가 messages는 교체·turns는 append → `asked[index]` 짝 밀림; 리듀서 턴 배열을 accepted_sequence 순 유지), P2 4(409 질문 유실, 출처 호스트 미표시, aria-live 델타 재낭독, 대화상자 초점 복귀), P3 6. 렌더 안전·비밀·FSD·i18n OK |
 | A-05 | `review_ai_a_05` | 3 | APPROVE | 5항목 전부 통과(A-04 보존, 양쪽 환경 green, P2·P3 반영, Usage 분리형 계약+파생, `ANTHROPIC_CUSTOM_HEADERS` 독립 재현·차단 확인 — 위험은 키 유출이 아니라 요청이 남의 계정으로 나가는 것). P3 1(비인증 헤더 통과를 docstring에 명시) |
 | B-03 | `review_ai_b_03` | 2 | REQUEST_CHANGES | 1차 11건 중 10 해소(P1 되돌리기 실증). 새 P1 1(`finishedTurn`이 status·failure 무시 → 취소·실패에도 "완료" announce·잔존), P2 1(제안 카드 `aria-live="off"` 주석만), P3 4(409 왕복 중 새 질문 덮임, 이벤트마다 정렬, `String.replace` 패턴, 주석) |
+| A-06 | `review_ai_a_06` | 2 | APPROVE | 1차 12건 전부 해소(`http_client` 주입이 `OPENAI_CUSTOM_HEADERS` 파싱 경로를 실제로 지남 확인, 예산 가드 되돌리기 red). P2(Anthropic 동일 구멍)는 A-05 `c0219894`에서 이미 차단. P3 4 → replay 뒤 커밋 |
 
 ## 검증 기록
 

@@ -7,7 +7,7 @@ import {
   type SessionHistoryView,
 } from "../../../entities/assistant";
 import { assistTranscript } from "../model/transcript";
-import { safeExternalUrl } from "../model/render-safety";
+import { safeExternalLink } from "../model/render-safety";
 
 const history = (): SessionHistoryView => ({
   session: {
@@ -75,6 +75,39 @@ describe("assistTranscript", () => {
     expect(entries[0].prompt).toBe("방금 보낸 질문");
   });
 
+  it("이력이 늦게 와도 턴 순서는 서버가 아는 생성 순서를 지킨다", () => {
+    // 턴 시작 202가 이력보다 먼저 도착한 세션. 리듀서가 관측 순서로 쌓으면 [t-3, t-1, t-2]가 되고
+    // 질문이 한 칸씩 밀린다(B-03 리뷰 P1).
+    const afterStart = assistantChatReducer(
+      { ...emptyAssistantChatState, sessionId: "s-1" },
+      {
+        type: "turn",
+        turn: {
+          turn_id: "t-3",
+          session_id: "s-1",
+          status: "running",
+          accepted_sequence: 7,
+          started_at: "2026-09-20T00:00:05Z",
+        },
+      },
+    );
+    const merged = assistantChatReducer(afterStart, {
+      type: "history",
+      history: history(),
+    });
+
+    expect(merged.turns.map((turn) => turn.turnId)).toEqual([
+      "t-1",
+      "t-2",
+      "t-3",
+    ]);
+    expect(
+      assistTranscript(merged, { "t-3": "셋째 질문" }).map(
+        (entry) => entry.prompt,
+      ),
+    ).toEqual(["첫 질문", "둘째 질문", "셋째 질문"]);
+  });
+
   it("leaves the prompt empty when neither source knows it", () => {
     const state = assistantChatReducer(emptyAssistantChatState, {
       type: "turn",
@@ -90,28 +123,36 @@ describe("assistTranscript", () => {
   });
 });
 
-describe("safeExternalUrl", () => {
-  it("keeps http and https targets", () => {
-    expect(safeExternalUrl("https://example.com/report?a=1")).toBe(
-      "https://example.com/report?a=1",
+describe("safeExternalLink", () => {
+  it("keeps http and https targets and names the real host", () => {
+    expect(safeExternalLink("https://example.com/report?a=1")).toEqual({
+      href: "https://example.com/report?a=1",
+      host: "example.com",
+    });
+    expect(safeExternalLink("http://example.com/")).toEqual({
+      href: "http://example.com/",
+      host: "example.com",
+    });
+    // 제목이 다른 곳을 사칭해도 호스트는 실제 도착지를 가리킨다(B-03 리뷰 P2).
+    expect(safeExternalLink("https://dart-fss.example-evil.com/x")?.host).toBe(
+      "dart-fss.example-evil.com",
     );
-    expect(safeExternalUrl("http://example.com/")).toBe("http://example.com/");
   });
 
   it("rejects every other scheme so a model cannot ship an executable link", () => {
-    expect(safeExternalUrl("javascript:alert(1)")).toBeNull();
-    expect(safeExternalUrl("  javascript:alert(1)")).toBeNull();
-    expect(safeExternalUrl("JaVaScRiPt:alert(1)")).toBeNull();
+    expect(safeExternalLink("javascript:alert(1)")).toBeNull();
+    expect(safeExternalLink("  javascript:alert(1)")).toBeNull();
+    expect(safeExternalLink("JaVaScRiPt:alert(1)")).toBeNull();
     expect(
-      safeExternalUrl("data:text/html,<script>alert(1)</script>"),
+      safeExternalLink("data:text/html,<script>alert(1)</script>"),
     ).toBeNull();
-    expect(safeExternalUrl("file:///etc/passwd")).toBeNull();
-    expect(safeExternalUrl("vbscript:msgbox(1)")).toBeNull();
+    expect(safeExternalLink("file:///etc/passwd")).toBeNull();
+    expect(safeExternalLink("vbscript:msgbox(1)")).toBeNull();
   });
 
   it("rejects values that are not absolute URLs at all", () => {
-    expect(safeExternalUrl("")).toBeNull();
-    expect(safeExternalUrl("/settings")).toBeNull();
-    expect(safeExternalUrl("example.com")).toBeNull();
+    expect(safeExternalLink("")).toBeNull();
+    expect(safeExternalLink("/settings")).toBeNull();
+    expect(safeExternalLink("example.com")).toBeNull();
   });
 });

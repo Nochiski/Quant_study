@@ -54,6 +54,8 @@ export type AssistantTurnState = {
    */
   settled: boolean;
   acceptedSequence: number | null;
+  /** 서버가 적은 턴 시작 시각. `acceptedSequence`가 같을 때의 순서 기준이다. */
+  startedAt: string | null;
   /**
    * 이 턴에서 이미 반영한 마지막 sequence. 멱등 판정은 세션 전체가 아니라 턴마다 한다.
    *
@@ -117,6 +119,7 @@ const emptyTurn = (turnId: string): AssistantTurnState => ({
   status: null,
   settled: false,
   acceptedSequence: null,
+  startedAt: null,
   lastSequence: -1,
   text: "",
   thinking: [],
@@ -135,6 +138,49 @@ const settledStatus = (
 ): TurnStatus =>
   current !== null && current !== "running" ? current : incoming;
 
+/**
+ * 턴 배열의 순서 불변식: **서버가 아는 생성 순서**.
+ *
+ * 클라이언트가 처음 본 순서로 두면 턴 시작 202가 이력보다 먼저 도착한 세션에서 배열이
+ * `[t-3, t-1, t-2]`가 된다. 소비자(`features/assist-strategy`의 transcript)는 n번째 사용자
+ * 메시지를 n번째 턴의 질문으로 짝지으므로, 그 어긋남이 답변을 다른 질문에 붙이고 마지막 턴의
+ * 질문을 잃는다. 한 번 어긋나면 이후 이력 재조회도 제자리 갱신뿐이라 스스로 복구되지 않는다
+ * (B-03 리뷰 P1).
+ *
+ * 기준은 `accepted_sequence`(턴 시작 직전 세션의 마지막 번호라 세션 안에서 단조), 같으면
+ * `started_at`, 그것도 모르면(이벤트로만 본 턴) 지금 자리를 지킨다.
+ */
+const TURN_RANK_UNKNOWN = Number.MAX_SAFE_INTEGER;
+
+/** 시작 시각을 모르는 턴(이벤트로만 본 턴)은 뒤로 보낸다. */
+const compareStartedAt = (
+  left: string | null,
+  right: string | null,
+): number => {
+  if (left === right) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return left < right ? -1 : 1;
+};
+
+const orderTurns = (
+  turns: readonly AssistantTurnState[],
+): readonly AssistantTurnState[] => {
+  const ordered = turns
+    .map((turn, index) => ({ turn, index }))
+    .sort(
+      (left, right) =>
+        (left.turn.acceptedSequence ?? TURN_RANK_UNKNOWN) -
+          (right.turn.acceptedSequence ?? TURN_RANK_UNKNOWN) ||
+        compareStartedAt(left.turn.startedAt, right.turn.startedAt) ||
+        left.index - right.index,
+    );
+  // 자리가 그대로면 같은 배열을 돌려준다 — 순서만 보고 다시 그리는 소비자를 깨우지 않는다.
+  return ordered.every((item, at) => item.index === at)
+    ? turns
+    : ordered.map((item) => item.turn);
+};
+
 const withTurn = (
   state: AssistantChatState,
   turnId: string,
@@ -148,7 +194,7 @@ const withTurn = (
     index === -1
       ? [...state.turns, next]
       : state.turns.map((turn, at) => (at === index ? next : turn));
-  return { ...state, turns };
+  return { ...state, turns: orderTurns(turns) };
 };
 
 const applyToolResult = (
@@ -260,6 +306,7 @@ const reduceTurn = (
     status: settledStatus(previous.status, turn.status),
     settled: previous.settled || (fromHistory && turn.status !== "running"),
     acceptedSequence: turn.accepted_sequence,
+    startedAt: turn.started_at,
   }));
 
 /**

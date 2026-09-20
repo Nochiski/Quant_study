@@ -176,9 +176,10 @@ main
   PR에서 갱신한다(12절).
 - **시나리오 fixture 3개**: `backend/tests/fixtures/assistant/scenarios/`에 `simple_answer`,
   `tool_then_proposal`, `search_then_failure`를 A-04 SSE 프레임
-  (`AssistantEventEnvelopeView`: `sequence`·`turn_id`·payload `type`)의 배열로 저장한다. B-05
-  e2e의 MSW가 그대로 재생하고, backend 테스트가 가짜 공급자 대본을 실제 서비스에 돌린 결과와
-  byte 비교한다. 재생성은 `backend/tools/export_assistant_scenarios.py`. `uuid4` 세션·턴 id는
+  (`AssistantEventEnvelopeView`: `sequence`·`turn_id`·payload `type`)의 배열로 저장한다. backend
+  테스트가 가짜 공급자 대본을 실제 서비스에 돌린 결과와 byte 비교하고, B-05 e2e는 같은 내용을
+  backend 대본 adapter(`adapters/outbound/llm_scripted`)로 재연한다 — 브라우저에서 공급자 응답을
+  가로채면 SSE 프레이밍·sequence·턴 러너·제안 재검증이 검사 밖으로 나가기 때문이다. 재생성은 `backend/tools/export_assistant_scenarios.py`. `uuid4` 세션·턴 id는
   `session-1`·`turn-1`로 고정해 골든이 실행마다 바뀌지 않게 한다.
 
 **live smoke 확인 항목** (A-05·A-06 구현자가 남긴 목록, 우선순위 순)
@@ -350,8 +351,8 @@ STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv 
 
 **Acceptance**
 
-- e2e(MSW 공급자 고정): 설정 등록 → 전략 화면 사이드바 질문 → 검색 활동 → 제안 카드 → 적용 →
-  "검증 통과" → 백테스트 페이지. 새로고침 재개. 취소.
+- e2e(backend 대본 공급자, `STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1`): 설정 등록 → 전략 화면
+  사이드바 질문 → 검색 활동 → 제안 카드 → 적용 → "검증 통과" → 백테스트 페이지. 새로고침 재개. 취소.
 - 매뉴얼 절 "AI 어시스턴트 연결과 사용", README, SoT 규칙 행 채움, `frontend/src/features/README.md`에
   slice 설명 추가.
 - B-01 2차 리뷰에서 이관된 접근성 2건(`features/configure-ai-providers`):

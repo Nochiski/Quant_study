@@ -419,8 +419,9 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 - frontend: SSE 리더 재개(재연결 후 중복 sequence가 두 번 반영되지 않음)·리듀서 property test; 설정
   섹션 MSW(생성·테스트·활성·삭제·거부 사유·설치 안 됨); 사이드바 스트리밍·제안 카드·적용 전 확인
   (변경된 문서에서 덮어쓰면 적용되고 undo 한 번으로 복원)·렌더 안전(javascript: URL은 링크가 아님);
-  e2e(MSW로 공급자 응답 고정): 설정 등록 → 사이드바 제안 → 적용 → 검증 통과 → 백테스트 페이지,
-  새로고침 재개, 취소.
+  e2e(backend 대본 공급자 `adapters/outbound/llm_scripted`, 환경 변수로만 켠다): 설정 등록 → 사이드바
+  제안 → 적용 → 검증 통과 → 백테스트 페이지, 새로고침 재개, 취소. 모델만 가짜이고 SSE·턴 러너·제안
+  재검증은 실제 경로를 지난다.
 
 ## 7. 롤백
 

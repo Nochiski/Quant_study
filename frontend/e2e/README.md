@@ -1,7 +1,48 @@
 # Browser release gate
 
 Playwright owns both ports and starts the real FastAPI server with an isolated temporary SQLite
-repository plus the production Vite preview. Stop local servers on ports 5173 and 8000 first.
+repository plus the production Vite preview.
+
+## One run per machine
+
+`npm run test:e2e` takes a machine-wide lock (`quant-e2e.lock` in the OS temp directory) before it
+starts anything, and waits if another checkout holds it. Do not bypass it by calling `playwright
+test` directly.
+
+The lock exists because `reuseExistingServer: false` only checks the port at startup. If a second
+worktree grabs port 8000 in the window between that check and our uvicorn binding, our backend dies
+and Playwright proceeds against the other checkout's server, which answers the health probe. The
+browser then tests somebody else's code. That failed loudly for us once, with stale English
+diagnostics on screen, but the dangerous case is the one that passes.
+
+The lock is a directory holding a `pid` file with a single decimal pid. That shape is a contract,
+not an implementation detail: other tooling on this machine takes the same lock, and a lock only
+works when every participant recognises the others. Do not change the path or the shape without
+changing them too.
+
+If an outer process already holds the same lock and runs the gate inside it, set
+`QUANT_E2E_LOCK_HELD=1` so the runner does not wait for a lock its own caller is holding. It then
+neither takes nor releases it, because releasing would take the lock away from the caller.
+
+A lock left behind by a killed run is reclaimed automatically: the holder's pid is checked for
+liveness first. Waiting polls every 15 seconds, prints one line per minute, and gives up after 40
+minutes. `e2e/lock.test.mjs` pins those rules.
+
+Two further guards back it up. The runner refuses to start when either port is already bound, so a
+stray dev server produces a clear error instead of a silent reuse. And `PW_BACKEND_PORT` /
+`PW_PREVIEW_PORT` move both ports, so a worktree can have its own pair:
+
+```text
+PW_BACKEND_PORT=18000 PW_PREVIEW_PORT=15173 npm run test:e2e
+```
+
+Both values come from `e2e/ports.mjs`, which is also what the build reads for the API base URL
+baked into the bundle. Never spell a port literally anywhere else.
+
+Moving the preview port also moves the browser origin, so the backend has to accept it. Playwright
+passes the preview origin to the server as `STRATEGY_WORKBENCH_ALLOWED_ORIGINS`. Without that the
+server starts healthy and every request from the page is blocked by CORS, which looks like an empty
+screen rather than an error.
 
 From `frontend`:
 
@@ -20,11 +61,38 @@ npm run test:e2e:update
 npm run test:e2e:report
 ```
 
+`test:e2e:update` passes `--update-snapshots=changed` on purpose. A bare `--update-snapshots`
+leaves a mismatching baseline untouched and still reports the test as passed, so the stale PNG
+survives and the next strict run fails again. `=all` rewrites every baseline including the ones
+that already matched, which buries the intended change in unrelated byte churn. Keep the mode
+explicit, and check `git status` afterwards: only the baselines you meant to change should appear.
+
 This layer owns browser process, server lifecycle, viewport/theme matrix, screenshots and failure
-artifacts. The four visual projects collect only `workbench.infrastructure.spec.ts`; the single
-1440px light project collects `workbench.workflow.spec.ts` so stateful create/revision/backtest
-scenarios execute once against the isolated real backend. Backend contract meaning continues to be
-owned by the backend and its generated client.
+artifacts. The four visual projects collect only `workbench.infrastructure.spec.ts`; one 1440px
+light project collects `workbench.workflow.spec.ts` so stateful create/revision/backtest scenarios
+execute once against the isolated real backend, and a second one collects
+`assistant.workflow.spec.ts`. Backend contract meaning continues to be owned by the backend and its
+generated client.
+
+## AI assistant scenarios
+
+`assistant.workflow.spec.ts` drives provider setup, the sidebar chat, proposal apply and the
+follow-on backtest. The provider is a **scripted backend adapter**
+(`adapters/outbound/llm_scripted`), turned on for this run by
+`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1` in `playwright.config.ts`. No SDK, key or network is
+involved, and the flag is off everywhere else.
+
+Faking the model rather than the HTTP responses is deliberate: intercepting the provider in the
+browser would take SSE framing, sequence numbers, the turn runner and server-side proposal
+re-validation out of the gate. Only the model is fake here.
+
+The script picks a scenario from a keyword in the question (`_scenarios.py`): 제안 asks for a tool
+call followed by a proposal, 검색 shows search activity and then three rejected proposals, 천천히
+streams a long answer so a mid-turn reload exercises resume, and anything else gets a short answer.
+
+Assistant history and secrets go to the same isolated runtime directory as the strategy database
+(`e2e/runtime.ts`); without that the run would write into the developer's real chat history and
+`secrets.json`.
 
 The npm test/update commands atomically create a unique random directory under the operating
 system temp root, pass its SQLite path only to the backend process, and delete the whole directory

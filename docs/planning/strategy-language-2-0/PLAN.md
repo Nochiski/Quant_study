@@ -2,11 +2,11 @@
 plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
-current_phase: P0,P1
-current_pr: P0-01,P1-01,P1-02
-active_prs: [P0-01, P1-01, P1-02]
-parallel_window: [P0-01, P1-01, P1-02]
-last_updated: 2026-09-20T23:11:07+09:00
+current_phase: P0,P1,P2
+current_pr: P0-01,P1-01,P1-02,P2-01
+active_prs: [P0-01, P1-01, P1-02, P2-01]
+parallel_window: [P0-01, P1-01, P1-02, P2-01]
+last_updated: 2026-09-20T23:12:04+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 1
@@ -24,12 +24,12 @@ progress_percent: 0
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `P0,P1` |
-| Current/next PR | `P0-01,P1-01,P1-02` |
-| Active PR | `P0-01, P1-01, P1-02` |
+| Current phase | `P0,P1,P2` |
+| Current/next PR | `P0-01,P1-01,P1-02,P2-01` |
+| Active PR | `P0-01, P1-01, P1-02, P2-01` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `1 / 28` |
-| Aggregated at | `2026-09-20 23:11 KST` |
+| Aggregated at | `2026-09-20 23:12 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -80,7 +80,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 0 | `APPROVED` |
 | P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_PROGRESS` |
-| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `WAITING` |
+| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_PROGRESS` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
@@ -135,7 +135,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `WAITING` | — |
+| [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_PROGRESS` | 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` |
 | [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `WAITING` | — |
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `WAITING` | — |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `WAITING` | — |

@@ -1,4 +1,4 @@
-"""Anthropic SDK와 닿는 유일한 경계 (설계 spec D4).
+"""Anthropic SDK 클라이언트를 만들고 부르는 유일한 모듈 (설계 spec D4).
 
 ## 왜 Protocol을 한 겹 두는가
 
@@ -9,6 +9,15 @@
 Protocol이 쓰는 타입은 SDK의 실제 타입 그대로다(`MessageParam`, `ToolUnionParam`, `Message`, …).
 우리 형식으로 한 번 더 옮기면 SDK 모양이 바뀌었을 때 타입 검사가 잡아 주지 못한다. 테스트
 픽스처도 같은 이유로 SDK 타입을 그대로 만들어 쓴다.
+
+**타입이 맞는다고 런타임 의미까지 맞는 것은 아니다.** `output_format=None`을 명시했다가 모든
+텍스트 블록에서 `ValidationError`가 났던 적이 있다 — SDK가 "인자 없음"으로 보는 센티널은
+`None`이 아니라 `omit`이고, `is_given(None)`은 참이다. 그래서 이 모듈은 타입 검사만이 아니라
+실제 SDK 스트림을 지나는 테스트로도 고정한다(`test_adapters_llm_anthropic_sdk_stream.py`).
+쓰지 않는 인자는 `None`으로 넘기지 말고 **아예 빼라**.
+
+같은 이유로 `anthropic`을 import하는 모듈이 여기 하나뿐인 것은 아니다(`_payload`·`_turn`·
+`_failures`도 SDK 타입을 쓴다). 여기만 하는 일은 **클라이언트를 만들고 실제로 호출하는 것**이다.
 
 ## 비밀
 
@@ -71,7 +80,18 @@ class AnthropicMessageStream(Protocol):
 
     def __iter__(self) -> Iterator[StreamEvent]: ...
 
-    def get_final_message(self) -> TurnMessage: ...
+    def get_final_message(self) -> TurnMessage:
+        """스트림을 **끝까지 읽고** 누적된 메시지를 돌려준다."""
+        ...
+
+    @property
+    def current_message_snapshot(self) -> TurnMessage:
+        """지금까지 누적된 메시지. 남은 이벤트를 읽지 않는다.
+
+        취소 경로가 이것을 쓴다. `get_final_message()`는 스트림을 끝까지 읽으므로, 취소하고
+        나서 부르면 멈추려던 응답을 오히려 전부 받아 온다.
+        """
+        ...
 
 
 class AnthropicStreamManager(Protocol):
@@ -126,10 +146,10 @@ AnthropicClientFactory = Callable[[str, str | None], AnthropicMessagesClient]
 class SdkMessagesClient:
     """`AnthropicMessagesClient`의 실제 SDK 구현.
 
-    `client.messages`를 그대로 돌려주지 않고 한 겹 두는 이유는 타입 하나 때문이다. SDK의
-    `messages.stream`은 `output_format` 인자로 결정되는 제네릭(`MessageStreamManager[T]`)을
-    돌려주는데, 우리는 그 인자를 쓰지 않아 `T`가 풀리지 않는다. 여기서 우리가 실제로 보내는
-    인자만으로 한 번 부르면 `T`가 `None`으로 확정되고, 위 Protocol과 구조가 맞는다.
+    `client.messages`(SDK의 `Messages` 리소스)를 그대로 돌려주면 위 Protocol과 구조가 맞지
+    않는다. `Messages.stream`이 돌려주는 `MessageStreamManager[T]`의 `T`가 호출부 없이는 풀리지
+    않기 때문이다. 여기서 우리가 실제로 보내는 인자만으로 한 번 부르면 `T`가 `None`으로
+    확정된다. 덧붙여 이 클래스가 클라이언트 수명(`secret`·`base_url`·타임아웃)의 주인이다.
     """
 
     def __init__(self, client: anthropic.Anthropic) -> None:
@@ -146,12 +166,14 @@ class SdkMessagesClient:
         thinking: ThinkingConfigParam,
         tools: Iterable[ToolUnionParam],
     ) -> AnthropicStreamManager:
+        # `output_format`은 **넘기지 않는다**. `None`을 명시하면 SDK가 "구조화 출력 요청"으로
+        # 읽어(`is_given(None)`이 참) 모든 텍스트 블록에서 `TypeAdapter(None).validate_json`이
+        # 터진다. 센티널은 `omit`이고 그건 인자를 생략할 때의 기본값이다.
         return self._client.messages.stream(
             max_tokens=max_tokens,
             messages=messages,
             model=model,
             output_config=output_config,
-            output_format=None,
             system=system,
             thinking=thinking,
             tools=tools,

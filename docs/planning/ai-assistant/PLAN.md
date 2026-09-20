@@ -113,7 +113,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영 완료(로컬 `7fcc584e`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건, R2-1 `probingIds` Set·R2-2 제목 위계) · 2차 APPROVE_WITH_COMMENTS · R2-3·R2-4는 B-05 · cascade 뒤 A-07 위 rebase·push·PR |
-| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `IN_REVIEW` | 구현 완료(로컬 `7a2f5849`, B-01 최종 `7fcc584e` 위 11커밋) · `review_ai_b_02` 1차 REQUEST_CHANGES 반영(턴별 watermark, `{status 5값, retry()}`, `onSseError` 계수, `AssistantStreamClose` 확장, 규칙 문서) → 2차 재검토 중 · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
+| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `IN_REVIEW` | 구현 완료(로컬 `7a2f5849`, B-01 최종 `7fcc584e` 위 11커밋) · `review_ai_b_02` 1차 REQUEST_CHANGES 반영(턴별 watermark, `{status 5값, retry()}`, `onSseError` 계수, `AssistantStreamClose` 확장, 규칙 문서) → 2차 APPROVE_WITH_NITS(R2-1 `streamKey` 단조 실행 번호 P2 + P3 6 후속) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `SELF_CHECK` | 구현 완료(로컬 `4b482533`, B-02 `a9f55f12` 위 4커밋, vitest 700·e2e 19/19) → B-02 최종 `bffcacf1` 위 rebase·훅 API 적응 뒤 리뷰 · 후속 backlog: `ChatMessageView.turn_id`(질문↔턴 짝짓기 순서 가정 제거) |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `IN_PROGRESS` | 구현자 `impl-ai-b04`, 워크트리 `wt-ai-b04`, 브랜치 `feat/ai-b-04-ide-assistant-slot`(임시 base B-02 로컬 tip, B-03 파일 불가침 — 사이드바는 슬롯 주입) |
 | [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `WAITING` | — |
@@ -146,6 +146,7 @@ Phase exit:
 | B-02 | `review_ai_b_02` | 1 | REQUEST_CHANGES | P1 2(재시도 상한 소진 뒤 진행 중 턴 스트림 영구 중단 — `streamKey`·`status`·`retry()`로 재연결 owner를 화면으로; 마지막 시도 본문 끊김이 `ended`로 분류 — `onSseError`로 계수), P2 2(이력 병합이 watermark 아래 앞선 턴 이벤트 폐기 → 적용 sequence 집합; `frontend-api-state.md` 갱신), P3 3 |
 | B-01 | `review_ai_b_01` | 2 | APPROVE_WITH_COMMENTS | P1·P2·P3 전부 닫힘(캐시 단언 실효성 되돌리기 실측). 새 P2 1(`probingId` 단일 슬롯 — 동시 probe에서 버튼 조기 해제, 주석 오기), P3 1(font-size 토큰화로 h2>h1 위계) → 후속. R2-3 삭제 후 포커스·R2-4 배지 연결은 B-05 |
 | A-05 | `review_ai_a_05` | 2 | APPROVE WITH CHANGES | 1차 12건 전부 해소(P0 red 확인, extras 없는 환경 재현, env 폴백은 `ANTHROPIC_AUTH_TOKEN`까지 차단). 블로킹 1(A-04 하위 모듈 fix 되돌림)은 base `439f9411` 불일치 산물 → replay 보존. P2 2(예산 소진 호출의 history 서버 도구 블록 미테스트 → live smoke 최우선, 캐시 접두 파기 비용 미기재), P3 4 |
+| B-02 | `review_ai_b_02` | 2 | APPROVE_WITH_NITS | 1차 P1 2·P2 2 해소(재현 probe 재실행). 이탈 2건(5값 status, 내부 attempt+retry) 타당. 새 P2 1(`streamKey` 입력 파생 → 세션 이탈·복귀 시 옛 close 사유가 status로), P3 6 → 후속 |
 
 ## 검증 기록
 

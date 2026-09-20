@@ -112,7 +112,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 로컬 ref 검토 중 · cascade 뒤 push·PR |
+| [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1: 키가 mutation cache에 잔류·P2 2) → 반영 중 · cascade 뒤 push·PR |
 | [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `IN_PROGRESS` | 구현자 `impl-ai-b02`, 워크트리 `wt-ai-b02`, 브랜치 `feat/ai-b-02-assistant-entity-sse`(임시 base B-01 로컬 tip) |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `WAITING` | — |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `WAITING` | — |
@@ -141,6 +141,7 @@ Phase exit:
 | A-02 | `review_ai_a_02` | 3 | APPROVE | 후속 커밋 2개 확인. `Done` 뒤 `Failure` 가능 계약은 spec 문장 추가(A-04)·B-03 리듀서 확인 항목 |
 | A-04 | `review_ai_a_04` | 1 | APPROVE WITH CHANGES | P1 1(`assistant.document_ref_invalid`가 OpenAPI·SDK에 없음), P2 3(이력 읽기 순서, SSE payload `unknown`, 레지스트리 즉시 호출·미설치 표현), P3 7 → 반영. `_finish` 순서 변경은 A-02 불변 4개 유지 확인 |
 | A-05 | `review_ai_a_05` | 1 | REQUEST_CHANGES | P0 1(`output_format=None`이 SDK 센티널 아님 → live에서 모든 텍스트 블록 `ValidationError`, 대본이 `_client.py`를 안 지나 미검출), P1 1(검색 상한 호출당 집행), P2 3(`llm` extra 없이 수집 깨짐, 로그 키 테스트 부재, 미사용 `DEPENDS_ON`), P3 6 → 반영. SDK 표면은 설치본 1.7.0과 전부 일치 |
+| B-01 | `review_ai_b_01` | 1 | REQUEST_CHANGES | P1 1(제출한 API 키가 react-query mutation cache `variables.secret`에 잔류 → 키 실은 요청은 mutation 미사용), P2 2(고급 접힘 시 base_url 전송, 삭제 확인 포커스·announce). FSD·i18n·서버 문구 미노출·스크린샷 OK |
 
 ## 검증 기록
 

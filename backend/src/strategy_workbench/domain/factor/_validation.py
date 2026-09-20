@@ -64,7 +64,42 @@ class FactorGraphValidation:
     required_field_ids: tuple[str, ...]
 
 
+# 이 모듈이 낼 수 있는 그래프 진단 코드 전부. 전략 문서 쪽 레지스트리(`EXPRESSION_CODES`)는 이
+# 집합을 `strategy.expression.*`로 옮긴 것과 같아야 하고, 그 불변식을 테스트가 지킨다(P1-05).
+# 코드를 여기 적지 않고 새로 만들면 전략 validator가 alias를 찾지 못해 진단이 조용히 새
+# 네임스페이스로 샌다 — 그래서 목록이 아니라 게이트다.
+FACTOR_GRAPH_CODES: frozenset[str] = frozenset(
+    {
+        "factor.graph.branch_type",
+        "factor.graph.branch_unit",
+        "factor.graph.cycle",
+        "factor.graph.duplicate_node",
+        "factor.graph.field_missing",
+        "factor.graph.group_field_missing",
+        "factor.graph.group_field_type",
+        "factor.graph.input_missing",
+        "factor.graph.input_type",
+        "factor.graph.insufficient_history",
+        "factor.graph.lag_periods",
+        "factor.graph.operand_type",
+        "factor.graph.output_missing",
+        "factor.graph.parameter_missing",
+        "factor.graph.predicate_type",
+        "factor.graph.saved_factor_missing",
+        "factor.graph.saved_subgraph_missing",
+        "factor.graph.time_series_window",
+        "factor.graph.unit_mismatch",
+        "factor.graph.winsor_bounds",
+    }
+)
+
+
 def _issue(code: str, node_id: str | None, path: str, message: str) -> FactorValidationIssue:
+    if code not in FACTOR_GRAPH_CODES:
+        raise ValueError(
+            "factor graph diagnostic code has no owner — add it to FACTOR_GRAPH_CODES and to the "
+            f"strategy alias table: code={code!r} path={path!r} node_id={node_id!r}"
+        )
     return FactorValidationIssue(code=code, node_id=node_id, path=path, message=message)
 
 
@@ -100,15 +135,22 @@ def validate_factor_graph(
 ) -> FactorGraphValidation:
     issues: list[FactorValidationIssue] = []
     nodes = {node.node_id: node for node in graph.nodes}
-    if len(nodes) != len(graph.nodes):
-        issues.append(
-            _issue(
-                "factor.graph.duplicate_node",
-                None,
-                "nodes",
-                "노드 ID는 중복될 수 없습니다.",
+    # 중복 id를 쓴 자리마다(첫 자리는 빼고) 진단을 단다: 그래프 카드가 어느 노드를 고쳐야 하는지
+    # node_id로 집어 하이라이트한다(P1-05). 한 줄짜리 "중복될 수 없습니다"는 어느 노드인지 말하지
+    # 못해 사용자가 목록을 눈으로 훑어야 했다.
+    seen_node_ids: set[str] = set()
+    for index, node in enumerate(graph.nodes):
+        if node.node_id in seen_node_ids:
+            issues.append(
+                _issue(
+                    "factor.graph.duplicate_node",
+                    node.node_id,
+                    f"nodes.{index}",
+                    "앞에서 이미 쓴 node_id입니다. 다른 이름을 붙여 주세요 — "
+                    f"node_id={node.node_id!r}",
+                )
             )
-        )
+        seen_node_ids.add(node.node_id)
     if graph.output_node_id not in nodes:
         issues.append(
             _issue(
@@ -213,10 +255,19 @@ def validate_factor_graph(
                     )
                 )
 
-    if _has_cycle(nodes):
-        issues.append(
-            _issue("factor.graph.cycle", None, "nodes", "팩터 그래프에 순환 참조가 있습니다.")
-        )
+    index_by_node_id = {node.node_id: index for index, node in enumerate(graph.nodes)}
+    for cycle in _cycles(nodes):
+        chain = " → ".join((*cycle, cycle[0]))
+        for node_id in cycle:
+            issues.append(
+                _issue(
+                    "factor.graph.cycle",
+                    node_id,
+                    f"nodes.{index_by_node_id[node_id]}",
+                    "이 노드가 순환 참조에 묶여 있어 값을 계산할 수 없습니다. 고리 중 한 곳의 "
+                    f"입력을 끊어 주세요 — cycle={chain}",
+                )
+            )
 
     contracts: dict[str, NodeContract] = {}
     if not any(
@@ -278,22 +329,39 @@ def validate_factor_graph(
     )
 
 
-def _has_cycle(nodes: dict[str, ExpressionNode]) -> bool:
+def _cycles(nodes: dict[str, ExpressionNode]) -> tuple[tuple[str, ...], ...]:
+    """순환마다 그 순환에 묶인 node_id를 참조 순서대로.
+
+    존재 여부(bool)만으로는 진단이 어느 노드를 가리킬지 정할 수 없어서 경로를 돌려준다. 방문 순서는
+    문서 순서(`nodes` 삽입 순서)라 같은 그래프면 항상 같은 경로가 나온다. 노드 집합이 같은 순환은
+    한 번만 보고한다 — 같은 고리를 진입점만 달리해 두 번 세지 않는다.
+    """
     state: dict[str, int] = {}
+    path: list[str] = []
+    found: list[tuple[str, ...]] = []
+    seen: set[frozenset[str]] = set()
 
-    def visit(node_id: str) -> bool:
-        if state.get(node_id) == 1:
-            return True
+    def visit(node_id: str) -> None:
         if state.get(node_id) == 2:
-            return False
+            return
+        if state.get(node_id) == 1:
+            cycle = tuple(path[path.index(node_id) :])
+            if frozenset(cycle) not in seen:
+                seen.add(frozenset(cycle))
+                found.append(cycle)
+            return
         state[node_id] = 1
-        node = nodes[node_id]
-        if any(dependency in nodes and visit(dependency) for dependency in node_dependencies(node)):
-            return True
+        path.append(node_id)
+        for dependency in node_dependencies(nodes[node_id]):
+            if dependency in nodes:
+                visit(dependency)
+        path.pop()
         state[node_id] = 2
-        return False
 
-    return any(visit(node_id) for node_id in nodes if state.get(node_id) is None)
+    for node_id in nodes:
+        if state.get(node_id) is None:
+            visit(node_id)
+    return tuple(found)
 
 
 def _infer_contract(

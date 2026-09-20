@@ -1,5 +1,7 @@
 from strategy_workbench.domain.strategy._hydrate import (
     CURRENT_SCHEMA_VERSION,
+    LEGACY_SHAPE_CODE,
+    STRUCTURE_CODES,
     SUPPORTED_SCHEMA_VERSIONS,
     HydrationStatus,
     StrategyHydration,
@@ -27,6 +29,8 @@ __all__ = [
     "UPGRADE_STEPS",
     "NotALegacyDocumentError",
     "HydrationStatus",
+    "LEGACY_SHAPE_CODE",
+    "STRUCTURE_CODES",
     "SourceFormat",
     "StrategyHydration",
     "StructuralIssue",

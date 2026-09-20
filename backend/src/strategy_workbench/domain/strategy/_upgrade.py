@@ -108,6 +108,54 @@ def is_legacy_document(document: Mapping[str, object]) -> bool:
     return document.get("schema_version") == LEGACY_SCHEMA_VERSION
 
 
+# 1.0에서만 쓰던 문법이 놓이는 JSON Pointer → 사용자가 읽을 한글 힌트(P1-05).
+#
+# 판정 조건은 위 step들이 이미 아는 것과 같다. 어떤 문법이 1.0 것인지를 두 벌 적지 않으려고 step과
+# 같은 모양을 읽는다: step이 바뀌면 이 함수도 같은 PR에서 바뀐다.
+def legacy_shape_hints(document: Mapping[str, object]) -> dict[str, str]:
+    """`schema_version`은 현재 버전인데 본문만 1.0인 문서에서, 1.0 문법이 놓인 자리와 힌트.
+
+    hydrate가 같은 pointer에 낸 구조 오류를 이 힌트로 바꿔 단다(`structure.legacy_shape`).
+    `expected a sequence, got dict` 같은 문장만으로는 "이건 예전 문법"이라는 사실이 보이지 않는다.
+    """
+    hints: dict[str, str] = {}
+    factors = document.get("factors")
+    if isinstance(factors, Mapping) and "factors" in factors:
+        hints["/factors"] = (
+            "1.0 문법입니다. factors 아래에 또 factors 목록을 두던 방식이라 지금 버전에서는 읽지 "
+            "못합니다. 안쪽 목록을 factors 바로 아래로 올리거나 업그레이드하세요 — "
+            f"expected=sequence got={type(factors).__name__}"
+        )
+    for section, key in REMOVED_FIELDS:
+        block = document.get(section)
+        if isinstance(block, Mapping) and key in block:
+            hints[f"/{section}/{key}"] = (
+                f"1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우거나 업그레이드하세요 — "
+                f"got={key!r} section={section!r}"
+            )
+    if isinstance(factors, (list, tuple)):
+        for factor_index, factor in enumerate(factors):
+            graph = factor.get("graph") if isinstance(factor, Mapping) else None
+            nodes = graph.get("nodes") if isinstance(graph, Mapping) else None
+            if not isinstance(nodes, (list, tuple)):
+                continue
+            for node_index, node in enumerate(nodes):
+                if not isinstance(node, Mapping) or node.get("kind") != "unary":
+                    continue
+                operator = str(node.get("operator"))
+                alias = _UNARY_ALIASES.get(operator)
+                if alias is None:
+                    continue
+                kind, renamed = alias
+                # `unary` kind 자체는 1.1에도 있다. 걸리는 자리는 은퇴한 operator 값이다.
+                hints[f"/factors/{factor_index}/graph/nodes/{node_index}/operator"] = (
+                    f"1.0 문법입니다. unary {operator}는 지금 버전에서 {kind}의 {renamed}로 "
+                    f"옮겨졌습니다. kind와 operator를 함께 바꾸거나 업그레이드하세요 — "
+                    f"got=unary/{operator} expected={kind}/{renamed}"
+                )
+    return hints
+
+
 def apply_upgrade_steps(document: MutableMapping[str, object]) -> None:
     """Mutate a 1.0 document (plain or ruamel containers) into 1.1 in place."""
     if not is_legacy_document(document):

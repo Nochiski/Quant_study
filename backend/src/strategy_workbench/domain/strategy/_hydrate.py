@@ -11,23 +11,51 @@ ADR: docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md (D1, D
   required field is never guessed.
 - Typed scalar fields normalise `1`/`1.0`, ISO date strings and enum strings; the
   `ParameterValue` union keeps bool/str as-is and folds integral floats to int.
+
+진단 문장은 한국어로 완성해 보낸다(P1-05). Problems panel은 `message`를 그대로 보여주고 다시
+조립하지 않으므로(`.claude/rules/strategy-workbench-sot.md`), 화면 문구의 owner가 이 모듈이다.
+문장 뒤 `—` 다음에는 기계가 읽는 디테일(`got=`·`expected=`·`allowed=`·`missing=`)이 남는다
+(`.claude/rules/error-messages.md`). 키·kind·enum 오타에는 가까운 후보를 한 개 제안한다.
+버전 줄은 현재 버전인데 본문이 1.0 문법이면 그 자리의 진단이 `structure.legacy_shape`로 바뀐다.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import difflib
 import types
 import typing
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum, StrEnum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 from ._models import CURRENT_SCHEMA_VERSION, StrategyIdentity, StrategySpec
+from ._upgrade import legacy_shape_hints
 
 # 새 문서로 받는 버전 집합. 현재 버전 상수의 owner는 `_models.py`다(모델 기본값과 같은 값).
 SUPPORTED_SCHEMA_VERSIONS: tuple[str, ...] = (CURRENT_SCHEMA_VERSION,)
+
+# 본문만 1.0 문법인 문서에 다는 힌트 코드. `structure.*`의 owner는 이 모듈이다
+# (`.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행).
+LEGACY_SHAPE_CODE = "structure.legacy_shape"
+
+# 이 모듈이 낼 수 있는 구조 진단 코드 전부. codec 코드에 `diagnostic_code()` 게이트가 있듯,
+# 구조 코드에도 게이트를 둬서 목록에 없는 코드가 조용히 생기지 않게 한다. 코드마다 문장 golden이
+# 하나씩 있다는 사실도 이 집합으로 강제한다(`tests/domain/test_strategy_diagnostic_messages.py`).
+STRUCTURE_CODES: frozenset[str] = frozenset(
+    {
+        "structure.invalid_date",
+        "structure.invalid_enum",
+        LEGACY_SHAPE_CODE,
+        "structure.missing_field",
+        "structure.type_mismatch",
+        "structure.unknown_key",
+        "structure.unknown_kind",
+        "structure.unsupported_schema_version",
+    }
+)
 
 # reason: sentinel shared by every hydrate branch; the walker is generic over dataclass hints,
 # so its intermediate values are `Any` until the top-level isinstance(StrategySpec) check.
@@ -44,6 +72,13 @@ class StructuralIssue:
     code: str
     pointer: str
     message: str
+
+    def __post_init__(self) -> None:
+        if self.code not in STRUCTURE_CODES:
+            raise ValueError(
+                "structural diagnostic code has no owner — add it to STRUCTURE_CODES and give it "
+                f"a message golden: code={self.code!r} pointer={self.pointer!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -71,7 +106,8 @@ def hydrate_strategy_document(
             StructuralIssue(
                 "structure.missing_field",
                 "/schema_version",
-                f"schema_version is required — supported={SUPPORTED_SCHEMA_VERSIONS}",
+                "문서 맨 위에 schema_version을 적어 주세요 — "
+                f"missing='schema_version' supported={SUPPORTED_SCHEMA_VERSIONS}",
             )
         )
     elif schema_version not in SUPPORTED_SCHEMA_VERSIONS:
@@ -79,8 +115,8 @@ def hydrate_strategy_document(
             StructuralIssue(
                 "structure.unsupported_schema_version",
                 "/schema_version",
-                f"unsupported schema_version — got={schema_version!r} "
-                f"supported={SUPPORTED_SCHEMA_VERSIONS}",
+                "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 바꿔 "
+                f"줍니다 — got={schema_version!r} supported={SUPPORTED_SCHEMA_VERSIONS}",
             )
         )
     if "identity" in document:
@@ -88,7 +124,7 @@ def hydrate_strategy_document(
             StructuralIssue(
                 "structure.unknown_key",
                 "/identity",
-                "identity is owned by the revision envelope, not the authoring document",
+                "identity는 revision 봉투가 소유합니다. 문서에서 지워 주세요 — got='identity'",
             )
         )
     if issues:
@@ -102,7 +138,9 @@ def hydrate_strategy_document(
     }
     spec = _hydrate(StrategySpec, payload, "", issues)
     if issues or spec is _MISSING:
-        return StrategyHydration(HydrationStatus.STRUCTURAL_ERROR, None, tuple(issues))
+        return StrategyHydration(
+            HydrationStatus.STRUCTURAL_ERROR, None, _with_legacy_hints(document, issues)
+        )
     if not isinstance(spec, StrategySpec):  # pragma: no cover - defensive
         raise TypeError(f"hydrate produced {type(spec).__name__}, expected StrategySpec")
     return StrategyHydration(HydrationStatus.OK, spec, ())
@@ -113,7 +151,9 @@ def hydrate_saved_strategy(document: Mapping[str, object]) -> StrategyHydration:
     issues: list[StructuralIssue] = []
     spec = _hydrate(StrategySpec, document, "", issues)
     if issues or spec is _MISSING:
-        return StrategyHydration(HydrationStatus.STRUCTURAL_ERROR, None, tuple(issues))
+        return StrategyHydration(
+            HydrationStatus.STRUCTURAL_ERROR, None, _with_legacy_hints(document, issues)
+        )
     if not isinstance(spec, StrategySpec):  # pragma: no cover - defensive
         raise TypeError(f"hydrate produced {type(spec).__name__}, expected StrategySpec")
     if spec.identity.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
@@ -124,7 +164,8 @@ def hydrate_saved_strategy(document: Mapping[str, object]) -> StrategyHydration:
                 StructuralIssue(
                     "structure.unsupported_schema_version",
                     "/identity/schema_version",
-                    f"unsupported schema_version — got={spec.identity.schema_version!r} "
+                    "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 "
+                    f"바꿔 줍니다 — got={spec.identity.schema_version!r} "
                     f"supported={SUPPORTED_SCHEMA_VERSIONS}",
                 ),
             ),
@@ -147,6 +188,38 @@ def _issue(issues: list[StructuralIssue], code: str, pointer: str, message: str)
     return _MISSING
 
 
+def _suggestion(value: object, candidates: Iterable[object]) -> str:
+    """오타로 보이는 값 뒤에 붙일 " 혹시 'x'인가요?". 닮은 후보가 없으면 빈 문자열.
+
+    초보자가 가장 자주 만나는 구조 오류가 키 오타(`max_name_wieght`)다. 허용 목록을 눈으로 훑는
+    대신 한 번에 고칠 수 있게 한다. 닮음 판정은 difflib 기본 비율(0.6)을 그대로 쓴다.
+    """
+    if not isinstance(value, str):
+        return ""
+    names = [candidate for candidate in candidates if isinstance(candidate, str)]
+    close = difflib.get_close_matches(value, names, n=1)
+    return f" 혹시 {close[0]!r}인가요?" if close else ""
+
+
+def _with_legacy_hints(
+    document: Mapping[str, object], issues: list[StructuralIssue]
+) -> tuple[StructuralIssue, ...]:
+    """1.0 문법이 놓인 자리의 구조 오류를 `structure.legacy_shape`로 바꿔 단다.
+
+    코드가 바뀌면 frontend 업그레이드 배너가 이 문서에도 뜬다(P1-05). pointer는 그대로 두므로
+    편집기가 가리키는 범위는 달라지지 않고, 1.0 문법이 없는 문서는 이 함수가 원본을 그대로 돌려준다.
+    """
+    hints = legacy_shape_hints(document)
+    if not hints:
+        return tuple(issues)
+    return tuple(
+        StructuralIssue(LEGACY_SHAPE_CODE, issue.pointer, hints[issue.pointer])
+        if issue.pointer in hints
+        else issue
+        for issue in issues
+    )
+
+
 def _hydrate(tp: Any, value: object, pointer: str, issues: list[StructuralIssue]) -> Any:
     origin = get_origin(tp)
     if origin is Union or origin is types.UnionType:
@@ -159,7 +232,7 @@ def _hydrate(tp: Any, value: object, pointer: str, issues: list[StructuralIssue]
             issues,
             "structure.type_mismatch",
             pointer,
-            f"expected one of {allowed!r}, got {value!r}",
+            f"여기에 쓸 수 있는 값이 아닙니다 — got={value!r} allowed={list(allowed)!r}",
         )
     if origin is tuple:
         return _hydrate_sequence(get_args(tp)[0], value, pointer, issues)
@@ -168,7 +241,12 @@ def _hydrate(tp: Any, value: object, pointer: str, issues: list[StructuralIssue]
     if tp is type(None):
         if value is None:
             return None
-        return _issue(issues, "structure.type_mismatch", pointer, f"expected null, got {value!r}")
+        return _issue(
+            issues,
+            "structure.type_mismatch",
+            pointer,
+            f"값이 비어 있어야 합니다 — expected=null got={value!r}",
+        )
     return _hydrate_scalar(tp, value, pointer, issues)
 
 
@@ -184,7 +262,8 @@ def _hydrate_union(
                 issues,
                 "structure.type_mismatch",
                 pointer,
-                f"expected a mapping, got {type(value).__name__}",
+                "여기에는 하위 항목을 가진 블록이 와야 합니다 — "
+                f"expected=mapping got={type(value).__name__}",
             )
         kinds = {_kind_of(m): m for m in dataclass_members}
         if None not in kinds:
@@ -194,7 +273,8 @@ def _hydrate_union(
                     issues,
                     "structure.missing_field",
                     _child(pointer, "kind"),
-                    f"kind is required — allowed={sorted(k for k in kinds if k)}",
+                    "어떤 종류의 노드인지 kind로 골라 주세요 — "
+                    f"missing='kind' allowed={sorted(k for k in kinds if k)}",
                 )
             member = kinds.get(kind if isinstance(kind, str) else None)
             if member is None:
@@ -202,7 +282,9 @@ def _hydrate_union(
                     issues,
                     "structure.unknown_kind",
                     _child(pointer, "kind"),
-                    f"unknown kind — got={kind!r} allowed={sorted(k for k in kinds if k)}",
+                    "모르는 kind입니다"
+                    + _suggestion(kind, [k for k in kinds if k])
+                    + f" — got={kind!r} allowed={sorted(k for k in kinds if k)}",
                 )
             return _hydrate_dataclass(member, value, pointer, issues)
         if len(dataclass_members) == 1:
@@ -229,7 +311,12 @@ def _hydrate_union(
         if str in scalar_members:
             return value
     names = "|".join(getattr(m, "__name__", str(m)) for m in scalar_members)
-    return _issue(issues, "structure.type_mismatch", pointer, f"expected {names}, got {value!r}")
+    return _issue(
+        issues,
+        "structure.type_mismatch",
+        pointer,
+        f"값의 타입이 맞지 않습니다 — expected={names} got={value!r}",
+    )
 
 
 def _hydrate_sequence(
@@ -240,7 +327,8 @@ def _hydrate_sequence(
             issues,
             "structure.type_mismatch",
             pointer,
-            f"expected a sequence, got {type(value).__name__}",
+            "여기에는 목록이 와야 합니다. 항목마다 줄 앞에 `- `를 붙이세요 — "
+            f"expected=sequence got={type(value).__name__}",
         )
     items = [
         _hydrate(item_tp, item, _child(pointer, index), issues) for index, item in enumerate(value)
@@ -256,7 +344,8 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
             issues,
             "structure.type_mismatch",
             pointer,
-            f"expected a mapping, got {type(value).__name__}",
+            "여기에는 하위 항목을 가진 블록이 와야 합니다 — "
+            f"expected=mapping got={type(value).__name__}",
         )
     hints = get_type_hints(tp)
     fields = {field.name: field for field in dataclasses.fields(tp)}
@@ -267,7 +356,9 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
                 issues,
                 "structure.unknown_key",
                 _child(pointer, key),
-                f"unknown key {key!r} — allowed={sorted(fields)}",
+                "모르는 키입니다"
+                + _suggestion(key, fields)
+                + f" — got={key!r} allowed={sorted(fields)}",
             )
             failed = True
     kwargs: dict[str, Any] = {}
@@ -297,7 +388,12 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
                 )
             derived_from[name] = source
         elif field.default is dataclasses.MISSING and field.default_factory is dataclasses.MISSING:
-            _issue(issues, "structure.missing_field", _child(pointer, name), f"{name} is required")
+            _issue(
+                issues,
+                "structure.missing_field",
+                _child(pointer, name),
+                f"필수 키가 없습니다 — missing={name!r} in={tp.__name__!r}",
+            )
             failed = True
     if failed:
         return _MISSING
@@ -317,26 +413,47 @@ def _hydrate_scalar(tp: Any, value: object, pointer: str, issues: list[Structura
                 pass
         allowed = [member.value for member in tp]
         return _issue(
-            issues, "structure.invalid_enum", pointer, f"expected one of {allowed!r}, got {value!r}"
+            issues,
+            "structure.invalid_enum",
+            pointer,
+            "고를 수 있는 값이 아닙니다"
+            + _suggestion(value, allowed)
+            + f" — got={value!r} allowed={allowed!r}",
         )
     if tp is bool:
         if isinstance(value, bool):
             return value
-        return _issue(issues, "structure.type_mismatch", pointer, f"expected bool, got {value!r}")
+        return _issue(
+            issues,
+            "structure.type_mismatch",
+            pointer,
+            f"참 또는 거짓(true·false)이 와야 합니다 — expected=bool got={value!r}",
+        )
     if tp is int:
         if isinstance(value, bool):
             return _issue(
-                issues, "structure.type_mismatch", pointer, f"expected int, got {value!r}"
+                issues,
+                "structure.type_mismatch",
+                pointer,
+                f"정수가 와야 합니다 — expected=int got={value!r}",
             )
         if isinstance(value, int):
             return value
         if isinstance(value, float) and value.is_integer():
             return int(value)
-        return _issue(issues, "structure.type_mismatch", pointer, f"expected int, got {value!r}")
+        return _issue(
+            issues,
+            "structure.type_mismatch",
+            pointer,
+            f"정수가 와야 합니다 — expected=int got={value!r}",
+        )
     if tp is float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             return _issue(
-                issues, "structure.type_mismatch", pointer, f"expected float, got {value!r}"
+                issues,
+                "structure.type_mismatch",
+                pointer,
+                f"숫자가 와야 합니다 — expected=float got={value!r}",
             )
         try:
             return float(value)
@@ -345,12 +462,18 @@ def _hydrate_scalar(tp: Any, value: object, pointer: str, issues: list[Structura
                 issues,
                 "structure.type_mismatch",
                 pointer,
-                f"integer literal too large for float — digits={len(str(value))}",
+                "정수가 너무 커서 숫자로 바꿀 수 없습니다 — "
+                f"digits={len(str(value))} expected=float",
             )
     if tp is str:
         if isinstance(value, str):
             return value
-        return _issue(issues, "structure.type_mismatch", pointer, f"expected str, got {value!r}")
+        return _issue(
+            issues,
+            "structure.type_mismatch",
+            pointer,
+            f"문자열이 와야 합니다 — expected=str got={value!r}",
+        )
     if tp is date:
         # datetime is a date subclass; a timestamp on a date field is a different value, not a date.
         if isinstance(value, date) and not isinstance(value, datetime):
@@ -364,7 +487,7 @@ def _hydrate_scalar(tp: Any, value: object, pointer: str, issues: list[Structura
             issues,
             "structure.invalid_date",
             pointer,
-            f"expected ISO date (YYYY-MM-DD), got {value!r}",
+            f"날짜는 YYYY-MM-DD로 적어 주세요 — expected=YYYY-MM-DD got={value!r}",
         )
     raise TypeError(  # pragma: no cover - model authoring error
         f"unsupported hydrate type {tp!r} at pointer={pointer!r}"

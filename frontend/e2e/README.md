@@ -25,6 +25,12 @@ npm run test:e2e:report
 한 벌(1440 light)로 충분해 시각 프로젝트 4종에 넣지 않았다. 캡처는 진단 문장을 `mask`로 가린다 —
 그 문장의 owner는 backend라 문구가 다듬어져도 이 기준선을 다시 찍을 일이 없어야 한다.
 
+`test:e2e:update` passes `--update-snapshots=changed` on purpose. A bare `--update-snapshots`
+leaves a mismatching baseline untouched and still reports the test as passed, so the stale PNG
+survives and the next strict run fails again. `=all` rewrites every baseline including the ones
+that already matched, which buries the intended change in unrelated byte churn. Keep the mode
+explicit, and check `git status` afterwards: only the baselines you meant to change should appear.
+
 This layer owns browser process, server lifecycle, viewport/theme matrix, screenshots and failure
 artifacts. The four visual projects collect only `workbench.infrastructure.spec.ts`; the single
 1440px light project collects `workbench.workflow.spec.ts` so stateful create/revision/backtest

@@ -39,7 +39,9 @@ main
 
 - 브랜치 이름은 `feat/lang2-<pr-id 소문자>-<slug>`. 예: `feat/lang2-p2-02-schema-1-2`.
 - 각 PR의 base는 직전 PR 브랜치다. P1 스택과 P2 스택은 서로 독립이라 병렬 진행할 수 있다
-  (`parallel_window`에 기록). P3-01의 base는 P2-09이며 P1-05가 먼저 merge되어 있어야 한다.
+  (`parallel_window`에 기록). 교차 제약 두 가지: **P2-06·P2-07은 P1-03(연산자 카탈로그)이 merge된 뒤
+  착수한다**(두 PR이 카탈로그의 `saved_*` 제거·`availability`를 건드린다). P3-01의 base는 P2-09이며
+  P1-05가 먼저 merge되어 있어야 한다.
 - **generated SDK 규칙(1.1 initiative와 같음)**: P2 backend PR은 `backend/openapi.json`만 재생성하고
   `frontend/src/shared/api/generated`는 건드리지 않는다. SDK 재생성과 frontend 적응은 P3-01이 한
   PR에서 한다. P2 PR은 backend gate만 merge gate로 삼고 CI `frontend`·`browser-e2e` job은 P3-01·P3-03의
@@ -304,7 +306,9 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 
 **제약사항**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend는 P3-01까지 빨간불.
 이 PR이 P2 스택에서 12절 상한(600줄·10파일)에 가장 가깝다. 착수 시 바뀌는 파일 수를 먼저 세고,
-상한을 넘으면 **enum 이동을 별도 PR로 뗀다**(`data`·`execution` 제거가 먼저, enum 이동이 뒤).
+상한을 넘으면 **enum 이동을 별도 PR로 뗀다**(`data`·`execution` 제거가 먼저, enum 이동이 뒤). 분리하면 PR
+총수가 바뀌므로 README의 "WORKFLOW의 PR 범위를 바꾸면 먼저 변경 이유를 PLAN.md 변경 기록에 남긴다" 절차를
+따르고 집계 도구를 다시 돌린다.
 그래도 넘으면 PR 본문 `제약사항`에 사유를 적는다.
 
 ### P2-04 — `signal.normalization`과 결합 전 정규화
@@ -378,7 +382,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `saved_factor`·`saved_subgraph`를 노드 union·스키마·연산자 카탈로그에서 제거. 실행 경로의 거부
   코드 삭제.
 - runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성(`risk_factor_id`
-  필드와 새 진단 코드가 응답 스키마에 노출된다). frontend SDK는 P3-01.
+  필드가 응답 스키마에 노출된다. 진단 코드 문자열은 OpenAPI에 열거되지 않는다). frontend SDK는 P3-01.
 
 ### P2-07 — compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported
 
@@ -394,8 +398,9 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `signal.normalization: none`이고 팩터 단위가 다르면 `strategy.signal.unit_mismatch` warning.
 - 어댑터 capability(`GROUP_SERIES` 제공 여부)를 compile이 조회해 `group` 노드가
   `strategy.operator.unsupported` error. 연산자 카탈로그 응답의 `availability`도 같은 capability로.
-- `export_openapi.py`로 `backend/openapi.json` 재생성(연산자 카탈로그 응답의 `availability`와 새 진단
-  코드가 노출된다). frontend SDK는 P3-01.
+- `export_openapi.py`로 `backend/openapi.json` 재생성(연산자 카탈로그 응답의 `availability` 값 집합이
+  바뀐다. 진단 코드 문자열은 OpenAPI에 열거되지 않으므로 그 자체는 재생성 사유가 아니다. diff가 0이면
+  그 사실을 PR 본문에 적는다). frontend SDK는 P3-01.
 
 ### P2-08 — duckdb `GROUP_SERIES` 스파이크와 `ideas/*.yaml` 5개
 

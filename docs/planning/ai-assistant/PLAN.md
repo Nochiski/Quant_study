@@ -6,7 +6,7 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
-last_updated: 2026-09-21T02:46:01+09:00
+last_updated: 2026-09-21T02:49:53+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 5
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `5 / 13` |
-| Aggregated at | `2026-09-21 02:46 KST` |
+| Aggregated at | `2026-09-21 02:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -99,7 +99,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `APPROVED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_REVIEW` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `5640f8d2`(A-04 `645efcb` 위) · `5b4a52e4`(A-04 최종 `9f39faec` 위 12커밋: 리뷰 전부 반영, lazy API 등록 재작성, `pause_turn` 결합, SDK env 폴백 차단, `Usage` 캐시 필드, `backend-no-extras` CI job, `AssistantClient`/`AssistantResponse` 타입 분기, extra 설치 전제 테스트 2건 정정) → 2차 P2·P3 후속 뒤 · `review_ai_a_05` 2차 APPROVE WITH CHANGES(블로킹 1은 base 불일치 산물 — replay로 해소, P2 2·P3 4 반영) → 3차 확인 |
-| [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`19331e4a`, A-05 `5640f8d2` 위 8커밋, pytest 1843·ruff·pyright 0, A-05 리뷰 결정 4건 대칭 적용) · 기본 모델 `gpt-6-astra` · A-05 재작성 뒤 rebase·push → PR |
+| [ ] | `A-06` | `llm_openai` adapter | A-05 | `IN_REVIEW` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `a963f316`(A-05 `bd2747ef` 위 11커밋, A-05 최종 뒤 재rebase 예정) · `review_ai_a_06` 진행 중 · 게이트: pytest 1895(extras)/1718(없음)·ruff·pyright 0 · 기본 모델 `gpt-6-astra` · Usage 캐시 의미 통일(input_tokens = 캐시 포함 총 입력, A-05 반영) |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `SELF_CHECK` | 구현 완료(로컬 `c1d08e41`, A-05 위 7커밋: 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) |
 
 Phase exit:
@@ -156,6 +156,7 @@ Phase exit:
 ## 변경 기록
 
 - 2026-09-21 — 보안 결함(A-06 발견, A-05·A-06 수정): 프로파일에 base_url이 없으면 SDK가 `OPENAI_BASE_URL`/`ANTHROPIC_BASE_URL` 환경 변수를 읽어 spec D6 검사를 지나지 않은 호스트로 키가 나감 → 기본 base_url·api_key를 항상 명시해 SDK 환경 변수 폴백 차단(spec D6 한 줄). `Usage` 캐시 필드는 SDK 값 그대로 매핑.
+- 2026-09-21 — A-06(#178) PR 생성·리뷰 배정. `Usage.input_tokens` 의미를 캐시 포함 총 입력으로 통일(Anthropic adapter 합산, OpenAI 그대로; A-07 집계는 단순 합산).
 - 2026-09-21 — B-03 구현 완료. A 후속 backlog: `ChatMessageView.turn_id` 추가(질문↔턴 짝짓기가 순서 가정에 의존).
 - 2026-09-21 — A-07: 실행 설정 문장은 schema 1.1 기준(lang2 P2-03 머지 뒤 프롬프트·골든 갱신 후속), env `STRATEGY_WORKBENCH_LIVE_SMOKE`로 통일, 기본값 5종 유지(근거 표), 타임아웃 300s 여유 얇음(live smoke 후 bootstrap 주입으로 조정).
 - 2026-09-21 — A-02 후속(CI flake 수정)이 스택 위에 없어 A-04·A-05 CI 실패 → A-03부터 cascade rebase(A-03 `d52436b7`, 이어 A-04·A-05·A-06·A-07·B-01).

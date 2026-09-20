@@ -88,6 +88,8 @@ export type StrategyIdeProps = {
 };
 
 const NARROW_QUERY = "(max-width: 1279px)";
+/** 좌우 패널이 다 펼쳐졌을 때 가운데 편집기에 남겨 두는 최소 폭. 이 아래로 내려가면 오버레이로 돌린다. */
+const EDITOR_MIN_WIDTH = 480;
 const VIEWS: readonly SourceView[] = ["yaml", "json", "form", "graph", "diff"];
 
 /**
@@ -134,6 +136,11 @@ export const StrategyIde = ({
       ? { ...DEFAULT_LAYOUT, inspectorOpen: false, debuggerOpen: false }
       : DEFAULT_LAYOUT,
   );
+  // 계약과 AI 사이드바를 나란히 두면 편집기가 최소 폭 아래로 내려가는 화면인가. 폭은 CSS가 아니라
+  // 배치 값에서 나오므로 질의도 배치에 따라 바뀐다.
+  const squeezed = useMediaQuery(
+    `(max-width: ${(layout.outlineOpen ? layout.outlineWidth : 0) + layout.inspectorWidth + layout.assistantWidth + EDITOR_MIN_WIDTH - 1}px)`,
+  );
   const outlineId = useId();
   const inspectorId = useId();
   const debuggerId = useId();
@@ -155,6 +162,16 @@ export const StrategyIde = ({
   const assistantRestore = useRef<HTMLButtonElement>(null);
   const assistantCollapse = useRef<HTMLButtonElement>(null);
   const hasAssistant = assistant !== undefined;
+  /**
+   * 좁은 화면에서 둘 다 펼쳐져 있으면 **나중에 연 쪽**을 오버레이로 돌린다. 먼저 보고 있던 패널을
+   * 빼앗지 않으면서 편집기 폭을 지키는 규칙이다.
+   */
+  const overlayRight =
+    !narrow && squeezed && hasAssistant && layout.inspectorOpen && layout.assistantOpen
+      ? (layout.lastOpenedRight ?? "assistantOpen")
+      : null;
+  const inspectorFloating = narrow || overlayRight === "inspectorOpen";
+  const assistantFloating = narrow || overlayRight === "assistantOpen";
   const theme = useThemePreference();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commands = useMemo<CommandPaletteItem[]>(() => {
@@ -291,14 +308,19 @@ export const StrategyIde = ({
 
   // window 리스너는 layout effect로 설치한다(`.claude/rules/frontend-react-effects.md`, backlog 20·21).
   useLayoutEffect(() => {
-    if (!narrow) return;
+    if (!narrow && overlayRight === null) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape")
-        close(["inspectorOpen", "debuggerOpen", "assistantOpen"]);
+      // 오버레이로 떠 있는 패널만 닫는다. 자리에 박혀 있는 패널은 Escape로 사라지지 않는다.
+      if (event.key !== "Escape") return;
+      close(
+        narrow
+          ? ["inspectorOpen", "debuggerOpen", "assistantOpen"]
+          : [overlayRight as "inspectorOpen" | "assistantOpen"],
+      );
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [narrow, close]);
+  }, [narrow, overlayRight, close]);
 
   // layout effect인 이유: 이 리스너는 화면의 버튼과 같은 게이트(`saveDisabled`·`runDisabled`·`validateDisabled`)를
   // 닫힌 값으로 읽는다. passive effect(`useEffect`)면 버튼이 켜진 commit과 새 리스너 설치 사이에 틈이 생겨, 그
@@ -375,7 +397,7 @@ export const StrategyIde = ({
       className="ide__inspector"
       aria-label={t("ide.inspector")}
       hidden={!layout.inspectorOpen}
-      style={narrow ? undefined : { width: layout.inspectorWidth }}
+      style={inspectorFloating ? undefined : { width: layout.inspectorWidth }}
     >
       <header className="ide__panel-header">
         <h2>{t("ide.inspector")}</h2>
@@ -433,7 +455,7 @@ export const StrategyIde = ({
       className="ide__assistant"
       aria-label={t("ide.assistant")}
       hidden={!layout.assistantOpen}
-      style={narrow ? undefined : { width: layout.assistantWidth }}
+      style={assistantFloating ? undefined : { width: layout.assistantWidth }}
     >
       <header className="ide__panel-header">
         <h2>{t("ide.assistant")}</h2>
@@ -500,7 +522,7 @@ export const StrategyIde = ({
               {t("ide.outline")}
             </Button>
           ) : null}
-          {narrow || !layout.inspectorOpen ? (
+          {inspectorFloating || !layout.inspectorOpen ? (
             <Button
               ref={inspectorRestore}
               size="small"
@@ -528,7 +550,7 @@ export const StrategyIde = ({
               {t("ide.debugger")}
             </Button>
           ) : null}
-          {hasAssistant && (narrow || !layout.assistantOpen) ? (
+          {hasAssistant && (assistantFloating || !layout.assistantOpen) ? (
             <Button
               ref={assistantRestore}
               size="small"
@@ -730,7 +752,7 @@ export const StrategyIde = ({
           {narrow ? null : debuggerNode}
         </div>
 
-        {!narrow && layout.inspectorOpen ? (
+        {!inspectorFloating && layout.inspectorOpen ? (
           <SplitHandle
             orientation="vertical"
             label={t("ide.resizeInspector")}
@@ -742,9 +764,9 @@ export const StrategyIde = ({
             controls={ids.inspector}
           />
         ) : null}
-        {narrow ? null : inspectorNode}
+        {inspectorFloating ? null : inspectorNode}
 
-        {hasAssistant && !narrow && layout.assistantOpen ? (
+        {hasAssistant && !assistantFloating && layout.assistantOpen ? (
           <SplitHandle
             orientation="vertical"
             label={t("ide.resizeAssistant")}
@@ -756,26 +778,26 @@ export const StrategyIde = ({
             controls={ids.assistant}
           />
         ) : null}
-        {narrow ? null : assistantNode}
+        {assistantFloating ? null : assistantNode}
       </div>
 
+      {inspectorFloating ? (
+        <div className="ide__drawer" hidden={!layout.inspectorOpen}>
+          {inspectorNode}
+        </div>
+      ) : null}
       {narrow ? (
-        <>
-          <div className="ide__drawer" hidden={!layout.inspectorOpen}>
-            {inspectorNode}
-          </div>
-          <div
-            className="ide__drawer ide__drawer--bottom"
-            hidden={!layout.debuggerOpen}
-          >
-            {debuggerNode}
-          </div>
-          {hasAssistant ? (
-            <div className="ide__drawer" hidden={!layout.assistantOpen}>
-              {assistantNode}
-            </div>
-          ) : null}
-        </>
+        <div
+          className="ide__drawer ide__drawer--bottom"
+          hidden={!layout.debuggerOpen}
+        >
+          {debuggerNode}
+        </div>
+      ) : null}
+      {hasAssistant && assistantFloating ? (
+        <div className="ide__drawer" hidden={!layout.assistantOpen}>
+          {assistantNode}
+        </div>
       ) : null}
       <CommandPalette
         open={paletteOpen}

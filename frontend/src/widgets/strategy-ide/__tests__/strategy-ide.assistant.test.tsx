@@ -31,6 +31,18 @@ const matchMedia = (matches: boolean) =>
     })),
   );
 
+/** 질의마다 다른 답을 주는 matchMedia. 좁은 화면(narrow)과 편집기 최소 폭 질의를 따로 흉내 낸다. */
+const matchMediaBy = (matches: (query: string) => boolean) =>
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn().mockImplementation((query: string) => ({
+      matches: matches(query),
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  );
+
 const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
   render(
     <ThemePreferenceProvider>
@@ -218,6 +230,64 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("편집기가 최소 폭 아래로 내려가면 나중에 연 패널을 오버레이로 돌린다", async () => {
+    // 1279px 초과라 좁은 화면 규칙은 아니지만, 계약 320 + 사이드바 360 + 편집기 480을 담지 못한다.
+    matchMediaBy((query) => query !== "(max-width: 1279px)");
+    const user = userEvent.setup();
+    mount();
+    // 계약은 기본 펼침이고 자리에 박혀 있다.
+    expect(
+      screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
+    ).toBeNull();
+
+    await user.click(
+      screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
+    );
+    const assistant = screen.getByRole("complementary", {
+      name: "AI 어시스턴트",
+    });
+    expect(assistant.closest(".ide__drawer")).not.toBeNull();
+    expect(
+      screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
+    ).not.toBeInTheDocument();
+
+    // Escape는 떠 있는 패널만 닫는다.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(
+      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("complementary", { name: "계약" }),
+    ).toBeInTheDocument();
+
+    // 계약을 닫았다가 다시 열면 이번에는 계약이 나중에 연 패널이다.
+    await user.click(screen.getByRole("button", { name: "계약 접기" }));
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
+    expect(
+      screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("complementary", { name: "AI 어시스턴트" })
+        .closest(".ide__drawer"),
+    ).toBeNull();
+  });
+
+  it("넓은 화면에서는 둘 다 자리에 박혀 있다", () => {
+    matchMediaBy(() => false);
+    mount();
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(
+      screen
+        .getByRole("complementary", { name: "AI 어시스턴트" })
+        .closest(".ide__drawer"),
+    ).toBeNull();
   });
 
   it("명령 팔레트에서도 사이드바를 여닫는다", async () => {

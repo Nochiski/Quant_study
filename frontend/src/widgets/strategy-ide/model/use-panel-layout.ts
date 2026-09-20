@@ -13,6 +13,11 @@ export type PanelLayout = {
   inspectorOpen: boolean;
   debuggerOpen: boolean;
   assistantOpen: boolean;
+  /**
+   * 오른쪽 두 패널(계약·AI) 중 마지막으로 펼친 쪽. 화면이 좁아 둘을 나란히 두면 편집기가 최소 폭
+   * 아래로 내려갈 때, 나중에 연 쪽을 오버레이로 돌리는 판정에 쓴다. 저장하지 않는다.
+   */
+  lastOpenedRight: "inspectorOpen" | "assistantOpen" | null;
 };
 
 export const PANEL_BOUNDS = {
@@ -32,6 +37,7 @@ export const DEFAULT_LAYOUT: PanelLayout = {
   debuggerOpen: true,
   // AI 사이드바만 기본 접힘이다: 슬롯을 넘기지 않는 화면과 첫 방문의 레이아웃을 그대로 둔다(B-04).
   assistantOpen: false,
+  lastOpenedRight: null,
 };
 
 type PanelSizes = Pick<
@@ -155,8 +161,17 @@ const reduce = (state: PanelLayout, action: Action): PanelLayout => {
   switch (action.type) {
     case "resize":
       return { ...state, [action.panel]: clamp(action.panel, action.value) };
-    case "toggle":
-      return { ...state, [action.panel]: !state[action.panel] };
+    case "toggle": {
+      const panel = action.panel;
+      const open = !state[panel];
+      const right = panel === "inspectorOpen" || panel === "assistantOpen";
+      return {
+        ...state,
+        [panel]: open,
+        lastOpenedRight:
+          right && open ? panel : state.lastOpenedRight,
+      };
+    }
     case "close":
       return action.panels.reduce(
         (next, panel) => ({ ...next, [panel]: false }),

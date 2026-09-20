@@ -404,3 +404,26 @@ def test_the_windows_account_is_qualified_with_its_domain() -> None:
     )
     assert windows_account_name(userdomain=None, username="sangmok", fallback="x") == "sangmok"
     assert windows_account_name(userdomain="QUANT", username=None, fallback="x") == "x"
+
+
+def test_the_os_cause_is_kept_for_local_diagnosis_but_stays_out_of_the_message(
+    tmp_path: Path,
+) -> None:
+    """체인은 일부러 끊지 않는다. 막는 것은 **최상위 예외 문자열**이다.
+
+    `OSError.__str__`은 `filename`을 담으므로 `__cause__`와 traceback에는 경로가 보인다. 로컬
+    로그의 절대 경로·스택은 규칙이 명시적으로 허용하는 채널이고, 끊으면 "어느 파일이 왜 안
+    열렸나"를 운영자가 볼 방법이 사라진다. A-04로 나가는 값은 `str`·`repr`·`args`뿐이고 그
+    셋만 깨끗하면 된다 — A-04가 체인·traceback을 응답에 싣지 않는 것이 그쪽 조건이다.
+    """
+    with pytest.raises(SecretStoreStorageError) as raised:
+        _blocked_store(tmp_path).put("profile-a", SECRET)
+
+    error = raised.value
+    assert isinstance(error.__cause__, OSError), "OS 실패의 원인은 체인으로 남긴다"
+    # 체인과 traceback은 **일부러 검사하지 않는다.** `OSError.filename`이 붙는지는 플랫폼마다
+    # 다르고, 붙더라도 로컬 진단 채널이라 허용 범위다. 이 테스트가 잠그는 것은 그 아래 세 줄뿐이다.
+    assert str(tmp_path) not in str(error)
+    assert str(tmp_path) not in repr(error)
+    assert all(str(tmp_path) not in str(argument) for argument in error.args)
+    assert error.path is not None, "경로를 프로그램으로 읽는 통로는 속성이다"

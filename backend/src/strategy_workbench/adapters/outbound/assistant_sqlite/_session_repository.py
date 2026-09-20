@@ -44,6 +44,9 @@ session_id, ordinal, strategy_id, revision, draft_id, provider_profile_id, creat
 """
 _TURN_COLUMNS = "turn_id, session_id, status, accepted_sequence, started_at, finished_at"
 
+# 종료 상태. `TurnStatus` docstring이 "다시 바뀌지 않는다"고 선언하고 여기서 집행한다.
+_TERMINAL_STATUSES = frozenset({TurnStatus.COMPLETED, TurnStatus.FAILED, TurnStatus.CANCELLED})
+
 
 class SQLiteChatSessionRepository:
     """세션·메시지·턴·이벤트를 한 DB 파일에 담는 저장소."""
@@ -158,15 +161,27 @@ class SQLiteChatSessionRepository:
 
         그래서 돌려주는 값도 인자가 아니라 **저장된 행**이다. 인자를 그대로 돌려주면 보존한
         사실을 호출자에게 거짓으로 말하게 된다.
+
+        상태 전이는 한쪽 방향만 연다. RUNNING에서 종료 상태로는 갈 수 있고(크래시 복구가 남은
+        RUNNING 턴을 FAILED로 정리해야 한다), 종료된 턴이 다른 상태로 바뀌는 것은 거부한다
+        (`TurnStatus` docstring: "종료 상태 세 개는 다시 바뀌지 않는다"). 같은 종료 상태로의
+        갱신은 남겨 둔다 — 러너의 `cancel`이 CANCELLED를 먼저 쓰고 스레드가 끝날 때 같은 상태에
+        `finished_at`만 채우기 때문이다. 종료된 턴이 RUNNING으로 되살아나면 "세션에 RUNNING 턴이
+        있으면 409"(spec D6) 판정이 뒤집혀 그 세션에서 새 턴을 영영 시작할 수 없다.
         """
         with self._database.transaction(write=True) as connection:
-            stored = _turn_row(connection, turn.turn_id)
-            stored_session = text_value(stored, "session_id")
-            if stored_session != turn.session_id:
+            stored = _decode_turn(_turn_row(connection, turn.turn_id))
+            if stored.session_id != turn.session_id:
                 raise AssistantStorageError(
                     "an assistant turn cannot move between sessions — "
-                    f"turn_id={turn.turn_id!r} stored={stored_session!r} "
+                    f"turn_id={turn.turn_id!r} stored={stored.session_id!r} "
                     f"given={turn.session_id!r}"
+                )
+            if stored.status in _TERMINAL_STATUSES and turn.status is not stored.status:
+                raise AssistantStorageError(
+                    "a finished assistant turn cannot change status — "
+                    f"turn_id={turn.turn_id!r} stored={stored.status.value} "
+                    f"given={turn.status.value}"
                 )
             connection.execute(
                 "UPDATE chat_turns SET status = ?, finished_at = ? WHERE turn_id = ?",

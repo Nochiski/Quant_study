@@ -109,6 +109,24 @@ def _turn(turn_id: str = "turn-1", *, session_id: str = "session-1", accepted: i
     )
 
 
+def _stated(
+    status: TurnStatus,
+    *,
+    finished_at: datetime | None,
+    turn_id: str = "turn-1",
+    session_id: str = "session-1",
+) -> Turn:
+    """상태 갱신용 `Turn`. 보존 대상 두 필드는 저장 값과 다르게 둬 갱신이 건드리지 않음을 본다."""
+    return Turn(
+        turn_id=turn_id,
+        session_id=session_id,
+        status=status,
+        accepted_sequence=-1,
+        started_at=datetime(1999, 1, 1, tzinfo=UTC),
+        finished_at=finished_at,
+    )
+
+
 def _event_samples() -> dict[type, ChatEvent]:
     """union 멤버 타입마다 왕복에 쓸 표본 하나.
 
@@ -576,3 +594,61 @@ def test_a_non_utc_aware_timestamp_is_stored_as_utc(database: AssistantDatabase)
         repository.append_message(
             "session-1", ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 9, 30))
         )
+
+
+def test_a_finished_turn_cannot_go_back_to_running(database: AssistantDatabase) -> None:
+    """종료 상태 셋은 다시 바뀌지 않는다(`TurnStatus` docstring).
+
+    되살아나면 "세션에 RUNNING 턴이 있으면 409"(spec D6) 판정이 뒤집혀 그 세션에서 새 턴을 영영
+    시작할 수 없다. 지금은 러너의 `decided`가 막아 주지만, A-04가 HTTP에서 턴 상태를 쓰거나
+    재기동 후 남은 RUNNING 턴을 쓸어 담는 스윕이 생기면 저장소가 막아 줄 것이 없다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn(accepted=3))
+    finished_at = datetime(2026, 9, 20, 9, 35, tzinfo=UTC)
+    repository.update_turn(_stated(TurnStatus.COMPLETED, finished_at=finished_at))
+
+    with pytest.raises(AssistantStorageError, match="cannot change status"):
+        repository.update_turn(_stated(TurnStatus.RUNNING, finished_at=None))
+    with pytest.raises(AssistantStorageError, match="cannot change status"):
+        repository.update_turn(_stated(TurnStatus.FAILED, finished_at=finished_at))
+
+    stored = repository.get_turn("turn-1")
+    assert stored.status is TurnStatus.COMPLETED
+    assert stored.finished_at == finished_at
+
+
+def test_a_running_turn_still_reaches_every_terminal_state(database: AssistantDatabase) -> None:
+    """한쪽 방향만 막는다. 크래시 복구는 남은 RUNNING 턴을 FAILED로 정리해야 한다."""
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    finished_at = datetime(2026, 9, 20, 9, 35, tzinfo=UTC)
+
+    terminal = (TurnStatus.COMPLETED, TurnStatus.FAILED, TurnStatus.CANCELLED)
+
+    for index, status in enumerate(terminal):
+        turn_id = f"turn-{index}"
+        repository.create_turn(_turn(turn_id))
+        target = _stated(status, finished_at=finished_at, turn_id=turn_id)
+
+        assert repository.update_turn(target).status is status
+
+
+def test_a_cancelled_turn_can_still_be_stamped_with_its_finish_time(
+    database: AssistantDatabase,
+) -> None:
+    """러너는 CANCELLED를 먼저 쓰고 스레드가 끝날 때 같은 상태에 `finished_at`만 채운다.
+
+    같은 종료 상태로의 갱신까지 막으면 `_turns.py`의 `cancel` → `_finish` 순서가 깨진다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn())
+    repository.update_turn(_stated(TurnStatus.CANCELLED, finished_at=None))
+    finished_at = datetime(2026, 9, 20, 9, 35, tzinfo=UTC)
+
+    stamped = repository.update_turn(_stated(TurnStatus.CANCELLED, finished_at=finished_at))
+
+    assert stamped.status is TurnStatus.CANCELLED
+    assert stamped.finished_at == finished_at

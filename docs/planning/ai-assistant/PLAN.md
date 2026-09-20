@@ -6,10 +6,10 @@ current_phase: P0,A
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05]
-last_updated: 2026-09-21T00:05:31+09:00
+last_updated: 2026-09-21T00:10:09+09:00
 planned_prs: 13
 merged_prs: 0
-approved_prs: 1
+approved_prs: 2
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05` |
 | Progress | `0 / 13 merged (0%)` |
-| Approved | `1 / 13` |
-| Aggregated at | `2026-09-21 00:05 KST` |
+| Approved | `2 / 13` |
+| Aggregated at | `2026-09-21 00:10 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -94,7 +94,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `IN_REVIEW` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 2차 REQUEST_CHANGES 반영(+`FailureCode.INTERNAL`) → 3차 재검토 중 |
+| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `APPROVED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `IN_REVIEW` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `84570df`(A-01 `e8c6895` 위) · `review_ai_a_02` 1차 REQUEST_CHANGES(P1 1·P2 6) 반영(P3 1건 사양) → 2차 재검토 중 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `IN_REVIEW` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `c6d70de`(A-02 `84570df` 위) · `review_ai_a_03` 1차 REQUEST_CHANGES(P1 2·권고 1·P2 1·P3 6) 반영(P3 3건 사양) → 2차 재검토 중 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_PROGRESS` | 구현자 `impl-ai-a04`, 워크트리 `wt-ai-a04`, 브랜치 `feat/ai-a-04-http-sse`(base A-03) |
@@ -135,6 +135,7 @@ Phase exit:
 | A-02 | `review_ai_a_02` | 1 | REQUEST_CHANGES | P1 1(취소 직후 두 번째 턴 시작), P2 6(`stream.close` 예외로 `_finish` 누락, 크래시 경로 Failure 없음, 취소 시 이벤트 유실, `logger.exception` 전문, `_DISCRIMINATOR` 손글씨, 타임아웃 유예) → 반영 |
 | A-01 | `review_ai_a_01` | 2 | REQUEST_CHANGES | 1차 10건 전부 해소. 새 P2 1(insecure 플래그가 기본 정책의 상위집합이 아님), 비차단 2(거절 문구, 승계 테스트) → 반영 |
 | A-03 | `review_ai_a_03` | 1 | REQUEST_CHANGES | P1 2(`ChatEvent` 확장 가드 부재, 비밀 파일 경로가 예외 메시지에), 권고 1(`update_turn`이 `started_at`·`accepted_sequence` 덮음), P2 1(부모 디렉터리 0700), P3 6 → 반영 |
+| A-01 | `review_ai_a_01` | 3 | APPROVE | 2차 3건 전부 해소(39 URL 매트릭스 실측). 새 P3 2(스킴 누락 거절 문구, `FailureCode`·`ChatEvent` 집합 대조 테스트) → A-02 브랜치에 적재. 잔여 위험: `Failure.message` 자유 문자열(adapter PR에서 `str(exc)` 유입 게이트) |
 
 ## 검증 기록
 

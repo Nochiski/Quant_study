@@ -11,7 +11,14 @@
  * 강제 kill) 잠금이 영원히 남지 않도록 pid 생존을 확인해 회수한다.
  */
 
-import { closeSync, openSync, readFileSync, rmSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -36,14 +43,23 @@ export const isProcessAlive = (pid) => {
   }
 };
 
+/** 잠금 자리가 디렉터리면 그 안의 `pid` 파일이 주인이다(mkdir 방식 잠금). */
+const DIRECTORY_PID_FILE = "pid";
+
 /**
- * 잠금 파일의 주인. 없거나 읽을 수 없으면 null(깨진 파일은 주인 없는 것으로 본다).
+ * 잠금 자리의 주인. 비어 있거나 읽을 수 없으면 null(깨진 잠금은 주인 없는 것으로 본다).
+ *
+ * 같은 자리를 mkdir 방식(디렉터리 + 그 안의 `pid` 파일)으로 잡는 구현과 한 머신에서 만날 수
+ * 있다. 모양이 다르다고 터지면 서로를 못 본 채 둘 다 돌아 버리므로 — 잠금이 있으나 마나가 된다 —
+ * 두 모양을 다 읽는다. 누가 먼저 만들었든 나머지는 기다린다.
  * @param {string} path
  */
 export const readLockOwner = (path) => {
   let raw;
   try {
-    raw = readFileSync(path, "utf8");
+    raw = statSync(path).isDirectory()
+      ? readFileSync(join(path, DIRECTORY_PID_FILE), "utf8")
+      : readFileSync(path, "utf8");
   } catch (error) {
     if (/** @type {NodeJS.ErrnoException} */ (error).code === "ENOENT")
       return null;
@@ -51,10 +67,13 @@ export const readLockOwner = (path) => {
   }
   try {
     const owner = JSON.parse(raw);
-    return typeof owner?.pid === "number" ? owner : null;
+    if (typeof owner?.pid === "number") return owner;
   } catch {
-    return null;
+    // JSON 이 아니면 mkdir 방식이 적은 pid 숫자 하나다.
   }
+  const pid = Number(raw.trim());
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  return { pid, workdir: "(directory lock)", startedAt: "" };
 };
 
 /**
@@ -75,7 +94,8 @@ export const tryAcquireLock = (path, owner, reclaimed = false) => {
     if (reclaimed) return false;
     const existing = readLockOwner(path);
     if (existing !== null && isProcessAlive(existing.pid)) return false;
-    rmSync(path, { force: true });
+    // 디렉터리 방식 잠금도 회수 대상이라 recursive 로 지운다.
+    rmSync(path, { force: true, recursive: true });
     return tryAcquireLock(path, owner, true);
   }
   try {

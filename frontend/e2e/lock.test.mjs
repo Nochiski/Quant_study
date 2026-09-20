@@ -5,7 +5,7 @@
  * 옆 워크트리의 backend 를 테스트하고도 초록으로 통과한다 — 그래서 회수 규칙까지 테스트로 고정한다.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -79,6 +79,26 @@ describe("E2E 잠금", () => {
     const path = lockPath();
     writeFileSync(path, JSON.stringify(owner(DEAD_PID)), "utf8");
     expect(isProcessAlive(DEAD_PID)).toBe(false);
+
+    expect(tryAcquireLock(path, owner(process.pid))).toBe(true);
+    expect(readLockOwner(path)?.pid).toBe(process.pid);
+  });
+
+  it("디렉터리 방식(mkdir + pid) 잠금도 주인으로 읽고 기다린다", () => {
+    // 같은 자리를 mkdir 방식으로 잡는 구현과 한 머신에서 만날 수 있다. 모양이 다르다고 터지거나
+    // 무시하면 둘 다 돌아 버려 잠금이 있으나 마나가 된다.
+    const path = lockPath();
+    mkdirSync(path);
+    writeFileSync(join(path, "pid"), String(process.pid), "utf8");
+
+    expect(readLockOwner(path)?.pid).toBe(process.pid);
+    expect(tryAcquireLock(path, owner(process.pid + 1))).toBe(false);
+  });
+
+  it("주인이 죽은 디렉터리 방식 잠금은 회수한다", () => {
+    const path = lockPath();
+    mkdirSync(path);
+    writeFileSync(join(path, "pid"), String(DEAD_PID), "utf8");
 
     expect(tryAcquireLock(path, owner(process.pid))).toBe(true);
     expect(readLockOwner(path)?.pid).toBe(process.pid);

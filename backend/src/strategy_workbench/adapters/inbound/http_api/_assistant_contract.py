@@ -317,9 +317,17 @@ class ProposalView:
 
 @dataclass(frozen=True)
 class UsageView:
+    """공급자 호출 한 번의 사용량. 세 입력 칸은 겹치지 않는다(도메인 `Usage` 불변식).
+
+    총입력은 싣지 않는다. 이벤트는 이력에 그대로 쌓이므로, 성분과 합을 함께 저장하면 둘이
+    어긋난 이력이 남는다. 합이 필요한 화면은 세션 사용량의 `total_input_tokens`를 읽는다.
+    """
+
     type: Literal["usage"]
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
 
 
 @dataclass(frozen=True)
@@ -369,6 +377,8 @@ class TokenTotalsView:
 
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
     total_input_tokens: int
 
 
@@ -606,6 +616,8 @@ def _token_totals_view(totals: TokenTotals) -> TokenTotalsView:
     return TokenTotalsView(
         input_tokens=totals.input_tokens,
         output_tokens=totals.output_tokens,
+        cache_read_tokens=totals.cache_read_tokens,
+        cache_write_tokens=totals.cache_write_tokens,
         total_input_tokens=totals.total_input_tokens,
     )
 
@@ -668,6 +680,8 @@ def _event_view(event: ChatEvent) -> AssistantEventView:
                 type="usage",
                 input_tokens=event.input_tokens,
                 output_tokens=event.output_tokens,
+                cache_read_tokens=event.cache_read_tokens,
+                cache_write_tokens=event.cache_write_tokens,
             )
         case Done():
             return DoneView(type="done", stop_reason=event.stop_reason)

@@ -394,9 +394,9 @@ def test_the_session_history_carries_the_usage_it_can_derive_from_its_events(
     gate = threading.Event()
     provider = _GatedProvider(
         after=[
-            Usage(input_tokens=1200, output_tokens=340),
+            Usage(input_tokens=1200, output_tokens=340, cache_read_tokens=900),
             SearchActivity(query="한국 모멘텀", sources=()),
-            Usage(input_tokens=1800, output_tokens=260),
+            Usage(input_tokens=1800, output_tokens=260, cache_write_tokens=70),
             Done(stop_reason="end_turn"),
         ],
         gate=gate,
@@ -417,7 +417,10 @@ def test_the_session_history_carries_the_usage_it_can_derive_from_its_events(
     assert usage["tokens"] == {
         "input_tokens": 3000,
         "output_tokens": 600,
-        "total_input_tokens": 3000,
+        "cache_read_tokens": 900,
+        "cache_write_tokens": 70,
+        # 세 입력 칸은 겹치지 않는다 — 총입력은 그 합이고 저장되지 않는다(도메인 `Usage`).
+        "total_input_tokens": 3970,
     }
     assert usage["search_uses"] == 1
     assert usage["provider_calls"] == 2
@@ -434,7 +437,13 @@ def test_a_session_with_no_turn_yet_reports_zero_usage(tmp_path: Path) -> None:
     history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
 
     assert history["usage"] == {
-        "tokens": {"input_tokens": 0, "output_tokens": 0, "total_input_tokens": 0},
+        "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "total_input_tokens": 0,
+        },
         "search_uses": 0,
         "provider_calls": 0,
         "turns": [],

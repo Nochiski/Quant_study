@@ -219,7 +219,15 @@ def test_a_turn_runs_end_to_end_through_the_real_openai_adapter(tmp_path: Path) 
     events = [item["event"] for item in history["events"]]
     assert [event["type"] for event in events] == ["text_delta", "text_delta", "usage", "done"]
     assert [event["text"] for event in events[:2]] == ["모멘텀", " 전략"]
-    assert events[2] == {"type": "usage", "input_tokens": 120, "output_tokens": 42}
+    # 세 입력 칸은 겹치지 않는다(도메인 `Usage` 불변식). 이 대본은 캐시가 걸리지 않은 호출이라
+    # 두 캐시 칸이 0이고, `input_tokens`는 그대로 공급자가 보고한 값에서 캐시를 뺀 값이다.
+    assert events[2] == {
+        "type": "usage",
+        "input_tokens": 120,
+        "output_tokens": 42,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
     assert [item["sequence"] for item in history["events"]] == [0, 1, 2, 3]
     assert [turn["status"] for turn in history["turns"]] == [TurnStatus.COMPLETED.value]
     assert [message["role"] for message in history["messages"]] == ["user", "assistant"]

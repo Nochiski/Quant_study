@@ -110,10 +110,12 @@ SCENARIOS: Mapping[str, Scenario] = {
         user_text="지금 문서를 읽고 더 나은 전략을 제안해 줘",
         script=(
             ToolStep(ToolCall(call_id="call-read", name=READ_CURRENT_STRATEGY, arguments={})),
-            Usage(input_tokens=2100, output_tokens=180),
+            # 두 번째 호출부터 캐시 읽기가 걸린다. 화면이 캐시 성분을 0이 아닌 값으로 한 번은
+            # 봐야 하므로 이 대본에만 넣는다(세 입력 칸은 겹치지 않는다 — 도메인 `Usage`).
+            Usage(input_tokens=2100, output_tokens=180, cache_write_tokens=1600),
             ToolStep(_propose(_CURRENT_DOCUMENT, "call-propose")),
             TextDelta(text="퀄리티 필터를 더한 안을 올렸습니다."),
-            Usage(input_tokens=3400, output_tokens=920),
+            Usage(input_tokens=1200, output_tokens=920, cache_read_tokens=1600),
             Done(stop_reason="end_turn"),
         ),
     ),

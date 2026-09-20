@@ -46,15 +46,22 @@ def test_an_empty_history_aggregates_to_zero_with_no_turns() -> None:
 def test_one_turn_sums_every_usage_event_it_emitted() -> None:
     """adapter는 공급자 호출마다 `Usage`를 하나씩 낸다. 턴 합은 그 호출들의 합이다."""
     history = _history(
-        ("turn-1", Usage(input_tokens=1200, output_tokens=300)),
+        ("turn-1", Usage(input_tokens=1200, output_tokens=300, cache_read_tokens=400)),
         ("turn-1", TextDelta(text="…")),
-        ("turn-1", Usage(input_tokens=1500, output_tokens=900)),
+        (
+            "turn-1",
+            Usage(input_tokens=1500, output_tokens=900, cache_write_tokens=50),
+        ),
         ("turn-1", Done(stop_reason="end_turn")),
     )
 
     usage = aggregate_usage(history)
 
-    assert usage.tokens == TokenTotals(input_tokens=2700, output_tokens=1200)
+    assert usage.tokens == TokenTotals(
+        input_tokens=2700, output_tokens=1200, cache_read_tokens=400, cache_write_tokens=50
+    )
+    # 캐시 성분은 입력과 겹치지 않으므로 총입력은 세 칸의 합이다(도메인 `Usage` 불변식).
+    assert usage.tokens.total_input_tokens == 3150
     assert usage.provider_calls == 2
     assert [turn.turn_id for turn in usage.turns] == ["turn-1"]
     assert usage.turns[0].tokens == usage.tokens
@@ -122,23 +129,28 @@ def test_the_total_input_is_the_sum_of_every_input_component() -> None:
     캐시 성분이 생기면 이 테스트가 먼저 깨져야 한다. 성분을 늘리고 `total_input_tokens`의 항을
     빠뜨리면 화면이 캐시가 걸린 턴의 입력을 실제보다 적게 보여 준다.
     """
-    components = ("input_tokens",)
-    totals = TokenTotals(input_tokens=1200, output_tokens=300)
+    components = ("input_tokens", "cache_read_tokens", "cache_write_tokens")
+    totals = TokenTotals(
+        input_tokens=1200, output_tokens=300, cache_read_tokens=800, cache_write_tokens=40
+    )
 
     assert {field.name for field in fields(TokenTotals)} == {*components, "output_tokens"}
     assert totals.total_input_tokens == sum(getattr(totals, name) for name in components)
+    assert totals.total_input_tokens == 2040
 
 
 def test_adding_components_first_gives_the_same_total_as_adding_totals() -> None:
     """`__add__`가 성분만 더해도 되는 근거다. 파생을 언제 계산하든 같은 수여야 한다."""
-    left = TokenTotals(input_tokens=100, output_tokens=10)
-    right = TokenTotals(input_tokens=250, output_tokens=20)
+    left = TokenTotals(input_tokens=100, output_tokens=10, cache_read_tokens=60)
+    right = TokenTotals(input_tokens=250, output_tokens=20, cache_write_tokens=15)
 
     assert (left + right).total_input_tokens == left.total_input_tokens + right.total_input_tokens
 
 
 def test_token_totals_add_without_touching_the_summation_loop() -> None:
     """토큰 종류를 늘릴 때 고치는 곳이 `__add__` 하나라는 계약을 고정한다."""
-    assert TokenTotals(input_tokens=1, output_tokens=2) + TokenTotals(
-        input_tokens=10, output_tokens=20
-    ) == TokenTotals(input_tokens=11, output_tokens=22)
+    assert TokenTotals(
+        input_tokens=1, output_tokens=2, cache_read_tokens=3, cache_write_tokens=4
+    ) + TokenTotals(
+        input_tokens=10, output_tokens=20, cache_read_tokens=30, cache_write_tokens=40
+    ) == TokenTotals(input_tokens=11, output_tokens=22, cache_read_tokens=33, cache_write_tokens=44)

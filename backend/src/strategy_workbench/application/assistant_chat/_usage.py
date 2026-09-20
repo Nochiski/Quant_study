@@ -52,21 +52,28 @@ class TokenTotals:
 
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
     @property
     def total_input_tokens(self) -> int:
-        """세 입력 성분의 합. 화면이 한 숫자를 원할 때 읽는 값이다.
+        """세 입력 성분의 합. 도메인 `Usage.total_input_tokens`와 같은 정의다.
 
-        저장하지 않고 파생시키는 이유는 성분과 총합이 어긋날 수 없게 하기 위함이다. 캐시 성분이
-        생기면 여기 항만 늘리고 `__add__`는 그대로 둔다 — 성분끼리 더한 뒤 파생시키는 것과
-        파생값끼리 더하는 것은 같은 수다.
+        도메인은 이 값을 "저장·전송 필드가 아니다"라고 못 박는다. 저장하면 성분과 합이 어긋난
+        이력이 생기기 때문이다. 여기서도 저장하지 않는다 — 응답을 만드는 순간에만 파생하므로
+        어긋난 이력이 남을 자리가 없다. 화면이 한 숫자를 원해서 응답에는 싣는다.
+
+        `__add__`는 성분만 더하고 이 값은 건드리지 않는다. 성분끼리 더한 뒤 파생시키는 것과
+        파생값끼리 더하는 것이 같은 수이기 때문이며, 그 등식을 테스트가 고정한다.
         """
-        return self.input_tokens
+        return self.input_tokens + self.cache_read_tokens + self.cache_write_tokens
 
     def __add__(self, other: TokenTotals) -> TokenTotals:
         return TokenTotals(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
+            cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
         )
 
 
@@ -96,8 +103,18 @@ class SessionUsage:
 
 
 def _tokens_of(event: Usage) -> TokenTotals:
-    """사용량 이벤트 하나를 토큰 합으로. 도메인 이벤트와 집계가 만나는 유일한 지점이다."""
-    return TokenTotals(input_tokens=event.input_tokens, output_tokens=event.output_tokens)
+    """사용량 이벤트 하나를 토큰 합으로. 도메인 이벤트와 집계가 만나는 유일한 지점이다.
+
+    도메인 `Usage`의 세 입력 칸은 겹치지 않는다(adapter가 그 불변식에 맞춘다). 그래서 성분을
+    그대로 옮기고 총합은 읽는 쪽에서 파생한다 — 여기서 `total_input_tokens`를 읽어 한 칸에 담으면
+    캐시 내역이 사라지고, 성분과 합을 둘 다 담으면 같은 토큰을 두 번 세게 된다.
+    """
+    return TokenTotals(
+        input_tokens=event.input_tokens,
+        output_tokens=event.output_tokens,
+        cache_read_tokens=event.cache_read_tokens,
+        cache_write_tokens=event.cache_write_tokens,
+    )
 
 
 def aggregate_usage(events: Sequence[SequencedEvent]) -> SessionUsage:

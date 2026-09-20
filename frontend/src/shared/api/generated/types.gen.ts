@@ -4736,6 +4736,14 @@ export type TimeSeriesOperator =
  */
 export type TokenTotalsView = {
   /**
+   * Cache Read Tokens
+   */
+  cache_read_tokens: number;
+  /**
+   * Cache Write Tokens
+   */
+  cache_write_tokens: number;
+  /**
    * Input Tokens
    */
   input_tokens: number;
@@ -5213,8 +5221,21 @@ export type UpgradedDocument = {
 
 /**
  * UsageView
+ *
+ * 공급자 호출 한 번의 사용량. 세 입력 칸은 겹치지 않는다(도메인 `Usage` 불변식).
+ *
+ * 총입력은 싣지 않는다. 이벤트는 이력에 그대로 쌓이므로, 성분과 합을 함께 저장하면 둘이
+ * 어긋난 이력이 남는다. 합이 필요한 화면은 세션 사용량의 `total_input_tokens`를 읽는다.
  */
 export type UsageView = {
+  /**
+   * Cache Read Tokens
+   */
+  cache_read_tokens: number;
+  /**
+   * Cache Write Tokens
+   */
+  cache_write_tokens: number;
   /**
    * Input Tokens
    */

@@ -122,11 +122,18 @@ def evaluate_factor_graph(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> FactorEvaluation:
+    """`missing` 은 실행 설정(`RunEnvironment.missing`)이 소유한다 — P2-02 이후 그래프의
+    deprecated `missing_policy` 는 읽지 않는다."""
     computed = _compute_nodes(
-        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+        graph,
+        observations=observations,
+        missing=missing,
+        parameters=parameters,
+        checkpoint=checkpoint,
     )
     return _evaluation_from_computed(graph, observations, computed, checkpoint=checkpoint)
 
@@ -163,6 +170,7 @@ def _compute_nodes(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, list[FactorComputedValue]]:
@@ -188,9 +196,7 @@ def _compute_nodes(
         inputs = [evaluate(dependency) for dependency in node_dependencies(node)]
         values: list[FactorComputedValue]
         if isinstance(node, FieldNode):
-            values = _field_values(
-                observations, node.field_id, graph.missing_policy, checkpoint=checkpoint
-            )
+            values = _field_values(observations, node.field_id, missing, checkpoint=checkpoint)
         elif isinstance(node, ConstantNode):
             values = [node.value for _ in _checkpointed(observations, checkpoint)]
         elif isinstance(node, ParameterNode):

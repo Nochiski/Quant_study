@@ -3,6 +3,9 @@
 두 가지를 고정한다. (1) 브리지 동등성 — `environment` 를 주지 않은 1.1 요청은 브리지가 만든
 값을 명시한 요청과 같은 결과를 낸다. (2) 우선순위 — 명시한 `environment` 가 문서의
 `data`·`execution` 보다 먼저 읽힌다.
+
+P2-02 부터 `environment.missing` 도 같은 경로를 탄다: 실행 설정의 결측 정책이 팩터 실행 plan 과
+`plan_hash` 까지 내려간다.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     InvalidBacktestRunError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
+    InvalidPortfolioRequestError,
     PortfolioDesignService,
     PortfolioPreviewRequest,
     RawObservationUnavailableError,
@@ -53,6 +57,7 @@ from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, Metric
 from strategy_workbench.domain.factor.facade.expression import (
     FactorGraph,
     FieldNode,
+    MissingPolicy,
     TimeSeriesNode,
     TimeSeriesOperator,
 )
@@ -259,3 +264,41 @@ def test_run_with_an_unknown_universe_fails_the_way_preview_does(tmp_path: Path)
     assert state.error_code == "portfolio.data.unavailable"
     with pytest.raises(BacktestResultNotReadyError):
         runs.result("bogus-universe-run")
+
+
+def test_environment_missing_reaches_the_factor_execution_plan() -> None:
+    """실행 설정의 결측 정책이 plan 과 `plan_hash` 로 내려간다(캐시 키 회귀)."""
+    spec = _spec()
+    zeroed = replace(environment_from_legacy_spec(spec), missing=MissingPolicy.ZERO)
+
+    bridged = _portfolio().run_pipeline(PortfolioPreviewRequest(spec))
+    explicit = _portfolio().run_pipeline(PortfolioPreviewRequest(spec, environment=zeroed))
+
+    bridged_plan = bridged.factor_evaluations[0].plan
+    explicit_plan = explicit.factor_evaluations[0].plan
+    assert (bridged_plan.missing_policy, explicit_plan.missing_policy) == ("drop", "zero")
+    # 결측 처리만 다른 두 실행이 같은 팩터 행렬 캐시 키를 공유하면 두 번째가 첫 결과를 재사용한다.
+    assert bridged_plan.plan_hash != explicit_plan.plan_hash
+    assert bridged_plan.graph_hash == explicit_plan.graph_hash
+
+
+def test_conflicting_legacy_missing_policies_are_refused_as_an_invalid_request() -> None:
+    """팩터마다 결측 정책이 다른 1.1 문서는 조용히 하나를 고르지 않고 거부된다."""
+    spec = _spec()
+    conflicting = replace(
+        spec,
+        factors=(
+            spec.factors[0],
+            replace(
+                spec.factors[0],
+                factor_id="momentum_3_zero",
+                graph=replace(spec.factors[0].graph, missing_policy=MissingPolicy.ZERO),
+            ),
+        ),
+    )
+
+    with pytest.raises(InvalidPortfolioRequestError) as info:
+        _portfolio().preflight(PortfolioPreviewRequest(conflicting))
+
+    codes = [issue.code for issue in info.value.validation.issues]
+    assert codes == ["run_environment.missing_policy_conflict"]

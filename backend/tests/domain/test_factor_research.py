@@ -79,7 +79,6 @@ def test_validator_rejects_cycle_unit_type_and_insufficient_history() -> None:
             ConditionalNode("choose", "price", "mean", "sum", "conditional"),
         ),
         output_node_id="choose",
-        missing_policy=MissingPolicy.CROSS_SECTIONAL_MEDIAN,
     )
     fields = (
         FieldMetadata("price.close", "KRW", available_history_sessions=10),
@@ -135,8 +134,8 @@ def test_all_quick_transforms_evaluate_deterministically() -> None:
         for security in (1, 2, 3)
     )
 
-    first = evaluate_factor_graph(graph, observations=observations)
-    second = evaluate_factor_graph(graph, observations=observations)
+    first = evaluate_factor_graph(graph, observations=observations, missing=MissingPolicy.DROP)
+    second = evaluate_factor_graph(graph, observations=observations, missing=MissingPolicy.DROP)
 
     assert first == second
     assert any(value.value is not None for value in first.values)
@@ -172,6 +171,7 @@ def test_parameter_and_saved_references_are_first_class_nodes() -> None:
     evaluation = evaluate_factor_graph(
         graph,
         observations=(observation,),
+        missing=MissingPolicy.DROP,
         parameters=(ResolvedFactorParameter("w", 3.0),),
     )
 
@@ -187,8 +187,10 @@ def test_plan_and_cache_fingerprints_cover_all_reproducibility_inputs() -> None:
         ),
         output_node_id="mean",
     )
-    plan = compile_factor_plan(graph, registry_version="registry-v1")
-    repeated = compile_factor_plan(graph, registry_version="registry-v1")
+    plan = compile_factor_plan(graph, registry_version="registry-v1", missing=MissingPolicy.DROP)
+    repeated = compile_factor_plan(
+        graph, registry_version="registry-v1", missing=MissingPolicy.DROP
+    )
     key = build_factor_matrix_cache_key(
         data_snapshot_id="snapshot-a",
         plan_hash=plan.plan_hash,
@@ -226,7 +228,7 @@ def test_factor_analytics_exposes_professional_diagnostics_explicitly() -> None:
         for day in (2, 3)
         for security in (1, 2, 3)
     )
-    evaluation = evaluate_factor_graph(graph, observations=observations)
+    evaluation = evaluate_factor_graph(graph, observations=observations, missing=MissingPolicy.DROP)
 
     analytics = analyze_factor_values(evaluation.values, observations)
 
@@ -261,11 +263,16 @@ def test_cross_sectional_operators_ignore_non_members(
     with_outsider = (*members, _member_row(2, "s3", 100.0, member=False))
 
     alone = {
-        v.security_id: v.value for v in evaluate_factor_graph(graph, observations=members).values
+        v.security_id: v.value
+        for v in evaluate_factor_graph(
+            graph, observations=members, missing=MissingPolicy.DROP
+        ).values
     }
     mixed = {
         v.security_id: v.value
-        for v in evaluate_factor_graph(graph, observations=with_outsider).values
+        for v in evaluate_factor_graph(
+            graph, observations=with_outsider, missing=MissingPolicy.DROP
+        ).values
     }
 
     assert alone == {"s1": 1.0, "s2": -1.0}
@@ -288,11 +295,14 @@ def test_rank_group_and_median_fill_all_use_the_member_peer_group() -> None:
         graph = FactorGraph(
             nodes=(FieldNode("source", "value", "field"), node),  # pyright: ignore[reportArgumentType]  # reason: parametrised over node kinds
             output_node_id="out",
-            missing_policy=MissingPolicy.CROSS_SECTIONAL_MEDIAN,
         )
         return {
             v.security_id: v.value
-            for v in evaluate_factor_graph(graph, observations=observations).values
+            for v in evaluate_factor_graph(
+                graph,
+                observations=observations,
+                missing=MissingPolicy.CROSS_SECTIONAL_MEDIAN,
+            ).values
         }
 
     for node in (
@@ -320,7 +330,9 @@ def test_cross_sectional_demean_subtracts_the_member_peer_mean() -> None:
 
     values = {
         v.security_id: v.value
-        for v in evaluate_factor_graph(graph, observations=(*members, outsider)).values
+        for v in evaluate_factor_graph(
+            graph, observations=(*members, outsider), missing=MissingPolicy.DROP
+        ).values
     }
 
     assert values == {"s1": 1.0, "s2": -1.0, "s3": 0.0}

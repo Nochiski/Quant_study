@@ -24,7 +24,10 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
-from strategy_workbench.domain.backtest.facade.environment import resolve_environment
+from strategy_workbench.domain.backtest.facade.environment import (
+    LegacyMissingPolicyConflictError,
+    resolve_environment,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
@@ -189,7 +192,10 @@ class BacktestRunService:
             )
         # 실행 설정을 여기서 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·tape·데이터 조회가
         # 모두 같은 값을 읽어야 명시 `environment` 가 조용히 무시되지 않는다(P2-01).
-        environment = resolve_environment(strategy, spec.environment)
+        try:
+            environment = resolve_environment(strategy, spec.environment)
+        except LegacyMissingPolicyConflictError as error:
+            raise InvalidBacktestRunError(str(error)) from error
         spec = replace(spec, environment=environment)
         for window in spec.metric_windows:
             if window.start < environment.start or window.end > environment.end:

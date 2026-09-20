@@ -37,6 +37,7 @@ from ._nodes import (
     FactorGraph,
     FieldNode,
     GroupNode,
+    MissingPolicy,
     ParameterNode,
     SavedFactorNode,
     SavedSubgraphNode,
@@ -104,6 +105,7 @@ def trace_factor_graph(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     selection: TraceSelection | None = None,
     checkpoint: Callable[[], None] = _noop_checkpoint,
@@ -116,7 +118,11 @@ def trace_factor_graph(
         graph, observations, selection, checkpoint=checkpoint
     )
     computed = _compute_nodes(
-        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+        graph,
+        observations=observations,
+        missing=missing,
+        parameters=parameters,
+        checkpoint=checkpoint,
     )
     return _project_trace(
         graph, observations, bounds, nodes, order, computed, checkpoint=checkpoint
@@ -127,6 +133,7 @@ def evaluate_factor_graph_with_trace(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     selection: TraceSelection | None = None,
     checkpoint: Callable[[], None] = _noop_checkpoint,
@@ -141,7 +148,11 @@ def evaluate_factor_graph_with_trace(
         graph, observations, selection, checkpoint=checkpoint
     )
     computed = _compute_nodes(
-        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+        graph,
+        observations=observations,
+        missing=missing,
+        parameters=parameters,
+        checkpoint=checkpoint,
     )
     return (
         _evaluation_from_computed(

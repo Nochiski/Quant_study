@@ -420,3 +420,17 @@ def test_runtime_schema_fixture_is_current() -> None:
         "runtime-schema.json is stale; regenerate with: "
         "uv run python tools/export_runtime_schema.py"
     )
+
+
+def test_deprecated_compat_field_is_marked_in_schema_and_contract() -> None:
+    """P2-02: `graph.missing_policy` 는 1.1 문서에서 여전히 유효하지만 화면 어휘에서 뺄 수 있다."""
+    schema = strategy_document_schema()
+    prop = schema["$defs"]["FactorGraph"]["properties"]["missing_policy"]
+    contracts = {row.pointer: row for row in strategy_field_contracts()}
+    row = contracts["/factors/*/graph/missing_policy"]
+
+    assert prop["x-deprecated"] is True
+    assert prop["default"] == "drop"  # 여전히 유효한 입력이다
+    assert row.deprecated is True
+    # 표시가 이 한 필드에만 붙어 있는지: 다른 행이 딸려 오면 편집기가 멀쩡한 필드를 감춘다.
+    assert [r.pointer for r in strategy_field_contracts() if r.deprecated] == [row.pointer]

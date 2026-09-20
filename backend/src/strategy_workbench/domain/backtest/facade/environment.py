@@ -1,4 +1,5 @@
 from strategy_workbench.domain.backtest._bridge import (
+    LegacyMissingPolicyConflictError,
     environment_from_legacy_spec,
     resolve_environment,
 )
@@ -19,6 +20,7 @@ from strategy_workbench.domain.backtest._schema import (
 __all__ = [
     "RUN_ENVIRONMENT_CONSTRAINTS",
     "RUN_ENVIRONMENT_SCHEMA_ID",
+    "LegacyMissingPolicyConflictError",
     "RunEnvironment",
     "environment_from_legacy_spec",
     "environment_hash",

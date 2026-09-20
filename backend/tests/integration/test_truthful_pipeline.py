@@ -66,6 +66,9 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
+from strategy_workbench.domain.backtest.facade.environment import (
+    environment_from_legacy_spec,
+)
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -655,10 +658,14 @@ def test_graph_evaluation_matches_a_direct_evaluation_over_raw_pit_fields() -> N
         )
         for item in raw.observations
     )
-    direct = evaluate_factor_graph(momentum.graph, observations=observations).values
+    # 파이프라인과 같은 결측 정책으로 직접 평가한다: 정책의 owner 는 실행 설정이다(P2-02).
+    missing = environment_from_legacy_spec(spec).missing
+    direct = evaluate_factor_graph(
+        momentum.graph, observations=observations, missing=missing
+    ).values
     pipeline = next(r for r in result.factor_evaluations if r.factor_id == "momentum_3").values
     assert direct == pipeline
-    trace = trace_factor_graph(momentum.graph, observations=observations)
+    trace = trace_factor_graph(momentum.graph, observations=observations, missing=missing)
     traced = {(v.as_of, v.security_id): v.value for v in trace.nodes[-1].values}
     assert all(traced[(v.as_of, v.security_id)] == v.value for v in pipeline)
 

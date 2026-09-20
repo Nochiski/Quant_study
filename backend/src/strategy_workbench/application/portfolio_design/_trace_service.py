@@ -9,7 +9,10 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
-from strategy_workbench.domain.backtest.facade.environment import resolve_environment
+from strategy_workbench.domain.backtest.facade.environment import (
+    LegacyMissingPolicyConflictError,
+    resolve_environment,
+)
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioConstructionTrace,
@@ -102,7 +105,10 @@ class StrategyTraceService:
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
-        environment = resolve_environment(spec, request.environment)
+        try:
+            environment = resolve_environment(spec, request.environment)
+        except LegacyMissingPolicyConflictError as error:
+            raise InvalidStrategyTraceRequestError(str(error)) from error
         if request.as_of is not None and not environment.start <= request.as_of <= environment.end:
             raise InvalidStrategyTraceRequestError(
                 "trace as_of is outside the run range — "

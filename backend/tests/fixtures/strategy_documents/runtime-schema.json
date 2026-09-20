@@ -638,7 +638,8 @@
             "zero",
             "cross_sectional_median"
           ],
-          "default": "drop"
+          "default": "drop",
+          "x-deprecated": true
         }
       },
       "required": [

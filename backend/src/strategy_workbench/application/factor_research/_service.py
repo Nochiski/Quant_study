@@ -94,6 +94,7 @@ class FactorResearchService:
         plan = compile_factor_plan(
             request.graph,
             registry_version=self._registry.version,
+            missing=request.missing,
             fields=metadata.fields,
             parameter_ids=request.parameter_ids,
             factor_ids=self._known_factor_ids(request.factor_ids),
@@ -130,6 +131,7 @@ class FactorResearchService:
             plan = compile_factor_plan(
                 request.graph,
                 registry_version=self._registry.version,
+                missing=request.missing,
                 fields=metadata.fields,
                 parameter_ids=parameter_ids,
                 factor_ids=self._known_factor_ids(request.factor_ids),
@@ -163,6 +165,7 @@ class FactorResearchService:
         full_evaluation = evaluate_factor_graph(
             request.graph,
             observations=observations,
+            missing=request.missing,
             parameters=request.parameters,
         )
         evaluation = FactorEvaluation(

@@ -29,6 +29,7 @@ from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataSnapshot,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
+    LegacyMissingPolicyConflictError,
     RunEnvironment,
     resolve_environment,
 )
@@ -40,7 +41,7 @@ from strategy_workbench.domain.factor.facade.evaluation import (
     NonFiniteFactorCalculationError,
     evaluate_factor_graph,
 )
-from strategy_workbench.domain.factor.facade.expression import NodeValueType
+from strategy_workbench.domain.factor.facade.expression import MissingPolicy, NodeValueType
 from strategy_workbench.domain.factor.facade.planning import (
     FactorExecutionPlan,
     InvalidFactorGraphError,
@@ -185,6 +186,8 @@ class _PreparedPipeline:
     engine: EngineCompatibility
     metadata: FactorMetadataSnapshot
     plans: dict[str, FactorExecutionPlan]
+    # 문서 검증 뒤에 해소한 실행 설정. 호출자가 브리지를 다시 부르지 않게 같이 돌려준다.
+    environment: RunEnvironment
 
 
 @dataclass(frozen=True)
@@ -233,7 +236,7 @@ class PortfolioDesignService:
 
         # 호환성은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게 명시한다.
         options = PortfolioPipelineOptions(require_engine_compatible=False)
-        return self._prepare(request.spec, options).engine
+        return self._prepare(request.spec, options, request.environment).engine
 
     def run_pipeline(
         self,
@@ -248,10 +251,11 @@ class PortfolioDesignService:
             _raise_if_cancelled(cancelled)
 
         spec = request.spec
-        prepared = self._prepare(spec, pipeline_options, checkpoint=checkpoint)
-        # 브리지는 `_prepare` 의 `validate_strategy` 뒤에 부른다 — 잘못된 문서는 코드화된
-        # 진단으로 거절되어야 하고, 그 판정의 owner 는 validator 다.
-        environment = resolve_environment(spec, request.environment)
+        # 브리지는 `_prepare` 안에서 `validate_strategy` 뒤에 돈다 — 잘못된 문서는 코드화된
+        # 진단으로 거절되어야 하고, 그 판정의 owner 는 validator 다. 플랜이 결측 정책을
+        # 인자로 받으므로(P2-02) 해소한 실행 설정을 `_prepare` 가 돌려준다.
+        prepared = self._prepare(spec, pipeline_options, request.environment, checkpoint=checkpoint)
+        environment = prepared.environment
         engine = prepared.engine
         metadata = prepared.metadata
         plans = prepared.plans
@@ -313,6 +317,7 @@ class PortfolioDesignService:
                     evaluation, trace = evaluate_factor_graph_with_trace(
                         factor.graph,
                         observations=factor_observations,
+                        missing=environment.missing,
                         parameters=parameters,
                         selection=pipeline_options.trace_selection,
                         checkpoint=checkpoint,
@@ -321,6 +326,7 @@ class PortfolioDesignService:
                     evaluation = evaluate_factor_graph(
                         factor.graph,
                         observations=factor_observations,
+                        missing=environment.missing,
                         parameters=parameters,
                         checkpoint=checkpoint,
                     )
@@ -406,15 +412,21 @@ class PortfolioDesignService:
         self,
         spec: StrategySpec,
         pipeline_options: PortfolioPipelineOptions,
+        environment: RunEnvironment | None,
         *,
         checkpoint: Callable[[], None] = lambda: None,
     ) -> _PreparedPipeline:
-        """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다."""
+        """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다.
+
+        실행 설정 해소도 여기서 한다: 문서 검증이 먼저고(코드화된 진단의 owner 는 validator),
+        플랜 컴파일은 `environment.missing` 을 인자로 받아야 한다(P2-02).
+        """
 
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
         checkpoint()
+        resolved = _resolve_environment_or_reject(spec, environment)
 
         engine = self._engine_portfolio.assess(spec)
         if pipeline_options.require_engine_compatible and not engine.compatible:
@@ -439,15 +451,20 @@ class PortfolioDesignService:
                 )
             )
         )
-        plans = self._plans(spec, metadata)
+        plans = self._plans(spec, metadata, resolved.missing)
         _reject_non_numeric_factor_outputs(spec, plans)
         _reject_saved_references(spec, plans)
         _validate_trace_selection(pipeline_options, plans)
         checkpoint()
-        return _PreparedPipeline(engine=engine, metadata=metadata, plans=plans)
+        return _PreparedPipeline(
+            engine=engine, metadata=metadata, plans=plans, environment=resolved
+        )
 
     def _plans(
-        self, spec: StrategySpec, metadata: FactorMetadataSnapshot
+        self,
+        spec: StrategySpec,
+        metadata: FactorMetadataSnapshot,
+        missing: MissingPolicy,
     ) -> dict[str, FactorExecutionPlan]:
         parameter_ids = tuple(parameter.parameter_id for parameter in spec.parameters)
         factor_ids = tuple(factor.factor_id for factor in spec.factors)
@@ -458,6 +475,7 @@ class PortfolioDesignService:
                 plans[factor.factor_id] = compile_factor_plan(
                     factor.graph,
                     registry_version=self._factor_registry_version,
+                    missing=missing,
                     fields=metadata.fields,
                     parameter_ids=parameter_ids,
                     factor_ids=factor_ids,
@@ -483,6 +501,23 @@ class PortfolioDesignService:
                 StrategyValidation(valid=False, issues=tuple(issues))
             )
         return plans
+
+
+def _resolve_environment_or_reject(
+    spec: StrategySpec, environment: RunEnvironment | None
+) -> RunEnvironment:
+    """실행 설정을 확정하고, 1.1 문서에서 못 만드는 경우는 요청 거부로 바꾼다.
+
+    브리지 실패는 서버 오류가 아니라 문서/요청 문제라 `portfolio.strategy.invalid` 진단으로
+    나간다. `run_environment.*` 코드는 `strategy.*` 레지스트리 밖이라 그대로 전달된다.
+    """
+    try:
+        return resolve_environment(spec, environment)
+    except LegacyMissingPolicyConflictError as error:
+        issue = semantic_issue(error.code, "factors", str(error))
+        raise InvalidPortfolioRequestError(
+            StrategyValidation(valid=False, issues=(issue,))
+        ) from error
 
 
 def _required_field_ids(

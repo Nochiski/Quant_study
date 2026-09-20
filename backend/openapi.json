@@ -1777,9 +1777,6 @@
             "title": "Minimum History Sessions",
             "type": "integer"
           },
-          "missing_policy": {
-            "$ref": "#/components/schemas/MissingPolicy"
-          },
           "output_unit": {
             "title": "Output Unit",
             "type": "string"
@@ -1812,7 +1809,6 @@
           "output_unit",
           "required_field_ids",
           "minimum_history_sessions",
-          "missing_policy",
           "availability",
           "default_graph"
         ],
@@ -2014,7 +2010,8 @@
         "properties": {
           "missing_policy": {
             "$ref": "#/components/schemas/MissingPolicy",
-            "default": "drop"
+            "default": "drop",
+            "deprecated": true
           },
           "nodes": {
             "items": {
@@ -2084,6 +2081,10 @@
           },
           "graph": {
             "$ref": "#/components/schemas/FactorGraph"
+          },
+          "missing": {
+            "$ref": "#/components/schemas/MissingPolicy",
+            "default": "drop"
           },
           "parameter_ids": {
             "default": [],
@@ -2269,6 +2270,10 @@
           },
           "graph": {
             "$ref": "#/components/schemas/FactorGraph"
+          },
+          "missing": {
+            "$ref": "#/components/schemas/MissingPolicy",
+            "default": "drop"
           },
           "parameters": {
             "default": [],
@@ -2506,6 +2511,11 @@
               }
             ],
             "title": "Default From"
+          },
+          "deprecated": {
+            "default": false,
+            "title": "Deprecated",
+            "type": "boolean"
           },
           "description_key": {
             "anyOf": [

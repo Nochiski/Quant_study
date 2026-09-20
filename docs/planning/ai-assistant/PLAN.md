@@ -95,7 +95,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `APPROVED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
-| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `84570df` · `review_ai_a_02` 2차 APPROVE(P3 7 중 5 후속 커밋, A-01 P3 2건 동반) · CI 대기 |
+| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE → 후속 확인 중 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `c6d70de` · `review_ai_a_03` 2차 APPROVE(P3 2 후속 커밋) · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_PROGRESS` | 구현자 `impl-ai-a04`, 워크트리 `wt-ai-a04`, 브랜치 `feat/ai-a-04-http-sse`(base A-03) |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_PROGRESS` | 구현자 `impl-ai-a05`, 워크트리 `wt-ai-a05`, 브랜치 `feat/ai-a-05-llm-anthropic`(임시 base A-02 `84570df`, A-04 tip 위로 rebase 예정) |

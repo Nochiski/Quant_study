@@ -170,6 +170,33 @@ main
 - [ ] **SDK 표면 확인 4건** — thinking 블록 signature 왕복, probe `max_tokens=64`,
   `display: "summarized"`가 실제로 텍스트를 채우는지, 검색 결과의 `title`이 비는 경우.
 
+**A-06이 넘긴 항목** (리뷰, 각각 근거가 코드·SDK 소스에 있다):
+
+- [ ] **live smoke 최우선** — 검색 예산이 소진돼 `web_search`를 뺀 호출에, 이전 호출의
+  `web_search_call` 항목이 든 `input`을 공급자가 **받아 주는지**. A-06이 우리 쪽 동작은
+  고정했지만(`test_the_call_without_the_search_tool_still_carries_the_earlier_search_items`)
+  공급자 계약은 문서화돼 있지 않다. 400이면 대안은 "도구를 빼지 말고 통지만 보낸다"이다 —
+  OpenAI `WebSearchToolParam`에는 `max_uses`가 없어 Anthropic식 절충을 쓸 수 없다.
+- [ ] **추론 항목 재전송 수용** — `previous_response_id` 없이 `reasoning` 항목 +
+  `encrypted_content`를 `input`에 실어 보내는 경로. `store=False`와의 조합도 같이 본다
+  (SDK 문서가 그 맥락으로 설명한다).
+- [ ] **`Reasoning.context` 기본 동작** — SDK가 "`gpt-5.6` 계열은 `all_turns`, 이전 모델은
+  `current_turn`이 기본"이라고 적는다. `gpt-6-astra`가 어느 쪽인지에 따라 우리가 `input`에 실은
+  추론 항목이 실제로 쓰이는지가 갈린다.
+- [ ] **`reasoning.summary: "auto"`가 요약을 실제로 채우는지** — 비면 `ThinkingSummary`가 영영
+  나오지 않는다(빈 문자열은 adapter가 거른다).
+- [ ] **probe `max_output_tokens=64`가 `effort: high`에서 400을 내지 않는지**, 그리고 추론
+  미지원 모델을 골랐을 때 probe만 통과하고 턴이 매번 실패하는 경로. 후자면 probe에 `reasoning`을
+  같이 싣는다.
+- [ ] **`MIN_CALL_OUTPUT_TOKENS` 실측** — `llm_anthropic`과 같은 256이며 값의 확정은 실측이다.
+- [ ] **`gpt-6-astra` 실존과 `developer` 통지에 대한 모델 반응**, 캐시 적중 실측
+  (`Usage.cache_read_tokens`).
+- [ ] **`openai>=2.0` 하한 확인** — 실제로 확인한 표면은 3.16.2 하나다.
+  `cache_write_tokens`·`Reasoning.context`·`ActionSearch.sources`는 최근 필드일 수 있어 2.x에서
+  깨질 수 있다. 하한을 올리거나 2.0을 세워 확인한다.
+- [ ] **`UsageView` 확장** — 전송 계약이 아직 `input_tokens`·`output_tokens` 두 칸이라 캐시 두
+  칸이 화면까지 가지 않는다. 확장 시 `test_assistant_http_openai.py`의 `usage` 단언도 같이 고친다.
+
 **Phase A exit**
 
 - [ ] 가짜 공급자로 HTTP SSE 시나리오 3개 green(재개 포함). live smoke 2건 로컬 통과 기록.

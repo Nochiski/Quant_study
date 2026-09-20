@@ -51,6 +51,7 @@ __all__ = [
     "DEFAULT_MODEL",
     "INCLUDE",
     "REASONING",
+    "STORE_RESPONSES",
     "WEB_SEARCH_TOOL_TYPE",
     "build_input",
     "build_tools",
@@ -79,6 +80,12 @@ INCLUDE: list[ResponseIncludable] = [
 ]
 
 WEB_SEARCH_TOOL_TYPE = "web_search"
+
+# 응답을 공급자에 저장하지 않는다. 주지 않으면 참이고 응답이 최소 30일 남는다(`_client.py`
+# "응답을 공급자에 저장하지 않는다"). 이 adapter는 대화 상태를 서버에 맡기지 않으므로 저장의
+# 이득이 없고 보존 비용만 남는다. probe도 같은 값을 쓴다 — 연결 테스트 한 번이 30일 남을 이유가
+# 없다.
+STORE_RESPONSES = False
 
 
 def build_tools(request: TurnRequest, *, web_search: bool) -> list[ToolParam]:

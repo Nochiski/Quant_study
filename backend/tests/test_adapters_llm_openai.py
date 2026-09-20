@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Literal
 
 import pytest
 
@@ -29,13 +30,18 @@ from strategy_workbench.adapters.outbound.llm_openai._client import (  # noqa: E
     DEFAULT_BASE_URL,
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT_SECONDS,
+    OpenAiClientFactory,
     SdkResponsesClient,
 )
 from strategy_workbench.adapters.outbound.llm_openai._payload import (  # noqa: E402  # reason: importorskip 이후 import
     INCLUDE,
     REASONING,
+    STORE_RESPONSES,
     build_input,
     build_tools,
+)
+from strategy_workbench.adapters.outbound.llm_openai._turn import (  # noqa: E402  # reason: importorskip 이후 import
+    MIN_CALL_OUTPUT_TOKENS,
 )
 from strategy_workbench.adapters.outbound.llm_openai.facade.provider import (  # noqa: E402  # reason: importorskip 이후 import
     DEFAULT_MODEL,
@@ -84,6 +90,7 @@ from .openai_stream_script import (  # noqa: E402  # reason: importorskip 이후
     response_of,
     search_done,
     text_delta,
+    web_search_item,
 )
 
 SECRET = "sk-proj-TEST-SECRET"
@@ -375,6 +382,15 @@ def test_the_call_asks_for_high_effort_reasoning_with_a_summary() -> None:
     assert REASONING == {"effort": "high", "summary": "auto"}
 
 
+def test_the_turn_never_asks_the_provider_to_store_the_response() -> None:
+    """`store`는 주지 않으면 참이고 전략 원문이 30일 이상 남는다(`_client.py` docstring)."""
+    client = one_call(final_event(response_of()))
+
+    run_turn(client)
+
+    assert client.payloads[0].store is False
+
+
 def test_the_call_includes_search_sources_and_encrypted_reasoning() -> None:
     client = one_call(final_event(response_of()))
 
@@ -515,6 +531,41 @@ def test_the_search_budget_drops_the_tool_and_tells_the_model_once() -> None:
     assert [event for event in events if isinstance(event, SearchActivity)][-1] == SearchActivity(
         query=SEARCH_BUDGET_EXHAUSTED_NOTICE, sources=()
     )
+
+
+def test_the_call_without_the_search_tool_still_carries_the_earlier_search_items() -> None:
+    """도구를 뺀 호출의 `input`에 이전 `web_search_call` 항목이 그대로 남는다.
+
+    `_as_input_items`가 응답 `output`을 통째로 되돌리므로 **선언되지 않은 서버 도구의 호출
+    항목이 든 입력을 도구 없이** 보내게 된다. 공급자가 이 조합을 받아 주는지는 문서화된 계약이
+    아니라 A-07 live smoke 최우선 항목이다. 여기서는 우리 쪽 동작만 못박는다 — 400이 나면
+    대안은 "도구를 빼지 말고 통지만 보낸다"이고, 그때 이 테스트가 바뀌어야 할 자리를 가리킨다.
+    """
+    request = make_request(max_search_uses=1)
+    client = ScriptedResponsesClient(
+        CallScript(
+            events=(
+                search_done("ws-1", "첫 검색"),
+                final_event(
+                    response_of(
+                        output=[
+                            web_search_item("ws-1", "첫 검색", ("https://example.com/a",)),
+                            function_call("call-1", "read_current_strategy", "{}"),
+                        ]
+                    )
+                ),
+            )
+        ),
+        CallScript(events=(final_event(response_of()),)),
+    )
+
+    run_turn(client, request=request)
+
+    second = client.payloads[1]
+    assert "web_search" not in tool_names(second.tools)
+    assert [
+        getattr(item, "type", None) for item in second.input if not isinstance(item, Mapping)
+    ] == ["web_search_call", "function_call"]
 
 
 def test_the_search_notice_text_comes_from_the_application_prompt_owner() -> None:
@@ -719,15 +770,28 @@ def test_incomplete_for_max_output_tokens_is_reported_as_truncated_output() -> N
     assert not [event for event in events if isinstance(event, Done)]
 
 
-def test_other_incomplete_reasons_are_provider_failures_not_truncation() -> None:
-    client = one_call(
-        final_event(response_of(status="incomplete", incomplete_reason="content_filter"))
-    )
+@pytest.mark.parametrize(
+    ("reason", "expected"),
+    [
+        ("max_output_tokens", FailureCode.OUTPUT_TRUNCATED),
+        # 거절이지 장애가 아니다. 화면이 "잠시 후 다시"와 "다르게 물어보세요"를 구분해야 한다.
+        ("content_filter", FailureCode.REFUSAL),
+        ("max_messages", FailureCode.PROVIDER),
+        # `steered`는 WebSocket 전용이라 이 경로로 오지 않지만, SDK union의 네 값을 다 지나야
+        # 새 값이 생겼을 때 어느 가지로 떨어지는지가 드러난다.
+        ("steered", FailureCode.PROVIDER),
+    ],
+)
+def test_every_incomplete_reason_lands_on_its_own_failure_code(
+    reason: Literal["max_output_tokens", "max_messages", "content_filter", "steered"],
+    expected: FailureCode,
+) -> None:
+    client = one_call(final_event(response_of(status="incomplete", incomplete_reason=reason)))
 
     failure = failures(run_turn(client))[0]
 
-    assert failure.code is FailureCode.PROVIDER
-    assert "content_filter" in failure.message
+    assert failure.code is expected
+    assert reason in failure.message
 
 
 def test_a_failed_response_is_a_provider_failure_carrying_only_the_error_code() -> None:
@@ -780,11 +844,12 @@ def test_the_next_call_is_capped_by_the_remaining_turn_budget() -> None:
 
     run_turn(
         client,
-        request=make_request(max_output_tokens_per_call=600, max_turn_output_tokens=1000),
+        request=make_request(max_output_tokens_per_call=600, max_turn_output_tokens=1_400),
     )
 
     assert client.payloads[0].max_output_tokens == 600
-    assert client.payloads[1].max_output_tokens == 100
+    # 남은 예산 500이 호출당 상한 600보다 작으므로 그쪽으로 줄어든다(최소 호출 크기는 넘는다).
+    assert client.payloads[1].max_output_tokens == 500
 
 
 def test_an_exhausted_turn_budget_stops_the_loop_before_the_next_call() -> None:
@@ -813,6 +878,39 @@ def test_an_exhausted_turn_budget_stops_the_loop_before_the_next_call() -> None:
 # -- 취소 -----------------------------------------------------------------------------------
 
 
+def test_a_budget_smaller_than_the_minimum_call_stops_before_the_next_call() -> None:
+    """남은 예산이 `MIN_CALL_OUTPUT_TOKENS`보다 작으면 호출하지 않는다.
+
+    OpenAI는 `max_output_tokens`의 최솟값이 16이라 그 아래로 보내면 요청 자체가 400이고, 예산
+    소진이 `PROVIDER`(공급자 장애)로 둔갑한다. 16을 넘겨도 아주 작은 호출은 추론 토큰만 쓰고
+    잘려 `OUTPUT_TRUNCATED`가 진짜 사유를 가린다. `llm_anthropic`이 같은 가드를 갖는다.
+    """
+    spent = 1_000 - MIN_CALL_OUTPUT_TOKENS + 1
+    client = ScriptedResponsesClient(
+        CallScript(
+            events=(
+                final_event(
+                    response_of(
+                        output=[function_call("call-1", "propose_strategy", "{}")],
+                        output_tokens=spent,
+                    )
+                ),
+            )
+        ),
+        CallScript(events=(final_event(response_of()),)),
+    )
+
+    events = run_turn(
+        client,
+        request=make_request(max_output_tokens_per_call=16_000, max_turn_output_tokens=1_000),
+    )
+
+    assert len(client.payloads) == 1
+    failure = failures(events)[0]
+    assert failure.code is FailureCode.TOKEN_BUDGET_EXCEEDED
+    assert f"min_call_output_tokens={MIN_CALL_OUTPUT_TOKENS}" in failure.message
+
+
 def test_cancelling_before_the_first_call_never_reaches_the_provider() -> None:
     client = ScriptedResponsesClient()
 
@@ -830,6 +928,28 @@ def test_cancelling_between_stream_events_keeps_what_was_already_streamed() -> N
 
     assert events == [
         TextDelta(text="이미 흘린 답"),
+        Failure(code=FailureCode.CANCELLED, message="턴이 취소되어 공급자 호출을 중단했습니다"),
+    ]
+
+
+def test_cancelling_right_after_the_terminal_event_still_reports_that_call_usage() -> None:
+    """취소해도 그 호출의 토큰은 과금된다. 빠뜨리면 세션 집계가 이 턴을 0으로 본다.
+
+    종료 이벤트를 이미 받은 경우에만 살릴 수 있다 — OpenAI는 `usage`를 종료 이벤트에만 싣는다.
+    그 앞에서 취소되면 살릴 값 자체가 없다(구조적 차이라 `test_cancelling_between_stream_events…`
+    는 `Usage` 없이 끝나는 것이 맞다).
+    """
+    client = one_call(
+        text_delta("절반"), final_event(response_of(input_tokens=80, output_tokens=33))
+    )
+    # 호출 전, 이벤트 1 뒤, 종료 이벤트 뒤 순서로 본다.
+    answers = iter([False, False, True])
+
+    events = run_turn(client, cancelled=lambda: next(answers, True))
+
+    assert events == [
+        TextDelta(text="절반"),
+        Usage(input_tokens=80, output_tokens=33),
         Failure(code=FailureCode.CANCELLED, message="턴이 취소되어 공급자 호출을 중단했습니다"),
     ]
 
@@ -966,6 +1086,7 @@ def test_probe_reports_success_with_a_latency() -> None:
     assert result.ok is True
     assert result.latency_ms == 250
     assert client.create_payloads == [(PROBE_MAX_OUTPUT_TOKENS, "gpt-6-astra")]
+    assert client.create_store_flags == [False]
 
 
 def test_probe_succeeds_even_when_the_minimal_response_is_incomplete() -> None:
@@ -1063,6 +1184,7 @@ def test_the_sdk_wrapper_sends_our_arguments_and_decodes_the_real_stream() -> No
         max_output_tokens=1234,
         model="gpt-6-astra",
         reasoning=REASONING,
+        store=STORE_RESPONSES,
         tools=tools,
     ) as stream:
         events = list(stream)
@@ -1077,9 +1199,12 @@ def test_the_sdk_wrapper_sends_our_arguments_and_decodes_the_real_stream() -> No
         "instructions",
         "include",
         "reasoning",
+        "store",
         "tools",
         "input",
     }
+    # 응답을 공급자에 저장하지 않는다. 빠뜨리면 기본이 참이라 전략 원문이 30일 이상 남는다.
+    assert sent[0]["store"] is False
     assert sent[0]["stream"] is True
     assert sent[0]["model"] == "gpt-6-astra"
     assert sent[0]["max_output_tokens"] == 1234
@@ -1109,7 +1234,10 @@ def test_the_sdk_wrapper_decodes_a_plain_probe_response() -> None:
         return httpx2.Response(200, json=json.loads(response_of().model_dump_json()))
 
     result = _sdk_with_transport(handler).create(
-        input="ping", max_output_tokens=PROBE_MAX_OUTPUT_TOKENS, model="gpt-6-astra"
+        input="ping",
+        max_output_tokens=PROBE_MAX_OUTPUT_TOKENS,
+        model="gpt-6-astra",
+        store=STORE_RESPONSES,
     )
 
     assert result.status == "completed"
@@ -1119,6 +1247,7 @@ def test_the_sdk_wrapper_decodes_a_plain_probe_response() -> None:
         "input": "ping",
         "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,
         "model": "gpt-6-astra",
+        "store": False,
     }
 
 
@@ -1132,36 +1261,93 @@ def test_the_sdk_client_factory_carries_the_base_url_timeout_and_retry_defaults(
     assert _sdk_of(client).max_retries == DEFAULT_MAX_RETRIES
 
 
-def test_an_ambient_base_url_env_var_cannot_redirect_a_profile_without_one(
+def _probe_on_the_wire() -> tuple[OpenAiClientFactory, list[httpx2.Request]]:
+    """프로덕션 팩토리를 그대로 쓰되 전송 계층만 갈아 끼운다.
+
+    환경 변수가 인증 헤더를 덮는지는 **wire에서만 보인다.** `auth_headers` 속성은 `api_key`로
+    만든 값을 돌려줄 뿐이고, `default_headers`가 그 위에 병합되는 것은 요청을 만들 때 일어난다.
+    속성만 보던 이전 테스트가 이 구멍을 놓쳤다.
+    """
+    seen: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(200, json=json.loads(response_of().model_dump_json()))
+
+    factory = sdk_client_factory(http_client=httpx2.Client(transport=httpx2.MockTransport(handler)))
+    return factory, seen
+
+
+def test_an_ambient_api_key_env_var_never_reaches_the_wire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """키는 언제나 프로파일 비밀이다.
+
+    `api_key`를 넘기지 않으면 SDK가 `OPENAI_API_KEY`를 읽는다. 그러면 사용자가 지운 프로파일로도
+    호출이 성립하고, 설정 화면의 "꼬리 4자리"가 실제로 쓰인 키와 달라진다 — 누가 어떤 키로
+    호출했는지 이력으로 되짚을 수 없게 된다.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-AMBIENT-ENV-KEY")
+    factory, seen = _probe_on_the_wire()
+
+    factory(SECRET, None).create(
+        input="ping",
+        max_output_tokens=PROBE_MAX_OUTPUT_TOKENS,
+        model="gpt-6-astra",
+        store=STORE_RESPONSES,
+    )
+
+    assert seen[0].headers["authorization"] == f"Bearer {SECRET}"
+
+
+def test_ambient_custom_headers_cannot_replace_the_profile_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`OPENAI_CUSTOM_HEADERS`의 `Authorization` 줄은 `api_key`로 만든 인증 헤더를 **덮는다.**
+
+    덮이면 사용자의 키가 아예 나가지 않는다. env 토큰이 유효하면 모든 턴이 남의 계정으로
+    과금·감사되고, 무효면 화면이 멀쩡한 키를 "공급자가 API 키를 거부했습니다"로 표시한다.
+    `OPENAI_ORG_ID`·`OPENAI_PROJECT_ID`도 같은 자리에서 요청에 붙는다.
+    """
+    monkeypatch.setenv("OPENAI_CUSTOM_HEADERS", "Authorization: Bearer AMBIENT-TOKEN")
+    monkeypatch.setenv("OPENAI_ORG_ID", "org-STALE")
+    monkeypatch.setenv("OPENAI_PROJECT_ID", "proj-STALE")
+    factory, seen = _probe_on_the_wire()
+
+    factory(SECRET, None).create(
+        input="ping",
+        max_output_tokens=PROBE_MAX_OUTPUT_TOKENS,
+        model="gpt-6-astra",
+        store=STORE_RESPONSES,
+    )
+
+    headers = seen[0].headers
+    assert headers["authorization"] == f"Bearer {SECRET}"
+    assert "AMBIENT-TOKEN" not in str(headers)
+    assert "openai-organization" not in headers
+    assert "openai-project" not in headers
+
+
+def test_an_ambient_base_url_env_var_cannot_redirect_the_wire_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`base_url=None`을 SDK에 넘기면 SDK가 `OPENAI_BASE_URL`을 대신 읽는다.
 
     그러면 "공급자 기본을 쓰겠다"는 프로파일이 서버 환경에 따라 다른 호스트로 나가고 거기에
     사용자의 API 키가 실린다. 그 호스트는 application의 base_url 규칙(spec D6)을 한 번도 통과하지
-    않는다. 검사를 우회하는 통로라 환경 변수가 끼어들 자리를 없앴다.
+    않는다.
     """
     monkeypatch.setenv("OPENAI_BASE_URL", "https://redirected.example.com/v1")
+    factory, seen = _probe_on_the_wire()
 
-    client = sdk_client_factory()(SECRET, None)
+    factory(SECRET, None).create(
+        input="ping",
+        max_output_tokens=PROBE_MAX_OUTPUT_TOKENS,
+        model="gpt-6-astra",
+        store=STORE_RESPONSES,
+    )
 
-    assert str(_sdk_of(client).base_url).startswith(DEFAULT_BASE_URL)
-
-
-def test_an_ambient_api_key_env_var_is_never_used(monkeypatch: pytest.MonkeyPatch) -> None:
-    """키는 언제나 프로파일 비밀이다.
-
-    `api_key`를 넘기지 않으면 SDK가 `OPENAI_API_KEY`를 읽는다. 그렇게 되면 사용자가 지운
-    프로파일로도 호출이 성립하고, 설정 화면의 "꼬리 4자리"가 실제로 쓰인 키와 달라진다 — 누가
-    어떤 키로 호출했는지 이력으로 되짚을 수 없게 된다. 속성만이 아니라 실제로 나가는
-    Authorization 헤더까지 본다.
-    """
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-AMBIENT-ENV-KEY")
-
-    client = sdk_client_factory()(SECRET, None)
-
-    assert _sdk_of(client).api_key == SECRET
-    assert _sdk_of(client).auth_headers == {"Authorization": f"Bearer {SECRET}"}
+    assert str(seen[0].url).startswith(DEFAULT_BASE_URL)
 
 
 def test_the_default_base_url_matches_the_sdk(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -68,6 +68,7 @@ __all__ = [
     "response_of",
     "search_done",
     "text_delta",
+    "web_search_item",
 ]
 
 
@@ -132,6 +133,26 @@ def open_page_done(call_id: str, url: str) -> ResponseOutputItemDoneEvent:
             id=call_id,
             status="completed",
             action=ActionOpenPage(type="open_page", url=url),
+        ),
+    )
+
+
+def web_search_item(
+    call_id: str, query: str, sources: Sequence[str] = ()
+) -> ResponseFunctionWebSearch:
+    """응답 `output`에 실리는 `web_search_call` 항목.
+
+    실제 응답은 같은 항목을 스트림 이벤트와 `output` 양쪽에 담는다. `_as_input_items`가 그것을
+    다음 요청의 `input`으로 되돌리므로, 도구를 뺀 호출에 이 항목이 실리는 조합이 생긴다.
+    """
+    return ResponseFunctionWebSearch(
+        type="web_search_call",
+        id=call_id,
+        status="completed",
+        action=ActionSearch(
+            type="search",
+            query=query,
+            sources=[ActionSearchSource(type="url", url=url) for url in sources],
         ),
     )
 
@@ -259,6 +280,7 @@ class ResponsePayload:
     max_output_tokens: int
     model: str
     reasoning: Reasoning
+    store: bool
     tools: list[ToolParam]
 
 
@@ -295,6 +317,7 @@ class ScriptedResponsesClient:
         self._create_error = create_error
         self.payloads: list[ResponsePayload] = []
         self.create_payloads: list[tuple[int, str]] = []
+        self.create_store_flags: list[bool] = []
 
     def stream_response(
         self,
@@ -305,6 +328,7 @@ class ScriptedResponsesClient:
         max_output_tokens: int,
         model: str,
         reasoning: Reasoning,
+        store: bool,
         tools: list[ToolParam],
     ) -> _ScriptedStream:
         self.payloads.append(
@@ -316,6 +340,7 @@ class ScriptedResponsesClient:
                 max_output_tokens=max_output_tokens,
                 model=model,
                 reasoning=reasoning,
+                store=store,
                 tools=list(tools),
             )
         )
@@ -327,8 +352,9 @@ class ScriptedResponsesClient:
             raise script.error
         return _ScriptedStream(script)
 
-    def create(self, *, input: str, max_output_tokens: int, model: str) -> Response:
+    def create(self, *, input: str, max_output_tokens: int, model: str, store: bool) -> Response:
         self.create_payloads.append((max_output_tokens, model))
+        self.create_store_flags.append(store)
         if self._create_error is not None:
             raise self._create_error
         if self._create_result is not None:

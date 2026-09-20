@@ -26,12 +26,16 @@ Responses API는 `previous_response_id`로 이전 응답을 이어받을 수 있
 | 상한 | 규칙 | 실패 |
 |---|---|---|
 | 도구 라운드 | `max_tool_rounds` 초과 | `TOOL_ROUNDS_EXCEEDED` |
-| 턴 토큰 예산 | `min(호출당 상한, 남은 예산)`, 남은 예산 0 | `TOKEN_BUDGET_EXCEEDED` |
+| 턴 토큰 예산 | `min(호출당 상한, 남은 예산)`, 잔량 < 최소 호출 크기 | `TOKEN_BUDGET_EXCEEDED` |
 | 검색 횟수 | 누적이 `max_search_uses`에 닿으면 도구 목록에서 제거 | (실패 아님) |
 
 `incomplete_details.reason == "max_output_tokens"`는 예산 때문에 줄였든 호출당 상한 때문이든
 `OUTPUT_TRUNCATED`다. 예산 소진은 "다음 호출을 할 토큰이 남지 않았다"일 때만 쓴다 — 두 사유가 같은
-상황을 가리키면 이력에서 무엇이 턴을 끊었는지 구분할 수 없다.
+상황을 가리키면 이력에서 무엇이 턴을 끊었는지 구분할 수 없다. 경계에서 이 구분이 뒤집히지 않게
+최소 호출 크기(`MIN_CALL_OUTPUT_TOKENS`)를 둔다. 남은 예산이 그보다 작으면 호출하지 않는다 —
+OpenAI는 `max_output_tokens`의 최솟값이 16이라 그 아래로는 요청 자체가 400이 되어 예산 소진이
+`PROVIDER`(공급자 장애)로 둔갑하고, 16을 넘겨도 아주 작은 호출은 추론 토큰만 쓰고
+`incomplete/max_output_tokens`로 끝나 진짜 사유를 `OUTPUT_TRUNCATED`로 가린다.
 
 ## 검색 횟수 집행이 왜 여기 있는가
 
@@ -103,11 +107,23 @@ from strategy_workbench.domain.assistant.facade.models import (
 
 from ._client import OpenAiResponsesClient
 from ._failures import failure_for
-from ._payload import INCLUDE, REASONING, build_input, build_tools, notice_item
+from ._payload import (
+    INCLUDE,
+    REASONING,
+    STORE_RESPONSES,
+    build_input,
+    build_tools,
+    notice_item,
+)
 
-__all__ = ["stream_turn"]
+__all__ = ["MIN_CALL_OUTPUT_TOKENS", "stream_turn"]
 
 logger = logging.getLogger(__name__)
+
+# 의미 있는 호출 하나의 최소 출력 토큰. 남은 예산이 이보다 작으면 호출하지 않고 예산 소진으로
+# 끝낸다. 값 자체는 A-07 실측으로 확정한다(spec D3: 기본값은 실측 뒤 확정). `llm_anthropic`과
+# 같은 값을 쓴다 — 같은 `TurnRequest`가 두 공급자에서 다른 종료 사유를 뜻하면 안 된다.
+MIN_CALL_OUTPUT_TOKENS = 256
 
 _CANCELLED_MESSAGE = "턴이 취소되어 공급자 호출을 중단했습니다"
 
@@ -146,22 +162,30 @@ def stream_turn(
             return
 
         remaining = request.max_turn_output_tokens - spent_output_tokens
-        if remaining <= 0:
+        if remaining < MIN_CALL_OUTPUT_TOKENS:
             yield Failure(
                 code=FailureCode.TOKEN_BUDGET_EXCEEDED,
                 message=(
                     "턴 출력 토큰 예산을 모두 썼습니다 — "
                     f"spent_output_tokens={spent_output_tokens} "
-                    f"budget={request.max_turn_output_tokens} tool_rounds={tool_rounds}"
+                    f"budget={request.max_turn_output_tokens} remaining={remaining} "
+                    f"min_call_output_tokens={MIN_CALL_OUTPUT_TOKENS} tool_rounds={tool_rounds}"
                 ),
             )
             return
         max_output_tokens = min(request.max_output_tokens_per_call, remaining)
 
         search_allowed = wants_search and search_uses < request.max_search_uses
-        if wants_search and not search_allowed and not search_notice_sent:
+        # 한 번도 검색하지 않았는데 "다 썼습니다"가 나가지 않게 한다. `max_search_uses == 0`이면
+        # 처음부터 도구가 없는 것이지 소진된 것이 아니다(현재 배선에서는 기본값 8이라 도달하지
+        # 않지만, 값의 owner는 application이라 여기서 가정하지 않는다).
+        if search_uses > 0 and wants_search and not search_allowed and not search_notice_sent:
             # 도구를 빼기 **전에** 알린다. 모델은 다음 요청의 입력에서, 사용자는 지금 화면에서
             # 같은 문장을 본다. 문장의 owner는 application이다(spec D4).
+            #
+            # 통지를 `SearchActivity.query`에 싣는 것은 임시다. 그 필드의 뜻은 "검색어"이고
+            # 화면이 "검색: {query}"로 그리면 문장이 검색어 자리에 들어간다. 화면 표현(전용
+            # 이벤트인지, 판별 플래그인지)은 B-03이 정한다 — domain 변경이라 여기 범위가 아니다.
             logger.info(
                 "openai web search budget spent — model=%s search_uses=%d max_search_uses=%d",
                 model,
@@ -229,6 +253,17 @@ def stream_turn(
                         f"max_output_tokens={max_output_tokens} "
                         f"per_call_limit={request.max_output_tokens_per_call} "
                         f"remaining_budget={remaining}"
+                    ),
+                )
+                return
+            if reason == "content_filter":
+                # 공급자 장애가 아니라 거절이다. `PROVIDER`로 뭉개면 화면이 "잠시 후 다시"와
+                # "다르게 물어보세요"를 구분하지 못한다(`_has_refusal`과 같은 뜻의 다른 표현).
+                yield Failure(
+                    code=FailureCode.REFUSAL,
+                    message=(
+                        "공급자가 요청을 거절했습니다 — "
+                        f"kind=openai model={model} incomplete_reason={reason}"
                     ),
                 )
                 return
@@ -306,6 +341,7 @@ def _stream_once(
         max_output_tokens=max_output_tokens,
         model=model,
         reasoning=REASONING,
+        store=STORE_RESPONSES,
         tools=tools,
     ) as stream:
         for event in stream:
@@ -337,6 +373,11 @@ def _stream_once(
             # 취소 확인은 이벤트를 **내보낸 뒤**에 한다. 앞에서 보면 공급자가 이미 만들어 낸
             # 조각 하나가 통째로 사라진다.
             if cancelled():
+                # 종료 이벤트를 이미 받았으면 그 호출의 `Usage`를 먼저 낸다. 취소해도 토큰은
+                # 과금되고, 빠뜨리면 세션 집계가 이 턴을 0으로 본다. 그 앞에서 취소된 경우는
+                # 살릴 값이 없다 — OpenAI는 `usage`를 종료 이벤트에만 싣는다(구조적 차이다).
+                if final is not None and final.usage is not None:
+                    yield _usage_of(final.usage)
                 yield Failure(code=FailureCode.CANCELLED, message=_CANCELLED_MESSAGE)
                 return _CallOutcome(response=None, search_uses=search_uses)
 

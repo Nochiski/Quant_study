@@ -76,10 +76,12 @@ _SETTLE_TIMEOUT_SECONDS = 5.0
 class _ScriptedStream:
     """SDK가 흘렸을 이벤트 열. adapter가 `with ... as stream`으로 받는 자리다."""
 
-    def __init__(self, events: Sequence[Any]) -> None:
+    def __init__(
+        self, events: Sequence[Any]
+    ) -> None:  # reason: SDK 스트림 이벤트 union을 그대로 받는다
         self._events = tuple(events)
 
-    def __iter__(self) -> Iterator[Any]:
+    def __iter__(self) -> Iterator[Any]:  # reason: 위와 같음
         yield from self._events
 
     def __enter__(self) -> _ScriptedStream:
@@ -100,18 +102,22 @@ class _ScriptedResponsesClient:
     def __init__(
         self,
         *,
-        events: Sequence[Any] = (),
+        events: Sequence[Any] = (),  # reason: 위와 같음
         stream_error: Exception | None = None,
     ) -> None:
         self._events = tuple(events)
         self._stream_error = stream_error
 
-    def stream_response(self, **_: Any) -> _ScriptedStream:
+    def stream_response(
+        self, **_: Any
+    ) -> _ScriptedStream:  # reason: 인자를 보지 않는 가짜라 전부 받는다
         if self._stream_error is not None:
             raise self._stream_error
         return _ScriptedStream(self._events)
 
-    def create(self, *, input: str, max_output_tokens: int, model: str) -> Any:
+    def create(  # reason: 반환은 SDK `Response`이고 이 파일은 그 타입을 쓰지 않는다
+        self, *, input: str, max_output_tokens: int, model: str, store: bool
+    ) -> Any:
         return response_of(model=model)
 
 

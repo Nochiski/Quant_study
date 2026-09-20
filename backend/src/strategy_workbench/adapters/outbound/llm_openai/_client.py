@@ -1,4 +1,8 @@
-"""OpenAI SDK와 닿는 유일한 경계 (설계 spec D4).
+"""OpenAI SDK 클라이언트를 만들고 실제로 호출하는 모듈 (설계 spec D4).
+
+`openai`를 import하는 유일한 파일은 아니다 — `_payload.py`·`_turn.py`·`_failures.py`도 SDK 타입을
+쓴다(architecture 게이트는 노드 디렉터리 전체를 허용한다). 여기만 다른 점은 **클라이언트를 만들고
+네트워크로 나가는 호출을 거는 곳**이 여기뿐이라는 것이다.
 
 ## 왜 Protocol을 한 겹 두는가
 
@@ -25,16 +29,44 @@ SDK에는 이벤트를 누적해 주는 헬퍼 `responses.stream(...)`도 있다
 클라이언트는 호출마다 `secret`으로 새로 만들고 보관하지 않는다(`LlmProviderPort` 계약). 그래서
 팩토리는 `(secret, base_url) -> client` 형태이지 미리 만들어 둔 클라이언트가 아니다.
 
-## base_url은 프로파일만 정한다
+## 응답을 공급자에 저장하지 않는다
 
-SDK에 `base_url=None`을 넘기면 SDK가 **환경 변수 `OPENAI_BASE_URL`을 대신 읽는다.** 그러면
-프로파일에 base_url이 없는(=공급자 기본을 쓰겠다는) 연결이 서버 환경에 따라 조용히 다른 호스트로
-나가고, 거기에는 사용자의 API 키가 실린다. 그 호스트는 application의 base_url 규칙(spec D6:
-https만, 루프백·사설 대역 금지, 위반은 `assistant.base_url_rejected`)을 한 번도 통과하지 않는다.
-검사를 우회하는 통로가 생기는 셈이다.
+`store`는 **주지 않으면 참**이고, 그러면 응답이 공급자 서버에 최소 30일 남는다. 요청에 실리는
+것은 runtime schema 요약·데이터 필드 카탈로그·팩터 카탈로그(spec D3)와 사용자의 전략 YAML 원문·
+대화다. 비밀은 아니지만 사용자 저작물이다.
 
-그래서 프로파일이 base_url을 말하지 않으면 **우리가 기본값을 명시**해서 환경 변수가 끼어들 자리를
-없앤다. 값이 SDK 기본과 어긋나면 테스트가 깨진다(`test_the_default_base_url_matches_the_sdk`).
+`store=False`를 명시한다. 이 adapter는 대화 상태를 서버에 맡기지 않고 `input`에 누적하므로
+(`_turn.py` "대화 상태를 서버에 맡기지 않는다") 저장의 이득이 없다. `include`에
+`reasoning.encrypted_content`를 넣는 것도 SDK가 **stateless**(`store=false`·ZDR) 맥락으로 설명하는
+기제다. 저장을 켜 두면 이득 없이 보존 비용만 치른다.
+
+## 서버 환경이 사용자 호출을 바꾸지 못하게 한다
+
+**SDK는 인자를 주지 않으면 환경 변수를 읽는다.** 읽는 것은 일곱이다 — `OPENAI_API_KEY`,
+`OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID`, `OPENAI_CUSTOM_HEADERS`,
+`OPENAI_ADMIN_KEY`, `OPENAI_WEBHOOK_SECRET`. 앞의 다섯은 **누가 어디로 무엇을 들고 호출하는가**를
+바꾼다. 그 값은 프로파일이 정해야 하고, 운영 셸에 남아 있던 변수가 정해서는 안 된다.
+
+우리가 닫는 것과 그 이유:
+
+- `api_key`: 언제나 프로파일 비밀을 명시한다. 비면 SDK가 `OPENAI_API_KEY`를 읽어, 사용자가 지운
+  프로파일로도 호출이 성립하고 화면의 꼬리 4자리가 실제로 쓰인 키와 달라진다.
+- `base_url`: 프로파일이 말하지 않으면 `DEFAULT_BASE_URL`을 명시한다. `None`을 넘기면 SDK가
+  `OPENAI_BASE_URL`을 읽어, 사용자의 키가 application의 base_url 규칙(spec D6: https만, 루프백·
+  사설 대역 금지)을 한 번도 통과하지 않은 호스트로 나간다.
+- `default_headers`: `Authorization`을 직접 넣는다. 주지 않으면 SDK가 `OPENAI_CUSTOM_HEADERS`를
+  파싱해 그 자리에 넣고, 그 매핑은 **`api_key`로 만든 인증 헤더를 덮는다.** 즉 프로파일 비밀이
+  아예 나가지 않는다. 빈 dict는 듣지 않는다 — SDK가 "명시된 Authorization이 있는가"로 갈리므로
+  값이 실제로 들어 있어야 env 쪽 줄이 걸러진다.
+- `organization`·`project`: 만든 뒤 `None`으로 되돌린다. 빈 문자열을 넘기면 빈 값 헤더가 그대로
+  나가므로 쓰지 않는다.
+
+**남겨 둔 것**: `OPENAI_CUSTOM_HEADERS`의 `Authorization`이 아닌 줄은 여전히 요청에 붙는다. 그걸
+막으려면 SDK의 private(`_custom_headers`)을 건드려야 해서, 자격 증명 치환이 닫힌 선에서 멈췄다.
+`OPENAI_ADMIN_KEY`·`OPENAI_WEBHOOK_SECRET`은 이 경로가 쓰지 않는 표면이다.
+
+값이 SDK 기본과 어긋나면 테스트가 깨진다(`test_the_default_base_url_matches_the_sdk`). 환경 변수
+쪽은 **실제로 나가는 요청 헤더**로 단언한다 — `auth_headers` 속성은 위 덮어쓰기를 보지 못한다.
 """
 
 from __future__ import annotations
@@ -43,6 +75,7 @@ from collections.abc import Callable, Iterator
 from types import TracebackType
 from typing import Protocol
 
+import httpx2
 import openai
 from openai.types.responses import (
     Response,
@@ -111,6 +144,7 @@ class OpenAiResponsesClient(Protocol):
         max_output_tokens: int,
         model: str,
         reasoning: Reasoning,
+        store: bool,
         tools: list[ToolParam],
     ) -> OpenAiResponseStream: ...
 
@@ -120,6 +154,7 @@ class OpenAiResponsesClient(Protocol):
         input: str,
         max_output_tokens: int,
         model: str,
+        store: bool,
     ) -> Response: ...
 
 
@@ -148,6 +183,7 @@ class SdkResponsesClient:
         max_output_tokens: int,
         model: str,
         reasoning: Reasoning,
+        store: bool,
         tools: list[ToolParam],
     ) -> OpenAiResponseStream:
         return self._client.responses.create(
@@ -158,14 +194,16 @@ class SdkResponsesClient:
             max_output_tokens=max_output_tokens,
             model=model,
             reasoning=reasoning,
+            store=store,
             tools=tools,
         )
 
-    def create(self, *, input: str, max_output_tokens: int, model: str) -> Response:
+    def create(self, *, input: str, max_output_tokens: int, model: str, store: bool) -> Response:
         return self._client.responses.create(
             input=input,
             max_output_tokens=max_output_tokens,
             model=model,
+            store=store,
         )
 
 
@@ -173,17 +211,32 @@ def sdk_client_factory(
     *,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     max_retries: int = DEFAULT_MAX_RETRIES,
+    http_client: httpx2.Client | None = None,
 ) -> OpenAiClientFactory:
-    """실제 SDK 클라이언트를 만드는 팩토리. 프로덕션 배선의 기본값이다."""
+    """실제 SDK 클라이언트를 만드는 팩토리. 프로덕션 배선의 기본값이다.
+
+    Args:
+        timeout_seconds: HTTP 타임아웃.
+        max_retries: SDK 재시도 횟수.
+        http_client: 전송 계층. 프로덕션은 주지 않는다. 테스트가 여기에
+            `httpx2.MockTransport`를 꽂아 **실제로 나가는 요청 헤더**를 본다 — 환경 변수가 인증
+            헤더를 덮는지는 속성이 아니라 wire에서만 보이기 때문이다(모듈 docstring).
+    """
 
     def build(secret: str, base_url: str | None) -> OpenAiResponsesClient:
-        return SdkResponsesClient(
-            openai.OpenAI(
-                api_key=secret,
-                base_url=base_url if base_url is not None else DEFAULT_BASE_URL,
-                timeout=timeout_seconds,
-                max_retries=max_retries,
-            )
+        client = openai.OpenAI(
+            api_key=secret,
+            base_url=base_url if base_url is not None else DEFAULT_BASE_URL,
+            timeout=timeout_seconds,
+            max_retries=max_retries,
+            # 이 자리를 비우면 SDK가 `OPENAI_CUSTOM_HEADERS`를 파싱해 넣고, 그 매핑이 인증 헤더를
+            # 덮는다. 빈 dict로는 막히지 않는다(모듈 docstring "서버 환경이 …").
+            default_headers={"Authorization": f"Bearer {secret}"},
+            http_client=http_client,
         )
+        # 생성자는 `None`을 "환경 변수를 읽어라"로 읽는다. 만든 뒤에 되돌려야 두 헤더가 빠진다.
+        client.organization = None
+        client.project = None
+        return SdkResponsesClient(client)
 
     return build

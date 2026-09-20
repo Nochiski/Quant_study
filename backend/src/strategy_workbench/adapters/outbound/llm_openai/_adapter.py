@@ -26,7 +26,7 @@ from strategy_workbench.domain.assistant.facade.models import (
 
 from ._client import OpenAiClientFactory, sdk_client_factory
 from ._failures import probe_failure_for
-from ._payload import DEFAULT_MODEL
+from ._payload import DEFAULT_MODEL, STORE_RESPONSES
 from ._turn import stream_turn
 
 __all__ = ["PROBE_MAX_OUTPUT_TOKENS", "OpenAiLlmAdapter"]
@@ -70,6 +70,11 @@ class OpenAiLlmAdapter:
         일이 흔한데, 그것은 키·모델·네트워크가 모두 살아 있다는 뜻이다. 확인하려는 것은 응답의
         내용이 아니라 호출이 성립하는가뿐이다.
 
+        **probe는 키·모델·네트워크만 본다. 요청 모양의 호환성은 보지 않는다.** 턴은 `reasoning`과
+        도구 목록을 같이 보내지만 probe는 보내지 않으므로, 추론을 지원하지 않는 모델을 고르면
+        probe는 통과하고 턴만 매번 실패할 수 있다. 그 경로는 A-07 live smoke가 확인한다
+        (`llm_anthropic`의 `thinking`도 같은 한계다).
+
         실패 사유만 고르고 문장은 고르지 않는다. `ProbeResult.message`는 사유에서 유도되며,
         SDK 예외 본문에는 키 조각이 섞여 있을 수 있어 여기 들어올 자리를 두지 않았다(spec D2).
         """
@@ -80,6 +85,7 @@ class OpenAiLlmAdapter:
                 input=_PROBE_PROMPT,
                 max_output_tokens=PROBE_MAX_OUTPUT_TOKENS,
                 model=model,
+                store=STORE_RESPONSES,
             )
         except Exception as error:
             failure = probe_failure_for(error)

@@ -35,8 +35,10 @@ from .ports.outgoing.strategy_compiler import StrategyCompilerPort
 
 __all__ = ["AssistantContextBuilder"]
 
-# JSON Schema를 걷는 데 쓰는 키. 스키마 방언의 어휘이지 전략 언어의 어휘가 아니므로 여기 적는다.
-_DISCRIMINATOR = "kind"
+# JSON Schema 방언의 어휘. 전략 언어의 필드 이름이 아니므로 여기 적어도 SoT 규칙에 걸리지 않는다.
+# 판별자 **키 이름**(현재는 "kind")은 전략 언어의 어휘라 손으로 적지 않고 스키마에서 읽는다.
+_DISCRIMINATOR_MARKER = "discriminator"
+_DISCRIMINATOR_NAME = "propertyName"
 
 
 class AssistantContextBuilder:
@@ -175,13 +177,18 @@ def _summarise_schema(schema: Mapping[str, object]) -> str:
         fixed = _mapping(member).get("const")
         if isinstance(fixed, str):
             lines.append(f"- {name} 고정값: {fixed}")
-    kinds = [
-        discriminator
-        for member in definitions.values()
-        if (discriminator := _discriminator_of(member)) is not None
-    ]
+    discriminator = _discriminator_key(schema)
+    kinds = (
+        [
+            value
+            for member in definitions.values()
+            if (value := _discriminator_of(member, discriminator)) is not None
+        ]
+        if discriminator is not None
+        else []
+    )
     if kinds:
-        lines.append(f"- 사용할 수 있는 {_DISCRIMINATOR} 값: {', '.join(kinds)}")
+        lines.append(f"- 사용할 수 있는 {discriminator} 값: {', '.join(kinds)}")
     # 같은 값 집합을 쓰는 필드는 한 줄로 묶는다. 같은 enum이 스무 번 반복되면 프롬프트만 길어지고
     # 모델이 읽어야 할 사실은 늘지 않는다. 소유자는 전부 적어 어떤 필드에 쓰는지는 잃지 않는다.
     owners_by_values: dict[tuple[str, ...], list[str]] = {}
@@ -196,8 +203,38 @@ def _summarise_schema(schema: Mapping[str, object]) -> str:
     return "\n".join(lines)
 
 
-def _discriminator_of(member: object) -> str | None:
-    fixed = _mapping(_mapping(_mapping(member).get("properties")).get(_DISCRIMINATOR)).get("const")
+def _discriminator_key(schema: Mapping[str, object]) -> str | None:
+    """스키마가 판별 union에 쓰는 속성 이름. 없으면 None.
+
+    `"kind"`를 손으로 적지 않으려고 스키마가 스스로 붙인 `discriminator.propertyName`을 읽는다.
+    리터럴로 두면 판별자 키가 바뀌는 날 요약의 "사용할 수 있는 … 값" 줄이 조용히 사라지고, 모델은
+    노드 종류를 모른 채 제안을 만들어 검증 왕복만 늘린다(SoT 규칙: 필드 이름을 손으로 적지 않는다).
+    """
+    return _find_discriminator(schema)
+
+
+def _find_discriminator(node: object) -> str | None:
+    mapping = _mapping(node)
+    marker = mapping.get(_DISCRIMINATOR_MARKER)
+    if isinstance(marker, Mapping):
+        name = marker.get(_DISCRIMINATOR_NAME)
+        if isinstance(name, str) and name:
+            return name
+    for value in mapping.values():
+        if isinstance(value, Mapping):
+            found = _find_discriminator(value)
+            if found is not None:
+                return found
+        elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
+            for item in value:
+                found = _find_discriminator(item)
+                if found is not None:
+                    return found
+    return None
+
+
+def _discriminator_of(member: object, discriminator: str) -> str | None:
+    fixed = _mapping(_mapping(_mapping(member).get("properties")).get(discriminator)).get("const")
     return fixed if isinstance(fixed, str) else None
 
 

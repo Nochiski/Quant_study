@@ -5,6 +5,11 @@
 일이 없다. 번호가 세션 단위인 이유는 사이드바가 한 세션의 이력을 이어서 읽기 때문이다.
 
 세션 저장에는 키와 시스템 프롬프트 원문을 넣지 않는다.
+
+**구현은 스레드 안전해야 한다.** `append_events`는 턴을 돌리는 워커 스레드에서, `last_sequence`·
+`create_turn`·`get`·`messages`는 요청 스레드에서 불린다(`AssistantTurnRunner` 참고). 특히 sequence
+부여는 원자적이어야 한다 — 두 호출이 같은 번호를 받으면 클라이언트의 `after_sequence` 재개가
+이벤트를 건너뛴다.
 """
 
 from __future__ import annotations

@@ -11,6 +11,15 @@
 늘리면 다른 워커가 시작한 턴은 취소할 수 없고 `state()`가 레지스트리 대신 저장소만 보게 된다.
 그때는 레지스트리를 프로세스 밖(DB 행 + 취소 플래그)으로 옮겨야 한다.
 
+## 세션 슬롯은 스레드가 끝날 때까지 잡혀 있다
+
+레지스트리에 항목이 있으면 그 세션은 점유 중이다. **취소했다는 사실은 슬롯을 풀지 않는다.** 취소는
+`threading.Event`를 세우는 best-effort 신호일 뿐이고, 러너 스레드는 공급자가 다음 이벤트를 낼
+때까지 그 신호를 읽지 못한다. 그 사이에 다음 턴을 받아 주면 한 세션에 두 스레드가 겹쳐서
+`ChatMessage` 이력이 `[user, user, assistant]`처럼 역할 교대가 깨진 순서로 저장되고(공급자 요청
+자체가 망가진다), 새 턴의 `accepted_sequence`보다 큰 sequence를 이전 턴이 계속 쓴다. 그래서
+슬롯은 `_finish`가 항목을 뺄 때만 풀린다.
+
 ## Failure 우선순위
 
 한 턴에서 **턴 상태가 되는 Failure는 먼저 확정된 하나뿐이다**(spec D3). 뒤이어 들어오는 Failure는
@@ -21,15 +30,26 @@
 라운드·검색·토큰 상한은 adapter가 집행하므로 `TOOL_ROUNDS_EXCEEDED`·`TOKEN_BUDGET_EXCEEDED`도
 공급자가 내는 Failure로 도착한다. 러너는 그것을 상태로 옮길 뿐 따로 세지 않는다.
 
+## 어떤 경로로 끝나도 슬롯은 풀리고 턴은 종료 상태가 된다
+
+`_drain`은 소비·크래시 기록·스트림 닫기·종료 기록을 분리해, `_finish`가 **정확히 한 번** 돌게
+한다. `_finish`는 저장소 예외를 삼키고 레지스트리 pop을 먼저 한다. 종료를 기록하지 못하는 것과
+세션이 영원히 잠기는 것 중에서는 전자가 훨씬 낫다. 잠기면 사용자는 사이드바에서 아무 질문도 보낼
+수 없고 프로세스를 재시작해야 한다.
+
+크래시로 끝난 턴에도 `Failure` 이벤트를 best-effort로 남긴다. 화면은 이벤트 열만 보고 턴의 끝을
+알기 때문에, 종료 이벤트 없이 스트림이 닫히면 사용자는 "멈춘 채 끝난" 턴을 본다.
+
 ## 타임아웃의 범위
 
 턴당 벽시계 타임아웃은 **이벤트 사이**에서 본다. 공급자가 아무 이벤트도 내지 않은 채 멈춰 있으면
 여기서 깨우지 못하고, 그 경우는 adapter가 건 HTTP 타임아웃이 막는다. 상한을 넘겨 도는 턴을
 잘라 내는 것이 목적이지 응답 없는 소켓을 감시하는 것이 목적이 아니다.
 
-취소 신호를 보낸 뒤에는 유예 시간만큼 더 읽어 adapter가 마무리로 내는 이벤트를 저장한다. 그
-유예마저 지나면 스트림을 닫는다. `cancelled`를 무시하는 adapter가 스레드를 영원히 붙잡지 못하게
-하는 상한이다.
+상한을 넘기면 `TIMEOUT`을 확정하고 취소 신호를 보낸 뒤 **유예(`grace_seconds`, 기본 10초)** 동안만
+더 읽어 adapter가 마무리로 내는 이벤트를 저장한다. 유예가 지나면 스트림을 닫는다. 즉 한 턴의 실제
+벽시계 상한은 `timeout_seconds + grace_seconds`다. 유예를 턴 상한과 같은 값으로 두면 spec D3이
+말하는 300초가 실제로는 600초가 되므로 따로 둔다.
 """
 
 from __future__ import annotations
@@ -56,18 +76,32 @@ from ._chat import AssistantChatService
 from ._models import TurnContext
 from .ports.outgoing.chat_sessions import ChatSessionRepository
 
-__all__ = ["AssistantTurnRunner", "TurnInProgressError", "TurnThread", "TurnThreadFactory"]
+__all__ = [
+    "DEFAULT_TURN_GRACE_SECONDS",
+    "AssistantTurnRunner",
+    "TurnInProgressError",
+    "TurnThread",
+    "TurnThreadFactory",
+]
 
 logger = logging.getLogger(__name__)
 
+# 취소 신호를 보낸 뒤 adapter가 마무리 이벤트를 낼 시간. 턴 상한(`DEFAULT_TURN_TIMEOUT_SECONDS`)과
+# 달리 `TurnRequest`로 나가지 않는 러너 내부 정책이라 여기가 owner다(spec D9: 값과 집행의 분리).
+DEFAULT_TURN_GRACE_SECONDS = 10.0
+
 
 class TurnInProgressError(RuntimeError):
-    """세션에 이미 RUNNING 턴이 있다. 한 세션의 턴은 한 번에 하나다."""
+    """세션에 이미 도는 턴이 있다. 한 세션의 턴은 한 번에 하나다.
+
+    취소한 직후에도 스레드가 아직 돌고 있으면 이 예외가 난다. 취소는 신호일 뿐 종료가 아니다.
+    """
 
     def __init__(self, session_id: str, turn_id: str) -> None:
         super().__init__(
             "a turn is already running for this session — "
-            f"session_id={session_id!r} running_turn_id={turn_id!r}; cancel it first"
+            f"session_id={session_id!r} running_turn_id={turn_id!r}; "
+            "cancel it and wait for it to finish"
         )
         self.session_id = session_id
         self.turn_id = turn_id
@@ -89,11 +123,17 @@ def _default_thread_factory(*, target: Callable[[], None], name: str, daemon: bo
 
 @dataclass
 class _Running:
-    """레지스트리 한 칸. 취소 신호, 마지막으로 알려진 턴, 먼저 확정된 종료 사유."""
+    """레지스트리 한 칸. 항목이 있다는 것 자체가 "그 세션은 점유 중"이라는 뜻이다."""
 
     turn: Turn
     cancel: threading.Event
     decided: TurnStatus | None = None
+
+    def view(self) -> Turn:
+        """바깥에 보여 줄 턴. 확정된 종료 사유가 있으면 그것을 반영한다."""
+        if self.decided is None:
+            return self.turn
+        return _with_status(self.turn, self.decided, finished_at=None)
 
 
 class AssistantTurnRunner:
@@ -106,6 +146,7 @@ class AssistantTurnRunner:
         new_id: Callable[[], str],
         thread_factory: TurnThreadFactory = _default_thread_factory,
         timeout_seconds: float = DEFAULT_TURN_TIMEOUT_SECONDS,
+        grace_seconds: float = DEFAULT_TURN_GRACE_SECONDS,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._chat = chat_service
@@ -114,6 +155,7 @@ class AssistantTurnRunner:
         self._new_id = new_id
         self._thread_factory = thread_factory
         self._timeout_seconds = timeout_seconds
+        self._grace_seconds = grace_seconds
         self._monotonic = monotonic
         self._lock = threading.RLock()
         self._running: dict[str, _Running] = {}
@@ -121,15 +163,15 @@ class AssistantTurnRunner:
     # -- 명령 ---------------------------------------------------------------------------------
 
     def start(self, session_id: str, text: str, context: TurnContext) -> Turn:
-        """턴 하나를 시작한다. 이미 도는 턴이 있으면 `TurnInProgressError`.
+        """턴 하나를 시작한다. 그 세션에 도는 턴이 있으면 `TurnInProgressError`.
 
         `chat_service.send`는 호출 스레드에서 부른다. 세션 없음·활성 프로파일 없음 같은 거절을
         HTTP 응답으로 바로 돌려주려면 스레드 안에서 터지면 안 되기 때문이다.
         """
         with self._lock:
-            existing = self._running_turn_for(session_id)
-            if existing is not None:
-                raise TurnInProgressError(session_id, existing.turn_id)
+            occupied = self._occupied_turn(session_id)
+            if occupied is not None:
+                raise TurnInProgressError(session_id, occupied.turn_id)
             accepted = self._sessions.last_sequence(session_id)
             turn = Turn(
                 turn_id=self._new_id(),
@@ -152,7 +194,10 @@ class AssistantTurnRunner:
         return turn
 
     def cancel(self, turn_id: str) -> Turn:
-        """취소 신호를 세우고 턴을 CANCELLED로 기록한다. 이미 끝난 턴이면 그대로 돌려준다."""
+        """취소 신호를 세우고 턴을 CANCELLED로 기록한다.
+
+        슬롯은 여기서 풀리지 않는다. 스레드가 신호를 읽고 `_finish`에 닿아야 다음 턴을 받는다.
+        """
         with self._lock:
             entry = self._running.get(turn_id)
             if entry is None:
@@ -160,7 +205,7 @@ class AssistantTurnRunner:
             entry.cancel.set()
             if entry.decided is not None:
                 # 이미 확정된 사유(예: 러너 타임아웃)가 있으면 취소가 덮지 않는다.
-                return entry.turn
+                return entry.view()
             entry.decided = TurnStatus.CANCELLED
             cancelled = _with_status(entry.turn, TurnStatus.CANCELLED, finished_at=None)
             entry.turn = cancelled
@@ -169,11 +214,11 @@ class AssistantTurnRunner:
     # -- 조회 ---------------------------------------------------------------------------------
 
     def state(self, turn_id: str) -> Turn:
-        """진행 중이면 레지스트리가, 아니면 저장소가 답한다(재시작 이후에도 조회된다)."""
+        """도는 중이면 레지스트리가, 아니면 저장소가 답한다(재시작 이후에도 조회된다)."""
         with self._lock:
             entry = self._running.get(turn_id)
             if entry is not None:
-                return entry.turn
+                return entry.view()
         return self._sessions.get_turn(turn_id)
 
     def events(self, session_id: str, *, after_sequence: int = -1) -> tuple[SequencedEvent, ...]:
@@ -188,31 +233,33 @@ class AssistantTurnRunner:
     # -- 스레드 본체 --------------------------------------------------------------------------
 
     def _drain(self, turn_id: str, stream: Iterator[ChatEvent]) -> None:
+        """워커 스레드의 전부. 어떤 경로로 끝나도 `_finish`가 정확히 한 번 돈다."""
+        status = TurnStatus.COMPLETED
+        try:
+            self._consume(turn_id, stream)
+        except Exception as error:
+            status = TurnStatus.FAILED
+            self._record_crash(turn_id, error)
+        finally:
+            self._close(turn_id, stream)
+            self._finish(turn_id, status)
+
+    def _consume(self, turn_id: str, stream: Iterator[ChatEvent]) -> None:
         deadline = self._monotonic() + self._timeout_seconds
         grace_deadline: float | None = None
-        try:
-            for event in stream:
-                # 이벤트마다 즉시 append한다. 배치로 모으면 화면이 턴이 끝날 때까지 비어 있다.
-                self._sessions.append_events(turn_id, (event,))
-                if isinstance(event, Failure):
-                    self._decide(turn_id, _status_for(event.code))
-                now = self._monotonic()
-                if grace_deadline is not None:
-                    if now >= grace_deadline:
-                        break
-                    continue
-                if now >= deadline:
-                    grace_deadline = now + self._timeout_seconds
-                    self._expire(turn_id)
-        except Exception:
-            logger.exception("assistant turn crashed — turn_id=%s", turn_id)
-            self._finish(turn_id, TurnStatus.FAILED)
-            return
-        finally:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                close()
-        self._finish(turn_id, TurnStatus.COMPLETED)
+        for event in stream:
+            # 이벤트마다 즉시 append한다. 배치로 모으면 화면이 턴이 끝날 때까지 비어 있다.
+            self._sessions.append_events(turn_id, (event,))
+            if isinstance(event, Failure):
+                self._decide(turn_id, _status_for(event.code))
+            now = self._monotonic()
+            if grace_deadline is not None:
+                if now >= grace_deadline:
+                    return
+                continue
+            if now >= deadline:
+                grace_deadline = now + self._grace_seconds
+                self._expire(turn_id)
 
     def _expire(self, turn_id: str) -> None:
         """`TIMEOUT`을 먼저 확정하고 나서 취소 신호를 보낸다(spec D3 Failure 우선순위)."""
@@ -234,6 +281,56 @@ class AssistantTurnRunner:
             if entry is not None:
                 entry.cancel.set()
 
+    def _record_crash(self, turn_id: str, error: Exception) -> None:
+        """예상 못 한 예외도 종료 이벤트를 남긴다. 로그·이벤트 모두 예외 타입 이름까지만.
+
+        코드는 `INTERNAL`이다. 여기서 잡히는 것은 저장소 호출이나 러너 자신의 예외이지 공급자
+        오류가 아니다. `PROVIDER`로 찍으면 이력과 화면이 원인을 공급자 탓으로 잘못 가리킨다.
+        """
+        logger.warning(
+            "assistant turn crashed — turn_id=%s error_type=%s",
+            turn_id,
+            type(error).__name__,
+        )
+        self._decide(turn_id, TurnStatus.FAILED)
+        try:
+            self._sessions.append_events(
+                turn_id,
+                (
+                    Failure(
+                        code=FailureCode.INTERNAL,
+                        message=(
+                            "턴 처리 중 내부 오류로 종료했습니다 — "
+                            f"turn_id={turn_id} error_type={type(error).__name__}"
+                        ),
+                    ),
+                ),
+            )
+        except Exception as append_error:
+            logger.warning(
+                "could not record the crash event — turn_id=%s error_type=%s",
+                turn_id,
+                type(append_error).__name__,
+            )
+
+    def _close(self, turn_id: str, stream: Iterator[ChatEvent]) -> None:
+        """제너레이터를 닫는다. 닫는 과정의 예외가 종료 기록을 건너뛰게 두지 않는다.
+
+        `close()`는 `send` 제너레이터의 `finally`를 돌리므로 부분 assistant 메시지 저장이 그 안에서
+        일어난다. 저장소가 그 순간 흔들리면 예외가 여기로 나온다.
+        """
+        close = getattr(stream, "close", None)
+        if not callable(close):
+            return
+        try:
+            close()
+        except Exception as error:
+            logger.warning(
+                "closing the turn stream failed — turn_id=%s error_type=%s",
+                turn_id,
+                type(error).__name__,
+            )
+
     def _decide(self, turn_id: str, status: TurnStatus) -> None:
         """턴의 종료 사유를 확정한다. 먼저 확정된 것이 남고 뒤엣것은 이벤트로만 남는다."""
         with self._lock:
@@ -243,16 +340,26 @@ class AssistantTurnRunner:
             entry.decided = status
 
     def _finish(self, turn_id: str, status: TurnStatus) -> None:
+        """슬롯을 풀고 종료 상태를 기록한다. 기록이 실패해도 슬롯은 이미 풀려 있다."""
         with self._lock:
             entry = self._running.pop(turn_id, None)
-            if entry is None:
-                return
-            final = entry.decided or status
+        if entry is None:
+            return
+        final = entry.decided or status
+        try:
             self._sessions.update_turn(_with_status(entry.turn, final, finished_at=self._now()))
+        except Exception as error:
+            logger.warning(
+                "could not persist the final turn state — turn_id=%s status=%s error_type=%s",
+                turn_id,
+                final.value,
+                type(error).__name__,
+            )
 
-    def _running_turn_for(self, session_id: str) -> Turn | None:
+    def _occupied_turn(self, session_id: str) -> Turn | None:
+        """그 세션의 슬롯을 잡고 있는 턴. 취소 신호를 받았어도 스레드가 돌면 여전히 점유 중이다."""
         for entry in self._running.values():
-            if entry.turn.session_id == session_id and entry.turn.status is TurnStatus.RUNNING:
+            if entry.turn.session_id == session_id:
                 return entry.turn
         return None
 

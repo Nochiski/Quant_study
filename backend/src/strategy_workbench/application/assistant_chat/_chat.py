@@ -80,6 +80,10 @@ __all__ = ["AssistantChatService", "NoActiveProviderError"]
 logger = logging.getLogger(__name__)
 
 _SUMMARY_LIMIT = 200
+
+# 다른 상한 기본값은 `domain/assistant/_models.py`가 소유한다(그 값들은 `TurnRequest`로 adapter에
+# 나가는 계약이다). 제안 재시도는 adapter로 나가지 않고 이 서비스만 집행하는 규칙이라 여기가
+# owner다.
 DEFAULT_MAX_PROPOSAL_ATTEMPTS = 3
 
 
@@ -219,7 +223,25 @@ class AssistantChatService:
         text_parts: list[str] = []
 
         def execute_tool(call: ToolCall) -> ToolResult:
-            result = self._run_tool(call, context, state, session.session_id, cancelled)
+            # 도구 실행은 우리 코드다. 여기서 난 예외가 바깥 `except`까지 올라가면 진단이
+            # `Failure(PROVIDER)`로 잘못 찍히고 턴도 죽는다. 도구 오류로 흡수해 모델이 고치게 한다.
+            try:
+                result = self._run_tool(call, context, state, session.session_id, cancelled)
+            except Exception as error:
+                logger.warning(
+                    "assistant tool failed — session_id=%s tool=%s error_type=%s",
+                    session.session_id,
+                    call.name,
+                    type(error).__name__,
+                )
+                result = ToolResult(
+                    call_id=call.call_id,
+                    ok=False,
+                    content=(
+                        f"도구 실행이 실패했습니다 — name={call.name!r} "
+                        f"error_type={type(error).__name__}"
+                    ),
+                )
             state.queue.append(
                 ToolResultSummary(
                     call_id=call.call_id,
@@ -235,12 +257,6 @@ class AssistantChatService:
                 for event in provider.stream_turn(
                     secret, profile, request, execute_tool, cancelled
                 ):
-                    if cancelled():
-                        state.stop = FailureCode.CANCELLED
-                        state.stop_message = (
-                            f"사용자가 턴을 취소했습니다 — session_id={session.session_id}"
-                        )
-                        break
                     # 도구가 세운 종료 사유는 그 도구의 요약을 내보낸 다음에 적용한다.
                     yield from state.drain()
                     if state.stop is not None:
@@ -251,13 +267,25 @@ class AssistantChatService:
                         state.input_tokens += event.input_tokens
                         state.output_tokens += event.output_tokens
                     yield event
+                    # 취소 확인은 이벤트를 처리한 **뒤**에 한다. 공급자가 이미 만들어 낸 조각은
+                    # 화면에도 assistant 메시지에도 남아야 한다(spec D3: 이미 스트리밍된 텍스트는
+                    # 보존한다). 앞에서 보면 손에 든 이벤트 하나가 통째로 사라진다.
+                    if cancelled():
+                        state.stop = FailureCode.CANCELLED
+                        state.stop_message = (
+                            f"사용자가 턴을 취소했습니다 — session_id={session.session_id}"
+                        )
+                        break
             except Exception as error:
-                # 예외 본문에 키가 섞여 있을 수 있어 타입 이름만 밖으로 낸다. 전문은 로컬 로그에.
-                logger.exception(
-                    "assistant provider call failed — kind=%s model=%s session_id=%s",
+                # 예외 전문에는 요청 헤더·본문 일부(키 접두사 포함)가 섞여 들어올 수 있다. 완료 정의
+                # 3이 "키가 로그에도 평문으로 나오지 않는다"를 요구하므로 traceback도 남기지 않는다
+                # (`logger.exception`은 예외의 str()을 그대로 기록한다).
+                logger.warning(
+                    "assistant provider call failed — kind=%s model=%s session_id=%s error_type=%s",
                     profile.kind.value,
                     profile.model,
                     session.session_id,
+                    type(error).__name__,
                 )
                 state.stop = FailureCode.PROVIDER
                 state.stop_message = (
@@ -339,6 +367,8 @@ class AssistantChatService:
             compile=outcome,
         )
         state.queue.append(Proposal(proposal=proposal))
+        # spec D3은 "3회 **연속** 실패"다. 성공하면 연속이 끊긴다.
+        state.proposal_attempts = 0
         return ToolResult(
             call_id=call.call_id,
             ok=True,

@@ -1,4 +1,4 @@
-"""AssistantChatService 도구 루프·제안 검증 테스트 (A-01).
+"""AssistantChatService 도구 루프·제안 검증 테스트 (A-02).
 
 공급자 SDK 없이 도는 것이 A-01의 완료 조건이므로 여기서는 `ScriptedProvider`만 쓴다.
 """
@@ -6,8 +6,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
@@ -401,7 +402,7 @@ def test_limits_are_passed_to_the_provider_but_not_enforced_here() -> None:
     events = _send(harness)
 
     assert harness.provider.requests[0].max_tool_rounds == 2
-    # 네 번째 도구 호출까지 전부 실행된다. 끊는 것은 공급자다.
+    # 상한이 2여도 세 번의 도구 호출이 전부 실행된다. 끊는 것은 공급자다.
     assert [result.ok for result in harness.provider.tool_results] == [True, True, True]
     assert not any(isinstance(event, Failure) for event in events)
 
@@ -440,15 +441,39 @@ def test_usage_is_recorded_and_streamed_without_enforcement() -> None:
 # -- (f) 취소 -----------------------------------------------------------------------------------
 
 
-def test_a_cancelled_turn_stops_before_streaming_provider_events() -> None:
+def test_a_cancelled_turn_keeps_the_event_it_was_already_holding() -> None:
+    """spec D3: 취소는 `Failure(CANCELLED)`, 이미 스트리밍된 텍스트는 보존한다."""
     harness = _harness((TextDelta("안녕"), Done("end_turn")))
 
     events = _send(harness, cancelled=lambda: True)
 
-    assert [type(event).__name__ for event in events] == ["Failure"]
-    failure = events[0]
+    assert [type(event).__name__ for event in events] == ["TextDelta", "Failure"]
+    assert events[0] == TextDelta("안녕")
+    failure = events[1]
     assert isinstance(failure, Failure)
     assert failure.code is FailureCode.CANCELLED
+    assert harness.sessions.messages(harness.session.session_id)[1].text == "안녕"
+
+
+def test_text_streamed_before_the_cancel_survives_as_one_message() -> None:
+    """두 번째 이벤트에서 취소가 켜져도 그때까지의 조각은 전부 남는다."""
+    harness = _harness((TextDelta("안"), TextDelta("녕"), TextDelta("하세요"), Done("end")))
+    seen = 0
+
+    def cancelled() -> bool:
+        nonlocal seen
+        seen += 1
+        return seen >= 2
+
+    events = _send(harness, cancelled=cancelled)
+
+    assert [type(event).__name__ for event in events] == ["TextDelta", "TextDelta", "Failure"]
+    assert [event for event in events if isinstance(event, TextDelta)] == [
+        TextDelta("안"),
+        TextDelta("녕"),
+    ]
+    messages = harness.sessions.messages(harness.session.session_id)
+    assert messages[1].text == "안녕"
 
 
 # -- (g) 공급자 예외 ----------------------------------------------------------------------------
@@ -497,6 +522,87 @@ def test_a_document_ref_needs_at_least_one_identifier() -> None:
         DocumentRef(strategy_id=None, revision=None, draft_id=None)
 
 
+# -- [P2] 비밀은 로그에도 남지 않는다 -----------------------------------------------------------
+
+
+def test_a_provider_exception_leaves_no_secret_in_the_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """완료 정의 3: 키가 응답·로그·DB 어디에도 평문으로 나오지 않는다."""
+    leaked = "invalid x-api-key: sk-ant-SECRET123"
+    harness = _harness((TextDelta("안"), RaiseStep(RuntimeError(leaked))))
+
+    with caplog.at_level(logging.DEBUG):
+        events = _send(harness)
+
+    rendered = "; ".join(
+        [record.getMessage() for record in caplog.records]
+        + [record.exc_text or "" for record in caplog.records]
+    )
+    assert "sk-ant-SECRET123" not in rendered
+    assert leaked not in rendered
+    assert "error_type=RuntimeError" in rendered
+    # 사유는 여전히 남는다 — 진단을 지우자는 규칙이 아니다.
+    failure = events[-1]
+    assert isinstance(failure, Failure)
+    assert failure.code is FailureCode.PROVIDER
+
+
+# -- [P3] 도구 실행 중 우리 코드의 예외는 공급자 탓이 아니다 --------------------------------------
+
+
+class _ExplodingContextBuilder:
+    """`tool_result`가 터지는 컨텍스트 빌더(카탈로그 포트 오류·직렬화 오류를 흉내 낸다)."""
+
+    def __init__(self, delegate: AssistantContextBuilder) -> None:
+        self._delegate = delegate
+
+    def system_prompt(self) -> str:
+        return self._delegate.system_prompt()
+
+    def tool_result(self, call: ToolCall, context: TurnContext) -> object:
+        raise RuntimeError("catalog port exploded")
+
+
+def test_a_tool_failure_comes_back_as_a_tool_error_not_a_provider_failure() -> None:
+    call = ToolCall(call_id="call-1", name=LIST_EQUITY_FIELDS, arguments={})
+    harness = _harness((ToolStep(call), Done("end_turn")))
+    harness.service._context_builder = _ExplodingContextBuilder(  # pyright: ignore[reportAttributeAccessIssue]  # reason: 주입 지점이 없는 내부 협력자를 테스트에서 교체
+        harness.service._context_builder  # pyright: ignore[reportAttributeAccessIssue]  # reason: 위와 같음
+    )
+
+    events = _send(harness)
+
+    assert not any(isinstance(event, Failure) for event in events)
+    result = harness.provider.tool_results[0]
+    assert result.ok is False
+    assert "error_type=RuntimeError" in result.content
+    assert "catalog port exploded" not in result.content
+
+
+# -- [P3] 제안 실패는 "연속" 3회다 ---------------------------------------------------------------
+
+
+def test_a_successful_proposal_resets_the_retry_streak() -> None:
+    script: tuple[ScriptStep, ...] = (
+        ToolStep(_proposal_call(INVALID_YAML, "call-1")),
+        ToolStep(_proposal_call(VALID_YAML, "call-2")),
+        ToolStep(_proposal_call(INVALID_YAML, "call-3")),
+        ToolStep(_proposal_call(INVALID_YAML, "call-4")),
+        Done("end_turn"),
+    )
+    harness = _harness(script, valid_sources=(VALID_YAML,), max_proposal_attempts=3)
+
+    events = _send(harness)
+
+    # 누적으로 세면 3·4번째에서 끊긴다. 연속으로 세면 끊기지 않는다(spec D3).
+    assert not any(
+        isinstance(event, Failure) and event.code is FailureCode.PROPOSAL_INVALID
+        for event in events
+    )
+    assert any(isinstance(event, Proposal) for event in events)
+
+
 # -- (k) 시스템 프롬프트 ------------------------------------------------------------------------
 
 
@@ -509,14 +615,39 @@ def _prompt_builder() -> AssistantContextBuilder:
     )
 
 
+def _discriminator_name(schema: Mapping[str, object]) -> str:
+    """스키마가 스스로 붙인 판별자 속성 이름. 테스트도 `"kind"`를 손으로 적지 않는다."""
+    found = _find_marker(schema)
+    assert found is not None, "runtime schema has no discriminator marker"
+    return found
+
+
+def _find_marker(node: object) -> str | None:
+    if isinstance(node, Mapping):
+        marker = node.get("discriminator")
+        if isinstance(marker, Mapping) and isinstance(marker.get("propertyName"), str):
+            return str(marker["propertyName"])
+        for value in node.values():
+            found = _find_marker(value)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = _find_marker(item)
+            if found is not None:
+                return found
+    return None
+
+
 def _schema_vocabulary() -> tuple[tuple[str, ...], tuple[str, ...]]:
     schema = strategy_document_schema()
     sections = tuple(name for name in schema["properties"] if name != "schema_version")
+    discriminator = _discriminator_name(schema)
     defs = schema["$defs"]
     kinds = tuple(
-        str(definition["properties"]["kind"]["const"])
+        str(definition["properties"][discriminator]["const"])
         for definition in defs.values()
-        if "kind" in definition["properties"]
+        if discriminator in definition["properties"]
     )
     return sections, kinds
 
@@ -526,9 +657,46 @@ def test_system_prompt_lists_the_runtime_schema_sections_and_node_kinds() -> Non
 
     prompt = _prompt_builder().system_prompt()
 
+    # 어휘가 비어 있으면 아래 두 단언이 공허하게 통과한다. 그 통과가 이 가드의 유일한 실패 모드다.
+    assert sections
+    assert kinds
     assert [section for section in sections if section not in prompt] == []
     assert [kind for kind in kinds if kind not in prompt] == []
     assert TODAY.isoformat() in prompt
+
+
+def test_the_summary_follows_the_schema_when_the_discriminator_is_renamed() -> None:
+    """판별자 키가 바뀌어도 요약의 종류 줄이 조용히 사라지면 안 된다."""
+    renamed = {
+        "properties": {"signal": {"$ref": "#/$defs/Node"}},
+        "required": ["signal"],
+        "$defs": {
+            "FieldNode": {
+                "type": "object",
+                "properties": {"node_type": {"type": "string", "const": "field"}},
+            },
+            "BinaryNode": {
+                "type": "object",
+                "properties": {"node_type": {"type": "string", "const": "binary"}},
+            },
+            "Node": {
+                "oneOf": [{"$ref": "#/$defs/FieldNode"}],
+                "discriminator": {"propertyName": "node_type"},
+            },
+        },
+    }
+    builder = AssistantContextBuilder(
+        equity_data=MockEquityDataAdapter.demo(),
+        factor_registry=build_default_factor_registry(),
+        compiler=FakeStrategyCompiler(),
+        today=lambda: TODAY,
+        schema=lambda: renamed,
+    )
+
+    prompt = builder.system_prompt()
+
+    assert "사용할 수 있는 node_type 값" in prompt
+    assert "field, binary" in prompt
 
 
 def test_the_prompt_template_never_hand_writes_schema_vocabulary() -> None:

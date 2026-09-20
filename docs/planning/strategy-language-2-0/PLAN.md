@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1
-current_pr: P0-01,P1-01
-active_prs: [P0-01, P1-01]
-parallel_window: [P0-01, P1-01]
-last_updated: 2026-09-20T23:04:52+09:00
+current_pr: P0-01,P1-01,P1-02
+active_prs: [P0-01, P1-01, P1-02]
+parallel_window: [P0-01, P1-01, P1-02]
+last_updated: 2026-09-20T23:06:19+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 0
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1` |
-| Current/next PR | `P0-01,P1-01` |
-| Active PR | `P0-01, P1-01` |
+| Current/next PR | `P0-01,P1-01,P1-02` |
+| Active PR | `P0-01, P1-01, P1-02` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `0 / 28` |
-| Aggregated at | `2026-09-20 23:04 KST` |
+| Aggregated at | `2026-09-20 23:06 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -119,8 +119,8 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `IN_PROGRESS` | 구현자 `impl-lang2-p1-01`, 워크트리 `wt-lang2-p1`, 브랜치 `feat/lang2-p1-01-diagnostics-anywhere` |
-| [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `WAITING` | — |
+| [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `IN_REVIEW` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `6ffb6ba` · `review_lang2_p1_01` 진행 중 · 게이트: typecheck·lint·Vitest 652·build·e2e 19/19 |
+| [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `IN_PROGRESS` | 구현자 `impl-lang2-p1-02`, 워크트리 `wt-lang2-p1-02`, 브랜치 `feat/lang2-p1-02-undo-redo` |
 | [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `WAITING` | — |
 | [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `WAITING` | — |
 | [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `WAITING` | — |

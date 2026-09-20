@@ -31,6 +31,7 @@ from strategy_workbench.domain.strategy._canonical import (
     strategy_spec_hash,
 )
 from strategy_workbench.domain.strategy._models import (
+    CATALOG_UNIVERSE,
     ChoiceParameter,
     ComparisonOperator,
     DataFrequency,
@@ -58,6 +59,7 @@ from strategy_workbench.domain.strategy._models import (
 )
 
 __all__ = [
+    "CATALOG_UNIVERSE",
     "BinaryNode",
     "BinaryOperator",
     "ChoiceParameter",

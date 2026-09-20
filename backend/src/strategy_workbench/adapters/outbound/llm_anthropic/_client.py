@@ -3,7 +3,7 @@
 ## 왜 Protocol을 한 겹 두는가
 
 도구 루프(`_turn.py`)는 네트워크 없이 검증되어야 한다. 실제 호출을 하는 테스트는 비결정적이고
-느리며 키를 요구한다(live smoke는 A-07의 `RUN_LLM_LIVE=1` 한 건뿐이다). 그래서 루프는 SDK
+느리며 키를 요구한다(live smoke는 A-07의 `scripts/assistant_live_smoke.py`뿐이다). 그래서 루프는 SDK
 객체가 아니라 여기 선언한 좁은 Protocol에만 기대고, 테스트는 스트림 이벤트 스크립트를 주입한다.
 
 Protocol이 쓰는 타입은 SDK의 실제 타입 그대로다(`MessageParam`, `ToolUnionParam`, `Message`, …).

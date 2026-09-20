@@ -2,7 +2,7 @@
 
 네트워크를 쓰지 않는다. `tests/anthropic_stream_script.py`가 SDK가 흘렸을 이벤트 열과 최종
 메시지를 대신 내주고, 여기서는 adapter가 **무엇을 보내고 무엇으로 옮기며 어떤 상한을 집행하는지**만
-본다. 실제 공급자 호출은 A-07의 `RUN_LLM_LIVE=1` smoke가 맡는다.
+본다. 실제 공급자 호출은 A-07의 `scripts/assistant_live_smoke.py`가 맡는다.
 """
 
 from __future__ import annotations

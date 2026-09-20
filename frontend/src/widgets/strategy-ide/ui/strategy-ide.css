@@ -199,11 +199,20 @@
   border-bottom: 1px solid var(--border);
 }
 
-/* 폭이 모자라면 탭 목록만 가로로 스크롤한다. 탭은 줄바꿈도 축소도 하지 않으므로 이 선언이 없으면
-   버튼 슬롯을 덮는다(P1-02 리뷰 P3: 480px 이하 겹침). */
+/*
+ * 폭이 모자라면 탭 목록만 가로로 스크롤한다. 탭은 줄바꿈도 축소도 하지 않으므로 이 선언이 없으면
+ * 버튼 슬롯을 덮는다(P1-02 1차 리뷰 P3: 480px 이하 겹침).
+ *
+ * `overflow-x: auto`는 `overflow-y`를 `auto`로 만들어 스크롤 컨테이너를 세우고, 그 padding box에서
+ * 잘라낸다 — 탭 포커스 링(2px outline + 2px offset = 바깥 4px)이 위아래로 잘렸다(2차 리뷰 P2).
+ * padding을 주어 잘라내는 상자를 링 바깥까지 넓히고, 같은 크기의 음수 margin으로 레이아웃을 원래대로
+ * 되돌린다: 줄 높이도 탭 밑줄 위치도 그대로이면서 링만 온전해진다.
+ */
 .ide__editor-tabs .ui-tabs {
   flex: 1;
   min-width: 0;
+  margin-block: calc(var(--space-2) * -1);
+  padding-block: var(--space-2);
   overflow-x: auto;
   border-bottom: 0;
 }
@@ -240,8 +249,9 @@
   display: none;
 }
 
+/* 가로 여백만 준다 — `padding` 단축은 탭 줄이 포커스 링용으로 준 세로 padding까지 0으로 덮는다. */
 .ide__editor .ui-tabs {
-  padding: 0 var(--space-4);
+  padding-inline: var(--space-4);
 }
 
 /* 탭 패널은 남은 높이를 차지하고, 그 안의 편집기가 다시 그 높이를 채운다 — 문제 목록이 패널 밖으로

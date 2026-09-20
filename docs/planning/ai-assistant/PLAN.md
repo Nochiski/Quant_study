@@ -6,10 +6,10 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
-last_updated: 2026-09-21T03:15:03+09:00
+last_updated: 2026-09-21T03:29:49+09:00
 planned_prs: 13
 merged_prs: 0
-approved_prs: 6
+approved_prs: 7
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04` |
 | Progress | `0 / 13 merged (0%)` |
-| Approved | `6 / 13` |
-| Aggregated at | `2026-09-21 03:15 KST` |
+| Approved | `7 / 13` |
+| Aggregated at | `2026-09-21 03:29 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -98,7 +98,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `APPROVED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
-| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_REVIEW` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `5640f8d2`(A-04 `645efcb` 위) · `c0219894`(A-04 최종 `9f39faec` 위 15커밋, 2차 P2·P3 반영 + Usage 분리형 계약·`total_input_tokens` 파생 + `ANTHROPIC_CUSTOM_HEADERS` 차단(X-Api-Key 고정·Authorization omit, 실제 요청 헤더 검증) + A-04 후속 보존 대조: 리뷰 전부 반영, lazy API 등록 재작성, `pause_turn` 결합, SDK env 폴백 차단, `Usage` 캐시 필드, `backend-no-extras` CI job, `AssistantClient`/`AssistantResponse` 타입 분기, extra 설치 전제 테스트 2건 정정) · `review_ai_a_05` 2차 APPROVE WITH CHANGES(블로킹 1은 base 불일치 산물 — replay로 해소) → 3차 확인 중 |
+| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `APPROVED` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `c0219894`(A-04 최종 `9f39faec` 위 15커밋) · `review_ai_a_05` 3차 APPROVE(세 라운드 24건 전부 닫힘, 비인증 헤더 통과는 docstring 한 문장 P3 — A-06 rebase 뒤 A-05에 fast-forward) · live smoke 최우선: 선언되지 않은 서버 도구 결과 블록 history 수용 여부 |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `IN_REVIEW` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `a963f316`(A-05 `bd2747ef` 위 11커밋, A-05 최종 뒤 재rebase 예정) · `review_ai_a_06` 1차 REQUEST_CHANGES(P1 2: `OPENAI_CUSTOM_HEADERS`가 Authorization 덮어씀·예산 잔량 API 최소 미만 호출, P2 3: `store=true`·통지 경로 spec 불일치·도구 제거 호출 조합 미테스트, P3 7) → rebase와 함께 반영 · 게이트: pytest 1895(extras)/1718(없음)·ruff·pyright 0 · 기본 모델 `gpt-6-astra` · Usage 분리형 정규화(OpenAI 원시 내역 뺄셈) rebase 때 반영 |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `SELF_CHECK` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring: 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) |
 
@@ -150,6 +150,7 @@ Phase exit:
 | A-06 | `review_ai_a_06` | 1 | REQUEST_CHANGES | P1 2(`OPENAI_CUSTOM_HEADERS`→`default_headers`가 Authorization 우선 — A-05도 `ANTHROPIC_CUSTOM_HEADERS` 동일; 턴 예산 잔량<16 호출 400→PROVIDER), P2 3(`store` 기본 true, 통지 경로 spec 문장, 도구 제거 호출에 이전 `web_search_call` 동승 미테스트), P3 7. A-05 결함 부류 15 중 9 부재 확인 |
 | B-02 | `review_ai_b_02` | 3 | APPROVE | 2차 잔여 7건 전부 닫힘(단조 `run`·렌더 중 조정, StrictMode 이중 호출 probe 통과, 값 형태 setState 멱등). 메모: `queryClient` 인스턴스 교체는 실제 경로 없음 |
 | B-03 | `review_ai_b_03` | 1 | REQUEST_CHANGES | P1 1(`reduceHistory`가 messages는 교체·turns는 append → `asked[index]` 짝 밀림; 리듀서 턴 배열을 accepted_sequence 순 유지), P2 4(409 질문 유실, 출처 호스트 미표시, aria-live 델타 재낭독, 대화상자 초점 복귀), P3 6. 렌더 안전·비밀·FSD·i18n OK |
+| A-05 | `review_ai_a_05` | 3 | APPROVE | 5항목 전부 통과(A-04 보존, 양쪽 환경 green, P2·P3 반영, Usage 분리형 계약+파생, `ANTHROPIC_CUSTOM_HEADERS` 독립 재현·차단 확인 — 위험은 키 유출이 아니라 요청이 남의 계정으로 나가는 것). P3 1(비인증 헤더 통과를 docstring에 명시) |
 
 ## 검증 기록
 

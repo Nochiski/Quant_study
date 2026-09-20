@@ -35,6 +35,7 @@ export {
   type AssistantSearchActivity,
   type AssistantToolActivity,
   type AssistantTurnState,
+  type AssistantTurnTokens,
 } from "./model/chat-state";
 export { assistantFailureMessage } from "./model/failure-copy";
 export {
@@ -67,12 +68,16 @@ export type {
   ProviderProfileView,
   ProvidersView,
   SessionHistoryView,
+  SessionUsageView,
   SessionView,
   SourceView,
   StartTurnRequest,
   StrategyProposalView,
+  TokenTotalsView,
   TurnAcceptedView,
   TurnContextPayload,
   TurnStatus,
+  TurnUsageView,
   TurnView,
+  UsageView,
 } from "../../shared/api";

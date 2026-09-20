@@ -33,7 +33,13 @@ describe("SSE 프레임 좁히기", () => {
       },
       { type: "search_activity", query: "momentum", sources: [] },
       { type: "proposal", proposal },
-      { type: "usage", input_tokens: 1, output_tokens: 2 },
+      {
+        type: "usage",
+        input_tokens: 1,
+        output_tokens: 2,
+        cache_read_tokens: 3,
+        cache_write_tokens: 4,
+      },
       { type: "done", stop_reason: "end_turn" },
       { type: "failure", code: "timeout", message: "제한 시간" },
     ];
@@ -52,7 +58,15 @@ describe("SSE 프레임 좁히기", () => {
       frame({ type: "unknown_event" }),
       // 갈래는 맞지만 리듀서가 읽는 필드가 없다 — 누적 텍스트에 `undefined`가 섞이는 경로다.
       frame({ type: "text_delta" }),
-      frame({ type: "usage", input_tokens: "많음", output_tokens: 2 }),
+      frame({
+        type: "usage",
+        input_tokens: "많음",
+        output_tokens: 2,
+        cache_read_tokens: 3,
+        cache_write_tokens: 4,
+      }),
+      // A-07이 더한 캐시 토큰이 빠진 프레임 — 누적이 `undefined`로 물드는 경로다.
+      frame({ type: "usage", input_tokens: 1, output_tokens: 2 }),
       frame({ type: "proposal", proposal: { ...proposal, compile: undefined } }),
       frame({ type: "search_activity", query: "momentum", sources: [{ url: 1 }] }),
     ];

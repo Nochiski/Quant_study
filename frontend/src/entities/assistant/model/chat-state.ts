@@ -26,6 +26,14 @@ export type AssistantSearchActivity = {
 
 export type AssistantFailure = { code: FailureCode; message: string };
 
+/** 턴 하나의 토큰 누적. 캐시 토큰은 과금이 다른 갈래라 입력 토큰에 섞지 않는다. */
+export type AssistantTurnTokens = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+};
+
 export type AssistantTurnState = {
   turnId: string;
   /**
@@ -48,7 +56,11 @@ export type AssistantTurnState = {
   tools: readonly AssistantToolActivity[];
   searches: readonly AssistantSearchActivity[];
   proposal: StrategyProposalView | null;
-  usage: { inputTokens: number; outputTokens: number } | null;
+  /**
+   * 이 턴이 쓴 토큰. `Usage` 이벤트를 접은 값이라 세션 누적은 여기서 더하지 않는다 —
+   * 세션 합계·공급자 호출 수의 owner는 서버가 같은 이벤트에서 접어 주는 `SessionHistoryView.usage`다.
+   */
+  usage: AssistantTurnTokens | null;
   failure: AssistantFailure | null;
   stopReason: string | null;
 };
@@ -188,6 +200,10 @@ const applyEvent = (
         usage: {
           inputTokens: (turn.usage?.inputTokens ?? 0) + event.input_tokens,
           outputTokens: (turn.usage?.outputTokens ?? 0) + event.output_tokens,
+          cacheReadTokens:
+            (turn.usage?.cacheReadTokens ?? 0) + event.cache_read_tokens,
+          cacheWriteTokens:
+            (turn.usage?.cacheWriteTokens ?? 0) + event.cache_write_tokens,
         },
       };
     case "done":

@@ -27,14 +27,18 @@ export type {
   ProviderProfileView,
   ProvidersView,
   SessionHistoryView,
+  SessionUsageView,
   SessionView,
   SourceView,
   StartTurnRequest,
   StrategyProposalView,
+  TokenTotalsView,
   TurnAcceptedView,
   TurnContextPayload,
   TurnStatus,
+  TurnUsageView,
   TurnView,
+  UsageView,
 } from "./generated/types.gen";
 export {
   ApiRequestError,

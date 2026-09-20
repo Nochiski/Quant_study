@@ -17,6 +17,7 @@ import {
 import type {
   AssistantEventEnvelopeView,
   SessionHistoryView,
+  SessionUsageView,
   TurnStatus,
 } from "../../../shared/api";
 import {
@@ -50,6 +51,20 @@ const frame = (item: AssistantEventEnvelopeView): Uint8Array =>
     `id: ${item.sequence}\nevent: assistant\ndata: ${JSON.stringify(item)}\n\n`,
   );
 
+/** 서버가 이벤트에서 접어 주는 사용량. 리듀서는 이 값을 들지 않는다(owner는 이력 응답이다). */
+const sessionUsage = (): SessionUsageView => ({
+  provider_calls: 0,
+  search_uses: 0,
+  tokens: {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    total_input_tokens: 0,
+  },
+  turns: [],
+});
+
 const history = (
   status: TurnStatus,
   sessionId: string = SESSION,
@@ -73,6 +88,7 @@ const history = (
     },
   ],
   events: [],
+  usage: sessionUsage(),
 });
 
 type Connection = {

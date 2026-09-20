@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type {
   AssistantEventEnvelopeView,
   SessionHistoryView,
+  SessionUsageView,
   StrategyProposalView,
   TurnStatus,
   TurnView,
@@ -49,6 +50,20 @@ const turnView = (status: TurnStatus, turnId: string = TURN): TurnView => ({
   finished_at: status === "running" ? null : "2026-09-20T00:01:00Z",
 });
 
+/** 서버가 이벤트에서 접어 주는 사용량. 리듀서는 이 값을 들지 않는다(owner는 이력 응답이다). */
+const sessionUsage = (): SessionUsageView => ({
+  provider_calls: 0,
+  search_uses: 0,
+  tokens: {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    total_input_tokens: 0,
+  },
+  turns: [],
+});
+
 const history = (
   events: AssistantEventEnvelopeView[],
   turns: TurnView[],
@@ -65,6 +80,7 @@ const history = (
   ],
   turns,
   events,
+  usage: sessionUsage(),
 });
 
 const opened = (): AssistantChatState =>
@@ -106,8 +122,20 @@ describe("어시스턴트 채팅 리듀서", () => {
           query: "momentum factor",
           sources: [{ title: "논문", url: "https://example.test/p" }],
         }),
-        envelope(5, { type: "usage", input_tokens: 10, output_tokens: 4 }),
-        envelope(6, { type: "usage", input_tokens: 3, output_tokens: 2 }),
+        envelope(5, {
+          type: "usage",
+          input_tokens: 10,
+          output_tokens: 4,
+          cache_read_tokens: 6,
+          cache_write_tokens: 1,
+        }),
+        envelope(6, {
+          type: "usage",
+          input_tokens: 3,
+          output_tokens: 2,
+          cache_read_tokens: 0,
+          cache_write_tokens: 5,
+        }),
         envelope(7, { type: "proposal", proposal: proposal("모멘텀 v1") }),
       ]),
     );
@@ -126,7 +154,12 @@ describe("어시스턴트 채팅 리듀서", () => {
     expect(turn.searches).toEqual([
       { query: "momentum factor", sources: [{ title: "논문", url: "https://example.test/p" }] },
     ]);
-    expect(turn.usage).toEqual({ inputTokens: 13, outputTokens: 6 });
+    expect(turn.usage).toEqual({
+      inputTokens: 13,
+      outputTokens: 6,
+      cacheReadTokens: 6,
+      cacheWriteTokens: 6,
+    });
     expect(turn.proposal?.title).toBe("모멘텀 v1");
     expect(state.lastSequence).toBe(7);
   });
@@ -298,6 +331,8 @@ const arbitraryEvent = fc.oneof(
       type: "usage",
       input_tokens: value,
       output_tokens: value,
+      cache_read_tokens: value,
+      cache_write_tokens: 0,
     }),
   ),
   fc.constant<ChatEvent>({ type: "done", stop_reason: "end_turn" }),

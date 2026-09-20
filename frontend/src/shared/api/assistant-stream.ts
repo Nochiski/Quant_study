@@ -157,7 +157,10 @@ const EVENT_FIELDS: Record<string, (event: Record<string, unknown>) => boolean> 
       isString(event.query) && isSourceList(event.sources),
     proposal: (event) => isProposal(event.proposal),
     usage: (event) =>
-      isFiniteNumber(event.input_tokens) && isFiniteNumber(event.output_tokens),
+      isFiniteNumber(event.input_tokens) &&
+      isFiniteNumber(event.output_tokens) &&
+      isFiniteNumber(event.cache_read_tokens) &&
+      isFiniteNumber(event.cache_write_tokens),
     done: (event) => isString(event.stop_reason),
     failure: (event) => isString(event.code) && isString(event.message),
   };

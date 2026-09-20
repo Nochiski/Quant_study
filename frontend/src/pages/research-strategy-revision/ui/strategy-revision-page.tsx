@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { strategyDocumentQuery } from "../../../entities/strategy";
 import {
   ContractInspector,
+  ProposalApplyDialog,
+  ProposalApplyFeedback,
   ConflictBanner,
   DirtyLeaveGuard,
   DocumentToolbar,
@@ -25,6 +27,8 @@ import {
   revisionDraftId,
   saveStatusText,
   saveStatusTone,
+  assistantDocumentContext,
+  useApplyAssistantProposal,
   useAutosave,
   useCompileDocument,
   useExecutionPlans,
@@ -38,6 +42,7 @@ import {
   useSourceTransactions,
   useStrategyDocument,
   useUpgradeDocument,
+  type AssistantSlotRender,
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
@@ -67,7 +72,17 @@ const shortTimestamp = (iso: string): string =>
  * source 트랜잭션 편집기다(ADR D5 2026-09-18 개정). 아직 없는 view는 빈 탭 대신 안내와 함께 저장된 포맷으로
  * 돌아간다.
  */
-export const StrategyRevisionPage = () => {
+export type StrategyRevisionPageProps = {
+  /**
+   * IDE 우측 `assistant` 슬롯에 들어갈 사이드바. B-03의 채팅 사이드바가 합류하면 페이지가 직접
+   * 렌더하고 이 prop은 사라진다 — 지금은 슬롯 배선과 제안 적용 경로만 완성한다.
+   */
+  renderAssistant?: AssistantSlotRender;
+};
+
+export const StrategyRevisionPage = ({
+  renderAssistant,
+}: StrategyRevisionPageProps = {}) => {
   const { strategyId, revision } = useParams({ from: ROUTE });
   const search = useSearch({ from: ROUTE });
   const navigate = useNavigate();
@@ -137,6 +152,8 @@ export const StrategyRevisionPage = () => {
     [stored.generated, stored.requires_upgrade, stored.revision],
   );
   const documentUpgrade = useUpgradeDocument(document, storedMeta);
+  // AI 제안은 업그레이드 적용과 같은 전체 범위 교체 경로를 쓴다(SoT 규칙의 두 번째 예외).
+  const proposalApply = useApplyAssistantProposal(document);
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -219,19 +236,30 @@ export const StrategyRevisionPage = () => {
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
   const onUpgradeEditorReady = documentUpgrade.onEditorReady;
+  const onProposalEditorReady = proposalApply.onEditorReady;
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
       onUpgradeEditorReady(editor);
+      onProposalEditorReady(editor);
     },
     [
       onOutlineEditorReady,
+      onProposalEditorReady,
       onSnippetEditorReady,
       onTransactionsEditorReady,
       onUpgradeEditorReady,
     ],
+  );
+  const assistantDocument = useMemo(
+    () =>
+      assistantDocumentContext(document, {
+        draftId: serverDraftId,
+        environment: runSettings.requestOptions,
+      }),
+    [document, serverDraftId, runSettings.requestOptions],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
   const selectSymbol = useCallback(
@@ -455,6 +483,17 @@ export const StrategyRevisionPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
+        assistant={
+          renderAssistant === undefined ? undefined : (
+            <>
+              <ProposalApplyFeedback apply={proposalApply} />
+              {renderAssistant({
+                document: assistantDocument,
+                apply: proposalApply,
+              })}
+            </>
+          )
+        }
         debugger={
           <StrategyDebuggerPanel
             document={document}
@@ -495,6 +534,7 @@ export const StrategyRevisionPage = () => {
           </>
         }
       />
+      <ProposalApplyDialog apply={proposalApply} />
       <DirtyLeaveGuard dirty={document.dirty} />
     </>
   );

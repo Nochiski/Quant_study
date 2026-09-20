@@ -129,61 +129,71 @@ const AssistTurnBlock = ({
 }) => {
   const { turn } = entry;
   const proposal = turn.proposal;
+  // 아직 아무 것도 오지 않은 턴은 빈 말풍선을 만들지 않는다. 진행 중이라는 사실은 진행 표시가 알린다.
+  const answered =
+    turn.text !== "" ||
+    turn.thinking.length > 0 ||
+    turn.tools.length > 0 ||
+    turn.searches.length > 0 ||
+    proposal !== null ||
+    turn.failure !== null;
   return (
-    <li className="assist-turn">
+    <article className="assist-turn">
       {entry.prompt === null ? null : (
         <AssistBubble role="user">
           <p className="assist-text">{entry.prompt}</p>
         </AssistBubble>
       )}
-      <AssistBubble role="assistant">
-        {turn.thinking.length === 0 ? null : (
-          <AssistDisclosure label={t("assistant.chat.thinking")}>
-            <ul className="assist-thinking">
-              {turn.thinking.map((text, index) => (
-                <li className="assist-text" key={index}>
-                  {text}
-                </li>
-              ))}
-            </ul>
-          </AssistDisclosure>
-        )}
-        {turn.tools.length === 0 ? null : (
-          <AssistDisclosure label={t("assistant.chat.tools")}>
-            <AssistToolList tools={turn.tools} />
-          </AssistDisclosure>
-        )}
-        {turn.searches.length === 0 ? null : (
-          <AssistSearchList searches={turn.searches} />
-        )}
-        {turn.text === "" ? null : <p className="assist-text">{turn.text}</p>}
-        {proposal === null ? null : (
-          <AssistProposalCard
-            proposal={proposal}
-            onPreview={
-              handlers.onPreview === undefined
-                ? undefined
-                : () => handlers.onPreview?.(proposal, entry.turnId)
-            }
-            onApply={
-              handlers.onApply === undefined
-                ? undefined
-                : () => handlers.onApply?.(proposal, entry.turnId)
-            }
-            onApplyAndBacktest={
-              handlers.onApplyAndBacktest === undefined
-                ? undefined
-                : () => handlers.onApplyAndBacktest?.(proposal, entry.turnId)
-            }
-          />
-        )}
-        {turn.failure === null ? null : (
-          <p className="assist-turn__failure">
-            {assistantFailureMessage(turn.failure)}
-          </p>
-        )}
-      </AssistBubble>
-    </li>
+      {!answered ? null : (
+        <AssistBubble role="assistant">
+          {turn.thinking.length === 0 ? null : (
+            <AssistDisclosure label={t("assistant.chat.thinking")}>
+              <ul className="assist-thinking">
+                {turn.thinking.map((text, index) => (
+                  <li className="assist-text" key={index}>
+                    {text}
+                  </li>
+                ))}
+              </ul>
+            </AssistDisclosure>
+          )}
+          {turn.tools.length === 0 ? null : (
+            <AssistDisclosure label={t("assistant.chat.tools")}>
+              <AssistToolList tools={turn.tools} />
+            </AssistDisclosure>
+          )}
+          {turn.searches.length === 0 ? null : (
+            <AssistSearchList searches={turn.searches} />
+          )}
+          {turn.text === "" ? null : <p className="assist-text">{turn.text}</p>}
+          {proposal === null ? null : (
+            <AssistProposalCard
+              proposal={proposal}
+              onPreview={
+                handlers.onPreview === undefined
+                  ? undefined
+                  : () => handlers.onPreview?.(proposal, entry.turnId)
+              }
+              onApply={
+                handlers.onApply === undefined
+                  ? undefined
+                  : () => handlers.onApply?.(proposal, entry.turnId)
+              }
+              onApplyAndBacktest={
+                handlers.onApplyAndBacktest === undefined
+                  ? undefined
+                  : () => handlers.onApplyAndBacktest?.(proposal, entry.turnId)
+              }
+            />
+          )}
+          {turn.failure === null ? null : (
+            <p className="assist-turn__failure">
+              {assistantFailureMessage(turn.failure)}
+            </p>
+          )}
+        </AssistBubble>
+      )}
+    </article>
   );
 };
 
@@ -202,7 +212,7 @@ export const AssistTranscript = ({
   pendingPrompt: string | null;
   handlers: AssistProposalHandlers;
 }) => (
-  <ol
+  <div
     className="assist__log"
     role="log"
     aria-live="polite"
@@ -212,11 +222,11 @@ export const AssistTranscript = ({
       <AssistTurnBlock entry={entry} handlers={handlers} key={entry.turnId} />
     ))}
     {pendingPrompt === null ? null : (
-      <li className="assist-turn">
+      <article className="assist-turn">
         <AssistBubble role="user">
           <p className="assist-text">{pendingPrompt}</p>
         </AssistBubble>
-      </li>
+      </article>
     )}
-  </ol>
+  </div>
 );

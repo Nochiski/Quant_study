@@ -129,6 +129,9 @@ export const AssistStrategySidebar = ({
           className="assist__confirm"
           role="alertdialog"
           aria-label={t("assistant.chat.close")}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setCloseConfirm(false);
+          }}
         >
           <p className="assist__confirm-text">
             {t("assistant.chat.close.confirm")}
@@ -137,9 +140,11 @@ export const AssistStrategySidebar = ({
             <Button size="small" tone="danger" onClick={cancelAndClose}>
               {t("assistant.chat.close.confirm.submit")}
             </Button>
+            {/* 진행 중 답변을 버리지 않는 쪽에 처음 초점을 둔다 — Enter가 실수로 취소를 부르지 않는다. */}
             <Button
               size="small"
               tone="ghost"
+              autoFocus
               onClick={() => setCloseConfirm(false)}
             >
               {t("assistant.chat.close.confirm.cancel")}

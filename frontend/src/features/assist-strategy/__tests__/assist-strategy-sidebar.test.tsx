@@ -531,6 +531,18 @@ describe("AssistStrategySidebar", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog).toHaveTextContent("진행 중인 답변이 있습니다");
     expect(onClose).not.toHaveBeenCalled();
+    // 처음 초점은 답변을 버리지 않는 쪽에 둔다.
+    expect(
+      within(dialog).getByRole("button", { name: "계속 두기" }),
+    ).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.click(
+      await screen.findByRole("button", { name: "사이드바 닫기" }),
+    );
 
     await user.click(within(dialog).getByRole("button", { name: "계속 두기" }));
     expect(onClose).not.toHaveBeenCalled();

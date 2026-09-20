@@ -103,7 +103,10 @@ export type StrategyIdeProps = {
 
 const NARROW_QUERY = "(max-width: 1279px)";
 
-/** 브라우저·편집기가 스스로 되돌리기를 갖는 입력 타입. 나머지(select·button)는 갖지 않는다. */
+/*
+ * 브라우저가 스스로 텍스트 되돌리기를 갖는 입력 타입. select·button은 물론 날짜·시간 계열도 빠진다 —
+ * 분절 위젯이라 되돌리기가 없어서, 양보하면 그 자리에서 Ctrl+Z가 아무 일도 하지 않는다(P1-02 리뷰 P3).
+ */
 const NATIVE_UNDO_INPUT_TYPES = new Set([
   "text",
   "search",
@@ -112,11 +115,6 @@ const NATIVE_UNDO_INPUT_TYPES = new Set([
   "email",
   "password",
   "number",
-  "date",
-  "month",
-  "week",
-  "time",
-  "datetime-local",
 ]);
 
 /**

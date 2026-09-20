@@ -452,15 +452,23 @@ describe("StrategyIde", () => {
     expect(onUndo).not.toHaveBeenCalled();
     expect(onRedo).not.toHaveBeenCalled();
 
-    // 되돌리기를 갖지 않는 컨트롤(드롭다운·버튼)에서는 문서 되돌리기가 그대로 동작한다.
+    // 되돌리기를 갖지 않는 컨트롤에서는 문서 되돌리기가 그대로 동작한다: 드롭다운, 그리고 분절 위젯인
+    // 날짜 입력(Form 탭의 시작일·종료일) — 여기서 양보하면 Ctrl+Z가 죽는다.
     const select = document.createElement("select");
     document.body.appendChild(select);
     fireEvent.keyDown(select, { key: "z", ctrlKey: true });
     expect(onUndo).toHaveBeenCalledTimes(1);
 
+    const date = document.createElement("input");
+    date.type = "date";
+    document.body.appendChild(date);
+    fireEvent.keyDown(date, { key: "z", ctrlKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(2);
+
     input.remove();
     editable.remove();
     select.remove();
+    date.remove();
   });
 
   it("searches document symbols and controls panels and theme from the palette", async () => {

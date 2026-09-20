@@ -259,7 +259,6 @@ describe("Strategy Outline projection", () => {
     );
     const editor: CodeEditorHandle = {
       getText: () => editorSource,
-      setText: vi.fn(),
       replaceRange: vi.fn(),
       getSelection: () => ({ from: 0, to: 0 }),
       setSelection: (from, to = from) =>
@@ -336,7 +335,6 @@ describe("Strategy Outline projection", () => {
     );
     const editor: CodeEditorHandle = {
       getText: () => SOURCE,
-      setText: vi.fn(),
       replaceRange: vi.fn(),
       getSelection: () => ({ from: 0, to: 0 }),
       setSelection,
@@ -417,7 +415,6 @@ describe("Strategy Outline projection", () => {
       act(() =>
         result.current.onEditorReady({
           getText: () => state.source,
-          setText: vi.fn(),
           replaceRange: vi.fn(),
           getSelection: () => ({ from: 0, to: 0 }),
           setSelection,
@@ -426,7 +423,7 @@ describe("Strategy Outline projection", () => {
           scrollTo,
           focus,
           loadText: vi.fn(),
-      undo: () => false,
+          undo: () => false,
           redo: () => false,
           historyDepth: () => ({ undo: 0, redo: 0 }),
           getHistoryState: () => null,

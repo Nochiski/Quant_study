@@ -35,9 +35,9 @@ const Arrow = ({ direction }: { direction: "undo" | "redo" }) => (
  * 머문 채로도 누를 수 있다 — 편집기는 그 탭에서 `hidden`이라 포커스가 없고, CodeMirror 키맵은 닿지 않는다.
  *
  * 비활성은 `disabled`가 아니라 `aria-disabled`다: 키보드 사용자가 버튼까지 이동해 이유를 읽을 수 있어야
- * 하고(포커스 불가 버튼은 읽히지 않는다), 깊이가 한 프레임 늦어도 클릭이 조용히 버려지지 않는다. 이유는
- * `title`과 `aria-describedby`가 가리키는 요소로만 전한다 — 탭 줄은 1280px에서도 한 줄이어야 해서
- * 화면에 문장을 더 둘 자리가 없다.
+ * 하고(포커스 불가 버튼은 읽히지 않는다), 깊이가 한 프레임 늦어도 클릭이 조용히 버려지지 않는다. 보이는
+ * 모습은 `shared/ui`의 `:disabled`와 같다(`primitives.css`). 이유는 `title`과 `aria-describedby`가
+ * 가리키는 요소로만 전한다 — 탭 줄은 1280px에서도 한 줄이어야 해서 화면에 문장을 더 둘 자리가 없다.
  */
 export const DocumentHistoryActions = ({
   history,
@@ -50,6 +50,7 @@ export const DocumentHistoryActions = ({
   const noRedo = depth.redo === 0;
   const undoReason = noUndo ? t("ide.undo.empty") : undefined;
   const redoReason = noRedo ? t("ide.redo.empty") : undefined;
+  // 좁은 화면에서는 라벨이 접혀 아이콘만 남으므로, 켜져 있을 때의 `title`은 동작 이름이다.
   return (
     <div
       className="doc-history"
@@ -63,11 +64,11 @@ export const DocumentHistoryActions = ({
         onClick={() => undo()}
         aria-disabled={noUndo || undefined}
         aria-describedby={noUndo ? `${base}-undo` : undefined}
-        title={undoReason}
+        title={undoReason ?? t("ide.undo")}
         aria-keyshortcuts="Control+Z Meta+Z"
       >
         <Arrow direction="undo" />
-        {t("ide.undo")}
+        <span className="doc-history__label">{t("ide.undo")}</span>
       </Button>
       <Button
         size="small"
@@ -76,11 +77,11 @@ export const DocumentHistoryActions = ({
         onClick={() => redo()}
         aria-disabled={noRedo || undefined}
         aria-describedby={noRedo ? `${base}-redo` : undefined}
-        title={redoReason}
+        title={redoReason ?? t("ide.redo")}
         aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z"
       >
         <Arrow direction="redo" />
-        {t("ide.redo")}
+        <span className="doc-history__label">{t("ide.redo")}</span>
       </Button>
       {/* 비활성 사유. 화면 자리를 차지하지 않지만 보조 기술에는 버튼 설명으로 읽힌다. */}
       <span id={`${base}-undo`} className="sr-only">

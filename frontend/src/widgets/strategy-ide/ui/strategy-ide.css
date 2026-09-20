@@ -192,17 +192,23 @@
 .ide__editor-tabs {
   display: flex;
   flex-wrap: nowrap;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
   gap: var(--space-2);
+  /* 구분선은 줄 전체가 갖는다 — 탭 목록만 그으면 버튼 슬롯 아래에서 선이 끊긴다(P1-02 리뷰 P3). */
+  border-bottom: 1px solid var(--border);
 }
 
+/* 폭이 모자라면 탭 목록만 가로로 스크롤한다. 탭은 줄바꿈도 축소도 하지 않으므로 이 선언이 없으면
+   버튼 슬롯을 덮는다(P1-02 리뷰 P3: 480px 이하 겹침). */
 .ide__editor-tabs .ui-tabs {
   flex: 1;
   min-width: 0;
+  overflow-x: auto;
+  border-bottom: 0;
 }
 
-/* 폭이 모자라도 두 버튼은 줄지 않는다 — 탭·배지가 먼저 줄어든다. */
+/* 폭이 모자라도 두 버튼은 줄지 않는다 — 탭 목록이 먼저 스크롤된다. */
 .ide__editor-history {
   display: flex;
   flex: none;

@@ -484,7 +484,6 @@ describe("StrategyFormPanel reset on the last written field (audit R4)", () => {
     let text = source;
     const editor: CodeEditorHandle = {
       getText: () => text,
-      setText: vi.fn(),
       replaceRange: vi.fn((from: number, to: number, insert: string) => {
         text = `${text.slice(0, from)}${insert}${text.slice(to)}`;
       }),
@@ -539,7 +538,6 @@ describe("StrategyFormPanel with the real transaction hook", () => {
     let text = MINIMAL;
     const editor: CodeEditorHandle = {
       getText: () => text,
-      setText: vi.fn(),
       replaceRange: vi.fn((from: number, to: number, insert: string) => {
         text = `${text.slice(0, from)}${insert}${text.slice(to)}`;
       }),

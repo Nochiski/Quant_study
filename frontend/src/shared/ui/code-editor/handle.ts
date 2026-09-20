@@ -60,15 +60,17 @@ export type EditorHoverSource = (offset: number) => EditorHover | null;
 
 export type CodeEditorHandle = {
   getText(): string;
-  /** Replaces the whole document; history records it as one change. */
-  setText(text: string): void;
   /**
    * 편집기에 **다른 문서**를 올린다(다른 리비전 열기). 교체 자체는 편집이 아니므로 이력에 남지 않고,
    * 이전 문서의 편집 단계도 함께 버린다 — 되돌리기로 앞 문서의 텍스트에 닿을 수 없다(P1-02 후속).
    * 같은 문서 안의 전체 범위 교체(업그레이드 적용·AI 제안)는 되돌릴 수 있어야 하므로 `replaceRange`다.
    */
   loadText(text: string): void;
-  /** Applies one range replacement and optional selection as a single undoable transaction. */
+  /**
+   * Applies one range replacement and optional selection as a single undoable transaction.
+   * 같은 문서 안의 전체 교체(업그레이드 적용·초안 복구·AI 제안)도 이 경로다 — 격리되지 않은
+   * 전체 교체 API를 따로 두지 않는다(P1-02 리뷰 P1: 직후 타이핑과 한 단계로 묶였다).
+   */
   replaceRange(
     from: number,
     to: number,
@@ -96,7 +98,7 @@ export type CodeEditorHandle = {
 };
 
 export type CodeEditorProps = {
-  /** Initial text; later changes flow through `onChange` and `setText`. */
+  /** Initial text; later changes flow through `onChange`, `replaceRange` and `loadText`. */
   value: string;
   language: EditorLanguage;
   ariaLabel: string;

@@ -1,4 +1,13 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useCallback } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -71,6 +80,7 @@ const Harness = () => {
 
 const A = 'schema_version: "1.1"\ntitle: 리비전 A\n';
 const B = 'schema_version: "1.1"\ntitle: 리비전 B\n';
+const RECOVERED = 'schema_version: "1.1"\ntitle: 복구본\n';
 
 const revision = (index: number, text: string): DocumentSource => ({
   kind: "revision",
@@ -101,6 +111,13 @@ const RevisionHarness = ({
   return (
     <>
       <DocumentHistoryActions history={history} />
+      {/* 복구 배너·서버 초안 배너가 보내는 것과 같은 액션이다(`use-autosave.ts`, `use-server-draft.ts`). */}
+      <button
+        type="button"
+        onClick={() => dispatch({ type: "edit", source: RECOVERED })}
+      >
+        복구본 불러오기
+      </button>
       <SourceEditor
         state={doc}
         dispatch={dispatch}
@@ -112,6 +129,17 @@ const RevisionHarness = ({
 };
 
 const source = (): string => screen.getByLabelText("원문").textContent ?? "";
+
+/** 편집기 이력은 CodeMirror가 소유하므로 타이밍이 걸린 단언은 view에서 직접 읽는다. */
+const editorView = async (): Promise<EditorView> => {
+  let view: EditorView | null = null;
+  await waitFor(() => {
+    const content = document.querySelector(".cm-content");
+    view = content ? EditorView.findFromDOM(content as HTMLElement) : null;
+    expect(view).not.toBeNull();
+  });
+  return view as unknown as EditorView;
+};
 const graph = () =>
   within(screen.getByRole("region", { name: "그래프 편집" }));
 
@@ -157,6 +185,32 @@ describe("문서 되돌리기·다시 실행 (P1-02)", () => {
     await waitFor(() =>
       expect(source()).toContain("\n          node_id: field\n"),
     );
+  });
+
+  it("keeps a same-document replacement as its own undo step (review P1)", async () => {
+    render(<RevisionHarness source={revision(1, A)} />);
+    await screen.findByRole("textbox", { name: "편집기" });
+    const view = await editorView();
+    const undoButton = screen.getByRole("button", { name: /실행 취소/ });
+
+    // 복구본 적용은 같은 문서(`documentEpoch` 불변)의 전체 교체다.
+    fireEvent.click(screen.getByRole("button", { name: "복구본 불러오기" }));
+    expect(view.state.doc.toString()).toBe(RECOVERED);
+
+    // 이어서 바로 친다 — CodeMirror history의 newGroupDelay(500ms) 안이라, 교체가 격리되지 않으면
+    // 두 편집이 한 단계로 묶인다(리뷰 P1). `user.keyboard`는 그 창을 넘겨 버려 변별력이 없다.
+    act(() => {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: "z" },
+        userEvent: "input.type",
+      });
+    });
+    expect(view.state.doc.toString()).toBe(`${RECOVERED}z`);
+
+    // 되돌리기 한 번은 방금 친 글자만 되돌린다 — 복구본은 남는다.
+    fireEvent.click(undoButton);
+    expect(view.state.doc.toString()).toBe(RECOVERED);
+    await waitFor(() => expect(source()).toBe(RECOVERED));
   });
 
   it("drops the history when another revision is loaded", async () => {

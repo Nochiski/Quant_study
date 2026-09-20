@@ -39,7 +39,6 @@ const SIGNAL_SNIPPET: CanonicalSnippet = {
 
 const editorHandle: CodeEditorHandle = {
   getText: () => "",
-  setText: vi.fn(),
   replaceRange: vi.fn(),
   getSelection: () => ({ from: 0, to: 0 }),
   setSelection: vi.fn(),

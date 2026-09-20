@@ -90,19 +90,25 @@ export const SourceEditor = ({
     [dispatch],
   );
 
-  // 같은 문서 안의 외부 교체는 편집 이력에 남고, **다른 문서**를 여는 것(`documentEpoch` 증가)은
-  // 남지 않는다 — 되돌리기로 앞 리비전의 텍스트에 닿으면 안 된다(P1-02 후속). epoch는 reducer의
-  // `load`에서만 오르므로 이 비교가 "다른 문서인가"와 같다.
+  // 같은 문서 안의 외부 교체(초안 복구·서버 초안 적용)는 되돌릴 수 있는 **한 단계**로 남고,
+  // **다른 문서**를 여는 것(`documentEpoch` 증가)은 이력에 남지 않는다 — 되돌리기로 앞 리비전의
+  // 텍스트에 닿으면 안 된다. epoch는 reducer의 `load`에서만 오르므로 이 비교가 "다른 문서인가"와 같다.
+  //
+  // 같은 epoch 분기가 `replaceRange`인 이유: 격리(`isolateHistory`)가 없으면 교체가 직후에 친 글자와
+  // 한 undo 단계로 묶여, 되돌리기 한 번에 복구한 초안이 통째로 사라진다(P1-02 리뷰 P1).
   const loadedEpoch = useRef(state.documentEpoch);
   useEffect(() => {
     const editor = handle.current;
     if (editor === null) return;
-    if (loadedEpoch.current === state.documentEpoch) {
-      editor.setText(state.source);
+    if (loadedEpoch.current !== state.documentEpoch) {
+      loadedEpoch.current = state.documentEpoch;
+      editor.loadText(state.source);
       return;
     }
-    loadedEpoch.current = state.documentEpoch;
-    editor.loadText(state.source);
+    // 편집기 자신의 편집이 reducer를 돌아 온 경우다 — 같은 텍스트를 다시 넣으면 빈 undo 단계가 쌓인다.
+    const current = editor.getText();
+    if (current === state.source) return;
+    editor.replaceRange(0, current.length, state.source);
   }, [state.documentEpoch, state.source]);
 
   return (

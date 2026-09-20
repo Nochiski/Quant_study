@@ -367,13 +367,6 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
       ref,
       (): CodeEditorHandle => ({
         getText: () => view.current?.state.doc.toString() ?? "",
-        setText: (text) => {
-          const current = view.current;
-          if (!current || current.state.doc.toString() === text) return;
-          current.dispatch({
-            changes: { from: 0, to: current.state.doc.length, insert: text },
-          });
-        },
         loadText: (text) => {
           const current = view.current;
           if (!current) return;

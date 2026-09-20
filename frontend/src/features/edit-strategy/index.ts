@@ -200,7 +200,17 @@ export {
   selectedNodePointer,
   setNodeField,
   suggestNodeId,
+  type AddNodeFailure,
 } from "./model/graph-transactions";
+export {
+  catalogNote,
+  entrySignature,
+  filterPalette,
+  operatorPalette,
+  type OperatorCatalogState,
+  type PaletteEntry,
+  type PaletteGroup,
+} from "./model/operator-palette";
 export { StrategyFormPanel, type FormCatalogs } from "./ui/strategy-form-panel";
 export { FactorGraphEditor } from "./ui/factor-graph-editor";
 export {

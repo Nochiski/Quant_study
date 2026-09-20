@@ -3,8 +3,10 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type Dispatch,
   type KeyboardEvent,
   type ReactNode,
+  type SetStateAction,
 } from "react";
 
 import type {
@@ -156,6 +158,7 @@ export const StrategyFormPanel = ({
             catalogSnippets={catalogSnippets}
             onOpenGraph={onOpenGraph}
             selectedPointer={selectedPointer}
+            revealSignal={revealSignal}
             disabled={disabled !== null}
           />
         ))
@@ -173,6 +176,7 @@ const FormSectionView = ({
   catalogSnippets,
   onOpenGraph,
   selectedPointer,
+  revealSignal,
   disabled,
 }: {
   section: FormSection;
@@ -183,9 +187,15 @@ const FormSectionView = ({
   catalogSnippets: readonly CanonicalSnippet[];
   onOpenGraph: ((pointer: string) => void) | undefined;
   selectedPointer: string | undefined;
+  revealSignal: number | undefined;
   disabled: boolean;
 }) => {
-  const [open, setOpen] = useState(true);
+  const notesId = useId();
+  const [open, setOpen] = useRevealedOpen(
+    section,
+    selectedPointer,
+    revealSignal,
+  );
   if (section.kind === "list") {
     return (
       <FormListSectionView
@@ -197,6 +207,7 @@ const FormSectionView = ({
         catalogSnippets={catalogSnippets}
         onOpenGraph={onOpenGraph}
         selectedPointer={selectedPointer}
+        revealSignal={revealSignal}
         disabled={disabled}
       />
     );
@@ -217,6 +228,7 @@ const FormSectionView = ({
         )}
         {severityBadge(section)}
       </legend>
+      <DiagnosticNotes id={notesId} diagnostics={section.diagnostics} />
       <div hidden={!open}>
         {section.fields.map((field) => (
           <FormFieldRow
@@ -225,6 +237,7 @@ const FormSectionView = ({
             field={field}
             transactions={transactions}
             catalogs={catalogs}
+            selectedPointer={selectedPointer}
           />
         ))}
         {/* 중첩 목록(`eligibility.rules`)은 루트 목록과 같은 뷰로 편집한다(P4-05). */}
@@ -239,6 +252,7 @@ const FormSectionView = ({
             catalogSnippets={catalogSnippets}
             onOpenGraph={onOpenGraph}
             selectedPointer={selectedPointer}
+            revealSignal={revealSignal}
             disabled={disabled}
           />
         ))}
@@ -307,6 +321,7 @@ const FormListSectionView = ({
   catalogSnippets,
   onOpenGraph,
   selectedPointer,
+  revealSignal,
   disabled,
 }: {
   section: ListSection;
@@ -317,8 +332,11 @@ const FormListSectionView = ({
   catalogSnippets: readonly CanonicalSnippet[];
   onOpenGraph: ((pointer: string) => void) | undefined;
   selectedPointer: string | undefined;
+  revealSignal: number | undefined;
   disabled: boolean;
 }) => {
+  const notesId = useId();
+  const addReasonId = `${notesId}-add`;
   const kinds = schema === null ? null : itemKinds(schema, section);
   const [kind, setKind] = useState<string>("");
   const chosenKind = kinds === null ? null : kind || (kinds[0] ?? "");
@@ -338,10 +356,22 @@ const FormListSectionView = ({
           Object.is(field.value, snippet.identity!.value),
       ),
     );
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useRevealedOpen(
+    section,
+    selectedPointer,
+    revealSignal,
+  );
   // 추가·preset·삭제(위치 pointer 연산)만 직전 편집의 parse가 따라올 때까지 잠근다(P5-03 리뷰 DEFECT-133-01;
   // 항목 필드·Graph 열기는 열어 둔다 — 3차 P2). 구조 변경 직후의 스칼라 확정은 훅이 pending으로 보류한다.
   const settling = transactions.settling;
+  const addBlocked =
+    schema === null
+      ? t("form.list.addNoSchema")
+      : addOperation === null
+        ? t("form.list.addBlocked")
+        : settling
+          ? t("form.list.addSettling")
+          : null;
   return (
     <fieldset className="strategy-form__section" disabled={disabled}>
       <legend>
@@ -356,6 +386,7 @@ const FormListSectionView = ({
         </span>
         {severityBadge(section)}
       </legend>
+      <DiagnosticNotes id={notesId} diagnostics={section.diagnostics} />
       <div hidden={!open}>
         <div className="strategy-form__control">
           {kinds !== null ? (
@@ -373,7 +404,8 @@ const FormListSectionView = ({
           ) : null}
           <Button
             size="small"
-            disabled={addOperation === null || settling}
+            disabled={addBlocked !== null}
+            aria-describedby={addBlocked === null ? undefined : addReasonId}
             onClick={() => {
               if (addOperation !== null)
                 transactions.apply(
@@ -420,6 +452,12 @@ const FormListSectionView = ({
             </select>
           ) : null}
         </div>
+        {/* 비활성 버튼이 이유를 말한다: 예전에는 눌러도 아무 일이 없고 왜인지 화면에 없었다(P1-04). */}
+        {addBlocked === null ? null : (
+          <p id={addReasonId} className="strategy-form__hint">
+            {addBlocked}
+          </p>
+        )}
         {section.items.length === 0 ? (
           <p className="strategy-form__state">{t("form.list.empty")}</p>
         ) : null}
@@ -459,6 +497,7 @@ const FormListItemView = ({
 }) => {
   // 삭제 거부 안내는 그 판정을 낸 문서(tree)에만 붙는다. 문서가 바뀌면(재색인 포함) 렌더 중 파생으로
   // 사라진다 — React key가 pointer(인덱스)라 인스턴스가 다른 항목에 재사용될 수 있다(리뷰 P2-2).
+  const notesId = useId();
   const [blockers, setBlockers] = useState<{
     tree: unknown;
     references: DocumentReference[];
@@ -533,6 +572,7 @@ const FormListItemView = ({
           )}
         </p>
       ) : null}
+      <DiagnosticNotes id={notesId} diagnostics={item.diagnostics} />
       {item.fields.map((field) => (
         <FormFieldRow
           key={field.pointer}
@@ -540,26 +580,97 @@ const FormListItemView = ({
           field={field}
           transactions={transactions}
           catalogs={catalogs}
+          selectedPointer={selectedPointer}
         />
       ))}
     </section>
   );
 };
 
+/**
+ * 개수 배지. 본문은 `DiagnosticNotes`가 카드·필드 옆에 인라인으로 보인다 — 예전에는 첫 메시지를
+ * `title`에만 담아 hover 없는 입력(키보드·터치·스크린리더)에서 원인을 읽을 수 없었다(WORKFLOW P1-04).
+ */
 const severityBadge = (owner: {
   diagnostics: DocumentDiagnostic[];
 }): ReactNode => {
   const errors = owner.diagnostics.filter((d) => d.severity === "error");
   const warnings = owner.diagnostics.filter((d) => d.severity === "warning");
   if (errors.length === 0 && warnings.length === 0) return null;
-  const first = (errors[0] ?? warnings[0])!;
   return (
-    <Badge tone={errors.length > 0 ? "error" : "warn"} title={first.message}>
+    <Badge tone={errors.length > 0 ? "error" : "warn"}>
       {errors.length > 0
         ? t("form.badge.error").replace("{count}", String(errors.length))
         : t("form.badge.warning").replace("{count}", String(warnings.length))}
     </Badge>
   );
+};
+
+/**
+ * 진단 본문을 그 자리(섹션 제목 아래·목록 항목 안·필드 아래)에 그대로 보인다. 문제 목록과 같은
+ * 문장이고 backend가 완성해 보낸 것을 다시 조립하지 않는다(SoT "authoring 진단 코드" 행).
+ *
+ * `alert`는 필드 오류에만 준다(`live`): 사용자가 고칠 자리가 필드이고, 섹션·항목 수준까지 assertive로
+ * 알리면 같은 원인을 두세 번 읽는다. 경고는 조언이라 live region이 아니다.
+ */
+const DiagnosticNotes = ({
+  id,
+  diagnostics,
+  live = false,
+}: {
+  id: string;
+  diagnostics: DocumentDiagnostic[];
+  live?: boolean;
+}): ReactNode => {
+  if (diagnostics.length === 0) return null;
+  return (
+    <div id={id} className="strategy-form__diagnostics">
+      {diagnostics.map((diagnostic, index) => (
+        <p
+          key={`${diagnostic.code}:${diagnostic.pointer}:${index}`}
+          className={
+            diagnostic.severity === "error"
+              ? "strategy-form__invalid"
+              : "strategy-form__warning"
+          }
+          role={live && diagnostic.severity === "error" ? "alert" : undefined}
+        >
+          {diagnostic.message}
+        </p>
+      ))}
+    </div>
+  );
+};
+
+/** 섹션이 이 pointer를 품는가(루트 스칼라 섹션은 pointer가 빈 문자열이라 필드로 본다). */
+const sectionCovers = (section: FormSection, pointer: string): boolean =>
+  section.pointer === ""
+    ? section.kind === "object" &&
+      section.fields.some((field) => field.pointer === pointer)
+    : pointer === section.pointer ||
+      pointer.startsWith(`${section.pointer}/`);
+
+/**
+ * 접기 상태. 문제 행이 이 섹션 안을 가리키면(같은 행을 다시 눌러도 `revealSignal`이 오른다) 접혀 있던
+ * 섹션을 펴서 인라인 본문이 열린 채로 드러나게 한다(WORKFLOW P1-04, P1-01 reveal과 한 쌍).
+ * 렌더 중 파생이다 — effect로 열면 스크롤(`useRevealSelection`)이 접힌 높이로 먼저 계산된다.
+ */
+const useRevealedOpen = (
+  section: FormSection,
+  selectedPointer: string | undefined,
+  revealSignal: number | undefined,
+): [boolean, Dispatch<SetStateAction<boolean>>] => {
+  const [open, setOpen] = useState(true);
+  const request =
+    selectedPointer !== undefined && sectionCovers(section, selectedPointer)
+      ? `${selectedPointer}:${revealSignal ?? 0}`
+      : null;
+  const [served, setServed] = useState<string | null>(request);
+  if (request !== served) {
+    setServed(request);
+    if (request !== null && !open) setOpen(true);
+  }
+  return [open, setOpen];
 };
 
 /** 편집 컨트롤이 없는 행(링크·const)은 `<label for>` 대신 `aria-labelledby`로 이름을 잇는다(리뷰 DEFECT-P402-004). */
@@ -595,12 +706,14 @@ export const FormFieldsEditor = ({
   catalogs,
   owner = FORM_OWNER,
   planCommit,
+  selectedPointer,
 }: {
   section: ObjectSection;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   owner?: string;
   planCommit?: CommitPlanner;
+  selectedPointer?: string;
 }) => (
   <>
     {section.fields.map((field) => (
@@ -612,6 +725,7 @@ export const FormFieldsEditor = ({
         catalogs={catalogs}
         owner={owner}
         planCommit={planCommit}
+        selectedPointer={selectedPointer}
       />
     ))}
   </>
@@ -624,6 +738,7 @@ const FormFieldRow = ({
   catalogs,
   owner = FORM_OWNER,
   planCommit,
+  selectedPointer,
 }: {
   section: ObjectSection;
   field: FormField;
@@ -631,9 +746,12 @@ const FormFieldRow = ({
   catalogs: FormCatalogs;
   owner?: string;
   planCommit?: CommitPlanner;
+  selectedPointer?: string;
 }) => {
   const id = useId();
   const labelId = `${id}-label`;
+  const notesId = `${id}-notes`;
+  const invalidId = `${id}-invalid`;
   const [invalid, setInvalid] = useState<string | null>(null);
   const passive = isPassiveControl(field.control);
   // `x-default-from`: 생략하면 backend가 형제 키의 값으로 채운다 → placeholder도 그 값(P4-01 DEFECT-121-06).
@@ -670,10 +788,16 @@ const FormFieldRow = ({
     tDescription(operatorKey) ?? tDescription(field.descriptionKey);
   const formula =
     operatorKey === null ? null : tOptional(`${operatorKey}.formula`);
+  // 컨트롤이 자기 오류 본문을 가리킨다: 배지 개수만으로는 무엇이 잘못됐는지 알 수 없다(P1-04).
+  const describedBy = [
+    invalid === null ? null : invalidId,
+    field.diagnostics.length === 0 ? null : notesId,
+  ].filter((value): value is string => value !== null);
   const control = (
     <FieldControl
       id={id}
       labelId={labelId}
+      describedBy={describedBy.length === 0 ? undefined : describedBy.join(" ")}
       field={field}
       catalogs={catalogs}
       placeholderValue={
@@ -714,6 +838,8 @@ const FormFieldRow = ({
   return (
     <div
       className="strategy-form__field"
+      // 문제 행이 이 필드를 가리키면 `useRevealSelection`이 여기로 스크롤한다(P1-01 reveal과 한 쌍).
+      aria-current={selectedPointer === field.pointer ? "true" : undefined}
       data-written={field.written}
       data-applicable={
         field.applicable === null ? "unknown" : String(field.applicable)
@@ -766,10 +892,11 @@ const FormFieldRow = ({
         {severityBadge(field)}
       </div>
       {invalid !== null ? (
-        <p className="strategy-form__invalid" role="alert">
+        <p id={invalidId} className="strategy-form__invalid" role="alert">
           {invalid}
         </p>
       ) : null}
+      <DiagnosticNotes id={notesId} diagnostics={field.diagnostics} live />
       {field.applicable === false ? (
         <p className="strategy-form__hint">{t("form.field.inapplicable")}</p>
       ) : null}
@@ -805,6 +932,8 @@ const FormFieldRow = ({
 type ControlProps = {
   id: string;
   labelId: string;
+  /** 이 필드의 오류 본문 id(있으면). 컨트롤이 `aria-describedby`로 가리킨다(P1-04). */
+  describedBy: string | undefined;
   field: FormField;
   catalogs: FormCatalogs;
   /** 미작성 필드의 placeholder 값(runtime schema default 또는 `x-default-from` 형제 값). */
@@ -817,11 +946,16 @@ type ControlProps = {
 
 /** 컨트롤별 커밋 규칙: 텍스트류는 blur/Enter에서 바뀐 값만, 선택류는 변경 즉시. Escape는 입력 취소. */
 const FieldControl = (props: ControlProps) => {
-  const { id, labelId, field, catalogs, onCommit } = props;
+  const { id, labelId, describedBy, field, catalogs, onCommit } = props;
   const { control } = field;
   if (control.kind === "const")
     return (
-      <code id={id} aria-labelledby={labelId} className="strategy-form__const">
+      <code
+        id={id}
+        aria-labelledby={labelId}
+        aria-describedby={describedBy}
+        className="strategy-form__const"
+      >
         {draftOf(control.value)}
       </code>
     );
@@ -830,6 +964,7 @@ const FieldControl = (props: ControlProps) => {
       <input
         id={id}
         type="checkbox"
+        aria-describedby={describedBy}
         checked={field.value === true}
         onChange={(event) => onCommit(event.target.checked)}
       />
@@ -860,6 +995,7 @@ const FieldControl = (props: ControlProps) => {
     return (
       <select
         id={id}
+        aria-describedby={describedBy}
         value={current}
         onChange={(event: ChangeEvent<HTMLSelectElement>) =>
           onCommit(event.target.value === UNSET ? null : event.target.value)
@@ -883,7 +1019,12 @@ const FieldControl = (props: ControlProps) => {
   }
   if (control.kind === "graph-link" || control.kind === "list-link")
     return (
-      <p id={id} aria-labelledby={labelId} className="strategy-form__hint">
+      <p
+        id={id}
+        aria-labelledby={labelId}
+        aria-describedby={describedBy}
+        className="strategy-form__hint"
+      >
         {control.kind === "graph-link"
           ? t("form.field.graphLink")
           : t("form.field.listLink")}
@@ -912,6 +1053,7 @@ const catalogOptions = (
 
 const TextualControl = ({
   id,
+  describedBy,
   field,
   placeholderValue,
   onCommit,
@@ -984,6 +1126,7 @@ const TextualControl = ({
   return (
     <input
       id={id}
+      aria-describedby={describedBy}
       type={control.kind === "date" ? "date" : numeric ? "number" : "text"}
       inputMode={numeric ? "decimal" : undefined}
       step={numeric ? (control.integer ? 1 : "any") : undefined}

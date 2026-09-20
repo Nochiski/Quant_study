@@ -20,6 +20,7 @@ paths:
 | Equity 연결 계약 | backend application outbound port | adapter가 구현 |
 | 팩터 정의·방향·단위·입력 요구 | backend Factor Registry | UI는 catalog 표시 |
 | 연산자 정의·설명 키·가용성 | `domain/factor/_operators.py`의 `OperatorDefinition` 레지스트리(키 `(kind, operator)`, 스키마 enum과 같은 집합임을 `tests/domain/test_factor_operators.py`가 양방향으로 강제한다) | 프론트 팔레트·노드 라벨·Contract Inspector는 `GET /api/v1/strategy-documents/operators`와 runtime schema의 `x-operator`(`enum 값 → 설명 키 stem`)로 이 카탈로그를 읽는다. 연산자 목록·arity·가용성·설명 키를 손으로 적지 않는다. `availability`는 정의 값이고 어댑터 capability로 판정하는 것은 P2-04이다 |
+| 그래프 노드 정수 파라미터의 하한(`window`·`lag`·`periods`) | 노드 dataclass 필드 옆의 `minimum` 선언(`domain/factor/_nodes.py`의 `minimum()`, 읽기는 `field_minimum()`) | `_validation.py`가 그 값으로 검사하고 runtime schema가 같은 값을 JSON Schema `minimum`으로 발행한다. 하한을 검증기와 스키마에 따로 적지 않는다 — 스키마에만 없으면 화면이 스키마로 만든 기본값(`materializeSchemaValue`)이 `window: 0`이 되어 backend가 곧바로 거부한다(P1-04). `tests/domain/test_node_parameter_bounds.py`가 정수 property의 선언 누락과 두 소비자의 불일치를 양방향으로 막는다. 관계 제약(분위수 `lower < upper`)은 필드 하나로 표현되지 않아 이 계약 밖이고 `_validation.py`가 소유한다 |
 | 팩터 **값** | `FactorGraph` 평가 (`domain/factor`) | 계산자는 `application/portfolio_design/_service.py` 하나뿐, 어댑터는 원천 필드만 답한다 |
 | 팩터 값의 공개일 | 그 팩터 plan이 읽는 필드들의 `available_date` 최댓값 | 컴파일러 FUTURE_DATA 가드가 그대로 읽는다 |
 | 리밸런싱 시점의 previous weight | `compile_target_tape`의 프레임 fold | 포트의 `previous_weight`는 첫 프레임 시드로만 쓰인다 |

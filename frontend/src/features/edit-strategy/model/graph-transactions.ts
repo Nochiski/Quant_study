@@ -165,19 +165,30 @@ const outputUnset = (graph: unknown): boolean => {
   return output === undefined || output === "";
 };
 
+/** `addNode`가 노드를 만들지 못한 이유. 화면은 `graph.addFailed.<reason>` 문장으로 옮긴다(P1-04). */
+export type AddNodeFailure = "unknown-kind" | "unsupported-schema";
+
 /**
- * 노드 추가: `kind` 분기 스키마로 최소 항목을 materialize하고 `node_id`는 `suggestNodeId(kind)`. 참조
+ * 노드 추가: `kind` 분기 스키마로 최소 항목을 materialize하고 `node_id`는 `suggestNodeId(operator ?? kind)`.
+ * `operator`를 주면(팔레트가 연산자를 먼저 고른 경로, P1-04) materialize가 넣은 enum 첫 값 대신 그 값을
+ * 쓰고 노드 id도 그 이름에서 딴다 — 파라미터 기본값은 그대로 스키마가 채운다. 참조
  * 슬롯(`nodeReferenceKeys`)이 **하나뿐인** 분기(unary·time_series·cross_sectional·group)는 그 슬롯을 그래프의
  * 마지막 노드 id로 채워 즉시 valid 가능하게 하고, 둘 이상인 분기(binary·comparison·conditional)는 같은
  * 노드를 여러 슬롯에 넣으면 `x op x`나 타입 불일치가 되므로 빈 문자열로 두어 사용자가 고르게 한다(리뷰
  * P2-3). `graph.nodes`가 없으면 키를 열면서 넣는다(P4-03이 만든 빈 팩터는 `nodes: []`라 `insert-item`).
+ *
+ * 실패 이유를 둘로 나눈 이유: 화면이 "무엇이 잘못됐는지"를 말해야 조용한 실패가 아니다(P1-04). 스키마에
+ * 없는 kind와, 있지만 기본값을 만들 수 없는 스키마는 사용자가 할 일이 다르다.
  */
 export const addNode = (
   tree: unknown,
   factorPointer: string,
   kind: string,
   schema: JsonSchema,
-): { ops: SourceOperation[]; nodeId: string } | { error: "unknown-kind" } => {
+  operator: string | null = null,
+):
+  | { ops: SourceOperation[]; nodeId: string }
+  | { error: AddNodeFailure } => {
   const branch = nodeKinds(schema, tree, factorPointer).find(
     ([name]) => name === kind,
   )?.[1];
@@ -186,14 +197,17 @@ export const addNode = (
   try {
     node = materializeSchemaValue(schema, branch);
   } catch (error) {
-    if (error instanceof UnsupportedSchemaShape) return { error: "unknown-kind" };
+    if (error instanceof UnsupportedSchemaShape)
+      return { error: "unsupported-schema" };
     throw error;
   }
-  if (!isRecord(node)) return { error: "unknown-kind" };
+  if (!isRecord(node)) return { error: "unsupported-schema" };
   const ids = graphNodeIds(tree, factorPointer);
-  const nodeId = suggestNodeId(tree, factorPointer, kind);
+  const nodeId = suggestNodeId(tree, factorPointer, operator ?? kind);
   const last = ids[ids.length - 1] ?? "";
   const value: Record<string, unknown> = { ...node, node_id: nodeId };
+  // 연산자를 먼저 고른 경로에서는 그 값이 정본이다(materialize는 enum 첫 값을 넣는다).
+  if (operator !== null) value.operator = operator;
   const references = nodeReferenceKeys(schema, branch);
   if (references.length === 1 && last !== "") value[references[0]!] = last;
   const graph = valueAt(tree, graphPointer(factorPointer));

@@ -1070,9 +1070,14 @@ test.describe("professional YAML workflow", () => {
     await expect(editor).toBeVisible();
     await expect(editor.getByText("편집 가능")).toBeVisible();
 
-    // 노드 추가: 새 field 노드가 문서 끝에 들어가고 바로 선택된다.
-    await editor.getByRole("combobox", { name: "노드 종류" }).selectOption("field");
-    await editor.getByRole("button", { name: "노드 추가" }).click();
+    // 노드 추가: 연산자 팔레트에서 고르면 kind가 따라온다(WORKFLOW P1-04). 새 field 노드가 문서
+    // 끝에 들어가고 바로 선택된다.
+    await expect(
+      editor.getByRole("combobox", { name: "노드 종류" }),
+    ).toHaveCount(0);
+    await editor
+      .getByRole("button", { name: "데이터 필드 노드 추가", exact: true })
+      .click();
     await expect(
       editor.getByRole("status").filter({ hasText: "반영됨" }),
     ).toContainText("field 반영됨");
@@ -1169,6 +1174,47 @@ test.describe("professional YAML workflow", () => {
     // Graph → Form 왕복.
     await editor.getByRole("button", { name: /Form에서 열기/ }).click();
     await expect(page.getByRole("region", { name: "Form 편집" })).toBeVisible();
+  });
+
+  test("picks the operator first in the palette and the document stays valid (P1-04)", async ({
+    page,
+  }) => {
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(page, GOLDEN.replace("퀄리티 모멘텀", "P1-04 E2E 팔레트"));
+    await expectPhase(page, "검증 통과");
+
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editor = page.getByRole("region", { name: "그래프 편집" });
+    const palette = editor.getByRole("group", { name: "연산자 팔레트" });
+    await expect(palette).toBeVisible();
+    // kind 드롭다운은 없고, 카탈로그가 도착하면 연산자 이름과 계산식이 보인다(P1-03 카탈로그).
+    await expect(editor.getByRole("combobox", { name: "노드 종류" })).toHaveCount(0);
+    await expect(
+      palette.getByRole("button", { name: "기간 평균 노드 추가", exact: true }),
+    ).toBeVisible();
+
+    // `기간 평균`을 고른다: 필수 정수 파라미터(`window`)가 있어 하한이 없으면 `window: 0`인
+    // 노드가 만들어져 곧바로 검증 오류가 났다(P1-04). runtime schema가 하한을 발행하면서
+    // 추가만으로 유효한 노드가 된다.
+    await palette.getByRole("searchbox", { name: "연산자 검색" }).fill("기간 평균");
+    await palette
+      .getByRole("button", { name: "기간 평균 노드 추가", exact: true })
+      .click();
+    await expect(editor.getByRole("alert")).toHaveCount(0);
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("mean 반영됨");
+
+    // 연산자를 고르면 kind와 파라미터 기본값이 따라오고, 문서는 그대로 검증을 통과한다.
+    await expectPhase(page, "검증 통과");
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    const edited = await currentSource(page);
+    expect(edited).toContain("\n        - kind: time_series\n");
+    expect(edited).toContain("\n          node_id: mean\n");
+    expect(edited).toContain("\n          operator: mean\n");
+    expect(edited).toContain("\n          input_node_id: mom_252\n");
+    // 파라미터 기본값은 runtime schema가 발행한 하한에서 온다(`window >= 1`).
+    expect(edited).toContain("\n          window: 1\n");
   });
 
   test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", async ({

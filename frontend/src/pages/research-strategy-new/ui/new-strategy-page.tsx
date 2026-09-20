@@ -384,6 +384,7 @@ export const NewStrategyPage = () => {
                   factors:
                     assist.inspectorSource.factorCatalog?.factors ?? null,
                 },
+                operators: assist.operators,
                 onOpenForm: openForm,
                 documentKey: document.documentEpoch,
               }}

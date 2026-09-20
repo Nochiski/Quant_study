@@ -3214,9 +3214,14 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
         screen.getByRole("button", { name: "노드 편집: mom_252" }).closest("li"),
       ).toHaveAttribute("aria-current", "true"),
     );
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(
-      screen.getByRole("button", { name: "노드 편집: mom_252" }).closest("li"),
-    );
+    // 진단이 노드 안의 필드를 가리키면 그 필드 행이 가장 구체적인 선택이라 스크롤도 거기로 간다 —
+    // 인라인 오류 본문이 붙는 자리다(WORKFLOW P1-04).
+    const windowRow = screen
+      .getByRole("region", { name: "그래프 편집" })
+      .querySelector('.strategy-form__field[aria-current="true"]');
+    expect(windowRow).not.toBeNull();
+    expect(windowRow).toHaveTextContent("window는 1 이상이어야 합니다");
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(windowRow);
     expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -3256,7 +3261,12 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
       expect(editorRow).toHaveAttribute("aria-current", "true"),
     );
     expect(planNode).toHaveAttribute("aria-current", "true");
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    // 노드 행보다 더 구체적인 선택(그 노드의 `window` 필드 행)이 마지막 매치다(P1-04).
+    const windowRow = screen
+      .getByRole("region", { name: "그래프 편집" })
+      .querySelector('.strategy-form__field[aria-current="true"]');
+    expect(windowRow).not.toBeNull();
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(windowRow);
   }, 15_000);
 
   it("falls back to the source tab and the line when the Graph tab cannot draw the pointer", async () => {
@@ -3336,9 +3346,11 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     );
     const card = screen.getByRole("region", { name: "factors · momentum" });
     await waitFor(() => expect(card).toHaveAttribute("aria-current", "true"));
-    await waitFor(() =>
-      expect(scrollIntoView.mock.contexts.at(-1)).toBe(card),
-    );
+    // 카드 안에서 문제가 가리킨 필드 행까지 표시되고, 스크롤은 그 행으로 간다(P1-04).
+    const row = card.querySelector('.strategy-form__field[aria-current="true"]');
+    expect(row).not.toBeNull();
+    expect(row).toHaveTextContent("weight must be positive");
+    await waitFor(() => expect(scrollIntoView.mock.contexts.at(-1)).toBe(row));
 
     // 같은 행을 다시 눌렀을 때도 끌어온다 — URL은 그대로라 reveal 신호가 대신 올라간다(2차 리뷰 R2-2).
     const before = scrollIntoView.mock.calls.length;
@@ -3346,6 +3358,6 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     await waitFor(() =>
       expect(scrollIntoView.mock.calls.length).toBeGreaterThan(before),
     );
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(card);
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(row);
   }, 15_000);
 });

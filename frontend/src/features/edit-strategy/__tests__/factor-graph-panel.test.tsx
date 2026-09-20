@@ -313,7 +313,9 @@ describe("FactorGraphPanel", () => {
     rerender(view({ status: "loading" }));
     expect(screen.getByText("재계산 중")).toBeInTheDocument();
     expect(document.querySelector('[data-node-id="signal"]')).not.toBeNull();
-    expect(screen.getByRole("button", { name: "노드 추가" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "데이터 필드 노드 추가" }),
+    ).toBeInTheDocument();
     // 다른 문서로 가면(문서 키 변경) 직전 투영을 쓰지 않는다.
     rerender(view({ status: "loading" }, 2));
     expect(screen.queryByText("재계산 중")).toBeNull();
@@ -336,9 +338,8 @@ describe("FactorGraphPanel", () => {
 
     expect(screen.getByText("factor-registry-v7")).toBeInTheDocument();
     expect(screen.getByText("krx-pit-2026-09-01")).toBeInTheDocument();
-    expect(screen.getByTitle("g".repeat(64))).toHaveTextContent(
-      `${"g".repeat(12)}…`,
-    );
+    // fingerprint는 `title`에 숨지 않고 본문으로 전부 보인다(P1-04).
+    expect(screen.getByText("g".repeat(64))).toBeInTheDocument();
     const signal = document.querySelector('[data-node-id="signal"]');
     expect(signal).toHaveAttribute("aria-current", "true");
     expect(

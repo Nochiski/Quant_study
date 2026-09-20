@@ -2,8 +2,11 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { OperatorDefinition } from "../../../shared/api";
+import { tOptional } from "../../../shared/config";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
+import type { OperatorCatalogState } from "../model/operator-palette";
 import type { JsonSchema } from "../model/schema-navigator";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { FactorGraphPanel } from "../ui/factor-graph-panel";
@@ -13,7 +16,56 @@ afterEach(cleanup);
 const SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/runtime-schema.json"),
 ) as JsonSchema;
+const CATALOG: OperatorCatalogState = {
+  status: "ready",
+  definitions: (
+    JSON.parse(
+      readBackendFixture("strategy_documents/operator-catalog.json"),
+    ) as { operators: OperatorDefinition[] }
+  ).operators,
+};
 const VERBOSE = readBackendFixture("strategy_documents/quality_momentum.yaml");
+// 자기 자신을 필수로 참조하는 노드 분기: `materializeSchemaValue`가 기본값을 만들지 못해
+// `addNode`가 `unsupported-schema`로 거부하는 경로(P1-04 조용한 실패 제거).
+const RECURSIVE_SCHEMA = {
+  type: "object",
+  properties: {
+    factors: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          graph: {
+            type: "object",
+            properties: {
+              nodes: { type: "array", items: { $ref: "#/$defs/Node" } },
+            },
+          },
+        },
+      },
+    },
+  },
+  $defs: {
+    Node: { oneOf: [{ $ref: "#/$defs/Loop" }] },
+    Loop: {
+      type: "object",
+      "x-description-key": "strategy.node.constant",
+      properties: {
+        kind: { const: "constant" },
+        node_id: { type: "string" },
+        child: { $ref: "#/$defs/Loop" },
+      },
+      required: ["kind", "node_id", "child"],
+    },
+  },
+} as unknown as JsonSchema;
+const RECURSIVE_SOURCE = [
+  "factors:",
+  "  - factor_id: f",
+  "    graph:",
+  "      nodes: []",
+  "",
+].join("\n");
 // 참조되지 않는 노드 `px`를 하나 더 둔 문서(삭제 가드 통과 경로).
 const WITH_SPARE = VERBOSE.replace(
   "      output_node_id: mom_252\n",
@@ -58,6 +110,7 @@ const renderEditor = (
   transactions: SourceTransactions,
   selectedPointer?: string,
   onOpenForm?: (pointer: string) => void,
+  operators: OperatorCatalogState = CATALOG,
 ) => {
   const onSelectPointer = vi.fn();
   render(
@@ -72,6 +125,7 @@ const renderEditor = (
         schema: SCHEMA,
         transactions,
         catalogs: { equityFields: null, factors: null },
+        operators,
         onOpenForm,
       }}
     />,
@@ -91,8 +145,9 @@ describe("FactorGraphEditor (P5-02)", () => {
     const factorSelect = editor().getByRole("combobox", { name: "팩터 그래프" });
     expect(factorSelect).toHaveValue("1");
     expect(editor().getByText("노드가 없습니다 — 노드 추가로 시작하세요")).toBeInTheDocument();
-    await user.selectOptions(editor().getByRole("combobox", { name: "노드 종류" }), "field");
-    await user.click(editor().getByRole("button", { name: "노드 추가" }));
+    // 연산자 먼저 고르기(P1-04): kind 드롭다운 없이 팔레트 항목을 누르면 kind가 따라온다.
+    expect(editor().queryByRole("combobox", { name: "노드 종류" })).toBeNull();
+    await user.click(editor().getByRole("button", { name: "데이터 필드 노드 추가" }));
     // 빈 그래프의 첫 노드는 출력 노드 지정과 한 트랜잭션이다(backlog 13).
     expect(transactions.apply).toHaveBeenLastCalledWith(
       [
@@ -209,8 +264,9 @@ describe("FactorGraphEditor (P5-02)", () => {
     const onSelectPointer = renderEditor(WITH_SPARE, transactions, "/factors/0/graph/nodes/2");
     await user.click(editor().getByRole("button", { name: "close · 삭제" }));
     expect(transactions.apply).not.toHaveBeenCalled();
+    // 거부 사유는 JSON Pointer가 아니라 노드 표시 이름이다(P1-04).
     expect(editor().getByRole("alert")).toHaveTextContent(
-      "/factors/0/graph/nodes/1/input_node_id",
+      "close을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: mom_252",
     );
     await user.click(editor().getByRole("button", { name: "px · 삭제" }));
     expect(transactions.apply).toHaveBeenLastCalledWith(
@@ -230,7 +286,9 @@ describe("FactorGraphEditor (P5-02)", () => {
     // 참조된 노드(close ← mom_252)는 거부하고 참조 pointer를 알려 준다.
     await user.click(editor().getByRole("button", { name: "close · 삭제" }));
     expect(transactions.apply).not.toHaveBeenCalled();
-    expect(editor().getByRole("alert")).toHaveTextContent("/factors/0/graph/nodes/1/input_node_id");
+    expect(editor().getByRole("alert")).toHaveTextContent(
+      "close을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: mom_252",
+    );
     // 중복 표시 이름(spare ×2)은 문서 순번으로 구분되고, 누른 행의 pointer가 지워진다(id로 첫 노드를 찾지 않는다).
     await user.click(editor().getByRole("button", { name: "spare (4) · 삭제" }));
     expect(transactions.apply).toHaveBeenLastCalledWith(
@@ -285,9 +343,134 @@ describe("FactorGraphEditor (P5-02)", () => {
       }),
       "/factors/0/graph/nodes/2",
     );
-    expect(editor().getByText("구문 오류 · source를 먼저 고치세요")).toBeInTheDocument();
-    expect(editor().getByRole("button", { name: "노드 추가", hidden: true })).toBeDisabled();
+    expect(
+      editor().getByText(
+        "노드를 추가할 수 없습니다: 구문 오류 · source를 먼저 고치세요",
+      ),
+    ).toBeInTheDocument();
+    const locked = editor().getByRole("button", {
+      name: "데이터 필드 노드 추가",
+      hidden: true,
+    });
+    expect(locked).toBeDisabled();
+    // 비활성 버튼이 이유를 가리킨다(P1-04 acceptance).
+    expect(locked.getAttribute("aria-describedby")).toContain(
+      editor()
+        .getByText("노드를 추가할 수 없습니다: 구문 오류 · source를 먼저 고치세요")
+        .id,
+    );
     expect(editor().getByRole("status")).toHaveTextContent("px 반영됨");
     expect(editor().queryByText("title 반영됨")).toBeNull();
+  });
+});
+
+describe("연산자 팔레트와 조용하지 않은 실패 (P1-04)", () => {
+  it("연산자를 고르면 kind와 파라미터 기본값이 따라온다", async () => {
+    const user = userEvent.setup();
+    const transactions = stub();
+    const onSelectPointer = renderEditor(
+      WITH_EMPTY,
+      transactions,
+      "/factors/1/graph",
+    );
+    const palette = within(
+      editor().getByRole("group", { name: "연산자 팔레트" }),
+    );
+    // 항목은 이름·한 줄 설명·계산식을 함께 보인다(본문, `title` 아님). 계산식 문구는 i18n이
+    // 소유하므로 여기 적지 않고 사전에서 읽는다.
+    const meanFormula = tOptional("strategy.operator.time_series.mean.formula");
+    expect(meanFormula).not.toBeNull();
+    expect(palette.getByText(meanFormula!)).toBeInTheDocument();
+    await user.click(palette.getByRole("button", { name: "기간 평균 노드 추가" }));
+
+    expect(transactions.apply).toHaveBeenLastCalledWith(
+      [
+        {
+          kind: "insert-item",
+          parentPointer: "/factors/1/graph/nodes",
+          value: expect.objectContaining({
+            kind: "time_series",
+            node_id: "mean",
+            operator: "mean",
+            // 파라미터 기본값은 runtime schema가 채운다(`window` 필수, `lag` 기본값).
+            window: expect.any(Number),
+            lag: 0,
+          }),
+        },
+        {
+          kind: "replace-scalar",
+          pointer: "/factors/1/graph/output_node_id",
+          value: "mean",
+        },
+      ],
+      "mean",
+      "graph",
+      { focusEditor: false },
+    );
+    expect(onSelectPointer).toHaveBeenLastCalledWith("/factors/1/graph/nodes/0");
+  });
+
+  it("검색이 목록을 좁히고 맞는 항목이 없으면 그렇게 말한다", async () => {
+    const user = userEvent.setup();
+    renderEditor(WITH_EMPTY, stub(), "/factors/1/graph");
+    const palette = within(
+      editor().getByRole("group", { name: "연산자 팔레트" }),
+    );
+    await user.type(palette.getByRole("searchbox", { name: "연산자 검색" }), "zscore");
+
+    expect(palette.getByRole("button", { name: "표준화 노드 추가" })).toBeInTheDocument();
+    expect(palette.queryByRole("button", { name: "기간 평균 노드 추가" })).toBeNull();
+
+    await user.clear(palette.getByRole("searchbox", { name: "연산자 검색" }));
+    await user.type(palette.getByRole("searchbox", { name: "연산자 검색" }), "없는연산자");
+    expect(palette.getByText("검색어와 맞는 연산자가 없습니다")).toBeInTheDocument();
+  });
+
+  it("카탈로그를 못 받으면 노드 kind만 보인다고 말한다(팔레트를 비우지 않는다)", () => {
+    renderEditor(WITH_EMPTY, stub(), "/factors/1/graph", undefined, {
+      status: "unavailable",
+    });
+    const palette = within(
+      editor().getByRole("group", { name: "연산자 팔레트" }),
+    );
+
+    expect(
+      palette.getByText(
+        "연산자 목록을 불러오지 못했습니다 — 지금은 노드 종류만 보이고, 연산자는 노드 속성에서 고르세요",
+      ),
+    ).toBeInTheDocument();
+    const add = palette.getByRole("button", { name: "기간 집계 노드 추가" });
+    expect(add).toBeEnabled();
+    expect(add.getAttribute("aria-describedby")).toContain(
+      palette.getByText(
+        "연산자 목록을 불러오지 못했습니다 — 지금은 노드 종류만 보이고, 연산자는 노드 속성에서 고르세요",
+      ).id,
+    );
+  });
+
+  it("노드를 만들지 못하면 조용히 넘어가지 않고 이유를 보인다", async () => {
+    const user = userEvent.setup();
+    const transactions = stub();
+    render(
+      <FactorGraphPanel
+        state={{ status: "blocked", reason: "invalid" }}
+        diagnostics={[]}
+        onSelectPointer={vi.fn()}
+        onOpenSource={vi.fn()}
+        editing={{
+          tree: treeOf(RECURSIVE_SOURCE),
+          schema: RECURSIVE_SCHEMA,
+          transactions,
+          catalogs: { equityFields: null, factors: null },
+          operators: { status: "ready", definitions: [] },
+        }}
+      />,
+    );
+    await user.click(editor().getByRole("button", { name: "상수 노드 추가" }));
+
+    expect(transactions.apply).not.toHaveBeenCalled();
+    expect(editor().getByRole("alert")).toHaveTextContent(
+      "상수: 이 노드의 스키마로는 기본값을 만들지 못해 추가하지 않았습니다",
+    );
   });
 });

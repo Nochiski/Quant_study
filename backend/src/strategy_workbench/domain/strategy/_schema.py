@@ -259,6 +259,11 @@ class _SchemaBuilder:
                 schema = {**schema, "default": _json_value(default)}
             elif "default-from" not in field.metadata:
                 required.append(field.name)
+            # 필드 옆에 선언한 정수 하한(`domain.factor._nodes.minimum`)을 그대로 발행한다. 검증기가
+            # 같은 상수를 읽으므로 화면이 스키마로 만든 기본값을 backend가 거부할 수 없다(P1-04).
+            declared_minimum = field.metadata.get("minimum")
+            if isinstance(declared_minimum, int):
+                schema = {**schema, "minimum": declared_minimum}
             # 파생 키를 먼저 얹고 제약 카탈로그가 자기 키를 가지면 그 쪽이 이긴다: 특정 필드의
             # 설명은 제약이 소유하고, 나머지 전부는 이름 규칙이 채운다(P1-03).
             schema = {**schema, "x-description-key": f"{property_namespace}.{field.name}"}

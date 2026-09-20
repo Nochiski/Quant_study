@@ -316,6 +316,36 @@ describe("StrategyFormPanel list sections", () => {
     return onOpenGraph;
   };
 
+  it("비활성 추가 버튼이 왜 못 누르는지 말한다 (P1-04)", () => {
+    // 직전 편집이 반영되는 중: 예전에는 버튼이 그냥 회색이고 화면에 이유가 없었다.
+    renderList(VERBOSE, { ...stub(), settling: true });
+    const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
+    const add = factors.getByRole("button", { name: "factors · 항목 추가" });
+    expect(add).toBeDisabled();
+    expect(add).toHaveAccessibleDescription(
+      "직전 편집이 문서에 반영되는 중입니다 — 잠시 후 다시 추가하세요",
+    );
+
+    cleanup();
+    // runtime schema가 아직 없으면 항목을 materialize할 수 없다 — 그 사실을 말한다.
+    const state = parsedState(VERBOSE);
+    render(
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, state.parse, [])}
+        schema={null}
+        transactions={stub()}
+        catalogs={{ equityFields: null, factors: null }}
+      />,
+    );
+    const noSchema = within(
+      screen.getByRole("group", { name: /\bfactors/ }),
+    ).getByRole("button", { name: "factors · 항목 추가" });
+    expect(noSchema).toBeDisabled();
+    expect(noSchema).toHaveAccessibleDescription(
+      "runtime schema를 아직 받지 못해 항목을 추가할 수 없습니다",
+    );
+  });
+
   it("adds items from the schema and from the factor catalog, and removes unreferenced items", async () => {
     const user = userEvent.setup();
     const transactions = stub();

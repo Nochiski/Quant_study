@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from dataclasses import fields as dataclass_fields
 from enum import StrEnum
 from typing import Literal, TypeAlias, get_args, get_type_hints
 
@@ -14,6 +15,28 @@ REFERENCE_NODE = {"reference": "node"}
 REFERENCE_PARAMETER = {"reference": "parameter"}
 # The array that declares a namespace; its items carry the `<namespace>_id` definition.
 DEFINES_NODE = {"defines": "node"}
+
+
+def minimum(value: int) -> dict[str, int]:
+    """정수 파라미터의 하한을 필드 옆에 선언한다 (P1-04).
+
+    이 값 하나를 `_validation.py`가 검사에 쓰고 runtime schema(`domain.strategy._schema`)가
+    JSON Schema `minimum`으로 발행한다. 하한을 검증기와 스키마에 따로 적으면 한쪽만 고쳐질 때
+    화면이 만들어 준 기본값을 backend가 거부한다 — 팔레트가 `window: 0`인 노드를 만들어 곧바로
+    검증 오류가 나던 결함이 그 모양이었다.
+    """
+    return {"minimum": value}
+
+
+def field_minimum(node_type: type, property_name: str) -> int:
+    """`node_type.property_name`에 선언된 하한. 선언이 없으면 `KeyError`."""
+    for item in dataclass_fields(node_type):
+        if item.name == property_name:
+            declared = item.metadata.get("minimum")
+            if isinstance(declared, int):
+                return declared
+            break
+    raise KeyError(f"{node_type.__name__}.{property_name}에 minimum 선언이 없습니다")
 
 
 # 요소별 변환만 남긴다(schema 1.1 S4). 횡단면 순위·표준화·윈저화·demean은 CrossSectionalOperator다.
@@ -107,7 +130,7 @@ class UnaryNode:
     operator: UnaryOperator
     input_node_id: str = field(metadata=REFERENCE_NODE)
     kind: Literal["unary"]
-    periods: int | None = None
+    periods: int | None = field(default=None, metadata=minimum(1))
 
 
 @dataclass(frozen=True)
@@ -124,9 +147,9 @@ class TimeSeriesNode:
     node_id: str
     operator: TimeSeriesOperator
     input_node_id: str = field(metadata=REFERENCE_NODE)
-    window: int
+    window: int = field(metadata=minimum(1))
     kind: Literal["time_series"]
-    lag: int = 0
+    lag: int = field(default=0, metadata=minimum(0))
 
 
 @dataclass(frozen=True)

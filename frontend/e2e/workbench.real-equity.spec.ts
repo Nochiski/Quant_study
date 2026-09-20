@@ -87,10 +87,10 @@ test.describe("real equity data", () => {
         graphEditor.getByRole("status").filter({ hasText: "반영됨" }),
       ).toContainText(`${label} 반영됨`);
     };
+    // kind 드롭다운 대신 연산자 팔레트에서 고른다(WORKFLOW P1-04).
     await graphEditor
-      .getByRole("combobox", { name: "노드 종류" })
-      .selectOption("field");
-    await graphEditor.getByRole("button", { name: "노드 추가" }).click();
+      .getByRole("button", { name: "데이터 필드 노드 추가", exact: true })
+      .click();
     await expectApplied("field");
     const selected = graphEditor.getByRole("group", { name: /선택한 노드/ });
     const fieldId = selected.getByRole("combobox", { name: /\bfield_id/ });

@@ -13,7 +13,11 @@ import {
   setNodeField,
   suggestNodeId,
 } from "../model/graph-transactions";
-import type { JsonSchema } from "../model/schema-navigator";
+import {
+  schemaAt,
+  schemaFacts,
+  type JsonSchema,
+} from "../model/schema-navigator";
 import {
   planSourceOperation,
   planSourceOperations,
@@ -89,6 +93,78 @@ describe("graph transactions (P5-01)", () => {
     const next = treeOf(applyPlan(VERBOSE, added.ops[0]!));
     expect(graphNodeIds(next, F0)).toEqual(["close", "mom_252", "unary"]);
     expect(addNode(tree, F0, "nope", SCHEMA)).toEqual({ error: "unknown-kind" });
+  });
+
+  it("연산자를 먼저 고르면 그 값과 kind·파라미터 기본값이 함께 들어간다 (P1-04)", () => {
+    const tree = treeOf(VERBOSE);
+    const added = addNode(tree, F0, "time_series", SCHEMA, "std");
+    if ("error" in added) throw new Error(added.error);
+
+    // 노드 id는 스키마 enum 첫 값(`mean`)이 아니라 고른 연산자에서 딴다.
+    expect(added.nodeId).toBe("std");
+    expect(added.ops[0]).toMatchObject({
+      kind: "insert-item",
+      parentPointer: "/factors/0/graph/nodes",
+      value: {
+        kind: "time_series",
+        node_id: "std",
+        operator: "std",
+        input_node_id: "mom_252",
+        lag: 0,
+      },
+    });
+    // 계획까지 통과한다(연산자 값이 스키마 enum 안에 있다).
+    expect(applyPlan(VERBOSE, added.ops[0]!)).toContain("operator: std");
+
+    // 필수 정수 파라미터는 스키마가 발행한 하한으로 채워진다 — 하한이 없으면 0이 들어가 backend가
+    // 곧바로 거부했다(P1-04). 기대값을 손으로 적지 않고 스키마에서 읽는다.
+    const windowSchema = schemaAt(SCHEMA, `${F0}/graph/nodes/0/window`, {
+      factors: [{ graph: { nodes: [{ kind: "time_series" }] } }],
+    });
+    const minimum = schemaFacts(windowSchema!.node).minimum;
+    expect(minimum).not.toBeNull();
+    expect((added.ops[0] as { value: { window: number } }).value.window).toBe(
+      minimum!.value,
+    );
+  });
+
+  it("기본값을 만들 수 없는 노드 스키마는 unknown-kind와 구분해 알린다 (P1-04)", () => {
+    const recursive = {
+      type: "object",
+      properties: {
+        factors: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              graph: {
+                type: "object",
+                properties: {
+                  nodes: { type: "array", items: { $ref: "#/$defs/Node" } },
+                },
+              },
+            },
+          },
+        },
+      },
+      $defs: {
+        Node: { oneOf: [{ $ref: "#/$defs/Loop" }] },
+        Loop: {
+          type: "object",
+          properties: {
+            kind: { const: "loop" },
+            node_id: { type: "string" },
+            child: { $ref: "#/$defs/Loop" },
+          },
+          required: ["kind", "node_id", "child"],
+        },
+      },
+    } as unknown as JsonSchema;
+    const tree = { factors: [{ graph: { nodes: [] } }] };
+
+    expect(addNode(tree, F0, "loop", recursive)).toEqual({
+      error: "unsupported-schema",
+    });
   });
 
   it("lists node reference keys from schemaFacts and leaves multi-slot kinds unfilled (review P1-1·P2-3)", () => {

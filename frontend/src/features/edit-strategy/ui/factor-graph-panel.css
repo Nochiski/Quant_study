@@ -423,6 +423,96 @@
   align-items: center;
 }
 
+/* fingerprint는 본문으로 보이므로 좁은 칸에서 줄을 넘겨 가로 스크롤을 만들지 않는다(P1-04). */
+.factor-graph__fingerprint {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* 연산자 팔레트(P1-04): 검색 + kind별 그룹. 목록이 길어 자기 칸 안에서만 스크롤한다. */
+.factor-graph__palette {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.factor-graph__palette-search {
+  width: 100%;
+}
+
+.factor-graph__palette-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__palette-groups {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 18rem;
+  padding-right: var(--space-1);
+  overflow-y: auto;
+}
+
+.factor-graph__palette-group h4 {
+  margin: 0 0 var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.factor-graph__palette-group ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factor-graph__palette-item {
+  display: grid;
+  gap: 2px;
+}
+
+.factor-graph__palette-item button {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+  text-align: start;
+  cursor: pointer;
+}
+
+.factor-graph__palette-item button:hover:enabled {
+  border-color: var(--accent);
+}
+
+.factor-graph__palette-item button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.factor-graph__palette-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__palette-signature {
+  font-family: var(--font-mono);
+}
+
+.factor-graph__palette-warning {
+  color: var(--status-warn);
+}
+
 .factor-graph__editor-nodes {
   display: grid;
   gap: var(--space-1);

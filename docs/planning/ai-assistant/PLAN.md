@@ -94,8 +94,8 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `IN_REVIEW` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `a45efc9` · `review_ai_a_01` 1차 REQUEST_CHANGES(P1 1·P2 4·P3 5) → 반영 중 |
-| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `IN_REVIEW` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `c8b17b1` · `review_ai_a_02` 1차 REQUEST_CHANGES(P1 1·P2 6) → 반영 중 |
+| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `IN_REVIEW` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `da08da7` · `review_ai_a_01` 1차 REQUEST_CHANGES(P1 1·P2 4·P3 5) 반영(P3 1건 사양) → 2차 재검토 중 |
+| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `IN_REVIEW` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `f01f69e`(A-01 위 rebase) · `review_ai_a_02` 1차 REQUEST_CHANGES(P1 1·P2 6) → 반영 중 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `IN_PROGRESS` | 구현자 `impl-ai-a03`, 워크트리 `wt-ai-a03`, 브랜치 `feat/ai-a-03-storage-adapters` |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `WAITING` | — |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `WAITING` | — |

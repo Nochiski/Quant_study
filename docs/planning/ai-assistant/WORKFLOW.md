@@ -90,9 +90,9 @@ main
   생성한 언어 요약; 도구 4종 실행), `_prompt.py`, `_chat.py` `AssistantChatService.send`(도구 루프,
   `propose_strategy`는 `StrategyCompilerPort`로 검증 후 `Proposal` 이벤트, 3회 실패 →
   `Failure(PROPOSAL_INVALID)`, `max_tool_rounds`, 취소, 공급자 예외 → `Failure(PROVIDER)`에 예외 타입
-  이름만), 턴 토큰 예산(`Usage` 누적, 초과 → `Failure(TOKEN_BUDGET_EXCEEDED)`, 남은 예산으로 다음 호출
-  `max_output_tokens_per_call` 축소), `_turns.py` `AssistantTurnRunner`(스레드, 즉시 append,
-  `accepted_sequence`, 중복 턴 거부, cancel, 타임아웃 → `Failure(TIMEOUT)`), facade `chat.py`·`turns.py`.
+  이름만, `Usage` 기록), `_turns.py` `AssistantTurnRunner`(스레드, 즉시 append, `accepted_sequence`, 중복
+  턴 거부, cancel, 타임아웃 → `Failure(TIMEOUT)`을 먼저 확정한 뒤 cancel 신호, Failure 우선순위: 첫 Failure만
+  턴 상태), facade `chat.py`·`turns.py`. 토큰 예산 집행은 adapter(A-05·A-06) 책임이라 여기 없다.
 - 테스트: 가짜 `LlmProviderPort`·in-memory 저장소·가짜 compiler로 spec D3의 종료 조건 전부, 턴 러너
   sequence·중복·취소·타임아웃(주입 clock), 시스템 프롬프트가 runtime schema의 최상위 키·노드 kind를
   포함하고 손으로 적은 필드명이 없음.
@@ -125,15 +125,22 @@ main
 
 **Acceptance**
 
-- `adapters/outbound/llm_anthropic`: spec D4 행 전부. 서버 도구 오류 객체 분기(성공 리스트 vs 오류
-  객체) 단위 테스트, `max_uses = request.max_search_uses`, `max_tokens = request.max_output_tokens_per_call`, `stop_reason == "max_tokens"` → `Failure(OUTPUT_TRUNCATED)`,
-  프롬프트 캐싱(안정 블록에만 `cache_control`, 휘발 값은 뒤), 예외 → `FailureCode` 매핑에서 message에
-  예외 타입 이름만(키 문자열 미노출 테스트). `probe`.
+- `adapters/outbound/llm_anthropic`: spec D4 행 전부. 체크 항목:
+  - [ ] `ToolSpec` → `tools[]`(`strict: true`), `web_search_20260209`(`max_uses = request.max_search_uses`)
+  - [ ] 수동 도구 루프(`tool_use` → `execute_tool` → `tool_result`, `pause_turn` 재개, `refusal` → `Failure(REFUSAL)`)
+  - [ ] 스트리밍 → `TextDelta`·`ThinkingSummary`(`display: summarized`)·`SearchActivity`·`Usage`
+  - [ ] 서버 도구 오류 객체 분기(성공 리스트 vs 오류 객체) 단위 테스트
+  - [ ] 토큰 예산: `max_tokens = min(request.max_output_tokens_per_call, 남은 턴 예산)`, 소진 시
+    `Failure(TOKEN_BUDGET_EXCEEDED)`; `stop_reason == "max_tokens"` → `Failure(OUTPUT_TRUNCATED)`
+  - [ ] 프롬프트 캐싱(안정 블록에만 `cache_control`, 휘발 값은 뒤, breakpoint ≤ 4)
+  - [ ] 예외 → `FailureCode` 매핑, message는 예외 타입 이름만(키 문자열 미노출 테스트)
+  - [ ] `probe`(실패 종류 구분)
 - optional extra `llm`에 `anthropic>=1.0`. `RUN_LLM_LIVE=1` smoke 1건.
 
 ### A-06 — OpenAI(Codex) adapter
 
-**Acceptance**: A-05와 같은 수준(검색 횟수 상한은 spec D4 OpenAI 행의 규칙, 잘림 → `OUTPUT_TRUNCATED`).
+**Acceptance**: A-05와 같은 체크 항목(검색 횟수 상한은 spec D4 OpenAI 행의 규칙 — 누적 상한 도달 시 이후
+호출의 도구 목록에서 `web_search` 제거, 잘림 → `OUTPUT_TRUNCATED`, 토큰 예산 집행은 adapter).
 기본 모델은 SDK 문서로 확정해 PLAN 변경 기록에 근거. extra `llm`에 `openai>=2.0`.
 
 ### A-07 — 프롬프트 최종본·컨텍스트 품질·시나리오 fixture
@@ -167,7 +174,8 @@ main
 **Acceptance**
 
 - 생성 SDK SSE 클라이언트(`serverSentEvents.gen.ts`) 기반 리더(턴 시작 응답의 `accepted_sequence`로
-  열고 재시도는 `Last-Event-ID`, 종료 상태에서 닫힘, 진행 중 턴이 없으면 열지 않음, 취소),
+  열고 재시도는 `Last-Event-ID`·`sseMaxRetryAttempts` 명시(기본 5), 종료 상태에서 닫힘, 진행 중 턴이 없으면
+  열지 않음, 409 `no_running_turn`은 재시도 없이 `GET /sessions/{id}` 이력으로 복구(테스트), 취소),
   `SequencedEvent` → 화면 상태 리듀서(스트리밍 텍스트 병합, 검색 활동, 제안, 실패, 턴 상태; 이미 반영한
   sequence 이하는 무시). property test(임의 청크·재개 분할·중복 재전송에 대해 같은 상태).
 - 세션 생성·목록·이력·턴 시작·취소 mutation.

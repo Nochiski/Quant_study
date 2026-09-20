@@ -6,7 +6,7 @@ current_phase: P0,A
 current_pr: P0-01,A-01
 active_prs: [P0-01, A-01]
 parallel_window: [P0-01, A-01]
-last_updated: 2026-09-20T22:49:35+09:00
+last_updated: 2026-09-20T22:55:18+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 0
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `0 / 13` |
-| Aggregated at | `2026-09-20 22:49 KST` |
+| Aggregated at | `2026-09-20 22:55 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -129,6 +129,7 @@ Phase exit:
 |---|---|---|---|---|
 | P0-01 | `review_ai_p0_01` | 1 | REQUEST_CHANGES | P1 3(적용 경로·턴 owner·PR 분할), P2 10, P3 8 → 전부 반영 |
 | P0-01 | `review_ai_p0_01` | 2 | REQUEST_CHANGES | 1차 전부 해소 확인. 신규 P1 2(EventSource 재개 회귀·stale 가드 진행 경로), P2 3, P3 5 → 반영 |
+| P0-01 | `review_ai_p0_01` | 3 | REQUEST_CHANGES | 2차 전부 해소 확인. 신규 P1 1(토큰 예산 축소가 포트로 구현 불가), P2 2, P3 4 → 반영 |
 
 ## 검증 기록
 
@@ -138,6 +139,9 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-20 — P0-01 3차 리뷰 반영: 토큰 예산 집행을 adapter로(서비스는 Usage 기록만), Failure 우선순위(첫
+  Failure만 턴 상태), 409는 backstop·프론트는 이력 복구·`sseMaxRetryAttempts`, OpenAI 검색 상한은 도구 목록 제거,
+  기본값은 A-07 실측 후 확정, A-05 체크 항목화.
 - 2026-09-20 — P0-01 2차 리뷰 반영: SSE 리더는 생성 SDK 클라이언트(`Last-Event-ID`), RUNNING 턴 없으면
   409·keepalive, 적용 전 확인(미리보기·덮어쓰기), 턴 토큰 예산·`OUTPUT_TRUNCATED`, `accepted_sequence` 정의.
 - 2026-09-20 — P0-01 1차 리뷰 반영: spec D2·D3·D4·D5·D6·D7·D9 개정, WORKFLOW 13 PR로 분할(A 7, B 5),

@@ -1,7 +1,7 @@
 # 설계: AI 어시스턴트 — LLM 연결 설정과 전략 사이드바 채팅
 
 > 작성: 2026-09-20 (P0-01 리뷰 1·2차 반영 개정: 제안 적용 경로, 턴·취소 owner, PR 분할, 검색·토큰
-> 상한, base_url·비밀 스크럽·렌더 안전, SSE 재개 규칙, 적용 전 확인)
+> 상한, base_url·비밀 스크럽·렌더 안전, SSE 재개 규칙, 적용 전 확인, 예산 집행 위치·Failure 우선순위)
 >
 > 상태: Accepted (제품 소유자 요청 2026-09-20: "설정 화면에 클로드·코덱스 연결, 그래프든 YAML이든
 > 우측 사이드바에 AI 채팅창. LLM은 들어온 데이터 + 인터넷 검색으로 시장을 서치해 적절한 전략을
@@ -106,7 +106,7 @@ class TurnRequest:
     max_tool_rounds: int
     max_search_uses: int              # 공급자 내장 검색의 max_uses (D4)
     max_output_tokens_per_call: int   # 공급자 호출 한 번의 max_tokens
-    max_turn_output_tokens: int       # 턴 누적 출력 토큰 예산(서비스가 Usage로 집계)
+    max_turn_output_tokens: int       # 턴 누적 출력 토큰 예산. 집행은 adapter(루프 주인)가 한다
 
 # 공급자·application → 화면 이벤트 (세션 저장소에 sequence 번호와 함께 남는다)
 ChatEvent = TextDelta | ThinkingSummary | ToolCall | ToolResultSummary | SearchActivity
@@ -120,7 +120,8 @@ class Turn:
     turn_id: str
     session_id: str
     status: TurnStatus
-    accepted_sequence: int     # 턴 시작 직전 세션의 마지막 sequence. 클라이언트가 after_sequence로 쓴다
+    accepted_sequence: int     # 턴 시작 직전 세션의 마지막 sequence. 클라이언트가 after_sequence로 쓰고,
+                               # 저장 레코드에도 남겨 이력 화면이 턴의 시작 위치를 안다
     started_at: datetime
     finished_at: datetime | None
 
@@ -176,9 +177,14 @@ application이 선언하는 도구(v1). 모든 스키마는 `additionalPropertie
   자연 종료되면 `Done("end_turn")`이고 화면은 "제안 없이 답변만"으로 보인다.
 - 턴당 벽시계 타임아웃(기본 300초) 초과는 `Failure(TIMEOUT)`. 검색 `max_search_uses`(기본 8)와
   호출당 `max_output_tokens_per_call`(기본 16000)은 `TurnRequest`로 adapter에 전달된다.
-- 토큰 예산은 턴 단위다. `AssistantChatService`가 공급자 `Usage` 이벤트의 출력 토큰을 누적해
-  `max_turn_output_tokens`(기본 48000)를 넘으면 `Failure(TOKEN_BUDGET_EXCEEDED)`로 끝내고, 남은 예산이
-  호출당 상한보다 작으면 다음 호출의 `max_output_tokens_per_call`을 그 값으로 줄인다.
+- 토큰 예산은 턴 단위이며 **집행은 adapter가 한다**(루프의 주인이 adapter이고 `TurnRequest`는 루프 시작 전에
+  넘어가므로 서비스는 호출당 상한을 바꿀 수 없다). adapter는 자기 루프 안에서 출력 토큰을 누적해 남은
+  예산이 호출당 상한보다 작으면 다음 호출의 `max_tokens`를 그 값으로 줄이고, 소진되면
+  `Failure(TOKEN_BUDGET_EXCEEDED)`를 내고 루프를 멈춘다. 서비스는 `Usage`를 기록만 한다. 기본값(호출당
+  16000, 턴 64000, 라운드 12)은 A-07의 fixture·live smoke 실측 뒤 확정하고 근거를 PLAN에 남긴다.
+- **Failure 우선순위**: 한 턴에서 턴 상태가 되는 Failure는 먼저 확정된 하나뿐이다. 뒤이어 들어오는
+  Failure(예: 러너 타임아웃이 cancel 신호를 보낸 뒤 adapter가 내는 `CANCELLED`)는 이벤트로 저장되지만
+  상태를 바꾸지 않는다. 러너의 `TIMEOUT`은 cancel 신호를 보내기 전에 확정한다.
 - 공급자 응답이 `max_tokens`로 잘리면 `Failure(OUTPUT_TRUNCATED)`(화면: "답변이 길어 잘렸습니다").
   잘린 텍스트는 보존하되 정상 종료로 보이지 않는다.
 - 취소는 `Failure(CANCELLED)`. 이미 스트리밍된 텍스트는 assistant 메시지로 보존한다.
@@ -218,7 +224,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | adapter | SDK | 기본 모델 | 검색 | 스트리밍 |
 |---|---|---|---|---|
 | `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high`, `max_tokens = request.max_output_tokens_per_call` | `web_search_20260209` 서버 도구, `max_uses = request.max_search_uses`, 도메인 제한 없음 | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
-| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구. 호출당 검색 횟수 옵션이 없으면 adapter가 검색 호출 이벤트를 세어 `max_search_uses` 초과 시 이후 검색을 도구 오류로 돌려주고 `SearchActivity`에 표시 | Responses 스트리밍 |
+| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구(서버 측이라 개별 호출을 거부할 수 없다). adapter가 검색 호출 이벤트를 세어 누적이 `max_search_uses`에 닿으면 이후 공급자 호출의 도구 목록에서 `web_search`를 빼고 그 사실을 모델(텍스트)과 화면(`SearchActivity`)에 알린다. 한 호출 안의 초과는 사후 관측만 가능하다. 실제 SDK 표면은 A-06에서 확정 | Responses 스트리밍 |
 
 - `probe`는 최소 토큰 요청 한 번으로 키·모델·네트워크를 확인하고 `ProbeResult(ok, message,
   latency_ms, failure)`를 돌려준다. 실패 종류를 구분한다(인증·모델 없음·네트워크·요금 한도).
@@ -261,7 +267,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | GET | `/sessions?document_ref=` | 문서의 세션 목록 |
 | GET | `/sessions/{id}` | 메시지·턴 이력 |
 | POST | `/sessions/{id}/turns` | 턴 시작 `{text, context: {source_text, source_format, environment?, diagnostics?}}` → 202 `{turn_id, accepted_sequence}`. `accepted_sequence`는 턴 시작 직전 세션의 마지막 sequence이며 클라이언트가 그대로 `after_sequence`로 쓴다. RUNNING 턴이 있으면 409 `assistant.turn_in_progress` |
-| GET | `/sessions/{id}/events?after_sequence=` | **SSE** `SequencedEvent` 스트림. backtest 이벤트 스트림(`/api/v1/backtests/{run_id}/events`)과 같은 프레이밍(`id`=sequence). 재개 위치는 `after_sequence` 쿼리 또는 `Last-Event-ID` 헤더(헤더가 있으면 우선). 진행 중(RUNNING) 턴이 없으면 409 `assistant.no_running_turn`으로 열지 않는다(무한 재연결 방지). 열린 동안 15초마다 `: keepalive` 주석을 보내고, 그 턴이 종료 상태가 되면 닫는다 |
+| GET | `/sessions/{id}/events?after_sequence=` | **SSE** `SequencedEvent` 스트림. backtest 이벤트 스트림(`/api/v1/backtests/{run_id}/events`)과 같은 프레이밍(`id`=sequence). 재개 위치는 `after_sequence` 쿼리 또는 `Last-Event-ID` 헤더(헤더가 있으면 우선). 진행 중(RUNNING) 턴이 없으면 409 `assistant.no_running_turn`으로 열지 않는다(프론트 규칙 D7의 backstop이며, 프론트는 409에 재시도하지 않고 이력으로 복구한다). 열린 동안 15초마다 `: keepalive` 주석을 보내고, 그 턴이 종료 상태가 되면 닫는다 |
 | POST | `/sessions/{id}/turns/{turn_id}/cancel` | 취소(영속 상태 CANCELLED + 프로세스 내 신호) |
 
 - 422 코드: `assistant.provider_not_installed`, `assistant.no_active_provider`,
@@ -278,7 +284,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 
 | slice | 책임 |
 |---|---|
-| `entities/assistant` | 생성 SDK 타입, 프로파일·세션 query, SSE 리더는 **생성 SDK의 SSE 클라이언트**(`shared/api/generated/core/serverSentEvents.gen.ts`: fetch 기반, `id:` 파싱, 재시도 시 `Last-Event-ID` 부착)를 그대로 쓴다. `EventSource`를 쓰지 않는다(재연결 시 같은 URL을 반복해 중복 수신). 리듀서는 이미 반영한 sequence 이하를 무시한다(멱등). 진행 중 턴이 있을 때만 스트림을 열고 종료 상태에서 닫는다 |
+| `entities/assistant` | 생성 SDK 타입, 프로파일·세션 query, SSE 리더는 **생성 SDK의 SSE 클라이언트**(`shared/api/generated/core/serverSentEvents.gen.ts`: fetch 기반, `id:` 파싱, 재시도 시 `Last-Event-ID` 부착)를 그대로 쓴다. `EventSource`를 쓰지 않는다(재연결 시 같은 URL을 반복해 중복 수신). 리듀서는 이미 반영한 sequence 이하를 무시한다(멱등). 진행 중 턴이 있을 때만 스트림을 열고 종료 상태에서 닫는다. `sseMaxRetryAttempts`를 명시(기본 5)하고, 409 `no_running_turn`은 재시도하지 않고 `GET /sessions/{id}` 이력으로 그 턴의 이벤트를 복구한다(턴 시작 직후 실패해 스트림을 열기 전에 끝난 경우) |
 | `features/configure-ai-providers` | 설정 화면 "AI 연결" 섹션. michelo DB 프로파일 섹션 패턴: 카드 목록(공급자 이름·라벨·모델·꼬리 4자리·활성 배지), 활성 전환, 삭제 확인, 추가 폼(공급자 선택 → 라벨·키·모델·base_url), "연결 테스트" 결과 인라인. 설치 안 된 공급자는 비활성 + 이유 |
 | `features/assist-strategy` | 우측 사이드바 채팅: 메시지 목록, 스트리밍 텍스트, 검색 활동 칩(질의·출처 링크), 도구 활동 접힘, 제안 카드(제목·한 문장·근거·출처·"미리보기"·"문서에 적용"·"적용 후 백테스트"), 취소, 세션 전환, 닫을 때 진행 중 턴 취소 확인. 적용은 `onApplyProposal(proposal)` 콜백으로 밖에 넘긴다(feature가 feature를 import하지 않는다) |
 | `pages/settings` | `/settings` 라우트. 섹션: AI 연결(위 feature) |

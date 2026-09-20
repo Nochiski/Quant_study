@@ -2,11 +2,11 @@
 plan_version: 2
 project: ai-assistant
 project_status: IN_PROGRESS
-current_phase: P0,A
-current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06
-active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06]
-parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06]
-last_updated: 2026-09-21T00:34:46+09:00
+current_phase: P0,A,B
+current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,B-01
+active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, B-01]
+parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, B-01]
+last_updated: 2026-09-21T00:49:43+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 4
@@ -24,12 +24,12 @@ progress_percent: 0
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `P0,A` |
-| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06` |
-| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06` |
+| Current phase | `P0,A,B` |
+| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,B-01` |
+| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, B-01` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `4 / 13` |
-| Aggregated at | `2026-09-21 00:34 KST` |
+| Aggregated at | `2026-09-21 00:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -63,7 +63,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `APPROVED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 0 | `IN_PROGRESS` |
-| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `WAITING` |
+| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `IN_PROGRESS` |
 | **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
@@ -97,7 +97,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `APPROVED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `7649967`(c6d70de + P3 후속) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
-| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_PROGRESS` | 구현자 `impl-ai-a04`, 워크트리 `wt-ai-a04`, 브랜치 `feat/ai-a-04-http-sse`(base A-03) |
+| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_REVIEW` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `645efcb`(A-03 `7649967` 위) · `review_ai_a_04` 진행 중 · 게이트: pytest 1696·ruff·pyright·frontend 4종 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `SELF_CHECK` | 구현 완료(`fa002b6`, A-02 위, 42 테스트, pytest 1681·ruff·pyright 0) · optional extra `llm` + CI `--extra llm` · A-04 push 뒤 rebase·팩토리 등록 → PR |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `IN_PROGRESS` | 구현자 `impl-ai-a06`, 워크트리 `wt-ai-a06`, 브랜치 `feat/ai-a-06-llm-openai`(임시 base A-02 `8324ebc`, A-05 tip 위로 rebase 예정) |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
@@ -112,7 +112,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `WAITING` | — |
+| [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_PROGRESS` | 구현자 `impl-ai-b01`, 워크트리 `wt-ai-b01`, 브랜치 `feat/ai-b-01-settings-providers`(임시 base A-04, A-07 tip 위로 rebase 예정) |
 | [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `WAITING` | — |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `WAITING` | — |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `WAITING` | — |
@@ -148,6 +148,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-21 — A-04(#174) PR 생성·리뷰 배정, A-05 rebase·팩토리 등록 지시, B-01 착수(A-04 위, frontend만).
 - 2026-09-21 — A-01(3차)·A-02(2차)·A-03(2차) APPROVE. A-04 구현 완료·rebase 중, A-05 착수.
 - 2026-09-20 — A-03(#171) PR 생성·리뷰 배정, A-04 착수(A-02 rewrite 뒤 A-03·A-04 rebase 예정).
 - 2026-09-20 — A-01·A-02 1차 리뷰 REQUEST_CHANGES(각 P1 1건) → 같은 구현자가 반영 후 재검토.

@@ -184,6 +184,7 @@ def stream_turn(
     tool_rounds = 0
     idle_pause_resumes = 0
     total_pause_resumes = 0
+    search_budget_spent = False
 
     while True:
         if cancelled():
@@ -205,7 +206,14 @@ def stream_turn(
         max_tokens = min(request.max_output_tokens_per_call, remaining)
         # 검색 예산은 턴 누적이다. 남은 횟수를 호출마다 다시 계산한다(모듈 docstring 표).
         remaining_search_uses = max(0, request.max_search_uses - search.uses)
-        if remaining_search_uses == 0 and ResearchCapability.WEB_SEARCH in request.research:
+        # 소진으로 **넘어가는 순간**에만 찍는다. 조건만 보면 남은 라운드마다 같은 줄이 반복돼
+        # 12라운드 턴의 로그가 같은 문장 11줄이 된다.
+        if (
+            remaining_search_uses == 0
+            and not search_budget_spent
+            and ResearchCapability.WEB_SEARCH in request.research
+        ):
+            search_budget_spent = True
             logger.info(
                 "anthropic web search budget spent — model=%s max_search_uses=%d "
                 "tool_rounds=%d (dropping the tool for the rest of the turn)",
@@ -416,13 +424,17 @@ def _usage_so_far(stream: AnthropicMessageStream) -> Iterator[Usage]:
     """
     try:
         snapshot = stream.current_message_snapshot
+        usage = _usage_of(snapshot.usage)
     except Exception as error:  # reason: 스냅샷 부재를 SDK가 assert로 알려 타입으로 잡히지 않는다
+        # `usage` 읽기까지 `try` 안에 둔다. SDK는 스냅샷 부재를 `assert`로 알리는데 `python -O`
+        # 에서는 그 `assert`가 사라져 `None`이 돌아오고, 밖에 두면 `AttributeError`가 취소 자체를
+        # 실패시킨다 — 이 함수가 막으려던 바로 그 결과다.
         logger.info(
             "anthropic usage snapshot unavailable at cancellation — error_type=%s",
             type(error).__name__,
         )
         return
-    yield _usage_of(snapshot.usage)
+    yield usage
 
 
 def _usage_of(usage: SdkUsage) -> Usage:

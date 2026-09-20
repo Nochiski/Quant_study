@@ -74,7 +74,9 @@ from .anthropic_stream_script import (  # noqa: E402  # reason: 위와 같음
     final_message,
     message_with_future_stop_reason,
     search_error_stop,
+    search_result_content,
     search_result_stop,
+    server_tool_use_content,
     server_tool_use_stop,
     text_event,
     thinking_stop,
@@ -479,6 +481,47 @@ def test_the_search_budget_is_spent_across_calls_not_reset_every_call() -> None:
     assert search_tools(0)[0]["max_uses"] == 2  # 아직 안 썼다
     assert search_tools(1)[0]["max_uses"] == 1  # 한 번 썼다
     assert search_tools(2) == []  # 예산 소진 — 도구를 뺀다
+
+
+def test_a_call_without_the_search_tool_still_carries_the_earlier_search_blocks() -> None:
+    """예산이 소진돼 `web_search`를 뺀 호출의 history에 이전 검색 블록이 그대로 실린다.
+
+    두 규칙이 만나 생기는 조합이다. 하나는 "assistant 턴을 한 글자도 바꾸지 않고 되돌린다"
+    (thinking signature를 지키려고), 다른 하나는 "예산이 소진되면 도구를 뺀다". 그래서 **선언
+    되지 않은 서버 도구의 `server_tool_use`·`web_search_tool_result` 블록이 든 history**를
+    도구 없이 보내게 된다.
+
+    여기서 고정하는 것은 우리 쪽 동작뿐이다. 공급자가 그런 history를 받아 주는지는 문서화된
+    계약이 아니다 — **A-07 live smoke 최우선 항목**이다. 400이면 대안은 도구를 빼는 대신
+    `max_uses=1`로 남겨 1회 초과를 허용하는 것이다.
+    """
+    client = ScriptedMessagesClient(
+        CallScript(
+            events=(
+                server_tool_use_stop("srvtoolu-1", "첫 질의"),
+                search_result_stop("srvtoolu-1", (("A", "https://a.test"),)),
+            ),
+            message=final_message(
+                stop_reason="tool_use",
+                content=[
+                    server_tool_use_content("srvtoolu-1", "첫 질의"),
+                    search_result_content("srvtoolu-1", (("A", "https://a.test"),)),
+                    tool_use_block("toolu-1", "read_current_strategy", {}),
+                ],
+            ),
+        ),
+        CallScript(message=final_message(stop_reason="end_turn")),
+    )
+
+    run_turn(client, request=make_request(max_search_uses=1))
+
+    second = client.payloads[1]
+    assert [tool.get("type") for tool in as_dicts(second.tools)] == [None, None]
+    assistant_turn = next(message for message in second.messages if message["role"] == "assistant")
+    content = assistant_turn["content"]
+    assert not isinstance(content, str)
+    carried = [getattr(block, "type", None) for block in content]
+    assert carried == ["server_tool_use", "web_search_tool_result", "tool_use"]
 
 
 def test_the_tool_list_is_byte_identical_until_a_search_actually_happens() -> None:

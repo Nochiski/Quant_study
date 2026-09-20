@@ -150,6 +150,26 @@ main
 **Acceptance**: 시스템 프롬프트 최종본(역할, 한국어, 도구 순서, 금지, 출처), 세션 `Usage` 집계, 가짜
 공급자 시나리오 fixture 3개(제안 성공·검증 실패 후 수정·검색 후 제안)가 B-05 e2e의 MSW 응답이 된다.
 
+**A-05가 넘긴 항목** (2차 리뷰, 각각 근거가 코드·spec에 있다):
+
+- [ ] **live smoke 최우선** — 검색 예산이 소진돼 `web_search`를 뺀 호출에, 이전 호출의
+  `server_tool_use`·`web_search_tool_result` 블록이 든 history를 공급자가 **받아 주는지**.
+  A-05가 우리 쪽 동작은 고정했지만(`test_a_call_without_the_search_tool_still_carries_the_earlier_search_blocks`)
+  공급자 계약은 문서화돼 있지 않다. 400이면 대안은 도구를 빼는 대신 `max_uses=1`로 남겨 1회
+  초과를 허용하는 것이다. 400은 `Failure(PROVIDER)`로 흡수돼 화면에 사유가 안 보이므로
+  로컬 로그의 `error_type`을 직접 봐야 한다.
+- [ ] **캐시 비용 실측** — 검색이 한 번 일어나면 이후 호출은 시스템 프롬프트를 캐시 읽기가
+  아니라 **쓰기**로 치른다(`_payload.py` 모듈 docstring). `Usage.cache_read_tokens`·
+  `cache_write_tokens`로 실제 값을 재고, 검색 초과를 막는 이득과 견줘 "`max_uses` 고정 +
+  소진 시에만 도구 제거"로 바꿀지 결정한다.
+- [ ] **`UsageView`에 캐시 두 칸을 싣는다** — domain `Usage`와 sqlite codec은 4칸인데 wire는
+  2칸이라 SSE·이력 응답에서 조용히 절삭된다. 세션 집계가 캐시를 뺀 입력 토큰으로 과소
+  보고하지 않으려면 여기서 채워야 한다(OpenAPI·생성 SDK 갱신 동반).
+- [ ] **상한 기본값 확정** — 라운드 12·호출당 16000·턴 64000·검색 8·`MIN_CALL_OUTPUT_TOKENS`
+  256(spec D3이 A-07 실측에 맡긴 값).
+- [ ] **SDK 표면 확인 4건** — thinking 블록 signature 왕복, probe `max_tokens=64`,
+  `display: "summarized"`가 실제로 텍스트를 채우는지, 검색 결과의 `title`이 비는 경우.
+
 **Phase A exit**
 
 - [ ] 가짜 공급자로 HTTP SSE 시나리오 3개 green(재개 포함). live smoke 2건 로컬 통과 기록.

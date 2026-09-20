@@ -62,7 +62,9 @@ __all__ = [
     "final_message",
     "message_with_future_stop_reason",
     "search_error_stop",
+    "search_result_content",
     "search_result_stop",
+    "server_tool_use_content",
     "server_tool_use_stop",
     "text_event",
     "thinking_stop",
@@ -153,6 +155,39 @@ def search_error_stop(
 
 def tool_use_block(call_id: str, name: str, arguments: dict[str, object]) -> ToolUseBlock:
     return ToolUseBlock(type="tool_use", id=call_id, name=name, input=arguments)
+
+
+def server_tool_use_content(tool_use_id: str, query: str) -> ServerToolUseBlock:
+    """최종 메시지 content에 들어가는 서버 도구 호출 블록.
+
+    스트림 이벤트(`server_tool_use_stop`)와 **다른 자리**다. 실제 `get_final_message()`는 검색을
+    한 턴의 content에 이 블록과 결과 블록을 담아 돌려주고, adapter는 그것을 그대로 다음 요청의
+    assistant 턴으로 되돌린다. 대본이 이 블록을 담지 않으면 실제와 다른 history가 만들어져
+    "도구를 뺀 호출에 이전 검색 블록이 실린다"는 조합을 볼 수 없다.
+    """
+    return ServerToolUseBlock(
+        type="server_tool_use", id=tool_use_id, name="web_search", input={"query": query}
+    )
+
+
+def search_result_content(
+    tool_use_id: str, sources: tuple[tuple[str, str], ...] = ()
+) -> WebSearchToolResultBlock:
+    """최종 메시지 content에 들어가는 검색 결과 블록."""
+    return WebSearchToolResultBlock(
+        type="web_search_tool_result",
+        tool_use_id=tool_use_id,
+        content=[
+            WebSearchResultBlock(
+                type="web_search_result",
+                title=title,
+                url=url,
+                encrypted_content="enc",
+                page_age=None,
+            )
+            for title, url in sources
+        ],
+    )
 
 
 def final_message(

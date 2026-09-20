@@ -560,10 +560,12 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   문자열에만 있다. 패널이 필드 옆에 오류를 붙이려면 파싱해야 하므로, inbound 계층에서
   `RunEnvironment`를 먼저 구성해 코드화된 detail로 바꿀지 결정한다.
 - 기간이 전략 문서에서 오던 `dateRange` 의존 제거. OOS 창 검증은 실행 설정의 기간으로.
-- **P2-03이 잠근 `test.fixme` 3건을 해제한다**: `workbench.workflow.spec.ts`의
+- **P2-03이 잠근 `test.fixme` 4건을 해제한다**: `workbench.workflow.spec.ts`의
   `creates, recovers, validates, versions, traces and backtests`와
   `upgrades a frozen 1.0 revision …`, `workbench.real-equity.spec.ts`의
-  `edits the graph on real data …`. 패널이 생기기 전에는 프론트가 `environment`를 싣지 못해
+  `edits the graph on real data …`, `workbench.infrastructure.spec.ts`의
+  `keeps a real debugger trace legible and inside the viewport`(`strategy-debugger.png` 기준선
+  4장도 그때 화면으로 재생성). 패널이 생기기 전에는 프론트가 `environment`를 싣지 못해
   브라우저에서 시작한 run이 422 `backtest.run.environment_required`로 거절된다.
 - **전략 디버거 trace 요청도 같은 배선이 필요하다.** `POST /api/v1/strategies/debug/trace`가
   `environment` 없이 나가면 preview·run과 같은 `portfolio.strategy.invalid` +

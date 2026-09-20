@@ -3,9 +3,9 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P2-01
-active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P2-01]
-parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P2-01]
+current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P2-01
+active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
+parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
 last_updated: 2026-09-21T08:28:37+09:00
 planned_prs: 28
 merged_prs: 0
@@ -103,6 +103,26 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Focused tests | `tools/update-plan-progress.ps1 -Check` |
 | Full gate | 코드 변경 없음 — 문서 링크 존재 확인 |
 
+### P1-05
+
+| 항목 | 값 |
+|---|---|
+| PR | `P1-05` |
+| Intent | 초보자가 가장 자주 만나는 구조 오류 6종이 전부 영문이던 것을 한글 문장으로 바꾸고, 그래프 진단이 전략 문서 네임스페이스로만 나가게 한다 |
+| Acceptance | WORKFLOW P1-05 |
+| Non-goals | 의미 오류 문구 손질(이미 한글), 그래프 새 화면(P4·P5), 실행 설정 UI(P2·P3) |
+| Branch/worktree | `feat/lang2-p1-05-structure-errors-ko` / `wt-lang2-p1-05` |
+| Base SHA | `90d2e9d` (`feat/lang2-p1-03-operator-catalog` tip). 정식 base는 P1-04이며 머지 전 `git rebase --onto <P1-04 tip>` |
+| 문장 소유 | backend. `.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행("compile 진단의 `message`는 backend가 한글 문장으로 완성해 보내고 Problems panel은 그대로 보여준다")을 따른다. `messages.ts`에 진단 문장 템플릿을 두지 않는다 — P1-04와 겹치는 파일이 없다 |
+| 변경 파일 | backend 문장: `domain/strategy/_hydrate.py`(`structure.*` 전부 + 오타 제안 + `LEGACY_SHAPE_CODE`), `adapters/outbound/document_codec/_codec.py`(`document.*`·`yaml.*`·`<format>.syntax`) |
+| | backend 1.0 힌트: `domain/strategy/_upgrade.py`(`legacy_shape_hints` — 판정은 `UPGRADE_STEPS`와 같은 조건), `application/strategy_authoring/_service.py`(키 범위 코드 집합), `domain/strategy/facade/document.py` |
+| | backend 네임스페이스: `domain/factor/_validation.py`(`FACTOR_GRAPH_CODES` 게이트, 순환·중복에 `node_id`), `domain/factor/facade/validation.py`, `domain/strategy/_constraints.py`(`EXPRESSION_CODES` 20개 확장·`expression_code()`), `domain/strategy/facade/constraints.py`, `domain/strategy/_validation.py`(`semantic_issue`가 `factor.` 접두사 거절), `application/portfolio_design/_service.py` |
+| | backend 테스트: `tests/domain/test_strategy_diagnostic_messages.py`(신규 golden 63건), `tests/domain/test_strategy_constraints.py`, `tests/domain/test_strategy_hydrate.py`, `tests/contract/test_strategy_authoring_fixtures.py`, `tests/integration/test_truthful_pipeline.py` |
+| | frontend: `features/edit-strategy/model/document-upgrade.ts`(배너가 `structure.legacy_shape`에도 반응), `model/use-compile-document.ts`(같은 코드는 키 범위), 테스트 2·e2e 1 |
+| | 문서: `docs/manual/strategy-workbench/README.md`(오류 문장 예시·`—` 읽는 법) |
+| Focused tests | `uv run pytest tests/domain/test_strategy_diagnostic_messages.py tests/domain/test_strategy_constraints.py tests/domain/test_strategy_hydrate.py`, `npx vitest run src/features/edit-strategy/__tests__/document-upgrade.test.ts src/features/edit-strategy/__tests__/factor-graph-panel.test.tsx` |
+| Full gate | 아래 "게이트" 참조. OpenAPI·runtime schema 재생성 결과 diff 0 → 생성 SDK 변경 없음 |
+
 ---
 
 ## P0 — 기획 패키지와 계약 문서
@@ -123,7 +143,7 @@ Phase exit:
 | [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `APPROVED` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE (1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2) |
 | [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `APPROVED` | [#177](https://github.com/Nochiski/Quant_study/pull/177) · `review_lang2_p1_03` 2차 APPROVE(1차 REQUEST_CHANGES 반영, 돌연변이 7건 실패 확인), 2차 P3 4건 후속 |
 | [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `APPROVED` | `review_lang2_p1_04` 4차 APPROVE (1·2·3차 REQUEST_CHANGES 차단 2·1·1, P3 7·3·2 전부 반영) |
-| [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `WAITING` | — |
+| [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `SELF_CHECK` | — |
 
 Phase exit:
 

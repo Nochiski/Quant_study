@@ -344,6 +344,45 @@ def test_missing_turn_is_a_port_error(database: AssistantDatabase) -> None:
         repository.append_events("absent", (Done(stop_reason="end_turn"),))
 
 
+def test_session_turns_come_back_in_start_order(database: AssistantDatabase) -> None:
+    """A-04의 이력 화면이 읽는 조회. `chat_turns`는 `WITHOUT ROWID`라 삽입 순서가 없다.
+
+    시작 시각이 같아도(같은 초에 두 턴을 열면 흔하다) 순서가 흔들리면 사이드바의 턴 목록이
+    새로고침마다 뒤바뀐다. 직전 sequence, 그다음 turn_id로 갈라 결정적으로 만든다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn("turn-b", accepted=1))
+    repository.create_turn(_turn("turn-a", accepted=0))
+
+    stored = repository.turns("session-1")
+
+    assert [item.turn_id for item in stored] == ["turn-a", "turn-b"]
+    assert [item.accepted_sequence for item in stored] == [0, 1]
+
+
+def test_session_turns_include_a_turn_that_never_produced_an_event(
+    database: AssistantDatabase,
+) -> None:
+    """이벤트에서 turn_id를 모아 역산하면 사라지는 턴이 있다. 그래서 별도 조회가 필요하다."""
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn())
+    repository.update_turn(_stated(TurnStatus.CANCELLED, finished_at=NOW))
+
+    stored = repository.turns("session-1")
+
+    assert [item.status for item in stored] == [TurnStatus.CANCELLED]
+    assert repository.events("session-1") == ()
+
+
+def test_turns_of_an_unknown_session_is_a_port_error(database: AssistantDatabase) -> None:
+    repository = SQLiteChatSessionRepository(database)
+
+    with pytest.raises(ChatSessionNotFoundError):
+        repository.turns("absent")
+
+
 def test_a_turn_for_an_unknown_session_is_refused(database: AssistantDatabase) -> None:
     repository = SQLiteChatSessionRepository(database)
 

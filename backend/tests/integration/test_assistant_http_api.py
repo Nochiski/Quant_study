@@ -290,6 +290,39 @@ def test_a_turn_streams_its_events_in_order_and_the_stream_closes(tmp_path: Path
     assert len(history["events"]) == 3
 
 
+def test_the_stream_keeps_going_past_done_until_the_turn_settles(tmp_path: Path) -> None:
+    """`Done`은 공급자 스트림이 끝났다는 표시일 뿐 턴 종료 판정이 아니다(spec D3).
+
+    도구가 세운 종료 사유는 손에 든 이벤트를 내보낸 뒤에 적용되므로 `Done` 뒤에 `Failure`가
+    온다. 스트림이 `Done`을 보고 닫으면 그 턴이 왜 실패했는지가 화면에 영영 안 나온다.
+    """
+    gate = threading.Event()
+    provider = _GatedProvider(
+        after=[
+            Done(stop_reason="end_turn"),
+            Failure(code=FailureCode.PROVIDER, message="공급자 호출이 실패했습니다"),
+        ],
+        gate=gate,
+    )
+    client = _client(tmp_path, provider)
+    _create_profile(client)
+    session_id = _start_session(client)
+    client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "Done 뒤에도 읽는다", "context": _CONTEXT},
+    )
+    assert provider.reached_gate.wait(timeout=5.0)
+
+    with client.stream("GET", f"{_ASSISTANT}/sessions/{session_id}/events") as stream:
+        lines = stream.iter_lines()
+        gate.set()
+        payloads = _read_frames(lines, until_id=1)
+
+    assert [item["event"]["type"] for item in payloads] == ["done", "failure"]
+    history = _wait_for_terminal_turn(client, session_id)
+    assert history["turns"][0]["status"] == TurnStatus.FAILED.value
+
+
 def test_the_stream_resumes_after_the_last_event_id_the_client_applied(tmp_path: Path) -> None:
     gate = threading.Event()
     provider = _GatedProvider(
@@ -390,6 +423,28 @@ def test_cancelling_a_running_turn_records_the_cancellation(tmp_path: Path) -> N
     codes = {item["event"]["code"] for item in history["events"]}
     assert [item["event"]["type"] for item in history["events"]] != []
     assert codes == {FailureCode.CANCELLED.value}
+
+
+def test_cancelling_an_already_finished_turn_reports_its_final_state(tmp_path: Path) -> None:
+    """저장소가 종료된 턴의 상태 변경을 거부하므로(A-03), 늦은 취소는 쓰지 않고 읽기만 한다.
+
+    사용자가 취소를 누르는 순간과 턴이 끝나는 순간은 언제든 겹친다. 여기서 500이 나면 화면은
+    "취소 실패"를 보여 주는데 정작 턴은 멀쩡히 끝나 있다.
+    """
+    client = _client(tmp_path, _GatedProvider(after=[Done(stop_reason="end_turn")]))
+    _create_profile(client)
+    session_id = _start_session(client)
+    turn = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "곧 끝나는 턴", "context": _CONTEXT},
+    ).json()
+    _wait_for_terminal_turn(client, session_id)
+
+    late = client.post(f"{_ASSISTANT}/sessions/{session_id}/turns/{turn['turn_id']}/cancel")
+
+    assert late.status_code == 200
+    assert late.json()["status"] == TurnStatus.COMPLETED.value
+    assert client.get(f"{_ASSISTANT}/sessions/{session_id}/events").status_code == 409
 
 
 def test_cancelling_a_turn_that_belongs_to_another_session_is_a_404(tmp_path: Path) -> None:

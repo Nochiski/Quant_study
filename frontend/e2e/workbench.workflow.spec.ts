@@ -1078,7 +1078,7 @@ test.describe("professional YAML workflow", () => {
     ).toContainText("field 반영됨");
 
     // 되돌리기는 툴바 버튼이라 Graph 탭에 머문 채로 동작한다 — 편집기는 이 탭에서 hidden이다(WORKFLOW P1-02).
-    const undoButton = page.getByRole("button", { name: "되돌리기" });
+    const undoButton = page.getByRole("button", { name: "실행 취소" });
     const redoButton = page.getByRole("button", { name: "다시 실행" });
     await expect(undoButton).not.toHaveAttribute("aria-disabled", "true");
     await undoButton.click();

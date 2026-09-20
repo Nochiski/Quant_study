@@ -90,10 +90,20 @@ export const SourceEditor = ({
     [dispatch],
   );
 
-  // External source replacement (load / format switch) is pushed into the editor.
+  // 같은 문서 안의 외부 교체는 편집 이력에 남고, **다른 문서**를 여는 것(`documentEpoch` 증가)은
+  // 남지 않는다 — 되돌리기로 앞 리비전의 텍스트에 닿으면 안 된다(P1-02 후속). epoch는 reducer의
+  // `load`에서만 오르므로 이 비교가 "다른 문서인가"와 같다.
+  const loadedEpoch = useRef(state.documentEpoch);
   useEffect(() => {
-    handle.current?.setText(state.source);
-  }, [state.source]);
+    const editor = handle.current;
+    if (editor === null) return;
+    if (loadedEpoch.current === state.documentEpoch) {
+      editor.setText(state.source);
+      return;
+    }
+    loadedEpoch.current = state.documentEpoch;
+    editor.loadText(state.source);
+  }, [state.documentEpoch, state.source]);
 
   return (
     <div className="source-editor">

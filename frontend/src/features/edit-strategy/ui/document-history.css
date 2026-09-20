@@ -1,14 +1,19 @@
 .doc-history {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-1);
 }
 
-/* 비활성 이유는 툴팁이 아니라 이 문장이다(P1-02) — 키보드·스크린리더 사용자도 읽는다. */
-.doc-history__hint {
-  color: var(--text-muted);
-  font-size: var(--text-size-small);
+.doc-history__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   white-space: nowrap;
+}
+
+.doc-history__icon {
+  flex: none;
 }
 
 /*

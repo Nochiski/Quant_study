@@ -184,10 +184,14 @@
   gap: var(--space-2);
 }
 
-/* 문서 상태 배지는 탭 줄에 산다 — 탭 패널 밖이라 다섯 탭 모두에서 보인다(P1-01). */
+/*
+ * 문서 상태 배지는 탭 줄에 산다 — 탭 패널 밖이라 다섯 탭 모두에서 보인다(P1-01). 실행 취소·다시 실행도
+ * 같은 줄이다(P1-02). 줄바꿈을 허용하면 편집기 높이가 한 줄만큼 줄어 1280px에서 레이아웃이 밀리므로
+ * 한 줄을 유지하고, 남는 폭이 모자라면 탭과 배지가 줄어든다(`min-width: 0` + 말줄임).
+ */
 .ide__editor-tabs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
@@ -195,22 +199,30 @@
 
 .ide__editor-tabs .ui-tabs {
   flex: 1;
+  min-width: 0;
 }
 
-/* 되돌리기·다시 실행도 같은 줄이다 — 탭 패널 밖이라 편집기가 hidden인 탭에서도 닿는다(P1-02). */
+/* 폭이 모자라도 두 버튼은 줄지 않는다 — 탭·배지가 먼저 줄어든다. */
 .ide__editor-history {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
   align-items: center;
   gap: var(--space-2);
 }
 
 .ide__editor-status {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
   padding-inline-end: var(--space-4);
+}
+
+.ide__editor-status .ui-badge {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 문제 목록도 탭 패널 밖, 편집 패널 아래다. 진단이 없으면 패널이 null을 내므로 자리도 비운다. */

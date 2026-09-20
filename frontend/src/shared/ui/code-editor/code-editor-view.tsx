@@ -177,6 +177,9 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
       onEscape,
     };
     const languageCompartment = useRef(new Compartment());
+    // 문서를 갈아 끼울 때 이력을 비우려고 compartment에 둔다: 확장을 잠시 떼면 `historyField`가 사라지고
+    // 다시 붙이면 빈 이력으로 초기화된다(CM6에서 이력을 지우는 방법).
+    const historyCompartment = useRef(new Compartment());
     const readOnlyCompartment = useRef(new Compartment());
     const completionCompartment = useRef(new Compartment());
     const hoverCompartment = useRef(new Compartment());
@@ -212,7 +215,7 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
         bracketMatching(),
         highlightSelectionMatches(),
         syntaxHighlighting(semanticHighlightStyle, { fallback: true }),
-        history(),
+        historyCompartment.current.of(history()),
         lintGutter(),
         linter(null),
         languageCompartment.current.of(language === "json" ? json() : yaml()),
@@ -369,6 +372,19 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           if (!current || current.state.doc.toString() === text) return;
           current.dispatch({
             changes: { from: 0, to: current.state.doc.length, insert: text },
+          });
+        },
+        loadText: (text) => {
+          const current = view.current;
+          if (!current) return;
+          // 교체 트랜잭션에서 이미 history 확장을 떼므로 이 변경은 기록되지 않고,
+          // 다시 붙이는 순간 이전 문서의 편집 단계까지 사라진다(깊이 0).
+          current.dispatch({
+            changes: { from: 0, to: current.state.doc.length, insert: text },
+            effects: historyCompartment.current.reconfigure([]),
+          });
+          current.dispatch({
+            effects: historyCompartment.current.reconfigure(history()),
           });
         },
         replaceRange: (from, to, text, selection) => {

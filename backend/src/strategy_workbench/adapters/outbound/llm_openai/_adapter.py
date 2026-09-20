@@ -33,8 +33,14 @@ __all__ = ["PROBE_MAX_OUTPUT_TOKENS", "OpenAiLlmAdapter"]
 
 logger = logging.getLogger(__name__)
 
-# 연결 테스트 한 번의 출력 상한. Responses API가 받는 최솟값이 16이라 그보다 낮출 수 없다.
-PROBE_MAX_OUTPUT_TOKENS = 16
+# 연결 테스트 한 번의 출력 상한.
+#
+# API가 받는 최솟값은 16이지만 16으로 부르지 않는다. 추론 모델은 본문을 쓰기 전에 추론 토큰을
+# 먼저 쓰고, 상한이 추론분보다 작으면 공급자가 400으로 거절하는 경우가 있다. 그러면 "키가
+# 틀렸다"와 "상한이 너무 낮다"를 구분할 수 없게 되고, 연결 테스트가 존재하는 이유가 사라진다.
+# 64는 그 여유를 두면서도 한 번의 확인으로 끝나는 크기다. 실제 모델별 최솟값은 A-07 live
+# smoke에서 확인한다.
+PROBE_MAX_OUTPUT_TOKENS = 64
 _PROBE_PROMPT = "ping"
 
 
@@ -60,7 +66,7 @@ class OpenAiLlmAdapter:
     def probe(self, secret: str, *, model: str, base_url: str | None) -> ProbeResult:
         """최소 토큰 요청 한 번으로 키·모델·네트워크를 확인한다.
 
-        응답이 `incomplete`로 와도 성공이다. 추론 모델은 16 토큰을 사고에 다 쓰고 본문 없이 끝나는
+        응답이 `incomplete`로 와도 성공이다. 추론 모델은 상한을 사고에 다 쓰고 본문 없이 끝나는
         일이 흔한데, 그것은 키·모델·네트워크가 모두 살아 있다는 뜻이다. 확인하려는 것은 응답의
         내용이 아니라 호출이 성립하는가뿐이다.
 

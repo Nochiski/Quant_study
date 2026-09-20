@@ -8,28 +8,43 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
 import httpx2
-import openai
 import pytest
 
-from strategy_workbench.adapters.outbound.llm_openai._payload import (
+pytest.importorskip("openai", reason="backend optional extra `llm` (uv sync --extra llm)")
+
+import openai  # noqa: E402  # reason: importorskip 이후 import
+
+from strategy_workbench.adapters.outbound.llm_openai._adapter import (  # noqa: E402  # reason: importorskip 이후 import
+    PROBE_MAX_OUTPUT_TOKENS,
+)
+from strategy_workbench.adapters.outbound.llm_openai._client import (  # noqa: E402  # reason: importorskip 이후 import
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_TIMEOUT_SECONDS,
+    SdkResponsesClient,
+)
+from strategy_workbench.adapters.outbound.llm_openai._payload import (  # noqa: E402  # reason: importorskip 이후 import
     INCLUDE,
     REASONING,
     build_input,
     build_tools,
 )
-from strategy_workbench.adapters.outbound.llm_openai.facade.provider import (
+from strategy_workbench.adapters.outbound.llm_openai.facade.provider import (  # noqa: E402  # reason: importorskip 이후 import
     DEFAULT_MODEL,
     OpenAiLlmAdapter,
+    sdk_client_factory,
 )
-from strategy_workbench.application.assistant_chat.facade.ports import LlmProviderPort
-from strategy_workbench.application.assistant_chat.facade.prompt import (
+from strategy_workbench.application.assistant_chat.facade.ports import (  # noqa: E402  # reason: importorskip 이후 import
+    LlmProviderPort,
+)
+from strategy_workbench.application.assistant_chat.facade.prompt import (  # noqa: E402  # reason: importorskip 이후 import
     SEARCH_BUDGET_EXHAUSTED_NOTICE,
 )
-from strategy_workbench.domain.assistant.facade.models import (
+from strategy_workbench.domain.assistant.facade.models import (  # noqa: E402  # reason: importorskip 이후 import
     ChatEvent,
     ChatMessage,
     ChatRole,
@@ -51,7 +66,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     Usage,
 )
 
-from .openai_stream_script import (
+from .openai_stream_script import (  # noqa: E402  # reason: importorskip 이후 import
     CallScript,
     RecordingClientFactory,
     ScriptedResponsesClient,
@@ -839,6 +854,27 @@ def test_the_turn_log_never_quotes_the_provider_error_text(
 
     assert SECRET not in caplog.text
     assert "AuthenticationError" in caplog.text
+    # `caplog.text`는 포매터를 거친 문자열이다. 예외 본문은 `exc_text`에도 따로 실리므로 둘 다 본다
+    # — `logger.exception`으로 바꾸는 순간 그쪽에 응답 본문이 통째로 들어온다.
+    assert all(SECRET not in (record.exc_text or "") for record in caplog.records)
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_the_probe_log_never_quotes_the_provider_error_text(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    leaked = f"Incorrect API key provided: {SECRET}"
+    client = ScriptedResponsesClient(
+        create_error=status_error(openai.AuthenticationError, 401, leaked)
+    )
+    adapter = OpenAiLlmAdapter(client_factory=RecordingClientFactory(client))
+
+    with caplog.at_level(logging.DEBUG):
+        adapter.probe(SECRET, model="gpt-6-astra", base_url=None)
+
+    assert SECRET not in caplog.text
+    assert all(SECRET not in (record.exc_text or "") for record in caplog.records)
+    assert "AuthenticationError" in caplog.text
 
 
 # -- probe -----------------------------------------------------------------------------------
@@ -855,11 +891,11 @@ def test_probe_reports_success_with_a_latency() -> None:
 
     assert result.ok is True
     assert result.latency_ms == 250
-    assert client.create_payloads == [(16, "gpt-6-astra")]
+    assert client.create_payloads == [(PROBE_MAX_OUTPUT_TOKENS, "gpt-6-astra")]
 
 
 def test_probe_succeeds_even_when_the_minimal_response_is_incomplete() -> None:
-    """추론 모델은 16 토큰을 사고에 다 쓰고 본문 없이 끝난다. 그래도 연결은 살아 있다."""
+    """추론 모델은 상한을 사고에 다 쓰고 본문 없이 끝난다. 그래도 연결은 살아 있다."""
     client = ScriptedResponsesClient(
         create_result=response_of(status="incomplete", incomplete_reason="max_output_tokens")
     )
@@ -901,6 +937,113 @@ def test_probe_never_quotes_the_provider_error_text() -> None:
 
     assert SECRET not in result.message
     assert result.message == "API 키가 거부되었습니다. 키를 다시 확인하세요."
+
+
+# -- SDK 래퍼 (`_client.py`) -------------------------------------------------------------------
+#
+# 위 테스트들은 대본을 `OpenAiResponsesClient` Protocol 자리에 통째로 꽂으므로 `_client.py`가 한
+# 줄도 실행되지 않는다. 래퍼가 인자를 빠뜨리거나 잘못된 오버로드를 부르면 단위 테스트는 전부
+# 초록인 채로 프로덕션만 깨진다. 여기서는 SDK를 실제로 만들고 HTTP 전송만 가짜로 바꿔, 우리가
+# 조립한 인자가 그대로 요청에 실리고 SDK가 돌려준 스트림이 그대로 해석되는지 본다.
+
+
+def _sse_body(*events: object) -> bytes:
+    """SDK가 네트워크에서 읽을 SSE 본문.
+
+    손으로 JSON을 적지 않고 SDK 이벤트 객체를 직렬화한다. 스키마를 흉내 내면 SDK가 모양을 바꿔도
+    이 테스트만 초록으로 남는다.
+    """
+    frames: list[str] = []
+    for event in events:
+        payload = event.model_dump_json()  # pyright: ignore[reportAttributeAccessIssue]  # reason: SDK 이벤트는 전부 pydantic 모델이다
+        frames.append(f"data: {payload}\n\n")
+    return "".join(frames).encode("utf-8")
+
+
+def _sdk_with_transport(
+    handler: Callable[[httpx2.Request], httpx2.Response],
+) -> SdkResponsesClient:
+    """진짜 `openai.OpenAI`를 만들고 HTTP 전송만 가짜로 바꾼 래퍼."""
+    return SdkResponsesClient(
+        openai.OpenAI(
+            api_key=SECRET,
+            http_client=httpx2.Client(transport=httpx2.MockTransport(handler)),
+        )
+    )
+
+
+def test_the_sdk_wrapper_sends_our_arguments_and_decodes_the_real_stream() -> None:
+    sent: list[dict[str, object]] = []
+    body = _sse_body(text_delta("모멘텀"), final_event(response_of(output_tokens=7)))
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        sent.append(json.loads(request.content))
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, content=body)
+
+    request = make_request()
+    tools = build_tools(request, web_search=True)
+    with _sdk_with_transport(handler).stream_response(
+        include=INCLUDE,
+        input=build_input(request),
+        instructions=request.system,
+        max_output_tokens=1234,
+        model="gpt-6-astra",
+        reasoning=REASONING,
+        tools=tools,
+    ) as stream:
+        events = list(stream)
+
+    assert sent[0]["stream"] is True
+    assert sent[0]["model"] == "gpt-6-astra"
+    assert sent[0]["max_output_tokens"] == 1234
+    assert sent[0]["instructions"] == request.system
+    assert sent[0]["include"] == INCLUDE
+    assert sent[0]["reasoning"] == REASONING
+    assert tool_names(sent[0]["tools"]) == [  # pyright: ignore[reportArgumentType]  # reason: 요청 본문은 열린 JSON이다
+        "read_current_strategy",
+        "propose_strategy",
+        "web_search",
+    ]
+    # 첨자 대신 풀어서 받는다. 리스트 원소는 이벤트 union이라 `events[1].response`를 타입
+    # 검사기가 좁히지 못하고, `type` 비교로 좁히려면 지역 이름이 필요하다.
+    delta, completed = events
+    assert delta.type == "response.output_text.delta"
+    assert delta.delta == "모멘텀"
+    assert completed.type == "response.completed"
+    assert completed.response.usage is not None
+    assert completed.response.usage.output_tokens == 7
+
+
+def test_the_sdk_wrapper_decodes_a_plain_probe_response() -> None:
+    sent: list[dict[str, object]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        sent.append(json.loads(request.content))
+        return httpx2.Response(200, json=json.loads(response_of().model_dump_json()))
+
+    result = _sdk_with_transport(handler).create(
+        input="ping", max_output_tokens=PROBE_MAX_OUTPUT_TOKENS, model="gpt-6-astra"
+    )
+
+    assert result.status == "completed"
+    # probe는 스트리밍이 아니다. `stream`을 실어 보내면 반환 타입이 달라져 `probe`가 깨진다.
+    assert "stream" not in sent[0]
+    assert sent[0] == {
+        "input": "ping",
+        "max_output_tokens": PROBE_MAX_OUTPUT_TOKENS,
+        "model": "gpt-6-astra",
+    }
+
+
+def test_the_sdk_client_factory_carries_the_base_url_timeout_and_retry_defaults() -> None:
+    """프로덕션 배선이 쓰는 팩토리. 타임아웃이 빠지면 멈춘 소켓을 아무도 깨우지 못한다."""
+    client = sdk_client_factory()(SECRET, "https://proxy.example.com/v1")
+
+    assert isinstance(client, SdkResponsesClient)
+    sdk = client._client  # pyright: ignore[reportPrivateUsage]  # reason: 배선 확인용이라 공개 접근자를 만들 이유가 없다
+    assert str(sdk.base_url).startswith("https://proxy.example.com")
+    assert sdk.timeout == DEFAULT_TIMEOUT_SECONDS
+    assert sdk.max_retries == DEFAULT_MAX_RETRIES
 
 
 # -- facade ----------------------------------------------------------------------------------

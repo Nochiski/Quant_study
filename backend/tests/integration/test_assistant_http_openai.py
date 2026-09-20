@@ -27,18 +27,35 @@ from types import TracebackType
 from typing import Any
 
 import httpx2
-import openai
+import pytest
 from fastapi.testclient import TestClient
 
-from strategy_workbench.adapters.outbound.llm_openai.facade.provider import (
+pytest.importorskip("openai", reason="backend optional extra `llm` (uv sync --extra llm)")
+
+import openai  # noqa: E402  # reason: importorskip 이후 import
+
+from strategy_workbench.adapters.outbound.llm_openai.facade.provider import (  # noqa: E402  # reason: importorskip 이후 import
+    DEFAULT_MODEL,
     OpenAiLlmAdapter,
     OpenAiResponsesClient,
 )
-from strategy_workbench.bootstrap.facade.container import AssistantSettings
-from strategy_workbench.bootstrap.facade.http import build_http_app
-from strategy_workbench.domain.assistant.facade.models import ProviderKind, TurnStatus
+from strategy_workbench.bootstrap.facade.container import (  # noqa: E402  # reason: importorskip 이후 import
+    PROVIDER_ADAPTER_FACTORIES,
+    AssistantSettings,
+)
+from strategy_workbench.bootstrap.facade.http import (  # noqa: E402  # reason: importorskip 이후 import
+    build_http_app,
+)
+from strategy_workbench.domain.assistant.facade.models import (  # noqa: E402  # reason: importorskip 이후 import
+    ProviderKind,
+    TurnStatus,
+)
 
-from ..openai_stream_script import final_event, response_of, text_delta
+from ..openai_stream_script import (  # noqa: E402  # reason: importorskip 이후 import
+    final_event,
+    response_of,
+    text_delta,
+)
 
 _API_KEY = "sk-proj-secret-workbench-ABCD1234"
 _ASSISTANT = "/api/v1/assistant"
@@ -147,6 +164,17 @@ def _settled_history(client: TestClient, session_id: str) -> dict[str, Any]:
     )
 
 
+def test_the_openai_adapter_is_registered_in_the_default_bootstrap_registry() -> None:
+    """레지스트리가 비어 있으면 아래 왕복 테스트가 가짜만 검증하게 된다."""
+    factory = PROVIDER_ADAPTER_FACTORIES[ProviderKind.OPENAI]
+
+    provider = factory()
+
+    assert isinstance(provider, OpenAiLlmAdapter)
+    assert provider.kind is ProviderKind.OPENAI
+    assert provider.default_model() == DEFAULT_MODEL
+
+
 def test_a_turn_runs_end_to_end_through_the_real_openai_adapter(tmp_path: Path) -> None:
     sdk = _ScriptedResponsesClient(
         events=[
@@ -165,9 +193,12 @@ def test_a_turn_runs_end_to_end_through_the_real_openai_adapter(tmp_path: Path) 
         json={"text": "모멘텀 전략을 제안해 줘", "context": _CONTEXT},
     )
 
-    # 프로파일 생성은 adapter의 `default_model()`과 `probe`를 실제로 지나간다.
-    assert profile["model"] == "gpt-6-astra"
+    # "설치 필요"(422 `assistant.provider_not_installed`)가 아니라 probe를 거쳐 201이 나와야
+    # 레지스트리 배선이 살아 있는 것이다.
+    assert profile["model"] == DEFAULT_MODEL
     assert profile["secret_tail"] == _API_KEY[-4:]
+    kinds = {item["kind"]: item for item in client.get(f"{_ASSISTANT}/providers").json()["kinds"]}
+    assert kinds["openai"]["installed"] is True
     assert accepted.status_code == 202, accepted.text
     history = _settled_history(client, session_id)
     events = [item["event"] for item in history["events"]]

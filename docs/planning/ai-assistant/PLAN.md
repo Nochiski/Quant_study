@@ -152,8 +152,12 @@ Phase exit:
   `ChatModel` 목록 첫 항목이자 `Response.model` docstring 예시이고, 공식 모델 문서가 "가장 유능한
   모델, 어디서 시작할지 모르겠으면 GPT-6 Astra"로 소개한다는 것. 화면 이름이 "Codex"지만 spec D4가
   "최신 GPT 모델"을 요구했고 이 기능의 일이 코딩이 아니라 리서치라 codex 계열 대신 범용 플래그십을
-  골랐다. 실호출 확인은 A-07 live smoke 항목(모델 이름 수용, `max_output_tokens=16` probe,
+  골랐다. 실호출 확인은 A-07 live smoke 항목(모델 이름 수용, probe의 `max_output_tokens` 하한,
   `developer` 통지 반응, 추론 항목 재전송 수용).
+- 2026-09-21 — A-06 probe의 `max_output_tokens`를 API 최솟값 16이 아니라 64로 둔다. 추론 모델은
+  본문 전에 추론 토큰을 먼저 쓰므로 상한이 추론분보다 작으면 400이 날 수 있고, 그러면 연결
+  테스트가 "키가 틀렸다"와 "상한이 낮다"를 구분하지 못한다. 모델별 실제 최솟값은 A-07 live
+  smoke에서 확인한다.
 - 2026-09-20 — P0-01 4차 APPROVE. 잔여 P2(`max_tool_rounds` 집행을 adapter로)·D9 값/집행 분리 반영. CI 통과 후 머지 대상.
 - 2026-09-20 — P0-01 3차 리뷰 반영: 토큰 예산 집행을 adapter로(서비스는 Usage 기록만), Failure 우선순위(첫
   Failure만 턴 상태), 409는 backstop·프론트는 이력 복구·`sseMaxRetryAttempts`, OpenAI 검색 상한은 도구 목록 제거,

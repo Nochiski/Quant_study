@@ -6,7 +6,7 @@ current_phase: P0,P1,P2
 current_pr: P0-01,P1-01,P1-02,P2-01,P2-02
 active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02]
 parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02]
-last_updated: 2026-09-21T01:32:23+09:00
+last_updated: 2026-09-21T01:43:12+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 1
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `1 / 28` |
-| Aggregated at | `2026-09-21 01:32 KST` |
+| Aggregated at | `2026-09-21 01:43 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -146,10 +146,10 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Non-goals | `data`·`execution` 제거·`schema_version` 1.2(P2-03), 업그레이더(P2-09), frontend 실행 설정 배선(P3-01) |
 | Branch/worktree | `feat/lang2-p2-02-missing-policy` / `wt-lang2-p2-02` |
 | Base SHA | `fff33fd` (`feat/lang2-p2-01-run-environment`) |
-| Head SHA | `6692d9d` (코드 마지막 커밋. 브랜치 head는 이 PLAN 갱신 커밋) |
-| Diff stat | 커밋 4개 · 29파일(신규 1). `e3dd414` domain·application 배선과 계약 산출물(23파일) → `13fc203` 생성 SDK(1파일) → `78b9c5c` frontend 카탈로그 소비자(5파일) → `6692d9d` 포매팅 부채 정리(2파일, 동작 불변) |
+| Head SHA | `c5bec5a` (코드 마지막 커밋. 브랜치 head는 이 PLAN 갱신 커밋) |
+| Diff stat | 커밋 10개 · 36파일(신규 1) · 776/120줄. 1차: `e3dd414` domain·application 배선과 계약 산출물(23파일) → `13fc203` 생성 SDK → `78b9c5c` frontend 카탈로그 소비자 → `6692d9d` 포매팅 부채 정리(동작 불변) → `e702302` 문서. 리뷰 반영: `7776a98` sandbox 결측 정책 fallback → `81e274f` 생성 SDK → `d1965bd` frontend mock → `c5bec5a` 죽은 catch·주석 정정 → `925b2a2` 문서 |
 | Focused tests | `uv run pytest tests/domain/test_factor_missing_policy.py tests/domain/test_run_environment.py tests/domain/test_factor_trace.py tests/architecture tests/application/test_run_environment_wiring.py -q` |
-| Full gate | backend `uv run pytest -q`(1548 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 21개 clean, 저장소의 기존 부채 21파일은 그대로) · `pyright`(0 errors, `uv sync --all-extras` 후) / frontend `npm run api:generate`(diff 0)·`typecheck`·`lint`·`test`(639, 57파일)·`build` / `uv run --project backend pytest database/tests/test_equity_s21_workbench.py -q`(14 passed) |
+| Full gate | backend `uv run pytest -q`(리뷰 반영 후 1551 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 21개 clean, 저장소의 기존 부채 21파일은 그대로) · `pyright`(0 errors, `uv sync --all-extras` 후) / frontend `npm run api:generate`(diff 0)·`typecheck`·`lint`·`test`(639, 57파일)·`build` / `uv run --project backend pytest database/tests/test_equity_s21_workbench.py -q`(14 passed) |
 
 작업 파일(신규 1 + 수정 28):
 
@@ -223,7 +223,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_REVIEW` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · 2차 APPROVE 대상 `1e0b095` + P3 후속 커밋 1개 · 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 반영, 2차 APPROVE(P3 6 → 코드 2 반영, 문서 3 이관, 본문 1 리드). 커밋 7개(backend 3 + 생성 SDK 1 + 리뷰 반영 3). 31파일은 12절 상한(8파일)을 넘어 논리 단위로 쪼갰다 — 모델·브리지 / 세 요청 배선 / 스키마 엔드포인트, 그리고 CI `api:generate` 게이트가 요구하는 생성 SDK. 게이트: pytest 1494·ruff·pyright(duckdb 4건 기존) · frontend typecheck·lint·Vitest 639·build |
-| [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `IN_REVIEW` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 대기. 커밋 6개(backend 1 + 생성 SDK 1 + frontend 소비자 1 + style 1 + 리뷰 반영 2). 게이트: pytest·ruff·pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest·build |
+| [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `IN_REVIEW` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 대기. 커밋 10개(1차 5 + 리뷰 반영 5, history 재작성 없음). 게이트: pytest 1551 · ruff · pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest 639·build. `database/tests` 는 base `fff33fd` 와 같은 41 failed/1268 passed/33 errors(기존 실패, 이 PR 무관) |
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `WAITING` | — |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `WAITING` | — |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `WAITING` | — |

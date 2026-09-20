@@ -99,7 +99,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `APPROVED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_REVIEW` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `5640f8d2`(A-04 `645efcb` 위) · `06723be3`(A-04 최종 `9f39faec` 위 13커밋, 2차 P2·P3 반영 + A-04 후속 보존 줄 단위 대조: 리뷰 전부 반영, lazy API 등록 재작성, `pause_turn` 결합, SDK env 폴백 차단, `Usage` 캐시 필드, `backend-no-extras` CI job, `AssistantClient`/`AssistantResponse` 타입 분기, extra 설치 전제 테스트 2건 정정) · `review_ai_a_05` 2차 APPROVE WITH CHANGES(블로킹 1은 base 불일치 산물 — replay로 해소) → Usage 분리형 파생 커밋 뒤 3차 확인 |
-| [ ] | `A-06` | `llm_openai` adapter | A-05 | `IN_REVIEW` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `a963f316`(A-05 `bd2747ef` 위 11커밋, A-05 최종 뒤 재rebase 예정) · `review_ai_a_06` 진행 중 · 게이트: pytest 1895(extras)/1718(없음)·ruff·pyright 0 · 기본 모델 `gpt-6-astra` · Usage 분리형 정규화(OpenAI 원시 내역 뺄셈) rebase 때 반영 |
+| [ ] | `A-06` | `llm_openai` adapter | A-05 | `IN_REVIEW` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `a963f316`(A-05 `bd2747ef` 위 11커밋, A-05 최종 뒤 재rebase 예정) · `review_ai_a_06` 1차 REQUEST_CHANGES(P1 2: `OPENAI_CUSTOM_HEADERS`가 Authorization 덮어씀·예산 잔량 API 최소 미만 호출, P2 3: `store=true`·통지 경로 spec 불일치·도구 제거 호출 조합 미테스트, P3 7) → rebase와 함께 반영 · 게이트: pytest 1895(extras)/1718(없음)·ruff·pyright 0 · 기본 모델 `gpt-6-astra` · Usage 분리형 정규화(OpenAI 원시 내역 뺄셈) rebase 때 반영 |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `SELF_CHECK` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring: 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) |
 
 Phase exit:
@@ -147,6 +147,7 @@ Phase exit:
 | B-01 | `review_ai_b_01` | 2 | APPROVE_WITH_COMMENTS | P1·P2·P3 전부 닫힘(캐시 단언 실효성 되돌리기 실측). 새 P2 1(`probingId` 단일 슬롯 — 동시 probe에서 버튼 조기 해제, 주석 오기), P3 1(font-size 토큰화로 h2>h1 위계) → 후속. R2-3 삭제 후 포커스·R2-4 배지 연결은 B-05 |
 | A-05 | `review_ai_a_05` | 2 | APPROVE WITH CHANGES | 1차 12건 전부 해소(P0 red 확인, extras 없는 환경 재현, env 폴백은 `ANTHROPIC_AUTH_TOKEN`까지 차단). 블로킹 1(A-04 하위 모듈 fix 되돌림)은 base `439f9411` 불일치 산물 → replay 보존. P2 2(예산 소진 호출의 history 서버 도구 블록 미테스트 → live smoke 최우선, 캐시 접두 파기 비용 미기재), P3 4 |
 | B-02 | `review_ai_b_02` | 2 | APPROVE_WITH_NITS | 1차 P1 2·P2 2 해소(재현 probe 재실행). 이탈 2건(5값 status, 내부 attempt+retry) 타당. 새 P2 1(`streamKey` 입력 파생 → 세션 이탈·복귀 시 옛 close 사유가 status로), P3 6 → 후속 |
+| A-06 | `review_ai_a_06` | 1 | REQUEST_CHANGES | P1 2(`OPENAI_CUSTOM_HEADERS`→`default_headers`가 Authorization 우선 — A-05도 `ANTHROPIC_CUSTOM_HEADERS` 동일; 턴 예산 잔량<16 호출 400→PROVIDER), P2 3(`store` 기본 true, 통지 경로 spec 문장, 도구 제거 호출에 이전 `web_search_call` 동승 미테스트), P3 7. A-05 결함 부류 15 중 9 부재 확인 |
 
 ## 검증 기록
 

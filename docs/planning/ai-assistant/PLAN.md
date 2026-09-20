@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: READY
-current_phase: P0
-current_pr: P0-01
-active_prs: []
-parallel_window: [P0-01]
-last_updated: 2026-09-20T22:16:11+09:00
+project_status: IN_PROGRESS
+current_phase: P0,A
+current_pr: P0-01,A-01
+active_prs: [P0-01, A-01]
+parallel_window: [P0-01, A-01]
+last_updated: 2026-09-20T22:23:41+09:00
 planned_prs: 10
 merged_prs: 0
 approved_prs: 0
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `READY` |
-| Current phase | `P0` |
-| Current/next PR | `P0-01` |
-| Active PR | none |
+| Project status | `IN_PROGRESS` |
+| Current phase | `P0,A` |
+| Current/next PR | `P0-01,A-01` |
+| Active PR | `P0-01, A-01` |
 | Progress | `0 / 10 merged (0%)` |
 | Approved | `0 / 10` |
-| Aggregated at | `2026-09-20 22:16 KST` |
+| Aggregated at | `2026-09-20 22:23 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -54,8 +54,8 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Planning package | 1 | 0 | `READY` |
-| A | Backend: ports, storage, HTTP, providers | 5 | 0 | `WAITING` |
+| P0 | Planning package | 1 | 0 | `IN_REVIEW` |
+| A | Backend: ports, storage, HTTP, providers | 5 | 0 | `IN_PROGRESS` |
 | B | Frontend: settings, entity, sidebar, e2e | 4 | 0 | `WAITING` |
 | **Total** |  | **10** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
@@ -68,9 +68,9 @@ progress_percent: 0
 | Intent | 기획 패키지·spec을 main에 올린다 |
 | Acceptance | WORKFLOW P0-01 |
 | Non-goals | 코드 변경 |
-| Branch/worktree | `docs/ai-assistant-plan` |
-| Base SHA | — |
-| Head SHA | — |
+| Branch/worktree | `docs/ai-assistant-plan` (PR #166) · A-01은 `wt-ai-a01` / `feat/ai-a-01-domain-ports` |
+| Base SHA | `5f97f8c` (origin/main) |
+| Head SHA | 리뷰 중 |
 | Diff stat | — |
 | Focused tests | `tools/update-plan-progress.ps1 -Check` |
 | Full gate | — |
@@ -81,13 +81,13 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P0-01` | 기획 패키지·설계 spec·SoT 행 예약 | 없음 | `READY` | — |
+| [ ] | `P0-01` | 기획 패키지·설계 spec·SoT 행 예약 | 없음 | `IN_REVIEW` | [#166](https://github.com/Nochiski/Quant_study/pull/166) · `review_ai_p0_01` 진행 중 |
 
 ## A — backend
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `A-01` | `domain/assistant`, `application/assistant_chat` 포트·서비스·도구 루프·제안 검증, 가짜 공급자 테스트, SDK import 게이트 | P0-01 | `WAITING` | — |
+| [ ] | `A-01` | `domain/assistant`, `application/assistant_chat` 포트·서비스·도구 루프·제안 검증, 가짜 공급자 테스트, SDK import 게이트 | P0-01 | `IN_PROGRESS` | 구현자 `impl-ai-a01`, 워크트리 `wt-ai-a01`, 브랜치 `feat/ai-a-01-domain-ports` |
 | [ ] | `A-02` | `assistant_sqlite`·`secrets_local` adapter, `/api/v1/assistant/*` + SSE, bootstrap, OpenAPI | A-01 | `WAITING` | — |
 | [ ] | `A-03` | `llm_anthropic` adapter (claude-opus-5, web_search 서버 도구, 스트리밍, probe) | A-02 | `WAITING` | — |
 | [ ] | `A-04` | `llm_openai` adapter (Responses API, web_search, 스트리밍, probe) | A-03 | `WAITING` | — |
@@ -125,6 +125,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-20 — P0-01 PR #166 생성, 리뷰 배정. A-01 구현 착수(P1·P2 스택과 독립이라 병렬).
 - 2026-09-20 — 패키지 생성. 제품 소유자 요청(설정에서 Claude·Codex 연결, 우측 사이드바 AI 채팅,
   검색 기반 전략 제안, 책임 분리)을 spec D1~D9와 Phase 0·A·B, 10 PR로 정리.
 

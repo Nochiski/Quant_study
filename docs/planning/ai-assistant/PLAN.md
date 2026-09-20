@@ -6,7 +6,7 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
-last_updated: 2026-09-21T07:11:56+09:00
+last_updated: 2026-09-21T07:14:06+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 9
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `9 / 13` |
-| Aggregated at | `2026-09-21 07:11 KST` |
+| Aggregated at | `2026-09-21 07:14 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -100,7 +100,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `APPROVED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `APPROVED` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `c0219894`(A-04 최종 `9f39faec` 위 15커밋) · `review_ai_a_05` 3차 APPROVE(세 라운드 24건 전부 닫힘, 비인증 헤더 통과는 docstring 한 문장 P3 — A-06 rebase 뒤 A-05에 fast-forward) · live smoke 최우선: 선언되지 않은 서버 도구 결과 블록 history 수용 여부 |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `APPROVED` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `6ada372f`(A-05 최종 `c0219894` 위 14커밋; org/project 헤더 `omit`, env 7종 기준선 테스트, spec D6 전수 표, P3 4 + A-05 P3 docstring 적재) · `review_ai_a_06` 2차 APPROVE · 확정 |
-| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `IN_REVIEW` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring) → A-06 최종 `6ada372f` 위 rebase·캐시 필드·재생성 뒤 push·PR( 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) · **A-06 최종 `6ada372f` 위 replay 완료 `4fcad54c`**(10커밋, 33파일 +2971/−27; `UsageView` 성분 2칸·`TokenTotalsView` 성분+`total_input_tokens`, `MODEL_NOTICES`에 `search_budget_exhausted`, pytest 1957) · PR 생성·`review_ai_a_07` 1차 착수 |
+| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `IN_REVIEW` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring) → A-06 최종 `6ada372f` 위 rebase·캐시 필드·재생성 뒤 push·PR( 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) · **A-06 최종 `6ada372f` 위 replay 완료 `4fcad54c`**(10커밋, 33파일 +2971/−27; `UsageView` 성분 2칸·`TokenTotalsView` 성분+`total_input_tokens`, `MODEL_NOTICES`에 `search_budget_exhausted`, pytest 1957) · [#179](https://github.com/Nochiski/Quant_study/pull/179) · `review_ai_a_07` 1차 착수 |
 
 Phase exit:
 

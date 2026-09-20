@@ -112,6 +112,13 @@ export const useAssistChat = ({
     dispatch({ type: "session", sessionId: next });
   };
 
+  /** 사용자가 대화를 바꿀 때. 앞 대화에 매달린 질문과 거부 문구를 함께 버린다. */
+  const switchSession = (next: string | null) => {
+    setPendingPrompt(null);
+    setRejection(null);
+    openSession(next);
+  };
+
   // 목록에서 저절로 고른 대화(auto)만 여기로 온다. 이미 그 세션이면 리듀서가 아무 것도 하지 않는다.
   useEffect(() => {
     dispatch({ type: "session", sessionId });
@@ -231,8 +238,8 @@ export const useAssistChat = ({
   return {
     sessions: list,
     sessionId,
-    selectSession: openSession,
-    startNewSession: () => openSession(null),
+    selectSession: switchSession,
+    startNewSession: () => switchSession(null),
     entries,
     pendingPrompt,
     running,

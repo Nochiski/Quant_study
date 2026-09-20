@@ -6,10 +6,10 @@ current_phase: P0,P1
 current_pr: P0-01,P1-01,P1-02
 active_prs: [P0-01, P1-01, P1-02]
 parallel_window: [P0-01, P1-01, P1-02]
-last_updated: 2026-09-20T23:09:30+09:00
+last_updated: 2026-09-20T23:11:07+09:00
 planned_prs: 28
 merged_prs: 0
-approved_prs: 0
+approved_prs: 1
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,P1-01,P1-02` |
 | Active PR | `P0-01, P1-01, P1-02` |
 | Progress | `0 / 28 merged (0%)` |
-| Approved | `0 / 28` |
-| Aggregated at | `2026-09-20 23:09 KST` |
+| Approved | `1 / 28` |
+| Aggregated at | `2026-09-20 23:11 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -70,16 +70,15 @@ progress_percent: 0
 | `MERGED` | 로컬 gate 후 main merge 완료 |
 | `PAUSED` | 제품·계약 결정이 필요해 일시 정지 |
 
-기본 active PR은 하나다. `parallel_window`에 PR ID를 먼저 기록한 것만 active로 허용한다. 서로 다른
-스택(P1·P2)은 각 하나씩, 같은 스택 위에 쌓인 PR들은 한 line으로 보아 리뷰를 병행한다(yaml-ui WORKFLOW
-13.7절). 집계 도구는 `parallel_window`에 선언된 PR을 전부 active로 센다.
+active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workbench-yaml-ui/WORKFLOW.md)을 그대로
+따른다(재서술하지 않는다). 집계 도구는 PR row 상태에서 active를 뽑아 `parallel_window`와 일치하는지 검사한다.
 
 ## Phase 자동 집계
 
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Planning package and contract docs | 1 | 0 | `IN_REVIEW` |
+| P0 | Planning package and contract docs | 1 | 0 | `APPROVED` |
 | P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_PROGRESS` |
 | P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `WAITING` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
@@ -110,7 +109,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P0-01` | 기획 패키지·설계 spec·ADR/로드맵/SoT 개정 | 없음 | `IN_REVIEW` | [#167](https://github.com/Nochiski/Quant_study/pull/167) · `review_lang2_p0_01` 진행 중 · `deecfe5` |
+| [ ] | `P0-01` | 기획 패키지·설계 spec·ADR/로드맵/SoT 개정 | 없음 | `APPROVED` | [#167](https://github.com/Nochiski/Quant_study/pull/167) · `review_lang2_p0_01` 5차 APPROVE(1~4차 REQUEST_CHANGES 전부 해소) |
 
 Phase exit:
 
@@ -216,6 +215,7 @@ Phase exit:
 | `P0-01` | `review_lang2_p0_01` | 2 | `REQUEST_CHANGES` | P1 2 · P2 3 · P3 4. 1차 18건은 전부 종결 확인. 새 회귀: P2-01 enum 이동 + re-export가 `domain.strategy ↔ domain.backtest` 순환, 합성 제외 후 팩터 0개면 `security_id` 사전순 선정. 반영: enum 이동을 P2-03으로(re-export 없음), `strategy.signal.no_alpha_factor` error, 제외를 `weighting: risk`로 한정 + `FIELD_APPLICABILITY` 행, P2-06 테스트 기준선 정정, `ExclusionReason`·trace 갱신, 아이디어 5 fixture 두 벌 |
 | `P0-01` | `review_lang2_p0_01` | 3 | `REQUEST_CHANGES` | P1 1 · 비차단 3. 2차 9건 종결 확인. P2-03 enum 소비자 목록에 재수출 지점(`specification.py`)이 들어가 순환이 되살아난 것을 고쳤다(삭제 대상, 실제 리다이렉트는 `engine_portfolio` 하나). `/risk/risk_factor_id` 행은 `owned_by_error` 없이 적용 조건만, 배타는 별개 validator error. P2-04·P2-05·P2-06에 OpenAPI 재생성 항목. P2-03에 `template()` 갱신과 12절 재점검 문장 |
 | `P0-01` | `review_lang2_p0_01` | 4 | `REQUEST_CHANGES` | P1 1 · 비차단 3. 3차 4건 종결 확인. P2-06·P2-07의 P1-03(연산자 카탈로그) 교차 의존이 미선언 → WORKFLOW 1절 교차 제약·Dependency 열에 P1-03. OpenAPI 재생성 사유에서 진단 코드 문자열 제외, active PR 문장 정정, P2-03 분할 시 PLAN 절차 참조 |
+| `P0-01` | `review_lang2_p0_01` | 5 | `APPROVE` | 4차 4건 종결. 잔여 문구 2건(active PR 문장을 13.7절 인용으로, 집계 도구 설명 방향) 반영 |
 
 ## 검증 기록
 

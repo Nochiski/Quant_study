@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P2-01,P2-02
-active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02]
-parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02]
-last_updated: 2026-09-21T02:04:21+09:00
+current_pr: P0-01,P1-01,P1-02,P2-01,P2-02,P2-03
+active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03]
+parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03]
+last_updated: 2026-09-21T03:24:33+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 2
@@ -25,8 +25,8 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P2-01,P2-02` |
-| Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02` |
+| Current/next PR | `P0-01,P1-01,P1-02,P2-01,P2-02,P2-03` |
+| Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02, P2-03` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `2 / 28` |
 | Aggregated at | `2026-09-21 02:04 KST` |
@@ -151,6 +151,50 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Focused tests | `uv run pytest tests/domain/test_factor_missing_policy.py tests/domain/test_run_environment.py tests/domain/test_factor_trace.py tests/architecture tests/application/test_run_environment_wiring.py -q` |
 | Full gate | backend `uv run pytest -q`(리뷰 반영 후 1551 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 21개 clean, 저장소의 기존 부채 21파일은 그대로) · `pyright`(0 errors, `uv sync --all-extras` 후) / frontend `npm run api:generate`(diff 0)·`typecheck`·`lint`·`test`(639, 57파일)·`build` / `uv run --project backend pytest database/tests/test_equity_s21_workbench.py -q`(14 passed) |
 
+| 항목 | 값 |
+|---|---|
+| PR | `P2-03` |
+| Intent | 전략 문서에서 실행 설정을 빼고 `CURRENT_SCHEMA_VERSION`을 1.2로 올린다 |
+| Acceptance | WORKFLOW P2-03 |
+| Non-goals | 업그레이더 버전 디스패치·upgrade 응답 `environment`(P2-09), `signal.normalization`(P2-04), 횡단면 eligibility(P2-05), frontend 실행 설정 UI(P3-01·P3-02), 실 DB 마이그레이션 |
+| Branch/worktree | `feat/lang2-p2-03-schema-1-2` / `wt-lang2-p2-03` |
+| Base SHA | `e702302` (`feat/lang2-p2-02-missing-policy`) |
+| Head SHA | 커밋 SHA는 PR 본문 참조 |
+| Diff stat | 커밋 5개 · backend domain/application/adapter + 계약 산출물 + 테스트 + frontend 최소 적응 |
+| Focused tests | `uv run pytest tests/domain/test_strategy_hydrate.py tests/domain/test_run_environment.py tests/architecture tests/application/test_run_environment_wiring.py tests/contract/test_strategy_repository_frozen_1_0.py -q` |
+| 제약사항 | **P2-09 전까지 은퇴 버전 문서의 업그레이드 결과는 저장·실행할 수 없다.** `POST /api/v1/strategy-documents/upgrade`가 아직 1.1까지만 올리므로(1.1 → 1.2 step 등록과 응답 `environment`는 P2-09 acceptance) 돌려준 원문의 compile 진단에 `structure.unsupported_schema_version`이 실린다. 저장된 은퇴 버전 row는 repository codec이 `strip_retired_execution_settings`까지 태워 현재 버전으로 읽으므로 목록·이력·문서 조회는 그대로 동작한다. 크기: 이 PR은 12절 상한(600줄·10파일)을 크게 넘는다 — 최상위 모델 필드 두 개를 지우는 변경이라 hydrate·schema·validation·explanation·compile·adapter·fixture·테스트가 한 커밋 단위로 같이 움직여야 컴파일되고, enum 이동만 떼어내도 상한 안에 들어오지 않는다 |
+| Full gate | backend `uv run pytest -q`(1538 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 clean) · `pyright`(0 errors) / frontend `npm run api:generate`·`typecheck`·`lint`·`test`(639, 57파일)·`build` |
+
+P2-03 결정 5건(WORKFLOW 결정 항목과 원문과 다르게 간 곳):
+
+1. **`dataclass_json_schema`의 owner는 `domain/strategy/facade/schema.py`에 그대로 둔다.**
+   `domain.backtest → domain.strategy` 화살표가 "표기법을 빌린다" 사유로 남지만 규칙 위반이
+   아니다(`DEPENDS_ON` 선언됨, facade가 책임 이름을 가짐). 옮기려면 두 노드 모두가 읽는 새 노드를
+   만들어야 하는데 그 노드의 유일한 내용이 이 빌더 하나라 owner 없는 공용 모듈이 된다.
+2. **실행 설정 수치 범위 행의 owner를 `domain/backtest/_models.py`로 옮겼다.** 1.2 문서에
+   `execution` 섹션이 없어 `/execution/*` 포인터가 가리킬 곳을 잃었기 때문이다. 포인터는 실행 설정
+   문서 기준(`/fee_bps` …)이고 진단 코드는 `strategy.*` validator 레지스트리 밖의
+   `run_environment.*`다 — 실행 설정 값은 문서 검증이 아니라 요청 검증에서 걸린다.
+3. **실행 설정 스키마 엔드포인트는 `application/strategy_authoring`에 그대로 둔다.** 옮기는 것은
+   P3-02와 함께 한다(WORKFLOW P2-03 결정 항목의 선택지 그대로).
+4. **`preflight`의 `environment`는 시그니처에 남기고 읽는다.** 참여율(엔진 능력)과 결측 정책(플랜)이
+   실행 설정 값이라 문서만으로는 같은 판정을 낼 수 없다. 해소 단계가 사라져(문서 브리지 없음)
+   `start()`와 `_run`이 서로 다른 값을 넘길 여지 자체가 없으므로 P2-01 P0의 재발 경로가 닫힌다.
+5. **`environment` 미지정은 필수 필드 오류가 아니라 코드화된 진단이다.** 요청 모델의 타입은
+   `RunEnvironment | None`으로 두고 `require_environment`가 `run_environment.required`(run 경로는
+   422 `backtest.run.environment_required`)로 거절한다. 타입을 필수로 바꾸면 pydantic의 영문
+   "Field required"가 나가 프론트가 번역할 코드를 잃는다.
+
+WORKFLOW 원문과 다르게 간 곳 2건:
+
+1. **`template()`은 시작 팩터 하나를 유지한다.** WORKFLOW는 "P4-04 시작 문서(`schema_version`·
+   `title`만)와 같아야 한다"고 적지만, 이 템플릿은 `create()`로 바로 들어가는 서버 초안이라 팩터를
+   비우면 `strategy.factor.required`로 모든 새 전략 저장이 막힌다. 편집 화면이 여는 빈 시작 문서는
+   저장 전 원문이라 규칙이 다르고, 그쪽은 `NEW_STRATEGY_STARTER`가 이미 두 키만 갖는다.
+2. **422 코드 철자는 `backtest.run.environment_required`다.** WORKFLOW는
+   `backtest_run.environment_required`로 적지만 기존 시작 요청 422 어휘가 전부 `backtest.*`이고
+   프론트가 `backtest.error.<code>`로 번역한다.
+
 작업 파일(신규 1 + 수정 28):
 
 - 신규 backend tests — `tests/domain/test_factor_missing_policy.py`
@@ -224,7 +268,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_REVIEW` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · 2차 APPROVE 대상 `1e0b095` + P3 후속 커밋 1개 · 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 반영, 2차 APPROVE(P3 6 → 코드 2 반영, 문서 3 이관, 본문 1 리드). 커밋 7개(backend 3 + 생성 SDK 1 + 리뷰 반영 3). 31파일은 12절 상한(8파일)을 넘어 논리 단위로 쪼갰다 — 모델·브리지 / 세 요청 배선 / 스키마 엔드포인트, 그리고 CI `api:generate` 게이트가 요구하는 생성 SDK. 게이트: pytest 1494·ruff·pyright(duckdb 4건 기존) · frontend typecheck·lint·Vitest 639·build |
 | [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `APPROVED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 APPROVE(P3 4건 후속 커밋). 커밋 12개(1차 5 + 1차 리뷰 반영 6 + 2차 리뷰 반영 1, history 재작성 없음). 게이트: pytest·ruff·pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest 639·build. `database/tests` 는 base `fff33fd` 와 같은 41 failed/1268 passed/33 errors(기존 실패, 이 PR 무관) |
-| [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `WAITING` | — |
+| [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `SELF_CHECK` | 구현 완료·게이트 통과, 리뷰 대기. 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2`. 게이트: pytest 1538 · ruff · `ruff format --check`(변경 파일 clean) · pyright 0 · frontend `api:generate`·typecheck·lint·Vitest 639·build |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `WAITING` | — |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `WAITING` | — |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `WAITING` | — |
@@ -378,6 +422,15 @@ Phase exit:
   (WORKFLOW가 지정한 유스케이스 서비스 3파일) 밖이다. `execution` 제거가 강제하는 P2-03 acceptance에
   항목으로 넣었다. 그때까지는 명시 `environment`로 참여율·체결 시점을 바꿔도 엔진 호환성 판정과
   tape hash는 문서 값을 읽는다(`ExecutionTiming` 값이 하나뿐이라 tape hash 실효 차이는 없다).
+- 2026-09-21 — P2-03 구현. WORKFLOW 결정 항목 4건에 결론을 내고(위 Packet 결정 1~4), 실행 설정
+  미지정을 코드화된 진단으로 거절하기로 정했다(결정 5). WORKFLOW 원문과 다르게 간 곳 2건(template()의
+  시작 팩터, 422 코드 철자)도 같은 표에 적었다. 크기 분할은 하지 않았다 — WORKFLOW가 제시한 분할선
+  (enum 이동을 뒤 PR로)을 적용해도 `StrategySpec`에서 필드 두 개를 지우는 순간 hydrate·schema·
+  validation·explanation·compile·adapter·fixture·테스트가 같이 움직여야 컴파일되므로 상한 안에
+  들어오지 않는다. 대신 커밋을 논리 단위로 쪼갰다. 1.1 → 1.2 내용 변환
+  (`strip_retired_execution_settings`)을 domain에 두고 저장 row를 읽는 repository codec만 쓰게
+  했다 — 없으면 은퇴 버전 row 조회가 P2-09까지 500이 된다. source 경로는 1.1에서 멈추므로
+  `quality_momentum.v1_1.commented.yaml` 골든과 dict/source drift 검사는 그대로다.
 - 2026-09-20 — P0-01 4차 리뷰 반영: P2-06·P2-07의 P1-03 교차 의존 선언(WORKFLOW 1절·Dependency 열), P2-06·
   P2-07 OpenAPI 재생성 사유 정정, active PR 문장을 도구 동작과 일치, P2-03 분할 시 PLAN 절차 참조.
 - 2026-09-20 — 패키지 생성. 디자인보드 원인 분석(코드 감사 2건, 아이디어 5개 실험)과 제품 소유자

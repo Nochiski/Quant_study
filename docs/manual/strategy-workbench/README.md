@@ -54,15 +54,9 @@ npm run dev
 가운데 큰 편집창을 클릭하고 내용을 모두 지운 뒤 아래 YAML을 붙여넣는다.
 
 ```yaml
-schema_version: "1.1"
+schema_version: "1.2"
 title: "사용자 매뉴얼 모멘텀"
 description: ""
-data:
-  market: KRX
-  start: "2021-01-01"
-  end: "2026-08-31"
-  universe_id: krx.common-stock
-  frequency: daily
 eligibility:
   rules: []
 factors:
@@ -81,15 +75,11 @@ factors:
           window: 252
           kind: time_series
       output_node_id: mom_252
-      missing_policy: drop
 portfolio:
   selection_count: 2
   rebalance: monthly
 risk:
   max_name_weight: 0.05
-execution:
-  timing: next_open
-  fee_bps: 15.0
 parameters: []
 ```
 
@@ -99,15 +89,15 @@ parameters: []
 
 ### 이 전략을 사람 말로 풀면
 
-| 설정                      | 뜻                                             |
-| ------------------------- | ---------------------------------------------- |
-| `market: KRX`             | 한국 주식 대상                                 |
-| `start`, `end`            | 2021-01-01부터 2026-08-31까지 테스트           |
-| `momentum`, `window: 252` | 최근 252거래일 모멘텀이 높은 종목을 선호       |
-| `selection_count: 2`      | 이 연습에서는 점수가 높은 2종목만 선택         |
-| `rebalance: monthly`      | 한 달에 한 번 종목과 비중을 다시 계산          |
-| `max_name_weight: 0.05`   | 한 종목을 최대 5%까지만 보유                   |
-| `timing: next_open`       | 오늘 데이터로 판단하고 다음 거래일 시가에 실행 |
+| 설정                      | 뜻                                       |
+| ------------------------- | ---------------------------------------- |
+| `momentum`, `window: 252` | 최근 252거래일 모멘텀이 높은 종목을 선호 |
+| `selection_count: 2`      | 이 연습에서는 점수가 높은 2종목만 선택   |
+| `rebalance: monthly`      | 한 달에 한 번 종목과 비중을 다시 계산    |
+| `max_name_weight: 0.05`   | 한 종목을 최대 5%까지만 보유             |
+
+schema 1.2부터 시장·기간·유니버스·체결 시점·수수료는 전략 문서가 아니라 **실행 설정**이 갖는다.
+같은 전략을 다른 기간이나 유니버스로 돌려도 전략 revision은 늘지 않는다.
 | `fee_bps: 15.0`           | 거래 비용 15bp, 즉 0.15% 적용                  |
 
 붙여넣고 잠시 기다리면 편집창 위에 초록색 `검증 통과`가 나온다.

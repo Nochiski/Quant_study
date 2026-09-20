@@ -113,7 +113,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영(로컬 `71c44b78`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건) → 2차 재검토 중 · cascade 뒤 push·PR |
-| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `IN_REVIEW` | 구현 완료(로컬 `a9f55f12`, B-01 `9f536bb4` 위 7커밋, vitest 677·e2e 19/19) · `review_ai_b_02` 로컬 ref 검토 중 · cascade 뒤 push·PR |
+| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `IN_REVIEW` | 구현 완료(로컬 `de38aff7`, B-01 `71c44b78` 위 7커밋) · `review_ai_b_02` 1차 REQUEST_CHANGES(P1 2: 재시도 소진 뒤 재연결 불가, 본문 끊김이 ended로 분류·P2 2·P3 3) → 반영 중 · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `IN_PROGRESS` | 구현자 `impl-ai-b03`, 워크트리 `wt-ai-b03`, 브랜치 `feat/ai-b-03-assist-sidebar`(임시 base B-02 로컬 tip) |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `WAITING` | — |
 | [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `WAITING` | — |
@@ -143,6 +143,7 @@ Phase exit:
 | A-05 | `review_ai_a_05` | 1 | REQUEST_CHANGES | P0 1(`output_format=None`이 SDK 센티널 아님 → live에서 모든 텍스트 블록 `ValidationError`, 대본이 `_client.py`를 안 지나 미검출), P1 1(검색 상한 호출당 집행), P2 3(`llm` extra 없이 수집 깨짐, 로그 키 테스트 부재, 미사용 `DEPENDS_ON`), P3 6 → 반영. SDK 표면은 설치본 1.7.0과 전부 일치 |
 | B-01 | `review_ai_b_01` | 1 | REQUEST_CHANGES | P1 1(제출한 API 키가 react-query mutation cache `variables.secret`에 잔류 → 키 실은 요청은 mutation 미사용), P2 2(고급 접힘 시 base_url 전송, 삭제 확인 포커스·announce). FSD·i18n·서버 문구 미노출·스크린샷 OK |
 | A-04 | `review_ai_a_04` | 2 | APPROVE | 1차 11건 중 10 해소·1 근거 보류. `PROVIDER_SDK_MODULES` 표·라이브 SSE 테스트가 권고보다 나음. 새 P3 4(하위 모듈 오분류, pyright ignore, 실패 시 스레드 정리, 공개 setter) → 후속 커밋 |
+| B-02 | `review_ai_b_02` | 1 | REQUEST_CHANGES | P1 2(재시도 상한 소진 뒤 진행 중 턴 스트림 영구 중단 — `streamKey`·`status`·`retry()`로 재연결 owner를 화면으로; 마지막 시도 본문 끊김이 `ended`로 분류 — `onSseError`로 계수), P2 2(이력 병합이 watermark 아래 앞선 턴 이벤트 폐기 → 적용 sequence 집합; `frontend-api-state.md` 갱신), P3 3 |
 
 ## 검증 기록
 

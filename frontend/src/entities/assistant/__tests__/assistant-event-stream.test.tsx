@@ -77,6 +77,8 @@ const history = (
 
 type Connection = {
   push: (item: AssistantEventEnvelopeView) => void;
+  /** 프레임을 임의의 자리에서 자른 청크. 한글이 코드포인트 중간에서 갈리는 경우를 포함한다. */
+  pushChunks: (item: AssistantEventEnvelopeView, size: number) => void;
   close: () => void;
   /** 응답 도중 끊긴 연결. 생성 클라이언트는 여기서 재연결한다. */
   drop: () => void;
@@ -110,6 +112,12 @@ const server = setupServer(
     });
     connections.push({
       push: (item) => controller.enqueue(frame(item)),
+      pushChunks: (item, size) => {
+        const bytes = frame(item);
+        for (let at = 0; at < bytes.length; at += size) {
+          controller.enqueue(bytes.slice(at, at + size));
+        }
+      },
       close: () => controller.close(),
       drop: () => controller.error(new Error("연결이 끊겼습니다")),
     });
@@ -232,6 +240,15 @@ describe("어시스턴트 SSE 리더", () => {
     connections[1].push(envelope(2, "다"));
     await waitFor(() => expect(onEvent).toHaveBeenCalledTimes(3));
     expect(onEvent.mock.calls[2][0].sequence).toBe(2);
+  });
+
+  it("프레임이 임의의 자리에서 잘려 와도 한 이벤트로 읽는다", async () => {
+    mount({ target, lastSequence: -1 });
+    await waitFor(() => expect(connections).toHaveLength(1));
+
+    connections[0].pushChunks(envelope(0, "모멘텀 팩터를 쓰는 전략"), 5);
+    await waitFor(() => expect(onEvent).toHaveBeenCalledTimes(1));
+    expect(onEvent.mock.calls[0][0]).toEqual(envelope(0, "모멘텀 팩터를 쓰는 전략"));
   });
 
   it("409 `no_running_turn`은 다시 열지 않고 이력으로 복구한다", async () => {

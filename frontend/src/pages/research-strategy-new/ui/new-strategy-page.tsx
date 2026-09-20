@@ -26,7 +26,7 @@ import {
   saveStatusTone,
   assistantDocumentRef,
   assistantProposalOf,
-  assistantTurnContext,
+  useAssistantTurnContext,
   useApplyAssistantProposal,
   useApplyProposalThenBacktest,
   useAutosave,
@@ -50,7 +50,6 @@ import {
   useBacktestRunSettings,
 } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
-import { useCommittedRef } from "../../../shared/lib/react";
 import { useNavigate, useSearch } from "../../../shared/lib/router";
 import { Badge, type CodeEditorHandle } from "../../../shared/ui";
 import {
@@ -220,18 +219,11 @@ export const NewStrategyPage = () => {
   );
   // 턴을 시작하는 순간의 문서·실행 설정을 읽는 손잡이. commit된 값을 비추는 ref라 사이드바에 넘기는
   // 함수는 그대로 두고도 늘 지금 화면의 값을 읽는다(`.claude/rules/frontend-react-effects.md`).
-  const assistantContext = useCommittedRef(
-    useMemo(
-      () => (liveSource: string | null) =>
-        assistantTurnContext(document, runSettings.requestOptions, liveSource),
-      [document, runSettings.requestOptions],
-    ),
-  );
   // 턴은 세션 생성 왕복 뒤에 시작될 수 있다. 텍스트는 그 순간 편집기에서 직접 읽는다.
-  const readProposalSource = proposalApply.readSource;
-  const readAssistantContext = useCallback(
-    () => assistantContext.current(readProposalSource()),
-    [assistantContext, readProposalSource],
+  const readAssistantContext = useAssistantTurnContext(
+    document,
+    proposalApply.readSource,
+    runSettings.requestOptions,
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
   // "적용 후 백테스트"는 적용 → 검증 → 실행을 한 동작으로 잇는다(WORKFLOW B-04).
@@ -427,23 +419,24 @@ export const NewStrategyPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
-        assistant={
-          <>
-            <AssistStrategySidebar
-              documentRef={assistantDocumentRefValue}
-              readContext={readAssistantContext}
-              onPreviewProposal={(action) =>
-                proposalApply.preview(assistantProposalOf(action))
-              }
-              onApplyProposal={(action) =>
-                proposalApply.apply(assistantProposalOf(action))
-              }
-              onApplyProposalAndBacktest={(action) =>
-                proposalBacktest.applyThenBacktest(assistantProposalOf(action))
-              }
-            />
-          </>
-        }
+        assistant={({ close }) => (
+          <AssistStrategySidebar
+            documentRef={assistantDocumentRefValue}
+            readContext={readAssistantContext}
+            onPreviewProposal={(action) =>
+              proposalApply.preview(assistantProposalOf(action))
+            }
+            onApplyProposal={(action) =>
+              proposalApply.apply(assistantProposalOf(action))
+            }
+            onApplyProposalAndBacktest={(action) =>
+              proposalBacktest.applyThenBacktest(assistantProposalOf(action))
+            }
+            // 사이드바의 "닫기"는 진행 중 턴 취소를 확인한 뒤 패널을 접는다(spec D7). 패널 헤더의
+            // 접기 버튼은 대화를 끝내지 않는 패널 조작이라 확인을 거치지 않는다.
+            onClose={close}
+          />
+        )}
         debugger={
           <StrategyDebuggerPanel
             document={document}

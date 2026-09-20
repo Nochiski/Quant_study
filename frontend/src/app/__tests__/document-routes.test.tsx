@@ -216,6 +216,7 @@ type AssistantSessionRow = {
 
 let assistantSessions: AssistantSessionRow[] = [];
 const assistantTurns: { text: string; context: TurnContextPayload }[] = [];
+const cancelledTurns: string[] = [];
 let assistantStream: {
   push: (envelope: AssistantEventEnvelopeView) => void;
   close: () => void;
@@ -488,6 +489,20 @@ const server = setupServer(
       );
     },
   ),
+  http.post(
+    `${API}/api/v1/assistant/sessions/:sessionId/turns/:turnId/cancel`,
+    ({ params }) => {
+      cancelledTurns.push(String(params.turnId));
+      return HttpResponse.json({
+        turn_id: String(params.turnId),
+        session_id: String(params.sessionId),
+        status: "cancelled",
+        accepted_sequence: -1,
+        started_at: "2026-09-20T00:01:00Z",
+        finished_at: "2026-09-20T00:02:00Z",
+      });
+    },
+  ),
   http.get(`${API}/api/v1/assistant/sessions/:sessionId/events`, () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     const stream = new ReadableStream<Uint8Array>({
@@ -529,6 +544,7 @@ afterEach(() => {
   tracedStrategies.length = 0;
   assistantSessions = [];
   assistantTurns.length = 0;
+  cancelledTurns.length = 0;
   assistantStream = null;
 });
 afterAll(() => server.close());
@@ -3282,7 +3298,7 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     expect(view.state.doc.toString()).toBe(before);
   });
 
-  it("세션 생성 왕복 뒤에 시작되는 턴도 그 순간 편집기 텍스트를 싣는다", async () => {
+  it("세션 생성 왕복 뒤에 시작되는 턴도 최신 편집기 텍스트를 싣는다", async () => {
     let release: (() => void) | null = null;
     const created = new Promise<void>((resolve) => {
       release = resolve;
@@ -3321,6 +3337,36 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
 
     await waitFor(() => expect(assistantTurns).toHaveLength(1));
     expect(assistantTurns[0].context.source_text).toBe(typedAfterSend);
+  });
+
+  it("턴이 도는 중 사이드바를 닫으면 취소를 확인하고, 계속 두면 닫히지 않는다", async () => {
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    await editor();
+    await askAssistant(user);
+
+    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
+    const confirm = await screen.findByRole("alertdialog", {
+      name: "사이드바 닫기",
+    });
+    expect(cancelledTurns).toHaveLength(0);
+
+    await user.click(
+      within(confirm).getByRole("button", { name: "계속 두기" }),
+    );
+    expect(
+      screen.getByRole("complementary", { name: "AI 어시스턴트" }),
+    ).toBeInTheDocument();
+    expect(cancelledTurns).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
+    await user.click(
+      await screen.findByRole("button", { name: "취소하고 닫기" }),
+    );
+    await waitFor(() => expect(cancelledTurns).toHaveLength(1));
+    expect(
+      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
+    ).not.toBeInTheDocument();
   });
 
   it("기다리는 동안 문서를 고쳤으면 확인을 거쳐 덮어쓴다", async () => {

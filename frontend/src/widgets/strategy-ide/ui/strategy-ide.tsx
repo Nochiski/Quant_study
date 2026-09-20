@@ -1,5 +1,6 @@
 import {
   type ReactNode,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -83,9 +84,15 @@ export type StrategyIdeProps = {
   /**
    * 우측 AI 어시스턴트 사이드바 슬롯(B-04). 넘기지 않으면 패널도 토글도 만들지 않는다 — 어시스턴트를
    * 붙이지 않은 화면의 배치는 그대로다. 내용은 페이지가 주입한다(widget은 채팅을 알지 않는다).
+   *
+   * 함수를 넘기면 패널을 접는 손잡이를 받는다. 사이드바의 "닫기"가 진행 중 턴 취소를 확인한 뒤 패널을
+   * 접는 경로다(spec D7). 패널 헤더의 접기 버튼은 대화를 끝내지 않는 패널 조작이라 확인을 거치지 않는다.
    */
-  assistant?: ReactNode;
+  assistant?: ReactNode | ((controls: AssistantSlotControls) => ReactNode);
 };
+
+/** 슬롯 함수가 받는 패널 손잡이. */
+export type AssistantSlotControls = { close: () => void };
 
 const NARROW_QUERY = "(max-width: 1279px)";
 /** 좌우 패널이 다 펼쳐졌을 때 가운데 편집기에 남겨 두는 최소 폭. 이 아래로 내려가면 오버레이로 돌린다. */
@@ -136,10 +143,20 @@ export const StrategyIde = ({
       ? { ...DEFAULT_LAYOUT, inspectorOpen: false, debuggerOpen: false }
       : DEFAULT_LAYOUT,
   );
-  // 계약과 AI 사이드바를 나란히 두면 편집기가 최소 폭 아래로 내려가는 화면인가. 폭은 CSS가 아니라
-  // 배치 값에서 나오므로 질의도 배치에 따라 바뀐다.
+  // 계약과 AI 사이드바를 나란히 두면 편집기가 최소 폭 아래로 내려가는 화면인가.
+  //
+  // 사이드바 폭은 **기본값 상수**로 재고 지금 폭을 쓰지 않는다. 지금 폭을 쓰면 폭 조절 드래그가 질의를
+  // 바꿔, 임계를 넘는 순간 패널이 오버레이로 바뀌며 핸들이 사라지고(포인터 캡처가 끊긴다) 저장된 폭
+  // 때문에 다음 방문에도 오버레이로 굳는다(B-04 리뷰 P1-3). 오버레이 전환은 "패널을 열었다"로만
+  // 일어나야 한다. 접힌 패널은 자리를 차지하지 않으므로 더하지 않는다.
   const squeezed = useMediaQuery(
-    `(max-width: ${(layout.outlineOpen ? layout.outlineWidth : 0) + layout.inspectorWidth + layout.assistantWidth + EDITOR_MIN_WIDTH - 1}px)`,
+    `(max-width: ${
+      (layout.outlineOpen ? layout.outlineWidth : 0) +
+      (layout.inspectorOpen ? layout.inspectorWidth : 0) +
+      DEFAULT_LAYOUT.assistantWidth +
+      EDITOR_MIN_WIDTH -
+      1
+    }px)`,
   );
   const outlineId = useId();
   const inspectorId = useId();
@@ -172,6 +189,34 @@ export const StrategyIde = ({
       : null;
   const inspectorFloating = narrow || overlayRight === "inspectorOpen";
   const assistantFloating = narrow || overlayRight === "assistantOpen";
+  // 기본이 접힘인데 내용을 미리 마운트하면 화면을 열 때마다 사이드바의 질의가 나간다. 한 번 펼친
+  // 뒤에는 접어도 유지한다 — 진행 중 턴의 스트림이 접기로 끊기면 안 된다(B-04 리뷰 P3).
+  const [assistantMounted, setAssistantMounted] = useState(layout.assistantOpen);
+  /**
+   * 오른쪽 패널 토글. 좁은 화면에서는 계약·AI 서랍이 같은 자리(`position: fixed; right: 0`)에 뜨므로
+   * 한 번에 하나만 연다 — 겹치면 뒤에 깔린 패널이 보이지 않은 채 탭 순서와 접근성 트리에 남는다
+   * (B-04 리뷰 P1-2).
+   */
+  const toggleRight = useCallback(
+    (panel: "inspectorOpen" | "assistantOpen"): void => {
+      const other =
+        panel === "inspectorOpen" ? "assistantOpen" : "inspectorOpen";
+      const opening = !layout[panel];
+      if (opening && narrow && layout[other]) close([other]);
+      if (opening && panel === "assistantOpen") setAssistantMounted(true);
+      toggle(panel);
+    },
+    [close, layout, narrow, toggle],
+  );
+  // 슬롯 함수는 렌더 중에 불리므로 이 손잡이는 ref를 닫지 않는다(`react-hooks/refs`). 접은 뒤 돌아갈
+  // 자리는 상단 바 토글이고, 그 자리는 id로 찾는다.
+  const assistantToggleId = `${assistantId}-toggle`;
+  const closeAssistant = useCallback((): void => {
+    close(["assistantOpen"]);
+    queueMicrotask(() =>
+      document.getElementById(assistantToggleId)?.focus(),
+    );
+  }, [assistantToggleId, close]);
   const theme = useThemePreference();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commands = useMemo<CommandPaletteItem[]>(() => {
@@ -228,7 +273,7 @@ export const StrategyIde = ({
           layout.inspectorOpen
             ? inspectorRestore.current
             : inspectorCollapse.current,
-        execute: () => toggle("inspectorOpen"),
+        execute: () => toggleRight("inspectorOpen"),
       },
       {
         id: "panel.debugger",
@@ -251,7 +296,7 @@ export const StrategyIde = ({
                 layout.assistantOpen
                   ? assistantRestore.current
                   : assistantCollapse.current,
-              execute: () => toggle("assistantOpen"),
+              execute: () => toggleRight("assistantOpen"),
             },
           ]
         : []),
@@ -297,6 +342,7 @@ export const StrategyIde = ({
     symbols,
     theme,
     toggle,
+    toggleRight,
     validateDisabled,
     view,
     viewTabsId,
@@ -357,7 +403,7 @@ export const StrategyIde = ({
         // 오기 때문이다(macOS 옵션 키).
         if (!hasAssistant || event.repeat) return;
         event.preventDefault();
-        toggle("assistantOpen");
+        toggleRight("assistantOpen");
       } else if (event.altKey && !modifier && /^[1-5]$/.test(event.key)) {
         const next = VIEWS[Number(event.key) - 1];
         if (
@@ -386,7 +432,7 @@ export const StrategyIde = ({
     paletteOpen,
     runDisabled,
     saveDisabled,
-    toggle,
+    toggleRight,
     validateDisabled,
     viewTabsId,
   ]);
@@ -406,7 +452,7 @@ export const StrategyIde = ({
           size="small"
           tone="ghost"
           onClick={() => {
-            toggle("inspectorOpen");
+            toggleRight("inspectorOpen");
             queueMicrotask(() => inspectorRestore.current?.focus());
           }}
         >
@@ -465,14 +511,21 @@ export const StrategyIde = ({
           size="small"
           tone="ghost"
           onClick={() => {
-            toggle("assistantOpen");
+            toggleRight("assistantOpen");
             queueMicrotask(() => assistantRestore.current?.focus());
           }}
         >
           {t("ide.collapseAssistant")}
         </Button>
       </header>
-      {assistant}
+      {/* 본문은 한 겹 감싼다 — 슬롯이 요소를 여럿 넘겨도 패널 높이를 나눠 갖지 않는다(리뷰 P1-1). */}
+      <div className="ide__assistant-body">
+        {assistantMounted
+          ? typeof assistant === "function"
+            ? assistant({ close: closeAssistant })
+            : assistant
+          : null}
+      </div>
     </aside>
   ) : null;
 
@@ -528,7 +581,7 @@ export const StrategyIde = ({
               ref={inspectorRestore}
               size="small"
               onClick={() => {
-                toggle("inspectorOpen");
+                toggleRight("inspectorOpen");
                 queueMicrotask(() => inspectorCollapse.current?.focus());
               }}
               aria-controls={ids.inspector}
@@ -554,9 +607,10 @@ export const StrategyIde = ({
           {hasAssistant && (assistantFloating || !layout.assistantOpen) ? (
             <Button
               ref={assistantRestore}
+              id={assistantToggleId}
               size="small"
               onClick={() => {
-                toggle("assistantOpen");
+                toggleRight("assistantOpen");
                 queueMicrotask(() => assistantCollapse.current?.focus());
               }}
               aria-controls={ids.assistant}

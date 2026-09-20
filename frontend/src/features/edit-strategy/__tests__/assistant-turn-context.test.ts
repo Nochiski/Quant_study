@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { parseSource } from "../../../shared/lib/yaml12";
 import {
   assistantDocumentRef,
   assistantTurnContext,
 } from "../model/assistant-turn-context";
+import { useAssistantTurnContext } from "../model/use-assistant-turn-context";
 import {
   documentReducer,
   initialDocumentState,
@@ -120,5 +122,37 @@ describe("assistantTurnContext", () => {
     const turnContext = assistantTurnContext(typing);
     expect(turnContext.diagnostics).toEqual([]);
     expect(turnContext.source_text).toContain("typing");
+  });
+});
+
+describe("useAssistantTurnContext", () => {
+  it("호출 시점의 편집기 텍스트를 싣는다 — reducer가 아직 따라오지 못했어도", () => {
+    // 페이지 배선을 그대로 흉내 낸다: reducer는 SOURCE에 머물러 있고 편집기는 이미 앞서 있다.
+    let live = 'schema_version: "1.1"\ntitle: "편집기가 먼저"\n';
+    const readSource = vi.fn(() => live);
+    const { result, rerender } = renderHook(
+      ({ state }) =>
+        useAssistantTurnContext(state, readSource, { start: "2021-01-01" }),
+      { initialProps: { state: parsed(initialDocumentState("yaml", SOURCE)) } },
+    );
+    const read = result.current;
+
+    expect(read().source_text).toBe(live);
+    // 손잡이는 그대로 두고 값만 따라온다 — 사이드바가 다시 그려지지 않는다.
+    live = 'schema_version: "1.1"\ntitle: "그 다음 글자"\n';
+    const later = parsed(
+      documentReducer(initialDocumentState("yaml", SOURCE), {
+        type: "edit",
+        source: 'schema_version: "1.1"\ntitle: "중간"\n',
+      }),
+    );
+    act(() => rerender({ state: later }));
+    expect(result.current).toBe(read);
+    expect(read()).toEqual({
+      source_text: live,
+      source_format: "yaml",
+      diagnostics: [],
+      environment: { start: "2021-01-01" },
+    });
   });
 });

@@ -9,7 +9,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -17,6 +17,7 @@ import {
   type CodeEditorHandle,
 } from "../../../shared/ui/code-editor";
 import {
+  documentReducer,
   initialDocumentState,
   type DocumentState,
 } from "../model/document-state";
@@ -28,14 +29,19 @@ afterEach(cleanup);
 const BASE = 'schema_version: "1.1"\ntitle: "old"\n';
 const PROPOSED = 'schema_version: "1.1"\ntitle: "new"\n';
 
-/** 문서 하나를 가진 편집기 handle 대역. replaceRange는 텍스트를 실제로 바꾼다. */
+/**
+ * 문서 하나를 가진 편집기 handle 대역. replaceRange는 텍스트를 실제로 바꾸고, 진짜 편집기처럼 구독자에게
+ * 변경을 알린다 — 하네스는 그 알림으로 reducer를 `edit`시켜 텍스트 버전을 올린다.
+ */
 const editorOf = (initial: string) => {
   let text = initial;
+  const listeners: ((next: string) => void)[] = [];
   const handle: CodeEditorHandle = {
     getText: () => text,
     setText: vi.fn(),
     replaceRange: vi.fn((from: number, to: number, insert: string) => {
       text = `${text.slice(0, from)}${insert}${text.slice(to)}`;
+      listeners.forEach((listener) => listener(text));
     }),
     getSelection: () => ({ from: 0, to: 0 }),
     setSelection: vi.fn(),
@@ -46,19 +52,51 @@ const editorOf = (initial: string) => {
     getHistoryState: vi.fn(() => null),
     restoreHistoryState: vi.fn(),
   };
-  return { handle, text: () => text, edit: (next: string) => (text = next) };
+  return {
+    handle,
+    text: () => text,
+    edit: (next: string) => {
+      text = next;
+      listeners.forEach((listener) => listener(text));
+    },
+    subscribe: (listener: (next: string) => void) => {
+      listeners.push(listener);
+    },
+  };
 };
+
+type FakeEditor = ReturnType<typeof editorOf>;
 
 const state = (overrides: Partial<DocumentState> = {}): DocumentState => ({
   ...initialDocumentState("yaml", BASE),
   ...overrides,
 });
 
+/**
+ * 페이지와 같은 흐름을 흉내 낸다: 편집기 변경 → reducer `edit`. 결과 상태의 소유자가 텍스트 버전이므로
+ * (적용 뒤 버전이 하나 올라간다) 이 흐름 없이는 "적용됨"을 읽을 수 없다.
+ */
 const mountHook = (initial = BASE, documentState = state()) => {
   const editor = editorOf(initial);
-  const hook = renderHook(() => useApplyAssistantProposal(documentState));
+  const hook = renderHook(
+    ({ doc }: { doc: DocumentState }) => useApplyAssistantProposal(doc),
+    { initialProps: { doc: documentState } },
+  );
+  let doc = documentState;
+  editor.subscribe((next) => {
+    doc = documentReducer(doc, { type: "edit", source: next });
+    hook.rerender({ doc });
+  });
   act(() => hook.result.current.onEditorReady(editor.handle));
-  return { editor, hook };
+  return {
+    editor,
+    hook,
+    /** 사용자가 한 글자 더 치는 것과 같다. */
+    typeMore: () => {
+      doc = documentReducer(doc, { type: "edit", source: `${doc.source}#` });
+      act(() => hook.rerender({ doc }));
+    },
+  };
 };
 
 describe("useApplyAssistantProposal", () => {
@@ -76,6 +114,17 @@ describe("useApplyAssistantProposal", () => {
     );
     expect(editor.text()).toBe(PROPOSED);
     expect(hook.result.current.status).toEqual({ kind: "applied" });
+  });
+
+  it("적용 결과는 그 뒤 편집 한 번에 걷힌다", () => {
+    const { hook, typeMore } = mountHook();
+    act(() =>
+      hook.result.current.apply({ source: PROPOSED, baseSource: BASE }),
+    );
+    expect(hook.result.current.status).toEqual({ kind: "applied" });
+
+    typeMore();
+    expect(hook.result.current.status).toEqual({ kind: "idle" });
   });
 
   it("문서가 바뀌었으면 덮어쓰지 않고 확인을 요구한다", () => {
@@ -156,7 +205,6 @@ describe("useApplyAssistantProposal", () => {
 
   it("편집기가 없거나 조합 중이면 적용하지 않고 이유를 남긴다", () => {
     const withoutEditor = renderHook(() => useApplyAssistantProposal(state()));
-    expect(withoutEditor.result.current.canApply).toBe(false);
     act(() =>
       withoutEditor.result.current.apply({
         source: PROPOSED,
@@ -169,7 +217,6 @@ describe("useApplyAssistantProposal", () => {
     });
 
     const composing = mountHook(BASE, state({ composing: true }));
-    expect(composing.hook.result.current.canApply).toBe(false);
     act(() =>
       composing.hook.result.current.apply({
         source: PROPOSED,
@@ -202,7 +249,6 @@ describe("useApplyAssistantProposal", () => {
 
   it("JSON 문서에는 제안을 적용하지 않는다", () => {
     const { editor, hook } = mountHook(BASE, state({ format: "json" }));
-    expect(hook.result.current.canApply).toBe(false);
     act(() =>
       hook.result.current.apply({ source: PROPOSED, baseSource: BASE }),
     );
@@ -256,10 +302,21 @@ describe("useApplyAssistantProposal", () => {
   });
 });
 
-const DialogHarness = ({ editor }: { editor: CodeEditorHandle }) => {
-  const apply = useApplyAssistantProposal(state());
+const DialogHarness = ({ editor }: { editor: FakeEditor }) => {
+  const [doc, setDoc] = useState(state);
+  const apply = useApplyAssistantProposal(doc);
   const onEditorReady = apply.onEditorReady;
-  useEffect(() => onEditorReady(editor), [editor, onEditorReady]);
+  useEffect(() => onEditorReady(editor.handle), [editor, onEditorReady]);
+  // 페이지와 같은 흐름: 편집기 변경이 reducer `edit`로 흐른다.
+  useEffect(
+    () =>
+      editor.subscribe((next) =>
+        setDoc((current) =>
+          documentReducer(current, { type: "edit", source: next }),
+        ),
+      ),
+    [editor],
+  );
   return (
     <>
       <button
@@ -277,7 +334,7 @@ const DialogHarness = ({ editor }: { editor: CodeEditorHandle }) => {
 const mountDialog = async (current: string) => {
   const editor = editorOf(current);
   const user = userEvent.setup();
-  render(<DialogHarness editor={editor.handle} />);
+  render(<DialogHarness editor={editor} />);
   await user.click(screen.getByRole("button", { name: "문서에 적용" }));
   return { editor, user };
 };

@@ -290,6 +290,95 @@ describe("StrategyIde assistant 슬롯", () => {
     ).toBeNull();
   });
 
+  it("슬롯이 요소를 여럿 넘겨도 본문 래퍼 하나가 패널 높이를 갖는다", () => {
+    matchMediaBy(() => false);
+    mount({
+      assistant: (
+        <>
+          <p>알림 한 줄</p>
+          <section>채팅</section>
+        </>
+      ),
+    });
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
+    // 패널 직계 자식은 헤더와 본문 래퍼 둘뿐이다(리뷰 P1-1: fragment 자식이 높이를 나눠 가졌다).
+    expect([...panel.children].map((child) => child.className)).toEqual([
+      "ide__panel-header",
+      "ide__assistant-body",
+    ]);
+  });
+
+  it("좁은 화면에서는 우측 서랍이 한 번에 하나만 뜬다", async () => {
+    matchMediaBy(() => true);
+    const user = userEvent.setup();
+    mount();
+    await user.click(screen.getByRole("button", { name: "계약" }));
+    expect(
+      screen.getByRole("complementary", { name: "계약" }),
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    expect(
+      screen.getByRole("complementary", { name: "AI 어시스턴트" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("complementary", { name: "계약" }),
+    ).not.toBeInTheDocument();
+    expect(
+      document.querySelectorAll(
+        ".ide__drawer:not(.ide__drawer--bottom):not([hidden])",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("폭 조절이 오버레이 판정을 바꾸지 않아 핸들이 남는다", async () => {
+    // 1440px 화면: 전략 구조 240 + 계약 320 + 사이드바 기본 360 + 편집기 480 = 1399px 이하만 좁다.
+    const asked: string[] = [];
+    matchMediaBy((query) => {
+      asked.push(query);
+      return false;
+    });
+    const user = userEvent.setup();
+    const first = mount();
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트" }));
+    const handle = () =>
+      screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" });
+    handle().focus();
+    const before = new Set(asked);
+
+    // 예전 판정이 임계로 삼던 401px을 넘어간다(리뷰 P1-3: 여기서 핸들이 사라지고 드래그가 끊겼다).
+    await user.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}");
+    expect(handle()).toHaveAttribute("aria-valuenow", "408");
+    expect(
+      screen
+        .getByRole("complementary", { name: "AI 어시스턴트" })
+        .closest(".ide__drawer"),
+    ).toBeNull();
+    // 질의 문자열이 폭을 타지 않는다 — 드래그가 판정을 바꿀 수 없다.
+    expect(new Set(asked)).toEqual(before);
+    expect([...before].filter((query) => query.includes("1399"))).not.toEqual(
+      [],
+    );
+
+    // 넓힌 폭은 저장되고, 다음 방문에도 고정 패널로 열린다.
+    await user.keyboard("{ArrowLeft}");
+    expect(handle()).toHaveAttribute("aria-valuenow", "392");
+    first.unmount();
+
+    matchMediaBy(() => false);
+    mount();
+    // 펼침 상태도 저장되므로 다시 열 필요가 없다.
+    expect(
+      screen.getByRole("separator", { name: "AI 어시스턴트 크기 조절" }),
+    ).toHaveAttribute("aria-valuenow", "392");
+    expect(
+      screen
+        .getByRole("complementary", { name: "AI 어시스턴트" })
+        .closest(".ide__drawer"),
+    ).toBeNull();
+  });
+
   it("명령 팔레트에서도 사이드바를 여닫는다", async () => {
     matchMedia(false);
     const user = userEvent.setup();

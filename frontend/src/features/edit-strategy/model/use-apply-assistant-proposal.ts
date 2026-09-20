@@ -56,8 +56,6 @@ export type ProposalApplyStatus =
 
 export type AssistantProposalApply = {
   status: ProposalApplyStatus;
-  /** 편집기가 준비됐고 IME 조합 중이 아니다. 사이드바의 "적용" 버튼 게이트. */
-  canApply: boolean;
   onEditorReady: (editor: CodeEditorHandle | null) => void;
   /**
    * 편집기의 지금 텍스트(없으면 null). 턴을 시작하는 쪽이 reducer 상태 대신 이 값을 싣는다 —
@@ -95,18 +93,19 @@ export const useApplyAssistantProposal = (
   state: DocumentState,
 ): AssistantProposalApply => {
   const editor = useRef<CodeEditorHandle | null>(null);
-  const [editorReady, setEditorReady] = useState(false);
   const [scoped, setScoped] = useState<{
-    documentEpoch: number;
+    epoch: number;
+    /** 이 상태가 묶인 텍스트 버전. null이면 버전과 무관하다(확인 창). */
+    version: number | null;
     value: ProposalApplyStatus;
   } | null>(null);
   const documentEpoch = state.documentEpoch;
   const composing = state.composing;
   const format = state.format;
+  const sourceVersion = state.sourceVersion;
 
   const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
     editor.current = next;
-    setEditorReady(next !== null);
   }, []);
 
   const readSource = useCallback(
@@ -114,10 +113,17 @@ export const useApplyAssistantProposal = (
     [],
   );
 
+  /**
+   * 결과(`applied`·`failed`)는 "이 문서의 이 텍스트 버전"이 소유한다 — 그 뒤로 한 글자만 더 쳐도 걷힌다
+   * (업그레이드 훅과 같은 모양, `use-upgrade-document.ts`). 확인 창은 버전과 무관하게 열려 있다가
+   * 사용자의 결정을 기다린다: 그 사이 문서가 바뀌었는지는 `confirm`의 stale 가드가 다시 판정한다.
+   */
   const setStatus = useCallback(
-    (value: ProposalApplyStatus): void =>
-      setScoped({ documentEpoch, value }),
-    [documentEpoch],
+    (
+      value: ProposalApplyStatus,
+      version: number | null = sourceVersion,
+    ): void => setScoped({ epoch: documentEpoch, version, value }),
+    [documentEpoch, sourceVersion],
   );
 
   /** 전체 범위 교체 한 번. 호출 전에 조합·편집기·기준 검사를 마친 상태여야 한다. */
@@ -126,9 +132,10 @@ export const useApplyAssistantProposal = (
       handle.replaceRange(0, handle.getText().length, source);
       handle.scrollTo(0);
       handle.focus();
-      setStatus({ kind: "applied" });
+      // replaceRange가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다.
+      setStatus({ kind: "applied" }, sourceVersion + 1);
     },
-    [setStatus],
+    [setStatus, sourceVersion],
   );
 
   /** 적용·미리보기가 함께 지키는 전제. 통과하면 지금 편집기 텍스트를 돌려준다. */
@@ -153,12 +160,10 @@ export const useApplyAssistantProposal = (
     (proposal: AssistantProposal): void => {
       const currentSource = readCurrent();
       if (currentSource === null) return;
-      setStatus({
-        kind: "confirming",
-        proposal,
-        reason: "preview",
-        currentSource,
-      });
+      setStatus(
+        { kind: "confirming", proposal, reason: "preview", currentSource },
+        null,
+      );
     },
     [readCurrent, setStatus],
   );
@@ -173,23 +178,27 @@ export const useApplyAssistantProposal = (
         overwrite(handle, proposal.source);
         return;
       }
-      setStatus({
-        kind: "confirming",
-        proposal,
-        reason: proposal.baseSource === null ? "unknown" : "changed",
-        currentSource,
-      });
+      setStatus(
+        {
+          kind: "confirming",
+          proposal,
+          reason: proposal.baseSource === null ? "unknown" : "changed",
+          currentSource,
+        },
+        null,
+      );
     },
     [overwrite, readCurrent, setStatus],
   );
 
-  // 다른 문서를 열면 결과·확인 상태는 사라진다(feedback 슬롯과 같은 방식).
   const status = useMemo<ProposalApplyStatus>(
     () =>
-      scoped !== null && scoped.documentEpoch === documentEpoch
+      scoped !== null &&
+      scoped.epoch === documentEpoch &&
+      (scoped.version === null || scoped.version === sourceVersion)
         ? scoped.value
         : IDLE,
-    [documentEpoch, scoped],
+    [documentEpoch, scoped, sourceVersion],
   );
 
   const confirm = useCallback((): void => {
@@ -210,7 +219,6 @@ export const useApplyAssistantProposal = (
 
   return {
     status,
-    canApply: editorReady && !composing && format === "yaml",
     onEditorReady,
     readSource,
     apply,

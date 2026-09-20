@@ -93,6 +93,7 @@ export {
   assistantDocumentRef,
   assistantTurnContext,
 } from "./model/assistant-turn-context";
+export { useAssistantTurnContext } from "./model/use-assistant-turn-context";
 export {
   assistantProposalOf,
   useApplyAssistantProposal,

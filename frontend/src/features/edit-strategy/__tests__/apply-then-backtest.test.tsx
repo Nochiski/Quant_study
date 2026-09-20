@@ -18,11 +18,13 @@ const PROPOSED = 'schema_version: "1.1"\ntitle: "new"\n';
 
 const editorOf = (initial: string) => {
   let text = initial;
+  const listeners: ((next: string) => void)[] = [];
   const handle: CodeEditorHandle = {
     getText: () => text,
     setText: vi.fn(),
     replaceRange: vi.fn((from: number, to: number, insert: string) => {
       text = `${text.slice(0, from)}${insert}${text.slice(to)}`;
+      listeners.forEach((listener) => listener(text));
     }),
     getSelection: () => ({ from: 0, to: 0 }),
     setSelection: vi.fn(),
@@ -33,7 +35,16 @@ const editorOf = (initial: string) => {
     getHistoryState: vi.fn(() => null),
     restoreHistoryState: vi.fn(),
   };
-  return { handle, edit: (next: string) => (text = next) };
+  return {
+    handle,
+    edit: (next: string) => {
+      text = next;
+      listeners.forEach((listener) => listener(text));
+    },
+    subscribe: (listener: (next: string) => void) => {
+      listeners.push(listener);
+    },
+  };
 };
 
 const edited = (source: string): DocumentState =>
@@ -94,6 +105,9 @@ const mountChain = (initial = BASE) => {
     },
   );
   act(() => hook.result.current.apply.onEditorReady(editor.handle));
+  // 페이지와 같은 흐름: 편집기 변경이 reducer `edit`로 흘러 텍스트 버전이 오른다. 적용 결과 상태가
+  // 그 버전에 묶여 있으므로 이 흐름 없이는 "적용됨"을 읽을 수 없다.
+  editor.subscribe((text) => hook.rerender({ state: edited(text), canRun: false }));
   return { editor, run, hook };
 };
 

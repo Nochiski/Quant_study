@@ -147,10 +147,17 @@
 }
 
 /* 사이드바 본문만 스크롤한다 — 헤더(접기 버튼)는 긴 대화에서도 제자리에 남는다. */
-.ide__assistant > :not(.ide__panel-header) {
+.ide__assistant-body {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
   overflow: auto;
+}
+
+/* 이 패널의 제목은 화면에 없다(sr-only). 접기 버튼을 다른 패널과 같은 오른쪽 끝에 둔다. */
+.ide__assistant .ide__panel-header {
+  justify-content: flex-end;
 }
 
 .ide__centre {

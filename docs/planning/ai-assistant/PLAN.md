@@ -100,7 +100,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_REVIEW` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `645efcb`(A-03 `7649967` 위) · `review_ai_a_04` 1차 APPROVE WITH CHANGES(P1 1·P2 3·P3 7) → 반영 중 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_REVIEW` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `5640f8d2`(A-04 `645efcb` 위) · `review_ai_a_05` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 3·P3 6) → A-04 rebase와 함께 반영 |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`19331e4a`, A-05 `5640f8d2` 위 8커밋, pytest 1843·ruff·pyright 0, A-05 리뷰 결정 4건 대칭 적용) · 기본 모델 `gpt-6-astra` · A-05 재작성 뒤 rebase·push → PR |
-| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `IN_PROGRESS` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-a07`, 브랜치 `feat/ai-a-07-prompt-fixtures`(임시 base A-05, A-06 tip 위로 rebase 예정) · live smoke는 키 없어 미실행 예정 |
+| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `IN_PROGRESS` | 구현 1차 완료(로컬 `cb429ed3`, A-05 위: 골든 fixture·live smoke 스크립트·기본값 근거) · 추가 지시: 세션 Usage 집계, 시나리오 fixture 3개(SSE 프레임 배열) → A-06 tip 위 rebase 예정 · live smoke 미실행(키 없음, 사용자 실행 필요) |
 
 Phase exit:
 
@@ -150,6 +150,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-21 — A-07: 실행 설정 문장은 schema 1.1 기준(lang2 P2-03 머지 뒤 프롬프트·골든 갱신 후속), env `STRATEGY_WORKBENCH_LIVE_SMOKE`로 통일, 기본값 5종 유지(근거 표), 타임아웃 300s 여유 얇음(live smoke 후 bootstrap 주입으로 조정).
 - 2026-09-21 — A-02 후속(CI flake 수정)이 스택 위에 없어 A-04·A-05 CI 실패 → A-03부터 cascade rebase(A-03 `d52436b7`, 이어 A-04·A-05·A-06·A-07·B-01).
 - 2026-09-21 — A-04(#174) PR 생성·리뷰 배정, A-05 rebase·팩토리 등록 지시, B-01 착수(A-04 위, frontend만).
 - 2026-09-21 — A-01(3차)·A-02(2차)·A-03(2차) APPROVE. A-04 구현 완료·rebase 중, A-05 착수.

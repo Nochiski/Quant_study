@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P2-01,P2-02,P2-03
-active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03]
-parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03]
-last_updated: 2026-09-21T12:47:39+09:00
+current_pr: P0-01,P1-01,P1-02,P2-01,P2-02,P2-03,P2-04
+active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04]
+parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04]
+last_updated: 2026-09-21T12:59:50+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 3
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P2-01,P2-02,P2-03` |
-| Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02, P2-03` |
+| Current/next PR | `P0-01,P1-01,P1-02,P2-01,P2-02,P2-03,P2-04` |
+| Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04` |
 | Progress | `0 / 28 merged (0%)` |
-| Approved | `3 / 28` |
-| Aggregated at | `2026-09-21 12:47 KST` |
+| Approved | `2 / 28` |
+| Aggregated at | `2026-09-21 12:59 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -165,6 +165,101 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | 제약사항 | **P2-09 전까지 은퇴 버전 문서의 업그레이드 결과는 저장·실행할 수 없다.** `POST /api/v1/strategy-documents/upgrade`가 아직 1.1까지만 올리므로(1.1 → 1.2 step 등록과 응답 `environment`는 P2-09 acceptance) 돌려준 원문의 compile 진단에 `structure.unsupported_schema_version`이 실린다. 저장된 은퇴 버전 row는 repository codec이 `strip_retired_execution_settings`까지 태워 현재 버전으로 읽으므로 목록·이력·문서 조회는 그대로 동작한다. **P2-03~P3-02 구간 브라우저 e2e는 시나리오 4건이 `test.fixme`다.** 상황: 프론트가 실행 요청에 `environment`를 싣지 않는다(그 배선은 P3-02 실행 설정 패널). 인풋: 편집기에서 백테스트 버튼 → `POST /api/v1/backtests`에 `environment` 없음. 에러 위치: `application/backtest_run/_service.py`의 `start()`가 `require_environment`로 422 `backtest.run.environment_required`를 낸다. 위험성: 브라우저에서 시작한 run이 전부 거절되어 e2e가 실제 회귀를 더는 못 잡는다. 전략 디버거 trace 요청도 같은 배선이 없어 `run_environment.required`로 거절되고 "추적 재현 정보" 패널이 뜨지 않는다(같은 fixme 시나리오 안이다) — 그 구간의 백테스트 경로는 명시 `environment`를 싣는 backend 통합 테스트가 검증한다. 잠근 시나리오: `workbench.workflow.spec.ts`의 `creates, recovers, validates, versions, traces and backtests`·`upgrades a frozen 1.0 revision …`, `workbench.real-equity.spec.ts`의 `edits the graph on real data …`, `workbench.infrastructure.spec.ts`의 `keeps a real debugger trace legible and inside the viewport`(trace 요청이 거절되어 "추적 재현 정보" 패널이 뜨지 않는다 — 픽셀 차이가 아니다). 되살리는 지점: P3-02(패널로 `environment` 배선·fixme 해제), P3-03(e2e fixture 1.2로 최종 시나리오 재작성). 크기: 이 PR은 12절 상한(600줄·10파일)을 크게 넘는다 — 최상위 모델 필드 두 개를 지우는 변경이라 hydrate·schema·validation·explanation·compile·adapter·fixture·테스트가 한 커밋 단위로 같이 움직여야 컴파일되고, enum 이동만 떼어내도 상한 안에 들어오지 않는다 |
 | Full gate | backend `uv run pytest -q`(1544 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 clean) · `pyright`(0 errors) / frontend `npm run api:generate`·`typecheck`·`lint`·`test`(639, 57파일)·`build` / `uv run --project backend pytest database/tests -q`(base `1dee07a` 와 같은 41 failed/1268 passed/33 errors — Windows symlink 권한(`WinError 1314`)으로 나는 기존 실패다) |
 
+| 항목 | 값 |
+|---|---|
+| PR | `P2-04` |
+| Intent | `signal.normalization`(none·rank·zscore)을 1.2 언어에 넣고 가중 합 **전에** 횡단면 정규화를 적용한다 |
+| Acceptance | WORKFLOW P2-04 |
+| Non-goals | 연산자 `availability` 판정(WORKFLOW 상 P2-07), 단위 경고 `strategy.signal.unit_mismatch`(P2-07), 횡단면 eligibility(P2-05), `risk.risk_factor_id`(P2-06), 업그레이더의 `normalization: none` 명시(P2-09), frontend i18n·소비자 배선(P3-01) |
+| Branch/worktree | `feat/lang2-p2-04-normalization` / `wt-lang2-p2-04` |
+| Base SHA | `fd3e1f0c` (`origin/feat/lang2-p2-03-schema-1-2`, P2-03 리뷰 후속 포함) |
+| Head SHA | 커밋 SHA는 PR 본문 참조 |
+| Diff stat | 커밋 6개(공식 SoT 정리 1 + 기능 1 + 계약 산출물 1 + frontend 기대값 1 + 문서 1 + 1차 리뷰 반영 1) |
+| Focused tests | `uv run pytest tests/domain/test_portfolio_pipeline.py tests/domain/test_strategy_hydrate.py tests/domain/test_strategy_diff.py tests/domain/test_strategy_spec.py -q` |
+| 제약사항 | 12절 상한 중 **파일 수(10)를 넘긴다** — 29파일(리뷰 반영 뒤 31파일). 넘긴 몫은 (a) 골든 `spec_hash` 리터럴을 한 줄씩 고치는 테스트 6파일, (b) 새 테스트 4파일이다. src 변경은 6파일 99줄이고 handwritten diff 는 약 510줄로 줄 수 상한(600) 안쪽이다. 골든 hash 리터럴이 파일 6곳에 복사돼 있는 것 자체가 부채지만 한 곳으로 모으는 정리는 이 PR 범위 밖이라 backlog 로 남긴다. 중간 상태 base `5653c14e` 에서 작업하던 동안에는 P2-03 잔재(import 붕괴·`typecheck:e2e`·테스트 3건) 우회 커밋 두 개를 앞에 뒀고, P2-03 최종 tip `7ec8f337` 이 같은 수정을 담아 replay 에서 버렸다 |
+| Full gate | backend `uv sync --all-extras` · `maturin develop --release` · `uv run pytest -q`(1571 passed, 0 failed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 clean) · `pyright`(0) · `export_openapi.py` · `export_runtime_schema.py`(둘 다 재생성 후 diff 0) / frontend `npm ci`·`api:generate`(diff 0)·`typecheck`·`typecheck:e2e`·`lint`·`test`(639, 57파일)·`build` / **e2e: AI 스택 완료 후 잠금 아래 실행 예정(미실행).** 1회차는 잠금 래퍼로 돌렸으나 다른 워크트리(`wt-lang2-p2-05`)가 8000·5173 을 잡고 있어 webServer 기동에서 `is already used` 로 죽었다 — 오염이라 결과로 세지 않는다 |
+
+P2-04 결정 7건(WORKFLOW 원문과 다르게 갔거나 원문이 비워 둔 곳 4 + 1차 리뷰 반영 3):
+
+1. **연산자 `availability` 판정은 이 PR 범위가 아니다.** WORKFLOW P2-04 acceptance 에 그 항목이
+   없고, `strategy.operator.unsupported` 와 카탈로그 `availability` 는 P2-07 acceptance 가 통째로
+   갖는다. WORKFLOW 1절 교차 제약도 "P2-06·P2-07 은 P1-03(연산자 카탈로그) merge 뒤 착수"라고
+   적어, P1-03 레지스트리가 없는 이 스택에서 먼저 만들면 owner 가 둘이 된다.
+2. **`plan_hash` 에는 `normalization` 을 넣지 않는다.** `plan_hash`(`domain/factor/_planning.py`)는
+   팩터 그래프 하나의 실행 계획 지문이고, 정규화는 팩터를 **합칠 때** 쓰는 signal 단계 사실이라
+   같은 팩터의 값·캐시가 정규화에 따라 달라지지 않는다. 넣으면 팩터 행렬 캐시가 근거 없이 쪼개진다.
+   전략 단위 지문(`spec_hash` → `strategy_hash` → `tape_hash`)에는 canonical payload 를 통해
+   자동으로 들어가며, 그 사실을 테스트로 고정했다.
+3. **정규화 모집단은 `domain/factor` 의 횡단면 동료 집단 규칙을 그대로 쓴다.** 한 리밸런싱
+   프레임은 기준일 하나이므로 남는 구분자는 `universe_member` 다(`_cross_section_indices` 와 같은
+   키). 유니버스 밖 행이 유니버스 안 종목의 순위를 움직이지 않고, 유니버스 밖 행끼리는 자기들끼리
+   한 집단이 된다. 결측·공개일 초과·비유한값은 모집단에서 빼며, 이는 `_score_candidate` 가 같은
+   값을 점수에서 버리는 사유와 1:1 로 같다.
+4. **순위·표준화 공식은 `domain/factor/_statistics.py` 가 소유한다.** `_evaluation.py` 가 같은
+   두 공식을 세 자리에 펼쳐 쓰고 있어서, 복사하면 `CrossSectionalOperator.RANK` 와
+   `signal.normalization: rank` 가 갈릴 수 있었다. `cross_sectional_rank`·`cross_sectional_zscore`
+   로 뽑고 `domain/factor/facade/cross_section.py` 로 공개해 `domain.portfolio` 가 읽는다
+   (`DEPENDS_ON` 에 `domain.factor` 추가, `domain.factor` 의 `DEPENDS_ON` 은 비어 있어 순환 아님).
+   동작 변경이 아니므로 별도 `refactor` 커밋이다.
+
+5. **`weighting: factor_score` × `normalization: zscore` 는 compile error 로 막는다**
+   (`strategy.portfolio.weighting_normalization_incompatible`, 1차 리뷰 P2-1 반영).
+   - **상황**: schema 1.2 문서, `portfolio.weighting: factor_score`, `signal.normalization:
+     zscore`, 팩터 1개(`direction: high`), `risk.max_name_weight` 가 충분히 큼.
+   - **인풋**: 같은 기준일 5종목의 팩터 원시값 `1,2,3,4,5` 로 `compile_target_tape` 실행.
+   - **에러 위치**: `domain/portfolio/_compiler.py` 의 `_weight_scores` —
+     `score = max(abs(candidate.composite_score or 0.0), 1e-12)`.
+   - **위험성**: `zscore` 는 합성 점수를 평균 0 중심으로 옮긴다. 그 위의 `abs()` 는 "신호가
+     세다" 가 아니라 "평균에서 멀다" 를 비중으로 번역해서, 횡단면 **최악** 종목(0.333)이
+     **최고** 종목(0.333)과 같은 최대 비중을 받고 중앙값 종목은 0 이 된다. 예외도 경고도 없어
+     백테스트 지표만으로는 알 수 없는 silent corrupt 다.
+   - **선택**: 경고가 아니라 **error** 다. 경고로 두면 방향이 뒤집힌 포트폴리오가 그대로
+     실행된다. 부호 있는 합성 점수를 비중으로 옮기는 규칙 자체는 P2-07 compile 게이트가
+     설계한다 — 이 PR 은 그때까지 조합을 막기만 한다.
+
+6. **`factor_score` 에서 0점 종목은 비중 0 으로 tape 에서 뺀다**(1차 리뷰 P2-1 반영).
+   `rank` 의 횡단면 최하위가 **항상 정확히 0.0** 이라, 기존 `max(..., 1e-12)` 바닥값이 그
+   종목에 `4e-13` 짜리 dust 비중을 주고 `target_weight != 0` 필터를 통과해 tape 에 남았다.
+   기본값이 `rank` 라 이 dust 가 기본 동작이었다. 기존 `MISSING_RISK` 와 같은 경로(사유를
+   남기고 `continue`)를 재사용하고 사유는 `ExclusionReason.SCORE_THRESHOLD` 다 — "합성 점수가
+   이 종목을 빼놨다" 라는 같은 뜻이고, `MINIMUM_TRADE` 를 쓰면 이전 보유가 있을 때 `selected`
+   로 되살아나는 별도 분기(`_finalize_decision`)에 잘못 걸린다.
+
+7. **정규화 값 조회는 catch-all default 대신 엄격 조회다**(1차 리뷰 P2-2 반영).
+   `normalized_signals.get(key, value.value)` 는 조회가 빗나가면 **원시값**으로 떨어져서,
+   정규화된 값과 원시값이 같은 가중 합에 섞인다 — 이 PR 이 없애려던 단위 지배가 진단도 예외도
+   없이 되살아난다. 결정 6(분기 exhaustive)과 같은 실패 모양이라 같은 정책을 쓴다:
+   `_signal_value` 가 `none` 분기에서만 원시값을 쓰고, 그 밖에는 `[...]` 로 조회해 `KeyError`
+   를 진단 컨텍스트(`as_of`·`security_id`·`factor_id`·`normalization`·모집단 크기)가 붙은
+   `ValueError` 로 올린다. 지금은 도달 불가이지만 P2-05 가 모집단 전제를 건드린다.
+
+WORKFLOW acceptance 중 **하지 않은 것 2건**:
+
+- **백테스트 골든은 바뀌지 않았다.** `rank` 기본값으로 갈아탄 뒤에도 기존 골든
+  (`test_backtest_http_api.py` 의 결과·지표 parity, `test_truthful_pipeline.py` 의 실행 경로)이
+  그대로 통과한다. 그 문서들이 팩터 하나짜리라 순위 변환이 순서를 보존해 선정·비중이 같기 때문이다.
+  `composite_score` 값 자체는 바뀌지만 골든이 그 값을 고정하지 않는다. WORKFLOW 는 "결과가 바뀌면
+  갱신"이라 조건이 성립하지 않았고, 대신 "`none` 이 1.1 과 같다"를 도메인·통합 두 층에서 테스트로
+  고정했다.
+
+- **은퇴한 1.1 리비전의 설명 문장이 그 리비전의 의미와 다르다**(1차 리뷰 P3, 기록만).
+  저장된 1.1 row 를 `adapters/outbound/strategy_sqlite/_record_codec.py` 가 `normalization`
+  없이 hydrate 하므로 기본값 `RANK` 가 붙고, `explain_strategy` 가 "횡단면 순위로 맞춘 뒤 …
+  결합" 이라고 말한다. 그 리비전의 실제 의미는 원시값 가중합이다. 실행은 `requires_upgrade`
+  가 막아(`backtest_run/_service.py`) 수치 손실은 없고, 문장을 바로잡는 owner 는 업그레이더가
+  `normalization: none` 을 명시하는 **P2-09** 다. 표시 문구만 남는 노출이라 이 PR 에서는
+  고치지 않고 기록한다.
+
+- **(정보) 이 PR 은 "P2-09 전까지 실 SQLite 에 1.2 revision 을 저장하지 않는다"(WORKFLOW 1절)에
+  의존한다.** 이 PR 이후 `normalization` 없이 저장된 1.2 `spec_json` 은 `_record_codec` 의
+  canonical 재직렬화 비교에서 탈락한다. 그 규칙이 이미 막고 있어 결함은 아니다.
+
+- **`quality_momentum.yaml` 에 `signal:` 블록을 넣지 않았다.** 이 verbose fixture 는 frontend 27개
+  테스트가 포인터·줄 위치로 읽고 있어(`readBackendFixture`), 섹션 하나를 끼우면 그 테스트들이
+  깨진다. 소비자 배선은 P3-01 범위라 fixture 를 그대로 두고, 명시 값 커버리지는
+  `quality_momentum.legacy.json` 과 hydrate 테스트가 맡는다. P3-01 이 frontend 투영을 만질 때
+  verbose fixture 에 같이 넣는 것을 권한다.
+
 P2-03 결정 9건(WORKFLOW 결정 항목 4 + 새 결정 5):
 
 1. **`dataclass_json_schema`의 owner는 `domain/strategy/facade/schema.py`에 그대로 둔다.**
@@ -286,7 +381,7 @@ Phase exit:
 | [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_REVIEW` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · 2차 APPROVE 대상 `1e0b095` + P3 후속 커밋 1개 · 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 반영, 2차 APPROVE(P3 6 → 코드 2 반영, 문서 3 이관, 본문 1 리드). 커밋 7개(backend 3 + 생성 SDK 1 + 리뷰 반영 3). 31파일은 12절 상한(8파일)을 넘어 논리 단위로 쪼갰다 — 모델·브리지 / 세 요청 배선 / 스키마 엔드포인트, 그리고 CI `api:generate` 게이트가 요구하는 생성 SDK. 게이트: pytest 1494·ruff·pyright(duckdb 4건 기존) · frontend typecheck·lint·Vitest 639·build |
 | [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `APPROVED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 APPROVE(P3 4건 후속 커밋). 커밋 12개(1차 5 + 1차 리뷰 반영 6 + 2차 리뷰 반영 1, history 재작성 없음). 게이트: pytest·ruff·pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest 639·build. `database/tests` 는 base `fff33fd` 와 같은 41 failed/1268 passed/33 errors(기존 실패, 이 PR 무관) |
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `APPROVED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2` · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 반영, 2차 **APPROVE**(돌연변이 재실행 2 failed 확인, P3-07 이탈 타당). P2 둘 다 `_record_codec.py`의 은퇴 row 읽기 5줄이다: 1.1 row 테스트 0건(그 가지를 `raise`로 바꿔도 초록), 미지 `schema_version`이 fail-closed에서 silent 현재 버전 해석으로 바뀜. 게이트는 아래 Full gate |
-| [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `WAITING` | — |
+| [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `SELF_CHECK` | 구현 완료·게이트 통과, 리뷰 대기. 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization`. 게이트: pytest 1571 passed / 0 failed · ruff · `ruff format --check`(변경 파일 clean) · pyright 0 · frontend `api:generate` diff 0·typecheck·`typecheck:e2e`·lint·Vitest 639·build · e2e: AI 스택 완료 후 잠금 아래 실행 예정(미실행) |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `WAITING` | — |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `WAITING` | — |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `WAITING` | — |
@@ -381,6 +476,14 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-21 — P2-04 구현 완료(SELF_CHECK). `signal.normalization`(기본 `rank`)을 모델·runtime
+  schema·OpenAPI·생성 SDK 에 넣고, `domain/portfolio/_compiler.py` 가 가중 합 **전에** 프레임
+  횡단면 정규화를 적용한다. 순위·표준화 공식은 `domain/factor/_statistics.py` 하나가 소유하게
+  정리해 팩터 그래프의 횡단면 연산자와 같은 정의를 쓴다. 정규화 모집단은 `(기준일,
+  universe_member)` 동료 집단이고 결측·공개일 초과·비유한값을 뺀다 — 결측 처리가 항상 정규화
+  앞이라는 순서를 테스트로 고정했다. `availability` 판정은 WORKFLOW 상 P2-07 이라 범위 밖으로
+  두었다. base 인 P2-03 tip 이 import 단계에서 깨져 있어 같은 결정(`missing` 생략 → `drop`)의
+  우회 커밋 두 개를 앞에 뒀고, P2-03 origin tip 위 rebase 에서 버릴 수 있게 분리해 두었다.
 - 2026-09-21 — P2-02 2차 리뷰 APPROVE. 1차 6건 해소 확인, 남은 P3 4건을 후속 커밋 하나로
   반영했다. trace 만 충돌 사유를 `InvalidStrategyTraceRequestError(str(error))` 로 납작하게
   만들어 프론트가 코드로 분기하려면 메시지를 파싱해야 했다 — preview·run 과 같은

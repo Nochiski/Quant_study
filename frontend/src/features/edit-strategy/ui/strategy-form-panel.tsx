@@ -647,6 +647,16 @@ export const DiagnosticNotes = ({
   );
 };
 
+/** 섹션 진단 본문. id는 pointer가 아니라 `useId`라 같은 pointer를 그리는 두 자리가 충돌하지 않는다. */
+const SectionDiagnosticNotes = ({
+  diagnostics,
+}: {
+  diagnostics: DocumentDiagnostic[];
+}): ReactNode => {
+  const id = useId();
+  return <DiagnosticNotes id={id} diagnostics={diagnostics} />;
+};
+
 /** 섹션이 이 pointer를 품는가(루트 스칼라 섹션은 pointer가 빈 문자열이라 필드로 본다). */
 const sectionCovers = (section: FormSection, pointer: string): boolean =>
   section.pointer === ""
@@ -712,6 +722,7 @@ export const FormFieldsEditor = ({
   owner = FORM_OWNER,
   planCommit,
   selectedPointer,
+  sectionDiagnostics = true,
 }: {
   section: ObjectSection;
   transactions: SourceTransactions;
@@ -719,14 +730,19 @@ export const FormFieldsEditor = ({
   owner?: string;
   planCommit?: CommitPlanner;
   selectedPointer?: string;
+  /**
+   * 섹션 자신의 진단(어느 필드도 흡수하지 않은 것)을 여기서 그릴지. 그 진단을 이미 다른 자리가
+   * 말하고 있으면 끈다 — Graph 편집기의 선택한 노드 패널이 그렇다(노드 카드가 같은 문장을 이미
+   * 들고 있다, 2차 리뷰 P3).
+   */
+  sectionDiagnostics?: boolean;
 }) => (
   <>
-    {/* 어느 필드도 흡수하지 않은 진단(그래프 노드 진단은 노드 **객체** pointer로 온다)을 이 자리에
-        본문으로 보인다 — 없으면 Graph 탭 선택한 노드 패널에서 원인 문장이 사라진다(리뷰 차단 2). */}
-    <DiagnosticNotes
-      id={`${section.pointer}-notes`}
-      diagnostics={section.diagnostics}
-    />
+    {/* 그래프 노드 진단은 노드 **객체** pointer로 오므로 어느 필드도 흡수하지 않는다. 그런 진단이
+        화면에서 사라지지 않게 이 자리가 본문으로 받는다(1차 리뷰 차단 2). */}
+    {sectionDiagnostics ? (
+      <SectionDiagnosticNotes diagnostics={section.diagnostics} />
+    ) : null}
     {section.fields.map((field) => (
       <FormFieldRow
         key={field.pointer}

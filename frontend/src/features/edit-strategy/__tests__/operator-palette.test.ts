@@ -15,6 +15,7 @@ import {
 } from "../model/operator-palette";
 import { addNode, nodeKinds } from "../model/graph-transactions";
 import {
+  nullDefaultSeed,
   schemaAt,
   schemaFacts,
   type JsonSchema,
@@ -176,7 +177,15 @@ describe("팔레트가 만든 노드의 파라미터 씨앗 (P1-04)", () => {
   it.each(withParameters.map((entry) => [entry.id, entry] as const))(
     "%s 항목은 선언한 파라미터를 스키마 씨앗으로 채운다",
     (_id, entry) => {
-      const added = addNode(tree, F0, entry.kind, SCHEMA, entry.operator);
+      const added = addNode(
+        tree,
+        F0,
+        entry.kind,
+        SCHEMA,
+        entry.operator === null
+          ? null
+          : { operator: entry.operator, params: entry.params },
+      );
       if ("error" in added) throw new Error(added.error);
       const value = (added.ops[0] as { value: Record<string, unknown> }).value;
 
@@ -198,4 +207,38 @@ describe("팔레트가 만든 노드의 파라미터 씨앗 (P1-04)", () => {
       }
     },
   );
+});
+
+/**
+ * 씨앗 규칙이 TypeScript와 Python에 한 벌씩 있다(2차 리뷰 P3). 두 구현을 묶는 것은 backend가
+ * 만든 golden 표다 — 여기서는 **자기 구현으로** 같은 표를 다시 만들어 대조한다. 한쪽 규칙만
+ * 바뀌면 표가 어긋나 이 테스트가 깨진다(backend 쪽은 golden 신선도 테스트가 맡는다).
+ */
+describe("씨앗 규칙 golden 대조 (P1-04 2차 리뷰)", () => {
+  const GOLDEN = (
+    JSON.parse(
+      readBackendFixture("strategy_documents/parameter-seeds.json"),
+    ) as { seeds: Record<string, number | null> }
+  ).seeds;
+
+  it("`default: null` property의 씨앗이 backend golden과 같다", () => {
+    const defs = (SCHEMA as { $defs?: Record<string, JsonSchema> }).$defs ?? {};
+    const computed: Record<string, unknown> = {};
+    for (const [name, definition] of Object.entries(defs)) {
+      const properties = (definition.properties ?? {}) as Record<
+        string,
+        JsonSchema
+      >;
+      for (const [propertyName, node] of Object.entries(properties)) {
+        if (node !== null && typeof node === "object" && node.default === null)
+          computed[`${name}.${propertyName}`] = nullDefaultSeed(SCHEMA, node);
+      }
+    }
+
+    // 표가 비어 있으면 대조가 무의미하다.
+    expect(Object.keys(computed).length).toBeGreaterThan(0);
+    expect(computed).toEqual(GOLDEN);
+    // 이 규칙이 실제로 씨앗을 내는 자리가 하나는 있어야 한다(전부 null이면 규칙이 죽은 것).
+    expect(Object.values(GOLDEN).some((seed) => seed !== null)).toBe(true);
+  });
 });

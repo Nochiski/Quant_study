@@ -3227,11 +3227,12 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
       .getByRole("button", { name: "노드 편집: mom_252" })
       .closest("li");
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
-    // 원인 문장이 그 노드 카드 안과 선택한 노드 패널 안에 본문으로 붙는다(리뷰 차단 2).
+    // 원인 문장이 그 노드 카드 안에 본문으로 붙는다(리뷰 차단 2). 선택한 노드 패널은 같은
+    // 문장을 다시 그리지 않는다(2차 리뷰 P3).
     expect(editorRow).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
     expect(
       screen.getByRole("group", { name: /선택한 노드/ }),
-    ).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
+    ).not.toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
     expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
       "aria-selected",
       "true",

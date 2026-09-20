@@ -523,8 +523,20 @@
 
 .factor-graph__editor-nodes li {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+}
+
+/*
+  노드 카드의 진단 본문은 이름 버튼·삭제 버튼과 같은 줄에 끼지 않고 카드 아래 줄 전체 폭을 쓴다.
+  `flex-wrap` 없이 두면 긴 한글 오류 문장이 버튼 옆 남은 폭으로 밀려 들어가 여러 줄로 접히고 행
+  높이가 튀며 이름 버튼이 눌렸다(P1-04 2차 리뷰 차단). 계약은 e2e가 boundingBox로 고정한다.
+*/
+.factor-graph__editor-nodes li > .strategy-form__diagnostics {
+  flex-basis: 100%;
+  /* 노드 이름과 같은 들여쓰기로 둬서 어느 카드의 문장인지 읽힌다. */
+  padding-left: var(--space-2);
 }
 
 .factor-graph__editor-nodes li[aria-current="true"] .factor-graph__editor-node {

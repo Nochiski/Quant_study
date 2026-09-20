@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { t, tName } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
@@ -85,6 +85,9 @@ export const FactorGraphEditor = ({
     selectedPointer,
     revealSignal,
   );
+  // 노드 카드 본문의 id 접두사. pointer 문자열을 id로 쓰면 같은 노드를 그리는 다른 자리와 충돌한다
+  // (2차 리뷰 P3: 노드 카드와 선택한 노드 패널이 같은 id를 냈다).
+  const notesPrefix = useId();
   const factors = authoredFactors(tree);
   const activeFactorId = factors[factorIndex]?.factorId ?? `#${factorIndex + 1}`;
   const factorPointer = `/factors/${factorIndex}`;
@@ -202,7 +205,9 @@ export const FactorGraphEditor = ({
       factorPointer,
       entry.kind,
       schema,
-      entry.operator,
+      entry.operator === null
+        ? null
+        : { operator: entry.operator, params: entry.params },
     );
     if ("error" in added) {
       setAddFailure({ tree, entry: entry.name, reason: added.error });
@@ -345,7 +350,7 @@ export const FactorGraphEditor = ({
                   {/* 노드 진단은 노드 객체 pointer로 오므로 그 카드 안에 본문을 붙인다 — Form 목록
                       항목과 같은 모양이다(리뷰 차단 2). */}
                   <DiagnosticNotes
-                    id={`${item.pointer}-notes`}
+                    id={`${notesPrefix}-node-${index}`}
                     diagnostics={item.diagnostics}
                   />
                 </li>
@@ -423,6 +428,9 @@ export const FactorGraphEditor = ({
             owner={GRAPH_OWNER}
             planCommit={planNodeCommit}
             selectedPointer={selectedPointer}
+            // 이 노드의 진단은 위 노드 카드가 이미 본문으로 들고 있다. 여기서 또 그리면 같은
+            // 문장이 한 화면에 두 번 나오고 정보는 늘지 않는다(2차 리뷰 P3).
+            sectionDiagnostics={false}
           />
         )}
       </fieldset>

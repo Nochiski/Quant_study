@@ -30,6 +30,7 @@ import {
   editor,
   expectPhase,
   GOLDEN,
+  mustReplace,
   openEditor,
   replaceSource,
   requireData,
@@ -1215,6 +1216,53 @@ test.describe("professional YAML workflow", () => {
     expect(edited).toContain("\n          input_node_id: mom_252\n");
     // 파라미터 기본값은 runtime schema가 발행한 하한에서 온다(`window >= 1`).
     expect(edited).toContain("\n          window: 1\n");
+  });
+
+  test("keeps a node card readable when that node carries a diagnostic (P1-04)", async ({
+    page,
+  }) => {
+    // 노드 카드에 진단 본문을 넣으면서 `li`가 flex 한 줄이라 본문이 이름·삭제 버튼 옆 세 번째
+    // 항목으로 끼어들 수 있었다(2차 리뷰 차단). 기준선 4장은 유효한 문서라 이 상태를 담지 않아
+    // 여기 한 장을 둔다 — 시각 프로젝트(4종)가 아니라 workflow 프로젝트라 이미지도 한 장이다.
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(
+      page,
+      mustReplace(
+        mustReplace(GOLDEN, "퀄리티 모멘텀", "P1-04 노드 진단 레이아웃"),
+        "window: 252",
+        "window: 0",
+      ),
+    );
+    await expectPhase(page, "검증 오류");
+
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editorRegion = page.getByRole("region", { name: "그래프 편집" });
+    await expect(editorRegion).toBeVisible();
+    // 원인 문장이 그 노드 카드 안에 본문으로 있다.
+    const nodes = editorRegion.locator(".factor-graph__editor-nodes");
+    await expect(nodes).toContainText("window는 1 이상이고 lag는 0 이상이어야 합니다");
+
+    // 본문은 버튼들과 같은 줄이 아니라 카드 아래 줄 전체 폭을 쓴다. 레이아웃 계약이라 픽셀로
+    // 고정한다 — jsdom에는 레이아웃이 없어 단위 테스트로는 잡히지 않는다.
+    const body = nodes.locator(".strategy-form__diagnostics").first();
+    const removeButton = nodes
+      .getByRole("button", { name: "mom_252 · 삭제" })
+      .first();
+    const bodyBox = await body.boundingBox();
+    const buttonBox = await removeButton.boundingBox();
+    expect(bodyBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    if (bodyBox === null || buttonBox === null) return;
+    // 같은 줄이 아니다: 본문 위쪽이 버튼 아래쪽보다 아래에 있다.
+    expect(bodyBox.y).toBeGreaterThanOrEqual(buttonBox.y + buttonBox.height);
+    // 카드 폭을 거의 다 쓴다(버튼 옆 좁은 칸에 끼지 않았다).
+    const listBox = await nodes.boundingBox();
+    expect(listBox).not.toBeNull();
+    if (listBox === null) return;
+    expect(bodyBox.width).toBeGreaterThan(listBox.width * 0.8);
+
+    await page.mouse.move(0, 0);
+    await expect(nodes).toHaveScreenshot("graph-node-diagnostic.png");
   });
 
   test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", async ({

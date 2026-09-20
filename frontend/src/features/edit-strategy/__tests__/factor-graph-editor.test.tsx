@@ -492,7 +492,7 @@ describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () =>
     nodeId: "mom_252",
   };
 
-  it("노드 카드와 선택한 노드 패널에 본문으로 보인다", () => {
+  it("노드 카드 한 곳에만 본문이 붙고 DOM id가 겹치지 않는다", () => {
     render(
       <FactorGraphPanel
         state={{ status: "blocked", reason: "invalid" }}
@@ -514,10 +514,16 @@ describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () =>
       .getByRole("button", { name: "노드 편집: mom_252" })
       .closest("li");
     expect(row).toHaveTextContent(NODE_DIAGNOSTIC.message);
+    // 선택한 노드 패널은 같은 문장을 다시 그리지 않는다 — 정보가 늘지 않는 사본이다(2차 리뷰 P3).
     expect(
       editor().getByRole("group", { name: /선택한 노드/ }),
-    ).toHaveTextContent(NODE_DIAGNOSTIC.message);
+    ).not.toHaveTextContent(NODE_DIAGNOSTIC.message);
+    // 문장은 편집기 안에서 한 번만 나온다.
+    expect(editor().getAllByText(NODE_DIAGNOSTIC.message)).toHaveLength(1);
     // 본문이지 assertive 알림이 아니다(리뷰 P3).
     expect(editor().queryAllByRole("alert")).toEqual([]);
+    // 같은 pointer를 그리는 두 자리가 같은 id를 내던 회귀(2차 리뷰 P3).
+    const ids = [...document.querySelectorAll("[id]")].map((node) => node.id);
+    expect(ids.length).toBe(new Set(ids).size);
   });
 });

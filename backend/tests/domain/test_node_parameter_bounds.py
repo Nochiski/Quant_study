@@ -19,7 +19,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import fields as dataclass_fields
+from pathlib import Path
 from typing import Any, get_args, get_type_hints
 
 import pytest
@@ -43,6 +45,8 @@ from strategy_workbench.domain.factor.facade.operators import (
 )
 from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
 from strategy_workbench.domain.strategy.facade.schema import strategy_document_schema
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "strategy_documents"
 
 _PRICE = FieldMetadata(field_id="price.close", unit="KRW", value_type=NodeValueType.NUMERIC_SERIES)
 _SECTOR = FieldMetadata(field_id="sector", unit="1", value_type=NodeValueType.GROUP_SERIES)
@@ -160,32 +164,26 @@ def _property_schema(node_type: type, name: str) -> dict[str, Any]:
     return strategy_document_schema()["$defs"][node_type.__name__]["properties"][name]
 
 
-def _declared_type(property_schema: dict[str, Any]) -> str | None:
-    """nullable(`anyOf`) 포장을 벗긴 선언 타입. 화면의 `materializeSchemaValue`와 같은 규칙이다."""
-    declared = property_schema.get("type")
-    if isinstance(declared, str):
-        return declared
-    for member in property_schema.get("anyOf", []):
-        if isinstance(member, dict) and member.get("type") != "null":
-            inner = member.get("type")
-            return inner if isinstance(inner, str) else None
-    return None
+_SEEDS: dict[str, object] = json.loads(
+    (FIXTURES / "parameter-seeds.json").read_text(encoding="utf-8")
+)["seeds"]
 
 
-def _published_seed(property_schema: dict[str, Any]) -> object | None:
-    """runtime schema가 이 property에 발행한 초기값. 없으면 None.
+def _published_seed(node_type: type, name: str) -> object | None:
+    """화면이 이 property에 넣을 값. 없으면 None.
 
-    화면(`materializeSchemaValue`)이 쓰는 규칙을 그대로 적는다: non-null `default`가 있으면 그 값,
-    `default`가 null이거나 없고 정수 하한이 있으면 그 하한. 여기서 값을 새로 정하지 않는다 —
-    발행된 씨앗을 검증기가 받아들이는지만 본다.
+    규칙을 여기서 다시 적지 않는다(2차 리뷰 P3). non-null `default`는 스키마가 그대로 들고 있고,
+    `default: null`인 자리의 씨앗은 `parameter-seeds.json` golden이 owner다 — 그 표를
+    `tools/export_runtime_schema.py`가 만들고 frontend 테스트가 자기 구현으로 같은 표를 재현한다.
     """
+    property_schema = _property_schema(node_type, name)
     default = property_schema.get("default", _UNSET)
-    if default is not _UNSET and default is not None:
-        return default
+    if default is not _UNSET:
+        # `default: null` 자리의 씨앗 판정(정수만·nullable 포장 벗기기)은 golden이 owner다.
+        return _SEEDS.get(f"{node_type.__name__}.{name}") if default is None else default
+    # `default`가 아예 없는 필수 숫자 property(`window`)는 스키마가 발행한 하한이 그대로 씨앗이다.
     bound = property_schema.get("minimum")
-    if isinstance(bound, int) and not isinstance(bound, bool):
-        return bound if _declared_type(property_schema) == "integer" else None
-    return None
+    return bound if isinstance(bound, (int, float)) and not isinstance(bound, bool) else None
 
 
 _UNSET = object()
@@ -196,7 +194,7 @@ def _seeded_parameters(definition: OperatorDefinition) -> dict[str, object]:
     values: dict[str, object] = {}
     for parameter in definition.params:
         name = parameter.property_name
-        seed = _published_seed(_property_schema(node_type, name))
+        seed = _published_seed(node_type, name)
         values[name] = _CATALOG_SAMPLES[name] if seed is None else seed
     return values
 
@@ -207,10 +205,7 @@ def test_every_catalog_parameter_has_a_seed_or_a_sample() -> None:
         f"{definition.kind}.{definition.operator}.{parameter.property_name}"
         for definition in operator_definitions()
         for parameter in definition.params
-        if _published_seed(
-            _property_schema(EXPRESSION_NODE_KINDS[definition.kind], parameter.property_name)
-        )
-        is None
+        if _published_seed(EXPRESSION_NODE_KINDS[definition.kind], parameter.property_name) is None
         and parameter.property_name not in _CATALOG_SAMPLES
     ]
 

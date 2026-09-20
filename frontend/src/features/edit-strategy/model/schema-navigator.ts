@@ -583,8 +583,13 @@ const isIntegerTyped = (root: JsonSchema, node: JsonSchema): boolean => {
  *
  * 정수 타입만 본다. `number`이면서 null이 "제한 없음"을 뜻하는 선택 값(`portfolio.minimum_liquidity`,
  * 하한 `0`)은 하한으로 채우면 뜻이 바뀐다 — 그런 필드는 null 그대로 둔다.
+ *
+ * `materializeSchemaValue`가 아니라 **호출자**가 쓴다(2차 리뷰 P3). 씨앗이 필요한지는 "고른
+ * 연산자가 이 파라미터를 요구하는가"이고, 그 사실의 owner는 스키마가 아니라 연산자 카탈로그다 —
+ * property 단위로 판단하면 `periods`를 읽지도 않는 `부호 뒤집기`에도 `periods: 1`이 붙는다.
+ * 규칙의 짝은 `backend/tests/fixtures/strategy_documents/parameter-seeds.json` golden이 묶는다.
  */
-const nullDefaultSeed = (root: JsonSchema, node: JsonSchema): unknown => {
+export const nullDefaultSeed = (root: JsonSchema, node: JsonSchema): unknown => {
   const bound = node.minimum;
   return typeof bound === "number" &&
     Number.isInteger(bound) &&
@@ -618,8 +623,7 @@ export const materializeSchemaValue = (
     throw new UnsupportedSchemaShape("recursive or oversized schema");
   state.ancestors.add(node);
   try {
-    if (Object.hasOwn(node, "default"))
-      return node.default === null ? nullDefaultSeed(root, node) : node.default;
+    if (Object.hasOwn(node, "default")) return node.default;
     if (Object.hasOwn(node, "const")) return node.const;
     if (Array.isArray(node.anyOf)) {
       const member = node.anyOf

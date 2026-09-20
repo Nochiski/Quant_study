@@ -10,6 +10,7 @@ import { findReferences } from "./document-references";
 import { branchKind } from "./form-transactions";
 import {
   materializeSchemaValue,
+  nullDefaultSeed,
   resolveRef,
   schemaAt,
   schemaFacts,
@@ -169,6 +170,37 @@ const outputUnset = (graph: unknown): boolean => {
 export type AddNodeFailure = "unknown-kind" | "unsupported-schema";
 
 /**
+ * 팔레트에서 고른 연산자. `params`는 그 연산자가 **요구하는** 노드 property 이름이고 카탈로그가
+ * owner다(`OperatorDefinition.params`).
+ */
+export type ChosenOperator = {
+  operator: string;
+  params: readonly string[];
+};
+
+/**
+ * 고른 연산자가 요구하는 파라미터의 빈자리를 스키마가 발행한 씨앗으로 채운다(2차 리뷰 P3).
+ *
+ * 채우는 자리는 `params`가 선언한 property뿐이다 — 연산자가 읽지도 않는 값(`부호 뒤집기`의
+ * `periods`)까지 채우면 사용자가 고르지 않은 숫자가 의미 있는 값처럼 YAML에 남는다.
+ */
+const seedChosenParameters = (
+  schema: JsonSchema,
+  branch: JsonSchema,
+  chosen: ChosenOperator,
+  value: Record<string, unknown>,
+): void => {
+  const properties = isRecord(branch.properties) ? branch.properties : {};
+  for (const name of chosen.params) {
+    if (value[name] !== null && value[name] !== undefined) continue;
+    const declared = properties[name];
+    const node = isRecord(declared) ? resolveRef(schema, declared) : null;
+    const seed = node === null ? null : nullDefaultSeed(schema, node);
+    if (seed !== null) value[name] = seed;
+  }
+};
+
+/**
  * 노드 추가: `kind` 분기 스키마로 최소 항목을 materialize하고 `node_id`는 `suggestNodeId(operator ?? kind)`.
  * `operator`를 주면(팔레트가 연산자를 먼저 고른 경로, P1-04) materialize가 넣은 enum 첫 값 대신 그 값을
  * 쓰고 노드 id도 그 이름에서 딴다 — 파라미터 기본값은 그대로 스키마가 채운다. 참조
@@ -185,7 +217,7 @@ export const addNode = (
   factorPointer: string,
   kind: string,
   schema: JsonSchema,
-  operator: string | null = null,
+  chosen: ChosenOperator | null = null,
 ):
   | { ops: SourceOperation[]; nodeId: string }
   | { error: AddNodeFailure } => {
@@ -203,11 +235,15 @@ export const addNode = (
   }
   if (!isRecord(node)) return { error: "unsupported-schema" };
   const ids = graphNodeIds(tree, factorPointer);
-  const nodeId = suggestNodeId(tree, factorPointer, operator ?? kind);
+  const nodeId = suggestNodeId(tree, factorPointer, chosen?.operator ?? kind);
   const last = ids[ids.length - 1] ?? "";
   const value: Record<string, unknown> = { ...node, node_id: nodeId };
-  // 연산자를 먼저 고른 경로에서는 그 값이 정본이다(materialize는 enum 첫 값을 넣는다).
-  if (operator !== null) value.operator = operator;
+  // 연산자를 먼저 고른 경로에서는 그 값이 정본이고(materialize는 enum 첫 값을 넣는다), 그 연산자가
+  // 요구하는 파라미터의 빈자리는 스키마 씨앗으로 채운다.
+  if (chosen !== null) {
+    value.operator = chosen.operator;
+    seedChosenParameters(schema, branch, chosen, value);
+  }
   const references = nodeReferenceKeys(schema, branch);
   if (references.length === 1 && last !== "") value[references[0]!] = last;
   const graph = valueAt(tree, graphPointer(factorPointer));

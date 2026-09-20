@@ -6,10 +6,10 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
-last_updated: 2026-09-21T07:48:49+09:00
+last_updated: 2026-09-21T07:53:06+09:00
 planned_prs: 13
 merged_prs: 0
-approved_prs: 10
+approved_prs: 11
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05` |
 | Progress | `0 / 13 merged (0%)` |
-| Approved | `10 / 13` |
-| Aggregated at | `2026-09-21 07:48 KST` |
+| Approved | `11 / 13` |
+| Aggregated at | `2026-09-21 07:53 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -62,7 +62,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `APPROVED` |
-| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `IN_REVIEW` |
+| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `APPROVED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `SELF_CHECK` |
 | **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
@@ -100,7 +100,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `APPROVED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `APPROVED` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `c0219894`(A-04 최종 `9f39faec` 위 15커밋) · `review_ai_a_05` 3차 APPROVE(세 라운드 24건 전부 닫힘, 비인증 헤더 통과는 docstring 한 문장 P3 — A-06 rebase 뒤 A-05에 fast-forward) · live smoke 최우선: 선언되지 않은 서버 도구 결과 블록 history 수용 여부 |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `APPROVED` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `6ada372f`(A-05 최종 `c0219894` 위 14커밋; org/project 헤더 `omit`, env 7종 기준선 테스트, spec D6 전수 표, P3 4 + A-05 P3 docstring 적재) · `review_ai_a_06` 2차 APPROVE · 확정 |
-| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `IN_REVIEW` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring) → A-06 최종 `6ada372f` 위 rebase·캐시 필드·재생성 뒤 push·PR( 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) · **A-06 최종 `6ada372f` 위 replay 완료 `4fcad54c`**(10커밋, 33파일 +2971/−27; `UsageView` 성분 2칸·`TokenTotalsView` 성분+`total_input_tokens`, `MODEL_NOTICES`에 `search_budget_exhausted`, pytest 1957) · [#179](https://github.com/Nochiski/Quant_study/pull/179) · `review_ai_a_07` 1차 APPROVE(P2 1·P3 3) · 마무리 `e57ec183`(리뷰 4건) + `5009a03c`(B-05 발견: 첫 이벤트 전 취소 `Failure(CANCELLED)` 저장, 공급자 알린 취소 중복 억제; pytest 1964) — **B 스택 rebase 대상 `5009a03c`**, 2차 확인 중 |
+| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `APPROVED` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring) → A-06 최종 `6ada372f` 위 rebase·캐시 필드·재생성 뒤 push·PR( 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) · **A-06 최종 `6ada372f` 위 replay 완료 `4fcad54c`**(10커밋, 33파일 +2971/−27; `UsageView` 성분 2칸·`TokenTotalsView` 성분+`total_input_tokens`, `MODEL_NOTICES`에 `search_budget_exhausted`, pytest 1957) · [#179](https://github.com/Nochiski/Quant_study/pull/179) · `review_ai_a_07` 1차 APPROVE(P2 1·P3 3) · 마무리 `e57ec183`(리뷰 4건) + `5009a03c`(B-05 발견: 첫 이벤트 전 취소 `Failure(CANCELLED)` 저장, 공급자 알린 취소 중복 억제; pytest 1964) — **최종 `5009a03c`**(`review_ai_a_07` 2차 APPROVE 유지, 돌연변이 3건 포착), B 스택 rebase 대상 |
 
 Phase exit:
 
@@ -146,6 +146,7 @@ Phase exit:
 | B-02 | `review_ai_b_02` | 1 | REQUEST_CHANGES | P1 2(재시도 상한 소진 뒤 진행 중 턴 스트림 영구 중단 — `streamKey`·`status`·`retry()`로 재연결 owner를 화면으로; 마지막 시도 본문 끊김이 `ended`로 분류 — `onSseError`로 계수), P2 2(이력 병합이 watermark 아래 앞선 턴 이벤트 폐기 → 적용 sequence 집합; `frontend-api-state.md` 갱신), P3 3 |
 | B-01 | `review_ai_b_01` | 2 | APPROVE_WITH_COMMENTS | P1·P2·P3 전부 닫힘(캐시 단언 실효성 되돌리기 실측). 새 P2 1(`probingId` 단일 슬롯 — 동시 probe에서 버튼 조기 해제, 주석 오기), P3 1(font-size 토큰화로 h2>h1 위계) → 후속. R2-3 삭제 후 포커스·R2-4 배지 연결은 B-05 |
 | A-07 | `review_ai_a_07` | 1 | APPROVE | P0·P1 없음. P2 1(`aggregate_usage`가 A-06 상한 통지 `SearchActivity(query=SEARCH_BUDGET_EXHAUSTED_NOTICE)`를 검색 1회로 집계 → 화면 검색 횟수 상한+1; 통지 제외 + 전용 이벤트 backlog), P3 3(`_chat.py` 모델 향 문장 2개가 `MODEL_NOTICES` 골든 밖, live smoke가 `DEFAULT_MAX_SEARCH_USES` 상수 읽음, 이력 `events`==SSE 프레임 미고정). 캐시 토큰 domain·집계·wire 일관, 돌연변이 3건 골든이 포착. pytest 1957 |
+| A-07 | `review_ai_a_07` | 2 | APPROVE | `e57ec183`·`5009a03c`. 1차 4건 반영 확인, 취소 결함 2건(첫 이벤트 전 취소 사유 저장은 `state.stop is None`일 때만 → PROVIDER 덮지 않음, 중복 억제는 같은 코드만 → 이벤트 0개 턴 없음)이 spec D3·`_finish` 1회와 정합. 새 결함 없음. 돌연변이 3건 포착, 변경 모듈 pytest 206 |
 | B-01 | `review_ai_b_01` | 3 | APPROVE | R2-1(`probingIds` 집합, 회귀 테스트가 2차 재현 시나리오와 동일)·R2-2(제목 display 크기) 닫힘 확인, PR #180 본문 코드 대조 정확. 비차단 2: R2-3·R2-4 B-05 이관 기록이 PR 본문에만 있음 → WORKFLOW B-05 acceptance에 추가; `ai-provider-settings.tsx` 주석 "활성 전환·" 과장. vitest 659 |
 | A-05 | `review_ai_a_05` | 2 | APPROVE WITH CHANGES | 1차 12건 전부 해소(P0 red 확인, extras 없는 환경 재현, env 폴백은 `ANTHROPIC_AUTH_TOKEN`까지 차단). 블로킹 1(A-04 하위 모듈 fix 되돌림)은 base `439f9411` 불일치 산물 → replay 보존. P2 2(예산 소진 호출의 history 서버 도구 블록 미테스트 → live smoke 최우선, 캐시 접두 파기 비용 미기재), P3 4 |
 | B-02 | `review_ai_b_02` | 2 | APPROVE_WITH_NITS | 1차 P1 2·P2 2 해소(재현 probe 재실행). 이탈 2건(5값 status, 내부 attempt+retry) 타당. 새 P2 1(`streamKey` 입력 파생 → 세션 이탈·복귀 시 옛 close 사유가 status로), P3 6 → 후속 |

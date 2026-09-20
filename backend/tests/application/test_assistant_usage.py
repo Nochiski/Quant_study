@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from dataclasses import fields
 
+from strategy_workbench.application.assistant_chat.facade.prompt import (
+    SEARCH_BUDGET_EXHAUSTED_NOTICE,
+)
 from strategy_workbench.application.assistant_chat.facade.usage import (
     TokenTotals,
     aggregate_usage,
@@ -92,6 +95,32 @@ def test_search_activity_is_counted_per_turn_and_for_the_session() -> None:
 
     assert usage.search_uses == 3
     assert [turn.search_uses for turn in usage.turns] == [2, 1]
+
+
+def test_the_search_budget_notice_is_not_counted_as_a_search() -> None:
+    """OpenAI adapter는 상한 통지도 `SearchActivity`로 흘린다(A-06 임시 표현, 리뷰 P2-1).
+
+    통지를 검색으로 세면 화면의 검색 횟수가 집행된 상한보다 1 커져, 사용자가 "상한이 안
+    지켜진다"고 읽는다. 전용 이벤트가 생기면 이 테스트와 `_is_search`의 분기를 함께 지운다.
+    """
+    limit = 3
+    history = _history(
+        *[("turn-1", _search(f"질의 {index}")) for index in range(limit)],
+        ("turn-1", SearchActivity(query=SEARCH_BUDGET_EXHAUSTED_NOTICE, sources=())),
+        ("turn-1", Done(stop_reason="end_turn")),
+    )
+
+    usage = aggregate_usage(history)
+
+    assert usage.search_uses == limit
+    assert usage.turns[0].search_uses == limit
+
+
+def test_a_search_that_came_back_without_sources_still_counts() -> None:
+    """출처가 비는 검색 오류도 실제 시도다. 통지만 빼고 나머지는 센다."""
+    history = _history(("turn-1", SearchActivity(query="검색 실패", sources=())))
+
+    assert aggregate_usage(history).search_uses == 1
 
 
 def test_a_turn_that_spent_nothing_still_appears_with_zeroes() -> None:

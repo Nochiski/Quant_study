@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.domain.assistant.facade.models import (
     DEFAULT_MAX_SEARCH_USES,
     ProbeFailure,
@@ -130,6 +131,15 @@ def test_running_the_smoke_without_the_environment_reports_and_exits_zero(
 
 
 # -- 판정 규칙 ----------------------------------------------------------------------------------
+
+
+def test_the_search_limit_comes_from_the_injected_value_not_the_constant() -> None:
+    """상한을 주입으로 바꾼 배포에서 "상한에 닿았는가" 판정이 틀리면 안 된다(리뷰 P3-2)."""
+    service = object.__new__(AssistantChatService)
+    service._max_search_uses = 3  # pyright: ignore[reportAttributeAccessIssue]  # reason: 주입 지점만 보는 최소 인스턴스
+
+    assert service.max_search_uses == 3
+    assert service.max_search_uses != DEFAULT_MAX_SEARCH_USES
 
 
 def test_every_checklist_item_has_a_verdict_rule(smoke: ModuleType) -> None:

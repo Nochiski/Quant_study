@@ -87,6 +87,34 @@ progress_percent: 0
 - 2026-09-21 A-07 **후속**: schema 1.2(`strategy-language-2-0` P2-03) 머지 뒤 프롬프트의 실행 설정
   문장과 `backend/tests/fixtures/assistant/` 골든·시나리오 fixture를 1.2 문서로 갱신한다
   (WORKFLOW 1절 규칙). 담당은 그 시점의 A-07 후속 또는 B-05.
+- 2026-09-21 A-07 리뷰 APPROVE 반영: P2 1건·P3 3건을 마무리 커밋 하나로 닫았다. 검색 상한 통지를
+  검색으로 세지 않도록 집계에 분기를 넣고, 모델이 읽는 고정 문장 2건을 `_prompt.py`로 옮겨 골든에
+  넣었으며, live smoke가 검색 상한을 상수가 아니라 주입값에서 읽게 하고, "이력 `events` == SSE
+  `data:` 프레임"을 통합 테스트로 고정했다.
+
+### A-07 backlog: 검색 상한 통지 전용 이벤트 (담당 B-03)
+
+- **상황**: OpenAI(Codex) 프로파일이 활성인 세션에서 한 턴의 누적 웹 검색이 `max_search_uses`에
+  닿아 adapter가 다음 호출의 도구 목록에서 `web_search`를 빼는 경로를 탄 뒤, 사이드바가 세션
+  이력을 다시 읽을 때.
+- **인풋**:
+  1. `POST /api/v1/assistant/sessions/{id}/turns` — 검색을 상한 이상 유도하는 질문.
+  2. 턴 종료 후 `GET /api/v1/assistant/sessions/{id}`.
+- **에러 위치**: `backend/src/strategy_workbench/adapters/outbound/llm_openai/_turn.py` — 검색이
+  아니라 **통지**를 `SearchActivity(query=SEARCH_BUDGET_EXHAUSTED_NOTICE, sources=())`로 흘린다
+  (A-06이 "임시"라고 주석에 적은 우회다). 받는 쪽
+  `backend/src/strategy_workbench/application/assistant_chat/_usage.py`의 `_is_search`가 그 문구를
+  보고 검색에서 빼는 것으로 지금은 막아 두었다.
+- **위험성**: 통지와 검색이 같은 이벤트 종류를 쓰는 한, 그 둘을 가르는 근거가 **문구 비교**다.
+  문구는 골든이 잠그고 있어 조용히 바뀌지는 않지만, 같은 문구를 쓰는 다른 경로가 생기거나 번역이
+  들어오면 집계가 다시 틀린다. 화면(B-03)도 통지를 검색 활동 칩으로 그려 사용자가 하지 않은 검색을
+  본다. 데이터 손실·look-ahead는 아니고 표시 오차다.
+- **해결**: `ChatEvent` union에 통지 전용 이벤트를 더하고 adapter가 그것을 흘린다. 그때
+  `_usage.py`의 `_is_search` 분기와 `test_the_search_budget_notice_is_not_counted_as_a_search`를
+  함께 지운다.
+- **재현 test**: `backend/tests/application/test_assistant_usage.py::test_the_search_budget_notice_is_not_counted_as_a_search`
+  (현재 동작을 고정하는 테스트이며, 전용 이벤트가 생기면 이 테스트가 없어진다)
+
 - 2026-09-21 A-07 **이관**: 검색 상한 8과 Anthropic adapter `MAX_PAUSE_RESUMES = 5`가 서로를 모르는
   건은 A-05로 넘겼다.
 

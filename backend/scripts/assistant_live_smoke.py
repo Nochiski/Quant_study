@@ -78,7 +78,6 @@ from strategy_workbench.bootstrap.facade.container import (
     build_container,
 )
 from strategy_workbench.domain.assistant.facade.models import (
-    DEFAULT_MAX_SEARCH_USES,
     ChatEvent,
     Failure,
     ProbeFailure,
@@ -468,7 +467,11 @@ def _failure_value(failure: ProbeFailure | None) -> str:
 
 
 def _turn_evidence(
-    events: Sequence[ChatEvent], *, stream_raised: bool, warnings: Sequence[str]
+    events: Sequence[ChatEvent],
+    *,
+    stream_raised: bool,
+    warnings: Sequence[str],
+    search_limit: int,
 ) -> TurnEvidence:
     failure = next((event for event in events if isinstance(event, Failure)), None)
     searches = [event for event in events if isinstance(event, SearchActivity)]
@@ -481,7 +484,7 @@ def _turn_evidence(
         stream_raised=stream_raised,
         event_kinds=tuple(type(event).__name__ for event in events),
         tool_rounds=sum(1 for event in events if isinstance(event, ToolResultSummary)),
-        search_limit=DEFAULT_MAX_SEARCH_USES,
+        search_limit=search_limit,
         search_activities=len(searches),
         search_with_sources=sum(1 for event in searches if event.sources),
         search_with_query=sum(1 for event in searches if event.query.strip()),
@@ -539,7 +542,14 @@ def _run_provider(kind: ProviderKind, secret: str, workspace: Path) -> ProviderS
             detail = f"턴이 예외로 끝났다 — error_type={type(error).__name__}"
         else:
             detail = f"이벤트 {len(events)}건"
-        turn = _turn_evidence(events, stream_raised=stream_raised, warnings=warnings)
+        turn = _turn_evidence(
+            events,
+            stream_raised=stream_raised,
+            warnings=warnings,
+            # 상한의 정본은 상수가 아니라 이 배포에 주입된 값이다(spec D3). 상수를 다시 읽으면
+            # 주입으로 바꾼 배포에서 "상한에 닿았는가" 판정이 틀린다.
+            search_limit=container.assistant_chat.max_search_uses,
+        )
     verdicts = verdicts_for(kind, probe, turn)
     failed = any(verdict.observed is False for verdict in verdicts)
     return ProviderSmoke(

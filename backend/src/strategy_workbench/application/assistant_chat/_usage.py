@@ -34,6 +34,8 @@ from strategy_workbench.domain.assistant.facade.models import (
     Usage,
 )
 
+from ._prompt import SEARCH_BUDGET_EXHAUSTED_NOTICE
+
 __all__ = ["SessionUsage", "TokenTotals", "TurnUsage", "aggregate_usage"]
 
 
@@ -88,6 +90,7 @@ class TurnUsage:
 
     turn_id: str
     tokens: TokenTotals
+    # 실제 검색 시도만 센다. 상한 통지는 `SearchActivity`로 와도 검색이 아니다(`_is_search`).
     search_uses: int
     provider_calls: int
 
@@ -117,6 +120,21 @@ def _tokens_of(event: Usage) -> TokenTotals:
     )
 
 
+def _is_search(event: object) -> bool:
+    """실제 검색 시도인 `SearchActivity`만 참.
+
+    OpenAI adapter는 검색 상한에 닿았다는 **통지**도 `SearchActivity`로 흘린다
+    (`llm_openai/_turn.py`, A-06이 "임시"라고 적은 우회다 — 전용 이벤트는 B-03이 정한다).
+    통지를 검색으로 세면 화면의 검색 횟수가 집행된 상한보다 1 커져, 사용자가 "상한이 안
+    지켜진다"고 읽는다.
+
+    통지를 알아보는 근거는 문구다. 그 문구의 owner가 application(`_prompt.py`)이라 adapter가
+    바꿀 수 없고, adapter는 상수를 그대로 실어 나르기만 한다(spec D8). **전용 이벤트가 생기면
+    이 분기를 지운다** — 그때는 통지가 `SearchActivity`로 오지 않는다.
+    """
+    return isinstance(event, SearchActivity) and event.query != SEARCH_BUDGET_EXHAUSTED_NOTICE
+
+
 def aggregate_usage(events: Sequence[SequencedEvent]) -> SessionUsage:
     """세션 이벤트 이력을 턴별·세션 누적 사용량으로 접는다.
 
@@ -135,7 +153,7 @@ def aggregate_usage(events: Sequence[SequencedEvent]) -> SessionUsage:
                 tokens=current.tokens + _tokens_of(stored.event),
                 provider_calls=current.provider_calls + 1,
             )
-        elif isinstance(stored.event, SearchActivity):
+        elif _is_search(stored.event):
             current = replace(current, search_uses=current.search_uses + 1)
         per_turn[stored.turn_id] = current
     turns = tuple(per_turn.values())

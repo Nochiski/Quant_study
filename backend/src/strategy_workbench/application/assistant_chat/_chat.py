@@ -70,7 +70,11 @@ from strategy_workbench.domain.assistant.facade.tools import ASSISTANT_TOOLS, PR
 from ._context import AssistantContextBuilder
 from ._models import ChatSession, DocumentRef, TurnContext, compile_payload
 from ._profiles import ProviderNotInstalledError, ProviderProfileService
-from ._prompt import PROPOSAL_REJECTED_NOTICE
+from ._prompt import (
+    PROPOSAL_ACCEPTED_NOTICE,
+    PROPOSAL_REJECTED_NOTICE,
+    PROPOSAL_SOURCE_TEXT_MISSING_NOTICE,
+)
 from .ports.outgoing.chat_sessions import ChatSessionRepository
 from .ports.outgoing.llm_provider import LlmProviderPort
 from .ports.outgoing.provider_secrets import ProviderSecretStore
@@ -148,6 +152,17 @@ class AssistantChatService:
         self._max_search_uses = max_search_uses
         self._max_output_tokens_per_call = max_output_tokens_per_call
         self._max_turn_output_tokens = max_turn_output_tokens
+
+    @property
+    def max_search_uses(self) -> int:
+        """이 배포에 주입된 턴당 검색 상한.
+
+        상수(`DEFAULT_MAX_SEARCH_USES`)는 주입이 없을 때의 기본값일 뿐이고, 정본은 여기 들어온
+        값이다(spec D3: 값 변경은 상수가 아니라 bootstrap 주입으로 한다). 실제로 집행된 상한을
+        알아야 하는 쪽 — live smoke의 "상한에 닿은 뒤에도 턴이 이어지는가" 판정 — 이 상수를 다시
+        읽으면 주입으로 바꾼 배포에서 판정이 틀린다(A-07 리뷰 P3-2).
+        """
+        return self._max_search_uses
 
     # -- 세션 ---------------------------------------------------------------------------------
 
@@ -353,8 +368,7 @@ class AssistantChatService:
                 call,
                 state,
                 session_id,
-                "source_text 인자에 전략 문서 YAML 원문 전체를 넣어 다시 제출하세요 — "
-                f"received={type(source_text).__name__}",
+                f"{PROPOSAL_SOURCE_TEXT_MISSING_NOTICE} — received={type(source_text).__name__}",
             )
         outcome = self._compiler.compile(source_text)
         if not outcome.ok:
@@ -382,7 +396,7 @@ class AssistantChatService:
         return ToolResult(
             call_id=call.call_id,
             ok=True,
-            content="제안이 접수되었습니다. 사용자가 문서에 적용할 수 있습니다.",
+            content=PROPOSAL_ACCEPTED_NOTICE,
         )
 
     def _reject_proposal(

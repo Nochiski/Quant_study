@@ -14,7 +14,9 @@ from types import MappingProxyType
 
 __all__ = [
     "MODEL_NOTICES",
+    "PROPOSAL_ACCEPTED_NOTICE",
     "PROPOSAL_REJECTED_NOTICE",
+    "PROPOSAL_SOURCE_TEXT_MISSING_NOTICE",
     "SEARCH_BUDGET_EXHAUSTED_NOTICE",
     "SYSTEM_PROMPT_TEMPLATE",
 ]
@@ -121,9 +123,26 @@ PROPOSAL_REJECTED_NOTICE = (
 # 모델에게 되돌리는 고정 문구 한 벌. 골든 파일(`tests/fixtures/assistant/model_notices.json`)이
 # 이 사전을 그대로 내보내므로, 문구를 고치면 `tools/export_assistant_prompts.py`로 골든을 다시
 # 뽑아야 테스트가 통과한다. 새 통지 문구는 여기 한 줄을 더하는 것으로 fixture에 들어온다.
+# 제안이 접수됐을 때 모델에게 돌아가는 문구. 다음 행동("한 턴에 한 번")까지 말해 둔다 —
+# 접수만 알리면 모델이 같은 제안을 다듬어 다시 보내는 일이 있다.
+PROPOSAL_ACCEPTED_NOTICE = (
+    "제안이 접수되었습니다. 사용자가 문서에 적용할 수 있습니다. 이 턴에서는 더 제출하지 말고 "
+    "설명으로 마무리하세요."
+)
+
+# `propose_strategy`를 부르면서 문서 원문을 빠뜨렸을 때의 문구. 뒤에 받은 타입 이름이 붙는다.
+#
+# 이것도 모델이 읽는 고정 지시문이므로 프롬프트 owner가 갖는다(spec D8). 서비스 안에 두면 골든이
+# 잠그지 않아 조용히 바뀌어도 아무 테스트도 깨지지 않는다(A-07 리뷰 P3-1).
+PROPOSAL_SOURCE_TEXT_MISSING_NOTICE = (
+    "source_text 인자에 전략 문서 YAML 원문 전체를 넣어 다시 제출하세요"
+)
+
 MODEL_NOTICES: Mapping[str, str] = MappingProxyType(
     {
+        "proposal_accepted": PROPOSAL_ACCEPTED_NOTICE,
         "proposal_rejected": PROPOSAL_REJECTED_NOTICE,
+        "proposal_source_text_missing": PROPOSAL_SOURCE_TEXT_MISSING_NOTICE,
         "search_budget_exhausted": SEARCH_BUDGET_EXHAUSTED_NOTICE,
     }
 )

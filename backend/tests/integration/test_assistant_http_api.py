@@ -48,13 +48,20 @@ from strategy_workbench.domain.assistant.facade.models import (
     FailureCode,
     ProbeFailure,
     ProbeResult,
+    Proposal,
+    ProposalCompileResult,
+    ProposalDiagnostic,
     ProviderKind,
     ProviderProfile,
     SearchActivity,
     SequencedEvent,
+    Source,
+    StrategyProposal,
     TextDelta,
+    ThinkingSummary,
     ToolCall,
     ToolResult,
+    ToolResultSummary,
     Turn,
     TurnRequest,
     TurnStatus,
@@ -382,6 +389,81 @@ def test_a_turn_streams_its_events_in_order_and_the_stream_closes(tmp_path: Path
         assert [turn["status"] for turn in history["turns"]] == [TurnStatus.COMPLETED.value]
         assert [message["role"] for message in history["messages"]] == ["user", "assistant"]
         assert len(history["events"]) == 3
+
+
+def test_the_history_events_are_byte_identical_to_the_sse_frames(tmp_path: Path) -> None:
+    """이력 `events`와 SSE `data:` payload가 같은 모양이라는 계약을 고정한다(리뷰 P3-3).
+
+    시나리오 골든과 B-05의 MSW는 둘이 같다는 전제 위에 서 있다. 그런데 직렬화 경로가 다르다 —
+    SSE는 `jsonable_encoder(asdict(...))`이고 이력은 FastAPI 응답 모델이다. 한쪽만 바뀌면 골든은
+    green인 채로 MSW 계약만 어긋나므로, 중첩이 깊은 이벤트까지 태워 두 경로를 직접 맞대 본다.
+    """
+    gate = threading.Event()
+    compiled = ProposalCompileResult(
+        ok=False,
+        spec_hash=None,
+        diagnostics=(
+            ProposalDiagnostic(
+                code="strategy.factor.unknown",
+                pointer="/factors/0/factor_id",
+                message="알 수 없는 팩터 식별자",
+                severity="error",
+            ),
+        ),
+    )
+    provider = _GatedProvider(
+        after=[
+            ThinkingSummary(text="어떤 팩터를 쓸지 고른다"),
+            SearchActivity(
+                query="KRX 모멘텀",
+                sources=(Source(title="리뷰", url="https://example.com/krx"),),
+            ),
+            ToolCall(call_id="call-1", name="read_current_strategy", arguments={"depth": 2}),
+            ToolResultSummary(
+                call_id="call-1", name="read_current_strategy", ok=True, summary="{}"
+            ),
+            Proposal(
+                proposal=StrategyProposal(
+                    title="제안",
+                    summary="한 문장",
+                    rationale="근거 (https://example.com/krx)",
+                    sources=(Source(title="리뷰", url="https://example.com/krx"),),
+                    source_text="schema_version: '1.1'\n",
+                    source_format="yaml",
+                    compile=compiled,
+                )
+            ),
+            Usage(input_tokens=1200, output_tokens=340, cache_read_tokens=900),
+            Done(stop_reason="end_turn"),
+            Failure(code=FailureCode.PROVIDER, message="공급자 호출이 실패했습니다"),
+        ],
+        gate=gate,
+    )
+    with _live_client(tmp_path, provider) as client:
+        _create_profile(client)
+        session_id = _start_session(client)
+        client.post(
+            f"{_ASSISTANT}/sessions/{session_id}/turns",
+            json={"text": "두 경로를 맞대 본다", "context": _CONTEXT},
+        )
+        assert provider.reached_gate.wait(timeout=5.0)
+        with client.stream("GET", f"{_ASSISTANT}/sessions/{session_id}/events") as stream:
+            lines = stream.iter_lines()
+            gate.set()
+            frames = _read_frames(lines, until_id=7)
+        history = _wait_for_terminal_turn(client, session_id)
+
+    assert [item["event"]["type"] for item in frames] == [
+        "thinking_summary",
+        "search_activity",
+        "tool_call",
+        "tool_result",
+        "proposal",
+        "usage",
+        "done",
+        "failure",
+    ]
+    assert history["events"] == frames
 
 
 def test_the_session_history_carries_the_usage_it_can_derive_from_its_events(

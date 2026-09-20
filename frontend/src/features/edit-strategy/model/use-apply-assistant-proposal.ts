@@ -51,7 +51,8 @@ export type ProposalApplyStatus =
       /** 확인 화면이 비교해 보여 주고, 덮어쓰기가 지울 현재 문서 텍스트. */
       currentSource: string;
     }
-  | { kind: "applied" }
+  /** `changed`가 거짓이면 제안이 지금 문서와 같아 바뀐 내용이 없다. */
+  | { kind: "applied"; changed: boolean }
   | { kind: "failed"; reason: ProposalApplyFailure };
 
 export type AssistantProposalApply = {
@@ -129,11 +130,15 @@ export const useApplyAssistantProposal = (
   /** 전체 범위 교체 한 번. 호출 전에 조합·편집기·기준 검사를 마친 상태여야 한다. */
   const overwrite = useCallback(
     (handle: CodeEditorHandle, source: string): void => {
-      handle.replaceRange(0, handle.getText().length, source);
+      const before = handle.getText();
+      handle.replaceRange(0, before.length, source);
       handle.scrollTo(0);
       handle.focus();
-      // replaceRange가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다.
-      setStatus({ kind: "applied" }, sourceVersion + 1);
+      // replaceRange가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다. 단 제안이
+      // 지금 문서와 똑같으면 reducer가 상태를 그대로 돌려줘 버전이 오르지 않는다 — 그때 +1을 쓰면
+      // 결과가 영원히 어긋난 소유자에 묶여 알림도, 이어지는 백테스트도 사라진다(3차 리뷰 P2-1).
+      const changed = source !== before;
+      setStatus({ kind: "applied", changed }, sourceVersion + (changed ? 1 : 0));
     },
     [setStatus, sourceVersion],
   );

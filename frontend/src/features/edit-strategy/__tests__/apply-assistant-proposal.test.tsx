@@ -113,7 +113,7 @@ describe("useApplyAssistantProposal", () => {
       PROPOSED,
     );
     expect(editor.text()).toBe(PROPOSED);
-    expect(hook.result.current.status).toEqual({ kind: "applied" });
+    expect(hook.result.current.status).toEqual({ kind: "applied", changed: true });
   });
 
   it("적용 결과는 그 뒤 편집 한 번에 걷힌다", () => {
@@ -121,10 +121,23 @@ describe("useApplyAssistantProposal", () => {
     act(() =>
       hook.result.current.apply({ source: PROPOSED, baseSource: BASE }),
     );
-    expect(hook.result.current.status).toEqual({ kind: "applied" });
+    expect(hook.result.current.status).toEqual({ kind: "applied", changed: true });
 
     typeMore();
     expect(hook.result.current.status).toEqual({ kind: "idle" });
+  });
+
+  it("제안이 지금 문서와 같아도 적용 결과를 알린다", () => {
+    // 같은 텍스트를 넣으면 reducer가 상태를 그대로 돌려줘 텍스트 버전이 오르지 않는다. 결과가 그
+    // 사실을 반영하지 않으면 알림이 영원히 어긋난 소유자에 묶인다(3차 리뷰 P2-1).
+    const { editor, hook } = mountHook();
+    act(() => hook.result.current.apply({ source: BASE, baseSource: BASE }));
+
+    expect(editor.text()).toBe(BASE);
+    expect(hook.result.current.status).toEqual({
+      kind: "applied",
+      changed: false,
+    });
   });
 
   it("문서가 바뀌었으면 덮어쓰지 않고 확인을 요구한다", () => {
@@ -170,7 +183,7 @@ describe("useApplyAssistantProposal", () => {
       typed.length,
       PROPOSED,
     );
-    expect(hook.result.current.status).toEqual({ kind: "applied" });
+    expect(hook.result.current.status).toEqual({ kind: "applied", changed: true });
   });
 
   it("취소하면 텍스트도 상태도 그대로 둔다", () => {

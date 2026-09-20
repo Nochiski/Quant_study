@@ -211,6 +211,16 @@ export const StrategyIde = ({
   // 슬롯 함수는 렌더 중에 불리므로 이 손잡이는 ref를 닫지 않는다(`react-hooks/refs`). 접은 뒤 돌아갈
   // 자리는 상단 바 토글이고, 그 자리는 id로 찾는다.
   const assistantToggleId = `${assistantId}-toggle`;
+  /**
+   * 사이드바를 펼친 뒤 포커스가 갈 자리. 슬롯이 접기 버튼을 그리면 그 버튼, 아니면 패널 자신이다
+   * (`tabIndex={-1}`) — 상단 토글은 펼치는 순간 스스로 언마운트되므로 넘겨받을 자리가 없으면 포커스가
+   * `body`로 떨어진다(3차 리뷰 P1-1).
+   */
+  const assistantFocusTarget = useCallback(
+    (): HTMLElement | null =>
+      assistantCollapse.current ?? document.getElementById(assistantId),
+    [assistantId],
+  );
   const closeAssistant = useCallback((): void => {
     close(["assistantOpen"]);
     queueMicrotask(() =>
@@ -295,7 +305,7 @@ export const StrategyIde = ({
               focusAfterExecute: () =>
                 layout.assistantOpen
                   ? assistantRestore.current
-                  : assistantCollapse.current,
+                  : assistantFocusTarget(),
               execute: () => toggleRight("assistantOpen"),
             },
           ]
@@ -329,6 +339,7 @@ export const StrategyIde = ({
       ...symbolCommands,
     ];
   }, [
+    assistantFocusTarget,
     availableViews,
     hasAssistant,
     layout,
@@ -403,7 +414,11 @@ export const StrategyIde = ({
         // 오기 때문이다(macOS 옵션 키).
         if (!hasAssistant || event.repeat) return;
         event.preventDefault();
+        const opening = !layout.assistantOpen;
         toggleRight("assistantOpen");
+        queueMicrotask(() =>
+          (opening ? assistantFocusTarget() : assistantRestore.current)?.focus(),
+        );
       } else if (event.altKey && !modifier && /^[1-5]$/.test(event.key)) {
         const next = VIEWS[Number(event.key) - 1];
         if (
@@ -423,8 +438,10 @@ export const StrategyIde = ({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
+    assistantFocusTarget,
     availableViews,
     hasAssistant,
+    layout.assistantOpen,
     onRunBacktest,
     onSave,
     onValidate,
@@ -500,6 +517,8 @@ export const StrategyIde = ({
       id={ids.assistant}
       className="ide__assistant"
       aria-label={t("ide.assistant")}
+      // 펼친 직후 포커스를 받을 수 있게 한다. 탭 순서에는 들어가지 않는다.
+      tabIndex={-1}
       hidden={!layout.assistantOpen}
       style={assistantFloating ? undefined : { width: layout.assistantWidth }}
     >
@@ -618,7 +637,7 @@ export const StrategyIde = ({
               size="small"
               onClick={() => {
                 toggleRight("assistantOpen");
-                queueMicrotask(() => assistantCollapse.current?.focus());
+                queueMicrotask(() => assistantFocusTarget()?.focus());
               }}
               aria-controls={ids.assistant}
               aria-expanded={layout.assistantOpen}

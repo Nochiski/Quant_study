@@ -168,6 +168,8 @@ const ko = {
   "assistant.apply.applyFromPreview": "문서에 적용",
   "assistant.apply.cancel": "취소",
   "assistant.apply.applied": "제안을 문서에 적용했습니다.",
+  "assistant.apply.appliedUnchanged":
+    "제안이 지금 문서와 같아 바뀐 내용이 없습니다.",
   "assistant.apply.backtestWaiting":
     "적용한 문서를 검증하는 중입니다. 실행할 수 있게 되면 백테스트를 시작합니다.",
   "assistant.apply.error.editor-unavailable":
@@ -688,16 +690,14 @@ const ko = {
     "저장된 1.0 revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.strategy.requires_upgrade":
     "저장된 1.0 revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
-  "trace.error.trace.request.invalid":
-    "추적 요청이 올바르지 않습니다: {detail}",
+  "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다: {detail}",
   "trace.error.trace.engine.incompatible":
     "선택한 실행 엔진이 이 전략을 추적할 수 없습니다. 다른 실행 core를 고르세요.",
   "trace.error.trace.capability.unsupported":
     "이 전략은 추적이 아직 지원하지 않는 기능을 씁니다: {detail}",
   "trace.error.trace.strategy.stale":
     "편집 중인 문서가 저장본과 달라져 추적할 수 없습니다. 저장하거나 저장본을 다시 여세요.",
-  "trace.error.trace.strategy.not_found":
-    "추적할 저장 revision을 찾지 못했습니다.",
+  "trace.error.trace.strategy.not_found": "추적할 저장 revision을 찾지 못했습니다.",
   "trace.error.trace.cancelled": "추적이 취소되었습니다.",
   "ide.meta.schemaVersion": "schema",
   "ide.meta.sourceHash": "source hash",
@@ -918,8 +918,7 @@ const ko = {
   "form.feedback.composing": "{label} · IME 입력 중에는 변경하지 않습니다",
   "form.feedback.editor-unavailable": "{label} · 편집기가 준비되지 않았습니다",
   "form.feedback.editor-inactive": "{label} · 편집기가 비활성입니다",
-  "form.feedback.pending":
-    "{label} · 직전 편집을 반영하는 중입니다. 잠시 뒤 다시 시도하세요",
+  "form.feedback.pending": "{label} · 직전 편집을 반영하는 중입니다. 잠시 뒤 다시 시도하세요",
   "form.feedback.yaml-only": "{label} · YAML 문서에서만 편집합니다",
   "nav.settings": "설정",
   "page.settings.title": "설정",
@@ -1006,7 +1005,8 @@ const ko = {
   "assistant.turn.failure.output_truncated": "답변이 길어 잘렸습니다.",
   "assistant.turn.failure.token_budget_exceeded":
     "이 답변의 토큰 예산을 다 썼습니다. 질문을 좁혀 다시 물어보세요.",
-  "assistant.turn.failure.unknown": "답변이 알 수 없는 이유로 중단되었습니다.",
+  "assistant.turn.failure.unknown":
+    "답변이 알 수 없는 이유로 중단되었습니다.",
   "assistant.chat.title": "AI 어시스턴트",
   "assistant.chat.log": "대화 내용",
   "assistant.chat.session": "대화",
@@ -1240,6 +1240,8 @@ export const messages = {
     "assistant.apply.applyFromPreview": "Apply to the document",
     "assistant.apply.cancel": "Cancel",
     "assistant.apply.applied": "The proposal was applied to the document.",
+    "assistant.apply.appliedUnchanged":
+      "The proposal matches the current document, so nothing changed.",
     "assistant.apply.backtestWaiting":
       "Validating the applied document. The backtest starts once it can run.",
     "assistant.apply.error.editor-unavailable":
@@ -1471,8 +1473,7 @@ export const messages = {
     "projection.specHash": "Backend spec hash",
     "graph.title": "FactorGraph DAG",
     "graph.planOnly": "Backend plan projection",
-    "graph.planWithEdit":
-      "Backend plan projection · edits are source transactions",
+    "graph.planWithEdit": "Backend plan projection · edits are source transactions",
     "graph.editTitle": "Edit graph",
     "graph.editable": "Editable",
     "graph.nodesTitle": "Nodes",
@@ -1480,16 +1481,14 @@ export const messages = {
     "graph.addNode": "Add node",
     "graph.editNode": "Edit node: {node}",
     "graph.removeNode": "Remove",
-    "graph.removeBlocked":
-      "{node} is still referenced, so it was not removed: {pointers}",
+    "graph.removeBlocked": "{node} is still referenced, so it was not removed: {pointers}",
     "graph.settingsTitle": "Graph settings",
     "graph.selectedNode": "Selected node",
     "graph.noSelection": "Select a node to edit its properties",
     "graph.noNodes": "No nodes yet — start with Add node",
     "graph.noFactors": "No factors — add one in the Form",
     "graph.recomputing": "Recomputing",
-    "graph.removeMissing":
-      "{node} was not found in the document, so it was not removed",
+    "graph.removeMissing": "{node} was not found in the document, so it was not removed",
     "graph.openForm": "Open in Form",
     "graph.dag": "Factor nodes and input edges in backend plan order",
     "graph.planSource": "Projection source",
@@ -1778,16 +1777,14 @@ export const messages = {
       "A stored 1.0 revision cannot run. Upgrade it and save a new revision first.",
     "trace.error.trace.strategy.requires_upgrade":
       "A stored 1.0 revision cannot be traced. Upgrade it and save a new revision first.",
-    "trace.error.trace.request.invalid":
-      "The trace request is invalid: {detail}",
+    "trace.error.trace.request.invalid": "The trace request is invalid: {detail}",
     "trace.error.trace.engine.incompatible":
       "The selected engine cannot trace this strategy. Choose another execution core.",
     "trace.error.trace.capability.unsupported":
       "This strategy uses a capability tracing does not support yet: {detail}",
     "trace.error.trace.strategy.stale":
       "The edited document no longer matches the stored revision. Save it or reopen the stored revision.",
-    "trace.error.trace.strategy.not_found":
-      "The stored revision to trace was not found.",
+    "trace.error.trace.strategy.not_found": "The stored revision to trace was not found.",
     "trace.error.trace.cancelled": "The trace was cancelled.",
     "ide.meta.schemaVersion": "schema",
     "ide.meta.sourceHash": "source hash",
@@ -2011,8 +2008,7 @@ export const messages = {
     "form.feedback.composing": "{label} · not applied during IME composition",
     "form.feedback.editor-unavailable": "{label} · the editor is not ready",
     "form.feedback.editor-inactive": "{label} · the editor is inactive",
-    "form.feedback.pending":
-      "{label} · the previous edit is still being applied; try again in a moment",
+    "form.feedback.pending": "{label} · the previous edit is still being applied; try again in a moment",
     "form.feedback.yaml-only": "{label} · only YAML documents are edited",
     "nav.settings": "Settings",
     "page.settings.title": "Settings",

@@ -34,7 +34,11 @@ export const ProposalApplyFeedback = ({
   if (status.kind === "applied")
     return (
       <p className="proposal-apply__feedback" role="status">
-        {t("assistant.apply.applied")}
+        {t(
+          status.changed
+            ? "assistant.apply.applied"
+            : "assistant.apply.appliedUnchanged",
+        )}
       </p>
     );
   if (status.kind === "failed")

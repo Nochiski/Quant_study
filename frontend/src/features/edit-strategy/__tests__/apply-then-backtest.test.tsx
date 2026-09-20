@@ -105,15 +105,25 @@ const mountChain = (initial = BASE) => {
     },
   );
   act(() => hook.result.current.apply.onEditorReady(editor.handle));
-  // 페이지와 같은 흐름: 편집기 변경이 reducer `edit`로 흘러 텍스트 버전이 오른다. 적용 결과 상태가
-  // 그 버전에 묶여 있으므로 이 흐름 없이는 "적용됨"을 읽을 수 없다.
-  editor.subscribe((text) => hook.rerender({ state: edited(text), canRun: false }));
-  return { editor, run, hook };
+  let current = { state: initialDocumentState("yaml", BASE), canRun: false };
+  const rerender = (next: { state: DocumentState; canRun: boolean }) => {
+    current = next;
+    hook.rerender(next);
+  };
+  // 페이지와 같은 흐름: 편집기 변경이 reducer `edit`로 흘러 텍스트 버전이 오른다. 같은 텍스트면
+  // reducer가 상태를 그대로 돌려주므로 버전도 그대로다 — 그 사실이 여기서도 재현돼야 한다.
+  editor.subscribe((text) =>
+    rerender({
+      state: documentReducer(current.state, { type: "edit", source: text }),
+      canRun: current.canRun,
+    }),
+  );
+  return { editor, run, hook, rerender };
 };
 
 describe("useApplyProposalThenBacktest", () => {
   it("검증이 끝나 실행 가능해지면 그때 백테스트를 잇는다", () => {
-    const { run, hook } = mountChain();
+    const { run, hook, rerender } = mountChain();
     act(() =>
       hook.result.current.chain.applyThenBacktest({
         source: PROPOSED,
@@ -125,17 +135,34 @@ describe("useApplyProposalThenBacktest", () => {
 
     // 편집기 change가 reducer로 흘렀지만 검증은 아직이다.
     const typing = edited(PROPOSED);
-    hook.rerender({ state: typing, canRun: false });
+    rerender({ state: typing, canRun: false });
     expect(hook.result.current.chain.waiting).toBe(true);
     expect(run).not.toHaveBeenCalled();
 
-    hook.rerender({ state: compiled(parsed(typing), false), canRun: true });
+    rerender({ state: compiled(parsed(typing), false), canRun: true });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.chain.waiting).toBe(false);
+  });
+
+  it("제안이 지금 문서와 같아도 백테스트를 잇는다", () => {
+    // 같은 텍스트라 reducer가 그대로 → 텍스트 버전이 오르지 않는다. 그 경우에도 사용자가 누른 동작의
+    // 뒷부분(실행)은 이어져야 한다(3차 리뷰 P2-1).
+    const { run, hook, rerender } = mountChain();
+    const settled = compiled(parsed(initialDocumentState("yaml", BASE)), false);
+    rerender({ state: settled, canRun: true });
+    act(() =>
+      hook.result.current.chain.applyThenBacktest({
+        source: BASE,
+        baseSource: BASE,
+      }),
+    );
+
     expect(run).toHaveBeenCalledTimes(1);
     expect(hook.result.current.chain.waiting).toBe(false);
   });
 
   it("검증이 끝났는데 실행할 수 없으면 대기를 풀고 실행하지 않는다", () => {
-    const { run, hook } = mountChain();
+    const { run, hook, rerender } = mountChain();
     act(() =>
       hook.result.current.chain.applyThenBacktest({
         source: PROPOSED,
@@ -143,7 +170,7 @@ describe("useApplyProposalThenBacktest", () => {
       }),
     );
     const settled = compiled(parsed(edited(PROPOSED)), true);
-    hook.rerender({ state: settled, canRun: false });
+    rerender({ state: settled, canRun: false });
 
     expect(run).not.toHaveBeenCalled();
     expect(hook.result.current.chain.waiting).toBe(false);
@@ -151,14 +178,14 @@ describe("useApplyProposalThenBacktest", () => {
   });
 
   it("구문 오류로 검증이 시작되지 않아도 영원히 기다리지 않는다", () => {
-    const { run, hook } = mountChain();
+    const { run, hook, rerender } = mountChain();
     act(() =>
       hook.result.current.chain.applyThenBacktest({
         source: "title: [\n",
         baseSource: BASE,
       }),
     );
-    hook.rerender({ state: parsed(edited("title: [\n")), canRun: false });
+    rerender({ state: parsed(edited("title: [\n")), canRun: false });
 
     expect(run).not.toHaveBeenCalled();
     expect(hook.result.current.chain.waiting).toBe(false);
@@ -183,7 +210,7 @@ describe("useApplyProposalThenBacktest", () => {
   });
 
   it("기다리는 동안 문서를 또 고치면 실행을 잇지 않는다", () => {
-    const { run, hook } = mountChain();
+    const { run, hook, rerender } = mountChain();
     act(() =>
       hook.result.current.chain.applyThenBacktest({
         source: PROPOSED,
@@ -191,10 +218,10 @@ describe("useApplyProposalThenBacktest", () => {
       }),
     );
     // 적용한 텍스트가 reducer에 닿은 뒤, 검증이 끝나기 전에 사용자가 이어서 고친다.
-    hook.rerender({ state: edited(PROPOSED), canRun: false });
+    rerender({ state: edited(PROPOSED), canRun: false });
     expect(hook.result.current.chain.waiting).toBe(true);
     const typedOver = edited('schema_version: "1.1"\ntitle: "new but mine"\n');
-    hook.rerender({ state: compiled(parsed(typedOver), false), canRun: true });
+    rerender({ state: compiled(parsed(typedOver), false), canRun: true });
 
     expect(run).not.toHaveBeenCalled();
     expect(hook.result.current.chain.waiting).toBe(false);

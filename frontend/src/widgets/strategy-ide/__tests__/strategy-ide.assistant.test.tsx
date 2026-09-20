@@ -43,6 +43,16 @@ const matchMediaBy = (matches: (query: string) => boolean) =>
     })),
   );
 
+/** 제품과 같은 모양의 슬롯: 손잡이를 받아 자기 닫기를 그리는 함수. */
+const sidebarSlot = ({ close }: { close: () => void }) => (
+  <section>
+    <button type="button" onClick={close}>
+      사이드바 닫기
+    </button>
+    <p>AI 사이드바</p>
+  </section>
+);
+
 const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
   render(
     <ThemePreferenceProvider>
@@ -50,11 +60,15 @@ const mount = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
         title="새 전략"
         versionLabel="초안"
         editor={<textarea aria-label="source" />}
-        assistant={<p>AI 사이드바</p>}
+        assistant={sidebarSlot}
         {...props}
       />
     </ThemePreferenceProvider>,
   );
+
+/** 접기 버튼을 위젯이 그리는 쪽(슬롯이 평범한 노드). */
+const mountNodeSlot = (props: Partial<Parameters<typeof StrategyIde>[0]> = {}) =>
+  mount({ assistant: <p>AI 사이드바</p>, ...props });
 
 /** 그래프·YAML 탭을 오가도 같은 사이드바가 살아 있는지 보기 위한 view 소유 래퍼. */
 const StatefulIde = () => {
@@ -89,10 +103,10 @@ describe("StrategyIde assistant 슬롯", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("토글 버튼으로 펼치고 접으며 aria-expanded와 aria-controls가 해소된다", async () => {
+  it("노드 슬롯이면 위젯이 접기 버튼을 그리고 거기로 포커스를 넘긴다", async () => {
     matchMedia(false);
     const user = userEvent.setup();
-    mount();
+    mountNodeSlot();
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();
@@ -116,6 +130,29 @@ describe("StrategyIde assistant 슬롯", () => {
     expect(
       screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("펼치면 포커스가 사이드바 패널로 간다 — 상단 토글은 스스로 사라진다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount();
+    await user.click(screen.getByRole("button", { name: "AI 어시스턴트" }));
+
+    const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
+    await waitFor(() => expect(panel).toHaveFocus());
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("명령 팔레트로 펼쳐도 포커스가 사이드바 패널로 간다", async () => {
+    matchMedia(false);
+    const user = userEvent.setup();
+    mount();
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    await user.type(screen.getByRole("combobox"), "AI 어시스턴트");
+    await user.keyboard("{Enter}");
+
+    const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
+    await waitFor(() => expect(panel).toHaveFocus());
   });
 
   it("Alt+A 단축키로 사이드바를 여닫는다", () => {
@@ -152,7 +189,8 @@ describe("StrategyIde assistant 슬롯", () => {
     const user = userEvent.setup();
     const first = mount();
     fireEvent.keyDown(window, { key: "a", altKey: true });
-    const handle = screen.getByRole("separator", {
+    // 펼침은 포커스를 패널로 옮긴다(microtask). 그 뒤에 핸들을 잡는다.
+    const handle = await screen.findByRole("separator", {
       name: "AI 어시스턴트 크기 조절",
     });
     handle.focus();

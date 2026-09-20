@@ -161,15 +161,17 @@ describe("useAssistantTurnContext", () => {
     });
   });
 
-  it("포맷 전환 중에는 편집기가 든 텍스트의 포맷을 싣는다", () => {
-    // 포맷 전환은 reducer를 먼저 바꾸고 편집기 텍스트는 effect가 뒤따라 민다. 그 틈에 턴이 시작되면
-    // 새 포맷 라벨에 옛 포맷 텍스트가 실리면 안 된다(B-04 리뷰 P3).
+  it("포맷은 문서와 함께만 바뀌므로 편집기 텍스트와 같은 짝으로 실린다", () => {
+    // 포맷 전환은 `load`라 텍스트도 함께 갈아 끼운다. 편집기가 따라온 뒤에는 새 짝이 실린다.
     let live = SOURCE;
     const { result, rerender } = renderHook(
       ({ state }) => useAssistantTurnContext(state, () => live, null),
       { initialProps: { state: initialDocumentState("yaml", SOURCE) } },
     );
-    expect(result.current().source_format).toBe("yaml");
+    expect(result.current()).toMatchObject({
+      source_text: SOURCE,
+      source_format: "yaml",
+    });
 
     const switched = documentReducer(initialDocumentState("yaml", SOURCE), {
       type: "load",
@@ -179,14 +181,8 @@ describe("useAssistantTurnContext", () => {
       baseRevision: null,
       baseSpecHash: null,
     });
-    act(() => rerender({ state: switched }));
-    expect(result.current()).toMatchObject({
-      source_text: SOURCE,
-      source_format: "yaml",
-    });
-
-    // 편집기가 따라온 뒤에는 새 포맷이다.
     live = '{ "schema_version": "1.1" }';
+    act(() => rerender({ state: switched }));
     expect(result.current()).toMatchObject({
       source_text: live,
       source_format: "json",

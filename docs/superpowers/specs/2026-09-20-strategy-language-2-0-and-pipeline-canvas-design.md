@@ -76,7 +76,8 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
   마지막 노드이면 체인이다. 다중 입력 노드는 **한 입력이 체인 꼬리이고 나머지 입력이 전부 체인
   밖 잎일 때만** 체인으로 본다. 잎은 입력이 없는 소스 노드(`field`·`constant`·`parameter`)이고
   체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다.
-- 아이디어 3(20일 이평 돌파)의 정본 노드 형태는 잎 4개다: `close`(field `price.close`) →
+- 아이디어 3(20일 이평 돌파)의 정본 노드 형태는 노드 4개(그중 잎 2개: `close`·`close_2`)다:
+  `close`(field `price.close`) →
   `ma20`(time_series mean, window 20, input `close`) → 잎 `close_2`(field `price.close`) →
   `breakout`(comparison gt, `left_node_id: close_2`, `right_node_id: ma20`, 출력). 마지막 노드가
   다중 입력이고 한 입력(`ma20`)이 체인 꼬리, 나머지(`close_2`)가 잎이므로 체인이다.
@@ -92,7 +93,7 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
 | S3 | `graph.missing_policy` 제거 | 팩터 그래프마다 4개 선택지 | unknown key. 실행 설정의 `missing` 기본값 하나 |
 | S4 | `signal.normalization` 추가 | 없음(원시값 가중 합) | `none`·`rank`·`zscore`. 새 문서 기본값 `rank`. 업그레이드 문서는 `none` 명시(의미 보존) |
 | S5 | `eligibility.rules[]`에 횡단면 규칙 추가 | `field_id`·`operator`·`value`만, `operator`가 공유 `ComparisonOperator` | 전용 `EligibilityOperator`(gt·gte·lt·lte·eq·top_percent·top_count)로 분리. `top_*`의 `value`는 비율·개수 |
-| S6 | `risk.risk_factor_id` 추가 | `risk_field_id`(데이터 필드만) | 팩터 id로 역가중. `risk_field_id`와 동시 지정은 error. 참조 팩터는 합성 점수에서 제외 |
+| S6 | `risk.risk_factor_id` 추가 | `risk_field_id`(데이터 필드만) | 팩터 id로 역가중. `risk_field_id`와 동시 지정은 error. `weighting: risk`에서만 읽히고, 그때 참조 팩터는 합성 점수에서 제외 |
 | S7 | `saved_factor`·`saved_subgraph` 노드 제거 | 스키마에 있으나 실행 거부 | 노드 union에서 제거(M8 라이브러리가 되살릴 때 재추가) |
 
 - 최상위 필수 키는 `schema_version`·`title` **둘**이다. `factors`는 생략해도, 빈 배열이어도 구조
@@ -145,9 +146,21 @@ risk:
 **S6 `risk.risk_factor_id`의 의미(정본).** `_compiler.py:526-570`은 `spec.factors` 전부를 합성에
 넣고, `:838-844`의 `risk` 분기는 원시 필드만 읽는다.
 
-- 참조된 팩터는 **합성 점수에서 제외한다**(그 팩터의 `weight`를 무시하고 분모 `Σ|weight|`에서도
-  뺀다). 사용자가 "가중만 바꿨다"고 믿는 동안 종목 선정이 바뀌는 것을 막는다. 제외했다는 사실은
-  정보 진단 `strategy.risk.risk_factor_excluded`(warning)로 알린다.
+- 제외는 **`portfolio.weighting == "risk"`이고 `risk_factor_id`가 설정된 경우에만** 적용한다. 그
+  밖의 모드에서는 `risk_factor_id`를 읽지 않고 그 팩터는 일반 알파로 남는다. `risk_field_id`와 같은
+  적용 조건 계약이며(`_constraints.py:193-197`의 `/risk/risk_field_id` 행과 같은 모양),
+  `FIELD_APPLICABILITY`에 `/risk/risk_factor_id`의 조건 `/portfolio/weighting = risk` 행을 넣어 다른
+  모드에서 설정하면 `strategy.field.inapplicable` warning이 나게 한다. 적용 조건이 있는 필드가 그
+  조건 밖에서 알파 합성을 바꾸면 "모드별로 읽히는 필드" 계약과 어긋난다.
+- 그 조건에서 참조된 팩터는 **합성 점수에서 제외한다**(그 팩터의 `weight`를 무시하고 분모
+  `Σ|weight|`에서도 뺀다). 사용자가 "가중만 바꿨다"고 믿는 동안 종목 선정이 바뀌는 것을 막는다.
+  제외했다는 사실은 정보 진단 `strategy.risk.risk_factor_excluded`(warning)로 알린다.
+- **제외한 뒤 합성에 남는 알파 팩터가 0개면 compile error `strategy.signal.no_alpha_factor`**다
+  (코드 레지스트리에 등록). 막지 않으면 `_compiler.py:562-570`에서 `denominator == 0`이라 모든
+  후보의 `composite_score`가 `None`이 되고, 정렬 키(`:345`, `:400`, `:835`의 `or 0.0` 폴백)가
+  `(-0.0, security_id)`로 전부 동점이 되어 **`security_id` 사전순 상위 N종목이 조용히 선정된다.**
+  예외도 진단도 없이 백테스트가 정상 완료되는 silent wrong result다. 팩터가 하나뿐인 문서에
+  그 팩터를 `risk_factor_id`로 지정하면 바로 이 경로에 들어간다.
 - 역가중은 **`signal.normalization` 적용 이전의 원시 출력**을 쓴다. `rank`(1.2 기본값) 출력을
   역수로 쓰면 무의미한 가중이 되기 때문이다. 값은 `PortfolioObservation.factor_values`에 있다.
 - 참조 팩터 값이 `<= 0`이면 기존 `MISSING_RISK` 탈락 분기를 그대로 쓴다(`_compiler.py:841-843`).
@@ -158,8 +171,10 @@ risk:
   `zscore`(횡단면 표준화), `none`(항등, 1.1 의미).
 - `none`이고 팩터 출력 단위(`NodeContract.unit`)가 서로 다르면 `strategy.signal.unit_mismatch`
   warning. 팩터가 하나면 경고하지 않는다.
-- `risk.risk_factor_id`가 가리키는 팩터는 이 합성에서 빠진다(D3 S6). `Σ`와 분모 `Σ|weight|` 양쪽에서
-  뺀다. 역가중이 읽는 값은 `norm`을 거치지 않은 원시 출력이다.
+- `weighting: risk`에서 `risk.risk_factor_id`가 가리키는 팩터는 이 합성에서 빠진다(D3 S6). `Σ`와
+  분모 `Σ|weight|` 양쪽에서 뺀다. 빼고 나서 남는 팩터가 0개면 `strategy.signal.no_alpha_factor`
+  error다. 역가중이 읽는 값은 `norm`을 거치지 않은 원시 출력이다. 다른 `weighting`에서는 이 제외가
+  일어나지 않는다.
 - 그래프의 "알파 팩터" 단계 "점수 합치는 방법" 카드가 이 필드를 "순위로 맞춘 뒤 가중 합 / 표준화 뒤 가중 합 / 원시값
   가중 합(주의)"으로 보인다.
 
@@ -312,7 +327,7 @@ schema(`x-description-key`, `x-operator`)로 내려준다. **레지스트리 키
 | 위치 | 변경 |
 |---|---|
 | `.claude/rules/strategy-workbench-sot.md` (P0-01) | "전략 의미" 행에 "표현은 YAML과 그래프 둘" 명시, "실행 설정"·"연산자 정의"·"그래프 표현 투영" 행 신설(owner는 실제 파일, 미구현은 괄호 표기), 업그레이드 행 제목을 "1.0 → 1.1 → 1.2"로 예약, `paths:` frontmatter에 이 패키지 추가, 금지 절 캐시 키 문장에 `environment_hash`. 금지 절의 DSL 문장 유지 |
-| `.claude/rules/strategy-workbench-sot.md` (후속 PR) | 실행 설정·연산자·투영 행의 "(아직 없음)" 표기 해제는 각 구현 PR(P2-01·P1-03·P4-01·P5-01), 금지 절 "JSON/Form/Graph/Diff projection" 문장 갱신은 P4-04, 1.2 업그레이드 step 반영은 P2-09 |
+| `.claude/rules/strategy-workbench-sot.md` (후속 PR) | 실행 설정·연산자·투영 행의 "(아직 없음)" 표기 해제는 각 구현 PR(P2-01·P1-03·P4-01·P5-01). 금지 절은 두 문장이 각각 주체를 갖는다 — "1.0 → 1.1 업그레이드 규칙" 문장을 "1.0 → 1.1 → 1.2"로 고치는 것은 P2-09, "JSON/Form/Graph/Diff projection" 문장 갱신은 P4-04. 1.2 업그레이드 step 반영도 P2-09 |
 | ADR 2026-09-04 | D8 대상 사용자·완료 정의 개정 링크 |
 | 1.1 spec | 머리말에 이 문서로의 확장 링크 |
 | 로드맵 | 완료 정의 원문 복귀, M8 "custom formula editor"는 여전히 non-goal |
@@ -369,7 +384,8 @@ Phase 1은 규칙 변경 없이 1.1 위에서 끝나며 1.2 뒤에도 그대로 
 - **frontend 단위**: `recipe-transactions` property test(임의 단일 입력 체인 문서·임의 연산에 대해
   `parse(apply(op, source)).tree == applyToTree(op, tree)`, 체인 불변식 유지, 무관한 줄 바이트 보존);
   `recipe-projection` 체인 판정(분기·다중 입력·미참조 노드는 비체인); `pipeline-projection` 스키마
-  fixture 유도; 실행 설정 패널 기본값이 runtime schema에서 오는지; 업그레이드 응답 `environment` 적용.
+  fixture 유도; 실행 설정 패널 기본값이 실행 설정 스키마 엔드포인트(`/run-environments/schema`)에서 오는지;
+  업그레이드 응답 `environment` 적용.
 - **e2e**: 빈 문서 → 파이프라인에서 팩터 추가 → 레시피 3단계 → 미리보기 → 백테스트(식별자 0개
   단언); 아이디어 5개; 1.1 revision 열기 → 업그레이드 → 실행 설정 채워짐 → 백테스트; 고급 캔버스
   드래그 배선 → YAML 반영 → 되돌리기.

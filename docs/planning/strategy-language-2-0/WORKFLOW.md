@@ -216,15 +216,19 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 **Acceptance**
 
 - `domain/backtest/_models.py`에 `RunEnvironment`(spec D6)와 canonical JSON·`environment_hash`.
-  `Market`·`DataFrequency`·`ExecutionTiming` enum을 `domain/backtest`로 옮긴다(`domain/strategy`는
-  re-export로 P2-03까지 호환 유지).
+- **enum(`Market`·`DataFrequency`·`ExecutionTiming`)을 이 PR에서 옮기지 않는다.** `RunEnvironment`는
+  이미 선언된 `domain.backtest → domain.strategy` 화살표로 현재 위치의 enum을 그대로 읽는다. 옮기고
+  `domain/strategy`가 re-export하면 `domain.strategy → domain.backtest` 화살표가 생겨 순환이 되고
+  (`tests/architecture/test_dependency_direction.py` 실패), 경계 규칙이 facade `__init__` 재수출
+  자체를 금지한다. 이동은 `DataStep`·`ExecutionStep`이 사라지는 P2-03에서 한다.
 - 브리지는 `domain/backtest`가 소유한다: `environment_from_legacy_spec(spec) -> RunEnvironment`.
   `application/backtest_run`에 두지 않는다 — `portfolio_design → backtest_run` 화살표가 기존
   `backtest_run → portfolio_design`과 순환을 만들어 `tests/architecture/test_dependency_direction.py`가
   실패하고, 경계 규칙상 application → application은 outgoing port 소비에만 허용된다(브리지는 로직).
-- `DEPENDS_ON` 갱신: `application.backtest_run`·`application.portfolio_design`·
-  `application.strategy_authoring`에 `domain.backtest` 추가, `domain.backtest`에 `domain.strategy`·
-  `domain.factor` 추가. 아키텍처 테스트 green.
+- `DEPENDS_ON` 갱신(새로 필요한 것만): `application.portfolio_design`·
+  `application.strategy_authoring`에 `domain.backtest` 추가, `domain.backtest`에 `domain.factor`
+  추가(`MissingPolicy`). `application.backtest_run`의 `domain.backtest`와 `domain.backtest`의
+  `domain.strategy`는 **이미 선언되어 있다**. 아키텍처 테스트 green.
 - `BacktestRunSpec`, portfolio preview 요청, trace 요청이 optional `environment`를 받는다. 없으면
   브리지로 만든다. 있으면 spec 값보다 우선.
 - run manifest에 `environment`와 `environment_hash` 기록. 실행 결과 캐시 키에 포함.
@@ -236,7 +240,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   설정 패널 기본값을 손으로 적지 않게 하는 경로다(P3-02가 소비).
 - OpenAPI 재생성. frontend SDK는 건드리지 않는다.
 
-**Non-goal**: StrategySpec 변경. `missing_policy`(P2-02).
+**Non-goal**: StrategySpec 변경. `missing_policy`(P2-02). enum 물리 이동(P2-03).
 
 ### P2-02 — `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지)
 
@@ -265,6 +269,12 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 **Acceptance**
 
 - `CURRENT_SCHEMA_VERSION = "1.2"`. `StrategySpec`에서 `data`·`execution` 제거.
+- `DataStep`·`ExecutionStep`이 사라지는 이 시점에 `Market`·`DataFrequency`·`ExecutionTiming` enum을
+  `domain/strategy`에서 `domain/backtest`로 옮긴다. **호환 re-export를 만들지 않는다**(경계 규칙이
+  facade 재수출을 금지). 남는 소비자(`application/strategy_design/_service.py`,
+  `adapters/outbound/engine_portfolio/_adapter.py`, `domain/strategy/facade/specification.py`)가
+  `domain.backtest` facade를 직접 읽도록 바꾸고 각 facade `DEPENDS_ON`을 갱신한다. `MissingPolicy`는
+  `domain/factor`에 그대로 둔다.
 - **최상위 필수 키는 `schema_version`·`title` 둘**이다. `factors: tuple[FactorSignal, ...] = ()`로
   기본값을 주어 생략도 빈 배열도 `structure.missing_field`를 내지 않고, 두 경우 모두 semantic
   `strategy.factor.required`가 난다. 회귀 테스트: `schema_version: "1.2"\ntitle: ""\n`의 hydrate
@@ -306,6 +316,13 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   분모에서도 뺀다. 동점은 값 내림차순 → `security_id` 오름차순 cut(결정성 테스트).
 - `top_percent` 0.2가 후보 100개에서 정확히 20개를 남긴다는 수치 테스트, 경계(소수점 절사)·동점·
   결측 케이스 각 1개.
+- **탈락 사유**: `domain/portfolio/_models.py`의 `ExclusionReason`에 횡단면 cut 전용 값을 추가한다
+  (현재 12종에 순위 탈락에 해당하는 값이 없어 `ELIGIBILITY_FAILED`로 표시되면 "규칙 위반"으로
+  잘못 읽힌다). 2-pass 구조상 `_score_candidate`(`:454-459`)는 1-pass 사유만 내고, 2-pass가 cut된
+  종목에 새 사유를 덧붙인다.
+- trace 투영과 `application/portfolio_design/_trace_service.py`가 새 사유를 그대로 전달한다. P4-03
+  미리보기 패널의 "유니버스·필터 통과·결측 제외 수"가 규칙 탈락과 순위 탈락을 구분해 셀 수 있어야
+  한다.
 
 ### P2-06 — `risk.risk_factor_id`, `saved_factor`·`saved_subgraph` 제거
 
@@ -315,12 +332,22 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 
 - `risk.risk_factor_id`(nullable, `x-reference: factor`). `weighting: risk`에서 `risk_field_id`와 배타
   (`strategy.risk.risk_source_conflict` error, `FIELD_APPLICABILITY`에 행 추가).
-- 참조 팩터는 **합성 점수에서 제외**한다(`weight` 무시, 분모 `Σ|weight|`에서도 제외). 제외 사실은
-  `strategy.risk.risk_factor_excluded` warning. 역가중은 `signal.normalization` **이전** 원시 출력
-  (`PortfolioObservation.factor_values`)을 쓴다. 값이 `<= 0`이면 기존 `MISSING_RISK` 탈락 유지
-  (`_compiler.py:841-843`).
-- 수치 테스트: 같은 문서에서 `risk_factor_id`를 붙이기 전후로 **선정 종목이 바뀌지 않는다**(합성
-  제외 검증). `normalization: rank`에서도 역가중이 원시값 기준이다.
+- `FIELD_APPLICABILITY`에 `/risk/risk_factor_id`의 적용 조건 `/portfolio/weighting = risk` 행을
+  추가한다(`_constraints.py:193-197`의 `/risk/risk_field_id` 행과 같은 모양). 다른 `weighting`에서
+  설정하면 `strategy.field.inapplicable` warning이 나고 **합성 제외도 일어나지 않는다**. 적용 조건이
+  붙은 필드가 조건 밖에서 알파 합성을 바꾸면 "모드별로 읽히는 필드" 계약과 어긋난다.
+- `weighting: risk` + `risk_factor_id`일 때 참조 팩터는 **합성 점수에서 제외**한다(`weight` 무시,
+  분모 `Σ|weight|`에서도 제외). 제외 사실은 `strategy.risk.risk_factor_excluded` warning. 역가중은
+  `signal.normalization` **이전** 원시 출력(`PortfolioObservation.factor_values`)을 쓴다. 값이
+  `<= 0`이면 기존 `MISSING_RISK` 탈락 유지(`_compiler.py:841-843`).
+- **제외 후 남는 알파 팩터가 0개면 compile error `strategy.signal.no_alpha_factor`**(코드 레지스트리
+  등록). 막지 않으면 `denominator == 0` → `composite_score` 전부 `None` → 정렬 키 `or 0.0` 폴백
+  (`_compiler.py:345`, `:400`, `:835`)으로 **`security_id` 사전순 상위 N이 조용히 선정된다.** 테스트:
+  팩터 1개짜리 문서에서 그 팩터를 `risk_factor_id`로 지정하면 compile error 1건.
+- 수치 테스트(기준선을 명시한다): **알파 팩터 N개짜리 문서**와, **거기에 변동성 팩터 1개 +
+  `risk_factor_id`를 함께 추가한 문서**의 선정 종목이 같고 비중만 다르다. "붙이기 전후 비교"가
+  아니다 — 붙이기 전 문서에는 그 팩터가 합성에 들어 있으므로 선정이 바뀌는 것이 정상이다.
+  `normalization: rank`에서도 역가중이 원시값 기준이다.
 - `saved_factor`·`saved_subgraph`를 노드 union·스키마·연산자 카탈로그에서 제거. 실행 경로의 거부
   코드 삭제.
 
@@ -348,9 +375,13 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   넘으면 **PLAN 변경 기록에 사유를 남기고 `unsupported`로 둔다**(P2-07 분기가 그대로 남는다).
 - fixture `ideas/*.yaml` 5개(spec 5절)가 hydrate·validate·preview까지 통과(backend 수준 완료 정의).
 - **ideas fixture는 레시피 빌더 산출 형태를 따른다**(spec D2). 다중 입력 연산자의 부가 입력은 새
-  소스 잎 노드다. 아이디어 3은 잎 4개(`close` → `ma20` → 잎 `close_2` → `breakout(gt, left=close_2,
-  right=ma20)`)이고 `comparison` 출력이 P2-07의 승격으로 통과한다. 체인 머리를 재참조하는 노드 3개
-  형태로 쓰지 않는다 — P5-03의 "e2e 산출물과 같은 hash" 단언이 깨진다.
+  소스 잎 노드다. 아이디어 3은 노드 4개(그중 잎 2개: `close`·`close_2`)다 — `close` → `ma20` → 잎
+  `close_2` → `breakout(gt, left=close_2, right=ma20)`. `comparison` 출력이 P2-07의 승격으로
+  통과한다. 체인 머리를 재참조하는 노드 3개 형태로 쓰지 않는다 — P5-03의 "e2e 산출물과 같은 hash"
+  단언이 깨진다.
+- 아이디어 5(변동성 역가중)는 **알파 팩터 1개 + 변동성 팩터 1개 두 벌**로 쓰고 `risk_factor_id`가
+  변동성 팩터를 가리킨다. 변동성 팩터 하나만 두고 그것을 참조하면 P2-06의
+  `strategy.signal.no_alpha_factor`에 걸려 compile이 막힌다.
 
 ### P2-09 — 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI
 
@@ -386,7 +417,9 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `.v1_1.commented.yaml`은 1.0 → 1.1 **중간 단계** 고정용으로 남긴다(체인 중간 검증 테스트).
   `.v1_1.yaml`(P2-03 보존분)이 1.1 → 1.2 입력이다. 세 경로 모두 주석·순서 보존, dict 경로와 tree 동일.
 - 업그레이드된 문서의 preview 결과가 1.1 결과와 같다(`normalization: none` 보존).
-- SoT 업그레이드 행의 "(1.2 step은 P2-09에서 추가, 아직 없음)" 예약 표기를 해제한다.
+- SoT 업그레이드 행의 "(1.2 step은 P2-09에서 추가, 아직 없음)" 예약 표기를 해제하고, 금지 절의
+  "frontend에 1.0 → 1.1 업그레이드 규칙과 …를 복제하지 않는다" 문장을 "1.0 → 1.1 → 1.2"로 고친다
+  (금지 절의 다른 문장 "JSON/Form/Graph/Diff projection"은 P4-04 몫이다).
 - OpenAPI 재생성. `database/tests` 계약 확인.
 
 **Phase 2 exit**
@@ -553,7 +586,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - e2e 5건(spec 5절 아이디어): 빈 문서에서 그래프 탭(파이프라인·레시피)만으로 완성 → 백테스트.
   결과 원문이 `fixtures/strategy_documents/ideas/*.yaml`(P2-08)과 같은 hash. 두 수준 DOM 식별자
   0개 단언. fixture와 빌더 산출물이 같은 형태라는 근거는 spec D2의 "다중 입력 연산자의 부가 입력은
-  항상 새 소스 잎 노드다"이며, 아이디어 3은 양쪽 모두 잎 4개 형태다.
+  항상 새 소스 잎 노드다"이며, 아이디어 3은 양쪽 모두 노드 4개(잎 2개) 형태다.
 - 매뉴얼에 그래프 화면 절과 예시 5개(튜토리얼).
 
 **Phase 5 exit**

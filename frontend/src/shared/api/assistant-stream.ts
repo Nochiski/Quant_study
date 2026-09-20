@@ -30,8 +30,14 @@ export type AssistantEventStreamOptions = {
   retryDelayMs?: number;
   /** 4xx 거절. 재시도하지 않고 이력으로 복구할 사유다(spec D7: 409 `no_running_turn`). */
   onRejected?: (rejection: AssistantStreamRejection) => void;
-  /** 연결 시도 한 번의 결과. 정상 종료와 재시도 상한 소진을 호출자가 구분하는 데 쓴다. */
-  onAttempt?: (ok: boolean) => void;
+  /**
+   * 연결 시도 한 번의 결말. 정상 종료와 재시도 상한 소진을 호출자가 구분하는 데 쓴다.
+   *
+   * 응답이 열리면 true, **연결된 뒤 본문이 끊겨도** false다. fetch 성공만 세면 마지막 시도가
+   * "붙었다 끊김"일 때 상한 소진이 정상 종료로 보인다 — 생성 클라이언트는 상한을 넘겨도 던지지 않고
+   * generator를 그냥 끝내므로, 호출자에게는 이 신호 말고 구분할 단서가 없다(리뷰 P1-2).
+   */
+  onStreamOutcome?: (ok: boolean) => void;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -84,7 +90,7 @@ export const openAssistantEventStream = ({
   maxRetryAttempts = ASSISTANT_SSE_MAX_RETRY_ATTEMPTS,
   retryDelayMs,
   onRejected,
-  onAttempt,
+  onStreamOutcome,
 }: AssistantEventStreamOptions) =>
   streamAssistantEvents({
     path: { session_id: sessionId },
@@ -92,20 +98,16 @@ export const openAssistantEventStream = ({
     signal,
     sseMaxRetryAttempts: maxRetryAttempts,
     ...(retryDelayMs === undefined ? {} : { sseDefaultRetryDelay: retryDelayMs }),
+    // 연결 실패·본문 끊김·상한 소진 직전까지 모두 이 콜백을 지난다(fetch가 던진 경우도 포함).
+    onSseError: () => onStreamOutcome?.(false),
     fetch: async (input, init) => {
-      let response: Response;
-      try {
-        response = await globalThis.fetch(input, init);
-      } catch (error) {
-        onAttempt?.(false);
-        throw error;
-      }
+      const response = await globalThis.fetch(input, init);
       if (response.ok) {
-        onAttempt?.(true);
+        onStreamOutcome?.(true);
         return response;
       }
-      onAttempt?.(false);
       // 5xx는 서버가 다시 살아날 수 있는 일시 오류다 — 생성 클라이언트의 재시도에 맡긴다.
+      // 실패로 세는 것은 뒤이어 불리는 `onSseError`가 한다.
       if (response.status >= 500) return response;
       onRejected?.({
         status: response.status,

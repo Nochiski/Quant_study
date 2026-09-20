@@ -77,6 +77,8 @@ const history = (
 
 type Connection = {
   push: (item: AssistantEventEnvelopeView) => void;
+  /** 봉투로 좁혀지지 않는 프레임까지 그대로 밀어 넣는다. */
+  pushFrame: (raw: string) => void;
   /** 프레임을 임의의 자리에서 자른 청크. 한글이 코드포인트 중간에서 갈리는 경우를 포함한다. */
   pushChunks: (item: AssistantEventEnvelopeView, size: number) => void;
   close: () => void;
@@ -95,6 +97,8 @@ let connections: Connection[];
 let replies: Reply[];
 let historyRequests: number;
 let historyStatus: TurnStatus;
+/** 이력 조회가 실패하는 경우(세션이 지워진 뒤)를 켠다. */
+let historyMissing: boolean;
 
 const server = setupServer(
   http.get(`${API}/api/v1/assistant/sessions/:sessionId/events`, ({ request }) => {
@@ -112,6 +116,7 @@ const server = setupServer(
     });
     connections.push({
       push: (item) => controller.enqueue(frame(item)),
+      pushFrame: (raw) => controller.enqueue(encoder.encode(raw)),
       pushChunks: (item, size) => {
         const bytes = frame(item);
         for (let at = 0; at < bytes.length; at += size) {
@@ -127,6 +132,17 @@ const server = setupServer(
   }),
   http.get(`${API}/api/v1/assistant/sessions/:sessionId`, ({ params }) => {
     historyRequests += 1;
+    if (historyMissing) {
+      return HttpResponse.json(
+        {
+          detail: {
+            code: "assistant.session.not_found",
+            message: "세션을 찾을 수 없습니다",
+          },
+        },
+        { status: 404 },
+      );
+    }
     return HttpResponse.json(history(historyStatus, String(params.sessionId)));
   }),
 );
@@ -140,6 +156,7 @@ beforeEach(() => {
   replies = [];
   historyRequests = 0;
   historyStatus = "completed";
+  historyMissing = false;
 });
 
 afterEach(() => {
@@ -220,7 +237,13 @@ describe("어시스턴트 SSE 리더", () => {
     connections[0].close();
     await waitFor(() => expect(onHistory).toHaveBeenCalledTimes(1));
     expect(onHistory.mock.calls[0][0].turns[0].status).toBe("completed");
-    expect(onClose).toHaveBeenCalledWith({ reason: "ended" });
+    expect(onClose).toHaveBeenCalledWith({
+      reason: "ended",
+      rejection: null,
+      turnStatus: "completed",
+      recovered: true,
+      droppedFrames: 0,
+    });
     expect(attempts).toHaveLength(1);
   });
 
@@ -271,17 +294,111 @@ describe("어시스턴트 SSE 리더", () => {
     expect(onClose).toHaveBeenCalledWith({
       reason: "rejected",
       rejection: { status: 409, code: "assistant.no_running_turn" },
+      turnStatus: "failed",
+      recovered: true,
+      droppedFrames: 0,
     });
     expect(onHistory.mock.calls[0][0].turns[0].status).toBe("failed");
   });
 
   it("재시도 상한을 다 쓰면 멈추고 이력으로 복구한다", async () => {
     replies = Array.from({ length: 12 }, () => "network-error" as const);
-    mount({ target, lastSequence: -1 });
+    const view = mount({ target, lastSequence: -1 });
 
     await waitFor(() => expect(onHistory).toHaveBeenCalledTimes(1));
     expect(attempts).toHaveLength(5);
-    expect(onClose).toHaveBeenCalledWith({ reason: "exhausted" });
+    expect(onClose.mock.calls[0][0]).toMatchObject({ reason: "exhausted" });
+    await waitFor(() => expect(view.result.current.status).toBe("exhausted"));
+  });
+
+  it("마지막 시도가 붙었다 끊긴 경우도 상한 소진으로 보고한다", async () => {
+    historyStatus = "running";
+    const view = mount({ target, lastSequence: -1 });
+
+    // 연결은 매번 열리고 본문만 끊긴다 — fetch 성공만 세면 이 경로가 정상 종료로 보인다.
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await waitFor(() => expect(connections).toHaveLength(attempt));
+      connections[attempt - 1].drop();
+    }
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onClose.mock.calls[0][0]).toMatchObject({
+      reason: "exhausted",
+      turnStatus: "running",
+      recovered: true,
+    });
+    expect(view.result.current.status).toBe("exhausted");
+  });
+
+  it("상한을 소진해도 스스로 다시 열지 않고 `retry()`에만 다시 연다", async () => {
+    historyStatus = "running";
+    replies = Array.from({ length: 5 }, () => "network-error" as const);
+    const view = mount({ target, lastSequence: -1 });
+
+    await waitFor(() => expect(view.result.current.status).toBe("exhausted"));
+    expect(attempts).toHaveLength(5);
+
+    // 턴은 서버에서 계속 돌지만(이력이 running) 훅은 스스로 되살아나지 않는다.
+    await settle();
+    expect(attempts).toHaveLength(5);
+
+    act(() => view.result.current.retry());
+    await waitFor(() => expect(connections).toHaveLength(1));
+    expect(attempts).toHaveLength(6);
+    expect(view.result.current.status).toBe("open");
+  });
+
+  it("이력 복구까지 실패하면 복구 실패를 알린다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    replies = [
+      {
+        status: 404,
+        body: {
+          detail: {
+            code: "assistant.session.not_found",
+            message: "세션을 찾을 수 없습니다",
+          },
+        },
+      },
+    ];
+    historyMissing = true;
+    mount({ target, lastSequence: -1 });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onClose.mock.calls[0][0]).toMatchObject({
+      reason: "rejected",
+      recovered: false,
+      turnStatus: null,
+    });
+    expect(onHistory).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("좁히지 못한 프레임은 버리되 흔적을 남긴다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mount({ target, lastSequence: -1 });
+    await waitFor(() => expect(connections).toHaveLength(1));
+
+    connections[0].pushFrame(
+      `id: 0
+event: assistant
+data: ${JSON.stringify({
+        sequence: 0,
+        turn_id: TURN,
+        event: { type: "brand_new_event" },
+      })}
+
+`,
+    );
+    connections[0].push(envelope(1, "정상 프레임"));
+    await waitFor(() => expect(onEvent).toHaveBeenCalledTimes(1));
+
+    connections[0].close();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onClose.mock.calls[0][0]).toMatchObject({ droppedFrames: 1 });
+    expect(warn.mock.calls[0][0]).toContain("brand_new_event");
+    warn.mockRestore();
   });
 
   it("언마운트하면 연결을 정리하고 늦게 온 프레임을 버린다", async () => {

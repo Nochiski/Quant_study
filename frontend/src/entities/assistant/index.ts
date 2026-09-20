@@ -34,8 +34,11 @@ export {
   assistantStreamTarget,
   useAssistantEventStream,
   type AssistantStreamClose,
+  type AssistantStreamCloseReason,
+  type AssistantStreamStatus,
   type AssistantStreamTarget,
   type UseAssistantEventStreamOptions,
+  type UseAssistantEventStreamResult,
 } from "./model/use-assistant-event-stream";
 export {
   ASSISTANT_SSE_MAX_RETRY_ATTEMPTS,

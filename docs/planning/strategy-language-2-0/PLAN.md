@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: READY
-current_phase: P0
-current_pr: P0-01
-active_prs: []
-parallel_window: [P0-01]
-last_updated: 2026-09-20T22:25:45+09:00
+project_status: IN_PROGRESS
+current_phase: P0,P1
+current_pr: P0-01,P1-01
+active_prs: [P0-01, P1-01]
+parallel_window: [P0-01, P1-01]
+last_updated: 2026-09-20T22:28:44+09:00
 planned_prs: 24
 merged_prs: 0
 approved_prs: 0
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `READY` |
-| Current phase | `P0` |
-| Current/next PR | `P0-01` |
-| Active PR | none |
+| Project status | `IN_PROGRESS` |
+| Current phase | `P0,P1` |
+| Current/next PR | `P0-01,P1-01` |
+| Active PR | `P0-01, P1-01` |
 | Progress | `0 / 24 merged (0%)` |
 | Approved | `0 / 24` |
-| Aggregated at | `2026-09-20 22:25 KST` |
+| Aggregated at | `2026-09-20 22:28 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -78,8 +78,8 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Planning package and contract docs | 1 | 0 | `READY` |
-| P1 | In-screen friction removal on 1.1 | 5 | 0 | `WAITING` |
+| P0 | Planning package and contract docs | 1 | 0 | `IN_REVIEW` |
+| P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_PROGRESS` |
 | P2 | Backend schema 1.2 | 5 | 0 | `WAITING` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
@@ -109,7 +109,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P0-01` | 기획 패키지·설계 spec·ADR/로드맵/SoT 개정 | 없음 | `READY` | — |
+| [ ] | `P0-01` | 기획 패키지·설계 spec·ADR/로드맵/SoT 개정 | 없음 | `IN_REVIEW` | [#167](https://github.com/Nochiski/Quant_study/pull/167) · `review_lang2_p0_01` 진행 중 · `deecfe5` |
 
 Phase exit:
 
@@ -119,7 +119,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `WAITING` | — |
+| [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `IN_PROGRESS` | 구현자 `impl-lang2-p1-01`, 워크트리 `wt-lang2-p1`, 브랜치 `feat/lang2-p1-01-diagnostics-anywhere` |
 | [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `WAITING` | — |
 | [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `WAITING` | — |
 | [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `WAITING` | — |

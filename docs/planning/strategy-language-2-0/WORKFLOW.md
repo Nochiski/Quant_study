@@ -309,13 +309,26 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
     `spec.execution.participation_rate < 1.0`으로 `PARTIAL_FILL` 요구를 판정한다. `assess(spec)`·
     `requirements(spec)` 시그니처에 `environment`를 더하고 호출자(`portfolio_design/_service.py`의
     `_prepare`)가 넘긴다. adapter → domain이라 facade `DEPENDS_ON`에 `domain.backtest` 추가로 끝난다
-    (enum 이동 항목이 이미 같은 줄을 요구한다).
+    (enum 이동 항목이 이미 같은 줄을 요구한다). **틀리는 방향은 과소 선언이다**: 문서
+    `execution.participation_rate = 1.0` + 명시 `environment.participation_rate = 0.1`이면
+    요구 집합에 `PARTIAL_FILL`이 빠져 능력 게이트가 조용히 약해진다(반대 조합은 과다 선언이라
+    무해). 회귀 테스트: "문서 1.0 + 환경 0.1이면 `requirements()`에 `PARTIAL_FILL`이 있다".
   - `domain/portfolio/_compiler.py:249,259` — tape hash payload의 `execution_timing`과
     `TargetTape.execution_timing`이 `spec.execution.timing`을 읽는다. `compile_target_tape`·
     `compile_target_tape_with_trace`가 `environment`(또는 `timing`)를 인자로 받게 하고
     `domain.portfolio` facade `DEPENDS_ON`에 `domain.backtest`를 추가한다(`domain.backtest`는
     `domain.portfolio`를 읽지 않으므로 순환이 아니다). `ExecutionTiming` 값이 하나뿐이라 지금은
     tape_hash가 변하지 않는다 — 회귀 테스트로 그 사실을 고정한다.
+- **결정 항목 2개**(코드 변경 전에 PLAN 변경 기록에 결론을 남긴다).
+  - `dataclass_json_schema`의 최종 owner. P2-01이 `domain/strategy/facade/schema.py`에서 수출하고
+    `domain/backtest/_schema.py`가 읽는다. 전략과 무관한 표기법이라 `domain.backtest →
+    domain.strategy` 화살표가 "유틸을 빌린다" 사유로 남는다 — enum을 옮겨 이 화살표를 끊으려 할 때
+    빌더 때문에 남는다. 규칙 위반은 아니다(`DEPENDS_ON` 선언됨, facade가 책임 이름을 가짐).
+  - 실행 설정 수치 범위(`RunEnvironment.__post_init__`과 런타임 스키마가 읽는 행)의 최종 owner.
+    P2-01은 `_constraints.py`의 `/execution/*` 행을 필드 이름으로 다시 걸어 쓴다. 이 PR이
+    `execution` 섹션을 지우면 그 행들이 전략 문서 포인터를 잃으므로 `domain/backtest`로 옮긴다.
+  - 실행 설정 스키마를 `application/strategy_authoring`이 서빙하는 것(P2-01 acceptance가 지정)도
+    같이 본다. authoring 유스케이스가 실행 설정을 소유하지는 않는다. 옮긴다면 P3-02와 함께.
 - runtime schema fixture 재생성. OpenAPI 재생성과 생성 SDK 재생성(1절 규칙).
 
 **제약사항**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend 소비자 배선은 P3-01까지

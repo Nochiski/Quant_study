@@ -34,6 +34,15 @@ export type AssistantTurnState = {
    */
   status: TurnStatus | null;
   acceptedSequence: number | null;
+  /**
+   * 이 턴에서 이미 반영한 마지막 sequence. 멱등 판정은 세션 전체가 아니라 턴마다 한다.
+   *
+   * 세션 하나짜리 watermark로 판정하면 스트림이 이력보다 먼저 붙었을 때 그 watermark가 앞으로
+   * 밀리고, 뒤늦게 온 이력의 앞선 턴 이벤트(더 낮은 번호)가 통째로 버려진다. backend SSE는 재개
+   * 범위에 걸린 앞선 턴 이벤트를 보내지 않으므로 그 이벤트의 유일한 출처가 이력이다 — 버리면
+   * 앞선 턴의 답변과 제안이 빈 채로 굳는다(리뷰 P2-1).
+   */
+  lastSequence: number;
   text: string;
   thinking: readonly string[];
   tools: readonly AssistantToolActivity[];
@@ -55,7 +64,11 @@ export type AssistantChatState = {
   sessionId: string | null;
   messages: readonly ChatMessageView[];
   turns: readonly AssistantTurnState[];
-  /** 이미 반영한 마지막 sequence. 재개 요청의 `after_sequence`이자 멱등 판정 기준이다(spec D7). */
+  /**
+   * 세션 전체에서 반영한 가장 큰 sequence. 재개 요청의 `after_sequence`로만 쓴다.
+   *
+   * 멱등 판정은 `AssistantTurnState.lastSequence`가 턴마다 한다.
+   */
   lastSequence: number;
 };
 
@@ -79,6 +92,7 @@ const emptyTurn = (turnId: string): AssistantTurnState => ({
   turnId,
   status: null,
   acceptedSequence: null,
+  lastSequence: -1,
   text: "",
   thinking: [],
   tools: [],
@@ -191,11 +205,19 @@ const reduceEvent = (
   state: AssistantChatState,
   envelope: AssistantEventEnvelopeView,
 ): AssistantChatState => {
-  if (envelope.sequence <= state.lastSequence) return state;
-  const applied = withTurn(state, envelope.turn_id, (turn) =>
-    applyEvent(turn, envelope.event),
-  );
-  return { ...applied, lastSequence: envelope.sequence };
+  const current = state.turns.find((turn) => turn.turnId === envelope.turn_id);
+  if (current !== undefined && envelope.sequence <= current.lastSequence) {
+    return state;
+  }
+  const applied = withTurn(state, envelope.turn_id, (turn) => ({
+    ...applyEvent(turn, envelope.event),
+    lastSequence: envelope.sequence,
+  }));
+  return {
+    ...applied,
+    // 재개 위치는 뒤로 가지 않는다 — 이력이 스트림보다 낮은 번호를 늦게 들고 와도 마찬가지다.
+    lastSequence: Math.max(state.lastSequence, envelope.sequence),
+  };
 };
 
 const reduceTurn = (
@@ -213,7 +235,7 @@ const reduceTurn = (
  *
  * 이력은 조회 시점의 스냅샷이라 응답이 도착했을 때는 스트림이 더 앞서 있을 수 있다. 통째로 갈아
  * 끼우면 그 사이에 반영한 이벤트가 사라지므로, 이벤트는 같은 멱등 경로로 넣고 턴 상태는 한 방향으로만
- * 옮긴다.
+ * 옮긴다. 반대 방향(이력만 아는 옛 이벤트가 사라지는 것)은 턴별 watermark가 막는다.
  */
 const reduceHistory = (
   state: AssistantChatState,

@@ -10,6 +10,7 @@ import type {
 } from "../../../shared/api";
 import {
   assistantChatReducer,
+  assistantTurn,
   emptyAssistantChatState,
   runningAssistantTurn,
   type AssistantChatAction,
@@ -221,6 +222,36 @@ describe("어시스턴트 채팅 리듀서", () => {
     expect(stale.turns[0].status).toBe("cancelled");
   });
 
+  it("스트림이 이력보다 먼저 붙어도 앞선 턴의 이벤트를 잃지 않는다", () => {
+    // 이력 query가 아직 오는 중에 턴 시작 202가 먼저 도착해 스트림이 붙은 경우다.
+    const live = fold(
+      opened(),
+      events([
+        envelope(10, text("새 턴 "), "turn-2"),
+        envelope(11, text("답변"), "turn-2"),
+      ]),
+    );
+    const merged = assistantChatReducer(live, {
+      type: "history",
+      history: history(
+        [
+          envelope(0, text("앞선 턴 답변"), "turn-1"),
+          envelope(1, { type: "proposal", proposal: proposal("앞선 제안") }, "turn-1"),
+          envelope(10, text("새 턴 "), "turn-2"),
+          envelope(11, text("답변"), "turn-2"),
+        ],
+        [turnView("completed", "turn-1"), turnView("running", "turn-2")],
+      ),
+    });
+
+    // backend SSE는 재개 범위에 걸린 앞선 턴 이벤트를 보내지 않는다 — 이력이 유일한 출처다.
+    expect(assistantTurn(merged, "turn-1")?.text).toBe("앞선 턴 답변");
+    expect(assistantTurn(merged, "turn-1")?.proposal?.title).toBe("앞선 제안");
+    // 같은 턴의 이미 반영한 이벤트는 다시 붙지 않는다.
+    expect(assistantTurn(merged, "turn-2")?.text).toBe("새 턴 답변");
+    expect(merged.lastSequence).toBe(11);
+  });
+
   it("턴이 여러 개면 이벤트를 각 턴에 나눠 담는다", () => {
     const state = fold(
       opened(),
@@ -302,7 +333,68 @@ const resent = (
   return delivered;
 };
 
+/** 턴별 순서는 지키고 턴 사이의 도착 순서만 뒤섞는다 — 스트림이 보장하는 것은 한 턴 안의 순서다. */
+const interleave = (
+  left: AssistantEventEnvelopeView[],
+  right: AssistantEventEnvelopeView[],
+  picks: boolean[],
+): AssistantEventEnvelopeView[] => {
+  const delivered: AssistantEventEnvelopeView[] = [];
+  let atLeft = 0;
+  let atRight = 0;
+  let pick = 0;
+  while (atLeft < left.length || atRight < right.length) {
+    const wantLeft = picks[pick] ?? true;
+    pick += 1;
+    if (atLeft < left.length && (wantLeft || atRight >= right.length)) {
+      delivered.push(left[atLeft]);
+      atLeft += 1;
+    } else {
+      delivered.push(right[atRight]);
+      atRight += 1;
+    }
+  }
+  return delivered;
+};
+
+/** 턴 목록의 순서는 도착 순서를 따르므로, 투영을 비교할 때만 정렬해 맞춘다. */
+const byTurnId = (state: AssistantChatState): AssistantChatState => ({
+  ...state,
+  turns: [...state.turns].sort((left, right) =>
+    left.turnId.localeCompare(right.turnId),
+  ),
+});
+
 describe("어시스턴트 채팅 리듀서 property", () => {
+  it("턴 사이 도착 순서가 뒤바뀌어도 같은 투영을 만든다", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.tuple(fc.boolean(), arbitraryEvent), {
+          minLength: 1,
+          maxLength: 20,
+        }),
+        fc.array(fc.boolean(), { maxLength: 40 }),
+        (plan, picks) => {
+          const envelopes = plan.map(([second, event], index) =>
+            envelope(index, event, second ? "turn-2" : "turn-1"),
+          );
+          const ordered = fold(opened(), events(envelopes));
+          const shuffled = fold(
+            opened(),
+            events(
+              interleave(
+                envelopes.filter((item) => item.turn_id === "turn-1"),
+                envelopes.filter((item) => item.turn_id === "turn-2"),
+                picks,
+              ),
+            ),
+          );
+          expect(byTurnId(shuffled)).toEqual(byTurnId(ordered));
+        },
+      ),
+    );
+  });
+
   it("중복 재전송과 재개 분할에도 한 번 적용한 상태와 같다", () => {
     fc.assert(
       fc.property(

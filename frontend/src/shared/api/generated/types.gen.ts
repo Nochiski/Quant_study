@@ -1259,7 +1259,7 @@ export type FactorGraphRequest = {
    */
   factor_ids?: Array<string>;
   graph: FactorGraph;
-  missing?: MissingPolicy;
+  missing?: MissingPolicy | null;
   /**
    * Parameter Ids
    */
@@ -1376,7 +1376,7 @@ export type FactorPreviewRequest = {
    */
   factor_ids?: Array<string>;
   graph: FactorGraph;
-  missing?: MissingPolicy;
+  missing?: MissingPolicy | null;
   /**
    * Parameters
    */

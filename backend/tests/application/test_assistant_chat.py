@@ -26,6 +26,7 @@ from strategy_workbench.application.assistant_chat.facade.chat import (
 )
 from strategy_workbench.application.assistant_chat.facade.context import AssistantContextBuilder
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
+from strategy_workbench.application.assistant_chat.facade.prompt import PROPOSAL_REJECTED_NOTICE
 from strategy_workbench.domain.assistant.facade.models import (
     DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL,
     DEFAULT_MAX_SEARCH_USES,
@@ -349,7 +350,11 @@ def test_an_invalid_proposal_comes_back_to_the_model_with_diagnostics() -> None:
     assert not any(isinstance(event, Proposal) for event in events)
     result = harness.provider.tool_results[0]
     assert result.ok is False
-    payload = json.loads(result.content)
+    # 진단 JSON 앞에 프롬프트 owner가 쓴 고정 문구가 한 줄 붙는다(A-07). 문구는 모델이 "도구가
+    # 고장났다"로 읽고 같은 원문을 다시 보내는 것을 막는다. 문장 전문은 골든 파일이 고정한다.
+    notice, _, payload_text = result.content.partition("\n")
+    assert notice == PROPOSAL_REJECTED_NOTICE
+    payload = json.loads(payload_text)
     assert payload["ok"] is False
     assert payload["diagnostics"][0]["pointer"] == "/factors/0/factor_id"
 

@@ -70,6 +70,7 @@ from strategy_workbench.domain.assistant.facade.tools import ASSISTANT_TOOLS, PR
 from ._context import AssistantContextBuilder
 from ._models import ChatSession, DocumentRef, TurnContext, compile_payload
 from ._profiles import ProviderNotInstalledError, ProviderProfileService
+from ._prompt import PROPOSAL_REJECTED_NOTICE
 from .ports.outgoing.chat_sessions import ChatSessionRepository
 from .ports.outgoing.llm_provider import LlmProviderPort
 from .ports.outgoing.provider_secrets import ProviderSecretStore
@@ -357,11 +358,14 @@ class AssistantChatService:
             )
         outcome = self._compiler.compile(source_text)
         if not outcome.ok:
+            # 진단 JSON만 돌려주면 모델이 "도구가 고장났다"로 읽고 같은 원문을 다시 보낸다.
+            # 무엇이 일어났고 무엇을 해야 하는지는 프롬프트 owner가 쓴 고정 문구가 먼저 말한다.
+            payload = json.dumps(compile_payload(outcome), ensure_ascii=False)
             return self._reject_proposal(
                 call,
                 state,
                 session_id,
-                json.dumps(compile_payload(outcome), ensure_ascii=False),
+                f"{PROPOSAL_REJECTED_NOTICE}\n{payload}",
             )
         proposal = StrategyProposal(
             title=_text_of(call.arguments.get("title")),

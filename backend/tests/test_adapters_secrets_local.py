@@ -16,7 +16,7 @@ import os
 import re
 import stat
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -33,6 +33,7 @@ from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
     default_secrets_path,
     resolve_default_secrets_path,
     run_icacls,
+    windows_account_name,
 )
 from strategy_workbench.application.assistant_chat.facade.ports import ProviderSecretMissingError
 from strategy_workbench.domain.assistant.facade.models import ProviderKind, ProviderProfile
@@ -55,8 +56,9 @@ class RecordingRunner:
     def __call__(self, command: Sequence[str]) -> None:
         self.commands.append(tuple(command))
         if self._fail:
+            # 실제 `run_icacls`와 같이 경로도 명령 배열도 싣지 않는다.
             raise SecretStoreStorageError(
-                f"could not restrict the secrets file ACL — command={list(command)} returncode=5"
+                "could not restrict the secrets file ACL — operation=icacls returncode=5"
             )
 
 
@@ -307,3 +309,98 @@ def test_neither_storage_adapter_logs_anything() -> None:
     ]
 
     assert offenders == []
+
+
+def _blocked_store(tmp_path: Path) -> LocalFileProviderSecretStore:
+    """부모 자리가 파일이라 디렉터리 준비·임시 파일 생성이 OSError로 끝나는 저장소."""
+    blocker = tmp_path / "blocked"
+    blocker.write_text("not a directory", encoding="utf-8")
+    return _store(blocker / "secrets.json")
+
+
+def test_store_errors_never_quote_the_secrets_path(tmp_path: Path) -> None:
+    """경로 노출도 되돌릴 수 없다.
+
+    A-04가 이 예외를 500 본문이나 진단 필드로 옮기는 순간, 인증 없이 홈 디렉터리 구조와 API 키
+    파일의 정확한 위치가 나간다. 값이 아니라 위치라는 점만 다르다.
+    """
+    corrupt_path = tmp_path / "corrupt" / "secrets.json"
+    corrupt_path.parent.mkdir()
+    corrupt_path.write_text("{not json", encoding="utf-8")
+    acl_path = tmp_path / "acl" / "secrets.json"
+
+    scenarios: list[tuple[str, Callable[[], object]]] = [
+        ("파손된 JSON", lambda: _store(corrupt_path).get("profile-a")),
+        ("쓰기 실패", lambda: _blocked_store(tmp_path).put("profile-a", SECRET)),
+        (
+            "ACL 실패",
+            lambda: _store(
+                acl_path,
+                platform="win32",
+                run_command=RecordingRunner(fail=True),
+                windows_account="sangmok",
+            ).put("profile-a", SECRET),
+        ),
+    ]
+
+    for label, run in scenarios:
+        with pytest.raises(SecretStoreStorageError) as raised:
+            run()
+        rendered = f"{raised.value} {raised.value!r} {raised.value.args}"
+        assert str(tmp_path) not in rendered, f"{label}: 경로가 예외에 실렸다 — {rendered}"
+        assert "secrets.json" not in rendered, f"{label}: 파일 이름이 예외에 실렸다 — {rendered}"
+
+
+def test_the_storage_error_still_carries_the_path_as_an_attribute(tmp_path: Path) -> None:
+    """진단은 잃지 않는다. 경로는 속성으로만 가고 `args`에는 들어가지 않는다."""
+    path = tmp_path / "secrets.json"
+    path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(SecretStoreStorageError) as raised:
+        _store(path).get("profile-a")
+
+    assert raised.value.path == path
+    assert raised.value.args == (str(raised.value),)
+
+
+def test_run_icacls_failures_do_not_quote_the_path(tmp_path: Path) -> None:
+    """실제 `run_icacls`도 같은 규칙을 지킨다. 명령 배열과 stderr에 경로가 그대로 들어 있다."""
+    path = tmp_path / "secrets.json"
+    path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SecretStoreStorageError) as nonzero:
+        run_icacls((sys.executable, "-c", "raise SystemExit(5)", str(path)))
+    with pytest.raises(SecretStoreStorageError) as missing:
+        run_icacls(("quant-workbench-no-such-binary", str(path)))
+
+    for raised in (nonzero, missing):
+        rendered = f"{raised.value} {raised.value!r} {raised.value.args}"
+        assert str(tmp_path) not in rendered
+        assert "secrets.json" not in rendered
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX 모드 비트는 Windows에 없다")
+def test_an_existing_directory_keeps_the_mode_its_owner_chose(tmp_path: Path) -> None:
+    """이미 있던 디렉터리는 좁히지 않는다.
+
+    bootstrap이 홈이나 공유 설정 디렉터리를 가리키면, 말없이 0700으로 좁히는 순간 같은
+    디렉터리를 쓰던 다른 프로세스가 접근을 잃는다. 비밀 값은 파일 0600이 지킨다.
+    """
+    directory = tmp_path / "shared"
+    directory.mkdir(mode=0o755)
+    os.chmod(directory, 0o755)
+
+    _store(directory / "secrets.json").put("profile-a", SECRET)
+
+    assert stat.S_IMODE(os.stat(directory).st_mode) == 0o755
+    assert stat.S_IMODE(os.stat(directory / "secrets.json").st_mode) == 0o600
+
+
+def test_the_windows_account_is_qualified_with_its_domain() -> None:
+    """도메인 가입 장비에서 계정 이름만 주면 `icacls`가 로컬 계정을 찾다 실패한다."""
+    assert (
+        windows_account_name(userdomain="QUANT", username="sangmok", fallback="x")
+        == "QUANT\\sangmok"
+    )
+    assert windows_account_name(userdomain=None, username="sangmok", fallback="x") == "sangmok"
+    assert windows_account_name(userdomain="QUANT", username=None, fallback="x") == "x"

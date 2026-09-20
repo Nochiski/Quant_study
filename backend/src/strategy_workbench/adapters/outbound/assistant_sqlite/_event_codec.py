@@ -1,5 +1,9 @@
 """`ChatEvent` union ↔ 태그 있는 JSON (설계 spec D2/D5).
 
+union 확장은 **두 겹의 가드**가 잡는다. 인코딩은 `assert_never`로 타입 단계에서, 디코딩은 태그
+집합을 `get_args(ChatEvent)`와 대조하는 테스트로 잡는다(디코딩은 태그 문자열 → 타입이라 타입
+체커가 볼 수 없다).
+
 union의 어느 갈래인지는 **저장된 태그**가 말한다. 구조를 보고 맞춰 추측하면(예: `text` 필드가
 있으면 `TextDelta`) `ThinkingSummary`와 구분되지 않고, 새 이벤트가 생길 때 과거 행의 해석이
 조용히 바뀐다. 태그를 모르면 읽기에서 멈춘다 — 이력의 구멍은 조용히 넘기는 쪽이 더 위험하다.
@@ -12,6 +16,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from typing import assert_never
 
 from strategy_workbench.domain.assistant.facade.models import (
     ChatEvent,
@@ -77,10 +82,10 @@ def encode_event(event: ChatEvent) -> tuple[str, str]:
             return "done", _dumps({"stop_reason": event.stop_reason})
         case Failure():
             return "failure", _dumps({"code": event.code.value, "message": event.message})
-    # match가 union 전부를 덮으므로 여기는 새 이벤트를 추가하고 위를 안 고쳤을 때만 닿는다.
-    raise AssistantStorageError(  # pragma: no cover - union 확장 방어
-        f"no storage encoding for this chat event — type={type(event).__name__}"
-    )
+    # `assert_never`는 위 `match`가 union을 남김없이 덮을 때만 타입이 맞는다. 멤버가 하나
+    # 늘어나면 **pyright가 여기서 깨진다** — 런타임에 `append_events`가 죽어 턴 이력이 통째로
+    # 사라진 뒤에야 알게 되는 것을 막는 게이트다. 평범한 raise로 두면 타입체커가 침묵한다.
+    assert_never(event)
 
 
 def decode_event(tag: str, payload: str) -> ChatEvent:

@@ -5,9 +5,11 @@ from strategy_workbench.adapters.outbound.secrets_local._store import (
     CommandRunner,
     LocalFileProviderSecretStore,
     default_secrets_path,
+    default_windows_account,
     icacls_command,
     resolve_default_secrets_path,
     run_icacls,
+    windows_account_name,
 )
 
 __all__ = [
@@ -17,7 +19,9 @@ __all__ = [
     "LocalFileProviderSecretStore",
     "SecretStoreStorageError",
     "default_secrets_path",
+    "default_windows_account",
     "icacls_command",
     "resolve_default_secrets_path",
+    "windows_account_name",
     "run_icacls",
 ]

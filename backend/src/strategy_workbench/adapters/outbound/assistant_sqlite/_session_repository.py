@@ -148,7 +148,17 @@ class SQLiteChatSessionRepository:
         return turn
 
     def update_turn(self, turn: Turn) -> Turn:
-        """상태·종료 시각을 갱신한다. 세션과 시작 시각은 턴의 정체라 바꾸지 않는다."""
+        """상태·종료 시각만 갱신하고, **나머지는 저장된 값을 지킨다.**
+
+        `accepted_sequence`는 SSE 재개의 기준점이고 `started_at`은 사이드바 턴 정렬의 기준이다
+        (`chat_turns_by_session`). 둘 다 턴이 시작될 때 한 번 정해지는 정체이지 갱신 대상이 아니다.
+        `-1`로 덮이면 재접속 클라이언트가 세션을 처음부터 다시 받고, 더 큰 값으로 덮이면 그 사이
+        이벤트를 영영 못 본다. 지금은 러너가 두 값을 보존해 주지만, 저장소가 지켜야 할 불변식을
+        호출자의 예의에 맡기지 않는다 — A-04가 HTTP 요청에서 `Turn`을 재구성하면 바로 깨진다.
+
+        그래서 돌려주는 값도 인자가 아니라 **저장된 행**이다. 인자를 그대로 돌려주면 보존한
+        사실을 호출자에게 거짓으로 말하게 된다.
+        """
         with self._database.transaction(write=True) as connection:
             stored = _turn_row(connection, turn.turn_id)
             stored_session = text_value(stored, "session_id")
@@ -159,14 +169,16 @@ class SQLiteChatSessionRepository:
                     f"given={turn.session_id!r}"
                 )
             connection.execute(
-                """
-                UPDATE chat_turns
-                SET status = ?, accepted_sequence = ?, started_at = ?, finished_at = ?
-                WHERE turn_id = ?
-                """,
-                (*_encode_turn(turn)[2:], turn.turn_id),
+                "UPDATE chat_turns SET status = ?, finished_at = ? WHERE turn_id = ?",
+                (
+                    turn.status.value,
+                    None
+                    if turn.finished_at is None
+                    else datetime_text(turn.finished_at, field="assistant turn finished_at"),
+                    turn.turn_id,
+                ),
             )
-        return turn
+            return _decode_turn(_turn_row(connection, turn.turn_id))
 
     def get_turn(self, turn_id: str) -> Turn:
         with self._database.transaction(write=False) as connection:

@@ -26,10 +26,10 @@ from ._database import (
 )
 from ._errors import AssistantStorageError
 
-_SELECT = """
-SELECT profile_id, ordinal, kind, label, model, base_url, created_at, active
-FROM provider_profiles
-"""
+# 컬럼 순서의 단일 정본. `_encode`가 이 순서대로 값을 내므로 둘을 따로 고치면 바로 어긋난다.
+_COLUMNS = "profile_id, ordinal, kind, label, model, base_url, created_at, active"
+_SELECT = f"SELECT {_COLUMNS} FROM provider_profiles"
+_INSERT = f"INSERT INTO provider_profiles ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
 
 
 class SQLiteProviderProfileRepository:
@@ -54,18 +54,10 @@ class SQLiteProviderProfileRepository:
         `active=True`인데 이미 활성이 있으면 부분 유니크 인덱스가 거부한다. 활성 전환은
         `set_active`의 일이고 `add`가 조용히 남을 끌어내리지 않는다(놀람 최소화).
         """
-        values = _encode(profile)
         with self._database.transaction(write=True) as connection:
             next_ordinal = self._next_ordinal(connection)
             try:
-                connection.execute(
-                    """
-                    INSERT INTO provider_profiles (
-                        profile_id, ordinal, kind, label, model, base_url, created_at, active
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (values[0], next_ordinal, *values[1:]),
-                )
+                connection.execute(_INSERT, _encode(profile, ordinal=next_ordinal))
             except sqlite3.IntegrityError as error:
                 raise AssistantStorageError(
                     "could not store the provider profile — "
@@ -110,9 +102,11 @@ class SQLiteProviderProfileRepository:
         return current + 1
 
 
-def _encode(profile: ProviderProfile) -> tuple[object, ...]:
+def _encode(profile: ProviderProfile, *, ordinal: int) -> tuple[object, ...]:
+    """`_COLUMNS` 순서 그대로. 슬라이스로 재조합하지 않는다."""
     return (
         profile.profile_id,
+        ordinal,
         profile.kind.value,
         profile.label,
         profile.model,

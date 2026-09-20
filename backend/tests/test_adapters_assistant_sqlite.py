@@ -10,12 +10,17 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier
+from typing import get_args
 
 import pytest
 
+from strategy_workbench.adapters.outbound.assistant_sqlite._event_codec import (
+    decode_event,
+    encode_event,
+)
 from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository import (
     AssistantDatabase,
     AssistantStorageError,
@@ -104,8 +109,12 @@ def _turn(turn_id: str = "turn-1", *, session_id: str = "session-1", accepted: i
     )
 
 
-def _every_event() -> tuple[ChatEvent, ...]:
-    """`ChatEvent` union 전부. 새 이벤트를 추가하면 이 목록이 먼저 비어 보인다."""
+def _event_samples() -> dict[type, ChatEvent]:
+    """union 멤버 타입마다 왕복에 쓸 표본 하나.
+
+    키 집합이 `get_args(ChatEvent)`와 같은지는 아래 테스트가 단언한다. 멤버가 늘면 `_every_event`가
+    `KeyError`로 먼저 멈추고, 표본만 빠뜨리면 그 테스트가 어느 타입인지 이름으로 말한다.
+    """
     proposal = StrategyProposal(
         title="KRX 모멘텀",
         summary="12개월 모멘텀 상위 20종목.",
@@ -126,7 +135,7 @@ def _every_event() -> tuple[ChatEvent, ...]:
             ),
         ),
     )
-    return (
+    samples: tuple[ChatEvent, ...] = (
         TextDelta(text="안녕하세요"),
         ThinkingSummary(text="요약된 사고"),
         ToolCall(call_id="call-1", name="validate_strategy_yaml", arguments={"source": "a: 1"}),
@@ -137,6 +146,13 @@ def _every_event() -> tuple[ChatEvent, ...]:
         Done(stop_reason="end_turn"),
         Failure(code=FailureCode.TOOL_ROUNDS_EXCEEDED, message="도구 호출이 너무 많습니다"),
     )
+    return {type(event): event for event in samples}
+
+
+def _every_event() -> tuple[ChatEvent, ...]:
+    """`ChatEvent` union 전부를 union 선언 순서대로. 목록이 아니라 union이 내용을 정한다."""
+    samples = _event_samples()
+    return tuple(samples[member] for member in get_args(ChatEvent))
 
 
 # -- 프로파일 저장소 -------------------------------------------------------------------------
@@ -458,3 +474,105 @@ def test_a_document_reference_row_cannot_name_both_a_strategy_and_a_draft(tmp_pa
                           '2026-09-20T00:00:00+00:00', 't')
                 """
             )
+
+
+def test_every_chat_event_union_member_has_a_round_trip_sample() -> None:
+    """표본 목록이 union과 어긋나면 여기서 먼저 깨진다.
+
+    인코딩 쪽 누락은 `assert_never`가 타입 단계에서 잡지만, 디코딩은 태그 문자열 → 타입이라
+    타입 체커가 볼 수 없다. 그 구멍을 이 단언이 막는다.
+    """
+    covered = set(_event_samples())
+
+    assert covered == set(get_args(ChatEvent)), (
+        "ChatEvent union 멤버와 왕복 표본이 다르다 — "
+        f"표본 없음={sorted(member.__name__ for member in set(get_args(ChatEvent)) - covered)} "
+        f"union 밖={sorted(member.__name__ for member in covered - set(get_args(ChatEvent)))}"
+    )
+
+
+def test_every_union_member_decodes_from_its_own_stored_tag() -> None:
+    """태그는 멤버마다 달라야 한다. 두 멤버가 한 태그를 쓰면 되돌릴 때 한쪽이 다른 쪽이 된다."""
+    encoded = {type(event): encode_event(event) for event in _every_event()}
+
+    tags = [tag for tag, _payload in encoded.values()]
+    assert len(set(tags)) == len(tags), f"태그가 겹친다 — tags={sorted(tags)}"
+    for member, (tag, payload) in encoded.items():
+        decoded = decode_event(tag, payload)
+        assert type(decoded) is member
+        assert decoded == _event_samples()[member]
+
+
+def test_every_failure_code_round_trips() -> None:
+    """`FailureCode`가 늘어도 저장·복원이 따라온다. 모르는 코드는 조용히 넘기지 않고 멈춘다."""
+    for code in FailureCode:
+        tag, payload = encode_event(Failure(code=code, message="사유 문장"))
+
+        assert decode_event(tag, payload) == Failure(code=code, message="사유 문장")
+
+    with pytest.raises(AssistantStorageError):
+        decode_event("failure", '{"code":"telepathy","message":"x"}')
+
+
+def test_update_turn_does_not_move_the_resume_anchor_or_the_start_time(
+    database: AssistantDatabase,
+) -> None:
+    """`accepted_sequence`·`started_at`은 턴의 정체다. 갱신이 이 둘을 건드리면 재개가 깨진다.
+
+    `-1`로 덮이면 재접속 클라이언트가 세션을 처음부터 다시 받고, 더 큰 값으로 덮이면 그 사이
+    이벤트를 영영 못 본다. `started_at`이 덮이면 사이드바의 턴 순서가 뒤집힌다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.create_turn(_turn(accepted=7))
+    finished_at = datetime(2026, 9, 20, 9, 35, tzinfo=UTC)
+
+    returned = repository.update_turn(
+        Turn(
+            turn_id="turn-1",
+            session_id="session-1",
+            status=TurnStatus.COMPLETED,
+            accepted_sequence=-1,
+            started_at=datetime(1999, 1, 1, tzinfo=UTC),
+            finished_at=finished_at,
+        )
+    )
+
+    stored = repository.get_turn("turn-1")
+    assert stored.accepted_sequence == 7
+    assert stored.started_at == NOW
+    assert stored.status is TurnStatus.COMPLETED
+    assert stored.finished_at == finished_at
+    assert returned == stored, "돌려주는 값은 인자가 아니라 저장된 행이어야 한다"
+
+
+def test_the_strategy_revision_database_is_refused(tmp_path: Path) -> None:
+    """두 DB를 서로 열지 않게 하는 방어의 핵심 가지다.
+
+    `_APPLICATION_ID`가 나중에 전략 쪽 값과 겹치게 바뀌면 여기서 깨진다.
+    """
+    path = tmp_path / "strategy-revisions.sqlite3"
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA application_id = 0x5357524B")  # "SWRK" — strategy_sqlite
+        connection.execute("PRAGMA user_version = 2")
+
+    with pytest.raises(AssistantStorageError, match="another application"):
+        AssistantDatabase(path)
+
+
+def test_a_non_utc_aware_timestamp_is_stored_as_utc(database: AssistantDatabase) -> None:
+    """offset이 0이 아닌 aware 값도 손실 없이 UTC로 옮겨진다. 거부하는 것은 naive뿐이다."""
+    seoul = timezone(timedelta(hours=9))
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.append_message(
+        "session-1",
+        ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 18, 30, tzinfo=seoul)),
+    )
+
+    assert repository.messages("session-1")[0].created_at == NOW
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        repository.append_message(
+            "session-1", ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 9, 30))
+        )

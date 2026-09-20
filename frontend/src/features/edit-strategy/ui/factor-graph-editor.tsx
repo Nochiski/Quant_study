@@ -37,7 +37,7 @@ type FactorGraphEditorProps = {
   selectedPointer?: string;
   /**
    * 같은 문제 행을 다시 눌렀을 때도 선택 카드를 다시 끌어오게 하는 신호. pointer가 같아도 이 값이 바뀌면
-   * `useRevealSelection`이 다시 돌냜다(2차 리뷰 R2-2).
+   * `useRevealSelection`의 effect가 다시 돈다(2차 리뷰 R2-2).
    */
   revealSignal?: number;
   onSelectPointer: (pointer: string) => void;

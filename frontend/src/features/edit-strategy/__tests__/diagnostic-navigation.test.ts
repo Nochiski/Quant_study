@@ -88,13 +88,14 @@ describe("resolveDiagnosticDestination", () => {
   });
 
   it("sends the Graph tab to the source before the runtime schema arrives", () => {
-    // schema가 없으면 Form 투영도 null이고 그래프 편집 표면도 그려지지 않는다.
+    // 은퇴한 조건(`form !== null`)과 구분한다: 투영이 있어도 schema가 안 왔다고 말하면
+    // 그래프 편집 표면이 렌더되지 않으므로 원문 탭으로 보낸다.
     expect(
       resolveDiagnosticDestination({
         view: "graph",
         sourceView: "yaml",
         pointer: "/factors/0/graph/nodes/1",
-        form: null,
+        form: FORM,
         tree: TREE,
         schemaLoaded: false,
       }),

@@ -115,7 +115,7 @@ Phase exit:
 | [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영 완료(로컬 `7fcc584e`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건, R2-1 `probingIds` Set·R2-2 제목 위계) · 2차 APPROVE_WITH_COMMENTS · R2-3·R2-4는 B-05 · cascade 뒤 A-07 위 rebase·push·PR |
 | [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `APPROVED` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋) · `review_ai_b_02` 3차 APPROVE(StrictMode probe 포함, e2e 19/19) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `IN_REVIEW` | 구현 완료(로컬 `df7b25f4`, B-02 최종 `cb852032` 위 7커밋, vitest 724, 훅 API 적응: exhausted 재연결·rejected 정착·droppedFrames 경고, vitest 714·e2e 19/19) · `review_ai_b_03` 1차 REQUEST_CHANGES(P1 1: 이력보다 202가 먼저 오면 turns 순서 축이 갈라져 질문↔답 짝 밀림 — 리듀서 정렬을 B-03에서 수정, P2 4, P3 6) 반영 → 2차 REQUEST_CHANGES(1차 10/11 해소; 새 P1: 취소·실패 턴에도 완료 announce, P2: 제안 카드 aria-live 미적용, P3 4) + landmark section → 후속 중 · 후속 backlog: `ChatMessageView.turn_id` |
-| [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `IN_REVIEW` | 구현 완료(로컬 `c6aaf55e`, B-03 `df7b25f4` 위 8커밋: 슬롯·적용 훅·페이지 배선·적용 후 백테스트·오버레이·spec 정정·사이드바 실장착·App 통합 테스트·`readContext` live 읽기·알림을 문서 notice 슬롯으로, vitest 762·e2e 19/19(어시스턴트 라우트 200 확인)·기준선 4장 재생성) · `review_ai_b_04` 로컬 ref 검토 중(e2e 제외) · landmark는 B-03 후속(이름 없는 section) |
+| [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `IN_REVIEW` | 구현 완료(로컬 `c6aaf55e`, B-03 `df7b25f4` 위 8커밋: 슬롯·적용 훅·페이지 배선·적용 후 백테스트·오버레이·spec 정정·사이드바 실장착·App 통합 테스트·`readContext` live 읽기·알림을 문서 notice 슬롯으로, vitest 762·e2e 19/19(어시스턴트 라우트 200 확인)·기준선 4장 재생성) · `review_ai_b_04` 1차 REQUEST_CHANGES(P1 3: 적용 알림이 패널 절반 차지·미소거, 좁은 화면 서랍 2개 동시, 드래그 임계 초과 시 되돌릴 수 없음; P2 2: en 한글, onClose 미배선; P3 7) → 반영 중 · 핵심 적용 설계(전체 범위 교체·undo 1스텝·live 재확인·stale 중단)는 승인 수준 |
 | [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `IN_PROGRESS` | 구현자 `impl-ai-b05`, 워크트리 `wt-ai-b05`, 브랜치 `feat/ai-b-05-e2e-docs`(임시 base B-04 로컬 `8ee4808a`; 가짜 공급자 env 배선으로 e2e, A-07 시나리오는 읽기 참조) |
 
 Phase exit:
@@ -153,6 +153,7 @@ Phase exit:
 | A-05 | `review_ai_a_05` | 3 | APPROVE | 5항목 전부 통과(A-04 보존, 양쪽 환경 green, P2·P3 반영, Usage 분리형 계약+파생, `ANTHROPIC_CUSTOM_HEADERS` 독립 재현·차단 확인 — 위험은 키 유출이 아니라 요청이 남의 계정으로 나가는 것). P3 1(비인증 헤더 통과를 docstring에 명시) |
 | B-03 | `review_ai_b_03` | 2 | REQUEST_CHANGES | 1차 11건 중 10 해소(P1 되돌리기 실증). 새 P1 1(`finishedTurn`이 status·failure 무시 → 취소·실패에도 "완료" announce·잔존), P2 1(제안 카드 `aria-live="off"` 주석만), P3 4(409 왕복 중 새 질문 덮임, 이벤트마다 정렬, `String.replace` 패턴, 주석) |
 | A-06 | `review_ai_a_06` | 2 | APPROVE | 1차 12건 전부 해소(`http_client` 주입이 `OPENAI_CUSTOM_HEADERS` 파싱 경로를 실제로 지남 확인, 예산 가드 되돌리기 red). P2(Anthropic 동일 구멍)는 A-05 `c0219894`에서 이미 차단. P3 4 → replay 뒤 커밋 |
+| B-04 | `review_ai_b_04` | 1 | REQUEST_CHANGES | P1 3(적용 알림 `<p>`가 슬롯 fragment `flex:1`로 패널 절반 + 소유자 `documentEpoch`뿐이라 미소거; 좁은 화면 계약·AI 서랍 동시 표시; 드래그 임계 초과 시 핸들 언마운트·폭 저장으로 복구 불가), P2 2(en 한글 `yaml-only`, spec D7 onClose 취소 확인 미배선), P3 7. 적용 설계·데이터 손실·look-ahead 결함 없음, 기준선 4장 상단 토글 밴드만 |
 
 ## 검증 기록
 

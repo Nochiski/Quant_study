@@ -6,7 +6,7 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
-last_updated: 2026-09-21T03:29:49+09:00
+last_updated: 2026-09-21T03:40:23+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 7
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `7 / 13` |
-| Aggregated at | `2026-09-21 03:29 KST` |
+| Aggregated at | `2026-09-21 03:40 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -63,7 +63,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `APPROVED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 0 | `SELF_CHECK` |
-| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `SELF_CHECK` |
+| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `IN_REVIEW` |
 | **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
@@ -115,7 +115,7 @@ Phase exit:
 | [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영 완료(로컬 `7fcc584e`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건, R2-1 `probingIds` Set·R2-2 제목 위계) · 2차 APPROVE_WITH_COMMENTS · R2-3·R2-4는 B-05 · cascade 뒤 A-07 위 rebase·push·PR |
 | [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `APPROVED` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋) · `review_ai_b_02` 3차 APPROVE(StrictMode probe 포함, e2e 19/19) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `IN_REVIEW` | 구현 완료(로컬 `df7b25f4`, B-02 최종 `cb852032` 위 7커밋, vitest 724, 훅 API 적응: exhausted 재연결·rejected 정착·droppedFrames 경고, vitest 714·e2e 19/19) · `review_ai_b_03` 1차 REQUEST_CHANGES(P1 1: 이력보다 202가 먼저 오면 turns 순서 축이 갈라져 질문↔답 짝 밀림 — 리듀서 정렬을 B-03에서 수정, P2 4, P3 6) 반영(턴 배열 서버 생성 순서 불변, 409 질문 복원, 출처 호스트, aria-live 범위, 초점 복귀) → 2차 재검토 중 · 후속 backlog: `ChatMessageView.turn_id` |
-| [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `SELF_CHECK` | 구현 완료(로컬 `0438c3d2`, B-02 `de38aff7` 위 3커밋, vitest 707·e2e 19/19) · 결정: 계약 패널과 별개의 독립 우측 패널(spec D7 탭 공존 문장 정정), 기준 텍스트 모르면 확인(fail-safe) · rebase 커밋에서 사이드바 실장착·통합 테스트·적용 후 백테스트·좁은 폭 오버레이 |
+| [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `IN_REVIEW` | 구현 완료(로컬 `e2a49935`, B-03 `64c5d6f2` 위 7커밋: 슬롯·적용 훅·페이지 배선·적용 후 백테스트·오버레이·spec 정정·사이드바 실장착 + App 통합 테스트 2건, vitest 753·e2e 19/19·기준선 4장 재생성) · `review_ai_b_04` 로컬 ref 검토 중(e2e 제외) · B-03 `df7b25f4` 위 replay 예정 · landmark 중복은 B-03 후속(section) |
 | [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `WAITING` | — |
 
 Phase exit:

@@ -97,7 +97,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `APPROVED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `7649967`(c6d70de + P3 후속) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
-| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_REVIEW` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `645efcb`(A-03 `7649967` 위) · `review_ai_a_04` 진행 중 · 게이트: pytest 1696·ruff·pyright·frontend 4종 |
+| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_REVIEW` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `645efcb`(A-03 `7649967` 위) · `review_ai_a_04` 1차 APPROVE WITH CHANGES(P1 1·P2 3·P3 7) → 반영 중 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `SELF_CHECK` | 구현 완료(`fa002b6`, A-02 위, 42 테스트, pytest 1681·ruff·pyright 0) · optional extra `llm` + CI `--extra llm` · A-04 push 뒤 rebase·팩토리 등록 → PR |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`5eec392`, A-02 위, 52 테스트, pytest 1700·ruff·pyright 0) · 기본 모델 `gpt-6-astra`(SDK `ChatModel` 첫 항목, A-07 live smoke 확인) · A-05 push 뒤 rebase·팩토리 등록 → PR |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
@@ -139,6 +139,7 @@ Phase exit:
 | A-02 | `review_ai_a_02` | 2 | APPROVE | 1차 P1 1·P2 6 전부 해소(원인 수정 + 회귀 테스트). `equity_workspace` 화살표는 포트 소비 확인. 새 P3 7(도구 종료 경로 이벤트 보존 등) → 5 반영, 2 사양(판별자 첫 매치, `_finish` 창 `state()`는 A-04 확인) |
 | A-03 | `review_ai_a_03` | 2 | APPROVE | 1차 P1 2·권고·P2 전부 해소(`assert_never` 양방향 실증). 새 P3 2(`__cause__` 경로, 종료 상태 역전 미차단) → 후속 커밋 |
 | A-02 | `review_ai_a_02` | 3 | APPROVE | 후속 커밋 2개 확인. `Done` 뒤 `Failure` 가능 계약은 spec 문장 추가(A-04)·B-03 리듀서 확인 항목 |
+| A-04 | `review_ai_a_04` | 1 | APPROVE WITH CHANGES | P1 1(`assistant.document_ref_invalid`가 OpenAPI·SDK에 없음), P2 3(이력 읽기 순서, SSE payload `unknown`, 레지스트리 즉시 호출·미설치 표현), P3 7 → 반영. `_finish` 순서 변경은 A-02 불변 4개 유지 확인 |
 
 ## 검증 기록
 

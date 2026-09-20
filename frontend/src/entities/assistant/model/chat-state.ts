@@ -181,10 +181,18 @@ const orderTurns = (
     : ordered.map((item) => item.turn);
 };
 
+/**
+ * 턴 하나를 넣거나 고친다.
+ *
+ * 자리를 다시 볼 필요가 있는 경로는 둘뿐이다 — 새 턴을 넣을 때와 정렬 키(`acceptedSequence`·
+ * `startedAt`)가 갱신되는 `reduceTurn`. 이벤트는 토큰마다 불리므로 그때까지 정렬하면 턴 수에 대해
+ * 토큰당 O(n log n)을 치른다(B-03 2차 리뷰 P3).
+ */
 const withTurn = (
   state: AssistantChatState,
   turnId: string,
   update: (turn: AssistantTurnState) => AssistantTurnState,
+  reorder = false,
 ): AssistantChatState => {
   const index = state.turns.findIndex((turn) => turn.turnId === turnId);
   const previous = index === -1 ? emptyTurn(turnId) : state.turns[index];
@@ -194,7 +202,10 @@ const withTurn = (
     index === -1
       ? [...state.turns, next]
       : state.turns.map((turn, at) => (at === index ? next : turn));
-  return { ...state, turns: orderTurns(turns) };
+  return {
+    ...state,
+    turns: reorder || index === -1 ? orderTurns(turns) : turns,
+  };
 };
 
 const applyToolResult = (
@@ -301,13 +312,18 @@ const reduceTurn = (
   /** 이력 응답이 답한 상태인가. 이력만이 "서버가 다 흘렸다"를 보장한다. */
   fromHistory: boolean,
 ): AssistantChatState =>
-  withTurn(state, turn.turn_id, (previous) => ({
-    ...previous,
-    status: settledStatus(previous.status, turn.status),
-    settled: previous.settled || (fromHistory && turn.status !== "running"),
-    acceptedSequence: turn.accepted_sequence,
-    startedAt: turn.started_at,
-  }));
+  withTurn(
+    state,
+    turn.turn_id,
+    (previous) => ({
+      ...previous,
+      status: settledStatus(previous.status, turn.status),
+      settled: previous.settled || (fromHistory && turn.status !== "running"),
+      acceptedSequence: turn.accepted_sequence,
+      startedAt: turn.started_at,
+    }),
+    true,
+  );
 
 /**
  * 이력을 덮어쓰지 않고 병합한다.

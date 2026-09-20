@@ -21,6 +21,9 @@ type AssistProposalCardProps = {
  *
  * `compile`은 application이 채운 서버 검증 결과다. 통과 여부와 진단을 그대로 보여 주고 프론트가
  * 다시 판정하지 않는다.
+ *
+ * 카드는 한 번에 추가되는 큰 서브트리라 라이브 영역 밖에 둔다(`aria-live="off"`). 도착 사실은
+ * 사이드바의 `role="status"`가 한 문장으로 알리고, 내용은 찾아 읽는다(B-03 2차 리뷰 P2).
  */
 export const AssistProposalCard = ({
   proposal,
@@ -30,7 +33,11 @@ export const AssistProposalCard = ({
 }: AssistProposalCardProps) => {
   const titleId = useId();
   return (
-    <article className="assist-proposal" aria-labelledby={titleId}>
+    <article
+      className="assist-proposal"
+      aria-labelledby={titleId}
+      aria-live="off"
+    >
       <header className="assist-proposal__head">
         <h4 className="assist-proposal__title" id={titleId}>
           {proposal.title}

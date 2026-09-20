@@ -21,7 +21,12 @@ const REJECTION_MESSAGE: Record<string, MessageKey> = {
   "assistant.provider.not_found": "assistant.error.not_found",
 };
 
-/** 진행 중 턴이 있다는 409. 배너 대신 이력으로 그 턴을 따라잡는 신호라 따로 본다. */
+/**
+ * 진행 중 턴이 있다는 409.
+ *
+ * 다른 거부와 달리 셋을 함께 한다 — 배너로 알리고, 보내지 못한 질문을 입력칸으로 되돌리고,
+ * 이력으로 그 턴을 따라잡는다. 질문이 서버에 닿지 않았다는 사실을 알릴 자리가 필요하다.
+ */
 export const TURN_IN_PROGRESS = "assistant.turn_in_progress";
 
 /**

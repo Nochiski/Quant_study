@@ -53,7 +53,6 @@ export const AssistStrategySidebar = ({
   onApplyProposalAndBacktest,
   onClose,
 }: AssistStrategySidebarProps) => {
-  const titleId = useId();
   const confirmTextId = useId();
   const providers = useQuery(assistantProvidersQuery());
   const chat = useAssistChat({ documentRef, readContext });
@@ -92,26 +91,37 @@ export const AssistStrategySidebar = ({
     onClose?.();
   };
 
-  /** 진행 상태를 한 번만 알리는 문구. 스트리밍 본문은 라이브 영역 밖이다(B-03 리뷰 P2). */
+  /**
+   * 진행 상태를 한 번만 알리는 문구. 스트리밍 본문은 라이브 영역 밖이다(B-03 리뷰 P2).
+   *
+   * 종결 종류를 가른다. 사용자가 스스로 중지시킨 답변을 "완료"라고 선언하면 바로 위 말풍선의
+   * 취소 문구와 모순되고, 본문이 `aria-live="off"`라 스크린리더에는 그 모순된 "완료"만 남는다
+   * (2차 리뷰 P1). 실패는 말풍선의 실패 문구가 이미 알리므로 여기서 같은 말을 또 하지 않는다.
+   * 다음 턴이 시작되면 진행 문구가 이 자리를 덮는다.
+   */
   const announcement =
     chat.running !== null
       ? t("assistant.chat.running")
       : chat.finishedTurn === null
         ? null
-        : t(
-            chat.finishedTurn.proposal === null
-              ? "assistant.chat.finished"
-              : "assistant.chat.finished.proposal",
-          );
+        : chat.finishedTurn.status === "cancelled"
+          ? t("assistant.chat.stopped")
+          : chat.finishedTurn.failure !== null ||
+              chat.finishedTurn.status !== "completed"
+            ? null
+            : t(
+                chat.finishedTurn.proposal === null
+                  ? "assistant.chat.finished"
+                  : "assistant.chat.finished.proposal",
+              );
 
   return (
-    // landmark는 이 feature를 꽂는 슬롯이 소유한다(`role="complementary"`). 루트까지 aside면
-    // 스크린리더가 같은 이름의 지역을 두 번 읽는다(B-04 지적).
-    <section className="assist" aria-labelledby={titleId}>
+    // landmark는 이 feature를 꽂는 슬롯이 소유한다(`role="complementary"`). 이름 없는 `<section>`은
+    // landmark로 노출되지 않는다 — 루트까지 이름을 달면 스크린리더가 같은 지역을 두 번 읽는다
+    // (B-04 지적). 패널 이름은 슬롯이, 내용 제목은 아래 `<h2>`가 맡는다.
+    <section className="assist">
       <header className="assist__head">
-        <h2 className="assist__title" id={titleId}>
-          {t("assistant.chat.title")}
-        </h2>
+        <h2 className="assist__title">{t("assistant.chat.title")}</h2>
         <div className="assist__head-actions">
           {chat.sessions.length === 0 ? null : (
             <select

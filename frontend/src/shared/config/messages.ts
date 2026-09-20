@@ -1016,6 +1016,7 @@ const ko = {
   "assistant.chat.stream.retry": "다시 연결",
   "assistant.chat.turnInProgress":
     "진행 중인 답변이 있어 보내지 못했습니다. 답변이 끝나면 다시 보내세요.",
+  "assistant.chat.stopped": "답변을 중지했습니다.",
   "assistant.chat.finished": "답변이 완료되었습니다.",
   "assistant.chat.finished.proposal":
     "답변이 완료되었습니다. 전략 제안이 도착했습니다.",
@@ -2076,6 +2077,7 @@ export const messages = {
     "assistant.chat.stream.retry": "Reconnect",
     "assistant.chat.turnInProgress":
       "An answer is still running, so this message was not sent. Send it again once the answer finishes.",
+    "assistant.chat.stopped": "The answer was stopped.",
     "assistant.chat.finished": "The answer is complete.",
     "assistant.chat.finished.proposal":
       "The answer is complete. A strategy proposal arrived.",

@@ -35,9 +35,12 @@ export const AssistComposer = ({
 
   // 되돌아온 질문을 렌더 중에 입력칸으로 옮긴다. effect로 미루면 빈 칸이 한 프레임 보이고,
   // 그 사이 타이핑은 다음 렌더에 덮인다(`frontend-react-effects.md`).
+  //
+  // 왕복이 도는 동안 사용자가 이미 다른 문장을 치고 있으면 덮지 않는다 — 되돌려 받는 문장보다
+  // 지금 치고 있는 문장이 새 것이다. 보내지 못한 질문은 배너가 알린다(B-03 2차 리뷰 P3).
   if (restore !== null && restore.nonce !== restoredNonce) {
     setRestoredNonce(restore.nonce);
-    setText(restore.text);
+    if (text.trim() === "") setText(restore.text);
   }
 
   const submit = () => {

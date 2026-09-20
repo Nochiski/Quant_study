@@ -676,6 +676,42 @@ describe("AssistStrategySidebar", () => {
     await waitFor(() => expect(input).toHaveValue("길게 쓴 질문"));
   });
 
+  it("409 왕복 중에 친 새 질문은 복원이 덮지 않는다", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(
+        `${API}/api/v1/assistant/sessions/:sessionId/turns`,
+        async () => {
+          await held;
+          return HttpResponse.json(
+            { detail: { code: "assistant.turn_in_progress", message: "" } },
+            { status: 409 },
+          );
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    mount();
+    const input = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    await user.type(input, "첫 질문");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(input).toHaveValue(""));
+
+    // 응답이 오기 전에 다른 문장을 친다 — 되돌아오는 문장보다 이것이 새 것이다.
+    await user.type(input, "그 사이에 친 다른 질문");
+    release();
+
+    expect(
+      await screen.findByText(/진행 중인 답변이 있어 보내지 못했습니다/),
+    ).toBeInTheDocument();
+    expect(input).toHaveValue("그 사이에 친 다른 질문");
+  });
+
   it("출처 링크는 제목 옆에 실제 도착지 호스트를 보인다", async () => {
     const user = userEvent.setup();
     mount();
@@ -731,6 +767,94 @@ describe("AssistStrategySidebar", () => {
     await waitFor(() =>
       expect(screen.getByRole("status")).toHaveTextContent(
         "답변이 완료되었습니다",
+      ),
+    );
+  });
+
+  it("중지한 턴을 완료로 선언하지 않는다", async () => {
+    const user = userEvent.setup();
+    mount();
+    const connection = await ask(user);
+    connection.push(textDelta(0, "쓰다 만 본문"));
+    await screen.findByText("쓰다 만 본문");
+
+    await user.click(await screen.findByRole("button", { name: "중지" }));
+
+    await waitFor(() => expect(cancelled).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "답변을 중지했습니다",
+      ),
+    );
+    expect(screen.queryByText(/답변이 완료되었습니다/)).toBeNull();
+  });
+
+  it("실패로 끝난 턴은 상태 영역이 완료를 말하지 않는다", async () => {
+    const user = userEvent.setup();
+    mount();
+    const connection = await ask(user);
+    connection.push({
+      sequence: 0,
+      turn_id: "t-1",
+      event: { type: "failure", code: "timeout", message: "TimeoutError" },
+    });
+    histories["s-new"] = {
+      ...emptyHistory("s-new", "새 대화"),
+      turns: [
+        {
+          turn_id: "t-1",
+          session_id: "s-new",
+          status: "failed",
+          accepted_sequence: -1,
+          started_at: "2026-09-20T00:01:00Z",
+          finished_at: "2026-09-20T00:02:00Z",
+        },
+      ],
+      events: [],
+    };
+    connection.close();
+
+    // 실패 문구는 말풍선이 알린다 — 상태 영역이 같은 말을 또 하거나 "완료"로 뭉개지 않는다.
+    expect(
+      await screen.findByText("답변이 제한 시간을 넘겨 멈췄습니다."),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText(/답변이 완료되었습니다/)).toBeNull(),
+    );
+  });
+
+  it("제안 카드는 라이브 영역 밖이고 도착만 상태로 알린다", async () => {
+    const user = userEvent.setup();
+    mount({ onApplyProposal: vi.fn() });
+    const connection = await ask(user);
+    connection.push({
+      sequence: 0,
+      turn_id: "t-1",
+      event: { type: "proposal", proposal: proposal() },
+    });
+
+    const card = await screen.findByRole("article", { name: "저변동 모멘텀" });
+    expect(card).toHaveAttribute("aria-live", "off");
+
+    histories["s-new"] = {
+      ...emptyHistory("s-new", "새 대화"),
+      turns: [
+        {
+          turn_id: "t-1",
+          session_id: "s-new",
+          status: "completed",
+          accepted_sequence: -1,
+          started_at: "2026-09-20T00:01:00Z",
+          finished_at: "2026-09-20T00:02:00Z",
+        },
+      ],
+      events: [],
+    };
+    connection.close();
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "전략 제안이 도착했습니다",
       ),
     );
   });

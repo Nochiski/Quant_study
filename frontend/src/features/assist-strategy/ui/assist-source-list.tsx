@@ -31,7 +31,11 @@ export const AssistSourceList = ({
                   {source.title}
                 </a>{" "}
                 <span className="assist-sources__host">
-                  {t("assistant.chat.source.host").replace("{host}", link.host)}
+                  {/* 함수 replacer라 호스트 안의 `$&`가 치환 패턴으로 해석되지 않는다. */}
+                  {t("assistant.chat.source.host").replace(
+                    "{host}",
+                    () => link.host,
+                  )}
                 </span>
               </>
             )}

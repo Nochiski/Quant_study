@@ -44,6 +44,7 @@ export {
 export type {
   ApplicableCondition,
   ApplicableWhen,
+  BacktestEnvironmentRequiredDetail,
   BacktestResultNotReadyDetail,
   BacktestResultNotReadyResponse,
   BacktestRunInvalidDetail,
@@ -101,7 +102,6 @@ export type {
   DatasetFieldProfile,
   DatasetRevision,
   DataSnapshot,
-  DataStep,
   DataWarning,
   DeleteStrategyDraftData,
   DeleteStrategyDraftError,
@@ -126,7 +126,6 @@ export type {
   EquityCurvePoint,
   ExclusionReason,
   ExecutionCore,
-  ExecutionStep,
   ExecutionTiming,
   ExplainFactorGraphData,
   ExplainFactorGraphError,

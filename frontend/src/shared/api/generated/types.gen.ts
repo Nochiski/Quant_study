@@ -46,6 +46,22 @@ export type ApplicableWhen = {
 };
 
 /**
+ * BacktestEnvironmentRequiredDetail
+ *
+ * 실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
+ */
+export type BacktestEnvironmentRequiredDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.environment_required";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * BacktestResultNotReadyDetail
  */
 export type BacktestResultNotReadyDetail = {
@@ -314,6 +330,9 @@ export type BacktestUnprocessableResponse = {
     | ({
         code: "backtest.run.invalid";
       } & BacktestRunInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
     | ({
         code: "backtest.strategy.requires_upgrade";
       } & BacktestStrategyRequiresUpgradeDetail)
@@ -617,26 +636,6 @@ export type DataSnapshot = {
 };
 
 /**
- * DataStep
- */
-export type DataStep = {
-  /**
-   * End
-   */
-  end: string;
-  frequency?: DataFrequency;
-  market?: Market;
-  /**
-   * Start
-   */
-  start: string;
-  /**
-   * Universe Id
-   */
-  universe_id: string;
-};
-
-/**
  * DataWarning
  */
 export type DataWarning = {
@@ -895,25 +894,6 @@ export type ExclusionReason =
  * ExecutionCore
  */
 export type ExecutionCore = "rust" | "python";
-
-/**
- * ExecutionStep
- */
-export type ExecutionStep = {
-  /**
-   * Fee Bps
-   */
-  fee_bps?: number;
-  /**
-   * Participation Rate
-   */
-  participation_rate?: number;
-  /**
-   * Slippage Bps
-   */
-  slippage_bps?: number;
-  timing?: ExecutionTiming;
-};
 
 /**
  * ExecutionTiming
@@ -1223,10 +1203,6 @@ export type FactorExplanation = {
  * FactorGraph
  */
 export type FactorGraph = {
-  /**
-   * @deprecated
-   */
-  missing_policy?: MissingPolicy;
   /**
    * Nodes
    */
@@ -2922,10 +2898,10 @@ export type RollingMetricPoint = {
  * 돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도
  * 전략 revision 이 늘지 않는다.
  *
- * enum 은 현재 소유 위치(`domain.strategy` 의 `Market`·`DataFrequency`·`ExecutionTiming`,
- * `domain.factor` 의 `MissingPolicy`)를 그대로 읽는다. 물리 이동은 `DataStep`·`ExecutionStep`
- * 이 사라지는 P2-03 이다 — 지금 옮기면 `domain.strategy` 가 재수출해야 하고 의존 화살표가
- * 순환한다.
+ * `Market`·`DataFrequency`·`ExecutionTiming` 은 `DataStep`·`ExecutionStep` 이 사라진 P2-03
+ * 에서 이 모듈로 옮겨 왔다. `domain/strategy` 는 이 enum 을 더 이상 공개하지 않는다 —
+ * 호환 재수출을 두면 `domain.strategy → domain.backtest` 화살표가 생겨 기존 반대 방향과
+ * 순환이 된다. `MissingPolicy` 는 `domain.factor` 가 계속 소유한다.
  */
 export type RunEnvironment = {
   /**
@@ -3729,17 +3705,15 @@ export type StrategySourceKind = "saved_revision" | "inline_draft";
  * StrategySpec
  */
 export type StrategySpec = {
-  data: DataStep;
   /**
    * Description
    */
   description?: string;
   eligibility?: EligibilityStep;
-  execution?: ExecutionStep;
   /**
    * Factors
    */
-  factors: Array<FactorSignal>;
+  factors?: Array<FactorSignal>;
   identity: StrategyIdentity;
   /**
    * Parameters

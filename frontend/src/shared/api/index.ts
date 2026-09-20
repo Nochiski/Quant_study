@@ -1,3 +1,13 @@
+export { AssistantRequestError, assistantProviderApi } from "./assistant";
+export type {
+  CreateProviderProfileRequestWritable,
+  ProbeFailure,
+  ProbeResultView,
+  ProviderKind,
+  ProviderKindView,
+  ProviderProfileView,
+  ProvidersView,
+} from "./generated/types.gen";
 export {
   ApiRequestError,
   configureStrategyWorkbenchApi,

@@ -23,6 +23,7 @@ from strategy_workbench.adapters.outbound.llm_openai._adapter import (  # noqa: 
     PROBE_MAX_OUTPUT_TOKENS,
 )
 from strategy_workbench.adapters.outbound.llm_openai._client import (  # noqa: E402  # reason: importorskip 이후 import
+    DEFAULT_BASE_URL,
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT_SECONDS,
     SdkResponsesClient,
@@ -993,6 +994,19 @@ def test_the_sdk_wrapper_sends_our_arguments_and_decodes_the_real_stream() -> No
     ) as stream:
         events = list(stream)
 
+    # 우리가 보낸 키가 전부이고 그 이상이 없다. 안 쓰는 인자를 `None`으로 넘기면 공급자는
+    # "기본값"이 아니라 "명시적 null"로 읽고, A-05는 그 한 줄(`output_format=None`)로 모든 텍스트
+    # 블록을 잃었다. 쓰지 않는 인자는 넘기지 않는 것이 유일하게 안전한 형태다.
+    assert set(sent[0]) == {
+        "stream",
+        "model",
+        "max_output_tokens",
+        "instructions",
+        "include",
+        "reasoning",
+        "tools",
+        "input",
+    }
     assert sent[0]["stream"] is True
     assert sent[0]["model"] == "gpt-6-astra"
     assert sent[0]["max_output_tokens"] == 1234
@@ -1040,10 +1054,44 @@ def test_the_sdk_client_factory_carries_the_base_url_timeout_and_retry_defaults(
     client = sdk_client_factory()(SECRET, "https://proxy.example.com/v1")
 
     assert isinstance(client, SdkResponsesClient)
-    sdk = client._client  # pyright: ignore[reportPrivateUsage]  # reason: 배선 확인용이라 공개 접근자를 만들 이유가 없다
-    assert str(sdk.base_url).startswith("https://proxy.example.com")
-    assert sdk.timeout == DEFAULT_TIMEOUT_SECONDS
-    assert sdk.max_retries == DEFAULT_MAX_RETRIES
+    assert str(_sdk_of(client).base_url).startswith("https://proxy.example.com")
+    assert _sdk_of(client).timeout == DEFAULT_TIMEOUT_SECONDS
+    assert _sdk_of(client).max_retries == DEFAULT_MAX_RETRIES
+
+
+def test_an_ambient_base_url_env_var_cannot_redirect_a_profile_without_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`base_url=None`을 SDK에 넘기면 SDK가 `OPENAI_BASE_URL`을 대신 읽는다.
+
+    그러면 "공급자 기본을 쓰겠다"는 프로파일이 서버 환경에 따라 다른 호스트로 나가고 거기에
+    사용자의 API 키가 실린다. 그 호스트는 application의 base_url 규칙(spec D6)을 한 번도 통과하지
+    않는다. 검사를 우회하는 통로라 환경 변수가 끼어들 자리를 없앴다.
+    """
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://redirected.example.com/v1")
+
+    client = sdk_client_factory()(SECRET, None)
+
+    assert str(_sdk_of(client).base_url).startswith(DEFAULT_BASE_URL)
+
+
+def test_the_default_base_url_matches_the_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """우리가 적어 둔 기본값이 SDK 기본과 어긋나면 모든 호출이 엉뚱한 곳으로 간다."""
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+
+    sdk_default = str(openai.OpenAI(api_key=SECRET).base_url)
+
+    assert sdk_default.rstrip("/") == DEFAULT_BASE_URL.rstrip("/")
+
+
+def _sdk_of(client: object) -> openai.OpenAI:
+    """래퍼가 들고 있는 SDK 클라이언트. 배선 확인용이라 공개 접근자를 만들지 않는다.
+
+    팩토리는 Protocol 타입을 돌려주므로 구현 클래스인지 먼저 확인한다.
+    """
+    if not isinstance(client, SdkResponsesClient):
+        raise AssertionError(f"SDK 래퍼가 아니다 — type={type(client).__name__}")
+    return client._client  # pyright: ignore[reportPrivateUsage]  # reason: composition 확인 전용
 
 
 # -- facade ----------------------------------------------------------------------------------

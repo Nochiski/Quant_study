@@ -24,6 +24,17 @@ SDK에는 이벤트를 누적해 주는 헬퍼 `responses.stream(...)`도 있다
 
 클라이언트는 호출마다 `secret`으로 새로 만들고 보관하지 않는다(`LlmProviderPort` 계약). 그래서
 팩토리는 `(secret, base_url) -> client` 형태이지 미리 만들어 둔 클라이언트가 아니다.
+
+## base_url은 프로파일만 정한다
+
+SDK에 `base_url=None`을 넘기면 SDK가 **환경 변수 `OPENAI_BASE_URL`을 대신 읽는다.** 그러면
+프로파일에 base_url이 없는(=공급자 기본을 쓰겠다는) 연결이 서버 환경에 따라 조용히 다른 호스트로
+나가고, 거기에는 사용자의 API 키가 실린다. 그 호스트는 application의 base_url 규칙(spec D6:
+https만, 루프백·사설 대역 금지, 위반은 `assistant.base_url_rejected`)을 한 번도 통과하지 않는다.
+검사를 우회하는 통로가 생기는 셈이다.
+
+그래서 프로파일이 base_url을 말하지 않으면 **우리가 기본값을 명시**해서 환경 변수가 끼어들 자리를
+없앤다. 값이 SDK 기본과 어긋나면 테스트가 깨진다(`test_the_default_base_url_matches_the_sdk`).
 """
 
 from __future__ import annotations
@@ -43,6 +54,7 @@ from openai.types.responses import (
 from openai.types.shared_params import Reasoning
 
 __all__ = [
+    "DEFAULT_BASE_URL",
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_TIMEOUT_SECONDS",
     "OpenAiClientFactory",
@@ -59,6 +71,9 @@ DEFAULT_TIMEOUT_SECONDS = 120.0
 # SDK 기본값(2)을 그대로 쓴다. 429·5xx는 SDK가 지수 백오프로 재시도하고, 그래도 실패하면 예외가
 # 올라와 `_failures.py`가 `FailureCode`로 옮긴다.
 DEFAULT_MAX_RETRIES = 2
+# 프로파일이 base_url을 말하지 않을 때 쓰는 값. SDK 기본과 같아야 하며 그 일치는 테스트가 본다.
+# 여기 적는 이유는 위 "base_url은 프로파일만 정한다"에 있다 — `None`을 넘기면 환경 변수가 이긴다.
+DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
 
 class OpenAiResponseStream(Protocol):
@@ -165,7 +180,7 @@ def sdk_client_factory(
         return SdkResponsesClient(
             openai.OpenAI(
                 api_key=secret,
-                base_url=base_url,
+                base_url=base_url if base_url is not None else DEFAULT_BASE_URL,
                 timeout=timeout_seconds,
                 max_retries=max_retries,
             )

@@ -20,6 +20,10 @@ not an implementation detail: other tooling on this machine takes the same lock,
 works when every participant recognises the others. Do not change the path or the shape without
 changing them too.
 
+If an outer process already holds the same lock and runs the gate inside it, set
+`QUANT_E2E_LOCK_HELD=1` so the runner does not wait for a lock its own caller is holding. It then
+neither takes nor releases it, because releasing would take the lock away from the caller.
+
 A lock left behind by a killed run is reclaimed automatically: the holder's pid is checked for
 liveness first. Waiting polls every 15 seconds, prints one line per minute, and gives up after 40
 minutes. `e2e/lock.test.mjs` pins those rules.

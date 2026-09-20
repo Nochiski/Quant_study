@@ -21,6 +21,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const LOCK_DIRECTORY_NAME = "quant-e2e.lock";
+/**
+ * 바깥에서 이미 같은 잠금을 쥐고 우리를 부른 경우 "1". 그때 또 잡으려 들면 자기 자신을 기다리는
+ * 교착이 된다 — 바깥 주인 pid 는 살아 있으니 상한까지 그대로 멈춘다. 래퍼로 감싸 돌릴 때 쓴다.
+ */
+export const OUTER_LOCK_ENV = "QUANT_E2E_LOCK_HELD";
 export const DEFAULT_LOCK_PATH = join(tmpdir(), LOCK_DIRECTORY_NAME);
 export const PID_FILE_NAME = "pid";
 /** 최대 대기 40분: 앞선 게이트 한 번이 2분 안팎이라 줄 서 있는 워크트리 몇 개는 기다려 준다. */
@@ -103,6 +108,7 @@ export const releaseLock = (path, pid) => {
  * @param {object} [options]
  * @param {string} [options.path]
  * @param {number} [options.pid]
+ * @param {boolean} [options.outerHeld]
  * @param {number} [options.timeoutMs]
  * @param {number} [options.pollMs]
  * @param {number} [options.noticeMs]
@@ -113,6 +119,7 @@ export const releaseLock = (path, pid) => {
 export const acquireLock = async ({
   path = DEFAULT_LOCK_PATH,
   pid = process.pid,
+  outerHeld = process.env[OUTER_LOCK_ENV] === "1",
   timeoutMs = DEFAULT_TIMEOUT_MS,
   pollMs = DEFAULT_POLL_MS,
   noticeMs = DEFAULT_NOTICE_MS,
@@ -120,6 +127,10 @@ export const acquireLock = async ({
   now = Date.now,
   sleep = (ms) => new Promise((done) => setTimeout(done, ms)),
 } = {}) => {
+  if (outerHeld) {
+    // 바깥이 이미 주인이다. 우리는 잡지도 놓지도 않는다 — 놓으면 바깥의 잠금을 뺏는 셈이 된다.
+    return { path, pid, release: () => false };
+  }
   const deadline = now() + timeoutMs;
   let nextNotice = 0;
   for (;;) {

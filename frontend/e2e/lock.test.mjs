@@ -178,6 +178,25 @@ describe("E2E 잠금", () => {
     expect(notices[0]).toBe(process.pid);
   });
 
+  it("바깥이 이미 잠금을 쥐고 부르면 다시 잡지 않는다", async () => {
+    // 래퍼로 감싸 돌릴 때 또 잡으려 들면 자기 자신을 기다리는 교착이 된다.
+    const path = lockPath();
+    heldBy(path, process.pid);
+
+    const handle = await acquireLock({
+      path,
+      pid: process.pid + 1,
+      outerHeld: true,
+      sleep: async () => {
+        throw new Error("바깥이 주인이면 기다리지 않아야 한다");
+      },
+    });
+
+    // 바깥 주인을 그대로 둔다 — 놓으면 남의 잠금을 뺏는 셈이다.
+    expect(handle.release()).toBe(false);
+    expect(readLockPid(path)).toBe(process.pid);
+  });
+
   it("기다리다 시간을 넘기면 주인을 담아 실패한다", async () => {
     const path = lockPath();
     tryAcquireLock(path, process.pid);

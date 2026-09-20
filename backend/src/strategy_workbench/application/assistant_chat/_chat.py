@@ -115,6 +115,8 @@ class _TurnState:
     stop: FailureCode | None = None
     stop_message: str = ""
     queue: deque[ChatEvent] = field(default_factory=deque)
+    # adapter가 이미 내보낸 실패 코드. 같은 사유를 뒤에 한 번 더 붙이지 않으려고 기억한다.
+    reported: set[FailureCode] = field(default_factory=set)
 
     def drain(self) -> Iterator[ChatEvent]:
         while self.queue:
@@ -285,6 +287,8 @@ class AssistantChatService:
                     if isinstance(event, Usage):
                         state.input_tokens += event.input_tokens
                         state.output_tokens += event.output_tokens
+                    if isinstance(event, Failure):
+                        state.reported.add(event.code)
                     yield event
                     # 종료 판정은 이벤트를 처리한 **뒤**에 한다. 도구가 세운 사유든 취소든
                     # 마찬가지다. 공급자가 이미 만들어 낸 조각은 화면에도 assistant 메시지에도
@@ -315,8 +319,17 @@ class AssistantChatService:
                     f"kind={profile.kind.value} model={profile.model} "
                     f"error_type={type(error).__name__}"
                 )
+            # 공급자가 첫 조각을 내기 **전에** 취소를 보고 그냥 반환하면 위 루프가 한 번도
+            # 돌지 않아 사유가 비어 있다. 그대로 두면 이력에 이벤트가 0개인 턴이 남아, 새로
+            # 연 화면은 "아무 일도 없었다"를 보고 SSE 소비자는 스트림을 닫을 근거를 잃는다
+            # (종료 판정은 터미널 이벤트가 한다). 루프 진입 여부와 무관하게 사유를 세운다.
+            if state.stop is None and cancelled():
+                state.stop = FailureCode.CANCELLED
+                state.stop_message = f"사용자가 턴을 취소했습니다 — session_id={session.session_id}"
             yield from state.drain()
-            if state.stop is not None:
+            # 같은 사유를 adapter가 이미 내보냈으면 한 번 더 붙이지 않는다. 이벤트가 둘로
+            # 늘 뿐 turn 상태는 첫 Failure가 정하므로(spec D3) 화면에만 중복이 보인다.
+            if state.stop is not None and state.stop not in state.reported:
                 yield Failure(code=state.stop, message=state.stop_message)
         finally:
             # 외부 호출의 사용량은 항상 남긴다(.claude/rules/error-messages.md 로깅 가이드).

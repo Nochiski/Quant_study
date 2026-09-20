@@ -217,6 +217,29 @@ def test_cancel_stops_the_stream_and_marks_the_turn_cancelled() -> None:
     assert final.finished_at == FIXED_NOW
 
 
+def test_a_turn_cancelled_before_its_first_event_still_settles_with_a_reason() -> None:
+    """공급자가 첫 조각을 내기 전에 취소를 보고 반환하는 경로(B-05 e2e가 찾은 결함).
+
+    사유가 이력에 없으면 이벤트 0개인 턴이 남는다. 새로 연 화면은 "아무 일도 없었다"를 보고,
+    SSE 소비자는 터미널 이벤트가 없어 스트림을 닫을 근거를 잃는다.
+    """
+    harness = _harness(())
+    turn = harness.runner.start(harness.session.session_id, "질문", CONTEXT)
+
+    harness.runner.cancel(turn.turn_id)
+    ManualTurnThread.run_all()
+
+    stored = harness.runner.events(harness.session.session_id)
+    assert [item.event for item in stored] == [
+        Failure(
+            code=FailureCode.CANCELLED,
+            message=f"사용자가 턴을 취소했습니다 — session_id={harness.session.session_id}",
+        )
+    ]
+    assert harness.runner.state(turn.turn_id).status is TurnStatus.CANCELLED
+    assert harness.runner.is_settled(turn.turn_id) is True
+
+
 def test_cancelling_a_finished_turn_returns_it_unchanged() -> None:
     harness = _harness((Done("end_turn"),))
     turn = harness.runner.start(harness.session.session_id, "질문", CONTEXT)

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
@@ -36,14 +36,17 @@ from strategy_workbench.domain.assistant.facade.models import (
     Done,
     Failure,
     FailureCode,
+    ProbeResult,
     Proposal,
     ProviderKind,
+    ProviderProfile,
     ResearchCapability,
     Source,
     TextDelta,
     ToolCall,
     ToolResult,
     ToolResultSummary,
+    TurnRequest,
     Usage,
 )
 from strategy_workbench.domain.assistant.facade.tools import (
@@ -482,6 +485,64 @@ def test_a_cancelled_turn_keeps_the_event_it_was_already_holding() -> None:
     assert isinstance(failure, Failure)
     assert failure.code is FailureCode.CANCELLED
     assert harness.sessions.messages(harness.session.session_id)[1].text == "안녕"
+
+
+class _CancelAwareProvider:
+    """첫 조각을 내기 **전에** 취소를 보고 아무 것도 흘리지 않는 공급자.
+
+    실제 adapter의 루프가 이 모양이다(`llm_anthropic/_turn.py`는 호출 전에 `cancelled()`를 본다).
+    취소가 턴 시작 직후에 들어오면 이벤트가 0개인 스트림이 나온다.
+    """
+
+    kind = ProviderKind.ANTHROPIC
+
+    def default_model(self) -> str:
+        return "fake-model-1"
+
+    def probe(self, secret: str, *, model: str, base_url: str | None) -> ProbeResult:
+        return ProbeResult(ok=True, latency_ms=1)
+
+    def stream_turn(
+        self,
+        secret: str,
+        profile: ProviderProfile,
+        request: TurnRequest,
+        execute_tool: Callable[[ToolCall], ToolResult],
+        cancelled: Callable[[], bool],
+    ) -> Iterator[ChatEvent]:
+        if cancelled():
+            return
+        yield Done(stop_reason="end_turn")
+
+
+def test_a_cancel_before_the_first_event_still_records_why_the_turn_ended() -> None:
+    """이벤트 0개로 끝나도 취소 사유는 이력에 남아야 한다(B-05 e2e가 찾은 결함).
+
+    사유가 없으면 이력이 빈 턴이 되고, SSE 종료 계약(터미널 이벤트로 정착)이 깨져 클라이언트가
+    스트림을 닫을 근거를 잃는다. 턴 상태만 CANCELLED이고 이벤트가 없으면 새로고침한 사용자는
+    "아무 일도 없었다"를 본다.
+    """
+    harness = _harness(())
+    harness.service._providers = {  # pyright: ignore[reportAttributeAccessIssue]  # reason: 주입 지점이 없는 내부 협력자를 테스트에서 교체
+        ProviderKind.ANTHROPIC: _CancelAwareProvider()
+    }
+
+    events = _send(harness, cancelled=lambda: True)
+
+    assert [type(event).__name__ for event in events] == ["Failure"]
+    failure = events[0]
+    assert isinstance(failure, Failure)
+    assert failure.code is FailureCode.CANCELLED
+    assert harness.session.session_id in failure.message
+
+
+def test_a_provider_that_reports_its_own_cancellation_is_not_doubled() -> None:
+    """adapter가 이미 `Failure(CANCELLED)`를 흘렸으면 서비스가 하나 더 붙이지 않는다."""
+    harness = _harness((Failure(code=FailureCode.CANCELLED, message="공급자가 취소를 알렸습니다"),))
+
+    events = _send(harness, cancelled=lambda: True)
+
+    assert [type(event).__name__ for event in events] == ["Failure"]
 
 
 def test_text_streamed_before_the_cancel_survives_as_one_message() -> None:

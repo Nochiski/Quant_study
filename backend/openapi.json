@@ -111,6 +111,26 @@
         "title": "AssistantBaseUrlRejectedDetail",
         "type": "object"
       },
+      "AssistantDocumentRefInvalidDetail": {
+        "description": "`document_ref`가 \"저장된 전략과 초안 중 정확히 하나\" 규칙을 어겼다.\n\nspec D6이 적어 둔 네 코드 밖이지만, 세션 목록 조회는 사이드바가 열릴 때마다 타는 경로라\n비거나 둘 다 채워진 참조가 실전에서 들어온다. 규칙을 판정하는 곳은 application의\n`DocumentRef`이고 여기서는 그 거절을 옮기기만 한다.",
+        "properties": {
+          "code": {
+            "const": "assistant.document_ref_invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantDocumentRefInvalidDetail",
+        "type": "object"
+      },
       "AssistantEventEnvelopeView": {
         "description": "SSE 프레임 하나의 payload. `sequence`는 `id:` 줄과 같은 값이다.",
         "properties": {
@@ -314,6 +334,7 @@
         "type": "object"
       },
       "AssistantTurnInProgressDetail": {
+        "description": "세션에 이미 도는 턴이 있다.\n\n`turn_id`는 **조회 시점에 이미 종료 상태일 수 있다.** 러너는 종료 상태를 저장한 뒤에\n세션 슬롯을 풀기 때문에, 그 짧은 창에 도착한 시작 요청이 방금 끝난 턴의 id를 받는다.\n오차 방향을 \"아직 바쁘다\" 쪽으로 고정한 결과이므로, 이 409는 영구 거절이 아니라 잠깐\n뒤 다시 시도하면 되는 충돌이다.",
         "properties": {
           "code": {
             "const": "assistant.turn_in_progress",
@@ -325,6 +346,7 @@
             "type": "string"
           },
           "turn_id": {
+            "description": "충돌한 턴. 조회 시점에 이미 종료 상태일 수 있으므로 짧게 재시도한다.",
             "title": "Turn Id",
             "type": "string"
           }
@@ -343,6 +365,7 @@
             "discriminator": {
               "mapping": {
                 "assistant.base_url_rejected": "#/components/schemas/AssistantBaseUrlRejectedDetail",
+                "assistant.document_ref_invalid": "#/components/schemas/AssistantDocumentRefInvalidDetail",
                 "assistant.no_active_provider": "#/components/schemas/AssistantNoActiveProviderDetail",
                 "assistant.probe_failed": "#/components/schemas/AssistantProbeFailedDetail",
                 "assistant.provider_not_installed": "#/components/schemas/AssistantProviderNotInstalledDetail",
@@ -365,6 +388,9 @@
               },
               {
                 "$ref": "#/components/schemas/AssistantSecretMissingDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantDocumentRefInvalidDetail"
               }
             ],
             "title": "Detail"
@@ -8677,7 +8703,7 @@
     },
     "/api/v1/assistant/sessions/{session_id}": {
       "get": {
-        "description": "메시지·턴·이벤트 이력 전부. 사이드바가 새로 열릴 때 한 번에 복구한다.",
+        "description": "메시지·턴·이벤트 이력 전부. 사이드바가 새로 열릴 때 한 번에 복구한다.\n\n**턴을 이벤트보다 먼저 읽는다.** 네 조회는 한 트랜잭션이 아니라서 그 사이 러너가\n마지막 이벤트를 저장하고 턴을 끝낼 수 있다. 이벤트를 먼저 읽으면 \"턴은 FAILED인데\n그 실패 이벤트는 목록에 없는\" 조합이 나가고, 화면은 이유 없이 멈춘 턴을 그린다 —\nspec D7의 복구 규칙이 이 응답 하나만 보기 때문에 그 이유는 영영 나오지 않는다.\n\n순서를 뒤집으면 창의 방향이 \"턴은 아직 RUNNING인데 이벤트는 더 와 있다\"가 된다.\n프론트 리듀서는 sequence 기준 멱등이라 여분 이벤트를 그대로 흡수하고, 다음 폴링이\n상태를 따라잡는다. 러너의 `_finish`가 택한 \"바쁘다 쪽으로만 틀린다\"와 같은 방향이다.\n\n`chat.messages`를 마지막에 읽는 것도 같은 이유로 안전하다. 부분 assistant 메시지\n저장은 `_close`에서 `_finish`보다 먼저 일어난다.",
         "operationId": "getAssistantSession",
         "parameters": [
           {
@@ -8774,9 +8800,13 @@
         "responses": {
           "200": {
             "content": {
-              "text/event-stream": {}
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssistantEventEnvelopeView"
+                }
+              }
             },
-            "description": "Successful Response"
+            "description": "Server-sent events. Each frame carries one AssistantEventEnvelopeView as its data, and the frame id repeats that envelope's sequence."
           },
           "404": {
             "content": {

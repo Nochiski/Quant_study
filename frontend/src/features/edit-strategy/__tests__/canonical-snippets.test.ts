@@ -53,7 +53,10 @@ describe("canonical StrategySpec snippets", () => {
     expect(new Set(snippets.map((snippet) => snippet.category))).toEqual(
       new Set(["factor", "signal", "risk"]),
     );
+    // `normalization`은 schema 1.2의 결합 전 정규화다. 기본값이 `rank`라 스니펫도
+    // 그 값을 그대로 materialize한다(P2-04).
     expect(findSnippet(snippets, "section:signal").value).toEqual({
+      normalization: "rank",
       score_threshold: null,
       regime_field_id: null,
       regime_minimum: null,
@@ -134,7 +137,7 @@ describe("canonical StrategySpec snippets", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.edit.nextSource).toBe(
-      'schema_version: "1.1"\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null',
+      'schema_version: "1.1"\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null',
     );
     expect(result.edit).toMatchObject({
       from: source.length - 3,
@@ -177,19 +180,19 @@ describe("canonical StrategySpec snippets", () => {
   it.each([
     [
       "# 첫 키 설명\nsig\nrisk: {}\n",
-      "# 첫 키 설명\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
+      "# 첫 키 설명\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
     ],
     [
       "risk:\n  a: 1\n# 주석\nsig\ndata: {}\n",
-      "risk:\n  a: 1\n# 주석\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\ndata: {}\n",
+      "risk:\n  a: 1\n# 주석\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\ndata: {}\n",
     ],
     [
       "\nsig\nrisk: {}\n",
-      "\nsignal:\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
+      "\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
     ],
     [
       "# c\r\nsig\r\nrisk: {}\r\n",
-      "# c\r\nsignal:\r\n  score_threshold: null\r\n  regime_field_id: null\r\n  regime_minimum: null\r\nrisk: {}\r\n",
+      "# c\r\nsignal:\r\n  normalization: rank\r\n  score_threshold: null\r\n  regime_field_id: null\r\n  regime_minimum: null\r\nrisk: {}\r\n",
     ],
   ])(
     "keeps the snippet on the cursor line below leading comments and blank lines (review P1-1)",

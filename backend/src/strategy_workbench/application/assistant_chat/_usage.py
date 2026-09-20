@@ -39,7 +39,15 @@ __all__ = ["SessionUsage", "TokenTotals", "TurnUsage", "aggregate_usage"]
 
 @dataclass(frozen=True)
 class TokenTotals:
-    """토큰 종류별 합. 종류가 늘어도 더하는 쪽 코드는 그대로다."""
+    """토큰 종류별 합. 종류가 늘어도 더하는 쪽 코드는 그대로다.
+
+    **`input_tokens`는 캐시 읽기·쓰기를 포함한 총 입력이다.** 공급자마다 원래 의미가 다른데
+    (OpenAI는 총입력, Anthropic은 캐시를 뺀 나머지) adapter가 그 차이를 흡수해 도메인 `Usage`가
+    나올 때 이미 총입력이다. 그래서 집계는 공급자를 구분하지 않고 단순히 더한다.
+
+    캐시 토큰 필드가 생기면 그것은 `input_tokens`의 **내역**이지 별도 항목이 아니다. 총합에 다시
+    더하면 캐시가 걸린 턴일수록 입력이 부풀어, 비용을 보려고 만든 값이 비용을 과대평가한다.
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0

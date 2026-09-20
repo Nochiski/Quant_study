@@ -227,10 +227,12 @@ test.describe("professional YAML workflow", () => {
     await expect(backtest(page)).toBeDisabled();
     const problems = page.getByRole("region", { name: "문제" });
     await expect(problems).toContainText("/risk/max_name_wieght");
-    // P1-05: 구조 오류는 한글 문장으로 오고, 오타에는 가까운 키를 제안한다.
+    // P1-05: 구조 오류는 한글 문장으로 오고, 오타에는 가까운 키를 제안한다. 문장은 계약 문자열인
+    // 키를 번역하지 않고 백틱으로 인용하며, 같은 제안이 기계가 읽는 자리에도 실린다.
     await expect(problems).toContainText("모르는 키입니다");
-    await expect(problems).toContainText("혹시 'max_name_weight'인가요?");
+    await expect(problems).toContainText("혹시 `max_name_weight`인가요?");
     await expect(problems).toContainText("got='max_name_wieght'");
+    await expect(problems).toContainText("suggestion='max_name_weight'");
     await expect(problems).not.toContainText("unknown key");
 
     await replaceSource(page, sourceV1);

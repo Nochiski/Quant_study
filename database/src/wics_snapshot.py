@@ -9,7 +9,9 @@
 L2 코드로 부르면 행의 SEC_CD 는 L1, L2 라벨은 IDX_CD·IDX_NM_KOR 에 온다(WICS_PROBE §6).
 
 사용: PYTHONPATH=src python -m wics_snapshot --dt 20260918 [--codes all|l1|l2|G4535,…]
-휴장일 dt 는 CNT=0 이 온다(09-20 실측) — 직전 거래일로 당겨 주지 않으므로 dt 는 반드시 거래일. [--db …] [--dry-run]
+휴장일 dt 는 CNT=0 이 온다(09-20 실측) — 직전 거래일로 당겨 주지 않으므로 dt 는 반드시 거래일.
+종료 코드(조용한 실패 금지 — 호출자 `wics_weekly.sh` 가 등급을 정한다): 0 완료 · 1 실패 응답 있음 · 2 연속 실패 중단 ·
+4 빈 응답 있음(재시도 대상) · 5 L1 검산 불일치(전 코드를 받은 런에서만 판정). [--db …] [--dry-run]
 """
 from __future__ import annotations
 
@@ -137,6 +139,18 @@ def run(dt_: str, codes: Sequence[str], db: str, *, sleep_s: float = 1.0, force:
     return out
 
 
+def l1_mismatches(out: dict[str, dict[str, object]]) -> list[str] | None:
+    """Σ L2 CNT ≠ L1 CNT 인 L1 코드. 이번 런이 38코드를 전부 받지 않았으면(skip·fail 포함) None — 부분 런에서
+    검산하면 거짓 불일치가 난다. 완전한 검산은 원장 건전성 `wics.integrity` 가 DB 에서 한다."""
+    if any(out.get(c, {}).get("status") != "ok" for c in L1 + L2):
+        return None
+    l1 = {c: int(str(out[c].get("cnt") or 0)) for c in L1}
+    l2: dict[str, int] = {}
+    for c in L2:
+        l2[c[:3]] = l2.get(c[:3], 0) + int(str(out[c].get("cnt") or 0))
+    return [c for c in L1 if l2.get(c, 0) != l1[c]]
+
+
 def report(dt_: str, out: dict[str, dict[str, object]]) -> str:
     n_ok = sum(1 for r in out.values() if r.get("status") == "ok")
     n_empty = sum(1 for r in out.values() if r.get("status") == "empty")
@@ -186,10 +200,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(report(a.dt, out))
     statuses = [r.get("status") for r in out.values()]
     if any(st == "fail" for st in statuses):
-        return 1
-    fetched = [st for st in statuses if st in ("ok", "empty")]
-    if fetched and all(st == "empty" for st in fetched):
-        return 4                                                       # 전부 빈 응답 — 구성 미공표·휴장일. 재시도 대상
+        return 1                                                       # 비 200·파싱 실패 — 호출자가 crit
+    if any(st == "empty" for st in statuses):
+        return 4                                                       # 빈 응답 1개라도 — 구성 미공표·휴장일·코드 소멸. 재시도 대상
+    bad = l1_mismatches(out)
+    if bad:
+        print(f"!!! L1 검산 불일치 {bad} — L2 코드 목록이 모자라거나 분류가 바뀌었다(WICS_PROBE §8 G5020 사례)",
+              file=sys.stderr)
+        return 5                                                       # 호출자가 crit
     return 0
 
 

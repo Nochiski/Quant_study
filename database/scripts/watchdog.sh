@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # 워치독 — 예정 시각까지 체인 보고가 없거나 실패면 crit. 플랜 v2 Task A.4 / 결정 V2-7(조용한 실패 금지).
-#   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build>
+#   사용: scripts/watchdog.sh <evening_ledger|evening_build|morning_build|wics_weekly>
 #   예정 크론(서버 TZ=UTC. 등록은 오케스트레이터가 한다):
 #     50 12 * * 1-5 cd /home/kael/quant-ledger && scripts/watchdog.sh evening_ledger   # 21:50 KST (결정 11: 키움 저녁 수집 21:05)
 #     30 14 * * 1-5 cd /home/kael/quant-ledger && scripts/watchdog.sh evening_build    # 23:30 KST (D02: 빌드 시작 한도 21:45 + stage 실측 43~66분 + equity 9~11분 = 상한 23:06. 옛 23:00 은 한도에 시작한 정상 판을 오탐했다)
+#     30 2 * * 6    cd /home/kael/quant-ledger && scripts/watchdog.sh wics_weekly      # 토 11:30 KST — 금요일 dt WICS 스냅샷 38코드(행>0)
 #     0 1 * * *     cd /home/kael/quant-ledger && scripts/watchdog.sh morning_build    # 10:00 KST 매일 (D03: 08:10 시작 + 실측 종료 09:23~09:30, krx_step 재시도 1회 +10분까지 흡수. 옛 09:45 은 여유 14.6분) — 금요일 판은 토요일에 지어지고 판정 기준은 "대상일 다음 날 08:00" 이라 실행일의 휴장 여부와 무관(검수 R4-07)
 #   판정 근거는 체인이 남긴 산출물뿐이다 — 원장·API 를 건드리지 않으므로 raw 락도 잡지 않는다.
 #   휴장일(오늘 KST)은 info 후 rc 0. 스코어 워치독은 페이즈 C 에서 case 에 추가한다.
@@ -16,7 +17,8 @@ case "$CHECK" in
   evening_ledger) TITLE_OK="watchdog evening_ledger 정상"; TITLE_BAD="watchdog: 21:50 까지 저녁 원장 보고 없음/실패" ;;
   evening_build)  TITLE_OK="watchdog evening_build 정상";  TITLE_BAD="watchdog: 23:30 까지 잠정판 보고 없음/실패" ;;
   morning_build)  TITLE_OK="watchdog morning_build 정상";  TITLE_BAD="watchdog: 10:00 까지 확정 빌드 보고 없음/실패" ;;
-  *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build)" >&2; exit 2 ;;
+  wics_weekly)    TITLE_OK="watchdog wics_weekly 정상";    TITLE_BAD="watchdog: 토 11:30 까지 WICS 주간 스냅샷 없음/불완전" ;;
+  *) echo "unknown check: $CHECK (allowed: evening_ledger, evening_build, morning_build, wics_weekly)" >&2; exit 2 ;;
 esac
 TODAY=$(TZ=Asia/Seoul date +%Y%m%d)
 # 오늘이 거래일인가 — 캘린더를 못 읽으면 1(거래일)로 본다. 조용히 넘어가는 쪽이 아니라 판정하는 쪽으로 기운다.
@@ -25,7 +27,8 @@ from daily import calendar as c
 d = sys.argv[1]
 print(1 if c.load().is_trading_day(dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))) else 0)' "$TODAY" 2>/dev/null || echo 1)
 # 저녁 두 검사는 "오늘" 을 판정하므로 휴장이면 건너뛴다. morning_build 는 직전 거래일의 확정판을 보므로 매일 돈다.
-if [ "$CHECK" != "morning_build" ] && [ "$TRADING" != "1" ]; then
+# wics_weekly 는 토요일(휴장) 검사라 거래일 가드 밖이다 — 직전 거래일(금요일) 스냅샷을 본다.
+if [ "$CHECK" != "morning_build" ] && [ "$CHECK" != "wics_weekly" ] && [ "$TRADING" != "1" ]; then
   scripts/notify.sh info "watchdog $CHECK — 휴장" "$TODAY(KST)는 거래일이 아니다 — 판정 건너뜀"
   exit 0
 fi
@@ -156,6 +159,39 @@ if check == "morning_build":
     if lbad:
         out("", f"확정판 건전성 실패 {', '.join(lbad)} — {lsum}{warn_txt}", 1)
     out(when.split(" ")[-1], f"D={d_prev} 원장 건전성 OK ({when} KST) · {lsum}{warn_txt}", 0)
+
+if check == "wics_weekly":
+    # 플랜 wics-weekly: 토 03:00 잡(10:00 재시도)이 금요일 dt 스냅샷을 38코드 전부(행>0) 남겼는가.
+    # 크론 자체가 안 돈 경우는 잡의 알림이 없으므로 여기서 잡는다(결정 V2-7 조용한 실패 금지).
+    import sqlite3
+
+    from daily import calendar as cal_mod
+    from wics_snapshot import L1, L2
+    d_prev = cal_mod.load().prev_trading_day(today_d).strftime("%Y%m%d")
+    path = "data/raw/wiseindex.db"
+    if not os.path.exists(path):
+        out("", f"{path} 없음 — WICS 원장이 없다", 1)
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        n_ok = int(con.execute("SELECT count(DISTINCT sec_cd) FROM wics_raw WHERE dt = ? AND http_status = 200 "
+                               "AND n_rows > 0", (d_prev,)).fetchone()[0])
+        n_rows = int(con.execute("SELECT coalesce(sum(n_rows), 0) FROM wics_raw WHERE dt = ? AND http_status = 200",
+                                 (d_prev,)).fetchone()[0])
+        last = con.execute("SELECT max(collected_at) FROM wics_raw WHERE dt = ?", (d_prev,)).fetchone()[0]
+        n_fail = int(con.execute("SELECT count(*) FROM wics_call_log WHERE dt = ? AND status = 'fail'",
+                                 (d_prev,)).fetchone()[0])
+    finally:
+        con.close()
+    expected = len(L1) + len(L2)
+    summary = f"dt={d_prev} 코드 {n_ok}/{expected}(행>0) 행 {n_rows} 마지막 수집 {last or '결측'}(UTC) 실패콜 {n_fail}"
+    if n_ok < expected:
+        out("", f"WICS 스냅샷 없음/불완전 — {summary} · 03:00·10:00 잡이 안 돌았거나 빈 응답. 로그 logs/wics_weekly_{d_prev}.log", 1)
+    try:
+        stamp = dt.datetime.strptime(str(last), "%Y-%m-%dT%H:%M:%S").replace(
+            tzinfo=dt.timezone.utc).astimezone(KST).strftime("%H:%M")
+    except ValueError:
+        stamp = ""
+    out(stamp, summary, 0)
 
 out("", f"판정 로직이 없는 check: {check}", 1)
 PY

@@ -59,14 +59,42 @@ def test_empty_list_is_saved_as_zero_rows_and_retried_next_run(tmp_path: Path) -
     assert "empty=1" in ws.report(DT, out2)
 
 
-def test_main_returns_4_when_every_fetched_code_is_empty(tmp_path: Path, monkeypatch) -> None:
+def test_main_returns_4_when_any_fetched_code_is_empty(tmp_path: Path, monkeypatch) -> None:
+    """빈 응답은 하나라도 rc 4 — 조용히 0 으로 끝나면 33/38 스냅샷이 '완료' 로 보인다."""
     db = str(tmp_path / "w.db")
     fetch, _ = _fake({"G10": (200, _body(0, None, None)), "G15": (200, _body(0, None, None))})
     monkeypatch.setattr(ws, "fetch_http", fetch)
     assert ws.main(["--dt", DT, "--codes", "G10,G15", "--db", db, "--sleep", "0"]) == 4
     fetch_ok, _ = _fake({"G10": (200, _body(3, "G10", "WICS 에너지", "G10")), "G15": (200, _body(0, None, None))})
     monkeypatch.setattr(ws, "fetch_http", fetch_ok)
-    assert ws.main(["--dt", DT, "--codes", "G10,G15", "--db", db, "--sleep", "0"]) == 0   # 일부만 비면 0
+    assert ws.main(["--dt", DT, "--codes", "G10,G15", "--db", db, "--sleep", "0"]) == 4   # 일부만 비어도 4
+    fetch_ok2, _ = _fake({"G15": (200, _body(2, "G15", "WICS 소재", "G15"))})
+    monkeypatch.setattr(ws, "fetch_http", fetch_ok2)
+    assert ws.main(["--dt", DT, "--codes", "G10,G15", "--db", db, "--sleep", "0"]) == 0   # 재시도: G10 skip, G15 채움
+
+
+def _full_table(l1_short: str | None = None) -> dict[str, tuple[int, bytes]]:
+    """L1 10 × L2 28 전 코드 응답. 각 L1 CNT = 그 L1 의 L2 CNT 합(l1_short 인 L1 만 1 작게)."""
+    table: dict[str, tuple[int, bytes]] = {}
+    for c in ws.L1:
+        l2s = [l for l in ws.L2 if l.startswith(c)]
+        for i, l in enumerate(l2s):
+            table[l] = (200, _body(i + 1, l, "n", c))
+        total = sum(i + 1 for i in range(len(l2s)))
+        table[c] = (200, _body(total - (1 if c == l1_short else 0), c, "n", c))
+    return table
+
+
+def test_main_returns_5_when_l1_sum_check_fails_on_a_complete_run(tmp_path: Path, monkeypatch) -> None:
+    db = str(tmp_path / "w.db")
+    fetch, _ = _fake(_full_table(l1_short="G45"))
+    monkeypatch.setattr(ws, "fetch_http", fetch)
+    assert ws.main(["--dt", DT, "--codes", "all", "--db", db, "--sleep", "0"]) == 5
+    assert ws.main(["--dt", DT, "--codes", "all", "--db", db, "--sleep", "0"]) == 0   # 전부 skip 인 부분 런 — 검산 안 함
+    db2 = str(tmp_path / "w2.db")
+    fetch_ok, _ = _fake(_full_table())
+    monkeypatch.setattr(ws, "fetch_http", fetch_ok)
+    assert ws.main(["--dt", DT, "--codes", "all", "--db", db2, "--sleep", "0"]) == 0
 
 
 def test_three_consecutive_failures_abort(tmp_path: Path) -> None:

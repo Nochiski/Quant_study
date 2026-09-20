@@ -201,20 +201,25 @@
 
 /*
  * 폭이 모자라면 탭 목록만 가로로 스크롤한다. 탭은 줄바꿈도 축소도 하지 않으므로 이 선언이 없으면
- * 버튼 슬롯을 덮는다(P1-02 1차 리뷰 P3: 480px 이하 겹침).
+ * 버튼 슬롯을 덮는다 — 1440px에서 이미 넘친다(스트립 콘텐츠 304px < 탭 311px, 1차 리뷰 P3).
  *
- * `overflow-x: auto`는 `overflow-y`를 `auto`로 만들어 스크롤 컨테이너를 세우고, 그 padding box에서
- * 잘라낸다 — 탭 포커스 링(2px outline + 2px offset = 바깥 4px)이 위아래로 잘렸다(2차 리뷰 P2).
- * padding을 주어 잘라내는 상자를 링 바깥까지 넓히고, 같은 크기의 음수 margin으로 레이아웃을 원래대로
- * 되돌린다: 줄 높이도 탭 밑줄 위치도 그대로이면서 링만 온전해진다.
+ * 이 상자를 **위아래로 넓히지 않는다**. 툴바 액션 줄과 탭 줄 사이 간격은 2px뿐이라, 스크롤포트를
+ * 위로 키우면 검증 버튼 아래를 덮어 그 영역 클릭이 탭 스트립으로 간다(3차 리뷰 P2: 28px 버튼의
+ * 하단 6px이 조용한 사각지대가 됐다). 포커스 링 클립은 링을 탭 안쪽에 그려 푼다(아래).
  */
 .ide__editor-tabs .ui-tabs {
   flex: 1;
   min-width: 0;
-  margin-block: calc(var(--space-2) * -1);
-  padding-block: var(--space-2);
   overflow-x: auto;
   border-bottom: 0;
+}
+
+/*
+ * 스크롤 컨테이너는 자기 padding box에서 잘라내므로 탭 바깥 4px(outline 2px + offset 2px)에 그린
+ * 링은 위아래가 잘린다(2차 리뷰 P2). 링을 안쪽(-2px)에 그리면 상자 안에 있어 잘릴 수 없다.
+ */
+.ide__editor-tabs .ui-tab:focus-visible {
+  outline-offset: -2px;
 }
 
 /* 폭이 모자라도 두 버튼은 줄지 않는다 — 탭 목록이 먼저 스크롤된다. */

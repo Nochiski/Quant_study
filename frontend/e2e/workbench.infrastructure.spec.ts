@@ -174,6 +174,24 @@ test("direct entry loads the lazy worker-free editor from the real backend", asy
   await expect(page.locator(".code-editor-fallback")).toHaveCount(0);
 });
 
+test("keeps the toolbar actions clickable under the tab strip", async ({
+  page,
+}) => {
+  // 탭 스트립은 `overflow-x: auto`라 스크롤 컨테이너다. 그 상자를 위로 넓히면 툴바와의 2px 간격을
+  // 넘어 버튼 아래를 덮고, 클릭이 조용히 탭 줄로 간다(P1-02 3차 리뷰 P2: 검증 버튼 하단 6px).
+  await openWorkbench(page);
+  const validate = page.getByRole("button", { name: "검증", exact: true });
+  const box = await validate.boundingBox();
+  expect(box).not.toBeNull();
+  if (box === null) return;
+  // actionability만 본다(`trial`) — 실제로 누르지 않으므로 컴파일을 돌리지 않는다.
+  await validate.click({
+    position: { x: box.width / 2, y: box.height - 2 },
+    trial: true,
+    timeout: 5_000,
+  });
+});
+
 test("matches the professional workbench viewport and theme baseline", async ({
   page,
 }, testInfo) => {

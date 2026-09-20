@@ -6,7 +6,7 @@ current_phase: P0,A
 current_pr: P0-01,A-01
 active_prs: [P0-01, A-01]
 parallel_window: [P0-01, A-01]
-last_updated: 2026-09-20T22:38:46+09:00
+last_updated: 2026-09-20T22:49:35+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 0
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `0 / 13` |
-| Aggregated at | `2026-09-20 22:38 KST` |
+| Aggregated at | `2026-09-20 22:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -113,7 +113,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `WAITING` | — |
-| [ ] | `B-02` | 세션·턴 query, `EventSource` 리더(재개), 이벤트 리듀서, property test | B-01 | `WAITING` | — |
+| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `WAITING` | — |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `WAITING` | — |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `WAITING` | — |
 | [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `WAITING` | — |
@@ -128,6 +128,7 @@ Phase exit:
 | PR | Reviewer | 회차 | 결과 | 비고 |
 |---|---|---|---|---|
 | P0-01 | `review_ai_p0_01` | 1 | REQUEST_CHANGES | P1 3(적용 경로·턴 owner·PR 분할), P2 10, P3 8 → 전부 반영 |
+| P0-01 | `review_ai_p0_01` | 2 | REQUEST_CHANGES | 1차 전부 해소 확인. 신규 P1 2(EventSource 재개 회귀·stale 가드 진행 경로), P2 3, P3 5 → 반영 |
 
 ## 검증 기록
 
@@ -137,6 +138,8 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-20 — P0-01 2차 리뷰 반영: SSE 리더는 생성 SDK 클라이언트(`Last-Event-ID`), RUNNING 턴 없으면
+  409·keepalive, 적용 전 확인(미리보기·덮어쓰기), 턴 토큰 예산·`OUTPUT_TRUNCATED`, `accepted_sequence` 정의.
 - 2026-09-20 — P0-01 1차 리뷰 반영: spec D2·D3·D4·D5·D6·D7·D9 개정, WORKFLOW 13 PR로 분할(A 7, B 5),
   PLAN·README의 lang2 링크 제거(정본은 yaml-ui WORKFLOW 13.7절), SoT `paths:`·행 문구, 경계 규칙 목록.
 - 2026-09-20 — P0-01 PR #166 생성, 리뷰 배정. A-01 구현 착수(P1·P2 스택과 독립이라 병렬).

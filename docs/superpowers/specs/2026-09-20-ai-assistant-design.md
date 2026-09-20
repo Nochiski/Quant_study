@@ -1,7 +1,7 @@
 # 설계: AI 어시스턴트 — LLM 연결 설정과 전략 사이드바 채팅
 
-> 작성: 2026-09-20 (P0-01 리뷰 반영 개정: 제안 적용 경로, 턴·취소 owner, PR 분할, 검색 상한,
-> base_url·비밀 스크럽·렌더 안전 규칙)
+> 작성: 2026-09-20 (P0-01 리뷰 1·2차 반영 개정: 제안 적용 경로, 턴·취소 owner, PR 분할, 검색·토큰
+> 상한, base_url·비밀 스크럽·렌더 안전, SSE 재개 규칙, 적용 전 확인)
 >
 > 상태: Accepted (제품 소유자 요청 2026-09-20: "설정 화면에 클로드·코덱스 연결, 그래프든 YAML이든
 > 우측 사이드바에 AI 채팅창. LLM은 들어온 데이터 + 인터넷 검색으로 시장을 서치해 적절한 전략을
@@ -104,20 +104,35 @@ class TurnRequest:
     tools: tuple[ToolSpec, ...]
     research: frozenset[ResearchCapability]
     max_tool_rounds: int
-    max_search_uses: int       # 공급자 내장 검색의 max_uses (D4)
-    max_output_tokens: int     # 턴당 출력 토큰 상한
+    max_search_uses: int              # 공급자 내장 검색의 max_uses (D4)
+    max_output_tokens_per_call: int   # 공급자 호출 한 번의 max_tokens
+    max_turn_output_tokens: int       # 턴 누적 출력 토큰 예산(서비스가 Usage로 집계)
 
 # 공급자·application → 화면 이벤트 (세션 저장소에 sequence 번호와 함께 남는다)
 ChatEvent = TextDelta | ThinkingSummary | ToolCall | ToolResultSummary | SearchActivity
           | Proposal | Usage | Done | Failure
 
-class TurnStatus(StrEnum): RUNNING, COMPLETED, FAILED, CANCELLED
-Turn(turn_id, session_id, status, started_at, finished_at)
-SequencedEvent(sequence, turn_id, event)     # sequence는 세션 안에서 단조 증가
+class TurnStatus(StrEnum):
+    RUNNING = "running"; COMPLETED = "completed"; FAILED = "failed"; CANCELLED = "cancelled"
+
+@dataclass(frozen=True)
+class Turn:
+    turn_id: str
+    session_id: str
+    status: TurnStatus
+    accepted_sequence: int     # 턴 시작 직전 세션의 마지막 sequence. 클라이언트가 after_sequence로 쓴다
+    started_at: datetime
+    finished_at: datetime | None
+
+@dataclass(frozen=True)
+class SequencedEvent:
+    sequence: int              # 세션 안에서 단조 증가
+    turn_id: str
+    event: ChatEvent
 
 class FailureCode(StrEnum):
     AUTH, RATE_LIMIT, NETWORK, REFUSAL, PROVIDER, TOOL_ROUNDS_EXCEEDED, TIMEOUT, CANCELLED,
-    PROPOSAL_INVALID
+    PROPOSAL_INVALID, OUTPUT_TRUNCATED, TOKEN_BUDGET_EXCEEDED
 
 @dataclass(frozen=True)
 class StrategyProposal:
@@ -159,8 +174,13 @@ application이 선언하는 도구(v1). 모든 스키마는 `additionalPropertie
 - `max_tool_rounds`(기본 12)를 넘으면 `Failure(TOOL_ROUNDS_EXCEEDED)`로 턴을 끝낸다.
 - `propose_strategy`가 3회 연속 검증에 실패하면 `Failure(PROPOSAL_INVALID)`로 끝낸다. 제안 없이 루프가
   자연 종료되면 `Done("end_turn")`이고 화면은 "제안 없이 답변만"으로 보인다.
-- 턴당 벽시계 타임아웃(기본 300초) 초과는 `Failure(TIMEOUT)`. 턴당 출력 토큰 상한
-  `max_output_tokens`(기본 16000)와 검색 `max_search_uses`(기본 8)는 `TurnRequest`로 adapter에 전달된다.
+- 턴당 벽시계 타임아웃(기본 300초) 초과는 `Failure(TIMEOUT)`. 검색 `max_search_uses`(기본 8)와
+  호출당 `max_output_tokens_per_call`(기본 16000)은 `TurnRequest`로 adapter에 전달된다.
+- 토큰 예산은 턴 단위다. `AssistantChatService`가 공급자 `Usage` 이벤트의 출력 토큰을 누적해
+  `max_turn_output_tokens`(기본 48000)를 넘으면 `Failure(TOKEN_BUDGET_EXCEEDED)`로 끝내고, 남은 예산이
+  호출당 상한보다 작으면 다음 호출의 `max_output_tokens_per_call`을 그 값으로 줄인다.
+- 공급자 응답이 `max_tokens`로 잘리면 `Failure(OUTPUT_TRUNCATED)`(화면: "답변이 길어 잘렸습니다").
+  잘린 텍스트는 보존하되 정상 종료로 보이지 않는다.
 - 취소는 `Failure(CANCELLED)`. 이미 스트리밍된 텍스트는 assistant 메시지로 보존한다.
 - 클라이언트가 이벤트 스트림 연결을 끊어도 턴은 위 상한 안에서 계속 돌고 이벤트는 저장된다
   (backtest와 같은 의미). 멈추려면 취소를 부른다. 프론트는 사이드바를 닫을 때 진행 중 턴이 있으면
@@ -197,8 +217,8 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 
 | adapter | SDK | 기본 모델 | 검색 | 스트리밍 |
 |---|---|---|---|---|
-| `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high` | `web_search_20260209` 서버 도구, `max_uses = request.max_search_uses`, 도메인 제한 없음 | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
-| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거) | Responses `web_search` 도구 | Responses 스트리밍 |
+| `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high`, `max_tokens = request.max_output_tokens_per_call` | `web_search_20260209` 서버 도구, `max_uses = request.max_search_uses`, 도메인 제한 없음 | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
+| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구. 호출당 검색 횟수 옵션이 없으면 adapter가 검색 호출 이벤트를 세어 `max_search_uses` 초과 시 이후 검색을 도구 오류로 돌려주고 `SearchActivity`에 표시 | Responses 스트리밍 |
 
 - `probe`는 최소 토큰 요청 한 번으로 키·모델·네트워크를 확인하고 `ProbeResult(ok, message,
   latency_ms, failure)`를 돌려준다. 실패 종류를 구분한다(인증·모델 없음·네트워크·요금 한도).
@@ -210,6 +230,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   이어갈 수 없으면 `Failure(PROVIDER)`로 매핑한다. 예외를 던지지 않는다.
 - 예외 → `Failure`: SDK 예외 종류를 `FailureCode`로 매핑하고 message에는 예외 타입 이름만 쓴다.
   단위 테스트가 "예외 메시지에 키 문자열이 섞여도 `Failure.message`에 나오지 않는다"를 고정한다.
+  `stop_reason == "max_tokens"`(OpenAI는 `incomplete`·`max_output_tokens`)는 `Failure(OUTPUT_TRUNCATED)`.
 - 프롬프트 캐싱: 시스템 프롬프트와 카탈로그(안정 부분)에 `cache_control`, 오늘 날짜·현재 문서·질문은
   마지막 breakpoint 뒤에 둔다. breakpoint는 최대 4개.
 - 의존성은 optional extra `llm = ["anthropic>=1.0", "openai>=2.0"]`. 설치되지 않은 공급자는 설정
@@ -239,13 +260,13 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | POST | `/sessions` | 세션 생성 `{document_ref}` |
 | GET | `/sessions?document_ref=` | 문서의 세션 목록 |
 | GET | `/sessions/{id}` | 메시지·턴 이력 |
-| POST | `/sessions/{id}/turns` | 턴 시작 `{text, context: {source_text, source_format, environment?, diagnostics?}}` → 202 `{turn_id, accepted_sequence}`. RUNNING 턴이 있으면 409 `assistant.turn_in_progress` |
-| GET | `/sessions/{id}/events?after_sequence=` | **SSE** `SequencedEvent` 스트림. backtest 이벤트 스트림(`/api/v1/backtests/{run_id}/events`)과 같은 프레이밍·재개 규칙(`id`=sequence, 마지막 턴이 종료 상태가 되면 닫힘). 새로고침·중복 탭은 `after_sequence`로 이어 받는다 |
+| POST | `/sessions/{id}/turns` | 턴 시작 `{text, context: {source_text, source_format, environment?, diagnostics?}}` → 202 `{turn_id, accepted_sequence}`. `accepted_sequence`는 턴 시작 직전 세션의 마지막 sequence이며 클라이언트가 그대로 `after_sequence`로 쓴다. RUNNING 턴이 있으면 409 `assistant.turn_in_progress` |
+| GET | `/sessions/{id}/events?after_sequence=` | **SSE** `SequencedEvent` 스트림. backtest 이벤트 스트림(`/api/v1/backtests/{run_id}/events`)과 같은 프레이밍(`id`=sequence). 재개 위치는 `after_sequence` 쿼리 또는 `Last-Event-ID` 헤더(헤더가 있으면 우선). 진행 중(RUNNING) 턴이 없으면 409 `assistant.no_running_turn`으로 열지 않는다(무한 재연결 방지). 열린 동안 15초마다 `: keepalive` 주석을 보내고, 그 턴이 종료 상태가 되면 닫는다 |
 | POST | `/sessions/{id}/turns/{turn_id}/cancel` | 취소(영속 상태 CANCELLED + 프로세스 내 신호) |
 
 - 422 코드: `assistant.provider_not_installed`, `assistant.no_active_provider`,
-  `assistant.probe_failed`, `assistant.base_url_rejected`. 409: `assistant.turn_in_progress`. 공급자
-  오류는 `Failure` 이벤트로.
+  `assistant.probe_failed`, `assistant.base_url_rejected`. 409: `assistant.turn_in_progress`,
+  `assistant.no_running_turn`. 공급자 오류는 `Failure` 이벤트로.
 - **base_url 규칙**: 없으면 공급자 기본. 있으면 `https` 스킴만, 호스트는 루프백·사설 대역·IP 리터럴
   금지. 로컬 프록시 개발용 예외는 env `STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL=1`일
   때만 `http`·루프백 허용. 검사는 application(`ProviderProfileService`)이 하고 위반은
@@ -257,13 +278,13 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 
 | slice | 책임 |
 |---|---|
-| `entities/assistant` | 생성 SDK 타입, 프로파일·세션 query, SSE 리더(`EventSource`로 `after_sequence`를 붙여 GET; 재연결 시 마지막 sequence부터), `SequencedEvent` → 화면 상태 리듀서 |
+| `entities/assistant` | 생성 SDK 타입, 프로파일·세션 query, SSE 리더는 **생성 SDK의 SSE 클라이언트**(`shared/api/generated/core/serverSentEvents.gen.ts`: fetch 기반, `id:` 파싱, 재시도 시 `Last-Event-ID` 부착)를 그대로 쓴다. `EventSource`를 쓰지 않는다(재연결 시 같은 URL을 반복해 중복 수신). 리듀서는 이미 반영한 sequence 이하를 무시한다(멱등). 진행 중 턴이 있을 때만 스트림을 열고 종료 상태에서 닫는다 |
 | `features/configure-ai-providers` | 설정 화면 "AI 연결" 섹션. michelo DB 프로파일 섹션 패턴: 카드 목록(공급자 이름·라벨·모델·꼬리 4자리·활성 배지), 활성 전환, 삭제 확인, 추가 폼(공급자 선택 → 라벨·키·모델·base_url), "연결 테스트" 결과 인라인. 설치 안 된 공급자는 비활성 + 이유 |
 | `features/assist-strategy` | 우측 사이드바 채팅: 메시지 목록, 스트리밍 텍스트, 검색 활동 칩(질의·출처 링크), 도구 활동 접힘, 제안 카드(제목·한 문장·근거·출처·"미리보기"·"문서에 적용"·"적용 후 백테스트"), 취소, 세션 전환, 닫을 때 진행 중 턴 취소 확인. 적용은 `onApplyProposal(proposal)` 콜백으로 밖에 넘긴다(feature가 feature를 import하지 않는다) |
 | `pages/settings` | `/settings` 라우트. 섹션: AI 연결(위 feature) |
 | `widgets/app-shell` | 내비 하단 "설정" 링크 |
 | `widgets/strategy-ide` | 우측 레일에 `assistant` 슬롯. 계약 인스펙터와 탭으로 공존("계약 · AI"), 폭·펼침은 기존 `use-panel-layout` |
-| `pages/research-strategy-*` | 조합: `onApplyProposal` → **업그레이드 적용과 같은 전체 범위 교체 경로**(`CodeEditorHandle.replaceRange(0, length, source)`; `setText`가 아니라 `replaceRange`인 이유는 history 격리(`isolateHistory`)로 직후 타이핑과 undo가 섞이지 않게 하기 위함, `use-upgrade-document.ts:93-99`와 동일) → compile → 진단. **stale 가드**: 제안 카드가 만들어질 때의 편집기 텍스트와 적용 시점 텍스트가 다르면 적용하지 않고 "문서가 바뀌었습니다. 미리보기로 확인하세요"를 보인다. "적용 후 백테스트"는 적용 뒤 기존 run-backtest 실행 |
+| `pages/research-strategy-*` | 조합: `onApplyProposal` → **업그레이드 적용과 같은 전체 범위 교체 경로**(`CodeEditorHandle.replaceRange(0, length, source)`; `setText`가 아니라 `replaceRange`인 이유는 history 격리(`isolateHistory`)로 직후 타이핑과 undo가 섞이지 않게 하기 위함, `use-upgrade-document.ts:93-99`와 동일) → compile → 진단. **적용 전 확인**: 제안 카드의 기준 텍스트(턴 시작 시점)와 적용 시점 텍스트가 다르면 바로 덮어쓰지 않고 "문서가 바뀌었습니다" 안내와 함께 "미리보기"·"그래도 덮어쓰기" 두 버튼을 보인다. 덮어쓰기도 같은 `replaceRange` 한 번·undo 한 단계이므로 데이터 손실이 아니다(턴은 수십~수백 초라 기다리며 편집하는 것이 흔하다). "적용 후 백테스트"는 적용 뒤 기존 run-backtest 실행 |
 
 - 사이드바는 그래프·YAML 어느 탭에서도 같은 세션이다. 턴을 시작할 때마다 현재 편집기 텍스트·진단·
   실행 설정을 실어 보낸다(서버가 문서를 따로 들지 않는다).
@@ -294,7 +315,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | 진행 중 턴 레지스트리·취소 신호 | `application/assistant_chat`의 `AssistantTurnRunner`(프로세스 내, 단일 워커 전제) |
 | 도구 정의·프롬프트·검증 규칙·턴 상한 | `application/assistant_chat`(도구 이름·스키마 상수는 `domain/assistant`) |
 | 공급자별 요청 형식·스트리밍·검색 도구 켜기·예외→코드 매핑 | 각 `llm_*` adapter |
-| 사이드바 열림·폭·현재 세션 id·제안 카드의 기준 텍스트 | frontend local UI state |
+| 사이드바 열림·폭·현재 세션 id·제안 카드의 기준 텍스트·마지막 반영 sequence | frontend local UI state |
 | 제안 적용 결과(문서 텍스트) | edit-strategy 편집기(전체 범위 교체, 업그레이드 적용과 같은 예외 경로) |
 
 ## 3. Non-goals
@@ -302,7 +323,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 - 자동 적용·자동 백테스트·자동 매매. 모든 문서 변경은 사용자의 "적용" 클릭.
 - Claude Agent SDK·Managed Agents. 이 기능은 Messages/Responses API 위의 자체 도구 루프다.
 - 자체 웹 검색 adapter(후속), 백테스트 실행 도구(후속, application 도구로 추가).
-- 다중 사용자·권한·다중 워커. 로컬 단일 사용자 도구다.
+- 다중 사용자·권한·다중 워커. 로컬 단일 사용자 도구다(전제는 1절·D3·D9가 같은 문장을 가리킨다).
 - 채팅으로 문서를 부분 편집(레시피 단계 수정 등). v1은 전체 제안 적용만.
 - 마크다운·HTML 렌더. 모델 텍스트는 평문이다.
 
@@ -330,10 +351,11 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   분기)·경로 거부; sqlite 세션·턴·이벤트 저장; HTTP SSE 계약(이벤트 순서·id·재개); architecture import
   게이트; 비밀 평문 검사(응답·로그·DB 덤프·`Failure.message`); 실제 SDK adapter는 SDK 응답 객체를 흉내
   낸 단위 테스트(서버 도구 오류 객체 분기 포함) + `RUN_LLM_LIVE=1`일 때만 도는 실연결 smoke.
-- frontend: SSE 리더 재개·리듀서 property test; 설정 섹션 MSW(생성·테스트·활성·삭제·거부 사유·설치
-  안 됨); 사이드바 스트리밍·제안 카드·stale 가드·렌더 안전(javascript: URL은 링크가 아님); e2e(MSW로
-  공급자 응답 고정): 설정 등록 → 사이드바 제안 → 적용 → 검증 통과 → 백테스트 페이지, 새로고침 재개,
-  취소.
+- frontend: SSE 리더 재개(재연결 후 중복 sequence가 두 번 반영되지 않음)·리듀서 property test; 설정
+  섹션 MSW(생성·테스트·활성·삭제·거부 사유·설치 안 됨); 사이드바 스트리밍·제안 카드·적용 전 확인
+  (변경된 문서에서 덮어쓰면 적용되고 undo 한 번으로 복원)·렌더 안전(javascript: URL은 링크가 아님);
+  e2e(MSW로 공급자 응답 고정): 설정 등록 → 사이드바 제안 → 적용 → 검증 통과 → 백테스트 페이지,
+  새로고침 재개, 취소.
 
 ## 7. 롤백
 

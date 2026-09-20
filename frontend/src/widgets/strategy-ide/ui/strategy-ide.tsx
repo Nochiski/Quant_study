@@ -80,6 +80,11 @@ export type StrategyIdeProps = {
   inspector?: ReactNode;
   /** Intermediate Debugger slot (P5); placeholder until then. */
   debugger?: ReactNode;
+  /**
+   * 우측 AI 어시스턴트 사이드바 슬롯(B-04). 넘기지 않으면 패널도 토글도 만들지 않는다 — 어시스턴트를
+   * 붙이지 않은 화면의 배치는 그대로다. 내용은 페이지가 주입한다(widget은 채팅을 알지 않는다).
+   */
+  assistant?: ReactNode;
 };
 
 const NARROW_QUERY = "(max-width: 1279px)";
@@ -121,6 +126,7 @@ export const StrategyIde = ({
   availableViews = ["yaml"],
   inspector,
   debugger: debuggerPanel,
+  assistant,
 }: StrategyIdeProps) => {
   const narrow = useMediaQuery(NARROW_QUERY);
   const { layout, resize, toggle, close } = usePanelLayout(
@@ -131,11 +137,13 @@ export const StrategyIde = ({
   const outlineId = useId();
   const inspectorId = useId();
   const debuggerId = useId();
+  const assistantId = useId();
   const viewTabsId = useId();
   const ids = {
     outline: outlineId,
     inspector: inspectorId,
     debugger: debuggerId,
+    assistant: assistantId,
     views: viewTabsId,
   };
   const outlineRestore = useRef<HTMLButtonElement>(null);
@@ -144,6 +152,9 @@ export const StrategyIde = ({
   const outlineCollapse = useRef<HTMLButtonElement>(null);
   const inspectorCollapse = useRef<HTMLButtonElement>(null);
   const debuggerCollapse = useRef<HTMLButtonElement>(null);
+  const assistantRestore = useRef<HTMLButtonElement>(null);
+  const assistantCollapse = useRef<HTMLButtonElement>(null);
+  const hasAssistant = assistant !== undefined;
   const theme = useThemePreference();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const commands = useMemo<CommandPaletteItem[]>(() => {
@@ -212,6 +223,21 @@ export const StrategyIde = ({
             : debuggerCollapse.current,
         execute: () => toggle("debuggerOpen"),
       },
+      ...(hasAssistant
+        ? [
+            {
+              id: "panel.assistant",
+              group: t("command.group.panel"),
+              label: `${layout.assistantOpen ? t("command.hide") : t("command.show")} ${t("ide.assistant")}`,
+              shortcut: "Alt A",
+              focusAfterExecute: () =>
+                layout.assistantOpen
+                  ? assistantRestore.current
+                  : assistantCollapse.current,
+              execute: () => toggle("assistantOpen"),
+            },
+          ]
+        : []),
     ];
     const themeCommands: CommandPaletteItem[] = (
       ["system", "light", "dark"] as const
@@ -242,6 +268,7 @@ export const StrategyIde = ({
     ];
   }, [
     availableViews,
+    hasAssistant,
     layout,
     onRunBacktest,
     onSave,
@@ -259,14 +286,15 @@ export const StrategyIde = ({
   ]);
 
   useEffect(() => {
-    if (narrow) close(["inspectorOpen", "debuggerOpen"]);
+    if (narrow) close(["inspectorOpen", "debuggerOpen", "assistantOpen"]);
   }, [narrow, close]);
 
   // window 리스너는 layout effect로 설치한다(`.claude/rules/frontend-react-effects.md`, backlog 20·21).
   useLayoutEffect(() => {
     if (!narrow) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close(["inspectorOpen", "debuggerOpen"]);
+      if (event.key === "Escape")
+        close(["inspectorOpen", "debuggerOpen", "assistantOpen"]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -298,6 +326,16 @@ export const StrategyIde = ({
         if (event.shiftKey) {
           if (!runDisabled) onRunBacktest?.();
         } else if (!validateDisabled) onValidate?.();
+      } else if (
+        event.altKey &&
+        !modifier &&
+        (key === "a" || event.code === "KeyA")
+      ) {
+        // Alt+A: AI 사이드바 토글. `code`도 보는 이유는 Alt 조합에서 `key`가 자판에 따라 다른 글자로
+        // 오기 때문이다(macOS 옵션 키).
+        if (!hasAssistant || event.repeat) return;
+        event.preventDefault();
+        toggle("assistantOpen");
       } else if (event.altKey && !modifier && /^[1-5]$/.test(event.key)) {
         const next = VIEWS[Number(event.key) - 1];
         if (
@@ -318,6 +356,7 @@ export const StrategyIde = ({
     return () => window.removeEventListener("keydown", onKey);
   }, [
     availableViews,
+    hasAssistant,
     onRunBacktest,
     onSave,
     onValidate,
@@ -325,6 +364,7 @@ export const StrategyIde = ({
     paletteOpen,
     runDisabled,
     saveDisabled,
+    toggle,
     validateDisabled,
     viewTabsId,
   ]);
@@ -382,6 +422,36 @@ export const StrategyIde = ({
       {debuggerPanel ?? <DebuggerPlaceholder />}
     </section>
   );
+
+  /**
+   * AI 어시스턴트 사이드바. 편집기 view와 무관하게 오른쪽 레일에 붙어 있어 YAML·Form·Graph 어느 탭에서도
+   * 같은 대화가 보인다(spec D7). 1280px 미만에서는 계약·중간 결과와 같은 오버레이 서랍이 된다.
+   */
+  const assistantNode = hasAssistant ? (
+    <aside
+      id={ids.assistant}
+      className="ide__assistant"
+      aria-label={t("ide.assistant")}
+      hidden={!layout.assistantOpen}
+      style={narrow ? undefined : { width: layout.assistantWidth }}
+    >
+      <header className="ide__panel-header">
+        <h2>{t("ide.assistant")}</h2>
+        <Button
+          ref={assistantCollapse}
+          size="small"
+          tone="ghost"
+          onClick={() => {
+            toggle("assistantOpen");
+            queueMicrotask(() => assistantRestore.current?.focus());
+          }}
+        >
+          {t("ide.collapseAssistant")}
+        </Button>
+      </header>
+      {assistant}
+    </aside>
+  ) : null;
 
   return (
     <div className="ide">
@@ -456,6 +526,21 @@ export const StrategyIde = ({
               aria-expanded={layout.debuggerOpen}
             >
               {t("ide.debugger")}
+            </Button>
+          ) : null}
+          {hasAssistant && (narrow || !layout.assistantOpen) ? (
+            <Button
+              ref={assistantRestore}
+              size="small"
+              onClick={() => {
+                toggle("assistantOpen");
+                queueMicrotask(() => assistantCollapse.current?.focus());
+              }}
+              aria-controls={ids.assistant}
+              aria-expanded={layout.assistantOpen}
+              aria-keyshortcuts="Alt+A"
+            >
+              {t("ide.assistant")}
             </Button>
           ) : null}
           <Button
@@ -658,6 +743,20 @@ export const StrategyIde = ({
           />
         ) : null}
         {narrow ? null : inspectorNode}
+
+        {hasAssistant && !narrow && layout.assistantOpen ? (
+          <SplitHandle
+            orientation="vertical"
+            label={t("ide.resizeAssistant")}
+            value={layout.assistantWidth}
+            min={PANEL_BOUNDS.assistantWidth.min}
+            max={PANEL_BOUNDS.assistantWidth.max}
+            invert
+            onChange={(value) => resize("assistantWidth", value)}
+            controls={ids.assistant}
+          />
+        ) : null}
+        {narrow ? null : assistantNode}
       </div>
 
       {narrow ? (
@@ -671,6 +770,11 @@ export const StrategyIde = ({
           >
             {debuggerNode}
           </div>
+          {hasAssistant ? (
+            <div className="ide__drawer" hidden={!layout.assistantOpen}>
+              {assistantNode}
+            </div>
+          ) : null}
         </>
       ) : null}
       <CommandPalette

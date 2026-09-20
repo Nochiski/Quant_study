@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { CodeEditorHandle } from "../../../shared/ui/code-editor";
 import { resolveDiagnosticDestination } from "./diagnostic-navigation";
@@ -21,6 +21,8 @@ export type DiagnosticNavigationOptions = {
   form: FormProjection | null;
   /** Form·Graph가 함께 읽는 parse tree. */
   tree: unknown;
+  /** runtime schema가 도착했는가(Form·Graph 편집 표면의 렌더 조건). */
+  schemaLoaded: boolean;
   /** 지금 탭을 지킨 채 pointer를 선택한다. */
   onSelectPointer: (pointer: string) => void;
   /** 원문 탭으로 전환한다. pointer가 문서 전체면 undefined가 온다. */
@@ -32,6 +34,12 @@ export type DiagnosticNavigation = {
   diagnostics: readonly DocumentDiagnostic[];
   /** 진단이 현재 텍스트보다 오래되었는가(행이 흐려지고 선택되지 않는다). */
   stale: boolean;
+  /**
+   * 문제 행을 현재 탭에서 고를 때마다 올라가는 값. 같은 행을 다시 눌러도 pointer는 그대로라
+   * URL이 안 바뀌므로, Form·Graph 패널의 `useRevealSelection`이 이 값을 같이 보고 다시 끌어온다
+   * (2차 리뷰 R2-2).
+   */
+  revealSignal: number;
   onEditorReady: (editor: CodeEditorHandle | null) => void;
   selectDiagnostic: (diagnostic: DocumentDiagnostic) => void;
 };
@@ -52,10 +60,12 @@ export const useDiagnosticNavigation = ({
   sourceView,
   form,
   tree,
+  schemaLoaded,
   onSelectPointer,
   onOpenSource,
 }: DiagnosticNavigationOptions): DiagnosticNavigation => {
   const editor = useRef<CodeEditorHandle | null>(null);
+  const [revealSignal, setRevealSignal] = useState(0);
   const onEditorReady = useCallback((next: CodeEditorHandle | null): void => {
     editor.current = next;
   }, []);
@@ -96,9 +106,11 @@ export const useDiagnosticNavigation = ({
         pointer: diagnostic.pointer,
         form,
         tree,
+        schemaLoaded,
       });
       if (destination === "current-view") {
         pending.current = null;
+        setRevealSignal((previous) => previous + 1);
         onSelectPointer(diagnostic.pointer);
         return;
       }
@@ -110,7 +122,16 @@ export const useDiagnosticNavigation = ({
       pending.current = diagnostic.range;
       onOpenSource(diagnostic.pointer === "" ? undefined : diagnostic.pointer);
     },
-    [form, onOpenSource, onSelectPointer, reveal, sourceView, tree, view],
+    [
+      form,
+      onOpenSource,
+      onSelectPointer,
+      reveal,
+      schemaLoaded,
+      sourceView,
+      tree,
+      view,
+    ],
   );
 
   useEffect(() => {
@@ -121,5 +142,5 @@ export const useDiagnosticNavigation = ({
     reveal(range);
   }, [reveal, sourceView, view]);
 
-  return { diagnostics, stale, onEditorReady, selectDiagnostic };
+  return { diagnostics, stale, revealSignal, onEditorReady, selectDiagnostic };
 };

@@ -27,6 +27,7 @@ const destination = (view: StrategyView, pointer: string) =>
     pointer,
     form: FORM,
     tree: TREE,
+    schemaLoaded: true,
   });
 
 describe("formCoversPointer", () => {
@@ -95,6 +96,7 @@ describe("resolveDiagnosticDestination", () => {
         pointer: "/factors/0/graph/nodes/1",
         form: null,
         tree: TREE,
+        schemaLoaded: false,
       }),
     ).toBe("source");
   });

@@ -35,6 +35,11 @@ type FactorGraphEditorProps = {
   diagnostics: DocumentDiagnostic[];
   factorIndex: number;
   selectedPointer?: string;
+  /**
+   * 같은 문제 행을 다시 눌렀을 때도 선택 카드를 다시 끌어오게 하는 신호. pointer가 같아도 이 값이 바뀌면
+   * `useRevealSelection`이 다시 돌냜다(2차 리뷰 R2-2).
+   */
+  revealSignal?: number;
   onSelectPointer: (pointer: string) => void;
   /** plan projection이 없을 때는 팩터 선택도 편집기가 맡는다. */
   factorSelect: boolean;
@@ -56,11 +61,15 @@ export const FactorGraphEditor = ({
   diagnostics,
   factorIndex,
   selectedPointer,
+  revealSignal,
   onSelectPointer,
   factorSelect,
   onOpenForm,
 }: FactorGraphEditorProps) => {
-  const container = useRevealSelection<HTMLElement>(selectedPointer);
+  const container = useRevealSelection<HTMLElement>(
+    selectedPointer,
+    revealSignal,
+  );
   const factors = authoredFactors(tree);
   const activeFactorId = factors[factorIndex]?.factorId ?? `#${factorIndex + 1}`;
   const factorPointer = `/factors/${factorIndex}`;

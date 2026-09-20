@@ -233,6 +233,7 @@ export const StrategyRevisionPage = () => {
     sourceView: stored.format,
     form: form.projection,
     tree: form.tree,
+    schemaLoaded: assist.schema !== null,
     onSelectPointer: (pointer) => selectPointer(pointer, "graph"),
     onOpenSource: openSourceAt,
   });
@@ -404,6 +405,7 @@ export const StrategyRevisionPage = () => {
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
               selectedPointer={search.path}
+              revealSignal={problems.revealSignal}
             />
           ),
           graph: (
@@ -411,6 +413,7 @@ export const StrategyRevisionPage = () => {
               state={executionPlans}
               diagnostics={currentDiagnostics(document)}
               selectedPointer={search.path}
+              revealSignal={problems.revealSignal}
               editing={{
                 tree: form.tree,
                 schema: assist.schema,

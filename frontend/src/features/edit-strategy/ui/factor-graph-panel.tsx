@@ -39,6 +39,11 @@ type FactorGraphPanelProps = {
   state: ExecutionPlansState;
   diagnostics: DocumentDiagnostic[];
   selectedPointer?: string;
+  /**
+   * 같은 문제 행을 다시 눌렀을 때도 선택 카드를 다시 끌어오게 하는 신호. pointer가 같아도 이 값이 바뀌면
+   * `useRevealSelection`이 다시 돌냜다(2차 리뷰 R2-2).
+   */
+  revealSignal?: number;
   onSelectPointer: (pointer: string) => void;
   onOpenSource: (pointer: string) => void;
   editing?: FactorGraphEditing;
@@ -293,12 +298,16 @@ export const FactorGraphPanel = ({
   state,
   diagnostics,
   selectedPointer,
+  revealSignal,
   onSelectPointer,
   onOpenSource,
   editing,
 }: FactorGraphPanelProps) => {
   const [chosenFactor, setChosenFactor] = useState(0);
-  const container = useRevealSelection<HTMLElement>(selectedPointer);
+  const container = useRevealSelection<HTMLElement>(
+    selectedPointer,
+    revealSignal,
+  );
   const projected = projectFactorGraphs(state);
   // 편집 확정 뒤 backend plan을 다시 받는 동안(loading) 직전 ready 투영을 "재계산 중" 배지와 함께 유지한다 —
   // DAG가 사라졌다 돌아오며 편집기가 점프하지 않도록(P5-02 acceptance, 리뷰 OBS-132-05). 렌더 중 파생 상태.
@@ -343,6 +352,7 @@ export const FactorGraphPanel = ({
         diagnostics={diagnostics}
         factorIndex={index}
         selectedPointer={selectedPointer}
+        revealSignal={revealSignal}
         onSelectPointer={onSelectPointer}
         factorSelect={factorSelect}
         onOpenForm={editing.onOpenForm}

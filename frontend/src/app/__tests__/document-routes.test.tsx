@@ -3212,11 +3212,49 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
         screen.getByRole("button", { name: "노드 편집: mom_252" }).closest("li"),
       ).toHaveAttribute("aria-current", "true"),
     );
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(
+      screen.getByRole("button", { name: "노드 편집: mom_252" }).closest("li"),
+    );
     expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
+  }, 15_000);
+
+  // plan이 ready면 읽기 전용 DAG 노드와 그 아래 편집기 행에 같은 pointer로 `aria-current`가
+  // 둘 붙는다. 중첩된 두 reveal 훅이 같은 요소로 수렴해야 한다(2차 리뷰 R2-1).
+  it("scrolls to the editor row, not the plan node, when both mark the same pointer", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.node.window",
+          kind: "semantic",
+          severity: "warning",
+          pointer: "/factors/0/graph/nodes/1/window",
+          message: "window가 깁니다",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2?view=graph");
+
+    await screen.findByLabelText("FactorGraph DAG");
+    await screen.findByRole("region", { name: "그래프 편집" });
+    await user.click(await problemRow(/window가 깁니다/));
+
+    const planNode = screen
+      .getByRole("button", { name: "그래프 노드 선택: mom_252" })
+      .closest("li");
+    const editorRow = screen
+      .getByRole("button", { name: "노드 편집: mom_252" })
+      .closest("li");
+    await waitFor(() =>
+      expect(editorRow).toHaveAttribute("aria-current", "true"),
+    );
+    expect(planNode).toHaveAttribute("aria-current", "true");
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
   }, 15_000);
 
   it("falls back to the source tab and the line when the Graph tab cannot draw the pointer", async () => {
@@ -3294,11 +3332,18 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     await waitFor(() =>
       expect(history.location.search).toContain("view=form"),
     );
+    const card = screen.getByRole("region", { name: "factors · momentum" });
+    await waitFor(() => expect(card).toHaveAttribute("aria-current", "true"));
     await waitFor(() =>
-      expect(
-        screen.getByRole("region", { name: "factors · momentum" }),
-      ).toHaveAttribute("aria-current", "true"),
+      expect(scrollIntoView.mock.contexts.at(-1)).toBe(card),
     );
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+
+    // 같은 행을 다시 눌렀을 때도 끌어온다 — URL은 그대로라 reveal 신호가 대신 올라간다(2차 리뷰 R2-2).
+    const before = scrollIntoView.mock.calls.length;
+    await user.click(await problemRow(/weight must be positive/));
+    await waitFor(() =>
+      expect(scrollIntoView.mock.calls.length).toBeGreaterThan(before),
+    );
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(card);
   }, 15_000);
 });

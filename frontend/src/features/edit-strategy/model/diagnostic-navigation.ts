@@ -74,6 +74,12 @@ export type DiagnosticDestinationInput = {
   form: FormProjection | null;
   /** Form·Graph가 함께 읽는 parse tree. */
   tree: unknown;
+  /**
+   * runtime schema가 도착했는가. Form·Graph 편집 표면은 둘 다 schema 없이는 렌더되지 않는다
+   * (`factor-graph-panel.tsx`의 `editing.schema === null → null`). `form !== null`로 대신 보면
+   * Graph 판정이 Form 투영의 구현 세부에 묶이므로 page가 명시로 넘긴다(2차 리뷰 R2-4).
+   */
+  schemaLoaded: boolean;
 };
 
 export const resolveDiagnosticDestination = ({
@@ -82,16 +88,16 @@ export const resolveDiagnosticDestination = ({
   pointer,
   form,
   tree,
+  schemaLoaded,
 }: DiagnosticDestinationInput): DiagnosticDestination => {
   // 문서 전체를 가리키는 진단(구문 오류 등)은 어느 카드에도 속하지 않는다.
   if (pointer === "") return "source";
   if (view === sourceView) return "source";
   if (view === "form") return formCoversPointer(form, pointer) ? "current-view" : "source";
-  // runtime schema가 아직 없으면 그래프 편집 표면 자체가 렌더되지 않는다
-  // (`factor-graph-panel.tsx`의 `editing.schema === null → null`). 그 창에서는 그릴 카드가 없으므로
-  // 원문 탭으로 보낸다(P1-01 리뷰 P2-2 변형). `form`은 schema가 있을 때만 null이 아니다.
+  // runtime schema가 아직 없으면 그래프 편집 표면 자체가 렌더되지 않아 그릴 카드가 없다
+  // (P1-01 리뷰 P2-2 변형).
   if (view === "graph")
-    return form !== null && graphCoversPointer(tree, pointer)
+    return schemaLoaded && graphCoversPointer(tree, pointer)
       ? "current-view"
       : "source";
   // JSON 투영·Diff는 읽기 전용이라 선택을 받지 않는다.

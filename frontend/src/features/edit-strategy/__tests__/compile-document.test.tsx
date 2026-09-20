@@ -104,6 +104,7 @@ const Harness = ({ initial }: { initial: string }) => {
     sourceView: "yaml",
     form: null,
     tree: null,
+    schemaLoaded: false,
     onSelectPointer: () => undefined,
     onOpenSource: () => undefined,
   });

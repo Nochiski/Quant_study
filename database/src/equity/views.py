@@ -84,6 +84,7 @@ SIGNATURES: dict[str, str] = {
     "v_adj_volume_fwd": "v_adj_volume_fwd(as_of, lag_override := NULL)",
     "v_consensus": "v_consensus(as_of, lag_override := NULL)",
     "v_fin_latest": "v_fin_latest(as_of, lag_override := NULL, vintage := 'restated')",
+    "v_sector": "v_sector(as_of)",                                  # S25 WICS 주간 스냅샷 as-of
 }
 MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_cum_adj": ("price_daily", "adj_factor", "trading_calendar"),
@@ -94,6 +95,7 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_adj_volume_fwd": ("price_daily", "adj_factor", "trading_calendar", "security_span"),
     "v_consensus": ("consensus_daily", "trading_calendar"),
     "v_fin_latest": ("fin_std", "disclosure_version", "trading_calendar"),
+    "v_sector": ("sector_snapshot",),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
@@ -165,6 +167,16 @@ fwd AS (
 """
 
 TEMPLATES: dict[str, str] = {
+    # S25 — 종목별 `snapshot_date <= as_of` 최신 스냅샷 한 행 + 경과일(캘린더일). 주 1회 축이라
+    # 세션 랙 대신 경과일로 묵은 정도를 알린다. 스냅샷 전 날짜(2026-09-18 이전)는 0행 — 채우지 않는다.
+    "v_sector": """
+SELECT s.ticker, s.snapshot_date, s.wics_l1_cd, s.wics_l1_nm, s.wics_l2_cd, s.wics_l2_nm,
+       s.float_shares_shr, s.float_mktcap_krw, s.wgt_in_l2_pct,
+       datediff('day', s.snapshot_date, CAST(as_of AS DATE)) AS days_since_snapshot
+FROM {sector_snapshot} s
+WHERE s.snapshot_date <= CAST(as_of AS DATE)
+QUALIFY row_number() OVER (PARTITION BY s.ticker ORDER BY s.snapshot_date DESC) = 1
+""",
     # ticker·date 별 누적 계수. 계수는 (ticker, apply_date) 로 먼저 접어(같은 날 두 이벤트 = 곱,
     # 복합 성분) 뒤에서부터 누적한 뒤 ASOF JOIN 으로 '이 날 이후 첫 적용 세션' 의 누적값을
     # 붙인다 — 행별 GROUP BY 없음.

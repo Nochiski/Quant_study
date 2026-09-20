@@ -182,11 +182,11 @@ def _order() -> list[str]:
             if ln.strip() and not ln.lstrip().startswith("#")]
 
 
-def test_빌드_순서는_등록된_29표_전건이다() -> None:
+def test_빌드_순서는_등록된_30표_전건이다() -> None:
     """`equity_gate_all.sh` 의 ORDER 가 28낱말이라 `coverage_daily`(S24, 09-10 신설)가 재판정에서
     통째로 빠졌고, `summary.txt` 에는 아무 표시도 남지 않아 '28표 전부 통과' 를 29로 오독했다."""
     order = _order()
-    assert len(order) == len(set(order)) == 29
+    assert len(order) == len(set(order)) == 30          # 29 + sector_snapshot(S25, 2026-09-20)
     # `sample_table` 은 T0 샘플이라 빌드 대상이 아니다
     assert set(order) == {n for n in REGISTERED if n != "sample_table"}
 

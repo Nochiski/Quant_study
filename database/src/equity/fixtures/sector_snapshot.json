@@ -1,0 +1,57 @@
+[
+ {
+  "id": "FX-25-001a",
+  "key": {
+   "ticker": "005930",
+   "snapshot_date": "2026-09-18"
+  },
+  "column": "wics_l2_cd",
+  "expect": "G4530",
+  "source": "stage:stg_wics_components(005930, 2026-09-18, req_sec_cd=G4530) — wiseindex GetIndexComponets 09-20 수집 원문",
+  "note": "L2 코드 = 요청 코드(IDX_CD). 반도체와반도체장비"
+ },
+ {
+  "id": "FX-25-001b",
+  "key": {
+   "ticker": "005930",
+   "snapshot_date": "2026-09-18"
+  },
+  "column": "wics_l2_nm",
+  "expect": "WICS 반도체와반도체장비",
+  "source": "같은 행 IDX_NM_KOR",
+  "note": "L2 라벨은 행의 SEC_NM_KOR 가 아니라 IDX_NM_KOR (WICS_PROBE §6)"
+ },
+ {
+  "id": "FX-25-001c",
+  "key": {
+   "ticker": "005930",
+   "snapshot_date": "2026-09-18"
+  },
+  "column": "wics_l1_cd",
+  "expect": "G45",
+  "source": "같은 행 SEC_CD",
+  "note": "L1 = IT"
+ },
+ {
+  "id": "FX-25-001d",
+  "key": {
+   "ticker": "005930",
+   "snapshot_date": "2026-09-18"
+  },
+  "column": "float_mktcap_krw",
+  "expect": "1144409038000000",
+  "source": "같은 행 MKT_VAL 1144409038 (백만원) × 1e6 — stage 픽스처 stg_wics_components 와 같은 값",
+  "note": "유동시총(원)"
+ },
+ {
+  "id": "FX-25-001e",
+  "key": {
+   "ticker": "005930",
+   "snapshot_date": "2026-09-18"
+  },
+  "column": "float_shares_shr",
+  "expect": "4384708956",
+  "source": "같은 행 APT_SHR_CNT",
+  "note": "유동주식수(주)"
+ }
+]

@@ -56,6 +56,7 @@ from . import (
     rules_s20,  # noqa: F401  # reason: 등록 부작용 — S20 팩터 준비도 factor_readiness
     rules_s23,  # noqa: F401  # reason: 등록 부작용 — S23 전방 조정가 price_adj_daily
     rules_s24,  # noqa: F401  # reason: 등록 부작용 — S24 WISE 커버 이력 coverage_daily
+    rules_s25,  # noqa: F401  # reason: 등록 부작용 — S25 WICS 섹터 스냅샷 sector_snapshot
     rules_sample,  # noqa: F401  # reason: T0 샘플 테이블
 )
 from .model import BUILD_BASES, BUILD_BASIS_DEFAULT, RULES, record_basis

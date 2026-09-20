@@ -181,3 +181,19 @@
 - **격자 = (WISE 요청 유니버스 종목) × (스냅샷 날짜)** 다. 종목 축에 `stg_wise_coverage` 를 넣는 것이 핵심이다 — 무커버 종목은 스냅샷 표에 행이 없거나 전값 NULL 이라 관측 표만으로 격자를 세우면 `covered=false` 칸 자체가 사라져 커버율이 조용히 1 이 된다(GATES §5-C6 생존편향과 같은 함정).
 - **아직 `dataset_profile`(S19)에 올리지 않았다.** `rules_s19.SOURCE_TABLES` 가 코드 고정 목록이고 이 작업의 소유 밖이라 `coverage_daily.field_profiles = ()` 이다. 어댑터에 `consensus.coverage_*` 를 노출하려면 ① `SOURCE_TABLES` 에 `coverage_daily` 추가 ② `FieldProfile`(scope `internal` — FACTORS 정본 54 에 대응 어휘가 없다) 선언 ③ `scripts/equity_rebuild_all.sh` 순서에 편입, 셋이 후속이다.
 - 절단본 교차확인: `covered` 술어가 `stg_wise_coverage.status_current` 7종목을 전건 재현한다(covered 5 · none 2). 이 대조는 `EG3_coverage_daily` 의 `n_wise_status_mismatch` 가 매 빌드 기록형으로 센다(같은 날짜끼리만 — 원장 쪽에 이력이 없어 다른 날과 비교하면 "그 뒤에 상태가 바뀌었다" 를 오차로 읽는다).
+
+## 6. `sector.*` — S25 `sector_snapshot` · `v_sector(as_of)` (2026-09-20, 플랜 wics-weekly)
+
+WICS 섹터 구성의 **주간 스냅샷**이다(토요일 03:00 KST, dt=금요일). 백필은 하지 않으므로 **2026-09-18 이전에는 섹터 축이 없다** — 그 전 구간 백테스트에 업종중립화·섹터캡을 걸 수 없다.
+
+| 필드 | 컬럼 | 뜻 | 단위·기준 |
+|---|---|---|---|
+| `sector.wics_l1` | `wics_l1_cd`·`wics_l1_nm` | WICS L1 섹터(10) | 코드 `G10`~`G55`, 라벨은 행의 SEC_NM_KOR |
+| `sector.wics_l2` | `wics_l2_cd`·`wics_l2_nm` | WICS L2 산업(28) | 코드 = 요청 IDX_CD(5자리), 라벨은 IDX_NM_KOR(행의 SEC_NM_KOR 가 아니다) |
+| `sector.float_shares` | `float_shares_shr` | 유동주식수 | 주(APT_SHR_CNT). E04 실질 유통비율의 후보 분모(현 DART 축) |
+| `sector.float_mktcap` | `float_mktcap_krw` | 유동시총 | 원(MKT_VAL 백만원 × 1e6, stage 픽스처로 스케일 고정) |
+
+- **소비는 `v_sector(as_of)`** 로 — 종목별 `snapshot_date <= as_of` 최신 행 + `days_since_snapshot`(캘린더일). 첫 스냅샷 전 날짜는 0행이고 채우지 않는다. 주 1회 축이라 경과일 최대 ≈7(연휴 시 더 김)이 정상이다.
+- `available_date = snapshot_date`, basis `convention`(공표 시각 미실측). 토요일 수집이므로 실사용 랙은 1캘린더일 이상 — 권장 랙 1세션.
+- `dataset_profile` 등재는 보류(`rules_s19.SOURCE_TABLES` 고정 목록, B-1 과 같은 사정). 선언은 `rules_s25.FIELDS` 에 있다.
+

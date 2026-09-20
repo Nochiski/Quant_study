@@ -18,7 +18,8 @@ from .model import TableRule
 
 # db alias → 원장 파일명. survey/targets.py DBS 와 같아야 한다(테스트 대조). wise 만 다르다.
 LEDGER_FILES: dict[str, str] = {"krx": "krx.db", "kiwoom": "kiwoom.db", "kis": "kis.db",
-                                "dart": "dart.db", "wise": "wisereport.db"}
+                                "dart": "dart.db", "wise": "wisereport.db",
+                                "wiseindex": "wiseindex.db"}   # WICS 주간 스냅샷(2026-09-20, 플랜 wics-weekly T1)
 
 _MODULES = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise,
             rules_doc)

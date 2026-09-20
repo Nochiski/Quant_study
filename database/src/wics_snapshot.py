@@ -74,8 +74,10 @@ def ensure_schema(con: sqlite3.Connection) -> None:
 
 
 def have_ok(con: sqlite3.Connection, dt_: str, sec_cd: str) -> bool:
-    row = con.execute("SELECT 1 FROM wics_raw WHERE dt=? AND sec_cd=? AND http_status=200 LIMIT 1",
-                      (dt_, sec_cd)).fetchone()
+    """멱등 판정 — 200 이고 **행이 1개 이상**인 원문이 있을 때만 "있다". 빈 list(CNT=0)는 휴장일·구성 미공표
+    신호라 다음 실행(토 10:00 재시도)이 다시 부른다. 원문은 append-only 라 빈 판본도 남는다."""
+    row = con.execute("SELECT 1 FROM wics_raw WHERE dt=? AND sec_cd=? AND http_status=200 "
+                      "AND n_rows > 0 LIMIT 1", (dt_, sec_cd)).fetchone()
     return row is not None
 
 
@@ -114,8 +116,9 @@ def run(dt_: str, codes: Sequence[str], db: str, *, sleep_s: float = 1.0, force:
                 err = ""
                 summary = parse(body) if status == 200 else {}
                 ok = status == 200
-            except Exception as e:                                   # JSON 파싱·네트워크 — 실패로 기록
-                status, body, elapsed, err, summary, ok = -1, b"", 0.0, f"{type(e).__name__}: {e}"[:300], {}, False
+            except Exception as e:  # noqa: BLE001  # reason: 네트워크·JSON 파싱 어떤 실패든 call_log 에 기록하고 연속 실패 카운트로 중단한다
+                status, body, elapsed = -1, b"", 0.0
+                err, summary, ok = f"{type(e).__name__}: {e}"[:300], {}, False
             collected_at = dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%S")
             con.execute("INSERT INTO wics_call_log VALUES (?,?,?,?,?,?,?)",
                         (dt_, code, requested_at, "ok" if ok else "fail", int(elapsed * 1000), len(body), err or None))
@@ -124,7 +127,8 @@ def run(dt_: str, codes: Sequence[str], db: str, *, sleep_s: float = 1.0, force:
                             (dt_, code, collected_at, status, summary.get("n_list") if ok else None,
                              zlib.compress(body)))
             con.commit()
-            out[code] = {"status": "ok" if ok else "fail", "http": status, "err": err, **summary}
+            status_word = "fail" if not ok else ("empty" if int(str(summary.get("n_list") or 0)) == 0 else "ok")
+            out[code] = {"status": status_word, "http": status, "err": err, **summary}
             consecutive_fail = 0 if ok else consecutive_fail + 1
             if consecutive_fail >= MAX_CONSECUTIVE_FAIL:
                 raise RuntimeError(f"{MAX_CONSECUTIVE_FAIL}회 연속 실패 — 중단(마지막 {code} http={status} {err})")
@@ -134,13 +138,17 @@ def run(dt_: str, codes: Sequence[str], db: str, *, sleep_s: float = 1.0, force:
 
 
 def report(dt_: str, out: dict[str, dict[str, object]]) -> str:
-    lines = [f"WICS 스냅샷 dt={dt_} 코드 {len(out)}개"]
+    n_ok = sum(1 for r in out.values() if r.get("status") == "ok")
+    n_empty = sum(1 for r in out.values() if r.get("status") == "empty")
+    n_fail = sum(1 for r in out.values() if r.get("status") == "fail")
+    n_skip = sum(1 for r in out.values() if r.get("status") == "skip_exists")
+    lines = [f"WICS 스냅샷 dt={dt_} 코드 {len(out)}개 ok={n_ok} empty={n_empty} fail={n_fail} skip={n_skip}"]
     l1_cnt: dict[str, int] = {}
     l2_sum: dict[str, int] = {}
     for code, r in out.items():
         st = r.get("status")
         if st == "ok":
-            cnt = int(r.get("cnt") or 0)
+            cnt = int(str(r.get("cnt") or 0))
             lines.append(f"  {code:<6} ok   CNT={cnt:>5} list={r.get('n_list'):>5}  {r.get('idx_cd')} {r.get('idx_nm')}")
             if code in L1:
                 l1_cnt[code] = cnt
@@ -171,13 +179,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     codes = resolve_codes(a.codes)
     try:
-        out = run(a.dt, codes, a.db, sleep_s=a.sleep, force=a.force, dry_run=a.dry_run)
+        out = run(a.dt, codes, a.db, sleep_s=a.sleep, force=a.force, dry_run=a.dry_run, fetch=fetch_http)
     except RuntimeError as e:
         print(f"!!! {e}", file=sys.stderr)
         return 2
     print(report(a.dt, out))
-    n_fail = sum(1 for r in out.values() if r.get("status") == "fail")
-    return 1 if n_fail else 0
+    statuses = [r.get("status") for r in out.values()]
+    if any(st == "fail" for st in statuses):
+        return 1
+    fetched = [st for st in statuses if st in ("ok", "empty")]
+    if fetched and all(st == "empty" for st in fetched):
+        return 4                                                       # 전부 빈 응답 — 구성 미공표·휴장일. 재시도 대상
+    return 0
 
 
 if __name__ == "__main__":

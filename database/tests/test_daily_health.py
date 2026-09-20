@@ -1,9 +1,11 @@
 """daily.ledger_health — 원장별 완료 판정(실측 기대치)과 등급별 rc. 플랜 P1 Task 1.7."""
 import json
 import sqlite3
+import zlib
 from pathlib import Path
 
 from daily import ledger_health as lh
+from wics_snapshot import L1, L2
 
 D, DP = "20260908", "20260907"          # 대상일(화), 직전 거래일(월)
 
@@ -85,6 +87,7 @@ def _kis(tmp_path, max_deal, n=2500):
 def _paths(tmp_path, **kw):
     p = lh.Paths(krx=kw.get("krx", str(tmp_path / "none1.db")), kiwoom=kw.get("kiwoom", str(tmp_path / "none2.db")),
                  kis=kw.get("kis", str(tmp_path / "none3.db")), dart=str(tmp_path / "none4.db"), wise=kw.get("wise", str(tmp_path / "none5.db")),
+                 wiseindex=kw.get("wiseindex", ""),
                  calendar=_cal(tmp_path), universe_state=str(tmp_path / "universe_kw.json"))
     (tmp_path / "universe_kw.json").write_text(json.dumps({"asof": D, "grace": {}, "n_requested": 2563}), encoding="utf-8")
     return p
@@ -328,3 +331,64 @@ def test_kis_credit_fresh_fails_when_two_sessions_behind(tmp_path):
     c = _by(rep)["kis.credit.fresh"]
     assert c.level is lh.Level.REQUIRED and c.status is lh.Status.FAIL
     assert not rep.ok
+
+
+# ── WICS 주간 원장 (플랜 wics-weekly T1) ────────────────────────────────────
+
+
+def _wics(tmp_path, *, dt_="20260904", n=2500, missing=(), l1_mismatch=False):
+    """L1 10 × L2 28 스냅샷. 종목 i 는 L1 = i % 10 번째, 그 안에서 L2 라운드로빈. KRX 픽스처(0~2761)와 겹친다."""
+    con = sqlite3.connect(tmp_path / "wiseindex.db")
+    con.execute("CREATE TABLE wics_raw (dt TEXT, sec_cd TEXT, collected_at TEXT, http_status INTEGER, n_rows INTEGER, body BLOB)")
+    by_l1 = {c: [] for c in L1}
+    for i in range(n):
+        by_l1[L1[i % 10]].append(f"{i:06d}")
+    l2_by_l1 = {c: [l for l in L2 if l.startswith(c)] for c in L1}
+    bodies = {c: list(by_l1[c]) for c in L1}
+    for c in L1:                                                       # L1 의 종목을 그 L1 의 L2 들에 라운드로빈
+        for j, l in enumerate(l2_by_l1[c]):
+            bodies[l] = [tk for k, tk in enumerate(by_l1[c]) if k % len(l2_by_l1[c]) == j]
+    if l1_mismatch:
+        bodies["G4510"] = bodies["G4510"][:-1]                          # G45 의 L2 합이 L1 보다 1 작다
+    for code, tickers in bodies.items():
+        if code in missing:
+            continue
+        rows = [{"CMP_CD": t, "CMP_KOR": "x", "MKT_VAL": 1, "IDX_CD": code, "IDX_NM_KOR": "n", "SEC_CD": code[:3], "SEC_NM_KOR": "s"} for t in tickers]
+        body = zlib.compress(json.dumps({"info": {"CNT": len(rows)}, "sector": [], "list": rows}).encode("utf-8"))
+        con.execute("INSERT INTO wics_raw VALUES (?,?,?,?,?,?)", (dt_, code, "2026-09-05T18:00:00", 200, len(rows), body))
+    con.commit(); con.close()
+    return str(tmp_path / "wiseindex.db")
+
+
+def test_wics_latest_snapshot_passes_integrity_freshness_and_coverage(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(tmp_path), wiseindex=_wics(tmp_path)))     # dt 09-04(금), D 09-08(화) → 4일
+    c = _by(rep)
+    assert c["wics.integrity"].status is lh.Status.PASS and c["wics.integrity"].value["missing"] == []
+    assert c["wics.fresh"].status is lh.Status.PASS and c["wics.fresh"].value["age_days"] == 4
+    assert c["wics.coverage"].status is lh.Status.PASS and c["wics.coverage"].value["ratio"] >= 0.85   # 2,500/2,762
+
+
+def test_wics_missing_code_or_l1_mismatch_fails_integrity_only(tmp_path):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(a), wiseindex=_wics(a, missing=("G5510",))))
+    c = _by(rep)
+    assert c["wics.integrity"].status is lh.Status.FAIL and c["wics.integrity"].value["missing"] == ["G5510"]
+    assert c["wics.integrity"].level is lh.Level.REQUIRED and not rep.ok
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(b), wiseindex=_wics(b, l1_mismatch=True)))
+    c = _by(rep)
+    assert c["wics.integrity"].status is lh.Status.FAIL and c["wics.integrity"].value["l1_mismatch"] == ["G45"]
+
+
+def test_wics_stale_or_thin_snapshot_only_warns(tmp_path):
+    """주간 축을 일일 건전성이 FAIL 로 보면 안 된다 — 나이·커버리지는 WARN 등급."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(); b.mkdir()
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(a), wiseindex=_wics(a, dt_="20260821", n=200)))   # 18일 · 200/2,762
+    c = _by(rep)
+    assert c["wics.fresh"].status is lh.Status.FAIL and c["wics.fresh"].level is lh.Level.WARN
+    assert c["wics.coverage"].status is lh.Status.FAIL and c["wics.coverage"].level is lh.Level.WARN
+    assert c["wics.integrity"].status is lh.Status.PASS and rep.ok                     # WARN 은 ok 를 깨지 않는다
+    rep = lh.run(D, _paths(tmp_path, krx=_krx(b), wiseindex=_wics(b)), skip=frozenset({"wics"}))
+    assert "wics.integrity" not in _by(rep) and _by(rep)["wics.skipped"].status is lh.Status.SKIP
+

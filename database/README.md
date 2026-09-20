@@ -148,6 +148,8 @@ uv run --no-project --python 3.11 --with pytest --with duckdb --with requests py
 | 21:50 | `50 12 * * 1-5` | `watchdog.sh evening_ledger` — 저녁 원장 보고 없음/실패면 crit | 가동 |
 | 23:30 | `30 14 * * 1-5` | `watchdog.sh evening_build` — `latest_evening.json` 이 오늘 것이 아니거나 health 실패면 crit. 23:00 → 23:30(DEFECT-D02: 한도 21:45 에 시작한 정상 판은 stage 43~66분 + equity 9~11분이라 23:06 에 끝난다) | 가동 |
 | 22:30 | — | Kael-alpha 스코어 보고 목표(결정 11; 옛 19:00 목표는 애프터마켓으로 무효). 저녁 단축 빌드(B.1)로 ≈21:35 까지 당길 수 있다 | 예정 (페이즈 C) |
+| 토 03:00 | `0 18 * * 5` | `wics_weekly.sh` — WICS 섹터 구성 주간 스냅샷(dt=금요일, L2 28 + L1 10 = 38콜, 멱등) → `data/raw/wiseindex.db`. 전부 빈 응답이면 rc 4 + warn | 예정 (플랜 `2026-09-20-wics-weekly` T4) |
+| 토 10:00 | `0 1 * * 6` | `wics_weekly.sh --retry` — 03:00 이 전부 빈 응답이었을 때만 콜(행>0 판본이 있으면 콜 0) | 예정 |
 | 일요일 04:30 | `30 19 * * 6` | `gc.sh --apply` — 빌드 락을 잡고 캐시·`_failed` 정리, 끝에서 `rotate_logs.sh` 호출, 완료 info / 실패 warn | 가동 (09-11 18:50 등록) |
 | ~~매시~~ | — | ~~키움 확정 시각 프로브~~ (09-16 제거 — 09-14 촘촘 프로브로 20:15 정착 확인, `data/evidence/after_market_20260914.db`) | 제거 |
 

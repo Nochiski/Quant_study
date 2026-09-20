@@ -45,14 +45,28 @@ def test_saves_raw_body_and_call_log_then_skips_on_rerun(tmp_path: Path) -> None
     assert "G45 ΣL2=   42 L1=   42 =" in rep
 
 
-def test_empty_list_is_saved_as_zero_rows_not_missing(tmp_path: Path) -> None:
+def test_empty_list_is_saved_as_zero_rows_and_retried_next_run(tmp_path: Path) -> None:
+    """빈 응답(휴장일·구성 미공표)은 원문으로 남기되 멱등 판정에서는 "없음" — 다음 실행이 다시 부른다."""
     db = str(tmp_path / "w.db")
-    fetch, _ = _fake({"G9999": (200, _body(0, None, None))})
+    fetch, calls = _fake({"G9999": (200, _body(0, None, None))})
     out = ws.run(DT, ("G9999",), db, sleep_s=0, fetch=fetch)
-    assert out["G9999"]["status"] == "ok" and out["G9999"]["cnt"] == 0
+    assert out["G9999"]["status"] == "empty" and out["G9999"]["cnt"] == 0
     con = sqlite3.connect(db)
     assert con.execute("SELECT n_rows FROM wics_raw").fetchone()[0] == 0
     con.close()
+    out2 = ws.run(DT, ("G9999",), db, sleep_s=0, fetch=fetch)
+    assert out2["G9999"]["status"] == "empty" and calls == ["G9999", "G9999"]      # skip 이 아니라 재호출
+    assert "empty=1" in ws.report(DT, out2)
+
+
+def test_main_returns_4_when_every_fetched_code_is_empty(tmp_path: Path, monkeypatch) -> None:
+    db = str(tmp_path / "w.db")
+    fetch, _ = _fake({"G10": (200, _body(0, None, None)), "G15": (200, _body(0, None, None))})
+    monkeypatch.setattr(ws, "fetch_http", fetch)
+    assert ws.main(["--dt", DT, "--codes", "G10,G15", "--db", db, "--sleep", "0"]) == 4
+    fetch_ok, _ = _fake({"G10": (200, _body(3, "G10", "WICS 에너지", "G10")), "G15": (200, _body(0, None, None))})
+    monkeypatch.setattr(ws, "fetch_http", fetch_ok)
+    assert ws.main(["--dt", DT, "--codes", "G10,G15", "--db", db, "--sleep", "0"]) == 0   # 일부만 비면 0
 
 
 def test_three_consecutive_failures_abort(tmp_path: Path) -> None:

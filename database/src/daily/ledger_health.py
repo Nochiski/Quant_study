@@ -83,6 +83,7 @@ class Paths:
     kis: str
     dart: str
     wise: str
+    wiseindex: str = ""         # WICS 주간 스냅샷 원장(플랜 wics-weekly T1). 없으면 판정하지 않는다
     calendar: str = _cal.DEFAULT_PATH
     universe_state: str = ""
     prev_report: str = ""       # 전날 리포트(JSON) — KIS 중복쌍 증가분 비교용
@@ -92,7 +93,7 @@ class Paths:
         raw = os.path.join(home, "data", "raw")
         return cls(krx=os.path.join(raw, "krx.db"), kiwoom=os.path.join(raw, "kiwoom.db"),
                    kis=os.path.join(raw, "kis.db"), dart=os.path.join(raw, "dart.db"),
-                   wise=os.path.join(raw, "wisereport.db"),
+                   wise=os.path.join(raw, "wisereport.db"), wiseindex=os.path.join(raw, "wiseindex.db"),
                    calendar=os.path.join(home, "data", "calendar", "kis_holidays.json"),
                    universe_state=os.path.join(home, "data", "daily", "universe_kw.json"))
 
@@ -429,9 +430,65 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
     return out
 
 
+WICS_FRESH_MAX_DAYS = 9          # 주 1회(토요일, dt=금요일) + 연휴 여유 — 다음 금요일 저녁 D 기준 7일
+WICS_COVERAGE_MIN = 0.85         # 09-18 실측 89.1% (WICS 는 관리·환기·우선주·외국주를 뺀다)
+
+
+def _wics_tickers(body: bytes) -> set[str]:
+    import zlib
+    rows = json.loads(zlib.decompress(body).decode("utf-8")).get("list") or []
+    return {str(r.get("CMP_CD")) for r in rows if r.get("CMP_CD")}
+
+
+def check_wics(con: sqlite3.Connection, krx: sqlite3.Connection | None, d: str, dd: dt.date) -> list[Check]:
+    """주간 WICS 원장(`wiseindex.db`) — 최신 스냅샷의 완결성(REQUIRED) · 나이(WARN) · KRX 커버리지(WARN).
+
+    일일 건전성이 주간 축을 매일 FAIL 로 보면 안 되므로 나이·커버리지는 WARN 이고, 완결성만 REQUIRED 다
+    (플랜 wics-weekly §5). 코드 목록의 정본은 수집기(`wics_snapshot.L1/L2`)다."""
+    from wics_snapshot import L1, L2
+    if not _has_table(con, "wics_raw"):
+        return [Check("wics.raw", Level.REQUIRED, Status.SKIP, None, "wics_raw 테이블 없음 — 첫 스냅샷 전")]
+    latest = _one(con, "SELECT max(dt) FROM wics_raw WHERE http_status = 200 AND n_rows > 0")
+    if latest is None:
+        return [Check("wics.integrity", Level.REQUIRED, Status.FAIL, None, "200·행>0 스냅샷이 하나도 없다")]
+    latest = str(latest)
+    have: dict[str, tuple[int, bytes]] = {}
+    for sec, n, body in con.execute("SELECT sec_cd, n_rows, body FROM wics_raw WHERE dt = ? AND http_status = 200 "
+                                    "AND n_rows > 0 ORDER BY collected_at", (latest,)):
+        have[str(sec)] = (int(str(n)), body if isinstance(body, bytes) else b"")   # 코드별 최신 판본
+    missing = sorted(set(L1 + L2) - set(have))
+    l1_cnt = {c: have[c][0] for c in L1 if c in have}
+    l2_sum: dict[str, int] = {}
+    for c in L2:
+        if c in have:
+            l2_sum[c[:3]] = l2_sum.get(c[:3], 0) + have[c][0]
+    l1_mismatch = [c for c in L1 if c in l1_cnt and l2_sum.get(c, 0) != l1_cnt[c]]
+    ok = not missing and not l1_mismatch and len(l1_cnt) == len(L1)
+    out = [Check("wics.integrity", Level.REQUIRED, Status.PASS if ok else Status.FAIL,
+                 {"dt": latest, "n_codes": len(have), "missing": missing, "l1_mismatch": l1_mismatch},
+                 f"최신 스냅샷 {len(L1) + len(L2)}/{len(L1) + len(L2)} 응답(행>0) · Σ L2 CNT = L1 CNT 10/10")]
+    age = (dd - dt.date(int(latest[:4]), int(latest[4:6]), int(latest[6:8]))).days
+    out.append(Check("wics.fresh", Level.WARN, Status.PASS if age <= WICS_FRESH_MAX_DAYS else Status.FAIL,
+                     {"dt": latest, "age_days": age}, f"최신 스냅샷이 D 기준 {WICS_FRESH_MAX_DAYS}일 이내(주 1회 + 연휴)"))
+    if krx is not None and _has_table(krx, "krx_stk_bydd_trd") and _has_table(krx, "krx_ksq_bydd_trd"):
+        krx_set = {str(r[0]) for r in krx.execute(
+            "SELECT ISU_CD FROM krx_stk_bydd_trd WHERE bas_dd_req = ? UNION SELECT ISU_CD FROM krx_ksq_bydd_trd "
+            "WHERE bas_dd_req = ?", (d, d))}
+        wics_set: set[str] = set()
+        for c in L1:
+            if c in have:
+                wics_set |= _wics_tickers(have[c][1])
+        if krx_set:
+            ratio = len(krx_set & wics_set) / len(krx_set)
+            out.append(Check("wics.coverage", Level.WARN, Status.PASS if ratio >= WICS_COVERAGE_MIN else Status.FAIL,
+                             {"ratio": round(ratio, 4), "krx": len(krx_set), "wics": len(wics_set), "dt": latest},
+                             f"KRX D 종목 대비 ≥ {WICS_COVERAGE_MIN:.0%} (09-18 실측 89.1%)"))
+    return out
+
+
 def run(d: str, paths: Paths, *, today: dt.date | None = None,
         skip: frozenset[str] = frozenset()) -> HealthReport:
-    """skip 에 든 소스(krx·kiwoom·kis·dart·wise)는 판정하지 않고 SKIP 1건으로 기록한다(예: 앱키 분리 전 kiwoom)."""
+    """skip 에 든 소스(krx·kiwoom·kis·dart·wise·wics)는 판정하지 않고 SKIP 1건으로 기록한다(예: 앱키 분리 전 kiwoom)."""
     cal = _cal.load(paths.calendar)
     dd = dt.date(int(d[:4]), int(d[4:6]), int(d[6:8]))
     d_prev = cal.prev_trading_day(dd).strftime("%Y%m%d")
@@ -458,6 +515,7 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
     kis = _ro(paths.kis)
     dart = _ro(paths.dart)
     wise = _ro(paths.wise)
+    wics = _ro(paths.wiseindex) if paths.wiseindex else None
     try:
         for name in sorted(skip):
             checks.append(Check(f"{name}.skipped", Level.WARN, Status.SKIP, None, "--skip 로 판정 제외(운영 결정)"))
@@ -471,8 +529,10 @@ def run(d: str, paths: Paths, *, today: dt.date | None = None,
             checks += check_dart(dart, d, cal.is_trading_day(dd), kst_start_utc)
         if wise is not None and "wise" not in skip:
             checks += check_wise(wise, dd.isoformat(), (dd + dt.timedelta(days=1)).isoformat())
+        if wics is not None and "wics" not in skip:
+            checks += check_wics(wics, krx, d, dd)
     finally:
-        for c in (krx, kw, kis, dart, wise):
+        for c in (krx, kw, kis, dart, wise, wics):
             if c is not None:
                 c.close()
     return HealthReport(d, tuple(checks), n_req)
@@ -494,12 +554,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--date", required=True, help="판정 대상 거래일 YYYYMMDD (보통 T-1)")
     ap.add_argument("--home", default=os.environ.get("QL_HOME", "/home/kael/quant-ledger"))
     ap.add_argument("--out", default=None, help="리포트 디렉터리 (기본 <home>/logs/health)")
-    ap.add_argument("--skip", default="", help="판정 제외 소스, 쉼표구분 (krx,kiwoom,kis,dart,wise)")
+    ap.add_argument("--skip", default="", help="판정 제외 소스, 쉼표구분 (krx,kiwoom,kis,dart,wise,wics)")
     a = ap.parse_args(argv)
     skip = frozenset(x.strip() for x in a.skip.split(",") if x.strip())
-    bad = skip - {"krx", "kiwoom", "kis", "dart", "wise"}
+    bad = skip - {"krx", "kiwoom", "kis", "dart", "wise", "wics"}
     if bad:
-        raise ValueError(f"unknown --skip source: {sorted(bad)} (allowed: krx,kiwoom,kis,dart,wise)")
+        raise ValueError(f"unknown --skip source: {sorted(bad)} (allowed: krx,kiwoom,kis,dart,wise,wics)")
     paths = Paths.from_home(a.home)
     out_dir = a.out or os.path.join(a.home, "logs", "health")
     cal = _cal.load(paths.calendar)

@@ -43,7 +43,13 @@ export type AssistantStreamClose =
 
 export type UseAssistantEventStreamOptions = {
   target: AssistantStreamTarget | null;
-  /** 이미 반영한 마지막 sequence. 최초 연결의 `after_sequence`로 나간다. */
+  /**
+   * 이미 반영한 마지막 sequence. 최초 연결의 `after_sequence`로 나간다.
+   *
+   * 이력을 읽고 연 사이드바에서는 이 값이 턴 시작 응답의 `accepted_sequence`와 같다(둘 다 턴
+   * 직전 세션의 마지막 번호다). 이력 없이 연 경우에는 더 앞이라 서버가 이미 반영한 프레임을
+   * 몇 개 다시 보내는데, 리듀서가 무시한다 — 뒤에서 여는 쪽이 이벤트를 흘리는 것보다 안전하다.
+   */
   lastSequence: number;
   onEvent: (envelope: AssistantEventEnvelopeView) => void;
   /** 스트림이 닫힌 뒤 이력으로 확정한 결과. 턴의 최종 상태는 여기서만 온다(spec D3). */

@@ -1,0 +1,492 @@
+"""`/api/v1/assistant/*` 계약 (설계 spec D6, WORKFLOW A-04).
+
+앱은 **실제 bootstrap 그래프**로 세운다(`build_http_app`). 가짜로 바꾸는 것은 공급자 adapter
+하나뿐이고 — A-05·A-06 전이라 진짜가 없다 — 저장소·비밀 파일·컴파일러는 전부 진짜다. 그래야
+라우트가 아니라 배선이 틀렸을 때도 이 테스트가 깨진다.
+
+비밀은 이 파일 전체에서 `_API_KEY` 하나만 쓴다. 마지막 테스트가 그 문자열이 어떤 응답 본문과
+로그에도 없음을 단언하므로, 새 라우트를 추가하면서 키를 응답에 흘리면 여기서 걸린다.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import threading
+from collections.abc import Callable, Iterator, Sequence
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+
+from strategy_workbench.bootstrap.facade.container import AssistantSettings
+from strategy_workbench.bootstrap.facade.http import build_http_app
+from strategy_workbench.domain.assistant.facade.models import (
+    ChatEvent,
+    Done,
+    Failure,
+    FailureCode,
+    ProbeFailure,
+    ProbeResult,
+    ProviderKind,
+    ProviderProfile,
+    TextDelta,
+    ToolCall,
+    ToolResult,
+    TurnRequest,
+    TurnStatus,
+)
+
+_API_KEY = "sk-secret-workbench-ABCD1234"
+_ASSISTANT = "/api/v1/assistant"
+_DOCUMENT_REF = {"draft_id": "draft-1", "strategy_id": None, "revision": None}
+_CONTEXT = {"source_text": "schema_version: '1.1'\n", "source_format": "yaml", "diagnostics": []}
+
+
+class _GatedProvider:
+    """대본대로 이벤트를 흘리되, 중간에서 테스트가 열어 줄 때까지 멈추는 가짜 공급자.
+
+    턴이 RUNNING으로 남아 있는 구간을 결정적으로 만들기 위해 필요하다. 진짜 스레드에서 도는
+    턴을 `time.sleep`으로 따라잡으려 하면 느리고 잘 깨진다.
+    """
+
+    kind = ProviderKind.ANTHROPIC
+
+    def __init__(
+        self,
+        *,
+        before: Sequence[ChatEvent] = (),
+        after: Sequence[ChatEvent] = (),
+        gate: threading.Event | None = None,
+        probe_result: ProbeResult | None = None,
+    ) -> None:
+        self._before = tuple(before)
+        self._after = tuple(after)
+        self._gate = gate
+        self._probe_result = probe_result or ProbeResult(ok=True, latency_ms=3)
+        self.probed_secrets: list[str] = []
+        self.streamed_secrets: list[str] = []
+        self.reached_gate = threading.Event()
+
+    def default_model(self) -> str:
+        return "fake-model-1"
+
+    def probe(self, secret: str, *, model: str, base_url: str | None) -> ProbeResult:
+        self.probed_secrets.append(secret)
+        return self._probe_result
+
+    def stream_turn(
+        self,
+        secret: str,
+        profile: ProviderProfile,
+        request: TurnRequest,
+        execute_tool: Callable[[ToolCall], ToolResult],
+        cancelled: Callable[[], bool],
+    ) -> Iterator[ChatEvent]:
+        self.streamed_secrets.append(secret)
+        yield from self._before
+        if self._gate is not None:
+            self.reached_gate.set()
+            self._gate.wait(timeout=10.0)
+        if cancelled():
+            yield Failure(code=FailureCode.CANCELLED, message="사용자가 턴을 취소했습니다")
+            return
+        yield from self._after
+
+
+def _client(tmp_path: Path, provider: _GatedProvider | None) -> TestClient:
+    """실제 컨테이너로 앱을 세운다. 비밀 파일은 임시 디렉터리에 둔다."""
+    factories = {} if provider is None else {ProviderKind.ANTHROPIC: lambda: provider}
+    app = build_http_app(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories=factories,
+        )
+    )
+    return TestClient(app)
+
+
+def _create_profile(client: TestClient, **overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {"kind": "anthropic", "label": "내 Claude", "secret": _API_KEY}
+    body.update(overrides)
+    response = client.post(f"{_ASSISTANT}/providers", json=body)
+    return {"status": response.status_code, "json": response.json()}
+
+
+def _start_session(client: TestClient) -> str:
+    response = client.post(f"{_ASSISTANT}/sessions", json={"document_ref": _DOCUMENT_REF})
+    assert response.status_code == 201, response.text
+    return response.json()["session_id"]
+
+
+def _read_frames(lines: Iterator[str], *, until_id: int) -> list[dict[str, Any]]:
+    """`id`가 `until_id`인 프레임까지 읽어 payload 목록으로 돌려준다."""
+    frames: list[dict[str, Any]] = []
+    current: int | None = None
+    for line in lines:
+        if line.startswith("id: "):
+            current = int(line.removeprefix("id: "))
+        elif line.startswith("data: "):
+            frames.append(json.loads(line.removeprefix("data: ")))
+            if current == until_id:
+                return frames
+    return frames
+
+
+# -- 공급자 프로파일 --------------------------------------------------------------------------
+
+
+def test_a_failed_probe_rejects_the_profile_with_only_an_enumerated_reason(
+    tmp_path: Path,
+) -> None:
+    provider = _GatedProvider(
+        probe_result=ProbeResult(ok=False, failure=ProbeFailure.AUTH, latency_ms=11)
+    )
+    client = _client(tmp_path, provider)
+
+    created = _create_profile(client)
+
+    assert created["status"] == 422
+    detail = created["json"]["detail"]
+    assert detail["code"] == "assistant.probe_failed"
+    assert detail["failure"] == ProbeFailure.AUTH.value
+    assert client.get(f"{_ASSISTANT}/providers").json()["profiles"] == []
+
+
+def test_a_probed_profile_is_stored_and_shows_only_the_key_tail(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+
+    created = _create_profile(client)
+
+    assert created["status"] == 201, created["json"]
+    assert created["json"]["secret_tail"] == _API_KEY[-4:]
+    assert created["json"]["active"] is True
+    assert created["json"]["model"] == "fake-model-1"
+    listed = client.get(f"{_ASSISTANT}/providers").json()
+    assert [item["secret_tail"] for item in listed["profiles"]] == [_API_KEY[-4:]]
+
+
+def test_an_uninstalled_provider_kind_is_visible_but_unusable(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+
+    created = _create_profile(client, kind="openai")
+
+    assert created["status"] == 422
+    assert created["json"]["detail"]["code"] == "assistant.provider_not_installed"
+    kinds = {item["kind"]: item for item in client.get(f"{_ASSISTANT}/providers").json()["kinds"]}
+    assert kinds["openai"]["installed"] is False
+    assert kinds["anthropic"]["installed"] is True
+
+
+def test_a_plain_http_base_url_is_rejected_before_the_provider_sees_the_key(
+    tmp_path: Path,
+) -> None:
+    provider = _GatedProvider()
+    client = _client(tmp_path, provider)
+
+    created = _create_profile(client, base_url="http://proxy.example.com")
+
+    assert created["status"] == 422
+    assert created["json"]["detail"]["code"] == "assistant.base_url_rejected"
+    assert provider.probed_secrets == []
+
+
+def test_activating_moves_the_active_flag_and_deleting_drops_the_key(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+    first = _create_profile(client)["json"]
+    second = _create_profile(client, label="두 번째")["json"]
+
+    activated = client.post(f"{_ASSISTANT}/providers/{second['profile_id']}/activate")
+
+    assert activated.status_code == 200
+    assert activated.json()["active"] is True
+    assert client.delete(f"{_ASSISTANT}/providers/{second['profile_id']}").status_code == 204
+    remaining = client.get(f"{_ASSISTANT}/providers").json()["profiles"]
+    assert [item["profile_id"] for item in remaining] == [first["profile_id"]]
+    assert remaining[0]["active"] is True
+
+
+def test_testing_a_profile_returns_the_probe_result_as_a_value(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+    profile = _create_profile(client)["json"]
+
+    response = client.post(f"{_ASSISTANT}/providers/{profile['profile_id']}/test")
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert response.json()["latency_ms"] == 3
+
+
+def test_an_unknown_profile_is_a_404(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+
+    response = client.post(f"{_ASSISTANT}/providers/missing/activate")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "assistant.provider.not_found"
+
+
+# -- 세션과 턴 --------------------------------------------------------------------------------
+
+
+def test_a_session_needs_an_active_provider(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+
+    response = client.post(f"{_ASSISTANT}/sessions", json={"document_ref": _DOCUMENT_REF})
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "assistant.no_active_provider"
+
+
+def test_a_document_ref_naming_both_a_strategy_and_a_draft_is_rejected(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+    _create_profile(client)
+
+    response = client.post(
+        f"{_ASSISTANT}/sessions",
+        json={"document_ref": {"draft_id": "draft-1", "strategy_id": "strategy-1"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "assistant.document_ref_invalid"
+
+
+def test_a_turn_streams_its_events_in_order_and_the_stream_closes(tmp_path: Path) -> None:
+    gate = threading.Event()
+    provider = _GatedProvider(
+        before=[TextDelta(text="먼저")],
+        after=[TextDelta(text="나중"), Done(stop_reason="end_turn")],
+        gate=gate,
+    )
+    client = _client(tmp_path, provider)
+    _create_profile(client)
+    session_id = _start_session(client)
+
+    accepted = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "모멘텀 전략을 제안해 줘", "context": _CONTEXT},
+    )
+
+    assert accepted.status_code == 202, accepted.text
+    assert accepted.json()["accepted_sequence"] == -1
+    assert accepted.json()["status"] == TurnStatus.RUNNING.value
+    assert provider.reached_gate.wait(timeout=5.0)
+    with client.stream(
+        "GET", f"{_ASSISTANT}/sessions/{session_id}/events?after_sequence=-1"
+    ) as stream:
+        assert stream.status_code == 200
+        assert stream.headers["content-type"].startswith("text/event-stream")
+        lines = stream.iter_lines()
+        gate.set()
+        payloads = _read_frames(lines, until_id=2)
+    assert [item["event"]["type"] for item in payloads] == ["text_delta", "text_delta", "done"]
+    assert [item["sequence"] for item in payloads] == [0, 1, 2]
+    history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
+    assert [turn["status"] for turn in history["turns"]] == [TurnStatus.COMPLETED.value]
+    assert [message["role"] for message in history["messages"]] == ["user", "assistant"]
+    assert len(history["events"]) == 3
+
+
+def test_the_stream_resumes_after_the_last_event_id_the_client_applied(tmp_path: Path) -> None:
+    gate = threading.Event()
+    provider = _GatedProvider(
+        before=[TextDelta(text="먼저")],
+        after=[TextDelta(text="나중"), Done(stop_reason="end_turn")],
+        gate=gate,
+    )
+    client = _client(tmp_path, provider)
+    _create_profile(client)
+    session_id = _start_session(client)
+    client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "이어서", "context": _CONTEXT},
+    )
+    assert provider.reached_gate.wait(timeout=5.0)
+
+    with client.stream(
+        "GET",
+        f"{_ASSISTANT}/sessions/{session_id}/events",
+        headers={"Last-Event-ID": "0"},
+    ) as stream:
+        lines = stream.iter_lines()
+        gate.set()
+        payloads = _read_frames(lines, until_id=2)
+
+    # sequence 0은 헤더가 가리킨 지점이라 다시 오지 않는다. 쿼리(`after_sequence` 기본 -1)보다
+    # 헤더가 이긴다는 것이 이 단언의 핵심이다.
+    assert [item["sequence"] for item in payloads] == [1, 2]
+
+
+def test_a_second_turn_while_one_runs_is_refused_with_the_running_turn_id(
+    tmp_path: Path,
+) -> None:
+    gate = threading.Event()
+    provider = _GatedProvider(after=[Done(stop_reason="end_turn")], gate=gate)
+    client = _client(tmp_path, provider)
+    _create_profile(client)
+    session_id = _start_session(client)
+    first = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "첫 턴", "context": _CONTEXT},
+    ).json()
+    assert provider.reached_gate.wait(timeout=5.0)
+
+    second = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "둘째 턴", "context": _CONTEXT},
+    )
+
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "assistant.turn_in_progress"
+    assert second.json()["detail"]["turn_id"] == first["turn_id"]
+    gate.set()
+
+
+def test_opening_the_stream_without_a_running_turn_is_refused(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+    _create_profile(client)
+    session_id = _start_session(client)
+
+    response = client.get(f"{_ASSISTANT}/sessions/{session_id}/events")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "assistant.no_running_turn"
+
+
+def test_streaming_an_unknown_session_is_a_404(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+    _create_profile(client)
+
+    response = client.get(f"{_ASSISTANT}/sessions/missing/events")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "assistant.session.not_found"
+
+
+def test_cancelling_a_running_turn_records_the_cancellation(tmp_path: Path) -> None:
+    gate = threading.Event()
+    provider = _GatedProvider(after=[Done(stop_reason="end_turn")], gate=gate)
+    client = _client(tmp_path, provider)
+    _create_profile(client)
+    session_id = _start_session(client)
+    turn = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "취소할 턴", "context": _CONTEXT},
+    ).json()
+    assert provider.reached_gate.wait(timeout=5.0)
+
+    cancelled = client.post(f"{_ASSISTANT}/sessions/{session_id}/turns/{turn['turn_id']}/cancel")
+
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == TurnStatus.CANCELLED.value
+    gate.set()
+    history = _wait_for_terminal_turn(client, session_id)
+    assert history["turns"][0]["status"] == TurnStatus.CANCELLED.value
+    # 공급자도, 서비스도 취소를 알린다. 둘 다 이벤트로 남지만 턴 상태가 되는 것은 먼저
+    # 확정된 하나뿐이다(spec D3 Failure 우선순위). 개수가 아니라 사유가 계약이다.
+    codes = {item["event"]["code"] for item in history["events"]}
+    assert [item["event"]["type"] for item in history["events"]] != []
+    assert codes == {FailureCode.CANCELLED.value}
+
+
+def test_cancelling_a_turn_that_belongs_to_another_session_is_a_404(tmp_path: Path) -> None:
+    gate = threading.Event()
+    provider = _GatedProvider(after=[Done(stop_reason="end_turn")], gate=gate)
+    client = _client(tmp_path, provider)
+    _create_profile(client)
+    session_id = _start_session(client)
+    other_session_id = _start_session(client)
+    turn = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "턴", "context": _CONTEXT},
+    ).json()
+    assert provider.reached_gate.wait(timeout=5.0)
+
+    response = client.post(
+        f"{_ASSISTANT}/sessions/{other_session_id}/turns/{turn['turn_id']}/cancel"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "assistant.turn.not_found"
+    gate.set()
+
+
+def test_sessions_are_listed_for_one_document(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+    _create_profile(client)
+    session_id = _start_session(client)
+
+    listed = client.get(f"{_ASSISTANT}/sessions", params={"draft_id": "draft-1"})
+
+    assert [item["session_id"] for item in listed.json()] == [session_id]
+    assert client.get(f"{_ASSISTANT}/sessions", params={"draft_id": "other"}).json() == []
+
+
+# -- 비밀 누설 --------------------------------------------------------------------------------
+
+
+def test_no_response_body_or_log_line_carries_the_api_key(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """키 문자열이 응답·로그 어디에도 없어야 한다(spec D1/D2).
+
+    프로파일을 만들고 연결을 테스트하고 턴을 한 번 돌린 뒤, 그 사이 오간 모든 응답 본문과
+    캡처된 로그를 한 덩어리로 검사한다. 새 라우트가 키를 흘리면 여기서 걸린다.
+    """
+    caplog.set_level(logging.DEBUG)
+    provider = _GatedProvider(after=[Done(stop_reason="end_turn")])
+    client = _client(tmp_path, provider)
+    bodies: list[str] = []
+
+    bodies.append(client.post(f"{_ASSISTANT}/providers", json=_profile_body()).text)
+    profile_id = client.get(f"{_ASSISTANT}/providers").json()["profiles"][0]["profile_id"]
+    bodies.append(client.get(f"{_ASSISTANT}/providers").text)
+    bodies.append(client.post(f"{_ASSISTANT}/providers/{profile_id}/test").text)
+    session_id = _start_session(client)
+    bodies.append(
+        client.post(
+            f"{_ASSISTANT}/sessions/{session_id}/turns",
+            json={"text": "키가 새는지 본다", "context": _CONTEXT},
+        ).text
+    )
+    _wait_for_terminal_turn(client, session_id)
+    bodies.append(client.get(f"{_ASSISTANT}/sessions/{session_id}").text)
+    bodies.append(json.dumps(client.get("/openapi.json").json(), ensure_ascii=False))
+
+    # 가짜 공급자는 키를 실제로 받았다 — 즉 "아무 데도 없다"가 "아무 데도 안 갔다"의 결과가 아니다.
+    assert provider.probed_secrets == [_API_KEY, _API_KEY]
+    assert provider.streamed_secrets == [_API_KEY]
+    assert all(_API_KEY not in body for body in bodies)
+    assert _API_KEY not in caplog.text
+
+
+def test_the_openapi_contract_marks_the_provider_secret_write_only(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+
+    assert schemas["CreateProviderProfileRequest"]["properties"]["secret"]["writeOnly"] is True
+    assert "secret" not in schemas["ProviderProfileView"]["properties"]
+    assert set(schemas["ProviderProfileView"]["required"]) >= {"profile_id", "secret_tail"}
+
+
+def _profile_body() -> dict[str, Any]:
+    return {"kind": "anthropic", "label": "내 Claude", "secret": _API_KEY}
+
+
+def _wait_for_terminal_turn(client: TestClient, session_id: str) -> dict[str, Any]:
+    """턴이 종료 상태로 기록될 때까지 이력을 다시 읽는다.
+
+    턴은 진짜 스레드에서 돌고 종료 기록은 스트림이 끝난 뒤에 남는다. 고정된 `sleep`으로
+    맞추면 느린 기계에서 깨지므로 짧은 폴링으로 기다린다.
+    """
+    deadline = datetime.now(UTC).timestamp() + 10.0
+    while datetime.now(UTC).timestamp() < deadline:
+        history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
+        statuses = {turn["status"] for turn in history["turns"]}
+        if statuses and TurnStatus.RUNNING.value not in statuses:
+            return history
+    raise AssertionError(f"turn never reached a terminal state — session_id={session_id}")

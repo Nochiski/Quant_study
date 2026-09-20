@@ -3282,6 +3282,47 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     expect(view.state.doc.toString()).toBe(before);
   });
 
+  it("세션 생성 왕복 뒤에 시작되는 턴도 그 순간 편집기 텍스트를 싣는다", async () => {
+    let release: (() => void) | null = null;
+    const created = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(`${API}/api/v1/assistant/sessions`, async ({ request }) => {
+        const body = (await request.json()) as { document_ref: unknown };
+        // 세션이 만들어지는 동안 사용자가 계속 타자를 친다.
+        await created;
+        const row = {
+          session_id: "s-1",
+          title: "새 대화",
+          provider_profile_id: "p-1",
+          document_ref: body.document_ref,
+          created_at: "2026-09-20T00:00:00Z",
+        };
+        assistantSessions = [row];
+        return HttpResponse.json(row, { status: 201 });
+      }),
+    );
+
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const view = await editor();
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+    const input = await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    await user.type(input, "전략을 제안해 줘");
+    await user.keyboard("{Enter}");
+
+    const typedAfterSend =
+      'schema_version: "1.1"\ntitle: "보낸 뒤에 친 제목"\n';
+    replaceText(view, typedAfterSend);
+    act(() => release?.());
+
+    await waitFor(() => expect(assistantTurns).toHaveLength(1));
+    expect(assistantTurns[0].context.source_text).toBe(typedAfterSend);
+  });
+
   it("기다리는 동안 문서를 고쳤으면 확인을 거쳐 덮어쓴다", async () => {
     const user = userEvent.setup();
     mount("/research/strategies/new");

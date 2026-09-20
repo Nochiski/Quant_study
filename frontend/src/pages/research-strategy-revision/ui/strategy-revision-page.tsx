@@ -261,13 +261,16 @@ export const StrategyRevisionPage = () => {
   // 함수는 그대로 두고도 늘 지금 화면의 값을 읽는다(`.claude/rules/frontend-react-effects.md`).
   const assistantContext = useCommittedRef(
     useMemo(
-      () => () => assistantTurnContext(document, runSettings.requestOptions),
+      () => (liveSource: string | null) =>
+        assistantTurnContext(document, runSettings.requestOptions, liveSource),
       [document, runSettings.requestOptions],
     ),
   );
+  // 턴은 세션 생성 왕복 뒤에 시작될 수 있다. 텍스트는 그 순간 편집기에서 직접 읽는다.
+  const readProposalSource = proposalApply.readSource;
   const readAssistantContext = useCallback(
-    () => assistantContext.current(),
-    [assistantContext],
+    () => assistantContext.current(readProposalSource()),
+    [assistantContext, readProposalSource],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
   // "적용 후 백테스트"는 적용 → 검증 → 실행을 한 동작으로 잇는다(WORKFLOW B-04).
@@ -454,6 +457,12 @@ export const StrategyRevisionPage = () => {
         }}
         notice={
           <>
+            {/* 제안 적용 결과는 문서 알림 줄에 둔다 — 사이드바 레일에는 사이드바가 소유한
+                라이브 영역 하나만 있어야 한다(B-03 리뷰). */}
+            <ProposalApplyFeedback
+              apply={proposalApply}
+              chain={proposalBacktest}
+            />
             <UpgradeBanner
               upgrade={documentUpgrade}
               backtestRejected={backtestRejectedForUpgrade}
@@ -499,10 +508,6 @@ export const StrategyRevisionPage = () => {
         }
         assistant={
           <>
-            <ProposalApplyFeedback
-              apply={proposalApply}
-              chain={proposalBacktest}
-            />
             <AssistStrategySidebar
               documentRef={assistantDocumentRefValue}
               readContext={readAssistantContext}

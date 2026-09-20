@@ -27,16 +27,27 @@ export const assistantDocumentRef = (
  * 진단은 backend가 완성한 문장을 그대로 줄로 옮긴다(frontend가 다시 조립·번역하지 않는다, SoT 규칙).
  * 텍스트와 같은 버전의 진단만 담는다 — `currentDiagnostics`가 뒤처진 parse의 결과를 버린다.
  * `environment`는 실행 설정(기간·수수료 등)이다. 전략 언어 밖의 값이라 문서 텍스트와 따로 싣는다.
+ *
+ * `liveSource`는 편집기의 지금 텍스트다. 턴은 세션 생성 왕복 뒤에 시작될 수 있어 reducer 상태보다
+ * 편집기가 앞서 있을 수 있으므로, 주어지면 그것이 정본이다. 그 경우 진단은 다른 텍스트의 결과이므로
+ * 싣지 않는다 — 틀린 진단을 보내느니 없는 편이 낫다.
  */
 export const assistantTurnContext = (
   state: DocumentState,
   environment: Record<string, unknown> | null = null,
-): TurnContextPayload => ({
-  source_text: state.source,
-  source_format: state.format,
-  diagnostics: currentDiagnostics(state).map(
-    (diagnostic) =>
-      `[${diagnostic.severity}] ${diagnostic.pointer === "" ? "/" : diagnostic.pointer}: ${diagnostic.message}`,
-  ),
-  environment,
-});
+  liveSource: string | null = null,
+): TurnContextPayload => {
+  const source = liveSource ?? state.source;
+  return {
+    source_text: source,
+    source_format: state.format,
+    diagnostics:
+      source === state.source
+        ? currentDiagnostics(state).map(
+            (diagnostic) =>
+              `[${diagnostic.severity}] ${diagnostic.pointer === "" ? "/" : diagnostic.pointer}: ${diagnostic.message}`,
+          )
+        : [],
+    environment,
+  };
+};

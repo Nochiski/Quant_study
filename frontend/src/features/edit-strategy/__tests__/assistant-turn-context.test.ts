@@ -74,6 +74,43 @@ describe("assistantTurnContext", () => {
     });
   });
 
+  it("편집기가 reducer보다 앞서 있으면 편집기 텍스트를 싣고 진단은 비운다", () => {
+    const state = parsed(initialDocumentState("yaml", SOURCE));
+    const live = 'schema_version: "1.1"\ntitle: "방금 친 제목"\n';
+    const withDiagnostics = documentReducer(state, {
+      type: "compiled",
+      version: state.sourceVersion,
+      outcome: {
+        spec: null,
+        canonicalJson: null,
+        specHash: null,
+        schemaVersion: null,
+        sourceHash: "h",
+        diagnostics: [
+          {
+            code: "structure.missing_key",
+            kind: "structural",
+            severity: "error",
+            pointer: "/data",
+            message: "data 섹션이 필요합니다.",
+            range: null,
+          },
+        ],
+      },
+    });
+
+    expect(assistantTurnContext(withDiagnostics, null, live)).toEqual({
+      source_text: live,
+      source_format: "yaml",
+      diagnostics: [],
+      environment: null,
+    });
+    // 같은 텍스트면 진단을 그대로 싣는다.
+    expect(
+      assistantTurnContext(withDiagnostics, null, SOURCE).diagnostics,
+    ).toEqual(["[error] /data: data 섹션이 필요합니다."]);
+  });
+
   it("텍스트가 진단보다 앞서 있으면 진단을 싣지 않는다", () => {
     const state = parsed(initialDocumentState("yaml", SOURCE));
     const typing = documentReducer(state, {

@@ -59,6 +59,11 @@ export type AssistantProposalApply = {
   /** 편집기가 준비됐고 IME 조합 중이 아니다. 사이드바의 "적용" 버튼 게이트. */
   canApply: boolean;
   onEditorReady: (editor: CodeEditorHandle | null) => void;
+  /**
+   * 편집기의 지금 텍스트(없으면 null). 턴을 시작하는 쪽이 reducer 상태 대신 이 값을 싣는다 —
+   * 세션 생성 왕복 뒤에 불려도 그 순간 사용자가 보는 텍스트여야 하기 때문이다.
+   */
+  readSource: () => string | null;
   /** 기준 텍스트가 현재 텍스트와 같으면 즉시 적용하고, 다르면 확인 상태로 둔다. */
   apply: (proposal: AssistantProposal) => void;
   /** 적용하지 않고 현재 문서와의 차이만 보여 준다. 거기서 바로 적용할 수도 있다. */
@@ -103,6 +108,11 @@ export const useApplyAssistantProposal = (
     editor.current = next;
     setEditorReady(next !== null);
   }, []);
+
+  const readSource = useCallback(
+    (): string | null => editor.current?.getText() ?? null,
+    [],
+  );
 
   const setStatus = useCallback(
     (value: ProposalApplyStatus): void =>
@@ -202,6 +212,7 @@ export const useApplyAssistantProposal = (
     status,
     canApply: editorReady && !composing && format === "yaml",
     onEditorReady,
+    readSource,
     apply,
     preview,
     confirm,

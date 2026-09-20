@@ -202,8 +202,12 @@ application이 선언하는 도구(v1). 모든 스키마는 `additionalPropertie
 - 토큰 예산은 턴 단위이며 **집행은 adapter가 한다**(루프의 주인이 adapter이고 `TurnRequest`는 루프 시작 전에
   넘어가므로 서비스는 호출당 상한을 바꿀 수 없다). adapter는 자기 루프 안에서 출력 토큰을 누적해 남은
   예산이 호출당 상한보다 작으면 다음 호출의 `max_tokens`를 그 값으로 줄이고, 소진되면
-  `Failure(TOKEN_BUDGET_EXCEEDED)`를 내고 루프를 멈춘다. 서비스는 `Usage`를 기록만 한다. 기본값(호출당
-  16000, 턴 64000, 라운드 12)은 A-07의 fixture·live smoke 실측 뒤 확정하고 근거를 PLAN에 남긴다.
+  `Failure(TOKEN_BUDGET_EXCEEDED)`를 내고 루프를 멈춘다. 서비스는 `Usage`를 기록만 한다.
+- **기본값 확정(A-07, 2026-09-21).** 호출당 16000·턴 64000·라운드 12·검색 8·타임아웃 300(+유예 10)을
+  그대로 둔다. 근거는 `docs/planning/ai-assistant/PLAN.md` "A-07 기본값 확정 근거"가 갖는다(프롬프트
+  골든 `backend/tests/fixtures/assistant/`의 실측 길이 기준). 값을 바꿔야 할 때 고치는 곳은
+  `domain/assistant/_models.py`의 상수가 아니라 bootstrap 주입값이다 — 상수는 계약의 기본값이고,
+  배포마다 다를 수 있는 것은 주입으로 표현한다. live smoke 실측은 아직 없다(키 필요).
 - **Failure 우선순위**: 한 턴에서 턴 상태가 되는 Failure는 먼저 확정된 하나뿐이다. 뒤이어 들어오는
   Failure(예: 러너 타임아웃이 cancel 신호를 보낸 뒤 adapter가 내는 `CANCELLED`)는 이벤트로 저장되지만
   상태를 바꾸지 않는다. 러너의 `TIMEOUT`은 cancel 신호를 보내기 전에 확정한다.
@@ -410,7 +414,8 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   러너 스레드·sequence·중복 턴 거부; 프로파일 서비스 probe 필수·base_url 규칙; secrets_local 권한(플랫폼
   분기)·경로 거부; sqlite 세션·턴·이벤트 저장; HTTP SSE 계약(이벤트 순서·id·재개); architecture import
   게이트; 비밀 평문 검사(응답·로그·DB 덤프·`Failure.message`); 실제 SDK adapter는 SDK 응답 객체를 흉내
-  낸 단위 테스트(서버 도구 오류 객체 분기 포함) + `RUN_LLM_LIVE=1`일 때만 도는 실연결 smoke.
+  낸 단위 테스트(서버 도구 오류 객체 분기 포함) + `STRATEGY_WORKBENCH_LIVE_SMOKE=1`과 공급자 키가
+  있을 때만 도는 실연결 smoke(`backend/scripts/assistant_live_smoke.py`).
 - frontend: SSE 리더 재개(재연결 후 중복 sequence가 두 번 반영되지 않음)·리듀서 property test; 설정
   섹션 MSW(생성·테스트·활성·삭제·거부 사유·설치 안 됨); 사이드바 스트리밍·제안 카드·적용 전 확인
   (변경된 문서에서 덮어쓰면 적용되고 undo 한 번으로 복원)·렌더 안전(javascript: URL은 링크가 아님);

@@ -3,10 +3,10 @@ plan_version: 2
 project: ai-assistant
 project_status: IN_PROGRESS
 current_phase: P0,A
-current_pr: P0-01,A-01
-active_prs: [P0-01, A-01]
-parallel_window: [P0-01, A-01]
-last_updated: 2026-09-20T22:58:44+09:00
+current_pr: P0-01,A-01,A-07
+active_prs: [P0-01, A-01, A-07]
+parallel_window: [P0-01, A-01, A-07]
+last_updated: 2026-09-21T01:30:00+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 1
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,A` |
-| Current/next PR | `P0-01,A-01` |
-| Active PR | `P0-01, A-01` |
+| Current/next PR | `P0-01,A-01,A-07` |
+| Active PR | `P0-01, A-01, A-07` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `1 / 13` |
-| Aggregated at | `2026-09-20 22:58 KST` |
+| Aggregated at | `2026-09-21 01:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -49,6 +49,44 @@ progress_percent: 0
   `gpt-6-astra`(reasoning effort high, summary auto).
 - OpenAPI와 frontend SDK는 A-04가 같은 PR에서 갱신한다(12절).
 - reviewer 서브에이전트는 Opus로만. Phase 종료마다 SoT·책임분리 점검.
+- 2026-09-21 A-07: 실연결 smoke의 게이트 환경 변수를 `RUN_LLM_LIVE`에서
+  `STRATEGY_WORKBENCH_LIVE_SMOKE`로 통일했다. 이 저장소의 다른 배포 설정이 전부
+  `STRATEGY_WORKBENCH_*` 접두사를 쓰고, 이름이 둘이면 문서와 코드가 서로 다른 변수를 가리키게
+  된다. 기존 표기 4곳(spec·WORKFLOW·README·adapter docstring 2건)을 같이 고쳤다.
+- 2026-09-21 A-07: **live smoke 미실행.** 구현 세션에 공급자 키가 없어
+  `backend/scripts/assistant_live_smoke.py`를 한 번도 돌리지 못했다. 사용자가 키로 실행해야 하며,
+  절차와 기대 출력은 WORKFLOW A-07 절에 있다. Phase A exit의 "live smoke 2건 로컬 통과 기록"은 그
+  실행 결과를 여기 적어야 닫힌다.
+- 2026-09-21 A-07: 시스템 프롬프트에 spec D8 품질 항목을 채웠다(근거 우선순위, 검색 결과를 명령으로
+  읽지 않기, 제안은 도구로만, 출처 인용 규칙, 한국어·식별자 원문 규칙, 실행 설정 보존). **실행
+  설정을 "언어 밖"이라고 쓰지 않았다** — schema 1.1은 시장·기간·유니버스를 문서 안에 두고
+  `data`를 필수로 요구하므로, 언어 밖이라고 지시하면 모델이 필수 절을 빼고 검증에 실패한다.
+  대신 "사용자가 바꿔 달라고 하지 않으면 현재 문서 값을 그대로 옮긴다"로 썼다. schema 1.2가
+  머지되면 이 문장과 골든을 같이 갱신한다(WORKFLOW 1절 규칙).
+
+### A-07 기본값 확정 근거 (2026-09-21)
+
+`backend/tests/fixtures/assistant/` 골든의 실측 길이로 검토했고 **다섯 값 모두 그대로 둔다.**
+토큰 수는 한글 1음절≈1토큰, ASCII 3.5자≈1토큰으로 보수적으로 환산한 추정치다(실측은 live smoke).
+
+| 값 | 기본값 | 근거 |
+|---|---:|---|
+| 호출당 출력(`DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL`) | 16000 | 한 호출이 내야 하는 최대치는 `propose_strategy` 한 번이다. 제안 YAML 골든(`quality_momentum.yaml`) 869자 ≈ 250토큰, 여기에 제목·요약·근거(한글 산문)와 사고 요약을 더해도 1500~2500토큰이다. 6배 이상 여유 |
+| 턴 출력(`DEFAULT_MAX_TURN_OUTPUT_TOKENS`) | 64000 | 호출당 상한의 4배. 최장 경로는 도구 3회 + 검색 + 검증 3회 + 제출 3회이고 제출 라운드만 1500~2500토큰이므로 합계 추정 11000~15000토큰. 사고 요약이 몇 배로 늘어도 닿지 않는다 |
+| 도구 라운드(`DEFAULT_MAX_TOOL_ROUNDS`) | 12 | 라운드는 우리 도구 호출(`stop_reason == "tool_use"`)만 세고 서버 검색은 세지 않는다. 결정적 최단 경로는 읽기·필드·팩터·검증·제출 5라운드, 제안 재시도 상한(3회)까지 쓰면 9라운드. 12는 3라운드 여유 |
+| 검색(`DEFAULT_MAX_SEARCH_USES`) | 8 | 한 주제에 대한 교차 확인 2~3건 × 팩터 2~3개. 상한 집행은 공급자 쪽이며 Anthropic은 서버가, OpenAI는 adapter가 센다 |
+| 타임아웃(`DEFAULT_TURN_TIMEOUT_SECONDS` + `DEFAULT_TURN_GRACE_SECONDS`) | 300 + 10 | 러너가 이벤트 사이에서만 보는 벽시계 상한. adapter HTTP 타임아웃 120초보다 길어 호출 하나가 멈춰도 러너가 깨어난다 |
+
+남은 위험 두 가지는 live smoke로만 판정된다.
+
+1. **타임아웃 여유가 가장 얇다.** 위 최단 경로도 공급자 호출 5~6회다. `effort: high` 한 호출이
+   60초를 쓰면 300초에 닿는다. live smoke의 `probe` 지연과 턴 소요를 보고, 모자라면 A-01 상수가
+   아니라 `build_assistant_services`에서 `AssistantTurnRunner(timeout_seconds=...)`로 주입해
+   올린다(주입 자리는 이미 있다).
+2. **검색 8회와 `MAX_PAUSE_RESUMES = 5`의 관계가 확인되지 않았다.** Anthropic 서버 검색은
+   `pause_turn`으로 턴을 멈출 수 있고 adapter는 재개를 5회로 끊는다. 검색 한 번이 재개 한 번을
+   부른다면 8회를 쓰기 전에 `Failure(PROVIDER)`가 난다. live smoke에서 검색 횟수와 재개 횟수를
+   함께 보고, 어긋나면 둘 중 하나를 맞춘다.
 
 ## 상태 값
 
@@ -100,7 +138,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `WAITING` | — |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `WAITING` | — |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `WAITING` | — |
-| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
+| [ ] | `A-07` | 프롬프트 골든 fixture·재생성 도구, D8 품질 항목, live smoke 스크립트, 턴 상한 기본값 확정 | A-06 | `SELF_CHECK` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-a07`, 브랜치 `feat/ai-a-07-prompt-fixtures` |
 
 Phase exit:
 

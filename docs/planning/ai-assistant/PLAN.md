@@ -5,7 +5,7 @@ project_status: IN_PROGRESS
 current_phase: P0,A
 current_pr: P0-01,A-01
 active_prs: [P0-01, A-01]
-parallel_window: [P0-01, A-01]
+parallel_window: [P0-01, A-01, A-02, A-03]
 last_updated: 2026-09-20T22:58:44+09:00
 planned_prs: 13
 merged_prs: 0
@@ -94,9 +94,9 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `IN_PROGRESS` | 구현자 `impl-ai-a01`, 워크트리 `wt-ai-a01`, 브랜치 `feat/ai-a-01-domain-ports` |
-| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `WAITING` | — |
-| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `WAITING` | — |
+| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `IN_REVIEW` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `a45efc9` · `review_ai_a_01` 진행 중 · 게이트: pytest 1550(단독 292)·ruff·pyright |
+| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `IN_REVIEW` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `c8b17b1` · `review_ai_a_02` 진행 중 |
+| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `IN_PROGRESS` | 구현자 `impl-ai-a03`, 워크트리 `wt-ai-a03`, 브랜치 `feat/ai-a-03-storage-adapters` |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `WAITING` | — |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `WAITING` | — |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `WAITING` | — |
@@ -140,6 +140,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-20 — A-01(#169)·A-02(#170) 스택 PR 생성, 리뷰 배정. A-03 착수.
 - 2026-09-20 — P0-01 4차 APPROVE. 잔여 P2(`max_tool_rounds` 집행을 adapter로)·D9 값/집행 분리 반영. CI 통과 후 머지 대상.
 - 2026-09-20 — P0-01 3차 리뷰 반영: 토큰 예산 집행을 adapter로(서비스는 Usage 기록만), Failure 우선순위(첫
   Failure만 턴 상태), 409는 backstop·프론트는 이력 복구·`sseMaxRetryAttempts`, OpenAI 검색 상한은 도구 목록 제거,

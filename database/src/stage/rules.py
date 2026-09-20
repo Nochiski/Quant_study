@@ -12,6 +12,7 @@ from . import (
     rules_kis,
     rules_kiwoom,
     rules_krx,
+    rules_wics,
     rules_wise,
 )
 from .model import TableRule
@@ -21,6 +22,6 @@ LEDGER_FILES: dict[str, str] = {"krx": "krx.db", "kiwoom": "kiwoom.db", "kis": "
                                 "dart": "dart.db", "wise": "wisereport.db",
                                 "wiseindex": "wiseindex.db"}   # WICS 주간 스냅샷(2026-09-20, 플랜 wics-weekly T1)
 
-_MODULES = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise,
+_MODULES = (rules_krx, rules_kiwoom, rules_kis, rules_dart, rules_dart_events, rules_wise, rules_wics,
             rules_doc)
 RULES: dict[str, TableRule] = {t.name: t for m in _MODULES for t in m.TABLES}

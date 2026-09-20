@@ -426,9 +426,13 @@ def _load_blob_source(con: duckdb.DuckDBPyConnection, rule: TableRule, tmp_dir: 
     if bs is None:
         raise ValueError(f"_load_blob_source called without blob_source: {rule.name}")
     parser = parsers.PARSERS[bs.parser]
-    eps = ", ".join(f"'{e}'" for e in bs.eps)
-    rows = con.execute(f"SELECT cmp_cd, ep, pkey, fetched_date, body, fetched_at "
-                       f"FROM {_q(bs.db)}.{_q(bs.table)} WHERE ep IN ({eps})").fetchall()
+    src_ref = f"{_q(bs.db)}.{_q(bs.table)}"
+    if bs.select_sql is not None:                                   # ws_raw 모양이 아닌 blob 원장(wics_raw)
+        sql = bs.select_sql.replace("{src}", src_ref)
+    else:
+        eps = ", ".join(f"'{e}'" for e in bs.eps)
+        sql = f"SELECT cmp_cd, ep, pkey, fetched_date, body, fetched_at FROM {src_ref} WHERE ep IN ({eps})"
+    rows = con.execute(sql).fetchall()
     blobs = [parsers.RawBlob(str(r[0]), str(r[1]), str(r[2]), str(r[3]),
                              bytes(r[4]) if r[4] is not None else b"", str(r[5])) for r in rows]
     res = parser(blobs)

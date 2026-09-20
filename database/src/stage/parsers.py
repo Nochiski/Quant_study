@@ -521,7 +521,57 @@ def parse_analyst_broker(blobs: Iterable[RawBlob]) -> ParseResult:
         "n_value_mismatch": n_mismatch})
 
 
+WICS_COLUMNS: tuple[str, ...] = (
+    "req_sec_cd", "dt", "cmp_cd", "cmp_kor", "idx_cd", "idx_nm", "sec_cd", "sec_nm", "mkt_val",
+    "all_mkt_val", "wgt", "s_wgt", "apt_shr_cnt", "top60", "cal_wgt", "fetched_at",
+)
+_WICS_FIELDS: tuple[tuple[str, str], ...] = (
+    ("cmp_cd", "CMP_CD"), ("cmp_kor", "CMP_KOR"), ("idx_cd", "IDX_CD"), ("idx_nm", "IDX_NM_KOR"),
+    ("sec_cd", "SEC_CD"), ("sec_nm", "SEC_NM_KOR"), ("mkt_val", "MKT_VAL"), ("all_mkt_val", "ALL_MKT_VAL"),
+    ("wgt", "WGT"), ("s_wgt", "S_WGT"), ("apt_shr_cnt", "APT_SHR_CNT"), ("top60", "TOP60"), ("cal_wgt", "CAL_WGT"),
+)
+
+
+def parse_wics_components(blobs: Iterable[RawBlob]) -> ParseResult:
+    """wiseindex `GetIndexComponets` 원문(`wics_raw`, RawBlob 별칭: cmp_cd=요청 sec_cd · pkey=dt) → 종목 행.
+
+    한 blob 의 `list` 가 그대로 행이 된다(WICS_PROBE §2·§8). `info.CNT` 와 `list` 길이가 다르면
+    `n_value_mismatch` 로 세어 G8 이 잡는다. 빈 list(휴장일·미공표)는 0행 — 원장 `n_rows=0` 판본은
+    `select_sql` 의 `n_rows > 0` 조건으로 애초에 오지 않는다."""
+    n_blobs = n_empty = n_failed = n_mismatch = 0
+    out: list[dict[str, str | None]] = []
+    for b in blobs:
+        n_blobs += 1
+        try:
+            top, rows = _json_rows(b.body, "list")
+        except Exception:  # noqa: BLE001  # reason: blob 손상은 도메인 실패 → parse_failed 계상
+            top, rows = None, None
+        if rows is None or top is None:
+            n_failed += 1
+            continue
+        if not rows:
+            n_empty += 1
+            continue
+        info = top.get("info") if isinstance(top.get("info"), dict) else {}
+        cnt = info.get("CNT") if isinstance(info, dict) else None
+        if cnt is not None and int(str(cnt)) != len(rows):
+            n_mismatch += 1
+        for r in rows:
+            if not isinstance(r, dict):
+                n_mismatch += 1
+                continue
+            row: dict[str, str | None] = {"req_sec_cd": b.cmp_cd, "dt": b.pkey, "fetched_at": b.fetched_at}
+            for name, src in _WICS_FIELDS:
+                v = r.get(src)
+                row[name] = None if v is None else str(v)
+            out.append(row)
+    return ParseResult(out, WICS_COLUMNS, {
+        "n_blobs": n_blobs, "n_empty_blobs": n_empty, "n_rows_emitted": len(out),
+        "n_parse_failed": n_failed, "n_value_mismatch": n_mismatch})
+
+
 PARSERS.update({
+    "parse_wics_components": parse_wics_components,
     "parse_analyst_broker": parse_analyst_broker,
     "parse_consensus_annual": parse_consensus_annual,
     "parse_consensus_quarterly": parse_consensus_quarterly,

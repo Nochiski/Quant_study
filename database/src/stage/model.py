@@ -128,6 +128,9 @@ class BlobSource:
     parser: str                                  # parsers.PARSERS 키
     required_columns: tuple[str, ...] = ("cmp_cd", "ep", "pkey", "fetched_date", "body",
                                          "fetched_at")
+    # ws_raw 모양이 아닌 blob 원장(`wics_raw` 등)은 RawBlob 6컬럼 별칭을 내는 SELECT 를 직접 준다.
+    # `{src}` 가 `"db"."table"` 로 치환된다. None 이면 ws_raw 계약(위 required_columns + ep IN eps).
+    select_sql: str | None = None
 
 
 @dataclass(frozen=True)

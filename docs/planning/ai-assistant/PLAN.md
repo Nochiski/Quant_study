@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: SELF_CHECK
+project_status: IN_PROGRESS
 current_phase: P0,A,B
-current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04
-active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
-parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
-last_updated: 2026-09-21T03:40:23+09:00
+current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05
+active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
+parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
+last_updated: 2026-09-21T03:42:15+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 7
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P0,A,B` |
-| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04` |
-| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04` |
+| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05` |
+| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `7 / 13` |
-| Aggregated at | `2026-09-21 03:40 KST` |
+| Aggregated at | `2026-09-21 03:42 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -63,7 +63,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `APPROVED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 0 | `SELF_CHECK` |
-| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `IN_REVIEW` |
+| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `IN_PROGRESS` |
 | **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
@@ -116,7 +116,7 @@ Phase exit:
 | [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `APPROVED` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋) · `review_ai_b_02` 3차 APPROVE(StrictMode probe 포함, e2e 19/19) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `IN_REVIEW` | 구현 완료(로컬 `df7b25f4`, B-02 최종 `cb852032` 위 7커밋, vitest 724, 훅 API 적응: exhausted 재연결·rejected 정착·droppedFrames 경고, vitest 714·e2e 19/19) · `review_ai_b_03` 1차 REQUEST_CHANGES(P1 1: 이력보다 202가 먼저 오면 turns 순서 축이 갈라져 질문↔답 짝 밀림 — 리듀서 정렬을 B-03에서 수정, P2 4, P3 6) 반영(턴 배열 서버 생성 순서 불변, 409 질문 복원, 출처 호스트, aria-live 범위, 초점 복귀) → 2차 재검토 중 · 후속 backlog: `ChatMessageView.turn_id` |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `IN_REVIEW` | 구현 완료(로컬 `e2a49935`, B-03 `64c5d6f2` 위 7커밋: 슬롯·적용 훅·페이지 배선·적용 후 백테스트·오버레이·spec 정정·사이드바 실장착 + App 통합 테스트 2건, vitest 753·e2e 19/19·기준선 4장 재생성) · `review_ai_b_04` 로컬 ref 검토 중(e2e 제외) · B-03 `df7b25f4` 위 replay 예정 · landmark 중복은 B-03 후속(section) |
-| [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `WAITING` | — |
+| [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `IN_PROGRESS` | 구현자 `impl-ai-b05`, 워크트리 `wt-ai-b05`, 브랜치 `feat/ai-b-05-e2e-docs`(임시 base B-04 로컬 `8ee4808a`; 가짜 공급자 env 배선으로 e2e, A-07 시나리오는 읽기 참조) |
 
 Phase exit:
 

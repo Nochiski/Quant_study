@@ -86,6 +86,19 @@ describe("resolveDiagnosticDestination", () => {
     expect(destination("diff", "/data/start")).toBe("source");
   });
 
+  it("sends the Graph tab to the source before the runtime schema arrives", () => {
+    // schema가 없으면 Form 투영도 null이고 그래프 편집 표면도 그려지지 않는다.
+    expect(
+      resolveDiagnosticDestination({
+        view: "graph",
+        sourceView: "yaml",
+        pointer: "/factors/0/graph/nodes/1",
+        form: null,
+        tree: TREE,
+      }),
+    ).toBe("source");
+  });
+
   it("sends a whole-document diagnostic back to the source tab", () => {
     expect(destination("graph", "")).toBe("source");
     expect(destination("form", "")).toBe("source");

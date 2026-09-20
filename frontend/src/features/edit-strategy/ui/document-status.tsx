@@ -1,6 +1,7 @@
 import { t } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
 import { isSpecStale, type DocumentState } from "../model/document-state";
+import "./document-status.css";
 
 const PHASE_TONE = {
   editing: "neutral",
@@ -18,7 +19,11 @@ const PHASE_TONE = {
  * 보인다(WORKFLOW P1-01) — Graph·Form에서 편집 결과를 보려고 YAML 탭으로 돌아갈 일이 없다.
  */
 export const DocumentStatus = ({ state }: { state: DocumentState }) => (
-  <div role="status" aria-label={t("document.status")}>
+  <div
+    className="document-status"
+    role="status"
+    aria-label={t("document.status")}
+  >
     <Badge tone={PHASE_TONE[state.phase]}>
       {t(`document.phase.${state.phase}`)}
     </Badge>

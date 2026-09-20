@@ -15,6 +15,7 @@ import {
   type DocumentState,
 } from "../model/document-state";
 import { deduplicateDiagnostics } from "../model/problem-list";
+import "./source-editor.css";
 
 type SourceEditorProps = {
   state: DocumentState;

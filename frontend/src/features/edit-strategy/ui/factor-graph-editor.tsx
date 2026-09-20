@@ -16,6 +16,7 @@ import {
 } from "../model/graph-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
 import { factorGraphPointer } from "../model/use-execution-plans";
+import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import {
   FormFieldsEditor,
@@ -59,6 +60,7 @@ export const FactorGraphEditor = ({
   factorSelect,
   onOpenForm,
 }: FactorGraphEditorProps) => {
+  const container = useRevealSelection<HTMLElement>(selectedPointer);
   const factors = authoredFactors(tree);
   const activeFactorId = factors[factorIndex]?.factorId ?? `#${factorIndex + 1}`;
   const factorPointer = `/factors/${factorIndex}`;
@@ -159,7 +161,11 @@ export const FactorGraphEditor = ({
   }
 
   return (
-    <section className="factor-graph__editor" aria-label={t("graph.editTitle")}>
+    <section
+      ref={container}
+      className="factor-graph__editor"
+      aria-label={t("graph.editTitle")}
+    >
       <header className="factor-graph__editor-toolbar">
         <div>
           <strong>{t("graph.editTitle")}</strong>

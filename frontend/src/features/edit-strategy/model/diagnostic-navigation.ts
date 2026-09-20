@@ -87,7 +87,13 @@ export const resolveDiagnosticDestination = ({
   if (pointer === "") return "source";
   if (view === sourceView) return "source";
   if (view === "form") return formCoversPointer(form, pointer) ? "current-view" : "source";
-  if (view === "graph") return graphCoversPointer(tree, pointer) ? "current-view" : "source";
+  // runtime schema가 아직 없으면 그래프 편집 표면 자체가 렌더되지 않는다
+  // (`factor-graph-panel.tsx`의 `editing.schema === null → null`). 그 창에서는 그릴 카드가 없으므로
+  // 원문 탭으로 보낸다(P1-01 리뷰 P2-2 변형). `form`은 schema가 있을 때만 null이 아니다.
+  if (view === "graph")
+    return form !== null && graphCoversPointer(tree, pointer)
+      ? "current-view"
+      : "source";
   // JSON 투영·Diff는 읽기 전용이라 선택을 받지 않는다.
   return "source";
 };

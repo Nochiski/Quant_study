@@ -3118,6 +3118,41 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
   const problemRow = (message: string | RegExp) =>
     screen.findByRole("button", { name: message });
 
+  /** 키 범위를 쓰는 유일한 진단 종류 — outline의 값 범위 reveal과 구별된다. */
+  const UNKNOWN_TITLE_KEY = {
+    code: "structure.unknown_key",
+    kind: "structural",
+    severity: "error",
+    pointer: "/title",
+    message: "title is not a known field",
+  };
+
+  // jsdom에는 `scrollIntoView`가 없다. 선택된 카드를 화면으로 끌어오는지 보려고 심는다.
+  const scrollIntoView = vi.fn();
+  let previousScrollIntoView: PropertyDescriptor | undefined;
+  beforeEach(() => {
+    previousScrollIntoView = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    scrollIntoView.mockClear();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+  });
+  afterEach(() => {
+    if (previousScrollIntoView)
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollIntoView",
+        previousScrollIntoView,
+      );
+    else
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown })
+        .scrollIntoView;
+  });
+
   it("shows the badge and the problem list while the Graph tab is selected", async () => {
     server.use(
       graphCompileWith([
@@ -3161,6 +3196,8 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=graph");
 
+    // compile이 error를 내면 실행 plan이 막혀 DAG는 없고 문서 tree로 그리는 편집 표면만 남는다.
+    await screen.findByRole("region", { name: "그래프 편집" });
     await user.click(await problemRow(/window는 1 이상이어야 합니다/));
 
     await waitFor(() => {
@@ -3169,29 +3206,59 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
         "path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F1%2Fwindow",
       );
     });
+    // URL은 wire일 뿐이다 — 그래프 노드가 실제로 선택 표시를 받고 화면으로 끌려오는지도 본다.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "노드 편집: mom_252" }).closest("li"),
+      ).toHaveAttribute("aria-current", "true"),
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   }, 15_000);
 
   it("falls back to the source tab and the line when the Graph tab cannot draw the pointer", async () => {
     server.use(
-      graphCompileWith([
-        {
-          code: "strategy.title.empty",
-          kind: "semantic",
-          severity: "error",
-          pointer: "/title",
-          message: "title must not be empty",
-        },
-      ]),
+      graphCompileWith([UNKNOWN_TITLE_KEY]),
       ...graphHandlers(),
       revisionDocumentHandler(GRAPH_SOURCE),
     );
     const user = userEvent.setup();
     const history = mount("/research/strategies/s1/revisions/2?view=graph");
 
-    await user.click(await problemRow(/title must not be empty/));
+    await user.click(await problemRow(/title is not a known field/));
 
     await waitFor(() =>
       expect(history.location.search).not.toContain("view=graph"),
+    );
+    // `structure.unknown_key`는 키 범위(`keyRanges`), outline reveal은 값 범위(`valueRanges`)라
+    // 둘이 다르다. 정확히 비교해야 진단 reveal이 마지막에 썼음을 고정한다(리뷰 P3-1).
+    const view = await editor();
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toBe("title"),
+    );
+  }, 15_000);
+
+  it("falls back to the source tab from the read-only Diff projection too", async () => {
+    server.use(
+      graphCompileWith([UNKNOWN_TITLE_KEY]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=diff");
+
+    await user.click(await problemRow(/title is not a known field/));
+
+    await waitFor(() =>
+      expect(history.location.search).not.toContain("view=diff"),
     );
     const view = await editor();
     await waitFor(() =>
@@ -3200,7 +3267,38 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
           view.state.selection.main.from,
           view.state.selection.main.to,
         ),
-      ).toContain("그래프 전략"),
+      ).toBe("title"),
     );
+  }, 15_000);
+
+  it("reveals the Form card the problem points at without leaving the Form tab", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.factor.weight",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors/0/weight",
+          message: "weight must be positive",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=form");
+
+    await screen.findByLabelText("Form 편집");
+    await user.click(await problemRow(/weight must be positive/));
+
+    await waitFor(() =>
+      expect(history.location.search).toContain("view=form"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "factors · momentum" }),
+      ).toHaveAttribute("aria-current", "true"),
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
   }, 15_000);
 });

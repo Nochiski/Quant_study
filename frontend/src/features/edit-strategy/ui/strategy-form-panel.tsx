@@ -43,6 +43,7 @@ import type {
   Scalar,
   SourceOperation,
 } from "../model/source-transactions";
+import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./strategy-form-panel.css";
@@ -94,8 +95,13 @@ export const StrategyFormPanel = ({
   stale = false,
 }: StrategyFormPanelProps) => {
   const disabled = transactions.disabled;
+  const container = useRevealSelection<HTMLElement>(selectedPointer);
   return (
-    <section className="strategy-form" aria-label={t("form.panel.label")}>
+    <section
+      ref={container}
+      className="strategy-form"
+      aria-label={t("form.panel.label")}
+    >
       <header className="strategy-form__header">
         <div>
           <strong>{t("form.panel.label")}</strong>

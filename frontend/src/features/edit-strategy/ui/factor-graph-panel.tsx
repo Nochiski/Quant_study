@@ -16,6 +16,7 @@ import {
   pointerSelectsNode,
   type ExecutionPlansState,
 } from "../model/use-execution-plans";
+import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { authoredFactors } from "../model/graph-transactions";
 import { FactorGraphEditor } from "./factor-graph-editor";
@@ -297,6 +298,7 @@ export const FactorGraphPanel = ({
   editing,
 }: FactorGraphPanelProps) => {
   const [chosenFactor, setChosenFactor] = useState(0);
+  const container = useRevealSelection<HTMLElement>(selectedPointer);
   const projected = projectFactorGraphs(state);
   // 편집 확정 뒤 backend plan을 다시 받는 동안(loading) 직전 ready 투영을 "재계산 중" 배지와 함께 유지한다 —
   // DAG가 사라졌다 돌아오며 편집기가 점프하지 않도록(P5-02 acceptance, 리뷰 OBS-132-05). 렌더 중 파생 상태.
@@ -375,7 +377,11 @@ export const FactorGraphPanel = ({
   const unplannedNodes = factor.nodes.filter((node) => !node.planned);
 
   return (
-    <section className="factor-graph" aria-label={t("graph.title")}>
+    <section
+      ref={container}
+      className="factor-graph"
+      aria-label={t("graph.title")}
+    >
       <header className="factor-graph__toolbar">
         <div>
           <strong>{t("graph.title")}</strong>

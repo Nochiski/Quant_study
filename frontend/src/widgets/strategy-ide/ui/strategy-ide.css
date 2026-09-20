@@ -218,8 +218,12 @@
   padding: 0 var(--space-4);
 }
 
+/* 탭 패널은 남은 높이를 차지하고, 그 안의 편집기가 다시 그 높이를 채운다 — 문제 목록이 패널 밖으로
+   나가면서 생긴 빈 구멍을 없앤다(P1-01 리뷰 P2-1). */
 .ide__editor-panel {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 240px;
   padding: var(--space-3) var(--space-4) var(--space-4);
   overflow: auto;

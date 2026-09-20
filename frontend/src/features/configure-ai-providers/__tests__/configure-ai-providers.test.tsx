@@ -115,16 +115,31 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
+/** 테스트가 `queryClient`를 들고 있어야 캐시에 키가 남는지 직접 볼 수 있다(리뷰 P1-1). */
 const renderSettings = (ui: ReactElement) => {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(ui, {
+  render(ui, {
     wrapper: ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     ),
   });
+  return queryClient;
 };
+
+/** query·mutation 캐시 전체를 직렬화한다 — mutation `variables`까지 포함해서 본다. */
+const cacheDump = (queryClient: QueryClient): string =>
+  JSON.stringify([
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .map((entry) => entry.state),
+    queryClient
+      .getQueryCache()
+      .getAll()
+      .map((entry) => entry.state),
+  ]);
 
 const cardOf = async (label: string) => {
   const heading = await screen.findByRole("heading", { name: label });
@@ -168,9 +183,9 @@ describe("AI 공급자 설정 섹션", () => {
     ).toHaveTextContent(/설치/);
   });
 
-  it("키를 요청 본문으로만 보내고 제출 뒤 화면에 남기지 않는다", async () => {
+  it("키를 요청 본문으로만 보내고 제출 뒤 화면·캐시에 남기지 않는다", async () => {
     const user = userEvent.setup();
-    renderSettings(<AiProviderSettings />);
+    const queryClient = renderSettings(<AiProviderSettings />);
     await fillNewProvider(user);
 
     await user.click(
@@ -187,6 +202,35 @@ describe("AI 공급자 설정 섹션", () => {
     expect(secretField).toHaveValue("");
     expect(secretField).toHaveAttribute("type", "password");
     expect(secretField).toHaveAttribute("autocomplete", "off");
+    expect(document.body.innerHTML).not.toContain(SECRET);
+    await waitFor(() =>
+      expect(screen.getByLabelText("표시 이름")).toHaveValue(""),
+    );
+    expect(cacheDump(queryClient)).not.toContain(SECRET);
+  });
+
+  it("거부로 끝난 제출도 키를 캐시에 남기지 않는다", async () => {
+    const user = userEvent.setup();
+    createReply = () =>
+      HttpResponse.json(
+        {
+          detail: {
+            code: "assistant.probe_failed",
+            failure: "auth",
+            message: "authentication rejected",
+          },
+        },
+        { status: 422 },
+      );
+    const queryClient = renderSettings(<AiProviderSettings />);
+    await fillNewProvider(user);
+
+    await user.click(
+      screen.getByRole("button", { name: "연결 테스트 후 저장" }),
+    );
+
+    await screen.findByText(/API 키가 거부/);
+    expect(cacheDump(queryClient)).not.toContain(SECRET);
     expect(document.body.innerHTML).not.toContain(SECRET);
   });
 
@@ -250,6 +294,57 @@ describe("AI 공급자 설정 섹션", () => {
     });
   });
 
+  it("고급 설정을 접으면 base_url을 보내지 않고 숨은 값을 드러낸다", async () => {
+    const user = userEvent.setup();
+    renderSettings(<AiProviderSettings />);
+    await fillNewProvider(user);
+    await user.click(screen.getByRole("button", { name: "고급 설정" }));
+    await user.type(screen.getByLabelText("base_url"), "https://proxy.example");
+    await user.click(screen.getByRole("button", { name: "고급 설정" }));
+
+    expect(screen.queryByLabelText("base_url")).toBeNull();
+    expect(screen.getByText("base_url 미적용")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "연결 테스트 후 저장" }),
+    );
+
+    await waitFor(() => expect(createBodies).toHaveLength(1));
+    expect(createBodies[0]).toMatchObject({ base_url: null });
+  });
+
+  // 접힌 채 제출하면 base_url을 보내지 않으므로 이 거부는 보통 "제출 뒤 접었는데 그 사이 거부가
+  // 도착한" 경우다. 서버가 어떤 이유로 base_url을 지목하든 고칠 칸이 화면에 있어야 한다.
+  it("base_url 거부가 오면 칸이 접혀 있어도 다시 펼친다", async () => {
+    const user = userEvent.setup();
+    createReply = () =>
+      HttpResponse.json(
+        {
+          detail: {
+            code: "assistant.base_url_rejected",
+            message: "loopback host rejected",
+          },
+        },
+        { status: 422 },
+      );
+    renderSettings(<AiProviderSettings />);
+    await fillNewProvider(user);
+    await user.click(screen.getByRole("button", { name: "고급 설정" }));
+    await user.type(screen.getByLabelText("base_url"), "https://proxy.example");
+    await user.click(screen.getByRole("button", { name: "고급 설정" }));
+    expect(screen.queryByLabelText("base_url")).toBeNull();
+
+    await user.click(
+      screen.getByRole("button", { name: "연결 테스트 후 저장" }),
+    );
+    await waitFor(() => expect(createBodies).toHaveLength(1));
+
+    const reopened = await screen.findByLabelText("base_url");
+    await waitFor(() =>
+      expect(reopened).toHaveAttribute("aria-invalid", "true"),
+    );
+  });
+
   it("연결 테스트 실패를 카드에 인라인 사유로 보여준다", async () => {
     const user = userEvent.setup();
     probeReply({
@@ -308,9 +403,13 @@ describe("AI 공급자 설정 섹션", () => {
     const card = await cardOf("작업용 Claude");
     await user.click(card.getByRole("button", { name: "삭제" }));
     expect(deleted).toEqual([]);
-    expect(card.getByText(/키도 함께 지워집니다/)).toBeInTheDocument();
+    const confirmButton = card.getByRole("button", { name: "삭제 확인" });
+    expect(confirmButton).toHaveFocus();
+    const announced = card.getByRole("alert");
+    expect(announced).toHaveTextContent(/키도 함께 지워집니다/);
+    expect(confirmButton).toHaveAttribute("aria-describedby", announced.id);
 
-    await user.click(card.getByRole("button", { name: "삭제 확인" }));
+    await user.click(confirmButton);
 
     await waitFor(() => expect(deleted).toEqual(["p-1"]));
     await waitFor(() =>
@@ -330,6 +429,7 @@ describe("AI 공급자 설정 섹션", () => {
 
     expect(deleted).toEqual([]);
     expect(card.queryByRole("button", { name: "삭제 확인" })).toBeNull();
+    expect(card.getByRole("button", { name: "삭제" })).toHaveFocus();
   });
 
   it("프로파일이 없으면 빈 상태를 보여준다", async () => {

@@ -1,12 +1,11 @@
 export {
   assistantProvidersKey,
   assistantProvidersQuery,
+  refreshAssistantProviders,
   useActivateAssistantProvider,
-  useCreateAssistantProvider,
   useDeleteAssistantProvider,
-  useTestAssistantProvider,
 } from "./model/provider-queries";
-export { AssistantRequestError } from "../../shared/api";
+export { AssistantRequestError, assistantProviderApi } from "../../shared/api";
 export type {
   CreateProviderProfileRequestWritable as CreateProviderProfileInput,
   ProbeFailure,

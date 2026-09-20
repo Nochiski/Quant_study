@@ -152,3 +152,9 @@
   color: var(--status-error);
   font-size: var(--text-size-small);
 }
+
+.ai-provider-form__advanced {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

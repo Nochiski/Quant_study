@@ -5,14 +5,13 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 
-import {
-  assistantProviderApi,
-  type CreateProviderProfileRequestWritable,
-} from "../../../shared/api";
+import { assistantProviderApi } from "../../../shared/api";
 
 export const assistantProvidersKey = () => ["assistant", "providers"] as const;
 
-const refreshProviders = (queryClient: QueryClient): Promise<void> =>
+export const refreshAssistantProviders = (
+  queryClient: QueryClient,
+): Promise<void> =>
   queryClient.invalidateQueries({ queryKey: assistantProvidersKey() });
 
 /**
@@ -26,22 +25,20 @@ export const assistantProvidersQuery = () =>
     queryFn: () => assistantProviderApi.listProviders(),
   });
 
-/** 키는 변이 인자로만 흐르고 mutation 결과·캐시 어디에도 남지 않는다(응답에 그 필드가 없다). */
-export const useCreateAssistantProvider = () => {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CreateProviderProfileRequestWritable) =>
-      assistantProviderApi.createProvider(input),
-    onSuccess: () => refreshProviders(queryClient),
-  });
-};
-
+/**
+ * 프로파일 id만 싣는 변이는 react-query mutation으로 둔다.
+ *
+ * 프로파일 생성처럼 **API 키를 싣는 호출은 여기에 두지 않는다** — TanStack Query는 변이 인자를
+ * `Mutation.state.variables`에 보관하고 그 mutation은 `MutationCache`에 남는다(관찰자가 살아 있는 동안
+ * gc도 일어나지 않는다). 키를 싣는 호출은 `features/configure-ai-providers`의 plain async 명령이
+ * `assistantProviderApi`를 직접 부르고, 키는 호출 인자로만 흐른다(B-01 리뷰 P1-1).
+ */
 export const useActivateAssistantProvider = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (profileId: string) =>
       assistantProviderApi.activateProvider(profileId),
-    onSuccess: () => refreshProviders(queryClient),
+    onSuccess: () => refreshAssistantProviders(queryClient),
   });
 };
 
@@ -50,13 +47,6 @@ export const useDeleteAssistantProvider = () => {
   return useMutation({
     mutationFn: (profileId: string) =>
       assistantProviderApi.deleteProvider(profileId),
-    onSuccess: () => refreshProviders(queryClient),
+    onSuccess: () => refreshAssistantProviders(queryClient),
   });
 };
-
-/** 연결 테스트는 서버 상태를 바꾸지 않으므로 목록을 다시 읽지 않는다. */
-export const useTestAssistantProvider = () =>
-  useMutation({
-    mutationFn: (profileId: string) =>
-      assistantProviderApi.testProvider(profileId),
-  });

@@ -932,6 +932,7 @@ const ko = {
   "assistant.provider.form.baseUrl": "base_url",
   "assistant.provider.form.baseUrl.hint":
     "비우면 공급자의 기본 주소를 씁니다. https 주소만 쓸 수 있습니다.",
+  "assistant.provider.form.baseUrl.unused": "base_url 미적용",
   "assistant.provider.form.submit": "연결 테스트 후 저장",
   "assistant.provider.form.submitting": "연결 테스트 중",
   "assistant.provider.form.error.label": "표시 이름을 입력하세요.",
@@ -1916,6 +1917,7 @@ export const messages = {
     "assistant.provider.form.baseUrl": "base_url",
     "assistant.provider.form.baseUrl.hint":
       "Leave empty to use the provider's default endpoint. Only https addresses are accepted.",
+    "assistant.provider.form.baseUrl.unused": "base_url not applied",
     "assistant.provider.form.submit": "Test and save",
     "assistant.provider.form.submitting": "Testing the connection",
     "assistant.provider.form.error.label": "Enter a display name.",

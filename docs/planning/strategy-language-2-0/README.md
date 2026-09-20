@@ -1,13 +1,13 @@
-# 전략 언어 2.0 · 파이프라인 캔버스 기획 패키지
+# schema 1.2 · 그래프 표현 기획 패키지
 
-전략 언어에서 실행 설정을 분리하고(schema 2.0), 팩터를 `steps`로 적게 하고, 그 언어가 곧 화면이
-되는 파이프라인 캔버스·레시피 빌더·고급 노드 캔버스를 stacked PR로 구현하는 initiative의 기획
+기존 YAML 문법을 유지한 채 실행 설정을 UI로 편입하고(schema 1.2), 표현을 YAML과 그래프 둘로 고정해
+그래프 표현 세 수준(파이프라인·레시피·고급 노드 캔버스)을 stacked PR로 구현하는 initiative의 기획
 자료를 한곳에 보관한다.
 
 ## 문서 구성
 
 - [설계 spec](../../superpowers/specs/2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md):
-  결정(D1~D12), non-goal, 완료 정의, 대안. 이 initiative의 계약 SoT
+  결정(D1~D11), non-goal, 완료 정의, 대안. 이 initiative의 계약 SoT
 - [WORKFLOW.md](./WORKFLOW.md): Phase별 PR scope packet(intent, acceptance, 계약 변경, 파일, non-goal)과
   Phase 종료 gate
 - [PLAN.md](./PLAN.md): PR 상태, 리뷰·검증 결과를 계속 갱신하는 단일 진행 추적 파일

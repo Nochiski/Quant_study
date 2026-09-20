@@ -125,11 +125,11 @@ if ($activeRows.Count -gt 1) {
 $phaseGoals = [ordered]@{
     "P0" = "Planning package and contract docs"
     "P1" = "In-screen friction removal on 1.1"
-    "P2" = "Backend schema 2.0"
-    "P3" = "Frontend 2.0 adaptation"
-    "P4" = "Pipeline canvas"
-    "P5" = "Recipe builder"
-    "P6" = "Advanced node canvas"
+    "P2" = "Backend schema 1.2"
+    "P3" = "Frontend 1.2 adaptation"
+    "P4" = "Graph level 1: pipeline"
+    "P5" = "Graph level 2: recipe"
+    "P6" = "Graph level 3: node canvas"
 }
 
 $unknownPhases = @($rows | Where-Object Phase -notin $phaseGoals.Keys)

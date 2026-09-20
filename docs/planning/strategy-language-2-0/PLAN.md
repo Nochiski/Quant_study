@@ -6,14 +6,14 @@ current_phase: P0
 current_pr: P0-01
 active_prs: []
 parallel_window: [P0-01]
-last_updated: 2026-09-20T21:32:49+09:00
-planned_prs: 27
+last_updated: 2026-09-20T21:55:42+09:00
+planned_prs: 24
 merged_prs: 0
 approved_prs: 0
 progress_percent: 0
 ---
 
-# 전략 언어 2.0 · 파이프라인 캔버스 실시간 진행 계획
+# schema 1.2 · 그래프 표현 실시간 진행 계획
 
 상세 범위와 acceptance는 [WORKFLOW.md](./WORKFLOW.md), 계약은
 [설계 spec](../../superpowers/specs/2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md)을 따른다.
@@ -27,9 +27,9 @@ progress_percent: 0
 | Current phase | `P0` |
 | Current/next PR | `P0-01` |
 | Active PR | none |
-| Progress | `0 / 27 merged (0%)` |
-| Approved | `0 / 27` |
-| Aggregated at | `2026-09-20 21:32 KST` |
+| Progress | `0 / 24 merged (0%)` |
+| Approved | `0 / 24` |
+| Aggregated at | `2026-09-20 21:55 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -39,19 +39,21 @@ progress_percent: 0
 
 - 2026-09-20 제품 소유자 결정: 템플릿·프리셋은 주 진입 경로가 아니다(튜토리얼 전용). 목표는 범용
   전략 구성이며, 언어 밖에서 정할 수 있는 것(시장·기간·유니버스·수수료·체결)은 실행 설정으로 뺀다.
-- 언어 2.0 범위는 spec 대안 절의 (c)다: 실행 설정 분리 + `steps` 표기·배관 제거 + `filter`·`combine`·
-  `select`·`weight` 재구성을 한 스키마 판으로. 1.0·1.1 revision은 동결 이력, 업그레이더 한 벌.
+- 2026-09-20 제품 소유자 결정(개정): **기존 YAML은 남긴다.** 표현은 YAML과 그래프 둘뿐이다. 새
+  팩터 표기(`steps`)와 섹션 재구성은 하지 않는다. schema 1.2는 `data`·`execution`·`missing_policy`
+  제거 + 추가 필드 3개(`signal.normalization`, 횡단면 eligibility, `risk.risk_factor_id`)다. 배관은
+  그래프 UI가 숨긴다. Form·JSON 탭은 은퇴한다. 1.0·1.1 revision은 동결 이력, 업그레이더 한 벌.
 - 한글 어휘의 소유: 키(`x-description-key`, 연산자 카탈로그)는 backend, 문장은 frontend i18n. 적용
   조건 문장과 같은 규칙.
-- 결합 정규화는 `combine.method`(기본 `rank_weighted`)가 소유한다. 1.1에서 올라온 문서는
-  `raw_weighted`를 명시해 실행 의미를 보존한다.
+- 결합 정규화는 `signal.normalization`(기본 `rank`)이 소유한다. 1.1에서 올라온 문서는 `none`을
+  명시해 실행 의미를 보존한다.
 - 그래프 라이브러리 도입은 P6-01 ADR이 결정한다. 레시피 빌더(P5)가 먼저 비전공자 경로를 닫는다.
 - P2 backend PR은 `backend/openapi.json`만 재생성하고 frontend generated SDK는 P3-01이 갱신한다.
   P2 스택은 backend gate만 merge gate로 삼는다.
-- P1 스택과 P2 스택은 독립이라 병렬 진행할 수 있다. P3-01은 P1-05·P2-07 둘 다 merge 뒤 시작한다.
+- P1 스택과 P2 스택은 독립이라 병렬 진행할 수 있다. P3-01은 P1-05·P2-05 둘 다 merge 뒤 시작한다.
 - reviewer 서브에이전트는 Opus로만 배정한다. Phase 종료마다 SoT·책임분리 점검 서브에이전트를 돌린다.
 - 완료 정의는 spec 5절의 6항이다. 특히 퀀트 아이디어 5개(12-1 모멘텀, 저PBR+고ROE, 20일 이평 돌파,
-  거래대금 상위 20%, 변동성 역가중)가 파이프라인·팩터 탭만으로 백테스트에 도달해야 한다.
+  거래대금 상위 20%, 변동성 역가중)가 그래프 탭만으로 백테스트에 도달해야 한다.
 
 ## 상태 값
 
@@ -78,12 +80,12 @@ progress_percent: 0
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 0 | `READY` |
 | P1 | In-screen friction removal on 1.1 | 5 | 0 | `WAITING` |
-| P2 | Backend schema 2.0 | 7 | 0 | `WAITING` |
-| P3 | Frontend 2.0 adaptation | 3 | 0 | `WAITING` |
-| P4 | Pipeline canvas | 4 | 0 | `WAITING` |
-| P5 | Recipe builder | 4 | 0 | `WAITING` |
-| P6 | Advanced node canvas | 3 | 0 | `WAITING` |
-| **Total** |  | **27** | **0** | **0%** |
+| P2 | Backend schema 1.2 | 5 | 0 | `WAITING` |
+| P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
+| P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
+| P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
+| P6 | Graph level 3: node canvas | 3 | 0 | `WAITING` |
+| **Total** |  | **24** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -129,32 +131,30 @@ Phase exit:
 - [ ] 노드 property·kind·연산자 설명 커버리지 100%.
 - [ ] SoT·책임분리 점검 서브에이전트 blocking 0.
 
-## P2 — backend schema 2.0
+## P2 — backend schema 1.2
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P2-01` | `RunEnvironment` 모델, 실행 요청 optional `environment`(브리지), manifest·캐시 키 | P0-01 | `WAITING` | — |
-| [ ] | `P2-02` | StrategySpec 2.0 (1): `data`·`execution`·`label`·`missing_policy` 제거, 버전 2.0, fixture·hash golden | P2-01 | `WAITING` | — |
-| [ ] | `P2-03` | StrategySpec 2.0 (2): `filter`·`combine`·`select`·`weight` 재구성, method union, 컴파일러 정규화 | P2-02 | `WAITING` | — |
-| [ ] | `P2-04` | `steps` 표기 → `FactorGraph` 컴파일, steps·nodes 같은 hash, saved_* 제거 | P2-03 | `WAITING` | — |
-| [ ] | `P2-05` | combine 단위 경고, boolean 승격, compile 단일 게이트, 연산자 unsupported | P2-04 | `WAITING` | — |
-| [ ] | `P2-06` | filter 횡단면 규칙, `weight.by` 팩터 참조, group 정리, `ideas/*.yaml` 5개 | P2-05 | `WAITING` | — |
-| [ ] | `P2-07` | 1.1 → 2.0 업그레이더(dict·source), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-06 | `WAITING` | — |
+| [ ] | `P2-02` | StrategySpec 1.2: `data`·`execution`·`missing_policy` 제거, 버전 1.2, 필수 키 3개, fixture·hash golden | P2-01 | `WAITING` | — |
+| [ ] | `P2-03` | 추가 필드: `signal.normalization`, 횡단면 eligibility, `risk.risk_factor_id`, saved_* 제거, 컴파일러 | P2-02 | `WAITING` | — |
+| [ ] | `P2-04` | 단위 경고, boolean 승격, compile 단일 게이트, 연산자 unsupported, `ideas/*.yaml` 5개 | P2-03 | `WAITING` | — |
+| [ ] | `P2-05` | 1.1 → 1.2 업그레이더(dict·source), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-04 | `WAITING` | — |
 
 Phase exit:
 
-- [ ] 2.0 fixture 같은 hash, 1.1 fixture 전부 업그레이드 통과.
+- [ ] 1.2 fixture 같은 hash, 1.1 fixture 전부 업그레이드 통과.
 - [ ] compile 통과 문서가 preview에서 422 없음(property).
 - [ ] `ideas/*.yaml` 5개 backend 통과.
-- [ ] SoT·책임분리 점검 blocking 0, SoT 행 3개 채움.
+- [ ] SoT·책임분리 점검 blocking 0, SoT 행 2개 채움.
 
-## P3 — frontend 2.0 적응
+## P3 — frontend 1.2 적응
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P3-01` | SDK 2.0, pointer 헬퍼·outline·snippet·Form projection(method union)·plan·debugger 적응 | P2-07, P1-05 | `WAITING` | — |
+| [ ] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-05, P1-05 | `WAITING` | — |
 | [ ] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `WAITING` | — |
-| [ ] | `P3-03` | e2e fixture 2.0, 매뉴얼·README·FACTORS 2.0, CI green | P3-02 | `WAITING` | — |
+| [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `WAITING` | — |
 
 Phase exit:
 
@@ -162,41 +162,40 @@ Phase exit:
 - [ ] 같은 전략·다른 기간 → 같은 spec_hash e2e.
 - [ ] SoT·책임분리 점검 blocking 0.
 
-## P4 — 파이프라인 캔버스
+## P4 — 그래프 1수준: 파이프라인
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P4-01` | `pipeline-projection.ts` (4단계 모델, 팩터 요약 문장) | P3-03 | `WAITING` | — |
+| [ ] | `P4-01` | `pipeline-projection.ts` (4단계 모델, `x-stage`, 팩터 요약 문장) | P3-03 | `WAITING` | — |
 | [ ] | `P4-02` | 단계 카드 UI(거른다·합쳐서 고른다·비중을 준다), 실행 설정 띠 | P4-01 | `WAITING` | — |
 | [ ] | `P4-03` | 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널 | P4-02 | `WAITING` | — |
-| [ ] | `P4-04` | IDE 탭 재편·기본 탭 파이프라인, 빈 화면 e2e, 식별자 0개 단언 | P4-03 | `WAITING` | — |
+| [ ] | `P4-04` | 탭을 그래프·YAML 둘로, 기본 탭 그래프, Form·JSON 은퇴, 빈 화면 e2e, 식별자 0개 단언 | P4-03 | `WAITING` | — |
 
 Phase exit:
 
 - [ ] 빈 화면 e2e green, 식별자 0개 단언 green.
 - [ ] SoT·책임분리 점검 blocking 0.
 
-## P5 — 레시피 빌더
+## P5 — 그래프 2수준: 레시피
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P5-01` | `recipe-transactions.ts` (steps 추가·삭제·이동·파라미터·inputs), property test | P4-04 | `WAITING` | — |
-| [ ] | `P5-02` | 팔레트(연산자 카탈로그), 단계 카드 UI, 설명, 인라인 진단 | P5-01 | `WAITING` | — |
-| [ ] | `P5-03` | (backend) `POST /strategy-documents/expand-steps` | P5-02 | `WAITING` | — |
-| [ ] | `P5-04` | 팩터 결과 미리보기·결측 표시·고급 전환, 아이디어 5개 e2e | P5-03 | `WAITING` | — |
+| [ ] | `P5-01` | `recipe-projection.ts`(체인 판정)·`recipe-transactions.ts`(추가·삭제·이동·파라미터·재배선), property test | P4-04 | `WAITING` | — |
+| [ ] | `P5-02` | 팔레트(연산자 카탈로그), 단계 카드 UI, 설명, 인라인 진단, 식별자 접힘 영역 | P5-01 | `WAITING` | — |
+| [ ] | `P5-03` | 팩터 결과 미리보기·결측 표시, 아이디어 5개 e2e, 매뉴얼 그래프 절 | P5-02 | `WAITING` | — |
 
 Phase exit:
 
-- [ ] 아이디어 5개 e2e green (완료 정의 1·2·4).
+- [ ] 아이디어 5개 e2e green (완료 정의 1·2).
 - [ ] SoT·책임분리 점검 blocking 0.
 
-## P6 — 고급 노드 캔버스
+## P6 — 그래프 3수준: 고급 노드 캔버스
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P6-01` | 그래프 라이브러리 ADR·스파이크 | P5-04 | `WAITING` | — |
+| [ ] | `P6-01` | 그래프 라이브러리 ADR·스파이크 | P5-03 | `WAITING` | — |
 | [ ] | `P6-02` | 노드 캔버스: 드래그 배선, 좌표 local state, 자동 정렬, 키보드 | P6-01 | `WAITING` | — |
-| [ ] | `P6-03` | 노드 위 진단, 복제, 마감 문서(SoT·로드맵 M8·매뉴얼) | P6-02 | `WAITING` | — |
+| [ ] | `P6-03` | 노드 위 진단, 옛 목록형 편집기 제거, 마감 문서(SoT·로드맵 M8·매뉴얼) | P6-02 | `WAITING` | — |
 
 Phase exit:
 
@@ -216,7 +215,10 @@ Phase exit:
 ## 변경 기록
 
 - 2026-09-20 — 패키지 생성. 디자인보드 원인 분석(코드 감사 2건, 아이디어 5개 실험)과 제품 소유자
-  결정(템플릿 배제, 실행 설정 분리, 언어 축소)을 spec D1~D12와 Phase 0~6, 27 PR로 정리.
+  결정(템플릿 배제, 실행 설정 분리, 언어 축소)을 spec과 Phase 0~6, 27 PR로 정리.
+- 2026-09-20 — 개정: "기존 YAML은 남긴다, 표현은 YAML과 그래프 둘". `steps` 표기·섹션 재구성·
+  expand-steps 엔드포인트 제거, schema 2.0 → 1.2(실행 설정 분리 + 추가 필드 3개). P2 7→5, P5 4→3,
+  총 24 PR. Form·JSON 탭 은퇴를 P4-04에.
 
 ## 갱신 절차
 

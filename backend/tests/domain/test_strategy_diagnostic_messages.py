@@ -134,8 +134,9 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "모르는 키(오타)",
         lambda d: _set(d, "risk.max_name_wieght", 0.1),
         "structure.unknown_key",
-        "모르는 키입니다 혹시 'max_name_weight'인가요? — "
-        "got='max_name_wieght' allowed=['gross_exposure', 'max_name_weight', "
+        "모르는 키입니다 혹시 `max_name_weight`인가요? — "
+        "got='max_name_wieght' suggestion='max_name_weight' "
+        "allowed=['gross_exposure', 'max_name_weight', "
         "'max_sector_weight', "
         "'net_exposure', 'risk_field_id', 'sector_neutral']",
     ),
@@ -149,7 +150,8 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "모르는 kind",
         lambda d: _set(d, "factors.0.graph.nodes.1.kind", "time_seris"),
         "structure.unknown_kind",
-        "모르는 kind입니다 혹시 'time_series'인가요? — got='time_seris' "
+        "모르는 kind입니다 혹시 `time_series`인가요? — got='time_seris' "
+        "suggestion='time_series' "
         "allowed=['binary', 'comparison', 'conditional', 'constant', 'cross_sectional', "
         "'field', 'group', 'parameter', 'saved_factor', 'saved_subgraph', "
         "'time_series', 'unary']",
@@ -158,8 +160,8 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "고를 수 없는 값",
         lambda d: _set(d, "execution.timing", "next_opne"),
         "structure.invalid_enum",
-        "고를 수 있는 값이 아닙니다 혹시 'next_open'인가요? — "
-        "got='next_opne' allowed=['next_open']",
+        "고를 수 있는 값이 아닙니다 혹시 `next_open`인가요? — "
+        "got='next_opne' suggestion='next_open' allowed=['next_open']",
     ),
     (
         "목록 자리에 블록",
@@ -202,7 +204,8 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "날짜 형식",
         lambda d: _set(d, "data.start", "2021/01/01"),
         "structure.invalid_date",
-        "날짜는 YYYY-MM-DD로 적어 주세요 — expected=YYYY-MM-DD got='2021/01/01'",
+        "날짜는 YYYY-MM-DD로 적어 주세요. 예: 2021-01-01 — "
+        "expected=YYYY-MM-DD example=2021-01-01 got='2021/01/01'",
     ),
     (
         "1.0 문법 — factors 두 겹",
@@ -430,6 +433,29 @@ def test_no_english_sentence_reaches_the_reader(code: str, message: str) -> None
     assert _HANGUL.search(sentence), f"{code}: 문장이 한국어가 아니다 — {message!r}"
     returned = [phrase for phrase in _RETIRED_ENGLISH if phrase in message]
     assert not returned, f"{code}: 영어 원문이 돌아왔다 — {returned}"
+
+
+@pytest.mark.parametrize(
+    ("name", "mutate", "expected"),
+    [
+        pytest.param("모르는 키", HYDRATE_GOLDEN[2][1], "max_name_weight", id="키"),
+        pytest.param("모르는 kind", HYDRATE_GOLDEN[4][1], "time_series", id="kind"),
+        pytest.param("고를 수 없는 값", HYDRATE_GOLDEN[5][1], "next_open", id="enum"),
+    ],
+)
+def test_near_miss_suggestion_appears_in_both_the_sentence_and_the_details(
+    name: str, mutate: Any, expected: str
+) -> None:
+    """근접 후보 제안은 사람이 읽는 문장과 기계가 읽는 자리에 같이 실린다.
+
+    문장에는 계약 문자열을 번역하지 않고 `` `키` ``로 인용한다 — 사람 말 이름의 정본은 runtime
+    schema의 `x-description-key`와 frontend i18n이고(P1-03), backend가 한 벌 더 갖지 않는다.
+    """
+    _code, message = _first_issue(mutate)
+    sentence, _separator, detail = message.partition(_DETAIL_SEPARATOR)
+
+    assert f"혹시 `{expected}`인가요?" in sentence
+    assert f"suggestion={expected!r}" in detail
 
 
 def _graph(*nodes: object, output: str) -> FactorGraph:

@@ -188,17 +188,32 @@ def _issue(issues: list[StructuralIssue], code: str, pointer: str, message: str)
     return _MISSING
 
 
-def _suggestion(value: object, candidates: Iterable[object]) -> str:
-    """오타로 보이는 값 뒤에 붙일 " 혹시 'x'인가요?". 닮은 후보가 없으면 빈 문자열.
+def _closest(value: object, candidates: Iterable[object]) -> str | None:
+    """오타로 보이는 값에 가장 가까운 후보 하나. 닮은 것이 없으면 None.
 
     초보자가 가장 자주 만나는 구조 오류가 키 오타(`max_name_wieght`)다. 허용 목록을 눈으로 훑는
     대신 한 번에 고칠 수 있게 한다. 닮음 판정은 difflib 기본 비율(0.6)을 그대로 쓴다.
     """
     if not isinstance(value, str):
-        return ""
+        return None
     names = [candidate for candidate in candidates if isinstance(candidate, str)]
     close = difflib.get_close_matches(value, names, n=1)
-    return f" 혹시 {close[0]!r}인가요?" if close else ""
+    return close[0] if close else None
+
+
+def _hint(closest: str | None) -> str:
+    """문장에 붙일 제안 조각.
+
+    키·kind·enum 값은 번역하면 계약이 달라지는 문자열이라 한글 이름으로 바꾸지 않고 `` `키` ``로
+    인용한다. 사람 말 이름의 정본은 runtime schema의 `x-description-key`와 frontend i18n이고
+    (P1-03), backend가 같은 이름을 한 벌 더 갖지 않는다.
+    """
+    return f" 혹시 `{closest}`인가요?" if closest else ""
+
+
+def _hint_detail(closest: str | None) -> str:
+    """같은 제안을 기계가 읽는 자리에도 남긴다 — 문장을 파싱해 꺼내 쓰지 않게."""
+    return f" suggestion={closest!r}" if closest else ""
 
 
 def _with_legacy_hints(
@@ -278,13 +293,15 @@ def _hydrate_union(
                 )
             member = kinds.get(kind if isinstance(kind, str) else None)
             if member is None:
+                closest_kind = _closest(kind, [k for k in kinds if k])
                 return _issue(
                     issues,
                     "structure.unknown_kind",
                     _child(pointer, "kind"),
                     "모르는 kind입니다"
-                    + _suggestion(kind, [k for k in kinds if k])
-                    + f" — got={kind!r} allowed={sorted(k for k in kinds if k)}",
+                    + _hint(closest_kind)
+                    + f" — got={kind!r}{_hint_detail(closest_kind)} "
+                    + f"allowed={sorted(k for k in kinds if k)}",
                 )
             return _hydrate_dataclass(member, value, pointer, issues)
         if len(dataclass_members) == 1:
@@ -352,13 +369,14 @@ def _hydrate_dataclass(tp: type, value: object, pointer: str, issues: list[Struc
     failed = False
     for key in value:
         if key not in fields:
+            closest_key = _closest(key, fields)
             _issue(
                 issues,
                 "structure.unknown_key",
                 _child(pointer, key),
                 "모르는 키입니다"
-                + _suggestion(key, fields)
-                + f" — got={key!r} allowed={sorted(fields)}",
+                + _hint(closest_key)
+                + f" — got={key!r}{_hint_detail(closest_key)} allowed={sorted(fields)}",
             )
             failed = True
     kwargs: dict[str, Any] = {}
@@ -412,13 +430,14 @@ def _hydrate_scalar(tp: Any, value: object, pointer: str, issues: list[Structura
             except ValueError:
                 pass
         allowed = [member.value for member in tp]
+        closest_value = _closest(value, allowed)
         return _issue(
             issues,
             "structure.invalid_enum",
             pointer,
             "고를 수 있는 값이 아닙니다"
-            + _suggestion(value, allowed)
-            + f" — got={value!r} allowed={allowed!r}",
+            + _hint(closest_value)
+            + f" — got={value!r}{_hint_detail(closest_value)} allowed={allowed!r}",
         )
     if tp is bool:
         if isinstance(value, bool):
@@ -487,7 +506,8 @@ def _hydrate_scalar(tp: Any, value: object, pointer: str, issues: list[Structura
             issues,
             "structure.invalid_date",
             pointer,
-            f"날짜는 YYYY-MM-DD로 적어 주세요 — expected=YYYY-MM-DD got={value!r}",
+            "날짜는 YYYY-MM-DD로 적어 주세요. 예: 2021-01-01 — "
+            f"expected=YYYY-MM-DD example=2021-01-01 got={value!r}",
         )
     raise TypeError(  # pragma: no cover - model authoring error
         f"unsupported hydrate type {tp!r} at pointer={pointer!r}"

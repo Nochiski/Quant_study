@@ -197,6 +197,14 @@
   flex: 1;
 }
 
+/* 되돌리기·다시 실행도 같은 줄이다 — 탭 패널 밖이라 편집기가 hidden인 탭에서도 닿는다(P1-02). */
+.ide__editor-history {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .ide__editor-status {
   display: flex;
   flex-wrap: wrap;

@@ -406,6 +406,63 @@ describe("StrategyIde", () => {
     expect(onRunBacktest).not.toHaveBeenCalled();
   });
 
+  it("runs undo and redo from the global shortcut, even with the editor hidden (P1-02)", () => {
+    matchMedia(false);
+    const onUndo = vi.fn();
+    const onRedo = vi.fn();
+    // Graph 탭처럼 편집기가 `hidden`인 상태: 포커스는 본문에 있고 CodeMirror 키맵은 닿지 않는다.
+    mount({
+      onUndo,
+      onRedo,
+      view: "diff",
+      sourceView: "yaml",
+      availableViews: ["yaml", "diff"],
+      projections: { diff: <div>diff</div> },
+    });
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "z", metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: "Z", ctrlKey: true, shiftKey: true });
+
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(onRedo).toHaveBeenCalledTimes(2);
+  });
+
+  it("yields Ctrl+Z to whatever already edits text under the cursor (P1-02)", () => {
+    matchMedia(false);
+    const onUndo = vi.fn();
+    const onRedo = vi.fn();
+    mount({ onUndo, onRedo });
+
+    // 편집기 슬롯의 textarea, Form의 텍스트 입력, CodeMirror의 contenteditable — 셋 다 자기 되돌리기를 갖는다.
+    const textarea = screen.getByLabelText("source");
+    fireEvent.keyDown(textarea, { key: "z", ctrlKey: true });
+    fireEvent.keyDown(textarea, { key: "z", ctrlKey: true, shiftKey: true });
+
+    const input = document.createElement("input");
+    input.type = "number";
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: "z", ctrlKey: true });
+
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "true");
+    document.body.appendChild(editable);
+    fireEvent.keyDown(editable, { key: "z", ctrlKey: true });
+
+    expect(onUndo).not.toHaveBeenCalled();
+    expect(onRedo).not.toHaveBeenCalled();
+
+    // 되돌리기를 갖지 않는 컨트롤(드롭다운·버튼)에서는 문서 되돌리기가 그대로 동작한다.
+    const select = document.createElement("select");
+    document.body.appendChild(select);
+    fireEvent.keyDown(select, { key: "z", ctrlKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(1);
+
+    input.remove();
+    editable.remove();
+    select.remove();
+  });
+
   it("searches document symbols and controls panels and theme from the palette", async () => {
     matchMedia(false);
     const user = userEvent.setup();

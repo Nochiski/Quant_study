@@ -9,6 +9,10 @@ import {
   historyKeymap,
   indentWithTab,
   isolateHistory,
+  redo,
+  redoDepth,
+  undo,
+  undoDepth,
 } from "@codemirror/commands";
 import { json } from "@codemirror/lang-json";
 import { yaml } from "@codemirror/lang-yaml";
@@ -425,6 +429,21 @@ export const CodeEditorView = forwardRef<CodeEditorHandle, CodeEditorProps>(
           });
         },
         focus: () => view.current?.focus(),
+        // 툴바 버튼과 전역 단축키가 쓰는 경로(P1-02). 편집기가 포커스를 갖지 않아도(다른 탭이 보이는 동안
+        // 편집기는 hidden으로 살아 있다) 명령을 직접 실행한다 — 키맵은 포커스가 있어야만 도는 경로다.
+        undo: () => {
+          const current = view.current;
+          return current === null ? false : undo(current);
+        },
+        redo: () => {
+          const current = view.current;
+          return current === null ? false : redo(current);
+        },
+        historyDepth: () => {
+          const state = view.current?.state;
+          if (state === undefined) return { undo: 0, redo: 0 };
+          return { undo: undoDepth(state), redo: redoDepth(state) };
+        },
         getHistoryState: () =>
           view.current?.state.toJSON(HISTORY_FIELDS) ?? null,
         restoreHistoryState: (state) => {

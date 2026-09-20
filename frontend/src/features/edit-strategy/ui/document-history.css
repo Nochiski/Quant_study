@@ -1,0 +1,20 @@
+.doc-history {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* 비활성 이유는 툴팁이 아니라 이 문장이다(P1-02) — 키보드·스크린리더 사용자도 읽는다. */
+.doc-history__hint {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  white-space: nowrap;
+}
+
+/*
+ * `aria-disabled` 버튼은 포커스를 받아야 하므로 `disabled`를 쓰지 않는다. 비활성으로 보이게만 하고
+ * 클릭은 막지 않는다 — 깊이 표시가 한 프레임 늦은 순간의 클릭이 조용히 버려지지 않는다.
+ */
+.doc-history .ui-button[aria-disabled="true"] {
+  opacity: 0.5;
+}

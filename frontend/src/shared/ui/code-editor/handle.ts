@@ -17,6 +17,12 @@ export type EditorDiagnostic = {
 
 export type EditorPosition = { line: number; column: number };
 
+/**
+ * 되돌리기·다시 실행으로 소비할 수 있는 편집 단계 수(P1-02). 0이면 그 방향으로 할 일이 없다.
+ * `replaceRange` 한 번(Form·Graph 트랜잭션 하나)은 언제나 한 단계다.
+ */
+export type EditorHistoryDepth = { undo: number; redo: number };
+
 export type EditorSelection = {
   from: number;
   to: number;
@@ -69,6 +75,15 @@ export type CodeEditorHandle = {
   positionToOffset(position: EditorPosition): number;
   scrollTo(offset: number): void;
   focus(): void;
+  /** 편집 한 단계를 되돌린다. 되돌릴 것이 없으면 아무 일도 없이 false. */
+  undo(): boolean;
+  /** 되돌린 편집 한 단계를 다시 적용한다. 다시 실행할 것이 없으면 false. */
+  redo(): boolean;
+  /**
+   * 지금 남은 되돌리기·다시 실행 깊이. 편집기가 포커스를 갖지 않아도 읽을 수 있어, 편집기가 hidden인
+   * 탭에서도 툴바 버튼이 비활성 여부를 판정한다(spec D9).
+   */
+  historyDepth(): EditorHistoryDepth;
   /** Opaque undo history (plus document) for view switching; never inspected by callers. */
   getHistoryState(): unknown;
   restoreHistoryState(state: unknown): void;

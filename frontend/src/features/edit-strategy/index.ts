@@ -55,6 +55,11 @@ export {
   type DiagnosticNavigation,
 } from "./model/use-diagnostic-navigation";
 export {
+  useDocumentHistory,
+  type DocumentHistory,
+} from "./model/use-document-history";
+export { DocumentHistoryActions } from "./ui/document-history";
+export {
   decideBacktestSource,
   gateBacktestSourceWithFactorPlans,
   type BacktestSourceDecision,

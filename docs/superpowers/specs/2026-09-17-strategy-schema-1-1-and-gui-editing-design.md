@@ -8,6 +8,10 @@
 > 선행 계약: [Strategy Authoring Contract ADR](./2026-09-04-strategy-authoring-contract-adr.md)
 > (D2 verbose 문법, D3 hash, D5 read-only projection을 이 문서가 개정한다)
 >
+> 이 문서를 확장하는 후속:
+> [2026-09-20 schema 1.2·그래프 표현 설계](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md)
+> (D1 문법, D2 동결 이력, D3 업그레이더, D5 source 트랜잭션을 그 문서가 확장한다)
+>
 > PR 진행은 [docs/planning/strategy-gui-editing/PLAN.md](../../planning/strategy-gui-editing/PLAN.md)
 
 ## 1. 맥락

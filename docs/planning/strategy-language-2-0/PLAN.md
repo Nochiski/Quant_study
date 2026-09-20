@@ -6,7 +6,7 @@ current_phase: P0
 current_pr: P0-01
 active_prs: []
 parallel_window: [P0-01]
-last_updated: 2026-09-20T21:55:42+09:00
+last_updated: 2026-09-20T22:25:45+09:00
 planned_prs: 24
 merged_prs: 0
 approved_prs: 0
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | none |
 | Progress | `0 / 24 merged (0%)` |
 | Approved | `0 / 24` |
-| Aggregated at | `2026-09-20 21:55 KST` |
+| Aggregated at | `2026-09-20 22:25 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -97,11 +97,11 @@ progress_percent: 0
 | Acceptance | WORKFLOW P0-01 |
 | Non-goals | 코드 변경 |
 | Branch/worktree | `docs/strategy-language-2-0-plan` |
-| Base SHA | — |
-| Head SHA | — |
-| Diff stat | — |
+| Base SHA | `5f97f8c` (main) |
+| Head SHA | `docs/strategy-language-2-0-plan` tip — 커밋이 자기 SHA를 담을 수 없어 PR 생성 시 확정 |
+| Diff stat | 9 files changed, +1419 −4 (문서만, 브랜치 전체 P0-01 기준) |
 | Focused tests | `tools/update-plan-progress.ps1 -Check` |
-| Full gate | — |
+| Full gate | 코드 변경 없음 — 문서 링크 존재 확인 |
 
 ---
 
@@ -219,6 +219,9 @@ Phase exit:
 - 2026-09-20 — 개정: "기존 YAML은 남긴다, 표현은 YAML과 그래프 둘". `steps` 표기·섹션 재구성·
   expand-steps 엔드포인트 제거, schema 2.0 → 1.2(실행 설정 분리 + 추가 필드 3개). P2 7→5, P5 4→3,
   총 24 PR. Form·JSON 탭 은퇴를 P4-04에.
+- 2026-09-20 — P0-01 상위 문서 개정: ADR 2026-09-04 머리말·D8에 개정 표기, 1.1 spec 머리말에 후속
+  링크, 로드맵 M8 완료 게이트를 원문("코드를 몰라도 …")으로 복귀, SoT 정본 대장에 실행 설정·연산자
+  정의·그래프 표현 투영 행 3개와 "표현은 YAML과 그래프 둘" 문장 추가.
 
 ## 갱신 절차
 

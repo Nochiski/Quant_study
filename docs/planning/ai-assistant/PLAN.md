@@ -6,10 +6,10 @@ current_phase: P0,A
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05]
-last_updated: 2026-09-21T00:11:19+09:00
+last_updated: 2026-09-21T00:17:04+09:00
 planned_prs: 13
 merged_prs: 0
-approved_prs: 3
+approved_prs: 4
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05` |
 | Progress | `0 / 13 merged (0%)` |
-| Approved | `3 / 13` |
-| Aggregated at | `2026-09-21 00:11 KST` |
+| Approved | `4 / 13` |
+| Aggregated at | `2026-09-21 00:17 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -96,7 +96,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 |---|---|---|---|---|---|
 | [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `APPROVED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `84570df` · `review_ai_a_02` 2차 APPROVE(P3 7 중 5 후속 커밋, A-01 P3 2건 동반) · CI 대기 |
-| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `IN_REVIEW` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `c6d70de`(A-02 `84570df` 위) · `review_ai_a_03` 1차 REQUEST_CHANGES(P1 2·권고 1·P2 1·P3 6) 반영(P3 3건 사양) → 2차 재검토 중 |
+| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `c6d70de` · `review_ai_a_03` 2차 APPROVE(P3 2 후속 커밋) · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_PROGRESS` | 구현자 `impl-ai-a04`, 워크트리 `wt-ai-a04`, 브랜치 `feat/ai-a-04-http-sse`(base A-03) |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_PROGRESS` | 구현자 `impl-ai-a05`, 워크트리 `wt-ai-a05`, 브랜치 `feat/ai-a-05-llm-anthropic`(임시 base A-02 `84570df`, A-04 tip 위로 rebase 예정) |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `WAITING` | — |
@@ -137,6 +137,7 @@ Phase exit:
 | A-03 | `review_ai_a_03` | 1 | REQUEST_CHANGES | P1 2(`ChatEvent` 확장 가드 부재, 비밀 파일 경로가 예외 메시지에), 권고 1(`update_turn`이 `started_at`·`accepted_sequence` 덮음), P2 1(부모 디렉터리 0700), P3 6 → 반영 |
 | A-01 | `review_ai_a_01` | 3 | APPROVE | 2차 3건 전부 해소(39 URL 매트릭스 실측). 새 P3 2(스킴 누락 거절 문구, `FailureCode`·`ChatEvent` 집합 대조 테스트) → A-02 브랜치에 적재. 잔여 위험: `Failure.message` 자유 문자열(adapter PR에서 `str(exc)` 유입 게이트) |
 | A-02 | `review_ai_a_02` | 2 | APPROVE | 1차 P1 1·P2 6 전부 해소(원인 수정 + 회귀 테스트). `equity_workspace` 화살표는 포트 소비 확인. 새 P3 7(도구 종료 경로 이벤트 보존 등) → 5 반영, 2 사양(판별자 첫 매치, `_finish` 창 `state()`는 A-04 확인) |
+| A-03 | `review_ai_a_03` | 2 | APPROVE | 1차 P1 2·권고·P2 전부 해소(`assert_never` 양방향 실증). 새 P3 2(`__cause__` 경로, 종료 상태 역전 미차단) → 후속 커밋 |
 
 ## 검증 기록
 
@@ -146,6 +147,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-21 — A-01(3차)·A-02(2차)·A-03(2차) APPROVE. A-04 구현 완료·rebase 중, A-05 착수.
 - 2026-09-20 — A-03(#171) PR 생성·리뷰 배정, A-04 착수(A-02 rewrite 뒤 A-03·A-04 rebase 예정).
 - 2026-09-20 — A-01·A-02 1차 리뷰 REQUEST_CHANGES(각 P1 1건) → 같은 구현자가 반영 후 재검토.
 - 2026-09-20 — A-01(#169)·A-02(#170) 스택 PR 생성, 리뷰 배정. A-03 착수.

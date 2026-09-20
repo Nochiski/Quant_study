@@ -72,10 +72,12 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DEFAULT_ASSISTANT_SETTINGS",
     "PROVIDER_ADAPTER_FACTORIES",
+    "PROVIDER_SDK_MODULES",
     "AssistantServices",
     "AssistantSettings",
     "ProviderAdapterFactory",
     "build_assistant_services",
+    "is_missing_provider_sdk",
     "repository_root",
 ]
 
@@ -83,13 +85,48 @@ __all__ = [
 #
 # 1. **SDK와 adapter import를 함수 본문 안에서 한다.** 모듈 최상단에서 import하면 이 파일이
 #    읽히는 순간 optional extra가 없는 환경에서 `ImportError`가 나고, 지연 호출이 무의미해진다.
-# 2. **미설치는 `ImportError`로 알린다.** 레지스트리가 그것만 "미설치"로 낮춘다. 그 밖의 예외는
-#    설정 오류이므로 숨기지 않고 그대로 올린다.
+# 2. **미설치는 그 SDK의 `ModuleNotFoundError`로 알린다.** 아래 표가 kind별로 어떤 모듈이어야
+#    하는지 정하고, 레지스트리는 그 모듈(또는 그 하위 모듈)일 때만 "미설치"로 낮춘다.
 ProviderAdapterFactory: TypeAlias = Callable[[], LlmProviderPort]
+
+# kind → optional extra가 설치하는 최상위 SDK 모듈 이름.
+#
+# 이 표가 없으면 **adapter 안의 오타 import까지 "미설치"로 둔갑한다.** `from ..._adaptor import X`
+# 같은 우리 쪽 실수도 `ModuleNotFoundError`이고, 그걸 삼키면 설정 화면은 "설치 필요"라고만
+# 말한다. 사용자는 이미 설치한 SDK를 다시 설치하려 들고, 진짜 원인인 우리 버그는 로그
+# 한 줄로만 남는다. `ImportError.name`이 그 kind의 SDK(또는 하위 모듈)가 아니면 그대로 올린다.
+PROVIDER_SDK_MODULES: Mapping[ProviderKind, str] = MappingProxyType(
+    {
+        ProviderKind.ANTHROPIC: "anthropic",
+        ProviderKind.OPENAI: "openai",
+    }
+)
 
 # A-05(`llm_anthropic`)·A-06(`llm_openai`)이 자기 항목을 등록한다. 비어 있는 동안에도 설정
 # 화면은 두 종류를 모두 보여 주고 "설치 필요"로 표시한다(`ProviderProfileService.available_kinds`).
 PROVIDER_ADAPTER_FACTORIES: Mapping[ProviderKind, ProviderAdapterFactory] = MappingProxyType({})
+
+
+def is_missing_provider_sdk(kind: ProviderKind, error: ImportError) -> bool:
+    """이 `ImportError`가 "그 공급자 SDK가 안 깔렸다"는 뜻인가.
+
+    두 가지를 모두 만족해야 참이다.
+
+    1. `ModuleNotFoundError`다. 설치된 패키지 **안에서** 난 `ImportError`(예: SDK가 자기
+       의존성을 못 찾음)는 미설치가 아니라 깨진 설치이므로 숨기지 않는다.
+    2. `name`이 그 kind의 SDK 최상위 모듈이거나 그 하위 모듈이다. `anthropic.types` 같은
+       하위 모듈까지 포함하는 이유는 SDK가 지연 import를 쓰면 실패가 거기서 나기 때문이다.
+
+    `name`이 비어 있으면(드물지만 직접 만든 예외) 참이라고 단정하지 않는다 — 우리 버그를
+    미설치로 둔갑시키는 쪽보다 시끄러운 쪽이 낫다.
+    """
+    if not isinstance(error, ModuleNotFoundError):
+        return False
+    module = PROVIDER_SDK_MODULES.get(kind)
+    if module is None or not error.name:
+        return False
+    return error.name == module or error.name.startswith(f"{module}.")
+
 
 # 제안 YAML은 편집기와 같은 형식으로만 들어온다. 어시스턴트는 JSON 문서를 제안하지 않는다
 # (도구 스키마가 `source_format: "yaml"`을 고정한다).
@@ -143,8 +180,10 @@ class _LazyProviderRegistry(Mapping[ProviderKind, LlmProviderPort]):
     """등록된 팩토리를 **처음 필요할 때** 한 번만 부르는 공급자 맵.
 
     `ProviderProfileService`·`AssistantChatService`가 쓰는 조회는 `.get(kind)` 하나이고,
-    "없다"가 곧 "설치 안 됨"이다. 그래서 `ImportError`를 낸 kind는 없는 것으로 답한다 —
-    설정 화면의 "설치 필요"가 그 값에서 나온다(spec D4).
+    "없다"가 곧 "설치 안 됨"이다. 그래서 **그 공급자 SDK가 없다는 뜻의**
+    `ModuleNotFoundError`를 낸 kind만 없는 것으로 답한다(`is_missing_provider_sdk`) — 설정
+    화면의 "설치 필요"가 그 값에서 나온다(spec D4). 그 밖의 import 실패는 우리 버그이므로
+    그대로 올린다.
 
     `Mapping` 규약을 지키려고 `__contains__`·`__iter__`도 같은 해소를 탄다. `kind in registry`가
     참인데 `.get(kind)`가 `None`인 상태를 만들지 않기 위해서다.
@@ -182,13 +221,17 @@ class _LazyProviderRegistry(Mapping[ProviderKind, LlmProviderPort]):
             try:
                 provider = factory()
             except ImportError as error:
+                if not is_missing_provider_sdk(kind, error):
+                    # 우리 쪽 import 실수는 미설치가 아니다. 삼키면 화면이 "설치 필요"라고만
+                    # 말하고 진짜 원인은 로그에만 남는다.
+                    raise
                 # 사유는 로그에만 남긴다. "왜 설치 필요로 뜨지"를 답할 수 있어야 하고,
                 # 화면에는 열거된 상태(`installed=False`)만 나간다.
                 logger.info(
                     "provider adapter is not installed — kind=%s error_type=%s module=%s",
                     kind.value,
                     type(error).__name__,
-                    getattr(error, "name", None),
+                    error.name,
                 )
                 self._resolved[kind] = None
                 return None

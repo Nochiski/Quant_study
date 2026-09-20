@@ -14,6 +14,7 @@ DBS = {
     "kis":    os.path.join(RAW, "kis.db"),
     "dart":   os.path.join(RAW, "dart.db"),
     "wise":   os.path.join(RAW, "wisereport.db"),
+    "wiseindex": os.path.join(RAW, "wiseindex.db"),   # WICS 주간 스냅샷 원장(2026-09-20) — survey 대상 표는 없다
 }
 
 # (db, table, ticker_col, date_col, 자연키 후보 tuple|None)

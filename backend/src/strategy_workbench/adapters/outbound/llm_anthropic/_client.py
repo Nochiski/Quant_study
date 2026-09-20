@@ -23,6 +23,15 @@ Protocol이 쓰는 타입은 SDK의 실제 타입 그대로다(`MessageParam`, `
 
 클라이언트는 호출마다 `secret`으로 새로 만들고 보관하지 않는다(`LlmProviderPort` 계약). 그래서
 팩토리는 `(secret, base_url) -> client` 형태이지 미리 만들어 둔 클라이언트가 아니다.
+
+## SDK의 환경 변수 폴백을 막는다
+
+`base_url`과 `api_key`는 **언제나 명시한다**. SDK는 둘 다 인자가 없으면 `ANTHROPIC_BASE_URL`·
+`ANTHROPIC_API_KEY`를 읽는데, 그러면 사용자가 등록하지도 않은 호스트로 프로파일의 키가 나간다
+(spec D6의 base_url 검사를 **한 번도 지나지 않은** 호스트다). 화면은 정상으로 보인다.
+
+프로파일이 base_url을 말하지 않으면 `None`을 그대로 넘기지 말고 `DEFAULT_BASE_URL`을 넘겨
+환경 변수가 끼어들 자리를 없앤다. `api_key`도 프로파일 비밀만 쓰고 환경 변수 폴백이 없다.
 """
 
 from __future__ import annotations
@@ -44,6 +53,7 @@ from anthropic.types import (
 )
 
 __all__ = [
+    "DEFAULT_BASE_URL",
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_TIMEOUT_SECONDS",
     "AnthropicClientFactory",
@@ -73,6 +83,11 @@ DEFAULT_TIMEOUT_SECONDS = 120.0
 # SDK 기본값(2)을 그대로 쓴다. 429·5xx는 SDK가 지수 백오프로 재시도하고, 그래도 실패하면 예외가
 # 올라와 `_failures.py`가 `FailureCode`로 옮긴다.
 DEFAULT_MAX_RETRIES = 2
+
+# 프로파일이 base_url을 말하지 않을 때 쓰는 호스트. SDK 기본값과 같은 값이지만 **우리가
+# 명시해야** `ANTHROPIC_BASE_URL`이 끼어들지 못한다(모듈 docstring). 테스트가 이 상수와 SDK
+# 기본값이 같은지 고정하므로, SDK가 기본 호스트를 바꾸면 조용히 어긋나지 않고 빨개진다.
+DEFAULT_BASE_URL = "https://api.anthropic.com"
 
 
 class AnthropicMessageStream(Protocol):
@@ -203,8 +218,11 @@ def sdk_client_factory(
     def build(secret: str, base_url: str | None) -> AnthropicMessagesClient:
         return SdkMessagesClient(
             anthropic.Anthropic(
+                # 프로파일 비밀만 쓴다. 인자를 비우면 SDK가 `ANTHROPIC_API_KEY`를 읽는다.
                 api_key=secret,
-                base_url=base_url,
+                # `None`을 넘기면 SDK가 `ANTHROPIC_BASE_URL`을 읽어, spec D6 검사를 지나지
+                # 않은 호스트로 키가 나간다. 미지정은 기본 호스트를 **명시**한다.
+                base_url=base_url if base_url is not None else DEFAULT_BASE_URL,
                 timeout=timeout_seconds,
                 max_retries=max_retries,
             )

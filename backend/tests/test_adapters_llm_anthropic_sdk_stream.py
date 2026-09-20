@@ -34,7 +34,9 @@ import anthropic  # noqa: E402  # reason: 위 importorskip 뒤에야 안전하�
 import httpx2  # noqa: E402  # reason: 위와 같음 (anthropic이 끌고 오는 전송 계층)
 
 from strategy_workbench.adapters.outbound.llm_anthropic._client import (  # noqa: E402  # reason: 위와 같음
+    DEFAULT_BASE_URL,
     SdkMessagesClient,
+    sdk_client_factory,
 )
 from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (  # noqa: E402  # reason: 위와 같음
     AnthropicLlmAdapter,
@@ -190,3 +192,88 @@ def test_the_request_body_carries_the_tools_thinking_and_cache_breakpoints() -> 
     assert [message.get("cache_control") for message in body["messages"]] == [None]
     declared = [tool for tool in body["tools"] if "type" not in tool]
     assert all(tool["strict"] is True for tool in declared)
+
+
+# -- SDK 환경 변수 폴백 차단 -------------------------------------------------------------------
+
+
+def test_an_env_base_url_cannot_redirect_the_key_to_another_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ANTHROPIC_BASE_URL`이 프로파일 키를 남의 호스트로 보내면 안 된다.
+
+    프로파일이 base_url을 말하지 않을 때 SDK에 `None`을 넘기면 SDK가 이 환경 변수를 읽는다.
+    그 호스트는 spec D6의 base_url 검사를 **한 번도 지나지 않았고**, 화면에는 정상으로 보인다.
+    키 누설은 회수 경로가 없다.
+    """
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://evil.example.com")
+    seen: list[httpx2.Request] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, content=_text_turn_body("답")
+        )
+
+    def build(secret: str, base_url: str | None) -> AnthropicMessagesClient:
+        client = anthropic.Anthropic(
+            api_key=secret,
+            base_url=base_url if base_url is not None else DEFAULT_BASE_URL,
+            max_retries=0,
+            http_client=anthropic.DefaultHttpxClient(transport=httpx2.MockTransport(handle)),
+        )
+        return SdkMessagesClient(client)
+
+    adapter = AnthropicLlmAdapter(client_factory=build)  # pyright: ignore[reportArgumentType]  # reason: 로컬 팩토리는 구조만 맞춘다
+    list(
+        adapter.stream_turn(
+            SECRET,
+            make_profile(model=_MODEL, base_url=None),
+            make_request(),
+            lambda call: ToolResult(call_id=call.call_id, ok=True, content="{}"),
+            lambda: False,
+        )
+    )
+
+    assert len(seen) == 1
+    assert str(seen[0].url).startswith(DEFAULT_BASE_URL)
+    assert "evil.example.com" not in str(seen[0].url)
+
+
+def test_the_production_factory_pins_the_host_and_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """프로덕션 배선(`sdk_client_factory`)이 환경 변수를 읽지 않는다.
+
+    위 테스트는 로컬 팩토리를 쓰므로 진짜 배선이 같은 규칙을 지키는지는 따로 본다.
+    """
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://evil.example.com")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ENV-KEY-NOT-THE-PROFILE")
+
+    client = sdk_client_factory()(SECRET, None)
+
+    assert isinstance(client, SdkMessagesClient)
+    sdk = client._client  # pyright: ignore[reportPrivateUsage]  # reason: 배선을 밖에서 볼 창구가 없다
+    assert str(sdk.base_url).rstrip("/") == DEFAULT_BASE_URL
+    assert sdk.api_key == SECRET
+
+
+def test_an_explicit_profile_base_url_still_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://evil.example.com")
+
+    client = sdk_client_factory()(SECRET, "https://gateway.example.test")
+
+    assert isinstance(client, SdkMessagesClient)
+    sdk = client._client  # pyright: ignore[reportPrivateUsage]  # reason: 위와 같음
+    assert str(sdk.base_url).rstrip("/") == "https://gateway.example.test"
+
+
+def test_the_pinned_host_matches_the_sdk_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """상수가 SDK 기본값에서 조용히 갈라지지 않게 고정한다.
+
+    SDK가 기본 호스트를 바꾸면 우리 상수가 옛 호스트를 가리키게 되는데, 그건 "환경 변수를
+    막는다"와 별개의 사고다. 여기가 빨개져야 알아챈다.
+    """
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+
+    assert str(anthropic.Anthropic(api_key="sk-unused").base_url).rstrip("/") == DEFAULT_BASE_URL

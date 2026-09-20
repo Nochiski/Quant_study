@@ -651,7 +651,7 @@ const ko = {
   "strategy.field.node.right_node_id.description": "연산의 오른쪽 값입니다.",
   "strategy.field.node.window": "집계 기간",
   "strategy.field.node.window.description":
-    "집계에 쓸 세션 수입니다. 구간은 lag만큼 물린 자리에서 셉니다.",
+    "집계에 쓸 세션 수입니다. 구간은 건너뛰는 세션(lag)만큼 물린 자리에서 셉니다.",
   "strategy.field.node.lag": "건너뛰는 세션",
   "strategy.field.node.lag.description":
     "집계 구간의 끝을 오늘에서 이만큼 뒤로 물립니다. 구간은 t-lag-window+1부터 t-lag까지입니다.",
@@ -814,7 +814,7 @@ const ko = {
   "strategy.operator.unary.negate.formula": "-x",
   "strategy.operator.unary.lag": "며칠 전 값",
   "strategy.operator.unary.lag.description":
-    "같은 종목의 periods 세션 이전 값을 씁니다.",
+    "같은 종목의 미루는 세션(periods)만큼 이전 값을 씁니다.",
   "strategy.operator.unary.lag.formula": "x[t - periods]",
   "strategy.operator.binary.add": "더하기",
   "strategy.operator.binary.add.description": "두 값을 더합니다.",
@@ -830,32 +830,32 @@ const ko = {
   "strategy.operator.binary.divide.formula": "left ÷ right",
   "strategy.operator.time_series.mean": "기간 평균",
   "strategy.operator.time_series.mean.description":
-    "lag만큼 물린 window 구간의 평균입니다. 이동평균이 이것입니다.",
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 평균입니다. 이동평균이 이것입니다.",
   "strategy.operator.time_series.mean.formula":
     "mean(x[t-lag-window+1 … t-lag])",
   "strategy.operator.time_series.std": "기간 표준편차",
   "strategy.operator.time_series.std.description":
-    "lag만큼 물린 window 구간이 얼마나 출렁였는지 봅니다.",
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)이 얼마나 출렁였는지 봅니다.",
   "strategy.operator.time_series.std.formula":
     "stdev(x[t-lag-window+1 … t-lag])",
   "strategy.operator.time_series.momentum": "기간 수익률",
   "strategy.operator.time_series.momentum.description":
-    "lag만큼 물린 window 구간의 첫 값 대비 마지막 값 변화율입니다. window 252, lag 21이 12-1 모멘텀입니다.",
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 첫 값 대비 마지막 값 변화율입니다. 집계 기간 252, 건너뛰는 세션 21이 12-1 모멘텀입니다.",
   "strategy.operator.time_series.momentum.formula":
     "x[t-lag] / x[t-lag-window+1] - 1",
   "strategy.operator.time_series.delta": "기간 변화량",
   "strategy.operator.time_series.delta.description":
-    "lag만큼 물린 window 구간의 첫 값과 마지막 값 차이입니다.",
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 첫 값과 마지막 값 차이입니다.",
   "strategy.operator.time_series.delta.formula":
     "x[t-lag] - x[t-lag-window+1]",
   "strategy.operator.time_series.min": "기간 최솟값",
   "strategy.operator.time_series.min.description":
-    "lag만큼 물린 window 구간에서 가장 작은 값입니다.",
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)에서 가장 작은 값입니다.",
   "strategy.operator.time_series.min.formula":
     "min(x[t-lag-window+1 … t-lag])",
   "strategy.operator.time_series.max": "기간 최댓값",
   "strategy.operator.time_series.max.description":
-    "lag만큼 물린 window 구간에서 가장 큰 값입니다.",
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)에서 가장 큰 값입니다.",
   "strategy.operator.time_series.max.formula":
     "max(x[t-lag-window+1 … t-lag])",
   "strategy.operator.cross_sectional.rank": "순위",
@@ -871,7 +871,7 @@ const ko = {
   "strategy.operator.cross_sectional.winsorize.description":
     "같은 날 위아래 극단값을 분위 값으로 눌러 줍니다.",
   "strategy.operator.cross_sectional.winsorize.formula":
-    "clip(x, lower_quantile 분위, upper_quantile 분위)",
+    "clip(x, lower_quantile, upper_quantile)",
   "strategy.operator.cross_sectional.demean": "평균 빼기",
   "strategy.operator.cross_sectional.demean.description":
     "같은 날 유니버스 평균을 뺍니다.",
@@ -2151,12 +2151,12 @@ export const messages = {
       "stdev(x[t-lag-window+1 … t-lag])",
     "strategy.operator.time_series.momentum": "Momentum",
     "strategy.operator.time_series.momentum.description":
-      "Change from the first to the last value of that window; window 252 with lag 21 is 12-1 momentum.",
+      "Change across the window sessions ending lag sessions back; window 252 with lag 21 is 12-1 momentum.",
     "strategy.operator.time_series.momentum.formula":
       "x[t-lag] / x[t-lag-window+1] - 1",
     "strategy.operator.time_series.delta": "Delta",
     "strategy.operator.time_series.delta.description":
-      "Difference between the first and last value of that window.",
+      "Difference across the window sessions ending lag sessions back.",
     "strategy.operator.time_series.delta.formula":
       "x[t-lag] - x[t-lag-window+1]",
     "strategy.operator.time_series.min": "Minimum",

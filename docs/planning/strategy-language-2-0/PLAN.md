@@ -3,13 +3,13 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P2-01
-active_prs: [P0-01, P1-01, P1-02, P2-01]
-parallel_window: [P0-01, P1-01, P1-02, P2-01]
-last_updated: 2026-09-21T07:28:39+09:00
+current_pr: P0-01,P1-01,P1-02,P1-03,P2-01
+active_prs: [P0-01, P1-01, P1-02, P1-03, P2-01]
+parallel_window: [P0-01, P1-01, P1-02, P1-03, P2-01]
+last_updated: 2026-09-21T07:45:41+09:00
 planned_prs: 28
 merged_prs: 0
-approved_prs: 2
+approved_prs: 3
 progress_percent: 0
 ---
 
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P2-01` |
-| Active PR | `P0-01, P1-01, P1-02, P2-01` |
+| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P2-01` |
+| Active PR | `P0-01, P1-01, P1-02, P1-03, P2-01` |
 | Progress | `0 / 28 merged (0%)` |
-| Approved | `2 / 28` |
-| Aggregated at | `2026-09-21 07:28 KST` |
+| Approved | `3 / 28` |
+| Aggregated at | `2026-09-21 07:45 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -121,7 +121,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `IN_REVIEW` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `review_lang2_p1_01` 1·2차 APPROVE(blocking 0), 후속 8건 반영 · 게이트: typecheck·lint·Vitest 658·build·e2e 19/19 |
 | [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `APPROVED` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE (1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2) |
-| [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `WAITING` | — |
+| [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `APPROVED` | [#177](https://github.com/Nochiski/Quant_study/pull/177) · `review_lang2_p1_03` 2차 APPROVE(1차 REQUEST_CHANGES 반영, 돌연변이 7건 실패 확인), 2차 P3 4건 후속 |
 | [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `WAITING` | — |
 | [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `WAITING` | — |
 
@@ -221,6 +221,9 @@ Phase exit:
 | `P1-02` | `review_lang2_p1_02` | 3차 | `REQUEST_CHANGES` | 링 클립은 해소됐으나(도장 픽셀·기하 양쪽 확인) 해법의 부작용 1건. **P2**: 스크롤포트를 위아래 8px 넓힌 `padding-block`+음수 `margin-block`이, 툴바 액션 줄과 탭 줄 사이 2px 간격을 넘어 검증 버튼 하단 6px을 덮어 그 영역 클릭을 가로챈다(28px 버튼의 21%가 무표시 사각지대). → padding·음수 margin을 걷고 링을 `outline-offset: -2px`로 탭 안쪽에 그려 해소, 검증 버튼 하단 actionability e2e 단언 추가(직전 해법에서 실패 확인). 리뷰어는 2차의 "겹침은 480px 이하에서만" 판단을 실제 앱 계측으로 철회(1440px에서 이미 넘침) — `overflow-x` 유지 결정 확정 |
 | `P1-02` | `review_lang2_p1_02` | 4차 | `APPROVE` | 코드 결함 0. 3차 P2(검증 버튼 하단 6px 클릭 가로채기)가 inset outline 교체로 해소되고, 회귀를 막는 e2e actionability 단언이 시각 project 4개에서 돈다. `overflow-x: auto` 유지, 탭 줄 한 줄·밑줄·`aria-disabled` 스타일·날짜 입력 단축키 모두 그대로. PR 본문 항목(spec D9, SoT와 어긋난 문장, 줄 수 근거, 테스트 수치)은 리드가 정정 |
 
+| `P1-03` | `review_lang2_p1_03` | 1차 | `REQUEST_CHANGES` | 차단 2 · P2 2 · P3 7. **차단1**: `messages.ts`의 `en` 블록이 한글 계산식 6개를 담아 영어 화면에 한글이 떴다 — `satisfies Record<MessageKey, string>`는 키 존재만 보고 커버리지 테스트는 ko만 조회해서 타입·테스트·lint 어디도 잡지 않았다. **차단2**: 시간축 연산자 6개의 계산식·설명이 `lag`를 빠뜨려 엔진의 창(`x[t-lag-window+1 … t-lag]`, `_evaluation.py:388-407`)과 어긋났다 — 12-1 모멘텀을 화면대로 만들면 11-0이 되는데 백테스트는 통과한다. **P2**: `output_type_rule` 대조 테스트가 입력이 항상 숫자 시계열이라 세 규칙이 한 값으로 접혀 공회전(mutation 2건 미검출), 선언 순서 테스트가 레지스트리에서 파생한 값끼리 비교하는 동어반복. 전부 반영 |
+| `P1-03` | `review_lang2_p1_03` | 2차 | `APPROVE` | 차단 0. 1차 findings 전부 해소 확인, 돌연변이 7건이 모두 실패하는 것을 실증. 새 P3 4건(en `momentum`·`delta` 문장 자족성, ko 산문의 식별자 호칭, e2e의 산문 고정, WORKFLOW 줄바꿈)은 후속 커밋에서 반영. 스코프 밖 관찰(`_registry.py` 12-1 모멘텀 시드 `history=252` ↔ 그래프 최소 이력 273)은 BACKLOG-001로 기록 |
+
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
@@ -296,6 +299,36 @@ Phase exit:
   P2-04·P2-05·P2-06에 OpenAPI 재생성 항목을 넣고, 같은 분류 착오가 걸리는 P2-02(`missing_policy`
   제거)·P2-07(카탈로그 `availability`)에도 같은 줄을 넣었다. P2-03 경로 목록에 `template()`과 12절
   재점검 문장을 추가했다. PR 수는 그대로 28.
+- 2026-09-21 — P1-03 구현·1차 리뷰 반영·2차 APPROVE: PR #177. 연산자 정의 레지스트리
+  (`domain/factor/_operators.py`, 키 `(kind, operator)` 23개)와 runtime schema의 `x-description-key`·
+  `x-operator`, `GET /api/v1/strategy-documents/operators`를 backend가 소유하고 화면 어휘 문장은
+  frontend i18n이 렌더한다. Form·Graph 라벨이 키 대신 이름을 보인다. 1차 리뷰가 잡은 차단 2건
+  (en 로케일 한글 계산식, 시간축 계산식의 `lag` 누락)과 공회전하던 `output_type_rule` 대조 테스트를
+  고치고 2차 APPROVE. 스코프 밖 관찰은 BACKLOG-001.
+
+## 관찰 backlog (담당 PR 예약)
+
+리뷰어가 자기 스코프 밖에서 관찰한 결함. 관찰한 PR에서 고치지 않고 담당 PR에 붙인다.
+
+### BACKLOG-001: 12-1 모멘텀 시드의 `history`가 그래프가 요구하는 이력보다 21 세션 짧다
+
+- **상황**: `domain/factor/_registry.py`의 팩터 카탈로그 시드와 같은 파일의 구현 그래프.
+  `price.momentum_12_1` 시드는 `history=252`를 선언하는데, 그 팩터의 그래프는
+  `TimeSeriesNode(window=252, lag=21)`이다. P1-03 2차 리뷰가 관찰했다(수정 범위 밖).
+- **인풋**:
+  1. `_implemented_graphs()["price.momentum_12_1"]`를 꺼낸다.
+  2. `validate_factor_graph(graph, fields=(price.close numeric_series,))`를 부른다.
+  3. `minimum_history_sessions`가 `273`으로 나온다. 시드가 선언한 값은 `252`다.
+- **에러 위치**: `backend/src/strategy_workbench/domain/factor/_registry.py:154-162`(시드
+  `history=252`) ↔ `:103-117`(그래프 `window=252`, `lag=21`). 계산 주체는
+  `domain/factor/_validation.py`의 `history += node.window - 1 + node.lag`다.
+- **위험성**: `history`는 필드 이력이 팩터 최소 이력보다 짧은지 판정하는 기준
+  (`factor.graph.insufficient_history`)이자 카탈로그 표시 값이다. 21 세션 모자란 값을 선언하면
+  워밍업이 짧은 데이터에서 그 진단이 뜨지 않은 채 앞 구간이 조용히 결측이 되거나 창이 덜 찬
+  첫 값이 나간다. 백테스트는 통과하고 화면에도 경고가 없다 — silent 결측/잘못된 첫 값이다.
+  12-1 모멘텀은 spec D1의 완료 정의 "퀀트 아이디어 5개"의 첫 번째라 노출이 크다.
+- **재현 test**: 없음(관찰만). 담당 PR이 시드 ↔ 그래프 최소 이력 동치 테스트를 함께 둔다.
+- **담당**: `P2-06`(`risk.risk_factor_id`·`saved_*` 제거로 레지스트리를 건드리는 PR).
 
 ## 갱신 절차
 

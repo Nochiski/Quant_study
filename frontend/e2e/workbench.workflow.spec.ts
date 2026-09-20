@@ -1108,9 +1108,9 @@ test.describe("professional YAML workflow", () => {
 
     // 재연결: mom_252의 입력을 새 노드로.
     await editor.getByRole("button", { name: "노드 편집: mom_252" }).click();
-    // 연산자 설명·계산식은 엔진의 창(`x[t-lag-window+1 … t-lag]`)과 같아야 한다(P1-03 1차 리뷰 P2).
-    // 실제 브라우저에서 사전이 이 문장을 렌더하는지 여기서 한 번 확인한다.
-    await expect(selected).toContainText("lag만큼 물린 window 구간");
+    // 계산식은 엔진의 창(`x[t-lag-window+1 … t-lag]`)과 같아야 한다(P1-03 1차 리뷰 P2). 표기법이라
+    // 문구 다듬기에 흔들리지 않으므로 이 한 줄만 고정한다 — 사전이 브라우저에서 렌더된다는
+    // 사실은 이것으로 증명된다. 산문 문장은 `screen-vocabulary.test.ts`가 소유한다.
     await expect(selected).toContainText("x[t-lag] / x[t-lag-window+1] - 1");
     await selected
       .getByRole("combobox", { name: /\binput_node_id/ })

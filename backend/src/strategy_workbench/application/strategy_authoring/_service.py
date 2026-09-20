@@ -23,6 +23,10 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import Any
 
+from strategy_workbench.domain.backtest.facade.environment import (
+    run_environment_schema,
+    run_environment_schema_hash,
+)
 from strategy_workbench.domain.strategy.facade.document import (
     hydrate_strategy_document,
     is_legacy_document,
@@ -136,6 +140,19 @@ class StrategyDocumentSchema:
 
 
 @dataclass(frozen=True)
+class RunEnvironmentSchema:
+    """실행 설정(`RunEnvironment`)의 런타임 JSON Schema; `schema_hash` 가 ETag 다.
+
+    전략 authoring 문서 스키마(`StrategyDocumentSchema`)와 별개 산출물이다 — 문서에는
+    `schema_version` 이 있고 실행 설정에는 없다. 프론트 실행 설정 패널이 기본값·enum 을 손으로
+    적지 않게 하는 경로다(spec D6).
+    """
+
+    schema_hash: str
+    schema: dict[str, Any]  # reason: JSON Schema 는 DTO 가 아니라 열린 문서다
+
+
+@dataclass(frozen=True)
 class StrategyDocumentContract:
     """Per-field authoring contract plus the registry versions the schema was built against.
 
@@ -183,6 +200,15 @@ class StrategyAuthoringService:
     def schema(self) -> StrategyDocumentSchema:
         """Runtime schema derived from the model and the constraint catalog (pure, cached)."""
         return self._schema
+
+    @cached_property
+    def _run_environment_schema(self) -> RunEnvironmentSchema:
+        schema = run_environment_schema()
+        return RunEnvironmentSchema(schema_hash=run_environment_schema_hash(schema), schema=schema)
+
+    def run_environment_schema(self) -> RunEnvironmentSchema:
+        """실행 설정의 런타임 스키마(`domain/backtest` 소유 모델에서 유도, 순수·캐시)."""
+        return self._run_environment_schema
 
     @cached_property
     def _fields(self) -> tuple[FieldContract, ...]:

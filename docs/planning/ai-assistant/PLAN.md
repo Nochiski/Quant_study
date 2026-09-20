@@ -6,10 +6,10 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03]
-last_updated: 2026-09-21T02:00:41+09:00
+last_updated: 2026-09-21T02:03:10+09:00
 planned_prs: 13
 merged_prs: 0
-approved_prs: 4
+approved_prs: 5
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03` |
 | Progress | `0 / 13 merged (0%)` |
-| Approved | `4 / 13` |
-| Aggregated at | `2026-09-21 02:00 KST` |
+| Approved | `5 / 13` |
+| Aggregated at | `2026-09-21 02:03 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -97,7 +97,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `APPROVED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
-| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_REVIEW` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `439f9411`(A-03 `d52436b7` 위, 후속 3커밋) · `review_ai_a_04` 1차 APPROVE WITH CHANGES 반영 → 2차 재검토 중 |
+| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `APPROVED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `439f9411`(+P3 후속 1) · `review_ai_a_04` 2차 APPROVE(P3 4 후속 커밋) · CI 대기 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_REVIEW` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `5640f8d2`(A-04 `645efcb` 위) · `86fc460a`(645efcb 위 6커밋: P0·P1·P2·P3 반영, extra 없이 수집 확인) · `review_ai_a_05` 1차 REQUEST_CHANGES → 반영, A-04 새 tip 위 rebase·등록 재작성·`Usage` 캐시 필드·no-extras CI job 뒤 2차 |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`19331e4a`, A-05 `5640f8d2` 위 8커밋, pytest 1843·ruff·pyright 0, A-05 리뷰 결정 4건 대칭 적용) · 기본 모델 `gpt-6-astra` · A-05 재작성 뒤 rebase·push → PR |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `IN_PROGRESS` | 구현 1차 완료(로컬 `cb429ed3`, A-05 위: 골든 fixture·live smoke 스크립트·기본값 근거) · 추가 지시: 세션 Usage 집계, 시나리오 fixture 3개(SSE 프레임 배열) → A-06 tip 위 rebase 예정 · live smoke 미실행(키 없음, 사용자 실행 필요) |
@@ -142,6 +142,7 @@ Phase exit:
 | A-04 | `review_ai_a_04` | 1 | APPROVE WITH CHANGES | P1 1(`assistant.document_ref_invalid`가 OpenAPI·SDK에 없음), P2 3(이력 읽기 순서, SSE payload `unknown`, 레지스트리 즉시 호출·미설치 표현), P3 7 → 반영. `_finish` 순서 변경은 A-02 불변 4개 유지 확인 |
 | A-05 | `review_ai_a_05` | 1 | REQUEST_CHANGES | P0 1(`output_format=None`이 SDK 센티널 아님 → live에서 모든 텍스트 블록 `ValidationError`, 대본이 `_client.py`를 안 지나 미검출), P1 1(검색 상한 호출당 집행), P2 3(`llm` extra 없이 수집 깨짐, 로그 키 테스트 부재, 미사용 `DEPENDS_ON`), P3 6 → 반영. SDK 표면은 설치본 1.7.0과 전부 일치 |
 | B-01 | `review_ai_b_01` | 1 | REQUEST_CHANGES | P1 1(제출한 API 키가 react-query mutation cache `variables.secret`에 잔류 → 키 실은 요청은 mutation 미사용), P2 2(고급 접힘 시 base_url 전송, 삭제 확인 포커스·announce). FSD·i18n·서버 문구 미노출·스크린샷 OK |
+| A-04 | `review_ai_a_04` | 2 | APPROVE | 1차 11건 중 10 해소·1 근거 보류. `PROVIDER_SDK_MODULES` 표·라이브 SSE 테스트가 권고보다 나음. 새 P3 4(하위 모듈 오분류, pyright ignore, 실패 시 스레드 정리, 공개 setter) → 후속 커밋 |
 
 ## 검증 기록
 

@@ -2,7 +2,7 @@
 
 - **작성일**: 2026-09-19
 - **상태**: 구현 완료(2026-09-19) — `database/src/ledger_sync/`, `frontend/e2e/workbench.real-equity.spec.ts`. 실측은 `database/docs/LEDGER_SYNC.md` §4·PR 본문
-- **대상**: 카엘 서버(`210.217.23.47`, 계정 `quantshare`, SFTP 전용·읽기 전용)의 `equity` 층을 로컬로
+- **대상**: 카엘 서버(주소는 `QL_SYNC_HOST`, 계정 `quantshare`, SFTP 전용·읽기 전용)의 `equity` 층을 로컬로
   받아 워크벤치·엔진이 읽게 하고, 이후 매일 증분으로 따라가며, 실데이터 위에서 그래프를 편집한 전략의
   백테스트를 E2E 로 검증한다.
 

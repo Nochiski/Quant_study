@@ -5,7 +5,7 @@
 
 ## 0. 한 문장
 
-서버(`210.217.23.47`, 계정 `quantshare`, SFTP 전용·읽기 전용)의 `equity/<table>/MANIFEST.json` 이
+서버(주소는 `QL_SYNC_HOST` 로 지정 — 공개 저장소라 적지 않는다, 계정 `quantshare`, SFTP 전용·읽기 전용)의 `equity/<table>/MANIFEST.json` 이
 가리키는 current_build 파티션만 받아 `~/quant-ledger/data/equity/` 에 서버와 같은 규약으로 두고,
 매일 한 번 새 빌드를 따라가며 세 층위(판본·파일·내용)로 같은지 확인한다.
 
@@ -28,7 +28,7 @@ database\scripts\register_daily_sync.ps1
 래퍼는 backend 프로젝트 환경(`uv sync --extra parquet --extra equity`)에 paramiko 만 얹어
 `python -m ledger_sync` 를 돈다. 접속 정보는 `--host/--port/--user/--key` 또는 `QL_SYNC_HOST`·
 `QL_SYNC_PORT`·`QL_SYNC_USER`·`QL_SYNC_KEY`, 로컬 루트는 `--root` 또는 `QL_SYNC_ROOT`(기본
-`~/quant-ledger/data`).
+`~/quant-ledger/data`). **서버 주소만은 기본값이 없다** — 공개 저장소라 코드에 두지 않는다. Windows 는 `setx QL_SYNC_HOST <주소>` 로 사용자 환경변수에 한 번 넣는다(예약 작업 `register_daily_sync.ps1` 은 `$PROFILE` 을 읽지 않으므로 `setx` 여야 한다 — 넣은 뒤 새 창부터 적용). macOS·Linux 는 셸 프로필에 `export QL_SYNC_HOST=<주소>`. 일회성이면 `--host` 로 준다. 빠지면 원격 명령(plan·pull·verify·sync)은 접속 전에 `error: server host is not set` 으로 끝나고, 로컬 명령(status·gc·catalog·`verify --offline`)은 그대로 돈다.
 
 **신뢰 경계**: 서버가 주는 이름(build_id·파티션 경로·파일 이름)은 그대로 로컬 경로 조각이 되므로
 `layout.is_safe_segment` 문법(`[A-Za-z0-9_][A-Za-z0-9._=%-]*`) 밖이면 그 테이블을 받지 않는다. `--accept-new`

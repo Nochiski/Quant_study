@@ -43,8 +43,12 @@ def remote(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeRemote:
     return fake
 
 
+# RFC 5737 문서용 주소 — 공개 저장소라 실제 서버 주소는 코드·테스트 어디에도 두지 않는다.
+TEST_HOST = "203.0.113.10"
+
+
 def _base(root: Path) -> list[str]:
-    return ["--root", str(root), "--layer", "equity"]
+    return ["--root", str(root), "--layer", "equity", "--host", TEST_HOST]
 
 
 def test_plan_pull_status_round_trip(remote: FakeRemote, tmp_path: Path, capsys) -> None:
@@ -183,9 +187,9 @@ def test_accept_new_appends_one_line_without_rewriting_known_hosts(tmp_path: Pat
 
     known = tmp_path / "known_hosts"
     known.write_text("# comment\n@revoked host ssh-rsa AAAA\n", encoding="utf-8")
-    append_known_host(known, "210.217.23.47", "ssh-ed25519", "AAAAC3")
+    append_known_host(known, TEST_HOST, "ssh-ed25519", "AAAAC3")
     assert known.read_text(encoding="utf-8") == (
-        "# comment\n@revoked host ssh-rsa AAAA\n210.217.23.47 ssh-ed25519 AAAAC3\n")
+        f"# comment\n@revoked host ssh-rsa AAAA\n{TEST_HOST} ssh-ed25519 AAAAC3\n")
 
 
 def test_sync_records_failure_when_an_unexpected_exception_escapes(remote: FakeRemote,
@@ -269,3 +273,22 @@ def test_log_rotation_keeps_the_newest_by_mtime(tmp_path: Path) -> None:
     cli._rotate_logs(tmp_path / "equity")
     left = sorted(p.name for p in log_dir.glob("*.log"))
     assert len(left) == cli.LOG_KEEP and "sync_000.log" in left and "sync_062.log" not in left
+
+
+def test_remote_verbs_fail_loudly_without_a_host(remote: FakeRemote, tmp_path: Path, capsys,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    """서버 주소는 기본값이 없다 — 빠지면 접속을 시도하지 않고 무엇을 설정할지 말하며 끝난다."""
+    monkeypatch.delenv("QL_SYNC_HOST", raising=False)
+    no_host = ["--root", str(tmp_path), "--layer", "equity"]
+    assert cli.main([*no_host, "plan"]) == cli.EXIT_ERROR
+    err = capsys.readouterr().err
+    assert "QL_SYNC_HOST" in err and "--host" in err
+
+
+def test_local_verbs_do_not_need_a_host(tmp_path: Path, capsys,
+                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """status 는 로컬 상태만 읽는다 — 서버 주소 없이도 돌아야 한다."""
+    monkeypatch.delenv("QL_SYNC_HOST", raising=False)
+    no_host = ["--root", str(tmp_path), "--layer", "equity"]
+    assert cli.main([*no_host, "--json", "status"]) == cli.EXIT_OK
+

@@ -55,7 +55,6 @@ EXIT_ERROR = 2
 EXIT_DRIFTED = 3
 EXIT_MISMATCH = 4
 
-DEFAULT_HOST = "210.217.23.47"
 DEFAULT_USER = "quantshare"
 DEFAULT_KEY = "~/.ssh/kael_quant"
 DEFAULT_ROOT = "~/quant-ledger/data"
@@ -73,6 +72,10 @@ def _env(name: str, default: str) -> str:
 
 
 def _endpoint(args: argparse.Namespace) -> SftpEndpoint:
+    if not args.host:
+        raise RemoteConnectError(
+            "server host is not set — pass --host or set QL_SYNC_HOST "
+            f"(verb={args.verb}, user={args.user}, port={args.port})")
     return SftpEndpoint(host=args.host, user=args.user, key_path=Path(args.key).expanduser(),
                         port=args.port)
 
@@ -599,7 +602,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"로컬 데이터 루트(기본 $QL_SYNC_ROOT 또는 {DEFAULT_ROOT})")
     parser.add_argument("--layer", choices=LAYERS, default="equity")
     parser.add_argument("--remote-root", default="/", help="서버 SFTP 루트(기본 /)")
-    parser.add_argument("--host", default=_env("QL_SYNC_HOST", DEFAULT_HOST))
+    parser.add_argument("--host", default=_env("QL_SYNC_HOST", ""),
+                        help="서버 주소(기본 $QL_SYNC_HOST). 공개 저장소라 기본값을 두지 않는다")
     parser.add_argument("--port", type=int, default=int(_env("QL_SYNC_PORT", "22")))
     parser.add_argument("--user", default=_env("QL_SYNC_USER", DEFAULT_USER))
     parser.add_argument("--key", default=_env("QL_SYNC_KEY", DEFAULT_KEY))

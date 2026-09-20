@@ -7,7 +7,7 @@
 #
 # backend 프로젝트 환경(duckdb·pyarrow — `uv sync --extra parquet --extra equity`)에 paramiko 만
 # 얹어 `python -m ledger_sync` 를 돈다. `equity catalog` 위임도 같은 인터프리터를 쓴다.
-# 접속 정보 기본값: 210.217.23.47 / quantshare / ~/.ssh/kael_quant. 환경변수 QL_SYNC_* 로 바꾼다.
+# 서버 주소는 기본값이 없다 — QL_SYNC_HOST 필수(공개 저장소). 계정·키 기본값: quantshare / ~/.ssh/kael_quant (QL_SYNC_*).
 # 로컬 루트 기본값: ~/quant-ledger/data (QL_SYNC_ROOT).
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")

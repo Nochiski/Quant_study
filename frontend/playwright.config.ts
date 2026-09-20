@@ -2,6 +2,12 @@ import { defineConfig } from "@playwright/test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  backendOrigin,
+  backendPort,
+  previewOrigin,
+  previewPort,
+} from "./e2e/ports.mjs";
 import { runtimeDatabasePath } from "./e2e/runtime";
 
 const frontendDirectory = dirname(fileURLToPath(import.meta.url));
@@ -15,6 +21,9 @@ const ci = process.env.CI !== undefined;
 // STRATEGY_WORKBENCH_EQUITY_* 는 여기서 덮어써 릴리스 게이트가 실데이터로 돌지 않게 한다.
 const realEquityRoot = process.env.E2E_REAL_EQUITY_ROOT ?? "";
 const realEquity = realEquityRoot !== "";
+// 워크트리마다 다른 포트를 줄 수 있다(`e2e/ports.mjs`). 설정·webServer·spec 이 같은 값을 읽는다.
+const backend = backendOrigin();
+const preview = previewOrigin();
 
 const chromiumUse = (
   width: 1440 | 1920,
@@ -77,7 +86,7 @@ export default defineConfig({
     },
   },
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: preview,
     locale: "ko-KR",
     timezoneId: "Asia/Seoul",
     // `locale` 은 navigator.language 와 Intl 만 바꾼다. Windows Chromium 의
@@ -94,7 +103,8 @@ export default defineConfig({
       // `.venv` 안 파일 변경 감지가 곧바로 재시작을 일으켜 브라우저 게이트가 한 번도
       // 통과하지 못했다. E2E 는 코드가 바뀌지 않으므로 같은 앱을 reload 없이 띄운다.
       command:
-        "uv run uvicorn strategy_workbench.bootstrap.facade.http:build_runtime_http_app --factory --host 127.0.0.1 --port 8000",
+        "uv run uvicorn strategy_workbench.bootstrap.facade.http:build_runtime_http_app " +
+        `--factory --host 127.0.0.1 --port ${backendPort()}`,
       cwd: backendDirectory,
       env: {
         ...process.env,
@@ -102,16 +112,16 @@ export default defineConfig({
         STRATEGY_WORKBENCH_EQUITY_ADAPTER: realEquity ? "duckdb" : "mock",
         STRATEGY_WORKBENCH_EQUITY_ROOT: realEquityRoot,
       },
-      url: "http://localhost:8000/api/v1/health",
+      url: `${backend}/api/v1/health`,
       reuseExistingServer: false,
       timeout: 120_000,
       stdout: "pipe",
       stderr: "pipe",
     },
     {
-      command: "npm run preview -- --host 127.0.0.1 --port 5173 --strictPort",
+      command: `npm run preview -- --host 127.0.0.1 --port ${previewPort()} --strictPort`,
       cwd: frontendDirectory,
-      url: "http://localhost:5173",
+      url: preview,
       reuseExistingServer: false,
       timeout: 120_000,
       stdout: "pipe",

@@ -1,7 +1,33 @@
 # Browser release gate
 
 Playwright owns both ports and starts the real FastAPI server with an isolated temporary SQLite
-repository plus the production Vite preview. Stop local servers on ports 5173 and 8000 first.
+repository plus the production Vite preview.
+
+## One run per machine
+
+`npm run test:e2e` takes a machine-wide lock (`quant-e2e.lock` in the OS temp directory) before it
+starts anything, and waits if another checkout holds it. Do not bypass it by calling `playwright
+test` directly.
+
+The lock exists because `reuseExistingServer: false` only checks the port at startup. If a second
+worktree grabs port 8000 in the window between that check and our uvicorn binding, our backend dies
+and Playwright proceeds against the other checkout's server, which answers the health probe. The
+browser then tests somebody else's code. That failed loudly for us once, with stale English
+diagnostics on screen, but the dangerous case is the one that passes.
+
+A lock left behind by a killed run is reclaimed automatically: the holder's pid is recorded and
+checked for liveness. `e2e/lock.test.mjs` pins those rules.
+
+Two further guards back it up. The runner refuses to start when either port is already bound, so a
+stray dev server produces a clear error instead of a silent reuse. And `PW_BACKEND_PORT` /
+`PW_PREVIEW_PORT` move both ports, so a worktree can have its own pair:
+
+```text
+PW_BACKEND_PORT=18000 PW_PREVIEW_PORT=15173 npm run test:e2e
+```
+
+Both values come from `e2e/ports.mjs`, which is also what the build reads for the API base URL
+baked into the bundle. Never spell a port literally anywhere else.
 
 From `frontend`:
 

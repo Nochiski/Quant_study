@@ -1,9 +1,27 @@
 import react from "@vitejs/plugin-react";
 import { configDefaults, defineConfig } from "vitest/config";
 
+import {
+  backendOrigin,
+  backendPort,
+  DEFAULT_BACKEND_PORT,
+} from "./e2e/ports.mjs";
+
+// 브라우저 번들의 backend 주소는 빌드 때 박힌다(`VITE_API_BASE_URL`). E2E 가 포트를 옮겼는데 이
+// 값만 기본 포트로 남으면 브라우저가 옆 워크트리의 backend 를 부른다 — 서버는 우리 것인데 화면만
+// 남의 것인, 가장 찾기 어려운 조합이다. 그래서 포트 상수 하나에서 함께 나오게 한다.
+if (
+  process.env.VITE_API_BASE_URL === undefined &&
+  backendPort() !== DEFAULT_BACKEND_PORT
+) {
+  process.env.VITE_API_BASE_URL = backendOrigin();
+}
+
 // Browser scenarios have their own real-server Playwright lifecycle and must never be
 // collected into the jsdom unit/integration runner. 제외 목록의 정본은 이 상수 하나다.
-const EXCLUDE = [...configDefaults.exclude, "e2e/**"];
+// Playwright spec 만 뺀다. `e2e/` 의 잠금·포트 유틸은 단위 테스트가 있는 평범한 모듈이라
+// vitest 가 수집해야 한다(`e2e/lock.test.mjs`).
+const EXCLUDE = [...configDefaults.exclude, "e2e/**/*.spec.ts"];
 /**
  * 워커 경합에 민감한 테스트 파일 — `routes` 프로젝트로 나머지가 끝난 뒤 혼자 돈다(아래 `projects`). 단독 실행이
  * 1분을 넘기는 page 트리 테스트가 새로 생기면 여기에 더한다.

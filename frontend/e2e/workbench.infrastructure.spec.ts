@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { getHealth } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
+import { backendOrigin } from "./ports.mjs";
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = readFileSync(
@@ -14,7 +15,7 @@ const GOLDEN = readFileSync(
   ),
   "utf8",
 );
-const apiClient = createClient({ baseUrl: "http://localhost:8000" });
+const apiClient = createClient({ baseUrl: backendOrigin() });
 
 const EDITOR_CHUNK = /\/assets\/code-editor-view-[^/]+\.js(?:\?.*)?$/u;
 const FONT_ASSETS = {

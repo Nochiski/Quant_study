@@ -699,9 +699,13 @@ const FormFieldRow = ({
       <code className="strategy-form__key">{field.key}</code>
       {field.required ? <span aria-hidden="true"> *</span> : null}
       {(field.displayUnit ?? field.unit) ? (
-        <span className="strategy-form__unit">
-          {` · ${field.displayUnit ?? field.unit}`}
-        </span>
+        <>
+          {/* 키와 단위 사이 공백도 형제 text node다 — 요소 안에 두면 "key· %"로 붙어 읽힌다. */}
+          {" "}
+          <span className="strategy-form__unit">
+            {`· ${field.displayUnit ?? field.unit}`}
+          </span>
+        </>
       ) : null}
     </>
   );

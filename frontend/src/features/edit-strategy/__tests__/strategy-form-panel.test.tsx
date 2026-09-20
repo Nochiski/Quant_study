@@ -85,11 +85,11 @@ const section = (name: string) =>
   within(screen.getByRole("group", { name: new RegExp(`(^|[^\\w])${name}`) }));
 
 /**
- * 컨트롤의 접근성 이름은 `<이름><key>[· <unit>]`이다 — accname은 인라인 요소 사이에 공백을 넣지
- * 않는다. `_`는 낱말 문자라 `selection_count`가 `short_selection_count`에 걸리지 않는다.
+ * 컨트롤의 접근성 이름은 `<이름> <key>[ · <unit>]`이다. `_`는 낱말 문자라 `selection_count`가
+ * `short_selection_count`에 걸리지 않는다.
  */
 const named = (key: string) => ({
-  name: new RegExp(`(^|[^\\w])${key}(\\u00b7|$)`),
+  name: new RegExp(`(^|[^\\w])${key}(\\s|$)`),
 });
 
 describe("StrategyFormPanel controls", () => {
@@ -466,6 +466,16 @@ describe("StrategyFormPanel 라벨 어휘 (P1-03)", () => {
     ).toBeInTheDocument();
     expect(
       section("전략 문서").getByRole("textbox", { name: /^전략 이름 title$/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("단위 접미사도 키와 띄어 읽는다", () => {
+    renderPanel(MINIMAL, stubTransactions());
+
+    expect(
+      section("execution").getByRole("spinbutton", {
+        name: "체결 금액에 적용할 수수료 가정 fee_bps · bp",
+      }),
     ).toBeInTheDocument();
   });
 

@@ -25,7 +25,6 @@ const FACTOR: FactorDefinition = {
   factor_id: "server.momentum",
   label: "Server momentum",
   minimum_history_sessions: 1,
-  missing_policy: "drop",
   output_unit: "score",
   preference: "high",
   required_field_ids: ["price.close"],

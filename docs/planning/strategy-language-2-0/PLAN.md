@@ -117,12 +117,17 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | 변경 파일 | backend 문장: `domain/strategy/_hydrate.py`(`structure.*` 전부 + 오타 제안 + `LEGACY_SHAPE_CODE`), `adapters/outbound/document_codec/_codec.py`(`document.*`·`yaml.*`·`<format>.syntax`) |
 | | backend 1.0 힌트: `domain/strategy/_upgrade.py`(`legacy_shape_hints` — 판정은 `UPGRADE_STEPS`와 같은 조건), `application/strategy_authoring/_service.py`(키 범위 코드 집합), `domain/strategy/facade/document.py` |
 | | backend 네임스페이스: `domain/factor/_validation.py`(`FACTOR_GRAPH_CODES` 게이트, 순환·중복에 `node_id`), `domain/factor/facade/validation.py`, `domain/strategy/_constraints.py`(`EXPRESSION_CODES` 20개 확장·`expression_code()`), `domain/strategy/facade/constraints.py`, `domain/strategy/_validation.py`(`semantic_issue`가 `factor.` 접두사 거절), `application/portfolio_design/_service.py` |
-| | backend 테스트: `tests/domain/test_strategy_diagnostic_messages.py`(신규 golden 63건), `tests/domain/test_strategy_constraints.py`, `tests/domain/test_strategy_hydrate.py`, `tests/contract/test_strategy_authoring_fixtures.py`, `tests/integration/test_truthful_pipeline.py` |
+| | backend 테스트: `tests/domain/test_strategy_diagnostic_messages.py`(신규, 74건), `tests/domain/test_strategy_constraints.py`, `tests/domain/test_strategy_hydrate.py`, `tests/contract/test_strategy_authoring_fixtures.py`, `tests/integration/test_truthful_pipeline.py` |
 | | frontend: `features/edit-strategy/model/document-upgrade.ts`(배너가 `structure.legacy_shape`에도 반응), `model/use-compile-document.ts`(같은 코드는 키 범위), 테스트 2·e2e 1 |
+| | backend CORS: `bootstrap/_http.py`(`STRATEGY_WORKBENCH_ALLOWED_ORIGINS`)·`bootstrap/facade/http.py`·`tests/test_server_entrypoint.py`·`backend/README.md` |
+| | 1차 리뷰 반영: `domain/strategy/_upgrade.py`(`is_upgradeable_document`)·`application/strategy_authoring/_service.py`·`domain/factor/_validation.py`(순환을 SCC로)·`tests/application/test_strategy_authoring_upgrade.py`·`tests/domain/test_strategy_upgrade.py`·`tests/integration/test_strategy_document_upgrade_http_api.py` |
+| | 그 외 frontend: `eslint.config.js`(Playwright 산출물 무시), `package.json`(빌드를 러너 안으로), `e2e/ports.d.mts`, `e2e/free-port.mjs`(IPv6), `scripts/capture-manual-screenshots.mjs`(포트 상수), `e2e/workbench.workflow.spec.ts`, 시각 기준선 4장 |
 | | 문서: `docs/manual/strategy-workbench/README.md`(오류 문장 예시·`—` 읽는 법) |
-| | e2e 인프라(저장소 전체 결함, 리드 지시로 이 PR에서): `frontend/e2e/{lock,free-port,ports}.mjs`(신규)·`lock.test.mjs`(단위 11건)·`run-playwright.mjs`·`playwright.config.ts`·`vite.config.ts`·`workbench-helpers.ts`·`workbench.infrastructure.spec.ts`·`e2e/README.md`. 머신 단위 잠금으로 워크트리 간 e2e를 직렬화하고, 포트를 `PW_BACKEND_PORT`·`PW_PREVIEW_PORT`로 연다 |
+| | e2e 인프라(저장소 전체 결함, 리드 지시로 이 PR에서): `frontend/e2e/{lock,free-port,ports}.mjs`(신규)·`lock.test.mjs`(단위 22건, 두 프로세스 경합 1건 포함)·`run-playwright.mjs`·`playwright.config.ts`·`vite.config.ts`·`workbench-helpers.ts`·`workbench.infrastructure.spec.ts`·`e2e/README.md`. 머신 단위 잠금으로 워크트리 간 e2e를 직렬화하고, 포트를 `PW_BACKEND_PORT`·`PW_PREVIEW_PORT`로 연다 |
 | Focused tests | `uv run pytest tests/domain/test_strategy_diagnostic_messages.py tests/domain/test_strategy_constraints.py tests/domain/test_strategy_hydrate.py`, `npx vitest run src/features/edit-strategy/__tests__/document-upgrade.test.ts src/features/edit-strategy/__tests__/factor-graph-panel.test.tsx` |
-| Full gate | 아래 "게이트" 참조. OpenAPI·runtime schema 재생성 결과 diff 0 → 생성 SDK 변경 없음 |
+| Head SHA | 1차 리뷰 반영분 포함. 커밋이 자기 SHA를 담을 수 없어 push 후 확정 |
+| Diff stat | base `743d0d7f` 대비 46 파일 (시각 기준선 4장 포함) |
+| Full gate | backend `pytest -q` 1694 passed · `ruff check src tests examples scripts` clean · `pyright` 0 · frontend `typecheck`·`lint`·`build` clean · `npm test` · e2e 20 passed(잠금 래퍼 아래). OpenAPI·runtime schema 재생성 diff 0 → 생성 SDK 변경 없음 |
 
 ---
 
@@ -373,6 +378,13 @@ Phase exit:
 - 2026-09-20 — P1-01 2차 리뷰 APPROVE(blocking 0). 중첩된 reveal 훅 둘이 서로 다른 요소를 끌던 R2-1을
   "마지막 매치"로 고치고, 같은 문제 행 재클릭 reveal(R2-2)·명시적 `schemaLoaded`(R2-4)·
   `scrollIntoView` 수신 요소 단언(R2-5)까지 반영.
+- 2026-09-21 — P1-05 1차 리뷰(REQUEST_CHANGES) 반영: 업그레이드 가능 판정을
+  `is_upgradeable_document` 하나로 모아 `structure.legacy_shape` 배너가 실제로 동작하게 했고
+  (전에는 눌러도 반드시 422), e2e 잠금 획득을 원자적 rename 하나로 바꿔 두 프로세스가 동시에
+  주인이 되던 경합 2종을 닫았으며, `PW_BACKEND_PORT`가 vitest·dev 설정까지 새어 단위 게이트를
+  깨던 경로를 막았다. 순환 진단은 SCC로 바꿔 고리에 묶인 노드를 하나도 빠뜨리지 않는다.
+- 2026-09-21 — 매뉴얼 스크린샷(`assets/04-structure-error.png` 등)은 옛 영문 화면이다. 한글
+  문장으로 바뀐 화면은 P1-05 후 Phase 1 감사에서 일괄 재촬영한다.
 - 2026-09-21 — P1-05 구현: 구조·codec 진단이 backend에서 한글 문장으로 완성돼 나가고
   (`.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행), `structure.legacy_shape`·
   `STRUCTURE_CODES`·`FACTOR_GRAPH_CODES`·`expression_code()` 세 레지스트리 게이트가 생겼다.

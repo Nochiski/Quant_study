@@ -36,8 +36,20 @@ stray dev server produces a clear error instead of a silent reuse. And `PW_BACKE
 PW_BACKEND_PORT=18000 PW_PREVIEW_PORT=15173 npm run test:e2e
 ```
 
-Both values come from `e2e/ports.mjs`, which is also what the build reads for the API base URL
-baked into the bundle. Never spell a port literally anywhere else.
+Both values come from `e2e/ports.mjs`. The runner passes the matching API base URL to the build
+child process only; `vite.config.ts` deliberately never reads these variables, because vitest and
+`npm run dev` load the same config and would follow the port into a backend that is not running.
+Never spell a port literally anywhere else.
+
+## What the lock does not cover
+
+- It is per user, not per machine. `os.tmpdir()` is a user directory on Windows, so two accounts on
+  the same box do not see each other's lock.
+- A recycled pid looks alive. If the holder dies and the operating system hands its pid to another
+  process, the lock is held until the 40-minute cap. That fails loudly rather than silently, which
+  is the direction we want, but it costs a run.
+- It serialises this gate only. Anything else that binds the same ports, a stray dev server for
+  instance, is caught by the port check rather than the lock.
 
 Moving the preview port also moves the browser origin, so the backend has to accept it. Playwright
 passes the preview origin to the server as `STRATEGY_WORKBENCH_ALLOWED_ORIGINS`. Without that the

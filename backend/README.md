@@ -143,6 +143,12 @@ uv run python scripts/export_openapi.py openapi.json
 선택하므로 실제 백테스트와 browser E2E 전에는 위 확장을 설치한다. 확장이 없을 때는 성능·실행
 의미를 숨기는 Python fallback 대신 `CoreUnavailable`로 실패한다.
 
+브라우저가 이 서버를 부를 수 있는 origin 은 `STRATEGY_WORKBENCH_ALLOWED_ORIGINS`(쉼표로 구분)로
+정한다. 설정하지 않으면 개발 서버 하나(`http://localhost:5173`)다. 워크트리별로 preview 포트를
+옮겨 e2e 를 돌릴 때는 그 origin 을 여기에 함께 넘겨야 한다 — 목록에 없으면 서버는 정상인데
+브라우저 요청만 CORS 로 막혀 화면이 빈다. 값이 있는데 origin 이 하나도 없으면 조용히 기본값으로
+돌아가지 않고 기동에 실패한다.
+
 Equity mock HTTP 계약은 다음 세 경로로 분리한다.
 
 - `GET /api/v1/equity/catalog`: 검색·dataset/unit/frequency 필터·pagination과 snapshot/field capability

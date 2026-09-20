@@ -491,6 +491,32 @@ def test_cycle_diagnostic_names_every_node_in_the_loop() -> None:
     assert all("cycle=a → b → a" in issue.message for issue in cycle)
 
 
+def test_cycle_diagnostic_misses_no_node_of_a_tangle() -> None:
+    """고리에 묶인 노드를 하나도 빠뜨리지 않는다(1차 리뷰 P3-6).
+
+    back-edge 한 번으로 순환 하나를 적던 방식은 이미 끝난 노드를 통해서만 닿는 순환을 놓쳐,
+    그 노드 카드에만 배지가 붙지 않았다. `1→2, 1→4, 2→3, 3→1, 4→2`에서 노드 `4`가 그랬다.
+    """
+    edges = {"1": ("2", "4"), "2": ("3", "3"), "3": ("1", "1"), "4": ("2", "2")}
+    graph_nodes = [
+        BinaryNode(
+            kind="binary",
+            node_id=node_id,
+            operator=BinaryOperator.ADD,
+            left_node_id=left,
+            right_node_id=right,
+        )
+        for node_id, (left, right) in edges.items()
+    ]
+
+    issues = validate_factor_graph(_graph(*graph_nodes, output="1")).issues
+    cycle = [issue for issue in issues if issue.code == "factor.graph.cycle"]
+
+    assert sorted(issue.node_id or "" for issue in cycle) == ["1", "2", "3", "4"]
+    # 갈래가 있는 묶음은 있지도 않은 경로를 화살표로 그리지 않는다.
+    assert all("nodes=[1, 2, 3, 4]" in issue.message for issue in cycle)
+
+
 def test_duplicate_node_diagnostic_names_the_repeated_id() -> None:
     """중복 id를 쓴 자리마다 진단이 붙는다 — "중복될 수 없습니다" 한 줄로는 어느 노드인지 모른다."""
     first = FieldNode(kind="field", node_id="px", field_id="price.close")

@@ -149,14 +149,14 @@ max_name_wieght: 0.05
 아래쪽 `문제` 목록에 이렇게 뜬다.
 
 ```text
-모르는 키입니다 혹시 'max_name_weight'인가요? — got='max_name_wieght' allowed=[...]
+모르는 키입니다 혹시 `max_name_weight`인가요? — got='max_name_wieght' suggestion='max_name_weight' allowed=[...]
 ```
 
 오류를 누르면 틀린 줄로 이동한다. 다시 `max_name_weight`로 고치면 `검증 통과`로 돌아온다.
 
 문장은 늘 `—` 앞뒤로 나뉜다. 앞은 무엇을 어떻게 고치라는 안내이고, 뒤는 그대로 옮겨 붙일 수 있는
 값이다(`got=` 실제로 적힌 값, `expected=` 와야 할 것, `allowed=` 고를 수 있는 목록,
-`missing=` 빠진 키). 자주 만나는 문장 몇 가지다.
+`missing=` 빠진 키, `suggestion=` 가까운 후보). 자주 만나는 문장 몇 가지다.
 
 | 상황                       | 문제 목록 문장                                                     |
 | -------------------------- | ------------------------------------------------------------------ |

@@ -257,7 +257,7 @@ def validate_factor_graph(
 
     index_by_node_id = {node.node_id: index for index, node in enumerate(graph.nodes)}
     for cycle in _cycles(nodes):
-        chain = " → ".join((*cycle, cycle[0]))
+        chain = _cycle_chain(cycle, nodes)
         for node_id in cycle:
             issues.append(
                 _issue(
@@ -330,38 +330,84 @@ def validate_factor_graph(
 
 
 def _cycles(nodes: dict[str, ExpressionNode]) -> tuple[tuple[str, ...], ...]:
-    """순환마다 그 순환에 묶인 node_id를 참조 순서대로.
+    """순환에 묶인 node_id 묶음들. 한 묶음은 서로를 물고 도는 노드 전부다.
 
-    존재 여부(bool)만으로는 진단이 어느 노드를 가리킬지 정할 수 없어서 경로를 돌려준다. 방문 순서는
-    문서 순서(`nodes` 삽입 순서)라 같은 그래프면 항상 같은 경로가 나온다. 노드 집합이 같은 순환은
-    한 번만 보고한다 — 같은 고리를 진입점만 달리해 두 번 세지 않는다.
+    강결합 요소(SCC)를 쓴다. DFS back-edge 한 번으로 순환 하나를 적는 방식은 **이미 끝난 노드를
+    통해서만 닿는 순환을 놓쳐서**, 그 노드 카드에 배지가 붙지 않았다(1차 리뷰 P3-6 실측:
+    `1→2, 1→4, 2→3, 3→1, 4→2`에서 노드 `4`가 빠졌다). 진단이 "이 노드가 고리에 묶였다"고 말하려면
+    묶인 노드를 하나도 빠뜨리면 안 된다.
+
+    한 묶음 안의 순서는 문서 순서(`nodes` 삽입 순서)라 같은 그래프면 항상 같은 결과가 나온다.
+    자기 자신을 가리키는 노드도 순환이다.
     """
-    state: dict[str, int] = {}
-    path: list[str] = []
-    found: list[tuple[str, ...]] = []
-    seen: set[frozenset[str]] = set()
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: list[str] = []
+    order = {node_id: position for position, node_id in enumerate(nodes)}
+    counter = 0
+    groups: list[tuple[str, ...]] = []
 
-    def visit(node_id: str) -> None:
-        if state.get(node_id) == 2:
-            return
-        if state.get(node_id) == 1:
-            cycle = tuple(path[path.index(node_id) :])
-            if frozenset(cycle) not in seen:
-                seen.add(frozenset(cycle))
-                found.append(cycle)
-            return
-        state[node_id] = 1
-        path.append(node_id)
+    def strongconnect(node_id: str) -> None:
+        nonlocal counter
+        index[node_id] = low[node_id] = counter
+        counter += 1
+        stack.append(node_id)
+        on_stack.add(node_id)
         for dependency in node_dependencies(nodes[node_id]):
-            if dependency in nodes:
-                visit(dependency)
-        path.pop()
-        state[node_id] = 2
+            if dependency not in nodes:
+                continue
+            if dependency not in index:
+                strongconnect(dependency)
+                low[node_id] = min(low[node_id], low[dependency])
+            elif dependency in on_stack:
+                low[node_id] = min(low[node_id], index[dependency])
+        if low[node_id] != index[node_id]:
+            return
+        component: list[str] = []
+        while True:
+            member = stack.pop()
+            on_stack.discard(member)
+            component.append(member)
+            if member == node_id:
+                break
+        self_loop = node_id in node_dependencies(nodes[node_id])
+        if len(component) > 1 or self_loop:
+            groups.append(tuple(sorted(component, key=lambda member: order[member])))
 
     for node_id in nodes:
-        if state.get(node_id) is None:
-            visit(node_id)
-    return tuple(found)
+        if node_id not in index:
+            strongconnect(node_id)
+    return tuple(sorted(groups, key=lambda group: order[group[0]]))
+
+
+def _cycle_chain(group: tuple[str, ...], nodes: dict[str, ExpressionNode]) -> str:
+    """고리를 사람이 읽을 한 줄로.
+
+    묶음 안에서 각 노드의 다음이 하나뿐이면 진짜 경로라 화살표로 잇는다(흔한 단순 고리). 갈래가
+    있으면 화살표가 없는 경로를 있는 것처럼 보이게 하므로 묶인 노드 목록만 보인다.
+    """
+    members = set(group)
+    # 같은 노드를 두 입력으로 받는 경우(`a + a`)가 있으므로 중복은 걷어낸다 — 갈래가 아니다.
+    successors = {
+        member: list(
+            dict.fromkeys(
+                dependency
+                for dependency in node_dependencies(nodes[member])
+                if dependency in members
+            )
+        )
+        for member in group
+    }
+    if all(len(nexts) == 1 for nexts in successors.values()):
+        walk = [group[0]]
+        while True:
+            following = successors[walk[-1]][0]
+            if following == walk[0]:
+                break
+            walk.append(following)
+        return " → ".join((*walk, walk[0]))
+    return "nodes=[" + ", ".join(group) + "]"
 
 
 def _infer_contract(

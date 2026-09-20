@@ -9,17 +9,39 @@
 import { createServer } from "node:net";
 
 /**
+ * 한 주소에서 그 포트가 비었는가.
  * @param {number} port
  * @param {string} [host]
  * @returns {Promise<boolean>}
  */
-export const isPortFree = (port, host = "127.0.0.1") =>
+const isPortFreeOn = (port, host) =>
   new Promise((resolve) => {
     const probe = createServer();
-    probe.once("error", () => resolve(false));
+    probe.once("error", (error) =>
+      // 이 호스트에 주소 자체가 없으면(IPv6 미구성) "쓰이고 있음"이 아니다.
+      resolve(
+        /** @type {NodeJS.ErrnoException} */ (error).code === "EADDRNOTAVAIL",
+      ),
+    );
     probe.once("listening", () => probe.close(() => resolve(true)));
     probe.listen({ port, host, exclusive: true });
   });
+
+/**
+ * IPv4·IPv6 양쪽에서 비었을 때만 비었다고 한다.
+ *
+ * `127.0.0.1` 만 보면 `::1` 에만 묶인 서버를 놓친다. Windows 에서 `localhost` 가 `::1` 로 먼저
+ * 풀리는 조합이 있어, 그 서버를 못 보고 지나가면 우리가 막으려던 "남의 backend 를 쓴다"가 그대로
+ * 난다(1차 리뷰 P3-9).
+ * @param {number} port
+ * @returns {Promise<boolean>}
+ */
+export const isPortFree = async (port) => {
+  for (const host of ["127.0.0.1", "::1"]) {
+    if (!(await isPortFreeOn(port, host))) return false;
+  }
+  return true;
+};
 
 /**
  * @param {ReadonlyArray<{port: number, label: string, env: string}>} required

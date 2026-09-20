@@ -94,6 +94,18 @@ afterEach(() => {
 /** 절대 존재할 수 없는 pid — 회수 경로를 태우려고 쓴다. */
 const DEAD_PID = 2 ** 31 - 1;
 
+/**
+ * 잠금이 유예를 넘기도록 디렉터리 시각을 과거로 돌린다.
+ *
+ * `now` 인자를 앞당기는 대신 파일시스템 시각을 직접 고치는 이유는, 앞당긴 시각이 실제 mtime 과
+ * 맞물리는 방식이 플랫폼마다 달라 테스트가 흔들리기 때문이다. 여기서는 유예가 지났다는 사실만
+ * 필요하다.
+ */
+const age = (path, ms = PID_GRACE_MS + 60_000) => {
+  const past = (Date.now() - ms) / 1000;
+  utimesSync(path, past, past);
+};
+
 /** 다른 구현(임시 래퍼)이 잠금을 쥔 상태를 그대로 만든다. */
 const heldBy = (path, pid) => {
   mkdirSync(path);
@@ -170,10 +182,9 @@ describe("E2E 잠금", () => {
     // 주인이 pid를 쓰기 전에 죽은 경우다. 영원히 막히면 안 된다.
     const path = lockPath();
     mkdirSync(path);
+    age(path);
 
-    expect(
-      tryAcquireLock(path, process.pid, false, Date.now() + PID_GRACE_MS + 1),
-    ).toBe(true);
+    expect(tryAcquireLock(path, process.pid)).toBe(true);
     expect(readLockPid(path)).toBe(process.pid);
   });
 
@@ -181,11 +192,10 @@ describe("E2E 잠금", () => {
     const broken = lockPath();
     mkdirSync(broken);
     writeFileSync(join(broken, PID_FILE_NAME), "not a pid");
+    age(broken);
 
     expect(readLockPid(broken)).toBeNull();
-    expect(
-      tryAcquireLock(broken, process.pid, false, Date.now() + PID_GRACE_MS + 1),
-    ).toBe(true);
+    expect(tryAcquireLock(broken, process.pid)).toBe(true);
   });
 
   it("살아 있는 주인은 기다렸다가 놓으면 잡는다", async () => {
@@ -276,6 +286,9 @@ describe("E2E 잠금 경합 (두 프로세스)", () => {
     import { tryAcquireLock, readLockPid } from ${JSON.stringify(lockModuleUrl)};
     while (Date.now() < ${startAt}) {}
     const won = tryAcquireLock(${JSON.stringify(path)}, process.pid);
+    // 이긴 쪽은 실제 러너처럼 잠금을 쥔 채 잠시 살아 있는다. 곧바로 죽으면 진 쪽이 그 잠금을
+    // 정당하게 회수하므로 "둘 다 이겼다"가 되는데, 그건 잠금의 결함이 아니라 모델이 틀린 것이다.
+    if (won) { const until = Date.now() + 900; while (Date.now() < until) {} }
     process.stdout.write(JSON.stringify({ won, pid: process.pid, holder: readLockPid(${JSON.stringify(path)}) }));
   `;
 
@@ -287,8 +300,7 @@ describe("E2E 잠금 경합 (두 프로세스)", () => {
       mkdirSync(path);
       // 유예를 넘긴 죽은 주인으로 만든다.
       writeFileSync(join(path, PID_FILE_NAME), String(DEAD_PID));
-      const past = Date.now() - PID_GRACE_MS - 1000;
-      utimesSync(path, past / 1000, past / 1000);
+      age(path);
 
       const startAt = Date.now() + 120;
       const results = await Promise.all([
@@ -302,6 +314,24 @@ describe("E2E 잠금 경합 (두 프로세스)", () => {
       expect(readLockPid(path)).toBe(winners[0].pid);
     }
   }, 60_000);
+});
+
+describe("E2E 포트 타입 선언", () => {
+  it("`ports.d.mts`가 `ports.mjs`의 export를 빠짐없이 비춘다", async () => {
+    // `tsconfig.playwright.json`이 `e2e/**/*.ts`만 보므로 `.mjs`는 타입 검사 밖이고, 손으로
+    // 유지하는 거울이 어긋나도 아무 게이트가 잡지 못한다(1차 리뷰 P3-7). 이 테스트가 그 역할이다.
+    const [runtime, declared] = await Promise.all([
+      import("./ports.mjs"),
+      readFile(resolve("e2e/ports.d.mts"), "utf8"),
+    ]);
+    const declaredNames = new Set(
+      [...declared.matchAll(/export declare const (\w+)/g)].map(
+        (match) => match[1],
+      ),
+    );
+
+    expect(declaredNames).toEqual(new Set(Object.keys(runtime)));
+  });
 });
 
 describe("E2E 포트가 단위 실행에 새지 않는다", () => {

@@ -6,10 +6,10 @@ current_phase: P0,P1,P2
 current_pr: P0-01,P1-01,P1-02,P2-01
 active_prs: [P0-01, P1-01, P1-02, P2-01]
 parallel_window: [P0-01, P1-01, P1-02, P2-01]
-last_updated: 2026-09-20T23:12:04+09:00
+last_updated: 2026-09-21T07:28:39+09:00
 planned_prs: 28
 merged_prs: 0
-approved_prs: 1
+approved_prs: 2
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,P1-01,P1-02,P2-01` |
 | Active PR | `P0-01, P1-01, P1-02, P2-01` |
 | Progress | `0 / 28 merged (0%)` |
-| Approved | `1 / 28` |
-| Aggregated at | `2026-09-20 23:12 KST` |
+| Approved | `2 / 28` |
+| Aggregated at | `2026-09-21 07:28 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -79,7 +79,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 0 | `APPROVED` |
-| P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_PROGRESS` |
+| P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_REVIEW` |
 | P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_PROGRESS` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
@@ -120,7 +120,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `IN_REVIEW` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `review_lang2_p1_01` 1·2차 APPROVE(blocking 0), 후속 8건 반영 · 게이트: typecheck·lint·Vitest 658·build·e2e 19/19 |
-| [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `IN_REVIEW` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 1차 REQUEST_CHANGES → 반영, 2차 APPROVE(코드)·새 P2, 3차 REQUEST_CHANGES → 반영, 4차 대기 |
+| [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `APPROVED` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE (1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2) |
 | [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `WAITING` | — |
 | [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `WAITING` | — |
 | [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `WAITING` | — |
@@ -219,6 +219,7 @@ Phase exit:
 | `P1-02` | `review_lang2_p1_02` | 1차 | `REQUEST_CHANGES` | blocking 1 + P3 7. **P1**: 같은 문서 안의 전체 교체(초안 복구 `use-autosave.ts`, 서버 초안 적용 `use-server-draft.ts`)가 `SourceEditor`의 같은-epoch 분기에서 격리 없는 `setText`로 가, CodeMirror `newGroupDelay`(500ms) 안에 친 글자와 한 undo 단계로 합쳐졌다 — 되돌리기 한 번에 복구한 초안이 통째로 사라진다. → 같은-epoch 분기를 `replaceRange(0, length)`로 통일하고 호출자가 없어진 `setText`를 핸들에서 제거, SoT 행 문구 정정, 회귀 테스트 추가. **P3**: 480px 이하 탭·버튼 겹침, 탭 밑줄이 버튼 아래에서 끊김, `aria-disabled` 스타일이 공용 `:disabled`와 불일치, 날짜 입력 포커스에서 Ctrl+Z 무반응, 핸들 대역 들여쓰기, PR 본문 spec D8→D9, 12절 초과 사유에 줄 수 누락. 코드 6건 반영, 본문 2건은 리드가 정정. **오기**: "업그레이드 적용 undo 잠금 테스트 없음"(P2)은 사실과 다르다 — `upgrade-banner.test.tsx`에 undo 단언 2건(직후 타이핑 케이스 포함)이 이미 있다 |
 | `P1-02` | `review_lang2_p1_02` | 2차 | `APPROVE`(코드) | 1차 blocking 해소를 확인. 구현이 권장(격리 주석 덧붙이기)보다 나은 방향 — 비격리 전체 교체 API 자체를 없앴고 새 회귀 테스트가 수정 전 실제로 실패함을 리뷰어가 재현. 1차 P2는 리뷰어가 철회(오기). P3 7건 중 5건 해소·1건 부분·1건 미해소(남은 둘은 PR 본문). **새 P2**: 탭 스트립의 `overflow-x: auto`가 `overflow-y`를 `auto`로 만들어 스크롤 컨테이너를 세우고, 탭 포커스 링(바깥 4px)이 위아래로 잘린다. 권장은 선언을 480px 미만으로 한정 |
 | `P1-02` | `review_lang2_p1_02` | 3차 | `REQUEST_CHANGES` | 링 클립은 해소됐으나(도장 픽셀·기하 양쪽 확인) 해법의 부작용 1건. **P2**: 스크롤포트를 위아래 8px 넓힌 `padding-block`+음수 `margin-block`이, 툴바 액션 줄과 탭 줄 사이 2px 간격을 넘어 검증 버튼 하단 6px을 덮어 그 영역 클릭을 가로챈다(28px 버튼의 21%가 무표시 사각지대). → padding·음수 margin을 걷고 링을 `outline-offset: -2px`로 탭 안쪽에 그려 해소, 검증 버튼 하단 actionability e2e 단언 추가(직전 해법에서 실패 확인). 리뷰어는 2차의 "겹침은 480px 이하에서만" 판단을 실제 앱 계측으로 철회(1440px에서 이미 넘침) — `overflow-x` 유지 결정 확정 |
+| `P1-02` | `review_lang2_p1_02` | 4차 | `APPROVE` | 코드 결함 0. 3차 P2(검증 버튼 하단 6px 클릭 가로채기)가 inset outline 교체로 해소되고, 회귀를 막는 e2e actionability 단언이 시각 project 4개에서 돈다. `overflow-x: auto` 유지, 탭 줄 한 줄·밑줄·`aria-disabled` 스타일·날짜 입력 단축키 모두 그대로. PR 본문 항목(spec D9, SoT와 어긋난 문장, 줄 수 근거, 테스트 수치)은 리드가 정정 |
 
 ## 검증 기록
 
@@ -227,6 +228,13 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-21 — P1-02 구현·리뷰 4회: PR #173. 되돌리기·다시 실행을 탭 밖 버튼과 IDE 전역
+  단축키 두 경로로 내고, 편집 이력의 단일 정본을 편집기(CodeMirror history)로 못 박았다
+  (SoT 행 추가). 1차 REQUEST_CHANGES: 같은 문서 전체 교체가 비격리 `setText`로 가 직후
+  타이핑과 한 undo 단계로 합쳐지던 것을 `replaceRange` 격리 경로로 통일하고 `setText`를
+  핸들에서 제거했다. 3차 REQUEST_CHANGES: 포커스 링 클립을 고치려 넓힌 스크롤포트가 검증
+  버튼 하단 클릭을 가로채 `outline-offset: -2px`(inset)로 교체하고 actionability e2e 단언을
+  추가했다. 4차 APPROVE(코드 결함 0).
 - 2026-09-20 — P1-01 2차 리뷰 APPROVE(blocking 0). 중첩된 reveal 훅 둘이 서로 다른 요소를
   끌던 R2-1을 "마지막 매치"로 고치고, 같은 문제 행 재클릭 reveal(R2-2), 명시적
   `schemaLoaded`(R2-4), `scrollIntoView` 수신 요소 단언(R2-5)까지 반영했다.

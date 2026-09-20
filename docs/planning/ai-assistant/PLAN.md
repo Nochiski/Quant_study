@@ -3,10 +3,10 @@ plan_version: 2
 project: ai-assistant
 project_status: IN_PROGRESS
 current_phase: P0,A
-current_pr: P0-01,A-01
-active_prs: [P0-01, A-01]
+current_pr: P0-01,A-01,A-02,A-03
+active_prs: [P0-01, A-01, A-02, A-03]
 parallel_window: [P0-01, A-01, A-02, A-03]
-last_updated: 2026-09-20T22:58:44+09:00
+last_updated: 2026-09-20T23:20:10+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 1
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,A` |
-| Current/next PR | `P0-01,A-01` |
-| Active PR | `P0-01, A-01` |
+| Current/next PR | `P0-01,A-01,A-02,A-03` |
+| Active PR | `P0-01, A-01, A-02, A-03` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `1 / 13` |
-| Aggregated at | `2026-09-20 22:58 KST` |
+| Aggregated at | `2026-09-20 23:20 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정

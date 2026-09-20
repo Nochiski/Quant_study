@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: IN_PROGRESS
+project_status: SELF_CHECK
 current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
-last_updated: 2026-09-21T02:49:53+09:00
+last_updated: 2026-09-21T02:59:28+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 5
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `SELF_CHECK` |
 | Current phase | `P0,A,B` |
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `5 / 13` |
-| Aggregated at | `2026-09-21 02:49 KST` |
+| Aggregated at | `2026-09-21 02:59 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -63,7 +63,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `APPROVED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 0 | `SELF_CHECK` |
-| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `IN_PROGRESS` |
+| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `SELF_CHECK` |
 | **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
@@ -115,7 +115,7 @@ Phase exit:
 | [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영 완료(로컬 `7fcc584e`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건, R2-1 `probingIds` Set·R2-2 제목 위계) · 2차 APPROVE_WITH_COMMENTS · R2-3·R2-4는 B-05 · cascade 뒤 A-07 위 rebase·push·PR |
 | [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `IN_REVIEW` | 구현 완료(로컬 `7a2f5849`, B-01 최종 `7fcc584e` 위 11커밋) · `review_ai_b_02` 1차 REQUEST_CHANGES 반영(턴별 watermark, `{status 5값, retry()}`, `onSseError` 계수, `AssistantStreamClose` 확장, 규칙 문서) → 2차 APPROVE_WITH_NITS(R2-1 `streamKey` 단조 실행 번호 P2 + P3 6 후속) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `SELF_CHECK` | 구현 완료(로컬 `4b482533`, B-02 `a9f55f12` 위 4커밋, vitest 700·e2e 19/19) → B-02 최종 `bffcacf1` 위 rebase·훅 API 적응 뒤 리뷰 · 후속 backlog: `ChatMessageView.turn_id`(질문↔턴 짝짓기 순서 가정 제거) |
-| [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `IN_PROGRESS` | 구현자 `impl-ai-b04`, 워크트리 `wt-ai-b04`, 브랜치 `feat/ai-b-04-ide-assistant-slot`(임시 base B-02 로컬 tip, B-03 파일 불가침 — 사이드바는 슬롯 주입) |
+| [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `SELF_CHECK` | 구현 완료(로컬 `0438c3d2`, B-02 `de38aff7` 위 3커밋, vitest 707·e2e 19/19) · 결정: 계약 패널과 별개의 독립 우측 패널(spec D7 탭 공존 문장 정정), 기준 텍스트 모르면 확인(fail-safe) · rebase 커밋에서 사이드바 실장착·통합 테스트·적용 후 백테스트·좁은 폭 오버레이 |
 | [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `WAITING` | — |
 
 Phase exit:

@@ -787,6 +787,12 @@ def test_cancelling_between_tool_calls_stops_before_the_second_tool_runs() -> No
         (status_error(openai.RateLimitError, 429, "rate limited"), FailureCode.RATE_LIMIT),
         (connection_error(), FailureCode.NETWORK),
         (status_error(openai.InternalServerError, 500, "server error"), FailureCode.PROVIDER),
+        # 컨텍스트 창 초과는 Responses에서 400으로 온다. Anthropic의
+        # `stop_reason == "model_context_window_exceeded"`에 대응하는 자리다.
+        (
+            status_error(openai.BadRequestError, 400, "context_length_exceeded"),
+            FailureCode.PROVIDER,
+        ),
     ],
 )
 def test_sdk_errors_map_to_failure_codes(error: Exception, expected: FailureCode) -> None:

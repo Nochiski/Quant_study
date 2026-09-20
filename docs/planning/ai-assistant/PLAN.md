@@ -3,10 +3,10 @@ plan_version: 2
 project: ai-assistant
 project_status: IN_PROGRESS
 current_phase: P0,A,B
-current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,B-01
-active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, B-01]
-parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, B-01]
-last_updated: 2026-09-21T00:50:41+09:00
+current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01
+active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01]
+parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01]
+last_updated: 2026-09-21T01:07:37+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 4
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,A,B` |
-| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,B-01` |
-| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, B-01` |
+| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01` |
+| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `4 / 13` |
-| Aggregated at | `2026-09-21 00:50 KST` |
+| Aggregated at | `2026-09-21 01:07 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -62,7 +62,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `APPROVED` |
-| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `SELF_CHECK` |
+| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `IN_PROGRESS` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `IN_PROGRESS` |
 | **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
@@ -98,9 +98,9 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `7649967`(c6d70de + P3 후속) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_REVIEW` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `645efcb`(A-03 `7649967` 위) · `review_ai_a_04` 1차 APPROVE WITH CHANGES(P1 1·P2 3·P3 7) → 반영 중 |
-| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `SELF_CHECK` | 구현 완료(`fa002b6`, A-02 위, 42 테스트, pytest 1681·ruff·pyright 0) · optional extra `llm` + CI `--extra llm` · A-04 push 뒤 rebase·팩토리 등록 → PR |
+| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_REVIEW` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `5640f8d2`(A-04 `645efcb` 위) · `review_ai_a_05` 진행 중 · 게이트: pytest 1782·ruff·pyright 0 |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`5eec392`, A-02 위, 52 테스트, pytest 1700·ruff·pyright 0) · 기본 모델 `gpt-6-astra`(SDK `ChatModel` 첫 항목, A-07 live smoke 확인) · A-05 push 뒤 rebase·팩토리 등록 → PR |
-| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
+| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `IN_PROGRESS` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-a07`, 브랜치 `feat/ai-a-07-prompt-fixtures`(임시 base A-05, A-06 tip 위로 rebase 예정) · live smoke는 키 없어 미실행 예정 |
 
 Phase exit:
 

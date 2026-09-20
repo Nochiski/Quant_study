@@ -72,6 +72,24 @@ progress_percent: 0
   대신 "사용자가 바꿔 달라고 하지 않으면 현재 문서 값을 그대로 옮긴다"로 썼다. schema 1.2가
   머지되면 이 문장과 골든을 같이 갱신한다(WORKFLOW 1절 규칙).
 
+- 2026-09-21 A-07: 세션 `Usage` 집계와 시나리오 fixture 3개를 A-07 안에서 마무리했다(WORKFLOW
+  A-07 원문이 정본). 집계는 저장하지 않고 이벤트 이력을 접는 application 순수 함수
+  `aggregate_usage`가 소유하며, 세션 조회 라우트가 이미 읽은 이력 하나를 넘긴다 — 따로 읽으면 한
+  응답 안에서 `events`와 `usage`가 다른 이력을 말할 수 있다. 토큰 종류 확장 지점은 세 곳
+  (`TokenTotals` 필드·그 `__add__`·`_tokens_of`)으로 좁혀 두었고, A-05가 도메인 `Usage`에
+  `cache_read_tokens`·`cache_write_tokens`를 더하면 rebase 때 같은 이름으로 붙인다.
+- 2026-09-21 A-07: 시나리오 fixture는 손으로 적지 않고 **실제 HTTP 응답**(`GET /sessions/{id}`의
+  `events`, SSE `data:` payload와 같은 dataclass)에서 받아 적는다. 손으로 적으면 계약이 바뀌었을
+  때 fixture만 옛 모양으로 남고 그 fixture로 green인 frontend가 진짜 서버에서 깨진다. `uuid4`
+  세션·턴 id는 직렬화 텍스트 전체에서 `session-1`·`turn-N`으로 치환한다 — `Failure.message`가
+  진단용으로 `session_id=…`를 담고 있어(error-messages 규칙) 필드만 바꾸면 골든이 실행마다
+  달라진다.
+- 2026-09-21 A-07 **후속**: schema 1.2(`strategy-language-2-0` P2-03) 머지 뒤 프롬프트의 실행 설정
+  문장과 `backend/tests/fixtures/assistant/` 골든·시나리오 fixture를 1.2 문서로 갱신한다
+  (WORKFLOW 1절 규칙). 담당은 그 시점의 A-07 후속 또는 B-05.
+- 2026-09-21 A-07 **이관**: 검색 상한 8과 Anthropic adapter `MAX_PAUSE_RESUMES = 5`가 서로를 모르는
+  건은 A-05로 넘겼다.
+
 ### A-07 기본값 확정 근거 (2026-09-21)
 
 `backend/tests/fixtures/assistant/` 골든의 실측 길이로 검토했고 **다섯 값 모두 그대로 둔다.**

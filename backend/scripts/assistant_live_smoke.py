@@ -165,7 +165,8 @@ class CheckItem:
 # 항목이 늘어날 뿐 잡는 것은 늘지 않는다.
 #
 # probe 항목이 토큰 수를 문장에 적지 않는 이유: 값은 adapter 상수가 소유하고 A-05·A-06이 그 값을
-# 올리는 중이다. 숫자를 여기 복제하면 상수가 바뀌는 날 이 문장만 stale해진다.
+# 16에서 64로 올리는 중이다. 숫자를 여기 복제하면 상수가 바뀌는 날 이 문장만 stale해진다. 확인할
+# 것은 "올린 값에서도 거부되는가"이며, 정상 키가 거부되면 상한을 더 올리거나 thinking을 꺼야 한다.
 CHECKLIST: Mapping[ProviderKind, tuple[CheckItem, ...]] = {
     ProviderKind.ANTHROPIC: (
         CheckItem(
@@ -174,8 +175,8 @@ CHECKLIST: Mapping[ProviderKind, tuple[CheckItem, ...]] = {
         ),
         CheckItem(
             "probe_reason_mapping",
-            "probe(`_adapter.py`의 `PROBE_MAX_TOKENS`)가 정상 키 ok, 틀린 키 auth, "
-            "없는 모델 model_not_found로 사유를 구분하는가",
+            "probe(`_adapter.py`의 `PROBE_MAX_TOKENS`, 64로 올린 값)가 그래도 거부되는가 — "
+            "정상 키 ok, 틀린 키 auth, 없는 모델 model_not_found로 사유가 갈리는가",
         ),
         CheckItem(
             "thinking_display_summarized",
@@ -205,8 +206,8 @@ CHECKLIST: Mapping[ProviderKind, tuple[CheckItem, ...]] = {
         ),
         CheckItem(
             "probe_reason_mapping",
-            "probe(adapter의 최소 `max_output_tokens` 상수)가 정상 키 ok, 틀린 키 auth, "
-            "없는 모델 model_not_found로 사유를 구분하는가",
+            "probe(adapter의 최소 `max_output_tokens` 상수, 64로 올린 값)가 그래도 거부되는가 — "
+            "정상 키 ok, 틀린 키 auth, 없는 모델 model_not_found로 사유가 갈리는가",
         ),
         CheckItem(
             "default_model_exists",

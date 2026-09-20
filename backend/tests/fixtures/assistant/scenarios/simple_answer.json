@@ -1,0 +1,35 @@
+[
+  {
+    "event": {
+      "text": "모멘텀 전략은 ",
+      "type": "text_delta"
+    },
+    "sequence": 0,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "text": "최근 많이 오른 종목을 사는 전략입니다.",
+      "type": "text_delta"
+    },
+    "sequence": 1,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "input_tokens": 1840,
+      "output_tokens": 120,
+      "type": "usage"
+    },
+    "sequence": 2,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "stop_reason": "end_turn",
+      "type": "done"
+    },
+    "sequence": 3,
+    "turn_id": "turn-1"
+  }
+]

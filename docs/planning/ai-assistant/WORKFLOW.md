@@ -170,6 +170,16 @@ main
 - **기본값 확정**: 호출당 16000·턴 64000·라운드 12·검색 8·타임아웃 300(+유예 10)을 골든 실측
   길이로 검토하고 근거를 PLAN 변경 기록과 spec D3에 남긴다. 값 변경은 A-01 상수가 아니라
   bootstrap 주입으로 한다.
+- **세션 `Usage` 집계**: `GET /sessions/{id}` 응답에 턴별·세션 누적 사용량(토큰 종류별 합, 검색
+  횟수, 공급자 호출 수)을 싣는다. 집계 owner는 application(`aggregate_usage`)이고 저장하지
+  않는다 — 같은 응답의 `events`를 접은 값이라 둘이 어긋날 수 없다. OpenAPI·생성 SDK를 같은
+  PR에서 갱신한다(12절).
+- **시나리오 fixture 3개**: `backend/tests/fixtures/assistant/scenarios/`에 `simple_answer`,
+  `tool_then_proposal`, `search_then_failure`를 A-04 SSE 프레임
+  (`AssistantEventEnvelopeView`: `sequence`·`turn_id`·payload `type`)의 배열로 저장한다. B-05
+  e2e의 MSW가 그대로 재생하고, backend 테스트가 가짜 공급자 대본을 실제 서비스에 돌린 결과와
+  byte 비교한다. 재생성은 `backend/tools/export_assistant_scenarios.py`. `uuid4` 세션·턴 id는
+  `session-1`·`turn-1`로 고정해 골든이 실행마다 바뀌지 않게 한다.
 
 **live smoke 확인 항목** (A-05·A-06 구현자가 남긴 목록, 우선순위 순)
 
@@ -211,11 +221,12 @@ STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv 
 
 결과는 PLAN 변경 기록에 날짜와 함께 적는다. **A-07 구현 시점에는 키가 없어 실행하지 못했다.**
 
-**이 PR에서 하지 않은 것**(후속으로 남김)
+**후속으로 남긴 것**
 
-- 세션 `Usage` 집계 응답과 가짜 공급자 시나리오 fixture 3개(제안 성공·검증 실패 후 수정·검색 후
-  제안). 전자는 HTTP 계약 변경이라 OpenAPI·생성 SDK 갱신을 같이 해야 하고(12절), 후자는 소비자인
-  B-05 e2e의 MSW 형식이 정해진 뒤에 모양이 결정된다. B-02 착수 전에 처리한다.
+- schema 1.2(`strategy-language-2-0` P2-03)가 머지되면 프롬프트의 실행 설정 문장과
+  `backend/tests/fixtures/assistant/` 골든 전부, 시나리오 fixture를 1.2 문서로 갱신한다(1절 규칙).
+  1.1은 시장·기간·유니버스를 문서 안 필수 절에 두므로 지금 프롬프트는 "실행 설정은 사용자의
+  몫이니 바꿔 달라고 하지 않으면 현재 값을 그대로 옮긴다"로 쓰여 있다.
 
 **A-05가 넘긴 항목** (2차 리뷰, 각각 근거가 코드·spec에 있다):
 

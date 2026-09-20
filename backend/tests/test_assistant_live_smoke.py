@@ -147,11 +147,20 @@ def test_the_retired_output_format_item_is_not_on_any_checklist(smoke: ModuleTyp
     assert "output_format_none" not in keys
 
 
-def test_no_checklist_question_hard_codes_the_probe_token_limit(smoke: ModuleType) -> None:
-    """상한 값은 adapter 상수가 소유한다. 문장에 숫자를 복제하면 상수가 오를 때 stale해진다."""
+def test_the_probe_question_names_the_constant_that_owns_the_token_limit(
+    smoke: ModuleType,
+) -> None:
+    """확인할 것은 "A-05·A-06이 올린 값에서도 거부되는가"다.
+
+    문장이 값을 말해 주면 읽는 사람이 무엇을 시험하는지 안다. 다만 정본은 adapter 상수이므로
+    문장이 그 상수 이름을 같이 대야, 값이 또 바뀌었을 때 어디를 볼지 알 수 있다.
+    """
     for kind in ProviderKind:
-        for item in smoke.CHECKLIST[kind]:
-            assert "16" not in item.question, item.key
+        probe_items = [item for item in smoke.CHECKLIST[kind] if item.key == "probe_reason_mapping"]
+        assert probe_items, kind
+        for item in probe_items:
+            named = item.question.lower()
+            assert "max_tokens" in named or "max_output_tokens" in named, kind
 
 
 def test_a_surface_the_run_never_exercised_is_reported_as_undecided(smoke: ModuleType) -> None:

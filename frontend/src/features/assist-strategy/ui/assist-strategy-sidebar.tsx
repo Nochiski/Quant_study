@@ -105,7 +105,9 @@ export const AssistStrategySidebar = ({
           );
 
   return (
-    <aside className="assist" aria-labelledby={titleId}>
+    // landmark는 이 feature를 꽂는 슬롯이 소유한다(`role="complementary"`). 루트까지 aside면
+    // 스크린리더가 같은 이름의 지역을 두 번 읽는다(B-04 지적).
+    <section className="assist" aria-labelledby={titleId}>
       <header className="assist__head">
         <h2 className="assist__title" id={titleId}>
           {t("assistant.chat.title")}
@@ -271,6 +273,6 @@ export const AssistStrategySidebar = ({
           />
         </>
       )}
-    </aside>
+    </section>
   );
 };

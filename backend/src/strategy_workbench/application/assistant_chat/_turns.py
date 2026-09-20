@@ -221,6 +221,41 @@ class AssistantTurnRunner:
                 return entry.view()
         return self._sessions.get_turn(turn_id)
 
+    def occupied_turn(self, session_id: str) -> Turn | None:
+        """이 세션의 슬롯을 잡고 있는 턴, 없으면 `None`.
+
+        판정 기준은 `start`와 같은 **레지스트리 존재**다. 취소 신호를 받은 턴도 스레드가
+        `_finish`에 닿기 전까지는 여기에 잡히고, 그동안 adapter가 마무리 이벤트를 더 낼 수
+        있다. 이벤트 스트림을 여는 쪽이 물어보는 것이 바로 그 질문이다 — "이 세션에 이벤트가
+        더 나올 턴이 있는가".
+
+        저장소는 보지 않는다. 저장소의 RUNNING 행은 이전 프로세스가 남긴 것일 수 있고, 그
+        턴은 더 이상 돌지 않는다.
+        """
+        with self._lock:
+            return self._occupied_turn(session_id)
+
+    def is_settled(self, turn_id: str) -> bool:
+        """이 턴에 이벤트가 더 붙을 수 있는지. 레지스트리에서 빠졌으면 끝났다.
+
+        종료 **상태**로는 이 질문에 답할 수 없다. 취소는 스레드가 신호를 읽기 전에 턴을
+        CANCELLED로 기록하므로, 상태만 보고 스트림을 닫으면 adapter가 마무리로 내는 이벤트를
+        클라이언트가 못 받는다. 슬롯이 풀리는 시점(`_finish`)은 모든 append 다음이다.
+        """
+        with self._lock:
+            return turn_id not in self._running
+
+    def turns(self, session_id: str) -> tuple[Turn, ...]:
+        """세션의 턴 이력. 슬롯을 잡고 있는 턴은 레지스트리의 최신 상태로 덮어 준다.
+
+        저장소 행의 상태는 `_finish`에서 마지막으로 갱신되므로, 러너가 먼저 확정한 사유(취소·
+        타임아웃)는 그 사이 이력 조회에 아직 보이지 않는다. `view()`가 그 확정을 반영한다.
+        """
+        stored = self._sessions.turns(session_id)
+        with self._lock:
+            live = {turn_id: entry.view() for turn_id, entry in self._running.items()}
+        return tuple(live.get(turn.turn_id, turn) for turn in stored)
+
     def events(self, session_id: str, *, after_sequence: int = -1) -> tuple[SequencedEvent, ...]:
         """세션 이벤트를 sequence 순으로. 모르는 세션은 빈 목록이 아니라 예외로 답한다.
 

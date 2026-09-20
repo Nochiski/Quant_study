@@ -26,7 +26,10 @@ from strategy_workbench.domain.assistant.facade.models import (
 
 from .ports.outgoing.llm_provider import LlmProviderPort
 from .ports.outgoing.provider_profiles import ProviderProfileRepository
-from .ports.outgoing.provider_secrets import ProviderSecretStore
+from .ports.outgoing.provider_secrets import (
+    ProviderSecretMissingError,
+    ProviderSecretStore,
+)
 
 __all__ = [
     "ProviderBaseUrlRejectedError",
@@ -34,7 +37,14 @@ __all__ = [
     "ProviderNotInstalledError",
     "ProviderProbeFailedError",
     "ProviderProfileService",
+    "ProviderProfileSummary",
 ]
+
+# 화면에 보여 줄 수 있는 키 조각의 길이와, 그걸 보여도 되는 최소 키 길이. 꼬리 4자리는 "내가
+# 어느 키를 넣었더라"를 가리기 위한 식별용이므로, 키가 짧아 꼬리가 키의 절반을 넘어가면 아예
+# 보여 주지 않는다.
+SECRET_TAIL_LENGTH = 4
+_MIN_TAILABLE_SECRET_LENGTH = SECRET_TAIL_LENGTH * 2
 
 # 호스트 이름만으로 루프백·사설이라고 단정할 수 있는 것들. DNS를 끌어오지 않고도 흔한 실수를
 # 막는다. 비교 전에 후행 점을 떼고 소문자로 맞춘다.
@@ -44,6 +54,19 @@ _LOOPBACK_SUFFIXES = (".localhost",)
 _LOCAL_NETWORK_SUFFIXES = (".local", ".internal")
 
 _IpAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+
+
+@dataclass(frozen=True)
+class ProviderProfileSummary:
+    """프로파일 하나를 화면에 보여 줄 만큼만 편 값.
+
+    `secret_tail`을 **여기서** 만드는 이유는 평문 키를 아는 마지막 지점이 이 서비스이기
+    때문이다. HTTP 어댑터가 `ProviderSecretStore`를 직접 들면 키 평문이 inbound 계층까지
+    올라오고, 그 계층은 응답을 직렬화하는 곳이라 한 줄 실수가 곧 유출이다(spec D1).
+    """
+
+    profile: ProviderProfile
+    secret_tail: str | None
 
 
 @dataclass(frozen=True)
@@ -133,6 +156,22 @@ class ProviderProfileService:
 
     def list(self) -> tuple[ProviderProfile, ...]:
         return self._repository.list()
+
+    def summaries(self) -> tuple[ProviderProfileSummary, ...]:
+        """프로파일 목록 + 각자의 키 꼬리 4자리. 키 평문은 이 함수 밖으로 나가지 않는다."""
+        return tuple(self._summarise(profile) for profile in self._repository.list())
+
+    def summary(self, profile_id: str) -> ProviderProfileSummary:
+        return self._summarise(self._repository.get(profile_id))
+
+    def _summarise(self, profile: ProviderProfile) -> ProviderProfileSummary:
+        try:
+            secret = self._secrets.get(profile.profile_id)
+        except ProviderSecretMissingError:
+            # 키가 사라진 프로파일도 목록에서 숨기지 않는다. 숨기면 사용자는 "왜 목록에 없지"
+            # 대신 "왜 턴이 실패하지"를 묻게 된다. 꼬리 없이 보이는 카드가 그 자체로 신호다.
+            return ProviderProfileSummary(profile=profile, secret_tail=None)
+        return ProviderProfileSummary(profile=profile, secret_tail=_secret_tail(secret))
 
     def active(self) -> ProviderProfile | None:
         for profile in self._repository.list():
@@ -323,3 +362,10 @@ def _ip_literal(host: str) -> _IpAddress | None:
 def _has_alphabetic_tld(host: str) -> bool:
     last_label = host.rsplit(".", 1)[-1]
     return len(last_label) >= 2 and last_label.isalpha()
+
+
+def _secret_tail(secret: str) -> str | None:
+    """키의 꼬리 `SECRET_TAIL_LENGTH`자리. 너무 짧은 키는 아무것도 보여 주지 않는다."""
+    if len(secret) < _MIN_TAILABLE_SECRET_LENGTH:
+        return None
+    return secret[-SECRET_TAIL_LENGTH:]

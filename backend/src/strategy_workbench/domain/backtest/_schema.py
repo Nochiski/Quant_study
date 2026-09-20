@@ -13,14 +13,22 @@ from typing import Any
 from strategy_workbench.domain.strategy.facade.schema import dataclass_json_schema
 
 from ._canonical import canonical_json_hash
-from ._models import RunEnvironment
+from ._models import RUN_ENVIRONMENT_CONSTRAINTS, RunEnvironment
 
 RUN_ENVIRONMENT_SCHEMA_ID = "urn:strategy-workbench:run-environment:1"
 
 
 def run_environment_schema() -> dict[str, Any]:
-    """실행 설정 패널이 필드·기본값·enum 을 읽는 JSON Schema(2020-12)."""
-    return dataclass_json_schema(RunEnvironment, schema_id=RUN_ENVIRONMENT_SCHEMA_ID)
+    """실행 설정 패널이 필드·기본값·enum·범위를 읽는 JSON Schema(2020-12).
+
+    범위는 `RunEnvironment.__post_init__` 이 쓰는 것과 **같은 제약 행**에서 온다. 손으로 적은
+    수치가 없으므로 검증이 거부하는 값을 스키마가 허용하는 일이 생길 수 없다.
+    """
+    return dataclass_json_schema(
+        RunEnvironment,
+        schema_id=RUN_ENVIRONMENT_SCHEMA_ID,
+        constraints={f"/{name}": row for name, row in RUN_ENVIRONMENT_CONSTRAINTS.items()},
+    )
 
 
 def run_environment_schema_hash(schema: dict[str, Any]) -> str:

@@ -59,9 +59,9 @@ def _result() -> BacktestRunResult:
             metric_registry_version=registry.version,
             initial_cash=100.0,
             annualization_days=252,
-            fee_bps=0.0,
-            slippage_bps=0.0,
-            participation_rate=1.0,
+            fee_bps=environment.fee_bps,
+            slippage_bps=environment.slippage_bps,
+            participation_rate=environment.participation_rate,
             environment=environment,
             environment_hash=environment_hash(environment),
             strategy_provenance=StrategyProvenance(

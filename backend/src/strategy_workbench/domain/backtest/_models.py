@@ -15,6 +15,10 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     RollingMetricPoint,
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.strategy.facade.constraints import (
+    ScalarConstraint,
+    scalar_constraint_index,
+)
 from strategy_workbench.domain.strategy.facade.provenance import (
     StrategyProvenance,
     StrategySource,
@@ -47,6 +51,34 @@ class WarningSeverity(StrEnum):
     WARNING = "warning"
 
 
+# 실행 설정 수치 필드의 범위는 전략 제약 카탈로그(`domain/strategy/_constraints.py`)의
+# `/execution/*` 행이 이미 SoT 다. 값을 여기에 다시 적지 않고 필드 이름으로만 다시 건다 —
+# 같은 수치를 두 곳에 두면 한쪽이 조용히 stale 된다. `__post_init__` 검증과 런타임 스키마의
+# `minimum`/`maximum` 이 같은 행을 읽는다. P2-03 이 `execution` 섹션을 지울 때 이 행들의 최종
+# owner 를 `domain/backtest` 로 옮긴다.
+NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = (
+    "participation_rate",
+    "fee_bps",
+    "slippage_bps",
+)
+_LEGACY_EXECUTION_POINTERS: dict[str, str] = {
+    name: f"/execution/{name}" for name in NUMERIC_ENVIRONMENT_FIELDS
+}
+RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
+    name: scalar_constraint_index()[pointer] for name, pointer in _LEGACY_EXECUTION_POINTERS.items()
+}
+
+
+def _describe_bound(constraint: ScalarConstraint) -> str:
+    """`0 < x <= 1` 모양의 기대 범위 문장(진단 메시지용)."""
+    parts: list[str] = []
+    if constraint.minimum is not None:
+        parts.append(f"{constraint.minimum} {'<' if constraint.exclusive_minimum else '<='} x")
+    if constraint.maximum is not None:
+        parts.append(f"x {'<' if constraint.exclusive_maximum else '<='} {constraint.maximum}")
+    return " and ".join(parts) if parts else "any finite number"
+
+
 @dataclass(frozen=True, kw_only=True)
 class RunEnvironment:
     """한 번의 실행이 놓인 환경 — 시장·빈도·기간·유니버스·체결·비용·결측 정책(spec D6).
@@ -71,6 +103,30 @@ class RunEnvironment:
     fee_bps: float = 15.0
     slippage_bps: float = 10.0
     missing: MissingPolicy = MissingPolicy.DROP
+
+    def __post_init__(self) -> None:
+        # 수치는 float 으로 정규화한다. `fee_bps=15` 와 `fee_bps=15.0` 은 같은 실행 설정인데
+        # canonical JSON 이 `15` 와 `15.0` 으로 갈려 `environment_hash` 가 달라진다.
+        for name in NUMERIC_ENVIRONMENT_FIELDS:
+            object.__setattr__(self, name, float(getattr(self, name)))
+        if self.start > self.end:
+            raise ValueError(
+                "run environment end must be on or after start — "
+                f"start={self.start} end={self.end} universe_id={self.universe_id!r}"
+            )
+        if not self.universe_id.strip():
+            raise ValueError(
+                "run environment requires a universe id — "
+                f"universe_id={self.universe_id!r} range={self.start}..{self.end}"
+            )
+        for name, constraint in RUN_ENVIRONMENT_CONSTRAINTS.items():
+            value = getattr(self, name)
+            if not constraint.satisfied_by(value):
+                raise ValueError(
+                    "run environment value is out of range — "
+                    f"field={name} value={value!r} expected={_describe_bound(constraint)} "
+                    f"({constraint.message})"
+                )
 
 
 @dataclass(frozen=True)
@@ -168,6 +224,23 @@ class RunManifest:
                 f"provenance.kind={self.strategy_provenance.kind.value} "
                 f"strategy_id={self.strategy_provenance.strategy_id} "
                 f"revision={self.strategy_provenance.revision}"
+            )
+        # 비용·참여율은 `environment` 가 owner 다. 평면 필드는 1.1 소비자 호환으로 남아 있을
+        # 뿐이라 두 축이 갈리면 리포트가 읽는 축에 따라 같은 run 의 수수료가 달라진다. 평면
+        # 필드 제거는 소비자 정리가 끝나는 P2-03 이다.
+        divergent = {
+            name: (getattr(self, name), getattr(self.environment, name))
+            for name in NUMERIC_ENVIRONMENT_FIELDS
+            if getattr(self, name) != getattr(self.environment, name)
+        }
+        if divergent:
+            raise ValueError(
+                "manifest records two execution cost models for one run — "
+                f"run_id={self.run_id} environment_hash={self.environment_hash} "
+                + " ".join(
+                    f"{name}: manifest={flat!r} environment={owned!r}"
+                    for name, (flat, owned) in sorted(divergent.items())
+                )
             )
 
 

@@ -243,8 +243,10 @@ class PortfolioDesignService:
             _raise_if_cancelled(cancelled)
 
         spec = request.spec
-        environment = resolve_environment(spec, request.environment)
         prepared = self._prepare(spec, pipeline_options, checkpoint=checkpoint)
+        # 브리지는 `_prepare` 의 `validate_strategy` 뒤에 부른다 — 잘못된 문서는 코드화된
+        # 진단으로 거절되어야 하고, 그 판정의 owner 는 validator 다.
+        environment = resolve_environment(spec, request.environment)
         engine = prepared.engine
         metadata = prepared.metadata
         plans = prepared.plans

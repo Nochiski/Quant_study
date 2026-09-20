@@ -733,3 +733,41 @@ def test_run_resource_openapi_declares_typed_not_found_and_not_ready_errors() ->
     assert result_responses["409"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "BacktestResultNotReadyResponse"
     )
+
+
+def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
+    """실행 설정 검증은 데이터를 읽지 않는 검사라 접수 단계에 있어야 한다(이슈 #158 계약).
+
+    없으면 202 로 접수된 뒤 run thread 가 `backtest.run.internal` 로 늦게 죽어, 클라이언트는
+    어느 필드가 왜 틀렸는지 알 수 없고 화면은 성공으로 표시한 뒤 깨진다(리뷰 P1).
+    """
+    client = TestClient(build_http_app())
+    environment = {
+        "market": "KRX",
+        "frequency": "daily",
+        "start": "2026-01-02",
+        "end": "2026-02-20",
+        "universe_id": "krx.common-stock",
+        "timing": "next_open",
+        "participation_rate": 0.1,
+        "fee_bps": 15.0,
+        "slippage_bps": 10.0,
+        "missing": "drop",
+    }
+    body = _run_body(client, "python")
+
+    for field_name, bad in (
+        ("participation_rate", 50.0),
+        ("fee_bps", -1.0),
+        ("start", "2026-12-31"),
+        ("universe_id", "   "),
+    ):
+        response = client.post(
+            "/api/v1/backtests",
+            json={**body, "environment": {**environment, field_name: bad}},
+        )
+        assert response.status_code == 422, (field_name, response.text)
+        assert field_name in response.text
+
+    accepted = client.post("/api/v1/backtests", json={**body, "environment": environment})
+    assert accepted.status_code == 202, accepted.text

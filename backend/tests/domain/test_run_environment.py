@@ -5,11 +5,14 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
+import pytest
+
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.backtest.facade.environment import (
+    RUN_ENVIRONMENT_CONSTRAINTS,
     RunEnvironment,
     environment_from_legacy_spec,
     environment_hash,
@@ -58,9 +61,11 @@ def test_canonical_json_is_sorted_and_compact() -> None:
     assert ", " not in encoded and '": ' not in encoded
 
 
-def test_environment_hash_splits_on_every_field() -> None:
+def test_environment_hash_splits_on_every_variable_field() -> None:
+    """`market`·`frequency`·`timing` 은 값이 하나뿐이라 변주할 수 없다. 나머지 7 필드를 덮는다."""
     base = _environment()
     variants = (
+        replace(base, start=date(2019, 1, 1)),
         replace(base, end=date(2021, 12, 31)),
         replace(base, universe_id="KOSDAQ150"),
         replace(base, fee_bps=30.0),
@@ -72,6 +77,63 @@ def test_environment_hash_splits_on_every_field() -> None:
     hashes = {environment_hash(item) for item in (base, *variants)}
     assert len(hashes) == len(variants) + 1
     assert all(len(item) == 64 for item in hashes)
+
+
+def test_environment_hash_ignores_int_versus_float_notation() -> None:
+    """`fee_bps=15` 와 `15.0` 은 `==` 로 같은 실행 설정인데 canonical JSON 은 `15`/`15.0` 으로
+    갈린다. 정규화가 없으면 같은 설정이 매니페스트에서 두 개의 hash 를 갖는다."""
+    integral = RunEnvironment(
+        start=date(2020, 1, 1),
+        end=date(2020, 12, 31),
+        universe_id="KOSPI200",
+        fee_bps=15,
+        slippage_bps=10,
+        participation_rate=1,
+    )
+    decimal = replace(integral, fee_bps=15.0, slippage_bps=10.0, participation_rate=1.0)
+
+    assert integral == decimal
+    assert environment_hash(integral) == environment_hash(decimal)
+    assert isinstance(integral.fee_bps, float)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("participation_rate", 50.0),
+        ("participation_rate", 0.0),
+        ("fee_bps", -1.0),
+        ("slippage_bps", -0.5),
+        ("universe_id", "   "),
+    ],
+)
+def test_out_of_range_values_are_rejected_at_construction(field_name: str, value: object) -> None:
+    with pytest.raises(ValueError) as error:
+        replace(_environment(), **{field_name: value})
+
+    assert field_name in str(error.value)
+
+
+def test_reversed_dates_are_rejected_at_construction() -> None:
+    with pytest.raises(ValueError, match="end must be on or after start"):
+        replace(_environment(), start=date(2021, 1, 1), end=date(2020, 1, 1))
+
+
+def test_schema_bounds_come_from_the_same_rows_the_model_validates_with() -> None:
+    """스키마 범위와 `__post_init__` 검증이 다른 수치를 쓰면 스키마가 허용하는 값을 모델이
+    거부한다. 두 경로가 같은 제약 행을 읽는지 고정한다."""
+    properties = run_environment_schema()["properties"]
+
+    assert properties["participation_rate"]["exclusiveMinimum"] == (
+        RUN_ENVIRONMENT_CONSTRAINTS["participation_rate"].minimum
+    )
+    assert properties["participation_rate"]["maximum"] == (
+        RUN_ENVIRONMENT_CONSTRAINTS["participation_rate"].maximum
+    )
+    assert properties["fee_bps"]["minimum"] == RUN_ENVIRONMENT_CONSTRAINTS["fee_bps"].minimum
+    assert (
+        properties["slippage_bps"]["minimum"] == RUN_ENVIRONMENT_CONSTRAINTS["slippage_bps"].minimum
+    )
 
 
 def test_bridge_reads_data_execution_and_the_first_factor_missing_policy() -> None:
@@ -125,7 +187,8 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
     assert schema["required"] == ["start", "end", "universe_id"]
     assert properties["market"]["enum"] == ["KRX"]
     assert properties["missing"]["enum"] == [member.value for member in MissingPolicy]
-    assert properties["fee_bps"] == {"type": "number", "default": 15.0}
+    assert properties["fee_bps"]["type"] == "number"
+    assert properties["fee_bps"]["default"] == 15.0
     assert properties["start"]["format"] == "date"
     assert properties["universe_id"]["x-catalog"] == "universe"
 

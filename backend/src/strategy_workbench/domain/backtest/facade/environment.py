@@ -6,7 +6,10 @@ from strategy_workbench.domain.backtest._canonical import (
     environment_hash,
     run_environment_canonical_json,
 )
-from strategy_workbench.domain.backtest._models import RunEnvironment
+from strategy_workbench.domain.backtest._models import (
+    RUN_ENVIRONMENT_CONSTRAINTS,
+    RunEnvironment,
+)
 from strategy_workbench.domain.backtest._schema import (
     RUN_ENVIRONMENT_SCHEMA_ID,
     run_environment_schema,
@@ -14,6 +17,7 @@ from strategy_workbench.domain.backtest._schema import (
 )
 
 __all__ = [
+    "RUN_ENVIRONMENT_CONSTRAINTS",
     "RUN_ENVIRONMENT_SCHEMA_ID",
     "RunEnvironment",
     "environment_from_legacy_spec",

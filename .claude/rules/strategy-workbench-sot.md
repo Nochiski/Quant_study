@@ -41,9 +41,9 @@ paths:
 | authoring 진단 코드 | `strategy.*`는 domain 코드 레지스트리, `structure.*`는 domain hydrate, codec 코드(`document.*`/`yaml.*`/`<format>.syntax`)는 `ports/outgoing/document_codec.py` | frontend는 코드 → 마커 매핑과 422 코드 번역(`upgrade.error.<code>`·`backtest.error.<code>`)만 한다. compile 진단의 `message`는 backend가 한글 문장으로 완성해 보내고 Problems panel은 그대로 보여준다(frontend가 다시 조립·번역하지 않음, Phase 2 감사 DEFECT-P2X-005(b)); 코드를 새로 만들지 않는다 |
 | URL 선택 상태(view/path/date/security) | TanStack Router search (`validateSearch`) | widget은 읽기만, 기본값은 URL에 쓰지 않음 |
 | AI 어시스턴트 공급자 프로파일·활성 여부 | `application/assistant_chat`의 `ProviderProfileRepository` port 뒤 adapter(`assistant_sqlite`) | frontend는 목록·활성 배지만 표시. 키는 프로파일과 분리 저장 |
-| AI 공급자 비밀(API 키) | `adapters/outbound/secrets_local`(사용자 설정 디렉터리, POSIX 0600 / Windows 현재 사용자 전용 ACL) | backend를 떠나지 않는다. 응답·로그·DB·OpenAPI에 평문 금지, frontend는 꼬리 4자리만 |
+| AI 공급자 비밀(API 키) | `adapters/outbound/secrets_local`(사용자 설정 디렉터리, POSIX 0600 / Windows 현재 사용자 전용 ACL) | backend를 떠나지 않는다. 응답·로그·DB·OpenAPI에 평문 금지, frontend는 꼬리 4자리만. 그 꼬리를 만드는 것은 `application/assistant_chat`의 `ProviderProfileService.summaries()`다 — 평문을 아는 마지막 지점이 거기이므로 inbound HTTP 계층은 `ProviderSecretStore`를 들지 않는다. 요청 본문의 `secret`은 OpenAPI에서 `writeOnly`이고 응답 스키마에 그 필드가 없다 |
 | AI 어시스턴트 도구 정의·시스템 프롬프트·제안 검증 | `application/assistant_chat`(`_prompt.py`, 도구 실행), 도구 이름·스키마 상수는 `domain/assistant` | 공급자 adapter(`llm_anthropic`·`llm_openai`)는 `ToolSpec`을 자기 형식으로 변환하고 루프만 돈다. 공급자 SDK import는 두 adapter 밖 금지(architecture 테스트) |
-| AI 채팅 세션·턴·메시지·이벤트 이력(sequence) | `assistant_sqlite` | 진행 중 턴 레지스트리·취소 신호는 `application/assistant_chat`의 `AssistantTurnRunner`(프로세스 내, 단일 워커 전제). 사이드바 열림·폭·현재 세션 id·제안 카드의 기준 텍스트는 frontend local UI state. 제안은 사용자의 "적용"으로만, 업그레이드 적용과 같은 편집기 전체 범위 교체(`replaceRange`, 문서가 바뀌었으면 적용 전 확인) 경로로 문서에 들어간다 — source 트랜잭션 행의 두 번째 명시 예외 |
+| AI 채팅 세션·턴·메시지·이벤트 이력(sequence) | `assistant_sqlite` | 진행 중 턴 레지스트리·취소 신호는 `application/assistant_chat`의 `AssistantTurnRunner`(프로세스 내, 단일 워커 전제). 사이드바 열림·폭·현재 세션 id·제안 카드의 기준 텍스트는 frontend local UI state. 제안은 사용자의 "적용"으로만, 업그레이드 적용과 같은 편집기 전체 범위 교체(`replaceRange`, 문서가 바뀌었으면 적용 전 확인) 경로로 문서에 들어간다 — source 트랜잭션 행의 두 번째 명시 예외. `ChatEvent`에는 판별자가 없으므로 전송용 `type` 태그와 그 합집합 메타데이터는 `adapters/inbound/http_api/_assistant_contract.py`가 소유한다 — domain은 `isinstance`로, 생성 SDK는 `type`으로 갈래를 가른다 |
 
 ## 금지
 

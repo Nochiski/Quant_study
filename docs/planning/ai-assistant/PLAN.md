@@ -3,10 +3,10 @@ plan_version: 2
 project: ai-assistant
 project_status: IN_PROGRESS
 current_phase: P0,A
-current_pr: P0-01,A-01,A-02,A-03
-active_prs: [P0-01, A-01, A-02, A-03]
-parallel_window: [P0-01, A-01, A-02, A-03]
-last_updated: 2026-09-20T23:20:10+09:00
+current_pr: P0-01,A-01,A-02,A-03,A-04
+active_prs: [P0-01, A-01, A-02, A-03, A-04]
+parallel_window: [P0-01, A-01, A-02, A-03, A-04]
+last_updated: 2026-09-20T23:40:38+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 1
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,A` |
-| Current/next PR | `P0-01,A-01,A-02,A-03` |
-| Active PR | `P0-01, A-01, A-02, A-03` |
+| Current/next PR | `P0-01,A-01,A-02,A-03,A-04` |
+| Active PR | `P0-01, A-01, A-02, A-03, A-04` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `1 / 13` |
-| Aggregated at | `2026-09-20 23:20 KST` |
+| Aggregated at | `2026-09-20 23:40 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -96,8 +96,8 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 |---|---|---|---|---|---|
 | [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `IN_REVIEW` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `da08da7` · `review_ai_a_01` 1차 REQUEST_CHANGES(P1 1·P2 4·P3 5) 반영(P3 1건 사양) → 2차 재검토 중 |
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `IN_REVIEW` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `f01f69e`(A-01 위 rebase) · `review_ai_a_02` 1차 REQUEST_CHANGES(P1 1·P2 6) → 반영 중 |
-| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `IN_PROGRESS` | 구현자 `impl-ai-a03`, 워크트리 `wt-ai-a03`, 브랜치 `feat/ai-a-03-storage-adapters` |
-| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `WAITING` | — |
+| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `IN_REVIEW` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `638b752`(A-02 `f01f69e` 위) · `review_ai_a_03` 진행 중 · 게이트: pytest 1612·ruff·pyright |
+| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_PROGRESS` | 구현자 `impl-ai-a04`, 워크트리 `wt-ai-a04`, 브랜치 `feat/ai-a-04-http-sse`(base A-03) |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `WAITING` | — |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `WAITING` | — |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
@@ -142,6 +142,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-20 — A-03(#171) PR 생성·리뷰 배정, A-04 착수(A-02 rewrite 뒤 A-03·A-04 rebase 예정).
 - 2026-09-20 — A-01·A-02 1차 리뷰 REQUEST_CHANGES(각 P1 1건) → 같은 구현자가 반영 후 재검토.
 - 2026-09-20 — A-01(#169)·A-02(#170) 스택 PR 생성, 리뷰 배정. A-03 착수.
 - 2026-09-20 — P0-01 4차 APPROVE. 잔여 P2(`max_tool_rounds` 집행을 adapter로)·D9 값/집행 분리 반영. CI 통과 후 머지 대상.

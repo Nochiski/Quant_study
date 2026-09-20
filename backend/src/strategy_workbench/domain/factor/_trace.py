@@ -114,9 +114,7 @@ def trace_factor_graph(
 
     Values come from the same cache `evaluate_factor_graph` reads, so they never diverge.
     """
-    bounds, nodes, order = _trace_context(
-        graph, observations, selection, checkpoint=checkpoint
-    )
+    bounds, nodes, order = _trace_context(graph, observations, selection, checkpoint=checkpoint)
     computed = _compute_nodes(
         graph,
         observations=observations,
@@ -144,9 +142,7 @@ def evaluate_factor_graph_with_trace(
     the exact in-memory node cache. Callers do not run `evaluate_factor_graph` and
     `trace_factor_graph` independently.
     """
-    bounds, nodes, order = _trace_context(
-        graph, observations, selection, checkpoint=checkpoint
-    )
+    bounds, nodes, order = _trace_context(graph, observations, selection, checkpoint=checkpoint)
     computed = _compute_nodes(
         graph,
         observations=observations,
@@ -155,12 +151,8 @@ def evaluate_factor_graph_with_trace(
         checkpoint=checkpoint,
     )
     return (
-        _evaluation_from_computed(
-            graph, observations, computed, checkpoint=checkpoint
-        ),
-        _project_trace(
-            graph, observations, bounds, nodes, order, computed, checkpoint=checkpoint
-        ),
+        _evaluation_from_computed(graph, observations, computed, checkpoint=checkpoint),
+        _project_trace(graph, observations, bounds, nodes, order, computed, checkpoint=checkpoint),
     )
 
 

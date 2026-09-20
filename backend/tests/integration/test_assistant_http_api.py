@@ -78,6 +78,20 @@ class _GatedProvider:
         self.streamed_secrets: list[str] = []
         self.reached_gate = threading.Event()
 
+    def set_probe_result(self, result: ProbeResult) -> None:
+        """다음 `probe`부터 돌려줄 결과. 한 클라이언트 안에서 실패와 성공을 다 거둘 때 쓴다."""
+        self._probe_result = result
+
+    def release(self) -> None:
+        """gate에 잡힌 턴 스레드를 풀어 준다. 멱등이다.
+
+        teardown이 이걸 부르지 않으면, 단언이 먼저 실패한 테스트에서 공급자 스레드가 gate
+        타임아웃(10초)까지 붙잡혀 있어 서버 종료가 그만큼 늦어진다. 실패한 테스트일수록
+        빨리 끝나야 다음 테스트의 신호가 읽힌다.
+        """
+        if self._gate is not None:
+            self._gate.set()
+
     def default_model(self) -> str:
         return "fake-model-1"
 
@@ -144,6 +158,9 @@ def _live_client(tmp_path: Path, provider: _GatedProvider) -> Iterator[httpx.Cli
         with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=15.0) as client:
             yield client
     finally:
+        # 공급자 스레드를 먼저 푼다. 단언이 실패해 gate가 닫힌 채로 빠져나오면 그 스레드가
+        # 자기 타임아웃까지 서버를 붙잡는다.
+        provider.release()
         server.should_exit = True
         thread.join(timeout=15.0)
 
@@ -677,7 +694,7 @@ def test_every_code_the_routes_actually_emit_is_in_the_contract(tmp_path: Path) 
     emitted.add(_code(client.post(f"{_ASSISTANT}/sessions", json={"document_ref": _DOCUMENT_REF})))
     emitted.add(_code(client.get(f"{_ASSISTANT}/sessions")))
     # 프로파일을 만든 뒤에만 닿는 거절들.
-    provider._probe_result = ProbeResult(ok=True, latency_ms=1)  # pyright: ignore[reportPrivateUsage]  # reason: 한 클라이언트 안에서 probe 결과를 뒤집어야 두 코드를 다 거둔다
+    provider.set_probe_result(ProbeResult(ok=True, latency_ms=1))
     _create_profile(client)
     session_id = _start_session(client)
     emitted.add(_code(client.get(f"{_ASSISTANT}/sessions/{session_id}/events")))
@@ -718,9 +735,9 @@ def _profile_body(**overrides: Any) -> dict[str, Any]:
     return body
 
 
-def _code(response: object) -> str:
+def _code(response: httpx.Response) -> str:
     """응답 본문의 `detail.code`. 코드 없는 본문이면 테스트가 여기서 멈춘다."""
-    payload = response.json()  # pyright: ignore[reportAttributeAccessIssue]  # reason: httpx Response만 들어온다(호출부 고정)
+    payload = response.json()
     detail = payload["detail"]
     if not isinstance(detail, dict) or "code" not in detail:
         raise AssertionError(f"response carries no coded detail — payload={payload!r}")

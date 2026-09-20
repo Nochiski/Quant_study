@@ -28,6 +28,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
@@ -110,12 +111,16 @@ PROVIDER_ADAPTER_FACTORIES: Mapping[ProviderKind, ProviderAdapterFactory] = Mapp
 def is_missing_provider_sdk(kind: ProviderKind, error: ImportError) -> bool:
     """이 `ImportError`가 "그 공급자 SDK가 안 깔렸다"는 뜻인가.
 
-    두 가지를 모두 만족해야 참이다.
+    세 가지를 모두 만족해야 참이다.
 
     1. `ModuleNotFoundError`다. 설치된 패키지 **안에서** 난 `ImportError`(예: SDK가 자기
        의존성을 못 찾음)는 미설치가 아니라 깨진 설치이므로 숨기지 않는다.
     2. `name`이 그 kind의 SDK 최상위 모듈이거나 그 하위 모듈이다. `anthropic.types` 같은
        하위 모듈까지 포함하는 이유는 SDK가 지연 import를 쓰면 실패가 거기서 나기 때문이다.
+    3. 하위 모듈이면 **최상위 모듈이 실제로 없어야** 한다. `anthropic`은 깔려 있는데
+       `anthropic.definitely_not_here`를 부르는 것은 SDK 부재가 아니라 우리 오타다. 이름만
+       보고 미설치로 낮추면 설정 화면이 "설치 필요"라고만 말하고, 사용자는 이미 설치한 SDK를
+       다시 설치하려 든다.
 
     `name`이 비어 있으면(드물지만 직접 만든 예외) 참이라고 단정하지 않는다 — 우리 버그를
     미설치로 둔갑시키는 쪽보다 시끄러운 쪽이 낫다.
@@ -125,7 +130,24 @@ def is_missing_provider_sdk(kind: ProviderKind, error: ImportError) -> bool:
     module = PROVIDER_SDK_MODULES.get(kind)
     if module is None or not error.name:
         return False
-    return error.name == module or error.name.startswith(f"{module}.")
+    if error.name == module:
+        return True
+    if not error.name.startswith(f"{module}."):
+        return False
+    return not _is_importable(module)
+
+
+def _is_importable(module: str) -> bool:
+    """그 최상위 모듈이 이 인터프리터에 있는가.
+
+    `find_spec`은 부모 패키지를 실제로 import하므로 그 과정에서 예외를 낼 수 있다. 여기서는
+    최상위 이름만 보므로 부모가 없지만, 탐색 자체가 실패하는 경우(손상된 경로 항목 등)에는
+    "있다"고 답한다 — 확신이 없을 때 미설치로 낮추지 않는 쪽이 이 함수의 기본 방향이다.
+    """
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return True
 
 
 # 제안 YAML은 편집기와 같은 형식으로만 들어온다. 어시스턴트는 JSON 문서를 제안하지 않는다

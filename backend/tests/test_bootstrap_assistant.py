@@ -20,6 +20,7 @@ from strategy_workbench.application.assistant_chat.facade.ports import LlmProvid
 from strategy_workbench.application.assistant_chat.facade.profiles import (
     ProviderNotInstalledError,
 )
+from strategy_workbench.bootstrap import _assistant as assistant_module
 from strategy_workbench.bootstrap._assistant import (
     _AuthoringStrategyCompiler,  # pyright: ignore[reportPrivateUsage]  # reason: composition root가 소유한 port 구현이라 공개 facade가 없다
 )
@@ -209,6 +210,17 @@ def _broken_sdk_install() -> LlmProviderPort:
     raise ImportError("cannot import name 'BaseModel' from 'pydantic'", name="anthropic")
 
 
+def _missing_submodule_of_an_installed_sdk() -> LlmProviderPort:
+    """설치된 패키지의 없는 하위 모듈을 부른다. SDK 부재가 아니라 우리 오타다.
+
+    `pytest`를 SDK 자리에 세워 "최상위 모듈은 분명히 있다"를 이 환경에서 보장한다 — optional
+    extra인 `anthropic`은 CI에 없을 수 있어 그걸로는 이 갈래를 재현할 수 없다.
+    """
+    raise ModuleNotFoundError(
+        "No module named 'pytest.definitely_not_here'", name="pytest.definitely_not_here"
+    )
+
+
 class _CountingFactory:
     """호출 횟수를 세는 팩토리. 시작할 때 불리지 않는다는 것을 보기 위해서다."""
 
@@ -314,6 +326,52 @@ def test_the_sdk_module_table_covers_every_provider_kind() -> None:
     assert set(PROVIDER_SDK_MODULES) == set(ProviderKind)
     assert PROVIDER_SDK_MODULES[ProviderKind.ANTHROPIC] == "anthropic"
     assert PROVIDER_SDK_MODULES[ProviderKind.OPENAI] == "openai"
+
+
+def test_a_missing_submodule_of_an_installed_sdk_is_our_bug_not_a_missing_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`anthropic`은 깔려 있는데 그 하위 모듈이 없으면 오타다.
+
+    이름만 보고 미설치로 낮추면 설정 화면이 "설치 필요"라고만 말하고, 사용자는 이미 설치한
+    SDK를 다시 설치하려 든다. 실제로 설치된 패키지(`pytest`)를 이 kind의 SDK 자리에 세워
+    "최상위는 있는데 하위가 없는" 상태를 만든다.
+    """
+    # 표 자체를 갈아 끼운다. `MappingProxyType`이라 항목만 바꿀 수는 없다.
+    monkeypatch.setattr(
+        assistant_module, "PROVIDER_SDK_MODULES", {ProviderKind.ANTHROPIC: "pytest"}
+    )
+
+    assert not is_missing_provider_sdk(
+        ProviderKind.ANTHROPIC,
+        ModuleNotFoundError("", name="pytest.definitely_not_here"),
+    )
+    # 최상위가 없으면 같은 모양이라도 미설치다.
+    monkeypatch.setattr(
+        assistant_module, "PROVIDER_SDK_MODULES", {ProviderKind.ANTHROPIC: "definitely_not_a_pkg"}
+    )
+    assert is_missing_provider_sdk(
+        ProviderKind.ANTHROPIC,
+        ModuleNotFoundError("", name="definitely_not_a_pkg.client"),
+    )
+
+
+def test_an_installed_sdk_with_a_missing_submodule_is_not_swallowed_by_the_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        assistant_module, "PROVIDER_SDK_MODULES", {ProviderKind.ANTHROPIC: "pytest"}
+    )
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={ProviderKind.ANTHROPIC: _missing_submodule_of_an_installed_sdk},
+        )
+    )
+
+    with pytest.raises(ModuleNotFoundError):
+        container.assistant_profiles.available_kinds()
 
 
 def test_a_missing_sdk_is_told_apart_from_our_own_import_bug() -> None:

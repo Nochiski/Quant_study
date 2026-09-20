@@ -24,6 +24,11 @@ from strategy_workbench.application.assistant_chat.facade.profiles import (
     ProviderAvailability,
     ProviderProfileSummary,
 )
+from strategy_workbench.application.assistant_chat.facade.usage import (
+    SessionUsage,
+    TokenTotals,
+    TurnUsage,
+)
 from strategy_workbench.domain.assistant.facade.models import (
     ChatEvent,
     ChatMessage,
@@ -76,16 +81,20 @@ __all__ = [
     "ProviderProfileView",
     "ProvidersView",
     "SessionHistoryView",
+    "SessionUsageView",
     "SessionView",
     "StartTurnRequest",
     "TurnAcceptedView",
+    "TokenTotalsView",
     "TurnContextPayload",
+    "TurnUsageView",
     "TurnView",
     "event_envelope_view",
     "message_view",
     "probe_result_view",
     "profile_view",
     "providers_view",
+    "session_usage_view",
     "turn_view",
 ]
 
@@ -350,17 +359,48 @@ class AssistantEventEnvelopeView:
 
 
 @dataclass(frozen=True)
+class TokenTotalsView:
+    """토큰 종류별 합. 종류가 늘면 여기에 필드를 더한다(application `TokenTotals`와 같은 이름)."""
+
+    input_tokens: int
+    output_tokens: int
+
+
+@dataclass(frozen=True)
+class TurnUsageView:
+    """턴 하나가 쓴 양. `provider_calls`는 adapter가 공급자를 실제로 부른 횟수다."""
+
+    turn_id: str
+    tokens: TokenTotalsView
+    search_uses: int
+    provider_calls: int
+
+
+@dataclass(frozen=True)
+class SessionUsageView:
+    """세션 누적과 턴별 내역. 이벤트 이력에서 파생되며 저장되지 않는다."""
+
+    tokens: TokenTotalsView
+    search_uses: int
+    provider_calls: int
+    turns: tuple[TurnUsageView, ...]
+
+
+@dataclass(frozen=True)
 class SessionHistoryView:
     """사이드바가 새로 열릴 때 한 번에 복구하는 이력.
 
     이벤트를 함께 싣는 이유는 spec D7의 복구 규칙 때문이다. 스트림을 열기도 전에 끝난 턴은
     `GET /sessions/{id}/events`가 409로 거절하므로, 그 턴의 이벤트를 볼 통로가 여기뿐이다.
+
+    `usage`는 그 `events`를 접은 값이다. 같은 이력에서 파생되므로 둘이 어긋날 수 없다.
     """
 
     session: SessionView
     messages: tuple[ChatMessageView, ...]
     turns: tuple[TurnView, ...]
     events: tuple[AssistantEventEnvelopeView, ...]
+    usage: SessionUsageView
 
 
 # -- 오류 ------------------------------------------------------------------------------------
@@ -535,6 +575,32 @@ def probe_result_view(result: ProbeResult) -> ProbeResultView:
 
 def message_view(message: ChatMessage) -> ChatMessageView:
     return ChatMessageView(role=message.role, text=message.text, created_at=message.created_at)
+
+
+def session_usage_view(usage: SessionUsage) -> SessionUsageView:
+    """application이 접은 사용량을 전송 형태로. 여기서 다시 세지 않는다(집계 owner는 하나다)."""
+    return SessionUsageView(
+        tokens=_token_totals_view(usage.tokens),
+        search_uses=usage.search_uses,
+        provider_calls=usage.provider_calls,
+        turns=tuple(_turn_usage_view(turn) for turn in usage.turns),
+    )
+
+
+def _turn_usage_view(usage: TurnUsage) -> TurnUsageView:
+    return TurnUsageView(
+        turn_id=usage.turn_id,
+        tokens=_token_totals_view(usage.tokens),
+        search_uses=usage.search_uses,
+        provider_calls=usage.provider_calls,
+    )
+
+
+def _token_totals_view(totals: TokenTotals) -> TokenTotalsView:
+    return TokenTotalsView(
+        input_tokens=totals.input_tokens,
+        output_tokens=totals.output_tokens,
+    )
 
 
 def turn_view(turn: Turn) -> TurnView:

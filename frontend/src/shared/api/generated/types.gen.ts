@@ -3704,6 +3704,8 @@ export type SelectionMethod = "top_n" | "percentile";
  *
  * 이벤트를 함께 싣는 이유는 spec D7의 복구 규칙 때문이다. 스트림을 열기도 전에 끝난 턴은
  * `GET /sessions/{id}/events`가 409로 거절하므로, 그 턴의 이벤트를 볼 통로가 여기뿐이다.
+ *
+ * `usage`는 그 `events`를 접은 값이다. 같은 이력에서 파생되므로 둘이 어긋날 수 없다.
  */
 export type SessionHistoryView = {
   /**
@@ -3719,6 +3721,28 @@ export type SessionHistoryView = {
    * Turns
    */
   turns: Array<TurnView>;
+  usage: SessionUsageView;
+};
+
+/**
+ * SessionUsageView
+ *
+ * 세션 누적과 턴별 내역. 이벤트 이력에서 파생되며 저장되지 않는다.
+ */
+export type SessionUsageView = {
+  /**
+   * Provider Calls
+   */
+  provider_calls: number;
+  /**
+   * Search Uses
+   */
+  search_uses: number;
+  tokens: TokenTotalsView;
+  /**
+   * Turns
+   */
+  turns: Array<TurnUsageView>;
 };
 
 /**
@@ -4702,6 +4726,22 @@ export type TimeSeriesOperator =
   "mean" | "std" | "momentum" | "delta" | "min" | "max";
 
 /**
+ * TokenTotalsView
+ *
+ * 토큰 종류별 합. 종류가 늘면 여기에 필드를 더한다(application `TokenTotals`와 같은 이름).
+ */
+export type TokenTotalsView = {
+  /**
+   * Input Tokens
+   */
+  input_tokens: number;
+  /**
+   * Output Tokens
+   */
+  output_tokens: number;
+};
+
+/**
  * ToolCallView
  */
 export type ToolCallView = {
@@ -4970,6 +5010,27 @@ export type TurnContextPayload = {
  * 진행 중 턴의 영속 상태. 종료 상태 세 개는 다시 바뀌지 않는다.
  */
 export type TurnStatus = "running" | "completed" | "failed" | "cancelled";
+
+/**
+ * TurnUsageView
+ *
+ * 턴 하나가 쓴 양. `provider_calls`는 adapter가 공급자를 실제로 부른 횟수다.
+ */
+export type TurnUsageView = {
+  /**
+   * Provider Calls
+   */
+  provider_calls: number;
+  /**
+   * Search Uses
+   */
+  search_uses: number;
+  tokens: TokenTotalsView;
+  /**
+   * Turn Id
+   */
+  turn_id: string;
+};
 
 /**
  * TurnView

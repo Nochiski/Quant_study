@@ -50,6 +50,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     ProbeResult,
     ProviderKind,
     ProviderProfile,
+    SearchActivity,
     SequencedEvent,
     TextDelta,
     ToolCall,
@@ -57,6 +58,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     Turn,
     TurnRequest,
     TurnStatus,
+    Usage,
 )
 
 # 헬퍼가 받는 HTTP 클라이언트. 두 종류가 섞이는 데에는 이유가 있다.
@@ -380,6 +382,59 @@ def test_a_turn_streams_its_events_in_order_and_the_stream_closes(tmp_path: Path
         assert [turn["status"] for turn in history["turns"]] == [TurnStatus.COMPLETED.value]
         assert [message["role"] for message in history["messages"]] == ["user", "assistant"]
         assert len(history["events"]) == 3
+
+
+def test_the_session_history_carries_the_usage_it_can_derive_from_its_events(
+    tmp_path: Path,
+) -> None:
+    """사용량은 이력에서 파생되는 값이라 저장되지 않는다(WORKFLOW A-07).
+
+    같은 응답의 `events`를 접은 값이므로 두 필드가 어긋날 수 없다는 것이 이 계약의 요점이다.
+    """
+    gate = threading.Event()
+    provider = _GatedProvider(
+        after=[
+            Usage(input_tokens=1200, output_tokens=340),
+            SearchActivity(query="한국 모멘텀", sources=()),
+            Usage(input_tokens=1800, output_tokens=260),
+            Done(stop_reason="end_turn"),
+        ],
+        gate=gate,
+    )
+    client = _client(tmp_path, provider)
+    _create_profile(client)
+    session_id = _start_session(client)
+    turn = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "사용량을 남겨 줘", "context": _CONTEXT},
+    )
+    assert provider.reached_gate.wait(timeout=5.0)
+    gate.set()
+
+    history = _wait_for_terminal_turn(client, session_id)
+
+    usage = history["usage"]
+    assert usage["tokens"] == {"input_tokens": 3000, "output_tokens": 600}
+    assert usage["search_uses"] == 1
+    assert usage["provider_calls"] == 2
+    assert [item["turn_id"] for item in usage["turns"]] == [turn.json()["turn_id"]]
+    assert usage["turns"][0]["tokens"] == usage["tokens"]
+
+
+def test_a_session_with_no_turn_yet_reports_zero_usage(tmp_path: Path) -> None:
+    """빈 세션에서 `usage`가 없으면 프론트가 매번 존재 검사를 해야 한다."""
+    client = _client(tmp_path, _GatedProvider())
+    _create_profile(client)
+    session_id = _start_session(client)
+
+    history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
+
+    assert history["usage"] == {
+        "tokens": {"input_tokens": 0, "output_tokens": 0},
+        "search_uses": 0,
+        "provider_calls": 0,
+        "turns": [],
+    }
 
 
 def test_the_stream_keeps_going_past_done_until_the_turn_settles(tmp_path: Path) -> None:

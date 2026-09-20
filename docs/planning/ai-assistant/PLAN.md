@@ -6,7 +6,7 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,B-01
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, B-01]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, B-01]
-last_updated: 2026-09-21T00:49:43+09:00
+last_updated: 2026-09-21T00:50:41+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 4
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, B-01` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `4 / 13` |
-| Aggregated at | `2026-09-21 00:49 KST` |
+| Aggregated at | `2026-09-21 00:50 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -62,7 +62,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `APPROVED` |
-| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `IN_PROGRESS` |
+| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `SELF_CHECK` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `IN_PROGRESS` |
 | **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
@@ -99,7 +99,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `7649967`(c6d70de + P3 후속) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_REVIEW` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `645efcb`(A-03 `7649967` 위) · `review_ai_a_04` 진행 중 · 게이트: pytest 1696·ruff·pyright·frontend 4종 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `SELF_CHECK` | 구현 완료(`fa002b6`, A-02 위, 42 테스트, pytest 1681·ruff·pyright 0) · optional extra `llm` + CI `--extra llm` · A-04 push 뒤 rebase·팩토리 등록 → PR |
-| [ ] | `A-06` | `llm_openai` adapter | A-05 | `IN_PROGRESS` | 구현자 `impl-ai-a06`, 워크트리 `wt-ai-a06`, 브랜치 `feat/ai-a-06-llm-openai`(임시 base A-02 `8324ebc`, A-05 tip 위로 rebase 예정) |
+| [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`5eec392`, A-02 위, 52 테스트, pytest 1700·ruff·pyright 0) · 기본 모델 `gpt-6-astra`(SDK `ChatModel` 첫 항목, A-07 live smoke 확인) · A-05 push 뒤 rebase·팩토리 등록 → PR |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
 
 Phase exit:

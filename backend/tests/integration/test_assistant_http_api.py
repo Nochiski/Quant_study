@@ -13,12 +13,17 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+import uvicorn
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
@@ -99,27 +104,58 @@ class _GatedProvider:
         yield from self._after
 
 
-def _client(tmp_path: Path, provider: _GatedProvider | None) -> TestClient:
+def _app(tmp_path: Path, provider: _GatedProvider | None) -> FastAPI:
     """실제 컨테이너로 앱을 세운다. 비밀 파일은 임시 디렉터리에 둔다."""
     factories = {} if provider is None else {ProviderKind.ANTHROPIC: lambda: provider}
-    app = build_http_app(
+    return build_http_app(
         assistant=AssistantSettings(
             db_path=None,
             secrets_path=tmp_path / "secrets.json",
             provider_factories=factories,
         )
     )
-    return TestClient(app)
 
 
-def _create_profile(client: TestClient, **overrides: Any) -> dict[str, Any]:
+def _client(tmp_path: Path, provider: _GatedProvider | None) -> TestClient:
+    return TestClient(_app(tmp_path, provider))
+
+
+@contextmanager
+def _live_client(tmp_path: Path, provider: _GatedProvider) -> Iterator[httpx.Client]:
+    """진짜 서버에 붙은 클라이언트.
+
+    **SSE를 검증하려면 `TestClient`로는 부족하다.** `TestClient`도 httpx의 `ASGITransport`도
+    응답 본문을 끝까지 모은 뒤에야 돌려준다(`ASGITransport.handle_async_request`가 `body_parts`를
+    쌓고 앱이 끝난 다음 `Response`를 만든다). 그래서 "진행 중인 턴의 프레임이 먼저 도착한다"는
+    성질을 볼 수 없고, 스트림을 열어 둔 채 gate를 푸는 순서도 성립하지 않는다 — 열기가 끝나지
+    않으므로 `set()`에 닿지 못하고 공급자 쪽 `wait` 타임아웃이 풀 때까지 멈춘다.
+    """
+    config = uvicorn.Config(_app(tmp_path, provider), host="127.0.0.1", port=0, log_level="error")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, name="assistant-test-server", daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 15.0
+        while not server.started:
+            if time.monotonic() > deadline:
+                raise AssertionError("the test server did not start within 15s")
+            time.sleep(0.01)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=15.0) as client:
+            yield client
+    finally:
+        server.should_exit = True
+        thread.join(timeout=15.0)
+
+
+def _create_profile(client: httpx.Client, **overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {"kind": "anthropic", "label": "내 Claude", "secret": _API_KEY}
     body.update(overrides)
     response = client.post(f"{_ASSISTANT}/providers", json=body)
     return {"status": response.status_code, "json": response.json()}
 
 
-def _start_session(client: TestClient) -> str:
+def _start_session(client: httpx.Client) -> str:
     response = client.post(f"{_ASSISTANT}/sessions", json={"document_ref": _DOCUMENT_REF})
     assert response.status_code == 201, response.text
     return response.json()["session_id"]
@@ -264,33 +300,42 @@ def test_a_turn_streams_its_events_in_order_and_the_stream_closes(tmp_path: Path
         after=[TextDelta(text="나중"), Done(stop_reason="end_turn")],
         gate=gate,
     )
-    client = _client(tmp_path, provider)
-    _create_profile(client)
-    session_id = _start_session(client)
+    with _live_client(tmp_path, provider) as client:
+        _create_profile(client)
+        session_id = _start_session(client)
 
-    accepted = client.post(
-        f"{_ASSISTANT}/sessions/{session_id}/turns",
-        json={"text": "모멘텀 전략을 제안해 줘", "context": _CONTEXT},
-    )
+        accepted = client.post(
+            f"{_ASSISTANT}/sessions/{session_id}/turns",
+            json={"text": "모멘텀 전략을 제안해 줘", "context": _CONTEXT},
+        )
 
-    assert accepted.status_code == 202, accepted.text
-    assert accepted.json()["accepted_sequence"] == -1
-    assert accepted.json()["status"] == TurnStatus.RUNNING.value
-    assert provider.reached_gate.wait(timeout=5.0)
-    with client.stream(
-        "GET", f"{_ASSISTANT}/sessions/{session_id}/events?after_sequence=-1"
-    ) as stream:
-        assert stream.status_code == 200
-        assert stream.headers["content-type"].startswith("text/event-stream")
-        lines = stream.iter_lines()
-        gate.set()
-        payloads = _read_frames(lines, until_id=2)
-    assert [item["event"]["type"] for item in payloads] == ["text_delta", "text_delta", "done"]
-    assert [item["sequence"] for item in payloads] == [0, 1, 2]
-    history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
-    assert [turn["status"] for turn in history["turns"]] == [TurnStatus.COMPLETED.value]
-    assert [message["role"] for message in history["messages"]] == ["user", "assistant"]
-    assert len(history["events"]) == 3
+        assert accepted.status_code == 202, accepted.text
+        assert accepted.json()["accepted_sequence"] == -1
+        assert accepted.json()["status"] == TurnStatus.RUNNING.value
+        assert provider.reached_gate.wait(timeout=5.0)
+        with client.stream(
+            "GET", f"{_ASSISTANT}/sessions/{session_id}/events?after_sequence=-1"
+        ) as stream:
+            assert stream.status_code == 200
+            assert stream.headers["content-type"].startswith("text/event-stream")
+            lines = stream.iter_lines()
+            # 공급자는 아직 gate에 잡혀 있다 — 이 프레임은 **진행 중인 턴**에서 온 것이다.
+            live = _read_frames(lines, until_id=0)
+            assert [item["event"]["type"] for item in live] == ["text_delta"]
+            running = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
+            assert running["turns"][0]["status"] == TurnStatus.RUNNING.value
+            gate.set()
+            payloads = live + _read_frames(lines, until_id=2)
+        assert [item["event"]["type"] for item in payloads] == [
+            "text_delta",
+            "text_delta",
+            "done",
+        ]
+        assert [item["sequence"] for item in payloads] == [0, 1, 2]
+        history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
+        assert [turn["status"] for turn in history["turns"]] == [TurnStatus.COMPLETED.value]
+        assert [message["role"] for message in history["messages"]] == ["user", "assistant"]
+        assert len(history["events"]) == 3
 
 
 def test_the_stream_keeps_going_past_done_until_the_turn_settles(tmp_path: Path) -> None:
@@ -307,23 +352,23 @@ def test_the_stream_keeps_going_past_done_until_the_turn_settles(tmp_path: Path)
         ],
         gate=gate,
     )
-    client = _client(tmp_path, provider)
-    _create_profile(client)
-    session_id = _start_session(client)
-    client.post(
-        f"{_ASSISTANT}/sessions/{session_id}/turns",
-        json={"text": "Done 뒤에도 읽는다", "context": _CONTEXT},
-    )
-    assert provider.reached_gate.wait(timeout=5.0)
+    with _live_client(tmp_path, provider) as client:
+        _create_profile(client)
+        session_id = _start_session(client)
+        client.post(
+            f"{_ASSISTANT}/sessions/{session_id}/turns",
+            json={"text": "Done 뒤에도 읽는다", "context": _CONTEXT},
+        )
+        assert provider.reached_gate.wait(timeout=5.0)
 
-    with client.stream("GET", f"{_ASSISTANT}/sessions/{session_id}/events") as stream:
-        lines = stream.iter_lines()
-        gate.set()
-        payloads = _read_frames(lines, until_id=1)
+        with client.stream("GET", f"{_ASSISTANT}/sessions/{session_id}/events") as stream:
+            lines = stream.iter_lines()
+            gate.set()
+            payloads = _read_frames(lines, until_id=1)
 
-    assert [item["event"]["type"] for item in payloads] == ["done", "failure"]
-    history = _wait_for_terminal_turn(client, session_id)
-    assert history["turns"][0]["status"] == TurnStatus.FAILED.value
+        assert [item["event"]["type"] for item in payloads] == ["done", "failure"]
+        history = _wait_for_terminal_turn(client, session_id)
+        assert history["turns"][0]["status"] == TurnStatus.FAILED.value
 
 
 def test_the_stream_resumes_after_the_last_event_id_the_client_applied(tmp_path: Path) -> None:
@@ -333,23 +378,23 @@ def test_the_stream_resumes_after_the_last_event_id_the_client_applied(tmp_path:
         after=[TextDelta(text="나중"), Done(stop_reason="end_turn")],
         gate=gate,
     )
-    client = _client(tmp_path, provider)
-    _create_profile(client)
-    session_id = _start_session(client)
-    client.post(
-        f"{_ASSISTANT}/sessions/{session_id}/turns",
-        json={"text": "이어서", "context": _CONTEXT},
-    )
-    assert provider.reached_gate.wait(timeout=5.0)
+    with _live_client(tmp_path, provider) as client:
+        _create_profile(client)
+        session_id = _start_session(client)
+        client.post(
+            f"{_ASSISTANT}/sessions/{session_id}/turns",
+            json={"text": "이어서", "context": _CONTEXT},
+        )
+        assert provider.reached_gate.wait(timeout=5.0)
 
-    with client.stream(
-        "GET",
-        f"{_ASSISTANT}/sessions/{session_id}/events",
-        headers={"Last-Event-ID": "0"},
-    ) as stream:
-        lines = stream.iter_lines()
-        gate.set()
-        payloads = _read_frames(lines, until_id=2)
+        with client.stream(
+            "GET",
+            f"{_ASSISTANT}/sessions/{session_id}/events",
+            headers={"Last-Event-ID": "0"},
+        ) as stream:
+            lines = stream.iter_lines()
+            gate.set()
+            payloads = _read_frames(lines, until_id=2)
 
     # sequence 0은 헤더가 가리킨 지점이라 다시 오지 않는다. 쿼리(`after_sequence` 기본 -1)보다
     # 헤더가 이긴다는 것이 이 단언의 핵심이다.
@@ -590,7 +635,7 @@ _DECLARED_ASSISTANT_CODES = frozenset(
 )
 
 
-def _openapi_assistant_codes(client: TestClient) -> set[str]:
+def _openapi_assistant_codes(client: httpx.Client) -> set[str]:
     """OpenAPI의 `Assistant*Detail` 스키마가 선언한 `code` 값 전부."""
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
     declared: set[str] = set()
@@ -682,7 +727,7 @@ def _code(response: object) -> str:
     return str(detail["code"])
 
 
-def _wait_for_terminal_turn(client: TestClient, session_id: str) -> dict[str, Any]:
+def _wait_for_terminal_turn(client: httpx.Client, session_id: str) -> dict[str, Any]:
     """턴이 종료 상태로 기록될 때까지 이력을 다시 읽는다.
 
     턴은 진짜 스레드에서 돌고 종료 기록은 스트림이 끝난 뒤에 남는다. 고정된 `sleep`으로

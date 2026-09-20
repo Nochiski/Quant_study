@@ -25,12 +25,14 @@ from strategy_workbench.bootstrap._assistant import (
 )
 from strategy_workbench.bootstrap.facade.container import (
     PROVIDER_ADAPTER_FACTORIES,
+    PROVIDER_SDK_MODULES,
     SIDECAR_SUFFIXES,
     AssistantSettings,
     BackendContainer,
     FilePermissionError,
     build_assistant_services,
     build_container,
+    is_missing_provider_sdk,
     restrict_to_current_user,
 )
 from strategy_workbench.bootstrap.facade.http import (
@@ -181,8 +183,30 @@ def _factor_registry() -> FactorRegistry:
 
 
 def _refuse_import() -> LlmProviderPort:
-    """optional extra가 없는 환경의 팩토리. A-05·A-06의 팩토리가 이 모양을 지켜야 한다."""
-    raise ImportError("No module named 'anthropic'", name="anthropic")
+    """optional extra가 없는 환경의 팩토리. A-05·A-06의 팩토리가 이 모양을 지켜야 한다.
+
+    `import anthropic`이 실제로 내는 예외와 같은 모양이다 — `ModuleNotFoundError`에
+    `name="anthropic"`.
+    """
+    raise ModuleNotFoundError("No module named 'anthropic'", name="anthropic")
+
+
+def _refuse_submodule_import() -> LlmProviderPort:
+    """SDK가 지연 import를 쓰면 실패가 하위 모듈에서 난다. 그것도 미설치다."""
+    raise ModuleNotFoundError("No module named 'anthropic.types'", name="anthropic.types")
+
+
+def _typo_import() -> LlmProviderPort:
+    """우리 adapter 안의 오타 import. 미설치가 아니라 버그다."""
+    raise ModuleNotFoundError(
+        "No module named 'strategy_workbench.adapters.outbound.llm_anthropik'",
+        name="strategy_workbench.adapters.outbound.llm_anthropik",
+    )
+
+
+def _broken_sdk_install() -> LlmProviderPort:
+    """설치는 됐는데 SDK가 자기 의존성을 못 찾는다. 미설치가 아니라 깨진 설치다."""
+    raise ImportError("cannot import name 'BaseModel' from 'pydantic'", name="anthropic")
 
 
 class _CountingFactory:
@@ -249,6 +273,67 @@ def test_an_uninstalled_provider_refuses_profile_creation_instead_of_crashing(
         container.assistant_profiles.create(
             kind=ProviderKind.ANTHROPIC, label="Claude", secret="sk-not-used-0001"
         )
+
+
+def test_a_missing_sdk_submodule_still_counts_as_not_installed(tmp_path: Path) -> None:
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={ProviderKind.ANTHROPIC: _refuse_submodule_import},
+        )
+    )
+
+    availability = {item.kind: item for item in container.assistant_profiles.available_kinds()}
+
+    assert availability[ProviderKind.ANTHROPIC].installed is False
+
+
+@pytest.mark.parametrize("factory", [_typo_import, _broken_sdk_install])
+def test_an_import_failure_that_is_not_a_missing_sdk_is_not_swallowed(
+    factory: Callable[[], LlmProviderPort], tmp_path: Path
+) -> None:
+    """오타 import나 깨진 설치를 "설치 필요"로 둔갑시키면 진짜 원인이 화면에서 사라진다.
+
+    사용자는 이미 설치한 SDK를 다시 설치하려 들고, 우리 버그는 로그 한 줄로만 남는다.
+    """
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={ProviderKind.ANTHROPIC: factory},
+        )
+    )
+
+    with pytest.raises(ImportError):
+        container.assistant_profiles.available_kinds()
+
+
+def test_the_sdk_module_table_covers_every_provider_kind() -> None:
+    """kind를 늘리면 표도 늘어야 한다. 빠지면 그 kind의 미설치가 전부 예외로 샌다."""
+    assert set(PROVIDER_SDK_MODULES) == set(ProviderKind)
+    assert PROVIDER_SDK_MODULES[ProviderKind.ANTHROPIC] == "anthropic"
+    assert PROVIDER_SDK_MODULES[ProviderKind.OPENAI] == "openai"
+
+
+def test_a_missing_sdk_is_told_apart_from_our_own_import_bug() -> None:
+    """판정 함수 자체. 위 배선 테스트가 이 규칙 위에 선다."""
+    assert is_missing_provider_sdk(
+        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name="anthropic")
+    )
+    assert is_missing_provider_sdk(
+        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name="anthropic.types")
+    )
+    # 이름이 겹쳐 보이는 남의 패키지는 하위 모듈이 아니다.
+    assert not is_missing_provider_sdk(
+        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name="anthropic_extras")
+    )
+    # 다른 kind의 SDK는 이 kind의 미설치가 아니다.
+    assert not is_missing_provider_sdk(
+        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name="openai")
+    )
+    # 이름이 없으면 단정하지 않는다.
+    assert not is_missing_provider_sdk(ProviderKind.ANTHROPIC, ModuleNotFoundError("boom"))
 
 
 def test_the_factory_is_called_once_and_only_when_a_provider_is_needed(tmp_path: Path) -> None:

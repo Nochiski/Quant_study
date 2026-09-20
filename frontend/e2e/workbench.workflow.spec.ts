@@ -1202,10 +1202,7 @@ test.describe("professional YAML workflow", () => {
     page,
   }) => {
     await openEditor(page, "/research/strategies/new");
-    await replaceSource(
-      page,
-      GOLDEN.replace("퀄리티 모멘텀", "P1-04 E2E 팔레트"),
-    );
+    await replaceSource(page, GOLDEN.replace("퀄리티 모멘텀", "P1-04 E2E 팔레트"));
     await expectPhase(page, "검증 통과");
 
     await page.getByRole("tab", { name: "Graph", exact: true }).click();
@@ -1213,9 +1210,7 @@ test.describe("professional YAML workflow", () => {
     const palette = editor.getByRole("group", { name: "연산자 팔레트" });
     await expect(palette).toBeVisible();
     // kind 드롭다운은 없고, 카탈로그가 도착하면 연산자 이름과 계산식이 보인다(P1-03 카탈로그).
-    await expect(
-      editor.getByRole("combobox", { name: "노드 종류" }),
-    ).toHaveCount(0);
+    await expect(editor.getByRole("combobox", { name: "노드 종류" })).toHaveCount(0);
     await expect(
       palette.getByRole("button", { name: "기간 평균 노드 추가", exact: true }),
     ).toBeVisible();
@@ -1223,9 +1218,7 @@ test.describe("professional YAML workflow", () => {
     // `기간 평균`을 고른다: 필수 정수 파라미터(`window`)가 있어 하한이 없으면 `window: 0`인
     // 노드가 만들어져 곧바로 검증 오류가 났다(P1-04). runtime schema가 하한을 발행하면서
     // 추가만으로 유효한 노드가 된다.
-    await palette
-      .getByRole("searchbox", { name: "연산자 검색" })
-      .fill("기간 평균");
+    await palette.getByRole("searchbox", { name: "연산자 검색" }).fill("기간 평균");
     await palette
       .getByRole("button", { name: "기간 평균 노드 추가", exact: true })
       .click();

@@ -53,11 +53,7 @@ const TEST_TIMEOUT_MS = 900_000;
 
 const realDataSource = (title: string): string => {
   const titled = mustReplace(GOLDEN, "퀄리티 모멘텀", title);
-  const started = mustReplace(
-    titled,
-    'start: "2021-01-01"',
-    `start: "${BACKTEST_START}"`,
-  );
+  const started = mustReplace(titled, 'start: "2021-01-01"', `start: "${BACKTEST_START}"`);
   return mustReplace(started, 'end: "2026-08-31"', `end: "${BACKTEST_END}"`);
 };
 
@@ -102,9 +98,7 @@ test.describe("real equity data", () => {
     await fieldId.selectOption(REWIRED_FIELD);
     await expect(fieldId).toHaveValue(REWIRED_FIELD);
     await expectApplied("field_id");
-    await graphEditor
-      .getByRole("button", { name: "노드 편집: mom_252" })
-      .click();
+    await graphEditor.getByRole("button", { name: "노드 편집: mom_252" }).click();
     await selected
       .getByRole("combobox", { name: /\binput_node_id/ })
       .selectOption("field");
@@ -143,9 +137,7 @@ test.describe("real equity data", () => {
     // 백테스트: 실데이터 duckdb 어댑터 + Rust core. 저장된 revision 을 그대로 실행한다.
     const settingsToggle = page.getByLabel("실행 설정 열기");
     await settingsToggle.click();
-    await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue(
-      "rust",
-    );
+    await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue("rust");
     await page
       .getByRole("textbox", { name: "벤치마크 종목 ID" })
       .fill(BENCHMARK_SECURITY_ID);
@@ -193,12 +185,7 @@ test.describe("real equity data", () => {
       .poll(
         async () => {
           finalState = requireData(
-            (
-              await getBacktestStatus({
-                client: apiClient,
-                path: { run_id: runId },
-              })
-            ).data,
+            (await getBacktestStatus({ client: apiClient, path: { run_id: runId } })).data,
             "poll backtest run state",
           );
           return finalState.status;
@@ -245,8 +232,7 @@ test.describe("real equity data", () => {
     expect(result.series.equity.length).toBeGreaterThan(0);
     const totalReturn = requireData(
       result.metrics.find(
-        (metric) =>
-          metric.metric_id === "total_return" && metric.scope === "full",
+        (metric) => metric.metric_id === "total_return" && metric.scope === "full",
       ),
       "total_return (full) metric",
     );

@@ -23,7 +23,6 @@ import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -772,13 +771,6 @@ def _wait_for_terminal_turn(client: httpx.Client, session_id: str) -> dict[str, 
 # -- 등록된 진짜 adapter (A-05) ---------------------------------------------------------------
 
 
-ANTHROPIC_INSTALLED = find_spec("anthropic") is not None
-_NEEDS_SDK = pytest.mark.skipif(
-    not ANTHROPIC_INSTALLED, reason="공급자 SDK는 optional extra `llm`이다"
-)
-
-
-@_NEEDS_SDK
 def test_the_anthropic_adapter_is_registered_in_the_default_bootstrap_registry() -> None:
     """레지스트리가 비어 있으면 아래 왕복 테스트가 가짜만 검증하게 된다."""
     pytest.importorskip("anthropic", reason="공급자 SDK는 optional extra `llm`이다")
@@ -796,7 +788,6 @@ def test_the_anthropic_adapter_is_registered_in_the_default_bootstrap_registry()
     assert provider.default_model() == DEFAULT_MODEL
 
 
-@_NEEDS_SDK
 def test_creating_an_anthropic_profile_reaches_the_real_adapters_probe(tmp_path: Path) -> None:
     """등록된 adapter 클래스를 그대로 쓰고 SDK 클라이언트만 대본으로 바꾼다.
 

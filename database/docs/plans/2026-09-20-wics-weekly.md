@@ -17,7 +17,7 @@
 | 단계 | 상태 | 비고 |
 |---|---|---|
 | T0 첫 스냅샷 | **완료 09-20 09:00 KST** | dt=20260918, 38콜 200, 2,460종목, L1 검산 10/10, KRX 대비 89.1% (`WICS_PROBE` §8) |
-| T1 원장 편입·주간 잡 | 대기 | `LEDGER_FILES`·백업·건전성 `wics.*`·`scripts/wics_weekly.sh`·크론 2줄 |
+| T1 원장 편입·주간 잡 | **완료 09-20 09:26 KST** | 커밋 `959506b`·`6d1170e`, **G-W1** CI 환경 `database/tests` 1,291 passed(ruff·pyright 0) → `deploy.sh --apply --allow-branch feat/wics-ledger` rev 6d1170e. **G-W2** ① dry-run rc 0 ② `--date 20260918` 멱등 38 skip rc 0 ③ `wics.integrity` PASS(38/38·L1 10/10)·`wics.fresh` 0일·`wics.coverage` 0.8907 ④ `LEDGER_FILES` 6 DB 실재 ⑤ 백업 DBS 에 wiseindex. 크론 2줄은 T4 에서 등록(예정) |
 | T2 stage `stg_wics_components` | 대기 | blob 로더 `select_sql`·파서·규칙·신선도 14일·fixture·baseline |
 | T3 equity `sector_snapshot` + `v_sector` | 대기 | S25, e1.17.0, 필드 프로파일 4, `equity_order.txt` |
 | T4 배포·크론 | 대기 | `deploy.sh --apply --allow-branch feat/wics-ledger`, 크론 `0 18 * * 5`·`0 1 * * 6` |

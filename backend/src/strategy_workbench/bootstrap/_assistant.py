@@ -121,10 +121,24 @@ def _anthropic_adapter() -> LlmProviderPort:
     return AnthropicLlmAdapter()
 
 
-# A-06(`llm_openai`)이 자기 항목을 여기에 더한다. 등록되지 않은 종류도 설정 화면에는 보이고
-# "설치 필요"로 표시된다(`ProviderProfileService.available_kinds`).
+def _openai_adapter() -> LlmProviderPort:
+    """A-06 OpenAI adapter(`llm_openai`). SDK 미설치는 `ModuleNotFoundError`로 알린다.
+
+    `_anthropic_adapter`와 같은 계약이다. import는 함수 본문 안에 있고, `find_spec`으로 미리
+    확인하지도 `ImportError`를 가로채지도 않는다. 판정은 `is_missing_provider_sdk` 한 곳만 한다.
+    """
+    from strategy_workbench.adapters.outbound.llm_openai.facade.provider import OpenAiLlmAdapter
+
+    return OpenAiLlmAdapter()
+
+
+# 등록되지 않은 종류도 설정 화면에는 보이고 "설치 필요"로 표시된다
+# (`ProviderProfileService.available_kinds`).
 PROVIDER_ADAPTER_FACTORIES: Mapping[ProviderKind, ProviderAdapterFactory] = MappingProxyType(
-    {ProviderKind.ANTHROPIC: _anthropic_adapter}
+    {
+        ProviderKind.ANTHROPIC: _anthropic_adapter,
+        ProviderKind.OPENAI: _openai_adapter,
+    }
 )
 
 

@@ -164,6 +164,8 @@ const ko = {
   "assistant.apply.overwrite": "그래도 덮어쓰기",
   "assistant.apply.cancel": "취소",
   "assistant.apply.applied": "제안을 문서에 적용했습니다.",
+  "assistant.apply.backtestWaiting":
+    "적용한 문서를 검증하는 중입니다. 검증이 끝나면 백테스트를 시작합니다.",
   "assistant.apply.error.editor-unavailable":
     "편집기를 사용할 수 없어 제안을 적용하지 못했습니다.",
   "assistant.apply.error.composing":
@@ -1225,6 +1227,8 @@ export const messages = {
     "assistant.apply.overwrite": "Overwrite anyway",
     "assistant.apply.cancel": "Cancel",
     "assistant.apply.applied": "The proposal was applied to the document.",
+    "assistant.apply.backtestWaiting":
+      "Validating the applied document. The backtest starts once validation finishes.",
     "assistant.apply.error.editor-unavailable":
       "The editor is unavailable, so the proposal was not applied.",
     "assistant.apply.error.composing":

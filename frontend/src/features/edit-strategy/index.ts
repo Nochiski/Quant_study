@@ -104,6 +104,11 @@ export {
   type ProposalApplyStatus,
 } from "./model/use-apply-assistant-proposal";
 export {
+  useApplyProposalThenBacktest,
+  type BacktestTrigger,
+  type ProposalBacktestChain,
+} from "./model/use-apply-then-backtest";
+export {
   ProposalApplyDialog,
   ProposalApplyFeedback,
 } from "./ui/proposal-apply-dialog";

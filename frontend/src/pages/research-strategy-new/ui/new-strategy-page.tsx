@@ -26,6 +26,7 @@ import {
   saveStatusTone,
   assistantDocumentContext,
   useApplyAssistantProposal,
+  useApplyProposalThenBacktest,
   useAutosave,
   useCompileDocument,
   useExecutionPlans,
@@ -223,6 +224,12 @@ export const NewStrategyPage = ({
     [document, serverDraftId, runSettings.requestOptions],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
+  // "적용 후 백테스트"는 적용 → 검증 → 실행을 한 동작으로 잇는다(WORKFLOW B-04).
+  const proposalBacktest = useApplyProposalThenBacktest(
+    proposalApply,
+    document,
+    { canRun: backtest.canRun, run: runBacktest },
+  );
   const selectSymbol = useCallback(
     (pointer: string): void => {
       outline.requestSourceReveal(pointer);
@@ -405,10 +412,14 @@ export const NewStrategyPage = ({
         assistant={
           renderAssistant === undefined ? undefined : (
             <>
-              <ProposalApplyFeedback apply={proposalApply} />
+              <ProposalApplyFeedback
+                apply={proposalApply}
+                chain={proposalBacktest}
+              />
               {renderAssistant({
                 document: assistantDocument,
                 apply: proposalApply,
+                backtest: proposalBacktest,
               })}
             </>
           )

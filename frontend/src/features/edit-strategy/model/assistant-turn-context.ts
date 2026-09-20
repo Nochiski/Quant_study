@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
 
-import type { DocumentRefView, TurnContextPayload } from "../../../shared/api";
+// 어시스턴트 어휘의 단일 입구는 `entities/assistant`다 — 생성 SDK 타입을 여기서 직접 들여오지 않는다.
+import type {
+  DocumentRefView,
+  TurnContextPayload,
+} from "../../../entities/assistant";
 import type { AssistantProposalApply } from "./use-apply-assistant-proposal";
+import type { ProposalBacktestChain } from "./use-apply-then-backtest";
 import { currentDiagnostics, type DocumentState } from "./document-state";
 
 /**
@@ -20,6 +25,8 @@ export type AssistantDocumentContext = {
 export type AssistantSlotRender = (slot: {
   document: AssistantDocumentContext;
   apply: AssistantProposalApply;
+  /** "적용 후 백테스트" 한 동작. 적용과 실행 사이의 검증 대기는 이 체인이 맡는다. */
+  backtest: ProposalBacktestChain;
 }) => ReactNode;
 
 export type AssistantContextOptions = {

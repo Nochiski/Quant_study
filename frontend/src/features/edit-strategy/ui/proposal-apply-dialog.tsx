@@ -7,6 +7,7 @@ import type {
   AssistantProposalApply,
   ProposalApplyStatus,
 } from "../model/use-apply-assistant-proposal";
+import type { ProposalBacktestChain } from "../model/use-apply-then-backtest";
 import "./proposal-apply-dialog.css";
 
 type ProposalApplyProps = { apply: AssistantProposalApply };
@@ -19,8 +20,17 @@ const failureText = (
  * 제안 적용 결과 알림. 적용은 성공해도 문서가 통째로 바뀌는 일이라 화면에 흔적을 남긴다. 확인
  * 화면이 떠 있는 동안에는 다이얼로그가 같은 사실을 말하므로 아무것도 그리지 않는다.
  */
-export const ProposalApplyFeedback = ({ apply }: ProposalApplyProps) => {
+export const ProposalApplyFeedback = ({
+  apply,
+  chain,
+}: ProposalApplyProps & { chain?: ProposalBacktestChain }) => {
   const { status } = apply;
+  if (chain?.waiting === true)
+    return (
+      <p className="proposal-apply__feedback" role="status">
+        {t("assistant.apply.backtestWaiting")}
+      </p>
+    );
   if (status.kind === "applied")
     return (
       <p className="proposal-apply__feedback" role="status">

@@ -321,8 +321,9 @@ STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv 
 
 **Acceptance**
 
-- `widgets/strategy-ide` 우측 레일 탭 "계약 · AI", `assistant` 슬롯, 폭·펼침 `use-panel-layout` 확장.
-  1280px 미만은 기존 drawer 규칙.
+- `widgets/strategy-ide` 우측 레일에 계약 인스펙터와 **별개 패널**인 `assistant` 슬롯(기본 접힘),
+  폭·펼침 `use-panel-layout` 확장. 1280px 미만은 기존 drawer 규칙이고, 그 이상이어도 편집기 최소
+  폭(480px)을 남기지 못하면 나중에 연 패널을 오버레이로 돌린다.
 - `pages/research-strategy-*`: `onApplyProposal` → `replaceRange(0, length, source)`(history 격리, undo 한
   단계). 제안의 기준 텍스트 ≠ 현재 텍스트면 "문서가 바뀌었습니다" + "미리보기"·"그래도 덮어쓰기"
   확인(덮어쓰기도 같은 경로, undo 한 번으로 복원되는 테스트) → compile. "미리보기"는

@@ -23,6 +23,7 @@ equity = [
 ]
 llm = [
     "anthropic>=1.0",
+    "openai>=2.0",
 ]
 
 [dependency-groups]

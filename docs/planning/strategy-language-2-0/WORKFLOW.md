@@ -42,10 +42,12 @@ main
   (`parallel_window`에 기록). 교차 제약 두 가지: **P2-06·P2-07은 P1-03(연산자 카탈로그)이 merge된 뒤
   착수한다**(두 PR이 카탈로그의 `saved_*` 제거·`availability`를 건드린다). P3-01의 base는 P2-09이며
   P1-05가 먼저 merge되어 있어야 한다.
-- **generated SDK 규칙(1.1 initiative와 같음)**: P2 backend PR은 `backend/openapi.json`만 재생성하고
-  `frontend/src/shared/api/generated`는 건드리지 않는다. SDK 재생성과 frontend 적응은 P3-01이 한
-  PR에서 한다. P2 PR은 backend gate만 merge gate로 삼고 CI `frontend`·`browser-e2e` job은 P3-01·P3-03의
-  exit 조건이다. 각 P2 PR 본문 `제약사항`에 이 사실을 적는다.
+- **generated SDK 규칙(P2-01에서 개정)**: OpenAPI를 바꾸는 backend PR은 같은 PR에서
+  `frontend/src/shared/api/generated`도 재생성해 별도 커밋으로 넣는다. CI `frontend` job이
+  `npm run api:generate` 뒤 `git diff --exit-code -- ../backend/openapi.json src/shared/api/generated`를
+  돌리므로, 생성 파일을 빼면 그 PR이 곧바로 빨간불이 된다. 커밋에는 **생성 산출물만** 넣고 소비자
+  배선(실행 설정 패널·요청 본문 연결)은 P3-01 그대로다. 재생성 뒤 `npm run typecheck`·`lint`·
+  `test`·`build`를 돌려 결과를 PR 본문에 적는다. `browser-e2e` job은 계속 P3-03의 exit 조건이다.
 - 실 DB 주의: P2-09 merge 전에는 실 SQLite에 1.2 revision을 저장하지 않는다(spec 7절).
 - fixture 이름과 역할(spec D7): P2-03부터 `quality_momentum.yaml`이 1.2가 되고, 1.1 원본은
   `quality_momentum.v1_1.yaml`로 복사해 보존한다(1.1 → 1.2 업그레이드 입력). 기존
@@ -240,7 +242,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   생성한 JSON Schema(필드별 타입·기본값·enum). 기존 `strategy_document_schema()` 빌더를 재사용하되
   전략 authoring runtime schema와는 **다른 산출물**이다(owner가 `domain/backtest`). 프론트가 실행
   설정 패널 기본값을 손으로 적지 않게 하는 경로다(P3-02가 소비).
-- OpenAPI 재생성. frontend SDK는 건드리지 않는다.
+- OpenAPI 재생성과 생성 SDK 재생성(1절 generated SDK 규칙). 소비자 배선은 P3-01 그대로.
 
 **Non-goal**: StrategySpec 변경. `missing_policy`(P2-02). enum 물리 이동(P2-03).
 
@@ -262,7 +264,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - P2-01 브리지가 `첫 팩터 graph.missing_policy`를 읽던 부분은 이 PR 이후 의미가 없어지므로, 1.1
   문서에서 만들 때만 쓰는 legacy 입력으로 좁힌다.
 - runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성
-  (`FactorGraph`에서 `missing_policy`가 빠진다). frontend SDK는 P3-01.
+  (`FactorGraph`에서 `missing_policy`가 빠진다)과 생성 SDK 재생성(1절 규칙).
 
 **제약사항**: 캐시 키 회귀가 이 PR의 핵심 invariant다. 분리하지 않으면 P2-03의 대량 삭제에 묻힌다.
 
@@ -302,9 +304,22 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - fixture: `quality_momentum.yaml`(1.2), `.json`, `.legacy.json`, `.minimal.yaml`이 같은 hash. 1.1
   원본을 `quality_momentum.v1_1.yaml`로 복사해 보존한다. **`quality_momentum.v1_1.commented.yaml`은
   건드리지 않는다**(1.0 → 1.1 기대 출력, 테스트 3곳이 단언 중).
-- runtime schema fixture 재생성. OpenAPI 재생성.
+- **P2-01 잔여 두 지점을 `environment`로 이관한다**(그때까지는 명시 실행 설정과 문서 값이 갈린다).
+  - `adapters/outbound/engine_portfolio/_adapter.py:42` — `requirements()`가
+    `spec.execution.participation_rate < 1.0`으로 `PARTIAL_FILL` 요구를 판정한다. `assess(spec)`·
+    `requirements(spec)` 시그니처에 `environment`를 더하고 호출자(`portfolio_design/_service.py`의
+    `_prepare`)가 넘긴다. adapter → domain이라 facade `DEPENDS_ON`에 `domain.backtest` 추가로 끝난다
+    (enum 이동 항목이 이미 같은 줄을 요구한다).
+  - `domain/portfolio/_compiler.py:249,259` — tape hash payload의 `execution_timing`과
+    `TargetTape.execution_timing`이 `spec.execution.timing`을 읽는다. `compile_target_tape`·
+    `compile_target_tape_with_trace`가 `environment`(또는 `timing`)를 인자로 받게 하고
+    `domain.portfolio` facade `DEPENDS_ON`에 `domain.backtest`를 추가한다(`domain.backtest`는
+    `domain.portfolio`를 읽지 않으므로 순환이 아니다). `ExecutionTiming` 값이 하나뿐이라 지금은
+    tape_hash가 변하지 않는다 — 회귀 테스트로 그 사실을 고정한다.
+- runtime schema fixture 재생성. OpenAPI 재생성과 생성 SDK 재생성(1절 규칙).
 
-**제약사항**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend는 P3-01까지 빨간불.
+**제약사항**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend 소비자 배선은 P3-01까지
+그대로다(생성 SDK는 1절 규칙대로 각 PR이 재생성한다).
 이 PR이 P2 스택에서 12절 상한(600줄·10파일)에 가장 가깝다. 착수 시 바뀌는 파일 수를 먼저 세고,
 상한을 넘으면 **enum 이동을 별도 PR로 뗀다**(`data`·`execution` 제거가 먼저, enum 이동이 뒤). 분리하면 PR
 총수가 바뀌므로 README의 "WORKFLOW의 PR 범위를 바꾸면 먼저 변경 이유를 PLAN.md 변경 기록에 남긴다" 절차를
@@ -322,7 +337,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `none`이 1.1과 수치 동일한 회귀 테스트. `rank`·`zscore` 수치 테스트.
 - `_explanation.py`·semantic diff·contract 설명 갱신. i18n 키 추가는 P3-01.
 - runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성(`normalization`
-  enum이 응답 스키마에 노출된다). frontend SDK는 P3-01.
+  enum이 응답 스키마에 노출된다)과 생성 SDK 재생성(1절 규칙).
 
 ### P2-05 — 횡단면 eligibility(`EligibilityOperator`, exhaustive `_compare`, 2-pass)
 
@@ -348,8 +363,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   한다.
 - `ExclusionReason`은 `backend/openapi.json`의 응답 스키마에 노출되어 있으므로(현재 4곳) 멤버 추가는
   **API 계약 변경**이다. `export_openapi.py`로 재생성하고 diff를 확인한다(2절 "API contract" gate).
-  frontend SDK 재생성은 P3-01. 재생성을 빠뜨리면 프론트가 모르는 enum 값을 받아 trace 화면이 빈칸을
-  낸다.
+  생성 SDK도 같은 PR에서 재생성한다(1절 규칙). 재생성을 빠뜨리면 프론트가 모르는 enum 값을 받아
+  trace 화면이 빈칸을 낸다.
 
 ### P2-06 — `risk.risk_factor_id`, `saved_factor`·`saved_subgraph` 제거
 
@@ -382,7 +397,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `saved_factor`·`saved_subgraph`를 노드 union·스키마·연산자 카탈로그에서 제거. 실행 경로의 거부
   코드 삭제.
 - runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성(`risk_factor_id`
-  필드가 응답 스키마에 노출된다. 진단 코드 문자열은 OpenAPI에 열거되지 않는다). frontend SDK는 P3-01.
+  필드가 응답 스키마에 노출된다. 진단 코드 문자열은 OpenAPI에 열거되지 않는다)과 생성 SDK
+  재생성(1절 규칙).
 
 ### P2-07 — compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported
 
@@ -400,7 +416,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `strategy.operator.unsupported` error. 연산자 카탈로그 응답의 `availability`도 같은 capability로.
 - `export_openapi.py`로 `backend/openapi.json` 재생성(연산자 카탈로그 응답의 `availability` 값 집합이
   바뀐다. 진단 코드 문자열은 OpenAPI에 열거되지 않으므로 그 자체는 재생성 사유가 아니다. diff가 0이면
-  그 사실을 PR 본문에 적는다). frontend SDK는 P3-01.
+  그 사실을 PR 본문에 적는다). diff가 있으면 생성 SDK도 재생성한다(1절 규칙).
 
 ### P2-08 — duckdb `GROUP_SERIES` 스파이크와 `ideas/*.yaml` 5개
 

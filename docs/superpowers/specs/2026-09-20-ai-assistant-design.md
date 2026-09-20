@@ -172,7 +172,8 @@ application이 선언하는 도구(v1). 모든 스키마는 `additionalPropertie
 
 턴의 상한과 종료:
 
-- `max_tool_rounds`(기본 12)를 넘으면 `Failure(TOOL_ROUNDS_EXCEEDED)`로 턴을 끝낸다.
+- `max_tool_rounds`(기본 12)를 넘으면 `Failure(TOOL_ROUNDS_EXCEEDED)`로 턴을 끝낸다. 값은 application이
+  정하고 **집행은 토큰 예산과 같이 adapter(루프 주인)가 한다.** 서비스는 라운드를 세지 않는다.
 - `propose_strategy`가 3회 연속 검증에 실패하면 `Failure(PROPOSAL_INVALID)`로 끝낸다. 제안 없이 루프가
   자연 종료되면 `Done("end_turn")`이고 화면은 "제안 없이 답변만"으로 보인다.
 - 턴당 벽시계 타임아웃(기본 300초) 초과는 `Failure(TIMEOUT)`. 검색 `max_search_uses`(기본 8)와
@@ -224,7 +225,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | adapter | SDK | 기본 모델 | 검색 | 스트리밍 |
 |---|---|---|---|---|
 | `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high`, `max_tokens = request.max_output_tokens_per_call` | `web_search_20260209` 서버 도구, `max_uses = request.max_search_uses`, 도메인 제한 없음 | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
-| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구(서버 측이라 개별 호출을 거부할 수 없다). adapter가 검색 호출 이벤트를 세어 누적이 `max_search_uses`에 닿으면 이후 공급자 호출의 도구 목록에서 `web_search`를 빼고 그 사실을 모델(텍스트)과 화면(`SearchActivity`)에 알린다. 한 호출 안의 초과는 사후 관측만 가능하다. 실제 SDK 표면은 A-06에서 확정 | Responses 스트리밍 |
+| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구(서버 측이라 개별 호출을 거부할 수 없다). adapter가 검색 호출 이벤트를 세어 누적이 `max_search_uses`에 닿으면 이후 공급자 호출의 도구 목록에서 `web_search`를 빼고 화면(`SearchActivity`)에 알린다. 모델에게 알리는 문장은 adapter가 저술하지 않고 application 프롬프트 owner가 준 고정 문구(`TurnRequest`에 실어 보내는 도구 결과 문구)만 쓴다(A-06에서 확정). 한 호출 안의 초과는 사후 관측만 가능하다. 실제 SDK 표면은 A-06에서 확정 | Responses 스트리밍 |
 
 - `probe`는 최소 토큰 요청 한 번으로 키·모델·네트워크를 확인하고 `ProbeResult(ok, message,
   latency_ms, failure)`를 돌려준다. 실패 종류를 구분한다(인증·모델 없음·네트워크·요금 한도).
@@ -319,7 +320,8 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | 비밀 | `secrets_local` |
 | 세션·턴·메시지·이벤트 이력(sequence) | `assistant_sqlite` |
 | 진행 중 턴 레지스트리·취소 신호 | `application/assistant_chat`의 `AssistantTurnRunner`(프로세스 내, 단일 워커 전제) |
-| 도구 정의·프롬프트·검증 규칙·턴 상한 | `application/assistant_chat`(도구 이름·스키마 상수는 `domain/assistant`) |
+| 도구 정의·프롬프트·검증 규칙, 턴 상한의 **값**(라운드·검색·토큰·타임아웃) | `application/assistant_chat`(도구 이름·스키마 상수는 `domain/assistant`) |
+| 턴 상한의 **집행**(라운드·검색 횟수·토큰 예산·잘림) | 각 `llm_*` adapter(루프 주인). 타임아웃만 `AssistantTurnRunner` |
 | 공급자별 요청 형식·스트리밍·검색 도구 켜기·예외→코드 매핑 | 각 `llm_*` adapter |
 | 사이드바 열림·폭·현재 세션 id·제안 카드의 기준 텍스트·마지막 반영 sequence | frontend local UI state |
 | 제안 적용 결과(문서 텍스트) | edit-strategy 편집기(전체 범위 교체, 업그레이드 적용과 같은 예외 경로) |

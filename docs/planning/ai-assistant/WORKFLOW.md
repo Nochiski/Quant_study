@@ -89,10 +89,11 @@ main
 - `_context.py` `AssistantContextBuilder`(시스템 프롬프트 = `_prompt.py` 템플릿 + runtime schema에서
   생성한 언어 요약; 도구 4종 실행), `_prompt.py`, `_chat.py` `AssistantChatService.send`(도구 루프,
   `propose_strategy`는 `StrategyCompilerPort`로 검증 후 `Proposal` 이벤트, 3회 실패 →
-  `Failure(PROPOSAL_INVALID)`, `max_tool_rounds`, 취소, 공급자 예외 → `Failure(PROVIDER)`에 예외 타입
+  `Failure(PROPOSAL_INVALID)`, 취소, 공급자 예외 → `Failure(PROVIDER)`에 예외 타입
   이름만, `Usage` 기록), `_turns.py` `AssistantTurnRunner`(스레드, 즉시 append, `accepted_sequence`, 중복
   턴 거부, cancel, 타임아웃 → `Failure(TIMEOUT)`을 먼저 확정한 뒤 cancel 신호, Failure 우선순위: 첫 Failure만
-  턴 상태), facade `chat.py`·`turns.py`. 토큰 예산 집행은 adapter(A-05·A-06) 책임이라 여기 없다.
+  턴 상태), facade `chat.py`·`turns.py`. 라운드·검색·토큰 상한의 집행은 adapter(A-05·A-06) 책임이라 여기
+  없다(서비스는 값만 `TurnRequest`에 싣는다).
 - 테스트: 가짜 `LlmProviderPort`·in-memory 저장소·가짜 compiler로 spec D3의 종료 조건 전부, 턴 러너
   sequence·중복·취소·타임아웃(주입 clock), 시스템 프롬프트가 runtime schema의 최상위 키·노드 kind를
   포함하고 손으로 적은 필드명이 없음.
@@ -127,7 +128,8 @@ main
 
 - `adapters/outbound/llm_anthropic`: spec D4 행 전부. 체크 항목:
   - [ ] `ToolSpec` → `tools[]`(`strict: true`), `web_search_20260209`(`max_uses = request.max_search_uses`)
-  - [ ] 수동 도구 루프(`tool_use` → `execute_tool` → `tool_result`, `pause_turn` 재개, `refusal` → `Failure(REFUSAL)`)
+  - [ ] 수동 도구 루프(`tool_use` → `execute_tool` → `tool_result`, `pause_turn` 재개, `refusal` → `Failure(REFUSAL)`,
+    라운드가 `request.max_tool_rounds`를 넘으면 `Failure(TOOL_ROUNDS_EXCEEDED)`)
   - [ ] 스트리밍 → `TextDelta`·`ThinkingSummary`(`display: summarized`)·`SearchActivity`·`Usage`
   - [ ] 서버 도구 오류 객체 분기(성공 리스트 vs 오류 객체) 단위 테스트
   - [ ] 토큰 예산: `max_tokens = min(request.max_output_tokens_per_call, 남은 턴 예산)`, 소진 시

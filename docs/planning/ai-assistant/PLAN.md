@@ -6,10 +6,10 @@ current_phase: P0,A
 current_pr: P0-01,A-01
 active_prs: [P0-01, A-01]
 parallel_window: [P0-01, A-01]
-last_updated: 2026-09-20T22:55:18+09:00
+last_updated: 2026-09-20T22:58:44+09:00
 planned_prs: 13
 merged_prs: 0
-approved_prs: 0
+approved_prs: 1
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,A-01` |
 | Active PR | `P0-01, A-01` |
 | Progress | `0 / 13 merged (0%)` |
-| Approved | `0 / 13` |
-| Aggregated at | `2026-09-20 22:55 KST` |
+| Approved | `1 / 13` |
+| Aggregated at | `2026-09-20 22:58 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -61,7 +61,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Planning package | 1 | 0 | `IN_REVIEW` |
+| P0 | Planning package | 1 | 0 | `APPROVED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 0 | `IN_PROGRESS` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `WAITING` |
 | **Total** |  | **13** | **0** | **0%** |
@@ -77,7 +77,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | Non-goals | 코드 변경 |
 | Branch/worktree | `docs/ai-assistant-plan` (PR #166) · A-01/A-02는 `wt-ai-a01` / `feat/ai-a-01-domain-ports` |
 | Base SHA | `5f97f8c` (origin/main) |
-| Head SHA | 리뷰 반영 후 재검토 중 |
+| Head SHA | 4차 APPROVE 뒤 잔여 P2 반영 커밋 |
 | Diff stat | 문서 8개 |
 | Focused tests | `tools/update-plan-progress.ps1 -Check` |
 | Full gate | CI(문서만) |
@@ -88,7 +88,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P0-01` | 기획 패키지·설계 spec·SoT 행 예약 | 없음 | `IN_REVIEW` | [#166](https://github.com/Nochiski/Quant_study/pull/166) · `review_ai_p0_01` 1차 REQUEST_CHANGES(P1 3·P2 10·P3 8) → 반영 후 재검토 |
+| [ ] | `P0-01` | 기획 패키지·설계 spec·SoT 행 예약 | 없음 | `APPROVED` | [#166](https://github.com/Nochiski/Quant_study/pull/166) · `review_ai_p0_01` 4차 APPROVE(1~3차 REQUEST_CHANGES 전부 해소, 잔여 P2 1건 머지 전 반영) |
 
 ## A — backend
 
@@ -130,6 +130,7 @@ Phase exit:
 | P0-01 | `review_ai_p0_01` | 1 | REQUEST_CHANGES | P1 3(적용 경로·턴 owner·PR 분할), P2 10, P3 8 → 전부 반영 |
 | P0-01 | `review_ai_p0_01` | 2 | REQUEST_CHANGES | 1차 전부 해소 확인. 신규 P1 2(EventSource 재개 회귀·stale 가드 진행 경로), P2 3, P3 5 → 반영 |
 | P0-01 | `review_ai_p0_01` | 3 | REQUEST_CHANGES | 2차 전부 해소 확인. 신규 P1 1(토큰 예산 축소가 포트로 구현 불가), P2 2, P3 4 → 반영 |
+| P0-01 | `review_ai_p0_01` | 4 | APPROVE | 3차 전부 해소. 잔여 P2 1(`max_tool_rounds` 집행 주체) 반영, P3 3(D9 분리 반영, OpenAI 통지 문구·기본값은 A-06·A-07) |
 
 ## 검증 기록
 
@@ -139,6 +140,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-20 — P0-01 4차 APPROVE. 잔여 P2(`max_tool_rounds` 집행을 adapter로)·D9 값/집행 분리 반영. CI 통과 후 머지 대상.
 - 2026-09-20 — P0-01 3차 리뷰 반영: 토큰 예산 집행을 adapter로(서비스는 Usage 기록만), Failure 우선순위(첫
   Failure만 턴 상태), 409는 backstop·프론트는 이력 복구·`sseMaxRetryAttempts`, OpenAI 검색 상한은 도구 목록 제거,
   기본값은 A-07 실측 후 확정, A-05 체크 항목화.

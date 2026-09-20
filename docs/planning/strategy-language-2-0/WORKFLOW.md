@@ -564,8 +564,11 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `creates, recovers, validates, versions, traces and backtests`와
   `upgrades a frozen 1.0 revision …`, `workbench.real-equity.spec.ts`의
   `edits the graph on real data …`. 패널이 생기기 전에는 프론트가 `environment`를 싣지 못해
-  브라우저에서 시작한 run이 422 `backtest.run.environment_required`로 거절된다. 최종 시나리오
-  재작성은 P3-03이 맡는다.
+  브라우저에서 시작한 run이 422 `backtest.run.environment_required`로 거절된다.
+- **전략 디버거 trace 요청도 같은 배선이 필요하다.** `POST /api/v1/strategies/debug/trace`가
+  `environment` 없이 나가면 preview·run과 같은 `portfolio.strategy.invalid` +
+  `run_environment.required`로 거절되어 "추적 재현 정보" 패널이 뜨지 않는다. 위 fixme
+  시나리오 안에 있으므로 해제와 같이 고친다. 최종 시나리오 재작성은 P3-03이 맡는다.
 - 업그레이드 배너가 1.1 문서에도 뜨고, 응답의 `environment`로 실행 설정을 채운다(사용자 확인 후).
   `warnings`를 배너에 표시.
 - 백테스트 버튼 차단 사유에서 `factor-plan` 분기가 compile error로 흡수되는지 확인(남으면 결함으로

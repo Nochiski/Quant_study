@@ -691,8 +691,11 @@ const FormFieldRow = ({
   const labelBody = (
     <>
       {name === null ? null : (
-        <span className="strategy-form__name">{name} </span>
+        <span className="strategy-form__name">{name}</span>
       )}
+      {/* 구분 공백은 형제 text node여야 한다: 요소 안에 넣으면 accname 계산이 그 요소의 결과를
+          trim해 "이름key"로 붙어 읽힌다(P1-03 리뷰). */}
+      {name === null ? null : " "}
       <code className="strategy-form__key">{field.key}</code>
       {field.required ? <span aria-hidden="true"> *</span> : null}
       {(field.displayUnit ?? field.unit) ? (

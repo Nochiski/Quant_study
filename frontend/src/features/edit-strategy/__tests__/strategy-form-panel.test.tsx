@@ -453,6 +453,32 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
   });
 });
 
+describe("StrategyFormPanel 라벨 어휘 (P1-03)", () => {
+  it("이름과 스키마 키를 띄어 읽는다", () => {
+    renderPanel(MINIMAL, stubTransactions());
+
+    // accname 계산은 인라인 요소의 결과를 각각 trim한다. 구분 공백이 `<span>` 안에 있으면
+    // "이름key"로 붙어 읽히므로 형제 text node여야 한다(P1-03 리뷰).
+    expect(
+      section("risk").getByRole("spinbutton", {
+        name: /^종목별 최대 목표 비중 한도 max_name_weight/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      section("전략 문서").getByRole("textbox", { name: /^전략 이름 title$/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("이름이 없는 필드는 키만 보인다", () => {
+    renderPanel(MINIMAL, stubTransactions());
+
+    // 섹션 제목은 스키마 키가 없으면 이름만 남는다(루트 스칼라 섹션 = 문서 자신).
+    expect(
+      screen.getByRole("button", { name: "전략 문서", expanded: true }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("StrategyFormPanel section collapse (P4-04)", () => {
   it("toggles aria-expanded and hides the section body while keeping it in the DOM", async () => {
     const user = userEvent.setup();

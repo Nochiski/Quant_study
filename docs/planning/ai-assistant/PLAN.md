@@ -6,7 +6,7 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03]
-last_updated: 2026-09-21T02:03:10+09:00
+last_updated: 2026-09-21T02:17:50+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 5
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `5 / 13` |
-| Aggregated at | `2026-09-21 02:03 KST` |
+| Aggregated at | `2026-09-21 02:17 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -62,7 +62,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `APPROVED` |
-| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `IN_PROGRESS` |
+| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `SELF_CHECK` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `IN_PROGRESS` |
 | **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
@@ -100,7 +100,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `APPROVED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_REVIEW` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `5640f8d2`(A-04 `645efcb` 위) · `86fc460a`(645efcb 위 6커밋: P0·P1·P2·P3 반영, extra 없이 수집 확인) · `review_ai_a_05` 1차 REQUEST_CHANGES → 반영, A-04 새 tip 위 rebase·등록 재작성·`Usage` 캐시 필드·no-extras CI job 뒤 2차 |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`19331e4a`, A-05 `5640f8d2` 위 8커밋, pytest 1843·ruff·pyright 0, A-05 리뷰 결정 4건 대칭 적용) · 기본 모델 `gpt-6-astra` · A-05 재작성 뒤 rebase·push → PR |
-| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `IN_PROGRESS` | 구현 1차 완료(로컬 `cb429ed3`, A-05 위: 골든 fixture·live smoke 스크립트·기본값 근거) · 추가 지시: 세션 Usage 집계, 시나리오 fixture 3개(SSE 프레임 배열) → A-06 tip 위 rebase 예정 · live smoke 미실행(키 없음, 사용자 실행 필요) |
+| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `SELF_CHECK` | 구현 완료(로컬 `c1d08e41`, A-05 위 7커밋: 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) |
 
 Phase exit:
 

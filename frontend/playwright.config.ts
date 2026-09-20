@@ -109,6 +109,9 @@ export default defineConfig({
       env: {
         ...process.env,
         STRATEGY_WORKBENCH_DB_PATH: runtimeDatabase,
+        // 포트를 옮기면 preview origin 도 바뀐다. 허용 목록에 넣지 않으면 브라우저 요청이
+        // CORS 로 막혀 서버는 멀쩡한데 화면만 빈다.
+        STRATEGY_WORKBENCH_ALLOWED_ORIGINS: preview,
         STRATEGY_WORKBENCH_EQUITY_ADAPTER: realEquity ? "duckdb" : "mock",
         STRATEGY_WORKBENCH_EQUITY_ROOT: realEquityRoot,
       },

@@ -236,7 +236,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 
 | adapter | SDK | 기본 모델 | 검색 | 스트리밍 |
 |---|---|---|---|---|
-| `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high`, `max_tokens = request.max_output_tokens_per_call` | `web_search_20260209` 서버 도구, `max_uses = request.max_search_uses`, 도메인 제한 없음 | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
+| `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high`, `max_tokens = request.max_output_tokens_per_call` | `web_search_20260209` 서버 도구, 도메인 제한 없음. SDK의 `max_uses`는 **호출당** 한도라 adapter가 턴 누적 검색 횟수를 세어 호출마다 `max_uses = max(0, request.max_search_uses − 누적)`을 다시 계산하고, 0이면 그 호출의 도구 목록에서 `web_search`를 뺀다(D9 · OpenAI 행과 같은 집행) | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
 | `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구(서버 측이라 개별 호출을 거부할 수 없다). adapter가 검색 호출 이벤트를 세어 누적이 `max_search_uses`에 닿으면 이후 공급자 호출의 도구 목록에서 `web_search`를 빼고 화면(`SearchActivity`)에 알린다. 모델에게 알리는 문장은 adapter가 저술하지 않고 application 프롬프트 owner가 준 고정 문구(`TurnRequest`에 실어 보내는 도구 결과 문구)만 쓴다(A-06에서 확정). 한 호출 안의 초과는 사후 관측만 가능하다. 실제 SDK 표면은 A-06에서 확정 | Responses 스트리밍 |
 
 - `probe`는 최소 토큰 요청 한 번으로 키·모델·네트워크를 확인하고 `ProbeResult(ok, message,

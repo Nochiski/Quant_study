@@ -33,9 +33,18 @@ __all__ = ["PROBE_MAX_TOKENS", "AnthropicLlmAdapter"]
 
 logger = logging.getLogger(__name__)
 
-# 연결 테스트 한 번의 출력 상한. 키·모델·네트워크가 살아 있는지만 보면 되므로 가장 작은 값에
-# 가깝게 잡는다. 0으로 두면 모델에 따라 400이 나 "키가 틀렸다"와 구분이 안 된다.
-PROBE_MAX_TOKENS = 16
+# 연결 테스트 한 번의 출력 상한.
+#
+# 작을수록 싸지만 너무 작으면 위험하다. `claude-opus-5`는 thinking이 기본으로 켜져 있어, 상한이
+# 모자라면 400이 날 수 있다. 그러면 `BadRequestError` → `ProbeFailure.UNKNOWN`으로 떨어져
+# **올바른 키가 틀린 키처럼 보인다**. 응답이 잘려 끝나는 것(`stop_reason == "max_tokens"`)은
+# 문제가 아니다 — probe는 요청이 받아들여졌는지만 본다.
+#
+# `thinking: {"type": "disabled"}`로 막지 않는 이유는 모델이 사용자 설정값이기 때문이다. Opus 5는
+# effort `high` 이하에서만 disabled를 받고, Fable 5.1 계열은 어떤 effort에서도 400이다. 즉
+# disabled는 멀쩡한 설정을 실패로 만들 수 있다. 넉넉한 상한이 공급자 모델에 중립적이다.
+# 실측 확인은 A-07 live smoke 몫이다.
+PROBE_MAX_TOKENS = 64
 _PROBE_PROMPT = "ping"
 
 

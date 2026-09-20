@@ -8,26 +8,44 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
-import anthropic
-import httpx2
 import pytest
-from anthropic.types import MessageParam
 
-from strategy_workbench.adapters.outbound.llm_anthropic._payload import (
+pytest.importorskip(
+    "anthropic",
+    reason="공급자 SDK는 optional extra `llm`이다. 미설치 환경에서는 이 모듈을 건너뛴다.",
+)
+
+import anthropic  # noqa: E402  # reason: 위 importorskip 뒤에야 import할 수 있다
+import httpx2  # noqa: E402  # reason: 위와 같음
+from anthropic.types import MessageParam  # noqa: E402  # reason: 위와 같음
+from anthropic.types.web_search_tool_result_error_code import (  # noqa: E402  # reason: 위와 같음
+    WebSearchToolResultErrorCode,
+)
+
+from strategy_workbench.adapters.outbound.llm_anthropic._adapter import (  # noqa: E402  # reason: 위와 같음
+    PROBE_MAX_TOKENS,
+)
+from strategy_workbench.adapters.outbound.llm_anthropic._payload import (  # noqa: E402  # reason: 위와 같음
     MAX_CACHE_BREAKPOINTS,
     build_messages,
     build_system,
     build_tools,
 )
-from strategy_workbench.adapters.outbound.llm_anthropic._turn import MAX_PAUSE_RESUMES
-from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (
+from strategy_workbench.adapters.outbound.llm_anthropic._turn import (  # noqa: E402  # reason: 위와 같음
+    MAX_PAUSE_RESUMES,
+    MIN_CALL_OUTPUT_TOKENS,
+)
+from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (  # noqa: E402  # reason: 위와 같음
     DEFAULT_MODEL,
     AnthropicLlmAdapter,
 )
-from strategy_workbench.application.assistant_chat.facade.ports import LlmProviderPort
-from strategy_workbench.domain.assistant.facade.models import (
+from strategy_workbench.application.assistant_chat.facade.ports import (  # noqa: E402  # reason: 위와 같음
+    LlmProviderPort,
+)
+from strategy_workbench.domain.assistant.facade.models import (  # noqa: E402  # reason: 위와 같음
     ChatEvent,
     ChatMessage,
     ChatRole,
@@ -49,11 +67,12 @@ from strategy_workbench.domain.assistant.facade.models import (
     Usage,
 )
 
-from .anthropic_stream_script import (
+from .anthropic_stream_script import (  # noqa: E402  # reason: 위와 같음
     CallScript,
     RecordingClientFactory,
     ScriptedMessagesClient,
     final_message,
+    message_with_future_stop_reason,
     search_error_stop,
     search_result_stop,
     server_tool_use_stop,
@@ -197,7 +216,7 @@ def connection_error() -> anthropic.APIConnectionError:
 
 
 def test_tool_specs_become_strict_anthropic_tools() -> None:
-    tools = as_dicts(build_tools(make_request()))
+    tools = as_dicts(build_tools(make_request(), remaining_search_uses=8))
 
     declared = [tool for tool in tools if "type" not in tool]
     assert [tool["name"] for tool in declared] == ["read_current_strategy", "propose_strategy"]
@@ -207,7 +226,7 @@ def test_tool_specs_become_strict_anthropic_tools() -> None:
 
 
 def test_web_search_tool_carries_the_requested_use_limit() -> None:
-    tools = as_dicts(build_tools(make_request(max_search_uses=3)))
+    tools = as_dicts(build_tools(make_request(max_search_uses=3), remaining_search_uses=3))
 
     search = [tool for tool in tools if tool.get("type") == "web_search_20260209"]
     assert len(search) == 1
@@ -215,8 +234,15 @@ def test_web_search_tool_carries_the_requested_use_limit() -> None:
     assert search[0]["max_uses"] == 3
 
 
+def test_a_spent_search_budget_drops_the_tool_entirely() -> None:
+    """SDK의 `max_uses`는 호출당 한도라 0을 보낼 수 없다. 도구를 빼는 것이 유일한 표현이다."""
+    tools = as_dicts(build_tools(make_request(), remaining_search_uses=0))
+
+    assert [tool.get("type") for tool in tools] == [None, None]
+
+
 def test_no_web_search_tool_when_research_was_not_requested() -> None:
-    tools = as_dicts(build_tools(make_request(research=frozenset())))
+    tools = as_dicts(build_tools(make_request(research=frozenset()), remaining_search_uses=8))
 
     assert [tool.get("type") for tool in tools] == [None, None]
 
@@ -226,7 +252,7 @@ def test_no_web_search_tool_when_research_was_not_requested() -> None:
 
 def test_cache_breakpoints_sit_on_the_stable_blocks_only() -> None:
     request = make_request()
-    tools = build_tools(request)
+    tools = build_tools(request, remaining_search_uses=request.max_search_uses)
     system = build_system(request)
     messages = build_messages(request)
 
@@ -334,16 +360,30 @@ def test_search_success_becomes_search_activity_with_sources() -> None:
     )
 
 
-def test_search_error_object_becomes_an_empty_search_activity_not_an_exception() -> None:
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "invalid_tool_input",
+        "unavailable",
+        "max_uses_exceeded",
+        "too_many_requests",
+        "query_too_long",
+        "request_too_large",
+    ],
+)
+def test_search_error_object_becomes_an_empty_search_activity_not_an_exception(
+    error_code: WebSearchToolResultErrorCode,
+) -> None:
     """검색 결과 블록의 `content`는 성공이면 리스트, 실패면 단일 오류 객체다(spec D4).
 
-    오류여도 턴은 계속된다 — 모델이 같은 오류를 보고 검색 없이 답을 잇는다.
+    오류여도 턴은 계속된다 — 모델이 같은 오류를 보고 검색 없이 답을 잇는다. 6종 전부 같은
+    처리를 받는다(분기가 코드가 아니라 타입을 본다). 나중에 코드별 분기가 생기면 여기가 자리다.
     """
     client = ScriptedMessagesClient(
         CallScript(
             events=(
                 server_tool_use_stop("srvtoolu-9", "존재하지 않는 질의"),
-                search_error_stop("srvtoolu-9", "max_uses_exceeded"),
+                search_error_stop("srvtoolu-9", error_code),
                 text_event("검색 없이 답한다"),
             ),
             message=final_message(stop_reason="end_turn"),
@@ -355,6 +395,67 @@ def test_search_error_object_becomes_an_empty_search_activity_not_an_exception()
     assert events[0] == SearchActivity(query="존재하지 않는 질의", sources=())
     assert TextDelta(text="검색 없이 답한다") in events
     assert failures(events) == []
+
+
+def test_the_search_budget_is_spent_across_calls_not_reset_every_call() -> None:
+    """spec D9: 검색 횟수 집행은 adapter다.
+
+    SDK의 `max_uses`는 **호출당** 한도라 한 번 계산해 모든 호출에 같은 값을 보내면 라운드가
+    12번 도는 턴이 예산의 12배를 쓴다. 검색은 과금 대상이다.
+    """
+    client = ScriptedMessagesClient(
+        CallScript(
+            events=(
+                server_tool_use_stop("srvtoolu-1", "첫 질의"),
+                search_result_stop("srvtoolu-1", (("A", "https://a.test"),)),
+            ),
+            message=final_message(
+                stop_reason="tool_use",
+                content=[tool_use_block("toolu-1", "read_current_strategy", {})],
+            ),
+        ),
+        CallScript(
+            events=(
+                server_tool_use_stop("srvtoolu-2", "둘째 질의"),
+                search_result_stop("srvtoolu-2", (("B", "https://b.test"),)),
+            ),
+            message=final_message(
+                stop_reason="tool_use",
+                content=[tool_use_block("toolu-2", "read_current_strategy", {})],
+            ),
+        ),
+        CallScript(message=final_message(stop_reason="end_turn")),
+    )
+
+    run_turn(client, request=make_request(max_search_uses=2))
+
+    def search_tools(index: int) -> list[dict[str, object]]:
+        return [
+            tool
+            for tool in as_dicts(client.payloads[index].tools)
+            if tool.get("type") == "web_search_20260209"
+        ]
+
+    assert search_tools(0)[0]["max_uses"] == 2  # 아직 안 썼다
+    assert search_tools(1)[0]["max_uses"] == 1  # 한 번 썼다
+    assert search_tools(2) == []  # 예산 소진 — 도구를 뺀다
+
+
+def test_the_tool_list_is_byte_identical_until_a_search_actually_happens() -> None:
+    """검색 전에는 남은 횟수가 곧 전체 예산이라 캐시 접두가 깨지지 않는다."""
+    client = ScriptedMessagesClient(
+        CallScript(
+            message=final_message(
+                stop_reason="tool_use",
+                content=[tool_use_block("toolu-1", "read_current_strategy", {})],
+            )
+        ),
+        CallScript(message=final_message(stop_reason="end_turn")),
+    )
+
+    run_turn(client)
+
+    assert as_dicts(client.payloads[0].tools) == as_dicts(client.payloads[1].tools)
 
 
 # -- 도구 루프 -------------------------------------------------------------------------------
@@ -507,6 +608,24 @@ def test_max_tokens_stop_reason_is_reported_as_truncated_output() -> None:
     assert not any(isinstance(event, Done) for event in events)
 
 
+def test_an_unknown_stop_reason_is_a_provider_failure_not_a_silent_done() -> None:
+    """SDK가 종류를 늘렸을 때 새 **실패성** 사유가 화면에 "정상 종료"로 보이면 안 된다."""
+    client = ScriptedMessagesClient(
+        CallScript(message=message_with_future_stop_reason("some_future_reason"))
+    )
+
+    events = run_turn(client)
+
+    assert failures(events)[0].code is FailureCode.PROVIDER
+    assert not any(isinstance(event, Done) for event in events)
+
+
+def test_stop_sequence_is_still_a_normal_end() -> None:
+    client = ScriptedMessagesClient(CallScript(message=final_message(stop_reason="stop_sequence")))
+
+    assert run_turn(client)[-1] == Done(stop_reason="stop_sequence")
+
+
 def test_context_window_overflow_is_a_provider_failure_not_a_normal_end() -> None:
     client = ScriptedMessagesClient(
         CallScript(message=final_message(stop_reason="model_context_window_exceeded"))
@@ -537,6 +656,32 @@ def test_the_next_call_is_capped_by_the_remaining_turn_budget() -> None:
 
     assert client.payloads[0].max_tokens == 1_000  # min(호출당 1000, 남은 1500)
     assert client.payloads[1].max_tokens == 600  # min(호출당 1000, 남은 1500-900)
+
+
+def test_a_budget_remainder_too_small_to_call_is_reported_as_budget_not_truncation() -> None:
+    """잔량이 1이면 `max_tokens=1` 호출이 거의 확실히 잘려 진짜 사유를 가린다.
+
+    그래서 최소 호출 크기보다 적게 남으면 호출하지 않는다. 두 사유가 같은 상황을 가리키면
+    이력에서 무엇이 턴을 끊었는지 구분할 수 없다.
+    """
+    spent = 1_000 - (MIN_CALL_OUTPUT_TOKENS - 1)
+    client = ScriptedMessagesClient(
+        CallScript(
+            message=final_message(
+                stop_reason="tool_use",
+                content=[tool_use_block("toolu-1", "read_current_strategy", {})],
+                output_tokens=spent,
+            )
+        )
+    )
+
+    events = run_turn(
+        client,
+        request=make_request(max_output_tokens_per_call=1_000, max_turn_output_tokens=1_000),
+    )
+
+    assert failures(events)[0].code is FailureCode.TOKEN_BUDGET_EXCEEDED
+    assert len(client.payloads) == 1
 
 
 def test_an_exhausted_turn_budget_stops_the_loop_before_the_next_call() -> None:
@@ -589,6 +734,49 @@ def test_cancelling_between_stream_events_keeps_what_was_already_streamed() -> N
     events = run_turn(client, cancelled=cancelled)
 
     assert events[0] == TextDelta(text="앞")
+    assert failures(events)[0].code is FailureCode.CANCELLED
+
+
+def test_a_cancelled_call_still_reports_the_tokens_it_already_spent() -> None:
+    """취소해도 그때까지의 출력 토큰은 과금된다. 집계에서 빠지면 세션 `Usage`가 0으로 보인다."""
+    client = ScriptedMessagesClient(
+        CallScript(
+            events=(text_event("앞"), text_event("뒤")),
+            message=final_message(stop_reason="end_turn"),
+            snapshot=final_message(input_tokens=70, output_tokens=12),
+        )
+    )
+    seen = 0
+
+    def cancelled() -> bool:
+        nonlocal seen
+        seen += 1
+        return seen >= 2
+
+    events = run_turn(client, cancelled=cancelled)
+
+    assert events == [
+        TextDelta(text="앞"),
+        Usage(input_tokens=70, output_tokens=12),
+        Failure(code=FailureCode.CANCELLED, message=events[-1].message),  # pyright: ignore[reportAttributeAccessIssue]  # reason: 문구가 아니라 순서를 본다
+    ]
+
+
+def test_a_cancellation_before_any_snapshot_still_ends_the_turn() -> None:
+    """`message_start`를 보기 전에 취소되면 사용량을 읽을 수 없다. 취소 자체는 성립해야 한다."""
+    client = ScriptedMessagesClient(
+        CallScript(events=(text_event("앞"),), message=final_message(), snapshot=None)
+    )
+    seen = 0
+
+    def cancelled() -> bool:
+        nonlocal seen
+        seen += 1
+        return seen >= 2
+
+    events = run_turn(client, cancelled=cancelled)
+
+    assert not any(isinstance(event, Usage) for event in events)
     assert failures(events)[0].code is FailureCode.CANCELLED
 
 
@@ -662,6 +850,29 @@ def test_a_key_inside_the_sdk_error_never_reaches_the_failure_message() -> None:
     assert "AuthenticationError" in failure.message
 
 
+def test_the_turn_log_carries_the_exception_type_but_never_the_key(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """완료 정의 3: 키는 로그에도 평문으로 남지 않는다.
+
+    다음 사람이 진단을 늘리려고 `logger.warning("... %s", error)`나 `logger.exception(...)`으로
+    바꾸면 401 응답 본문이 그대로 로그에 남는다. 키 누설은 회수 경로가 없으므로 여기서 고정한다.
+    """
+    leaked = f"Incorrect API key provided: {SECRET}"
+    client = ScriptedMessagesClient(
+        CallScript(error=status_error(anthropic.AuthenticationError, 401, leaked))
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        run_turn(client)
+
+    assert SECRET not in caplog.text
+    assert "Incorrect API key provided" not in caplog.text
+    assert "AuthenticationError" in caplog.text
+    # `logger.exception`은 예외의 `str()`을 `exc_text`로 기록한다. 쓰지 않는다는 뜻이다.
+    assert all(record.exc_text is None for record in caplog.records)
+
+
 # -- probe -----------------------------------------------------------------------------------
 
 
@@ -676,7 +887,7 @@ def test_probe_reports_success_with_a_latency() -> None:
 
     assert result.ok is True
     assert result.latency_ms == 250
-    assert client.create_payloads == [(16, "claude-opus-5")]
+    assert client.create_payloads == [(PROBE_MAX_TOKENS, "claude-opus-5")]
 
 
 @pytest.mark.parametrize(
@@ -703,7 +914,7 @@ def test_probe_tells_failure_kinds_apart(error: Exception, expected: ProbeFailur
     assert result.failure is expected
 
 
-def test_probe_never_quotes_the_provider_error_text() -> None:
+def test_probe_never_quotes_the_provider_error_text(caplog: pytest.LogCaptureFixture) -> None:
     client = ScriptedMessagesClient(
         create_error=status_error(
             anthropic.AuthenticationError, 401, f"Incorrect API key provided: {SECRET}"
@@ -711,16 +922,26 @@ def test_probe_never_quotes_the_provider_error_text() -> None:
     )
     adapter = AnthropicLlmAdapter(client_factory=RecordingClientFactory(client))
 
-    result = adapter.probe(SECRET, model="claude-opus-5", base_url=None)
+    with caplog.at_level(logging.DEBUG):
+        result = adapter.probe(SECRET, model="claude-opus-5", base_url=None)
 
     assert SECRET not in result.message
     assert result.message == "API 키가 거부되었습니다. 키를 다시 확인하세요."
+    assert SECRET not in caplog.text
+    assert "Incorrect API key provided" not in caplog.text
+    assert all(record.exc_text is None for record in caplog.records)
 
 
 # -- facade ----------------------------------------------------------------------------------
 
 
 def test_the_facade_declares_only_the_nodes_it_uses() -> None:
+    """선언은 실제 import와 같아야 한다.
+
+    이 노드는 `application.assistant_chat`을 import하지 않는다 — `LlmProviderPort`는 Protocol
+    이라 구조만 맞으면 되고, 쓰는 타입은 전부 `domain.assistant` 것이다. 경계 게이트는
+    "선언 없는 import"만 잡고 "import 없는 선언"은 잡지 못하므로 여기서 고정한다.
+    """
     from strategy_workbench.adapters.outbound.llm_anthropic import facade
 
-    assert facade.DEPENDS_ON == ("application.assistant_chat", "domain.assistant")
+    assert facade.DEPENDS_ON == ("domain.assistant",)

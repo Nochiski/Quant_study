@@ -14,18 +14,30 @@ SDK에는 도구 루프를 대신 돌려 주는 `tool_runner`가 있지만 쓰�
 | 상한 | 규칙 | 실패 |
 |---|---|---|
 | 도구 라운드 | `request.max_tool_rounds` 초과 | `TOOL_ROUNDS_EXCEEDED` |
-| 턴 토큰 예산 | `max_tokens = min(호출당 상한, 남은 예산)`, 남은 예산 0 | `TOKEN_BUDGET_EXCEEDED` |
-| 검색 횟수 | `web_search` 도구의 `max_uses`로 서버가 집행 | (서버 도구 오류 객체) |
+| 턴 토큰 예산 | `max_tokens = min(호출당, 남은 예산)`, 잔량 < 최소 호출 | `TOKEN_BUDGET_EXCEEDED` |
+| 검색 횟수 | 턴 누적을 세어 호출마다 `max_uses`를 줄이고, 0이면 도구를 뺀다 | (도구 없음) |
+
+**검색은 턴 누적이다.** SDK의 `max_uses`는 호출당 한도라, 한 번 계산해 모든 호출에 같은 값을
+보내면 라운드가 12번 도는 턴이 예산의 12배를 쓴다. 검색은 과금 대상이고 spec D9는 집행을
+adapter에 맡겼으므로, 여기서 `server_tool_use` 블록을 세어 남은 횟수를 호출마다 다시 계산한다.
+같은 `TurnRequest` 값이 Anthropic과 OpenAI에서 다른 상한을 뜻하면 안 된다.
 
 `stop_reason == "max_tokens"`는 예산 때문에 줄였든 호출당 상한 때문이든 `OUTPUT_TRUNCATED`다.
 예산 소진은 "다음 호출을 할 토큰이 남지 않았다"일 때만 쓴다 — 두 사유가 같은 상황을 가리키면
-이력에서 무엇이 턴을 끊었는지 구분할 수 없다.
+이력에서 무엇이 턴을 끊었는지 구분할 수 없다. 경계에서 이 구분이 뒤집히지 않게 최소 호출
+크기(`MIN_CALL_OUTPUT_TOKENS`)를 둔다. 남은 예산이 그보다 작으면 호출하지 않는다 — 1토큰짜리
+호출은 거의 확실히 `max_tokens`로 끝나 진짜 사유(예산 소진)를 `OUTPUT_TRUNCATED`로 가린다.
 
 ## 취소
 
 `cancelled()`는 **호출 사이·이벤트 사이·도구 실행 사이** 세 곳에서 본다. 확인되면 그 자리에서
 `Failure(CANCELLED)`를 내고 스트림을 끝낸다. 이미 흘려보낸 텍스트는 되돌리지 않는다
 (spec D3: 이미 스트리밍된 텍스트는 assistant 메시지로 보존한다).
+
+취소로 끊은 호출도 그때까지의 `Usage`를 먼저 내보낸다. 취소해도 그 시점까지의 출력 토큰은
+과금되고, 내보내지 않으면 세션 집계가 취소 턴을 0으로 본다. 이때 `get_final_message()`를 부르면
+**안 된다** — 그건 스트림을 끝까지 읽으므로 멈추려던 응답을 오히려 전부 받아 온다.
+`current_message_snapshot`은 남은 이벤트를 읽지 않는다.
 
 ## 서버 도구 오류
 
@@ -57,6 +69,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     Done,
     Failure,
     FailureCode,
+    ResearchCapability,
     SearchActivity,
     Source,
     TextDelta,
@@ -67,7 +80,12 @@ from strategy_workbench.domain.assistant.facade.models import (
     Usage,
 )
 
-from ._client import AnthropicMessagesClient, StreamEvent, TurnMessage
+from ._client import (
+    AnthropicMessagesClient,
+    AnthropicMessageStream,
+    StreamEvent,
+    TurnMessage,
+)
 from ._failures import failure_for
 from ._payload import (
     OUTPUT_CONFIG,
@@ -78,7 +96,7 @@ from ._payload import (
     build_tools,
 )
 
-__all__ = ["MAX_PAUSE_RESUMES", "stream_turn"]
+__all__ = ["MAX_PAUSE_RESUMES", "MIN_CALL_OUTPUT_TOKENS", "stream_turn"]
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +104,14 @@ logger = logging.getLogger(__name__)
 # 루프가 끝나지 않을 수 있다. 라운드 상한과 따로 세는 이유는 재개가 우리 도구를 부른 것이
 # 아니어서 "도구 라운드"로 세면 사용자가 허락한 라운드를 서버 도구가 먹어 버리기 때문이다.
 MAX_PAUSE_RESUMES = 5
+
+# 의미 있는 호출 하나의 최소 출력 토큰. 남은 예산이 이보다 작으면 호출하지 않고 예산 소진으로
+# 끝낸다. 값 자체는 A-07 실측으로 확정한다(spec D3: 기본값은 실측 뒤 확정).
+MIN_CALL_OUTPUT_TOKENS = 256
+
+# `Done`으로 흘려보내도 되는 정상 종료 사유. SDK가 종류를 늘렸을 때 새 **실패성** 사유가
+# 화면에 "정상 종료"로 보이지 않게 화이트리스트로 둔다.
+_NORMAL_STOP_REASONS = frozenset({"end_turn", "stop_sequence"})
 
 _CANCELLED_MESSAGE = "턴이 취소되어 공급자 호출을 중단했습니다"
 
@@ -98,14 +124,22 @@ class _CallOutcome:
 
 
 class _SearchTrace:
-    """검색 질의와 결과 블록을 이어 붙이는 자리.
+    """턴 하나의 검색 기록. 질의를 결과 블록에 이어 붙이고 사용 횟수를 센다.
 
     `server_tool_use` 블록에 질의가, 뒤따르는 `web_search_tool_result` 블록에 결과가 실려 온다.
     둘은 별개의 content block이라 질의를 기억해 두지 않으면 `SearchActivity`에 넣을 질의가 없다.
+
+    **호출 하나가 아니라 턴 하나를 산다.** 검색 예산은 턴 단위이고, 호출마다 새로 만들면 셀
+    대상이 사라진다.
     """
 
     def __init__(self) -> None:
         self._queries: dict[str, str] = {}
+
+    @property
+    def uses(self) -> int:
+        """이 턴에서 모델이 검색을 부른 횟수."""
+        return len(self._queries)
 
     def remember(self, tool_use_id: str, query: str) -> None:
         self._queries[tool_use_id] = query
@@ -123,9 +157,9 @@ def stream_turn(
     model: str,
 ) -> Iterator[ChatEvent]:
     """한 턴을 흘린다. 상한 집행과 도구 루프가 전부 여기 있다."""
-    tools = build_tools(request)
     system = build_system(request)
     messages = build_messages(request)
+    search = _SearchTrace()
     spent_output_tokens = 0
     tool_rounds = 0
     pause_resumes = 0
@@ -136,17 +170,29 @@ def stream_turn(
             return
 
         remaining = request.max_turn_output_tokens - spent_output_tokens
-        if remaining <= 0:
+        if remaining < MIN_CALL_OUTPUT_TOKENS:
             yield Failure(
                 code=FailureCode.TOKEN_BUDGET_EXCEEDED,
                 message=(
-                    "턴 출력 토큰 예산을 모두 썼습니다 — "
+                    "턴 출력 토큰 예산이 다음 호출에 모자랍니다 — "
                     f"spent_output_tokens={spent_output_tokens} "
-                    f"budget={request.max_turn_output_tokens} tool_rounds={tool_rounds}"
+                    f"budget={request.max_turn_output_tokens} remaining={remaining} "
+                    f"min_call={MIN_CALL_OUTPUT_TOKENS} tool_rounds={tool_rounds}"
                 ),
             )
             return
         max_tokens = min(request.max_output_tokens_per_call, remaining)
+        # 검색 예산은 턴 누적이다. 남은 횟수를 호출마다 다시 계산한다(모듈 docstring 표).
+        remaining_search_uses = max(0, request.max_search_uses - search.uses)
+        if remaining_search_uses == 0 and ResearchCapability.WEB_SEARCH in request.research:
+            logger.info(
+                "anthropic web search budget spent — model=%s max_search_uses=%d "
+                "tool_rounds=%d (dropping the tool for the rest of the turn)",
+                model,
+                request.max_search_uses,
+                tool_rounds,
+            )
+        tools = build_tools(request, remaining_search_uses=remaining_search_uses)
 
         try:
             outcome = yield from _stream_once(
@@ -157,6 +203,7 @@ def stream_turn(
                 system=system,
                 tools=tools,
                 cancelled=cancelled,
+                search=search,
             )
         except Exception as error:
             failure = failure_for(error, model=model)
@@ -231,6 +278,17 @@ def stream_turn(
             continue
 
         if stop_reason != "tool_use":
+            if stop_reason is not None and stop_reason not in _NORMAL_STOP_REASONS:
+                # SDK가 종류를 늘렸다. 모르는 사유를 `Done`으로 흘리면 실패가 정상 종료로 보인다.
+                yield Failure(
+                    code=FailureCode.PROVIDER,
+                    message=(
+                        "공급자가 알 수 없는 종료 사유를 보냈습니다 — "
+                        f"kind=anthropic model={model} stop_reason={stop_reason} "
+                        f"tool_rounds={tool_rounds}"
+                    ),
+                )
+                return
             yield Done(stop_reason=stop_reason or "end_turn")
             return
 
@@ -287,9 +345,9 @@ def _stream_once(
     system: list[TextBlockParam],
     tools: list[ToolUnionParam],
     cancelled: Callable[[], bool],
+    search: _SearchTrace,
 ) -> Generator[ChatEvent, None, _CallOutcome]:
     """공급자를 한 번 부르고 스트림을 흘린다. 반환값은 최종 메시지(또는 취소)다."""
-    trace = _SearchTrace()
     with client.stream(
         max_tokens=max_tokens,
         messages=messages,
@@ -300,13 +358,35 @@ def _stream_once(
         tools=tools,
     ) as stream:
         for event in stream:
-            yield from _events_from(event, trace)
+            yield from _events_from(event, search)
             # 취소 확인은 이벤트를 **내보낸 뒤**에 한다. 앞에서 보면 공급자가 이미 만들어 낸
             # 조각 하나가 통째로 사라진다.
             if cancelled():
+                yield from _usage_so_far(stream)
                 yield Failure(code=FailureCode.CANCELLED, message=_CANCELLED_MESSAGE)
                 return _CallOutcome(message=None)
         return _CallOutcome(message=stream.get_final_message())
+
+
+def _usage_so_far(stream: AnthropicMessageStream) -> Iterator[Usage]:
+    """취소 시점까지의 사용량. 읽지 못하면 아무것도 내지 않는다.
+
+    취소해도 그때까지의 출력 토큰은 과금되므로 집계에서 빠지면 안 된다. 다만 이건 부가
+    정보이고, 여기서 터져 취소 자체가 실패하면 그게 더 나쁘다. `message_start`를 보기 전에
+    취소되면 스냅샷 자체가 없다.
+    """
+    try:
+        snapshot = stream.current_message_snapshot
+    except Exception as error:  # reason: 스냅샷 부재를 SDK가 assert로 알려 타입으로 잡히지 않는다
+        logger.info(
+            "anthropic usage snapshot unavailable at cancellation — error_type=%s",
+            type(error).__name__,
+        )
+        return
+    yield Usage(
+        input_tokens=snapshot.usage.input_tokens,
+        output_tokens=snapshot.usage.output_tokens,
+    )
 
 
 def _assistant_turn(message: TurnMessage) -> MessageParam:

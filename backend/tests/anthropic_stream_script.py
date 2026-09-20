@@ -14,8 +14,18 @@ from dataclasses import dataclass
 from types import TracebackType
 from typing import Literal
 
-from anthropic.lib.streaming import ParsedContentBlockStopEvent, TextEvent
-from anthropic.types import (
+import pytest
+
+pytest.importorskip(
+    "anthropic",
+    reason="공급자 SDK는 optional extra `llm`이다. 미설치 환경에서는 이 모듈을 건너뛴다.",
+)
+
+from anthropic.lib.streaming import (  # noqa: E402  # reason: 위 importorskip 뒤에야 import할 수 있다
+    ParsedContentBlockStopEvent,
+    TextEvent,
+)
+from anthropic.types import (  # noqa: E402  # reason: 위와 같음
     Message,
     MessageParam,
     OutputConfigParam,
@@ -31,11 +41,16 @@ from anthropic.types import (
     WebSearchToolResultBlock,
     WebSearchToolResultError,
 )
-from anthropic.types.parsed_message import ParsedContentBlock, ParsedTextBlock
-from anthropic.types.stop_reason import StopReason
-from anthropic.types.web_search_tool_result_error_code import WebSearchToolResultErrorCode
+from anthropic.types.parsed_message import (  # noqa: E402  # reason: 위와 같음
+    ParsedContentBlock,
+    ParsedTextBlock,
+)
+from anthropic.types.stop_reason import StopReason  # noqa: E402  # reason: 위와 같음
+from anthropic.types.web_search_tool_result_error_code import (  # noqa: E402  # reason: 위와 같음
+    WebSearchToolResultErrorCode,
+)
 
-from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (
+from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (  # noqa: E402  # reason: 위와 같음
     AnthropicMessagesClient,
 )
 
@@ -45,6 +60,7 @@ __all__ = [
     "StreamPayload",
     "RecordingClientFactory",
     "final_message",
+    "message_with_future_stop_reason",
     "search_error_stop",
     "search_result_stop",
     "server_tool_use_stop",
@@ -161,6 +177,18 @@ def final_message(
     )
 
 
+def message_with_future_stop_reason(reason: str) -> ParsedMessage[None]:
+    """SDK가 아직 모르는 종료 사유를 흉내 낸다.
+
+    `StopReason`이 Literal이라 생성자가 막지만, 실제로 이런 값이 오는 시점은 **서버가 SDK보다
+    먼저** 새 사유를 내보낼 때다. 생성 뒤 대입은 pydantic이 검증하지 않으므로(모델에
+    `validate_assignment`가 없다) 그 상황을 그대로 만들 수 있다.
+    """
+    message = final_message()
+    message.stop_reason = reason  # pyright: ignore[reportAttributeAccessIssue]  # reason: 위 docstring
+    return message
+
+
 @dataclass
 class CallScript:
     """공급자 호출 한 번의 대본. `error`가 있으면 그 호출은 예외로 끝난다."""
@@ -168,6 +196,9 @@ class CallScript:
     events: tuple[StreamStep, ...] = ()
     message: ParsedMessage[None] | None = None
     error: Exception | None = None
+    # 취소 시점에 SDK가 들고 있을 누적 스냅샷. `None`이면 `message_start`를 보기 전에
+    # 취소된 상황을 흉내 낸다(실제 SDK는 그 경우 assert로 막는다).
+    snapshot: ParsedMessage[None] | None = None
 
 
 @dataclass
@@ -195,6 +226,17 @@ class _ScriptedStream:
         if message is None:
             raise AssertionError("대본에 최종 메시지가 없다 — CallScript.message를 채워라")
         return message
+
+    @property
+    def current_message_snapshot(self) -> ParsedMessage[None]:
+        """SDK와 같이, 스냅샷이 없으면 `AssertionError`를 낸다.
+
+        취소 경로가 이 예외를 삼키고 `Usage` 없이 넘어가는지 테스트가 볼 수 있어야 한다.
+        """
+        snapshot = self._script.snapshot
+        if snapshot is None:
+            raise AssertionError("아직 message_start를 보지 못했다")
+        return snapshot
 
 
 class _ScriptedStreamManager:

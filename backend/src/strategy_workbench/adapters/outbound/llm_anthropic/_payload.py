@@ -10,6 +10,11 @@ Anthropic은 요청을 `tools` → `system` → `messages` 순으로 렌더링�
 breakpoint는 요청당 최대 4개다. 여기서는 2개(도구 목록 끝, 시스템 블록)만 쓴다. 도구 목록만
 같고 시스템이 바뀐 요청도 앞쪽 절반은 재사용하라고 둘로 나눴다.
 
+**검색이 실제로 일어나면 캐시 접두가 깨진다.** `web_search`의 `max_uses`가 남은 횟수로 줄어
+도구 목록이 바뀌기 때문이다. 검색 전에는 남은 횟수가 곧 전체 예산이라 목록이 바이트 단위로
+같고, 캐시는 그대로 맞는다. 즉 손해는 "검색한 턴"에만 생기며, 그 대가로 검색 예산이 턴 전체에
+걸쳐 지켜진다. 과금되는 쪽은 검색이다.
+
 ## 도구
 
 `ToolSpec`의 이름·스키마를 그대로 옮기고 `strict: true`를 붙인다. `strict`가 요구하는
@@ -65,8 +70,20 @@ MAX_CACHE_BREAKPOINTS = 4
 _CACHE_CONTROL: CacheControlEphemeralParam = {"type": "ephemeral"}
 
 
-def build_tools(request: TurnRequest) -> list[ToolUnionParam]:
-    """application이 선언한 도구 + 요청한 리서치 능력. 마지막 항목에 캐시 breakpoint를 찍는다."""
+def build_tools(request: TurnRequest, *, remaining_search_uses: int) -> list[ToolUnionParam]:
+    """application이 선언한 도구 + 아직 예산이 남은 리서치 능력.
+
+    Args:
+        request: 이번 턴의 요청. 도구 정의와 리서치 요청이 들어 있다.
+            `remaining_search_uses`: 이 턴에서 아직 쓸 수 있는 검색 횟수. SDK의 `max_uses`는
+            **호출당** 한도(`"Maximum number of times the tool can be used in the API
+            request."`)라 턴 상한으로 쓰려면 호출마다 남은 값으로 다시 계산해야 한다. 0이면
+            도구를 아예 빼서 그 호출에서는 검색이 불가능하게 만든다(spec D9: 검색 횟수 집행은
+            adapter).
+
+    Returns:
+        공급자에 보낼 도구 목록. 마지막 항목에 캐시 breakpoint를 찍는다.
+    """
     tools: list[ToolUnionParam] = [
         ToolParam(
             name=spec.name,
@@ -76,12 +93,12 @@ def build_tools(request: TurnRequest) -> list[ToolUnionParam]:
         )
         for spec in request.tools
     ]
-    if ResearchCapability.WEB_SEARCH in request.research:
+    if ResearchCapability.WEB_SEARCH in request.research and remaining_search_uses > 0:
         tools.append(
             WebSearchTool20260209Param(
                 type=_WEB_SEARCH_TOOL_TYPE,
                 name=WEB_SEARCH_TOOL_NAME,
-                max_uses=request.max_search_uses,
+                max_uses=remaining_search_uses,
             )
         )
     if tools:

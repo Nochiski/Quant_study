@@ -6,7 +6,9 @@
 
 마지막 두 건(A-05)은 가짜를 한 겹 더 벗긴다. 진짜 `AnthropicLlmAdapter`를 쓰고 SDK
 클라이언트만 대본으로 바꿔, bootstrap 레지스트리에 등록된 그 클래스가 HTTP 왕복에서
-"설치 필요"가 아니라 probe 경로로 가는지 본다.
+"설치 필요"가 아니라 probe 경로로 가는지 본다. **그 둘만** 공급자 SDK를 필요로 하므로 import를
+함수 안으로 내렸다 — 모듈 수준에서 묶으면 extra `llm` 없이 돌릴 때 이 파일 전체(SSE 순서·재개·
+409·비밀 누설)가 수집 단계에서 통째로 사라진다.
 
 비밀은 이 파일 전체에서 `_API_KEY` 하나만 쓴다. 마지막 테스트가 그 문자열이 어떤 응답 본문과
 로그에도 없음을 단언하므로, 새 라우트를 추가하면서 키를 응답에 흘리면 여기서 걸린다.
@@ -21,6 +23,7 @@ import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -769,6 +772,13 @@ def _wait_for_terminal_turn(client: httpx.Client, session_id: str) -> dict[str, 
 # -- 등록된 진짜 adapter (A-05) ---------------------------------------------------------------
 
 
+ANTHROPIC_INSTALLED = find_spec("anthropic") is not None
+_NEEDS_SDK = pytest.mark.skipif(
+    not ANTHROPIC_INSTALLED, reason="공급자 SDK는 optional extra `llm`이다"
+)
+
+
+@_NEEDS_SDK
 def test_the_anthropic_adapter_is_registered_in_the_default_bootstrap_registry() -> None:
     """레지스트리가 비어 있으면 아래 왕복 테스트가 가짜만 검증하게 된다."""
     pytest.importorskip("anthropic", reason="공급자 SDK는 optional extra `llm`이다")
@@ -786,6 +796,7 @@ def test_the_anthropic_adapter_is_registered_in_the_default_bootstrap_registry()
     assert provider.default_model() == DEFAULT_MODEL
 
 
+@_NEEDS_SDK
 def test_creating_an_anthropic_profile_reaches_the_real_adapters_probe(tmp_path: Path) -> None:
     """등록된 adapter 클래스를 그대로 쓰고 SDK 클라이언트만 대본으로 바꾼다.
 

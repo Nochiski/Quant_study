@@ -41,16 +41,27 @@ __all__ = ["SessionUsage", "TokenTotals", "TurnUsage", "aggregate_usage"]
 class TokenTotals:
     """토큰 종류별 합. 종류가 늘어도 더하는 쪽 코드는 그대로다.
 
-    **`input_tokens`는 캐시 읽기·쓰기를 포함한 총 입력이다.** 공급자마다 원래 의미가 다른데
-    (OpenAI는 총입력, Anthropic은 캐시를 뺀 나머지) adapter가 그 차이를 흡수해 도메인 `Usage`가
-    나올 때 이미 총입력이다. 그래서 집계는 공급자를 구분하지 않고 단순히 더한다.
+    **입력은 분리형이다.** `input_tokens`는 캐시 읽기·쓰기를 **뺀** 성분이고, 캐시 성분은 각자
+    자기 칸을 갖는다. 세 칸은 서로 겹치지 않으므로 총 입력은 그 합(`total_input_tokens`)이다.
+    공급자 원본의 의미는 서로 다르지만(A-06의 OpenAI adapter가 원시 내역을 빼서 정규화한다)
+    도메인 `Usage`가 나올 때는 이미 분리형이라, 집계는 공급자를 구분하지 않고 성분끼리 더한다.
 
-    캐시 토큰 필드가 생기면 그것은 `input_tokens`의 **내역**이지 별도 항목이 아니다. 총합에 다시
-    더하면 캐시가 걸린 턴일수록 입력이 부풀어, 비용을 보려고 만든 값이 비용을 과대평가한다.
+    성분을 따로 두는 이유는 캐시가 비용이 다르기 때문이다. 한 칸으로 뭉치면 화면이 "캐시가
+    얼마나 걸렸는가"를 영영 못 보여 주고, 그 질문이 프롬프트 캐싱을 넣은 이유다(spec D4).
     """
 
     input_tokens: int = 0
     output_tokens: int = 0
+
+    @property
+    def total_input_tokens(self) -> int:
+        """세 입력 성분의 합. 화면이 한 숫자를 원할 때 읽는 값이다.
+
+        저장하지 않고 파생시키는 이유는 성분과 총합이 어긋날 수 없게 하기 위함이다. 캐시 성분이
+        생기면 여기 항만 늘리고 `__add__`는 그대로 둔다 — 성분끼리 더한 뒤 파생시키는 것과
+        파생값끼리 더하는 것은 같은 수다.
+        """
+        return self.input_tokens
 
     def __add__(self, other: TokenTotals) -> TokenTotals:
         return TokenTotals(

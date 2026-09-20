@@ -414,7 +414,11 @@ def test_the_session_history_carries_the_usage_it_can_derive_from_its_events(
     history = _wait_for_terminal_turn(client, session_id)
 
     usage = history["usage"]
-    assert usage["tokens"] == {"input_tokens": 3000, "output_tokens": 600}
+    assert usage["tokens"] == {
+        "input_tokens": 3000,
+        "output_tokens": 600,
+        "total_input_tokens": 3000,
+    }
     assert usage["search_uses"] == 1
     assert usage["provider_calls"] == 2
     assert [item["turn_id"] for item in usage["turns"]] == [turn.json()["turn_id"]]
@@ -430,7 +434,7 @@ def test_a_session_with_no_turn_yet_reports_zero_usage(tmp_path: Path) -> None:
     history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
 
     assert history["usage"] == {
-        "tokens": {"input_tokens": 0, "output_tokens": 0},
+        "tokens": {"input_tokens": 0, "output_tokens": 0, "total_input_tokens": 0},
         "search_uses": 0,
         "provider_calls": 0,
         "turns": [],

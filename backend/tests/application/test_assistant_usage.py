@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
+
 from strategy_workbench.application.assistant_chat.facade.usage import (
     TokenTotals,
     aggregate_usage,
@@ -112,6 +114,27 @@ def test_turns_keep_the_order_they_first_appear_in_the_history() -> None:
 
     assert [turn.turn_id for turn in usage.turns] == ["turn-1", "turn-2", "turn-3"]
     assert usage.turns[0].provider_calls == 2
+
+
+def test_the_total_input_is_the_sum_of_every_input_component() -> None:
+    """입력은 분리형이다 — 성분은 겹치지 않고 총합은 그 합이다.
+
+    캐시 성분이 생기면 이 테스트가 먼저 깨져야 한다. 성분을 늘리고 `total_input_tokens`의 항을
+    빠뜨리면 화면이 캐시가 걸린 턴의 입력을 실제보다 적게 보여 준다.
+    """
+    components = ("input_tokens",)
+    totals = TokenTotals(input_tokens=1200, output_tokens=300)
+
+    assert {field.name for field in fields(TokenTotals)} == {*components, "output_tokens"}
+    assert totals.total_input_tokens == sum(getattr(totals, name) for name in components)
+
+
+def test_adding_components_first_gives_the_same_total_as_adding_totals() -> None:
+    """`__add__`가 성분만 더해도 되는 근거다. 파생을 언제 계산하든 같은 수여야 한다."""
+    left = TokenTotals(input_tokens=100, output_tokens=10)
+    right = TokenTotals(input_tokens=250, output_tokens=20)
+
+    assert (left + right).total_input_tokens == left.total_input_tokens + right.total_input_tokens
 
 
 def test_token_totals_add_without_touching_the_summation_loop() -> None:

@@ -4730,8 +4730,9 @@ export type TimeSeriesOperator =
  *
  * 토큰 종류별 합. 종류가 늘면 여기에 필드를 더한다(application `TokenTotals`와 같은 이름).
  *
- * `input_tokens`는 캐시 읽기·쓰기를 포함한 총 입력이다. 캐시 토큰 필드가 생기면 그것은 이 값의
- * 내역이므로 화면이 둘을 더해 보여 주면 안 된다.
+ * 입력은 분리형이다. `input_tokens`는 캐시 읽기·쓰기를 **뺀** 성분이고 캐시 성분은 각자 자기
+ * 칸을 가지며, 세 칸은 겹치지 않는다. 화면이 한 숫자만 필요하면 `total_input_tokens`를 읽는다 —
+ * 성분을 화면에서 다시 더하면 합산 규칙의 owner가 둘이 된다.
  */
 export type TokenTotalsView = {
   /**
@@ -4742,6 +4743,10 @@ export type TokenTotalsView = {
    * Output Tokens
    */
   output_tokens: number;
+  /**
+   * Total Input Tokens
+   */
+  total_input_tokens: number;
 };
 
 /**

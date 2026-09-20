@@ -15,8 +15,14 @@ and Playwright proceeds against the other checkout's server, which answers the h
 browser then tests somebody else's code. That failed loudly for us once, with stale English
 diagnostics on screen, but the dangerous case is the one that passes.
 
-A lock left behind by a killed run is reclaimed automatically: the holder's pid is recorded and
-checked for liveness. `e2e/lock.test.mjs` pins those rules.
+The lock is a directory holding a `pid` file with a single decimal pid. That shape is a contract,
+not an implementation detail: other tooling on this machine takes the same lock, and a lock only
+works when every participant recognises the others. Do not change the path or the shape without
+changing them too.
+
+A lock left behind by a killed run is reclaimed automatically: the holder's pid is checked for
+liveness first. Waiting polls every 15 seconds, prints one line per minute, and gives up after 40
+minutes. `e2e/lock.test.mjs` pins those rules.
 
 Two further guards back it up. The runner refuses to start when either port is already bound, so a
 stray dev server produces a clear error instead of a silent reuse. And `PW_BACKEND_PORT` /
@@ -28,6 +34,11 @@ PW_BACKEND_PORT=18000 PW_PREVIEW_PORT=15173 npm run test:e2e
 
 Both values come from `e2e/ports.mjs`, which is also what the build reads for the API base URL
 baked into the bundle. Never spell a port literally anywhere else.
+
+Moving the preview port also moves the browser origin, so the backend has to accept it. Playwright
+passes the preview origin to the server as `STRATEGY_WORKBENCH_ALLOWED_ORIGINS`. Without that the
+server starts healthy and every request from the page is blocked by CORS, which looks like an empty
+screen rather than an error.
 
 From `frontend`:
 

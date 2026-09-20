@@ -3,17 +3,30 @@
  *
  * 이 잠금이 지키는 것은 "한 머신에서 e2e 가 한 번에 하나만 돈다"는 불변식이다. 깨지면 브라우저가
  * 옆 워크트리의 backend 를 테스트하고도 초록으로 통과한다 — 그래서 회수 규칙까지 테스트로 고정한다.
+ *
+ * 형식(디렉터리 + 십진수 `pid` 파일)은 한 머신의 다른 구현과 같은 잠금을 공유하려고 맞춘 것이라
+ * 그 자체가 계약이다. 모양이 달라지면 서로를 주인으로 못 알아보고 둘 다 돌아 버린다.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_LOCK_PATH,
+  LOCK_DIRECTORY_NAME,
+  PID_FILE_NAME,
   acquireLock,
   isProcessAlive,
-  readLockOwner,
+  readLockPid,
   releaseLock,
   tryAcquireLock,
 } from "./lock.mjs";
@@ -32,7 +45,7 @@ const directories = [];
 const lockPath = () => {
   const directory = mkdtempSync(join(tmpdir(), "quant-e2e-lock-test-"));
   directories.push(directory);
-  return join(directory, "quant-e2e.lock");
+  return join(directory, LOCK_DIRECTORY_NAME);
 };
 
 afterEach(() => {
@@ -40,83 +53,92 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 
-const owner = (pid) => ({
-  pid,
-  workdir: `/w/${pid}`,
-  startedAt: "2026-09-21T00:00:00.000Z",
-});
 /** 절대 존재할 수 없는 pid — 회수 경로를 태우려고 쓴다. */
 const DEAD_PID = 2 ** 31 - 1;
 
+/** 다른 구현(임시 래퍼)이 잠금을 쥔 상태를 그대로 만든다. */
+const heldBy = (path, pid) => {
+  mkdirSync(path);
+  writeFileSync(join(path, PID_FILE_NAME), String(pid));
+};
+
 describe("E2E 잠금", () => {
+  it("한 머신 기본 경로는 임시 디렉터리의 quant-e2e.lock이다", () => {
+    // 다른 구현과 같은 자리를 써야 서로를 주인으로 알아본다.
+    expect(DEFAULT_LOCK_PATH).toBe(join(tmpdir(), "quant-e2e.lock"));
+  });
+
+  it("디렉터리와 십진수 pid 파일로 잡는다", () => {
+    const path = lockPath();
+
+    expect(tryAcquireLock(path, 4242)).toBe(true);
+    expect(readFileSync(join(path, PID_FILE_NAME), "utf8")).toBe("4242");
+    expect(readLockPid(path)).toBe(4242);
+  });
+
   it("한 번에 하나만 잡는다", () => {
     const path = lockPath();
 
-    expect(tryAcquireLock(path, owner(process.pid))).toBe(true);
-    expect(tryAcquireLock(path, owner(process.pid))).toBe(false);
-    expect(readLockOwner(path)?.pid).toBe(process.pid);
+    expect(tryAcquireLock(path, process.pid)).toBe(true);
+    expect(tryAcquireLock(path, process.pid)).toBe(false);
   });
 
   it("놓으면 다음 사람이 잡는다", () => {
     const path = lockPath();
-    tryAcquireLock(path, owner(process.pid));
+    tryAcquireLock(path, process.pid);
 
     expect(releaseLock(path, process.pid)).toBe(true);
-    expect(readLockOwner(path)).toBeNull();
-    expect(tryAcquireLock(path, owner(process.pid))).toBe(true);
+    expect(existsSync(path)).toBe(false);
+    expect(tryAcquireLock(path, process.pid)).toBe(true);
   });
 
   it("주인이 아니면 남의 잠금을 지우지 않는다", () => {
     const path = lockPath();
-    tryAcquireLock(path, owner(process.pid));
+    tryAcquireLock(path, process.pid);
 
     expect(releaseLock(path, process.pid + 1)).toBe(false);
-    expect(readLockOwner(path)?.pid).toBe(process.pid);
+    expect(readLockPid(path)).toBe(process.pid);
+  });
+
+  it("다른 구현이 쥔 잠금도 주인으로 읽고 기다린다", () => {
+    const path = lockPath();
+    heldBy(path, process.pid);
+
+    expect(readLockPid(path)).toBe(process.pid);
+    expect(tryAcquireLock(path, process.pid + 1)).toBe(false);
   });
 
   it("죽은 주인의 잠금은 회수한다", () => {
     // 비정상 종료로 남은 잠금이 머신을 영원히 막으면 안 된다.
     const path = lockPath();
-    writeFileSync(path, JSON.stringify(owner(DEAD_PID)), "utf8");
+    heldBy(path, DEAD_PID);
     expect(isProcessAlive(DEAD_PID)).toBe(false);
 
-    expect(tryAcquireLock(path, owner(process.pid))).toBe(true);
-    expect(readLockOwner(path)?.pid).toBe(process.pid);
+    expect(tryAcquireLock(path, process.pid)).toBe(true);
+    expect(readLockPid(path)).toBe(process.pid);
   });
 
-  it("디렉터리 방식(mkdir + pid) 잠금도 주인으로 읽고 기다린다", () => {
-    // 같은 자리를 mkdir 방식으로 잡는 구현과 한 머신에서 만날 수 있다. 모양이 다르다고 터지거나
-    // 무시하면 둘 다 돌아 버려 잠금이 있으나 마나가 된다.
+  it("pid 파일이 없거나 숫자가 아니면 주인 없는 잠금으로 보고 회수한다", () => {
     const path = lockPath();
     mkdirSync(path);
-    writeFileSync(join(path, "pid"), String(process.pid), "utf8");
 
-    expect(readLockOwner(path)?.pid).toBe(process.pid);
-    expect(tryAcquireLock(path, owner(process.pid + 1))).toBe(false);
-  });
+    expect(readLockPid(path)).toBeNull();
+    expect(tryAcquireLock(path, process.pid)).toBe(true);
 
-  it("주인이 죽은 디렉터리 방식 잠금은 회수한다", () => {
-    const path = lockPath();
-    mkdirSync(path);
-    writeFileSync(join(path, "pid"), String(DEAD_PID), "utf8");
+    const broken = lockPath();
+    mkdirSync(broken);
+    writeFileSync(join(broken, PID_FILE_NAME), "not a pid");
 
-    expect(tryAcquireLock(path, owner(process.pid))).toBe(true);
-    expect(readLockOwner(path)?.pid).toBe(process.pid);
-  });
-
-  it("깨진 잠금 파일도 주인 없는 것으로 보고 회수한다", () => {
-    const path = lockPath();
-    writeFileSync(path, "not json", "utf8");
-
-    expect(readLockOwner(path)).toBeNull();
-    expect(tryAcquireLock(path, owner(process.pid))).toBe(true);
+    expect(readLockPid(broken)).toBeNull();
+    expect(tryAcquireLock(broken, process.pid)).toBe(true);
   });
 
   it("살아 있는 주인은 기다렸다가 놓으면 잡는다", async () => {
     const path = lockPath();
-    tryAcquireLock(path, owner(process.pid));
+    tryAcquireLock(path, process.pid);
     let waited = 0;
-    const acquired = acquireLock({
+
+    const handle = await acquireLock({
       path,
       pid: process.pid + 1,
       pollMs: 1,
@@ -127,16 +149,38 @@ describe("E2E 잠금", () => {
       },
     });
 
-    const handle = await acquired;
-
     expect(waited).toBe(3);
-    expect(readLockOwner(path)?.pid).toBe(process.pid + 1);
+    expect(readLockPid(path)).toBe(process.pid + 1);
     handle.release();
+  });
+
+  it("대기 로그는 간격을 두고 한 줄씩만 낸다", async () => {
+    // 폴링 줄마다 한 줄이면 에이전트 모니터가 그때마다 깨어난다.
+    const path = lockPath();
+    tryAcquireLock(path, process.pid);
+    const notices = [];
+    let clock = 0;
+
+    await expect(
+      acquireLock({
+        path,
+        pid: process.pid + 1,
+        pollMs: 1,
+        noticeMs: 60_000,
+        timeoutMs: 100_000,
+        onWait: (holder) => notices.push(holder),
+        now: () => (clock += 10_000),
+        sleep: async () => {},
+      }),
+    ).rejects.toThrow("timed out");
+
+    expect(notices.length).toBeLessThan(4);
+    expect(notices[0]).toBe(process.pid);
   });
 
   it("기다리다 시간을 넘기면 주인을 담아 실패한다", async () => {
     const path = lockPath();
-    tryAcquireLock(path, owner(process.pid));
+    tryAcquireLock(path, process.pid);
     let clock = 0;
 
     await expect(

@@ -415,10 +415,16 @@ class AssistantTurnRunner:
                 self._running.pop(turn_id, None)
 
     def _occupied_turn(self, session_id: str) -> Turn | None:
-        """그 세션의 슬롯을 잡고 있는 턴. 취소 신호를 받았어도 스레드가 돌면 여전히 점유 중이다."""
+        """그 세션의 슬롯을 잡고 있는 턴. 취소 신호를 받았어도 스레드가 돌면 여전히 점유 중이다.
+
+        `state`·`turns`·`is_settled`와 같은 `view()` 기준으로 답한다. `entry.turn`을 그대로
+        돌려주면 `_expire`가 `decided`만 세우고 `entry.turn`은 그대로 두는 창에서 이 함수만
+        RUNNING을, 나머지는 FAILED를 말한다. 오늘은 두 호출자가 `turn_id`만 읽어 무해하지만,
+        같은 레지스트리를 읽는 함수끼리 진실이 갈리면 다음 호출자가 조용히 틀린다.
+        """
         for entry in self._running.values():
             if entry.turn.session_id == session_id:
-                return entry.turn
+                return entry.view()
         return None
 
 

@@ -10,6 +10,12 @@
    비어 있으므로 `ProviderProfileService`가 모든 종류를 "설치 필요"로 답하고 프로파일 생성을
    거절한다(spec D4: 설치되지 않은 공급자는 프로파일을 만들 수 없다).
 
+   **팩토리는 시작할 때 부르지 않는다.** 공급자 SDK는 optional extra(`llm`)라 설치되지 않은
+   환경이 정상이고, 시작 시점에 부르면 그 `ImportError`가 `build_container`를 타고 올라가
+   **어시스턴트를 쓰지도 않는 사용자의 백엔드가 통째로 안 뜬다.** `_LazyProviderRegistry`가
+   처음 필요할 때(설정 화면이 목록을 묻거나 프로파일을 만들 때) 한 번만 부르고, `ImportError`는
+   "미설치"로 낮춰 `available_kinds()`의 `installed=False`가 된다.
+
 **비밀 파일은 저장소 밖에 둔다.** `forbidden_roots`에 저장소 루트를 넘겨, 환경 변수가 작업
 트리 안을 가리키면 어댑터가 생성 시점에 거절하게 한다(평문 키가 git에 들어가는 사고를 막는
 가장 싼 지점이 여기다).
@@ -22,10 +28,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+import logging
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
+from threading import RLock
 from types import MappingProxyType
 from typing import TypeAlias
 from uuid import uuid4
@@ -59,6 +67,8 @@ from strategy_workbench.domain.factor.facade.registry import FactorRegistry
 
 from ._file_guard import restrict_to_current_user
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "DEFAULT_ASSISTANT_SETTINGS",
     "PROVIDER_ADAPTER_FACTORIES",
@@ -69,6 +79,12 @@ __all__ = [
     "repository_root",
 ]
 
+# 공급자 adapter 하나를 만드는 함수. A-05·A-06이 지켜야 하는 계약은 둘이다.
+#
+# 1. **SDK와 adapter import를 함수 본문 안에서 한다.** 모듈 최상단에서 import하면 이 파일이
+#    읽히는 순간 optional extra가 없는 환경에서 `ImportError`가 나고, 지연 호출이 무의미해진다.
+# 2. **미설치는 `ImportError`로 알린다.** 레지스트리가 그것만 "미설치"로 낮춘다. 그 밖의 예외는
+#    설정 오류이므로 숨기지 않고 그대로 올린다.
 ProviderAdapterFactory: TypeAlias = Callable[[], LlmProviderPort]
 
 # A-05(`llm_anthropic`)·A-06(`llm_openai`)이 자기 항목을 등록한다. 비어 있는 동안에도 설정
@@ -113,8 +129,71 @@ class AssistantServices:
 
 
 def repository_root() -> Path:
-    """설치된 패키지 기준 저장소 루트. 비밀 파일이 들어가면 안 되는 트리다."""
+    """**소스 체크아웃 기준** 저장소 루트. 비밀 파일이 들어가면 안 되는 트리다.
+
+    `backend/src/strategy_workbench/bootstrap/`에서 네 단계 위다. 같은 파일의 `.local` 경로
+    계산(`_http.py`의 `parents[3]`)과 같은 관례이고, 이 앱은 editable 설치(`uv sync`)로만
+    돌기 때문에 성립한다. 비 editable 설치에서는 관련 없는 디렉터리를 가리키므로, 그런 배포가
+    생기면 저장소 루트를 설정으로 받아야 한다.
+    """
     return Path(__file__).resolve().parents[4]
+
+
+class _LazyProviderRegistry(Mapping[ProviderKind, LlmProviderPort]):
+    """등록된 팩토리를 **처음 필요할 때** 한 번만 부르는 공급자 맵.
+
+    `ProviderProfileService`·`AssistantChatService`가 쓰는 조회는 `.get(kind)` 하나이고,
+    "없다"가 곧 "설치 안 됨"이다. 그래서 `ImportError`를 낸 kind는 없는 것으로 답한다 —
+    설정 화면의 "설치 필요"가 그 값에서 나온다(spec D4).
+
+    `Mapping` 규약을 지키려고 `__contains__`·`__iter__`도 같은 해소를 탄다. `kind in registry`가
+    참인데 `.get(kind)`가 `None`인 상태를 만들지 않기 위해서다.
+    """
+
+    def __init__(self, factories: Mapping[ProviderKind, ProviderAdapterFactory]) -> None:
+        self._factories = dict(factories)
+        self._resolved: dict[ProviderKind, LlmProviderPort | None] = {}
+        self._lock = RLock()
+
+    def __getitem__(self, kind: ProviderKind) -> LlmProviderPort:
+        provider = self._resolve(kind)
+        if provider is None:
+            raise KeyError(kind)
+        return provider
+
+    def __iter__(self) -> Iterator[ProviderKind]:
+        return iter([kind for kind in self._factories if self._resolve(kind) is not None])
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+    def _resolve(self, kind: ProviderKind) -> LlmProviderPort | None:
+        """팩토리를 한 번만 부르고 결과(실패 포함)를 기억한다.
+
+        실패도 캐시한다. 안 그러면 설정 화면을 열 때마다 없는 SDK를 다시 import하려 든다.
+        """
+        with self._lock:
+            if kind in self._resolved:
+                return self._resolved[kind]
+            factory = self._factories.get(kind)
+            if factory is None:
+                self._resolved[kind] = None
+                return None
+            try:
+                provider = factory()
+            except ImportError as error:
+                # 사유는 로그에만 남긴다. "왜 설치 필요로 뜨지"를 답할 수 있어야 하고,
+                # 화면에는 열거된 상태(`installed=False`)만 나간다.
+                logger.info(
+                    "provider adapter is not installed — kind=%s error_type=%s module=%s",
+                    kind.value,
+                    type(error).__name__,
+                    getattr(error, "name", None),
+                )
+                self._resolved[kind] = None
+                return None
+            self._resolved[kind] = provider
+            return provider
 
 
 def build_assistant_services(
@@ -141,7 +220,7 @@ def build_assistant_services(
         settings.secrets_path if settings.secrets_path is not None else default_secrets_path(),
         forbidden_roots=(repository_root(),),
     )
-    providers = {kind: factory() for kind, factory in sorted(settings.provider_factories.items())}
+    providers = _LazyProviderRegistry(settings.provider_factories)
     compiler = _AuthoringStrategyCompiler(strategy_authoring)
     profiles = ProviderProfileService(
         profile_repository,

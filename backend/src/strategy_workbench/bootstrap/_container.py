@@ -90,8 +90,9 @@ def build_container(
     `equity` optional extra (duckdb) and fails loudly when the root or the extra is missing.
     `strategy_repository_path=None` selects isolated in-memory SQLite for tests; the HTTP
     runtime supplies a durable file path explicitly so both exercise the same adapter contract.
-    `assistant` follows the same rule for the AI assistant database and carries the provider
-    adapter registry, which stays empty until the provider adapters land (A-05, A-06).
+    `assistant`는 어시스턴트 DB에 같은 규칙을 적용하고, 공급자 adapter 레지스트리를 같이
+    나른다. 레지스트리는 A-05·A-06이 자기 항목을 등록할 때까지 비어 있고, 팩토리는 시작할 때가
+    아니라 처음 필요할 때 불린다(미설치 SDK가 서버 시작을 막지 않는다).
     """
     equity_data: MockEquityDataAdapter | EquityDuckdbAdapter
     if equity_adapter == "mock":

@@ -37,12 +37,12 @@ def runtime_equity_selection() -> tuple[str, Path | None]:
 
 
 def runtime_assistant_settings() -> AssistantSettings:
-    """Read the assistant deployment settings from the environment (design spec D5/D6).
+    """환경 변수에서 어시스턴트 배포 설정을 읽는다 (설계 spec D5/D6).
 
-    `..._SECRETS_PATH` left unset keeps the OS default user-config location, which the adapter
-    computes; the composition root does not re-derive it. `..._ALLOW_INSECURE_BASE_URL` is the
-    local-proxy escape hatch and only `"1"` turns it on -- an unrecognised value stays off, so a
-    typo never widens what base URLs are accepted.
+    `..._SECRETS_PATH`가 비어 있으면 OS 기본 사용자 설정 위치를 그대로 쓴다. 그 경로를 계산하는
+    owner는 어댑터이고 composition root가 다시 유도하지 않는다.
+    `..._ALLOW_INSECURE_BASE_URL`은 로컬 프록시용 예외이며 정확히 `"1"`일 때만 켜진다 — 알 수
+    없는 값은 꺼진 채로 두어, 오타가 허용되는 base URL 범위를 넓히지 못하게 한다.
     """
     configured_db = os.environ.get(ASSISTANT_DB_PATH_ENV)
     configured_secrets = os.environ.get(ASSISTANT_SECRETS_PATH_ENV)

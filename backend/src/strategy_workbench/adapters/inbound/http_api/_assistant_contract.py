@@ -56,11 +56,15 @@ __all__ = [
     "Assistant409Response",
     "Assistant422Response",
     "AssistantBaseUrlRejectedDetail",
+    "AssistantDocumentRefInvalidDetail",
     "AssistantEventEnvelopeView",
     "AssistantEventView",
+    "AssistantNoActiveProviderDetail",
     "AssistantNoRunningTurnDetail",
+    "AssistantNotFoundDetail",
     "AssistantNotFoundResponse",
     "AssistantProbeFailedDetail",
+    "AssistantProviderNotInstalledDetail",
     "AssistantSecretMissingDetail",
     "AssistantTurnInProgressDetail",
     "ChatMessageView",
@@ -406,12 +410,26 @@ class AssistantSecretMissingDetail:
     message: str
 
 
+@dataclass(frozen=True)
+class AssistantDocumentRefInvalidDetail:
+    """`document_ref`가 "저장된 전략과 초안 중 정확히 하나" 규칙을 어겼다.
+
+    spec D6이 적어 둔 네 코드 밖이지만, 세션 목록 조회는 사이드바가 열릴 때마다 타는 경로라
+    비거나 둘 다 채워진 참조가 실전에서 들어온다. 규칙을 판정하는 곳은 application의
+    `DocumentRef`이고 여기서는 그 거절을 옮기기만 한다.
+    """
+
+    code: Literal["assistant.document_ref_invalid"]
+    message: str
+
+
 AssistantUnprocessableDetail: TypeAlias = Annotated[
     AssistantProviderNotInstalledDetail
     | AssistantNoActiveProviderDetail
     | AssistantProbeFailedDetail
     | AssistantBaseUrlRejectedDetail
-    | AssistantSecretMissingDetail,
+    | AssistantSecretMissingDetail
+    | AssistantDocumentRefInvalidDetail,
     Field(discriminator="code"),
 ]
 
@@ -426,9 +444,20 @@ Assistant422Response: TypeAlias = AssistantUnprocessableResponse | RequestValida
 
 @dataclass(frozen=True)
 class AssistantTurnInProgressDetail:
+    """세션에 이미 도는 턴이 있다.
+
+    `turn_id`는 **조회 시점에 이미 종료 상태일 수 있다.** 러너는 종료 상태를 저장한 뒤에
+    세션 슬롯을 풀기 때문에, 그 짧은 창에 도착한 시작 요청이 방금 끝난 턴의 id를 받는다.
+    오차 방향을 "아직 바쁘다" 쪽으로 고정한 결과이므로, 이 409는 영구 거절이 아니라 잠깐
+    뒤 다시 시도하면 되는 충돌이다.
+    """
+
     code: Literal["assistant.turn_in_progress"]
     message: str
-    turn_id: str
+    turn_id: Annotated[
+        str,
+        Field(description=("충돌한 턴. 조회 시점에 이미 종료 상태일 수 있으므로 짧게 재시도한다.")),
+    ]
 
 
 @dataclass(frozen=True)

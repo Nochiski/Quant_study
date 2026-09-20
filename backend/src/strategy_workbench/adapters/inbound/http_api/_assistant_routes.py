@@ -245,11 +245,24 @@ def register_assistant_routes(
         responses={404: {"model": AssistantNotFoundResponse, **_NOT_FOUND_DESCRIPTION}},
     )
     def get_assistant_session(session_id: str) -> SessionHistoryView:
-        """메시지·턴·이벤트 이력 전부. 사이드바가 새로 열릴 때 한 번에 복구한다."""
+        """메시지·턴·이벤트 이력 전부. 사이드바가 새로 열릴 때 한 번에 복구한다.
+
+        **턴을 이벤트보다 먼저 읽는다.** 네 조회는 한 트랜잭션이 아니라서 그 사이 러너가
+        마지막 이벤트를 저장하고 턴을 끝낼 수 있다. 이벤트를 먼저 읽으면 "턴은 FAILED인데
+        그 실패 이벤트는 목록에 없는" 조합이 나가고, 화면은 이유 없이 멈춘 턴을 그린다 —
+        spec D7의 복구 규칙이 이 응답 하나만 보기 때문에 그 이유는 영영 나오지 않는다.
+
+        순서를 뒤집으면 창의 방향이 "턴은 아직 RUNNING인데 이벤트는 더 와 있다"가 된다.
+        프론트 리듀서는 sequence 기준 멱등이라 여분 이벤트를 그대로 흡수하고, 다음 폴링이
+        상태를 따라잡는다. 러너의 `_finish`가 택한 "바쁘다 쪽으로만 틀린다"와 같은 방향이다.
+
+        `chat.messages`를 마지막에 읽는 것도 같은 이유로 안전하다. 부분 assistant 메시지
+        저장은 `_close`에서 `_finish`보다 먼저 일어난다.
+        """
         try:
             session = chat.get(session_id)
-            stored_events = turns.events(session_id)
             history_turns = turns.turns(session_id)
+            stored_events = turns.events(session_id)
             messages = chat.messages(session_id)
         except ChatSessionNotFoundError as error:
             raise _session_not_found(error) from error
@@ -316,7 +329,7 @@ def register_assistant_routes(
         response_class=StreamingResponse,
         tags=["assistant"],
         responses={
-            200: {"content": {"text/event-stream": {}}},
+            200: _EVENT_STREAM_RESPONSE,
             404: {"model": AssistantNotFoundResponse, **_NOT_FOUND_DESCRIPTION},
             409: {"model": Assistant409Response, **_TURN_CONFLICT_DESCRIPTION},
         },
@@ -523,6 +536,22 @@ def _provider_not_found(error: ProviderProfileNotFoundError) -> HTTPException:
         detail={"code": "assistant.provider.not_found", "message": str(error)},
     )
 
+
+# SSE 200의 본문 스키마. `response_class=StreamingResponse`라 FastAPI가 반환 타입에서 스키마를
+# 만들지 못하므로 프레임 payload 타입을 여기서 직접 가리킨다. 이걸 비워 두면 생성 SDK의
+# `StreamAssistantEventsResponses`가 `unknown`이 되어, 프론트가 가장 많이 소비하는 경로만 타입이
+# 없는 상태가 된다(`_event_view`의 망라 검사가 wire를 건너지 못한다).
+#
+# 프레임 하나의 `data:`가 이 스키마이고, `id:` 줄은 그 안의 `sequence`와 같은 값이다.
+_EVENT_STREAM_RESPONSE: dict[str, Any] = {
+    "description": (
+        "Server-sent events. Each frame carries one AssistantEventEnvelopeView as its data, "
+        "and the frame id repeats that envelope's sequence."
+    ),
+    "content": {
+        "text/event-stream": {"schema": {"$ref": "#/components/schemas/AssistantEventEnvelopeView"}}
+    },
+}
 
 _UNPROCESSABLE_DESCRIPTION: dict[str, Any] = {
     "description": "A coded assistant rejection or a malformed request envelope",

@@ -260,9 +260,9 @@ def create_app(
 ) -> FastAPI:
     """Compose the HTTP surface; the assistant routes appear only when their services arrive.
 
-    The three assistant services travel together: a container that builds one builds all three.
-    Tests that never touch `/api/v1/assistant` keep passing none of them, and the routes are then
-    absent rather than present-and-failing.
+    어시스턴트 서비스 셋은 항상 같이 만들어진다 — 하나를 세우는 컨테이너는 셋을 다 세운다.
+    `/api/v1/assistant`를 건드리지 않는 기존 테스트는 셋 다 넘기지 않고, 그러면 라우트가
+    "있는데 실패"가 아니라 아예 없는 상태가 된다.
     """
     app = FastAPI(
         title="Quant Strategy Workbench API",
@@ -1043,7 +1043,11 @@ def create_app(
         except StrategyRevisionConflictError as error:
             raise _revision_conflict(error) from error
 
-    if assistant_profiles and assistant_chat and assistant_turns:
+    if (
+        assistant_profiles is not None
+        and assistant_chat is not None
+        and assistant_turns is not None
+    ):
         register_assistant_routes(
             app, profiles=assistant_profiles, chat=assistant_chat, turns=assistant_turns
         )

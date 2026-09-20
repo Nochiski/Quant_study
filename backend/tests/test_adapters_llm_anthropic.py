@@ -297,6 +297,46 @@ def test_stream_turn_emits_text_thinking_usage_and_done() -> None:
     ]
 
 
+def test_cache_tokens_travel_into_the_domain_usage_event() -> None:
+    """SDK의 `input_tokens`는 캐시 읽기·쓰기를 **뺀** 값이다.
+
+    그것만 옮기면 세션 집계가 실제 청구 입력 토큰을 과소 보고한다. 프롬프트 캐싱을 켠 adapter가
+    그 사실을 숨기면 안 된다. 단가가 달라 합칠 수도 없으므로 칸을 따로 둔다.
+    """
+    client = ScriptedMessagesClient(
+        CallScript(
+            message=final_message(
+                input_tokens=120,
+                output_tokens=34,
+                cache_read_input_tokens=8_000,
+                cache_creation_input_tokens=450,
+            )
+        )
+    )
+
+    events = run_turn(client)
+
+    assert (
+        Usage(
+            input_tokens=120,
+            output_tokens=34,
+            cache_read_tokens=8_000,
+            cache_write_tokens=450,
+        )
+        in events
+    )
+
+
+def test_a_provider_without_cache_tokens_reports_zeros_not_none() -> None:
+    """SDK는 캐시를 안 쓴 호출에 `None`을 준다. domain은 정수만 안다."""
+    client = ScriptedMessagesClient(CallScript(message=final_message()))
+
+    events = run_turn(client)
+
+    usage = next(event for event in events if isinstance(event, Usage))
+    assert (usage.cache_read_tokens, usage.cache_write_tokens) == (0, 0)
+
+
 def test_the_call_asks_for_summarized_adaptive_thinking_and_high_effort() -> None:
     client = ScriptedMessagesClient(CallScript(message=final_message()))
 

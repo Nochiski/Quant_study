@@ -112,6 +112,12 @@ class TurnRequest:
 ChatEvent = TextDelta | ThinkingSummary | ToolCall | ToolResultSummary | SearchActivity
           | Proposal | Usage | Done | Failure
 
+# `Usage`는 캐시 토큰을 따로 싣는다. 공급자의 `input_tokens`는 캐시 읽기·쓰기를 **뺀** 값이라
+# 그것만 더하면 세션 집계가 실제 청구 입력 토큰을 과소 보고한다. 단가가 달라 합칠 수도 없다.
+# 채우지 않는 adapter와 필드가 생기기 전 이력을 위해 기본값은 0이다.
+class Usage: input_tokens: int; output_tokens: int
+             cache_read_tokens: int = 0; cache_write_tokens: int = 0
+
 class TurnStatus(StrEnum):
     RUNNING = "running"; COMPLETED = "completed"; FAILED = "failed"; CANCELLED = "cancelled"
 

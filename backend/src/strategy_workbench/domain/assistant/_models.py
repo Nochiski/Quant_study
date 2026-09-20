@@ -306,8 +306,20 @@ class Proposal:
 
 @dataclass(frozen=True)
 class Usage:
+    """한 번의 공급자 호출이 쓴 토큰.
+
+    캐시 두 칸을 따로 두는 이유는 `input_tokens`가 **캐시 읽기·쓰기를 뺀** 값이기 때문이다.
+    그것만 더하면 세션 집계가 실제 청구 입력 토큰을 과소 보고한다. 값이 다른 단가로 과금되므로
+    합쳐서도 안 된다 — 캐시 읽기는 싸고 쓰기는 오히려 비싸다.
+
+    기본값 0은 호환을 위해서다. 채우지 않는 공급자 adapter와 이 필드가 생기기 전에 저장된
+    이력이 그대로 성립한다.
+    """
+
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 @dataclass(frozen=True)

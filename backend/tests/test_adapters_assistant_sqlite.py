@@ -160,7 +160,14 @@ def _event_samples() -> dict[type, ChatEvent]:
         ToolResultSummary(call_id="call-1", name="validate_strategy_yaml", ok=True, summary="통과"),
         SearchActivity(query="KRX 모멘텀", sources=(Source(title="기사", url="https://a.test/1"),)),
         Proposal(proposal=proposal),
-        Usage(input_tokens=1200, output_tokens=340),
+        # 캐시 두 칸도 0이 아니어야 왕복 검사가 뜻을 가진다. 기본값 그대로면 codec이
+        # 두 필드를 통째로 흘려도 같은 값으로 복원돼 테스트가 조용히 통과한다.
+        Usage(
+            input_tokens=1200,
+            output_tokens=340,
+            cache_read_tokens=8000,
+            cache_write_tokens=450,
+        ),
         Done(stop_reason="end_turn"),
         Failure(code=FailureCode.TOOL_ROUNDS_EXCEEDED, message="도구 호출이 너무 많습니다"),
     )

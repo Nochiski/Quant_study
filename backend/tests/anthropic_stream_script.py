@@ -161,6 +161,8 @@ def final_message(
     content: list[ParsedContentBlock[None]] | None = None,
     input_tokens: int = 100,
     output_tokens: int = 50,
+    cache_read_input_tokens: int | None = None,
+    cache_creation_input_tokens: int | None = None,
     model: str = "claude-opus-5",
 ) -> ParsedMessage[None]:
     """한 번의 호출이 끝나며 오는 최종 메시지."""
@@ -173,7 +175,12 @@ def final_message(
         content=content if content is not None else default_content,
         stop_reason=stop_reason,
         stop_sequence=None,
-        usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+        usage=Usage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_input_tokens=cache_read_input_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
+        ),
     )
 
 

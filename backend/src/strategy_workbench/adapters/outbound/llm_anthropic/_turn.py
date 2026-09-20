@@ -64,6 +64,7 @@ from anthropic.types import (
     WebSearchToolResultBlock,
     WebSearchToolResultError,
 )
+from anthropic.types import Usage as SdkUsage
 
 from strategy_workbench.domain.assistant.facade.models import (
     ChatEvent,
@@ -248,10 +249,7 @@ def stream_turn(
             return
 
         spent_output_tokens += message.usage.output_tokens
-        yield Usage(
-            input_tokens=message.usage.input_tokens,
-            output_tokens=message.usage.output_tokens,
-        )
+        yield _usage_of(message.usage)
 
         stop_reason = message.stop_reason
         if stop_reason == "refusal":
@@ -424,9 +422,22 @@ def _usage_so_far(stream: AnthropicMessageStream) -> Iterator[Usage]:
             type(error).__name__,
         )
         return
-    yield Usage(
-        input_tokens=snapshot.usage.input_tokens,
-        output_tokens=snapshot.usage.output_tokens,
+    yield _usage_of(snapshot.usage)
+
+
+def _usage_of(usage: SdkUsage) -> Usage:
+    """SDK 사용량 → domain `Usage`.
+
+    SDK의 `input_tokens`는 **캐시 읽기·쓰기를 뺀** 값이라 그것만 옮기면 세션 집계가 실제 청구
+    입력 토큰을 과소 보고한다. 캐시 두 칸을 따로 싣는다(단가가 달라 합칠 수도 없다).
+
+    예산 집행은 출력 토큰만 센다(spec D9). 여기서 넓히지 않는다.
+    """
+    return Usage(
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cache_read_input_tokens or 0,
+        cache_write_tokens=usage.cache_creation_input_tokens or 0,
     )
 
 

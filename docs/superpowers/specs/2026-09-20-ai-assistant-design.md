@@ -112,11 +112,16 @@ class TurnRequest:
 ChatEvent = TextDelta | ThinkingSummary | ToolCall | ToolResultSummary | SearchActivity
           | Proposal | Usage | Done | Failure
 
-# `Usage`는 캐시 토큰을 따로 싣는다. 공급자의 `input_tokens`는 캐시 읽기·쓰기를 **뺀** 값이라
-# 그것만 더하면 세션 집계가 실제 청구 입력 토큰을 과소 보고한다. 단가가 달라 합칠 수도 없다.
+# `Usage`는 **분리형**이다 — 세 입력 칸은 서로 겹치지 않는다. `input_tokens`는 캐시 읽기·쓰기를
+# 제외한 입력이고, 공급자가 캐시를 `input_tokens`에 포함해 보고하면(OpenAI) adapter가 빼서 이
+# 불변식에 맞춘다. 성분마다 단가가 달라 합쳐 저장하면 비용을 되계산할 수 없고, `input_tokens`만
+# 더하면 집계가 과소 보고한다. 총입력은 저장·전송하지 않고 `total_input_tokens`(파생)로 얻는다.
 # 채우지 않는 adapter와 필드가 생기기 전 이력을 위해 기본값은 0이다.
 class Usage: input_tokens: int; output_tokens: int
              cache_read_tokens: int = 0; cache_write_tokens: int = 0
+             @property
+             def total_input_tokens(self) -> int:   # 파생. 저장·wire 필드가 아니다
+                 return input_tokens + cache_read_tokens + cache_write_tokens
 
 class TurnStatus(StrEnum):
     RUNNING = "running"; COMPLETED = "completed"; FAILED = "failed"; CANCELLED = "cancelled"

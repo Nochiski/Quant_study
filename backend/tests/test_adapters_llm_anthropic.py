@@ -327,6 +327,11 @@ def test_cache_tokens_travel_into_the_domain_usage_event() -> None:
         )
         in events
     )
+    # Anthropic SDK가 이미 분리형으로 보고하므로 adapter는 빼지도 더하지도 않는다. 총입력이
+    # 필요한 쪽은 파생 property로 더한다(domain 계약: 세 칸은 서로 겹치지 않는다).
+    usage = next(event for event in events if isinstance(event, Usage))
+    assert usage.input_tokens == 120
+    assert usage.total_input_tokens == 120 + 8_000 + 450
 
 
 def test_a_provider_without_cache_tokens_reports_zeros_not_none() -> None:

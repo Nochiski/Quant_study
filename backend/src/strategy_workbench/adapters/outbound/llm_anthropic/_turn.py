@@ -440,8 +440,13 @@ def _usage_so_far(stream: AnthropicMessageStream) -> Iterator[Usage]:
 def _usage_of(usage: SdkUsage) -> Usage:
     """SDK 사용량 → domain `Usage`.
 
-    SDK의 `input_tokens`는 **캐시 읽기·쓰기를 뺀** 값이라 그것만 옮기면 세션 집계가 실제 청구
-    입력 토큰을 과소 보고한다. 캐시 두 칸을 따로 싣는다(단가가 달라 합칠 수도 없다).
+    domain `Usage`는 분리형이다 — 세 입력 칸이 서로 겹치지 않는다. Anthropic SDK가 이미 그
+    모양으로 보고하므로(`input_tokens`가 캐시 읽기·쓰기를 **뺀** 값) 여기서는 옮기기만 하고
+    빼지 않는다. 캐시를 `input_tokens`에 포함해 보고하는 공급자(OpenAI)는 adapter가 빼서 같은
+    불변식에 맞춘다. 총입력이 필요하면 `Usage.total_input_tokens`가 더한다.
+
+    캐시 두 칸을 버리면 세션 집계가 실제 청구 입력 토큰을 과소 보고한다 — 이 adapter는 프롬프트
+    캐싱을 켜고 돌므로 입력의 상당 부분이 그 두 칸에 있다.
 
     예산 집행은 출력 토큰만 센다(spec D9). 여기서 넓히지 않는다.
     """

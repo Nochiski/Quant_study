@@ -513,9 +513,16 @@
   color: var(--status-warn);
 }
 
+/*
+  카드 **사이** 간격(12px)은 카드 **안** 줄 간격(4px)보다 넓다. 진단 본문은 자기 카드의 둘째
+  줄이므로 근접성이 곧 소유권을 말한다 — 두 간격이 뒤집혀 있으면(예전: 카드 안 8px, 카드 사이
+  4px) 마지막이 아닌 노드의 오류 문장이 **아래** 노드 것으로 읽혔다. 진단 문장에는 node_id가
+  없어서(`window는 1 이상이고 …`) 문장만으로는 주인을 알 수 없다(P1-04 3차 리뷰 차단).
+  계약은 e2e가 boundingBox 거리 비교로 고정한다(되돌리면 9.5 > 4로 실패하는 것을 확인했다).
+*/
 .factor-graph__editor-nodes {
   display: grid;
-  gap: var(--space-1);
+  gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -524,7 +531,8 @@
 .factor-graph__editor-nodes li {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  /* 행 간격은 좁게(자기 카드 안), 열 간격은 버튼 사이라 그대로. */
+  gap: var(--space-1) var(--space-2);
   align-items: center;
 }
 

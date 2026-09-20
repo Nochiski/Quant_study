@@ -42,6 +42,14 @@ import {
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
 
+/** golden 그래프 끝에 붙이는 노드. 오류 노드 뒤에 비교 대상이 있어야 근접성을 잴 수 있다. */
+const TRAILING_NODE = [
+  "        - kind: field",
+  "          node_id: trailing",
+  "          field_id: price.close",
+  "",
+].join("\n");
+
 const rowFor = (region: Locator, securityId: string): Locator =>
   region.getByRole("row").filter({ hasText: securityId });
 
@@ -1221,18 +1229,26 @@ test.describe("professional YAML workflow", () => {
   test("keeps a node card readable when that node carries a diagnostic (P1-04)", async ({
     page,
   }) => {
-    // 노드 카드에 진단 본문을 넣으면서 `li`가 flex 한 줄이라 본문이 이름·삭제 버튼 옆 세 번째
-    // 항목으로 끼어들 수 있었다(2차 리뷰 차단). 기준선 4장은 유효한 문서라 이 상태를 담지 않아
-    // 여기 한 장을 둔다 — 시각 프로젝트(4종)가 아니라 workflow 프로젝트라 이미지도 한 장이다.
+    // 노드 카드 진단 본문의 **레이아웃 계약** 둘을 고정한다.
+    //  1. 본문이 이름·삭제 버튼과 같은 줄에 끼지 않고 카드 아래 줄 전체 폭을 쓴다(2차 리뷰 차단).
+    //  2. 본문이 남의 카드보다 자기 카드에 더 가깝다(3차 리뷰 차단). 진단 문장에 node_id가 없어
+    //     근접성이 곧 소유권이다.
+    // 계약은 아래 boundingBox 단언이 잠근다. 기준선 한 장은 보조 증거라 폭·테마 한 벌로 충분하고,
+    // 그래서 시각 프로젝트(4종)가 아니라 workflow 프로젝트에 둔다. 결함 자체는 테마와 무관하고
+    // 폭이 좁을수록 심한데 1440은 구성된 둘 중 좁은 쪽이다.
     await openEditor(page, "/research/strategies/new");
-    await replaceSource(
-      page,
+    // 오류를 **마지막이 아닌** 노드에 준다: 뒤에 노드가 없으면 근접성이 뒤집혀도 드러나지 않는다.
+    // golden의 마지막 노드(`mom_252`)를 깨고 그 뒤에 노드를 하나 더 둔다.
+    const withTrailingNode = mustReplace(
       mustReplace(
         mustReplace(GOLDEN, "퀄리티 모멘텀", "P1-04 노드 진단 레이아웃"),
         "window: 252",
         "window: 0",
       ),
+      "      output_node_id: mom_252",
+      TRAILING_NODE + "      output_node_id: mom_252",
     );
+    await replaceSource(page, withTrailingNode);
     await expectPhase(page, "검증 오류");
 
     await page.getByRole("tab", { name: "Graph", exact: true }).click();
@@ -1261,8 +1277,21 @@ test.describe("professional YAML workflow", () => {
     if (listBox === null) return;
     expect(bodyBox.width).toBeGreaterThan(listBox.width * 0.8);
 
+    // 근접성이 소유권이다: 본문은 자기 행보다 **아래 노드 행**에서 더 멀어야 한다.
+    const nextRow = nodes.getByRole("button", { name: "노드 편집: trailing" });
+    const nextBox = await nextRow.boundingBox();
+    expect(nextBox).not.toBeNull();
+    if (nextBox === null) return;
+    const toOwnRow = bodyBox.y - (buttonBox.y + buttonBox.height);
+    const toNextRow = nextBox.y - (bodyBox.y + bodyBox.height);
+    expect(toOwnRow).toBeLessThanOrEqual(toNextRow);
+
     await page.mouse.move(0, 0);
-    await expect(nodes).toHaveScreenshot("graph-node-diagnostic.png");
+    // 문장 자체는 backend 소유라 픽셀로 고정하지 않는다(`mask`). 이 기준선이 지키는 것은 카드
+    // 레이아웃이고, 문구가 다듬어져도 기준선을 다시 찍을 일이 없다.
+    await expect(nodes).toHaveScreenshot("graph-node-diagnostic.png", {
+      mask: [nodes.locator(".strategy-form__diagnostics")],
+    });
   });
 
   test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", async ({

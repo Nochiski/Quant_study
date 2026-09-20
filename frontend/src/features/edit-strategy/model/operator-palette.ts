@@ -45,7 +45,7 @@ export type PaletteEntry = {
   arity: number | null;
   params: readonly string[];
   /**
-   * 정의 시점 가용성이 `available`이 아닌가. 어댑터 capability 판정은 P2-04이다. 조건이 "available이
+   * 정의 시점 가용성이 `available`이 아닌가. 어댑터 capability 판정은 P2-07이다. 조건이 "available이
    * 아니다"인 것은 WORKFLOW P1-04 acceptance 그대로다 — backend가 상태를 늘릴 때 새 값이 기본
    * "정상"으로 흘러가면 화면 어휘의 owner가 backend라는 규칙과 반대가 된다(리뷰 P3).
    */

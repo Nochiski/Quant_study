@@ -20,6 +20,11 @@ npm run test:e2e:update
 npm run test:e2e:report
 ```
 
+`workbench.workflow.spec.ts`도 기준선 한 장(`graph-node-diagnostic.png`)을 갖는다. 노드 카드
+레이아웃 계약은 같은 테스트의 boundingBox 단언이 잠그고 이 이미지는 보조 증거라, 뷰포트·테마
+한 벌(1440 light)로 충분해 시각 프로젝트 4종에 넣지 않았다. 캡처는 진단 문장을 `mask`로 가린다 —
+그 문장의 owner는 backend라 문구가 다듬어져도 이 기준선을 다시 찍을 일이 없어야 한다.
+
 This layer owns browser process, server lifecycle, viewport/theme matrix, screenshots and failure
 artifacts. The four visual projects collect only `workbench.infrastructure.spec.ts`; the single
 1440px light project collects `workbench.workflow.spec.ts` so stateful create/revision/backtest

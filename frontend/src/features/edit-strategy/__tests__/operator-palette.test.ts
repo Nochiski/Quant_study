@@ -100,7 +100,7 @@ describe("연산자 팔레트 (P1-04)", () => {
     expect(mean?.description).toContain("평균");
   });
 
-  it("정의 시점에 미지원인 연산자를 표시한다(판정은 P2-04)", () => {
+  it("정의 시점에 미지원인 연산자를 표시한다(판정은 P2-07)", () => {
     const groups = operatorPalette(SCHEMA, tree, F0, CATALOG);
     const unsupported = groups
       .flatMap((group) => group.entries)

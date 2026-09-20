@@ -2,6 +2,7 @@ export {
   assistantProvidersKey,
   assistantProvidersQuery,
   refreshAssistantProviders,
+  refreshIfProviderGone,
   useActivateAssistantProvider,
   useDeleteAssistantProvider,
 } from "./model/provider-queries";

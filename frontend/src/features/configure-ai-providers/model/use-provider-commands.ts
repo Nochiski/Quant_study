@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   assistantProviderApi,
   refreshAssistantProviders,
+  refreshIfProviderGone,
   type CreateProviderProfileInput,
 } from "../../../entities/assistant";
 import { t } from "../../../shared/config";
@@ -59,6 +60,7 @@ export const useCreateProvider = () => {
  * 풀린다(리뷰 P3-2). 진행 중 id를 여기서 직접 들면 그 문제가 생기지 않는다.
  */
 export const useProbeProvider = () => {
+  const queryClient = useQueryClient();
   const [probingId, setProbingId] = useState<string | null>(null);
 
   const probe = async (profileId: string): Promise<ProbeOutcome> => {
@@ -73,6 +75,7 @@ export const useProbeProvider = () => {
         latencyMs: result.latency_ms,
       };
     } catch (error) {
+      refreshIfProviderGone(queryClient, error);
       return {
         ok: false,
         message: providerRejection(error).message,

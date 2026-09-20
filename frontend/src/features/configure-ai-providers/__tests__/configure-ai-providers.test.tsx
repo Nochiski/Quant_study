@@ -359,6 +359,8 @@ describe("AI 공급자 설정 섹션", () => {
     await user.click(card.getByRole("button", { name: "연결 테스트" }));
 
     expect(await card.findByText(/요청 한도/)).toBeInTheDocument();
+    // 200 경로에도 서버 원문 문구를 그리지 않는 잠금을 건다(spec D6, 리뷰 P3-3).
+    expect(card.queryByText(/rate limited/)).toBeNull();
   });
 
   it("연결 테스트 성공은 지연 시간과 함께 보여준다", async () => {
@@ -430,6 +432,80 @@ describe("AI 공급자 설정 섹션", () => {
     expect(deleted).toEqual([]);
     expect(card.queryByRole("button", { name: "삭제 확인" })).toBeNull();
     expect(card.getByRole("button", { name: "삭제" })).toHaveFocus();
+  });
+
+  it("404가 오면 목록을 다시 읽어 유령 카드를 지운다", async () => {
+    const user = userEvent.setup();
+    view = {
+      ...view,
+      profiles: [
+        profile(),
+        profile({ profile_id: "p-2", label: "예비 Claude", active: false }),
+      ],
+    };
+    server.use(
+      http.post(
+        `${API}/api/v1/assistant/providers/:profileId/activate`,
+        ({ params }) => {
+          // 다른 곳에서 이미 지워진 프로파일
+          view = {
+            ...view,
+            profiles: view.profiles.filter(
+              (item) => item.profile_id !== String(params.profileId),
+            ),
+          };
+          return HttpResponse.json(
+            {
+              detail: {
+                code: "assistant.provider.not_found",
+                message: "gone",
+              },
+            },
+            { status: 404 },
+          );
+        },
+      ),
+    );
+    renderSettings(<AiProviderSettings />);
+
+    const spare = await cardOf("예비 Claude");
+    await user.click(spare.getByRole("button", { name: "활성으로 사용" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "예비 Claude" })).toBeNull(),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/찾을 수 없습니다/);
+  });
+
+  it("서버 거부와 입력 누락 모두 고칠 칸으로 포커스를 옮긴다", async () => {
+    const user = userEvent.setup();
+    createReply = () =>
+      HttpResponse.json(
+        {
+          detail: {
+            code: "assistant.probe_failed",
+            failure: "auth",
+            message: "authentication rejected",
+          },
+        },
+        { status: 422 },
+      );
+    renderSettings(<AiProviderSettings />);
+
+    // 표시 이름이 비어 있으면 요청 없이 그 칸으로 간다.
+    await user.click(
+      await screen.findByRole("button", { name: "연결 테스트 후 저장" }),
+    );
+    expect(screen.getByLabelText("표시 이름")).toHaveFocus();
+    expect(createBodies).toEqual([]);
+
+    await user.type(screen.getByLabelText("표시 이름"), "새 연결");
+    await user.type(screen.getByLabelText("API 키"), SECRET);
+    await user.click(
+      screen.getByRole("button", { name: "연결 테스트 후 저장" }),
+    );
+
+    await waitFor(() => expect(screen.getByLabelText("API 키")).toHaveFocus());
   });
 
   it("프로파일이 없으면 빈 상태를 보여준다", async () => {

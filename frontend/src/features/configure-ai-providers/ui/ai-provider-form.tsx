@@ -1,4 +1,5 @@
 import { useId, useRef, useState, type FormEvent } from "react";
+import { flushSync } from "react-dom";
 
 import {
   type ProviderKind,
@@ -34,6 +35,10 @@ const firstInstalled = (
 export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
   const create = useCreateProvider();
   const secretRef = useRef<HTMLInputElement>(null);
+  const kindRef = useRef<HTMLSelectElement>(null);
+  const labelRef = useRef<HTMLInputElement>(null);
+  const modelRef = useRef<HTMLInputElement>(null);
+  const baseUrlRef = useRef<HTMLInputElement>(null);
   const ids = {
     kind: useId(),
     label: useId(),
@@ -62,6 +67,28 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
     [hint, rejection?.field === field ? ids.error : undefined]
       .filter(Boolean)
       .join(" ") || undefined;
+  /**
+   * 거부 사유를 표시하고 그 칸으로 포커스를 옮긴다.
+   *
+   * `role="alert"`로 읽히기는 하지만 포커스가 제출 버튼에 남으면 고칠 자리를 손으로 찾아야 한다
+   * (리뷰 P3-4). `base_url`은 접혀 있을 수 있어 펼침과 포커스를 같은 `flushSync` 뒤에 한다.
+   */
+  const reject = (next: ProviderRejection) => {
+    flushSync(() => {
+      if (next.field === "baseUrl") setAdvanced(true);
+      setRejection(next);
+    });
+    const target = {
+      kind: kindRef.current,
+      label: labelRef.current,
+      model: modelRef.current,
+      secret: secretRef.current,
+      baseUrl: baseUrlRef.current,
+      form: null,
+    }[next.field];
+    target?.focus();
+  };
+
   const fieldError = (field: ProviderField) =>
     rejection?.field === field ? (
       <p className="ai-provider-form__error" id={ids.error} role="alert">
@@ -86,21 +113,20 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
       return;
     }
     // 거부가 base_url을 지목하면 그 칸을 화면에 되돌려 놓는다 — 접힌 채로는 고칠 자리가 안 보인다.
-    if (rejected.field === "baseUrl") setAdvanced(true);
-    setRejection(rejected);
+    reject(rejected);
   };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (kind === null || !installedKind) {
-      setRejection({
+      reject({
         field: "kind",
         message: t("assistant.error.provider_not_installed"),
       });
       return;
     }
     if (label.trim() === "") {
-      setRejection({
+      reject({
         field: "label",
         message: t("assistant.provider.form.error.label"),
       });
@@ -109,7 +135,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
     const secretInput = secretRef.current;
     const secret = secretInput === null ? "" : secretInput.value;
     if (secret === "") {
-      setRejection({
+      reject({
         field: "secret",
         message: t("assistant.provider.form.error.secret"),
       });
@@ -130,6 +156,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
         <label htmlFor={ids.kind}>{t("assistant.provider.form.kind")}</label>
         <select
           id={ids.kind}
+          ref={kindRef}
           value={kind ?? ""}
           aria-invalid={invalid("kind")}
           aria-describedby={describedBy("kind")}
@@ -157,6 +184,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
         <label htmlFor={ids.label}>{t("assistant.provider.form.label")}</label>
         <input
           id={ids.label}
+          ref={labelRef}
           value={label}
           autoComplete="off"
           aria-invalid={invalid("label")}
@@ -187,6 +215,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
         <label htmlFor={ids.model}>{t("assistant.provider.form.model")}</label>
         <input
           id={ids.model}
+          ref={modelRef}
           value={model}
           autoComplete="off"
           placeholder={defaultModel}
@@ -222,6 +251,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
             </label>
             <input
               id={ids.baseUrl}
+              ref={baseUrlRef}
               value={baseUrl}
               autoComplete="off"
               inputMode="url"

@@ -5,7 +5,10 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 
-import { assistantProviderApi } from "../../../shared/api";
+import {
+  AssistantRequestError,
+  assistantProviderApi,
+} from "../../../shared/api";
 
 export const assistantProvidersKey = () => ["assistant", "providers"] as const;
 
@@ -26,6 +29,22 @@ export const assistantProvidersQuery = () =>
   });
 
 /**
+ * 404는 이 화면이 모르는 사이에 프로파일이 사라졌다는 뜻이다 — 다른 탭·다른 기기에서 지웠을 때.
+ *
+ * 그대로 두면 화면이 "목록을 새로 고치세요"라고 말하면서 새로 고칠 수단을 주지 않는다(수동 새로 고침
+ * 버튼이 없고 `refetchOnWindowFocus`도 꺼져 있다). 사용자가 존재하지 않는 프로파일을 계속 조작하는
+ * dead end라 여기서 목록을 한 번 다시 읽는다(리뷰 P3-1).
+ */
+export const refreshIfProviderGone = (
+  queryClient: QueryClient,
+  error: unknown,
+): void => {
+  if (error instanceof AssistantRequestError && error.status === 404) {
+    void refreshAssistantProviders(queryClient);
+  }
+};
+
+/**
  * 프로파일 id만 싣는 변이는 react-query mutation으로 둔다.
  *
  * 프로파일 생성처럼 **API 키를 싣는 호출은 여기에 두지 않는다** — TanStack Query는 변이 인자를
@@ -39,6 +58,7 @@ export const useActivateAssistantProvider = () => {
     mutationFn: (profileId: string) =>
       assistantProviderApi.activateProvider(profileId),
     onSuccess: () => refreshAssistantProviders(queryClient),
+    onError: (error) => refreshIfProviderGone(queryClient, error),
   });
 };
 
@@ -48,5 +68,6 @@ export const useDeleteAssistantProvider = () => {
     mutationFn: (profileId: string) =>
       assistantProviderApi.deleteProvider(profileId),
     onSuccess: () => refreshAssistantProviders(queryClient),
+    onError: (error) => refreshIfProviderGone(queryClient, error),
   });
 };

@@ -7,7 +7,7 @@
 
 .ai-providers__title {
   margin: 0;
-  font-size: 17px;
+  font-size: var(--text-size-title);
   font-weight: 700;
 }
 
@@ -67,7 +67,7 @@
 
 .ai-provider-card__title {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-size-body);
   font-weight: 700;
 }
 
@@ -90,6 +90,10 @@
 .ai-provider-card__probe {
   margin: 0;
   font-size: var(--text-size-small);
+}
+
+.ai-provider-card__probe--ok {
+  color: var(--status-ok);
 }
 
 .ai-provider-card__probe--failed {
@@ -121,7 +125,7 @@
 
 .ai-provider-form__title {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-size-body);
   font-weight: 700;
 }
 

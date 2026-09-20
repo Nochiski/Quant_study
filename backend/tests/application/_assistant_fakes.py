@@ -93,7 +93,11 @@ ScriptStep = ChatEvent | ToolStep | RaiseStep
 
 
 class ScriptedProvider:
-    """`LlmProviderPort` 가짜 구현. 스크립트를 순서대로 흘린다."""
+    """`LlmProviderPort` 가짜 구현. 스크립트를 순서대로 흘린다.
+
+    `probe_result`로 연결 테스트 결과를 주입한다. `ProbeResult`는 사유만 받고 문장은 스스로
+    고르므로, 이 가짜가 SDK 오류 본문을 흉내 내려 해도 넣을 자리가 없다(spec D2 스크럽 계약).
+    """
 
     def __init__(
         self,
@@ -105,7 +109,7 @@ class ScriptedProvider:
     ) -> None:
         self.kind = kind
         self._script = tuple(script)
-        self._probe_result = probe_result or ProbeResult(ok=True, message="연결 확인", latency_ms=7)
+        self._probe_result = probe_result or ProbeResult(ok=True, latency_ms=7)
         self._model = model
         self.tool_results: list[ToolResult] = []
         self.requests: list[TurnRequest] = []

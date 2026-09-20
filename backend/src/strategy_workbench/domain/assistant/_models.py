@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Literal, TypeAlias
 
 __all__ = [
@@ -85,6 +86,19 @@ class ProbeFailure(StrEnum):
     UNKNOWN = "unknown"
 
 
+# 사유별 고정 문구. 연결 테스트 결과로 사람에게 보여 줄 문장은 이 표가 전부다.
+_PROBE_MESSAGES: Mapping[ProbeFailure, str] = MappingProxyType(
+    {
+        ProbeFailure.AUTH: "API 키가 거부되었습니다. 키를 다시 확인하세요.",
+        ProbeFailure.MODEL_NOT_FOUND: "모델을 찾을 수 없습니다. 모델 이름을 확인하세요.",
+        ProbeFailure.NETWORK: "공급자에 연결하지 못했습니다. 네트워크를 확인하세요.",
+        ProbeFailure.RATE_LIMIT: "요금 한도에 걸렸습니다. 잠시 후 다시 시도하세요.",
+        ProbeFailure.UNKNOWN: "연결 테스트가 알 수 없는 이유로 실패했습니다.",
+    }
+)
+_PROBE_OK_MESSAGE = "연결을 확인했습니다."
+
+
 @dataclass(frozen=True)
 class ProviderProfile:
     """사용자가 등록한 공급자 연결 하나. 비밀은 여기 없고 `ProviderSecretStore`가 가진다."""
@@ -100,12 +114,39 @@ class ProviderProfile:
 
 @dataclass(frozen=True)
 class ProbeResult:
-    """연결 테스트 결과. `ok`가 거짓이면 `failure`가 사유를 말한다."""
+    """연결 테스트 결과. `ok`가 거짓이면 `failure`가 사유를 말한다.
+
+    **`message`는 필드가 아니라 `failure`에서 유도된다.** `Failure.message`와 같은 이유로 SDK 예외
+    문자열·응답 본문이 여기 들어올 자리를 아예 없앴다(spec D2). 공급자 인증 오류 본문은
+    `Incorrect API key provided: sk-proj-…`처럼 키 조각을 그대로 담는 일이 흔하고, 이 값은
+    설정 화면의 "연결 테스트" 결과로 HTTP 응답 본문까지 그대로 나간다. 한 번 새면 회수 경로가
+    없으므로 adapter는 사유(`ProbeFailure`)만 고르고 문장은 고르지 못한다.
+
+    진단이 더 필요한 adapter는 자기 로컬 로그에 남긴다.
+    """
 
     ok: bool
-    message: str
     latency_ms: int | None = None
     failure: ProbeFailure | None = None
+
+    def __post_init__(self) -> None:
+        if self.ok and self.failure is not None:
+            raise ValueError(
+                "a successful probe must not carry a failure reason — "
+                f"ok={self.ok} failure={self.failure.value!r}"
+            )
+        if not self.ok and self.failure is None:
+            raise ValueError(
+                f"a failed probe must name its reason — ok={self.ok} failure=None; "
+                f"expected one of {[member.value for member in ProbeFailure]}"
+            )
+
+    @property
+    def message(self) -> str:
+        """사유별 고정 문구. 호출자가 문장을 정하지 않는다."""
+        if self.failure is None:
+            return _PROBE_OK_MESSAGE
+        return _PROBE_MESSAGES[self.failure]
 
 
 @dataclass(frozen=True)

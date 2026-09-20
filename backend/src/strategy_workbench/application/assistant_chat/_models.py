@@ -18,16 +18,28 @@ __all__ = ["ChatSession", "DocumentRef", "TurnContext", "compile_payload"]
 
 @dataclass(frozen=True)
 class DocumentRef:
-    """세션이 붙은 문서. 저장된 전략(`strategy_id`) 또는 초안(`draft_id`) 중 하나다."""
+    """세션이 붙은 문서. 저장된 전략(`strategy_id`) 또는 초안(`draft_id`) **정확히 하나**다.
+
+    둘 다 설정된 값을 받으면 같은 대화가 두 문서에 붙은 것이 되어, 저장소의
+    `list_for_document`가 같은 세션을 서로 다른 키로 보게 된다. 사이드바에서 세션이 사라지거나 한
+    문서의 세션 목록이 둘로 갈린다. `revision`은 저장된 전략에만 있는 개념이므로 초안에는 붙지
+    않는다.
+    """
 
     strategy_id: str | None
     revision: int | None
     draft_id: str | None
 
     def __post_init__(self) -> None:
-        if self.strategy_id is None and self.draft_id is None:
+        if (self.strategy_id is None) == (self.draft_id is None):
             raise ValueError(
-                "document_ref needs a saved strategy or a draft — "
+                "document_ref needs exactly one of a saved strategy or a draft — "
+                f"strategy_id={self.strategy_id!r} revision={self.revision!r} "
+                f"draft_id={self.draft_id!r}"
+            )
+        if self.draft_id is not None and self.revision is not None:
+            raise ValueError(
+                "a draft document_ref has no revision — "
                 f"strategy_id={self.strategy_id!r} revision={self.revision!r} "
                 f"draft_id={self.draft_id!r}"
             )

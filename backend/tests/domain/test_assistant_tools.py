@@ -12,6 +12,7 @@ from collections.abc import Iterator, Mapping
 
 import pytest
 
+from strategy_workbench.domain.assistant.facade.models import ToolSpec
 from strategy_workbench.domain.assistant.facade.tools import (
     ASSISTANT_TOOLS,
     LIST_EQUITY_FIELDS,
@@ -57,10 +58,9 @@ def test_tool_names_are_unique() -> None:
 
 
 @pytest.mark.parametrize("tool", ASSISTANT_TOOLS, ids=lambda tool: tool.name)
-def test_every_tool_schema_is_strict(tool: object) -> None:
-    spec = next(item for item in ASSISTANT_TOOLS if item is tool)
+def test_every_tool_schema_is_strict(tool: ToolSpec) -> None:
     offenders: list[str] = []
-    for pointer, node in _object_schemas(spec.input_schema, ""):
+    for pointer, node in _object_schemas(tool.input_schema, ""):
         properties = node.get("properties")
         required = node.get("required")
         names = sorted(properties) if isinstance(properties, Mapping) else []
@@ -69,21 +69,17 @@ def test_every_tool_schema_is_strict(tool: object) -> None:
         if not isinstance(required, list) or sorted(str(name) for name in required) != names:
             offenders.append(f"{pointer or '/'}: required={required!r} expected={names!r}")
 
-    assert offenders == [], f"tool={spec.name} offenders={offenders}"
+    assert offenders == [], f"tool={tool.name} offenders={offenders}"
 
 
 @pytest.mark.parametrize("tool", ASSISTANT_TOOLS, ids=lambda tool: tool.name)
-def test_every_tool_schema_is_json_serialisable(tool: object) -> None:
-    spec = next(item for item in ASSISTANT_TOOLS if item is tool)
-
-    assert json.loads(json.dumps(spec.input_schema, ensure_ascii=False)) == spec.input_schema
+def test_every_tool_schema_is_json_serialisable(tool: ToolSpec) -> None:
+    assert json.loads(json.dumps(tool.input_schema, ensure_ascii=False)) == tool.input_schema
 
 
 @pytest.mark.parametrize("tool", ASSISTANT_TOOLS, ids=lambda tool: tool.name)
-def test_every_tool_describes_itself_for_the_model(tool: object) -> None:
-    spec = next(item for item in ASSISTANT_TOOLS if item is tool)
-
-    assert len(spec.description) >= 20
+def test_every_tool_describes_itself_for_the_model(tool: ToolSpec) -> None:
+    assert len(tool.description) >= 20
 
 
 def test_input_free_tools_take_no_arguments() -> None:

@@ -5,6 +5,10 @@
 - provider SDKs (`anthropic`, `openai`) live only in their own outbound adapters
   (AI 어시스턴트 설계 spec D1/D4, A-01): domain/application see providers through
   `LlmProviderPort`, so a second provider is a new adapter and not an edit to the tool loop.
+
+Scope: these gates read `import` / `from … import` statements out of the AST. An import made
+through a string (`importlib.import_module("anthropic")`, `__import__`) is outside what they can
+see, so a reviewer of the provider adapters has to check that by eye.
 """
 
 from __future__ import annotations
@@ -15,9 +19,10 @@ from pathlib import Path
 SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "strategy_workbench"
 
 LLM_SDKS = frozenset({"anthropic", "openai"})
+# 끝의 "/"가 중요하다. 접두만 비교하면 `llm_openai_experiment/` 같은 인접 디렉터리도 통과한다.
 LLM_SDK_OWNERS = (
-    "adapters/outbound/llm_anthropic",
-    "adapters/outbound/llm_openai",
+    "adapters/outbound/llm_anthropic/",
+    "adapters/outbound/llm_openai/",
 )
 
 

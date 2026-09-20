@@ -118,7 +118,7 @@ risk:
   `zscore`(횡단면 표준화), `none`(항등, 1.1 의미).
 - `none`이고 팩터 출력 단위(`NodeContract.unit`)가 서로 다르면 `strategy.signal.unit_mismatch`
   warning. 팩터가 하나면 경고하지 않는다.
-- 그래프의 "합쳐서 고른다" 카드가 이 필드를 "순위로 맞춘 뒤 가중 합 / 표준화 뒤 가중 합 / 원시값
+- 그래프의 "알파 팩터" 단계 "점수 합치는 방법" 카드가 이 필드를 "순위로 맞춘 뒤 가중 합 / 표준화 뒤 가중 합 / 원시값
   가중 합(주의)"으로 보인다.
 
 ### D5. 저장 게이트와 실행 게이트를 하나로 합친다
@@ -190,7 +190,7 @@ schema(`x-description-key`, `x-operator`)로 내려준다. 문장은 frontend i1
 
 | 수준 | 투영 입력 | 편집 |
 |---|---|---|
-| 파이프라인(전략 전체) | runtime schema × parse tree × compile 진단 → 4단계 모델(`pipeline-projection.ts`): 거른다 `eligibility`, 점수를 매긴다 `factors`, 합쳐서 고른다 `signal`+`portfolio`, 비중을 준다 `risk`+`portfolio.weighting` | 카드 컨트롤은 Form 필드 컨트롤 재사용(`replaceScalar`·`insertKey`·`remove`). 팩터 추가는 빈 그래프 팩터 `insertItem` |
+| 파이프라인(전략 전체) | runtime schema × parse tree × compile 진단 → 통상 퀀트 프레임워크의 단계 모델(`pipeline-projection.ts`): 1 유니버스(Universe) `eligibility`, 2 알파 팩터(Alpha) `factors`+`signal`, 3 포트폴리오 구성(Portfolio) `portfolio`, 4 리스크 제약(Risk) `risk`, 5 실행(Execution) = 실행 설정 띠(문서 밖). YAML 섹션과 1:1이다. 문서 전체를 한국어 한 문장으로 요약한 문장(`strategy-summary`)도 같은 투영이 만든다 | 카드 컨트롤은 Form 필드 컨트롤 재사용(`replaceScalar`·`insertKey`·`remove`). 팩터 추가는 빈 그래프 팩터 `insertItem` |
 | 레시피(팩터 하나) | `graph.nodes`가 단일 입력 체인(각 노드가 직전 노드만 참조, 마지막이 출력)이면 순서 목록(`recipe-projection.ts`). 아니면 "고급에서 편집" 안내 | `recipe-transactions.ts`: 단계 추가 = `addNode`(kind·id·입력·출력 자동) + 다음 노드 재배선, 삭제 = `remove` + 재배선, 이동 = `*_node_id` 재배선, 파라미터 = `replaceScalar`. 여러 연산은 `planSourceOperations`로 한 undo 단계 |
 | 고급(임의 DAG) | `graph.nodes` + backend plan | 1.1 `graph-transactions.ts` 유지. 드래그 배선은 `*_node_id` `replaceScalar`. 좌표는 local UI state |
 | 실행 설정 띠 | `RunEnvironment` runtime schema | 문서 밖. `run-settings.ts` 필드 |
@@ -200,6 +200,14 @@ schema(`x-description-key`, `x-operator`)로 내려준다. 문장은 frontend i1
   탭이 아니라 기존 revision 화면 영역.
 - 문제 목록과 "검증 통과" 배지는 탭과 무관하게 렌더된다. 진단은 pointer로 해당 카드·단계에 붙는다.
 - 되돌리기·다시 실행은 툴바 버튼과 전역 단축키다. 편집기가 hidden이어도 동작한다.
+- 단계 구조는 통상 퀀트 전략 프로그램(유니버스 → 알파 → 포트폴리오 구성 → 리스크 → 실행)을 따른다.
+  표준 용어를 단계 이름으로 쓰고(한글 + 영문 소제목), 그 아래 한 줄 쉬운 설명을 둔다. 새 어휘를
+  만들지 않는다.
+- 화면 문구 규칙: 단계 이름은 위 표준 용어이고,
+  카드의 컨트롤은 한국어 문장 안에 들어가 읽힌다("거래대금이 [10]억 원 [이상인] 종목만"). 용어만 있는
+  문구(순위·완충·역가중)는 쓰지 않고 결과로 설명한다("20위 밖으로 5위까지 밀려도 유지"). 캔버스
+  맨 위에 문서 전체를 한 문장으로 요약해 보여 주고 카드가 바뀌면 문장이 바뀐다. 문장은 i18n 틀에
+  값을 끼운 것이며 frontend가 필드 목록을 손으로 적지는 않는다(스키마 `x-stage`와 i18n 키).
 - 그래프 탭(파이프라인·레시피 수준)에는 YAML 식별자가 나오지 않는다. 확인: 그 DOM 텍스트에
   `_id`·`_node`·`kind:` 패턴이 없다는 e2e 단언. 고급 수준은 접힌 영역에서만 노출.
 

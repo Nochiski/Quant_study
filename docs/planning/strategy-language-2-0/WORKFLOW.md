@@ -329,9 +329,12 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 
 **Acceptance**
 
-- runtime schema × parse tree × compile 진단 → 4단계 모델(거른다 `eligibility`, 점수를 매긴다
-  `factors`, 합쳐서 고른다 `signal`+`portfolio` 선택·리밸런스 필드, 비중을 준다
-  `portfolio.weighting`+`risk`). 각 카드는 pointer, 한글 라벨(i18n 키), 현재 값(작성 여부), 컨트롤
+- runtime schema × parse tree × compile 진단 → 표준 단계 모델(1 유니버스 `eligibility`, 2 알파 팩터
+  `factors`+`signal`, 3 포트폴리오 구성 `portfolio`, 4 리스크 제약 `risk`; 5 실행은 실행 설정 띠).
+  YAML 섹션과 1:1. `weighting: risk`의 기준 팩터(`risk.risk_factor_id`)는 3단계 비중 카드가
+  편집한다(카드가 pointer 여러 개를 가질 수 있다, `x-stage`). 전략 한 문장 요약(`strategySummary`)을 같은 투영이 i18n 문장 틀로
+  만든다(예: "거래대금이 10억 원 이상인 종목 중에서, 모멘텀 60%·가치 40%로 합친 순위 점수가 높은
+  20종목을 매월 골라 같은 비중으로 보유한다"). 각 카드는 pointer, 한글 라벨(i18n 키), 현재 값(작성 여부), 컨트롤
   종류(`form-projection`의 필드 행 재사용), 진단 목록. 필드의 단계 배정은 스키마 `x-stage` 마커로
   backend가 준다(프론트에 필드 목록을 손으로 적지 않는다; backend 변경은 이 PR에 포함, 1.2 계약
   additive).
@@ -340,9 +343,13 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
   고급".
 - 스키마 fixture만으로 유도되는 단위 테스트.
 
-### P4-02 — 단계 카드 UI(거른다·합쳐서 고른다·비중을 준다)와 실행 설정 띠
+### P4-02 — 단계 카드 UI(유니버스·포트폴리오 구성·리스크 제약)와 실행 설정 띠
 
 **Acceptance**
+
+- 문구 규칙(spec D9): 단계 이름은 표준 용어(한글 + 영문 소제목) + 한 줄 쉬운 설명, 컨트롤은 한국어 문장 안에("거래대금이 [10]억 원 [이상인]
+  종목만", "합산 점수 상위 [20]종목을 [매월] 다시 고른다"), 용어 대신 결과로 설명. 캔버스 맨 위에
+  한 문장 요약 띠. 문장 틀은 i18n, 값은 parse tree.
 
 - `pipeline-panel.tsx`: 4열 캔버스. eligibility 규칙 추가·삭제(`insertItem`·`remove`), 조건 컨트롤
   (이상·이하·상위 %·상위 N개 → `operator`·`value`), 정규화 선택(`signal.normalization`) 카드에 단위
@@ -351,7 +358,7 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 - 실행 설정 띠(P3-02)가 캔버스 위. "여기 없는 것" 안내 카드.
 - 키보드 조작·ARIA(`frontend-ui-quality.md`).
 
-### P4-03 — 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널
+### P4-03 — 알파 팩터 단계(팩터 카드·점수 합치기), 빈 팩터 추가, 기준일 미리보기 패널
 
 **Acceptance**
 

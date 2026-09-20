@@ -41,6 +41,18 @@ export type AssistantTurnState = {
    * 그 뒤에 `Failure`가 올 수 있다(spec D3). 아직 서버가 알려 준 상태가 없으면 null이다.
    */
   status: TurnStatus | null;
+  /**
+   * 서버가 이 턴을 정착(settled)시킨 것을 **클라이언트가 확인했는가.**
+   *
+   * 저장된 `status`가 종료로 바뀌어도 서버는 그 뒤에 마지막 이벤트를 더 붙인다 — 취소 응답을 받은
+   * 직후의 `Failure(CANCELLED)`와 남은 텍스트 조각이 그렇다. status로 스트림을 닫으면 그 이벤트를
+   * 영영 못 받아 화면에 취소 사유가 뜨지 않는다(B-05 e2e가 찾은 DEFECT-B05-001).
+   *
+   * 정착을 확인해 주는 것은 이력 응답 하나뿐이다. 이력이 종료 상태를 답했다면 서버는 그 턴의
+   * 이벤트를 모두 flush한 뒤이고 그 이벤트들이 같은 응답에 실려 온다(backend의 SSE 종료 판정도
+   * 같은 `is_settled`다). 턴 시작·취소 응답은 그 보장이 없으므로 여기에 쓰지 않는다.
+   */
+  settled: boolean;
   acceptedSequence: number | null;
   /**
    * 이 턴에서 이미 반영한 마지막 sequence. 멱등 판정은 세션 전체가 아니라 턴마다 한다.
@@ -103,6 +115,7 @@ export const emptyAssistantChatState: AssistantChatState = {
 const emptyTurn = (turnId: string): AssistantTurnState => ({
   turnId,
   status: null,
+  settled: false,
   acceptedSequence: null,
   lastSequence: -1,
   text: "",
@@ -239,10 +252,13 @@ const reduceEvent = (
 const reduceTurn = (
   state: AssistantChatState,
   turn: TurnView | TurnAcceptedView,
+  /** 이력 응답이 답한 상태인가. 이력만이 "서버가 다 흘렸다"를 보장한다. */
+  fromHistory: boolean,
 ): AssistantChatState =>
   withTurn(state, turn.turn_id, (previous) => ({
     ...previous,
     status: settledStatus(previous.status, turn.status),
+    settled: previous.settled || (fromHistory && turn.status !== "running"),
     acceptedSequence: turn.accepted_sequence,
   }));
 
@@ -264,11 +280,15 @@ const reduceHistory = (
     // 세션을 바꾼 뒤 도착한 앞 세션의 응답이다.
     return state;
   }
-  const withTurns = history.turns.reduce(reduceTurn, {
+  const seeded: AssistantChatState = {
     ...state,
     sessionId: history.session.session_id,
     messages: history.messages,
-  });
+  };
+  const withTurns = history.turns.reduce<AssistantChatState>(
+    (merged, turn) => reduceTurn(merged, turn, true),
+    seeded,
+  );
   return history.events.reduce(reduceEvent, withTurns);
 };
 
@@ -284,7 +304,7 @@ export const assistantChatReducer = (
     case "history":
       return reduceHistory(state, action.history);
     case "turn":
-      return reduceTurn(state, action.turn);
+      return reduceTurn(state, action.turn, false);
     case "event":
       return reduceEvent(state, action.envelope);
   }
@@ -296,8 +316,26 @@ export const assistantTurn = (
 ): AssistantTurnState | null =>
   state.turns.find((turn) => turn.turnId === turnId) ?? null;
 
-/** 진행 중 턴. 스트림을 열지 말지는 이 값이 정한다(spec D7). */
+/** 저장된 상태가 `running`인 턴. 화면의 "답변 중" 표시가 읽는 값이다. */
 export const runningAssistantTurn = (
   state: AssistantChatState,
 ): AssistantTurnState | null =>
   state.turns.find((turn) => turn.status === "running") ?? null;
+
+/**
+ * 정착을 아직 확인하지 못한 마지막 턴. 스트림을 열고 닫는 판단은 이 값이 한다(spec D7).
+ *
+ * `runningAssistantTurn`이 아닌 이유는 취소 경로다 — 취소 응답으로 status가 먼저 CANCELLED가 되고
+ * 서버의 취소 사유는 그 뒤에 온다. 반대 방향(정착했는데 아직 확인 못 한 턴을 대상으로 두는 것)은
+ * 서버가 409 `no_running_turn`으로 막고 그 거절이 이력 복구를 부르므로, 한 번의 헛된 요청으로
+ * 스스로 수렴한다.
+ */
+export const unsettledAssistantTurn = (
+  state: AssistantChatState,
+): AssistantTurnState | null => {
+  for (let at = state.turns.length - 1; at >= 0; at -= 1) {
+    const turn = state.turns[at];
+    if (!turn.settled) return turn;
+  }
+  return null;
+};

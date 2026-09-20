@@ -29,6 +29,7 @@ export {
   assistantTurn,
   emptyAssistantChatState,
   runningAssistantTurn,
+  unsettledAssistantTurn,
   type AssistantChatAction,
   type AssistantChatState,
   type AssistantFailure,

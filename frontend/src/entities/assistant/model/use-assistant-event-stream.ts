@@ -11,7 +11,7 @@ import {
   type TurnStatus,
 } from "../../../shared/api";
 import { useCommittedRef } from "../../../shared/lib/react";
-import { runningAssistantTurn, type AssistantChatState } from "./chat-state";
+import { unsettledAssistantTurn, type AssistantChatState } from "./chat-state";
 import { assistantSessionQuery } from "./session-queries";
 
 /** 스트림을 열 대상. 진행 중 턴이 없으면 null이고, 그때는 열지 않는다(spec D7). */
@@ -23,15 +23,17 @@ export type AssistantStreamTarget = {
 /**
  * 투영에서 스트림 대상을 고른다.
  *
- * "진행 중 턴이 있을 때만 열고 종료 상태에서 닫는다"는 규칙을 화면이 아니라 여기서 집행한다 —
- * 턴이 종료 상태로 바뀌면 대상이 사라지고 리더가 연결을 정리한다.
+ * "진행 중 턴이 있을 때만 열고 끝나면 닫는다"는 규칙을 화면이 아니라 여기서 집행한다. 닫는 기준은
+ * 저장된 `status`가 아니라 **정착 확인 여부**다 — 취소 응답이 status를 먼저 CANCELLED로 바꾸는데
+ * 서버는 그 뒤에 취소 사유(`Failure(CANCELLED)`)와 남은 조각을 더 붙인다. status로 닫으면 그
+ * 이벤트를 영영 못 받아 화면에 이유가 뜨지 않는다(DEFECT-B05-001).
  */
 export const assistantStreamTarget = (
   state: AssistantChatState,
 ): AssistantStreamTarget | null => {
-  const running = runningAssistantTurn(state);
-  if (state.sessionId === null || running === null) return null;
-  return { sessionId: state.sessionId, turnId: running.turnId };
+  const pending = unsettledAssistantTurn(state);
+  if (state.sessionId === null || pending === null) return null;
+  return { sessionId: state.sessionId, turnId: pending.turnId };
 };
 
 export type AssistantStreamCloseReason =

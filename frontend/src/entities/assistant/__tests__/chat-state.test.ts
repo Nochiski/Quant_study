@@ -14,6 +14,7 @@ import {
   assistantTurn,
   emptyAssistantChatState,
   runningAssistantTurn,
+  unsettledAssistantTurn,
   type AssistantChatAction,
   type AssistantChatState,
 } from "../model/chat-state";
@@ -283,6 +284,35 @@ describe("어시스턴트 채팅 리듀서", () => {
     // 같은 턴의 이미 반영한 이벤트는 다시 붙지 않는다.
     expect(assistantTurn(merged, "turn-2")?.text).toBe("새 턴 답변");
     expect(merged.lastSequence).toBe(11);
+  });
+
+  it("취소 응답만으로는 정착으로 보지 않고 이력이 답할 때 정착한다", () => {
+    // 서버는 취소 응답 뒤에 `Failure(CANCELLED)`와 남은 조각을 더 붙인다 — 그때까지 대상으로 남긴다.
+    const cancelled = fold(opened(), [
+      { type: "turn", turn: turnView("running") },
+      { type: "turn", turn: turnView("cancelled") },
+    ]);
+    expect(runningAssistantTurn(cancelled)).toBeNull();
+    expect(unsettledAssistantTurn(cancelled)?.turnId).toBe(TURN);
+
+    const settled = assistantChatReducer(cancelled, {
+      type: "history",
+      history: history(
+        [envelope(0, { type: "failure", code: "cancelled", message: "취소" })],
+        [turnView("cancelled")],
+      ),
+    });
+    expect(unsettledAssistantTurn(settled)).toBeNull();
+    expect(assistantTurn(settled, TURN)?.failure?.code).toBe("cancelled");
+  });
+
+  it("이력이 답한 진행 중 턴은 정착으로 보지 않는다", () => {
+    const merged = assistantChatReducer(opened(), {
+      type: "history",
+      history: history([], [turnView("running")]),
+    });
+
+    expect(unsettledAssistantTurn(merged)?.turnId).toBe(TURN);
   });
 
   it("턴이 여러 개면 이벤트를 각 턴에 나눠 담는다", () => {

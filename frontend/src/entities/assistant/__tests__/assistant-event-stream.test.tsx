@@ -22,6 +22,7 @@ import type {
 } from "../../../shared/api";
 import {
   assistantChatReducer,
+  assistantTurn,
   emptyAssistantChatState,
 } from "../model/chat-state";
 import {
@@ -64,6 +65,18 @@ const sessionUsage = (): SessionUsageView => ({
   },
   turns: [],
 });
+
+/** 서버가 취소 사유를 뒤늦게 붙이는 프레임. */
+const failureFrame = (sequence: number): string =>
+  `id: ${sequence}
+event: assistant
+data: ${JSON.stringify({
+    sequence,
+    turn_id: TURN,
+    event: { type: "failure", code: "cancelled", message: "취소되었습니다" },
+  })}
+
+`;
 
 const history = (
   status: TurnStatus,
@@ -490,6 +503,53 @@ data: ${JSON.stringify({
     view.rerender({ target, lastSequence: -1, retryDelayMs: 2 });
     await waitFor(() => expect(connections).toHaveLength(2));
     expect(view.result.current.status).toBe("open");
+  });
+
+  it("취소 상태를 먼저 알아도 서버가 남긴 취소 사유를 받을 때까지 닫지 않는다", async () => {
+    historyStatus = "cancelled";
+    let state = assistantChatReducer(emptyAssistantChatState, {
+      type: "session",
+      sessionId: SESSION,
+    });
+    state = assistantChatReducer(state, {
+      type: "turn",
+      turn: history("running").turns[0],
+    });
+    const view = mount({
+      target: assistantStreamTarget(state),
+      lastSequence: -1,
+    });
+    await waitFor(() => expect(connections).toHaveLength(1));
+
+    // B-03의 취소 응답 dispatch — 저장된 상태는 CANCELLED지만 사유는 아직 오지 않았다.
+    state = assistantChatReducer(state, {
+      type: "turn",
+      turn: history("cancelled").turns[0],
+    });
+    expect(assistantStreamTarget(state)).not.toBeNull();
+    view.rerender({
+      target: assistantStreamTarget(state),
+      lastSequence: state.lastSequence,
+    });
+    await settle();
+    expect(attempts[0].signal.aborted).toBe(false);
+
+    // 서버가 취소 사유를 흘리고 닫는다.
+    connections[0].pushFrame(failureFrame(0));
+    await waitFor(() => expect(onEvent).toHaveBeenCalledTimes(1));
+    state = assistantChatReducer(state, {
+      type: "event",
+      envelope: onEvent.mock.calls[0][0],
+    });
+    connections[0].close();
+
+    await waitFor(() => expect(onHistory).toHaveBeenCalledTimes(1));
+    state = assistantChatReducer(state, {
+      type: "history",
+      history: onHistory.mock.calls[0][0],
+    });
+    expect(assistantStreamTarget(state)).toBeNull();
+    expect(assistantTurn(state, TURN)?.failure?.code).toBe("cancelled");
   });
 
   it("세션을 바꾸면 앞 세션 연결을 끊고 새 세션으로 연다", async () => {

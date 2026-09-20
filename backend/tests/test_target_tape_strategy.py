@@ -34,6 +34,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import MarketBarRecord
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.backtest.facade.environment import environment_from_legacy_spec
 from strategy_workbench.domain.portfolio.facade.construction import (
     CandidateSide,
     TargetFrame,
@@ -82,7 +83,12 @@ def _strategy(*targets: TargetPosition) -> TargetTapeStrategy:
     ).template()
     frame = TargetFrame(signal_as_of=SIGNAL, execution_on=EXECUTION, targets=targets, candidates=())
     tape = TargetTape(data_snapshot_id="snap", strategy_hash="h", tape_hash="t", frames=(frame,))
-    return TargetTapeStrategy(spec, tape, BacktestEnginePortfolioAdapter())
+    return TargetTapeStrategy(
+        spec,
+        tape,
+        BacktestEnginePortfolioAdapter(),
+        max_participation=environment_from_legacy_spec(spec).participation_rate,
+    )
 
 
 def test_adapter_delegates_to_evaluate_tape_and_only_adds_its_reasons() -> None:

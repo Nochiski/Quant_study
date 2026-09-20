@@ -24,6 +24,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.backtest.facade.environment import resolve_environment
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
@@ -176,10 +177,16 @@ class BacktestRunService:
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - _resolve always fills it
             raise InvalidBacktestRunError("resolved run spec has no strategy")
+        # 실행 설정을 여기서 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·데이터 조회가
+        # 모두 같은 값을 읽어야 명시 `environment` 가 조용히 무시되지 않는다(P2-01).
+        environment = resolve_environment(strategy, spec.environment)
+        spec = replace(spec, environment=environment)
         for window in spec.metric_windows:
-            if window.start < strategy.data.start or window.end > strategy.data.end:
+            if window.start < environment.start or window.end > environment.end:
                 raise InvalidBacktestRunError(
-                    f"metric window exceeds strategy data range: {window.scope.value}"
+                    "metric window exceeds the run range — "
+                    f"scope={window.scope.value} window={window.start}..{window.end} "
+                    f"run={environment.start}..{environment.end}"
                 )
         # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
         engine = self._portfolio_design.preflight(PortfolioPreviewRequest(strategy))
@@ -403,6 +410,11 @@ class BacktestRunService:
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - resolved before the thread starts
             raise InvalidBacktestRunError("resolved run spec has no strategy")
+        environment = spec.environment
+        if environment is None:  # pragma: no cover - start() pins it before the thread starts
+            raise InvalidBacktestRunError(
+                f"resolved run spec has no run environment — run_id={run_id}"
+            )
         try:
             # tape 단계: 원시 관측 로딩 + 팩터 평가 + TargetTape 컴파일. 실데이터에서 실행 시간의
             # 대부분을 차지하므로 취소 콜백을 파이프라인 checkpoint 에 그대로 건다.
@@ -433,8 +445,8 @@ class BacktestRunService:
                 raise InvalidBacktestRunError("target tape does not contain any positions")
             dataset = self._data_source.load_backtest_dataset(
                 BacktestDataQuery(
-                    start=strategy.data.start,
-                    end=strategy.data.end,
+                    start=environment.start,
+                    end=environment.end,
                     security_ids=security_ids,
                     benchmark_security_id=spec.benchmark_security_id,
                 )

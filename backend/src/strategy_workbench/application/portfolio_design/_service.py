@@ -28,6 +28,10 @@ from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataPort,
     FactorMetadataSnapshot,
 )
+from strategy_workbench.domain.backtest.facade.environment import (
+    RunEnvironment,
+    resolve_environment,
+)
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -239,15 +243,16 @@ class PortfolioDesignService:
             _raise_if_cancelled(cancelled)
 
         spec = request.spec
+        environment = resolve_environment(spec, request.environment)
         prepared = self._prepare(spec, pipeline_options, checkpoint=checkpoint)
         engine = prepared.engine
         metadata = prepared.metadata
         plans = prepared.plans
         raw_query = RawObservationQuery(
-            market=spec.data.market.value,
-            universe_id=spec.data.universe_id,
-            start=spec.data.start,
-            end=spec.data.end,
+            market=environment.market.value,
+            universe_id=environment.universe_id,
+            start=environment.start,
+            end=environment.end,
             field_ids=_required_field_ids(spec, plans),
             # Plans count as_of itself; the port counts sessions strictly before start.
             history_sessions_before_start=max(
@@ -274,7 +279,7 @@ class PortfolioDesignService:
                 expected=metadata.data_snapshot_id,
                 actual=raw.data_snapshot_id,
             )
-        _reject_sessions_outside_strategy_range(raw, spec, checkpoint=checkpoint)
+        _reject_sessions_outside_run_range(raw, environment, checkpoint=checkpoint)
         schedule = compile_rebalance_schedule(spec, raw.sessions, checkpoint=checkpoint)
         pipeline_options = _resolve_default_trace_date(pipeline_options, schedule)
         _validate_loaded_trace_scope(
@@ -687,31 +692,31 @@ def _reject_non_numeric_factor_outputs(
         raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
 
 
-def _reject_sessions_outside_strategy_range(
+def _reject_sessions_outside_run_range(
     raw: RawObservationSet,
-    spec: StrategySpec,
+    environment: RunEnvironment,
     *,
     checkpoint: Callable[[], None],
 ) -> None:
-    """Sessions must stay inside `spec.data.start..end` (fail-closed, D-004).
+    """Sessions must stay inside `environment.start..end` (fail-closed, D-004).
 
     A wider answer is fail-open: `compile_target_tape` would emit frames whose execution date has
-    no bar in the backtest dataset, which `application/backtest_run` queries for the strategy
-    range alone.
+    no bar in the backtest dataset, which `application/backtest_run` queries for the run range
+    alone.
     """
     outside = tuple(
         session
         for session in _checkpointed(raw.sessions, checkpoint)
-        if not spec.data.start <= session <= spec.data.end
+        if not environment.start <= session <= environment.end
     )
     if not outside:
         return
     raise RawObservationContractError(
-        "raw observation sessions fall outside the requested strategy range — "
-        f"expected={spec.data.start}..{spec.data.end} "
+        "raw observation sessions fall outside the requested run range — "
+        f"expected={environment.start}..{environment.end} "
         f"actual={raw.sessions[0]}..{raw.sessions[-1]} "
         f"outside={outside[:5]} outside_count={len(outside)} "
-        f"universe_id={spec.data.universe_id!r} snapshot={raw.data_snapshot_id!r}"
+        f"universe_id={environment.universe_id!r} snapshot={raw.data_snapshot_id!r}"
     )
 
 

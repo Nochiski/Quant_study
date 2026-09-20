@@ -202,6 +202,9 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
         "annualization_days": 252,
         "initial_cash": 100_000_000.0,
         "strategy_source": None,
+        # 요청 본문에 실행 설정을 주지 않으면 접수된 요청도 None 을 그대로 보존한다 —
+        # 브리지로 해소한 값은 run spec 에만 박히고 매니페스트로 나간다(P2-01).
+        "environment": None,
     }
 
     not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
@@ -303,7 +306,13 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
     assert replay_state["status"] == "completed", replay_state
     replay_result = client.get(f"/api/v1/backtests/{replay_run_id}/result")
     assert replay_result.status_code == 200
-    assert replay_result.json()["manifest"]["run_spec"] == accepted_request.json()
+    # 접수된 요청은 그대로 다시 제출할 수 있는 원본이라 `environment` 가 None 으로 남고,
+    # 매니페스트의 run spec 은 브리지로 해소한 실행 설정을 담는다(P2-01).
+    manifest_run_spec = replay_result.json()["manifest"]["run_spec"]
+    assert manifest_run_spec["environment"] == replay_result.json()["manifest"]["environment"]
+    assert {k: v for k, v in manifest_run_spec.items() if k != "environment"} == {
+        k: v for k, v in accepted_request.json().items() if k != "environment"
+    }
 
 
 def test_start_accepts_the_run_before_raw_observations_are_loaded(tmp_path: Path) -> None:

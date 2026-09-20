@@ -9,6 +9,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.backtest.facade.environment import resolve_environment
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioConstructionTrace,
@@ -93,10 +94,11 @@ class StrategyTraceService:
     ) -> StrategyTraceResponse:
         spec, provenance = self._resolve(request)
         _raise_if_cancelled(cancelled)
-        if request.as_of is not None and not spec.data.start <= request.as_of <= spec.data.end:
+        environment = resolve_environment(spec, request.environment)
+        if request.as_of is not None and not environment.start <= request.as_of <= environment.end:
             raise InvalidStrategyTraceRequestError(
                 "trace as_of is outside the strategy data range — "
-                f"as_of={request.as_of} range={spec.data.start}..{spec.data.end}"
+                f"as_of={request.as_of} range={environment.start}..{environment.end}"
             )
         factors = {factor.factor_id: factor for factor in spec.factors}
         if request.factor_id not in factors:
@@ -114,7 +116,7 @@ class StrategyTraceService:
         )
         try:
             pipeline = self._portfolio_design.run_pipeline(
-                PortfolioPreviewRequest(spec),
+                PortfolioPreviewRequest(spec, environment=environment),
                 options=PortfolioPipelineOptions(
                     trace_factor_id=request.factor_id,
                     trace_selection=selection,

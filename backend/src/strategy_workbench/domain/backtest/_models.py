@@ -100,6 +100,9 @@ class BacktestRunSpec:
 
     strategy: StrategySpec | None = None
     strategy_source: StrategySource | None = None
+    # 실행 설정. 없으면 서비스가 1.1 문서에서 브리지로 만든다(P2-01). 주어지면 문서의
+    # `data`·`execution` 보다 우선한다. P2-03 에서 필수가 된다.
+    environment: RunEnvironment | None = None
     core: ExecutionCore = ExecutionCore.RUST
     initial_cash: float = 100_000_000.0
     benchmark_security_id: str | None = None
@@ -144,6 +147,10 @@ class RunManifest:
     fee_bps: float
     slippage_bps: float
     participation_rate: float
+    # 이 run 이 실제로 쓴 실행 설정과 그 hash. `strategy_hash` 와 별개 축이라, 같은 전략을
+    # 다른 기간·비용으로 돌린 두 run 을 매니페스트만 보고 구분할 수 있다.
+    environment: RunEnvironment
+    environment_hash: str
     strategy_provenance: StrategyProvenance
     warnings: tuple[DataWarning, ...] = ()
     schema_version: str = "backtest-run-v2"

@@ -11,6 +11,10 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.backtest.facade.environment import (
+    environment_from_legacy_spec,
+    environment_hash,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     ExecutionCore,
@@ -54,6 +58,7 @@ def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:
     strategy = StrategyDesignService(
         InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
     ).template()
+    environment = environment_from_legacy_spec(strategy)
     return RunManifest(
         run_id="run-001",
         created_at=created,
@@ -61,7 +66,7 @@ def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:
         engine_core=ExecutionCore.PYTHON,
         engine_version="test",
         run_fingerprint="fingerprint",
-        run_spec=BacktestRunSpec(strategy),
+        run_spec=BacktestRunSpec(strategy, environment=environment),
         strategy_hash=strategy_hash,
         data_snapshot_id="snap",
         target_tape_hash="tape",
@@ -71,6 +76,8 @@ def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:
         fee_bps=0.0,
         slippage_bps=0.0,
         participation_rate=1.0,
+        environment=environment,
+        environment_hash=environment_hash(environment),
         strategy_provenance=StrategyProvenance(
             StrategySourceKind.SAVED_REVISION, spec_hash, "1.1", "s1", 3, "b" * 64
         ),

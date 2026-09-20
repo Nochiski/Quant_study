@@ -17,6 +17,10 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     MetricValue,
     build_default_metric_registry,
 )
+from strategy_workbench.domain.backtest.facade.environment import (
+    environment_from_legacy_spec,
+    environment_hash,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
@@ -38,7 +42,8 @@ def _result() -> BacktestRunResult:
         new_id=lambda: "unused",
         today=lambda: date(2026, 9, 3),
     ).template()
-    run_spec = BacktestRunSpec(strategy)
+    environment = environment_from_legacy_spec(strategy)
+    run_spec = BacktestRunSpec(strategy, environment=environment)
     return BacktestRunResult(
         manifest=RunManifest(
             run_id="run-safe-001",
@@ -57,6 +62,8 @@ def _result() -> BacktestRunResult:
             fee_bps=0.0,
             slippage_bps=0.0,
             participation_rate=1.0,
+            environment=environment,
+            environment_hash=environment_hash(environment),
             strategy_provenance=StrategyProvenance(
                 StrategySourceKind.INLINE_DRAFT, "strategy", "1.1"
             ),

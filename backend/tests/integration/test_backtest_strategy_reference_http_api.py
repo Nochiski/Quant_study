@@ -68,7 +68,8 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
     run_id = accepted.json()["run"]["run_id"]
     accepted_request = client.get(f"/api/v1/backtests/{run_id}/request")
     assert accepted_request.status_code == 200
-    assert accepted_request.json() == {**requested, "strategy": None}
+    # 실행 설정을 주지 않은 요청은 접수 본문에도 None 으로 남는다 — 브리지 결과는 매니페스트에만.
+    assert accepted_request.json() == {**requested, "strategy": None, "environment": None}
 
     replayed = client.post("/api/v1/backtests", json=accepted_request.json())
     assert replayed.status_code == 202, replayed.text

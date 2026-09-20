@@ -58,12 +58,19 @@ SDK에는 이벤트를 누적해 주는 헬퍼 `responses.stream(...)`도 있다
   파싱해 그 자리에 넣고, 그 매핑은 **`api_key`로 만든 인증 헤더를 덮는다.** 즉 프로파일 비밀이
   아예 나가지 않는다. 빈 dict는 듣지 않는다 — SDK가 "명시된 Authorization이 있는가"로 갈리므로
   값이 실제로 들어 있어야 env 쪽 줄이 걸러진다.
-- `organization`·`project`: 만든 뒤 `None`으로 되돌린다. 빈 문자열을 넘기면 빈 값 헤더가 그대로
-  나가므로 쓰지 않는다.
+- `OpenAI-Organization`·`OpenAI-Project`: `omit` 센티널로 **지운다.** `organization=None`만으로는
+  모자라다 — SDK는 두 헤더를 `Omit()`으로 두고 나서 `**self._custom_headers`를 **그 뒤에** 병합하고,
+  env에서 파싱된 같은 이름의 줄이 거기 들어 있으면 그것이 이긴다. 두 헤더는 요청이 **어느 조직·
+  프로젝트로 과금되고 접근되는지**를 정하므로 자격 증명과 같은 급이다. 명시 헤더는 env 쪽보다
+  뒤에 병합되므로(`{**parsed, **explicit}`) `omit`이 이긴다.
 
-**남겨 둔 것**: `OPENAI_CUSTOM_HEADERS`의 `Authorization`이 아닌 줄은 여전히 요청에 붙는다. 그걸
-막으려면 SDK의 private(`_custom_headers`)을 건드려야 해서, 자격 증명 치환이 닫힌 선에서 멈췄다.
-`OPENAI_ADMIN_KEY`·`OPENAI_WEBHOOK_SECRET`은 이 경로가 쓰지 않는 표면이다.
+`OPENAI_CUSTOM_HEADERS`의 형식은 SDK 소스로 확인했다 — 줄바꿈으로 나누고 첫 `:`에서 이름과 값을
+가르며, 이름은 대소문자를 구분하지 않고 `authorization`과 비교된다.
+
+**남겨 둔 것**: 위 세 이름이 아닌 임의 env 헤더(`X-Evil: 1` 같은)는 여전히 요청에 붙는다. 그걸
+막으려면 SDK의 private(`_custom_headers`)을 비워야 해서, 자격 증명과 과금 귀속이 닫힌 선에서
+멈췄다. `OPENAI_ADMIN_KEY`·`OPENAI_WEBHOOK_SECRET`은 이 경로가 쓰지 않는 표면이다. 환경 변수
+전수와 차단 여부는 spec D6의 표가 정본이다.
 
 값이 SDK 기본과 어긋나면 테스트가 깨진다(`test_the_default_base_url_matches_the_sdk`). 환경 변수
 쪽은 **실제로 나가는 요청 헤더**로 단언한다 — `auth_headers` 속성은 위 덮어쓰기를 보지 못한다.
@@ -71,12 +78,13 @@ SDK에는 이벤트를 누적해 주는 헬퍼 `responses.stream(...)`도 있다
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from types import TracebackType
-from typing import Protocol
+from typing import Protocol, cast
 
 import httpx2
 import openai
+from openai import omit
 from openai.types.responses import (
     Response,
     ResponseIncludable,
@@ -229,12 +237,25 @@ def sdk_client_factory(
             base_url=base_url if base_url is not None else DEFAULT_BASE_URL,
             timeout=timeout_seconds,
             max_retries=max_retries,
-            # 이 자리를 비우면 SDK가 `OPENAI_CUSTOM_HEADERS`를 파싱해 넣고, 그 매핑이 인증 헤더를
-            # 덮는다. 빈 dict로는 막히지 않는다(모듈 docstring "서버 환경이 …").
-            default_headers={"Authorization": f"Bearer {secret}"},
+            # 이 자리를 비우면 SDK가 `OPENAI_CUSTOM_HEADERS`를 파싱해 넣고, 그 매핑이 인증 헤더와
+            # 과금 귀속 헤더를 덮는다. 빈 dict로는 막히지 않는다(모듈 docstring "서버 환경이 …").
+            #
+            # reason: `default_headers`의 선언 타입은 `Mapping[str, str]`이지만 SDK 자신이 같은
+            # 병합 경로에 `Omit()`을 넣어 헤더를 지운다(`_client.py`의 `default_headers` 속성).
+            # 지우는 표현이 `omit` 하나뿐이라 여기서만 타입을 넓힌다.
+            default_headers=cast(
+                "Mapping[str, str]",
+                {
+                    "Authorization": f"Bearer {secret}",
+                    "OpenAI-Organization": omit,
+                    "OpenAI-Project": omit,
+                },
+            ),
             http_client=http_client,
         )
-        # 생성자는 `None`을 "환경 변수를 읽어라"로 읽는다. 만든 뒤에 되돌려야 두 헤더가 빠진다.
+        # 생성자는 `None`을 "환경 변수를 읽어라"로 읽는다. 만든 뒤에 되돌려야 두 값이 빠진다.
+        # 위 `omit`과 둘 다 필요하다 — 이쪽은 `OPENAI_ORG_ID`/`OPENAI_PROJECT_ID`를, 저쪽은
+        # `OPENAI_CUSTOM_HEADERS`의 같은 이름 줄을 막는다.
         client.organization = None
         client.project = None
         return SdkResponsesClient(client)

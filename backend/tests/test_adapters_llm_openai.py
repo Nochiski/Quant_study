@@ -1328,6 +1328,73 @@ def test_ambient_custom_headers_cannot_replace_the_profile_secret(
     assert "openai-project" not in headers
 
 
+def test_ambient_custom_headers_cannot_reroute_the_billing_org(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`OpenAI-Organization`·`OpenAI-Project`는 요청이 **어디로 과금·접근되는지**를 정한다.
+
+    `client.organization = None`만으로는 모자라다. SDK가 두 헤더를 `Omit()`으로 둔 **뒤에**
+    `_custom_headers`를 병합하고, env에서 파싱된 같은 이름의 줄이 거기 들어 있으면 그것이 이긴다.
+    `omit`을 명시 헤더로 넣어야 지워진다.
+    """
+    monkeypatch.setenv(
+        "OPENAI_CUSTOM_HEADERS",
+        "OpenAI-Organization: org-EVIL\nOpenAI-Project: proj-EVIL",
+    )
+    factory, seen = _probe_on_the_wire()
+
+    factory(SECRET, None).create(
+        input="ping",
+        max_output_tokens=PROBE_MAX_OUTPUT_TOKENS,
+        model="gpt-6-astra",
+        store=STORE_RESPONSES,
+    )
+
+    headers = seen[0].headers
+    assert "openai-organization" not in headers
+    assert "openai-project" not in headers
+    assert "org-EVIL" not in str(headers)
+    assert "proj-EVIL" not in str(headers)
+
+
+def test_the_only_credential_on_the_wire_is_the_profile_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """기준선: 모든 환경 변수를 한꺼번에 심어도 요청이 드는 자격 증명은 프로파일 비밀 하나다.
+
+    개별 변수 테스트는 "이 변수를 막았다"를 고정하고, 이 테스트는 "막지 못한 변수가 새로
+    생기면 드러난다"를 고정한다. SDK가 환경에서 읽는 값 전수는 spec D6의 표가 정본이다.
+    """
+    planted = {
+        "OPENAI_API_KEY": "sk-proj-AMBIENT-KEY",
+        "OPENAI_ADMIN_KEY": "sk-admin-AMBIENT",
+        "OPENAI_WEBHOOK_SECRET": "whsec-AMBIENT",
+        "OPENAI_ORG_ID": "org-AMBIENT",
+        "OPENAI_PROJECT_ID": "proj-AMBIENT",
+        "OPENAI_BASE_URL": "https://redirected.example.com/v1",
+        "OPENAI_CUSTOM_HEADERS": (
+            "Authorization: Bearer AMBIENT-TOKEN\n"
+            "OpenAI-Organization: org-AMBIENT\n"
+            "OpenAI-Project: proj-AMBIENT"
+        ),
+    }
+    for name, value in planted.items():
+        monkeypatch.setenv(name, value)
+    factory, seen = _probe_on_the_wire()
+
+    factory(SECRET, None).create(
+        input="ping",
+        max_output_tokens=PROBE_MAX_OUTPUT_TOKENS,
+        model="gpt-6-astra",
+        store=STORE_RESPONSES,
+    )
+
+    wire = str(seen[0].headers) + str(seen[0].url)
+    assert seen[0].headers["authorization"] == f"Bearer {SECRET}"
+    leaked = [name for name, value in planted.items() if value in wire]
+    assert leaked == [], f"환경 변수 값이 요청에 실렸다 — names={leaked}"
+
+
 def test_an_ambient_base_url_env_var_cannot_redirect_the_wire_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -310,6 +310,26 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   `default_headers`로 들어가고 그것이 인증 헤더보다 뒤에 합쳐져 `X-Api-Key`를 덮어쓴다. adapter가
   인증 헤더를 `default_headers`에 **명시**하고 쓰지 않는 bearer 헤더는 지운다. 검증은 "무엇을
   넘겼는가"가 아니라 **실제 요청 헤더**로 한다 — 둘 사이에 실제로 차이가 생긴다.
+- **차단 여부는 SDK 소스로 확인한 전수 표로 관리한다.** 아래는 `openai` 3.16.2가 읽는 일곱이다
+  (`openai/_client.py`). SDK를 올릴 때 이 표를 다시 맞춘다. `anthropic` 쪽도 같은 방식으로 본다.
+
+  | 환경 변수 | 무엇을 바꾸나 | 차단 | 방법 |
+  |---|---|---|---|
+  | `OPENAI_API_KEY` | 누구의 키로 호출하나 | ✓ | `api_key`에 프로파일 비밀 명시 |
+  | `OPENAI_BASE_URL` | 어느 호스트로 나가나 | ✓ | 프로파일이 없으면 기본 호스트 명시 |
+  | `OPENAI_CUSTOM_HEADERS` (`Authorization` 줄) | 인증 헤더를 덮음 | ✓ | `default_headers`에 `Authorization` 명시 |
+  | `OPENAI_CUSTOM_HEADERS` (`OpenAI-Organization`·`OpenAI-Project` 줄) | 어느 조직·프로젝트로 과금·접근되나 | ✓ | `default_headers`에 두 이름을 `omit`으로 |
+  | `OPENAI_ORG_ID` | 위와 같음 | ✓ | 생성 뒤 `organization = None` |
+  | `OPENAI_PROJECT_ID` | 위와 같음 | ✓ | 생성 뒤 `project = None` |
+  | `OPENAI_CUSTOM_HEADERS` (그 밖의 줄) | 임의 헤더가 따라 붙음 | ✗ | SDK private(`_custom_headers`)을 비워야 해서 남겼다 |
+  | `OPENAI_ADMIN_KEY` | admin 엔드포인트 인증 | 해당 없음 | 이 경로가 쓰지 않는 표면 |
+  | `OPENAI_WEBHOOK_SECRET` | webhook 서명 검증 | 해당 없음 | 위와 같음 |
+
+  `organization = None`과 `omit`은 **둘 다** 필요하다. SDK는 두 헤더를 `Omit()`으로 둔 뒤
+  `_custom_headers`를 그 뒤에 병합하므로, 속성만 비우면 `OPENAI_CUSTOM_HEADERS`의 같은 이름 줄이
+  이긴다. 기준선 테스트는 변수를 전부 심고 **요청에 실린 자격 증명 값이 프로파일 비밀 하나뿐**임을
+  본다 — 개별 테스트가 "이 변수를 막았다"를 고정한다면 기준선은 "막지 못한 변수가 새로 생기면
+  드러난다"를 고정한다.
 - OpenAPI와 frontend generated SDK를 **같은 PR(A-04)에서** 갱신한다(12절). 비밀 필드는 요청 전용
   (`writeOnly`), 응답 스키마에 없다.
 

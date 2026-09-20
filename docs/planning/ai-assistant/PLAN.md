@@ -6,7 +6,7 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
-last_updated: 2026-09-21T08:12:05+09:00
+last_updated: 2026-09-21T08:14:26+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 12
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `12 / 13` |
-| Aggregated at | `2026-09-21 08:12 KST` |
+| Aggregated at | `2026-09-21 08:14 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -116,7 +116,7 @@ Phase exit:
 | [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `APPROVED` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋) · `review_ai_b_02` 3차 APPROVE(StrictMode probe 포함, e2e 19/19) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `APPROVED` | 구현 완료(로컬 `ecd530a6`, B-02 최종 `cb852032` 위 9커밋, vitest 728, 훅 API 적응: exhausted 재연결·rejected 정착·droppedFrames 경고, vitest 714·e2e 19/19) · `review_ai_b_03` 1차 REQUEST_CHANGES(P1 1: 이력보다 202가 먼저 오면 turns 순서 축이 갈라져 질문↔답 짝 밀림 — 리듀서 정렬을 B-03에서 수정, P2 4, P3 6) 반영 → 2차 REQUEST_CHANGES(1차 10/11 해소; 새 P1: 취소·실패 턴에도 완료 announce, P2: 제안 카드 aria-live 미적용, P3 4) 반영(결말별 status·제안 카드 aria-live·P3 4·이름 없는 section) → 3차 확인 중 · 후속 backlog: `ChatMessageView.turn_id` · `review_ai_b_03` 3차 APPROVE(P2 1: status 라이브 영역 상시 렌더, P3 3) · 마무리 커밋 후 **최종 `1445d982`**(B-02 `cb852032` 위 10커밋, vitest 729, e2e 19; 사이드바 자체 `<h2>` 제거, WORKFLOW B-04 Acceptance에 슬롯 landmark·`onClose` 위임 계약 2줄) — B-04 replay 대상 |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `APPROVED` | 구현 완료(로컬 `c6aaf55e`, B-03 `df7b25f4` 위 8커밋: 슬롯·적용 훅·페이지 배선·적용 후 백테스트·오버레이·spec 정정·사이드바 실장착·App 통합 테스트·`readContext` live 읽기·알림을 문서 notice 슬롯으로, vitest 762·e2e 19/19(어시스턴트 라우트 200 확인)·기준선 4장 재생성) · `review_ai_b_04` 1차 REQUEST_CHANGES(P1 3: 적용 알림이 패널 절반 차지·미소거, 좁은 화면 서랍 2개 동시, 드래그 임계 초과 시 되돌릴 수 없음; P2 2: en 한글, onClose 미배선; P3 7) → 반영 중 · 핵심 적용 설계(전체 범위 교체·undo 1스텝·live 재확인·stale 중단)는 승인 수준 · 2차 6건 반영 + B-03 최종 `1445d982` 위 replay **`c9fd1f3d`**(10커밋, vitest 776, e2e 19; 우측 패널 단일 열림, 오버레이 판정 기본 폭 상수, `onClose` 위임, 슬롯 헤더 보이는 h2) · `review_ai_b_04` 3차 REQUEST_CHANGES(2차 6건 해소 확인; 새 P1 1·P2 2·P3 3) · 후속 **`47041511`**(펼침 포커스·함수 슬롯 기본, 동일 제안 `changed=false` 알림+체인 진행, Acceptance 정정, 포맷 기억 제거; vitest 780) · `review_ai_b_04` 4차 APPROVE(주석 1줄 정정은 B-03 새 tip 위 replay 때) |
-| [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `IN_REVIEW` | 구현자 `impl-ai-b05`, 워크트리 `wt-ai-b05`, 브랜치 `feat/ai-b-05-e2e-docs`(임시 base B-04 로컬 `8ee4808a`; 가짜 공급자 env 배선으로 e2e, A-07 시나리오는 읽기 참조) · 구현 완료(로컬 4커밋: e2e 잠금·포트 override(P1-05 `aa57028e` 동일 hunk + CORS), 대본 공급자 adapter `llm_scripted`(`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1`), e2e 시나리오 4 + B-01 이관 2, 매뉴얼 9절·README; e2e 23/23(포트 18000·15173), vitest 778, pytest 1411) · B-04 `c9fd1f3d` 위 rebase 완료(5커밋, e2e 24/24·vitest 794·pytest 1718; B-04 슬롯 계약 반영, 상주 status로 취소 문구 즉시 확인) · push **`0b982778`** · `review_ai_b_05` 1차 착수; 동일 제안 재적용 결함은 B-04 3차 P2와 동일 건 |
+| [ ] | `B-05` | e2e(backend 대본 공급자 `llm_scripted`, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `IN_REVIEW` | 구현자 `impl-ai-b05`, 워크트리 `wt-ai-b05`, 브랜치 `feat/ai-b-05-e2e-docs`(임시 base B-04 로컬 `8ee4808a`; 가짜 공급자 env 배선으로 e2e, A-07 시나리오는 읽기 참조) · 구현 완료(로컬 4커밋: e2e 잠금·포트 override(P1-05 `aa57028e` 동일 hunk + CORS), 대본 공급자 adapter `llm_scripted`(`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1`), e2e 시나리오 4 + B-01 이관 2, 매뉴얼 9절·README; e2e 23/23(포트 18000·15173), vitest 778, pytest 1411) · B-04 `c9fd1f3d` 위 rebase 완료(5커밋, e2e 24/24·vitest 794·pytest 1718; B-04 슬롯 계약 반영, 상주 status로 취소 문구 즉시 확인) · push **`0b982778`** · `review_ai_b_05` 1차 APPROVE 조건부(P1: 결함 id가 `database/` DEFECT-B05와 충돌 → `DEFECT-AI-B05-001`; P2 4: 재개 시나리오 여유 5초, 가짜 공급자 표식 없음, 재연결 중복 미검출, 적용 격리 미단언; P3 3) → 후속 + B-04 `47041511` 위 rebase 중; 동일 제안 재적용 결함은 B-04 3차 P2와 동일 건 |
 
 Phase exit:
 
@@ -161,6 +161,7 @@ Phase exit:
 | B-04 | `review_ai_b_04` | 2 | REQUEST_CHANGES | `c6aaf55e` 재판정. live 읽기 정합 확인(양변 편집기 텍스트, `beginTurn`이 `readContext()` 1회), notice 슬롯으로 레이아웃 절반 해소. 잔존 P1 2(좁은 화면 서랍 겹침, 폭 401px+ 드래그 끊김·`lastOpenedRight` 미저장), P2 4(적용 알림 영구 잔존, en `yaml-only` 한글, `onClose` 미배선, live 읽기 통합 테스트 vacuous), P3 2(포맷 전환 순간 `source_format` 출처 불일치, 알림 줄 충돌 배너 중복). vitest 762 |
 | B-04 | `review_ai_b_04` | 3 | REQUEST_CHANGES | `c9fd1f3d`. 2차 6건 되돌리기 실험으로 전부 확인, 기본 폭 상수 판정 수용, B-03 계약 3건 정합. 새 P1 1(함수 슬롯에서 인라인 펼침 시 토글 버튼 언마운트로 포커스 `body` 소실 — 위젯 테스트 `mount()`가 ReactNode 슬롯이라 가려짐), P2 2(제안이 현재 문서와 동일하면 `sourceVersion` 불변 → `applied` 소유자 영원히 불일치 + `chainPhase`가 idle을 취소로 읽어 적용 후 백테스트 취소, 2차 대비 회귀; WORKFLOW Acceptance가 접기·`onClose` 문장에서 코드와 모순), P3 3. vitest 776 |
 | B-04 | `review_ai_b_04` | 4 | APPROVE | `47041511`. 3차 6건 반영 확인(되돌리기 실험: 패널 포커스 폴백·동일 텍스트 알림/체인 테스트가 정확히 깨짐), Acceptance 문장이 코드와 일치, P3-1 포맷 기억 제거 이탈 타당. 새 결함 없음. 비차단: `readContext` 호출 시점 주석 1줄 부정확(네트워크 콜백 경로). vitest 780 |
+| B-05 | `review_ai_b_05` | 1 | APPROVE(조건부) | `0b982778`. 코드·테스트 blocking 없음. P1 1(DEFECT-B05-001이 코드 주석에만 인용되고 id가 `database/` 동명 결함과 충돌 → 리드 PLAN 기록 확인 + `DEFECT-AI-B05-001`로 개명), P2 4(재개 시나리오 여유 ~5초, 가짜 공급자 켜진 프로세스 표식 없음, 재연결 중복 반영을 `toContainText`가 못 잡음, 적용 격리 브라우저 단언 없음), P3 3. P1-05 `aa57028e`와 blob 동일 확인, `playwright test` 직접 호출 차단 확인. pytest 1718, vitest 798 |
 
 ## 검증 기록
 
@@ -172,7 +173,7 @@ Phase exit:
 
 - 2026-09-21 — 보안 결함(A-06 발견, A-05·A-06 수정): 프로파일에 base_url이 없으면 SDK가 `OPENAI_BASE_URL`/`ANTHROPIC_BASE_URL` 환경 변수를 읽어 spec D6 검사를 지나지 않은 호스트로 키가 나감 → 기본 base_url·api_key를 항상 명시해 SDK 환경 변수 폴백 차단(spec D6 한 줄). `Usage` 캐시 필드는 SDK 값 그대로 매핑.
 - 2026-09-21 — A-06(#178) PR 생성·리뷰 배정. `Usage` 캐시 의미 결정(번복 후 확정): domain은 **분리형**(`input_tokens` = 캐시 읽기·쓰기 제외, 세 칸 겹치지 않음) 유지, 총입력은 파생 `total_input_tokens`(A-05), OpenAI adapter가 원시 내역을 빼서 정규화(A-06), A-07 집계는 성분 합산 + wire `total_input_tokens`. 근거: 성분별 단가·저장 이력 의미 보존(A-05 리뷰어).
-- 2026-09-21 — B-05 e2e가 찾은 DEFECT-B05-001(진행 중 턴 취소 후 취소 사유가 새로고침 전까지 안 보임): 프론트 `assistantStreamTarget`이 턴 status로 파생돼 취소 dispatch 직후 SSE를 닫아 서버의 `Failure(CANCELLED)`·남은 조각을 못 받음 → **B-02**가 target을 정착(`is_settled`) 기준으로 파생하도록 수정; 첫 이벤트 전 취소 시 backend가 `Failure(CANCELLED)`를 저장하지 않는 경로 → **A-07** 마무리 커밋에서 수정. B-05 e2e 2번 시나리오는 두 수정 뒤 "reload 없이 취소 문구"로 조임.
+- 2026-09-21 — B-05 e2e가 찾은 DEFECT-AI-B05-001(진행 중 턴 취소 후 취소 사유가 새로고침 전까지 안 보임): 프론트 `assistantStreamTarget`이 턴 status로 파생돼 취소 dispatch 직후 SSE를 닫아 서버의 `Failure(CANCELLED)`·남은 조각을 못 받음 → **B-02**가 target을 정착(`is_settled`) 기준으로 파생하도록 수정; 첫 이벤트 전 취소 시 backend가 `Failure(CANCELLED)`를 저장하지 않는 경로 → **A-07** 마무리 커밋에서 수정. B-05 e2e 2번 시나리오는 두 수정 뒤 "reload 없이 취소 문구"로 조임.
 - 2026-09-21 — B-03 구현 완료. A 후속 backlog: `ChatMessageView.turn_id` 추가(질문↔턴 짝짓기가 순서 가정에 의존).
 - 2026-09-21 — A-07: 실행 설정 문장은 schema 1.1 기준(lang2 P2-03 머지 뒤 프롬프트·골든 갱신 후속), env `STRATEGY_WORKBENCH_LIVE_SMOKE`로 통일, 기본값 5종 유지(근거 표), 타임아웃 300s 여유 얇음(live smoke 후 bootstrap 주입으로 조정).
 - 2026-09-21 — A-02 후속(CI flake 수정)이 스택 위에 없어 A-04·A-05 CI 실패 → A-03부터 cascade rebase(A-03 `d52436b7`, 이어 A-04·A-05·A-06·A-07·B-01).

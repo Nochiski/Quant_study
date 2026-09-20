@@ -34,6 +34,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     PortfolioSide,
     RebalanceFrequency,
     SelectionMethod,
+    SignalNormalization,
     WeightingMethod,
 )
 from strategy_workbench.domain.strategy.facade.validation import validate_strategy
@@ -161,11 +162,14 @@ def test_eligibility_and_point_in_time_rules_explain_every_rejection() -> None:
 
 
 def test_composite_rank_threshold_regime_and_long_short_selection() -> None:
+    # `score_threshold` 는 원시값 합성 점수를 기준으로 쓰던 1.1 규칙이라 `none` 으로 고정한다.
+    # 기본값 `rank` 에서의 문턱 의미는 아래 정규화 전용 테스트가 따로 덮는다(P2-04).
     spec = _spec()
     spec = replace(
         spec,
         signal=replace(
             spec.signal,
+            normalization=SignalNormalization.NONE,
             score_threshold=0.5,
             regime_field_id="market.regime",
             regime_minimum=0.0,
@@ -368,12 +372,15 @@ def test_target_tape_hash_is_immutable_and_snapshot_sensitive() -> None:
 
 
 def test_construction_trace_is_out_of_band_and_contributions_sum_to_the_same_score() -> None:
+    # 기여도 합 = 합성 점수라는 불변식은 정규화와 무관하지만, 기대 비중 5/7 은 원시값 산술이라
+    # `none` 으로 고정한다(1.1 수치 회귀, P2-04).
     spec = _spec()
     original = spec.factors[0]
     second = replace(original, factor_id="second", weight=3.0)
     first = replace(original, weight=1.0)
     spec = replace(
         spec,
+        signal=replace(spec.signal, normalization=SignalNormalization.NONE),
         factors=(first, second),
         portfolio=replace(
             spec.portfolio, selection_count=2, weighting=WeightingMethod.FACTOR_SCORE
@@ -531,9 +538,15 @@ def test_target_tape_hash_preserves_the_pre_cancellation_byte_contract() -> None
 
 
 def test_portfolio_arithmetic_overflow_never_materializes_a_target_tape() -> None:
+    # 정규화는 값을 유한한 구간으로 눌러서 오버플로를 못 만든다. 오버플로 가드가 살아 있는지는
+    # 원시값을 그대로 곱하는 `none` 에서만 확인할 수 있다(P2-04).
     spec = _spec()
     factor = replace(spec.factors[0], weight=1e308)
-    spec = replace(spec, factors=(factor,))
+    spec = replace(
+        spec,
+        signal=replace(spec.signal, normalization=SignalNormalization.NONE),
+        factors=(factor,),
+    )
     day = date(2026, 1, 2)
 
     with pytest.raises(NonFinitePortfolioCalculationError, match="composite_score"):
@@ -685,3 +698,236 @@ def test_only_the_first_frame_reads_the_adapter_seed() -> None:
     assert {target.security_id for target in frames[0].targets} == {"a", "b"}
     # Frame 1 reads the folded book ("a", "b"), never "c"'s stale seed.
     assert {target.security_id for target in frames[1].targets} == {"a", "b"}
+
+
+# --- signal.normalization (P2-04, spec D3 S4·D4) ---------------------------------------------
+#
+# 합성식은 `composite = Σ(sign(direction) × weight × norm(x)) / Σ|weight|` 이고, `norm` 만
+# `signal.normalization` 이 고른다. 아래 fixture 는 팩터 하나·weight 1.0·`direction: high` 라
+# 분모가 1.0 이므로 합성 점수가 곧 `norm(x)` 다 — 정규화 값을 직접 읽을 수 있다.
+
+_NORMALIZATION_DAY = date(2026, 1, 2)
+
+
+def _normalization_spec(method: SignalNormalization, *, selection_count: int = 1):
+    spec = _spec()
+    return replace(
+        spec,
+        signal=replace(spec.signal, normalization=method),
+        portfolio=replace(spec.portfolio, selection_count=selection_count),
+    )
+
+
+def _scores(method: SignalNormalization, observations) -> dict[str, float | None]:
+    frame = _compile(_normalization_spec(method), observations).frames[0]
+    return {item.security_id: item.composite_score for item in frame.candidates}
+
+
+def _ladder() -> tuple[PortfolioObservation, ...]:
+    return tuple(
+        _observation(_NORMALIZATION_DAY, security_id, value)
+        for security_id, value in (("a", 1.0), ("b", 2.0), ("c", 3.0), ("d", 4.0))
+    )
+
+
+def test_normalization_none_keeps_the_raw_weighted_sum() -> None:
+    """1.1 수치 회귀: `none` 은 원시값을 그대로 가중 합한다."""
+    assert _scores(SignalNormalization.NONE, _ladder()) == {
+        "a": pytest.approx(1.0),
+        "b": pytest.approx(2.0),
+        "c": pytest.approx(3.0),
+        "d": pytest.approx(4.0),
+    }
+
+
+def test_normalization_rank_is_the_cross_sectional_percentile() -> None:
+    """`rank` 는 같은 날 횡단면 백분위다 — 최저 0.0, 최고 1.0, 사이는 등간격."""
+    assert _scores(SignalNormalization.RANK, _ladder()) == {
+        "a": pytest.approx(0.0),
+        "b": pytest.approx(1 / 3),
+        "c": pytest.approx(2 / 3),
+        "d": pytest.approx(1.0),
+    }
+
+
+def test_normalization_rank_gives_tied_values_the_average_rank() -> None:
+    """동점은 평균 순위를 나눠 가져서 입력 순서가 결과를 바꾸지 못한다(결정성)."""
+    observations = tuple(
+        _observation(_NORMALIZATION_DAY, security_id, value)
+        for security_id, value in (("a", 1.0), ("b", 2.0), ("c", 2.0), ("d", 4.0))
+    )
+
+    scores = _scores(SignalNormalization.RANK, observations)
+
+    # 순위 1, 2.5, 2.5, 4 → (r - 1) / 3.
+    assert scores == {
+        "a": pytest.approx(0.0),
+        "b": pytest.approx(0.5),
+        "c": pytest.approx(0.5),
+        "d": pytest.approx(1.0),
+    }
+    assert _scores(SignalNormalization.RANK, tuple(reversed(observations))) == scores
+
+
+def test_normalization_zscore_standardizes_the_cross_section() -> None:
+    """`zscore` 는 모집단 표준편차 기준 표준화다."""
+    # 평균 2.5, 모집단 표준편차 sqrt(1.25).
+    deviation = math.sqrt(1.25)
+
+    assert _scores(SignalNormalization.ZSCORE, _ladder()) == {
+        "a": pytest.approx(-1.5 / deviation),
+        "b": pytest.approx(-0.5 / deviation),
+        "c": pytest.approx(0.5 / deviation),
+        "d": pytest.approx(1.5 / deviation),
+    }
+
+
+def test_normalization_zscore_without_dispersion_is_neutral() -> None:
+    """값이 전부 같으면 편차 정보가 없으므로 0 으로 나누지 않고 전부 0.0 이다."""
+    observations = tuple(
+        _observation(_NORMALIZATION_DAY, security_id, 7.0) for security_id in ("a", "b", "c")
+    )
+
+    assert _scores(SignalNormalization.ZSCORE, observations) == {
+        "a": pytest.approx(0.0),
+        "b": pytest.approx(0.0),
+        "c": pytest.approx(0.0),
+    }
+
+
+def test_normalization_population_excludes_future_dated_values() -> None:
+    """공개일이 기준일보다 늦은 값은 모집단에 못 들어간다 — 들어가면 look-ahead 다."""
+    visible = tuple(
+        _observation(_NORMALIZATION_DAY, security_id, value)
+        for security_id, value in (("a", 1.0), ("b", 2.0), ("c", 3.0))
+    )
+    with_future = visible + (
+        _observation(
+            _NORMALIZATION_DAY,
+            "future",
+            100.0,
+            available_date=_NORMALIZATION_DAY + timedelta(days=1),
+        ),
+    )
+
+    scores = _scores(SignalNormalization.RANK, with_future)
+
+    # 모집단이 3개 그대로라 순위가 0, 0.5, 1 이다. 아직 알 수 없는 값이 끼면 0, 1/3, 2/3 이 된다.
+    assert {key: scores[key] for key in ("a", "b", "c")} == {
+        "a": pytest.approx(0.0),
+        "b": pytest.approx(0.5),
+        "c": pytest.approx(1.0),
+    }
+    assert scores["future"] is None
+
+
+def test_normalization_population_excludes_non_universe_members() -> None:
+    """유니버스 밖 행은 유니버스 안 종목의 순위를 움직이지 못한다(domain.factor 와 같은 규칙)."""
+    members = tuple(
+        _observation(_NORMALIZATION_DAY, security_id, value)
+        for security_id, value in (("a", 1.0), ("b", 2.0), ("c", 3.0))
+    )
+    with_outsider = members + (
+        _observation(_NORMALIZATION_DAY, "outsider", 100.0, universe_member=False),
+    )
+
+    scores = _scores(SignalNormalization.RANK, with_outsider)
+
+    assert {key: scores[key] for key in ("a", "b", "c")} == {
+        "a": pytest.approx(0.0),
+        "b": pytest.approx(0.5),
+        "c": pytest.approx(1.0),
+    }
+    # 유니버스 밖 행끼리는 따로 한 집단이라 혼자면 0.0 이고, 선정에는 못 들어간다.
+    assert scores["outsider"] == pytest.approx(0.0)
+
+
+def test_missing_factor_values_drop_out_before_normalization() -> None:
+    """결측은 정규화 **전**에 빠진다 — `missing` 정책은 팩터 평가에서 이미 끝났다."""
+    observations = tuple(
+        _observation(_NORMALIZATION_DAY, security_id, value)
+        for security_id, value in (("a", 1.0), ("b", 2.0), ("c", 3.0), ("gap", None))
+    )
+
+    frame = _compile(_normalization_spec(SignalNormalization.RANK), observations).frames[0]
+    decisions = {item.security_id: item for item in frame.candidates}
+
+    assert ExclusionReason.MISSING_FACTOR in decisions["gap"].exclusion_reasons
+    assert decisions["gap"].composite_score is None
+    # 모집단이 3개라 분모가 2 다. 결측이 모집단에 남으면 0, 1/3, 2/3 이 된다.
+    assert {key: decisions[key].composite_score for key in ("a", "b", "c")} == {
+        "a": pytest.approx(0.0),
+        "b": pytest.approx(0.5),
+        "c": pytest.approx(1.0),
+    }
+
+
+def test_normalization_cross_section_is_per_rebalance_frame() -> None:
+    """같은 종목도 그날 동료가 달라지면 순위가 달라진다 — 날짜를 가로지르지 않는다."""
+    days = (_NORMALIZATION_DAY, _NORMALIZATION_DAY + timedelta(days=1))
+    sessions = days + (_NORMALIZATION_DAY + timedelta(days=2),)
+    observations = (
+        _observation(days[0], "a", 5.0),
+        _observation(days[0], "peer_low_1", 1.0),
+        _observation(days[0], "peer_low_2", 2.0),
+        _observation(days[1], "a", 5.0),
+        _observation(days[1], "peer_high_1", 9.0),
+        _observation(days[1], "peer_high_2", 10.0),
+    )
+
+    frames = _compile(
+        _normalization_spec(SignalNormalization.RANK), observations, sessions=sessions
+    ).frames
+
+    scores = [
+        {item.security_id: item.composite_score for item in frame.candidates}["a"]
+        for frame in frames
+    ]
+    assert scores == [pytest.approx(1.0), pytest.approx(0.0)]
+
+
+def test_rank_normalization_stops_a_large_unit_factor_from_dominating_selection() -> None:
+    """아이디어 2: 단위가 다른 두 팩터를 결합할 때 `rank` 가 한쪽 지배를 막는다.
+
+    `alpha` 는 0~1 구간, `scale` 은 만 단위다. 같은 weight 로 원시값을 더하면 `scale` 하나가
+    선정을 결정하고, `rank` 는 둘을 같은 0~1 구간으로 맞춰 `alpha` 가 결과를 되돌린다.
+    """
+    values = {"a": (1.0, 10_000.0), "b": (0.0, 40_000.0)}
+    observations = tuple(
+        replace(
+            _observation(_NORMALIZATION_DAY, security_id, alpha),
+            factor_values=(
+                PortfolioFactorValue("alpha", alpha, _NORMALIZATION_DAY),
+                PortfolioFactorValue("scale", scale, _NORMALIZATION_DAY),
+            ),
+        )
+        for security_id, (alpha, scale) in values.items()
+    )
+    template_factor = _spec().factors[0]
+    factors = (
+        replace(template_factor, factor_id="alpha", weight=1.0),
+        replace(template_factor, factor_id="scale", weight=1.0),
+    )
+
+    def _selected(method: SignalNormalization) -> str:
+        spec = replace(_normalization_spec(method), factors=factors)
+        (target,) = _compile(spec, observations).frames[0].targets
+        return target.security_id
+
+    assert _selected(SignalNormalization.NONE) == "b"
+    # `rank` 에서는 alpha 1.0 + scale 0.0 = 0.5 와 alpha 0.0 + scale 1.0 = 0.5 로 동점이 되고,
+    # 동점은 `security_id` 오름차순이라 "a" 가 앞선다 — `scale` 단독 지배가 사라졌다.
+    assert _selected(SignalNormalization.RANK) == "a"
+
+
+def test_normalization_reaches_the_tape_hash_through_the_strategy_hash() -> None:
+    """정규화가 다르면 tape 지문도 달라야 캐시된 실행 결과가 섞이지 않는다(P2-04)."""
+    observations = _ladder()
+
+    tapes = {
+        method: _compile(_normalization_spec(method), observations)
+        for method in SignalNormalization
+    }
+
+    assert len({tape.strategy_hash for tape in tapes.values()}) == len(SignalNormalization)
+    assert len({tape.tape_hash for tape in tapes.values()}) == len(SignalNormalization)

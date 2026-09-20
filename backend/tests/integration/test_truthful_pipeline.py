@@ -97,6 +97,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
     FactorSignal,
     RebalanceFrequency,
+    SignalNormalization,
     StrategySpec,
     WeightingMethod,
 )
@@ -638,7 +639,9 @@ def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: 
 
 
 def test_composite_score_is_the_direction_signed_weighted_sum_of_graph_outputs() -> None:
+    """`normalization: none` 은 1.1 과 수치가 같다 — 원시값 가중 합 그대로다(P2-04)."""
     spec = _spec()
+    spec = replace(spec, signal=replace(spec.signal, normalization=SignalNormalization.NONE))
     result = _service().run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
     weights = {f.factor_id: (f.weight, f.direction) for f in spec.factors}
 

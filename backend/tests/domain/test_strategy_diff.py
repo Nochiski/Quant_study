@@ -23,6 +23,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     EligibilityRule,
     EligibilityStep,
     FloatParameter,
+    SignalNormalization,
     StrategyIdentity,
     StrategySpec,
 )
@@ -155,3 +156,13 @@ def test_pointer_tokens_are_rfc6901_escaped() -> None:
     entries: list[DiffEntry] = []
     _diff._walk({"a/b": 1, "c~d": 2}, {"a/b": 2, "c~d": 2}, "", entries)  # pyright: ignore[reportPrivateUsage]  # reason: unit
     assert [e.pointer for e in entries] == ["/a~1b"]
+
+
+def test_normalization_change_is_one_leaf_entry() -> None:
+    """결합 전 정규화를 바꾸면 semantic diff 가 `/signal/normalization` 한 줄로 보고한다(P2-04)."""
+    base = _template()
+    target = replace(base, signal=replace(base.signal, normalization=SignalNormalization.NONE))
+
+    assert diff_strategy_specs(base, target) == (
+        DiffEntry("/signal/normalization", DiffKind.CHANGED, "rank", "none"),
+    )

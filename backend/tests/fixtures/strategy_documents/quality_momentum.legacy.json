@@ -36,6 +36,7 @@
     }
   ],
   "signal": {
+    "normalization": "rank",
     "score_threshold": null,
     "regime_field_id": null,
     "regime_minimum": null

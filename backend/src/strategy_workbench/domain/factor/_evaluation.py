@@ -441,11 +441,11 @@ def _cross_sectional(
                 result[index] = value - center
         elif node.operator is CrossSectionalOperator.RANK:
             ranks = cross_sectional_rank([value for _, value in numeric])
-            for (index, _), rank in _checkpointed(zip(numeric, ranks), checkpoint):
+            for (index, _), rank in _checkpointed(zip(numeric, ranks, strict=True), checkpoint):
                 result[index] = rank
         elif node.operator is CrossSectionalOperator.ZSCORE:
             scores = cross_sectional_zscore([value for _, value in numeric])
-            for (index, _), score in _checkpointed(zip(numeric, scores), checkpoint):
+            for (index, _), score in _checkpointed(zip(numeric, scores, strict=True), checkpoint):
                 result[index] = score
         else:
             ordered = sorted(value for _, value in numeric)
@@ -485,7 +485,7 @@ def _group_transform(
                 result[index] = value - center
         else:
             ranks = cross_sectional_rank([value for _, value in numeric])
-            for (index, _), rank in _checkpointed(zip(numeric, ranks), checkpoint):
+            for (index, _), rank in _checkpointed(zip(numeric, ranks, strict=True), checkpoint):
                 result[index] = rank
     return result
 

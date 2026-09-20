@@ -11,6 +11,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     FactorSignal,
     FloatParameter,
     ParameterNode,
+    SignalNormalization,
     StrategyIdentity,
     strategy_spec_hash,
 )
@@ -84,10 +85,29 @@ def test_explanation_preserves_pipeline_order() -> None:
     # 요약 문구는 모델이 소유한 사실만 말한다.
     # 1.2에서 문서를 떠난 data·execution 단계는 설명하지 않는다 — 실행 설정의 owner 는
     # `RunEnvironment` 하나다(P2-03).
-    assert summaries["signal"] == "팩터 1개를 방향·가중치 가중합으로 결합"
+    # 새 문서의 기본 정규화는 `rank` 라서 요약도 결합 전 정규화를 말한다(P2-04).
+    assert summaries["signal"] == "팩터 1개를 횡단면 순위로 맞춘 뒤 방향·가중치 가중합으로 결합"
     assert tuple(step.stage for step in explanation.steps) == (
         "signal",
         "portfolio",
         "risk",
     )
     assert isinstance(spec.factors[0], FactorSignal)
+
+
+def test_every_normalization_value_has_a_signal_summary() -> None:
+    """정규화 값을 늘리고 문장을 빠뜨리면 `/strategies/explain` 이 `KeyError` 로 500 을 낸다."""
+    base = _template()
+
+    summaries = {
+        method: next(
+            step.summary
+            for step in StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused")
+            .explain(replace(base, signal=replace(base.signal, normalization=method)))
+            .steps
+            if step.stage == "signal"
+        )
+        for method in SignalNormalization
+    }
+
+    assert len(set(summaries.values())) == len(SignalNormalization)

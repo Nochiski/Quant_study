@@ -130,8 +130,14 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
     by_security = {item["security_id"]: item for item in expected_candidates}
     construction = {item["security_id"]: item for item in payload["target"]["construction"]}
     assert set(construction) == set(request["security_ids"])
-    for row in payload["trace"]["rows"]:
-        assert row["value"] == by_security[row["security_id"]]["composite_score"]
+    # 새 문서 기본 정규화가 `rank` 라서 합성 점수는 팩터 원시값이 아니라 그 값의 횡단면 순위다
+    # (P2-04). 두 값이 같지는 않지만 단일 `direction: high` 팩터에서는 순서가 보존되므로,
+    # trace 값으로 정렬한 순서가 합성 점수로 정렬한 순서와 같아야 한다.
+    ordered_scores = [
+        by_security[row["security_id"]]["composite_score"]
+        for row in sorted(payload["trace"]["rows"], key=lambda item: item["value"])
+    ]
+    assert ordered_scores == sorted(ordered_scores)
     for security_id, row in construction.items():
         candidate = by_security[security_id]
         assert row["composite_score"] == candidate["composite_score"]

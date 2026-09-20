@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ._models import StrategySpec
+from ._models import SignalNormalization, StrategySpec
+
+# 결합 전 정규화를 문장으로 옮기는 결합자. 진단 메시지와 같은 규칙으로 backend 가 한글 문장을
+# 완성해 내보낸다(SoT: authoring 진단 코드 행). 로케일별 문구는 frontend i18n 이 따로 갖는다.
+_NORMALIZATION_SUMMARY: dict[SignalNormalization, str] = {
+    SignalNormalization.NONE: "원시값 그대로 방향·가중치 가중합으로",
+    SignalNormalization.RANK: "횡단면 순위로 맞춘 뒤 방향·가중치 가중합으로",
+    SignalNormalization.ZSCORE: "횡단면 표준화 뒤 방향·가중치 가중합으로",
+}
 
 
 @dataclass(frozen=True)
@@ -29,7 +37,8 @@ def explain_strategy(spec: StrategySpec) -> StrategyExplanation:
         steps=(
             StrategyExplanationStep(
                 "signal",
-                f"팩터 {len(factor_names)}개를 방향·가중치 가중합으로 결합",
+                f"팩터 {len(factor_names)}개를 "
+                f"{_NORMALIZATION_SUMMARY[spec.signal.normalization]} 결합",
                 factor_names,
             ),
             StrategyExplanationStep(

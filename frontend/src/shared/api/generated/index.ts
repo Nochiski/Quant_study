@@ -357,6 +357,7 @@ export type {
   SaveStrategyDraftResponses,
   SecurityRef,
   SelectionMethod,
+  SignalNormalization,
   SignalStep,
   SourceDiagnostic,
   SourceFormat,

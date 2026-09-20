@@ -3196,9 +3196,21 @@ export type SecurityRef = {
 export type SelectionMethod = "top_n" | "percentile";
 
 /**
+ * SignalNormalization
+ *
+ * 팩터 신호를 가중 합으로 합치기 전에 적용하는 횡단면 정규화 (schema 1.2, spec D4).
+ *
+ * `NONE` 은 1.1 의 의미(원시값 가중 합)이고, 1.1 문서를 업그레이드할 때 명시된다. 새 문서의
+ * 기본값은 `RANK` 다 — 단위가 다른 팩터(PBR 과 ROE 등)를 원시값으로 더하면 큰 단위 하나가
+ * 합성 점수를 지배하기 때문이다.
+ */
+export type SignalNormalization = "none" | "rank" | "zscore";
+
+/**
  * SignalStep
  */
 export type SignalStep = {
+  normalization?: SignalNormalization;
   /**
    * Regime Field Id
    */

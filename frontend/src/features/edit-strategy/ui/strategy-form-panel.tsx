@@ -564,6 +564,12 @@ const FormListItemView = ({
           {t("form.list.remove")}
         </Button>
       </header>
+      {/*
+        Graph 노드 삭제 거부는 노드 표시 이름으로 말하지만(P1-04) 여기는 pointer 그대로다.
+        목록 항목을 붙잡는 참조는 문서 전역이라(`/portfolio/signal_factor_id` 같은 자리) 이름보다
+        위치가 더 정확하고, pointer를 표시 이름으로 옮기는 규칙은 아직 owner가 없는 새 사실이다.
+        의도적 제외이며 PLAN P1-04 Non-goals에 적었다.
+      */}
       {blocked !== null ? (
         <p className="strategy-form__invalid" role="alert">
           {t("form.list.blocked").replace(
@@ -607,20 +613,20 @@ const severityBadge = (owner: {
 };
 
 /**
- * 진단 본문을 그 자리(섹션 제목 아래·목록 항목 안·필드 아래)에 그대로 보인다. 문제 목록과 같은
- * 문장이고 backend가 완성해 보낸 것을 다시 조립하지 않는다(SoT "authoring 진단 코드" 행).
+ * 진단 본문을 그 자리(섹션 제목 아래·목록 항목 안·필드 아래·노드 카드 안)에 그대로 보인다. 문제
+ * 목록과 같은 문장이고 backend가 완성해 보낸 것을 다시 조립하지 않는다(SoT "authoring 진단 코드" 행).
  *
- * `alert`는 필드 오류에만 준다(`live`): 사용자가 고칠 자리가 필드이고, 섹션·항목 수준까지 assertive로
- * 알리면 같은 원인을 두세 번 읽는다. 경고는 조언이라 live region이 아니다.
+ * live region이 아니다(P1-04 리뷰 P3). 예전에는 필드 오류마다 `role="alert"`를 달았는데, 오류가
+ * 여럿인 문서를 열면 assertive 알림이 동시에 삽입돼 스크린리더가 서로를 끊어 먹고 마지막 하나만
+ * 읽었다 — 원인 문장을 읽히게 하려던 목적과 반대다. 본문은 컨트롤의 `aria-describedby`가 가리키므로
+ * 포커스가 닿을 때 읽히고, 개수 알림은 문제 목록 요약 한 줄이 맡는다.
  */
-const DiagnosticNotes = ({
+export const DiagnosticNotes = ({
   id,
   diagnostics,
-  live = false,
 }: {
   id: string;
   diagnostics: DocumentDiagnostic[];
-  live?: boolean;
 }): ReactNode => {
   if (diagnostics.length === 0) return null;
   return (
@@ -633,7 +639,6 @@ const DiagnosticNotes = ({
               ? "strategy-form__invalid"
               : "strategy-form__warning"
           }
-          role={live && diagnostic.severity === "error" ? "alert" : undefined}
         >
           {diagnostic.message}
         </p>
@@ -716,6 +721,12 @@ export const FormFieldsEditor = ({
   selectedPointer?: string;
 }) => (
   <>
+    {/* 어느 필드도 흡수하지 않은 진단(그래프 노드 진단은 노드 **객체** pointer로 온다)을 이 자리에
+        본문으로 보인다 — 없으면 Graph 탭 선택한 노드 패널에서 원인 문장이 사라진다(리뷰 차단 2). */}
+    <DiagnosticNotes
+      id={`${section.pointer}-notes`}
+      diagnostics={section.diagnostics}
+    />
     {section.fields.map((field) => (
       <FormFieldRow
         key={field.pointer}
@@ -896,7 +907,7 @@ const FormFieldRow = ({
           {invalid}
         </p>
       ) : null}
-      <DiagnosticNotes id={notesId} diagnostics={field.diagnostics} live />
+      <DiagnosticNotes id={notesId} diagnostics={field.diagnostics} />
       {field.applicable === false ? (
         <p className="strategy-form__hint">{t("form.field.inapplicable")}</p>
       ) : null}

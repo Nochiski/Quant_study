@@ -11,6 +11,10 @@
    property를 새로 만들면 여기서 깨진다.
 2. **소비자 일치**: 선언한 값 그대로 runtime schema가 `minimum`으로 발행하고, 검증기는 그 값은
    받고 하나 작은 값은 거부한다.
+3. **씨앗 수용**: 카탈로그의 모든 연산자에 대해, runtime schema가 발행한 파라미터 씨앗
+   (non-null `default` → 그 값, 아니면 정수 `minimum`)으로 만든 그래프를 검증기가 받아들인다.
+   화면은 이 씨앗으로 노드를 만들므로(`materializeSchemaValue`), 여기가 통과해야 "팔레트에서
+   고르자마자 검증 오류"가 나지 않는다(리뷰 차단 1: `unary.lag`의 `periods`가 null이었다).
 """
 
 from __future__ import annotations
@@ -33,10 +37,21 @@ from strategy_workbench.domain.factor.facade.expression import (
     UnaryOperator,
     field_minimum,
 )
+from strategy_workbench.domain.factor.facade.operators import (
+    OperatorDefinition,
+    operator_definitions,
+)
 from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
 from strategy_workbench.domain.strategy.facade.schema import strategy_document_schema
 
 _PRICE = FieldMetadata(field_id="price.close", unit="KRW", value_type=NodeValueType.NUMERIC_SERIES)
+_SECTOR = FieldMetadata(field_id="sector", unit="1", value_type=NodeValueType.GROUP_SERIES)
+_FIELDS = (_PRICE, _SECTOR)
+
+# 카탈로그 id는 사용자가 고르는 자리라 스키마가 씨앗을 발행하지 않는다(화면도 빈 문자열로 둔다).
+# 검증 가능한 그래프를 만들려면 테스트가 실제 카탈로그 값을 하나 준다. 새 카탈로그 파라미터가
+# 생기면 아래 `test_every_catalog_parameter_has_a_sample`이 먼저 깨진다.
+_CATALOG_SAMPLES: dict[str, object] = {"group_field_id": _SECTOR.field_id}
 
 
 def _is_integer_property(annotation: Any) -> bool:
@@ -139,3 +154,100 @@ def test_bound_messages_quote_the_declared_constant() -> None:
 def test_constant_node_value_is_not_treated_as_an_integer_property() -> None:
     """`float` property는 관계 제약(분위수 `lower < upper`)이라 이 하한 계약의 대상이 아니다."""
     assert ConstantNode not in {node_type for _, node_type, _ in _INTEGER_PROPERTIES}
+
+
+def _property_schema(node_type: type, name: str) -> dict[str, Any]:
+    return strategy_document_schema()["$defs"][node_type.__name__]["properties"][name]
+
+
+def _declared_type(property_schema: dict[str, Any]) -> str | None:
+    """nullable(`anyOf`) 포장을 벗긴 선언 타입. 화면의 `materializeSchemaValue`와 같은 규칙이다."""
+    declared = property_schema.get("type")
+    if isinstance(declared, str):
+        return declared
+    for member in property_schema.get("anyOf", []):
+        if isinstance(member, dict) and member.get("type") != "null":
+            inner = member.get("type")
+            return inner if isinstance(inner, str) else None
+    return None
+
+
+def _published_seed(property_schema: dict[str, Any]) -> object | None:
+    """runtime schema가 이 property에 발행한 초기값. 없으면 None.
+
+    화면(`materializeSchemaValue`)이 쓰는 규칙을 그대로 적는다: non-null `default`가 있으면 그 값,
+    `default`가 null이거나 없고 정수 하한이 있으면 그 하한. 여기서 값을 새로 정하지 않는다 —
+    발행된 씨앗을 검증기가 받아들이는지만 본다.
+    """
+    default = property_schema.get("default", _UNSET)
+    if default is not _UNSET and default is not None:
+        return default
+    bound = property_schema.get("minimum")
+    if isinstance(bound, int) and not isinstance(bound, bool):
+        return bound if _declared_type(property_schema) == "integer" else None
+    return None
+
+
+_UNSET = object()
+
+
+def _seeded_parameters(definition: OperatorDefinition) -> dict[str, object]:
+    node_type = EXPRESSION_NODE_KINDS[definition.kind]
+    values: dict[str, object] = {}
+    for parameter in definition.params:
+        name = parameter.property_name
+        seed = _published_seed(_property_schema(node_type, name))
+        values[name] = _CATALOG_SAMPLES[name] if seed is None else seed
+    return values
+
+
+def test_every_catalog_parameter_has_a_seed_or_a_sample() -> None:
+    """씨앗도 카탈로그 샘플도 없는 파라미터가 생기면 아래 순회 테스트가 조용히 비지 않게 한다."""
+    missing = [
+        f"{definition.kind}.{definition.operator}.{parameter.property_name}"
+        for definition in operator_definitions()
+        for parameter in definition.params
+        if _published_seed(
+            _property_schema(EXPRESSION_NODE_KINDS[definition.kind], parameter.property_name)
+        )
+        is None
+        and parameter.property_name not in _CATALOG_SAMPLES
+    ]
+
+    assert missing == []
+
+
+@pytest.mark.parametrize(
+    "definition",
+    operator_definitions(),
+    ids=lambda item: f"{item.kind}.{item.operator}",
+)
+def test_published_seed_makes_a_valid_graph(definition: OperatorDefinition) -> None:
+    """화면이 만드는 모양(입력은 이어 주고 파라미터는 발행된 씨앗) 그대로 검증을 통과한다."""
+    node_type = EXPRESSION_NODE_KINDS[definition.kind]
+    inputs = [
+        item.name
+        for item in dataclass_fields(node_type)
+        if item.metadata.get("reference") == "node"
+    ]
+    operator_enum = get_type_hints(node_type)["operator"]
+    values: dict[str, object] = {
+        "node_id": "subject",
+        "kind": definition.kind,
+        "operator": operator_enum(definition.operator),
+        **_seeded_parameters(definition),
+    }
+    for index, name in enumerate(inputs):
+        values[name] = f"source_{index}"
+    sources = tuple(
+        FieldNode(node_id=f"source_{index}", field_id=_PRICE.field_id, kind="field")
+        for index in range(len(inputs))
+    )
+    graph = FactorGraph(
+        nodes=(*sources, node_type(**values)),  # pyright: ignore[reportCallIssue]  # reason: kind별 생성자가 달라 정적으로 좁힐 수 없다
+        output_node_id="subject",
+    )
+
+    validation = validate_factor_graph(graph, fields=_FIELDS)
+
+    assert validation.valid, [issue.message for issue in validation.issues]

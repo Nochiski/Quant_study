@@ -44,7 +44,11 @@ export type PaletteEntry = {
   /** 입력 노드 개수. kind 항목은 스키마가 정하므로 null. */
   arity: number | null;
   params: readonly string[];
-  /** 정의 시점 가용성이 `unsupported`인가. 어댑터 capability 판정은 P2-04이다. */
+  /**
+   * 정의 시점 가용성이 `available`이 아닌가. 어댑터 capability 판정은 P2-04이다. 조건이 "available이
+   * 아니다"인 것은 WORKFLOW P1-04 acceptance 그대로다 — backend가 상태를 늘릴 때 새 값이 기본
+   * "정상"으로 흘러가면 화면 어휘의 owner가 backend라는 규칙과 반대가 된다(리뷰 P3).
+   */
   unsupported: boolean;
 };
 
@@ -67,7 +71,7 @@ const entryOf = (
   formula: tOptional(definition.formula_key),
   arity: definition.arity,
   params: definition.params.map((parameter) => parameter.property_name),
-  unsupported: definition.availability === "unsupported",
+  unsupported: definition.availability !== "available",
 });
 
 /**

@@ -3159,11 +3159,15 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     server.use(
       graphCompileWith([
         {
-          code: "strategy.node.window",
+          // backend는 그래프 노드 진단을 노드 **객체** pointer로 낸다(`_validation.py`의
+          // `nodes.{index}` → `<factor>.graph.nodes.N`). 필드 pointer로 mocking하면 화면이
+          // 실제로 못 하는 일을 통과시킨다(리뷰 차단 2).
+          code: "factor.graph.time_series_window",
           kind: "semantic",
           severity: "error",
-          pointer: "/factors/0/graph/nodes/1/window",
-          message: "window는 1 이상이어야 합니다",
+          pointer: "/factors/0/graph/nodes/1",
+          node_id: "mom_252",
+          message: "window는 1 이상이고 lag는 0 이상이어야 합니다: window=0 lag=0",
         },
       ]),
       ...graphHandlers(),
@@ -3185,11 +3189,15 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     server.use(
       graphCompileWith([
         {
-          code: "strategy.node.window",
+          // backend는 그래프 노드 진단을 노드 **객체** pointer로 낸다(`_validation.py`의
+          // `nodes.{index}` → `<factor>.graph.nodes.N`). 필드 pointer로 mocking하면 화면이
+          // 실제로 못 하는 일을 통과시킨다(리뷰 차단 2).
+          code: "factor.graph.time_series_window",
           kind: "semantic",
           severity: "error",
-          pointer: "/factors/0/graph/nodes/1/window",
-          message: "window는 1 이상이어야 합니다",
+          pointer: "/factors/0/graph/nodes/1",
+          node_id: "mom_252",
+          message: "window는 1 이상이고 lag는 0 이상이어야 합니다: window=0 lag=0",
         },
       ]),
       ...graphHandlers(),
@@ -3200,12 +3208,12 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
 
     // compile이 error를 내면 실행 plan이 막혀 DAG는 없고 문서 tree로 그리는 편집 표면만 남는다.
     await screen.findByRole("region", { name: "그래프 편집" });
-    await user.click(await problemRow(/window는 1 이상이어야 합니다/));
+    await user.click(await problemRow(/window는 1 이상이고 lag는 0 이상이어야 합니다/));
 
     await waitFor(() => {
       expect(history.location.search).toContain("view=graph");
       expect(history.location.search).toContain(
-        "path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F1%2Fwindow",
+        "path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F1",
       );
     });
     // URL은 wire일 뿐이다 — 그래프 노드가 실제로 선택 표시를 받고 화면으로 끌려오는지도 본다.
@@ -3214,14 +3222,16 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
         screen.getByRole("button", { name: "노드 편집: mom_252" }).closest("li"),
       ).toHaveAttribute("aria-current", "true"),
     );
-    // 진단이 노드 안의 필드를 가리키면 그 필드 행이 가장 구체적인 선택이라 스크롤도 거기로 간다 —
-    // 인라인 오류 본문이 붙는 자리다(WORKFLOW P1-04).
-    const windowRow = screen
-      .getByRole("region", { name: "그래프 편집" })
-      .querySelector('.strategy-form__field[aria-current="true"]');
-    expect(windowRow).not.toBeNull();
-    expect(windowRow).toHaveTextContent("window는 1 이상이어야 합니다");
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(windowRow);
+    // 노드 pointer 진단이므로 가장 구체적인 선택은 노드 행이고 스크롤도 거기로 간다.
+    const editorRow = screen
+      .getByRole("button", { name: "노드 편집: mom_252" })
+      .closest("li");
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    // 원인 문장이 그 노드 카드 안과 선택한 노드 패널 안에 본문으로 붙는다(리뷰 차단 2).
+    expect(editorRow).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
+    expect(
+      screen.getByRole("group", { name: /선택한 노드/ }),
+    ).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
     expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -3234,10 +3244,11 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     server.use(
       graphCompileWith([
         {
-          code: "strategy.node.window",
+          code: "factor.graph.time_series_window",
           kind: "semantic",
           severity: "warning",
-          pointer: "/factors/0/graph/nodes/1/window",
+          pointer: "/factors/0/graph/nodes/1",
+          node_id: "mom_252",
           message: "window가 깁니다",
         },
       ]),
@@ -3261,12 +3272,9 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
       expect(editorRow).toHaveAttribute("aria-current", "true"),
     );
     expect(planNode).toHaveAttribute("aria-current", "true");
-    // 노드 행보다 더 구체적인 선택(그 노드의 `window` 필드 행)이 마지막 매치다(P1-04).
-    const windowRow = screen
-      .getByRole("region", { name: "그래프 편집" })
-      .querySelector('.strategy-form__field[aria-current="true"]');
-    expect(windowRow).not.toBeNull();
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(windowRow);
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    // 경고도 같은 자리에 본문으로 붙는다(alert이 아니라 본문이다 — 리뷰 P3).
+    expect(editorRow).toHaveTextContent("window가 깁니다");
   }, 15_000);
 
   it("falls back to the source tab and the line when the Graph tab cannot draw the pointer", async () => {

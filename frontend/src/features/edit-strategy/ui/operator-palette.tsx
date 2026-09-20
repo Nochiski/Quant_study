@@ -123,14 +123,19 @@ const PaletteItem = ({
         onClick={() => onPick(entry)}
       >
         <strong>{entry.name}</strong>
-        {entry.formula === null ? null : <code>{entry.formula}</code>}
         {entry.unsupported ? (
           <Badge tone="warn">{t("graph.palette.unsupportedBadge")}</Badge>
         ) : null}
       </button>
-      {/* 설명·입력 개수·미지원 사유는 본문이다 — `title`로 감추면 키보드·터치에서 읽히지 않는다(P1-04). */}
+      {/*
+        설명·계산식·입력 개수·미지원 사유는 본문이다 — `title`로 감추면 키보드·터치에서 읽히지
+        않는다(P1-04). 계산식이 버튼 안이 아니라 여기 있는 이유: 버튼은 `aria-label`로 이름을
+        정하므로 그 안의 `<code>`는 접근성 이름에서 지워졌고, 시각 사용자에게만 보이는 정보가
+        됐다(리뷰 P3). 본문은 `aria-describedby`가 가리켜 둘 다에게 읽힌다.
+      */}
       <p id={bodyId} className="factor-graph__palette-body">
         {entry.description === null ? null : <span>{entry.description}</span>}
+        {entry.formula === null ? null : <code>{entry.formula}</code>}
         {signature === null ? null : (
           <span className="factor-graph__palette-signature">{signature}</span>
         )}

@@ -377,10 +377,15 @@ describe("연산자 팔레트와 조용하지 않은 실패 (P1-04)", () => {
       editor().getByRole("group", { name: "연산자 팔레트" }),
     );
     // 항목은 이름·한 줄 설명·계산식을 함께 보인다(본문, `title` 아님). 계산식 문구는 i18n이
-    // 소유하므로 여기 적지 않고 사전에서 읽는다.
+    // 소유하므로 여기 적지 않고 사전에서 읽는다. 계산식은 버튼 안이 아니라 본문에 있어야
+    // 스크린리더에도 읽힌다 — 버튼 이름은 `aria-label`이 정하므로 그 안의 `<code>`는 지워진다
+    // (리뷰 P3).
     const meanFormula = tOptional("strategy.operator.time_series.mean.formula");
     expect(meanFormula).not.toBeNull();
     expect(palette.getByText(meanFormula!)).toBeInTheDocument();
+    expect(
+      palette.getByRole("button", { name: "기간 평균 노드 추가" }),
+    ).toHaveAccessibleDescription(expect.stringContaining(meanFormula!));
     await user.click(palette.getByRole("button", { name: "기간 평균 노드 추가" }));
 
     expect(transactions.apply).toHaveBeenLastCalledWith(
@@ -472,5 +477,47 @@ describe("연산자 팔레트와 조용하지 않은 실패 (P1-04)", () => {
     expect(editor().getByRole("alert")).toHaveTextContent(
       "상수: 이 노드의 스키마로는 기본값을 만들지 못해 추가하지 않았습니다",
     );
+  });
+});
+
+describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () => {
+  /** backend가 실제로 내는 모양: 노드 **객체** pointer + `factor.graph.*` 코드. */
+  const NODE_DIAGNOSTIC = {
+    code: "factor.graph.time_series_window",
+    kind: "semantic" as const,
+    severity: "error" as const,
+    pointer: "/factors/0/graph/nodes/1",
+    message: "window는 1 이상이고 lag는 0 이상이어야 합니다: window=0 lag=0",
+    range: null,
+    nodeId: "mom_252",
+  };
+
+  it("노드 카드와 선택한 노드 패널에 본문으로 보인다", () => {
+    render(
+      <FactorGraphPanel
+        state={{ status: "blocked", reason: "invalid" }}
+        diagnostics={[NODE_DIAGNOSTIC]}
+        selectedPointer="/factors/0/graph/nodes/1"
+        onSelectPointer={vi.fn()}
+        onOpenSource={vi.fn()}
+        editing={{
+          tree: treeOf(VERBOSE),
+          schema: SCHEMA,
+          transactions: stub(),
+          catalogs: { equityFields: null, factors: null },
+          operators: CATALOG,
+        }}
+      />,
+    );
+
+    const row = editor()
+      .getByRole("button", { name: "노드 편집: mom_252" })
+      .closest("li");
+    expect(row).toHaveTextContent(NODE_DIAGNOSTIC.message);
+    expect(
+      editor().getByRole("group", { name: /선택한 노드/ }),
+    ).toHaveTextContent(NODE_DIAGNOSTIC.message);
+    // 본문이지 assertive 알림이 아니다(리뷰 P3).
+    expect(editor().queryAllByRole("alert")).toEqual([]);
   });
 });

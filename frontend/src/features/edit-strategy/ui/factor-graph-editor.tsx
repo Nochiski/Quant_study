@@ -26,6 +26,7 @@ import { factorGraphPointer } from "../model/use-execution-plans";
 import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import {
+  DiagnosticNotes,
   FormFieldsEditor,
   type CommitPlanner,
   type FormCatalogs,
@@ -140,9 +141,10 @@ export const FactorGraphEditor = ({
   const nodes = graphSection?.lists.find((list) => list.key === "nodes");
   // 표시 이름은 `node_id`(없으면 첫 문자열 값)라 겹칠 수 있다 → 겹치면 문서 순번을 붙여 접근성 이름을 유일하게
   // 한다(리뷰 DEFECT-132-01(b)). 연산은 언제나 pointer로 한다.
-  const labelOf = (index: number): string => {
+  const labelOf = (index: number): string | null => {
     const items = nodes?.items ?? [];
-    const summary = items[index]?.summary ?? "";
+    const summary = items[index]?.summary;
+    if (summary === undefined) return null;
     const duplicated = items.filter((item) => item.summary === summary).length > 1;
     return duplicated ? `${summary} (${index + 1})` : summary;
   };
@@ -150,9 +152,10 @@ export const FactorGraphEditor = ({
   // `output_node_id`처럼 노드 밖 참조는 그 자리를 이름으로 부른다.
   const referenceLabel = (pointer: string): string => {
     const index = NODE_INDEX.exec(pointer)?.[1];
-    return index === undefined
-      ? t("graph.outputReference")
-      : labelOf(Number(index));
+    if (index === undefined) return t("graph.outputReference");
+    // 그린 목록 밖 인덱스면 이름이 없다. 안내 문장이 빈칸이 되지 않게 pointer 원문으로 떨어진다
+    // (리뷰 P3: 조용한 실패를 없애는 PR에서 안내가 비는 것은 같은 계열의 퇴행이다).
+    return labelOf(Number(index)) ?? pointer;
   };
   const nodePointer = selectedNodePointer(selectedPointer, factorPointer);
   const selectedItem =
@@ -309,7 +312,7 @@ export const FactorGraphEditor = ({
             {nodes.items.map((item, index) => {
               const kindField = item.fields.find((field) => field.key === "kind");
               const active = item.pointer === nodePointer;
-              const label = labelOf(index);
+              const label = labelOf(index) ?? item.pointer;
               return (
                 <li key={item.pointer} aria-current={active ? "true" : undefined}>
                   <button
@@ -339,6 +342,12 @@ export const FactorGraphEditor = ({
                   >
                     {t("graph.removeNode")}
                   </Button>
+                  {/* 노드 진단은 노드 객체 pointer로 오므로 그 카드 안에 본문을 붙인다 — Form 목록
+                      항목과 같은 모양이다(리뷰 차단 2). */}
+                  <DiagnosticNotes
+                    id={`${item.pointer}-notes`}
+                    diagnostics={item.diagnostics}
+                  />
                 </li>
               );
             })}

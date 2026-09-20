@@ -6,10 +6,10 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04]
-last_updated: 2026-09-21T03:03:22+09:00
+last_updated: 2026-09-21T03:15:03+09:00
 planned_prs: 13
 merged_prs: 0
-approved_prs: 5
+approved_prs: 6
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04` |
 | Progress | `0 / 13 merged (0%)` |
-| Approved | `5 / 13` |
-| Aggregated at | `2026-09-21 03:03 KST` |
+| Approved | `6 / 13` |
+| Aggregated at | `2026-09-21 03:15 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -113,7 +113,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영 완료(로컬 `7fcc584e`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건, R2-1 `probingIds` Set·R2-2 제목 위계) · 2차 APPROVE_WITH_COMMENTS · R2-3·R2-4는 B-05 · cascade 뒤 A-07 위 rebase·push·PR |
-| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `IN_REVIEW` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋, 2차 후속 반영) · `review_ai_b_02` 1차 REQUEST_CHANGES 반영(턴별 watermark, `{status 5값, retry()}`, `onSseError` 계수, `AssistantStreamClose` 확장, 규칙 문서) → 2차 APPROVE_WITH_NITS(R2-1 `streamKey` 단조 실행 번호 P2 + P3 6 후속) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
+| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `APPROVED` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋) · `review_ai_b_02` 3차 APPROVE(StrictMode probe 포함, e2e 19/19) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `IN_REVIEW` | 구현 완료(로컬 `64c5d6f2`, B-02 최종 `cb852032` 위 5커밋, vitest 717·e2e 19/19, 훅 API 적응: exhausted 재연결·rejected 정착·droppedFrames 경고, vitest 714·e2e 19/19) · `review_ai_b_03` 로컬 ref 검토 중 · 후속 backlog: `ChatMessageView.turn_id` |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `SELF_CHECK` | 구현 완료(로컬 `0438c3d2`, B-02 `de38aff7` 위 3커밋, vitest 707·e2e 19/19) · 결정: 계약 패널과 별개의 독립 우측 패널(spec D7 탭 공존 문장 정정), 기준 텍스트 모르면 확인(fail-safe) · rebase 커밋에서 사이드바 실장착·통합 테스트·적용 후 백테스트·좁은 폭 오버레이 |
 | [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `WAITING` | — |
@@ -148,6 +148,7 @@ Phase exit:
 | A-05 | `review_ai_a_05` | 2 | APPROVE WITH CHANGES | 1차 12건 전부 해소(P0 red 확인, extras 없는 환경 재현, env 폴백은 `ANTHROPIC_AUTH_TOKEN`까지 차단). 블로킹 1(A-04 하위 모듈 fix 되돌림)은 base `439f9411` 불일치 산물 → replay 보존. P2 2(예산 소진 호출의 history 서버 도구 블록 미테스트 → live smoke 최우선, 캐시 접두 파기 비용 미기재), P3 4 |
 | B-02 | `review_ai_b_02` | 2 | APPROVE_WITH_NITS | 1차 P1 2·P2 2 해소(재현 probe 재실행). 이탈 2건(5값 status, 내부 attempt+retry) 타당. 새 P2 1(`streamKey` 입력 파생 → 세션 이탈·복귀 시 옛 close 사유가 status로), P3 6 → 후속 |
 | A-06 | `review_ai_a_06` | 1 | REQUEST_CHANGES | P1 2(`OPENAI_CUSTOM_HEADERS`→`default_headers`가 Authorization 우선 — A-05도 `ANTHROPIC_CUSTOM_HEADERS` 동일; 턴 예산 잔량<16 호출 400→PROVIDER), P2 3(`store` 기본 true, 통지 경로 spec 문장, 도구 제거 호출에 이전 `web_search_call` 동승 미테스트), P3 7. A-05 결함 부류 15 중 9 부재 확인 |
+| B-02 | `review_ai_b_02` | 3 | APPROVE | 2차 잔여 7건 전부 닫힘(단조 `run`·렌더 중 조정, StrictMode 이중 호출 probe 통과, 값 형태 setState 멱등). 메모: `queryClient` 인스턴스 교체는 실제 경로 없음 |
 
 ## 검증 기록
 

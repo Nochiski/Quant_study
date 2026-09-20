@@ -46,6 +46,7 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
     secret: useId(),
     baseUrl: useId(),
     error: useId(),
+    unusedBaseUrl: useId(),
   };
   const [pickedKind, setPickedKind] = useState<ProviderKind | null>(null);
   const [label, setLabel] = useState("");
@@ -60,6 +61,8 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
   const defaultModel =
     kinds.find((item) => item.kind === kind)?.default_model ?? "";
   const sentBaseUrl = advanced && baseUrl.trim() !== "" ? baseUrl.trim() : null;
+  // 적어 두었지만 접혀 있어 전송되지 않는 상태. 배지와 그 배지를 설명으로 다는 토글이 같은 조건을 본다.
+  const baseUrlUnused = !advanced && baseUrl.trim() !== "";
 
   const invalid = (field: ProviderField) =>
     rejection?.field === field ? true : undefined;
@@ -230,16 +233,20 @@ export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
       </div>
       <div className="ai-provider-form__row">
         <div className="ai-provider-form__advanced">
+          {/* 배지는 이 토글이 지금 무엇을 뜻하는지 말한다. 컨트롤에 매달지 않으면 스크린리더
+              사용자는 "고급 설정" 버튼만 듣고, 적어 둔 base_url이 전송되지 않는다는 사실을
+              놓친다(B-01 리뷰 이관 항목). */}
           <Button
             size="small"
             tone="ghost"
             aria-expanded={advanced}
+            aria-describedby={baseUrlUnused ? ids.unusedBaseUrl : undefined}
             onClick={() => setAdvanced(!advanced)}
           >
             {t("assistant.provider.form.advanced")}
           </Button>
-          {!advanced && baseUrl.trim() !== "" ? (
-            <Badge tone="neutral">
+          {baseUrlUnused ? (
+            <Badge tone="neutral" id={ids.unusedBaseUrl}>
               {t("assistant.provider.form.baseUrl.unused")}
             </Badge>
           ) : null}

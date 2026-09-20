@@ -175,6 +175,7 @@ const ProviderCard = ({
  */
 export const AiProviderSettings = () => {
   const titleId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const providers = useQuery(assistantProvidersQuery());
   const activate = useActivateAssistantProvider();
   const remove = useDeleteAssistantProvider();
@@ -205,17 +206,28 @@ export const AiProviderSettings = () => {
     });
   };
 
+  /**
+   * 삭제가 성공하면 그 카드가 통째로 사라진다. 방금 누른 "삭제 확인" 버튼도 같이 사라지므로
+   * 포커스가 `document.body`로 떨어지고, 키보드·스크린리더 사용자는 목록의 어디에 있었는지 잃는다
+   * (B-01 리뷰 이관 항목: 확인 단계 진입·취소만 포커스를 옮기고 성공 경로는 비어 있었다).
+   * 언제 사라질지 아는 곳이 여기뿐이라 성공 콜백에서 섹션 제목으로 돌려 놓는다 — 목록 바로 위의
+   * 고정된 자리이고, 읽히는 문장이 "지금 어디인가"를 그대로 답한다.
+   */
   const runDelete = (profileId: string) => {
     setActionError(null);
     remove.mutate(profileId, {
-      onSuccess: () => setConfirming(null),
+      onSuccess: () => {
+        flushSync(() => setConfirming(null));
+        heading.current?.focus();
+      },
       onError: (error) => setActionError(providerRejection(error).message),
     });
   };
 
   return (
     <section className="ai-providers" aria-labelledby={titleId}>
-      <h2 className="ai-providers__title" id={titleId}>
+      {/* `tabIndex={-1}`은 탭 순서에 넣지 않고 프로그램 포커스만 허용한다(삭제 성공 후 복귀 지점). */}
+      <h2 className="ai-providers__title" id={titleId} ref={heading} tabIndex={-1}>
         {t("settings.assistant.title")}
       </h2>
       <p className="ai-providers__description">

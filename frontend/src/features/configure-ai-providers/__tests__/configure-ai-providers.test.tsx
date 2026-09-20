@@ -313,6 +313,28 @@ describe("AI 공급자 설정 섹션", () => {
     expect(createBodies[0]).toMatchObject({ base_url: null });
   });
 
+  // 배지를 컨트롤에 매달지 않으면 스크린리더 사용자는 "고급 설정" 버튼만 듣고, 적어 둔 base_url이
+  // 전송되지 않는다는 사실을 놓친다(B-01 리뷰 이관 항목).
+  it("미적용 배지를 고급 설정 토글의 설명으로 단다", async () => {
+    const user = userEvent.setup();
+    renderSettings(<AiProviderSettings />);
+    await fillNewProvider(user);
+    const toggle = screen.getByRole("button", { name: "고급 설정" });
+    expect(toggle).not.toHaveAttribute("aria-describedby");
+
+    await user.click(toggle);
+    await user.type(screen.getByLabelText("base_url"), "https://proxy.example");
+    await user.click(toggle);
+
+    const badge = screen.getByText("base_url 미적용");
+    expect(toggle).toHaveAttribute("aria-describedby", badge.id);
+    expect(badge.id).not.toBe("");
+
+    // 다시 펼치면 값이 전송되므로 설명도 사라진다.
+    await user.click(toggle);
+    expect(toggle).not.toHaveAttribute("aria-describedby");
+  });
+
   // 접힌 채 제출하면 base_url을 보내지 않으므로 이 거부는 보통 "제출 뒤 접었는데 그 사이 거부가
   // 도착한" 경우다. 서버가 어떤 이유로 base_url을 지목하든 고칠 칸이 화면에 있어야 한다.
   it("base_url 거부가 오면 칸이 접혀 있어도 다시 펼친다", async () => {
@@ -419,6 +441,24 @@ describe("AI 공급자 설정 섹션", () => {
         screen.queryByRole("heading", { name: "작업용 Claude" }),
       ).toBeNull(),
     );
+  });
+
+  // 확인 단계 진입·취소는 포커스를 옮기는데 성공 경로만 비어 있었다(B-01 리뷰 이관 항목).
+  // 누른 버튼이 카드째 사라지므로 포커스는 body로 떨어지고, 키보드 사용자는 파괴적 동작 직후에
+  // 목록의 어디에 있었는지 잃는다.
+  it("삭제가 끝나면 포커스를 섹션 제목으로 되돌린다", async () => {
+    const user = userEvent.setup();
+    renderSettings(<AiProviderSettings />);
+
+    const card = await cardOf("작업용 Claude");
+    await user.click(card.getByRole("button", { name: "삭제" }));
+    await user.click(card.getByRole("button", { name: "삭제 확인" }));
+
+    await waitFor(() => expect(deleted).toEqual(["p-1"]));
+    expect(
+      screen.getByRole("heading", { name: "AI 어시스턴트 공급자" }),
+    ).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
   });
 
   it("삭제 확인은 취소할 수 있다", async () => {

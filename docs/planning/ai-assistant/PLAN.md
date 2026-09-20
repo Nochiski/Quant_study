@@ -96,7 +96,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 |---|---|---|---|---|---|
 | [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `APPROVED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
-| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `7649967`(c6d70de + P3 후속) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
+| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_REVIEW` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `645efcb`(A-03 `7649967` 위) · `review_ai_a_04` 1차 APPROVE WITH CHANGES(P1 1·P2 3·P3 7) → 반영 중 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_REVIEW` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `5640f8d2`(A-04 `645efcb` 위) · `review_ai_a_05` 진행 중 · 게이트: pytest 1782·ruff·pyright 0 |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`5eec392`, A-02 위, 52 테스트, pytest 1700·ruff·pyright 0) · 기본 모델 `gpt-6-astra`(SDK `ChatModel` 첫 항목, A-07 live smoke 확인) · A-05 push 뒤 rebase·팩토리 등록 → PR |
@@ -149,6 +149,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-21 — A-02 후속(CI flake 수정)이 스택 위에 없어 A-04·A-05 CI 실패 → A-03부터 cascade rebase(A-03 `d52436b7`, 이어 A-04·A-05·A-06·A-07·B-01).
 - 2026-09-21 — A-04(#174) PR 생성·리뷰 배정, A-05 rebase·팩토리 등록 지시, B-01 착수(A-04 위, frontend만).
 - 2026-09-21 — A-01(3차)·A-02(2차)·A-03(2차) APPROVE. A-04 구현 완료·rebase 중, A-05 착수.
 - 2026-09-20 — A-03(#171) PR 생성·리뷰 배정, A-04 착수(A-02 rewrite 뒤 A-03·A-04 rebase 예정).

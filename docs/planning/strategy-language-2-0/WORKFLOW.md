@@ -560,6 +560,12 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   문자열에만 있다. 패널이 필드 옆에 오류를 붙이려면 파싱해야 하므로, inbound 계층에서
   `RunEnvironment`를 먼저 구성해 코드화된 detail로 바꿀지 결정한다.
 - 기간이 전략 문서에서 오던 `dateRange` 의존 제거. OOS 창 검증은 실행 설정의 기간으로.
+- **P2-03이 잠근 `test.fixme` 3건을 해제한다**: `workbench.workflow.spec.ts`의
+  `creates, recovers, validates, versions, traces and backtests`와
+  `upgrades a frozen 1.0 revision …`, `workbench.real-equity.spec.ts`의
+  `edits the graph on real data …`. 패널이 생기기 전에는 프론트가 `environment`를 싣지 못해
+  브라우저에서 시작한 run이 422 `backtest.run.environment_required`로 거절된다. 최종 시나리오
+  재작성은 P3-03이 맡는다.
 - 업그레이드 배너가 1.1 문서에도 뜨고, 응답의 `environment`로 실행 설정을 채운다(사용자 확인 후).
   `warnings`를 배너에 표시.
 - 백테스트 버튼 차단 사유에서 `factor-plan` 분기가 compile error로 흡수되는지 확인(남으면 결함으로

@@ -8,8 +8,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { SourceDiagnostic } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { toDocumentDiagnostics } from "../model/use-compile-document";
+import { useDiagnosticNavigation } from "../model/use-diagnostic-navigation";
 import { useStrategyDocument } from "../model/use-strategy-document";
 import { useCompileDocument } from "../model/use-compile-document";
+import { DiagnosticsPanel } from "../ui/diagnostics-panel";
 import { SourceEditor } from "../ui/source-editor";
 
 const API = "http://localhost:8000";
@@ -88,6 +90,7 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
+/** 페이지와 같은 조합: 문제 목록은 편집기 밖에 있고 항해는 훅이 소유한다(WORKFLOW P1-01). */
 const Harness = ({ initial }: { initial: string }) => {
   const [state, dispatch] = useStrategyDocument({
     kind: "new",
@@ -95,13 +98,31 @@ const Harness = ({ initial }: { initial: string }) => {
     source: initial,
   });
   useCompileDocument(state, dispatch);
+  const problems = useDiagnosticNavigation({
+    state,
+    view: "yaml",
+    sourceView: "yaml",
+    form: null,
+    tree: null,
+    onSelectPointer: () => undefined,
+    onOpenSource: () => undefined,
+  });
   return (
     <>
       <output data-testid="phase">{state.phase}</output>
       <output data-testid="version">
         {state.sourceVersion}/{state.compiledVersion}
       </output>
-      <SourceEditor state={state} dispatch={dispatch} />
+      <SourceEditor
+        state={state}
+        dispatch={dispatch}
+        onEditorReady={problems.onEditorReady}
+      />
+      <DiagnosticsPanel
+        diagnostics={problems.diagnostics}
+        stale={problems.stale}
+        onSelect={problems.selectDiagnostic}
+      />
     </>
   );
 };

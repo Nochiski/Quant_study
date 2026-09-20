@@ -43,6 +43,17 @@ export {
   useCompileDocument,
 } from "./model/use-compile-document";
 export { DiagnosticsPanel } from "./ui/diagnostics-panel";
+export { DocumentStatus } from "./ui/document-status";
+export {
+  formCoversPointer,
+  graphCoversPointer,
+  resolveDiagnosticDestination,
+  type DiagnosticDestination,
+} from "./model/diagnostic-navigation";
+export {
+  useDiagnosticNavigation,
+  type DiagnosticNavigation,
+} from "./model/use-diagnostic-navigation";
 export {
   decideBacktestSource,
   gateBacktestSourceWithFactorPlans,

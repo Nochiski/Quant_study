@@ -184,6 +184,36 @@
   gap: var(--space-2);
 }
 
+/* 문서 상태 배지는 탭 줄에 산다 — 탭 패널 밖이라 다섯 탭 모두에서 보인다(P1-01). */
+.ide__editor-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.ide__editor-tabs .ui-tabs {
+  flex: 1;
+}
+
+.ide__editor-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-inline-end: var(--space-4);
+}
+
+/* 문제 목록도 탭 패널 밖, 편집 패널 아래다. 진단이 없으면 패널이 null을 내므로 자리도 비운다. */
+.ide__problems {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.ide__problems:empty {
+  display: none;
+}
+
 .ide__editor .ui-tabs {
   padding: 0 var(--space-4);
 }

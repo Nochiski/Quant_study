@@ -1661,111 +1661,125 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
   });
 });
 
-describe("FactorGraph read-only projection (P4-07)", () => {
-  const graphHandlers = () => [
-    http.post(`${API}/api/v1/strategy-documents/compile`, () => {
-      const compiledSpec = graphSpec("draft", 0);
-      const { identity, ...canonicalSpec } = compiledSpec;
-      return HttpResponse.json({
-        format: "yaml",
-        source_hash: "b".repeat(64),
-        schema_version: "1.1",
-        spec: compiledSpec,
-        canonical_json: JSON.stringify({
-          ...canonicalSpec,
-          schema_version: identity.schema_version,
-        }),
-        spec_hash: "7".repeat(64),
-        diagnostics: [],
-      });
-    }),
-    http.get(`${API}/api/v1/strategy-documents/schema`, () =>
-      HttpResponse.json({
-        schema: RUNTIME_SCHEMA,
-        schema_hash: "h".repeat(64),
-        schema_version: "1.1",
+/** 같은 그래프 문서를 compile하되 진단만 바꿔 답한다. */
+const graphCompileWith = (diagnostics: readonly unknown[]) =>
+  http.post(`${API}/api/v1/strategy-documents/compile`, () => {
+    const compiledSpec = graphSpec("draft", 0);
+    const { identity, ...canonicalSpec } = compiledSpec;
+    return HttpResponse.json({
+      format: "yaml",
+      source_hash: "b".repeat(64),
+      schema_version: "1.1",
+      spec: compiledSpec,
+      canonical_json: JSON.stringify({
+        ...canonicalSpec,
+        schema_version: identity.schema_version,
       }),
-    ),
-    http.get(`${API}/api/v1/equity/catalog`, () =>
-      HttpResponse.json({
-        snapshot: {
-          snapshot_id: "snap",
-          schema_version: "1.1",
-          built_at: "2026-09-05T00:00:00Z",
-          source: "route-test",
-          point_in_time: true,
-          dataset_revisions: [],
-        },
-        total: 0,
-        page: 1,
-        page_size: 100,
-        page_count: 0,
-        fields: [],
-        facets: { dataset_ids: [], units: [], frequencies: [] },
-      }),
-    ),
-    http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
-      explainedGraphs.push(await request.json());
-      return HttpResponse.json({
-        registry_version: "v1",
-        data_snapshot_id: "snap",
-        narrative: [],
-        validation: {
-          valid: true,
-          issues: [],
-          node_contracts: [
-            {
-              node_id: "close",
-              value_type: "numeric_series",
-              unit: "KRW",
-              minimum_history_sessions: 1,
-            },
-            {
-              node_id: "mom_252",
-              value_type: "numeric_series",
-              unit: "ratio",
-              minimum_history_sessions: 252,
-            },
-          ],
-          minimum_history_sessions: 252,
-          required_field_ids: ["price.close"],
-        },
-        plan: {
-          graph_hash: "g".repeat(64),
-          plan_hash: "p".repeat(64),
-          registry_version: "v1",
-          output_node_id: "mom_252",
-          steps: [
-            {
-              sequence: 1,
-              node_id: "close",
-              operation: "field",
-              input_node_ids: [],
-              output_type: "numeric_series",
-              output_unit: "KRW",
-              minimum_history_sessions: 1,
-            },
-            {
-              sequence: 2,
-              node_id: "mom_252",
-              operation: "time_series.momentum",
-              input_node_ids: ["close"],
-              output_type: "numeric_series",
-              output_unit: "ratio",
-              minimum_history_sessions: 252,
-            },
-          ],
-          required_field_ids: ["price.close"],
-          referenced_factor_ids: [],
-          referenced_subgraph_ids: [],
-          minimum_history_sessions: 252,
-          missing_policy: "drop",
-          as_of_policy: "available_date_lte_as_of",
-        },
-      });
-    }),
-  ];
+      spec_hash: "7".repeat(64),
+      diagnostics,
+    });
+  });
 
+const graphHandlers = () => [
+  graphCompileWith([]),
+  http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+    HttpResponse.json({
+      schema: RUNTIME_SCHEMA,
+      schema_hash: "h".repeat(64),
+      schema_version: "1.1",
+    }),
+  ),
+  http.get(`${API}/api/v1/equity/catalog`, () =>
+    HttpResponse.json({
+      snapshot: {
+        snapshot_id: "snap",
+        schema_version: "1.1",
+        built_at: "2026-09-05T00:00:00Z",
+        source: "route-test",
+        point_in_time: true,
+        dataset_revisions: [],
+      },
+      total: 0,
+      page: 1,
+      page_size: 100,
+      page_count: 0,
+      fields: [],
+      facets: { dataset_ids: [], units: [], frequencies: [] },
+    }),
+  ),
+  http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
+    explainedGraphs.push(await request.json());
+    return HttpResponse.json({
+      registry_version: "v1",
+      data_snapshot_id: "snap",
+      narrative: [],
+      validation: {
+        valid: true,
+        issues: [],
+        node_contracts: [
+          {
+            node_id: "close",
+            value_type: "numeric_series",
+            unit: "KRW",
+            minimum_history_sessions: 1,
+          },
+          {
+            node_id: "mom_252",
+            value_type: "numeric_series",
+            unit: "ratio",
+            minimum_history_sessions: 252,
+          },
+        ],
+        minimum_history_sessions: 252,
+        required_field_ids: ["price.close"],
+      },
+      plan: {
+        graph_hash: "g".repeat(64),
+        plan_hash: "p".repeat(64),
+        registry_version: "v1",
+        output_node_id: "mom_252",
+        steps: [
+          {
+            sequence: 1,
+            node_id: "close",
+            operation: "field",
+            input_node_ids: [],
+            output_type: "numeric_series",
+            output_unit: "KRW",
+            minimum_history_sessions: 1,
+          },
+          {
+            sequence: 2,
+            node_id: "mom_252",
+            operation: "time_series.momentum",
+            input_node_ids: ["close"],
+            output_type: "numeric_series",
+            output_unit: "ratio",
+            minimum_history_sessions: 252,
+          },
+        ],
+        required_field_ids: ["price.close"],
+        referenced_factor_ids: [],
+        referenced_subgraph_ids: [],
+        minimum_history_sessions: 252,
+        missing_policy: "drop",
+        as_of_policy: "available_date_lte_as_of",
+      },
+    });
+  }),
+];
+
+const revisionDocumentHandler = (source: string, strategyId = "s1") =>
+  http.get(
+    `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+    () =>
+      HttpResponse.json({
+        ...document(strategyId, 2, source, "그래프 전략"),
+        spec: graphSpec(strategyId, 2),
+      }),
+  );
+
+describe("FactorGraph read-only projection (P4-07)", () => {
   const completedTrace = (
     request: StrategyTraceRequest,
   ): StrategyTraceResponse => ({
@@ -1832,14 +1846,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
   it("keeps graph selection in the URL, then opens the exact YAML node", async () => {
     server.use(
       ...graphHandlers(),
-      http.get(
-        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
-        () =>
-          HttpResponse.json({
-            ...document("s1", 2, GRAPH_SOURCE, "그래프 전략"),
-            spec: graphSpec("s1", 2),
-          }),
-      ),
+      revisionDocumentHandler(GRAPH_SOURCE),
     );
     const user = userEvent.setup();
     const nodePath = "%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
@@ -3105,4 +3112,95 @@ describe("dirty guard follow-ups (P2-04 review)", () => {
       "/research/strategies/s1/revisions/2",
     );
   });
+});
+
+describe("problems and the document status badge follow no tab (P1-01)", () => {
+  const problemRow = (message: string | RegExp) =>
+    screen.findByRole("button", { name: message });
+
+  it("shows the badge and the problem list while the Graph tab is selected", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.node.window",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors/0/graph/nodes/1/window",
+          message: "window는 1 이상이어야 합니다",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    mount("/research/strategies/s1/revisions/2?view=graph");
+
+    const status = await screen.findByRole("status", { name: "문서 상태" });
+    await waitFor(() => expect(status).toHaveTextContent("검증 오류"));
+    const problems = await screen.findByRole("region", { name: "문제" });
+    expect(problems).toHaveTextContent("오류 1 · 경고 0");
+    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  }, 15_000);
+
+  it("keeps the Graph tab and selects the pointer the graph editor draws", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.node.window",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors/0/graph/nodes/1/window",
+          message: "window는 1 이상이어야 합니다",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+
+    await user.click(await problemRow(/window는 1 이상이어야 합니다/));
+
+    await waitFor(() => {
+      expect(history.location.search).toContain("view=graph");
+      expect(history.location.search).toContain(
+        "path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F1%2Fwindow",
+      );
+    });
+  }, 15_000);
+
+  it("falls back to the source tab and the line when the Graph tab cannot draw the pointer", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.title.empty",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/title",
+          message: "title must not be empty",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+
+    await user.click(await problemRow(/title must not be empty/));
+
+    await waitFor(() =>
+      expect(history.location.search).not.toContain("view=graph"),
+    );
+    const view = await editor();
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toContain("그래프 전략"),
+    );
+  }, 15_000);
 });

@@ -1,0 +1,93 @@
+import { describe, expect, it } from "vitest";
+
+import { parseSource } from "../../../shared/lib/yaml12";
+import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
+import {
+  formCoversPointer,
+  graphCoversPointer,
+  resolveDiagnosticDestination,
+} from "../model/diagnostic-navigation";
+import { projectForm } from "../model/form-projection";
+import type { JsonSchema } from "../model/schema-navigator";
+import type { StrategyView } from "../model/strategy-views";
+
+const SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/runtime-schema.json"),
+) as JsonSchema;
+const VERBOSE = readBackendFixture("strategy_documents/quality_momentum.yaml");
+
+const parsed = parseSource(VERBOSE, "yaml");
+const FORM = projectForm(SCHEMA, parsed, []);
+const TREE = parsed.tree ?? {};
+
+const destination = (view: StrategyView, pointer: string) =>
+  resolveDiagnosticDestination({
+    view,
+    sourceView: "yaml",
+    pointer,
+    form: FORM,
+    tree: TREE,
+  });
+
+describe("formCoversPointer", () => {
+  it("covers the sections, items and fields the Form actually draws", () => {
+    expect(formCoversPointer(FORM, "/data/start")).toBe(true);
+    expect(formCoversPointer(FORM, "/factors/0")).toBe(true);
+    // graph 링크 필드가 그 아래 진단을 모두 받는다(`projectField`의 link 필드 규칙).
+    expect(formCoversPointer(FORM, "/factors/0/graph/nodes/1")).toBe(true);
+    // 문서에 없는 항목의 진단은 목록 섹션 카드가 받는다(`unabsorbedDiagnostics`).
+    expect(formCoversPointer(FORM, "/factors/9")).toBe(true);
+  });
+
+  it("covers neither an unknown root key nor the whole document", () => {
+    expect(formCoversPointer(FORM, "/nope")).toBe(false);
+    expect(formCoversPointer(FORM, "/nope/deeper")).toBe(false);
+    expect(formCoversPointer(FORM, "")).toBe(false);
+  });
+
+  it("covers nothing before the runtime schema arrives", () => {
+    expect(formCoversPointer(null, "/data/start")).toBe(false);
+  });
+});
+
+describe("graphCoversPointer", () => {
+  it("covers only pointers inside the graph of a factor the document has", () => {
+    expect(graphCoversPointer(TREE, "/factors/0/graph")).toBe(true);
+    expect(
+      graphCoversPointer(TREE, "/factors/0/graph/nodes/1/input_node_id"),
+    ).toBe(true);
+    // 팩터 카드(Form 소유)와 문서에 없는 팩터는 그래프 편집 표면이 그리지 않는다.
+    expect(graphCoversPointer(TREE, "/factors/0/factor_id")).toBe(false);
+    expect(graphCoversPointer(TREE, "/factors/9/graph")).toBe(false);
+    expect(graphCoversPointer(TREE, "/data/start")).toBe(false);
+  });
+});
+
+describe("resolveDiagnosticDestination", () => {
+  it("stays in the source tab, which jumps to the line itself", () => {
+    expect(destination("yaml", "/factors/0/graph/nodes/1")).toBe("source");
+    expect(destination("yaml", "")).toBe("source");
+  });
+
+  it("keeps the Graph tab only when that graph is on screen", () => {
+    expect(destination("graph", "/factors/0/graph/nodes/1")).toBe(
+      "current-view",
+    );
+    expect(destination("graph", "/data/start")).toBe("source");
+  });
+
+  it("keeps the Form tab only when that card is on screen", () => {
+    expect(destination("form", "/data/start")).toBe("current-view");
+    expect(destination("form", "/nope")).toBe("source");
+  });
+
+  it("sends the read-only projection tabs back to the source tab", () => {
+    expect(destination("json", "/data/start")).toBe("source");
+    expect(destination("diff", "/data/start")).toBe("source");
+  });
+
+  it("sends a whole-document diagnostic back to the source tab", () => {
+    expect(destination("graph", "")).toBe("source");
+    expect(destination("form", "")).toBe("source");
+  });
+});

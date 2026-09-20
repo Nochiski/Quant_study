@@ -538,4 +538,32 @@ describe("StrategyIde", () => {
       sizes: { outlineWidth: 256, inspectorWidth: 320, debuggerHeight: 220 },
     });
   });
+
+  // 배지·문제 목록은 탭 패널 밖에 있어야 한다. 탭 패널 안에 있으면 선택되지 않은 탭은 `hidden`이라
+  // Graph·Form에서 편집 결과를 보려고 YAML 탭으로 돌아가야 했다(WORKFLOW P1-01).
+  it("keeps the document status and the problem list outside the tab panels", () => {
+    matchMedia(false);
+    for (const view of ["yaml", "json", "form", "graph", "diff"] as const) {
+      mount({
+        view,
+        sourceView: "yaml",
+        availableViews: ["yaml", "json", "form", "graph", "diff"],
+        projections: {
+          json: <div>JSON projection</div>,
+          form: <div>Form projection</div>,
+          graph: <div>Graph projection</div>,
+          diff: <div>Diff projection</div>,
+        },
+        documentStatus: (
+          <p role="status" aria-label="문서 상태">
+            검증 통과
+          </p>
+        ),
+        problems: <section aria-label="문제">오류 1 · 경고 0</section>,
+      });
+      expect(screen.getByRole("status", { name: "문서 상태" })).toBeVisible();
+      expect(screen.getByRole("region", { name: "문제" })).toBeVisible();
+      cleanup();
+    }
+  });
 });

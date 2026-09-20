@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   ContractInspector,
+  DiagnosticsPanel,
   DirtyLeaveGuard,
+  DocumentStatus,
   DocumentToolbar,
   FactorGraphPanel,
   RecoveryBanner,
@@ -24,6 +26,7 @@ import {
   saveStatusTone,
   useAutosave,
   useCompileDocument,
+  useDiagnosticNavigation,
   useExecutionPlans,
   useRunBacktest,
   useServerDraft,
@@ -179,16 +182,41 @@ export const NewStrategyPage = () => {
     },
     [navigate, search],
   );
+  const openSourceAt = useCallback(
+    (pointer: string | undefined): void => {
+      if (pointer !== undefined) outline.requestSourceReveal(pointer);
+      selectPointer(pointer, "outline");
+    },
+    [outline, selectPointer],
+  );
+  // outline 다음에 부른다 — 탭 전환 뒤 진단 범위로 가는 effect가 outline의 pointer reveal 뒤에 서야
+  // 더 정확한 범위가 남는다(WORKFLOW P1-01).
+  const problems = useDiagnosticNavigation({
+    state: document,
+    view,
+    sourceView: document.format,
+    form: form.projection,
+    tree: form.tree,
+    onSelectPointer: (pointer) => selectPointer(pointer, "graph"),
+    onOpenSource: openSourceAt,
+  });
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
+  const onProblemsEditorReady = problems.onEditorReady;
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
+      onProblemsEditorReady(editor);
     },
-    [onOutlineEditorReady, onSnippetEditorReady, onTransactionsEditorReady],
+    [
+      onOutlineEditorReady,
+      onSnippetEditorReady,
+      onTransactionsEditorReady,
+      onProblemsEditorReady,
+    ],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
   const selectSymbol = useCallback(
@@ -273,6 +301,14 @@ export const NewStrategyPage = () => {
             },
             replace: true,
           })
+        }
+        documentStatus={<DocumentStatus state={document} />}
+        problems={
+          <DiagnosticsPanel
+            diagnostics={problems.diagnostics}
+            stale={problems.stale}
+            onSelect={problems.selectDiagnostic}
+          />
         }
         editorActions={
           <DocumentToolbar

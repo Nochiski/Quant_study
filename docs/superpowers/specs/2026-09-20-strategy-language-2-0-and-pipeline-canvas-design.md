@@ -152,6 +152,11 @@ risk:
   `FIELD_APPLICABILITY`에 `/risk/risk_factor_id`의 조건 `/portfolio/weighting = risk` 행을 넣어 다른
   모드에서 설정하면 `strategy.field.inapplicable` warning이 나게 한다. 적용 조건이 있는 필드가 그
   조건 밖에서 알파 합성을 바꾸면 "모드별로 읽히는 필드" 계약과 어긋난다.
+- 그 행은 **적용 조건 warning 전용이고 `owned_by_error`를 갖지 않는다.** `risk_field_id`와의 배타는
+  별개 validator error `strategy.risk.risk_source_conflict`가 소유하며 `FIELD_APPLICABILITY`와 무관
+  하다. 배타 error를 `owned_by_error`로 묶으면 validator가 그 error 하나만 내고
+  (`_constraints.py:138-140`) 적용 조건 warning이 억제되어, `weighting: equal`에 `risk_factor_id`가
+  남아 있어도 아무 경고가 없게 된다.
 - 그 조건에서 참조된 팩터는 **합성 점수에서 제외한다**(그 팩터의 `weight`를 무시하고 분모
   `Σ|weight|`에서도 뺀다). 사용자가 "가중만 바꿨다"고 믿는 동안 종목 선정이 바뀌는 것을 막는다.
   제외했다는 사실은 정보 진단 `strategy.risk.risk_factor_excluded`(warning)로 알린다.

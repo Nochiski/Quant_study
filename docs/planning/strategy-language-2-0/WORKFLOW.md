@@ -259,6 +259,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `graph.missing_policy` 참조 grep 0건 테스트.
 - P2-01 브리지가 `첫 팩터 graph.missing_policy`를 읽던 부분은 이 PR 이후 의미가 없어지므로, 1.1
   문서에서 만들 때만 쓰는 legacy 입력으로 좁힌다.
+- runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성
+  (`FactorGraph`에서 `missing_policy`가 빠진다). frontend SDK는 P3-01.
 
 **제약사항**: 캐시 키 회귀가 이 PR의 핵심 invariant다. 분리하지 않으면 P2-03의 대량 삭제에 묻힌다.
 
@@ -271,10 +273,19 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `CURRENT_SCHEMA_VERSION = "1.2"`. `StrategySpec`에서 `data`·`execution` 제거.
 - `DataStep`·`ExecutionStep`이 사라지는 이 시점에 `Market`·`DataFrequency`·`ExecutionTiming` enum을
   `domain/strategy`에서 `domain/backtest`로 옮긴다. **호환 re-export를 만들지 않는다**(경계 규칙이
-  facade 재수출을 금지). 남는 소비자(`application/strategy_design/_service.py`,
-  `adapters/outbound/engine_portfolio/_adapter.py`, `domain/strategy/facade/specification.py`)가
-  `domain.backtest` facade를 직접 읽도록 바꾸고 각 facade `DEPENDS_ON`을 갱신한다. `MissingPolicy`는
-  `domain/factor`에 그대로 둔다.
+  facade 재수출을 금지). 처리는 파일마다 다르다.
+  - `domain/strategy/facade/specification.py`: 세 enum의 import(`:36`, `:41`, `:46`)와 `__all__`
+    항목(`:70`, `:75`, `:87`)을 **삭제한다.** 이 파일은 소비자가 아니라 재수출 지점이므로
+    `domain.backtest`를 읽게 바꾸면 안 된다 — `domain.strategy → domain.backtest` 화살표가 생겨
+    기존 반대 방향과 순환이 된다(P2-01에서 막은 것과 같은 실패). `domain/strategy`는 이 enum을 더
+    이상 공개하지 않는다.
+  - `application/strategy_design/_service.py`: `template()`이 `DataStep(market=Market.KRX, …)`를
+    만들 때만 쓰므로 `data` 제거와 함께 **import가 사라진다.** 리다이렉트 대상이 아니다.
+  - `adapters/outbound/engine_portfolio/_adapter.py:85`(`ExecutionTiming.NEXT_OPEN`): 실제로
+    `domain.backtest`를 새로 읽는 **유일한** 파일이다. 그 facade `DEPENDS_ON`(현재
+    `application.portfolio_design`·`domain.portfolio`·`domain.strategy`)에 `domain.backtest`를
+    추가한다. adapter → domain이라 순환이 없다.
+  - `MissingPolicy`는 `domain/factor`에 그대로 둔다.
 - **최상위 필수 키는 `schema_version`·`title` 둘**이다. `factors: tuple[FactorSignal, ...] = ()`로
   기본값을 주어 생략도 빈 배열도 `structure.missing_field`를 내지 않고, 두 경우 모두 semantic
   `strategy.factor.required`가 난다. 회귀 테스트: `schema_version: "1.2"\ntitle: ""\n`의 hydrate
@@ -283,12 +294,18 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   없으면 422 `backtest_run.environment_required`.
 - hydrate·schema·validation·explanation·diff·trace·compile 경로 갱신. 1.1 문서는
   `structure.unsupported_schema_version`.
+- 기본 템플릿 빌더 `application/strategy_design/_service.py`의 `template()` 갱신. `StrategySpec`을
+  직접 만들면서 `DataStep`을 채우고 있어 `data` 제거로 깨진다. 새 전략 기본 문서의 내용은 P4-04의
+  시작 문서 결정(`schema_version`·`title`만)과 같아야 한다.
 - fixture: `quality_momentum.yaml`(1.2), `.json`, `.legacy.json`, `.minimal.yaml`이 같은 hash. 1.1
   원본을 `quality_momentum.v1_1.yaml`로 복사해 보존한다. **`quality_momentum.v1_1.commented.yaml`은
   건드리지 않는다**(1.0 → 1.1 기대 출력, 테스트 3곳이 단언 중).
 - runtime schema fixture 재생성. OpenAPI 재생성.
 
-**제약**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend는 P3-01까지 빨간불.
+**제약사항**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend는 P3-01까지 빨간불.
+이 PR이 P2 스택에서 12절 상한(600줄·10파일)에 가장 가깝다. 착수 시 바뀌는 파일 수를 먼저 세고,
+상한을 넘으면 **enum 이동을 별도 PR로 뗀다**(`data`·`execution` 제거가 먼저, enum 이동이 뒤).
+그래도 넘으면 PR 본문 `제약사항`에 사유를 적는다.
 
 ### P2-04 — `signal.normalization`과 결합 전 정규화
 
@@ -300,6 +317,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   (`domain/portfolio/_compiler.py:526-570`)가 결합 전에 적용.
 - `none`이 1.1과 수치 동일한 회귀 테스트. `rank`·`zscore` 수치 테스트.
 - `_explanation.py`·semantic diff·contract 설명 갱신. i18n 키 추가는 P3-01.
+- runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성(`normalization`
+  enum이 응답 스키마에 노출된다). frontend SDK는 P3-01.
 
 ### P2-05 — 횡단면 eligibility(`EligibilityOperator`, exhaustive `_compare`, 2-pass)
 
@@ -323,6 +342,10 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - trace 투영과 `application/portfolio_design/_trace_service.py`가 새 사유를 그대로 전달한다. P4-03
   미리보기 패널의 "유니버스·필터 통과·결측 제외 수"가 규칙 탈락과 순위 탈락을 구분해 셀 수 있어야
   한다.
+- `ExclusionReason`은 `backend/openapi.json`의 응답 스키마에 노출되어 있으므로(현재 4곳) 멤버 추가는
+  **API 계약 변경**이다. `export_openapi.py`로 재생성하고 diff를 확인한다(2절 "API contract" gate).
+  frontend SDK 재생성은 P3-01. 재생성을 빠뜨리면 프론트가 모르는 enum 값을 받아 trace 화면이 빈칸을
+  낸다.
 
 ### P2-06 — `risk.risk_factor_id`, `saved_factor`·`saved_subgraph` 제거
 
@@ -330,12 +353,16 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 
 **Acceptance**
 
-- `risk.risk_factor_id`(nullable, `x-reference: factor`). `weighting: risk`에서 `risk_field_id`와 배타
-  (`strategy.risk.risk_source_conflict` error, `FIELD_APPLICABILITY`에 행 추가).
-- `FIELD_APPLICABILITY`에 `/risk/risk_factor_id`의 적용 조건 `/portfolio/weighting = risk` 행을
-  추가한다(`_constraints.py:193-197`의 `/risk/risk_field_id` 행과 같은 모양). 다른 `weighting`에서
-  설정하면 `strategy.field.inapplicable` warning이 나고 **합성 제외도 일어나지 않는다**. 적용 조건이
-  붙은 필드가 조건 밖에서 알파 합성을 바꾸면 "모드별로 읽히는 필드" 계약과 어긋난다.
+- `risk.risk_factor_id`(nullable, `x-reference: factor`). `risk_field_id`와 동시 지정은
+  `strategy.risk.risk_source_conflict` **error**다. 이 배타 규칙은 적용 조건이 아니라 별개 validator
+  검사이므로 `FIELD_APPLICABILITY`에 넣지 않는다.
+- `FIELD_APPLICABILITY`에 `/risk/risk_factor_id` 행을 추가한다. 조건은
+  `/portfolio/weighting = risk` **하나뿐이고 `owned_by_error`를 붙이지 않는다**
+  (`_constraints.py:193-197`의 `/risk/risk_field_id` 행과 같은 모양). 붙이면 validator가 그 error
+  하나만 내고(`:138-140`) `strategy.field.inapplicable` warning이 억제되어, `weighting: equal`에서
+  `risk_factor_id`를 남겨 둬도 아무 경고가 없게 된다. 다른 `weighting`에서 설정하면 warning이 나고
+  **합성 제외도 일어나지 않는다**. 적용 조건이 붙은 필드가 조건 밖에서 알파 합성을 바꾸면
+  "모드별로 읽히는 필드" 계약과 어긋난다.
 - `weighting: risk` + `risk_factor_id`일 때 참조 팩터는 **합성 점수에서 제외**한다(`weight` 무시,
   분모 `Σ|weight|`에서도 제외). 제외 사실은 `strategy.risk.risk_factor_excluded` warning. 역가중은
   `signal.normalization` **이전** 원시 출력(`PortfolioObservation.factor_values`)을 쓴다. 값이
@@ -350,6 +377,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `normalization: rank`에서도 역가중이 원시값 기준이다.
 - `saved_factor`·`saved_subgraph`를 노드 union·스키마·연산자 카탈로그에서 제거. 실행 경로의 거부
   코드 삭제.
+- runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성(`risk_factor_id`
+  필드와 새 진단 코드가 응답 스키마에 노출된다). frontend SDK는 P3-01.
 
 ### P2-07 — compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported
 
@@ -365,6 +394,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `signal.normalization: none`이고 팩터 단위가 다르면 `strategy.signal.unit_mismatch` warning.
 - 어댑터 capability(`GROUP_SERIES` 제공 여부)를 compile이 조회해 `group` 노드가
   `strategy.operator.unsupported` error. 연산자 카탈로그 응답의 `availability`도 같은 capability로.
+- `export_openapi.py`로 `backend/openapi.json` 재생성(연산자 카탈로그 응답의 `availability`와 새 진단
+  코드가 노출된다). frontend SDK는 P3-01.
 
 ### P2-08 — duckdb `GROUP_SERIES` 스파이크와 `ideas/*.yaml` 5개
 

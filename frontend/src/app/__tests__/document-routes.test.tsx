@@ -1467,8 +1467,8 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
   });
   const formPanel = () => screen.findByLabelText("Form 편집");
   // 섹션은 runtime schema query가 끝난 뒤 나타난다.
-  // 섹션 legend는 `▾ <이름> <키>`다(P1-03). accname은 인라인 요소 사이에 공백을 넣지 않으므로
-  // 앞이 낱말 문자가 아닌 자리에서 키를 찾는다.
+  // 섹션 legend는 `▾ <이름> <키>`다(P1-03). 앞이 낱말 문자가 아닌 자리에서 키를 찾는다 —
+  // 공백 자체는 `strategy-form-panel.test.tsx`의 "라벨 어휘" 테스트가 고정한다.
   const formSection = async (name: string) =>
     within(
       await within(await formPanel()).findByRole("group", {

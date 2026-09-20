@@ -1,12 +1,11 @@
-"""Write the runtime authoring fixtures both runtimes read (P3-03, P1-03).
+"""두 런타임이 함께 읽는 authoring fixture를 쓴다 (P3-03, P1-03).
 
-- `runtime-schema.json`: the StrategyDocument JSON Schema. The frontend schema navigator tests
-  read it so both runtimes see one shape; `tests/domain/test_strategy_schema.py` fails when it
-  is stale.
-- `operator-catalog.json`: the `GET /api/v1/strategy-documents/operators` payload. The frontend
-  i18n coverage test walks it so no operator reaches a screen without a name (P1-03).
+- `runtime-schema.json`: StrategyDocument JSON Schema. frontend schema navigator 테스트가 이 파일을
+  읽어 두 런타임이 같은 모양을 본다. 파일이 낡으면 `tests/domain/test_strategy_schema.py`가 깨진다.
+- `operator-catalog.json`: `GET /api/v1/strategy-documents/operators` 응답. frontend i18n 커버리지
+  테스트가 이 파일을 순회해 이름 없는 연산자가 화면에 나가지 못하게 한다(P1-03).
 
-Run from `backend/`:
+`backend/`에서 실행한다:
 
     uv run python tools/export_runtime_schema.py
 """

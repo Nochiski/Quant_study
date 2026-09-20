@@ -650,10 +650,11 @@ const ko = {
   "strategy.field.node.right_node_id": "오른쪽 노드",
   "strategy.field.node.right_node_id.description": "연산의 오른쪽 값입니다.",
   "strategy.field.node.window": "집계 기간",
-  "strategy.field.node.window.description": "집계에 쓸 과거 세션 수입니다.",
+  "strategy.field.node.window.description":
+    "집계에 쓸 세션 수입니다. 구간은 lag만큼 물린 자리에서 셉니다.",
   "strategy.field.node.lag": "건너뛰는 세션",
   "strategy.field.node.lag.description":
-    "집계 구간을 며칠 전에서 끝낼지 정합니다.",
+    "집계 구간의 끝을 오늘에서 이만큼 뒤로 물립니다. 구간은 t-lag-window+1부터 t-lag까지입니다.",
   "strategy.field.node.lower_quantile": "아래 절단 분위",
   "strategy.field.node.lower_quantile.description":
     "이 분위보다 작은 값은 분위 값으로 끌어올립니다.",
@@ -813,7 +814,7 @@ const ko = {
   "strategy.operator.unary.negate.formula": "-x",
   "strategy.operator.unary.lag": "며칠 전 값",
   "strategy.operator.unary.lag.description":
-    "같은 종목의 지정한 세션 수 이전 값을 씁니다.",
+    "같은 종목의 periods 세션 이전 값을 씁니다.",
   "strategy.operator.unary.lag.formula": "x[t - periods]",
   "strategy.operator.binary.add": "더하기",
   "strategy.operator.binary.add.description": "두 값을 더합니다.",
@@ -829,28 +830,34 @@ const ko = {
   "strategy.operator.binary.divide.formula": "left ÷ right",
   "strategy.operator.time_series.mean": "기간 평균",
   "strategy.operator.time_series.mean.description":
-    "최근 지정 기간의 평균입니다. 이동평균이 이것입니다.",
-  "strategy.operator.time_series.mean.formula": "mean(x[t-window+1 … t])",
+    "lag만큼 물린 window 구간의 평균입니다. 이동평균이 이것입니다.",
+  "strategy.operator.time_series.mean.formula":
+    "mean(x[t-lag-window+1 … t-lag])",
   "strategy.operator.time_series.std": "기간 표준편차",
   "strategy.operator.time_series.std.description":
-    "최근 지정 기간이 얼마나 출렁였는지 봅니다.",
-  "strategy.operator.time_series.std.formula": "stdev(x[t-window+1 … t])",
+    "lag만큼 물린 window 구간이 얼마나 출렁였는지 봅니다.",
+  "strategy.operator.time_series.std.formula":
+    "stdev(x[t-lag-window+1 … t-lag])",
   "strategy.operator.time_series.momentum": "기간 수익률",
   "strategy.operator.time_series.momentum.description":
-    "기간 첫 값 대비 마지막 값의 변화율입니다. 모멘텀이 이것입니다.",
-  "strategy.operator.time_series.momentum.formula": "x[t] / x[t-window+1] - 1",
+    "lag만큼 물린 window 구간의 첫 값 대비 마지막 값 변화율입니다. window 252, lag 21이 12-1 모멘텀입니다.",
+  "strategy.operator.time_series.momentum.formula":
+    "x[t-lag] / x[t-lag-window+1] - 1",
   "strategy.operator.time_series.delta": "기간 변화량",
   "strategy.operator.time_series.delta.description":
-    "기간 첫 값과 마지막 값의 차이입니다.",
-  "strategy.operator.time_series.delta.formula": "x[t] - x[t-window+1]",
+    "lag만큼 물린 window 구간의 첫 값과 마지막 값 차이입니다.",
+  "strategy.operator.time_series.delta.formula":
+    "x[t-lag] - x[t-lag-window+1]",
   "strategy.operator.time_series.min": "기간 최솟값",
   "strategy.operator.time_series.min.description":
-    "최근 지정 기간에서 가장 작은 값입니다.",
-  "strategy.operator.time_series.min.formula": "min(x[t-window+1 … t])",
+    "lag만큼 물린 window 구간에서 가장 작은 값입니다.",
+  "strategy.operator.time_series.min.formula":
+    "min(x[t-lag-window+1 … t-lag])",
   "strategy.operator.time_series.max": "기간 최댓값",
   "strategy.operator.time_series.max.description":
-    "최근 지정 기간에서 가장 큰 값입니다.",
-  "strategy.operator.time_series.max.formula": "max(x[t-window+1 … t])",
+    "lag만큼 물린 window 구간에서 가장 큰 값입니다.",
+  "strategy.operator.time_series.max.formula":
+    "max(x[t-lag-window+1 … t-lag])",
   "strategy.operator.cross_sectional.rank": "순위",
   "strategy.operator.cross_sectional.rank.description":
     "같은 날 다른 종목과 견준 0~1 순위로 바꿉니다.",
@@ -864,7 +871,7 @@ const ko = {
   "strategy.operator.cross_sectional.winsorize.description":
     "같은 날 위아래 극단값을 분위 값으로 눌러 줍니다.",
   "strategy.operator.cross_sectional.winsorize.formula":
-    "clip(x, 아래 분위, 위 분위)",
+    "clip(x, lower_quantile 분위, upper_quantile 분위)",
   "strategy.operator.cross_sectional.demean": "평균 빼기",
   "strategy.operator.cross_sectional.demean.description":
     "같은 날 유니버스 평균을 뺍니다.",
@@ -872,12 +879,13 @@ const ko = {
   "strategy.operator.group.neutralize": "그룹 평균 빼기",
   "strategy.operator.group.neutralize.description":
     "같은 날 같은 그룹의 평균을 뺍니다. 섹터 효과를 걷어낼 때 씁니다.",
-  "strategy.operator.group.neutralize.formula": "x - 그룹 평균",
+  "strategy.operator.group.neutralize.formula":
+    "x - group_field_id별 평균",
   "strategy.operator.group.rank": "그룹 안 순위",
   "strategy.operator.group.rank.description":
     "같은 날 같은 그룹 안에서 매긴 0~1 순위입니다.",
   "strategy.operator.group.rank.formula":
-    "(그룹 안 순위 - 1) / (그룹 종목 수 - 1)",
+    "(group_field_id별 순위 - 1) / (그룹 종목 수 - 1)",
   "strategy.operator.comparison.gt": "초과",
   "strategy.operator.comparison.gt.description":
     "왼쪽이 오른쪽보다 크면 참입니다.",
@@ -1947,10 +1955,10 @@ export const messages = {
     "strategy.field.node.right_node_id.description": "The right-hand operand.",
     "strategy.field.node.window": "Window",
     "strategy.field.node.window.description":
-      "Number of past sessions the aggregate covers.",
+      "Number of sessions the aggregate covers, counted from where lag ends it.",
     "strategy.field.node.lag": "Window lag",
     "strategy.field.node.lag.description":
-      "How many sessions before today the window ends.",
+      "Pushes the end of the window back by this many sessions: t-lag-window+1 through t-lag.",
     "strategy.field.node.lower_quantile": "Lower quantile",
     "strategy.field.node.lower_quantile.description":
       "Values below this quantile are raised to it.",
@@ -2114,7 +2122,7 @@ export const messages = {
     "strategy.operator.unary.negate.formula": "-x",
     "strategy.operator.unary.lag": "Lag",
     "strategy.operator.unary.lag.description":
-      "Takes the value of the same security that many sessions ago.",
+      "Takes the value of the same security periods sessions ago.",
     "strategy.operator.unary.lag.formula": "x[t - periods]",
     "strategy.operator.binary.add": "Add",
     "strategy.operator.binary.add.description": "Adds the two inputs.",
@@ -2133,56 +2141,63 @@ export const messages = {
     "strategy.operator.binary.divide.formula": "left ÷ right",
     "strategy.operator.time_series.mean": "Mean",
     "strategy.operator.time_series.mean.description":
-      "Average over the recent window; this is the moving average.",
-    "strategy.operator.time_series.mean.formula": "mean(x[t-window+1 … t])",
+      "Average over the window sessions ending lag sessions back; this is the moving average.",
+    "strategy.operator.time_series.mean.formula":
+      "mean(x[t-lag-window+1 … t-lag])",
     "strategy.operator.time_series.std": "Standard deviation",
     "strategy.operator.time_series.std.description":
-      "How much the value moved over the recent window.",
-    "strategy.operator.time_series.std.formula": "stdev(x[t-window+1 … t])",
+      "How much the value moved over the window sessions ending lag sessions back.",
+    "strategy.operator.time_series.std.formula":
+      "stdev(x[t-lag-window+1 … t-lag])",
     "strategy.operator.time_series.momentum": "Momentum",
     "strategy.operator.time_series.momentum.description":
-      "Change from the first to the last value of the window.",
+      "Change from the first to the last value of that window; window 252 with lag 21 is 12-1 momentum.",
     "strategy.operator.time_series.momentum.formula":
-      "x[t] / x[t-window+1] - 1",
+      "x[t-lag] / x[t-lag-window+1] - 1",
     "strategy.operator.time_series.delta": "Delta",
     "strategy.operator.time_series.delta.description":
-      "Difference between the first and last value of the window.",
-    "strategy.operator.time_series.delta.formula": "x[t] - x[t-window+1]",
+      "Difference between the first and last value of that window.",
+    "strategy.operator.time_series.delta.formula":
+      "x[t-lag] - x[t-lag-window+1]",
     "strategy.operator.time_series.min": "Minimum",
     "strategy.operator.time_series.min.description":
-      "Smallest value in the recent window.",
-    "strategy.operator.time_series.min.formula": "min(x[t-window+1 … t])",
+      "Smallest value in the window sessions ending lag sessions back.",
+    "strategy.operator.time_series.min.formula":
+      "min(x[t-lag-window+1 … t-lag])",
     "strategy.operator.time_series.max": "Maximum",
     "strategy.operator.time_series.max.description":
-      "Largest value in the recent window.",
-    "strategy.operator.time_series.max.formula": "max(x[t-window+1 … t])",
+      "Largest value in the window sessions ending lag sessions back.",
+    "strategy.operator.time_series.max.formula":
+      "max(x[t-lag-window+1 … t-lag])",
     "strategy.operator.cross_sectional.rank": "Rank",
     "strategy.operator.cross_sectional.rank.description":
       "Replaces the value with a 0-1 rank against the other names that day.",
     "strategy.operator.cross_sectional.rank.formula":
-      "(순위 - 1) / (종목 수 - 1)",
+      "(rank - 1) / (count - 1)",
     "strategy.operator.cross_sectional.zscore": "Z-score",
     "strategy.operator.cross_sectional.zscore.description":
       "Subtracts that day's mean and divides by its standard deviation.",
-    "strategy.operator.cross_sectional.zscore.formula": "(x - 평균) / 표준편차",
+    "strategy.operator.cross_sectional.zscore.formula":
+      "(x - mean) / stdev",
     "strategy.operator.cross_sectional.winsorize": "Winsorise",
     "strategy.operator.cross_sectional.winsorize.description":
       "Clips that day's extremes back to the chosen quantiles.",
     "strategy.operator.cross_sectional.winsorize.formula":
-      "clip(x, 아래 분위, 위 분위)",
+      "clip(x, lower_quantile, upper_quantile)",
     "strategy.operator.cross_sectional.demean": "Demean",
     "strategy.operator.cross_sectional.demean.description":
       "Subtracts that day's universe mean.",
-    "strategy.operator.cross_sectional.demean.formula": "x - 평균",
+    "strategy.operator.cross_sectional.demean.formula": "x - mean",
     "strategy.operator.group.neutralize": "Group neutralise",
     "strategy.operator.group.neutralize.description":
       "Subtracts the group mean of that day, stripping the sector effect.",
-    "strategy.operator.group.neutralize.formula": "x - 그룹 평균",
+    "strategy.operator.group.neutralize.formula":
+      "x - mean per group_field_id",
     "strategy.operator.group.rank": "Group rank",
     "strategy.operator.group.rank.description":
       "A 0-1 rank taken within the group on that day.",
     "strategy.operator.group.rank.formula":
-      "(그룹 안 순위 - 1) / (그룹 종목 수 - 1)",
+      "(rank within group_field_id - 1) / (group count - 1)",
     "strategy.operator.comparison.gt": "Greater than",
     "strategy.operator.comparison.gt.description":
       "True where the left input exceeds the right.",

@@ -62,7 +62,8 @@ class OutputTypeRule(StrEnum):
 class UnitRule(StrEnum):
     """`_validation.py`가 이 연산자의 출력 단위를 정하는 방식."""
 
-    SAME_AS_INPUT = "same_as_input"  # 첫 입력의 단위 그대로 (더하기·빼기는 단위가 다르면 경고)
+    # 첫 입력의 단위 그대로. 더하기·빼기는 좌우 단위가 다르면 error다(검증이 막는다).
+    SAME_AS_INPUT = "same_as_input"
     COMBINED = "combined"  # 두 입력 단위를 곱/나눗셈으로 합친다 — `(a*b)`, `(a/b)`
     BOOLEAN = "boolean"  # `bool`
 

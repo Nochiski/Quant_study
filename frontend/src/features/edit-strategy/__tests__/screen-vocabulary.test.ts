@@ -9,7 +9,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { tDescription, tName, tOptional } from "../../../shared/config";
+import {
+  messages,
+  tDescription,
+  tName,
+  tOptional,
+} from "../../../shared/config";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 
 type Json = Record<string, unknown>;
@@ -25,10 +30,13 @@ const CATALOG = JSON.parse(
   operators: {
     kind: string;
     operator: string;
+    params: { property_name: string; required: boolean }[];
     description_key: string;
     formula_key: string;
   }[];
 };
+
+const HANGUL = /[가-힣]/;
 
 /** 스키마 어디에 있든 `x-description-key` 전부. 객체 stem과 property stem을 함께 모은다. */
 const descriptionStems = (node: unknown, found: Set<string>): Set<string> => {
@@ -95,6 +103,42 @@ describe("화면 어휘 커버리지", () => {
         tOptional(definition.formula_key) === null ? `${label} formula` : null,
       ].filter((item): item is string => item !== null);
     });
+
+    expect(missing).toEqual([]);
+  });
+
+  it("en 로케일에 한글이 남지 않고 ko 로케일에 빈 문장이 없다", () => {
+    // `satisfies Record<MessageKey, string>`는 키 존재만 강제하고 값의 언어는 보지 않는다.
+    // `tOptional`류는 ko 고정이라 en 값은 사전을 직접 순회해야 검사된다(P1-03 리뷰 P2-1).
+    const korean = Object.entries(messages.en).filter(([, value]) =>
+      HANGUL.test(value),
+    );
+    const blank = Object.entries(messages.ko).filter(
+      ([, value]) => value.trim() === "",
+    );
+
+    expect(korean.map(([key]) => key)).toEqual([]);
+    expect(blank.map(([key]) => key)).toEqual([]);
+  });
+
+  it("연산자 계산식이 자기 파라미터 이름을 전부 말한다", () => {
+    // 시간축 연산자의 계산식이 `lag`를 빠뜨려 엔진의 창과 어긋났다(P1-03 리뷰 P2-2).
+    // 파라미터를 말하지 않는 계산식은 그 파라미터가 결과에 어떻게 들어가는지 숨긴다.
+    const missing = CATALOG.operators.flatMap((definition) =>
+      definition.params.flatMap((parameter) =>
+        (["ko", "en"] as const)
+          .filter(
+            (locale) =>
+              !(messages[locale][
+                definition.formula_key as keyof (typeof messages)["ko"]
+              ] ?? "").includes(parameter.property_name),
+          )
+          .map(
+            (locale) =>
+              `${definition.kind}.${definition.operator} ${locale} ${parameter.property_name}`,
+          ),
+      ),
+    );
 
     expect(missing).toEqual([]);
   });

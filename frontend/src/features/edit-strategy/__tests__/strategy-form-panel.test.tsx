@@ -79,13 +79,15 @@ const renderPanel = (
 
 /**
  * 섹션 fieldset(legend = `▾ <섹션 이름> <섹션 키> [· 힌트]`). P1-03부터 라벨이 사람 말 이름을
- * 먼저 보이므로 앞이 낱말 문자가 아닌 자리에서 키를 찾는다.
+ * 먼저 보이므로 앞이 낱말 문자가 아닌 자리에서 키를 찾는다(이름만 있는 섹션은 이름으로 찾는다).
  */
 const section = (name: string) =>
   within(screen.getByRole("group", { name: new RegExp(`(^|[^\\w])${name}`) }));
 
 /**
- * 컨트롤의 접근성 이름은 `<이름> <key>[ · <unit>]`이다. `_`는 낱말 문자라 `selection_count`가
+ * 컨트롤의 접근성 이름은 `<이름> <key>[ · <unit>]`이다. 헬퍼는 키 앞 경계만 느슨하게 본다 —
+ * JS의 `" + bs + "w`는 ASCII라 한글 뒤 경계까지 구분하지 못한다. 공백 자체는 아래 "라벨 어휘"
+ * 테스트가 유일한 정본으로 고정한다. `_`는 낱말 문자라 `selection_count`가
  * `short_selection_count`에 걸리지 않는다.
  */
 const named = (key: string) => ({
@@ -454,6 +456,8 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
 });
 
 describe("StrategyFormPanel 라벨 어휘 (P1-03)", () => {
+  // 이 describe가 라벨 공백 규칙의 유일한 정본이다. `named()`·`section()`의 느슨한 정규식은
+  // 공백을 단언하지 못하므로 아래 단언을 완화하면 회귀 방어가 사라진다.
   it("이름과 스키마 키를 띄어 읽는다", () => {
     renderPanel(MINIMAL, stubTransactions());
 
@@ -479,7 +483,7 @@ describe("StrategyFormPanel 라벨 어휘 (P1-03)", () => {
     ).toBeInTheDocument();
   });
 
-  it("이름이 없는 필드는 키만 보인다", () => {
+  it("스키마 키가 없는 섹션은 이름만 보인다", () => {
     renderPanel(MINIMAL, stubTransactions());
 
     // 섹션 제목은 스키마 키가 없으면 이름만 남는다(루트 스칼라 섹션 = 문서 자신).

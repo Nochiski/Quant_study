@@ -192,6 +192,8 @@ def response_of(
     output: Sequence[ResponseOutputItem] = (),
     input_tokens: int = 100,
     output_tokens: int = 50,
+    cached_tokens: int = 0,
+    cache_write_tokens: int = 0,
     incomplete_reason: Literal["max_output_tokens", "max_messages", "content_filter", "steered"]
     | None = None,
     error_code: Literal["server_error", "rate_limit_exceeded"] | None = None,
@@ -218,7 +220,9 @@ def response_of(
         ),
         usage=ResponseUsage(
             input_tokens=input_tokens,
-            input_tokens_details=InputTokensDetails(cached_tokens=0, cache_write_tokens=0),
+            input_tokens_details=InputTokensDetails(
+                cached_tokens=cached_tokens, cache_write_tokens=cache_write_tokens
+            ),
             output_tokens=output_tokens,
             output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
             total_tokens=input_tokens + output_tokens,

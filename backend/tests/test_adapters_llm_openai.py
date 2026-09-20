@@ -12,12 +12,15 @@ import json
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
-import httpx2
 import pytest
 
-pytest.importorskip("openai", reason="backend optional extra `llm` (uv sync --extra llm)")
+pytest.importorskip(
+    "openai",
+    reason="공급자 SDK는 optional extra `llm`이다. 미설치 환경에서는 이 모듈을 건너뛴다.",
+)
 
-import openai  # noqa: E402  # reason: importorskip 이후 import
+import httpx2  # noqa: E402  # reason: SDK가 끌고 오는 전송 계층이라 importorskip 뒤에야 있다
+import openai  # noqa: E402  # reason: 위와 같음
 
 from strategy_workbench.adapters.outbound.llm_openai._adapter import (  # noqa: E402  # reason: importorskip 이후 import
     PROBE_MAX_OUTPUT_TOKENS,
@@ -284,6 +287,76 @@ def test_stream_turn_emits_text_thinking_usage_and_done() -> None:
         Usage(input_tokens=120, output_tokens=42),
         Done(stop_reason="completed"),
     ]
+
+
+def test_usage_splits_the_cache_details_out_of_the_input_total() -> None:
+    """OpenAI 원시 `input_tokens`는 캐시 내역을 **포함**하고 domain 세 칸은 겹치지 않는다.
+
+    0이 아니고 서로 다른 값을 써야 뜻이 있다. 둘 다 0이면 빼기를 빠뜨려도 통과하고, 두 값이
+    같으면 읽기·쓰기를 맞바꾼 실수가 잡히지 않는다.
+    """
+    raw_input_tokens = 1_200
+    client = one_call(
+        final_event(
+            response_of(
+                input_tokens=raw_input_tokens,
+                output_tokens=42,
+                cached_tokens=900,
+                cache_write_tokens=250,
+            )
+        )
+    )
+
+    usages = [event for event in run_turn(client) if isinstance(event, Usage)]
+
+    assert usages == [
+        Usage(
+            input_tokens=50,
+            output_tokens=42,
+            cache_read_tokens=900,
+            cache_write_tokens=250,
+        )
+    ]
+    # 원시 총입력은 세 칸의 합으로 복원된다(domain `total_input_tokens`가 하는 일).
+    recovered = usages[0].input_tokens + usages[0].cache_read_tokens + usages[0].cache_write_tokens
+    assert recovered == raw_input_tokens
+
+
+def test_cache_details_larger_than_the_input_total_clamp_to_zero_and_warn(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """빼기가 음수면 우리가 모르는 방식으로 계약이 바뀐 것이다.
+
+    음수 토큰 수는 화면에도 집계에도 넣을 수 없어 0으로 깎는다. 진단에 필요한 원시 세 값은
+    로그가 들고 있다. 턴을 `Failure`로 끝내지는 않는다.
+    """
+    client = one_call(
+        final_event(
+            response_of(
+                input_tokens=100,
+                output_tokens=7,
+                cached_tokens=90,
+                cache_write_tokens=80,
+            )
+        )
+    )
+
+    with caplog.at_level(logging.WARNING):
+        usages = [event for event in run_turn(client) if isinstance(event, Usage)]
+
+    assert usages == [
+        Usage(
+            input_tokens=0,
+            output_tokens=7,
+            cache_read_tokens=90,
+            cache_write_tokens=80,
+        )
+    ]
+    # 원시 세 값이 로그에 남아 진단이 가능하다. 토큰 수는 비밀이 아니다.
+    assert "cache details exceed the input total" in caplog.text
+    assert "input_tokens=100" in caplog.text
+    assert "cached_tokens=90" in caplog.text
+    assert "cache_write_tokens=80" in caplog.text
 
 
 def test_an_empty_reasoning_summary_is_not_emitted() -> None:

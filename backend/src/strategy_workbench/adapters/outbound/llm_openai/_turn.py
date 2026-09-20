@@ -77,6 +77,7 @@ from openai.types.responses import (
     ResponseInputItemParam,
     ResponseOutputItem,
     ResponseStreamEvent,
+    ResponseUsage,
     ToolParam,
 )
 from openai.types.responses.response_input_item_param import FunctionCallOutput
@@ -207,7 +208,7 @@ def stream_turn(
         usage = response.usage
         if usage is not None:
             spent_output_tokens += usage.output_tokens
-            yield Usage(input_tokens=usage.input_tokens, output_tokens=usage.output_tokens)
+            yield _usage_of(usage)
 
         if _has_refusal(response):
             yield Failure(
@@ -351,6 +352,45 @@ def _stream_once(
         )
         return _CallOutcome(response=None, search_uses=search_uses)
     return _CallOutcome(response=final, search_uses=search_uses)
+
+
+def _usage_of(usage: ResponseUsage) -> Usage:
+    """OpenAI 원시값(내역 포함)을 domain 분리형으로 변환한다.
+
+    domain `Usage`의 세 입력 칸은 **서로 겹치지 않는다.** `input_tokens`는 캐시 읽기·쓰기를
+    제외한 입력이고, 나머지 둘이 캐시분이다. 원시 총입력은 세 칸을 더해 복원한다
+    (domain이 `total_input_tokens`로 제공한다).
+
+    OpenAI는 반대 모양이다. `input_tokens_details`는 이름 그대로 `input_tokens`의 *내역*이라
+    `cached_tokens`·`cache_write_tokens`가 `input_tokens` **안에** 이미 들어 있다. 그래서 여기서
+    빼서 겹치지 않게 만든다. 이 변환을 adapter가 하는 이유는 domain과 세션 집계가 공급자별
+    분기를 갖지 않게 하기 위해서다 — 뜻이 공급자마다 달라지면 집계가 한쪽만 두 번 센다.
+
+    빼기가 음수가 되면 우리가 모르는 방식으로 계약이 바뀐 것이다. 그때는 **0으로 깎고 경고를
+    남긴다.** 음수 토큰 수는 화면에도 세션 집계에도 넣을 수 없는 값이라 그대로 흘리면 더 먼 곳에서
+    이상하게 터진다. 진단에 필요한 원시 세 값은 로그가 들고 있으므로 잃지 않는다(토큰 수는 비밀이
+    아니다). 턴을 `Failure`로 끝내지는 않는다 — 토큰 회계 하나 때문에 사용자가 답변을 잃을 이유가
+    없다.
+    """
+    details = usage.input_tokens_details
+    cache_read_tokens = details.cached_tokens
+    cache_write_tokens = details.cache_write_tokens
+    uncached_input_tokens = usage.input_tokens - cache_read_tokens - cache_write_tokens
+    if uncached_input_tokens < 0:
+        logger.warning(
+            "openai usage cache details exceed the input total — input_tokens=%d "
+            "cached_tokens=%d cache_write_tokens=%d; clamping the uncached input to 0",
+            usage.input_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+        )
+        uncached_input_tokens = 0
+    return Usage(
+        input_tokens=uncached_input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+    )
 
 
 def _events_from(event: ResponseStreamEvent) -> tuple[list[ChatEvent], int]:

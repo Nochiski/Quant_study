@@ -24,15 +24,19 @@ import time
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, TypeAlias
 
-import httpx2
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-pytest.importorskip("openai", reason="backend optional extra `llm` (uv sync --extra llm)")
+pytest.importorskip(
+    "openai",
+    reason="공급자 SDK는 optional extra `llm`이다. 미설치 환경에서는 이 모듈을 건너뛴다.",
+)
 
-import openai  # noqa: E402  # reason: importorskip 이후 import
+import httpx2  # noqa: E402  # reason: SDK가 끌고 오는 전송 계층이라 importorskip 뒤에야 있다
+import openai  # noqa: E402  # reason: 위와 같음
 
 from strategy_workbench.adapters.outbound.llm_openai.facade.provider import (  # noqa: E402  # reason: importorskip 이후 import
     DEFAULT_MODEL,
@@ -56,6 +60,11 @@ from ..openai_stream_script import (  # noqa: E402  # reason: importorskip 이�
     response_of,
     text_delta,
 )
+
+# 헬퍼가 받는 HTTP 클라이언트. 두 종류가 섞이는 이유는 `test_assistant_http_api.py`와 같다 —
+# starlette 1.6의 `TestClient`는 설치된 전송 계층에 따라 `httpx` 또는 `httpx2`를 상속하고, 둘은
+# 서로의 하위 타입이 아니다. 한쪽으로만 적으면 extra 설치 여부에 따라 타입 검사가 갈린다.
+AssistantClient: TypeAlias = TestClient | httpx.Client
 
 _API_KEY = "sk-proj-secret-workbench-ABCD1234"
 _ASSISTANT = "/api/v1/assistant"
@@ -131,7 +140,7 @@ def _client(tmp_path: Path, factory: _RecordingFactory) -> TestClient:
     return TestClient(app)
 
 
-def _create_profile(client: TestClient) -> dict[str, Any]:
+def _create_profile(client: AssistantClient) -> dict[str, Any]:
     response = client.post(
         f"{_ASSISTANT}/providers",
         json={"kind": "openai", "label": "내 Codex", "secret": _API_KEY},
@@ -140,13 +149,13 @@ def _create_profile(client: TestClient) -> dict[str, Any]:
     return response.json()
 
 
-def _start_session(client: TestClient) -> str:
+def _start_session(client: AssistantClient) -> str:
     response = client.post(f"{_ASSISTANT}/sessions", json={"document_ref": _DOCUMENT_REF})
     assert response.status_code == 201, response.text
     return response.json()["session_id"]
 
 
-def _settled_history(client: TestClient, session_id: str) -> dict[str, Any]:
+def _settled_history(client: AssistantClient, session_id: str) -> dict[str, Any]:
     """턴이 종료 상태가 될 때까지 이력을 다시 읽는다.
 
     턴은 러너의 스레드에서 돌기 때문에 202 응답 시점에는 아직 이벤트가 없다. 고정 시간

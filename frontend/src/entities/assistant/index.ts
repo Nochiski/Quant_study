@@ -6,13 +6,63 @@ export {
   useActivateAssistantProvider,
   useDeleteAssistantProvider,
 } from "./model/provider-queries";
-export { AssistantRequestError, assistantProviderApi } from "../../shared/api";
+export {
+  assistantSessionKey,
+  assistantSessionQuery,
+  assistantSessionsKey,
+  assistantSessionsQuery,
+  useCancelAssistantTurn,
+  useCreateAssistantSession,
+  useStartAssistantTurn,
+  type CancelAssistantTurnInput,
+  type StartAssistantTurnInput,
+} from "./model/session-queries";
+export {
+  assistantChatReducer,
+  assistantTurn,
+  emptyAssistantChatState,
+  runningAssistantTurn,
+  type AssistantChatAction,
+  type AssistantChatState,
+  type AssistantFailure,
+  type AssistantSearchActivity,
+  type AssistantToolActivity,
+  type AssistantTurnState,
+} from "./model/chat-state";
+export { assistantFailureMessage } from "./model/failure-copy";
+export {
+  assistantStreamTarget,
+  useAssistantEventStream,
+  type AssistantStreamClose,
+  type AssistantStreamTarget,
+  type UseAssistantEventStreamOptions,
+} from "./model/use-assistant-event-stream";
+export {
+  ASSISTANT_SSE_MAX_RETRY_ATTEMPTS,
+  AssistantRequestError,
+  assistantProviderApi,
+} from "../../shared/api";
 export type {
+  AssistantEventEnvelopeView,
+  ChatMessageView,
+  ChatRole,
   CreateProviderProfileRequestWritable as CreateProviderProfileInput,
+  CreateSessionRequest,
+  DocumentRefView,
+  FailureCode,
   ProbeFailure,
   ProbeResultView,
   ProviderKind,
   ProviderKindView,
   ProviderProfileView,
   ProvidersView,
+  SessionHistoryView,
+  SessionView,
+  SourceView,
+  StartTurnRequest,
+  StrategyProposalView,
+  TurnAcceptedView,
+  TurnContextPayload,
+  TurnStatus,
+  TurnView,
 } from "../../shared/api";

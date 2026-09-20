@@ -1,3 +1,10 @@
+/**
+ * 어시스턴트 어휘의 단일 입구.
+ *
+ * 상위 레이어는 `shared/api/assistant*`를 직접 import하지 않고 이 배럴을 쓴다 — 같은 값을 두 자리에서
+ * 가져오면 어느 한쪽이 바뀌었을 때 그 사실이 나뉜다. 그래서 생성 타입과 `shared` 상수·오류 타입도
+ * 여기서 다시 내보낸다(B-02 리뷰 P3-3 결정, 2026-09-21).
+ */
 export {
   assistantProvidersKey,
   assistantProvidersQuery,

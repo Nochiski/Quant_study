@@ -65,9 +65,11 @@ test.describe("real equity data", () => {
   test.describe.configure({ mode: "serial" });
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  // P3-01 에서 되살린다. schema 1.2 는 실행 기간·유니버스를 전략 문서에서 빼 실행 요청의
-  // `environment` 로 옮겼고(P2-03), 그 값을 싣는 프론트 배선은 P3-01·P3-02 의 실행 설정 패널이다.
-  // 그때까지 브라우저에서 시작한 백테스트는 422 `backtest.run.environment_required` 로 거절된다.
+  // P3-02(실행 설정 패널)에서 되살린다. schema 1.2 는 실행 기간·유니버스를 전략 문서에서 빼
+  // 실행 요청의 `environment` 로 옮겼고(P2-03), 그 값을 싣는 프론트 배선이 그 패널이다. 기간에는
+  // 스키마 기본값이 있을 수 없어 요청에 상수를 박는 shim 으로 앞당길 수 없다. 그때까지 브라우저에서
+  // 시작한 백테스트는 422 `backtest.run.environment_required` 로 거절된다. 최종 시나리오 재작성은
+  // P3-03(e2e fixture 1.2)이 맡는다.
   // 되살릴 때 바꿀 것: OOS 창이 읽던 `dateRange` 출처와 기대 요청 본문의 `environment`.
   test.fixme("edits the graph on real data, saves the revision and completes a backtest", async ({
     page,

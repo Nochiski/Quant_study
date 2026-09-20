@@ -19,7 +19,6 @@ const FACTOR: FactorDefinition = {
   default_graph: {
     nodes: [{ kind: "field", node_id: "px", field_id: "price.close" }],
     output_node_id: "px",
-    missing_policy: "drop",
   },
   description: "Server factor",
   factor_id: "server.momentum",
@@ -47,26 +46,21 @@ const catalog = (
   buildCanonicalSnippetCatalog({ schema, factors, status });
 
 describe("canonical StrategySpec snippets", () => {
-  it("projects all five areas, defaults and factor graphs only from backend contracts", () => {
+  it("projects every area, defaults and factor graphs only from backend contracts", () => {
     const snippets = catalog();
 
+    // schema 1.2에서 `data`·`execution`은 문서를 떠나 실행 설정이 소유한다(P2-03).
     expect(new Set(snippets.map((snippet) => snippet.category))).toEqual(
-      new Set(["data", "factor", "signal", "risk", "execution"]),
+      new Set(["factor", "signal", "risk"]),
     );
-    expect(findSnippet(snippets, "section:data").value).toEqual({
-      market: "KRX",
-      start: "",
-      end: "",
-      universe_id: "",
-      frequency: "daily",
+    expect(findSnippet(snippets, "section:signal").value).toEqual({
+      score_threshold: null,
+      regime_field_id: null,
+      regime_minimum: null,
     });
     expect(findSnippet(snippets, "section:risk").value).toMatchObject({
       max_name_weight: 0.1,
       sector_neutral: false,
-    });
-    expect(findSnippet(snippets, "section:execution").value).toMatchObject({
-      timing: "next_open",
-      fee_bps: 15,
     });
     expect(findSnippet(snippets, "factor:server.momentum").value).toEqual({
       factor_id: "server.momentum",
@@ -263,8 +257,8 @@ describe("canonical StrategySpec snippets", () => {
   });
 
   it("fails without mutation for duplicate, selected, JSON and unsafe cursor contexts", () => {
-    const snippet = findSnippet(catalog(), "section:data");
-    const duplicate = "data:\n  market: TEST\n";
+    const snippet = findSnippet(catalog(), "section:risk");
+    const duplicate = "risk:\n  max_name_weight: 0.2\n";
     expect(
       planSnippetEdit(
         duplicate,

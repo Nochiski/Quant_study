@@ -10,7 +10,6 @@ export {
   type BacktestStartResponse,
   type CompileRequest,
   type CompiledDocument,
-  type DataStep,
   type DatasetFieldProfile,
   type DiffEntry,
   type EquityCatalogQuery,

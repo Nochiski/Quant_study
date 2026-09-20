@@ -1,1 +1,1 @@
-export type { DataStep, StrategySpec } from "../../../shared/api";
+export type { StrategySpec } from "../../../shared/api";

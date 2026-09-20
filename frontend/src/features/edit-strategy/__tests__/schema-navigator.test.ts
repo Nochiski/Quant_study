@@ -25,7 +25,7 @@ describe("schema navigator", () => {
     expect(options.map((o) => o.name)).toEqual(
       Object.keys(SCHEMA.properties as object),
     );
-    expect(options.find((o) => o.name === "data")?.required).toBe(true);
+    expect(options.find((o) => o.name === "title")?.required).toBe(true);
     expect(options.find((o) => o.name === "risk")?.required).toBe(false);
     expect(options.find((o) => o.name === "parameters")?.required).toBe(false);
   });
@@ -163,7 +163,7 @@ describe("schema navigator", () => {
     );
     expect(valueOptions(operator!)).toEqual(["gt", "gte", "lt", "lte", "eq"]);
     const version = schemaAt(SCHEMA, "/schema_version", DOCUMENT);
-    expect(valueOptions(version!)).toEqual(["1.1"]);
+    expect(valueOptions(version!)).toEqual(["1.2"]);
     expect(typeLabel(operator!.node)).toBe("enum(gt|gte|lt|lte|eq)");
   });
 

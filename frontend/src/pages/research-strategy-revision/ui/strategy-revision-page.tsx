@@ -20,7 +20,6 @@ import {
   PROJECTION_VIEWS,
   canValidateDocument,
   currentDiagnostics,
-  currentSpec,
   projectStrategySpec,
   revisionDraftId,
   saveStatusText,
@@ -108,14 +107,9 @@ export const StrategyRevisionPage = () => {
     schemaVersion: assist.schemaVersion,
   });
   const executionPlans = useExecutionPlans(document, assist.inspectorSource);
-  const executableSpec = currentSpec(document);
-  const runDateRange = useMemo(
-    () =>
-      executableSpec === null
-        ? null
-        : { start: executableSpec.data.start, end: executableSpec.data.end },
-    [executableSpec],
-  );
+  // 실행 기간의 owner가 전략 문서에서 실행 설정으로 옮겨갔다(schema 1.2). 그 값을 편집하는
+  // 실행 설정 패널은 P3-01·P3-02에서 붙으므로 그때까지 기간은 지정되지 않은 상태다.
+  const runDateRange = null;
   const runSettings = useBacktestRunSettings(runDateRange);
   const backtest = useRunBacktest(
     document,

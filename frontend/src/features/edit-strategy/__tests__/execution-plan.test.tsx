@@ -33,7 +33,7 @@ const API = "http://localhost:8000";
 const FIXTURE_SPEC = JSON.parse(
   readBackendFixture("strategy_documents/quality_momentum.legacy.json"),
 ) as StrategySpec;
-const MOMENTUM_FACTOR = FIXTURE_SPEC.factors[0]!;
+const MOMENTUM_FACTOR = FIXTURE_SPEC.factors![0]!;
 const SPEC: StrategySpec = {
   ...FIXTURE_SPEC,
   title: "멀티 팩터",
@@ -53,7 +53,6 @@ const SPEC: StrategySpec = {
           },
         ],
         output_node_id: "book",
-        missing_policy: "keep",
       },
     },
   ],
@@ -133,7 +132,7 @@ const METADATA: ContractInspectorSource = {
   schema: {
     schema: { type: "object" },
     schema_hash: "schema-hash",
-    schema_version: "1.1",
+    schema_version: "1.2",
   },
   contract: {
     contract: {
@@ -142,7 +141,7 @@ const METADATA: ContractInspectorSource = {
       factor_registry_version: "registry-v1",
       fields: [],
       schema_hash: "schema-hash",
-      schema_version: "1.1",
+      schema_version: "1.2",
     },
     equity_catalog_url: "/api/v1/equity/catalog",
     factor_catalog_url: "/api/v1/factors/catalog",
@@ -166,7 +165,7 @@ const currentState = (): DocumentState => ({
     spec: SPEC,
     canonicalJson: JSON.stringify(SPEC),
     specHash: "s".repeat(64),
-    schemaVersion: "1.1",
+    schemaVersion: "1.2",
     sourceHash: "x".repeat(64),
     diagnostics: [],
   },
@@ -218,7 +217,8 @@ const explanation = (body: FactorGraphRequest): FactorExplanation => {
       referenced_factor_ids: [],
       referenced_subgraph_ids: [],
       minimum_history_sessions: contracts.at(-1)?.minimum_history_sessions ?? 0,
-      missing_policy: body.missing ?? graph.missing_policy ?? "drop",
+      // schema 1.2 문서에는 결측 정책이 없다 — 요청이 명시하지 않으면 모델 기본값이다.
+      missing_policy: body.missing ?? "drop",
       as_of_policy: "available_date_lte_as_of",
     },
     narrative: [],
@@ -344,7 +344,7 @@ describe("execution plan orchestration", () => {
       status: "incompatible",
       resource: "schema-contract",
       expected: "2.0",
-      actual: "1.1:1.1",
+      actual: "1.2:1.2",
     });
     const { result } = renderHook(
       () => useExecutionPlans(currentState(), nextRuntime),

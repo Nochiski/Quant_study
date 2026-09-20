@@ -27,7 +27,6 @@ const graph = (fieldId: string): FactorGraphRequest["graph"] => ({
     },
   ],
   output_node_id: "momentum",
-  missing_policy: "drop",
 });
 
 const explanation = (
@@ -59,6 +58,7 @@ const explanation = (
     ],
   },
   plan: {
+    missing_policy: "drop",
     graph_hash: suffix.repeat(64),
     plan_hash: suffix.toUpperCase().repeat(64),
     registry_version: "factor-registry-v1",
@@ -89,7 +89,6 @@ const explanation = (
     referenced_factor_ids: [],
     referenced_subgraph_ids: [],
     minimum_history_sessions: 252,
-    missing_policy: "drop",
     as_of_policy: "available_date_lte_as_of",
   },
   narrative: [],

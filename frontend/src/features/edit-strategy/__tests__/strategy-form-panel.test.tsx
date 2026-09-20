@@ -111,12 +111,13 @@ describe("StrategyFormPanel controls", () => {
       { focusEditor: false },
     );
 
-    const fee = section("execution").getByRole("spinbutton", named("fee_bps"));
-    await user.clear(fee);
-    await user.type(fee, "20{Enter}");
+    const gross = section("risk").getByRole("spinbutton", named("gross_exposure"));
+    await user.clear(gross);
+    await user.type(gross, "1.5{Enter}");
+    // MINIMAL 문서에는 없는 키라 삽입 트랜잭션이 된다.
     expect(transactions.apply).toHaveBeenLastCalledWith(
-      { kind: "replace-scalar", pointer: "/execution/fee_bps", value: 20 },
-      "fee_bps",
+      { kind: "insert-key", parentPointer: "/risk", key: "gross_exposure", value: 1.5 },
+      "gross_exposure",
       "form",
       { focusEditor: false },
     );
@@ -276,7 +277,7 @@ describe("StrategyFormPanel controls", () => {
         "현재 모드에서는 읽히지 않는 필드입니다",
       ).length,
     ).toBeGreaterThan(0);
-    expect(section("data").getByText("기본값 KRX")).toBeInTheDocument();
+    expect(section("portfolio").getByText("기본값 long_only")).toBeInTheDocument();
   });
 });
 
@@ -294,7 +295,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
       eligibility.getByRole("button", { name: "liquidity.adv · 삭제" }),
     ).toBeInTheDocument();
     const root = section("기본 정보");
-    expect(root.getByText("1.1")).toHaveAttribute("aria-labelledby");
+    expect(root.getByText("1.2")).toHaveAttribute("aria-labelledby");
     expect(root.queryByRole("textbox", named("schema_version"))).toBeNull();
     expect(root.queryByRole("button", { name: /schema_version ·/ })).toBeNull();
   });
@@ -435,10 +436,13 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
     rerender(view(MINIMAL.replace("max_name_weight: 0.05", "max_name_weight: 0.3")));
     expect(weight).toHaveValue(0.3);
     // 한 번도 손대지 않은 다른 입력도 외부 변경(스니펫·소스 편집기·undo)을 따라간다(`draft === seen` 경로).
-    const fee = section("execution").getByRole("spinbutton", named("fee_bps"));
-    expect(fee).toHaveValue(15);
-    rerender(view(MINIMAL.replace("fee_bps: 15.0", "fee_bps: 20.0")));
-    expect(fee).toHaveValue(20);
+    const count = section("portfolio").getByRole(
+      "spinbutton",
+      named("selection_count"),
+    );
+    expect(count).toHaveValue(20);
+    rerender(view(MINIMAL.replace("selection_count: 20", "selection_count: 25")));
+    expect(count).toHaveValue(25);
     // 예전에 확정했던 문자열을 경유해 치는 중에도(0.2까지 쳤을 때 외부 변경 도착) 되돌리지 않는다.
     await user.clear(weight);
     await user.type(weight, "0.2");

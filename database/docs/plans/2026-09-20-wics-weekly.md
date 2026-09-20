@@ -128,6 +128,18 @@
 
 ---
 
+## 4b. 조용한 실패 점검 (2026-09-20 11:45, 사용자 "조용한 실패가 있으면 안됨")
+
+| 경로 | 전 | 후 |
+|---|---|---|
+| `wics_weekly.sh` 종료 코드 | `{ … } \| tee` 파이프 안에서 RC 가 서브셸에 갇혀 **항상 0 → 실패해도 info "완료"** | RC 를 파일로 꺼낸다. 실측: 휴장일 dt 로 rc 4 → warn, `--retry` 로 rc 4 → **crit** |
+| 빈 응답 일부(예 33/38) | rc 0 → info | rc 4 → warn + 10:00 재시도(빈 코드만 재호출), 재시도 뒤에도 비면 crit |
+| L1 검산 불일치(Σ L2 ≠ L1) | 출력만 | 전 코드를 받은 런이면 rc 5 → crit(부분 런은 원장 건전성 `wics.integrity` REQUIRED 가 DB 로 판정) |
+| 크론 자체가 안 돎 | 알림 없음(9일 뒤 `wics.fresh` WARN, 14일 뒤 C6 crit) | **토 11:30 `watchdog.sh wics_weekly`** — 금요일 dt 38코드(행>0) 없으면 crit(크론 `30 2 * * 6`, 09-20 등록) |
+| 아침 체인 | — | `wics.integrity` REQUIRED(38/38·L1 10/10) → 08:10 daily_build crit · stage C6 14일 · equity EG3_sector_snapshot |
+
+배포 rev 00ba456(tests 1,299). 서버 실측 09-20 11:40: ① `watchdog wics_weekly` info(09-18 38/38) ② `--date 20260920` rc 4 warn ③ `--retry --date 20260920` rc 4 crit — 텔레그램 3건은 검증용.
+
 ## 5. 리스크·완화
 
 | 리스크 | 완화 |

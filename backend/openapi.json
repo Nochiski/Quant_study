@@ -2485,11 +2485,6 @@
             ],
             "title": "Default From"
           },
-          "deprecated": {
-            "default": false,
-            "title": "Deprecated",
-            "type": "boolean"
-          },
           "description_key": {
             "anyOf": [
               {

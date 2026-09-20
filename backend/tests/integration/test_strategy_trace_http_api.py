@@ -775,34 +775,24 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     )
 
 
-def test_conflicting_legacy_missing_policies_are_coded_on_trace_like_preview() -> None:
-    """P2-02 2차 리뷰 P3: trace 도 preview·run 과 같은 코드·details 구조로 거절한다.
+def test_a_missing_environment_is_coded_on_trace_like_preview() -> None:
+    """P2-02 2차 리뷰 P3: trace 도 preview 와 같은 코드·details 구조로 거절한다.
 
     trace 만 사유를 메시지 문자열로 납작하게 만들면 프론트가 코드로 분기하려고 본문을 파싱해야
-    한다.
+    한다. 1.2 에서 그 사유는 "실행 설정이 없다"다(P2-03).
     """
     client = TestClient(build_http_app())
     spec, request = _inline_request(client)
-    factor = spec["factors"][0]
-    conflicting = copy.deepcopy(spec)
-    conflicting["factors"] = [
-        {**factor, "graph": {**factor["graph"], "missing_policy": "zero"}},
-        {
-            **copy.deepcopy(factor),
-            "factor_id": f"{factor['factor_id']}_dropped",
-            "graph": {**copy.deepcopy(factor["graph"]), "missing_policy": "drop"},
-        },
-    ]
-    request = {**request, "strategy_source": {"kind": "inline_draft", "spec": conflicting}}
+    request = {key: value for key, value in request.items() if key != "environment"}
 
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": conflicting})
+    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
     trace = client.post("/api/v1/strategies/debug/trace", json=request)
 
-    assert (preview.status_code, trace.status_code) == (422, 422)
+    assert (preview.status_code, trace.status_code) == (422, 422), (preview.text, trace.text)
     codes = [response.json()["detail"]["code"] for response in (preview, trace)]
     assert codes == ["portfolio.strategy.invalid", "portfolio.strategy.invalid"]
     issue_codes = [
         [issue["code"] for issue in response.json()["detail"]["validation"]["issues"]]
         for response in (preview, trace)
     ]
-    assert issue_codes == [["run_environment.missing_policy_conflict"]] * 2
+    assert issue_codes == [["run_environment.required"]] * 2

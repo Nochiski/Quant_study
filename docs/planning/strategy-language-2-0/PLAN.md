@@ -6,7 +6,7 @@ current_phase: P0,P1,P2
 current_pr: P0-01,P1-01,P1-02,P2-01,P2-02,P2-03
 active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03]
 parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03]
-last_updated: 2026-09-21T03:24:33+09:00
+last_updated: 2026-09-21T06:42:08+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 2
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02, P2-03` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `2 / 28` |
-| Aggregated at | `2026-09-21 02:04 KST` |
+| Aggregated at | `2026-09-21 06:42 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -81,7 +81,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 0 | `APPROVED` |
 | P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_PROGRESS` |
-| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_REVIEW` |
+| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `SELF_CHECK` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
@@ -163,7 +163,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Diff stat | 커밋 5개 · backend domain/application/adapter + 계약 산출물 + 테스트 + frontend 최소 적응 |
 | Focused tests | `uv run pytest tests/domain/test_strategy_hydrate.py tests/domain/test_run_environment.py tests/architecture tests/application/test_run_environment_wiring.py tests/contract/test_strategy_repository_frozen_1_0.py -q` |
 | 제약사항 | **P2-09 전까지 은퇴 버전 문서의 업그레이드 결과는 저장·실행할 수 없다.** `POST /api/v1/strategy-documents/upgrade`가 아직 1.1까지만 올리므로(1.1 → 1.2 step 등록과 응답 `environment`는 P2-09 acceptance) 돌려준 원문의 compile 진단에 `structure.unsupported_schema_version`이 실린다. 저장된 은퇴 버전 row는 repository codec이 `strip_retired_execution_settings`까지 태워 현재 버전으로 읽으므로 목록·이력·문서 조회는 그대로 동작한다. 크기: 이 PR은 12절 상한(600줄·10파일)을 크게 넘는다 — 최상위 모델 필드 두 개를 지우는 변경이라 hydrate·schema·validation·explanation·compile·adapter·fixture·테스트가 한 커밋 단위로 같이 움직여야 컴파일되고, enum 이동만 떼어내도 상한 안에 들어오지 않는다 |
-| Full gate | backend `uv run pytest -q`(1538 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 clean) · `pyright`(0 errors) / frontend `npm run api:generate`·`typecheck`·`lint`·`test`(639, 57파일)·`build` |
+| Full gate | backend `uv run pytest -q`(1544 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 clean) · `pyright`(0 errors) / frontend `npm run api:generate`·`typecheck`·`lint`·`test`(639, 57파일)·`build` / `uv run --project backend pytest database/tests -q`(base `1dee07a` 와 같은 41 failed/1268 passed/33 errors — Windows symlink 권한(`WinError 1314`)으로 나는 기존 실패다) |
 
 P2-03 결정 5건(WORKFLOW 결정 항목과 원문과 다르게 간 곳):
 
@@ -184,6 +184,23 @@ P2-03 결정 5건(WORKFLOW 결정 항목과 원문과 다르게 간 곳):
    `RunEnvironment | None`으로 두고 `require_environment`가 `run_environment.required`(run 경로는
    422 `backtest.run.environment_required`)로 거절한다. 타입을 필수로 바꾸면 pydantic의 영문
    "Field required"가 나가 프론트가 번역할 코드를 잃는다.
+
+6. **팩터 sandbox 의 `missing` 기본값을 실행 설정과 같은 상수로 묶었다.** P2-02 후속이 넣은
+   "요청이 `missing` 을 생략하면 문서의 `graph.missing_policy` 로 떨어진다"는 1.2 에서 떨어질
+   문서 값이 없어 성립하지 않는다. 대신 `domain/backtest` 가 `DEFAULT_MISSING_POLICY`(= 1.1
+   까지의 기본값 `drop`)를 소유하고 `RunEnvironment.missing` 과 sandbox 요청이 같은 상수를
+   읽는다 — 두 기본값이 갈리면 편집 화면의 실행 플랜 패널이 실제 실행과 다른 `plan_hash` 를
+   보인다. P3-01 이 실행 설정의 `missing` 을 sandbox 요청에 실으면 `None` 경로가 사라진다.
+   `resolve_graph_missing_policy`·`_missing_from_legacy_graphs`·`LegacyMissingPolicyConflictError`
+   는 입력이 사라져 함께 삭제했다.
+7. **`domain/backtest/_bridge.py` 를 `_requirement.py` 로 개명했다.** 브리지가 사라진 뒤에도
+   파일 이름이 "브리지"로 남으면 다음 사람이 없는 폴백을 찾는다.
+8. **`x-deprecated` 표기를 은퇴시켰다**(WORKFLOW P2-03 잔재 삭제 항목). `DEPRECATED_FIELD`
+   마커, 런타임 스키마의 `x-deprecated` 발행, `FieldContract.deprecated` 를 지웠다 — 유일한
+   사용자였던 `graph.missing_policy` 가 사라졌다. 다시 필요해지면 그때 되살린다.
+9. **아키텍처 가드를 `*.graph.missing_policy` 모양으로 좁혔다**(P2-02 2차 리뷰 P3). 이름만 보고
+   전부 잡으면 `FactorExecutionPlan.missing_policy`(실행 설정에서 인자로 받아 `plan_hash` 에
+   남는 정당한 필드)까지 걸려, 가드가 옳은 코드를 막고 결국 지워진다.
 
 WORKFLOW 원문과 다르게 간 곳 2건:
 
@@ -422,6 +439,15 @@ Phase exit:
   (WORKFLOW가 지정한 유스케이스 서비스 3파일) 밖이다. `execution` 제거가 강제하는 P2-03 acceptance에
   항목으로 넣었다. 그때까지는 명시 `environment`로 참여율·체결 시점을 바꿔도 엔진 호환성 판정과
   tape hash는 문서 값을 읽는다(`ExecutionTiming` 값이 하나뿐이라 tape hash 실효 차이는 없다).
+- 2026-09-21 — P2-03 rebase(base `1dee07a`) 후속. P2-02 리뷰 후속이 넣은 sandbox 문서 폴백이
+  1.2 에서 성립하지 않아 `DEFAULT_MISSING_POLICY` 한 상수로 정리했다(결정 6). `x-deprecated`
+  표기 은퇴(결정 8)와 아키텍처 가드 범위 축소(결정 9)로 P2-02 미반영 P3 두 건도 닫았다.
+  **브라우저 백테스트 경로가 P3-01 까지 죽는다**: 실행 기간·유니버스를 요청의 `environment` 로
+  옮겼는데 그 값을 싣는 프론트 배선이 P3-01·P3-02 이므로, UI 에서 시작한 run 은 422
+  `backtest.run.environment_required` 로 거절된다. e2e 시나리오 3개(`creates, recovers, …
+  backtests`, `edits the graph on real data …`, `upgrades a frozen 1.0 revision …`)를
+  `test.fixme` 로 잠그고 되살릴 지점을 주석에 적었다. P2-09 머지 전까지 1.0·1.1 문서의 실행
+  경로도 없다 — 스택을 한꺼번에 머지하면 main 에는 이 상태가 남지 않는다.
 - 2026-09-21 — P2-03 구현. WORKFLOW 결정 항목 4건에 결론을 내고(위 Packet 결정 1~4), 실행 설정
   미지정을 코드화된 진단으로 거절하기로 정했다(결정 5). WORKFLOW 원문과 다르게 간 곳 2건(template()의
   시작 팩터, 422 코드 철자)도 같은 표에 적었다. 크기 분할은 하지 않았다 — WORKFLOW가 제시한 분할선

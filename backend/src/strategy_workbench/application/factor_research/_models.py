@@ -21,8 +21,9 @@ class FactorGraphRequest:
     factor_ids: tuple[str, ...] = ()
     subgraph_ids: tuple[str, ...] = ()
     # 결측 정책은 전략 문서가 아니라 실행이 소유한다(P2-02). 팩터 연구는 전략 실행 설정 밖에서
-    # 도는 sandbox 라 요청이 직접 들고 온다. 생략하면(`None`) 1.1 그래프의 legacy 값으로
-    # 떨어져 전략 실행과 같은 plan 을 낸다 — 편집 화면의 실행 플랜 패널이 그 경로다.
+    # 도는 sandbox 라 요청이 직접 들고 온다. 1.2 문서에는 떨어질 legacy 값이 없으므로 생략하면
+    # (`None`) 실행 설정과 같은 기본값(`DEFAULT_MISSING_POLICY`)을 쓴다 — 편집 화면의 실행 플랜
+    # 패널이 실제 실행과 같은 `plan_hash` 를 보이려면 두 기본값이 한 상수여야 한다(P2-03).
     missing: MissingPolicy | None = None
 
 

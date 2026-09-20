@@ -547,7 +547,7 @@ const ko = {
   "upgrade.pending": "업그레이드 중…",
   "upgrade.applied": "1.1로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
   "upgrade.frozenGenerated":
-    "schema 1.0 동결 revision입니다. 생성된 문서는 이미 1.1이므로 편집 후 새 revision으로 저장하세요.",
+    "schema 1.0 동결 revision입니다. 생성된 문서는 이미 현재 버전이므로 편집 후 새 revision으로 저장하세요.",
   "upgrade.backtestBlocked":
     "저장된 1.0 revision으로는 백테스트를 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "upgrade.error.editor": "편집기가 준비되지 않아 업그레이드하지 못했습니다.",
@@ -1453,7 +1453,7 @@ export const messages = {
     "upgrade.applied":
       "Rewritten as 1.1. Review it, then save it as a new revision.",
     "upgrade.frozenGenerated":
-      "This is a frozen schema 1.0 revision. The generated document is already 1.1: edit it and save a new revision.",
+      "This is a frozen schema 1.0 revision. The generated document is already on the current version: edit it and save a new revision.",
     "upgrade.backtestBlocked":
       "A stored 1.0 revision cannot run a backtest. Upgrade it and save a new revision first.",
     "upgrade.error.editor": "The editor is not ready, so nothing was upgraded.",

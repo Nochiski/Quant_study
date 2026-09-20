@@ -1485,10 +1485,6 @@ export type FieldContract = {
    */
   default_from?: string | null;
   /**
-   * Deprecated
-   */
-  deprecated?: boolean;
-  /**
    * Description Key
    */
   description_key?: string | null;

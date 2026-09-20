@@ -94,23 +94,34 @@ def test_every_preview_request_carries_the_resolved_environment() -> None:
     )
 
 
-def _missing_policy_reads(path: Path) -> list[str]:
+def _graph_missing_policy_reads(path: Path) -> list[str]:
+    """`<무엇>.graph.missing_policy` 모양만 센다.
+
+    이름만 보고 `missing_policy` 를 전부 잡으면 `FactorExecutionPlan.missing_policy`(실행 설정에서
+    인자로 받아 `plan_hash` 에 남는 정당한 필드)까지 걸린다 — 가드가 옳은 코드를 막으면 다음
+    사람이 가드를 지운다(P2-02 2차 리뷰 P3).
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     return [
         f"{path.relative_to(SRC_ROOT).as_posix()}:{node.lineno} {ast.unparse(node)}"
         for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute) and node.attr == "missing_policy"
+        if isinstance(node, ast.Attribute)
+        and node.attr == "missing_policy"
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "graph"
     ]
 
 
 def test_nothing_reads_a_graph_missing_policy_attribute() -> None:
-    """P2-03: 필드가 모델에서 사라졌으므로 읽는 곳도 0 건이다.
+    """P2-03: 필드가 `FactorGraph` 에서 사라졌으므로 읽는 곳도 0 건이다.
 
-    plan payload 의 `missing_policy` 는 dict 키라 속성 읽기가 아니다 — 그쪽은 실행 설정에서
-    인자로 받은 값이고 `plan_hash` 에 남는다(P2-02 의 캐시 키 invariant).
+    필드 자체가 없다는 사실은 `tests/domain/test_factor_missing_policy.py` 가 고정한다. 이
+    가드는 호환 shim 이 되살아나는 것을 막는 그물이다.
     """
     offenders = [
-        item for path in sorted(SRC_ROOT.glob("**/*.py")) for item in _missing_policy_reads(path)
+        item
+        for path in sorted(SRC_ROOT.glob("**/*.py"))
+        for item in _graph_missing_policy_reads(path)
     ]
     assert offenders == [], (
         "`graph.missing_policy` 속성을 읽는 코드가 있다 — "

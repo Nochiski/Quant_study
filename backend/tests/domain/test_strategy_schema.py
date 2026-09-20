@@ -427,5 +427,6 @@ def test_execution_settings_left_the_authoring_schema() -> None:
     assert "DataStep" not in schema["$defs"] and "ExecutionStep" not in schema["$defs"]
     assert "missing_policy" not in schema["$defs"]["FactorGraph"]["properties"]
     assert not [pointer for pointer in pointers if pointer.startswith(("/data/", "/execution/"))]
-    # `x-deprecated` 표기 자체는 published contract 로 남는다(다음 호환 필드용).
-    assert [row.pointer for row in strategy_field_contracts() if row.deprecated] == []
+    # `x-deprecated` 표기는 P2-02 의 `graph.missing_policy` 하나만 쓰던 마커라 같이 은퇴했다
+    # (WORKFLOW P2-03 잔재 삭제 항목). 다시 필요해지면 그때 되살린다.
+    assert "x-deprecated" not in json.dumps(schema)

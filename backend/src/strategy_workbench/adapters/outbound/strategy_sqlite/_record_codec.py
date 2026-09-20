@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import sqlite3
 from collections.abc import Callable, Mapping
@@ -84,8 +85,8 @@ def decode_record(
         if payload.get("schema_version") != schema_version:
             raise ValueError("schema_version column does not match the canonical strategy payload")
         spec_hash = required_text(row, "spec_hash")
-        # 동결 판정 술어는 port와 같은 domain 함수 하나다(DEFECT-P1X-003). 은퇴 버전이 1.0이
-        # 아니면 `upgrade_document_1_0`이 NotALegacyDocumentError(ValueError)로 fail-closed한다.
+        # 동결 판정 술어는 port와 같은 domain 함수 하나다(DEFECT-P1X-003). 은퇴 버전마다 필요한
+        # 변환 단계가 다르므로 `_decode_frozen_spec`이 1.0 step 적용 여부를 다시 판정한다.
         frozen = is_frozen_schema_version(schema_version)
         if frozen:
             spec = _decode_frozen_spec(
@@ -170,7 +171,9 @@ def _decode_frozen_spec(
             "frozen spec_json bytes do not match the stored spec_hash -- "
             f"strategy_id={strategy_id} revision={revision} computed={computed} stored={spec_hash}"
         )
-    upgraded = upgrade_document_1_0(payload) if is_legacy_document(payload) else dict(payload)
+    upgraded = (
+        upgrade_document_1_0(payload) if is_legacy_document(payload) else copy.deepcopy(payload)
+    )
     strip_retired_execution_settings(upgraded)
     upgraded["schema_version"] = CURRENT_SCHEMA_VERSION
     hydration = hydrate_strategy_document(

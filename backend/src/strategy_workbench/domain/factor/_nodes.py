@@ -14,10 +14,6 @@ REFERENCE_NODE = {"reference": "node"}
 REFERENCE_PARAMETER = {"reference": "parameter"}
 # The array that declares a namespace; its items carry the `<namespace>_id` definition.
 DEFINES_NODE = {"defines": "node"}
-# 다음 schema 버전에서 사라지는 호환 전용 필드의 마커. 런타임 스키마가 `x-deprecated` 로
-# 표시해 편집 화면 어휘에서 뺄 수 있게 한다(P2-02의 `graph.missing_policy`가 첫 사용자였고
-# 1.2가 그 필드를 지웠다 — 표기 자체는 published contract 라 다음 호환 필드를 위해 남긴다).
-DEPRECATED_FIELD = {"deprecated": True}
 
 
 # 요소별 변환만 남긴다(schema 1.1 S4). 횡단면 순위·표준화·윈저화·demean은 CrossSectionalOperator다.

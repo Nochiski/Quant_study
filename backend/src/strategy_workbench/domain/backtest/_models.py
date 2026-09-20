@@ -51,6 +51,16 @@ class WarningSeverity(StrEnum):
 # 사실이므로 owner 가 여기로 왔다(P2-03).
 CATALOG_UNIVERSE = {"catalog": "universe"}
 
+# 결측 정책을 지정하지 않은 실행이 쓰는 값. 1.1 까지의 기본값(`drop`)을 그대로 이어받는다 —
+# 바꾸면 같은 문서의 팩터 값이 조용히 달라진다.
+#
+# 1.2 문서에는 결측 정책이 없으므로(P2-03) 실행 설정과 팩터 sandbox 요청이 **같은 상수**를 읽어야
+# 편집 화면의 실행 플랜(`plan_hash`)과 실제 실행이 갈리지 않는다. P2-02 는 sandbox 요청이
+# `missing` 을 생략하면 문서의 `graph.missing_policy` 로 떨어지게 했지만, 1.2 에는 떨어질 문서
+# 값이 없어 그 경로가 이 기본값으로 바뀌었다. P3-01 이 실행 설정의 `missing` 을 sandbox 요청에
+# 실어 보내면 `None` 경로 자체가 사라진다.
+DEFAULT_MISSING_POLICY = MissingPolicy.DROP
+
 
 class Market(StrEnum):
     KRX = "KRX"
@@ -149,7 +159,7 @@ class RunEnvironment:
     participation_rate: float = 0.1
     fee_bps: float = 15.0
     slippage_bps: float = 10.0
-    missing: MissingPolicy = MissingPolicy.DROP
+    missing: MissingPolicy = DEFAULT_MISSING_POLICY
 
     def __post_init__(self) -> None:
         # 수치는 float 으로 정규화한다. `fee_bps=15` 와 `fee_bps=15.0` 은 같은 실행 설정인데

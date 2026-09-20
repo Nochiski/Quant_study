@@ -146,10 +146,11 @@ def test_preflight_without_an_environment_is_refused_too() -> None:
     assert [issue.code for issue in info.value.validation.issues] == ["run_environment.required"]
 
 
-def test_trace_without_an_environment_is_refused() -> None:
+def test_trace_without_an_environment_is_refused_like_preview() -> None:
+    """세 경로가 같은 코드·같은 `validation.issues` 구조로 거절한다(P2-02 2차 리뷰 P3)."""
     traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
 
-    with pytest.raises(InvalidStrategyTraceRequestError, match="run_environment.required"):
+    with pytest.raises(InvalidPortfolioRequestError) as info:
         traces.trace(
             StrategyTraceRequest(
                 strategy_source=InlineDraft(_spec(), "inline_draft", "a" * 64),
@@ -157,6 +158,8 @@ def test_trace_without_an_environment_is_refused() -> None:
                 factor_id="momentum_3",
             )
         )
+
+    assert [issue.code for issue in info.value.validation.issues] == ["run_environment.required"]
 
 
 def test_run_without_an_environment_is_refused_before_it_is_queued(tmp_path: Path) -> None:

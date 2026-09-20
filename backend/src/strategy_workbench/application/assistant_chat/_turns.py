@@ -375,14 +375,32 @@ class AssistantTurnRunner:
             entry.decided = status
 
     def _finish(self, turn_id: str, status: TurnStatus) -> None:
-        """슬롯을 풀고 종료 상태를 기록한다. 기록이 실패해도 슬롯은 이미 풀려 있다."""
+        """종료 상태를 확정·기록하고 **그다음에** 슬롯을 푼다. 기록이 실패해도 슬롯은 풀린다.
+
+        순서가 계약이다. pop을 먼저 하면 "레지스트리에는 없는데 저장된 행은 아직 RUNNING"인
+        창이 생기고, 그 창에서 조회가 거짓을 말한다 — 취소 응답과 이력이 이미 끝난 턴을
+        RUNNING으로 보여 주고, 클라이언트는 그 말을 믿고 스트림을 열려다 409를 받는다
+        (A-02 2차 리뷰가 A-04로 넘긴 확인 항목).
+
+        반대 순서에도 창은 있지만 방향이 안전하다. 기록은 끝났는데 슬롯이 아직 잡혀 있는
+        동안 `occupied_turn`은 그 턴을, `is_settled`는 거짓을 답한다. 즉 "아직 바쁘다"
+        쪽으로 틀리므로 새 턴은 409로 잠깐 미뤄지고 스트림은 한 번 더 폴링할 뿐이다. 잃는
+        이벤트도, 뒤집히는 판정도 없다.
+
+        그 창에서도 `state()`·`turns()`가 최종 상태를 말하도록 레지스트리 항목을 먼저
+        갱신한다. 그러지 않으면 정상 종료(`decided`가 없는 COMPLETED)가 `view()`에서 여전히
+        RUNNING으로 보인다.
+        """
         with self._lock:
-            entry = self._running.pop(turn_id, None)
-        if entry is None:
-            return
-        final = entry.decided or status
+            entry = self._running.get(turn_id)
+            if entry is None:
+                return
+            final = entry.decided or status
+            settled = _with_status(entry.turn, final, finished_at=self._now())
+            entry.decided = final
+            entry.turn = settled
         try:
-            self._sessions.update_turn(_with_status(entry.turn, final, finished_at=self._now()))
+            self._sessions.update_turn(settled)
         except Exception as error:
             logger.warning(
                 "could not persist the final turn state — turn_id=%s status=%s error_type=%s",
@@ -390,6 +408,11 @@ class AssistantTurnRunner:
                 final.value,
                 type(error).__name__,
             )
+        finally:
+            # 저장이 실패해도 슬롯은 반드시 푼다. 안 풀면 그 세션은 재시작 전까지 새 턴을
+            # 시작할 수 없다(점유 판정이 레지스트리 존재 기준이므로).
+            with self._lock:
+                self._running.pop(turn_id, None)
 
     def _occupied_turn(self, session_id: str) -> Turn | None:
         """그 세션의 슬롯을 잡고 있는 턴. 취소 신호를 받았어도 스레드가 돌면 여전히 점유 중이다."""

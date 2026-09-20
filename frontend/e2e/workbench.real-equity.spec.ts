@@ -70,7 +70,9 @@ test.describe("real equity data", () => {
   // 스키마 기본값이 있을 수 없어 요청에 상수를 박는 shim 으로 앞당길 수 없다. 그때까지 브라우저에서
   // 시작한 백테스트는 422 `backtest.run.environment_required` 로 거절된다. 최종 시나리오 재작성은
   // P3-03(e2e fixture 1.2)이 맡는다.
-  // 되살릴 때 바꿀 것: OOS 창이 읽던 `dateRange` 출처와 기대 요청 본문의 `environment`.
+  // 되살릴 때 바꿀 것: `realDataSource` 가 GOLDEN 의 `start`/`end` 를 치환하는데 1.2 문서에는 그
+  // 키가 없어 `mustReplace` 가 던진다 — 구간은 실행 설정으로 옮겨야 한다. 그리고 기대 요청 본문의
+  // `environment`.
   test.fixme("edits the graph on real data, saves the revision and completes a backtest", async ({
     page,
   }) => {
@@ -138,7 +140,11 @@ test.describe("real equity data", () => {
       "graph-edited compile",
     );
     expect(saved.spec_hash).toBe(compiled.spec_hash);
-    expect(saved.spec.data.universe_id).toBe("krx.common-stock");
+    // 유니버스는 schema 1.2 에서 전략 문서를 떠나 실행 설정이 소유한다(P2-03). 저장된 spec 으로
+    // 확인할 수 있는 것은 문서에 남은 쪽이다.
+    expect((saved.spec.factors ?? []).map((factor) => factor.factor_id)).toEqual([
+      "momentum",
+    ]);
 
     // 백테스트: 실데이터 duckdb 어댑터 + Rust core. 저장된 revision 을 그대로 실행한다.
     const settingsToggle = page.getByLabel("실행 설정 열기");

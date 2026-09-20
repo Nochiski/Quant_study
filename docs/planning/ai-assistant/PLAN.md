@@ -3,10 +3,10 @@ plan_version: 2
 project: ai-assistant
 project_status: IN_PROGRESS
 current_phase: P0,A,B
-current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02
-active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02]
-parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02]
-last_updated: 2026-09-21T01:22:32+09:00
+current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03
+active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03]
+parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03]
+last_updated: 2026-09-21T02:00:41+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 4
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,A,B` |
-| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02` |
-| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02` |
+| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03` |
+| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `4 / 13` |
-| Aggregated at | `2026-09-21 01:22 KST` |
+| Aggregated at | `2026-09-21 02:00 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -113,8 +113,8 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영(로컬 `ed0d68c7`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region) → P3 후속 뒤 2차 · cascade 뒤 push·PR |
-| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `IN_PROGRESS` | 구현자 `impl-ai-b02`, 워크트리 `wt-ai-b02`, 브랜치 `feat/ai-b-02-assistant-entity-sse`(임시 base B-01 로컬 tip) |
-| [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `WAITING` | — |
+| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `IN_REVIEW` | 구현 완료(로컬 `a9f55f12`, B-01 `9f536bb4` 위 7커밋, vitest 677·e2e 19/19) · `review_ai_b_02` 로컬 ref 검토 중 · cascade 뒤 push·PR |
+| [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `IN_PROGRESS` | 구현자 `impl-ai-b03`, 워크트리 `wt-ai-b03`, 브랜치 `feat/ai-b-03-assist-sidebar`(임시 base B-02 로컬 tip) |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `WAITING` | — |
 | [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `WAITING` | — |
 

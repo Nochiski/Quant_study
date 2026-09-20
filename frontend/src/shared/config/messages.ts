@@ -1011,6 +1011,11 @@ const ko = {
   "assistant.chat.toolName.validate_strategy_yaml": "전략 YAML 검증",
   "assistant.chat.toolName.propose_strategy": "전략 제안 제출",
   "assistant.chat.search": "웹 검색",
+  "assistant.chat.stream.exhausted":
+    "연결이 끊겼습니다. 답변은 서버에서 계속 진행되고 있습니다.",
+  "assistant.chat.stream.retry": "다시 연결",
+  "assistant.chat.stream.dropped":
+    "표시하지 못한 진행 정보가 있습니다. 서버와 화면의 이벤트 계약이 어긋났을 수 있습니다.",
   "assistant.chat.proposal.compileOk": "검증 통과",
   "assistant.chat.proposal.compileFailed": "검증 실패",
   "assistant.chat.proposal.rationale": "근거",
@@ -2060,6 +2065,11 @@ export const messages = {
     "assistant.chat.toolName.validate_strategy_yaml": "Validate strategy YAML",
     "assistant.chat.toolName.propose_strategy": "Submit strategy proposal",
     "assistant.chat.search": "Web search",
+    "assistant.chat.stream.exhausted":
+      "The connection dropped. The answer keeps running on the server.",
+    "assistant.chat.stream.retry": "Reconnect",
+    "assistant.chat.stream.dropped":
+      "Some progress events could not be shown. The server and this screen may disagree on the event contract.",
     "assistant.chat.proposal.compileOk": "Validation passed",
     "assistant.chat.proposal.compileFailed": "Validation failed",
     "assistant.chat.proposal.rationale": "Rationale",

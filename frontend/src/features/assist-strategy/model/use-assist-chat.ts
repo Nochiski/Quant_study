@@ -15,6 +15,8 @@ import {
   useCreateAssistantSession,
   useStartAssistantTurn,
   type AssistantEventEnvelopeView,
+  type AssistantStreamClose,
+  type AssistantStreamStatus,
   type AssistantTurnState,
   type DocumentRefView,
   type SessionHistoryView,
@@ -52,6 +54,12 @@ export type AssistChat = {
   busy: boolean;
   rejection: string | null;
   historyFailed: boolean;
+  /** 이벤트 스트림의 현재 상태. `exhausted`면 화면이 다시 연결을 권한다(spec D7, B-02 리뷰 P1-1). */
+  streamStatus: AssistantStreamStatus;
+  /** 상한을 소진한 스트림을 다시 연다. 되살릴지는 화면이 정한다. */
+  retryStream: () => void;
+  /** 이 대화를 보는 동안 갈래를 좁히지 못해 버린 프레임 수. 0이 아니면 서버와 계약이 어긋났다. */
+  droppedFrames: number;
   baseSourceText: (turnId: string) => string | null;
   send: (text: string) => void;
   cancel: () => void;
@@ -78,6 +86,7 @@ export const useAssistChat = ({
   const [prompts, setPrompts] = useState<Record<string, TurnPrompt>>({});
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [rejection, setRejection] = useState<string | null>(null);
+  const [droppedFrames, setDroppedFrames] = useState(0);
   const [state, dispatch] = useReducer(
     assistantChatReducer,
     emptyAssistantChatState,
@@ -116,6 +125,7 @@ export const useAssistChat = ({
   const switchSession = (next: string | null) => {
     setPendingPrompt(null);
     setRejection(null);
+    setDroppedFrames(0);
     openSession(next);
   };
 
@@ -141,11 +151,24 @@ export const useAssistChat = ({
     [],
   );
 
-  useAssistantEventStream({
+  /**
+   * 스트림이 닫힌 사정 중 화면이 쥐는 것은 버린 프레임 수뿐이다.
+   *
+   * 사유(`exhausted`·`rejected`)는 훅의 `status`가 이미 들고 있고, 턴의 최종 상태는 이력이 정한다 —
+   * 여기서 다시 세면 같은 사실이 두 곳에 산다.
+   */
+  const onClose = useCallback((close: AssistantStreamClose) => {
+    if (close.droppedFrames > 0) {
+      setDroppedFrames((previous) => previous + close.droppedFrames);
+    }
+  }, []);
+
+  const { status: streamStatus, retry: retryStream } = useAssistantEventStream({
     target: assistantStreamTarget(state),
     lastSequence: state.lastSequence,
     onEvent,
     onHistory,
+    onClose,
   });
 
   const createSession = useCreateAssistantSession();
@@ -246,6 +269,9 @@ export const useAssistChat = ({
     busy,
     rejection,
     historyFailed: history.isError,
+    streamStatus,
+    retryStream,
+    droppedFrames,
     baseSourceText: (turnId: string) => prompts[turnId]?.sourceText ?? null,
     send,
     cancel,

@@ -216,6 +216,20 @@ export const AssistStrategySidebar = ({
               {chat.rejection}
             </p>
           )}
+          {/* 상한을 소진한 연결. 턴은 서버에서 계속 도므로 다시 연결하면 이어서 본다(spec D7). */}
+          {chat.streamStatus === "exhausted" ? (
+            <div className="assist__reconnect" role="alert">
+              <span>{t("assistant.chat.stream.exhausted")}</span>
+              <Button size="small" onClick={chat.retryStream}>
+                {t("assistant.chat.stream.retry")}
+              </Button>
+            </div>
+          ) : null}
+          {chat.droppedFrames === 0 ? null : (
+            <p className="assist__notice assist__notice--warn" role="status">
+              {t("assistant.chat.stream.dropped")}
+            </p>
+          )}
           {chat.running === null ? null : (
             <p className="assist__progress" role="status">
               {t("assistant.chat.running")}

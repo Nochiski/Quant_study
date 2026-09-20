@@ -99,13 +99,26 @@ const proposal = (): StrategyProposalView => ({
 /** 열려 있는 SSE 연결 하나. 테스트가 프레임을 직접 밀어 넣는다. */
 type Connection = {
   push: (envelope: AssistantEventEnvelopeView) => void;
+  /** 갈래를 좁히지 못하는 프레임. 서버가 이벤트 종류를 늘린 상황이다. */
+  pushUnknown: (sequence: number) => void;
+  /** 재연결 간격을 서버가 정한다. 테스트는 이것으로 상한 소진을 빠르게 만든다. */
+  pushRetryDelay: (ms: number) => void;
   close: () => void;
+  /** 응답 도중 끊긴 연결. 생성 클라이언트는 여기서 재연결한다. */
+  drop: () => void;
 };
+
+/** 이벤트 엔드포인트의 응답 계획. 앞에서부터 하나씩 쓰고, 비면 스트림을 연다. */
+type Reply =
+  | "stream"
+  | "network-error"
+  | { status: number; body: Record<string, unknown> };
 
 let providers: ProvidersView;
 let sessions: SessionView[];
 let histories: Record<string, SessionHistoryView>;
 let connections: Connection[];
+let eventReplies: Reply[];
 let startedTurns: { sessionId: string; body: Record<string, unknown> }[];
 let cancelled: { sessionId: string; turnId: string }[];
 let createdSessions: Record<string, unknown>[];
@@ -170,20 +183,34 @@ const server = setupServer(
     },
   ),
   http.get(`${API}/api/v1/assistant/sessions/:sessionId/events`, () => {
+    const reply = eventReplies.shift() ?? "stream";
+    if (reply === "network-error") return HttpResponse.error();
+    if (reply !== "stream") {
+      return HttpResponse.json(reply.body, { status: reply.status });
+    }
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     const stream = new ReadableStream<Uint8Array>({
       start: (value) => {
         controller = value;
       },
     });
+    const frame = (text: string) => controller.enqueue(encoder.encode(text));
     connections.push({
       push: (envelope) =>
-        controller.enqueue(
-          encoder.encode(
-            `id: ${envelope.sequence}\nevent: assistant\ndata: ${JSON.stringify(envelope)}\n\n`,
-          ),
+        frame(
+          `id: ${envelope.sequence}\nevent: assistant\ndata: ${JSON.stringify(envelope)}\n\n`,
         ),
+      pushUnknown: (sequence) =>
+        frame(
+          `id: ${sequence}\nevent: assistant\ndata: ${JSON.stringify({
+            sequence,
+            turn_id: "t-1",
+            event: { type: "quantum_leap" },
+          })}\n\n`,
+        ),
+      pushRetryDelay: (ms) => frame(`retry: ${ms}\n\n`),
       close: () => controller.close(),
+      drop: () => controller.error(new Error("연결이 끊겼습니다")),
     });
     return new HttpResponse(stream, {
       headers: { "Content-Type": "text/event-stream" },
@@ -203,6 +230,7 @@ beforeEach(() => {
   sessions = [];
   histories = {};
   connections = [];
+  eventReplies = [];
   startedTurns = [];
   cancelled = [];
   createdSessions = [];
@@ -257,16 +285,25 @@ const mount = (options: MountOptions = {}) => {
   );
 };
 
-/** 질문 하나를 보내고 그 턴의 SSE 연결이 열릴 때까지 기다린다. */
-const ask = async (
+/** 질문 하나를 보내고 서버가 턴을 받을 때까지 기다린다. */
+const send = async (
   user: ReturnType<typeof userEvent.setup>,
   text = "지금 시장에 맞는 전략을 제안해 줘",
-): Promise<Connection> => {
+): Promise<void> => {
   const input = await screen.findByRole("textbox", {
     name: "어시스턴트에게 보낼 메시지",
   });
   await user.type(input, text);
   await user.keyboard("{Enter}");
+  await waitFor(() => expect(startedTurns).toHaveLength(1));
+};
+
+/** 질문 하나를 보내고 그 턴의 SSE 연결이 열릴 때까지 기다린다. */
+const ask = async (
+  user: ReturnType<typeof userEvent.setup>,
+  text = "지금 시장에 맞는 전략을 제안해 줘",
+): Promise<Connection> => {
+  await send(user, text);
   await waitFor(() => expect(connections).toHaveLength(1));
   return connections[0];
 };
@@ -676,6 +713,85 @@ describe("AssistStrategySidebar", () => {
       expect(screen.queryByText("앞 대화의 질문")).toBeNull(),
     );
     expect(screen.getByText("무엇이든 물어보세요")).toBeInTheDocument();
+  });
+
+  it("재시도 상한을 소진하면 다시 연결 손잡이를 보여 준다", async () => {
+    const user = userEvent.setup();
+    mount();
+    const connection = await ask(user);
+    // 서버가 재연결 간격을 정한다 — 기본 3초를 기다리지 않고 상한까지 내려간다.
+    connection.pushRetryDelay(1);
+    connection.drop();
+    for (let attempt = 2; attempt <= 5; attempt += 1) {
+      await waitFor(() => expect(connections).toHaveLength(attempt));
+      connections[attempt - 1].drop();
+    }
+
+    const banner = await screen.findByText(/연결이 끊겼습니다/);
+    expect(banner).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "다시 연결" }));
+    await waitFor(() => expect(connections).toHaveLength(6));
+    await waitFor(() =>
+      expect(screen.queryByText(/연결이 끊겼습니다/)).toBeNull(),
+    );
+  });
+
+  it("서버가 스트림을 열어 주지 않으면 배너 없이 이력으로 정착한다", async () => {
+    eventReplies = [
+      {
+        status: 409,
+        body: { detail: { code: "assistant.no_running_turn", message: "" } },
+      },
+    ];
+    const user = userEvent.setup();
+    mount();
+    server.use(
+      http.get(`${API}/api/v1/assistant/sessions/:sessionId`, ({ params }) => {
+        const sessionId = String(params.sessionId);
+        return HttpResponse.json({
+          ...emptyHistory(sessionId, "새 대화"),
+          turns: [
+            {
+              turn_id: "t-1",
+              session_id: sessionId,
+              status: "completed",
+              accepted_sequence: -1,
+              started_at: "2026-09-20T00:01:00Z",
+              finished_at: "2026-09-20T00:02:00Z",
+            },
+          ],
+          events: [
+            {
+              sequence: 0,
+              turn_id: "t-1",
+              event: { type: "text_delta", text: "스트림 없이 받은 답" },
+            },
+          ],
+        });
+      }),
+    );
+    await send(user);
+
+    expect(await screen.findByText("스트림 없이 받은 답")).toBeInTheDocument();
+    expect(screen.queryByText(/연결이 끊겼습니다/)).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: "보내기" }),
+    ).toBeInTheDocument();
+  });
+
+  it("좁히지 못한 프레임이 있으면 화면에 그 사실을 남긴다", async () => {
+    const user = userEvent.setup();
+    mount();
+    const connection = await ask(user);
+    connection.pushUnknown(0);
+    connection.push(textDelta(1, "나머지는 그대로 보인다"));
+    await screen.findByText("나머지는 그대로 보인다");
+    connection.close();
+
+    expect(
+      await screen.findByText(/표시하지 못한 진행 정보/),
+    ).toBeInTheDocument();
   });
 
   it("서버가 턴 시작을 거부하면 코드에 맞는 문장을 배너로 보여 준다", async () => {

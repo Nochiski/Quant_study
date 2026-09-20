@@ -35,10 +35,12 @@ from strategy_workbench.bootstrap.facade.container import (
     build_container,
     is_missing_provider_sdk,
     restrict_to_current_user,
+    scripted_provider_factories,
 )
 from strategy_workbench.bootstrap.facade.http import (
     ASSISTANT_ALLOW_INSECURE_BASE_URL_ENV,
     ASSISTANT_DB_PATH_ENV,
+    ASSISTANT_FAKE_PROVIDER_ENV,
     ASSISTANT_SECRETS_PATH_ENV,
     DEFAULT_ASSISTANT_DB_PATH,
     build_http_app,
@@ -218,6 +220,7 @@ def test_the_runtime_settings_fall_back_to_the_documented_defaults(
         ASSISTANT_DB_PATH_ENV,
         ASSISTANT_SECRETS_PATH_ENV,
         ASSISTANT_ALLOW_INSECURE_BASE_URL_ENV,
+        ASSISTANT_FAKE_PROVIDER_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -227,6 +230,8 @@ def test_the_runtime_settings_fall_back_to_the_documented_defaults(
     # `None`은 "OS 규칙이 정하는 사용자 설정 디렉터리"라는 뜻이고, 그 계산의 owner는 어댑터다.
     assert settings.secrets_path is None
     assert settings.allow_insecure_base_url is False
+    # 대본 공급자는 기본이 꺼짐이다. 켜진 채로 배포되면 사용자가 받는 답이 전부 대본이 된다.
+    assert settings.provider_factories is PROVIDER_ADAPTER_FACTORIES
     assert default_secrets_path().name == "secrets.json"
 
 
@@ -238,6 +243,46 @@ def test_only_an_exact_one_opens_the_insecure_base_url_escape_hatch(
     monkeypatch.setenv(ASSISTANT_ALLOW_INSECURE_BASE_URL_ENV, value)
 
     assert runtime_assistant_settings().allow_insecure_base_url is False
+
+
+@pytest.mark.parametrize("value", ["", "0", "true", "yes", " 1 x"])
+def test_only_an_exact_one_installs_the_scripted_provider(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """오타로 가짜가 켜지면 사용자는 화면에서 그 사실을 구분할 수 없다."""
+    monkeypatch.setenv(ASSISTANT_FAKE_PROVIDER_ENV, value)
+
+    assert runtime_assistant_settings().provider_factories is PROVIDER_ADAPTER_FACTORIES
+
+
+def test_the_fake_provider_flag_installs_every_kind_from_the_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """e2e는 설정 화면에서 공급자를 골라 등록하는 경로를 지난다 — 두 종류 다 고를 수 있어야 한다."""
+    monkeypatch.setenv(ASSISTANT_FAKE_PROVIDER_ENV, "1")
+
+    factories = runtime_assistant_settings().provider_factories
+
+    assert set(factories) == set(ProviderKind)
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories=factories,
+        )
+    )
+    availability = container.assistant_profiles.available_kinds()
+    assert all(item.installed for item in availability)
+    assert all(item.default_model for item in availability)
+
+
+def test_the_scripted_registry_answers_each_kind_with_its_own_adapter() -> None:
+    """`partial`의 인자 묶기가 어긋나면 모든 종류가 같은 kind로 답해 활성 전환이 조용히 깨진다."""
+    factories = scripted_provider_factories()
+
+    assert {kind: factory().kind for kind, factory in factories.items()} == {
+        kind: kind for kind in ProviderKind
+    }
 
 
 def test_the_http_app_exposes_the_assistant_routes() -> None:

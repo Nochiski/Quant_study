@@ -73,6 +73,11 @@
   color: var(--text-subtle);
 }
 
+/* 알릴 것이 없을 때도 접근성 트리에는 남는다 — 라이브 영역은 자리를 지켜야 읽힌다. */
+.assist__progress:empty {
+  display: none;
+}
+
 .assist__confirm {
   display: flex;
   flex-direction: column;

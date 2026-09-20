@@ -989,6 +989,7 @@ const ko = {
     "무엇을 만들고 싶은지 적으세요. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
   "assistant.chat.send": "보내기",
   "assistant.chat.stop": "중지",
+  "assistant.chat.progress": "진행 상태",
   "assistant.chat.running": "답변을 작성하는 중입니다.",
   "assistant.chat.empty": "무엇이든 물어보세요",
   "assistant.chat.empty.description":
@@ -2050,6 +2051,7 @@ export const messages = {
       "Describe what you want to build. Enter sends, Shift+Enter adds a line.",
     "assistant.chat.send": "Send",
     "assistant.chat.stop": "Stop",
+    "assistant.chat.progress": "Progress",
     "assistant.chat.running": "Writing an answer.",
     "assistant.chat.empty": "Ask anything",
     "assistant.chat.empty.description":

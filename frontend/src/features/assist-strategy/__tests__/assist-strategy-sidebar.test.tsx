@@ -154,13 +154,14 @@ const server = setupServer(
         sessionId,
         body: (await request.json()) as Record<string, unknown>,
       });
+      // 턴 id는 요청마다 새로 준다 — 같은 id를 다시 주면 리듀서가 종결된 턴을 되살리지 않는다.
       return HttpResponse.json(
         {
-          turn_id: "t-1",
+          turn_id: `t-${startedTurns.length}`,
           session_id: sessionId,
           status: "running",
-          accepted_sequence: -1,
-          started_at: "2026-09-20T00:01:00Z",
+          accepted_sequence: startedTurns.length - 1,
+          started_at: `2026-09-20T00:0${startedTurns.length}:00Z`,
         },
         { status: 202 },
       );
@@ -308,6 +309,10 @@ const ask = async (
   return connections[0];
 };
 
+/** 진행·완료를 알리는 라이브 영역. 빈 상태 카드도 `role="status"`라 이름으로 좁힌다. */
+const progressRegion = (): HTMLElement =>
+  screen.getByRole("status", { name: "진행 상태" });
+
 const textDelta = (
   sequence: number,
   text: string,
@@ -354,9 +359,7 @@ describe("AssistStrategySidebar", () => {
     expect(
       within(log).getByText("지금 시장에 맞는 전략을 제안해 줘"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "답변을 작성하는 중입니다",
-    );
+    expect(progressRegion()).toHaveTextContent("답변을 작성하는 중입니다");
 
     connection.push(textDelta(0, "저변동 구간이라"));
     connection.push(textDelta(1, " 모멘텀을 권합니다."));
@@ -744,9 +747,7 @@ describe("AssistStrategySidebar", () => {
 
     const body = await screen.findByText("본문");
     expect(body).toHaveAttribute("aria-live", "off");
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "답변을 작성하는 중입니다",
-    );
+    expect(progressRegion()).toHaveTextContent("답변을 작성하는 중입니다");
 
     histories["s-new"] = {
       ...emptyHistory("s-new", "새 대화"),
@@ -765,10 +766,61 @@ describe("AssistStrategySidebar", () => {
     connection.close();
 
     await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "답변이 완료되었습니다",
-      ),
+      expect(progressRegion()).toHaveTextContent("답변이 완료되었습니다"),
     );
+  });
+
+  it("진행 알림 영역은 전송 전부터 같은 노드로 자리를 지킨다", async () => {
+    const user = userEvent.setup();
+    mount();
+    await screen.findByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+
+    // 내용과 함께 삽입되는 라이브 영역은 보조 기술이 놓친다 — 빈 채로 먼저 있어야 한다.
+    const live = progressRegion();
+    expect(live).toHaveTextContent("");
+
+    const connection = await ask(user);
+    expect(progressRegion()).toBe(live);
+    expect(live).toHaveTextContent("답변을 작성하는 중입니다");
+
+    // 실패로 끝나도 노드는 남고 텍스트만 비워진다.
+    connection.push({
+      sequence: 0,
+      turn_id: "t-1",
+      event: { type: "failure", code: "timeout", message: "TimeoutError" },
+    });
+    histories["s-new"] = {
+      ...emptyHistory("s-new", "새 대화"),
+      turns: [
+        {
+          turn_id: "t-1",
+          session_id: "s-new",
+          status: "failed",
+          accepted_sequence: -1,
+          started_at: "2026-09-20T00:01:00Z",
+          finished_at: "2026-09-20T00:02:00Z",
+        },
+      ],
+      events: [],
+    };
+    connection.close();
+
+    await waitFor(() => expect(live).toHaveTextContent(""));
+    expect(progressRegion()).toBe(live);
+
+    // 실패 뒤 다음 질문도 같은 노드의 텍스트가 바뀌어 알림이 된다.
+    const input = screen.getByRole("textbox", {
+      name: "어시스턴트에게 보낼 메시지",
+    });
+    await user.type(input, "다음 질문");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(live).toHaveTextContent("답변을 작성하는 중입니다"),
+    );
+    expect(progressRegion()).toBe(live);
   });
 
   it("중지한 턴을 완료로 선언하지 않는다", async () => {
@@ -782,9 +834,7 @@ describe("AssistStrategySidebar", () => {
 
     await waitFor(() => expect(cancelled).toHaveLength(1));
     await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "답변을 중지했습니다",
-      ),
+      expect(progressRegion()).toHaveTextContent("답변을 중지했습니다"),
     );
     expect(screen.queryByText(/답변이 완료되었습니다/)).toBeNull();
   });
@@ -853,9 +903,7 @@ describe("AssistStrategySidebar", () => {
     connection.close();
 
     await waitFor(() =>
-      expect(screen.getByRole("status")).toHaveTextContent(
-        "전략 제안이 도착했습니다",
-      ),
+      expect(progressRegion()).toHaveTextContent("전략 제안이 도착했습니다"),
     );
   });
 

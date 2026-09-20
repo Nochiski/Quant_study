@@ -329,6 +329,14 @@ STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv 
   diff 투영. "적용 후 백테스트"는 적용 후 기존 실행 흐름. 턴 시작 시 현재 텍스트·진단·실행 설정을
   실어 보낸다.
 - 키보드·ARIA(`frontend-ui-quality.md`), i18n 전부 `messages.ts`.
+- **슬롯이 패널의 landmark·이름·제목을 소유한다.** `assistant` 슬롯은 `aria-label`을 가진 landmark이고
+  (계약 인스펙터 슬롯과 같은 모양), 슬롯 헤더가 패널 제목과 접기·닫기를 그린다. B-03의
+  `AssistStrategySidebar`는 이름 없는 `<section>`이고 자체 `<h2>`를 그리지 않으므로, 슬롯이 이름을 달지
+  않으면 사이드바는 landmark 탐색으로 닿지 않는다. 슬롯을 `getByRole("complementary", { name })`으로
+  찾는 테스트로 잠근다(B-03 3차 리뷰 P3).
+- 닫기는 한 곳만 그린다. 슬롯 헤더가 닫기를 맡으면 `onClose`를 넘기지 않고(사이드바의 ✕ 버튼이
+  사라진다), 진행 중 턴 취소 확인은 사이드바가 소유하므로 슬롯이 닫기를 맡을 때는 그 확인을
+  거치도록 `onClose`를 사이드바에 위임한다.
 
 ### B-05 — e2e·문서
 

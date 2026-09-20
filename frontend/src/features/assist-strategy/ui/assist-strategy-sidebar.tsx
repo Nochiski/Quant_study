@@ -116,12 +116,10 @@ export const AssistStrategySidebar = ({
               );
 
   return (
-    // landmark는 이 feature를 꽂는 슬롯이 소유한다(`role="complementary"`). 이름 없는 `<section>`은
-    // landmark로 노출되지 않는다 — 루트까지 이름을 달면 스크린리더가 같은 지역을 두 번 읽는다
-    // (B-04 지적). 패널 이름은 슬롯이, 내용 제목은 아래 `<h2>`가 맡는다.
+    // 이름 없는 `<section>`은 landmark로 노출되지 않는다. 패널의 landmark·이름·제목은 이 feature를
+    // 꽂는 슬롯이 소유하고 여기서는 그리지 않는다 — 계약은 WORKFLOW B-04 Acceptance에 있다.
     <section className="assist">
       <header className="assist__head">
-        <h2 className="assist__title">{t("assistant.chat.title")}</h2>
         <div className="assist__head-actions">
           {chat.sessions.length === 0 ? null : (
             <select
@@ -269,11 +267,18 @@ export const AssistStrategySidebar = ({
               {t("assistant.chat.stream.dropped")}
             </p>
           )}
-          {announcement === null ? null : (
-            <p className="assist__progress" role="status">
-              {announcement}
-            </p>
-          )}
+          {/*
+            라이브 영역은 늘 자리를 지키고 텍스트만 바뀐다. 내용과 함께 삽입되는 영역은 보조 기술이
+            놓치기 쉽고, 본문과 제안 카드를 라이브 영역에서 뺀 뒤로 이 한 곳이 유일한 통로다
+            (3차 리뷰 P2). 빈 영역은 낭독되지 않으므로 "실패는 말하지 않는다"는 결정은 그대로다.
+          */}
+          <p
+            className="assist__progress"
+            role="status"
+            aria-label={t("assistant.chat.progress")}
+          >
+            {announcement ?? ""}
+          </p>
           <AssistComposer
             restore={chat.draftRestore}
             running={chat.running !== null}

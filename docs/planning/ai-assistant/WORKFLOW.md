@@ -338,6 +338,15 @@ STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv 
   "검증 통과" → 백테스트 페이지. 새로고침 재개. 취소.
 - 매뉴얼 절 "AI 어시스턴트 연결과 사용", README, SoT 규칙 행 채움, `frontend/src/features/README.md`에
   slice 설명 추가.
+- B-01 2차 리뷰에서 이관된 접근성 2건(`features/configure-ai-providers`):
+  - R2-3 — 삭제가 **성공한** 뒤 포커스가 `document.body`로 떨어진다. `ai-provider-settings.tsx`의
+    삭제 `onSuccess`가 `setConfirming(null)`만 해서, 포커스를 들고 있던 "삭제 확인" 버튼이 카드와 함께
+    언마운트된다. 남은 목록의 첫 카드나 섹션 제목(`tabIndex={-1}`)으로 옮기거나, `role="status"`로
+    "연결을 지웠습니다"를 알리고 폼으로 보낸다. B-01이 고친 것은 확인 단계 **진입·취소** 시점뿐이다.
+  - R2-4 — "base_url 미적용" 배지가 어떤 컨트롤과도 연결되어 있지 않다. `ai-provider-form.tsx`의
+    배지에 `id`를 주고 "고급 설정" 버튼의 `aria-describedby`로 잇는다(`aria-controls`로 펼침 영역까지
+    가리키면 `aria-expanded`가 완성된다). 지금은 스크린리더가 "고급 설정, 축소됨"만 들어, 접힌 채
+    남아 있는 base_url 값의 존재가 전달되지 않는다.
 
 **Phase B exit**
 

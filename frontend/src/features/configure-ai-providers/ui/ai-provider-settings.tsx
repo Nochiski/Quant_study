@@ -183,7 +183,7 @@ export const AiProviderSettings = () => {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // 변이가 끝나도 `variables`는 남으므로 진행 중 여부와 함께 봐야 한다. 활성 전환·삭제는 확인 단계가
+  // 변이가 끝나도 `variables`는 남으므로 진행 중 여부와 함께 봐야 한다. 삭제는 확인 단계가
   // 한 카드만 허용해 동시에 두 장이 뜨지 않지만, 연결 테스트는 여러 카드가 동시에 비행할 수 있어
   // `useProbeProvider`가 진행 중 id를 집합으로 든다(리뷰 R2-1).
   const busyProfile = (profileId: string): boolean =>

@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: SELF_CHECK
+project_status: IN_REVIEW
 current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
-last_updated: 2026-09-21T07:59:09+09:00
+last_updated: 2026-09-21T08:01:12+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 11
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P0,A,B` |
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `11 / 13` |
-| Aggregated at | `2026-09-21 07:59 KST` |
+| Aggregated at | `2026-09-21 08:01 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -63,7 +63,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 |---|---|---:|---:|---|
 | P0 | Planning package | 1 | 0 | `APPROVED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 0 | `APPROVED` |
-| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `SELF_CHECK` |
+| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `IN_REVIEW` |
 | **Total** |  | **13** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
@@ -116,7 +116,7 @@ Phase exit:
 | [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `APPROVED` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋) · `review_ai_b_02` 3차 APPROVE(StrictMode probe 포함, e2e 19/19) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `APPROVED` | 구현 완료(로컬 `ecd530a6`, B-02 최종 `cb852032` 위 9커밋, vitest 728, 훅 API 적응: exhausted 재연결·rejected 정착·droppedFrames 경고, vitest 714·e2e 19/19) · `review_ai_b_03` 1차 REQUEST_CHANGES(P1 1: 이력보다 202가 먼저 오면 turns 순서 축이 갈라져 질문↔답 짝 밀림 — 리듀서 정렬을 B-03에서 수정, P2 4, P3 6) 반영 → 2차 REQUEST_CHANGES(1차 10/11 해소; 새 P1: 취소·실패 턴에도 완료 announce, P2: 제안 카드 aria-live 미적용, P3 4) 반영(결말별 status·제안 카드 aria-live·P3 4·이름 없는 section) → 3차 확인 중 · 후속 backlog: `ChatMessageView.turn_id` · `review_ai_b_03` 3차 APPROVE(P2 1: status 라이브 영역 상시 렌더, P3 3) · 마무리 커밋 후 **최종 `1445d982`**(B-02 `cb852032` 위 10커밋, vitest 729, e2e 19; 사이드바 자체 `<h2>` 제거, WORKFLOW B-04 Acceptance에 슬롯 landmark·`onClose` 위임 계약 2줄) — B-04 replay 대상 |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `IN_REVIEW` | 구현 완료(로컬 `c6aaf55e`, B-03 `df7b25f4` 위 8커밋: 슬롯·적용 훅·페이지 배선·적용 후 백테스트·오버레이·spec 정정·사이드바 실장착·App 통합 테스트·`readContext` live 읽기·알림을 문서 notice 슬롯으로, vitest 762·e2e 19/19(어시스턴트 라우트 200 확인)·기준선 4장 재생성) · `review_ai_b_04` 1차 REQUEST_CHANGES(P1 3: 적용 알림이 패널 절반 차지·미소거, 좁은 화면 서랍 2개 동시, 드래그 임계 초과 시 되돌릴 수 없음; P2 2: en 한글, onClose 미배선; P3 7) → 반영 중 · 핵심 적용 설계(전체 범위 교체·undo 1스텝·live 재확인·stale 중단)는 승인 수준 · 2차 6건 반영 + B-03 최종 `1445d982` 위 replay **`c9fd1f3d`**(10커밋, vitest 776, e2e 19; 우측 패널 단일 열림, 오버레이 판정 기본 폭 상수, `onClose` 위임, 슬롯 헤더 보이는 h2) · `review_ai_b_04` 3차 REQUEST_CHANGES(2차 6건 해소 확인; 새 P1 1·P2 2·P3 3) → 후속 중 |
-| [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `SELF_CHECK` | 구현자 `impl-ai-b05`, 워크트리 `wt-ai-b05`, 브랜치 `feat/ai-b-05-e2e-docs`(임시 base B-04 로컬 `8ee4808a`; 가짜 공급자 env 배선으로 e2e, A-07 시나리오는 읽기 참조) · 구현 완료(로컬 4커밋: e2e 잠금·포트 override(P1-05 `aa57028e` 동일 hunk + CORS), 대본 공급자 adapter `llm_scripted`(`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1`), e2e 시나리오 4 + B-01 이관 2, 매뉴얼 9절·README; e2e 23/23(포트 18000·15173), vitest 778, pytest 1411) · B-04 `c9fd1f3d` 위 rebase 완료(5커밋, e2e 24/24·vitest 794·pytest 1718; B-04 슬롯 계약 반영, 상주 status로 취소 문구 즉시 확인) → push·리뷰 착수; 동일 제안 재적용 결함은 B-04 3차 P2와 동일 건 |
+| [ ] | `B-05` | e2e(MSW 공급자, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `IN_REVIEW` | 구현자 `impl-ai-b05`, 워크트리 `wt-ai-b05`, 브랜치 `feat/ai-b-05-e2e-docs`(임시 base B-04 로컬 `8ee4808a`; 가짜 공급자 env 배선으로 e2e, A-07 시나리오는 읽기 참조) · 구현 완료(로컬 4커밋: e2e 잠금·포트 override(P1-05 `aa57028e` 동일 hunk + CORS), 대본 공급자 adapter `llm_scripted`(`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1`), e2e 시나리오 4 + B-01 이관 2, 매뉴얼 9절·README; e2e 23/23(포트 18000·15173), vitest 778, pytest 1411) · B-04 `c9fd1f3d` 위 rebase 완료(5커밋, e2e 24/24·vitest 794·pytest 1718; B-04 슬롯 계약 반영, 상주 status로 취소 문구 즉시 확인) · push **`0b982778`** · `review_ai_b_05` 1차 착수; 동일 제안 재적용 결함은 B-04 3차 P2와 동일 건 |
 
 Phase exit:
 

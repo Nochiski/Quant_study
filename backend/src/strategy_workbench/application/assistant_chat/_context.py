@@ -203,17 +203,16 @@ def _summarise_schema(schema: Mapping[str, object]) -> str:
     return "\n".join(lines)
 
 
-def _discriminator_key(schema: Mapping[str, object]) -> str | None:
+def _discriminator_key(node: object) -> str | None:
     """스키마가 판별 union에 쓰는 속성 이름. 없으면 None.
 
     `"kind"`를 손으로 적지 않으려고 스키마가 스스로 붙인 `discriminator.propertyName`을 읽는다.
     리터럴로 두면 판별자 키가 바뀌는 날 요약의 "사용할 수 있는 … 값" 줄이 조용히 사라지고, 모델은
     노드 종류를 모른 채 제안을 만들어 검증 왕복만 늘린다(SoT 규칙: 필드 이름을 손으로 적지 않는다).
+
+    스키마를 깊이 우선으로 걸어 **처음 만난** 표식 하나를 쓴다. 지금 스키마의 판별 union은 모두
+    같은 키를 쓰므로 충분하다. 한 문서가 서로 다른 판별자 키를 섞는 날(schema 1.2) 다시 본다.
     """
-    return _find_discriminator(schema)
-
-
-def _find_discriminator(node: object) -> str | None:
     mapping = _mapping(node)
     marker = mapping.get(_DISCRIMINATOR_MARKER)
     if isinstance(marker, Mapping):
@@ -222,12 +221,12 @@ def _find_discriminator(node: object) -> str | None:
             return name
     for value in mapping.values():
         if isinstance(value, Mapping):
-            found = _find_discriminator(value)
+            found = _discriminator_key(value)
             if found is not None:
                 return found
         elif isinstance(value, Sequence) and not isinstance(value, str | bytes):
             for item in value:
-                found = _find_discriminator(item)
+                found = _discriminator_key(item)
                 if found is not None:
                     return found
     return None

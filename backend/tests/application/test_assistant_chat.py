@@ -41,6 +41,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     Source,
     TextDelta,
     ToolCall,
+    ToolResult,
     ToolResultSummary,
     Usage,
 )
@@ -96,6 +97,7 @@ def _harness(
     max_tool_rounds: int = 12,
     max_proposal_attempts: int = 3,
     with_profile: bool = True,
+    context_builder: AssistantContextBuilder | None = None,
 ) -> Harness:
     repository = InMemoryProviderProfileRepository()
     secrets = InMemoryProviderSecretStore()
@@ -111,7 +113,7 @@ def _harness(
     if with_profile:
         profiles.create(kind=ProviderKind.ANTHROPIC, label="Claude", secret="sk-fake-0001")
     compiler = FakeStrategyCompiler(valid_sources=valid_sources)
-    context_builder = AssistantContextBuilder(
+    context_builder = context_builder or AssistantContextBuilder(
         equity_data=MockEquityDataAdapter.demo(),
         factor_registry=build_default_factor_registry(),
         compiler=compiler,
@@ -384,8 +386,30 @@ def test_three_invalid_proposals_end_the_turn_with_proposal_invalid() -> None:
             f"session_id={harness.session.session_id} attempts=3 max_attempts=3"
         ),
     )
-    assert not any(isinstance(event, Done) for event in events)
+    # 손에 든 이벤트는 종료 사유가 세워져 있어도 그대로 내보낸다(취소 경로와 같은 규칙).
+    assert isinstance(events[-2], Done)
     assert len(harness.compiler.compiled) == 3
+
+
+def test_text_streamed_after_the_last_failed_proposal_is_kept() -> None:
+    """모델이 도구 결과 뒤에 한 문장을 더 흘리는 흔한 경로. 그 문장이 사라지면 안 된다."""
+    script: tuple[ScriptStep, ...] = (
+        ToolStep(_proposal_call(INVALID_YAML, "call-1")),
+        ToolStep(_proposal_call(INVALID_YAML, "call-2")),
+        ToolStep(_proposal_call(INVALID_YAML, "call-3")),
+        TextDelta("죄송합니다. 유효한 전략을 만들지 못했습니다."),
+        Done("end_turn"),
+    )
+    harness = _harness(script, valid_sources=(VALID_YAML,), max_proposal_attempts=3)
+
+    events = _send(harness)
+
+    assert events[-2] == TextDelta("죄송합니다. 유효한 전략을 만들지 못했습니다.")
+    failure = events[-1]
+    assert isinstance(failure, Failure)
+    assert failure.code is FailureCode.PROPOSAL_INVALID
+    messages = harness.sessions.messages(harness.session.session_id)
+    assert messages[1].text == "죄송합니다. 유효한 전략을 만들지 못했습니다."
 
 
 # -- 공급자가 집행하는 상한 -----------------------------------------------------------------------
@@ -551,24 +575,23 @@ def test_a_provider_exception_leaves_no_secret_in_the_logs(
 # -- [P3] 도구 실행 중 우리 코드의 예외는 공급자 탓이 아니다 --------------------------------------
 
 
-class _ExplodingContextBuilder:
+class _ExplodingContextBuilder(AssistantContextBuilder):
     """`tool_result`가 터지는 컨텍스트 빌더(카탈로그 포트 오류·직렬화 오류를 흉내 낸다)."""
 
-    def __init__(self, delegate: AssistantContextBuilder) -> None:
-        self._delegate = delegate
-
-    def system_prompt(self) -> str:
-        return self._delegate.system_prompt()
-
-    def tool_result(self, call: ToolCall, context: TurnContext) -> object:
+    def tool_result(self, call: ToolCall, context: TurnContext) -> ToolResult:
         raise RuntimeError("catalog port exploded")
 
 
 def test_a_tool_failure_comes_back_as_a_tool_error_not_a_provider_failure() -> None:
     call = ToolCall(call_id="call-1", name=LIST_EQUITY_FIELDS, arguments={})
-    harness = _harness((ToolStep(call), Done("end_turn")))
-    harness.service._context_builder = _ExplodingContextBuilder(  # pyright: ignore[reportAttributeAccessIssue]  # reason: 주입 지점이 없는 내부 협력자를 테스트에서 교체
-        harness.service._context_builder  # pyright: ignore[reportAttributeAccessIssue]  # reason: 위와 같음
+    harness = _harness(
+        (ToolStep(call), Done("end_turn")),
+        context_builder=_ExplodingContextBuilder(
+            equity_data=MockEquityDataAdapter.demo(),
+            factor_registry=build_default_factor_registry(),
+            compiler=FakeStrategyCompiler(),
+            today=lambda: TODAY,
+        ),
     )
 
     events = _send(harness)

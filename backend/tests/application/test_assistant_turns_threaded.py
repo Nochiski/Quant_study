@@ -196,9 +196,14 @@ def test_a_real_worker_thread_holds_the_session_slot_until_it_finishes() -> None
 
 
 def test_two_threads_racing_to_start_leave_exactly_one_winner() -> None:
-    """`start()`의 check-then-act가 한 RLock 구간인지 실제 경합으로 확인한다."""
+    """`start()`의 check-then-act가 한 RLock 구간인지 실제 경합으로 확인한다.
+
+    `release`를 미리 걸면 승자의 워커가 스트림을 끝까지 소비하고 `_finish`로 슬롯을 풀 수 있다.
+    그러면 패자의 `start()`도 성공해 "정확히 하나"가 깨진다(CI에서 실제로 터졌다). 공급자를 막아
+    두면 승자의 워커가 첫 이벤트 뒤 공급자 안에서 멈추므로, 패자가 언제 재검사하든 슬롯은 잡혀
+    있다. 경합을 다 본 뒤에 풀어 준다.
+    """
     runner, _, session_id, provider = _build()
-    provider.release.set()
     barrier = threading.Barrier(2)
     outcomes: list[str] = []
     lock = threading.Lock()
@@ -225,3 +230,7 @@ def test_two_threads_racing_to_start_leave_exactly_one_winner() -> None:
     assert outcomes.count("rejected") == 1
     winners = [outcome for outcome in outcomes if outcome != "rejected"]
     assert len(winners) == 1
+
+    # 막아 둔 공급자를 풀어 워커가 정상 종료하게 한다(데몬 스레드를 10초 매달아 두지 않는다).
+    provider.release.set()
+    assert _await_finished(runner, winners[0]).status is TurnStatus.COMPLETED

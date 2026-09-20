@@ -429,7 +429,37 @@ def test_the_grace_window_is_shorter_than_the_turn_timeout() -> None:
 # -- [P3] 확정된 턴을 취소하면 확정된 상태가 보인다 ----------------------------------------------
 
 
-def test_cancelling_an_already_decided_turn_reports_that_decision() -> None:
+def test_cancelling_a_turn_whose_reason_is_already_decided_reports_that_reason() -> None:
+    """스레드가 아직 도는 동안 취소하면 레지스트리가 답한다 — 확정된 사유가 보여야 한다.
+
+    `run_all()` 뒤에 취소하면 `_finish`가 이미 항목을 뺀 뒤라 저장소 폴백으로 빠지고, 레지스트리
+    분기(`entry.decided` → `view()`)를 지나지 않는다.
+    """
+    harness = _harness(
+        (TextDelta("한"), TextDelta("참"), TextDelta("뒤")),
+        timeout_seconds=5.0,
+        grace_seconds=1.0,
+        clock_step=4.0,
+    )
+    turn = harness.runner.start(harness.session.session_id, "질문", CONTEXT)
+    # 스레드를 돌리지 않은 채 타임아웃만 태워 `decided`를 FAILED로 만든다. 공개 API로는 이 창을
+    # 동기적으로 만들 수 없다(`run_all()`은 소비와 종료를 한 번에 돌린다).
+    harness.runner._expire(turn.turn_id)
+
+    cancelled = harness.runner.cancel(turn.turn_id)
+
+    assert cancelled.status is TurnStatus.FAILED
+    assert cancelled.turn_id == turn.turn_id
+    # 취소가 확정된 사유를 덮지 않고, 슬롯도 아직 잡혀 있다.
+    assert harness.runner.state(turn.turn_id).status is TurnStatus.FAILED
+    with pytest.raises(TurnInProgressError):
+        harness.runner.start(harness.session.session_id, "다음", CONTEXT)
+
+    ManualTurnThread.run_all()
+    assert harness.runner.state(turn.turn_id).status is TurnStatus.FAILED
+
+
+def test_cancelling_a_finished_turn_falls_back_to_the_repository() -> None:
     harness = _harness(
         (TextDelta("한"), TextDelta("참"), TextDelta("뒤")),
         timeout_seconds=5.0,
@@ -439,5 +469,4 @@ def test_cancelling_an_already_decided_turn_reports_that_decision() -> None:
     turn = harness.runner.start(harness.session.session_id, "질문", CONTEXT)
     ManualTurnThread.run_all()
 
-    # 이미 끝난 턴은 저장소가 답한다.
     assert harness.runner.cancel(turn.turn_id).status is TurnStatus.FAILED

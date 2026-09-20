@@ -257,19 +257,20 @@ class AssistantChatService:
                 for event in provider.stream_turn(
                     secret, profile, request, execute_tool, cancelled
                 ):
-                    # 도구가 세운 종료 사유는 그 도구의 요약을 내보낸 다음에 적용한다.
+                    # 도구가 큐에 넣은 이벤트를 먼저 내보낸다.
                     yield from state.drain()
-                    if state.stop is not None:
-                        break
                     if isinstance(event, TextDelta):
                         text_parts.append(event.text)
                     if isinstance(event, Usage):
                         state.input_tokens += event.input_tokens
                         state.output_tokens += event.output_tokens
                     yield event
-                    # 취소 확인은 이벤트를 처리한 **뒤**에 한다. 공급자가 이미 만들어 낸 조각은
-                    # 화면에도 assistant 메시지에도 남아야 한다(spec D3: 이미 스트리밍된 텍스트는
-                    # 보존한다). 앞에서 보면 손에 든 이벤트 하나가 통째로 사라진다.
+                    # 종료 판정은 이벤트를 처리한 **뒤**에 한다. 도구가 세운 사유든 취소든
+                    # 마찬가지다. 공급자가 이미 만들어 낸 조각은 화면에도 assistant 메시지에도
+                    # 남아야 한다(spec D3: 이미 스트리밍된 텍스트는 보존한다). 앞에서 보면 손에
+                    # 든 이벤트 하나가 통째로 사라지고, 같은 규칙이 경로에 따라 달라진다.
+                    if state.stop is not None:
+                        break
                     if cancelled():
                         state.stop = FailureCode.CANCELLED
                         state.stop_message = (

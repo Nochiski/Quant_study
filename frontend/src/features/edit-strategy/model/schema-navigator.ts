@@ -36,6 +36,11 @@ export type SchemaFacts = {
   unit: string | null;
   displayUnit: string | null;
   descriptionKey: string | null;
+  /**
+   * `x-operator`: 노드 `operator` property가 발행하는 `enum 값 → 설명 키 stem`. 소비자가 값에서
+   * 키를 조립하지 않도록 backend가 매핑을 통째로 내려준다(P1-03, spec D8).
+   */
+  operatorKeys: Readonly<Record<string, string>> | null;
   appliedStage: string | null;
   catalog: string | null;
   reference: string | null;
@@ -451,6 +456,20 @@ export const definingArrayFor = (
 const stringAt = (node: JsonSchema, key: string): string | null =>
   typeof node[key] === "string" ? (node[key] as string) : null;
 
+/** 문자열만 담은 mapping 확장 값(`x-operator`). 경계에서 모양을 확인하고 아니면 null. */
+const stringRecordAt = (
+  node: JsonSchema,
+  key: string,
+): Readonly<Record<string, string>> | null => {
+  const value = node[key];
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.every(([, item]) => typeof item === "string")
+    ? (Object.fromEntries(entries) as Record<string, string>)
+    : null;
+};
+
 /** 한 스키마 노드의 사실. `$ref`·nullable은 이미 풀린 노드(`schemaAt(...).node`)를 받는다. */
 export const schemaFacts = (node: JsonSchema): SchemaFacts => {
   const own = (key: string): boolean =>
@@ -491,6 +510,7 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
     unit: stringAt(node, "x-unit"),
     displayUnit: stringAt(node, "x-display-unit"),
     descriptionKey: stringAt(node, "x-description-key"),
+    operatorKeys: stringRecordAt(node, "x-operator"),
     appliedStage: stringAt(node, "x-applied-stage"),
     catalog: stringAt(node, "x-catalog"),
     reference: stringAt(node, "x-reference"),

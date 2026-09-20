@@ -11,7 +11,7 @@ import type {
   DatasetFieldProfile,
   FactorDefinition,
 } from "../../../shared/api";
-import { t, tOptional } from "../../../shared/config";
+import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import type {
   FormControl,
@@ -185,7 +185,6 @@ const FormSectionView = ({
   selectedPointer: string | undefined;
   disabled: boolean;
 }) => {
-  const title = section.key === "" ? t("form.section.root") : section.key;
   const [open, setOpen] = useState(true);
   if (section.kind === "list") {
     return (
@@ -206,7 +205,8 @@ const FormSectionView = ({
     <fieldset className="strategy-form__section" disabled={disabled}>
       <legend>
         <SectionToggle
-          title={title}
+          schemaKey={section.key === "" ? null : section.key}
+          descriptionKey={section.descriptionKey}
           open={open}
           onToggle={() => setOpen((value) => !value)}
         />
@@ -248,24 +248,49 @@ const FormSectionView = ({
 };
 
 /** 섹션 제목 = 접기/펼치기 버튼(키보드: Enter/Space). 접힌 섹션은 DOM에 남긴다(`hidden`). */
+/**
+ * 섹션 제목은 backend가 발행한 이름을 보이고 스키마 키는 보조 `<code>`로 내려간다(P1-03).
+ * 루트 스칼라 섹션처럼 스키마 키가 없는 자리는 이름만 보이고, 이름도 없으면 예전처럼 키만
+ * 보인다 — 키 문자열을 설명으로 찍지 않는다.
+ */
 const SectionToggle = ({
-  title,
+  schemaKey,
+  descriptionKey,
   open,
   onToggle,
 }: {
-  title: string;
+  schemaKey: string | null;
+  descriptionKey: string | null;
   open: boolean;
   onToggle: () => void;
-}) => (
-  <button
-    type="button"
-    className="strategy-form__toggle"
-    aria-expanded={open}
-    onClick={onToggle}
-  >
-    <span aria-hidden="true">{open ? "▾" : "▸"}</span> <code>{title}</code>
-  </button>
-);
+}) => {
+  const name = tName(descriptionKey);
+  return (
+    <button
+      type="button"
+      className="strategy-form__toggle"
+      aria-expanded={open}
+      onClick={onToggle}
+      title={tDescription(descriptionKey) ?? undefined}
+    >
+      <span aria-hidden="true">{open ? "▾" : "▸"}</span>{" "}
+      {name === null ? null : (
+        <span className="strategy-form__name">{name}</span>
+      )}
+      {schemaKey === null ? null : (
+        <>
+          {name === null ? null : " "}
+          <code className={name === null ? undefined : "strategy-form__key"}>
+            {schemaKey}
+          </code>
+        </>
+      )}
+      {name === null && schemaKey === null ? (
+        <code>{t("form.section.root")}</code>
+      ) : null}
+    </button>
+  );
+};
 
 /**
  * 목록 섹션(P4-03): 항목 추가(스키마 materialize, union이면 `kind` 선택), 팩터 카탈로그 preset 추가,
@@ -319,7 +344,8 @@ const FormListSectionView = ({
     <fieldset className="strategy-form__section" disabled={disabled}>
       <legend>
         <SectionToggle
-          title={section.key}
+          schemaKey={section.key}
+          descriptionKey={section.descriptionKey}
           open={open}
           onToggle={() => setOpen((value) => !value)}
         />
@@ -630,7 +656,18 @@ const FormFieldRow = ({
       NO_FOCUS,
     );
   };
-  const description = tOptional(field.descriptionKey ?? "");
+  // 라벨은 이름을 보이고 스키마 키는 보조 `<code>`다(P1-03). 설명은 `<stem>.description`.
+  const name = tName(field.descriptionKey);
+  // 연산자 필드는 고른 연산자의 설명·계산식을 보인다: "이 노드가 수행할 연산"보다 화면에서
+  // 답이 되는 문장이 "최근 지정 기간의 평균"이다(연산자 카탈로그의 `x-operator` 키).
+  const operatorKey =
+    field.control.kind === "enum" && typeof field.value === "string"
+      ? (field.control.labelKeys?.[field.value] ?? null)
+      : null;
+  const description =
+    tDescription(operatorKey) ?? tDescription(field.descriptionKey);
+  const formula =
+    operatorKey === null ? null : tOptional(`${operatorKey}.formula`);
   const control = (
     <FieldControl
       id={id}
@@ -653,7 +690,10 @@ const FormFieldRow = ({
   // 라벨 내용은 passive 행(링크·const)도 같다: 필수 별표·단위(P4-02 리뷰 010).
   const labelBody = (
     <>
-      <code>{field.key}</code>
+      {name === null ? null : (
+        <span className="strategy-form__name">{name} </span>
+      )}
+      <code className="strategy-form__key">{field.key}</code>
       {field.required ? <span aria-hidden="true"> *</span> : null}
       {(field.displayUnit ?? field.unit) ? (
         <span className="strategy-form__unit">
@@ -739,7 +779,15 @@ const FormFieldRow = ({
         </p>
       ) : null}
       {description !== null ? (
-        <p className="strategy-form__description">{description}</p>
+        <p className="strategy-form__description">
+          {description}
+          {formula === null ? null : (
+            <>
+              {" "}
+              <code>{formula}</code>
+            </>
+          )}
+        </p>
       ) : null}
     </div>
   );
@@ -790,7 +838,11 @@ const FieldControl = (props: ControlProps) => {
           : "";
     const options =
       control.kind === "enum"
-        ? control.values.map((value) => ({ value, label: value }))
+        ? control.values.map((value) => ({
+            value,
+            // 연산자 값은 카탈로그가 발행한 이름으로 보인다. 이름이 없으면 값 그대로.
+            label: tName(control.labelKeys?.[value]) ?? value,
+          }))
         : control.kind === "reference"
           ? control.candidates.map((value) => ({ value, label: value }))
           : catalogOptions(control.catalog, catalogs);

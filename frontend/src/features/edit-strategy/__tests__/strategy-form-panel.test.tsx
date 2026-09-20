@@ -77,13 +77,19 @@ const renderPanel = (
   return projection;
 };
 
-/** 섹션 fieldset(legend = 섹션 키 [+ 힌트]). */
+/**
+ * 섹션 fieldset(legend = `▾ <섹션 이름> <섹션 키> [· 힌트]`). P1-03부터 라벨이 사람 말 이름을
+ * 먼저 보이므로 앞이 낱말 문자가 아닌 자리에서 키를 찾는다.
+ */
 const section = (name: string) =>
-  within(screen.getByRole("group", { name: new RegExp(`^${name}`) }));
+  within(screen.getByRole("group", { name: new RegExp(`(^|[^\\w])${name}`) }));
 
-/** 컨트롤의 접근성 이름은 `<key>` 또는 `<key>· <unit>`이다. */
+/**
+ * 컨트롤의 접근성 이름은 `<이름><key>[· <unit>]`이다 — accname은 인라인 요소 사이에 공백을 넣지
+ * 않는다. `_`는 낱말 문자라 `selection_count`가 `short_selection_count`에 걸리지 않는다.
+ */
 const named = (key: string) => ({
-  name: new RegExp(`^${key}(\\u00b7|$)`),
+  name: new RegExp(`(^|[^\\w])${key}(\\u00b7|$)`),
 });
 
 describe("StrategyFormPanel controls", () => {
@@ -121,7 +127,7 @@ describe("StrategyFormPanel controls", () => {
       { focusEditor: false },
     );
 
-    const title = section("기본 정보").getByRole("textbox", named("title"));
+    const title = section("전략 문서").getByRole("textbox", named("title"));
     await user.clear(title);
     await user.type(title, "버림{Escape}");
     expect(title).toHaveValue("퀄리티 모멘텀");
@@ -293,7 +299,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
     expect(
       eligibility.getByRole("button", { name: "liquidity.adv · 삭제" }),
     ).toBeInTheDocument();
-    const root = section("기본 정보");
+    const root = section("전략 문서");
     expect(root.getByText("1.1")).toHaveAttribute("aria-labelledby");
     expect(root.queryByRole("textbox", named("schema_version"))).toBeNull();
     expect(root.queryByRole("button", { name: /schema_version ·/ })).toBeNull();
@@ -452,7 +458,7 @@ describe("StrategyFormPanel section collapse (P4-04)", () => {
     const user = userEvent.setup();
     renderPanel(MINIMAL, stubTransactions());
     const toggle = section("risk").getByRole("button", {
-      name: "risk",
+      name: /risk$/,
       expanded: true,
     });
     const weight = () =>

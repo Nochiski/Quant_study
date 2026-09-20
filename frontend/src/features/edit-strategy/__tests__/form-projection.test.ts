@@ -79,6 +79,7 @@ describe("projectForm", () => {
     expect(field(portfolio, "side").control).toEqual({
       kind: "enum",
       values: ["long_only", "long_short"],
+      labelKeys: null,
     });
     const risk = objectFields(sections, "risk");
     expect(field(risk, "sector_neutral").control).toEqual({ kind: "boolean" });
@@ -149,6 +150,7 @@ describe("projectForm", () => {
     expect(field(momentum!.fields, "direction").control).toEqual({
       kind: "enum",
       values: ["high", "low"],
+      labelKeys: null,
     });
     expect(field(momentum!.fields, "graph").control).toEqual({
       kind: "graph-link",

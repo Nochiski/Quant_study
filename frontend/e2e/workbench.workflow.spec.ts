@@ -987,8 +987,8 @@ test.describe("professional YAML workflow", () => {
     const form = page.getByRole("region", { name: "Form 편집" });
     await expect(form).toBeVisible();
     await expect(form.getByText("편집 가능")).toBeVisible();
-    const risk = form.getByRole("group", { name: /^risk/ });
-    const weight = risk.getByRole("spinbutton", { name: /^max_name_weight/ });
+    const risk = form.getByRole("group", { name: /\brisk\b/ });
+    const weight = risk.getByRole("spinbutton", { name: /\bmax_name_weight/ });
     await expect(weight).toHaveValue("0.05");
     await weight.fill("0.1");
     await weight.press("Enter");
@@ -1027,7 +1027,7 @@ test.describe("professional YAML workflow", () => {
 
     // 카탈로그에서 팩터 추가 → source에 항목이 생기고 검증을 통과하며 Graph 화면에 새 팩터가 보인다.
     await page.getByRole("tab", { name: "Form", exact: true }).click();
-    const factors = form.getByRole("group", { name: /^factors/ });
+    const factors = form.getByRole("group", { name: /\bfactors\b/ });
     const catalog = factors.getByRole("combobox", {
       name: "factors · 카탈로그에서 추가",
     });
@@ -1097,7 +1097,7 @@ test.describe("professional YAML workflow", () => {
     await editor.getByRole("button", { name: "노드 편집: field" }).click();
 
     const selected = editor.getByRole("group", { name: /선택한 노드/ });
-    const fieldId = selected.getByRole("combobox", { name: /^field_id/ });
+    const fieldId = selected.getByRole("combobox", { name: /\bfield_id/ });
     const fieldOptions = fieldId.locator("option:not([disabled])");
     await expect.poll(async () => fieldOptions.count()).toBeGreaterThan(1);
     const chosenField = await fieldOptions.nth(1).getAttribute("value");
@@ -1109,7 +1109,7 @@ test.describe("professional YAML workflow", () => {
     // 재연결: mom_252의 입력을 새 노드로.
     await editor.getByRole("button", { name: "노드 편집: mom_252" }).click();
     await selected
-      .getByRole("combobox", { name: /^input_node_id/ })
+      .getByRole("combobox", { name: /\binput_node_id/ })
       .selectOption("field");
     await expect(
       editor.getByRole("status").filter({ hasText: "반영됨" }),

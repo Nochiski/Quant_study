@@ -124,7 +124,7 @@ describe("FactorGraphEditor (P5-02)", () => {
     renderEditor(WITH_SPARE, transactions, "/factors/0/graph/nodes/1");
     const selected = within(editor().getByRole("group", { name: /선택한 노드/ }));
     // `mom_252`(time_series)의 속성: window(number), input_node_id(reference → 같은 그래프의 다른 노드).
-    const input = selected.getByRole("combobox", { name: /^input_node_id/ });
+    const input = selected.getByRole("combobox", { name: /\binput_node_id/ });
     const options = within(input)
       .getAllByRole("option")
       .map((option) => option.textContent);
@@ -142,7 +142,7 @@ describe("FactorGraphEditor (P5-02)", () => {
       "graph",
       { focusEditor: false },
     );
-    const window = selected.getByRole("spinbutton", { name: /^window/ });
+    const window = selected.getByRole("spinbutton", { name: /\bwindow/ });
     await user.clear(window);
     await user.type(window, "126{Enter}");
     expect(transactions.apply).toHaveBeenLastCalledWith(
@@ -153,14 +153,14 @@ describe("FactorGraphEditor (P5-02)", () => {
     );
     // 그래프 설정: output_node_id(reference)·missing_policy(enum).
     const settings = within(editor().getByRole("group", { name: "그래프 설정" }));
-    await user.selectOptions(settings.getByRole("combobox", { name: /^output_node_id/ }), "px");
+    await user.selectOptions(settings.getByRole("combobox", { name: /\boutput_node_id/ }), "px");
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "replace-scalar", pointer: "/factors/0/graph/output_node_id", value: "px" },
       "output_node_id",
       "graph",
       { focusEditor: false },
     );
-    await user.selectOptions(settings.getByRole("combobox", { name: /^missing_policy/ }), "zero");
+    await user.selectOptions(settings.getByRole("combobox", { name: /\bmissing_policy/ }), "zero");
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "replace-scalar", pointer: "/factors/0/graph/missing_policy", value: "zero" },
       "missing_policy",
@@ -174,7 +174,7 @@ describe("FactorGraphEditor (P5-02)", () => {
     const transactions = stub();
     renderEditor(WITH_SPARE, transactions, "/factors/0/graph/nodes/0");
     const selected = within(editor().getByRole("group", { name: /선택한 노드/ }));
-    const nodeId = selected.getByRole("textbox", { name: /^node_id/ });
+    const nodeId = selected.getByRole("textbox", { name: /\bnode_id/ });
     await user.clear(nodeId);
     await user.type(nodeId, "px_close{Enter}");
     expect(transactions.apply).toHaveBeenLastCalledWith(

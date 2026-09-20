@@ -58,6 +58,9 @@ import type {
   GetStrategyDraftErrors,
   GetStrategyDraftResponses,
   GetStrategyErrors,
+  GetStrategyOperatorCatalogData,
+  GetStrategyOperatorCatalogErrors,
+  GetStrategyOperatorCatalogResponses,
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
@@ -635,6 +638,25 @@ export const getStrategyDocumentContract = <
     GetStrategyDocumentContractErrors,
     ThrowOnError
   >({ url: "/api/v1/strategy-documents/contract", ...options });
+
+/**
+ * Strategy Operator Catalog
+ *
+ * Graph node operator definitions (arity, params, output rules, availability, i18n keys).
+ *
+ * The catalog is the only source of the operator list a palette or a node label may show;
+ * clients never restate it. ETag = catalog hash (304 on match).
+ */
+export const getStrategyOperatorCatalog = <
+  ThrowOnError extends boolean = false,
+>(
+  options?: Options<GetStrategyOperatorCatalogData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetStrategyOperatorCatalogResponses,
+    GetStrategyOperatorCatalogErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategy-documents/operators", ...options });
 
 /**
  * Strategy Document Schema

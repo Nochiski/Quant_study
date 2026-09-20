@@ -1467,10 +1467,12 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
   });
   const formPanel = () => screen.findByLabelText("Form 편집");
   // 섹션은 runtime schema query가 끝난 뒤 나타난다.
+  // 섹션 legend는 `▾ <이름> <키>`다(P1-03). accname은 인라인 요소 사이에 공백을 넣지 않으므로
+  // 앞이 낱말 문자가 아닌 자리에서 키를 찾는다.
   const formSection = async (name: string) =>
     within(
       await within(await formPanel()).findByRole("group", {
-        name: new RegExp(`^${name}`),
+        name: new RegExp(`(^|[^\\w])${name}`),
       }),
     );
 
@@ -1494,7 +1496,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       await waitFor(() => expect(form).toBeVisible());
       // 값은 parse tree에서, 없는 필드는 runtime schema 기본값 placeholder로 온다.
       const data = await formSection("data");
-      expect(data.getByRole("combobox", { name: /^market/ })).toHaveValue(
+      expect(data.getByRole("combobox", { name: /\bmarket/ })).toHaveValue(
         "KRX",
       );
       expect(within(form).queryByText("strategy_id")).not.toBeInTheDocument();
@@ -1557,7 +1559,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
 
     await user.click(screen.getByRole("tab", { name: "Form" }));
     const risk = await formSection("risk");
-    const weight = risk.getByRole("spinbutton", { name: /^max_name_weight/ });
+    const weight = risk.getByRole("spinbutton", { name: /\bmax_name_weight/ });
     expect(weight).toHaveValue(0.05);
     await user.clear(weight);
     await user.type(weight, "0.1{Enter}");
@@ -1580,7 +1582,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     // 미작성 필드의 첫 값은 섹션에 insert-key, 문서 다른 부분은 그대로.
     const data = await formSection("data");
     await user.selectOptions(
-      data.getByRole("combobox", { name: /^frequency/ }),
+      data.getByRole("combobox", { name: /\bfrequency/ }),
       "daily",
     );
     await waitFor(() =>
@@ -1628,8 +1630,8 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
         exact: false,
       }),
     ).toBeInTheDocument();
-    const root = await formSection("기본 정보");
-    expect(root.getByRole("textbox", { name: /^title/ })).toBeDisabled();
+    const root = await formSection("전략 문서");
+    expect(root.getByRole("textbox", { name: /\btitle/ })).toBeDisabled();
     expect(view.state.doc.toString()).toBe(jsonSource);
 
     await user.click(screen.getByRole("tab", { name: "JSON" }));
@@ -1651,8 +1653,8 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     expect(
       within(form).getByText("구문 오류 · source를 먼저 고치세요"),
     ).toBeInTheDocument();
-    const root = await formSection("기본 정보");
-    const title = root.getByRole("textbox", { name: /^title/ });
+    const root = await formSection("전략 문서");
+    const title = root.getByRole("textbox", { name: /\btitle/ });
     expect(title).toHaveValue("last-valid");
     expect(title).toBeDisabled();
     expect(saveButton()).toBeDisabled();

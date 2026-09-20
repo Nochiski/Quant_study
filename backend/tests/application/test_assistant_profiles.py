@@ -228,6 +228,11 @@ def test_active_is_none_before_any_profile_exists() -> None:
         ("https://8.8.8.8/v1", "IP literals"),
         ("https://user:key@api.example.com", "credentials"),
         ("https:///v1", "host is empty"),
+        # 스킴을 빠뜨린 주소는 가장 흔한 오타다. 호스트가 멀쩡히 적혀 있는데 "호스트가 비었다"고
+        # 답하면 사용자는 고칠 방향을 알 수 없다.
+        ("api.openai.com/v1", "https://"),
+        ("api.openai.com", "https://"),
+        ("www.api.openai.com", "https://"),
         # 아래 넷은 전부 127.0.0.1로 연결되지만 `ipaddress`가 주소로 인정하지 않는 표기다.
         ("https://2130706433/v1", "last label must be alphabetic"),
         ("https://0x7f000001/v1", "last label must be alphabetic"),

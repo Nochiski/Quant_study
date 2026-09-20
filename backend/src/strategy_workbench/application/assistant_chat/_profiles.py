@@ -243,10 +243,10 @@ class ProviderProfileService:
         if "@" in parts.netloc:
             raise ProviderBaseUrlRejectedError(base_url, "credentials in the URL are not accepted")
         if not parts.hostname:
-            raise ProviderBaseUrlRejectedError(base_url, "host is empty")
+            raise ProviderBaseUrlRejectedError(base_url, _empty_host_reason(parts.scheme))
         host = parts.hostname.rstrip(".").lower()
         if not host:
-            raise ProviderBaseUrlRejectedError(base_url, "host is empty")
+            raise ProviderBaseUrlRejectedError(base_url, _empty_host_reason(parts.scheme))
         address = _ip_literal(host)
         local_reason = _local_host_reason(host, address)
         if local_reason is not None:
@@ -273,6 +273,23 @@ class ProviderProfileService:
                 "IP literals are not accepted — the last label must be alphabetic "
                 f"(2+ letters), got {host.rsplit('.', 1)[-1]!r}",
             )
+
+
+def _empty_host_reason(scheme: str) -> str:
+    """호스트를 못 읽은 이유. 스킴이 없으면 그쪽을 지목한다.
+
+    `urlsplit("api.openai.com/v1")`은 `netloc`이 비어 전부 `path`로 가므로 호스트가 `None`이 된다.
+    공급자 문서에서 주소를 복사해 스킴 없이 붙여 넣는 것이 가장 흔한 오타인데, 그때 "호스트가
+    비었다"고만 답하면 사용자는 호스트가 멀쩡히 적혀 있는 화면을 보며 고칠 방향을 알 수 없다. 이
+    문자열은 `assistant.base_url_rejected` 422 본문으로 그대로 나가므로 화면이 대신 설명할 여지도
+    없다.
+    """
+    if not scheme:
+        return (
+            "base_url must be an absolute URL starting with https:// "
+            "(for example https://api.example.com/v1)"
+        )
+    return f"host is empty — scheme={scheme!r}"
 
 
 def _local_host_reason(host: str, address: _IpAddress | None) -> str | None:

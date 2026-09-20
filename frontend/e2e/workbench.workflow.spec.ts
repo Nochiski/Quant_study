@@ -225,9 +225,13 @@ test.describe("professional YAML workflow", () => {
     await expectPhase(page, "구조 오류");
     await expect(save(page)).toBeDisabled();
     await expect(backtest(page)).toBeDisabled();
-    await expect(page.getByRole("region", { name: "문제" })).toContainText(
-      "/risk/max_name_wieght",
-    );
+    const problems = page.getByRole("region", { name: "문제" });
+    await expect(problems).toContainText("/risk/max_name_wieght");
+    // P1-05: 구조 오류는 한글 문장으로 오고, 오타에는 가까운 키를 제안한다.
+    await expect(problems).toContainText("모르는 키입니다");
+    await expect(problems).toContainText("혹시 'max_name_weight'인가요?");
+    await expect(problems).toContainText("got='max_name_wieght'");
+    await expect(problems).not.toContainText("unknown key");
 
     await replaceSource(page, sourceV1);
     await expectPhase(page, "검증 통과");
@@ -1148,7 +1152,14 @@ test.describe("professional YAML workflow", () => {
     expect(edited).toContain("\n          node_id: field\n");
     expect(edited).toContain(`\n          field_id: ${chosenField}\n`);
     expect(edited).toContain("\n          input_node_id: field\n");
-    expect(edited.startsWith(GOLDEN.slice(0, GOLDEN.indexOf("factors:")).replace("퀄리티 모멘텀", title))).toBe(true);
+    expect(
+      edited.startsWith(
+        GOLDEN.slice(0, GOLDEN.indexOf("factors:")).replace(
+          "퀄리티 모멘텀",
+          title,
+        ),
+      ),
+    ).toBe(true);
     await saveAndWaitForRevision(page, 2);
     const saved = requireData(
       (

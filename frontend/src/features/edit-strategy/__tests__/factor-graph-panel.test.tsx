@@ -272,7 +272,78 @@ describe("FactorGraph projection", () => {
   });
 });
 
+/** 순환·중복 진단이 노드를 집어 오는 상태(P1-05). 계획은 없고 검증 진단만 있다. */
+const cyclicReadyState = (): ExecutionPlansState => {
+  const graphExplanation = explanation();
+  graphExplanation.plan = null;
+  graphExplanation.validation.valid = false;
+  graphExplanation.validation.issues = [
+    {
+      code: "factor.graph.cycle",
+      message:
+        "이 노드가 순환 참조에 묶여 있어 값을 계산할 수 없습니다. 고리 중 한 곳의 입력을 끊어 주세요 — cycle=close → positive → close",
+      node_id: "close",
+      path: "nodes.1",
+      severity: "error",
+    },
+    {
+      code: "factor.graph.cycle",
+      message:
+        "이 노드가 순환 참조에 묶여 있어 값을 계산할 수 없습니다. 고리 중 한 곳의 입력을 끊어 주세요 — cycle=close → positive → close",
+      node_id: "positive",
+      path: "nodes.3",
+      severity: "error",
+    },
+  ];
+  return {
+    status: "ready",
+    expectedRegistryVersion: "factor-registry-v7",
+    expectedDataSnapshotId: "krx-pit-2026-09-01",
+    factors: [plannedFactor(graph, graphExplanation)],
+  };
+};
+
 describe("FactorGraphPanel", () => {
+  it("puts a cycle diagnostic on every node card in the loop, not in the graph-level list", () => {
+    // P1-05: `node_id`가 없던 시절에는 "순환 참조가 있습니다" 한 줄이 그래프 머리에만 떠서,
+    // 어느 노드를 고쳐야 하는지 사용자가 목록을 눈으로 훑어야 했다.
+    const projection = projectFactorGraphs(cyclicReadyState());
+    if (projection.status !== "ready") throw new Error("fixture must be ready");
+
+    const byNodeId = new Map(
+      projection.factors[0].nodes.map((node) => [node.nodeId, node]),
+    );
+    expect(byNodeId.get("close")?.issues.map((issue) => issue.code)).toEqual([
+      "factor.graph.cycle",
+    ]);
+    expect(byNodeId.get("positive")?.issues.map((issue) => issue.code)).toEqual(
+      ["factor.graph.cycle"],
+    );
+    expect(byNodeId.get("zero")?.issues).toEqual([]);
+    expect(
+      projection.factors[0].issues.filter((issue) => issue.node_id === null),
+    ).toEqual([]);
+
+    render(
+      <FactorGraphPanel
+        state={cyclicReadyState()}
+        diagnostics={[]}
+        onSelectPointer={vi.fn()}
+        onOpenSource={vi.fn()}
+      />,
+    );
+
+    // 고리에 묶인 노드 카드 둘에만 배지가 붙고, 문장이 고리 경로를 말한다.
+    const badges = screen.getAllByText("factor.graph.cycle");
+    expect(badges).toHaveLength(2);
+    for (const badge of badges) {
+      const row = badge.closest("li");
+      expect(
+        within(row as HTMLElement).getByText(/cycle=close → positive → close/),
+      ).toBeInTheDocument();
+    }
+  });
+
   it("keeps the last plan projection with a recomputing badge while the plan reloads (OBS-132-05)", () => {
     const schema = JSON.parse(
       readBackendFixture("strategy_documents/runtime-schema.json"),

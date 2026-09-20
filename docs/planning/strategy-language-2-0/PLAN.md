@@ -360,6 +360,28 @@ Phase exit:
   12-1 모멘텀은 spec D1의 완료 정의 "퀀트 아이디어 5개"의 첫 번째라 노출이 크다.
 - **재현 test**: 없음(관찰만). 담당 PR이 시드 ↔ 그래프 최소 이력 동치 테스트를 함께 둔다.
 - **담당**: `P2-06`(`risk.risk_factor_id`·`saved_*` 제거로 레지스트리를 건드리는 PR).
+- 2026-09-20 — P1-01 구현 및 1차 리뷰: PR #168. 문서 상태 배지와 `DiagnosticsPanel`을
+  `SourceEditor` 밖 슬롯으로 올려 다섯 탭 모두에서 보이게 하고, 문제 행 클릭 목적지를
+  `resolveDiagnosticDestination`이 판정한다. `review_lang2_p1_01` APPROVE(blocking 0), 후속으로
+  편집기 높이 충전·선택 카드 `scrollIntoView`·route 테스트 강화 5건을 반영.
+- 2026-09-21 — P1-04 구현 및 1차 리뷰: 연산자 팔레트(카탈로그·스키마 주도), 추가·삭제 실패의 사유
+  표시, 진단 본문 인라인. 구현 중 발견한 `window: 0` 결함은 하한을 노드 dataclass 옆에 한 번
+  선언하고 검증기·runtime schema가 함께 읽게 해 같은 PR에서 고쳤다. `review_lang2_p1_04`
+  REQUEST_CHANGES(차단 2·P3 7) 전부 반영 — 남은 하나였던 `periods: null` 씨앗까지 막아 팔레트가
+  만든 노드가 곧바로 거부되지 않는다.
+- 2026-09-20 — P1-01 2차 리뷰 APPROVE(blocking 0). 중첩된 reveal 훅 둘이 서로 다른 요소를 끌던 R2-1을
+  "마지막 매치"로 고치고, 같은 문제 행 재클릭 reveal(R2-2)·명시적 `schemaLoaded`(R2-4)·
+  `scrollIntoView` 수신 요소 단언(R2-5)까지 반영.
+- 2026-09-21 — P1-05 구현: 구조·codec 진단이 backend에서 한글 문장으로 완성돼 나가고
+  (`.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행), `structure.legacy_shape`·
+  `STRUCTURE_CODES`·`FACTOR_GRAPH_CODES`·`expression_code()` 세 레지스트리 게이트가 생겼다.
+  `factor.*`는 더 이상 전략 문서 진단으로 나가지 않는다. 문장 golden이 레지스트리와 1:1이다.
+  리드 브리핑의 "진단 문장을 frontend i18n 템플릿으로" 방향은 SoT·WORKFLOW 원문과 충돌해 철회됐다.
+- 2026-09-21 — P2-09 acceptance 추가: `is_upgradeable_document`에 버전 상한을 두는 항목을
+  업그레이더 PR에 적었다. 판정을 넓힌 것은 P1-05가 이미 했고(진단이 "업그레이드하세요"라고 시킨
+  문서를 endpoint가 거절하던 모순 제거), 1.2가 들어오면 "미래 버전 + 옛 키 하나"가 1.1로
+  강등되는 경로가 되므로 상한은 버전 디스패치를 넣는 PR 몫이다. 옛 24 PR 계획 기준으로 이 줄을
+  P2-05에 적었던 것을 28 PR 계획에 맞춰 옮겼다.
 
 ## 갱신 절차
 

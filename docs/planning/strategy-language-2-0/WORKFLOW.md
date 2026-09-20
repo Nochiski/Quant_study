@@ -310,7 +310,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - **P2-02가 남긴 1.1 호환 잔재를 이 PR에서 물리 삭제한다**: `FactorGraph.missing_policy` 필드,
   `domain/factor/_nodes.py`의 `DEPRECATED_FIELD` 마커, `domain/strategy/_schema.py`의
   `x-deprecated` 발행과 `FieldContract.deprecated`(다른 deprecated 필드가 생기지 않았다면),
-  브리지의 `resolve_graph_missing_policy`·`missing_from_legacy_graphs`(문서 입력이 사라지면
+  브리지의 `resolve_graph_missing_policy`·`_missing_from_legacy_graphs`(문서 입력이 사라지면
   `environment.missing`만 남는다). 1.2 문서의 `graph.missing_policy`는 `structure.unknown_field`가
   된다. 1.1 문서에서의 이관은 P2-09 업그레이더가 맡는다.
 - **최상위 필수 키는 `schema_version`·`title` 둘**이다. `factors: tuple[FactorSignal, ...] = ()`로

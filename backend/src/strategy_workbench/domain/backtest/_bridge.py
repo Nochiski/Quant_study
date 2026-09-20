@@ -35,7 +35,7 @@ class LegacyMissingPolicyConflictError(ValueError):
         self.by_factor = by_factor
 
 
-def missing_from_legacy_graphs(
+def _missing_from_legacy_graphs(
     graphs: tuple[tuple[str, FactorGraph], ...],
 ) -> MissingPolicy:
     """1.1 그래프들의 `graph.missing_policy` 를 실행 설정의 단일 값으로 접는다.
@@ -68,12 +68,12 @@ def resolve_graph_missing_policy(
     """
     if missing is not None:
         return missing
-    return missing_from_legacy_graphs((("graph", graph),))
+    return _missing_from_legacy_graphs((("graph", graph),))
 
 
 def _missing_from_legacy_factors(spec: StrategySpec) -> MissingPolicy:
     """전략 문서의 팩터별 결측 정책을 실행 설정의 단일 값으로 접는다."""
-    return missing_from_legacy_graphs(
+    return _missing_from_legacy_graphs(
         tuple((factor.factor_id, factor.graph) for factor in spec.factors)
     )
 

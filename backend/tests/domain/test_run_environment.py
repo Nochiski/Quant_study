@@ -19,6 +19,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     environment_from_legacy_spec,
     environment_hash,
     resolve_environment,
+    resolve_graph_missing_policy,
     run_environment_canonical_json,
     run_environment_schema,
     run_environment_schema_hash,
@@ -209,6 +210,17 @@ def test_bridge_refuses_factors_that_disagree_on_the_missing_policy() -> None:
     assert "expected=" in message and "factors=2" in message
     # 막다른 길이 아니라는 안내: 명시 실행 설정을 주면 이 문서로도 실행할 수 있다.
     assert "environment 를 명시하면" in message and "통과한다" in message
+
+
+def test_single_graph_missing_policy_falls_back_to_the_document() -> None:
+    """실행 설정이 없는 팩터 sandbox 요청의 우선순위(2차 리뷰 P3).
+
+    `resolve_environment` 이 전략 실행에 대해 하는 판정과 같은 규칙이라 owner 옆에서 고정한다.
+    """
+    graph = replace(_template().factors[0].graph, missing_policy=MissingPolicy.ZERO)
+
+    assert resolve_graph_missing_policy(graph, None) is MissingPolicy.ZERO
+    assert resolve_graph_missing_policy(graph, MissingPolicy.DROP) is MissingPolicy.DROP
 
 
 def test_explicit_environment_skips_the_conflicting_legacy_values() -> None:

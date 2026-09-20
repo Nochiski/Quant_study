@@ -777,3 +777,31 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
 
     accepted = client.post("/api/v1/backtests", json={**body, "environment": environment})
     assert accepted.status_code == 202, accepted.text
+
+
+def test_conflicting_legacy_missing_policies_are_refused_at_start_with_a_code() -> None:
+    """P2-02 리뷰 P2: 충돌 문서의 run 경로 응답 shape 를 고정한다.
+
+    거절 주체는 `start` 가 아니라 `preflight` 안의 브리지다. 그래서 코드는
+    `portfolio.strategy.invalid` 이고 사유는 `validation.issues` 안에 구조화되어 들어간다.
+    `start` 에 있던 도달 불가 catch 를 지워도 이 응답이 그대로여야 한다.
+    """
+    client = TestClient(build_http_app())
+    body = _run_body(client, "python")
+    factor = body["strategy"]["factors"][0]
+    body["strategy"]["factors"] = [
+        {**factor, "graph": {**factor["graph"], "missing_policy": "zero"}},
+        {
+            **factor,
+            "factor_id": f"{factor['factor_id']}_dropped",
+            "graph": {**factor["graph"], "missing_policy": "drop"},
+        },
+    ]
+
+    response = client.post("/api/v1/backtests", json=body)
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "portfolio.strategy.invalid"
+    codes = [issue["code"] for issue in detail["validation"]["issues"]]
+    assert "run_environment.missing_policy_conflict" in codes

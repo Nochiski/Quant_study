@@ -301,10 +301,15 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   금지. 로컬 프록시 개발용 예외는 env `STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL=1`일
   때만 `http`·루프백 허용. 검사는 application(`ProviderProfileService`)이 하고 위반은
   `assistant.base_url_rejected`.
-- **adapter는 SDK의 환경 변수 폴백(base_url·api_key)을 차단한다.** 둘 다 인자를 비우면 공급자
-  SDK가 `ANTHROPIC_BASE_URL`·`ANTHROPIC_API_KEY`(OpenAI도 같은 방식)를 읽어, 위 검사를 한 번도
-  지나지 않은 호스트로 프로파일의 키가 나간다. 화면은 정상으로 보인다. base_url이 없으면
-  adapter가 공급자 기본 호스트를 **명시**하고, api_key는 언제나 프로파일 비밀만 쓴다.
+- **adapter는 SDK가 환경에서 읽는 값(base_url·api_key·auth token·custom headers·org/project 등)을
+  전부 차단한다.** 인자를 비우면 공급자 SDK가 `ANTHROPIC_BASE_URL`·`ANTHROPIC_API_KEY`
+  (OpenAI도 같은 방식)를 읽어, 위 검사를 한 번도 지나지 않은 호스트로 프로파일의 키가 나간다.
+  화면은 정상으로 보인다. base_url이 없으면 adapter가 공급자 기본 호스트를 **명시**하고,
+  api_key는 언제나 프로파일 비밀만 쓴다.
+  **키를 명시해도 끝이 아니다** — `ANTHROPIC_CUSTOM_HEADERS` 같은 변수는 SDK의
+  `default_headers`로 들어가고 그것이 인증 헤더보다 뒤에 합쳐져 `X-Api-Key`를 덮어쓴다. adapter가
+  인증 헤더를 `default_headers`에 **명시**하고 쓰지 않는 bearer 헤더는 지운다. 검증은 "무엇을
+  넘겼는가"가 아니라 **실제 요청 헤더**로 한다 — 둘 사이에 실제로 차이가 생긴다.
 - OpenAPI와 frontend generated SDK를 **같은 PR(A-04)에서** 갱신한다(12절). 비밀 필드는 요청 전용
   (`writeOnly`), 응답 스키마에 없다.
 

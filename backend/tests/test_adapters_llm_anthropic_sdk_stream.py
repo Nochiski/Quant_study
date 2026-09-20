@@ -33,7 +33,11 @@ pytest.importorskip(
 import anthropic  # noqa: E402  # reason: 위 importorskip 뒤에야 안전하게 import할 수 있다
 import httpx2  # noqa: E402  # reason: 위와 같음 (anthropic이 끌고 오는 전송 계층)
 
+from strategy_workbench.adapters.outbound.llm_anthropic import (  # noqa: E402  # reason: 위와 같음
+    _client as client_module,
+)
 from strategy_workbench.adapters.outbound.llm_anthropic._client import (  # noqa: E402  # reason: 위와 같음
+    AUTH_HEADER,
     DEFAULT_BASE_URL,
     SdkMessagesClient,
     sdk_client_factory,
@@ -277,3 +281,85 @@ def test_the_pinned_host_matches_the_sdk_default(monkeypatch: pytest.MonkeyPatch
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
 
     assert str(anthropic.Anthropic(api_key="sk-unused").base_url).rstrip("/") == DEFAULT_BASE_URL
+
+
+def _headers_from_a_production_call(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """프로덕션 팩토리로 한 번 호출하고 **실제 요청 헤더**를 돌려준다.
+
+    팩토리가 무엇을 넘겼는지가 아니라 소켓에 실린 것을 본다. SDK가 `default_headers`를 인증
+    헤더보다 뒤에 합치므로, "넘겼다"와 "실제로 그 값이 나갔다" 사이에 실제로 차이가 생긴다.
+    전송 계층만 가짜다 — 클라이언트 생성은 프로덕션 코드가 한다.
+    """
+    seen: list[httpx2.Request] = []
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(
+            200, headers={"content-type": "text/event-stream"}, content=_text_turn_body("답")
+        )
+
+    class _MockTransportAnthropic(anthropic.Anthropic):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(
+                **kwargs,  # pyright: ignore[reportArgumentType]  # reason: 프로덕션 인자를 그대로 넘긴다
+                http_client=anthropic.DefaultHttpxClient(transport=httpx2.MockTransport(handle)),
+            )
+
+    monkeypatch.setattr(client_module.anthropic, "Anthropic", _MockTransportAnthropic)
+    client = sdk_client_factory()(SECRET, None)
+    with client.stream(
+        max_tokens=16,
+        messages=[{"role": "user", "content": "x"}],
+        model=_MODEL,
+        output_config={"effort": "high"},
+        system=[],
+        thinking={"type": "adaptive"},
+        tools=[],
+    ) as stream:
+        list(stream)
+
+    assert len(seen) == 1
+    return {name.lower(): value for name, value in seen[0].headers.items()}
+
+
+def test_custom_header_env_cannot_replace_the_profile_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ANTHROPIC_CUSTOM_HEADERS`가 인증 헤더를 덮어쓰면 안 된다.
+
+    `api_key`를 명시해도 이 환경 변수는 남는다. SDK가 값을 `"이름: 값"` 줄 단위로 파싱해
+    `default_headers`에 넣고, 그것이 인증 헤더보다 **뒤에** 합쳐지기 때문이다. 막지 않으면
+    우리 요청이 남의 키로 나간다 — 실측으로 확인한 동작이다.
+    """
+    monkeypatch.setenv(
+        "ANTHROPIC_CUSTOM_HEADERS",
+        f"{AUTH_HEADER}: sk-ant-ATTACKER" + chr(10) + "Authorization: Bearer sk-ant-ATTACKER-2",
+    )
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-ant-ENV-TOKEN")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ENV-KEY")
+
+    headers = _headers_from_a_production_call(monkeypatch)
+
+    assert headers[AUTH_HEADER.lower()] == SECRET
+    # 우리는 bearer를 쓰지 않는다. 주입된 것이 남아 있으면 안 된다.
+    assert "authorization" not in headers
+
+
+def test_the_only_credential_on_the_wire_is_the_profile_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """환경 변수가 아무것도 없을 때의 기준선. 위 테스트가 무엇과 비교되는지 고정한다."""
+    for name in (
+        "ANTHROPIC_CUSTOM_HEADERS",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    headers = _headers_from_a_production_call(monkeypatch)
+
+    assert headers[AUTH_HEADER.lower()] == SECRET
+    assert "authorization" not in headers
+    credentials = [value for name, value in headers.items() if "sk-ant-" in value]
+    assert credentials == [SECRET]

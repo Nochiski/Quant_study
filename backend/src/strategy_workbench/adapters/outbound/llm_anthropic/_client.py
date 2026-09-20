@@ -32,15 +32,25 @@ Protocol이 쓰는 타입은 SDK의 실제 타입 그대로다(`MessageParam`, `
 
 프로파일이 base_url을 말하지 않으면 `None`을 그대로 넘기지 말고 `DEFAULT_BASE_URL`을 넘겨
 환경 변수가 끼어들 자리를 없앤다. `api_key`도 프로파일 비밀만 쓰고 환경 변수 폴백이 없다.
+
+**인증 헤더도 못 박는다.** `api_key`를 명시해도 `ANTHROPIC_CUSTOM_HEADERS`가 남는다. SDK는 그
+값을 `"이름: 값"` 줄 단위로 파싱해 `default_headers`에 넣고, `default_headers`는 인증 헤더보다
+**뒤에** 합쳐지므로 `X-Api-Key`를 통째로 덮어쓸 수 있다. 실측으로 확인했다 — 그 환경 변수만
+있으면 우리 요청이 남의 키로 나간다. 그래서 `X-Api-Key`를 프로파일 비밀로 명시하고
+`Authorization`은 `omit`으로 지운다(명시한 `default_headers`가 환경 변수 파싱분을 이긴다).
+
+인증과 무관한 헤더가 주입되는 것까지는 막지 않는다. 목적지는 `base_url`이 고정하므로 그런
+헤더로는 비밀이 새지 않고, 운영자가 자기 환경에 헤더를 더하는 것은 정당한 용도일 수 있다.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from types import TracebackType
-from typing import Protocol, TypeAlias
+from typing import Protocol, TypeAlias, cast
 
 import anthropic
+from anthropic._types import Omit, omit
 from anthropic.lib.streaming import ParsedMessageStreamEvent
 from anthropic.types import (
     Message,
@@ -53,6 +63,7 @@ from anthropic.types import (
 )
 
 __all__ = [
+    "AUTH_HEADER",
     "DEFAULT_BASE_URL",
     "DEFAULT_MAX_RETRIES",
     "DEFAULT_TIMEOUT_SECONDS",
@@ -88,6 +99,13 @@ DEFAULT_MAX_RETRIES = 2
 # 명시해야** `ANTHROPIC_BASE_URL`이 끼어들지 못한다(모듈 docstring). 테스트가 이 상수와 SDK
 # 기본값이 같은지 고정하므로, SDK가 기본 호스트를 바꾸면 조용히 어긋나지 않고 빨개진다.
 DEFAULT_BASE_URL = "https://api.anthropic.com"
+
+# SDK가 API 키를 싣는 헤더 이름(`Anthropic._api_key_auth`). 상수로 두는 이유는 이 이름이 틀리면
+# 덮어쓰기를 막지 못하면서 막은 것처럼 보이기 때문이다 — 테스트가 실제 요청 헤더로 확인한다.
+AUTH_HEADER = "X-Api-Key"
+# 키를 명시해도 `ANTHROPIC_CUSTOM_HEADERS`는 `Authorization`을 주입할 수 있다. 우리는 이 헤더를
+# 쓰지 않으므로 지운다.
+_BEARER_HEADER = "Authorization"
 
 
 class AnthropicMessageStream(Protocol):
@@ -208,6 +226,20 @@ class SdkMessagesClient:
         )
 
 
+def _pinned_auth_headers(secret: str) -> Mapping[str, str]:
+    """환경 변수가 건드리지 못하게 못 박는 인증 헤더.
+
+    `Authorization`을 `omit`으로 지운다. SDK 생성자의 주석은 `Mapping[str, str]`이라 `Omit`을
+    받지 않는 것처럼 보이지만, 같은 SDK의 `default_headers` **property**는
+    `dict[str, str | Omit]`이고 런타임은 `Omit`을 "이 헤더를 보내지 않는다"로 처리한다(실측으로
+    확인했고, 실제 요청 헤더를 보는 테스트가 그 동작을 고정한다). 생성자 주석이 property보다
+    좁은 것이 원인이라 여기 한 곳에서만 좁힌다.
+    """
+    headers: dict[str, str | Omit] = {AUTH_HEADER: secret, _BEARER_HEADER: omit}
+    # reason: SDK 생성자 주석이 자기 property 타입보다 좁다(위 docstring).
+    return cast(Mapping[str, str], headers)
+
+
 def sdk_client_factory(
     *,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
@@ -223,6 +255,9 @@ def sdk_client_factory(
                 # `None`을 넘기면 SDK가 `ANTHROPIC_BASE_URL`을 읽어, spec D6 검사를 지나지
                 # 않은 호스트로 키가 나간다. 미지정은 기본 호스트를 **명시**한다.
                 base_url=base_url if base_url is not None else DEFAULT_BASE_URL,
+                # `api_key`를 명시해도 `ANTHROPIC_CUSTOM_HEADERS`가 인증 헤더를 덮어쓸 수 있다
+                # (모듈 docstring). 명시한 `default_headers`가 그 파싱분을 이긴다.
+                default_headers=_pinned_auth_headers(secret),
                 timeout=timeout_seconds,
                 max_retries=max_retries,
             )

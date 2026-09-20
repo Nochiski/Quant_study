@@ -360,7 +360,8 @@ def _send(home: str, status: ReportStatus, title: str, body: str) -> bool:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="통합 일일 리포트")
     ap.add_argument("--date", required=True, help="대상 거래일 YYYYMMDD (보통 T-1)")
-    ap.add_argument("--home", default=os.environ.get("QL_HOME", "/home/kael/quant-ledger"))
+    ap.add_argument("--home",
+                    default=os.environ.get("QL_HOME", os.path.expanduser("~/quant-ledger")))
     ap.add_argument("--dry-run", action="store_true", help="발송 없이 메시지만 출력")
     ap.add_argument("--lock-glob", default=LOCK_GLOB, help=f"락 파일 glob (기본 {LOCK_GLOB})")
     a = ap.parse_args(argv)

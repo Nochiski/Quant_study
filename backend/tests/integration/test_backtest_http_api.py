@@ -552,7 +552,7 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     [
         # 키가 붙은 값은 모양·루트와 무관하게 전부 가린다(접미형 키·값 끝 문장부호 포함).
         (r"root=C:\Users\someone\quant-ledger\data\equity end", "root=<path> end"),
-        ("root=/home/kael/quant-ledger/data/equity detail", "root=<path> detail"),
+        ("root=/home/ledger/quant-ledger/data/equity detail", "root=<path> detail"),
         ("root=/app/quant-ledger/data/equity", "root=<path>"),
         ("root=/c/Users/sangmok/quant-ledger", "root=<path>"),
         ("path=/workspace/quant-ledger/data x", "path=<path> x"),
@@ -567,7 +567,7 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
         ("(/tmp/foo/part0.parquet)", "(<path>)"),
         ("(/tmp/foo)", "(<path>)"),
         (
-            "OSError: [Errno 13] Permission denied: '/home/kael/quant-ledger/data/equity'",
+            "OSError: [Errno 13] Permission denied: '/home/ledger/quant-ledger/data/equity'",
             "OSError: [Errno 13] Permission denied: '<path>'",
         ),
         ("cannot open /Users/sangmok/Library/x", "cannot open <path>"),

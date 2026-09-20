@@ -173,7 +173,7 @@
 
 - [x] **Step 1**: 서버 `data/equity/baseline.json` 의 상수 3건(`consensus_daily.v3_wise_match_min 0.93`, `v3_wise_value_tol_rel 0.01`, `corp_event.bonus_ratio_window_sessions 25`)이 09-07 결정인지 `EQUITY_HANDOFF.md` §8 에서 확인. 맞으면 락 파일에 반영, 아니면 서버를 락으로 되돌린다.
 - [x] **Step 2**: `scripts/check_baseline_lock.py` rc=0 확인. (09-09: 서버가 09-07 확정값이었고 락이 뒤처진 것 — 락을 서버 상수로 갱신해 설치, 바이트 동일 확인)
-- [x] **Step 3**: 서버에서 `equity_rebuild_all.sh`(470초) → `python -m equity catalog` → `contract`. 목적: `rules_version` 단일화 + catalog stale 해소. `_catalog_meta.snapshot_id` 가 현재 MANIFEST 지문과 일치해야 한다. **(09-09 실행: pass1 517s · pass2 499s, content_hash 28/28 동일, rules_version 28표 e1.14.0, 게이트 fail 0, catalog `2c38be1d58fb03be` EG5c n_diff 0, contract EGC-01~05·10 pass. `contract` 는 `--engine-src /home/kael/quant-ledger/_engine` 를 줘야 한다 — 기본값 `~/backend/src` 는 서버에 없다 → Task 5.3 `equity_daily.sh` 에 반영)**
+- [x] **Step 3**: 서버에서 `equity_rebuild_all.sh`(470초) → `python -m equity catalog` → `contract`. 목적: `rules_version` 단일화 + catalog stale 해소. `_catalog_meta.snapshot_id` 가 현재 MANIFEST 지문과 일치해야 한다. **(09-09 실행: pass1 517s · pass2 499s, content_hash 28/28 동일, rules_version 28표 e1.14.0, 게이트 fail 0, catalog `2c38be1d58fb03be` EG5c n_diff 0, contract EGC-01~05·10 pass. `contract` 는 `--engine-src ~/quant-ledger/_engine` 를 줘야 한다 — 기본값 `~/backend/src` 는 서버에 없다 → Task 5.3 `equity_daily.sh` 에 반영)**
 - [x] **Step 4**: 커밋(락 파일 `9c8a24e`) + `EQUITY_HANDOFF.md §8-5` 에 정렬 기록
 
 ### Task 0.7: 키움 확정 시각 프로브 (3거래일 이상)

@@ -970,7 +970,7 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **위험성**: **자원 + 데이터 손실(소비자 측)**. ① `_pinned/` 31 GB 는 stage parquet 하드링크 사본이라
   `rsync -a equity/` 를 그대로 도는 소비자에게 필요량의 10배 넘는 전송을 시킨다 ② `_failed/*.json` 은
   실패 빌드의 게이트 metric 전문(종목 코드·표본 키)을 내보낸다 ③ `_contract_meta.json`·
-  `_catalog_meta.json`·`equity.duckdb` 매크로가 `/home/kael/...` 절대경로를 싣는다(토큰·키는 없음 — 확인)
+  `_catalog_meta.json`·`equity.duckdb` 매크로가 `~/...` 절대경로를 싣는다(토큰·키는 없음 — 확인)
   ④ `baseline.json.bak_*` 8개·`baseline_seed_s*.json` 11개 같은 잔재가 "어느 것이 정본인가" 를 묻게 만든다
   ⑤ 읽는 중 `v=` 가 지워지면 duckdb `read_parquet` 이 중간에 깨진다.
 - **왜 미뤘나**: 마운트 재구성은 `sudo` 가 필요하고(현 세션 권한 밖), 소비자에게 무엇을 보일지 = 공유

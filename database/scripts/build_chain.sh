@@ -10,8 +10,8 @@
 #   로그: logs/<basis>/build_<D>.log (단계별 상세는 기존 위치 logs/stage_all/·logs/equity/ 그대로)
 #   알림: 성공 info "잠정판 준비 hh:mm (stage n분·equity n분)" · 실패 단계에서 crit (결정 V2-7)
 set -uo pipefail
-cd /home/kael/quant-ledger || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 빌드하지 않는다" >&2; exit 4; }
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd $HOME/quant-ledger || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 빌드하지 않는다" >&2; exit 4; }
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 
 BASIS="${1:?usage: build_chain.sh <evening|morning> --date YYYYMMDD [--dry-run]}"; shift

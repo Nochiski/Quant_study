@@ -6,10 +6,10 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
-last_updated: 2026-09-21T07:25:48+09:00
+last_updated: 2026-09-21T07:29:16+09:00
 planned_prs: 13
 merged_prs: 0
-approved_prs: 9
+approved_prs: 10
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05` |
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05` |
 | Progress | `0 / 13 merged (0%)` |
-| Approved | `9 / 13` |
-| Aggregated at | `2026-09-21 07:25 KST` |
+| Approved | `10 / 13` |
+| Aggregated at | `2026-09-21 07:29 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -112,7 +112,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `IN_REVIEW` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영 완료(로컬 `7fcc584e`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건, R2-1 `probingIds` Set·R2-2 제목 위계) · 2차 APPROVE_WITH_COMMENTS · R2-3·R2-4는 B-05 · cascade 뒤 A-07 위 rebase·push·PR · **A-07 최종 `4fcad54c` 위 replay `44ce20a4`**(7커밋, 충돌 없음, api:generate diff 0, vitest 659, 잠금 아래 e2e 19/19) · [#180](https://github.com/Nochiski/Quant_study/pull/180) · `review_ai_b_01` 3차 확인 중 |
+| [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `APPROVED` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영 완료(로컬 `7fcc584e`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건, R2-1 `probingIds` Set·R2-2 제목 위계) · 2차 APPROVE_WITH_COMMENTS · R2-3·R2-4는 B-05 · cascade 뒤 A-07 위 rebase·push·PR · **A-07 최종 `4fcad54c` 위 replay `44ce20a4`**(7커밋, 충돌 없음, api:generate diff 0, vitest 659, 잠금 아래 e2e 19/19) · [#180](https://github.com/Nochiski/Quant_study/pull/180) · `review_ai_b_01` 3차 APPROVE(비차단 2: R2-3·R2-4 이관을 WORKFLOW B-05 acceptance에, 주석 과장) → A-07 마무리 tip 위 rebase 후 확정 |
 | [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `APPROVED` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋) · `review_ai_b_02` 3차 APPROVE(StrictMode probe 포함, e2e 19/19) · 어휘 단일 입구는 entity · cascade 뒤 push·PR |
 | [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `APPROVED` | 구현 완료(로컬 `ecd530a6`, B-02 최종 `cb852032` 위 9커밋, vitest 728, 훅 API 적응: exhausted 재연결·rejected 정착·droppedFrames 경고, vitest 714·e2e 19/19) · `review_ai_b_03` 1차 REQUEST_CHANGES(P1 1: 이력보다 202가 먼저 오면 turns 순서 축이 갈라져 질문↔답 짝 밀림 — 리듀서 정렬을 B-03에서 수정, P2 4, P3 6) 반영 → 2차 REQUEST_CHANGES(1차 10/11 해소; 새 P1: 취소·실패 턴에도 완료 announce, P2: 제안 카드 aria-live 미적용, P3 4) 반영(결말별 status·제안 카드 aria-live·P3 4·이름 없는 section) → 3차 확인 중 · 후속 backlog: `ChatMessageView.turn_id` · `review_ai_b_03` 3차 APPROVE(P2 1: status 라이브 영역 상시 렌더, P3 3) · 마무리 커밋 후 **최종 `1445d982`**(B-02 `cb852032` 위 10커밋, vitest 729, e2e 19; 사이드바 자체 `<h2>` 제거, WORKFLOW B-04 Acceptance에 슬롯 landmark·`onClose` 위임 계약 2줄) — B-04 replay 대상 |
 | [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `IN_REVIEW` | 구현 완료(로컬 `c6aaf55e`, B-03 `df7b25f4` 위 8커밋: 슬롯·적용 훅·페이지 배선·적용 후 백테스트·오버레이·spec 정정·사이드바 실장착·App 통합 테스트·`readContext` live 읽기·알림을 문서 notice 슬롯으로, vitest 762·e2e 19/19(어시스턴트 라우트 200 확인)·기준선 4장 재생성) · `review_ai_b_04` 1차 REQUEST_CHANGES(P1 3: 적용 알림이 패널 절반 차지·미소거, 좁은 화면 서랍 2개 동시, 드래그 임계 초과 시 되돌릴 수 없음; P2 2: en 한글, onClose 미배선; P3 7) → 반영 중 · 핵심 적용 설계(전체 범위 교체·undo 1스텝·live 재확인·stale 중단)는 승인 수준 |
@@ -146,6 +146,7 @@ Phase exit:
 | B-02 | `review_ai_b_02` | 1 | REQUEST_CHANGES | P1 2(재시도 상한 소진 뒤 진행 중 턴 스트림 영구 중단 — `streamKey`·`status`·`retry()`로 재연결 owner를 화면으로; 마지막 시도 본문 끊김이 `ended`로 분류 — `onSseError`로 계수), P2 2(이력 병합이 watermark 아래 앞선 턴 이벤트 폐기 → 적용 sequence 집합; `frontend-api-state.md` 갱신), P3 3 |
 | B-01 | `review_ai_b_01` | 2 | APPROVE_WITH_COMMENTS | P1·P2·P3 전부 닫힘(캐시 단언 실효성 되돌리기 실측). 새 P2 1(`probingId` 단일 슬롯 — 동시 probe에서 버튼 조기 해제, 주석 오기), P3 1(font-size 토큰화로 h2>h1 위계) → 후속. R2-3 삭제 후 포커스·R2-4 배지 연결은 B-05 |
 | A-07 | `review_ai_a_07` | 1 | APPROVE | P0·P1 없음. P2 1(`aggregate_usage`가 A-06 상한 통지 `SearchActivity(query=SEARCH_BUDGET_EXHAUSTED_NOTICE)`를 검색 1회로 집계 → 화면 검색 횟수 상한+1; 통지 제외 + 전용 이벤트 backlog), P3 3(`_chat.py` 모델 향 문장 2개가 `MODEL_NOTICES` 골든 밖, live smoke가 `DEFAULT_MAX_SEARCH_USES` 상수 읽음, 이력 `events`==SSE 프레임 미고정). 캐시 토큰 domain·집계·wire 일관, 돌연변이 3건 골든이 포착. pytest 1957 |
+| B-01 | `review_ai_b_01` | 3 | APPROVE | R2-1(`probingIds` 집합, 회귀 테스트가 2차 재현 시나리오와 동일)·R2-2(제목 display 크기) 닫힘 확인, PR #180 본문 코드 대조 정확. 비차단 2: R2-3·R2-4 B-05 이관 기록이 PR 본문에만 있음 → WORKFLOW B-05 acceptance에 추가; `ai-provider-settings.tsx` 주석 "활성 전환·" 과장. vitest 659 |
 | A-05 | `review_ai_a_05` | 2 | APPROVE WITH CHANGES | 1차 12건 전부 해소(P0 red 확인, extras 없는 환경 재현, env 폴백은 `ANTHROPIC_AUTH_TOKEN`까지 차단). 블로킹 1(A-04 하위 모듈 fix 되돌림)은 base `439f9411` 불일치 산물 → replay 보존. P2 2(예산 소진 호출의 history 서버 도구 블록 미테스트 → live smoke 최우선, 캐시 접두 파기 비용 미기재), P3 4 |
 | B-02 | `review_ai_b_02` | 2 | APPROVE_WITH_NITS | 1차 P1 2·P2 2 해소(재현 probe 재실행). 이탈 2건(5값 status, 내부 attempt+retry) 타당. 새 P2 1(`streamKey` 입력 파생 → 세션 이탈·복귀 시 옛 close 사유가 status로), P3 6 → 후속 |
 | A-06 | `review_ai_a_06` | 1 | REQUEST_CHANGES | P1 2(`OPENAI_CUSTOM_HEADERS`→`default_headers`가 Authorization 우선 — A-05도 `ANTHROPIC_CUSTOM_HEADERS` 동일; 턴 예산 잔량<16 호출 400→PROVIDER), P2 3(`store` 기본 true, 통지 경로 spec 문장, 도구 제거 호출에 이전 `web_search_call` 동승 미테스트), P3 7. A-05 결함 부류 15 중 9 부재 확인 |

@@ -18,10 +18,15 @@ import sys
 from importlib import import_module
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
-from strategy_workbench.domain.assistant.facade.models import ProviderKind
+from strategy_workbench.domain.assistant.facade.models import (
+    DEFAULT_MAX_SEARCH_USES,
+    ProbeFailure,
+    ProviderKind,
+)
 
 _SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 
@@ -37,20 +42,47 @@ def smoke() -> ModuleType:
         sys.path.remove(path)
 
 
-def _evidence(smoke: ModuleType, **overrides: object) -> object:
-    defaults: dict[str, object] = {
-        "probe_ok": True,
-        "probe_latency_ms": 120,
+def _probe(smoke: ModuleType, **overrides: Any) -> Any:  # noqa: ANN401  # reason: 스크립트 모듈은 동적 import라 타입이 없다
+    defaults: dict[str, Any] = {
+        "model": "fake-model-1",
+        "ok": True,
+        "latency_ms": 120,
+        "wrong_key_failure": ProbeFailure.AUTH.value,
+        "unknown_model_failure": ProbeFailure.MODEL_NOT_FOUND.value,
+    }
+    return smoke.ProbeEvidence(**(defaults | overrides))
+
+
+def _turn(smoke: ModuleType, **overrides: Any) -> Any:  # noqa: ANN401  # reason: 위와 같음
+    defaults: dict[str, Any] = {
         "stream_raised": False,
         "event_kinds": ("TextDelta", "Done"),
         "tool_rounds": 0,
+        "search_limit": DEFAULT_MAX_SEARCH_USES,
         "search_activities": 0,
         "search_with_sources": 0,
+        "search_with_query": 0,
+        "events_after_last_search": 0,
         "thinking_with_text": 0,
+        "call_output_tokens": (),
+        "turn_input_tokens": 0,
+        "turn_output_tokens": 0,
         "proposal_accepted": False,
         "failure_code": None,
+        "warnings": (),
     }
     return smoke.TurnEvidence(**(defaults | overrides))
+
+
+def _verdicts(smoke: ModuleType, kind: ProviderKind, **overrides: Any) -> dict[str, Any]:  # noqa: ANN401  # reason: 위와 같음
+    probe = overrides.pop("probe", _probe(smoke))
+    return {
+        verdict.item.key: verdict
+        for verdict in smoke.verdicts_for(kind, probe, _turn(smoke, **overrides))
+    }
+
+
+# -- 게이트 -------------------------------------------------------------------------------------
 
 
 def test_the_smoke_is_disabled_until_the_environment_asks_for_it(smoke: ModuleType) -> None:
@@ -97,61 +129,7 @@ def test_running_the_smoke_without_the_environment_reports_and_exits_zero(
     assert smoke.LIVE_SMOKE_ENV in capsys.readouterr().out
 
 
-def test_a_surface_the_run_never_exercised_is_reported_as_undecided(smoke: ModuleType) -> None:
-    verdicts = {
-        verdict.item.key: verdict
-        for verdict in smoke.verdicts_for(ProviderKind.ANTHROPIC, _evidence(smoke))
-    }
-
-    assert verdicts["thinking_display_summarized"].observed is None
-    assert verdicts["search_result_fields"].observed is None
-    assert verdicts["thinking_signature_roundtrip"].observed is None
-    assert verdicts["thinking_display_summarized"].marker == "[?]"
-
-
-def test_an_exercised_surface_that_came_back_empty_is_a_failure_not_a_question(
-    smoke: ModuleType,
-) -> None:
-    """검색은 했는데 출처가 하나도 안 실렸다면 매핑이 틀린 것이다 — 판정 불가가 아니다."""
-    verdicts = {
-        verdict.item.key: verdict
-        for verdict in smoke.verdicts_for(
-            ProviderKind.ANTHROPIC,
-            _evidence(smoke, search_activities=2, search_with_sources=0),
-        )
-    }
-
-    assert verdicts["search_result_fields"].observed is False
-    assert verdicts["search_result_fields"].marker == "[fail]"
-
-
-def test_a_completed_multi_round_turn_confirms_the_reasoning_block_round_trip(
-    smoke: ModuleType,
-) -> None:
-    verdicts = {
-        verdict.item.key: verdict
-        for verdict in smoke.verdicts_for(
-            ProviderKind.ANTHROPIC,
-            _evidence(smoke, tool_rounds=3, thinking_with_text=1),
-        )
-    }
-
-    assert verdicts["thinking_signature_roundtrip"].observed is True
-    assert verdicts["thinking_display_summarized"].observed is True
-
-
-def test_a_failed_turn_does_not_confirm_the_reasoning_block_round_trip(
-    smoke: ModuleType,
-) -> None:
-    verdicts = {
-        verdict.item.key: verdict
-        for verdict in smoke.verdicts_for(
-            ProviderKind.ANTHROPIC,
-            _evidence(smoke, tool_rounds=3, failure_code="provider"),
-        )
-    }
-
-    assert verdicts["thinking_signature_roundtrip"].observed is None
+# -- 판정 규칙 ----------------------------------------------------------------------------------
 
 
 def test_every_checklist_item_has_a_verdict_rule(smoke: ModuleType) -> None:
@@ -159,7 +137,156 @@ def test_every_checklist_item_has_a_verdict_rule(smoke: ModuleType) -> None:
     for kind in ProviderKind:
         keys = [item.key for item in smoke.CHECKLIST[kind]]
         assert keys
-        assert [verdict.item.key for verdict in smoke.verdicts_for(kind, _evidence(smoke))] == keys
+        assert list(_verdicts(smoke, kind)) == keys
+
+
+def test_the_retired_output_format_item_is_not_on_any_checklist(smoke: ModuleType) -> None:
+    """A-05 리뷰에서 로컬 재현 가능한 결함으로 판정되어 live smoke 대상에서 빠졌다."""
+    keys = {item.key for kind in ProviderKind for item in smoke.CHECKLIST[kind]}
+
+    assert "output_format_none" not in keys
+
+
+def test_no_checklist_question_hard_codes_the_probe_token_limit(smoke: ModuleType) -> None:
+    """상한 값은 adapter 상수가 소유한다. 문장에 숫자를 복제하면 상수가 오를 때 stale해진다."""
+    for kind in ProviderKind:
+        for item in smoke.CHECKLIST[kind]:
+            assert "16" not in item.question, item.key
+
+
+def test_a_surface_the_run_never_exercised_is_reported_as_undecided(smoke: ModuleType) -> None:
+    verdicts = _verdicts(smoke, ProviderKind.ANTHROPIC)
+
+    assert verdicts["thinking_display_summarized"].observed is None
+    assert verdicts["search_result_fields"].observed is None
+    assert verdicts["thinking_signature_roundtrip"].observed is None
+    assert verdicts["turn_budget_measurements"].observed is None
+    assert verdicts["thinking_display_summarized"].marker == "[?]"
+
+
+def test_one_tool_round_is_enough_to_exercise_the_thinking_block_round_trip(
+    smoke: ModuleType,
+) -> None:
+    """도구를 한 번 부르면 공급자 호출이 두 번이고, 두 번째가 첫 응답의 사고 블록을 되돌린다."""
+    verdicts = _verdicts(smoke, ProviderKind.ANTHROPIC, tool_rounds=1)
+
+    assert verdicts["thinking_signature_roundtrip"].observed is True
+
+
+def test_a_provider_failure_after_a_tool_round_fails_the_round_trip_check(
+    smoke: ModuleType,
+) -> None:
+    """재전송이 거부되면 화면에는 `Failure(PROVIDER)`만 보인다. 그 증상이 이 항목의 실패다."""
+    verdicts = _verdicts(
+        smoke,
+        ProviderKind.ANTHROPIC,
+        tool_rounds=2,
+        failure_code="provider",
+        warnings=("anthropic turn failed — error_type=BadRequestError",),
+    )
+
+    assert verdicts["thinking_signature_roundtrip"].observed is False
+    assert "BadRequestError" in verdicts["thinking_signature_roundtrip"].note
+
+
+def test_a_probe_that_cannot_tell_a_bad_key_from_an_unknown_one_is_a_failure(
+    smoke: ModuleType,
+) -> None:
+    """정상 키의 `ok`만 보면 `AUTH`와 `UNKNOWN`이 뒤바뀐 매핑을 놓친다."""
+    verdicts = _verdicts(
+        smoke,
+        ProviderKind.ANTHROPIC,
+        probe=_probe(smoke, wrong_key_failure=ProbeFailure.UNKNOWN.value),
+    )
+
+    assert verdicts["probe_reason_mapping"].observed is False
+
+
+def test_a_probe_that_maps_all_three_reasons_passes(smoke: ModuleType) -> None:
+    verdicts = _verdicts(smoke, ProviderKind.OPENAI)
+
+    assert verdicts["probe_reason_mapping"].observed is True
+    assert verdicts["default_model_exists"].observed is True
+
+
+def test_an_exercised_search_that_came_back_empty_is_a_failure_not_a_question(
+    smoke: ModuleType,
+) -> None:
+    """검색은 했는데 출처가 안 실렸다면 필드 매핑이 틀린 것이다 — 판정 불가가 아니다."""
+    verdicts = _verdicts(
+        smoke,
+        ProviderKind.ANTHROPIC,
+        search_activities=2,
+        search_with_query=2,
+        search_with_sources=0,
+    )
+
+    assert verdicts["search_result_fields"].observed is False
+    assert verdicts["search_result_fields"].marker == "[fail]"
+
+
+def test_the_search_budget_check_stays_undecided_until_the_limit_is_reached(
+    smoke: ModuleType,
+) -> None:
+    verdicts = _verdicts(
+        smoke,
+        ProviderKind.ANTHROPIC,
+        search_activities=2,
+        search_with_query=2,
+        search_with_sources=2,
+        events_after_last_search=3,
+    )
+
+    assert verdicts["search_budget_turn_continues"].observed is None
+
+
+def test_a_turn_that_kept_going_past_the_search_limit_passes_the_budget_check(
+    smoke: ModuleType,
+) -> None:
+    verdicts = _verdicts(
+        smoke,
+        ProviderKind.OPENAI,
+        search_activities=DEFAULT_MAX_SEARCH_USES,
+        search_with_query=DEFAULT_MAX_SEARCH_USES,
+        search_with_sources=DEFAULT_MAX_SEARCH_USES,
+        events_after_last_search=4,
+    )
+
+    assert verdicts["search_budget_notice_reaction"].observed is True
+
+
+def test_a_turn_that_died_at_the_search_limit_fails_the_budget_check(smoke: ModuleType) -> None:
+    """상한에 닿자마자 턴이 끝나면 통지 대신 실패를 보낸 것이다."""
+    verdicts = _verdicts(
+        smoke,
+        ProviderKind.OPENAI,
+        search_activities=DEFAULT_MAX_SEARCH_USES,
+        search_with_query=DEFAULT_MAX_SEARCH_USES,
+        search_with_sources=DEFAULT_MAX_SEARCH_USES,
+        events_after_last_search=1,
+        failure_code="provider",
+    )
+
+    assert verdicts["search_budget_notice_reaction"].observed is False
+
+
+def test_the_measurement_item_reports_the_numbers_plan_needs(smoke: ModuleType) -> None:
+    """이 항목은 통과·실패가 아니라 기록이다. 숫자가 없으면 기록할 것도 없다."""
+    verdicts = _verdicts(
+        smoke,
+        ProviderKind.ANTHROPIC,
+        tool_rounds=4,
+        call_output_tokens=(1200, 800, 2400),
+        turn_input_tokens=41000,
+        turn_output_tokens=4400,
+        proposal_accepted=True,
+    )
+
+    note = verdicts["turn_budget_measurements"].note
+    assert verdicts["turn_budget_measurements"].observed is True
+    assert "1200" in note
+    assert "4400" in note
+    assert "4" in note
 
 
 @pytest.mark.skipif(

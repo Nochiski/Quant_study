@@ -163,13 +163,35 @@ main
   본문에 문서 원문 금지), 출처 인용 규칙(검색으로 안 사실만·실제 URL만·http/https만), 한국어
   응답과 식별자 원문 유지, 실행 설정은 사용자가 바꿔 달라고 할 때만 손댄다.
 - **live smoke** `backend/scripts/assistant_live_smoke.py`: `STRATEGY_WORKBENCH_LIVE_SMOKE=1`과
-  공급자 키(`ANTHROPIC_API_KEY`·`OPENAI_API_KEY`)가 있을 때만 실행. 공급자마다 probe → 짧은 턴
-  (도구 + 검색) → 제안 1회를 돌리고 A-05·A-06이 남긴 SDK 표면 확인 항목을 `[ok]`/`[fail]`/`[?]`로
-  찍는다. 키는 출력·로그에 찍지 않는다. pytest(`backend/tests/test_assistant_live_smoke.py`)는
-  같은 조건이 없으면 사유를 적고 skip한다.
+  공급자 키(`ANTHROPIC_API_KEY`·`OPENAI_API_KEY`)가 있을 때만 실행. 공급자마다 probe 3회
+  (정상 키·틀린 키·없는 모델) → 짧은 턴(도구 + 검색) → 제안 1회를 돌리고 아래 확인 항목을
+  `[ok]`/`[fail]`/`[?]`로 찍는다. 키는 출력·로그에 찍지 않는다.
+  pytest(`backend/tests/test_assistant_live_smoke.py`)는 같은 조건이 없으면 사유를 적고 skip한다.
 - **기본값 확정**: 호출당 16000·턴 64000·라운드 12·검색 8·타임아웃 300(+유예 10)을 골든 실측
   길이로 검토하고 근거를 PLAN 변경 기록과 spec D3에 남긴다. 값 변경은 A-01 상수가 아니라
   bootstrap 주입으로 한다.
+
+**live smoke 확인 항목** (A-05·A-06 구현자가 남긴 목록, 우선순위 순)
+
+| 공급자 | 항목 | 통과 조건 | 실패 증상 |
+|---|---|---|---|
+| anthropic | thinking signature 왕복 | 도구 라운드 1회 이상을 공급자 실패 없이 완주 | 두 번째 호출 400 `Invalid signature in thinking block`. 화면에는 `Failure(PROVIDER)`로만 보이므로 블록 끝의 로컬 경고에서 `error_type=BadRequestError`를 본다 |
+| anthropic·openai | probe 사유 매핑 | 정상 키 `ok`, 틀린 키 `auth`, 없는 모델 `model_not_found` | 올바른 키가 `unknown`. 최소 출력 토큰 값은 adapter 상수가 소유하며 확인 문장에 숫자를 복제하지 않는다 |
+| anthropic | `display: "summarized"` | 비어 있지 않은 `ThinkingSummary` 1건 이상 | 이벤트 자체가 없다 |
+| anthropic | 검색 결과 필드 | `SearchActivity`마다 `query`와 출처 제목·URL이 채워짐 | 검색은 했는데 출처가 빈다 |
+| anthropic·openai | 검색 상한 뒤 턴 지속 | 턴 누적 상한에 닿은 뒤에도 턴이 검색 없이 이어짐 | 상한에 닿자마자 턴이 실패로 끝난다 |
+| openai | 추론 항목 재전송 | 위 signature 왕복과 같은 관측 | 재전송 뒤 공급자 실패 |
+| openai | 기본 모델 실존 | adapter 기본 모델로 probe 성공 | `model_not_found` |
+| anthropic·openai | 상한 기본값 실측 | 제안 1건이 나온 턴의 라운드 수·호출별 `usage.output_tokens`·턴 합계를 기록 | 사용량 이벤트가 없다 |
+
+마지막 항목의 숫자는 PLAN "A-07 기본값 확정 근거" 표에 옮겨 적는다. 그 표의 토큰 수는 골든
+길이에서 환산한 추정치이고, 이 실행이 실측으로 바꾼다. 값을 조정해야 하면
+`domain/assistant/_models.py`의 `DEFAULT_*`가 유일한 owner이지만 그 파일은 승인된 A-01이므로,
+이번 단계에서는 bootstrap 주입값으로 두고 근거만 남긴다.
+
+`output_format=None` 항목은 A-05 리뷰에서 로컬 재현 가능한 SDK 센티널 오류로 판정되어 adapter에서
+고쳐졌고, live smoke 대상에서 뺐다. 로컬에서 재현되는 것을 여기 두면 키가 있어야만 도는 항목만
+늘어난다.
 
 **live smoke 실행 절차**
 

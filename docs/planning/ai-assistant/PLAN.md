@@ -45,8 +45,8 @@ progress_percent: 0
   영속 상태 + 프로세스 내 신호, `AssistantTurnRunner`가 owner, 단일 워커 전제). 제안 적용은 업그레이드와
   같은 `replaceRange` 전체 교체 + stale 가드. 검색 `max_uses`·출력 토큰·벽시계 상한. base_url은 https만.
   `Failure.message`에 SDK 예외 문자열 금지. 출처 링크는 http/https만 + noopener. PR을 13개로 분할.
-- Anthropic 기본 모델 `claude-opus-5`(adaptive thinking, effort high). OpenAI 기본 모델은 A-06
-  구현 시 SDK 문서로 확정한다.
+- Anthropic 기본 모델 `claude-opus-5`(adaptive thinking, effort high). OpenAI 기본 모델은
+  `gpt-6-astra`(reasoning effort high, summary auto).
 - OpenAPI와 frontend SDK는 A-04가 같은 PR에서 갱신한다(12절).
 - reviewer 서브에이전트는 Opus로만. Phase 종료마다 SoT·책임분리 점검.
 
@@ -148,6 +148,12 @@ Phase exit:
   같은 리뷰에서 A-07로 넘긴 항목 5건을 WORKFLOW A-07 Acceptance에 체크 항목으로 적었다
   (선언되지 않은 서버 도구 결과 블록이 든 history를 공급자가 받는지가 최우선).
 
+- 2026-09-21 — A-06 OpenAI 기본 모델을 `gpt-6-astra`로 확정. 근거는 설치된 `openai` 3.16.2의
+  `ChatModel` 목록 첫 항목이자 `Response.model` docstring 예시이고, 공식 모델 문서가 "가장 유능한
+  모델, 어디서 시작할지 모르겠으면 GPT-6 Astra"로 소개한다는 것. 화면 이름이 "Codex"지만 spec D4가
+  "최신 GPT 모델"을 요구했고 이 기능의 일이 코딩이 아니라 리서치라 codex 계열 대신 범용 플래그십을
+  골랐다. 실호출 확인은 A-07 live smoke 항목(모델 이름 수용, `max_output_tokens=16` probe,
+  `developer` 통지 반응, 추론 항목 재전송 수용).
 - 2026-09-20 — P0-01 4차 APPROVE. 잔여 P2(`max_tool_rounds` 집행을 adapter로)·D9 값/집행 분리 반영. CI 통과 후 머지 대상.
 - 2026-09-20 — P0-01 3차 리뷰 반영: 토큰 예산 집행을 adapter로(서비스는 Usage 기록만), Failure 우선순위(첫
   Failure만 턴 상태), 409는 backstop·프론트는 이력 복구·`sseMaxRetryAttempts`, OpenAI 검색 상한은 도구 목록 제거,

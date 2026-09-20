@@ -1,0 +1,231 @@
+import { useId, useRef, useState, type FormEvent } from "react";
+
+import {
+  useCreateAssistantProvider,
+  type ProviderKind,
+  type ProviderKindView,
+} from "../../../entities/assistant";
+import { t } from "../../../shared/config";
+import { Button } from "../../../shared/ui";
+import {
+  providerKindLabel,
+  providerRejection,
+  type ProviderField,
+  type ProviderRejection,
+} from "../model/provider-copy";
+
+type AiProviderFormProps = { kinds: readonly ProviderKindView[] };
+
+const firstInstalled = (
+  kinds: readonly ProviderKindView[],
+): ProviderKind | null =>
+  kinds.find((candidate) => candidate.installed)?.kind ?? null;
+
+/**
+ * 공급자 추가 폼.
+ *
+ * API 키만 비제어 입력이다 — 제출 때 한 번 읽어 요청 본문에 싣고 그 자리에서 입력칸을 비운다. React
+ * state·query 캐시·localStorage 어디에도 키를 두지 않는다(spec D7). 저장은 서버가 연결 테스트를 통과시킨
+ * 뒤에만 일어나므로(spec D6) 제출 버튼이 곧 "연결 테스트 후 저장"이다.
+ */
+export const AiProviderForm = ({ kinds }: AiProviderFormProps) => {
+  const create = useCreateAssistantProvider();
+  const secretRef = useRef<HTMLInputElement>(null);
+  const ids = {
+    kind: useId(),
+    label: useId(),
+    model: useId(),
+    secret: useId(),
+    baseUrl: useId(),
+    error: useId(),
+  };
+  const [pickedKind, setPickedKind] = useState<ProviderKind | null>(null);
+  const [label, setLabel] = useState("");
+  const [model, setModel] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [advanced, setAdvanced] = useState(false);
+  const [rejection, setRejection] = useState<ProviderRejection | null>(null);
+
+  const kind = pickedKind ?? firstInstalled(kinds);
+  const installedKind =
+    kind !== null && kinds.some((item) => item.kind === kind && item.installed);
+  const defaultModel =
+    kinds.find((item) => item.kind === kind)?.default_model ?? "";
+
+  const invalid = (field: ProviderField) =>
+    rejection?.field === field ? true : undefined;
+  const describedBy = (field: ProviderField, hint?: string) =>
+    [hint, rejection?.field === field ? ids.error : undefined]
+      .filter(Boolean)
+      .join(" ") || undefined;
+  const fieldError = (field: ProviderField) =>
+    rejection?.field === field ? (
+      <p className="ai-provider-form__error" id={ids.error} role="alert">
+        {rejection.message}
+      </p>
+    ) : null;
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (kind === null || !installedKind) {
+      setRejection({
+        field: "kind",
+        message: t("assistant.error.provider_not_installed"),
+      });
+      return;
+    }
+    if (label.trim() === "") {
+      setRejection({
+        field: "label",
+        message: t("assistant.provider.form.error.label"),
+      });
+      return;
+    }
+    const secretInput = secretRef.current;
+    const secret = secretInput === null ? "" : secretInput.value;
+    if (secret === "") {
+      setRejection({
+        field: "secret",
+        message: t("assistant.provider.form.error.secret"),
+      });
+      return;
+    }
+    // 읽은 즉시 비운다 — 거부로 끝나도 키가 DOM에 남지 않는다.
+    if (secretInput !== null) secretInput.value = "";
+    setRejection(null);
+    create.mutate(
+      {
+        kind,
+        label: label.trim(),
+        model: model.trim() === "" ? null : model.trim(),
+        base_url: baseUrl.trim() === "" ? null : baseUrl.trim(),
+        secret,
+      },
+      {
+        onSuccess: () => {
+          setLabel("");
+          setModel("");
+          setBaseUrl("");
+        },
+        onError: (error) => setRejection(providerRejection(error)),
+      },
+    );
+  };
+
+  return (
+    <form className="ai-provider-form" onSubmit={submit}>
+      <h3 className="ai-provider-form__title">
+        {t("assistant.provider.form.title")}
+      </h3>
+      <div className="ai-provider-form__row">
+        <label htmlFor={ids.kind}>{t("assistant.provider.form.kind")}</label>
+        <select
+          id={ids.kind}
+          value={kind ?? ""}
+          aria-invalid={invalid("kind")}
+          aria-describedby={describedBy("kind")}
+          onChange={(event) => {
+            setPickedKind(event.target.value as ProviderKind);
+            setRejection(null);
+          }}
+        >
+          {kinds.map((item) => (
+            <option
+              key={item.kind}
+              value={item.kind}
+              disabled={!item.installed}
+            >
+              {providerKindLabel(item.kind)}
+              {item.installed
+                ? ""
+                : ` — ${t("assistant.provider.notInstalled")}`}
+            </option>
+          ))}
+        </select>
+        {fieldError("kind")}
+      </div>
+      <div className="ai-provider-form__row">
+        <label htmlFor={ids.label}>{t("assistant.provider.form.label")}</label>
+        <input
+          id={ids.label}
+          value={label}
+          autoComplete="off"
+          aria-invalid={invalid("label")}
+          aria-describedby={describedBy("label")}
+          onChange={(event) => setLabel(event.target.value)}
+        />
+        {fieldError("label")}
+      </div>
+      <div className="ai-provider-form__row">
+        <label htmlFor={ids.secret}>
+          {t("assistant.provider.form.secret")}
+        </label>
+        <input
+          id={ids.secret}
+          ref={secretRef}
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={invalid("secret")}
+          aria-describedby={describedBy("secret", `${ids.secret}-hint`)}
+        />
+        <p className="ai-provider-form__hint" id={`${ids.secret}-hint`}>
+          {t("assistant.provider.form.secret.hint")}
+        </p>
+        {fieldError("secret")}
+      </div>
+      <div className="ai-provider-form__row">
+        <label htmlFor={ids.model}>{t("assistant.provider.form.model")}</label>
+        <input
+          id={ids.model}
+          value={model}
+          autoComplete="off"
+          placeholder={defaultModel}
+          aria-invalid={invalid("model")}
+          aria-describedby={describedBy("model", `${ids.model}-hint`)}
+          onChange={(event) => setModel(event.target.value)}
+        />
+        <p className="ai-provider-form__hint" id={`${ids.model}-hint`}>
+          {t("assistant.provider.form.model.hint")}
+        </p>
+        {fieldError("model")}
+      </div>
+      <div className="ai-provider-form__row">
+        <Button
+          size="small"
+          tone="ghost"
+          aria-expanded={advanced}
+          onClick={() => setAdvanced(!advanced)}
+        >
+          {t("assistant.provider.form.advanced")}
+        </Button>
+        {advanced ? (
+          <>
+            <label htmlFor={ids.baseUrl}>
+              {t("assistant.provider.form.baseUrl")}
+            </label>
+            <input
+              id={ids.baseUrl}
+              value={baseUrl}
+              autoComplete="off"
+              inputMode="url"
+              aria-invalid={invalid("baseUrl")}
+              aria-describedby={describedBy("baseUrl", `${ids.baseUrl}-hint`)}
+              onChange={(event) => setBaseUrl(event.target.value)}
+            />
+            <p className="ai-provider-form__hint" id={`${ids.baseUrl}-hint`}>
+              {t("assistant.provider.form.baseUrl.hint")}
+            </p>
+          </>
+        ) : null}
+        {fieldError("baseUrl")}
+      </div>
+      {fieldError("form")}
+      <Button type="submit" tone="primary" disabled={create.isPending}>
+        {create.isPending
+          ? t("assistant.provider.form.submitting")
+          : t("assistant.provider.form.submit")}
+      </Button>
+    </form>
+  );
+};

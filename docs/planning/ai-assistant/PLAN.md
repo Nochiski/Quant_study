@@ -3,10 +3,10 @@ plan_version: 2
 project: ai-assistant
 project_status: IN_PROGRESS
 current_phase: P0,A
-current_pr: P0-01,A-01,A-02,A-03,A-04
-active_prs: [P0-01, A-01, A-02, A-03, A-04]
-parallel_window: [P0-01, A-01, A-02, A-03, A-04]
-last_updated: 2026-09-20T23:40:38+09:00
+current_pr: P0-01,A-01,A-02,A-03,A-04,A-05
+active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05]
+parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05]
+last_updated: 2026-09-21T00:05:31+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 1
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,A` |
-| Current/next PR | `P0-01,A-01,A-02,A-03,A-04` |
-| Active PR | `P0-01, A-01, A-02, A-03, A-04` |
+| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05` |
+| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `1 / 13` |
-| Aggregated at | `2026-09-20 23:40 KST` |
+| Aggregated at | `2026-09-21 00:05 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -98,7 +98,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `IN_REVIEW` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `84570df`(A-01 `e8c6895` 위) · `review_ai_a_02` 1차 REQUEST_CHANGES(P1 1·P2 6) 반영(P3 1건 사양) → 2차 재검토 중 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `IN_REVIEW` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `638b752`(A-02 `f01f69e` 위) · `review_ai_a_03` 1차 REQUEST_CHANGES(P1 2·권고 1·P2 1·P3 6) → 반영 중 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_PROGRESS` | 구현자 `impl-ai-a04`, 워크트리 `wt-ai-a04`, 브랜치 `feat/ai-a-04-http-sse`(base A-03) |
-| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `WAITING` | — |
+| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_PROGRESS` | 구현자 `impl-ai-a05`, 워크트리 `wt-ai-a05`, 브랜치 `feat/ai-a-05-llm-anthropic`(임시 base A-02 `84570df`, A-04 tip 위로 rebase 예정) |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `WAITING` | — |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
 

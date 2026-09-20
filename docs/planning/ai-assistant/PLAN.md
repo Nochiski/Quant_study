@@ -94,9 +94,9 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `IN_REVIEW` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `da08da7` · `review_ai_a_01` 1차 REQUEST_CHANGES(P1 1·P2 4·P3 5) 반영(P3 1건 사양) → 2차 재검토 중 |
-| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `IN_REVIEW` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `f01f69e`(A-01 위 rebase) · `review_ai_a_02` 1차 REQUEST_CHANGES(P1 1·P2 6) → 반영 중 |
-| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `IN_REVIEW` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `638b752`(A-02 `f01f69e` 위) · `review_ai_a_03` 진행 중 · 게이트: pytest 1612·ruff·pyright |
+| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `IN_REVIEW` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `da08da7` · `review_ai_a_01` 2차 REQUEST_CHANGES(1차 10건 해소, 새 P2 1: insecure 플래그가 공개 https 차단) → 반영 중(+`FailureCode.INTERNAL`) |
+| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `IN_REVIEW` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `c730426` · `review_ai_a_02` 1차 REQUEST_CHANGES(P1 1·P2 6) 반영(P3 1건 사양) → A-01 3차 뒤 2차 재검토 |
+| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `IN_REVIEW` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `638b752`(A-02 `f01f69e` 위) · `review_ai_a_03` 1차 REQUEST_CHANGES(P1 2·권고 1·P2 1·P3 6) → 반영 중 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_PROGRESS` | 구현자 `impl-ai-a04`, 워크트리 `wt-ai-a04`, 브랜치 `feat/ai-a-04-http-sse`(base A-03) |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `WAITING` | — |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `WAITING` | — |
@@ -133,6 +133,8 @@ Phase exit:
 | P0-01 | `review_ai_p0_01` | 4 | APPROVE | 3차 전부 해소. 잔여 P2 1(`max_tool_rounds` 집행 주체) 반영, P3 3(D9 분리 반영, OpenAI 통지 문구·기본값은 A-06·A-07) |
 | A-01 | `review_ai_a_01` | 1 | REQUEST_CHANGES | P1 1(`ProbeResult.message` 스크럽 계약 없음), P2 4(활성 승계·create 쓰기 순서·base_url 정수/16진/`localhost.` 우회·`_models` 테스트/`DocumentRef` 불변식), P3 5 → 반영 |
 | A-02 | `review_ai_a_02` | 1 | REQUEST_CHANGES | P1 1(취소 직후 두 번째 턴 시작), P2 6(`stream.close` 예외로 `_finish` 누락, 크래시 경로 Failure 없음, 취소 시 이벤트 유실, `logger.exception` 전문, `_DISCRIMINATOR` 손글씨, 타임아웃 유예) → 반영 |
+| A-01 | `review_ai_a_01` | 2 | REQUEST_CHANGES | 1차 10건 전부 해소. 새 P2 1(insecure 플래그가 기본 정책의 상위집합이 아님), 비차단 2(거절 문구, 승계 테스트) → 반영 |
+| A-03 | `review_ai_a_03` | 1 | REQUEST_CHANGES | P1 2(`ChatEvent` 확장 가드 부재, 비밀 파일 경로가 예외 메시지에), 권고 1(`update_turn`이 `started_at`·`accepted_sequence` 덮음), P2 1(부모 디렉터리 0700), P3 6 → 반영 |
 
 ## 검증 기록
 

@@ -39,11 +39,11 @@ const PROVIDER_LABEL = "대본 Claude";
 const PROPOSED_TITLE = "KRX 12-1 모멘텀";
 
 /**
- * IDE 우측 패널. 패널(`widgets/strategy-ide`)과 그 안의 채팅 사이드바(`features/assist-strategy`)가
- * 둘 다 "AI 어시스턴트"라는 이름의 `aside`라서 바깥 것을 집는다 — 안쪽은 그 안에 들어 있다.
+ * IDE 우측 패널. landmark·이름·제목은 슬롯(`widgets/strategy-ide`)이 소유하고 채팅 feature는 이름
+ * 없는 `<section>`이라, "AI 어시스턴트"라는 이름의 landmark는 이 하나뿐이다(B-04 슬롯 계약).
  */
 const assistant = (page: Page) =>
-  page.getByRole("complementary", { name: "AI 어시스턴트" }).first();
+  page.getByRole("complementary", { name: "AI 어시스턴트" });
 
 const composer = (page: Page) =>
   assistant(page).getByRole("textbox", { name: "어시스턴트에게 보낼 메시지" });
@@ -51,10 +51,23 @@ const composer = (page: Page) =>
 const transcript = (page: Page) =>
   assistant(page).getByRole("log", { name: "대화 내용" });
 
-/** 상단 바의 토글. 이미 열려 있으면 그 버튼이 없으므로(패널이 접기 버튼을 가진다) 세지 않는다. */
+/** 상주하는 진행 상태 영역. 내용과 함께 삽입되지 않고 문구만 바뀐다(B-03 3차 리뷰 P2). */
+const progress = (page: Page) =>
+  assistant(page).getByRole("status", { name: "진행 상태" });
+
+/**
+ * 사이드바를 펼친다. 기본이 접힘이고 **내용은 첫 펼침 이후에 마운트되므로**(B-04 리뷰 P3: 화면을
+ * 열 때마다 어시스턴트 질의가 나가지 않게) 모든 시나리오는 여기서 시작한다.
+ *
+ * 새로고침 뒤에는 배치에 남은 열림 상태로 이미 펼쳐져 있고 그때는 상단 바 토글이 사라진다 —
+ * 그래서 버튼이 있을 때만 누른다.
+ */
 const openAssistant = async (page: Page) => {
   const toggle = page.getByRole("button", { name: "AI 어시스턴트", exact: true });
   if ((await toggle.count()) > 0) await toggle.click();
+  await expect(
+    assistant(page).getByRole("heading", { name: "AI 어시스턴트" }),
+  ).toBeVisible();
   await expect(composer(page)).toBeVisible();
 };
 
@@ -138,9 +151,7 @@ test.describe("AI 어시스턴트", () => {
     await expect(transcript(page)).toContainText(
       "최근 많이 오른 종목을 사는 전략입니다.",
     );
-    await expect(
-      assistant(page).getByText("답변이 완료되었습니다.", { exact: true }),
-    ).toBeVisible();
+    await expect(progress(page)).toHaveText("답변이 완료되었습니다.");
 
     // 새로고침: 사이드바 열림은 배치에 남고 대화는 서버 이력에서 돌아온다.
     await page.reload();
@@ -154,17 +165,13 @@ test.describe("AI 어시스턴트", () => {
     await expect(transcript(page)).toContainText("천천히 설명하겠습니다.");
     await page.reload();
     await expect(editor(page)).toBeVisible();
-    await expect(
-      assistant(page).getByText("답변을 작성하는 중입니다.", { exact: true }),
-    ).toBeVisible();
+    await expect(progress(page)).toHaveText("답변을 작성하는 중입니다.");
     await expect(transcript(page)).toContainText(
       "한 종목이 성과를 좌우하지 않게 합니다.",
     );
-    await expect(
-      assistant(page).getByText("답변이 완료되었습니다.", { exact: true }),
-    ).toBeVisible();
+    await expect(progress(page)).toHaveText("답변이 완료되었습니다.");
 
-    // 취소: 답이 흘러나오는 중에 멈춘다.
+    // 취소: 답이 흘러나오는 중에 멈춘다. 진행 상태 영역은 상주하며 문구만 바뀐다(B-03 3차 리뷰 P2).
     await ask(page, "이번에는 천천히 한 번 더 설명해 줘");
     // 같은 대본을 두 번 돌리므로 대화 전체가 아니라 **마지막 턴 블록**만 본다. 전체를 보면 앞
     // 턴의 같은 문장에 걸려 기다리지 않고 지나간다.
@@ -174,16 +181,18 @@ test.describe("AI 어시스턴트", () => {
     const stop = assistant(page).getByRole("button", { name: "중지" });
     await expect(stop).toBeVisible();
     await stop.click();
-    // 턴이 끝나 입력이 다시 열린다.
+    // 턴이 끝나 입력이 다시 열리고, 상주하는 진행 상태가 중지를 알린다.
     await expect(
       assistant(page).getByRole("button", { name: "보내기" }),
     ).toBeVisible();
     await expect(stop).toHaveCount(0);
+    await expect(progress(page)).toHaveText("답변을 중지했습니다.");
 
-    // 취소 사유는 서버 이력에 남아 있고 다시 열면 보인다. **지금은 취소한 화면에서 바로 보이지
-    // 않는다** — 취소 응답이 턴을 종료 상태로 바꾸는 순간 사이드바가 스트림을 닫아, 그 뒤에
-    // 서버가 append하는 `Failure(CANCELLED)`를 받지 못한다(B-05 보고 DEFECT-B05-001). 이 단언은
-    // 그 경계를 그대로 고정한다: 고쳐서 즉시 보이게 되면 아래 reload 없이도 통과해야 한다.
+    // 말풍선의 취소 사유는 **이 화면에서는 오지 않는다**: 취소 응답이 턴을 종료 상태로 바꾸는
+    // 순간 사이드바가 스트림을 닫아, 그 뒤 서버가 append하는 `Failure(CANCELLED)`를 받지 못한다
+    // (DEFECT-B05-001 — 스트림 유지는 B-02, 첫 이벤트 전 취소의 이벤트 저장은 A-07이 맡는다).
+    // 서버가 그 사유를 기록했다는 것은 이력으로 확인한다. 둘이 들어오면 아래 reload를 걷고
+    // 취소 직후 말풍선에서 바로 단언하도록 조인다.
     await page.reload();
     await expect(editor(page)).toBeVisible();
     await expect(transcript(page).getByRole("article").last()).toContainText(
@@ -193,13 +202,16 @@ test.describe("AI 어시스턴트", () => {
     expect(page.url()).toContain(`/research/strategies/${strategyId}/`);
   });
 
-  test("제안 카드를 문서에 적용하면 검증을 통과하고 적용 후 백테스트가 실행으로 간다", async ({
+  test("제안 카드를 미리 보고 적용한 뒤 적용 후 백테스트가 실행 화면까지 간다", async ({
     page,
   }) => {
     await ensureProvider(page);
     await saveStrategyRevision(page, "B-05 제안 적용");
     const before = await currentSource(page);
     await openAssistant(page);
+    // 펼치는 순간 상단 토글이 스스로 언마운트되므로 패널이 포커스를 받는다(B-04 3차 리뷰 P1-1).
+    // 그러지 않으면 키보드 사용자는 방금 연 사이드바를 찾아 처음부터 탭해야 한다.
+    await expect(assistant(page)).toBeFocused();
 
     await ask(page, "KRX에서 통할 만한 모멘텀 전략 하나 제안해 줘");
 
@@ -235,11 +247,17 @@ test.describe("AI 어시스턴트", () => {
     expect(applied).not.toBe(before);
     await expectPhase(page, "검증 통과");
 
-    // "적용 후 백테스트": 이제 문서가 제안 기준과 달라졌으므로 확인을 거쳐 덮어쓴다.
+    // "적용 후 백테스트": 문서가 제안 기준과 달라졌으므로 확인을 거쳐 덮어쓴다.
     await card.getByRole("button", { name: "적용 후 백테스트" }).click();
     const confirm = page.getByRole("dialog", { name: "문서가 바뀌었습니다" });
     await expect(confirm).toBeVisible();
     await confirm.getByRole("button", { name: "그래도 덮어쓰기" }).click();
+
+    // 같은 제안을 두 번째로 적용한 것이라 바뀐 내용이 없다. 그 사실을 알리고 실행은 그대로
+    // 이어진다 — 편집기 change가 없다고 결과와 체인이 함께 사라지면 안 된다(B-04 3차 리뷰 P2-1).
+    await expect(
+      page.getByText("제안이 지금 문서와 같아 바뀐 내용이 없습니다."),
+    ).toBeVisible();
 
     // 저장하지 않은 문서를 떠나므로 이탈 확인을 거친다.
     const leaveGuard = page.getByRole("button", { name: "나가기" });

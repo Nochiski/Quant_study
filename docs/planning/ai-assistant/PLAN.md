@@ -6,7 +6,7 @@ current_phase: P0,A
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06]
-last_updated: 2026-09-21T00:29:01+09:00
+last_updated: 2026-09-21T00:34:46+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 4
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `4 / 13` |
-| Aggregated at | `2026-09-21 00:29 KST` |
+| Aggregated at | `2026-09-21 00:34 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -98,7 +98,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `7649967`(c6d70de + P3 후속) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_PROGRESS` | 구현자 `impl-ai-a04`, 워크트리 `wt-ai-a04`, 브랜치 `feat/ai-a-04-http-sse`(base A-03) |
-| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_PROGRESS` | 구현자 `impl-ai-a05`, 워크트리 `wt-ai-a05`, 브랜치 `feat/ai-a-05-llm-anthropic`(임시 base A-02 `84570df`, A-04 tip 위로 rebase 예정) |
+| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `SELF_CHECK` | 구현 완료(`fa002b6`, A-02 위, 42 테스트, pytest 1681·ruff·pyright 0) · optional extra `llm` + CI `--extra llm` · A-04 push 뒤 rebase·팩토리 등록 → PR |
 | [ ] | `A-06` | `llm_openai` adapter | A-05 | `IN_PROGRESS` | 구현자 `impl-ai-a06`, 워크트리 `wt-ai-a06`, 브랜치 `feat/ai-a-06-llm-openai`(임시 base A-02 `8324ebc`, A-05 tip 위로 rebase 예정) |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `WAITING` | — |
 

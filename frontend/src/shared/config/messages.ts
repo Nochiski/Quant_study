@@ -151,6 +151,25 @@ const ko = {
   "ide.collapseOutline": "전략 구조 접기",
   "ide.collapseInspector": "계약 접기",
   "ide.collapseDebugger": "중간 결과 접기",
+  "assistant.apply.title": "문서가 바뀌었습니다",
+  "assistant.apply.changed":
+    "제안을 만든 뒤 편집기 문서가 바뀌었습니다. 덮어쓰면 지금 편집기에 있는 내용이 제안으로 바뀝니다.",
+  "assistant.apply.unknown":
+    "이 제안이 어떤 문서를 기준으로 만들어졌는지 알 수 없습니다. 덮어쓰기 전에 미리보기로 차이를 확인하세요.",
+  "assistant.apply.undoNote":
+    "적용은 편집 한 번이라 실행 취소(Ctrl/⌘ Z) 한 번으로 되돌릴 수 있습니다.",
+  "assistant.apply.preview": "미리보기",
+  "assistant.apply.previewHide": "미리보기 닫기",
+  "assistant.apply.previewLabel": "제안과 현재 문서의 차이",
+  "assistant.apply.overwrite": "그래도 덮어쓰기",
+  "assistant.apply.cancel": "취소",
+  "assistant.apply.applied": "제안을 문서에 적용했습니다.",
+  "assistant.apply.error.editor-unavailable":
+    "편집기를 사용할 수 없어 제안을 적용하지 못했습니다.",
+  "assistant.apply.error.composing":
+    "입력기 조합 중에는 제안을 적용할 수 없습니다. 조합을 끝내고 다시 적용하세요.",
+  "assistant.apply.error.stale":
+    "확인하는 동안 문서가 또 바뀌어 적용을 멈췄습니다. 다시 적용하세요.",
   "ide.assistant": "AI 어시스턴트",
   "ide.collapseAssistant": "AI 어시스턴트 접기",
   "ide.resizeAssistant": "AI 어시스턴트 크기 조절",
@@ -1193,6 +1212,25 @@ export const messages = {
     "ide.collapseOutline": "Collapse outline",
     "ide.collapseInspector": "Collapse contract panel",
     "ide.collapseDebugger": "Collapse intermediate results",
+    "assistant.apply.title": "The document changed",
+    "assistant.apply.changed":
+      "The document changed after this proposal was made. Overwriting replaces what is in the editor now.",
+    "assistant.apply.unknown":
+      "The document this proposal was based on is unknown. Preview the difference before overwriting.",
+    "assistant.apply.undoNote":
+      "Applying is a single edit, so one undo (Ctrl/⌘ Z) brings the previous document back.",
+    "assistant.apply.preview": "Preview",
+    "assistant.apply.previewHide": "Hide preview",
+    "assistant.apply.previewLabel": "Difference between the proposal and the current document",
+    "assistant.apply.overwrite": "Overwrite anyway",
+    "assistant.apply.cancel": "Cancel",
+    "assistant.apply.applied": "The proposal was applied to the document.",
+    "assistant.apply.error.editor-unavailable":
+      "The editor is unavailable, so the proposal was not applied.",
+    "assistant.apply.error.composing":
+      "A proposal cannot be applied while an input method is composing. Finish composing and apply again.",
+    "assistant.apply.error.stale":
+      "The document changed again while you were confirming, so applying stopped. Apply again.",
     "ide.assistant": "AI assistant",
     "ide.collapseAssistant": "Collapse AI assistant",
     "ide.resizeAssistant": "Resize AI assistant",

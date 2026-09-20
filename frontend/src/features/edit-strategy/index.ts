@@ -89,6 +89,24 @@ export {
   type DocumentUpgrade,
   type UpgradeStatus,
 } from "./model/use-upgrade-document";
+export {
+  assistantDocumentContext,
+  type AssistantContextOptions,
+  type AssistantDocumentContext,
+  type AssistantSlotRender,
+} from "./model/assistant-turn-context";
+export {
+  useApplyAssistantProposal,
+  type AssistantProposal,
+  type AssistantProposalApply,
+  type ProposalApplyBlock,
+  type ProposalApplyFailure,
+  type ProposalApplyStatus,
+} from "./model/use-apply-assistant-proposal";
+export {
+  ProposalApplyDialog,
+  ProposalApplyFeedback,
+} from "./ui/proposal-apply-dialog";
 export { SourceEditor } from "./ui/source-editor";
 export { StrategyOutline } from "./ui/strategy-outline";
 export { ContractInspector } from "./ui/contract-inspector";

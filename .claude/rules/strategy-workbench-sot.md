@@ -38,6 +38,10 @@ paths:
 | 실행 차단(blocking) 판정 | backend compile diagnostics의 error severity | frontend syntax marker는 advisory, 실행 가능 여부를 판단하지 않음 |
 | authoring 진단 코드 | `strategy.*`는 domain 코드 레지스트리, `structure.*`는 domain hydrate, codec 코드(`document.*`/`yaml.*`/`<format>.syntax`)는 `ports/outgoing/document_codec.py` | frontend는 코드 → 마커 매핑과 422 코드 번역(`upgrade.error.<code>`·`backtest.error.<code>`)만 한다. compile 진단의 `message`는 backend가 한글 문장으로 완성해 보내고 Problems panel은 그대로 보여준다(frontend가 다시 조립·번역하지 않음, Phase 2 감사 DEFECT-P2X-005(b)); 코드를 새로 만들지 않는다 |
 | URL 선택 상태(view/path/date/security) | TanStack Router search (`validateSearch`) | widget은 읽기만, 기본값은 URL에 쓰지 않음 |
+| AI 어시스턴트 공급자 프로파일·활성 여부 | `application/assistant_chat`의 `ProviderProfileRepository` port 뒤 adapter(`assistant_sqlite`) | frontend는 목록·활성 배지만 표시. 키는 프로파일과 분리 저장 |
+| AI 공급자 비밀(API 키) | `adapters/outbound/secrets_local`(사용자 설정 디렉터리, 0600) | backend를 떠나지 않는다. 응답·로그·DB·OpenAPI에 평문 금지, frontend는 꼬리 4자리만 |
+| AI 어시스턴트 도구 정의·시스템 프롬프트·제안 검증 | `application/assistant_chat`(`_prompt.py`, 도구 실행), 도구 이름·스키마 상수는 `domain/assistant` | 공급자 adapter(`llm_anthropic`·`llm_openai`)는 `ToolSpec`을 자기 형식으로 변환하고 루프만 돈다. 공급자 SDK import는 두 adapter 밖 금지(architecture 테스트) |
+| AI 채팅 세션·메시지·이벤트 이력 | `assistant_sqlite` | 사이드바 열림·폭·현재 세션 id는 frontend local UI state. 제안은 사용자의 "적용"으로만 edit-strategy source 트랜잭션에 들어간다 |
 
 ## 금지
 

@@ -10,12 +10,16 @@ from __future__ import annotations
 import os
 import stat
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
 import pytest
 
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import default_secrets_path
+from strategy_workbench.application.assistant_chat.facade.ports import LlmProviderPort
+from strategy_workbench.application.assistant_chat.facade.profiles import (
+    ProviderNotInstalledError,
+)
 from strategy_workbench.bootstrap._assistant import (
     _AuthoringStrategyCompiler,  # pyright: ignore[reportPrivateUsage]  # reason: composition root가 소유한 port 구현이라 공개 facade가 없다
 )
@@ -37,7 +41,16 @@ from strategy_workbench.bootstrap.facade.http import (
     build_http_app,
     runtime_assistant_settings,
 )
-from strategy_workbench.domain.assistant.facade.models import ProviderKind
+from strategy_workbench.domain.assistant.facade.models import (
+    ChatEvent,
+    Done,
+    ProbeResult,
+    ProviderKind,
+    ProviderProfile,
+    ToolCall,
+    ToolResult,
+    TurnRequest,
+)
 from strategy_workbench.domain.factor.facade.registry import (
     FactorRegistry,
     build_default_factor_registry,
@@ -164,6 +177,98 @@ def _factor_registry() -> FactorRegistry:
     return build_default_factor_registry()
 
 
+# -- 공급자 레지스트리 (지연 해소) --------------------------------------------------------------
+
+
+def _refuse_import() -> LlmProviderPort:
+    """optional extra가 없는 환경의 팩토리. A-05·A-06의 팩토리가 이 모양을 지켜야 한다."""
+    raise ImportError("No module named 'anthropic'", name="anthropic")
+
+
+class _CountingFactory:
+    """호출 횟수를 세는 팩토리. 시작할 때 불리지 않는다는 것을 보기 위해서다."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self) -> LlmProviderPort:
+        self.calls += 1
+        return _StubProvider()
+
+
+class _StubProvider:
+    """`LlmProviderPort` 최소 구현. 레지스트리 해소만 보므로 호출은 일어나지 않는다."""
+
+    kind = ProviderKind.ANTHROPIC
+
+    def default_model(self) -> str:
+        return "stub-model-1"
+
+    def probe(self, secret: str, *, model: str, base_url: str | None) -> ProbeResult:
+        return ProbeResult(ok=True, latency_ms=1)
+
+    def stream_turn(
+        self,
+        secret: str,
+        profile: ProviderProfile,
+        request: TurnRequest,
+        execute_tool: Callable[[ToolCall], ToolResult],
+        cancelled: Callable[[], bool],
+    ) -> Iterator[ChatEvent]:
+        yield Done(stop_reason="end_turn")
+
+
+def test_a_provider_whose_sdk_is_missing_does_not_stop_the_backend(tmp_path: Path) -> None:
+    """미설치 SDK가 시작을 막으면 어시스턴트를 쓰지도 않는 사용자의 백엔드가 통째로 안 뜬다."""
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={ProviderKind.ANTHROPIC: _refuse_import},
+        )
+    )
+
+    availability = {item.kind: item for item in container.assistant_profiles.available_kinds()}
+
+    assert availability[ProviderKind.ANTHROPIC].installed is False
+    assert availability[ProviderKind.ANTHROPIC].default_model is None
+
+
+def test_an_uninstalled_provider_refuses_profile_creation_instead_of_crashing(
+    tmp_path: Path,
+) -> None:
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={ProviderKind.ANTHROPIC: _refuse_import},
+        )
+    )
+
+    with pytest.raises(ProviderNotInstalledError):
+        container.assistant_profiles.create(
+            kind=ProviderKind.ANTHROPIC, label="Claude", secret="sk-not-used-0001"
+        )
+
+
+def test_the_factory_is_called_once_and_only_when_a_provider_is_needed(tmp_path: Path) -> None:
+    """공급자 SDK import는 비싸고, 어시스턴트를 안 쓰는 시작 경로가 그 값을 치를 이유가 없다."""
+    factory = _CountingFactory()
+
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={ProviderKind.ANTHROPIC: factory},
+        )
+    )
+
+    assert factory.calls == 0
+    container.assistant_profiles.available_kinds()
+    container.assistant_profiles.available_kinds()
+    assert factory.calls == 1
+
+
 # -- DB 파일 권한 (A-03 리뷰가 A-04로 넘긴 항목) ----------------------------------------------
 
 
@@ -186,12 +291,12 @@ def test_the_windows_branch_breaks_inheritance_and_grants_only_the_current_user(
     runner = _RecordingRunner()
 
     touched = restrict_to_current_user(
-        database, platform="win32", run_command=runner, windows_account="DOMAIN\tester"
+        database, platform="win32", run_command=runner, windows_account=r"DOMAIN\tester"
     )
 
     assert touched == (database,)
     assert runner.commands == [
-        ["icacls", str(database), "/inheritance:r", "/grant:r", "DOMAIN\tester:F"]
+        ["icacls", str(database), "/inheritance:r", "/grant:r", r"DOMAIN\tester:F"]
     ]
 
 

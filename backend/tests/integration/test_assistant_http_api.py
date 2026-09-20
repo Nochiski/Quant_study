@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.bootstrap.facade.container import AssistantSettings
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.assistant.facade.models import (
@@ -32,9 +33,11 @@ from strategy_workbench.domain.assistant.facade.models import (
     ProbeResult,
     ProviderKind,
     ProviderProfile,
+    SequencedEvent,
     TextDelta,
     ToolCall,
     ToolResult,
+    Turn,
     TurnRequest,
     TurnStatus,
 )
@@ -469,6 +472,55 @@ def test_cancelling_a_turn_that_belongs_to_another_session_is_a_404(tmp_path: Pa
     gate.set()
 
 
+def test_the_history_reads_turns_before_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """네 조회는 한 트랜잭션이 아니다. 그 창의 오차 방향을 "바쁘다 쪽"으로 고정한다.
+
+    이벤트를 먼저 읽으면 "턴은 FAILED인데 그 실패 이벤트는 목록에 없는" 응답이 나가고, spec D7의
+    복구 규칙이 이 응답 하나만 보기 때문에 화면은 이유 없이 멈춘 턴을 그린다. 턴을 먼저 읽으면
+    창의 방향이 "턴은 아직 RUNNING인데 이벤트가 더 와 있다"가 되고, 프론트 리듀서는 sequence
+    기준 멱등이라 여분 이벤트를 그대로 흡수한다.
+
+    턴 조회 도중에 이벤트를 하나 더 저장해 그 순서를 밖에서 관측한다.
+    """
+    client = _client(tmp_path, _GatedProvider(after=[Done(stop_reason="end_turn")]))
+    _create_profile(client)
+    session_id = _start_session(client)
+    turn = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "이력 순서", "context": _CONTEXT},
+    ).json()
+    _wait_for_terminal_turn(client, session_id)
+    reads: list[str] = []
+    original_turns = AssistantTurnRunner.turns
+    original_events = AssistantTurnRunner.events
+
+    def spy_turns(runner: AssistantTurnRunner, session: str) -> tuple[Turn, ...]:
+        reads.append("turns")
+        result = original_turns(runner, session)
+        # 두 조회 사이에 러너가 마지막 이벤트를 저장하는 상황을 재현한다.
+        runner._sessions.append_events(  # pyright: ignore[reportPrivateUsage]  # reason: 두 조회 사이의 창을 밖에서 열 방법이 이것뿐이다
+            turn["turn_id"],
+            (Failure(code=FailureCode.PROVIDER, message="늦게 도착한 종료 사유"),),
+        )
+        return result
+
+    def spy_events(
+        runner: AssistantTurnRunner, session: str, *, after_sequence: int = -1
+    ) -> tuple[SequencedEvent, ...]:
+        reads.append("events")
+        return original_events(runner, session, after_sequence=after_sequence)
+
+    monkeypatch.setattr(AssistantTurnRunner, "turns", spy_turns)
+    monkeypatch.setattr(AssistantTurnRunner, "events", spy_events)
+
+    history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
+
+    assert reads == ["turns", "events"]
+    assert [item["event"]["type"] for item in history["events"]][-1] == "failure"
+
+
 def test_sessions_are_listed_for_one_document(tmp_path: Path) -> None:
     client = _client(tmp_path, _GatedProvider())
     _create_profile(client)
@@ -518,6 +570,93 @@ def test_no_response_body_or_log_line_carries_the_api_key(
     assert _API_KEY not in caplog.text
 
 
+# spec D6이 적은 코드와 이 PR이 더한 두 개. 라우트가 코드를 새로 만들고 계약에 넣지 않으면
+# 아래 테스트가 깨진다 — 생성 SDK의 판별 유니언은 코드로 갈라지므로, 계약에 없는 코드는
+# 프론트에서 어느 갈래에도 맞지 않고 "알 수 없는 오류"로 떨어진다.
+_DECLARED_ASSISTANT_CODES = frozenset(
+    {
+        "assistant.provider_not_installed",
+        "assistant.no_active_provider",
+        "assistant.probe_failed",
+        "assistant.base_url_rejected",
+        "assistant.provider_secret_missing",
+        "assistant.document_ref_invalid",
+        "assistant.turn_in_progress",
+        "assistant.no_running_turn",
+        "assistant.session.not_found",
+        "assistant.turn.not_found",
+        "assistant.provider.not_found",
+    }
+)
+
+
+def _openapi_assistant_codes(client: TestClient) -> set[str]:
+    """OpenAPI의 `Assistant*Detail` 스키마가 선언한 `code` 값 전부."""
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    declared: set[str] = set()
+    for name, schema in schemas.items():
+        if not (name.startswith("Assistant") and name.endswith("Detail")):
+            continue
+        code = schema.get("properties", {}).get("code", {})
+        declared.update(code.get("enum", []) or [])
+        if "const" in code:
+            declared.add(code["const"])
+    return declared
+
+
+def test_the_openapi_contract_declares_every_assistant_error_code(tmp_path: Path) -> None:
+    client = _client(tmp_path, _GatedProvider())
+
+    assert _openapi_assistant_codes(client) == set(_DECLARED_ASSISTANT_CODES)
+
+
+def test_every_code_the_routes_actually_emit_is_in_the_contract(tmp_path: Path) -> None:
+    """실제 응답에서 코드를 거둬 계약과 대조한다. 선언만 맞추고 라우트가 딴 말을 하면 걸린다."""
+    provider = _GatedProvider(
+        probe_result=ProbeResult(ok=False, failure=ProbeFailure.AUTH, latency_ms=1)
+    )
+    client = _client(tmp_path, provider)
+    emitted: set[str] = set()
+
+    # 프로파일이 없는 상태에서 나오는 거절들.
+    emitted.add(_code(client.post(f"{_ASSISTANT}/providers", json=_profile_body(kind="openai"))))
+    emitted.add(_code(client.post(f"{_ASSISTANT}/providers", json=_profile_body())))
+    emitted.add(
+        _code(
+            client.post(
+                f"{_ASSISTANT}/providers", json=_profile_body(base_url="http://proxy.example.com")
+            )
+        )
+    )
+    emitted.add(_code(client.post(f"{_ASSISTANT}/providers/absent/activate")))
+    emitted.add(_code(client.post(f"{_ASSISTANT}/sessions", json={"document_ref": _DOCUMENT_REF})))
+    emitted.add(_code(client.get(f"{_ASSISTANT}/sessions")))
+    # 프로파일을 만든 뒤에만 닿는 거절들.
+    provider._probe_result = ProbeResult(ok=True, latency_ms=1)  # pyright: ignore[reportPrivateUsage]  # reason: 한 클라이언트 안에서 probe 결과를 뒤집어야 두 코드를 다 거둔다
+    _create_profile(client)
+    session_id = _start_session(client)
+    emitted.add(_code(client.get(f"{_ASSISTANT}/sessions/{session_id}/events")))
+    emitted.add(_code(client.get(f"{_ASSISTANT}/sessions/absent")))
+    emitted.add(_code(client.post(f"{_ASSISTANT}/sessions/{session_id}/turns/absent/cancel")))
+
+    assert emitted <= _openapi_assistant_codes(client)
+    assert "assistant.document_ref_invalid" in emitted
+    assert "assistant.probe_failed" in emitted
+
+
+def test_the_event_stream_response_declares_its_frame_schema(tmp_path: Path) -> None:
+    """SSE payload에 스키마가 없으면 생성 SDK가 `unknown`을 만들고, B-02가 손으로 캐스팅한다."""
+    client = _client(tmp_path, _GatedProvider())
+
+    document = client.get("/openapi.json").json()
+    operation = document["paths"][f"{_ASSISTANT}/sessions/{{session_id}}/events"]["get"]
+    content = operation["responses"]["200"]["content"]["text/event-stream"]
+
+    assert content["schema"]["$ref"].endswith("/AssistantEventEnvelopeView")
+    envelope = document["components"]["schemas"]["AssistantEventEnvelopeView"]
+    assert set(envelope["required"]) >= {"sequence", "turn_id", "event"}
+
+
 def test_the_openapi_contract_marks_the_provider_secret_write_only(tmp_path: Path) -> None:
     client = _client(tmp_path, _GatedProvider())
 
@@ -528,8 +667,19 @@ def test_the_openapi_contract_marks_the_provider_secret_write_only(tmp_path: Pat
     assert set(schemas["ProviderProfileView"]["required"]) >= {"profile_id", "secret_tail"}
 
 
-def _profile_body() -> dict[str, Any]:
-    return {"kind": "anthropic", "label": "내 Claude", "secret": _API_KEY}
+def _profile_body(**overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {"kind": "anthropic", "label": "내 Claude", "secret": _API_KEY}
+    body.update(overrides)
+    return body
+
+
+def _code(response: object) -> str:
+    """응답 본문의 `detail.code`. 코드 없는 본문이면 테스트가 여기서 멈춘다."""
+    payload = response.json()  # pyright: ignore[reportAttributeAccessIssue]  # reason: httpx Response만 들어온다(호출부 고정)
+    detail = payload["detail"]
+    if not isinstance(detail, dict) or "code" not in detail:
+        raise AssertionError(f"response carries no coded detail — payload={payload!r}")
+    return str(detail["code"])
 
 
 def _wait_for_terminal_turn(client: TestClient, session_id: str) -> dict[str, Any]:

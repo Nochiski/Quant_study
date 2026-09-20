@@ -538,3 +538,41 @@ def test_the_slot_is_released_even_when_storing_the_final_state_fails() -> None:
 
     assert harness.runner.occupied_turn(harness.session.session_id) is None
     assert harness.runner.is_settled(turn.turn_id) is True
+
+
+def test_every_registry_query_reports_the_same_status_after_a_timeout() -> None:
+    """`_expire`가 사유만 확정하고 `entry.turn`은 그대로 두는 창을 본다.
+
+    `_occupied_turn`이 `view()`가 아니라 `entry.turn`을 돌려주면, 그 창에서 이 함수만 RUNNING을
+    답하고 `state`·`turns`·`is_settled`는 FAILED를 답한다. 오늘 두 호출자가 `turn_id`만 읽어
+    무해할 뿐이고, 같은 레지스트리를 읽는 함수끼리 진실이 갈리면 다음 호출자가 조용히 틀린다.
+    """
+    observations: list[tuple[TurnStatus, TurnStatus]] = []
+
+    class _WatchingRepository(InMemoryChatSessionRepository):
+        def append_events(self, turn_id: str, events: Sequence[ChatEvent]) -> tuple[int, ...]:
+            sequences = super().append_events(turn_id, events)
+            if any(isinstance(event, Failure) for event in events):
+                # 종료 사유가 오가는 구간. `_expire`가 `decided`를 세운 뒤이고 `_finish` 전이다.
+                occupied = harness.runner.occupied_turn(harness.session.session_id)
+                assert occupied is not None
+                observations.append(
+                    (occupied.status, harness.runner.state(occupied.turn_id).status)
+                )
+            return sequences
+
+    harness = _harness(
+        (TextDelta("한"), TextDelta("참"), Done("end_turn")),
+        timeout_seconds=5.0,
+        clock_step=4.0,
+        sessions=_WatchingRepository(),
+    )
+    harness.runner.start(harness.session.session_id, "질문", CONTEXT)
+
+    ManualTurnThread.run_all()
+
+    # 두 조회가 언제 보든 같은 답을 해야 한다.
+    assert observations
+    assert all(occupied is state for occupied, state in observations)
+    # 그리고 그중 한 번은 `decided`가 세워진 뒤라 RUNNING이 아니다 — 창을 실제로 지나갔다는 증거.
+    assert TurnStatus.FAILED in [occupied for occupied, _ in observations]

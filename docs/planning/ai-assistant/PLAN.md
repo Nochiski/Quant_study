@@ -99,7 +99,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
 | [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `IN_REVIEW` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `645efcb`(A-03 `7649967` 위) · `review_ai_a_04` 1차 APPROVE WITH CHANGES(P1 1·P2 3·P3 7) → 반영 중 |
 | [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `IN_REVIEW` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `5640f8d2`(A-04 `645efcb` 위) · `review_ai_a_05` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 3·P3 6) → A-04 rebase와 함께 반영 |
-| [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`5eec392`, A-02 위, 52 테스트, pytest 1700·ruff·pyright 0) · 기본 모델 `gpt-6-astra`(SDK `ChatModel` 첫 항목, A-07 live smoke 확인) · A-05 push 뒤 rebase·팩토리 등록 → PR |
+| [ ] | `A-06` | `llm_openai` adapter | A-05 | `SELF_CHECK` | 구현 완료(`19331e4a`, A-05 `5640f8d2` 위 8커밋, pytest 1843·ruff·pyright 0, A-05 리뷰 결정 4건 대칭 적용) · 기본 모델 `gpt-6-astra` · A-05 재작성 뒤 rebase·push → PR |
 | [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `IN_PROGRESS` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-a07`, 브랜치 `feat/ai-a-07-prompt-fixtures`(임시 base A-05, A-06 tip 위로 rebase 예정) · live smoke는 키 없어 미실행 예정 |
 
 Phase exit:

@@ -257,6 +257,9 @@ class FailureCode(StrEnum):
     NETWORK = "network"
     REFUSAL = "refusal"
     PROVIDER = "provider"
+    # 러너·서비스 내부 예외. 공급자 탓이 아닌 실패를 `PROVIDER`로 찍으면 이력과 화면 모두 원인을
+    # 잘못 가리킨다. `message`는 다른 코드와 같이 예외 타입 이름까지만 담는다.
+    INTERNAL = "internal"
     TOOL_ROUNDS_EXCEEDED = "tool_rounds_exceeded"
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"

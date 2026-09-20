@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -44,6 +45,7 @@ def _service(
     probe_result: ProbeResult | None = None,
     kinds: tuple[ProviderKind, ...] = (ProviderKind.ANTHROPIC,),
     allow_insecure_base_url: bool = False,
+    now: Callable[[], datetime] = lambda: FIXED_NOW,
 ) -> tuple[ProviderProfileService, InMemoryProviderProfileRepository, InMemoryProviderSecretStore]:
     repository = InMemoryProviderProfileRepository()
     secrets = InMemoryProviderSecretStore()
@@ -55,11 +57,17 @@ def _service(
         repository,
         secrets,
         providers,
-        now=lambda: FIXED_NOW,
+        now=now,
         new_id=sequential_ids("profile"),
         allow_insecure_base_url=allow_insecure_base_url,
     )
     return service, repository, secrets
+
+
+def _ticking_clock() -> Callable[[], datetime]:
+    """부를 때마다 1분씩 흐르는 시계. 생성 시각이 실제로 달라지는 상황을 만든다."""
+    ticks = iter(range(1, 1000))
+    return lambda: FIXED_NOW + timedelta(minutes=next(ticks))
 
 
 # -- (j) 미설치 공급자 --------------------------------------------------------------------------
@@ -214,9 +222,10 @@ def test_active_is_none_before_any_profile_exists() -> None:
         ("ftp://api.example.com", "scheme"),
         ("https://localhost/v1", "loopback"),
         ("https://inner.localhost/v1", "loopback"),
-        ("https://127.0.0.1/v1", "IP literals"),
-        ("https://10.0.0.5/v1", "IP literals"),
-        ("https://[::1]/v1", "IP literals"),
+        ("https://127.0.0.1/v1", "loopback addresses"),
+        ("https://10.0.0.5/v1", "private network addresses"),
+        ("https://[::1]/v1", "loopback addresses"),
+        ("https://8.8.8.8/v1", "IP literals"),
         ("https://user:key@api.example.com", "credentials"),
         ("https:///v1", "host is empty"),
         # 아래 넷은 전부 127.0.0.1로 연결되지만 `ipaddress`가 주소로 인정하지 않는 표기다.
@@ -224,8 +233,9 @@ def test_active_is_none_before_any_profile_exists() -> None:
         ("https://0x7f000001/v1", "last label must be alphabetic"),
         ("https://017700000001/v1", "last label must be alphabetic"),
         ("https://localhost./v1", "loopback"),
-        ("https://proxy.local/v1", "loopback"),
-        ("https://gateway.internal/v1", "loopback"),
+        # mDNS와 사설 전용 TLD는 루프백이 아니다. 걸린 규칙을 정확히 지목해야 사용자가 고칠 수 있다.
+        ("https://proxy.local/v1", "local network names"),
+        ("https://gateway.internal/v1", "local network names"),
         ("https://LOCALHOST/v1", "loopback"),
     ],
 )
@@ -273,12 +283,14 @@ def test_the_insecure_escape_hatch_allows_a_local_proxy(base_url: str) -> None:
     assert profile.base_url == base_url
 
 
-@pytest.mark.parametrize("base_url", ["http://evil.example.com/v1", "https://api.example.com/v1"])
-def test_the_insecure_escape_hatch_still_refuses_public_hosts(base_url: str) -> None:
-    """예외의 뜻은 "로컬 프록시"다. 켜 둔 환경에서 오타 하나가 공개 호스트로 키를 보내면 안 된다."""
+@pytest.mark.parametrize("base_url", ["http://evil.example.com/v1", "http://8.8.8.8/v1"])
+def test_the_insecure_escape_hatch_still_refuses_plaintext_to_public_hosts(
+    base_url: str,
+) -> None:
+    """예외의 뜻은 "로컬 프록시"다. 켜 둔 환경에서 오타가 공개 호스트로 평문 키를 보내면 안 된다."""
     service, repository, secrets = _service(allow_insecure_base_url=True)
 
-    with pytest.raises(ProviderBaseUrlRejectedError, match="loopback or private"):
+    with pytest.raises(ProviderBaseUrlRejectedError, match="scheme"):
         service.create(
             kind=ProviderKind.ANTHROPIC,
             label="Claude",
@@ -288,6 +300,42 @@ def test_the_insecure_escape_hatch_still_refuses_public_hosts(base_url: str) -> 
 
     assert repository.list() == ()
     assert secrets.secrets == {}
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [None, "https://api.openai.com/v1", "https://gateway.example.co.kr/v1"],
+)
+def test_the_insecure_escape_hatch_keeps_public_https_working(base_url: str | None) -> None:
+    """플래그는 기본 정책의 상위집합이다. 켜는 순간 공개 API 프로파일이 막히면 안 된다.
+
+    spec D6의 문장이 "http·루프백을 허용한다"는 덧셈이라, 플래그가 기본 정책을 좁히면 한 프로세스
+    안에서 로컬 프록시 프로파일과 실제 공급자 API 프로파일을 함께 둘 수 없다.
+    """
+    service, _, _ = _service(allow_insecure_base_url=True)
+
+    profile = service.create(
+        kind=ProviderKind.ANTHROPIC, label="Claude", secret="sk-fake-0001", base_url=base_url
+    )
+
+    assert profile.base_url == base_url
+
+
+def test_a_rejection_reason_names_the_host_and_the_rule_that_refused_it() -> None:
+    """이 문자열은 `assistant.base_url_rejected` 422 본문으로 사용자에게 그대로 나간다."""
+    service, _, _ = _service()
+
+    with pytest.raises(ProviderBaseUrlRejectedError) as raised:
+        service.create(
+            kind=ProviderKind.ANTHROPIC,
+            label="Claude",
+            secret="sk-fake-0001",
+            base_url="https://box.local/v1",
+        )
+
+    assert "box.local" in raised.value.reason
+    assert "local network names" in raised.value.reason
+    assert "loopback" not in raised.value.reason
 
 
 def test_the_base_url_check_runs_before_the_probe() -> None:
@@ -353,15 +401,55 @@ def test_a_probe_result_must_name_its_reason() -> None:
 
 
 def test_deleting_the_active_profile_promotes_the_most_recent_survivor() -> None:
-    service, _, _ = _service()
+    """생존자가 둘 이상일 때 "가장 최근 생성"이 실제로 걸리는지 본다.
+
+    생존자가 하나뿐이면 승계 규칙 자체가 걸리지 않아 이름이 약속한 것을 검증하지 못한다.
+    """
+    service, _, _ = _service(now=_ticking_clock())
     first = service.create(kind=ProviderKind.ANTHROPIC, label="A", secret="sk-fake-0001")
-    second = service.create(kind=ProviderKind.ANTHROPIC, label="B", secret="sk-fake-0002")
+    middle = service.create(kind=ProviderKind.ANTHROPIC, label="B", secret="sk-fake-0002")
+    newest = service.create(kind=ProviderKind.ANTHROPIC, label="C", secret="sk-fake-0003")
+    assert middle.created_at < newest.created_at
 
     service.delete(first.profile_id)
 
     active = service.active()
     assert active is not None
-    assert active.profile_id == second.profile_id
+    assert active.profile_id == newest.profile_id
+    assert [profile.active for profile in service.list()] == [False, True]
+
+
+def test_the_succession_order_walks_back_through_the_survivors() -> None:
+    service, _, _ = _service(now=_ticking_clock())
+    first = service.create(kind=ProviderKind.ANTHROPIC, label="A", secret="sk-fake-0001")
+    middle = service.create(kind=ProviderKind.ANTHROPIC, label="B", secret="sk-fake-0002")
+    newest = service.create(kind=ProviderKind.ANTHROPIC, label="C", secret="sk-fake-0003")
+
+    service.delete(first.profile_id)
+    service.delete(newest.profile_id)
+
+    active = service.active()
+    assert active is not None
+    assert active.profile_id == middle.profile_id
+
+
+def test_profiles_created_at_the_same_instant_break_the_tie_deterministically() -> None:
+    """고정 시계에서도 승계자가 저장 순서에 좌우되면 안 된다.
+
+    A-03 저장소가 `created_at`을 초 단위로 절삭하면 동률이 흔해진다. 같은 입력이 다른 활성
+    프로파일을 낳으면 비결정이다. 규칙은 "가장 최근, 동률이면 `profile_id`가 큰 쪽"이다.
+    """
+    service, _, _ = _service()  # 고정 시계 — 세 프로파일의 created_at이 모두 같다
+    first = service.create(kind=ProviderKind.ANTHROPIC, label="A", secret="sk-fake-0001")
+    second = service.create(kind=ProviderKind.ANTHROPIC, label="B", secret="sk-fake-0002")
+    third = service.create(kind=ProviderKind.ANTHROPIC, label="C", secret="sk-fake-0003")
+    assert first.created_at == second.created_at == third.created_at
+
+    service.delete(first.profile_id)
+
+    active = service.active()
+    assert active is not None
+    assert active.profile_id == max(second.profile_id, third.profile_id)
 
 
 def test_a_profile_created_while_none_is_active_becomes_active() -> None:

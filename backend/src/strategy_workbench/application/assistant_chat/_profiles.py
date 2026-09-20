@@ -39,7 +39,9 @@ __all__ = [
 # 호스트 이름만으로 루프백·사설이라고 단정할 수 있는 것들. DNS를 끌어오지 않고도 흔한 실수를
 # 막는다. 비교 전에 후행 점을 떼고 소문자로 맞춘다.
 _LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain"})
-_PRIVATE_SUFFIXES = (".localhost", ".local", ".internal")
+_LOOPBACK_SUFFIXES = (".localhost",)
+# mDNS와 ICANN 사설 전용 TLD. 루프백은 아니지만 spec D6이 막는 사설 대역이다.
+_LOCAL_NETWORK_SUFFIXES = (".local", ".internal")
 
 _IpAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
@@ -193,6 +195,8 @@ class ProviderProfileService:
         디스크에 남는 것보다 낫다(spec D1: 비밀은 backend를 떠나지 않고 수명도 프로파일보다 길지
         않다).
 
+        승계자는 가장 최근에 만든 생존자이고, `created_at`이 같으면 `profile_id`가 큰 쪽이다.
+
         활성 승계가 없으면 프로파일이 화면에 멀쩡히 보이는데 모든 턴이
         `assistant.no_active_provider`로 거부되고, 새 프로파일을 추가해도 풀리지 않는다. 가장 흔한
         "키 교체"가 바로 그 상태를 만든다.
@@ -205,7 +209,9 @@ class ProviderProfileService:
         remaining = self._repository.list()
         if not remaining:
             return
-        successor = max(remaining, key=lambda item: item.created_at)
+        # 전순서 키로 정한다. `created_at`만 보면 동률에서 목록 순서로 떨어져 같은 입력이 다른
+        # 활성 프로파일을 낳는다(A-03 저장소가 시각을 초 단위로 절삭하면 동률이 흔해진다).
+        successor = max(remaining, key=lambda item: (item.created_at, item.profile_id))
         self._repository.set_active(successor.profile_id)
 
     def _provider_for(self, kind: ProviderKind) -> LlmProviderPort:
@@ -225,18 +231,15 @@ class ProviderProfileService:
         라벨(TLD)이 알파벳 2자 이상이어야 한다는 규칙을 같이 건다 — 정상 호스트명의 TLD는 숫자나
         `0x…`일 수 없다. 후행 점(`localhost.`)은 비교 전에 떼어 낸다.
 
-        로컬 프록시 예외(`STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL`)가 켜져도 호스트는
-        루프백·사설 대역으로 한정한다. 예외의 뜻이 "로컬 프록시"이므로 공개 호스트로 평문 http를
-        보내는 것은 그 뜻 밖이다.
+        로컬 프록시 예외(`STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL`)는 기본 정책의
+        **상위집합**이다. spec D6의 문장이 "`http`·루프백을 허용한다"는 덧셈이기 때문이다. 호스트가
+        로컬이면 평문 `http`까지 통과시키고, 그 밖의 호스트는 플래그와 무관하게 기본 정책(https
+        한정·IP 리터럴 금지·알파벳 TLD)을 그대로 태운다. 플래그가 기본 정책을 좁히면 한 프로세스
+        안에서 "로컬 프록시 프로파일"과 "실제 공급자 API 프로파일"을 함께 둘 수 없다.
         """
         if base_url is None:
             return
         parts = urlsplit(base_url)
-        allowed_schemes = ("https", "http") if self._allow_insecure_base_url else ("https",)
-        if parts.scheme not in allowed_schemes:
-            raise ProviderBaseUrlRejectedError(
-                base_url, f"scheme must be one of {list(allowed_schemes)}, got {parts.scheme!r}"
-            )
         if "@" in parts.netloc:
             raise ProviderBaseUrlRejectedError(base_url, "credentials in the URL are not accepted")
         if not parts.hostname:
@@ -245,14 +248,24 @@ class ProviderProfileService:
         if not host:
             raise ProviderBaseUrlRejectedError(base_url, "host is empty")
         address = _ip_literal(host)
-        if self._allow_insecure_base_url:
-            self._require_local_host(base_url, host, address)
+        local_reason = _local_host_reason(host, address)
+        if local_reason is not None:
+            if not self._allow_insecure_base_url:
+                raise ProviderBaseUrlRejectedError(
+                    base_url, f"{local_reason} are not accepted — host={host!r}"
+                )
+            if parts.scheme not in ("https", "http"):
+                raise ProviderBaseUrlRejectedError(
+                    base_url, f"scheme must be 'https' or 'http', got {parts.scheme!r}"
+                )
             return
-        if host in _LOOPBACK_NAMES or host.endswith(_PRIVATE_SUFFIXES):
-            raise ProviderBaseUrlRejectedError(base_url, "loopback hosts are not accepted")
+        if parts.scheme != "https":
+            raise ProviderBaseUrlRejectedError(
+                base_url, f"scheme must be 'https', got {parts.scheme!r}"
+            )
         if address is not None:
             raise ProviderBaseUrlRejectedError(
-                base_url, f"IP literals are not accepted (is_private={address.is_private})"
+                base_url, f"IP literals are not accepted — host={host!r}"
             )
         if not _has_alphabetic_tld(host):
             raise ProviderBaseUrlRejectedError(
@@ -261,16 +274,25 @@ class ProviderProfileService:
                 f"(2+ letters), got {host.rsplit('.', 1)[-1]!r}",
             )
 
-    def _require_local_host(self, base_url: str, host: str, address: _IpAddress | None) -> None:
-        """예외 플래그가 켜졌을 때의 허용 범위: 루프백 이름과 루프백·사설 IP뿐이다."""
-        if host in _LOOPBACK_NAMES or host.endswith(_PRIVATE_SUFFIXES):
-            return
-        if address is not None and (address.is_loopback or address.is_private):
-            return
-        raise ProviderBaseUrlRejectedError(
-            base_url,
-            f"the insecure escape hatch only accepts loopback or private hosts — host={host!r}",
-        )
+
+def _local_host_reason(host: str, address: _IpAddress | None) -> str | None:
+    """호스트가 로컬이면 걸린 규칙의 이름, 아니면 None.
+
+    사유를 셋으로 나눈 이유는 이 문자열이 `assistant.base_url_rejected` 422 본문으로 사용자에게
+    그대로 나가기 때문이다. mDNS(`.local`)와 사설 전용 TLD(`.internal`)를 "loopback"이라고 적으면
+    "내 주소는 localhost가 아닌데?"에서 막힌다(`error-messages.md`의 기대 vs 실제).
+    """
+    if host in _LOOPBACK_NAMES or host.endswith(_LOOPBACK_SUFFIXES):
+        return "loopback hosts"
+    if host.endswith(_LOCAL_NETWORK_SUFFIXES):
+        return "local network names"
+    if address is None:
+        return None
+    if address.is_loopback:
+        return "loopback addresses"
+    if address.is_private or address.is_link_local:
+        return "private network addresses"
+    return None
 
 
 def _ip_literal(host: str) -> _IpAddress | None:

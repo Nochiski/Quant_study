@@ -3,6 +3,7 @@ import type {
   DocumentRefView,
   TurnContextPayload,
 } from "../../../entities/assistant";
+import type { SourceFormat } from "../../../shared/lib/yaml12";
 import { currentDiagnostics, type DocumentState } from "./document-state";
 
 /**
@@ -28,23 +29,19 @@ export const assistantDocumentRef = (
  * 텍스트와 같은 버전의 진단만 담는다 — `currentDiagnostics`가 뒤처진 parse의 결과를 버린다.
  * `environment`는 실행 설정(기간·수수료 등)이다. 전략 언어 밖의 값이라 문서 텍스트와 따로 싣는다.
  *
- * `source_format`만은 reducer 값이다. 포맷 전환(`load`)은 reducer를 먼저 갱신하고 편집기 텍스트는
- * 뒤따르는 effect가 밀어 넣으므로 그 사이에는 둘이 어긋날 수 있다. 턴은 사용자의 전송에서 출발하고
- * 포맷 전환은 화면 이동을 동반해 실제로 그 틈에 들어가기 어렵다 — 지금은 이 비대칭을 받아들인다.
- *
- * `liveSource`는 편집기의 지금 텍스트다. 턴은 세션 생성 왕복 뒤에 시작될 수 있어 reducer 상태보다
- * 편집기가 앞서 있을 수 있으므로, 주어지면 그것이 정본이다. 그 경우 진단은 다른 텍스트의 결과이므로
- * 싣지 않는다 — 틀린 진단을 보내느니 없는 편이 낫다.
+ * 텍스트와 포맷은 **같은 출처**에서 온다. `live`를 주면 그 쌍이 정본이다 — 포맷 전환은 reducer를 먼저
+ * 갱신하고 편집기 텍스트는 뒤따르는 effect가 밀어 넣으므로, 텍스트만 편집기에서 읽고 포맷은 reducer에서
+ * 읽으면 그 틈에서 새 포맷 라벨에 옛 포맷 텍스트가 실린다(B-04 리뷰 P3).
  */
 export const assistantTurnContext = (
   state: DocumentState,
   environment: Record<string, unknown> | null = null,
-  liveSource: string | null = null,
+  live: { source: string; format: SourceFormat } | null = null,
 ): TurnContextPayload => {
-  const source = liveSource ?? state.source;
+  const source = live?.source ?? state.source;
   return {
     source_text: source,
-    source_format: state.format,
+    source_format: live?.format ?? state.format,
     diagnostics:
       source === state.source
         ? currentDiagnostics(state).map(

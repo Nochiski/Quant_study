@@ -155,11 +155,6 @@
   overflow: auto;
 }
 
-/* 이 패널의 제목은 화면에 없다(sr-only). 접기 버튼을 다른 패널과 같은 오른쪽 끝에 둔다. */
-.ide__assistant .ide__panel-header {
-  justify-content: flex-end;
-}
-
 .ide__centre {
   display: flex;
   flex: 1;

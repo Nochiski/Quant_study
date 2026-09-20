@@ -432,8 +432,8 @@ export const NewStrategyPage = () => {
             onApplyProposalAndBacktest={(action) =>
               proposalBacktest.applyThenBacktest(assistantProposalOf(action))
             }
-            // 사이드바의 "닫기"는 진행 중 턴 취소를 확인한 뒤 패널을 접는다(spec D7). 패널 헤더의
-            // 접기 버튼은 대화를 끝내지 않는 패널 조작이라 확인을 거치지 않는다.
+            // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
+            // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
             onClose={close}
           />
         )}

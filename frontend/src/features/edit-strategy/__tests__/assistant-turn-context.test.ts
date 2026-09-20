@@ -101,7 +101,12 @@ describe("assistantTurnContext", () => {
       },
     });
 
-    expect(assistantTurnContext(withDiagnostics, null, live)).toEqual({
+    expect(
+      assistantTurnContext(withDiagnostics, null, {
+        source: live,
+        format: "yaml",
+      }),
+    ).toEqual({
       source_text: live,
       source_format: "yaml",
       diagnostics: [],
@@ -109,7 +114,10 @@ describe("assistantTurnContext", () => {
     });
     // 같은 텍스트면 진단을 그대로 싣는다.
     expect(
-      assistantTurnContext(withDiagnostics, null, SOURCE).diagnostics,
+      assistantTurnContext(withDiagnostics, null, {
+        source: SOURCE,
+        format: "yaml",
+      }).diagnostics,
     ).toEqual(["[error] /data: data 섹션이 필요합니다."]);
   });
 
@@ -135,10 +143,8 @@ describe("useAssistantTurnContext", () => {
         useAssistantTurnContext(state, readSource, { start: "2021-01-01" }),
       { initialProps: { state: parsed(initialDocumentState("yaml", SOURCE)) } },
     );
-    const read = result.current;
-
-    expect(read().source_text).toBe(live);
-    // 손잡이는 그대로 두고 값만 따라온다 — 사이드바가 다시 그려지지 않는다.
+    expect(result.current().source_text).toBe(live);
+    // 손잡이를 다시 부르면 값만 따라온다.
     live = 'schema_version: "1.1"\ntitle: "그 다음 글자"\n';
     const later = parsed(
       documentReducer(initialDocumentState("yaml", SOURCE), {
@@ -147,12 +153,43 @@ describe("useAssistantTurnContext", () => {
       }),
     );
     act(() => rerender({ state: later }));
-    expect(result.current).toBe(read);
-    expect(read()).toEqual({
+    expect(result.current()).toEqual({
       source_text: live,
       source_format: "yaml",
       diagnostics: [],
       environment: { start: "2021-01-01" },
+    });
+  });
+
+  it("포맷 전환 중에는 편집기가 든 텍스트의 포맷을 싣는다", () => {
+    // 포맷 전환은 reducer를 먼저 바꾸고 편집기 텍스트는 effect가 뒤따라 민다. 그 틈에 턴이 시작되면
+    // 새 포맷 라벨에 옛 포맷 텍스트가 실리면 안 된다(B-04 리뷰 P3).
+    let live = SOURCE;
+    const { result, rerender } = renderHook(
+      ({ state }) => useAssistantTurnContext(state, () => live, null),
+      { initialProps: { state: initialDocumentState("yaml", SOURCE) } },
+    );
+    expect(result.current().source_format).toBe("yaml");
+
+    const switched = documentReducer(initialDocumentState("yaml", SOURCE), {
+      type: "load",
+      format: "json",
+      source: '{ "schema_version": "1.1" }',
+      strategyId: null,
+      baseRevision: null,
+      baseSpecHash: null,
+    });
+    act(() => rerender({ state: switched }));
+    expect(result.current()).toMatchObject({
+      source_text: SOURCE,
+      source_format: "yaml",
+    });
+
+    // 편집기가 따라온 뒤에는 새 포맷이다.
+    live = '{ "schema_version": "1.1" }';
+    expect(result.current()).toMatchObject({
+      source_text: live,
+      source_format: "json",
     });
   });
 });

@@ -503,20 +503,27 @@ export const StrategyIde = ({
       hidden={!layout.assistantOpen}
       style={assistantFloating ? undefined : { width: layout.assistantWidth }}
     >
+      {/*
+        패널의 landmark·이름·제목은 슬롯이 소유한다(WORKFLOW B-04 Acceptance). 슬롯 내용은 이름 없는
+        `<section>`이라 여기서 이름을 달지 않으면 landmark 탐색으로 닿지 않는다.
+        닫기는 한 곳만 그린다: 슬롯이 손잡이를 받는 함수면 그쪽이 닫기(진행 중 작업 확인 포함)를
+        그리므로 여기서는 접기 버튼을 내지 않는다.
+      */}
       <header className="ide__panel-header">
-        {/* 슬롯 내용이 자기 제목을 그리므로 패널 제목은 이름표로만 둔다(중복 제목 방지). */}
-        <h2 className="sr-only">{t("ide.assistant")}</h2>
-        <Button
-          ref={assistantCollapse}
-          size="small"
-          tone="ghost"
-          onClick={() => {
-            toggleRight("assistantOpen");
-            queueMicrotask(() => assistantRestore.current?.focus());
-          }}
-        >
-          {t("ide.collapseAssistant")}
-        </Button>
+        <h2>{t("ide.assistant")}</h2>
+        {typeof assistant === "function" ? null : (
+          <Button
+            ref={assistantCollapse}
+            size="small"
+            tone="ghost"
+            onClick={() => {
+              toggleRight("assistantOpen");
+              queueMicrotask(() => assistantRestore.current?.focus());
+            }}
+          >
+            {t("ide.collapseAssistant")}
+          </Button>
+        )}
       </header>
       {/* 본문은 한 겹 감싼다 — 슬롯이 요소를 여럿 넘겨도 패널 높이를 나눠 갖지 않는다(리뷰 P1-1). */}
       <div className="ide__assistant-body">

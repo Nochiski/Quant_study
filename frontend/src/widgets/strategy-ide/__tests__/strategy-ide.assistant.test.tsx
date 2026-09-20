@@ -379,6 +379,41 @@ describe("StrategyIde assistant 슬롯", () => {
     ).toBeNull();
   });
 
+  it("슬롯이 손잡이를 받으면 닫기는 슬롯이 그리고 패널 제목은 슬롯 헤더가 그린다", async () => {
+    matchMediaBy(() => false);
+    const user = userEvent.setup();
+    mount({
+      assistant: ({ close }) => (
+        <section>
+          <button type="button" onClick={close}>
+            사이드바 닫기
+          </button>
+        </section>
+      ),
+    });
+    fireEvent.keyDown(window, { key: "a", altKey: true });
+
+    const panel = screen.getByRole("complementary", { name: "AI 어시스턴트" });
+    // 제목은 슬롯 헤더가 그린다 — 슬롯 내용은 이름 없는 section이라 landmark 이름이 여기서만 나온다.
+    expect(
+      within(panel).getByRole("heading", { name: "AI 어시스턴트" }),
+    ).toBeInTheDocument();
+    // 닫기는 한 곳만: 슬롯이 그리므로 패널 헤더의 접기 버튼은 없다.
+    expect(
+      screen.queryByRole("button", { name: "AI 어시스턴트 접기" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "사이드바 닫기" }));
+    expect(
+      screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
+      ).toHaveFocus(),
+    );
+  });
+
   it("명령 팔레트에서도 사이드바를 여닫는다", async () => {
     matchMedia(false);
     const user = userEvent.setup();

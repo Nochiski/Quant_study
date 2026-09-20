@@ -18,7 +18,7 @@
 |---|---|---|
 | T0 첫 스냅샷 | **완료 09-20 09:00 KST** | dt=20260918, 38콜 200, 2,460종목, L1 검산 10/10, KRX 대비 89.1% (`WICS_PROBE` §8) |
 | T1 원장 편입·주간 잡 | **완료 09-20 09:26 KST** | 커밋 `959506b`·`6d1170e`, **G-W1** CI 환경 `database/tests` 1,291 passed(ruff·pyright 0) → `deploy.sh --apply --allow-branch feat/wics-ledger` rev 6d1170e. **G-W2** ① dry-run rc 0 ② `--date 20260918` 멱등 38 skip rc 0 ③ `wics.integrity` PASS(38/38·L1 10/10)·`wics.fresh` 0일·`wics.coverage` 0.8907 ④ `LEDGER_FILES` 6 DB 실재 ⑤ 백업 DBS 에 wiseindex. 크론 2줄은 T4 에서 등록(예정) |
-| T2 stage `stg_wics_components` | 대기 | blob 로더 `select_sql`·파서·규칙·신선도 14일·fixture·baseline |
+| T2 stage `stg_wics_components` | **완료 09-20 09:51 KST** (② 는 월요일 저녁 빌드 대기) | 커밋 `0af6e3c`·`1ce4d73`, **G-W1** 1,294 passed → 배포 rev 1ce4d73. **G-W3 ①** 스냅샷 `snap_20260920T004352Z`(6 DB, wiseindex 220 KB) 단일 표 빌드 ok: **4,920행**(L2 2,460 + L1 2,460), reject 0, G0~G4·G6~G8 pass, G4 픽스처 6/6, G5 skip(no_baseline — 새 표라 회귀 기준 없음, 첫 실전 판 뒤 baseline 등재 여부 T5 에서 판단), `max_available_date` 2026-09-18. ② C1~C6 은 09-21(월) 21:20 잠정 빌드·09-22 08:10 확정 빌드에서 잰다(09-21 08:10 은 완료 가드로 건너뜀) |
 | T3 equity `sector_snapshot` + `v_sector` | 대기 | S25, e1.17.0, 필드 프로파일 4, `equity_order.txt` |
 | T4 배포·크론 | 대기 | `deploy.sh --apply --allow-branch feat/wics-ledger`, 크론 `0 18 * * 5`·`0 1 * * 6` |
 | T5 실전 게이트 | 대기 | 토요일 2회(09-26·10-03) 자동 통과 |

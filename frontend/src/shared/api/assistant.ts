@@ -1,16 +1,28 @@
 import {
   activateAssistantProvider,
+  cancelAssistantTurn,
   createAssistantProvider,
+  createAssistantSession,
   deleteAssistantProvider,
+  getAssistantSession,
   listAssistantProviders,
+  listAssistantSessions,
+  startAssistantTurn,
   testAssistantProvider,
 } from "./generated/sdk.gen";
 import type {
   CreateProviderProfileRequestWritable,
+  CreateSessionRequest,
+  DocumentRefView,
   ProbeFailure,
   ProbeResultView,
   ProviderProfileView,
   ProvidersView,
+  SessionHistoryView,
+  SessionView,
+  StartTurnRequest,
+  TurnAcceptedView,
+  TurnView,
 } from "./generated/types.gen";
 
 /**
@@ -25,12 +37,14 @@ export class AssistantRequestError extends Error {
   readonly status: number;
   readonly code: string | undefined;
   readonly probeFailure: ProbeFailure | null;
+  readonly turnId: string | null;
 
   constructor(
     context: string,
     status: number,
     code: string | undefined,
     probeFailure: ProbeFailure | null,
+    turnId: string | null = null,
   ) {
     super(
       `Assistant request failed: ${context} status=${status} code=${code ?? "-"}`,
@@ -39,6 +53,7 @@ export class AssistantRequestError extends Error {
     this.status = status;
     this.code = code;
     this.probeFailure = probeFailure;
+    this.turnId = turnId;
   }
 }
 
@@ -68,6 +83,8 @@ const assistantError = (
   const detail = codedDetail(response.error);
   const code = typeof detail?.code === "string" ? detail.code : undefined;
   const failure = detail?.failure;
+  // 409 `turn_in_progress`는 진행 중 턴의 id를 함께 준다 — 화면이 그 턴의 스트림을 이어 열 수 있다.
+  const turnId = typeof detail?.turn_id === "string" ? detail.turn_id : null;
   return new AssistantRequestError(
     context,
     response.response?.status ?? 0,
@@ -75,6 +92,7 @@ const assistantError = (
     typeof failure === "string" && PROBE_FAILURES.has(failure)
       ? (failure as ProbeFailure)
       : null,
+    turnId,
   );
 };
 
@@ -129,5 +147,61 @@ export const assistantProviderApi = {
     if (response.error !== undefined) {
       throw assistantError(response, "deleteAssistantProvider");
     }
+  },
+};
+
+/**
+ * 세션·턴 API. 프로파일 API와 같은 방식으로 생성 SDK 위에 얇게 얹는다.
+ *
+ * 세션 경로는 키를 다루지 않는다 — 요청·응답 어디에도 비밀 필드가 없다(spec D6).
+ */
+export const assistantSessionApi = {
+  async createSession(input: CreateSessionRequest): Promise<SessionView> {
+    return unwrap(
+      await createAssistantSession({ body: input }),
+      "createAssistantSession",
+    );
+  },
+
+  /** 문서 하나의 세션 목록. `document_ref`는 필드 셋으로 보낸다(서버가 다시 parse하지 않는다). */
+  async listSessions(documentRef: DocumentRefView): Promise<SessionView[]> {
+    return unwrap(
+      await listAssistantSessions({
+        query: {
+          strategy_id: documentRef.strategy_id ?? null,
+          revision: documentRef.revision ?? null,
+          draft_id: documentRef.draft_id ?? null,
+        },
+      }),
+      "listAssistantSessions",
+    );
+  },
+
+  /** 메시지·턴·이벤트 이력 전부. 사이드바가 열릴 때와 스트림이 닫힌 뒤의 복구 경로다. */
+  async getSession(sessionId: string): Promise<SessionHistoryView> {
+    return unwrap(
+      await getAssistantSession({ path: { session_id: sessionId } }),
+      "getAssistantSession",
+    );
+  },
+
+  /** 202로 즉시 답한다. 이벤트는 `openAssistantEventStream`으로 따로 읽는다. */
+  async startTurn(
+    sessionId: string,
+    input: StartTurnRequest,
+  ): Promise<TurnAcceptedView> {
+    return unwrap(
+      await startAssistantTurn({ path: { session_id: sessionId }, body: input }),
+      "startAssistantTurn",
+    );
+  },
+
+  async cancelTurn(sessionId: string, turnId: string): Promise<TurnView> {
+    return unwrap(
+      await cancelAssistantTurn({
+        path: { session_id: sessionId, turn_id: turnId },
+      }),
+      "cancelAssistantTurn",
+    );
   },
 };

@@ -1,12 +1,40 @@
-export { AssistantRequestError, assistantProviderApi } from "./assistant";
+export {
+  AssistantRequestError,
+  assistantProviderApi,
+  assistantSessionApi,
+} from "./assistant";
+export {
+  ASSISTANT_SSE_MAX_RETRY_ATTEMPTS,
+  assistantEventEnvelope,
+  openAssistantEventStream,
+  type AssistantEventStreamOptions,
+  type AssistantStreamRejection,
+} from "./assistant-stream";
 export type {
+  AssistantEventEnvelopeView,
+  ChatMessageView,
+  ChatRole,
   CreateProviderProfileRequestWritable,
+  CreateSessionRequest,
+  DocumentRefView,
+  FailureCode,
   ProbeFailure,
   ProbeResultView,
+  ProposalCompileView,
+  ProposalDiagnosticView,
   ProviderKind,
   ProviderKindView,
   ProviderProfileView,
   ProvidersView,
+  SessionHistoryView,
+  SessionView,
+  SourceView,
+  StartTurnRequest,
+  StrategyProposalView,
+  TurnAcceptedView,
+  TurnContextPayload,
+  TurnStatus,
+  TurnView,
 } from "./generated/types.gen";
 export {
   ApiRequestError,

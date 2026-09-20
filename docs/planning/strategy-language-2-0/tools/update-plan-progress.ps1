@@ -125,7 +125,7 @@ if ($activeRows.Count -gt 1) {
 $phaseGoals = [ordered]@{
     "P0" = "Planning package and contract docs"
     "P1" = "In-screen friction removal on 1.1"
-    "P2" = "Backend schema 1.2"
+    "P2" = "Backend schema 1.2 (environment split, 9 PRs)"
     "P3" = "Frontend 1.2 adaptation"
     "P4" = "Graph level 1: pipeline"
     "P5" = "Graph level 2: recipe"

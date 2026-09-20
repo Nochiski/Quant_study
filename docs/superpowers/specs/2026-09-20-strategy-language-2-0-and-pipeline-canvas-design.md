@@ -24,7 +24,7 @@ schema 1.1과 Form/Graph 편집(2026-09-17 initiative, 19 PR)이 끝난 뒤에�
 
 | 관찰 | 근거 |
 |---|---|
-| 화면 어휘가 스키마 식별자 그대로다. 노드 kind 12, 연산자 18, 참조 필드 11이 드롭다운·라벨에 노출되고, 설명이 붙은 property는 121개 중 13개, 그래프 노드는 0개 | `_schema.py:245`가 title에 파이썬 클래스명, `strategy-form-panel.tsx:641`이 `<code>{field.key}</code>` |
+| 화면 어휘가 스키마 식별자 그대로다. 노드 kind 12, 연산자 23(= `(kind, operator)` 쌍: unary 2·binary 4·time_series 6·cross_sectional 4·group 2·comparison 5), 참조 필드 11이 드롭다운·라벨에 노출되고, 설명이 붙은 property는 121개 중 13개, 그래프 노드는 0개 | `_schema.py:245`가 title에 파이썬 클래스명, `strategy-form-panel.tsx:641`이 `<code>{field.key}</code>` |
 | Graph 캔버스는 카드를 한 줄로 흘리는 CSS 그리드, 엣지는 글자 `→`, 연결은 `input_node_id` 드롭다운. 좌표·드래그·되돌리기 버튼·이동·복제 연산이 없다 | `factor-graph-panel.css:108-111`, `source-transactions.ts:29-45` |
 | 합성 점수가 `Σ(방향×weight×원시값)/Σ|weight|`라 단위가 다른 팩터를 섞으면 큰 단위가 지배한다. 검증은 이슈 0건 | `portfolio/_compiler.py:526-570` |
 | 저장 게이트가 실행 게이트보다 느슨하다. `field_id` 오타, boolean 출력, `saved_factor`가 저장까지 통과하고 백테스트에서 422 | `strategy/_validation.py:339-343`, `portfolio_design/_service.py:452, 660-685` |
@@ -66,6 +66,20 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
   사용자에게 보이지 않는다.** 레시피 빌더가 노드를 추가할 때 kind는 연산자에서, node_id는
   `<operator>_<n>`으로, 입력은 직전 단계로, 출력은 마지막 단계로 채운다(1.1 `addNode` 규칙 확장).
   고급 화면의 접힌 "식별자" 영역에서만 보인다.
+- **다중 입력 연산자의 부가 입력은 항상 새 소스 잎 노드다**(정본). 레시피 빌더는 `binary`·
+  `comparison`처럼 입력이 둘인 연산자를 추가할 때 부가 입력을 데이터 필드 picker로 물어 `field`·
+  `constant`·`parameter` 잎 노드를 **새로 만든다**. 체인 머리를 다시 참조하는 형태(`left: close`,
+  `right: ma20`처럼 `close`를 두 곳에서 읽는 그래프)는 손으로 쓸 수 있지만 **비체인으로 판정해
+  고급 수준으로 보낸다.** 같은 아이디어가 문서 두 벌로 갈리지 않게 하는 규칙이며, `ideas/*.yaml`
+  fixture는 레시피 빌더 산출 형태를 따른다.
+- 체인 판정 규칙(정본): 소스 노드 하나로 시작해 각 노드가 직전 노드만 참조하고 `output_node_id`가
+  마지막 노드이면 체인이다. 다중 입력 노드는 **한 입력이 체인 꼬리이고 나머지 입력이 전부 체인
+  밖 잎일 때만** 체인으로 본다. 잎은 입력이 없는 소스 노드(`field`·`constant`·`parameter`)이고
+  체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다.
+- 아이디어 3(20일 이평 돌파)의 정본 노드 형태는 잎 4개다: `close`(field `price.close`) →
+  `ma20`(time_series mean, window 20, input `close`) → 잎 `close_2`(field `price.close`) →
+  `breakout`(comparison gt, `left_node_id: close_2`, `right_node_id: ma20`, 출력). 마지막 노드가
+  다중 입력이고 한 입력(`ma20`)이 체인 꼬리, 나머지(`close_2`)가 잎이므로 체인이다.
 
 ### D3. 기존 YAML 규칙 중 실행 환경을 UI로 편입한다 (schema 1.2)
 
@@ -77,13 +91,15 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
 | S2 | `execution` 섹션 제거 | `timing`·`participation_rate`·`fee_bps`·`slippage_bps` | unknown key. 실행 설정으로 |
 | S3 | `graph.missing_policy` 제거 | 팩터 그래프마다 4개 선택지 | unknown key. 실행 설정의 `missing` 기본값 하나 |
 | S4 | `signal.normalization` 추가 | 없음(원시값 가중 합) | `none`·`rank`·`zscore`. 새 문서 기본값 `rank`. 업그레이드 문서는 `none` 명시(의미 보존) |
-| S5 | `eligibility.rules[]`에 횡단면 규칙 추가 | `field_id`·`operator`·`value`만 | `operator`에 `top_percent`·`top_count` 추가(`value`가 비율·개수) |
-| S6 | `risk.risk_factor_id` 추가 | `risk_field_id`(데이터 필드만) | 팩터 id로 역가중. `risk_field_id`와 동시 지정은 error |
+| S5 | `eligibility.rules[]`에 횡단면 규칙 추가 | `field_id`·`operator`·`value`만, `operator`가 공유 `ComparisonOperator` | 전용 `EligibilityOperator`(gt·gte·lt·lte·eq·top_percent·top_count)로 분리. `top_*`의 `value`는 비율·개수 |
+| S6 | `risk.risk_factor_id` 추가 | `risk_field_id`(데이터 필드만) | 팩터 id로 역가중. `risk_field_id`와 동시 지정은 error. 참조 팩터는 합성 점수에서 제외 |
 | S7 | `saved_factor`·`saved_subgraph` 노드 제거 | 스키마에 있으나 실행 거부 | 노드 union에서 제거(M8 라이브러리가 되살릴 때 재추가) |
 
-- 최상위 필수 키는 `schema_version`·`title`·`factors` 셋이다. 빈 `factors: []`는 structural error가
-  아니라 semantic error(`strategy.factor.required`)로 바꿔, 새 전략이 "구조 오류"가 아니라 "팩터를
-  추가하세요"로 시작한다.
+- 최상위 필수 키는 `schema_version`·`title` **둘**이다. `factors`는 생략해도, 빈 배열이어도 구조
+  오류가 아니다(모델이 `factors: tuple[FactorSignal, ...] = ()`라 `_hydrate.py`가
+  `structure.missing_field`를 내지 않는다). 두 경우 모두 semantic `strategy.factor.required`를 내서,
+  새 전략이 "구조 오류"가 아니라 "팩터를 추가하세요"로 시작한다. P4-04의 시작 문서
+  `schema_version: "1.2"\ntitle: ""\n`가 구조 오류 0건으로 열리는 근거가 이것이다.
 - canonical payload와 hash 알고리즘(ADR D3)은 그대로다. **hash가 이제 전략 논리만 덮는다.** 같은
   전략을 다른 기간·유니버스·수수료로 돌려도 revision이 늘지 않는다.
 - `CURRENT_SCHEMA_VERSION = "1.2"`. 1.0·1.1 문서는 D7의 업그레이드 경로로만 들어온다.
@@ -112,12 +128,38 @@ risk:
   max_name_weight: 0.05
 ```
 
+**S5 횡단면 eligibility의 의미(정본).** 현재 `EligibilityRule.operator`는 `domain/strategy/_models.py`의
+공유 `ComparisonOperator`이고, `domain/portfolio/_compiler.py`의 `_compare`는 마지막 줄이 catch-all
+`return value == threshold`다. `top_percent`를 공유 enum에 얹으면 예외가 아니라 조용한 오필터가 된다.
+
+- `EligibilityRule.operator`는 **전용 `EligibilityOperator`**(`gt`·`gte`·`lt`·`lte`·`eq`·
+  `top_percent`·`top_count`)다. `ComparisonOperator`와 값이 겹쳐도 타입을 공유하지 않는다.
+- `_compare`는 **exhaustive**로 바꾼다. 미지 연산자는 조용히 `==`로 떨어지지 않고 raise한다.
+- **모집단**: 기준일 프레임에서 실행 설정 유니버스의 멤버 중 절대 규칙(`gt`~`eq`)을 전부 통과했고
+  그 규칙의 `field_id` 값이 있는 종목. 결측 종목은 탈락시키고 **분모에서도 뺀다.**
+- **동점**: 값 내림차순, 같으면 `security_id` 오름차순으로 정렬한 뒤 cut한다. 정렬이 전순서라
+  컷이 결정적이다.
+- **평가 지점**: 프레임 컴파일을 2-pass로 바꾼다. 1-pass가 절대 규칙으로 후보를 거르고, 2-pass가
+  남은 후보의 횡단면 순위로 `top_*`를 적용한다. 절대 규칙과 횡단면 규칙은 AND다.
+
+**S6 `risk.risk_factor_id`의 의미(정본).** `_compiler.py:526-570`은 `spec.factors` 전부를 합성에
+넣고, `:838-844`의 `risk` 분기는 원시 필드만 읽는다.
+
+- 참조된 팩터는 **합성 점수에서 제외한다**(그 팩터의 `weight`를 무시하고 분모 `Σ|weight|`에서도
+  뺀다). 사용자가 "가중만 바꿨다"고 믿는 동안 종목 선정이 바뀌는 것을 막는다. 제외했다는 사실은
+  정보 진단 `strategy.risk.risk_factor_excluded`(warning)로 알린다.
+- 역가중은 **`signal.normalization` 적용 이전의 원시 출력**을 쓴다. `rank`(1.2 기본값) 출력을
+  역수로 쓰면 무의미한 가중이 되기 때문이다. 값은 `PortfolioObservation.factor_values`에 있다.
+- 참조 팩터 값이 `<= 0`이면 기존 `MISSING_RISK` 탈락 분기를 그대로 쓴다(`_compiler.py:841-843`).
+
 ### D4. `signal.normalization`이 결합 전 정규화를 소유한다
 
 - `composite = Σ(sign(direction) × weight × norm(x)) / Σ|weight|`. `norm`은 `rank`(횡단면 0~1 순위),
   `zscore`(횡단면 표준화), `none`(항등, 1.1 의미).
 - `none`이고 팩터 출력 단위(`NodeContract.unit`)가 서로 다르면 `strategy.signal.unit_mismatch`
   warning. 팩터가 하나면 경고하지 않는다.
+- `risk.risk_factor_id`가 가리키는 팩터는 이 합성에서 빠진다(D3 S6). `Σ`와 분모 `Σ|weight|` 양쪽에서
+  뺀다. 역가중이 읽는 값은 `norm`을 거치지 않은 원시 출력이다.
 - 그래프의 "알파 팩터" 단계 "점수 합치는 방법" 카드가 이 필드를 "순위로 맞춘 뒤 가중 합 / 표준화 뒤 가중 합 / 원시값
   가중 합(주의)"으로 보인다.
 
@@ -153,17 +195,46 @@ class RunEnvironment:
 
 - owner는 `domain/backtest/_models.py`다(전략이 아니라 실행의 사실). `BacktestRunSpec`, portfolio
   preview 요청, trace 요청이 `environment` 필드로 같은 타입을 받는다.
-- run manifest는 `spec_hash`와 별개로 `environment_hash`를 기록한다. 캐시 키에도 들어간다.
-- frontend 실행 설정 패널이 필드를 소유한다. 기본값은 runtime schema `RunEnvironment` default,
-  마지막 사용값은 전략별 local UI state(`localStorage`). 서버는 run manifest에만 기록하고 전략
-  revision에는 저장하지 않는다(hash에서 뺀 이유).
+- run manifest는 `spec_hash`와 별개로 `environment_hash`를 기록한다. 실행 결과 캐시 키에도 들어간다.
+- **`RunEnvironment.missing`은 `build_factor_execution_plan`의 인자로 들어가 `plan_hash`에 계속
+  포함된다.** 1.1에서는 `FactorGraph.missing_policy`가 plan payload에 들어가 팩터 행렬 캐시 키를
+  갈랐다(`domain/factor/_planning.py:122-131`, `:153-160`). 섹션만 지우고 환경 값을 plan 빌더에
+  넘기지 않으면 `missing: drop` 실행과 `missing: zero` 실행이 같은 캐시 키를 공유해 두 번째 실행이
+  첫 번째의 결측 처리 결과를 조용히 재사용한다. 결측 정책은 계속 plan의 일부다.
+- frontend 실행 설정 패널이 필드를 소유한다. 기본값은 **실행 설정 스키마**
+  `GET /api/v1/run-environments/schema`가 주는 JSON Schema의 default이며, 전략 authoring runtime
+  schema(`strategy_document_schema()`, `domain/strategy` 소유)와는 다른 물건이다. 마지막 사용값은
+  전략별 local UI state(`localStorage`). 서버는 run manifest에만 기록하고 전략 revision에는
+  저장하지 않는다(hash에서 뺀 이유).
 - 전환 규칙: P2-01은 `environment`를 optional로 받고 없으면 `spec.data`·`spec.execution`·
-  `graph.missing_policy`에서 만든다(브리지). P2-02가 섹션을 모델에서 지우면 필수가 된다.
+  `graph.missing_policy`에서 만든다. 브리지는 `RunEnvironment`의 owner인 **`domain/backtest`**가
+  소유한다(`environment_from_legacy_spec(spec) -> RunEnvironment`). `application/backtest_run`에 두면
+  `portfolio_design → backtest_run` 화살표가 생겨 기존 `backtest_run → portfolio_design`과 순환이
+  되고 `backend/tests/architecture/test_dependency_direction.py`가 실패한다. 경계 규칙은
+  application → application을 "다른 유스케이스의 outgoing port를 소비할 때만" 허용하는데 브리지는
+  port가 아니라 로직이다. P2-03이 섹션을 모델에서 지우면 `environment`가 필수가 된다.
 
 ### D7. 1.1 → 1.2 업그레이드와 동결 이력
 
-- `domain/strategy/_upgrade.py`의 `UPGRADE_STEPS`에 1.1 → 1.2 step을 잇는다. 1.0 문서는 1.0 → 1.1 →
-  1.2 순서. dict 경로·source 경로(ruamel round-trip) 같은 step, drift fail-closed(1.1 spec D3 구조 유지).
+현재 `domain/strategy/_upgrade.py`는 **단일 버전 변환기**다. `UPGRADE_STEPS`가 평탄한 step 튜플이고
+(`:99-104`), `_step_schema_version`이 곧장 `CURRENT_SCHEMA_VERSION`을 찍으며(`:58-59`),
+`is_legacy_document`가 `== "1.0"`을 단정하고(`:107-108`), `apply_upgrade_steps`가 1.0이 아니면
+`NotALegacyDocumentError`를 낸다(`:111-118`). step만 이어 붙이면 1.0 문서가 1.1 step과 1.2 step을 한
+번에 맞아 중간 상태 검증이 사라지고, 1.1 입력은 거부된다. 그래서 **버전 디스패치로 다시 쓴다.**
+
+- `UPGRADE_STEPS: Mapping[str, tuple[UpgradeStep, ...]]` — 키는 from-version(`"1.0"`·`"1.1"`).
+- 공개 API는 `upgrade_document(tree) -> UpgradeOutcome(tree, environment, warnings)` 하나다. 문서의
+  `schema_version`에서 시작해 `CURRENT_SCHEMA_VERSION`까지 체인을 **순서대로** 적용하고, 각 중간
+  단계마다 그 버전으로 `schema_version`을 찍고 검증한다.
+- 심볼 교체: `LEGACY_SCHEMA_VERSION`(단수) → `FROZEN_SCHEMA_VERSIONS`, `is_legacy_document` →
+  `is_upgradeable_document`, `upgrade_document_1_0` → `upgrade_document`, `NotALegacyDocumentError` →
+  `NotUpgradeableDocumentError`. `is_frozen_schema_version`은 이미 `!= CURRENT_SCHEMA_VERSION`이라
+  **변경하지 않는다**(`:27-34`).
+- facade `domain/strategy/facade/document.py`의 공개 심볼과 호출자 세 곳
+  (`adapters/outbound/document_codec/_upgrade_source.py`,
+  `adapters/outbound/strategy_sqlite/_record_codec.py`,
+  `application/strategy_authoring/_service.py`)을 같은 PR에서 갱신한다.
+- dict 경로·source 경로(ruamel round-trip)는 같은 step 맵을 쓰고 drift fail-closed(1.1 spec D3 유지).
 - 변환: `schema_version` → `"1.2"`; `data`·`execution`·`graph.missing_policy` 제거 후 **응답의
   `environment`로 반환**(팩터별 `missing_policy`가 서로 다르면 첫 팩터 값을 쓰고 warning);
   `signal.normalization: none` 명시; `saved_factor`·`saved_subgraph` 노드가 있으면 업그레이드 거부
@@ -172,15 +243,27 @@ class RunEnvironment:
   한 번으로 적용하고 `environment`로 실행 설정 패널을 채운다.
 - 1.1 revision은 1.0과 같은 동결 이력이다. `is_frozen_schema_version`은 이미 `!= CURRENT`라 변경
   없이 동결된다. saved-reference backtest는 `422 strategy_revision_requires_upgrade`.
-- golden: `quality_momentum.v1_1.commented.yaml` → 1.2 원문(주석·순서 보존) → dict 경로와 tree 동일.
-  업그레이드된 문서의 preview 결과가 1.1 결과와 같다(`normalization: none` 보존).
+- golden 파일의 역할을 파일별로 고정한다. `quality_momentum.v1_1.commented.yaml`은 **이미
+  1.0 → 1.1 source 업그레이드의 기대 출력**이고 세 테스트가 단언한다
+  (`tests/application/test_strategy_authoring_upgrade.py:69`,
+  `tests/contract/test_document_upgrade_source.py:50`,
+  `tests/integration/test_strategy_document_upgrade_http_api.py:33`). 이름을 겹쳐 쓰지 않는다.
+  - `quality_momentum.v1_1.commented.yaml` — 1.0 → 1.1 **중간 단계** 고정용(현행 유지).
+  - `quality_momentum.v1_2.commented.yaml` — 1.0 문서의 **최종** 기대 출력(신규). 위 세 단언이 이
+    파일로 옮겨간다.
+  - `quality_momentum.v1_1.yaml` — 보존된 1.1 원본(현행 `quality_momentum.yaml` 복사, 1.1 → 1.2
+    업그레이드 입력).
+- golden 단언: 1.0 원본 → 1.2 원문(주석·순서 보존) → dict 경로와 tree 동일. 업그레이드된 문서의
+  preview 결과가 1.1 결과와 같다(`normalization: none` 보존).
 
 ### D8. 연산자 카탈로그 (backend owner)
 
 팩터에는 `FactorDefinition.description`이 있지만 연산자에는 없다. `domain/factor/_operators.py`에
 `OperatorDefinition(operator, kind, arity, params, output_type_rule, unit_rule, availability,
 description_key, formula_key, example)`을 두고 `GET /api/v1/strategy-documents/operators`와 runtime
-schema(`x-description-key`, `x-operator`)로 내려준다. 문장은 frontend i18n(`operator.<name>.*`)이
+schema(`x-description-key`, `x-operator`)로 내려준다. **레지스트리 키는 `(kind, operator)` 쌍이고
+항목은 23개다.** `rank`가 `cross_sectional`과 `group` 양쪽에 있어 이름 단독 키는 충돌하며,
+`ComparisonNode.operator`(`FactorComparisonOperator` 5개)도 팔레트·설명 대상이라 빼지 않는다. 문장은 frontend i18n(`operator.<name>.*`)이
 렌더한다(적용 조건 문장과 같은 소유 규칙: 키는 backend, 문장은 소비자별).
 
 레시피 팔레트, 고급 캔버스 팔레트, Contract Inspector가 같은 카탈로그를 읽는다. frontend에 연산자
@@ -191,9 +274,9 @@ schema(`x-description-key`, `x-operator`)로 내려준다. 문장은 frontend i1
 | 수준 | 투영 입력 | 편집 |
 |---|---|---|
 | 파이프라인(전략 전체) | runtime schema × parse tree × compile 진단 → 통상 퀀트 프레임워크의 단계 모델(`pipeline-projection.ts`): 1 유니버스(Universe) `eligibility`, 2 알파 팩터(Alpha) `factors`+`signal`, 3 포트폴리오 구성(Portfolio) `portfolio`, 4 리스크 제약(Risk) `risk`, 5 실행(Execution) = 실행 설정 띠(문서 밖). YAML 섹션과 1:1이다. 문서 전체를 한국어 한 문장으로 요약한 문장(`strategy-summary`)도 같은 투영이 만든다 | 카드 컨트롤은 Form 필드 컨트롤 재사용(`replaceScalar`·`insertKey`·`remove`). 팩터 추가는 빈 그래프 팩터 `insertItem` |
-| 레시피(팩터 하나) | `graph.nodes`가 단일 입력 체인(각 노드가 직전 노드만 참조, 마지막이 출력)이면 순서 목록(`recipe-projection.ts`). 아니면 "고급에서 편집" 안내 | `recipe-transactions.ts`: 단계 추가 = `addNode`(kind·id·입력·출력 자동) + 다음 노드 재배선, 삭제 = `remove` + 재배선, 이동 = `*_node_id` 재배선, 파라미터 = `replaceScalar`. 여러 연산은 `planSourceOperations`로 한 undo 단계 |
+| 레시피(팩터 하나) | `graph.nodes`가 D2의 체인 판정 규칙을 만족하면 순서 목록(`recipe-projection.ts`). 다중 입력 노드는 부가 입력이 전부 체인 밖 잎일 때만 체인이고, 체인 머리 재참조는 비체인이다. 아니면 "고급에서 편집" 안내 | `recipe-transactions.ts`: 단계 추가 = `addNode`(kind·id·입력·출력 자동, 다중 입력 연산자는 부가 입력 잎을 새로 만든다) + 다음 노드 재배선, 삭제 = `remove` + 재배선, 이동 = `*_node_id` 재배선, 파라미터 = `replaceScalar`. 여러 연산은 `planSourceOperations`로 한 undo 단계 |
 | 고급(임의 DAG) | `graph.nodes` + backend plan | 1.1 `graph-transactions.ts` 유지. 드래그 배선은 `*_node_id` `replaceScalar`. 좌표는 local UI state |
-| 실행 설정 띠 | `RunEnvironment` runtime schema | 문서 밖. `run-settings.ts` 필드 |
+| 실행 설정 띠 | 실행 설정 스키마 `GET /api/v1/run-environments/schema`(전략 authoring runtime schema와 별개) | 문서 밖. `run-settings.ts` 필드 |
 | 기준일 미리보기 | 기존 trace API(`debug-strategy`) | 읽기 전용 |
 
 - 탭은 **그래프 · YAML** 둘이다. 새 전략과 revision 열기의 기본 탭은 그래프. 이력(revision·diff)은
@@ -228,12 +311,13 @@ schema(`x-description-key`, `x-operator`)로 내려준다. 문장은 frontend i1
 
 | 위치 | 변경 |
 |---|---|
-| `.claude/rules/strategy-workbench-sot.md` | "전략 의미" 행에 그래프 표현 세 수준·투영 owner 추가, "실행 설정" 행 신설, "연산자 정의" 행 신설, 업그레이드 행 1.2, "표현은 YAML과 그래프 둘" 명시. 금지 절의 DSL 문장 유지 |
+| `.claude/rules/strategy-workbench-sot.md` (P0-01) | "전략 의미" 행에 "표현은 YAML과 그래프 둘" 명시, "실행 설정"·"연산자 정의"·"그래프 표현 투영" 행 신설(owner는 실제 파일, 미구현은 괄호 표기), 업그레이드 행 제목을 "1.0 → 1.1 → 1.2"로 예약, `paths:` frontmatter에 이 패키지 추가, 금지 절 캐시 키 문장에 `environment_hash`. 금지 절의 DSL 문장 유지 |
+| `.claude/rules/strategy-workbench-sot.md` (후속 PR) | 실행 설정·연산자·투영 행의 "(아직 없음)" 표기 해제는 각 구현 PR(P2-01·P1-03·P4-01·P5-01), 금지 절 "JSON/Form/Graph/Diff projection" 문장 갱신은 P4-04, 1.2 업그레이드 step 반영은 P2-09 |
 | ADR 2026-09-04 | D8 대상 사용자·완료 정의 개정 링크 |
 | 1.1 spec | 머리말에 이 문서로의 확장 링크 |
 | 로드맵 | 완료 정의 원문 복귀, M8 "custom formula editor"는 여전히 non-goal |
 | `docs/manual/strategy-workbench/README.md`, `README.md`, `frontend/README.md`, `backend/FACTORS.md` | 1.2 문법, 실행 설정, 그래프 화면, 예시 전략 5개(튜토리얼) |
-| fixture | `quality_momentum.yaml` 1.2, `.v1_1.yaml`(업그레이드 golden), `ideas/*.yaml` 5개(완료 정의) |
+| fixture | `quality_momentum.yaml` 1.2, `.v1_1.yaml`(1.1 원본, 업그레이드 입력), `.v1_1.commented.yaml`(1.0 → 1.1 중간 단계), `.v1_2.commented.yaml`(1.0 최종 golden), `ideas/*.yaml` 5개(완료 정의, 레시피 빌더 산출 형태) |
 
 ## 3. Non-goals
 
@@ -258,7 +342,7 @@ Phase 1은 규칙 변경 없이 1.1 위에서 끝나며 1.2 뒤에도 그대로 
 |---|---|---|
 | P0 | 기획 패키지·계약 문서 개정 | P0-01 |
 | P1 | 화면 안에서 끝나는 마찰 제거(진단·되돌리기·한글 어휘·연산자 카탈로그·조용한 실패) | P1-01 ~ P1-05 |
-| P2 | backend schema 1.2(실행 설정 분리, 추가 필드, 단일 게이트, 업그레이더) | P2-01 ~ P2-05 |
+| P2 | backend schema 1.2(실행 설정 분리, 추가 필드, 단일 게이트, 업그레이더) | P2-01 ~ P2-09 |
 | P3 | frontend 1.2 적응(SDK·실행 설정 패널·업그레이드·e2e·매뉴얼) | P3-01 ~ P3-03 |
 | P4 | 그래프 표현 1수준 파이프라인(4단계 카드, 팩터 카드, 미리보기, 탭 둘로, 빈 화면 e2e) | P4-01 ~ P4-04 |
 | P5 | 그래프 표현 2수준 레시피(체인 투영·트랜잭션, 팔레트, 결과 미리보기, 아이디어 5개 e2e) | P5-01 ~ P5-03 |
@@ -293,7 +377,7 @@ Phase 1은 규칙 변경 없이 1.1 위에서 끝나며 1.2 뒤에도 그대로 
 ## 7. 롤백
 
 - P1은 PR 단위 revert 가능. 1.1 계약을 바꾸지 않는다.
-- P2는 backend만 바꾼다. P2-05(업그레이더) merge 전에는 실 DB에 1.2 revision을 저장하지 않는다.
+- P2는 backend만 바꾼다. P2-09(업그레이더) merge 전에는 실 DB에 1.2 revision을 저장하지 않는다.
   P2-01의 브리지 덕에 P2-01만 merge된 상태는 1.1과 완전 호환이다.
 - P3 이후는 frontend feature 모듈 추가·재배치라 PR 단위 revert 가능. 그래프 탭을 숨기고 Form 탭을
   되살리면 1.1 GUI 편집 화면으로 돌아간다(P4-04 전까지 Form 코드는 남아 있다).

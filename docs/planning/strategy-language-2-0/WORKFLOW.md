@@ -30,7 +30,7 @@ React 19 · TanStack Router/Query · CodeMirror 6 · `yaml` 2.9 · Vitest · fas
 main
  └─ P0-01  docs/strategy-language-2-0-plan          (이 패키지 + spec + ADR·로드맵·SoT 개정)
      ├─ P1-01 ─ P1-02 ─ P1-03 ─ P1-04 ─ P1-05          화면 안 마찰 제거 (1.1 위, 독립)
-     └─ P2-01 ─ P2-02 ─ P2-03 ─ P2-04 ─ P2-05          backend schema 1.2
+     └─ P2-01 ─ … ─ P2-09                              backend schema 1.2 (9 PR, 아래 5절)
          └─ P3-01 ─ P3-02 ─ P3-03                    frontend 1.2 적응
              └─ P4-01 ─ P4-02 ─ P4-03 ─ P4-04        그래프 1수준: 파이프라인
                  └─ P5-01 ─ P5-02 ─ P5-03            그래프 2수준: 레시피
@@ -39,14 +39,17 @@ main
 
 - 브랜치 이름은 `feat/lang2-<pr-id 소문자>-<slug>`. 예: `feat/lang2-p2-02-schema-1-2`.
 - 각 PR의 base는 직전 PR 브랜치다. P1 스택과 P2 스택은 서로 독립이라 병렬 진행할 수 있다
-  (`parallel_window`에 기록). P3-01의 base는 P2-05이며 P1-05가 먼저 merge되어 있어야 한다.
+  (`parallel_window`에 기록). P3-01의 base는 P2-09이며 P1-05가 먼저 merge되어 있어야 한다.
 - **generated SDK 규칙(1.1 initiative와 같음)**: P2 backend PR은 `backend/openapi.json`만 재생성하고
   `frontend/src/shared/api/generated`는 건드리지 않는다. SDK 재생성과 frontend 적응은 P3-01이 한
   PR에서 한다. P2 PR은 backend gate만 merge gate로 삼고 CI `frontend`·`browser-e2e` job은 P3-01·P3-03의
   exit 조건이다. 각 P2 PR 본문 `제약사항`에 이 사실을 적는다.
-- 실 DB 주의: P2-05 merge 전에는 실 SQLite에 1.2 revision을 저장하지 않는다(spec 7절).
-- fixture: P2-02부터 `quality_momentum.yaml`이 1.2가 되고 1.1 원본은 `quality_momentum.v1_1.yaml`·
-  `.v1_1.commented.yaml`로 보존한다(P2-05 golden).
+- 실 DB 주의: P2-09 merge 전에는 실 SQLite에 1.2 revision을 저장하지 않는다(spec 7절).
+- fixture 이름과 역할(spec D7): P2-03부터 `quality_momentum.yaml`이 1.2가 되고, 1.1 원본은
+  `quality_momentum.v1_1.yaml`로 복사해 보존한다(1.1 → 1.2 업그레이드 입력). 기존
+  `quality_momentum.v1_1.commented.yaml`은 **건드리지 않는다** — 이 파일은 1.0 → 1.1 source
+  업그레이드의 기대 출력이고 테스트 세 곳이 단언한다. 1.0 문서의 최종 기대 출력은 P2-09가 만드는
+  `quality_momentum.v1_2.commented.yaml`이다.
 
 ## 2. 공통 gate
 
@@ -59,6 +62,11 @@ main
 
 runtime schema fixture는 backend 모델이 바뀔 때마다 `uv run python tools/export_runtime_schema.py`로
 재생성한다.
+
+PR 크기는 [YAML Strategy Workbench WORKFLOW 12절](../strategy-workbench-yaml-ui/WORKFLOW.md)을
+따른다(handwritten diff 150~450줄 권장, logical file 8개 이내, 600줄·10파일 초과 시 분할이 기본).
+**분할이 불가능해 상한을 넘기면 그 PR 본문 `제약사항`에 사유를 한 줄로 적는다.** 12절이 요구하는
+기록이며, 생략하면 reviewer가 크기를 결함으로 본다.
 
 ---
 
@@ -75,10 +83,27 @@ runtime schema fixture는 backend 모델이 바뀔 때마다 `uv run python tool
 - `docs/superpowers/specs/2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md`.
 - ADR 2026-09-04 머리말에 개정 링크(D8 대상 사용자). 1.1 spec 머리말에 확장 링크.
 - 로드맵 완료 정의 문장을 원문("코드를 몰라도 …")으로 되돌리고 이 initiative 링크.
-- `.claude/rules/strategy-workbench-sot.md`에 "실행 설정", "연산자 정의", "그래프 표현 투영" owner
-  행 예약(구현 PR이 채운다). "표현은 YAML과 그래프 둘" 문장. 금지 절의 DSL 문장은 유지.
+- `.claude/rules/strategy-workbench-sot.md`(spec D11 표와 같은 목록):
+  - "실행 설정", "연산자 정의", "그래프 표현 투영" owner 행 예약. owner는 실제 파일을 적고 미구현은
+    괄호로 표시한다. 그래프 투영 행에는 "필드 → 단계 배정은 runtime schema `x-stage`(backend)".
+  - "전략 의미" 행에 "표현은 YAML과 그래프 둘" 문장.
+  - 업그레이드 행 제목을 "1.0 → 1.1 → 1.2 문서 업그레이드 변환(1.2 step은 P2-09에서 추가, 아직
+    없음)"으로 예약하고, 같은 행의 `LEGACY_SCHEMA_VERSION`(단수) 표현을 버전 디스패치 API 예약
+    문구로 바꾼다.
+  - 금지 절 캐시 키 문장에 `environment_hash` 추가. DSL 문장은 유지.
+  - `paths:` frontmatter에 `docs/planning/strategy-language-2-0/**`,
+    `docs/planning/strategy-gui-editing/**`,
+    `docs/superpowers/specs/2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md` 추가.
 
 **Non-goal**: 코드 변경.
+
+**제약사항(12절 예외 기록)**
+
+- 이 PR은 9파일 +1400줄대로 12절 상한(600줄·10파일)을 넘는다. 기획 패키지 3문서와 설계 spec은
+  서로를 참조해서 한 벌로만 리뷰할 수 있고, 쪼개면 중간 커밋의 링크가 깨진다.
+- `tools/update-plan-progress.ps1`은 `strategy-gui-editing` 판의 337줄 중 phase 이름 해시테이블만
+  다른 세 번째 복제본이다. 공용 위치(`docs/planning/tools/`)로 올리고 패키지별 phase 맵을 인자로
+  받는 정리는 이 initiative 범위 밖이라 **backlog**로 남긴다(P0-01 리뷰 P3 finding).
 
 ---
 
@@ -119,12 +144,15 @@ runtime schema fixture는 backend 모델이 바뀔 때마다 `uv run python tool
 
 **Acceptance**
 
-- `domain/factor/_operators.py`에 `OperatorDefinition` 레지스트리(연산자 18개: kind, arity, params,
-  output_type_rule, unit_rule, availability, description_key, formula_key, example). 스키마 enum과
-  레지스트리 키가 같다는 테스트.
+- `domain/factor/_operators.py`에 `OperatorDefinition` 레지스트리(kind, arity, params,
+  output_type_rule, unit_rule, availability, description_key, formula_key, example). **키는
+  `(kind, operator)` 쌍이고 항목은 23개다**(unary 2·binary 4·time_series 6·cross_sectional 4·group 2·
+  comparison 5). `rank`가 `cross_sectional`·`group` 양쪽에 있어 이름 단독 키는 충돌하고,
+  `FactorComparisonOperator` 5개도 팔레트·설명 대상이라 뺄 수 없다. 스키마 enum 6종의 값 전부가
+  레지스트리 키로 있다는 테스트(양방향 전수).
 - `GET /api/v1/strategy-documents/operators`. runtime schema 노드 `$defs`의 `title`을 파이썬
   클래스명 대신 `x-description-key`로 대체하고, 모든 노드 property에 `x-description-key`.
-- `messages.ts`에 노드 kind 12, 연산자 18, 노드 property 전부, 최상위 섹션의 한글 이름과 한 줄
+- `messages.ts`에 노드 kind 12, 연산자 23, 노드 property 전부, 최상위 섹션의 한글 이름과 한 줄
   설명. Form·Graph 라벨이 키 대신 이름을 보이고 `<code>` 키는 보조 표기로 내려간다.
 - Contract Inspector가 i18n 키 문자열을 본문으로 찍는 경로 제거(누락 시 "설명 없음").
 
@@ -132,7 +160,7 @@ runtime schema fixture는 backend 모델이 바뀔 때마다 `uv run python tool
 `openapi.json`; frontend `messages.ts`, `strategy-form-panel.tsx`, `factor-graph-editor.tsx`,
 `contract-inspector.tsx`, `schema-navigator.ts`.
 
-**Non-goal**: 그래프 새 화면(P4·P5). 연산자 `availability` 판정(P2-04).
+**Non-goal**: 그래프 새 화면(P4·P5). 연산자 `availability` 판정(P2-07).
 
 ### P1-04 — 연산자 먼저 고르기, 조용한 실패 피드백, 오류 본문 인라인
 
@@ -177,63 +205,128 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 
 ## 5. Phase 2 — backend schema 1.2
 
-### P2-01 — `RunEnvironment` 모델과 실행 요청 확장(브리지)
+9 PR이다. P0-01 리뷰에서 "P2-02 하나가 `spec.data`·`spec.execution`·`missing_policy`를 참조하는
+backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 blocking으로 지적되어, 사용자에게 설명
+가능한 동작 또는 invariant 하나씩으로 쪼갰다.
+
+### P2-01 — `RunEnvironment` 모델, 브리지, 실행 요청 optional `environment`, 실행 설정 스키마
 
 **Intent**: 실행 설정을 전략 문서 밖에서 받을 자리를 먼저 만든다. 1.1과 완전 호환.
 
 **Acceptance**
 
 - `domain/backtest/_models.py`에 `RunEnvironment`(spec D6)와 canonical JSON·`environment_hash`.
+  `Market`·`DataFrequency`·`ExecutionTiming` enum을 `domain/backtest`로 옮긴다(`domain/strategy`는
+  re-export로 P2-03까지 호환 유지).
+- 브리지는 `domain/backtest`가 소유한다: `environment_from_legacy_spec(spec) -> RunEnvironment`.
+  `application/backtest_run`에 두지 않는다 — `portfolio_design → backtest_run` 화살표가 기존
+  `backtest_run → portfolio_design`과 순환을 만들어 `tests/architecture/test_dependency_direction.py`가
+  실패하고, 경계 규칙상 application → application은 outgoing port 소비에만 허용된다(브리지는 로직).
+- `DEPENDS_ON` 갱신: `application.backtest_run`·`application.portfolio_design`·
+  `application.strategy_authoring`에 `domain.backtest` 추가, `domain.backtest`에 `domain.strategy`·
+  `domain.factor` 추가. 아키텍처 테스트 green.
 - `BacktestRunSpec`, portfolio preview 요청, trace 요청이 optional `environment`를 받는다. 없으면
-  `spec.data`·`spec.execution`·첫 팩터 `graph.missing_policy`에서 만든다(브리지 함수 하나,
-  `application/backtest_run/_environment.py`). 있으면 spec 값보다 우선.
-- run manifest에 `environment`와 `environment_hash` 기록. 캐시 키에 포함.
+  브리지로 만든다. 있으면 spec 값보다 우선.
+- run manifest에 `environment`와 `environment_hash` 기록. 실행 결과 캐시 키에 포함.
 - `backtest_run/_service.py`·`portfolio_design/_service.py`·`_trace_service.py`의 `spec.data.*`·
-  `spec.execution.*`·`missing_policy` 직접 참조가 전부 `environment`를 거친다(grep 0건 테스트).
+  `spec.execution.*` 직접 참조가 전부 `environment`를 거친다(grep 0건 테스트).
+- **실행 설정 스키마 엔드포인트** `GET /api/v1/run-environments/schema`: `RunEnvironment` dataclass에서
+  생성한 JSON Schema(필드별 타입·기본값·enum). 기존 `strategy_document_schema()` 빌더를 재사용하되
+  전략 authoring runtime schema와는 **다른 산출물**이다(owner가 `domain/backtest`). 프론트가 실행
+  설정 패널 기본값을 손으로 적지 않게 하는 경로다(P3-02가 소비).
 - OpenAPI 재생성. frontend SDK는 건드리지 않는다.
 
-**Non-goal**: StrategySpec 변경.
+**Non-goal**: StrategySpec 변경. `missing_policy`(P2-02).
 
-### P2-02 — StrategySpec 1.2: `data`·`execution`·`missing_policy` 제거, 버전 1.2, fixture·hash golden
+### P2-02 — `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지)
 
-**Intent**: spec D3 S1~S3. 기존 문법에서 실행 환경만 뺀다.
+**Intent**: spec D3 S3와 D6. 결측 정책이 팩터 그래프에서 실행 설정으로 옮겨가되 **plan의 일부로
+남는다**.
 
 **Acceptance**
 
-- `CURRENT_SCHEMA_VERSION = "1.2"`. `StrategySpec`에서 `data`·`execution` 제거, `FactorGraph`에서
-  `missing_policy` 제거. `Market`·`DataFrequency`·`ExecutionTiming` enum은 `domain/backtest`로 이동.
-- `environment`가 실행 요청의 필수 필드가 된다(P2-01 브리지 제거). 없으면 422
-  `backtest_run.environment_required`.
-- 최상위 필수 키 `schema_version`·`title`·`factors`. 빈 `factors: []`는 semantic
-  `strategy.factor.required`(structural 아님).
+- `FactorGraph`에서 `missing_policy` 제거. `build_factor_execution_plan`이 `missing: MissingPolicy`를
+  **인자로** 받는다. 호출자가 `environment.missing`을 넘긴다.
+- `domain/factor/_planning.py:122-131`의 plan payload에 결측 정책이 그대로 남아 `plan_hash`가 계속
+  갈린다. `build_factor_matrix_cache_key`(`:153-160`)는 무변경. 회귀 테스트: 같은 전략을
+  `missing: drop`과 `missing: zero`로 계획하면 `plan_hash`가 **다르다**.
+- 소비자 갱신: `domain/factor`의 `_planning.py`·`_evaluation.py`(`:192`, `:270-285`)·`_registry.py`
+  (`:49`, `:619`), `application/portfolio_design/_service.py`, `application/backtest_run/_service.py`.
+  `graph.missing_policy` 참조 grep 0건 테스트.
+- P2-01 브리지가 `첫 팩터 graph.missing_policy`를 읽던 부분은 이 PR 이후 의미가 없어지므로, 1.1
+  문서에서 만들 때만 쓰는 legacy 입력으로 좁힌다.
+
+**제약사항**: 캐시 키 회귀가 이 PR의 핵심 invariant다. 분리하지 않으면 P2-03의 대량 삭제에 묻힌다.
+
+### P2-03 — `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION = "1.2"`, 필수 키 2개, fixture·hash golden
+
+**Intent**: spec D3 S1~S2. 기존 문법에서 실행 환경만 뺀다.
+
+**Acceptance**
+
+- `CURRENT_SCHEMA_VERSION = "1.2"`. `StrategySpec`에서 `data`·`execution` 제거.
+- **최상위 필수 키는 `schema_version`·`title` 둘**이다. `factors: tuple[FactorSignal, ...] = ()`로
+  기본값을 주어 생략도 빈 배열도 `structure.missing_field`를 내지 않고, 두 경우 모두 semantic
+  `strategy.factor.required`가 난다. 회귀 테스트: `schema_version: "1.2"\ntitle: ""\n`의 hydrate
+  진단에 `structure.*`가 0건이고 `strategy.factor.required` 1건.
+- `environment`가 실행 요청의 필수 필드가 된다(P2-01 브리지는 업그레이드 경로 전용으로 축소).
+  없으면 422 `backtest_run.environment_required`.
 - hydrate·schema·validation·explanation·diff·trace·compile 경로 갱신. 1.1 문서는
   `structure.unsupported_schema_version`.
-- fixture: `quality_momentum.yaml`(1.2), `.json`, `.legacy.json`, `.minimal.yaml`이 같은 hash. 1.1 원본은
-  `quality_momentum.v1_1.yaml`·`.v1_1.commented.yaml`로 보존. hash 알고리즘 golden 불변.
+- fixture: `quality_momentum.yaml`(1.2), `.json`, `.legacy.json`, `.minimal.yaml`이 같은 hash. 1.1
+  원본을 `quality_momentum.v1_1.yaml`로 복사해 보존한다. **`quality_momentum.v1_1.commented.yaml`은
+  건드리지 않는다**(1.0 → 1.1 기대 출력, 테스트 3곳이 단언 중).
 - runtime schema fixture 재생성. OpenAPI 재생성.
 
-**제약**: P2-05 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend는 P3-01까지 빨간불.
+**제약**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend는 P3-01까지 빨간불.
 
-### P2-03 — 추가 필드: `signal.normalization`, 횡단면 eligibility, `risk.risk_factor_id`, saved_* 제거
+### P2-04 — `signal.normalization`과 결합 전 정규화
 
-**Intent**: spec D3 S4~S7과 D4. 아이디어 2(결합)·4(상위 20%)·5(변동성 역가중)를 언어가 표현하게 한다.
+**Intent**: spec D3 S4·D4. 아이디어 2(저PBR+고ROE 결합)를 언어가 표현하게 한다.
 
 **Acceptance**
 
-- `signal.normalization: none|rank|zscore`(기본 `rank`). 컴파일러(`domain/portfolio/_compiler.py`)가
-  결합 전에 적용. `none`이 1.1과 수치 동일한 회귀 테스트, `rank`·`zscore` 수치 테스트.
-- `eligibility.rules[].operator`에 `top_percent`·`top_count`. 기준일 횡단면에서 적용. 기존 절대
-  규칙과 AND.
-- `risk.risk_factor_id`(nullable, `x-reference: factor`). `weighting: risk`에서 `risk_field_id`와 배타
-  (`strategy.risk.risk_source_conflict` error, `FIELD_APPLICABILITY`에 행 추가). 참조 팩터 출력으로
-  역가중.
-- `saved_factor`·`saved_subgraph`를 노드 union·스키마·연산자 카탈로그에서 제거. 실행 경로의 거부
-  코드는 삭제.
+- `signal.normalization: none|rank|zscore`(새 문서 기본 `rank`). 컴파일러
+  (`domain/portfolio/_compiler.py:526-570`)가 결합 전에 적용.
+- `none`이 1.1과 수치 동일한 회귀 테스트. `rank`·`zscore` 수치 테스트.
 - `_explanation.py`·semantic diff·contract 설명 갱신. i18n 키 추가는 P3-01.
 
-### P2-04 — 단위 경고, boolean 승격, compile 단일 게이트, 연산자 unsupported
+### P2-05 — 횡단면 eligibility(`EligibilityOperator`, exhaustive `_compare`, 2-pass)
 
-**Intent**: spec D4·D5. "검증 통과 = 실행 가능".
+**Intent**: spec D3 S5. 아이디어 4(거래대금 상위 20%).
+
+**Acceptance**
+
+- `EligibilityRule.operator`를 **전용 `EligibilityOperator`**(`gt`·`gte`·`lt`·`lte`·`eq`·
+  `top_percent`·`top_count`)로 분리한다. 공유 `ComparisonOperator`에 얹지 않는다.
+- `_compiler.py:1008-1017`의 `_compare`를 **exhaustive**로 바꾼다. catch-all
+  `return value == threshold`를 제거하고 미지 연산자는 raise. 회귀 테스트로 고정.
+- 프레임 컴파일 2-pass: 1-pass 절대 규칙(`gt`~`eq`), 2-pass 횡단면 `top_*`. AND 결합.
+- 모집단은 유니버스 멤버 중 절대 규칙 통과 + 해당 `field_id` 값이 있는 종목. 결측은 탈락이고
+  분모에서도 뺀다. 동점은 값 내림차순 → `security_id` 오름차순 cut(결정성 테스트).
+- `top_percent` 0.2가 후보 100개에서 정확히 20개를 남긴다는 수치 테스트, 경계(소수점 절사)·동점·
+  결측 케이스 각 1개.
+
+### P2-06 — `risk.risk_factor_id`, `saved_factor`·`saved_subgraph` 제거
+
+**Intent**: spec D3 S6~S7. 아이디어 5(변동성 역가중).
+
+**Acceptance**
+
+- `risk.risk_factor_id`(nullable, `x-reference: factor`). `weighting: risk`에서 `risk_field_id`와 배타
+  (`strategy.risk.risk_source_conflict` error, `FIELD_APPLICABILITY`에 행 추가).
+- 참조 팩터는 **합성 점수에서 제외**한다(`weight` 무시, 분모 `Σ|weight|`에서도 제외). 제외 사실은
+  `strategy.risk.risk_factor_excluded` warning. 역가중은 `signal.normalization` **이전** 원시 출력
+  (`PortfolioObservation.factor_values`)을 쓴다. 값이 `<= 0`이면 기존 `MISSING_RISK` 탈락 유지
+  (`_compiler.py:841-843`).
+- 수치 테스트: 같은 문서에서 `risk_factor_id`를 붙이기 전후로 **선정 종목이 바뀌지 않는다**(합성
+  제외 검증). `normalization: rank`에서도 역가중이 원시값 기준이다.
+- `saved_factor`·`saved_subgraph`를 노드 union·스키마·연산자 카탈로그에서 제거. 실행 경로의 거부
+  코드 삭제.
+
+### P2-07 — compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported
+
+**Intent**: spec D5. "검증 통과 = 실행 가능".
 
 **Acceptance**
 
@@ -245,27 +338,55 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 - `signal.normalization: none`이고 팩터 단위가 다르면 `strategy.signal.unit_mismatch` warning.
 - 어댑터 capability(`GROUP_SERIES` 제공 여부)를 compile이 조회해 `group` 노드가
   `strategy.operator.unsupported` error. 연산자 카탈로그 응답의 `availability`도 같은 capability로.
-  duckdb 어댑터가 `GROUP_SERIES`(섹터 코드 필드 1개)를 제공하는 최소 구현을 시도하고, 범위를
-  넘으면 PLAN 변경 기록에 남기고 unsupported로 둔다.
-- fixture `ideas/*.yaml` 5개(spec 5절)가 hydrate·validate·preview까지 통과(backend 수준 완료 정의).
-  20일 이평 돌파는 `comparison` 출력이 승격되어 통과해야 한다.
 
-### P2-05 — 1.1 → 1.2 업그레이더, upgrade 응답 `environment`, 동결 읽기, OpenAPI
+### P2-08 — duckdb `GROUP_SERIES` 스파이크와 `ideas/*.yaml` 5개
+
+**Acceptance**
+
+- duckdb 어댑터가 `GROUP_SERIES`(섹터 코드 필드 1개)를 제공하는 최소 구현을 시도한다
+  (`equity_duckdb/_adapter.py:734-747`이 현재 모든 필드를 `NUMERIC_SERIES`로 고정 반환). 범위를
+  넘으면 **PLAN 변경 기록에 사유를 남기고 `unsupported`로 둔다**(P2-07 분기가 그대로 남는다).
+- fixture `ideas/*.yaml` 5개(spec 5절)가 hydrate·validate·preview까지 통과(backend 수준 완료 정의).
+- **ideas fixture는 레시피 빌더 산출 형태를 따른다**(spec D2). 다중 입력 연산자의 부가 입력은 새
+  소스 잎 노드다. 아이디어 3은 잎 4개(`close` → `ma20` → 잎 `close_2` → `breakout(gt, left=close_2,
+  right=ma20)`)이고 `comparison` 출력이 P2-07의 승격으로 통과한다. 체인 머리를 재참조하는 노드 3개
+  형태로 쓰지 않는다 — P5-03의 "e2e 산출물과 같은 hash" 단언이 깨진다.
+
+### P2-09 — 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI
 
 **Intent**: spec D7. 1.1 이력이 동결되고 업그레이드 경로가 열린다.
 
 **Acceptance**
 
-- `_upgrade.py` `UPGRADE_STEPS`에 1.1 → 1.2 step(spec D7 변환 목록). 1.0 문서는 두 판을 순서대로.
-  dict 경로·source 경로(ruamel) 같은 step, drift fail-closed.
-- `upgrade_document(tree) -> (tree, environment, warnings)`: 제거된 `data`·`execution`·`missing_policy`를
-  `RunEnvironment`로 돌려준다. 팩터별 `missing_policy`가 다르면 첫 값 + warning. `saved_*` 노드는
-  `strategy_document.upgrade_unsupported_node` 422.
+- `_upgrade.py`를 **버전 디스패치**로 다시 쓴다.
+  `UPGRADE_STEPS: Mapping[str, tuple[UpgradeStep, ...]]`(키는 from-version `"1.0"`·`"1.1"`), 공개
+  API는 `upgrade_document(tree) -> UpgradeOutcome(tree, environment, warnings)` 하나. 문서의
+  `schema_version`에서 `CURRENT_SCHEMA_VERSION`까지 체인을 순서대로 적용하고 **각 중간 단계마다**
+  그 버전을 찍고 검증한다. 현재 `_step_schema_version`(`:58-59`)이 곧장 최신 버전을 찍는 동작을
+  고친다.
+- 심볼 교체와 호출자 갱신을 같은 PR에서: `LEGACY_SCHEMA_VERSION` → `FROZEN_SCHEMA_VERSIONS`,
+  `is_legacy_document` → `is_upgradeable_document`, `upgrade_document_1_0` → `upgrade_document`,
+  `NotALegacyDocumentError` → `NotUpgradeableDocumentError`. facade
+  `domain/strategy/facade/document.py`의 공개 심볼, 호출자 3곳
+  (`adapters/outbound/document_codec/_upgrade_source.py`,
+  `adapters/outbound/strategy_sqlite/_record_codec.py`,
+  `application/strategy_authoring/_service.py`). `is_frozen_schema_version`은 **변경 없음**
+  (테스트로 고정).
+- 1.1 → 1.2 step(spec D7 변환 목록): `data`·`execution`·`graph.missing_policy` 제거 후 `environment`로
+  반환(팩터별 정책이 다르면 첫 값 + warning), `signal.normalization: none` 명시, `saved_*` 노드는
+  `strategy_document.upgrade_unsupported_node` 422. dict 경로·source 경로(ruamel) 같은 step 맵,
+  drift fail-closed.
 - `POST /strategy-documents/upgrade` 응답에 `environment`·`warnings`.
-- repository codec이 1.0·1.1 row를 업그레이드해 읽고 무결성 검증 3종(1.1 spec D2 방식). saved-reference
-  backtest 422. `is_frozen_schema_version` 변경 없음(테스트로 고정).
-- golden: `quality_momentum.v1_1.commented.yaml` → 1.2 원문(주석·순서 보존) → tree가 dict 경로와
-  동일. 업그레이드된 문서의 preview 결과가 1.1 결과와 같다(`normalization: none` 보존).
+- repository codec이 1.0·1.1 row를 업그레이드해 읽고 무결성 검증 3종(1.1 spec D2 방식).
+  saved-reference backtest 422.
+- golden 파일 역할(spec D7): `quality_momentum.v1_2.commented.yaml` 신규 = 1.0 문서의 **최종** 기대
+  출력. `tests/application/test_strategy_authoring_upgrade.py:69`,
+  `tests/contract/test_document_upgrade_source.py:50`,
+  `tests/integration/test_strategy_document_upgrade_http_api.py:33`의 기대 파일이 이것으로 바뀐다.
+  `.v1_1.commented.yaml`은 1.0 → 1.1 **중간 단계** 고정용으로 남긴다(체인 중간 검증 테스트).
+  `.v1_1.yaml`(P2-03 보존분)이 1.1 → 1.2 입력이다. 세 경로 모두 주석·순서 보존, dict 경로와 tree 동일.
+- 업그레이드된 문서의 preview 결과가 1.1 결과와 같다(`normalization: none` 보존).
+- SoT 업그레이드 행의 "(1.2 step은 P2-09에서 추가, 아직 없음)" 예약 표기를 해제한다.
 - OpenAPI 재생성. `database/tests` 계약 확인.
 
 **Phase 2 exit**
@@ -273,7 +394,8 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 - [ ] 1.2 fixture 같은 hash. 1.1 fixture 전부 업그레이드 통과.
 - [ ] compile 통과 문서가 preview에서 422 없음(property).
 - [ ] `ideas/*.yaml` 5개 backend 통과.
-- [ ] SoT·책임분리 점검 서브에이전트 blocking 0. SoT 행 "실행 설정"·"연산자 정의" 채움.
+- [ ] `plan_hash`가 결측 정책으로 계속 갈린다(P2-02 회귀 테스트).
+- [ ] SoT·책임분리 점검 서브에이전트 blocking 0. SoT 행 "실행 설정" 채움(owner 구현 완료), 업그레이드 행 예약 표기 해제.
 
 ---
 
@@ -296,8 +418,9 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 **Acceptance**
 
 - 실행 설정 패널(`backtest-run-settings.tsx`)에 시장·빈도·기간·유니버스·체결·수수료·참여율·슬리피지·
-  결측 처리. 기본값은 runtime schema `RunEnvironment`에서. 마지막 사용값은 전략별 `localStorage`.
-  유니버스는 기존 catalog picker.
+  결측 처리. 기본값은 **실행 설정 스키마** `GET /api/v1/run-environments/schema`(P2-01)에서 온다.
+  전략 authoring runtime schema와 다른 산출물이며, 프론트에 기본값을 손으로 적지 않는다(테스트로
+  고정). 마지막 사용값은 전략별 `localStorage`. 유니버스는 기존 catalog picker.
 - 기간이 전략 문서에서 오던 `dateRange` 의존 제거. OOS 창 검증은 실행 설정의 기간으로.
 - 업그레이드 배너가 1.1 문서에도 뜨고, 응답의 `environment`로 실행 설정을 채운다(사용자 확인 후).
   `warnings`를 배너에 표시.
@@ -338,9 +461,10 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
   종류(`form-projection`의 필드 행 재사용), 진단 목록. 필드의 단계 배정은 스키마 `x-stage` 마커로
   backend가 준다(프론트에 필드 목록을 손으로 적지 않는다; backend 변경은 이 PR에 포함, 1.2 계약
   additive).
-- 팩터 카드 요약 문장: `recipe-projection`(P5-01 전에는 이 PR에 최소 체인 판정 포함)이 체인이면
-  "종가 → 252일 모멘텀(21일 제외) → 순위"(연산자 카탈로그 i18n 이름 + 파라미터), 아니면 "노드 N개 ·
-  고급".
+- 팩터 카드 요약 문장: **이 PR이 `features/edit-strategy/model/recipe-projection.ts`를 만들고
+  P5-01이 같은 파일을 확장한다**(별도 헬퍼를 만들지 않는다). 여기서는 spec D2의 체인 판정만
+  구현한다. 체인이면 "종가 → 252일 모멘텀(21일 제외) → 순위"(연산자 카탈로그 i18n 이름 +
+  파라미터), 아니면 "노드 N개 · 고급".
 - 스키마 fixture만으로 유도되는 단위 테스트.
 
 ### P4-02 — 단계 카드 UI(유니버스·포트폴리오 구성·리스크 제약)와 실행 설정 띠
@@ -380,6 +504,9 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 - 새 전략 시작 문서 `schema_version: "1.2"\ntitle: ""\n`이 "구조 오류" 없이 열린다.
 - e2e: 빈 문서 → 그래프에서 팩터 추가 → (P5 전이므로) 기존 Graph 편집기로 노드 3개 → 미리보기 →
   백테스트. 그래프 탭 파이프라인 수준 DOM에 `_id`·`_node`·`kind:` 패턴 없음 단언.
+- SoT 갱신: 금지 절의 "YAML/JSON source ↔ StrategySpec ↔ JSON/Form/Graph/Diff projection" 문장에서
+  은퇴한 Form·JSON 투영을 빼고 그래프 표현 세 수준으로 다시 쓴다. DSL 문장은 유지. 이 문장을
+  갱신하는 PR은 이 PR 하나다(P0-01 리뷰 P3 finding).
 
 **Phase 4 exit**
 
@@ -395,9 +522,11 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 
 **Acceptance**
 
-- 체인 판정: 팩터 `graph.nodes`가 소스 노드 하나로 시작해 각 노드가 직전 노드만 참조하고
-  `output_node_id`가 마지막이면 체인. 다중 입력 노드는 다른 입력이 field/constant/parameter 소스
-  노드(체인 밖 잎)일 때만 허용("÷ 시가총액"). 그 외는 비체인 → "고급에서 편집".
+- 체인 판정(정본은 spec D2)을 P4-01이 만든 `recipe-projection.ts`에서 **확장**한다. 새 파일을
+  만들지 않는다. 규칙: 소스 노드 하나로 시작해 각 노드가 직전 노드만 참조하고 `output_node_id`가
+  마지막이면 체인. 다중 입력 노드는 한 입력이 체인 꼬리이고 나머지 입력이 전부 체인 밖 잎
+  (`field`·`constant`·`parameter`)일 때만 체인("÷ 시가총액", "종가 > 20일 이평"). **체인 머리
+  재참조는 비체인**이다. 그 외는 "고급에서 편집".
 - 연산: 단계 추가(끝·중간) = `addNode`(kind·id `<operator>_<n>`·입력=직전·출력=마지막) + 다음
   노드 `input_node_id` 재배선; 삭제 = `remove` + 재배선(+출력 갱신); 이동 = 재배선; 파라미터 =
   `replaceScalar`; 연산자 교체 = 노드 항목 교체(kind 동반). 여러 연산은 `planSourceOperations`로 한
@@ -422,7 +551,9 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 
 - 결과 미리보기: 값 있는 종목 수, 결측 처리(실행 설정 `missing`) 표시, 상위 5.
 - e2e 5건(spec 5절 아이디어): 빈 문서에서 그래프 탭(파이프라인·레시피)만으로 완성 → 백테스트.
-  결과 원문이 `fixtures/strategy_documents/ideas/*.yaml`과 같은 hash. 두 수준 DOM 식별자 0개 단언.
+  결과 원문이 `fixtures/strategy_documents/ideas/*.yaml`(P2-08)과 같은 hash. 두 수준 DOM 식별자
+  0개 단언. fixture와 빌더 산출물이 같은 형태라는 근거는 spec D2의 "다중 입력 연산자의 부가 입력은
+  항상 새 소스 잎 노드다"이며, 아이디어 3은 양쪽 모두 잎 4개 형태다.
 - 매뉴얼에 그래프 화면 절과 예시 5개(튜토리얼).
 
 **Phase 5 exit**

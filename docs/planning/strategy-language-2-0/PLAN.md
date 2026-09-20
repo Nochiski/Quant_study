@@ -6,8 +6,8 @@ current_phase: P0,P1
 current_pr: P0-01,P1-01
 active_prs: [P0-01, P1-01]
 parallel_window: [P0-01, P1-01]
-last_updated: 2026-09-20T22:28:44+09:00
-planned_prs: 24
+last_updated: 2026-09-20T22:50:01+09:00
+planned_prs: 28
 merged_prs: 0
 approved_prs: 0
 progress_percent: 0
@@ -27,9 +27,9 @@ progress_percent: 0
 | Current phase | `P0,P1` |
 | Current/next PR | `P0-01,P1-01` |
 | Active PR | `P0-01, P1-01` |
-| Progress | `0 / 24 merged (0%)` |
-| Approved | `0 / 24` |
-| Aggregated at | `2026-09-20 22:28 KST` |
+| Progress | `0 / 28 merged (0%)` |
+| Approved | `0 / 28` |
+| Aggregated at | `2026-09-20 22:50 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -50,7 +50,7 @@ progress_percent: 0
 - 그래프 라이브러리 도입은 P6-01 ADR이 결정한다. 레시피 빌더(P5)가 먼저 비전공자 경로를 닫는다.
 - P2 backend PR은 `backend/openapi.json`만 재생성하고 frontend generated SDK는 P3-01이 갱신한다.
   P2 스택은 backend gate만 merge gate로 삼는다.
-- P1 스택과 P2 스택은 독립이라 병렬 진행할 수 있다. P3-01은 P1-05·P2-05 둘 다 merge 뒤 시작한다.
+- P1 스택과 P2 스택은 독립이라 병렬 진행할 수 있다. P3-01은 P1-05·P2-09 둘 다 merge 뒤 시작한다.
 - reviewer 서브에이전트는 Opus로만 배정한다. Phase 종료마다 SoT·책임분리 점검 서브에이전트를 돌린다.
 - 완료 정의는 spec 5절의 6항이다. 특히 퀀트 아이디어 5개(12-1 모멘텀, 저PBR+고ROE, 20일 이평 돌파,
   거래대금 상위 20%, 변동성 역가중)가 그래프 탭만으로 백테스트에 도달해야 한다.
@@ -80,12 +80,12 @@ progress_percent: 0
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 0 | `IN_REVIEW` |
 | P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_PROGRESS` |
-| P2 | Backend schema 1.2 | 5 | 0 | `WAITING` |
+| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `WAITING` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | `WAITING` |
-| **Total** |  | **24** | **0** | **0%** |
+| **Total** |  | **28** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -98,8 +98,8 @@ progress_percent: 0
 | Non-goals | 코드 변경 |
 | Branch/worktree | `docs/strategy-language-2-0-plan` |
 | Base SHA | `5f97f8c` (main) |
-| Head SHA | `docs/strategy-language-2-0-plan` tip — 커밋이 자기 SHA를 담을 수 없어 PR 생성 시 확정 |
-| Diff stat | 9 files changed, +1419 −4 (문서만, 브랜치 전체 P0-01 기준) |
+| Head SHA | 재검토 중 |
+| Diff stat | 문서만. 리뷰 반영 커밋 포함, PR #167 diff 참조 |
 | Focused tests | `tools/update-plan-progress.ps1 -Check` |
 | Full gate | 코드 변경 없음 — 문서 링크 존재 확인 |
 
@@ -135,24 +135,29 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P2-01` | `RunEnvironment` 모델, 실행 요청 optional `environment`(브리지), manifest·캐시 키 | P0-01 | `WAITING` | — |
-| [ ] | `P2-02` | StrategySpec 1.2: `data`·`execution`·`missing_policy` 제거, 버전 1.2, 필수 키 3개, fixture·hash golden | P2-01 | `WAITING` | — |
-| [ ] | `P2-03` | 추가 필드: `signal.normalization`, 횡단면 eligibility, `risk.risk_factor_id`, saved_* 제거, 컴파일러 | P2-02 | `WAITING` | — |
-| [ ] | `P2-04` | 단위 경고, boolean 승격, compile 단일 게이트, 연산자 unsupported, `ideas/*.yaml` 5개 | P2-03 | `WAITING` | — |
-| [ ] | `P2-05` | 1.1 → 1.2 업그레이더(dict·source), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-04 | `WAITING` | — |
+| [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `WAITING` | — |
+| [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `WAITING` | — |
+| [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `WAITING` | — |
+| [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `WAITING` | — |
+| [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `WAITING` | — |
+| [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05 | `WAITING` | — |
+| [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06 | `WAITING` | — |
+| [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `WAITING` | — |
+| [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `WAITING` | — |
 
 Phase exit:
 
 - [ ] 1.2 fixture 같은 hash, 1.1 fixture 전부 업그레이드 통과.
 - [ ] compile 통과 문서가 preview에서 422 없음(property).
+- [ ] `plan_hash`가 결측 정책으로 계속 갈린다(P2-02 회귀).
 - [ ] `ideas/*.yaml` 5개 backend 통과.
-- [ ] SoT·책임분리 점검 blocking 0, SoT 행 2개 채움.
+- [ ] SoT·책임분리 점검 blocking 0, SoT "실행 설정" 행 채움·업그레이드 행 예약 해제.
 
 ## P3 — frontend 1.2 적응
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-05, P1-05 | `WAITING` | — |
+| [ ] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-05 | `WAITING` | — |
 | [ ] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `WAITING` | — |
 | [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `WAITING` | — |
 
@@ -206,6 +211,7 @@ Phase exit:
 
 | PR | Reviewer | 회차 | 결과 | 비고 |
 |---|---|---|---|---|
+| `P0-01` | `review_lang2_p0_01` | 1 | `REQUEST_CHANGES` | P1 6 · P2 7 · P3 5. 전부 문서 결정과 실제 코드의 불일치. 반영: 필수 키 2개, 업그레이더 버전 디스패치, 브리지를 `domain/backtest`로, `plan_hash`에 결측 정책 유지, 전용 `EligibilityOperator`·2-pass, 다중 입력 잎 노드 규칙, `risk_factor_id` 합성 제외, 연산자 23=(kind, operator), `/run-environments/schema`, SoT 업그레이드 행·`paths`·캐시 키·`x-stage`, P2 5→9 분할 |
 
 ## 검증 기록
 
@@ -222,6 +228,13 @@ Phase exit:
 - 2026-09-20 — P0-01 상위 문서 개정: ADR 2026-09-04 머리말·D8에 개정 표기, 1.1 spec 머리말에 후속
   링크, 로드맵 M8 완료 게이트를 원문("코드를 몰라도 …")으로 복귀, SoT 정본 대장에 실행 설정·연산자
   정의·그래프 표현 투영 행 3개와 "표현은 YAML과 그래프 둘" 문장 추가.
+- 2026-09-20 — P0-01 리뷰(`review_lang2_p0_01`, REQUEST_CHANGES) 반영: spec D2·D3·D4·D6·D7·D8·D9·D11과
+  WORKFLOW·SoT를 실제 코드에 맞게 고쳤다. 최상위 필수 키 3→2개, 업그레이더를 버전 디스패치로,
+  브리지를 `domain/backtest`로(application 순환 회피), 결측 정책을 `plan_hash`에 유지, 횡단면
+  eligibility에 전용 enum·모집단·동점·2-pass 정의, 다중 입력 연산자의 잎 노드 규칙과 아이디어 3
+  정본 형태, `risk_factor_id` 합성 제외·원시값 역가중, 연산자 18→23(`(kind, operator)` 키),
+  `GET /api/v1/run-environments/schema` 신설, golden 파일 역할 분리. **P2를 5 → 9 PR로 재분할**(총
+  24 → 28 PR), P3-01 base는 P2-09.
 
 ## 갱신 절차
 

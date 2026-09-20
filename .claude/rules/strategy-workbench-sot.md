@@ -4,7 +4,10 @@ paths:
   - "frontend/**"
   - "docs/superpowers/specs/*strategy-workbench*"
   - "docs/superpowers/specs/2026-09-04-*-adr.md"
+  - "docs/superpowers/specs/2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md"
   - "docs/planning/strategy-workbench-yaml-ui/**"
+  - "docs/planning/strategy-gui-editing/**"
+  - "docs/planning/strategy-language-2-0/**"
 ---
 
 # Strategy Workbench의 사실은 한 곳만 소유한다
@@ -21,10 +24,10 @@ paths:
 | 팩터 값의 공개일 | 그 팩터 plan이 읽는 필드들의 `available_date` 최댓값 | 컴파일러 FUTURE_DATA 가드가 그대로 읽는다 |
 | 리밸런싱 시점의 previous weight | `compile_target_tape`의 프레임 fold | 포트의 `previous_weight`는 첫 프레임 시드로만 쓰인다 |
 | 전략 의미 | immutable, versioned `StrategySpec` | YAML/JSON source를 서버가 compile한다. Form·Graph 편집은 runtime schema × parse tree projection 위의 **source 트랜잭션**(`planSourceOperation` → 편집기 `replaceRange` 한 번)이며 별도 편집 모델·직렬화 경로를 두지 않는다. Graph 노드 추가·삭제 가드와 `node_id` rename(`renameNode`: 중복 거부, 정의 + 같은 그래프 참조를 한 트랜잭션으로 — `FormFieldsEditor`의 `planCommit`이 가로챈다)은 `graph-transactions.ts`, 그 밖의 노드 속성·입력 재연결·출력은 Form과 같은 필드 컨트롤(owner `graph`)이고 DAG 투영은 backend plan 위에 그대로다. JSON 문서는 Form·Graph에서 읽기 전용이다. 문서 안 id 참조 탐색(`document-references.ts`의 `findReferences`)은 스키마를 모르는 전역 탐색이라, 네임스페이스가 스코프를 가지면(`x-defines`가 붙은 배열: `graph.nodes`의 `node`) 호출자가 스코프를 좁혀야 한다(Phase 4 감사 DEFECT-P4X-002; Graph 노드 삭제 `removeNodeAt`과 Form 목록 삭제 가드 `removalBlockers`(`REFERENCE_SCOPES`)가 `{ within: "/factors/N/graph" }`로 좁힌다). 표현은 YAML과 그래프 둘이다(2026-09-20 결정) |
-| 실행 설정(시장·빈도·기간·유니버스·체결·수수료·결측) | `domain/backtest`의 `RunEnvironment` (schema 1.2, P2-01~P2-02에서 구현, 아직 없음) | 전략 revision에 저장하지 않고 run manifest에 `environment`·`environment_hash`로 기록한다. frontend 실행 설정 패널이 편집 값을 소유하고, 1.1 문서의 `data`·`execution`·`missing_policy`는 `application/backtest_run/_environment.py` 브리지가 환경으로 옮긴다 |
-| 그래프 표현 투영(파이프라인 4단계·레시피 체인 판정) | `features/edit-strategy/model/pipeline-projection.ts`·`recipe-projection.ts` (P4-01·P5-01에서 구현, 아직 없음) | YAML과 같은 parse tree를 읽는 투영이며 편집은 기존 source 트랜잭션(`planSourceOperation`)이다. 별도 편집 모델·직렬화 경로를 두지 않는다. 표현은 YAML과 그래프 둘뿐이고 Form·JSON 탭은 P4-04에서 은퇴한다 |
-| authoring schema 버전 | `domain/strategy/_models.py`의 `CURRENT_SCHEMA_VERSION`(`_hydrate.py`의 `SUPPORTED_SCHEMA_VERSIONS`가 파생), 은퇴 버전은 `domain/strategy/_upgrade.py`의 `LEGACY_SCHEMA_VERSION` | 모델 기본값·스키마·검증·어댑터·테스트는 이 상수를 읽는다. `"1.1"`/`"1.0"` 리터럴을 다시 적지 않는다. frontend도 같다: 동결/업그레이드 판정은 `requires_upgrade`와 compile 진단으로만 하고 은퇴 버전 문자열을 갖지 않는다. 버전 리터럴을 남겨야 하면(새 문서 템플릿) 그 값이 runtime schema `schema_version.const`와 같은지 단언하는 테스트를 같은 PR에 넣는다 |
-| 1.0 → 1.1 문서 업그레이드 변환 | `domain/strategy/_upgrade.py`의 `UPGRADE_STEPS` | dict 경로(repository codec, legacy generated source)와 source 경로(`adapters/outbound/document_codec/_upgrade_source.py`)가 같은 step을 적용한다. 어댑터는 주석·순서 보존만 맡고, 두 경로가 다른 tree를 내면 application이 `strategy_document.upgrade_drift` 422로 거부한다. frontend는 변환 규칙을 알지 않고 응답 원문을 그대로 적용한다 |
+| 실행 설정(시장·빈도·기간·유니버스·체결·수수료·결측) | `domain/backtest`의 `RunEnvironment` (schema 1.2, P2-01·P2-03에서 구현, 아직 없음) | 전략 revision에 저장하지 않고 run manifest에 `environment`·`environment_hash`로 기록한다. frontend 실행 설정 패널이 편집 값을 소유하며 기본값은 실행 설정 스키마 `GET /api/v1/run-environments/schema`에서만 읽는다(전략 authoring runtime schema와 다른 산출물, 프론트에 적지 않는다). 1.1 문서의 `data`·`execution`·`missing_policy`를 환경으로 옮기는 브리지도 `domain/backtest`가 소유한다(`environment_from_legacy_spec`) — application에 두면 `portfolio_design → backtest_run` 화살표가 순환을 만든다. `missing`은 `build_factor_execution_plan` 인자로 계속 들어가 `plan_hash`에 남는다 |
+| 그래프 표현 투영(파이프라인 4단계·레시피 체인 판정) | `features/edit-strategy/model/pipeline-projection.ts`·`recipe-projection.ts` (P4-01이 두 파일을 만들고 P5-01이 `recipe-projection.ts`를 확장, 아직 없음). 필드 → 단계 배정은 runtime schema `x-stage`(backend, P4-01) | YAML과 같은 parse tree를 읽는 투영이며 편집은 기존 source 트랜잭션(`planSourceOperation`)이다. 별도 편집 모델·직렬화 경로를 두지 않는다. 단계 배정표를 프론트에 손으로 적지 않고 `x-stage`를 읽는다. 체인 판정 규칙의 정본은 2026-09-20 spec D2다(다중 입력 노드는 부가 입력이 전부 체인 밖 잎일 때만 체인, 체인 머리 재참조는 비체인). 표현은 YAML과 그래프 둘뿐이고 Form·JSON 탭은 P4-04에서 은퇴한다 |
+| authoring schema 버전 | `domain/strategy/_models.py`의 `CURRENT_SCHEMA_VERSION`(`_hydrate.py`의 `SUPPORTED_SCHEMA_VERSIONS`가 파생), 은퇴 버전은 `domain/strategy/_upgrade.py`가 소유한다(현재 `LEGACY_SCHEMA_VERSION` 단수 상수. schema 1.2에서 `FROZEN_SCHEMA_VERSIONS` 집합 + 버전 디스패치 API로 바뀐다 — P2-09, 아직 없음) | 모델 기본값·스키마·검증·어댑터·테스트는 이 상수를 읽는다. `"1.1"`/`"1.0"` 리터럴을 다시 적지 않는다. frontend도 같다: 동결/업그레이드 판정은 `requires_upgrade`와 compile 진단으로만 하고 은퇴 버전 문자열을 갖지 않는다. 버전 리터럴을 남겨야 하면(새 문서 템플릿) 그 값이 runtime schema `schema_version.const`와 같은지 단언하는 테스트를 같은 PR에 넣는다 |
+| 1.0 → 1.1 → 1.2 문서 업그레이드 변환(1.2 step은 P2-09에서 추가, 아직 없음) | `domain/strategy/_upgrade.py`의 `UPGRADE_STEPS`. 1.2부터 `from_version → steps` 맵이고 공개 API는 `upgrade_document(tree) -> UpgradeOutcome` 하나가 중간 버전을 순서대로 적용·검증한다 | dict 경로(repository codec, legacy generated source)와 source 경로(`adapters/outbound/document_codec/_upgrade_source.py`)가 같은 step을 적용한다. 어댑터는 주석·순서 보존만 맡고, 두 경로가 다른 tree를 내면 application이 `strategy_document.upgrade_drift` 422로 거부한다. frontend는 변환 규칙을 알지 않고 응답 원문을 그대로 적용한다 |
 | 필드 적용 조건(모드별로 읽히는 필드) | `domain/strategy/_constraints.py`의 `FIELD_APPLICABILITY` | 같은 행에서 validator가 `strategy.field.inapplicable` warning을, runtime schema가 `x-applicable-when`을, contract가 `FieldContract.applicable_when`을 낸다. 이미 blocking error가 소유한 관계는 `owned_by_error`로 표시하고 warning을 두 번 내지 않는다. 적용 조건을 문장으로 옮기는 결합자·문장 틀은 소비자별 소유다 — backend 진단 `strategy.field.inapplicable` 메시지(한글 고정, API·CLI 소비자)와 frontend i18n(`contract.applicable.*`, 로케일별)이 같은 조건 데이터(`path`·`equals`·`not_null`)에서 각자 렌더하며, 조건 조각 형식(`path = value`, `path 설정`)만 같다. wire 계약에 문장을 싣지 않기로 한다(Phase 2 감사 DEFECT-P2X-005 종결 결정, 2026-09-18). |
 | revision의 동결(업그레이드 필요) 여부 | `domain/strategy/_upgrade.py`의 `is_frozen_schema_version`을 `StrategyRevisionRecord.requires_upgrade`(`application/strategy_design/ports/outgoing/strategy_repository.py`)가 적용 | 목록·history·문서 응답·saved-reference 실행 거부가 이 property를 그대로 전달한다. 어댑터와 HTTP 계층이 `schema_version`을 다시 비교해 동결을 판정하지 않는다 |
 | 파라미터 공간 | `SearchSpec` | trial은 해소된 값만 참조 |
@@ -52,8 +55,10 @@ paths:
   DSL과 단위 literal은 v1 범위가 아니다 (`docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md`).
 - canonical `spec_hash`와 semantic validation은 backend 응답만 신뢰한다. frontend가 만든 spec이나
   hash를 표시·실행에 쓰지 않는다.
-- 캐시를 SoT로 취급하지 않는다. 캐시 키는 입력 spec hash, 데이터 snapshot, registry/engine
-  version, cost model, seed를 모두 포함한다.
+- 캐시를 SoT로 취급하지 않는다. 캐시 키는 입력 spec hash, **실행 설정 `environment_hash`**, 데이터
+  snapshot, registry/engine version, cost model, seed를 모두 포함한다. 결측 정책은 실행 설정으로
+  옮긴 뒤에도 팩터 실행 plan의 일부라 `plan_hash`에 남는다 — 팩터 행렬 캐시가 결측 처리만 다른 두
+  실행을 같은 키로 묶으면 두 번째 실행이 첫 번째 결과를 조용히 재사용한다.
 - 실패·pruned trial을 결과에서 지우지 않는다. 전체 trial 수와 실패 이유는 audit 대상이다.
 - frontend에 1.0 → 1.1 업그레이드 규칙과 필드 적용 조건표를 복제하지 않는다. 업그레이드는
   `POST /api/v1/strategy-documents/upgrade`가 돌려준 원문을 편집기 범위 교체 한 번으로 적용한다.

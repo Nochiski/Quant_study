@@ -329,6 +329,13 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
     `execution` 섹션을 지우면 그 행들이 전략 문서 포인터를 잃으므로 `domain/backtest`로 옮긴다.
   - 실행 설정 스키마를 `application/strategy_authoring`이 서빙하는 것(P2-01 acceptance가 지정)도
     같이 본다. authoring 유스케이스가 실행 설정을 소유하지는 않는다. 옮긴다면 P3-02와 함께.
+  - **`preflight`가 `environment`를 받지만 읽지 않는다.** P2-01의 `start()`는 브리지가 validator
+    보다 먼저 터지지 않도록 **해소 전** `spec.environment`를 넘기고, `_run`은 해소된 값을 넘긴다.
+    지금은 `preflight`가 문서만 검사해 무해하지만, P2-01의 AST 가드는 "키워드가 있는가"만 보므로
+    두 호출부가 **서로 다른 값**을 넘기는 상태를 통과시킨다. `_prepare`가 실행 설정을 읽게 되는
+    순간 `start()`는 문서 값으로, `_run`은 명시값으로 판정해 P2-01 P0과 같은 모양이 된다. 가드를
+    "두 호출부가 같은 값을 넘긴다"로 강화할지, `preflight` 시그니처에서 `environment`를 빼
+    문서 전용임을 타입으로 못 박을지 이 PR에서 정한다.
 - runtime schema fixture 재생성. OpenAPI 재생성과 생성 SDK 재생성(1절 규칙).
 
 **제약사항**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend 소비자 배선은 P3-01까지
@@ -519,6 +526,16 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   결측 처리. 기본값은 **실행 설정 스키마** `GET /api/v1/run-environments/schema`(P2-01)에서 온다.
   전략 authoring runtime schema와 다른 산출물이며, 프론트에 기본값을 손으로 적지 않는다(테스트로
   고정). 마지막 사용값은 전략별 `localStorage`. 유니버스는 기존 catalog picker.
+- **범위(`minimum`/`maximum`)의 SoT는 `/run-environments/schema`다.** `backend/openapi.json`의
+  `RunEnvironment`에는 범위가 없다 — pydantic이 `__post_init__`를 들여다보지 못해 생성 SDK 타입에
+  실리지 않는다(P2-01에서 OpenAPI 재생성 diff가 0인 이유이기도 하다). 생성 타입만 믿는 화면은
+  서버가 거부할 값을 유효한 것으로 보므로, 패널은 범위도 스키마 엔드포인트에서 읽는다(테스트로 고정).
+- **결정 항목**: 명시 `environment`의 422를 필드 단위로 어떻게 표면화할지. 같은 사실이 문서에
+  있으면 `strategy.execution.participation` 코드가, 실행 설정에 있으면 pydantic 기본 분기가 나간다
+  (`Backtest422Response`가 `RequestValidationResponse`를 이미 union에 가져 계약 위반은 아니다).
+  `loc`이 `["body","environment"]`까지만 가리켜 어느 필드인지 구조화된 형태로는 알 수 없고 메시지
+  문자열에만 있다. 패널이 필드 옆에 오류를 붙이려면 파싱해야 하므로, inbound 계층에서
+  `RunEnvironment`를 먼저 구성해 코드화된 detail로 바꿀지 결정한다.
 - 기간이 전략 문서에서 오던 `dateRange` 의존 제거. OOS 창 검증은 실행 설정의 기간으로.
 - 업그레이드 배너가 1.1 문서에도 뜨고, 응답의 `environment`로 실행 설정을 채운다(사용자 확인 후).
   `warnings`를 배너에 표시.

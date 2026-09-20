@@ -61,12 +61,29 @@ NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = (
     "fee_bps",
     "slippage_bps",
 )
-_LEGACY_EXECUTION_POINTERS: dict[str, str] = {
-    name: f"/execution/{name}" for name in NUMERIC_ENVIRONMENT_FIELDS
-}
-RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
-    name: scalar_constraint_index()[pointer] for name, pointer in _LEGACY_EXECUTION_POINTERS.items()
-}
+
+
+def _execution_constraint_rows(names: tuple[str, ...]) -> dict[str, ScalarConstraint]:
+    """전략 제약 카탈로그의 `/execution/<name>` 행을 실행 설정 필드 이름으로 다시 건다.
+
+    카탈로그에서 포인터 이름이 바뀌면 이 모듈은 import 시점에 죽는다 — 실패 지점이 테스트가
+    아니라 부팅이다. bare `KeyError: '/execution/fee_bps'` 로 떨어지면 무엇이 왜 사라졌는지
+    알 수 없으므로, 없어진 포인터와 현재 카탈로그를 메시지에 싣는다.
+    """
+    catalog = scalar_constraint_index()
+    wanted = {name: f"/execution/{name}" for name in names}
+    missing = sorted(pointer for pointer in wanted.values() if pointer not in catalog)
+    if missing:
+        raise LookupError(
+            "run environment references strategy constraint rows that no longer exist — "
+            f"missing={missing} fields={list(names)} available={sorted(catalog)}"
+        )
+    return {name: catalog[pointer] for name, pointer in wanted.items()}
+
+
+RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = _execution_constraint_rows(
+    NUMERIC_ENVIRONMENT_FIELDS
+)
 
 
 def _describe_bound(constraint: ScalarConstraint) -> str:

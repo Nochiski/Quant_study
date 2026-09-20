@@ -11,6 +11,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.backtest._models import _execution_constraint_rows
 from strategy_workbench.domain.backtest.facade.environment import (
     RUN_ENVIRONMENT_CONSTRAINTS,
     RunEnvironment,
@@ -117,6 +118,18 @@ def test_out_of_range_values_are_rejected_at_construction(field_name: str, value
 def test_reversed_dates_are_rejected_at_construction() -> None:
     with pytest.raises(ValueError, match="end must be on or after start"):
         replace(_environment(), start=date(2021, 1, 1), end=date(2020, 1, 1))
+
+
+def test_missing_constraint_row_names_the_pointer_instead_of_a_bare_key_error() -> None:
+    """포인터 rename 은 이 모듈의 import 를 깨뜨린다 — 즉 부팅이 죽는다. 맥락 없는 KeyError 로
+    떨어지지 않고 사라진 포인터와 현재 카탈로그를 실어야 추적할 수 있다."""
+    with pytest.raises(LookupError) as error:
+        # 부팅 시점 방어라 공개 심볼이 없다. 모듈 경로로 직접 부른다.
+        _execution_constraint_rows(("fee_bps", "no_such_field"))
+
+    message = str(error.value)
+    assert "missing=['/execution/no_such_field']" in message
+    assert "/execution/fee_bps" in message
 
 
 def test_schema_bounds_come_from_the_same_rows_the_model_validates_with() -> None:

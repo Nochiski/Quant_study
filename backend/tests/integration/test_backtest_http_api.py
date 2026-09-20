@@ -756,18 +756,24 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
     }
     body = _run_body(client, "python")
 
-    for field_name, bad in (
-        ("participation_rate", 50.0),
-        ("fee_bps", -1.0),
-        ("start", "2026-12-31"),
-        ("universe_id", "   "),
+    # 422 본문의 `input` 은 요청한 environment 객체를 통째로 되돌려주므로 모든 필드 이름이
+    # 응답 텍스트에 들어 있다. 진단이 어느 필드를 지목하는지 보려면 `msg` 로 좁혀야 한다.
+    for field_name, bad, expected in (
+        ("participation_rate", 50.0, "field=participation_rate"),
+        ("fee_bps", -1.0, "field=fee_bps"),
+        ("start", "2026-12-31", "end must be on or after start"),
+        ("universe_id", "   ", "requires a universe id"),
     ):
         response = client.post(
             "/api/v1/backtests",
             json={**body, "environment": {**environment, field_name: bad}},
         )
         assert response.status_code == 422, (field_name, response.text)
-        assert field_name in response.text
+        detail = response.json()["detail"]
+        assert len(detail) == 1, (field_name, detail)
+        assert expected in detail[0]["msg"], (field_name, detail[0]["msg"])
+        # 현재 `loc` 은 environment 객체까지만 가리킨다. 필드 단위 표면은 P3-02 결정 항목이다.
+        assert detail[0]["loc"][-1] == "environment", (field_name, detail[0]["loc"])
 
     accepted = client.post("/api/v1/backtests", json={**body, "environment": environment})
     assert accepted.status_code == 202, accepted.text

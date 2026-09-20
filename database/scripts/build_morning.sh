@@ -7,8 +7,8 @@
 #   daily_build.sh 가 자기 D 를 그대로 넘겨 준다(--date). 잠정판과 같은 D 여야 잠정 vs 확정 대조가 선다.
 #   raw 락은 daily_build 에서 QL_RAW_LOCK_HELD=1 로 물려받고, 빌드 락은 build_chain 이 새로 잡는다.
 set -uo pipefail
-cd /home/kael/quant-ledger || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 빌드하지 않는다" >&2; exit 4; }
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd $HOME/quant-ledger || { echo "quant-ledger 홈으로 이동 실패 — 잘못된 디렉토리에서 빌드하지 않는다" >&2; exit 4; }
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 DATE_ARG=""; DRY=""
 while [ $# -gt 0 ]; do

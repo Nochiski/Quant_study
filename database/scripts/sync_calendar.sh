@@ -7,8 +7,8 @@
 #   `kis_holidays_<year>.json` 에 쌓고 `kis_holidays.json` 은 옛 경로 호환용으로 계속 갱신한다.
 #   daily.calendar.load() 는 디렉터리의 `kis_holidays*.json` 을 합쳐 읽는다.
 set -uo pipefail
-cd "${QL_HOME:-/home/kael/quant-ledger}"
-SRC="${1:-/home/kael/kael-system-v3/data/.kis_holidays.json}"
+cd "${QL_HOME:-$HOME/quant-ledger}"
+SRC="${1:-$HOME/kael-system-v3/data/.kis_holidays.json}"
 DST=data/calendar/kis_holidays.json
 mkdir -p data/calendar
 # 같은 파일시스템에 만들어야 마지막 mv 가 rename(2) 원자 교체가 된다(리뷰 REC-8)

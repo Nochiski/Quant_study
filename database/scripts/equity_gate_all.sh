@@ -4,7 +4,7 @@
 #   (재빌드가 필요한 상수 목록은 EQUITY_HANDOFF.md §5-1).
 set -uo pipefail
 export LC_ALL=C
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 cd "$QL_HOME"
 OUT=logs/equity/gate_all
 mkdir -p "$OUT"

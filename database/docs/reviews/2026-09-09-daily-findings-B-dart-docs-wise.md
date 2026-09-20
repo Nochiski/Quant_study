@@ -206,13 +206,13 @@ else: pending += 1                                          # 잠정 → 다시 
 |---|---|
 | v3 크론 | `45 22 * * *` (07:45 KST) · `15 9 * * *` (18:15 KST) — `backend.dart.filings --mode incremental`, `flock` 으로 자기 중복만 방지 |
 | v3 가 쓰는 키 | `DART_API_KEY` = 우리의 `kael` (순서상 최후) |
-| v3 일 사용량 | **약 60~90콜/일** (실측, `/home/kael/logs/kael-v3/dart.log` 요약행: `{"window":"20260907~20260908","pages":10,"filings":504,"docs":59}` 형태. pages=list.json 콜, docs=document.xml 콜. 2회 실행 합계 최대 83) |
+| v3 일 사용량 | **약 60~90콜/일** (실측, `~/logs/kael-v3/dart.log` 요약행: `{"window":"20260907~20260908","pages":10,"filings":504,"docs":59}` 형태. pages=list.json 콜, docs=document.xml 콜. 2회 실행 합계 최대 83) |
 | 설계 가정 | 300콜/일 (`CAPS["kael"]=39_000` = 40,000 − 카엘몫 − 마진) → **실측이 가정의 1/4, 여유 충분** |
 
 **충돌 위험 평가**
 - 우리 키 k2·k3 로 80,000콜을 다 태우기 전에는 `kael` 이 아예 나가지 않는다(`pick_key()` 순차 폴백). 일일 증분은 평시 640콜이므로 **kael 키에 도달할 일이 사실상 없다.**
 - 진짜 위험은 **역방향**: 우리가 실수로 `kael` 을 쓰면 v3 의 22:45/09:15 UTC 실행이 020 을 맞는다. `backfill_dart.py` 에는 1순위가 kael 이면 즉시 중단하는 가드가 있고(`main()`), `backfill_docs.py` 는 kael 을 아예 제외한다.
-- **부수 발견(보안)**: `/home/kael/logs/kael-v3/dart.log` 는 `crtfc_key` 를 **URL 평문으로 로깅**한다(httpx INFO). 이 파일은 로테이션이 없고 현재 584KB·3,223 호출. `api.py:160-164` 의 주석이 지목한 바로 그 사고다. 우리 조사·플랜 산출물에 이 로그를 인용할 때 URL 전문을 붙이면 키가 유출된다.
+- **부수 발견(보안)**: `~/logs/kael-v3/dart.log` 는 `crtfc_key` 를 **URL 평문으로 로깅**한다(httpx INFO). 이 파일은 로테이션이 없고 현재 584KB·3,223 호출. `api.py:160-164` 의 주석이 지목한 바로 그 사고다. 우리 조사·플랜 산출물에 이 로그를 인용할 때 URL 전문을 붙이면 키가 유출된다.
 
 ---
 
@@ -311,7 +311,7 @@ v3 로그의 같은 기간 실측 filings: 09-02 461 · 09-03 633 · 09-06→09-
 crontab 61-62행:
 ```
 # quant-ledger WISE 데일리 — KST 06:00 (= UTC 21:00 전일). 2026-09-02 18:00에서 변경
-0 21 * * * /bin/bash /home/kael/quant-ledger/scripts/daily_wise.sh
+0 21 * * * /bin/bash ~/quant-ledger/scripts/daily_wise.sh
 ```
 ① `master_daily.py` (키움 ka10099 코스피/코스닥 2콜 → `kiwoom.db:ka10099_stock_master` 일별 스냅샷)
 ② `backfill_wise.py --mode full` — **항상 full** (무커버 재프로브가 +3,700요청·+1분뿐이라 신규 커버리지 개시를 다음 날에 잡는 쪽이 이득, 2026-09-01 결정)

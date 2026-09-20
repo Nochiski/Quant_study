@@ -11,8 +11,8 @@
 #   사용: daily_evening.sh [--date YYYYMMDD] [--dry-run] [--limit N]
 #   환경: QL_EVENING_NOT_BEFORE=HH:MM (키움 fetch 하한 시각. 기본 20:00 = 애프터마켓 마감) · QL_KW_EVENING_HHMM (대기 시각, 기본 2105)
 set -uo pipefail
-cd /home/kael/quant-ledger
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+cd "$HOME/quant-ledger"
+export QL_HOME="$HOME/quant-ledger" PYTHONPATH="$HOME/quant-ledger/src"
 PY=.venv/bin/python
 LOCK=/tmp/quant_ledger_raw.lock
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then

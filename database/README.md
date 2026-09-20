@@ -158,15 +158,15 @@ crontab 복구용 원문 9줄(이 표와 같은 값이다. 서버가 초기화�
 알림 전송 실패를 사후에 확인하기 위한 것이다(DEFECT-D04, `logs/notify_failed.log` 와 짝):
 
 ```cron
-0 21 * * * /bin/bash /home/kael/quant-ledger/scripts/daily_ledger.sh >> /home/kael/quant-ledger/logs/cron_daily_ledger.log 2>&1
-10 23 * * * /bin/bash /home/kael/quant-ledger/scripts/daily_build.sh >> /home/kael/quant-ledger/logs/cron_daily_build.log 2>&1
-5 9 * * 1-5 QL_KW_EVENING_HHMM=2105 /bin/bash /home/kael/quant-ledger/scripts/daily_evening.sh >> /home/kael/quant-ledger/logs/cron_daily_evening.log 2>&1
-50 12 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh evening_ledger >> logs/watchdog.log 2>&1
-0 1 * * * cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh morning_build >> logs/watchdog.log 2>&1
-20 12 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/build_evening.sh >> logs/build_evening.log 2>&1
-30 14 * * 1-5 cd /home/kael/quant-ledger && /bin/bash scripts/watchdog.sh evening_build >> logs/watchdog.log 2>&1
-30 18 * * 5 cd /home/kael/quant-ledger && /bin/bash scripts/backup_raw.sh >> logs/backup_raw.log 2>&1
-30 19 * * 6 cd /home/kael/quant-ledger && /bin/bash scripts/gc.sh --apply >> logs/gc.log 2>&1
+0 21 * * * /bin/bash ~/quant-ledger/scripts/daily_ledger.sh >> ~/quant-ledger/logs/cron_daily_ledger.log 2>&1
+10 23 * * * /bin/bash ~/quant-ledger/scripts/daily_build.sh >> ~/quant-ledger/logs/cron_daily_build.log 2>&1
+5 9 * * 1-5 QL_KW_EVENING_HHMM=2105 /bin/bash ~/quant-ledger/scripts/daily_evening.sh >> ~/quant-ledger/logs/cron_daily_evening.log 2>&1
+50 12 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh evening_ledger >> logs/watchdog.log 2>&1
+0 1 * * * cd ~/quant-ledger && /bin/bash scripts/watchdog.sh morning_build >> logs/watchdog.log 2>&1
+20 12 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/build_evening.sh >> logs/build_evening.log 2>&1
+30 14 * * 1-5 cd ~/quant-ledger && /bin/bash scripts/watchdog.sh evening_build >> logs/watchdog.log 2>&1
+30 18 * * 5 cd ~/quant-ledger && /bin/bash scripts/backup_raw.sh >> logs/backup_raw.log 2>&1
+30 19 * * 6 cd ~/quant-ledger && /bin/bash scripts/gc.sh --apply >> logs/gc.log 2>&1
 ```
 
 문서에 없던 환경변수: `QL_KW_EVENING_HHMM`(키움 저녁 수집 하한, 크론에 2105) · `QL_EVENING_BUILD_DEADLINE`

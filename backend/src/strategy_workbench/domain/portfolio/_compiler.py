@@ -1317,6 +1317,15 @@ def _cross_sectional_cut(rule: EligibilityRule, population_size: int) -> int:
     없이 한 종목을 더 떨군다. `repr(float)` 는 그 float 로 되돌아가는 최단 10진 표기라
     문서에 적힌 리터럴을 그대로 복원한다.
     """
+    if not _number(rule.value):
+        # validator(`strategy.eligibility.rule_value`·`strategy.number.non_finite`)가 먼저
+        # 막지만, 검증을 건너뛴 경로가 생기면 `math.floor(Decimal("NaN"))` 의 맨몸 ValueError
+        # 대신 어떤 규칙이었는지 말하고 멈춘다.
+        raise ValueError(
+            "cross-sectional eligibility cut received a non-finite size — "
+            f"operator={rule.operator!r} field_id={rule.field_id!r} value={rule.value!r} "
+            f"population_size={population_size}"
+        )
     if rule.operator is EligibilityOperator.TOP_PERCENT:
         kept = math.floor(Decimal(population_size) * Decimal(str(rule.value)))
     elif rule.operator is EligibilityOperator.TOP_COUNT:

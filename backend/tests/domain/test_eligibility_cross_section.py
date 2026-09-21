@@ -362,3 +362,12 @@ def test_eligibility_operator_is_not_the_shared_comparison_enum() -> None:
         "top_percent",
         "top_count",
     ]
+
+
+def test_a_non_finite_cut_size_names_the_rule_instead_of_crashing_bare() -> None:
+    """validator 를 건너뛴 경로가 생겨도 `Decimal("NaN")` 의 맨몸 ValueError 로 끝나지 않는다."""
+    from strategy_workbench.domain.portfolio import _compiler as compiler_module
+
+    rule = EligibilityRule(_LIQUIDITY, EligibilityOperator.TOP_PERCENT, float("nan"))
+    with pytest.raises(ValueError, match="non-finite size"):
+        compiler_module._cross_sectional_cut(rule, 10)

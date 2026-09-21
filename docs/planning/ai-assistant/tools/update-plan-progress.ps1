@@ -126,6 +126,7 @@ $phaseGoals = [ordered]@{
     "P0" = "Planning package"
     "A" = "Backend: ports, storage, HTTP, providers"
     "B" = "Frontend: settings, entity, sidebar, e2e"
+    "C" = "Phase A 감사 후속"
 }
 
 $unknownPhases = @($rows | Where-Object Phase -notin $phaseGoals.Keys)

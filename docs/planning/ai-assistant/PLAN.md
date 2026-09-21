@@ -2,12 +2,12 @@
 plan_version: 2
 project: ai-assistant
 project_status: IN_PROGRESS
-current_phase: P0,A
-current_pr: P0-01,A-01,A-07
-active_prs: [P0-01, A-01, A-07]
-parallel_window: [P0-01, A-01, A-07]
-last_updated: 2026-09-21T01:30:00+09:00
-planned_prs: 13
+current_phase: P0,A,C
+current_pr: P0-01,A-01,A-07,C-01
+active_prs: [P0-01, A-01, A-07, C-01]
+parallel_window: [P0-01, A-01, A-07, C-01]
+last_updated: 2026-09-21T11:48:12+09:00
+planned_prs: 14
 merged_prs: 0
 approved_prs: 1
 progress_percent: 0
@@ -24,12 +24,12 @@ progress_percent: 0
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `P0,A` |
-| Current/next PR | `P0-01,A-01,A-07` |
-| Active PR | `P0-01, A-01, A-07` |
-| Progress | `0 / 13 merged (0%)` |
-| Approved | `1 / 13` |
-| Aggregated at | `2026-09-21 01:30 KST` |
+| Current phase | `P0,A,C` |
+| Current/next PR | `P0-01,A-01,A-07,C-01` |
+| Active PR | `P0-01, A-01, A-07, C-01` |
+| Progress | `0 / 14 merged (0%)` |
+| Approved | `1 / 14` |
+| Aggregated at | `2026-09-21 11:48 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -118,6 +118,18 @@ progress_percent: 0
 - 2026-09-21 A-07 **이관**: 검색 상한 8과 Anthropic adapter `MAX_PAUSE_RESUMES = 5`가 서로를 모르는
   건은 A-05로 넘겼다.
 
+- 2026-09-21 C-01: Phase A 종료 감사의 비차단 10건을 닫았다. 문서 5건(NB-1~NB-4·NB-10)은
+  stale 표기와 사실과 반대인 이월 체크박스였고, 나머지는 `MIN_CALL_OUTPUT_TOKENS` owner 단일화
+  (NB-5), CI의 lint·type 범위와 no-extras 대상 확대(NB-6·NB-7), 비밀 누락 422와 anthropic env
+  차단 전수 테스트(NB-8·NB-9)다. NB-11은 브랜치 상태라 머지 직전 rebase에서 처리한다.
+- 2026-09-21 C-01: `backend/pyproject.toml`의 pyright `include`에 `"tools"`를 더했다.
+  `.claude/rules/code-style.md`가 `[tool.pyright]` 변경에 사용자 확인을 요구하는 항목이다. 이
+  변경은 룰을 끄거나 모드를 낮추는 것이 아니라 **검사 범위를 넓히는** 방향이며, 팀 리드를 통해
+  확인을 받고 진행했다.
+- 2026-09-21 C-01: `MIN_CALL_OUTPUT_TOKENS`의 owner가 `domain/assistant/_models.py`로 옮겨졌다.
+  adapter가 같은 이름을 모듈 수준에서 다시 선언하면 `tests/architecture/test_turn_budget_constants.py`가
+  실패한다. 공급자마다 다른 값이 정말 필요해지면 adapter 리터럴이 아니라 `TurnRequest`로 승격한다.
+
 ### A-07 기본값 확정 근거 (2026-09-21)
 
 `backend/tests/fixtures/assistant/` 골든의 실측 길이로 검토했고 **다섯 값 모두 그대로 둔다.**
@@ -160,7 +172,8 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | P0 | Planning package | 1 | 0 | `APPROVED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 0 | `IN_PROGRESS` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `WAITING` |
-| **Total** |  | **13** | **0** | **0%** |
+| C | Phase A 媛먯궗 ?꾩냽 | 1 | 0 | `SELF_CHECK` |
+| **Total** |  | **14** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -218,6 +231,21 @@ Phase exit:
 
 - [ ] 완료 정의 1~5 기록.
 - [ ] SoT·책임분리 점검 blocking 0.
+
+## C — Phase A 감사 후속
+
+Phase A 종료 감사(`audit_ai_phase_a.md`)는 **blocking 0**으로 PASS했고, 비차단 11건 중
+NB-1~NB-10을 C-01이 닫는다. NB-11은 브랜치 상태(스택 base 격차)라 머지 직전 rebase에서
+처리한다 — `PLAN.md` 충돌은 base 쪽 값으로 해소한다.
+
+| 완료 | PR | 결과물 | Dependency | 상태 | Review |
+|---|---|---|---|---|---|
+| [ ] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `SELF_CHECK` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` |
+
+Phase exit:
+
+- [ ] NB-1~NB-10 닫힘, 각 항목이 코드·문서·테스트 중 어디서 닫혔는지 PR 본문에 기록.
+- [ ] no-extras job 확대판이 SDK 없는 환경에서 green.
 
 ## Review 기록
 

@@ -6,7 +6,7 @@ current_phase: P0,P1,P2
 current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P2-01
 active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
 parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
-last_updated: 2026-09-21T08:28:37+09:00
+last_updated: 2026-09-21T11:49:36+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 4
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P1-04,P2-01` |
-| Active PR | `P0-01, P1-01, P1-02, P1-03, P1-04, P2-01` |
+| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P2-01` |
+| Active PR | `P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `4 / 28` |
-| Aggregated at | `2026-09-21 08:28 KST` |
+| Aggregated at | `2026-09-21 11:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -79,7 +79,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 0 | `APPROVED` |
-| P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_REVIEW` |
+| P1 | In-screen friction removal on 1.1 | 5 | 0 | `SELF_CHECK` |
 | P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_PROGRESS` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
@@ -112,7 +112,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Acceptance | WORKFLOW P1-05 |
 | Non-goals | 의미 오류 문구 손질(이미 한글), 그래프 새 화면(P4·P5), 실행 설정 UI(P2·P3) |
 | Branch/worktree | `feat/lang2-p1-05-structure-errors-ko` / `wt-lang2-p1-05` |
-| Base SHA | `743d0d7` (P1-04 tip, 1차 리뷰 반영분 포함. 2026-09-21 replay). P1-04에 후속이 더 붙거나 origin에 오르면 그때 한 번 더 replay |
+| Base SHA | `0ce311bb` (P1-04 최종 tip, PR #181. 28 PR 계획 위로 cascade replay) |
 | 문장 소유 | backend. `.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행("compile 진단의 `message`는 backend가 한글 문장으로 완성해 보내고 Problems panel은 그대로 보여준다")을 따른다. `messages.ts`에 진단 문장 템플릿을 두지 않는다 — P1-04와 겹치는 파일이 없다 |
 | 변경 파일 | backend 문장: `domain/strategy/_hydrate.py`(`structure.*` 전부 + 오타 제안 + `LEGACY_SHAPE_CODE`), `adapters/outbound/document_codec/_codec.py`(`document.*`·`yaml.*`·`<format>.syntax`) |
 | | backend 1.0 힌트: `domain/strategy/_upgrade.py`(`legacy_shape_hints` — 판정은 `UPGRADE_STEPS`와 같은 조건), `application/strategy_authoring/_service.py`(키 범위 코드 집합), `domain/strategy/facade/document.py` |
@@ -126,7 +126,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | | e2e 인프라(저장소 전체 결함, 리드 지시로 이 PR에서): `frontend/e2e/{lock,free-port,ports}.mjs`(신규)·`lock.test.mjs`(단위 22건, 두 프로세스 경합 1건 포함)·`run-playwright.mjs`·`playwright.config.ts`·`vite.config.ts`·`workbench-helpers.ts`·`workbench.infrastructure.spec.ts`·`e2e/README.md`. 머신 단위 잠금으로 워크트리 간 e2e를 직렬화하고, 포트를 `PW_BACKEND_PORT`·`PW_PREVIEW_PORT`로 연다 |
 | Focused tests | `uv run pytest tests/domain/test_strategy_diagnostic_messages.py tests/domain/test_strategy_constraints.py tests/domain/test_strategy_hydrate.py`, `npx vitest run src/features/edit-strategy/__tests__/document-upgrade.test.ts src/features/edit-strategy/__tests__/factor-graph-panel.test.tsx` |
 | Head SHA | 1차 리뷰 반영분 포함. 커밋이 자기 SHA를 담을 수 없어 push 후 확정 |
-| Diff stat | base `743d0d7f` 대비 46 파일 (시각 기준선 4장 포함) |
+| Diff stat | base `0ce311bb` 대비 51 파일 `+2596 −162` (시각 기준선 4장 포함) |
 | Full gate | backend `pytest -q` 1694 passed · `ruff check src tests examples scripts` clean · `pyright` 0 · frontend `typecheck`·`lint`·`build` clean · `npm test` · e2e 20 passed(잠금 래퍼 아래). OpenAPI·runtime schema 재생성 diff 0 → 생성 SDK 변경 없음 |
 
 ---

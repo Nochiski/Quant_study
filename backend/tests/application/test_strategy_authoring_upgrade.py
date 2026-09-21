@@ -77,7 +77,16 @@ def test_upgrade_returns_1_1_text_matching_the_dict_path() -> None:
 
 
 def test_upgrade_reports_diagnostics_of_the_upgraded_text_without_hiding_them() -> None:
-    """변환 자체는 성공해도 결과 문서의 진단은 감추지 않고 그대로 담아 돌려준다."""
+    """변환 자체는 성공해도 결과 문서의 진단은 감추지 않고 그대로 담아 돌려준다.
+
+    원래 계약은 "1.0 → 1.1 변환은 성공하지만 결과 문서의 semantic error 를 감추지 않는다"였고
+    `== ["strategy.risk.max_name_weight"]` 로 고정돼 있었다. 1.1 이 은퇴 버전이 되면서 결과가
+    structural 단계에서 멈춰 semantic 진단이 **아예 계산되지 않는다** — truthy 단언은 무조건
+    참이라 계약을 지키지 못한다(P2-03 리뷰 P3-07). 그래서 중간 상태의 정확한 모양을 고정한다.
+
+    **P2-09 가 결과를 1.2 로 올리면 이 단언이 깨진다.** 그때 위 원래 단언으로 되돌려야 한다 —
+    그게 이 테스트가 P2-09 에 남기는 신호다.
+    """
     source = _read("quality_momentum.v1_0.yaml").replace(
         "max_name_weight: 0.05", "max_name_weight: 1.5"
     )
@@ -85,7 +94,8 @@ def test_upgrade_reports_diagnostics_of_the_upgraded_text_without_hiding_them() 
     upgraded = _service().upgrade(CompileRequest(source, SourceFormat.YAML))
 
     assert upgraded.compiled.spec_hash is None
-    assert upgraded.compiled.diagnostics
+    codes = [diagnostic.code for diagnostic in upgraded.compiled.diagnostics]
+    assert codes == ["structure.unsupported_schema_version"]
 
 
 @pytest.mark.parametrize("version", ['"1.1"', '"2.0"', "1.0"])

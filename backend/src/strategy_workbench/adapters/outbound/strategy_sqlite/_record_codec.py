@@ -20,6 +20,7 @@ from strategy_workbench.domain.strategy.facade.document import (
     hydrate_strategy_document,
     is_frozen_schema_version,
     is_legacy_document,
+    require_retired_schema_version,
     strip_retired_execution_settings,
     upgrade_document_1_0,
 )
@@ -164,6 +165,10 @@ def _decode_frozen_spec(
     같은 실행 설정 제거(1.2)를 거친다. 두 단계를 다 태우지 않으면 은퇴 row 가
     `structure.unknown_key`/`unsupported_schema_version` 으로 hydrate 에 실패해 목록·이력 조회가
     통째로 500 이 된다. 버전 디스패치 공개 API 와 업그레이드 응답의 `environment` 는 P2-09 다.
+
+    변환 대상은 **알려진 은퇴 버전**뿐이다. `is_frozen_schema_version` 은 "현재 버전이 아닌 모든
+    것"이라 집합이 열려 있어, 그 술어만 믿으면 미래 버전이나 손상된 값이 조용히 현재 모델로
+    해석된다 — `spec_hash` 검증은 변환 전에 끝나므로 그 변형을 잡지 못한다(P2-03 리뷰 P2-02).
     """
     computed = canonical_json_spec_hash(spec_json)
     if computed != spec_hash:
@@ -171,6 +176,7 @@ def _decode_frozen_spec(
             "frozen spec_json bytes do not match the stored spec_hash -- "
             f"strategy_id={strategy_id} revision={revision} computed={computed} stored={spec_hash}"
         )
+    require_retired_schema_version(schema_version)
     upgraded = (
         upgrade_document_1_0(payload) if is_legacy_document(payload) else copy.deepcopy(payload)
     )

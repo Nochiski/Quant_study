@@ -1146,12 +1146,14 @@ test.describe("professional YAML workflow", () => {
     await expect(page.getByRole("region", { name: "Form 편집" })).toBeVisible();
   });
 
-  // P2-09 에서 되살린다. 업그레이드 엔드포인트는 아직 1.1 까지만 올리고(1.1 → 1.2 step 과 응답
-  // `environment` 는 P2-09 acceptance), 1.1 은 schema 1.2 에서 은퇴 버전이라 돌려준 원문이
-  // `structure.unsupported_schema_version` 으로 저장되지 않는다. 시나리오를 중간 상태에 맞춰
-  // 다시 쓰면 P2-09 가 같은 파일을 또 되돌려야 하므로, 원래 계약을 그대로 두고 잠근다.
-  // 되살릴 때 바꿀 것: 배너 문구의 버전 리터럴(`upgrade.action`·`upgrade.applied`)과
-  // `schema_version` 단언 둘.
+  // **P3-02 에서 되살린다** — P2-09 와 P3-02 가 둘 다 필요하고 해제 지점은 늦은 쪽이다.
+  // (1) 업그레이드 엔드포인트가 아직 1.1 까지만 올려서(1.1 → 1.2 step 과 응답 `environment` 는
+  //     P2-09 acceptance) 돌려준 원문이 `structure.unsupported_schema_version` 으로 저장되지 않고,
+  // (2) 이 시나리오는 저장 뒤 **백테스트까지** 하는데 요청에 `environment` 를 싣는 배선이
+  //     P3-02 의 실행 설정 패널이다.
+  // 시나리오를 중간 상태에 맞춰 다시 쓰면 두 PR 이 같은 파일을 또 되돌려야 하므로 원래 계약을
+  // 그대로 두고 잠근다. 되살릴 때 바꿀 것: 배너 문구의 버전 리터럴(`upgrade.action`·
+  // `upgrade.applied`)과 `schema_version` 단언 둘, 그리고 기대 요청 본문의 `environment`.
   test.fixme("upgrades a frozen 1.0 revision, saves it and backtests it", async ({
     page,
   }) => {

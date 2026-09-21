@@ -509,10 +509,13 @@ const ko = {
   "strategy.contract.risk.gross_exposure": "포트폴리오 총 익스포저",
   "strategy.contract.risk.max_name_weight": "종목별 최대 목표 비중 한도",
   "strategy.contract.risk.max_sector_weight": "섹터별 최대 목표 비중 한도",
-  "strategy.contract.execution.participation_rate":
+  // 실행 설정 제약 행의 `x-description-key`. 발행처는 `GET /api/v1/run-environments/schema` 이며
+  // (owner `domain/backtest`), schema 1.2 에서 전략 문서의 `execution` 섹션이 사라지면서
+  // `strategy.contract.execution.*` 세 줄을 이 이름으로 옮겼다(P2-03). 렌더는 P3-02 패널이다.
+  "run_environment.contract.participation_rate":
     "시장 거래량 대비 최대 주문 참여율",
-  "strategy.contract.execution.fee_bps": "체결 금액에 적용할 수수료 가정",
-  "strategy.contract.execution.slippage_bps": "체결 가격의 슬리피지 가정",
+  "run_environment.contract.fee_bps": "체결 금액에 적용할 수수료 가정",
+  "run_environment.contract.slippage_bps": "체결 가격의 슬리피지 가정",
   "ide.debugger.tab.preview": "값 미리보기",
   "ide.debugger.tab.exposure": "노출",
   "ide.debugger.tab.orders": "주문 예상",
@@ -1411,11 +1414,11 @@ export const messages = {
       "Maximum target weight per security",
     "strategy.contract.risk.max_sector_weight":
       "Maximum target weight per sector",
-    "strategy.contract.execution.participation_rate":
+    "run_environment.contract.participation_rate":
       "Maximum order participation relative to market volume",
-    "strategy.contract.execution.fee_bps":
+    "run_environment.contract.fee_bps":
       "Fee assumption applied to notional traded",
-    "strategy.contract.execution.slippage_bps":
+    "run_environment.contract.slippage_bps":
       "Execution price slippage assumption",
     "ide.debugger.tab.preview": "Value preview",
     "ide.debugger.tab.exposure": "Exposure",

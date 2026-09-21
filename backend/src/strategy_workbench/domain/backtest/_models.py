@@ -214,7 +214,7 @@ class BacktestRunSpec:
     strategy: StrategySpec | None = None
     strategy_source: StrategySource | None = None
     # 실행 설정(1.2 부터 필수). 타입은 optional 로 남긴다 — 요청 본문에서 빠졌을 때
-    # pydantic 의 타입 오류가 아니라 코드화된 진단(`backtest_run.environment_required`)으로
+    # pydantic 의 타입 오류가 아니라 코드화된 진단(`backtest.run.environment_required`)으로
     # 거절해야 프론트가 번역할 코드를 얻는다. 해소는 `require_environment` 하나가 한다.
     environment: RunEnvironment | None = None
     core: ExecutionCore = ExecutionCore.RUST

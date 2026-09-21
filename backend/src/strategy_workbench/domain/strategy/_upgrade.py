@@ -31,6 +31,42 @@ LEGACY_SCHEMA_VERSION = "1.0"
 # (spec D7 이 요구하는 버전 디스패치의 선행 조건). 1.1 → 1.2 step 과 체인 적용은 P2-09 다.
 LEGACY_UPGRADE_TARGET_VERSION = "1.1"
 
+# 저장 row 로 읽어 줄 수 있는 은퇴 버전의 **닫힌 집합**. `is_frozen_schema_version` 은
+# "현재 버전이 아닌 모든 것"이라 집합이 열려 있어서, 저장된 row 를 현재 버전으로 해석해도 되는지
+# 판정하는 데는 쓸 수 없다 — 그 술어만 믿으면 미래 버전(`"1.3"`)이나 손상된 값(`"9.9"`)이 조용히
+# 현재 모델로 해석된다. 키를 **지우거나 의미를 바꾼** 버전은 1.2 기본값으로 채워져 읽히고,
+# `spec_hash` 검증은 변환 전에 끝나므로 그 변형을 잡지 못한다(P2-03 리뷰 P2-02).
+# P2-09 가 `FROZEN_SCHEMA_VERSIONS` 로 이름을 바꾸며 업그레이드 체인의 키 집합과 합친다.
+RETIRED_SCHEMA_VERSIONS: frozenset[str] = frozenset(
+    {LEGACY_SCHEMA_VERSION, LEGACY_UPGRADE_TARGET_VERSION}
+)
+
+
+class UnknownSchemaVersionError(ValueError):
+    """저장 row 의 `schema_version` 이 알려진 은퇴 버전도 현재 버전도 아니다.
+
+    더 새 backend 가 쓴 row 를 구 backend 가 읽는 다운그레이드이거나, 손으로 고친 값이다. 둘 다
+    현재 모델로 해석하면 사용자가 저장한 적 없는 값이 그 revision 의 사실로 화면에 뜬다.
+    """
+
+    def __init__(self, schema_version: str) -> None:
+        super().__init__(
+            "stored schema_version is neither current nor a known retired version -- "
+            f"got={schema_version!r} current={CURRENT_SCHEMA_VERSION!r} "
+            f"retired={sorted(RETIRED_SCHEMA_VERSIONS)}"
+        )
+        self.schema_version = schema_version
+
+
+def require_retired_schema_version(schema_version: str) -> None:
+    """저장 row 를 현재 버전으로 변환해도 되는 버전인지 확인한다(fail-closed).
+
+    Raises:
+        UnknownSchemaVersionError: 알려진 은퇴 버전이 아닐 때.
+    """
+    if schema_version not in RETIRED_SCHEMA_VERSIONS:
+        raise UnknownSchemaVersionError(schema_version)
+
 
 def is_frozen_schema_version(schema_version: str) -> bool:
     """저장 row가 동결(업그레이드 필요) 이력인가: 현재 버전이 아닌 모든 버전(spec D2).

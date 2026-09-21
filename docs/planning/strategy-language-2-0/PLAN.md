@@ -158,10 +158,10 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Acceptance | WORKFLOW P2-03 |
 | Non-goals | 업그레이더 버전 디스패치·upgrade 응답 `environment`(P2-09), `signal.normalization`(P2-04), 횡단면 eligibility(P2-05), frontend 실행 설정 UI(P3-01·P3-02), 실 DB 마이그레이션 |
 | Branch/worktree | `feat/lang2-p2-03-schema-1-2` / `wt-lang2-p2-03` |
-| Base SHA | `e702302` (`feat/lang2-p2-02-missing-policy`) |
-| Head SHA | 커밋 SHA는 PR 본문 참조 |
-| Diff stat | 커밋 5개 · backend domain/application/adapter + 계약 산출물 + 테스트 + frontend 최소 적응 |
-| Focused tests | `uv run pytest tests/domain/test_strategy_hydrate.py tests/domain/test_run_environment.py tests/architecture tests/application/test_run_environment_wiring.py tests/contract/test_strategy_repository_frozen_1_0.py -q` |
+| Base SHA | `d1836ed7` (`feat/lang2-p2-02-missing-policy` tip) |
+| Head SHA | 1차 리뷰 대상 `7ec8f337` + 리뷰 반영 커밋(아래 Review 열) |
+| Diff stat | 1차 리뷰 대상 커밋 14개 · 121파일 +1732/-1610. 그중 손으로 쓴 코드는 `backend/src`·`backend/scripts`·`database/scripts` 33파일 +417/-416이고 나머지는 생성 산출물(OpenAPI·SDK·runtime schema)·fixture·기준선 PNG와 그에 맞춘 테스트다 |
+| Focused tests | `uv run pytest tests/domain/test_strategy_hydrate.py tests/domain/test_run_environment.py tests/architecture tests/application/test_run_environment_wiring.py tests/contract/test_strategy_repository_frozen_1_0.py tests/contract/test_strategy_repository_retired_1_1.py -q` |
 | 제약사항 | **P2-09 전까지 은퇴 버전 문서의 업그레이드 결과는 저장·실행할 수 없다.** `POST /api/v1/strategy-documents/upgrade`가 아직 1.1까지만 올리므로(1.1 → 1.2 step 등록과 응답 `environment`는 P2-09 acceptance) 돌려준 원문의 compile 진단에 `structure.unsupported_schema_version`이 실린다. 저장된 은퇴 버전 row는 repository codec이 `strip_retired_execution_settings`까지 태워 현재 버전으로 읽으므로 목록·이력·문서 조회는 그대로 동작한다. **P2-03~P3-02 구간 브라우저 e2e는 시나리오 4건이 `test.fixme`다.** 상황: 프론트가 실행 요청에 `environment`를 싣지 않는다(그 배선은 P3-02 실행 설정 패널). 인풋: 편집기에서 백테스트 버튼 → `POST /api/v1/backtests`에 `environment` 없음. 에러 위치: `application/backtest_run/_service.py`의 `start()`가 `require_environment`로 422 `backtest.run.environment_required`를 낸다. 위험성: 브라우저에서 시작한 run이 전부 거절되어 e2e가 실제 회귀를 더는 못 잡는다. 전략 디버거 trace 요청도 같은 배선이 없어 `run_environment.required`로 거절되고 "추적 재현 정보" 패널이 뜨지 않는다(같은 fixme 시나리오 안이다) — 그 구간의 백테스트 경로는 명시 `environment`를 싣는 backend 통합 테스트가 검증한다. 잠근 시나리오: `workbench.workflow.spec.ts`의 `creates, recovers, validates, versions, traces and backtests`·`upgrades a frozen 1.0 revision …`, `workbench.real-equity.spec.ts`의 `edits the graph on real data …`, `workbench.infrastructure.spec.ts`의 `keeps a real debugger trace legible and inside the viewport`(trace 요청이 거절되어 "추적 재현 정보" 패널이 뜨지 않는다 — 픽셀 차이가 아니다). 되살리는 지점: P3-02(패널로 `environment` 배선·fixme 해제), P3-03(e2e fixture 1.2로 최종 시나리오 재작성). 크기: 이 PR은 12절 상한(600줄·10파일)을 크게 넘는다 — 최상위 모델 필드 두 개를 지우는 변경이라 hydrate·schema·validation·explanation·compile·adapter·fixture·테스트가 한 커밋 단위로 같이 움직여야 컴파일되고, enum 이동만 떼어내도 상한 안에 들어오지 않는다 |
 | Full gate | backend `uv run pytest -q`(1544 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 clean) · `pyright`(0 errors) / frontend `npm run api:generate`·`typecheck`·`lint`·`test`(639, 57파일)·`build` / `uv run --project backend pytest database/tests -q`(base `1dee07a` 와 같은 41 failed/1268 passed/33 errors — Windows symlink 권한(`WinError 1314`)으로 나는 기존 실패다) |
 
@@ -285,7 +285,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_REVIEW` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · 2차 APPROVE 대상 `1e0b095` + P3 후속 커밋 1개 · 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 반영, 2차 APPROVE(P3 6 → 코드 2 반영, 문서 3 이관, 본문 1 리드). 커밋 7개(backend 3 + 생성 SDK 1 + 리뷰 반영 3). 31파일은 12절 상한(8파일)을 넘어 논리 단위로 쪼갰다 — 모델·브리지 / 세 요청 배선 / 스키마 엔드포인트, 그리고 CI `api:generate` 게이트가 요구하는 생성 SDK. 게이트: pytest 1494·ruff·pyright(duckdb 4건 기존) · frontend typecheck·lint·Vitest 639·build |
 | [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `APPROVED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 APPROVE(P3 4건 후속 커밋). 커밋 12개(1차 5 + 1차 리뷰 반영 6 + 2차 리뷰 반영 1, history 재작성 없음). 게이트: pytest·ruff·pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest 639·build. `database/tests` 는 base `fff33fd` 와 같은 41 failed/1268 passed/33 errors(기존 실패, 이 PR 무관) |
-| [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `SELF_CHECK` | 구현 완료·게이트 통과, 리뷰 대기. 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2`. 게이트: pytest 1538 · ruff · `ruff format --check`(변경 파일 clean) · pyright 0 · frontend `api:generate`·typecheck·lint·Vitest 639·build |
+| [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `SELF_CHECK` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2` · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 반영. P2 둘 다 `_record_codec.py`의 은퇴 row 읽기 5줄이다: 1.1 row 테스트 0건(그 가지를 `raise`로 바꿔도 초록), 미지 `schema_version`이 fail-closed에서 silent 현재 버전 해석으로 바뀜. 게이트는 아래 Full gate |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `WAITING` | — |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `WAITING` | — |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `WAITING` | — |
@@ -439,13 +439,28 @@ Phase exit:
   (WORKFLOW가 지정한 유스케이스 서비스 3파일) 밖이다. `execution` 제거가 강제하는 P2-03 acceptance에
   항목으로 넣었다. 그때까지는 명시 `environment`로 참여율·체결 시점을 바꿔도 엔진 호환성 판정과
   tape hash는 문서 값을 읽는다(`ExecutionTiming` 값이 하나뿐이라 tape hash 실효 차이는 없다).
-- 2026-09-21 — 브라우저 백테스트 fixme 3건의 되살리는 지점을 계약에 고정했다. 리드 판단: 요청에 `environment`만 앞당겨 싣는 shim은 기간·유니버스 값의 출처가 없어(스키마 기본값이 있을 수 없다) 제품 동작을 속이는 것이라 하지 않는다. WORKFLOW P3-02 acceptance에 "P2-03이 잠근 `test.fixme` 3건 해제"를 넣고, 이 PR 제약사항에 4요소로 적었다.
+- 2026-09-21 — P2-03 1차 리뷰(`review_lang2_p2_03`, REQUEST_CHANGES, P2 2·P3 8) 반영. **P2 둘 다
+  `_record_codec.py` 의 은퇴 row 읽기 같은 5줄이다.** (1) 저장된 **1.1** row 를 읽는 가지에 테스트가
+  0건이었다 — 동결 fixture 가 전부 1.0 이라 그 가지를 통째로 `raise` 로 바꿔도 1544 passed 였다.
+  실 DB 에 남은 은퇴 row 는 사실상 전부 1.1 이므로, 이 PR 이 지키겠다고 선언한 바로 그 버전이 회귀
+  그물 밖이었다. `seed_retired_1_1_row` 와 `tests/contract/test_strategy_repository_retired_1_1.py`
+  (복원·목록·이력·문서 조회)를 더해 같은 돌연변이가 이제 2건을 실패시킨다. (2) 미지
+  `schema_version`(`"1.3"`·`"9.9"`) row 가 base 의 fail-closed 에서 **silent 현재 버전 해석**으로
+  바뀌어 있었다 — `is_frozen_schema_version` 은 "현재가 아닌 모든 것"이라 집합이 열려 있고,
+  `spec_hash` 검증은 변환 **전에** 끝나 키를 지우거나 의미를 바꾼 버전을 못 잡는다. domain 이
+  `RETIRED_SCHEMA_VERSIONS`(닫힌 집합)와 `require_retired_schema_version` 을 소유하고 codec 이 그
+  밖을 `UnknownSchemaVersionError` 로 거절하게 했다(P2-09 의 `FROZEN_SCHEMA_VERSIONS` 를 그만큼
+  앞당긴 셈). P3 8건도 전부 닫았다: 422 코드 철자 주석, `run_environment.contract.*` i18n 이관(옛
+  `strategy.contract.execution.*` dead key 삭제), 매뉴얼 고아 표 행, `form-projection.ts` 고아 주석,
+  fixme 해제 지점을 P3-02 로 통일, 디버거 `start`/`end` non-null 복구를 P3-02 acceptance 로,
+  업그레이드 진단 테스트를 중간 상태 정확한 모양으로 강화(P2-09 가 깨뜨리며 원복), 이 패킷 메타.
+- 2026-09-21 — 브라우저 백테스트 fixme(당시 3건, 뒤에 디버거 기준선 시나리오가 더해져 4건) 의 되살리는 지점을 계약에 고정했다. 리드 판단: 요청에 `environment`만 앞당겨 싣는 shim은 기간·유니버스 값의 출처가 없어(스키마 기본값이 있을 수 없다) 제품 동작을 속이는 것이라 하지 않는다. WORKFLOW P3-02 acceptance에 "P2-03이 잠근 `test.fixme` 해제"를 넣고, 이 PR 제약사항에 4요소로 적었다.
 - 2026-09-21 — P2-03 rebase(base `1dee07a`) 후속. P2-02 리뷰 후속이 넣은 sandbox 문서 폴백이
   1.2 에서 성립하지 않아 `DEFAULT_MISSING_POLICY` 한 상수로 정리했다(결정 6). `x-deprecated`
   표기 은퇴(결정 8)와 아키텍처 가드 범위 축소(결정 9)로 P2-02 미반영 P3 두 건도 닫았다.
-  **브라우저 백테스트 경로가 P3-01 까지 죽는다**: 실행 기간·유니버스를 요청의 `environment` 로
-  옮겼는데 그 값을 싣는 프론트 배선이 P3-01·P3-02 이므로, UI 에서 시작한 run 은 422
-  `backtest.run.environment_required` 로 거절된다. e2e 시나리오 3개(`creates, recovers, …
+  **브라우저 백테스트 경로가 P3-02 까지 죽는다**: 실행 기간·유니버스를 요청의 `environment` 로
+  옮겼는데 그 값을 싣는 프론트 배선이 P3-02 실행 설정 패널이므로, UI 에서 시작한 run 은 422
+  `backtest.run.environment_required` 로 거절된다. e2e 시나리오 3개(뒤에 디버거 기준선까지 4개: `creates, recovers, …
   backtests`, `edits the graph on real data …`, `upgrades a frozen 1.0 revision …`)를
   `test.fixme` 로 잠그고 되살릴 지점을 주석에 적었다. P2-09 머지 전까지 1.0·1.1 문서의 실행
   경로도 없다 — 스택을 한꺼번에 머지하면 main 에는 이 상태가 남지 않는다.

@@ -50,6 +50,13 @@ Never spell a port literally anywhere else.
   is the direction we want, but it costs a run.
 - It serialises this gate only. Anything else that binds the same ports, a stray dev server for
   instance, is caught by the port check rather than the lock.
+- It never reclaims an orphaned server. The lock only recovers its own stale directory, so a run
+  whose Playwright died while uvicorn and the Vite preview kept going leaves those holding the
+  ports. The next run therefore fails on the port check rather than the lock, and that failure
+  names the listener: its pid, start time and command line. Confirm with
+  `Get-NetTCPConnection -LocalPort <port> | Select-Object OwningProcess` on Windows or
+  `lsof -nP -iTCP:<port> -sTCP:LISTEN` elsewhere, then stop it yourself. The runner never kills a
+  process it did not start, because the listener may be somebody's healthy run.
 
 Moving the preview port also moves the browser origin, so the backend has to accept it. Playwright
 passes the preview origin to the server as `STRATEGY_WORKBENCH_ALLOWED_ORIGINS`. Without that the

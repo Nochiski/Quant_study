@@ -8,6 +8,8 @@
 
 import { createServer } from "node:net";
 
+import { describePortOwner } from "./port-owner.mjs";
+
 /**
  * 한 주소에서 그 포트가 비었는가.
  * @param {number} port
@@ -44,6 +46,12 @@ export const isPortFree = async (port) => {
 };
 
 /**
+ * 우리가 잠금을 쥔 상태에서 포트가 막혀 있으면, 그 서버는 이 게이트가 띄운 것이 아니다.
+ *
+ * 둘 중 하나다: 옆 체크아웃의 개발 서버이거나, 앞선 실행에서 Playwright 만 죽고 남은 **고아**
+ * (uvicorn·vite preview 는 잠금이 회수해 주지 않는다 — 잠금은 자기 잠금의 stale 만 본다).
+ * 어느 쪽인지는 사람이 판단해야 하므로 pid·시작 시각·커맨드를 찍어 주고 **죽이지는 않는다**.
+ * 잘못 죽이면 남의 게이트가 깨진다.
  * @param {ReadonlyArray<{port: number, label: string, env: string}>} required
  * @returns {Promise<void>}
  */
@@ -54,10 +62,26 @@ export const assertPortsFree = async (required) => {
   }
   if (taken.length === 0) return;
   const detail = taken
-    .map((entry) => `${entry.label}=${entry.port} (override with ${entry.env})`)
-    .join(", ");
+    .map((entry) => {
+      const owner = describePortOwner(entry.port);
+      const who =
+        owner === null
+          ? "owner unknown"
+          : `pid=${owner.pid}` +
+            (owner.startedAt ? ` started=${owner.startedAt}` : "") +
+            (owner.command ? ` command=${owner.command}` : "");
+      return `${entry.label}=${entry.port} [${who}] (override with ${entry.env})`;
+    })
+    .join("; ");
+  const inspect =
+    process.platform === "win32"
+      ? "Get-NetTCPConnection -LocalPort <port> | Select-Object OwningProcess"
+      : "lsof -nP -iTCP:<port> -sTCP:LISTEN";
   throw new Error(
     "E2E ports are already in use — refusing to run against a server this process did not " +
-      `start: ${detail}. Stop the other server, or give this worktree its own ports.`,
+      `start: ${detail}. This gate holds the machine lock, so nothing else should be running: ` +
+      "the listener is most likely an orphan left by a run whose Playwright died while its " +
+      `servers kept going. Confirm with \`${inspect}\` and stop it yourself — this script never ` +
+      "kills a process it did not start. Otherwise give this worktree its own ports.",
   );
 };

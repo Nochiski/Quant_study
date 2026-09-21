@@ -46,7 +46,8 @@ import {
   previewPort,
   readPort,
 } from "./ports.mjs";
-import { isPortFree } from "./free-port.mjs";
+import { assertPortsFree, isPortFree } from "./free-port.mjs";
+import { describePortOwner } from "./port-owner.mjs";
 
 // vitest 의 `import.meta.url` 은 dev 서버 http URL 이라 자식 노드가 불러오지 못한다.
 // 자식은 진짜 파일을 봐야 하므로 작업 디렉터리(= frontend) 기준 file URL 로 만든다.
@@ -354,6 +355,55 @@ describe("E2E 잠금 경합 (두 프로세스)", () => {
       expect(readLockPid(path)).toBe(winners[0].pid);
     }
   }, 60_000);
+});
+
+describe("포트를 쥔 프로세스", () => {
+  it("리스너의 pid·시작 시각·커맨드를 알아낸다", async () => {
+    // 잠금은 자기 잠금의 stale만 회수한다. Playwright만 죽고 uvicorn·vite preview가 남으면 그
+    // 고아가 포트를 쥔 채 남는데, "쓰이는 중"이라는 사실만으로는 고아인지 남의 정상 실행인지
+    // 구별할 수 없다. 사람이 판단할 수 있게 주인을 찍어 준다.
+    const { createServer } = await import("node:net");
+    const server = createServer();
+    await new Promise((done) =>
+      server.listen({ port: 0, host: "127.0.0.1" }, () => done(undefined)),
+    );
+    const address = server.address();
+    const port =
+      typeof address === "object" && address !== null ? address.port : 0;
+
+    const owner = describePortOwner(port);
+
+    expect(owner?.pid).toBe(process.pid);
+    // 시작 시각·커맨드는 최선껏이라 없을 수 있지만, 있으면 한 줄에 들어갈 길이여야 한다.
+    expect(owner?.command === null || owner.command.length <= 161).toBe(true);
+    expect(owner?.command ?? "").not.toContain(String.fromCharCode(10));
+
+    await new Promise((done) => server.close(() => done(undefined)));
+    expect(describePortOwner(port)).toBeNull();
+  }, 30_000);
+
+  it("막힌 포트 오류가 주인과 확인 방법을 담는다", async () => {
+    const { createServer } = await import("node:net");
+    const server = createServer();
+    await new Promise((done) =>
+      server.listen({ port: 0, host: "127.0.0.1" }, () => done(undefined)),
+    );
+    const address = server.address();
+    const port =
+      typeof address === "object" && address !== null ? address.port : 0;
+
+    const failure = await assertPortsFree([
+      { port, label: "backend", env: "PW_BACKEND_PORT" },
+    ]).catch((error) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toContain(`pid=${process.pid}`);
+    expect(failure.message).toContain("orphan");
+    // 자동으로 죽이지 않는다는 사실이 메시지에 있어야 한다.
+    expect(failure.message).toContain("never kills a process it did not start");
+
+    await new Promise((done) => server.close(() => done(undefined)));
+  }, 30_000);
 });
 
 describe("E2E 포트 타입 선언", () => {

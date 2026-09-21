@@ -22,7 +22,9 @@ from ._constraints import (
 )
 from ._hydrate import SUPPORTED_SCHEMA_VERSIONS
 from ._models import (
+    CROSS_SECTIONAL_ELIGIBILITY_OPERATORS,
     ChoiceParameter,
+    EligibilityOperator,
     FloatParameter,
     IntegerParameter,
     PortfolioSide,
@@ -128,6 +130,37 @@ def _numeric_leaves(value: object, path: str = "") -> Iterator[tuple[str, float]
             yield from _numeric_leaves(item, child_path)
 
 
+def _eligibility_rule_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
+    """`top_*` 규칙의 `value` 가 cut 크기로 쓸 수 있는 값인지 검사한다 (spec D3 S5).
+
+    절대 규칙(`gt`~`eq`)의 `value` 는 비교 임계값이라 어떤 실수든 뜻이 있지만, `top_percent` 는
+    비율이고 `top_count` 는 개수다. 범위를 안 걸면 "상위 20%"를 `20` 으로 적은 문서가 예외도
+    진단도 없이 **모집단 전체를 통과**시킨다 — 필터가 있는데 아무것도 거르지 않는 상태로
+    백테스트가 완주한다. 이 규칙은 포인터가 배열 항목이라 스칼라 제약 카탈로그
+    (`_constraints.py`, 평면 포인터 전용)가 담을 수 없어 validator 가 소유한다.
+    """
+    for index, rule in enumerate(spec.eligibility.rules):
+        if rule.operator not in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS:
+            continue
+        path = f"eligibility.rules.{index}.value"
+        if rule.operator is EligibilityOperator.TOP_PERCENT:
+            if not (math.isfinite(rule.value) and 0 < rule.value <= 1):
+                yield semantic_issue(
+                    "strategy.eligibility.rule_value",
+                    path,
+                    "상위 비율은 0보다 크고 1 이하인 비율이어야 합니다(20%는 0.2): "
+                    f"got={rule.value!r} field_id={rule.field_id!r}",
+                )
+            continue
+        if not (math.isfinite(rule.value) and rule.value >= 1 and float(rule.value).is_integer()):
+            yield semantic_issue(
+                "strategy.eligibility.rule_value",
+                path,
+                "상위 개수는 1 이상의 정수여야 합니다: "
+                f"got={rule.value!r} field_id={rule.field_id!r}",
+            )
+
+
 def validate_strategy(
     spec: StrategySpec, *, written_pointers: Collection[str] | None = None
 ) -> StrategyValidation:
@@ -190,6 +223,7 @@ def validate_strategy(
         issues.append(
             semantic_issue("strategy.factor.required", "factors", "팩터를 하나 이상 추가하세요.")
         )
+    issues.extend(_eligibility_rule_issues(spec))
     # Scalar bounds are owned by the constraint catalog (P1-04); the schema API reads the same rows.
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         value = resolve_scalar(spec, constraint.pointer)

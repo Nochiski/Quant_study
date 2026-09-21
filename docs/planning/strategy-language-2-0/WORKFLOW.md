@@ -498,6 +498,13 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `adapters/outbound/strategy_sqlite/_record_codec.py`,
   `application/strategy_authoring/_service.py`). `is_frozen_schema_version`은 **변경 없음**
   (테스트로 고정).
+- P2-03이 저장 row 읽기를 위해 앞당긴 세 심볼도 같이 흡수한다:
+  `RETIRED_SCHEMA_VERSIONS`(현재 `{"1.0", "1.1"}` 리터럴 집합) → `FROZEN_SCHEMA_VERSIONS =
+  frozenset(UPGRADE_STEPS)`(체인 키에서 유도해 버전 추가 시 한 곳만 고친다),
+  `require_retired_schema_version` → 새 술어 이름으로 개명, `UnknownSchemaVersionError` →
+  `NotUpgradeableDocumentError`로 합치거나 그 계열 이름으로. 호출자는
+  `adapters/outbound/strategy_sqlite/_record_codec.py` 하나이고, 미지 버전 fail-closed 회귀
+  테스트(`tests/contract/test_strategy_repository_retired_1_1.py`)를 그대로 통과시켜야 한다.
 - 1.1 → 1.2 step(spec D7 변환 목록): `data`·`execution`·`graph.missing_policy` 제거 후 `environment`로
   반환(팩터별 정책이 다르면 첫 값 + warning), `signal.normalization: none` 명시, `saved_*` 노드는
   `strategy_document.upgrade_unsupported_node` 422. dict 경로·source 경로(ruamel) 같은 step 맵,

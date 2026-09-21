@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass
 
 from strategy_workbench.domain.assistant.facade.models import (
     ChatEvent,
@@ -44,8 +45,10 @@ from strategy_workbench.domain.assistant.facade.tools import (
 
 __all__ = [
     "SCENARIO_KEYWORDS",
+    "SLOW_ANSWER_DELAY_SCALE",
     "ExecuteTool",
     "Scenario",
+    "ScenarioPlan",
     "scenario_for",
     "search_then_failure",
     "simple_answer",
@@ -55,6 +58,21 @@ __all__ = [
 
 ExecuteTool = Callable[[ToolCall], ToolResult]
 Scenario = Callable[[ExecuteTool], Iterator[ChatEvent]]
+
+
+@dataclass(frozen=True)
+class ScenarioPlan:
+    """돌릴 대본과 그 대본에만 걸 지연 배율.
+
+    배율이 대본마다 다른 이유는 시나리오가 재는 것이 다르기 때문이다. 짧은 답변은 "스트리밍이
+    보이는가"만 보면 되지만, 재연결 시나리오는 브라우저가 새로고침하고 다시 붙는 동안 턴이 살아
+    있어야 한다. 그 여유를 머신 속도에 맡기면 빠른 장비에서 턴이 먼저 끝나 재연결 경로가 조용히
+    "이미 끝난 턴의 이력 읽기"로 바뀐다(B-05 리뷰 R1-003).
+    """
+
+    run: Scenario
+    delay_scale: float = 1.0
+
 
 _KRX_MOMENTUM_SOURCE = Source(title="KRX 모멘텀 리뷰", url="https://example.com/krx-momentum")
 _FACTOR_REVIEW_SOURCE = Source(title="팩터 성과 보고", url="https://example.com/factor-review")
@@ -70,8 +88,9 @@ _BROKEN_SOURCE = "title: 깨진 제안\n"
 # 키는 건드리지 않는다.
 _TITLE_LINE = re.compile(r"^title:.*$", re.MULTILINE)
 
-# 조각 수 × adapter의 조각당 지연이 이 턴의 길이다. 브라우저가 새로고침하고 다시 붙는 데 드는
-# 시간보다 넉넉히 길어야, 재연결 경로가 "이미 끝난 턴의 이력 읽기"로 조용히 대체되지 않는다.
+# 조각 수 × adapter의 조각당 지연 × `SLOW_ANSWER_DELAY_SCALE`이 이 턴의 길이다. 기본값으로 20초를
+# 넘겨, 브라우저가 새로고침하고 다시 붙는 데 드는 1~2초가 그 안에 넉넉히 들어오게 한다.
+SLOW_ANSWER_DELAY_SCALE = 4.0
 _SLOW_ANSWER_PARTS = (
     "천천히 설명하겠습니다. ",
     "모멘텀 전략은 ",
@@ -181,19 +200,19 @@ def search_then_failure(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
 
 # 질문에 들어 있는 낱말로 시나리오를 고른다. 먼저 맞는 항목이 이긴다 — "검색해서 제안해 줘"처럼
 # 둘 다 들어 있으면 제안 쪽이다.
-SCENARIO_KEYWORDS: tuple[tuple[str, Scenario], ...] = (
-    ("제안", tool_then_proposal),
-    ("검색", search_then_failure),
-    ("천천히", slow_answer),
+SCENARIO_KEYWORDS: tuple[tuple[str, ScenarioPlan], ...] = (
+    ("제안", ScenarioPlan(tool_then_proposal)),
+    ("검색", ScenarioPlan(search_then_failure)),
+    ("천천히", ScenarioPlan(slow_answer, delay_scale=SLOW_ANSWER_DELAY_SCALE)),
 )
 
 
-def scenario_for(text: str) -> Scenario:
+def scenario_for(text: str) -> ScenarioPlan:
     """질문 한 줄로 시나리오를 고른다. 아무 낱말도 없으면 단순 답변이다."""
-    for keyword, scenario in SCENARIO_KEYWORDS:
+    for keyword, plan in SCENARIO_KEYWORDS:
         if keyword in text:
-            return scenario
-    return simple_answer
+            return plan
+    return ScenarioPlan(simple_answer)
 
 
 def _proposal_source(current: ToolResult) -> str:

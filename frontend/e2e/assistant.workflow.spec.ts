@@ -34,6 +34,8 @@ import {
 const SECRET = "sk-scripted-e2e-key-7431";
 const SECRET_TAIL = "7431";
 const PROVIDER_LABEL = "대본 Claude";
+/** 대본 공급자가 기본 모델 이름에 박아 두는 고정 표식(`_adapter.py`의 `SCRIPTED_MARKER`). */
+const SCRIPTED_MARKER = "scripted fake";
 
 /** 대본이 제안하는 제목(`_scenarios.py`). 적용이 실제로 문서를 바꿨는지 보는 표식이다. */
 const PROPOSED_TITLE = "KRX 12-1 모멘텀";
@@ -129,6 +131,9 @@ test.describe("AI 어시스턴트", () => {
     // 배지 텍스트에는 색 없이도 읽히도록 숨은 상태 낱말이 앞에 붙는다 — testid로 집는다.
     await expect(card.getByTestId("provider-active")).toBeVisible();
     await expect(card).toContainText(`••••${SECRET_TAIL}`);
+    // 모델을 비워 등록했으므로 공급자의 기본 모델이 쓰인다. 대본 공급자는 그 자리에 자기가
+    // 가짜라고 적어 둔다 — 켠 채로 배포됐을 때 화면에서 알아챌 유일한 자리다(리뷰 R1-004).
+    await expect(card).toContainText(SCRIPTED_MARKER);
 
     // 키는 요청 본문으로만 갔다. 화면에도 입력칸에도 남지 않는다(spec D7).
     await expect(section.getByLabel("API 키")).toHaveValue("");
@@ -166,10 +171,17 @@ test.describe("AI 어시스턴트", () => {
     await page.reload();
     await expect(editor(page)).toBeVisible();
     await expect(progress(page)).toHaveText("답변을 작성하는 중입니다.");
-    await expect(transcript(page)).toContainText(
-      "한 종목이 성과를 좌우하지 않게 합니다.",
-    );
-    await expect(progress(page)).toHaveText("답변이 완료되었습니다.");
+    await expect(progress(page)).toHaveText("답변이 완료되었습니다.", {
+      timeout: 60_000,
+    });
+    // 재연결은 멱등해야 한다: 끊기기 전에 받은 조각을 다시 받아도 본문이 늘어나지 않는다.
+    // `toContainText`로는 중복이 보이지 않으므로 **정확 일치**로 못 박는다(리뷰 R1-005).
+    await expect(
+      transcript(page).getByRole("article").last().locator("p.assist-text"),
+    ).toHaveText([
+      "모멘텀 전략을 천천히 설명해 줘",
+      "천천히 설명하겠습니다. 모멘텀 전략은 최근 수익률이 높았던 종목이 당분간 더 오르는 경향에 기대는 전략입니다. KRX에서도 이 경향은 관측됩니다. 다만 그대로 쓰지는 않습니다. 12개월 수익률에서 최근 1개월을 빼는 형태를 많이 씁니다. 직전 한 달은 되돌림이 잦기 때문입니다. 순위를 매긴 뒤에는 상위 몇 종목을 담을지 정합니다. 종목 수가 적으면 변동이 커지고 많으면 지수에 가까워집니다. 리밸런싱 주기도 같이 봅니다. 자주 갈아탈수록 수수료와 슬리피지가 쌓입니다. 마지막으로 종목당 비중 상한을 두어 한 종목이 성과를 좌우하지 않게 합니다.",
+    ]);
 
     // 취소: 답이 흘러나오는 중에 멈춘다. 진행 상태 영역은 상주하며 문구만 바뀐다(B-03 3차 리뷰 P2).
     await ask(page, "이번에는 천천히 한 번 더 설명해 줘");
@@ -188,15 +200,19 @@ test.describe("AI 어시스턴트", () => {
     await expect(stop).toHaveCount(0);
     await expect(progress(page)).toHaveText("답변을 중지했습니다.");
 
-    // 말풍선의 취소 사유는 **이 화면에서는 오지 않는다**: 취소 응답이 턴을 종료 상태로 바꾸는
-    // 순간 사이드바가 스트림을 닫아, 그 뒤 서버가 append하는 `Failure(CANCELLED)`를 받지 못한다
-    // (DEFECT-B05-001 — 스트림 유지는 B-02, 첫 이벤트 전 취소의 이벤트 저장은 A-07이 맡는다).
-    // 서버가 그 사유를 기록했다는 것은 이력으로 확인한다. 둘이 들어오면 아래 reload를 걷고
-    // 취소 직후 말풍선에서 바로 단언하도록 조인다.
+    // 취소가 서버의 턴을 실제로 멈췄다: 새로고침해 이력을 다시 읽어도 그 턴은 받다 만 조각에서
+    // 더 자라지 않는다. 대본의 마지막 문장은 영영 오지 않는다.
+    //
+    // 취소 **사유**(`Failure(CANCELLED)`)는 아직 이력에 없다. 공급자 adapter가 취소 신호를 보고
+    // 스트림을 먼저 닫으면 application이 그 사유를 이벤트로 남길 자리가 없고, 사이드바도 종료
+    // 상태를 받는 순간 스트림을 닫는다(DEFECT-AI-B05-001 — 이벤트 저장은 A-07, 스트림 유지는
+    // B-02). 둘이 들어오면 아래 두 줄을 "요청을 취소했습니다." 단언으로 바꾼다.
     await page.reload();
     await expect(editor(page)).toBeVisible();
-    await expect(transcript(page).getByRole("article").last()).toContainText(
-      "요청을 취소했습니다.",
+    const stopped = transcript(page).getByRole("article").last();
+    await expect(stopped).toContainText("천천히 설명하겠습니다.");
+    await expect(stopped).not.toContainText(
+      "한 종목이 성과를 좌우하지 않게 합니다.",
     );
 
     expect(page.url()).toContain(`/research/strategies/${strategyId}/`);
@@ -228,6 +244,7 @@ test.describe("AI 어시스턴트", () => {
       "https://example.com/krx-momentum",
     );
     await expect(source).toHaveAttribute("rel", "noopener noreferrer");
+    await expect(source).toHaveAttribute("target", "_blank");
     await expect(card).toContainText("도착지 example.com");
 
     // 미리보기는 문서를 건드리지 않고 차이만 보인다.
@@ -245,6 +262,15 @@ test.describe("AI 어시스턴트", () => {
     const applied = await currentSource(page);
     expect(applied).toContain(`title: "${PROPOSED_TITLE}"`);
     expect(applied).not.toBe(before);
+    // 적용이 문서의 나머지를 건드리지 않았다. 대본이 제목 줄만 바꾸기로 했으므로(`_scenarios.py`)
+    // 그 밖의 줄이 하나라도 달라지면 전체 범위 교체가 뭔가를 더 지운 것이다(리뷰 R1-006).
+    const beforeLines = before.split("\n");
+    const appliedLines = applied.split("\n");
+    expect(appliedLines).toHaveLength(beforeLines.length);
+    const changedLines = appliedLines.filter(
+      (line, index) => line !== beforeLines[index],
+    );
+    expect(changedLines).toEqual([`title: "${PROPOSED_TITLE}"`]);
     await expectPhase(page, "검증 통과");
 
     // "적용 후 백테스트": 문서가 제안 기준과 달라졌으므로 확인을 거쳐 덮어쓴다.

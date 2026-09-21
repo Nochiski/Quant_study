@@ -11,12 +11,15 @@ Playwright 실행 없이 가르려면, 대본 자체의 계약이 여기서 먼�
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 
 import pytest
 
 from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import (
     DEFAULT_SCRIPTED_MODEL,
+    SCRIPTED_MARKER,
+    SLOW_ANSWER_DELAY_SCALE,
     ScriptedLlmProvider,
     scenario_for,
     search_then_failure,
@@ -110,7 +113,7 @@ class _ToolRecorder:
     ],
 )
 def test_the_question_picks_the_scenario(text: str, expected: object) -> None:
-    assert scenario_for(text) is expected
+    assert scenario_for(text).run is expected
 
 
 def test_the_simple_scenario_streams_text_and_ends() -> None:
@@ -119,12 +122,26 @@ def test_the_simple_scenario_streams_text_and_ends() -> None:
     assert [type(event) for event in events] == [TextDelta, TextDelta, Usage, Done]
 
 
-def test_the_slow_scenario_streams_more_chunks_than_the_simple_one() -> None:
-    """새로고침 중 재연결을 재현하려면 턴이 한 프레임보다 오래 살아 있어야 한다."""
-    slow = [event for event in slow_answer(_ToolRecorder()) if isinstance(event, TextDelta)]
-    simple = [event for event in simple_answer(_ToolRecorder()) if isinstance(event, TextDelta)]
+def test_the_slow_scenario_holds_the_turn_open_for_over_twenty_seconds() -> None:
+    """재연결을 재현하려면 턴 길이가 머신 속도가 아니라 대본이 정해야 한다(리뷰 R1-003).
 
-    assert len(slow) > len(simple)
+    브라우저가 새로고침하고 다시 붙는 데 드는 1~2초보다 한참 길어야, 빠른 장비에서 턴이 먼저
+    끝나 재연결 경로가 조용히 "이미 끝난 턴의 이력 읽기"로 바뀌는 일이 없다.
+    """
+    plan = scenario_for("천천히 설명해 줘")
+    events = list(plan.run(_ToolRecorder()))
+
+    naps: list[float] = []
+    provider = ScriptedLlmProvider(ProviderKind.ANTHROPIC, sleep=naps.append)
+    list(
+        provider.stream_turn(
+            "sk-fake", _profile(), _request("천천히 설명해 줘"), _ToolRecorder(), lambda: False
+        )
+    )
+
+    assert plan.delay_scale == SLOW_ANSWER_DELAY_SCALE
+    assert len(naps) == len(events)
+    assert sum(naps) > 20.0
 
 
 def test_the_proposal_scenario_reads_the_document_and_changes_only_its_title() -> None:
@@ -183,6 +200,27 @@ def test_the_probe_succeeds_without_touching_a_network() -> None:
     assert result.ok is True
     assert provider.kind is ProviderKind.OPENAI
     assert provider.default_model() == DEFAULT_SCRIPTED_MODEL
+
+
+def test_the_default_model_name_says_it_is_a_fake() -> None:
+    """설정 화면의 모델 자리에 그대로 나가는 문자열이다(리뷰 R1-004)."""
+    assert SCRIPTED_MARKER in DEFAULT_SCRIPTED_MODEL
+    assert ScriptedLlmProvider(ProviderKind.ANTHROPIC).default_model() == DEFAULT_SCRIPTED_MODEL
+
+
+def test_building_the_provider_warns_that_answers_come_from_a_script(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """켠 채로 배포하면 화면만 보고는 진짜와 구분되지 않는다 — 서버 로그가 정본 표식이다."""
+    with caplog.at_level(logging.WARNING):
+        ScriptedLlmProvider(ProviderKind.OPENAI)
+
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "SCRIPTED FAKE" in message
+    assert SCRIPTED_MARKER in message
+    assert ProviderKind.OPENAI.value in message
 
 
 def test_the_adapter_sleeps_between_chunks_so_the_stream_is_observable() -> None:

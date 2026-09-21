@@ -1,11 +1,14 @@
 from strategy_workbench.adapters.outbound.llm_scripted._adapter import (
     DEFAULT_SCRIPTED_MODEL,
+    SCRIPTED_MARKER,
     ScriptedLlmProvider,
 )
 from strategy_workbench.adapters.outbound.llm_scripted._scenarios import (
     SCENARIO_KEYWORDS,
+    SLOW_ANSWER_DELAY_SCALE,
     ExecuteTool,
     Scenario,
+    ScenarioPlan,
     scenario_for,
     search_then_failure,
     simple_answer,
@@ -16,8 +19,11 @@ from strategy_workbench.adapters.outbound.llm_scripted._scenarios import (
 __all__ = [
     "DEFAULT_SCRIPTED_MODEL",
     "SCENARIO_KEYWORDS",
+    "SCRIPTED_MARKER",
+    "SLOW_ANSWER_DELAY_SCALE",
     "ExecuteTool",
     "Scenario",
+    "ScenarioPlan",
     "ScriptedLlmProvider",
     "scenario_for",
     "search_then_failure",

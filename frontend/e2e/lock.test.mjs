@@ -12,15 +12,17 @@ import { spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -28,11 +30,11 @@ import {
   DEFAULT_LOCK_PATH,
   LOCK_DIRECTORY_NAME,
   PID_FILE_NAME,
-  PID_GRACE_MS,
   acquireLock,
   isProcessAlive,
   readLockPid,
   releaseLock,
+  sweepLeftovers,
   tryAcquireLock,
 } from "./lock.mjs";
 import {
@@ -101,7 +103,7 @@ const DEAD_PID = 2 ** 31 - 1;
  * 맞물리는 방식이 플랫폼마다 달라 테스트가 흔들리기 때문이다. 여기서는 유예가 지났다는 사실만
  * 필요하다.
  */
-const age = (path, ms = PID_GRACE_MS + 60_000) => {
+const age = (path, ms = 2 * 60 * 60 * 1000) => {
   const past = (Date.now() - ms) / 1000;
   utimesSync(path, past, past);
 };
@@ -178,6 +180,26 @@ describe("E2E 잠금", () => {
     expect(tryAcquireLock(path, process.pid)).toBe(false);
   });
 
+  it("자리가 차 있으면 올리기를 시도조차 하지 않는다", () => {
+    // 플랫폼 무관 단언. POSIX `rename(2)`는 대상이 **빈 디렉터리면 성공**하므로, 자리를 보지 않고
+    // 올리면 남이 `mkdir`로 막 잡고 pid를 쓰기 전인 잠금을 덮어쓴다(2차 리뷰 DEFECT-P105R2-001).
+    // Windows 는 그 rename 이 실패해 증상이 가려지므로, "시도 자체를 안 한다"를 직접 고정한다.
+    const path = lockPath();
+    mkdirSync(path);
+    const before = statSync(path).mtimeMs;
+
+    expect(tryAcquireLock(path, process.pid)).toBe(false);
+
+    // 갓 만들어진 남의 자리를 건드리지 않았다: 그대로 있고, 비어 있고, 시각도 그대로다.
+    expect(existsSync(path)).toBe(true);
+    expect(readdirSync(path)).toEqual([]);
+    expect(statSync(path).mtimeMs).toBe(before);
+    // 올리려다 만 staging 찌꺼기도 남기지 않는다.
+    expect(
+      readdirSync(dirname(path)).filter((name) => name.includes(".new-")),
+    ).toEqual([]);
+  });
+
   it("유예를 넘긴 pid 없는 잠금은 회수한다", () => {
     // 주인이 pid를 쓰기 전에 죽은 경우다. 영원히 막히면 안 된다.
     const path = lockPath();
@@ -196,6 +218,24 @@ describe("E2E 잠금", () => {
 
     expect(readLockPid(broken)).toBeNull();
     expect(tryAcquireLock(broken, process.pid)).toBe(true);
+  });
+
+  it("오래 남은 임시 디렉터리만 치운다", () => {
+    // 진행 중인 남의 임시 디렉터리를 지우면 그 프로세스가 깨진다 — 실제로 둘이 서로의 것을 지워
+    // 아무도 못 잡는 일이 있었다. 그래서 나이로 가린다(2차 리뷰 P3-6).
+    const path = lockPath();
+    const parent = dirname(path);
+    const stale = join(parent, `${basename(path)}.stale-1-1`);
+    const fresh = join(parent, `${basename(path)}.new-2-2`);
+    const unrelated = join(parent, "something-else");
+    for (const directory of [stale, fresh, unrelated]) mkdirSync(directory);
+    age(stale);
+
+    expect(sweepLeftovers(path)).toBe(1);
+
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(unrelated)).toBe(true);
   });
 
   it("살아 있는 주인은 기다렸다가 놓으면 잡는다", async () => {
@@ -350,12 +390,10 @@ describe("E2E 포트가 단위 실행에 새지 않는다", () => {
   });
 
   it("빌드 주소는 러너가 빌드 자식에만 넘긴다", async () => {
-    const code = stripComments(
-      await readFile(resolve("e2e/run-playwright.mjs"), "utf8"),
-    );
+    // 서식이 아니라 값을 본다 — Prettier 가 줄을 바꿔도 깨지지 않게(2차 리뷰 P3-5).
+    const { BUILD_ARGS } = await import("./build-command.mjs");
 
-    expect(code).toMatch(/VITE_API_BASE_URL/);
-    expect(code).toMatch(/npm", \["run", "build"\]/);
+    expect(BUILD_ARGS).toEqual(["run", "build"]);
   });
 });
 

@@ -122,6 +122,10 @@ def is_upgradeable_document(document: Mapping[str, object]) -> bool:
     변환 자체는 어느 갈래든 같다. step 들은 옛 판 모양에만 반응하고(`flatten_factors` 는 factors
     가 mapping 일 때만, `unary_aliases` 는 `kind: unary` 일 때만), `schema_version` step 이 버전
     줄을 결과 버전으로 정규화한다. 그래서 버전 줄이 이미 현재 판이어도 결과는 같다.
+
+    지금은 아는 버전이 1.0·1.1 둘뿐이라 본문 모양만 보면 충분하다. schema 1.2 가 들어오면 "미래
+    버전 + 옛 키 하나"가 1.1 로 강등되는 경로가 되므로, 버전 디스패치를 넣는 PR 에서 이 판정에
+    버전 상한을 함께 둬야 한다(2차 리뷰 P3-7).
     """
     return is_legacy_document(document) or bool(legacy_shape_hints(document))
 

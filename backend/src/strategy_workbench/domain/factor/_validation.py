@@ -265,7 +265,7 @@ def validate_factor_graph(
                     node_id,
                     f"nodes.{index_by_node_id[node_id]}",
                     "이 노드가 순환 참조에 묶여 있어 값을 계산할 수 없습니다. 고리 중 한 곳의 "
-                    f"입력을 끊어 주세요 — cycle={chain}",
+                    f"입력을 끊어 주세요 — {chain}",
                 )
             )
 
@@ -406,8 +406,10 @@ def _cycle_chain(group: tuple[str, ...], nodes: dict[str, ExpressionNode]) -> st
             if following == walk[0]:
                 break
             walk.append(following)
-        return " → ".join((*walk, walk[0]))
-    return "nodes=[" + ", ".join(group) + "]"
+        return "cycle=" + " → ".join((*walk, walk[0]))
+    # 갈래가 있으면 경로가 아니라 묶인 노드 목록이다. `키=값` 한 쌍이 되도록 키를 따로 쓴다
+    # (`error-messages.md`) — `cycle=nodes=[...]` 는 값 안에 `=` 가 또 들어간다.
+    return "cycle_nodes=[" + ", ".join(group) + "]"
 
 
 def _infer_contract(

@@ -19,13 +19,14 @@
 import {
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 export const LOCK_DIRECTORY_NAME = "quant-e2e.lock";
 /**
@@ -139,9 +140,10 @@ const reclaimDeadLock = (path, deadPid, pid) => {
  * `mkdir` 로 자리를 잡고 나중에 pid 를 쓰면 그 사이 잠금이 "pid 없는 상태"로 보이는 창이 생기고,
  * 회수 로직이 그 창을 죽은 잠금으로 오해한다. 먼저 딴 자리에 pid 까지 갖춘 디렉터리를 만들고
  * `rename` 한 번으로 올리면 그 창 자체가 없다 — 올라간 순간부터 pid 가 들어 있다.
- * `rename` 은 대상이 있으면 실패하므로(Windows 는 항상, POSIX 는 비어 있지 않은 디렉터리)
- * 동시에 올리려는 둘 중 하나만 성공한다. 잡는 마지막 동작이 원자적 rename 하나라
- * "회수했다가 다시 mkdir" 사이의 창이 없다(1차 리뷰 DEFECT-P105-002).
+ * 잡는 마지막 동작이 원자적 rename 하나라 "회수했다가 다시 mkdir" 사이의 창이 없다
+ * (1차 리뷰 DEFECT-P105-002). 다만 대상이 **빈 디렉터리**일 때의 의미가 플랫폼마다 다르다
+ * — Windows 는 실패하고 POSIX 는 교체에 성공한다. 그래서 호출자가 자리가 비었는지 먼저 보고
+ * 부른다(`tryAcquireLock`). 여기서는 빈 자리를 동시에 노리는 둘 중 하나만 이긴다는 것만 맡는다.
  * @param {string} path
  * @param {number} pid
  */
@@ -172,7 +174,15 @@ export const tryAcquireLock = (
   reclaimed = false,
   now = Date.now(),
 ) => {
-  if (publishLock(path, pid)) return true;
+  // **자리가 비었을 때만** 올린다. POSIX `rename(2)` 는 대상이 빈 디렉터리면 성공하므로, 자리를
+  // 보지 않고 올리면 다른 구현이 `mkdir` 로 막 잡고 pid 를 쓰기 전인 잠금을 덮어쓴다. 그러면 그
+  // 구현의 `writeFileSync` 가 우리 디렉터리에 자기 pid 를 적어 둘 다 주인이 된다 — 잠금이 막으려던
+  // 조용한 거짓 통과가 그 플랫폼에서만 되살아난다(2차 리뷰 DEFECT-P105R2-001).
+  // 빈 자리를 둘이 동시에 노리는 경우는 그대로 `rename` 원자성이 가른다.
+  if (lockAgeMs(path, now) === null && publishLock(path, pid)) {
+    sweepLeftovers(path);
+    return true;
+  }
   if (reclaimed) return false;
   const holder = readLockPid(path);
   if (holder !== null && isProcessAlive(holder)) return false;
@@ -183,7 +193,9 @@ export const tryAcquireLock = (
     if (age !== null && age < PID_GRACE_MS) return false;
   }
   if (!reclaimDeadLock(path, holder, pid)) return false;
-  return tryAcquireLock(path, pid, true, now);
+  const acquired = tryAcquireLock(path, pid, true, now);
+  if (acquired) sweepLeftovers(path);
+  return acquired;
 };
 
 /**
@@ -191,6 +203,43 @@ export const tryAcquireLock = (
  * @param {string} path
  * @param {number} pid
  */
+/**
+ * 앞선 실행이 남긴 `<lock>.new-*`·`<lock>.stale-*` 찌꺼기를 치운다.
+ *
+ * 올리거나 회수하는 중에 프로세스가 죽으면 그 임시 디렉터리가 남는다. 잠금 자체는 영향이 없지만
+ * 치우는 곳이 없으면 임시 디렉터리에 쌓인다(2차 리뷰 P3-6).
+ *
+ * **오래된 것만** 치운다. 잠금을 쥐었다고 다른 프로세스가 아무 일도 안 하는 것은 아니다 —
+ * 경합에서 진 쪽이 자기 `.stale-` 을 되돌리거나 `.new-` 를 정리하는 중일 수 있고, 그것을 지우면
+ * 그 프로세스가 깨진다(실제로 이 규칙 없이 두 쪽이 서로의 임시 디렉터리를 지워 아무도 잠금을
+ * 잡지 못했다). 한 번의 획득은 밀리초 단위라 한 시간을 넘긴 것은 확실히 버려진 것이다.
+ * @param {string} path
+ * @param {number} [olderThanMs]
+ * @param {number} [now]
+ */
+export const LEFTOVER_MAX_AGE_MS = 60 * 60 * 1000;
+
+export const sweepLeftovers = (
+  path,
+  olderThanMs = LEFTOVER_MAX_AGE_MS,
+  now = Date.now(),
+) => {
+  const parent = dirname(path);
+  const prefix = `${basename(path)}.`;
+  let swept = 0;
+  for (const name of readdirSync(parent)) {
+    if (!name.startsWith(prefix)) continue;
+    const suffix = name.slice(prefix.length);
+    if (!suffix.startsWith("new-") && !suffix.startsWith("stale-")) continue;
+    const leftover = join(parent, name);
+    const age = lockAgeMs(leftover, now);
+    if (age === null || age < olderThanMs) continue;
+    rmSync(leftover, { recursive: true, force: true });
+    swept += 1;
+  }
+  return swept;
+};
+
 export const releaseLock = (path, pid) => {
   if (readLockPid(path) !== pid) return false;
   rmSync(path, { recursive: true, force: true });

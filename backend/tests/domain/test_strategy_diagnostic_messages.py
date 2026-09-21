@@ -513,8 +513,8 @@ def test_cycle_diagnostic_misses_no_node_of_a_tangle() -> None:
     cycle = [issue for issue in issues if issue.code == "factor.graph.cycle"]
 
     assert sorted(issue.node_id or "" for issue in cycle) == ["1", "2", "3", "4"]
-    # 갈래가 있는 묶음은 있지도 않은 경로를 화살표로 그리지 않는다.
-    assert all("nodes=[1, 2, 3, 4]" in issue.message for issue in cycle)
+    # 갈래가 있는 묶음은 있지도 않은 경로를 화살표로 그리지 않고, `키=값` 한 쌍으로 낸다.
+    assert all("cycle_nodes=[1, 2, 3, 4]" in issue.message for issue in cycle)
 
 
 def test_duplicate_node_diagnostic_names_the_repeated_id() -> None:

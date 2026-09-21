@@ -883,6 +883,35 @@ def test_every_code_the_routes_actually_emit_is_in_the_contract(tmp_path: Path) 
     assert "assistant.probe_failed" in emitted
 
 
+def test_a_profile_whose_secret_vanished_is_refused_with_its_own_code(tmp_path: Path) -> None:
+    """비밀만 사라진 프로파일이 어떤 422를 내는지 고정한다 (Phase A 감사 NB-8).
+
+    선언 집합 테스트(`_DECLARED_ASSISTANT_CODES`)는 그 문자열이 **계약에 있는지**만 본다. 라우트의
+    `isinstance` 갈래 순서나 코드 문자열이 바뀌어도 그 테스트는 계속 초록이다. 생성 SDK의 판별
+    유니언은 `code`로 갈라지므로, 실제로 나가는 코드가 달라지면 프론트가 "알 수 없는 오류"로
+    떨어진다. 그래서 이 갈래를 실제로 태운다.
+
+    비밀 파일을 직접 건드리는 이유는 그 상태가 앱 안에서 만들어지지 않기 때문이다 — 삭제는
+    프로파일과 비밀을 같이 지운다. 사람이 파일을 지웠거나 설정 디렉터리가 초기화된 경우다.
+    """
+    client = _client(tmp_path, _GatedProvider())
+    created = _create_profile(client)
+    profile_id = created["json"]["profile_id"]
+    secrets_path = tmp_path / "secrets.json"
+    stored = json.loads(secrets_path.read_text(encoding="utf-8"))
+    assert profile_id in stored, "프로파일 생성이 비밀을 쓰지 않았다면 이 테스트는 공허하다"
+    del stored[profile_id]
+    secrets_path.write_text(json.dumps(stored), encoding="utf-8")
+
+    response = client.post(f"{_ASSISTANT}/providers/{profile_id}/test")
+
+    assert response.status_code == 422, response.text
+    assert response.json()["detail"]["code"] == "assistant.provider_secret_missing"
+    # 비밀 파일 경로는 응답에 나가지 않는다(A-03 리뷰). 예외는 `profile_id`만 담는다.
+    assert str(secrets_path) not in response.text
+    assert _API_KEY not in response.text
+
+
 def test_the_event_stream_response_declares_its_frame_schema(tmp_path: Path) -> None:
     """SSE payload에 스키마가 없으면 생성 SDK가 `unknown`을 만들고, B-02가 손으로 캐스팅한다."""
     client = _client(tmp_path, _GatedProvider())

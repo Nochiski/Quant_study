@@ -345,17 +345,51 @@ def test_custom_header_env_cannot_replace_the_profile_key(
     assert "authorization" not in headers
 
 
+def _sdk_credential_env_names() -> tuple[str, ...]:
+    """SDK가 자격 증명 탐색에 읽는 환경 변수 전수.
+
+    목록을 손으로 적지 않고 **SDK의 상수에서 읽는다.** 손으로 적으면 SDK가 변수를 하나 더
+    읽기 시작해도 기준선이 그대로라 아무것도 빨개지지 않는다 — 그 침묵이 NB-9이 지적한 위험이다.
+
+    `_constants.py` 밖에서 읽히는 둘은 여기서 더한다. `ANTHROPIC_CUSTOM_HEADERS`는 클라이언트
+    생성 경로가, `ANTHROPIC_WEBHOOK_SIGNING_KEY`는 webhook 검증이 읽는다. 둘 다 `ENV_*` 상수가
+    아니라 자동으로 딸려오지 않는다.
+    """
+    from anthropic.lib.credentials import _constants
+
+    discovered = tuple(
+        value
+        for name, value in sorted(vars(_constants).items())
+        if name.startswith("ENV_") and isinstance(value, str)
+    )
+    # 목록이 비면 아래 기준선이 "아무것도 안 심은" 테스트로 조용히 바뀐다.
+    assert discovered, "SDK에서 자격 증명 환경 변수를 하나도 찾지 못했다"
+    return (*discovered, "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_WEBHOOK_SIGNING_KEY")
+
+
 def test_the_only_credential_on_the_wire_is_the_profile_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """환경 변수가 아무것도 없을 때의 기준선. 위 테스트가 무엇과 비교되는지 고정한다."""
-    for name in (
+    """SDK가 읽는 환경 변수를 **전부 심고도** 프로파일 비밀 하나만 나가는지 본다 (감사 NB-9).
+
+    명시 `api_key`가 SDK의 자격 증명 auto-discovery 체인을 gate하기 때문에 오늘은 전부 무해하다.
+    이 테스트가 지키는 것은 그 gate다 — SDK 업그레이드가 gate를 바꾸면 여기서 먼저 드러난다.
+    OpenAI adapter에는 같은 성질의 기준선이 이미 있었고, 이쪽은 4종만 지우는 좁은 형태였다.
+
+    심는 값이 전부 `sk-ant-`로 시작하는 이유는 마지막 단언 때문이다. 헤더에 그 접두가 붙은 값이
+    프로파일 비밀 말고 또 있으면 주입된 것이 새어 나간 것이다.
+    """
+    planted = _sdk_credential_env_names()
+    for name in planted:
+        monkeypatch.setenv(name, f"sk-ant-ENV-{name}")
+    # 목적지를 바꾸는 둘은 형식이 정해져 있어 위 접두를 쓸 수 없다.
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://evil.example.com")
+    monkeypatch.setenv(
         "ANTHROPIC_CUSTOM_HEADERS",
-        "ANTHROPIC_AUTH_TOKEN",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-    ):
-        monkeypatch.delenv(name, raising=False)
+        f"{AUTH_HEADER}: sk-ant-ENV-CUSTOM-HEADER"
+        + chr(10)
+        + "Authorization: Bearer sk-ant-ENV-BEARER",
+    )
 
     headers = _headers_from_a_production_call(monkeypatch)
 
@@ -363,3 +397,17 @@ def test_the_only_credential_on_the_wire_is_the_profile_secret(
     assert "authorization" not in headers
     credentials = [value for name, value in headers.items() if "sk-ant-" in value]
     assert credentials == [SECRET]
+
+
+def test_the_credential_env_baseline_covers_every_name_the_sdk_reads() -> None:
+    """기준선이 실제로 전수인지 고정한다.
+
+    SDK가 `ENV_*` 상수를 더하면 위 테스트가 자동으로 그것을 심지만, 상수 **밖에서** 읽는 변수가
+    늘면 여기서 걸리지 않는다. 그래서 오늘 아는 전수(14종)를 수로 못 박아 둔다. SDK를 올릴 때
+    이 수가 바뀌면 무엇이 늘었는지 확인하고 갱신하라는 신호다.
+    """
+    names = _sdk_credential_env_names()
+
+    assert len(names) == len(set(names))
+    assert len(names) == 14, f"SDK가 읽는 환경 변수 수가 바뀌었다 — names={names}"
+    assert {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"} <= set(names)

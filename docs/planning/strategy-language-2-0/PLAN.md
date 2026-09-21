@@ -228,6 +228,24 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-21 — P1-02 결함 수정(Phase 1 감사 BLOCKING): SoT 대장에 커밋된 병합 충돌 표식.
+  **상황**: P1-02를 28 PR 계획 tip(`ea7e2fa4`) 위로 `rebase --onto`할 때, 충돌 해소를
+  `git add -A` + `rebase --continue` 반복 스크립트로 돌리면서 각 단계의 남은 표식을
+  확인하지 않았다. 출력도 `tail -3`으로 잘라 봐 SoT 파일의 CONFLICT 줄을 놓쳤다.
+  **인풋**: 3번째 커밋 `a9121667`(원본 `86ce099c`) replay — PLAN.md와 함께
+  `.claude/rules/strategy-workbench-sot.md`도 충돌했는데 PLAN만 해소하고 staging했다.
+  **에러 위치**: `.claude/rules/strategy-workbench-sot.md:27-39` — 정본 대장 안에
+  `<<<<<<< HEAD`/`=======`/`>>>>>>> 86ce099c` 표식과 함께 5행(실행 설정·그래프 표현 투영·
+  편집 이력·authoring schema 버전·업그레이드 변환)이 두 벌로 남았다. `a9121667`부터
+  P1-02 tip `db3bc079`, 이어받은 P1-03~P1-05 tip `a55e7a67`까지 전파됐다.
+  **위험성**: 표식이 있어도 Markdown은 정상 렌더되고 게이트도 전부 통과해 조용하다.
+  되살아난 24 PR 시절 행이 P2-01 브리지를 `application/backtest_run/_environment.py`에
+  두라고 해 WORKFLOW P2-01의 금지 배치와 정면으로 모순되고, 1.2 업그레이드 step과
+  `FROZEN_SCHEMA_VERSIONS` 예약이 사라져 후속 PR이 어느 행을 정본으로 읽느냐에 따라
+  서로 다른 구현을 낳는다(정본 분열).
+  **수정**: 4행(실행 설정·그래프 투영·schema 버전·업그레이드 변환)은 P0-01 개정본,
+  편집 이력 1행은 `86ce099c` 판으로 해소. 재발 방지로 저장소 전체 충돌 표식 검출
+  (`tools/quant_study_dev/conflict_markers.py`, 단위 테스트 8건, CI backend job step)을 추가했다.
 - 2026-09-21 — P1-02 구현·리뷰 4회: PR #173. 되돌리기·다시 실행을 탭 밖 버튼과 IDE 전역
   단축키 두 경로로 내고, 편집 이력의 단일 정본을 편집기(CodeMirror history)로 못 박았다
   (SoT 행 추가). 1차 REQUEST_CHANGES: 같은 문서 전체 교체가 비격리 `setText`로 가 직후

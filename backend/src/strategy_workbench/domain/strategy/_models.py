@@ -26,12 +26,32 @@ def _factor_authoring(source: str, *, identity: bool = False) -> dict[str, objec
     return metadata
 
 
-class ComparisonOperator(StrEnum):
+class EligibilityOperator(StrEnum):
+    """유니버스 필터 한 줄의 비교 방식 (schema 1.2, spec D3 S5).
+
+    앞의 다섯(`gt`~`eq`)은 후보 하나의 값만 보면 판정되는 **절대** 규칙이고, `top_*` 는 같은
+    기준일 프레임의 **횡단면** 순위를 봐야 판정된다. `value` 의 의미도 갈린다 — 절대 규칙은
+    비교 임계값, `top_percent` 는 비율, `top_count` 는 개수다.
+
+    이 enum 은 전용이다. 값이 겹친다고 다른 비교 연산자 enum 에 얹으면 `top_*` 가 그 enum 의
+    소비자(팩터 그래프 `comparison` 노드 등)로 흘러들어, 모집단 없이 판정할 수 없는 값이
+    catch-all 분기에서 조용히 다른 비교로 떨어진다.
+    """
+
     GREATER_THAN = "gt"
     GREATER_THAN_OR_EQUAL = "gte"
     LESS_THAN = "lt"
     LESS_THAN_OR_EQUAL = "lte"
     EQUAL = "eq"
+    TOP_PERCENT = "top_percent"
+    TOP_COUNT = "top_count"
+
+
+# 절대/횡단면 갈림의 유일한 owner. 컴파일러의 1-pass·2-pass 와 validator 가 같은 집합을 읽는다 —
+# 목록을 소비자마다 다시 적으면 연산자를 늘릴 때 한쪽만 바뀌어 새 연산자가 1-pass 로 샌다.
+CROSS_SECTIONAL_ELIGIBILITY_OPERATORS: frozenset[EligibilityOperator] = frozenset(
+    {EligibilityOperator.TOP_PERCENT, EligibilityOperator.TOP_COUNT}
+)
 
 
 class FactorDirection(StrEnum):
@@ -86,7 +106,7 @@ class StrategyIdentity:
 @dataclass(frozen=True)
 class EligibilityRule:
     field_id: str = field(metadata=CATALOG_EQUITY_FIELD)
-    operator: ComparisonOperator
+    operator: EligibilityOperator
     value: float
 
 

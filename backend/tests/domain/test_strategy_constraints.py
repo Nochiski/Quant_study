@@ -33,7 +33,7 @@ from strategy_workbench.domain.strategy.facade.constraints import (
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
-    ComparisonOperator,
+    EligibilityOperator,
     EligibilityRule,
     EligibilityStep,
     FloatParameter,
@@ -253,7 +253,7 @@ def test_every_unbounded_strategy_numeric_leaf_must_be_finite(value: float) -> N
             replace(
                 spec,
                 eligibility=EligibilityStep(
-                    (EligibilityRule("price.close", ComparisonOperator.GREATER_THAN, value),)
+                    (EligibilityRule("price.close", EligibilityOperator.GREATER_THAN, value),)
                 ),
             ),
             "eligibility.rules.0.value",

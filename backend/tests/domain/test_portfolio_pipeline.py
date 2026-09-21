@@ -29,7 +29,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     compile_target_tape_with_trace,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
-    ComparisonOperator,
+    EligibilityOperator,
     EligibilityRule,
     EligibilityStep,
     FactorDirection,
@@ -135,7 +135,7 @@ def test_eligibility_and_point_in_time_rules_explain_every_rejection() -> None:
     spec = replace(
         spec,
         eligibility=EligibilityStep(
-            (EligibilityRule("price.market_cap", ComparisonOperator.GREATER_THAN, 100.0),)
+            (EligibilityRule("price.market_cap", EligibilityOperator.GREATER_THAN, 100.0),)
         ),
     )
     day = date(2026, 1, 2)
@@ -985,7 +985,9 @@ def _factor_score_weights(
     rules = (
         ()
         if eligible_above is None
-        else (EligibilityRule(_ELIGIBILITY_FIELD, ComparisonOperator.GREATER_THAN, eligible_above),)
+        else (
+            EligibilityRule(_ELIGIBILITY_FIELD, EligibilityOperator.GREATER_THAN, eligible_above),
+        )
     )
     spec = replace(
         spec,

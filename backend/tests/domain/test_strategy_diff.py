@@ -17,7 +17,7 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.domain.strategy.facade.diff import DiffEntry, DiffKind, diff_strategy_specs
 from strategy_workbench.domain.strategy.facade.document import SourceFormat
 from strategy_workbench.domain.strategy.facade.specification import (
-    ComparisonOperator as Op,
+    EligibilityOperator as Op,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     EligibilityRule,

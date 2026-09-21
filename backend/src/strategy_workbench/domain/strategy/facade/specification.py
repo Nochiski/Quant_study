@@ -31,8 +31,9 @@ from strategy_workbench.domain.strategy._canonical import (
     strategy_spec_hash,
 )
 from strategy_workbench.domain.strategy._models import (
+    CROSS_SECTIONAL_ELIGIBILITY_OPERATORS,
     ChoiceParameter,
-    ComparisonOperator,
+    EligibilityOperator,
     EligibilityRule,
     EligibilityStep,
     FactorDirection,
@@ -54,15 +55,16 @@ from strategy_workbench.domain.strategy._models import (
 )
 
 __all__ = [
+    "CROSS_SECTIONAL_ELIGIBILITY_OPERATORS",
     "BinaryNode",
     "BinaryOperator",
     "ChoiceParameter",
     "ComparisonNode",
-    "ComparisonOperator",
     "ConditionalNode",
     "ConstantNode",
     "CrossSectionalNode",
     "CrossSectionalOperator",
+    "EligibilityOperator",
     "EligibilityRule",
     "EligibilityStep",
     "ExpressionNode",

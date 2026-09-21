@@ -56,7 +56,7 @@ from strategy_workbench.domain.portfolio.facade.construction import PortfolioTra
 from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
-    ComparisonOperator,
+    EligibilityOperator,
     EligibilityRule,
     EligibilityStep,
     FloatParameter,
@@ -378,7 +378,7 @@ def test_all_non_finite_strategy_leaves_fail_before_metadata_and_raw(
         spec = replace(
             spec,
             eligibility=EligibilityStep(
-                (EligibilityRule("price.close", ComparisonOperator.GREATER_THAN, value),)
+                (EligibilityRule("price.close", EligibilityOperator.GREATER_THAN, value),)
             ),
         )
     elif location == "signal":

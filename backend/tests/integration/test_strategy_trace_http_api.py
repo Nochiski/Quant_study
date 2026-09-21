@@ -45,6 +45,10 @@ def _scope(
 
 def _inline_request(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]:
     spec = client.get("/api/v1/strategies/template").json()
+    # 이 테스트의 단언은 "trace 행 값 == 그 종목의 합성 점수" 다. 팩터 하나·weight 1.0·
+    # `direction: high` 에서 그 항등식은 정규화가 항등일 때만 성립하므로 `none` 으로 고정한다.
+    # 기본값 `rank` 의 횡단면 규칙은 도메인 테스트가 덮는다(P2-04 리뷰 P3).
+    spec["signal"] = dict(spec.get("signal") or {}, normalization="none")
     as_of, security_ids, factor_id = _scope(client, spec)
     factor = spec["factors"][0]
     return spec, {
@@ -130,14 +134,8 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
     by_security = {item["security_id"]: item for item in expected_candidates}
     construction = {item["security_id"]: item for item in payload["target"]["construction"]}
     assert set(construction) == set(request["security_ids"])
-    # 새 문서 기본 정규화가 `rank` 라서 합성 점수는 팩터 원시값이 아니라 그 값의 횡단면 순위다
-    # (P2-04). 두 값이 같지는 않지만 단일 `direction: high` 팩터에서는 순서가 보존되므로,
-    # trace 값으로 정렬한 순서가 합성 점수로 정렬한 순서와 같아야 한다.
-    ordered_scores = [
-        by_security[row["security_id"]]["composite_score"]
-        for row in sorted(payload["trace"]["rows"], key=lambda item: item["value"])
-    ]
-    assert ordered_scores == sorted(ordered_scores)
+    for row in payload["trace"]["rows"]:
+        assert row["value"] == by_security[row["security_id"]]["composite_score"]
     for security_id, row in construction.items():
         candidate = by_security[security_id]
         assert row["composite_score"] == candidate["composite_score"]

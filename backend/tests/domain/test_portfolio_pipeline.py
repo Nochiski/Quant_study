@@ -163,7 +163,8 @@ def test_eligibility_and_point_in_time_rules_explain_every_rejection() -> None:
 
 def test_composite_rank_threshold_regime_and_long_short_selection() -> None:
     # `score_threshold` 는 원시값 합성 점수를 기준으로 쓰던 1.1 규칙이라 `none` 으로 고정한다.
-    # 기본값 `rank` 에서의 문턱 의미는 아래 정규화 전용 테스트가 따로 덮는다(P2-04).
+    # `rank` 에서 같은 필드가 0~1 백분위와 비교된다는 사실은
+    # `test_score_threshold_compares_against_the_percentile_under_rank` 가 따로 덮는다(P2-04).
     spec = _spec()
     spec = replace(
         spec,
@@ -204,9 +205,13 @@ def test_composite_rank_threshold_regime_and_long_short_selection() -> None:
 
 @pytest.mark.parametrize("weighting", tuple(WeightingMethod))
 def test_equal_factor_rank_and_risk_weighting(weighting: WeightingMethod) -> None:
+    # 가중 방식 자체의 산술을 보는 테스트라 원시 점수(`none`)로 고정한다. 기본값 `rank` 에서는
+    # 횡단면 최하위가 0점이 되어 `factor_score` 가 그 종목을 비중 0으로 빼므로(P2-04 리뷰 P2-1)
+    # 목표 3건이라는 전제가 깨진다 — 그 동작은 아래 전용 테스트가 덮는다.
     spec = _spec()
     spec = replace(
         spec,
+        signal=replace(spec.signal, normalization=SignalNormalization.NONE),
         portfolio=replace(spec.portfolio, selection_count=3, weighting=weighting),
         risk=replace(spec.risk, risk_field_id="risk.volatility"),
     )
@@ -890,7 +895,8 @@ def test_rank_normalization_stops_a_large_unit_factor_from_dominating_selection(
     """아이디어 2: 단위가 다른 두 팩터를 결합할 때 `rank` 가 한쪽 지배를 막는다.
 
     `alpha` 는 0~1 구간, `scale` 은 만 단위다. 같은 weight 로 원시값을 더하면 `scale` 하나가
-    선정을 결정하고, `rank` 는 둘을 같은 0~1 구간으로 맞춰 `alpha` 가 결과를 되돌린다.
+    선정을 결정한다. `rank` 는 둘을 같은 0~1 구간으로 맞춰 그 지배를 없앤다 — 이 fixture 에서는
+    두 종목이 0.5 동점이 되고 `security_id` 오름차순 tie-break 로 갈린다.
     """
     values = {"a": (1.0, 10_000.0), "b": (0.0, 40_000.0)}
     observations = tuple(
@@ -931,3 +937,148 @@ def test_normalization_reaches_the_tape_hash_through_the_strategy_hash() -> None
 
     assert len({tape.strategy_hash for tape in tapes.values()}) == len(SignalNormalization)
     assert len({tape.tape_hash for tape in tapes.values()}) == len(SignalNormalization)
+
+
+# --- P2-04 리뷰 P2-1: 가중 방식 × 정규화 조합 ----------------------------------------------
+
+
+def _weight_table(method: SignalNormalization) -> dict[str, float]:
+    """`weighting: factor_score` 에서 종목별 목표 비중. tape 에 없는 종목은 빠진다."""
+    day = _NORMALIZATION_DAY
+    observations = tuple(
+        _observation(day, security_id, value)
+        for security_id, value in (("a", 1.0), ("b", 2.0), ("c", 3.0), ("d", 4.0), ("e", 5.0))
+    )
+    spec = _spec()
+    spec = replace(
+        spec,
+        signal=replace(spec.signal, normalization=method),
+        portfolio=replace(
+            spec.portfolio, selection_count=5, weighting=WeightingMethod.FACTOR_SCORE
+        ),
+        risk=replace(spec.risk, max_name_weight=1.0),
+    )
+    frame = _compile(spec, observations).frames[0]
+    return {item.security_id: item.weight for item in frame.targets}
+
+
+def test_factor_score_weighting_keeps_raw_proportions_under_none() -> None:
+    """1.1 수치 회귀: 원시값 1~5 가 그대로 비중 비례가 된다."""
+    assert _weight_table(SignalNormalization.NONE) == {
+        "a": pytest.approx(1 / 15),
+        "b": pytest.approx(2 / 15),
+        "c": pytest.approx(3 / 15),
+        "d": pytest.approx(4 / 15),
+        "e": pytest.approx(5 / 15),
+    }
+
+
+def test_factor_score_weighting_drops_a_zero_score_instead_of_a_dust_target() -> None:
+    """`rank` 의 횡단면 최하위는 정확히 0.0 이라 배분 몫이 없다 — tape 에서 빠진다.
+
+    예전 `max(abs(score), 1e-12)` 바닥값은 그 종목에 `4e-13` 짜리 dust 비중을 주고 그것이
+    `target_weight != 0` 필터를 통과해 tape 에 남았다(P2-04 리뷰 P2-1). 기본값이 `rank` 라
+    이 dust 는 기본 동작이었다.
+    """
+    table = _weight_table(SignalNormalization.RANK)
+
+    assert table == {
+        "b": pytest.approx(0.1),
+        "c": pytest.approx(0.2),
+        "d": pytest.approx(0.3),
+        "e": pytest.approx(0.4),
+    }
+    assert sum(table.values()) == pytest.approx(1.0)
+
+
+def test_a_zero_score_candidate_records_why_it_left_the_tape() -> None:
+    """빠진 사실이 trace 에 남아야 "왜 없지?" 를 사람이 답할 수 있다."""
+    day = _NORMALIZATION_DAY
+    observations = tuple(
+        _observation(day, security_id, value)
+        for security_id, value in (("a", 1.0), ("b", 2.0), ("c", 3.0))
+    )
+    spec = _spec()
+    spec = replace(
+        spec,
+        signal=replace(spec.signal, normalization=SignalNormalization.RANK),
+        portfolio=replace(
+            spec.portfolio, selection_count=3, weighting=WeightingMethod.FACTOR_SCORE
+        ),
+        risk=replace(spec.risk, max_name_weight=1.0),
+    )
+
+    frame = _compile(spec, observations).frames[0]
+    lowest = {item.security_id: item for item in frame.candidates}["a"]
+
+    assert lowest.composite_score == pytest.approx(0.0)
+    assert ExclusionReason.SCORE_THRESHOLD in lowest.exclusion_reasons
+    assert lowest.selected is False and lowest.target_weight == 0.0
+
+
+def test_zscore_with_factor_score_weighting_is_a_compile_error() -> None:
+    """표준화 점수 × 점수 비례 가중은 실행을 막는다(P2-04 리뷰 P2-1).
+
+    `_weight_scores` 가 `abs(composite_score)` 를 쓰므로 평균 0 중심의 zscore 위에서는
+    "신호가 세다" 가 아니라 "평균에서 멀다" 가 비중이 된다 — 횡단면 최악 종목이 최고 종목과
+    같은 최대 비중을 받는다. 부호 있는 점수의 비중 변환 규칙은 P2-07 이 설계한다.
+    """
+    base = _spec()
+    incompatible = replace(
+        base,
+        portfolio=replace(base.portfolio, weighting=WeightingMethod.FACTOR_SCORE),
+        signal=replace(base.signal, normalization=SignalNormalization.ZSCORE),
+    )
+
+    validation = validate_strategy(incompatible)
+
+    assert not validation.valid
+    (issue,) = [
+        item
+        for item in validation.issues
+        if item.code == "strategy.portfolio.weighting_normalization_incompatible"
+    ]
+    assert issue.path == "portfolio.weighting"
+    assert "got=" in issue.message and "allowed=" in issue.message
+
+    for allowed in (SignalNormalization.NONE, SignalNormalization.RANK):
+        relaxed = replace(incompatible, signal=replace(incompatible.signal, normalization=allowed))
+        assert validate_strategy(relaxed).valid, allowed
+    for allowed_weighting in (WeightingMethod.EQUAL, WeightingMethod.RANK):
+        relaxed = replace(
+            incompatible, portfolio=replace(incompatible.portfolio, weighting=allowed_weighting)
+        )
+        assert validate_strategy(relaxed).valid, allowed_weighting
+
+
+def test_score_threshold_compares_against_the_percentile_under_rank() -> None:
+    """`rank` 에서 `score_threshold` 는 원시값이 아니라 0~1 백분위와 비교된다.
+
+    같은 문턱 값이 `none` 과 `rank` 에서 전혀 다른 필터가 된다 — 1.1 문서를 그대로 옮기면
+    문턱이 사실상 꺼지거나(원시값 스케일이 1 보다 클 때) 전부 걸러낸다(P2-04 리뷰 P3).
+    """
+    observations = tuple(
+        _observation(_NORMALIZATION_DAY, security_id, value)
+        for security_id, value in (("a", 10.0), ("b", 20.0), ("c", 30.0))
+    )
+
+    def blocked(method: SignalNormalization, threshold: float) -> set[str]:
+        spec = _spec()
+        spec = replace(
+            spec,
+            signal=replace(spec.signal, normalization=method, score_threshold=threshold),
+            portfolio=replace(spec.portfolio, selection_count=3),
+        )
+        frame = _compile(spec, observations).frames[0]
+        return {
+            item.security_id
+            for item in frame.candidates
+            if ExclusionReason.SCORE_THRESHOLD in item.exclusion_reasons
+        }
+
+    # 원시값 10·20·30 은 문턱 0.5 를 전부 넘는다.
+    assert blocked(SignalNormalization.NONE, 0.5) == set()
+    # 같은 문턱이 `rank` 에서는 백분위 0.0·0.5·1.0 과 비교되어 최하위만 걸린다.
+    assert blocked(SignalNormalization.RANK, 0.5) == {"a"}
+    # 백분위는 1.0 을 넘지 않으므로 1 보다 큰 문턱은 전부 걸러낸다.
+    assert blocked(SignalNormalization.RANK, 1.5) == {"a", "b", "c"}

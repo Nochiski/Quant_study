@@ -450,6 +450,34 @@ def _compile_frame(
     )
 
 
+def _signal_value(
+    spec: StrategySpec,
+    observation: PortfolioObservation,
+    factor_id: str,
+    raw: float,
+    normalized_signals: Mapping[tuple[str, str], float],
+) -> float:
+    """가중 합에 들어갈 값 하나. `none` 이면 원시값, 그 밖에는 정규화 값이다.
+
+    `none` 이 아닌데 조회가 빗나가면 **기본값으로 떨어지지 않고 올린다.** default 를 원시값으로
+    두면 정규화된 값과 원시값이 같은 가중 합에 섞여, 이 PR 이 없애려던 단위 지배가 진단도 예외도
+    없이 되살아난다(P2-04 리뷰 P2-2). 지금은 `_cross_sectional_signals` 의 모집단 술어와
+    `_score_candidate` 의 값 단위 탈락 술어가 글자 그대로 같아서 도달 불가이지만, 그 전제를
+    건드리는 변경(예: 모집단을 eligible 종목으로 좁히기)이 오면 조용히 틀리는 대신 멈춰야 한다.
+    """
+    if spec.signal.normalization is SignalNormalization.NONE:
+        return raw
+    try:
+        return normalized_signals[(factor_id, observation.security_id)]
+    except KeyError as error:
+        raise ValueError(
+            "normalized signal missing for a scored factor value — "
+            f"as_of={observation.as_of} security_id={observation.security_id!r} "
+            f"factor_id={factor_id!r} normalization={spec.signal.normalization.value!r} "
+            f"population_size={len(normalized_signals)}"
+        ) from error
+
+
 def _cross_sectional_signals(
     spec: StrategySpec,
     observations: tuple[PortfolioObservation, ...],
@@ -601,11 +629,8 @@ def _score_candidate(
                 )
             continue
         direction = 1.0 if factor.direction is FactorDirection.HIGH else -1.0
-        # `none` 이면 빈 맵이라 원시값이 그대로 들어간다. 그 밖에는 `_cross_sectional_signals` 가
-        # 이 팩터·종목을 모집단에 넣었다는 뜻이고, 위 결측·공개일·유한성 검사를 모두 통과한
-        # 값이므로 조회가 실패하지 않는다.
-        signal_value = normalized_signals.get(
-            (factor.factor_id, observation.security_id), value.value
+        signal_value = _signal_value(
+            spec, observation, factor.factor_id, value.value, normalized_signals
         )
         weighted_value = _finite(
             direction * factor.weight * signal_value,
@@ -915,7 +940,16 @@ def _weight_scores(
         if spec.portfolio.weighting is WeightingMethod.EQUAL:
             score = 1.0
         elif spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE:
-            score = max(abs(candidate.composite_score or 0.0), 1e-12)
+            magnitude = abs(candidate.composite_score or 0.0)
+            if magnitude == 0.0:
+                # 점수 비례 가중에서 0점은 배분받을 몫이 없다. 예전 `max(..., 1e-12)` 바닥값은
+                # 0점 종목에 dust 비중(1e-12 / Σscore)을 주고 그것이 `target_weight != 0` 필터를
+                # 통과해 tape 에 남았다. `rank` 의 횡단면 최하위가 **항상 정확히 0.0** 이라
+                # 1.2 기본 설정에서 그 dust 가 상시 발생한다(P2-04 리뷰 P2-1). 비중 0으로 빼고
+                # 사유를 남겨 trace 가 "점수가 0이라 빠졌다"를 말하게 한다.
+                reasons[candidate.security_id] = ExclusionReason.SCORE_THRESHOLD
+                continue
+            score = magnitude
         elif spec.portfolio.weighting is WeightingMethod.RANK:
             score = float(len(selected) - min(order, len(selected)) + 1)
         else:

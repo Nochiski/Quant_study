@@ -26,6 +26,7 @@ from ._models import (
     FloatParameter,
     IntegerParameter,
     PortfolioSide,
+    SignalNormalization,
     StrategySpec,
     WeightingMethod,
 )
@@ -208,6 +209,28 @@ def validate_strategy(
                 "strategy.portfolio.liquidity_field",
                 "portfolio.liquidity_field_id",
                 "최소 유동성을 쓰려면 유동성 필드를 지정해야 합니다.",
+            )
+        )
+    if (
+        spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE
+        and spec.signal.normalization is SignalNormalization.ZSCORE
+    ):
+        # 부호 있는 합성 점수를 비중으로 옮기는 규칙이 아직 없다. `_weight_scores` 는
+        # `abs(composite_score)` 를 쓰므로 평균 0 중심의 zscore 위에서는 "신호가 세다" 가 아니라
+        # "평균에서 멀다" 가 비중이 된다 — 횡단면 최악 종목이 최고 종목과 같은 최대 비중을 받는다.
+        # 경고로 두면 조용히 방향이 뒤집힌 포트폴리오가 나가므로 실행을 막는다(P2-04 리뷰 P2-1).
+        issues.append(
+            semantic_issue(
+                "strategy.portfolio.weighting_normalization_incompatible",
+                "portfolio.weighting",
+                "표준화 점수는 평균을 기준으로 부호가 갈려서 점수 비례 가중과 함께 쓸 수 없습니다. "
+                "가장 낮은 종목이 가장 높은 종목과 같은 비중을 받습니다. "
+                f"got=weighting {WeightingMethod.FACTOR_SCORE.value} + "
+                f"normalization {SignalNormalization.ZSCORE.value}, "
+                f"allowed=normalization {SignalNormalization.NONE.value}/"
+                f"{SignalNormalization.RANK.value} 또는 weighting "
+                f"{WeightingMethod.EQUAL.value}/{WeightingMethod.RANK.value}/"
+                f"{WeightingMethod.RISK.value}",
             )
         )
     if abs(spec.risk.net_exposure) > spec.risk.gross_exposure:

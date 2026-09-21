@@ -65,6 +65,15 @@ DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL = 16_000
 DEFAULT_MAX_TURN_OUTPUT_TOKENS = 64_000
 DEFAULT_TURN_TIMEOUT_SECONDS = 300.0
 
+# 의미 있는 호출 하나의 최소 출력 토큰. 남은 턴 예산이 이보다 작으면 adapter는 호출하지
+# 않고 예산 소진으로 끝낸다. 1토큰짜리 호출은 답을 만들지 못하면서 비용과 지연만 쓴다.
+#
+# **집행은 adapter지만 값은 여기가 소유한다.** 두 adapter가 각자 상수를 들면 한쪽만 올렸을
+# 때 같은 `TurnRequest`가 공급자에 따라 다른 지점에서 예산 소진으로 끝난다. 그 차이는 예산
+# 경계에서만 드러나 재현이 어렵다. 공급자마다 다른 값이 정말 필요해지면 그때 `TurnRequest`에
+# 실어 보내는 값으로 승격한다 — adapter가 자기 리터럴을 되살리는 것이 아니다.
+MIN_CALL_OUTPUT_TOKENS = 256
+
 
 class ProviderKind(StrEnum):
     """지원 공급자. 값은 저장·전송 계약이므로 화면 이름(Claude/Codex)과 분리한다."""

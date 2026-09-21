@@ -67,6 +67,7 @@ from anthropic.types import (
 from anthropic.types import Usage as SdkUsage
 
 from strategy_workbench.domain.assistant.facade.models import (
+    MIN_CALL_OUTPUT_TOKENS,
     ChatEvent,
     Done,
     Failure,
@@ -98,7 +99,7 @@ from ._payload import (
     build_tools,
 )
 
-__all__ = ["MAX_PAUSE_RESUMES", "MIN_CALL_OUTPUT_TOKENS", "stream_turn"]
+__all__ = ["MAX_PAUSE_RESUMES", "stream_turn"]
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +114,6 @@ logger = logging.getLogger(__name__)
 # 새 검색이 있었으면 진전으로 보고 카운터를 되돌린다.** 여기서 세는 것은 "아무것도 하지 않고
 # 멈추기만 하는" 재개다.
 MAX_PAUSE_RESUMES = 5
-
-# 의미 있는 호출 하나의 최소 출력 토큰. 남은 예산이 이보다 작으면 호출하지 않고 예산 소진으로
-# 끝낸다. 값 자체는 A-07 실측으로 확정한다(spec D3: 기본값은 실측 뒤 확정).
-MIN_CALL_OUTPUT_TOKENS = 256
 
 
 def _max_total_pause_resumes(max_search_uses: int) -> int:

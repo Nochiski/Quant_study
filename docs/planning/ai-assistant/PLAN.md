@@ -139,10 +139,12 @@ progress_percent: 0
    60초를 쓰면 300초에 닿는다. live smoke의 `probe` 지연과 턴 소요를 보고, 모자라면 A-01 상수가
    아니라 `build_assistant_services`에서 `AssistantTurnRunner(timeout_seconds=...)`로 주입해
    올린다(주입 자리는 이미 있다).
-2. **검색 8회와 `MAX_PAUSE_RESUMES = 5`의 관계가 확인되지 않았다.** Anthropic 서버 검색은
-   `pause_turn`으로 턴을 멈출 수 있고 adapter는 재개를 5회로 끊는다. 검색 한 번이 재개 한 번을
-   부른다면 8회를 쓰기 전에 `Failure(PROVIDER)`가 난다. live smoke에서 검색 횟수와 재개 횟수를
-   함께 보고, 어긋나면 둘 중 하나를 맞춘다.
+2. ~~검색 8회와 `MAX_PAUSE_RESUMES = 5`의 관계가 확인되지 않았다.~~ **해소됨**(2026-09-21,
+   커밋 `57272513`). `llm_anthropic/_turn.py`의
+   `_max_total_pause_resumes(max_search_uses) = max_search_uses + MAX_PAUSE_RESUMES`가 두 상한의
+   결합을 구조적으로 끊었다 — 재개 예산이 검색 예산을 먹지 않는다. 재개 상한 케이스가
+   `tests/test_adapters_llm_anthropic.py`에서 그 동작을 고정한다. live smoke에서 다시 볼 항목이
+   아니다.
 
 ## 상태 값
 

@@ -32,6 +32,7 @@ import type {
   AssistantEventEnvelopeView,
   ProvidersView,
   SessionHistoryView,
+  SessionUsageView,
   SessionView,
   StrategyProposalView,
   TurnContextPayload,
@@ -73,6 +74,20 @@ const session = (sessionId: string, title: string): SessionView => ({
   created_at: "2026-09-20T00:00:00Z",
 });
 
+/** 세션 사용량은 이 사이드바가 그리지 않는다 — 계약을 채우는 최소 픽스처다. */
+const emptyUsage = (): SessionUsageView => ({
+  provider_calls: 0,
+  search_uses: 0,
+  tokens: {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    total_input_tokens: 0,
+  },
+  turns: [],
+});
+
 const emptyHistory = (
   sessionId: string,
   title: string,
@@ -81,6 +96,7 @@ const emptyHistory = (
   messages: [],
   turns: [],
   events: [],
+  usage: emptyUsage(),
 });
 
 const proposal = (): StrategyProposalView => ({
@@ -173,6 +189,18 @@ const server = setupServer(
       const sessionId = String(params.sessionId);
       const turnId = String(params.turnId);
       cancelled.push({ sessionId, turnId });
+      // 취소는 `Failure(CANCELLED)`로 스트림에 닿는다(spec D3). 서버가 그 프레임을 흘려야 리더가
+      // 턴을 정착으로 보고 연결을 닫으므로, 응답만 주고 마는 하네스는 실제 순서를 재현하지 못한다.
+      connections.at(-1)?.push({
+        sequence: 90,
+        turn_id: turnId,
+        event: {
+          type: "failure",
+          code: "cancelled",
+          message: "CancelledError",
+        },
+      });
+      connections.at(-1)?.close();
       return HttpResponse.json({
         turn_id: turnId,
         session_id: sessionId,
@@ -837,6 +865,9 @@ describe("AssistStrategySidebar", () => {
       expect(progressRegion()).toHaveTextContent("답변을 중지했습니다"),
     );
     expect(screen.queryByText(/답변이 완료되었습니다/)).toBeNull();
+    // 서버가 뒤이어 흘린 `Failure(CANCELLED)`는 말풍선이 받는다 — 상태 영역과 두 문장이 맞물린다.
+    expect(await screen.findByText("요청을 취소했습니다.")).toBeInTheDocument();
+    expect(screen.getByText("쓰다 만 본문")).toBeInTheDocument();
   });
 
   it("실패로 끝난 턴은 상태 영역이 완료를 말하지 않는다", async () => {

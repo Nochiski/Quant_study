@@ -41,6 +41,18 @@ const history = (): SessionHistoryView => ({
     },
   ],
   events: [],
+  usage: {
+    provider_calls: 0,
+    search_uses: 0,
+    tokens: {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      total_input_tokens: 0,
+    },
+    turns: [],
+  },
 });
 
 const loaded = (): AssistantChatState =>

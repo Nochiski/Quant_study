@@ -799,17 +799,6 @@
         "title": "ComparisonNode",
         "type": "object"
       },
-      "ComparisonOperator": {
-        "enum": [
-          "gt",
-          "gte",
-          "lt",
-          "lte",
-          "eq"
-        ],
-        "title": "ComparisonOperator",
-        "type": "string"
-      },
       "CompileRequest": {
         "properties": {
           "format": {
@@ -1248,6 +1237,20 @@
         "title": "DrawdownPoint",
         "type": "object"
       },
+      "EligibilityOperator": {
+        "description": "유니버스 필터 한 줄의 비교 방식 (schema 1.2, spec D3 S5).\n\n앞의 다섯(`gt`~`eq`)은 후보 하나의 값만 보면 판정되는 **절대** 규칙이고, `top_*` 는 같은\n기준일 프레임의 **횡단면** 순위를 봐야 판정된다. `value` 의 의미도 갈린다 — 절대 규칙은\n비교 임계값, `top_percent` 는 비율, `top_count` 는 개수다.\n\n이 enum 은 전용이다. 값이 겹친다고 다른 비교 연산자 enum 에 얹으면 `top_*` 가 그 enum 의\n소비자(팩터 그래프 `comparison` 노드 등)로 흘러들어, 모집단 없이 판정할 수 없는 값이\ncatch-all 분기에서 조용히 다른 비교로 떨어진다.",
+        "enum": [
+          "gt",
+          "gte",
+          "lt",
+          "lte",
+          "eq",
+          "top_percent",
+          "top_count"
+        ],
+        "title": "EligibilityOperator",
+        "type": "string"
+      },
       "EligibilityRule": {
         "properties": {
           "field_id": {
@@ -1255,7 +1258,7 @@
             "type": "string"
           },
           "operator": {
-            "$ref": "#/components/schemas/ComparisonOperator"
+            "$ref": "#/components/schemas/EligibilityOperator"
           },
           "value": {
             "title": "Value",
@@ -1418,6 +1421,7 @@
           "future_data",
           "missing_eligibility",
           "eligibility_failed",
+          "eligibility_rank_cut",
           "missing_factor",
           "score_threshold",
           "regime_blocked",

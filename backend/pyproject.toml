@@ -57,7 +57,9 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pyright]
 typeCheckingMode = "basic"
-include = ["src", "tests", "examples", "scripts"]
+# `tools`는 골든·스키마 재생성 스크립트다. 검사 범위를 넓히는 쪽이라 룰 완화가 아니다
+# (C-01 감사 NB-6).
+include = ["src", "tests", "examples", "scripts", "tools"]
 pythonVersion = "3.11"
 
 [tool.pytest.ini_options]

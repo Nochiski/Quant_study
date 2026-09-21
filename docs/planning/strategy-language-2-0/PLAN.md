@@ -188,9 +188,9 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Branch/worktree | `feat/lang2-p2-05-eligibility` / `wt-lang2-p2-05` |
 | Base SHA | `dc8030d3` (`origin/feat/lang2-p2-04-normalization` tip, P2-03 `7ec8f337` 위 replay 판). 최초 구현은 옛 로컬 tip `bb8f3843` 위였고 `git rebase --onto dc8030d3 bb8f3843` 으로 옮겼다 — 코드 8커밋은 충돌 없이 replay, PLAN 커밋만 P2-04 행·frontmatter 에서 충돌해 새 base 의 P2-04 행을 취했다 |
 | Head SHA | `77e80471` 모델·연산자·2-pass·탈락 사유 → `1d722b07` `top_*` 값 검증 → `d7e5e8a9` 계약 산출물 재생성 → `c165e616` 비유한 cut 크기 거절 → `8a8e9e15` 프론트 enum 단언 → `275a248e` 이 패킷 → `720d0eb3` 주석 → `2d1d185d` validator exhaustive 리팩터 |
-| Diff stat | 커밋 9개 · backend domain 5파일 + backend 테스트 6파일(신규 1) + 계약 산출물 4파일 + frontend 테스트 1파일 + 이 문서. handwritten diff 약 350줄 · 논리 파일 8개(생성 산출물 제외)로 12절 상한 안이다 |
+| Diff stat | 실측(`git diff --numstat`, 생성 산출물 4파일·PLAN 제외) **13파일 · +690 / −34** — src 7파일 +256/−25, test 6파일 +434/−9. **12절 상한(600줄·10파일)을 넘는다**(사유는 아래 제약사항) |
 | Focused tests | `uv run pytest tests/domain/test_eligibility_cross_section.py tests/domain/test_strategy_constraints.py tests/domain/test_portfolio_pipeline.py tests/domain/test_strategy_schema.py tests/integration/test_openapi_document_is_current.py -q` |
-| 제약사항 | **e2e 미실행** — 리드 신호 뒤 잠금 래퍼로 1회 돌린다(AI 스택이 잠금·포트를 먼저 쓴다). 옛 base `bb8f3843` 에서 관측했던 backend 3 failed 와 `typecheck:e2e` 3건 실패, 1.1 스냅샷 기준선 불일치는 **전부 옛 base 산물이고 P2-03 최종 tip `7ec8f337`(#183)이 해소했다** — 새 base `dc8030d3` 위에서는 backend 1587 passed / 0 failed, `typecheck:e2e` 통과다 |
+| 제약사항 | **12절 상한 초과(600줄·10파일 → 690줄·13파일), 분할하지 않는다.** 13파일 중 5개(`test_portfolio_pipeline`·`test_strategy_diff`·`test_strategy_trace_preflight`·`test_truthful_pipeline`·`facade/specification.py`)는 enum 개명이 강제한 1~2줄 import 수정이라 떼어 낼 단위가 없고, 신규 테스트 373줄은 12절이 "test 는 구현과 같은 PR"이라 분리할 수 없다. 나머지 src 변경(모델·컴파일러·validator)은 한 커밋 단위로 같이 움직여야 컴파일된다. **e2e 미실행** — 리드 신호 뒤 잠금 래퍼로 1회 돌린다(AI 스택이 잠금·포트를 먼저 쓴다). 옛 base `bb8f3843` 에서 관측했던 backend 3 failed 와 `typecheck:e2e` 3건 실패, 1.1 스냅샷 기준선 불일치는 **전부 옛 base 산물이고 P2-03 최종 tip `7ec8f337`(#183)이 해소했다** — 새 base `dc8030d3` 위에서는 backend 1587 passed / 0 failed, `typecheck:e2e` 통과다 |
 | Full gate | base `dc8030d3` 재배치 후 실측 — backend `uv run pytest -q`(1587 passed / 0 failed) · `ruff check src tests` · `ruff format --check`(변경 12파일 clean) · `pyright` 0 errors · `export_openapi.py`·`export_runtime_schema.py` 재실행 diff 0 / frontend `npm ci`·`npm run api:generate` diff 0·`typecheck`·`typecheck:e2e`·`lint`·`test`(639, 57파일)·`build` / e2e 는 리드 신호 후 실행 예정(미실행) |
 
 P2-05 결정 4건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
@@ -573,6 +573,7 @@ Phase exit:
 | `P2-04` | `review_lang2_p2_0405` | 3 | `REQUEST_CHANGES` | P2 1 · P3 1. 방향 반전(R2)은 원인 수준에서 닫힘 확인, 되돌리기 실험 4건 red. **R3-P204-001(P2)**: 롱 바닥 `min(0, eligible 최저)` 때문에 eligible 최저 종목의 강도가 항상 0 이라 `SCORE_THRESHOLD` 로 빠진다 — eligible 1종목·전원 동점 프레임이 비고, `top_count: 1` + `low` 는 매 프레임 보유 0, 5종목 선정은 4종목 보유, `rank` 에서 `high`/`low` 비대칭. **R3-P204-002(P3)**: "1.1 과 달라지는 곳" 이 실제보다 좁다. 리드가 비중 규칙 요건 7개를 정했고 결정 5 를 그 요건을 만족하는 규칙으로 다시 썼다 |
 | `P2-04` | `review_lang2_p2_0405` | 4 | `REQUEST_CHANGES` | P2 2 · P3 2. 3차 결함은 닫힘. **R4-P204-001(P2)**: 기준점이 컷 아래 최고뿐이라 원시값 3, 2, 1+2⁻⁵², 1 에서 선정 `c` 가 `7.4e-17` dust 비중, 폐기된 결정 6 의 "dust 없음" 문장과 모순. **R4-P204-002(P2)**: `if below:` 제거·`<=` 돌연변이가 351건 전부 통과(등간격 입력만 있고 컷 동점 없음). R4-P204-003(P3): `rank` 무동점에서 채택 규칙이 `weighting: rank` 와 같고, 컷 아래가 없으면 선정 2 는 항상 2:1. R4-P204-004(P3): ±1e308 overflow 는 `_finite` 로 요란하게 실패(기록만). 리드 결정 (a)안 반영 |
 | `P2-04` | `review_lang2_p2_0405` | 5 | `APPROVE` | 4차 blocking 2건 닫힘. P3 R5-P204-001: 컷 동점에서 비중이 불연속이라 자기 점수가 올라 자기 비중이 줄 수 있다(1.0, 1.0, 1.02, −4 선정 2 에서 `a` .499 → .333). 평균 간격 하한이 생겨 엄격 비교가 더는 필요 없으므로 `<=` 로 바꿨다(리드 지시) |
+| `P2-05` | `review_lang2_p2_05` | 1 | `REQUEST_CHANGES` | P2 2 · P3 2. 의미 계약·look-ahead·SDK 잔재·trace 렌더 경로는 전부 확인됨. **P2-1**: 동점 결정성 테스트가 입력 순서=기대 순서라 파이썬 안정 정렬이 타이브레이커를 대신해, 정렬 2차 키를 지운 돌연변이가 15 passed 로 통과했다(미충족 acceptance). **P2-2**: PR 크기 기록이 실측과 달랐다(350줄·8파일로 적었으나 실측 690줄·13파일로 12절 상한 초과) — 분할은 요구하지 않고 기록·사유만. **P3 2**: `top_percent` 가 모집단을 0으로 만드는 쪽에 진단 없음(P2-07 backlog), 1-pass dict / 2-pass 선형 탐색 조회 불일치. 반영: 같은 픽스처를 `reversed()` 로 한 번 더 컴파일해 동일 결과 단언(돌연변이 재현으로 검증), 2-pass 조회를 관측당 dict 로 통일 + 중복 `field_id` 회귀 테스트, PLAN·PR 본문 크기 기록 정정, WORKFLOW P2-07 에 backlog 한 줄 |
 
 ## 검증 기록
 
@@ -608,6 +609,17 @@ Phase exit:
 - 2026-09-26 — P2-04 를 P2-03 APPROVED tip `0dd740e8` 위로 replay 하고(코드 4커밋 range-diff 동일) 1차
   리뷰 반영 `28003cf1`·시각 기준선 `80a5ddf5` 를 얹어 상태를 `IN_REVIEW` 로 갱신했다. 옛 PR head
   `dc8030d3` 는 옛 base 위라 PR #184 가 CONFLICTING 이었다.
+- 2026-09-21 — P2-05 1차 리뷰(REQUEST_CHANGES, P2 2·P3 2) 반영. **P2-1** 동점 결정성 테스트가
+  타이브레이커를 고정하지 못했다 — 관측을 `s000`~`s004` 오름차순으로만 넣어 파이썬 안정 정렬이
+  2차 키를 대신해 줬고, `population.sort` 에서 `item[0]` 을 지운 돌연변이가 그대로 통과했다.
+  같은 픽스처를 `reversed()` 로 한 번 더 컴파일해 결과가 같음을 단언하고, 돌연변이를 다시 넣어
+  이번에는 실패하는 것을 확인했다. **P2-2** 크기 기록을 실측(690줄·13파일)으로 고치고 12절 상한
+  초과 사유를 패킷과 PR 본문에 적었다 — 13파일 중 5개가 enum 개명이 강제한 1~2줄 import 수정이라
+  분할할 단위가 없다. **P3-2** 2-pass 의 필드 조회를 1-pass 와 같은 관측당 dict 로 통일했다
+  (중복 `field_id` 에서 두 패스가 다른 값을 읽던 차이, 포트 계약이 막지만 공개 도메인 facade 는
+  임의 관측으로 불린다). **P3-1**(`top_percent` 가 모집단을 0으로 만드는 쪽에 진단 없음)은
+  WORKFLOW P2-07 acceptance 에 backlog 한 줄로 옮겼다 — 결과가 빈 포트폴리오라 조용하지 않고,
+  compile 단일 게이트가 frame warning 을 다루는 자리다.
 - 2026-09-21 — P2-05 을 P2-04 새 tip `dc8030d3`(P2-03 최종 `7ec8f337` 위 replay 판) 으로
   재배치했다. 코드 8커밋은 충돌 없이 replay 됐고 PLAN 커밋만 P2-04 행·frontmatter 에서 충돌해
   새 base 의 P2-04 행을 취했다. 옛 base `bb8f3843` 에서 관측했던 backend 3 failed·

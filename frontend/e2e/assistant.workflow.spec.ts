@@ -206,7 +206,23 @@ test.describe("AI 어시스턴트", () => {
       "한 종목이 성과를 좌우하지 않게 합니다.",
     );
 
-    // 취소(보내자마자): 버튼이 뜨는 즉시 멈춰도 사유가 남는다. 공급자가 아무 이벤트도 내기 전에
+    // 여기까지는 **이 화면이 그린 것**이라 서버가 취소를 정말 받아들였는지는 아직 모른다
+    // (리뷰 R2-001: 마지막 문장 부재는 취소 직후라면 무시당해도 참이다). 서버 쪽 사실 두 개를
+    // 따로 본다.
+    //
+    // 1) 사유가 **이력에** 남았다. 새로고침한 화면은 `GET /sessions/{id}`가 돌려준 것만 그리므로,
+    //    여기 문구가 보인다는 것은 `Failure(CANCELLED)`가 저장됐다는 뜻이다(A-07).
+    await page.reload();
+    await expect(editor(page)).toBeVisible();
+    await expect(transcript(page).getByRole("article").last()).toContainText(
+      "요청을 취소했습니다.",
+    );
+    // 2) 세션 슬롯이 풀렸다. 러너는 스레드가 끝날 때까지 슬롯을 쥐고 그동안 새 턴을 409
+    //    `turn_in_progress`로 거절하므로, 다음 질문이 받아들여진다는 것은 그 턴이 실제로
+    //    끝났다는 뜻이다. 거절당하면 입력칸에 질문이 되돌아오고 아래 단언이 깨진다.
+
+    // 취소(보내자마자): 앞 턴이 끝났으므로 이 질문은 거절 없이 받아들여진다(위 2번). 버튼이 뜨는
+    // 즉시 멈춰도 사유가 남는다. 공급자가 아무 이벤트도 내기 전에
     // 반환하면 서비스 루프가 한 번도 돌지 않아 사유가 비는 갈래가 있었고, A-07 `5009a03c`가
     // 루프 진입 여부와 무관하게 사유를 세우도록 닫았다(DEFECT-AI-B05-001의 두 번째 갈래).
     //
@@ -214,7 +230,9 @@ test.describe("AI 어시스턴트", () => {
     // 사이는 밀리초라 클릭이 어느 쪽에 떨어질지 정할 수 없다. 그 경계는 application 단위 테스트가
     // 결정적으로 고정하고, 여기서는 "언제 눌러도 사유가 남는다"를 본다.
     await ask(page, "천천히 한 번만 더 설명해 줘");
-    await stop.click();
+    await expect(assistant(page).getByRole("button", { name: "중지" })).toBeVisible();
+    await expect(assistant(page).getByRole("alert")).toHaveCount(0);
+    await assistant(page).getByRole("button", { name: "중지" }).click();
     await expect(
       assistant(page).getByRole("button", { name: "보내기" }),
     ).toBeVisible();

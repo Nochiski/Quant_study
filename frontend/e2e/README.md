@@ -36,8 +36,20 @@ stray dev server produces a clear error instead of a silent reuse. And `PW_BACKE
 PW_BACKEND_PORT=18000 PW_PREVIEW_PORT=15173 npm run test:e2e
 ```
 
-Both values come from `e2e/ports.mjs`, which is also what the build reads for the API base URL
-baked into the bundle. Never spell a port literally anywhere else.
+Both values come from `e2e/ports.mjs`. The runner passes the matching API base URL to the build
+child process only; `vite.config.ts` deliberately never reads these variables, because vitest and
+`npm run dev` load the same config and would follow the port into a backend that is not running.
+Never spell a port literally anywhere else.
+
+## What the lock does not cover
+
+- It is per user, not per machine. `os.tmpdir()` is a user directory on Windows, so two accounts on
+  the same box do not see each other's lock.
+- A recycled pid looks alive. If the holder dies and the operating system hands its pid to another
+  process, the lock is held until the 40-minute cap. That fails loudly rather than silently, which
+  is the direction we want, but it costs a run.
+- It serialises this gate only. Anything else that binds the same ports, a stray dev server for
+  instance, is caught by the port check rather than the lock.
 
 Moving the preview port also moves the browser origin, so the backend has to accept it. Playwright
 passes the preview origin to the server as `STRATEGY_WORKBENCH_ALLOWED_ORIGINS`. Without that the
@@ -60,6 +72,11 @@ intentional visual change, then require a strict no-update CI pass:
 npm run test:e2e:update
 npm run test:e2e:report
 ```
+
+`workbench.workflow.spec.ts`도 기준선 한 장(`graph-node-diagnostic.png`)을 갖는다. 노드 카드
+레이아웃 계약은 같은 테스트의 boundingBox 단언이 잠그고 이 이미지는 보조 증거라, 뷰포트·테마
+한 벌(1440 light)로 충분해 시각 프로젝트 4종에 넣지 않았다. 캡처는 진단 문장을 `mask`로 가린다 —
+그 문장의 owner는 backend라 문구가 다듬어져도 이 기준선을 다시 찍을 일이 없어야 한다.
 
 `test:e2e:update` passes `--update-snapshots=changed` on purpose. A bare `--update-snapshots`
 leaves a mismatching baseline untouched and still reports the test as passed, so the stale PNG

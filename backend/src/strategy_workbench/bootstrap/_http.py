@@ -52,9 +52,11 @@ def runtime_allowed_origins() -> tuple[str, ...]:
     죽은, 원인을 짚기 어려운 조합이다. 어떤 주소를 허용할지는 프로세스를 띄우는 쪽만 알므로
     환경 변수로 받는다.
     """
-    configured = os.environ.get(ALLOWED_ORIGINS_ENV, "").strip()
-    if not configured:
+    configured = os.environ.get(ALLOWED_ORIGINS_ENV)
+    if configured is None:
         return DEFAULT_ALLOWED_ORIGINS
+    # 값이 있는데 origin 이 하나도 없으면 전부 같은 결말이다: 공백만("   ")과 쉼표만(" , ")이
+    # 갈라지면 같은 의도의 입력이 다르게 끝난다(1차 리뷰 P3-12).
     origins = tuple(part.strip() for part in configured.split(",") if part.strip())
     if not origins:
         raise ValueError(

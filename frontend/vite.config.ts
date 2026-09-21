@@ -1,21 +1,11 @@
 import react from "@vitejs/plugin-react";
 import { configDefaults, defineConfig } from "vitest/config";
 
-import {
-  backendOrigin,
-  backendPort,
-  DEFAULT_BACKEND_PORT,
-} from "./e2e/ports.mjs";
-
-// 브라우저 번들의 backend 주소는 빌드 때 박힌다(`VITE_API_BASE_URL`). E2E 가 포트를 옮겼는데 이
-// 값만 기본 포트로 남으면 브라우저가 옆 워크트리의 backend 를 부른다 — 서버는 우리 것인데 화면만
-// 남의 것인, 가장 찾기 어려운 조합이다. 그래서 포트 상수 하나에서 함께 나오게 한다.
-if (
-  process.env.VITE_API_BASE_URL === undefined &&
-  backendPort() !== DEFAULT_BACKEND_PORT
-) {
-  process.env.VITE_API_BASE_URL = backendOrigin();
-}
+// 이 파일은 `PW_*` 포트 변수를 읽지 않는다. vitest·dev serve 가 같은 설정을 읽으므로, 셸에
+// `PW_BACKEND_PORT` 가 export 돼 있다는 이유만으로 SDK 기본 주소가 바뀌면 MSW 핸들러가 등록된
+// 주소와 어긋나 단위 테스트가 통째로 깨진다(1차 리뷰 DEFECT-P105-003, 실측 5 failed).
+// E2E 빌드에 필요한 `VITE_API_BASE_URL` 은 `e2e/run-playwright.mjs` 가 **빌드 자식 프로세스에만**
+// 명시적으로 넘긴다 — 주변 환경이 아니라 그 한 번의 빌드에만 적용된다.
 
 // Browser scenarios have their own real-server Playwright lifecycle and must never be
 // collected into the jsdom unit/integration runner. 제외 목록의 정본은 이 상수 하나다.

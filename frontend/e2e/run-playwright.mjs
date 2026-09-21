@@ -4,11 +4,13 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { BUILD_ARGS } from "./build-command.mjs";
 import { assertPortsFree } from "./free-port.mjs";
 import { acquireLock } from "./lock.mjs";
 import {
   BACKEND_PORT_ENV,
   PREVIEW_PORT_ENV,
+  backendOrigin,
   backendPort,
   previewPort,
 } from "./ports.mjs";
@@ -30,6 +32,42 @@ const assertOwnedRuntime = () => {
 assertOwnedRuntime();
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
 
+const frontendDirectory = resolve(ownDirectory, "..");
+
+/** 자식 명령 하나. 실패하면 종료 코드를 담아 던진다. */
+const runToCompletion = (command, args, env) =>
+  new Promise((done, fail) => {
+    const child = spawn(command, args, {
+      cwd: frontendDirectory,
+      env: { ...process.env, ...env },
+      stdio: "inherit",
+      shell: true,
+      windowsHide: true,
+    });
+    child.once("error", fail);
+    child.once("exit", (code) =>
+      code === 0
+        ? done(undefined)
+        : fail(new Error(`${command} ${args.join(" ")} exited ${code}`)),
+    );
+  });
+
+// 브라우저 번들의 backend 주소는 빌드 때 박힌다. 포트를 옮겼으면 이 빌드에만 그 주소를 준다 —
+// `vite.config.ts` 가 주변 환경의 `PW_*` 를 읽으면 같은 설정을 쓰는 vitest·dev 까지 끌려간다
+// (1차 리뷰 DEFECT-P105-003).
+//
+// 빌드는 **잠금 밖**에서 돈다. `dist/` 는 워크트리마다 따로라 직렬화할 이유가 없고, 안에서 돌리면
+// 줄 서 있는 다른 워크트리가 빌드 시간만큼 더 기다린다(2차 리뷰 P3-4).
+try {
+  await runToCompletion("npm", BUILD_ARGS, {
+    VITE_API_BASE_URL: process.env.VITE_API_BASE_URL ?? backendOrigin(),
+  });
+} catch (error) {
+  assertOwnedRuntime();
+  rmSync(resolvedRuntime, { recursive: true, force: true });
+  throw error;
+}
+
 // 머신 단위 직렬화. 다른 워크트리가 돌고 있으면 기다린다 — 겹쳐 돌면 Playwright 가 남의 backend 를
 // 우리 것으로 알고 진행한다(`lock.mjs` 머리말).
 const lock = await acquireLock({
@@ -38,6 +76,13 @@ const lock = await acquireLock({
 });
 console.log(`[e2e-lock] acquired (pid ${lock.pid})`);
 
+const abort = (error) => {
+  lock.release();
+  assertOwnedRuntime();
+  rmSync(resolvedRuntime, { recursive: true, force: true });
+  throw error;
+};
+
 // 잠금을 잡고도 포트가 막혀 있으면(옆 체크아웃의 개발 서버 등) 남의 서버를 조용히 쓰지 않고 멈춘다.
 try {
   await assertPortsFree([
@@ -45,10 +90,7 @@ try {
     { port: previewPort(), label: "preview", env: PREVIEW_PORT_ENV },
   ]);
 } catch (error) {
-  lock.release();
-  assertOwnedRuntime();
-  rmSync(resolvedRuntime, { recursive: true, force: true });
-  throw error;
+  abort(error);
 }
 const playwrightCli = resolve(
   ownDirectory,

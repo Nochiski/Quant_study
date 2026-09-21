@@ -143,21 +143,27 @@ def _eligibility_rule_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         if rule.operator not in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS:
             continue
         path = f"eligibility.rules.{index}.value"
+        # 분기는 exhaustive 다. 횡단면 연산자가 하나 더 늘었을 때 catch-all 이 그것을 조용히
+        # 개수 규칙으로 검사하면, 이 PR 이 `_compare` 에서 없앤 실패 모양이 validator 로 옮겨온다.
         if rule.operator is EligibilityOperator.TOP_PERCENT:
-            if not (math.isfinite(rule.value) and 0 < rule.value <= 1):
-                yield semantic_issue(
-                    "strategy.eligibility.rule_value",
-                    path,
-                    "상위 비율은 0보다 크고 1 이하인 비율이어야 합니다(20%는 0.2): "
-                    f"got={rule.value!r} field_id={rule.field_id!r}",
-                )
-            continue
-        if not (math.isfinite(rule.value) and rule.value >= 1 and float(rule.value).is_integer()):
+            satisfied = math.isfinite(rule.value) and 0 < rule.value <= 1
+            expectation = "상위 비율은 0보다 크고 1 이하인 비율이어야 합니다(20%는 0.2)"
+        elif rule.operator is EligibilityOperator.TOP_COUNT:
+            satisfied = (
+                math.isfinite(rule.value) and rule.value >= 1 and float(rule.value).is_integer()
+            )
+            expectation = "상위 개수는 1 이상의 정수여야 합니다"
+        else:
+            raise ValueError(
+                "cross-sectional eligibility operator has no value rule — "
+                f"operator={rule.operator!r} path={path!r} "
+                f"known={[member.value for member in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS]}"
+            )
+        if not satisfied:
             yield semantic_issue(
                 "strategy.eligibility.rule_value",
                 path,
-                "상위 개수는 1 이상의 정수여야 합니다: "
-                f"got={rule.value!r} field_id={rule.field_id!r}",
+                f"{expectation}: got={rule.value!r} field_id={rule.field_id!r}",
             )
 
 

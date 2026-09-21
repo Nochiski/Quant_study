@@ -179,6 +179,52 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | 제약사항 | 12절 상한 중 **파일 수(10)를 넘긴다** — 29파일(리뷰 반영 뒤 문서·PNG 제외 31파일). 넘긴 몫은 (a) 골든 `spec_hash` 리터럴을 한 줄씩 고치는 테스트 6파일, (b) 새 테스트 4파일이다. src 변경은 6파일 99줄이고 handwritten diff 는 약 510줄로 줄 수 상한(600) 안쪽이다. 골든 hash 리터럴이 파일 6곳에 복사돼 있는 것 자체가 부채지만 한 곳으로 모으는 정리는 이 PR 범위 밖이라 backlog 로 남긴다. 중간 상태 base `5653c14e` 에서 작업하던 동안에는 P2-03 잔재(import 붕괴·`typecheck:e2e`·테스트 3건) 우회 커밋 두 개를 앞에 뒀고, P2-03 최종 tip `7ec8f337` 이 같은 수정을 담아 replay 에서 버렸다 |
 | Full gate | backend `uv sync --all-extras` · `maturin develop --release` · `uv run pytest -q`(1571 passed, 0 failed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 clean) · `pyright`(0) · `export_openapi.py` · `export_runtime_schema.py`(둘 다 재생성 후 diff 0) / frontend `npm ci`·`api:generate`(diff 0)·`typecheck`·`typecheck:e2e`·`lint`·`test`(639, 57파일)·`build` / e2e: 시각 기준선 4장(`strategy-workbench.png`, 1440/1920 × light/dark)을 계약 해시 변경으로 재생성(`80a5ddf5`). 이 수치들은 옛 tip 기준이다. 2차 리뷰 반영 뒤 게이트 전체와 `npm run test:e2e` 는 이 PLAN 커밋을 포함한 push tip 에서 다시 돌려 PR #184 댓글에 기록한다 |
 
+| 항목 | 값 |
+|---|---|
+| PR | `P2-05` |
+| Intent | 유니버스 필터에 횡단면 규칙(`top_percent`·`top_count`)을 넣고 프레임 컴파일을 2-pass 로 나눈다 |
+| Acceptance | WORKFLOW P2-05 |
+| Non-goals | `availability`·`unit_mismatch`(P2-07), `risk.risk_factor_id`(P2-06), 업그레이더(P2-09), 프론트 실행 설정 UI·i18n 배선(P3) |
+| Branch/worktree | `feat/lang2-p2-05-eligibility` / `wt-lang2-p2-05` |
+| Base SHA | `bb8f3843` (`feat/lang2-p2-04-normalization` tip, push 전) |
+| Head SHA | `a54059a7` 모델·연산자·2-pass·탈락 사유 → `2cfe45fe` `top_*` 값 검증 → `e79d2093` 계약 산출물 재생성 |
+| Diff stat | 커밋 3개 · backend domain 5파일 + 테스트 6파일(신규 1) + 계약 산출물 4파일 |
+| Focused tests | `uv run pytest tests/domain/test_eligibility_cross_section.py tests/domain/test_strategy_constraints.py tests/domain/test_portfolio_pipeline.py tests/domain/test_strategy_schema.py tests/integration/test_openapi_document_is_current.py -q` |
+| 제약사항 | base 인 P2-04 tip 이 P2-03 잔재 실패 3건(`test_trace_without_an_environment_is_refused`, `test_conflicting_legacy_missing_policies_are_refused_at_start_with_a_code`, `test_conflicting_legacy_missing_policies_are_coded_on_trace_like_preview`)을 그대로 물려받는다. base 에서 같은 3건이 같은 방식으로 실패하는 것을 착수 전 전체 실행으로 확인했고, 이 PR 은 셋 다 건드리지 않는다. `npm run typecheck:e2e` 도 base 에서 3건 실패한다(아래 결정 4) |
+| Full gate | backend `uv run pytest -q`(1583 passed / 3 failed = 위 base 잔재) · `ruff check src tests` · `ruff format --check`(변경 12파일 clean) · `pyright` 0 · `export_openapi.py`·`export_runtime_schema.py` / frontend `npm run api:generate`(재생성 커밋 포함)·`typecheck`·`lint`·`test`(639, 57파일)·`build` |
+
+P2-05 결정 4건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
+
+1. **`ComparisonOperator` 를 남기지 않고 삭제했다.** WORKFLOW 는 "공유 `ComparisonOperator` 에
+   얹지 않는다"만 적지만, `EligibilityRule` 이 그 enum 의 **유일한** 소비자라 분리하는 순간
+   소비자 0개가 된다(팩터 그래프의 `comparison` 노드는 `domain/factor` 의 별개
+   `FactorComparisonOperator` 를 쓴다). 남기면 facade `__all__` 과 OpenAPI 에 아무도 안 쓰는
+   타입이 계속 발행되어, 다음 사람이 "공유 enum 이 있으니 여기 얹자"로 되돌아간다. 이름
+   변경이 아니라 타입 분리이므로 같은 커밋에 뒀다.
+2. **비율 cut 은 이진 부동소수가 아니라 문서가 쓴 10진 표기로 곱한다**(`Decimal(str(value))`).
+   `math.floor(100 * 0.29)` 는 28 이다 — "상위 29%" 문서가 진단도 예외도 없이 한 종목을 더
+   떨군다. 1~300 × 1~99% 격자에서 두 방식이 갈리는 조합이 16개 있다(0.29·0.57·0.58·0.7·
+   0.82·0.35 …). WORKFLOW 는 "경계(소수점 절사)" 테스트만 요구하고 어느 산술인지는 비워 뒀다.
+3. **`top_*` 의 `value` 범위를 compile 진단으로 막는다**(`strategy.eligibility.rule_value`,
+   WORKFLOW acceptance 밖). 이 PR 이 `value` 의 의미를 연산자별로 갈라 놓았기 때문에 생긴
+   구멍이라 같은 PR 이 닫는다 — "상위 20%"를 `20` 으로 적으면 `100 × 20 = 2000 → min(…, 100)`
+   으로 **모집단 전체가 통과**해, 필터가 있는데 아무것도 거르지 않는 채 백테스트가 완주한다.
+   포인터가 배열 항목(`eligibility.rules.N.value`)이라 평면 포인터 전용인 `_constraints.py`
+   스칼라 카탈로그가 담을 수 없어 validator 가 소유한다.
+4. **탈락 사유 i18n 표를 프론트에 새로 만들지 않았다.** WORKFLOW 는 "프론트가 모르는 enum
+   값을 받아 trace 화면이 빈칸을 낸다"를 재생성 사유로 들지만, 실제 화면은 사유를 번역 없이
+   원문 코드로 찍는다(`strategy-debugger.tsx:429`·`:597` 의 `<code>{…join(", ")}</code>`).
+   기존 12종이 전부 그렇고 새 값도 같은 경로로 빈칸 없이 렌더된다. 표를 만들면 기존 12종의
+   표시 문구까지 바꾸는 변경이라 소비자 배선을 소유한 P3-01 범위다.
+
+WORKFLOW acceptance 중 **범위 밖으로 남긴 것 1건**:
+
+- **`application/portfolio_design/_trace_service.py` 는 무변경이다.** WORKFLOW 는 "trace 투영과
+  `_trace_service.py` 가 새 사유를 그대로 전달한다"를 요구하는데, 그 경로는 `CandidateDecision`
+  객체를 그대로 실어 나르고 사유를 열거하지 않는다(`_trace_service.py:336-348`). 2-pass 가
+  `_compile_frame` 안에서 `_candidate_trace` 보다 먼저 사유를 병합하므로 코드 변경 없이
+  전달되며, 그 사실은 `test_the_rank_cut_reason_reaches_the_construction_trace` 가 고정한다.
+
 P2-04 결정 7건(WORKFLOW 원문과 다르게 갔거나 원문이 비워 둔 곳 4 + 리뷰 반영 3):
 
 1. **연산자 `availability` 판정은 이 PR 범위가 아니다.** WORKFLOW P2-04 acceptance 에 그 항목이
@@ -441,7 +487,7 @@ Phase exit:
 | [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `APPROVED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 APPROVE(P3 4건 후속 커밋). 커밋 12개(1차 5 + 1차 리뷰 반영 6 + 2차 리뷰 반영 1, history 재작성 없음). 게이트: pytest·ruff·pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest 639·build. `database/tests` 는 base `fff33fd` 와 같은 41 failed/1268 passed/33 errors(기존 실패, 이 PR 무관) |
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `APPROVED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2` · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 반영, 2차 **APPROVE**(돌연변이 재실행 2 failed 확인, P3-07 이탈 타당). P2 둘 다 `_record_codec.py`의 은퇴 row 읽기 5줄이다: 1.1 row 테스트 0건(그 가지를 `raise`로 바꿔도 초록), 미지 `schema_version`이 fail-closed에서 silent 현재 버전 해석으로 바뀜. 게이트는 아래 Full gate |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `APPROVED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · 1차 → `28003cf1` · 2차 → `2a10798d` · 3차 → `70cfdffa` · 4차 → `22636fc3` · 5차 **APPROVE**(P3 R5-P204-001 단조성: 기준점 후보 비교를 `<=` 로, 리드 지시로 즉시 반영). 게이트는 push tip 에서 재실행(PR 댓글) |
-| [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `WAITING` | — |
+| [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `SELF_CHECK` | 구현 완료·게이트 통과, 리뷰 대기. 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility`. 게이트: pytest 1583 passed / 3 failed(셋 다 base `bb8f3843` 에서 이미 실패하던 P2-03 잔재, 이 PR 무관) · ruff · `ruff format --check`(변경 파일 clean) · pyright 0 · `export_openapi.py`·`export_runtime_schema.py` · frontend `api:generate`·typecheck·lint·Vitest 639·build |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `WAITING` | — |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `WAITING` | — |
 | [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `WAITING` | — |
@@ -562,6 +608,19 @@ Phase exit:
 - 2026-09-26 — P2-04 를 P2-03 APPROVED tip `0dd740e8` 위로 replay 하고(코드 4커밋 range-diff 동일) 1차
   리뷰 반영 `28003cf1`·시각 기준선 `80a5ddf5` 를 얹어 상태를 `IN_REVIEW` 로 갱신했다. 옛 PR head
   `dc8030d3` 는 옛 base 위라 PR #184 가 CONFLICTING 이었다.
+- 2026-09-21 — P2-05 구현 완료(SELF_CHECK). `EligibilityRule.operator` 를 전용
+  `EligibilityOperator` 로 떼고(`ComparisonOperator` 는 소비자가 사라져 삭제), `_compare` 의
+  catch-all `return value == threshold` 를 없애 미지 연산자를 raise 하게 했다. 프레임 컴파일은
+  2-pass 다 — 1-pass 가 절대 규칙으로 후보를 거르고, 2-pass 가 규칙마다 따로 센 모집단의 순위로
+  `top_*` 를 적용해 AND 로 묶는다. 모집단은 유니버스 멤버 ∩ 절대 규칙 전부 통과 ∩ 해당
+  `field_id` 값이 기준일까지 공개된 종목이고, 결측·공개일 초과는 탈락이면서 분모에서도 빠진다.
+  동점은 값 내림차순 → `security_id` 오름차순 cut 이라 같은 입력이 같은 컷을 낸다. 순위 탈락은
+  `ExclusionReason.ELIGIBILITY_RANK_CUT` 로 규칙 위반과 구분되며, 멤버 추가가 API 계약 변경이라
+  OpenAPI·runtime schema·생성 SDK 를 같은 PR 에서 재생성했다. 비율 cut 을 이진 부동소수로
+  곱하면 `100 × 0.29` 가 28 을 내서(격자 1~300 × 1~99% 에서 16조합) `Decimal(str(value))` 로
+  문서 표기를 그대로 곱한다. `top_*` 의 `value` 범위는 새 진단
+  `strategy.eligibility.rule_value` 가 막는다 — 이 PR 이 `value` 의 의미를 연산자별로 갈라
+  놓아 생긴 구멍이라 같은 PR 이 닫는다.
 - 2026-09-21 — P2-04 구현 완료(SELF_CHECK). `signal.normalization`(기본 `rank`)을 모델·runtime
   schema·OpenAPI·생성 SDK 에 넣고, `domain/portfolio/_compiler.py` 가 가중 합 **전에** 프레임
   횡단면 정규화를 적용한다. 순위·표준화 공식은 `domain/factor/_statistics.py` 하나가 소유하게

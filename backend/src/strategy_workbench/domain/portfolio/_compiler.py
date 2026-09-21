@@ -549,6 +549,9 @@ def _apply_cross_sectional_eligibility(
             if not observation.universe_member:
                 continue  # 1-pass 가 이미 NOT_IN_UNIVERSE 로 탈락시켰다
             if not eligible_for_population[observation.security_id]:
+                # 절대 규칙에서 이미 떨어진 종목에는 횡단면 사유를 덧붙이지 않는다. 모집단 밖이라
+                # 순위가 없고, 탈락 사유 목록에 도달하지도 않은 규칙 이야기가 섞이면 trace 화면이
+                # 실제로 걸린 규칙을 가린다.
                 continue
             field = next(
                 (item for item in observation.fields if item.field_id == rule.field_id), None

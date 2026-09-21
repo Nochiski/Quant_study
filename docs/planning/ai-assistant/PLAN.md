@@ -6,7 +6,7 @@ current_phase: P0,A,B
 current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05
 active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
 parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
-last_updated: 2026-09-21T12:56:46+09:00
+last_updated: 2026-09-21T13:01:55+09:00
 planned_prs: 13
 merged_prs: 0
 approved_prs: 13
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05` |
 | Progress | `0 / 13 merged (0%)` |
 | Approved | `13 / 13` |
-| Aggregated at | `2026-09-21 12:56 KST` |
+| Aggregated at | `2026-09-21 13:01 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -177,6 +177,7 @@ Phase exit:
 
 - 2026-09-21 — 보안 결함(A-06 발견, A-05·A-06 수정): 프로파일에 base_url이 없으면 SDK가 `OPENAI_BASE_URL`/`ANTHROPIC_BASE_URL` 환경 변수를 읽어 spec D6 검사를 지나지 않은 호스트로 키가 나감 → 기본 base_url·api_key를 항상 명시해 SDK 환경 변수 폴백 차단(spec D6 한 줄). `Usage` 캐시 필드는 SDK 값 그대로 매핑.
 - 2026-09-21 — A-06(#178) PR 생성·리뷰 배정. `Usage` 캐시 의미 결정(번복 후 확정): domain은 **분리형**(`input_tokens` = 캐시 읽기·쓰기 제외, 세 칸 겹치지 않음) 유지, 총입력은 파생 `total_input_tokens`(A-05), OpenAI adapter가 원시 내역을 빼서 정규화(A-06), A-07 집계는 성분 합산 + wire `total_input_tokens`. 근거: 성분별 단가·저장 이력 의미 보존(A-05 리뷰어).
+- 2026-09-21 — C-01 추가 3건(B-01 probe 경합 deferred, B-02 세션 전환 동기 push+`delivered`+닫힘 플래그+afterEach, B-03 죽은 키·CSS·`.assist__head`) 완료 **`cfb704dd`**(B-05 `ea7b41d5` 위 6커밋, 21파일 +365/−78; pytest 1992, no-extras 118, vitest 801 ×3, e2e 23) · [#190](https://github.com/Nochiski/Quant_study/pull/190) · `review_ai_c_01` 1차 착수. B-05 최종 재복사 tip 위 `--onto` 1회 남음.
 - 2026-09-21 — C-01 NB-1~NB-10 구현 완료 `33d7f663`(B-02 `22a86e39` 위 5커밋; `MIN_CALL_OUTPUT_TOKENS` owner domain + AST 가드, CI ruff·pyright `tools` 포함, no-extras 110 passed, anthropic env 14종 SDK 상수 기반 기준선, `provider_secret_missing` 422 테스트; pytest 1968). 추가 범위(B-01 probe flake deferred화, B-03 죽은 키·CSS·헤더 정렬, B-02 `assistant-event-stream` 세션 전환 테스트 `Controller is already closed` 격리)는 B-05 최종 tip 위 rebase 뒤 커밋.
 - 2026-09-21 — C-01 범위 추가: B-01 probe 경합 vitest flake(벽시계 380ms 의존, B-03·B-05 리뷰어 각 1회 관측)를 deferred promise로 결정화, B-03 P3 2건(죽은 키·CSS, `.assist__head` 정렬).
 - 2026-09-21 — 사용자 지시로 우선순위 변경: 진행 중 작업 전부 push, **AI 스택을 먼저 완결**(B-02~B-05 PR → C-01 감사 후속 → 전체 E2E·CI → #166부터 순서 머지). C-01 구현 착수(`impl-ai-a07`, 워크트리 `wt-ai-c01`, base B-05 tip).

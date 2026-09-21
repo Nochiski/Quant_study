@@ -183,13 +183,13 @@ test.describe("AI 어시스턴트", () => {
       "천천히 설명하겠습니다. 모멘텀 전략은 최근 수익률이 높았던 종목이 당분간 더 오르는 경향에 기대는 전략입니다. KRX에서도 이 경향은 관측됩니다. 다만 그대로 쓰지는 않습니다. 12개월 수익률에서 최근 1개월을 빼는 형태를 많이 씁니다. 직전 한 달은 되돌림이 잦기 때문입니다. 순위를 매긴 뒤에는 상위 몇 종목을 담을지 정합니다. 종목 수가 적으면 변동이 커지고 많으면 지수에 가까워집니다. 리밸런싱 주기도 같이 봅니다. 자주 갈아탈수록 수수료와 슬리피지가 쌓입니다. 마지막으로 종목당 비중 상한을 두어 한 종목이 성과를 좌우하지 않게 합니다.",
     ]);
 
-    // 취소: 답이 흘러나오는 중에 멈춘다. 진행 상태 영역은 상주하며 문구만 바뀐다(B-03 3차 리뷰 P2).
+    // 취소(스트리밍 도중): 답이 흘러나오는 중에 멈추면 사유가 그 자리에서 말풍선에 남는다.
+    // 진행 상태 영역은 상주하며 문구만 바뀐다(B-03 3차 리뷰 P2).
     await ask(page, "이번에는 천천히 한 번 더 설명해 줘");
     // 같은 대본을 두 번 돌리므로 대화 전체가 아니라 **마지막 턴 블록**만 본다. 전체를 보면 앞
     // 턴의 같은 문장에 걸려 기다리지 않고 지나간다.
-    await expect(transcript(page).getByRole("article").last()).toContainText(
-      "천천히 설명하겠습니다.",
-    );
+    const midStream = transcript(page).getByRole("article").last();
+    await expect(midStream).toContainText("천천히 설명하겠습니다.");
     const stop = assistant(page).getByRole("button", { name: "중지" });
     await expect(stop).toBeVisible();
     await stop.click();
@@ -199,20 +199,27 @@ test.describe("AI 어시스턴트", () => {
     ).toBeVisible();
     await expect(stop).toHaveCount(0);
     await expect(progress(page)).toHaveText("답변을 중지했습니다.");
-
-    // 취소가 서버의 턴을 실제로 멈췄다: 새로고침해 이력을 다시 읽어도 그 턴은 받다 만 조각에서
-    // 더 자라지 않는다. 대본의 마지막 문장은 영영 오지 않는다.
-    //
-    // 취소 **사유**(`Failure(CANCELLED)`)는 아직 이력에 없다. 공급자 adapter가 취소 신호를 보고
-    // 스트림을 먼저 닫으면 application이 그 사유를 이벤트로 남길 자리가 없고, 사이드바도 종료
-    // 상태를 받는 순간 스트림을 닫는다(DEFECT-AI-B05-001 — 이벤트 저장은 A-07, 스트림 유지는
-    // B-02). 둘이 들어오면 아래 두 줄을 "요청을 취소했습니다." 단언으로 바꾼다.
-    await page.reload();
-    await expect(editor(page)).toBeVisible();
-    const stopped = transcript(page).getByRole("article").last();
-    await expect(stopped).toContainText("천천히 설명하겠습니다.");
-    await expect(stopped).not.toContainText(
+    // 새로고침 없이 사유가 보인다: 사이드바가 종료 이벤트까지 스트림을 열어 둔다(B-02).
+    await expect(midStream).toContainText("요청을 취소했습니다.");
+    // 받다 만 조각은 남고 그 뒤는 오지 않는다 — 이미 스트리밍된 텍스트는 보존한다(spec D3).
+    await expect(midStream).not.toContainText(
       "한 종목이 성과를 좌우하지 않게 합니다.",
+    );
+
+    // 취소(보내자마자): 버튼이 뜨는 즉시 멈춰도 사유가 남는다. 공급자가 아무 이벤트도 내기 전에
+    // 반환하면 서비스 루프가 한 번도 돌지 않아 사유가 비는 갈래가 있었고, A-07 `5009a03c`가
+    // 루프 진입 여부와 무관하게 사유를 세우도록 닫았다(DEFECT-AI-B05-001의 두 번째 갈래).
+    //
+    // 첫 조각이 오기 **전**이라는 것까지 브라우저에서 못 박지는 않는다 — 턴 시작 응답과 첫 조각
+    // 사이는 밀리초라 클릭이 어느 쪽에 떨어질지 정할 수 없다. 그 경계는 application 단위 테스트가
+    // 결정적으로 고정하고, 여기서는 "언제 눌러도 사유가 남는다"를 본다.
+    await ask(page, "천천히 한 번만 더 설명해 줘");
+    await stop.click();
+    await expect(
+      assistant(page).getByRole("button", { name: "보내기" }),
+    ).toBeVisible();
+    await expect(transcript(page).getByRole("article").last()).toContainText(
+      "요청을 취소했습니다.",
     );
 
     expect(page.url()).toContain(`/research/strategies/${strategyId}/`);

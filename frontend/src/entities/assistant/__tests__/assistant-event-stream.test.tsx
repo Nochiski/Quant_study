@@ -105,7 +105,8 @@ const history = (
 });
 
 type Connection = {
-  push: (item: AssistantEventEnvelopeView) => void;
+  /** 실제로 enqueue했으면 true. 이미 닫힌 컬트롤러면 조용히 false. */
+  push: (item: AssistantEventEnvelopeView) => boolean;
   /** 봉투로 좁혀지지 않는 프레임까지 그대로 밀어 넣는다. */
   pushFrame: (raw: string) => void;
   /** 프레임을 임의의 자리에서 자른 청크. 한글이 코드포인트 중간에서 갈리는 경우를 포함한다. */
@@ -138,23 +139,48 @@ const server = setupServer(
       return HttpResponse.json(reply.body, { status: reply.status });
     }
     let controller!: ReadableStreamDefaultController<Uint8Array>;
+    // 닫힌 컬트롤러에 enqueue하면 `Invalid state`로 던진다. 어떤 테스트는 읽기를 끊은 뒤에도
+    // 프레임을 밀어 "전달되지 않는다"를 보는데, 중단 전파가 말아서 컬트롤러를 먼저 닫을 수 있다.
+    // 그때 예외로 죽으면 부하에 따라 결과가 갈린다. 예외 메시지를 보고 판별하지 않고
+    // 닫힌 시점을 직접 기록해 읽는다. 이미 닫혔다면 전달할 것이 없다 — 테스트가 보려는 상태 그 자체다.
+    let closed = false;
     const stream = new ReadableStream<Uint8Array>({
       start: (value) => {
         controller = value;
       },
+      cancel: () => {
+        closed = true;
+      },
     });
-    connections.push({
-      push: (item) => controller.enqueue(frame(item)),
-      pushFrame: (raw) => controller.enqueue(encoder.encode(raw)),
+    const connection: Connection = {
+      push: (item) => {
+        if (closed) return false;
+        controller.enqueue(frame(item));
+        return true;
+      },
+      pushFrame: (raw) => {
+        if (closed) return;
+        controller.enqueue(encoder.encode(raw));
+      },
       pushChunks: (item, size) => {
+        if (closed) return;
         const bytes = frame(item);
         for (let at = 0; at < bytes.length; at += size) {
           controller.enqueue(bytes.slice(at, at + size));
         }
       },
-      close: () => controller.close(),
-      drop: () => controller.error(new Error("연결이 끊겼습니다")),
-    });
+      close: () => {
+        if (closed) return;
+        closed = true;
+        controller.close();
+      },
+      drop: () => {
+        if (closed) return;
+        closed = true;
+        controller.error(new Error("연결이 끊겼습니다"));
+      },
+    };
+    connections.push(connection);
     return new HttpResponse(stream, {
       headers: { "Content-Type": "text/event-stream" },
     });
@@ -190,6 +216,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  // 열린 스트림을 남기지 않는다. 남기면 다음 파일까지 매달려 teardown이 느려진다.
+  for (const connection of connections) connection.close();
   server.resetHandlers();
 });
 
@@ -561,11 +589,17 @@ data: ${JSON.stringify({
       lastSequence: -1,
     });
 
+    // rerender 직후 **같은 동기 턴**에 밀어 넣는다. 중단 전파는 최소한 번의 microtask를
+    // 타므로 여기서는 컬트롤러가 반드시 열려 있다. await를 먼저 거치면 닫힐 수 있고,
+    // 그러면 "무시됐다"가 자명한 참이 돼 리더가 정말 버렸는지를 지키지 못한다.
+    const delivered = connections[0].push(envelope(0, "앞 세션 프레임"));
+
     await waitFor(() => expect(attempts).toHaveLength(2));
     expect(attempts[0].signal.aborted).toBe(true);
     expect(attempts[1].url).toContain("/sessions/session-2/events");
 
-    connections[0].push(envelope(0, "앞 세션 프레임"));
+    // 실제로 넣었음을 못 박는다. 순서를 되돌려 닫힌 뒤에 밀게 되면 여기서 불이 켜진다.
+    expect(delivered).toBe(true);
     await settle();
     expect(onEvent).not.toHaveBeenCalled();
   });

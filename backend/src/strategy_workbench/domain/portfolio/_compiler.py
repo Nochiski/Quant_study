@@ -542,6 +542,14 @@ def _apply_cross_sectional_eligibility(
         item.decision.security_id: item.passes_absolute_eligibility
         for item in _checkpointed(scored, checkpoint)
     }
+    # 1-pass 의 `_score_candidate` 와 **같은 방식**으로 필드를 찾는다(관측당 dict 한 벌, 중복
+    # `field_id` 면 마지막 항목이 이긴다). 한쪽이 선형 탐색이면 중복이 들어왔을 때 절대 규칙과
+    # 횡단면 모집단이 서로 다른 값을 읽는다 — 포트 계약이 중복을 거절하므로 실 파이프라인에서는
+    # 안 나지만, 이 함수는 공개 도메인 facade 를 통해 임의 관측으로도 불린다(리뷰 DEFECT-P3-2).
+    fields_by_security = {
+        observation.security_id: {item.field_id: item for item in observation.fields}
+        for observation in _checkpointed(observations, checkpoint)
+    }
     added: dict[str, list[ExclusionReason]] = {}
     for rule in rules:
         population: list[tuple[str, float]] = []
@@ -553,9 +561,7 @@ def _apply_cross_sectional_eligibility(
                 # 순위가 없고, 탈락 사유 목록에 도달하지도 않은 규칙 이야기가 섞이면 trace 화면이
                 # 실제로 걸린 규칙을 가린다.
                 continue
-            field = next(
-                (item for item in observation.fields if item.field_id == rule.field_id), None
-            )
+            field = fields_by_security[observation.security_id].get(rule.field_id)
             if field is None or not _number(field.value):
                 added.setdefault(observation.security_id, []).append(
                     ExclusionReason.MISSING_ELIGIBILITY

@@ -196,7 +196,14 @@ def test_a_cut_larger_than_the_population_keeps_everyone() -> None:
 
 
 def test_ties_are_cut_by_security_id_ascending() -> None:
-    """값이 모두 같으면 `security_id` 오름차순이 전순서를 만든다 — 같은 입력이 같은 컷을 낸다."""
+    """값이 모두 같으면 `security_id` 오름차순이 전순서를 만든다 — 같은 입력이 같은 컷을 낸다.
+
+    관측을 **뒤집어** 한 번 더 컴파일하는 것이 이 테스트의 핵심이다. 오름차순 입력만 쓰면
+    파이썬의 안정 정렬이 타이브레이커를 대신해 주므로, 정렬 2차 키(`item[0]`)를 지워도
+    통과한다(리뷰 DEFECT-P2-1 실측). 도메인 facade `compile_target_tape` 는 관측 순서를
+    정렬하지도 검사하지도 않으므로(프레임 그룹화가 호출자 순서를 그대로 보존한다) 2차 키가
+    없으면 같은 문서·같은 스냅샷이 관측 순서에 따라 다른 종목을 남긴다.
+    """
     observations = tuple(_observation(f"s{index:03d}", liquidity=1.0) for index in range(5))
     spec = _spec(EligibilityRule(_LIQUIDITY, EligibilityOperator.TOP_COUNT, 2))
 
@@ -204,6 +211,7 @@ def test_ties_are_cut_by_security_id_ascending() -> None:
 
     assert _kept_ids(candidates) == {"s000", "s001"}
     assert _cut_ids(candidates) == {"s002", "s003", "s004"}
+    assert _kept_ids(_candidates(spec, tuple(reversed(observations)))) == _kept_ids(candidates)
 
 
 def test_missing_values_drop_out_of_the_population_and_the_denominator() -> None:
@@ -371,3 +379,35 @@ def test_a_non_finite_cut_size_names_the_rule_instead_of_crashing_bare() -> None
     rule = EligibilityRule(_LIQUIDITY, EligibilityOperator.TOP_PERCENT, float("nan"))
     with pytest.raises(ValueError, match="non-finite size"):
         compiler_module._cross_sectional_cut(rule, 10)
+
+
+def test_both_passes_read_the_same_field_when_a_field_id_repeats() -> None:
+    """중복 `field_id` 에서 절대 규칙과 횡단면 모집단이 같은 값을 읽는다 (리뷰 DEFECT-P3-2).
+
+    포트 계약이 중복을 거절하므로 실 파이프라인에서는 나지 않지만, `compile_target_tape` 는
+    공개 도메인 facade 라 임의 관측으로도 불린다. 두 패스가 서로 다른 조회 방식을 쓰면 같은
+    규칙이 종목마다 다른 값을 보고도 조용히 통과한다.
+    """
+    # 마지막 항목(5.0)이 이긴다 — 절대 규칙 `> 3` 을 통과하고, 순위도 그 값으로 매겨진다.
+    duplicated = PortfolioObservation(
+        as_of=_DAY,
+        security_id="s000",
+        universe_member=True,
+        factor_values=(PortfolioFactorValue("price.close", 1.0, _DAY),),
+        fields=(
+            PortfolioFieldValue(_LIQUIDITY, 1.0, _DAY),
+            PortfolioFieldValue(_LIQUIDITY, 5.0, _DAY),
+        ),
+        sector_id="sector-a",
+        previous_weight=0.0,
+    )
+    observations = (duplicated, _observation("s001", liquidity=3.0))
+    spec = _spec(
+        EligibilityRule(_LIQUIDITY, EligibilityOperator.GREATER_THAN, 2.0),
+        EligibilityRule(_LIQUIDITY, EligibilityOperator.TOP_COUNT, 1),
+    )
+
+    candidates = _candidates(spec, observations)
+
+    assert _kept_ids(candidates) == {"s000"}
+    assert _cut_ids(candidates) == {"s001"}

@@ -642,3 +642,34 @@ def test_commit_records_but_does_not_fail_without_history(tmp_path, monkeypatch)
     assert kw_daily.main(["--fetch", "--date", D, "--tr", "ka10014", "--commit"]) == 0
     # 기준선이 없으면 판정하지 않는다 — 왜 판정을 못 했는지는 남긴다
     assert "coverage_basis=ka10014:none" in _run_detail(tmp_path, "kiwoom_fetch")
+
+
+# ── call_tr: 비JSON 응답은 재시도 뒤 ERROR 로 센다 — 예외가 실행 전체를 죽이지 않는다(09-23 21:20 실측) ──
+def test_call_tr_counts_non_json_response_as_error_instead_of_raising(monkeypatch) -> None:
+    import types
+
+    monkeypatch.setattr(kw_daily, "BACKOFF_SEC", 0)
+    spec = kw_daily.TRS["ka10060"]
+    calls = {"n": 0}
+
+    def flaky(api_id, url, body):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("Expecting value: line 1 column 1 (char 0)")      # requests JSONDecodeError 는 ValueError
+        return {"return_code": 0, "return_msg": "", spec.rows_key: [{"dt": "20260923", "cur_prc": "1"}]}, {}
+
+    out = kw_daily.call_tr(types.SimpleNamespace(kiwoom=flaky), spec, "005930", "20260923")
+    assert out.status is kw_daily.CallStatus.OK and calls["n"] == 2                 # 1회 재시도 뒤 성공
+
+    def always_bad(api_id, url, body):
+        raise ValueError("<html>점검중</html>")
+
+    out = kw_daily.call_tr(types.SimpleNamespace(kiwoom=always_bad), spec, "005930", "20260923")
+    assert out.status is kw_daily.CallStatus.ERROR and "non-json" in out.detail and "exhausted" in out.detail
+
+    def timeout(api_id, url, body):
+        raise TimeoutError("read timed out")
+
+    out = kw_daily.call_tr(types.SimpleNamespace(kiwoom=timeout), spec, "005930", "20260923")
+    assert out.status is kw_daily.CallStatus.ERROR and "transport" in out.detail
+

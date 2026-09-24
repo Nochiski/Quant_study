@@ -371,7 +371,19 @@ def call_tr(client: ModuleType, spec: TrSpec, ticker: str, end_dt: str) -> CallO
     body = spec.body(ticker, spec.floor, end_dt)
     last = "no attempt"
     for _ in range(MAX_RETRY):
-        payload, _headers = client.kiwoom(spec.api_id, spec.url, body)
+        try:
+            payload, _headers = client.kiwoom(spec.api_id, spec.url, body)
+        except ValueError as e:
+            # 비JSON 응답(점검 페이지·HTML 오류 — 09-23 21:20 실측 `requests.exceptions.JSONDecodeError`).
+            # 종전엔 여기서 예외가 올라가 15분짜리 수집 전체가 rc 1 로 죽고 2,167/2,654 만 남았다. 한 종목의
+            # 이상 응답은 재시도 뒤 ERROR 로 세고, 결손은 A01 커버리지 게이트가 판정한다(조용히 넘기지 않는다).
+            last = f"non-json response — api={spec.api_id} ticker={ticker} err={type(e).__name__}: {str(e)[:80]}"
+            time.sleep(BACKOFF_SEC)
+            continue
+        except OSError as e:                                   # requests 의 연결·타임아웃 예외는 OSError 계열
+            last = f"transport — api={spec.api_id} ticker={ticker} err={type(e).__name__}: {str(e)[:80]}"
+            time.sleep(BACKOFF_SEC)
+            continue
         if not isinstance(payload, dict):
             last = (f"non-dict response — api={spec.api_id} ticker={ticker} "
                     f"type={type(payload).__name__}")

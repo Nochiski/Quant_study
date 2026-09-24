@@ -91,6 +91,10 @@ _ONE_PREFIX_RE = re.compile(r"\[([^\]]*)\]")
 _LABEL_RE = re.compile(r"\((\d{4})\.(\d{2})\)")
 # 12월 결산 기준. 분기보고서의 Q1/Q3 를 가르는 데만 쓴다 — 사업·반기는 이름이 먼저 정한다.
 _QUARTER_REPRT: dict[str, str] = {"03": "11013", "09": "11014"}
+# 비12월 결산: 라벨 월 − 결산월(acc_mt) 이 3 이면 1분기(11013), 9 면 3분기(11014). 6 은 반기(11012)인데 이름이
+# 분기보고서면 원문 오기라 그대로 반기로 본다. bsns_year 는 12월 결산과 같이 **라벨 연도**(기간 종료 연도) —
+# 실측 테라뷰(acc_mt 04): 반기 (2025.10) → 2025/11012 ok, 사업 (2026.04) → 2026/11011 ok(DART 는 기간 종료 연도).
+_OFFSET_REPRT: dict[int, str] = {3: "11013", 9: "11014", 6: "11012"}
 
 # ── 예산 (findings B §3-1·§7-5) ────────────────────────────────────────────────────
 OUR_QUOTA_LIMIT = 40_000       # 우리 키(k2+k3) 합계 상한. 넘으면 중단한다
@@ -297,6 +301,34 @@ def _classify_periodic(nm_clean: str, prefixes: tuple[str, ...], is_corr: bool) 
     return Classified(Kind.PERIODIC, is_corr, nm_clean, prefixes, year, reprt)
 
 
+def resolve_with_acc_mt(c: Classified, acc_mt: str | None) -> Classified | None:
+    """`classify()` 가 보류한 비12월 결산 분기보고서를 법인의 결산월로 푼다. 못 풀면 None.
+
+    09-23 실측: 테라뷰(acc_mt 04) '분기보고서 (2026.07)' 가 `unresolved` 로 남아 DART 게이트가 저녁·아침
+    두 번 실패했고, 재실행마다 같은 자리에서 다시 실패한다(D 가 같으니). 결산월이 있으면 판정할 수 있다."""
+    if c.kind is not Kind.PERIODIC or c.reprt_code is not None or c.bsns_year is None:
+        return None
+    if not acc_mt or len(acc_mt) != 2 or not acc_mt.isdigit():
+        return None
+    m = _LABEL_RE.search(c.nm_clean)
+    if m is None:
+        return None
+    offset = (int(m.group(2)) - int(acc_mt)) % 12
+    reprt = _OFFSET_REPRT.get(offset)
+    if reprt is None:
+        return None
+    return Classified(c.kind, c.is_correction, c.nm_clean, c.prefixes, c.bsns_year, reprt,
+                      detail=f"resolved via dart_company.acc_mt={acc_mt}: label month {m.group(2)} "
+                             f"offset {offset} → {reprt}")
+
+
+def _acc_mt_by_corp(con: sqlite3.Connection) -> dict[str, str]:
+    """corp_code → 결산월. `dart_company` 가 없는 절단본(테스트)에서는 빈 dict."""
+    if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='dart_company'").fetchone() is None:
+        return {}
+    return {str(r[0]): str(r[1] or "") for r in con.execute("SELECT corp_code, acc_mt FROM dart_company")}
+
+
 # ── 2. 계획 ──────────────────────────────────────────────────────────────────────
 def late_rows(con: sqlite3.Connection, date_yyyymmdd: str,
               since_ts: str) -> list[tuple[str, str, str]]:
@@ -352,10 +384,17 @@ def plan(con: sqlite3.Connection, date_yyyymmdd: str, *,
     unresolved: list[tuple[str, str]] = []
     bad: list[tuple[str, str]] = []
     counts: dict[str, int] = {k.value: 0 for k in Kind}
+    acc_mt_by_corp: dict[str, str] | None = None          # 비12월 결산 분기 라벨이 나올 때만 읽는다
 
     for rcept_no, corp_code, report_nm in rows:
         rno, corp, nm = str(rcept_no), str(corp_code or ""), str(report_nm or "")
         c = classify(nm)
+        if c.kind is Kind.PERIODIC and not c.resolved and c.bsns_year is not None:
+            if acc_mt_by_corp is None:
+                acc_mt_by_corp = _acc_mt_by_corp(con)
+            fixed = resolve_with_acc_mt(c, acc_mt_by_corp.get(corp))
+            if fixed is not None:
+                c = fixed
         counts[c.kind.value] += 1
         if c.kind in (Kind.OTHER, Kind.CORRECTION):
             continue

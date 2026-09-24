@@ -207,6 +207,27 @@ def test_plan_skips_unlisted_and_records_unresolved(tmp_path) -> None:
     con.close()
 
 
+def test_plan_resolves_non_december_quarterly_label_with_company_fiscal_month(tmp_path) -> None:
+    """09-23 실측: 테라뷰(결산월 04)의 '분기보고서 (2026.07)' — 라벨 월 07 − 결산월 04 = 3 → 1분기(11013),
+    bsns_year 는 라벨 연도. 결산월을 모르는 법인(dart_company 에 없음)은 종전대로 unresolved 로 남긴다."""
+    rows = [("20260923000617", D, C1, "950250", "분기보고서 (2026.07)"),     # acc_mt 04 → Q1
+            ("20260923000618", D, C2, "005930", "분기보고서 (2026.01)"),     # acc_mt 04 → 01−04 = 9 → Q3
+            ("20260923000619", D, C3, "000660", "분기보고서 (2026.05)")]     # dart_company 에 없음 → 보류
+    home = _make_home(tmp_path, rows=rows)
+    con = _con(home)
+    con.execute("CREATE TABLE dart_company (corp_code TEXT PRIMARY KEY, corp_name TEXT, acc_mt TEXT)")
+    con.executemany("INSERT INTO dart_company VALUES (?,?,?)", [(C1, "테라뷰홀딩스", "04"), (C2, "x", "04")])
+    con.commit()
+    p = dd.plan(con, D)
+    assert set(p.periodic_units) == {(C1, "2026", "11013"), (C2, "2026", "11014")}
+    assert [r[0] for r in p.unresolved] == ["20260923000619"]
+    c = dd.resolve_with_acc_mt(dd.classify("분기보고서 (2026.07)"), "04")
+    assert c is not None and c.reprt_code == "11013" and c.bsns_year == "2026" and "acc_mt=04" in c.detail
+    assert dd.resolve_with_acc_mt(dd.classify("분기보고서 (2026.07)"), "12") is None      # 07−12 = 7 → 판정 불가
+    assert dd.resolve_with_acc_mt(dd.classify("분기보고서 (2026.07)"), None) is None
+    con.close()
+
+
 def test_plan_includes_late_arriving_filings_first_seen_in_this_sweep(tmp_path) -> None:
     """접수일이 D 가 아니어도 **이번 스윕에서 처음 본** 공시는 상세 축을 따라가야 한다.
 

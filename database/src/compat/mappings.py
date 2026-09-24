@@ -39,6 +39,9 @@ class TableMapping:
     retire_when: str
     null_columns: tuple[str, ...] = field(default_factory=tuple)
     note: str = ""
+    # 다른 루트의 원천 — (kind, 표). `financial_summary` 가 stage WISE 와 equity DART 를
+    # 함께 읽는다(T1.5 · D-10). SQL 자리 이름은 `sources` 와 같은 규칙이다.
+    cross_sources: tuple[tuple[str, str], ...] = ()
 
 
 # ── daily_prices ────────────────────────────────────────────────────────────────────────────
@@ -277,27 +280,40 @@ FROM sel
 WHERE rn = 1
 """
 
-# ── financial_summary ───────────────────────────────────────────────────────────────────────
-# stage `stg_fin_wise`(WISE cF3002 재무제표 + cF4002 투자지표, 결정 D-5).
-# wide → long: 한 행이 계정 1개 × 기간 슬롯 6개(`period_label_1..6` ↔ `val_1..6`)라
-# 6-fold UNION ALL 로 펴고 accode 로 피벗한다.
-# 기간 라벨은 '2021/12(IFRS연결)' / '2026/12(E)(IFRS연결)' 꼴이다 —
-#   (E) 가 없으면 v3 `data_type` 은 **NULL** 이고 그 행만 scoring 의 quality·valuation 창
-#   (`period_type='annual' AND data_type IS NULL`)에 든다.
-# accode(절단본 `tests/fixtures/stage_slice/stg_fin_wise` 실측). cF3002 넷은 **계정명까지**
-# 맞아야 센다(R1 — 금융업은 같은 accode 에 다른 계정이 실린다):
-#   cF3002 200000 '매출액(수익)' · 200810 '매출총이익' · 201370 '영업이익' · 203170 '당기순이익'
-#   cF4002 312000 EPS · 314000 BPS · 382100 PER · 382500 PBR · 331000 EV/EBITDA ·
-#          431800 현금배당수익률 · 701250 보통주수정기말발행주식수
-#   cF4002 는 같은 ACCODE 가 P_ACCODE 아래 한 번 더 나온다(EPS/BPS) — 값이 같지만 최상위
-#   행(`p_accode IS NULL`)만 쓴다.
-# ⚠ **없음(NULL)**: roe · roa · debt_ratio · fcf · capex · op_margin · ni_margin · yoy ·
-#   total_assets. WISE cF3002 는 손익계산서 전용이고(절단본 accode 전수 200000~205590·
-#   290010~294000) 재무상태표·현금흐름표 계정이 없다. v3 의 이 열들은 네이버 금융
-#   '기업실적분석' HTML(`backend/clients/naver/_wisereport_parsers.py:36-49`)에서 왔다.
-#   → v3 quality 팩터가 읽는 roa·debt_ratio·fcf·total_assets 가 비어 gpa·roa·fcf/자산·
-#     부채비율 서브가 전부 결측이 된다(std_20d 만 남는다). **G-M2 ②의 선결 과제**로
-#     오케스트레이터에 보고했다(D-5 재검토 또는 다른 원천 필요).
+# ── financial_summary (두 원천 합성 — T1.5 · D-10) ──────────────────────────────────────────
+# ① stage `stg_fin_wise`(WISE cF3002 재무제표 + cF4002 투자지표, 결정 D-5)
+#      → revenue · op · ni · eps · bps · per · pbr · ev_ebitda · dividend_yield · shares ·
+#        gross_profit · accounting_standard
+# ② equity `fin_std`(DART 표준계정 PIT, S12) — **v3 quality 팩터 입력**
+#      → total_assets · roa · debt_ratio · fcf · capex · roe
+#   4일 그림자 실측에서 quality 상관이 0.48 뿐이었던 원인이 ②의 부재였다(나머지 팩터는
+#   momentum 0.997 · flow 0.996 · revision 0.985 · valuation 0.977). WISE cF3002 는
+#   손익계산서 전용이라 재무상태표·현금흐름표 계정이 없다.
+#
+# 정의(단위는 v3 `financial_summary` 기준 — 금액 억원 · 비율 %):
+#   total_assets = total_asset / 1e8                              (원 → 억원)
+#   roa          = net_income / total_asset   × 100               (%)
+#   debt_ratio   = total_liab / total_equity  × 100               (%)
+#   roe          = net_income / total_equity  × 100               (%)
+#   capex        = abs(capex_ytd) / 1e8                           (원 → 억원)
+#   fcf          = (cf_operating_ytd − abs(capex_ytd)) / 1e8      (원 → 억원)
+#   `capex_ytd`(유형자산 취득, 연초누계)는 DART 제출사마다 유출을 음수로 적기도 양수로 적기도
+#   한다. CAPEX 는 **취득액(크기)** 이므로 `abs()` 로 부호를 지우고 FCF 에서 뺀다 — 부호 규약을
+#   실측으로 확인하기 전까지의 보수적 선택이며, 서버 대조(v3 네이버 CAPEX)로 검증할 항목이다.
+#
+# 조인·PIT:
+#   `fin_std` grain 은 (corp_code, period_end, report_code, fs_div, vintage_kind) 라
+#   `security.corp_code` 로 티커에 붙인다(보통주·우선주가 같은 corp_code 를 공유하면 둘 다
+#   같은 재무를 받는다 — v3 네이버도 그렇다).
+#   연간 = `report_code='11011'`(사업보고서). `period` 는 `period_end` 의 'YYYY/MM' 이라
+#   비12월 결산도 자기 결산월로 들어간다(v3 규칙대로 월이 12 가 아니면 period_type='quarter').
+#   PIT — `available_date <= {date}` 인 판본만 본다. 같은 (corp_code, period_end) 에 여러
+#   판본이면 **연결(CFS) 우선**(v3·WISE 가 IFRS연결 기준이다) → 그 안에서 available_date 최신
+#   (정정 공시 반영) → rcept_no 최신.
+#   `gross_profit` 은 WISE 값 우선, 없으면 DART(원 → 억원). v3 원천에 가까운 쪽을 남긴다.
+#   WISE 확정 행과 DART 행은 (ticker, period) FULL OUTER JOIN 이다 — 한쪽에만 있는 기도
+#   행으로 남긴다(DART 만 있는 종목은 quality 입력이라도 채워진다).
+# ⚠ 여전히 **없음(NULL)**: op_margin · ni_margin · yoy. 계산은 팩터층 몫이라 두지 않는다.
 _FIN_SLOTS = "\n    UNION ALL\n    ".join(
     "SELECT ticker, ep, accode, p_accode, acc_nm, fs_basis, "
     f"period_label_{i} AS label, val_{i} AS val FROM cur" for i in range(1, 7))
@@ -321,6 +337,21 @@ def _fin_pick(ep: str, accode: str, top_only: bool = False,
     return f"max(CASE WHEN {cond} THEN val END)"
 
 
+# WISE 확정·추정 두 갈래가 함께 쓰는 v3 컬럼(DART 와 무관한 자리)
+_W_COLS = """       CAST(round(w_revenue) AS BIGINT)                       AS revenue,
+       CAST(round(w_op) AS BIGINT)                            AS op,
+       CAST(round(w_ni) AS BIGINT)                            AS ni,
+       CAST(round(w_eps) AS BIGINT)                           AS eps,
+       CAST(round(w_bps) AS BIGINT)                           AS bps,
+       CAST(w_per AS DOUBLE)                                  AS per,
+       CAST(w_pbr AS DOUBLE)                                  AS pbr,"""
+_W_TAIL = """       CAST(NULL AS DOUBLE)                                   AS op_margin,
+       CAST(NULL AS DOUBLE)                                   AS ni_margin,
+       CAST(w_dividend_yield AS DOUBLE)                       AS dividend_yield,
+       CAST(round(w_shares) AS BIGINT)                        AS shares,
+       CAST(w_ev_ebitda AS DOUBLE)                            AS ev_ebitda,
+       CAST(NULL AS DOUBLE)                                   AS yoy,"""
+
 _FINANCIAL_SUMMARY_SQL = f"""
 WITH latest AS (
     SELECT ticker, max(fetched_date) AS fetched_date
@@ -342,37 +373,103 @@ parsed AS (
            regexp_matches(label, '\\(E\\)')                      AS is_est
     FROM slots
     WHERE label IS NOT NULL AND regexp_matches(label, '\\d\\d\\d\\d[./]\\d\\d')
+),
+wise AS (
+    SELECT ticker,
+           yyyy || '/' || mm                                   AS period,
+           CASE WHEN mm = '12' THEN 'annual' ELSE 'quarter' END AS period_type,
+           is_est,
+           {_fin_pick('cF3002', '200000', True, '매출액(수익)')}  AS w_revenue,
+           {_fin_pick('cF3002', '201370', True, '영업이익')}      AS w_op,
+           {_fin_pick('cF3002', '203170', True, '당기순이익')}    AS w_ni,
+           {_fin_pick('cF4002', '312000', True)}                  AS w_eps,
+           {_fin_pick('cF4002', '314000', True)}                  AS w_bps,
+           {_fin_pick('cF4002', '382100')}                        AS w_per,
+           {_fin_pick('cF4002', '382500')}                        AS w_pbr,
+           {_fin_pick('cF4002', '331000')}                        AS w_ev_ebitda,
+           {_fin_pick('cF4002', '431800')}                        AS w_dividend_yield,
+           {_fin_pick('cF4002', '701250')}                        AS w_shares,
+           {_fin_pick('cF3002', '200810', True, '매출총이익')}    AS w_gross_profit,
+           max(CASE WHEN ep = 'cF3002' THEN fs_basis END)         AS w_fs_basis
+    FROM parsed
+    GROUP BY ticker, yyyy, mm, is_est
+),
+fin AS (
+    SELECT f.corp_code, f.period_end, f.total_asset, f.total_liab, f.total_equity,
+           f.net_income, f.cf_operating_ytd, f.capex_ytd, f.gross_profit,
+           row_number() OVER (
+               PARTITION BY f.corp_code, f.period_end
+               ORDER BY CASE WHEN f.fs_div = 'CFS' THEN 0 ELSE 1 END,
+                        f.available_date DESC, f.rcept_no DESC) AS rn
+    FROM {{fin_std}} f
+    WHERE f.report_code = '11011'
+      AND f.available_date <= DATE '{{date}}'
+),
+dart AS (
+    SELECT s.ticker,
+           strftime(f.period_end, '%Y/%m')                      AS period,
+           CASE WHEN strftime(f.period_end, '%m') = '12' THEN 'annual' ELSE 'quarter' END
+                                                                AS period_type,
+           f.total_asset  AS d_total_asset,
+           f.total_liab   AS d_total_liab,
+           f.total_equity AS d_total_equity,
+           f.net_income   AS d_net_income,
+           f.cf_operating_ytd AS d_cf_op,
+           f.capex_ytd    AS d_capex,
+           f.gross_profit AS d_gross_profit
+    FROM fin f
+    JOIN {{security}} s ON s.corp_code = f.corp_code
+    WHERE f.rn = 1
+),
+act AS (
+    SELECT coalesce(w.ticker, d.ticker)           AS ticker,
+           coalesce(w.period, d.period)           AS period,
+           coalesce(w.period_type, d.period_type) AS period_type,
+           w.w_revenue, w.w_op, w.w_ni, w.w_eps, w.w_bps, w.w_per, w.w_pbr,
+           w.w_ev_ebitda, w.w_dividend_yield, w.w_shares, w.w_gross_profit, w.w_fs_basis,
+           d.d_total_asset, d.d_total_liab, d.d_total_equity, d.d_net_income,
+           d.d_cf_op, d.d_capex, d.d_gross_profit
+    FROM (SELECT * FROM wise WHERE NOT is_est) w
+    FULL OUTER JOIN dart d ON d.ticker = w.ticker AND d.period = w.period
 )
-SELECT ticker                                              AS stock_code,
-       yyyy || '/' || mm                                   AS period,
-       CASE WHEN mm = '12' THEN 'annual' ELSE 'quarter' END AS period_type,
-       CAST(round({_fin_pick('cF3002', '200000', True, '매출액(수익)')}) AS BIGINT) AS revenue,
-       CAST(round({_fin_pick('cF3002', '201370', True, '영업이익')}) AS BIGINT) AS op,
-       CAST(round({_fin_pick('cF3002', '203170', True, '당기순이익')}) AS BIGINT) AS ni,
-       CAST(round({_fin_pick('cF4002', '312000', True)}) AS BIGINT) AS eps,
-       CAST(round({_fin_pick('cF4002', '314000', True)}) AS BIGINT) AS bps,
-       CAST({_fin_pick('cF4002', '382100')} AS DOUBLE)              AS per,
-       CAST({_fin_pick('cF4002', '382500')} AS DOUBLE)              AS pbr,
-       CAST(NULL AS DOUBLE)                                         AS roe,
-       CAST(NULL AS DOUBLE)                                         AS roa,
-       CAST(NULL AS DOUBLE)                                         AS debt_ratio,
-       CAST(NULL AS BIGINT)                                         AS fcf,
-       CAST(NULL AS BIGINT)                                         AS capex,
-       CAST(NULL AS DOUBLE)                                         AS op_margin,
-       CAST(NULL AS DOUBLE)                                         AS ni_margin,
-       CAST({_fin_pick('cF4002', '431800')} AS DOUBLE)              AS dividend_yield,
-       CAST(round({_fin_pick('cF4002', '701250')}) AS BIGINT)       AS shares,
-       CAST({_fin_pick('cF4002', '331000')} AS DOUBLE)              AS ev_ebitda,
-       CAST(NULL AS DOUBLE)                                         AS yoy,
-       CASE WHEN is_est THEN 'estimate' END                          AS data_type,
-       max(CASE WHEN ep = 'cF3002' THEN fs_basis END)               AS accounting_standard,
-       CAST(round({_fin_pick('cF3002', '200810', True, '매출총이익')}) AS BIGINT) AS gross_profit,
-       CAST(NULL AS BIGINT)                                         AS total_assets
-FROM parsed
-GROUP BY ticker, yyyy, mm, is_est
+SELECT ticker                                                 AS stock_code,
+       period, period_type,
+{_W_COLS}
+       CAST(d_net_income / nullif(d_total_equity, 0) * 100 AS DOUBLE)  AS roe,
+       CAST(d_net_income / nullif(d_total_asset, 0) * 100 AS DOUBLE)   AS roa,
+       CAST(d_total_liab / nullif(d_total_equity, 0) * 100 AS DOUBLE)  AS debt_ratio,
+       CAST(round((d_cf_op - abs(d_capex)) / {KRW_PER_EOK}.0) AS BIGINT) AS fcf,
+       CAST(round(abs(d_capex) / {KRW_PER_EOK}.0) AS BIGINT)           AS capex,
+{_W_TAIL}
+       CAST(NULL AS VARCHAR)                                  AS data_type,
+       w_fs_basis                                             AS accounting_standard,
+       CAST(round(coalesce(w_gross_profit, d_gross_profit / {KRW_PER_EOK}.0)) AS BIGINT)
+                                                              AS gross_profit,
+       CAST(round(d_total_asset / {KRW_PER_EOK}.0) AS BIGINT)  AS total_assets
+FROM act
+
+UNION ALL
+
+-- (E) 슬롯 — 추정치에는 DART 확정 재무가 없다. v3 도 data_type='estimate' 로 갈라 두고
+-- scoring 창(`data_type IS NULL`)에서 뺀다.
+SELECT ticker                                                 AS stock_code,
+       period, period_type,
+{_W_COLS}
+       CAST(NULL AS DOUBLE)                                   AS roe,
+       CAST(NULL AS DOUBLE)                                   AS roa,
+       CAST(NULL AS DOUBLE)                                   AS debt_ratio,
+       CAST(NULL AS BIGINT)                                   AS fcf,
+       CAST(NULL AS BIGINT)                                   AS capex,
+{_W_TAIL}
+       'estimate'                                             AS data_type,
+       w_fs_basis                                             AS accounting_standard,
+       CAST(round(w_gross_profit) AS BIGINT)                  AS gross_profit,
+       CAST(NULL AS BIGINT)                                   AS total_assets
+FROM wise
+WHERE is_est
 -- 같은 (종목, 기) 에 (E) 슬롯과 확정 슬롯이 둘 다 오면 v3 PK 가 하나뿐이라 뒤에 넣은 행이 남는다.
--- 확정치(data_type NULL)가 scoring 창이므로 그쪽을 마지막에 넣는다.
-ORDER BY ticker, yyyy, mm, is_est DESC
+-- 확정치(data_type NULL)가 scoring 창이므로 NULLS LAST 로 그쪽을 마지막에 넣는다.
+ORDER BY stock_code, period, data_type NULLS LAST
 """
 
 # ── 모델 유니버스(사용자 결정 09-24) ────────────────────────────────────────────────────────
@@ -481,10 +578,10 @@ MAPPINGS: tuple[TableMapping, ...] = (
         sql=_FINANCIAL_SUMMARY_SQL,
         retire_when="v3 엔진이 model 층으로 은퇴한 뒤(D-4) — financial_summary 소비자는 "
                     "scoring 뿐이다(플랜 §8-3)",
-        null_columns=("roe", "roa", "debt_ratio", "fcf", "capex", "op_margin", "ni_margin",
-                      "yoy", "total_assets"),
-        note="WISE cF3002 는 손익계산서 전용 — 재무상태표·현금흐름표 계정이 없다. "
-             "v3 quality 팩터 입력(roa·debt_ratio·fcf·total_assets)이 비므로 D-5 재검토 필요",
+        null_columns=("op_margin", "ni_margin", "yoy"),
+        note="WISE(손익·투자지표) + DART fin_std(재무상태표·현금흐름) 합성 — T1.5/D-10. "
+             "quality 입력 roa·debt_ratio·fcf·total_assets 는 DART 쪽에서 온다",
+        cross_sources=((EQUITY, "fin_std"), (EQUITY, "security")),
     ),
     TableMapping(
         v3_table="score_history",

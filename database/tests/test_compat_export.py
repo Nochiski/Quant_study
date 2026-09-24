@@ -159,7 +159,7 @@ def _universe_rows(fillers: list[str]) -> list[dict]:
 
 def _sec_row(ticker: str, name: str, list_date: dt.date, delist: dt.date | None = None) -> dict:
     """`security` 실물 13열."""
-    return {"ticker": ticker, "corp_code": "0" * 8, "isin": "KR" + ticker * 2,
+    return {"ticker": ticker, "corp_code": f"{ticker}00", "isin": "KR" + ticker * 2,
             "name_current": name, "sec_type": "common", "list_date": list_date,
             "list_date_basis": "measured", "delist_date_krx": delist,
             "delist_date_kis": None, "delist_conflict": False, "delist_date": delist,
@@ -261,6 +261,43 @@ def _fin_wise_rows() -> list[dict]:
 
 
 # ── 트리 ─────────────────────────────────────────────────────────────────────
+# ── DART fin_std (T1.5 · D-10) ──────────────────────────────────────────────
+# 열 이름·단위는 `src/equity/sql/fin_std.sql` 실물 그대로(금액 전부 원).
+# 005930 2025/12: 자산 500조 · 부채 100조 · 자본 400조 · 순이익 40조 · 영업CF 60조 ·
+#   capex −30조(유출 부호) → roa 8.0% · debt_ratio 25.0% · roe 10.0% ·
+#   total_assets 5,000,000 억원 · capex 300,000 억원 · fcf 300,000 억원
+FIN_STD_BASE = {"total_asset": 500_000_000_000_000.0, "total_liab": 100_000_000_000_000.0,
+                "total_equity": 400_000_000_000_000.0, "net_income": 40_000_000_000_000.0,
+                "cf_operating_ytd": 60_000_000_000_000.0,
+                "capex_ytd": -30_000_000_000_000.0,
+                "gross_profit": 50_000_000_000_000.0}
+
+
+def _fin_std_row(ticker: str, period_end: dt.date, available: dt.date, rcept: str,
+                 fs_div: str = "CFS", **over: float) -> dict:
+    row = {"corp_code": f"{ticker}00", "period_end": period_end, "report_code": "11011",
+           "fs_div": fs_div, "vintage_kind": "api_restated", "bsns_year": str(period_end.year),
+           "rcept_no": rcept, "rcept_dt": available, "period_start": dt.date(2025, 1, 1),
+           "period_end_basis": "measured", "currency": "KRW",
+           "revenue": 3_000_000_000_000_000.0, "op_profit": 50_000_000_000_000.0,
+           "available_date": available, "available_basis": "derived"}
+    row.update(FIN_STD_BASE)
+    row.update(over)
+    return row
+
+
+def _fin_std_rows() -> list[dict]:
+    return [
+        _fin_std_row("005930", dt.date(2025, 12, 31), dt.date(2026, 3, 11), "20260311000001"),
+        # 별도(OFS) 판본 — 연결(CFS) 이 있으므로 선택되면 안 된다
+        _fin_std_row("005930", dt.date(2025, 12, 31), dt.date(2026, 3, 12), "20260312000001",
+                     fs_div="OFS", total_asset=111_000_000_000_000.0),
+        # D 뒤에 접수된 정정 판본 — PIT 상 보이면 안 된다
+        _fin_std_row("005930", dt.date(2025, 12, 31), dt.date(2026, 9, 30), "20260930000001",
+                     total_asset=999_000_000_000_000.0),
+    ]
+
+
 def _make_roots(base: Path, *, fillers: list[str] | None = None,
                 price_rows: list[dict] | None = None, adj_rows: list[dict] | None = None,
                 eq_build: str = EQ_BUILD, adj_build: str | None = None) -> tuple[Path, Path]:
@@ -274,6 +311,7 @@ def _make_roots(base: Path, *, fillers: list[str] | None = None,
         "security": (_security_rows(f), eq_build),
         "sector_snapshot": (_sector_rows(), eq_build),
         "flow_daily": (_flow_rows(), eq_build),
+        "fin_std": (_fin_std_rows(), eq_build),
     }
     for table, (rows, build) in equity.items():
         _make_stage_tree(eq, table, rows, build_id=build)
@@ -430,16 +468,47 @@ def test_financial_summary_scoring_window(roots, tmp_path: Path) -> None:
 
 
 def test_financial_summary_null_columns_stay_null(roots, tmp_path: Path) -> None:
-    """WISE cF3002/cF4002 에 재료가 없는 열은 0 이 아니라 NULL 이다(결측은 결측)."""
+    """두 원천 어디에도 재료가 없는 열은 0 이 아니라 NULL 이다(결측은 결측)."""
     from compat.mappings import BY_TABLE
     target = tmp_path / "quant.db"
     _run(roots, target, tables=["financial_summary"])
     nulls = BY_TABLE["financial_summary"].null_columns
-    assert set(nulls) == {"roe", "roa", "debt_ratio", "fcf", "capex", "op_margin", "ni_margin",
-                          "yoy", "total_assets"}
+    assert set(nulls) == {"op_margin", "ni_margin", "yoy"}     # T1.5 뒤 남은 셋
     cols = ", ".join(nulls)
     for row in _rows(target, f"SELECT {cols} FROM financial_summary"):
         assert all(v is None for v in row)
+
+
+# ── T1.5 / D-10 — DART fin_std 가 quality 입력을 채운다 ──────────────────────
+def test_financial_summary_dart_quality_inputs(roots, tmp_path: Path) -> None:
+    """roa·debt_ratio·roe(%) · total_assets·capex·fcf(억원) 가 산식·단위대로 찬다."""
+    target = tmp_path / "quant.db"
+    res = _run(roots, target, tables=["financial_summary"])
+    assert _rows(target, "SELECT roa, debt_ratio, roe, total_assets, capex, fcf "
+                         "FROM financial_summary WHERE stock_code='005930' "
+                         "AND period='2025/12'") == [
+        (8.0, 25.0, 10.0, 5_000_000, 300_000, 300_000)]
+    # 원천별 채움 수 — WISE 6기 전부 · DART 는 2025/12 한 기
+    assert res.tables["financial_summary"].metrics == {"n_from_wise": 6, "n_from_dart": 1}
+    meta = json.loads(_rows(target, "SELECT tables FROM _compat_meta")[0][0])
+    assert meta["financial_summary"]["metrics"] == {"n_from_wise": 6, "n_from_dart": 1}
+
+
+def test_financial_summary_dart_is_point_in_time(roots, tmp_path: Path) -> None:
+    """D 뒤에 접수된 정정 판본(자산 999조)은 보이지 않고, 연결(CFS)이 별도(OFS)보다 앞선다."""
+    target = tmp_path / "quant.db"
+    _run(roots, target, tables=["financial_summary"])
+    got = _rows(target, "SELECT total_assets FROM financial_summary "
+                        "WHERE stock_code='005930' AND period='2025/12'")
+    assert got == [(5_000_000,)]           # 999조(9,990,000)도 111조(1,110,000)도 아니다
+
+
+def test_financial_summary_wise_gross_profit_wins(roots, tmp_path: Path) -> None:
+    """gross_profit 은 WISE 값 우선(v3 원천에 가깝다) — DART 50조(500,000 억원)가 아니다."""
+    target = tmp_path / "quant.db"
+    _run(roots, target, tables=["financial_summary"])
+    assert _rows(target, "SELECT gross_profit FROM financial_summary "
+                         "WHERE stock_code='005930' AND period='2025/12'") == [(1_000_000,)]
 
 
 # ── R1 — accode 충돌(금융업)은 계정명으로 가른다. 실물 절단본으로 본다 ───────
@@ -450,8 +519,18 @@ def test_financial_summary_acc_nm_whitelist_on_real_slice() -> None:
     from compat.mappings import BY_TABLE
     globs = ", ".join(repr(str(p)) for p in FIN_SLICE)
     expr = f"read_parquet([{globs}], hive_partitioning=true, union_by_name=true)"
+    # 절단본에는 equity 판이 없다 — DART 쪽은 빈 관계로 두고 WISE 갈래만 본다(R1 의 범위).
+    empty_fin = ("(SELECT NULL::VARCHAR AS corp_code, NULL::DATE AS period_end, "
+                 "NULL::VARCHAR AS report_code, NULL::VARCHAR AS fs_div, "
+                 "NULL::VARCHAR AS rcept_no, NULL::DATE AS available_date, "
+                 "NULL::DOUBLE AS total_asset, NULL::DOUBLE AS total_liab, "
+                 "NULL::DOUBLE AS total_equity, NULL::DOUBLE AS net_income, "
+                 "NULL::DOUBLE AS cf_operating_ytd, NULL::DOUBLE AS capex_ytd, "
+                 "NULL::DOUBLE AS gross_profit WHERE false)")
+    empty_sec = "(SELECT NULL::VARCHAR AS ticker, NULL::VARCHAR AS corp_code WHERE false)"
     sql = BY_TABLE["financial_summary"].sql.format(
-        stg_fin_wise=expr, consensus_asof="2026-09-03")
+        stg_fin_wise=expr, fin_std=empty_fin, security=empty_sec,
+        consensus_asof="2026-09-03", date="2026-09-03")
     con = duckdb.connect()
     try:
         cur = con.execute(sql)

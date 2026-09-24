@@ -140,6 +140,8 @@ class TableResult:
     n_rows: int                 # 실제로 넣은 행
     n_skipped: int              # v3 NOT NULL/PK 를 못 채워 넣지 못한 행
     sources: dict[str, str]     # 원천 표 → build_id
+    # 표별 추가 지표. `financial_summary` 는 원천별 채움 수(n_from_wise · n_from_dart)를 싣는다.
+    metrics: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -356,8 +358,9 @@ def _render(mapping: TableMapping, params: dict[str, str],
     """매핑 SQL 의 원천 자리를 `read_parquet(...)` 로, 나머지를 스칼라로 채운다."""
     kind = mapping.source_kind
     assert kind is not None
-    sources = {t: builds[kind][_EXPR + t] for t in mapping.sources}
-    used = {t: builds[kind][t] for t in mapping.sources}
+    pairs = [(kind, t) for t in mapping.sources] + list(mapping.cross_sources)
+    sources = {t: builds[k][_EXPR + t] for k, t in pairs}
+    used = {t: builds[k][t] for k, t in pairs}
     return mapping.sql.format(**sources, **params), used
 
 
@@ -476,6 +479,20 @@ def _count_evening_skipped(duck: duckdb.DuckDBPyConnection, expr: str,
     return 0 if row is None else int(row[0])
 
 
+def _fin_source_counts(con: sqlite3.Connection) -> dict[str, int]:
+    """T1.5 — `financial_summary` 행 중 각 원천이 채운 수.
+
+    WISE 전용 열(`per`)과 DART 전용 열(`total_assets`)의 NOT NULL 수로 센다. 두 원천이 겹친
+    행은 양쪽에 모두 계상된다(합이 행수보다 클 수 있다).
+    """
+    row = con.execute(
+        "SELECT sum(CASE WHEN per IS NOT NULL THEN 1 ELSE 0 END), "
+        "sum(CASE WHEN total_assets IS NOT NULL THEN 1 ELSE 0 END) "
+        "FROM financial_summary").fetchone()
+    wise, dart = (0, 0) if row is None else (int(row[0] or 0), int(row[1] or 0))
+    return {"n_from_wise": wise, "n_from_dart": dart}
+
+
 def _check_adj_close(con: sqlite3.Connection, params: dict[str, str]) -> int:
     """R9 — 이번 창에 쓴 daily_prices 의 `adj_close` 결측 비율. 1% 넘으면 예외."""
     row = con.execute(
@@ -555,7 +572,9 @@ def _resolve_sources(selected: list[TableMapping], roots: dict[str, Path],
     """
     builds: dict[str, dict[str, str]] = {EQUITY: {}, STAGE: {}}
     fallback: set[str] = set()
-    wanted = [(m.source_kind, t) for m in selected for t in m.sources] + list(extra)
+    wanted = [(m.source_kind, t) for m in selected for t in m.sources]
+    wanted += [pair for m in selected for pair in m.cross_sources]
+    wanted += list(extra)
     for kind, table in wanted:
         assert kind is not None
         if table in builds[kind]:
@@ -674,7 +693,9 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                 else:
                     n_rows, n_skipped = _upsert(con, mapping, columns, _chunks(cur),
                                                 required[mapping.v3_table])
-                results[mapping.v3_table] = TableResult(n_rows, n_skipped, used)
+                metrics = (_fin_source_counts(con)
+                           if mapping.v3_table == "financial_summary" else {})
+                results[mapping.v3_table] = TableResult(n_rows, n_skipped, used, metrics)
                 if mapping.v3_table == "daily_prices":
                     evening_skipped = _count_evening_skipped(
                         duck, builds[EQUITY][_EXPR + "price_daily"], params)

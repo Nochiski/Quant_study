@@ -139,9 +139,11 @@ def _write_db(
 
 
 def _swap_ranks(rows: list[dict[str, object]], code_a: str, code_b: str) -> None:
+    """두 종목의 rank 와 총점을 맞바꾼다 — v3 rank 는 총점에서 파생되므로 같이 움직인다."""
     by_code = {str(r["stock_code"]): r for r in rows}
-    by_code[code_a]["rank"], by_code[code_b]["rank"] = (
-        by_code[code_b]["rank"], by_code[code_a]["rank"])
+    for field in ("rank", "composite_score"):
+        by_code[code_a][field], by_code[code_b][field] = (
+            by_code[code_b][field], by_code[code_a][field])
 
 
 def _causes(result: CompareResult) -> dict[str, str]:
@@ -157,6 +159,7 @@ def test_identical_tables_give_spearman_one_and_pass(tmp_path: Path) -> None:
 
     assert res.spearman == pytest.approx(1.0)
     assert res.top_overlap[3] == 3
+    assert res.top_overlap_common[3] == 3
     assert res.top_overlap[50] == 6
     assert res.n_common == 6
     assert res.score_abs_max == 0.0
@@ -184,7 +187,8 @@ def test_left_only_ticker_is_classified_as_universe(tmp_path: Path) -> None:
     assert res.n_left == 7
     assert _causes(res)["000099"] == "universe"
     alert = next(a for a in res.rank_alerts if a.stock_code == "000099")
-    assert alert.left_rank == 7
+    assert alert.left_stored_rank == 7      # 저장 rank 는 병기
+    assert alert.left_rank is None          # 교집합에 없으니 재순위는 없다
     assert alert.right_rank is None
     assert alert.rank_diff is None
 
@@ -204,7 +208,8 @@ def test_single_raw_column_difference_is_classified_as_input(tmp_path: Path) -> 
     alert = next(a for a in res.rank_alerts if a.stock_code == "000003")
     assert alert.cause == "input:val_per"
     assert alert.input_columns == ("val_per",)
-    assert alert.rank_diff == -2  # 왼쪽 3 − 오른쪽 5
+    assert alert.rank_diff == -2         # 재순위: 왼쪽 3 − 오른쪽 5
+    assert alert.stored_rank_diff == -2  # 저장 rank 도 같이 병기
     val_per = next(f for f in res.factors if f.column == "val_per")
     assert val_per.n_over_tol == 1
     assert val_per.max_abs == pytest.approx(8.0)
@@ -297,6 +302,7 @@ def test_write_report_emits_markdown_and_json(tmp_path: Path) -> None:
     assert payload["verdict"] == "fail"
     assert payload["date"] == "2026-09-23"
     assert len(payload["rank_alerts"]) == 2
+    assert payload["top_overlap_common"]["50"] == 6
 
 
 # ── (i) adj_close 비율 불일치 → v3_defect 후보 표식 ─────────────────────────
@@ -316,6 +322,56 @@ def test_adj_close_ratio_mismatch_marks_v3_defect(tmp_path: Path) -> None:
     marks = {a.stock_code: a.v3_defect for a in res.rank_alerts}
     assert marks["000002"] is True
     assert marks["000004"] is False
+
+
+# ── (j) 유니버스 크기 차이 → 저장 rank 겹침은 낮고 재순위 겹침은 온전 ──────
+def test_common_rerank_overlap_ignores_universe_gap(tmp_path: Path) -> None:
+    # 왼쪽(v3)에만 있는 고득점 3종목이 저장 rank 상위를 다 차지한다(실측 09-22: 1,309 vs 636)
+    extras = [_sh_row(f"0001{i:02d}", i, 10.0 - i) for i in range(1, 4)]
+    left_rows: list[dict[str, object]] = []
+    for rk, row in enumerate(
+            sorted([*extras, *_base_rows()], key=lambda r: -float(str(r["composite_score"]))), 1):
+        merged = dict(row)
+        merged["rank"] = rk
+        left_rows.append(merged)
+    left = _write_db(tmp_path / "left.db", SH_DDL, "score_history", left_rows)
+    right = _write_db(tmp_path / "right.db", SH_DDL, "score_history", _base_rows())
+
+    res = compare(left, right, DATE, top_ns=(3,), rank_alert=5, top50_min=6)
+
+    assert res.n_left == 9
+    assert res.n_right == 6
+    assert res.n_common == 6
+    assert res.top_overlap[3] == 0          # 저장 rank 상위 3 = 왼쪽에만 있는 종목
+    assert res.top_overlap_common[3] == 3   # 교집합만 다시 순위 매기면 완전 일치
+    assert res.top_overlap_common[50] == 6
+    assert res.spearman == pytest.approx(1.0)
+    # 판정은 재순위 값으로 — 유니버스 차이는 universe 분류로만 남는다
+    assert res.verdict == "pass"
+    assert {a.cause for a in res.rank_alerts} == {"universe"}
+
+
+# ── (k) 유니버스 차이만 있는 종목은 알림에 안 뜬다 ─────────────────────────
+def test_universe_gap_alone_does_not_raise_rank_alerts(tmp_path: Path) -> None:
+    """왼쪽 전용 고득점 3종목이 공통 종목의 저장 rank 를 3씩 밀어도,
+    입력·총점이 같으면 알림이 뜨지 않는다."""
+    extras = [_sh_row(f"0001{i:02d}", i, 10.0 - i) for i in range(1, 4)]
+    left_rows: list[dict[str, object]] = []
+    for rk, row in enumerate(
+            sorted([*extras, *_base_rows()], key=lambda r: -float(str(r["composite_score"]))), 1):
+        merged = dict(row)
+        merged["rank"] = rk
+        left_rows.append(merged)
+    left = _write_db(tmp_path / "left.db", SH_DDL, "score_history", left_rows)
+    right = _write_db(tmp_path / "right.db", SH_DDL, "score_history", _base_rows())
+
+    # 저장 rank 로 재면 공통 6종목이 전부 |Δrank|=3 > 1 로 뜬다 — 재순위 축에서는 0
+    res = compare(left, right, DATE, top_ns=(3,), rank_alert=1, top50_min=6)
+
+    assert [a.stock_code for a in res.rank_alerts] == ["000101", "000102", "000103"]
+    assert {a.cause for a in res.rank_alerts} == {"universe"}
+    assert res.n_unclassified == 0
+    assert res.verdict == "pass"
 
 
 # ── 입력 오류 ───────────────────────────────────────────────────────────────

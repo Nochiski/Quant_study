@@ -8,8 +8,18 @@
 `score_history`(48열)·`score_history_v2`(21열). 팩터·서브 raw 열은 양쪽 표에 다 있는 숫자 열에서
 총점(`composite_score`/`total_score`)·`rank`·`stock_code`·`score_date`·`*_flag` 를 뺀 나머지다.
 
-판정(임계는 인자): Spearman ≥ `spearman_min` · 상위 50 겹침 ≥ `top50_min` ·
-|Δrank| > `rank_alert` 종목이 전부 분류(unclassified 0) → `pass`, 아니면 `fail` + 사유 목록.
+상위 N 겹침은 두 가지를 나란히 낸다: `top_overlap`(양쪽에 저장된 `rank` 그대로)과
+`top_overlap_common`(**교집합 종목만으로 총점을 다시 순위 매긴 뒤** 잰 값). 유니버스 크기가 다르면
+(실측 09-22: v3 1,309 vs 우리 636) 저장 rank 기준 겹침은 유니버스 차이를 팩터 차이처럼 보이게 하므로
+**판정에는 재순위 값을 쓰고** 저장 rank 기준 값은 기록만 한다.
+재순위 정렬은 v3 규약 `(−총점, 종목코드)`.
+
+|Δrank| 알림·분류도 같은 이유로 **교집합 재순위 rank** 로 잰다(저장 rank 로 재면 좁은 쪽 유니버스의
+rank 가 통째로 당겨져 입력이 같은 종목까지 전부 알림에 뜬다). 저장 rank 차이는 `stored_rank_diff` 로
+목록에 병기만 한다.
+
+판정(임계는 인자): Spearman ≥ `spearman_min` · 상위 50 겹침(재순위) ≥ `top50_min` ·
+|Δrank|(재순위) > `rank_alert` 종목이 전부 분류(unclassified 0) → `pass`, 아니면 `fail` + 사유 목록.
 분류: `universe`(한쪽만 있음) / `input:<열>`(raw 열이 다름 — 상대 차이 큰 순) /
 `unclassified`(raw 는 같은데 순위만 다름 → GAP-7 동점 정렬 의심). `v3_defect` 는 분류를 덮지 않는
 **추가 표식**으로, 양쪽 `daily_prices` 의 최근 `adj_close/close` 비율이 다른 종목에 붙는다(GAP-4:
@@ -75,17 +85,23 @@ class RankAlert:
     """|Δrank| 가 큰 종목 하나와 그 원인."""
 
     stock_code: str
-    left_rank: int | None
+    left_rank: int | None            # 교집합 재순위(판정 축). 한쪽만 있는 종목은 None
     right_rank: int | None
-    rank_diff: int | None           # 왼쪽 rank − 오른쪽 rank(한쪽만이면 None)
-    cause: str                      # universe | input:<열> | unclassified
-    input_columns: tuple[str, ...]  # 상대 차이 큰 순
-    v3_defect: bool                 # adj_close 비율 불일치 후보(GAP-4)
+    rank_diff: int | None            # 왼쪽 − 오른쪽(재순위)
+    left_stored_rank: int | None     # DB 에 저장된 rank(병기용) — universe 종목도 값이 있다
+    right_stored_rank: int | None
+    stored_rank_diff: int | None     # 왼쪽 − 오른쪽(저장 rank)
+    cause: str                       # universe | input:<열> | unclassified
+    input_columns: tuple[str, ...]   # 상대 차이 큰 순
+    v3_defect: bool                  # adj_close 비율 불일치 후보(GAP-4)
 
     def to_dict(self) -> dict[str, object]:
         return {
             "stock_code": self.stock_code, "left_rank": self.left_rank,
-            "right_rank": self.right_rank, "rank_diff": self.rank_diff, "cause": self.cause,
+            "right_rank": self.right_rank, "rank_diff": self.rank_diff,
+            "left_stored_rank": self.left_stored_rank,
+            "right_stored_rank": self.right_stored_rank,
+            "stored_rank_diff": self.stored_rank_diff, "cause": self.cause,
             "input_columns": list(self.input_columns), "v3_defect": self.v3_defect,
         }
 
@@ -105,7 +121,8 @@ class CompareResult:
     right_only: tuple[str, ...]
     spearman: float | None
     n_spearman: int
-    top_overlap: dict[int, int]
+    top_overlap: dict[int, int]          # 양쪽에 저장된 rank 기준(기록용)
+    top_overlap_common: dict[int, int]   # 교집합 재순위 기준(판정용)
     score_abs_max: float | None
     score_abs_median: float | None
     factors: tuple[FactorDiff, ...]
@@ -128,6 +145,7 @@ class CompareResult:
             },
             "spearman": self.spearman, "n_spearman": self.n_spearman,
             "top_overlap": {str(k): v for k, v in self.top_overlap.items()},
+            "top_overlap_common": {str(k): v for k, v in self.top_overlap_common.items()},
             "score_abs_max": self.score_abs_max, "score_abs_median": self.score_abs_median,
             "factors": [f.to_dict() for f in self.factors],
             "columns_left_only": list(self.columns_left_only),
@@ -266,6 +284,16 @@ def _top_codes(rows: dict[str, dict[str, object]], n: int) -> set[str]:
     return {c for _, c in ranked[:n]}
 
 
+def _rerank(codes: Sequence[str], scores: dict[str, float]) -> dict[str, int]:
+    """교집합 종목만 총점으로 다시 매긴 순위(1 시작) — v3 정렬 규약 `(−총점, 종목코드)`."""
+    return {c: i for i, c in enumerate(sorted(codes, key=lambda c: (-scores[c], c)), 1)}
+
+
+def _top_codes_by_score(codes: Sequence[str], scores: dict[str, float], n: int) -> set[str]:
+    """교집합 종목을 총점으로 다시 순위 매긴 상위 N — v3 정렬 규약 `(−총점, 종목코드)`."""
+    return set(sorted(codes, key=lambda c: (-scores[c], c))[:n])
+
+
 def _adj_ratio(conn: sqlite3.Connection, code: str, date: str) -> float | None:
     """date 이하 마지막 거래일의 adj_close/close. 비율은 전방 조정이면 양쪽이 같아야 한다."""
     row = conn.execute(
@@ -361,6 +389,9 @@ def compare(left_db: str | Path, right_db: str | Path, date: str,
         lvals: list[float] = []
         rvals: list[float] = []
         score_deltas: list[float] = []
+        paired: list[str] = []          # 양쪽 총점이 다 있는 교집합 종목(재순위 대상)
+        lscore: dict[str, float] = {}
+        rscore: dict[str, float] = {}
         for code in common:
             lv = _as_float(left_rows[code][total_col], total_col, code)
             rv = _as_float(right_rows[code][total_col], total_col, code)
@@ -369,10 +400,17 @@ def compare(left_db: str | Path, right_db: str | Path, date: str,
             lvals.append(lv)
             rvals.append(rv)
             score_deltas.append(abs(lv - rv))
+            paired.append(code)
+            lscore[code], rscore[code] = lv, rv
         rho = spearman(lvals, rvals)
 
         ns = tuple(sorted({*top_ns, 50}))
         top_overlap = {n: len(_top_codes(left_rows, n) & _top_codes(right_rows, n)) for n in ns}
+        # 유니버스 크기가 다르면 저장 rank 겹침은 유니버스 차이를 팩터 차이로 오인시킨다 —
+        # 교집합만 다시 순위 매겨 같은 잣대로 잰 값이 판정 축이다.
+        top_overlap_common = {
+            n: len(_top_codes_by_score(paired, lscore, n) & _top_codes_by_score(paired, rscore, n))
+            for n in ns}
 
         factors = tuple(_factor_diff(col, left_rows, right_rows, common, tol)
                         for col in factor_cols)
@@ -388,24 +426,31 @@ def compare(left_db: str | Path, right_db: str | Path, date: str,
             scale = max(abs(lr), abs(rr), 1.0)
             return abs(lr - rr) / scale > ADJ_RATIO_TOL
 
+        lrank_common = _rerank(paired, lscore)
+        rrank_common = _rerank(paired, rscore)
+
         alerts: list[RankAlert] = []
-        n_rank_null = 0
-        for code in common:
-            lr_i, rr_i = _as_int(left_rows[code][RANK_COL]), _as_int(right_rows[code][RANK_COL])
-            if lr_i is None or rr_i is None:
-                n_rank_null += 1
+        n_rank_null = sum(
+            1 for code in common
+            if _as_int(left_rows[code][RANK_COL]) is None
+            or _as_int(right_rows[code][RANK_COL]) is None)
+        for code in paired:
+            lrk, rrk = lrank_common[code], rrank_common[code]
+            if abs(lrk - rrk) <= rank_alert:
                 continue
-            if abs(lr_i - rr_i) <= rank_alert:
-                continue
+            ls, rs = _as_int(left_rows[code][RANK_COL]), _as_int(right_rows[code][RANK_COL])
             cols = _input_columns(left_rows[code], right_rows[code], factor_cols, tol)
-            alerts.append(RankAlert(code, lr_i, rr_i, lr_i - rr_i,
+            alerts.append(RankAlert(code, lrk, rrk, lrk - rrk, ls, rs,
+                                    ls - rs if ls is not None and rs is not None else None,
                                     f"input:{cols[0]}" if cols else "unclassified",
                                     cols, defect(code)))
         for code in left_only:
-            alerts.append(RankAlert(code, _as_int(left_rows[code][RANK_COL]), None, None,
+            alerts.append(RankAlert(code, None, None, None,
+                                    _as_int(left_rows[code][RANK_COL]), None, None,
                                     "universe", (), defect(code)))
         for code in right_only:
-            alerts.append(RankAlert(code, None, _as_int(right_rows[code][RANK_COL]), None,
+            alerts.append(RankAlert(code, None, None, None,
+                                    None, _as_int(right_rows[code][RANK_COL]), None,
                                     "universe", (), defect(code)))
 
     alerts.sort(key=lambda a: (a.rank_diff is None, -abs(a.rank_diff or 0), a.stock_code))
@@ -416,8 +461,8 @@ def compare(left_db: str | Path, right_db: str | Path, date: str,
         reasons.append(f"Spearman 계산 불가(표본 {len(lvals)}행·순위 분산 0)")
     elif rho < spearman_min:
         reasons.append(f"Spearman {rho:.4f} < {spearman_min}")
-    if top_overlap[50] < top50_min:
-        reasons.append(f"상위 50 겹침 {top_overlap[50]} < {top50_min}")
+    if top_overlap_common[50] < top50_min:
+        reasons.append(f"상위 50 겹침(교집합 재순위) {top_overlap_common[50]} < {top50_min}")
     if n_unclassified:
         reasons.append(f"unclassified {n_unclassified}종목(|Δrank| > {rank_alert})")
 
@@ -426,6 +471,7 @@ def compare(left_db: str | Path, right_db: str | Path, date: str,
         n_left=len(left_rows), n_right=len(right_rows), n_common=len(common),
         left_only=left_only, right_only=right_only,
         spearman=rho, n_spearman=len(lvals), top_overlap=top_overlap,
+        top_overlap_common=top_overlap_common,
         score_abs_max=max(score_deltas) if score_deltas else None,
         score_abs_median=_median(score_deltas),
         factors=factors, columns_left_only=columns_left_only,
@@ -463,6 +509,14 @@ def _fmt(value: float | None, digits: int = 6) -> str:
     return "—" if value is None else f"{value:.{digits}f}"
 
 
+def _num(value: int | None) -> str:
+    return "—" if value is None else str(value)
+
+
+def _pair(left: int | None, right: int | None) -> str:
+    return f"{_num(left)} / {_num(right)}"
+
+
 def _render_md(result: CompareResult) -> str:
     r = result
     lines = [
@@ -483,12 +537,14 @@ def _render_md(result: CompareResult) -> str:
         f"| 한쪽만(왼쪽/오른쪽) | {len(r.left_only)} / {len(r.right_only)} |",
         f"| Spearman 순위 상관 (n={r.n_spearman}) | {_fmt(r.spearman, 4)} |",
     ]
-    for n in sorted(r.top_overlap):
-        lines.append(f"| 상위 {n} 겹침 | {r.top_overlap[n]} |")
+    for n in sorted(r.top_overlap_common):
+        lines.append(f"| 상위 {n} 겹침 — 교집합 재순위(판정) / 저장 rank(기록) | "
+                     f"{r.top_overlap_common[n]} / {r.top_overlap[n]} |")
     lines += [
         # 표 셀 안의 파이프는 markdown 열 구분자라 이스케이프한다
         f"| 총점 \\|Δ\\| max / median | {_fmt(r.score_abs_max)} / {_fmt(r.score_abs_median)} |",
-        f"| \\|Δrank\\| > {int(r.thresholds['rank_alert'])} 또는 한쪽만 | {len(r.rank_alerts)} |",
+        f"| \\|Δrank\\|(재순위) > {int(r.thresholds['rank_alert'])} 또는 한쪽만 | "
+        f"{len(r.rank_alerts)} |",
         f"| unclassified | {r.n_unclassified} |",
         f"| rank NULL(비교 제외) | {r.n_rank_null} |",
         f"| 열 목록 차이(왼쪽만/오른쪽만) | {len(r.columns_left_only)} / "
@@ -508,17 +564,19 @@ def _render_md(result: CompareResult) -> str:
     shown = r.rank_alerts[:MD_ALERT_LIMIT]
     lines += [
         "",
-        f"## |Δrank| > {int(r.thresholds['rank_alert'])} 종목 "
+        f"## |Δrank|(교집합 재순위) > {int(r.thresholds['rank_alert'])} 종목 "
         f"(총 {len(r.rank_alerts)}개, {len(shown)}개 표시)",
         "",
-        "| 종목 | 왼쪽 rank | 오른쪽 rank | Δrank | 분류 | 근거 열 | v3_defect(adj_close) |",
-        "|---|---:|---:|---:|---|---|---|",
+        "| 종목 | 재순위 좌/우 | Δ재순위 | 저장 rank 좌/우 | Δ저장 | 분류 | 근거 열 | "
+        "v3_defect(adj_close) |",
+        "|---|---|---:|---|---:|---|---|---|",
     ]
     for a in shown:
         cols = ", ".join(a.input_columns[:5]) if a.input_columns else "—"
-        lines.append(f"| {a.stock_code} | {a.left_rank if a.left_rank is not None else '—'} | "
-                     f"{a.right_rank if a.right_rank is not None else '—'} | "
-                     f"{a.rank_diff if a.rank_diff is not None else '—'} | {a.cause} | {cols} | "
+        lines.append(f"| {a.stock_code} | {_pair(a.left_rank, a.right_rank)} | "
+                     f"{_num(a.rank_diff)} | "
+                     f"{_pair(a.left_stored_rank, a.right_stored_rank)} | "
+                     f"{_num(a.stored_rank_diff)} | {a.cause} | {cols} | "
                      f"{'예' if a.v3_defect else '아니오'} |")
     lines.append("")
     return "\n".join(lines)
@@ -568,8 +626,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                              spearman_min=args.spearman_min, top50_min=args.top50_min)
             md_path, _ = write_report(result, args.out)
             print(f"{result.table} {result.date} verdict={result.verdict} "
-                  f"spearman={_fmt(result.spearman, 4)} top50={result.top_overlap[50]} "
-                  f"common={result.n_common} alerts={len(result.rank_alerts)} "
+                  f"spearman={_fmt(result.spearman, 4)} "
+                  f"top50_common={result.top_overlap_common[50]} "
+                  f"top50_stored={result.top_overlap[50]} "
+                  f"n_left={result.n_left} n_right={result.n_right} "
+                  f"n_common={result.n_common} alerts={len(result.rank_alerts)} "
                   f"unclassified={result.n_unclassified} → {md_path}")
             for reason in result.reasons:
                 print(f"  ✗ {reason}")

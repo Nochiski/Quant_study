@@ -145,7 +145,12 @@ def kiwoom(api_id, url, body, cont=None, next_key=None):
         if next_key: h["next-key"] = next_key
         r = requests.post(f"{KW_BASE}{url}", json=body, headers=h, timeout=30)
         time.sleep(0.25)
-        return r.json(), r.headers
+        try:
+            return r.json(), r.headers
+        except ValueError as e:
+            # 비JSON 응답(09-23 21:20 실측: 두 스레드가 동시에 빈 본문) — 상태코드·본문 머리를 남겨야 다음에 원인을 안다.
+            # 호출자(kw_daily.call_tr)가 ValueError 를 재시도 뒤 ERROR 로 센다.
+            raise ValueError(f"non-json http={r.status_code} api={api_id} body={r.text[:80]!r}") from e
 
     j, hdr = _call()
     if j.get("return_code") == 3 and "8005" in str(j.get("return_msg", "")):

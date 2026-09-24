@@ -44,11 +44,11 @@ def _price_rows() -> list[dict[str, object]]:
                 "ticker": ticker, "date": d, "open": close - 500, "high": close + 700,
                 "low": close - 900, "close": close, "volume_shr": 1_000_000 + j,
                 "value_krw": VALUE_KRW + j, "mktcap_krw": MKTCAP_KRW + i,
-                "basis": "krx", "reject_reason": None})
+                "basis": "krx"})
     # 저녁 잠정 T 행 — KRX 기본정보가 없어 OHL·거래대금·시총이 전부 NULL (GAP-1/D-8)
     rows.append({"ticker": "000270", "date": D23, "open": None, "high": None, "low": None,
                  "close": 55_000, "volume_shr": 12_345, "value_krw": None, "mktcap_krw": None,
-                 "basis": "evening", "reject_reason": None})
+                 "basis": "evening"})
     return rows
 
 
@@ -59,12 +59,10 @@ def _flow_rows() -> list[dict[str, object]]:
             row: dict[str, object] = {"date": d, "ticker": ticker, "src": "kiwoom"}
             for k, col in enumerate(_FLOW_SRC):
                 row[col] = FRGN_KRW + (i + j + k) * 1_000_000
-            row["reject_reason"] = None
             rows.append(row)
     # 미측정 셀 — 전 주체 NULL. v3 는 수집한 행만 가지므로 내보내지 않는다.
     empty: dict[str, object] = {"date": D22, "ticker": "000270", "src": None}
     empty.update(dict.fromkeys(_FLOW_SRC))
-    empty["reject_reason"] = None
     rows.append(empty)
     return rows
 
@@ -142,26 +140,23 @@ def roots(tmp_path: Path, make_stage_tree) -> tuple[Path, Path]:
                              "adj_close": float(r["close"]) * 0.9}    # type: ignore[arg-type]
                             for r in _price_rows()],
         "universe_daily": [
-            {"date": d, "ticker": t, "status": "listed", "market": m, "sec_type": s,
-             "reject_reason": None}
+            {"date": d, "ticker": t, "status": "listed", "market": m, "sec_type": s}
             for d in SESSIONS
             for t, m, s in (("005930", "KOSPI", "common"), ("000660", "KOSPI", "common"),
                             ("069500", "KOSPI", "etf"))],
         "security": [
             {"ticker": "005930", "name_current": "삼성전자", "list_date": dt.date(1975, 6, 11),
-             "delist_date": None, "reject_reason": None},
+             "delist_date": None},
             {"ticker": "000660", "name_current": "SK하이닉스", "list_date": dt.date(1996, 12, 26),
-             "delist_date": None, "reject_reason": None},
+             "delist_date": None},
             {"ticker": "069500", "name_current": "KODEX 200", "list_date": dt.date(2002, 10, 14),
-             "delist_date": None, "reject_reason": None},
+             "delist_date": None},
             {"ticker": "900000", "name_current": "폐지종목", "list_date": dt.date(2010, 1, 4),
-             "delist_date": dt.date(2026, 5, 1), "reject_reason": None},
+             "delist_date": dt.date(2026, 5, 1)},
         ],
         "sector_snapshot": [
-            {"ticker": "005930", "snapshot_date": dt.date(2026, 9, 19), "wics_l1_nm": "IT",
-             "reject_reason": None},
-            {"ticker": "000660", "snapshot_date": dt.date(2026, 9, 19), "wics_l1_nm": "IT",
-             "reject_reason": None},
+            {"ticker": "005930", "snapshot_date": dt.date(2026, 9, 19), "wics_l1_nm": "IT"},
+            {"ticker": "000660", "snapshot_date": dt.date(2026, 9, 19), "wics_l1_nm": "IT"},
         ],
         "flow_daily": _flow_rows(),
     }

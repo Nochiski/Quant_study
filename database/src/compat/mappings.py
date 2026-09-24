@@ -67,8 +67,7 @@ SELECT
     CAST(a.adj_close AS DOUBLE)                    AS adj_close
 FROM {{price_daily}} p
 LEFT JOIN {{price_adj_daily}} a ON a.ticker = p.ticker AND a.date = p.date
-WHERE p.reject_reason IS NULL
-  AND p.basis = 'krx'
+WHERE p.basis = 'krx'
   AND p.date >= DATE '{{from_date}}' AND p.date <= DATE '{{date}}'
 """
 
@@ -76,8 +75,7 @@ WHERE p.reject_reason IS NULL
 # D-8 결정 전까지 "저녁 T 행이 v3 표에 없다" 는 사실을 숫자로 남긴다(조용한 실패 금지).
 EVENING_SKIPPED_SQL = """
 SELECT count(*) FROM {price_daily} p
-WHERE p.reject_reason IS NULL
-  AND p.basis = 'evening'
+WHERE p.basis = 'evening'
   AND p.date >= DATE '{from_date}' AND p.date <= DATE '{date}'
 """
 
@@ -95,22 +93,21 @@ WITH uni AS (
     SELECT u.ticker, u.market, u.sec_type,
            row_number() OVER (PARTITION BY u.ticker ORDER BY u.date DESC) AS rn
     FROM {{universe_daily}} u
-    WHERE u.reject_reason IS NULL
-      AND u.status IN ('listed', 'suspended')
+    WHERE u.status IN ('listed', 'suspended')
       AND u.date >= DATE '{{snap_from}}' AND u.date <= DATE '{{date}}'
 ),
 cap AS (
     SELECT p.ticker, p.mktcap_krw,
            row_number() OVER (PARTITION BY p.ticker ORDER BY p.date DESC) AS rn
     FROM {{price_daily}} p
-    WHERE p.reject_reason IS NULL AND p.mktcap_krw IS NOT NULL
+    WHERE p.mktcap_krw IS NOT NULL
       AND p.date >= DATE '{{snap_from}}' AND p.date <= DATE '{{date}}'
 ),
 sect AS (
     SELECT s.ticker, s.wics_l1_nm,
            row_number() OVER (PARTITION BY s.ticker ORDER BY s.snapshot_date DESC) AS rn
     FROM {{sector_snapshot}} s
-    WHERE s.reject_reason IS NULL AND s.snapshot_date <= DATE '{{date}}'
+    WHERE s.snapshot_date <= DATE '{{date}}'
 )
 SELECT
     u.ticker                                              AS stock_code,
@@ -125,7 +122,7 @@ SELECT
     CAST(v.delist_date AS VARCHAR)                        AS delisted_date,
     '{{exported_at}}'                                     AS updated_at
 FROM uni u
-JOIN {{security}} v ON v.ticker = u.ticker AND v.reject_reason IS NULL
+JOIN {{security}} v ON v.ticker = u.ticker
 LEFT JOIN cap  ON cap.ticker = u.ticker AND cap.rn = 1
 LEFT JOIN sect ON sect.ticker = u.ticker AND sect.rn = 1
 WHERE u.rn = 1 AND u.sec_type <> 'etf'
@@ -150,8 +147,7 @@ WITH picked AS (
                PARTITION BY f.ticker, f.date
                ORDER BY CASE WHEN f.src = 'kiwoom' THEN 0 ELSE 1 END, f.src) AS rn
     FROM {{flow_daily}} f
-    WHERE f.reject_reason IS NULL
-      AND f.date >= DATE '{{from_date}}' AND f.date <= DATE '{{date}}'
+    WHERE f.date >= DATE '{{from_date}}' AND f.date <= DATE '{{date}}'
       AND coalesce({_FLOW_ANY}) IS NOT NULL
 )
 SELECT f.ticker                   AS stock_code,

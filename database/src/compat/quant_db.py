@@ -80,6 +80,18 @@ BASES = ("evening", "morning")
 #   estimates : 당해 12월기 WISE 추정치(op·ni)가 없는 종목의 `market_cap` 을 NULL 로 둔다
 #               → v3 엔진의 `market_cap >= min_market_cap` 필터가 그 종목을 빼고 돈다
 MODEL_UNIVERSES = ("all", "estimates")
+# `--builds-from` 이 가리킨 판을 못 찾았을 때의 처리(서버 4일 재실행 실측).
+#   error   : 멈춘다(기본). 그 판으로 재현해야 하는 비교에서는 이쪽이 맞다.
+#   current : `current_build` 로 폴백하고 어느 표가 폴백했는지 남긴다.
+# 폴백이 안전한 근거 — **stage 표**는 `fetched_date` 축의 append-only 다(STAGE_DESIGN §3).
+#   새 판은 옛 행을 덮지 않고 뒤에 붙이므로 `current_build` + `consensus_asof` 필터는 그날
+#   인계 판과 같은 행을 고른다(09-21 실측: 인계 판 m_20260922T000215_559494Z 가 stage keep=3
+#   GC 로 사라졌지만 as-of 필터가 같은 스냅샷을 재현한다).
+# ⚠ **equity 표 폴백은 다르다** — 격자·조정계수 표는 판마다 값이 바뀔 수 있어 과거 날짜 재현이
+#   깨진다. `sector_snapshot` 처럼 표시용이고 자체 `snapshot_date` as-of 를 갖는 표만 안전하다
+#   (09-18 실측: 그날 인계 JSON 에 `sector_snapshot` 키 자체가 없었다 — 표가 아직 없던 날).
+#   가격·수급 표가 폴백 목록에 뜨면 그 날짜 비교 결과는 믿지 말고 원인을 먼저 본다.
+BUILDS_MISSING = ("error", "current")
 MARKET_VOCAB = ("KOSPI", "KOSDAQ")      # v3 `stocks.market` CHECK 제약과 같은 어휘
 META_TABLE = "_compat_meta"
 META_DDL = f"""
@@ -102,7 +114,9 @@ CREATE TABLE IF NOT EXISTS {META_TABLE} (
     failed_table   TEXT,
     -- 사용자 결정 09-24: 'all' | 'estimates' 와 그때 추정치를 가진 종목 수.
     model_universe TEXT,
-    n_universe_with_estimates INTEGER
+    n_universe_with_estimates INTEGER,
+    -- --builds-from 이 가리킨 판을 못 찾아 current_build 로 폴백한 표 목록(json 배열).
+    builds_fallback TEXT
 )
 """
 
@@ -147,6 +161,8 @@ class ExportResult:
     model_universe: str = "all"
     # 사용자 결정 09-24 — `market_cap` 을 살려 둔(= 추정치를 가진) 종목 수. all 이면 None
     n_universe_with_estimates: int | None = None
+    # `--builds-from` 판을 못 찾아 current_build 로 떨어진 표(정렬된 실명)
+    builds_fallback: tuple[str, ...] = ()
     tables: dict[str, TableResult] = field(default_factory=dict)
     equity_builds: dict[str, str] = field(default_factory=dict)
     stage_builds: dict[str, str] = field(default_factory=dict)
@@ -162,6 +178,8 @@ class ExportResult:
         if self.n_universe_with_estimates is not None:
             parts.append(f"universe({self.model_universe})="
                          f"{self.n_universe_with_estimates}")
+        if self.builds_fallback:
+            parts.append("fallback=" + ",".join(self.builds_fallback))
         return (f"compat date={self.date} basis={self.basis} target={self.target} "
                 f"consensus_asof={self.consensus_asof} | " + " ".join(parts))
 
@@ -477,7 +495,8 @@ def _ensure_meta_columns(con: sqlite3.Connection) -> None:
     have = {r[1] for r in con.execute(f"PRAGMA table_info({META_TABLE})")}
     for name, decl in (("n_evening_rows_skipped", "INTEGER"), ("n_adj_close_null", "INTEGER"),
                        ("status", "TEXT"), ("failed_table", "TEXT"),
-                       ("model_universe", "TEXT"), ("n_universe_with_estimates", "INTEGER")):
+                       ("model_universe", "TEXT"), ("n_universe_with_estimates", "INTEGER"),
+                       ("builds_fallback", "TEXT")):
         if name not in have:
             con.execute(f"ALTER TABLE {META_TABLE} ADD COLUMN {name} {decl}")
 
@@ -491,8 +510,8 @@ def _write_meta(con: sqlite3.Connection, result: ExportResult) -> None:
             f'INSERT OR REPLACE INTO {META_TABLE} (exported_at, date, basis, equity_builds, '
             f'stage_builds, tables, "window", consensus_asof, n_evening_rows_skipped, '
             f"n_adj_close_null, status, failed_table, model_universe, "
-            f"n_universe_with_estimates) "
-            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f"n_universe_with_estimates, builds_fallback) "
+            f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (result.exported_at, result.date, result.basis,
              json.dumps(result.equity_builds, ensure_ascii=False, sort_keys=True),
              json.dumps(result.stage_builds, ensure_ascii=False, sort_keys=True),
@@ -501,7 +520,8 @@ def _write_meta(con: sqlite3.Connection, result: ExportResult) -> None:
              json.dumps(result.window, ensure_ascii=False, sort_keys=True),
              result.consensus_asof, result.n_evening_rows_skipped, result.n_adj_close_null,
              result.status, result.failed_table, result.model_universe,
-             result.n_universe_with_estimates))
+             result.n_universe_with_estimates,
+             json.dumps(list(result.builds_fallback), ensure_ascii=False)))
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
@@ -524,9 +544,17 @@ def _selected(tables: list[str] | None) -> list[TableMapping]:
 
 def _resolve_sources(selected: list[TableMapping], roots: dict[str, Path],
                      pinned: dict[str, dict[str, str]] | None,
-                     extra: Iterable[tuple[str, str]] = ()) -> dict[str, dict[str, str]]:
-    """쓰기 전에 원천 판을 전부 해석한다 — 판 가드(R5 · R9)를 먼저 걸기 위해서다."""
+                     extra: Iterable[tuple[str, str]] = (),
+                     on_missing: str = "error"
+                     ) -> tuple[dict[str, dict[str, str]], tuple[str, ...]]:
+    """쓰기 전에 원천 판을 전부 해석한다 — 판 가드(R5 · R9)를 먼저 걸기 위해서다.
+
+    `on_missing='current'` 면 `--builds-from` 에 **키가 없는 표**와 그 build_id 가 이미
+    **GC 로 MANIFEST 에서 사라진 표**를 `current_build` 로 떨어뜨리고 목록을 함께 돌려준다
+    (근거·경고는 `BUILDS_MISSING` 주석).
+    """
     builds: dict[str, dict[str, str]] = {EQUITY: {}, STAGE: {}}
+    fallback: set[str] = set()
     wanted = [(m.source_kind, t) for m in selected for t in m.sources] + list(extra)
     for kind, table in wanted:
         assert kind is not None
@@ -534,11 +562,19 @@ def _resolve_sources(selected: list[TableMapping], roots: dict[str, Path],
             continue
         want = pinned[kind].get(table) if pinned is not None else None
         if pinned is not None and want is None:
-            raise CompatError(f"--builds-from 에 {kind} {table} 판이 없다")
-        expr, build_id = _parquet_source(roots[kind], table, kind, want)
+            if on_missing == "error":
+                raise CompatError(f"--builds-from 에 {kind} {table} 판이 없다")
+            fallback.add(table)
+        try:
+            expr, build_id = _parquet_source(roots[kind], table, kind, want)
+        except CompatError:
+            if want is None or on_missing == "error":
+                raise
+            fallback.add(table)          # 인계 판이 GC 로 사라졌다
+            expr, build_id = _parquet_source(roots[kind], table, kind, None)
         builds[kind][table] = build_id
         builds[kind][_EXPR + table] = expr
-    return builds
+    return builds, tuple(sorted(fallback))
 
 
 def _build_ids(builds: dict[str, str]) -> dict[str, str]:
@@ -548,7 +584,7 @@ def _build_ids(builds: dict[str, str]) -> dict[str, str]:
 def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: Path,
            tables: list[str] | None = None, full: bool = False,
            window_days: int | None = None, consensus_asof: str | None = None,
-           builds_from: Path | None = None,
+           builds_from: Path | None = None, builds_from_missing: str = "error",
            model_universe: str = "all") -> ExportResult:
     """equity/stage 판을 읽어 v3 `quant.db` 9표 중 지정 표를 upsert 한다.
 
@@ -556,12 +592,18 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
     `full=True` 면 `window_days`(기본 `FULL_WINDOW_DAYS`) 창 전체를 다시 넣는다. 스냅샷
     표(`stocks`·리비전·재무)는 창과 무관하게 as_of 최신 한 판이다.
     `builds_from` 은 인계 이력 JSON 경로 — 그 판으로 고정해 읽는다(과거 날짜 비교용).
+    그 판을 못 찾았을 때 `builds_from_missing='current'` 면 `current_build` 로 폴백하고
+    폴백한 표를 `_compat_meta.builds_fallback` 에 남긴다(기본 'error' 는 멈춘다).
     `model_universe='estimates'` 면 당해 12월기 WISE 추정치가 없는 종목의 `stocks.market_cap`
     을 NULL 로 두어 v3 엔진 유니버스에서 뺀다(사용자 결정 09-24).
     """
     as_of = _parse_date(date, "--date")
     if basis not in BASES:
         raise CompatError(f"--basis 는 {BASES} 중 하나여야 한다: {basis!r}")
+    if builds_from_missing not in BUILDS_MISSING:
+        raise CompatError(
+            f"--builds-from-missing 은 {BUILDS_MISSING} 중 하나여야 한다: "
+            f"{builds_from_missing!r}")
     if model_universe not in MODEL_UNIVERSES:
         raise CompatError(
             f"--model-universe 는 {MODEL_UNIVERSES} 중 하나여야 한다: {model_universe!r}")
@@ -587,9 +629,10 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
 
     want_estimates = (model_universe == "estimates"
                       and any(m.v3_table == "stocks" for m in selected))
-    builds = _resolve_sources(
+    builds, builds_fallback = _resolve_sources(
         selected, roots, pinned,
-        [(STAGE, "stg_consensus_annual")] if want_estimates else [])
+        [(STAGE, "stg_consensus_annual")] if want_estimates else [],
+        builds_from_missing)
     equity_builds, stage_builds = _build_ids(builds[EQUITY]), _build_ids(builds[STAGE])
     _check_basis(equity_builds, basis)
     _check_price_chain(equity_builds)
@@ -646,7 +689,8 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
                 n_evening_rows_skipped=evening_skipped, n_adj_close_null=adj_null,
                 status="failed", failed_table=current,
                 model_universe=model_universe,
-                n_universe_with_estimates=n_with_est, tables=results,
+                n_universe_with_estimates=n_with_est, builds_fallback=builds_fallback,
+                tables=results,
                 equity_builds=equity_builds, stage_builds=stage_builds))
             raise
         result = ExportResult(
@@ -655,6 +699,7 @@ def export(equity_root: Path, stage_root: Path, date: str, basis: str, target: P
             consensus_asof=params["consensus_asof"],
             n_evening_rows_skipped=evening_skipped, n_adj_close_null=adj_null,
             model_universe=model_universe, n_universe_with_estimates=n_with_est,
+            builds_fallback=builds_fallback,
             tables=results, equity_builds=equity_builds, stage_builds=stage_builds)
         _write_meta(con, result)
         return result

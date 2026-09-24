@@ -11,7 +11,8 @@
 #       어느 경로도 알림 없이 끝나지 않는다(결정 V2-7). --dry-run 만 예외.
 #   사용: compat_export.sh --date YYYYMMDD --basis evening|morning
 #                          [--target PATH] [--full] [--dry-run] [--consensus-asof YYYYMMDD]
-#                          [--builds-from PATH] [--model-universe all|estimates]
+#                          [--builds-from PATH] [--builds-from-missing error|current]
+#                          [--model-universe all|estimates]
 set -uo pipefail
 cd /home/kael/quant-ledger || { echo "quant-ledger 홈으로 이동 실패" >&2; exit 4; }
 export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
@@ -21,7 +22,7 @@ EQUITY_ROOT="${QL_EQUITY_ROOT:-data/equity}"
 STAGE_ROOT="${QL_STAGE_ROOT:-data/stage}"
 TARGET="${QL_COMPAT_TARGET:-data/compat/quant.db}"
 DATE_ARG=""; BASIS=""; FULL=""; DRY=""; CONS=""; BUILDS=""
-UNIV="${QL_COMPAT_UNIVERSE:-}"
+UNIV="${QL_COMPAT_UNIVERSE:-}"; BFMISS=""
 kst() { TZ=Asia/Seoul date '+%m-%d %H:%M:%S KST'; }
 # 인자 오류는 조용히 죽지 않는다 — warn 알림 + rc 5 (R8). `set -u` 라 값 없는 `shift 2` 도 막는다.
 die_arg() {
@@ -38,6 +39,7 @@ while [ $# -gt 0 ]; do
     --consensus-asof) need_val "$@"; CONS="$2"; shift 2 ;;
     --builds-from) need_val "$@"; BUILDS="$2"; shift 2 ;;
     --model-universe) need_val "$@"; UNIV="$2"; shift 2 ;;
+    --builds-from-missing) need_val "$@"; BFMISS="$2"; shift 2 ;;
     --full) FULL="--full"; shift ;;
     --dry-run) DRY=1; shift ;;
     *) die_arg "모르는 인자 '$1'" ;;
@@ -65,14 +67,14 @@ if [ -n "$DRY" ]; then
   echo "  $PY -m compat export --date $D --basis $BASIS --equity-root $EQUITY_ROOT" \
        "--stage-root $STAGE_ROOT --target $TARGET $FULL" \
        "${CONS:+--consensus-asof $CONS} ${BUILDS:+--builds-from $BUILDS}" \
-       "${UNIV:+--model-universe $UNIV}"
+       "${UNIV:+--model-universe $UNIV} ${BFMISS:+--builds-from-missing $BFMISS}"
   RC=0
 else
   # shellcheck disable=SC2086  # reason: $FULL 은 있거나 없는 단일 플래그다
   $PY -m compat export --date "$D" --basis "$BASIS" --equity-root "$EQUITY_ROOT" \
       --stage-root "$STAGE_ROOT" --target "$TARGET" $FULL \
       ${CONS:+--consensus-asof "$CONS"} ${BUILDS:+--builds-from "$BUILDS"} \
-      ${UNIV:+--model-universe "$UNIV"}
+      ${UNIV:+--model-universe "$UNIV"} ${BFMISS:+--builds-from-missing "$BFMISS"}
   RC=$?
   echo "──── compat export 종료 rc=$RC $(kst) ────"
 fi

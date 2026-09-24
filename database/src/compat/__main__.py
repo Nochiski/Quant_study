@@ -4,7 +4,7 @@
         --equity-root data/equity --stage-root data/stage --target data/compat/quant.db \\
         [--tables daily_prices,stocks] [--full] [--window-days 730] [--consensus-asof 20260922] \\
         [--builds-from data/deliver/history/20260923_morning.json] \\
-        [--model-universe all|estimates]
+        [--model-universe all|estimates] [--builds-from-missing error|current]
 
 rc 0 정상 · 2 예외. 표별 행수 한 줄을 stdout 에 낸다(`scripts/compat_export.sh` 가 로그로 받는다).
 """
@@ -34,6 +34,8 @@ def _parser() -> argparse.ArgumentParser:
                    help="컨센서스 as-of YYYYMMDD (기본 --date)")
     e.add_argument("--builds-from", default=None, type=Path,
                    help="인계 이력 JSON(data/deliver/history/<D>_<basis>.json) 의 판으로 고정")
+    e.add_argument("--builds-from-missing", default="error", choices=("error", "current"),
+                   help="--builds-from 의 판이 없을 때: error(멈춤) | current(current_build 폴백)")
     e.add_argument("--model-universe", default="all", choices=("all", "estimates"),
                    help="estimates 면 당해 12월기 WISE 추정치가 없는 종목의 "
                         "stocks.market_cap 을 NULL 로 둔다(사용자 결정 09-24)")
@@ -48,7 +50,8 @@ def main(argv: list[str] | None = None) -> int:
             basis=args.basis, target=args.target,
             tables=[t.strip() for t in args.tables.split(",")] if args.tables else None,
             full=args.full, window_days=args.window_days, consensus_asof=args.consensus_asof,
-            builds_from=args.builds_from, model_universe=args.model_universe)
+            builds_from=args.builds_from, builds_from_missing=args.builds_from_missing,
+            model_universe=args.model_universe)
     except CompatError as e:
         print(f"compat 실패: {e}", file=sys.stderr)
         return 2

@@ -658,6 +658,52 @@ def test_builds_from_pins_an_older_build(tmp_path: Path) -> None:
                              "AND trade_date='2026-09-23'") == [(71_200,)]
 
 
+def test_builds_from_missing_key_falls_back_to_current(roots, tmp_path: Path) -> None:
+    """09-18 실측 — 그날 인계 JSON 에는 `sector_snapshot` 키가 아예 없었다(표가 없던 날)."""
+    hist = tmp_path / "20260918_morning.json"
+    hist.write_text(json.dumps({
+        "equity_builds": {t: EQ_BUILD for t in
+                          ("price_daily", "price_adj_daily", "universe_daily", "security",
+                           "flow_daily")},              # sector_snapshot 없음
+        "stage_builds": {t: ST_BUILD for t in
+                         ("stg_consensus_matrix", "stg_consensus_annual", "stg_fin_wise")},
+    }), encoding="utf-8")
+    with pytest.raises(CompatError, match="sector_snapshot"):
+        _run(roots, tmp_path / "e.db", tables=["stocks"], builds_from=hist)
+
+    target = tmp_path / "quant.db"
+    res = _run(roots, target, tables=["stocks"], builds_from=hist,
+               builds_from_missing="current")
+    assert res.builds_fallback == ("sector_snapshot",)
+    assert res.equity_builds["sector_snapshot"] == EQ_BUILD      # current_build
+    assert json.loads(_rows(target, "SELECT builds_fallback FROM _compat_meta")[0][0]) == \
+        ["sector_snapshot"]
+
+
+def test_builds_from_gc_removed_build_falls_back_to_current(roots, tmp_path: Path) -> None:
+    """09-21 실측 — 인계 판이 stage keep=3 GC 로 MANIFEST 에서 사라졌다.
+
+    stage 는 `fetched_date` append-only 라 current_build + as-of 필터가 같은 행을 고른다.
+    """
+    hist = tmp_path / "20260921_morning.json"
+    hist.write_text(json.dumps({
+        "equity_builds": {"price_daily": EQ_BUILD},
+        "stage_builds": {"stg_consensus_matrix": "m_20260922T000215_559494Z"},   # GC 로 소멸
+    }), encoding="utf-8")
+    with pytest.raises(CompatError, match="MANIFEST 에 없다"):
+        _run(roots, tmp_path / "e.db", tables=["consensus_revision_daily"], builds_from=hist)
+
+    target = tmp_path / "quant.db"
+    res = _run(roots, target, tables=["consensus_revision_daily"], builds_from=hist,
+               builds_from_missing="current")
+    assert res.builds_fallback == ("stg_consensus_matrix",)
+    assert res.stage_builds["stg_consensus_matrix"] == ST_BUILD
+    # 폴백해도 as-of 필터가 같은 스냅샷을 고른다.
+    assert _rows(target, "SELECT base_date, op FROM consensus_revision_daily") == [
+        ("2026-09-22", 1100.0)]
+    assert "fallback=stg_consensus_matrix" in res.summary()
+
+
 def test_builds_from_unknown_build_refuses(roots, tmp_path: Path) -> None:
     hist = tmp_path / "bad.json"
     hist.write_text(json.dumps({

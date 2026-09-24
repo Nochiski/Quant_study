@@ -221,6 +221,19 @@ def test_plan_resolves_non_december_quarterly_label_with_company_fiscal_month(tm
     p = dd.plan(con, D)
     assert set(p.periodic_units) == {(C1, "2026", "11013"), (C2, "2026", "11014")}
     assert [r[0] for r in p.unresolved] == ["20260923000619"]
+    # 6월 결산: 1분기 라벨이 09, 3분기 라벨이 03 — 12월 기준 월 규칙(09→3분기)을 결산월로 덮어쓴다(09-24 검수)
+    rows_jun = [("20261114000001", "20261114", C1, "005930", "분기보고서 (2026.09)"),
+                ("20260514000002", "20260514", C1, "005930", "분기보고서 (2026.03)"),
+                ("20260514000003", "20260514", C3, "000660", "분기보고서 (2026.03)")]      # C3 는 12월 결산
+    con.execute("DELETE FROM dart_disclosure"); con.execute("DELETE FROM dart_company")
+    con.executemany("INSERT INTO dart_disclosure VALUES (?,?,?,?,?,?,?)",
+                    [(f"j{i}", *r, "2026-11-14T12:00:00") for i, r in enumerate(rows_jun)])
+    con.executemany("INSERT INTO dart_company VALUES (?,?,?)", [(C1, "june", "06"), (C3, "dec", "12")])
+    con.commit()
+    p1 = dd.plan(con, "20261114")
+    assert p1.periodic_units == ((C1, "2026", "11013"),)                     # 09 → 1분기(6월 결산)
+    p3 = dd.plan(con, "20260514")
+    assert set(p3.periodic_units) == {(C1, "2026", "11014"), (C3, "2026", "11013")}   # 03 → 3분기 / 12월 결산은 1분기
     c = dd.resolve_with_acc_mt(dd.classify("분기보고서 (2026.07)"), "04")
     assert c is not None and c.reprt_code == "11013" and c.bsns_year == "2026" and "acc_mt=04" in c.detail
     assert dd.resolve_with_acc_mt(dd.classify("분기보고서 (2026.07)"), "12") is None      # 07−12 = 7 → 판정 불가

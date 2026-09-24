@@ -306,7 +306,9 @@ def resolve_with_acc_mt(c: Classified, acc_mt: str | None) -> Classified | None:
 
     09-23 실측: 테라뷰(acc_mt 04) '분기보고서 (2026.07)' 가 `unresolved` 로 남아 DART 게이트가 저녁·아침
     두 번 실패했고, 재실행마다 같은 자리에서 다시 실패한다(D 가 같으니). 결산월이 있으면 판정할 수 있다."""
-    if c.kind is not Kind.PERIODIC or c.reprt_code is not None or c.bsns_year is None:
+    # 결산월을 아는 법인은 월 규칙(03→1분기, 09→3분기)을 **덮어쓴다** — 6월 결산 29사의 1분기 라벨은 09, 3분기는
+    # 03 이라 12월 기준 월 규칙이 정반대로 코드를 매긴다(09-24 검수). 이미 판정된 반기·사업보고서는 건드리지 않는다.
+    if c.kind is not Kind.PERIODIC or c.bsns_year is None or c.reprt_code in ("11011", "11012"):
         return None
     if not acc_mt or len(acc_mt) != 2 or not acc_mt.isdigit():
         return None
@@ -389,12 +391,15 @@ def plan(con: sqlite3.Connection, date_yyyymmdd: str, *,
     for rcept_no, corp_code, report_nm in rows:
         rno, corp, nm = str(rcept_no), str(corp_code or ""), str(report_nm or "")
         c = classify(nm)
-        if c.kind is Kind.PERIODIC and not c.resolved and c.bsns_year is not None:
+        if c.kind is Kind.PERIODIC and c.bsns_year is not None and c.reprt_code not in ("11011", "11012"):
+            # 분기보고서는 결산월이 있으면 그것으로 판정한다(보류분은 풀고, 비12월 결산은 월 규칙을 덮어쓴다)
             if acc_mt_by_corp is None:
                 acc_mt_by_corp = _acc_mt_by_corp(con)
-            fixed = resolve_with_acc_mt(c, acc_mt_by_corp.get(corp))
-            if fixed is not None:
-                c = fixed
+            acc_mt = acc_mt_by_corp.get(corp)
+            if acc_mt and acc_mt != "12":
+                fixed = resolve_with_acc_mt(c, acc_mt)
+                if fixed is not None:
+                    c = fixed
         counts[c.kind.value] += 1
         if c.kind in (Kind.OTHER, Kind.CORRECTION):
             continue

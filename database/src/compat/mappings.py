@@ -80,9 +80,13 @@ WHERE p.basis = 'evening'
 """
 
 # ── stocks ──────────────────────────────────────────────────────────────────────────────────
-# 종목당 1행 스냅샷. 유니버스는 `universe_daily` 의 as_of 이하 최신 세션 행(status listed·suspended,
-# ETF 제외 — v3 `stocks` 는 키움 ka10099/KIS MST 종목표라 ETF 를 담지 않는다). 시총은 같은 창의
-# `price_daily.mktcap_krw` 최신 값 → 억원. 이름·상장일·폐지일은 `security`.
+# 종목당 1행 스냅샷. 유니버스는 `universe_daily` 의 as_of 이하 최신 세션 행
+# (status listed·suspended). 시총은 같은 창의 `price_daily.mktcap_krw` 최신 값 → 억원.
+# 이름·상장일·폐지일은 `security`.
+# **D-11 유니버스 미러**: v3 `stocks` 는 KOSPI·KOSDAQ 의 `sec_type IN ('common', 'spac')` 다.
+#   09-23 그림자 실측 — v3 active 2,533 = common 2,413 + spac 117. 우리가 더 넣었던 236 은
+#   preferred 114 · reit 23 · foreign 12 · dr 10 · fund 3 이고 v3 수집기(키움 ka10099 + KIS MST)가
+#   애초에 담지 않는 종류다. 유니버스를 v3 와 같게 맞춰야 G-M2 ①의 티커 집합 차이가 선다.
 # `sector` 는 WICS L1 명(`sector_snapshot`)을 넣는다 — v3 는 KRX 업종명이라 **값이 다르다**.
 #   T1.4 소비자 감사에서 브리핑·리서치센터가 sector 를 표시용으로만 쓰는지 확인한 뒤
 #   WICS 유지 / KRX 업종으로 교체를 확정한다(플랜 §5 T1.2 2).
@@ -125,7 +129,9 @@ FROM uni u
 JOIN {{security}} v ON v.ticker = u.ticker
 LEFT JOIN cap  ON cap.ticker = u.ticker AND cap.rn = 1
 LEFT JOIN sect ON sect.ticker = u.ticker AND sect.rn = 1
-WHERE u.rn = 1 AND u.sec_type <> 'etf'
+WHERE u.rn = 1
+  AND u.sec_type IN ('common', 'spac')          -- D-11
+  AND u.market IN ('KOSPI', 'KOSDAQ')           -- v3 CHECK 제약과 같은 어휘
 """
 
 # ── investor_detail_flows ───────────────────────────────────────────────────────────────────
@@ -168,7 +174,8 @@ WHERE f.rn = 1
 # lookback: VAL1=current · VAL2=1w · VAL3=1m · VAL4=3m · VAL5=1y (`parsers.py:268`).
 # as-of: `fetched_date <= {consensus_asof}` 의 종목별 **최신 fetched_date** 한 판.
 #   G-M2 에서 v3 09-23 점수의 리비전 입력이 09-22 자료였으므로 `--consensus-asof` 로 맞춘다.
-# target_period: WISE 는 종목마다 3개(과거·당해·차기)를 준다. **as_of 이상인 것 중 최솟값**
+# target_period: WISE 는 종목마다 3개(당해·차기·차차기 — 09-23 실측)를 준다.
+#   **as_of 이상인 것 중 최솟값**
 #   = 아직 끝나지 않은 가장 가까운 결산기를 고른다(비12월 결산 202605·202903 실재).
 #   v3 가 네이버에서 어떤 기를 골랐는지는 문서화돼 있지 않다 — T1.3 서버 대조의 확인 대상이다.
 _ACC: tuple[tuple[str, str], ...] = (
@@ -277,8 +284,9 @@ WHERE rn = 1
 # 기간 라벨은 '2021/12(IFRS연결)' / '2026/12(E)(IFRS연결)' 꼴이다 —
 #   (E) 가 없으면 v3 `data_type` 은 **NULL** 이고 그 행만 scoring 의 quality·valuation 창
 #   (`period_type='annual' AND data_type IS NULL`)에 든다.
-# accode(절단본 `tests/fixtures/stage_slice/stg_fin_wise` 실측):
-#   cF3002 200000 매출액(수익) · 200810 매출총이익 · 201370 영업이익 · 203170 당기순이익
+# accode(절단본 `tests/fixtures/stage_slice/stg_fin_wise` 실측). cF3002 넷은 **계정명까지**
+# 맞아야 센다(R1 — 금융업은 같은 accode 에 다른 계정이 실린다):
+#   cF3002 200000 '매출액(수익)' · 200810 '매출총이익' · 201370 '영업이익' · 203170 '당기순이익'
 #   cF4002 312000 EPS · 314000 BPS · 382100 PER · 382500 PBR · 331000 EV/EBITDA ·
 #          431800 현금배당수익률 · 701250 보통주수정기말발행주식수
 #   cF4002 는 같은 ACCODE 가 P_ACCODE 아래 한 번 더 나온다(EPS/BPS) — 값이 같지만 최상위
@@ -291,14 +299,25 @@ WHERE rn = 1
 #     부채비율 서브가 전부 결측이 된다(std_20d 만 남는다). **G-M2 ②의 선결 과제**로
 #     오케스트레이터에 보고했다(D-5 재검토 또는 다른 원천 필요).
 _FIN_SLOTS = "\n    UNION ALL\n    ".join(
-    "SELECT ticker, ep, accode, p_accode, fs_basis, "
+    "SELECT ticker, ep, accode, p_accode, acc_nm, fs_basis, "
     f"period_label_{i} AS label, val_{i} AS val FROM cur" for i in range(1, 7))
 
 
-def _fin_pick(ep: str, accode: str, top_only: bool = False) -> str:
+def _fin_pick(ep: str, accode: str, top_only: bool = False,
+              acc_nm: str | None = None) -> str:
+    """accode 피벗 한 칸. `acc_nm` 을 주면 계정명까지 맞는 행만 센다.
+
+    R1 — WISE 는 업종에 따라 **같은 accode 에 다른 계정**을 싣는다. 절단본 실측:
+    003540(대신증권)의 cF3002 `200000` 은 '순이자이익' 이고 `200810`·`203170` 은
+    하위 계정('단기매매금융자산매매이익'·'자산재평가이익')이다. accode 만 보면 금융업의
+    순이자이익이 v3 `financial_summary.revenue` 로 들어가 밸류·퀄리티가 오염된다.
+    계정명이 다르면 값을 만들지 않는다(NULL) — 잘못 채우느니 비운다(원칙 ④).
+    """
     cond = f"ep = '{ep}' AND accode = '{accode}'"
     if top_only:
         cond += " AND p_accode IS NULL"
+    if acc_nm is not None:
+        cond += f" AND acc_nm = '{acc_nm}'"
     return f"max(CASE WHEN {cond} THEN val END)"
 
 
@@ -317,7 +336,7 @@ slots AS (
     {_FIN_SLOTS}
 ),
 parsed AS (
-    SELECT ticker, ep, accode, p_accode, fs_basis, val,
+    SELECT ticker, ep, accode, p_accode, acc_nm, fs_basis, val,
            regexp_extract(label, '(\\d\\d\\d\\d)[./](\\d\\d)', 1) AS yyyy,
            regexp_extract(label, '(\\d\\d\\d\\d)[./](\\d\\d)', 2) AS mm,
            regexp_matches(label, '\\(E\\)')                      AS is_est
@@ -327,9 +346,9 @@ parsed AS (
 SELECT ticker                                              AS stock_code,
        yyyy || '/' || mm                                   AS period,
        CASE WHEN mm = '12' THEN 'annual' ELSE 'quarter' END AS period_type,
-       CAST(round({_fin_pick('cF3002', '200000', True)}) AS BIGINT) AS revenue,
-       CAST(round({_fin_pick('cF3002', '201370', True)}) AS BIGINT) AS op,
-       CAST(round({_fin_pick('cF3002', '203170', True)}) AS BIGINT) AS ni,
+       CAST(round({_fin_pick('cF3002', '200000', True, '매출액(수익)')}) AS BIGINT) AS revenue,
+       CAST(round({_fin_pick('cF3002', '201370', True, '영업이익')}) AS BIGINT) AS op,
+       CAST(round({_fin_pick('cF3002', '203170', True, '당기순이익')}) AS BIGINT) AS ni,
        CAST(round({_fin_pick('cF4002', '312000', True)}) AS BIGINT) AS eps,
        CAST(round({_fin_pick('cF4002', '314000', True)}) AS BIGINT) AS bps,
        CAST({_fin_pick('cF4002', '382100')} AS DOUBLE)              AS per,
@@ -347,13 +366,34 @@ SELECT ticker                                              AS stock_code,
        CAST(NULL AS DOUBLE)                                         AS yoy,
        CASE WHEN is_est THEN 'estimate' END                          AS data_type,
        max(CASE WHEN ep = 'cF3002' THEN fs_basis END)               AS accounting_standard,
-       CAST(round({_fin_pick('cF3002', '200810', True)}) AS BIGINT) AS gross_profit,
+       CAST(round({_fin_pick('cF3002', '200810', True, '매출총이익')}) AS BIGINT) AS gross_profit,
        CAST(NULL AS BIGINT)                                         AS total_assets
 FROM parsed
 GROUP BY ticker, yyyy, mm, is_est
 -- 같은 (종목, 기) 에 (E) 슬롯과 확정 슬롯이 둘 다 오면 v3 PK 가 하나뿐이라 뒤에 넣은 행이 남는다.
 -- 확정치(data_type NULL)가 scoring 창이므로 그쪽을 마지막에 넣는다.
 ORDER BY ticker, yyyy, mm, is_est DESC
+"""
+
+# ── 모델 유니버스(사용자 결정 09-24) ────────────────────────────────────────────────────────
+# "v3 유니버스는 추정치 데이터가 있는 종목만". v3 엔진 원본은 `stocks.market_cap >= min_market_cap`
+# 으로만 유니버스를 자르므로(v3 `backend/scoring/engine.py:71-78`, v2 는 `market_cap > 0`),
+# **추정치가 없는 종목의 `market_cap` 을 NULL 로 내보내면** v3 코드를 한 줄도 고치지 않고 같은
+# 효과를 낸다. 이름·시장 열은 남으므로 브리핑·뉴스·unitelegram 의 조인은 깨지지 않는다.
+# 판정: as_of 이하 최신 `stg_consensus_annual` 판에서 **당해 12월기 추정(period_kind='E')의
+# op·ni 가 둘 다 있는** 종목.
+ESTIMATE_TICKERS_SQL = """
+WITH latest AS (
+    SELECT ticker, max(fetched_date) AS fetched_date
+    FROM {stg_consensus_annual}
+    WHERE fetched_date <= DATE '{consensus_asof}'
+    GROUP BY ticker
+)
+SELECT DISTINCT a.ticker
+FROM {stg_consensus_annual} a
+JOIN latest l ON l.ticker = a.ticker AND l.fetched_date = a.fetched_date
+WHERE a.period_kind = 'E' AND a.period = '{asof_fy}'
+  AND a.op IS NOT NULL AND a.ni IS NOT NULL
 """
 
 # ── 선언 ────────────────────────────────────────────────────────────────────────────────────

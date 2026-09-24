@@ -127,8 +127,10 @@ def to_v3(v3_table: str, v3_column: str, value: float | None) -> float | None:
 
 
 def v3_flow_z_input(net_v3: float, market_cap_v3: float) -> float:
-    """v3 `backend/scoring/factors/flow.py:67` 의 z 입력식 그대로.
+    """v3 `backend/scoring/factors/flow.py:67` 의 z 입력식 그대로. **테스트 전용 검산축**이다.
 
+    exporter 는 이 함수를 부르지 않는다 — 단위표(위 `UNIT_RULES`)가 v3 의 실제 식과
+    정합한지 `tests/test_compat_units.py` 가 재보는 데만 쓴다.
     net 은 백만원, market_cap 은 억원. 결과는 '진짜 순매수/시총 비율'의 1/1000 이지만
     z-score 정규화에서 상수가 상쇄돼 점수에는 영향이 없다(flow.py:65-66 주석).
     """
@@ -136,5 +138,5 @@ def v3_flow_z_input(net_v3: float, market_cap_v3: float) -> float:
 
 
 def true_flow_ratio(net_krw: float, mktcap_krw: float) -> float:
-    """원 단위끼리 나눈 진짜 순매수/시총 비율 — 위 식의 검산축."""
+    """원 단위끼리 나눈 진짜 순매수/시총 비율 — 위 식의 **테스트 전용 검산축**."""
     return net_krw / mktcap_krw

@@ -971,18 +971,21 @@ def _margin_strengths(
     """점수 비례 가중(`weighting: factor_score`)의 선정 종목별 강도다. 비중은 이 값에 비례한다.
 
     규칙(PLAN 결정 5): 선호 점수 p 는 롱이면 합성 점수, 숏이면 그 부호를 뒤집은 값이다.
-    선정 종목 강도 = p − 기준점. 기준점은 선정 최저 p 보다 **엄격히 낮은** eligible 비선정 종목 중
-    최고 p 이고, 그런 종목이 없으면 `선정 최저 p − (선정 최고 p − 선정 최저 p) / (선정 수 − 1)`
-    이다. 강도가 모두 0 이면(선정 1종목이면서 아래 종목이 없거나, 선정 종목이 전원 동점) 균등
-    배분한다.
+    선정이 2종목 이상이면 선정 종목 강도 = p − 기준점, 기준점 = `min(선정 최저 p 보다 엄격히 낮은
+    eligible 비선정 종목 중 최고 p, 선정 최저 p − 평균 간격)`, 평균 간격 = `(선정 최고 p − 선정
+    최저 p) / (선정 수 − 1)` 이다. 컷 아래 종목이 없으면 뒤 항만 쓴다. 선정 1종목이거나 강도가
+    모두 0 이면(선정 전원 동점이고 아래 종목 없음) 균등 배분한다.
 
     - 합성 점수는 방향을 이미 반영해서 **클수록 매수 선호**다(spec D4). 절댓값을 쓰면
       `direction: low` 와 공매도 쪽에서 순서가 뒤집혔다(2차 리뷰 R2-P204-001).
-    - 기준점이 선정 최저보다 항상 낮으므로 선정된 종목의 강도는 0 이 되지 않는다. eligible 최저
-      점수를 바닥으로 둔 규칙은 그 종목을 0 으로 만들어 1종목·동점 프레임을 비웠다(3차 리뷰
-      R3-P204-001).
-    - 강도가 점수 차이이므로 평행 이동과 양의 배율에 불변이다. 그래서 x 에 `low` 를 준 문서와
-      −x 에 `high` 를 준 문서가 `rank`(두 합성 점수가 상수 1 차이)에서도 같은 비중을 낸다.
+    - 기준점이 "선정 최저 − 평균 간격" 이하라서 선정 종목은 최소 평균 간격만큼의 강도를 갖는다.
+      eligible 최저를 바닥으로 두면 그 종목이 0 이 되어 1종목·동점 프레임이 비었고(3차 리뷰
+      R3-P204-001), 컷 아래 최고만 쓰면 근접 동점 종목이 dust 비중을 받았다(4차 리뷰
+      R4-P204-001). 그래서 최고/최저 강도 비는 선정 수를 넘지 않는다.
+    - 컷 아래 종목이 선정 최저에서 멀면 그 점수가 기준점이 되어 비중이 균등 쪽으로 평평해진다.
+      하한은 기준점이 선정 최저에 너무 가까운 쪽만 막는다(PLAN 결정 5 의 알려진 성질).
+    - 두 항 모두 점수의 평행 이동·양의 배율에 공변이라 비중은 불변이다. 그래서 x 에 `low` 를 준
+      문서와 −x 에 `high` 를 준 문서가 `rank`(두 합성 점수가 상수 1 차이)에서도 같은 비중을 낸다.
     - 기준점은 같은 프레임의 eligible 후보에서만 구하므로 날짜를 가로지르지 않는다.
     """
     sign = -1.0 if short else 1.0
@@ -992,18 +995,17 @@ def _margin_strengths(
     chosen = [value for security_id, value in preference.items() if security_id in selected]
     if not chosen:
         return {}
+    if len(chosen) == 1:
+        return {security_id: 1.0 for security_id in preference if security_id in selected}
     lowest = min(chosen)
+    reference = lowest - (max(chosen) - lowest) / (len(chosen) - 1)
     below = [
         value
         for security_id, value in preference.items()
         if security_id not in selected and value < lowest
     ]
     if below:
-        reference = max(below)
-    elif len(chosen) > 1:
-        reference = lowest - (max(chosen) - lowest) / (len(chosen) - 1)
-    else:
-        reference = lowest
+        reference = min(reference, max(below))
     strengths = {
         security_id: value - reference
         for security_id, value in preference.items()

@@ -1182,6 +1182,104 @@ def test_factor_score_is_mirror_symmetric_between_low_and_high(
     assert low == _approx_table(high)
 
 
+_AFFINE_METHODS = (SignalNormalization.NONE, SignalNormalization.ZSCORE)
+
+
+def _labelled(values: tuple[float, ...]) -> tuple[tuple[str, float], ...]:
+    return tuple(zip("abcdefgh", values, strict=False))
+
+
+@pytest.mark.parametrize("method", _AFFINE_METHODS)
+def test_factor_score_gives_a_near_tie_at_the_cut_a_real_share(
+    method: SignalNormalization,
+) -> None:
+    """컷 바로 아래 비선정 종목과 거의 동점인 선정 종목도 평균 간격만큼의 강도를 받는다.
+
+    원시값 3, 2, 1+2⁻⁵², 1 에서 3종목 선정. 기준점을 "컷 아래 최고"만으로 잡으면 `c` 의 강도가
+    2⁻⁵² 라 비중이 `7.4e-17` 인 dust target 이 됐다(4차 리뷰 R4-P204-001). 기준점은
+    `min(컷 아래 최고 1, 선정 최저 − 평균 간격 0) = 0` 이라 강도 3 : 2 : 1 이다. `none`·`zscore`
+    는 원시값의 양의 아핀 변환이라 같은 표다.
+    """
+    raw = _labelled((3.0, 2.0, 1.0 + 2.0**-52, 1.0))
+
+    table = _factor_score_weights(
+        raw, method=method, direction=FactorDirection.HIGH, selection_count=3
+    )
+
+    assert table == _approx_table({"a": 3 / 6, "b": 2 / 6, "c": 1 / 6})
+
+
+@pytest.mark.parametrize("method", _AFFINE_METHODS)
+def test_factor_score_uses_the_best_rejected_score_when_it_is_further_than_the_gap(
+    method: SignalNormalization,
+) -> None:
+    """원시값 5, 4, 2, 1 에서 2종목 선정: 기준점은 컷 아래 최고 2 다(평균 간격 기준 3 보다 낮다).
+
+    강도 3 : 2 → .6/.4. 컷 아래 종목을 무시하고 평균 간격만 쓰면 2 : 1 → 2/3·1/3 이 된다. 이
+    테스트가 "컷 아래 종목 정보를 쓴다"는 규칙 부분을 고정한다(R4-P204-002).
+    """
+    raw = _labelled((5.0, 4.0, 2.0, 1.0))
+
+    table = _factor_score_weights(
+        raw, method=method, direction=FactorDirection.HIGH, selection_count=2
+    )
+
+    assert table == _approx_table({"a": 0.6, "b": 0.4})
+
+
+@pytest.mark.parametrize("method", _AFFINE_METHODS)
+def test_factor_score_skips_a_rejected_name_tied_with_the_weakest_selected(
+    method: SignalNormalization,
+) -> None:
+    """원시값 5, 4, 4, 1 에서 2종목 선정: `c` 는 `b` 와 동점이지만 비선정이라 기준점이 되지 않는다.
+
+    기준점은 선정 최저 4 보다 **엄격히** 낮은 비선정 중 최고 1 과 평균 간격 기준 3 중 작은 값
+    1 이다. 강도 4 : 3 → 4/7·3/7 이고 `b` 를 보유한다. 동점 비선정을 기준점에 넣으면 기준점이
+    3 이 되어 2/3·1/3 이 되고, 평균 간격 하한이 없던 규칙에서는 `b` 가 비중 0 으로 빠졌다
+    (R4-P204-002).
+    """
+    raw = _labelled((5.0, 4.0, 4.0, 1.0))
+
+    table = _factor_score_weights(
+        raw, method=method, direction=FactorDirection.HIGH, selection_count=2
+    )
+
+    assert table == _approx_table({"a": 4 / 7, "b": 3 / 7})
+
+
+@pytest.mark.parametrize("method", _AFFINE_METHODS)
+def test_factor_score_lets_a_far_rejected_name_flatten_the_weights(
+    method: SignalNormalization,
+) -> None:
+    """원시값 3, 2, 1, −100 에서 3종목 선정: 컷 아래 종목이 멀면 기준점도 그 점수다(알려진 성질).
+
+    기준점은 `min(−100, 0) = −100` 이라 강도 103 : 102 : 101 로 거의 균등하다. 평균 간격 하한은
+    기준점이 선정 최저에 **너무 가까운** 쪽만 막고, 먼 쪽은 막지 않는다. PLAN 결정 5 가 이 성질을
+    기록한다.
+    """
+    raw = _labelled((3.0, 2.0, 1.0, -100.0))
+
+    table = _factor_score_weights(
+        raw, method=method, direction=FactorDirection.HIGH, selection_count=3
+    )
+
+    assert table == _approx_table({"a": 103 / 306, "b": 102 / 306, "c": 101 / 306})
+
+
+def test_factor_score_under_rank_without_ties_matches_rank_weighting() -> None:
+    """`rank` 정규화에 동점이 없으면 순위 간격이 균일해 강도가 N : … : 1 이 된다.
+
+    `weighting: rank` 와 같은 비중이다. PLAN 결정 5 가 이 성질을 기록한다(4차 리뷰 R4-P204-003).
+    """
+    raw = tuple((f"s{index:02d}", float(index) ** 3) for index in range(1, 11))
+
+    table = _factor_score_weights(
+        raw, method=SignalNormalization.RANK, direction=FactorDirection.HIGH, selection_count=4
+    )
+
+    assert table == _approx_table({"s10": 0.4, "s09": 0.3, "s08": 0.2, "s07": 0.1})
+
+
 def test_a_normalized_signal_missing_from_the_population_raises_instead_of_using_raw(
     monkeypatch,
 ) -> None:

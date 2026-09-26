@@ -31,6 +31,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     ComparisonOperator,
     EligibilityRule,
     EligibilityStep,
+    FactorDirection,
     PortfolioSide,
     RebalanceFrequency,
     SelectionMethod,
@@ -1016,39 +1017,139 @@ def test_a_zero_score_candidate_records_why_it_left_the_tape() -> None:
     assert lowest.selected is False and lowest.target_weight == 0.0
 
 
-def test_zscore_with_factor_score_weighting_is_a_compile_error() -> None:
-    """표준화 점수 × 점수 비례 가중은 실행을 막는다(P2-04 리뷰 P2-1).
+# --- P2-04 2차 리뷰 R2-P204-001: 점수 비례 가중의 방향 -------------------------------------
 
-    `_weight_scores` 가 `abs(composite_score)` 를 쓰므로 평균 0 중심의 zscore 위에서는
-    "신호가 세다" 가 아니라 "평균에서 멀다" 가 비중이 된다 — 횡단면 최악 종목이 최고 종목과
-    같은 최대 비중을 받는다. 부호 있는 점수의 비중 변환 규칙은 P2-07 이 설계한다.
+_FIVE_RAW = (("a", 1.0), ("b", 2.0), ("c", 3.0), ("d", 4.0), ("e", 5.0))
+
+
+def _directional_weights(
+    method: SignalNormalization, direction: FactorDirection, side: PortfolioSide
+) -> dict[str, float]:
+    """원시값 1~5 다섯 종목, `weighting: factor_score` 의 목표 비중(tape 에 없는 종목은 빠진다)."""
+    day = _NORMALIZATION_DAY
+    observations = tuple(_observation(day, security_id, value) for security_id, value in _FIVE_RAW)
+    spec = _spec()
+    long_short = side is PortfolioSide.LONG_SHORT
+    spec = replace(
+        spec,
+        factors=(replace(spec.factors[0], direction=direction),),
+        signal=replace(spec.signal, normalization=method),
+        portfolio=replace(
+            spec.portfolio,
+            side=side,
+            selection_count=2 if long_short else 5,
+            short_selection_count=2,
+            weighting=WeightingMethod.FACTOR_SCORE,
+        ),
+        risk=replace(spec.risk, max_name_weight=1.0, net_exposure=0.0 if long_short else 1.0),
+    )
+    frame = _compile(spec, observations).frames[0]
+    return {item.security_id: item.weight for item in frame.targets}
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+def test_factor_score_weights_the_preferred_name_most_when_lower_is_better(
+    method: SignalNormalization,
+) -> None:
+    """`direction: low` 에서 가장 좋은 종목(원시값이 가장 작은 `a`)이 가장 큰 비중을 받는다.
+
+    예전 `_weight_scores` 는 방향을 반영한 합성 점수의 **절댓값**을 비중으로 썼다. `rank` 에서
+    `direction: low` 의 합성 점수는 `-rank ∈ [-1, 0]` 이라 최선 종목이 정확히 0 이 되어 빠지고
+    최악 종목이 최대 비중을 받았다(R2-P204-001 경우 A). 원시값이 등간격이라 세 정규화 모두
+    "가장 나쁜 종목 대비 거리" 4:3:2:1:0 이 되어 같은 표가 나온다.
+    """
+    table = _directional_weights(method, FactorDirection.LOW, PortfolioSide.LONG_ONLY)
+
+    assert table == {
+        "a": pytest.approx(0.4),
+        "b": pytest.approx(0.3),
+        "c": pytest.approx(0.2),
+        "d": pytest.approx(0.1),
+    }
+
+
+_LONG_SHORT_EXPECTED = {
+    # `none` 의 롱 쪽은 모든 점수가 양수라 0 을 바닥으로 쓰고 1.1 의 원시값 비례(4:5)를 지킨다.
+    SignalNormalization.NONE: {"d": 4 / 18, "e": 5 / 18, "a": -4 / 14, "b": -3 / 14},
+    SignalNormalization.RANK: {"d": 3 / 14, "e": 4 / 14, "a": -4 / 14, "b": -3 / 14},
+    SignalNormalization.ZSCORE: {"d": 3 / 14, "e": 4 / 14, "a": -4 / 14, "b": -3 / 14},
+}
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+def test_factor_score_weights_the_strongest_short_most(method: SignalNormalization) -> None:
+    """`long_short` 공매도 쪽에서 가장 강한 숏(가장 낮은 점수 `a`)이 가장 큰 공매도 비중을 받는다.
+
+    예전에는 공매도 쪽도 `abs(composite_score)` 를 써서 `rank` 에서 가장 강한 숏의 점수가 정확히
+    0 이 되어 빠지고, 공매도 예산이 `b` 하나에 몰렸다(R2-P204-001 경우 B). 롱 쪽은 가장 좋은
+    `e` 가 가장 크다.
+    """
+    table = _directional_weights(method, FactorDirection.HIGH, PortfolioSide.LONG_SHORT)
+
+    assert table == {
+        security_id: pytest.approx(weight)
+        for security_id, weight in _LONG_SHORT_EXPECTED[method].items()
+    }
+    assert table["e"] > table["d"] > 0 > table["b"] > table["a"]
+
+
+def test_a_normalized_signal_missing_from_the_population_raises_instead_of_using_raw(
+    monkeypatch,
+) -> None:
+    """정규화 맵에서 빠진 값은 원시값으로 떨어지지 않고 진단과 함께 멈춘다(P2-04 결정 7).
+
+    지금은 정규화 모집단 술어와 `_score_candidate` 의 값 단위 탈락 술어가 같아서 도달 불가다.
+    그 전제가 깨졌을 때 `.get(key, raw)` 처럼 원시값으로 떨어지면 정규화 값과 원시값이 같은
+    가중 합에 섞인다. 조회를 되돌려도 CI 가 초록이던 것을 막는다(2차 리뷰 R2-P204-002).
+    """
+    from strategy_workbench.domain.portfolio import _compiler as compiler_module
+
+    original = compiler_module._cross_sectional_signals
+
+    def drop_one(*args, **kwargs):
+        signals = dict(original(*args, **kwargs))
+        signals.pop(("price.close", "c"))
+        return signals
+
+    monkeypatch.setattr(compiler_module, "_cross_sectional_signals", drop_one)
+    day = _NORMALIZATION_DAY
+    observations = tuple(_observation(day, security_id, value) for security_id, value in _FIVE_RAW)
+    spec = _spec()
+    spec = replace(spec, signal=replace(spec.signal, normalization=SignalNormalization.RANK))
+
+    with pytest.raises(ValueError, match="normalized signal missing") as raised:
+        _compile(spec, observations)
+
+    message = str(raised.value)
+    assert "security_id='c'" in message
+    assert "factor_id='price.close'" in message
+    assert "normalization='rank'" in message
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+@pytest.mark.parametrize("direction", list(FactorDirection))
+@pytest.mark.parametrize("side", list(PortfolioSide))
+def test_factor_score_weighting_is_valid_with_every_normalization(
+    method: SignalNormalization, direction: FactorDirection, side: PortfolioSide
+) -> None:
+    """점수 비례 가중은 정규화·방향·side 조합 어디서도 compile 을 막지 않는다.
+
+    1차 리뷰 반영에서 `zscore` × `factor_score` 를 error 로 막았지만 원인(`abs(composite_score)`)은
+    `rank` 의 `direction: low` 와 공매도 쪽에 남아 있었다(R2-P204-001). 비중이 선호 방향 거리를
+    쓰게 고친 뒤로는 막을 조합이 없다 — 위 두 방향 테스트가 세 정규화 모두에서 순서를 고정한다.
     """
     base = _spec()
-    incompatible = replace(
+    spec = replace(
         base,
-        portfolio=replace(base.portfolio, weighting=WeightingMethod.FACTOR_SCORE),
-        signal=replace(base.signal, normalization=SignalNormalization.ZSCORE),
+        factors=(replace(base.factors[0], direction=direction),),
+        signal=replace(base.signal, normalization=method),
+        portfolio=replace(base.portfolio, side=side, weighting=WeightingMethod.FACTOR_SCORE),
+        risk=replace(base.risk, net_exposure=0.0 if side is PortfolioSide.LONG_SHORT else 1.0),
     )
 
-    validation = validate_strategy(incompatible)
+    validation = validate_strategy(spec)
 
-    assert not validation.valid
-    (issue,) = [
-        item
-        for item in validation.issues
-        if item.code == "strategy.portfolio.weighting_normalization_incompatible"
-    ]
-    assert issue.path == "portfolio.weighting"
-    assert "got=" in issue.message and "allowed=" in issue.message
-
-    for allowed in (SignalNormalization.NONE, SignalNormalization.RANK):
-        relaxed = replace(incompatible, signal=replace(incompatible.signal, normalization=allowed))
-        assert validate_strategy(relaxed).valid, allowed
-    for allowed_weighting in (WeightingMethod.EQUAL, WeightingMethod.RANK):
-        relaxed = replace(
-            incompatible, portfolio=replace(incompatible.portfolio, weighting=allowed_weighting)
-        )
-        assert validate_strategy(relaxed).valid, allowed_weighting
+    assert validation.valid, [issue.code for issue in validation.issues]
 
 
 def test_score_threshold_compares_against_the_percentile_under_rank() -> None:

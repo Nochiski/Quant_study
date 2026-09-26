@@ -331,7 +331,6 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.factor.required",
         "strategy.factor.duplicate",
         "strategy.portfolio.liquidity_field",
-        "strategy.portfolio.weighting_normalization_incompatible",
         "strategy.risk.net_exposure",
         "strategy.risk.long_only_exposure",
         "strategy.risk.risk_field",

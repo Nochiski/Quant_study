@@ -848,7 +848,7 @@ def _target_weights(
     )
     reasons: dict[str, ExclusionReason] = {}
     long_scores = _weight_scores(
-        spec, ranked, observations, long_ids, reasons, checkpoint=checkpoint
+        spec, ranked, observations, long_ids, reasons, short=False, checkpoint=checkpoint
     )
     short_scores = _weight_scores(
         spec,
@@ -856,6 +856,7 @@ def _target_weights(
         observations,
         short_ids,
         reasons,
+        short=True,
         checkpoint=checkpoint,
     )
     unconstrained = _proportional_allocate(long_scores, long_budget, checkpoint=checkpoint)
@@ -931,25 +932,31 @@ def _weight_scores(
     selected: set[str],
     reasons: dict[str, ExclusionReason],
     *,
+    short: bool,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, float]:
     scores: dict[str, float] = {}
+    anchor = (
+        _preference_anchor(ranked, short=short)
+        if spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE
+        else 0.0
+    )
     for order, candidate in _checkpointed(enumerate(ranked, start=1), checkpoint):
         if candidate.security_id not in selected:
             continue
         if spec.portfolio.weighting is WeightingMethod.EQUAL:
             score = 1.0
         elif spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE:
-            magnitude = abs(candidate.composite_score or 0.0)
-            if magnitude == 0.0:
-                # 점수 비례 가중에서 0점은 배분받을 몫이 없다. 예전 `max(..., 1e-12)` 바닥값은
+            composite = candidate.composite_score or 0.0
+            strength = anchor - composite if short else composite - anchor
+            if strength <= 0.0:
+                # 점수 비례 가중에서 강도 0은 배분받을 몫이 없다. 예전 `max(..., 1e-12)` 바닥값은
                 # 0점 종목에 dust 비중(1e-12 / Σscore)을 주고 그것이 `target_weight != 0` 필터를
-                # 통과해 tape 에 남았다. `rank` 의 횡단면 최하위가 **항상 정확히 0.0** 이라
-                # 1.2 기본 설정에서 그 dust 가 상시 발생한다(P2-04 리뷰 P2-1). 비중 0으로 빼고
-                # 사유를 남겨 trace 가 "점수가 0이라 빠졌다"를 말하게 한다.
+                # 통과해 tape 에 남았다(P2-04 리뷰 P2-1). 비중 0으로 빼고 사유를 남겨 trace 가
+                # "점수 때문에 빠졌다"를 말하게 한다.
                 reasons[candidate.security_id] = ExclusionReason.SCORE_THRESHOLD
                 continue
-            score = magnitude
+            score = strength
         elif spec.portfolio.weighting is WeightingMethod.RANK:
             score = float(len(selected) - min(order, len(selected)) + 1)
         else:
@@ -965,6 +972,28 @@ def _weight_scores(
             context=f"security_id={candidate.security_id!r} weighting={spec.portfolio.weighting}",
         )
     return scores
+
+
+def _preference_anchor(ranked: list[CandidateDecision], *, short: bool) -> float:
+    """점수 비례 가중에서 강도를 재는 기준점이다. 롱은 바닥, 숏은 천장이다.
+
+    합성 점수는 방향을 이미 반영해서 **클수록 매수 선호**다(spec D4). 비중은 그 점수의
+    절댓값이 아니라 기준점에서 선호 방향으로 떨어진 거리에 비례해야 한다. 절댓값을 쓰면
+    `direction: low`(`rank` 에서 점수가 `-rank ∈ [-1, 0]`)와 공매도 쪽에서 최선 종목이 0,
+    최악 종목이 최대 비중을 받는다(P2-04 2차 리뷰 R2-P204-001).
+
+    - 롱 바닥은 `min(0, 프레임 eligible 후보 최저 점수)`, 숏 천장은
+      `max(0, 프레임 eligible 후보 최고 점수)` 다.
+    - 점수가 모두 0 이상이면(원시값 양수 팩터, `rank` + `high`) 롱 바닥이 0 이라 비중이
+      점수에 그대로 비례한다. 원시값 양수 팩터를 쓰는 1.1 문서의 롱 비중이 그대로다.
+    - 점수가 0 아래로 내려가면(`zscore`, `direction: low`) 가장 나쁜 eligible 점수가 바닥이
+      된다. 평행 이동에 불변이라 평균 0 중심인 `zscore` 에서도 순서가 뒤집히지 않는다.
+    - 기준점은 같은 프레임의 eligible 후보에서만 계산하므로 날짜를 가로지르지 않는다.
+    """
+    composites = [candidate.composite_score or 0.0 for candidate in ranked]
+    if short:
+        return max(0.0, max(composites, default=0.0))
+    return min(0.0, min(composites, default=0.0))
 
 
 def _proportional_allocate(

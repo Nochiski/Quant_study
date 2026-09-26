@@ -497,6 +497,15 @@ def _infer_contract(
                 )
             )
         value_type = true_value.value_type
+        if (
+            value_type is NodeValueType.SCALAR
+            and false_value.value_type is NodeValueType.SCALAR
+            and predicate.value_type is NodeValueType.BOOLEAN_SERIES
+        ):
+            # 가지가 상수여도 조건이 종목·날짜마다 갈리므로 값은 시계열이다(P2-07). boolean
+            # 출력 승격(`domain/strategy/_promotion.py`)이 이 규칙으로 `조건 ? 1 : 0` 을 숫자
+            # 점수로 만든다.
+            value_type = NodeValueType.NUMERIC_SERIES
         unit = true_value.unit
         history = max(item.minimum_history_sessions for item in dependencies)
     else:

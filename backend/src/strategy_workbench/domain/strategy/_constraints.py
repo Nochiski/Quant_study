@@ -339,6 +339,10 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.factor.required",
         "strategy.eligibility.rule_value",
         "strategy.factor.duplicate",
+        # 팩터 출력이 종목별 숫자 점수가 아니다(P2-07). 실행 경계의 방어 검사
+        # (`application/portfolio_design` `_reject_non_numeric_factor_outputs`)도 같은 코드를 낸다 —
+        # 한 사실에 코드 하나다.
+        "strategy.factor.output_type",
         "strategy.portfolio.liquidity_field",
         "strategy.risk.net_exposure",
         "strategy.risk.long_only_exposure",
@@ -387,7 +391,6 @@ EXPRESSION_CODES: frozenset[str] = frozenset(
         "strategy.expression.winsor_bounds",
         # 전략·포트폴리오 쪽에서만 나는 표현식 진단.
         "strategy.expression.parameter_type",
-        "strategy.expression.output_type",
         "strategy.expression.calculation_non_finite",
     }
 )

@@ -9,6 +9,10 @@ from strategy_workbench.domain.strategy._hydrate import (
     hydrate_saved_strategy,
     hydrate_strategy_document,
 )
+from strategy_workbench.domain.strategy._promotion import (
+    PROMOTION_NODE_PREFIX,
+    promotion_node_ids,
+)
 from strategy_workbench.domain.strategy._source import SourceFormat, source_hash_of
 from strategy_workbench.domain.strategy._upgrade import (
     LEGACY_SCHEMA_VERSION,
@@ -39,6 +43,7 @@ __all__ = [
     "SUPPORTED_SCHEMA_VERSIONS",
     "UPGRADE_STEPS",
     "NotALegacyDocumentError",
+    "PROMOTION_NODE_PREFIX",
     "UnknownSchemaVersionError",
     "HydrationStatus",
     "LEGACY_SHAPE_CODE",
@@ -54,6 +59,7 @@ __all__ = [
     "require_retired_schema_version",
     "is_upgradeable_document",
     "legacy_shape_hints",
+    "promotion_node_ids",
     "source_hash_of",
     "strip_retired_execution_settings",
     "upgrade_document_1_0",

@@ -32,6 +32,7 @@ from enum import Enum, StrEnum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 from ._models import CURRENT_SCHEMA_VERSION, StrategyIdentity, StrategySpec
+from ._promotion import promote_boolean_factor_outputs
 from ._upgrade import legacy_shape_hints
 
 # 새 문서로 받는 버전 집합. 현재 버전 상수의 owner는 `_models.py`다(모델 기본값과 같은 값).
@@ -143,7 +144,9 @@ def hydrate_strategy_document(
         )
     if not isinstance(spec, StrategySpec):  # pragma: no cover - defensive
         raise TypeError(f"hydrate produced {type(spec).__name__}, expected StrategySpec")
-    return StrategyHydration(HydrationStatus.OK, spec, ())
+    # boolean 팩터 출력은 canonical 그래프 끝에서 0/1 로 올린다(P2-07, spec D5). 문서 tree 는
+    # 그대로이고 spec 에만 노드가 붙는다.
+    return StrategyHydration(HydrationStatus.OK, promote_boolean_factor_outputs(spec), ())
 
 
 def hydrate_saved_strategy(document: Mapping[str, object]) -> StrategyHydration:

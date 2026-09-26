@@ -812,13 +812,19 @@ def _reject_non_numeric_factor_outputs(
     executable portfolio boundary accepts only numeric series: group/boolean values are not
     scores, and a scalar cannot distinguish securities. This check must inspect the compiled plan
     so it consumes the same metadata-derived contract as execution.
+
+    P2-07 부터 같은 판정을 compile 이 먼저 한다(`validate_strategy` 의
+    `strategy.factor.output_type`, boolean 은 hydrate 가 0/1 로 승격). 이 검사는 방어선으로 남고,
+    compile 을 통과한 문서에서 발화하면 결함이다 —
+    `tests/integration/test_compile_gate_property.py` 가 그 불변식을 지킨다.
     """
     issues = tuple(
         semantic_issue(
-            "strategy.expression.output_type",
+            "strategy.factor.output_type",
             f"factors.{factor_index}.graph.output_node_id",
-            "FactorSignal output must be numeric_series for portfolio/backtest execution: "
-            f"actual={output.output_type!r}",
+            "팩터 출력은 종목별 숫자 점수여야 합니다: "
+            f"factor_id={factor.factor_id!r} actual={output.output_type!r} "
+            "expected='numeric_series'",
             node_id=plan.output_node_id,
         )
         for factor_index, factor in enumerate(spec.factors)

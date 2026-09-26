@@ -6,8 +6,14 @@ from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from strategy_workbench.domain.factor.facade.expression import ParameterNode
+from strategy_workbench.domain.factor.facade.expression import (
+    FactorGraph,
+    FieldMetadata,
+    NodeValueType,
+    ParameterNode,
+)
 from strategy_workbench.domain.factor.facade.validation import (
+    FactorGraphValidation,
     FactorValidationSeverity,
     validate_factor_graph,
 )
@@ -34,6 +40,7 @@ from ._models import (
     composite_factors,
     inverse_risk_factor_id,
 )
+from ._promotion import promotion_node_ids
 
 
 class ValidationKind(StrEnum):
@@ -235,8 +242,49 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         )
 
 
+def _output_type_issue(
+    factor_index: int, factor_id: str, graph: FactorGraph, validation: FactorGraphValidation
+) -> ValidationIssue | None:
+    """팩터 출력이 종목별 숫자 점수(`numeric_series`)가 아니면 compile error (P2-07, spec D5).
+
+    실행 경계의 `_reject_non_numeric_factor_outputs` 와 같은 판정을 compile 로 앞당긴 것이다.
+    boolean 출력은 hydrate 가 이미 0/1 로 승격했으므로 여기 오는 boolean 은 승격이 막힌 경우
+    (예약 node_id 충돌, 또는 문서를 거치지 않은 JSON spec)뿐이다. group 출력은 필드 계약이 있어야
+    보인다 — 계약 없이 필드 노드는 숫자로 추론된다.
+    """
+    output = next(
+        (
+            contract
+            for contract in validation.node_contracts
+            if contract.node_id == graph.output_node_id
+        ),
+        None,
+    )
+    if output is None or output.value_type is NodeValueType.NUMERIC_SERIES:
+        return None
+    detail = f"factor_id={factor_id!r} actual={output.value_type.value!r} expected='numeric_series'"
+    reason = "팩터 출력은 종목별 숫자 점수여야 합니다"
+    if output.value_type is NodeValueType.BOOLEAN_SERIES:
+        taken = sorted({node.node_id for node in graph.nodes} & set(promotion_node_ids(factor_id)))
+        if taken:
+            reason = (
+                "참/거짓 출력을 0/1 점수로 바꾸는 데 쓰는 예약 node_id 를 이미 다른 노드가 쓰고 "
+                "있습니다. 그 노드의 이름을 바꾸세요"
+            )
+            detail = f"{detail} reserved={taken!r}"
+    return semantic_issue(
+        "strategy.factor.output_type",
+        f"factors.{factor_index}.graph.output_node_id",
+        f"{reason}: {detail}",
+        node_id=graph.output_node_id,
+    )
+
+
 def validate_strategy(
-    spec: StrategySpec, *, written_pointers: Collection[str] | None = None
+    spec: StrategySpec,
+    *,
+    written_pointers: Collection[str] | None = None,
+    fields: Collection[FieldMetadata] | None = None,
 ) -> StrategyValidation:
     """Semantic validation of a typed spec.
 
@@ -245,7 +293,13 @@ def validate_strategy(
     only emitted for pointers in this set; callers without a document pass nothing. A written
     value equal to the model default is silent too: canonical documents (JSON projection, legacy
     generated source, format conversion) spell out every default and must not warn.
+
+    `fields` 는 연결된 equity 어댑터가 제공하는 필드 계약 전부다(P2-07, spec D5). 주어지면 그래프
+    검증이 계약을 요구해 없는 `field_id` 가 `strategy.expression.field_missing` 으로 저장 전에
+    나고, 단위·그룹 타입도 실제 계약으로 추론한다. 어댑터가 없는 컨텍스트(CLI·테스트)는 None 을
+    넘기고 지금과 같이 계약 없이 검증한다.
     """
+    field_contracts = None if fields is None else tuple(fields)
     issues: list[ValidationIssue] = []
     written = frozenset(written_pointers or ())
     for applicability in FIELD_APPLICABILITY:
@@ -423,6 +477,8 @@ def validate_strategy(
         validation = validate_factor_graph(
             factor.graph,
             parameter_ids=tuple(parameter_ids),
+            fields=field_contracts or (),
+            require_field_metadata=field_contracts is not None,
         )
         issues.extend(
             semantic_issue(
@@ -438,6 +494,9 @@ def validate_strategy(
             )
             for factor_issue in validation.issues
         )
+        output_issue = _output_type_issue(factor_index, factor.factor_id, factor.graph, validation)
+        if output_issue is not None:
+            issues.append(output_issue)
 
     return StrategyValidation(
         valid=not any(issue.severity is ValidationSeverity.ERROR for issue in issues),

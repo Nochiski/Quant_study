@@ -6,6 +6,7 @@ from strategy_workbench.bootstrap._assistant import (
     ProviderAdapterFactory,
     build_assistant_services,
     is_missing_provider_sdk,
+    scripted_provider_factories,
 )
 from strategy_workbench.bootstrap._container import BackendContainer, build_container
 from strategy_workbench.bootstrap._file_guard import (
@@ -27,4 +28,5 @@ __all__ = [
     "build_container",
     "is_missing_provider_sdk",
     "restrict_to_current_user",
+    "scripted_provider_factories",
 ]

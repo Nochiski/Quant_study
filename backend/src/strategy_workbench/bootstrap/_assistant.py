@@ -33,6 +33,7 @@ import logging
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from functools import partial
 from pathlib import Path
 from threading import RLock
 from types import MappingProxyType
@@ -44,6 +45,7 @@ from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository imp
     SQLiteChatSessionRepository,
     SQLiteProviderProfileRepository,
 )
+from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import ScriptedLlmProvider
 from strategy_workbench.adapters.outbound.secrets_local.facade.store import (
     LocalFileProviderSecretStore,
     default_secrets_path,
@@ -80,6 +82,7 @@ __all__ = [
     "build_assistant_services",
     "is_missing_provider_sdk",
     "repository_root",
+    "scripted_provider_factories",
 ]
 
 # 공급자 adapter 하나를 만드는 함수. A-05·A-06이 지켜야 하는 계약은 둘이다.
@@ -187,6 +190,19 @@ def _is_importable(module: str) -> bool:
 # 제안 YAML은 편집기와 같은 형식으로만 들어온다. 어시스턴트는 JSON 문서를 제안하지 않는다
 # (도구 스키마가 `source_format: "yaml"`을 고정한다).
 _PROPOSAL_SOURCE_FORMAT = SourceFormat.YAML
+
+
+def scripted_provider_factories() -> Mapping[ProviderKind, ProviderAdapterFactory]:
+    """모든 공급자 종류를 대본 adapter로 채운 레지스트리 (테스트 전용, WORKFLOW B-05).
+
+    실 adapter를 **덮어쓴다**. 브라우저 e2e는 설정 화면에서 "Claude (Anthropic)"를 고르고 키를
+    넣는 사람의 경로를 그대로 지나야 하는데, 그 종류가 실 SDK에 매여 있으면 e2e가 네트워크와
+    진짜 키를 요구한다. 두 종류 모두 대본으로 두면 어느 쪽을 골라도 같은 대본이 돈다.
+
+    켜는 판단은 여기가 아니라 환경 변수를 읽는 `bootstrap/_http.py`가 한다 — 이 함수를 부르는
+    것 자체가 "가짜로 돌린다"는 선언이다.
+    """
+    return MappingProxyType({kind: partial(ScriptedLlmProvider, kind) for kind in ProviderKind})
 
 
 @dataclass(frozen=True)

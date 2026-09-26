@@ -3,13 +3,13 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P2-01,P2-02,P2-03,P2-04
-active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04]
-parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04]
-last_updated: 2026-09-26T23:21:15+09:00
+current_pr: P0-01,P1-01,P1-02,P2-01,P2-02,P2-03,P2-04,P2-05
+active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04, P2-05]
+parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04, P2-05]
+last_updated: 2026-09-26T23:27:01+09:00
 planned_prs: 28
 merged_prs: 0
-approved_prs: 4
+approved_prs: 5
 progress_percent: 0
 ---
 
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P2-01,P2-02,P2-03,P2-04` |
-| Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04` |
+| Current/next PR | `P0-01,P1-01,P1-02,P2-01,P2-02,P2-03,P2-04,P2-05` |
+| Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04, P2-05` |
 | Progress | `0 / 28 merged (0%)` |
-| Approved | `4 / 28` |
-| Aggregated at | `2026-09-26 23:21 KST` |
+| Approved | `5 / 28` |
+| Aggregated at | `2026-09-26 23:27 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -186,12 +186,12 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Acceptance | WORKFLOW P2-05 |
 | Non-goals | `availability`·`unit_mismatch`(P2-07), `risk.risk_factor_id`(P2-06), 업그레이더(P2-09), 프론트 실행 설정 UI(P3). **탈락 사유 i18n 표도 범위 밖이다** — trace 화면은 기존 12종을 포함해 사유를 번역 없이 원문 코드로 찍으므로 새 값도 빈칸 없이 렌더된다. 표를 만들면 기존 12종 표시 문구까지 바꾸는 변경이라 소비자 배선을 소유한 P3-01 몫이다(리드 승인, 2026-09-21) |
 | Branch/worktree | `feat/lang2-p2-05-eligibility` / `wt-lang2-p2-05` |
-| Base SHA | `dc8030d3` (`origin/feat/lang2-p2-04-normalization` tip, P2-03 `7ec8f337` 위 replay 판). 최초 구현은 옛 로컬 tip `bb8f3843` 위였고 `git rebase --onto dc8030d3 bb8f3843` 으로 옮겼다 — 코드 8커밋은 충돌 없이 replay, PLAN 커밋만 P2-04 행·frontmatter 에서 충돌해 새 base 의 P2-04 행을 취했다 |
-| Head SHA | `77e80471` 모델·연산자·2-pass·탈락 사유 → `1d722b07` `top_*` 값 검증 → `d7e5e8a9` 계약 산출물 재생성 → `c165e616` 비유한 cut 크기 거절 → `8a8e9e15` 프론트 enum 단언 → `275a248e` 이 패킷 → `720d0eb3` 주석 → `2d1d185d` validator exhaustive 리팩터 |
-| Diff stat | 실측(`git diff --numstat`, 생성 산출물 4파일·PLAN 제외) **13파일 · +690 / −34** — src 7파일 +256/−25, test 6파일 +434/−9. **12절 상한(600줄·10파일)을 넘는다**(사유는 아래 제약사항) |
+| Base SHA | `35089901` (`feat/lang2-p2-04-normalization` tip, P2-03 APPROVED `0dd740e8` 위 replay + 1~5차 리뷰 반영). `git rebase --onto a823ebc8 dc8030d3` 로 옮긴 뒤 P2-04 의 문서 커밋을 따라 `git rebase --onto 41c92616 a823ebc8`, P2-04 2차 리뷰 반영 뒤 `git rebase --onto a9f4ed93 41c92616`, 3차 리뷰 반영 뒤 `git rebase --onto 350e8a40 a9f4ed93`, 4차 리뷰 반영 뒤 `git rebase --onto 34b20ef5 350e8a40`, 5차 리뷰 반영 뒤 `git rebase --onto 35089901 34b20ef5` 로 옮겼다. 뒤의 다섯 번은 PLAN 만 충돌했고 코드 변경분은 바이트 단위로 같다 — 코드 커밋 중 첫 커밋만 `_compiler.py` 에서 충돌했다(P2-04 의 `_signal_value` 와 이 PR 의 `_apply_cross_sectional_eligibility` 가 같은 자리에 추가된 최상위 함수라 둘 다 남김). PLAN 커밋 3개는 새 base 구조 위에 P2-05 패킷·행·리뷰 기록만 얹었다. 그 이전 이력: 최초 구현 `bb8f3843` 위 → `dc8030d3` 위 |
+| Head SHA | `a35c1e40` 모델·연산자·2-pass·탈락 사유 → `dc4f14fc` `top_*` 값 검증 → `bcba9353` 계약 산출물 재생성 → `22705f6b` 비유한 cut 크기 거절 → `e1c0adda` 프론트 enum 단언 → `3ca17587` 이 패킷 → `765b3815` 주석 → `377aac3e` validator exhaustive 리팩터 → `1358fd4c` 패킷 갱신 → `641c6f3b` 1차 리뷰 반영(동점 역순 단언·필드 조회 통일) → `efd6a768` 리뷰 기록 → `57731080` 시각 기준선 재생성(계약 해시 변경, `strategy-workbench.png` 4장) → `8587d413` P2-04 3차 리뷰 재현 테스트(`top_count` × `factor_score`) → 이 PLAN 상태 갱신 커밋 |
+| Diff stat | 실측(`git diff --numstat`, 생성 산출물 4파일·PLAN 제외) **13파일 · +810 / −35** — src 6파일 +250/−23, test 7파일(backend 6 + frontend 1) +560/−12. 1차 리뷰 때 690 은 반영 커밋의 +46줄이 빠진 값이었고(2차 리뷰 R2-P205-001), 2차 APPROVE 때 736 에 P2-04 3차 리뷰 재현 테스트 `8587d413`(+71)와 첫 커밋의 enum 개명 한 줄(+3/−1)이 더해졌다. **12절 상한(600줄·10파일)을 넘는다**(사유는 아래 제약사항) |
 | Focused tests | `uv run pytest tests/domain/test_eligibility_cross_section.py tests/domain/test_strategy_constraints.py tests/domain/test_portfolio_pipeline.py tests/domain/test_strategy_schema.py tests/integration/test_openapi_document_is_current.py -q` |
-| 제약사항 | **12절 상한 초과(600줄·10파일 → 690줄·13파일), 분할하지 않는다.** 13파일 중 5개(`test_portfolio_pipeline`·`test_strategy_diff`·`test_strategy_trace_preflight`·`test_truthful_pipeline`·`facade/specification.py`)는 enum 개명이 강제한 1~2줄 import 수정이라 떼어 낼 단위가 없고, 신규 테스트 373줄은 12절이 "test 는 구현과 같은 PR"이라 분리할 수 없다. 나머지 src 변경(모델·컴파일러·validator)은 한 커밋 단위로 같이 움직여야 컴파일된다. **e2e 미실행** — 리드 신호 뒤 잠금 래퍼로 1회 돌린다(AI 스택이 잠금·포트를 먼저 쓴다). 옛 base `bb8f3843` 에서 관측했던 backend 3 failed 와 `typecheck:e2e` 3건 실패, 1.1 스냅샷 기준선 불일치는 **전부 옛 base 산물이고 P2-03 최종 tip `7ec8f337`(#183)이 해소했다** — 새 base `dc8030d3` 위에서는 backend 1587 passed / 0 failed, `typecheck:e2e` 통과다 |
-| Full gate | base `dc8030d3` 재배치 후 실측 — backend `uv run pytest -q`(1587 passed / 0 failed) · `ruff check src tests` · `ruff format --check`(변경 12파일 clean) · `pyright` 0 errors · `export_openapi.py`·`export_runtime_schema.py` 재실행 diff 0 / frontend `npm ci`·`npm run api:generate` diff 0·`typecheck`·`typecheck:e2e`·`lint`·`test`(639, 57파일)·`build` / e2e 는 리드 신호 후 실행 예정(미실행) |
+| 제약사항 | **12절 상한 초과(600줄·10파일 → 810줄·13파일), 분할하지 않는다.** 13파일 중 5개(`test_portfolio_pipeline`·`test_strategy_diff`·`test_strategy_trace_preflight`·`test_truthful_pipeline`·`facade/specification.py`)는 enum 개명이 강제한 1~2줄 import 수정이라 떼어 낼 단위가 없고, 신규 테스트 373줄은 12절이 "test 는 구현과 같은 PR"이라 분리할 수 없다. 나머지 src 변경(모델·컴파일러·validator)은 한 커밋 단위로 같이 움직여야 컴파일된다. e2e 는 기준선 재생성과 함께 잠금 러너로 돌렸다(`57731080`). 옛 base `bb8f3843` 에서 관측했던 backend 3 failed 와 `typecheck:e2e` 3건 실패, 1.1 스냅샷 기준선 불일치는 **전부 옛 base 산물이고 P2-03 최종 tip `7ec8f337`(#183)이 해소했다** — 새 base `dc8030d3` 위에서는 backend 1587 passed / 0 failed, `typecheck:e2e` 통과다 |
+| Full gate | base `dc8030d3` 시절 실측 — backend `uv run pytest -q`(1587 passed / 0 failed) · `ruff check src tests` · `ruff format --check`(변경 12파일 clean) · `pyright` 0 errors · `export_openapi.py`·`export_runtime_schema.py` 재실행 diff 0 / frontend `npm ci`·`npm run api:generate` diff 0·`typecheck`·`typecheck:e2e`·`lint`·`test`(639, 57파일)·`build`. base `35089901` 재배치 뒤 게이트 전체와 `npm run test:e2e` 는 이 PLAN 커밋을 포함한 push tip 에서 다시 돌려 PR #187 댓글에 기록한다 |
 
 P2-05 결정 4건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
 
@@ -487,7 +487,7 @@ Phase exit:
 | [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `APPROVED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 APPROVE(P3 4건 후속 커밋). 커밋 12개(1차 5 + 1차 리뷰 반영 6 + 2차 리뷰 반영 1, history 재작성 없음). 게이트: pytest·ruff·pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest 639·build. `database/tests` 는 base `fff33fd` 와 같은 41 failed/1268 passed/33 errors(기존 실패, 이 PR 무관) |
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `APPROVED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2` · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 반영, 2차 **APPROVE**(돌연변이 재실행 2 failed 확인, P3-07 이탈 타당). P2 둘 다 `_record_codec.py`의 은퇴 row 읽기 5줄이다: 1.1 row 테스트 0건(그 가지를 `raise`로 바꿔도 초록), 미지 `schema_version`이 fail-closed에서 silent 현재 버전 해석으로 바뀜. 게이트는 아래 Full gate |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `APPROVED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · 1차 → `28003cf1` · 2차 → `2a10798d` · 3차 → `70cfdffa` · 4차 → `22636fc3` · 5차 **APPROVE**(P3 R5-P204-001 단조성: 기준점 후보 비교를 `<=` 로, 리드 지시로 즉시 반영). 게이트는 push tip 에서 재실행(PR 댓글) |
-| [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `SELF_CHECK` | 구현 완료·게이트 통과, 리뷰 대기. 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility`, base `dc8030d3`. 게이트: pytest 1587 passed / 0 failed · ruff · `ruff format --check`(변경 파일 clean) · pyright 0 · `export_openapi.py`·`export_runtime_schema.py` diff 0 · frontend `api:generate` diff 0·typecheck·`typecheck:e2e`·lint·Vitest 639·build · e2e: 리드 신호 후 잠금 아래 실행 예정(미실행) |
+| [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `APPROVED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility` · 1차 REQUEST_CHANGES(P2 2·P3 2) → `641c6f3b`·`efd6a768` · 2~5차 **APPROVE**. 3차 재배치 때 첫 커밋 `a35c1e40` 에 P2-04 새 테스트 한 줄의 enum 개명을 넣었고, P2-04 3차 재현 테스트 `8587d413` 를 더했다. P2-04 5차 반영 tip `35089901` 위로 rebase(코드 변경분 동일). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `WAITING` | — |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `WAITING` | — |
 | [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `WAITING` | — |
@@ -574,6 +574,10 @@ Phase exit:
 | `P2-04` | `review_lang2_p2_0405` | 4 | `REQUEST_CHANGES` | P2 2 · P3 2. 3차 결함은 닫힘. **R4-P204-001(P2)**: 기준점이 컷 아래 최고뿐이라 원시값 3, 2, 1+2⁻⁵², 1 에서 선정 `c` 가 `7.4e-17` dust 비중, 폐기된 결정 6 의 "dust 없음" 문장과 모순. **R4-P204-002(P2)**: `if below:` 제거·`<=` 돌연변이가 351건 전부 통과(등간격 입력만 있고 컷 동점 없음). R4-P204-003(P3): `rank` 무동점에서 채택 규칙이 `weighting: rank` 와 같고, 컷 아래가 없으면 선정 2 는 항상 2:1. R4-P204-004(P3): ±1e308 overflow 는 `_finite` 로 요란하게 실패(기록만). 리드 결정 (a)안 반영 |
 | `P2-04` | `review_lang2_p2_0405` | 5 | `APPROVE` | 4차 blocking 2건 닫힘. P3 R5-P204-001: 컷 동점에서 비중이 불연속이라 자기 점수가 올라 자기 비중이 줄 수 있다(1.0, 1.0, 1.02, −4 선정 2 에서 `a` .499 → .333). 평균 간격 하한이 생겨 엄격 비교가 더는 필요 없으므로 `<=` 로 바꿨다(리드 지시) |
 | `P2-05` | `review_lang2_p2_05` | 1 | `REQUEST_CHANGES` | P2 2 · P3 2. 의미 계약·look-ahead·SDK 잔재·trace 렌더 경로는 전부 확인됨. **P2-1**: 동점 결정성 테스트가 입력 순서=기대 순서라 파이썬 안정 정렬이 타이브레이커를 대신해, 정렬 2차 키를 지운 돌연변이가 15 passed 로 통과했다(미충족 acceptance). **P2-2**: PR 크기 기록이 실측과 달랐다(350줄·8파일로 적었으나 실측 690줄·13파일로 12절 상한 초과) — 분할은 요구하지 않고 기록·사유만. **P3 2**: `top_percent` 가 모집단을 0으로 만드는 쪽에 진단 없음(P2-07 backlog), 1-pass dict / 2-pass 선형 탐색 조회 불일치. 반영: 같은 픽스처를 `reversed()` 로 한 번 더 컴파일해 동일 결과 단언(돌연변이 재현으로 검증), 2-pass 조회를 관측당 dict 로 통일 + 중복 `field_id` 회귀 테스트, PLAN·PR 본문 크기 기록 정정, WORKFLOW P2-07 에 backlog 한 줄 |
+| `P2-05` | `review_lang2_p2_0405_r2` | 2 | `APPROVE` | 1차 P2 2건·P3-2 가 되돌리기 실험으로 닫힘 확인. rebase 뒤 코드 변경분이 바이트 단위로 같고 기준선 해시(`41290101…`/`e637846e…`)가 새 enum 값 두 개로 설명된다. P3 3건: R2-P205-001 크기 실측 690 → 736(반영), R2-P205-002 기준선 커밋 메시지가 `eligibility_rank_cut` 을 runtime schema 변화 원인으로 적음(그 값은 OpenAPI 에만 있다, 커밋 메시지라 기록만), R2-P205-003 테스트 주석의 문턱 값 `> 3` 이 코드 `2.0` 과 다름(판별력 무관, 기록만) |
+| `P2-05` | `review_lang2_p2_0405` | 3 | `APPROVE` | P2-04 2차 반영 tip 위 재배치 확인. 코드 커밋 range-diff 는 문맥 줄 두 개만 다르고 `backend/src`·`backend/tests`·`frontend/src` 변경분이 바이트 동일, 기준선 해시 불변. P2-04 R3-P204-001 이 이 PR 의 `top_count: 1` 로 재현돼 재현 테스트 `8587d413` 을 더했다 |
+| `P2-05` | `review_lang2_p2_0405` | 4 | `APPROVE` | src 는 이전 APPROVE본과 바이트 동일, 재현 테스트 `8587d413` 는 균등 대체를 지우면 6건 red 로 판별력 있음. 첫 커밋의 enum 개명 한 줄은 P2-05 가 enum 을 바꾸므로 필요한 변경으로 확인. 해시 불변 |
+| `P2-05` | `review_lang2_p2_0405` | 5 | `APPROVE` | 4차본과 src 바이트 동일, 해시 불변. P2-04 R5 반영(`<=`) 뒤 재배치 |
 
 ## 검증 기록
 
@@ -587,6 +591,21 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-26 — P2-05 5차 리뷰 APPROVE. P2-04 5차 반영(`<=`) tip `35089901` 위로 다시 옮겼다.
+  PLAN 만 충돌했고 코드 커밋 13개는 range-diff 가 모두 `=` 다.
+- 2026-09-26 — P2-05 4차 리뷰 APPROVE. P2-04 4차 리뷰 반영 tip `34b20ef5` 위로 다시 옮겼다.
+  PLAN 만 충돌했고 코드 커밋 13개는 range-diff 가 모두 `=` 다.
+- 2026-09-26 — P2-05 3차 리뷰 APPROVE. P2-04 3차 리뷰 반영 tip `350e8a40` 위로 다시 옮겼다.
+  PLAN 만 충돌했다. 코드는 한 줄이 다르다 — P2-04 3차 테스트가 쓰는
+  `ComparisonOperator.GREATER_THAN` 을 이 PR 의 첫 커밋(`a35c1e40`, enum 개명)이 다른 소비자와
+  함께 `EligibilityOperator` 로 바꾼다. P2-04 R3-P204-001 이 `top_count: 1` +
+  `low` 로 재현되므로 그 문서를 고정하는 테스트 `8587d413` 을 더했다(P2-04 2차 규칙에서 6건 red).
+  크기 실측은 810줄·13파일이다(첫 커밋의 개명 한 줄 포함).
+- 2026-09-26 — P2-05 2차 리뷰 APPROVE. P2-04 2차 리뷰 반영 tip `a9f4ed93` 위로 다시 옮겼다.
+  코드 변경분은 바이트 단위로 같고 PLAN 만 충돌했다. 크기 실측을 736줄·13파일로 정정했다
+  (R2-P205-001). 처음 `a823ebc8` 위로 옮길 때의 코드 충돌은 `_compiler.py` 한 곳이었고
+  P2-04 `_signal_value` 와 P2-05 `_apply_cross_sectional_eligibility` 를 둘 다 남겼다. 새 계약
+  해시로 워크벤치 시각 기준선 4장을 재생성했다(`57731080`).
 - 2026-09-26 — P2-04 5차 리뷰 APPROVE. 비차단 P3 R5-P204-001 을 리드 지시로 반영했다. 기준점 후보
   비교를 `<=` 로 바꿔 선정 최저와 동점인 비선정 종목도 후보에 넣었다. 컷 동점 기대값을 2/3·1/3 으로
   고치고 리뷰어 반례와 자기 점수 단조성 퍼즈를 더했다. 결정 5·SoT 의 규칙 문장을 "이하인"으로 고쳤다.

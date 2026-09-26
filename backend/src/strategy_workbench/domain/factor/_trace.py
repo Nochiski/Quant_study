@@ -24,6 +24,7 @@ from ._evaluation import (
     _evaluation_from_computed,
     _indices_by_security,
     _noop_checkpoint,
+    _noop_progress,
     values_from_indices,
 )
 from ._nodes import (
@@ -130,6 +131,7 @@ def evaluate_factor_graph_with_trace(
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     selection: TraceSelection | None = None,
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    progress: Callable[[float], None] = _noop_progress,
 ) -> tuple[FactorEvaluation, FactorTrace]:
     """Evaluate once and derive both the executable output and bounded debug projection.
 
@@ -141,7 +143,11 @@ def evaluate_factor_graph_with_trace(
         graph, observations, selection, checkpoint=checkpoint
     )
     computed = _compute_nodes(
-        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+        graph,
+        observations=observations,
+        parameters=parameters,
+        checkpoint=checkpoint,
+        progress=progress,
     )
     return (
         _evaluation_from_computed(

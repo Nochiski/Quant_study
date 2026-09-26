@@ -11,7 +11,10 @@ export {
   type AssistantStreamRejection,
 } from "./assistant-stream";
 export type {
+  Assistant409Response,
   AssistantEventEnvelopeView,
+  AssistantNotFoundResponse,
+  AssistantUnprocessableResponse,
   ChatMessageView,
   ChatRole,
   CreateProviderProfileRequestWritable,

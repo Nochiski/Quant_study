@@ -27,11 +27,8 @@ import {
   revisionDraftId,
   saveStatusText,
   saveStatusTone,
-  assistantDocumentRef,
-  assistantProposalOf,
-  useAssistantTurnContext,
   useApplyAssistantProposal,
-  useApplyProposalThenBacktest,
+  useStrategyAssistant,
   useAutosave,
   useCompileDocument,
   useExecutionPlans,
@@ -246,31 +243,14 @@ export const StrategyRevisionPage = () => {
       onUpgradeEditorReady,
     ],
   );
-  // 세션이 붙은 문서는 타자마다 바뀌지 않는다 — 문서 텍스트가 아니라 이 세 값에만 묶는다.
-  const assistantDocumentRefValue = useMemo(
-    () =>
-      assistantDocumentRef(
-        document.strategyId,
-        document.baseRevision,
-        serverDraftId,
-      ),
-    [document.strategyId, document.baseRevision, serverDraftId],
-  );
-  // 턴을 시작하는 순간의 문서·실행 설정을 읽는 손잡이. commit된 값을 비추는 ref라 사이드바에 넘기는
-  // 함수는 그대로 두고도 늘 지금 화면의 값을 읽는다(`.claude/rules/frontend-react-effects.md`).
-  // 턴은 세션 생성 왕복 뒤에 시작될 수 있다. 텍스트는 그 순간 편집기에서 직접 읽는다.
-  const readAssistantContext = useAssistantTurnContext(
-    document,
-    proposalApply.readSource,
-    runSettings.requestOptions,
-  );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
-  // "적용 후 백테스트"는 적용 → 검증 → 실행을 한 동작으로 잇는다(WORKFLOW B-04).
-  const proposalBacktest = useApplyProposalThenBacktest(
-    proposalApply,
-    document,
-    { canRun, run: runBacktest },
-  );
+  // 어시스턴트 사이드바 배선(문서 참조·턴 컨텍스트·"적용 후 백테스트"·제안 카드 동작). 두 전략 화면이
+  // 같은 훅을 써서 한쪽만 콜백을 잃지 않는다(Phase B 감사 NB-8).
+  const strategyAssistant = useStrategyAssistant(proposalApply, document, {
+    draftId: serverDraftId,
+    environment: runSettings.requestOptions,
+    backtest: { canRun, settling: backtest.settling, run: runBacktest },
+  });
   const selectSymbol = useCallback(
     (pointer: string): void => {
       outline.requestSourceReveal(pointer);
@@ -455,7 +435,7 @@ export const StrategyRevisionPage = () => {
                 읽히는 편이 나아 그대로 둔다(B-04 리뷰 P3). */}
             <ProposalApplyFeedback
               apply={proposalApply}
-              chain={proposalBacktest}
+              chain={strategyAssistant.chain}
             />
             <UpgradeBanner
               upgrade={documentUpgrade}
@@ -502,17 +482,9 @@ export const StrategyRevisionPage = () => {
         }
         assistant={({ close }) => (
           <AssistStrategySidebar
-            documentRef={assistantDocumentRefValue}
-            readContext={readAssistantContext}
-            onPreviewProposal={(action) =>
-              proposalApply.preview(assistantProposalOf(action))
-            }
-            onApplyProposal={(action) =>
-              proposalApply.apply(assistantProposalOf(action))
-            }
-            onApplyProposalAndBacktest={(action) =>
-              proposalBacktest.applyThenBacktest(assistantProposalOf(action))
-            }
+            documentRef={strategyAssistant.documentRef}
+            readContext={strategyAssistant.readContext}
+            {...strategyAssistant.proposalHandlers}
             // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
             // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
             onClose={close}

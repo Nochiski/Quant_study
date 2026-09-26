@@ -46,6 +46,7 @@ export { DiagnosticsPanel } from "./ui/diagnostics-panel";
 export {
   decideBacktestSource,
   gateBacktestSourceWithFactorPlans,
+  isBacktestSettling,
   type BacktestSourceDecision,
 } from "./model/backtest-source";
 export {
@@ -94,6 +95,12 @@ export {
   assistantTurnContext,
 } from "./model/assistant-turn-context";
 export { useAssistantTurnContext } from "./model/use-assistant-turn-context";
+export {
+  useStrategyAssistant,
+  type AssistantProposalHandlers,
+  type StrategyAssistant,
+  type StrategyAssistantOptions,
+} from "./model/use-strategy-assistant";
 export {
   assistantProposalOf,
   useApplyAssistantProposal,

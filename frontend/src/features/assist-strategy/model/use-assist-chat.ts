@@ -2,8 +2,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 
 import {
+  ASSISTANT_TURN_IN_PROGRESS,
   AssistantRequestError,
   assistantChatReducer,
+  assistantRejectionMessage,
   assistantSessionKey,
   assistantTurn,
   assistantSessionQuery,
@@ -24,8 +26,6 @@ import {
   type SessionView,
   type TurnContextPayload,
 } from "../../../entities/assistant";
-import { t } from "../../../shared/config";
-import { TURN_IN_PROGRESS, assistRejection } from "./assist-copy";
 import { assistTranscript, type AssistTranscriptEntry } from "./transcript";
 
 /**
@@ -247,18 +247,18 @@ export const useAssistChat = ({
           // 이미 도는 턴이 있다는 답은 배너가 아니라 이력으로 따라잡을 신호다(spec D7).
           if (
             error instanceof AssistantRequestError &&
-            error.code === TURN_IN_PROGRESS
+            error.code === ASSISTANT_TURN_IN_PROGRESS
           ) {
             // 이 질문은 서버에 닿지 않았다. 입력칸으로 되돌리지 않으면 친 문장이 어디에도 남지
             // 않고, 사용자는 진행 중인 **다른** 턴의 답을 자기 질문의 답으로 읽는다(리뷰 P2).
             setDraftRestore({ text, nonce: Date.now() });
-            setRejection(t("assistant.chat.turnInProgress"));
+            setRejection(assistantRejectionMessage(error));
             void queryClient.invalidateQueries({
               queryKey: assistantSessionKey(id),
             });
             return;
           }
-          setRejection(assistRejection(error));
+          setRejection(assistantRejectionMessage(error));
         },
       },
     );
@@ -282,7 +282,7 @@ export const useAssistChat = ({
         },
         onError: (error) => {
           setPendingPrompt(null);
-          setRejection(assistRejection(error));
+          setRejection(assistantRejectionMessage(error));
         },
       },
     );
@@ -294,7 +294,7 @@ export const useAssistChat = ({
       { sessionId, turnId: running.turnId },
       {
         onSuccess: (turn) => dispatch({ type: "turn", turn }),
-        onError: (error) => setRejection(assistRejection(error)),
+        onError: (error) => setRejection(assistantRejectionMessage(error)),
       },
     );
   };

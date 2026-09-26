@@ -256,13 +256,17 @@ def create_app(
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
-    allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
+    allowed_origins: tuple[str, ...],
 ) -> FastAPI:
     """Compose the HTTP surface; the assistant routes appear only when their services arrive.
 
     어시스턴트 서비스 셋은 항상 같이 만들어진다 — 하나를 세우는 컨테이너는 셋을 다 세운다.
     `/api/v1/assistant`를 건드리지 않는 기존 테스트는 셋 다 넘기지 않고, 그러면 라우트가
     "있는데 실패"가 아니라 아예 없는 상태가 된다.
+
+    `allowed_origins`는 기본값을 두지 않는다. 기본 origin의 owner는 조립 지점
+    (`bootstrap/_http.py`의 `DEFAULT_ALLOWED_ORIGINS`)이고, 여기에 같은 리터럴을 또 두면 개발 서버
+    포트를 옮길 때 한쪽만 바뀐다(Phase B 감사 NB-7).
     """
     app = FastAPI(
         title="Quant Strategy Workbench API",

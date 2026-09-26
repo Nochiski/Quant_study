@@ -112,9 +112,11 @@ Faking the model rather than the HTTP responses is deliberate: intercepting the 
 browser would take SSE framing, sequence numbers, the turn runner and server-side proposal
 re-validation out of the gate. Only the model is fake here.
 
-The script picks a scenario from a keyword in the question (`_scenarios.py`): 제안 asks for a tool
-call followed by a proposal, 검색 shows search activity and then three rejected proposals, 천천히
-streams a long answer so a mid-turn reload exercises resume, and anything else gets a short answer.
+The script picks a scenario from a keyword in the question (`_scenarios.py`): 창을 줄 proposes a
+shorter momentum window, so the factor graph changes and the page has to fetch an uncached factor
+plan before "apply then backtest" can run; 제안 asks for a tool call followed by a proposal that only
+changes the title; 검색 shows search activity and then three rejected proposals; 천천히 streams a
+long answer so a mid-turn reload exercises resume; anything else gets a short answer.
 
 Assistant history and secrets go to the same isolated runtime directory as the strategy database
 (`e2e/runtime.ts`); without that the run would write into the developer's real chat history and

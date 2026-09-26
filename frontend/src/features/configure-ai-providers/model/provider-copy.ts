@@ -1,5 +1,8 @@
 import {
   AssistantRequestError,
+  assistantRejectionMessage,
+  isAssistantRejectionCode,
+  type AssistantRejectionCode,
   type ProbeFailure,
   type ProviderKind,
 } from "../../../entities/assistant";
@@ -40,18 +43,11 @@ const PROBE_FIELD: Record<ProbeFailure, ProviderField> = {
   unknown: "form",
 };
 
-const CODE_MESSAGE: Record<string, MessageKey> = {
-  "assistant.base_url_rejected": "assistant.error.base_url_rejected",
-  "assistant.provider_not_installed": "assistant.error.provider_not_installed",
-  "assistant.no_active_provider": "assistant.error.no_active_provider",
-  "assistant.provider_secret_missing":
-    "assistant.error.provider_secret_missing",
-  "assistant.session.not_found": "assistant.error.not_found",
-  "assistant.turn.not_found": "assistant.error.not_found",
-  "assistant.provider.not_found": "assistant.error.not_found",
-};
-
-const CODE_FIELD: Record<string, ProviderField> = {
+/**
+ * 거부 코드마다 사유를 걸 입력칸. 문구는 entity의 공용 표가 소유하고(Phase B 감사 NB-1), 여기에는
+ * 설정 폼만 아는 칸 배치만 둔다. 없는 코드는 폼 전체에 건다.
+ */
+const CODE_FIELD: Partial<Record<AssistantRejectionCode, ProviderField>> = {
   "assistant.base_url_rejected": "baseUrl",
   "assistant.provider_not_installed": "kind",
 };
@@ -73,10 +69,11 @@ export const providerRejection = (error: unknown): ProviderRejection => {
       message: probeFailureMessage(failure),
     };
   }
-  const key = error.code === undefined ? undefined : CODE_MESSAGE[error.code];
   return {
     field:
-      (error.code === undefined ? undefined : CODE_FIELD[error.code]) ?? "form",
-    message: t(key ?? "assistant.error.unknown"),
+      (isAssistantRejectionCode(error.code)
+        ? CODE_FIELD[error.code]
+        : undefined) ?? "form",
+    message: assistantRejectionMessage(error),
   };
 };

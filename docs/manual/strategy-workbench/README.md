@@ -361,7 +361,9 @@ YAML을 직접 치지 않아도 된다. `Form`과 `Graph` 탭에서 고친 값�
 - 실제 공급자를 부르지 않고 화면 흐름만 확인하려면 개발용 대본 공급자를 쓴다
   (`frontend/e2e/README.md`의 "AI assistant scenarios"). 실제 공급자로 한 번 확인하는 절차는
   [AI 어시스턴트 WORKFLOW](../../planning/ai-assistant/WORKFLOW.md)의 A-07 절
-  (`STRATEGY_WORKBENCH_LIVE_SMOKE=1` smoke)과 그 아래 "Phase A exit" 항목에 있다.
+  (`STRATEGY_WORKBENCH_LIVE_SMOKE=1` smoke, `backend/scripts/assistant_live_smoke.py`)과 그 아래
+  "Phase A exit" 항목에 있다. 이 변수를 `1`로 주지 않으면 스크립트는 공급자를 부르지 않고
+  끝나므로, 출력에 공급자별 확인 항목이 나왔는지 본다.
 
 ## 10. 자주 쓰는 단축키
 

@@ -145,6 +145,8 @@ def _app_with_backtests(container: BackendContainer, backtests: BacktestRunServi
         portfolio_design=container.portfolio_design,
         strategy_traces=container.strategy_traces,
         backtest_runs=backtests,
+        # TestClient는 브라우저가 아니라 CORS를 거치지 않는다 — 허용할 origin이 없다.
+        allowed_origins=(),
     )
 
 

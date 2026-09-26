@@ -9,8 +9,9 @@
  * 브라우저에서 가로채지 않는 이유는, 그러면 SSE 프레이밍·sequence·턴 러너·제안 재검증이 전부
  * 검사 밖으로 나가기 때문이다. 여기서 가짜인 것은 모델 하나뿐이고 나머지 경로는 전부 진짜다.
  *
- * 대본은 질문에 든 낱말로 고른다(`_scenarios.py`의 `SCENARIO_KEYWORDS`): "제안"이면 도구 호출 후
- * 제안, "검색"이면 검색 활동 후 검증 3회 실패, "천천히"면 긴 스트리밍, 그 밖이면 짧은 답변이다.
+ * 대본은 질문에 든 낱말로 고른다(`_scenarios.py`의 `SCENARIO_KEYWORDS`): "창을 줄"이면 팩터 창을
+ * 줄인 제안, "제안"이면 도구 호출 후 제목만 바꾼 제안, "검색"이면 검색 활동 후 검증 3회 실패,
+ * "천천히"면 긴 스트리밍, 그 밖이면 짧은 답변이다.
  *
  * 스크린샷은 만들지 않는다. 시각 기준선의 owner는 `workbench.infrastructure.spec.ts`이고, 이
  * 파일은 동작만 본다.
@@ -39,6 +40,9 @@ const SCRIPTED_MARKER = "scripted fake";
 
 /** 대본이 제안하는 제목(`_scenarios.py`). 적용이 실제로 문서를 바꿨는지 보는 표식이다. */
 const PROPOSED_TITLE = "KRX 12-1 모멘텀";
+/** 팩터 창을 줄이는 대본의 제목과 새 창(`_scenarios.py`의 `factor_window_proposal`). */
+const WINDOW_PROPOSED_TITLE = "KRX 6개월 모멘텀";
+const PROPOSED_WINDOW = 126;
 
 /**
  * IDE 우측 패널. landmark·이름·제목은 슬롯(`widgets/strategy-ide`)이 소유하고 채팅 feature는 이름
@@ -329,6 +333,52 @@ test.describe("AI 어시스턴트", () => {
     await expect(
       page.getByRole("article", { name: "백테스트 결과" }),
     ).toBeVisible({ timeout: 180_000 });
+  });
+
+  test("팩터 그래프를 바꾸는 제안도 적용 후 백테스트가 팩터 계획 조회를 기다려 실행한다", async ({
+    page,
+  }) => {
+    // C-02 리뷰 P1-1. 그래프가 바뀌면 compile 직후 새 팩터 계획(explain)을 조회하는 동안 실행
+    // 게이트가 닫힌다. 그 닫힘은 "아직 검증 중"이라 체인이 기다렸다가 계획이 오면 실행해야 한다.
+    // 위 시나리오는 제목만 바꿔 계획이 캐시에 있으므로 이 경로를 밟지 않는다.
+    await ensureProvider(page);
+    await saveStrategyRevision(page, "C-02 팩터 창 제안");
+    await openAssistant(page);
+
+    await ask(page, "모멘텀 창을 줄인 안을 제안해 줘");
+    const card = assistant(page).getByRole("article", {
+      name: WINDOW_PROPOSED_TITLE,
+    });
+    await expect(card).toBeVisible({ timeout: 60_000 });
+    await expect(card).toContainText("검증 통과");
+
+    // 캐시에 없는 새 그래프의 계획 조회가 실제로 나가는지 함께 본다 — 그래야 이 시나리오가
+    // "조회 중 닫힘" 경로를 밟았다고 말할 수 있다.
+    const freshExplain = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        request.url().includes("/api/v1/factors/explain") &&
+        (request.postData() ?? "").includes(`"window":${PROPOSED_WINDOW}`),
+    );
+    // 턴을 시작한 뒤 문서를 고치지 않았으므로 확인 창 없이 바로 적용된다.
+    await card.getByRole("button", { name: "적용 후 백테스트" }).click();
+    // 새 창(126)이 실린 계획 조회가 나갔다는 것 자체가 적용된 문서가 그래프를 바꿨다는 증거다. 편집기를
+    // 여기서 다시 읽지 않는다 — 실행이 곧바로 이어지면 이탈 확인 창이 편집기를 가린다.
+    await freshExplain;
+
+    // 계획이 도착하면 실행이 시작되고, 저장하지 않은 문서를 떠나므로 이탈 확인이 뜬다.
+    const leaveGuard = page.getByRole("button", { name: "나가기" });
+    await expect(leaveGuard).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/백테스트를 시작하지 않았습니다/u)).toHaveCount(
+      0,
+    );
+    await leaveGuard.click();
+
+    await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
+    await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
+      "completed",
+      { timeout: 180_000 },
+    );
   });
 
   test("검색 출처를 링크로 보이고 검증에 실패한 턴은 실패 문구로 끝난다", async ({

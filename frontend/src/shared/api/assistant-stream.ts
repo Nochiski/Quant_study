@@ -137,33 +137,44 @@ const isProposal = (value: unknown): value is StrategyProposalView =>
   isSourceList(value.sources) &&
   isCompile(value.compile);
 
+/** 생성 SDK가 아는 이벤트 갈래 이름 전부. */
+type AssistantEventType = AssistantEventEnvelopeView["event"]["type"];
+
 /**
  * 갈래별로 리듀서가 실제로 읽는 필드가 있는지 본다.
  *
  * 프레임은 신뢰하지 않는 입력이다(프록시가 끼어든 본문, 서버 버전 불일치). 필드가 없으면 누적 텍스트에
  * `undefined`가 섞이는 식으로 조용히 망가지므로, 좁히지 못한 프레임은 버린다.
+ *
+ * 키를 갈래 합집합으로 묶는다(Phase B 감사 NB-6). backend가 갈래를 더하고 SDK를 재생성하면 리듀서
+ * `switch`처럼 이 표도 컴파일되지 않는다 — 표를 잊으면 그 갈래 프레임이 런타임에 전부 버려진다.
  */
-const EVENT_FIELDS: Record<string, (event: Record<string, unknown>) => boolean> =
-  {
-    text_delta: (event) => isString(event.text),
-    thinking_summary: (event) => isString(event.text),
-    tool_call: (event) =>
-      isString(event.call_id) && isString(event.name) &&
-      isRecord(event.arguments),
-    tool_result: (event) =>
-      isString(event.call_id) && isString(event.name) &&
-      typeof event.ok === "boolean" && isString(event.summary),
-    search_activity: (event) =>
-      isString(event.query) && isSourceList(event.sources),
-    proposal: (event) => isProposal(event.proposal),
-    usage: (event) =>
-      isFiniteNumber(event.input_tokens) &&
-      isFiniteNumber(event.output_tokens) &&
-      isFiniteNumber(event.cache_read_tokens) &&
-      isFiniteNumber(event.cache_write_tokens),
-    done: (event) => isString(event.stop_reason),
-    failure: (event) => isString(event.code) && isString(event.message),
-  };
+const EVENT_FIELDS: Record<
+  AssistantEventType,
+  (event: Record<string, unknown>) => boolean
+> = {
+  text_delta: (event) => isString(event.text),
+  thinking_summary: (event) => isString(event.text),
+  tool_call: (event) =>
+    isString(event.call_id) &&
+    isString(event.name) &&
+    isRecord(event.arguments),
+  tool_result: (event) =>
+    isString(event.call_id) &&
+    isString(event.name) &&
+    typeof event.ok === "boolean" &&
+    isString(event.summary),
+  search_activity: (event) =>
+    isString(event.query) && isSourceList(event.sources),
+  proposal: (event) => isProposal(event.proposal),
+  usage: (event) =>
+    isFiniteNumber(event.input_tokens) &&
+    isFiniteNumber(event.output_tokens) &&
+    isFiniteNumber(event.cache_read_tokens) &&
+    isFiniteNumber(event.cache_write_tokens),
+  done: (event) => isString(event.stop_reason),
+  failure: (event) => isString(event.code) && isString(event.message),
+};
 
 /**
  * SSE 프레임 하나를 이벤트 봉투로 좁힌다. 좁히지 못하면 null — 호출자는 그 프레임을 버린다.
@@ -178,7 +189,8 @@ export const assistantEventEnvelope = (
   if (!isFiniteNumber(frame.sequence) || !isString(frame.turn_id)) return null;
   const event = frame.event;
   if (!isRecord(event) || !isString(event.type)) return null;
-  const fields = EVENT_FIELDS[event.type];
-  if (fields === undefined || !fields(event)) return null;
+  // 자기 키만 본다 — `constructor` 같은 프로토타입 이름이 판정 함수로 잡히면 안 된다.
+  if (!Object.hasOwn(EVENT_FIELDS, event.type)) return null;
+  if (!EVENT_FIELDS[event.type as AssistantEventType](event)) return null;
   return frame as unknown as AssistantEventEnvelopeView;
 };

@@ -40,6 +40,12 @@ export {
 } from "./model/chat-state";
 export { assistantFailureMessage } from "./model/failure-copy";
 export {
+  ASSISTANT_TURN_IN_PROGRESS,
+  assistantRejectionMessage,
+  isAssistantRejectionCode,
+  type AssistantRejectionCode,
+} from "./model/rejection-copy";
+export {
   assistantStreamTarget,
   useAssistantEventStream,
   type AssistantStreamClose,

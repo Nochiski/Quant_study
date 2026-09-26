@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P2-01
-active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P2-01]
-parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P2-01]
-last_updated: 2026-09-21T08:28:37+09:00
+current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P2-01
+active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
+parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
+last_updated: 2026-09-21T11:49:36+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 4
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P1-04,P2-01` |
-| Active PR | `P0-01, P1-01, P1-02, P1-03, P1-04, P2-01` |
+| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P2-01` |
+| Active PR | `P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `4 / 28` |
-| Aggregated at | `2026-09-21 08:28 KST` |
+| Aggregated at | `2026-09-21 11:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -79,7 +79,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 0 | `APPROVED` |
-| P1 | In-screen friction removal on 1.1 | 5 | 0 | `IN_REVIEW` |
+| P1 | In-screen friction removal on 1.1 | 5 | 0 | `SELF_CHECK` |
 | P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_PROGRESS` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
@@ -103,6 +103,32 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Focused tests | `tools/update-plan-progress.ps1 -Check` |
 | Full gate | 코드 변경 없음 — 문서 링크 존재 확인 |
 
+### P1-05
+
+| 항목 | 값 |
+|---|---|
+| PR | `P1-05` |
+| Intent | 초보자가 가장 자주 만나는 구조 오류 6종이 전부 영문이던 것을 한글 문장으로 바꾸고, 그래프 진단이 전략 문서 네임스페이스로만 나가게 한다 |
+| Acceptance | WORKFLOW P1-05 |
+| Non-goals | 의미 오류 문구 손질(이미 한글), 그래프 새 화면(P4·P5), 실행 설정 UI(P2·P3) |
+| Branch/worktree | `feat/lang2-p1-05-structure-errors-ko` / `wt-lang2-p1-05` |
+| Base SHA | `0ce311bb` (P1-04 최종 tip, PR #181. 28 PR 계획 위로 cascade replay) |
+| 문장 소유 | backend. `.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행("compile 진단의 `message`는 backend가 한글 문장으로 완성해 보내고 Problems panel은 그대로 보여준다")을 따른다. `messages.ts`에 진단 문장 템플릿을 두지 않는다 — P1-04와 겹치는 파일이 없다 |
+| 변경 파일 | backend 문장: `domain/strategy/_hydrate.py`(`structure.*` 전부 + 오타 제안 + `LEGACY_SHAPE_CODE`), `adapters/outbound/document_codec/_codec.py`(`document.*`·`yaml.*`·`<format>.syntax`) |
+| | backend 1.0 힌트: `domain/strategy/_upgrade.py`(`legacy_shape_hints` — 판정은 `UPGRADE_STEPS`와 같은 조건), `application/strategy_authoring/_service.py`(키 범위 코드 집합), `domain/strategy/facade/document.py` |
+| | backend 네임스페이스: `domain/factor/_validation.py`(`FACTOR_GRAPH_CODES` 게이트, 순환·중복에 `node_id`), `domain/factor/facade/validation.py`, `domain/strategy/_constraints.py`(`EXPRESSION_CODES` 20개 확장·`expression_code()`), `domain/strategy/facade/constraints.py`, `domain/strategy/_validation.py`(`semantic_issue`가 `factor.` 접두사 거절), `application/portfolio_design/_service.py` |
+| | backend 테스트: `tests/domain/test_strategy_diagnostic_messages.py`(신규, 74건), `tests/domain/test_strategy_constraints.py`, `tests/domain/test_strategy_hydrate.py`, `tests/contract/test_strategy_authoring_fixtures.py`, `tests/integration/test_truthful_pipeline.py` |
+| | frontend: `features/edit-strategy/model/document-upgrade.ts`(배너가 `structure.legacy_shape`에도 반응), `model/use-compile-document.ts`(같은 코드는 키 범위), 테스트 2·e2e 1 |
+| | backend CORS: `bootstrap/_http.py`(`STRATEGY_WORKBENCH_ALLOWED_ORIGINS`)·`bootstrap/facade/http.py`·`tests/test_server_entrypoint.py`·`backend/README.md` |
+| | 1차 리뷰 반영: `domain/strategy/_upgrade.py`(`is_upgradeable_document`)·`application/strategy_authoring/_service.py`·`domain/factor/_validation.py`(순환을 SCC로)·`tests/application/test_strategy_authoring_upgrade.py`·`tests/domain/test_strategy_upgrade.py`·`tests/integration/test_strategy_document_upgrade_http_api.py` |
+| | 그 외 frontend: `eslint.config.js`(Playwright 산출물 무시), `package.json`(빌드를 npm 스크립트에서 러너로 옮김 — 러너는 빌드를 잠금 **밖**에서 돌린다, `--update-snapshots=changed`), `e2e/ports.d.mts`, `e2e/free-port.mjs`(IPv6), `scripts/capture-manual-screenshots.mjs`(포트 상수), `e2e/workbench.workflow.spec.ts`, 시각 기준선 4장 |
+| | 문서: `docs/manual/strategy-workbench/README.md`(오류 문장 예시·`—` 읽는 법) |
+| | e2e 인프라(저장소 전체 결함, 리드 지시로 이 PR에서): `frontend/e2e/{lock,free-port,ports}.mjs`(신규)·`lock.test.mjs`(단위 22건, 두 프로세스 경합 1건 포함)·`run-playwright.mjs`·`playwright.config.ts`·`vite.config.ts`·`workbench-helpers.ts`·`workbench.infrastructure.spec.ts`·`e2e/README.md`. 머신 단위 잠금으로 워크트리 간 e2e를 직렬화하고, 포트를 `PW_BACKEND_PORT`·`PW_PREVIEW_PORT`로 연다 |
+| Focused tests | `uv run pytest tests/domain/test_strategy_diagnostic_messages.py tests/domain/test_strategy_constraints.py tests/domain/test_strategy_hydrate.py`, `npx vitest run src/features/edit-strategy/__tests__/document-upgrade.test.ts src/features/edit-strategy/__tests__/factor-graph-panel.test.tsx` |
+| Head SHA | 1차 리뷰 반영분 포함. 커밋이 자기 SHA를 담을 수 없어 push 후 확정 |
+| Diff stat | base `0ce311bb` 대비 51 파일 `+2596 −162` (시각 기준선 4장 포함) |
+| Full gate | backend `pytest -q` 1694 passed · `ruff check src tests examples scripts` clean · `pyright` 0 · frontend `typecheck`·`lint`·`build` clean · `npm test` · e2e 20 passed(잠금 래퍼 아래). OpenAPI·runtime schema 재생성 diff 0 → 생성 SDK 변경 없음 |
+
 ---
 
 ## P0 — 기획 패키지와 계약 문서
@@ -123,7 +149,7 @@ Phase exit:
 | [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `APPROVED` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE (1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2) |
 | [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `APPROVED` | [#177](https://github.com/Nochiski/Quant_study/pull/177) · `review_lang2_p1_03` 2차 APPROVE(1차 REQUEST_CHANGES 반영, 돌연변이 7건 실패 확인), 2차 P3 4건 후속 |
 | [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `APPROVED` | `review_lang2_p1_04` 4차 APPROVE (1·2·3차 REQUEST_CHANGES 차단 2·1·1, P3 7·3·2 전부 반영) |
-| [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `WAITING` | — |
+| [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `SELF_CHECK` | — |
 
 Phase exit:
 
@@ -340,6 +366,39 @@ Phase exit:
   12-1 모멘텀은 spec D1의 완료 정의 "퀀트 아이디어 5개"의 첫 번째라 노출이 크다.
 - **재현 test**: 없음(관찰만). 담당 PR이 시드 ↔ 그래프 최소 이력 동치 테스트를 함께 둔다.
 - **담당**: `P2-06`(`risk.risk_factor_id`·`saved_*` 제거로 레지스트리를 건드리는 PR).
+- 2026-09-20 — P1-01 구현 및 1차 리뷰: PR #168. 문서 상태 배지와 `DiagnosticsPanel`을
+  `SourceEditor` 밖 슬롯으로 올려 다섯 탭 모두에서 보이게 하고, 문제 행 클릭 목적지를
+  `resolveDiagnosticDestination`이 판정한다. `review_lang2_p1_01` APPROVE(blocking 0), 후속으로
+  편집기 높이 충전·선택 카드 `scrollIntoView`·route 테스트 강화 5건을 반영.
+- 2026-09-21 — P1-04 구현 및 1차 리뷰: 연산자 팔레트(카탈로그·스키마 주도), 추가·삭제 실패의 사유
+  표시, 진단 본문 인라인. 구현 중 발견한 `window: 0` 결함은 하한을 노드 dataclass 옆에 한 번
+  선언하고 검증기·runtime schema가 함께 읽게 해 같은 PR에서 고쳤다. `review_lang2_p1_04`
+  REQUEST_CHANGES(차단 2·P3 7) 전부 반영 — 남은 하나였던 `periods: null` 씨앗까지 막아 팔레트가
+  만든 노드가 곧바로 거부되지 않는다.
+- 2026-09-20 — P1-01 2차 리뷰 APPROVE(blocking 0). 중첩된 reveal 훅 둘이 서로 다른 요소를 끌던 R2-1을
+  "마지막 매치"로 고치고, 같은 문제 행 재클릭 reveal(R2-2)·명시적 `schemaLoaded`(R2-4)·
+  `scrollIntoView` 수신 요소 단언(R2-5)까지 반영.
+- 2026-09-21 — P1-05 1차 리뷰(REQUEST_CHANGES) 반영: 업그레이드 가능 판정을
+  `is_upgradeable_document` 하나로 모아 `structure.legacy_shape` 배너가 실제로 동작하게 했고
+  (전에는 눌러도 반드시 422), e2e 잠금 획득을 원자적 rename 하나로 바꿔 두 프로세스가 동시에
+  주인이 되던 경합 2종을 닫았으며, `PW_BACKEND_PORT`가 vitest·dev 설정까지 새어 단위 게이트를
+  깨던 경로를 막았다. 순환 진단은 SCC로 바꿔 고리에 묶인 노드를 하나도 빠뜨리지 않는다.
+- 2026-09-21 — 매뉴얼 스크린샷(`assets/04-structure-error.png` 등)은 옛 영문 화면이다. 한글
+  문장으로 바뀐 화면은 P1-05 후 Phase 1 감사에서 일괄 재촬영한다.
+- 2026-09-21 — P1-05 구현: 구조·codec 진단이 backend에서 한글 문장으로 완성돼 나가고
+  (`.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행), `structure.legacy_shape`·
+  `STRUCTURE_CODES`·`FACTOR_GRAPH_CODES`·`expression_code()` 세 레지스트리 게이트가 생겼다.
+  `factor.*`는 더 이상 전략 문서 진단으로 나가지 않는다. 문장 golden이 레지스트리와 1:1이다.
+  리드 브리핑의 "진단 문장을 frontend i18n 템플릿으로" 방향은 SoT·WORKFLOW 원문과 충돌해 철회됐다.
+- 2026-09-21 — P1-05에서 저장소 전체 e2e 결함을 고쳤다(리드 지시): Playwright `webServer`의
+  `reuseExistingServer: false`가 시작 시점 포트만 봐서, 워크트리 둘이 겹쳐 돌면 브라우저가 옆
+  체크아웃의 backend를 테스트하고도 통과할 수 있었다. 머신 단위 잠금으로 직렬화하고, 포트를
+  환경 변수로 열고, 포트가 막혀 있으면 조용히 재사용하지 않고 즉시 실패하게 했다.
+- 2026-09-21 — P2-09 acceptance 추가: `is_upgradeable_document`에 버전 상한을 두는 항목을
+  업그레이더 PR에 적었다. 판정을 넓힌 것은 P1-05가 이미 했고(진단이 "업그레이드하세요"라고 시킨
+  문서를 endpoint가 거절하던 모순 제거), 1.2가 들어오면 "미래 버전 + 옛 키 하나"가 1.1로
+  강등되는 경로가 되므로 상한은 버전 디스패치를 넣는 PR 몫이다. 옛 24 PR 계획 기준으로 이 줄을
+  P2-05에 적었던 것을 28 PR 계획에 맞춰 옮겼다.
 
 ## 갱신 절차
 

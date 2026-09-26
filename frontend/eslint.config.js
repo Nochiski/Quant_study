@@ -24,6 +24,11 @@ export default tseslint.config(
       "coverage/**",
       "node_modules/**",
       "openapi-ts-error-*.log",
+      // 실패한 Playwright 실행이 여기에 trace viewer vendor JS를 통째로 떨군다. gitignore에는
+      // 있지만 ESLint는 무시 목록이 따로라, 한 번 실패한 뒤 `npm run lint`가 남의 번들에서 나온
+      // 오류 수천 건으로 깨졌다. 산출물이지 우리 소스가 아니다.
+      "playwright-report/**",
+      "test-results/**",
     ],
   },
   { ...js.configs.recommended, files: ["**/*.js"] },

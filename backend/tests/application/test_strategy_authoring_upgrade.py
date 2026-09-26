@@ -89,14 +89,31 @@ def test_upgrade_reports_semantic_diagnostics_of_the_upgraded_text_without_hidin
 
 
 @pytest.mark.parametrize("version", ['"1.1"', '"2.0"', "1.0"])
-def test_non_1_0_documents_are_refused(version: str) -> None:
+def test_a_1_0_body_upgrades_whatever_the_version_line_says(version: str) -> None:
+    """버전 줄만 손으로 고친 1.0 본문도 받아 준다(P1-05 1차 리뷰 DEFECT-P105-001).
+
+    진단이 `structure.legacy_shape`로 "업그레이드하세요"라고 시키고 배너까지 띄우므로, 여기서
+    거절하면 사용자에게 남는 길이 없다.
+    """
     source = _read("quality_momentum.v1_0.yaml").replace(
         'schema_version: "1.0"', f"schema_version: {version}"
     )
 
+    upgraded = _service().upgrade(CompileRequest(source, SourceFormat.YAML))
+
+    assert upgraded.compiled.schema_version == "1.1"
+    assert upgraded.compiled.spec is not None
+
+
+def test_a_document_with_no_1_0_shape_is_refused() -> None:
+    """옛 판 모양이 하나도 없으면 그대로 거절한다 — 판정이 넓어져도 fail-closed 는 남는다."""
+    source = _read("quality_momentum.yaml").replace(
+        'schema_version: "1.1"', 'schema_version: "2.0"'
+    )
+
     with pytest.raises(DocumentNotUpgradeableError, match="only schema 1.0") as info:
         _service().upgrade(CompileRequest(source, SourceFormat.YAML))
-    assert str(info.value.schema_version) in {"1.1", "2.0", "1.0"}
+    assert str(info.value.schema_version) == "2.0"
 
 
 def test_syntax_errors_carry_the_codec_diagnostics() -> None:

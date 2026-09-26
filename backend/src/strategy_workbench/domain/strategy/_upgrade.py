@@ -105,16 +105,91 @@ UPGRADE_STEPS: tuple[tuple[str, UpgradeStep], ...] = (
 
 
 def is_legacy_document(document: Mapping[str, object]) -> bool:
+    """문서가 스스로 은퇴 버전이라고 적었는가. 버전 **문자열만** 본다."""
     return document.get("schema_version") == LEGACY_SCHEMA_VERSION
 
 
+def is_upgradeable_document(document: Mapping[str, object]) -> bool:
+    """이 문서에 1.0 → 1.1 변환을 적용할 수 있는가 — 업그레이드 가능 판정의 유일한 owner.
+
+    버전 문자열이 은퇴 버전이거나, 버전 줄은 현재 판인데 **본문이 옛 판 모양**이면 참이다. 두
+    번째 갈래가 필요한 이유는 진단과 판정이 갈라지면 화면이 모순되기 때문이다(P1-05 1차 리뷰
+    DEFECT-P105-001): `structure.legacy_shape` 진단은 "업그레이드하세요"라고 시키고 배너까지
+    띄우는데, 판정이 버전 문자열만 보면 버튼이 반드시 422로 끝나 사용자에게 남는 길이 없다.
+    진단이 시키는 일은 눌러서 되는 것이 계약이라, 진단을 만드는 `legacy_shape_hints`와 이 판정이
+    같은 조건을 읽는다.
+
+    변환 자체는 어느 갈래든 같다. step 들은 옛 판 모양에만 반응하고(`flatten_factors` 는 factors
+    가 mapping 일 때만, `unary_aliases` 는 `kind: unary` 일 때만), `schema_version` step 이 버전
+    줄을 결과 버전으로 정규화한다. 그래서 버전 줄이 이미 현재 판이어도 결과는 같다.
+
+    지금은 아는 버전이 1.0·1.1 둘뿐이라 본문 모양만 보면 충분하다. schema 1.2 가 들어오면 "미래
+    버전 + 옛 키 하나"가 1.1 로 강등되는 경로가 되므로, 버전 디스패치를 넣는 PR 에서 이 판정에
+    버전 상한을 함께 둬야 한다(2차 리뷰 P3-7).
+    """
+    return is_legacy_document(document) or bool(legacy_shape_hints(document))
+
+
+# 1.0에서만 쓰던 문법이 놓이는 JSON Pointer → 사용자가 읽을 한글 힌트(P1-05).
+#
+# 판정 조건은 위 step들이 이미 아는 것과 같다. 어떤 문법이 1.0 것인지를 두 벌 적지 않으려고 step과
+# 같은 모양을 읽는다: step이 바뀌면 이 함수도 같은 PR에서 바뀐다.
+def legacy_shape_hints(document: Mapping[str, object]) -> dict[str, str]:
+    """`schema_version`은 현재 버전인데 본문만 1.0인 문서에서, 1.0 문법이 놓인 자리와 힌트.
+
+    hydrate가 같은 pointer에 낸 구조 오류를 이 힌트로 바꿔 단다(`structure.legacy_shape`).
+    `expected a sequence, got dict` 같은 문장만으로는 "이건 예전 문법"이라는 사실이 보이지 않는다.
+    """
+    hints: dict[str, str] = {}
+    factors = document.get("factors")
+    if isinstance(factors, Mapping) and "factors" in factors:
+        hints["/factors"] = (
+            "1.0 문법입니다. factors 아래에 또 factors 목록을 두던 방식이라 지금 버전에서는 읽지 "
+            "못합니다. 안쪽 목록을 factors 바로 아래로 올리거나 업그레이드하세요 — "
+            f"expected=sequence got={type(factors).__name__}"
+        )
+    for section, key in REMOVED_FIELDS:
+        block = document.get(section)
+        if isinstance(block, Mapping) and key in block:
+            hints[f"/{section}/{key}"] = (
+                f"1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우거나 업그레이드하세요 — "
+                f"got={key!r} section={section!r}"
+            )
+    if isinstance(factors, (list, tuple)):
+        for factor_index, factor in enumerate(factors):
+            graph = factor.get("graph") if isinstance(factor, Mapping) else None
+            nodes = graph.get("nodes") if isinstance(graph, Mapping) else None
+            if not isinstance(nodes, (list, tuple)):
+                continue
+            for node_index, node in enumerate(nodes):
+                if not isinstance(node, Mapping) or node.get("kind") != "unary":
+                    continue
+                operator = str(node.get("operator"))
+                alias = _UNARY_ALIASES.get(operator)
+                if alias is None:
+                    continue
+                kind, renamed = alias
+                # `unary` kind 자체는 1.1에도 있다. 걸리는 자리는 은퇴한 operator 값이다.
+                hints[f"/factors/{factor_index}/graph/nodes/{node_index}/operator"] = (
+                    f"1.0 문법입니다. unary {operator}는 지금 버전에서 {kind}의 {renamed}로 "
+                    f"옮겨졌습니다. kind와 operator를 함께 바꾸거나 업그레이드하세요 — "
+                    f"got=unary/{operator} expected={kind}/{renamed}"
+                )
+    return hints
+
+
 def apply_upgrade_steps(document: MutableMapping[str, object]) -> None:
-    """Mutate a 1.0 document (plain or ruamel containers) into 1.1 in place."""
-    if not is_legacy_document(document):
+    """Mutate a 1.0 document (plain or ruamel containers) into 1.1 in place.
+
+    받아 주는 조건의 owner 는 `is_upgradeable_document` 하나다 — 버전 줄이 은퇴 버전이거나 본문이
+    옛 판 모양이면 변환한다. 어느 쪽도 아닌 문서는 그대로 fail-closed 다(저장 row 읽기 경로가
+    이 예외에 기대고 있다: `adapters/outbound/strategy_sqlite/_record_codec.py`).
+    """
+    if not is_upgradeable_document(document):
         raise NotALegacyDocumentError(
-            "only schema 1.0 documents can be upgraded — "
+            "only schema 1.0 documents or bodies still written in 1.0 shapes can be upgraded — "
             f"schema_version={document.get('schema_version')!r} "
-            f"expected={LEGACY_SCHEMA_VERSION!r}"
+            f"expected={LEGACY_SCHEMA_VERSION!r} legacy_shapes=0"
         )
     for _name, step in UPGRADE_STEPS:
         step(document)

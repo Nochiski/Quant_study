@@ -59,6 +59,36 @@ def test_upgrade_of_a_1_1_document_is_422_not_upgradeable() -> None:
     TypeAdapter(StrategyDocumentUpgrade422Response).validate_python(response.json())
 
 
+def test_a_document_the_diagnostic_calls_1_0_actually_upgrades() -> None:
+    """진단이 "업그레이드하세요"라고 시킨 문서는 버튼을 눌러서 된다(P1-05 1차 리뷰 DEFECT-P105-001).
+
+    버전 줄은 현재 판인데 본문만 옛 판인 문서다. 전에는 compile 이 `structure.legacy_shape` 를
+    내고 배너까지 떴는데 업그레이드 endpoint 가 버전 문자열만 보고 422 로 거절해, 한 화면이 서로
+    모순되는 두 안내를 냈다. 진단과 판정이 같은 조건을 읽는지 이 경로로 확인한다.
+    """
+    client = TestClient(build_http_app())
+    source = _read("quality_momentum.v1_0.commented.yaml").replace(
+        'schema_version: "1.0"', 'schema_version: "1.1"'
+    )
+    assert 'schema_version: "1.1"' in source
+
+    compiled = client.post(
+        "/api/v1/strategy-documents/compile", json={"source": source, "format": "yaml"}
+    )
+    assert compiled.status_code == 200, compiled.text
+    codes = {item["code"] for item in compiled.json()["diagnostics"]}
+    assert "structure.legacy_shape" in codes
+
+    upgraded = client.post(
+        "/api/v1/strategy-documents/upgrade", json={"source": source, "format": "yaml"}
+    )
+
+    assert upgraded.status_code == 200, upgraded.text
+    body = upgraded.json()
+    assert 'schema_version: "1.1"' in body["source"]
+    assert body["compiled"]["diagnostics"] == []
+
+
 def test_upgrade_of_a_syntax_invalid_document_is_422_with_diagnostics() -> None:
     client = TestClient(build_http_app())
 

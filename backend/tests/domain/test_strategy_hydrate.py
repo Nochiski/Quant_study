@@ -331,8 +331,10 @@ def test_default_from_must_name_a_required_sibling_field() -> None:
         ("execution", "order_style", "market"),
     ],
 )
-def test_removed_1_0_fields_are_unknown_keys(section: str, key: str, value: object) -> None:
-    """schema 1.1 S2: 파이프라인이 읽지 않던 세 필드는 키 자체가 사라져 fail-closed다."""
+def test_removed_1_0_fields_are_flagged_as_legacy_shape(
+    section: str, key: str, value: object
+) -> None:
+    """schema 1.1 S2: 읽지 않던 세 필드는 fail-closed이고, 1.0 문법임을 문장이 말한다(P1-05)."""
     document = copy.deepcopy(_document())
     document.setdefault(section, {})[key] = value
 
@@ -340,8 +342,9 @@ def test_removed_1_0_fields_are_unknown_keys(section: str, key: str, value: obje
 
     assert not result.ok
     assert [(issue.code, issue.pointer) for issue in result.issues] == [
-        ("structure.unknown_key", f"/{section}/{key}")
+        ("structure.legacy_shape", f"/{section}/{key}")
     ]
+    assert "1.0" in result.issues[0].message and f"got={key!r}" in result.issues[0].message
 
 
 def test_cross_sectional_demean_hydrates_from_a_document() -> None:
@@ -374,7 +377,8 @@ def test_unary_aliases_of_cross_sectional_operators_are_gone(operator: str) -> N
     result = hydrate_strategy_document(document, identity=DRAFT)
 
     assert not result.ok
+    # 1.0에서만 쓰던 alias라 "고를 수 없는 값"이 아니라 "예전 문법"으로 안내한다(P1-05).
     assert [(issue.code, issue.pointer) for issue in result.issues] == [
-        ("structure.invalid_enum", "/factors/0/graph/nodes/2/operator")
+        ("structure.legacy_shape", "/factors/0/graph/nodes/2/operator")
     ]
-    assert "['negate', 'lag']" in result.issues[0].message
+    assert f"got=unary/{operator}" in result.issues[0].message

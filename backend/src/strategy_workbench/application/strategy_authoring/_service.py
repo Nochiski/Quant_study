@@ -29,8 +29,9 @@ from strategy_workbench.domain.factor.facade.operators import (
     operator_definitions,
 )
 from strategy_workbench.domain.strategy.facade.document import (
+    LEGACY_SHAPE_CODE,
     hydrate_strategy_document,
-    is_legacy_document,
+    is_upgradeable_document,
     upgrade_document_1_0,
 )
 from strategy_workbench.domain.strategy.facade.schema import (
@@ -246,7 +247,7 @@ class StrategyAuthoringService:
         parsed = self._codec.parse(request.source, format=request.format)
         if not parsed.ok or parsed.tree is None:
             raise DocumentUpgradeSyntaxError(_rejected(parsed, None, parsed.diagnostics))
-        if not is_legacy_document(parsed.tree):
+        if not is_upgradeable_document(parsed.tree):
             raise DocumentNotUpgradeableError(parsed.tree.get("schema_version"))
         expected = upgrade_document_1_0(parsed.tree)
         try:
@@ -353,9 +354,13 @@ def _rejected(
     )
 
 
+# 값이 아니라 키 자체를 가리켜야 하는 구조 진단. 모르는 키도, 1.0 문법 힌트도 고칠 곳이 키다.
+_KEY_RANGE_CODES = frozenset({"structure.unknown_key", LEGACY_SHAPE_CODE})
+
+
 def _structural_range(parsed: ParsedDocument, code: str, pointer: str) -> SourceRange | None:
     # An unknown key exists in the source: point at the key itself, not its value.
-    if code == "structure.unknown_key" and pointer in parsed.key_ranges:
+    if code in _KEY_RANGE_CODES and pointer in parsed.key_ranges:
         return parsed.key_ranges[pointer]
     return parsed.locate(pointer)
 

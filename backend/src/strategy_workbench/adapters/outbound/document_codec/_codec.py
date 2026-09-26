@@ -18,6 +18,10 @@ noticed it: policy that reads identically in both formats is `document.<reason>`
 used to be told `yaml.too_deep`), YAML-only constructs stay `yaml.<reason>`, and a syntax error
 carries the format that failed. Untrusted input never raises out of `parse()`: every rejection is a
 diagnostic.
+
+진단 문장은 한국어로 완성해 보낸다(P1-05, `.claude/rules/strategy-workbench-sot.md`). `—` 뒤에는
+기계가 읽는 디테일만 남고, 파서(ruamel·json)가 준 영어 원문은 `detail=` 값으로만 실린다. 문장
+golden은 `tests/domain/test_strategy_diagnostic_messages.py`다.
 """
 
 from __future__ import annotations
@@ -130,17 +134,22 @@ class RuamelDocumentCodec:
             if not isinstance(tree, dict):
                 raise _Rejected(
                     "not_a_mapping",
-                    f"document root must be a mapping — got={type(tree).__name__}",
+                    "문서 맨 바깥은 키와 값을 가진 블록이어야 합니다 — "
+                    f"expected=mapping got={type(tree).__name__}",
                     "",
                     _range_of(root),
                 )
             if json_duplicates:  # pragma: no cover - _walk reports located duplicates first
-                raise _Rejected("duplicate_key", f"duplicate key — key={json_duplicates[0]!r}")
+                raise _Rejected(
+                    "duplicate_key",
+                    f"같은 키를 두 번 적었습니다 — key={json_duplicates[0]!r}",
+                )
             if format is SourceFormat.JSON:
                 if not isinstance(json_tree, dict):
                     raise _Rejected(
                         "not_a_mapping",
-                        f"document root must be a mapping — got={type(json_tree).__name__}",
+                        "문서 맨 바깥은 키와 값을 가진 블록이어야 합니다 — "
+                        f"expected=mapping got={type(json_tree).__name__}",
                         "",
                         _range_of(root),
                     )
@@ -183,8 +192,8 @@ class RuamelDocumentCodec:
             position = _offset_position(source, match.start())
             raise _Rejected(
                 "syntax",
-                "source is not valid UTF-8 text — unpaired surrogate "
-                f"at line={position.line + 1} column={position.column + 1}",
+                "UTF-8로 읽을 수 없는 문자가 있습니다 — reason=unpaired_surrogate "
+                f"line={position.line + 1} column={position.column + 1}",
                 "",
                 SourceRange(position, position),
             )
@@ -194,7 +203,7 @@ class RuamelDocumentCodec:
         if size > self._limits.max_bytes:
             raise _Rejected(
                 "too_large",
-                f"source exceeds size limit — bytes={size} max_bytes={self._limits.max_bytes}",
+                f"문서가 너무 큽니다 — bytes={size} max_bytes={self._limits.max_bytes}",
             )
 
     def _check_json_syntax(self, source: str, duplicates: list[str]) -> Any:
@@ -219,16 +228,17 @@ class RuamelDocumentCodec:
             position = SourcePosition(error.lineno - 1, error.colno - 1, error.pos)
             raise _Rejected(
                 "syntax",
-                f"invalid JSON — {error.msg} (line={error.lineno} column={error.colno})",
+                f"JSON 문법 오류입니다 — detail={error.msg!r} "
+                f"line={error.lineno} column={error.colno}",
                 "",
                 SourceRange(position, position),
             ) from error
         except ValueError as error:
-            raise _Rejected("syntax", f"invalid JSON — {error}") from error
+            raise _Rejected("syntax", f"JSON 문법 오류입니다 — detail={error}") from error
         except RecursionError as error:
             raise _Rejected(
                 "too_deep",
-                f"nesting exceeds limit — max_depth={self._limits.max_depth}",
+                f"중첩이 너무 깊습니다 — max_depth={self._limits.max_depth}",
             ) from error
         return tree
 
@@ -238,7 +248,7 @@ class RuamelDocumentCodec:
         except MarkedYAMLError as error:
             raise _Rejected("syntax", _marked_message(error), "", _mark_range(error)) from error
         except YAMLError as error:
-            raise _Rejected("syntax", f"invalid YAML — {error}") from error
+            raise _Rejected("syntax", f"YAML 문법 오류입니다 — detail={error}") from error
         try:
             with warnings.catch_warnings():
                 # Policy violations (duplicate anchors, tags) are composed before being rejected
@@ -249,7 +259,7 @@ class RuamelDocumentCodec:
             if "single document" in str(error):
                 raise _Rejected(
                     "multiple_documents",
-                    "source must contain exactly one YAML document",
+                    "파일 하나에 YAML 문서는 하나만 둘 수 있습니다 — reason=multiple_documents",
                     "",
                     _problem_range(error),
                 ) from error
@@ -257,22 +267,22 @@ class RuamelDocumentCodec:
         except MarkedYAMLError as error:
             raise _Rejected("syntax", _marked_message(error), "", _mark_range(error)) from error
         except YAMLError as error:
-            raise _Rejected("syntax", f"invalid YAML — {error}") from error
+            raise _Rejected("syntax", f"YAML 문법 오류입니다 — detail={error}") from error
         except RecursionError as error:  # pragma: no cover - scan depth guard runs first
             raise _Rejected(
-                "too_deep", f"nesting exceeds limit — max_depth={self._limits.max_depth}"
+                "too_deep", f"중첩이 너무 깊습니다 — max_depth={self._limits.max_depth}"
             ) from error
         except Exception as error:  # noqa: BLE001  # reason: untrusted input must never raise
             # ruamel's pure parser uses bare asserts (e.g. `%YAML 1.3` version setter); any
             # non-YAMLError escaping compose is still a rejected document, not a server fault.
             raise _Rejected(
                 "syntax",
-                f"invalid YAML — parser error {type(error).__name__}: {error}",
+                f"YAML 문법 오류입니다 — parser_error={type(error).__name__} detail={error}",
             ) from error
         if deferred is not None:
             raise deferred  # policy violation reported only after compose found no syntax error
         if root is None:
-            raise _Rejected("not_a_mapping", "document is empty — expected a mapping")
+            raise _Rejected("not_a_mapping", "문서가 비어 있습니다 — expected=mapping")
         return root
 
     def _scan_policy(self, tokens: Iterator[object], loader: YAML) -> _Rejected | None:
@@ -291,7 +301,7 @@ class RuamelDocumentCodec:
                 if depth > self._limits.max_depth + 1:
                     raise _Rejected(
                         "too_deep",
-                        f"nesting exceeds limit — depth={depth - 1} "
+                        f"중첩이 너무 깊습니다 — depth={depth - 1} "
                         f"max_depth={self._limits.max_depth}",
                         "",
                         _token_range(token),
@@ -303,26 +313,32 @@ class RuamelDocumentCodec:
             elif isinstance(token, DirectiveToken):
                 first = _Rejected(
                     "directive",
-                    f"directives are not allowed — directive=%{token.name}",
+                    f"YAML 지시자(%)는 쓸 수 없습니다 — directive=%{token.name}",
                     "",
                     _token_range(token),
                 )
             elif isinstance(token, (AnchorToken, AliasToken)):
                 first = _Rejected(
                     "anchor_or_alias",
-                    f"anchors and aliases are not allowed — token={type(token).__name__}",
+                    f"앵커(&)와 별칭(*)은 쓸 수 없습니다 — token={type(token).__name__}",
                     "",
                     _token_range(token),
                 )
             elif isinstance(token, TagToken):
                 first = _Rejected(
-                    "tag", f"tags are not allowed — tag={token.value}", "", _token_range(token)
+                    "tag",
+                    f"태그(!)는 쓸 수 없습니다 — tag={token.value}",
+                    "",
+                    _token_range(token),
                 )
             elif isinstance(token, ScalarToken) and token.plain:
                 tag = loader.resolver.resolve(ScalarNode, token.value, (True, False))
                 if tag == _MERGE_TAG:
                     first = _Rejected(
-                        "merge_key", "merge keys (<<) are not allowed", "", _token_range(token)
+                        "merge_key",
+                        "병합 키(<<)는 쓸 수 없습니다 — token='<<'",
+                        "",
+                        _token_range(token),
                     )
                     continue
                 core_number = bool(_CORE_INT.match(token.value) or _CORE_FLOAT.match(token.value))
@@ -330,8 +346,8 @@ class RuamelDocumentCodec:
                 if resolver_number != core_number:
                     first = _Rejected(
                         "non_core_number",
-                        "number literal outside the YAML 1.2 core schema — "
-                        f"scalar={token.value!r} (frontend and backend would disagree)",
+                        "YAML 1.2 표준 바깥의 숫자 표기라 편집기와 서버가 다르게 읽습니다 — "
+                        f"scalar={token.value!r}",
                         "",
                         _token_range(token),
                     )
@@ -351,14 +367,14 @@ class RuamelDocumentCodec:
         if counter.nodes > self._limits.max_nodes:
             raise _Rejected(
                 "too_many_nodes",
-                f"node count exceeds limit — max_nodes={self._limits.max_nodes}",
+                f"문서의 항목이 너무 많습니다 — max_nodes={self._limits.max_nodes}",
                 pointer,
                 _range_of(node),
             )
         if depth > self._limits.max_depth:
             raise _Rejected(
                 "too_deep",
-                f"nesting exceeds limit — depth={depth} max_depth={self._limits.max_depth}",
+                f"중첩이 너무 깊습니다 — depth={depth} max_depth={self._limits.max_depth}",
                 pointer,
                 _range_of(node),
             )
@@ -372,7 +388,7 @@ class RuamelDocumentCodec:
                 if not isinstance(key, str):
                     raise _Rejected(
                         "non_string_key",
-                        f"mapping keys must be strings — got={key!r}",
+                        f"키는 문자열이어야 합니다 — expected=str got={key!r}",
                         pointer,
                         _range_of(key_node),
                     )
@@ -380,7 +396,7 @@ class RuamelDocumentCodec:
                 if key in result:
                     raise _Rejected(
                         "duplicate_key",
-                        f"duplicate key — key={key!r}",
+                        f"같은 키를 두 번 적었습니다 — key={key!r}",
                         child,
                         _range_of(key_node),
                     )
@@ -403,7 +419,7 @@ class RuamelDocumentCodec:
             if isinstance(value, float) and not math.isfinite(value):
                 raise _Rejected(
                     "non_finite_number",
-                    f"non-finite numbers are not allowed — value={node.value!r}",
+                    f"무한대와 NaN은 쓸 수 없습니다 — value={node.value!r}",
                     pointer,
                     _range_of(node),
                 )
@@ -414,16 +430,18 @@ class RuamelDocumentCodec:
             ):
                 raise _Rejected(
                     "integer_out_of_range",
-                    f"integer exceeds 2^53-1 — value={value}",
+                    f"정수가 너무 큽니다(2^53-1 초과) — value={value}",
                     pointer,
                     _range_of(node),
                 )
             if isinstance(value, bytes):  # pragma: no cover - tags are rejected at scan time
-                raise _Rejected("tag", "binary values are not allowed", pointer, _range_of(node))
+                raise _Rejected(
+                    "tag", "이진 값은 쓸 수 없습니다 — reason=tag", pointer, _range_of(node)
+                )
             return value
         raise _Rejected(  # pragma: no cover - ruamel node kinds are exhaustive
             "syntax",
-            f"unsupported node — type={type(node).__name__}",
+            f"지원하지 않는 노드입니다 — type={type(node).__name__}",
             pointer,
             _range_of(node),
         )
@@ -439,7 +457,7 @@ def _merge_surrogates(value: str, pointer: str, node: Node) -> str:
     except UnicodeDecodeError as error:
         raise _Rejected(
             "syntax",
-            f"string contains an unpaired surrogate escape — pointer={pointer!r}",
+            f"문자열에 짝 없는 서로게이트 이스케이프가 있습니다 — pointer={pointer!r}",
             pointer,
             _range_of(node),
         ) from error
@@ -500,6 +518,6 @@ def _mark_range(error: MarkedYAMLError) -> SourceRange | None:
 
 def _marked_message(error: MarkedYAMLError) -> str:
     mark = error.problem_mark or error.context_mark
-    where = f" at line={mark.line + 1} column={mark.column + 1}" if mark is not None else ""
-    problem = error.problem or error.context or "invalid YAML"
-    return f"invalid YAML — {problem}{where}"
+    where = f" line={mark.line + 1} column={mark.column + 1}" if mark is not None else ""
+    problem = error.problem or error.context or "unknown"
+    return f"YAML 문법 오류입니다 — detail={problem}{where}"

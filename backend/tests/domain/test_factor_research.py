@@ -363,9 +363,15 @@ def test_evaluation_reports_progress_inside_the_time_series_node() -> None:
     )
     reported: list[float] = []
 
-    evaluation = evaluate_factor_graph(graph, observations=observations, progress=reported.append)
+    # `missing` 은 P2-02 이후 실행 설정이 소유하는 필수 인자다.
+    # #193 테스트를 P2-02 위로 옮기며 넣었다.
+    evaluation = evaluate_factor_graph(
+        graph, observations=observations, missing=MissingPolicy.DROP, progress=reported.append
+    )
 
-    assert evaluation == evaluate_factor_graph(graph, observations=observations)
+    assert evaluation == evaluate_factor_graph(
+        graph, observations=observations, missing=MissingPolicy.DROP
+    )
     assert reported == sorted(reported)
     # 가중치 field 1 + 시계열 20 = 21. field 완료가 1/21 이고, 시계열 노드는 종목 4개(관측 3개씩)를
     # 끝낼 때마다 5/21 씩 올린다. 필드 노드가 팩터 구간의 절반을 가져가지 않는다(리뷰 P3-1).

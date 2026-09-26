@@ -56,12 +56,11 @@ test(
     await expect(result).toBeVisible({ timeout: 120_000 });
 
     const highlights = result.getByRole("region", { name: "핵심 성과 지표" });
+    // 지표마다 이름 바로 뒤에 서버가 계산한 값이 숫자로 붙는다. 값이 없으면 "N/A"라 여기서 걸린다.
     for (const label of HIGHLIGHT_LABELS)
-      await expect(highlights.getByText(label, { exact: true })).toBeVisible();
-    // 값이 비어 있지 않다: 지표마다 이름 옆에 서버가 계산한 값이 한 칸씩 붙는다.
-    await expect(highlights.locator("strong")).toHaveCount(
-      HIGHLIGHT_LABELS.length,
-    );
+      await expect(
+        highlights.getByText(label, { exact: true }).locator("xpath=.."),
+      ).toHaveText(new RegExp(`^${label}\\s*[-₩]?\\d`, "u"));
     await expect(
       result.getByRole("img", { name: "Equity curve 차트" }),
     ).toBeVisible();

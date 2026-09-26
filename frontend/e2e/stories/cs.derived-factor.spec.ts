@@ -48,6 +48,13 @@ const DERIVED_FACTOR = `  - factor_id: book_to_market
       output_node_id: btm_z
 `;
 const SECURITY_IDS = ["sec-005930-1", "sec-000660-1", "sec-035420-1"];
+/** 화면이 숫자를 찍는 모양(`Intl.NumberFormat("en-US")`). 결측은 "—"라 여기에 맞지 않는다. */
+const NUMBER = /^-?\d[\d,]*(?:\.\d+)?$/u;
+/**
+ * 상태 배지가 `ok`로 끝난다. 배지는 색 없이도 읽히도록 숨은 상태 낱말("✓정상")을 앞에 붙이므로
+ * 끝만 본다. 결측(`missing`)·오류 상태는 여기에 맞지 않는다.
+ */
+const STATUS_OK = /(?:^|[^a-z])ok$/u;
 
 test(
   "US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다",
@@ -79,33 +86,74 @@ test(
       timeout: 60_000,
     });
 
-    // 원시 데이터: 파생 팩터가 읽은 두 원천 필드가 공개일과 함께 보인다.
+    // 연결 추적(기본 탭): 종목마다 합성 점수에 두 팩터가 설정한 비중으로 기여하고, 파생 팩터의 기여도
+    // 계산 성공(ok)이다. 파생 팩터가 결측이면 여기서 ok가 아니거나 기여 항목이 빠진다.
+    const linked = page.getByRole("list", { name: "연결 추적" });
+    for (const securityId of SECURITY_IDS) {
+      const pipeline = linked.getByRole("listitem", { name: securityId });
+      for (const [factorId, weight] of [
+        ["book_to_market", "0.4"],
+        ["momentum", "0.6"],
+      ] as const) {
+        // 한 기여 항목: 팩터 ID · "방향 × 비중" · 정규화 기여도 · 상태.
+        const contribution = pipeline
+          .locator("span")
+          .filter({ has: page.getByText(factorId, { exact: true }) })
+          .first();
+        await expect(contribution).toHaveText(
+          new RegExp(
+            `^${factorId}\\s*high × ${weight}\\s*${NUMBER.source.slice(1, -1)}\\D*ok$`,
+            "u",
+          ),
+        );
+      }
+    }
+
+    // 원시 데이터: 파생 팩터가 읽은 두 원천 필드의 값이 종목마다 숫자로 있다.
     await page.getByRole("tab", { name: "원시 데이터" }).click();
     const raw = page.getByRole("tabpanel", { name: "원시 데이터" });
-    await expect(
-      raw.getByText("financial.book_equity", { exact: true }).first(),
-    ).toBeVisible();
-    await expect(
-      raw.getByText("price.market_cap", { exact: true }).first(),
-    ).toBeVisible();
+    for (const securityId of SECURITY_IDS)
+      for (const fieldId of ["financial.book_equity", "price.market_cap"]) {
+        const row = raw
+          .getByRole("row")
+          .filter({ hasText: securityId })
+          .filter({ hasText: fieldId })
+          .first();
+        await expect(row.getByRole("cell").nth(2)).toHaveText(NUMBER);
+      }
 
-    // 선택 노드: 표준화한 파생 팩터 값이 종목마다 한 줄씩 있다.
+    // 선택 노드: 표준화한 파생 팩터(btm_z) 값이 종목마다 숫자이고 상태가 ok다.
     await page.getByRole("tab", { name: "선택 노드" }).click();
     const node = page.getByRole("tabpanel", { name: "선택 노드" });
-    for (const securityId of SECURITY_IDS)
-      await expect(
-        node.getByRole("row").filter({ hasText: securityId }),
-      ).toContainText("btm_z");
+    for (const securityId of SECURITY_IDS) {
+      const cells = node
+        .getByRole("row")
+        .filter({ hasText: securityId })
+        .filter({ hasText: "btm_z" })
+        .getByRole("cell");
+      // 열: 종목 · 노드 · 연산 · 입력 · 값 · 상태
+      await expect(cells.nth(4)).toHaveText(NUMBER);
+      await expect(cells.nth(5)).toHaveText(STATUS_OK);
+    }
 
-    // 실행 계획: 나눗셈과 횡단면 표준화 단계가 원천 필드와 함께 계획에 있다.
+    // 실행 계획: 나눗셈과 횡단면 표준화 단계가 계획에 있다.
     await page.getByRole("tab", { name: "실행 계획" }).click();
     const plan = page.getByRole("tabpanel", { name: "실행 계획" });
+    // 계획 행은 "<노드> 소스 열기" 버튼으로 찾는다(노드 ID가 다른 노드 ID의 앞부분이어도 갈린다).
+    const planRow = (nodeId: string) =>
+      plan.getByRole("row").filter({
+        has: page.getByRole("button", {
+          name: new RegExp(`^${nodeId} 소스 열기`, "u"),
+        }),
+      });
+    await expect(planRow("btm")).toContainText("binary.divide");
     await expect(
-      plan.getByRole("row").filter({ hasText: "btm_z" }).first(),
-    ).toContainText("zscore");
+      planRow("btm").getByRole("button", { name: /^book / }),
+    ).toBeVisible();
     await expect(
-      plan.getByRole("row").filter({ hasText: "divide" }).first(),
-    ).toContainText("btm");
+      planRow("btm").getByRole("button", { name: /^cap / }),
+    ).toBeVisible();
+    await expect(planRow("btm_z")).toContainText("cross_sectional.zscore");
 
     // 결합한 전략이 끝까지 돈다.
     await expect(backtest(page)).toBeEnabled();

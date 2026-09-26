@@ -6,7 +6,7 @@ current_phase: P0,P1,P2
 current_pr: P0-01,P1-01,P1-02,P2-01,P2-02,P2-03,P2-04
 active_prs: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04]
 parallel_window: [P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04]
-last_updated: 2026-09-26T21:21:13+09:00
+last_updated: 2026-09-26T21:59:19+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 3
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, P1-01, P1-02, P2-01, P2-02, P2-03, P2-04` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `3 / 28` |
-| Aggregated at | `2026-09-26 21:21 KST` |
+| Aggregated at | `2026-09-26 21:59 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -202,41 +202,52 @@ P2-04 결정 7건(WORKFLOW 원문과 다르게 갔거나 원문이 비워 둔 �
    (`DEPENDS_ON` 에 `domain.factor` 추가, `domain.factor` 의 `DEPENDS_ON` 은 비어 있어 순환 아님).
    동작 변경이 아니므로 별도 `refactor` 커밋이다.
 
-5. **점수 비례 가중(`weighting: factor_score`)은 합성 점수의 절댓값이 아니라 선호 방향 거리에
-   비례한다**(1차 리뷰 P2-1 → 2차 리뷰 R2-P204-001 원인 수정). 1차 반영은 `zscore` 조합만
-   compile error(`strategy.portfolio.weighting_normalization_incompatible`)로 막았는데, 원인이
-   남아 2차 리뷰에서 다시 막혔다. 그 error 는 지웠다.
-   - **상황**: `weighting: factor_score`, 같은 기준일 5종목 원시값 `1,2,3,4,5`, 한 프레임.
-     경우 A 는 `direction: low`·`long_only`·5종목 선정, 경우 B 는 `direction: high`·
-     `long_short`·롱 2·숏 2·`net_exposure: 0`. 둘 다 `validate_strategy` 를 통과했다.
-   - **인풋**: `signal.normalization` 을 `none`/`rank`/`zscore` 로 바꿔 `compile_target_tape` 실행.
-   - **에러 위치**: `domain/portfolio/_compiler.py` 의 `_weight_scores` 가
-     `abs(composite_score)` 를 비중으로 썼다.
-   - **위험성**: 합성 점수는 방향을 이미 반영해 **클수록 매수 선호**다(spec D4). 절댓값은 그
-     순서를 옮기지 못한다. `rank` 에서 경우 A 는 최선 종목 `a` 가 0점으로 빠지고 최악 `e` 가
-     0.4 를 받았다. 경우 B 는 가장 강한 숏 `a` 가 빠지고 공매도 예산이 `b` 에 −0.5 로 몰렸다.
-     `zscore` 는 양 끝이 같은 최대 비중을 받았다. 예외도 경고도 없는 silent corrupt 다.
-   - **선택**: `_preference_anchor` 가 기준점을 정하고 비중은 그 점에서 선호 방향으로 떨어진
-     거리에 비례한다. 롱 바닥은 `min(0, 프레임 eligible 최저 점수)`, 숏 천장은
-     `max(0, 프레임 eligible 최고 점수)` 다. 점수가 모두 0 이상이면 롱 바닥이 0 이라 원시값
-     양수 팩터의 롱 비중이 1.1 과 같고, 평행 이동에 불변이라 `zscore` 도 순서를 지킨다.
-   - **대안**: (a) 1차처럼 조합을 막는 범위를 `rank`·`direction: low`·`long_short` 로 넓힌다.
-     (b) 모든 경우 최저 점수를 바닥으로 쓴다. (c) 양수 점수만 롱, 음수 점수만 숏으로 자른다.
-   - **선택 이유**: (a) 는 기본값 `rank` 에서 공매도 문서 대부분을 막게 되고 원인은 남는다.
-     (b) 는 원시값 양수 팩터의 롱 비중이 1.1 과 달라진다(1~5 비례 → 0~4 비례). (c) 는 `rank`
-     점수가 모두 0 이상이라 공매도 쪽이 통째로 비어 버린다.
-   - **1.1 과 달라지는 곳**: `none` 에서도 `direction: low` 와 공매도 쪽 비중은 이제 방향을 따른다.
-     1.1 부터 뒤집혀 있던 동작이라 고친 것으로 본다. 원시값 양수 팩터의 롱 비중은 그대로다.
-   - **테스트**: 경우 A·B 를 세 정규화 전부에서 값으로 고정했다(수정 전 6건 red). 정규화·방향·
-     side 전 조합이 compile 을 통과하는지도 고정했다.
+5. **점수 비례 가중(`weighting: factor_score`) 규칙: 롱 선정 종목 강도 = 합성 점수 − 기준점, 기준점 = 선정 최저 점수보다 엄격히 낮은 eligible 비선정 종목 중 최고 점수(없으면 `선정 최저 − (선정 최고 − 선정 최저) / (선정 수 − 1)`), 강도가 모두 0 이면 균등 배분, 숏은 합성 점수 부호를 뒤집어 같은 규칙.**
+   1차(P2-1)·2차(R2-P204-001)·3차(R3-P204-001) 리뷰를 거쳐 리드가 정한 요건 7개를 만족하는 규칙이다.
+   1차의 `zscore` 조합 차단 error(`strategy.portfolio.weighting_normalization_incompatible`)와 2차의
+   `min(0, eligible 최저)` 바닥 규칙은 둘 다 지웠다.
+   - **상황**: `weighting: factor_score`, 한 프레임의 eligible 후보와 선정 결과가 정해진 뒤.
+   - **인풋**: 선정 종목(롱 `long_ids`, 숏 `short_ids`)과 eligible 후보의 합성 점수. 합성 점수는
+     방향을 이미 반영해 **클수록 매수 선호**다(spec D4).
+   - **에러 위치(이전 규칙)**: `domain/portfolio/_compiler.py` 의 `_weight_scores`. 1.1·1차는
+     `abs(합성 점수)` 를 써서 `direction: low`·공매도 쪽에서 최선 종목이 0, 최악 종목이 최대가
+     됐다. 2차는 롱 바닥을 `min(0, eligible 최저)` 로 둬서 eligible 최저 종목이 항상 강도 0 으로
+     빠졌다. `top_count: 1` + `low` 는 매 프레임 보유 0, 5종목 선정은 4종목 보유였다.
+   - **위험성(이전 규칙)**: valid 문서가 예외도 경고도 없이 뒤집힌 비중이나 빈 프레임을 낸다
+     (silent corrupt).
+   - **이 규칙이 지키는 요건**: (1) 기준점이 선정 최저보다 항상 낮아 선정 종목의 강도가 0 이 되지
+     않는다. (2) 1종목·전원 동점처럼 강도가 모두 0 인 프레임은 균등 배분하고 비우지 않는다.
+     (3) 강도가 점수 차이라 평행 이동과 양의 배율에 불변이다. x 에 `low`, −x 에 `high` 를 준 두
+     문서가 `none`·`zscore` 에서 같은 합성 점수를, `rank` 에서 상수 1 차이(`−r` 대 `1 − r`)의
+     합성 점수를 내고 셋 다 보유 종목·비중이 같다. `rank` 의 오프셋은 결과에 드러나지 않는다.
+     (4) 숏은 부호를 뒤집어 같은 규칙이다.
+   - **대안**:
+     | 규칙 | 어기는 요건 | 버린 이유 |
+     |---|---|---|
+     | `abs(합성 점수)` 비례(1.1·1차) | 3, 4 | `direction: low`·공매도 쪽 순서 반전 |
+     | 롱 바닥 `min(0, eligible 최저)`(2차) | 1, 2, `rank` 의 3 | eligible 최저 종목이 항상 0, 1종목·동점 프레임이 빈다 |
+     | 선정 종목만 보는 "선정 최저 − 평균 간격" 기준점 | 없음 | 선정 최고/최저 비중 비율이 항상 선정 수와 같아져 점수 크기를 거의 버린다. 컷 아래 종목이 있으면 그 종목과의 거리를 쓰는 편이 정보가 많다 |
+     | 선정 순위 비례(N, N−1, …, 1) | 없음 | `weighting: rank` 와 같은 규칙이 되어 `factor_score` 를 따로 둘 이유가 없다 |
+   - **알려진 성질**: 컷 바로 아래 비선정 종목과 점수 차가 아주 작은 선정 종목은 작은 비중을
+     받는다. 0 은 아니다. 점수 차가 곧 "그 종목을 고른 근거의 크기"라서 의도된 동작으로 둔다.
+   - **1.1 과 달라지는 곳(정확한 불변 조건)**: 선정·보유 종목은 1.1 과 같다(1.1 도 선정 종목을
+     모두 보유했다). 비중은 롱이고 **기준점이 정확히 0** 일 때만 1.1 과 같다(예: 원시값 1~N
+     등간격을 전부 선정). 그 밖에는 원시값이 모두 양수인 `high` 롱도 비중이 달라진다. 예를 들어
+     합성 점수 2.5·1.0 두 종목은 5/7·2/7 이 2/3·1/3 이 된다. 부호가 섞인 원시값 −2, −1, 1, 2, 3
+     의 `high` 롱 상위 2종목은 .4/.6 이 1/3·2/3 이 된다. `long_short` 2/2 원시값 −3, −1, 1, 2, 5
+     의 숏 `a/b` 는 −.375/−.125 가 −1/3·−1/6 이 된다. `direction: low` 와 공매도 쪽의 반전도
+     사라진다. 저장된 1.1 리비전은 `requires_upgrade` 로 실행이 막혀 있어서 이 차이는 P2-09
+     업그레이드(`normalization: none` 명시) 뒤에 드러난다. 과거 실행 결과 아티팩트는 바뀌지 않는다.
+     WORKFLOW P2-09 acceptance 에 한 줄을 남겼다.
+   - **테스트**: 1~3차 경계를 세 정규화 전부에서 값으로 고정했다. 선정 5 보유 5, `low`, 숏,
+     eligible 1종목, 0 이하 1종목, 전원 동점, 전부 음수, 모집단 10·eligible 5 가 대상이다. 거울
+     대칭 5경우도 고정했다. 3차 tip `a9f4ed93` 에서 25건이 red 였다.
 
-6. **`factor_score` 에서 강도 0 인 종목은 비중 0 으로 tape 에서 뺀다**(1차 리뷰 P2-1 반영, 강도는 결정 5 의 선호 방향 거리).
-   `rank` 의 횡단면 최하위가 **항상 정확히 0.0** 이라, 기존 `max(..., 1e-12)` 바닥값이 그
-   종목에 `4e-13` 짜리 dust 비중을 주고 `target_weight != 0` 필터를 통과해 tape 에 남았다.
-   기본값이 `rank` 라 이 dust 가 기본 동작이었다. 기존 `MISSING_RISK` 와 같은 경로(사유를
-   남기고 `continue`)를 재사용하고 사유는 `ExclusionReason.SCORE_THRESHOLD` 다 — "합성 점수가
-   이 종목을 빼놨다" 라는 같은 뜻이고, `MINIMUM_TRADE` 를 쓰면 이전 보유가 있을 때 `selected`
-   로 되살아나는 별도 분기(`_finalize_decision`)에 잘못 걸린다.
+6. **(폐기) 강도 0 종목 제외.** 1차 리뷰 P2-1 에서 `rank` 모집단 최하위(백분위 0)가 `1e-12` 바닥값
+   때문에 dust 비중으로 tape 에 남던 문제를 "강도 0 이면 `SCORE_THRESHOLD` 로 뺀다"로 막았다.
+   사용자가 설정한 규칙이 아니라 dust 를 없애려던 장치였다. 결정 5 의 규칙에서는 선정 종목의
+   강도가 0 이 되지 않고 퇴화 프레임은 균등 배분하므로, dust 도 제외도 생기지 않는다. 그래서
+   이 분기를 지웠다. `signal.score_threshold` 는 그대로 사용자 필터다.
 
 7. **정규화 값 조회는 catch-all default 대신 엄격 조회다**(1차 리뷰 P2-2 반영).
    `normalized_signals.get(key, value.value)` 는 조회가 빗나가면 **원시값**으로 떨어져서,
@@ -395,7 +406,7 @@ Phase exit:
 | [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_REVIEW` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · 2차 APPROVE 대상 `1e0b095` + P3 후속 커밋 1개 · 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 반영, 2차 APPROVE(P3 6 → 코드 2 반영, 문서 3 이관, 본문 1 리드). 커밋 7개(backend 3 + 생성 SDK 1 + 리뷰 반영 3). 31파일은 12절 상한(8파일)을 넘어 논리 단위로 쪼갰다 — 모델·브리지 / 세 요청 배선 / 스키마 엔드포인트, 그리고 CI `api:generate` 게이트가 요구하는 생성 SDK. 게이트: pytest 1494·ruff·pyright(duckdb 4건 기존) · frontend typecheck·lint·Vitest 639·build |
 | [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `APPROVED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 APPROVE(P3 4건 후속 커밋). 커밋 12개(1차 5 + 1차 리뷰 반영 6 + 2차 리뷰 반영 1, history 재작성 없음). 게이트: pytest·ruff·pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest 639·build. `database/tests` 는 base `fff33fd` 와 같은 41 failed/1268 passed/33 errors(기존 실패, 이 PR 무관) |
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `APPROVED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2` · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 반영, 2차 **APPROVE**(돌연변이 재실행 2 failed 확인, P3-07 이탈 타당). P2 둘 다 `_record_codec.py`의 은퇴 row 읽기 5줄이다: 1.1 row 테스트 0건(그 가지를 `raise`로 바꿔도 초록), 미지 `schema_version`이 fail-closed에서 silent 현재 버전 해석으로 바뀜. 게이트는 아래 Full gate |
-| [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `IN_REVIEW` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · `review_lang2_p2_04` 1차 REQUEST_CHANGES(P2 3·P3 5) → 반영 `28003cf1` · `review_lang2_p2_0405_r2` 2차 REQUEST_CHANGES(P2 1: `factor_score` 절댓값 비중이 `rank`·`direction: low`·공매도 쪽에서 방향 반전) → 원인 수정 `2a10798d`(선호 방향 거리 가중, zscore 차단 error 제거, 엄격 조회 테스트). 3차 리뷰 대기. 게이트·e2e 는 push tip 에서 재실행(PR 댓글) |
+| [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `IN_REVIEW` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · 1차 REQUEST_CHANGES(P2 3·P3 5) → `28003cf1` · 2차 REQUEST_CHANGES(P2 1·P3 1) → `2a10798d` · 3차 REQUEST_CHANGES(P2 1: 롱 바닥 `min(0, eligible 최저)` 가 최저 종목을 0 으로 만들어 1종목·동점 프레임이 빔, P3 1: 1.1 변경 범위 기록이 좁음) → 리드 요건 7개로 규칙 재정의(결정 5, 결정 6 폐기). 4차 리뷰 대기. 게이트·e2e 는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `WAITING` | — |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `WAITING` | — |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `WAITING` | — |
@@ -479,6 +490,7 @@ Phase exit:
 | `P2-02` | `review_lang2_p2_02` | 2 | `APPROVE` | 1차 findings 6건 전부 해소 확인. P1 은 세 각도로 실증 재현 — 문서 값 반영(세 정책이 각자 값과 서로 다른 `plan_hash`), 경로 간 일치(`run_pipeline` 의 plan 과 `explain` 의 plan 이 `missing_policy`·`plan_hash` 모두 동일), 가드 되돌리기(application 에서 `request.graph.missing_policy` 를 읽으면 AST 테스트 실패). 새 findings 3건 + 미해소 1건은 전부 P3 비차단이며 후속 커밋 하나로 반영: trace 의 충돌 진단을 `_resolve_environment_or_reject` 로 통일해 preview·run 과 같은 `portfolio.strategy.invalid` + `validation.issues` 구조로, `/factors/preview` fallback 회귀 테스트(mock 관측에 결측 셀이 없어 이중체 포트로 값 수준 고정 — plan 과 값이 같은 정책을 읽는지), `resolve_graph_missing_policy` domain 단위 테스트를 owner 옆에, 모듈 내부 전용 헬퍼를 `_missing_from_legacy_graphs` 로 개명(WORKFLOW P2-03 삭제 목록도 함께). 리뷰어 권고 1건(`x-deprecated` 해석 시점을 P3-01 acceptance 에 명시)은 P3-01 소관으로 남긴다 |
 | `P2-04` | `review_lang2_p2_04` | 1 | `REQUEST_CHANGES` | P2 3 · P3 5. 기능(look-ahead 없음·수치 정확·`spec_hash` 변화가 새 키 하나로 설명됨)은 맞음. **P2-1**: `weighting: factor_score` × `normalization: zscore` 에서 `abs()` 때문에 최악 종목이 최대 비중, `rank` 최하위 0점이 `1e-12` 바닥값으로 dust target → `strategy.portfolio.weighting_normalization_incompatible` error + 0점 종목 `SCORE_THRESHOLD` 제외. **P2-2**: 정규화 조회 default 가 원시값 → `_signal_value` 엄격 조회·진단 `ValueError`. **P2-3**: 추출한 rank 공식 값이 기존 테스트로 고정 안 됨(돌연변이 통과) → `CrossSectionalOperator.RANK`·`GroupOperator.RANK` 백분위 값 테스트. P3 3건 코드 반영, 2건 문서 기록. 반영 커밋 `28003cf1` |
 | `P2-04` | `review_lang2_p2_0405_r2` | 2 | `REQUEST_CHANGES` | P2 1 · P3 1. 1차 blocking 은 전부 되돌리기 실험으로 닫힘 확인, replay 드리프트 없음. **R2-P204-001(P2)**: 1차 P2-1 이 증상만 막혔다 — `_weight_scores` 의 `abs(composite_score)` 때문에 기본값 `rank` 에서 `direction: low` 는 최선 종목이 빠지고 최악이 최대 비중, `long_short` 공매도 쪽은 가장 강한 숏이 빠진다. 1차 error 의 `allowed=` 가 `rank` 를 대안으로 안내했다 → 원인 수정(결정 5), error 제거. **R2-P204-002(P3)**: 엄격 조회를 되돌려도 초록 → 강제 누락 테스트. 반영 커밋 `2a10798d` |
+| `P2-04` | `review_lang2_p2_0405` | 3 | `REQUEST_CHANGES` | P2 1 · P3 1. 방향 반전(R2)은 원인 수준에서 닫힘 확인, 되돌리기 실험 4건 red. **R3-P204-001(P2)**: 롱 바닥 `min(0, eligible 최저)` 때문에 eligible 최저 종목의 강도가 항상 0 이라 `SCORE_THRESHOLD` 로 빠진다 — eligible 1종목·전원 동점 프레임이 비고, `top_count: 1` + `low` 는 매 프레임 보유 0, 5종목 선정은 4종목 보유, `rank` 에서 `high`/`low` 비대칭. **R3-P204-002(P3)**: "1.1 과 달라지는 곳" 이 실제보다 좁다. 리드가 비중 규칙 요건 7개를 정했고 결정 5 를 그 요건을 만족하는 규칙으로 다시 썼다 |
 
 ## 검증 기록
 
@@ -492,6 +504,11 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-26 — P2-04 3차 리뷰(REQUEST_CHANGES, P2 1·P3 1) 반영. 리드가 정한 `factor_score` 비중
+  요건 7개(선정 종목 비중 0 금지, 퇴화 프레임 균등, 거울 대칭, 숏 대칭, 규칙 문서화, 1.1 차이
+  정정, 경계 테스트)를 만족하는 규칙으로 결정 5 를 다시 썼다. 강도는 선정 컷 바로 아래 eligible
+  비선정 종목과의 점수 차(없으면 선정 최저 − 평균 간격)다. 결정 6(강도 0 제외)은 폐기했다.
+  1.1 과 비중이 같은 경우가 "기준점이 정확히 0" 뿐이라는 사실과 P2-09 영향을 적었다.
 - 2026-09-26 — P2-04 2차 리뷰(REQUEST_CHANGES, P2 1·P3 1) 반영. 점수 비례 가중이 합성 점수의
   절댓값 대신 선호 방향 거리(롱은 `min(0, 최저 점수)` 바닥, 숏은 `max(0, 최고 점수)` 천장)를
   쓰게 고쳐 `rank`·`zscore`·`none` 모두에서 `direction: low` 와 공매도 쪽의 비중 반전을 없앴다.

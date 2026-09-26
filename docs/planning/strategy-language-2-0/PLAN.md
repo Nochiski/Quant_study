@@ -2,15 +2,15 @@
 plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
-current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P1-06,P2-01
-active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01]
-parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01]
-last_updated: 2026-09-26T21:31:59+09:00
+current_phase: P1,P2
+current_pr: P1-06,P2-01
+active_prs: [P1-06, P2-01]
+parallel_window: [P1-06, P2-01]
+last_updated: 2026-09-27T01:28:38+09:00
 planned_prs: 29
-merged_prs: 0
+merged_prs: 6
 approved_prs: 6
-progress_percent: 0
+progress_percent: 21
 ---
 
 # schema 1.2 · 그래프 표현 실시간 진행 계획
@@ -24,12 +24,12 @@ progress_percent: 0
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P1-06,P2-01` |
-| Active PR | `P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01` |
-| Progress | `0 / 29 merged (0%)` |
+| Current phase | `P1,P2` |
+| Current/next PR | `P1-06,P2-01` |
+| Active PR | `P1-06, P2-01` |
+| Progress | `6 / 29 merged (21%)` |
 | Approved | `6 / 29` |
-| Aggregated at | `2026-09-26 21:31 KST` |
+| Aggregated at | `2026-09-27 01:28 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -78,14 +78,14 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Planning package and contract docs | 1 | 0 | `APPROVED` |
-| P1 | In-screen friction removal on 1.1 | 6 | 0 | `IN_REVIEW` |
+| P0 | Planning package and contract docs | 1 | 1 | `MERGED` |
+| P1 | In-screen friction removal on 1.1 | 6 | 5 | `IN_REVIEW` |
 | P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_PROGRESS` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | `WAITING` |
-| **Total** |  | **29** | **0** | **0%** |
+| **Total** |  | **29** | **6** | **21%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -149,28 +149,28 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P0-01` | 기획 패키지·설계 spec·ADR/로드맵/SoT 개정 | 없음 | `APPROVED` | [#167](https://github.com/Nochiski/Quant_study/pull/167) · `review_lang2_p0_01` 5차 APPROVE(1~4차 REQUEST_CHANGES 전부 해소) |
+| [x] | `P0-01` | 기획 패키지·설계 spec·ADR/로드맵/SoT 개정 | 없음 | `MERGED` | [#167](https://github.com/Nochiski/Quant_study/pull/167) · `review_lang2_p0_01` 5차 APPROVE(1~4차 REQUEST_CHANGES 전부 해소) · main 머지 `b438e58d`(#167, 2026-09-27) |
 
 Phase exit:
 
-- [ ] `update-plan-progress.ps1 -Check` 통과, 상위 문서 링크 확인.
+- [x] `update-plan-progress.ps1 -Check` 통과, 상위 문서 링크 확인. (#167 머지, 2026-09-27)
 
 ## P1 — 화면 안에서 끝나는 마찰 제거
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `APPROVED` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `review_lang2_p1_01` 3차 APPROVE(1·2·3차 전부 APPROVE, blocking 0. 1차 P2 2·P3 6, 2차 새 P2 1·P3 5, 3차 P3 3 전부 반영 — 3차분 `ea7e2fa4`) · 게이트: typecheck·lint·Vitest 658·build·e2e 19/19 |
-| [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `APPROVED` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE(`db3bc079`까지, 1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2 2) + 5차 APPROVE(`ac3a3d0e` — SoT 표식 해소·`conflict_markers.py`·테스트 7건·CI backend step, blocking 0·P3 4, 코드 개선은 BACKLOG-008) |
-| [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `APPROVED` | [#177](https://github.com/Nochiski/Quant_study/pull/177) · `review_lang2_p1_03` 2차 APPROVE(1차 REQUEST_CHANGES 반영, 돌연변이 7건 실패 확인), 2차 P3 4건 후속 |
-| [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `APPROVED` | [#181](https://github.com/Nochiski/Quant_study/pull/181) · `review_lang2_p1_04` 4차 APPROVE (1·2·3차 REQUEST_CHANGES 차단 2·1·1, P3 7·3·2 전부 반영) |
-| [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `APPROVED` | [#188](https://github.com/Nochiski/Quant_study/pull/188) · `review_lang2_p1_05` 3차 APPROVE(1차 REQUEST_CHANGES P1 1·P2 2·P3 13 → 2차 REQUEST_CHANGES 새 P1 1(POSIX 잠금 덮어쓰기)·P3 8, 수정 `5e8e0af0` → 3차 APPROVE P2 1·P3 2, 추가분 `a55e7a67` 확인 P3 3, 3차 반영 `3755b186`·`a263276b`. SHA는 rebase 전 값, 현 tip `45f1c4a3`) · 게이트: pytest 1695·Vitest 733·e2e 25/25 |
-| [ ] | `P1-06` | Phase 1 감사 후속(문서): PLAN 진행 기록 정정, SoT 하한·e2e 잠금 행, 이월 항목 담당 지정 | P1-05 | `IN_REVIEW` | [#191](https://github.com/Nochiski/Quant_study/pull/191) · `review_lang2_p1_06` 1차 REQUEST_CHANGES(P2 2·P3 5) 반영, 재검토 대기 |
+| [x] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `MERGED` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `review_lang2_p1_01` 3차 APPROVE(1·2·3차 전부 APPROVE, blocking 0. 1차 P2 2·P3 6, 2차 새 P2 1·P3 5, 3차 P3 3 전부 반영 — 3차분 `ea7e2fa4`) · 게이트: typecheck·lint·Vitest 658·build·e2e 19/19 · main 머지 `3d6f2b42`(#168, 2026-09-27) |
+| [x] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `MERGED` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE(`db3bc079`까지, 1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2 2) + 5차 APPROVE(`ac3a3d0e` — SoT 표식 해소·`conflict_markers.py`·테스트 7건·CI backend step, blocking 0·P3 4, 코드 개선은 BACKLOG-008) · main 머지 `bee2a4fd`(#173, 2026-09-27) |
+| [x] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `MERGED` | [#177](https://github.com/Nochiski/Quant_study/pull/177) · `review_lang2_p1_03` 2차 APPROVE(1차 REQUEST_CHANGES 반영, 돌연변이 7건 실패 확인), 2차 P3 4건 후속 · main 머지 `9cef7f3d`(#177, 2026-09-27) |
+| [x] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `MERGED` | [#181](https://github.com/Nochiski/Quant_study/pull/181) · `review_lang2_p1_04` 4차 APPROVE (1·2·3차 REQUEST_CHANGES 차단 2·1·1, P3 7·3·2 전부 반영) · main 머지 `3c1f1ab7`(#181, 2026-09-27) |
+| [x] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `MERGED` | [#188](https://github.com/Nochiski/Quant_study/pull/188) · `review_lang2_p1_05` 3차 APPROVE(1차 REQUEST_CHANGES P1 1·P2 2·P3 13 → 2차 REQUEST_CHANGES 새 P1 1(POSIX 잠금 덮어쓰기)·P3 8, 수정 `5e8e0af0` → 3차 APPROVE P2 1·P3 2, 추가분 `a55e7a67` 확인 P3 3, 3차 반영 `3755b186`·`a263276b`. SHA는 rebase 전 값, 현 tip `45f1c4a3`) · 게이트: pytest 1695·Vitest 733·e2e 25/25 · main 머지 `7d525949`(#188, 2026-09-27) |
+| [ ] | `P1-06` | Phase 1 감사 후속(문서): PLAN 진행 기록 정정, SoT 하한·e2e 잠금 행, 이월 항목 담당 지정 | P1-05 | `IN_REVIEW` | [#191](https://github.com/Nochiski/Quant_study/pull/191) · `review_lang2_p1_06` 2차 APPROVE(`909ae273`, 1차 REQUEST_CHANGES P2 2·P3 5 반영). 이후 추가분 — main 병합 cascade, US-DM-06 스토리 e2e, 병합 리뷰 P3 문서 반영 — 은 리뷰 대기 |
 
 Phase exit:
 
 - [x] e2e 그래프 시나리오가 YAML 탭 전환 없이 통과. (Phase 1 감사 4절 (a) PASS — CI #188 `browser-e2e` 25/25)
 - [x] 노드 property·kind·연산자 설명 커버리지 100%. (감사 4절 (b) PASS — 발행은 생성기 구조로, 소비는 `screen-vocabulary.test.ts`로 고정)
-- [ ] SoT·책임분리 점검 서브에이전트 blocking 0. (감사 2026-09-21 BLOCKING 2 — DEFECT-P1X-001은 `ac3a3d0e`+cascade rebase, DEFECT-P1X-002는 P1-06이 해소. `ac3a3d0e`는 5차 APPROVE, P1-06 재검토 뒤 체크)
+- [ ] SoT·책임분리 점검 서브에이전트 blocking 0. (감사 2026-09-21 BLOCKING 2 — DEFECT-P1X-001은 `ac3a3d0e`+cascade rebase, DEFECT-P1X-002는 P1-06이 해소. `ac3a3d0e`는 5차 APPROVE, P0-01~P1-05는 main 머지. P1-06 머지 뒤 체크)
 
 ## P2 — backend schema 1.2
 
@@ -287,6 +287,17 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-27 — P0-01·P1-01~P1-05 main 머지. 머지 커밋 #167 `b438e58d`, #168 `3d6f2b42`, #173
+  `bee2a4fd`, #177 `9cef7f3d`, #181 `3c1f1ab7`, #188 `7d525949`. 그 전에 AI 어시스턴트 스택 15개·#193·
+  #195(유저 스토리 하네스)를 merge cascade(리뷰된 SHA 보존)로 P0-01부터 P1-06까지 올렸다. 병합이 드러낸
+  의미 충돌 네 건은 각 브랜치에서 고쳤다: AI 테스트의 편집기 대역(P1-02 핸들 계약), e2e 원문 읽기의
+  reveal 경합(`currentSource` 안정 읽기), 계약 패널 스토리 e2e(P1-03 화면 어휘), 어시스턴트 대본 골든
+  글자 수(P1-05 한글 진단). 인프라 기준선은 층마다 다시 찍었다.
+- 2026-09-27 — 병합 리뷰 P3 반영(P1-06): SoT e2e 잠금 행의 "B-05가 hunk를 복사" 문장을 병합 뒤 사실
+  (한 벌)로, `currentSource` 우회를 BACKLOG-007에, AI 적용 뒤 버튼 되돌리기 e2e 부재를 BACKLOG-009(담당
+  P3-03, 스토리 US-DM-09 `예정`)로, BACKLOG-008 줄 번호를 `:16-17`로. 하네스 문서도 P0-01 머지 뒤 사실로
+  맞췄다: US-CS-01 수용 기준을 P1-04 연산자 팔레트·P1-02 툴바 되돌리기로(e2e는 이미 그 흐름),
+  traceability 머리말·README 한계 절의 "lang2 WORKFLOW가 아직 main에 없다" 문장.
 - 2026-09-27 — P1-06 추가분(유저 스토리 하네스): P1-03~P1-05가 구현한 US-DM-06(화면의 말과 오류 문장을
   쉬운 한글로)을 `구현됨-e2e`로 올렸다. 스토리 e2e `frontend/e2e/stories/dm.readable-korean.spec.ts` 두
   건(`@story`·`@US-DM-06`)이 노드 종류·연산자·필드의 한글 이름과 설명, 노드 이름으로 말하는 삭제 거부,
@@ -556,6 +567,10 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   이미 적는다.
 - **위험성**: merge gate가 간헐 적색이 되어 재실행이 습관이 되면 진짜 회귀를 흘려보낸다.
 - **담당**: `P4-04`(JSON 탭 은퇴로 "read-only view에서 YAML로 돌아가는" 이 경로를 다시 쓴다).
+- **관련 우회**: 같은 현상(탭 전환 뒤 reveal이 한 틱 늦게 와 선택을 옮김)이 main 병합 중 브라우저 e2e에서도
+  나왔다. `frontend/e2e/workbench-helpers.ts`의 `currentSource`가 전체 선택·복사를 두 번 연속 같은 값이
+  나올 때까지 되풀이하게 해 막았다(`9a3e1fd0`). P4-04가 reveal 경로를 다시 쓸 때 이 우회를 걷을 수
+  있는지 함께 본다.
 
 ### BACKLOG-008: 충돌 표식 게이트가 일부 추적 텍스트를 건너뛰고, 주석이 검출 범위를 과장한다
 
@@ -568,7 +583,7 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
      텍스트에 표식을 커밋한다.
   3. 로컬에 추적하지 않는 `.orig`·`.rej`가 있는 상태에서 게이트를 돌린다.
   4. 주석을 믿고 정확히 7자인 setext 밑줄(`=======`)을 쓴다.
-- **에러 위치**: `tools/quant_study_dev/conflict_markers.py:15-16`(`MARKER` 위 주석), `SKIP_DIRECTORIES`·
+- **에러 위치**: `tools/quant_study_dev/conflict_markers.py:16-17`(`MARKER` 위 주석), `SKIP_DIRECTORIES`·
   `iter_candidate_files`(`root.rglob("*")` 열거), `BINARY_SUFFIXES`의 `.lock`, UTF-8 디코딩 실패 시 건너뜀.
 - **위험성**: 1·2는 표식이 조용히 통과한다(false negative). 지금 추적 파일 중 해당 경로·비 UTF-8은
   0개이고 `.lock` 4개 중 3개는 다른 step이 파싱해 깨지므로 실손은 reference `uv.lock` 하나다. 3은
@@ -579,6 +594,21 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **담당**: `P3-03`(CI 전체 green을 exit로 가진 PR). `git ls-files -z`로 추적 파일만 열거하고 디렉터리
   제외를 걷으며, `.lock`을 제외에서 빼고, `errors="replace"`로 읽으며, 주석을 "7자가 아닌 밑줄은
   잡지 않는다. 정확히 7자인 단독 줄은 git도 충돌 표식으로 본다"로 좁힌다.
+
+### BACKLOG-009: AI 제안을 적용한 뒤 툴바 "실행 취소"로 되돌리는 브라우저 e2e가 없다
+
+- **상황**: AI B-04의 제안 적용과 P1-02의 탭 밖 되돌리기 버튼이 main 병합으로 한 화면에 모였다. SoT 편집
+  이력 행은 제안 적용을 격리된 `replaceRange` 한 단계로 정하고, 단위 테스트
+  (`document-routes.test.tsx`의 "AI 어시스턴트 제안 적용 (B-04)")가 편집기 `undo`로 그 사실을 본다.
+  병합 리뷰가 P3로 남겼다.
+- **인풋**: 브라우저에서 사이드바 제안 카드의 "문서에 적용"을 누른 뒤 툴바 "실행 취소" 버튼을 누른다.
+- **에러 위치**: `frontend/e2e/assistant.workflow.spec.ts`·`frontend/e2e/stories/dm.ai-new-strategy.spec.ts`
+  — 적용까지만 보고 버튼 되돌리기를 누르지 않는다.
+- **위험성**: 버튼·단축키 배선(`useDocumentHistory` ↔ 제안 적용 훅)이 page에서 끊겨도 단위 테스트는
+  편집기를 직접 부르므로 초록이다. 사용자는 적용을 한 번에 되돌리지 못한다(silent 회귀).
+- **스토리**: US-DM-09(`예정`, e2e 담당 P3-03)에 수용 기준으로 잇는다.
+- **담당**: `P3-03`(e2e fixture를 1.2로 바꾸며 어시스턴트 e2e도 다시 도는 PR). 스토리 e2e를 더하고
+  US-DM-09를 `구현됨-e2e`로 올린다.
 
 ## 갱신 절차
 

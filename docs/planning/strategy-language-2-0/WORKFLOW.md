@@ -544,6 +544,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - BACKLOG-008: 충돌 표식 게이트(`tools/quant_study_dev/conflict_markers.py`)가 `git ls-files`로 추적
   파일만 열거하고, `.lock`과 비 UTF-8 텍스트도 검사하며, 주석이 7자 밑줄 검출을 사실대로 적는다.
   cp949·UTF-16·`.lock`·`build/`·`dist/` 표식 검출 테스트를 둔다.
+- BACKLOG-009: 사이드바 제안을 "문서에 적용"한 뒤 툴바 "실행 취소" 한 번으로 적용 전 원문으로 돌아가는
+  브라우저 스토리 e2e(`@story`·`@US-DM-09`)를 더하고 US-DM-09를 `구현됨-e2e`로 올린다.
 
 **Phase 3 exit**
 

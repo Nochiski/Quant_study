@@ -24,6 +24,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.backtest.facade.environment import resolve_environment
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
@@ -188,17 +189,27 @@ class BacktestRunService:
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - _resolve always fills it
             raise InvalidBacktestRunError("resolved run spec has no strategy")
-        for window in spec.metric_windows:
-            if window.start < strategy.data.start or window.end > strategy.data.end:
-                raise InvalidBacktestRunError(
-                    f"metric window exceeds strategy data range: {window.scope.value}"
-                )
         # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
-        engine = self._portfolio_design.preflight(PortfolioPreviewRequest(strategy))
+        # 해소 전 `spec.environment` 를 그대로 넘긴다 — preflight 는 문서만 검사하고, 문서
+        # 검증이 브리지보다 먼저여야 잘못된 문서가 코드화된 진단으로 거절된다.
+        engine = self._portfolio_design.preflight(
+            PortfolioPreviewRequest(strategy, environment=spec.environment)
+        )
         if not engine.compatible:
             raise InvalidBacktestRunError(
                 "strategy exceeds engine capabilities — " + _describe_engine_issues(engine)
             )
+        # 실행 설정을 여기서 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·tape·데이터 조회가
+        # 모두 같은 값을 읽어야 명시 `environment` 가 조용히 무시되지 않는다(P2-01).
+        environment = resolve_environment(strategy, spec.environment)
+        spec = replace(spec, environment=environment)
+        for window in spec.metric_windows:
+            if window.start < environment.start or window.end > environment.end:
+                raise InvalidBacktestRunError(
+                    "metric window exceeds the run range — "
+                    f"scope={window.scope.value} window={window.start}..{window.end} "
+                    f"run={environment.start}..{environment.end}"
+                )
         # TargetTape.strategy_hash 는 같은 spec 의 strategy_spec_hash 다. tape 없이도 provenance 를
         # 확정할 수 있고, tape 단계가 이 값을 다시 대조한다.
         executed_hash = strategy_spec_hash(strategy)
@@ -415,6 +426,11 @@ class BacktestRunService:
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - resolved before the thread starts
             raise InvalidBacktestRunError("resolved run spec has no strategy")
+        environment = spec.environment
+        if environment is None:  # pragma: no cover - start() pins it before the thread starts
+            raise InvalidBacktestRunError(
+                f"resolved run spec has no run environment — run_id={run_id}"
+            )
         try:
             # tape 단계: 원시 관측 로딩 + 팩터 평가 + TargetTape 컴파일. 실데이터에서 실행 시간의
             # 대부분을 차지하므로 취소 콜백을 파이프라인 checkpoint 에 그대로 건다.
@@ -425,7 +441,7 @@ class BacktestRunService:
                 # require_engine_compatible 은 start() 의 preflight 판정을 되풀이하는 심층 방어다 —
                 # 같은 순수 판정이라 정상 경로에서는 발동하지 않는다.
                 preview = self._portfolio_design.run_pipeline(
-                    PortfolioPreviewRequest(strategy),
+                    PortfolioPreviewRequest(strategy, environment=environment),
                     options=PortfolioPipelineOptions(require_engine_compatible=True),
                     cancelled=record.cancellation.is_set,
                     progress=self._tape_progress(record),
@@ -448,8 +464,8 @@ class BacktestRunService:
                 raise InvalidBacktestRunError("target tape does not contain any positions")
             dataset = self._data_source.load_backtest_dataset(
                 BacktestDataQuery(
-                    start=strategy.data.start,
-                    end=strategy.data.end,
+                    start=environment.start,
+                    end=environment.end,
                     security_ids=security_ids,
                     benchmark_security_id=spec.benchmark_security_id,
                 )

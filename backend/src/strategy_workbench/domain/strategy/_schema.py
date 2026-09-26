@@ -154,6 +154,34 @@ def strategy_document_schema() -> dict[str, Any]:
     }
 
 
+def dataclass_json_schema(
+    tp: type,
+    *,
+    schema_id: str,
+    constraints: Mapping[str, ScalarConstraint] | None = None,
+) -> dict[str, Any]:
+    """dataclass 하나에서 유도한 JSON Schema(타입·기본값·enum·format·필드 마커).
+
+    authoring 문서 스키마(`strategy_document_schema`)와 같은 빌더를 쓰지만 산출물이 다르다.
+    전략 문서의 제약 카탈로그·적용 조건표를 자동으로 읽지 않는다 — 다른 문서의 `/fee_bps` 가
+    전략 포인터와 우연히 겹쳐 남의 단위·범위를 입는 일을 막는다. 범위를 실으려면 호출자가
+    자기 포인터로 다시 건 `constraints` 를 넘긴다. 소유자는 dataclass 를 가진 노드이고
+    (P2-01 의 `RunEnvironment` 는 `domain.backtest`), 이 함수는 표기법만 제공한다.
+    """
+    builder = _SchemaBuilder(constraints or {}, {})
+    root = builder.dataclass_schema(tp, "")
+    return {
+        "$schema": SCHEMA_DIALECT,
+        "$id": schema_id,
+        "title": tp.__name__,
+        "type": "object",
+        "properties": root["properties"],
+        "required": root["required"],
+        "additionalProperties": False,
+        "$defs": builder.defs,
+    }
+
+
 def strategy_document_schema_hash(schema: dict[str, Any]) -> str:
     """sha256 of the canonical (sorted, compact) schema JSON; doubles as the HTTP ETag."""
     encoded = json.dumps(schema, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -177,9 +205,17 @@ def strategy_field_contracts() -> tuple[FieldContract, ...]:
 
 
 class _SchemaBuilder:
-    def __init__(self, constraints: Mapping[str, ScalarConstraint]) -> None:
+    def __init__(
+        self,
+        constraints: Mapping[str, ScalarConstraint],
+        applicability: Mapping[str, FieldApplicability] | None = None,
+    ) -> None:
         self._constraints = constraints
-        self._applicability = field_applicability_index()
+        # 전략 문서가 아닌 dataclass(`dataclass_json_schema`)는 빈 표를 넘겨 전략 포인터 표를
+        # 읽지 않는다.
+        self._applicability = (
+            field_applicability_index() if applicability is None else applicability
+        )
         self.defs: dict[str, dict[str, Any]] = {}
         self.contracts: list[FieldContract] = []
         self._seen: set[str] = set()

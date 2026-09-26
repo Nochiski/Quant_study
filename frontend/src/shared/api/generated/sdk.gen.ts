@@ -62,6 +62,9 @@ import type {
   GetFactorCatalogResponses,
   GetHealthData,
   GetHealthResponses,
+  GetRunEnvironmentSchemaData,
+  GetRunEnvironmentSchemaErrors,
+  GetRunEnvironmentSchemaResponses,
   GetStrategyData,
   GetStrategyDocumentContractData,
   GetStrategyDocumentContractErrors,
@@ -628,6 +631,20 @@ export const previewPortfolio = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * Run Environment Schema
+ *
+ * 실행 설정의 런타임 JSON Schema. ETag = 스키마 해시(일치하면 304).
+ */
+export const getRunEnvironmentSchema = <ThrowOnError extends boolean = false>(
+  options?: Options<GetRunEnvironmentSchemaData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    GetRunEnvironmentSchemaResponses,
+    GetRunEnvironmentSchemaErrors,
+    ThrowOnError
+  >({ url: "/api/v1/run-environments/schema", ...options });
 
 /**
  * List Strategies

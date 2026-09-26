@@ -397,6 +397,7 @@ export type BacktestRunSpec = {
    */
   benchmark_security_id?: string | null;
   core?: ExecutionCore;
+  environment?: RunEnvironment | null;
   /**
    * Initial Cash
    */
@@ -2591,6 +2592,7 @@ export type PortfolioPreview = {
  * PortfolioPreviewRequest
  */
 export type PortfolioPreviewRequest = {
+  environment?: RunEnvironment | null;
   spec: StrategySpec;
 };
 
@@ -3515,6 +3517,73 @@ export type RollingMetricPoint = {
 };
 
 /**
+ * RunEnvironment
+ *
+ * 한 번의 실행이 놓인 환경 — 시장·빈도·기간·유니버스·체결·비용·결측 정책(spec D6).
+ *
+ * 전략 문서가 아니라 실행이 소유하는 사실이다. 같은 전략을 다른 기간·유니버스·수수료로
+ * 돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도
+ * 전략 revision 이 늘지 않는다.
+ *
+ * enum 은 현재 소유 위치(`domain.strategy` 의 `Market`·`DataFrequency`·`ExecutionTiming`,
+ * `domain.factor` 의 `MissingPolicy`)를 그대로 읽는다. 물리 이동은 `DataStep`·`ExecutionStep`
+ * 이 사라지는 P2-03 이다 — 지금 옮기면 `domain.strategy` 가 재수출해야 하고 의존 화살표가
+ * 순환한다.
+ */
+export type RunEnvironment = {
+  /**
+   * End
+   */
+  end: string;
+  /**
+   * Fee Bps
+   */
+  fee_bps?: number;
+  frequency?: DataFrequency;
+  market?: Market;
+  missing?: MissingPolicy;
+  /**
+   * Participation Rate
+   */
+  participation_rate?: number;
+  /**
+   * Slippage Bps
+   */
+  slippage_bps?: number;
+  /**
+   * Start
+   */
+  start: string;
+  timing?: ExecutionTiming;
+  /**
+   * Universe Id
+   */
+  universe_id: string;
+};
+
+/**
+ * RunEnvironmentSchema
+ *
+ * 실행 설정(`RunEnvironment`)의 런타임 JSON Schema; `schema_hash` 가 ETag 다.
+ *
+ * 전략 authoring 문서 스키마(`StrategyDocumentSchema`)와 별개 산출물이다 — 문서에는
+ * `schema_version` 이 있고 실행 설정에는 없다. 프론트 실행 설정 패널이 기본값·enum 을 손으로
+ * 적지 않게 하는 경로다(spec D6).
+ */
+export type RunEnvironmentSchema = {
+  /**
+   * Schema
+   */
+  schema: {
+    [key: string]: unknown;
+  };
+  /**
+   * Schema Hash
+   */
+  schema_hash: string;
+};
+
+/**
  * RunManifest
  *
  * What a finished run was made of.
@@ -3544,6 +3613,11 @@ export type RunManifest = {
    * Engine Version
    */
   engine_version: string;
+  environment: RunEnvironment;
+  /**
+   * Environment Hash
+   */
+  environment_hash: string;
   /**
    * Fee Bps
    */
@@ -4551,6 +4625,7 @@ export type StrategyTraceRequest = {
    * As Of
    */
   as_of?: string | null;
+  environment?: RunEnvironment | null;
   /**
    * Factor Id
    */
@@ -6422,6 +6497,39 @@ export type PreviewPortfolioResponses = {
 
 export type PreviewPortfolioResponse =
   PreviewPortfolioResponses[keyof PreviewPortfolioResponses];
+
+export type GetRunEnvironmentSchemaData = {
+  body?: never;
+  headers?: {
+    /**
+     * If-None-Match
+     */
+    "if-none-match"?: string | null;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/run-environments/schema";
+};
+
+export type GetRunEnvironmentSchemaErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetRunEnvironmentSchemaError =
+  GetRunEnvironmentSchemaErrors[keyof GetRunEnvironmentSchemaErrors];
+
+export type GetRunEnvironmentSchemaResponses = {
+  /**
+   * Successful Response
+   */
+  200: RunEnvironmentSchema;
+};
+
+export type GetRunEnvironmentSchemaResponse =
+  GetRunEnvironmentSchemaResponses[keyof GetRunEnvironmentSchemaResponses];
 
 export type ListStrategiesData = {
   body?: never;

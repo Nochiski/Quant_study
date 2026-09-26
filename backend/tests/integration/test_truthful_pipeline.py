@@ -916,9 +916,9 @@ class _WideRangePort:
         return MockEquityDataAdapter.demo().load_raw_observations(widened)
 
 
-def test_sessions_outside_the_strategy_range_fail_closed() -> None:
+def test_sessions_outside_the_run_range_fail_closed() -> None:
     spec = _spec()
-    with pytest.raises(RawObservationContractError, match="outside the requested strategy range"):
+    with pytest.raises(RawObservationContractError, match="outside the requested run range"):
         _service(_WideRangePort()).run_pipeline(PortfolioPreviewRequest(spec))
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal, get_args
@@ -14,11 +14,22 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     MonthlyReturnPoint,
     RollingMetricPoint,
 )
+from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.strategy.facade.constraints import (
+    ScalarConstraint,
+    scalar_constraint_index,
+)
 from strategy_workbench.domain.strategy.facade.provenance import (
     StrategyProvenance,
     StrategySource,
 )
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import (
+    CATALOG_UNIVERSE,
+    DataFrequency,
+    ExecutionTiming,
+    Market,
+    StrategySpec,
+)
 
 
 class ExecutionCore(StrEnum):
@@ -38,6 +49,101 @@ class RunStatus(StrEnum):
 class WarningSeverity(StrEnum):
     INFO = "info"
     WARNING = "warning"
+
+
+# 실행 설정 수치 필드의 범위는 전략 제약 카탈로그(`domain/strategy/_constraints.py`)의
+# `/execution/*` 행이 이미 SoT 다. 값을 여기에 다시 적지 않고 필드 이름으로만 다시 건다 —
+# 같은 수치를 두 곳에 두면 한쪽이 조용히 stale 된다. `__post_init__` 검증과 런타임 스키마의
+# `minimum`/`maximum` 이 같은 행을 읽는다. P2-03 이 `execution` 섹션을 지울 때 이 행들의 최종
+# owner 를 `domain/backtest` 로 옮긴다.
+NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = (
+    "participation_rate",
+    "fee_bps",
+    "slippage_bps",
+)
+
+
+def _execution_constraint_rows(names: tuple[str, ...]) -> dict[str, ScalarConstraint]:
+    """전략 제약 카탈로그의 `/execution/<name>` 행을 실행 설정 필드 이름으로 다시 건다.
+
+    카탈로그에서 포인터 이름이 바뀌면 이 모듈은 import 시점에 죽는다 — 실패 지점이 테스트가
+    아니라 부팅이다. bare `KeyError: '/execution/fee_bps'` 로 떨어지면 무엇이 왜 사라졌는지
+    알 수 없으므로, 없어진 포인터와 현재 카탈로그를 메시지에 싣는다.
+    """
+    catalog = scalar_constraint_index()
+    wanted = {name: f"/execution/{name}" for name in names}
+    missing = sorted(pointer for pointer in wanted.values() if pointer not in catalog)
+    if missing:
+        raise LookupError(
+            "run environment references strategy constraint rows that no longer exist — "
+            f"missing={missing} fields={list(names)} available={sorted(catalog)}"
+        )
+    return {name: catalog[pointer] for name, pointer in wanted.items()}
+
+
+RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = _execution_constraint_rows(
+    NUMERIC_ENVIRONMENT_FIELDS
+)
+
+
+def _describe_bound(constraint: ScalarConstraint) -> str:
+    """`0 < x <= 1` 모양의 기대 범위 문장(진단 메시지용)."""
+    parts: list[str] = []
+    if constraint.minimum is not None:
+        parts.append(f"{constraint.minimum} {'<' if constraint.exclusive_minimum else '<='} x")
+    if constraint.maximum is not None:
+        parts.append(f"x {'<' if constraint.exclusive_maximum else '<='} {constraint.maximum}")
+    return " and ".join(parts) if parts else "any finite number"
+
+
+@dataclass(frozen=True, kw_only=True)
+class RunEnvironment:
+    """한 번의 실행이 놓인 환경 — 시장·빈도·기간·유니버스·체결·비용·결측 정책(spec D6).
+
+    전략 문서가 아니라 실행이 소유하는 사실이다. 같은 전략을 다른 기간·유니버스·수수료로
+    돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도
+    전략 revision 이 늘지 않는다.
+
+    enum 은 현재 소유 위치(`domain.strategy` 의 `Market`·`DataFrequency`·`ExecutionTiming`,
+    `domain.factor` 의 `MissingPolicy`)를 그대로 읽는다. 물리 이동은 `DataStep`·`ExecutionStep`
+    이 사라지는 P2-03 이다 — 지금 옮기면 `domain.strategy` 가 재수출해야 하고 의존 화살표가
+    순환한다.
+    """
+
+    market: Market = Market.KRX
+    frequency: DataFrequency = DataFrequency.DAILY
+    start: date
+    end: date
+    universe_id: str = field(metadata=CATALOG_UNIVERSE)
+    timing: ExecutionTiming = ExecutionTiming.NEXT_OPEN
+    participation_rate: float = 0.1
+    fee_bps: float = 15.0
+    slippage_bps: float = 10.0
+    missing: MissingPolicy = MissingPolicy.DROP
+
+    def __post_init__(self) -> None:
+        # 수치는 float 으로 정규화한다. `fee_bps=15` 와 `fee_bps=15.0` 은 같은 실행 설정인데
+        # canonical JSON 이 `15` 와 `15.0` 으로 갈려 `environment_hash` 가 달라진다.
+        for name in NUMERIC_ENVIRONMENT_FIELDS:
+            object.__setattr__(self, name, float(getattr(self, name)))
+        if self.start > self.end:
+            raise ValueError(
+                "run environment end must be on or after start — "
+                f"start={self.start} end={self.end} universe_id={self.universe_id!r}"
+            )
+        if not self.universe_id.strip():
+            raise ValueError(
+                "run environment requires a universe id — "
+                f"universe_id={self.universe_id!r} range={self.start}..{self.end}"
+            )
+        for name, constraint in RUN_ENVIRONMENT_CONSTRAINTS.items():
+            value = getattr(self, name)
+            if not constraint.satisfied_by(value):
+                raise ValueError(
+                    "run environment value is out of range — "
+                    f"field={name} value={value!r} expected={_describe_bound(constraint)} "
+                    f"({constraint.message})"
+                )
 
 
 @dataclass(frozen=True)
@@ -67,6 +173,9 @@ class BacktestRunSpec:
 
     strategy: StrategySpec | None = None
     strategy_source: StrategySource | None = None
+    # 실행 설정. 없으면 서비스가 1.1 문서에서 브리지로 만든다(P2-01). 주어지면 문서의
+    # `data`·`execution` 보다 우선한다. P2-03 에서 필수가 된다.
+    environment: RunEnvironment | None = None
     core: ExecutionCore = ExecutionCore.RUST
     initial_cash: float = 100_000_000.0
     benchmark_security_id: str | None = None
@@ -111,6 +220,10 @@ class RunManifest:
     fee_bps: float
     slippage_bps: float
     participation_rate: float
+    # 이 run 이 실제로 쓴 실행 설정과 그 hash. `strategy_hash` 와 별개 축이라, 같은 전략을
+    # 다른 기간·비용으로 돌린 두 run 을 매니페스트만 보고 구분할 수 있다.
+    environment: RunEnvironment
+    environment_hash: str
     strategy_provenance: StrategyProvenance
     warnings: tuple[DataWarning, ...] = ()
     schema_version: str = "backtest-run-v2"
@@ -128,6 +241,23 @@ class RunManifest:
                 f"provenance.kind={self.strategy_provenance.kind.value} "
                 f"strategy_id={self.strategy_provenance.strategy_id} "
                 f"revision={self.strategy_provenance.revision}"
+            )
+        # 비용·참여율은 `environment` 가 owner 다. 평면 필드는 1.1 소비자 호환으로 남아 있을
+        # 뿐이라 두 축이 갈리면 리포트가 읽는 축에 따라 같은 run 의 수수료가 달라진다. 평면
+        # 필드 제거는 소비자 정리가 끝나는 P2-03 이다.
+        divergent = {
+            name: (getattr(self, name), getattr(self.environment, name))
+            for name in NUMERIC_ENVIRONMENT_FIELDS
+            if getattr(self, name) != getattr(self.environment, name)
+        }
+        if divergent:
+            raise ValueError(
+                "manifest records two execution cost models for one run — "
+                f"run_id={self.run_id} environment_hash={self.environment_hash} "
+                + " ".join(
+                    f"{name}: manifest={flat!r} environment={owned!r}"
+                    for name, (flat, owned) in sorted(divergent.items())
+                )
             )
 
 

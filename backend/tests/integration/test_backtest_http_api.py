@@ -205,6 +205,9 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
         "annualization_days": 252,
         "initial_cash": 100_000_000.0,
         "strategy_source": None,
+        # 요청 본문에 실행 설정을 주지 않으면 접수된 요청도 None 을 그대로 보존한다 —
+        # 브리지로 해소한 값은 run spec 에만 박히고 매니페스트로 나간다(P2-01).
+        "environment": None,
     }
 
     not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
@@ -306,7 +309,13 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
     assert replay_state["status"] == "completed", replay_state
     replay_result = client.get(f"/api/v1/backtests/{replay_run_id}/result")
     assert replay_result.status_code == 200
-    assert replay_result.json()["manifest"]["run_spec"] == accepted_request.json()
+    # 접수된 요청은 그대로 다시 제출할 수 있는 원본이라 `environment` 가 None 으로 남고,
+    # 매니페스트의 run spec 은 브리지로 해소한 실행 설정을 담는다(P2-01).
+    manifest_run_spec = replay_result.json()["manifest"]["run_spec"]
+    assert manifest_run_spec["environment"] == replay_result.json()["manifest"]["environment"]
+    assert {k: v for k, v in manifest_run_spec.items() if k != "environment"} == {
+        k: v for k, v in accepted_request.json().items() if k != "environment"
+    }
 
 
 def test_start_accepts_the_run_before_raw_observations_are_loaded(tmp_path: Path) -> None:
@@ -810,6 +819,50 @@ def test_run_resource_openapi_declares_typed_not_found_and_not_ready_errors() ->
     assert result_responses["409"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "BacktestResultNotReadyResponse"
     )
+
+
+def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
+    """실행 설정 검증은 데이터를 읽지 않는 검사라 접수 단계에 있어야 한다(이슈 #158 계약).
+
+    없으면 202 로 접수된 뒤 run thread 가 `backtest.run.internal` 로 늦게 죽어, 클라이언트는
+    어느 필드가 왜 틀렸는지 알 수 없고 화면은 성공으로 표시한 뒤 깨진다(리뷰 P1).
+    """
+    client = TestClient(build_http_app())
+    environment = {
+        "market": "KRX",
+        "frequency": "daily",
+        "start": "2026-01-02",
+        "end": "2026-02-20",
+        "universe_id": "krx.common-stock",
+        "timing": "next_open",
+        "participation_rate": 0.1,
+        "fee_bps": 15.0,
+        "slippage_bps": 10.0,
+        "missing": "drop",
+    }
+    body = _run_body(client, "python")
+
+    # 422 본문의 `input` 은 요청한 environment 객체를 통째로 되돌려주므로 모든 필드 이름이
+    # 응답 텍스트에 들어 있다. 진단이 어느 필드를 지목하는지 보려면 `msg` 로 좁혀야 한다.
+    for field_name, bad, expected in (
+        ("participation_rate", 50.0, "field=participation_rate"),
+        ("fee_bps", -1.0, "field=fee_bps"),
+        ("start", "2026-12-31", "end must be on or after start"),
+        ("universe_id", "   ", "requires a universe id"),
+    ):
+        response = client.post(
+            "/api/v1/backtests",
+            json={**body, "environment": {**environment, field_name: bad}},
+        )
+        assert response.status_code == 422, (field_name, response.text)
+        detail = response.json()["detail"]
+        assert len(detail) == 1, (field_name, detail)
+        assert expected in detail[0]["msg"], (field_name, detail[0]["msg"])
+        # 현재 `loc` 은 environment 객체까지만 가리킨다. 필드 단위 표면은 P3-02 결정 항목이다.
+        assert detail[0]["loc"][-1] == "environment", (field_name, detail[0]["loc"])
+
+    accepted = client.post("/api/v1/backtests", json={**body, "environment": environment})
+    assert accepted.status_code == 202, accepted.text
 
 
 def test_tape_stage_progress_advances_monotonically_within_a_bounded_event_count() -> None:

@@ -28,6 +28,10 @@ from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataPort,
     FactorMetadataSnapshot,
 )
+from strategy_workbench.domain.backtest.facade.environment import (
+    RunEnvironment,
+    resolve_environment,
+)
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -240,6 +244,11 @@ class PortfolioDesignService:
         시간이 데이터 구간·유니버스 크기에 비례하지 않는다 — 백테스트 시작 요청이 즉시 202 를
         돌려주기 위한 사전 검사다(이슈 #158). 데이터에 의존하는 실패(관측 부재·계약 위반·스냅샷
         불일치·비유한 계산)는 여기서 잡히지 않는다.
+
+        **`request.environment` 를 읽지 않는다.** 문서만 보는 검사라 호출자가 해소 전 값을 넘겨도
+        판정이 같다(`backtest_run` 은 브리지가 validator 보다 먼저 터지지 않게 그렇게 넘긴다).
+        `_prepare` 가 실행 설정을 읽게 되는 시점에는 이 전제가 깨지므로 두 호출부가 같은 값을
+        넘기는지 다시 봐야 한다 — WORKFLOW P2-03 결정 항목.
         """
 
         # 호환성은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게 명시한다.
@@ -267,14 +276,17 @@ class PortfolioDesignService:
 
         spec = request.spec
         prepared = self._prepare(spec, pipeline_options, checkpoint=checkpoint)
+        # 브리지는 `_prepare` 의 `validate_strategy` 뒤에 부른다 — 잘못된 문서는 코드화된
+        # 진단으로 거절되어야 하고, 그 판정의 owner 는 validator 다.
+        environment = resolve_environment(spec, request.environment)
         engine = prepared.engine
         metadata = prepared.metadata
         plans = prepared.plans
         raw_query = RawObservationQuery(
-            market=spec.data.market.value,
-            universe_id=spec.data.universe_id,
-            start=spec.data.start,
-            end=spec.data.end,
+            market=environment.market.value,
+            universe_id=environment.universe_id,
+            start=environment.start,
+            end=environment.end,
             field_ids=_required_field_ids(spec, plans),
             # Plans count as_of itself; the port counts sessions strictly before start.
             history_sessions_before_start=max(
@@ -317,7 +329,7 @@ class PortfolioDesignService:
                 expected=metadata.data_snapshot_id,
                 actual=raw.data_snapshot_id,
             )
-        _reject_sessions_outside_strategy_range(raw, spec, checkpoint=checkpoint)
+        _reject_sessions_outside_run_range(raw, environment, checkpoint=checkpoint)
         schedule = compile_rebalance_schedule(spec, raw.sessions, checkpoint=checkpoint)
         pipeline_options = _resolve_default_trace_date(pipeline_options, schedule)
         _validate_loaded_trace_scope(
@@ -800,31 +812,31 @@ def _reject_non_numeric_factor_outputs(
         raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
 
 
-def _reject_sessions_outside_strategy_range(
+def _reject_sessions_outside_run_range(
     raw: RawObservationSet,
-    spec: StrategySpec,
+    environment: RunEnvironment,
     *,
     checkpoint: Callable[[], None],
 ) -> None:
-    """Sessions must stay inside `spec.data.start..end` (fail-closed, D-004).
+    """Sessions must stay inside `environment.start..end` (fail-closed, D-004).
 
     A wider answer is fail-open: `compile_target_tape` would emit frames whose execution date has
-    no bar in the backtest dataset, which `application/backtest_run` queries for the strategy
-    range alone.
+    no bar in the backtest dataset, which `application/backtest_run` queries for the run range
+    alone.
     """
     outside = tuple(
         session
         for session in _checkpointed(raw.sessions, checkpoint)
-        if not spec.data.start <= session <= spec.data.end
+        if not environment.start <= session <= environment.end
     )
     if not outside:
         return
     raise RawObservationContractError(
-        "raw observation sessions fall outside the requested strategy range — "
-        f"expected={spec.data.start}..{spec.data.end} "
+        "raw observation sessions fall outside the requested run range — "
+        f"expected={environment.start}..{environment.end} "
         f"actual={raw.sessions[0]}..{raw.sessions[-1]} "
         f"outside={outside[:5]} outside_count={len(outside)} "
-        f"universe_id={spec.data.universe_id!r} snapshot={raw.data_snapshot_id!r}"
+        f"universe_id={environment.universe_id!r} snapshot={raw.data_snapshot_id!r}"
     )
 
 

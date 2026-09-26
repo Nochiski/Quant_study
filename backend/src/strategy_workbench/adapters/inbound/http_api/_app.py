@@ -84,6 +84,7 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     InvalidStrategyDraftError,
     ReviseDocumentRequest,
     RevisionDiff,
+    RunEnvironmentSchema,
     SaveDocumentRequest,
     SaveStrategyDraftRequest,
     StrategyAuthoringService,
@@ -918,6 +919,23 @@ def create_app(
     ) -> StrategyDocumentSchema | Response:
         """Runtime JSON Schema of the authoring document. ETag = schema hash (304 on match)."""
         schema = strategy_authoring.schema()
+        etag = _etag(schema.schema_hash)
+        if if_none_match is not None and _matches(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        return schema
+
+    @app.get(
+        "/api/v1/run-environments/schema",
+        operation_id="getRunEnvironmentSchema",
+        response_model=RunEnvironmentSchema,
+        responses={304: {"description": "Not modified (ETag matched If-None-Match)"}},
+    )
+    def run_environment_schema(
+        response: Response, if_none_match: Annotated[str | None, Header()] = None
+    ) -> RunEnvironmentSchema | Response:
+        """실행 설정의 런타임 JSON Schema. ETag = 스키마 해시(일치하면 304)."""
+        schema = strategy_authoring.run_environment_schema()
         etag = _etag(schema.schema_hash)
         if if_none_match is not None and _matches(if_none_match, etag):
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})

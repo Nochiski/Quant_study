@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: IN_PROGRESS
+project_status: IN_REVIEW
 current_phase: P1,P2
 current_pr: P1-06,P2-01
 active_prs: [P1-06, P2-01]
 parallel_window: [P1-06, P2-01]
-last_updated: 2026-09-27T01:44:25+09:00
+last_updated: 2026-09-27T03:25:45+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 6
@@ -23,13 +23,13 @@ progress_percent: 21
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P1,P2` |
 | Current/next PR | `P1-06,P2-01` |
 | Active PR | `P1-06, P2-01` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `6 / 29` |
-| Aggregated at | `2026-09-27 01:44 KST` |
+| Aggregated at | `2026-09-27 03:25 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -48,8 +48,9 @@ progress_percent: 21
 - 결합 정규화는 `signal.normalization`(기본 `rank`)이 소유한다. 1.1에서 올라온 문서는 `none`을
   명시해 실행 의미를 보존한다.
 - 그래프 라이브러리 도입은 P6-01 ADR이 결정한다. 레시피 빌더(P5)가 먼저 비전공자 경로를 닫는다.
-- P2 backend PR은 `backend/openapi.json`만 재생성하고 frontend generated SDK는 P3-01이 갱신한다.
-  P2 스택은 backend gate만 merge gate로 삼는다.
+- 2026-09-20 개정(P2-01): OpenAPI를 바꾸는 backend PR은 `frontend/src/shared/api/generated`도 같은
+  PR에서 재생성해 별도 커밋으로 넣는다. CI `frontend` job의 `api:generate` diff 게이트 때문이다.
+  생성 산출물만 넣고 소비자 배선은 P3-01 그대로다. `browser-e2e` job은 계속 P3-03의 exit 조건이다. P2 스택은 backend gate만 merge gate로 삼는다.
 - P1 스택과 P2 스택은 독립이라 병렬 진행할 수 있다. P3-01은 P1 스택 끝(P1-06)·P2-09 둘 다 merge 뒤 시작한다.
 - reviewer 서브에이전트는 Opus로만 배정한다. Phase 종료마다 SoT·책임분리 점검 서브에이전트를 돌린다.
 - 완료 정의는 spec 5절의 6항이다. 특히 퀀트 아이디어 5개(12-1 모멘텀, 저PBR+고ROE, 20일 이평 돌파,
@@ -80,7 +81,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 1 | `MERGED` |
 | P1 | In-screen friction removal on 1.1 | 6 | 5 | `IN_REVIEW` |
-| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_PROGRESS` |
+| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_REVIEW` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
@@ -145,6 +146,44 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 
 ---
 
+### P2 스택
+
+| 항목 | 값 |
+|---|---|
+| PR | `P2-01` |
+| Intent | 실행 설정을 전략 문서 밖에서 받을 자리를 만든다. 1.1과 완전 호환(브리지) |
+| Acceptance | WORKFLOW P2-01 |
+| Non-goals | StrategySpec 변경, `missing_policy`(P2-02), enum 물리 이동(P2-03), frontend 소비자 배선(P3-01) |
+| Branch/worktree | `feat/lang2-p2-01-run-environment` / `wt-lang2-p2-01` |
+| Base SHA | `15f8ca8` (`docs/strategy-language-2-0-plan` tip) |
+| Head SHA | 2차 리뷰 대상 `1e0b095` + P3 후속 커밋 1개(이 PLAN 갱신과 같은 커밋) |
+| Diff stat | 커밋 4개 · 31파일(신규 7). `92b304e` 모델·canonical hash·브리지·런타임 스키마(10파일) → `6b451ef` preview·trace·run 배선(16파일) → `a7bf368` 스키마 엔드포인트·OpenAPI(6파일) → `54af48c` 생성 SDK(3파일) |
+| Focused tests | `uv run pytest tests/domain/test_run_environment.py tests/application/test_run_environment_wiring.py tests/architecture tests/integration/test_run_environment_schema_http_api.py -q` |
+| 제약사항 | `run_fingerprint` 표기가 바뀐다 — `run_spec`에 `environment` 키가 늘어 같은 입력의 지문이 P2-01 이전과 다르다(실측 `258b4637…` → `7074f1aa…`). `run_fingerprint`를 읽는 캐시 lookup은 코드베이스에 없어 잘못된 캐시 히트는 불가능하고, 영향은 감사 축이다: P2-01 이전에 저장된 매니페스트의 지문은 재계산 대상이 아니다. 지문에 표기 버전을 넣을지는 캐시 도입 시점(P2-09)에 정한다. 매니페스트의 `fee_bps`·`slippage_bps`·`participation_rate` 평면 필드는 `environment`와 중복이지만 호환을 위해 남긴다(대조로 불일치를 막고, 제거는 P2-03) |
+| Full gate | backend `uv run pytest -q`(1480 passed, 13 skipped) · `ruff check src tests` · `ruff format --check`(변경 30파일) · `pyright`(duckdb 미설치 4건만, 기존) / frontend `npm run typecheck`·`lint`·`test`(639, 57파일)·`build` |
+
+작업 파일(신규 7 + 수정 24):
+
+- 신규 backend src — `domain/backtest/_bridge.py`, `domain/backtest/_schema.py`,
+  `domain/backtest/facade/environment.py`
+- 신규 backend tests — `tests/domain/test_run_environment.py`,
+  `tests/application/test_run_environment_wiring.py`,
+  `tests/architecture/test_run_environment_ownership.py`,
+  `tests/integration/test_run_environment_schema_http_api.py`
+- domain — `backtest/_models.py`, `backtest/_canonical.py`, `backtest/facade/__init__.py`,
+  `strategy/_schema.py`, `strategy/facade/schema.py`, `strategy/facade/specification.py`
+- application — `portfolio_design/_models.py`·`_service.py`·`_trace_models.py`·`_trace_service.py`·
+  `facade/__init__.py`, `backtest_run/_service.py`, `strategy_authoring/_service.py`·
+  `facade/__init__.py`·`facade/authoring.py`
+- adapters — `inbound/http_api/_app.py`, `outbound/backtest_engine/_adapter.py`
+- 계약 산출물 — `backend/openapi.json`, `frontend/src/shared/api/generated/{index.ts,sdk.gen.ts,types.gen.ts}`
+- 기존 테스트 갱신 — `tests/domain/test_backtest_fingerprint.py`,
+  `tests/test_backtest_artifact_store.py`, `tests/test_target_tape_strategy.py`,
+  `tests/integration/test_truthful_pipeline.py`·`test_backtest_http_api.py`·
+  `test_backtest_strategy_reference_http_api.py`
+
+---
+
 ## P0 — 기획 패키지와 계약 문서
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
@@ -176,7 +215,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_PROGRESS` | 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` |
+| [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_REVIEW` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · 2차 APPROVE 대상 `1e0b095` + P3 후속 커밋 1개 · 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 반영, 2차 APPROVE(P3 6 → 코드 2 반영, 문서 3 이관, 본문 1 리드). 커밋 7개(backend 3 + 생성 SDK 1 + 리뷰 반영 3). 31파일은 12절 상한(8파일)을 넘어 논리 단위로 쪼갰다 — 모델·브리지 / 세 요청 배선 / 스키마 엔드포인트, 그리고 CI `api:generate` 게이트가 요구하는 생성 SDK. 게이트: pytest 1494·ruff·pyright(duckdb 4건 기존) · frontend typecheck·lint·Vitest 639·build |
 | [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `WAITING` | — |
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `WAITING` | — |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `WAITING` | — |
@@ -278,6 +317,8 @@ Phase exit:
 | `P1-06` | `review_lang2_p1_06` | 2차 | `APPROVE` | `909ae273` 판정. 1차 P2 2건(P1-02 `ac3a3d0e` 리뷰 대기 기록, BACKLOG의 WORKFLOW acceptance 예약)과 P3 5건 반영 확인. 그 뒤 추가분(병합 cascade·US-DM-06 스토리 e2e·병합 리뷰 P3 문서)은 별도 확인 |
 | `P0-01`~`P1-06` 병합 | `review_lang2_p1_06` | 병합 cascade | `APPROVE` | blocking 0 · P3 3. main(AI 스택 15개·#193·#195)을 7개 PR에 올린 병합 커밋과 정정 커밋만 봤다. 병합이 PR 고유 변경을 하나도 되돌리지 않았고(층마다 옛·새 범위 추가·삭제 줄 대조), AI 제안 적용은 P1-02 편집 이력 계약의 격리된 전체 교체 한 단계로 들어가며, 단축키 분기는 겹치지 않고, SoT 3-way 결과에 이중 owner·누락이 없다. 의미 충돌 수정 4건 중 테스트를 약화한 것은 없고(`9815b40b`는 단언 강화), 기준선 변화는 전부 P1 기능으로 설명된다. P3: SoT e2e 행의 "B-05가 hunk를 복사" 문장, AI 적용 → 되돌리기 버튼 브라우저 e2e 부재(BACKLOG-009), `currentSource` 우회를 BACKLOG-007에 잇기 — 전부 P1-06 `229eed5f`에서 반영 |
 
+| `P2-01` | `review_lang2_p2_01` | 1 | `REQUEST_CHANGES` | P0 1 · P1 1 · P2 4 · P3 3. **P0**: 명시 `environment`가 run의 tape 파이프라인(`backtest_run/_service.py`의 `preflight`·`run_pipeline`)에 미전달 — 데이터셋·엔진·매니페스트는 명시값을, 관측 조회·tape는 문서 브리지 값을 써서 preview가 422로 거절하는 유니버스를 run이 completed로 기록. **P1**: 명시 `environment`가 제약 검증 우회 — 범위 밖 값이 202 접수 뒤 `backtest.run.internal`로 늦게 실패, 런타임 스키마에도 범위 없음. **P2 4**: 지문 표기 변경 미기록, `environment_hash`의 int/float 비대칭, 매니페스트 비용 3필드가 `environment`와 중복·미대조(fixture가 이미 불일치), `engine_portfolio` PARTIAL_FILL 과소 선언 방향 미기록. **P3 3**: trace 메시지 미갱신, 해시 분리 테스트에 `start` 누락, 범용 빌더 owner. 반영: 파이프라인 전달 + architecture 테스트를 AST 전달 검사로 확장, `RunEnvironment.__post_init__` 검증(범위는 `_constraints.py` `/execution/*` 행 재사용)·float 정규화, 매니페스트 비용 축 대조, 문서 검증 → 브리지 순서 정정(부수 회귀 6건), P2-03에 방향·결정 항목 |
+| `P2-01` | `review_lang2_p2_01` | 2 | `APPROVE` | 1차 10건 전부 해소 확인(재현 2개 재실행, 되돌리기 실험이 정확히 2건 실패). 새 findings 6건은 전부 P3·비차단. 코드 2건 반영 — 새 HTTP 테스트의 필드 단언이 사실상 항상 참(422 `input`이 요청 객체를 되돌려줘 모든 필드명이 본문에 있음) → `detail[0]["msg"]`·`loc` 기준으로 좁힘, `RUN_ENVIRONMENT_CONSTRAINTS`의 import 시점 bare `KeyError` → 누락 포인터·카탈로그를 실은 명시 `LookupError`. 문서 3건 이관 — P2-03에 "`preflight`가 `environment`를 받지만 읽지 않음"(두 호출부 값 동일성 가드 강화 또는 시그니처 정리), P3-02에 명시 `environment` 422의 필드 단위 표면 결정과 "범위 SoT는 `/run-environments/schema`, OpenAPI `RunEnvironment`에는 범위 없음". 나머지 1건(PR 본문의 수치·동작 변화 문장)은 리드가 처리 |
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
@@ -287,6 +328,11 @@ Phase exit:
 | `P1-05` | cascade tip `45f1c4a3`, 위와 같은 게이트 + `npm run test:e2e`(머신 잠금 아래) | pytest 1695 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 733/733 · e2e 25/25 | 2026-09-26 |
 | `P1-06` | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` | `PLAN.md is consistent: 0/29 merged, 6 approved`(P1-02 5차 APPROVE 반영 뒤. 1차 리뷰 반영 시점에는 P1-02가 `ac3a3d0e` 리뷰 대기라 5) · 충돌 표식 0 | 2026-09-26 |
 
+| `P2-01` | `uv run pytest -q` (backend) | 1480 passed, 13 skipped | 2026-09-20 |
+| `P2-01` | `uv run pytest -q` (backend, 리뷰 반영 후) | 1493 passed, 13 skipped | 2026-09-21 |
+| `P2-01` | `uv run ruff check src tests` · `ruff format --check`(변경 30파일) | 통과 | 2026-09-20 |
+| `P2-01` | `uv run pyright` | 4 errors — 전부 `duckdb` 미설치(기존), 신규 파일 0 | 2026-09-20 |
+| `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
 - 2026-09-27 — P0-01·P1-01~P1-05 main 머지. 머지 커밋 #167 `b438e58d`, #168 `3d6f2b42`, #173
@@ -408,6 +454,36 @@ Phase exit:
   핸들에서 제거했다. 3차 REQUEST_CHANGES: 포커스 링 클립을 고치려 넓힌 스크롤포트가 검증
   버튼 하단 클릭을 가로채 `outline-offset: -2px`(inset)로 교체하고 actionability e2e 단언을
   추가했다. 4차 APPROVE(코드 결함 0).
+- 2026-09-21 — P1-03 구현·1차 리뷰 반영·2차 APPROVE: PR #177. 연산자 정의 레지스트리
+  (`domain/factor/_operators.py`, 키 `(kind, operator)` 23개)와 runtime schema의 `x-description-key`·
+  `x-operator`, `GET /api/v1/strategy-documents/operators`를 backend가 소유하고 화면 어휘 문장은
+  frontend i18n이 렌더한다. Form·Graph 라벨이 키 대신 이름을 보인다. 1차 리뷰가 잡은 차단 2건
+  (en 로케일 한글 계산식, 시간축 계산식의 `lag` 누락)과 공회전하던 `output_type_rule` 대조 테스트를
+  고치고 2차 APPROVE. 스코프 밖 관찰은 BACKLOG-001.
+- 2026-09-21 — P2-01 2차 리뷰 APPROVE. 새 findings 6건은 전부 P3다. 코드 2건을 반영했다 —
+  새 HTTP 테스트의 `assert field_name in response.text`는 422 본문의 `input`이 요청한
+  environment 객체를 통째로 되돌려주므로 **틀린 필드가 보고돼도 통과**했고, `detail[0]["msg"]`와
+  `loc` 기준으로 좁혔다. `RUN_ENVIRONMENT_CONSTRAINTS`가 모듈 수준에서
+  `scalar_constraint_index()[pointer]`를 불러 포인터 rename 시 부팅이 맥락 없는 `KeyError`로 죽던
+  것을, 누락 포인터와 현재 카탈로그를 실은 `LookupError`로 바꾸고 테스트를 붙였다. 문서 3건은
+  WORKFLOW P2-03·P3-02 결정 항목으로 이관했고, PR 본문 갱신 1건은 리드가 맡는다.
+- 2026-09-21 — P2-01 1차 리뷰(REQUEST_CHANGES, P0 1·P1 1·P2 4·P3 3) 반영. **P0**: 명시
+  `environment`가 run의 tape 파이프라인(`backtest_run/_service.py`의 `preflight`·`run_pipeline`)에
+  전달되지 않아, 데이터셋·엔진·매니페스트는 명시값을 쓰는데 관측 조회·tape만 문서 브리지 값으로
+  되돌아갔다. preview가 422로 거절하는 유니버스를 run이 completed로 기록했다. architecture 테스트를
+  "`PortfolioPreviewRequest`를 `environment` 없이 만들지 않는다"(AST)로 확장해 전달 누락 자체를
+  고정했다 — 기존 검사는 `spec.data.*` 읽기만 봐서 이 계열에 무력했다. **P1**: `RunEnvironment`에
+  `__post_init__` 검증을 넣어 범위를 벗어난 명시 설정이 접수 단계 422가 된다(이전에는 202 접수 뒤
+  `backtest.run.internal`). 수치 범위는 `_constraints.py`의 `/execution/*` 행을 필드 이름으로 다시
+  걸어 검증과 런타임 스키마가 같은 행을 읽는다. **P2**: 수치 float 정규화(`fee_bps=15`와 `15.0`의
+  hash 동일), 매니페스트 비용 축 대조. **부수**: `__post_init__` 검증이 브리지를 통해 문서 오류를
+  코드화된 진단보다 먼저 터뜨려 6건이 회귀했고, 세 호출부 모두 "문서 검증 → 브리지" 순서로 고쳤다.
+- 2026-09-21 — P2-01 기록: `run_fingerprint` 표기가 바뀌어 P2-01 이전 매니페스트의 지문은 재계산
+  대상이 아니다(`run_spec`에 `environment` 키가 늘었다). 캐시 lookup이 없어 잘못된 히트는 불가능하고
+  영향은 감사 대조뿐이다. 지문 표기 버전 도입 여부는 캐시가 생기는 P2-09에서 정한다. WORKFLOW
+  P2-03에 잔여 이관 항목의 **과소 선언 방향**(문서 1.0 + 환경 0.1이면 `PARTIAL_FILL`이 빠진다)과
+  결정 항목 3개(범용 스키마 빌더 owner, 실행 설정 수치 범위 행 owner, 실행 설정 스키마의 서빙
+  유스케이스)를 추가했다.
 - 2026-09-20 — P1-01 2차 리뷰 APPROVE(blocking 0). 중첩된 reveal 훅 둘이 서로 다른 요소를
   끌던 R2-1을 "마지막 매치"로 고치고, 같은 문제 행 재클릭 reveal(R2-2), 명시적
   `schemaLoaded`(R2-4), `scrollIntoView` 수신 요소 단언(R2-5)까지 반영했다.
@@ -451,12 +527,19 @@ Phase exit:
   P2-04·P2-05·P2-06에 OpenAPI 재생성 항목을 넣고, 같은 분류 착오가 걸리는 P2-02(`missing_policy`
   제거)·P2-07(카탈로그 `availability`)에도 같은 줄을 넣었다. P2-03 경로 목록에 `template()`과 12절
   재점검 문장을 추가했다. PR 수는 그대로 28.
-- 2026-09-21 — P1-03 구현·1차 리뷰 반영·2차 APPROVE: PR #177. 연산자 정의 레지스트리
-  (`domain/factor/_operators.py`, 키 `(kind, operator)` 23개)와 runtime schema의 `x-description-key`·
-  `x-operator`, `GET /api/v1/strategy-documents/operators`를 backend가 소유하고 화면 어휘 문장은
-  frontend i18n이 렌더한다. Form·Graph 라벨이 키 대신 이름을 보인다. 1차 리뷰가 잡은 차단 2건
-  (en 로케일 한글 계산식, 시간축 계산식의 `lag` 누락)과 공회전하던 `output_type_rule` 대조 테스트를
-  고치고 2차 APPROVE. 스코프 밖 관찰은 BACKLOG-001.
+- 2026-09-20 — P2-01 구현 중 규칙 개정: **OpenAPI를 바꾸는 backend PR은 생성 SDK 재생성 커밋을
+  포함한다.** CI `frontend` job이 `npm run api:generate` 뒤
+  `git diff --exit-code -- ../backend/openapi.json src/shared/api/generated`를 돌려서, 생성 파일을
+  빼면 그 PR이 곧바로 빨간불이 된다. 기존 규칙("P2는 `openapi.json`만, SDK는 P3-01")을 WORKFLOW
+  1절·P2-01~P2-07 acceptance·이 문서 현재 결정에서 교체했다. 커밋에는 생성 산출물만 넣고 소비자
+  배선(실행 설정 패널·요청 본문 연결)은 P3-01 그대로다.
+- 2026-09-20 — P2-01 잔여 2건을 P2-03으로 이관 기록. `adapters/outbound/engine_portfolio/
+  _adapter.py:42`의 참여율 `PARTIAL_FILL` 판정과 `domain/portfolio/_compiler.py:249,259`의
+  `execution_timing`이 아직 `spec.execution`을 읽는다. 둘 다 시그니처 변경(`assess`/`requirements`,
+  `compile_target_tape`)과 facade `DEPENDS_ON`에 `domain.backtest` 추가가 필요해 P2-01 범위
+  (WORKFLOW가 지정한 유스케이스 서비스 3파일) 밖이다. `execution` 제거가 강제하는 P2-03 acceptance에
+  항목으로 넣었다. 그때까지는 명시 `environment`로 참여율·체결 시점을 바꿔도 엔진 호환성 판정과
+  tape hash는 문서 값을 읽는다(`ExecutionTiming` 값이 하나뿐이라 tape hash 실효 차이는 없다).
 
 ## 관찰 backlog (담당 PR 예약)
 

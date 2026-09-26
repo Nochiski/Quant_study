@@ -38,8 +38,11 @@ from strategy_workbench.domain.strategy.facade.specification import (
     EligibilityOperator,
     EligibilityRule,
     EligibilityStep,
+    FactorDirection,
     RebalanceFrequency,
+    SignalNormalization,
     StrategySpec,
+    WeightingMethod,
 )
 
 _DAY = date(2026, 1, 2)
@@ -411,3 +414,71 @@ def test_both_passes_read_the_same_field_when_a_field_id_repeats() -> None:
 
     assert _kept_ids(candidates) == {"s000"}
     assert _cut_ids(candidates) == {"s001"}
+
+
+def _factor_score_targets(
+    count: int, *, method: SignalNormalization, direction: FactorDirection
+) -> dict[str, float]:
+    """10종목(팩터 원시값·거래대금 = 1~10)에 `top_count: count`·선정 `count`·`factor_score`."""
+    base = _spec(EligibilityRule(_LIQUIDITY, EligibilityOperator.TOP_COUNT, float(count)))
+    spec = replace(
+        base,
+        factors=(replace(base.factors[0], direction=direction),),
+        signal=replace(base.signal, normalization=method),
+        portfolio=replace(
+            base.portfolio, selection_count=count, weighting=WeightingMethod.FACTOR_SCORE
+        ),
+    )
+    observations = tuple(
+        replace(
+            _observation(f"s{index:02d}", liquidity=float(index)),
+            factor_values=(
+                PortfolioFactorValue(
+                    factor_id="price.close", value=float(index), available_date=_DAY
+                ),
+            ),
+        )
+        for index in range(1, 11)
+    )
+    tape = compile_target_tape(
+        spec,
+        environment=_environment(),
+        data_snapshot_id="snapshot-1",
+        sessions=(_DAY, _DAY + timedelta(days=1)),
+        observations=observations,
+    )
+    return {item.security_id: item.weight for item in tape.frames[0].targets}
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+@pytest.mark.parametrize("direction", list(FactorDirection))
+def test_top_count_one_with_factor_score_holds_the_survivor_fully(
+    method: SignalNormalization, direction: FactorDirection
+) -> None:
+    """`top_count: 1` + 선정 1 + `factor_score` 는 방향과 무관하게 살아남은 종목을 100% 보유한다.
+
+    P2-04 3차 리뷰(R3-P204-001) 재현 문서다. 롱 바닥을 eligible 최저 점수로 둔 비중 규칙은
+    `direction: low` 에서 유일한 eligible 종목의 강도를 0 으로 만들어 매 프레임 보유 0 이었다.
+    """
+    targets = _factor_score_targets(1, method=method, direction=direction)
+
+    assert targets == {"s10": pytest.approx(1.0)}
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+def test_top_count_five_with_factor_score_and_low_holds_all_five(
+    method: SignalNormalization,
+) -> None:
+    """`top_count: 5` + 선정 5 + `low` 는 5종목을 골라 5종목을 보유한다(R3-P204-001).
+
+    eligible 은 거래대금 상위 `s06`~`s10` 이고 `low` 라 원시값이 가장 작은 `s06` 이 가장 크다.
+    """
+    targets = _factor_score_targets(5, method=method, direction=FactorDirection.LOW)
+
+    assert targets == {
+        "s06": pytest.approx(5 / 15),
+        "s07": pytest.approx(4 / 15),
+        "s08": pytest.approx(3 / 15),
+        "s09": pytest.approx(2 / 15),
+        "s10": pytest.approx(1 / 15),
+    }

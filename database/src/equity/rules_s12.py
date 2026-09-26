@@ -43,6 +43,8 @@ equity 는 **두 라벨을 싣기만 한다**. 무엇을 버릴지는 팩터층�
 `ppe_incl_invprop`, 정의가 달라 섞어 쓰면 안 된다는 표시)와 **0 규칙**(현금흐름표가 있는데 유형자산
 취득 줄이 아예 없으면 `capex_ytd = 0` · `none_in_cf` — 현금흐름표는 현금흐름을 다 적으므로 줄이
 없다는 것은 안 샀다는 뜻이다). 어휘는 `CAPEX_BASIS_VOCAB` 5종이다.
+F-A4 로 자산별 합은 `agg='sum_abs'`(크기의 합 — 한 표 안에서 부호가 섞인다)이고 이름 목록은 자산
+종류 × 접미어 48종으로 펼쳤으며, `pick` 은 공백 없는 원문을 먼저 본다.
 
 격리 4종(EG7): `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved` ·
 `rcept_lag_out_of_range` · `duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로
@@ -170,6 +172,7 @@ def acct_rows() -> tuple[tuple[object, ...], ...]:
     capex 는 `d_ppe_parts`(fin_map.CAPEX_FALLBACK — 같은 tier 라벨에 kind 두 줄) 와
     `e_ppe_combined`(fin_map.CAPEX_COMBINED — 유형자산+투자부동산 합산 줄)가 더 붙고 둘 다
     `require` 가 없다. 이름(`nm`·`nm_nonstd`) 토큰은 `norm_nm()` 으로 공백을 뗀 판이다.
+    `agg` 어휘는 `pick`·`sum`·`sum_abs` 셋이고 `sum_abs`(크기의 합)는 자산별 합 전용이다.
     """
     rows: list[tuple[object, ...]] = []
     for metric in ACCOUNTS:
@@ -193,11 +196,13 @@ def acct_rows() -> tuple[tuple[object, ...], ...]:
     # 함께 더해진다. 집계 줄(tier a/b/c)이 하나라도 있으면 `best_tier` 의 min(tier) 이 거기서
     # 끝내므로 이중계상이 나지 않는다. `nm_nonstd` 는 표준계정코드 미사용 행만 보는 kind 다 —
     # 표준 태그 줄을 이름으로 한 번 더 세지 않기 위한 것이다(fin_map.CAPEX_FALLBACK 주석).
+    # `agg` 는 `sum_abs` 다(F-A4) — 같은 표 안에서 표준 태그 줄은 +, 비표준 줄은 − 로 적는 회사가
+    # 있어 그냥 더하면 취득이 상계된다(fin_map.CAPEX_FALLBACK 주석, 00402989 FY2016).
     for key, kind in (("concept", "concept"), ("nm", "nm_nonstd")):
         tokens = list(CAPEX_FALLBACK[key])
         rows.append(("capex_ytd", TIER_CAPEX_PARTS, kind,
                      tokens if kind == "concept" else norm_nm(tokens),
-                     list(CAPEX_FALLBACK["sj"]), "sum", None,
+                     list(CAPEX_FALLBACK["sj"]), str(CAPEX_FALLBACK["agg"]), None,
                      str(CAPEX_FALLBACK["basis"]), _FAMILY["capex_ytd"]))
     # 유형자산+투자부동산 합산 줄(F-A1) — 자산별 합보다 **뒤**(tier e)다. 자산별 줄이 있으면
     # 그 합이 PPE 정의에 정확히 맞으므로 먼저 쓰고, 합산 줄은 정의가 다르다는 표시
@@ -595,7 +600,8 @@ FIELDS_FIN: tuple[FieldProfile, ...] = (
          "unavailable}. standard = 집계 한 줄"
          "(ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities 또는 "
          "'유형자산의 취득') · ppe_parts = 자산별 줄(dart_PurchaseOf* 9종 + 표준계정코드 미사용 "
-         "이름 11종)의 합. 09-26 실측에서 같은 회사가 둘 다 적는 경우는 0건이라 합이 곧 집계이고 "
+         "이름 48종)의 **크기 합**(부호가 섞여 sum_abs, 언제나 양수). 09-26 실측에서 같은 회사가 "
+         "둘 다 적는 경우는 0건이라 합이 곧 집계이고 "
          "(FY2025 결측 311사 중 211사 복구), 사용권자산·무형자산은 집계 줄 정의(PPE) "
          "밖이라 제외한다. ppe_incl_invprop = 유형자산과 투자부동산을 한 줄로 적은 회사(7사) — "
          "정의가 다르므로 standard·ppe_parts 와 **섞어 횡단면을 세우면 안 된다**. "

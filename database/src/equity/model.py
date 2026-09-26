@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.19.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.20.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -167,6 +167,17 @@ RULES_VERSION = "e1.19.0"                # BuildRecord.rules_version 에 실린�
 #             `capex_basis='none_in_cf'`. 현금흐름표는 현금흐름을 다 적으므로 줄이 없다는 것은
 #             안 샀다는 뜻이다(FY2025 92사 + 9사). 표가 없는 그룹은 NULL(`unavailable`) 이다.
 #          어휘가 3 → 5종(`CAPEX_BASIS_VOCAB`)으로 늘어 EG3_fin_std 의 어휘 폐쇄 판정도 바뀐다.
+# e1.20.0: e1.19.0 서버 재빌드(m_20260926T130415)에서 드러난 회귀 둘 + 목록 확장(F-A4):
+#          ① `d_ppe_parts` 의 `agg` 를 `sum` → **`sum_abs`**(크기의 합). 한 표 안에서 표준 태그
+#             줄은 +, 비표준 줄은 − 로 적는 회사가 있어(00402989 FY2016) 공백 정규화로 음수 줄이
+#             새로 걸리자 합이 상계됐다(ppe_parts 361행 중 53행 감소). `ppe_parts` capex 는 이제
+#             **언제나 양의 크기**다. `sum`(금융업 매출 대체·lease_liab)은 그대로 부호를 지킨다.
+#          ② `pick` 이 **공백 없는 원문**(`hit.nm_exact=0`)을 먼저 본다. 정규화 뒤 공백 변형이
+#             함께 걸려 값이 갈리면서 `cf_operating_ytd` 2행이 값 → NULL 로 퇴행했다
+#             (00364795 FY2018 · 00926522 2019). 정규화가 없던 때 뽑히던 값이 그대로 남는다.
+#          ③ `CAPEX_FALLBACK` 이름 목록을 **자산 종류 24 × 접미어 2 = 48종**으로 펼쳤다 —
+#             표준계정코드를 하나도 안 단 회사는 모든 종류를 평이한 이름으로 적는다(00159971
+#             FY2015 는 8줄 중 2줄만 세어졌다). 완전일치 규칙은 그대로다(곱집합을 펼칠 뿐).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

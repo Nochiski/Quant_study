@@ -6,10 +6,13 @@
 -- 계정 대응표 `_acct` 는 `src/fin_map.py` 가 정본이고 `rules_s12.py:acct_values_sql()` 이 만든
 -- 문자열을 그대로 옮겼다(tests 가 대조). 탐색 순서는 tier(a_concept → b_concept_alt → c_nm →
 -- d 보험 대체 → e 은행 대체, 정렬 가능한 라벨이라 min() 이 고른다) 다음 sj 순서(IS → CIS)다. 같은 우선순위에서 `pick` 은 값이 하나로
--- 모일 때만 채우고 갈리면 NULL(모호), `sum` 은 합산한다.
--- capex 는 `d_ppe_parts` tier 가 더 있고 그 안에 kind 두 줄(concept · nm_nonstd)이 함께 `sum` 된다
--- — 자산별 줄을 나눠 적는 회사의 합이 집계 한 줄과 같기 때문이다(DQ-8). 집계 줄이 하나라도
--- 있으면 tier a/b/c 가 이겨 d 는 무시되므로 이중계상은 구조적으로 불가능하다.
+-- 모일 때만 채우고 갈리면 NULL(모호), `sum` 은 합산하며 `sum_abs` 는 **크기**를 합산한다(F-A4 —
+-- 자산별 취득 줄은 한 표 안에서도 부호가 섞인다). `pick` 은 공백 없는 원문을 먼저 본다(F-A4).
+-- capex 는 `d_ppe_parts` tier 가 더 있고 그 안에 kind 두 줄(concept · nm_nonstd)이 함께
+-- `sum_abs` 된다 — 자산별 줄을 나눠 적는 회사의 합이 집계 한 줄과 같기 때문이다(DQ-8). 집계 줄이
+-- 하나라도 있으면 tier a/b/c 가 이겨 d 는 무시되므로 이중계상은 구조적으로 불가능하다.
+-- 자산별 이름 목록은 자산 종류 × 접미어를 펼친 48종이고(F-A4, 표준계정코드를 하나도 안 단 회사가
+-- 모든 종류를 평이한 이름으로 적는다) 합은 부호가 섞여도 **크기**로 더한다.
 -- 그 뒤에 `e_ppe_combined`(유형자산+투자부동산 **합산 줄** 7사, F-A1)가 있고 basis 가
 -- `ppe_incl_invprop` 라 정의 차이가 행에 남는다 — 자산별 합이 있으면 그것이 이긴다.
 -- 이름 대조는 **공백을 뗀 판**으로 한다(F-A2) — `fin` 의 `account_nm_norm` 과 `_acct` 토큰이
@@ -100,8 +103,8 @@ WITH _acct(metric, tier, kind, tokens, sjs, agg, require_tag, basis, family) AS 
         ('capex_ytd', 'c_nm', 'nm', ['유형자산의취득', '유형자산취득'], ['CF'], 'pick', NULL, 'standard', 'cf'),
         ('revenue', 'd_insurance_gross', 'concept', ['OperatingIncomeInsurance', 'InvestmentIncome'], ['IS', 'CIS'], 'sum', 'InvestmentIncome', 'insurance_gross', 'flow'),
         ('revenue', 'e_banking_gross', 'concept', ['RevenueFromInterest', 'FeeAndCommissionIncome', 'OperatingIncomeInsurance'], ['IS', 'CIS'], 'sum', 'RevenueFromInterest', 'banking_gross', 'flow'),
-        ('capex_ytd', 'd_ppe_parts', 'concept', ['PurchaseOfLand', 'PurchaseOfBuildings', 'PurchaseOfStructure', 'PurchaseOfMachinery', 'PurchaseOfVehicles', 'PurchaseOfOfficeEquipment', 'PurchaseOfConstructionInProgress', 'PurchaseOfOtherPropertyPlantAndEquipment', 'PurchaseOfFixturesAndFittings'], ['CF'], 'sum', NULL, 'ppe_parts', 'cf'),
-        ('capex_ytd', 'd_ppe_parts', 'nm_nonstd', ['시설장치의취득', '공구와기구의취득', '공구기구의취득', '금형의취득', '건물부속설비의취득', '기타유형자산의취득', '비품의취득', '건설중인자산의취득', '건설중인유형자산의취득', '기타의유형자산의취득', '건설중인자산(유형자산)의취득'], ['CF'], 'sum', NULL, 'ppe_parts', 'cf'),
+        ('capex_ytd', 'd_ppe_parts', 'concept', ['PurchaseOfLand', 'PurchaseOfBuildings', 'PurchaseOfStructure', 'PurchaseOfMachinery', 'PurchaseOfVehicles', 'PurchaseOfOfficeEquipment', 'PurchaseOfConstructionInProgress', 'PurchaseOfOtherPropertyPlantAndEquipment', 'PurchaseOfFixturesAndFittings'], ['CF'], 'sum_abs', NULL, 'ppe_parts', 'cf'),
+        ('capex_ytd', 'd_ppe_parts', 'nm_nonstd', ['토지의취득', '토지취득', '건물의취득', '건물취득', '구축물의취득', '구축물취득', '기계장치의취득', '기계장치취득', '차량운반구의취득', '차량운반구취득', '비품의취득', '비품취득', '집기의취득', '집기취득', '집기비품의취득', '집기비품취득', '사무용비품의취득', '사무용비품취득', '공구의취득', '공구취득', '공구와기구의취득', '공구와기구취득', '공구기구의취득', '공구기구취득', '시설장치의취득', '시설장치취득', '시설물의취득', '시설물취득', '금형의취득', '금형취득', '건설중인자산의취득', '건설중인자산취득', '건설중자산의취득', '건설중자산취득', '건설중인유형자산의취득', '건설중인유형자산취득', '건설중인자산(유형자산)의취득', '건설중인자산(유형자산)취득', '기타유형자산의취득', '기타유형자산취득', '기타의유형자산의취득', '기타의유형자산취득', '건물부속설비의취득', '건물부속설비취득', '임차자산개량의취득', '임차자산개량취득', '리스개량자산의취득', '리스개량자산취득'], ['CF'], 'sum_abs', NULL, 'ppe_parts', 'cf'),
         ('capex_ytd', 'e_ppe_combined', 'nm_nonstd', ['유형자산및투자부동산의취득', '투자부동산및유형자산의취득'], ['CF'], 'pick', NULL, 'ppe_incl_invprop', 'cf')
 ),
 _qcode(reprt_code) AS (
@@ -125,10 +128,12 @@ grp AS (
 fin AS (
     SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.sj_div,
            regexp_replace(f.account_id, '^(ifrs-full_|ifrs_|dart_)', '')  AS concept,
-           -- 계정명은 **공백을 뗀 판**만 싣는다(F-A2). DART 계정명의 공백은 회사마다 임의라
-           -- ('영업활동으로 인한 순현금흐름' · '유형자산 및 투자부동산의 취득', CF 90,456행에
-           -- 공백) 원문으로 완전일치하면 같은 계정이 결측이 된다. 토큰도 같은 규칙으로
-           -- 정규화된 판이 `_acct` 에 들어 있다(rules_s12.norm_nm).
+           -- 계정명은 **원문과 공백 뗀 판**을 함께 싣는다(F-A2). DART 계정명의 공백은 회사마다
+           -- 임의라('영업활동으로 인한 순현금흐름' · '유형자산 및 투자부동산의 취득', CF
+           -- 90,456행에 공백) 원문으로 완전일치하면 같은 계정이 결측이 된다. 토큰도 같은 규칙으로
+           -- 정규화된 판이 `_acct` 에 들어 있다(rules_s12.norm_nm). 원문은 `pick` 의 우선순위
+           -- (`nm_exact`)에 쓴다 — 공백 변형을 받아들이되 **원래 이기던 줄이 계속 이겨야** 한다.
+           f.account_nm,
            regexp_replace(f.account_nm, '\s+', '', 'g')                   AS account_nm_norm,
            f.account_std,
            f.thstrm_amount
@@ -162,6 +167,10 @@ hit AS (
     SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div,
            a.metric, a.tier, a.agg, a.basis, a.family,
            list_position(a.sjs, f.sj_div)                        AS sj_rank,
+           -- 0 = 공백 정규화 없이도 걸리던 줄(태그 히트 포함) · 1 = 공백을 떼야 걸린 줄.
+           -- `val` 의 `pick` 이 0 을 먼저 본다(F-A4) — 정규화가 없던 때 뽑히던 값을 지킨다.
+           CASE WHEN a.kind = 'concept' OR f.account_nm = f.account_nm_norm
+                THEN 0 ELSE 1 END                                 AS nm_exact,
            f.thstrm_amount                                       AS val
     FROM fin f
     JOIN _acct a
@@ -203,8 +212,18 @@ val AS (
     SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.metric,
            min(h.family)                                         AS family,
            min(h.basis)                                          AS basis,
-           CASE WHEN min(h.agg) = 'sum' THEN sum(h.val)
-                WHEN count(DISTINCT h.val) = 1 THEN min(h.val)
+           -- `sum_abs` 는 **크기의 합**이다(F-A4) — 자산별 취득 줄은 한 표 안에서도 부호가
+           -- 섞여(표준 태그 +, 비표준 −) 그냥 더하면 취득이 상계된다. `sum` 은 종전대로 부호를
+           -- 지킨다(금융업 매출 대체 · lease_liab).
+           -- `pick` 은 공백 없는 원문(nm_exact=0)이 먼저다: 그런 줄이 있고 값이 하나로 모이면
+           -- 그것을 쓰고, 없을 때만 공백 변형까지 보며(값이 하나면 채운다), 그래도 갈리면
+           -- NULL(모호). 공백 정규화 전에 뽑히던 값이 정규화 때문에 모호로 떨어지지 않는다.
+           CASE WHEN min(h.agg) = 'sum'     THEN sum(h.val)
+                WHEN min(h.agg) = 'sum_abs' THEN sum(abs(h.val))
+                WHEN count(DISTINCT h.val) FILTER (WHERE h.nm_exact = 0) = 1
+                     THEN min(h.val) FILTER (WHERE h.nm_exact = 0)
+                WHEN count(*) FILTER (WHERE h.nm_exact = 0) = 0
+                     AND count(DISTINCT h.val) = 1 THEN min(h.val)
            END                                                   AS v
     FROM hit h
     JOIN best b

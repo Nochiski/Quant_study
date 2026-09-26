@@ -1083,3 +1083,80 @@ def test_capex_현금흐름표가_없으면_결측이다(make_stage_tree, tmp_pa
     row = rows["20260330000001"]
     assert row["capex_ytd"] is None
     assert row["capex_basis"] == "unavailable"
+
+
+# ── F-A4: 부호 혼재 · 평이한 이름 전부 · 공백 정규화가 만든 pick 모호 (서버 재빌드 실측) ──
+
+# m_20260926T130415 재빌드에서 나온 세 가지다.
+# ① 같은 회사 한 표 안에서 표준 태그 줄은 +, 비표준 줄은 − 로 적힌다(00402989 FY2016: 건물 +34.79억
+#    · 기계장치 +20.42 …)은 양수인데 비표준 줄(공구와 기구 −12.59 · 시설물 −9.11)은 음수다.
+#    그래서 자산별 합은 **크기의 합**이다.
+# ② 표준계정코드를 하나도 안 단 회사는 모든 자산 종류를 평이한 이름으로 적는다(00159971 FY2015:
+#    기계장치의취득 −123.97 · 건설중자산의취득 −121.41 · 구축물의취득 −26.26 …).
+# ③ 공백을 떼자 `영업활동으로인한 현금흐름` 과 `영업활동순현금흐름` 이 함께 걸려 pick 이 갈렸다
+#    (00364795 FY2018 · 00926522 2019 2행이 값에서 NULL 로 퇴행). 공백 없는 원문이 이긴다.
+
+def test_capex_자산별_줄은_부호가_섞여도_크기의_합이다(make_stage_tree, tmp_path: Path) -> None:
+    """표준 태그 줄 +100 · 비표준 줄 −30 → 130. 부호가 아니라 **취득 규모**를 더한다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfLand", account_nm="토지의 취득",
+                 amount=100.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="공구와 기구의 취득", amount=-30.0,
+                 ord_=2, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_parts"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("130")
+    assert row["capex_basis"] == "ppe_parts"
+
+
+def test_capex_표준태그_없는_회사의_평이한_이름도_전부_센다(make_stage_tree,
+                                                          tmp_path: Path) -> None:
+    """`기계장치의취득`·`토지의취득`·`건물의취득` — 자산 종류 × 접미어를 펼친 목록이 잡는다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="기계장치의취득", amount=-123.0,
+                 ord_=2, account_std=False),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="토지의취득", amount=-24.0,
+                 ord_=3, account_std=False),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="건물의취득", amount=-13.0,
+                 ord_=4, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_parts"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("160")
+    assert row["capex_basis"] == "ppe_parts"
+
+
+def test_pick_은_공백_없는_원문을_먼저_고른다(make_stage_tree, tmp_path: Path) -> None:
+    """공백 정규화 전에 쓰이던 값을 그대로 지킨다 — 공백 변형은 동점자일 때만 본다(F-A4)."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="영업활동으로인한현금흐름", amount=83.0,
+                 ord_=2, account_std=False),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="영업활동으로 인한 현금흐름", amount=-1230.0,
+                 ord_=3, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "period_end_basis", "document"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    assert _num(rows["20260330000001"]["cf_operating_ytd"]) == Decimal("83")

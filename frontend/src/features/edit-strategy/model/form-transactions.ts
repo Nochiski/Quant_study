@@ -120,6 +120,8 @@ export const itemSection = (
   kind: "object",
   pointer: item.pointer,
   key: section.key,
+  // 항목은 목록의 한 칸이다. 이름은 항목 요약(`summary`)이 보이므로 섹션 이름 키는 없다.
+  descriptionKey: null,
   written: true,
   fields: item.fields,
   // 항목 안의 배열(`choices` 등)은 `list-link` 필드로 남는다(중첩 목록은 object 섹션 전용, P4-05).

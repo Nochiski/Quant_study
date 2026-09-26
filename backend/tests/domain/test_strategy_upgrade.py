@@ -26,6 +26,8 @@ from strategy_workbench.domain.strategy.facade.document import (
     hydrate_strategy_document,
     is_frozen_schema_version,
     is_legacy_document,
+    is_upgradeable_document,
+    legacy_shape_hints,
     upgrade_document_1_0,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
@@ -94,7 +96,13 @@ def test_frozen_means_any_version_other_than_current() -> None:
 
 
 @pytest.mark.parametrize("version", [CURRENT_SCHEMA_VERSION, "2.0", 1.0, None])
-def test_only_schema_1_0_is_upgradeable(version: object) -> None:
+def test_a_1_0_body_upgrades_whatever_the_version_line_says(version: object) -> None:
+    """버전 줄만 손으로 고친 1.0 본문도 업그레이드된다(P1-05 1차 리뷰 DEFECT-P105-001).
+
+    진단(`structure.legacy_shape`)이 "업그레이드하세요"라고 시키고 배너까지 띄우므로, 판정이
+    버전 문자열만 보면 버튼이 반드시 422로 끝난다. 판정 owner를 하나로 두고 둘이 같은 조건을
+    읽게 한 결과를 여기서 고정한다.
+    """
     document = _yaml("quality_momentum.v1_0.yaml")
     if version is None:
         del document["schema_version"]
@@ -102,8 +110,80 @@ def test_only_schema_1_0_is_upgradeable(version: object) -> None:
         document["schema_version"] = version
 
     assert not is_legacy_document(document)
-    with pytest.raises(NotALegacyDocumentError, match="only schema 1.0"):
+    assert is_upgradeable_document(document)
+
+    upgraded = upgrade_document_1_0(document)
+
+    # 버전 줄은 결과 버전으로 정규화되고 1.0 모양은 사라진다.
+    assert upgraded["schema_version"] == CURRENT_SCHEMA_VERSION
+    assert isinstance(upgraded["factors"], list)
+    assert hydrate_strategy_document(upgraded, identity=DRAFT).ok
+
+
+def test_a_document_with_no_1_0_shape_stays_fail_closed() -> None:
+    """옛 판 모양이 하나도 없으면 그대로 거절한다 — 저장 row 읽기 경로가 이 예외에 기댄다."""
+    document = _yaml("quality_momentum.yaml")
+    document["schema_version"] = "0.9"
+
+    assert not is_upgradeable_document(document)
+    with pytest.raises(NotALegacyDocumentError, match="only schema 1.0 documents or bodies"):
         upgrade_document_1_0(document)
+
+
+def test_a_valid_current_document_is_never_mistaken_for_an_old_one() -> None:
+    """정상 1.1 문서에 오탐이 없다. 오탐이면 멀쩡한 문서에 업그레이드 배너가 뜬다."""
+    document = _yaml("quality_momentum.yaml")
+
+    assert legacy_shape_hints(document) == {}
+    assert not is_upgradeable_document(document)
+
+
+@pytest.mark.parametrize(
+    ("name", "mutate"),
+    [
+        pytest.param(
+            "factors 두 겹",
+            lambda d: d.__setitem__("factors", {"factors": d["factors"]}),
+            id="nested-factors",
+        ),
+        pytest.param(
+            "은퇴한 키",
+            lambda d: d.setdefault("execution", {}).__setitem__("order_style", "market"),
+            id="removed-field",
+        ),
+        pytest.param(
+            "unary alias 노드",
+            lambda d: d["factors"][0]["graph"]["nodes"].append(
+                {
+                    "kind": "unary",
+                    "node_id": "ranked",
+                    "operator": "rank",
+                    "input_node_id": "close",
+                }
+            ),
+            id="unary-alias",
+        ),
+    ],
+)
+def test_every_shape_the_diagnostic_points_at_can_actually_be_upgraded(
+    name: str, mutate: Any
+) -> None:
+    """진단이 짚는 세 모양이 전부 실제로 업그레이드된다.
+
+    진단이 시키는 일은 눌러서 되어야 한다 — 하나라도 판정에서 빠지면 그 문서의 배너가 422로
+    끝나고 사용자에게 남는 길이 없다.
+    """
+    document = _yaml("quality_momentum.yaml")
+    mutate(document)
+
+    assert legacy_shape_hints(document) != {}, name
+    assert is_upgradeable_document(document), name
+
+    upgraded = upgrade_document_1_0(document)
+
+    assert legacy_shape_hints(upgraded) == {}, name
+    assert upgraded["schema_version"] == CURRENT_SCHEMA_VERSION
+    assert hydrate_strategy_document(upgraded, identity=DRAFT).ok, name
 
 
 def test_unary_aliases_move_to_cross_sectional_and_drop_periods() -> None:

@@ -95,20 +95,20 @@ test.describe("real equity data", () => {
         graphEditor.getByRole("status").filter({ hasText: "반영됨" }),
       ).toContainText(`${label} 반영됨`);
     };
+    // kind 드롭다운 대신 연산자 팔레트에서 고른다(WORKFLOW P1-04).
     await graphEditor
-      .getByRole("combobox", { name: "노드 종류" })
-      .selectOption("field");
-    await graphEditor.getByRole("button", { name: "노드 추가" }).click();
+      .getByRole("button", { name: "데이터 필드 노드 추가", exact: true })
+      .click();
     await expectApplied("field");
     const selected = graphEditor.getByRole("group", { name: /선택한 노드/ });
-    const fieldId = selected.getByRole("combobox", { name: /^field_id/ });
+    const fieldId = selected.getByRole("combobox", { name: /\bfield_id/ });
     // 필드 목록은 duckdb 어댑터 `list_fields()` 가 실데이터에서 실제로 서비스하는 것만 담는다.
     await fieldId.selectOption(REWIRED_FIELD);
     await expect(fieldId).toHaveValue(REWIRED_FIELD);
     await expectApplied("field_id");
     await graphEditor.getByRole("button", { name: "노드 편집: mom_252" }).click();
     await selected
-      .getByRole("combobox", { name: /^input_node_id/ })
+      .getByRole("combobox", { name: /\binput_node_id/ })
       .selectOption("field");
     await expectApplied("input_node_id");
 

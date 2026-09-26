@@ -17,6 +17,7 @@ from ._constraints import (
     FIELD_APPLICABILITY,
     SEMANTIC_ONLY_CODES,
     STRATEGY_SCALAR_CONSTRAINTS,
+    expression_code,
     field_default,
     resolve_scalar,
 )
@@ -58,6 +59,10 @@ class StrategyValidation:
     issues: tuple[ValidationIssue, ...]
 
 
+# 전략 문서 진단에 그대로 실릴 수 없는 네임스페이스(`semantic_issue` 게이트).
+_FACTOR_CODE_PREFIX = "factor."
+
+
 def _owned_codes() -> frozenset[str]:
     """The registry of `strategy.*` codes, read live so a monkeypatched catalog still applies."""
     return (
@@ -79,10 +84,17 @@ def semantic_issue(
 
     This is the only sanctioned way to mint a `strategy.*` issue, in the domain and in the
     application alike: constructing `ValidationIssue` directly would let a code exist that no
-    registry row describes, which the schema API and the UI could not explain. Codes outside the
-    `strategy.` namespace pass through unchecked — they belong to another registry (today
-    `domain.factor` graph codes, forwarded verbatim when the validator has no alias for them).
+    registry row describes, which the schema API and the UI could not explain.
+
+    `factor.*` 코드는 전략 문서 진단으로 그대로 나갈 수 없다(P1-05). 전에는 alias가 없는 그래프
+    코드가 검사 없이 통과해, frontend가 모르는 네임스페이스의 코드가 문제 목록에 섞였다. 지금은
+    호출자가 `expression_code()`로 먼저 옮겨야 하고, 옮긴 코드는 `EXPRESSION_CODES`가 검사한다.
     """
+    if code.startswith(_FACTOR_CODE_PREFIX):
+        raise ValueError(
+            "factor graph codes never reach a strategy document — alias them with "
+            f"expression_code() first: code={code!r} path={path!r}"
+        )
     if code.startswith("strategy.") and code not in _owned_codes():
         raise ValueError(
             "validation code has no owner — add it to SEMANTIC_ONLY_CODES, EXPRESSION_CODES or "
@@ -297,13 +309,6 @@ def validate_strategy(
         issues.append(
             semantic_issue("strategy.factor.duplicate", "factors", "팩터 ID는 중복될 수 없습니다.")
         )
-    code_aliases = {
-        "factor.graph.duplicate_node": "strategy.expression.duplicate_node",
-        "factor.graph.output_missing": "strategy.expression.output_missing",
-        "factor.graph.input_missing": "strategy.expression.input_missing",
-        "factor.graph.parameter_missing": "strategy.expression.parameter_missing",
-        "factor.graph.lag_periods": "strategy.expression.lag_periods",
-    }
     numeric_parameter_ids = {
         parameter.parameter_id
         for parameter in spec.parameters
@@ -333,7 +338,7 @@ def validate_strategy(
         )
         issues.extend(
             semantic_issue(
-                code_aliases.get(factor_issue.code, factor_issue.code),
+                expression_code(factor_issue.code),
                 f"{base}.graph.{factor_issue.path}",
                 factor_issue.message,
                 severity=(

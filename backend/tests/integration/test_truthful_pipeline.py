@@ -264,9 +264,11 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
     assert {item["code"] for item in explain_invalid.json()["validation"]["issues"]} == {
         "factor.graph.group_field_type"
     }
+    # 전략 문서를 검증한 진단은 `strategy.expression.*`로 나간다(P1-05). `factor.graph.*`는
+    # 팩터 API(`/factors/explain`)의 네임스페이스로만 남는다 — 위 explain 단언이 그쪽이다.
     for response in (preview_invalid, backtest_invalid):
         assert {item["code"] for item in response.json()["detail"]["validation"]["issues"]} == {
-            "factor.graph.group_field_type"
+            "strategy.expression.group_field_type"
         }
 
     valid_spec, valid_graph = request_spec("classification.sector")

@@ -164,7 +164,7 @@ def test_kind_is_the_first_property_of_every_discriminated_branch() -> None:
     assert branches
     for option in branches:
         branch = _resolve(schema, option)
-        assert list(branch["properties"])[0] == "kind", branch["title"]
+        assert list(branch["properties"])[0] == "kind", branch["x-description-key"]
 
 
 def test_factor_label_is_optional_and_derived_from_factor_id() -> None:
@@ -240,7 +240,11 @@ def test_schema_properties_are_exactly_the_model_fields_and_nothing_is_hand_writ
     schema = strategy_document_schema()
     model_fields = [f.name for f in dataclass_fields(StrategySpec) if f.name != "identity"]
     assert list(schema["properties"]) == ["schema_version", *model_fields]
-    assert schema["properties"]["schema_version"] == {"type": "string", "const": "1.2"}
+    assert schema["properties"]["schema_version"] == {
+        "type": "string",
+        "const": "1.2",
+        "x-description-key": "strategy.section.schema_version",
+    }
     assert schema["required"][0] == "schema_version"
     assert schema["additionalProperties"] is False
     # 1.2 최상위 필수 키는 `schema_version`·`title` 둘뿐이다(spec D3).
@@ -250,6 +254,7 @@ def test_schema_properties_are_exactly_the_model_fields_and_nothing_is_hand_writ
         "type": "string",
         "enum": ["long_only", "long_short"],
         "default": "long_only",
+        "x-description-key": "strategy.field.portfolio_step.side",
     }
     assert portfolio["required"] == []
 
@@ -300,9 +305,15 @@ def test_scalar_unions_keep_integer_unless_number_is_present() -> None:
 
     builder = _schema._SchemaBuilder({})  # pyright: ignore[reportPrivateUsage]  # reason: unit
     schema = builder.dataclass_schema(Probe, "")
-    assert schema["properties"]["int_or_str"] == {"type": ["integer", "string"]}
-    assert schema["properties"]["bool_or_int"] == {"type": ["boolean", "integer"]}
-    assert schema["properties"]["number_union"] == {"type": ["number", "string"]}
+    # `x-description-key`는 property마다 파생되므로(P1-03) 타입 판정만 떼어 본다.
+    types = {
+        name: property_schema["type"] for name, property_schema in schema["properties"].items()
+    }
+    assert types == {
+        "int_or_str": ["integer", "string"],
+        "bool_or_int": ["boolean", "integer"],
+        "number_union": ["number", "string"],
+    }
 
 
 def test_contract_rows_are_unique_per_pointer_and_branch() -> None:
@@ -403,6 +414,17 @@ def test_factor_authoring_mapping_is_owned_by_the_runtime_schema() -> None:
         "weight": {"x-authoring-default": 1.0},
         "graph": {"x-authoring-source": "default_graph"},
     }
+
+
+def test_parameter_seed_fixture_is_current() -> None:
+    """씨앗 golden은 두 런타임의 규칙을 묶는 표다 — 낡으면 frontend 대조가 옛 표를 통과시킨다."""
+    from tools.export_runtime_schema import parameter_seeds
+
+    fixture = json.loads((FIXTURES / "parameter-seeds.json").read_text(encoding="utf-8"))
+    assert fixture == {"seeds": parameter_seeds(strategy_document_schema())}, (
+        "parameter-seeds.json is stale; regenerate with: "
+        "uv run python tools/export_runtime_schema.py"
+    )
 
 
 def test_runtime_schema_fixture_is_current() -> None:

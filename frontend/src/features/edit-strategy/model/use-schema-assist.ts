@@ -6,6 +6,7 @@ import { useFactorCatalog } from "../../../entities/factor";
 import { useCommittedRef } from "../../../shared/lib/react";
 import {
   strategyContractQuery,
+  strategyOperatorsQuery,
   strategySchemaQuery,
 } from "../../../entities/strategy";
 import type {
@@ -13,6 +14,7 @@ import type {
   EditorHoverSource,
 } from "../../../shared/ui/code-editor";
 import type { SnippetCatalogSource } from "./canonical-snippets";
+import type { OperatorCatalogState } from "./operator-palette";
 import type { DocumentState } from "./document-state";
 import type {
   ContractInspectorSource,
@@ -38,6 +40,11 @@ export type SchemaAssist = {
   schema: JsonSchema | null;
   /** Same query-owned metadata, exposed intact for the read-only Contract Inspector. */
   inspectorSource: ContractInspectorSource;
+  /**
+   * 연산자 카탈로그(P1-03, spec D8). Graph 팔레트가 읽는다. `loading`은 편집기 assist의 `loading`과
+   * 분리한다 — 카탈로그가 늦어도 편집기 완성·hover는 기다릴 이유가 없다.
+   */
+  operators: OperatorCatalogState;
   /** Runtime-schema projection plus only the factor catalog pinned to that contract version. */
   snippetSource: SnippetCatalogSource;
 };
@@ -60,6 +67,7 @@ const resourceState = (
 export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
   const schema = useQuery(strategySchemaQuery());
   const contract = useQuery(strategyContractQuery());
+  const operatorCatalog = useQuery(strategyOperatorsQuery());
   const fields = useDatasetCatalog(CATALOG_PAGE);
   const factors = useFactorCatalog(CATALOG_PAGE);
 
@@ -127,6 +135,15 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       snippetCoherence,
     ],
   );
+  const operators = useMemo<OperatorCatalogState>(
+    () =>
+      operatorCatalog.data
+        ? { status: "ready", definitions: operatorCatalog.data.operators }
+        : operatorCatalog.isPending
+          ? { status: "loading" }
+          : { status: "unavailable" },
+    [operatorCatalog.data, operatorCatalog.isPending],
+  );
   const inspectorSource = useMemo<ContractInspectorSource>(
     () => ({
       schema: schema.data ? schema.data : null,
@@ -180,6 +197,7 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       schemaVersion,
       schema: runtimeSchema,
       inspectorSource,
+      operators,
       snippetSource,
     }),
     [
@@ -187,6 +205,7 @@ export const useSchemaAssist = (state: DocumentState): SchemaAssist => {
       hoverSource,
       inspectorSource,
       loading,
+      operators,
       schemaVersion,
       snippetSource,
       runtimeSchema,

@@ -77,13 +77,21 @@ const renderPanel = (
   return projection;
 };
 
-/** 섹션 fieldset(legend = 섹션 키 [+ 힌트]). */
+/**
+ * 섹션 fieldset(legend = `▾ <섹션 이름> <섹션 키> [· 힌트]`). P1-03부터 라벨이 사람 말 이름을
+ * 먼저 보이므로 앞이 낱말 문자가 아닌 자리에서 키를 찾는다(이름만 있는 섹션은 이름으로 찾는다).
+ */
 const section = (name: string) =>
-  within(screen.getByRole("group", { name: new RegExp(`^${name}`) }));
+  within(screen.getByRole("group", { name: new RegExp(`(^|[^\\w])${name}`) }));
 
-/** 컨트롤의 접근성 이름은 `<key>` 또는 `<key>· <unit>`이다. */
+/**
+ * 컨트롤의 접근성 이름은 `<이름> <key>[ · <unit>]`이다. 헬퍼는 키 앞 경계만 느슨하게 본다 —
+ * JS의 `" + bs + "w`는 ASCII라 한글 뒤 경계까지 구분하지 못한다. 공백 자체는 아래 "라벨 어휘"
+ * 테스트가 유일한 정본으로 고정한다. `_`는 낱말 문자라 `selection_count`가
+ * `short_selection_count`에 걸리지 않는다.
+ */
 const named = (key: string) => ({
-  name: new RegExp(`^${key}(\\u00b7|$)`),
+  name: new RegExp(`(^|[^\\w])${key}(\\s|$)`),
 });
 
 describe("StrategyFormPanel controls", () => {
@@ -122,7 +130,7 @@ describe("StrategyFormPanel controls", () => {
       { focusEditor: false },
     );
 
-    const title = section("기본 정보").getByRole("textbox", named("title"));
+    const title = section("전략 문서").getByRole("textbox", named("title"));
     await user.clear(title);
     await user.type(title, "버림{Escape}");
     expect(title).toHaveValue("퀄리티 모멘텀");
@@ -251,13 +259,17 @@ describe("StrategyFormPanel controls", () => {
         range: null,
       },
     ]);
-    expect(section("risk").getByText("오류 1")).toHaveAttribute(
-      "title",
-      "너무 큽니다",
-    );
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "YAML 1.2로 읽히지 않아",
-    );
+    // 배지는 개수만 세고 원인 문장은 그 필드 아래 본문이다 — `title`은 hover 없는 입력에서
+    // 읽히지 않았다(WORKFLOW P1-04).
+    expect(section("risk").getByText("오류 1")).not.toHaveAttribute("title");
+    expect(
+      section("risk").getByRole("spinbutton", named("max_name_weight")),
+    ).toHaveAccessibleDescription("너무 큽니다");
+    expect(section("risk").getByText("너무 큽니다")).toBeVisible();
+    // 진단 본문은 live region이 아니다. assertive 알림은 트랜잭션 피드백 하나뿐이다(리뷰 P3).
+    expect(
+      screen.getAllByRole("alert").map((node) => node.textContent),
+    ).toEqual([expect.stringContaining("YAML 1.2로 읽히지 않아")]);
     // selection_method 기본값(top_n) 때문에 percentile은 읽히지 않는 필드다.
     const portfolio = projection.sections.find((s) => s.key === "portfolio");
     if (portfolio === undefined || portfolio.kind !== "object")
@@ -294,7 +306,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
     expect(
       eligibility.getByRole("button", { name: "liquidity.adv · 삭제" }),
     ).toBeInTheDocument();
-    const root = section("기본 정보");
+    const root = section("전략 문서");
     expect(root.getByText("1.2")).toHaveAttribute("aria-labelledby");
     expect(root.queryByRole("textbox", named("schema_version"))).toBeNull();
     expect(root.queryByRole("button", { name: /schema_version ·/ })).toBeNull();
@@ -451,12 +463,50 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
   });
 });
 
+describe("StrategyFormPanel 라벨 어휘 (P1-03)", () => {
+  // 이 describe가 라벨 공백 규칙의 유일한 정본이다. `named()`·`section()`의 느슨한 정규식은
+  // 공백을 단언하지 못하므로 아래 단언을 완화하면 회귀 방어가 사라진다.
+  it("이름과 스키마 키를 띄어 읽는다", () => {
+    renderPanel(MINIMAL, stubTransactions());
+
+    // accname 계산은 인라인 요소의 결과를 각각 trim한다. 구분 공백이 `<span>` 안에 있으면
+    // "이름key"로 붙어 읽히므로 형제 text node여야 한다(P1-03 리뷰).
+    expect(
+      section("risk").getByRole("spinbutton", {
+        name: /^종목별 최대 목표 비중 한도 max_name_weight/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      section("전략 문서").getByRole("textbox", { name: /^전략 이름 title$/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("단위 접미사도 키와 띄어 읽는다", () => {
+    renderPanel(MINIMAL, stubTransactions());
+
+    expect(
+      section("execution").getByRole("spinbutton", {
+        name: "체결 금액에 적용할 수수료 가정 fee_bps · bp",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("스키마 키가 없는 섹션은 이름만 보인다", () => {
+    renderPanel(MINIMAL, stubTransactions());
+
+    // 섹션 제목은 스키마 키가 없으면 이름만 남는다(루트 스칼라 섹션 = 문서 자신).
+    expect(
+      screen.getByRole("button", { name: "전략 문서", expanded: true }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("StrategyFormPanel section collapse (P4-04)", () => {
   it("toggles aria-expanded and hides the section body while keeping it in the DOM", async () => {
     const user = userEvent.setup();
     renderPanel(MINIMAL, stubTransactions());
     const toggle = section("risk").getByRole("button", {
-      name: "risk",
+      name: /risk$/,
       expanded: true,
     });
     const weight = () =>
@@ -488,7 +538,6 @@ describe("StrategyFormPanel reset on the last written field (audit R4)", () => {
     let text = source;
     const editor: CodeEditorHandle = {
       getText: () => text,
-      setText: vi.fn(),
       replaceRange: vi.fn((from: number, to: number, insert: string) => {
         text = `${text.slice(0, from)}${insert}${text.slice(to)}`;
       }),
@@ -498,6 +547,10 @@ describe("StrategyFormPanel reset on the last written field (audit R4)", () => {
       positionToOffset: vi.fn(() => 0),
       scrollTo: vi.fn(),
       focus: vi.fn(),
+      loadText: vi.fn(),
+      undo: vi.fn(() => false),
+      redo: vi.fn(() => false),
+      historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
       getHistoryState: vi.fn(() => null),
       restoreHistoryState: vi.fn(),
     };
@@ -539,7 +592,6 @@ describe("StrategyFormPanel with the real transaction hook", () => {
     let text = MINIMAL;
     const editor: CodeEditorHandle = {
       getText: () => text,
-      setText: vi.fn(),
       replaceRange: vi.fn((from: number, to: number, insert: string) => {
         text = `${text.slice(0, from)}${insert}${text.slice(to)}`;
       }),
@@ -549,6 +601,10 @@ describe("StrategyFormPanel with the real transaction hook", () => {
       positionToOffset: vi.fn(() => 0),
       scrollTo: vi.fn(),
       focus: vi.fn(),
+      loadText: vi.fn(),
+      undo: vi.fn(() => false),
+      redo: vi.fn(() => false),
+      historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
       getHistoryState: vi.fn(() => null),
       restoreHistoryState: vi.fn(),
     };
@@ -595,5 +651,94 @@ describe("StrategyFormPanel with the real transaction hook", () => {
     expect(
       section("risk").getByRole("spinbutton", named("max_name_weight")),
     ).toHaveValue(0.1);
+  });
+});
+
+describe("인라인 오류 본문과 문제 행 reveal (P1-04)", () => {
+  const WEIGHT_ERROR: DocumentDiagnostic = {
+    code: "strategy.risk.weight",
+    kind: "semantic",
+    severity: "error",
+    pointer: "/risk/max_name_weight",
+    message: "너무 큽니다",
+    range: null,
+  };
+
+  const renderWithSelection = (
+    selectedPointer: string | undefined,
+    revealSignal: number,
+  ) => {
+    const state = parsedState(MINIMAL);
+    return (
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, state.parse, [WEIGHT_ERROR])}
+        transactions={stubTransactions()}
+        catalogs={NO_CATALOGS}
+        selectedPointer={selectedPointer}
+        revealSignal={revealSignal}
+      />
+    );
+  };
+
+  it("접은 섹션이라도 문제 행이 가리키면 펴서 본문을 보인다", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(renderWithSelection(undefined, 0));
+
+    const body = section("risk").getByText("너무 큽니다");
+    expect(body).toBeVisible();
+    // 사용자가 섹션을 접으면 본문이 가려진다.
+    await user.click(
+      section("risk").getByRole("button", { name: /risk/ }),
+    );
+    expect(body).not.toBeVisible();
+
+    // 문제 행 클릭 = pointer 선택 + reveal 신호: 접힌 섹션이 다시 펴진다.
+    rerender(renderWithSelection("/risk/max_name_weight", 1));
+    expect(body).toBeVisible();
+    expect(
+      section("risk").getByRole("spinbutton", named("max_name_weight")),
+    ).toHaveAccessibleDescription("너무 큽니다");
+  });
+
+  it("오류가 여럿이어도 assertive 알림을 쌓지 않는다 (리뷰 P3)", () => {
+    const state = parsedState(MINIMAL);
+    render(
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, state.parse, [
+          WEIGHT_ERROR,
+          {
+            ...WEIGHT_ERROR,
+            pointer: "/portfolio/selection_count",
+            message: "종목 수가 너무 적습니다",
+          },
+        ])}
+        transactions={stubTransactions()}
+        catalogs={NO_CATALOGS}
+      />,
+    );
+
+    // 두 문장 모두 본문으로 보이지만 live region은 하나도 없다 — 동시에 삽입된 assertive
+    // 영역들이 서로를 끊어 먹으면 원인 문장이 오히려 안 읽힌다.
+    expect(section("risk").getByText("너무 큽니다")).toBeVisible();
+    expect(
+      section("portfolio").getByText("종목 수가 너무 적습니다"),
+    ).toBeVisible();
+    expect(screen.queryAllByRole("alert")).toEqual([]);
+  });
+
+  it("경고는 본문으로 보이되 assertive alert로 알리지 않는다", () => {
+    const state = parsedState(MINIMAL);
+    render(
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, state.parse, [
+          { ...WEIGHT_ERROR, severity: "warning", message: "조금 큽니다" },
+        ])}
+        transactions={stubTransactions()}
+        catalogs={NO_CATALOGS}
+      />,
+    );
+
+    expect(section("risk").getByText("조금 큽니다")).toBeVisible();
+    expect(screen.queryAllByRole("alert")).toEqual([]);
   });
 });

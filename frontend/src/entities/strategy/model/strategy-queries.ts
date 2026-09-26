@@ -40,6 +40,17 @@ export const strategySchemaQuery = () =>
     staleTime: 5 * 60_000,
   });
 
+/**
+ * 연산자 카탈로그(P1-03). 배포로만 바뀌고 서버가 `catalog_hash`를 ETag로 답하므로 스키마와 같은
+ * staleTime을 쓴다. 팔레트·노드 라벨이 읽는 유일한 연산자 목록이다(spec D8).
+ */
+export const strategyOperatorsQuery = () =>
+  queryOptions({
+    queryKey: ["strategy", "operator-catalog"],
+    queryFn: () => strategyWorkbenchApi.getStrategyOperatorCatalog(),
+    staleTime: 5 * 60_000,
+  });
+
 /** Field contract plus the catalog versions it was built against. */
 export const strategyContractQuery = () =>
   queryOptions({

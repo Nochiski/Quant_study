@@ -1,5 +1,7 @@
 from strategy_workbench.domain.strategy._hydrate import (
     CURRENT_SCHEMA_VERSION,
+    LEGACY_SHAPE_CODE,
+    STRUCTURE_CODES,
     SUPPORTED_SCHEMA_VERSIONS,
     HydrationStatus,
     StrategyHydration,
@@ -22,6 +24,8 @@ from strategy_workbench.domain.strategy._upgrade import (
     is_legacy_document,
     require_retired_schema_version,
     strip_retired_execution_settings,
+    is_upgradeable_document,
+    legacy_shape_hints,
     upgrade_document_1_0,
 )
 
@@ -37,6 +41,8 @@ __all__ = [
     "NotALegacyDocumentError",
     "UnknownSchemaVersionError",
     "HydrationStatus",
+    "LEGACY_SHAPE_CODE",
+    "STRUCTURE_CODES",
     "SourceFormat",
     "StrategyHydration",
     "StructuralIssue",
@@ -46,6 +52,8 @@ __all__ = [
     "is_frozen_schema_version",
     "is_legacy_document",
     "require_retired_schema_version",
+    "is_upgradeable_document",
+    "legacy_shape_hints",
     "source_hash_of",
     "strip_retired_execution_settings",
     "upgrade_document_1_0",

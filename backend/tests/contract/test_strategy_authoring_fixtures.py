@@ -182,8 +182,12 @@ def test_schema_1_0_document_is_rejected() -> None:
     assert [issue.code for issue in result.issues] == ["structure.unsupported_schema_version"]
 
 
-def test_nested_factors_shape_is_a_type_mismatch() -> None:
-    """1.0의 `factors: {factors: [...]}`는 1.1에서 sequence 자리의 mapping이다 (S1)."""
+def test_nested_factors_shape_is_reported_as_1_0_syntax() -> None:
+    """1.0의 `factors: {factors: [...]}`는 1.1에서 sequence 자리의 mapping이다 (S1).
+
+    버전 줄이 1.1이라 버전 진단이 뜨지 않으므로, "이건 예전 문법"이라는 사실은 이 코드가 말한다
+    (P1-05 `structure.legacy_shape` — frontend 업그레이드 배너가 같이 반응한다).
+    """
     document = _load_yaml("quality_momentum.yaml")
     document["factors"] = {"factors": document["factors"]}
 
@@ -191,8 +195,9 @@ def test_nested_factors_shape_is_a_type_mismatch() -> None:
 
     assert not result.ok
     assert [(issue.code, issue.pointer) for issue in result.issues] == [
-        ("structure.type_mismatch", "/factors")
+        ("structure.legacy_shape", "/factors")
     ]
+    assert "expected=sequence got=dict" in result.issues[0].message
 
 
 def test_syntax_invalid_yaml_never_becomes_a_spec() -> None:

@@ -93,9 +93,8 @@ export const useUpgradeDocument = (
         // 응답이 도착하기 전에 편집됐으면 그 텍스트를 덮어쓰지 않는다.
         if (editor.current !== current || current.getText() !== state.source)
           return;
-        // `replaceRange`는 history를 앞뒤로 격리한다(`isolateHistory`). `setText`는 로드·포맷 전환이
-        // 공유하는 경로라 격리하지 않으므로, 직후에 친 글자와 업그레이드가 한 undo로 묶이지 않게
-        // 여기서는 범위 교체를 쓴다.
+        // `replaceRange`는 history를 앞뒤로 격리한다(`isolateHistory`) — 직후에 친 글자와 업그레이드가
+        // 한 undo로 묶이지 않는다. 같은 문서 안의 전체 교체는 모두 이 경로다.
         current.replaceRange(0, current.getText().length, upgraded.source);
         current.scrollTo(0);
         current.focus();

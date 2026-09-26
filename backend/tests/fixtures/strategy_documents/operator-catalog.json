@@ -1,5 +1,5 @@
 {
-  "catalog_hash": "63bbcecf966bfae0c22cdcc6a94d93de499f6cc42d196aefd5ac0cfda0c859d3",
+  "catalog_hash": "4b292de3009760ebdf84b6f33f574abc00defc87f4a2daf369cd5a1db4b4830e",
   "operators": [
     {
       "kind": "unary",
@@ -210,7 +210,7 @@
       "arity": 1,
       "params": [],
       "output_type_rule": "numeric_series",
-      "unit_rule": "same_as_input",
+      "unit_rule": "dimensionless",
       "availability": "available",
       "description_key": "strategy.operator.cross_sectional.rank",
       "formula_key": "strategy.operator.cross_sectional.rank.formula",
@@ -222,7 +222,7 @@
       "arity": 1,
       "params": [],
       "output_type_rule": "numeric_series",
-      "unit_rule": "same_as_input",
+      "unit_rule": "dimensionless",
       "availability": "available",
       "description_key": "strategy.operator.cross_sectional.zscore",
       "formula_key": "strategy.operator.cross_sectional.zscore.formula",

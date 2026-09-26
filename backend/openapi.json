@@ -3633,7 +3633,7 @@
         "type": "string"
       },
       "OperatorAvailability": {
-        "description": "정의 시점의 가용성. 실제 판정(어댑터 capability)은 P2-04이 추가한다.",
+        "description": "연결된 어댑터에서 이 연산자를 실행할 수 있는가(`operator_availability`가 판정).",
         "enum": [
           "available",
           "unsupported"
@@ -6811,7 +6811,7 @@
         "type": "object"
       },
       "StrategyOperatorCatalog": {
-        "description": "그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.\n\n문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,\n연산자 목록·arity·가용성을 손으로 적지 않는다.",
+        "description": "그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.\n\n문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,\n연산자 목록·arity·가용성을 손으로 적지 않는다. `availability` 는 연결된 어댑터 capability 로\n판정하므로(P2-07) 해시도 어댑터에 따라 다르다 — 어댑터를 바꾸면 ETag 가 바뀐다.",
         "properties": {
           "catalog_hash": {
             "title": "Catalog Hash",
@@ -8217,7 +8217,8 @@
         "enum": [
           "same_as_input",
           "combined",
-          "boolean"
+          "boolean",
+          "dimensionless"
         ],
         "title": "UnitRule",
         "type": "string"

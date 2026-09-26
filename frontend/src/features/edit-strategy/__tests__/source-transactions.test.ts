@@ -372,6 +372,21 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
     },
   );
 
+  it.each([
+    ["LF", "\n"],
+    ["CRLF", "\r\n"],
+  ])(
+    "does not read ` #` inside a quoted scalar on the dash line as the parent's comment when the parent content starts on that line (%s, #198 review P3)",
+    (_name, eol) => {
+      // `"a #b"`의 `#`은 공백 뒤라 YAML 주석 문자 규칙만으로는 걸러지지 않는다. 부모 내용(안쪽 시퀀스)이 dash
+      // 줄에서 시작하므로 그 줄에 부모의 줄 끝 주석은 없다는 판정(`contentOnLaterLine`)만이 이 경우를 지킨다.
+      const source = ["g:", '  - - k: "a #b"', "      x: 1", "z: 2", ""].join(eol);
+      expect(ok(source, { kind: "remove", pointer: "/g/0/0" }).nextSource).toBe(
+        ["g:", "  - []", "z: 2", ""].join(eol),
+      );
+    },
+  );
+
   it("expands `- []` and `- {}` without leaving a trailing space", () => {
     expect(
       ok("a:\n  - []\n", {

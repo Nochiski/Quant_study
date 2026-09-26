@@ -70,6 +70,14 @@ const mockProjects = [
     testMatch: /assistant\.workflow\.spec\.ts/u,
     use: chromiumUse(1440, 900, "light"),
   },
+  {
+    // 유저 스토리 하네스(`docs/product/user-stories/`)가 스토리 하나를 위해 새로 쓴 e2e. 스크린샷
+    // 기준선을 만들지 않으므로 1440 light 하나로 수집한다. 기존 spec에 붙인 스토리 태그는 그 spec의
+    // project에서 돈다.
+    name: "chromium-stories",
+    testMatch: /stories[\\/][^\\/]+\.spec\.ts/u,
+    use: chromiumUse(1440, 900, "light"),
+  },
 ];
 
 const realEquityProjects = [

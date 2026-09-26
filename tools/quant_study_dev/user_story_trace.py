@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from collections.abc import Iterable, Sequence
@@ -43,17 +44,25 @@ AREA_LINE = re.compile(r"^- 기능 영역: (?P<area>.+)$", re.MULTILINE)
 E2E_NONE_LINE = re.compile(r"^- e2e: 없음$", re.MULTILINE)
 E2E_LIST_LINE = re.compile(r"^- e2e:$", re.MULTILINE)
 E2E_ITEM_LINE = re.compile(r"^  - `(?P<path>[^`]+)` :: (?P<title>.+)$")
+E2E_OWNER_LINE = re.compile(r"^- e2e 담당: (?P<owners>.+)$", re.MULTILINE)
+ACCEPTANCE_SECTION = re.compile(r"^수용 기준\s*\n\s*\n- \S", re.MULTILINE)
 # lang2 WORKFLOW 같은 계획 문서의 PR ID(`P3-02`)나 GitHub 번호(`#123`).
 OWNER_ID = re.compile(r"^(?:[A-Z][A-Z0-9]*-\d{2}|#\d+)$")
 
-# `test("제목", { tag: [...] }, …)`. 제목은 따옴표 세 종류를 받되 템플릿 치환(`${`)은 거부한다.
+# `test("제목", { …, tag: [...] }, …)`. 제목은 따옴표 세 종류를 받되 템플릿 치환(`${`)은 거부한다.
+# 옵션 객체 안에서 `tag` 앞에 다른 키(`annotation: { … }` 한 겹까지)가 와도 읽는다.
 TEST_WITH_TAGS = re.compile(
     r"""\btest\(\s*(?P<quote>["'`])(?P<title>(?:\\.|(?!(?P=quote)).)*?)(?P=quote)\s*,"""
-    r"""\s*\{\s*tag:\s*(?P<tags>\[[^\]]*\]|["'][^"']*["'])""",
+    r"""\s*\{(?:[^{}]|\{[^{}]*\})*?\btag:\s*(?P<tags>\[[^\]]*\]|["'][^"']*["'])""",
     re.DOTALL,
 )
 TAG_LITERAL = re.compile(r"""["'](?P<tag>@[^"']+)["']""")
 STORY_TAG_TOKEN = re.compile(r"@US-[A-Za-z0-9-]+")
+# 스토리 태그가 있는 파일에서 테스트를 건너뛰거나(skip·fixme), 실패를 기대하거나(fail), 나머지를
+# 끄는(only) 호출. 본문 안 `test.skip()`도 정적으로 잡는다.
+NON_RUNNING_CALL = re.compile(r"\btest(?:\.describe)?\.(?P<kind>skip|fixme|fail|only)\(")
+# 릴리스 게이트에 들지 않는 opt-in spec(`E2E_REAL_EQUITY_ROOT`가 있을 때만 수집된다).
+OPT_IN_SPEC = re.compile(r"\.real-equity\.spec\.ts$")
 
 
 class StoryStatus(StrEnum):
@@ -95,10 +104,12 @@ class Story:
     persona: str
     status: StoryStatus | None
     owners: tuple[str, ...]
+    e2e_owners: tuple[str, ...]
     area: str
     e2e: tuple[TestRef, ...]
     source: str
     has_unplanned_reason: bool
+    has_acceptance: bool
 
 
 @dataclass(frozen=True)
@@ -237,21 +248,10 @@ def _parse_story(
                     f"{story_id}의 상태가 허용값이 아니다: got={status_match['status']!r} allowed=[{allowed}]",
                 )
             )
-    owner_match = OWNER_LINE.search(block)
-    owners: tuple[str, ...] = ()
-    if owner_match is None:
-        report.findings.append(Finding("story.owner", location, f"{story_id}에 `- 담당 PR:` 줄이 없다"))
-    else:
-        owners = _parse_owners(owner_match["owners"])
-        invalid = [owner for owner in owners if OWNER_ID.fullmatch(owner) is None]
-        if invalid:
-            report.findings.append(
-                Finding(
-                    "story.owner",
-                    location,
-                    f"{story_id}의 담당 PR ID 형식이 틀렸다: got={invalid} expected=`P3-02` 또는 `#123`",
-                )
-            )
+    owners = _owner_field(OWNER_LINE, "담당 PR", "story.owner", story_id, block, location, report)
+    e2e_owners = _owner_field(
+        E2E_OWNER_LINE, "e2e 담당", "story.e2e_owner", story_id, block, location, report
+    )
     area_match = AREA_LINE.search(block)
     if area_match is None:
         report.findings.append(Finding("story.area", location, f"{story_id}에 `- 기능 영역:` 줄이 없다"))
@@ -264,11 +264,40 @@ def _parse_story(
         persona=persona,
         status=status,
         owners=owners,
+        e2e_owners=e2e_owners,
         area=area_match["area"].strip() if area_match else "",
         e2e=e2e,
         source=location,
         has_unplanned_reason=UNPLANNED_MARKER in block,
+        has_acceptance=ACCEPTANCE_SECTION.search(block) is not None,
     )
+
+
+def _owner_field(
+    pattern: re.Pattern[str],
+    label: str,
+    code: str,
+    story_id: str,
+    block: str,
+    location: str,
+    report: TraceReport,
+) -> tuple[str, ...]:
+    """`- 담당 PR:`·`- e2e 담당:` 같은 PR ID 목록 줄을 읽는다. 줄이 없거나 ID 형식이 틀리면 기록한다."""
+    match = pattern.search(block)
+    if match is None:
+        report.findings.append(Finding(code, location, f"{story_id}에 `- {label}:` 줄이 없다"))
+        return ()
+    owners = _parse_owners(match["owners"])
+    invalid = [owner for owner in owners if OWNER_ID.fullmatch(owner) is None]
+    if invalid:
+        report.findings.append(
+            Finding(
+                code,
+                location,
+                f"{story_id}의 {label} ID 형식이 틀렸다: got={invalid} expected=`P3-02` 또는 `#123`",
+            )
+        )
+    return owners
 
 
 def _spec_files(root: Path) -> Iterable[Path]:
@@ -332,6 +361,25 @@ def scan_tests(root: Path, report: TraceReport) -> None:
                     " `test.describe`나 주석이 아니라 테스트 호출의 tag 옵션에만 둔다",
                 )
             )
+        if total_story_tags == 0:
+            continue
+        if OPT_IN_SPEC.search(path.name):
+            report.findings.append(
+                Finding(
+                    "e2e.opt_in_spec",
+                    location,
+                    "opt-in spec은 릴리스 게이트에서 돌지 않으므로 스토리 태그를 달 수 없다",
+                )
+            )
+        for call in NON_RUNNING_CALL.finditer(text):
+            report.findings.append(
+                Finding(
+                    "e2e.non_running",
+                    f"{location}:{_line_of(text, call.start())}",
+                    f"스토리 태그가 있는 파일에서 `{call.group(0)}…)`를 쓴다."
+                    " 건너뛰거나 실패를 기대하는 테스트로는 스토리를 지킬 수 없다",
+                )
+            )
 
 
 def check_links(report: TraceReport) -> None:
@@ -391,6 +439,51 @@ def check_links(report: TraceReport) -> None:
             report.findings.append(
                 Finding("story.planned_owner", story.source, f"{story.story_id}는 `예정`인데 담당 PR이 없다")
             )
+        if status is StoryStatus.PLANNED and not story.e2e_owners:
+            report.findings.append(
+                Finding(
+                    "story.planned_e2e_owner",
+                    story.source,
+                    f"{story.story_id}는 `예정`인데 e2e를 쓸 PR(`- e2e 담당:`)이 없다",
+                )
+            )
+        stray_e2e_owners = [owner for owner in story.e2e_owners if owner not in story.owners]
+        if status is StoryStatus.PLANNED and stray_e2e_owners:
+            report.findings.append(
+                Finding(
+                    "story.e2e_owner_not_listed",
+                    story.source,
+                    f"{story.story_id}의 e2e 담당 {stray_e2e_owners}가 담당 PR {list(story.owners)}에 없다",
+                )
+            )
+        if (
+            status is StoryStatus.IMPLEMENTED_WITH_E2E or status is StoryStatus.UNPLANNED
+        ) and story.e2e_owners:
+            report.findings.append(
+                Finding(
+                    "story.e2e_owner_status",
+                    story.source,
+                    f"{story.story_id}는 `{status.value}`라 e2e 담당을 `없음`으로 둔다:"
+                    f" got={list(story.e2e_owners)}",
+                )
+            )
+        if status is StoryStatus.IMPLEMENTED_WITH_E2E and story.owners:
+            report.findings.append(
+                Finding(
+                    "story.implemented_owner",
+                    story.source,
+                    f"{story.story_id}는 `{status.value}`인데 담당 PR {list(story.owners)}이 남아 있다."
+                    " 구현이 끝났으면 `없음`으로 바꾼다",
+                )
+            )
+        if not story.has_acceptance:
+            report.findings.append(
+                Finding(
+                    "story.acceptance",
+                    story.source,
+                    f"{story.story_id}에 `수용 기준` 절과 그 아래 항목(`- …`)이 없다",
+                )
+            )
         if status is StoryStatus.UNPLANNED:
             if story.owners:
                 report.findings.append(
@@ -436,8 +529,8 @@ def render_traceability(report: TraceReport) -> str:
         "",
         "### 스토리별 추적",
         "",
-        "| 스토리 | 페르소나 | 제목 | 상태 | 담당 PR | e2e (파일 :: 테스트) |",
-        "|---|---|---|---|---|---|",
+        "| 스토리 | 페르소나 | 제목 | 상태 | 담당 PR | e2e 담당 | e2e (파일 :: 테스트) |",
+        "|---|---|---|---|---|---|---|",
     ]
     tagged: dict[str, list[TestRef]] = {}
     for test in report.tests:
@@ -448,8 +541,10 @@ def render_traceability(report: TraceReport) -> str:
         e2e = "<br>".join(_cell(ref.render()) for ref in refs) if refs else "—"
         status = f"`{story.status.value}`" if story.status is not None else "?"
         owners = ", ".join(story.owners) if story.owners else "—"
+        e2e_owners = ", ".join(story.e2e_owners) if story.e2e_owners else "—"
         lines.append(
-            f"| {story.story_id} | {story.persona} | {_cell(story.title)} | {status} | {owners} | {e2e} |"
+            f"| {story.story_id} | {story.persona} | {_cell(story.title)} | {status} | {owners}"
+            f" | {e2e_owners} | {e2e} |"
         )
     return "\n".join(lines)
 
@@ -490,13 +585,140 @@ def check_traceability(root: Path, report: TraceReport, *, write: bool) -> None:
         )
 
 
-def run(root: Path, *, write: bool = False) -> TraceReport:
-    """저장소 `root`를 검사한 보고서를 돌려준다. `write`면 traceability 표를 먼저 갱신한다."""
+@dataclass(frozen=True)
+class ListedTest:
+    """`playwright test --list --reporter=json`이 알려 준 테스트 한 벌(project 하나)."""
+
+    ref: TestRef
+    story_ids: tuple[str, ...]
+    project: str
+    expected_status: str
+
+
+def _text(mapping: dict[str, object], key: str) -> str | None:
+    value = mapping.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _listed_tests(payload: object) -> list[ListedTest]:
+    """Playwright JSON reporter 출력의 suite 트리를 평평하게 편다. 파일 경로는 `frontend/e2e/` 기준이다."""
+    listed: list[ListedTest] = []
+    pending: list[object] = [payload]
+    while pending:
+        node = pending.pop()
+        if not isinstance(node, dict):
+            continue
+        suites = node.get("suites")
+        if isinstance(suites, list):
+            pending.extend(suites)
+        specs = node.get("specs")
+        if not isinstance(specs, list):
+            continue
+        for spec in specs:
+            if not isinstance(spec, dict):
+                continue
+            file = _text(spec, "file")
+            title = _text(spec, "title")
+            tests = spec.get("tests")
+            if file is None or title is None or not isinstance(tests, list):
+                continue
+            tags = spec.get("tags")
+            story_ids = tuple(
+                tag.removeprefix("@")
+                for tag in (tags if isinstance(tags, list) else [])
+                if isinstance(tag, str) and tag.removeprefix("@").startswith("US-")
+            )
+            ref = TestRef(f"{E2E_DIR.as_posix()}/{file.replace(chr(92), '/')}", title)
+            for test in tests:
+                if isinstance(test, dict):
+                    listed.append(
+                        ListedTest(
+                            ref,
+                            story_ids,
+                            _text(test, "projectName") or "",
+                            _text(test, "expectedStatus") or "",
+                        )
+                    )
+    return listed
+
+
+def check_playwright_list(report: TraceReport, list_path: Path) -> None:
+    """스토리 태그가 붙은 테스트가 릴리스 게이트 실행에서 실제로 수집되는지 본다.
+
+    입력은 `E2E_REAL_EQUITY_ROOT` 없이 러너로 만든 목록이다(`node e2e/run-playwright.mjs --list
+    --reporter=json`). 정적 검사는 어느 project가 어느 파일을 모으는지 모르므로, 모으지 않는 위치에
+    둔 spec이나 `test.skip(제목, …)` 같은 선언형 건너뛰기는 이 목록이 있어야 잡힌다.
+    """
+    location = list_path.as_posix()
+    try:
+        payload: object = json.loads(list_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        report.findings.append(Finding("list.read", location, f"Playwright 목록을 읽지 못했다: {error!r}"))
+        return
+    listed = _listed_tests(payload)
+    if not listed:
+        report.findings.append(Finding("list.empty", location, "Playwright 목록에 테스트가 하나도 없다"))
+        return
+    if any(item.project == "real-equity" for item in listed):
+        report.findings.append(
+            Finding(
+                "list.opt_in",
+                location,
+                "목록에 opt-in project `real-equity`가 있다. `E2E_REAL_EQUITY_ROOT` 없이 다시 만든다",
+            )
+        )
+    by_ref: dict[TestRef, list[ListedTest]] = {}
+    for item in listed:
+        by_ref.setdefault(item.ref, []).append(item)
+    static = {test.ref: test for test in report.tests}
+    for ref, test in sorted(static.items()):
+        runs = by_ref.get(ref, [])
+        running = [item for item in runs if item.expected_status == "passed"]
+        if not running:
+            report.findings.append(
+                Finding(
+                    "e2e.not_in_gate",
+                    ref.path,
+                    f"스토리 테스트 {ref.title!r}가 릴리스 게이트 목록에서 실행 대상이 아니다"
+                    f" (수집된 project {[item.project for item in runs]},"
+                    f" expectedStatus {[item.expected_status for item in runs]})",
+                )
+            )
+            continue
+        listed_ids = set(running[0].story_ids)
+        if listed_ids != set(test.story_ids):
+            report.findings.append(
+                Finding(
+                    "e2e.list_mismatch",
+                    ref.path,
+                    f"{ref.title!r}의 스토리 태그가 정적 해석 {sorted(test.story_ids)}와"
+                    f" Playwright 목록 {sorted(listed_ids)}에서 다르다",
+                )
+            )
+    for ref, runs in sorted(by_ref.items()):
+        if ref not in static and any(item.story_ids for item in runs):
+            report.findings.append(
+                Finding(
+                    "e2e.list_unparsed",
+                    ref.path,
+                    f"Playwright는 {ref.title!r}에 스토리 태그가 있다는데 정적 검사가 읽지 못했다",
+                )
+            )
+
+
+def run(root: Path, *, write: bool = False, playwright_list: Path | None = None) -> TraceReport:
+    """저장소 `root`를 검사한 보고서를 돌려준다.
+
+    `write`면 traceability 표를 먼저 갱신한다. `playwright_list`가 있으면 스토리 테스트가 릴리스
+    게이트에서 실제로 도는지도 본다.
+    """
     report = TraceReport()
     parse_stories(root, report)
     scan_tests(root, report)
     check_links(report)
     check_traceability(root, report, write=write)
+    if playwright_list is not None:
+        check_playwright_list(report, playwright_list)
     return report
 
 
@@ -504,9 +726,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="유저 스토리 하네스 추적성 검사")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="저장소 루트 (기본: 이 파일 기준)")
     parser.add_argument("--write", action="store_true", help="traceability.md 표를 다시 쓴 뒤 검사한다")
+    parser.add_argument(
+        "--playwright-list",
+        type=Path,
+        default=None,
+        help="`run-playwright.mjs --list --reporter=json` 결과 파일. 주면 게이트 수집 여부도 본다",
+    )
     args = parser.parse_args(argv)
     root: Path = args.root.resolve()
-    report = run(root, write=args.write)
+    report = run(root, write=args.write, playwright_list=args.playwright_list)
     for finding in report.findings:
         print(finding.render(), file=sys.stderr)
     stories = len(report.stories)

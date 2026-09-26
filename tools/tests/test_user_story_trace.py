@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +19,7 @@ from quant_study_dev.user_story_trace import (
 )
 
 SPEC_PATH = "frontend/e2e/stories/dm.sample.spec.ts"
+ACCEPTANCE = "수용 기준\n\n- Given 샘플, Then 통과한다.\n"
 
 
 def _story(
@@ -25,8 +27,10 @@ def _story(
     *,
     status: str = "구현됨-e2e",
     owners: str = "없음",
+    e2e_owners: str = "없음",
     e2e: tuple[str, ...] = (),
     extra: str = "",
+    acceptance: str = ACCEPTANCE,
 ) -> str:
     if e2e:
         e2e_block = "- e2e:\n" + "".join(f"  - `{SPEC_PATH}` :: {title}\n" for title in e2e)
@@ -37,19 +41,38 @@ def _story(
         "> 정동민으로서 샘플을 하고 싶다. 그래야 검사할 수 있다.\n\n"
         f"- 상태: `{status}`\n"
         f"- 담당 PR: {owners}\n"
+        f"- e2e 담당: {e2e_owners}\n"
         "- 기능 영역: 샘플\n"
         f"{e2e_block}\n"
-        "수용 기준\n\n- Given 샘플, Then 통과한다.\n"
+        f"{acceptance}"
         f"{extra}\n"
     )
 
 
-def _test_call(title: str, tags: tuple[str, ...]) -> str:
+def _planned(story_id: str) -> str:
+    return _story(story_id, status="예정", owners="P3-02", e2e_owners="P3-02")
+
+
+def _test_call(title: str, tags: tuple[str, ...], *, body: str = "void page;") -> str:
     rendered = ", ".join(f'"{tag}"' for tag in tags)
-    return f'test(\n  "{title}",\n  {{ tag: [{rendered}] }},\n  async ({{ page }}) => {{\n    void page;\n  }},\n);\n'
+    return (
+        f'test(\n  "{title}",\n  {{ tag: [{rendered}] }},\n'
+        f"  async ({{ page }}) => {{\n    {body}\n  }},\n);\n"
+    )
 
 
-class UserStoryTraceTest(unittest.TestCase):
+def _listed(file: str, title: str, tags: list[str], project: str, expected: str = "passed") -> dict[str, object]:
+    return {
+        "file": file,
+        "title": title,
+        "tags": tags,
+        "tests": [{"projectName": project, "expectedStatus": expected}],
+    }
+
+
+class _Harness(unittest.TestCase):
+    """임시 저장소 하나와 파일 쓰기 도우미. 테스트는 두지 않는다."""
+
     def setUp(self) -> None:
         self._temp = tempfile.TemporaryDirectory()
         self.root = Path(self._temp.name)
@@ -73,14 +96,22 @@ class UserStoryTraceTest(unittest.TestCase):
         path = self.root / "docs/product/user-stories/traceability.md"
         path.write_text(f"# 표\n\n{TRACE_START}\n{body}\n{TRACE_END}\n", encoding="utf-8")
 
+    def write_list(self, *specs: dict[str, object]) -> Path:
+        path = self.root / "list.json"
+        payload = {"suites": [{"title": "root", "specs": [], "suites": [{"specs": list(specs)}]}]}
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return path
+
     def codes(self, report: TraceReport) -> list[str]:
         return sorted(finding.code for finding in report.findings)
 
+
+class UserStoryTraceTest(_Harness):
     def test_consistent_harness_passes_after_write(self) -> None:
         title = "US-DM-01 샘플이 보인다"
         self.write_stories(
             _story("US-DM-01", e2e=(title,)),
-            _story("US-DM-02", status="예정", owners="P3-02"),
+            _planned("US-DM-02"),
             _story("US-DM-03", status="미계획", extra="제품 결정 필요: 계획이 없다."),
         )
         self.write_spec(_test_call(title, ("@story", "@US-DM-01")))
@@ -91,8 +122,8 @@ class UserStoryTraceTest(unittest.TestCase):
         self.assertEqual(self.codes(written), [])
         self.assertTrue(checked.ok, [finding.render() for finding in checked.findings])
         table = (self.root / "docs/product/user-stories/traceability.md").read_text(encoding="utf-8")
-        self.assertIn(f"| US-DM-01 | 정동민 | 샘플 스토리 | `구현됨-e2e` | — | `{SPEC_PATH}` :: {title} |", table)
-        self.assertIn("| US-DM-02 | 정동민 | 샘플 스토리 | `예정` | P3-02 | — |", table)
+        self.assertIn(f"| US-DM-01 | 정동민 | 샘플 스토리 | `구현됨-e2e` | — | — | `{SPEC_PATH}` :: {title} |", table)
+        self.assertIn("| US-DM-02 | 정동민 | 샘플 스토리 | `예정` | P3-02 | P3-02 | — |", table)
         self.assertIn("| 정동민 | 1 | 0 | 1 | 1 | 3 |", table)
 
     def test_implemented_story_without_tagged_test_fails(self) -> None:
@@ -128,14 +159,14 @@ class UserStoryTraceTest(unittest.TestCase):
         self.assertEqual(self.codes(report), ["story.e2e_unlisted"])
 
     def test_planned_story_with_tagged_test_must_be_promoted(self) -> None:
-        self.write_stories(_story("US-DM-01", status="예정", owners="P3-02"))
+        self.write_stories(_planned("US-DM-01"))
         self.write_spec(_test_call("US-DM-01 샘플", ("@story", "@US-DM-01")))
 
         report = run(self.root, write=True)
 
         self.assertIn("story.status_mismatch", self.codes(report))
 
-    def test_planned_story_requires_owner_and_unplanned_requires_reason(self) -> None:
+    def test_planned_story_requires_owners_and_unplanned_requires_reason(self) -> None:
         self.write_stories(
             _story("US-DM-01", status="예정"),
             _story("US-DM-02", status="미계획"),
@@ -146,27 +177,58 @@ class UserStoryTraceTest(unittest.TestCase):
 
         self.assertEqual(
             self.codes(report),
-            ["story.planned_owner", "story.unplanned_owner", "story.unplanned_reason"],
+            [
+                "story.planned_e2e_owner",
+                "story.planned_owner",
+                "story.unplanned_owner",
+                "story.unplanned_reason",
+            ],
         )
+
+    def test_e2e_owner_must_be_one_of_the_owners_and_only_for_open_work(self) -> None:
+        self.write_stories(
+            _story("US-DM-01", status="예정", owners="P3-02", e2e_owners="P5-03"),
+            _story("US-DM-02", status="미계획", e2e_owners="P5-03", extra="제품 결정 필요: 사유."),
+            _story("US-DM-03", status="구현됨-e2e없음", owners="P5-03", e2e_owners="P5-03"),
+        )
+
+        report = run(self.root, write=True)
+
+        self.assertEqual(self.codes(report), ["story.e2e_owner_not_listed", "story.e2e_owner_status"])
+
+    def test_implemented_story_must_drop_its_owner(self) -> None:
+        self.write_stories(_story("US-DM-01", owners="P3-02", e2e=("US-DM-01 샘플",)))
+        self.write_spec(_test_call("US-DM-01 샘플", ("@story", "@US-DM-01")))
+
+        report = run(self.root, write=True)
+
+        self.assertEqual(self.codes(report), ["story.implemented_owner"])
+
+    def test_story_without_acceptance_criteria_fails(self) -> None:
+        self.write_stories(
+            _story("US-DM-01", status="예정", owners="P3-02", e2e_owners="P3-02", acceptance="")
+        )
+
+        report = run(self.root, write=True)
+
+        self.assertEqual(self.codes(report), ["story.acceptance"])
 
     def test_invalid_status_owner_and_persona_prefix_are_reported(self) -> None:
         self.write_stories(
             _story("US-DM-01", status="완료"),
-            _story("US-DM-02", status="예정", owners="다음 분기"),
+            _story("US-DM-02", status="예정", owners="다음 분기", e2e_owners="다음 분기"),
             _story("US-SM-01", status="미계획", extra="제품 결정 필요: 사유."),
         )
 
         report = run(self.root, write=True)
 
-        self.assertEqual(self.codes(report), ["story.owner", "story.persona", "story.status"])
+        self.assertEqual(
+            self.codes(report), ["story.e2e_owner", "story.owner", "story.persona", "story.status"]
+        )
 
     def test_duplicate_story_id_across_files_fails(self) -> None:
-        self.write_stories(_story("US-DM-01", status="예정", owners="P3-02"))
-        self.write_stories(
-            _story("US-DM-01", status="예정", owners="P3-02"),
-            name="sm",
-            persona="한상목",
-        )
+        self.write_stories(_planned("US-DM-01"))
+        self.write_stories(_planned("US-DM-01"), name="sm", persona="한상목")
 
         report = run(self.root, write=True)
 
@@ -203,8 +265,45 @@ class UserStoryTraceTest(unittest.TestCase):
 
         self.assertTrue(report.ok, [finding.render() for finding in report.findings])
 
+    def test_tag_after_another_option_key_is_recognised(self) -> None:
+        title = "US-DM-01 주석 뒤 태그"
+        self.write_stories(_story("US-DM-01", e2e=(title,)))
+        self.write_spec(
+            f'test(\n  "{title}",\n  {{ annotation: {{ type: "issue", description: "#1" }}, tag: ["@story", "@US-DM-01"] }},\n'
+            "  async ({ page }) => {\n    void page;\n  },\n);\n"
+        )
+
+        report = run(self.root, write=True)
+
+        self.assertTrue(report.ok, [finding.render() for finding in report.findings])
+
+    def test_skip_inside_a_story_spec_is_rejected(self) -> None:
+        self.write_stories(_story("US-DM-01", e2e=("US-DM-01 샘플",)))
+        self.write_spec(_test_call("US-DM-01 샘플", ("@story", "@US-DM-01"), body="test.skip();"))
+
+        report = run(self.root, write=True)
+
+        self.assertEqual(self.codes(report), ["e2e.non_running"])
+
+    def test_skip_in_a_spec_without_story_tags_is_left_alone(self) -> None:
+        self.write_stories(_planned("US-DM-01"))
+        self.write_spec('test.skip("실데이터 없음", () => {});\n', path="frontend/e2e/other.spec.ts")
+
+        report = run(self.root, write=True)
+
+        self.assertTrue(report.ok, [finding.render() for finding in report.findings])
+
+    def test_story_tag_on_opt_in_spec_is_rejected(self) -> None:
+        path = "frontend/e2e/workbench.real-equity.spec.ts"
+        self.write_stories(_story("US-DM-01", e2e=("US-DM-01 샘플",)).replace(SPEC_PATH, path))
+        self.write_spec(_test_call("US-DM-01 샘플", ("@story", "@US-DM-01")), path=path)
+
+        report = run(self.root, write=True)
+
+        self.assertEqual(self.codes(report), ["e2e.opt_in_spec"])
+
     def test_stale_traceability_fails_without_write(self) -> None:
-        self.write_stories(_story("US-DM-01", status="예정", owners="P3-02"))
+        self.write_stories(_planned("US-DM-01"))
         self.write_traceability("| 손으로 고친 표 |")
 
         report = run(self.root)
@@ -214,7 +313,7 @@ class UserStoryTraceTest(unittest.TestCase):
         self.assertIn("손으로 고친 표", table)
 
     def test_missing_markers_fail(self) -> None:
-        self.write_stories(_story("US-DM-01", status="예정", owners="P3-02"))
+        self.write_stories(_planned("US-DM-01"))
         (self.root / "docs/product/user-stories/traceability.md").write_text("# 표\n", encoding="utf-8")
 
         report = run(self.root, write=True)
@@ -222,12 +321,74 @@ class UserStoryTraceTest(unittest.TestCase):
         self.assertEqual(self.codes(report), ["trace.markers"])
 
     def test_screenshot_directory_named_like_spec_is_ignored(self) -> None:
-        self.write_stories(_story("US-DM-01", status="예정", owners="P3-02"))
+        self.write_stories(_planned("US-DM-01"))
         (self.root / "frontend/e2e/__screenshots__/sample.spec.ts").mkdir(parents=True)
 
         report = run(self.root, write=True)
 
         self.assertTrue(report.ok, [finding.render() for finding in report.findings])
+
+
+class PlaywrightListTest(_Harness):
+    """`--playwright-list`: 태그가 붙은 테스트가 릴리스 게이트에서 실제로 수집되는가."""
+
+    title = "US-DM-01 샘플"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_stories(_story("US-DM-01", e2e=(self.title,)))
+        self.write_spec(_test_call(self.title, ("@story", "@US-DM-01")))
+
+    def test_collected_story_test_passes(self) -> None:
+        listed = self.write_list(
+            _listed("stories/dm.sample.spec.ts", self.title, ["@story", "@US-DM-01"], "chromium-stories")
+        )
+
+        report = run(self.root, write=True, playwright_list=listed)
+
+        self.assertTrue(report.ok, [finding.render() for finding in report.findings])
+
+    def test_story_test_no_project_collects_fails(self) -> None:
+        listed = self.write_list(_listed("other.spec.ts", "다른 테스트", [], "chromium-workflow"))
+
+        report = run(self.root, write=True, playwright_list=listed)
+
+        self.assertEqual(self.codes(report), ["e2e.not_in_gate"])
+
+    def test_declared_skip_is_not_a_running_test(self) -> None:
+        listed = self.write_list(
+            _listed(
+                "stories/dm.sample.spec.ts",
+                self.title,
+                ["story", "US-DM-01"],
+                "chromium-stories",
+                expected="skipped",
+            )
+        )
+
+        report = run(self.root, write=True, playwright_list=listed)
+
+        self.assertEqual(self.codes(report), ["e2e.not_in_gate"])
+
+    def test_list_made_in_opt_in_mode_is_rejected(self) -> None:
+        listed = self.write_list(
+            _listed("stories/dm.sample.spec.ts", self.title, ["story", "US-DM-01"], "chromium-stories"),
+            _listed("workbench.real-equity.spec.ts", "실데이터", [], "real-equity"),
+        )
+
+        report = run(self.root, write=True, playwright_list=listed)
+
+        self.assertEqual(self.codes(report), ["list.opt_in"])
+
+    def test_story_tag_only_playwright_sees_is_reported(self) -> None:
+        listed = self.write_list(
+            _listed("stories/dm.sample.spec.ts", self.title, ["story", "US-DM-01"], "chromium-stories"),
+            _listed("stories/dm.dynamic.spec.ts", "동적 제목", ["story", "US-DM-01"], "chromium-stories"),
+        )
+
+        report = run(self.root, write=True, playwright_list=listed)
+
+        self.assertEqual(self.codes(report), ["e2e.list_unparsed"])
 
 
 if __name__ == "__main__":

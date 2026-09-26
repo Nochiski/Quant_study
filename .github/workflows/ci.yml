@@ -153,6 +153,15 @@ jobs:
         working-directory: frontend
       - run: npx playwright install chromium
         working-directory: frontend
+      # 스토리 태그가 붙은 e2e가 이 게이트에서 실제로 수집되고 건너뛰지 않는지 본다. 정적 검사는
+      # project의 testMatch를 모르므로 Playwright가 만든 목록과 맞춘다(유저 스토리 하네스).
+      - name: 유저 스토리 e2e가 릴리스 게이트에 드는지 확인
+        shell: bash
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/story-list.json
+        run: |
+          node frontend/e2e/run-playwright.mjs --list --reporter=json
+          uv run --locked python -m quant_study_dev.user_story_trace --playwright-list "$PLAYWRIGHT_JSON_OUTPUT_NAME"
       - run: npm run test:e2e
         working-directory: frontend
       - name: Upload browser failure artifacts

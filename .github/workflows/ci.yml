@@ -74,6 +74,18 @@ jobs:
           tests/application/test_assistant_usage.py
           tests/architecture
 
+  # 유저 스토리 하네스(`docs/product/user-stories/`): 스토리 상태·e2e 태그·traceability 표가 서로
+  # 맞는지 본다. 검사기 단위 테스트는 backend job의 "Verify root server contract" step이 함께 돈다.
+  user-story-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --locked python -m quant_study_dev.user_story_trace
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

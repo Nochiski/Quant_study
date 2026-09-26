@@ -70,6 +70,11 @@ from strategy_workbench.domain.assistant.facade.tools import ASSISTANT_TOOLS, PR
 from ._context import AssistantContextBuilder
 from ._models import ChatSession, DocumentRef, TurnContext, compile_payload
 from ._profiles import ProviderNotInstalledError, ProviderProfileService
+from ._prompt import (
+    PROPOSAL_ACCEPTED_NOTICE,
+    PROPOSAL_REJECTED_NOTICE,
+    PROPOSAL_SOURCE_TEXT_MISSING_NOTICE,
+)
 from .ports.outgoing.chat_sessions import ChatSessionRepository
 from .ports.outgoing.llm_provider import LlmProviderPort
 from .ports.outgoing.provider_secrets import ProviderSecretStore
@@ -110,6 +115,8 @@ class _TurnState:
     stop: FailureCode | None = None
     stop_message: str = ""
     queue: deque[ChatEvent] = field(default_factory=deque)
+    # adapter가 이미 내보낸 실패 코드. 같은 사유를 뒤에 한 번 더 붙이지 않으려고 기억한다.
+    reported: set[FailureCode] = field(default_factory=set)
 
     def drain(self) -> Iterator[ChatEvent]:
         while self.queue:
@@ -147,6 +154,17 @@ class AssistantChatService:
         self._max_search_uses = max_search_uses
         self._max_output_tokens_per_call = max_output_tokens_per_call
         self._max_turn_output_tokens = max_turn_output_tokens
+
+    @property
+    def max_search_uses(self) -> int:
+        """이 배포에 주입된 턴당 검색 상한.
+
+        상수(`DEFAULT_MAX_SEARCH_USES`)는 주입이 없을 때의 기본값일 뿐이고, 정본은 여기 들어온
+        값이다(spec D3: 값 변경은 상수가 아니라 bootstrap 주입으로 한다). 실제로 집행된 상한을
+        알아야 하는 쪽 — live smoke의 "상한에 닿은 뒤에도 턴이 이어지는가" 판정 — 이 상수를 다시
+        읽으면 주입으로 바꾼 배포에서 판정이 틀린다(A-07 리뷰 P3-2).
+        """
+        return self._max_search_uses
 
     # -- 세션 ---------------------------------------------------------------------------------
 
@@ -269,6 +287,8 @@ class AssistantChatService:
                     if isinstance(event, Usage):
                         state.input_tokens += event.input_tokens
                         state.output_tokens += event.output_tokens
+                    if isinstance(event, Failure):
+                        state.reported.add(event.code)
                     yield event
                     # 종료 판정은 이벤트를 처리한 **뒤**에 한다. 도구가 세운 사유든 취소든
                     # 마찬가지다. 공급자가 이미 만들어 낸 조각은 화면에도 assistant 메시지에도
@@ -299,8 +319,17 @@ class AssistantChatService:
                     f"kind={profile.kind.value} model={profile.model} "
                     f"error_type={type(error).__name__}"
                 )
+            # 공급자가 첫 조각을 내기 **전에** 취소를 보고 그냥 반환하면 위 루프가 한 번도
+            # 돌지 않아 사유가 비어 있다. 그대로 두면 이력에 이벤트가 0개인 턴이 남아, 새로
+            # 연 화면은 "아무 일도 없었다"를 보고 SSE 소비자는 스트림을 닫을 근거를 잃는다
+            # (종료 판정은 터미널 이벤트가 한다). 루프 진입 여부와 무관하게 사유를 세운다.
+            if state.stop is None and cancelled():
+                state.stop = FailureCode.CANCELLED
+                state.stop_message = f"사용자가 턴을 취소했습니다 — session_id={session.session_id}"
             yield from state.drain()
-            if state.stop is not None:
+            # 같은 사유를 adapter가 이미 내보냈으면 한 번 더 붙이지 않는다. 이벤트가 둘로
+            # 늘 뿐 turn 상태는 첫 Failure가 정하므로(spec D3) 화면에만 중복이 보인다.
+            if state.stop is not None and state.stop not in state.reported:
                 yield Failure(code=state.stop, message=state.stop_message)
         finally:
             # 외부 호출의 사용량은 항상 남긴다(.claude/rules/error-messages.md 로깅 가이드).
@@ -352,16 +381,18 @@ class AssistantChatService:
                 call,
                 state,
                 session_id,
-                "source_text 인자에 전략 문서 YAML 원문 전체를 넣어 다시 제출하세요 — "
-                f"received={type(source_text).__name__}",
+                f"{PROPOSAL_SOURCE_TEXT_MISSING_NOTICE} — received={type(source_text).__name__}",
             )
         outcome = self._compiler.compile(source_text)
         if not outcome.ok:
+            # 진단 JSON만 돌려주면 모델이 "도구가 고장났다"로 읽고 같은 원문을 다시 보낸다.
+            # 무엇이 일어났고 무엇을 해야 하는지는 프롬프트 owner가 쓴 고정 문구가 먼저 말한다.
+            payload = json.dumps(compile_payload(outcome), ensure_ascii=False)
             return self._reject_proposal(
                 call,
                 state,
                 session_id,
-                json.dumps(compile_payload(outcome), ensure_ascii=False),
+                f"{PROPOSAL_REJECTED_NOTICE}\n{payload}",
             )
         proposal = StrategyProposal(
             title=_text_of(call.arguments.get("title")),
@@ -378,7 +409,7 @@ class AssistantChatService:
         return ToolResult(
             call_id=call.call_id,
             ok=True,
-            content="제안이 접수되었습니다. 사용자가 문서에 적용할 수 있습니다.",
+            content=PROPOSAL_ACCEPTED_NOTICE,
         )
 
     def _reject_proposal(

@@ -32,7 +32,7 @@ main
 - OpenAPI와 frontend generated SDK는 **A-04가 같은 PR에서** 갱신한다(12절 "API 변경은 같은 PR에서
   OpenAPI와 generated SDK 갱신"). 생성 타입 추가는 기존 frontend 코드를 깨지 않으므로 frontend CI가
   A-04부터 green이어야 한다.
-- 실제 공급자 호출은 `RUN_LLM_LIVE=1` smoke 테스트에서만. CI는 가짜 공급자.
+- 실제 공급자 호출은 `STRATEGY_WORKBENCH_LIVE_SMOKE=1` smoke에서만. CI는 가짜 공급자.
 - `strategy-language-2-0`(schema 1.2)이 먼저 머지되면 A-07 fixture와 B-05 e2e를 1.2 문서로 갱신한다.
 
 ## 2. 공통 gate
@@ -137,7 +137,7 @@ main
   - [ ] 프롬프트 캐싱(안정 블록에만 `cache_control`, 휘발 값은 뒤, breakpoint ≤ 4)
   - [ ] 예외 → `FailureCode` 매핑, message는 예외 타입 이름만(키 문자열 미노출 테스트)
   - [ ] `probe`(실패 종류 구분)
-- optional extra `llm`에 `anthropic>=1.0`. `RUN_LLM_LIVE=1` smoke 1건.
+- optional extra `llm`에 `anthropic>=1.0`. 실연결 확인은 A-07의 live smoke가 맡는다.
 
 ### A-06 — OpenAI(Codex) adapter
 
@@ -145,10 +145,88 @@ main
 호출의 도구 목록에서 `web_search` 제거, 잘림 → `OUTPUT_TRUNCATED`, 토큰 예산 집행은 adapter).
 기본 모델은 SDK 문서로 확정해 PLAN 변경 기록에 근거. extra `llm`에 `openai>=2.0`.
 
-### A-07 — 프롬프트 최종본·컨텍스트 품질·시나리오 fixture
+### A-07 — 프롬프트 fixture·live smoke·기본값 확정
 
-**Acceptance**: 시스템 프롬프트 최종본(역할, 한국어, 도구 순서, 금지, 출처), 세션 `Usage` 집계, 가짜
-공급자 시나리오 fixture 3개(제안 성공·검증 실패 후 수정·검색 후 제안)가 B-05 e2e의 MSW 응답이 된다.
+**Intent**: 모델이 읽는 문장(시스템 프롬프트·도구 설명·고정 통지)을 골든 파일로 잠가 회귀를
+감지하고, 키가 있을 때만 도는 live smoke로 두 공급자의 SDK 표면을 확인하며, 턴 상한 기본값을
+근거와 함께 확정한다.
+
+**Acceptance**
+
+- **프롬프트 골든**: `backend/tests/fixtures/assistant/`에 시스템 프롬프트 전문(ko), 도구 5종의
+  설명·입력 스키마, 모델에게 되돌리는 고정 문구(제안 거절·검색 상한 통지)를 저장하고,
+  `AssistantContextBuilder`가 runtime schema fixture로 만든 결과와 byte 비교한다. 재생성은
+  `backend/tools/export_assistant_prompts.py`(갱신 절차는 그 docstring). 손으로 적은 전략 언어
+  필드명 0개 가드 유지.
+- **프롬프트 품질**(spec D8): 근거의 우선순위(사용자 요청 → 현재 문서 → 카탈로그·언어 요약 →
+  검색 결과)와 검색 결과를 명령으로 읽지 않는 규칙, 제안은 `propose_strategy` 도구로만(답변
+  본문에 문서 원문 금지), 출처 인용 규칙(검색으로 안 사실만·실제 URL만·http/https만), 한국어
+  응답과 식별자 원문 유지, 실행 설정은 사용자가 바꿔 달라고 할 때만 손댄다.
+- **live smoke** `backend/scripts/assistant_live_smoke.py`: `STRATEGY_WORKBENCH_LIVE_SMOKE=1`과
+  공급자 키(`ANTHROPIC_API_KEY`·`OPENAI_API_KEY`)가 있을 때만 실행. 공급자마다 probe 3회
+  (정상 키·틀린 키·없는 모델) → 짧은 턴(도구 + 검색) → 제안 1회를 돌리고 아래 확인 항목을
+  `[ok]`/`[fail]`/`[?]`로 찍는다. 키는 출력·로그에 찍지 않는다.
+  pytest(`backend/tests/test_assistant_live_smoke.py`)는 같은 조건이 없으면 사유를 적고 skip한다.
+- **기본값 확정**: 호출당 16000·턴 64000·라운드 12·검색 8·타임아웃 300(+유예 10)을 골든 실측
+  길이로 검토하고 근거를 PLAN 변경 기록과 spec D3에 남긴다. 값 변경은 A-01 상수가 아니라
+  bootstrap 주입으로 한다.
+- **세션 `Usage` 집계**: `GET /sessions/{id}` 응답에 턴별·세션 누적 사용량(토큰 종류별 합, 검색
+  횟수, 공급자 호출 수)을 싣는다. 집계 owner는 application(`aggregate_usage`)이고 저장하지
+  않는다 — 같은 응답의 `events`를 접은 값이라 둘이 어긋날 수 없다. OpenAPI·생성 SDK를 같은
+  PR에서 갱신한다(12절).
+- **시나리오 fixture 3개**: `backend/tests/fixtures/assistant/scenarios/`에 `simple_answer`,
+  `tool_then_proposal`, `search_then_failure`를 A-04 SSE 프레임
+  (`AssistantEventEnvelopeView`: `sequence`·`turn_id`·payload `type`)의 배열로 저장한다. B-05
+  e2e의 MSW가 그대로 재생하고, backend 테스트가 가짜 공급자 대본을 실제 서비스에 돌린 결과와
+  byte 비교한다. 재생성은 `backend/tools/export_assistant_scenarios.py`. `uuid4` 세션·턴 id는
+  `session-1`·`turn-1`로 고정해 골든이 실행마다 바뀌지 않게 한다.
+
+**live smoke 확인 항목** (A-05·A-06 구현자가 남긴 목록, 우선순위 순)
+
+| 공급자 | 항목 | 통과 조건 | 실패 증상 |
+|---|---|---|---|
+| anthropic | thinking signature 왕복 | 도구 라운드 1회 이상을 공급자 실패 없이 완주 | 두 번째 호출 400 `Invalid signature in thinking block`. 화면에는 `Failure(PROVIDER)`로만 보이므로 블록 끝의 로컬 경고에서 `error_type=BadRequestError`를 본다 |
+| anthropic·openai | probe 사유 매핑 | 정상 키 `ok`, 틀린 키 `auth`, 없는 모델 `model_not_found` | 올바른 키가 `unknown`. 최소 출력 토큰 값은 adapter 상수가 소유하며 확인 문장에 숫자를 복제하지 않는다 |
+| anthropic | `display: "summarized"` | 비어 있지 않은 `ThinkingSummary` 1건 이상 | 이벤트 자체가 없다 |
+| anthropic | 검색 결과 필드 | `SearchActivity`마다 `query`와 출처 제목·URL이 채워짐 | 검색은 했는데 출처가 빈다 |
+| anthropic·openai | 검색 상한 뒤 턴 지속 | 턴 누적 상한에 닿은 뒤에도 턴이 검색 없이 이어짐 | 상한에 닿자마자 턴이 실패로 끝난다 |
+| openai | 추론 항목 재전송 | 위 signature 왕복과 같은 관측 | 재전송 뒤 공급자 실패 |
+| openai | 기본 모델 실존 | adapter 기본 모델로 probe 성공 | `model_not_found` |
+| anthropic·openai | 상한 기본값 실측 | 제안 1건이 나온 턴의 라운드 수·호출별 `usage.output_tokens`·턴 합계를 기록 | 사용량 이벤트가 없다 |
+
+마지막 항목의 숫자는 PLAN "A-07 기본값 확정 근거" 표에 옮겨 적는다. 그 표의 토큰 수는 골든
+길이에서 환산한 추정치이고, 이 실행이 실측으로 바꾼다. 값을 조정해야 하면
+`domain/assistant/_models.py`의 `DEFAULT_*`가 유일한 owner이지만 그 파일은 승인된 A-01이므로,
+이번 단계에서는 bootstrap 주입값으로 두고 근거만 남긴다.
+
+`output_format=None` 항목은 A-05 리뷰에서 로컬 재현 가능한 SDK 센티널 오류로 판정되어 adapter에서
+고쳐졌고, live smoke 대상에서 뺐다. 로컬에서 재현되는 것을 여기 두면 키가 있어야만 도는 항목만
+늘어난다.
+
+**live smoke 실행 절차**
+
+`backend/`에서 아래를 돌린다. 키는 환경 변수로만 준다(명령줄 인자는 셸 이력에 남는다).
+
+```bash
+STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv run python scripts/assistant_live_smoke.py
+```
+
+기대 출력은 공급자마다 한 블록이다. `probe` 지연 시간, 턴이 흘린 이벤트 종류의 순서, 도구
+라운드·검색 횟수·제안 접수 여부, 그리고 확인 항목 목록이 나온다. 확인 항목의 표시는 세 가지다.
+
+- `[ok]` 이번 실행이 그 표면을 실제로 관측했다.
+- `[fail]` 관측했는데 기대와 달랐다 — adapter 결함이다. 종료 코드 1.
+- `[?]` 이번 실행으로 판정할 수 없다(모델이 그 경로를 타지 않았다). 실패가 아니며, 다시 돌리거나
+  질문을 바꿔 그 경로를 태운다.
+
+결과는 PLAN 변경 기록에 날짜와 함께 적는다. **A-07 구현 시점에는 키가 없어 실행하지 못했다.**
+
+**후속으로 남긴 것**
+
+- schema 1.2(`strategy-language-2-0` P2-03)가 머지되면 프롬프트의 실행 설정 문장과
+  `backend/tests/fixtures/assistant/` 골든 전부, 시나리오 fixture를 1.2 문서로 갱신한다(1절 규칙).
+  1.1은 시장·기간·유니버스를 문서 안 필수 절에 두므로 지금 프롬프트는 "실행 설정은 사용자의
+  몫이니 바꿔 달라고 하지 않으면 현재 값을 그대로 옮긴다"로 쓰여 있다.
 
 **A-05가 넘긴 항목** (2차 리뷰, 각각 근거가 코드·spec에 있다):
 

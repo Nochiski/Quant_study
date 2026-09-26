@@ -48,15 +48,24 @@ from strategy_workbench.domain.assistant.facade.models import (
     FailureCode,
     ProbeFailure,
     ProbeResult,
+    Proposal,
+    ProposalCompileResult,
+    ProposalDiagnostic,
     ProviderKind,
     ProviderProfile,
+    SearchActivity,
     SequencedEvent,
+    Source,
+    StrategyProposal,
     TextDelta,
+    ThinkingSummary,
     ToolCall,
     ToolResult,
+    ToolResultSummary,
     Turn,
     TurnRequest,
     TurnStatus,
+    Usage,
 )
 
 # 헬퍼가 받는 HTTP 클라이언트. 두 종류가 섞이는 데에는 이유가 있다.
@@ -380,6 +389,147 @@ def test_a_turn_streams_its_events_in_order_and_the_stream_closes(tmp_path: Path
         assert [turn["status"] for turn in history["turns"]] == [TurnStatus.COMPLETED.value]
         assert [message["role"] for message in history["messages"]] == ["user", "assistant"]
         assert len(history["events"]) == 3
+
+
+def test_the_history_events_are_byte_identical_to_the_sse_frames(tmp_path: Path) -> None:
+    """이력 `events`와 SSE `data:` payload가 같은 모양이라는 계약을 고정한다(리뷰 P3-3).
+
+    시나리오 골든과 B-05의 MSW는 둘이 같다는 전제 위에 서 있다. 그런데 직렬화 경로가 다르다 —
+    SSE는 `jsonable_encoder(asdict(...))`이고 이력은 FastAPI 응답 모델이다. 한쪽만 바뀌면 골든은
+    green인 채로 MSW 계약만 어긋나므로, 중첩이 깊은 이벤트까지 태워 두 경로를 직접 맞대 본다.
+    """
+    gate = threading.Event()
+    compiled = ProposalCompileResult(
+        ok=False,
+        spec_hash=None,
+        diagnostics=(
+            ProposalDiagnostic(
+                code="strategy.factor.unknown",
+                pointer="/factors/0/factor_id",
+                message="알 수 없는 팩터 식별자",
+                severity="error",
+            ),
+        ),
+    )
+    provider = _GatedProvider(
+        after=[
+            ThinkingSummary(text="어떤 팩터를 쓸지 고른다"),
+            SearchActivity(
+                query="KRX 모멘텀",
+                sources=(Source(title="리뷰", url="https://example.com/krx"),),
+            ),
+            ToolCall(call_id="call-1", name="read_current_strategy", arguments={"depth": 2}),
+            ToolResultSummary(
+                call_id="call-1", name="read_current_strategy", ok=True, summary="{}"
+            ),
+            Proposal(
+                proposal=StrategyProposal(
+                    title="제안",
+                    summary="한 문장",
+                    rationale="근거 (https://example.com/krx)",
+                    sources=(Source(title="리뷰", url="https://example.com/krx"),),
+                    source_text="schema_version: '1.1'\n",
+                    source_format="yaml",
+                    compile=compiled,
+                )
+            ),
+            Usage(input_tokens=1200, output_tokens=340, cache_read_tokens=900),
+            Done(stop_reason="end_turn"),
+            Failure(code=FailureCode.PROVIDER, message="공급자 호출이 실패했습니다"),
+        ],
+        gate=gate,
+    )
+    with _live_client(tmp_path, provider) as client:
+        _create_profile(client)
+        session_id = _start_session(client)
+        client.post(
+            f"{_ASSISTANT}/sessions/{session_id}/turns",
+            json={"text": "두 경로를 맞대 본다", "context": _CONTEXT},
+        )
+        assert provider.reached_gate.wait(timeout=5.0)
+        with client.stream("GET", f"{_ASSISTANT}/sessions/{session_id}/events") as stream:
+            lines = stream.iter_lines()
+            gate.set()
+            frames = _read_frames(lines, until_id=7)
+        history = _wait_for_terminal_turn(client, session_id)
+
+    assert [item["event"]["type"] for item in frames] == [
+        "thinking_summary",
+        "search_activity",
+        "tool_call",
+        "tool_result",
+        "proposal",
+        "usage",
+        "done",
+        "failure",
+    ]
+    assert history["events"] == frames
+
+
+def test_the_session_history_carries_the_usage_it_can_derive_from_its_events(
+    tmp_path: Path,
+) -> None:
+    """사용량은 이력에서 파생되는 값이라 저장되지 않는다(WORKFLOW A-07).
+
+    같은 응답의 `events`를 접은 값이므로 두 필드가 어긋날 수 없다는 것이 이 계약의 요점이다.
+    """
+    gate = threading.Event()
+    provider = _GatedProvider(
+        after=[
+            Usage(input_tokens=1200, output_tokens=340, cache_read_tokens=900),
+            SearchActivity(query="한국 모멘텀", sources=()),
+            Usage(input_tokens=1800, output_tokens=260, cache_write_tokens=70),
+            Done(stop_reason="end_turn"),
+        ],
+        gate=gate,
+    )
+    client = _client(tmp_path, provider)
+    _create_profile(client)
+    session_id = _start_session(client)
+    turn = client.post(
+        f"{_ASSISTANT}/sessions/{session_id}/turns",
+        json={"text": "사용량을 남겨 줘", "context": _CONTEXT},
+    )
+    assert provider.reached_gate.wait(timeout=5.0)
+    gate.set()
+
+    history = _wait_for_terminal_turn(client, session_id)
+
+    usage = history["usage"]
+    assert usage["tokens"] == {
+        "input_tokens": 3000,
+        "output_tokens": 600,
+        "cache_read_tokens": 900,
+        "cache_write_tokens": 70,
+        # 세 입력 칸은 겹치지 않는다 — 총입력은 그 합이고 저장되지 않는다(도메인 `Usage`).
+        "total_input_tokens": 3970,
+    }
+    assert usage["search_uses"] == 1
+    assert usage["provider_calls"] == 2
+    assert [item["turn_id"] for item in usage["turns"]] == [turn.json()["turn_id"]]
+    assert usage["turns"][0]["tokens"] == usage["tokens"]
+
+
+def test_a_session_with_no_turn_yet_reports_zero_usage(tmp_path: Path) -> None:
+    """빈 세션에서 `usage`가 없으면 프론트가 매번 존재 검사를 해야 한다."""
+    client = _client(tmp_path, _GatedProvider())
+    _create_profile(client)
+    session_id = _start_session(client)
+
+    history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
+
+    assert history["usage"] == {
+        "tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "total_input_tokens": 0,
+        },
+        "search_uses": 0,
+        "provider_calls": 0,
+        "turns": [],
+    }
 
 
 def test_the_stream_keeps_going_past_done_until_the_turn_settles(tmp_path: Path) -> None:

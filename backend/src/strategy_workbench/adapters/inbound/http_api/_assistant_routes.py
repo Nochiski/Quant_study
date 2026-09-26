@@ -49,6 +49,7 @@ from strategy_workbench.application.assistant_chat.facade.turns import (
     AssistantTurnRunner,
     TurnInProgressError,
 )
+from strategy_workbench.application.assistant_chat.facade.usage import aggregate_usage
 from strategy_workbench.domain.assistant.facade.models import SequencedEvent, Turn
 
 from ._assistant_contract import (
@@ -74,6 +75,7 @@ from ._assistant_contract import (
     probe_result_view,
     profile_view,
     providers_view,
+    session_usage_view,
     turn_view,
 )
 
@@ -266,11 +268,14 @@ def register_assistant_routes(
             messages = chat.messages(session_id)
         except ChatSessionNotFoundError as error:
             raise _session_not_found(error) from error
+        # 사용량은 방금 읽은 이력 하나를 접은 값이다. 여기서 세지 않고 application 함수에
+        # 넘기는 이유는 집계 규칙의 owner가 하나여야 하기 때문이다(spec D9 파생 값 규칙).
         return SessionHistoryView(
             session=_session_view(session),
             messages=tuple(message_view(message) for message in messages),
             turns=tuple(turn_view(turn) for turn in history_turns),
             events=tuple(event_envelope_view(stored) for stored in stored_events),
+            usage=session_usage_view(aggregate_usage(stored_events)),
         )
 
     @app.post(

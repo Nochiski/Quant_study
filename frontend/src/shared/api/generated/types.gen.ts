@@ -3704,6 +3704,8 @@ export type SelectionMethod = "top_n" | "percentile";
  *
  * 이벤트를 함께 싣는 이유는 spec D7의 복구 규칙 때문이다. 스트림을 열기도 전에 끝난 턴은
  * `GET /sessions/{id}/events`가 409로 거절하므로, 그 턴의 이벤트를 볼 통로가 여기뿐이다.
+ *
+ * `usage`는 그 `events`를 접은 값이다. 같은 이력에서 파생되므로 둘이 어긋날 수 없다.
  */
 export type SessionHistoryView = {
   /**
@@ -3719,6 +3721,28 @@ export type SessionHistoryView = {
    * Turns
    */
   turns: Array<TurnView>;
+  usage: SessionUsageView;
+};
+
+/**
+ * SessionUsageView
+ *
+ * 세션 누적과 턴별 내역. 이벤트 이력에서 파생되며 저장되지 않는다.
+ */
+export type SessionUsageView = {
+  /**
+   * Provider Calls
+   */
+  provider_calls: number;
+  /**
+   * Search Uses
+   */
+  search_uses: number;
+  tokens: TokenTotalsView;
+  /**
+   * Turns
+   */
+  turns: Array<TurnUsageView>;
 };
 
 /**
@@ -4702,6 +4726,38 @@ export type TimeSeriesOperator =
   "mean" | "std" | "momentum" | "delta" | "min" | "max";
 
 /**
+ * TokenTotalsView
+ *
+ * 토큰 종류별 합. 종류가 늘면 여기에 필드를 더한다(application `TokenTotals`와 같은 이름).
+ *
+ * 입력은 분리형이다. `input_tokens`는 캐시 읽기·쓰기를 **뺀** 성분이고 캐시 성분은 각자 자기
+ * 칸을 가지며, 세 칸은 겹치지 않는다. 화면이 한 숫자만 필요하면 `total_input_tokens`를 읽는다 —
+ * 성분을 화면에서 다시 더하면 합산 규칙의 owner가 둘이 된다.
+ */
+export type TokenTotalsView = {
+  /**
+   * Cache Read Tokens
+   */
+  cache_read_tokens: number;
+  /**
+   * Cache Write Tokens
+   */
+  cache_write_tokens: number;
+  /**
+   * Input Tokens
+   */
+  input_tokens: number;
+  /**
+   * Output Tokens
+   */
+  output_tokens: number;
+  /**
+   * Total Input Tokens
+   */
+  total_input_tokens: number;
+};
+
+/**
  * ToolCallView
  */
 export type ToolCallView = {
@@ -4972,6 +5028,27 @@ export type TurnContextPayload = {
 export type TurnStatus = "running" | "completed" | "failed" | "cancelled";
 
 /**
+ * TurnUsageView
+ *
+ * 턴 하나가 쓴 양. `provider_calls`는 adapter가 공급자를 실제로 부른 횟수다.
+ */
+export type TurnUsageView = {
+  /**
+   * Provider Calls
+   */
+  provider_calls: number;
+  /**
+   * Search Uses
+   */
+  search_uses: number;
+  tokens: TokenTotalsView;
+  /**
+   * Turn Id
+   */
+  turn_id: string;
+};
+
+/**
  * TurnView
  */
 export type TurnView = {
@@ -5144,8 +5221,21 @@ export type UpgradedDocument = {
 
 /**
  * UsageView
+ *
+ * 공급자 호출 한 번의 사용량. 세 입력 칸은 겹치지 않는다(도메인 `Usage` 불변식).
+ *
+ * 총입력은 싣지 않는다. 이벤트는 이력에 그대로 쌓이므로, 성분과 합을 함께 저장하면 둘이
+ * 어긋난 이력이 남는다. 합이 필요한 화면은 세션 사용량의 `total_input_tokens`를 읽는다.
  */
 export type UsageView = {
+  /**
+   * Cache Read Tokens
+   */
+  cache_read_tokens: number;
+  /**
+   * Cache Write Tokens
+   */
+  cache_write_tokens: number;
   /**
    * Input Tokens
    */

@@ -21,7 +21,11 @@
 - 공급자 SDK(`anthropic`, `openai`)는 `adapters/outbound/llm_*` 밖에서 import하지 않는다.
   architecture 테스트가 강제한다.
 - 비밀(API 키)은 저장소·DB·로그·응답·OpenAPI 어디에도 평문으로 두지 않는다. 테스트로 고정한다.
-- 실제 공급자 호출 테스트는 `RUN_LLM_LIVE=1`일 때만 돈다. CI는 가짜 공급자만 쓴다.
+- 실제 공급자 호출은 `backend/scripts/assistant_live_smoke.py`가 `STRATEGY_WORKBENCH_LIVE_SMOKE=1`과
+  공급자 키를 둘 다 가졌을 때만 한다. CI는 가짜 공급자만 쓴다. 실행 절차와 기대 출력은
+  [WORKFLOW A-07 절](./WORKFLOW.md)에 있다.
+- 모델이 읽는 문장(시스템 프롬프트·도구 설명·고정 통지)은 `backend/tests/fixtures/assistant/`의
+  골든 파일이 정본이다. 고쳤으면 `uv run python tools/export_assistant_prompts.py`로 다시 뽑는다.
 - `PLAN.md`가 진행 상태의 단일 기준이다.
 - 이 initiative는 schema 1.2·그래프 표현 initiative(PR #167)와 파일이 겹치지 않는다. 어시스턴트는 현재
   스키마 버전을 runtime schema에서 읽으므로 1.1이든 1.2든 같은 코드로 동작한다. 단 그쪽이 먼저

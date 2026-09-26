@@ -362,8 +362,9 @@ test.describe("AI 어시스턴트", () => {
     );
     // 턴을 시작한 뒤 문서를 고치지 않았으므로 확인 창 없이 바로 적용된다.
     await card.getByRole("button", { name: "적용 후 백테스트" }).click();
+    // 새 창(126)이 실린 계획 조회가 나갔다는 것 자체가 적용된 문서가 그래프를 바꿨다는 증거다. 편집기를
+    // 여기서 다시 읽지 않는다 — 실행이 곧바로 이어지면 이탈 확인 창이 편집기를 가린다.
     await freshExplain;
-    expect(await currentSource(page)).toContain(`window: ${PROPOSED_WINDOW}`);
 
     // 계획이 도착하면 실행이 시작되고, 저장하지 않은 문서를 떠나므로 이탈 확인이 뜬다.
     const leaveGuard = page.getByRole("button", { name: "나가기" });

@@ -41,7 +41,7 @@ main
 - 각 PR의 base는 직전 PR 브랜치다. P1 스택과 P2 스택은 서로 독립이라 병렬 진행할 수 있다
   (`parallel_window`에 기록). 교차 제약 두 가지: **P2-06·P2-07은 P1-03(연산자 카탈로그)이 merge된 뒤
   착수한다**(두 PR이 카탈로그의 `saved_*` 제거·`availability`를 건드린다). P3-01의 base는 P2-09이며
-  P1-05가 먼저 merge되어 있어야 한다.
+  P1 스택 끝(P1-06)이 먼저 merge되어 있어야 한다.
 - **generated SDK 규칙(1.1 initiative와 같음)**: P2 backend PR은 `backend/openapi.json`만 재생성하고
   `frontend/src/shared/api/generated`는 건드리지 않는다. SDK 재생성과 frontend 적응은 P3-01이 한
   PR에서 한다. P2 PR은 backend gate만 merge gate로 삼고 CI `frontend`·`browser-e2e` job은 P3-01·P3-03의
@@ -212,7 +212,8 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 - PLAN P1 행이 실제 상태(PR 링크, 리뷰 회차·결과, 수정 커밋)를 담고, Review 기록 표에 P1-01·P1-05
   전 회차 행이 있다. P1-02 1·2차 행의 수치가 서로 모순되지 않는다.
 - `관찰 backlog` 절에는 BACKLOG 항목만, 변경 기록은 `변경 기록` 절에만 있다.
-- 감사 비차단 N1·N2·N3·N4·N5·N10과 P6-03 키보드 flake에 `담당:` PR이 있다.
+- 감사 비차단 N1·N2·N3·N4·N5·N10과 P6-03 키보드 flake에 `담당:` PR이 있고, 그 PR의 acceptance에
+  같은 BACKLOG 번호로 한 줄씩 예약돼 있다(BACKLOG-001 선례).
 - SoT 대장: 정수 하한 행이 두 소비자의 읽기 방식을 사실대로 적고(N8), e2e 잠금·포트·빌드 주소 행이
   실제 owner 파일을 가리킨다(N9).
 - `update-plan-progress.ps1 -Check`와 충돌 표식 검사 통과.
@@ -425,6 +426,9 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `export_openapi.py`로 `backend/openapi.json` 재생성(연산자 카탈로그 응답의 `availability` 값 집합이
   바뀐다. 진단 코드 문자열은 OpenAPI에 열거되지 않으므로 그 자체는 재생성 사유가 아니다. diff가 0이면
   그 사실을 PR 본문에 적는다). frontend SDK는 P3-01.
+- BACKLOG-003: 횡단면 `zscore`·`rank`의 `unit_rule`을 무차원(`"1"`)으로 바꾼다. 단위가 다른 두 필드를
+  표준화해 더한 그래프가 `factor.graph.unit_mismatch` 없이 통과하는 재현 그래프 테스트와, `demean`·
+  `winsorize`는 입력 단위를 보존하는 대조 테스트를 `test_factor_operators.py`에 둔다.
 
 ### P2-08 — duckdb `GROUP_SERIES` 스파이크와 `ideas/*.yaml` 5개
 
@@ -535,6 +539,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - 매뉴얼 1절 샘플을 1.2로, 실행 설정 절 신설, "이 전략을 사람 말로" 표 갱신. README·frontend
   README·`backend/FACTORS.md` 1.2.
 - CI `frontend`·`browser-e2e` green(P2 스택의 exit 조건 해소).
+- BACKLOG-002: 매뉴얼 스크린샷 14장을 `npm run docs:capture`로 1.2 한글 화면으로 다시 찍고, 8절에
+  "초안 복구·서버 초안 적용 직후 되돌리기는 복구 이전 텍스트로 돌아간다"는 안내를 넣는다.
 
 **Phase 3 exit**
 
@@ -605,6 +611,12 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - SoT 갱신: 금지 절의 "YAML/JSON source ↔ StrategySpec ↔ JSON/Form/Graph/Diff projection" 문장에서
   은퇴한 Form·JSON 투영을 빼고 그래프 표현 세 수준으로 다시 쓴다. DSL 문장은 유지. 이 문장을
   갱신하는 PR은 이 PR 하나다(P0-01 리뷰 P3 finding).
+- BACKLOG-005: 좁은 폭 지원 하한을 정해 기록하고, 그 폭에서 뷰 탭 두 개가 보이고 눌리는 단언을 둔다
+  (지금은 640px 이하에서 탭 줄 폭이 0).
+- BACKLOG-006: Form 탭을 걷어도 문제 행 클릭이 편집 가능한 가장 깊은 요소로 스크롤하는 route
+  테스트("scrolls to the editor row, not the plan node")를 새 탭 구성 기준으로 유지한다. 지우지 않는다.
+- BACKLOG-007: JSON 탭 은퇴로 `document-routes.test.tsx` "professional keyboard workflow (P6-03)"의
+  read-only view 경로 테스트를 다시 쓸 때, 부하 중 한 틱 늦는 reveal을 기다리는 방식으로 flake를 없앤다.
 
 **Phase 4 exit**
 
@@ -653,6 +665,9 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   0개 단언. fixture와 빌더 산출물이 같은 형태라는 근거는 spec D2의 "다중 입력 연산자의 부가 입력은
   항상 새 소스 잎 노드다"이며, 아이디어 3은 양쪽 모두 노드 4개(잎 2개) 형태다.
 - 매뉴얼에 그래프 화면 절과 예시 5개(튜토리얼).
+- BACKLOG-004: 미리보기가 `POST /api/v1/factors/preview`를 쓰면 그 422(`factor.graph.invalid`와
+  `factor.graph.*` 이슈 코드)를 `strategy.expression.*` 네임스페이스로 정리한다. 이 endpoint를 쓰지
+  않으면 이 PR에서 BACKLOG-004의 담당을 다시 정한다.
 
 **Phase 5 exit**
 
@@ -690,6 +705,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - P1-05의 node_id 포함 진단이 캔버스 노드 배지로. 미연결 노드 표시.
 - 옛 `factor-graph-editor`(목록형)·DAG 카드 스트립 제거.
 - SoT 행(그래프 좌표·캔버스 편집 owner), 로드맵 M8 체크, 매뉴얼 고급 절, ADR 최종 반영.
+- BACKLOG-006(후속): 목록형 편집기를 걷어도 문제 행 reveal이 캔버스의 편집 가능한 노드로 가는
+  테스트를 유지한다.
 
 **Phase 6 exit**
 

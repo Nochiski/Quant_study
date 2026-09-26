@@ -151,6 +151,40 @@ const ko = {
   "ide.collapseOutline": "전략 구조 접기",
   "ide.collapseInspector": "계약 접기",
   "ide.collapseDebugger": "중간 결과 접기",
+  "assistant.apply.title": "문서가 바뀌었습니다",
+  "assistant.apply.previewTitle": "제안 미리보기",
+  "assistant.apply.previewBody":
+    "제안을 현재 문서와 비교합니다. 적용하면 현재 내용이 제안으로 바뀝니다.",
+  "assistant.apply.changed":
+    "제안을 만든 뒤 편집기 문서가 바뀌었습니다. 덮어쓰면 지금 편집기에 있는 내용이 제안으로 바뀝니다.",
+  "assistant.apply.unknown":
+    "이 제안이 어떤 문서를 기준으로 만들어졌는지 알 수 없습니다. 덮어쓰기 전에 미리보기로 차이를 확인하세요.",
+  "assistant.apply.undoNote":
+    "적용은 편집 한 번이라 실행 취소(Ctrl/⌘ Z) 한 번으로 되돌릴 수 있습니다.",
+  "assistant.apply.preview": "미리보기",
+  "assistant.apply.previewHide": "미리보기 닫기",
+  "assistant.apply.previewLabel": "제안과 현재 문서의 차이",
+  "assistant.apply.overwrite": "그래도 덮어쓰기",
+  "assistant.apply.applyFromPreview": "문서에 적용",
+  "assistant.apply.cancel": "취소",
+  "assistant.apply.applied": "제안을 문서에 적용했습니다.",
+  "assistant.apply.appliedUnchanged":
+    "제안이 지금 문서와 같아 바뀐 내용이 없습니다.",
+  "assistant.apply.backtestWaiting":
+    "적용한 문서를 검증하는 중입니다. 검증이 끝났을 때 실행할 수 있으면 백테스트를 시작합니다.",
+  "assistant.apply.backtestNotStarted":
+    "제안을 문서에 적용했지만 지금은 실행할 수 없어 백테스트를 시작하지 않았습니다. 실행할 수 있게 되면 직접 실행하세요.",
+  "assistant.apply.error.editor-unavailable":
+    "편집기를 사용할 수 없어 제안을 적용하지 못했습니다.",
+  "assistant.apply.error.composing":
+    "입력기 조합 중에는 제안을 적용할 수 없습니다. 조합을 끝내고 다시 적용하세요.",
+  "assistant.apply.error.yaml-only":
+    "제안은 YAML 문서에만 적용할 수 있습니다. YAML 문서를 열고 다시 적용하세요.",
+  "assistant.apply.error.stale":
+    "확인하는 동안 문서가 또 바뀌어 적용을 멈췄습니다. 다시 적용하세요.",
+  "ide.assistant": "AI 어시스턴트",
+  "ide.collapseAssistant": "AI 어시스턴트 접기",
+  "ide.resizeAssistant": "AI 어시스턴트 크기 조절",
   "ide.resizeOutline": "전략 구조 크기 조절",
   "ide.resizeInspector": "계약 크기 조절",
   "ide.resizeDebugger": "중간 결과 크기 조절",
@@ -888,6 +922,150 @@ const ko = {
   "form.feedback.editor-inactive": "{label} · 편집기가 비활성입니다",
   "form.feedback.pending": "{label} · 직전 편집을 반영하는 중입니다. 잠시 뒤 다시 시도하세요",
   "form.feedback.yaml-only": "{label} · YAML 문서에서만 편집합니다",
+  "nav.settings": "설정",
+  "page.settings.title": "설정",
+  "page.settings.description": "이 워크벤치의 연결과 동작을 설정합니다.",
+  "settings.assistant.title": "AI 어시스턴트 공급자",
+  "settings.assistant.description":
+    "Claude·Codex 연결을 등록하고 어느 연결을 쓸지 고릅니다. API 키는 서버에만 저장되고 화면에는 꼬리 4자리만 보입니다.",
+  "assistant.provider.kind.anthropic": "Claude (Anthropic)",
+  "assistant.provider.kind.openai": "Codex (OpenAI)",
+  "assistant.provider.installed": "사용 가능",
+  "assistant.provider.notInstalled": "설치 필요",
+  "assistant.provider.notInstalled.reason":
+    "서버에 이 공급자의 SDK가 설치되어 있지 않습니다. backend에서 llm extra를 설치한 뒤 서버를 다시 시작하세요.",
+  "assistant.provider.active": "활성",
+  "assistant.provider.activate": "활성으로 사용",
+  "assistant.provider.model": "모델",
+  "assistant.provider.baseUrl": "base_url",
+  "assistant.provider.secretTail": "API 키",
+  "assistant.provider.secretTail.unknown": "표시할 수 없음",
+  "assistant.provider.test": "연결 테스트",
+  "assistant.provider.test.ok": "연결 확인됨",
+  "assistant.provider.delete": "삭제",
+  "assistant.provider.delete.submit": "삭제 확인",
+  "assistant.provider.delete.cancel": "삭제 취소",
+  "assistant.provider.delete.confirm":
+    "이 연결을 지웁니다. 저장된 키도 함께 지워집니다.",
+  "assistant.provider.empty": "연결된 공급자가 없습니다",
+  "assistant.provider.empty.description":
+    "아래에서 공급자를 추가하면 어시스턴트를 쓸 수 있습니다.",
+  "assistant.provider.loadError": "공급자 목록을 불러오지 못했습니다.",
+  "assistant.provider.form.title": "공급자 추가",
+  "assistant.provider.form.kind": "공급자",
+  "assistant.provider.form.label": "표시 이름",
+  "assistant.provider.form.model": "모델",
+  "assistant.provider.form.model.hint": "비우면 공급자의 기본 모델을 씁니다.",
+  "assistant.provider.form.secret": "API 키",
+  "assistant.provider.form.secret.hint":
+    "저장하면 다시 볼 수 없고 꼬리 4자리만 표시합니다.",
+  "assistant.provider.form.advanced": "고급 설정",
+  "assistant.provider.form.baseUrl": "base_url",
+  "assistant.provider.form.baseUrl.hint":
+    "비우면 공급자의 기본 주소를 씁니다. https 주소만 쓸 수 있습니다.",
+  "assistant.provider.form.baseUrl.unused": "base_url 미적용",
+  "assistant.provider.form.submit": "연결 테스트 후 저장",
+  "assistant.provider.form.submitting": "연결 테스트 중",
+  "assistant.provider.form.error.label": "표시 이름을 입력하세요.",
+  "assistant.provider.form.error.secret": "API 키를 입력하세요.",
+  "assistant.probe.auth": "API 키가 거부되었습니다. 키를 다시 확인하세요.",
+  "assistant.probe.model_not_found":
+    "그 모델을 찾을 수 없습니다. 모델 이름을 확인하세요.",
+  "assistant.probe.network":
+    "공급자에 연결하지 못했습니다. 네트워크와 base_url을 확인하세요.",
+  "assistant.probe.rate_limit":
+    "공급자가 요청 한도를 넘었다고 답했습니다. 잠시 뒤 다시 시도하세요.",
+  "assistant.probe.unknown": "연결 테스트가 알 수 없는 이유로 실패했습니다.",
+  "assistant.error.base_url_rejected":
+    "이 base_url은 쓸 수 없습니다. https 주소여야 하고 루프백·사설 대역·IP 주소는 받지 않습니다.",
+  "assistant.error.provider_not_installed":
+    "서버에 이 공급자의 SDK가 설치되어 있지 않습니다.",
+  "assistant.error.no_active_provider": "활성 공급자가 없습니다.",
+  "assistant.error.provider_secret_missing":
+    "저장된 키를 찾을 수 없습니다. 이 연결을 지우고 키를 다시 등록하세요.",
+  "assistant.error.not_found":
+    "이 연결을 찾을 수 없습니다. 목록을 새로 고치세요.",
+  "assistant.error.unknown":
+    "요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하세요.",
+  "assistant.turn.failure.auth":
+    "API 키가 거부되었습니다. 설정에서 키를 다시 확인하세요.",
+  "assistant.turn.failure.rate_limit":
+    "공급자가 요청 한도를 넘었다고 답했습니다. 잠시 뒤 다시 물어보세요.",
+  "assistant.turn.failure.network":
+    "공급자에 연결하지 못했습니다. 네트워크를 확인하세요.",
+  "assistant.turn.failure.refusal": "모델이 이 요청에 답하지 않았습니다.",
+  "assistant.turn.failure.provider":
+    "공급자가 오류로 답했습니다. 잠시 뒤 다시 물어보세요.",
+  "assistant.turn.failure.internal":
+    "워크벤치 내부 오류로 답변이 중단되었습니다.",
+  "assistant.turn.failure.tool_rounds_exceeded":
+    "도구 호출이 상한을 넘어 답변을 멈췄습니다. 질문을 좁혀 다시 물어보세요.",
+  "assistant.turn.failure.timeout": "답변이 제한 시간을 넘겨 멈췄습니다.",
+  "assistant.turn.failure.cancelled": "요청을 취소했습니다.",
+  "assistant.turn.failure.proposal_invalid":
+    "모델이 낸 전략이 검증을 통과하지 못했습니다.",
+  "assistant.turn.failure.output_truncated": "답변이 길어 잘렸습니다.",
+  "assistant.turn.failure.token_budget_exceeded":
+    "이 답변의 토큰 예산을 다 썼습니다. 질문을 좁혀 다시 물어보세요.",
+  "assistant.turn.failure.unknown":
+    "답변이 알 수 없는 이유로 중단되었습니다.",
+  "assistant.chat.log": "대화 내용",
+  "assistant.chat.session": "대화",
+  "assistant.chat.session.new": "새 대화",
+  "assistant.chat.close": "사이드바 닫기",
+  "assistant.chat.close.confirm":
+    "진행 중인 답변이 있습니다. 답변을 취소하고 닫을까요?",
+  "assistant.chat.close.confirm.submit": "취소하고 닫기",
+  "assistant.chat.close.confirm.cancel": "계속 두기",
+  "assistant.chat.input": "어시스턴트에게 보낼 메시지",
+  "assistant.chat.input.placeholder":
+    "무엇을 만들고 싶은지 적으세요. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
+  "assistant.chat.send": "보내기",
+  "assistant.chat.stop": "중지",
+  "assistant.chat.progress": "진행 상태",
+  "assistant.chat.running": "답변을 작성하는 중입니다.",
+  "assistant.chat.empty": "무엇이든 물어보세요",
+  "assistant.chat.empty.description":
+    "들어온 데이터와 인터넷 검색으로 시장을 조사해 전략을 제안합니다. 제안은 직접 적용하기 전까지 문서를 바꾸지 않습니다.",
+  "assistant.chat.noProvider": "연결된 AI 공급자가 없습니다",
+  "assistant.chat.noProvider.description":
+    "설정에서 Claude·Codex 연결을 등록하면 이 사이드바를 쓸 수 있습니다.",
+  "assistant.chat.noProvider.action": "설정 열기",
+  "assistant.chat.loadError": "대화를 불러오지 못했습니다.",
+  "assistant.chat.role.user": "나",
+  "assistant.chat.role.assistant": "어시스턴트",
+  "assistant.chat.thinking": "사고 요약",
+  "assistant.chat.tools": "도구 활동",
+  "assistant.chat.tool.running": "실행 중",
+  "assistant.chat.tool.ok": "완료",
+  "assistant.chat.tool.failed": "실패",
+  "assistant.chat.toolName.read_current_strategy": "현재 전략 읽기",
+  "assistant.chat.toolName.list_equity_fields": "데이터 필드 목록",
+  "assistant.chat.toolName.list_factor_catalog": "팩터 카탈로그",
+  "assistant.chat.toolName.validate_strategy_yaml": "전략 YAML 검증",
+  "assistant.chat.toolName.propose_strategy": "전략 제안 제출",
+  "assistant.chat.search": "웹 검색",
+  "assistant.chat.stream.exhausted":
+    "연결이 끊겼습니다. 답변은 서버에서 계속 진행되고 있습니다.",
+  "assistant.chat.stream.retry": "다시 연결",
+  "assistant.chat.turnInProgress":
+    "진행 중인 답변이 있어 보내지 못했습니다. 답변이 끝나면 다시 보내세요.",
+  "assistant.chat.stopped": "답변을 중지했습니다.",
+  "assistant.chat.finished": "답변이 완료되었습니다.",
+  "assistant.chat.finished.proposal":
+    "답변이 완료되었습니다. 전략 제안이 도착했습니다.",
+  "assistant.chat.source.host": "도착지 {host}",
+  "assistant.chat.stream.dropped":
+    "표시하지 못한 진행 정보가 있습니다. 서버와 화면의 이벤트 계약이 어긋났을 수 있습니다.",
+  "assistant.chat.proposal.compileOk": "검증 통과",
+  "assistant.chat.proposal.compileFailed": "검증 실패",
+  "assistant.chat.proposal.rationale": "근거",
+  "assistant.chat.proposal.sources": "출처",
+  "assistant.chat.proposal.preview": "미리보기",
+  "assistant.chat.proposal.apply": "문서에 적용",
+  "assistant.chat.proposal.applyAndBacktest": "적용 후 백테스트",
+  "assistant.error.document_ref_invalid":
+    "이 문서로는 대화를 만들 수 없습니다. 전략을 먼저 저장하거나 초안을 다시 여세요.",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -1045,6 +1223,41 @@ export const messages = {
     "ide.collapseOutline": "Collapse outline",
     "ide.collapseInspector": "Collapse contract panel",
     "ide.collapseDebugger": "Collapse intermediate results",
+    "assistant.apply.title": "The document changed",
+    "assistant.apply.previewTitle": "Proposal preview",
+    "assistant.apply.previewBody":
+      "This compares the proposal with the current document. Applying replaces the current content.",
+    "assistant.apply.changed":
+      "The document changed after this proposal was made. Overwriting replaces what is in the editor now.",
+    "assistant.apply.unknown":
+      "The document this proposal was based on is unknown. Preview the difference before overwriting.",
+    "assistant.apply.undoNote":
+      "Applying is a single edit, so one undo (Ctrl/⌘ Z) brings the previous document back.",
+    "assistant.apply.preview": "Preview",
+    "assistant.apply.previewHide": "Hide preview",
+    "assistant.apply.previewLabel":
+      "Difference between the proposal and the current document",
+    "assistant.apply.overwrite": "Overwrite anyway",
+    "assistant.apply.applyFromPreview": "Apply to the document",
+    "assistant.apply.cancel": "Cancel",
+    "assistant.apply.applied": "The proposal was applied to the document.",
+    "assistant.apply.appliedUnchanged":
+      "The proposal matches the current document, so nothing changed.",
+    "assistant.apply.backtestWaiting":
+      "Validating the applied document. The backtest starts if it can run when validation finishes.",
+    "assistant.apply.backtestNotStarted":
+      "The proposal was applied, but the backtest did not start because it cannot run right now. Run it yourself once it can.",
+    "assistant.apply.error.editor-unavailable":
+      "The editor is unavailable, so the proposal was not applied.",
+    "assistant.apply.error.composing":
+      "A proposal cannot be applied while an input method is composing. Finish composing and apply again.",
+    "assistant.apply.error.yaml-only":
+      "Proposals apply to YAML documents only. Open a YAML document and apply again.",
+    "assistant.apply.error.stale":
+      "The document changed again while you were confirming, so applying stopped. Apply again.",
+    "ide.assistant": "AI assistant",
+    "ide.collapseAssistant": "Collapse AI assistant",
+    "ide.resizeAssistant": "Resize AI assistant",
     "ide.resizeOutline": "Resize outline",
     "ide.resizeInspector": "Resize contract panel",
     "ide.resizeDebugger": "Resize intermediate results",
@@ -1800,6 +2013,155 @@ export const messages = {
     "form.feedback.editor-inactive": "{label} · the editor is inactive",
     "form.feedback.pending": "{label} · the previous edit is still being applied; try again in a moment",
     "form.feedback.yaml-only": "{label} · only YAML documents are edited",
+    "nav.settings": "Settings",
+    "page.settings.title": "Settings",
+    "page.settings.description":
+      "Configure how this workbench connects and behaves.",
+    "settings.assistant.title": "AI assistant providers",
+    "settings.assistant.description":
+      "Register Claude and Codex connections and choose which one to use. API keys stay on the server; only the last four characters are shown.",
+    "assistant.provider.kind.anthropic": "Claude (Anthropic)",
+    "assistant.provider.kind.openai": "Codex (OpenAI)",
+    "assistant.provider.installed": "Available",
+    "assistant.provider.notInstalled": "Not installed",
+    "assistant.provider.notInstalled.reason":
+      "This provider's SDK is not installed on the server. Install the llm extra in the backend and restart the server.",
+    "assistant.provider.active": "Active",
+    "assistant.provider.activate": "Use as active",
+    "assistant.provider.model": "Model",
+    "assistant.provider.baseUrl": "base_url",
+    "assistant.provider.secretTail": "API key",
+    "assistant.provider.secretTail.unknown": "Not shown",
+    "assistant.provider.test": "Test connection",
+    "assistant.provider.test.ok": "Connection verified",
+    "assistant.provider.delete": "Delete",
+    "assistant.provider.delete.submit": "Confirm delete",
+    "assistant.provider.delete.cancel": "Cancel delete",
+    "assistant.provider.delete.confirm":
+      "This deletes the connection. The stored key is deleted with it.",
+    "assistant.provider.empty": "No provider is connected",
+    "assistant.provider.empty.description":
+      "Add a provider below to use the assistant.",
+    "assistant.provider.loadError": "The provider list could not be loaded.",
+    "assistant.provider.form.title": "Add a provider",
+    "assistant.provider.form.kind": "Provider",
+    "assistant.provider.form.label": "Display name",
+    "assistant.provider.form.model": "Model",
+    "assistant.provider.form.model.hint":
+      "Leave empty to use the provider's default model.",
+    "assistant.provider.form.secret": "API key",
+    "assistant.provider.form.secret.hint":
+      "Once saved it cannot be shown again; only the last four characters appear.",
+    "assistant.provider.form.advanced": "Advanced",
+    "assistant.provider.form.baseUrl": "base_url",
+    "assistant.provider.form.baseUrl.hint":
+      "Leave empty to use the provider's default endpoint. Only https addresses are accepted.",
+    "assistant.provider.form.baseUrl.unused": "base_url not applied",
+    "assistant.provider.form.submit": "Test and save",
+    "assistant.provider.form.submitting": "Testing the connection",
+    "assistant.provider.form.error.label": "Enter a display name.",
+    "assistant.provider.form.error.secret": "Enter the API key.",
+    "assistant.probe.auth": "The API key was rejected. Check the key.",
+    "assistant.probe.model_not_found":
+      "That model was not found. Check the model name.",
+    "assistant.probe.network":
+      "The provider could not be reached. Check the network and base_url.",
+    "assistant.probe.rate_limit":
+      "The provider reported a rate limit. Try again shortly.",
+    "assistant.probe.unknown":
+      "The connection test failed for an unknown reason.",
+    "assistant.error.base_url_rejected":
+      "This base_url cannot be used. It must be an https address; loopback, private ranges and IP literals are rejected.",
+    "assistant.error.provider_not_installed":
+      "This provider's SDK is not installed on the server.",
+    "assistant.error.no_active_provider": "No provider is active.",
+    "assistant.error.provider_secret_missing":
+      "The stored key is missing. Delete this connection and register the key again.",
+    "assistant.error.not_found":
+      "This connection no longer exists. Refresh the list.",
+    "assistant.error.unknown":
+      "The request could not be completed. Try again shortly.",
+    "assistant.turn.failure.auth":
+      "The API key was rejected. Check the key in settings.",
+    "assistant.turn.failure.rate_limit":
+      "The provider reported a rate limit. Ask again shortly.",
+    "assistant.turn.failure.network":
+      "The provider could not be reached. Check the network.",
+    "assistant.turn.failure.refusal": "The model did not answer this request.",
+    "assistant.turn.failure.provider":
+      "The provider returned an error. Ask again shortly.",
+    "assistant.turn.failure.internal":
+      "The answer stopped because of an internal workbench error.",
+    "assistant.turn.failure.tool_rounds_exceeded":
+      "The answer stopped after too many tool rounds. Narrow the question and ask again.",
+    "assistant.turn.failure.timeout":
+      "The answer stopped after exceeding the time limit.",
+    "assistant.turn.failure.cancelled": "The request was cancelled.",
+    "assistant.turn.failure.proposal_invalid":
+      "The strategy the model produced did not pass validation.",
+    "assistant.turn.failure.output_truncated":
+      "The answer was truncated because it grew too long.",
+    "assistant.turn.failure.token_budget_exceeded":
+      "This answer used up its token budget. Narrow the question and ask again.",
+    "assistant.turn.failure.unknown":
+      "The answer stopped for an unknown reason.",
+    "assistant.chat.log": "Conversation",
+    "assistant.chat.session": "Conversation",
+    "assistant.chat.session.new": "New conversation",
+    "assistant.chat.close": "Close sidebar",
+    "assistant.chat.close.confirm":
+      "An answer is still running. Cancel it and close?",
+    "assistant.chat.close.confirm.submit": "Cancel and close",
+    "assistant.chat.close.confirm.cancel": "Keep it open",
+    "assistant.chat.input": "Message for the assistant",
+    "assistant.chat.input.placeholder":
+      "Describe what you want to build. Enter sends, Shift+Enter adds a line.",
+    "assistant.chat.send": "Send",
+    "assistant.chat.stop": "Stop",
+    "assistant.chat.progress": "Progress",
+    "assistant.chat.running": "Writing an answer.",
+    "assistant.chat.empty": "Ask anything",
+    "assistant.chat.empty.description":
+      "The assistant researches the market with the connected data and web search, then proposes a strategy. Nothing touches your document until you apply it.",
+    "assistant.chat.noProvider": "No AI provider is connected",
+    "assistant.chat.noProvider.description":
+      "Register a Claude or Codex connection in settings to use this sidebar.",
+    "assistant.chat.noProvider.action": "Open settings",
+    "assistant.chat.loadError": "The conversation could not be loaded.",
+    "assistant.chat.role.user": "You",
+    "assistant.chat.role.assistant": "Assistant",
+    "assistant.chat.thinking": "Thinking summary",
+    "assistant.chat.tools": "Tool activity",
+    "assistant.chat.tool.running": "Running",
+    "assistant.chat.tool.ok": "Done",
+    "assistant.chat.tool.failed": "Failed",
+    "assistant.chat.toolName.read_current_strategy": "Read current strategy",
+    "assistant.chat.toolName.list_equity_fields": "List data fields",
+    "assistant.chat.toolName.list_factor_catalog": "List factor catalog",
+    "assistant.chat.toolName.validate_strategy_yaml": "Validate strategy YAML",
+    "assistant.chat.toolName.propose_strategy": "Submit strategy proposal",
+    "assistant.chat.search": "Web search",
+    "assistant.chat.stream.exhausted":
+      "The connection dropped. The answer keeps running on the server.",
+    "assistant.chat.stream.retry": "Reconnect",
+    "assistant.chat.turnInProgress":
+      "An answer is still running, so this message was not sent. Send it again once the answer finishes.",
+    "assistant.chat.stopped": "The answer was stopped.",
+    "assistant.chat.finished": "The answer is complete.",
+    "assistant.chat.finished.proposal":
+      "The answer is complete. A strategy proposal arrived.",
+    "assistant.chat.source.host": "goes to {host}",
+    "assistant.chat.stream.dropped":
+      "Some progress events could not be shown. The server and this screen may disagree on the event contract.",
+    "assistant.chat.proposal.compileOk": "Validation passed",
+    "assistant.chat.proposal.compileFailed": "Validation failed",
+    "assistant.chat.proposal.rationale": "Rationale",
+    "assistant.chat.proposal.sources": "Sources",
+    "assistant.chat.proposal.preview": "Preview",
+    "assistant.chat.proposal.apply": "Apply to document",
+    "assistant.chat.proposal.applyAndBacktest": "Apply and backtest",
+    "assistant.error.document_ref_invalid":
+      "A conversation cannot be created for this document. Save the strategy or reopen the draft first.",
   } satisfies Record<MessageKey, string>,
 } as const;
 

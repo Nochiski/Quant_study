@@ -1,9 +1,17 @@
 import react from "@vitejs/plugin-react";
 import { configDefaults, defineConfig } from "vitest/config";
 
+// 이 파일은 `PW_*` 포트 변수를 읽지 않는다. vitest·dev serve 가 같은 설정을 읽으므로, 셸에
+// `PW_BACKEND_PORT` 가 export 돼 있다는 이유만으로 SDK 기본 주소가 바뀌면 MSW 핸들러가 등록된
+// 주소와 어긋나 단위 테스트가 통째로 깨진다(1차 리뷰 DEFECT-P105-003, 실측 5 failed).
+// E2E 빌드에 필요한 `VITE_API_BASE_URL` 은 `e2e/run-playwright.mjs` 가 **빌드 자식 프로세스에만**
+// 명시적으로 넘긴다 — 주변 환경이 아니라 그 한 번의 빌드에만 적용된다.
+
 // Browser scenarios have their own real-server Playwright lifecycle and must never be
 // collected into the jsdom unit/integration runner. 제외 목록의 정본은 이 상수 하나다.
-const EXCLUDE = [...configDefaults.exclude, "e2e/**"];
+// Playwright spec 만 뺀다. `e2e/` 의 잠금·포트 유틸은 단위 테스트가 있는 평범한 모듈이라
+// vitest 가 수집해야 한다(`e2e/lock.test.mjs`).
+const EXCLUDE = [...configDefaults.exclude, "e2e/**/*.spec.ts"];
 /**
  * 워커 경합에 민감한 테스트 파일 — `routes` 프로젝트로 나머지가 끝난 뒤 혼자 돈다(아래 `projects`). 단독 실행이
  * 1분을 넘기는 page 트리 테스트가 새로 생기면 여기에 더한다.

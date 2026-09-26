@@ -370,14 +370,11 @@ EXPRESSION_CODES: frozenset[str] = frozenset(
         "strategy.expression.output_missing",
         "strategy.expression.parameter_missing",
         "strategy.expression.predicate_type",
-        "strategy.expression.saved_factor_missing",
-        "strategy.expression.saved_subgraph_missing",
         "strategy.expression.time_series_window",
         "strategy.expression.unit_mismatch",
         "strategy.expression.winsor_bounds",
         # 전략·포트폴리오 쪽에서만 나는 표현식 진단.
         "strategy.expression.parameter_type",
-        "strategy.expression.reference_unsupported",
         "strategy.expression.output_type",
         "strategy.expression.calculation_non_finite",
     }

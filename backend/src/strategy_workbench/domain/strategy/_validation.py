@@ -374,7 +374,6 @@ def validate_strategy(
         validation = validate_factor_graph(
             factor.graph,
             parameter_ids=tuple(parameter_ids),
-            factor_ids=tuple(factor_ids),
         )
         issues.extend(
             semantic_issue(

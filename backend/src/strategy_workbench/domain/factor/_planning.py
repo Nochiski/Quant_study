@@ -12,8 +12,6 @@ from ._nodes import (
     FactorGraph,
     FieldMetadata,
     MissingPolicy,
-    SavedFactorNode,
-    SavedSubgraphNode,
 )
 from ._validation import FactorGraphValidation, node_dependencies, validate_factor_graph
 
@@ -45,8 +43,6 @@ class FactorExecutionPlan:
     output_node_id: str
     steps: tuple[FactorExecutionStep, ...]
     required_field_ids: tuple[str, ...]
-    referenced_factor_ids: tuple[str, ...]
-    referenced_subgraph_ids: tuple[str, ...]
     minimum_history_sessions: int
     missing_policy: str
     as_of_policy: str = "available_date_lte_as_of"
@@ -92,16 +88,12 @@ def compile_factor_plan(
     missing: MissingPolicy,
     fields: tuple[FieldMetadata, ...] = (),
     parameter_ids: tuple[str, ...] = (),
-    factor_ids: tuple[str, ...] = (),
-    subgraph_ids: tuple[str, ...] = (),
     require_field_metadata: bool = False,
 ) -> FactorExecutionPlan:
     validation = validate_factor_graph(
         graph,
         fields=fields,
         parameter_ids=parameter_ids,
-        factor_ids=factor_ids,
-        subgraph_ids=subgraph_ids,
         require_field_metadata=require_field_metadata,
     )
     if not validation.valid:
@@ -142,14 +134,6 @@ def compile_factor_plan(
         output_node_id=graph.output_node_id,
         steps=steps,
         required_field_ids=validation.required_field_ids,
-        referenced_factor_ids=tuple(
-            sorted({node.factor_id for node in graph.nodes if isinstance(node, SavedFactorNode)})
-        ),
-        referenced_subgraph_ids=tuple(
-            sorted(
-                {node.subgraph_id for node in graph.nodes if isinstance(node, SavedSubgraphNode)}
-            )
-        ),
         minimum_history_sessions=validation.minimum_history_sessions,
         missing_policy=missing.value,
     )

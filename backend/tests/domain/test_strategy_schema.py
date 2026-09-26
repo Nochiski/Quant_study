@@ -361,8 +361,6 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
         "#/$defs/EligibilityRule/field_id": "equity-field",
         "#/$defs/FieldNode/field_id": "equity-field",
         "#/$defs/GroupNode/group_field_id": "equity-field",
-        "#/$defs/SavedFactorNode/factor_id": "factor",
-        "#/$defs/SavedSubgraphNode/subgraph_id": "subgraph",
         "#/$defs/SignalStep/regime_field_id": "equity-field",
         "#/$defs/PortfolioStep/liquidity_field_id": "equity-field",
         "#/$defs/RiskStep/risk_field_id": "equity-field",
@@ -401,7 +399,6 @@ def test_field_contracts_carry_the_identifier_markers() -> None:
     contracts = {c.pointer: c for c in strategy_field_contracts()}
     assert contracts["/eligibility/rules/*/field_id"].catalog == "equity-field"
     assert contracts["/signal/regime_field_id"].catalog == "equity-field"  # nullable keeps it
-    assert contracts["/factors/*/graph/nodes/*/factor_id"].catalog == "factor"
     assert contracts["/factors/*/graph/nodes/*/input_node_id"].reference == "node"
     assert contracts["/factors/*/graph/nodes/*/node_id"].catalog is None
     assert contracts["/factors/*/graph/nodes/*/node_id"].reference is None

@@ -10,10 +10,10 @@ from strategy_workbench.domain.factor.facade.analysis import analyze_factor_valu
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
-    FactorReferenceValue,
     evaluate_factor_graph,
 )
 from strategy_workbench.domain.factor.facade.expression import (
+    EXPRESSION_NODE_KINDS,
     BinaryNode,
     BinaryOperator,
     ConditionalNode,
@@ -26,8 +26,6 @@ from strategy_workbench.domain.factor.facade.expression import (
     GroupOperator,
     MissingPolicy,
     ParameterNode,
-    SavedFactorNode,
-    SavedSubgraphNode,
     TimeSeriesNode,
     TimeSeriesOperator,
     UnaryNode,
@@ -43,7 +41,10 @@ from strategy_workbench.domain.factor.facade.registry import (
     FactorCategory,
     build_default_factor_registry,
 )
-from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
+from strategy_workbench.domain.factor.facade.validation import (
+    FACTOR_GRAPH_CODES,
+    validate_factor_graph,
+)
 
 
 def test_registry_is_the_versioned_source_of_truth_for_fifty_factor_ids() -> None:
@@ -169,32 +170,17 @@ def test_all_quick_transforms_evaluate_deterministically() -> None:
     assert any(value.value is not None for value in first.values)
 
 
-def test_parameter_and_saved_references_are_first_class_nodes() -> None:
+def test_parameter_references_are_first_class_nodes() -> None:
     graph = FactorGraph(
         nodes=(
-            SavedFactorNode("factor", "quality", "saved_factor"),
-            SavedSubgraphNode("subgraph", "scale", "saved_subgraph"),
+            FieldNode("close", "price.close", "field"),
             ParameterNode("weight", "w", "parameter"),
-            BinaryNode("weighted", BinaryOperator.MULTIPLY, "factor", "weight", "binary"),
-            BinaryNode("sum", BinaryOperator.ADD, "weighted", "subgraph", "binary"),
+            BinaryNode("weighted", BinaryOperator.MULTIPLY, "close", "weight", "binary"),
         ),
-        output_node_id="sum",
+        output_node_id="weighted",
     )
-    validation = validate_factor_graph(
-        graph,
-        parameter_ids=("w",),
-        factor_ids=("quality",),
-        subgraph_ids=("scale",),
-    )
-    observation = FactorObservation(
-        date(2024, 1, 2),
-        "s1",
-        (),
-        (
-            FactorReferenceValue("factor:quality", 2.0),
-            FactorReferenceValue("subgraph:scale", 1.0),
-        ),
-    )
+    validation = validate_factor_graph(graph, parameter_ids=("w",))
+    observation = FactorObservation(date(2024, 1, 2), "s1", (FactorFieldValue("price.close", 2.0),))
 
     evaluation = evaluate_factor_graph(
         graph,
@@ -204,7 +190,20 @@ def test_parameter_and_saved_references_are_first_class_nodes() -> None:
     )
 
     assert validation.valid
-    assert evaluation.values[0].value == pytest.approx(7.0)
+    assert evaluation.values[0].value == pytest.approx(6.0)
+
+
+def test_saved_reference_nodes_are_not_part_of_the_graph_language() -> None:
+    """spec D3 S7: `saved_factor`·`saved_subgraph` 는 노드 union 에서 빠졌다(M8 라이브러리가
+    되살릴 때 다시 넣는다). 실행 경로가 거부하던 노드를 문법이 받지 않으므로 거부 코드도 없다."""
+    assert not {"saved_factor", "saved_subgraph"} & set(EXPRESSION_NODE_KINDS)
+    assert (
+        not {
+            "factor.graph.saved_factor_missing",
+            "factor.graph.saved_subgraph_missing",
+        }
+        & FACTOR_GRAPH_CODES
+    )
 
 
 def test_plan_and_cache_fingerprints_cover_all_reproducibility_inputs() -> None:

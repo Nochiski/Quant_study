@@ -548,7 +548,6 @@ class PortfolioDesignService:
         )
         plans = self._plans(spec, metadata, resolved.missing)
         _reject_non_numeric_factor_outputs(spec, plans)
-        _reject_saved_references(spec, plans)
         _validate_trace_selection(pipeline_options, plans)
         checkpoint()
         return _PreparedPipeline(
@@ -562,7 +561,6 @@ class PortfolioDesignService:
         missing: MissingPolicy,
     ) -> dict[str, FactorExecutionPlan]:
         parameter_ids = tuple(parameter.parameter_id for parameter in spec.parameters)
-        factor_ids = tuple(factor.factor_id for factor in spec.factors)
         plans: dict[str, FactorExecutionPlan] = {}
         issues = []
         for factor_index, factor in enumerate(spec.factors):
@@ -573,7 +571,6 @@ class PortfolioDesignService:
                     missing=missing,
                     fields=metadata.fields,
                     parameter_ids=parameter_ids,
-                    factor_ids=factor_ids,
                     require_field_metadata=True,
                 )
             except InvalidFactorGraphError as error:
@@ -804,25 +801,6 @@ def _reported(
 def _between(start: float, end: float, fraction: float) -> float:
     """구간 [start, end] 안의 위치. 부동소수 오차로 end 를 넘지 않게 자른다."""
     return min(start + (end - start) * fraction, end)
-
-
-def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
-    # TODO(PLAN P5-03): evaluate referenced factors/subgraphs in topological order instead.
-    issues = tuple(
-        # The domain owns the code registry; minting an issue here goes through the same gate.
-        semantic_issue(
-            "strategy.expression.reference_unsupported",
-            f"factors.{index}.graph",
-            "저장된 팩터/서브그래프 참조는 아직 preview/backtest에서 계산되지 않습니다: "
-            f"factor_ids={plan.referenced_factor_ids} "
-            f"subgraph_ids={plan.referenced_subgraph_ids}",
-        )
-        for index, factor in enumerate(spec.factors)
-        for plan in (plans[factor.factor_id],)
-        if plan.referenced_factor_ids or plan.referenced_subgraph_ids
-    )
-    if issues:
-        raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
 
 
 def _reject_non_numeric_factor_outputs(

@@ -112,7 +112,6 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
         json={
             "graph": factor["graph"],
             "parameter_ids": [item["parameter_id"] for item in spec["parameters"]],
-            "factor_ids": [item["factor_id"] for item in spec["factors"]],
         },
     )
     assert explained.status_code == 200, explained.text

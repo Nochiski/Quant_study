@@ -158,7 +158,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "모르는 kind입니다 혹시 `time_series`인가요? — got='time_seris' "
         "suggestion='time_series' "
         "allowed=['binary', 'comparison', 'conditional', 'constant', 'cross_sectional', "
-        "'field', 'group', 'parameter', 'saved_factor', 'saved_subgraph', "
+        "'field', 'group', 'parameter', "
         "'time_series', 'unary']",
     ),
     (

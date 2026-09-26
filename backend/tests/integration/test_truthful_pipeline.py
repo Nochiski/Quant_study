@@ -81,7 +81,6 @@ from strategy_workbench.domain.factor.facade.expression import (
     FactorGraph,
     FieldNode,
     ParameterNode,
-    SavedFactorNode,
     TimeSeriesNode,
     TimeSeriesOperator,
 )
@@ -215,14 +214,12 @@ def test_explain_and_portfolio_compile_identical_plans_from_one_metadata_contrac
         PortfolioPreviewRequest(spec, environment=_environment())
     )
 
-    factor_ids = tuple(factor.factor_id for factor in spec.factors)
     plans = {record.factor_id: record.plan for record in result.factor_evaluations}
     for factor in spec.factors:
         explanation = research.explain(
             FactorGraphRequest(
                 graph=factor.graph,
                 parameter_ids=tuple(parameter.parameter_id for parameter in spec.parameters),
-                factor_ids=factor_ids,
             )
         )
         assert explanation.validation.valid
@@ -782,26 +779,6 @@ def test_choice_parameter_referenced_by_a_parameter_node_is_a_validation_issue()
     )
 
 
-def test_saved_factor_reference_is_rejected_up_front_not_silently_missing() -> None:
-    referencing = FactorSignal(
-        factor_id="twin",
-        label="참조",
-        direction=FactorDirection.HIGH,
-        weight=0.5,
-        graph=FactorGraph(
-            nodes=(SavedFactorNode("ref", "momentum_3", "saved_factor"),), output_node_id="ref"
-        ),
-    )
-    spec = _spec(_momentum(), referencing)
-    assert validate_strategy(spec).valid
-
-    with pytest.raises(InvalidPortfolioRequestError) as excinfo:
-        _service().run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
-    (issue,) = excinfo.value.validation.issues
-    assert issue.code == "strategy.expression.reference_unsupported"
-    assert issue.path == "factors.1.graph"
-
-
 def test_unknown_universe_is_a_422_with_the_adapter_detail() -> None:
     client = TestClient(build_http_app())
     template = client.get("/api/v1/strategies/template").json()
@@ -826,29 +803,25 @@ def test_structural_rejections_share_a_code_and_data_failures_fail_the_backtest_
     template = client.get("/api/v1/strategies/template").json()
     unknown_universe = _environment_json(universe_id="nope.universe")
     first_factor = template["factors"][0]
-    referencing = {
+    scalar_output = {
         **first_factor,
-        "factor_id": "twin",
+        "factor_id": "constant",
         "graph": {
-            "nodes": [
-                {"node_id": "ref", "factor_id": first_factor["factor_id"], "kind": "saved_factor"}
-            ],
-            "output_node_id": "ref",
+            "nodes": [{"node_id": "one", "value": 1.0, "kind": "constant"}],
+            "output_node_id": "one",
         },
     }
-    saved_reference = {
-        **template,
-        "factors": [first_factor, referencing],
-    }
+    structural = {**template, "factors": [first_factor, scalar_output]}
 
-    # 구조적 거부(저장 팩터 참조)는 데이터를 읽기 전에 판정되므로 두 경로가 같은 422 코드를 낸다.
+    # 구조적 거부(점수가 아닌 팩터 출력)는 데이터를 읽기 전에 판정되므로 두 경로가 같은 422 코드를
+    # 낸다. P2-06 전에는 저장 팩터 참조가 이 예였지만, 그 노드는 문법에서 빠졌다(spec D3 S7).
     preview = client.post(
         "/api/v1/portfolio/preview",
-        json={"spec": saved_reference, "environment": _environment_json()},
+        json={"spec": structural, "environment": _environment_json()},
     )
     run = client.post(
         "/api/v1/backtests",
-        json={"strategy": saved_reference, "core": "python", "environment": _environment_json()},
+        json={"strategy": structural, "core": "python", "environment": _environment_json()},
     )
     assert preview.status_code == 422 and run.status_code == 422, (preview.text, run.text)
     assert (

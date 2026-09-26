@@ -6,10 +6,10 @@ current_phase: P0,P1,P2
 current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P1-06,P2-01
 active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01]
 parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01]
-last_updated: 2026-09-26T21:29:26+09:00
+last_updated: 2026-09-26T21:31:59+09:00
 planned_prs: 29
 merged_prs: 0
-approved_prs: 5
+approved_prs: 6
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P1-06,P2-01` |
 | Active PR | `P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01` |
 | Progress | `0 / 29 merged (0%)` |
-| Approved | `5 / 29` |
-| Aggregated at | `2026-09-26 21:29 KST` |
+| Approved | `6 / 29` |
+| Aggregated at | `2026-09-26 21:31 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -160,7 +160,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `APPROVED` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `review_lang2_p1_01` 3차 APPROVE(1·2·3차 전부 APPROVE, blocking 0. 1차 P2 2·P3 6, 2차 새 P2 1·P3 5, 3차 P3 3 전부 반영 — 3차분 `ea7e2fa4`) · 게이트: typecheck·lint·Vitest 658·build·e2e 19/19 |
-| [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `IN_REVIEW` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE는 `db3bc079`까지(1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2 2). **`ac3a3d0e` 리뷰 대기** — 4차 뒤에 올라간 코드 커밋(SoT 표식 해소, `tools/quant_study_dev/conflict_markers.py`·테스트 7건, CI backend step)이라 APPROVE 범위 밖이다 |
+| [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `APPROVED` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE(`db3bc079`까지, 1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2 2) + 5차 APPROVE(`ac3a3d0e` — SoT 표식 해소·`conflict_markers.py`·테스트 7건·CI backend step, blocking 0·P3 4, 코드 개선은 BACKLOG-008) |
 | [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `APPROVED` | [#177](https://github.com/Nochiski/Quant_study/pull/177) · `review_lang2_p1_03` 2차 APPROVE(1차 REQUEST_CHANGES 반영, 돌연변이 7건 실패 확인), 2차 P3 4건 후속 |
 | [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `APPROVED` | [#181](https://github.com/Nochiski/Quant_study/pull/181) · `review_lang2_p1_04` 4차 APPROVE (1·2·3차 REQUEST_CHANGES 차단 2·1·1, P3 7·3·2 전부 반영) |
 | [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `APPROVED` | [#188](https://github.com/Nochiski/Quant_study/pull/188) · `review_lang2_p1_05` 3차 APPROVE(1차 REQUEST_CHANGES P1 1·P2 2·P3 13 → 2차 REQUEST_CHANGES 새 P1 1(POSIX 잠금 덮어쓰기)·P3 8, 수정 `5e8e0af0` → 3차 APPROVE P2 1·P3 2, 추가분 `a55e7a67` 확인 P3 3, 3차 반영 `3755b186`·`a263276b`. SHA는 rebase 전 값, 현 tip `45f1c4a3`) · 게이트: pytest 1695·Vitest 733·e2e 25/25 |
@@ -170,7 +170,7 @@ Phase exit:
 
 - [x] e2e 그래프 시나리오가 YAML 탭 전환 없이 통과. (Phase 1 감사 4절 (a) PASS — CI #188 `browser-e2e` 25/25)
 - [x] 노드 property·kind·연산자 설명 커버리지 100%. (감사 4절 (b) PASS — 발행은 생성기 구조로, 소비는 `screen-vocabulary.test.ts`로 고정)
-- [ ] SoT·책임분리 점검 서브에이전트 blocking 0. (감사 2026-09-21 BLOCKING 2 — DEFECT-P1X-001은 `ac3a3d0e`+cascade rebase, DEFECT-P1X-002는 P1-06이 해소. `ac3a3d0e` 리뷰와 P1-06 재검토 뒤 체크)
+- [ ] SoT·책임분리 점검 서브에이전트 blocking 0. (감사 2026-09-21 BLOCKING 2 — DEFECT-P1X-001은 `ac3a3d0e`+cascade rebase, DEFECT-P1X-002는 P1-06이 해소. `ac3a3d0e`는 5차 APPROVE, P1-06 재검토 뒤 체크)
 
 ## P2 — backend schema 1.2
 
@@ -264,7 +264,7 @@ Phase exit:
 | `P1-02` | `review_lang2_p1_02` | 2차 | `APPROVE`(코드) | 새 P2 2 · P3 3. 1차 blocking 해소를 확인. 구현이 권장(격리 주석 덧붙이기)보다 나은 방향 — 비격리 전체 교체 API 자체를 없앴고 새 회귀 테스트가 수정 전 실제로 실패함을 리뷰어가 재현. 1차 P2는 리뷰어가 철회(오기). P3 7건 중 코드 5건 해소, PR 본문 2건은 부분 1(P3-4)·미해소 1(P3-6). **새 P2(1)**: 탭 스트립의 `overflow-x: auto`가 `overflow-y`를 `auto`로 만들어 스크롤 컨테이너를 세우고, 탭 포커스 링(바깥 4px)이 위아래로 잘린다. 권장은 선언을 480px 미만으로 한정. **새 P2(2)**: PR 본문이 머지된 SoT 규칙과 반대되는 문장을 담았다(4차 전 리드 정정). **P3**: 12절 초과 사유가 여전히 파일 수만 다룸(1차 P3-6 재지적), 활성 버튼 `title`이 접근 가능한 이름을 중복 낭독, visually-hidden 레시피가 두 곳(= 감사 N6) |
 | `P1-02` | `review_lang2_p1_02` | 3차 | `REQUEST_CHANGES` | 링 클립은 해소됐으나(도장 픽셀·기하 양쪽 확인) 해법의 부작용 1건. **P2**: 스크롤포트를 위아래 8px 넓힌 `padding-block`+음수 `margin-block`이, 툴바 액션 줄과 탭 줄 사이 2px 간격을 넘어 검증 버튼 하단 6px을 덮어 그 영역 클릭을 가로챈다(28px 버튼의 21%가 무표시 사각지대). → padding·음수 margin을 걷고 링을 `outline-offset: -2px`로 탭 안쪽에 그려 해소, 검증 버튼 하단 actionability e2e 단언 추가(직전 해법에서 실패 확인). 리뷰어는 2차의 "겹침은 480px 이하에서만" 판단을 실제 앱 계측으로 철회(1440px에서 이미 넘침) — `overflow-x` 유지 결정 확정 |
 | `P1-02` | `review_lang2_p1_02` | 4차 | `APPROVE` | 코드 결함 0. 3차 P2(검증 버튼 하단 6px 클릭 가로채기)가 inset outline 교체로 해소되고, 회귀를 막는 e2e actionability 단언이 시각 project 4개에서 돈다. `overflow-x: auto` 유지, 탭 줄 한 줄·밑줄·`aria-disabled` 스타일·날짜 입력 단축키 모두 그대로. PR 본문 항목(spec D9, SoT와 어긋난 문장, 줄 수 근거, 테스트 수치)은 리드가 정정 |
-| `P1-02` | 배정 예정 | 5차(`ac3a3d0e`) | 대기 | 4차 APPROVE(`db3bc079`) 뒤 Phase 1 감사 BLOCKING(DEFECT-P1X-001)을 닫으려고 올라간 코드 커밋이다. 범위: SoT 대장 표식 해소(4행은 P0-01 판, 편집 이력 1행은 `86ce099c` 판)와 N9 행, `conflict_markers.py`(139줄)·`test_conflict_markers.py`(7건), CI backend job step. P1-06 1차 리뷰가 관찰로 남긴 경계: 정확히 7자인 `=======` setext 밑줄은 표식으로 잡힌다(테스트가 의도로 고정, 실패가 닫힌 방향), diff3 표식 `|||||||`는 검출하지 않는다. 결과가 오면 이 행을 채운다 |
+| `P1-02` | `review_lang2_p1_06` | 5차(`ac3a3d0e`) | `APPROVE` | blocking 0 · P3 4. 4차 APPROVE(`db3bc079`) 뒤 Phase 1 감사 BLOCKING(DEFECT-P1X-001)을 닫으려고 올라간 코드 커밋이다. 범위: SoT 대장 표식 해소(4행은 P0-01 판, 편집 이력 1행은 `86ce099c` 판)와 N9 행, `conflict_markers.py`(139줄)·`test_conflict_markers.py`(7건), CI backend job step. **근거**: (1) 사고 당시 트리 `db3bc079`에서 SoT `:27/:33/:39` 3건을 찍고 exit 1, 수정 트리 `ac3a3d0e`는 exit 0. 임시 저장소의 실제 `git merge` 충돌도 기본 방식·diff3(zdiff3 포함) 모두 exit 1로 잡는다 — diff3의 `|||||||` 줄 자체는 목록에 없지만 나머지 세 표식으로 검출된다. (2) 오탐 규칙이 git의 `git diff --check`와 같다(정확히 7자 `=======` 단독 줄은 git도 `leftover conflict marker`, 8자 이상·들여쓴 줄·표 구분선·doctest는 둘 다 통과). 현재 추적 파일에 해당 줄 0개. (3) CI step이 실제로 돌았다 — run 36220139969(#191 push) backend job의 "No committed merge conflict markers" success, 약 1초. **P3**: ① 주석·커밋 문장 "setext 밑줄은 오검출하지 않는다"가 과하다(7자가 아닌 밑줄만 해당), ② 파일 열거를 `rglob`+디렉터리 이름 제외 대신 `git ls-files`로(추적 소스 안 `build/`·`dist/` 누락, 비추적 파일 오탐, 불필요한 순회), ③ `.lock` 확장자 전체를 건너뛰어 아무도 파싱하지 않는 reference `uv.lock`의 표식이 조용히 통과, 비 UTF-8 텍스트(cp949·UTF-16)도 건너뜀, ④ 테스트 수는 8건이 아니라 7건(PLAN 정정 완료). ①~③은 BACKLOG-008 |
 | `P1-03` | `review_lang2_p1_03` | 1차 | `REQUEST_CHANGES` | 차단 2 · P2 2 · P3 7. **차단1**: `messages.ts`의 `en` 블록이 한글 계산식 6개를 담아 영어 화면에 한글이 떴다 — `satisfies Record<MessageKey, string>`는 키 존재만 보고 커버리지 테스트는 ko만 조회해서 타입·테스트·lint 어디도 잡지 않았다. **차단2**: 시간축 연산자 6개의 계산식·설명이 `lag`를 빠뜨려 엔진의 창(`x[t-lag-window+1 … t-lag]`, `_evaluation.py:388-407`)과 어긋났다 — 12-1 모멘텀을 화면대로 만들면 11-0이 되는데 백테스트는 통과한다. **P2**: `output_type_rule` 대조 테스트가 입력이 항상 숫자 시계열이라 세 규칙이 한 값으로 접혀 공회전(mutation 2건 미검출), 선언 순서 테스트가 레지스트리에서 파생한 값끼리 비교하는 동어반복. 전부 반영 |
 | `P1-03` | `review_lang2_p1_03` | 2차 | `APPROVE` | 차단 0. 1차 findings 전부 해소 확인, 돌연변이 7건이 모두 실패하는 것을 실증. 새 P3 4건(en `momentum`·`delta` 문장 자족성, ko 산문의 식별자 호칭, e2e의 산문 고정, WORKFLOW 줄바꿈)은 후속 커밋에서 반영. 스코프 밖 관찰(`_registry.py` 12-1 모멘텀 시드 `history=252` ↔ 그래프 최소 이력 273)은 BACKLOG-001로 기록 |
 | `P1-04` | `review_lang2_p1_04` | 1차 | `REQUEST_CHANGES` | 차단 2 · P3 7. **차단1**: 팔레트로 만든 `기간 집계` 노드가 `window: 0`이라 곧바로 거부됐다 — runtime schema가 하한을 발행하지 않아 화면이 0을 채웠다. 하한을 노드 dataclass 옆에 한 번 선언하고(`_nodes.minimum`) 검증기·스키마가 함께 읽게 고쳤다. **차단2**: Graph 탭 인라인 본문 테스트가 backend가 내지 않는 pointer로만 단언해, 실제 노드 객체 pointer에서는 본문이 어디에도 안 붙는 것을 못 잡았다. P3: `availability` 판정 반전, 팔레트 계산식 접근성, 진단 본문 `role="alert"` 제거, `referenceLabel` fallback, 공개 API 8→1, `filterPalette` 참조 동일성. Form 목록 pointer 표기는 의도적 제외로 근거 명시 |
@@ -283,10 +283,16 @@ Phase exit:
 | `P1-03` | cascade tip `748bc62f`: backend `pytest -q`·`ruff check src tests examples scripts`·`pyright`, 루트 tools unittest·ruff·pyright, 충돌 표식 검사, frontend `api:generate` 후 생성물 diff·`typecheck`·`typecheck:e2e`·`lint`·`npm test` | pytest 1579 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 674/674 | 2026-09-26 |
 | `P1-04` | cascade tip `e6fb10b0`, 위와 같은 게이트 | pytest 1611 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 704/704 | 2026-09-26 |
 | `P1-05` | cascade tip `45f1c4a3`, 위와 같은 게이트 + `npm run test:e2e`(머신 잠금 아래) | pytest 1695 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 733/733 · e2e 25/25 | 2026-09-26 |
-| `P1-06` | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` | `PLAN.md is consistent: 0/29 merged, 5 approved`(1차 리뷰 반영 뒤, P1-02가 `ac3a3d0e` 리뷰 대기로 내려감) · 충돌 표식 0 | 2026-09-26 |
+| `P1-06` | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` | `PLAN.md is consistent: 0/29 merged, 6 approved`(P1-02 5차 APPROVE 반영 뒤. 1차 리뷰 반영 시점에는 P1-02가 `ac3a3d0e` 리뷰 대기라 5) · 충돌 표식 0 | 2026-09-26 |
 
 ## 변경 기록
 
+- 2026-09-26 — P1-02 5차 리뷰(`ac3a3d0e`) APPROVE, blocking 0·P3 4. 게이트가 사고 당시 트리
+  `db3bc079`와 실제 git 충돌(기본 방식·diff3)을 exit 1로 잡고, 오탐 규칙이 `git diff --check`와
+  같으며, CI step이 run 36220139969에서 실제로 돌았다. P1-02를 `APPROVED`로 되돌렸다. 앞서 5차
+  대기 행에 "diff3 표식은 검출하지 않는다"고 적은 것은 틀렸다 — `|||||||` 줄 자체는 목록에 없지만
+  diff3 충돌도 나머지 세 표식으로 검출된다. 도구 개선 P3(문장 정정·`git ls-files` 전환·`.lock`과
+  비 UTF-8 건너뜀)는 BACKLOG-008로 P3-03 acceptance에 예약했다.
 - 2026-09-26 — P1-06 1차 리뷰(REQUEST_CHANGES, P2 2·P3 5) 반영. P1-02를 `APPROVED`에서
   `IN_REVIEW`로 내렸다 — 4차 APPROVE는 `db3bc079`까지이고 #173 head `ac3a3d0e`(표식 해소·검출 도구·
   CI step)는 리뷰 기록이 없다. Review 기록에 5차 대기 행을 두고 결과가 오면 채운다. 도구 테스트
@@ -366,7 +372,8 @@ Phase exit:
   **수정**: 4행(실행 설정·그래프 투영·schema 버전·업그레이드 변환)은 P0-01 개정본,
   편집 이력 1행은 `86ce099c` 판으로 해소. 재발 방지로 저장소 전체 충돌 표식 검출
   (`tools/quant_study_dev/conflict_markers.py`, 단위 테스트 7건 — 커밋 메시지의 "8건"은 오기, CI
-  backend job step)을 추가했다. 이 커밋은 4차 APPROVE 뒤에 올라가 리뷰 대기다(P1-02 Review 5차 행).
+  backend job step)을 추가했다. 이 커밋은 4차 APPROVE 뒤에 올라가 5차 리뷰가 따로 APPROVE했다
+  (P1-02 Review 5차 행, 개선 P3는 BACKLOG-008).
 - 2026-09-21 — P1-04 구현·리뷰 3회: 연산자 팔레트(카탈로그·스키마 주도, 손으로 적은 목록 0), 추가·
   삭제 실패의 사유 표시, 진단 본문 인라인. 구현 중 발견한 `window: 0` 결함은 하한을 노드 dataclass
   옆에 한 번 선언하고 검증기·runtime schema가 함께 읽게 해 같은 PR에서 고쳤다(SoT 행 추가).
@@ -543,6 +550,29 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   이미 적는다.
 - **위험성**: merge gate가 간헐 적색이 되어 재실행이 습관이 되면 진짜 회귀를 흘려보낸다.
 - **담당**: `P4-04`(JSON 탭 은퇴로 "read-only view에서 YAML로 돌아가는" 이 경로를 다시 쓴다).
+
+### BACKLOG-008: 충돌 표식 게이트가 일부 추적 텍스트를 건너뛰고, 주석이 검출 범위를 과장한다
+
+- **상황**: P1-02 `ac3a3d0e`의 `tools/quant_study_dev/conflict_markers.py`(CI backend step "No committed
+  merge conflict markers"). 5차 리뷰가 APPROVE하면서 P3 4건을 남겼고, 테스트 수 정정을 뺀 3건이다.
+- **인풋**:
+  1. `backend/reference/sangmok/implementation/uv.lock`처럼 다른 CI step이 파싱하지 않는 `.lock` 파일에
+     충돌 표식을 커밋한다.
+  2. 추적 소스 안 `build/`·`dist/`·`target/`·`coverage/` 이름 디렉터리 아래 파일, 또는 cp949·UTF-16
+     텍스트에 표식을 커밋한다.
+  3. 로컬에 추적하지 않는 `.orig`·`.rej`가 있는 상태에서 게이트를 돌린다.
+  4. 주석을 믿고 정확히 7자인 setext 밑줄(`=======`)을 쓴다.
+- **에러 위치**: `tools/quant_study_dev/conflict_markers.py:15-16`(`MARKER` 위 주석), `SKIP_DIRECTORIES`·
+  `iter_candidate_files`(`root.rglob("*")` 열거), `BINARY_SUFFIXES`의 `.lock`, UTF-8 디코딩 실패 시 건너뜀.
+- **위험성**: 1·2는 표식이 조용히 통과한다(false negative). 지금 추적 파일 중 해당 경로·비 UTF-8은
+  0개이고 `.lock` 4개 중 3개는 다른 step이 파싱해 깨지므로 실손은 reference `uv.lock` 하나다. 3은
+  로컬만 적색(비추적 파일 오탐), 4는 CI에서 막히고 원인을 헤맨다(동작은 `git diff --check`와 같아
+  안전). 로컬 Windows 순회가 약 9.6초로 느린 것도 `rglob` 때문이다.
+- **재현 test**: 없음(리뷰 probe `cm_probe.py`). 담당 PR이 FN 5건(cp949·UTF-16·`.lock`·`build/`·
+  `dist/`)을 단위 테스트로 넣는다.
+- **담당**: `P3-03`(CI 전체 green을 exit로 가진 PR). `git ls-files -z`로 추적 파일만 열거하고 디렉터리
+  제외를 걷으며, `.lock`을 제외에서 빼고, `errors="replace"`로 읽으며, 주석을 "7자가 아닌 밑줄은
+  잡지 않는다. 정확히 7자인 단독 줄은 git도 충돌 표식으로 본다"로 좁힌다.
 
 ## 갱신 절차
 

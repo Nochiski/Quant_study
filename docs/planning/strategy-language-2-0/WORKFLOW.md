@@ -541,6 +541,9 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - CI `frontend`·`browser-e2e` green(P2 스택의 exit 조건 해소).
 - BACKLOG-002: 매뉴얼 스크린샷 14장을 `npm run docs:capture`로 1.2 한글 화면으로 다시 찍고, 8절에
   "초안 복구·서버 초안 적용 직후 되돌리기는 복구 이전 텍스트로 돌아간다"는 안내를 넣는다.
+- BACKLOG-008: 충돌 표식 게이트(`tools/quant_study_dev/conflict_markers.py`)가 `git ls-files`로 추적
+  파일만 열거하고, `.lock`과 비 UTF-8 텍스트도 검사하며, 주석이 7자 밑줄 검출을 사실대로 적는다.
+  cp949·UTF-16·`.lock`·`build/`·`dist/` 표식 검출 테스트를 둔다.
 
 **Phase 3 exit**
 

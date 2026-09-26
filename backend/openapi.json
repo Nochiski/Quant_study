@@ -2333,20 +2333,6 @@
             "title": "Plan Hash",
             "type": "string"
           },
-          "referenced_factor_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Referenced Factor Ids",
-            "type": "array"
-          },
-          "referenced_subgraph_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Referenced Subgraph Ids",
-            "type": "array"
-          },
           "registry_version": {
             "title": "Registry Version",
             "type": "string"
@@ -2373,8 +2359,6 @@
           "output_node_id",
           "steps",
           "required_field_ids",
-          "referenced_factor_ids",
-          "referenced_subgraph_ids",
           "minimum_history_sessions",
           "missing_policy"
         ],
@@ -2502,12 +2486,6 @@
                 },
                 {
                   "$ref": "#/components/schemas/ConditionalNode"
-                },
-                {
-                  "$ref": "#/components/schemas/SavedFactorNode"
-                },
-                {
-                  "$ref": "#/components/schemas/SavedSubgraphNode"
                 }
               ]
             },
@@ -2528,14 +2506,6 @@
       },
       "FactorGraphRequest": {
         "properties": {
-          "factor_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Factor Ids",
-            "type": "array"
-          },
           "graph": {
             "$ref": "#/components/schemas/FactorGraph"
           },
@@ -2555,14 +2525,6 @@
               "type": "string"
             },
             "title": "Parameter Ids",
-            "type": "array"
-          },
-          "subgraph_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Subgraph Ids",
             "type": "array"
           }
         },
@@ -2723,14 +2685,6 @@
             ],
             "title": "Expected Data Snapshot Id"
           },
-          "factor_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Factor Ids",
-            "type": "array"
-          },
           "graph": {
             "$ref": "#/components/schemas/FactorGraph"
           },
@@ -2750,14 +2704,6 @@
               "$ref": "#/components/schemas/ResolvedFactorParameter"
             },
             "title": "Parameters",
-            "type": "array"
-          },
-          "subgraph_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Subgraph Ids",
             "type": "array"
           }
         },
@@ -5582,6 +5528,17 @@
             "title": "Net Exposure",
             "type": "number"
           },
+          "risk_factor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Factor Id"
+          },
           "risk_field_id": {
             "anyOf": [
               {
@@ -5910,30 +5867,6 @@
         "title": "SaveStrategyDraftRequest",
         "type": "object"
       },
-      "SavedFactorNode": {
-        "properties": {
-          "factor_id": {
-            "title": "Factor Id",
-            "type": "string"
-          },
-          "kind": {
-            "const": "saved_factor",
-            "title": "Kind",
-            "type": "string"
-          },
-          "node_id": {
-            "title": "Node Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node_id",
-          "factor_id",
-          "kind"
-        ],
-        "title": "SavedFactorNode",
-        "type": "object"
-      },
       "SavedRevisionReference": {
         "description": "Resolve an immutable revision and fail before calculation if its hash differs.",
         "properties": {
@@ -5984,30 +5917,6 @@
           "requires_upgrade"
         ],
         "title": "SavedStrategy",
-        "type": "object"
-      },
-      "SavedSubgraphNode": {
-        "properties": {
-          "kind": {
-            "const": "saved_subgraph",
-            "title": "Kind",
-            "type": "string"
-          },
-          "node_id": {
-            "title": "Node Id",
-            "type": "string"
-          },
-          "subgraph_id": {
-            "title": "Subgraph Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node_id",
-          "subgraph_id",
-          "kind"
-        ],
-        "title": "SavedSubgraphNode",
         "type": "object"
       },
       "SearchActivityView": {
@@ -8093,8 +8002,7 @@
           "missing_input",
           "warm_up",
           "divide_by_zero",
-          "group_missing",
-          "reference_missing"
+          "group_missing"
         ],
         "title": "TraceValueStatus",
         "type": "string"

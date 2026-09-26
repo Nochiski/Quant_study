@@ -11,6 +11,12 @@ Shape (JSON Schema 2020-12):
   except `identity`, `additionalProperties: false` at every depth (unknown keys fail closed);
 - one `$defs` entry per dataclass, named after the class; discriminated unions (`kind`
   Literal) become `oneOf` over `$ref`s whose `kind` property is a `const`;
+- no `$defs` carries a python class name any more (P1-03). Every object and every property
+  publishes `x-description-key` instead: an i18n key **stem** the client resolves as `<stem>`
+  (짧은 이름) and `<stem>.description` (한 줄 설명). Keys are ours, sentences belong to each
+  consumer's locale dictionary — the same ownership rule as `x-applicable-when`;
+- an `operator` property additionally publishes `x-operator`: `enum 값 → 설명 키 stem`, read from
+  the operator registry (`domain.factor._operators`) so no client assembles a key from a value;
 - catalog bounds appear as `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`, contract
   metadata as `x-unit`, `x-display-unit`, `x-applied-stage`, `x-description-key`, `examples`;
 - identifier fields carry `x-catalog` (equity-field, factor, universe, subgraph: complete from
@@ -27,12 +33,16 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import re
 import types
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
+
+from strategy_workbench.domain.factor.facade.expression import EXPRESSION_NODE_KINDS
+from strategy_workbench.domain.factor.facade.operators import operator_description_keys
 
 from ._constraints import (
     FieldApplicability,
@@ -41,7 +51,7 @@ from ._constraints import (
     scalar_constraint_index,
 )
 from ._hydrate import SUPPORTED_SCHEMA_VERSIONS, _kind_of
-from ._models import StrategySpec
+from ._models import ParameterDefinition, StrategySpec
 
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 DOCUMENT_TITLE = "StrategyDocument"
@@ -106,21 +116,41 @@ class ApplicableWhen:
     owned_by_error: str | None
 
 
+ROOT_DESCRIPTION_KEY = "strategy.document"
+# 최상위 property는 화면에서 "섹션"이다. 문서 자신(`strategy.document`)과 네임스페이스를 나눠야
+# `description` 섹션 이름과 문서 설명(`strategy.document.description`)이 겹치지 않는다.
+ROOT_PROPERTY_NAMESPACE = "strategy.section"
+
+
+def _root_schema(builder: _SchemaBuilder) -> dict[str, Any]:
+    return builder.dataclass_schema(
+        StrategySpec,
+        "",
+        exclude=("identity",),
+        stem=ROOT_DESCRIPTION_KEY,
+        property_namespace=ROOT_PROPERTY_NAMESPACE,
+    )
+
+
 def strategy_document_schema() -> dict[str, Any]:
     """JSON Schema for the identity-free authoring document, derived from the model."""
     builder = _SchemaBuilder(scalar_constraint_index())
-    root = builder.dataclass_schema(StrategySpec, "", exclude=("identity",))
+    root = _root_schema(builder)
     versions = sorted(SUPPORTED_SCHEMA_VERSIONS)
-    version_schema: dict[str, Any] = (
-        {"type": "string", "const": versions[0]}
-        if len(versions) == 1
-        else {"type": "string", "enum": versions}
-    )
+    version_schema: dict[str, Any] = {
+        **(
+            {"type": "string", "const": versions[0]}
+            if len(versions) == 1
+            else {"type": "string", "enum": versions}
+        ),
+        "x-description-key": f"{ROOT_PROPERTY_NAMESPACE}.schema_version",
+    }
     properties = {"schema_version": version_schema, **root["properties"]}
     return {
         "$schema": SCHEMA_DIALECT,
         "$id": f"urn:strategy-workbench:strategy-document:{versions[-1]}",
         "title": DOCUMENT_TITLE,
+        "x-description-key": ROOT_DESCRIPTION_KEY,
         "type": "object",
         "properties": properties,
         "required": ["schema_version", *root["required"]],
@@ -166,7 +196,7 @@ def strategy_document_schema_hash(schema: dict[str, Any]) -> str:
 def strategy_field_contracts() -> tuple[FieldContract, ...]:
     """Every scalar authoring path (pointer template order = document order)."""
     builder = _SchemaBuilder(scalar_constraint_index())
-    builder.dataclass_schema(StrategySpec, "", exclude=("identity",))
+    _root_schema(builder)
     versions = sorted(SUPPORTED_SCHEMA_VERSIONS)
     version = FieldContract(
         pointer="/schema_version",
@@ -174,6 +204,7 @@ def strategy_field_contracts() -> tuple[FieldContract, ...]:
         required=True,
         const=versions[0] if len(versions) == 1 else None,
         enum=None if len(versions) == 1 else tuple(versions),
+        description_key=f"{ROOT_PROPERTY_NAMESPACE}.schema_version",
     )
     return (version, *builder.contracts)
 
@@ -240,10 +271,18 @@ class _SchemaBuilder:
         return {"$ref": f"#/$defs/{name}"}
 
     def dataclass_schema(
-        self, tp: type, pointer: str, *, exclude: tuple[str, ...] = ()
+        self,
+        tp: type,
+        pointer: str,
+        *,
+        exclude: tuple[str, ...] = (),
+        stem: str | None = None,
+        property_namespace: str | None = None,
     ) -> dict[str, Any]:
         hints = get_type_hints(tp)
         branch = _kind_of(tp)
+        stem = stem or _description_stem(tp, branch)
+        property_namespace = property_namespace or _property_namespace(tp, branch)
         properties: dict[str, Any] = {}
         required: list[str] = []
         # `kind` discriminator가 있으면 첫 property로 둔다(schema 1.1 S5). editor·snippet·fixture가
@@ -261,6 +300,17 @@ class _SchemaBuilder:
                 schema = {**schema, "default": _json_value(default)}
             elif "default-from" not in field.metadata:
                 required.append(field.name)
+            # 필드 옆에 선언한 정수 하한(`domain.factor._nodes.minimum`)을 그대로 발행한다. 검증기가
+            # 같은 상수를 읽으므로 화면이 스키마로 만든 기본값을 backend가 거부할 수 없다(P1-04).
+            declared_minimum = field.metadata.get("minimum")
+            if isinstance(declared_minimum, int):
+                schema = {**schema, "minimum": declared_minimum}
+            # 파생 키를 먼저 얹고 제약 카탈로그가 자기 키를 가지면 그 쪽이 이긴다: 특정 필드의
+            # 설명은 제약이 소유하고, 나머지 전부는 이름 규칙이 채운다(P1-03).
+            schema = {**schema, "x-description-key": f"{property_namespace}.{field.name}"}
+            operator_keys = operator_description_keys(hints[field.name])
+            if operator_keys is not None:
+                schema = {**schema, "x-operator": dict(operator_keys)}
             constraint = self._constraints.get(child)
             if constraint is not None:
                 schema = {**schema, **_constraint_schema(constraint)}
@@ -283,7 +333,7 @@ class _SchemaBuilder:
             self._record_contract(child, hints[field.name], schema, has_default, default, branch)
         return {
             "type": "object",
-            "title": tp.__name__,
+            "x-description-key": stem,
             "properties": properties,
             "required": required,
             "additionalProperties": False,
@@ -337,9 +387,52 @@ class _SchemaBuilder:
                 applicable_when=(
                     _applicable_when(applicability) if applicability is not None else None
                 ),
-                description_key=constraint.description_key or None if constraint else None,
+                description_key=schema.get("x-description-key"),
             )
         )
+
+
+# 판별 union의 분기들은 화면에서 한 어휘를 이룬다: `node_id`는 어떤 노드에서도, `parameter_id`는
+# 어떤 파라미터에서도 같은 뜻이다. 분기마다 다른 키를 주면 (1) 같은 문장을 12벌 두게 되고
+# (2) 분기 독립 property의 스키마가 분기마다 달라져 편집기가 "kind를 먼저 고르라"고 요구한다
+# (frontend `collectProperties`의 분기 동치 판정). union 하나가 stem prefix와 property
+# 네임스페이스를 함께 소유한다.
+_UNION_VOCABULARIES: tuple[tuple[frozenset[type], str, str], ...] = (
+    (
+        frozenset(EXPRESSION_NODE_KINDS.values()),
+        "strategy.node",
+        "strategy.field.node",
+    ),
+    (
+        frozenset(get_args(ParameterDefinition)),
+        "strategy.parameter",
+        "strategy.field.parameter",
+    ),
+)
+
+
+def _snake(name: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def _vocabulary(tp: type, branch: str | None) -> tuple[str, str] | None:
+    if branch is None:
+        return None
+    for members, stem_prefix, namespace in _UNION_VOCABULARIES:
+        if tp in members:
+            return f"{stem_prefix}.{branch}", namespace
+    return None
+
+
+def _description_stem(tp: type, branch: str | None) -> str:
+    """객체 하나의 i18n 키 stem. `$defs` 이름(파이썬 클래스명)은 화면에 나가지 않는다."""
+    vocabulary = _vocabulary(tp, branch)
+    return vocabulary[0] if vocabulary else f"strategy.type.{_snake(tp.__name__)}"
+
+
+def _property_namespace(tp: type, branch: str | None) -> str:
+    vocabulary = _vocabulary(tp, branch)
+    return vocabulary[1] if vocabulary else f"strategy.field.{_snake(tp.__name__)}"
 
 
 def _scalar_schema(tp: Any) -> dict[str, Any]:

@@ -322,6 +322,11 @@ const ko = {
   "shell.expandNav": "메뉴 펼치기",
   "ide.breadcrumb": "현재 위치",
   "ide.runBacktest": "백테스트 실행",
+  "ide.history": "실행 취소·다시 실행",
+  "ide.undo": "실행 취소",
+  "ide.redo": "다시 실행",
+  "ide.undo.empty": "되돌릴 편집이 없습니다",
+  "ide.redo.empty": "다시 실행할 편집이 없습니다",
   "command.open": "명령",
   "command.palette": "전략 명령 팔레트",
   "command.search": "명령과 문서 경로 검색",
@@ -401,12 +406,32 @@ const ko = {
   "graph.editTitle": "그래프 편집",
   "graph.editable": "편집 가능",
   "graph.nodesTitle": "노드",
-  "graph.nodeKind": "노드 종류",
-  "graph.addNode": "노드 추가",
+  "graph.palette.label": "연산자 팔레트",
+  "graph.palette.search": "연산자 검색",
+  "graph.palette.searchPlaceholder": "이름·설명·계산식으로 검색",
+  "graph.palette.empty": "검색어와 맞는 연산자가 없습니다",
+  "graph.palette.addNode": "{operator} 노드 추가",
+  "graph.palette.arity": "입력 {count}개",
+  "graph.palette.params": "설정 {params}",
+  "graph.palette.unsupportedBadge": "미지원",
+  "graph.palette.unsupported":
+    "이 연산자를 계산할 수 있는 데이터 어댑터가 아직 없습니다. 문서에는 넣을 수 있지만 실행은 막힙니다",
+  "graph.palette.catalogLoading":
+    "연산자 목록을 불러오는 중입니다 — 지금은 노드 종류만 보입니다",
+  "graph.palette.catalogUnavailable":
+    "연산자 목록을 불러오지 못했습니다 — 지금은 노드 종류만 보이고, 연산자는 노드 속성에서 고르세요",
+  "graph.palette.locked": "노드를 추가할 수 없습니다: {reason}",
+  "graph.palette.settling":
+    "직전 편집이 문서에 반영되는 중입니다 — 잠시 후 다시 추가하세요",
+  "graph.addFailed.unknown-kind":
+    "{entry}: 이 노드 종류를 runtime schema에서 찾지 못해 추가하지 않았습니다",
+  "graph.addFailed.unsupported-schema":
+    "{entry}: 이 노드의 스키마로는 기본값을 만들지 못해 추가하지 않았습니다(재귀·과대 스키마)",
   "graph.editNode": "노드 편집: {node}",
   "graph.removeNode": "삭제",
   "graph.removeBlocked":
-    "{node}을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: {pointers}",
+    "{node}을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: {nodes}",
+  "graph.outputReference": "그래프 출력",
   "graph.settingsTitle": "그래프 설정",
   "graph.selectedNode": "선택한 노드",
   "graph.noSelection": "노드를 선택하면 속성을 편집합니다",
@@ -457,6 +482,7 @@ const ko = {
   "contract.format": "포맷",
   "contract.description": "설명",
   "contract.descriptionKey": "설명 키",
+  "contract.noDescription": "설명 없음",
   "contract.discriminator": "Discriminator",
   "contract.variants": "분기",
   "contract.selectedBranch": "현재 분기",
@@ -547,6 +573,391 @@ const ko = {
     "시장 거래량 대비 최대 주문 참여율",
   "strategy.contract.execution.fee_bps": "체결 금액에 적용할 수수료 가정",
   "strategy.contract.execution.slippage_bps": "체결 가격의 슬리피지 가정",
+  // -- 화면 어휘 (P1-03, spec D8) -------------------------------------------------
+  // backend가 발행한 설명 키는 stem이다: `<stem>`은 이름(라벨), `<stem>.description`은
+  // 한 줄 설명. 연산자는 `<stem>.formula`로 계산식을 더한다. 목록 자체는 runtime schema의
+  // `x-description-key`와 연산자 카탈로그가 소유하며 여기 손으로 복제하지 않는다 —
+  // `screen-vocabulary.test.ts`가 fixture를 순회해 누락 키를 잡는다.
+  "strategy.document": "전략 문서",
+  "strategy.document.description":
+    "유니버스·팩터·포트폴리오·리스크·실행을 한 벌로 적은 전략 정의입니다.",
+  "strategy.section.schema_version": "문서 버전",
+  "strategy.section.schema_version.description":
+    "이 문서가 따르는 authoring 스키마 버전입니다.",
+  "strategy.section.title": "전략 이름",
+  "strategy.section.title.description":
+    "목록과 리비전 화면에 보이는 이름입니다.",
+  "strategy.section.description": "전략 설명",
+  "strategy.section.description.description":
+    "이 전략이 무엇을 노리는지 자유롭게 적습니다.",
+  "strategy.section.data": "데이터",
+  "strategy.section.data.description":
+    "어느 시장의 어느 기간·유니버스를 읽을지 정합니다.",
+  "strategy.section.eligibility": "종목 거르기",
+  "strategy.section.eligibility.description":
+    "팩터를 계산하기 전에 유니버스에서 뺄 조건입니다.",
+  "strategy.section.factors": "알파 팩터",
+  "strategy.section.factors.description":
+    "종목 점수를 만드는 팩터와 각각의 가중치입니다.",
+  "strategy.section.signal": "신호 결합",
+  "strategy.section.signal.description":
+    "팩터 점수를 합친 뒤 매수 후보를 남기는 기준입니다.",
+  "strategy.section.portfolio": "포트폴리오 구성",
+  "strategy.section.portfolio.description":
+    "몇 종목을 어떤 비중으로 담고 언제 다시 맞출지 정합니다.",
+  "strategy.section.risk": "리스크 제약",
+  "strategy.section.risk.description": "익스포저와 종목·섹터 비중 한도입니다.",
+  "strategy.section.execution": "체결 가정",
+  "strategy.section.execution.description":
+    "주문 시점과 참여율·수수료·슬리피지 가정입니다.",
+  "strategy.section.parameters": "탐색 파라미터",
+  "strategy.section.parameters.description":
+    "최적화가 값을 바꿔 가며 시험할 파라미터 정의입니다.",
+  "strategy.type.data_step": "데이터 구간",
+  "strategy.type.data_step.description":
+    "시장·주기·기간·유니버스를 묶은 데이터 설정입니다.",
+  "strategy.field.data_step.market": "시장",
+  "strategy.field.data_step.market.description": "시세를 읽어 올 거래소입니다.",
+  "strategy.field.data_step.start": "시작일",
+  "strategy.field.data_step.start.description":
+    "백테스트가 읽기 시작하는 첫날입니다.",
+  "strategy.field.data_step.end": "종료일",
+  "strategy.field.data_step.end.description":
+    "백테스트가 읽는 마지막 날입니다.",
+  "strategy.field.data_step.universe_id": "유니버스",
+  "strategy.field.data_step.universe_id.description":
+    "후보 종목 집합의 식별자입니다.",
+  "strategy.field.data_step.frequency": "데이터 주기",
+  "strategy.field.data_step.frequency.description": "관측을 읽는 간격입니다.",
+  "strategy.type.eligibility_rule": "거르기 규칙",
+  "strategy.type.eligibility_rule.description":
+    "데이터 필드 하나를 기준값과 견주는 조건입니다.",
+  "strategy.field.eligibility_rule.field_id": "데이터 필드",
+  "strategy.field.eligibility_rule.field_id.description":
+    "비교 대상이 되는 원천 데이터 필드입니다.",
+  "strategy.field.eligibility_rule.operator": "비교 방식",
+  "strategy.field.eligibility_rule.operator.description":
+    "필드 값과 기준값을 견주는 방법입니다.",
+  "strategy.field.eligibility_rule.value": "기준값",
+  "strategy.field.eligibility_rule.value.description":
+    "비교에 쓰는 숫자입니다.",
+  "strategy.type.eligibility_step": "종목 거르기",
+  "strategy.type.eligibility_step.description":
+    "팩터 계산 전에 유니버스를 좁히는 규칙 묶음입니다.",
+  "strategy.field.eligibility_step.rules": "거르기 규칙 목록",
+  "strategy.field.eligibility_step.rules.description":
+    "모두 만족하는 종목만 남습니다.",
+  "strategy.node.field": "데이터 필드",
+  "strategy.node.field.description":
+    "원천 데이터 필드 하나를 그래프로 들여옵니다.",
+  "strategy.node.constant": "상수",
+  "strategy.node.constant.description": "고정된 숫자 하나를 내보냅니다.",
+  "strategy.node.parameter": "파라미터",
+  "strategy.node.parameter.description":
+    "탐색 파라미터의 값을 그래프로 들여옵니다.",
+  "strategy.node.unary": "값 변환",
+  "strategy.node.unary.description": "입력 하나를 그대로 바꿉니다.",
+  "strategy.node.binary": "두 값 계산",
+  "strategy.node.binary.description": "두 입력을 사칙연산으로 합칩니다.",
+  "strategy.node.time_series": "기간 집계",
+  "strategy.node.time_series.description":
+    "같은 종목의 과거 구간을 값 하나로 집계합니다.",
+  "strategy.node.cross_sectional": "종목 간 비교",
+  "strategy.node.cross_sectional.description":
+    "같은 날 다른 종목과 견주어 값을 고칩니다.",
+  "strategy.node.group": "그룹 안 비교",
+  "strategy.node.group.description": "같은 날 같은 그룹 안에서만 견줍니다.",
+  "strategy.node.comparison": "조건 비교",
+  "strategy.node.comparison.description": "두 값을 견주어 참·거짓을 냅니다.",
+  "strategy.node.conditional": "조건 분기",
+  "strategy.node.conditional.description":
+    "조건이 참일 때와 거짓일 때 다른 값을 냅니다.",
+  "strategy.node.saved_factor": "저장된 팩터",
+  "strategy.node.saved_factor.description":
+    "이미 저장한 팩터의 값을 들여옵니다.",
+  "strategy.node.saved_subgraph": "저장된 부분 그래프",
+  "strategy.node.saved_subgraph.description":
+    "이미 저장한 그래프 조각을 들여옵니다.",
+  "strategy.field.node.kind": "노드 종류",
+  "strategy.field.node.kind.description":
+    "이 노드가 무엇을 하는 노드인지 정합니다.",
+  "strategy.field.node.node_id": "노드 이름",
+  "strategy.field.node.node_id.description":
+    "그래프 안에서 이 노드를 가리키는 이름입니다.",
+  "strategy.field.node.field_id": "데이터 필드",
+  "strategy.field.node.field_id.description":
+    "값을 읽어 올 원천 데이터 필드입니다.",
+  "strategy.field.node.value": "값",
+  "strategy.field.node.value.description": "이 노드가 내보낼 고정 숫자입니다.",
+  "strategy.field.node.parameter_id": "파라미터 이름",
+  "strategy.field.node.parameter_id.description":
+    "값을 가져올 탐색 파라미터입니다.",
+  "strategy.field.node.operator": "연산",
+  "strategy.field.node.operator.description": "이 노드가 수행할 연산입니다.",
+  "strategy.field.node.input_node_id": "입력 노드",
+  "strategy.field.node.input_node_id.description": "값을 받아 올 노드입니다.",
+  "strategy.field.node.periods": "미루는 세션",
+  "strategy.field.node.periods.description": "며칠 전 값을 쓸지 정합니다.",
+  "strategy.field.node.left_node_id": "왼쪽 노드",
+  "strategy.field.node.left_node_id.description": "연산의 왼쪽 값입니다.",
+  "strategy.field.node.right_node_id": "오른쪽 노드",
+  "strategy.field.node.right_node_id.description": "연산의 오른쪽 값입니다.",
+  "strategy.field.node.window": "집계 기간",
+  "strategy.field.node.window.description":
+    "집계에 쓸 세션 수입니다. 구간은 건너뛰는 세션(lag)만큼 물린 자리에서 셉니다.",
+  "strategy.field.node.lag": "건너뛰는 세션",
+  "strategy.field.node.lag.description":
+    "집계 구간의 끝을 오늘에서 이만큼 뒤로 물립니다. 구간은 t-lag-window+1부터 t-lag까지입니다.",
+  "strategy.field.node.lower_quantile": "아래 절단 분위",
+  "strategy.field.node.lower_quantile.description":
+    "이 분위보다 작은 값은 분위 값으로 끌어올립니다.",
+  "strategy.field.node.upper_quantile": "위 절단 분위",
+  "strategy.field.node.upper_quantile.description":
+    "이 분위보다 큰 값은 분위 값으로 끌어내립니다.",
+  "strategy.field.node.group_field_id": "그룹 필드",
+  "strategy.field.node.group_field_id.description":
+    "종목을 묶는 기준이 되는 데이터 필드입니다.",
+  "strategy.field.node.predicate_node_id": "조건 노드",
+  "strategy.field.node.predicate_node_id.description":
+    "참·거짓을 내는 노드입니다.",
+  "strategy.field.node.true_node_id": "참일 때 값",
+  "strategy.field.node.true_node_id.description":
+    "조건이 참인 종목에 쓸 값입니다.",
+  "strategy.field.node.false_node_id": "거짓일 때 값",
+  "strategy.field.node.false_node_id.description":
+    "조건이 거짓인 종목에 쓸 값입니다.",
+  "strategy.field.node.factor_id": "팩터 이름",
+  "strategy.field.node.factor_id.description": "값을 가져올 저장된 팩터입니다.",
+  "strategy.field.node.subgraph_id": "부분 그래프 이름",
+  "strategy.field.node.subgraph_id.description":
+    "값을 가져올 저장된 그래프 조각입니다.",
+  "strategy.type.factor_graph": "팩터 계산 그래프",
+  "strategy.type.factor_graph.description":
+    "노드를 이어 팩터 값을 만드는 계산식입니다.",
+  "strategy.field.factor_graph.nodes": "노드 목록",
+  "strategy.field.factor_graph.nodes.description":
+    "이 팩터가 쓰는 계산 노드 전부입니다.",
+  "strategy.field.factor_graph.output_node_id": "출력 노드",
+  "strategy.field.factor_graph.output_node_id.description":
+    "팩터 값으로 쓸 마지막 노드입니다.",
+  "strategy.field.factor_graph.missing_policy": "결측 처리",
+  "strategy.field.factor_graph.missing_policy.description":
+    "값이 없는 종목을 어떻게 다룰지 정합니다.",
+  "strategy.type.factor_signal": "알파 팩터",
+  "strategy.type.factor_signal.description":
+    "종목 점수 하나와 그 가중치입니다.",
+  "strategy.field.factor_signal.factor_id": "팩터 이름",
+  "strategy.field.factor_signal.factor_id.description":
+    "이 팩터를 가리키는 이름입니다.",
+  "strategy.field.factor_signal.label": "표시 이름",
+  "strategy.field.factor_signal.label.description":
+    "화면에 보일 이름입니다. 비우면 팩터 이름을 씁니다.",
+  "strategy.field.factor_signal.direction": "선호 방향",
+  "strategy.field.factor_signal.direction.description":
+    "값이 클수록 좋은지 작을수록 좋은지 정합니다.",
+  "strategy.field.factor_signal.weight": "가중치",
+  "strategy.field.factor_signal.weight.description":
+    "여러 팩터를 합칠 때 이 팩터가 갖는 비중입니다.",
+  "strategy.field.factor_signal.graph": "계산 그래프",
+  "strategy.field.factor_signal.graph.description":
+    "이 팩터 값을 만드는 계산식입니다.",
+  "strategy.type.signal_step": "신호 결합",
+  "strategy.type.signal_step.description":
+    "팩터 점수를 합친 뒤 후보를 남기는 기준입니다.",
+  "strategy.field.signal_step.score_threshold": "점수 하한",
+  "strategy.field.signal_step.score_threshold.description":
+    "이 점수보다 낮은 종목은 후보에서 뺍니다.",
+  "strategy.field.signal_step.regime_field_id": "레짐 필드",
+  "strategy.field.signal_step.regime_field_id.description":
+    "시장 국면을 판정할 데이터 필드입니다.",
+  "strategy.field.signal_step.regime_minimum": "레짐 하한",
+  "strategy.field.signal_step.regime_minimum.description":
+    "이 값보다 낮으면 신규 매수를 멈춥니다.",
+  "strategy.type.portfolio_step": "포트폴리오 구성",
+  "strategy.type.portfolio_step.description":
+    "후보에서 담을 종목과 비중·리밸런싱을 정합니다.",
+  "strategy.field.portfolio_step.side": "매매 방향",
+  "strategy.field.portfolio_step.side.description":
+    "매수만 할지 매수·매도를 함께 할지 정합니다.",
+  "strategy.field.portfolio_step.weighting": "비중 산정",
+  "strategy.field.portfolio_step.weighting.description":
+    "선택한 종목에 비중을 주는 방법입니다.",
+  "strategy.field.portfolio_step.rebalance": "리밸런싱 주기",
+  "strategy.field.portfolio_step.rebalance.description":
+    "목표 비중을 다시 맞추는 간격입니다.",
+  "strategy.field.portfolio_step.selection_method": "선택 방식",
+  "strategy.field.portfolio_step.selection_method.description":
+    "상위 개수로 고를지 상위 비율로 고를지 정합니다.",
+  "strategy.field.portfolio_step.liquidity_field_id": "유동성 필드",
+  "strategy.field.portfolio_step.liquidity_field_id.description":
+    "거래 가능성을 판정할 데이터 필드입니다.",
+  "strategy.type.risk_step": "리스크 제약",
+  "strategy.type.risk_step.description": "익스포저와 비중 한도입니다.",
+  "strategy.field.risk_step.net_exposure": "순 익스포저",
+  "strategy.field.risk_step.net_exposure.description":
+    "매수에서 매도를 뺀 목표 비중 합입니다.",
+  "strategy.field.risk_step.sector_neutral": "섹터 중립",
+  "strategy.field.risk_step.sector_neutral.description":
+    "섹터별 비중을 중립으로 맞출지 정합니다.",
+  "strategy.field.risk_step.risk_field_id": "위험 필드",
+  "strategy.field.risk_step.risk_field_id.description":
+    "위험 가중에 쓸 데이터 필드입니다.",
+  "strategy.type.execution_step": "체결 가정",
+  "strategy.type.execution_step.description": "주문 시점과 비용 가정입니다.",
+  "strategy.field.execution_step.timing": "주문 시점",
+  "strategy.field.execution_step.timing.description":
+    "신호가 난 뒤 언제 체결한다고 볼지 정합니다.",
+  "strategy.parameter.float": "실수 파라미터",
+  "strategy.parameter.float.description":
+    "소수 범위에서 값을 찾는 파라미터입니다.",
+  "strategy.field.parameter.kind": "파라미터 종류",
+  "strategy.field.parameter.kind.description":
+    "값이 실수인지 정수인지 선택지인지 정합니다.",
+  "strategy.field.parameter.parameter_id": "파라미터 이름",
+  "strategy.field.parameter.parameter_id.description":
+    "그래프에서 이 값을 가리키는 이름입니다.",
+  "strategy.field.parameter.default": "기본값",
+  "strategy.field.parameter.default.description":
+    "탐색하지 않을 때 쓰는 값입니다.",
+  "strategy.field.parameter.minimum": "최솟값",
+  "strategy.field.parameter.minimum.description": "탐색 범위의 아래 끝입니다.",
+  "strategy.field.parameter.maximum": "최댓값",
+  "strategy.field.parameter.maximum.description": "탐색 범위의 위 끝입니다.",
+  "strategy.field.parameter.step": "탐색 간격",
+  "strategy.field.parameter.step.description":
+    "탐색할 때 값을 움직이는 폭입니다.",
+  "strategy.parameter.integer": "정수 파라미터",
+  "strategy.parameter.integer.description":
+    "정수 범위에서 값을 찾는 파라미터입니다.",
+  "strategy.parameter.choice": "선택지 파라미터",
+  "strategy.parameter.choice.description":
+    "정해진 후보 중 하나를 고르는 파라미터입니다.",
+  "strategy.field.parameter.choices": "선택지",
+  "strategy.field.parameter.choices.description":
+    "탐색이 고를 수 있는 값 목록입니다.",
+  "strategy.contract.portfolio.selection_count.description":
+    "점수 상위에서 롱으로 담을 종목 수입니다.",
+  "strategy.contract.portfolio.short_selection_count.description":
+    "점수 하위에서 숏으로 담을 종목 수입니다.",
+  "strategy.contract.portfolio.selection_percentile.description":
+    "개수 대신 비율로 고를 때 쓰는 꼬리 비율입니다.",
+  "strategy.contract.portfolio.rebalance_every_n_sessions.description":
+    "세션 수로 리밸런싱할 때의 간격입니다.",
+  "strategy.contract.portfolio.turnover_buffer_count.description":
+    "경계에 걸친 종목을 바로 교체하지 않도록 두는 여유 종목 수입니다.",
+  "strategy.contract.portfolio.minimum_trade_weight.description":
+    "이보다 작은 비중 변화는 주문을 만들지 않습니다.",
+  "strategy.contract.portfolio.minimum_liquidity.description":
+    "유동성 필드 값이 이보다 낮은 종목은 후보에서 뺍니다.",
+  "strategy.contract.risk.gross_exposure.description":
+    "롱과 숏 비중의 절댓값 합 목표입니다.",
+  "strategy.contract.risk.max_name_weight.description":
+    "종목 하나가 가질 수 있는 최대 목표 비중입니다.",
+  "strategy.contract.risk.max_sector_weight.description":
+    "섹터 하나가 가질 수 있는 최대 목표 비중입니다.",
+  "strategy.contract.execution.participation_rate.description":
+    "같은 세션 거래량 대비 주문이 차지할 수 있는 최대 비율입니다.",
+  "strategy.contract.execution.fee_bps.description":
+    "체결 금액에 bp 단위로 붙는 수수료 가정입니다.",
+  "strategy.contract.execution.slippage_bps.description":
+    "체결 가격이 기준가에서 밀린다고 보는 bp 폭입니다.",
+  "strategy.operator.unary.negate": "부호 뒤집기",
+  "strategy.operator.unary.negate.description":
+    "값의 부호를 뒤집습니다. 작을수록 좋은 지표를 클수록 좋게 바꿀 때 씁니다.",
+  "strategy.operator.unary.negate.formula": "-x",
+  "strategy.operator.unary.lag": "며칠 전 값",
+  "strategy.operator.unary.lag.description":
+    "같은 종목의 미루는 세션(periods)만큼 이전 값을 씁니다.",
+  "strategy.operator.unary.lag.formula": "x[t - periods]",
+  "strategy.operator.binary.add": "더하기",
+  "strategy.operator.binary.add.description": "두 값을 더합니다.",
+  "strategy.operator.binary.add.formula": "left + right",
+  "strategy.operator.binary.subtract": "빼기",
+  "strategy.operator.binary.subtract.description": "왼쪽에서 오른쪽을 뺍니다.",
+  "strategy.operator.binary.subtract.formula": "left - right",
+  "strategy.operator.binary.multiply": "곱하기",
+  "strategy.operator.binary.multiply.description": "두 값을 곱합니다.",
+  "strategy.operator.binary.multiply.formula": "left × right",
+  "strategy.operator.binary.divide": "나누기",
+  "strategy.operator.binary.divide.description": "왼쪽을 오른쪽으로 나눕니다.",
+  "strategy.operator.binary.divide.formula": "left ÷ right",
+  "strategy.operator.time_series.mean": "기간 평균",
+  "strategy.operator.time_series.mean.description":
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 평균입니다. 이동평균이 이것입니다.",
+  "strategy.operator.time_series.mean.formula":
+    "mean(x[t-lag-window+1 … t-lag])",
+  "strategy.operator.time_series.std": "기간 표준편차",
+  "strategy.operator.time_series.std.description":
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)이 얼마나 출렁였는지 봅니다.",
+  "strategy.operator.time_series.std.formula":
+    "stdev(x[t-lag-window+1 … t-lag])",
+  "strategy.operator.time_series.momentum": "기간 수익률",
+  "strategy.operator.time_series.momentum.description":
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 첫 값 대비 마지막 값 변화율입니다. 집계 기간 252, 건너뛰는 세션 21이 12-1 모멘텀입니다.",
+  "strategy.operator.time_series.momentum.formula":
+    "x[t-lag] / x[t-lag-window+1] - 1",
+  "strategy.operator.time_series.delta": "기간 변화량",
+  "strategy.operator.time_series.delta.description":
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 첫 값과 마지막 값 차이입니다.",
+  "strategy.operator.time_series.delta.formula":
+    "x[t-lag] - x[t-lag-window+1]",
+  "strategy.operator.time_series.min": "기간 최솟값",
+  "strategy.operator.time_series.min.description":
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)에서 가장 작은 값입니다.",
+  "strategy.operator.time_series.min.formula":
+    "min(x[t-lag-window+1 … t-lag])",
+  "strategy.operator.time_series.max": "기간 최댓값",
+  "strategy.operator.time_series.max.description":
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)에서 가장 큰 값입니다.",
+  "strategy.operator.time_series.max.formula":
+    "max(x[t-lag-window+1 … t-lag])",
+  "strategy.operator.cross_sectional.rank": "순위",
+  "strategy.operator.cross_sectional.rank.description":
+    "같은 날 다른 종목과 견준 0~1 순위로 바꿉니다.",
+  "strategy.operator.cross_sectional.rank.formula":
+    "(순위 - 1) / (종목 수 - 1)",
+  "strategy.operator.cross_sectional.zscore": "표준화",
+  "strategy.operator.cross_sectional.zscore.description":
+    "같은 날 평균을 빼고 표준편차로 나눕니다.",
+  "strategy.operator.cross_sectional.zscore.formula": "(x - 평균) / 표준편차",
+  "strategy.operator.cross_sectional.winsorize": "양끝 자르기",
+  "strategy.operator.cross_sectional.winsorize.description":
+    "같은 날 위아래 극단값을 분위 값으로 눌러 줍니다.",
+  "strategy.operator.cross_sectional.winsorize.formula":
+    "clip(x, lower_quantile, upper_quantile)",
+  "strategy.operator.cross_sectional.demean": "평균 빼기",
+  "strategy.operator.cross_sectional.demean.description":
+    "같은 날 유니버스 평균을 뺍니다.",
+  "strategy.operator.cross_sectional.demean.formula": "x - 평균",
+  "strategy.operator.group.neutralize": "그룹 평균 빼기",
+  "strategy.operator.group.neutralize.description":
+    "같은 날 같은 그룹의 평균을 뺍니다. 섹터 효과를 걷어낼 때 씁니다.",
+  "strategy.operator.group.neutralize.formula":
+    "x - group_field_id별 평균",
+  "strategy.operator.group.rank": "그룹 안 순위",
+  "strategy.operator.group.rank.description":
+    "같은 날 같은 그룹 안에서 매긴 0~1 순위입니다.",
+  "strategy.operator.group.rank.formula":
+    "(group_field_id별 순위 - 1) / (그룹 종목 수 - 1)",
+  "strategy.operator.comparison.gt": "초과",
+  "strategy.operator.comparison.gt.description":
+    "왼쪽이 오른쪽보다 크면 참입니다.",
+  "strategy.operator.comparison.gt.formula": "left > right",
+  "strategy.operator.comparison.gte": "이상",
+  "strategy.operator.comparison.gte.description":
+    "왼쪽이 오른쪽보다 크거나 같으면 참입니다.",
+  "strategy.operator.comparison.gte.formula": "left ≥ right",
+  "strategy.operator.comparison.lt": "미만",
+  "strategy.operator.comparison.lt.description":
+    "왼쪽이 오른쪽보다 작으면 참입니다.",
+  "strategy.operator.comparison.lt.formula": "left < right",
+  "strategy.operator.comparison.lte": "이하",
+  "strategy.operator.comparison.lte.description":
+    "왼쪽이 오른쪽보다 작거나 같으면 참입니다.",
+  "strategy.operator.comparison.lte.formula": "left ≤ right",
+  "strategy.operator.comparison.eq": "같음",
+  "strategy.operator.comparison.eq.description": "두 값이 같으면 참입니다.",
+  "strategy.operator.comparison.eq.formula": "left = right",
   "ide.debugger.tab.preview": "값 미리보기",
   "ide.debugger.tab.exposure": "노출",
   "ide.debugger.tab.orders": "주문 예상",
@@ -884,6 +1295,12 @@ const ko = {
   "form.list.empty": "항목이 없습니다",
   "form.list.blocked":
     "다른 곳이 참조하고 있어 삭제하지 않았습니다: {pointers}",
+  "form.list.addNoSchema":
+    "runtime schema를 아직 받지 못해 항목을 추가할 수 없습니다",
+  "form.list.addBlocked":
+    "이 목록의 항목 스키마를 runtime schema에서 따라갈 수 없어 추가할 수 없습니다",
+  "form.list.addSettling":
+    "직전 편집이 문서에 반영되는 중입니다 — 잠시 후 다시 추가하세요",
   "form.list.branchNeeded": "kind를 먼저 정하세요({kinds})",
   "form.list.presetExists": "이미 있음",
   "form.field.openGraph": "Graph에서 열기",
@@ -1397,6 +1814,11 @@ export const messages = {
     "shell.expandNav": "Expand menu",
     "ide.breadcrumb": "Breadcrumb",
     "ide.runBacktest": "Run backtest",
+    "ide.history": "Undo and redo",
+    "ide.undo": "Undo",
+    "ide.redo": "Redo",
+    "ide.undo.empty": "Nothing to undo",
+    "ide.redo.empty": "Nothing to redo",
     "command.open": "Commands",
     "command.palette": "Strategy command palette",
     "command.search": "Search commands and document paths",
@@ -1479,11 +1901,31 @@ export const messages = {
     "graph.editTitle": "Edit graph",
     "graph.editable": "Editable",
     "graph.nodesTitle": "Nodes",
-    "graph.nodeKind": "Node kind",
-    "graph.addNode": "Add node",
+    "graph.palette.label": "Operator palette",
+    "graph.palette.search": "Search operators",
+    "graph.palette.searchPlaceholder": "Search by name, description or formula",
+    "graph.palette.empty": "No operator matches this search",
+    "graph.palette.addNode": "Add a {operator} node",
+    "graph.palette.arity": "{count} inputs",
+    "graph.palette.params": "settings {params}",
+    "graph.palette.unsupportedBadge": "Unsupported",
+    "graph.palette.unsupported":
+      "No connected data adapter can compute this operator yet. The document accepts it, but a run is blocked",
+    "graph.palette.catalogLoading":
+      "Loading the operator catalog — only node kinds are listed for now",
+    "graph.palette.catalogUnavailable":
+      "The operator catalog could not be loaded — only node kinds are listed; choose the operator in the node properties",
+    "graph.palette.locked": "Cannot add a node: {reason}",
+    "graph.palette.settling":
+      "The previous edit is still being applied — try adding again in a moment",
+    "graph.addFailed.unknown-kind":
+      "{entry}: this node kind is not in the runtime schema, so nothing was added",
+    "graph.addFailed.unsupported-schema":
+      "{entry}: default values could not be built from this node schema (recursive or oversized), so nothing was added",
     "graph.editNode": "Edit node: {node}",
     "graph.removeNode": "Remove",
-    "graph.removeBlocked": "{node} is still referenced, so it was not removed: {pointers}",
+    "graph.removeBlocked": "{node} is still referenced, so it was not removed: {nodes}",
+    "graph.outputReference": "Graph output",
     "graph.settingsTitle": "Graph settings",
     "graph.selectedNode": "Selected node",
     "graph.noSelection": "Select a node to edit its properties",
@@ -1535,6 +1977,7 @@ export const messages = {
     "contract.format": "Format",
     "contract.description": "Description",
     "contract.descriptionKey": "Description key",
+    "contract.noDescription": "No description",
     "contract.discriminator": "Discriminator",
     "contract.variants": "Branches",
     "contract.selectedBranch": "Active branch",
@@ -1630,6 +2073,408 @@ export const messages = {
       "Fee assumption applied to notional traded",
     "strategy.contract.execution.slippage_bps":
       "Execution price slippage assumption",
+    // -- 화면 어휘 (P1-03, spec D8) -------------------------------------------------
+    // backend가 발행한 설명 키는 stem이다: `<stem>`은 이름(라벨), `<stem>.description`은
+    // 한 줄 설명. 연산자는 `<stem>.formula`로 계산식을 더한다. 목록 자체는 runtime schema의
+    // `x-description-key`와 연산자 카탈로그가 소유하며 여기 손으로 복제하지 않는다 —
+    // `screen-vocabulary.test.ts`가 fixture를 순회해 누락 키를 잡는다.
+    "strategy.document": "Strategy document",
+    "strategy.document.description":
+      "One strategy definition: universe, factors, portfolio, risk and execution.",
+    "strategy.section.schema_version": "Document version",
+    "strategy.section.schema_version.description":
+      "The authoring schema version this document follows.",
+    "strategy.section.title": "Strategy name",
+    "strategy.section.title.description":
+      "The name shown in the strategy list and revision screens.",
+    "strategy.section.description": "Strategy description",
+    "strategy.section.description.description":
+      "Free text describing what this strategy is after.",
+    "strategy.section.data": "Data",
+    "strategy.section.data.description":
+      "Which market, period and universe the run reads.",
+    "strategy.section.eligibility": "Eligibility",
+    "strategy.section.eligibility.description":
+      "Conditions that drop names from the universe before factors are computed.",
+    "strategy.section.factors": "Alpha factors",
+    "strategy.section.factors.description":
+      "The factors that score each name, with their weights.",
+    "strategy.section.signal": "Signal",
+    "strategy.section.signal.description":
+      "How the combined score decides which names stay as candidates.",
+    "strategy.section.portfolio": "Portfolio",
+    "strategy.section.portfolio.description":
+      "How many names to hold, at what weights, and how often to rebalance.",
+    "strategy.section.risk": "Risk",
+    "strategy.section.risk.description":
+      "Exposure limits and per-name / per-sector weight caps.",
+    "strategy.section.execution": "Execution",
+    "strategy.section.execution.description":
+      "Order timing plus participation, fee and slippage assumptions.",
+    "strategy.section.parameters": "Search parameters",
+    "strategy.section.parameters.description":
+      "Parameters an optimisation sweeps over.",
+    "strategy.type.data_step": "Data window",
+    "strategy.type.data_step.description":
+      "Market, frequency, period and universe in one block.",
+    "strategy.field.data_step.market": "Market",
+    "strategy.field.data_step.market.description":
+      "The exchange prices are read from.",
+    "strategy.field.data_step.start": "Start date",
+    "strategy.field.data_step.start.description":
+      "First day the backtest reads.",
+    "strategy.field.data_step.end": "End date",
+    "strategy.field.data_step.end.description": "Last day the backtest reads.",
+    "strategy.field.data_step.universe_id": "Universe",
+    "strategy.field.data_step.universe_id.description":
+      "Identifier of the candidate security set.",
+    "strategy.field.data_step.frequency": "Frequency",
+    "strategy.field.data_step.frequency.description":
+      "Interval at which observations are read.",
+    "strategy.type.eligibility_rule": "Eligibility rule",
+    "strategy.type.eligibility_rule.description":
+      "One condition comparing a data field against a threshold.",
+    "strategy.field.eligibility_rule.field_id": "Data field",
+    "strategy.field.eligibility_rule.field_id.description":
+      "The source field being compared.",
+    "strategy.field.eligibility_rule.operator": "Comparison",
+    "strategy.field.eligibility_rule.operator.description":
+      "How the field value is compared with the threshold.",
+    "strategy.field.eligibility_rule.value": "Threshold",
+    "strategy.field.eligibility_rule.value.description":
+      "The number used in the comparison.",
+    "strategy.type.eligibility_step": "Eligibility step",
+    "strategy.type.eligibility_step.description":
+      "The rules that narrow the universe before factors run.",
+    "strategy.field.eligibility_step.rules": "Rules",
+    "strategy.field.eligibility_step.rules.description":
+      "Only names satisfying every rule survive.",
+    "strategy.node.field": "Data field",
+    "strategy.node.field.description":
+      "Brings one source data field into the graph.",
+    "strategy.node.constant": "Constant",
+    "strategy.node.constant.description": "Emits one fixed number.",
+    "strategy.node.parameter": "Parameter",
+    "strategy.node.parameter.description":
+      "Brings a search parameter value into the graph.",
+    "strategy.node.unary": "Unary transform",
+    "strategy.node.unary.description": "Transforms a single input in place.",
+    "strategy.node.binary": "Arithmetic",
+    "strategy.node.binary.description":
+      "Combines two inputs with an arithmetic operator.",
+    "strategy.node.time_series": "Time-series window",
+    "strategy.node.time_series.description":
+      "Aggregates a past window of the same security into one value.",
+    "strategy.node.cross_sectional": "Cross-section",
+    "strategy.node.cross_sectional.description":
+      "Rewrites the value against the other names on the same day.",
+    "strategy.node.group": "Group transform",
+    "strategy.node.group.description":
+      "Compares only within the same group on the same day.",
+    "strategy.node.comparison": "Comparison",
+    "strategy.node.comparison.description":
+      "Compares two values and yields true or false.",
+    "strategy.node.conditional": "Conditional",
+    "strategy.node.conditional.description":
+      "Yields one value when the condition holds and another when it does not.",
+    "strategy.node.saved_factor": "Saved factor",
+    "strategy.node.saved_factor.description":
+      "Brings in the value of an already saved factor.",
+    "strategy.node.saved_subgraph": "Saved subgraph",
+    "strategy.node.saved_subgraph.description":
+      "Brings in an already saved fragment of a graph.",
+    "strategy.field.node.kind": "Node kind",
+    "strategy.field.node.kind.description": "What kind of node this is.",
+    "strategy.field.node.node_id": "Node name",
+    "strategy.field.node.node_id.description":
+      "The name other nodes use to refer to this one.",
+    "strategy.field.node.field_id": "Data field",
+    "strategy.field.node.field_id.description":
+      "The source field the value is read from.",
+    "strategy.field.node.value": "Value",
+    "strategy.field.node.value.description":
+      "The fixed number this node emits.",
+    "strategy.field.node.parameter_id": "Parameter name",
+    "strategy.field.node.parameter_id.description":
+      "The search parameter the value comes from.",
+    "strategy.field.node.operator": "Operator",
+    "strategy.field.node.operator.description":
+      "The operation this node performs.",
+    "strategy.field.node.input_node_id": "Input node",
+    "strategy.field.node.input_node_id.description":
+      "The node this one reads its value from.",
+    "strategy.field.node.periods": "Lag periods",
+    "strategy.field.node.periods.description":
+      "How many sessions back the value is taken from.",
+    "strategy.field.node.left_node_id": "Left node",
+    "strategy.field.node.left_node_id.description": "The left-hand operand.",
+    "strategy.field.node.right_node_id": "Right node",
+    "strategy.field.node.right_node_id.description": "The right-hand operand.",
+    "strategy.field.node.window": "Window",
+    "strategy.field.node.window.description":
+      "Number of sessions the aggregate covers, counted from where lag ends it.",
+    "strategy.field.node.lag": "Window lag",
+    "strategy.field.node.lag.description":
+      "Pushes the end of the window back by this many sessions: t-lag-window+1 through t-lag.",
+    "strategy.field.node.lower_quantile": "Lower quantile",
+    "strategy.field.node.lower_quantile.description":
+      "Values below this quantile are raised to it.",
+    "strategy.field.node.upper_quantile": "Upper quantile",
+    "strategy.field.node.upper_quantile.description":
+      "Values above this quantile are lowered to it.",
+    "strategy.field.node.group_field_id": "Group field",
+    "strategy.field.node.group_field_id.description":
+      "The data field that buckets securities into groups.",
+    "strategy.field.node.predicate_node_id": "Condition node",
+    "strategy.field.node.predicate_node_id.description":
+      "The node that yields true or false.",
+    "strategy.field.node.true_node_id": "Value when true",
+    "strategy.field.node.true_node_id.description":
+      "The value used where the condition holds.",
+    "strategy.field.node.false_node_id": "Value when false",
+    "strategy.field.node.false_node_id.description":
+      "The value used where the condition does not hold.",
+    "strategy.field.node.factor_id": "Factor name",
+    "strategy.field.node.factor_id.description":
+      "The saved factor the value comes from.",
+    "strategy.field.node.subgraph_id": "Subgraph name",
+    "strategy.field.node.subgraph_id.description":
+      "The saved graph fragment the value comes from.",
+    "strategy.type.factor_graph": "Factor graph",
+    "strategy.type.factor_graph.description":
+      "The wired nodes that produce the factor value.",
+    "strategy.field.factor_graph.nodes": "Nodes",
+    "strategy.field.factor_graph.nodes.description":
+      "Every node this factor computes with.",
+    "strategy.field.factor_graph.output_node_id": "Output node",
+    "strategy.field.factor_graph.output_node_id.description":
+      "The node whose value becomes the factor.",
+    "strategy.field.factor_graph.missing_policy": "Missing policy",
+    "strategy.field.factor_graph.missing_policy.description":
+      "What happens to names with no value.",
+    "strategy.type.factor_signal": "Alpha factor",
+    "strategy.type.factor_signal.description":
+      "One scoring factor and its weight.",
+    "strategy.field.factor_signal.factor_id": "Factor name",
+    "strategy.field.factor_signal.factor_id.description":
+      "The name that identifies this factor.",
+    "strategy.field.factor_signal.label": "Label",
+    "strategy.field.factor_signal.label.description":
+      "Name shown on screen; falls back to the factor name.",
+    "strategy.field.factor_signal.direction": "Direction",
+    "strategy.field.factor_signal.direction.description":
+      "Whether a higher or a lower value is preferred.",
+    "strategy.field.factor_signal.weight": "Weight",
+    "strategy.field.factor_signal.weight.description":
+      "This factor's share when scores are combined.",
+    "strategy.field.factor_signal.graph": "Graph",
+    "strategy.field.factor_signal.graph.description":
+      "The calculation that produces this factor.",
+    "strategy.type.signal_step": "Signal step",
+    "strategy.type.signal_step.description":
+      "What the combined score has to clear to stay a candidate.",
+    "strategy.field.signal_step.score_threshold": "Score floor",
+    "strategy.field.signal_step.score_threshold.description":
+      "Names scoring below this are dropped.",
+    "strategy.field.signal_step.regime_field_id": "Regime field",
+    "strategy.field.signal_step.regime_field_id.description":
+      "The data field that decides the market regime.",
+    "strategy.field.signal_step.regime_minimum": "Regime floor",
+    "strategy.field.signal_step.regime_minimum.description":
+      "Below this value no new buys are made.",
+    "strategy.type.portfolio_step": "Portfolio step",
+    "strategy.type.portfolio_step.description":
+      "Which candidates are held, at what weight, and how often.",
+    "strategy.field.portfolio_step.side": "Side",
+    "strategy.field.portfolio_step.side.description":
+      "Long only, or long and short.",
+    "strategy.field.portfolio_step.weighting": "Weighting",
+    "strategy.field.portfolio_step.weighting.description":
+      "How weight is assigned to the selected names.",
+    "strategy.field.portfolio_step.rebalance": "Rebalance",
+    "strategy.field.portfolio_step.rebalance.description":
+      "How often target weights are reset.",
+    "strategy.field.portfolio_step.selection_method": "Selection method",
+    "strategy.field.portfolio_step.selection_method.description":
+      "Select by top count or by top fraction.",
+    "strategy.field.portfolio_step.liquidity_field_id": "Liquidity field",
+    "strategy.field.portfolio_step.liquidity_field_id.description":
+      "The data field used to judge tradability.",
+    "strategy.type.risk_step": "Risk step",
+    "strategy.type.risk_step.description": "Exposure and weight limits.",
+    "strategy.field.risk_step.net_exposure": "Net exposure",
+    "strategy.field.risk_step.net_exposure.description":
+      "Long target weight minus short target weight.",
+    "strategy.field.risk_step.sector_neutral": "Sector neutral",
+    "strategy.field.risk_step.sector_neutral.description":
+      "Whether sector weights are held neutral.",
+    "strategy.field.risk_step.risk_field_id": "Risk field",
+    "strategy.field.risk_step.risk_field_id.description":
+      "The data field used for risk weighting.",
+    "strategy.type.execution_step": "Execution step",
+    "strategy.type.execution_step.description":
+      "Order timing and cost assumptions.",
+    "strategy.field.execution_step.timing": "Timing",
+    "strategy.field.execution_step.timing.description":
+      "When a signal is assumed to be filled.",
+    "strategy.parameter.float": "Float parameter",
+    "strategy.parameter.float.description":
+      "A parameter searched over a real-valued range.",
+    "strategy.field.parameter.kind": "Parameter kind",
+    "strategy.field.parameter.kind.description":
+      "Real, integer, or a fixed set of choices.",
+    "strategy.field.parameter.parameter_id": "Parameter name",
+    "strategy.field.parameter.parameter_id.description":
+      "The name graph nodes refer to this value by.",
+    "strategy.field.parameter.default": "Default",
+    "strategy.field.parameter.default.description":
+      "Value used when nothing is searched.",
+    "strategy.field.parameter.minimum": "Minimum",
+    "strategy.field.parameter.minimum.description":
+      "Lower end of the search range.",
+    "strategy.field.parameter.maximum": "Maximum",
+    "strategy.field.parameter.maximum.description":
+      "Upper end of the search range.",
+    "strategy.field.parameter.step": "Step",
+    "strategy.field.parameter.step.description":
+      "Increment the search moves the value by.",
+    "strategy.parameter.integer": "Integer parameter",
+    "strategy.parameter.integer.description":
+      "A parameter searched over an integer range.",
+    "strategy.parameter.choice": "Choice parameter",
+    "strategy.parameter.choice.description":
+      "A parameter picked from a fixed list.",
+    "strategy.field.parameter.choices": "Choices",
+    "strategy.field.parameter.choices.description":
+      "The values the search may pick from.",
+    "strategy.contract.portfolio.selection_count.description":
+      "How many top-scoring names are held long.",
+    "strategy.contract.portfolio.short_selection_count.description":
+      "How many bottom-scoring names are held short.",
+    "strategy.contract.portfolio.selection_percentile.description":
+      "Tail fraction used when selecting by percentile instead of count.",
+    "strategy.contract.portfolio.rebalance_every_n_sessions.description":
+      "Interval used when rebalancing every N sessions.",
+    "strategy.contract.portfolio.turnover_buffer_count.description":
+      "Slack in names that keeps borderline holdings from being swapped at once.",
+    "strategy.contract.portfolio.minimum_trade_weight.description":
+      "Weight changes smaller than this produce no order.",
+    "strategy.contract.portfolio.minimum_liquidity.description":
+      "Candidates whose liquidity field falls below this are dropped.",
+    "strategy.contract.risk.gross_exposure.description":
+      "Target sum of absolute long and short weights.",
+    "strategy.contract.risk.max_name_weight.description":
+      "Largest target weight a single name may take.",
+    "strategy.contract.risk.max_sector_weight.description":
+      "Largest target weight a single sector may take.",
+    "strategy.contract.execution.participation_rate.description":
+      "Largest share of the session's volume an order may take.",
+    "strategy.contract.execution.fee_bps.description":
+      "Fee in basis points charged on notional traded.",
+    "strategy.contract.execution.slippage_bps.description":
+      "Basis points the fill price is assumed to move against the order.",
+    "strategy.operator.unary.negate": "Negate",
+    "strategy.operator.unary.negate.description":
+      "Flips the sign, turning a lower-is-better measure into a higher-is-better one.",
+    "strategy.operator.unary.negate.formula": "-x",
+    "strategy.operator.unary.lag": "Lag",
+    "strategy.operator.unary.lag.description":
+      "Takes the value of the same security periods sessions ago.",
+    "strategy.operator.unary.lag.formula": "x[t - periods]",
+    "strategy.operator.binary.add": "Add",
+    "strategy.operator.binary.add.description": "Adds the two inputs.",
+    "strategy.operator.binary.add.formula": "left + right",
+    "strategy.operator.binary.subtract": "Subtract",
+    "strategy.operator.binary.subtract.description":
+      "Subtracts the right input from the left.",
+    "strategy.operator.binary.subtract.formula": "left - right",
+    "strategy.operator.binary.multiply": "Multiply",
+    "strategy.operator.binary.multiply.description":
+      "Multiplies the two inputs.",
+    "strategy.operator.binary.multiply.formula": "left × right",
+    "strategy.operator.binary.divide": "Divide",
+    "strategy.operator.binary.divide.description":
+      "Divides the left input by the right.",
+    "strategy.operator.binary.divide.formula": "left ÷ right",
+    "strategy.operator.time_series.mean": "Mean",
+    "strategy.operator.time_series.mean.description":
+      "Average over the window sessions ending lag sessions back; this is the moving average.",
+    "strategy.operator.time_series.mean.formula":
+      "mean(x[t-lag-window+1 … t-lag])",
+    "strategy.operator.time_series.std": "Standard deviation",
+    "strategy.operator.time_series.std.description":
+      "How much the value moved over the window sessions ending lag sessions back.",
+    "strategy.operator.time_series.std.formula":
+      "stdev(x[t-lag-window+1 … t-lag])",
+    "strategy.operator.time_series.momentum": "Momentum",
+    "strategy.operator.time_series.momentum.description":
+      "Change across the window sessions ending lag sessions back; window 252 with lag 21 is 12-1 momentum.",
+    "strategy.operator.time_series.momentum.formula":
+      "x[t-lag] / x[t-lag-window+1] - 1",
+    "strategy.operator.time_series.delta": "Delta",
+    "strategy.operator.time_series.delta.description":
+      "Difference across the window sessions ending lag sessions back.",
+    "strategy.operator.time_series.delta.formula":
+      "x[t-lag] - x[t-lag-window+1]",
+    "strategy.operator.time_series.min": "Minimum",
+    "strategy.operator.time_series.min.description":
+      "Smallest value in the window sessions ending lag sessions back.",
+    "strategy.operator.time_series.min.formula":
+      "min(x[t-lag-window+1 … t-lag])",
+    "strategy.operator.time_series.max": "Maximum",
+    "strategy.operator.time_series.max.description":
+      "Largest value in the window sessions ending lag sessions back.",
+    "strategy.operator.time_series.max.formula":
+      "max(x[t-lag-window+1 … t-lag])",
+    "strategy.operator.cross_sectional.rank": "Rank",
+    "strategy.operator.cross_sectional.rank.description":
+      "Replaces the value with a 0-1 rank against the other names that day.",
+    "strategy.operator.cross_sectional.rank.formula":
+      "(rank - 1) / (count - 1)",
+    "strategy.operator.cross_sectional.zscore": "Z-score",
+    "strategy.operator.cross_sectional.zscore.description":
+      "Subtracts that day's mean and divides by its standard deviation.",
+    "strategy.operator.cross_sectional.zscore.formula":
+      "(x - mean) / stdev",
+    "strategy.operator.cross_sectional.winsorize": "Winsorise",
+    "strategy.operator.cross_sectional.winsorize.description":
+      "Clips that day's extremes back to the chosen quantiles.",
+    "strategy.operator.cross_sectional.winsorize.formula":
+      "clip(x, lower_quantile, upper_quantile)",
+    "strategy.operator.cross_sectional.demean": "Demean",
+    "strategy.operator.cross_sectional.demean.description":
+      "Subtracts that day's universe mean.",
+    "strategy.operator.cross_sectional.demean.formula": "x - mean",
+    "strategy.operator.group.neutralize": "Group neutralise",
+    "strategy.operator.group.neutralize.description":
+      "Subtracts the group mean of that day, stripping the sector effect.",
+    "strategy.operator.group.neutralize.formula":
+      "x - mean per group_field_id",
+    "strategy.operator.group.rank": "Group rank",
+    "strategy.operator.group.rank.description":
+      "A 0-1 rank taken within the group on that day.",
+    "strategy.operator.group.rank.formula":
+      "(rank within group_field_id - 1) / (group count - 1)",
+    "strategy.operator.comparison.gt": "Greater than",
+    "strategy.operator.comparison.gt.description":
+      "True where the left input exceeds the right.",
+    "strategy.operator.comparison.gt.formula": "left > right",
+    "strategy.operator.comparison.gte": "Greater than or equal",
+    "strategy.operator.comparison.gte.description":
+      "True where the left input is at least the right.",
+    "strategy.operator.comparison.gte.formula": "left ≥ right",
+    "strategy.operator.comparison.lt": "Less than",
+    "strategy.operator.comparison.lt.description":
+      "True where the left input is below the right.",
+    "strategy.operator.comparison.lt.formula": "left < right",
+    "strategy.operator.comparison.lte": "Less than or equal",
+    "strategy.operator.comparison.lte.description":
+      "True where the left input is at most the right.",
+    "strategy.operator.comparison.lte.formula": "left ≤ right",
+    "strategy.operator.comparison.eq": "Equal",
+    "strategy.operator.comparison.eq.description":
+      "True where the two inputs are equal.",
+    "strategy.operator.comparison.eq.formula": "left = right",
     "ide.debugger.tab.preview": "Value preview",
     "ide.debugger.tab.exposure": "Exposure",
     "ide.debugger.tab.orders": "Expected orders",
@@ -1974,6 +2819,12 @@ export const messages = {
     "form.list.remove": "Remove",
     "form.list.empty": "No items",
     "form.list.blocked": "Not removed: referenced elsewhere: {pointers}",
+    "form.list.addNoSchema":
+      "The runtime schema has not arrived yet, so nothing can be added",
+    "form.list.addBlocked":
+      "The item schema for this list cannot be followed in the runtime schema, so nothing can be added",
+    "form.list.addSettling":
+      "The previous edit is still being applied — try adding again in a moment",
     "form.list.branchNeeded": "Choose a kind first ({kinds})",
     "form.list.presetExists": "already present",
     "form.field.openGraph": "Open in Graph",
@@ -2170,3 +3021,15 @@ export const tOptional = (key: string): string | null =>
   Object.prototype.hasOwnProperty.call(messages.ko, key)
     ? messages.ko[key as MessageKey]
     : null;
+
+/**
+ * backend가 발행하는 설명 키(`x-description-key`, 연산자 카탈로그의 `description_key`)는 **stem**
+ * 이다(P1-03, spec D8): `<stem>`이 화면에 보일 이름, `<stem>.description`이 한 줄 설명이다.
+ * 호출부가 접미사를 조립하지 않도록 두 함수로 감싼다 — 키가 없으면 null이고, 화면은 그 자리에
+ * "설명 없음"을 보인다(키 문자열을 본문으로 찍지 않는다).
+ */
+export const tName = (stem: string | null | undefined): string | null =>
+  stem ? tOptional(stem) : null;
+
+export const tDescription = (stem: string | null | undefined): string | null =>
+  stem ? tOptional(`${stem}.description`) : null;

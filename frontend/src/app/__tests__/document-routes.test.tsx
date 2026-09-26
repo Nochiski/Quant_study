@@ -1602,10 +1602,12 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
   });
   const formPanel = () => screen.findByLabelText("Form 편집");
   // 섹션은 runtime schema query가 끝난 뒤 나타난다.
+  // 섹션 legend는 `▾ <이름> <키>`다(P1-03). 앞이 낱말 문자가 아닌 자리에서 키를 찾는다 —
+  // 공백 자체는 `strategy-form-panel.test.tsx`의 "라벨 어휘" 테스트가 고정한다.
   const formSection = async (name: string) =>
     within(
       await within(await formPanel()).findByRole("group", {
-        name: new RegExp(`^${name}`),
+        name: new RegExp(`(^|[^\\w])${name}`),
       }),
     );
 
@@ -1629,7 +1631,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       await waitFor(() => expect(form).toBeVisible());
       // 값은 parse tree에서, 없는 필드는 runtime schema 기본값 placeholder로 온다.
       const data = await formSection("data");
-      expect(data.getByRole("combobox", { name: /^market/ })).toHaveValue(
+      expect(data.getByRole("combobox", { name: /\bmarket/ })).toHaveValue(
         "KRX",
       );
       expect(within(form).queryByText("strategy_id")).not.toBeInTheDocument();
@@ -1692,7 +1694,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
 
     await user.click(screen.getByRole("tab", { name: "Form" }));
     const risk = await formSection("risk");
-    const weight = risk.getByRole("spinbutton", { name: /^max_name_weight/ });
+    const weight = risk.getByRole("spinbutton", { name: /\bmax_name_weight/ });
     expect(weight).toHaveValue(0.05);
     await user.clear(weight);
     await user.type(weight, "0.1{Enter}");
@@ -1715,7 +1717,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     // 미작성 필드의 첫 값은 섹션에 insert-key, 문서 다른 부분은 그대로.
     const data = await formSection("data");
     await user.selectOptions(
-      data.getByRole("combobox", { name: /^frequency/ }),
+      data.getByRole("combobox", { name: /\bfrequency/ }),
       "daily",
     );
     await waitFor(() =>
@@ -1763,8 +1765,8 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
         exact: false,
       }),
     ).toBeInTheDocument();
-    const root = await formSection("기본 정보");
-    expect(root.getByRole("textbox", { name: /^title/ })).toBeDisabled();
+    const root = await formSection("전략 문서");
+    expect(root.getByRole("textbox", { name: /\btitle/ })).toBeDisabled();
     expect(view.state.doc.toString()).toBe(jsonSource);
 
     await user.click(screen.getByRole("tab", { name: "JSON" }));
@@ -1786,8 +1788,8 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     expect(
       within(form).getByText("구문 오류 · source를 먼저 고치세요"),
     ).toBeInTheDocument();
-    const root = await formSection("기본 정보");
-    const title = root.getByRole("textbox", { name: /^title/ });
+    const root = await formSection("전략 문서");
+    const title = root.getByRole("textbox", { name: /\btitle/ });
     expect(title).toHaveValue("last-valid");
     expect(title).toBeDisabled();
     expect(saveButton()).toBeDisabled();
@@ -1796,111 +1798,125 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
   });
 });
 
-describe("FactorGraph read-only projection (P4-07)", () => {
-  const graphHandlers = () => [
-    http.post(`${API}/api/v1/strategy-documents/compile`, () => {
-      const compiledSpec = graphSpec("draft", 0);
-      const { identity, ...canonicalSpec } = compiledSpec;
-      return HttpResponse.json({
-        format: "yaml",
-        source_hash: "b".repeat(64),
-        schema_version: "1.1",
-        spec: compiledSpec,
-        canonical_json: JSON.stringify({
-          ...canonicalSpec,
-          schema_version: identity.schema_version,
-        }),
-        spec_hash: "7".repeat(64),
-        diagnostics: [],
-      });
-    }),
-    http.get(`${API}/api/v1/strategy-documents/schema`, () =>
-      HttpResponse.json({
-        schema: RUNTIME_SCHEMA,
-        schema_hash: "h".repeat(64),
-        schema_version: "1.1",
+/** 같은 그래프 문서를 compile하되 진단만 바꿔 답한다. */
+const graphCompileWith = (diagnostics: readonly unknown[]) =>
+  http.post(`${API}/api/v1/strategy-documents/compile`, () => {
+    const compiledSpec = graphSpec("draft", 0);
+    const { identity, ...canonicalSpec } = compiledSpec;
+    return HttpResponse.json({
+      format: "yaml",
+      source_hash: "b".repeat(64),
+      schema_version: "1.1",
+      spec: compiledSpec,
+      canonical_json: JSON.stringify({
+        ...canonicalSpec,
+        schema_version: identity.schema_version,
       }),
-    ),
-    http.get(`${API}/api/v1/equity/catalog`, () =>
-      HttpResponse.json({
-        snapshot: {
-          snapshot_id: "snap",
-          schema_version: "1.1",
-          built_at: "2026-09-05T00:00:00Z",
-          source: "route-test",
-          point_in_time: true,
-          dataset_revisions: [],
-        },
-        total: 0,
-        page: 1,
-        page_size: 100,
-        page_count: 0,
-        fields: [],
-        facets: { dataset_ids: [], units: [], frequencies: [] },
-      }),
-    ),
-    http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
-      explainedGraphs.push(await request.json());
-      return HttpResponse.json({
-        registry_version: "v1",
-        data_snapshot_id: "snap",
-        narrative: [],
-        validation: {
-          valid: true,
-          issues: [],
-          node_contracts: [
-            {
-              node_id: "close",
-              value_type: "numeric_series",
-              unit: "KRW",
-              minimum_history_sessions: 1,
-            },
-            {
-              node_id: "mom_252",
-              value_type: "numeric_series",
-              unit: "ratio",
-              minimum_history_sessions: 252,
-            },
-          ],
-          minimum_history_sessions: 252,
-          required_field_ids: ["price.close"],
-        },
-        plan: {
-          graph_hash: "g".repeat(64),
-          plan_hash: "p".repeat(64),
-          registry_version: "v1",
-          output_node_id: "mom_252",
-          steps: [
-            {
-              sequence: 1,
-              node_id: "close",
-              operation: "field",
-              input_node_ids: [],
-              output_type: "numeric_series",
-              output_unit: "KRW",
-              minimum_history_sessions: 1,
-            },
-            {
-              sequence: 2,
-              node_id: "mom_252",
-              operation: "time_series.momentum",
-              input_node_ids: ["close"],
-              output_type: "numeric_series",
-              output_unit: "ratio",
-              minimum_history_sessions: 252,
-            },
-          ],
-          required_field_ids: ["price.close"],
-          referenced_factor_ids: [],
-          referenced_subgraph_ids: [],
-          minimum_history_sessions: 252,
-          missing_policy: "drop",
-          as_of_policy: "available_date_lte_as_of",
-        },
-      });
-    }),
-  ];
+      spec_hash: "7".repeat(64),
+      diagnostics,
+    });
+  });
 
+const graphHandlers = () => [
+  graphCompileWith([]),
+  http.get(`${API}/api/v1/strategy-documents/schema`, () =>
+    HttpResponse.json({
+      schema: RUNTIME_SCHEMA,
+      schema_hash: "h".repeat(64),
+      schema_version: "1.1",
+    }),
+  ),
+  http.get(`${API}/api/v1/equity/catalog`, () =>
+    HttpResponse.json({
+      snapshot: {
+        snapshot_id: "snap",
+        schema_version: "1.1",
+        built_at: "2026-09-05T00:00:00Z",
+        source: "route-test",
+        point_in_time: true,
+        dataset_revisions: [],
+      },
+      total: 0,
+      page: 1,
+      page_size: 100,
+      page_count: 0,
+      fields: [],
+      facets: { dataset_ids: [], units: [], frequencies: [] },
+    }),
+  ),
+  http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
+    explainedGraphs.push(await request.json());
+    return HttpResponse.json({
+      registry_version: "v1",
+      data_snapshot_id: "snap",
+      narrative: [],
+      validation: {
+        valid: true,
+        issues: [],
+        node_contracts: [
+          {
+            node_id: "close",
+            value_type: "numeric_series",
+            unit: "KRW",
+            minimum_history_sessions: 1,
+          },
+          {
+            node_id: "mom_252",
+            value_type: "numeric_series",
+            unit: "ratio",
+            minimum_history_sessions: 252,
+          },
+        ],
+        minimum_history_sessions: 252,
+        required_field_ids: ["price.close"],
+      },
+      plan: {
+        graph_hash: "g".repeat(64),
+        plan_hash: "p".repeat(64),
+        registry_version: "v1",
+        output_node_id: "mom_252",
+        steps: [
+          {
+            sequence: 1,
+            node_id: "close",
+            operation: "field",
+            input_node_ids: [],
+            output_type: "numeric_series",
+            output_unit: "KRW",
+            minimum_history_sessions: 1,
+          },
+          {
+            sequence: 2,
+            node_id: "mom_252",
+            operation: "time_series.momentum",
+            input_node_ids: ["close"],
+            output_type: "numeric_series",
+            output_unit: "ratio",
+            minimum_history_sessions: 252,
+          },
+        ],
+        required_field_ids: ["price.close"],
+        referenced_factor_ids: [],
+        referenced_subgraph_ids: [],
+        minimum_history_sessions: 252,
+        missing_policy: "drop",
+        as_of_policy: "available_date_lte_as_of",
+      },
+    });
+  }),
+];
+
+const revisionDocumentHandler = (source: string, strategyId = "s1") =>
+  http.get(
+    `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+    () =>
+      HttpResponse.json({
+        ...document(strategyId, 2, source, "그래프 전략"),
+        spec: graphSpec(strategyId, 2),
+      }),
+  );
+
+describe("FactorGraph read-only projection (P4-07)", () => {
   const completedTrace = (
     request: StrategyTraceRequest,
   ): StrategyTraceResponse => ({
@@ -1967,14 +1983,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
   it("keeps graph selection in the URL, then opens the exact YAML node", async () => {
     server.use(
       ...graphHandlers(),
-      http.get(
-        `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
-        () =>
-          HttpResponse.json({
-            ...document("s1", 2, GRAPH_SOURCE, "그래프 전략"),
-            spec: graphSpec("s1", 2),
-          }),
-      ),
+      revisionDocumentHandler(GRAPH_SOURCE),
     );
     const user = userEvent.setup();
     const nodePath = "%2Ffactors%2F0%2Fgraph%2Fnodes%2F1";
@@ -3240,6 +3249,261 @@ describe("dirty guard follow-ups (P2-04 review)", () => {
       "/research/strategies/s1/revisions/2",
     );
   });
+});
+
+describe("problems and the document status badge follow no tab (P1-01)", () => {
+  const problemRow = (message: string | RegExp) =>
+    screen.findByRole("button", { name: message });
+
+  /** 키 범위를 쓰는 유일한 진단 종류 — outline의 값 범위 reveal과 구별된다. */
+  const UNKNOWN_TITLE_KEY = {
+    code: "structure.unknown_key",
+    kind: "structural",
+    severity: "error",
+    pointer: "/title",
+    message: "title is not a known field",
+  };
+
+  // jsdom에는 `scrollIntoView`가 없다. 선택된 카드를 화면으로 끌어오는지 보려고 심는다.
+  const scrollIntoView = vi.fn();
+  let previousScrollIntoView: PropertyDescriptor | undefined;
+  beforeEach(() => {
+    previousScrollIntoView = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView",
+    );
+    scrollIntoView.mockClear();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+  });
+  afterEach(() => {
+    if (previousScrollIntoView)
+      Object.defineProperty(
+        HTMLElement.prototype,
+        "scrollIntoView",
+        previousScrollIntoView,
+      );
+    else
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown })
+        .scrollIntoView;
+  });
+
+  it("shows the badge and the problem list while the Graph tab is selected", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          // backend는 그래프 노드 진단을 노드 **객체** pointer로 낸다(`_validation.py`의
+          // `nodes.{index}` → `<factor>.graph.nodes.N`). 필드 pointer로 mocking하면 화면이
+          // 실제로 못 하는 일을 통과시킨다(리뷰 차단 2).
+          code: "factor.graph.time_series_window",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors/0/graph/nodes/1",
+          node_id: "mom_252",
+          message: "window는 1 이상이고 lag는 0 이상이어야 합니다: window=0 lag=0",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    mount("/research/strategies/s1/revisions/2?view=graph");
+
+    const status = await screen.findByRole("status", { name: "문서 상태" });
+    await waitFor(() => expect(status).toHaveTextContent("검증 오류"));
+    const problems = await screen.findByRole("region", { name: "문제" });
+    expect(problems).toHaveTextContent("오류 1 · 경고 0");
+    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  }, 15_000);
+
+  it("keeps the Graph tab and selects the pointer the graph editor draws", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          // backend는 그래프 노드 진단을 노드 **객체** pointer로 낸다(`_validation.py`의
+          // `nodes.{index}` → `<factor>.graph.nodes.N`). 필드 pointer로 mocking하면 화면이
+          // 실제로 못 하는 일을 통과시킨다(리뷰 차단 2).
+          code: "factor.graph.time_series_window",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors/0/graph/nodes/1",
+          node_id: "mom_252",
+          message: "window는 1 이상이고 lag는 0 이상이어야 합니다: window=0 lag=0",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+
+    // compile이 error를 내면 실행 plan이 막혀 DAG는 없고 문서 tree로 그리는 편집 표면만 남는다.
+    await screen.findByRole("region", { name: "그래프 편집" });
+    await user.click(await problemRow(/window는 1 이상이고 lag는 0 이상이어야 합니다/));
+
+    await waitFor(() => {
+      expect(history.location.search).toContain("view=graph");
+      expect(history.location.search).toContain(
+        "path=%2Ffactors%2F0%2Fgraph%2Fnodes%2F1",
+      );
+    });
+    // URL은 wire일 뿐이다 — 그래프 노드가 실제로 선택 표시를 받고 화면으로 끌려오는지도 본다.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "노드 편집: mom_252" }).closest("li"),
+      ).toHaveAttribute("aria-current", "true"),
+    );
+    // 노드 pointer 진단이므로 가장 구체적인 선택은 노드 행이고 스크롤도 거기로 간다.
+    const editorRow = screen
+      .getByRole("button", { name: "노드 편집: mom_252" })
+      .closest("li");
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    // 원인 문장이 그 노드 카드 안에 본문으로 붙는다(리뷰 차단 2). 선택한 노드 패널은 같은
+    // 문장을 다시 그리지 않는다(2차 리뷰 P3).
+    expect(editorRow).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
+    expect(
+      screen.getByRole("group", { name: /선택한 노드/ }),
+    ).not.toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
+    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  }, 15_000);
+
+  // plan이 ready면 읽기 전용 DAG 노드와 그 아래 편집기 행에 같은 pointer로 `aria-current`가
+  // 둘 붙는다. 중첩된 두 reveal 훅이 같은 요소로 수렴해야 한다(2차 리뷰 R2-1).
+  it("scrolls to the editor row, not the plan node, when both mark the same pointer", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "factor.graph.time_series_window",
+          kind: "semantic",
+          severity: "warning",
+          pointer: "/factors/0/graph/nodes/1",
+          node_id: "mom_252",
+          message: "window가 깁니다",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2?view=graph");
+
+    await screen.findByLabelText("FactorGraph DAG");
+    await screen.findByRole("region", { name: "그래프 편집" });
+    await user.click(await problemRow(/window가 깁니다/));
+
+    const planNode = screen
+      .getByRole("button", { name: "그래프 노드 선택: mom_252" })
+      .closest("li");
+    const editorRow = screen
+      .getByRole("button", { name: "노드 편집: mom_252" })
+      .closest("li");
+    await waitFor(() =>
+      expect(editorRow).toHaveAttribute("aria-current", "true"),
+    );
+    expect(planNode).toHaveAttribute("aria-current", "true");
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    // 경고도 같은 자리에 본문으로 붙는다(alert이 아니라 본문이다 — 리뷰 P3).
+    expect(editorRow).toHaveTextContent("window가 깁니다");
+  }, 15_000);
+
+  it("falls back to the source tab and the line when the Graph tab cannot draw the pointer", async () => {
+    server.use(
+      graphCompileWith([UNKNOWN_TITLE_KEY]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+
+    await user.click(await problemRow(/title is not a known field/));
+
+    await waitFor(() =>
+      expect(history.location.search).not.toContain("view=graph"),
+    );
+    // `structure.unknown_key`는 키 범위(`keyRanges`), outline reveal은 값 범위(`valueRanges`)라
+    // 둘이 다르다. 정확히 비교해야 진단 reveal이 마지막에 썼음을 고정한다(리뷰 P3-1).
+    const view = await editor();
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toBe("title"),
+    );
+  }, 15_000);
+
+  it("falls back to the source tab from the read-only Diff projection too", async () => {
+    server.use(
+      graphCompileWith([UNKNOWN_TITLE_KEY]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=diff");
+
+    await user.click(await problemRow(/title is not a known field/));
+
+    await waitFor(() =>
+      expect(history.location.search).not.toContain("view=diff"),
+    );
+    const view = await editor();
+    await waitFor(() =>
+      expect(
+        view.state.sliceDoc(
+          view.state.selection.main.from,
+          view.state.selection.main.to,
+        ),
+      ).toBe("title"),
+    );
+  }, 15_000);
+
+  it("reveals the Form card the problem points at without leaving the Form tab", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.factor.weight",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors/0/weight",
+          message: "weight must be positive",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=form");
+
+    await screen.findByLabelText("Form 편집");
+    await user.click(await problemRow(/weight must be positive/));
+
+    await waitFor(() =>
+      expect(history.location.search).toContain("view=form"),
+    );
+    const card = screen.getByRole("region", { name: "factors · momentum" });
+    await waitFor(() => expect(card).toHaveAttribute("aria-current", "true"));
+    // 카드 안에서 문제가 가리킨 필드 행까지 표시되고, 스크롤은 그 행으로 간다(P1-04).
+    const row = card.querySelector('.strategy-form__field[aria-current="true"]');
+    expect(row).not.toBeNull();
+    expect(row).toHaveTextContent("weight must be positive");
+    await waitFor(() => expect(scrollIntoView.mock.contexts.at(-1)).toBe(row));
+
+    // 같은 행을 다시 눌렀을 때도 끌어온다 — URL은 그대로라 reveal 신호가 대신 올라간다(2차 리뷰 R2-2).
+    const before = scrollIntoView.mock.calls.length;
+    await user.click(await problemRow(/weight must be positive/));
+    await waitFor(() =>
+      expect(scrollIntoView.mock.calls.length).toBeGreaterThan(before),
+    );
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(row);
+  }, 15_000);
 });
 
 describe("AI 어시스턴트 제안 적용 (B-04)", () => {

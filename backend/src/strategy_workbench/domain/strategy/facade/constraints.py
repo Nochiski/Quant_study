@@ -8,6 +8,7 @@ from strategy_workbench.domain.strategy._constraints import (
     ContractUnit,
     FieldApplicability,
     ScalarConstraint,
+    expression_code,
     field_applicability_index,
     field_default,
     resolve_scalar,
@@ -16,6 +17,7 @@ from strategy_workbench.domain.strategy._constraints import (
 
 __all__ = [
     "EXPRESSION_CODES",
+    "expression_code",
     "FIELD_APPLICABILITY",
     "FieldApplicability",
     "ApplicabilityCondition",

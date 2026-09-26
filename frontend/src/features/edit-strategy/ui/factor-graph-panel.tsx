@@ -9,6 +9,7 @@ import {
   type GraphFactorProjection,
   type GraphNodeProjection,
 } from "../model/factor-graph-projection";
+import type { OperatorCatalogState } from "../model/operator-palette";
 import type { JsonSchema } from "../model/schema-navigator";
 import {
   factorGraphPointer,
@@ -16,6 +17,7 @@ import {
   pointerSelectsNode,
   type ExecutionPlansState,
 } from "../model/use-execution-plans";
+import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { authoredFactors } from "../model/graph-transactions";
 import { FactorGraphEditor } from "./factor-graph-editor";
@@ -28,6 +30,8 @@ export type FactorGraphEditing = {
   schema: JsonSchema | null;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
+  /** 연산자 카탈로그(P1-03). 팔레트가 읽는다 — 없으면 노드 kind만 보인다. */
+  operators?: OperatorCatalogState;
   /** Graph → Form 왕복(P5-03). */
   onOpenForm?: (pointer: string) => void;
   /** 문서 경계(`documentEpoch`). 바뀌면 "재계산 중"에 쓰는 직전 투영을 버린다(3차 P1). */
@@ -38,6 +42,11 @@ type FactorGraphPanelProps = {
   state: ExecutionPlansState;
   diagnostics: DocumentDiagnostic[];
   selectedPointer?: string;
+  /**
+   * 같은 문제 행을 다시 눌렀을 때도 선택 카드를 다시 끌어오게 하는 신호. pointer가 같아도 이 값이 바뀌면
+   * `useRevealSelection`의 effect가 다시 돈다(2차 리뷰 R2-2).
+   */
+  revealSignal?: number;
   onSelectPointer: (pointer: string) => void;
   onOpenSource: (pointer: string) => void;
   editing?: FactorGraphEditing;
@@ -103,8 +112,6 @@ const GraphState = ({
   );
 };
 
-const shortHash = (value: string): string => `${value.slice(0, 12)}…`;
-
 const FactorSummary = ({
   factor,
   registryVersion,
@@ -143,11 +150,12 @@ const FactorSummary = ({
         {factor.minimumHistorySessions} {t("plan.sessions")}
       </dd>
     </div>
+    {/* fingerprint는 `title`로 감추지 않고 본문으로 보인다 — hover 없는 입력에서도 읽히고 복사된다(P1-04). */}
     {factor.graphHash !== null ? (
       <div>
         <dt>{t("plan.graphFingerprint")}</dt>
         <dd>
-          <code title={factor.graphHash}>{shortHash(factor.graphHash)}</code>
+          <code className="factor-graph__fingerprint">{factor.graphHash}</code>
         </dd>
       </div>
     ) : null}
@@ -155,7 +163,7 @@ const FactorSummary = ({
       <div>
         <dt>{t("plan.planFingerprint")}</dt>
         <dd>
-          <code title={factor.planHash}>{shortHash(factor.planHash)}</code>
+          <code className="factor-graph__fingerprint">{factor.planHash}</code>
         </dd>
       </div>
     ) : null}
@@ -292,11 +300,16 @@ export const FactorGraphPanel = ({
   state,
   diagnostics,
   selectedPointer,
+  revealSignal,
   onSelectPointer,
   onOpenSource,
   editing,
 }: FactorGraphPanelProps) => {
   const [chosenFactor, setChosenFactor] = useState(0);
+  const container = useRevealSelection<HTMLElement>(
+    selectedPointer,
+    revealSignal,
+  );
   const projected = projectFactorGraphs(state);
   // 편집 확정 뒤 backend plan을 다시 받는 동안(loading) 직전 ready 투영을 "재계산 중" 배지와 함께 유지한다 —
   // DAG가 사라졌다 돌아오며 편집기가 점프하지 않도록(P5-02 acceptance, 리뷰 OBS-132-05). 렌더 중 파생 상태.
@@ -339,8 +352,10 @@ export const FactorGraphPanel = ({
         transactions={editing.transactions}
         catalogs={editing.catalogs}
         diagnostics={diagnostics}
+        operators={editing.operators}
         factorIndex={index}
         selectedPointer={selectedPointer}
+        revealSignal={revealSignal}
         onSelectPointer={onSelectPointer}
         factorSelect={factorSelect}
         onOpenForm={editing.onOpenForm}
@@ -375,7 +390,11 @@ export const FactorGraphPanel = ({
   const unplannedNodes = factor.nodes.filter((node) => !node.planned);
 
   return (
-    <section className="factor-graph" aria-label={t("graph.title")}>
+    <section
+      ref={container}
+      className="factor-graph"
+      aria-label={t("graph.title")}
+    >
       <header className="factor-graph__toolbar">
         <div>
           <strong>{t("graph.title")}</strong>

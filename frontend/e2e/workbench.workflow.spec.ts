@@ -30,6 +30,7 @@ import {
   editor,
   expectPhase,
   GOLDEN,
+  mustReplace,
   openEditor,
   replaceSource,
   requireData,
@@ -40,6 +41,14 @@ import {
 } from "./workbench-helpers";
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
+
+/** golden 그래프 끝에 붙이는 노드. 오류 노드 뒤에 비교 대상이 있어야 근접성을 잴 수 있다. */
+const TRAILING_NODE = [
+  "        - kind: field",
+  "          node_id: trailing",
+  "          field_id: price.close",
+  "",
+].join("\n");
 
 const rowFor = (region: Locator, securityId: string): Locator =>
   region.getByRole("row").filter({ hasText: securityId });
@@ -216,9 +225,15 @@ test.describe("professional YAML workflow", () => {
     await expectPhase(page, "구조 오류");
     await expect(save(page)).toBeDisabled();
     await expect(backtest(page)).toBeDisabled();
-    await expect(page.getByRole("region", { name: "문제" })).toContainText(
-      "/risk/max_name_wieght",
-    );
+    const problems = page.getByRole("region", { name: "문제" });
+    await expect(problems).toContainText("/risk/max_name_wieght");
+    // P1-05: 구조 오류는 한글 문장으로 오고, 오타에는 가까운 키를 제안한다. 문장은 계약 문자열인
+    // 키를 번역하지 않고 백틱으로 인용하며, 같은 제안이 기계가 읽는 자리에도 실린다.
+    await expect(problems).toContainText("모르는 키입니다");
+    await expect(problems).toContainText("혹시 `max_name_weight`인가요?");
+    await expect(problems).toContainText("got='max_name_wieght'");
+    await expect(problems).toContainText("suggestion='max_name_weight'");
+    await expect(problems).not.toContainText("unknown key");
 
     await replaceSource(page, sourceV1);
     await expectPhase(page, "검증 통과");
@@ -987,8 +1002,8 @@ test.describe("professional YAML workflow", () => {
     const form = page.getByRole("region", { name: "Form 편집" });
     await expect(form).toBeVisible();
     await expect(form.getByText("편집 가능")).toBeVisible();
-    const risk = form.getByRole("group", { name: /^risk/ });
-    const weight = risk.getByRole("spinbutton", { name: /^max_name_weight/ });
+    const risk = form.getByRole("group", { name: /\brisk\b/ });
+    const weight = risk.getByRole("spinbutton", { name: /\bmax_name_weight/ });
     await expect(weight).toHaveValue("0.05");
     await weight.fill("0.1");
     await weight.press("Enter");
@@ -1027,7 +1042,7 @@ test.describe("professional YAML workflow", () => {
 
     // 카탈로그에서 팩터 추가 → source에 항목이 생기고 검증을 통과하며 Graph 화면에 새 팩터가 보인다.
     await page.getByRole("tab", { name: "Form", exact: true }).click();
-    const factors = form.getByRole("group", { name: /^factors/ });
+    const factors = form.getByRole("group", { name: /\bfactors\b/ });
     const catalog = factors.getByRole("combobox", {
       name: "factors · 카탈로그에서 추가",
     });
@@ -1064,19 +1079,45 @@ test.describe("professional YAML workflow", () => {
     await saveAndWaitForRevision(page, 1);
     const { strategyId } = strategyIdentity(page);
 
+    const baseSource = await currentSource(page);
     await page.getByRole("tab", { name: "Graph", exact: true }).click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
     await expect(editor).toBeVisible();
     await expect(editor.getByText("편집 가능")).toBeVisible();
 
-    // 노드 추가: 새 field 노드가 문서 끝에 들어가고 바로 선택된다.
-    await editor.getByRole("combobox", { name: "노드 종류" }).selectOption("field");
-    await editor.getByRole("button", { name: "노드 추가" }).click();
+    // 노드 추가: 연산자 팔레트에서 고르면 kind가 따라온다(WORKFLOW P1-04). 새 field 노드가 문서
+    // 끝에 들어가고 바로 선택된다.
+    await expect(
+      editor.getByRole("combobox", { name: "노드 종류" }),
+    ).toHaveCount(0);
+    await editor
+      .getByRole("button", { name: "데이터 필드 노드 추가", exact: true })
+      .click();
     await expect(
       editor.getByRole("status").filter({ hasText: "반영됨" }),
     ).toContainText("field 반영됨");
+
+    // 되돌리기는 툴바 버튼이라 Graph 탭에 머문 채로 동작한다 — 편집기는 이 탭에서 hidden이다(WORKFLOW P1-02).
+    const undoButton = page.getByRole("button", { name: "실행 취소" });
+    const redoButton = page.getByRole("button", { name: "다시 실행" });
+    await expect(undoButton).not.toHaveAttribute("aria-disabled", "true");
+    await undoButton.click();
+    expect(
+      await page
+        .getByRole("tab", { name: "Graph", exact: true })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    await expect(redoButton).not.toHaveAttribute("aria-disabled", "true");
+    // 트랜잭션 한 번 = 되돌리기 한 단계: YAML 원문이 노드 추가 전으로 정확히 돌아온다.
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    expect(await currentSource(page)).toBe(baseSource);
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await redoButton.click();
+    // 되돌리기는 선택까지 되살리지 않는다(선택 pointer는 URL, 문서 이력 밖) — 노드를 다시 고른다.
+    await editor.getByRole("button", { name: "노드 편집: field" }).click();
+
     const selected = editor.getByRole("group", { name: /선택한 노드/ });
-    const fieldId = selected.getByRole("combobox", { name: /^field_id/ });
+    const fieldId = selected.getByRole("combobox", { name: /\bfield_id/ });
     const fieldOptions = fieldId.locator("option:not([disabled])");
     await expect.poll(async () => fieldOptions.count()).toBeGreaterThan(1);
     const chosenField = await fieldOptions.nth(1).getAttribute("value");
@@ -1087,22 +1128,40 @@ test.describe("professional YAML workflow", () => {
 
     // 재연결: mom_252의 입력을 새 노드로.
     await editor.getByRole("button", { name: "노드 편집: mom_252" }).click();
+    // 계산식은 엔진의 창(`x[t-lag-window+1 … t-lag]`)과 같아야 한다(P1-03 1차 리뷰 P2). 표기법이라
+    // 문구 다듬기에 흔들리지 않으므로 이 한 줄만 고정한다 — 사전이 브라우저에서 렌더된다는
+    // 사실은 이것으로 증명된다. 산문 문장은 `screen-vocabulary.test.ts`가 소유한다.
+    await expect(selected).toContainText("x[t-lag] / x[t-lag-window+1] - 1");
     await selected
-      .getByRole("combobox", { name: /^input_node_id/ })
+      .getByRole("combobox", { name: /\binput_node_id/ })
       .selectOption("field");
     await expect(
       editor.getByRole("status").filter({ hasText: "반영됨" }),
     ).toContainText("input_node_id 반영됨");
 
-    // 편집은 source 트랜잭션이라 YAML에 그대로 있고 compile이 다시 통과한다(문서 상태는 source view에 있다).
-    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    // 문서 상태 배지는 탭 밖에 있어 Graph 탭에 머문 채 compile 결과를 본다(WORKFLOW P1-01).
     await expectPhase(page, "검증 통과");
+    expect(
+      await page
+        .getByRole("tab", { name: "Graph", exact: true })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+
+    // 편집은 source 트랜잭션이라 YAML에 그대로 있다. 원문 읽기는 편집기가 보이는 탭에서 한다.
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
     const edited = await currentSource(page);
     // 줄 단위 단언: `node_id: field`는 `input_node_id: field`의 부분문자열이라 앞 공백까지 본다.
     expect(edited).toContain("\n          node_id: field\n");
     expect(edited).toContain(`\n          field_id: ${chosenField}\n`);
     expect(edited).toContain("\n          input_node_id: field\n");
-    expect(edited.startsWith(GOLDEN.slice(0, GOLDEN.indexOf("factors:")).replace("퀄리티 모멘텀", title))).toBe(true);
+    expect(
+      edited.startsWith(
+        GOLDEN.slice(0, GOLDEN.indexOf("factors:")).replace(
+          "퀄리티 모멘텀",
+          title,
+        ),
+      ),
+    ).toBe(true);
     await saveAndWaitForRevision(page, 2);
     const saved = requireData(
       (
@@ -1137,6 +1196,115 @@ test.describe("professional YAML workflow", () => {
     // Graph → Form 왕복.
     await editor.getByRole("button", { name: /Form에서 열기/ }).click();
     await expect(page.getByRole("region", { name: "Form 편집" })).toBeVisible();
+  });
+
+  test("picks the operator first in the palette and the document stays valid (P1-04)", async ({
+    page,
+  }) => {
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(page, GOLDEN.replace("퀄리티 모멘텀", "P1-04 E2E 팔레트"));
+    await expectPhase(page, "검증 통과");
+
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editor = page.getByRole("region", { name: "그래프 편집" });
+    const palette = editor.getByRole("group", { name: "연산자 팔레트" });
+    await expect(palette).toBeVisible();
+    // kind 드롭다운은 없고, 카탈로그가 도착하면 연산자 이름과 계산식이 보인다(P1-03 카탈로그).
+    await expect(editor.getByRole("combobox", { name: "노드 종류" })).toHaveCount(0);
+    await expect(
+      palette.getByRole("button", { name: "기간 평균 노드 추가", exact: true }),
+    ).toBeVisible();
+
+    // `기간 평균`을 고른다: 필수 정수 파라미터(`window`)가 있어 하한이 없으면 `window: 0`인
+    // 노드가 만들어져 곧바로 검증 오류가 났다(P1-04). runtime schema가 하한을 발행하면서
+    // 추가만으로 유효한 노드가 된다.
+    await palette.getByRole("searchbox", { name: "연산자 검색" }).fill("기간 평균");
+    await palette
+      .getByRole("button", { name: "기간 평균 노드 추가", exact: true })
+      .click();
+    await expect(editor.getByRole("alert")).toHaveCount(0);
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("mean 반영됨");
+
+    // 연산자를 고르면 kind와 파라미터 기본값이 따라오고, 문서는 그대로 검증을 통과한다.
+    await expectPhase(page, "검증 통과");
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    const edited = await currentSource(page);
+    expect(edited).toContain("\n        - kind: time_series\n");
+    expect(edited).toContain("\n          node_id: mean\n");
+    expect(edited).toContain("\n          operator: mean\n");
+    expect(edited).toContain("\n          input_node_id: mom_252\n");
+    // 파라미터 기본값은 runtime schema가 발행한 하한에서 온다(`window >= 1`).
+    expect(edited).toContain("\n          window: 1\n");
+  });
+
+  test("keeps a node card readable when that node carries a diagnostic (P1-04)", async ({
+    page,
+  }) => {
+    // 노드 카드 진단 본문의 **레이아웃 계약** 둘을 고정한다.
+    //  1. 본문이 이름·삭제 버튼과 같은 줄에 끼지 않고 카드 아래 줄 전체 폭을 쓴다(2차 리뷰 차단).
+    //  2. 본문이 남의 카드보다 자기 카드에 더 가깝다(3차 리뷰 차단). 진단 문장에 node_id가 없어
+    //     근접성이 곧 소유권이다.
+    // 계약은 아래 boundingBox 단언이 잠근다. 기준선 한 장은 보조 증거라 폭·테마 한 벌로 충분하고,
+    // 그래서 시각 프로젝트(4종)가 아니라 workflow 프로젝트에 둔다. 결함 자체는 테마와 무관하고
+    // 폭이 좁을수록 심한데 1440은 구성된 둘 중 좁은 쪽이다.
+    await openEditor(page, "/research/strategies/new");
+    // 오류를 **마지막이 아닌** 노드에 준다: 뒤에 노드가 없으면 근접성이 뒤집혀도 드러나지 않는다.
+    // golden의 마지막 노드(`mom_252`)를 깨고 그 뒤에 노드를 하나 더 둔다.
+    const withTrailingNode = mustReplace(
+      mustReplace(
+        mustReplace(GOLDEN, "퀄리티 모멘텀", "P1-04 노드 진단 레이아웃"),
+        "window: 252",
+        "window: 0",
+      ),
+      "      output_node_id: mom_252",
+      TRAILING_NODE + "      output_node_id: mom_252",
+    );
+    await replaceSource(page, withTrailingNode);
+    await expectPhase(page, "검증 오류");
+
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editorRegion = page.getByRole("region", { name: "그래프 편집" });
+    await expect(editorRegion).toBeVisible();
+    // 원인 문장이 그 노드 카드 안에 본문으로 있다.
+    const nodes = editorRegion.locator(".factor-graph__editor-nodes");
+    await expect(nodes).toContainText("window는 1 이상이고 lag는 0 이상이어야 합니다");
+
+    // 본문은 버튼들과 같은 줄이 아니라 카드 아래 줄 전체 폭을 쓴다. 레이아웃 계약이라 픽셀로
+    // 고정한다 — jsdom에는 레이아웃이 없어 단위 테스트로는 잡히지 않는다.
+    const body = nodes.locator(".strategy-form__diagnostics").first();
+    const removeButton = nodes
+      .getByRole("button", { name: "mom_252 · 삭제" })
+      .first();
+    const bodyBox = await body.boundingBox();
+    const buttonBox = await removeButton.boundingBox();
+    expect(bodyBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    if (bodyBox === null || buttonBox === null) return;
+    // 같은 줄이 아니다: 본문 위쪽이 버튼 아래쪽보다 아래에 있다.
+    expect(bodyBox.y).toBeGreaterThanOrEqual(buttonBox.y + buttonBox.height);
+    // 카드 폭을 거의 다 쓴다(버튼 옆 좁은 칸에 끼지 않았다).
+    const listBox = await nodes.boundingBox();
+    expect(listBox).not.toBeNull();
+    if (listBox === null) return;
+    expect(bodyBox.width).toBeGreaterThan(listBox.width * 0.8);
+
+    // 근접성이 소유권이다: 본문은 자기 행보다 **아래 노드 행**에서 더 멀어야 한다.
+    const nextRow = nodes.getByRole("button", { name: "노드 편집: trailing" });
+    const nextBox = await nextRow.boundingBox();
+    expect(nextBox).not.toBeNull();
+    if (nextBox === null) return;
+    const toOwnRow = bodyBox.y - (buttonBox.y + buttonBox.height);
+    const toNextRow = nextBox.y - (bodyBox.y + bodyBox.height);
+    expect(toOwnRow).toBeLessThanOrEqual(toNextRow);
+
+    await page.mouse.move(0, 0);
+    // 문장 자체는 backend 소유라 픽셀로 고정하지 않는다(`mask`). 이 기준선이 지키는 것은 카드
+    // 레이아웃이고, 문구가 다듬어져도 기준선을 다시 찍을 일이 없다.
+    await expect(nodes).toHaveScreenshot("graph-node-diagnostic.png", {
+      mask: [nodes.locator(".strategy-form__diagnostics")],
+    });
   });
 
   test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({

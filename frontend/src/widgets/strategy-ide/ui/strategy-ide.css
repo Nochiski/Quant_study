@@ -195,12 +195,87 @@
   gap: var(--space-2);
 }
 
-.ide__editor .ui-tabs {
-  padding: 0 var(--space-4);
+/*
+ * 문서 상태 배지는 탭 줄에 산다 — 탭 패널 밖이라 다섯 탭 모두에서 보인다(P1-01). 실행 취소·다시 실행도
+ * 같은 줄이다(P1-02). 줄바꿈을 허용하면 편집기 높이가 한 줄만큼 줄어 1280px에서 레이아웃이 밀리므로
+ * 한 줄을 유지하고, 남는 폭이 모자라면 탭과 배지가 줄어든다(`min-width: 0` + 말줄임).
+ */
+.ide__editor-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: var(--space-2);
+  /* 구분선은 줄 전체가 갖는다 — 탭 목록만 그으면 버튼 슬롯 아래에서 선이 끊긴다(P1-02 리뷰 P3). */
+  border-bottom: 1px solid var(--border);
 }
 
-.ide__editor-panel {
+/*
+ * 폭이 모자라면 탭 목록만 가로로 스크롤한다. 탭은 줄바꿈도 축소도 하지 않으므로 이 선언이 없으면
+ * 버튼 슬롯을 덮는다 — 1440px에서 이미 넘친다(스트립 콘텐츠 304px < 탭 311px, 1차 리뷰 P3).
+ *
+ * 이 상자를 **위아래로 넓히지 않는다**. 툴바 액션 줄과 탭 줄 사이 간격은 2px뿐이라, 스크롤포트를
+ * 위로 키우면 검증 버튼 아래를 덮어 그 영역 클릭이 탭 스트립으로 간다(3차 리뷰 P2: 28px 버튼의
+ * 하단 6px이 조용한 사각지대가 됐다). 포커스 링 클립은 링을 탭 안쪽에 그려 푼다(아래).
+ */
+.ide__editor-tabs .ui-tabs {
   flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 0;
+}
+
+/*
+ * 스크롤 컨테이너는 자기 padding box에서 잘라내므로 탭 바깥 4px(outline 2px + offset 2px)에 그린
+ * 링은 위아래가 잘린다(2차 리뷰 P2). 링을 안쪽(-2px)에 그리면 상자 안에 있어 잘릴 수 없다.
+ */
+.ide__editor-tabs .ui-tab:focus-visible {
+  outline-offset: -2px;
+}
+
+/* 폭이 모자라도 두 버튼은 줄지 않는다 — 탭 목록이 먼저 스크롤된다. */
+.ide__editor-history {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ide__editor-status {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding-inline-end: var(--space-4);
+}
+
+.ide__editor-status .ui-badge {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 문제 목록도 탭 패널 밖, 편집 패널 아래다. 진단이 없으면 패널이 null을 내므로 자리도 비운다. */
+.ide__problems {
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.ide__problems:empty {
+  display: none;
+}
+
+/* 가로 여백만 준다 — `padding` 단축은 탭 줄이 포커스 링용으로 준 세로 padding까지 0으로 덮는다. */
+.ide__editor .ui-tabs {
+  padding-inline: var(--space-4);
+}
+
+/* 탭 패널은 남은 높이를 차지하고, 그 안의 편집기가 다시 그 높이를 채운다 — 문제 목록이 패널 밖으로
+   나가면서 생긴 빈 구멍을 없앤다(P1-01 리뷰 P2-1). */
+.ide__editor-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-height: 240px;
   padding: var(--space-3) var(--space-4) var(--space-4);
   overflow: auto;

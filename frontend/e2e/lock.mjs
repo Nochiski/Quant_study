@@ -198,11 +198,8 @@ export const tryAcquireLock = (
   return acquired;
 };
 
-/**
- * 내가 주인일 때만 지운다. 이미 회수돼 남이 잡고 있으면 건드리지 않는다.
- * @param {string} path
- * @param {number} pid
- */
+export const LEFTOVER_MAX_AGE_MS = 60 * 60 * 1000;
+
 /**
  * 앞선 실행이 남긴 `<lock>.new-*`·`<lock>.stale-*` 찌꺼기를 치운다.
  *
@@ -217,8 +214,6 @@ export const tryAcquireLock = (
  * @param {number} [olderThanMs]
  * @param {number} [now]
  */
-export const LEFTOVER_MAX_AGE_MS = 60 * 60 * 1000;
-
 export const sweepLeftovers = (
   path,
   olderThanMs = LEFTOVER_MAX_AGE_MS,
@@ -240,6 +235,11 @@ export const sweepLeftovers = (
   return swept;
 };
 
+/**
+ * 내가 주인일 때만 지운다. 이미 회수돼 남이 잡고 있으면 건드리지 않는다.
+ * @param {string} path
+ * @param {number} pid
+ */
 export const releaseLock = (path, pid) => {
   if (readLockPid(path) !== pid) return false;
   rmSync(path, { recursive: true, force: true });

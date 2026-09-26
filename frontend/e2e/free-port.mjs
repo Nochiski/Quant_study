@@ -73,15 +73,29 @@ export const assertPortsFree = async (required) => {
       return `${entry.label}=${entry.port} [${who}] (override with ${entry.env})`;
     })
     .join("; ");
-  const inspect =
+  // 주인 조회에 쓴 도구와 사람에게 권하는 확인 명령은 다르다. 구현은 파싱하기 쉬운 쪽을 쓰고,
+  // 사람은 손에 익은 쪽을 쓰면 된다 — 문구가 둘을 섞어 쓰면 구현도 그럴 것이라 오해한다
+  // (3차 리뷰 P3 추가 2).
+  const [lookedUpWith, inspect] =
     process.platform === "win32"
-      ? "Get-NetTCPConnection -LocalPort <port> | Select-Object OwningProcess"
-      : "lsof -nP -iTCP:<port> -sTCP:LISTEN";
+      ? [
+          "netstat -ano",
+          "`netstat -ano -p tcp | findstr :<port>` or " +
+            "`Get-NetTCPConnection -LocalPort <port> | Select-Object OwningProcess`",
+        ]
+      : [
+          "lsof",
+          "`lsof -nP -iTCP:<port> -sTCP:LISTEN` or `ss -ltnp 'sport = :<port>'`",
+        ];
+  // 먼저 할 일(서버를 멈추거나 포트를 옮긴다)을 앞에, 고아일 가능성은 뒤에 둔다. 옆 체크아웃의
+  // 정상 dev 서버도 이 경로로 오므로 고아라고 단정하는 문장이 앞서면 안 된다(3차 리뷰 P3 추가 3).
   throw new Error(
     "E2E ports are already in use — refusing to run against a server this process did not " +
-      `start: ${detail}. This gate holds the machine lock, so nothing else should be running: ` +
-      "the listener is most likely an orphan left by a run whose Playwright died while its " +
-      `servers kept going. Confirm with \`${inspect}\` and stop it yourself — this script never ` +
-      "kills a process it did not start. Otherwise give this worktree its own ports.",
+      `start: ${detail}. Stop the other server, or give this worktree its own ports with the ` +
+      "variables named above. This gate holds the machine lock, so the listener is not another " +
+      "run of this gate: it is a dev server from another checkout, or an orphan left by a run " +
+      "whose Playwright died while its servers kept going. The owner above was looked up with " +
+      `${lookedUpWith}; confirm it with whichever you prefer: ${inspect}. This script never ` +
+      "kills a process it did not start.",
   );
 };

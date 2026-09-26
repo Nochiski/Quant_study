@@ -53,10 +53,12 @@ Never spell a port literally anywhere else.
 - It never reclaims an orphaned server. The lock only recovers its own stale directory, so a run
   whose Playwright died while uvicorn and the Vite preview kept going leaves those holding the
   ports. The next run therefore fails on the port check rather than the lock, and that failure
-  names the listener: its pid, start time and command line. Confirm with
-  `Get-NetTCPConnection -LocalPort <port> | Select-Object OwningProcess` on Windows or
-  `lsof -nP -iTCP:<port> -sTCP:LISTEN` elsewhere, then stop it yourself. The runner never kills a
-  process it did not start, because the listener may be somebody's healthy run.
+  names the listener: its pid, start time and command line. The runner looks the owner up with
+  `netstat -ano` on Windows and `lsof` elsewhere; to confirm it yourself, use whichever you prefer,
+  for example `Get-NetTCPConnection -LocalPort <port> | Select-Object OwningProcess` on Windows or
+  `lsof -nP -iTCP:<port> -sTCP:LISTEN` elsewhere. Then stop it yourself, or move this worktree to
+  its own ports. The runner never kills a process it did not start, because the listener may be
+  somebody's healthy dev server.
 
 Moving the preview port also moves the browser origin, so the backend has to accept it. Playwright
 passes the preview origin to the server as `STRATEGY_WORKBENCH_ALLOWED_ORIGINS`. Without that the

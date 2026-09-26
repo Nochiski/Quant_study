@@ -47,7 +47,7 @@ import {
   readPort,
 } from "./ports.mjs";
 import { assertPortsFree, isPortFree } from "./free-port.mjs";
-import { describePortOwner } from "./port-owner.mjs";
+import { describePortOwner, listenerPid } from "./port-owner.mjs";
 
 // vitest 의 `import.meta.url` 은 dev 서버 http URL 이라 자식 노드가 불러오지 못한다.
 // 자식은 진짜 파일을 봐야 하므로 작업 디렉터리(= frontend) 기준 file URL 로 만든다.
@@ -57,30 +57,47 @@ const stripComments = (source) =>
 
 const lockModuleUrl = pathToFileURL(resolve("e2e/lock.mjs")).href;
 
-/** 자식 노드 프로세스로 잠금을 노려 본다. 표준 출력의 JSON 한 줄이 결과다. */
-const runRacer = (source) =>
-  new Promise((done, fail) => {
-    const child = spawn(
-      process.execPath,
-      ["--input-type=module", "-e", source],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (chunk) => (out += chunk));
-    child.stderr.on("data", (chunk) => (err += chunk));
-    child.on("error", fail);
-    child.on("exit", (code) => {
-      if (code !== 0) return fail(new Error(`racer exited ${code}: ${err}`));
-      try {
-        done(JSON.parse(out));
-      } catch {
-        fail(new Error(`racer output was not JSON: ${out} ${err}`));
-      }
-    });
+/**
+ * 자식 노드 프로세스로 잠금을 노려 본다.
+ *
+ * 결과는 시도 **직후** IPC 메시지로 오고, 자식은 부모가 `release()` 로 놓으라고 할 때까지 산다.
+ * 주인의 생존 구간을 시간이 아니라 신호로 정하는 것이 요점이다 — 고정 시간만 살려 두면 부하가
+ * 걸린 러너(2코어 CI)에서 늦은 자식이 이미 끝난 주인의 잠금을 **정당하게** 회수해 승자가 둘이
+ * 되고, 잠금은 멀쩡한데 테스트만 간헐적으로 붉어진다(3차 리뷰 DEFECT-P105R3-001).
+ */
+const runRacer = (source) => {
+  const child = spawn(process.execPath, ["--input-type=module", "-e", source], {
+    stdio: ["ignore", "ignore", "pipe", "ipc"],
   });
+  let err = "";
+  child.stderr.on("data", (chunk) => (err += chunk));
+  const reported = new Promise((done, fail) => {
+    child.once("message", done);
+    child.once("error", fail);
+    child.once("exit", (code) =>
+      fail(new Error(`racer exited ${code} before reporting: ${err}`)),
+    );
+  });
+  const finished = new Promise((done, fail) => {
+    child.once("error", fail);
+    child.once("exit", (code) =>
+      code === 0
+        ? done(undefined)
+        : fail(new Error(`racer exited ${code}: ${err}`)),
+    );
+  });
+  // 한쪽이 실패해 다른 쪽을 await 하지 못하고 빠져나가도 처리 안 된 거부로 새지 않게 한다.
+  // 원래 promise 를 돌려주므로 await 하는 쪽은 그대로 거부를 받는다.
+  reported.catch(() => {});
+  finished.catch(() => {});
+  return {
+    reported,
+    finished,
+    release: () => {
+      if (child.connected) child.send("release");
+    },
+  };
+};
 
 const directories = [];
 const lockPath = () => {
@@ -322,15 +339,33 @@ describe("E2E 잠금", () => {
 });
 
 describe("E2E 잠금 경합 (두 프로세스)", () => {
-  /** 죽은 주인의 잠금을 동시에 노리는 자식 하나. 잡았으면 "won", 아니면 "lost"를 찍는다. */
+  /** 죽은 주인의 잠금을 동시에 노리는 자식 하나. 시도 결과를 알리고, 놓으라 할 때까지 쥔다. */
   const racer = (path, startAt) => `
     import { tryAcquireLock, readLockPid } from ${JSON.stringify(lockModuleUrl)};
+    const path = ${JSON.stringify(path)};
+    const sleep = (ms) =>
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
     while (Date.now() < ${startAt}) {}
-    const won = tryAcquireLock(${JSON.stringify(path)}, process.pid);
-    // 이긴 쪽은 실제 러너처럼 잠금을 쥔 채 잠시 살아 있는다. 곧바로 죽으면 진 쪽이 그 잠금을
-    // 정당하게 회수하므로 "둘 다 이겼다"가 되는데, 그건 잠금의 결함이 아니라 모델이 틀린 것이다.
-    if (won) { const until = Date.now() + 900; while (Date.now() < until) {} }
-    process.stdout.write(JSON.stringify({ won, pid: process.pid, holder: readLockPid(${JSON.stringify(path)}) }));
+    // 실제 러너처럼 자리가 날 때까지 다시 시도한다. 한 번만 보면 Windows 에서 두 회수 rename 이
+    // 서로가 연 pid 파일 핸들에 막혀 **둘 다** 실패하는 찰나가 잡힌다(EPERM). 그건 주인이 둘이
+    // 되는 위험이 아니라 그 순간 아무도 못 잡은 것이고, 러너는 폴링으로 다시 온다.
+    let won = false;
+    for (let attempt = 0; attempt < 300 && !won; attempt += 1) {
+      won = tryAcquireLock(path, process.pid);
+      if (won) break;
+      // 살아 있는 남의 잠금이 자리를 지키면 정당하게 진 것이다. 죽은 주인이 그대로면 다시 시도한다.
+      const holder = readLockPid(path);
+      if (holder !== null && holder !== ${DEAD_PID}) break;
+      sleep(5);
+    }
+    // 이긴 쪽은 실제 러너처럼 잠금을 쥔 채 산다. 곧바로 죽으면 진 쪽이 그 잠금을 정당하게
+    // 회수하므로 "둘 다 이겼다"가 되는데, 그건 잠금의 결함이 아니라 모델이 틀린 것이다.
+    // 얼마나 사는지는 부모가 정한다 — 두 시도가 모두 끝난 뒤에 놓으라고 알려 온다.
+    // 진 쪽도 같이 기다린다. 보내자마자 exit 하면 아직 채널에 남은 결과가 버려질 수 있다.
+    process.on("message", () => process.exit(0));
+    // 부모가 먼저 죽으면 채널이 닫힌다. 잠금을 쥔 고아로 남지 않게 같이 끝낸다.
+    process.on("disconnect", () => process.exit(0));
+    process.send({ won, pid: process.pid, holder: readLockPid(path) });
   `;
 
   it("죽은 주인의 잠금을 둘이 동시에 노려도 하나만 이긴다", async () => {
@@ -343,22 +378,36 @@ describe("E2E 잠금 경합 (두 프로세스)", () => {
       writeFileSync(join(path, PID_FILE_NAME), String(DEAD_PID));
       age(path);
 
-      const startAt = Date.now() + 120;
-      const results = await Promise.all([
+      const startAt = Date.now() + 200;
+      const racers = [
         runRacer(racer(path, startAt)),
         runRacer(racer(path, startAt)),
-      ]);
+      ];
+      let results;
+      let holder;
+      try {
+        results = await Promise.all(racers.map((one) => one.reported));
+        // 두 시도가 모두 끝난 지금 주인을 본다. 이긴 쪽은 아직 살아 있으므로 진 쪽에게 이 잠금은
+        // 회수 대상이 아니었다 — 단언이 자식의 스케줄링과 무관해진다.
+        holder = readLockPid(path);
+      } finally {
+        // 한쪽이 보고 없이 죽어도 남은 쪽이 잠금을 쥔 채 테스트 끝까지 매달리지 않게 놓아 준다.
+        for (const one of racers) one.release();
+      }
+      await Promise.all(racers.map((one) => one.finished));
 
       const winners = results.filter((result) => result.won);
-      expect(winners).toHaveLength(1);
+      // 깨졌을 때 두 자식이 무엇을 봤는지 없으면 원인을 못 찾는다.
+      const seen = `${JSON.stringify(results)} holder=${holder}`;
+      expect(winners, seen).toHaveLength(1);
       // 이긴 쪽의 잠금이 그대로 남아 있어야 한다 — 진 쪽이 지우고 가면 안 된다.
-      expect(readLockPid(path)).toBe(winners[0].pid);
+      expect(holder, seen).toBe(winners[0].pid);
     }
-  }, 60_000);
+  }, 120_000);
 });
 
 describe("포트를 쥔 프로세스", () => {
-  it("리스너의 pid·시작 시각·커맨드를 알아낸다", async () => {
+  it("리스너의 pid·시작 시각·커맨드를 알아낸다", async (context) => {
     // 잠금은 자기 잠금의 stale만 회수한다. Playwright만 죽고 uvicorn·vite preview가 남으면 그
     // 고아가 포트를 쥔 채 남는데, "쓰이는 중"이라는 사실만으로는 고아인지 남의 정상 실행인지
     // 구별할 수 없다. 사람이 판단할 수 있게 주인을 찍어 준다.
@@ -372,8 +421,15 @@ describe("포트를 쥔 프로세스", () => {
       typeof address === "object" && address !== null ? address.port : 0;
 
     const owner = describePortOwner(port);
+    if (owner === null) {
+      // 조회는 최선껏이 모듈 계약이다 — OS 도구(`lsof` 등)가 없거나 시간을 넘긴 러너에서는 null
+      // 이 정상 결과라, 여기서 붉어지면 모듈이 아니라 러너 이미지를 탓하게 된다(3차 리뷰 P3 추가 1).
+      await new Promise((done) => server.close(() => done(undefined)));
+      context.skip();
+      return;
+    }
 
-    expect(owner?.pid).toBe(process.pid);
+    expect(owner.pid).toBe(process.pid);
     // 시작 시각·커맨드는 최선껏이라 없을 수 있지만, 있으면 한 줄에 들어갈 길이여야 한다.
     expect(owner?.command === null || owner.command.length <= 161).toBe(true);
     expect(owner?.command ?? "").not.toContain(String.fromCharCode(10));
@@ -397,8 +453,16 @@ describe("포트를 쥔 프로세스", () => {
     ]).catch((error) => error);
 
     expect(failure).toBeInstanceOf(Error);
-    expect(failure.message).toContain(`pid=${process.pid}`);
-    expect(failure.message).toContain("orphan");
+    // 주인 조회는 최선껏이다. 도구가 없는 러너에서는 "모른다"로 내려앉는 것이 계약이라 그쪽을
+    // 본다 — 조회 성공을 전제하면 degrade 가 아니라 실패가 된다(3차 리뷰 P3 추가 1).
+    expect(failure.message).toContain(
+      listenerPid(port) === null ? "owner unknown" : `pid=${process.pid}`,
+    );
+    // 할 일이 먼저, 고아일 가능성은 그 뒤다 — 옆 체크아웃의 정상 dev 서버도 이 경로로 온다.
+    const stopAt = failure.message.indexOf("Stop the other server");
+    expect(stopAt).toBeGreaterThan(-1);
+    expect(failure.message.indexOf("own ports")).toBeGreaterThan(stopAt);
+    expect(failure.message.indexOf("orphan")).toBeGreaterThan(stopAt);
     // 자동으로 죽이지 않는다는 사실이 메시지에 있어야 한다.
     expect(failure.message).toContain("never kills a process it did not start");
 
@@ -439,11 +503,42 @@ describe("E2E 포트가 단위 실행에 새지 않는다", () => {
     expect(code).not.toMatch(/VITE_API_BASE_URL/);
   });
 
-  it("빌드 주소는 러너가 빌드 자식에만 넘긴다", async () => {
+  it("빌드 자식이 받는 주소는 포트 설정을 따른다", async () => {
     // 서식이 아니라 값을 본다 — Prettier 가 줄을 바꿔도 깨지지 않게(2차 리뷰 P3-5).
-    const { BUILD_ARGS } = await import("./build-command.mjs");
+    const { BUILD_ARGS, buildEnv } = await import("./build-command.mjs");
 
     expect(BUILD_ARGS).toEqual(["run", "build"]);
+    expect(buildEnv({})).toEqual({
+      VITE_API_BASE_URL: `http://localhost:${DEFAULT_BACKEND_PORT}`,
+    });
+    expect(buildEnv({ [BACKEND_PORT_ENV]: "18000" })).toEqual({
+      VITE_API_BASE_URL: "http://localhost:18000",
+    });
+    // 직접 준 주소가 있으면 그 뜻을 덮지 않는다.
+    expect(
+      buildEnv({
+        VITE_API_BASE_URL: "http://localhost:19999",
+        [BACKEND_PORT_ENV]: "18000",
+      }),
+    ).toEqual({ VITE_API_BASE_URL: "http://localhost:19999" });
+  });
+
+  it("러너는 그 주소를 빌드 자식에만 넘긴다", async () => {
+    // 3차 리뷰 P3-2: 이름은 "빌드 자식에만"인데 단언은 `BUILD_ARGS` 만 보고 있었다. 주소를 만드는
+    // 곳이 `buildEnv` 하나이므로, 러너가 그것을 빌드 호출에만 쓰고 Playwright 자식 env 에는
+    // 아무 주소도 끼워 넣지 않는다는 것을 본다. 이쪽이 새면 브라우저가 아니라 Playwright 프로세스
+    // 환경이 오염돼, `vite.config.ts` 단언(반대쪽)은 그대로 통과한다.
+    const runner = stripComments(
+      await readFile(resolve("e2e/run-playwright.mjs"), "utf8"),
+    );
+
+    // 주소 문자열을 러너가 직접 만들지 않는다.
+    expect(runner).not.toMatch(/VITE_API_BASE_URL|backendOrigin/);
+    // 빌드 자식 한 번에만 쓴다.
+    expect(runner.match(/buildEnv\(\)/g)).toHaveLength(1);
+    expect(runner).toMatch(
+      /runToCompletion\(\s*"npm",\s*BUILD_ARGS,\s*buildEnv\(\)/,
+    );
   });
 });
 

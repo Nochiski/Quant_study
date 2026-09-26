@@ -1,0 +1,144 @@
+[
+  {
+    "event": {
+      "query": "KRX 모멘텀 팩터 2026",
+      "sources": [
+        {
+          "title": "KRX 모멘텀 리뷰",
+          "url": "https://example.com/krx-momentum"
+        },
+        {
+          "title": "팩터 성과 보고",
+          "url": "https://example.com/factor-review"
+        }
+      ],
+      "type": "search_activity"
+    },
+    "sequence": 0,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "input_tokens": 2600,
+      "output_tokens": 240,
+      "type": "usage"
+    },
+    "sequence": 1,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "arguments": {
+        "rationale": "모멘텀 프리미엄은 KRX에서도 관측된다 (https://example.com/krx-momentum).",
+        "source_text": "schema_version: '1.1'\ntitle: 깨진 제안\n",
+        "sources": [
+          {
+            "title": "KRX 모멘텀 리뷰",
+            "url": "https://example.com/krx-momentum"
+          }
+        ],
+        "summary": "12개월 모멘텀에서 최근 1개월을 뺀 순위로 상위 종목을 담는다.",
+        "title": "KRX 12-1 모멘텀"
+      },
+      "call_id": "call-propose-1",
+      "name": "propose_strategy",
+      "type": "tool_call"
+    },
+    "sequence": 2,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "call_id": "call-propose-1",
+      "name": "propose_strategy",
+      "ok": false,
+      "summary": "제안이 서버 검증을 통과하지 못해 사용자에게 전달되지 않았습니다. 아래 진단이 가리키는 위치를 고쳐 다시 제출하세요. 같은 원문을 그대로 다시 보내면 같은 진단이 돌아옵니다.\n{\"ok\": false, \"spec_hash\": null, \"diagnostics\": [{\"code\": \"structure.missing_field\", \"pointer\": \"/data… (총 371자)",
+      "type": "tool_result"
+    },
+    "sequence": 3,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "arguments": {
+        "rationale": "모멘텀 프리미엄은 KRX에서도 관측된다 (https://example.com/krx-momentum).",
+        "source_text": "schema_version: '1.1'\ntitle: 깨진 제안\n",
+        "sources": [
+          {
+            "title": "KRX 모멘텀 리뷰",
+            "url": "https://example.com/krx-momentum"
+          }
+        ],
+        "summary": "12개월 모멘텀에서 최근 1개월을 뺀 순위로 상위 종목을 담는다.",
+        "title": "KRX 12-1 모멘텀"
+      },
+      "call_id": "call-propose-2",
+      "name": "propose_strategy",
+      "type": "tool_call"
+    },
+    "sequence": 4,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "call_id": "call-propose-2",
+      "name": "propose_strategy",
+      "ok": false,
+      "summary": "제안이 서버 검증을 통과하지 못해 사용자에게 전달되지 않았습니다. 아래 진단이 가리키는 위치를 고쳐 다시 제출하세요. 같은 원문을 그대로 다시 보내면 같은 진단이 돌아옵니다.\n{\"ok\": false, \"spec_hash\": null, \"diagnostics\": [{\"code\": \"structure.missing_field\", \"pointer\": \"/data… (총 371자)",
+      "type": "tool_result"
+    },
+    "sequence": 5,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "arguments": {
+        "rationale": "모멘텀 프리미엄은 KRX에서도 관측된다 (https://example.com/krx-momentum).",
+        "source_text": "schema_version: '1.1'\ntitle: 깨진 제안\n",
+        "sources": [
+          {
+            "title": "KRX 모멘텀 리뷰",
+            "url": "https://example.com/krx-momentum"
+          }
+        ],
+        "summary": "12개월 모멘텀에서 최근 1개월을 뺀 순위로 상위 종목을 담는다.",
+        "title": "KRX 12-1 모멘텀"
+      },
+      "call_id": "call-propose-3",
+      "name": "propose_strategy",
+      "type": "tool_call"
+    },
+    "sequence": 6,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "call_id": "call-propose-3",
+      "name": "propose_strategy",
+      "ok": false,
+      "summary": "제안이 서버 검증을 통과하지 못해 사용자에게 전달되지 않았습니다. 아래 진단이 가리키는 위치를 고쳐 다시 제출하세요. 같은 원문을 그대로 다시 보내면 같은 진단이 돌아옵니다.\n{\"ok\": false, \"spec_hash\": null, \"diagnostics\": [{\"code\": \"structure.missing_field\", \"pointer\": \"/data… (총 371자)",
+      "type": "tool_result"
+    },
+    "sequence": 7,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "stop_reason": "end_turn",
+      "type": "done"
+    },
+    "sequence": 8,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "code": "proposal_invalid",
+      "message": "제안이 3회 연속 검증에 실패해 턴을 종료했습니다 — session_id=session-1 attempts=3 max_attempts=3",
+      "type": "failure"
+    },
+    "sequence": 9,
+    "turn_id": "turn-1"
+  }
+]

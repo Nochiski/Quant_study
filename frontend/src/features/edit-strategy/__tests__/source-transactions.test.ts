@@ -337,6 +337,56 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
     );
   });
 
+  it.each([
+    ["LF", "\n"],
+    ["CRLF", "\r\n"],
+  ])(
+    "empties an inner sequence whose only item is a multi-line mapping with `#` in a quoted scalar on the dash line (%s, #197)",
+    (_name, eol) => {
+      // property seed 968400747의 반례다. 안쪽 항목이 여러 줄이라 부모 줄 뒤에 자식 줄이 이어진다. dash 줄의
+      // 인용 스칼라 `"#tag"` 속 `#`을 부모 줄 끝 주석으로 오인하면 dash 줄을 남긴 채 `[]`를 덧붙여 tree가 깨진다.
+      const source = [
+        'schema_version: "1.1"',
+        "zgeu2_: -0",
+        "g_13:",
+        "  # c3",
+        '  - - jemr0v: "#tag"',
+        "      # c4",
+        "      hyn9_3y8: false",
+        "      # c5",
+        "      mf: -277",
+        "      # c6",
+        "      kw5t:",
+        "        # c7",
+        "        w_: null",
+        "        # c8",
+        "        rq8ujnx: |-",
+        "          first",
+        "          second",
+        "          third",
+        "",
+      ].join(eol);
+      expect(ok(source, { kind: "remove", pointer: "/g_13/0/0" }).nextSource).toBe(
+        ['schema_version: "1.1"', "zgeu2_: -0", "g_13:", "  # c3", "  - []", ""].join(eol),
+      );
+    },
+  );
+
+  it.each([
+    ["LF", "\n"],
+    ["CRLF", "\r\n"],
+  ])(
+    "does not read ` #` inside a quoted scalar on the dash line as the parent's comment when the parent content starts on that line (%s, #198 review P3)",
+    (_name, eol) => {
+      // `"a #b"`의 `#`은 공백 뒤라 YAML 주석 문자 규칙만으로는 걸러지지 않는다. 부모 내용(안쪽 시퀀스)이 dash
+      // 줄에서 시작하므로 그 줄에 부모의 줄 끝 주석은 없다는 판정(`contentOnLaterLine`)만이 이 경우를 지킨다.
+      const source = ["g:", '  - - k: "a #b"', "      x: 1", "z: 2", ""].join(eol);
+      expect(ok(source, { kind: "remove", pointer: "/g/0/0" }).nextSource).toBe(
+        ["g:", "  - []", "z: 2", ""].join(eol),
+      );
+    },
+  );
+
   it("expands `- []` and `- {}` without leaving a trailing space", () => {
     expect(
       ok("a:\n  - []\n", {

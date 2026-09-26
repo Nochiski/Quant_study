@@ -6,10 +6,10 @@ current_phase: P1,P2
 current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07
 active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07]
 parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07]
-last_updated: 2026-09-27T07:12:26+09:00
+last_updated: 2026-09-27T08:51:43+09:00
 planned_prs: 29
 merged_prs: 6
-approved_prs: 10
+approved_prs: 11
 progress_percent: 21
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 21
 | Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07` |
 | Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07` |
 | Progress | `6 / 29 merged (21%)` |
-| Approved | `10 / 29` |
-| Aggregated at | `2026-09-27 07:12 KST` |
+| Approved | `11 / 29` |
+| Aggregated at | `2026-09-27 08:51 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -272,7 +272,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Acceptance | WORKFLOW P2-07 |
 | Non-goals | 화면에서 승격 노드를 숨기거나 사람 말로 보이기(BACKLOG-014, P3-01), duckdb 그룹 필드 제공과 `group.rank` 단위(P2-08, BACKLOG-015), 단위 경고·출력 타입 문장의 frontend i18n(진단 문장은 backend 가 완성해 보낸다 — SoT 진단 코드 행), 횡단면 eligibility 가 모집단을 0 으로 만드는 쪽의 진단(P2-05 DEFECT-P3-1, 아래 변경 기록의 판단) |
 | Branch/worktree | `feat/lang2-p2-07-compile-gate` / `wt-lang2-p2-07` |
-| Base SHA | `36060527` (`feat/lang2-p2-06-risk-factor` tip). P2-06 의 문서 커밋 `dd1fbebd`(BACKLOG-013)를 merge 로 따라갔다 |
+| Base SHA | `lang2/integration` (`c72f6257`, P2-03~P2-06 통합 머지, main `a4ccfd7a` 기반). 착수는 P2-06 tip `36060527` 에서 했고, P2-06 문서 커밋 `dd1fbebd` 와 통합 브랜치를 차례로 merge 로 따라갔다 |
 | Head SHA | PR [#201](https://github.com/Nochiski/Quant_study/pull/201) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
 | Diff stat | 생성 산출물(OpenAPI·SDK·연산자 카탈로그 fixture)·문서를 뺀 handwritten **24파일 · +1524 / −35**. 비테스트 backend src 15파일 +426/−31(신규 `_promotion.py` 87줄·`field_catalog.py` 21줄, `_validation.py` +159), test 9파일 +1098/−4(신규 4파일: 출력 타입 312·compile 게이트 276·property 248·단위 경고 148줄, 나머지는 BACKLOG-003 76줄·duckdb 16줄·e2e 19줄과 기대값 3줄) |
 | Focused tests | `uv run pytest tests/domain/test_factor_operators.py tests/domain/test_factor_output_gate.py tests/domain/test_signal_unit_mismatch.py tests/application/test_strategy_compile_gate.py tests/integration/test_compile_gate_property.py tests/integration/test_truthful_pipeline.py tests/test_adapters_equity_duckdb.py -q` |
@@ -650,8 +650,8 @@ Phase exit:
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `APPROVED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2` · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 반영, 2차 **APPROVE**(돌연변이 재실행 2 failed 확인, P3-07 이탈 타당). P2 둘 다 `_record_codec.py`의 은퇴 row 읽기 5줄이다: 1.1 row 테스트 0건(그 가지를 `raise`로 바꿔도 초록), 미지 `schema_version`이 fail-closed에서 silent 현재 버전 해석으로 바뀜. 게이트는 아래 Full gate |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `APPROVED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · 1차 → `28003cf1` · 2차 → `2a10798d` · 3차 → `70cfdffa` · 4차 → `22636fc3` · 5차 **APPROVE**(P3 R5-P204-001 단조성: 기준점 후보 비교를 `<=` 로, 리드 지시로 즉시 반영). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `APPROVED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility` · 1차 REQUEST_CHANGES(P2 2·P3 2) → `641c6f3b`·`efd6a768` · 2~5차 **APPROVE**. 3차 재배치 때 첫 커밋 `a35c1e40` 에 P2-04 새 테스트 한 줄의 enum 개명을 넣었고, P2-04 3차 재현 테스트 `8587d413` 를 더했다. P2-04 5차 반영 tip `35089901` 위로 rebase(코드 변경분 동일). 게이트는 push tip 에서 재실행(PR 댓글) |
-| [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `IN_REVIEW` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base P2-06 tip `36060527`(뒤에 P2-06 문서 커밋 `dd1fbebd` merge) · 커밋 11개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → 이 PLAN) · 게이트는 push tip 에서 실측(PR 본문) |
+| [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `APPROVED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 **APPROVE**(blocking 0 · P2 1 · P3 4, 전부 반영: `77bd713c`·`7b707660`) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
+| [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base `lang2/integration`(통합 머지 `c72f6257` 을 merge, 처음 착수는 P2-06 tip `36060527`) · 커밋 11개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → 이 PLAN) · 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `WAITING` | — |
 | [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `WAITING` | — |
 
@@ -761,6 +761,7 @@ Phase exit:
 | `P2-05` | `review_lang2_p2_0405` | 3 | `APPROVE` | P2-04 2차 반영 tip 위 재배치 확인. 코드 커밋 range-diff 는 문맥 줄 두 개만 다르고 `backend/src`·`backend/tests`·`frontend/src` 변경분이 바이트 동일, 기준선 해시 불변. P2-04 R3-P204-001 이 이 PR 의 `top_count: 1` 로 재현돼 재현 테스트 `8587d413` 을 더했다 |
 | `P2-05` | `review_lang2_p2_0405` | 4 | `APPROVE` | src 는 이전 APPROVE본과 바이트 동일, 재현 테스트 `8587d413` 는 균등 대체를 지우면 6건 red 로 판별력 있음. 첫 커밋의 enum 개명 한 줄은 P2-05 가 enum 을 바꾸므로 필요한 변경으로 확인. 해시 불변 |
 | `P2-05` | `review_lang2_p2_0405` | 5 | `APPROVE` | 4차본과 src 바이트 동일, 해시 불변. P2-04 R5 반영(`<=`) 뒤 재배치 |
+| `P2-06` | `review_lang2_p2_06` | 1 | `APPROVE` | blocking 0 · P2 1 · P3 4. acceptance 전 항목 충족, 돌연변이 11종 중 10종 red(M6 정규화 모집단 변형은 동치). **P2-1**: `_risk_value` 의 공개일 조건을 지워도 테스트가 전부 초록 — 역가중 팩터가 합성 루프 밖이라 그 한 줄이 유일한 look-ahead 가드다. 반영: 공개일 초과 → `MISSING_RISK`·선정 불변 테스트, 그 조건만 지우면 1건 red 확인(`77bd713c`). **P3**: form-list 삭제 가드 fixture 의 `saved_factor` → `risk.risk_factor_id` 참조, `risk_factor_id` 설명에 적용 조건, `strategy.risk.risk_field` 메시지에 값(`77bd713c`·`7b707660`), PR 본문 e2e 합계에 "9 did not run" |
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
@@ -791,6 +792,9 @@ Phase exit:
   리밸런싱 경로를 바꾸는 실행 측 변경이라 compile 게이트 PR 범위 밖이고, 결과가 빈 포트폴리오라 조용히
   틀린 값을 내지 않는다(P3 그대로). 추적 화면이 규칙·순위 탈락을 구분해 세는 P4-03 미리보기 패널에서 빈
   결과의 이유가 보인다.
+- 2026-09-27 — P2-06 1차 리뷰 APPROVE(blocking 0). 권고 P2-1(역가중 팩터 공개일 가드 회귀 테스트)과
+  P3 4건을 반영해 `APPROVED`. 삭제 가드 fixture 를 `risk.risk_factor_id` 참조로 바꿔 BACKLOG-012 에 넣을
+  항목은 생기지 않았다.
 
 - 2026-09-27 — P2-01·P2-02 main 병합 리뷰 P3 반영(P2-06 PR 문서): 실행 설정 스키마 설명 키 7개의
   frontend 문장·커버리지 테스트 부재를 BACKLOG-013 으로 P3-02 acceptance 에 예약하고, US-SM-10 비고에

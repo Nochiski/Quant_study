@@ -229,7 +229,9 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         yield semantic_issue(
             "strategy.risk.risk_field",
             "risk.risk_field_id",
-            "리스크 가중 방식을 쓰려면 리스크 필드나 리스크 팩터를 지정해야 합니다.",
+            "리스크 가중 방식을 쓰려면 리스크 필드나 리스크 팩터를 지정해야 합니다: "
+            f"weighting={spec.portfolio.weighting.value!r} "
+            f"risk_field_id={spec.risk.risk_field_id!r} risk_factor_id={risk_factor_id!r}",
         )
     excluded = inverse_risk_factor_id(spec)
     if excluded is None or excluded not in factor_ids:

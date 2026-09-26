@@ -809,9 +809,17 @@ const planRemove = (
     const empty = Array.isArray(parent) ? "[]" : "{}";
     // `key: # 메모`처럼 부모 줄에 줄 끝 주석이 있으면 그 줄은 두고 다음 줄에 빈 컨테이너를 쓴다(P3-02 리뷰 P2-2).
     const parentLine = lineEndOf(source, from);
-    // 줄 끝 주석 분기는 부모 줄 뒤에 자식 줄이 있을 때만 성립한다. `- - "#tag"`처럼 안쪽 유일 항목이 부모와
-    // 같은 줄에 있으면 인용 스칼라 안의 `#`이 주석으로 오인되어 범위가 뒤집혔다(P5-01 리뷰 P2-1).
-    if (parentLine < to && source.slice(from, parentLine).includes("#")) {
+    // 부모 줄의 `#`이 부모의 줄 끝 주석인 것은 부모 내용(첫 자식)이 다음 줄에서 시작할 때뿐이다(`key: # 메모`
+    // 다음 줄에 자식). 내용이 같은 줄에서 시작하면(`- - …`) 그 줄의 `#`은 지워질 자식 안의 스칼라일 수 있다.
+    // 한 줄 자식 `- - "#tag"`(P5-01 리뷰 P2-1)는 물론, 여러 줄 자식 `- - k: "#tag"` 뒤에 자식 줄이 이어질 때도
+    // 인용 스칼라 속 `#`을 주석으로 오인해 dash 줄을 남긴 채 `[]`를 덧붙여 tree가 깨졌다(#197). `#`은 YAML
+    // 주석 규칙대로 줄 시작이나 공백 뒤일 때만 주석으로 본다.
+    const contentOnLaterLine =
+      parentRange !== undefined && parentRange.start.offset > parentLine;
+    if (
+      contentOnLaterLine &&
+      /(?:^|[ \t])#/.test(source.slice(from, parentLine))
+    ) {
       const keyRange = parsed.keyRanges.get(parentPointer);
       const column =
         keyRange?.start.column ??

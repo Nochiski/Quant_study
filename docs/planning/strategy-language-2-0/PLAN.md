@@ -119,7 +119,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `IN_REVIEW` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `6ffb6ba` · `review_lang2_p1_01` 진행 중 · 게이트: typecheck·lint·Vitest 652·build·e2e 19/19 |
+| [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `IN_REVIEW` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `review_lang2_p1_01` 1·2차 APPROVE(blocking 0), 후속 8건 반영 · 게이트: typecheck·lint·Vitest 658·build·e2e 19/19 |
 | [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `IN_PROGRESS` | 구현자 `impl-lang2-p1-02`, 워크트리 `wt-lang2-p1-02`, 브랜치 `feat/lang2-p1-02-undo-redo` |
 | [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `WAITING` | — |
 | [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `WAITING` | — |
@@ -224,6 +224,14 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-20 — P1-01 2차 리뷰 APPROVE(blocking 0). 중첩된 reveal 훅 둘이 서로 다른 요소를
+  끌던 R2-1을 "마지막 매치"로 고치고, 같은 문제 행 재클릭 reveal(R2-2), 명시적
+  `schemaLoaded`(R2-4), `scrollIntoView` 수신 요소 단언(R2-5)까지 반영했다.
+- 2026-09-20 — P1-01 구현·1차 리뷰: PR #168. 문서 상태 배지와 `DiagnosticsPanel`을
+  `SourceEditor` 밖 슬롯으로 올려 다섯 탭 모두에서 보이게 하고, 문제 행 클릭 목적지를
+  `resolveDiagnosticDestination`이 판정한다. Graph 판정은 backend plan이 아니라 parse tree로
+  한다(편집 표면은 plan 없이도 문서의 팩터를 그린다). `review_lang2_p1_01` APPROVE(blocking 0),
+  후속으로 편집기 높이 충전·선택 카드 `scrollIntoView`·route 테스트 강화 5건을 반영했다.
 - 2026-09-20 — P0-01 4차 리뷰 반영: P2-06·P2-07의 P1-03 교차 의존 선언(WORKFLOW 1절·Dependency 열), P2-06·
   P2-07 OpenAPI 재생성 사유 정정, active PR 문장을 도구 동작과 일치, P2-03 분할 시 PLAN 절차 참조.
 - 2026-09-20 — 패키지 생성. 디자인보드 원인 분석(코드 감사 2건, 아이디어 5개 실험)과 제품 소유자

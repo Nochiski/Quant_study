@@ -1094,9 +1094,16 @@ test.describe("professional YAML workflow", () => {
       editor.getByRole("status").filter({ hasText: "반영됨" }),
     ).toContainText("input_node_id 반영됨");
 
-    // 편집은 source 트랜잭션이라 YAML에 그대로 있고 compile이 다시 통과한다(문서 상태는 source view에 있다).
-    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    // 문서 상태 배지는 탭 밖에 있어 Graph 탭에 머문 채 compile 결과를 본다(WORKFLOW P1-01).
     await expectPhase(page, "검증 통과");
+    expect(
+      await page
+        .getByRole("tab", { name: "Graph", exact: true })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+
+    // 편집은 source 트랜잭션이라 YAML에 그대로 있다. 원문 읽기는 편집기가 보이는 탭에서 한다.
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
     const edited = await currentSource(page);
     // 줄 단위 단언: `node_id: field`는 `input_node_id: field`의 부분문자열이라 앞 공백까지 본다.
     expect(edited).toContain("\n          node_id: field\n");

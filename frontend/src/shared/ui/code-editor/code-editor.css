@@ -1,5 +1,13 @@
+/* 편집기는 준 높이를 채운다 — 탭 패널과 문제 목록 사이에 빈 구멍이 생기지 않게(P1-01 리뷰 P2-1). */
+.code-editor-shell {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .code-editor {
-  height: 100%;
+  flex: 1;
   min-height: 240px;
   border: 1px solid var(--border);
   border-radius: var(--radius-medium);
@@ -66,6 +74,7 @@
 
 .code-editor-fallback {
   display: grid;
+  flex: 1;
   place-items: center;
   min-height: 240px;
   color: var(--text-muted);

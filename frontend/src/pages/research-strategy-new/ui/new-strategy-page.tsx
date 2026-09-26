@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   ContractInspector,
+  DiagnosticsPanel,
   ProposalApplyDialog,
   ProposalApplyFeedback,
   DirtyLeaveGuard,
+  DocumentStatus,
   DocumentToolbar,
   FactorGraphPanel,
   RecoveryBanner,
@@ -28,6 +30,7 @@ import {
   useStrategyAssistant,
   useAutosave,
   useCompileDocument,
+  useDiagnosticNavigation,
   useExecutionPlans,
   useRunBacktest,
   useServerDraft,
@@ -186,15 +189,36 @@ export const NewStrategyPage = () => {
     },
     [navigate, search],
   );
+  const openSourceAt = useCallback(
+    (pointer: string | undefined): void => {
+      if (pointer !== undefined) outline.requestSourceReveal(pointer);
+      selectPointer(pointer, "outline");
+    },
+    [outline, selectPointer],
+  );
+  // outline 다음에 부른다 — 탭 전환 뒤 진단 범위로 가는 effect가 outline의 pointer reveal 뒤에 서야
+  // 더 정확한 범위가 남는다(WORKFLOW P1-01).
+  const problems = useDiagnosticNavigation({
+    state: document,
+    view,
+    sourceView: document.format,
+    form: form.projection,
+    tree: form.tree,
+    schemaLoaded: assist.schema !== null,
+    onSelectPointer: (pointer) => selectPointer(pointer, "graph"),
+    onOpenSource: openSourceAt,
+  });
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
+  const onProblemsEditorReady = problems.onEditorReady;
   const onProposalEditorReady = proposalApply.onEditorReady;
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
+      onProblemsEditorReady(editor);
       onProposalEditorReady(editor);
     },
     [
@@ -202,6 +226,7 @@ export const NewStrategyPage = () => {
       onProposalEditorReady,
       onSnippetEditorReady,
       onTransactionsEditorReady,
+      onProblemsEditorReady,
     ],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
@@ -307,6 +332,14 @@ export const NewStrategyPage = () => {
             replace: true,
           })
         }
+        documentStatus={<DocumentStatus state={document} />}
+        problems={
+          <DiagnosticsPanel
+            diagnostics={problems.diagnostics}
+            stale={problems.stale}
+            onSelect={problems.selectDiagnostic}
+          />
+        }
         editorActions={
           <DocumentToolbar
             state={document}
@@ -350,6 +383,7 @@ export const NewStrategyPage = () => {
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
               selectedPointer={search.path}
+              revealSignal={problems.revealSignal}
             />
           ),
           graph: (
@@ -357,6 +391,7 @@ export const NewStrategyPage = () => {
               state={executionPlans}
               diagnostics={currentDiagnostics(document)}
               selectedPointer={search.path}
+              revealSignal={problems.revealSignal}
               editing={{
                 tree: form.tree,
                 schema: assist.schema,

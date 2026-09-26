@@ -43,6 +43,7 @@ import type {
   Scalar,
   SourceOperation,
 } from "../model/source-transactions";
+import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./strategy-form-panel.css";
@@ -69,6 +70,11 @@ type StrategyFormPanelProps = {
   stale?: boolean;
   /** URL `path`(Graph "Form에서 열기" 등). 그 pointer 아래의 목록 항목을 `aria-current`로 강조한다(P5-03). */
   selectedPointer?: string;
+  /**
+   * 같은 문제 행을 다시 눌렀을 때도 선택 카드를 다시 끌어오게 하는 신호. pointer가 같아도 이 값이 바뀌면
+   * `useRevealSelection`의 effect가 다시 돈다(2차 리뷰 R2-2).
+   */
+  revealSignal?: number;
 };
 
 const UNSET = "__unset__";
@@ -91,11 +97,20 @@ export const StrategyFormPanel = ({
   catalogSnippets = [],
   onOpenGraph,
   selectedPointer,
+  revealSignal,
   stale = false,
 }: StrategyFormPanelProps) => {
   const disabled = transactions.disabled;
+  const container = useRevealSelection<HTMLElement>(
+    selectedPointer,
+    revealSignal,
+  );
   return (
-    <section className="strategy-form" aria-label={t("form.panel.label")}>
+    <section
+      ref={container}
+      className="strategy-form"
+      aria-label={t("form.panel.label")}
+    >
       <header className="strategy-form__header">
         <div>
           <strong>{t("form.panel.label")}</strong>

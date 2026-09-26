@@ -73,6 +73,13 @@ export type StrategyIdeProps = {
   snippets?: ReactNode;
   /** Editor toolbar actions (format / validate) rendered in the editor header. */
   editorActions?: ReactNode;
+  /**
+   * 문서 상태 배지(검증 통과·구조 오류·STALE). 탭 목록 줄의 오른쪽 — 탭 패널 밖이라 다섯 탭 모두에서
+   * 보인다(WORKFLOW P1-01).
+   */
+  documentStatus?: ReactNode;
+  /** 문제 목록. 탭 패널 밖(편집 패널 아래)이라 다섯 탭 모두에서 보인다(WORKFLOW P1-01). */
+  problems?: ReactNode;
   view?: SourceView;
   onViewChange?: (view: SourceView) => void;
   /** Views the caller can render; the rest are shown disabled. */
@@ -130,6 +137,8 @@ export const StrategyIde = ({
   outline,
   snippets,
   editorActions,
+  documentStatus,
+  problems,
   view = "yaml",
   onViewChange,
   availableViews = ["yaml"],
@@ -785,20 +794,25 @@ export const StrategyIde = ({
               </div>
               <div className="ide__editor-actions">{editorActions}</div>
             </header>
-            <Tabs
-              label={t("ui.tabs.view")}
-              idBase={ids.views}
-              items={VIEWS.map((id) => ({
-                id,
-                label:
-                  id === "yaml" || id === "json"
-                    ? id.toUpperCase()
-                    : capitalize(id),
-                disabled: !availableViews.includes(id),
-              }))}
-              value={view}
-              onChange={(next) => onViewChange?.(next)}
-            />
+            <div className="ide__editor-tabs">
+              <Tabs
+                label={t("ui.tabs.view")}
+                idBase={ids.views}
+                items={VIEWS.map((id) => ({
+                  id,
+                  label:
+                    id === "yaml" || id === "json"
+                      ? id.toUpperCase()
+                      : capitalize(id),
+                  disabled: !availableViews.includes(id),
+                }))}
+                value={view}
+                onChange={(next) => onViewChange?.(next)}
+              />
+              {documentStatus ? (
+                <div className="ide__editor-status">{documentStatus}</div>
+              ) : null}
+            </div>
             {VIEWS.map((id) => (
               <div
                 key={id}
@@ -817,6 +831,9 @@ export const StrategyIde = ({
                     : projections?.[id]}
               </div>
             ))}
+            {problems ? (
+              <div className="ide__problems">{problems}</div>
+            ) : null}
           </section>
           {!narrow && layout.debuggerOpen ? (
             <SplitHandle

@@ -83,7 +83,9 @@ export const useApplyProposalThenBacktest = (
   // 바뀌면 그 객체를 내려놓으므로 객체가 같을 때만 알림을 보인다.
   const [notStartedFor, setNotStartedFor] =
     useState<ProposalApplyStatus | null>(null);
-  // 이미 실행을 이은 요청. 실행이 시작되면 게이트가 닫혀 phase가 바뀌므로 중복 실행만 막으면 된다.
+  // 실행하기로 판정해 대기에서 꺼낸 요청. effect가 이것을 보고 실행을 한 번 부른다.
+  const [firing, setFiring] = useState<ArmedRun | null>(null);
+  // 실행을 이미 부른 요청. `run`의 정체성이 바뀌어 effect가 다시 돌아도 두 번 부르지 않는다.
   const fired = useRef<ArmedRun | null>(null);
   const applyProposal = apply.apply;
   const { canRun, run } = backtest;
@@ -103,19 +105,24 @@ export const useApplyProposalThenBacktest = (
   );
 
   const phase = chainPhase(armed, apply.status, state, canRun);
-  // 실행할 수 없다고 판정한 그 렌더에서 요청을 버린다. effect로 미루면 게이트가 열리는 렌더와
-  // 순서가 갈릴 수 있다 — 렌더 중에 자기 상태를 고치는 것은 React가 허용한 조정 방식이다.
-  if (phase === "blocked" && armed !== null) {
+  // 대기가 끝나는 두 판정(실행·실행하지 않음)은 그 렌더에서 요청을 대기에서 꺼낸다. 렌더 중에 자기
+  // 상태를 고치는 것은 React가 허용한 조정 방식이고, effect로 미루면 게이트가 바뀌는 렌더와 순서가
+  // 갈릴 수 있다. 실행으로 꺼낸 요청도 대기에 남겨 두면, 시작된 실행이 게이트를 닫는 순간 그 요청이
+  // "실행할 수 없음"으로 읽혀 접수된 백테스트를 두고 시작하지 않았다고 알리게 된다.
+  if (armed !== null && phase === "ready") {
+    setArmed(null);
+    setFiring(armed);
+  } else if (armed !== null && phase === "blocked") {
     setArmed(null);
     setNotStartedFor(apply.status);
   }
 
   // 검증이 끝나는 시점은 렌더 사이에만 알 수 있어 effect로 잇는다. 여기서 하는 일은 실행 호출 하나다.
   useEffect(() => {
-    if (armed === null || phase !== "ready" || fired.current === armed) return;
-    fired.current = armed;
+    if (firing === null || fired.current === firing) return;
+    fired.current = firing;
     run();
-  }, [armed, phase, run]);
+  }, [firing, run]);
 
   return {
     applyThenBacktest,

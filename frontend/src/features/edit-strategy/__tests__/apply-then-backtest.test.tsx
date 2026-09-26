@@ -262,12 +262,18 @@ describe("useApplyProposalThenBacktest", () => {
         baseSource: BASE,
       }),
     );
-    rerender({
-      state: compiled(parsed(edited(PROPOSED)), false),
-      canRun: true,
-    });
+    const settled = compiled(parsed(edited(PROPOSED)), false);
+    rerender({ state: settled, canRun: true });
     expect(run).toHaveBeenCalledTimes(1);
     expect(hook.result.current.chain.notStarted).toBe(false);
+
+    // 실행이 시작되면 그 실행이 게이트를 닫는다(`starting`). 이미 이은 요청을 "실행할 수 없어 버림"으로
+    // 읽으면 백테스트는 접수됐는데 알림 줄은 시작하지 않았다고 말한다(C-02 e2e에서 발견).
+    rerender({ state: settled, canRun: false });
+    expect(hook.result.current.chain.notStarted).toBe(false);
+    expect(hook.result.current.chain.waiting).toBe(false);
+    rerender({ state: settled, canRun: true });
+    expect(run).toHaveBeenCalledTimes(1);
   });
 
   it("구문 오류로 검증이 시작되지 않아도 영원히 기다리지 않는다", () => {

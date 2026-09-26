@@ -65,7 +65,10 @@ const progress = (page: Page) =>
  * 그래서 버튼이 있을 때만 누른다.
  */
 const openAssistant = async (page: Page) => {
-  const toggle = page.getByRole("button", { name: "AI 어시스턴트", exact: true });
+  const toggle = page.getByRole("button", {
+    name: "AI 어시스턴트",
+    exact: true,
+  });
   if ((await toggle.count()) > 0) await toggle.click();
   await expect(
     assistant(page).getByRole("heading", { name: "AI 어시스턴트" }),
@@ -100,7 +103,8 @@ const ensureProvider = async (page: Page, label = PROVIDER_LABEL) => {
   const section = page.getByRole("region", { name: "AI 어시스턴트 공급자" });
   // 추가 폼은 공급자 조회가 끝나야 그려진다 — 목록이 비었는지 여기서부터 물을 수 있다.
   await expect(section.getByLabel("표시 이름")).toBeVisible();
-  if ((await section.getByTestId("provider-active").count()) > 0) return section;
+  if ((await section.getByTestId("provider-active").count()) > 0)
+    return section;
   await section.getByLabel("표시 이름").fill(label);
   await section.getByLabel("API 키").fill(SECRET);
   await section.getByRole("button", { name: "연결 테스트 후 저장" }).click();
@@ -230,7 +234,9 @@ test.describe("AI 어시스턴트", () => {
     // 사이는 밀리초라 클릭이 어느 쪽에 떨어질지 정할 수 없다. 그 경계는 application 단위 테스트가
     // 결정적으로 고정하고, 여기서는 "언제 눌러도 사유가 남는다"를 본다.
     await ask(page, "천천히 한 번만 더 설명해 줘");
-    await expect(assistant(page).getByRole("button", { name: "중지" })).toBeVisible();
+    await expect(
+      assistant(page).getByRole("button", { name: "중지" }),
+    ).toBeVisible();
     await expect(assistant(page).getByRole("alert")).toHaveCount(0);
     await assistant(page).getByRole("button", { name: "중지" }).click();
     await expect(
@@ -316,9 +322,10 @@ test.describe("AI 어시스턴트", () => {
     await leaveGuard.click();
 
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
-    await expect(
-      page.getByRole("status", { name: "실행 상태" }),
-    ).toContainText("completed", { timeout: 180_000 });
+    await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
+      "completed",
+      { timeout: 180_000 },
+    );
     await expect(
       page.getByRole("article", { name: "백테스트 결과" }),
     ).toBeVisible({ timeout: 180_000 });

@@ -8,6 +8,8 @@
 
 import { createServer } from "node:net";
 
+import { describePortOwner } from "./port-owner.mjs";
+
 /**
  * 한 주소에서 그 포트가 비었는가.
  * @param {number} port
@@ -44,6 +46,12 @@ export const isPortFree = async (port) => {
 };
 
 /**
+ * 우리가 잠금을 쥔 상태에서 포트가 막혀 있으면, 그 서버는 이 게이트가 띄운 것이 아니다.
+ *
+ * 둘 중 하나다: 옆 체크아웃의 개발 서버이거나, 앞선 실행에서 Playwright 만 죽고 남은 **고아**
+ * (uvicorn·vite preview 는 잠금이 회수해 주지 않는다 — 잠금은 자기 잠금의 stale 만 본다).
+ * 어느 쪽인지는 사람이 판단해야 하므로 pid·시작 시각·커맨드를 찍어 주고 **죽이지는 않는다**.
+ * 잘못 죽이면 남의 게이트가 깨진다.
  * @param {ReadonlyArray<{port: number, label: string, env: string}>} required
  * @returns {Promise<void>}
  */
@@ -54,10 +62,40 @@ export const assertPortsFree = async (required) => {
   }
   if (taken.length === 0) return;
   const detail = taken
-    .map((entry) => `${entry.label}=${entry.port} (override with ${entry.env})`)
-    .join(", ");
+    .map((entry) => {
+      const owner = describePortOwner(entry.port);
+      const who =
+        owner === null
+          ? "owner unknown"
+          : `pid=${owner.pid}` +
+            (owner.startedAt ? ` started=${owner.startedAt}` : "") +
+            (owner.command ? ` command=${owner.command}` : "");
+      return `${entry.label}=${entry.port} [${who}] (override with ${entry.env})`;
+    })
+    .join("; ");
+  // 주인 조회에 쓴 도구와 사람에게 권하는 확인 명령은 다르다. 구현은 파싱하기 쉬운 쪽을 쓰고,
+  // 사람은 손에 익은 쪽을 쓰면 된다 — 문구가 둘을 섞어 쓰면 구현도 그럴 것이라 오해한다
+  // (3차 리뷰 P3 추가 2).
+  const [lookedUpWith, inspect] =
+    process.platform === "win32"
+      ? [
+          "netstat -ano",
+          "`netstat -ano -p tcp | findstr :<port>` or " +
+            "`Get-NetTCPConnection -LocalPort <port> | Select-Object OwningProcess`",
+        ]
+      : [
+          "lsof",
+          "`lsof -nP -iTCP:<port> -sTCP:LISTEN` or `ss -ltnp 'sport = :<port>'`",
+        ];
+  // 먼저 할 일(서버를 멈추거나 포트를 옮긴다)을 앞에, 고아일 가능성은 뒤에 둔다. 옆 체크아웃의
+  // 정상 dev 서버도 이 경로로 오므로 고아라고 단정하는 문장이 앞서면 안 된다(3차 리뷰 P3 추가 3).
   throw new Error(
     "E2E ports are already in use — refusing to run against a server this process did not " +
-      `start: ${detail}. Stop the other server, or give this worktree its own ports.`,
+      `start: ${detail}. Stop the other server, or give this worktree its own ports with the ` +
+      "variables named above. This gate holds the machine lock, so the listener is not another " +
+      "run of this gate: it is a dev server from another checkout, or an orphan left by a run " +
+      "whose Playwright died while its servers kept going. The owner above was looked up with " +
+      `${lookedUpWith}; confirm it with whichever you prefer: ${inspect}. This script never ` +
+      "kills a process it did not start.",
   );
 };

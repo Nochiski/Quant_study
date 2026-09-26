@@ -4,13 +4,12 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BUILD_ARGS } from "./build-command.mjs";
+import { BUILD_ARGS, buildEnv } from "./build-command.mjs";
 import { assertPortsFree } from "./free-port.mjs";
 import { acquireLock } from "./lock.mjs";
 import {
   BACKEND_PORT_ENV,
   PREVIEW_PORT_ENV,
-  backendOrigin,
   backendPort,
   previewPort,
 } from "./ports.mjs";
@@ -52,16 +51,13 @@ const runToCompletion = (command, args, env) =>
     );
   });
 
-// 브라우저 번들의 backend 주소는 빌드 때 박힌다. 포트를 옮겼으면 이 빌드에만 그 주소를 준다 —
-// `vite.config.ts` 가 주변 환경의 `PW_*` 를 읽으면 같은 설정을 쓰는 vitest·dev 까지 끌려간다
-// (1차 리뷰 DEFECT-P105-003).
+// 브라우저 번들의 backend 주소는 빌드 때 박힌다. 그 주소를 만드는 곳은 `buildEnv` 하나고, 여기
+// 빌드 자식에게만 넘긴다 — 아래 Playwright 자식은 받지 않는다(1차 리뷰 DEFECT-P105-003).
 //
 // 빌드는 **잠금 밖**에서 돈다. `dist/` 는 워크트리마다 따로라 직렬화할 이유가 없고, 안에서 돌리면
 // 줄 서 있는 다른 워크트리가 빌드 시간만큼 더 기다린다(2차 리뷰 P3-4).
 try {
-  await runToCompletion("npm", BUILD_ARGS, {
-    VITE_API_BASE_URL: process.env.VITE_API_BASE_URL ?? backendOrigin(),
-  });
+  await runToCompletion("npm", BUILD_ARGS, buildEnv());
 } catch (error) {
   assertOwnedRuntime();
   rmSync(resolvedRuntime, { recursive: true, force: true });

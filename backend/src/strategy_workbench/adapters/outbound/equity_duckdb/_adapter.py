@@ -200,6 +200,10 @@ def _noop_checkpoint() -> None:
     """취소를 요구하지 않는 호출자용 체크포인트 — `load_raw_observations` 의 기본값."""
 
 
+def _noop_progress(fraction: float) -> None:
+    """진행 보고를 요구하지 않는 호출자용 콜백 — `load_raw_observations_cancellable` 의 기본값."""
+
+
 @dataclass(frozen=True)
 class _Observed:
     """셀 하나 — 값 · 공개일 · 내용일(관측이 가리키는 기간·사건의 날짜) · 셀 종류."""
@@ -793,7 +797,23 @@ class EquityDuckdbAdapter:
         *,
         checkpoint: Callable[[], None],
     ) -> RawObservationSet:
-        """`load_raw_observations` 와 같은 결과 + 협조적 취소.
+        """`load_raw_observations` 와 같은 결과 + 협조적 취소. 진행 보고 없이 위임한다."""
+        return self.load_raw_observations_reporting(
+            query, checkpoint=checkpoint, progress=_noop_progress
+        )
+
+    def load_raw_observations_reporting(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None],
+        progress: Callable[[float], None],
+    ) -> RawObservationSet:
+        """`load_raw_observations` 와 같은 결과 + 협조적 취소 + 진행 보고.
+
+        `progress` 는 duckdb 질의가 끝나면 0.5, 행 조립 동안 `_CHECKPOINT_ROWS` 행마다 그 뒤를
+        채워 조립이 끝나면 1.0 을 받는다(이슈 #162). 실데이터 실측에서 질의와 행 조립이 비슷한
+        시간을 쓴다. 실패 값으로 끝나는 경로는 보고하지 않는다.
 
         `checkpoint` 는 (1) duckdb 로 내려가기 전 1회, (2) 행 조립 루프에서
         `_CHECKPOINT_ROWS` 행마다, (3) `RawObservationSet` 계약 검증 중
@@ -839,10 +859,12 @@ class EquityDuckdbAdapter:
             predicate=self._predicate(query.universe_id),
             field_ids=query.field_ids,
         )
+        rows = tuple(self._rows_in(panel, window.sessions))
         observations: list[RawObservation] = []
-        for index, row in enumerate(self._rows_in(panel, window.sessions)):
+        for index, row in enumerate(rows):
             if index % _CHECKPOINT_ROWS == 0:
                 checkpoint()
+                progress(0.5 + 0.5 * index / len(rows))
             fields: list[RawFieldValue] = []
             for field_id in query.field_ids:
                 found = self._cell(panel, row, field_id, lags[field_id])
@@ -871,6 +893,7 @@ class EquityDuckdbAdapter:
                 )
             )
         observations.sort(key=lambda item: (item.as_of, item.security_id))
+        progress(1.0)
         return RawObservationSet(
             status=DataLoadStatus.OK if observations else DataLoadStatus.NO_DATA,
             data_snapshot_id=self._snapshot_id,

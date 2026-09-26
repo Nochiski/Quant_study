@@ -253,3 +253,21 @@ class CancellableRawObservationPort(Protocol):
         *,
         checkpoint: Callable[[], None],
     ) -> RawObservationSet: ...
+
+
+@runtime_checkable
+class ProgressReportingRawObservationPort(Protocol):
+    """선택 능력: 취소에 더해 로딩 진행을 보고한다(이슈 #162).
+
+    실데이터 로딩은 수십 초~수 분이라 진행 없이 두면 run 진행 막대가 멈춘 듯 보인다. `progress` 는
+    어댑터 작업 안의 완료 비율(0~1, 단조 증가)을 받고 1.0 으로 끝난다. 결과는
+    `load_raw_observations` 와 같아야 한다. 콜백 예외 정책은 application 소유다.
+    """
+
+    def load_raw_observations_reporting(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None],
+        progress: Callable[[float], None],
+    ) -> RawObservationSet: ...

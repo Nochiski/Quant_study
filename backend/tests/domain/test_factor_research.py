@@ -324,3 +324,36 @@ def test_cross_sectional_demean_subtracts_the_member_peer_mean() -> None:
     }
 
     assert values == {"s1": 1.0, "s2": -1.0, "s3": 0.0}
+
+
+def test_evaluation_reports_progress_inside_the_time_series_node() -> None:
+    """이슈 #162: 실데이터에서 시계열 노드 하나가 tape 단계의 절반 가까이를 쓴다.
+
+    노드 완료 단위로만 진행을 올리면 그 노드 동안 막대가 멈춰 보이므로 종목 단위로도 올린다.
+    진행 콜백은 결과를 바꾸지 않는다.
+    """
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("close", "price.close", "field"),
+            TimeSeriesNode("mom", TimeSeriesOperator.MOMENTUM, "close", 2, "time_series"),
+        ),
+        output_node_id="mom",
+    )
+    observations = tuple(
+        FactorObservation(
+            as_of=date(2024, 1, day),
+            security_id=f"s{security}",
+            fields=(FactorFieldValue("price.close", float(day + security)),),
+            forward_return=None,
+        )
+        for day in (2, 3, 4)
+        for security in (1, 2, 3, 4)
+    )
+    reported: list[float] = []
+
+    evaluation = evaluate_factor_graph(graph, observations=observations, progress=reported.append)
+
+    assert evaluation == evaluate_factor_graph(graph, observations=observations)
+    assert reported == sorted(reported)
+    # 도달 가능한 노드 2개: field 완료가 0.5, 시계열 노드가 종목 4개를 끝낼 때마다 0.125씩.
+    assert sorted(set(reported)) == [0.5, 0.625, 0.75, 0.875, 1.0]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
@@ -726,3 +727,32 @@ def test_run_resource_openapi_declares_typed_not_found_and_not_ready_errors() ->
     assert result_responses["409"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "BacktestResultNotReadyResponse"
     )
+
+
+def test_tape_stage_progress_advances_monotonically_within_a_bounded_event_count() -> None:
+    """이슈 #162: tape 단계가 `0.02` 한 번만 내고 끝나 실행 시간 대부분 동안 2% 에 고정됐다.
+
+    tape 단계 안에서 진행 값이 여러 번 오르고, 단계 이름은 `tape` 그대로이며, 전체 이벤트의 진행
+    값은 단조 증가한다. 평가기가 종목마다 보고해도 이벤트 수는 제한된다(SSE·메모리 보호).
+    """
+    client = TestClient(build_http_app())
+    accepted = client.post("/api/v1/backtests", json=_run_body(client))
+    assert accepted.status_code == 202
+    run_id = accepted.json()["run"]["run_id"]
+    assert _wait(client, run_id)["status"] == "completed"
+
+    stream = client.get(f"/api/v1/backtests/{run_id}/events").text
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in stream.splitlines()
+        if line.startswith("data: ")
+    ]
+    progress = [event["progress"] for event in events]
+    assert progress == sorted(progress), progress
+    tape = [event for event in events if event["stage"] == "tape"]
+    tape_progress = {event["progress"] for event in tape}
+    assert len(tape_progress) >= 5, tape
+    assert min(tape_progress) == pytest.approx(0.02)
+    assert max(tape_progress) <= 0.8
+    assert len(tape) <= 100, len(tape)
+    assert {event["stage"] for event in events} >= {"queued", "tape", "data", "engine", "completed"}

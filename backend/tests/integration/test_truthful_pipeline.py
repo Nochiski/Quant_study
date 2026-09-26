@@ -993,3 +993,61 @@ def test_preview_warnings_are_recorded_in_the_run_manifest() -> None:
     recorded = {item["code"]: item["message"] for item in manifest["warnings"]}
     assert "portfolio.raw_observation" in recorded
     assert recorded["portfolio.raw_observation"] in preview.json()["warnings"]
+
+
+def test_run_pipeline_reports_monotonic_progress_through_every_phase() -> None:
+    """이슈 #162: tape 단계가 실행 시간의 97% 를 쓰는데 진행 콜백이 없어 2% 에 고정됐다.
+
+    원시 로딩·팩터 평가(팩터별, 노드 안)·TargetTape 컴파일을 지나며 0 에서 1 까지 단조 증가하고,
+    진행 콜백 유무가 산출 tape 를 바꾸지 않는다.
+    """
+    reported: list[tuple[float, str]] = []
+
+    result = _service().run_pipeline(
+        PortfolioPreviewRequest(_spec()),
+        progress=lambda fraction, message: reported.append((fraction, message)),
+    )
+
+    fractions = [fraction for fraction, _ in reported]
+    assert fractions == sorted(fractions)
+    assert fractions[0] == 0.0
+    assert fractions[-1] == 1.0
+    messages = " ".join(message for _, message in reported)
+    assert "momentum_3" in messages and "size" in messages
+    # 팩터 2개인데 팩터 경계만이 아니라 노드 안에서도 올라간다.
+    assert len(set(fractions)) > 2 + 4
+    baseline = _service().run_pipeline(PortfolioPreviewRequest(_spec()))
+    assert result.preview.tape.tape_hash == baseline.preview.tape.tape_hash
+
+
+class _ProgressReportingRawPort:
+    """로딩 진행을 보고하는 선택 능력을 가진 테스트 포트. 관측은 mock 어댑터에 위임한다."""
+
+    def __init__(self) -> None:
+        self._delegate = MockEquityDataAdapter.demo()
+
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        return self._delegate.load_raw_observations(query)
+
+    def load_raw_observations_reporting(
+        self, query: RawObservationQuery, *, checkpoint, progress
+    ) -> RawObservationSet:
+        progress(0.25)
+        result = self._delegate.load_raw_observations_cancellable(query, checkpoint=checkpoint)
+        progress(1.0)
+        return result
+
+
+def test_run_pipeline_maps_raw_load_progress_into_the_loading_band() -> None:
+    """이슈 #162: 로딩 진행을 보고하는 포트면 로딩 구간(0~0.28) 안에서 막대가 오른다."""
+    reported: list[tuple[float, str]] = []
+
+    _service(_ProgressReportingRawPort()).run_pipeline(
+        PortfolioPreviewRequest(_spec()),
+        progress=lambda fraction, message: reported.append((fraction, message)),
+    )
+
+    loading = [fraction for fraction, message in reported if message == "Loading raw observations"]
+    assert loading == pytest.approx([0.0, 0.07, 0.28])
+    fractions = [fraction for fraction, _ in reported]
+    assert fractions == sorted(fractions)

@@ -5,6 +5,7 @@ import { parseSource } from "../../../shared/lib/yaml12";
 import {
   decideBacktestSource,
   gateBacktestSourceWithFactorPlans,
+  isBacktestSettling,
   type BacktestSourceDecision,
 } from "../model/backtest-source";
 import {
@@ -201,5 +202,48 @@ describe("decideBacktestSource", () => {
     expect(gateBacktestSourceWithFactorPlans(decision, validPlans)).toBe(
       decision,
     );
+  });
+});
+
+describe("isBacktestSettling", () => {
+  const factorPlanBlocked: BacktestSourceDecision = {
+    kind: "blocked",
+    reason: "factor-plan",
+  };
+
+  it("팩터 계획이나 그 전제인 메타데이터를 아직 조회 중이면 검증 중이다", () => {
+    expect(isBacktestSettling(factorPlanBlocked, { status: "loading" })).toBe(
+      true,
+    );
+    expect(
+      isBacktestSettling(factorPlanBlocked, { status: "metadata-loading" }),
+    ).toBe(true);
+  });
+
+  it("계획 조회가 끝난 판정이면 검증 중이 아니다", () => {
+    // 오류·호환 불가·메타데이터 없음은 문서를 고치지 않는 한 열리지 않는 닫힘이다(C-02 리뷰 P1-1 결정).
+    const finished: ExecutionPlansState[] = [
+      { status: "error", message: "explain failed" },
+      {
+        status: "incompatible",
+        resource: "factor-registry",
+        expected: "registry-v1",
+        actual: "registry-v2",
+      },
+      { status: "metadata-unavailable" },
+    ];
+    for (const plans of finished) {
+      expect(isBacktestSettling(factorPlanBlocked, plans)).toBe(false);
+    }
+  });
+
+  it("팩터 계획이 아닌 이유로 닫힌 결정은 검증 중으로 보지 않는다", () => {
+    // 문서가 아직 compile 전이면 체인이 텍스트 버전으로 따로 기다린다. 여기서는 계획 조회만 본다.
+    expect(
+      isBacktestSettling(
+        { kind: "blocked", reason: "invalid" },
+        { status: "loading" },
+      ),
+    ).toBe(false);
   });
 });

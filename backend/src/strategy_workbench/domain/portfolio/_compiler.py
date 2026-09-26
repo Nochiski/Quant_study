@@ -44,6 +44,10 @@ _T = TypeVar("_T")
 _CHECKPOINT_BATCH = 256
 
 
+def _noop_progress(fraction: float) -> None:
+    return None
+
+
 def _noop_checkpoint() -> None:
     return None
 
@@ -114,8 +118,13 @@ def compile_target_tape(
     observations: tuple[PortfolioObservation, ...],
     schedule: PortfolioRebalanceSchedule | None = None,
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    progress: Callable[[float], None] = _noop_progress,
 ) -> TargetTape:
-    """Compile the canonical executable tape without retaining an audit projection."""
+    """Compile the canonical executable tape without retaining an audit projection.
+
+    `progress` 는 관측 색인(0~0.4), 프레임 컴파일(0.4~0.8), 프레임별 정규화(0.8~0.9), 해시(~1.0)
+    진행을 받는다.
+    """
     return _compile_target_tape(
         spec,
         environment=environment,
@@ -125,6 +134,7 @@ def compile_target_tape(
         schedule=schedule,
         trace_selection=None,
         checkpoint=checkpoint,
+        progress=progress,
     ).tape
 
 
@@ -138,6 +148,7 @@ def compile_target_tape_with_trace(
     trace_selection: PortfolioTraceSelection,
     schedule: PortfolioRebalanceSchedule | None = None,
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    progress: Callable[[float], None] = _noop_progress,
 ) -> TargetTapeTraceResult:
     """Compile once and return an out-of-band audit from that same calculation."""
     return _compile_target_tape(
@@ -149,6 +160,7 @@ def compile_target_tape_with_trace(
         schedule=schedule,
         trace_selection=trace_selection,
         checkpoint=checkpoint,
+        progress=progress,
     )
 
 
@@ -165,6 +177,7 @@ def _compile_target_tape(
     schedule: PortfolioRebalanceSchedule | None,
     trace_selection: PortfolioTraceSelection | None,
     checkpoint: Callable[[], None],
+    progress: Callable[[float], None] = _noop_progress,
 ) -> TargetTapeTraceResult:
     prepared_schedule = schedule or compile_rebalance_schedule(
         spec, sessions, checkpoint=checkpoint
@@ -180,7 +193,9 @@ def _compile_target_tape(
         raise ValueError("portfolio rebalance schedule does not match the strategy and sessions")
     by_date: dict[date, list[PortfolioObservation]] = {}
     seen: set[tuple[date, str]] = set()
-    for observation in _checkpointed(observations, checkpoint):
+    for index, observation in enumerate(_checkpointed(observations, checkpoint)):
+        if index % _CHECKPOINT_BATCH == 0:
+            progress(0.4 * index / len(observations))
         key = (observation.as_of, observation.security_id)
         if key in seen:
             raise ValueError(f"duplicate portfolio observation: key={key}")
@@ -197,7 +212,11 @@ def _compile_target_tape(
     # The book is folded frame by frame: the compiler owns `previous_weight` from the second
     # rebalance on, and `PortfolioObservation.previous_weight` seeds only the first (D-002).
     carried: dict[str, float] | None = None
-    for signal_as_of, execution_on in _checkpointed(prepared_schedule.pairs, checkpoint):
+    frame_count = max(len(prepared_schedule.pairs), 1)
+    for frame_index, (signal_as_of, execution_on) in enumerate(
+        _checkpointed(prepared_schedule.pairs, checkpoint)
+    ):
+        progress(0.4 + 0.4 * frame_index / frame_count)
         frame_observations = tuple(by_date.get(signal_as_of, ()))
         previous_weights = (
             {
@@ -250,15 +269,24 @@ def _compile_target_tape(
             target.security_id: target.weight for target in _checkpointed(frame.targets, checkpoint)
         }
     frames = tuple(compiled)
+    progress(0.8)
     checkpoint()
     strategy_hash = strategy_spec_hash(spec)
+    # 튜플의 정규화는 원소별 정규화 목록과 같다. 프레임 단위로 풀어 진행을 보고한다(4년 구간에서
+    # 정규화·해시가 보고 없이 약 5초 걸렸다, 이슈 #162).
+    canonical_frames: list[object] = []
+    for frame_index, frame in enumerate(_checkpointed(frames, checkpoint)):
+        progress(0.8 + 0.1 * frame_index / frame_count)
+        canonical_frames.append(_canonical_payload(frame, checkpoint=checkpoint))
+    progress(0.9)
     payload = {
         "data_snapshot_id": data_snapshot_id,
         "strategy_hash": strategy_hash,
         "execution_timing": environment.timing.value,
-        "frames": _canonical_payload(frames, checkpoint=checkpoint),
+        "frames": canonical_frames,
     }
     tape_hash = _hash_payload(payload, checkpoint=checkpoint)
+    progress(1.0)
     return TargetTapeTraceResult(
         tape=TargetTape(
             data_snapshot_id=data_snapshot_id,

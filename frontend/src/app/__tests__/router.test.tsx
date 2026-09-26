@@ -294,6 +294,19 @@ const server = setupServer(
   http.get(`${API}/api/v1/strategies/template`, () =>
     HttpResponse.json(spec(0, "새 팩터 전략")),
   ),
+  http.get(`${API}/api/v1/assistant/providers`, () =>
+    HttpResponse.json({
+      kinds: [
+        {
+          kind: "anthropic",
+          installed: true,
+          default_model: "claude-sonnet-5",
+        },
+        { kind: "openai", installed: false, default_model: null },
+      ],
+      profiles: [],
+    }),
+  ),
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -923,6 +936,23 @@ describe("App Shell routes", () => {
     expect(screen.getByRole("status", { name: "실행 상태" })).toHaveTextContent(
       "cancelled",
     );
+  });
+
+  it("opens the settings route with the AI provider section from the shell", async () => {
+    const user = userEvent.setup();
+    const history = mount("/research/backtests");
+    await user.click(await screen.findByRole("link", { name: "설정" }));
+
+    await waitFor(() => expect(history.location.pathname).toBe("/settings"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "설정" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "AI 어시스턴트 공급자" }),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("연결된 공급자가 없습니다"),
+    ).toBeInTheDocument();
   });
 
   it("supports back and forward between routes", async () => {

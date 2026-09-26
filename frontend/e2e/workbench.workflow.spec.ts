@@ -161,13 +161,7 @@ test.describe("professional YAML workflow", () => {
     );
   });
 
-  // P3-02(실행 설정 패널)에서 되살린다. schema 1.2 는 실행 기간·유니버스를 전략 문서에서 빼
-  // 실행 요청의 `environment` 로 옮겼고(P2-03), 그 값을 싣는 프론트 배선이 그 패널이다. 기간에는
-  // 스키마 기본값이 있을 수 없어 요청에 상수를 박는 shim 으로 앞당길 수 없다. 그때까지 브라우저에서
-  // 시작한 백테스트는 422 `backtest.run.environment_required` 로 거절된다. 최종 시나리오 재작성은
-  // P3-03(e2e fixture 1.2)이 맡는다.
-  // 되살릴 때 바꿀 것: OOS 창이 읽던 `dateRange` 출처와 기대 요청 본문의 `environment`.
-  test.fixme("creates, recovers, validates, versions, traces and backtests", async ({
+  test("creates, recovers, validates, versions, traces and backtests", { tag: ["@story", "@US-SM-01", "@US-SM-03", "@US-SM-05", "@US-CS-03"] }, async ({
     browser,
     page,
   }) => {
@@ -827,7 +821,7 @@ test.describe("professional YAML workflow", () => {
     await conflicting.context.close();
   });
 
-  test("cancels a nonterminal run and replays the server-owned request byte-for-byte", async ({
+  test("cancels a nonterminal run and replays the server-owned request byte-for-byte", { tag: ["@story", "@US-SM-05"] }, async ({
     page,
   }) => {
     const acceptedRequest: BacktestRunSpec = {
@@ -927,7 +921,7 @@ test.describe("professional YAML workflow", () => {
     expect(replayed).toBe(true);
   });
 
-  test("migrates a source-less legacy revision without changing meaning", async ({
+  test("migrates a source-less legacy revision without changing meaning", { tag: ["@story", "@US-SM-07"] }, async ({
     page,
   }) => {
     const template = requireData(
@@ -973,7 +967,7 @@ test.describe("professional YAML workflow", () => {
     expect(migrated.spec_hash).toBe(saved.spec_hash);
   });
 
-  test("edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan", async ({
+  test("edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan", { tag: ["@story", "@US-SM-08"] }, async ({
     page,
   }) => {
     // 같은 GOLDEN에서 출발하는 전략 둘: 하나는 Form으로, 하나는 YAML로 같은 값을 바꾼다.
@@ -1061,7 +1055,7 @@ test.describe("professional YAML workflow", () => {
     );
   });
 
-  test("adds a node in the Graph editor, rewires an input, refreshes the plan and saves", async ({
+  test("adds a node in the Graph editor, rewires an input, refreshes the plan and saves", { tag: ["@story", "@US-SM-08", "@US-CS-01"] }, async ({
     page,
   }) => {
     const title = "P5-03 E2E Graph";
@@ -1146,15 +1140,7 @@ test.describe("professional YAML workflow", () => {
     await expect(page.getByRole("region", { name: "Form 편집" })).toBeVisible();
   });
 
-  // **P3-02 에서 되살린다** — P2-09 와 P3-02 가 둘 다 필요하고 해제 지점은 늦은 쪽이다.
-  // (1) 업그레이드 엔드포인트가 아직 1.1 까지만 올려서(1.1 → 1.2 step 과 응답 `environment` 는
-  //     P2-09 acceptance) 돌려준 원문이 `structure.unsupported_schema_version` 으로 저장되지 않고,
-  // (2) 이 시나리오는 저장 뒤 **백테스트까지** 하는데 요청에 `environment` 를 싣는 배선이
-  //     P3-02 의 실행 설정 패널이다.
-  // 시나리오를 중간 상태에 맞춰 다시 쓰면 두 PR 이 같은 파일을 또 되돌려야 하므로 원래 계약을
-  // 그대로 두고 잠근다. 되살릴 때 바꿀 것: 배너 문구의 버전 리터럴(`upgrade.action`·
-  // `upgrade.applied`)과 `schema_version` 단언 둘, 그리고 기대 요청 본문의 `environment`.
-  test.fixme("upgrades a frozen 1.0 revision, saves it and backtests it", async ({
+  test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({
     page,
   }) => {
     const frozen = seedFrozenRevisionRows();

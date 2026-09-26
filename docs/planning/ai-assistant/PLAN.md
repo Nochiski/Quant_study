@@ -3,14 +3,14 @@ plan_version: 2
 project: ai-assistant
 project_status: SELF_CHECK
 current_phase: C
-current_pr: C-01
-active_prs: [C-01]
-parallel_window: [C-01]
-last_updated: 2026-09-26T14:21:51+09:00
-planned_prs: 14
+current_pr: C-01,C-02
+active_prs: [C-01, C-02]
+parallel_window: [C-01, C-02]
+last_updated: 2026-09-26T14:26:47+09:00
+planned_prs: 15
 merged_prs: 13
 approved_prs: 13
-progress_percent: 93
+progress_percent: 87
 ---
 
 # AI 어시스턴트 실시간 진행 계획
@@ -25,11 +25,11 @@ progress_percent: 93
 |---|---|
 | Project status | `SELF_CHECK` |
 | Current phase | `C` |
-| Current/next PR | `C-01` |
-| Active PR | `C-01` |
-| Progress | `13 / 14 merged (93%)` |
-| Approved | `13 / 14` |
-| Aggregated at | `2026-09-26 14:21 KST` |
+| Current/next PR | `C-01,C-02` |
+| Active PR | `C-01, C-02` |
+| Progress | `13 / 15 merged (87%)` |
+| Approved | `13 / 15` |
+| Aggregated at | `2026-09-26 14:26 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -92,7 +92,11 @@ progress_percent: 93
   넣었으며, live smoke가 검색 상한을 상수가 아니라 주입값에서 읽게 하고, "이력 `events` == SSE
   `data:` 프레임"을 통합 테스트로 고정했다.
 
-### A-07 backlog: 검색 상한 통지 전용 이벤트 (담당 B-03)
+### A-07 backlog: 검색 상한 통지 전용 이벤트 (담당 B-03 → C-03 재배정)
+
+B-03 행·리뷰 기록·변경 기록 어디에도 이 건의 처리나 이관 기록이 없었다(Phase B 감사 NB-4).
+2026-09-26 담당을 "AI 후속 C-03(미착수)"으로 옮겼고, 현재 위치의 4요소 기록은 C 절 backlog가
+정본이다. 아래는 A-07 시점의 원 기록이다.
 
 - **상황**: OpenAI(Codex) 프로파일이 활성인 세션에서 한 턴의 누적 웹 검색이 `max_search_uses`에
   닿아 adapter가 다음 호출의 도구 목록에서 `web_search`를 빼는 경로를 탄 뒤, 사이드바가 세션
@@ -178,8 +182,8 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | P0 | Planning package | 1 | 1 | `MERGED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
-| C | Phase A audit follow-up | 1 | 0 | `SELF_CHECK` |
-| **Total** |  | **14** | **13** | **93%** |
+| C | Phase A audit follow-up | 2 | 0 | `SELF_CHECK` |
+| **Total** |  | **15** | **13** | **87%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -238,20 +242,65 @@ Phase exit:
 - [ ] 완료 정의 1~5 기록.
 - [ ] SoT·책임분리 점검 blocking 0.
 
-## C — Phase A 감사 후속
+## C — Phase A·B 감사 후속
 
 Phase A 종료 감사(`audit_ai_phase_a.md`)는 **blocking 0**으로 PASS했고, 비차단 11건 중
 NB-1~NB-10을 C-01이 닫는다. NB-11은 브랜치 상태(스택 base 격차)라 머지 직전 rebase에서
-처리한다 — `PLAN.md` 충돌은 base 쪽 값으로 해소한다.
+처리한다. `PLAN.md` 충돌은 파일 단위가 아니라 절 단위로 합친다. PR 행·Review 기록·변경 기록은
+리드 판(base)을 쓰고, 스택에만 있는 절(A-07 기본값 확정 근거, A-07 backlog, 이 C 절과 그
+backlog)은 보존한다. 파일 단위로 한쪽을 고르면 다른 쪽 기록이 조용히 사라진다(Phase B 감사 NB-5).
+
+Phase B 종료 감사(`audit_ai_phase_b.md`)도 **blocking 0**으로 PASS했다. 비차단 8건 중 NB-3은
+C-01이 매뉴얼을 고치며 닫았고, NB-1·NB-2·NB-5~NB-8은 C-02가 닫는다. NB-4는 코드를 고치지 않고
+아래 backlog 2건으로 담당을 정한다.
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `SELF_CHECK` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` |
+| [ ] | `C-02` | Phase B 감사 비차단 7건: 4xx 거부 문구 표 entity 단일화(생성 code 합집합), 적용 후 백테스트 blocked 시 요청 폐기·알림, SSE 좁히기 표 타입 가드, CORS 기본 origin 단일 owner, 두 page 어시스턴트 배선 훅, backlog 2건 담당 지정, PLAN 병합 규칙 정정 | C-01 | `SELF_CHECK` | 구현자 `impl-ai-b05-c01`, 워크트리 `wt-ai-c02`, 브랜치 `feat/ai-c-02-phase-b-followup` |
 
 Phase exit:
 
 - [ ] NB-1~NB-10 닫힘, 각 항목이 코드·문서·테스트 중 어디서 닫혔는지 PR 본문에 기록.
 - [ ] no-extras job 확대판이 SDK 없는 환경에서 green.
+- [ ] Phase B 감사 NB-1~NB-8 처리 결과(C-02 닫힘 6건, C-01 닫힘 1건, backlog 이관 1건)를 C-02 PR
+  본문에 기록.
+
+### C 절 backlog (Phase B 감사 NB-4)
+
+**1. 검색 상한 통지 전용 `ChatEvent`와 화면 분기** — 담당 AI 후속 C-03(미착수)
+
+- **상황**: OpenAI 프로파일이 활성인 세션에서 한 턴의 누적 웹 검색이 `max_search_uses`에 닿는다.
+- **인풋**:
+  1. `POST /api/v1/assistant/sessions/{id}/turns` — 검색을 상한 이상 유도하는 질문.
+  2. 사이드바가 그 턴의 SSE 또는 `GET /api/v1/assistant/sessions/{id}` 이력을 그린다.
+- **에러 위치**: 생산 쪽 `backend/src/strategy_workbench/adapters/outbound/llm_openai/_turn.py`가
+  통지를 `SearchActivity(query=SEARCH_BUDGET_EXHAUSTED_NOTICE, sources=())`로 흘린다. 소비 쪽
+  `frontend/src/features/assist-strategy/ui/assist-transcript.tsx`는 그것을 "웹 검색" 배지와
+  `query` 본문으로 그리며, 통지를 가르는 분기가 없다. 집계는
+  `backend/src/strategy_workbench/application/assistant_chat/_usage.py`의 `_is_search`가 문구
+  비교로 막고 있다.
+- **위험성**: 사용자는 하지 않은 검색 칩을 보고, 칩 본문은 모델에게 보내려고 쓴 고정 문장이다
+  (표시 오차). 통지와 검색을 가르는 근거가 문구 비교라 같은 문구를 쓰는 경로가 생기거나 번역이
+  들어오면 집계가 다시 틀린다(silent 집계 오류). 데이터 손실·look-ahead는 아니다.
+- **해결 방향**: `ChatEvent` union에 통지 전용 갈래를 더하고 adapter·리듀서·SSE 좁히기 표
+  (C-02가 갈래 합집합으로 묶어 누락 시 컴파일 오류)·transcript를 함께 고친다. 그때 `_is_search`
+  분기와 아래 재현 테스트를 지운다.
+- **재현 test**: `backend/tests/application/test_assistant_usage.py::test_the_search_budget_notice_is_not_counted_as_a_search`
+  (현재 동작 고정). frontend 쪽 없음.
+
+**2. `ChatMessageView.turn_id`** — 담당 AI 후속 C-03(미착수)
+
+- **상황**: 한 세션에 턴이 여러 개 쌓인 뒤 사이드바가 세션 이력으로 대화를 다시 그린다.
+- **인풋**: `GET /api/v1/assistant/sessions/{id}` 응답의 `messages` 배열(사용자·어시스턴트 메시지).
+- **에러 위치**: 전송 계약 `ChatMessageView`에 `turn_id`가 없다. 그래서
+  `frontend/src/features/assist-strategy/model/transcript.ts`의 `assistTranscript`는 n번째 사용자
+  메시지를 n번째 턴의 질문으로 본다(생성 순서 짝짓기). 이 backlog는 B-03 행 비고와 그 파일
+  docstring에 적혀 있지만 담당이 없었다.
+- **위험성**: 메시지 수와 턴 수가 어긋나는 경로(사용자 메시지 없이 턴이 생기거나 그 반대)에서는
+  질문이 다른 턴의 답에 붙는다(표시 오차, silent). 지금은 리듀서의 턴 순서 불변식이 막고 있을
+  뿐이다. 데이터 손실은 아니다. 계약에 `turn_id`를 싣고 그 값으로 짝지으면 추정이 사라진다.
+- **재현 test**: 없음. C-03이 backend 계약 테스트와 transcript 단위 테스트를 함께 더한다.
 
 ## Review 기록
 
@@ -306,6 +355,18 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-26 — C-02가 Phase B 감사 비차단 건을 처리했다. NB-1: 4xx 거부 문구 표를
+  `entities/assistant`의 `Record<AssistantRejectionCode, MessageKey>` 하나로 모으고
+  `TURN_IN_PROGRESS`를 entity로 옮겼다. NB-2: "적용 후 백테스트"가 blocked로 풀리면 요청을
+  버리고 알림 줄에 "적용했지만 백테스트는 시작하지 않았다"를 보인다(spec "자동 백테스트
+  금지" 쪽 결정, 회귀 테스트 수정 전 red 확인). 첫 구현은 이미 이은 실행이 게이트를 닫는 순간을
+  blocked로 읽어 전체 e2e에서 걸렸고, ready 판정 때도 요청을 대기에서 꺼내도록 고쳤다. NB-3: C-01이
+  매뉴얼을 고쳐 C-02 범위에서 뺐다. NB-4: 코드는 두고 C 절 backlog 2건(검색 상한 통지 전용 이벤트,
+  `ChatMessageView.turn_id`)의 담당을 "AI 후속 C-03(미착수)"으로 정했다. NB-5: C 절 서문의 PLAN
+  충돌 규칙을 절 단위 병합으로 고쳤다. NB-6: SSE 좁히기 표 키를 이벤트 갈래 합집합으로 묶었고,
+  정리 중 `constructor` 같은 프로토타입 이름 프레임이 통과하던 결함을 `Object.hasOwn`으로 막았다.
+  NB-7: `create_app`의 CORS 기본값을 없애 기본 origin의 owner를 `bootstrap/_http.py` 하나로 했다.
+  NB-8: 두 전략 page의 어시스턴트 배선을 `useStrategyAssistant` 하나로 모았다.
 - 2026-09-26 — **P0-01~B-05 13 PR main 머지 완료**(#166·#169·#170·#171·#174·#175·#178·#179·#180·#182·#185·#186·#189, 스택 아래부터 `--merge`, 다음 PR base를 main으로 먼저 옮긴 뒤). 중간 PR은 PLAN.md만 리드 판으로 맞춘 main 병합 커밋을 얹었고(PLAN 외 파일은 각 tip과 동일, CI는 tip 결과 인용), 스택 전용 절(현재 결정의 A-07 항목·A-07 backlog·기본값 근거·C 절·A-05/A-06 변경 기록)은 C-01의 main 병합에서 절 단위로 합쳤다(Phase B 감사 NB-5). C-01은 1차 REQUEST_CHANGES(P2 3: PLAN 도구 cp949 깨짐, NB-9 기준선이 SDK gate 미통과, 매뉴얼 `RUN_LLM_LIVE`) → 반영 `afba06f3` → 2차 REQUEST_CHANGES(P2 1: probe 상한 owner 오기, 1차 지적 오판) → `de807566`.
 - 2026-09-26 — 세션 한도 중단 뒤 재개. B-05 **최종 `2d5f2b26`**, C-01 B-05 위 rebase **`b7e01b76`**(range-diff 6커밋 전부 동일, pytest 1992·vitest 812·계약 재생성 diff 0) push, 스택 최상단 `b7e01b76`에서 **전체 e2e 23/23**(백테스트 2건·적용 후 백테스트 포함). `review_ai_c_01` 1차 재착수(이전 리뷰는 결과 없이 중단). **Phase B 감사(`audit_ai_phase_b`, `bb51cec9`) PASS, blocking 0**, NON_BLOCKING 8건(NB-1 거부 문구 표 이중 owner, NB-2 적용 후 백테스트가 `blocked` 뒤 트리거 잔존 → armed 폐기로 결정, NB-3 매뉴얼 live smoke 변수, NB-4 backlog 담당 부재, NB-5 PLAN 병합 규칙, NB-6~8 P3)은 스택 최상단 **C-02** 하나로 처리. 완료 정의 1(실제 키 연결 테스트)·live smoke는 키 부재로 사용자 실행 필요.
 - 2026-09-21 — A-05 2차 리뷰 반영. **검색 예산 집행 방식을 유지하기로 결정**: 호출마다

@@ -1070,7 +1070,7 @@ def test_run_pipeline_reports_monotonic_progress_through_every_phase() -> None:
     reported: list[tuple[float, str]] = []
 
     result = _service().run_pipeline(
-        PortfolioPreviewRequest(_spec()),
+        PortfolioPreviewRequest(_spec(), environment=_environment()),
         progress=lambda fraction, message: reported.append((fraction, message)),
     )
 
@@ -1082,7 +1082,7 @@ def test_run_pipeline_reports_monotonic_progress_through_every_phase() -> None:
     assert "momentum_3" in messages and "size" in messages
     # 팩터 2개인데 팩터 경계만이 아니라 노드 안에서도 올라간다.
     assert len(set(fractions)) > 2 + 4
-    baseline = _service().run_pipeline(PortfolioPreviewRequest(_spec()))
+    baseline = _service().run_pipeline(PortfolioPreviewRequest(_spec(), environment=_environment()))
     assert result.preview.tape.tape_hash == baseline.preview.tape.tape_hash
 
 
@@ -1109,7 +1109,7 @@ def test_run_pipeline_maps_raw_load_progress_into_the_loading_band() -> None:
     reported: list[tuple[float, str]] = []
 
     _service(_ProgressReportingRawPort()).run_pipeline(
-        PortfolioPreviewRequest(_spec()),
+        PortfolioPreviewRequest(_spec(), environment=_environment()),
         progress=lambda fraction, message: reported.append((fraction, message)),
     )
 
@@ -1131,7 +1131,7 @@ def test_run_pipeline_progress_never_steps_back_across_factor_boundaries(
     reported: list[float] = []
 
     _service().run_pipeline(
-        PortfolioPreviewRequest(_spec(*factors)),
+        PortfolioPreviewRequest(_spec(*factors), environment=_environment()),
         progress=lambda fraction, message: reported.append(fraction),
     )
 

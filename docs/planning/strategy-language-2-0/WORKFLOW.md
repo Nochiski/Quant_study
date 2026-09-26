@@ -616,6 +616,11 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `RunEnvironment`에는 범위가 없다 — pydantic이 `__post_init__`를 들여다보지 못해 생성 SDK 타입에
   실리지 않는다(P2-01에서 OpenAPI 재생성 diff가 0인 이유이기도 하다). 생성 타입만 믿는 화면은
   서버가 거부할 값을 유효한 것으로 보므로, 패널은 범위도 스키마 엔드포인트에서 읽는다(테스트로 고정).
+- **BACKLOG-013(P2-01·P2-02 병합 리뷰 P3)**: 실행 설정 스키마가 발행하는 설명 키
+  `strategy.field.run_environment.*` 7개(`start`·`end`·`market`·`frequency`·`universe_id`·`timing`·
+  `missing`)에 frontend 문장(한국어·영어, 이름과 `.description`)을 붙이고, `/run-environments/schema`
+  가 발행한 설명 키가 전부 번역됐는지 보는 커버리지 테스트를 둔다(전략 runtime schema 쪽
+  `screen-vocabulary.test.ts` 와 같은 모양). 패널 항목 옆 한 줄 뜻 표시는 US-SM-10 과 잇는다.
 - **결정 항목**: 명시 `environment`의 422를 필드 단위로 어떻게 표면화할지. 같은 사실이 문서에
   있으면 `strategy.execution.participation` 코드가, 실행 설정에 있으면 pydantic 기본 분기가 나간다
   (`Backtest422Response`가 `RequestValidationResponse`를 이미 union에 가져 계약 위반은 아니다).

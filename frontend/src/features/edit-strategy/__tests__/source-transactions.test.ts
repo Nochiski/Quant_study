@@ -337,6 +337,41 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
     );
   });
 
+  it.each([
+    ["LF", "\n"],
+    ["CRLF", "\r\n"],
+  ])(
+    "empties an inner sequence whose only item is a multi-line mapping with `#` in a quoted scalar on the dash line (%s, #197)",
+    (_name, eol) => {
+      // property seed 968400747의 반례다. 안쪽 항목이 여러 줄이라 부모 줄 뒤에 자식 줄이 이어진다. dash 줄의
+      // 인용 스칼라 `"#tag"` 속 `#`을 부모 줄 끝 주석으로 오인하면 dash 줄을 남긴 채 `[]`를 덧붙여 tree가 깨진다.
+      const source = [
+        'schema_version: "1.1"',
+        "zgeu2_: -0",
+        "g_13:",
+        "  # c3",
+        '  - - jemr0v: "#tag"',
+        "      # c4",
+        "      hyn9_3y8: false",
+        "      # c5",
+        "      mf: -277",
+        "      # c6",
+        "      kw5t:",
+        "        # c7",
+        "        w_: null",
+        "        # c8",
+        "        rq8ujnx: |-",
+        "          first",
+        "          second",
+        "          third",
+        "",
+      ].join(eol);
+      expect(ok(source, { kind: "remove", pointer: "/g_13/0/0" }).nextSource).toBe(
+        ['schema_version: "1.1"', "zgeu2_: -0", "g_13:", "  # c3", "  - []", ""].join(eol),
+      );
+    },
+  );
+
   it("expands `- []` and `- {}` without leaving a trailing space", () => {
     expect(
       ok("a:\n  - []\n", {

@@ -1,4 +1,10 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  renderHook,
+  screen,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseSource } from "../../../shared/lib/yaml12";
@@ -10,6 +16,7 @@ import {
 } from "../model/document-state";
 import { useApplyAssistantProposal } from "../model/use-apply-assistant-proposal";
 import { useApplyProposalThenBacktest } from "../model/use-apply-then-backtest";
+import { ProposalApplyFeedback } from "../ui/proposal-apply-dialog";
 
 afterEach(cleanup);
 
@@ -174,7 +181,93 @@ describe("useApplyProposalThenBacktest", () => {
 
     expect(run).not.toHaveBeenCalled();
     expect(hook.result.current.chain.waiting).toBe(false);
+    expect(hook.result.current.chain.notStarted).toBe(true);
+  });
+
+  it("실행할 수 없어 대기가 풀린 뒤 실행 게이트만 열려도 백테스트를 잇지 않는다", () => {
+    // Phase B 감사 NB-2. 인풋 1: "적용 후 백테스트"를 누른다.
+    const { run, hook, rerender } = mountChain();
+    act(() =>
+      hook.result.current.chain.applyThenBacktest({
+        source: PROPOSED,
+        baseSource: BASE,
+      }),
+    );
+    // 인풋 2: 적용·parse·compile은 끝났지만 문서와 무관한 이유(실행 설정 무효, 앞선 실행 진행 중)로
+    // 실행 게이트가 닫혀 있다. 대기가 풀리고 실행하지 않는다.
+    const settled = compiled(parsed(edited(PROPOSED)), false);
+    rerender({ state: settled, canRun: false });
     expect(hook.result.current.chain.waiting).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+
+    // 인풋 3: 문서는 그대로 두고 실행 설정을 고치거나 앞선 실행이 끝나 게이트만 열린다. 대기 표시가
+    // 사라진 뒤라 여기서 실행하면 예고 없는 실행이다(spec Non-goals "자동 백테스트 금지").
+    rerender({ state: settled, canRun: true });
+    expect(run).not.toHaveBeenCalled();
+    expect(hook.result.current.chain.waiting).toBe(false);
+    // 알림 줄은 "적용했지만 백테스트는 시작하지 않았다"를 계속 말한다.
+    expect(hook.result.current.chain.notStarted).toBe(true);
+  });
+
+  it("알림 줄이 적용은 됐지만 백테스트는 시작하지 않았다고 알린다", () => {
+    const { hook, rerender } = mountChain();
+    act(() =>
+      hook.result.current.chain.applyThenBacktest({
+        source: PROPOSED,
+        baseSource: BASE,
+      }),
+    );
+    rerender({
+      state: compiled(parsed(edited(PROPOSED)), false),
+      canRun: false,
+    });
+    render(
+      <ProposalApplyFeedback
+        apply={hook.result.current.apply}
+        chain={hook.result.current.chain}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "제안을 문서에 적용했지만 지금은 실행할 수 없어 백테스트를 시작하지 않았습니다.",
+    );
+  });
+
+  it("시작하지 않았다는 알림은 문서를 고치면 걷힌다", () => {
+    const { run, hook, rerender } = mountChain();
+    act(() =>
+      hook.result.current.chain.applyThenBacktest({
+        source: PROPOSED,
+        baseSource: BASE,
+      }),
+    );
+    const settled = compiled(parsed(edited(PROPOSED)), false);
+    rerender({ state: settled, canRun: false });
+    expect(hook.result.current.chain.notStarted).toBe(true);
+
+    const typedOver = documentReducer(settled, {
+      type: "edit",
+      source: 'schema_version: "1.1"\ntitle: "mine"\n',
+    });
+    rerender({ state: typedOver, canRun: true });
+    expect(hook.result.current.chain.notStarted).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("실행을 이으면 시작하지 않았다는 알림을 내지 않는다", () => {
+    const { run, hook, rerender } = mountChain();
+    act(() =>
+      hook.result.current.chain.applyThenBacktest({
+        source: PROPOSED,
+        baseSource: BASE,
+      }),
+    );
+    rerender({
+      state: compiled(parsed(edited(PROPOSED)), false),
+      canRun: true,
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.chain.notStarted).toBe(false);
   });
 
   it("구문 오류로 검증이 시작되지 않아도 영원히 기다리지 않는다", () => {
@@ -189,7 +282,7 @@ describe("useApplyProposalThenBacktest", () => {
 
     expect(run).not.toHaveBeenCalled();
     expect(hook.result.current.chain.waiting).toBe(false);
-    expect(hook.result.current.chain.waiting).toBe(false);
+    expect(hook.result.current.chain.notStarted).toBe(true);
   });
 
   it("확인 창에서 취소하면 실행도 잇지 않는다", () => {

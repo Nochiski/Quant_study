@@ -31,6 +31,14 @@ export const ProposalApplyFeedback = ({
         {t("assistant.apply.backtestWaiting")}
       </p>
     );
+  // 적용은 됐지만 실행 게이트가 닫혀 있어 백테스트를 시작하지 않았다(Phase B 감사 NB-2). "적용했습니다"만
+  // 보이면 사용자는 실행이 곧 이어진다고 읽는다.
+  if (chain?.notStarted === true)
+    return (
+      <p className="proposal-apply__feedback" role="status">
+        {t("assistant.apply.backtestNotStarted")}
+      </p>
+    );
   if (status.kind === "applied")
     return (
       <p className="proposal-apply__feedback" role="status">

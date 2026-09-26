@@ -12,6 +12,11 @@ export type ProposalBacktestChain = {
   applyThenBacktest: (proposal: AssistantProposal) => void;
   /** 적용·확인·검증이 끝나기를 기다리는 중. 실행이 시작되거나 대기가 풀리면 거짓이 된다. */
   waiting: boolean;
+  /**
+   * 적용은 끝났지만 실행할 수 없어 백테스트를 시작하지 않았다. 그 적용 결과가 화면에 남아 있는 동안만
+   * 참이다 — 문서를 고치거나 다른 제안을 적용하면 거짓이 된다.
+   */
+  notStarted: boolean;
 };
 
 /** 실행 게이트와 실행 방법. 페이지가 `useRunBacktest`에서 뽑아 넘긴다. */
@@ -61,8 +66,12 @@ const chainPhase = (
  * (자동 적용·자동 백테스트 금지는 그대로다, spec Non-goals).
  *
  * 대기는 네 가지로 풀린다. 확인 창에서 취소하거나 적용이 중단되면, 기다리는 동안 사용자가 문서를 또
- * 고치면, 검증이 끝나 실행 가능하면(실행), 검증이 끝났는데 실행할 수 없으면(실행하지 않음 — 이유는
- * Problems 패널과 툴바가 이미 소유한 사실이라 여기서 다시 말하지 않는다).
+ * 고치면, 검증이 끝나 실행 가능하면(실행), 검증이 끝났는데 실행할 수 없으면(실행하지 않음).
+ *
+ * 마지막 경우는 요청을 **버린다**. 실행 설정이 무효이거나 앞선 실행이 도는 등 문서와 무관한 이유로
+ * 게이트가 닫혀 있을 수 있는데, 요청을 남겨 두면 대기 표시가 사라진 뒤 게이트가 열리는 순간 예고 없이
+ * 실행된다(Phase B 감사 NB-2). 대신 `notStarted`로 "적용했지만 백테스트는 시작하지 않았다"를 알린다.
+ * 왜 실행할 수 없는지는 Problems 패널과 툴바가 이미 소유한 사실이라 여기서 다시 말하지 않는다.
  */
 export const useApplyProposalThenBacktest = (
   apply: AssistantProposalApply,
@@ -70,6 +79,10 @@ export const useApplyProposalThenBacktest = (
   backtest: BacktestTrigger,
 ): ProposalBacktestChain => {
   const [armed, setArmed] = useState<ArmedRun | null>(null);
+  // 실행하지 않고 버린 요청이 묶였던 적용 결과. 적용 훅은 적용마다 새 상태 객체를 만들고, 문서가
+  // 바뀌면 그 객체를 내려놓으므로 객체가 같을 때만 알림을 보인다.
+  const [notStartedFor, setNotStartedFor] =
+    useState<ProposalApplyStatus | null>(null);
   // 이미 실행을 이은 요청. 실행이 시작되면 게이트가 닫혀 phase가 바뀌므로 중복 실행만 막으면 된다.
   const fired = useRef<ArmedRun | null>(null);
   const applyProposal = apply.apply;
@@ -78,6 +91,7 @@ export const useApplyProposalThenBacktest = (
 
   const applyThenBacktest = useCallback(
     (proposal: AssistantProposal): void => {
+      setNotStartedFor(null);
       setArmed({
         source: proposal.source,
         version: sourceVersion,
@@ -89,6 +103,12 @@ export const useApplyProposalThenBacktest = (
   );
 
   const phase = chainPhase(armed, apply.status, state, canRun);
+  // 실행할 수 없다고 판정한 그 렌더에서 요청을 버린다. effect로 미루면 게이트가 열리는 렌더와
+  // 순서가 갈릴 수 있다 — 렌더 중에 자기 상태를 고치는 것은 React가 허용한 조정 방식이다.
+  if (phase === "blocked" && armed !== null) {
+    setArmed(null);
+    setNotStartedFor(apply.status);
+  }
 
   // 검증이 끝나는 시점은 렌더 사이에만 알 수 있어 effect로 잇는다. 여기서 하는 일은 실행 호출 하나다.
   useEffect(() => {
@@ -97,5 +117,9 @@ export const useApplyProposalThenBacktest = (
     run();
   }, [armed, phase, run]);
 
-  return { applyThenBacktest, waiting: phase === "waiting" };
+  return {
+    applyThenBacktest,
+    waiting: phase === "waiting",
+    notStarted: notStartedFor !== null && notStartedFor === apply.status,
+  };
 };

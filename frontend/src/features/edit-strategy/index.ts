@@ -89,6 +89,29 @@ export {
   type DocumentUpgrade,
   type UpgradeStatus,
 } from "./model/use-upgrade-document";
+export {
+  assistantDocumentRef,
+  assistantTurnContext,
+} from "./model/assistant-turn-context";
+export { useAssistantTurnContext } from "./model/use-assistant-turn-context";
+export {
+  assistantProposalOf,
+  useApplyAssistantProposal,
+  type AssistantProposal,
+  type AssistantProposalApply,
+  type ProposalApplyBlock,
+  type ProposalApplyFailure,
+  type ProposalApplyStatus,
+} from "./model/use-apply-assistant-proposal";
+export {
+  useApplyProposalThenBacktest,
+  type BacktestTrigger,
+  type ProposalBacktestChain,
+} from "./model/use-apply-then-backtest";
+export {
+  ProposalApplyDialog,
+  ProposalApplyFeedback,
+} from "./ui/proposal-apply-dialog";
 export { SourceEditor } from "./ui/source-editor";
 export { StrategyOutline } from "./ui/strategy-outline";
 export { ContractInspector } from "./ui/contract-inspector";

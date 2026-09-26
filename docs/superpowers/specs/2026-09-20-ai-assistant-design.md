@@ -346,7 +346,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | `features/assist-strategy` | 우측 사이드바 채팅: 메시지 목록, 스트리밍 텍스트, 검색 활동 칩(질의·출처 링크), 도구 활동 접힘, 제안 카드(제목·한 문장·근거·출처·"미리보기"·"문서에 적용"·"적용 후 백테스트"), 취소, 세션 전환, 닫을 때 진행 중 턴 취소 확인. 적용은 `onApplyProposal(proposal)` 콜백으로 밖에 넘긴다(feature가 feature를 import하지 않는다) |
 | `pages/settings` | `/settings` 라우트. 섹션: AI 연결(위 feature) |
 | `widgets/app-shell` | 내비 하단 "설정" 링크 |
-| `widgets/strategy-ide` | 우측 레일에 `assistant` 슬롯. 계약 인스펙터와 탭으로 공존("계약 · AI"), 폭·펼침은 기존 `use-panel-layout` |
+| `widgets/strategy-ide` | 우측 레일에 `assistant` 슬롯. 계약 인스펙터와 **탭이 아니라 별개 패널**로 공존한다(B-04 결정 2026-09-21: 사용자 요구가 "우측 사이드바 하나"이고, 탭이면 채팅을 보는 동안 계약 인스펙터가 사라진다). 폭·펼침은 기존 `use-panel-layout`을 확장하며(`assistantWidth`·`assistantOpen`) 기본은 접힘이다. 1280px 미만은 기존 drawer 규칙이고, 그 이상이어도 좌우 패널이 편집기 최소 폭(480px)을 남기지 못하면 나중에 연 쪽을 오버레이로 돌린다 |
 | `pages/research-strategy-*` | 조합: `onApplyProposal` → **업그레이드 적용과 같은 전체 범위 교체 경로**(`CodeEditorHandle.replaceRange(0, length, source)`; `setText`가 아니라 `replaceRange`인 이유는 history 격리(`isolateHistory`)로 직후 타이핑과 undo가 섞이지 않게 하기 위함, `use-upgrade-document.ts:93-99`와 동일) → compile → 진단. **적용 전 확인**: 제안 카드의 기준 텍스트(턴 시작 시점)와 적용 시점 텍스트가 다르면 바로 덮어쓰지 않고 "문서가 바뀌었습니다" 안내와 함께 "미리보기"·"그래도 덮어쓰기" 두 버튼을 보인다. 덮어쓰기도 같은 `replaceRange` 한 번·undo 한 단계이므로 데이터 손실이 아니다(턴은 수십~수백 초라 기다리며 편집하는 것이 흔하다). "적용 후 백테스트"는 적용 뒤 기존 run-backtest 실행 |
 
 - 사이드바는 그래프·YAML 어느 탭에서도 같은 세션이다. 턴을 시작할 때마다 현재 편집기 텍스트·진단·

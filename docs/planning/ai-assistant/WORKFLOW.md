@@ -321,8 +321,12 @@ STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv 
 
 **Acceptance**
 
-- `widgets/strategy-ide` 우측 레일 탭 "계약 · AI", `assistant` 슬롯, 폭·펼침 `use-panel-layout` 확장.
-  1280px 미만은 기존 drawer 규칙.
+- `widgets/strategy-ide` 우측 레일에 계약 인스펙터와 **별개 패널**인 `assistant` 슬롯(기본 접힘),
+  폭·펼침 `use-panel-layout` 확장. 1280px 미만은 기존 drawer 규칙이고, 그 이상이어도 편집기 최소
+  폭(480px)을 남기지 못하면 나중에 연 패널을 오버레이로 돌린다. 이 판정은 **사이드바 기본 폭 기준**이다
+  — 지금 폭으로 재면 폭 조절 드래그가 판정을 바꿔 핸들이 사라지고 저장 폭 때문에 고착된다(B-04 2차
+  리뷰 P1). 사용자가 기본 폭보다 넓히면 편집기가 480px 아래로 내려갈 수 있고, 그때는 핸들이 그대로
+  있어 즉시 되돌릴 수 있다.
 - `pages/research-strategy-*`: `onApplyProposal` → `replaceRange(0, length, source)`(history 격리, undo 한
   단계). 제안의 기준 텍스트 ≠ 현재 텍스트면 "문서가 바뀌었습니다" + "미리보기"·"그래도 덮어쓰기"
   확인(덮어쓰기도 같은 경로, undo 한 번으로 복원되는 테스트) → compile. "미리보기"는
@@ -330,13 +334,17 @@ STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv 
   실어 보낸다.
 - 키보드·ARIA(`frontend-ui-quality.md`), i18n 전부 `messages.ts`.
 - **슬롯이 패널의 landmark·이름·제목을 소유한다.** `assistant` 슬롯은 `aria-label`을 가진 landmark이고
-  (계약 인스펙터 슬롯과 같은 모양), 슬롯 헤더가 패널 제목과 접기·닫기를 그린다. B-03의
-  `AssistStrategySidebar`는 이름 없는 `<section>`이고 자체 `<h2>`를 그리지 않으므로, 슬롯이 이름을 달지
-  않으면 사이드바는 landmark 탐색으로 닿지 않는다. 슬롯을 `getByRole("complementary", { name })`으로
-  찾는 테스트로 잠근다(B-03 3차 리뷰 P3).
-- 닫기는 한 곳만 그린다. 슬롯 헤더가 닫기를 맡으면 `onClose`를 넘기지 않고(사이드바의 ✕ 버튼이
-  사라진다), 진행 중 턴 취소 확인은 사이드바가 소유하므로 슬롯이 닫기를 맡을 때는 그 확인을
-  거치도록 `onClose`를 사이드바에 위임한다.
+  (계약 인스펙터 슬롯과 같은 모양), 슬롯 헤더가 패널 제목을 그린다. B-03의 `AssistStrategySidebar`는
+  이름 없는 `<section>`이고 자체 `<h2>`를 그리지 않으므로, 슬롯이 이름을 달지 않으면 사이드바는
+  landmark 탐색으로 닿지 않는다. 슬롯을 `getByRole("complementary", { name })`으로 찾는 테스트로
+  잠근다(B-03 3차 리뷰 P3).
+- **닫기는 한 곳만 그린다 — 사이드바다**(B-04 결정 2026-09-21). 진행 중 턴 취소 확인을 사이드바가
+  소유하므로, 슬롯은 패널을 접는 손잡이를 `onClose`로 넘기고 헤더에는 접기 버튼을 그리지 않는다.
+  슬롯 내용이 평범한 노드라 자기 닫기를 그리지 않을 때만 헤더가 접기 버튼을 낸다. 상단 바 토글과
+  Alt+A는 대화를 끝내지 않는 패널 조작이라 확인을 거치지 않으며, 접어도 사이드바는 마운트를 유지해
+  진행 중 턴의 스트림이 끊기지 않는다.
+- 펼친 직후 포커스는 사이드바 패널(`tabIndex={-1}`)로 간다 — 상단 토글은 펼치는 순간 스스로
+  언마운트되므로 넘겨받을 자리가 없으면 포커스가 `body`로 떨어진다.
 
 ### B-05 — e2e·문서
 

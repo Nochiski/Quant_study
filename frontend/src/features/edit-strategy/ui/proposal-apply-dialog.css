@@ -1,0 +1,81 @@
+.proposal-apply__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: var(--overlay-scrim);
+}
+
+.proposal-apply {
+  display: grid;
+  gap: var(--space-3);
+  width: min(680px, 100%);
+  max-height: min(620px, 80vh);
+  overflow: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--status-warn);
+  border-radius: var(--radius-large);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-popover);
+}
+
+.proposal-apply__header {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--text-size-small);
+}
+
+.proposal-apply__note {
+  color: var(--text-muted);
+}
+
+.proposal-apply__diff {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--text-size-small);
+}
+
+.proposal-apply__diff-scroll {
+  max-height: 40vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+}
+
+.proposal-apply__diff table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.proposal-apply__diff th,
+.proposal-apply__diff td {
+  padding: var(--space-1) var(--space-2);
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+
+.proposal-apply__diff tr[data-kind="added"] {
+  background: var(--status-ok-soft);
+}
+
+.proposal-apply__diff tr[data-kind="removed"] {
+  background: var(--status-error-soft);
+}
+
+.proposal-apply__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.proposal-apply__feedback {
+  font-size: var(--text-size-small);
+  color: var(--text-muted);
+}
+
+.proposal-apply__feedback--error {
+  color: var(--status-error);
+}

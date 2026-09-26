@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { strategyDocumentQuery } from "../../../entities/strategy";
 import {
   ContractInspector,
+  ProposalApplyDialog,
+  ProposalApplyFeedback,
   ConflictBanner,
   DirtyLeaveGuard,
   DocumentToolbar,
@@ -25,6 +27,11 @@ import {
   revisionDraftId,
   saveStatusText,
   saveStatusTone,
+  assistantDocumentRef,
+  assistantProposalOf,
+  useAssistantTurnContext,
+  useApplyAssistantProposal,
+  useApplyProposalThenBacktest,
   useAutosave,
   useCompileDocument,
   useExecutionPlans,
@@ -41,6 +48,7 @@ import {
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
+import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
   useBacktestRunSettings,
@@ -137,6 +145,8 @@ export const StrategyRevisionPage = () => {
     [stored.generated, stored.requires_upgrade, stored.revision],
   );
   const documentUpgrade = useUpgradeDocument(document, storedMeta);
+  // AI 제안은 업그레이드 적용과 같은 전체 범위 교체 경로를 쓴다(SoT 규칙의 두 번째 예외).
+  const proposalApply = useApplyAssistantProposal(document);
   const current =
     document.compiled !== null &&
     document.compiledVersion === document.sourceVersion
@@ -219,21 +229,48 @@ export const StrategyRevisionPage = () => {
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
   const onUpgradeEditorReady = documentUpgrade.onEditorReady;
+  const onProposalEditorReady = proposalApply.onEditorReady;
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
       onUpgradeEditorReady(editor);
+      onProposalEditorReady(editor);
     },
     [
       onOutlineEditorReady,
+      onProposalEditorReady,
       onSnippetEditorReady,
       onTransactionsEditorReady,
       onUpgradeEditorReady,
     ],
   );
+  // 세션이 붙은 문서는 타자마다 바뀌지 않는다 — 문서 텍스트가 아니라 이 세 값에만 묶는다.
+  const assistantDocumentRefValue = useMemo(
+    () =>
+      assistantDocumentRef(
+        document.strategyId,
+        document.baseRevision,
+        serverDraftId,
+      ),
+    [document.strategyId, document.baseRevision, serverDraftId],
+  );
+  // 턴을 시작하는 순간의 문서·실행 설정을 읽는 손잡이. commit된 값을 비추는 ref라 사이드바에 넘기는
+  // 함수는 그대로 두고도 늘 지금 화면의 값을 읽는다(`.claude/rules/frontend-react-effects.md`).
+  // 턴은 세션 생성 왕복 뒤에 시작될 수 있다. 텍스트는 그 순간 편집기에서 직접 읽는다.
+  const readAssistantContext = useAssistantTurnContext(
+    document,
+    proposalApply.readSource,
+    runSettings.requestOptions,
+  );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
+  // "적용 후 백테스트"는 적용 → 검증 → 실행을 한 동작으로 잇는다(WORKFLOW B-04).
+  const proposalBacktest = useApplyProposalThenBacktest(
+    proposalApply,
+    document,
+    { canRun, run: runBacktest },
+  );
   const selectSymbol = useCallback(
     (pointer: string): void => {
       outline.requestSourceReveal(pointer);
@@ -412,6 +449,14 @@ export const StrategyRevisionPage = () => {
         }}
         notice={
           <>
+            {/* 제안 적용 결과는 문서 알림 줄에 둔다 — 사이드바 레일에는 사이드바가 소유한
+                라이브 영역 하나만 있어야 한다(B-03 리뷰). 알림 줄은 배너들의 원래 자리라 저장 충돌
+                배너와 동시에 뜨면 라이브 영역이 둘이 될 수 있으나, 동시 노출이 드물고 두 문장 모두
+                읽히는 편이 나아 그대로 둔다(B-04 리뷰 P3). */}
+            <ProposalApplyFeedback
+              apply={proposalApply}
+              chain={proposalBacktest}
+            />
             <UpgradeBanner
               upgrade={documentUpgrade}
               backtestRejected={backtestRejectedForUpgrade}
@@ -455,6 +500,24 @@ export const StrategyRevisionPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
+        assistant={({ close }) => (
+          <AssistStrategySidebar
+            documentRef={assistantDocumentRefValue}
+            readContext={readAssistantContext}
+            onPreviewProposal={(action) =>
+              proposalApply.preview(assistantProposalOf(action))
+            }
+            onApplyProposal={(action) =>
+              proposalApply.apply(assistantProposalOf(action))
+            }
+            onApplyProposalAndBacktest={(action) =>
+              proposalBacktest.applyThenBacktest(assistantProposalOf(action))
+            }
+            // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
+            // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
+            onClose={close}
+          />
+        )}
         debugger={
           <StrategyDebuggerPanel
             document={document}
@@ -495,6 +558,7 @@ export const StrategyRevisionPage = () => {
           </>
         }
       />
+      <ProposalApplyDialog apply={proposalApply} />
       <DirtyLeaveGuard dirty={document.dirty} />
     </>
   );

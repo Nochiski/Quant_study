@@ -122,10 +122,20 @@ def build_container(
         RuamelDocumentCodec(),
         factor_registry_version=factor_registry.version,
         dataset_snapshot_id=lambda: equity_data.snapshot().snapshot_id,
+        field_catalog=equity_data,
     )
+    # 저장소 무결성 검사는 "원문이 저장된 spec 으로 compile 되는가"만 본다. 연결된 어댑터의 필드
+    # 계약·capability 로 판정하면 어댑터를 바꾸거나(mock ↔ duckdb) 필드가 빠진 순간 저장된
+    # revision 을 읽지 못해 목록·이력이 통째로 500 이 된다. 실행 가능성은 compile·실행이 따로 본다.
     strategy_repository = SQLiteStrategyRepository(
         strategy_repository_path,
-        source_spec_hash=_source_spec_hash_resolver(strategy_authoring),
+        source_spec_hash=_source_spec_hash_resolver(
+            StrategyAuthoringService(
+                RuamelDocumentCodec(),
+                factor_registry_version=factor_registry.version,
+                dataset_snapshot_id=lambda: equity_data.snapshot().snapshot_id,
+            )
+        ),
     )
     strategy_draft_repository = SQLiteStrategyDraftRepository(strategy_repository_path)
     run_artifact_root = artifact_root or (

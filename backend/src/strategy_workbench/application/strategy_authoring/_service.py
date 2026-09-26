@@ -28,6 +28,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     run_environment_schema,
     run_environment_schema_hash,
 )
+from strategy_workbench.domain.factor.facade.expression import FieldMetadata
 from strategy_workbench.domain.factor.facade.operators import (
     OperatorDefinition,
     operator_definitions,
@@ -65,6 +66,7 @@ from .ports.outgoing.document_codec import (
     SourceFormat,
     SourceRange,
 )
+from .ports.outgoing.field_catalog import FieldCatalogPort
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +181,8 @@ class StrategyOperatorCatalog:
     """그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.
 
     문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,
-    연산자 목록·arity·가용성을 손으로 적지 않는다.
+    연산자 목록·arity·가용성을 손으로 적지 않는다. `availability` 는 연결된 어댑터 capability 로
+    판정하므로(P2-07) 해시도 어댑터에 따라 다르다 — 어댑터를 바꾸면 ETag 가 바뀐다.
     """
 
     catalog_hash: str
@@ -210,11 +213,20 @@ class StrategyAuthoringService:
         *,
         factor_registry_version: str,
         dataset_snapshot_id: Callable[[], str],
+        field_catalog: FieldCatalogPort | None = None,
     ) -> None:
+        """`field_catalog` 는 연결된 equity 어댑터다(P2-07, spec D5).
+
+        주면 compile 이 그 필드 계약으로 없는 `field_id` 와 연산자 capability 를 판정하고, 연산자
+        카탈로그의 `availability` 도 같은 capability 로 답한다. 어댑터가 없는 컨텍스트(CLI·테스트,
+        저장소 무결성 검사)는 None 이고 계약 없이 검증한다.
+        """
         self._codec = codec
         self._factor_registry_version = factor_registry_version
         # The equity port owns the snapshot fact: read it per call, never copy it at bootstrap.
         self._dataset_snapshot_id = dataset_snapshot_id
+        # 필드 계약도 어댑터가 소유한다 — 매 호출 읽고 복사해 두지 않는다.
+        self._field_catalog = field_catalog
 
     @cached_property
     def _schema(self) -> StrategyDocumentSchema:
@@ -239,16 +251,20 @@ class StrategyAuthoringService:
         """실행 설정의 런타임 스키마(`domain/backtest` 소유 모델에서 유도, 순수·캐시)."""
         return self._run_environment_schema
 
-    @cached_property
-    def _operators(self) -> StrategyOperatorCatalog:
-        operators = operator_definitions()
+    def operators(self) -> StrategyOperatorCatalog:
+        """연산자 정의 카탈로그. 가용성은 연결된 어댑터 capability 로 판정한다(P2-07)."""
+        fields = self._fields_or_none()
+        operators = operator_definitions(
+            None if fields is None else {field.value_type for field in fields}
+        )
         return StrategyOperatorCatalog(
             catalog_hash=operator_catalog_hash(operators), operators=operators
         )
 
-    def operators(self) -> StrategyOperatorCatalog:
-        """연산자 정의 카탈로그 (domain.factor 레지스트리 그대로, pure·cached)."""
-        return self._operators
+    def _fields_or_none(self) -> tuple[FieldMetadata, ...] | None:
+        if self._field_catalog is None:
+            return None
+        return self._field_catalog.factor_field_catalog()
 
     @cached_property
     def _fields(self) -> tuple[FieldContract, ...]:
@@ -334,7 +350,9 @@ class StrategyAuthoringService:
 
         spec = hydration.spec
         # 문서에 명시된 pointer만 넘긴다: 적용 불가 경고는 작성된 값에만 해당한다 (spec D4).
-        validation = validate_strategy(spec, written_pointers=parsed.key_ranges.keys())
+        validation = validate_strategy(
+            spec, written_pointers=parsed.key_ranges.keys(), fields=self._fields_or_none()
+        )
         diagnostics = tuple(
             SourceDiagnostic(
                 code=issue.code,

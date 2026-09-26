@@ -9,8 +9,11 @@ property를 갖는지. `_evaluation.py`가 계산을, `_validation.py`가 출력
   문장은 frontend i18n이 렌더한다. 적용 조건(`x-applicable-when`)과 같은 소유 규칙이다.
 - 파생 가능한 것은 적지 않는다. `kind`·`arity`·`params`의 필수 여부·operator enum은 전부 노드
   dataclass에서 읽는다. 손으로 적는 것은 "이 연산자가 무엇을 읽고 무엇을 내는가"뿐이다.
-- `availability`는 정의 값이다. 연결된 어댑터 capability로 실제 가용성을 판정하는 것은 P2-04이며
-  여기서는 "GROUP_SERIES 필드를 주는 어댑터가 아직 없다"는 spec D5의 정적 사실만 담는다.
+- `availability`는 어댑터 capability로 판정한다(P2-07, spec D5). 연산자 kind가 입력으로 요구하는
+  필드 값 타입(`_REQUIRED_FIELD_VALUE_TYPES`, 지금은 그룹 연산의 `group_series`)을 연결된 어댑터의
+  필드 계약이 하나라도 갖는지로 가른다. compile 의 `strategy.operator.unsupported` 와 카탈로그
+  응답이 같은 함수(`operator_availability`)를 읽는다. 어댑터가 없으면 아무 필드도 없는 것으로
+  보아 그룹 연산은 `unsupported` 다(`operator_definitions()` 기본값).
 
 `tests/domain/test_factor_operators.py`가 스키마 enum과 이 표의 키를 양방향으로 대조하고,
 `output_type_rule`·`unit_rule`을 실제 `validate_factor_graph` 결과와 대조한다.
@@ -18,8 +21,8 @@ property를 갖는지. `_evaluation.py`가 계산을, `_validation.py`가 출력
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from dataclasses import MISSING, dataclass
+from collections.abc import Collection, Mapping
+from dataclasses import MISSING, dataclass, replace
 from dataclasses import fields as dataclass_fields
 from enum import StrEnum
 from types import MappingProxyType
@@ -34,6 +37,7 @@ from ._nodes import (
     FactorComparisonOperator,
     GroupNode,
     GroupOperator,
+    NodeValueType,
     TimeSeriesNode,
     TimeSeriesOperator,
     UnaryNode,
@@ -43,7 +47,7 @@ from ._nodes import (
 
 
 class OperatorAvailability(StrEnum):
-    """정의 시점의 가용성. 실제 판정(어댑터 capability)은 P2-04이 추가한다."""
+    """연결된 어댑터에서 이 연산자를 실행할 수 있는가(`operator_availability`가 판정)."""
 
     AVAILABLE = "available"
     UNSUPPORTED = "unsupported"
@@ -107,6 +111,28 @@ def _parameter(node_type: type, property_name: str) -> OperatorParameter:
     return OperatorParameter(property_name=property_name, required=not has_default)
 
 
+# 연산자 kind 가 입력으로 요구하는 필드 값 타입(어댑터 capability). 그룹 연산은 종목을 묶을 그룹 키
+# 필드가 있어야 뜻이 있다. 실데이터 어댑터는 아직 그룹 필드를 주지 않는다(P2-08 스파이크 전).
+_REQUIRED_FIELD_VALUE_TYPES: Mapping[str, NodeValueType] = MappingProxyType(
+    {_kind_of(GroupNode): NodeValueType.GROUP_SERIES}
+)
+
+
+def required_field_value_type(kind: str) -> NodeValueType | None:
+    """이 kind 의 연산자가 어댑터에 요구하는 필드 값 타입. 요구가 없으면 None."""
+    return _REQUIRED_FIELD_VALUE_TYPES.get(kind)
+
+
+def operator_availability(
+    kind: str, provided_value_types: Collection[NodeValueType]
+) -> OperatorAvailability:
+    """어댑터가 제공하는 필드 값 타입 집합에서 이 kind 의 가용성을 판정한다(spec D5)."""
+    required = required_field_value_type(kind)
+    if required is None or required in provided_value_types:
+        return OperatorAvailability.AVAILABLE
+    return OperatorAvailability.UNSUPPORTED
+
+
 def _definition(
     node_type: type,
     operator: StrEnum,
@@ -114,7 +140,6 @@ def _definition(
     params: tuple[str, ...] = (),
     output_type_rule: OutputTypeRule,
     unit_rule: UnitRule,
-    availability: OperatorAvailability = OperatorAvailability.AVAILABLE,
     example: str,
 ) -> OperatorDefinition:
     kind = _kind_of(node_type)
@@ -126,7 +151,8 @@ def _definition(
         params=tuple(_parameter(node_type, name) for name in params),
         output_type_rule=output_type_rule,
         unit_rule=unit_rule,
-        availability=availability,
+        # 어댑터를 모르는 정의 시점 값: 아무 필드도 제공되지 않은 것으로 판정한다.
+        availability=operator_availability(kind, ()),
         description_key=stem,
         formula_key=f"{stem}.formula",
         example=example,
@@ -303,7 +329,6 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
         params=("group_field_id",),
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
         unit_rule=UnitRule.SAME_AS_INPUT,
-        availability=OperatorAvailability.UNSUPPORTED,
         example=(
             "{ kind: group, node_id: sector_neutral, operator: neutralize, input_node_id: score,"
             " group_field_id: sector }"
@@ -315,7 +340,6 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
         params=("group_field_id",),
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
         unit_rule=UnitRule.SAME_AS_INPUT,
-        availability=OperatorAvailability.UNSUPPORTED,
         example=(
             "{ kind: group, node_id: sector_rank, operator: rank, input_node_id: score,"
             " group_field_id: sector }"
@@ -379,9 +403,23 @@ OPERATOR_DEFINITIONS: Mapping[tuple[str, str], OperatorDefinition] = MappingProx
 )
 
 
-def operator_definitions() -> tuple[OperatorDefinition, ...]:
-    """선언 순서(노드 kind 순 × enum 선언 순)의 정의 전부. 팔레트 표시 순서다."""
-    return _DEFINITIONS
+def operator_definitions(
+    provided_value_types: Collection[NodeValueType] | None = None,
+) -> tuple[OperatorDefinition, ...]:
+    """선언 순서(노드 kind 순 × enum 선언 순)의 정의 전부. 팔레트 표시 순서다.
+
+    `provided_value_types` 는 연결된 어댑터가 제공하는 필드 값 타입이다. 주면 `availability` 를 그
+    capability 로 다시 판정하고, 안 주면(어댑터 없음) 아무것도 제공되지 않은 정의 시점 값이다.
+    """
+    if provided_value_types is None:
+        return _DEFINITIONS
+    return tuple(
+        replace(
+            definition,
+            availability=operator_availability(definition.kind, provided_value_types),
+        )
+        for definition in _DEFINITIONS
+    )
 
 
 _KEYS_BY_ENUM: Mapping[type, Mapping[str, str]] = MappingProxyType(

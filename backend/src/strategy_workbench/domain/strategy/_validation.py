@@ -12,6 +12,11 @@ from strategy_workbench.domain.factor.facade.expression import (
     NodeValueType,
     ParameterNode,
 )
+from strategy_workbench.domain.factor.facade.operators import (
+    OperatorAvailability,
+    operator_availability,
+    required_field_value_type,
+)
 from strategy_workbench.domain.factor.facade.validation import (
     FactorGraphValidation,
     FactorValidationSeverity,
@@ -90,12 +95,16 @@ def semantic_issue(
     *,
     severity: ValidationSeverity = ValidationSeverity.ERROR,
     node_id: str | None = None,
+    kind: ValidationKind = ValidationKind.SEMANTIC,
 ) -> ValidationIssue:
     """Build a semantic `ValidationIssue`, checking the code against its registry (D-007).
 
     This is the only sanctioned way to mint a `strategy.*` issue, in the domain and in the
     application alike: constructing `ValidationIssue` directly would let a code exist that no
     registry row describes, which the schema API and the UI could not explain.
+
+    `kind` 는 진단 분류다. 문서가 틀린 것이 아니라 연결된 데이터가 못 하는 것(어댑터 capability)은
+    `CAPABILITY` 로 낸다(P2-07 `strategy.operator.unsupported`).
 
     `factor.*` 코드는 전략 문서 진단으로 그대로 나갈 수 없다(P1-05). 전에는 alias가 없는 그래프
     코드가 검사 없이 통과해, frontend가 모르는 네임스페이스의 코드가 문제 목록에 섞였다. 지금은
@@ -115,7 +124,7 @@ def semantic_issue(
         code=code,
         path=path,
         message=message,
-        kind=ValidationKind.SEMANTIC,
+        kind=kind,
         severity=severity,
         node_id=node_id,
     )
@@ -280,6 +289,39 @@ def _output_type_issue(
     )
 
 
+# 어댑터 capability 가 없어 unsupported 인 노드에서는 같은 원인(그 필드 타입이 없다)을 그래프 검증이
+# 다시 말한다. unsupported 한 줄만 남긴다.
+_CAPABILITY_SHADOWED_CODES = frozenset(
+    {"factor.graph.group_field_missing", "factor.graph.group_field_type"}
+)
+
+
+def _unsupported_operator_issues(
+    factor_index: int, graph: FactorGraph, provided: frozenset[NodeValueType]
+) -> list[ValidationIssue]:
+    """연결된 어댑터가 요구 필드 타입을 주지 않는 연산자 노드마다 capability error (spec D5)."""
+    issues: list[ValidationIssue] = []
+    for node_index, node in enumerate(graph.nodes):
+        if operator_availability(node.kind, provided) is OperatorAvailability.AVAILABLE:
+            continue
+        required = required_field_value_type(node.kind)
+        operator = getattr(node, "operator", None)
+        issues.append(
+            semantic_issue(
+                "strategy.operator.unsupported",
+                f"factors.{factor_index}.graph.nodes.{node_index}",
+                "연결된 데이터가 이 연산에 필요한 필드를 제공하지 않아 실행할 수 없습니다: "
+                f"node_id={node.node_id!r} kind={node.kind!r} "
+                f"operator={getattr(operator, 'value', operator)!r} "
+                f"required={getattr(required, 'value', required)!r} "
+                f"provided={sorted(item.value for item in provided)!r}",
+                node_id=node.node_id,
+                kind=ValidationKind.CAPABILITY,
+            )
+        )
+    return issues
+
+
 def validate_strategy(
     spec: StrategySpec,
     *,
@@ -300,6 +342,11 @@ def validate_strategy(
     넘기고 지금과 같이 계약 없이 검증한다.
     """
     field_contracts = None if fields is None else tuple(fields)
+    provided = (
+        None
+        if field_contracts is None
+        else frozenset(field.value_type for field in field_contracts)
+    )
     issues: list[ValidationIssue] = []
     written = frozenset(written_pointers or ())
     for applicability in FIELD_APPLICABILITY:
@@ -480,6 +527,13 @@ def validate_strategy(
             fields=field_contracts or (),
             require_field_metadata=field_contracts is not None,
         )
+        unsupported = (
+            []
+            if provided is None
+            else _unsupported_operator_issues(factor_index, factor.graph, provided)
+        )
+        unsupported_nodes = {issue.node_id for issue in unsupported}
+        issues.extend(unsupported)
         issues.extend(
             semantic_issue(
                 expression_code(factor_issue.code),
@@ -493,6 +547,10 @@ def validate_strategy(
                 node_id=factor_issue.node_id,
             )
             for factor_issue in validation.issues
+            if not (
+                factor_issue.node_id in unsupported_nodes
+                and factor_issue.code in _CAPABILITY_SHADOWED_CODES
+            )
         )
         output_issue = _output_type_issue(factor_index, factor.factor_id, factor.graph, validation)
         if output_issue is not None:

@@ -51,6 +51,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     FactorGraph,
     FactorSignal,
     FieldNode,
+    NodeValueType,
     RebalanceFrequency,
     StrategySpec,
     TimeSeriesNode,
@@ -553,6 +554,21 @@ def test_factor_metadata_and_observations_come_from_the_same_panel(
     assert min(dates) == date(2024, 1, 5) and max(dates) == END
     assert all(o.forward_return is None for o in observations.observations)
     assert any(not o.universe_member for o in observations.observations)  # 000660 정지일
+
+
+def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """compile 이 읽는 필드 계약 전부(P2-07). 같은 변환(`resolve_factor_fields`)을 거친다.
+
+    이 어댑터는 그룹 필드를 아직 주지 않으므로(P2-08 스파이크 전) 그룹 연산은 unsupported 다.
+    """
+    catalog = adapter.factor_field_catalog()
+
+    field_ids = tuple(profile.field_id for profile in adapter.list_fields())
+    assert catalog == adapter.resolve_factor_fields(field_ids).fields
+    assert catalog, "필드가 하나도 없으면 compile 이 모든 필드를 없다고 본다"
+    assert {field.value_type for field in catalog} == {NodeValueType.NUMERIC_SERIES}
 
 
 # ── BacktestDataPort ──────────────────────────────────────────────────────────

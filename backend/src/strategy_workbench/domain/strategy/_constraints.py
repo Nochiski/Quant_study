@@ -343,6 +343,8 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         # (`application/portfolio_design` `_reject_non_numeric_factor_outputs`)도 같은 코드를 낸다 —
         # 한 사실에 코드 하나다.
         "strategy.factor.output_type",
+        # 연결된 어댑터가 연산에 필요한 필드 타입을 주지 않는다(P2-07, capability 진단).
+        "strategy.operator.unsupported",
         "strategy.portfolio.liquidity_field",
         "strategy.risk.net_exposure",
         "strategy.risk.long_only_exposure",

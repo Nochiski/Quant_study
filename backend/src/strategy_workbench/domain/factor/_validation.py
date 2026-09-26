@@ -10,6 +10,7 @@ from ._nodes import (
     ConditionalNode,
     ConstantNode,
     CrossSectionalNode,
+    CrossSectionalOperator,
     ExpressionNode,
     FactorGraph,
     FieldMetadata,
@@ -22,6 +23,9 @@ from ._nodes import (
     UnaryOperator,
     field_minimum,
 )
+
+# 출력이 무차원인 횡단면 연산(BACKLOG-003). `demean`·`winsorize` 는 값의 단위를 그대로 둔다.
+_DIMENSIONLESS_SECTIONS = frozenset({CrossSectionalOperator.RANK, CrossSectionalOperator.ZSCORE})
 
 # 정수 파라미터의 하한은 노드 dataclass 옆에 한 번만 선언한다(`_nodes.minimum`). runtime schema가
 # 같은 값을 JSON Schema `minimum`으로 발행하므로 화면이 만든 기본값과 검증기가
@@ -519,6 +523,10 @@ def _infer_contract(
             isinstance(node, UnaryNode) and node.operator is not UnaryOperator.NEGATE
         ):
             value_type = NodeValueType.NUMERIC_SERIES
+        if isinstance(node, CrossSectionalNode) and node.operator in _DIMENSIONLESS_SECTIONS:
+            # 순위·z-score 는 입력 단위를 지운다(BACKLOG-003). 카탈로그 `UnitRule.DIMENSIONLESS`
+            # 와 같은 규칙이며 `test_factor_operators.py` 가 둘을 대조한다.
+            unit = "1"
         if isinstance(node, GroupNode):
             group_metadata = fields.get(node.group_field_id)
             if (fields or require_field_metadata) and group_metadata is None:

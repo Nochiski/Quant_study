@@ -66,6 +66,9 @@ class UnitRule(StrEnum):
     SAME_AS_INPUT = "same_as_input"
     COMBINED = "combined"  # 두 입력 단위를 곱/나눗셈으로 합친다 — `(a*b)`, `(a/b)`
     BOOLEAN = "boolean"  # `bool`
+    # 무차원 `"1"`. 횡단면 순위·z-score 는 "몇 번째인가"·"평균에서 몇 표준편차인가"라 입력 단위가
+    # 남지 않는다(BACKLOG-003). 입력 단위를 물려주면 표준화한 두 팩터의 합이 단위 오류로 막힌다.
+    DIMENSIONLESS = "dimensionless"
 
 
 @dataclass(frozen=True)
@@ -259,7 +262,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
         CrossSectionalNode,
         CrossSectionalOperator.RANK,
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
-        unit_rule=UnitRule.SAME_AS_INPUT,
+        unit_rule=UnitRule.DIMENSIONLESS,
         example=(
             "{ kind: cross_sectional, node_id: ranked, operator: rank, input_node_id: score }"
         ),
@@ -268,7 +271,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
         CrossSectionalNode,
         CrossSectionalOperator.ZSCORE,
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
-        unit_rule=UnitRule.SAME_AS_INPUT,
+        unit_rule=UnitRule.DIMENSIONLESS,
         example=(
             "{ kind: cross_sectional, node_id: standardized, operator: zscore,"
             " input_node_id: score }"

@@ -147,6 +147,12 @@ VENUE = "XKRX"
 SCHEMA_VERSION = "equity-v1.2"
 SECURITY_ID_SEP = ":"
 _CHECKPOINT_ROWS = 256  # 취소 체크포인트 간격(행) — 포트의 `_CHECKPOINT_BATCH` 와 같은 크기
+# 원시 로딩 진행 구간 경계(이슈 #162). 실데이터 4년 구간 실측(질의 약 7초, 격자 행 조립 약 16초,
+# 관측 조립 약 17.5초, 생성 시 계약 검증 약 4초) 비율을 따른다.
+_GRID_FETCHED = 0.3  # 격자 안: 질의·fetchall 완료
+_LOAD_PANEL_END = 0.52  # 격자·LATEST 원천 완료
+_LOAD_ROWS_END = 0.905  # 관측 조립 완료
+_LOAD_SORTED = 0.91  # 정렬 완료, 이후 생성 시 계약 검증
 RESEARCH_UNIVERSE_ID = "krx.common-stock"  # FactorObservationQuery 에 유니버스가 없다 — 계약 기본값
 REFERENCE_KIND = "reference"
 # `price_daily.basis`(규칙 e1.15.0) — 'krx' 확정 / 'evening' 저녁 잠정(키움 종가·거래량만, OHL
@@ -198,6 +204,10 @@ def _cell_kind(value: float | None, fill_kind: object) -> CellKind:
 
 def _noop_checkpoint() -> None:
     """취소를 요구하지 않는 호출자용 체크포인트 — `load_raw_observations` 의 기본값."""
+
+
+def _noop_progress(fraction: float) -> None:
+    """진행 보고를 요구하지 않는 호출자용 콜백 — `load_raw_observations_cancellable` 의 기본값."""
 
 
 @dataclass(frozen=True)
@@ -793,7 +803,25 @@ class EquityDuckdbAdapter:
         *,
         checkpoint: Callable[[], None],
     ) -> RawObservationSet:
-        """`load_raw_observations` 와 같은 결과 + 협조적 취소.
+        """`load_raw_observations` 와 같은 결과 + 협조적 취소. 진행 보고 없이 위임한다."""
+        return self.load_raw_observations_reporting(
+            query, checkpoint=checkpoint, progress=_noop_progress
+        )
+
+    def load_raw_observations_reporting(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None],
+        progress: Callable[[float], None],
+    ) -> RawObservationSet:
+        """`load_raw_observations` 와 같은 결과 + 협조적 취소 + 진행 보고.
+
+        `progress` 는 격자 질의·격자 행 조립(0~`_LOAD_PANEL_END`), 관측 조립(~`_LOAD_ROWS_END`),
+        정렬, `RawObservationSet` 생성 시 계약 검증(~1.0)을 지나며 오르고, 생성이 끝난 뒤 1.0 을
+        받는다(이슈 #162). SQL 은 로딩 시간의 일부이고(실측 2년 약 2초, 4년 콜드 캐시 약 7초)
+        대부분은 파이썬 행 조립과 검증이라 그 루프들이 `_CHECKPOINT_ROWS` 행마다 보고한다. SQL
+        한 번은 나눌 수 없어 그 동안만 보고가 없다. 실패 값으로 끝나는 경로는 보고하지 않는다.
 
         `checkpoint` 는 (1) duckdb 로 내려가기 전 1회, (2) 행 조립 루프에서
         `_CHECKPOINT_ROWS` 행마다, (3) `RawObservationSet` 계약 검증 중
@@ -838,11 +866,15 @@ class EquityDuckdbAdapter:
             tickers=None,
             predicate=self._predicate(query.universe_id),
             field_ids=query.field_ids,
+            checkpoint=checkpoint,
+            progress=lambda fraction: progress(fraction * _LOAD_PANEL_END),
         )
+        rows = tuple(self._rows_in(panel, window.sessions))
         observations: list[RawObservation] = []
-        for index, row in enumerate(self._rows_in(panel, window.sessions)):
+        for index, row in enumerate(rows):
             if index % _CHECKPOINT_ROWS == 0:
                 checkpoint()
+                progress(_LOAD_PANEL_END + (_LOAD_ROWS_END - _LOAD_PANEL_END) * index / len(rows))
             fields: list[RawFieldValue] = []
             for field_id in query.field_ids:
                 found = self._cell(panel, row, field_id, lags[field_id])
@@ -871,7 +903,8 @@ class EquityDuckdbAdapter:
                 )
             )
         observations.sort(key=lambda item: (item.as_of, item.security_id))
-        return RawObservationSet(
+        progress(_LOAD_SORTED)
+        result = RawObservationSet(
             status=DataLoadStatus.OK if observations else DataLoadStatus.NO_DATA,
             data_snapshot_id=self._snapshot_id,
             sessions=window.requested,
@@ -885,7 +918,12 @@ class EquityDuckdbAdapter:
             ),
             warnings=tuple(sorted({*window.warnings, *panel.warnings})),
             validation_checkpoint=checkpoint,
+            validation_progress=lambda fraction: progress(
+                _LOAD_SORTED + (1.0 - _LOAD_SORTED) * fraction
+            ),
         )
+        progress(1.0)
+        return result
 
     # ── BacktestDataPort ──────────────────────────────────────────────────────
 
@@ -1224,12 +1262,15 @@ class EquityDuckdbAdapter:
         tickers: tuple[str, ...] | None,
         predicate: str | None,
         field_ids: Sequence[str],
+        checkpoint: Callable[[], None] = _noop_checkpoint,
+        progress: Callable[[float], None] = _noop_progress,
     ) -> _Panel:
         """격자 행 + 원천별 관측을 한 번에 읽는다.
 
         `tickers` 가 없으면 `predicate` 가 창 안에서 한 번이라도 참인 종목 집합(정책 driven)이고,
         있으면 그 종목이다. GRID 원천은 랙만큼 앞 세션까지 더 읽고, LATEST 원천은 창 끝까지의
-        관측을 전부 읽어 세션별 컷오프를 파이썬에서 bisect 한다.
+        관측을 전부 읽어 세션별 컷오프를 파이썬에서 bisect 한다. `progress` 는 격자(0~0.9)와
+        LATEST 원천(~1.0) 진행을, `checkpoint` 는 격자 행 조립 중 협조적 취소를 받는다.
         """
         grouped = self._fields_by_source(field_ids)
         grid_sources = [name for name in grouped if SOURCE_BY_NAME[name].mode is SourceMode.GRID]
@@ -1244,7 +1285,14 @@ class EquityDuckdbAdapter:
             )
         fetch_start, fetch_end = self._sessions[fetch_first], window.sessions[-1]
         rows = self._grid(
-            grouped, grid_sources, fetch_start, fetch_end, tickers=tickers, predicate=predicate
+            grouped,
+            grid_sources,
+            fetch_start,
+            fetch_end,
+            tickers=tickers,
+            predicate=predicate,
+            checkpoint=checkpoint,
+            progress=lambda fraction: progress(0.9 * fraction),
         )
         panel_tickers = tuple(sorted({row.ticker for row in rows.values()}))
         latest_sources = [
@@ -1262,6 +1310,7 @@ class EquityDuckdbAdapter:
                 else tuple(sorted(set(corp_by_ticker.values())))
             )
             latest[name] = self._latest(source, grouped[name], keys, fetch_end)
+        progress(1.0)
         return _Panel(rows, latest, corp_by_ticker, tuple(warnings))
 
     def _grid(
@@ -1273,8 +1322,14 @@ class EquityDuckdbAdapter:
         *,
         tickers: tuple[str, ...] | None,
         predicate: str | None,
+        checkpoint: Callable[[], None] = _noop_checkpoint,
+        progress: Callable[[float], None] = _noop_progress,
     ) -> dict[tuple[str, date], _Row]:
-        """`universe_daily` × `security_span` 격자에 GRID 원천을 (ticker, date) 로 붙인 행들."""
+        """`universe_daily` × `security_span` 격자에 GRID 원천을 (ticker, date) 로 붙인 행들.
+
+        질의가 끝나면 `_GRID_FETCHED`, 파이썬 행 조립 동안 `_CHECKPOINT_ROWS` 행마다 그 뒤를 채워
+        1.0 까지 보고한다. 조립 루프가 질의보다 훨씬 길다(2년 구간 실측 약 8.5초 대 2초).
+        """
         member_expr = (
             f"coalesce(({predicate}), FALSE)" if predicate is not None else "NULL::BOOLEAN"
         )
@@ -1348,8 +1403,12 @@ class EquityDuckdbAdapter:
             raw_rows = con.execute(sql, params).fetchall()
         finally:
             con.close()
+        progress(_GRID_FETCHED)
         rows: dict[tuple[str, date], _Row] = {}
-        for raw in raw_rows:
+        for index, raw in enumerate(raw_rows):
+            if index % _CHECKPOINT_ROWS == 0:
+                checkpoint()
+                progress(_GRID_FETCHED + (1.0 - _GRID_FETCHED) * index / len(raw_rows))
             session = _as_date(raw[0], "universe_daily.date")
             ticker = str(raw[1])
             cells: dict[str, _Observed] = {}
@@ -1384,6 +1443,7 @@ class EquityDuckdbAdapter:
                     f"root={self._root}"
                 )
             rows[key] = row
+        progress(1.0)
         return rows
 
     def _corp_map(self, tickers: Sequence[str]) -> dict[str, str]:

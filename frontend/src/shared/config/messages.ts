@@ -888,6 +888,71 @@ const ko = {
   "form.feedback.editor-inactive": "{label} · 편집기가 비활성입니다",
   "form.feedback.pending": "{label} · 직전 편집을 반영하는 중입니다. 잠시 뒤 다시 시도하세요",
   "form.feedback.yaml-only": "{label} · YAML 문서에서만 편집합니다",
+  "nav.settings": "설정",
+  "page.settings.title": "설정",
+  "page.settings.description": "이 워크벤치의 연결과 동작을 설정합니다.",
+  "settings.assistant.title": "AI 어시스턴트 공급자",
+  "settings.assistant.description":
+    "Claude·Codex 연결을 등록하고 어느 연결을 쓸지 고릅니다. API 키는 서버에만 저장되고 화면에는 꼬리 4자리만 보입니다.",
+  "assistant.provider.kind.anthropic": "Claude (Anthropic)",
+  "assistant.provider.kind.openai": "Codex (OpenAI)",
+  "assistant.provider.installed": "사용 가능",
+  "assistant.provider.notInstalled": "설치 필요",
+  "assistant.provider.notInstalled.reason":
+    "서버에 이 공급자의 SDK가 설치되어 있지 않습니다. backend에서 llm extra를 설치한 뒤 서버를 다시 시작하세요.",
+  "assistant.provider.active": "활성",
+  "assistant.provider.activate": "활성으로 사용",
+  "assistant.provider.model": "모델",
+  "assistant.provider.baseUrl": "base_url",
+  "assistant.provider.secretTail": "API 키",
+  "assistant.provider.secretTail.unknown": "표시할 수 없음",
+  "assistant.provider.test": "연결 테스트",
+  "assistant.provider.test.ok": "연결 확인됨",
+  "assistant.provider.delete": "삭제",
+  "assistant.provider.delete.submit": "삭제 확인",
+  "assistant.provider.delete.cancel": "삭제 취소",
+  "assistant.provider.delete.confirm":
+    "이 연결을 지웁니다. 저장된 키도 함께 지워집니다.",
+  "assistant.provider.empty": "연결된 공급자가 없습니다",
+  "assistant.provider.empty.description":
+    "아래에서 공급자를 추가하면 어시스턴트를 쓸 수 있습니다.",
+  "assistant.provider.loadError": "공급자 목록을 불러오지 못했습니다.",
+  "assistant.provider.form.title": "공급자 추가",
+  "assistant.provider.form.kind": "공급자",
+  "assistant.provider.form.label": "표시 이름",
+  "assistant.provider.form.model": "모델",
+  "assistant.provider.form.model.hint": "비우면 공급자의 기본 모델을 씁니다.",
+  "assistant.provider.form.secret": "API 키",
+  "assistant.provider.form.secret.hint":
+    "저장하면 다시 볼 수 없고 꼬리 4자리만 표시합니다.",
+  "assistant.provider.form.advanced": "고급 설정",
+  "assistant.provider.form.baseUrl": "base_url",
+  "assistant.provider.form.baseUrl.hint":
+    "비우면 공급자의 기본 주소를 씁니다. https 주소만 쓸 수 있습니다.",
+  "assistant.provider.form.baseUrl.unused": "base_url 미적용",
+  "assistant.provider.form.submit": "연결 테스트 후 저장",
+  "assistant.provider.form.submitting": "연결 테스트 중",
+  "assistant.provider.form.error.label": "표시 이름을 입력하세요.",
+  "assistant.provider.form.error.secret": "API 키를 입력하세요.",
+  "assistant.probe.auth": "API 키가 거부되었습니다. 키를 다시 확인하세요.",
+  "assistant.probe.model_not_found":
+    "그 모델을 찾을 수 없습니다. 모델 이름을 확인하세요.",
+  "assistant.probe.network":
+    "공급자에 연결하지 못했습니다. 네트워크와 base_url을 확인하세요.",
+  "assistant.probe.rate_limit":
+    "공급자가 요청 한도를 넘었다고 답했습니다. 잠시 뒤 다시 시도하세요.",
+  "assistant.probe.unknown": "연결 테스트가 알 수 없는 이유로 실패했습니다.",
+  "assistant.error.base_url_rejected":
+    "이 base_url은 쓸 수 없습니다. https 주소여야 하고 루프백·사설 대역·IP 주소는 받지 않습니다.",
+  "assistant.error.provider_not_installed":
+    "서버에 이 공급자의 SDK가 설치되어 있지 않습니다.",
+  "assistant.error.no_active_provider": "활성 공급자가 없습니다.",
+  "assistant.error.provider_secret_missing":
+    "저장된 키를 찾을 수 없습니다. 이 연결을 지우고 키를 다시 등록하세요.",
+  "assistant.error.not_found":
+    "이 연결을 찾을 수 없습니다. 목록을 새로 고치세요.",
+  "assistant.error.unknown":
+    "요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하세요.",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -1800,6 +1865,74 @@ export const messages = {
     "form.feedback.editor-inactive": "{label} · the editor is inactive",
     "form.feedback.pending": "{label} · the previous edit is still being applied; try again in a moment",
     "form.feedback.yaml-only": "{label} · only YAML documents are edited",
+    "nav.settings": "Settings",
+    "page.settings.title": "Settings",
+    "page.settings.description":
+      "Configure how this workbench connects and behaves.",
+    "settings.assistant.title": "AI assistant providers",
+    "settings.assistant.description":
+      "Register Claude and Codex connections and choose which one to use. API keys stay on the server; only the last four characters are shown.",
+    "assistant.provider.kind.anthropic": "Claude (Anthropic)",
+    "assistant.provider.kind.openai": "Codex (OpenAI)",
+    "assistant.provider.installed": "Available",
+    "assistant.provider.notInstalled": "Not installed",
+    "assistant.provider.notInstalled.reason":
+      "This provider's SDK is not installed on the server. Install the llm extra in the backend and restart the server.",
+    "assistant.provider.active": "Active",
+    "assistant.provider.activate": "Use as active",
+    "assistant.provider.model": "Model",
+    "assistant.provider.baseUrl": "base_url",
+    "assistant.provider.secretTail": "API key",
+    "assistant.provider.secretTail.unknown": "Not shown",
+    "assistant.provider.test": "Test connection",
+    "assistant.provider.test.ok": "Connection verified",
+    "assistant.provider.delete": "Delete",
+    "assistant.provider.delete.submit": "Confirm delete",
+    "assistant.provider.delete.cancel": "Cancel delete",
+    "assistant.provider.delete.confirm":
+      "This deletes the connection. The stored key is deleted with it.",
+    "assistant.provider.empty": "No provider is connected",
+    "assistant.provider.empty.description":
+      "Add a provider below to use the assistant.",
+    "assistant.provider.loadError": "The provider list could not be loaded.",
+    "assistant.provider.form.title": "Add a provider",
+    "assistant.provider.form.kind": "Provider",
+    "assistant.provider.form.label": "Display name",
+    "assistant.provider.form.model": "Model",
+    "assistant.provider.form.model.hint":
+      "Leave empty to use the provider's default model.",
+    "assistant.provider.form.secret": "API key",
+    "assistant.provider.form.secret.hint":
+      "Once saved it cannot be shown again; only the last four characters appear.",
+    "assistant.provider.form.advanced": "Advanced",
+    "assistant.provider.form.baseUrl": "base_url",
+    "assistant.provider.form.baseUrl.hint":
+      "Leave empty to use the provider's default endpoint. Only https addresses are accepted.",
+    "assistant.provider.form.baseUrl.unused": "base_url not applied",
+    "assistant.provider.form.submit": "Test and save",
+    "assistant.provider.form.submitting": "Testing the connection",
+    "assistant.provider.form.error.label": "Enter a display name.",
+    "assistant.provider.form.error.secret": "Enter the API key.",
+    "assistant.probe.auth": "The API key was rejected. Check the key.",
+    "assistant.probe.model_not_found":
+      "That model was not found. Check the model name.",
+    "assistant.probe.network":
+      "The provider could not be reached. Check the network and base_url.",
+    "assistant.probe.rate_limit":
+      "The provider reported a rate limit. Try again shortly.",
+    "assistant.probe.unknown":
+      "The connection test failed for an unknown reason.",
+    "assistant.error.base_url_rejected":
+      "This base_url cannot be used. It must be an https address; loopback, private ranges and IP literals are rejected.",
+    "assistant.error.provider_not_installed":
+      "This provider's SDK is not installed on the server.",
+    "assistant.error.no_active_provider": "No provider is active.",
+    "assistant.error.provider_secret_missing":
+      "The stored key is missing. Delete this connection and register the key again.",
+    "assistant.error.not_found":
+      "This connection no longer exists. Refresh the list.",
+    "assistant.error.unknown":
+      "The request could not be completed. Try again shortly.",
   } satisfies Record<MessageKey, string>,
 } as const;
 

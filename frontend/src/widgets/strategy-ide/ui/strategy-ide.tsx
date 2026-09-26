@@ -57,6 +57,13 @@ export type StrategyIdeProps = {
   validateDisabled?: boolean;
   onSave?: () => void;
   saveDisabled?: boolean;
+  /**
+   * 되돌리기·다시 실행(WORKFLOW P1-02, spec D9). 편집기가 hidden인 탭에서도 동작해야 하므로 IDE가 전역
+   * 단축키로 받아 넘긴다. 할 일이 없을 때 아무 일도 하지 않는 책임은 편집기 이력에 있다 — 여기서 깊이로
+   * 게이트를 걸면 깊이가 한 프레임 늦은 순간의 입력이 조용히 버려진다(Phase 5 backlog 20과 같은 경합).
+   */
+  onUndo?: () => void;
+  onRedo?: () => void;
   symbols?: readonly StrategyOutlineSymbol[];
   onSelectSymbol?: (pointer: string) => void;
   /** The source editor slot (P3). */
@@ -73,6 +80,11 @@ export type StrategyIdeProps = {
   snippets?: ReactNode;
   /** Editor toolbar actions (format / validate) rendered in the editor header. */
   editorActions?: ReactNode;
+  /**
+   * 되돌리기·다시 실행 버튼. 탭 목록 줄 — 탭 패널 밖이라 편집기가 hidden인 Graph·Form 탭에서도 닿는다
+   * (WORKFLOW P1-02). 편집기 헤더의 액션 줄은 이미 꽉 차 있어 상태 배지와 같은 줄에 둔다.
+   */
+  documentHistory?: ReactNode;
   /**
    * 문서 상태 배지(검증 통과·구조 오류·STALE). 탭 목록 줄의 오른쪽 — 탭 패널 밖이라 다섯 탭 모두에서
    * 보인다(WORKFLOW P1-01).
@@ -102,6 +114,39 @@ export type StrategyIdeProps = {
 export type AssistantSlotControls = { close: () => void };
 
 const NARROW_QUERY = "(max-width: 1279px)";
+
+/*
+ * 브라우저가 스스로 텍스트 되돌리기를 갖는 입력 타입. select·button은 물론 날짜·시간 계열도 빠진다 —
+ * 분절 위젯이라 되돌리기가 없어서, 양보하면 그 자리에서 Ctrl+Z가 아무 일도 하지 않는다(P1-02 리뷰 P3).
+ */
+const NATIVE_UNDO_INPUT_TYPES = new Set([
+  "text",
+  "search",
+  "url",
+  "tel",
+  "email",
+  "password",
+  "number",
+]);
+
+/**
+ * 이 입력이 자기 자신의 되돌리기를 가진 곳에서 왔는가(WORKFLOW P1-02). 텍스트 입력·textarea·
+ * contenteditable(CodeMirror의 편집 영역이 여기 해당한다)에 포커스가 있으면 Ctrl+Z를 가로채지 않는다 —
+ * 가로채면 한 번의 입력이 그 자리의 되돌리기와 문서 되돌리기를 둘 다 실행한다.
+ */
+const hasNativeUndo = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) return false;
+  // `isContentEditable`은 상속까지 반영하지만 jsdom에는 없다 — 속성도 함께 본다.
+  if (target.isContentEditable) return true;
+  if (target.closest('[contenteditable=""], [contenteditable="true"]') !== null)
+    return true;
+  if (target instanceof HTMLTextAreaElement) return true;
+  return (
+    target instanceof HTMLInputElement &&
+    NATIVE_UNDO_INPUT_TYPES.has(target.type)
+  );
+};
+
 /** 좌우 패널이 다 펼쳐졌을 때 가운데 편집기에 남겨 두는 최소 폭. 이 아래로 내려가면 오버레이로 돌린다. */
 const EDITOR_MIN_WIDTH = 480;
 const VIEWS: readonly SourceView[] = ["yaml", "json", "form", "graph", "diff"];
@@ -128,6 +173,8 @@ export const StrategyIde = ({
   validateDisabled = true,
   onSave,
   saveDisabled = true,
+  onUndo,
+  onRedo,
   symbols = [],
   onSelectSymbol,
   editor,
@@ -137,6 +184,7 @@ export const StrategyIde = ({
   outline,
   snippets,
   editorActions,
+  documentHistory,
   documentStatus,
   problems,
   view = "yaml",
@@ -257,6 +305,22 @@ export const StrategyIde = ({
         execute: () => onSave?.(),
       },
       {
+        id: "action.undo",
+        group: t("command.group.action"),
+        label: t("ide.undo"),
+        shortcut: "Ctrl/⌘ Z",
+        disabled: !onUndo,
+        execute: () => onUndo?.(),
+      },
+      {
+        id: "action.redo",
+        group: t("command.group.action"),
+        label: t("ide.redo"),
+        shortcut: "Ctrl/⌘ Shift Z",
+        disabled: !onRedo,
+        execute: () => onRedo?.(),
+      },
+      {
         id: "action.backtest",
         group: t("command.group.action"),
         label: t("ide.runBacktest"),
@@ -352,9 +416,11 @@ export const StrategyIde = ({
     availableViews,
     hasAssistant,
     layout,
+    onRedo,
     onRunBacktest,
     onSave,
     onSelectSymbol,
+    onUndo,
     onValidate,
     onViewChange,
     runDisabled,
@@ -405,7 +471,17 @@ export const StrategyIde = ({
         return;
       }
       if (paletteOpen) return;
-      if (modifier && key === "s") {
+      if (modifier && key === "z") {
+        // 편집기가 hidden인 탭(Graph·Form)에서는 CodeMirror 키맵이 포커스를 못 받아 Ctrl+Z가 사라진다.
+        // 포커스가 스스로 되돌리기를 가진 곳에 있으면 그쪽에 양보한다(중복 undo 금지).
+        if (hasNativeUndo(event.target)) return;
+        const run = event.shiftKey ? onRedo : onUndo;
+        if (run === undefined) return;
+        event.preventDefault();
+        // 다른 단축키와 달리 auto-repeat를 막지 않는다 — 눌러 두고 여러 단계를 되돌리는 것이 편집기의
+        // 통상 동작이고, 할 일이 없어지면 편집기 이력이 스스로 멈춘다.
+        run();
+      } else if (modifier && key === "s") {
         event.preventDefault();
         if (!event.repeat && !saveDisabled) onSave?.();
       } else if (modifier && event.key === "Enter") {
@@ -451,8 +527,10 @@ export const StrategyIde = ({
     availableViews,
     hasAssistant,
     layout.assistantOpen,
+    onRedo,
     onRunBacktest,
     onSave,
+    onUndo,
     onValidate,
     onViewChange,
     paletteOpen,
@@ -809,6 +887,9 @@ export const StrategyIde = ({
                 value={view}
                 onChange={(next) => onViewChange?.(next)}
               />
+              {documentHistory ? (
+                <div className="ide__editor-history">{documentHistory}</div>
+              ) : null}
               {documentStatus ? (
                 <div className="ide__editor-status">{documentStatus}</div>
               ) : null}

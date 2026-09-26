@@ -6,6 +6,7 @@ import {
   ProposalApplyDialog,
   ProposalApplyFeedback,
   DirtyLeaveGuard,
+  DocumentHistoryActions,
   DocumentStatus,
   DocumentToolbar,
   FactorGraphPanel,
@@ -31,6 +32,7 @@ import {
   useAutosave,
   useCompileDocument,
   useDiagnosticNavigation,
+  useDocumentHistory,
   useExecutionPlans,
   useRunBacktest,
   useServerDraft,
@@ -208,10 +210,14 @@ export const NewStrategyPage = () => {
     onSelectPointer: (pointer) => selectPointer(pointer, "graph"),
     onOpenSource: openSourceAt,
   });
+  // 되돌리기·다시 실행은 편집기 이력 하나가 owner다(WORKFLOW P1-02). 탭 목록 줄의 버튼(탭 패널 밖)과
+  // IDE 전역 단축키가 같은 명령을 부른다.
+  const history = useDocumentHistory(document);
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
   const onProblemsEditorReady = problems.onEditorReady;
+  const onHistoryEditorReady = history.onEditorReady;
   const onProposalEditorReady = proposalApply.onEditorReady;
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
@@ -219,6 +225,7 @@ export const NewStrategyPage = () => {
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
       onProblemsEditorReady(editor);
+      onHistoryEditorReady(editor);
       onProposalEditorReady(editor);
     },
     [
@@ -227,6 +234,7 @@ export const NewStrategyPage = () => {
       onSnippetEditorReady,
       onTransactionsEditorReady,
       onProblemsEditorReady,
+      onHistoryEditorReady,
     ],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
@@ -316,6 +324,8 @@ export const NewStrategyPage = () => {
         validateDisabled={!canValidate}
         onSave={save}
         saveDisabled={!canSave}
+        onUndo={history.undo}
+        onRedo={history.redo}
         symbols={outline.symbols}
         onSelectSymbol={selectSymbol}
         saveTone={saveStatusTone(document, status)}
@@ -332,6 +342,7 @@ export const NewStrategyPage = () => {
             replace: true,
           })
         }
+        documentHistory={<DocumentHistoryActions history={history} />}
         documentStatus={<DocumentStatus state={document} />}
         problems={
           <DiagnosticsPanel

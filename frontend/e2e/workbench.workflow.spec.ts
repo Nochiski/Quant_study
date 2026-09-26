@@ -1064,6 +1064,7 @@ test.describe("professional YAML workflow", () => {
     await saveAndWaitForRevision(page, 1);
     const { strategyId } = strategyIdentity(page);
 
+    const baseSource = await currentSource(page);
     await page.getByRole("tab", { name: "Graph", exact: true }).click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
     await expect(editor).toBeVisible();
@@ -1075,6 +1076,26 @@ test.describe("professional YAML workflow", () => {
     await expect(
       editor.getByRole("status").filter({ hasText: "반영됨" }),
     ).toContainText("field 반영됨");
+
+    // 되돌리기는 툴바 버튼이라 Graph 탭에 머문 채로 동작한다 — 편집기는 이 탭에서 hidden이다(WORKFLOW P1-02).
+    const undoButton = page.getByRole("button", { name: "실행 취소" });
+    const redoButton = page.getByRole("button", { name: "다시 실행" });
+    await expect(undoButton).not.toHaveAttribute("aria-disabled", "true");
+    await undoButton.click();
+    expect(
+      await page
+        .getByRole("tab", { name: "Graph", exact: true })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    await expect(redoButton).not.toHaveAttribute("aria-disabled", "true");
+    // 트랜잭션 한 번 = 되돌리기 한 단계: YAML 원문이 노드 추가 전으로 정확히 돌아온다.
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    expect(await currentSource(page)).toBe(baseSource);
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await redoButton.click();
+    // 되돌리기는 선택까지 되살리지 않는다(선택 pointer는 URL, 문서 이력 밖) — 노드를 다시 고른다.
+    await editor.getByRole("button", { name: "노드 편집: field" }).click();
+
     const selected = editor.getByRole("group", { name: /선택한 노드/ });
     const fieldId = selected.getByRole("combobox", { name: /^field_id/ });
     const fieldOptions = fieldId.locator("option:not([disabled])");

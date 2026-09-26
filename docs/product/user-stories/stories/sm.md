@@ -11,6 +11,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: YAML 편집기 · compile 진단 · 문제 목록
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests
@@ -30,6 +31,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: 전략 구조(outline) · 계약 패널(Contract Inspector)
 - e2e:
   - `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다
@@ -47,6 +49,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: 리비전 저장 · Diff · 전략 이력 · 저장 충돌
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests
@@ -67,6 +70,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: 명령 팔레트 · 전역 단축키
 - e2e:
   - `frontend/e2e/stories/sm.keyboard.spec.ts` :: US-SM-04 키보드만으로 문서 경로를 찾고 검증·저장·백테스트까지 간다
@@ -86,6 +90,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: 실행 설정 · run manifest · 동일 설정 재실행 · 실행 취소
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests
@@ -99,6 +104,8 @@
   데이터 경고 · 재현성 정보"에 같은 값과 전략 버전, 실행 지문이 보인다.
 - Given 실행 중인 백테스트, When "실행 취소"를 누르면 상태가 cancelled가 되고, "동일 설정
   재실행"을 누르면 서버가 기억한 요청 그대로 새 실행이 시작된다.
+- 비고: 취소·재실행 테스트는 `/api/v1/backtests/**`를 브라우저에서 대신 응답한다. 마지막 기준은 화면
+  동작 수준에서만 확인하며, 서버 쪽 재실행 계약은 backend 테스트가 소유한다.
 
 ### US-SM-06 같은 전략을 다른 실행 설정으로 돌려도 전략 해시는 같다
 
@@ -107,14 +114,16 @@
 
 - 상태: `예정`
 - 담당 PR: P3-03
+- e2e 담당: P3-03
 - 기능 영역: 실행 설정(`RunEnvironment`) · run manifest · `spec_hash`
 - e2e: 없음
 
 수용 기준
 
 - Given 저장한 전략 하나, When 기간만 다른 실행 설정으로 두 번 백테스트하면, Then 두 결과의 실행
-  기록에서 전략 해시는 같고 실행 설정 해시(`environment_hash`)는 다르다.
+  기록에서 전략 해시는 같고 실행 설정 해시는 다르다.
 - 비고: lang2 완료 정의 5번과 Phase 3 exit "같은 전략·다른 기간 → 같은 spec_hash e2e"가 이 스토리다.
+  실행 설정 해시는 run manifest의 environment_hash 값이다.
 
 ### US-SM-07 예전 형식으로 저장한 전략을 새 형식으로 올린다
 
@@ -123,6 +132,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: schema 업그레이드 · 동결 리비전
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it
@@ -144,6 +154,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: Form 편집 · Graph 편집 · source 트랜잭션
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan
@@ -156,3 +167,45 @@
 - Given 저장한 전략, When Graph에서 노드를 더하고 입력을 다시 이으면, Then YAML에는 그 노드와 입력
   줄만 생기고 나머지 앞부분은 그대로다.
 - 비고: P4-04가 Form 탭을 은퇴시키면 첫 기준은 그래프 카드의 같은 동작으로 바뀐다.
+
+### US-SM-09 모르는 금융 개념을 편집 흐름 안에서 설명받는다
+
+> 한상목으로서 결과 화면이나 전략 문서에서 본 샤프 비율, 롱 포트폴리오 같은 말을 편집기를 떠나지
+> 않고 쉬운 말로 설명받고 싶다. 그래야 금융 용어를 따로 검색하느라 흐름이 끊기지 않는다.
+
+- 상태: `구현됨-e2e`
+- 담당 PR: 없음
+- e2e 담당: 없음
+- 기능 영역: AI 어시스턴트 · 계약 패널(Contract Inspector)
+- e2e:
+  - `frontend/e2e/stories/sm.finance-terms.spec.ts` :: US-SM-09 편집 중에 AI와 계약 패널로 금융 개념의 뜻을 확인한다
+
+수용 기준
+
+- Given 전략 편집 화면, When 사이드바에서 "샤프 비율이 무슨 뜻이야?"라고 물으면, Then 위험 한 단위당
+  수익이라는 쉬운 설명이 대화에 나오고 편집 중인 화면은 그대로다.
+- Given 검증을 통과한 문서, When 전략 구조에서 `selection_count`를 고르면, Then 계약 패널에 "롱
+  포트폴리오에 선택할 종목 수"라는 한글 뜻이 보인다.
+- 비고: 실행 설정 항목과 결과 지표 옆의 용어 설명은 US-SM-10(미계획)과 US-DM-08(미계획)이 다룬다.
+
+### US-SM-10 실행 설정 항목 옆에서 용어 뜻을 바로 본다
+
+> 한상목으로서 실행 설정의 OOS 시작일, 연환산 거래일, 벤치마크 같은 항목 옆에서 그 뜻을 바로 보고
+> 싶다. 그래야 AI에게 묻기 전에 무엇을 넣을지 안다.
+
+- 상태: `미계획`
+- 담당 PR: 없음
+- e2e 담당: 없음
+- 기능 영역: 실행 설정 · i18n
+- e2e: 없음
+
+수용 기준
+
+- Given 실행 설정 패널, Then OOS 시작일·연환산 거래일·벤치마크·수수료·슬리피지 옆에 한 줄 한글 뜻이
+  보인다.
+- Given 실행 설정의 뜻 문장, Then 전략 문서 필드의 계약 설명과 같은 소유 규칙(키는 backend, 문장은
+  frontend i18n)을 따른다.
+
+제품 결정 필요: 전략 문서 필드는 계약 패널이 설명하지만 실행 설정 패널에는 설명이 없다. lang2 P3-02가
+실행 설정 패널을 넓히지만 acceptance에 항목 설명이 없고, P2-01의 실행 설정 스키마가 설명 키를 낼지도
+정해지지 않았다. 설명 키의 owner와 표시 위치를 정해야 한다.

@@ -10,6 +10,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: Graph 편집기 · 실행 계획 투영
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: adds a node in the Graph editor, rewires an input, refreshes the plan and saves
@@ -21,7 +22,9 @@
 - Given 새 노드, When 기존 노드의 입력을 새 노드로 바꾸면, Then "반영됨"이 보이고 문서가 다시
   "검증 통과"가 된다.
 - Given 바꾼 문서, When 저장하면, Then 새 버전이 생기고 그래프 투영에 새 노드 카드가 보인다.
-  "Form에서 열기"로 같은 값을 Form에서 볼 수 있다.
+  "Form에서 열기"를 누르면 Form 편집 화면이 열린다.
+- 비고: P1-04(노드 종류 대신 연산자를 먼저 고른다), P4-04(Form 탭 은퇴), P6-03(목록형 편집기 제거)이
+  이 수용 기준을 바꾼다. 그 PR이 이 스토리를 함께 고친다.
 
 ### US-CS-02 두 원천 필드를 가공한 파생 팩터를 정의하고 기존 팩터와 결합한다
 
@@ -30,6 +33,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: 팩터 그래프(field·binary·cross_sectional) · 합성 점수 · 실행 계획 · 백테스트
 - e2e:
   - `frontend/e2e/stories/cs.derived-factor.spec.ts` :: US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다
@@ -38,10 +42,13 @@
 
 - Given 모멘텀 팩터 하나짜리 전략, When 자본총계(`financial.book_equity`) ÷ 시가총액
   (`price.market_cap`)을 횡단면 z-score로 바꾼 팩터를 비중 0.4로 더하면, Then 문서가 "검증 통과"다.
-- Given 그 문서, When 실행 계획을 열면, Then 파생 팩터가 읽는 두 원천 필드와 나눗셈·표준화 단계가
+- Given 저장한 문서, When 중간 결과에서 파생 팩터의 마지막 노드를 골라 종목 셋을 추적하면, Then 종목
+  마다 합성 점수의 팩터 기여에 파생 팩터(비중 0.4)와 모멘텀(비중 0.6)이 숫자 기여도와 정상(ok) 상태로
   보인다.
-- Given 저장한 문서, When 중간 결과에서 파생 팩터의 마지막 노드를 골라 종목 셋을 추적하면, Then
-  추적 재현 정보와 종목별 노드 값이 보인다.
+- Given 같은 추적, Then 원시 데이터 탭에 두 원천 필드 값이 종목마다 숫자로 있고, 선택 노드 탭에
+  표준화한 파생 팩터 값이 종목마다 숫자이며 상태가 ok다.
+- Given 실행 계획 탭, Then 나눗셈 노드가 두 원천 필드 노드를 입력으로 받고 그 뒤에 횡단면 표준화
+  단계가 있다.
 - Given 같은 문서, When 백테스트를 누르면, Then 실행이 완료되고 결과가 보인다.
 
 ### US-CS-03 중간값 추적과 실행 계획으로 계산과 공개 시점을 검증한다
@@ -51,6 +58,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: 중간 결과(디버거 추적) · TargetTape · 실행 계획
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests
@@ -71,6 +79,7 @@
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: AI 어시스턴트 · 웹 검색 · 제안 적용 · 적용 후 백테스트
 - e2e:
   - `frontend/e2e/assistant.workflow.spec.ts` :: 검색 출처를 링크로 보이고 검증에 실패한 턴은 실패 문구로 끝난다
@@ -91,7 +100,8 @@
 > 그래야 큰 단위 팩터가 합성 점수를 지배하지 않는다.
 
 - 상태: `예정`
-- 담당 PR: P2-04, P3-01
+- 담당 PR: P2-04, P2-07, P2-09, P3-01, P5-03
+- e2e 담당: P5-03
 - 기능 영역: `signal.normalization` · 합성 점수
 - e2e: 없음
 
@@ -109,7 +119,8 @@
 > 나누고 싶다. 그래야 유동성과 위험을 전략 안에서 다룰 수 있다.
 
 - 상태: `예정`
-- 담당 PR: P2-05, P2-06, P3-01
+- 담당 PR: P2-05, P2-06, P3-01, P5-03
+- e2e 담당: P5-03
 - 기능 영역: 횡단면 eligibility · `risk.risk_factor_id` · 탈락 사유
 - e2e: 없음
 
@@ -128,6 +139,7 @@
 
 - 상태: `예정`
 - 담당 PR: P6-02, P6-03
+- e2e 담당: P6-02
 - 기능 영역: 그래프 3수준(고급 노드 캔버스)
 - e2e: 없음
 
@@ -145,6 +157,7 @@
 
 - 상태: `미계획`
 - 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: 팩터 라이브러리 · Factor Registry
 - e2e: 없음
 

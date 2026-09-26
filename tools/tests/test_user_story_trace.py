@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -327,6 +330,44 @@ class UserStoryTraceTest(_Harness):
         report = run(self.root, write=True)
 
         self.assertTrue(report.ok, [finding.render() for finding in report.findings])
+
+
+class CommandLineEncodingTest(_Harness):
+    """명령행 실행이 비UTF-8 파이프에서도 한글 결과를 쓰고 끝난다(#195 2차 리뷰 P1-3).
+
+    Windows CI 러너의 파이프는 cp1252다. 그 환경을 `PYTHONIOENCODING=cp1252`로 재현해 서브프로세스로
+    돌린다. 출력은 UTF-8 바이트여야 한다.
+    """
+
+    def run_cli(self) -> subprocess.CompletedProcess[bytes]:
+        env = {**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"}
+        return subprocess.run(
+            [sys.executable, "-m", "quant_study_dev.user_story_trace", "--root", str(self.root), "--write"],
+            capture_output=True,
+            env=env,
+            check=False,
+            timeout=60,
+        )
+
+    def test_passing_harness_prints_korean_summary_on_a_cp1252_pipe(self) -> None:
+        self.write_stories(_planned("US-DM-01"))
+
+        result = self.run_cli()
+
+        stderr = result.stderr.decode("utf-8")
+        self.assertEqual(result.returncode, 0, stderr)
+        self.assertNotIn("Traceback", stderr)
+        self.assertIn("유저 스토리 하네스 통과", result.stdout.decode("utf-8"))
+
+    def test_failing_harness_prints_korean_findings_on_a_cp1252_pipe(self) -> None:
+        self.write_stories(_story("US-DM-01", status="예정"))
+
+        result = self.run_cli()
+
+        stderr = result.stderr.decode("utf-8")
+        self.assertEqual(result.returncode, 1, stderr)
+        self.assertNotIn("Traceback", stderr)
+        self.assertIn("담당 PR이 없다", stderr)
 
 
 class PlaywrightListTest(_Harness):

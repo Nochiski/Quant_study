@@ -722,7 +722,21 @@ def run(root: Path, *, write: bool = False, playwright_list: Path | None = None)
     return report
 
 
+def _use_utf8_output() -> None:
+    """표준 출력·오류를 UTF-8로 다시 연다.
+
+    Windows CI 러너는 파이프 인코딩이 cp1252라 한글 결과 문구를 쓰는 순간 `UnicodeEncodeError`로
+    죽는다(#195 2차 리뷰 P1-3). 그러면 검사 결과와 무관하게 step이 실패하고 뒤따르는 e2e가 돌지
+    않는다. `reconfigure`가 없는 대체 스트림(테스트 캡처 등)은 그대로 둔다.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _use_utf8_output()
     parser = argparse.ArgumentParser(description="유저 스토리 하네스 추적성 검사")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="저장소 루트 (기본: 이 파일 기준)")
     parser.add_argument("--write", action="store_true", help="traceability.md 표를 다시 쓴 뒤 검사한다")

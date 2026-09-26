@@ -190,7 +190,7 @@ main
 | 공급자 | 항목 | 통과 조건 | 실패 증상 |
 |---|---|---|---|
 | anthropic | thinking signature 왕복 | 도구 라운드 1회 이상을 공급자 실패 없이 완주 | 두 번째 호출 400 `Invalid signature in thinking block`. 화면에는 `Failure(PROVIDER)`로만 보이므로 블록 끝의 로컬 경고에서 `error_type=BadRequestError`를 본다 |
-| anthropic·openai | probe 사유 매핑 | 정상 키 `ok`, 틀린 키 `auth`, 없는 모델 `model_not_found` | 올바른 키가 `unknown`. 최소 출력 토큰 값은 domain(`_models.py`)이 소유하고 adapter는 집행만 하며, 확인 문장에 숫자를 복제하지 않는다 |
+| anthropic·openai | probe 사유 매핑 | 정상 키 `ok`, 틀린 키 `auth`, 없는 모델 `model_not_found` | 올바른 키가 `unknown`. probe 출력 상한은 adapter 상수(`PROBE_MAX_TOKENS`·`PROBE_MAX_OUTPUT_TOKENS`)가 소유하며 확인 문장에 숫자를 복제하지 않는다 |
 | anthropic | `display: "summarized"` | 비어 있지 않은 `ThinkingSummary` 1건 이상 | 이벤트 자체가 없다 |
 | anthropic | 검색 결과 필드 | `SearchActivity`마다 `query`와 출처 제목·URL이 채워짐 | 검색은 했는데 출처가 빈다 |
 | anthropic·openai | 검색 상한 뒤 턴 지속 | 턴 누적 상한에 닿은 뒤에도 턴이 검색 없이 이어짐 | 상한에 닿자마자 턴이 실패로 끝난다 |

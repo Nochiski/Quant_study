@@ -7,6 +7,7 @@
 import json
 
 import backfill_wise as bw
+import pytest
 
 YMMS = ["202612", "202712", "202812"]
 
@@ -63,3 +64,13 @@ def test_fin_screens_request_main_basis_not_consolidated_only():
     src = inspect.getsource(bw)
     assert '"finGubun": "IFRSL"' not in src, "cF3002/cF4002 요청이 다시 연결 고정으로 돌아갔다"
     assert src.count('"finGubun": FIN_GUBUN') == 2
+
+
+def test_daily_mode_is_gone():
+    """DQ-9: `--mode daily` 는 무커버 판정 종목을 영구 스킵(재프로브 없음)하는데 건전성 검사
+    `wise.run` 은 mode='full' 을 요구한다 — 운영에서 쓸 수 없는 길이라 제거했다(크론은 full).
+    네트워크·DB 를 타지 않고 파서만 보려고 `main()` 에서 `_parse_args` 를 뽑아 썼다."""
+    with pytest.raises(SystemExit):
+        bw._parse_args(["--mode", "daily"])
+    assert bw._parse_args(["--mode", "full"]).mode == "full"
+    assert bw._parse_args([]).mode == "full"

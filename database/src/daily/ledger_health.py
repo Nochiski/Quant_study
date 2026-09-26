@@ -381,6 +381,9 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
 
     전환기에는 옛 방식(D+1 아침 06:00) 스냅샷만 있을 수 있어, D 행이 없으면 next_iso(D+1) 로 폴백하고
     어느 쪽을 읽었는지 `wise.snapshot_day` 에 남긴다. 둘 다 없으면 종전대로 FAIL.
+
+    요청 항등식(covered·none)의 입력은 `ws_call_log`(append-only)다 — `ws_coverage` 는 종목당 1행
+    덮어쓰기라 이력이 없다(DQ-9, 2026-09-26 실측). 어느 표에서 셌는지는 검사 값의 `source` 에 남는다.
     """
     out: list[Check] = []
     if not _has_table(con, "ws_run_log"):
@@ -401,15 +404,28 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
     out.append(Check("wise.run", Level.REQUIRED, Status.PASS if (mode == "full" and n_bad == 0 and n_ok == n_req) else Status.FAIL,
                      {"mode": mode, "n_stocks": n_stocks, "n_req": n_req, "n_ok": n_ok, "n_bad": n_bad}, "mode=full, n_bad=0, n_ok=n_req"))
     cov = none = -1
-    if _has_table(con, "ws_coverage"):
-        # 그 런이 갱신한(checked_at = 스냅샷 날짜 KST) 커버리지 행만 센다 — 런 뒤에 상태가 바뀐 종목이 있으면
-        # 전체 집계로는 등식이 깨진다(09-09 실측: 전체 808/1758 vs 당일 807/1756, n_req 15,617 은 후자와 일치).
+    src = basis = None
+    if _has_table(con, "ws_call_log"):
+        # 항등식 입력은 append-only 호출 원장이다. `ws_coverage` 는 cmp_cd PK + INSERT OR REPLACE 라
+        # (backfill_wise.py:66-69·355) 나중 런이 checked_at 을 전건 덮어써 **판정 이력이 남지 않는다** —
+        # 09-26(토) 수동 full 뒤 `--date 20260923` 재판정이 covered 0·none 0 으로 FAIL 했다(DQ-9 실측).
+        # 재무 화면 cF3002 는 커버 종목만 요청하므로 그날 cF3002 를 부른 종목 수가 곧 covered 다
+        # (status 무관 — 커버 판정의 결과가 아니라 "요청했다"는 사실을 센다).
+        cov = _count(con, "SELECT COUNT(DISTINCT cmp_cd) FROM ws_call_log WHERE ep='cF3002' AND date(ts, '+9 hours')=?", (day,))
+        n_stocks_day = _count(con, "SELECT COUNT(DISTINCT cmp_cd) FROM ws_call_log WHERE date(ts, '+9 hours')=?", (day,))
+        none = n_stocks_day - cov
+        src, basis = "call_log", "ws_call_log 호출 원장(cF3002 종목=covered)"
+    elif _has_table(con, "ws_coverage"):
+        # 전환기 폴백 — 호출 원장이 없던 옛 원장 사본. 그 런이 갱신한(checked_at = 스냅샷 날짜 KST) 행만 센다
+        # (09-09 실측: 전체 808/1758 vs 당일 807/1756, n_req 15,617 은 후자와 일치).
         cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered' AND date(checked_at, '+9 hours')=?", (day,))
         none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none' AND date(checked_at, '+9 hours')=?", (day,))
+        src, basis = "coverage", "ws_coverage.checked_at(호출 원장 없음 — 전환기 폴백)"
+    if src is not None:
         expected = cov * REQ_COVERED + none * REQ_NONE
         out.append(Check("wise.req_identity", Level.REQUIRED, Status.PASS if expected == n_req else Status.FAIL,
-                         {"expected": expected, "actual": n_req, "covered": cov, "none": none},
-                         f"{day} checked_at 기준 covered×{REQ_COVERED} + none×{REQ_NONE} == n_req "
+                         {"expected": expected, "actual": n_req, "covered": cov, "none": none, "source": src},
+                         f"{day} {basis} 기준 covered×{REQ_COVERED} + none×{REQ_NONE} == n_req "
                          "(무커버 4 = 목록 1 + 3개년 cF5001, 09-10 검수 D H1 이후)"))
         rate = cov / (cov + none) if (cov + none) else None
         out.append(Check("wise.cov_rate", Level.WARN, Status.SKIP if rate is None else (Status.PASS if rate >= 0.25 else Status.FAIL),
@@ -418,14 +434,15 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
         row = con.execute("SELECT COUNT(*), COUNT(DISTINCT cmp_cd) FROM ws_raw WHERE fetched_date=?", (day,)).fetchone()
         n, s = (int(row[0]), int(row[1])) if row else (0, 0)
         # 절대 밴드(15,500~15,700 · 2,560~2,570)는 무커버 4콜 전환(09-10)과 규모구분 갱신(09-11: 2,563→2,610)에
-        # 모두 오탐을 냈다 — 기대치는 커버리지 항등식과 유니버스에서 유도한다. 커버리지 표가 없으면 하한만 본다.
+        # 모두 오탐을 냈다 — 기대치는 같은 covered·none(위 항등식과 동일 출처)에서 유도한다. 출처가 없으면 하한만 본다.
         if cov >= 0 and none >= 0:
             exp_rows, exp_stocks = cov * REQ_COVERED + none * REQ_NONE, cov + none
             ok = n == exp_rows and s == exp_stocks and s >= 2400
-            expected = f"rows == covered×{REQ_COVERED} + none×{REQ_NONE} ({exp_rows:,}) · stocks == covered+none ({exp_stocks:,}) · stocks >= 2,400"
+            expected = (f"{basis} 기준 rows == covered×{REQ_COVERED} + none×{REQ_NONE} ({exp_rows:,}) · "
+                        f"stocks == covered+none ({exp_stocks:,}) · stocks >= 2,400")
         else:
             ok = n >= 15000 and s >= 2400
-            expected = "커버리지 표 없음 — rows >= 15,000 · stocks >= 2,400"
+            expected = "호출 원장·커버리지 표 없음 — rows >= 15,000 · stocks >= 2,400"
         out.append(Check("wise.raw", Level.REQUIRED, Status.PASS if ok else Status.FAIL, {"rows": n, "stocks": s}, expected))
     return out
 

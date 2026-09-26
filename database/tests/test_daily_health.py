@@ -203,8 +203,18 @@ _WISE_SNAPSHOT = {
 }
 
 
-def _wise(tmp_path, *, cov=804, none=1759, n_req=None, raw_rows=None, raw_stocks=None, snapshot="evening"):
-    """ws_run_log 1건 + 같은 런의 checked_at 커버리지 + ws_raw(기본은 항등식대로). n_req 기본값은 항등식대로."""
+# 종목 1건의 일일 요청 ep 목록 — `backfill_wise.collect` 순서(커버 15 · 무커버 4). 커버 종목에만 cF3002 가 있다.
+_EPS_COVERED = (["c1050001_data"] + ["cF5001"] * 3 + ["cF5002"] * 3 + ["c1050001_data"] * 2
+                + ["c1050001_data"] * 3 + ["c1010001", "cF3002", "cF4002"])
+_EPS_NONE = ["c1050001_data"] + ["cF5001"] * 3
+
+
+def _wise(tmp_path, *, cov=804, none=1759, n_req=None, raw_rows=None, raw_stocks=None, snapshot="evening",
+          call_log=True):
+    """ws_run_log 1건 + 같은 런의 checked_at 커버리지 + ws_call_log + ws_raw(기본은 항등식대로).
+
+    n_req 기본값은 항등식대로. `call_log=False` 는 호출 원장이 없던 옛 판(폴백 경로) 재현용.
+    """
     n_req = n_req if n_req is not None else cov * 15 + none * 4
     raw_rows = n_req if raw_rows is None else raw_rows
     raw_stocks = cov + none if raw_stocks is None else raw_stocks
@@ -218,6 +228,13 @@ def _wise(tmp_path, *, cov=804, none=1759, n_req=None, raw_rows=None, raw_stocks
     con.execute("CREATE TABLE ws_coverage (cmp_cd TEXT PRIMARY KEY, status TEXT, checked_at TEXT)")
     con.executemany("INSERT INTO ws_coverage VALUES (?,?,?)",
                     [(f"{i:06d}", "covered" if i < cov else "none", checked_at) for i in range(cov + none)])
+    if call_log:
+        con.execute("CREATE TABLE ws_call_log (ts TEXT NOT NULL, cmp_cd TEXT, ep TEXT, pkey TEXT, "
+                    "status TEXT NOT NULL, bytes INTEGER, ms INTEGER)")
+        con.executemany("INSERT INTO ws_call_log VALUES (?,?,?,?,'ok',100,10)",
+                        [(checked_at, f"{i:06d}", ep, str(k))
+                         for i in range(cov + none)
+                         for k, ep in enumerate(_EPS_COVERED if i < cov else _EPS_NONE)])
     con.commit(); con.close()
     return str(tmp_path / "wise.db")
 
@@ -230,6 +247,32 @@ def test_wise_request_identity_counts_four_requests_per_uncovered_stock(tmp_path
     sub = tmp_path / "b"; sub.mkdir()
     rep2 = lh.run(D, _paths(sub, wise=_wise(sub, n_req=804 * 15 + 1759 * 2)))
     assert next(c for c in rep2.checks if c.name == "wise.req_identity").status is lh.Status.FAIL
+
+
+def test_wise_identity_survives_coverage_overwrite(tmp_path):
+    """DQ-9(09-26 실측): `ws_coverage` 는 cmp_cd PK + INSERT OR REPLACE 라 나중 런이 `checked_at` 을 전건
+    덮어쓴다 — 토요일 수동 full 뒤 `--date 20260923` 재판정이 covered 0·none 0 으로 FAIL 했다. 항등식 입력은
+    append-only 호출 원장(`ws_call_log`)이어야 과거일 재판정이 살아남는다."""
+    wise = _wise(tmp_path)
+    con = sqlite3.connect(tmp_path / "wise.db")
+    con.execute("UPDATE ws_coverage SET checked_at=?", ("2026-09-09T09:05:30",))   # 다음날 런이 전건 덮어씀
+    con.commit(); con.close()
+    c = _by(lh.run(D, _paths(tmp_path, wise=wise)))
+    ident = c["wise.req_identity"]
+    assert ident.status is lh.Status.PASS, ident
+    assert ident.value["source"] == "call_log"
+    assert ident.value["covered"] == 804 and ident.value["none"] == 1759
+    assert c["wise.raw"].status is lh.Status.PASS
+    assert c["wise.cov_rate"].value == round(804 / 2563, 3)
+
+
+def test_wise_identity_falls_back_to_coverage_without_call_log(tmp_path):
+    """전환기 호환: 호출 원장이 없는 원장 사본은 종전대로 `ws_coverage.checked_at` 에서 센다."""
+    c = _by(lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, call_log=False))))
+    ident = c["wise.req_identity"]
+    assert ident.status is lh.Status.PASS and ident.value["source"] == "coverage"
+    assert ident.value["covered"] == 804 and ident.value["none"] == 1759
+    assert c["wise.raw"].status is lh.Status.PASS
 
 
 def test_wise_raw_expectation_derives_from_coverage_not_a_fixed_band(tmp_path):

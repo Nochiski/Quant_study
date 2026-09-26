@@ -241,22 +241,24 @@ def universe(con_w: sqlite3.Connection) -> list[str]:
     return sorted(tks)
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """인자 파서 — 네트워크·DB 를 타지 않고 시험하려고 `main()` 에서 분리했다."""
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", default="daily", choices=("daily", "full"),
-                    help="daily=무커버 스킵 · full=전 종목 (초도·주 1회 재분류)")
+    ap.add_argument("--mode", default="full", choices=("full",),
+                    help="full=전 종목 (무커버도 매일 재프로브). daily(무커버 영구 스킵)는 제거 — "
+                         "건전성 검사 wise.run 이 mode=full 을 요구한다 (DQ-9)")
     ap.add_argument("--limit", type=int, default=0, help="종목 수 상한 (시험용)")
-    a = ap.parse_args()
+    return ap.parse_args(argv)
+
+
+def main() -> None:
+    a = _parse_args()
 
     con = sqlite3.connect(DB, timeout=60)
     con.execute("PRAGMA busy_timeout=60000")
     con.executescript(DDL)
 
     tks = universe(con)
-    if a.mode == "daily":
-        skip = {r[0] for r in con.execute("SELECT cmp_cd FROM ws_coverage WHERE status='none'")}
-        tks = [t for t in tks if t not in skip]
-        print(f"  · daily — 무커버 {len(skip):,} 종목 스킵", flush=True)
     if a.limit:
         tks = tks[:a.limit]
     today = kst_today()

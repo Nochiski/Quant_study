@@ -16,8 +16,6 @@ from strategy_workbench.domain.factor.facade.expression import (
     MissingPolicy,
     NodeValueType,
     ParameterNode,
-    SavedFactorNode,
-    SavedSubgraphNode,
     TimeSeriesNode,
     TimeSeriesOperator,
     UnaryNode,
@@ -52,6 +50,8 @@ from strategy_workbench.domain.strategy._models import (
     StrategyIdentity,
     StrategySpec,
     WeightingMethod,
+    composite_factors,
+    inverse_risk_factor_id,
 )
 
 __all__ = [
@@ -88,8 +88,6 @@ __all__ = [
     "RebalanceFrequency",
     "RiskStep",
     "SelectionMethod",
-    "SavedFactorNode",
-    "SavedSubgraphNode",
     "SignalNormalization",
     "SignalStep",
     "StrategyIdentity",
@@ -103,5 +101,7 @@ __all__ = [
     "canonical_payload_json",
     "canonical_strategy_json",
     "canonical_strategy_payload",
+    "composite_factors",
+    "inverse_risk_factor_id",
     "strategy_spec_hash",
 ]

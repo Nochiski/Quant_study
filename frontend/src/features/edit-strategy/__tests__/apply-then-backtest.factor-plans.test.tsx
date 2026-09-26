@@ -212,8 +212,6 @@ const explanation = (graph: FactorGraphRequest["graph"]): FactorExplanation => {
       required_field_ids: graph.nodes.flatMap((node) =>
         node.kind === "field" ? [node.field_id] : [],
       ),
-      referenced_factor_ids: [],
-      referenced_subgraph_ids: [],
       minimum_history_sessions: contracts.at(-1)?.minimum_history_sessions ?? 0,
       // schema 1.2 그래프에는 결측 정책이 없다. 계획의 결측 정책은 실행 설정 기본값이다(P2-03).
       missing_policy: "drop",

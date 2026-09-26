@@ -9,8 +9,6 @@ from typing import Literal, TypeAlias, get_args, get_type_hints
 # `x-reference`: which catalog or document-internal namespace an identifier resolves in. The
 # engine never reads it; it exists so no client keeps a hand-written list of which ids are which.
 CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
-CATALOG_FACTOR = {"catalog": "factor"}
-CATALOG_SUBGRAPH = {"catalog": "subgraph"}
 REFERENCE_NODE = {"reference": "node"}
 REFERENCE_PARAMETER = {"reference": "parameter"}
 # The array that declares a namespace; its items carry the `<namespace>_id` definition.
@@ -189,20 +187,6 @@ class ConditionalNode:
     kind: Literal["conditional"]
 
 
-@dataclass(frozen=True)
-class SavedFactorNode:
-    node_id: str
-    factor_id: str = field(metadata=CATALOG_FACTOR)
-    kind: Literal["saved_factor"]
-
-
-@dataclass(frozen=True)
-class SavedSubgraphNode:
-    node_id: str
-    subgraph_id: str = field(metadata=CATALOG_SUBGRAPH)
-    kind: Literal["saved_subgraph"]
-
-
 ExpressionNode: TypeAlias = (
     FieldNode
     | ConstantNode
@@ -214,9 +198,9 @@ ExpressionNode: TypeAlias = (
     | GroupNode
     | ComparisonNode
     | ConditionalNode
-    | SavedFactorNode
-    | SavedSubgraphNode
 )
+# `saved_factor`·`saved_subgraph` 는 schema 1.2 에서 union 을 떠났다(spec D3 S7). 실행 경로가 늘
+# 거부하던 노드라 문법이 받을 이유가 없다. 재사용 팩터 라이브러리(M8)가 되살릴 때 다시 넣는다.
 
 
 @dataclass(frozen=True)

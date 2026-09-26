@@ -595,8 +595,6 @@ test.describe("professional YAML workflow", () => {
             parameter_ids: (savedV4.spec.parameters ?? []).map(
               (parameter) => parameter.parameter_id,
             ),
-            factor_ids: savedFactors.map((item) => item.factor_id),
-            subgraph_ids: [],
           },
         })
       ).data,

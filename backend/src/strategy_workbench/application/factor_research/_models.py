@@ -18,8 +18,6 @@ from strategy_workbench.domain.factor.facade.validation import FactorGraphValida
 class FactorGraphRequest:
     graph: FactorGraph
     parameter_ids: tuple[str, ...] = ()
-    factor_ids: tuple[str, ...] = ()
-    subgraph_ids: tuple[str, ...] = ()
     # 결측 정책은 전략 문서가 아니라 실행이 소유한다(P2-02). 팩터 연구는 전략 실행 설정 밖에서
     # 도는 sandbox 라 요청이 직접 들고 온다. 1.2 문서에는 떨어질 legacy 값이 없으므로 생략하면
     # (`None`) 실행 설정과 같은 기본값(`DEFAULT_MISSING_POLICY`)을 쓴다 — 편집 화면의 실행 플랜
@@ -50,8 +48,6 @@ class FactorPreviewRequest:
     as_of_end: date
     expected_data_snapshot_id: str | None = None
     parameters: tuple[ResolvedFactorParameter, ...] = ()
-    factor_ids: tuple[str, ...] = ()
-    subgraph_ids: tuple[str, ...] = ()
     missing: MissingPolicy | None = None
 
 

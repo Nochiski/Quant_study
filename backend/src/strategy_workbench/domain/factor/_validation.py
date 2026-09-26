@@ -17,8 +17,6 @@ from ._nodes import (
     GroupNode,
     NodeValueType,
     ParameterNode,
-    SavedFactorNode,
-    SavedSubgraphNode,
     TimeSeriesNode,
     UnaryNode,
     UnaryOperator,
@@ -85,8 +83,6 @@ FACTOR_GRAPH_CODES: frozenset[str] = frozenset(
         "factor.graph.output_missing",
         "factor.graph.parameter_missing",
         "factor.graph.predicate_type",
-        "factor.graph.saved_factor_missing",
-        "factor.graph.saved_subgraph_missing",
         "factor.graph.time_series_window",
         "factor.graph.unit_mismatch",
         "factor.graph.winsor_bounds",
@@ -129,8 +125,6 @@ def validate_factor_graph(
     *,
     fields: tuple[FieldMetadata, ...] = (),
     parameter_ids: tuple[str, ...] = (),
-    factor_ids: tuple[str, ...] = (),
-    subgraph_ids: tuple[str, ...] = (),
     require_field_metadata: bool = False,
 ) -> FactorGraphValidation:
     issues: list[FactorValidationIssue] = []
@@ -163,8 +157,6 @@ def validate_factor_graph(
 
     field_by_id = {field.field_id: field for field in fields}
     known_parameters = set(parameter_ids)
-    known_factors = set(factor_ids)
-    known_subgraphs = set(subgraph_ids)
     for index, node in enumerate(graph.nodes):
         path = f"nodes.{index}"
         for dependency in node_dependencies(node):
@@ -198,24 +190,6 @@ def validate_factor_graph(
                     node.node_id,
                     path,
                     f"파라미터를 찾을 수 없습니다: parameter_id={node.parameter_id!r}",
-                )
-            )
-        elif isinstance(node, SavedFactorNode) and node.factor_id not in known_factors:
-            issues.append(
-                _issue(
-                    "factor.graph.saved_factor_missing",
-                    node.node_id,
-                    path,
-                    f"저장 팩터를 찾을 수 없습니다: factor_id={node.factor_id!r}",
-                )
-            )
-        elif isinstance(node, SavedSubgraphNode) and node.subgraph_id not in known_subgraphs:
-            issues.append(
-                _issue(
-                    "factor.graph.saved_subgraph_missing",
-                    node.node_id,
-                    path,
-                    f"저장 서브그래프를 찾을 수 없습니다: subgraph_id={node.subgraph_id!r}",
                 )
             )
         elif isinstance(node, UnaryNode):
@@ -428,8 +402,6 @@ def _infer_contract(
         history = 1
     elif isinstance(node, (ConstantNode, ParameterNode)):
         value_type, unit, history = NodeValueType.SCALAR, "1", 0
-    elif isinstance(node, (SavedFactorNode, SavedSubgraphNode)):
-        value_type, unit, history = NodeValueType.NUMERIC_SERIES, "unknown", 1
     elif isinstance(node, BinaryNode):
         left, right = dependencies
         for side, operand in (("left", left), ("right", right)):

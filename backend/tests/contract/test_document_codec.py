@@ -29,7 +29,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-QUALITY_MOMENTUM_SPEC_HASH = "d3a9c236306d1c53f8d7b5c09fd05df42b61b2848c7c8cfc5aeae61de793e781"
+QUALITY_MOMENTUM_SPEC_HASH = "22f95ea804a57f6bb8f7134127c2feb7d88e0a5a0bbc52481977c75cf0de5197"
 
 
 def _source(name: str) -> str:

@@ -64,7 +64,9 @@ describe("graph transactions (P5-01)", () => {
     expect(kinds).toContain("field");
     expect(kinds).toContain("time_series");
     expect(kinds).toContain("conditional");
-    expect(kinds.length).toBeGreaterThanOrEqual(12);
+    // `saved_factor`·`saved_subgraph` 는 schema 1.2 에서 union 을 떠났다(P2-06, spec D3 S7).
+    expect(kinds).not.toContain("saved_factor");
+    expect(kinds.length).toBeGreaterThanOrEqual(10);
   });
 
   it("suggests unique node ids by suffixing a counter", () => {

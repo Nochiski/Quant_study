@@ -214,8 +214,6 @@ const explanation = (body: FactorGraphRequest): FactorExplanation => {
       required_field_ids: graph.nodes.flatMap((node) =>
         node.kind === "field" ? [node.field_id] : [],
       ),
-      referenced_factor_ids: [],
-      referenced_subgraph_ids: [],
       minimum_history_sessions: contracts.at(-1)?.minimum_history_sessions ?? 0,
       // schema 1.2 문서에는 결측 정책이 없다 — 요청이 명시하지 않으면 모델 기본값이다.
       missing_policy: body.missing ?? "drop",
@@ -262,7 +260,6 @@ describe("execution plan orchestration", () => {
     expect(requests).toHaveLength(2);
     expect(requests[0]).toMatchObject({
       parameter_ids: [],
-      factor_ids: ["momentum", "quality"],
     });
     expect(requests[0]).not.toHaveProperty("fields");
     expect(requests.map((request) => request.graph.output_node_id)).toEqual([

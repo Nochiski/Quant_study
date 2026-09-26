@@ -47,9 +47,7 @@ const plans = (): ExecutionPlansState => ({
       label: FACTOR.label,
       request: {
         graph: FACTOR.graph,
-        factor_ids: [FACTOR.factor_id],
         parameter_ids: [],
-        subgraph_ids: [],
       },
       explanation: {
         registry_version: "registry-v1",
@@ -88,8 +86,6 @@ const plans = (): ExecutionPlansState => ({
             },
           ],
           required_field_ids: ["price.close"],
-          referenced_factor_ids: [],
-          referenced_subgraph_ids: [],
           minimum_history_sessions: 252,
           as_of_policy: "available_date_lte_as_of",
         },

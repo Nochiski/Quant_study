@@ -1895,8 +1895,6 @@ const graphHandlers = () => [
           },
         ],
         required_field_ids: ["price.close"],
-        referenced_factor_ids: [],
-        referenced_subgraph_ids: [],
         minimum_history_sessions: 252,
         missing_policy: "drop",
         as_of_policy: "available_date_lte_as_of",

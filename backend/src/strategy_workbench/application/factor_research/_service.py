@@ -92,8 +92,6 @@ class FactorResearchService:
             request.graph,
             fields=metadata.fields,
             parameter_ids=request.parameter_ids,
-            factor_ids=self._known_factor_ids(request.factor_ids),
-            subgraph_ids=request.subgraph_ids,
             require_field_metadata=True,
         )
         return validation, metadata
@@ -114,8 +112,6 @@ class FactorResearchService:
             missing=_resolved_missing(request),
             fields=metadata.fields,
             parameter_ids=request.parameter_ids,
-            factor_ids=self._known_factor_ids(request.factor_ids),
-            subgraph_ids=request.subgraph_ids,
             require_field_metadata=True,
         )
         return FactorExplanation(
@@ -138,8 +134,6 @@ class FactorResearchService:
             request.graph,
             fields=metadata.fields,
             parameter_ids=parameter_ids,
-            factor_ids=self._known_factor_ids(request.factor_ids),
-            subgraph_ids=request.subgraph_ids,
             require_field_metadata=True,
         )
         if not validation.valid:
@@ -151,8 +145,6 @@ class FactorResearchService:
                 missing=_resolved_missing(request),
                 fields=metadata.fields,
                 parameter_ids=parameter_ids,
-                factor_ids=self._known_factor_ids(request.factor_ids),
-                subgraph_ids=request.subgraph_ids,
                 require_field_metadata=True,
             )
         except InvalidFactorGraphError as error:
@@ -213,6 +205,3 @@ class FactorResearchService:
             evaluation=evaluation,
             analytics=analyze_factor_values(evaluation.values, preview_observations),
         )
-
-    def _known_factor_ids(self, extra: tuple[str, ...]) -> tuple[str, ...]:
-        return tuple(definition.factor_id for definition in self._registry.all()) + extra

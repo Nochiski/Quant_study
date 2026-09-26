@@ -1480,14 +1480,6 @@ export type FactorExecutionPlan = {
    */
   plan_hash: string;
   /**
-   * Referenced Factor Ids
-   */
-  referenced_factor_ids: Array<string>;
-  /**
-   * Referenced Subgraph Ids
-   */
-  referenced_subgraph_ids: Array<string>;
-  /**
    * Registry Version
    */
   registry_version: string;
@@ -1573,8 +1565,6 @@ export type FactorGraph = {
     | GroupNode
     | ComparisonNode
     | ConditionalNode
-    | SavedFactorNode
-    | SavedSubgraphNode
   >;
   /**
    * Output Node Id
@@ -1586,20 +1576,12 @@ export type FactorGraph = {
  * FactorGraphRequest
  */
 export type FactorGraphRequest = {
-  /**
-   * Factor Ids
-   */
-  factor_ids?: Array<string>;
   graph: FactorGraph;
   missing?: MissingPolicy | null;
   /**
    * Parameter Ids
    */
   parameter_ids?: Array<string>;
-  /**
-   * Subgraph Ids
-   */
-  subgraph_ids?: Array<string>;
 };
 
 /**
@@ -1703,20 +1685,12 @@ export type FactorPreviewRequest = {
    * Expected Data Snapshot Id
    */
   expected_data_snapshot_id?: string | null;
-  /**
-   * Factor Ids
-   */
-  factor_ids?: Array<string>;
   graph: FactorGraph;
   missing?: MissingPolicy | null;
   /**
    * Parameters
    */
   parameters?: Array<ResolvedFactorParameter>;
-  /**
-   * Subgraph Ids
-   */
-  subgraph_ids?: Array<string>;
 };
 
 /**
@@ -3485,6 +3459,10 @@ export type RiskStep = {
    */
   net_exposure?: number;
   /**
+   * Risk Factor Id
+   */
+  risk_factor_id?: string | null;
+  /**
    * Risk Field Id
    */
   risk_field_id?: string | null;
@@ -3717,24 +3695,6 @@ export type SaveStrategyDraftRequest = {
 };
 
 /**
- * SavedFactorNode
- */
-export type SavedFactorNode = {
-  /**
-   * Factor Id
-   */
-  factor_id: string;
-  /**
-   * Kind
-   */
-  kind: "saved_factor";
-  /**
-   * Node Id
-   */
-  node_id: string;
-};
-
-/**
  * SavedRevisionReference
  *
  * Resolve an immutable revision and fail before calculation if its hash differs.
@@ -3771,24 +3731,6 @@ export type SavedStrategy = {
    * Spec Hash
    */
   spec_hash: string;
-};
-
-/**
- * SavedSubgraphNode
- */
-export type SavedSubgraphNode = {
-  /**
-   * Kind
-   */
-  kind: "saved_subgraph";
-  /**
-   * Node Id
-   */
-  node_id: string;
-  /**
-   * Subgraph Id
-   */
-  subgraph_id: string;
 };
 
 /**
@@ -5131,12 +5073,7 @@ export type TraceUnprocessableResponse = {
  * TraceValueStatus
  */
 export type TraceValueStatus =
-  | "ok"
-  | "missing_input"
-  | "warm_up"
-  | "divide_by_zero"
-  | "group_missing"
-  | "reference_missing";
+  "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
 
 /**
  * TurnAcceptedView

@@ -23,8 +23,6 @@ from ._nodes import (
     GroupOperator,
     MissingPolicy,
     ParameterNode,
-    SavedFactorNode,
-    SavedSubgraphNode,
     TimeSeriesNode,
     TimeSeriesOperator,
     UnaryNode,
@@ -68,12 +66,6 @@ class FactorFieldValue:
 
 
 @dataclass(frozen=True)
-class FactorReferenceValue:
-    reference_id: str
-    value: float | None
-
-
-@dataclass(frozen=True)
 class FactorObservation:
     """One (as_of, security) row of raw inputs.
 
@@ -88,7 +80,6 @@ class FactorObservation:
     as_of: date
     security_id: str
     fields: tuple[FactorFieldValue, ...]
-    references: tuple[FactorReferenceValue, ...] = ()
     forward_return: float | None = None
     universe_member: bool = True
 
@@ -284,14 +275,6 @@ def _compute_nodes(
             values = _cross_sectional(node, inputs[0], observations, checkpoint=checkpoint)
         elif isinstance(node, GroupNode):
             values = _group_transform(node, inputs[0], observations, checkpoint=checkpoint)
-        elif isinstance(node, SavedFactorNode):
-            values = _reference_values(
-                observations, f"factor:{node.factor_id}", checkpoint=checkpoint
-            )
-        elif isinstance(node, SavedSubgraphNode):
-            values = _reference_values(
-                observations, f"subgraph:{node.subgraph_id}", checkpoint=checkpoint
-            )
         _require_finite_values(node.node_id, values, observations, checkpoint=checkpoint)
         computed[node_id] = values
         completed_weight += _node_progress_weight(node)
@@ -386,25 +369,6 @@ def _field_values(
                     result[index] = fill
         return result
     return list(raw)
-
-
-def _reference_values(
-    observations: tuple[FactorObservation, ...],
-    reference_id: str,
-    *,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> list[FactorComputedValue]:
-    return [
-        next(
-            (
-                reference.value
-                for reference in observation.references
-                if reference.reference_id == reference_id
-            ),
-            None,
-        )
-        for observation in _checkpointed(observations, checkpoint)
-    ]
 
 
 def _binary(

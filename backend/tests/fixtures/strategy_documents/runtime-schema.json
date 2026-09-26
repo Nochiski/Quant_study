@@ -32,7 +32,8 @@
         "$ref": "#/$defs/FactorSignal"
       },
       "default": [],
-      "x-description-key": "strategy.section.factors"
+      "x-description-key": "strategy.section.factors",
+      "x-defines": "factor"
     },
     "signal": {
       "$ref": "#/$defs/SignalStep",
@@ -70,7 +71,8 @@
         "max_name_weight": 0.1,
         "max_sector_weight": 0.3,
         "sector_neutral": false,
-        "risk_field_id": null
+        "risk_field_id": null,
+        "risk_factor_id": null
       },
       "x-description-key": "strategy.section.risk"
     },
@@ -577,58 +579,6 @@
       ],
       "additionalProperties": false
     },
-    "SavedFactorNode": {
-      "type": "object",
-      "x-description-key": "strategy.node.saved_factor",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "saved_factor",
-          "x-description-key": "strategy.field.node.kind"
-        },
-        "node_id": {
-          "type": "string",
-          "x-description-key": "strategy.field.node.node_id"
-        },
-        "factor_id": {
-          "type": "string",
-          "x-description-key": "strategy.field.node.factor_id",
-          "x-catalog": "factor"
-        }
-      },
-      "required": [
-        "kind",
-        "node_id",
-        "factor_id"
-      ],
-      "additionalProperties": false
-    },
-    "SavedSubgraphNode": {
-      "type": "object",
-      "x-description-key": "strategy.node.saved_subgraph",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "const": "saved_subgraph",
-          "x-description-key": "strategy.field.node.kind"
-        },
-        "node_id": {
-          "type": "string",
-          "x-description-key": "strategy.field.node.node_id"
-        },
-        "subgraph_id": {
-          "type": "string",
-          "x-description-key": "strategy.field.node.subgraph_id",
-          "x-catalog": "subgraph"
-        }
-      },
-      "required": [
-        "kind",
-        "node_id",
-        "subgraph_id"
-      ],
-      "additionalProperties": false
-    },
     "FactorGraph": {
       "type": "object",
       "x-description-key": "strategy.type.factor_graph",
@@ -666,12 +616,6 @@
               },
               {
                 "$ref": "#/$defs/ConditionalNode"
-              },
-              {
-                "$ref": "#/$defs/SavedFactorNode"
-              },
-              {
-                "$ref": "#/$defs/SavedSubgraphNode"
               }
             ],
             "discriminator": {
@@ -1095,6 +1039,30 @@
             "owned_by_error": null
           },
           "x-catalog": "equity-field"
+        },
+        "risk_factor_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "x-description-key": "strategy.field.risk_step.risk_factor_id",
+          "x-applicable-when": {
+            "all_of": [
+              {
+                "pointer": "/portfolio/weighting",
+                "equals": "risk",
+                "not_null": false
+              }
+            ],
+            "description_key": "strategy.contract.applicable.risk_factor_id",
+            "owned_by_error": null
+          },
+          "x-reference": "factor"
         }
       },
       "required": [],

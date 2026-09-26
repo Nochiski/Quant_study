@@ -143,7 +143,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "got='max_name_wieght' suggestion='max_name_weight' "
         "allowed=['gross_exposure', 'max_name_weight', "
         "'max_sector_weight', "
-        "'net_exposure', 'risk_field_id', 'sector_neutral']",
+        "'net_exposure', 'risk_factor_id', 'risk_field_id', 'sector_neutral']",
     ),
     (
         "필수 키 누락",
@@ -158,7 +158,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "모르는 kind입니다 혹시 `time_series`인가요? — got='time_seris' "
         "suggestion='time_series' "
         "allowed=['binary', 'comparison', 'conditional', 'constant', 'cross_sectional', "
-        "'field', 'group', 'parameter', 'saved_factor', 'saved_subgraph', "
+        "'field', 'group', 'parameter', "
         "'time_series', 'unary']",
     ),
     (

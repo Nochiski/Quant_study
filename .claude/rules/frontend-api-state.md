@@ -40,4 +40,10 @@ paths:
   reset을 숨기지 않는다.
 - SSE progress는 query cache에 병합하고, 매우 높은 빈도의 순수 표시값만 local store/ref를
   검토한다.
+- 예외 하나: AI 어시스턴트의 턴 투영(`entities/assistant`의 채팅 리듀서)은 local이 owner다. 서버
+  이력(`GET /sessions/{id}`)의 owner는 여전히 query cache이고, 리듀서는 그 이력과 SSE 이벤트를 **같은
+  멱등 경로**로 접는 파생 투영이다. 토큰 단위로 오는 텍스트 델타를 캐시에 다시 쓰지 않으려는 것이며,
+  spec D9도 "마지막 반영 sequence"를 frontend local state로 지정한다. 이력은 덮어쓰지 않고 **턴별**
+  sequence watermark로 병합한다 — 세션 하나짜리 watermark로 판정하면 스트림이 이력보다 먼저 붙었을 때
+  앞선 턴의 이벤트가 조용히 사라진다.
 - graph 좌표·zoom·panel open 상태는 StrategySpec이 아니라 별도 UI metadata다.

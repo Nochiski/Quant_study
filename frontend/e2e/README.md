@@ -94,10 +94,33 @@ that already matched, which buries the intended change in unrelated byte churn. 
 explicit, and check `git status` afterwards: only the baselines you meant to change should appear.
 
 This layer owns browser process, server lifecycle, viewport/theme matrix, screenshots and failure
-artifacts. The four visual projects collect only `workbench.infrastructure.spec.ts`; the single
-1440px light project collects `workbench.workflow.spec.ts` so stateful create/revision/backtest
-scenarios execute once against the isolated real backend. Backend contract meaning continues to be
-owned by the backend and its generated client.
+artifacts. The four visual projects collect only `workbench.infrastructure.spec.ts`; one 1440px
+light project collects `workbench.workflow.spec.ts` so stateful create/revision/backtest scenarios
+execute once against the isolated real backend, and a second one collects
+`assistant.workflow.spec.ts`. Backend contract meaning continues to be owned by the backend and its
+generated client.
+
+## AI assistant scenarios
+
+`assistant.workflow.spec.ts` drives provider setup, the sidebar chat, proposal apply and the
+follow-on backtest. The provider is a **scripted backend adapter**
+(`adapters/outbound/llm_scripted`), turned on for this run by
+`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1` in `playwright.config.ts`. No SDK, key or network is
+involved, and the flag is off everywhere else.
+
+Faking the model rather than the HTTP responses is deliberate: intercepting the provider in the
+browser would take SSE framing, sequence numbers, the turn runner and server-side proposal
+re-validation out of the gate. Only the model is fake here.
+
+The script picks a scenario from a keyword in the question (`_scenarios.py`): 창을 줄 proposes a
+shorter momentum window, so the factor graph changes and the page has to fetch an uncached factor
+plan before "apply then backtest" can run; 제안 asks for a tool call followed by a proposal that only
+changes the title; 검색 shows search activity and then three rejected proposals; 천천히 streams a
+long answer so a mid-turn reload exercises resume; anything else gets a short answer.
+
+Assistant history and secrets go to the same isolated runtime directory as the strategy database
+(`e2e/runtime.ts`); without that the run would write into the developer's real chat history and
+`secrets.json`.
 
 The npm test/update commands atomically create a unique random directory under the operating
 system temp root, pass its SQLite path only to the backend process, and delete the whole directory

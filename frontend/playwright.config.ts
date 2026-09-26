@@ -8,12 +8,20 @@ import {
   previewOrigin,
   previewPort,
 } from "./e2e/ports.mjs";
-import { runtimeDatabasePath } from "./e2e/runtime";
+import {
+  runtimeAssistantDatabasePath,
+  runtimeAssistantSecretsPath,
+  runtimeDatabasePath,
+} from "./e2e/runtime";
 
 const frontendDirectory = dirname(fileURLToPath(import.meta.url));
 const backendDirectory = resolve(frontendDirectory, "../backend");
 // 격리 런타임 밖에서 실행되면 여기서 거부한다(run-playwright.mjs만 이 변수를 설정한다).
 const runtimeDatabase = runtimeDatabasePath();
+// 어시스턴트 이력과 비밀도 같은 격리 런타임 안에 둔다. 기본 경로는 저장소 `.local/`과 OS 사용자
+// 설정 디렉터리라, 넘기지 않으면 e2e가 개발자의 실제 대화 이력과 `secrets.json`에 쓴다.
+const runtimeAssistantDatabase = runtimeAssistantDatabasePath();
+const runtimeAssistantSecrets = runtimeAssistantSecretsPath();
 const ci = process.env.CI !== undefined;
 // 실데이터 opt-in: `E2E_REAL_EQUITY_ROOT`(로컬 equity 루트, `ledger_sync sync` 산출)가 있으면 backend 를
 // duckdb 어댑터로 띄우고 `real-equity` project 만 수집한다. 없으면 mock 어댑터 + 릴리스 게이트 project 만.
@@ -53,6 +61,13 @@ const mockProjects = [
   {
     name: "chromium-workflow",
     testMatch: /workbench\.workflow\.spec\.ts/u,
+    use: chromiumUse(1440, 900, "light"),
+  },
+  {
+    // AI 어시스턴트 시나리오. 가짜 공급자 위에서 돌고 스크린샷을 만들지 않으므로 시각 기준선
+    // 매트릭스와 분리해 1440 light 하나로 수집한다.
+    name: "chromium-assistant",
+    testMatch: /assistant\.workflow\.spec\.ts/u,
     use: chromiumUse(1440, 900, "light"),
   },
 ];
@@ -114,6 +129,10 @@ export default defineConfig({
         STRATEGY_WORKBENCH_ALLOWED_ORIGINS: preview,
         STRATEGY_WORKBENCH_EQUITY_ADAPTER: realEquity ? "duckdb" : "mock",
         STRATEGY_WORKBENCH_EQUITY_ROOT: realEquityRoot,
+        STRATEGY_WORKBENCH_ASSISTANT_DB_PATH: runtimeAssistantDatabase,
+        STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH: runtimeAssistantSecrets,
+        // 대본 공급자. 실 SDK·키·네트워크 없이 어시스턴트 시나리오가 돈다(WORKFLOW B-05).
+        STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER: "1",
       },
       url: `${backend}/api/v1/health`,
       reuseExistingServer: false,

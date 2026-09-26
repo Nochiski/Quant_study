@@ -1,0 +1,300 @@
+.assist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  /* 비신뢰 문자열이 컨테이너의 최소 너비를 밀어 올리지 못하게 한다(B-03 리뷰 P3). */
+  min-width: 0;
+  height: 100%;
+  padding: var(--space-3);
+  background: var(--surface-panel);
+}
+
+.assist__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* 자식은 동작 묶음 하나뿐이다. 제목은 이 feature를 꽂는 슬롯이 그린다(WORKFLOW B-04).
+     `space-between`을 그대로 두면 하나뿐인 자식이 왼쪽 끝으로 붙어 패널 오른쪽이 비어 보인다. */
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.assist__head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.assist__sessions {
+  max-width: 180px;
+  padding: 4px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-canvas);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-size-small);
+}
+
+.assist__notice {
+  margin: 0;
+  font-size: var(--text-size-small);
+  color: var(--text-muted);
+}
+
+.assist__notice--error {
+  color: var(--status-error);
+}
+
+.assist__notice--warn {
+  color: var(--status-warn);
+}
+
+.assist__reconnect {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--status-warn);
+  border-radius: var(--radius-medium);
+  background: var(--status-warn-soft);
+  font-size: var(--text-size-small);
+}
+
+.assist__progress {
+  margin: 0;
+  font-size: var(--text-size-small);
+  color: var(--text-subtle);
+}
+
+/* 알릴 것이 없을 때도 접근성 트리에는 남는다 — 라이브 영역은 자리를 지켜야 읽힌다. */
+.assist__progress:empty {
+  display: none;
+}
+
+.assist__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--status-error-border);
+  border-radius: var(--radius-medium);
+  background: var(--status-error-soft);
+}
+
+.assist__confirm-text {
+  margin: 0;
+  font-size: var(--text-size-small);
+}
+
+.assist__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.assist__log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.assist-turn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.assist-message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-medium);
+  font-size: var(--text-size-small);
+}
+
+.assist-message--user {
+  align-self: flex-end;
+  max-width: 90%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+}
+
+.assist-message--assistant {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+}
+
+/* 모델 텍스트는 평문이다 — 줄바꿈만 살리고 마크업으로 해석하지 않는다. */
+.assist-text {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* 모델·도구·서버가 만든 문자열은 어디에 있든 줄을 바꾼다. 긴 무공백 한 줄이 폭을 밀어낸다. */
+.assist-text,
+.assist-proposal__title,
+.assist-tool__summary,
+.assist-sources__item,
+.assist-proposal__diagnostics {
+  overflow-wrap: anywhere;
+}
+
+.assist-activity__toggle {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-size-small);
+  text-align: left;
+  cursor: pointer;
+}
+
+.assist-activity__toggle:hover {
+  color: var(--text);
+}
+
+.assist-activity__panel {
+  padding-top: var(--space-1);
+}
+
+.assist-thinking,
+.assist-tools,
+.assist-searches,
+.assist-sources {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assist-tool {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.assist-tool__name {
+  font-weight: 600;
+}
+
+.assist-tool__state,
+.assist-tool__summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-muted);
+}
+
+.assist-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.assist-search__query {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.assist-sources {
+  padding-left: var(--space-3);
+}
+
+.assist-sources__plain,
+.assist-sources__host {
+  color: var(--text-subtle);
+}
+
+.assist-sources__host {
+  font-size: var(--text-size-small);
+}
+
+.assist-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-panel);
+}
+
+.assist-proposal__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.assist-proposal__title {
+  margin: 0;
+  font-size: var(--text-size-body);
+  font-weight: 700;
+}
+
+.assist-proposal__label {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: var(--text-size-small);
+  font-weight: 600;
+}
+
+.assist-proposal__rationale {
+  color: var(--text-muted);
+}
+
+.assist-proposal__diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--status-error);
+}
+
+.assist-proposal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.assist-turn__failure {
+  margin: 0;
+  color: var(--status-error);
+}
+
+.assist__composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.assist__input {
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-canvas);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-size-small);
+  resize: vertical;
+}
+
+.assist__composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

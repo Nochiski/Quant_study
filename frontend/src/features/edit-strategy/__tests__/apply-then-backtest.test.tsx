@@ -28,7 +28,7 @@ const editorOf = (initial: string) => {
   const listeners: ((next: string) => void)[] = [];
   const handle: CodeEditorHandle = {
     getText: () => text,
-    setText: vi.fn(),
+    loadText: vi.fn(),
     replaceRange: vi.fn((from: number, to: number, insert: string) => {
       text = `${text.slice(0, from)}${insert}${text.slice(to)}`;
       listeners.forEach((listener) => listener(text));
@@ -39,6 +39,9 @@ const editorOf = (initial: string) => {
     positionToOffset: vi.fn(() => 0),
     scrollTo: vi.fn(),
     focus: vi.fn(),
+    undo: vi.fn(() => false),
+    redo: vi.fn(() => false),
+    historyDepth: vi.fn(() => ({ undo: 0, redo: 0 })),
     getHistoryState: vi.fn(() => null),
     restoreHistoryState: vi.fn(),
   };

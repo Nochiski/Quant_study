@@ -34,7 +34,12 @@ export type FormControl =
   | { kind: "number"; min: Bound | null; max: Bound | null; integer: boolean }
   | { kind: "date" }
   | { kind: "boolean" }
-  | { kind: "enum"; values: readonly string[] }
+  | {
+      kind: "enum";
+      values: readonly string[];
+      /** `x-operator`: enum 값 → 이름 키 stem. 연산자 enum에만 있고 나머지는 null(P1-03). */
+      labelKeys: Readonly<Record<string, string>> | null;
+    }
   | {
       kind: "catalog";
       catalog: "equity-field" | "universe" | "factor" | "subgraph";
@@ -93,6 +98,8 @@ export type FormListSection = {
   kind: "list";
   pointer: string;
   key: string;
+  /** backend가 발행한 설명 키 stem(`x-description-key`). 제목이 키 대신 이름을 보인다(P1-03). */
+  descriptionKey: string | null;
   /** 목록 키가 문서에 있는가. 없으면 항목 추가가 키를 열면서 넣는다(`insert-key`). */
   written: boolean;
   /** 목록 키를 담는 부모 pointer(루트 목록은 `""`)와 그 부모가 문서에 있는가(없으면 부모까지 연다). */
@@ -110,6 +117,8 @@ export type FormSection =
       kind: "object";
       pointer: string;
       key: string;
+      /** backend가 발행한 설명 키 stem(`x-description-key`). 제목이 키 대신 이름을 보인다(P1-03). */
+      descriptionKey: string | null;
       written: boolean;
       fields: FormField[];
       /** 중첩 목록(`eligibility.rules`): object 섹션의 배열 property는 link 필드가 아니라 목록 섹션이다(P4-05). */
@@ -155,7 +164,12 @@ const controlFor = (
       };
   }
   if (facts.enumValues.length > 0)
-    return { kind: "enum", values: facts.enumValues };
+    // 연산자 enum은 값마다 이름 키가 따로 온다(`x-operator`). 나머지 enum은 값을 그대로 보인다.
+    return {
+      kind: "enum",
+      values: facts.enumValues,
+      labelKeys: facts.operatorKeys,
+    };
   if (facts.type === "boolean") return { kind: "boolean" };
   if (facts.type === "integer" || facts.type === "number")
     return {
@@ -349,6 +363,7 @@ const projectListSection = (
   key: string,
   pointer: string,
   arrayNode: JsonSchema,
+  descriptionKey: string | null,
   parentPointer = "",
   parentWritten = true,
 ): FormListSection => {
@@ -388,6 +403,7 @@ const projectListSection = (
     kind: "list",
     pointer,
     key,
+    descriptionKey,
     written: found.present,
     parentPointer,
     parentWritten,
@@ -405,6 +421,7 @@ const objectSectionAt = (
   key: string,
   pointer: string,
   node: JsonSchema,
+  descriptionKey: string | null,
 ): Extract<FormSection, { kind: "object" }> => {
   const written = valueAtPointer(tree, pointer).present;
   const projected = projectFields(root, tree, diagnostics, pointer, node);
@@ -421,6 +438,7 @@ const objectSectionAt = (
         field.pointer,
         // `projectField`가 같은 pointer를 이미 해소해 list-link를 냈으므로 여기서 null일 수 없다(P4-05 리뷰 P2-4).
         schemaAt(root, field.pointer, tree)!.node,
+        field.descriptionKey,
         pointer,
         written,
       ),
@@ -429,6 +447,7 @@ const objectSectionAt = (
     kind: "object",
     pointer,
     key,
+    descriptionKey,
     written,
     fields,
     lists,
@@ -454,7 +473,15 @@ export const projectObjectSection = (
   const resolved = schemaAt(schema, pointer, tree);
   if (resolved === null || resolved.branches !== null) return null;
   if (!isRecord(resolved.node.properties)) return null;
-  return objectSectionAt(schema, tree, diagnostics, key, pointer, resolved.node);
+  return objectSectionAt(
+    schema,
+    tree,
+    diagnostics,
+    key,
+    pointer,
+    resolved.node,
+    schemaFacts(resolved.node).descriptionKey,
+  );
 };
 
 export const projectForm = (
@@ -473,6 +500,11 @@ export const projectForm = (
     const resolved = schemaAt(schema, pointer, tree);
     if (resolved === null) continue;
     const facts = schemaFacts(resolved.node);
+    // 섹션 이름은 최상위 property가 발행한 키(`strategy.section.*`)가 먼저다. `$ref` 해소 뒤의
+    // 타입 키(`strategy.type.*`)는 그 property에 키가 없을 때만 쓴다.
+    const sectionKey =
+      schemaFacts(rootProperties[key] as JsonSchema).descriptionKey ??
+      facts.descriptionKey;
     if (facts.type === "array") {
       sections.push(
         projectListSection(
@@ -482,11 +514,20 @@ export const projectForm = (
           key,
           pointer,
           resolved.node,
+          sectionKey,
         ),
       );
     } else if (facts.type === "object" && isRecord(resolved.node.properties)) {
       sections.push(
-        objectSectionAt(schema, tree, diagnostics, key, pointer, resolved.node),
+        objectSectionAt(
+          schema,
+          tree,
+          diagnostics,
+          key,
+          pointer,
+          resolved.node,
+          sectionKey,
+        ),
       );
     } else {
       const field = projectField(
@@ -524,6 +565,9 @@ export const projectForm = (
         kind: "object" as const,
         pointer: "",
         key: "",
+        // 루트 스칼라 섹션은 문서 자신이다.
+        descriptionKey:
+          schemaFacts(schema as JsonSchema).descriptionKey ?? null,
         written: true,
         fields: scalarFields,
         // 루트 배열은 자기 목록 섹션이 된다 — 루트 스칼라 섹션에 중첩 목록은 없다.

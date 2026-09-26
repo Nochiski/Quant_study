@@ -3,6 +3,8 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { backendPort, previewOrigin } from "../e2e/ports.mjs";
+
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "../..");
 const outputDirectory = resolve(
@@ -13,10 +15,13 @@ const fixturePath = resolve(
   repositoryRoot,
   "backend/tests/fixtures/strategy_documents/quality_momentum.yaml",
 );
+// 포트 기본값은 e2e 와 같은 상수에서 온다 — 여기만 숫자를 따로 적으면 워크트리가 포트를 옮겼을 때
+// 이 스크립트만 옛 포트를 부른다(1차 리뷰 P3-8).
 const frontendUrl =
-  process.env.WORKBENCH_MANUAL_FRONTEND_URL ?? "http://localhost:5173";
+  process.env.WORKBENCH_MANUAL_FRONTEND_URL ?? previewOrigin();
 const backendUrl =
-  process.env.WORKBENCH_MANUAL_BACKEND_URL ?? "http://127.0.0.1:8000";
+  process.env.WORKBENCH_MANUAL_BACKEND_URL ??
+  `http://127.0.0.1:${backendPort()}`;
 const headed = process.env.WORKBENCH_MANUAL_HEADED === "1";
 
 const assertReachable = async (url, label) => {

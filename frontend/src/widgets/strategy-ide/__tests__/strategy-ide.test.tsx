@@ -406,6 +406,71 @@ describe("StrategyIde", () => {
     expect(onRunBacktest).not.toHaveBeenCalled();
   });
 
+  it("runs undo and redo from the global shortcut, even with the editor hidden (P1-02)", () => {
+    matchMedia(false);
+    const onUndo = vi.fn();
+    const onRedo = vi.fn();
+    // Graph 탭처럼 편집기가 `hidden`인 상태: 포커스는 본문에 있고 CodeMirror 키맵은 닿지 않는다.
+    mount({
+      onUndo,
+      onRedo,
+      view: "diff",
+      sourceView: "yaml",
+      availableViews: ["yaml", "diff"],
+      projections: { diff: <div>diff</div> },
+    });
+
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "z", metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: "Z", ctrlKey: true, shiftKey: true });
+
+    expect(onUndo).toHaveBeenCalledTimes(1);
+    expect(onRedo).toHaveBeenCalledTimes(2);
+  });
+
+  it("yields Ctrl+Z to whatever already edits text under the cursor (P1-02)", () => {
+    matchMedia(false);
+    const onUndo = vi.fn();
+    const onRedo = vi.fn();
+    mount({ onUndo, onRedo });
+
+    // 편집기 슬롯의 textarea, Form의 텍스트 입력, CodeMirror의 contenteditable — 셋 다 자기 되돌리기를 갖는다.
+    const textarea = screen.getByLabelText("source");
+    fireEvent.keyDown(textarea, { key: "z", ctrlKey: true });
+    fireEvent.keyDown(textarea, { key: "z", ctrlKey: true, shiftKey: true });
+
+    const input = document.createElement("input");
+    input.type = "number";
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: "z", ctrlKey: true });
+
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "true");
+    document.body.appendChild(editable);
+    fireEvent.keyDown(editable, { key: "z", ctrlKey: true });
+
+    expect(onUndo).not.toHaveBeenCalled();
+    expect(onRedo).not.toHaveBeenCalled();
+
+    // 되돌리기를 갖지 않는 컨트롤에서는 문서 되돌리기가 그대로 동작한다: 드롭다운, 그리고 분절 위젯인
+    // 날짜 입력(Form 탭의 시작일·종료일) — 여기서 양보하면 Ctrl+Z가 죽는다.
+    const select = document.createElement("select");
+    document.body.appendChild(select);
+    fireEvent.keyDown(select, { key: "z", ctrlKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(1);
+
+    const date = document.createElement("input");
+    date.type = "date";
+    document.body.appendChild(date);
+    fireEvent.keyDown(date, { key: "z", ctrlKey: true });
+    expect(onUndo).toHaveBeenCalledTimes(2);
+
+    input.remove();
+    editable.remove();
+    select.remove();
+    date.remove();
+  });
+
   it("searches document symbols and controls panels and theme from the palette", async () => {
     matchMedia(false);
     const user = userEvent.setup();
@@ -543,5 +608,33 @@ describe("StrategyIde", () => {
       },
       open: { assistant: false },
     });
+  });
+
+  // 배지·문제 목록은 탭 패널 밖에 있어야 한다. 탭 패널 안에 있으면 선택되지 않은 탭은 `hidden`이라
+  // Graph·Form에서 편집 결과를 보려고 YAML 탭으로 돌아가야 했다(WORKFLOW P1-01).
+  it("keeps the document status and the problem list outside the tab panels", () => {
+    matchMedia(false);
+    for (const view of ["yaml", "json", "form", "graph", "diff"] as const) {
+      mount({
+        view,
+        sourceView: "yaml",
+        availableViews: ["yaml", "json", "form", "graph", "diff"],
+        projections: {
+          json: <div>JSON projection</div>,
+          form: <div>Form projection</div>,
+          graph: <div>Graph projection</div>,
+          diff: <div>Diff projection</div>,
+        },
+        documentStatus: (
+          <p role="status" aria-label="문서 상태">
+            검증 통과
+          </p>
+        ),
+        problems: <section aria-label="문제">오류 1 · 경고 0</section>,
+      });
+      expect(screen.getByRole("status", { name: "문서 상태" })).toBeVisible();
+      expect(screen.getByRole("region", { name: "문제" })).toBeVisible();
+      cleanup();
+    }
   });
 });

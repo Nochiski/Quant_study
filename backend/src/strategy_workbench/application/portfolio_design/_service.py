@@ -68,6 +68,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     compile_target_tape,
     compile_target_tape_with_trace,
 )
+from strategy_workbench.domain.strategy.facade.constraints import expression_code
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import (
     StrategyValidation,
@@ -556,7 +557,7 @@ class PortfolioDesignService:
             except InvalidFactorGraphError as error:
                 issues.extend(
                     semantic_issue(
-                        factor_issue.code,
+                        expression_code(factor_issue.code),
                         f"factors.{factor_index}.graph.{factor_issue.path}",
                         factor_issue.message,
                         severity=(

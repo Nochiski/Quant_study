@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-import { t, tOptional } from "../../../shared/config";
+import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import {
   formatContractValue,
   projectContractInspector,
@@ -374,9 +374,10 @@ export const ContractInspector = ({
     );
 
   const { field } = projection;
-  const description = field.descriptionKey
-    ? tOptional(field.descriptionKey)
-    : null;
+  // backend 키는 stem이다: 이름과 한 줄 설명을 따로 찾는다(P1-03). 번역이 없으면 키 문자열을
+  // 본문으로 찍지 않고 "설명 없음"을 보인다 — 키는 아래 보조 `<code>`에만 남는다.
+  const name = tName(field.descriptionKey);
+  const description = tDescription(field.descriptionKey);
   const rows: [string, ReactNode][] = [
     [
       t("ide.inspector.path"),
@@ -476,7 +477,9 @@ export const ContractInspector = ({
       ) : null}
       <section className="contract-inspector__section">
         <h3>
-          {field.shape === "root" ? t("contract.root") : field.templatePointer}
+          {name ?? (field.shape === "root" ? t("contract.root") : null) ?? (
+            <code>{field.templatePointer}</code>
+          )}
         </h3>
         <Rows rows={rows} />
         {field.unresolvedBranches !== null ? (
@@ -493,7 +496,7 @@ export const ContractInspector = ({
         {field.descriptionKey ? (
           <div className="contract-inspector__description">
             <strong>{t("contract.description")}</strong>
-            <p>{description ?? field.descriptionKey}</p>
+            <p>{description ?? t("contract.noDescription")}</p>
             <code title={t("contract.descriptionKey")}>
               {field.descriptionKey}
             </code>

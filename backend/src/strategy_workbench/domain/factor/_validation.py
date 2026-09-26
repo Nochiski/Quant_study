@@ -22,7 +22,15 @@ from ._nodes import (
     TimeSeriesNode,
     UnaryNode,
     UnaryOperator,
+    field_minimum,
 )
+
+# 정수 파라미터의 하한은 노드 dataclass 옆에 한 번만 선언한다(`_nodes.minimum`). runtime schema가
+# 같은 값을 JSON Schema `minimum`으로 발행하므로 화면이 만든 기본값과 검증기가
+# 어긋나지 않는다(P1-04).
+LAG_PERIODS_MINIMUM = field_minimum(UnaryNode, "periods")
+TIME_SERIES_WINDOW_MINIMUM = field_minimum(TimeSeriesNode, "window")
+TIME_SERIES_LAG_MINIMUM = field_minimum(TimeSeriesNode, "lag")
 
 
 class FactorValidationSeverity(StrEnum):
@@ -56,7 +64,42 @@ class FactorGraphValidation:
     required_field_ids: tuple[str, ...]
 
 
+# 이 모듈이 낼 수 있는 그래프 진단 코드 전부. 전략 문서 쪽 레지스트리(`EXPRESSION_CODES`)는 이
+# 집합을 `strategy.expression.*`로 옮긴 것과 같아야 하고, 그 불변식을 테스트가 지킨다(P1-05).
+# 코드를 여기 적지 않고 새로 만들면 전략 validator가 alias를 찾지 못해 진단이 조용히 새
+# 네임스페이스로 샌다 — 그래서 목록이 아니라 게이트다.
+FACTOR_GRAPH_CODES: frozenset[str] = frozenset(
+    {
+        "factor.graph.branch_type",
+        "factor.graph.branch_unit",
+        "factor.graph.cycle",
+        "factor.graph.duplicate_node",
+        "factor.graph.field_missing",
+        "factor.graph.group_field_missing",
+        "factor.graph.group_field_type",
+        "factor.graph.input_missing",
+        "factor.graph.input_type",
+        "factor.graph.insufficient_history",
+        "factor.graph.lag_periods",
+        "factor.graph.operand_type",
+        "factor.graph.output_missing",
+        "factor.graph.parameter_missing",
+        "factor.graph.predicate_type",
+        "factor.graph.saved_factor_missing",
+        "factor.graph.saved_subgraph_missing",
+        "factor.graph.time_series_window",
+        "factor.graph.unit_mismatch",
+        "factor.graph.winsor_bounds",
+    }
+)
+
+
 def _issue(code: str, node_id: str | None, path: str, message: str) -> FactorValidationIssue:
+    if code not in FACTOR_GRAPH_CODES:
+        raise ValueError(
+            "factor graph diagnostic code has no owner — add it to FACTOR_GRAPH_CODES and to the "
+            f"strategy alias table: code={code!r} path={path!r} node_id={node_id!r}"
+        )
     return FactorValidationIssue(code=code, node_id=node_id, path=path, message=message)
 
 
@@ -92,15 +135,22 @@ def validate_factor_graph(
 ) -> FactorGraphValidation:
     issues: list[FactorValidationIssue] = []
     nodes = {node.node_id: node for node in graph.nodes}
-    if len(nodes) != len(graph.nodes):
-        issues.append(
-            _issue(
-                "factor.graph.duplicate_node",
-                None,
-                "nodes",
-                "노드 ID는 중복될 수 없습니다.",
+    # 중복 id를 쓴 자리마다(첫 자리는 빼고) 진단을 단다: 그래프 카드가 어느 노드를 고쳐야 하는지
+    # node_id로 집어 하이라이트한다(P1-05). 한 줄짜리 "중복될 수 없습니다"는 어느 노드인지 말하지
+    # 못해 사용자가 목록을 눈으로 훑어야 했다.
+    seen_node_ids: set[str] = set()
+    for index, node in enumerate(graph.nodes):
+        if node.node_id in seen_node_ids:
+            issues.append(
+                _issue(
+                    "factor.graph.duplicate_node",
+                    node.node_id,
+                    f"nodes.{index}",
+                    "앞에서 이미 쓴 node_id입니다. 다른 이름을 붙여 주세요 — "
+                    f"node_id={node.node_id!r}",
+                )
             )
-        )
+        seen_node_ids.add(node.node_id)
     if graph.output_node_id not in nodes:
         issues.append(
             _issue(
@@ -169,23 +219,27 @@ def validate_factor_graph(
                 )
             )
         elif isinstance(node, UnaryNode):
-            if node.operator is UnaryOperator.LAG and (node.periods is None or node.periods < 1):
+            if node.operator is UnaryOperator.LAG and (
+                node.periods is None or node.periods < LAG_PERIODS_MINIMUM
+            ):
                 issues.append(
                     _issue(
                         "factor.graph.lag_periods",
                         node.node_id,
                         path,
-                        f"lag 기간은 1 이상이어야 합니다: periods={node.periods}",
+                        f"lag 기간은 {LAG_PERIODS_MINIMUM} 이상이어야 합니다: "
+                        f"periods={node.periods}",
                     )
                 )
         elif isinstance(node, TimeSeriesNode):
-            if node.window < 1 or node.lag < 0:
+            if node.window < TIME_SERIES_WINDOW_MINIMUM or node.lag < TIME_SERIES_LAG_MINIMUM:
                 issues.append(
                     _issue(
                         "factor.graph.time_series_window",
                         node.node_id,
                         path,
-                        "window는 1 이상이고 lag는 0 이상이어야 합니다: "
+                        f"window는 {TIME_SERIES_WINDOW_MINIMUM} 이상이고 "
+                        f"lag는 {TIME_SERIES_LAG_MINIMUM} 이상이어야 합니다: "
                         f"window={node.window} lag={node.lag}",
                     )
                 )
@@ -201,10 +255,19 @@ def validate_factor_graph(
                     )
                 )
 
-    if _has_cycle(nodes):
-        issues.append(
-            _issue("factor.graph.cycle", None, "nodes", "팩터 그래프에 순환 참조가 있습니다.")
-        )
+    index_by_node_id = {node.node_id: index for index, node in enumerate(graph.nodes)}
+    for cycle in _cycles(nodes):
+        chain = _cycle_chain(cycle, nodes)
+        for node_id in cycle:
+            issues.append(
+                _issue(
+                    "factor.graph.cycle",
+                    node_id,
+                    f"nodes.{index_by_node_id[node_id]}",
+                    "이 노드가 순환 참조에 묶여 있어 값을 계산할 수 없습니다. 고리 중 한 곳의 "
+                    f"입력을 끊어 주세요 — {chain}",
+                )
+            )
 
     contracts: dict[str, NodeContract] = {}
     if not any(
@@ -266,22 +329,87 @@ def validate_factor_graph(
     )
 
 
-def _has_cycle(nodes: dict[str, ExpressionNode]) -> bool:
-    state: dict[str, int] = {}
+def _cycles(nodes: dict[str, ExpressionNode]) -> tuple[tuple[str, ...], ...]:
+    """순환에 묶인 node_id 묶음들. 한 묶음은 서로를 물고 도는 노드 전부다.
 
-    def visit(node_id: str) -> bool:
-        if state.get(node_id) == 1:
-            return True
-        if state.get(node_id) == 2:
-            return False
-        state[node_id] = 1
-        node = nodes[node_id]
-        if any(dependency in nodes and visit(dependency) for dependency in node_dependencies(node)):
-            return True
-        state[node_id] = 2
-        return False
+    강결합 요소(SCC)를 쓴다. DFS back-edge 한 번으로 순환 하나를 적는 방식은 **이미 끝난 노드를
+    통해서만 닿는 순환을 놓쳐서**, 그 노드 카드에 배지가 붙지 않았다(1차 리뷰 P3-6 실측:
+    `1→2, 1→4, 2→3, 3→1, 4→2`에서 노드 `4`가 빠졌다). 진단이 "이 노드가 고리에 묶였다"고 말하려면
+    묶인 노드를 하나도 빠뜨리면 안 된다.
 
-    return any(visit(node_id) for node_id in nodes if state.get(node_id) is None)
+    한 묶음 안의 순서는 문서 순서(`nodes` 삽입 순서)라 같은 그래프면 항상 같은 결과가 나온다.
+    자기 자신을 가리키는 노드도 순환이다.
+    """
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: list[str] = []
+    order = {node_id: position for position, node_id in enumerate(nodes)}
+    counter = 0
+    groups: list[tuple[str, ...]] = []
+
+    def strongconnect(node_id: str) -> None:
+        nonlocal counter
+        index[node_id] = low[node_id] = counter
+        counter += 1
+        stack.append(node_id)
+        on_stack.add(node_id)
+        for dependency in node_dependencies(nodes[node_id]):
+            if dependency not in nodes:
+                continue
+            if dependency not in index:
+                strongconnect(dependency)
+                low[node_id] = min(low[node_id], low[dependency])
+            elif dependency in on_stack:
+                low[node_id] = min(low[node_id], index[dependency])
+        if low[node_id] != index[node_id]:
+            return
+        component: list[str] = []
+        while True:
+            member = stack.pop()
+            on_stack.discard(member)
+            component.append(member)
+            if member == node_id:
+                break
+        self_loop = node_id in node_dependencies(nodes[node_id])
+        if len(component) > 1 or self_loop:
+            groups.append(tuple(sorted(component, key=lambda member: order[member])))
+
+    for node_id in nodes:
+        if node_id not in index:
+            strongconnect(node_id)
+    return tuple(sorted(groups, key=lambda group: order[group[0]]))
+
+
+def _cycle_chain(group: tuple[str, ...], nodes: dict[str, ExpressionNode]) -> str:
+    """고리를 사람이 읽을 한 줄로.
+
+    묶음 안에서 각 노드의 다음이 하나뿐이면 진짜 경로라 화살표로 잇는다(흔한 단순 고리). 갈래가
+    있으면 화살표가 없는 경로를 있는 것처럼 보이게 하므로 묶인 노드 목록만 보인다.
+    """
+    members = set(group)
+    # 같은 노드를 두 입력으로 받는 경우(`a + a`)가 있으므로 중복은 걷어낸다 — 갈래가 아니다.
+    successors = {
+        member: list(
+            dict.fromkeys(
+                dependency
+                for dependency in node_dependencies(nodes[member])
+                if dependency in members
+            )
+        )
+        for member in group
+    }
+    if all(len(nexts) == 1 for nexts in successors.values()):
+        walk = [group[0]]
+        while True:
+            following = successors[walk[-1]][0]
+            if following == walk[0]:
+                break
+            walk.append(following)
+        return "cycle=" + " → ".join((*walk, walk[0]))
+    # 갈래가 있으면 경로가 아니라 묶인 노드 목록이다. `키=값` 한 쌍이 되도록 키를 따로 쓴다
+    # (`error-messages.md`) — `cycle=nodes=[...]` 는 값 안에 `=` 가 또 들어간다.
+    return "cycle_nodes=[" + ", ".join(group) + "]"
 
 
 def _infer_contract(

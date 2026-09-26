@@ -17,9 +17,10 @@ excluded from `spec_hash`, and the save flow (P1-06/P1-07) assigns the real stra
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import cached_property
 from typing import Any
 
@@ -27,9 +28,14 @@ from strategy_workbench.domain.backtest.facade.environment import (
     run_environment_schema,
     run_environment_schema_hash,
 )
+from strategy_workbench.domain.factor.facade.operators import (
+    OperatorDefinition,
+    operator_definitions,
+)
 from strategy_workbench.domain.strategy.facade.document import (
+    LEGACY_SHAPE_CODE,
     hydrate_strategy_document,
-    is_legacy_document,
+    is_upgradeable_document,
     upgrade_document_1_0,
 )
 from strategy_workbench.domain.strategy.facade.schema import (
@@ -168,6 +174,29 @@ class StrategyDocumentContract:
     fields: tuple[FieldContract, ...]
 
 
+@dataclass(frozen=True)
+class StrategyOperatorCatalog:
+    """그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.
+
+    문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,
+    연산자 목록·arity·가용성을 손으로 적지 않는다.
+    """
+
+    catalog_hash: str
+    operators: tuple[OperatorDefinition, ...]
+
+
+def operator_catalog_hash(operators: tuple[OperatorDefinition, ...]) -> str:
+    """정의 전부의 canonical JSON sha256. 정의가 하나라도 바뀌면 ETag가 바뀐다."""
+    material = json.dumps(
+        [asdict(definition) for definition in operators],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
 def contract_hash(schema_hash: str, factor_registry_version: str, dataset_snapshot_id: str) -> str:
     """Identity of one contract representation: the schema plus the catalogs it pairs with."""
     material = f"{schema_hash}\n{factor_registry_version}\n{dataset_snapshot_id}".encode()
@@ -211,6 +240,17 @@ class StrategyAuthoringService:
         return self._run_environment_schema
 
     @cached_property
+    def _operators(self) -> StrategyOperatorCatalog:
+        operators = operator_definitions()
+        return StrategyOperatorCatalog(
+            catalog_hash=operator_catalog_hash(operators), operators=operators
+        )
+
+    def operators(self) -> StrategyOperatorCatalog:
+        """연산자 정의 카탈로그 (domain.factor 레지스트리 그대로, pure·cached)."""
+        return self._operators
+
+    @cached_property
     def _fields(self) -> tuple[FieldContract, ...]:
         return strategy_field_contracts()
 
@@ -233,7 +273,7 @@ class StrategyAuthoringService:
         parsed = self._codec.parse(request.source, format=request.format)
         if not parsed.ok or parsed.tree is None:
             raise DocumentUpgradeSyntaxError(_rejected(parsed, None, parsed.diagnostics))
-        if not is_legacy_document(parsed.tree):
+        if not is_upgradeable_document(parsed.tree):
             raise DocumentNotUpgradeableError(parsed.tree.get("schema_version"))
         expected = upgrade_document_1_0(parsed.tree)
         try:
@@ -340,9 +380,13 @@ def _rejected(
     )
 
 
+# 값이 아니라 키 자체를 가리켜야 하는 구조 진단. 모르는 키도, 1.0 문법 힌트도 고칠 곳이 키다.
+_KEY_RANGE_CODES = frozenset({"structure.unknown_key", LEGACY_SHAPE_CODE})
+
+
 def _structural_range(parsed: ParsedDocument, code: str, pointer: str) -> SourceRange | None:
     # An unknown key exists in the source: point at the key itself, not its value.
-    if code == "structure.unknown_key" and pointer in parsed.key_ranges:
+    if code in _KEY_RANGE_CODES and pointer in parsed.key_ranges:
         return parsed.key_ranges[pointer]
     return parsed.locate(pointer)
 

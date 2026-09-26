@@ -82,8 +82,10 @@ def decode_record(
         if payload.get("schema_version") != schema_version:
             raise ValueError("schema_version column does not match the canonical strategy payload")
         spec_hash = required_text(row, "spec_hash")
-        # 동결 판정 술어는 port와 같은 domain 함수 하나다(DEFECT-P1X-003). 은퇴 버전이 1.0이
-        # 아니면 `upgrade_document_1_0`이 NotALegacyDocumentError(ValueError)로 fail-closed한다.
+        # 동결 판정 술어는 port와 같은 domain 함수 하나다(DEFECT-P1X-003). 동결 row 중에서도
+        # `upgrade_document_1_0`이 받아 주는 것은 버전이 은퇴 버전이거나 본문이 옛 판 모양인
+        # 문서다(`is_upgradeable_document`). 둘 다 아니면 NotALegacyDocumentError(ValueError)로
+        # fail-closed한다.
         frozen = is_frozen_schema_version(schema_version)
         if frozen:
             spec = _decode_frozen_spec(

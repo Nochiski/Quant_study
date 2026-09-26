@@ -163,3 +163,28 @@ wise 5검사 pass ⑤ 모 플랜 §1-7 DQ-7~11 조치 열이 결과 숫자로 �
 1. `capex_basis` 열 신설(계약 변경, 문서 3종 갱신) — 권장 **예**.
 2. 유예 G 기본 **5 거래일**(대안 10) · 플래그 표기 방식(§3-2).
 3. `--mode daily` 제거(건전성이 full 을 요구하므로 죽은 길) — 권장 **예**.
+
+---
+
+## 7. 실행 결과 (2026-09-26 20:10 KST, 배포 rev 17bc918d)
+
+| 게이트 | 결과 | 비고 |
+|---|---|---|
+| GA1 | **PASS** | `test_equity_s12_fin.py` 39(+4 capex) · 관련 808 · 전체 1,391+ |
+| GA2 | 복구 **203**(ppe_parts), 잔여 107 → 기준(≤100·≥205)에 각 7·2 미달, **잔여 전수 분류로 종결** | 잔여 107 = 집계 줄은 있으나 값 공란 8 · 유형자산+투자부동산 **합산 줄** 3 · PPE 줄 없이 리스·무형·소프트웨어 취득만 82 · '취득' 줄 자체 없음 14. 규칙(PPE 정의)으로 더 채울 것은 합산 줄 3(FY2025 전체 7사, 유니버스 024110·030200·000370·046890)뿐 → 후속 F-A1 |
+| GA3 | **PASS** | 기존 capex 80,391행 값 전건 동일·basis 전부 standard, revenue·net_income·cf_operating 회귀 0 |
+| GA4 | **PASS 81%**(±10% 25/31) | 그 밖 6 중 2 는 0 vs 0·1 vs 1(분모 효과), 4 는 네이버 정의 차이(006730·036800 무형 포함, 020000, 080160) |
+| GA5 | **PASS** | `qual_fcf_assets` NULL 34 → **4**(030200·024110 합산 줄, 241560 비KRW 격리, 146320 영업현금흐름 이름 변형) |
+| GA6 | **PASS** | v3 vs v5: composite 0.993 · quality 0.9855 · valuation 0.987 · v2 total 0.9825, verdict pass |
+| GB1 | **PASS** | `test_daily_health.py`·`test_backfill_wise.py` 33, 전체 1,391 |
+| GB2 | **PASS** | `--date 20260923` 재판정 OK(covered 805·none 1,802·19,283 항등, source=call_log) — 종전 FAIL |
+| GB3 | 대기 | 09-28 정규 저녁 수집 → 09-29 아침 `logs/health/20260928.json` |
+| EG5a | 절차 추가 | 규칙 변경엔 `model.RULES_VERSION` 인상이 필요(플랜 누락) → **e1.17.0 → e1.18.0**(17bc918d), 이후 `skip(rules_changed)` |
+
+구현 중 발견·반영: 이름 목록을 `kind='nm'` 으로 두면 표준 태그 줄(예 `dart_PurchaseOfConstructionInProgress` = '건설중인자산의 취득')이 concept 줄과 nm 줄에 **둘 다** 걸려 같은 tier 에서 두 번 더해진다 → 새 kind `nm_nonstd`(`NOT account_std` 행만) 로 차단, 테스트 ①이 경계를 찍는다. `tests/test_equity_s19_profile.py` 선언 행수 83→84.
+
+**후속(작음, 별도 승인)**
+- **F-A1** 유형자산+투자부동산 합산 줄(7사, 유니버스 4): tier `e_ppe_combined`·basis `ppe_incl_invprop` 추가 여부 — 투자부동산이 섞이므로 정의가 다르다는 표시가 필요. KT(030200)가 여기 속한다.
+- **F-A2** `cf_operating_ytd` 이름 목록에 공백 변형 '영업활동으로 인한 순현금흐름'(146320) — 이름 매칭에 공백 정규화(NFKC·공백 제거)를 넣는 편이 근본적.
+- **F-A3** PPE 취득 줄이 없고 리스·무형만 있는 82사: capex 를 NULL 로 둘지 0 으로 볼지는 팩터층 결정(현재 NULL = FCF 결측). 서비스업 편향 여부 확인 뒤 결정.
+- T-C(유예 규칙)는 M2 T2.11 에서 코드화.

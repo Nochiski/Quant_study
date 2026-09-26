@@ -6,7 +6,7 @@ current_phase: C
 current_pr: C-02
 active_prs: [C-02]
 parallel_window: [C-02]
-last_updated: 2026-09-26T14:35:27+09:00
+last_updated: 2026-09-26T21:35:51+09:00
 planned_prs: 15
 merged_prs: 14
 approved_prs: 14
@@ -29,7 +29,7 @@ progress_percent: 93
 | Active PR | `C-02` |
 | Progress | `14 / 15 merged (93%)` |
 | Approved | `14 / 15` |
-| Aggregated at | `2026-09-26 14:35 KST` |
+| Aggregated at | `2026-09-26 21:35 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -182,7 +182,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | P0 | Planning package | 1 | 1 | `MERGED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
-| C | Phase A audit follow-up | 2 | 1 | `SELF_CHECK` |
+| C | Phase A/B audit follow-up | 2 | 1 | `SELF_CHECK` |
 | **Total** |  | **15** | **14** | **93%** |
 <!-- PLAN:PHASES:END -->
 
@@ -275,12 +275,12 @@ Phase exit:
 - **인풋**:
   1. `POST /api/v1/assistant/sessions/{id}/turns` — 검색을 상한 이상 유도하는 질문.
   2. 사이드바가 그 턴의 SSE 또는 `GET /api/v1/assistant/sessions/{id}` 이력을 그린다.
-- **에러 위치**: 생산 쪽 `backend/src/strategy_workbench/adapters/outbound/llm_openai/_turn.py`가
+- **에러 위치**: 생산 쪽 `backend/src/strategy_workbench/adapters/outbound/llm_openai/_turn.py:191-192`가
   통지를 `SearchActivity(query=SEARCH_BUDGET_EXHAUSTED_NOTICE, sources=())`로 흘린다. 소비 쪽
-  `frontend/src/features/assist-strategy/ui/assist-transcript.tsx`는 그것을 "웹 검색" 배지와
+  `frontend/src/features/assist-strategy/ui/assist-transcript.tsx:84-91`은 그것을 "웹 검색" 배지와
   `query` 본문으로 그리며, 통지를 가르는 분기가 없다. 집계는
-  `backend/src/strategy_workbench/application/assistant_chat/_usage.py`의 `_is_search`가 문구
-  비교로 막고 있다.
+  `backend/src/strategy_workbench/application/assistant_chat/_usage.py:123`의 `_is_search`(호출
+  `:156`)가 문구 비교로 막고 있다.
 - **위험성**: 사용자는 하지 않은 검색 칩을 보고, 칩 본문은 모델에게 보내려고 쓴 고정 문장이다
   (표시 오차). 통지와 검색을 가르는 근거가 문구 비교라 같은 문구를 쓰는 경로가 생기거나 번역이
   들어오면 집계가 다시 틀린다(silent 집계 오류). 데이터 손실·look-ahead는 아니다.
@@ -294,9 +294,11 @@ Phase exit:
 
 - **상황**: 한 세션에 턴이 여러 개 쌓인 뒤 사이드바가 세션 이력으로 대화를 다시 그린다.
 - **인풋**: `GET /api/v1/assistant/sessions/{id}` 응답의 `messages` 배열(사용자·어시스턴트 메시지).
-- **에러 위치**: 전송 계약 `ChatMessageView`에 `turn_id`가 없다. 그래서
-  `frontend/src/features/assist-strategy/model/transcript.ts`의 `assistTranscript`는 n번째 사용자
-  메시지를 n번째 턴의 질문으로 본다(생성 순서 짝짓기). 이 backlog는 B-03 행 비고와 그 파일
+- **에러 위치**: 전송 계약
+  `backend/src/strategy_workbench/adapters/inbound/http_api/_assistant_contract.py:195-198`의
+  `ChatMessageView`에 `turn_id`가 없다. 그래서
+  `frontend/src/features/assist-strategy/model/transcript.ts:29-36`의 `assistTranscript`는 n번째
+  사용자 메시지를 n번째 턴의 질문으로 본다(생성 순서 짝짓기, backlog 표기는 `:24`). 이 backlog는 B-03 행 비고와 그 파일
   docstring에 적혀 있지만 담당이 없었다.
 - **위험성**: 메시지 수와 턴 수가 어긋나는 경로(사용자 메시지 없이 턴이 생기거나 그 반대)에서는
   질문이 다른 턴의 답에 붙는다(표시 오차, silent). 지금은 리듀서의 턴 순서 불변식이 막고 있을
@@ -369,6 +371,13 @@ Phase exit:
   정리 중 `constructor` 같은 프로토타입 이름 프레임이 통과하던 결함을 `Object.hasOwn`으로 막았다.
   NB-7: `create_app`의 CORS 기본값을 없애 기본 origin의 owner를 `bootstrap/_http.py` 하나로 했다.
   NB-8: 두 전략 page의 어시스턴트 배선을 `useStrategyAssistant` 하나로 모았다.
+- 2026-09-26 — C-02 1차 리뷰 REQUEST_CHANGES(P1 1·P3 3) 반영. P1: NB-2 수정이 compile 직후 팩터 계획
+  (explain) 조회 중의 `factor-plan` 닫힘까지 blocked로 읽어, 팩터 그래프를 바꾸는 제안의 "적용 후
+  백테스트"가 실행되지 않았다. `isBacktestSettling`(계획 `loading`·`metadata-loading`)을 `useRunBacktest`가
+  `settling`으로 내보내고 체인이 그 동안 기다린다. 계획 오류·호환 불가와 문서와 무관한 닫힘은 그대로
+  버린다. 리뷰 프로브를 회귀 테스트로 옮겨 수정 전 red를 확인했고, 대본 공급자에 팩터 창을 줄이는
+  시나리오(`창을 줄`)와 그 e2e를 더했다. P3: 대기 문구(ko/en), backlog 에러 위치 줄 번호, 집계
+  도구의 C 목표(`Phase A/B audit follow-up`).
 - 2026-09-26 — **P0-01~B-05 13 PR main 머지 완료**(#166·#169·#170·#171·#174·#175·#178·#179·#180·#182·#185·#186·#189, 스택 아래부터 `--merge`, 다음 PR base를 main으로 먼저 옮긴 뒤). 중간 PR은 PLAN.md만 리드 판으로 맞춘 main 병합 커밋을 얹었고(PLAN 외 파일은 각 tip과 동일, CI는 tip 결과 인용), 스택 전용 절(현재 결정의 A-07 항목·A-07 backlog·기본값 근거·C 절·A-05/A-06 변경 기록)은 C-01의 main 병합에서 절 단위로 합쳤다(Phase B 감사 NB-5). C-01은 1차 REQUEST_CHANGES(P2 3: PLAN 도구 cp949 깨짐, NB-9 기준선이 SDK gate 미통과, 매뉴얼 `RUN_LLM_LIVE`) → 반영 `afba06f3` → 2차 REQUEST_CHANGES(P2 1: probe 상한 owner 오기, 1차 지적 오판) → `de807566`.
 - 2026-09-26 — 세션 한도 중단 뒤 재개. B-05 **최종 `2d5f2b26`**, C-01 B-05 위 rebase **`b7e01b76`**(range-diff 6커밋 전부 동일, pytest 1992·vitest 812·계약 재생성 diff 0) push, 스택 최상단 `b7e01b76`에서 **전체 e2e 23/23**(백테스트 2건·적용 후 백테스트 포함). `review_ai_c_01` 1차 재착수(이전 리뷰는 결과 없이 중단). **Phase B 감사(`audit_ai_phase_b`, `bb51cec9`) PASS, blocking 0**, NON_BLOCKING 8건(NB-1 거부 문구 표 이중 owner, NB-2 적용 후 백테스트가 `blocked` 뒤 트리거 잔존 → armed 폐기로 결정, NB-3 매뉴얼 live smoke 변수, NB-4 backlog 담당 부재, NB-5 PLAN 병합 규칙, NB-6~8 P3)은 스택 최상단 **C-02** 하나로 처리. 완료 정의 1(실제 키 연결 테스트)·live smoke는 키 부재로 사용자 실행 필요.
 - 2026-09-21 — A-05 2차 리뷰 반영. **검색 예산 집행 방식을 유지하기로 결정**: 호출마다

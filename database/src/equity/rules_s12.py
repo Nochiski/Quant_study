@@ -36,10 +36,13 @@ API 는 정정이 있으면 정정본의 `rcept_no` 를 돌려주므로 `availab
 equity 는 **두 라벨을 싣기만 한다**. 무엇을 버릴지는 팩터층이 정한다(WORKFLOW §0-2).
 
 **capex 기준 한 축**(DQ-8, 2026-09-26): 유형자산 취득을 집계 한 줄로 적지 않고 자산별로 나눠 적는
-회사가 있어(FY2025 연간 결측 311사 중 211사) tier `d_ppe_parts` 가 그 합을 만들고 `capex_basis` ∈
-{`standard`, `ppe_parts`, `unavailable`} 가 출처를 남긴다. 같은 회사가 둘 다 적는 경우는 0건이고
-집계 줄이 있으면 `min(tier)` 가 a/b/c 에서 끝내므로 이중계상이 구조적으로 불가능하다.
-`capex_basis_prev` 는 두지 않는다.
+회사가 있어(FY2025 연간 결측 311사 중 211사) tier `d_ppe_parts` 가 그 합을 만들고 `capex_basis` 가
+출처를 남긴다. 같은 회사가 둘 다 적는 경우는 0건이고 집계 줄이 있으면 `min(tier)` 가 a/b/c 에서
+끝내므로 이중계상이 구조적으로 불가능하다. `capex_basis_prev` 는 두지 않는다.
+후속 F-A1·F-A3 로 두 축이 더 붙었다: tier `e_ppe_combined`(유형자산+투자부동산 **합산 줄** 7사 →
+`ppe_incl_invprop`, 정의가 달라 섞어 쓰면 안 된다는 표시)와 **0 규칙**(현금흐름표가 있는데 유형자산
+취득 줄이 아예 없으면 `capex_ytd = 0` · `none_in_cf` — 현금흐름표는 현금흐름을 다 적으므로 줄이
+없다는 것은 안 샀다는 뜻이다). 어휘는 `CAPEX_BASIS_VOCAB` 5종이다.
 
 격리 4종(EG7): `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved` ·
 `rcept_lag_out_of_range` · `duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로
@@ -47,9 +50,10 @@ equity 는 **두 라벨을 싣기만 한다**. 무엇을 버릴지는 팩터층�
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-from fin_map import CAPEX_FALLBACK, FIN_MAP, REVENUE_FALLBACK
+from fin_map import CAPEX_COMBINED, CAPEX_FALLBACK, FIN_MAP, REVENUE_FALLBACK
 from stage.gates import GateResult, GateStatus
 
 from .gates import EquityGateContext, require_const
@@ -63,8 +67,12 @@ VINTAGE_KIND_VOCAB: tuple[str, ...] = ("api_restated", "original", "corrected") 
 PERIOD_END_BASIS_VOCAB: tuple[str, ...] = ("document", "inferred")
 REVENUE_BASIS_VOCAB: tuple[str, ...] = ("standard", "banking_gross", "insurance_gross",
                                         "consensus", "unavailable")
-# capex 산출 기준(DQ-8) — `standard` = 집계 한 줄 · `ppe_parts` = 자산별 줄의 합
-CAPEX_BASIS_VOCAB: tuple[str, ...] = ("standard", "ppe_parts", "unavailable")
+# capex 산출 기준(DQ-8 · 2026-09-26 F-A1·F-A3) — `standard` = 집계 한 줄 ·
+# `ppe_parts` = 자산별 줄의 합 · `ppe_incl_invprop` = 유형자산+투자부동산 합산 줄(정의가 다르다) ·
+# `none_in_cf` = 현금흐름표는 있는데 유형자산 취득 줄이 없어 0 으로 읽은 것 ·
+# `unavailable` = 판단 근거 자체가 없다(현금흐름표 부재 · 값 모호).
+CAPEX_BASIS_VOCAB: tuple[str, ...] = ("standard", "ppe_parts", "ppe_incl_invprop",
+                                      "none_in_cf", "unavailable")
 REPORT_CODE_VOCAB: tuple[str, ...] = ("11011", "11012", "11013", "11014")
 FS_DIV_VOCAB: tuple[str, ...] = ("CFS", "OFS")
 REJECT_REASONS: tuple[str, ...] = ("non_krw", "period_unresolved", "rcept_lag_out_of_range",
@@ -126,10 +134,31 @@ TIER_CONCEPT_ALT = "b_concept_alt"
 TIER_NM = "c_nm"
 TIER_REVENUE_FALLBACK: tuple[str, ...] = ("d_insurance_gross", "e_banking_gross")
 TIER_CAPEX_PARTS = "d_ppe_parts"
+TIER_CAPEX_COMBINED = "e_ppe_combined"
 
 # `basis` 를 싣는 계정 — 산출 뒤 출처를 알 수 없어 라벨 컬럼이 따로 나가는 둘이다
 # (`revenue_basis`·`capex_basis`). 나머지 계정은 tier a/b/c 에서 basis 가 NULL 이다.
 _BASIS_METRICS: tuple[str, ...] = ("revenue", "capex_ytd")
+
+
+_WS = re.compile(r"\s+")
+
+
+def norm_nm(tokens: list[str]) -> list[str]:
+    """계정명 토큰을 **공백 뗀 판**으로 바꾼다(F-A2, 중복은 접는다).
+
+    DART 계정명의 공백은 회사마다 임의다(2026-09-26 실측: CF 90,456행에 공백이 있고
+    `영업활동으로 인한 순현금흐름`·`유형자산 및 투자부동산의 취득` 처럼 위치가 갈린다).
+    `.sql` 이 `account_nm` 을 같은 규칙으로 정규화해 대조하므로 토큰도 여기서 한 번만
+    정규화한다 — fin_map 목록은 읽을 수 있는 원문으로 남는다. 완전일치 규칙(fin_map 규칙 1)은
+    그대로다: 공백만 무시하고 부분일치는 여전히 안 쓴다.
+    """
+    out: list[str] = []
+    for t in tokens:
+        n = _WS.sub("", t)
+        if n not in out:
+            out.append(n)
+    return out
 
 
 def acct_rows() -> tuple[tuple[object, ...], ...]:
@@ -138,8 +167,9 @@ def acct_rows() -> tuple[tuple[object, ...], ...]:
     tier 는 fin_map 의 탐색 순서다: `a_concept` → `b_concept_alt`(1차 태그가 한 건도 없을 때만)
     → `c_nm`(표준태그 미사용 행 폴백). 매출은 `d_insurance_gross` · `e_banking_gross` 가 더
     붙고 `require` 태그가 있어야 발동한다(fin_map.REVENUE_FALLBACK, 보험이 먼저).
-    capex 는 `d_ppe_parts` 가 더 붙는다(fin_map.CAPEX_FALLBACK) — 같은 tier 라벨에 kind 두 줄이고
-    `require` 가 없다.
+    capex 는 `d_ppe_parts`(fin_map.CAPEX_FALLBACK — 같은 tier 라벨에 kind 두 줄) 와
+    `e_ppe_combined`(fin_map.CAPEX_COMBINED — 유형자산+투자부동산 합산 줄)가 더 붙고 둘 다
+    `require` 가 없다. 이름(`nm`·`nm_nonstd`) 토큰은 `norm_nm()` 으로 공백을 뗀 판이다.
     """
     rows: list[tuple[object, ...]] = []
     for metric in ACCOUNTS:
@@ -153,7 +183,9 @@ def acct_rows() -> tuple[tuple[object, ...], ...]:
                                 (TIER_NM, "nm", "nm")):
             tokens = list(spec.get(key) or [])      # type: ignore[arg-type]
             if tokens:
-                rows.append((metric, tier, kind, tokens, sjs, agg, None, basis, fam))
+                rows.append((metric, tier, kind,
+                             tokens if kind == "concept" else norm_nm(tokens),
+                             sjs, agg, None, basis, fam))
     for i, fb in enumerate(REVENUE_FALLBACK):
         rows.append(("revenue", TIER_REVENUE_FALLBACK[i], "concept", list(fb["concept"]),
                      list(fb["sj"]), "sum", str(fb["require"][0]), str(fb["basis"]), "flow"))
@@ -162,9 +194,17 @@ def acct_rows() -> tuple[tuple[object, ...], ...]:
     # 끝내므로 이중계상이 나지 않는다. `nm_nonstd` 는 표준계정코드 미사용 행만 보는 kind 다 —
     # 표준 태그 줄을 이름으로 한 번 더 세지 않기 위한 것이다(fin_map.CAPEX_FALLBACK 주석).
     for key, kind in (("concept", "concept"), ("nm", "nm_nonstd")):
-        rows.append(("capex_ytd", TIER_CAPEX_PARTS, kind, list(CAPEX_FALLBACK[key]),
+        tokens = list(CAPEX_FALLBACK[key])
+        rows.append(("capex_ytd", TIER_CAPEX_PARTS, kind,
+                     tokens if kind == "concept" else norm_nm(tokens),
                      list(CAPEX_FALLBACK["sj"]), "sum", None,
                      str(CAPEX_FALLBACK["basis"]), _FAMILY["capex_ytd"]))
+    # 유형자산+투자부동산 합산 줄(F-A1) — 자산별 합보다 **뒤**(tier e)다. 자산별 줄이 있으면
+    # 그 합이 PPE 정의에 정확히 맞으므로 먼저 쓰고, 합산 줄은 정의가 다르다는 표시
+    # (`ppe_incl_invprop`)를 달고 마지막에 받는다. 한 줄이라 `pick` 이다.
+    rows.append(("capex_ytd", TIER_CAPEX_COMBINED, "nm_nonstd",
+                 norm_nm(list(CAPEX_COMBINED["nm"])), list(CAPEX_COMBINED["sj"]), "pick", None,
+                 str(CAPEX_COMBINED["basis"]), _FAMILY["capex_ytd"]))
     return tuple(rows)
 
 
@@ -551,12 +591,18 @@ FIELDS_FIN: tuple[FieldProfile, ...] = (
     # capex 기준(DQ-8, 2026-09-26) — 같은 사정의 라벨이다. 자산별 줄을 합한 뒤에는 값만 보고는
     # 출처를 알 수 없으므로 산출 규칙을 행에 싣는다. 어휘는 CAPEX_BASIS_VOCAB 로 닫혀 있다.
     _fin("financial.capex_basis", "capex_basis", "유형자산 취득 산출 기준", "", "category",
-         "fin_std.capex_basis ∈ {standard, ppe_parts, unavailable}. standard = 집계 한 줄 "
+         "fin_std.capex_basis ∈ {standard, ppe_parts, ppe_incl_invprop, none_in_cf, "
+         "unavailable}. standard = 집계 한 줄"
          "(ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities 또는 "
          "'유형자산의 취득') · ppe_parts = 자산별 줄(dart_PurchaseOf* 9종 + 표준계정코드 미사용 "
-         "이름 8종)의 합. 09-26 실측에서 같은 회사가 둘 다 적는 경우는 0건이라 합이 곧 집계이고 "
-         "(FY2025 결측 311사 중 211사 복구), 사용권자산·무형자산·투자부동산은 집계 줄 정의(PPE) "
-         "밖이라 제외한다. FCF(Q05) 를 시계열로 쓸 때 기준이 바뀌는 구간은 이 라벨로 가른다.",
+         "이름 11종)의 합. 09-26 실측에서 같은 회사가 둘 다 적는 경우는 0건이라 합이 곧 집계이고 "
+         "(FY2025 결측 311사 중 211사 복구), 사용권자산·무형자산은 집계 줄 정의(PPE) "
+         "밖이라 제외한다. ppe_incl_invprop = 유형자산과 투자부동산을 한 줄로 적은 회사(7사) — "
+         "정의가 다르므로 standard·ppe_parts 와 **섞어 횡단면을 세우면 안 된다**. "
+         "none_in_cf = 현금흐름표는 있는데 유형자산 취득 줄이 없어(리스·무형만 있거나 집계 줄이 "
+         "값 공란) 0 으로 읽은 것 — 값은 0 이고 결측이 아니다. unavailable = 현금흐름표가 없거나 "
+         "값이 모호해 판단 근거 자체가 없는 행(NULL). FCF(Q05) 를 시계열로 쓸 때 기준이 바뀌는 "
+         "구간은 이 라벨로 가른다.",
          scope="internal"),
     # equity 내부 스코프 — FIELD_MAP §3 이 "dataset_profile(S19)이 노출 여부를 정한다" 한 16계정
     _fin("financial.cost_of_sales", "cost_of_sales", "매출원가", "KRW", "amount",
@@ -655,10 +701,11 @@ BASELINE_SEED = Path(__file__).parent / "baseline_seed_s12.json"
 
 __all__ = ["ACCOUNTS", "BASELINE_SEED", "CAPEX_BASIS_VOCAB", "CF_ACCOUNTS", "CF_PRIOR_REPORT",
            "CF_Q_COLUMNS",
-           "TIER_CAPEX_PARTS", "TIER_CONCEPT", "TIER_CONCEPT_ALT", "TIER_NM",
+           "TIER_CAPEX_COMBINED", "TIER_CAPEX_PARTS", "TIER_CONCEPT", "TIER_CONCEPT_ALT",
+           "TIER_NM",
            "TIER_REVENUE_FALLBACK",
            "EXTRA_ACCOUNTS", "FIN_STD", "FLOW_ACCOUNTS", "PERIOD_END_BASIS_VOCAB",
            "PREV_FY_PREDICATE",
            "Q4_COLUMNS", "REJECT_REASONS", "REPORT_CODE_VOCAB", "REVENUE_BASIS_VOCAB",
            "STOCK_ACCOUNTS", "TABLES", "VINTAGE_KIND", "VINTAGE_KIND_VOCAB", "acct_rows",
-           "acct_values_sql"]
+           "acct_values_sql", "norm_nm"]

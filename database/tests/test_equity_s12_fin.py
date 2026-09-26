@@ -368,7 +368,7 @@ OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 
 
 
 def _fin_row(corp: str, year: str, reprt: str, rcept: str, *, sj: str, account_id: str,
-             account_nm: str, amount: float, is_krw: bool = True, currency: str = "KRW",
+             account_nm: str, amount: float | None, is_krw: bool = True, currency: str = "KRW",
              ord_: int = 1, observed: date = OBSERVED,
              account_std: bool = True) -> dict[str, object]:
     # `account_std` = stage 의 `account_id <> '-표준계정코드 미사용-'`(rules_dart). 비표준 이름
@@ -887,7 +887,12 @@ def test_capex_집계_줄이_있으면_자산별_줄을_더하지_않는다(make
 
 
 def test_capex_사용권자산은_유형자산_취득이_아니다(make_stage_tree, tmp_path: Path) -> None:
-    """리스(사용권자산)·무형자산·투자부동산은 집계 줄의 정의(PPE) 밖이라 합에 넣지 않는다."""
+    """리스(사용권자산)·무형자산은 집계 줄의 정의(PPE) 밖이라 합에 넣지 않는다.
+
+    0 규칙(F-A3)은 여기서 서지 않는다 — 이 픽스처엔 영업·투자 소계가 없어 「현금흐름표가 있다」
+    는 판정 자체가 안 선다. 소계가 있으면 같은 구성이 0 · `none_in_cf` 가 된다
+    (test_capex_현금흐름표에_유형자산_취득_줄이_없으면_0이다).
+    """
     corps, reports = _capex_corp()
     fin = [
         _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
@@ -906,7 +911,8 @@ def test_capex_사용권자산은_유형자산_취득이_아니다(make_stage_tr
 def test_capex_기준_어휘가_닫혀_있다(built: build.BuildResult,
                                     rows: dict[str, dict[str, object]]) -> None:
     """`capex_basis` 는 `revenue_basis` 와 같은 자리·같은 규약의 라벨이다(어휘 폐쇄)."""
-    assert rules_s12.CAPEX_BASIS_VOCAB == ("standard", "ppe_parts", "unavailable")
+    assert rules_s12.CAPEX_BASIS_VOCAB == ("standard", "ppe_parts", "ppe_incl_invprop",
+                                          "none_in_cf", "unavailable")
     m = _gate(built, "EG3_fin_std").metrics
     assert m["n_capex_basis_outside_vocab"] == 0
     assert set(m["n_by_capex_basis"]) <= set(rules_s12.CAPEX_BASIS_VOCAB)
@@ -917,3 +923,163 @@ def test_capex_기준_어휘가_닫혀_있다(built: build.BuildResult,
     assert f.columns == ("capex_basis",)
     assert f.value_type == "category" and f.unit == "" and f.scope == "internal"
     assert "capex_basis" in FIN_STD.columns
+
+
+# ── F-A1·F-A2·F-A3: 합산 줄 · 이름 공백 정규화 · 취득 줄 부재 (2026-09-26 실측) ──
+
+# F-A1 7사는 유형자산과 투자부동산을 **한 줄로** 적는다(정규화 이름 `유형자산및투자부동산의취득`·
+# `투자부동산및유형자산의취득`, 유니버스 024110·030200 KT·000370·046890). 정의가 집계 줄(PPE)과
+# 달라 basis 를 따로 둔다. F-A2 계정명 공백은 회사마다 임의라(CF 90,456행에 공백) 양쪽을 공백
+# 제거 판으로 맞춘다. F-A3 현금흐름표는 있는데 유형자산 취득 줄이 아예 없는 92사 + 집계 줄이
+# 값 공란인 9사는 "안 샀다" 는 뜻이므로 0 이다.
+
+def test_capex_유형자산과_투자부동산을_한_줄로_적으면_기준이_다르다(make_stage_tree,
+                                                                  tmp_path: Path) -> None:
+    """합산 줄(F-A1) — 값은 채우고 `ppe_incl_invprop` 로 정의 차이를 표시한다.
+
+    이름에 공백이 섞여 있어도 잡힌다(F-A2) — `유형자산 및 투자부동산의 취득`.
+    """
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
+                 account_nm="영업활동현금흐름", amount=9000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="유형자산 및 투자부동산의 취득",
+                 amount=500.0, ord_=2, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_incl_invprop"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("500")
+    assert row["capex_basis"] == "ppe_incl_invprop"
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_capex_basis_outside_vocab"] == 0
+    assert m["n_by_capex_basis"] == {"ppe_incl_invprop": 1}
+
+
+def test_capex_자산별_줄이_합산_줄보다_앞선다(make_stage_tree, tmp_path: Path) -> None:
+    """tier d(자산별) < tier e(합산) — 투자부동산이 섞인 줄은 PPE 만 있는 합에 진다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfLand", account_nm="토지의 취득",
+                 amount=100.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfMachinery", account_nm="기계장치의 취득",
+                 amount=200.0, ord_=2),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="투자부동산 및 유형자산의 취득",
+                 amount=500.0, ord_=3, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_parts"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("300")
+    assert row["capex_basis"] == "ppe_parts"
+
+
+def test_영업활동_현금흐름_이름은_공백을_무시한다(make_stage_tree, tmp_path: Path) -> None:
+    """F-A2 — `영업활동으로 인한 순현금흐름`(146320 실측)이 공백 때문에 결측이었다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="영업활동으로 인한 순현금흐름",
+                 amount=900.0, ord_=2, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "period_end_basis", "document"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    assert _num(rows["20260330000001"]["cf_operating_ytd"]) == Decimal("900")
+
+
+def test_영업활동으로부터_창출된_현금흐름은_영업현금흐름이_아니다(make_stage_tree,
+                                                              tmp_path: Path) -> None:
+    """이자·법인세 **차감 전** 소계다 — 공백을 떼도 이 이름은 목록에 없다(F-A2 경계)."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="영업활동으로부터 창출된 현금흐름",
+                 amount=700.0, ord_=2, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "unavailable"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert row["cf_operating_ytd"] is None
+    # 현금흐름표 소계가 하나도 안 잡혔으므로 「표가 있다」 판정이 서지 않는다 → 0 규칙 밖
+    assert row["capex_ytd"] is None
+    assert row["capex_basis"] == "unavailable"
+
+
+def test_capex_현금흐름표에_유형자산_취득_줄이_없으면_0이다(make_stage_tree,
+                                                          tmp_path: Path) -> None:
+    """F-A3 — 리스·무형만 사고 유형자산은 안 산 회사(92사). 결측이 아니라 0 이다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
+                 account_nm="영업활동현금흐름", amount=900.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_AdditionsToRightofuseAssets",
+                 account_nm="사용권자산의 취득", amount=300.0, ord_=2),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="무형자산의 취득", amount=200.0,
+                 ord_=3, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "none_in_cf"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("0")
+    assert row["capex_basis"] == "none_in_cf"
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_capex_basis_outside_vocab"] == 0
+    assert m["n_by_capex_basis"] == {"none_in_cf": 1}
+
+
+def test_capex_집계_줄이_값_공란이어도_0이다(make_stage_tree, tmp_path: Path) -> None:
+    """F-A3 — 줄은 있는데 금액이 비었다(9사). 값 없는 줄은 「샀다」 는 증거가 아니다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="ifrs-full_CashFlowsFromUsedInOperatingActivities",
+                 account_nm="영업활동현금흐름", amount=900.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=CAPEX_AGG_ID, account_nm="유형자산의 취득",
+                 amount=None, ord_=2),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "none_in_cf"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("0")
+    assert row["capex_basis"] == "none_in_cf"
+
+
+def test_capex_현금흐름표가_없으면_결측이다(make_stage_tree, tmp_path: Path) -> None:
+    """0 규칙은 **현금흐름표가 있는** 그룹에만 선다 — 표가 없으면 안 샀다는 증거도 없다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="IS",
+                 account_id="ifrs-full_Revenue", account_nm="매출액", amount=1000.0, ord_=1),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "unavailable"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert row["capex_ytd"] is None
+    assert row["capex_basis"] == "unavailable"

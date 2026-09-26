@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.18.0"  # e1.18.0 (2026-09-26, DQ-8): fin_std capex 자산별 합 tier d_ppe_parts + capex_basis 열                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.19.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -148,6 +148,25 @@ RULES_VERSION = "e1.18.0"  # e1.18.0 (2026-09-26, DQ-8): fin_std capex 자산별
 #            스코프로 선언(DEFECT-E02) → `dataset_profile` 79 → 83행.
 #         산출 자체가 안 바뀌는 항목(카탈로그·계약 자원 제한 C04 · rebase 승인 기록 C08 ·
 #         롤백 C03 · 빌드 순서 파일 C09)도 같은 판에 들어간다.
+# e1.17.0: S25 `sector_snapshot` 신설(WICS 주간 판) — 표가 하나 늘고 매크로 `v_sector(as_of)` 가
+#          붙는다(플랜 wics-weekly T3).
+# e1.18.0: DQ-8 — `fin_std` capex 자산별 합 tier `d_ppe_parts`(kind concept + nm_nonstd, `sum`) 와
+#          `capex_basis` 열 신설. 집계 줄을 안 쓰고 유형자산 취득을 자산별로 나눠 적는 회사의
+#          `capex_ytd` 가 NULL 에서 값으로 바뀐다(FY2025 연간 211사).
+# e1.19.0: DQ-8 후속 F-A1·F-A2·F-A3 — `fin_std` 의 세 가지가 산출을 바꾼다:
+#          ① tier `e_ppe_combined` 신설 — 유형자산과 투자부동산을 **한 줄로** 적는 7사
+#             (024110·030200 KT·000370·046890 …)를 `capex_basis='ppe_incl_invprop'` 로 싣는다.
+#             자산별 합(tier d)이 있으면 그것이 이긴다. 자산별 비표준 이름도 3종 늘었다.
+#          ② **이름 대조를 공백 뗀 판으로** 바꿨다(`fin.account_nm_norm` ↔ `_acct` 토큰,
+#             `rules_s12.norm_nm`). 계정명 공백이 회사마다 임의라(CF 90,456행) `영업활동으로 인한
+#             순현금흐름` 같은 줄이 결측이었다. `cf_operating_ytd` 이름 목록에
+#             `영업활동으로인한순현금흐름` 을 더했고 `영업활동으로부터창출된현금흐름`(이자·법인세
+#             차감 전 소계)은 **넣지 않는다**. 계정명 폴백(tier c)으로 값을 받는 행이 늘어난다.
+#          ③ **capex 0 규칙**(`capex_zero` CTE) — 현금흐름표는 있는데(영업·투자 소계 존재)
+#             유형자산 취득 줄이 아예 없거나 집계 줄이 값 공란인 그룹은 `capex_ytd = 0` ·
+#             `capex_basis='none_in_cf'`. 현금흐름표는 현금흐름을 다 적으므로 줄이 없다는 것은
+#             안 샀다는 뜻이다(FY2025 92사 + 9사). 표가 없는 그룹은 NULL(`unavailable`) 이다.
+#          어휘가 3 → 5종(`CAPEX_BASIS_VOCAB`)으로 늘어 EG3_fin_std 의 어휘 폐쇄 판정도 바뀐다.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

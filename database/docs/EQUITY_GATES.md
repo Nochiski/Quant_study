@@ -2498,9 +2498,21 @@ EG5c metrics 에 뷰별 `columns_added`·`columns_removed`·`schema_changed` 와
 | 항목 | 내용 |
 |---|---|
 | 왜 | DART 현금흐름표는 유형자산 취득을 집계 한 줄(2,218사) 또는 자산별 줄로 적고 **같은 회사가 둘 다 적는 경우는 0건**이다. 대응표가 집계 줄만 잡아 FY2025 연간 2,631사 중 **311사**의 `capex_ytd` 가 NULL 이었고(그중 211사는 자산별 합으로 산출 가능), 그것이 09-23 유니버스 `qual_fcf_assets` 결측 34 중 32 의 원인이다 |
-| 규칙 | `_acct` 에 tier `d_ppe_parts` 두 줄(kind `concept` 9종 · kind `nm_nonstd` 8종, 둘 다 `agg='sum'`). 집계 줄이 하나라도 있으면 `best_tier` 의 `min(tier)` 가 a/b/c 에서 끝내므로 **이중계상은 구조적으로 불가능**하다. `nm_nonstd` 는 표준계정코드 미사용 행만 보는 kind 다 — `건설중인자산의 취득`·`기타유형자산의 취득`·`비품의 취득` 이 표준 태그의 계정명이기도 해서, 평범한 `nm` 으로 두면 같은 줄이 두 번 더해진다 |
-| 신설 컬럼 | `capex_basis` ∈ {`standard`, `ppe_parts`, `unavailable`} — `wide` 에서 `max(basis) FILTER (WHERE metric='capex_ytd' AND v IS NOT NULL)`, 최종 SELECT 에서 `coalesce(…, 'unavailable')`. `revenue_basis` 와 같은 자리·같은 규약이고 **`capex_basis_prev` 는 두지 않는다** |
+| 규칙 | `_acct` 에 tier `d_ppe_parts` 두 줄(kind `concept` 9종 · kind `nm_nonstd` 11종, 둘 다 `agg='sum'`). 집계 줄이 하나라도 있으면 `best_tier` 의 `min(tier)` 가 a/b/c 에서 끝내므로 **이중계상은 구조적으로 불가능**하다. `nm_nonstd` 는 표준계정코드 미사용 행만 보는 kind 다 — `건설중인자산의 취득`·`기타유형자산의 취득`·`비품의 취득` 이 표준 태그의 계정명이기도 해서, 평범한 `nm` 으로 두면 같은 줄이 두 번 더해진다 |
+| 신설 컬럼 | `capex_basis` ∈ {`standard`, `ppe_parts`, `ppe_incl_invprop`, `none_in_cf`, `unavailable`} — `wide_acct` 에서 `max(basis) FILTER (WHERE metric='capex_ytd' AND v IS NOT NULL)`, 최종 SELECT 에서 `coalesce(…, 'unavailable')`. `revenue_basis` 와 같은 자리·같은 규약이고 **`capex_basis_prev` 는 두지 않는다** |
 | 폐기형 | `n_capex_basis_outside_vocab`(NULL 도 위반) — 어휘 폐쇄뿐이다. 복구 규모에는 임계를 걸지 않는다 |
 | 기록형 | `n_by_capex_basis` — `ppe_parts` 행 수가 이 규칙이 실제로 복구한 크기다(플랜 GA2 가 이 값으로 판정한다: FY2025 11011 `ppe_parts` ≥ 205) |
 | 부호 | 합산 전에 `abs()` 하지 않는다. 한 회사 안에서 부호는 일관이고(실측) 취득액(크기)으로 바꾸는 것은 소비 측 몫이다(compat `mappings.py` · 팩터층 동일) |
 | 제외 | 사용권자산(리스 `AdditionsToRightofuseAssets`·`PurchaseOfFinanceLeaseAssets`, 이름에 '사용권자산') · 무형자산 · 투자부동산. 집계 줄의 정의(PPE)와 범위를 맞춰야 `standard` 회사와 횡단면이 선다 |
+
+### 11-7. 같은 게이트의 후속 — 합산 줄 · 이름 공백 정규화 · 0 규칙 (F-A1·F-A2·F-A3, 2026-09-26)
+
+11-6 의 잔여 107사를 전수 분류해 나온 세 갈래다(규칙 판본 `e1.19.0`).
+
+| 항목 | 내용 |
+|---|---|
+| F-A1 합산 줄 | 유형자산과 투자부동산을 **한 줄로** 적는 7사(정규화 이름 `유형자산및투자부동산의취득`·`투자부동산및유형자산의취득`, 유니버스 024110·030200 KT·000370·046890). tier **`e_ppe_combined`**(kind `nm_nonstd`, `agg='pick'`, basis `ppe_incl_invprop`) 가 `d_ppe_parts` **뒤**에 붙는다 — 자산별 합이 있으면 PPE 정의에 정확히 맞으므로 먼저 쓴다. 표준 태그를 단 회사는 tier a 가 이미 `standard` 로 잡는다. 자산별 비표준 이름도 3종(`건설중인유형자산의 취득`·`기타의유형자산의 취득`·`건설중인자산(유형자산)의 취득`) 늘었다 |
+| F-A2 이름 정규화 | 계정명 대조를 **공백 뗀 판**으로 한다 — `.sql` 의 `fin.account_nm_norm = regexp_replace(account_nm, '\s+', '', 'g')` ↔ `_acct` 토큰(`rules_s12.norm_nm()`). DART 계정명의 공백은 회사마다 임의다(CF 90,456행에 공백). `cf_operating_ytd` 이름 목록에 `영업활동으로인한순현금흐름` 을 더했고 **`영업활동으로부터창출된현금흐름` 은 넣지 않는다**(이자·법인세 차감 전 소계). 완전일치 규칙(fin_map 규칙 1)은 그대로다 — 공백만 무시한다 |
+| F-A3 0 규칙 | `capex_zero` CTE — 현금흐름표가 있고(영업 또는 투자 소계가 잡혔고) **값 있는 유형자산 취득 줄이 하나도 없는** 그룹은 `capex_ytd = 0` · `capex_basis='none_in_cf'`. 판정 축은 OR: capex 토큰(집계 concept · 자산별 9종 · 비표준 이름 · 합산 줄)에 걸린 줄 · 정규화 이름에 '유형자산' 과 '취득' 이 함께 든 줄. **금액이 있는** 줄이 하나라도 있으면 막는다(값 모호로 NULL 인 것과 안 산 것을 섞지 않는다). 금액이 빈 줄은 「샀다」 는 증거가 아니라 막지 않는다 — 집계 줄이 값 공란인 9사가 여기 든다. 현금흐름표 자체가 없으면 NULL(`unavailable`) |
+| 왜 0 인가 | 현금흐름표는 그 기간의 현금흐름을 **다 적는 표**다. 리스·무형·소프트웨어·금융자산 취득만 있고 유형자산 취득 줄이 아예 없으면 그 기간에 유형자산을 안 산 것이고, 충실한 읽기는 결측이 아니라 0 이다(FY2025 92사). 결측으로 두면 FCF 가 통째로 비어 회사가 팩터 모집단에서 사라진다 |
+| 무회귀 | `val`·`best_tier` 는 건드리지 않는다 — 0 규칙은 `wide` 에서 뒤에 덮고 `capex_q`(분기 차분)로는 옮겨가지 않는다. 절단본 220행 재빌드에서 61컬럼 전부 값 변화 0(`capex_basis` 220 `standard` 유지). **잔여 위험**: 공백 정규화로 tier `c_nm` 의 `pick` 이 새로 갈릴 수 있다(표준 태그가 아예 없는 그룹에서 공백 변형 두 줄이 값이 다를 때). 절단본에서는 `cf_financing_ytd` 3그룹이 그런 꼴인데 셋 다 표준 태그가 있어 tier a 가 이기고(00722500, `non_krw` 격리) 산출은 안 바뀌었다 — 서버 재빌드에서 `cf_*`·`depreciation` 등 `c_nm` 로 값을 받는 행의 NULL 전환을 확인해야 한다 |

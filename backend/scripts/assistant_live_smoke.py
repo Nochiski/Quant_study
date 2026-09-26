@@ -163,8 +163,8 @@ class CheckItem:
 # 판정되어 adapter에서 고쳐졌다. 로컬에서 재현되는 것을 live smoke에 두면 키가 있어야만 도는
 # 항목이 늘어날 뿐 잡는 것은 늘지 않는다.
 #
-# probe 항목이 토큰 수를 문장에 적지 않는 이유: 값은 adapter 상수가 소유하고 A-05·A-06이 그 값을
-# 16에서 64로 올리는 중이다. 숫자를 여기 복제하면 상수가 바뀌는 날 이 문장만 stale해진다. 확인할
+# probe 항목이 토큰 수를 문장에 적지 않는 이유: 값은 domain 상수가 소유하고(adapter는 집행만
+# 한다) A-05·A-06이 그 값을 16에서 64로 올리는 중이다. 숫자를 여기 복제하면 상수가 바뀌는 날 이 문장만 stale해진다. 확인할
 # 것은 "올린 값에서도 거부되는가"이며, 정상 키가 거부되면 상한을 더 올리거나 thinking을 꺼야 한다.
 CHECKLIST: Mapping[ProviderKind, tuple[CheckItem, ...]] = {
     ProviderKind.ANTHROPIC: (

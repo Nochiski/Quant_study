@@ -73,6 +73,7 @@
 - CrossSectionalNode.operator 값: rank | zscore | winsorize | demean
 - GroupNode.operator 값: neutralize | rank
 - FactorSignal.direction 값: high | low
+- SignalStep.normalization 값: none | rank | zscore
 - PortfolioStep.side 값: long_only | long_short
 - PortfolioStep.weighting 값: equal | factor_score | rank | risk
 - PortfolioStep.rebalance 값: every_n_sessions | weekly | monthly | quarterly

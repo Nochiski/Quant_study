@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 from dataclasses import asdict, replace
 from datetime import date, timedelta
 from enum import Enum
@@ -943,10 +944,10 @@ def test_normalization_reaches_the_tape_hash_through_the_strategy_hash() -> None
 
 # --- P2-04 점수 비례 가중(`weighting: factor_score`) 규칙 -----------------------------------
 #
-# 규칙(PLAN 결정 5): 롱 선정 종목 강도 = 방향 반영 합성 점수 − 기준점. 기준점은 선정 최저 점수보다
-# 엄격히 낮은 eligible 비선정 종목 중 최고 점수이고, 없으면 "선정 최저 − 선정 점수 평균 간격"이다.
-# 강도가 모두 0 이면(1종목·전원 동점) 균등 배분한다. 숏은 점수 부호를 뒤집어 같은 규칙을 쓴다.
-# 1~3차 리뷰(P2-1, R2-P204-001, R3-P204-001)의 경계를 값으로 고정한다.
+# 규칙(PLAN 결정 5): 선정 2종목 이상이면 롱 선정 종목 강도 = 방향 반영 합성 점수 − 기준점,
+# 기준점 = min(선정 최저 점수 이하인 eligible 비선정 종목 중 최고 점수, 선정 최저 − 선정 점수 평균
+# 간격). 선정 1종목이거나 강도가 모두 0 이면 균등 배분한다. 숏은 점수 부호를 뒤집어 같은 규칙을
+# 쓴다. 1~5차 리뷰(P2-1, R2·R3·R4·R5-P204-001)의 경계를 값으로 고정한다.
 
 _FIVE_RAW = (("a", 1.0), ("b", 2.0), ("c", 3.0), ("d", 4.0), ("e", 5.0))
 _ELIGIBILITY_FIELD = "price.market_cap"
@@ -1228,15 +1229,16 @@ def test_factor_score_uses_the_best_rejected_score_when_it_is_further_than_the_g
 
 
 @pytest.mark.parametrize("method", _AFFINE_METHODS)
-def test_factor_score_skips_a_rejected_name_tied_with_the_weakest_selected(
+def test_factor_score_counts_a_rejected_name_tied_with_the_weakest_selected(
     method: SignalNormalization,
 ) -> None:
-    """원시값 5, 4, 4, 1 에서 2종목 선정: `c` 는 `b` 와 동점이지만 비선정이라 기준점이 되지 않는다.
+    """원시값 5, 4, 4, 1 에서 2종목 선정: `c` 는 `b` 와 동점인 비선정이라 기준점 후보에 든다.
 
-    기준점은 선정 최저 4 보다 **엄격히** 낮은 비선정 중 최고 1 과 평균 간격 기준 3 중 작은 값
-    1 이다. 강도 4 : 3 → 4/7·3/7 이고 `b` 를 보유한다. 동점 비선정을 기준점에 넣으면 기준점이
-    3 이 되어 2/3·1/3 이 되고, 평균 간격 하한이 없던 규칙에서는 `b` 가 비중 0 으로 빠졌다
-    (R4-P204-002).
+    기준점은 선정 최저 4 **이하**인 비선정 중 최고 4 와 평균 간격 기준 3 중 작은 값 3 이다. 강도
+    2 : 1 → 2/3·1/3 이고 `b` 를 보유한다. 동점 비선정을 빼면(엄격 비교) 기준점이 1 로 튀어 4/7·3/7
+    이 된다. 그러면 `b` 의 점수가 동점을 벗어나는 순간 비중이 계단처럼 뛰고, 자기 점수가 올라
+    비중이 주는 경우가 생긴다(5차 리뷰 R5-P204-001). 평균 간격 하한 덕분에 `b` 는 비중 0 이 되지
+    않는다.
     """
     raw = _labelled((5.0, 4.0, 4.0, 1.0))
 
@@ -1244,7 +1246,68 @@ def test_factor_score_skips_a_rejected_name_tied_with_the_weakest_selected(
         raw, method=method, direction=FactorDirection.HIGH, selection_count=2
     )
 
-    assert table == _approx_table({"a": 4 / 7, "b": 3 / 7})
+    assert table == _approx_table({"a": 2 / 3, "b": 1 / 3})
+
+
+def test_factor_score_weight_does_not_drop_when_the_name_s_own_score_rises() -> None:
+    """리뷰어 반례: 선호 점수 1.0, 1.0, 1.02, −4 에서 2종목 선정, `a` 를 1.0 → 1.01 로 올린다.
+
+    엄격 비교에서는 `a` 비중이 .499 에서 .333 으로 떨어졌다(5차 리뷰 R5-P204-001). 동점 비선정을
+    기준점 후보에 넣으면 두 경우 모두 1/3 이다.
+    """
+    before = _factor_score_weights(
+        _labelled((1.0, 1.0, 1.02, -4.0)),
+        method=SignalNormalization.NONE,
+        direction=FactorDirection.HIGH,
+        selection_count=2,
+    )
+    after = _factor_score_weights(
+        _labelled((1.01, 1.0, 1.02, -4.0)),
+        method=SignalNormalization.NONE,
+        direction=FactorDirection.HIGH,
+        selection_count=2,
+    )
+
+    assert before == _approx_table({"a": 1 / 3, "c": 2 / 3})
+    assert after["a"] >= before["a"] - 1e-12
+
+
+def test_factor_score_weight_is_monotone_in_the_name_s_own_score() -> None:
+    """성질: 선정 종목의 자기 점수가 오르면 자기 비중은 줄지 않는다(결정적 시드 퍼즈).
+
+    선정 2~3, eligible 3~6 종목, 점수는 0.25 간격 격자에서 뽑아 컷 동점이 자주 생기게 한다. 선정된
+    종목 하나의 점수를 격자 한 칸(0.25) 또는 반 칸 올려 다시 컴파일하고 그 종목 비중을 비교한다.
+    """
+    generator = random.Random(20260926)
+    grid = [step * 0.25 for step in range(-8, 9)]
+    checked = 0
+    for _ in range(150):
+        size = generator.randint(3, 6)
+        selection = generator.randint(2, min(3, size - 1))
+        values = tuple(generator.choice(grid) for _ in range(size))
+        raw = _labelled(values)
+        before = _factor_score_weights(
+            raw,
+            method=SignalNormalization.NONE,
+            direction=FactorDirection.HIGH,
+            selection_count=selection,
+        )
+        target = generator.choice(sorted(before))
+        bump = generator.choice((0.25, 0.125))
+        raised = tuple(
+            (security_id, value + bump if security_id == target else value)
+            for security_id, value in raw
+        )
+        after = _factor_score_weights(
+            raised,
+            method=SignalNormalization.NONE,
+            direction=FactorDirection.HIGH,
+            selection_count=selection,
+        )
+        assert after.get(target, 0.0) >= before[target] - 1e-12, (values, target, bump)
+        checked += 1
+
+    assert checked == 150
 
 
 @pytest.mark.parametrize("method", _AFFINE_METHODS)

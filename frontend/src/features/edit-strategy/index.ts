@@ -46,6 +46,7 @@ export { DiagnosticsPanel } from "./ui/diagnostics-panel";
 export {
   decideBacktestSource,
   gateBacktestSourceWithFactorPlans,
+  isBacktestSettling,
   type BacktestSourceDecision,
 } from "./model/backtest-source";
 export {

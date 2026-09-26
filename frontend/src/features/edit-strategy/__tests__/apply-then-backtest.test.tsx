@@ -101,7 +101,11 @@ const mountChain = (initial = BASE) => {
       const apply = useApplyAssistantProposal(state);
       return {
         apply,
-        chain: useApplyProposalThenBacktest(apply, state, { canRun, run }),
+        chain: useApplyProposalThenBacktest(apply, state, {
+          canRun,
+          settling: false,
+          run,
+        }),
       };
     },
     {

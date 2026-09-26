@@ -34,7 +34,7 @@ const mount = (apply: AssistantProposalApply, draftId: string | null) =>
       useStrategyAssistant(apply, state, {
         draftId,
         environment: null,
-        backtest: { canRun: false, run: vi.fn() },
+        backtest: { canRun: false, settling: false, run: vi.fn() },
       }),
     { initialProps: { state: initialDocumentState("yaml", BASE) } },
   );

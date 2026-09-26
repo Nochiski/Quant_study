@@ -171,7 +171,7 @@ const ko = {
   "assistant.apply.appliedUnchanged":
     "제안이 지금 문서와 같아 바뀐 내용이 없습니다.",
   "assistant.apply.backtestWaiting":
-    "적용한 문서를 검증하는 중입니다. 실행할 수 있게 되면 백테스트를 시작합니다.",
+    "적용한 문서를 검증하는 중입니다. 검증이 끝났을 때 실행할 수 있으면 백테스트를 시작합니다.",
   "assistant.apply.backtestNotStarted":
     "제안을 문서에 적용했지만 지금은 실행할 수 없어 백테스트를 시작하지 않았습니다. 실행할 수 있게 되면 직접 실행하세요.",
   "assistant.apply.error.editor-unavailable":
@@ -1244,7 +1244,7 @@ export const messages = {
     "assistant.apply.appliedUnchanged":
       "The proposal matches the current document, so nothing changed.",
     "assistant.apply.backtestWaiting":
-      "Validating the applied document. The backtest starts once it can run.",
+      "Validating the applied document. The backtest starts if it can run when validation finishes.",
     "assistant.apply.backtestNotStarted":
       "The proposal was applied, but the backtest did not start because it cannot run right now. Run it yourself once it can.",
     "assistant.apply.error.editor-unavailable":

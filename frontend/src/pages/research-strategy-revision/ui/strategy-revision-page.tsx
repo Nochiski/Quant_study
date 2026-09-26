@@ -249,7 +249,7 @@ export const StrategyRevisionPage = () => {
   const strategyAssistant = useStrategyAssistant(proposalApply, document, {
     draftId: serverDraftId,
     environment: runSettings.requestOptions,
-    backtest: { canRun, run: runBacktest },
+    backtest: { canRun, settling: backtest.settling, run: runBacktest },
   });
   const selectSymbol = useCallback(
     (pointer: string): void => {

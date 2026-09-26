@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: SELF_CHECK
-current_phase: C
-current_pr: C-02
-active_prs: [C-02]
-parallel_window: [C-02]
-last_updated: 2026-09-26T21:35:51+09:00
+project_status: COMPLETE
+current_phase: complete
+current_pr: none
+active_prs: []
+parallel_window: []
+last_updated: 2026-09-26T22:10:58+09:00
 planned_prs: 15
-merged_prs: 14
-approved_prs: 14
-progress_percent: 93
+merged_prs: 15
+approved_prs: 15
+progress_percent: 100
 ---
 
 # AI 어시스턴트 실시간 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 93
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `SELF_CHECK` |
-| Current phase | `C` |
-| Current/next PR | `C-02` |
-| Active PR | `C-02` |
-| Progress | `14 / 15 merged (93%)` |
-| Approved | `14 / 15` |
-| Aggregated at | `2026-09-26 21:35 KST` |
+| Project status | `COMPLETE` |
+| Current phase | `complete` |
+| Current/next PR | `none` |
+| Active PR | none |
+| Progress | `15 / 15 merged (100%)` |
+| Approved | `15 / 15` |
+| Aggregated at | `2026-09-26 22:10 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -182,8 +182,8 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | P0 | Planning package | 1 | 1 | `MERGED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
-| C | Phase A/B audit follow-up | 2 | 1 | `SELF_CHECK` |
-| **Total** |  | **15** | **14** | **93%** |
+| C | Phase A/B audit follow-up | 2 | 2 | `MERGED` |
+| **Total** |  | **15** | **15** | **100%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -223,9 +223,9 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 
 Phase exit:
 
-- [ ] 가짜 공급자 SSE 시나리오 3개 green(재개 포함), live smoke 2건 로컬 통과 기록.
-- [ ] SDK import 게이트·비밀 평문 검사 green.
-- [ ] SoT·책임분리 점검 blocking 0.
+- [ ] 가짜 공급자 SSE 시나리오 3개 green(재개 포함) — **충족**(A-07 시나리오 fixture·B-05 e2e). live smoke 2건 로컬 통과 기록 — **미충족: 공급자 키 필요, 사용자 실행 대기**(`STRATEGY_WORKBENCH_LIVE_SMOKE=1`, WORKFLOW A-07 절).
+- [x] SDK import 게이트·비밀 평문 검사 green.
+- [x] SoT·책임분리 점검 blocking 0.
 
 ## B — frontend
 
@@ -239,8 +239,8 @@ Phase exit:
 
 Phase exit:
 
-- [ ] 완료 정의 1~5 기록.
-- [ ] SoT·책임분리 점검 blocking 0.
+- [ ] 완료 정의 1~5 기록 — 2(대본 공급자 e2e: 제안 카드·문서 적용·compile 통과·적용 후 백테스트·새로고침 재개)·3·4·5 **충족**. 1(실제 키 연결 테스트)과 2의 실제 공급자 검색 활동은 **사용자 키 필요**.
+- [x] SoT·책임분리 점검 blocking 0.
 
 ## C — Phase A·B 감사 후속
 
@@ -258,13 +258,13 @@ C-01이 매뉴얼을 고치며 닫았고(C-02가 스크립트 경로와 변수 �
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `MERGED` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` · [#190](https://github.com/Nochiski/Quant_study/pull/190) · 최종 `707cd4f9` · main 머지 `a3cc5f8b` |
-| [ ] | `C-02` | Phase B 감사 비차단 7건: 4xx 거부 문구 표 entity 단일화(생성 code 합집합), 적용 후 백테스트 blocked 시 요청 폐기·알림, SSE 좁히기 표 타입 가드, CORS 기본 origin 단일 owner, 두 page 어시스턴트 배선 훅, backlog 2건 담당 지정, PLAN 병합 규칙 정정 | C-01 | `SELF_CHECK` | 구현자 `impl-ai-b05-c01`, 워크트리 `wt-ai-c02`, 브랜치 `feat/ai-c-02-phase-b-followup` |
+| [x] | `C-02` | Phase B 감사 비차단 7건: 4xx 거부 문구 표 entity 단일화(생성 code 합집합), 적용 후 백테스트 blocked 시 요청 폐기·알림, SSE 좁히기 표 타입 가드, CORS 기본 origin 단일 owner, 두 page 어시스턴트 배선 훅, backlog 2건 담당 지정, PLAN 병합 규칙 정정 | C-01 | `MERGED` | [#192](https://github.com/Nochiski/Quant_study/pull/192) · 최종 `0a030884`, 머지 `16e6e994` · `review_ai_c_02` 1차 REQUEST_CHANGES(P1 1: 팩터 계획 조회 중 게이트 일시 닫힘을 blocked로 읽어 적용 후 백테스트 미실행) → `settling` 신호로 대기 유지 + 팩터 창 변경 e2e 시나리오 → 2차 APPROVE(blocking·non-blocking 0) · 전체 e2e 24/24 |
 
 Phase exit:
 
-- [ ] NB-1~NB-10 닫힘, 각 항목이 코드·문서·테스트 중 어디서 닫혔는지 PR 본문에 기록.
-- [ ] no-extras job 확대판이 SDK 없는 환경에서 green.
-- [ ] Phase B 감사 NB-1~NB-8 처리 결과(C-02 닫힘 6건, C-01 닫힘 1건, backlog 이관 1건)를 C-02 PR
+- [x] NB-1~NB-10 닫힘, 각 항목이 코드·문서·테스트 중 어디서 닫혔는지 PR 본문에 기록.
+- [x] no-extras job 확대판이 SDK 없는 환경에서 green.
+- [x] Phase B 감사 NB-1~NB-8 처리 결과(C-02 닫힘 6건, C-01 닫힘 1건, backlog 이관 1건)를 C-02 PR
   본문에 기록.
 
 ### C 절 backlog (Phase B 감사 NB-4)
@@ -349,6 +349,11 @@ Phase exit:
 | B-03 | `review_ai_b_03` | 4 | APPROVE | `92ce346a`. 3차 P2 1·P3 3 닫힘, `reduceTurn` 병합이 B-02 계약 불변(`settled` 3줄 문자 동일, `!== "running"` 축약 안전), 하네스·usage 픽스처 적절, PR #185 본문 일치·12절 사유 있음. B-01 `configure-ai-providers` probe 경합 테스트 flake 1회(380ms 벽시계 의존 → C-01에서 deferred로), P3 3(죽은 키 `assistant.chat.title`·`.assist__title`, `.assist__head` 정렬, 하네스 커밋 메시지 과장) → C-01 |
 | B-04 | `review_ai_b_04` | 5 | APPROVE | `25fc7edc`. replay 드리프트 0(패치 3576줄 동일, hunk 헤더 3줄만), `SessionHistoryView.usage`·`unsettledAssistantTurn` 미참조로 B-02 정착 플래그와 직교, 인계 5건 정합, 주석 정정 확인, PR #186 본문 stat·설계 결정 8건·12절 사유 일치. 부하 민감 테스트 flake 2(`code-editor.performance`, `document-routes` P6-03) 회귀 아님. vitest 783 |
 | B-05 | `review_ai_b_05` | 3 | APPROVE | `d84b0eda`. R2-001 대체 단언 타당 — reload 뒤 progress 문구는 `finishedTurn`이 `watchedTurnId`일 때만 채워져 불가, 대신 서버 사실 둘 중 "다음 질문이 409 없이 접수"가 러너 슬롯 계약(`cancel()`은 Event만, pop은 `_finish`뿐)으로 취소 무시 회귀를 결정적으로 잡음. P1-05 `cf56b5b4` 재복사 9파일 blob 동일·CORS 동일, `PW_BACKEND_PORT` 누출 닫힘 확인. P3 2. vitest 809 |
+| C-01 | `review_ai_c_01` | 1 | REQUEST_CHANGES | P2 3(PLAN 도구 cp949 깨짐이 `-Check`에 가려짐, NB-9 기준선이 SDK 하위 클래스라 auto-discovery gate 미통과 — gate 돌연변이 2종에서 green, 매뉴얼 `RUN_LLM_LIVE`), P3 4 |
+| C-01 | `review_ai_c_01` | 2 | REQUEST_CHANGES | 1차 P2 3 닫힘(돌연변이 red 확인, 비ASCII 가드). 새 P2 1: probe 상한 owner를 domain으로 오기(1차 지적 오판) |
+| C-01 | `review_ai_c_01` | 3 | APPROVE | `707cd4f9`. P2-N1 닫힘, 리드 main 병합 커밋이 PLAN.md만 바꿈, 두 판 내용 손실 0 |
+| C-02 | `review_ai_c_02` | 1 | REQUEST_CHANGES | P1 1(팩터 그래프 변경 제안에서 explain 조회 중 게이트 일시 닫힘을 blocked로 읽어 적용 후 백테스트 미실행 — 기존 e2e는 캐시 경로라 미검출), P3 3 |
+| C-02 | `review_ai_c_02` | 2 | APPROVE | `0a030884`. 실제 훅 조합 프로브 4종 green(StrictMode 포함), settling 무시 돌연변이 6건 red, 영구 대기 경로 없음, blocking·non-blocking 0 |
 
 ## 검증 기록
 
@@ -358,6 +363,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-26 — **AI 어시스턴트 initiative 15/15 PR main 머지 완료**(C-01 #190 `a3cc5f8b`, C-02 #192 `16e6e994`). Phase A·B 감사 blocking 0, 감사 후속 NB 전부 닫힘 또는 backlog(C 절 2건, 담당 AI 후속 C-03 미착수). 남은 것은 사용자 키가 필요한 live smoke 2건과 완료 정의 1(실제 키 연결 테스트)뿐이다.
 - 2026-09-26 — C-02가 Phase B 감사 비차단 건을 처리했다. NB-1: 4xx 거부 문구 표를
   `entities/assistant`의 `Record<AssistantRejectionCode, MessageKey>` 하나로 모으고
   `TURN_IN_PROGRESS`를 entity로 옮겼다. NB-2: "적용 후 백테스트"가 blocked로 풀리면 요청을

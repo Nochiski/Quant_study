@@ -40,6 +40,7 @@ from ._models import (
     FloatParameter,
     IntegerParameter,
     PortfolioSide,
+    SignalNormalization,
     StrategySpec,
     WeightingMethod,
     composite_factors,
@@ -322,6 +323,38 @@ def _unsupported_operator_issues(
     return issues
 
 
+# 필드 계약 없이 추론한 필드 노드의 단위(`domain/factor` `_infer_contract`). 판정할 수 없는 값이다.
+_UNKNOWN_UNIT = "unknown"
+
+
+def _unit_mismatch_issue(
+    spec: StrategySpec, output_units: dict[str, str]
+) -> ValidationIssue | None:
+    """정규화 없이 단위가 다른 알파 팩터를 더하면 warning (P2-07, spec D4).
+
+    `none` 은 원시 점수의 가중 합이라 큰 단위 팩터가 합성 점수를 지배한다. 1.1 에서 올라온 문서가
+    예전 결과를 그대로 내는 모드라 막지 않고 알린다. 합성에 들어가는 팩터(`composite_factors`)만
+    비교하고, 단위를 모르는 팩터(필드 계약 없음)는 판정에서 뺀다.
+    """
+    if spec.signal.normalization is not SignalNormalization.NONE:
+        return None
+    units = {
+        factor.factor_id: output_units[factor.factor_id]
+        for factor in composite_factors(spec)
+        if output_units.get(factor.factor_id, _UNKNOWN_UNIT) != _UNKNOWN_UNIT
+    }
+    if len(set(units.values())) <= 1:
+        return None
+    return semantic_issue(
+        "strategy.signal.unit_mismatch",
+        "signal.normalization",
+        "정규화 없이(`none`) 단위가 다른 팩터 점수를 그대로 더합니다. 단위가 큰 팩터가 합성 점수를 "
+        "좌우하니 결합 정규화를 rank 나 zscore 로 바꾸는 것을 고려하세요: "
+        f"normalization='none' units={units!r}",
+        severity=ValidationSeverity.WARNING,
+    )
+
+
 def validate_strategy(
     spec: StrategySpec,
     *,
@@ -495,6 +528,7 @@ def validate_strategy(
                 )
 
     factor_ids = [factor.factor_id for factor in spec.factors]
+    output_units: dict[str, str] = {}
     if len(factor_ids) != len(set(factor_ids)):
         issues.append(
             semantic_issue("strategy.factor.duplicate", "factors", "팩터 ID는 중복될 수 없습니다.")
@@ -555,6 +589,14 @@ def validate_strategy(
         output_issue = _output_type_issue(factor_index, factor.factor_id, factor.graph, validation)
         if output_issue is not None:
             issues.append(output_issue)
+        output_units.update(
+            (factor.factor_id, contract.unit)
+            for contract in validation.node_contracts
+            if contract.node_id == factor.graph.output_node_id
+        )
+    unit_issue = _unit_mismatch_issue(spec, output_units)
+    if unit_issue is not None:
+        issues.append(unit_issue)
 
     return StrategyValidation(
         valid=not any(issue.severity is ValidationSeverity.ERROR for issue in issues),

@@ -355,6 +355,8 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.risk.sector_neutral_side",
         "strategy.signal.regime_field",
         "strategy.signal.no_alpha_factor",
+        # 정규화 없이 단위가 다른 알파 팩터를 더한다(P2-07, warning).
+        "strategy.signal.unit_mismatch",
         "strategy.parameter.duplicate",
         "strategy.parameter.bounds",
         "strategy.parameter.default",

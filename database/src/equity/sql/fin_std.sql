@@ -7,6 +7,9 @@
 -- 문자열을 그대로 옮겼다(tests 가 대조). 탐색 순서는 tier(a_concept → b_concept_alt → c_nm →
 -- d 보험 대체 → e 은행 대체, 정렬 가능한 라벨이라 min() 이 고른다) 다음 sj 순서(IS → CIS)다. 같은 우선순위에서 `pick` 은 값이 하나로
 -- 모일 때만 채우고 갈리면 NULL(모호), `sum` 은 합산한다.
+-- capex 는 `d_ppe_parts` tier 가 더 있고 그 안에 kind 두 줄(concept · nm_nonstd)이 함께 `sum` 된다
+-- — 자산별 줄을 나눠 적는 회사의 합이 집계 한 줄과 같기 때문이다(DQ-8). 집계 줄이 하나라도
+-- 있으면 tier a/b/c 가 이겨 d 는 무시되므로 이중계상은 구조적으로 불가능하다.
 --
 -- 기간: `period_end` = `stg_doc_meta.period_to`(main), `report_code` = `doc_acode`.
 -- `doc_acode` 는 1분기·3분기를 둘 다 11013 으로 적으므로 `period_from → period_to` 개월 수로
@@ -32,6 +35,8 @@
 -- **직전 회계연도 같은 보고서**(`bsns_year` − 1, 같은 `report_code`·`fs_div`)가 어느 규칙이었는지를
 -- 남긴다. 둘이 다르면 매출 시계열이 끊긴 것이고(삼성카드 2024 `standard` 4.38조 → 2025
 -- `banking_gross` 3.84조), 그 구간의 성장률을 버릴지는 **팩터층이** 정한다.
+-- capex 기준: `capex_basis ∈ {standard, ppe_parts, unavailable}` — 같은 자리·같은 규약의 라벨이다.
+-- 합산 뒤에는 값만으로 출처를 알 수 없으므로 산출 규칙을 행에 싣는다(`_prev` 축은 두지 않는다).
 --
 -- PIT: `available_date = rcept_dt`(derived, `stg_disclosure`). `stg_rcept_dt_map` 은 stage 에
 -- 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 · `restated_unknown = true`(4A).
@@ -84,10 +89,12 @@ WITH _acct(metric, tier, kind, tokens, sjs, agg, require_tag, basis, family) AS 
         ('cf_investing_ytd', 'c_nm', 'nm', ['투자활동현금흐름', '투자활동으로인한현금흐름', '투자활동순현금흐름'], ['CF'], 'pick', NULL, NULL, 'cf'),
         ('cf_financing_ytd', 'a_concept', 'concept', ['CashFlowsFromUsedInFinancingActivities'], ['CF'], 'pick', NULL, NULL, 'cf'),
         ('cf_financing_ytd', 'c_nm', 'nm', ['재무활동현금흐름', '재무활동으로인한현금흐름', '재무활동순현금흐름'], ['CF'], 'pick', NULL, NULL, 'cf'),
-        ('capex_ytd', 'a_concept', 'concept', ['PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'], ['CF'], 'pick', NULL, NULL, 'cf'),
-        ('capex_ytd', 'c_nm', 'nm', ['유형자산의 취득', '유형자산의취득', '유형자산 취득'], ['CF'], 'pick', NULL, NULL, 'cf'),
+        ('capex_ytd', 'a_concept', 'concept', ['PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities'], ['CF'], 'pick', NULL, 'standard', 'cf'),
+        ('capex_ytd', 'c_nm', 'nm', ['유형자산의 취득', '유형자산의취득', '유형자산 취득'], ['CF'], 'pick', NULL, 'standard', 'cf'),
         ('revenue', 'd_insurance_gross', 'concept', ['OperatingIncomeInsurance', 'InvestmentIncome'], ['IS', 'CIS'], 'sum', 'InvestmentIncome', 'insurance_gross', 'flow'),
-        ('revenue', 'e_banking_gross', 'concept', ['RevenueFromInterest', 'FeeAndCommissionIncome', 'OperatingIncomeInsurance'], ['IS', 'CIS'], 'sum', 'RevenueFromInterest', 'banking_gross', 'flow')
+        ('revenue', 'e_banking_gross', 'concept', ['RevenueFromInterest', 'FeeAndCommissionIncome', 'OperatingIncomeInsurance'], ['IS', 'CIS'], 'sum', 'RevenueFromInterest', 'banking_gross', 'flow'),
+        ('capex_ytd', 'd_ppe_parts', 'concept', ['PurchaseOfLand', 'PurchaseOfBuildings', 'PurchaseOfStructure', 'PurchaseOfMachinery', 'PurchaseOfVehicles', 'PurchaseOfOfficeEquipment', 'PurchaseOfConstructionInProgress', 'PurchaseOfOtherPropertyPlantAndEquipment', 'PurchaseOfFixturesAndFittings'], ['CF'], 'sum', NULL, 'ppe_parts', 'cf'),
+        ('capex_ytd', 'd_ppe_parts', 'nm_nonstd', ['시설장치의 취득', '공구와기구의 취득', '공구기구의 취득', '금형의 취득', '건물부속설비의 취득', '기타유형자산의 취득', '비품의 취득', '건설중인자산의 취득'], ['CF'], 'sum', NULL, 'ppe_parts', 'cf')
 ),
 _qcode(reprt_code) AS (
     -- 3개월 손익을 싣는 분기 판본. q4 파생은 이 셋이 다 있어야 선다(부분합 금지).
@@ -111,6 +118,7 @@ fin AS (
     SELECT f.corp_code, f.bsns_year, f.reprt_code, f.fs_div, f.sj_div,
            regexp_replace(f.account_id, '^(ifrs-full_|ifrs_|dart_)', '')  AS concept,
            f.account_nm,
+           f.account_std,
            f.thstrm_amount
     FROM stg_fin f
     SEMI JOIN grp g
@@ -147,7 +155,12 @@ hit AS (
     JOIN _acct a
       ON list_position(a.sjs, f.sj_div) IS NOT NULL
      AND ((a.kind = 'concept' AND list_contains(a.tokens, f.concept))
-       OR (a.kind = 'nm' AND list_contains(a.tokens, f.account_nm)))
+       OR (a.kind = 'nm' AND list_contains(a.tokens, f.account_nm))
+       -- `nm_nonstd` = 표준계정코드 미사용 행(account_std=false)만 보는 이름 폴백. capex 자산별
+       -- 합은 concept 줄과 **같은 tier** 라 표준 태그 줄을 이름으로 또 세면 두 번 더해진다
+       -- (`건설중인자산의 취득` 등은 표준 태그의 계정명이기도 하다 — fin_map.CAPEX_FALLBACK).
+       OR (a.kind = 'nm_nonstd' AND NOT f.account_std
+           AND list_contains(a.tokens, f.account_nm)))
     LEFT JOIN req r
       ON r.corp_code = f.corp_code AND r.bsns_year = f.bsns_year
      AND r.reprt_code = f.reprt_code AND r.fs_div = f.fs_div
@@ -348,7 +361,10 @@ wide AS (
            max(v) FILTER (WHERE metric = 'cf_operating_ytd')     AS cf_operating_ytd,
            max(v) FILTER (WHERE metric = 'cf_investing_ytd')     AS cf_investing_ytd,
            max(v) FILTER (WHERE metric = 'cf_financing_ytd')     AS cf_financing_ytd,
-           max(v) FILTER (WHERE metric = 'capex_ytd')            AS capex_ytd
+           max(v) FILTER (WHERE metric = 'capex_ytd')            AS capex_ytd,
+           -- 합산 뒤에는 값만으로 출처를 알 수 없다 — 집계 한 줄(standard)인지 자산별 줄의
+           -- 합(ppe_parts)인지를 `revenue_basis` 와 같은 꼴로 싣는다(DQ-8).
+           max(basis) FILTER (WHERE metric = 'capex_ytd' AND v IS NOT NULL) AS capex_basis
     FROM val
     GROUP BY corp_code, bsns_year, reprt_code, fs_div
 ),
@@ -413,6 +429,7 @@ SELECT
     j.currency,
     coalesce(w.revenue_basis, 'unavailable')                    AS revenue_basis,
     bp.revenue_basis                                            AS revenue_basis_prev,
+    coalesce(w.capex_basis, 'unavailable')                      AS capex_basis,
     TRUE                                                        AS restated_unknown,
     w.revenue, w.cost_of_sales, w.gross_profit, w.op_profit, w.pretax_income,
     w.net_income, w.net_income_owners, w.eps_basic, w.depreciation, w.interest_expense,

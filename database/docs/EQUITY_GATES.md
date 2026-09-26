@@ -2492,3 +2492,15 @@ EG5c metrics 에 뷰별 `columns_added`·`columns_removed`·`schema_changed` 와
 **과거 값 변경**을 구별할 수 없었다 — 9/16 의 `n_diff=319,310` 은 전자였고(가격 축이 아닌
 `v_cum_adj`·`v_adj_volume_fwd` 의 n_diff 0 이 증거) 그 판정을 09-19 에 역추적해야 했다.
 이제 FAIL·PASS detail 에도 `schema_changed=[...]` 가 붙는다.
+
+### 11-6. EG3_fin_std 확장 — capex 자산별 합과 `capex_basis` 어휘 (DQ-8, 2026-09-26)
+
+| 항목 | 내용 |
+|---|---|
+| 왜 | DART 현금흐름표는 유형자산 취득을 집계 한 줄(2,218사) 또는 자산별 줄로 적고 **같은 회사가 둘 다 적는 경우는 0건**이다. 대응표가 집계 줄만 잡아 FY2025 연간 2,631사 중 **311사**의 `capex_ytd` 가 NULL 이었고(그중 211사는 자산별 합으로 산출 가능), 그것이 09-23 유니버스 `qual_fcf_assets` 결측 34 중 32 의 원인이다 |
+| 규칙 | `_acct` 에 tier `d_ppe_parts` 두 줄(kind `concept` 9종 · kind `nm_nonstd` 8종, 둘 다 `agg='sum'`). 집계 줄이 하나라도 있으면 `best_tier` 의 `min(tier)` 가 a/b/c 에서 끝내므로 **이중계상은 구조적으로 불가능**하다. `nm_nonstd` 는 표준계정코드 미사용 행만 보는 kind 다 — `건설중인자산의 취득`·`기타유형자산의 취득`·`비품의 취득` 이 표준 태그의 계정명이기도 해서, 평범한 `nm` 으로 두면 같은 줄이 두 번 더해진다 |
+| 신설 컬럼 | `capex_basis` ∈ {`standard`, `ppe_parts`, `unavailable`} — `wide` 에서 `max(basis) FILTER (WHERE metric='capex_ytd' AND v IS NOT NULL)`, 최종 SELECT 에서 `coalesce(…, 'unavailable')`. `revenue_basis` 와 같은 자리·같은 규약이고 **`capex_basis_prev` 는 두지 않는다** |
+| 폐기형 | `n_capex_basis_outside_vocab`(NULL 도 위반) — 어휘 폐쇄뿐이다. 복구 규모에는 임계를 걸지 않는다 |
+| 기록형 | `n_by_capex_basis` — `ppe_parts` 행 수가 이 규칙이 실제로 복구한 크기다(플랜 GA2 가 이 값으로 판정한다: FY2025 11011 `ppe_parts` ≥ 205) |
+| 부호 | 합산 전에 `abs()` 하지 않는다. 한 회사 안에서 부호는 일관이고(실측) 취득액(크기)으로 바꾸는 것은 소비 측 몫이다(compat `mappings.py` · 팩터층 동일) |
+| 제외 | 사용권자산(리스 `AdditionsToRightofuseAssets`·`PurchaseOfFinanceLeaseAssets`, 이름에 '사용권자산') · 무형자산 · 투자부동산. 집계 줄의 정의(PPE)와 범위를 맞춰야 `standard` 회사와 횡단면이 선다 |

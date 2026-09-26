@@ -358,6 +358,10 @@ _W_TAIL = """       CAST(NULL AS DOUBLE)                                   AS op
        CAST(w_ev_ebitda AS DOUBLE)                            AS ev_ebitda,
        CAST(NULL AS DOUBLE)                                   AS yoy,"""
 
+# DQ-11(2026-09-26, 기록만): 아래 `period_type` 은 **v3 미러**다 — 월(mm)이 12 면 annual, 아니면
+# quarter. 그래서 비12월 결산 12종목의 사업보고서가 `quarter` 로 들어간다. v3 scoring 의
+# `period_type='annual'` 창이 그 종목을 빼는 동작까지 그대로 재현해야 그림자 비교가 서므로 여기서
+# 고치지 않는다. 결산월을 옳게 보는 판정은 **모델 층이 `freq` 로** 한다(그림자 컷오버 뒤).
 _FINANCIAL_SUMMARY_SQL = f"""
 WITH latest AS (
     SELECT ticker, max(fetched_date) AS fetched_date

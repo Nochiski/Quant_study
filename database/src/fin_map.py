@@ -147,6 +147,34 @@ REVENUE_FALLBACK = [
                   "OperatingIncomeInsurance"]),
 ]
 
+# 유형자산 취득 자산별 합 — FIN_MAP["capex_ytd"](집계 한 줄)이 값을 못 준 행에만 태운다(DQ-8).
+#
+# DART 현금흐름표는 유형자산 취득을 (a) 집계 한 줄
+# `PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities`(2,218사) 또는
+# (b) 자산별 줄(토지·건물·구축물·기계장치·차량운반구·비품·집기·건설중인자산·기타유형자산)로
+# 적는다. 2026-09-26 실측에서 **같은 회사가 둘 다 적는 경우는 0건**이라 (b) 의 합이 곧 (a) 다.
+# FY2025 연간 2,631사 중 capex 결측 311사이고 그중 211사가 이 합으로 살아난다
+# (09-23 유니버스 580 의 `qual_fcf_assets` 결측 34 중 32 가 이것).
+#
+# `nm` 은 **표준계정코드 미사용 행**(`account_id='-표준계정코드 미사용-'`)만 잡는다 — 표준 태그로
+# 적힌 줄은 위 `concept` 가 이미 잡으므로 이름까지 같이 보면 같은 줄이 두 번 더해진다
+# (`건설중인자산의 취득`·`기타유형자산의 취득`·`비품의 취득` 은 표준 태그의 계정명이기도 하다).
+#
+# **제외**: 사용권자산(리스 — `AdditionsToRightofuseAssets`·`PurchaseOfFinanceLeaseAssets`,
+# 이름에 '사용권자산' 이 든 줄)·무형자산·투자부동산. 집계 줄의 정의가 유형자산(PPE) 뿐이므로
+# 대체도 같은 범위여야 한다 — 넣으면 (a) 를 쓰는 회사와 정의가 달라져 횡단면이 깨진다.
+#
+# 부호는 합산 전에 건드리지 않는다(abs 금지). 한 회사 안에서 부호는 일관이라 그대로 더하면 되고,
+# 취득액(크기)으로 바꾸는 것은 소비 측 몫이다(compat `mappings.py` · 팩터층 동일).
+CAPEX_FALLBACK = dict(
+    basis="ppe_parts", sj=["CF"],
+    concept=["PurchaseOfLand", "PurchaseOfBuildings", "PurchaseOfStructure",
+             "PurchaseOfMachinery", "PurchaseOfVehicles", "PurchaseOfOfficeEquipment",
+             "PurchaseOfConstructionInProgress", "PurchaseOfOtherPropertyPlantAndEquipment",
+             "PurchaseOfFixturesAndFittings"],
+    nm=["시설장치의 취득", "공구와기구의 취득", "공구기구의 취득", "금형의 취득",
+        "건물부속설비의 취득", "기타유형자산의 취득", "비품의 취득", "건설중인자산의 취득"])
+
 # DEFECT-S01 탐지용. 통합층 컬럼이 아니라 검사에만 쓴다 —
 # EquityAndLiabilities(자본과부채총계)는 회계상 Assets 와 원 단위로 같아야 한다.
 # 10사 40행 실측에서 concept 이 40/40 잡히고 38행이 일치, 어긋난 2행이 정확히

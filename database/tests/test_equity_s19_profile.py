@@ -54,9 +54,11 @@ CHAIN: tuple[str, ...] = (
 # 2026-09-19 감사 DEFECT-E02: KIS 축 4(flow 2 · short 2)를 **내부 스코프**로 선언 → 83.
 # 카탈로그만 보는 소비자에게 원천 정지(2026-08-14)를 `coverage_to` 로 알리는 것이 목적이고,
 # FIELD_MAP §2 어휘·어댑터 `list_fields()` 는 그대로다.
-N_FIELDS = 83                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
+# 2026-09-26 DQ-8: `financial.capex_basis`(내부 스코프 1)를 선언 → 84. capex 자산별 합 규칙이
+# 붙으면서 값의 출처(집계 한 줄 vs 자산별 합)를 라벨로 싣는다 — `revenue_basis` 와 같은 사정.
+N_FIELDS = 84                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
 N_FIELD_MAP_SCOPE = 35           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
-N_INTERNAL_SCOPE = 48            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
+N_INTERNAL_SCOPE = 49            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
 N_FIELD_MAP_VOCAB = 45           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
                                  # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
 PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG2_dataset_profile", "EG9", "EG4", "EG5a"]

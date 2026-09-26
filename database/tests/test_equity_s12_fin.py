@@ -369,11 +369,14 @@ OBSERVED = date(2026, 9, 1)          # 손 트리의 재수집 관측일(판본 
 
 def _fin_row(corp: str, year: str, reprt: str, rcept: str, *, sj: str, account_id: str,
              account_nm: str, amount: float, is_krw: bool = True, currency: str = "KRW",
-             ord_: int = 1, observed: date = OBSERVED) -> dict[str, object]:
+             ord_: int = 1, observed: date = OBSERVED,
+             account_std: bool = True) -> dict[str, object]:
+    # `account_std` = stage 의 `account_id <> '-표준계정코드 미사용-'`(rules_dart). 비표준 이름
+    # 폴백(capex 자산별 합)을 시험하려면 이 축을 손으로 내려야 한다.
     return {"corp_code": corp, "bsns_year": year, "reprt_code": reprt, "fs_div": "CFS",
             "sj_div": sj, "account_id": account_id, "account_detail": "",
             "ord": ord_, "account_nm": account_nm,
-            "thstrm_amount": amount, "account_std": True, "is_krw": is_krw,
+            "thstrm_amount": amount, "account_std": account_std, "is_krw": is_krw,
             "currency": currency, "rcept_no": rcept, "observed_date": observed}
 
 
@@ -802,3 +805,115 @@ def test_추정_폴백이_임계_아래면_통과한다(make_stage_tree, tmp_pat
                     fin_std_inferred_recent_ratio_max=0.6, inferred_recent_days=30)
     assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
     assert _gate(r, "EG3_fin_std").metrics["n_period_end_inferred_recent_over_max"] == 0
+
+
+# ── DQ-8: 유형자산 취득을 자산별로 나눠 적는 회사 (2026-09-26 실측) ─────────────
+
+# DART 현금흐름표는 유형자산 취득을 집계 한 줄(2,218사) 또는 자산별 줄(`dart_PurchaseOf*` 9종 +
+# 비표준 이름)로 적고 **같은 회사가 둘 다 적는 경우는 0건**이다. FY2025 연간 2,631사 중 capex
+# 결측 311사이고 그중 211사가 자산별 합으로 살아난다.
+CAPEX_AGG_ID = "ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities"
+NONSTD_ID = "-표준계정코드 미사용-"          # stage 가 account_std=false 로 적는 자리
+
+
+def _capex_corp() -> tuple[list[tuple[str, str | None]],
+                           list[tuple[str, str, str, str, date, date | None, str | None]]]:
+    """capex 시험용 1법인 1사업보고서(2025 연간)."""
+    return ([("00000001", "12")],
+            [("20260330000001", "00000001", "2025", "11011", date(2026, 3, 30),
+              date(2025, 12, 31), "11011")])
+
+
+def test_capex_자산별_줄만_있으면_합이_capex가_된다(make_stage_tree, tmp_path: Path) -> None:
+    """집계 줄이 없는 회사 — 자산별 줄(표준 4 + 비표준 이름 1)을 더해 capex 를 만든다.
+
+    `건설중인자산의 취득` 은 표준 태그(`dart_PurchaseOfConstructionInProgress`)의 계정명이자
+    비표준 이름 목록에도 있는 이름이라, 같은 tier 안에서 이름 쪽에 한 번 더 걸리면 50 이 두 번
+    더해진다. kind `nm_nonstd` 가 표준계정코드 미사용 행만 보게 해서 그것을 막는다.
+    """
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfLand", account_nm="토지의 취득",
+                 amount=100.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfMachinery", account_nm="기계장치의 취득",
+                 amount=200.0, ord_=2),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfConstructionInProgress",
+                 account_nm="건설중인자산의 취득", amount=50.0, ord_=3),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfVehicles", account_nm="차량운반구의 취득",
+                 amount=0.0, ord_=4),
+        # 표준계정코드 미사용 행 — 이름으로만 잡힌다
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=NONSTD_ID, account_nm="공구와기구의 취득", amount=30.0,
+                 ord_=5, account_std=False),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "ppe_parts"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("380")
+    assert row["capex_basis"] == "ppe_parts"
+    m = _gate(r, "EG3_fin_std").metrics
+    assert m["n_capex_basis_outside_vocab"] == 0
+    assert m["n_by_capex_basis"] == {"ppe_parts": 1}
+
+
+def test_capex_집계_줄이_있으면_자산별_줄을_더하지_않는다(make_stage_tree,
+                                                        tmp_path: Path) -> None:
+    """집계 줄(a tier)이 하나라도 있으면 `min(tier)` 이 거기서 끝난다 — 이중계상 불가."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id=CAPEX_AGG_ID, account_nm="유형자산의 취득",
+                 amount=1000.0, ord_=1),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfLand", account_nm="토지의 취득",
+                 amount=400.0, ord_=2),
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_PurchaseOfMachinery", account_nm="기계장치의 취득",
+                 amount=600.0, ord_=3),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "standard"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert _num(row["capex_ytd"]) == Decimal("1000")
+    assert row["capex_basis"] == "standard"
+
+
+def test_capex_사용권자산은_유형자산_취득이_아니다(make_stage_tree, tmp_path: Path) -> None:
+    """리스(사용권자산)·무형자산·투자부동산은 집계 줄의 정의(PPE) 밖이라 합에 넣지 않는다."""
+    corps, reports = _capex_corp()
+    fin = [
+        _fin_row("00000001", "2025", "11011", "20260330000001", sj="CF",
+                 account_id="dart_AdditionsToRightofuseAssets",
+                 account_nm="사용권자산의 취득", amount=700.0, ord_=1),
+    ]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20260330000001", "capex_basis", "unavailable"))
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    rows = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}   # type: ignore[arg-type]
+    row = rows["20260330000001"]
+    assert row["capex_ytd"] is None
+    assert row["capex_basis"] == "unavailable"
+
+
+def test_capex_기준_어휘가_닫혀_있다(built: build.BuildResult,
+                                    rows: dict[str, dict[str, object]]) -> None:
+    """`capex_basis` 는 `revenue_basis` 와 같은 자리·같은 규약의 라벨이다(어휘 폐쇄)."""
+    assert rules_s12.CAPEX_BASIS_VOCAB == ("standard", "ppe_parts", "unavailable")
+    m = _gate(built, "EG3_fin_std").metrics
+    assert m["n_capex_basis_outside_vocab"] == 0
+    assert set(m["n_by_capex_basis"]) <= set(rules_s12.CAPEX_BASIS_VOCAB)
+    # 절단본 9법인은 집계 줄을 쓴다
+    assert rows[SEC]["capex_basis"] == "standard"
+    fields = {f.field_id: f for f in rules_s12.FIELDS_FIN}
+    f = fields["financial.capex_basis"]
+    assert f.columns == ("capex_basis",)
+    assert f.value_type == "category" and f.unit == "" and f.scope == "internal"
+    assert "capex_basis" in FIN_STD.columns

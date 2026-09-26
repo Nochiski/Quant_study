@@ -564,6 +564,14 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   모순을 없애려고), 아는 버전이 1.0·1.1 둘뿐이라 상한이 없어도 됐다. 1.2가 들어오면 "미래 버전 +
   옛 키 하나"가 1.1로 강등되는 경로가 되므로, 버전 디스패치를 넣는 이 PR에서 판정에 상한을 함께
   둔다(P1-05 2차 리뷰 P3-7).
+- **BACKLOG-010(P2 구현자 관찰)**: 위 상한을 넣으면서 `is_upgradeable_document` docstring 도 고친다.
+  지금 docstring 은 "지금은 아는 버전이 1.0·1.1 둘뿐 … schema 1.2 가 들어오면"이라고 적는데, 1.2 는
+  P2-03 부터 현재 버전이라 이 문장은 이미 사실이 아니고 상한 추가를 이 PR 에 떠넘기는 문장만
+  남았다.
+- **BACKLOG-011(P2 구현자 관찰)**: `structure.invalid_date` 를 정리한다. 1.2 문서에는 날짜 필드가
+  없어(`data.start`·`end` 가 실행 설정으로 이동, P2-03) 문서로는 도달할 수 없는 코드다. 지금은
+  `STRUCTURE_CODES` 에 남아 golden 테스트가 날짜 필드 하나짜리 가짜 모델로 문장을 고정한다. 업그레이더
+  가 1.0·1.1 원문의 날짜를 읽는 경로에서 쓰이지 않으면 코드·분기·golden 을 함께 지운다.
 - OpenAPI 재생성. `database/tests` 계약 확인.
 
 **Phase 2 exit**
@@ -585,7 +593,13 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `npm run api:generate` 후 diff 0. `/data/*`·`/execution/*`·`/graph/missing_policy` pointer 참조가
   소스·테스트에서 사라진다(grep 0건 테스트).
 - `signal.normalization`·횡단면 eligibility·`risk_factor_id`의 i18n(설명·적용 조건) 추가. Form이 새
-  필드를 스키마에서 자동으로 그린다(손으로 적지 않는다).
+  필드를 스키마에서 자동으로 그린다(손으로 적지 않는다). `risk_factor_id` 의 이름·설명·적용 조건 키는
+  P2-06 이 먼저 넣었다(runtime schema 가 발행한 키는 전부 번역돼야 한다는 단위 테스트가 강제한다).
+- **BACKLOG-012(P2-06 관찰)**: `saved_*` 제거로 도달할 수 없게 된 frontend 잔재를 지운다. Contract
+  Inspector 의 팩터 카탈로그 join(`contract-inspector.ts` 의 `catalog === "factor"` 분기와 그 자원
+  로딩), `form-projection.ts` 의 `CATALOGS` 중 `factor`·`subgraph`, `schema-assist.ts` 의 `subgraph`·
+  `factor` 카탈로그 분기, i18n 키 `strategy.node.saved_*`·`strategy.field.node.factor_id`·
+  `strategy.field.node.subgraph_id`·`assist.catalog.subgraph`.
 - outline·snippet 카탈로그(팩터 preset은 "예시" 그룹으로 강등, 튜토리얼 전용)·execution plan·graph·
   debugger가 1.2 pointer로.
 - 단위 테스트 전부 green. e2e fixture는 P3-03.

@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_REVIEW
 current_phase: P1,P2
-current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05
-active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05]
-parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05]
-last_updated: 2026-09-27T04:57:05+09:00
+current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06
+active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06]
+parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06]
+last_updated: 2026-09-27T06:19:18+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 10
@@ -25,11 +25,11 @@ progress_percent: 21
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2` |
-| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05` |
-| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05` |
+| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06` |
+| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `10 / 29` |
-| Aggregated at | `2026-09-27 04:57 KST` |
+| Aggregated at | `2026-09-27 06:19 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -250,6 +250,51 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Focused tests | `uv run pytest tests/domain/test_eligibility_cross_section.py tests/domain/test_strategy_constraints.py tests/domain/test_portfolio_pipeline.py tests/domain/test_strategy_schema.py tests/integration/test_openapi_document_is_current.py -q` |
 | 제약사항 | **12절 상한 초과(600줄·10파일 → 810줄·13파일), 분할하지 않는다.** 13파일 중 5개(`test_portfolio_pipeline`·`test_strategy_diff`·`test_strategy_trace_preflight`·`test_truthful_pipeline`·`facade/specification.py`)는 enum 개명이 강제한 1~2줄 import 수정이라 떼어 낼 단위가 없고, 신규 테스트 373줄은 12절이 "test 는 구현과 같은 PR"이라 분리할 수 없다. 나머지 src 변경(모델·컴파일러·validator)은 한 커밋 단위로 같이 움직여야 컴파일된다. e2e 는 기준선 재생성과 함께 잠금 러너로 돌렸다(`57731080`). 옛 base `bb8f3843` 에서 관측했던 backend 3 failed 와 `typecheck:e2e` 3건 실패, 1.1 스냅샷 기준선 불일치는 **전부 옛 base 산물이고 P2-03 최종 tip `7ec8f337`(#183)이 해소했다** — 새 base `dc8030d3` 위에서는 backend 1587 passed / 0 failed, `typecheck:e2e` 통과다 |
 | Full gate | base `dc8030d3` 시절 실측 — backend `uv run pytest -q`(1587 passed / 0 failed) · `ruff check src tests` · `ruff format --check`(변경 12파일 clean) · `pyright` 0 errors · `export_openapi.py`·`export_runtime_schema.py` 재실행 diff 0 / frontend `npm ci`·`npm run api:generate` diff 0·`typecheck`·`typecheck:e2e`·`lint`·`test`(639, 57파일)·`build`. base `35089901` 재배치 뒤 게이트 전체와 `npm run test:e2e` 는 이 PLAN 커밋을 포함한 push tip 에서 다시 돌려 PR #187 댓글에 기록한다 |
+
+| 항목 | 값 |
+|---|---|
+| PR | `P2-06` |
+| Intent | 변동성 역가중(아이디어 5)을 언어가 표현하게 하고, 실행이 늘 거부하던 `saved_*` 노드를 문법에서 뺀다 |
+| Acceptance | WORKFLOW P2-06 |
+| Non-goals | 화면에서 `risk_factor_id` 를 고르는 흐름·추적 표시(P3-01), 아이디어 5 fixture(P2-08), 업그레이더의 `saved_*` 422(P2-09), `saved_*` 제거로 도달 불가가 된 frontend 잔재 정리(BACKLOG-012, P3-01) |
+| Branch/worktree | `feat/lang2-p2-06-risk-factor` / `wt-lang2-p2-06` |
+| Base SHA | `4262796f` (`feat/lang2-p2-05-eligibility` tip) |
+| Head SHA | PR [#200](https://github.com/Nochiski/Quant_study/pull/200) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
+| Diff stat | 생성 산출물(OpenAPI·SDK·runtime schema·seed·어시스턴트 프롬프트)·기준선 PNG·문서를 뺀 handwritten **49파일 · +610 / −331**. 비테스트(backend src·frontend src·CSS·i18n·`FACTORS.md`) 24파일 +165/−193(그중 `saved_*` 제거 커밋이 +5/−158), test 25파일 +445/−138(신규 `test_risk_factor.py` 339줄, 골든 `spec_hash` 리터럴 7파일 각 1줄) |
+| Focused tests | `uv run pytest tests/domain/test_risk_factor.py tests/domain/test_strategy_applicability.py tests/domain/test_factor_research.py tests/domain/test_strategy_schema.py tests/domain/test_strategy_diagnostic_messages.py tests/integration/test_truthful_pipeline.py -q` |
+| 제약사항 | **12절 상한 초과(600줄·10파일 → 941줄·49파일), 분할하지 않는다.** WORKFLOW 가 두 변경(`risk_factor_id`·`saved_*` 제거)을 한 PR 로 묶었고, `saved_*` 제거가 노드 union·평가·계획·추적·검증·실행 거부·팩터 연구 요청까지 걸친 배관 삭제라 파일 수가 늘었다(src 14파일 −158줄). frontend 16파일은 생성 타입이 바뀌어 컴파일·테스트가 깨지는 곳만 고쳤고, 골든 `spec_hash` 리터럴 7파일은 필드 추가가 강제한 1줄씩이다. 커밋을 논리 단위 7개로 나눠 리뷰 단위를 대신한다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
+| Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·계약 산출물 diff 0·frontend typecheck·typecheck:e2e·lint·test·build·`api:generate` diff 0·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
+
+P2-06 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
+
+1. **제외 판정은 `domain/strategy/_models.py` 의 `inverse_risk_factor_id`·`composite_factors` 두 함수가
+   소유한다.** 컴파일러(가중 합·분모·정규화 모집단·역가중 값), 검증(제외 warning·알파 0개 error),
+   설명(신호 단계 팩터 수)이 같은 함수를 읽는다. 컴파일러 안에 판정을 두고 검증이 같은 조건을 다시
+   적으면 "모드별로 읽히는 필드" 조건이 두 곳에서 갈릴 수 있다. SoT 합성 공식 행에 적었다.
+2. **`strategy.risk.risk_factor_missing` error 를 더했다(WORKFLOW 밖).** `risk_factor_id` 가 문서에 없는
+   팩터를 가리키면, 막지 않을 때 합성에는 아무 영향이 없고 선정 종목 전부가 역가중 값을 못 읽어
+   `MISSING_RISK` 로 빠진다 — 경고 없이 빈 포트폴리오가 된다. 노드·파라미터 참조가 모두 `*_missing`
+   error 인 것과 같은 규칙이다. `weighting` 과 무관하게 검사한다(문서 참조 무결성).
+3. **`risk_source_conflict` 도 `weighting` 과 무관한 error 다.** 원천이 둘인 문서는 `risk` 로 바꾸는
+   순간 어느 쪽을 읽을지 정할 수 없다. 적용 조건 warning 은 `FIELD_APPLICABILITY` 행이 따로 낸다
+   (`owned_by_error` 없음, WORKFLOW 그대로).
+4. **`strategy.risk.risk_field` 는 "필드나 팩터 중 하나"로 넓혔다.** 새 코드를 만들지 않은 이유는
+   관계가 같기 때문이다(`weighting: risk` 에 역가중 원천이 없다).
+5. **역가중 팩터 값의 결측·공개일 초과도 `MISSING_RISK` 다.** WORKFLOW 는 `<= 0` 만 적는다. 결측을
+   알파 결측(`MISSING_FACTOR`)으로 두면 역가중 팩터가 선정을 흔들어 "선정은 같고 비중만 다르다"는
+   수치 계약이 깨진다. 추적의 팩터 기여 목록에도 역가중 팩터는 나오지 않는다(기여 합 = 합성 점수).
+6. **`saved_*` 배관을 와이어까지 지웠다.** 노드·스키마 외에 팩터 연구 요청의 `factor_ids`·
+   `subgraph_ids`, 실행 계획의 `referenced_factor_ids`·`referenced_subgraph_ids`, 추적 상태
+   `reference_missing`, 평가 입력 `FactorObservation.references` 가 두 노드만을 위해 있었다. 남기면
+   아무것도 검사하지 않는 입력과 늘 비어 있는 응답이 계약에 남는다. 연산자 카탈로그에는 처음부터
+   두 노드의 행이 없어(연산자 없는 kind) 바뀐 것이 없다.
+7. **BACKLOG-001 은 파생 대신 단언이다.** 카탈로그 50개 중 43개는 그래프가 없는 `catalog_only` 라 시드
+   `history` 가 유일한 출처다. 구현 팩터만 그래프에서 파생하면 한 표 안에 두 규칙이 섞인다. 시드를
+   273 으로 고치고, 구현 팩터 7개 전부의 카탈로그 값이 그래프 검증 결과와 같은지 테스트가 대조한다.
+8. **`factors` 에 `x-defines: factor` 를 달았다(WORKFLOW 는 `x-reference: factor` 만 적는다).**
+   참조 후보는 가장 가까운 `x-defines` 배열에서 읽으므로(`referenceCandidates`) 정의 배열이 없으면
+   화면이 고를 후보가 없다. frontend 는 Form 네임스페이스 목록에 `factor` 를 더했고(runtime schema 값
+   집합과 같아야 한다는 테스트), 팩터 삭제 가드는 원래 `*_factor_id` 를 참조로 본다.
 
 P2-05 결정 4건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
 
@@ -547,7 +592,7 @@ Phase exit:
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `APPROVED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2` · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 반영, 2차 **APPROVE**(돌연변이 재실행 2 failed 확인, P3-07 이탈 타당). P2 둘 다 `_record_codec.py`의 은퇴 row 읽기 5줄이다: 1.1 row 테스트 0건(그 가지를 `raise`로 바꿔도 초록), 미지 `schema_version`이 fail-closed에서 silent 현재 버전 해석으로 바뀜. 게이트는 아래 Full gate |
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `APPROVED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · 1차 → `28003cf1` · 2차 → `2a10798d` · 3차 → `70cfdffa` · 4차 → `22636fc3` · 5차 **APPROVE**(P3 R5-P204-001 단조성: 기준점 후보 비교를 `<=` 로, 리드 지시로 즉시 반영). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `APPROVED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility` · 1차 REQUEST_CHANGES(P2 2·P3 2) → `641c6f3b`·`efd6a768` · 2~5차 **APPROVE**. 3차 재배치 때 첫 커밋 `a35c1e40` 에 P2-04 새 테스트 한 줄의 enum 개명을 넣었고, P2-04 3차 재현 테스트 `8587d413` 를 더했다. P2-04 5차 반영 tip `35089901` 위로 rebase(코드 변경분 동일). 게이트는 push tip 에서 재실행(PR 댓글) |
-| [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `WAITING` | — |
+| [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `IN_REVIEW` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `WAITING` | — |
 | [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `WAITING` | — |
 | [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `WAITING` | — |
@@ -673,6 +718,13 @@ Phase exit:
 | `P2-01` | `uv run pyright` | 4 errors — 전부 `duckdb` 미설치(기존), 신규 파일 0 | 2026-09-20 |
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
+
+- 2026-09-27 — P2-06 구현(`IN_REVIEW`, [#200](https://github.com/Nochiski/Quant_study/pull/200)). `risk.risk_factor_id`(`x-reference: factor`,
+  `factors` 는 `x-defines: factor`)와 적용 조건 행, 검증 코드 4개(`risk_source_conflict`·
+  `risk_factor_missing`·`risk_factor_excluded`·`no_alpha_factor`), 합성 제외와 원시값 역가중을 넣고
+  `saved_*` 노드와 그 배관을 와이어까지 지웠다. BACKLOG-001 처리(시드 273 + 동치 테스트). P2 구현자
+  관찰 두 건을 BACKLOG-010·011 로 P2-09 에, `saved_*` 제거로 남은 frontend 잔재를 BACKLOG-012 로 P3-01 에
+  예약했다. 필드 추가로 `spec_hash` 가 바뀌어 골든 리터럴 7곳과 시각 기준선 4장을 갱신했다.
 
 - 2026-09-27 — P0-01·P1-01~P1-05 main 머지. 머지 커밋 #167 `b438e58d`, #168 `3d6f2b42`, #173
   `bee2a4fd`, #177 `9cef7f3d`, #181 `3c1f1ab7`, #188 `7d525949`. 그 전에 AI 어시스턴트 스택 15개·#193·
@@ -1036,6 +1088,8 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   12-1 모멘텀은 spec D1의 완료 정의 "퀀트 아이디어 5개"의 첫 번째라 노출이 크다.
 - **재현 test**: 없음(관찰만). 담당 PR이 시드 ↔ 그래프 최소 이력 동치 테스트를 함께 둔다.
 - **담당**: `P2-06`(`risk.risk_factor_id`·`saved_*` 제거로 레지스트리를 건드리는 PR).
+- **처리(P2-06)**: 시드를 273 으로 고치고 `tests/domain/test_factor_research.py::test_catalog_history_of_every_implemented_factor_is_its_graph_minimum` 이 구현 팩터 7개의 카탈로그 값과
+  그래프 최소 이력을 대조한다(고치기 전 `{'price.momentum_12_1': (252, 273)}` 로 red). `FACTORS.md` 표도 273.
 
 ### BACKLOG-002: 매뉴얼이 옛 영문 화면이고 초안 복구 뒤 되돌리기를 안내하지 않는다 (감사 N1·N2)
 
@@ -1166,6 +1220,47 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **스토리**: US-DM-09(`예정`, e2e 담당 P3-03)에 수용 기준으로 잇는다.
 - **담당**: `P3-03`(e2e fixture를 1.2로 바꾸며 어시스턴트 e2e도 다시 도는 PR). 스토리 e2e를 더하고
   US-DM-09를 `구현됨-e2e`로 올린다.
+
+### BACKLOG-010: `is_upgradeable_document` docstring 이 이미 지난 조건을 들어 상한 추가를 미룬다
+
+- **상황**: P1-05 가 업그레이드 판정을 "은퇴 버전이거나 본문이 옛 판 모양"으로 넓혔고, 상한이 없는
+  이유를 docstring 에 적었다. P2-03 이 `CURRENT_SCHEMA_VERSION` 을 1.2 로 올린 뒤에도 문장이 남았다.
+  P2 구현자(P2-06)가 관찰했다.
+- **인풋**: `backend/src/strategy_workbench/domain/strategy/_upgrade.py` 의 `is_upgradeable_document`
+  docstring 을 읽는다.
+- **에러 위치**: `_upgrade.py:198-200` — "지금은 아는 버전이 1.0·1.1 둘뿐이라 … schema 1.2 가 들어오면".
+- **위험성**: 1.2 는 이미 현재 버전이라 "미래 버전 + 옛 키 하나"가 1.1 로 강등되는 경로가 지금 열려
+  있다(판정 자체의 상한은 WORKFLOW P2-09 기존 항목). docstring 이 조건을 미래형으로 적어 두면 읽는
+  사람이 아직 안전하다고 오해한다(문서 부채, 동작 결함은 위 항목이 소유).
+- **담당**: `P2-09`(버전 디스패치와 상한을 넣는 PR). WORKFLOW P2-09 에 같은 번호로 예약했다.
+
+### BACKLOG-011: `structure.invalid_date` 는 schema 1.2 문서로 닿을 수 없는 코드다
+
+- **상황**: P2-03 이 `data.start`·`end` 를 실행 설정으로 옮겨 `StrategySpec` 에 날짜 필드가 없다.
+  `STRUCTURE_CODES` 와 hydrate 분기, golden 테스트(날짜 필드 하나짜리 가짜 모델)는 남아 있다. P2 구현자가
+  관찰했다.
+- **인풋**: 1.2 문서 어디에 어떤 값을 적어도 hydrate 가 `date` 타입 필드를 만나지 않는다.
+- **에러 위치**: `backend/src/strategy_workbench/domain/strategy/_hydrate.py:49`(코드 목록)·`:496-511`
+  (`tp is date` 분기), `backend/tests/domain/test_strategy_diagnostic_messages.py:412-441`(가짜 모델 golden).
+- **위험성**: 동작 결함은 아니다(도달 불가). 다만 "코드마다 문장 golden 이 있다"는 게이트가 도달 불가
+  코드를 위해 가짜 모델을 유지하게 만들어, 코드 목록이 실제 진단 집합보다 넓어 보인다(cleanup).
+  업그레이더가 1.0·1.1 원문의 날짜를 이 분기로 읽는지 확인한 뒤 함께 지운다.
+- **담당**: `P2-09`(은퇴 버전 원문을 다루는 업그레이더 PR). WORKFLOW P2-09 에 예약했다.
+
+### BACKLOG-012: `saved_*` 제거로 도달할 수 없게 된 frontend 잔재
+
+- **상황**: P2-06 이 `saved_factor`·`saved_subgraph` 를 노드 union 에서 빼면서 runtime schema 가 발행하던
+  `x-catalog: factor`·`x-catalog: subgraph` 가 사라졌다. frontend 는 컴파일·테스트가 깨지는 곳만 고쳤다.
+- **인풋**: 1.2 runtime schema 로 편집기를 띄운다. 어떤 필드도 `factor`·`subgraph` 카탈로그를 가리키지
+  않는다.
+- **에러 위치**: `frontend/src/features/edit-strategy/model/contract-inspector.ts:461-518`(팩터 카탈로그
+  join)와 그 자원 로딩, `form-projection.ts:45`·`:144`(`CATALOGS` 의 `factor`·`subgraph`),
+  `schema-assist.ts:129`·`:164`, `ui/strategy-form-panel.tsx:1065-1073`, `shared/config/messages.ts` 의
+  `strategy.node.saved_*`·`strategy.field.node.factor_id`·`strategy.field.node.subgraph_id`·
+  `assist.catalog.subgraph`(한국어·영어).
+- **위험성**: 동작 결함은 아니다(도달 불가 분기·안 쓰는 번역). Contract Inspector 는 팩터 카탈로그를
+  계속 불러오므로 쓰지 않는 요청이 하나 남는다(cleanup).
+- **담당**: `P3-01`(frontend 1.2 적응, 소비자 배선 owner). WORKFLOW P3-01 에 예약했다.
 
 ## 갱신 절차
 

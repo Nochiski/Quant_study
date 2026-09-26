@@ -61,6 +61,34 @@ def test_registry_is_the_versioned_source_of_truth_for_fifty_factor_ids() -> Non
     assert all(item.default_graph is not None for item in implemented)
 
 
+def test_catalog_history_of_every_implemented_factor_is_its_graph_minimum() -> None:
+    """BACKLOG-001: 카탈로그의 `minimum_history_sessions` 는 구현 그래프가 요구하는 이력과 같다.
+
+    12-1 모멘텀은 `window=252` + `lag=21` 이라 273 세션이 필요한데 시드가 252 로 적혀 있었다.
+    이 값은 화면이 보여 주는 워밍업 길이라, 짧게 적히면 앞 구간이 조용히 결측이 되는 데이터를
+    골라도 사용자는 알 수 없다. 구현 팩터 전부를 그래프 검증 결과와 대조한다.
+    """
+    implemented = [
+        item
+        for item in build_default_factor_registry().all()
+        if item.availability is FactorAvailability.IMPLEMENTED
+    ]
+
+    mismatched = {
+        item.factor_id: (
+            item.minimum_history_sessions,
+            validate_factor_graph(item.default_graph).minimum_history_sessions,
+        )
+        for item in implemented
+        if item.default_graph is not None
+        and item.minimum_history_sessions
+        != validate_factor_graph(item.default_graph).minimum_history_sessions
+    }
+
+    assert len(implemented) == 7
+    assert mismatched == {}
+
+
 def test_factor_catalog_document_tracks_every_registry_identifier() -> None:
     document = (Path(__file__).resolve().parents[2] / "FACTORS.md").read_text(encoding="utf-8")
     definitions = build_default_factor_registry().all()

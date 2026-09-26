@@ -161,7 +161,7 @@ test.describe("professional YAML workflow", () => {
     );
   });
 
-  test("creates, recovers, validates, versions, traces and backtests", async ({
+  test("creates, recovers, validates, versions, traces and backtests", { tag: ["@story", "@US-SM-01", "@US-SM-03", "@US-SM-05", "@US-CS-03"] }, async ({
     browser,
     page,
   }) => {
@@ -820,7 +820,7 @@ test.describe("professional YAML workflow", () => {
     await conflicting.context.close();
   });
 
-  test("cancels a nonterminal run and replays the server-owned request byte-for-byte", async ({
+  test("cancels a nonterminal run and replays the server-owned request byte-for-byte", { tag: ["@story", "@US-SM-05"] }, async ({
     page,
   }) => {
     const acceptedRequest: BacktestRunSpec = {
@@ -920,7 +920,7 @@ test.describe("professional YAML workflow", () => {
     expect(replayed).toBe(true);
   });
 
-  test("migrates a source-less legacy revision without changing meaning", async ({
+  test("migrates a source-less legacy revision without changing meaning", { tag: ["@story", "@US-SM-07"] }, async ({
     page,
   }) => {
     const template = requireData(
@@ -966,7 +966,7 @@ test.describe("professional YAML workflow", () => {
     expect(migrated.spec_hash).toBe(saved.spec_hash);
   });
 
-  test("edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan", async ({
+  test("edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan", { tag: ["@story", "@US-SM-08"] }, async ({
     page,
   }) => {
     // 같은 GOLDEN에서 출발하는 전략 둘: 하나는 Form으로, 하나는 YAML로 같은 값을 바꾼다.
@@ -1054,7 +1054,7 @@ test.describe("professional YAML workflow", () => {
     );
   });
 
-  test("adds a node in the Graph editor, rewires an input, refreshes the plan and saves", async ({
+  test("adds a node in the Graph editor, rewires an input, refreshes the plan and saves", { tag: ["@story", "@US-SM-08", "@US-CS-01"] }, async ({
     page,
   }) => {
     const title = "P5-03 E2E Graph";
@@ -1146,7 +1146,7 @@ test.describe("professional YAML workflow", () => {
     await expect(page.getByRole("region", { name: "Form 편집" })).toBeVisible();
   });
 
-  test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", async ({
+  test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({
     page,
   }) => {
     const frozen = seedFrozenRevisionRows();

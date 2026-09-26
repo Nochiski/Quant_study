@@ -378,8 +378,9 @@ def test_target_tape_hash_is_immutable_and_snapshot_sensitive() -> None:
 
 
 def test_construction_trace_is_out_of_band_and_contributions_sum_to_the_same_score() -> None:
-    # 기여도 합 = 합성 점수라는 불변식은 정규화와 무관하지만, 기대 비중 5/7 은 원시값 산술이라
-    # `none` 으로 고정한다(1.1 수치 회귀, P2-04).
+    # 기여도 합 = 합성 점수라는 불변식은 정규화와 무관하지만, 기대 비중은 원시값 산술이라 `none`
+    # 으로 고정한다. 합성 점수는 a 2.5, b 1.0 이다. 1.1 은 점수에 비례해 5/7 이었고, P2-04 결정 5 의
+    # 강도 규칙은 선정 2종목·아래 종목 없음이라 기준점이 1.0 − 1.5 = −0.5, 강도 3 : 1.5 → 2/3 이다.
     spec = _spec()
     original = spec.factors[0]
     second = replace(original, factor_id="second", weight=3.0)
@@ -434,7 +435,7 @@ def test_construction_trace_is_out_of_band_and_contributions_sum_to_the_same_sco
         assert sum(item.normalized_contribution or 0.0 for item in contributions) == pytest.approx(
             candidate.composite_score
         )
-    assert by_id["a"].unconstrained_target_weight == pytest.approx(5 / 7)
+    assert by_id["a"].unconstrained_target_weight == pytest.approx(2 / 3)
     assert by_id["a"].constrained_target_weight == pytest.approx(0.6)
     assert by_id["a"].constraint_effect is PortfolioConstraintEffect.ADJUSTED
     assert by_id["a"].previous_weight is None
@@ -940,105 +941,61 @@ def test_normalization_reaches_the_tape_hash_through_the_strategy_hash() -> None
     assert len({tape.tape_hash for tape in tapes.values()}) == len(SignalNormalization)
 
 
-# --- P2-04 리뷰 P2-1: 가중 방식 × 정규화 조합 ----------------------------------------------
-
-
-def _weight_table(method: SignalNormalization) -> dict[str, float]:
-    """`weighting: factor_score` 에서 종목별 목표 비중. tape 에 없는 종목은 빠진다."""
-    day = _NORMALIZATION_DAY
-    observations = tuple(
-        _observation(day, security_id, value)
-        for security_id, value in (("a", 1.0), ("b", 2.0), ("c", 3.0), ("d", 4.0), ("e", 5.0))
-    )
-    spec = _spec()
-    spec = replace(
-        spec,
-        signal=replace(spec.signal, normalization=method),
-        portfolio=replace(
-            spec.portfolio, selection_count=5, weighting=WeightingMethod.FACTOR_SCORE
-        ),
-        risk=replace(spec.risk, max_name_weight=1.0),
-    )
-    frame = _compile(spec, observations).frames[0]
-    return {item.security_id: item.weight for item in frame.targets}
-
-
-def test_factor_score_weighting_keeps_raw_proportions_under_none() -> None:
-    """1.1 수치 회귀: 원시값 1~5 가 그대로 비중 비례가 된다."""
-    assert _weight_table(SignalNormalization.NONE) == {
-        "a": pytest.approx(1 / 15),
-        "b": pytest.approx(2 / 15),
-        "c": pytest.approx(3 / 15),
-        "d": pytest.approx(4 / 15),
-        "e": pytest.approx(5 / 15),
-    }
-
-
-def test_factor_score_weighting_drops_a_zero_score_instead_of_a_dust_target() -> None:
-    """`rank` 의 횡단면 최하위는 정확히 0.0 이라 배분 몫이 없다 — tape 에서 빠진다.
-
-    예전 `max(abs(score), 1e-12)` 바닥값은 그 종목에 `4e-13` 짜리 dust 비중을 주고 그것이
-    `target_weight != 0` 필터를 통과해 tape 에 남았다(P2-04 리뷰 P2-1). 기본값이 `rank` 라
-    이 dust 는 기본 동작이었다.
-    """
-    table = _weight_table(SignalNormalization.RANK)
-
-    assert table == {
-        "b": pytest.approx(0.1),
-        "c": pytest.approx(0.2),
-        "d": pytest.approx(0.3),
-        "e": pytest.approx(0.4),
-    }
-    assert sum(table.values()) == pytest.approx(1.0)
-
-
-def test_a_zero_score_candidate_records_why_it_left_the_tape() -> None:
-    """빠진 사실이 trace 에 남아야 "왜 없지?" 를 사람이 답할 수 있다."""
-    day = _NORMALIZATION_DAY
-    observations = tuple(
-        _observation(day, security_id, value)
-        for security_id, value in (("a", 1.0), ("b", 2.0), ("c", 3.0))
-    )
-    spec = _spec()
-    spec = replace(
-        spec,
-        signal=replace(spec.signal, normalization=SignalNormalization.RANK),
-        portfolio=replace(
-            spec.portfolio, selection_count=3, weighting=WeightingMethod.FACTOR_SCORE
-        ),
-        risk=replace(spec.risk, max_name_weight=1.0),
-    )
-
-    frame = _compile(spec, observations).frames[0]
-    lowest = {item.security_id: item for item in frame.candidates}["a"]
-
-    assert lowest.composite_score == pytest.approx(0.0)
-    assert ExclusionReason.SCORE_THRESHOLD in lowest.exclusion_reasons
-    assert lowest.selected is False and lowest.target_weight == 0.0
-
-
-# --- P2-04 2차 리뷰 R2-P204-001: 점수 비례 가중의 방향 -------------------------------------
+# --- P2-04 점수 비례 가중(`weighting: factor_score`) 규칙 -----------------------------------
+#
+# 규칙(PLAN 결정 5): 롱 선정 종목 강도 = 방향 반영 합성 점수 − 기준점. 기준점은 선정 최저 점수보다
+# 엄격히 낮은 eligible 비선정 종목 중 최고 점수이고, 없으면 "선정 최저 − 선정 점수 평균 간격"이다.
+# 강도가 모두 0 이면(1종목·전원 동점) 균등 배분한다. 숏은 점수 부호를 뒤집어 같은 규칙을 쓴다.
+# 1~3차 리뷰(P2-1, R2-P204-001, R3-P204-001)의 경계를 값으로 고정한다.
 
 _FIVE_RAW = (("a", 1.0), ("b", 2.0), ("c", 3.0), ("d", 4.0), ("e", 5.0))
+_ELIGIBILITY_FIELD = "price.market_cap"
 
 
-def _directional_weights(
-    method: SignalNormalization, direction: FactorDirection, side: PortfolioSide
+def _factor_score_weights(
+    raw: tuple[tuple[str, float], ...],
+    *,
+    method: SignalNormalization,
+    direction: FactorDirection,
+    side: PortfolioSide = PortfolioSide.LONG_ONLY,
+    selection_count: int = 5,
+    short_selection_count: int = 2,
+    eligible_above: float | None = None,
+    field_values: dict[str, float] | None = None,
 ) -> dict[str, float]:
-    """원시값 1~5 다섯 종목, `weighting: factor_score` 의 목표 비중(tape 에 없는 종목은 빠진다)."""
+    """`weighting: factor_score` 의 목표 비중(tape 에 없는 종목은 빠진다).
+
+    `eligible_above` 를 주면 `price.market_cap > eligible_above` 절대 규칙으로 eligible 종목을
+    줄인다. 필드 값은 `field_values`(없으면 원시 팩터 값)다.
+    """
     day = _NORMALIZATION_DAY
-    observations = tuple(_observation(day, security_id, value) for security_id, value in _FIVE_RAW)
+    fields = field_values or dict(raw)
+    observations = tuple(
+        _observation(
+            day,
+            security_id,
+            value,
+            fields=(PortfolioFieldValue(_ELIGIBILITY_FIELD, fields[security_id], day),),
+        )
+        for security_id, value in raw
+    )
     spec = _spec()
     long_short = side is PortfolioSide.LONG_SHORT
+    rules = (
+        ()
+        if eligible_above is None
+        else (EligibilityRule(_ELIGIBILITY_FIELD, ComparisonOperator.GREATER_THAN, eligible_above),)
+    )
     spec = replace(
         spec,
         factors=(replace(spec.factors[0], direction=direction),),
         signal=replace(spec.signal, normalization=method),
+        eligibility=EligibilityStep(rules),
         portfolio=replace(
             spec.portfolio,
             side=side,
-            selection_count=2 if long_short else 5,
-            short_selection_count=2,
+            selection_count=selection_count,
+            short_selection_count=short_selection_count,
             weighting=WeightingMethod.FACTOR_SCORE,
         ),
         risk=replace(spec.risk, max_name_weight=1.0, net_exposure=0.0 if long_short else 1.0),
@@ -1047,50 +1004,182 @@ def _directional_weights(
     return {item.security_id: item.weight for item in frame.targets}
 
 
+def _approx_table(table: dict[str, float]) -> dict[str, object]:
+    return {security_id: pytest.approx(weight) for security_id, weight in table.items()}
+
+
+_ONE_TO_FIVE = {"a": 1 / 15, "b": 2 / 15, "c": 3 / 15, "d": 4 / 15, "e": 5 / 15}
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+def test_factor_score_holds_every_selected_name_in_margin_order(
+    method: SignalNormalization,
+) -> None:
+    """원시값 1~5, `high`, 5종목 선정: 선정 종목이 모두 보유되고 가장 좋은 `e` 가 가장 크다.
+
+    eligible 이 전부 선정돼 기준점은 "선정 최저 − 평균 간격" 이다. 등간격이라 세 정규화 모두
+    강도 1:2:3:4:5 가 된다. `rank` 에서 선정 최하위(백분위 0)도 dust 가 아니라 제 몫을 받는다
+    (1차 리뷰 P2-1 의 dust 문제는 강도가 0 이 되지 않으므로 생기지 않는다).
+    """
+    table = _factor_score_weights(_FIVE_RAW, method=method, direction=FactorDirection.HIGH)
+
+    assert table == _approx_table(_ONE_TO_FIVE)
+
+
 @pytest.mark.parametrize("method", list(SignalNormalization))
 def test_factor_score_weights_the_preferred_name_most_when_lower_is_better(
     method: SignalNormalization,
 ) -> None:
-    """`direction: low` 에서 가장 좋은 종목(원시값이 가장 작은 `a`)이 가장 큰 비중을 받는다.
+    """`direction: low` 는 원시값이 가장 작은 `a` 가 가장 크고, 5종목을 골라 5종목을 보유한다.
 
-    예전 `_weight_scores` 는 방향을 반영한 합성 점수의 **절댓값**을 비중으로 썼다. `rank` 에서
-    `direction: low` 의 합성 점수는 `-rank ∈ [-1, 0]` 이라 최선 종목이 정확히 0 이 되어 빠지고
-    최악 종목이 최대 비중을 받았다(R2-P204-001 경우 A). 원시값이 등간격이라 세 정규화 모두
-    "가장 나쁜 종목 대비 거리" 4:3:2:1:0 이 되어 같은 표가 나온다.
+    절댓값 가중은 최선 종목을 0 으로 만들었고(R2-P204-001), 롱 바닥을 eligible 최저 점수로 둔
+    규칙은 최악 종목을 0 으로 만들어 4종목만 보유했다(R3-P204-001).
     """
-    table = _directional_weights(method, FactorDirection.LOW, PortfolioSide.LONG_ONLY)
+    table = _factor_score_weights(_FIVE_RAW, method=method, direction=FactorDirection.LOW)
 
-    assert table == {
-        "a": pytest.approx(0.4),
-        "b": pytest.approx(0.3),
-        "c": pytest.approx(0.2),
-        "d": pytest.approx(0.1),
-    }
-
-
-_LONG_SHORT_EXPECTED = {
-    # `none` 의 롱 쪽은 모든 점수가 양수라 0 을 바닥으로 쓰고 1.1 의 원시값 비례(4:5)를 지킨다.
-    SignalNormalization.NONE: {"d": 4 / 18, "e": 5 / 18, "a": -4 / 14, "b": -3 / 14},
-    SignalNormalization.RANK: {"d": 3 / 14, "e": 4 / 14, "a": -4 / 14, "b": -3 / 14},
-    SignalNormalization.ZSCORE: {"d": 3 / 14, "e": 4 / 14, "a": -4 / 14, "b": -3 / 14},
-}
+    assert table == _approx_table({"a": 5 / 15, "b": 4 / 15, "c": 3 / 15, "d": 2 / 15, "e": 1 / 15})
 
 
 @pytest.mark.parametrize("method", list(SignalNormalization))
 def test_factor_score_weights_the_strongest_short_most(method: SignalNormalization) -> None:
-    """`long_short` 공매도 쪽에서 가장 강한 숏(가장 낮은 점수 `a`)이 가장 큰 공매도 비중을 받는다.
+    """`long_short` 2/2: 롱은 `e` 가, 숏은 가장 강한 숏 `a` 가 가장 크다.
 
-    예전에는 공매도 쪽도 `abs(composite_score)` 를 써서 `rank` 에서 가장 강한 숏의 점수가 정확히
-    0 이 되어 빠지고, 공매도 예산이 `b` 하나에 몰렸다(R2-P204-001 경우 B). 롱 쪽은 가장 좋은
-    `e` 가 가장 크다.
+    롱 기준점은 선정 최저 `d` 바로 아래 비선정 `c`, 숏 기준점은 선정 숏 최약 `b` 바로 위 비선정
+    `c` 다. 세 정규화 모두 강도 1:2 다.
     """
-    table = _directional_weights(method, FactorDirection.HIGH, PortfolioSide.LONG_SHORT)
+    table = _factor_score_weights(
+        _FIVE_RAW,
+        method=method,
+        direction=FactorDirection.HIGH,
+        side=PortfolioSide.LONG_SHORT,
+        selection_count=2,
+    )
 
-    assert table == {
-        security_id: pytest.approx(weight)
-        for security_id, weight in _LONG_SHORT_EXPECTED[method].items()
-    }
-    assert table["e"] > table["d"] > 0 > table["b"] > table["a"]
+    assert table == _approx_table({"d": 1 / 6, "e": 2 / 6, "a": -2 / 6, "b": -1 / 6})
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+@pytest.mark.parametrize("direction", list(FactorDirection))
+def test_factor_score_holds_a_single_eligible_name_fully(
+    method: SignalNormalization, direction: FactorDirection
+) -> None:
+    """eligible 이 1종목이면 그 종목을 100% 보유한다 — 프레임을 비우지 않는다(R3-P204-001).
+
+    `top_count: 1` 과 같은 모양이다. 롱 바닥을 eligible 최저 점수로 둔 규칙은 `low` 에서 이
+    프레임을 통째로 비웠다.
+    """
+    table = _factor_score_weights(_FIVE_RAW, method=method, direction=direction, eligible_above=4.5)
+
+    assert table == _approx_table({"e": 1.0})
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+def test_factor_score_holds_a_single_non_positive_name_fully(method: SignalNormalization) -> None:
+    """점수가 0 이하인 1종목(원시값 −3, `high`)도 100% 보유한다."""
+    table = _factor_score_weights(
+        (("a", -3.0),), method=method, direction=FactorDirection.HIGH, selection_count=1
+    )
+
+    assert table == _approx_table({"a": 1.0})
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+@pytest.mark.parametrize("direction", list(FactorDirection))
+def test_factor_score_splits_evenly_when_every_selected_score_ties(
+    method: SignalNormalization, direction: FactorDirection
+) -> None:
+    """전원 동점이면 강도가 모두 0 이라 균등 배분한다(퇴화 프레임, R3-P204-001)."""
+    tied = tuple((security_id, 2.0) for security_id, _ in _FIVE_RAW)
+
+    table = _factor_score_weights(tied, method=method, direction=direction)
+
+    assert table == _approx_table({security_id: 0.2 for security_id, _ in _FIVE_RAW})
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+def test_factor_score_holds_every_name_when_all_scores_are_negative(
+    method: SignalNormalization,
+) -> None:
+    """원시값이 전부 음수(−5~−1)여도 `high` 5종목 선정은 5종목 보유, 원시값이 큰 `e` 가 최대다."""
+    negative = tuple((security_id, value - 6.0) for security_id, value in _FIVE_RAW)
+
+    table = _factor_score_weights(negative, method=method, direction=FactorDirection.HIGH)
+
+    assert table == _approx_table(_ONE_TO_FIVE)
+
+
+_TEN_RAW = tuple((f"s{index:02d}", float(index)) for index in range(1, 11))
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+def test_factor_score_holds_all_five_selected_when_eligibility_shrinks_the_pool(
+    method: SignalNormalization,
+) -> None:
+    """모집단 10·eligible 5·선정 5, `low`: 5종목을 골라 5종목을 보유한다(R3-P204-001).
+
+    롱 바닥을 eligible 최저 점수로 둔 규칙은 여기서 `s10` 을 0 으로 만들어 4종목만 보유했다.
+    """
+    table = _factor_score_weights(
+        _TEN_RAW, method=method, direction=FactorDirection.LOW, eligible_above=5.5
+    )
+
+    assert table == _approx_table(
+        {"s06": 5 / 15, "s07": 4 / 15, "s08": 3 / 15, "s09": 2 / 15, "s10": 1 / 15}
+    )
+
+
+_MIRROR_CASES = {
+    "long_only_all_selected": {"side": PortfolioSide.LONG_ONLY, "selection_count": 10},
+    "long_only_top_two": {"side": PortfolioSide.LONG_ONLY, "selection_count": 2},
+    "long_only_shrunken_pool": {
+        "side": PortfolioSide.LONG_ONLY,
+        "selection_count": 5,
+        "eligible_above": 5.5,
+    },
+    # eligible 5종목이 `low` 선호 쪽(원시값이 작은 쪽)이다. 롱 바닥을 `min(0, eligible 최저)`
+    # 로 둔 규칙은 여기서 `high` 는 5종목, `low` 는 4종목을 보유했다(R3-P204-001).
+    "long_only_preferred_pool": {
+        "side": PortfolioSide.LONG_ONLY,
+        "selection_count": 5,
+        "eligible_above": 5.5,
+        "field_values": {security_id: 11.0 - value for security_id, value in _TEN_RAW},
+    },
+    "long_short": {"side": PortfolioSide.LONG_SHORT, "selection_count": 2},
+}
+
+
+@pytest.mark.parametrize("method", list(SignalNormalization))
+@pytest.mark.parametrize("case", sorted(_MIRROR_CASES))
+def test_factor_score_is_mirror_symmetric_between_low_and_high(
+    method: SignalNormalization, case: str
+) -> None:
+    """데이터 x 에 `low` 를 준 결과와 −x 에 `high` 를 준 결과가 보유 종목·비중 모두 같다.
+
+    `none`·`zscore` 는 두 문서의 합성 점수가 같다. `rank` 는 백분위 정의상 두 합성 점수가 상수
+    1 만큼 어긋나지만(`-r` 대 `1 - r`), 규칙이 점수의 평행 이동에 불변이라 결과가 같다.
+    eligibility 필드는 원시 팩터와 따로 두어 두 문서가 같은 eligible 집합을 본다.
+    """
+    options = dict(_MIRROR_CASES[case])
+    field_values = options.pop("field_values", dict(_TEN_RAW))
+    mirrored = tuple((security_id, -value) for security_id, value in _TEN_RAW)
+
+    low = _factor_score_weights(
+        _TEN_RAW,
+        method=method,
+        direction=FactorDirection.LOW,
+        field_values=field_values,
+        **options,
+    )
+    high = _factor_score_weights(
+        mirrored,
+        method=method,
+        direction=FactorDirection.HIGH,
+        field_values=field_values,
+        **options,
+    )
+
+    assert set(low) == set(high)
+    assert low == _approx_table(high)
 
 
 def test_a_normalized_signal_missing_from_the_population_raises_instead_of_using_raw(

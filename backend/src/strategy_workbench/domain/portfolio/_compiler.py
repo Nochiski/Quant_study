@@ -936,10 +936,10 @@ def _weight_scores(
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, float]:
     scores: dict[str, float] = {}
-    anchor = (
-        _preference_anchor(ranked, short=short)
+    strengths = (
+        _margin_strengths(ranked, selected, short=short)
         if spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE
-        else 0.0
+        else {}
     )
     for order, candidate in _checkpointed(enumerate(ranked, start=1), checkpoint):
         if candidate.security_id not in selected:
@@ -947,16 +947,7 @@ def _weight_scores(
         if spec.portfolio.weighting is WeightingMethod.EQUAL:
             score = 1.0
         elif spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE:
-            composite = candidate.composite_score or 0.0
-            strength = anchor - composite if short else composite - anchor
-            if strength <= 0.0:
-                # 점수 비례 가중에서 강도 0은 배분받을 몫이 없다. 예전 `max(..., 1e-12)` 바닥값은
-                # 0점 종목에 dust 비중(1e-12 / Σscore)을 주고 그것이 `target_weight != 0` 필터를
-                # 통과해 tape 에 남았다(P2-04 리뷰 P2-1). 비중 0으로 빼고 사유를 남겨 trace 가
-                # "점수 때문에 빠졌다"를 말하게 한다.
-                reasons[candidate.security_id] = ExclusionReason.SCORE_THRESHOLD
-                continue
-            score = strength
+            score = strengths[candidate.security_id]
         elif spec.portfolio.weighting is WeightingMethod.RANK:
             score = float(len(selected) - min(order, len(selected)) + 1)
         else:
@@ -974,26 +965,53 @@ def _weight_scores(
     return scores
 
 
-def _preference_anchor(ranked: list[CandidateDecision], *, short: bool) -> float:
-    """점수 비례 가중에서 강도를 재는 기준점이다. 롱은 바닥, 숏은 천장이다.
+def _margin_strengths(
+    ranked: list[CandidateDecision], selected: set[str], *, short: bool
+) -> dict[str, float]:
+    """점수 비례 가중(`weighting: factor_score`)의 선정 종목별 강도다. 비중은 이 값에 비례한다.
 
-    합성 점수는 방향을 이미 반영해서 **클수록 매수 선호**다(spec D4). 비중은 그 점수의
-    절댓값이 아니라 기준점에서 선호 방향으로 떨어진 거리에 비례해야 한다. 절댓값을 쓰면
-    `direction: low`(`rank` 에서 점수가 `-rank ∈ [-1, 0]`)와 공매도 쪽에서 최선 종목이 0,
-    최악 종목이 최대 비중을 받는다(P2-04 2차 리뷰 R2-P204-001).
+    규칙(PLAN 결정 5): 선호 점수 p 는 롱이면 합성 점수, 숏이면 그 부호를 뒤집은 값이다.
+    선정 종목 강도 = p − 기준점. 기준점은 선정 최저 p 보다 **엄격히 낮은** eligible 비선정 종목 중
+    최고 p 이고, 그런 종목이 없으면 `선정 최저 p − (선정 최고 p − 선정 최저 p) / (선정 수 − 1)`
+    이다. 강도가 모두 0 이면(선정 1종목이면서 아래 종목이 없거나, 선정 종목이 전원 동점) 균등
+    배분한다.
 
-    - 롱 바닥은 `min(0, 프레임 eligible 후보 최저 점수)`, 숏 천장은
-      `max(0, 프레임 eligible 후보 최고 점수)` 다.
-    - 점수가 모두 0 이상이면(원시값 양수 팩터, `rank` + `high`) 롱 바닥이 0 이라 비중이
-      점수에 그대로 비례한다. 원시값 양수 팩터를 쓰는 1.1 문서의 롱 비중이 그대로다.
-    - 점수가 0 아래로 내려가면(`zscore`, `direction: low`) 가장 나쁜 eligible 점수가 바닥이
-      된다. 평행 이동에 불변이라 평균 0 중심인 `zscore` 에서도 순서가 뒤집히지 않는다.
-    - 기준점은 같은 프레임의 eligible 후보에서만 계산하므로 날짜를 가로지르지 않는다.
+    - 합성 점수는 방향을 이미 반영해서 **클수록 매수 선호**다(spec D4). 절댓값을 쓰면
+      `direction: low` 와 공매도 쪽에서 순서가 뒤집혔다(2차 리뷰 R2-P204-001).
+    - 기준점이 선정 최저보다 항상 낮으므로 선정된 종목의 강도는 0 이 되지 않는다. eligible 최저
+      점수를 바닥으로 둔 규칙은 그 종목을 0 으로 만들어 1종목·동점 프레임을 비웠다(3차 리뷰
+      R3-P204-001).
+    - 강도가 점수 차이이므로 평행 이동과 양의 배율에 불변이다. 그래서 x 에 `low` 를 준 문서와
+      −x 에 `high` 를 준 문서가 `rank`(두 합성 점수가 상수 1 차이)에서도 같은 비중을 낸다.
+    - 기준점은 같은 프레임의 eligible 후보에서만 구하므로 날짜를 가로지르지 않는다.
     """
-    composites = [candidate.composite_score or 0.0 for candidate in ranked]
-    if short:
-        return max(0.0, max(composites, default=0.0))
-    return min(0.0, min(composites, default=0.0))
+    sign = -1.0 if short else 1.0
+    preference = {
+        candidate.security_id: sign * (candidate.composite_score or 0.0) for candidate in ranked
+    }
+    chosen = [value for security_id, value in preference.items() if security_id in selected]
+    if not chosen:
+        return {}
+    lowest = min(chosen)
+    below = [
+        value
+        for security_id, value in preference.items()
+        if security_id not in selected and value < lowest
+    ]
+    if below:
+        reference = max(below)
+    elif len(chosen) > 1:
+        reference = lowest - (max(chosen) - lowest) / (len(chosen) - 1)
+    else:
+        reference = lowest
+    strengths = {
+        security_id: value - reference
+        for security_id, value in preference.items()
+        if security_id in selected
+    }
+    if not any(strength > 0.0 for strength in strengths.values()):
+        return {security_id: 1.0 for security_id in strengths}
+    return strengths
 
 
 def _proportional_allocate(

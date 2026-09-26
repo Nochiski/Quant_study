@@ -953,6 +953,28 @@ const ko = {
     "이 연결을 찾을 수 없습니다. 목록을 새로 고치세요.",
   "assistant.error.unknown":
     "요청을 처리하지 못했습니다. 잠시 뒤 다시 시도하세요.",
+  "assistant.turn.failure.auth":
+    "API 키가 거부되었습니다. 설정에서 키를 다시 확인하세요.",
+  "assistant.turn.failure.rate_limit":
+    "공급자가 요청 한도를 넘었다고 답했습니다. 잠시 뒤 다시 물어보세요.",
+  "assistant.turn.failure.network":
+    "공급자에 연결하지 못했습니다. 네트워크를 확인하세요.",
+  "assistant.turn.failure.refusal": "모델이 이 요청에 답하지 않았습니다.",
+  "assistant.turn.failure.provider":
+    "공급자가 오류로 답했습니다. 잠시 뒤 다시 물어보세요.",
+  "assistant.turn.failure.internal":
+    "워크벤치 내부 오류로 답변이 중단되었습니다.",
+  "assistant.turn.failure.tool_rounds_exceeded":
+    "도구 호출이 상한을 넘어 답변을 멈췄습니다. 질문을 좁혀 다시 물어보세요.",
+  "assistant.turn.failure.timeout": "답변이 제한 시간을 넘겨 멈췄습니다.",
+  "assistant.turn.failure.cancelled": "요청을 취소했습니다.",
+  "assistant.turn.failure.proposal_invalid":
+    "모델이 낸 전략이 검증을 통과하지 못했습니다.",
+  "assistant.turn.failure.output_truncated": "답변이 길어 잘렸습니다.",
+  "assistant.turn.failure.token_budget_exceeded":
+    "이 답변의 토큰 예산을 다 썼습니다. 질문을 좁혀 다시 물어보세요.",
+  "assistant.turn.failure.unknown":
+    "답변이 알 수 없는 이유로 중단되었습니다.",
 } as const;
 
 export type MessageKey = keyof typeof ko;
@@ -1933,6 +1955,30 @@ export const messages = {
       "This connection no longer exists. Refresh the list.",
     "assistant.error.unknown":
       "The request could not be completed. Try again shortly.",
+    "assistant.turn.failure.auth":
+      "The API key was rejected. Check the key in settings.",
+    "assistant.turn.failure.rate_limit":
+      "The provider reported a rate limit. Ask again shortly.",
+    "assistant.turn.failure.network":
+      "The provider could not be reached. Check the network.",
+    "assistant.turn.failure.refusal": "The model did not answer this request.",
+    "assistant.turn.failure.provider":
+      "The provider returned an error. Ask again shortly.",
+    "assistant.turn.failure.internal":
+      "The answer stopped because of an internal workbench error.",
+    "assistant.turn.failure.tool_rounds_exceeded":
+      "The answer stopped after too many tool rounds. Narrow the question and ask again.",
+    "assistant.turn.failure.timeout":
+      "The answer stopped after exceeding the time limit.",
+    "assistant.turn.failure.cancelled": "The request was cancelled.",
+    "assistant.turn.failure.proposal_invalid":
+      "The strategy the model produced did not pass validation.",
+    "assistant.turn.failure.output_truncated":
+      "The answer was truncated because it grew too long.",
+    "assistant.turn.failure.token_budget_exceeded":
+      "This answer used up its token budget. Narrow the question and ask again.",
+    "assistant.turn.failure.unknown":
+      "The answer stopped for an unknown reason.",
   } satisfies Record<MessageKey, string>,
 } as const;
 

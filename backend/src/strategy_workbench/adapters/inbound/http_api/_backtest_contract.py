@@ -20,6 +20,14 @@ class BacktestRunInvalidDetail:
 
 
 @dataclass(frozen=True)
+class BacktestEnvironmentRequiredDetail:
+    """실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다."""
+
+    code: Literal["backtest.run.environment_required"]
+    message: str
+
+
+@dataclass(frozen=True)
 class BacktestStrategyRequiresUpgradeDetail:
     code: Literal["backtest.strategy.requires_upgrade"]
     message: str
@@ -30,6 +38,7 @@ class BacktestStrategyRequiresUpgradeDetail:
 # `error` 로 전달된다.
 BacktestUnprocessableDetail: TypeAlias = Annotated[
     BacktestRunInvalidDetail
+    | BacktestEnvironmentRequiredDetail
     | BacktestStrategyRequiresUpgradeDetail
     | PortfolioStrategyInvalidDetail,
     Field(discriminator="code"),

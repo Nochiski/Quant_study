@@ -23,12 +23,16 @@ from ._constraints import (
 )
 from ._hydrate import SUPPORTED_SCHEMA_VERSIONS
 from ._models import (
+    CROSS_SECTIONAL_ELIGIBILITY_OPERATORS,
     ChoiceParameter,
+    EligibilityOperator,
     FloatParameter,
     IntegerParameter,
     PortfolioSide,
     StrategySpec,
     WeightingMethod,
+    composite_factors,
+    inverse_risk_factor_id,
 )
 
 
@@ -140,6 +144,99 @@ def _numeric_leaves(value: object, path: str = "") -> Iterator[tuple[str, float]
             yield from _numeric_leaves(item, child_path)
 
 
+def _eligibility_rule_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
+    """`top_*` 규칙의 `value` 가 cut 크기로 쓸 수 있는 값인지 검사한다 (spec D3 S5).
+
+    절대 규칙(`gt`~`eq`)의 `value` 는 비교 임계값이라 어떤 실수든 뜻이 있지만, `top_percent` 는
+    비율이고 `top_count` 는 개수다. 범위를 안 걸면 "상위 20%"를 `20` 으로 적은 문서가 예외도
+    진단도 없이 **모집단 전체를 통과**시킨다 — 필터가 있는데 아무것도 거르지 않는 상태로
+    백테스트가 완주한다. 이 규칙은 포인터가 배열 항목이라 스칼라 제약 카탈로그
+    (`_constraints.py`, 평면 포인터 전용)가 담을 수 없어 validator 가 소유한다.
+    """
+    for index, rule in enumerate(spec.eligibility.rules):
+        if rule.operator not in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS:
+            continue
+        path = f"eligibility.rules.{index}.value"
+        # 분기는 exhaustive 다. 횡단면 연산자가 하나 더 늘었을 때 catch-all 이 그것을 조용히
+        # 개수 규칙으로 검사하면, 이 PR 이 `_compare` 에서 없앤 실패 모양이 validator 로 옮겨온다.
+        if rule.operator is EligibilityOperator.TOP_PERCENT:
+            satisfied = math.isfinite(rule.value) and 0 < rule.value <= 1
+            expectation = "상위 비율은 0보다 크고 1 이하인 비율이어야 합니다(20%는 0.2)"
+        elif rule.operator is EligibilityOperator.TOP_COUNT:
+            satisfied = (
+                math.isfinite(rule.value) and rule.value >= 1 and float(rule.value).is_integer()
+            )
+            expectation = "상위 개수는 1 이상의 정수여야 합니다"
+        else:
+            raise ValueError(
+                "cross-sectional eligibility operator has no value rule — "
+                f"operator={rule.operator!r} path={path!r} "
+                f"known={[member.value for member in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS]}"
+            )
+        if not satisfied:
+            yield semantic_issue(
+                "strategy.eligibility.rule_value",
+                path,
+                f"{expectation}: got={rule.value!r} field_id={rule.field_id!r}",
+            )
+
+
+def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
+    """리스크 역가중의 원천(필드 또는 팩터)과 그 팩터를 합성에서 뺀 결과를 검사한다 (spec D3 S6).
+
+    원천 배타(`risk_source_conflict`)와 참조 확인(`risk_factor_missing`)은 `weighting` 과 무관한
+    문서 규칙이다 — 적용 조건은 `FIELD_APPLICABILITY` 행이 따로 warning 으로 낸다. 제외 warning 과
+    알파 0개 error 는 제외가 실제로 일어나는 경우(`inverse_risk_factor_id`)에만 낸다.
+    """
+    factor_ids = [factor.factor_id for factor in spec.factors]
+    risk_factor_id = spec.risk.risk_factor_id
+    if risk_factor_id is not None and spec.risk.risk_field_id is not None:
+        yield semantic_issue(
+            "strategy.risk.risk_source_conflict",
+            "risk.risk_factor_id",
+            "리스크 역가중 원천은 필드와 팩터 중 하나만 지정할 수 있습니다: "
+            f"risk_field_id={spec.risk.risk_field_id!r} risk_factor_id={risk_factor_id!r}",
+        )
+    if risk_factor_id is not None and risk_factor_id not in factor_ids:
+        yield semantic_issue(
+            "strategy.risk.risk_factor_missing",
+            "risk.risk_factor_id",
+            "리스크 팩터가 이 문서의 팩터 목록에 없습니다: "
+            f"risk_factor_id={risk_factor_id!r} factors={factor_ids!r}",
+        )
+    if (
+        spec.portfolio.weighting is WeightingMethod.RISK
+        and spec.risk.risk_field_id is None
+        and risk_factor_id is None
+    ):
+        yield semantic_issue(
+            "strategy.risk.risk_field",
+            "risk.risk_field_id",
+            "리스크 가중 방식을 쓰려면 리스크 필드나 리스크 팩터를 지정해야 합니다: "
+            f"weighting={spec.portfolio.weighting.value!r} "
+            f"risk_field_id={spec.risk.risk_field_id!r} risk_factor_id={risk_factor_id!r}",
+        )
+    excluded = inverse_risk_factor_id(spec)
+    if excluded is None or excluded not in factor_ids:
+        return
+    yield semantic_issue(
+        "strategy.risk.risk_factor_excluded",
+        "risk.risk_factor_id",
+        "리스크 팩터는 역가중에만 쓰이고 합성 점수에서는 빠집니다(가중치 무시): "
+        f"risk_factor_id={excluded!r}",
+        severity=ValidationSeverity.WARNING,
+    )
+    if not composite_factors(spec):
+        # 막지 않으면 모든 후보의 합성 점수가 `None` 이 되어 정렬이 `security_id` 사전순으로
+        # 떨어진다 — 예외도 진단도 없이 엉뚱한 종목이 선정되는 silent wrong result 다.
+        yield semantic_issue(
+            "strategy.signal.no_alpha_factor",
+            "factors",
+            "리스크 팩터를 빼고 나면 점수를 낼 알파 팩터가 없습니다. 알파 팩터를 하나 이상 "
+            f"추가하세요: risk_factor_id={excluded!r} factors={factor_ids!r}",
+        )
+
+
 def validate_strategy(
     spec: StrategySpec, *, written_pointers: Collection[str] | None = None
 ) -> StrategyValidation:
@@ -196,22 +293,13 @@ def validate_strategy(
         )
     if not spec.title.strip():
         issues.append(semantic_issue("strategy.title.empty", "title", "전략 이름을 입력하세요."))
-    if spec.data.start > spec.data.end:
-        issues.append(
-            semantic_issue(
-                "strategy.data.date_order", "data.end", "종료일은 시작일 이후여야 합니다."
-            )
-        )
-    if not spec.data.universe_id.strip():
-        issues.append(
-            semantic_issue(
-                "strategy.data.universe_empty", "data.universe_id", "유니버스를 선택하세요."
-            )
-        )
+    # 기간·유니버스 검증은 1.2 부터 실행 설정이 소유한다 — `RunEnvironment.__post_init__`
+    # (`domain/backtest/_models.py`)이 같은 두 규칙을 건다. 전략 문서에는 그 필드가 없다.
     if not spec.factors:
         issues.append(
             semantic_issue("strategy.factor.required", "factors", "팩터를 하나 이상 추가하세요.")
         )
+    issues.extend(_eligibility_rule_issues(spec))
     # Scalar bounds are owned by the constraint catalog (P1-04); the schema API reads the same rows.
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         value = resolve_scalar(spec, constraint.pointer)
@@ -251,14 +339,7 @@ def validate_strategy(
                 "롱온리 전략은 총 익스포저와 순 익스포저가 같아야 합니다.",
             )
         )
-    if spec.portfolio.weighting is WeightingMethod.RISK and spec.risk.risk_field_id is None:
-        issues.append(
-            semantic_issue(
-                "strategy.risk.risk_field",
-                "risk.risk_field_id",
-                "리스크 가중 방식을 쓰려면 리스크 필드를 지정해야 합니다.",
-            )
-        )
+    issues.extend(_risk_source_issues(spec))
     if spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_ONLY:
         issues.append(
             semantic_issue(
@@ -344,7 +425,6 @@ def validate_strategy(
         validation = validate_factor_graph(
             factor.graph,
             parameter_ids=tuple(parameter_ids),
-            factor_ids=tuple(factor_ids),
         )
         issues.extend(
             semantic_issue(

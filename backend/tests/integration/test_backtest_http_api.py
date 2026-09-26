@@ -151,9 +151,18 @@ def _app_with_backtests(container: BackendContainer, backtests: BacktestRunServi
     )
 
 
+def _environment(**overrides: Any) -> dict[str, Any]:
+    """실행 설정은 1.2 부터 요청 본문이 싣는다(P2-03)."""
+    return {
+        "start": "2026-01-02",
+        "end": "2026-02-20",
+        "universe_id": "krx.common-stock",
+        **overrides,
+    }
+
+
 def _run_body(client: TestClient, core: str = "rust") -> dict[str, Any]:
     spec = client.get("/api/v1/strategies/template").json()
-    spec["data"].update({"start": "2026-01-02", "end": "2026-02-20"})
     spec["portfolio"].update(
         {
             "selection_count": 2,
@@ -165,6 +174,7 @@ def _run_body(client: TestClient, core: str = "rust") -> dict[str, Any]:
     return {
         "strategy": spec,
         "core": core,
+        "environment": _environment(),
         "benchmark_security_id": "005930",
         "metric_windows": [
             {
@@ -202,12 +212,22 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
     assert accepted_request.status_code == 200
     assert accepted_request.json() == {
         **_run_body(client),
+        # 응답은 해소된 실행 설정을 전부 채워 돌려준다(요청은 기본값을 생략했다).
+        "environment": {
+            "market": "KRX",
+            "frequency": "daily",
+            "start": "2026-01-02",
+            "end": "2026-02-20",
+            "universe_id": "krx.common-stock",
+            "timing": "next_open",
+            "participation_rate": 0.1,
+            "fee_bps": 15.0,
+            "slippage_bps": 10.0,
+            "missing": "drop",
+        },
         "annualization_days": 252,
         "initial_cash": 100_000_000.0,
         "strategy_source": None,
-        # 요청 본문에 실행 설정을 주지 않으면 접수된 요청도 None 을 그대로 보존한다 —
-        # 브리지로 해소한 값은 run spec 에만 박히고 매니페스트로 나간다(P2-01).
-        "environment": None,
     }
 
     not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
@@ -535,7 +555,7 @@ def test_failure_that_races_a_cancel_keeps_its_reason(tmp_path: Path) -> None:
 class _RejectingEngine:
     """엔진이 구현하지 못하는 스펙으로 판정하는 포트 — preflight 반환값 소비 분기를 고정한다."""
 
-    def assess(self, spec: object) -> EngineCompatibility:
+    def assess(self, spec: object, environment: object) -> EngineCompatibility:
         return EngineCompatibility(
             compatible=False,
             requirements=EngineRequirementSummary("EverySession", (), (), ("unsupported",)),
@@ -778,9 +798,18 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
     # 관측 데이터 부재·계약 위반은 시작 요청이 아니라 run 상태 `failed` 로 전달된다(이슈 #158).
     assert set(detail["discriminator"]["mapping"]) == {
         "backtest.run.invalid",
+        "backtest.run.environment_required",
         "backtest.strategy.requires_upgrade",
         "portfolio.strategy.invalid",
     }
+
+    # 실행 설정 없는 시작 요청은 코드화된 422 다 — schema 1.2 문서에는 되돌아갈 값이 없다(P2-03).
+    without_environment = _run_body(client, "python")
+    without_environment.pop("environment")
+    missing_environment = client.post("/api/v1/backtests", json=without_environment)
+    assert missing_environment.status_code == 422, missing_environment.text
+    assert missing_environment.json()["detail"]["code"] == "backtest.run.environment_required"
+    TypeAdapter(Backtest422Response).validate_python(missing_environment.json())
 
     semantic = _run_body(client, "python")
     semantic["strategy"]["portfolio"]["weighting"] = "risk"
@@ -841,6 +870,7 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
         "missing": "drop",
     }
     body = _run_body(client, "python")
+    body.pop("environment")
 
     # 422 본문의 `input` 은 요청한 environment 객체를 통째로 되돌려주므로 모든 필드 이름이
     # 응답 텍스트에 들어 있다. 진단이 어느 필드를 지목하는지 보려면 `msg` 로 좁혀야 한다.
@@ -865,32 +895,22 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
     assert accepted.status_code == 202, accepted.text
 
 
-def test_conflicting_legacy_missing_policies_are_refused_at_start_with_a_code() -> None:
-    """P2-02 리뷰 P2: 충돌 문서의 run 경로 응답 shape 를 고정한다.
+def test_start_without_an_environment_is_a_coded_422() -> None:
+    """schema 1.2 문서에는 실행 설정이 없으므로 시작 요청이 반드시 실어야 한다(P2-03).
 
-    거절 주체는 `start` 가 아니라 `preflight` 안의 브리지다. 그래서 코드는
-    `portfolio.strategy.invalid` 이고 사유는 `validation.issues` 안에 구조화되어 들어간다.
-    `start` 에 있던 도달 불가 catch 를 지워도 이 응답이 그대로여야 한다.
+    거절 주체는 `start` 이고 코드는 전용 `backtest.run.environment_required` 다 — 프론트가 이
+    한 코드를 보고 실행 설정 패널로 보낸다.
     """
     client = TestClient(build_http_app())
     body = _run_body(client, "python")
-    factor = body["strategy"]["factors"][0]
-    body["strategy"]["factors"] = [
-        {**factor, "graph": {**factor["graph"], "missing_policy": "zero"}},
-        {
-            **factor,
-            "factor_id": f"{factor['factor_id']}_dropped",
-            "graph": {**factor["graph"], "missing_policy": "drop"},
-        },
-    ]
+    body.pop("environment")
 
     response = client.post("/api/v1/backtests", json=body)
 
-    assert response.status_code == 422
+    assert response.status_code == 422, response.text
     detail = response.json()["detail"]
-    assert detail["code"] == "portfolio.strategy.invalid"
-    codes = [issue["code"] for issue in detail["validation"]["issues"]]
-    assert "run_environment.missing_policy_conflict" in codes
+    assert detail["code"] == "backtest.run.environment_required"
+    assert "run_environment.required" in detail["message"]
 
 
 def test_tape_stage_progress_advances_monotonically_within_a_bounded_event_count() -> None:

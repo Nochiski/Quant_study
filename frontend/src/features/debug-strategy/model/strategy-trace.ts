@@ -30,8 +30,13 @@ export type StrategyDebuggerContext = {
   specHash: string;
   expectedSnapshotId: string;
   expectedRegistryVersion: string;
-  start: string;
-  end: string;
+  /**
+   * 실행 기간. schema 1.2부터 전략 문서가 아니라 실행 설정이 소유하고, 그 값을 편집하는
+   * 패널은 P3-01·P3-02에서 붙는다. 그때까지는 알 수 없어 `null`이며, 응답 날짜 범위
+   * 가드는 값이 있을 때만 건다.
+   */
+  start: string | null;
+  end: string | null;
   factors: StrategyDebuggerFactor[];
 };
 
@@ -64,8 +69,8 @@ export type PreparedStrategyTrace =
         registryVersion: string;
         planHash: string;
         sourceVersion: number;
-        start: string;
-        end: string;
+        start: string | null;
+        end: string | null;
       };
     };
 
@@ -333,10 +338,11 @@ const responseDateMatches = (
   request: StrategyTraceRequest,
   response: StrategyTraceResponse,
 ): boolean => {
+  const { start, end } = prepared.expected;
   if (
     !validIsoDate(response.as_of) ||
-    response.as_of < prepared.expected.start ||
-    response.as_of > prepared.expected.end ||
+    (start !== null && response.as_of < start) ||
+    (end !== null && response.as_of > end) ||
     (request.as_of != null && response.as_of !== request.as_of)
   )
     return false;
@@ -345,7 +351,7 @@ const responseDateMatches = (
     response.target.signal_as_of === response.as_of &&
     validIsoDate(response.target.execution_on) &&
     response.target.execution_on > response.as_of &&
-    response.target.execution_on <= prepared.expected.end
+    (end === null || response.target.execution_on <= end)
   );
 };
 

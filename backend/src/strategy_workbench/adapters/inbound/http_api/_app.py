@@ -26,6 +26,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunSummary,
     BacktestStartResponse,
     InvalidBacktestRunError,
+    MissingBacktestRunEnvironmentError,
     RunStatus,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
@@ -335,6 +336,12 @@ def create_app(
     def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
         try:
             return backtest_runs.start(spec)
+        # `InvalidBacktestRunError` 의 하위 타입이므로 반드시 먼저 잡는다.
+        except MissingBacktestRunEnvironmentError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "backtest.run.environment_required", "message": str(error)},
+            ) from error
         except InvalidBacktestRunError as error:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

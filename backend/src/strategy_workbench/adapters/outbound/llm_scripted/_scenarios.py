@@ -108,21 +108,14 @@ _WINDOW_PROPOSAL_SUMMARY = "모멘텀 창을 252거래일에서 126거래일로 
 # 가져온다** — 버전 리터럴의 owner는 `domain/strategy`이고, 새 전략 화면이 이미 runtime schema의
 # `const`와 같은 값을 쓴다.
 # 본문 섹션은 authoring schema를 따르므로 schema가 바뀌면 여기도 바뀌어야 한다.
-# 지금 본문의 `data`(시장·기간·유니버스)와 `execution`(체결·수수료)은 schema 1.1이 요구해서
-# 전략 안에 있다. 제품 방향은 실행 설정을 언어 밖에 두는 것이므로, schema 1.2(lang2 P2-03)를
-# 머지하는 PR이 이 두 섹션을 본문에서 빼고 이 대본을 함께 고친다.
+# schema 1.2(lang2 P2-03)는 시장·기간·유니버스(`data`)와 체결·수수료(`execution`)를 전략 문서에서
+# 빼 실행 요청의 `environment`로 옮겼다. 그래서 본문에 두 섹션이 없다.
 # `tests/application/test_scripted_idea_proposal.py`가 현재 schema로 깨끗이 compile되는지 고정해,
 # 섹션이 낡으면 backend 게이트에서 먼저 깨진다.
 _SCHEMA_VERSION_LINE = re.compile(r"^schema_version:.*$", re.MULTILINE)
 _IDEA_TITLE = "KRX 대형 모멘텀"
 _IDEA_SUMMARY = "최근 1년 많이 오른 종목 가운데 시가총액이 큰 종목을 매달 20개 담는다."
 _IDEA_BODY = """description: "최근 1년 수익률이 높고 시가총액이 큰 종목을 매달 20개 담는다."
-data:
-  market: KRX
-  start: "2021-01-01"
-  end: "2026-08-31"
-  universe_id: krx.common-stock
-  frequency: daily
 eligibility:
   rules: []
 factors:
@@ -160,9 +153,6 @@ portfolio:
   rebalance: monthly
 risk:
   max_name_weight: 0.05
-execution:
-  timing: next_open
-  fee_bps: 15.0
 parameters: []
 """
 

@@ -551,6 +551,7 @@ const ko = {
   "strategy.contract.applicable.minimum_liquidity": "최소 유동성 하한",
   "strategy.contract.applicable.sector_neutral": "섹터 중립 여부",
   "strategy.contract.applicable.risk_field_id": "위험 가중에 쓰는 필드",
+  "strategy.contract.applicable.risk_factor_id": "위험 가중에 쓰는 팩터",
   "strategy.contract.applicable.regime_minimum": "레짐 값 하한",
   "strategy.contract.portfolio.selection_count":
     "롱 포트폴리오에 선택할 종목 수",
@@ -569,10 +570,13 @@ const ko = {
   "strategy.contract.risk.gross_exposure": "포트폴리오 총 익스포저",
   "strategy.contract.risk.max_name_weight": "종목별 최대 목표 비중 한도",
   "strategy.contract.risk.max_sector_weight": "섹터별 최대 목표 비중 한도",
-  "strategy.contract.execution.participation_rate":
+  // 실행 설정 제약 행의 `x-description-key`. 발행처는 `GET /api/v1/run-environments/schema` 이며
+  // (owner `domain/backtest`), schema 1.2 에서 전략 문서의 `execution` 섹션이 사라지면서
+  // `strategy.contract.execution.*` 세 줄을 이 이름으로 옮겼다(P2-03). 렌더는 P3-02 패널이다.
+  "run_environment.contract.participation_rate":
     "시장 거래량 대비 최대 주문 참여율",
-  "strategy.contract.execution.fee_bps": "체결 금액에 적용할 수수료 가정",
-  "strategy.contract.execution.slippage_bps": "체결 가격의 슬리피지 가정",
+  "run_environment.contract.fee_bps": "체결 금액에 적용할 수수료 가정",
+  "run_environment.contract.slippage_bps": "체결 가격의 슬리피지 가정",
   // -- 화면 어휘 (P1-03, spec D8) -------------------------------------------------
   // backend가 발행한 설명 키는 stem이다: `<stem>`은 이름(라벨), `<stem>.description`은
   // 한 줄 설명. 연산자는 `<stem>.formula`로 계산식을 더한다. 목록 자체는 runtime schema의
@@ -764,6 +768,9 @@ const ko = {
   "strategy.type.signal_step": "신호 결합",
   "strategy.type.signal_step.description":
     "팩터 점수를 합친 뒤 후보를 남기는 기준입니다.",
+  "strategy.field.signal_step.normalization": "점수 정규화",
+  "strategy.field.signal_step.normalization.description":
+    "팩터 점수를 합치기 전에 순위·표준점수로 맞출지 정합니다.",
   "strategy.field.signal_step.score_threshold": "점수 하한",
   "strategy.field.signal_step.score_threshold.description":
     "이 점수보다 낮은 종목은 후보에서 뺍니다.",
@@ -802,6 +809,9 @@ const ko = {
   "strategy.field.risk_step.risk_field_id": "위험 필드",
   "strategy.field.risk_step.risk_field_id.description":
     "위험 가중에 쓸 데이터 필드입니다.",
+  "strategy.field.risk_step.risk_factor_id": "위험 팩터",
+  "strategy.field.risk_step.risk_factor_id.description":
+    "위험 가중에 쓸 팩터입니다. 비중 방식이 위험 가중(risk)일 때만 읽히고, 그때 이 팩터는 점수 합산에서 빠지며 원시값의 역수로 비중을 나눕니다.",
   "strategy.type.execution_step": "체결 가정",
   "strategy.type.execution_step.description": "주문 시점과 비용 가정입니다.",
   "strategy.field.execution_step.timing": "주문 시점",
@@ -855,11 +865,11 @@ const ko = {
     "종목 하나가 가질 수 있는 최대 목표 비중입니다.",
   "strategy.contract.risk.max_sector_weight.description":
     "섹터 하나가 가질 수 있는 최대 목표 비중입니다.",
-  "strategy.contract.execution.participation_rate.description":
+  "run_environment.contract.participation_rate.description":
     "같은 세션 거래량 대비 주문이 차지할 수 있는 최대 비율입니다.",
-  "strategy.contract.execution.fee_bps.description":
+  "run_environment.contract.fee_bps.description":
     "체결 금액에 bp 단위로 붙는 수수료 가정입니다.",
-  "strategy.contract.execution.slippage_bps.description":
+  "run_environment.contract.slippage_bps.description":
     "체결 가격이 기준가에서 밀린다고 보는 bp 폭입니다.",
   "strategy.operator.unary.negate": "부호 뒤집기",
   "strategy.operator.unary.negate.description":
@@ -992,7 +1002,7 @@ const ko = {
   "upgrade.pending": "업그레이드 중…",
   "upgrade.applied": "1.1로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
   "upgrade.frozenGenerated":
-    "schema 1.0 동결 revision입니다. 생성된 문서는 이미 1.1이므로 편집 후 새 revision으로 저장하세요.",
+    "schema 1.0 동결 revision입니다. 생성된 문서는 이미 현재 버전이므로 편집 후 새 revision으로 저장하세요.",
   "upgrade.backtestBlocked":
     "저장된 1.0 revision으로는 백테스트를 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "upgrade.error.editor": "편집기가 준비되지 않아 업그레이드하지 못했습니다.",
@@ -2047,6 +2057,8 @@ export const messages = {
     "strategy.contract.applicable.sector_neutral": "Sector neutrality",
     "strategy.contract.applicable.risk_field_id":
       "Field used for risk weighting",
+    "strategy.contract.applicable.risk_factor_id":
+      "Factor used for risk weighting",
     "strategy.contract.applicable.regime_minimum": "Regime value floor",
     "strategy.contract.portfolio.selection_count":
       "Number of names in the long portfolio",
@@ -2067,11 +2079,11 @@ export const messages = {
       "Maximum target weight per security",
     "strategy.contract.risk.max_sector_weight":
       "Maximum target weight per sector",
-    "strategy.contract.execution.participation_rate":
+    "run_environment.contract.participation_rate":
       "Maximum order participation relative to market volume",
-    "strategy.contract.execution.fee_bps":
+    "run_environment.contract.fee_bps":
       "Fee assumption applied to notional traded",
-    "strategy.contract.execution.slippage_bps":
+    "run_environment.contract.slippage_bps":
       "Execution price slippage assumption",
     // -- 화면 어휘 (P1-03, spec D8) -------------------------------------------------
     // backend가 발행한 설명 키는 stem이다: `<stem>`은 이름(라벨), `<stem>.description`은
@@ -2273,6 +2285,9 @@ export const messages = {
     "strategy.type.signal_step": "Signal step",
     "strategy.type.signal_step.description":
       "What the combined score has to clear to stay a candidate.",
+    "strategy.field.signal_step.normalization": "Score normalization",
+    "strategy.field.signal_step.normalization.description":
+      "Whether factor scores are ranked or z-scored before they are combined.",
     "strategy.field.signal_step.score_threshold": "Score floor",
     "strategy.field.signal_step.score_threshold.description":
       "Names scoring below this are dropped.",
@@ -2311,6 +2326,9 @@ export const messages = {
     "strategy.field.risk_step.risk_field_id": "Risk field",
     "strategy.field.risk_step.risk_field_id.description":
       "The data field used for risk weighting.",
+    "strategy.field.risk_step.risk_factor_id": "Risk factor",
+    "strategy.field.risk_step.risk_factor_id.description":
+      "The factor used for risk weighting. It is read only when weighting is risk; then it is left out of the combined score and weights follow the inverse of its raw value.",
     "strategy.type.execution_step": "Execution step",
     "strategy.type.execution_step.description":
       "Order timing and cost assumptions.",
@@ -2367,11 +2385,11 @@ export const messages = {
       "Largest target weight a single name may take.",
     "strategy.contract.risk.max_sector_weight.description":
       "Largest target weight a single sector may take.",
-    "strategy.contract.execution.participation_rate.description":
+    "run_environment.contract.participation_rate.description":
       "Largest share of the session's volume an order may take.",
-    "strategy.contract.execution.fee_bps.description":
+    "run_environment.contract.fee_bps.description":
       "Fee in basis points charged on notional traded.",
-    "strategy.contract.execution.slippage_bps.description":
+    "run_environment.contract.slippage_bps.description":
       "Basis points the fill price is assumed to move against the order.",
     "strategy.operator.unary.negate": "Negate",
     "strategy.operator.unary.negate.description":
@@ -2511,7 +2529,7 @@ export const messages = {
     "upgrade.applied":
       "Rewritten as 1.1. Review it, then save it as a new revision.",
     "upgrade.frozenGenerated":
-      "This is a frozen schema 1.0 revision. The generated document is already 1.1: edit it and save a new revision.",
+      "This is a frozen schema 1.0 revision. The generated document is already on the current version: edit it and save a new revision.",
     "upgrade.backtestBlocked":
       "A stored 1.0 revision cannot run a backtest. Upgrade it and save a new revision first.",
     "upgrade.error.editor": "The editor is not ready, so nothing was upgraded.",

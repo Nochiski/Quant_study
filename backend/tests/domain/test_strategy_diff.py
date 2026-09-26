@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
 from pathlib import Path
 
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
@@ -18,12 +17,13 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.domain.strategy.facade.diff import DiffEntry, DiffKind, diff_strategy_specs
 from strategy_workbench.domain.strategy.facade.document import SourceFormat
 from strategy_workbench.domain.strategy.facade.specification import (
-    ComparisonOperator as Op,
+    EligibilityOperator as Op,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     EligibilityRule,
     EligibilityStep,
     FloatParameter,
+    SignalNormalization,
     StrategyIdentity,
     StrategySpec,
 )
@@ -32,9 +32,7 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_docum
 
 
 def _template() -> StrategySpec:
-    return StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
-    ).template()
+    return StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template()
 
 
 def test_identical_specs_and_identity_changes_produce_no_entries() -> None:
@@ -50,13 +48,13 @@ def test_scalar_changes_are_reported_per_leaf_with_json_values() -> None:
         base,
         title="바뀐 제목",
         risk=replace(base.risk, max_name_weight=0.05),
-        data=replace(base.data, end=date(2026, 12, 31)),
+        portfolio=replace(base.portfolio, selection_count=30),
     )
 
     entries = diff_strategy_specs(base, target)
 
     assert entries == (
-        DiffEntry("/data/end", DiffKind.CHANGED, "2026-09-03", "2026-12-31"),
+        DiffEntry("/portfolio/selection_count", DiffKind.CHANGED, 20, 30),
         DiffEntry("/risk/max_name_weight", DiffKind.CHANGED, 0.1, 0.05),
         DiffEntry("/title", DiffKind.CHANGED, "새 팩터 전략", "바뀐 제목"),
     )
@@ -158,3 +156,13 @@ def test_pointer_tokens_are_rfc6901_escaped() -> None:
     entries: list[DiffEntry] = []
     _diff._walk({"a/b": 1, "c~d": 2}, {"a/b": 2, "c~d": 2}, "", entries)  # pyright: ignore[reportPrivateUsage]  # reason: unit
     assert [e.pointer for e in entries] == ["/a~1b"]
+
+
+def test_normalization_change_is_one_leaf_entry() -> None:
+    """결합 전 정규화를 바꾸면 semantic diff 가 `/signal/normalization` 한 줄로 보고한다(P2-04)."""
+    base = _template()
+    target = replace(base, signal=replace(base.signal, normalization=SignalNormalization.NONE))
+
+    assert diff_strategy_specs(base, target) == (
+        DiffEntry("/signal/normalization", DiffKind.CHANGED, "rank", "none"),
+    )

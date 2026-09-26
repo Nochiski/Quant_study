@@ -39,7 +39,7 @@ export const buildStrategyDebuggerAvailability = (
 ): StrategyDebuggerAvailability => {
   const compiled = currentCompile(document);
   if (compiled === null) return { context: null, reason: "document" };
-  if (compiled.spec.factors.length === 0)
+  if ((compiled.spec.factors ?? []).length === 0)
     return { context: null, reason: "no-factors" };
   if (plans.status !== "ready")
     return { context: null, reason: unavailableReason(plans) };
@@ -85,7 +85,7 @@ export const buildStrategyDebuggerAvailability = (
       },
     ];
   });
-  if (factors.length !== compiled.spec.factors.length)
+  if (factors.length !== (compiled.spec.factors ?? []).length)
     return { context: null, reason: "execution-plan" };
 
   return {
@@ -98,8 +98,9 @@ export const buildStrategyDebuggerAvailability = (
       specHash: compiled.specHash,
       expectedSnapshotId: plans.expectedDataSnapshotId,
       expectedRegistryVersion: plans.expectedRegistryVersion,
-      start: compiled.spec.data.start,
-      end: compiled.spec.data.end,
+      // 실행 기간의 owner가 실행 설정으로 옮겨갔다(schema 1.2). 편집 패널 배선은 P3-01·P3-02.
+      start: null,
+      end: null,
       factors,
     },
   };

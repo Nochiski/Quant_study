@@ -485,6 +485,11 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `export_openapi.py`로 `backend/openapi.json` 재생성(연산자 카탈로그 응답의 `availability` 값 집합이
   바뀐다. 진단 코드 문자열은 OpenAPI에 열거되지 않으므로 그 자체는 재생성 사유가 아니다. diff가 0이면
   그 사실을 PR 본문에 적는다). diff가 있으면 생성 SDK도 재생성한다(1절 규칙).
+- **backlog(P2-05 리뷰 DEFECT-P3-1)**: 횡단면 eligibility 규칙이 모집단을 0으로 만드는 쪽에는
+  진단이 없다. `top_percent: 0.001`에 모집단 100이면 cut이 0이라 전원 `ELIGIBILITY_RANK_CUT`이다.
+  P2-05의 `strategy.eligibility.rule_value`는 "너무 관대한" 쪽(`20`을 비율로 적는 실수)만 막는다.
+  결과가 빈 포트폴리오라 조용하지 않아 P3으로 뒀다 — 이 PR에서 frame warning으로 다룰지 정하고,
+  다루지 않으면 그 판단을 PLAN 변경 기록에 남긴다.
 - BACKLOG-003: 횡단면 `zscore`·`rank`의 `unit_rule`을 무차원(`"1"`)으로 바꾼다. 단위가 다른 두 필드를
   표준화해 더한 그래프가 `factor.graph.unit_mismatch` 없이 통과하는 재현 그래프 테스트와, `demean`·
   `winsorize`는 입력 단위를 보존하는 대조 테스트를 `test_factor_operators.py`에 둔다.
@@ -526,10 +531,21 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `adapters/outbound/strategy_sqlite/_record_codec.py`,
   `application/strategy_authoring/_service.py`). `is_frozen_schema_version`은 **변경 없음**
   (테스트로 고정).
+- P2-03이 저장 row 읽기를 위해 앞당긴 세 심볼도 같이 흡수한다:
+  `RETIRED_SCHEMA_VERSIONS`(현재 `{"1.0", "1.1"}` 리터럴 집합) → `FROZEN_SCHEMA_VERSIONS =
+  frozenset(UPGRADE_STEPS)`(체인 키에서 유도해 버전 추가 시 한 곳만 고친다),
+  `require_retired_schema_version` → 새 술어 이름으로 개명, `UnknownSchemaVersionError` →
+  `NotUpgradeableDocumentError`로 합치거나 그 계열 이름으로. 호출자는
+  `adapters/outbound/strategy_sqlite/_record_codec.py` 하나이고, 미지 버전 fail-closed 회귀
+  테스트(`tests/contract/test_strategy_repository_retired_1_1.py`)를 그대로 통과시켜야 한다.
 - 1.1 → 1.2 step(spec D7 변환 목록): `data`·`execution`·`graph.missing_policy` 제거 후 `environment`로
   반환(팩터별 정책이 다르면 첫 값 + warning), `signal.normalization: none` 명시, `saved_*` 노드는
   `strategy_document.upgrade_unsupported_node` 422. dict 경로·source 경로(ruamel) 같은 step 맵,
   drift fail-closed.
+- `weighting: factor_score` 문서는 업그레이드 뒤 목표 비중이 1.1 결과와 다를 수 있다(P2-04
+  결정 5). 선정·보유 종목은 같고, 비중이 1.1 과 같은 경우는 롱이면서 강도 기준점이 정확히 0 일
+  때뿐이다. `direction: low`·`long_short`·부호 섞인 점수·일반 양수 점수 모두 달라질 수 있다.
+  "1.1 결과 보존" 검증에서 이 차이를 회귀로 세지 않도록 기대값을 결정 5 규칙으로 계산한다.
 - `POST /strategy-documents/upgrade` 응답에 `environment`·`warnings`.
 - repository codec이 1.0·1.1 row를 업그레이드해 읽고 무결성 검증 3종(1.1 spec D2 방식).
   saved-reference backtest 422.
@@ -548,6 +564,14 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   모순을 없애려고), 아는 버전이 1.0·1.1 둘뿐이라 상한이 없어도 됐다. 1.2가 들어오면 "미래 버전 +
   옛 키 하나"가 1.1로 강등되는 경로가 되므로, 버전 디스패치를 넣는 이 PR에서 판정에 상한을 함께
   둔다(P1-05 2차 리뷰 P3-7).
+- **BACKLOG-010(P2 구현자 관찰)**: 위 상한을 넣으면서 `is_upgradeable_document` docstring 도 고친다.
+  지금 docstring 은 "지금은 아는 버전이 1.0·1.1 둘뿐 … schema 1.2 가 들어오면"이라고 적는데, 1.2 는
+  P2-03 부터 현재 버전이라 이 문장은 이미 사실이 아니고 상한 추가를 이 PR 에 떠넘기는 문장만
+  남았다.
+- **BACKLOG-011(P2 구현자 관찰)**: `structure.invalid_date` 를 정리한다. 1.2 문서에는 날짜 필드가
+  없어(`data.start`·`end` 가 실행 설정으로 이동, P2-03) 문서로는 도달할 수 없는 코드다. 지금은
+  `STRUCTURE_CODES` 에 남아 golden 테스트가 날짜 필드 하나짜리 가짜 모델로 문장을 고정한다. 업그레이더
+  가 1.0·1.1 원문의 날짜를 읽는 경로에서 쓰이지 않으면 코드·분기·golden 을 함께 지운다.
 - OpenAPI 재생성. `database/tests` 계약 확인.
 
 **Phase 2 exit**
@@ -569,7 +593,13 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `npm run api:generate` 후 diff 0. `/data/*`·`/execution/*`·`/graph/missing_policy` pointer 참조가
   소스·테스트에서 사라진다(grep 0건 테스트).
 - `signal.normalization`·횡단면 eligibility·`risk_factor_id`의 i18n(설명·적용 조건) 추가. Form이 새
-  필드를 스키마에서 자동으로 그린다(손으로 적지 않는다).
+  필드를 스키마에서 자동으로 그린다(손으로 적지 않는다). `risk_factor_id` 의 이름·설명·적용 조건 키는
+  P2-06 이 먼저 넣었다(runtime schema 가 발행한 키는 전부 번역돼야 한다는 단위 테스트가 강제한다).
+- **BACKLOG-012(P2-06 관찰)**: `saved_*` 제거로 도달할 수 없게 된 frontend 잔재를 지운다. Contract
+  Inspector 의 팩터 카탈로그 join(`contract-inspector.ts` 의 `catalog === "factor"` 분기와 그 자원
+  로딩), `form-projection.ts` 의 `CATALOGS` 중 `factor`·`subgraph`, `schema-assist.ts` 의 `subgraph`·
+  `factor` 카탈로그 분기, i18n 키 `strategy.node.saved_*`·`strategy.field.node.factor_id`·
+  `strategy.field.node.subgraph_id`·`assist.catalog.subgraph`.
 - outline·snippet 카탈로그(팩터 preset은 "예시" 그룹으로 강등, 튜토리얼 전용)·execution plan·graph·
   debugger가 1.2 pointer로.
 - 단위 테스트 전부 green. e2e fixture는 P3-03.
@@ -586,6 +616,11 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `RunEnvironment`에는 범위가 없다 — pydantic이 `__post_init__`를 들여다보지 못해 생성 SDK 타입에
   실리지 않는다(P2-01에서 OpenAPI 재생성 diff가 0인 이유이기도 하다). 생성 타입만 믿는 화면은
   서버가 거부할 값을 유효한 것으로 보므로, 패널은 범위도 스키마 엔드포인트에서 읽는다(테스트로 고정).
+- **BACKLOG-013(P2-01·P2-02 병합 리뷰 P3)**: 실행 설정 스키마가 발행하는 설명 키
+  `strategy.field.run_environment.*` 7개(`start`·`end`·`market`·`frequency`·`universe_id`·`timing`·
+  `missing`)에 frontend 문장(한국어·영어, 이름과 `.description`)을 붙이고, `/run-environments/schema`
+  가 발행한 설명 키가 전부 번역됐는지 보는 커버리지 테스트를 둔다(전략 runtime schema 쪽
+  `screen-vocabulary.test.ts` 와 같은 모양). 패널 항목 옆 한 줄 뜻 표시는 US-SM-10 과 잇는다.
 - **결정 항목**: 명시 `environment`의 422를 필드 단위로 어떻게 표면화할지. 같은 사실이 문서에
   있으면 `strategy.execution.participation` 코드가, 실행 설정에 있으면 pydantic 기본 분기가 나간다
   (`Backtest422Response`가 `RequestValidationResponse`를 이미 union에 가져 계약 위반은 아니다).
@@ -593,6 +628,23 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   문자열에만 있다. 패널이 필드 옆에 오류를 붙이려면 파싱해야 하므로, inbound 계층에서
   `RunEnvironment`를 먼저 구성해 코드화된 detail로 바꿀지 결정한다.
 - 기간이 전략 문서에서 오던 `dateRange` 의존 제거. OOS 창 검증은 실행 설정의 기간으로.
+- **P2-03이 잠근 `test.fixme` 4건을 해제한다**: `workbench.workflow.spec.ts`의
+  `creates, recovers, validates, versions, traces and backtests`와
+  `upgrades a frozen 1.0 revision …`, `workbench.real-equity.spec.ts`의
+  `edits the graph on real data …`, `workbench.infrastructure.spec.ts`의
+  `keeps a real debugger trace legible and inside the viewport`(`strategy-debugger.png` 기준선
+  4장도 그때 화면으로 재생성). 패널이 생기기 전에는 프론트가 `environment`를 싣지 못해
+  브라우저에서 시작한 run이 422 `backtest.run.environment_required`로 거절된다.
+- **전략 디버거 trace 요청도 같은 배선이 필요하다.** `POST /api/v1/strategies/debug/trace`가
+  `environment` 없이 나가면 preview·run과 같은 `portfolio.strategy.invalid` +
+  `run_environment.required`로 거절되어 "추적 재현 정보" 패널이 뜨지 않는다. 위 fixme
+  시나리오 안에 있으므로 해제와 같이 고친다. 최종 시나리오 재작성은 P3-03이 맡는다.
+- **디버거 컨텍스트의 `start`/`end`를 다시 non-null로 만든다.** P2-03이 실행 기간의 출처를
+  잃어 `widgets/strategy-ide/model/strategy-debugger-context.ts`가 두 값을 `null`로 고정했고,
+  그 결과 `features/debug-strategy/model/strategy-trace.ts`의 응답 날짜 범위 가드(`as_of`가
+  실행 기간 안인가, `execution_on <= end`인가)와 날짜 입력의 `min`/`max`가 꺼져 있다. 패널이
+  기간을 갖게 되면 두 필드를 실행 설정에서 채우고 타입을 `string`으로 되돌린다 — `string |
+  null`인 채로 끝나면 가드가 영구히 꺼진 채 남는다(P2-03 리뷰 P3-06).
 - 업그레이드 배너가 1.1 문서에도 뜨고, 응답의 `environment`로 실행 설정을 채운다(사용자 확인 후).
   `warnings`를 배너에 표시.
 - 백테스트 버튼 차단 사유에서 `factor-plan` 분기가 compile error로 흡수되는지 확인(남으면 결함으로

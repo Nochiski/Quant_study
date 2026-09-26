@@ -33,7 +33,7 @@ from ._service import (
     PortfolioDesignService,
     PortfolioPipelineCancelledError,
     TraceObservationCapabilityError,
-    _resolve_environment_or_reject,
+    _require_environment_or_reject,
 )
 from ._trace_models import (
     RawStrategyTraceRow,
@@ -96,16 +96,15 @@ class StrategyTraceService:
     ) -> StrategyTraceResponse:
         spec, provenance = self._resolve(request)
         _raise_if_cancelled(cancelled)
-        # `as_of` 범위 판정은 실행 설정을 필요로 하고, 문서에서 만드는 브리지는 유효한 문서를
-        # 전제한다. 그래서 파이프라인이 하는 것과 같은 검증을 여기서 먼저 한 번 돌린다 —
-        # 없으면 잘못된 문서가 코드화된 진단 대신 브리지의 raw ValueError 로 터진다.
+        # `as_of` 범위 판정이 실행 설정을 필요로 한다. 파이프라인이 하는 것과 같은 문서 검증을
+        # 여기서 먼저 한 번 돌려, 잘못된 문서가 실행 설정 진단보다 먼저 코드화된 진단으로
+        # 거절되게 한다(진단 순서의 owner 는 validator 다).
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
-        # 실행 설정 해소 실패는 preview·run 과 같은 구조화 진단으로 나간다(2차 리뷰 P3).
-        # trace 만 메시지 문자열로 납작하게 만들면 프론트가 코드로 분기하려고 본문을 파싱해야
-        # 한다.
-        environment = _resolve_environment_or_reject(spec, request.environment)
+        # preview·run 과 같은 헬퍼를 쓴다 — 세 경로가 같은 `portfolio.strategy.invalid` +
+        # `validation.issues` 구조로 거절해야 프론트가 코드 하나만 번역한다(P2-02 2차 리뷰 P3).
+        environment = _require_environment_or_reject(spec, request.environment)
         if request.as_of is not None and not environment.start <= request.as_of <= environment.end:
             raise InvalidStrategyTraceRequestError(
                 "trace as_of is outside the run range — "

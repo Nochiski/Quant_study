@@ -206,19 +206,12 @@ describe("FactorGraphEditor (P5-02)", () => {
       "graph",
       { focusEditor: false },
     );
-    // 그래프 설정: output_node_id(reference)·missing_policy(enum).
+    // 그래프 설정: output_node_id(reference). missing_policy 는 1.2 에서 실행 설정으로 갔다.
     const settings = within(editor().getByRole("group", { name: "그래프 설정" }));
     await user.selectOptions(settings.getByRole("combobox", { name: /\boutput_node_id/ }), "px");
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "replace-scalar", pointer: "/factors/0/graph/output_node_id", value: "px" },
       "output_node_id",
-      "graph",
-      { focusEditor: false },
-    );
-    await user.selectOptions(settings.getByRole("combobox", { name: /\bmissing_policy/ }), "zero");
-    expect(transactions.apply).toHaveBeenLastCalledWith(
-      { kind: "replace-scalar", pointer: "/factors/0/graph/missing_policy", value: "zero" },
-      "missing_policy",
       "graph",
       { focusEditor: false },
     );

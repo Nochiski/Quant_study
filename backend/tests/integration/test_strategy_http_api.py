@@ -123,9 +123,8 @@ def test_json_spec_api_keeps_label_required_while_document_defaults_apply() -> N
     relaxed = {
         k: v
         for k, v in template.items()
-        if k not in ("signal", "portfolio", "risk", "execution", "eligibility", "description")
+        if k not in ("signal", "portfolio", "risk", "eligibility", "description")
     }
-    relaxed["data"] = {k: v for k, v in template["data"].items() if k != "market"}
     relaxed["factors"] = [{k: v for k, v in template["factors"][0].items() if k != "weight"}]
     response = client.post("/api/v1/strategies/validate", json=relaxed)
     assert response.status_code == 200, response.text

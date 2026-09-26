@@ -156,7 +156,10 @@ _SEEDS = (
         FactorPreference.HIGH,
         "ratio",
         ("price.close",),
-        252,
+        # 구현 그래프(`window=252` + `lag=21`)가 요구하는 이력이다. 구현 팩터의 이 값은
+        # 그래프 검증의 `minimum_history_sessions` 와 같아야 한다 — 테스트가 대조한다
+        # (BACKLOG-001).
+        273,
     ),
     _CatalogSeed(
         "price.momentum_6_1",

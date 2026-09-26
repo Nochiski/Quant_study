@@ -402,6 +402,26 @@
         "title": "AssistantUnprocessableResponse",
         "type": "object"
       },
+      "BacktestEnvironmentRequiredDetail": {
+        "description": "실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.",
+        "properties": {
+          "code": {
+            "const": "backtest.run.environment_required",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestEnvironmentRequiredDetail",
+        "type": "object"
+      },
       "BacktestResultNotReadyDetail": {
         "properties": {
           "code": {
@@ -843,6 +863,7 @@
           "detail": {
             "discriminator": {
               "mapping": {
+                "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
                 "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
@@ -852,6 +873,9 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/BacktestRunInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
               },
               {
                 "$ref": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail"
@@ -1142,17 +1166,6 @@
         ],
         "title": "ComparisonNode",
         "type": "object"
-      },
-      "ComparisonOperator": {
-        "enum": [
-          "gt",
-          "gte",
-          "lt",
-          "lte",
-          "eq"
-        ],
-        "title": "ComparisonOperator",
-        "type": "string"
       },
       "CompileRequest": {
         "properties": {
@@ -1473,39 +1486,6 @@
         "title": "DataSnapshot",
         "type": "object"
       },
-      "DataStep": {
-        "properties": {
-          "end": {
-            "format": "date",
-            "title": "End",
-            "type": "string"
-          },
-          "frequency": {
-            "$ref": "#/components/schemas/DataFrequency",
-            "default": "daily"
-          },
-          "market": {
-            "$ref": "#/components/schemas/Market",
-            "default": "KRX"
-          },
-          "start": {
-            "format": "date",
-            "title": "Start",
-            "type": "string"
-          },
-          "universe_id": {
-            "title": "Universe Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "start",
-          "end",
-          "universe_id"
-        ],
-        "title": "DataStep",
-        "type": "object"
-      },
       "DataWarning": {
         "properties": {
           "code": {
@@ -1749,6 +1729,20 @@
         "title": "DrawdownPoint",
         "type": "object"
       },
+      "EligibilityOperator": {
+        "description": "유니버스 필터 한 줄의 비교 방식 (schema 1.2, spec D3 S5).\n\n앞의 다섯(`gt`~`eq`)은 후보 하나의 값만 보면 판정되는 **절대** 규칙이고, `top_*` 는 같은\n기준일 프레임의 **횡단면** 순위를 봐야 판정된다. `value` 의 의미도 갈린다 — 절대 규칙은\n비교 임계값, `top_percent` 는 비율, `top_count` 는 개수다.\n\n이 enum 은 전용이다. 값이 겹친다고 다른 비교 연산자 enum 에 얹으면 `top_*` 가 그 enum 의\n소비자(팩터 그래프 `comparison` 노드 등)로 흘러들어, 모집단 없이 판정할 수 없는 값이\ncatch-all 분기에서 조용히 다른 비교로 떨어진다.",
+        "enum": [
+          "gt",
+          "gte",
+          "lt",
+          "lte",
+          "eq",
+          "top_percent",
+          "top_count"
+        ],
+        "title": "EligibilityOperator",
+        "type": "string"
+      },
       "EligibilityRule": {
         "properties": {
           "field_id": {
@@ -1756,7 +1750,7 @@
             "type": "string"
           },
           "operator": {
-            "$ref": "#/components/schemas/ComparisonOperator"
+            "$ref": "#/components/schemas/EligibilityOperator"
           },
           "value": {
             "title": "Value",
@@ -1919,6 +1913,7 @@
           "future_data",
           "missing_eligibility",
           "eligibility_failed",
+          "eligibility_rank_cut",
           "missing_factor",
           "score_threshold",
           "regime_blocked",
@@ -1938,31 +1933,6 @@
         ],
         "title": "ExecutionCore",
         "type": "string"
-      },
-      "ExecutionStep": {
-        "properties": {
-          "fee_bps": {
-            "default": 15.0,
-            "title": "Fee Bps",
-            "type": "number"
-          },
-          "participation_rate": {
-            "default": 0.1,
-            "title": "Participation Rate",
-            "type": "number"
-          },
-          "slippage_bps": {
-            "default": 10.0,
-            "title": "Slippage Bps",
-            "type": "number"
-          },
-          "timing": {
-            "$ref": "#/components/schemas/ExecutionTiming",
-            "default": "next_open"
-          }
-        },
-        "title": "ExecutionStep",
-        "type": "object"
       },
       "ExecutionTiming": {
         "enum": [
@@ -2363,20 +2333,6 @@
             "title": "Plan Hash",
             "type": "string"
           },
-          "referenced_factor_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Referenced Factor Ids",
-            "type": "array"
-          },
-          "referenced_subgraph_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Referenced Subgraph Ids",
-            "type": "array"
-          },
           "registry_version": {
             "title": "Registry Version",
             "type": "string"
@@ -2403,8 +2359,6 @@
           "output_node_id",
           "steps",
           "required_field_ids",
-          "referenced_factor_ids",
-          "referenced_subgraph_ids",
           "minimum_history_sessions",
           "missing_policy"
         ],
@@ -2500,11 +2454,6 @@
       },
       "FactorGraph": {
         "properties": {
-          "missing_policy": {
-            "$ref": "#/components/schemas/MissingPolicy",
-            "default": "drop",
-            "deprecated": true
-          },
           "nodes": {
             "items": {
               "anyOf": [
@@ -2537,12 +2486,6 @@
                 },
                 {
                   "$ref": "#/components/schemas/ConditionalNode"
-                },
-                {
-                  "$ref": "#/components/schemas/SavedFactorNode"
-                },
-                {
-                  "$ref": "#/components/schemas/SavedSubgraphNode"
                 }
               ]
             },
@@ -2563,14 +2506,6 @@
       },
       "FactorGraphRequest": {
         "properties": {
-          "factor_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Factor Ids",
-            "type": "array"
-          },
           "graph": {
             "$ref": "#/components/schemas/FactorGraph"
           },
@@ -2590,14 +2525,6 @@
               "type": "string"
             },
             "title": "Parameter Ids",
-            "type": "array"
-          },
-          "subgraph_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Subgraph Ids",
             "type": "array"
           }
         },
@@ -2758,14 +2685,6 @@
             ],
             "title": "Expected Data Snapshot Id"
           },
-          "factor_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Factor Ids",
-            "type": "array"
-          },
           "graph": {
             "$ref": "#/components/schemas/FactorGraph"
           },
@@ -2785,14 +2704,6 @@
               "$ref": "#/components/schemas/ResolvedFactorParameter"
             },
             "title": "Parameters",
-            "type": "array"
-          },
-          "subgraph_ids": {
-            "default": [],
-            "items": {
-              "type": "string"
-            },
-            "title": "Subgraph Ids",
             "type": "array"
           }
         },
@@ -3057,11 +2968,6 @@
               }
             ],
             "title": "Default From"
-          },
-          "deprecated": {
-            "default": false,
-            "title": "Deprecated",
-            "type": "boolean"
           },
           "description_key": {
             "anyOf": [
@@ -5622,6 +5528,17 @@
             "title": "Net Exposure",
             "type": "number"
           },
+          "risk_factor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Factor Id"
+          },
           "risk_field_id": {
             "anyOf": [
               {
@@ -5669,7 +5586,7 @@
         "type": "object"
       },
       "RunEnvironment": {
-        "description": "한 번의 실행이 놓인 환경 — 시장·빈도·기간·유니버스·체결·비용·결측 정책(spec D6).\n\n전략 문서가 아니라 실행이 소유하는 사실이다. 같은 전략을 다른 기간·유니버스·수수료로\n돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도\n전략 revision 이 늘지 않는다.\n\nenum 은 현재 소유 위치(`domain.strategy` 의 `Market`·`DataFrequency`·`ExecutionTiming`,\n`domain.factor` 의 `MissingPolicy`)를 그대로 읽는다. 물리 이동은 `DataStep`·`ExecutionStep`\n이 사라지는 P2-03 이다 — 지금 옮기면 `domain.strategy` 가 재수출해야 하고 의존 화살표가\n순환한다.",
+        "description": "한 번의 실행이 놓인 환경 — 시장·빈도·기간·유니버스·체결·비용·결측 정책(spec D6).\n\n전략 문서가 아니라 실행이 소유하는 사실이다. 같은 전략을 다른 기간·유니버스·수수료로\n돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도\n전략 revision 이 늘지 않는다.\n\n`Market`·`DataFrequency`·`ExecutionTiming` 은 `DataStep`·`ExecutionStep` 이 사라진 P2-03\n에서 이 모듈로 옮겨 왔다. `domain/strategy` 는 이 enum 을 더 이상 공개하지 않는다 —\n호환 재수출을 두면 `domain.strategy → domain.backtest` 화살표가 생겨 기존 반대 방향과\n순환이 된다. `MissingPolicy` 는 `domain.factor` 가 계속 소유한다.",
         "properties": {
           "end": {
             "format": "date",
@@ -5950,30 +5867,6 @@
         "title": "SaveStrategyDraftRequest",
         "type": "object"
       },
-      "SavedFactorNode": {
-        "properties": {
-          "factor_id": {
-            "title": "Factor Id",
-            "type": "string"
-          },
-          "kind": {
-            "const": "saved_factor",
-            "title": "Kind",
-            "type": "string"
-          },
-          "node_id": {
-            "title": "Node Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node_id",
-          "factor_id",
-          "kind"
-        ],
-        "title": "SavedFactorNode",
-        "type": "object"
-      },
       "SavedRevisionReference": {
         "description": "Resolve an immutable revision and fail before calculation if its hash differs.",
         "properties": {
@@ -6024,30 +5917,6 @@
           "requires_upgrade"
         ],
         "title": "SavedStrategy",
-        "type": "object"
-      },
-      "SavedSubgraphNode": {
-        "properties": {
-          "kind": {
-            "const": "saved_subgraph",
-            "title": "Kind",
-            "type": "string"
-          },
-          "node_id": {
-            "title": "Node Id",
-            "type": "string"
-          },
-          "subgraph_id": {
-            "title": "Subgraph Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node_id",
-          "subgraph_id",
-          "kind"
-        ],
-        "title": "SavedSubgraphNode",
         "type": "object"
       },
       "SearchActivityView": {
@@ -6218,8 +6087,22 @@
         "title": "SessionView",
         "type": "object"
       },
+      "SignalNormalization": {
+        "description": "팩터 신호를 가중 합으로 합치기 전에 적용하는 횡단면 정규화 (schema 1.2, spec D4).\n\n`NONE` 은 1.1 의 의미(원시값 가중 합)이고, 1.1 문서를 업그레이드할 때 명시된다. 새 문서의\n기본값은 `RANK` 다 — 단위가 다른 팩터(PBR 과 ROE 등)를 원시값으로 더하면 큰 단위 하나가\n합성 점수를 지배하기 때문이다.",
+        "enum": [
+          "none",
+          "rank",
+          "zscore"
+        ],
+        "title": "SignalNormalization",
+        "type": "string"
+      },
       "SignalStep": {
         "properties": {
+          "normalization": {
+            "$ref": "#/components/schemas/SignalNormalization",
+            "default": "rank"
+          },
           "regime_field_id": {
             "anyOf": [
               {
@@ -6911,7 +6794,7 @@
             "type": "integer"
           },
           "schema_version": {
-            "default": "1.1",
+            "default": "1.2",
             "title": "Schema Version",
             "type": "string"
           },
@@ -7103,9 +6986,6 @@
       },
       "StrategySpec": {
         "properties": {
-          "data": {
-            "$ref": "#/components/schemas/DataStep"
-          },
           "description": {
             "default": "",
             "title": "Description",
@@ -7117,16 +6997,8 @@
               "rules": []
             }
           },
-          "execution": {
-            "$ref": "#/components/schemas/ExecutionStep",
-            "default": {
-              "fee_bps": 15.0,
-              "participation_rate": 0.1,
-              "slippage_bps": 10.0,
-              "timing": "next_open"
-            }
-          },
           "factors": {
+            "default": [],
             "items": {
               "$ref": "#/components/schemas/FactorSignal"
             },
@@ -7181,7 +7053,9 @@
           },
           "signal": {
             "$ref": "#/components/schemas/SignalStep",
-            "default": {}
+            "default": {
+              "normalization": "rank"
+            }
           },
           "title": {
             "title": "Title",
@@ -7190,9 +7064,7 @@
         },
         "required": [
           "identity",
-          "title",
-          "data",
-          "factors"
+          "title"
         ],
         "title": "StrategySpec",
         "type": "object"
@@ -8130,8 +8002,7 @@
           "missing_input",
           "warm_up",
           "divide_by_zero",
-          "group_missing",
-          "reference_missing"
+          "group_missing"
         ],
         "title": "TraceValueStatus",
         "type": "string"

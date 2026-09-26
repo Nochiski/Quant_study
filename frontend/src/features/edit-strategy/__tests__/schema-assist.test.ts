@@ -370,8 +370,9 @@ describe("schema-driven completion", () => {
       explicit: true,
     });
     expect(kind!.options.map((o) => o.label)).toEqual(
-      expect.arrayContaining(["field", "time_series", "saved_factor"]),
+      expect.arrayContaining(["field", "time_series", "conditional"]),
     );
+    expect(kind!.options.map((o) => o.label)).not.toContain("saved_factor");
     const parameterKind = await source({
       text: YAML,
       offset: offsetOf(YAML, "    kind: integer") - "integer".length,

@@ -73,7 +73,9 @@ describe("화면 어휘 커버리지", () => {
   it("runtime schema가 발행한 설명 키에 이름과 한 줄 설명이 있다", () => {
     const stems = [...descriptionStems(SCHEMA, new Set())].sort();
 
-    expect(stems.length).toBeGreaterThan(100);
+    // 순회가 실제로 키를 찾았는지 보는 하한이다. schema 1.2(P2-03)에서 `data`·`execution` 절이
+    // 빠져 1.1 의 100여 개보다 줄었다.
+    expect(stems.length).toBeGreaterThan(80);
     const missing = stems.filter(
       (stem) => tName(stem) === null || tDescription(stem) === null,
     );
@@ -129,9 +131,11 @@ describe("화면 어휘 커버리지", () => {
         (["ko", "en"] as const)
           .filter(
             (locale) =>
-              !(messages[locale][
-                definition.formula_key as keyof (typeof messages)["ko"]
-              ] ?? "").includes(parameter.property_name),
+              !(
+                messages[locale][
+                  definition.formula_key as keyof (typeof messages)["ko"]
+                ] ?? ""
+              ).includes(parameter.property_name),
           )
           .map(
             (locale) =>

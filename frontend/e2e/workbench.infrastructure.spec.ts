@@ -211,7 +211,13 @@ test("matches the professional workbench viewport and theme baseline", async ({
   await expect(page).toHaveScreenshot("strategy-workbench.png");
 });
 
-test("keeps a real debugger trace legible and inside the viewport", async ({
+// P3-02(실행 설정 패널)에서 되살린다. 전략 디버거는 `POST /api/v1/strategies/debug/trace` 를
+// 부르는데, schema 1.2 는 기간·유니버스를 전략 문서에서 빼 실행 요청의 `environment` 로 옮겼고
+// (P2-03) 그 값을 싣는 프론트 배선이 그 패널이다. 그때까지 trace 는 preview·run 과 같은
+// `portfolio.strategy.invalid` + `run_environment.required` 로 거절되어 "추적 재현 정보" 패널이
+// 뜨지 않는다(픽셀 차이가 아니라 요청 거절이다).
+// 되살릴 때 바꿀 것: `strategy-debugger.png` 기준선 4장을 그때 화면으로 재생성.
+test.fixme("keeps a real debugger trace legible and inside the viewport", async ({
   page,
 }) => {
   await openWorkbench(page);

@@ -14,9 +14,9 @@ const FIXTURE = JSON.parse(
 ) as StrategySpec;
 const SPEC: StrategySpec = {
   ...FIXTURE,
-  factors: [FIXTURE.factors[0]!],
+  factors: [FIXTURE.factors![0]!],
 };
-const FACTOR = SPEC.factors[0]!;
+const FACTOR = SPEC.factors![0]!;
 
 const documentState = (): DocumentState => ({
   ...initialDocumentState("yaml", "current source"),
@@ -47,9 +47,7 @@ const plans = (): ExecutionPlansState => ({
       label: FACTOR.label,
       request: {
         graph: FACTOR.graph,
-        factor_ids: [FACTOR.factor_id],
         parameter_ids: [],
-        subgraph_ids: [],
       },
       explanation: {
         registry_version: "registry-v1",
@@ -62,6 +60,7 @@ const plans = (): ExecutionPlansState => ({
           required_field_ids: ["price.close"],
         },
         plan: {
+          missing_policy: "drop",
           graph_hash: "graph-hash",
           plan_hash: "plan-hash",
           registry_version: "registry-v1",
@@ -87,10 +86,7 @@ const plans = (): ExecutionPlansState => ({
             },
           ],
           required_field_ids: ["price.close"],
-          referenced_factor_ids: [],
-          referenced_subgraph_ids: [],
           minimum_history_sessions: 252,
-          missing_policy: "drop",
           as_of_policy: "available_date_lte_as_of",
         },
         narrative: [],
@@ -115,8 +111,8 @@ describe("Strategy IDE debugger composition", () => {
           specHash: "spec-hash",
           expectedSnapshotId: "snapshot-v1",
           expectedRegistryVersion: "registry-v1",
-          start: SPEC.data.start,
-          end: SPEC.data.end,
+          start: null,
+          end: null,
           factors: [
             {
               factorId: "momentum",

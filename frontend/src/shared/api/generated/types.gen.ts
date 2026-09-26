@@ -304,6 +304,22 @@ export type AssistantUnprocessableResponse = {
 };
 
 /**
+ * BacktestEnvironmentRequiredDetail
+ *
+ * 실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
+ */
+export type BacktestEnvironmentRequiredDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.environment_required";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * BacktestResultNotReadyDetail
  */
 export type BacktestResultNotReadyDetail = {
@@ -573,6 +589,9 @@ export type BacktestUnprocessableResponse = {
         code: "backtest.run.invalid";
       } & BacktestRunInvalidDetail)
     | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
         code: "backtest.strategy.requires_upgrade";
       } & BacktestStrategyRequiresUpgradeDetail)
     | ({
@@ -732,11 +751,6 @@ export type ComparisonNode = {
    */
   right_node_id: string;
 };
-
-/**
- * ComparisonOperator
- */
-export type ComparisonOperator = "gt" | "gte" | "lt" | "lte" | "eq";
 
 /**
  * CompileRequest
@@ -927,26 +941,6 @@ export type DataSnapshot = {
 };
 
 /**
- * DataStep
- */
-export type DataStep = {
-  /**
-   * End
-   */
-  end: string;
-  frequency?: DataFrequency;
-  market?: Market;
-  /**
-   * Start
-   */
-  start: string;
-  /**
-   * Universe Id
-   */
-  universe_id: string;
-};
-
-/**
  * DataWarning
  */
 export type DataWarning = {
@@ -1117,6 +1111,22 @@ export type DrawdownPoint = {
 };
 
 /**
+ * EligibilityOperator
+ *
+ * 유니버스 필터 한 줄의 비교 방식 (schema 1.2, spec D3 S5).
+ *
+ * 앞의 다섯(`gt`~`eq`)은 후보 하나의 값만 보면 판정되는 **절대** 규칙이고, `top_*` 는 같은
+ * 기준일 프레임의 **횡단면** 순위를 봐야 판정된다. `value` 의 의미도 갈린다 — 절대 규칙은
+ * 비교 임계값, `top_percent` 는 비율, `top_count` 는 개수다.
+ *
+ * 이 enum 은 전용이다. 값이 겹친다고 다른 비교 연산자 enum 에 얹으면 `top_*` 가 그 enum 의
+ * 소비자(팩터 그래프 `comparison` 노드 등)로 흘러들어, 모집단 없이 판정할 수 없는 값이
+ * catch-all 분기에서 조용히 다른 비교로 떨어진다.
+ */
+export type EligibilityOperator =
+  "gt" | "gte" | "lt" | "lte" | "eq" | "top_percent" | "top_count";
+
+/**
  * EligibilityRule
  */
 export type EligibilityRule = {
@@ -1124,7 +1134,7 @@ export type EligibilityRule = {
    * Field Id
    */
   field_id: string;
-  operator: ComparisonOperator;
+  operator: EligibilityOperator;
   /**
    * Value
    */
@@ -1226,6 +1236,7 @@ export type ExclusionReason =
   | "future_data"
   | "missing_eligibility"
   | "eligibility_failed"
+  | "eligibility_rank_cut"
   | "missing_factor"
   | "score_threshold"
   | "regime_blocked"
@@ -1239,25 +1250,6 @@ export type ExclusionReason =
  * ExecutionCore
  */
 export type ExecutionCore = "rust" | "python";
-
-/**
- * ExecutionStep
- */
-export type ExecutionStep = {
-  /**
-   * Fee Bps
-   */
-  fee_bps?: number;
-  /**
-   * Participation Rate
-   */
-  participation_rate?: number;
-  /**
-   * Slippage Bps
-   */
-  slippage_bps?: number;
-  timing?: ExecutionTiming;
-};
 
 /**
  * ExecutionTiming
@@ -1488,14 +1480,6 @@ export type FactorExecutionPlan = {
    */
   plan_hash: string;
   /**
-   * Referenced Factor Ids
-   */
-  referenced_factor_ids: Array<string>;
-  /**
-   * Referenced Subgraph Ids
-   */
-  referenced_subgraph_ids: Array<string>;
-  /**
    * Registry Version
    */
   registry_version: string;
@@ -1568,10 +1552,6 @@ export type FactorExplanation = {
  */
 export type FactorGraph = {
   /**
-   * @deprecated
-   */
-  missing_policy?: MissingPolicy;
-  /**
    * Nodes
    */
   nodes: Array<
@@ -1585,8 +1565,6 @@ export type FactorGraph = {
     | GroupNode
     | ComparisonNode
     | ConditionalNode
-    | SavedFactorNode
-    | SavedSubgraphNode
   >;
   /**
    * Output Node Id
@@ -1598,20 +1576,12 @@ export type FactorGraph = {
  * FactorGraphRequest
  */
 export type FactorGraphRequest = {
-  /**
-   * Factor Ids
-   */
-  factor_ids?: Array<string>;
   graph: FactorGraph;
   missing?: MissingPolicy | null;
   /**
    * Parameter Ids
    */
   parameter_ids?: Array<string>;
-  /**
-   * Subgraph Ids
-   */
-  subgraph_ids?: Array<string>;
 };
 
 /**
@@ -1715,20 +1685,12 @@ export type FactorPreviewRequest = {
    * Expected Data Snapshot Id
    */
   expected_data_snapshot_id?: string | null;
-  /**
-   * Factor Ids
-   */
-  factor_ids?: Array<string>;
   graph: FactorGraph;
   missing?: MissingPolicy | null;
   /**
    * Parameters
    */
   parameters?: Array<ResolvedFactorParameter>;
-  /**
-   * Subgraph Ids
-   */
-  subgraph_ids?: Array<string>;
 };
 
 /**
@@ -1889,10 +1851,6 @@ export type FieldContract = {
    * Default From
    */
   default_from?: string | null;
-  /**
-   * Deprecated
-   */
-  deprecated?: boolean;
   /**
    * Description Key
    */
@@ -3501,6 +3459,10 @@ export type RiskStep = {
    */
   net_exposure?: number;
   /**
+   * Risk Factor Id
+   */
+  risk_factor_id?: string | null;
+  /**
    * Risk Field Id
    */
   risk_field_id?: string | null;
@@ -3533,10 +3495,10 @@ export type RollingMetricPoint = {
  * 돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도
  * 전략 revision 이 늘지 않는다.
  *
- * enum 은 현재 소유 위치(`domain.strategy` 의 `Market`·`DataFrequency`·`ExecutionTiming`,
- * `domain.factor` 의 `MissingPolicy`)를 그대로 읽는다. 물리 이동은 `DataStep`·`ExecutionStep`
- * 이 사라지는 P2-03 이다 — 지금 옮기면 `domain.strategy` 가 재수출해야 하고 의존 화살표가
- * 순환한다.
+ * `Market`·`DataFrequency`·`ExecutionTiming` 은 `DataStep`·`ExecutionStep` 이 사라진 P2-03
+ * 에서 이 모듈로 옮겨 왔다. `domain/strategy` 는 이 enum 을 더 이상 공개하지 않는다 —
+ * 호환 재수출을 두면 `domain.strategy → domain.backtest` 화살표가 생겨 기존 반대 방향과
+ * 순환이 된다. `MissingPolicy` 는 `domain.factor` 가 계속 소유한다.
  */
 export type RunEnvironment = {
   /**
@@ -3733,24 +3695,6 @@ export type SaveStrategyDraftRequest = {
 };
 
 /**
- * SavedFactorNode
- */
-export type SavedFactorNode = {
-  /**
-   * Factor Id
-   */
-  factor_id: string;
-  /**
-   * Kind
-   */
-  kind: "saved_factor";
-  /**
-   * Node Id
-   */
-  node_id: string;
-};
-
-/**
  * SavedRevisionReference
  *
  * Resolve an immutable revision and fail before calculation if its hash differs.
@@ -3787,24 +3731,6 @@ export type SavedStrategy = {
    * Spec Hash
    */
   spec_hash: string;
-};
-
-/**
- * SavedSubgraphNode
- */
-export type SavedSubgraphNode = {
-  /**
-   * Kind
-   */
-  kind: "saved_subgraph";
-  /**
-   * Node Id
-   */
-  node_id: string;
-  /**
-   * Subgraph Id
-   */
-  subgraph_id: string;
 };
 
 /**
@@ -3924,9 +3850,21 @@ export type SessionView = {
 };
 
 /**
+ * SignalNormalization
+ *
+ * 팩터 신호를 가중 합으로 합치기 전에 적용하는 횡단면 정규화 (schema 1.2, spec D4).
+ *
+ * `NONE` 은 1.1 의 의미(원시값 가중 합)이고, 1.1 문서를 업그레이드할 때 명시된다. 새 문서의
+ * 기본값은 `RANK` 다 — 단위가 다른 팩터(PBR 과 ROE 등)를 원시값으로 더하면 큰 단위 하나가
+ * 합성 점수를 지배하기 때문이다.
+ */
+export type SignalNormalization = "none" | "rank" | "zscore";
+
+/**
  * SignalStep
  */
 export type SignalStep = {
+  normalization?: SignalNormalization;
   /**
    * Regime Field Id
    */
@@ -4504,17 +4442,15 @@ export type StrategySourceKind = "saved_revision" | "inline_draft";
  * StrategySpec
  */
 export type StrategySpec = {
-  data: DataStep;
   /**
    * Description
    */
   description?: string;
   eligibility?: EligibilityStep;
-  execution?: ExecutionStep;
   /**
    * Factors
    */
-  factors: Array<FactorSignal>;
+  factors?: Array<FactorSignal>;
   identity: StrategyIdentity;
   /**
    * Parameters
@@ -5137,12 +5073,7 @@ export type TraceUnprocessableResponse = {
  * TraceValueStatus
  */
 export type TraceValueStatus =
-  | "ok"
-  | "missing_input"
-  | "warm_up"
-  | "divide_by_zero"
-  | "group_missing"
-  | "reference_missing";
+  "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
 
 /**
  * TurnAcceptedView

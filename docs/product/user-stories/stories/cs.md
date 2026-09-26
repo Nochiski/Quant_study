@@ -115,6 +115,9 @@
 - Given 새 전략, Then 결합 정규화 기본값은 `rank`다. 1.1에서 올라온 문서는 `none`으로 예전 결과를
   그대로 낸다.
 - Given 정규화를 `none`으로 두고 단위가 다른 팩터를 섞은 문서, Then 단위가 다르다는 경고가 뜬다(P2-07).
+- 비고: backend 에는 `signal.normalization`(`none`·`rank`·`zscore`, 새 문서 기본값 `rank`)과 가중 합
+  전의 횡단면 정규화가 있다(P2-04). 추적 화면 표시(P3-01), 단위 경고(P2-07), 업그레이더의 `none`
+  명시(P2-09)가 아직 없어 상태는 `예정`이다.
 
 ### US-CS-06 거래대금 상위 20% 같은 횡단면 필터와 변동성 역가중을 쓴다
 
@@ -134,6 +137,13 @@
 - Given 알파 팩터와 변동성 팩터가 있는 전략, When 비중 방식을 위험 기반으로 두고 변동성 팩터를
   고르면, Then 변동성 팩터는 합성 점수에서 빠지고 비중에만 쓰인다.
 - Given 변동성 팩터를 빼면 알파 팩터가 하나도 남지 않는 문서, Then compile 오류가 난다.
+- 비고: backend 에는 횡단면 eligibility(`top_percent`·`top_count`, 규칙마다 따로 센 모집단의 순위로
+  자르는 2-pass)와 순위 탈락 사유 `eligibility_rank_cut` 이 있다(P2-05). 변동성 역가중도
+  backend 에 있다(P2-06): `weighting: risk` 에서 `risk.risk_factor_id` 가 가리키는 팩터는 합성
+  점수와 분모에서 빠지고(warning `strategy.risk.risk_factor_excluded`), 정규화 전 원시값의 역수로
+  비중을 나눈다. 빼고 나서 알파가 없으면 compile error `strategy.signal.no_alpha_factor` 다.
+  화면에서 그 필드를 고르는 흐름과 추적 화면 표시(P3-01), e2e(P5-03)가 아직 없어 상태는
+  `예정`이다.
 
 ### US-CS-07 노드 캔버스에서 끌어서 잇고 되돌린다
 
@@ -172,6 +182,6 @@
   바뀌지 않고 새 버전을 쓸지 고를 수 있다.
 
 제품 결정 필요: lang2 설계는 `saved_factor`·`saved_subgraph`와 재사용 팩터 라이브러리(M8)를
-non-goal로 두고 1.2에서 두 노드를 없앤다(P2-06). 사용자 팩터를 어디에 저장할지(전략 리비전과
+non-goal로 두고 1.2에서 두 노드를 없앴다(P2-06). 사용자 팩터를 어디에 저장할지(전략 리비전과
 같은 저장소인지, Factor Registry 확장인지), 버전을 어떻게 고정할지, 전략 해시에 무엇을 넣을지를
 정해야 한다. 지금은 카탈로그 팩터 추가와 YAML 복사만 된다.

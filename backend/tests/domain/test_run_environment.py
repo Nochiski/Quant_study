@@ -1,4 +1,4 @@
-"""P2-01: 실행 설정(`RunEnvironment`) 값 타입·canonical hash·1.1 브리지·런타임 스키마."""
+"""P2-01·P2-03: 실행 설정(`RunEnvironment`) 값 타입·canonical hash·필수 규칙·런타임 스키마."""
 
 from __future__ import annotations
 
@@ -7,55 +7,24 @@ from datetime import date
 
 import pytest
 
-from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
-    InMemoryStrategyRepository,
-)
-from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
-from strategy_workbench.domain.backtest._models import _execution_constraint_rows
 from strategy_workbench.domain.backtest.facade.environment import (
     RUN_ENVIRONMENT_CONSTRAINTS,
-    LegacyMissingPolicyConflictError,
+    DataFrequency,
+    ExecutionTiming,
+    Market,
+    MissingRunEnvironmentError,
     RunEnvironment,
-    environment_from_legacy_spec,
     environment_hash,
-    resolve_environment,
-    resolve_graph_missing_policy,
+    require_environment,
     run_environment_canonical_json,
     run_environment_schema,
     run_environment_schema_hash,
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
-from strategy_workbench.domain.strategy.facade.specification import (
-    DataFrequency,
-    ExecutionTiming,
-    Market,
-    StrategySpec,
-)
-
-
-def _template() -> StrategySpec:
-    return StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
-    ).template()
 
 
 def _environment() -> RunEnvironment:
     return RunEnvironment(start=date(2020, 1, 1), end=date(2020, 12, 31), universe_id="KOSPI200")
-
-
-def _spec_with_missing_policies(*policies: MissingPolicy) -> StrategySpec:
-    """팩터마다 1.1 `graph.missing_policy` 만 다른 문서."""
-    template = _template()
-    source = template.factors[0]
-    factors = tuple(
-        replace(
-            source,
-            factor_id=factor_id,
-            graph=replace(source.graph, missing_policy=policy),
-        )
-        for factor_id, policy in zip("ab", policies, strict=True)
-    )
-    return replace(template, factors=factors)
 
 
 def test_defaults_match_the_design_contract() -> None:
@@ -137,16 +106,24 @@ def test_reversed_dates_are_rejected_at_construction() -> None:
         replace(_environment(), start=date(2021, 1, 1), end=date(2020, 1, 1))
 
 
-def test_missing_constraint_row_names_the_pointer_instead_of_a_bare_key_error() -> None:
-    """포인터 rename 은 이 모듈의 import 를 깨뜨린다 — 즉 부팅이 죽는다. 맥락 없는 KeyError 로
-    떨어지지 않고 사라진 포인터와 현재 카탈로그를 실어야 추적할 수 있다."""
-    with pytest.raises(LookupError) as error:
-        # 부팅 시점 방어라 공개 심볼이 없다. 모듈 경로로 직접 부른다.
-        _execution_constraint_rows(("fee_bps", "no_such_field"))
+def test_constraint_rows_point_at_the_run_environment_document() -> None:
+    """P2-03: 범위 행의 owner 가 전략 제약 카탈로그에서 실행 설정으로 옮겨 왔다.
 
-    message = str(error.value)
-    assert "missing=['/execution/no_such_field']" in message
-    assert "/execution/fee_bps" in message
+    1.2 문서에는 `execution` 섹션이 없으므로 `/execution/*` 포인터는 가리킬 곳이 없다. 행이
+    전략 포인터를 그대로 들고 있으면 런타임 스키마가 실행 설정 필드에 남의 문서 경로를 싣는다.
+    """
+    from strategy_workbench.domain.strategy.facade.constraints import scalar_constraint_index
+
+    assert {name: row.pointer for name, row in RUN_ENVIRONMENT_CONSTRAINTS.items()} == {
+        "participation_rate": "/participation_rate",
+        "fee_bps": "/fee_bps",
+        "slippage_bps": "/slippage_bps",
+    }
+    # 진단 코드는 `strategy.*` validator 레지스트리 밖이다.
+    assert all(
+        row.code.startswith("run_environment.") for row in RUN_ENVIRONMENT_CONSTRAINTS.values()
+    )
+    assert not [row for row in scalar_constraint_index() if row.startswith("/execution/")]
 
 
 def test_schema_bounds_come_from_the_same_rows_the_model_validates_with() -> None:
@@ -166,76 +143,24 @@ def test_schema_bounds_come_from_the_same_rows_the_model_validates_with() -> Non
     )
 
 
-def test_bridge_reads_data_execution_and_the_graph_missing_policy() -> None:
-    spec = _template()
-    graph = spec.factors[0].graph
-
-    environment = environment_from_legacy_spec(spec)
-
-    assert environment.market is spec.data.market
-    assert environment.frequency is spec.data.frequency
-    assert (environment.start, environment.end) == (spec.data.start, spec.data.end)
-    assert environment.universe_id == spec.data.universe_id
-    assert environment.timing is spec.execution.timing
-    assert environment.participation_rate == spec.execution.participation_rate
-    assert environment.fee_bps == spec.execution.fee_bps
-    assert environment.slippage_bps == spec.execution.slippage_bps
-    assert environment.missing is graph.missing_policy
-
-
-def test_bridge_without_factors_falls_back_to_the_model_default() -> None:
-    spec = replace(_template(), factors=())
-
-    assert environment_from_legacy_spec(spec).missing is MissingPolicy.DROP
-
-
-def test_bridge_accepts_factors_that_agree_on_one_missing_policy() -> None:
-    spec = _spec_with_missing_policies(MissingPolicy.ZERO, MissingPolicy.ZERO)
-
-    assert environment_from_legacy_spec(spec).missing is MissingPolicy.ZERO
-
-
-def test_bridge_refuses_factors_that_disagree_on_the_missing_policy() -> None:
-    """P2-02: 팩터마다 결측 정책이 다르면 실행 설정 하나로 접을 수 없다 — 조용히 고르지 않는다."""
-    spec = _spec_with_missing_policies(MissingPolicy.ZERO, MissingPolicy.DROP)
-
-    with pytest.raises(LegacyMissingPolicyConflictError) as info:
-        environment_from_legacy_spec(spec)
-
-    message = str(info.value)
-    assert info.value.code == "run_environment.missing_policy_conflict"
-    assert info.value.by_factor == (("a", MissingPolicy.ZERO), ("b", MissingPolicy.DROP))
-    # error-messages.md: 식별자와 기대 vs 실제가 메시지에 들어간다.
-    assert "a=zero" in message and "b=drop" in message
-    assert "expected=" in message and "factors=2" in message
-    # 막다른 길이 아니라는 안내: 명시 실행 설정을 주면 이 문서로도 실행할 수 있다.
-    assert "environment 를 명시하면" in message and "통과한다" in message
-
-
-def test_single_graph_missing_policy_falls_back_to_the_document() -> None:
-    """실행 설정이 없는 팩터 sandbox 요청의 우선순위(2차 리뷰 P3).
-
-    `resolve_environment` 이 전략 실행에 대해 하는 판정과 같은 규칙이라 owner 옆에서 고정한다.
-    """
-    graph = replace(_template().factors[0].graph, missing_policy=MissingPolicy.ZERO)
-
-    assert resolve_graph_missing_policy(graph, None) is MissingPolicy.ZERO
-    assert resolve_graph_missing_policy(graph, MissingPolicy.DROP) is MissingPolicy.DROP
-
-
-def test_explicit_environment_skips_the_conflicting_legacy_values() -> None:
-    spec = _spec_with_missing_policies(MissingPolicy.ZERO, MissingPolicy.DROP)
+def test_explicit_environment_is_returned_unchanged() -> None:
     explicit = _environment()
 
-    assert resolve_environment(spec, explicit) is explicit
+    assert require_environment(explicit, requested_by="test") is explicit
 
 
-def test_explicit_environment_wins_over_the_legacy_document() -> None:
-    spec = _template()
-    explicit = replace(_environment(), fee_bps=99.0)
+def test_missing_environment_is_refused_with_a_coded_diagnostic() -> None:
+    """P2-03: 1.2 문서에는 기간·유니버스가 없다. 기본값을 지어내면 사용자가 지정한 적 없는
+    구간으로 백테스트가 돌고 매니페스트가 그 값을 사실로 기록한다."""
+    with pytest.raises(MissingRunEnvironmentError) as info:
+        require_environment(None, requested_by="portfolio.preview('퀄리티 모멘텀')")
 
-    assert resolve_environment(spec, explicit) is explicit
-    assert resolve_environment(spec, None) == environment_from_legacy_spec(spec)
+    message = str(info.value)
+    assert info.value.code == "run_environment.required"
+    # error-messages.md: 식별자와 기대 vs 실제가 메시지에 들어간다.
+    assert "requested_by=portfolio.preview('퀄리티 모멘텀')" in message
+    assert "expected=" in message and "got=None" in message
+    assert "실행 설정을 지정하라" in message
 
 
 def test_schema_publishes_type_default_and_enum_for_every_field() -> None:

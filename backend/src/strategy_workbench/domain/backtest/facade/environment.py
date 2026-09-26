@@ -1,16 +1,19 @@
-from strategy_workbench.domain.backtest._bridge import (
-    LegacyMissingPolicyConflictError,
-    environment_from_legacy_spec,
-    resolve_environment,
-    resolve_graph_missing_policy,
-)
 from strategy_workbench.domain.backtest._canonical import (
     environment_hash,
     run_environment_canonical_json,
 )
 from strategy_workbench.domain.backtest._models import (
+    CATALOG_UNIVERSE,
+    DEFAULT_MISSING_POLICY,
     RUN_ENVIRONMENT_CONSTRAINTS,
+    DataFrequency,
+    ExecutionTiming,
+    Market,
     RunEnvironment,
+)
+from strategy_workbench.domain.backtest._requirement import (
+    MissingRunEnvironmentError,
+    require_environment,
 )
 from strategy_workbench.domain.backtest._schema import (
     RUN_ENVIRONMENT_SCHEMA_ID,
@@ -19,14 +22,17 @@ from strategy_workbench.domain.backtest._schema import (
 )
 
 __all__ = [
+    "CATALOG_UNIVERSE",
+    "DEFAULT_MISSING_POLICY",
     "RUN_ENVIRONMENT_CONSTRAINTS",
     "RUN_ENVIRONMENT_SCHEMA_ID",
-    "LegacyMissingPolicyConflictError",
+    "DataFrequency",
+    "ExecutionTiming",
+    "Market",
+    "MissingRunEnvironmentError",
     "RunEnvironment",
-    "environment_from_legacy_spec",
     "environment_hash",
-    "resolve_environment",
-    "resolve_graph_missing_policy",
+    "require_environment",
     "run_environment_canonical_json",
     "run_environment_schema",
     "run_environment_schema_hash",

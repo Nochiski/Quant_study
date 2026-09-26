@@ -97,13 +97,14 @@ test(
     await expect(problems).toContainText("혹시 `max_name_weight`인가요?");
 
     // 1.0에서만 쓰던 키를 적으면: 문장이 그 사실과 할 일(지우거나 업그레이드)을 말하고, 화면이
-    // 업그레이드 안내를 띄운다.
+    // 업그레이드 안내를 띄운다. schema 1.2(P2-03)에는 `execution` 절이 없어 1.0 의
+    // `signal.method` 를 쓴다.
     await replaceSource(
       page,
       mustReplace(
         valid,
-        "  timing: next_open\n",
-        "  timing: next_open\n  order_style: market\n",
+        "portfolio:\n",
+        "signal:\n  method: weighted_sum\nportfolio:\n",
       ),
     );
     await expectPhase(page, "구조 오류");

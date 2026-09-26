@@ -105,7 +105,7 @@ const history = (
 });
 
 type Connection = {
-  /** 실제로 enqueue했으면 true. 이미 닫힌 컬트롤러면 조용히 false. */
+  /** 실제로 enqueue했으면 true. 이미 닫힌 컨트롤러면 조용히 false. */
   push: (item: AssistantEventEnvelopeView) => boolean;
   /** 봉투로 좁혀지지 않는 프레임까지 그대로 밀어 넣는다. */
   pushFrame: (raw: string) => void;
@@ -139,8 +139,8 @@ const server = setupServer(
       return HttpResponse.json(reply.body, { status: reply.status });
     }
     let controller!: ReadableStreamDefaultController<Uint8Array>;
-    // 닫힌 컬트롤러에 enqueue하면 `Invalid state`로 던진다. 어떤 테스트는 읽기를 끊은 뒤에도
-    // 프레임을 밀어 "전달되지 않는다"를 보는데, 중단 전파가 말아서 컬트롤러를 먼저 닫을 수 있다.
+    // 닫힌 컨트롤러에 enqueue하면 `Invalid state`로 던진다. 어떤 테스트는 읽기를 끊은 뒤에도
+    // 프레임을 밀어 "전달되지 않는다"를 보는데, 중단 전파가 앞서서 컨트롤러를 먼저 닫을 수 있다.
     // 그때 예외로 죽으면 부하에 따라 결과가 갈린다. 예외 메시지를 보고 판별하지 않고
     // 닫힌 시점을 직접 기록해 읽는다. 이미 닫혔다면 전달할 것이 없다 — 테스트가 보려는 상태 그 자체다.
     let closed = false;
@@ -589,8 +589,8 @@ data: ${JSON.stringify({
       lastSequence: -1,
     });
 
-    // rerender 직후 **같은 동기 턴**에 밀어 넣는다. 중단 전파는 최소한 번의 microtask를
-    // 타므로 여기서는 컬트롤러가 반드시 열려 있다. await를 먼저 거치면 닫힐 수 있고,
+    // rerender 직후 **같은 동기 턴**에 밀어 넣는다. 중단 전파는 최소 한 번의 microtask를
+    // 타므로 여기서는 컨트롤러가 반드시 열려 있다. await를 먼저 거치면 닫힐 수 있고,
     // 그러면 "무시됐다"가 자명한 참이 돼 리더가 정말 버렸는지를 지키지 못한다.
     const delivered = connections[0].push(envelope(0, "앞 세션 프레임"));
 
@@ -598,7 +598,8 @@ data: ${JSON.stringify({
     expect(attempts[0].signal.aborted).toBe(true);
     expect(attempts[1].url).toContain("/sessions/session-2/events");
 
-    // 실제로 넣었음을 못 박는다. 순서를 되돌려 닫힌 뒤에 밀게 되면 여기서 불이 켜진다.
+    // 실제로 넣었음을 못 박는다. push를 await 뒤로 되돌리면 닫힘이 먼저 이긴 실행에서만 여기가
+    // 빨개진다. 즉 매번 실패하는 것이 아니라 원래의 간헐 실패로 돌아간다.
     expect(delivered).toBe(true);
     await settle();
     expect(onEvent).not.toHaveBeenCalled();

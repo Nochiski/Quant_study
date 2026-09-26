@@ -120,7 +120,7 @@ test.describe("AI 어시스턴트", () => {
   test.describe.configure({ mode: "serial" });
   test.setTimeout(300_000);
 
-  test("설정에서 공급자를 등록하면 활성이 되고 키는 꼬리 4자리만 남는다", async ({
+  test("설정에서 공급자를 등록하면 활성이 되고 키는 꼬리 4자리만 남는다", { tag: ["@story", "@US-DM-01"] }, async ({
     page,
   }) => {
     const section = await ensureProvider(page);
@@ -152,7 +152,7 @@ test.describe("AI 어시스턴트", () => {
     expect(await page.content()).not.toContain(SECRET);
   });
 
-  test("사이드바 질문에 답이 스트리밍되고 새로고침해도 이력과 진행 중 턴이 이어진다", async ({
+  test("사이드바 질문에 답이 스트리밍되고 새로고침해도 이력과 진행 중 턴이 이어진다", { tag: ["@story", "@US-DM-02"] }, async ({
     page,
   }) => {
     await ensureProvider(page);
@@ -253,7 +253,7 @@ test.describe("AI 어시스턴트", () => {
     expect(page.url()).toContain(`/research/strategies/${strategyId}/`);
   });
 
-  test("제안 카드를 미리 보고 적용한 뒤 적용 후 백테스트가 실행 화면까지 간다", async ({
+  test("제안 카드를 미리 보고 적용한 뒤 적용 후 백테스트가 실행 화면까지 간다", { tag: ["@story", "@US-DM-03"] }, async ({
     page,
   }) => {
     await ensureProvider(page);
@@ -335,7 +335,7 @@ test.describe("AI 어시스턴트", () => {
     ).toBeVisible({ timeout: 180_000 });
   });
 
-  test("팩터 그래프를 바꾸는 제안도 적용 후 백테스트가 팩터 계획 조회를 기다려 실행한다", async ({
+  test("팩터 그래프를 바꾸는 제안도 적용 후 백테스트가 팩터 계획 조회를 기다려 실행한다", { tag: ["@story", "@US-CS-04"] }, async ({
     page,
   }) => {
     // C-02 리뷰 P1-1. 그래프가 바뀌면 compile 직후 새 팩터 계획(explain)을 조회하는 동안 실행
@@ -381,7 +381,7 @@ test.describe("AI 어시스턴트", () => {
     );
   });
 
-  test("검색 출처를 링크로 보이고 검증에 실패한 턴은 실패 문구로 끝난다", async ({
+  test("검색 출처를 링크로 보이고 검증에 실패한 턴은 실패 문구로 끝난다", { tag: ["@story", "@US-CS-04"] }, async ({
     page,
   }) => {
     await ensureProvider(page);

@@ -329,11 +329,17 @@ def _fin_pick(ep: str, accode: str, top_only: bool = False,
     순이자이익이 v3 `financial_summary.revenue` 로 들어가 밸류·퀄리티가 오염된다.
     계정명이 다르면 값을 만들지 않는다(NULL) — 잘못 채우느니 비운다(원칙 ④).
     """
-    cond = f"ep = '{ep}' AND accode = '{accode}'"
-    if top_only:
-        cond += " AND p_accode IS NULL"
+    # DQ-6(2026-09-26 실측): 금융업 템플릿은 같은 계정을 **다른 accode** 에 싣는다 — 당기순이익이
+    # 제조업 203170 · 증권 203730 · 은행 202550 · 보험 203250 · 신탁 202290. accode 를 고정하면
+    # 은행·증권·보험 33종목의 순이익이 NULL 이 된다. 그래서 `acc_nm` 이 주어지면 **계정명 + 최상위
+    # (p_accode IS NULL)** 로 고르고 accode 는 문서용 힌트로만 남긴다(R1 의 반대 방향 오염도 막힌다:
+    # 이름이 다르면 안 센다). 계정명이 없으면(cF4002 지표) 종전대로 accode 로 고른다.
     if acc_nm is not None:
-        cond += f" AND acc_nm = '{acc_nm}'"
+        cond = f"ep = '{ep}' AND acc_nm = '{acc_nm}' AND p_accode IS NULL"
+    else:
+        cond = f"ep = '{ep}' AND accode = '{accode}'"
+        if top_only:
+            cond += " AND p_accode IS NULL"
     return f"max(CASE WHEN {cond} THEN val END)"
 
 

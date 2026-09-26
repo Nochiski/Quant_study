@@ -513,8 +513,8 @@ def test_financial_summary_wise_gross_profit_wins(roots, tmp_path: Path) -> None
 
 # ── R1 — accode 충돌(금융업)은 계정명으로 가른다. 실물 절단본으로 본다 ───────
 @pytest.mark.skipif(not FIN_SLICE, reason="stage_slice stg_fin_wise 픽스처 없음")
-def test_financial_summary_acc_nm_whitelist_on_real_slice() -> None:
-    """003540(대신증권)의 cF3002 200000 은 '순이자이익' 이다 — revenue 로 새면 안 된다."""
+def _financial_summary_on_real_slice() -> tuple[list[str], list[tuple]]:
+    """절단본 stg_fin_wise 만으로 financial_summary SQL 을 돌린다(컬럼명, 행)."""
     import duckdb
     from compat.mappings import BY_TABLE
     globs = ", ".join(repr(str(p)) for p in FIN_SLICE)
@@ -539,12 +539,31 @@ def test_financial_summary_acc_nm_whitelist_on_real_slice() -> None:
     finally:
         con.close()
     assert cols == list(BY_TABLE["financial_summary"].columns)
+    return cols, rows
+
+
+def test_financial_summary_acc_nm_whitelist_on_real_slice() -> None:
+    """003540(대신증권)의 cF3002 200000 은 '순이자이익' 이다 — revenue 로 새면 안 된다."""
+    cols, rows = _financial_summary_on_real_slice()
     i_code, i_rev = cols.index("stock_code"), cols.index("revenue")
     by_code: dict[str, set] = {}
     for r in rows:
         by_code.setdefault(r[i_code], set()).add(r[i_rev])
     assert by_code["003540"] == {None}, "금융업 '순이자이익' 이 revenue 로 새고 있다"
     assert any(v is not None for v in by_code["005930"])
+
+
+def test_financial_summary_financial_template_ni_op_by_account_name() -> None:
+    """DQ-6: 증권 템플릿은 당기순이익을 203730, 영업이익을 202820 에 싣는다(제조업 203170·201370).
+    accode 고정이면 003540 의 ni·op 가 NULL — 계정명+최상위로 골라 2025/12 연결 1,867·3,014 억이 나와야 한다."""
+    cols, rows = _financial_summary_on_real_slice()
+    i = {c: cols.index(c) for c in ("stock_code", "period", "ni", "op", "revenue")}
+    r = {row[i["period"]]: row for row in rows if row[i["stock_code"]] == "003540"}
+    assert "2025/12" in r, sorted(r)
+    assert r["2025/12"][i["ni"]] == 1867 and r["2025/12"][i["op"]] == 3014
+    assert r["2025/12"][i["revenue"]] is None            # R1 그대로: '순이자이익' 은 매출이 아니다
+    s = {row[i["period"]]: row for row in rows if row[i["stock_code"]] == "005930"}
+    assert s["2025/12"][i["ni"]] is not None and s["2025/12"][i["op"]] is not None
 
 
 # ── (b) 멱등 ─────────────────────────────────────────────────────────────────

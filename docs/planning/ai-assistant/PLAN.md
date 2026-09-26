@@ -6,7 +6,7 @@ current_phase: P0,A,C
 current_pr: P0-01,A-01,A-07,C-01
 active_prs: [P0-01, A-01, A-07, C-01]
 parallel_window: [P0-01, A-01, A-07, C-01]
-last_updated: 2026-09-21T11:48:12+09:00
+last_updated: 2026-09-26T13:48:24+09:00
 planned_prs: 14
 merged_prs: 0
 approved_prs: 1
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `P0-01, A-01, A-07, C-01` |
 | Progress | `0 / 14 merged (0%)` |
 | Approved | `1 / 14` |
-| Aggregated at | `2026-09-21 11:48 KST` |
+| Aggregated at | `2026-09-26 13:48 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -129,6 +129,12 @@ progress_percent: 0
 - 2026-09-21 C-01: `MIN_CALL_OUTPUT_TOKENS`의 owner가 `domain/assistant/_models.py`로 옮겨졌다.
   adapter가 같은 이름을 모듈 수준에서 다시 선언하면 `tests/architecture/test_turn_budget_constants.py`가
   실패한다. 공급자마다 다른 값이 정말 필요해지면 adapter 리터럴이 아니라 `TurnRequest`로 승격한다.
+- 2026-09-26 C-01 1차 리뷰 반영: PLAN 페이즈 표 C 행이 cp949 깨진 글자로 커밋돼 있었다. 진행
+  스크립트의 한글 값을 기존 A·B 행처럼 ASCII로 바꾸고, 스크립트가 자기 파일에 비ASCII 바이트가
+  있으면 `-Check`를 포함해 멈추게 했다. NB-9 기준선 테스트는 SDK 하위 클래스로 전송을 바꿔 끼워
+  auto-discovery 체인을 한 번도 지나지 않았다. 기본 클래스 인스턴스를 쓰고 `ANTHROPIC_API_KEY`·
+  `ANTHROPIC_AUTH_TOKEN`을 뺀 경우를 더해, SDK gate 조건을 지우는 돌연변이에서 빨개지게 했다.
+  B-05가 매뉴얼에 새로 넣은 `RUN_LLM_LIVE=1`도 `STRATEGY_WORKBENCH_LIVE_SMOKE`로 고쳤다.
 
 ### A-07 기본값 확정 근거 (2026-09-21)
 
@@ -172,7 +178,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | P0 | Planning package | 1 | 0 | `APPROVED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 0 | `IN_PROGRESS` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `WAITING` |
-| C | Phase A 媛먯궗 ?꾩냽 | 1 | 0 | `SELF_CHECK` |
+| C | Phase A audit follow-up | 1 | 0 | `SELF_CHECK` |
 | **Total** |  | **14** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 

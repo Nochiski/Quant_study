@@ -62,6 +62,8 @@ from .test_adapters_llm_anthropic import (  # noqa: E402  # reason: 위와 같�
 
 _MESSAGE_ID = "msg_sdk_stream_1"
 _MODEL = "claude-opus-5"
+# monkeypatch가 `anthropic.Anthropic`을 팩토리로 바꾸기 전에 기본 클래스를 붙잡아 둔다.
+_BASE_ANTHROPIC = anthropic.Anthropic
 
 
 def _sse(events: list[tuple[str, dict[str, object]]]) -> bytes:
@@ -289,6 +291,12 @@ def _headers_from_a_production_call(monkeypatch: pytest.MonkeyPatch) -> dict[str
     팩토리가 무엇을 넘겼는지가 아니라 소켓에 실린 것을 본다. SDK가 `default_headers`를 인증
     헤더보다 뒤에 합치므로, "넘겼다"와 "실제로 그 값이 나갔다" 사이에 실제로 차이가 생긴다.
     전송 계층만 가짜다 — 클라이언트 생성은 프로덕션 코드가 한다.
+
+    전송을 바꿔 끼울 때 `anthropic.Anthropic`의 **하위 클래스를 만들면 안 된다.** SDK는
+    `type(client) in (Anthropic, AsyncAnthropic)`일 때만 자격 증명 auto-discovery 체인을
+    돌리므로, 하위 클래스로는 그 체인이 gate와 무관하게 절대 돌지 않는다. 그러면 gate가 바뀌어도
+    이 경로의 테스트는 전부 초록이다(1차 리뷰가 SDK gate 돌연변이로 확인했다). 그래서 기본 클래스
+    인스턴스를 돌려주는 팩토리로 바꿔 끼운다.
     """
     seen: list[httpx2.Request] = []
 
@@ -298,14 +306,13 @@ def _headers_from_a_production_call(monkeypatch: pytest.MonkeyPatch) -> dict[str
             200, headers={"content-type": "text/event-stream"}, content=_text_turn_body("답")
         )
 
-    class _MockTransportAnthropic(anthropic.Anthropic):
-        def __init__(self, **kwargs: object) -> None:
-            super().__init__(
-                **kwargs,  # pyright: ignore[reportArgumentType]  # reason: 프로덕션 인자를 그대로 넘긴다
-                http_client=anthropic.DefaultHttpxClient(transport=httpx2.MockTransport(handle)),
-            )
+    def build_base_client(**kwargs: object) -> anthropic.Anthropic:
+        return _BASE_ANTHROPIC(
+            **kwargs,  # pyright: ignore[reportArgumentType]  # reason: 프로덕션 인자를 그대로 넘긴다
+            http_client=anthropic.DefaultHttpxClient(transport=httpx2.MockTransport(handle)),
+        )
 
-    monkeypatch.setattr(client_module.anthropic, "Anthropic", _MockTransportAnthropic)
+    monkeypatch.setattr(client_module.anthropic, "Anthropic", build_base_client)
     client = sdk_client_factory()(SECRET, None)
     with client.stream(
         max_tokens=16,
@@ -346,9 +353,13 @@ def test_custom_header_env_cannot_replace_the_profile_key(
 
 
 def _sdk_credential_env_names() -> tuple[str, ...]:
-    """SDK가 자격 증명 탐색에 읽는 환경 변수 전수.
+    """SDK가 자격 증명·목적지를 정하려고 읽는 환경 변수 전수.
 
-    목록을 손으로 적지 않고 **SDK의 상수에서 읽는다.** 손으로 적으면 SDK가 변수를 하나 더
+    로그(`ANTHROPIC_LOG`)나 프록시 변수처럼 자격 증명·목적지와 무관한 것은 범위 밖이다.
+
+    목록을 손으로 적지 않고 **SDK의 상수에서 읽는다.** 상수가 있는 곳은 SDK private 모듈
+    (`anthropic.lib.credentials._constants`)이다. 모듈 이름이 바뀌면 ImportError로 빨개지므로
+    조용히 넘어가지는 않는다 — 그때 새 위치를 찾아 고치면 된다. 손으로 적으면 SDK가 변수를 하나 더
     읽기 시작해도 기준선이 그대로라 아무것도 빨개지지 않는다 — 그 침묵이 NB-9이 지적한 위험이다.
 
     `_constants.py` 밖에서 읽히는 둘은 여기서 더한다. `ANTHROPIC_CUSTOM_HEADERS`는 클라이언트
@@ -367,21 +378,44 @@ def _sdk_credential_env_names() -> tuple[str, ...]:
     return (*discovered, "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_WEBHOOK_SIGNING_KEY")
 
 
+# 체인 앞단에서 곧바로 끝나게 만드는 둘. 이 둘이 있으면 체인이 돌더라도 나머지 변수는 읽히지 않는다.
+_CHAIN_SHORT_CIRCUIT_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+@pytest.mark.parametrize(
+    "include_direct_keys",
+    [True, False],
+    ids=["every_credential_env", "discovery_chain_env_only"],
+)
 def test_the_only_credential_on_the_wire_is_the_profile_secret(
     monkeypatch: pytest.MonkeyPatch,
+    include_direct_keys: bool,
 ) -> None:
-    """SDK가 읽는 환경 변수를 **전부 심고도** 프로파일 비밀 하나만 나가는지 본다 (감사 NB-9).
+    """SDK가 읽는 자격 증명 환경 변수를 심고도 프로파일 비밀 하나만 나가는지 본다 (감사 NB-9).
 
-    명시 `api_key`가 SDK의 자격 증명 auto-discovery 체인을 gate하기 때문에 오늘은 전부 무해하다.
-    이 테스트가 지키는 것은 그 gate다 — SDK 업그레이드가 gate를 바꾸면 여기서 먼저 드러난다.
-    OpenAI adapter에는 같은 성질의 기준선이 이미 있었고, 이쪽은 4종만 지우는 좁은 형태였다.
+    SDK는 `credentials`·`api_key`·`auth_token`이 모두 없고 클라이언트가 기본 클래스일 때만
+    자격 증명 auto-discovery 체인을 돌린다. 프로덕션은 `api_key`를 명시하므로 오늘은 체인이
+    돌지 않고, 이 테스트가 지키는 것이 그 gate다.
+
+    두 경우가 필요하다.
+
+    - `every_credential_env`: 전부 심는다. 무엇이 새로 읽히든 헤더에는 프로파일 비밀만 있어야 한다.
+      다만 체인이 돌더라도 `ANTHROPIC_API_KEY`가 있으면 체인이 앞단에서 끝나 나머지 변수를 읽지
+      않으므로, 이 경우만으로는 gate 변화를 보지 못한다.
+    - `discovery_chain_env_only`: 앞단에서 끝내는 둘을 **빼고** 체인 변수만 심는다. gate가
+      명시 `api_key`와 무관하게 체인을 돌리기 시작하면 체인이 심어 둔 프로파일·설정 디렉터리를
+      읽으러 가서 클라이언트 생성이나 헤더 단언에서 빨개진다. SDK gate에서 `api_key`·`auth_token`
+      조건을 지우는 돌연변이, 기본 클래스 조건까지 지우는 돌연변이 둘 다 이 경우가 잡는다.
 
     심는 값이 전부 `sk-ant-`로 시작하는 이유는 마지막 단언 때문이다. 헤더에 그 접두가 붙은 값이
     프로파일 비밀 말고 또 있으면 주입된 것이 새어 나간 것이다.
     """
     planted = _sdk_credential_env_names()
     for name in planted:
-        monkeypatch.setenv(name, f"sk-ant-ENV-{name}")
+        if include_direct_keys or name not in _CHAIN_SHORT_CIRCUIT_ENV:
+            monkeypatch.setenv(name, f"sk-ant-ENV-{name}")
+        else:
+            monkeypatch.delenv(name, raising=False)
     # 목적지를 바꾸는 둘은 형식이 정해져 있어 위 접두를 쓸 수 없다.
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://evil.example.com")
     monkeypatch.setenv(
@@ -399,8 +433,8 @@ def test_the_only_credential_on_the_wire_is_the_profile_secret(
     assert credentials == [SECRET]
 
 
-def test_the_credential_env_baseline_covers_every_name_the_sdk_reads() -> None:
-    """기준선이 실제로 전수인지 고정한다.
+def test_the_credential_env_baseline_covers_every_credential_name_the_sdk_reads() -> None:
+    """기준선이 자격 증명·목적지 변수의 전수인지 고정한다.
 
     SDK가 `ENV_*` 상수를 더하면 위 테스트가 자동으로 그것을 심지만, 상수 **밖에서** 읽는 변수가
     늘면 여기서 걸리지 않는다. 그래서 오늘 아는 전수(14종)를 수로 못 박아 둔다. SDK를 올릴 때

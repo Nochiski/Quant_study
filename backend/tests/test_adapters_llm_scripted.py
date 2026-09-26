@@ -21,7 +21,9 @@ from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import (
     SCRIPTED_MARKER,
     SLOW_ANSWER_DELAY_SCALE,
     ScriptedLlmProvider,
+    concept_answer,
     factor_window_proposal,
+    idea_to_new_strategy,
     scenario_for,
     search_then_failure,
     simple_answer,
@@ -112,6 +114,10 @@ class _ToolRecorder:
         # 두 낱말이 같이 있으면 앞선 항목이 이긴다 — 선택이 질문 순서에 흔들리지 않게 고정한다.
         ("검색해서 제안해 줘", tool_then_proposal),
         ("모멘텀 창을 줄인 안을 제안해 줘", factor_window_proposal),
+        # "새 전략"은 "제안"보다 앞이라 "새 전략으로 제안해 줘"도 전체 전략을 쓰는 대본을 고른다.
+        ("많이 오른 대형주를 사는 새 전략을 만들어 줘", idea_to_new_strategy),
+        ("새 전략으로 제안해 줘", idea_to_new_strategy),
+        ("샤프 비율이 무슨 뜻이야?", concept_answer),
     ],
 )
 def test_the_question_picks_the_scenario(text: str, expected: object) -> None:
@@ -318,3 +324,39 @@ def _followed_by_another_event(events: list[ChatEvent], tool_name: str) -> bool:
         if isinstance(event, ToolCall) and event.name == tool_name:
             return index + 1 < len(events)
     return False
+
+
+NEW_STRATEGY_SOURCE = 'schema_version: "9.9"\ntitle: ""\n'
+
+
+def test_the_idea_scenario_keeps_the_current_schema_line_and_writes_a_whole_strategy() -> None:
+    """버전은 지어내지 않고 지금 원문에서 가져온다(US-DM-03). compile은 tests/application이 본다."""
+    tools = _ToolRecorder(source_text=NEW_STRATEGY_SOURCE)
+
+    events = list(idea_to_new_strategy(tools))
+
+    assert [call.name for call in tools.calls] == [READ_CURRENT_STRATEGY, PROPOSE_STRATEGY]
+    proposed = tools.calls[1].arguments["source_text"]
+    assert isinstance(proposed, str)
+    assert proposed.startswith('schema_version: "9.9"\ntitle: "KRX 대형 모멘텀"\n')
+    assert "factors:\n" in proposed
+    assert _followed_by_another_event(events, PROPOSE_STRATEGY)
+
+
+def test_the_idea_scenario_submits_a_broken_document_without_a_schema_line() -> None:
+    tools = _ToolRecorder(source_text='title: ""\n')
+
+    list(idea_to_new_strategy(tools))
+
+    assert tools.calls[1].arguments["source_text"] == "title: 깨진 제안\n"
+
+
+def test_the_concept_scenario_explains_in_plain_text_without_tools() -> None:
+    tools = _ToolRecorder()
+
+    events = list(concept_answer(tools))
+
+    assert tools.calls == []
+    text = "".join(event.text for event in events if isinstance(event, TextDelta))
+    assert text.startswith("샤프 비율은 ")
+    assert isinstance(events[-1], Done)

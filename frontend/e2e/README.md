@@ -96,9 +96,24 @@ explicit, and check `git status` afterwards: only the baselines you meant to cha
 This layer owns browser process, server lifecycle, viewport/theme matrix, screenshots and failure
 artifacts. The four visual projects collect only `workbench.infrastructure.spec.ts`; one 1440px
 light project collects `workbench.workflow.spec.ts` so stateful create/revision/backtest scenarios
-execute once against the isolated real backend, and a second one collects
-`assistant.workflow.spec.ts`. Backend contract meaning continues to be owned by the backend and its
+execute once against the isolated real backend, a second one collects
+`assistant.workflow.spec.ts`, and a third one (`chromium-stories`) collects `e2e/stories/`. Backend contract meaning continues to be owned by the backend and its
 generated client.
+
+## User story harness
+
+유저 스토리(`docs/product/user-stories/`)를 지키는 테스트에는 Playwright `tag` 옵션으로 `@story`와
+스토리 ID(`@US-DM-04` 등)를 붙인다. 스토리 하나를 위해 새로 쓴 spec은 `e2e/stories/`에 있고
+`chromium-stories` project(1440 light, 스크린샷 없음)가 모은다. 기존 spec에 붙인 태그는 그 spec의
+project에서 그대로 돈다. 스토리만 골라 돌릴 때도 러너를 쓴다.
+
+```text
+npm run test:e2e -- --grep @story
+npm run test:e2e -- --grep @US-CS-02
+```
+
+태그·스토리·traceability 표의 일치는 저장소 루트의
+`uv run python -m quant_study_dev.user_story_trace`가 검사하고 CI `user-story-harness` job이 돌린다.
 
 ## AI assistant scenarios
 
@@ -114,9 +129,11 @@ re-validation out of the gate. Only the model is fake here.
 
 The script picks a scenario from a keyword in the question (`_scenarios.py`): 창을 줄 proposes a
 shorter momentum window, so the factor graph changes and the page has to fetch an uncached factor
-plan before "apply then backtest" can run; 제안 asks for a tool call followed by a proposal that only
-changes the title; 검색 shows search activity and then three rejected proposals; 천천히 streams a
-long answer so a mid-turn reload exercises resume; anything else gets a short answer.
+plan before "apply then backtest" can run; 새 전략 keeps the editor's `schema_version` line and
+proposes a whole strategy, so a blank new strategy can reach a backtest (user story US-DM-03); 제안 asks
+for a tool call followed by a proposal that only changes the title; 검색 shows search activity and then
+three rejected proposals; 천천히 streams a long answer so a mid-turn reload exercises resume; 샤프
+explains the Sharpe ratio in plain words (US-SM-09); anything else gets a short answer.
 
 Assistant history and secrets go to the same isolated runtime directory as the strategy database
 (`e2e/runtime.ts`); without that the run would write into the developer's real chat history and

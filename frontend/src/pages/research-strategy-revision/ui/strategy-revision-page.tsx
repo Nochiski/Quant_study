@@ -7,7 +7,10 @@ import {
   ProposalApplyDialog,
   ProposalApplyFeedback,
   ConflictBanner,
+  DiagnosticsPanel,
   DirtyLeaveGuard,
+  DocumentHistoryActions,
+  DocumentStatus,
   DocumentToolbar,
   FactorGraphPanel,
   RecoveryBanner,
@@ -30,6 +33,8 @@ import {
   useStrategyAssistant,
   useAutosave,
   useCompileDocument,
+  useDiagnosticNavigation,
+  useDocumentHistory,
   useExecutionPlans,
   useRunBacktest,
   useServerDraft,
@@ -216,10 +221,34 @@ export const StrategyRevisionPage = () => {
     },
     [navigate, search, revision, strategyId],
   );
+  const openSourceAt = useCallback(
+    (pointer: string | undefined): void => {
+      if (pointer !== undefined) outline.requestSourceReveal(pointer);
+      selectPointer(pointer, "outline");
+    },
+    [outline, selectPointer],
+  );
+  // outline 다음에 부른다 — 탭 전환 뒤 진단 범위로 가는 effect가 outline의 pointer reveal 뒤에 서야
+  // 더 정확한 범위가 남는다(WORKFLOW P1-01).
+  const problems = useDiagnosticNavigation({
+    state: document,
+    view,
+    sourceView: stored.format,
+    form: form.projection,
+    tree: form.tree,
+    schemaLoaded: assist.schema !== null,
+    onSelectPointer: (pointer) => selectPointer(pointer, "graph"),
+    onOpenSource: openSourceAt,
+  });
+  // 되돌리기·다시 실행은 편집기 이력 하나가 owner다(WORKFLOW P1-02). 탭 목록 줄의 버튼(탭 패널 밖)과
+  // IDE 전역 단축키가 같은 명령을 부른다.
+  const history = useDocumentHistory(document);
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
   const onUpgradeEditorReady = documentUpgrade.onEditorReady;
+  const onProblemsEditorReady = problems.onEditorReady;
+  const onHistoryEditorReady = history.onEditorReady;
   const onProposalEditorReady = proposalApply.onEditorReady;
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
@@ -227,6 +256,8 @@ export const StrategyRevisionPage = () => {
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
       onUpgradeEditorReady(editor);
+      onProblemsEditorReady(editor);
+      onHistoryEditorReady(editor);
       onProposalEditorReady(editor);
     },
     [
@@ -235,6 +266,8 @@ export const StrategyRevisionPage = () => {
       onSnippetEditorReady,
       onTransactionsEditorReady,
       onUpgradeEditorReady,
+      onProblemsEditorReady,
+      onHistoryEditorReady,
     ],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
@@ -318,6 +351,8 @@ export const StrategyRevisionPage = () => {
         validateDisabled={!canValidate}
         onSave={save}
         saveDisabled={!canSave}
+        onUndo={history.undo}
+        onRedo={history.redo}
         symbols={outline.symbols}
         onSelectSymbol={selectSymbol}
         saveTone={saveStatusTone(document, status)}
@@ -334,6 +369,15 @@ export const StrategyRevisionPage = () => {
             },
             replace: true,
           })
+        }
+        documentHistory={<DocumentHistoryActions history={history} />}
+        documentStatus={<DocumentStatus state={document} />}
+        problems={
+          <DiagnosticsPanel
+            diagnostics={problems.diagnostics}
+            stale={problems.stale}
+            onSelect={problems.selectDiagnostic}
+          />
         }
         editorActions={
           <DocumentToolbar
@@ -383,6 +427,7 @@ export const StrategyRevisionPage = () => {
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
               selectedPointer={search.path}
+              revealSignal={problems.revealSignal}
             />
           ),
           graph: (
@@ -390,6 +435,7 @@ export const StrategyRevisionPage = () => {
               state={executionPlans}
               diagnostics={currentDiagnostics(document)}
               selectedPointer={search.path}
+              revealSignal={problems.revealSignal}
               editing={{
                 tree: form.tree,
                 schema: assist.schema,
@@ -400,6 +446,7 @@ export const StrategyRevisionPage = () => {
                   factors:
                     assist.inspectorSource.factorCatalog?.factors ?? null,
                 },
+                operators: assist.operators,
                 onOpenForm: openForm,
                 documentKey: document.documentEpoch,
               }}

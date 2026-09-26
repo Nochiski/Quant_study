@@ -1,7 +1,18 @@
 import type { StrategyDocument } from "../../../shared/api";
 import type { DocumentState } from "./document-state";
 
-const UNSUPPORTED_VERSION_CODE = "structure.unsupported_schema_version";
+/**
+ * 업그레이드를 제안해야 하는 backend 구조 진단 코드.
+ *
+ * - `structure.unsupported_schema_version`: 문서가 스스로 지원하지 않는 버전이라고 적었다.
+ * - `structure.legacy_shape`: 버전 줄은 현재 버전인데 본문이 1.0 문법이다(P1-05). 이 경우도
+ *   사용자가 할 일은 업그레이드라 배너를 같이 띄운다. 어떤 문법이 1.0인지는 backend가 판정하고
+ *   frontend는 코드만 본다(은퇴 버전 문자열을 갖지 않는다는 기존 규칙 그대로).
+ */
+const UPGRADE_SUGGESTING_CODES = new Set([
+  "structure.unsupported_schema_version",
+  "structure.legacy_shape",
+]);
 
 /** 열린 revision 중 배너 판정에 필요한 봉투 필드만 받는다(생성 타입에서 파생, 복제 아님). */
 export type StoredRevisionMeta = Pick<
@@ -23,17 +34,17 @@ export type StoredRevisionMeta = Pick<
 export type UpgradeAvailability =
   { kind: "none" } | { kind: "upgradeable" } | { kind: "frozen-generated" };
 
-const compileRejectsSchemaVersion = (state: DocumentState): boolean =>
+const compileSuggestsUpgrade = (state: DocumentState): boolean =>
   state.compiled !== null &&
   state.compiledVersion === state.sourceVersion &&
-  state.compiled.diagnostics.some(
-    (diagnostic) => diagnostic.code === UNSUPPORTED_VERSION_CODE,
+  state.compiled.diagnostics.some((diagnostic) =>
+    UPGRADE_SUGGESTING_CODES.has(diagnostic.code),
   );
 
 /**
- * 판정은 backend 진단으로만 한다(지원 버전·은퇴 버전 모두 backend가 소유). 현재 텍스트가 무슨
- * 버전이든 backend가 "지원하지 않음"이라 답했으면 업그레이드를 제안하고, 변환 가능 여부는 업그레이드
- * endpoint가 판정한다.
+ * 판정은 backend 진단으로만 한다(지원 버전·은퇴 버전·1.0 문법 판정 모두 backend가 소유). 현재
+ * 텍스트가 무슨 버전이든 backend가 "지원하지 않음" 또는 "1.0 문법"이라 답했으면 업그레이드를
+ * 제안하고, 변환 가능 여부는 업그레이드 endpoint가 판정한다.
  */
 export const decideDocumentUpgrade = (
   state: DocumentState,
@@ -41,7 +52,7 @@ export const decideDocumentUpgrade = (
 ): UpgradeAvailability => {
   // 현재 텍스트가 우선한다: legacy 동결 row를 열었더라도 편집기에 은퇴 버전 텍스트를 넣었으면
   // 업그레이드가 유일한 진행 경로다(P2-02 리뷰 P2-001).
-  if (compileRejectsSchemaVersion(state)) return { kind: "upgradeable" };
+  if (compileSuggestsUpgrade(state)) return { kind: "upgradeable" };
   if (
     stored !== null &&
     stored.requires_upgrade &&

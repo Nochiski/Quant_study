@@ -32,7 +32,16 @@ def test_endpoint_serves_the_run_environment_schema_with_its_hash_as_etag() -> N
     assert properties["fee_bps"]["default"] == 15.0
     assert properties["participation_rate"]["default"] == 0.1
     assert properties["slippage_bps"]["default"] == 10.0
-    assert properties["timing"] == {"type": "string", "enum": ["next_open"], "default": "next_open"}
+    assert properties["timing"] == {
+        "type": "string",
+        "enum": ["next_open"],
+        "default": "next_open",
+        "x-description-key": "strategy.field.run_environment.timing",
+    }
+    # 화면 어휘는 frontend i18n 이 렌더하고 backend 는 키 줄기만 싣는다(P1-03 정책, 모든 필드 공통).
+    # 비용 세 필드는 실행 설정 제약 행(`run_environment.contract.*`, P2-03 에서 옮김)의 키를 쓴다.
+    assert all("x-description-key" in prop for prop in properties.values())
+    assert properties["fee_bps"]["x-description-key"] == "run_environment.contract.fee_bps"
     assert properties["missing"]["enum"] == ["drop", "keep", "zero", "cross_sectional_median"]
     assert properties["universe_id"]["x-catalog"] == "universe"
 

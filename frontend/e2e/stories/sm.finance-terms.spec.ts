@@ -54,9 +54,16 @@ test(
       .getByRole("treeitem", { name: /^selection_count/u })
       .click();
     const contract = page.getByRole("complementary", { name: "계약" });
+    // 제목은 필드의 사람 말 이름이고 JSON Pointer는 `Path` 항목으로 내려갔다(lang2 P1-03 화면 어휘).
     await expect(
-      contract.getByRole("heading", { name: "/portfolio/selection_count" }),
+      contract.getByRole("heading", { name: "롱 포트폴리오에 선택할 종목 수" }),
     ).toBeVisible();
+    await expect(
+      contract
+        .getByRole("term")
+        .filter({ hasText: /^Path$/u })
+        .locator("xpath=following-sibling::*[1]"),
+    ).toHaveText("/portfolio/selection_count");
     await expect(contract).toContainText("롱 포트폴리오에 선택할 종목 수");
   },
 );

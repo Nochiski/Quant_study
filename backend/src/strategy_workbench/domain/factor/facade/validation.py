@@ -1,4 +1,5 @@
 from strategy_workbench.domain.factor._validation import (
+    FACTOR_GRAPH_CODES,
     FactorGraphValidation,
     FactorValidationIssue,
     FactorValidationSeverity,
@@ -9,6 +10,7 @@ from strategy_workbench.domain.factor._validation import (
 )
 
 __all__ = [
+    "FACTOR_GRAPH_CODES",
     "FactorGraphValidation",
     "FactorValidationIssue",
     "FactorValidationSeverity",

@@ -95,6 +95,7 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     StrategyDocumentService,
     StrategyDraft,
     StrategyDraftService,
+    StrategyOperatorCatalog,
     UpgradedDocument,
 )
 from strategy_workbench.application.strategy_authoring.facade.ports import (
@@ -947,6 +948,29 @@ def create_app(
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
         response.headers["ETag"] = etag
         return schema
+
+    @app.get(
+        "/api/v1/strategy-documents/operators",
+        operation_id="getStrategyOperatorCatalog",
+        response_model=StrategyOperatorCatalog,
+        responses={304: {"description": "Not modified (ETag matched If-None-Match)"}},
+    )
+    def strategy_operator_catalog(
+        response: Response, if_none_match: Annotated[str | None, Header()] = None
+    ) -> StrategyOperatorCatalog | Response:
+        """그래프 노드 연산자 정의 전부.
+
+        입력 개수, 읽는 파라미터, 출력 타입·단위 규칙, 가용성, i18n 키를 담는다.
+
+        팔레트·노드 라벨이 보일 수 있는 연산자 목록의 유일한 출처다. 소비자는 목록을 다시 적지
+        않는다. ETag는 카탈로그 해시이며 If-None-Match가 맞으면 304로 답한다.
+        """
+        catalog = strategy_authoring.operators()
+        etag = _etag(catalog.catalog_hash)
+        if if_none_match is not None and _matches(if_none_match, etag):
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
+        response.headers["ETag"] = etag
+        return catalog
 
     @app.get(
         "/api/v1/strategy-documents/contract",

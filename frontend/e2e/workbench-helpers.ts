@@ -57,14 +57,30 @@ export const requireData = <Value>(
   return data;
 };
 
+/**
+ * 편집기 원문 전체를 읽는다. 전체 선택 → 복사 → 클립보드 읽기를 **연속 두 번 같은 값이 나올 때까지**
+ * 되풀이한다. 탭을 YAML로 바꾸면 선택된 pointer를 편집기에 드러내는 reveal이 비동기로 한 틱 늦게
+ * 도착한다(route 테스트 P6-03 주석과 같은 현상). 그 reveal이 Ctrl+A 뒤에 떨어지면 선택이 그 pointer
+ * 범위로 바뀌어 원문 대신 조각이 복사된다 — 화면이 무거워진 main 반영 뒤 그래프 되돌리기 e2e가 이
+ * 경로로 간헐 실패했다. reveal은 한 번 오고 끝나므로 두 번 연속 같은 값이면 그것이 전체 원문이다.
+ */
 export const currentSource = async (page: Page) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: previewOrigin(),
   });
-  await editor(page).click();
-  await editor(page).press("Control+A");
-  await editor(page).press("Control+C");
-  return page.evaluate(() => navigator.clipboard.readText());
+  const copyAll = async (): Promise<string> => {
+    await editor(page).click();
+    await editor(page).press("Control+A");
+    await editor(page).press("Control+C");
+    return page.evaluate(() => navigator.clipboard.readText());
+  };
+  let previous = await copyAll();
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const next = await copyAll();
+    if (next === previous) return next;
+    previous = next;
+  }
+  throw new Error("editor source kept changing while it was being copied");
 };
 
 export const strategyIdentity = (page: Page) => {

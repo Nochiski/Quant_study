@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_REVIEW
 current_phase: P1,P2
-current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06
-active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06]
-parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06]
-last_updated: 2026-09-27T06:32:59+09:00
+current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07
+active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07]
+parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07]
+last_updated: 2026-09-27T07:12:26+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 10
@@ -25,11 +25,11 @@ progress_percent: 21
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2` |
-| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06` |
-| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06` |
+| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07` |
+| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `10 / 29` |
-| Aggregated at | `2026-09-27 06:32 KST` |
+| Aggregated at | `2026-09-27 07:12 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -264,6 +264,64 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Focused tests | `uv run pytest tests/domain/test_risk_factor.py tests/domain/test_strategy_applicability.py tests/domain/test_factor_research.py tests/domain/test_strategy_schema.py tests/domain/test_strategy_diagnostic_messages.py tests/integration/test_truthful_pipeline.py -q` |
 | 제약사항 | **12절 상한 초과(600줄·10파일 → 941줄·49파일), 분할하지 않는다.** WORKFLOW 가 두 변경(`risk_factor_id`·`saved_*` 제거)을 한 PR 로 묶었고, `saved_*` 제거가 노드 union·평가·계획·추적·검증·실행 거부·팩터 연구 요청까지 걸친 배관 삭제라 파일 수가 늘었다(src 14파일 −158줄). frontend 16파일은 생성 타입이 바뀌어 컴파일·테스트가 깨지는 곳만 고쳤고, 골든 `spec_hash` 리터럴 7파일은 필드 추가가 강제한 1줄씩이다. 커밋을 논리 단위 7개로 나눠 리뷰 단위를 대신한다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
 | Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·계약 산출물 diff 0·frontend typecheck·typecheck:e2e·lint·test·build·`api:generate` diff 0·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
+
+| 항목 | 값 |
+|---|---|
+| PR | `P2-07` |
+| Intent | "검증 통과 = 실행 가능"(spec D5). 실행 직전에야 나던 판정(없는 필드·비수치 출력·그룹 연산 capability)을 compile 로 앞당기고, 정규화 없는 단위 혼합을 경고한다 |
+| Acceptance | WORKFLOW P2-07 |
+| Non-goals | 화면에서 승격 노드를 숨기거나 사람 말로 보이기(BACKLOG-014, P3-01), duckdb 그룹 필드 제공과 `group.rank` 단위(P2-08, BACKLOG-015), 단위 경고·출력 타입 문장의 frontend i18n(진단 문장은 backend 가 완성해 보낸다 — SoT 진단 코드 행), 횡단면 eligibility 가 모집단을 0 으로 만드는 쪽의 진단(P2-05 DEFECT-P3-1, 아래 변경 기록의 판단) |
+| Branch/worktree | `feat/lang2-p2-07-compile-gate` / `wt-lang2-p2-07` |
+| Base SHA | `36060527` (`feat/lang2-p2-06-risk-factor` tip). P2-06 의 문서 커밋 `dd1fbebd`(BACKLOG-013)를 merge 로 따라갔다 |
+| Head SHA | PR [#201](https://github.com/Nochiski/Quant_study/pull/201) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
+| Diff stat | 생성 산출물(OpenAPI·SDK·연산자 카탈로그 fixture)·문서를 뺀 handwritten **24파일 · +1524 / −35**. 비테스트 backend src 15파일 +426/−31(신규 `_promotion.py` 87줄·`field_catalog.py` 21줄, `_validation.py` +159), test 9파일 +1098/−4(신규 4파일: 출력 타입 312·compile 게이트 276·property 248·단위 경고 148줄, 나머지는 BACKLOG-003 76줄·duckdb 16줄·e2e 19줄과 기대값 3줄) |
+| Focused tests | `uv run pytest tests/domain/test_factor_operators.py tests/domain/test_factor_output_gate.py tests/domain/test_signal_unit_mismatch.py tests/application/test_strategy_compile_gate.py tests/integration/test_compile_gate_property.py tests/integration/test_truthful_pipeline.py tests/test_adapters_equity_duckdb.py -q` |
+| 제약사항 | **12절 상한 초과(600줄·10파일 → 1524줄·24파일), 분할하지 않는다.** WORKFLOW 가 compile 게이트 네 가지(필드 계약·출력 타입·단위 경고·capability)와 BACKLOG-003 을 한 PR 로 묶었고, 넷이 `validate_strategy` 의 같은 인자(`fields`)와 compile 서비스의 같은 port 를 공유해 따로 떼면 중간 PR 이 인자만 있고 쓰는 곳이 없다. 비테스트는 457줄로 상한 안이고 초과분은 신규 테스트 4파일(984줄)이다 — 12절이 "test 는 구현과 같은 PR"이라 분리할 수 없다. 커밋을 논리 단위 10개로 나눠 리뷰 단위를 대신한다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
+| Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·계약 산출물 diff·frontend typecheck·typecheck:e2e·lint·test·build·`api:generate` diff 0·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
+
+P2-07 결정 10건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
+
+1. **승격은 새 노드 종류 없이 조건 노드 하나와 상수 둘이다.** hydrate(`domain/strategy/_promotion.py`)가
+   boolean 출력 그래프 끝에 `__promote_<factor>_one`(1.0)·`_zero`(0.0) 상수와 조건 노드
+   `__promote_<factor>`(predicate = 원래 출력)를 붙이고 출력을 그 조건 노드로 옮긴다. WORKFLOW 는
+   "승격 노드"만 적었다. 새 kind 를 만들면 문법(스키마 union)에 들어가 사용자가 쓸 수 있는 노드가 되고,
+   평가·계획·추적·연산자 카탈로그를 다 고쳐야 한다. 결측은 조건 노드 규칙대로 None 이다.
+2. **조건 노드 추론을 고쳤다(WORKFLOW 밖).** 가지가 둘 다 scalar 이고 조건이 boolean 시계열이면 출력은
+   숫자 시계열이다. 이전 추론은 가지 타입을 물려줘 승격 노드가 scalar 가 되었고, 사용자가 직접 쓴
+   `조건 ? 1 : 0` 팩터도 실행 경계에서 scalar 출력으로 거부됐다. 조건이 boolean 이 아니면(오류 문서)
+   올리지 않는다.
+3. **예약 id 가 이미 쓰였으면 승격하지 않는다.** 중복 노드를 만들면 원인과 무관한 `duplicate_node` 가
+   문서에 없는 자리를 가리킨다. 대신 출력이 boolean 으로 남고 `strategy.factor.output_type` 문장이 예약
+   id 를 말한다. 승격 뒤 출력은 숫자라 canonical payload 를 다시 hydrate 해도 또 붙지 않는다(저장소
+   무결성 검사가 canonical JSON 을 다시 만들어 비교한다).
+4. **출력 타입 코드는 하나다.** 실행 경계의 `_reject_non_numeric_factor_outputs` 도
+   `strategy.factor.output_type` 을 내고 `strategy.expression.output_type` 을 레지스트리에서 뺐다. 한
+   사실에 두 코드가 있으면 JSON spec 경로(scalar 는 validator, group 은 방어 검사)가 같은 문제를 두
+   코드로 답한다. scalar 는 어댑터 없이도 error 이고, group 은 필드 계약이 있어야 보인다.
+5. **필드 계약 port 는 `strategy_authoring` 이 소유한다**(`FieldCatalogPort.factor_field_catalog`).
+   `factor_research` 의 `FactorMetadataPort` 에 메서드를 더하면 그 port 를 구현한 테스트 가짜 5개가
+   깨지고 `strategy_authoring → factor_research` 화살표가 새로 생긴다. 어댑터는 새 메서드에서
+   `resolve_factor_fields` 를 그대로 불러 실행 경로와 같은 변환을 거친다. 계약은 매 compile 마다 읽는다.
+6. **capability 는 어댑터 필드 계약의 값 타입 집합이다.** kind → 요구 필드 타입 표
+   (`_REQUIRED_FIELD_VALUE_TYPES`, 그룹 연산 → `group_series`)와 판정 함수 `operator_availability` 를
+   연산자 레지스트리가 소유하고 compile 진단과 카탈로그 응답이 같이 읽는다. mock 어댑터는
+   `classification.sector` 를 그룹 필드로 주므로 mock 위에서는 그룹 연산이 **available** 로 바뀐다
+   (duckdb 는 unsupported). 어댑터가 없으면 아무 필드도 없는 것으로 보아 정의 시점 값(unsupported)이다.
+   카탈로그 해시가 가용성을 덮어 어댑터가 바뀌면 ETag 가 바뀐다. 진단 분류는 `capability` 이고, 같은
+   노드의 `group_field_missing`·`group_field_type` 은 같은 원인이라 내지 않는다.
+7. **저장소 무결성 검사는 어댑터 없는 compile 로 돌린다.** 그 검사가 필드 계약을 읽으면 어댑터를
+   바꾸거나(mock ↔ duckdb) 필드가 빠진 순간 저장된 revision 을 읽지 못해 목록·이력이 500 이 된다.
+   bootstrap 이 무결성 resolver 에 어댑터 없는 authoring 서비스를 따로 준다(회귀 테스트 있음).
+8. **단위 경고는 합성에 들어가는 팩터만 본다.** `composite_factors`(역가중 리스크 팩터 제외)의 출력
+   단위 중 모르는 값(`unknown`, 필드 계약 없음)을 뺀 것이 둘 이상이면 `signal.normalization` 을
+   가리키는 warning 이다. 필드 계약을 받으면 그래프 안 더하기·빼기의 단위 오류(`unit_mismatch`)도
+   compile 에서 난다 — 실행 플랜이 원래 같은 계약으로 내던 오류다.
+9. **BACKLOG-003 은 횡단면 `rank`·`zscore` 만 바꿨다.** `UnitRule.DIMENSIONLESS`(`"1"`)를 더하고 추론도
+   같게 했다. 그룹 안 순위 `group.rank` 도 같은 성격이지만 acceptance 밖이고 그룹 필드를 실제로 주는
+   P2-08 이 확인할 수 있어 BACKLOG-015 로 넘겼다.
+10. **새 `strategy.*` 코드 3개**(`strategy.factor.output_type`·`strategy.operator.unsupported`·
+   `strategy.signal.unit_mismatch`)는 `SEMANTIC_ONLY_CODES` 에 등록했다. 진단 코드 문자열은 OpenAPI 에
+   열거되지 않는다. OpenAPI diff 는 `UnitRule` 의 새 값과 설명 두 줄이다.
 
 P2-06 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
 
@@ -593,7 +651,7 @@ Phase exit:
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `APPROVED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · 1차 → `28003cf1` · 2차 → `2a10798d` · 3차 → `70cfdffa` · 4차 → `22636fc3` · 5차 **APPROVE**(P3 R5-P204-001 단조성: 기준점 후보 비교를 `<=` 로, 리드 지시로 즉시 반영). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `APPROVED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility` · 1차 REQUEST_CHANGES(P2 2·P3 2) → `641c6f3b`·`efd6a768` · 2~5차 **APPROVE**. 3차 재배치 때 첫 커밋 `a35c1e40` 에 P2-04 새 테스트 한 줄의 enum 개명을 넣었고, P2-04 3차 재현 테스트 `8587d413` 를 더했다. P2-04 5차 반영 tip `35089901` 위로 rebase(코드 변경분 동일). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `IN_REVIEW` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `WAITING` | — |
+| [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base P2-06 tip `36060527`(뒤에 P2-06 문서 커밋 `dd1fbebd` merge) · 커밋 11개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → 이 PLAN) · 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `WAITING` | — |
 | [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `WAITING` | — |
 
@@ -718,6 +776,21 @@ Phase exit:
 | `P2-01` | `uv run pyright` | 4 errors — 전부 `duckdb` 미설치(기존), 신규 파일 0 | 2026-09-20 |
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
+
+- 2026-09-27 — P2-07 구현(`IN_REVIEW`, [#201](https://github.com/Nochiski/Quant_study/pull/201)). compile 이
+  연결된 어댑터의 필드 계약(`FieldCatalogPort`)으로 `field_missing`·그룹 연산 capability
+  (`strategy.operator.unsupported`, 카탈로그 `availability` 같은 판정)를 내고, boolean 팩터 출력을
+  hydrate 에서 0/1 로 승격하며, scalar·group 출력은 `strategy.factor.output_type`, 정규화 없는 단위
+  혼합은 `strategy.signal.unit_mismatch` warning 이다. BACKLOG-003(횡단면 `rank`·`zscore` 무차원) 처리.
+  compile 통과 문서가 미리보기 사전 검사에서 거부되지 않는다는 property 테스트를 두었다. US-CS-02 e2e 가
+  분모 필드 오타를 compile 오류로 먼저 확인한다. 관찰 두 건을 BACKLOG-014(승격 노드 화면 표시, P3-01)와
+  BACKLOG-015(`group.rank` 단위, P2-08)로 예약했다.
+- 2026-09-27 — P2-07 판단: **P2-05 DEFECT-P3-1(횡단면 eligibility 가 모집단을 0 으로 자르는 쪽)은 이
+  PR 에서 다루지 않는다.** compile 은 모집단 크기를 모른다 — 모집단은 실행 설정(유니버스·기간)과 데이터가
+  정하므로 문서만으로는 `top_percent: 0.001` 이 0 이 되는지 판정할 수 없다. 프레임 warning 은 컴파일러의
+  리밸런싱 경로를 바꾸는 실행 측 변경이라 compile 게이트 PR 범위 밖이고, 결과가 빈 포트폴리오라 조용히
+  틀린 값을 내지 않는다(P3 그대로). 추적 화면이 규칙·순위 탈락을 구분해 세는 P4-03 미리보기 패널에서 빈
+  결과의 이유가 보인다.
 
 - 2026-09-27 — P2-01·P2-02 main 병합 리뷰 P3 반영(P2-06 PR 문서): 실행 설정 스키마 설명 키 7개의
   frontend 문장·커버리지 테스트 부재를 BACKLOG-013 으로 P3-02 acceptance 에 예약하고, US-SM-10 비고에
@@ -1281,6 +1354,33 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   시작하면 번역 없는 키 문자열이 화면에 그대로 찍히고, 게이트가 없어 조용히 통과한다(누락 번역).
 - **스토리**: US-SM-10(실행 설정 용어 도움말, `미계획`) 비고에 이 예약을 적었다.
 - **담당**: `P3-02`(실행 설정 패널 확장). WORKFLOW P3-02 에 같은 번호로 예약했다.
+
+### BACKLOG-014: boolean 출력 승격 노드가 실행 계획·디버거에 문서 밖 노드로 보인다
+
+- **상황**: P2-07 이 boolean 팩터 출력을 hydrate 에서 0/1 로 승격한다. 승격 노드(`__promote_<factor>`
+  조건 노드와 상수 `_one`·`_zero`)는 compile 된 spec 에만 있고 사용자 문서에는 없다.
+- **인풋**: 출력이 비교 노드인 팩터(아이디어 3, `breakout(gt, close_2, ma20)`)를 편집기에서 compile 하고
+  실행 계획 탭·디버거 노드 목록을 연다.
+- **에러 위치**: `frontend/src/features/edit-strategy/model/use-execution-plans.ts:151-160`(compile spec 의
+  `factor.graph` 로 설명 요청)과 `nodePointerById`(`:181-190`) — 승격 노드의 index 가 문서 노드 목록
+  밖이라 pointer 가 문서에 없는 자리를 가리키고, `factor-graph-projection.ts:187` 이 kind 를 `unknown`
+  으로 보인다.
+- **위험성**: 동작 결함은 아니다(계산·추적 값은 맞다). 사용자가 쓰지 않은 노드 셋이 `unknown` 으로 보여
+  "내 그래프가 바뀌었나"로 읽히고, "소스 열기"가 문서에 없는 줄을 짚는다(표시 drift).
+- **담당**: `P3-01`(execution plan·debugger 를 1.2 에 맞추는 PR). WORKFLOW P3-01 에 예약했다.
+
+### BACKLOG-015: 그룹 안 순위 `group.rank` 가 입력 단위를 물려준다
+
+- **상황**: P2-07 이 BACKLOG-003 으로 횡단면 `rank`·`zscore` 를 무차원으로 바꿨다. `group.rank` 는
+  acceptance 밖이라 그대로 `UnitRule.SAME_AS_INPUT` 이다.
+- **인풋**: 그룹 필드를 주는 어댑터(mock `classification.sector`)에서 단위가 다른 두 필드에 각각
+  `group.rank` 를 붙이고 `binary.add` 로 더한다.
+- **에러 위치**: `backend/src/strategy_workbench/domain/factor/_operators.py` 의 `GroupOperator.RANK`
+  정의(`unit_rule=UnitRule.SAME_AS_INPUT`)와 `domain/factor/_validation.py` 의 단위 추론(무차원 집합
+  `_DIMENSIONLESS_SECTIONS` 는 횡단면 연산만 본다).
+- **위험성**: 섹터 안 백분위 두 개의 합이 `factor.graph.unit_mismatch` 로 거부된다(false rejection,
+  BACKLOG-003 과 같은 모양). 실데이터 어댑터가 그룹 필드를 주기 전에는 도달하지 않는다.
+- **담당**: `P2-08`(duckdb `GROUP_SERIES` 스파이크). WORKFLOW P2-08 에 예약했다.
 
 ## 갱신 절차
 

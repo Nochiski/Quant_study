@@ -510,6 +510,10 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - 아이디어 5(변동성 역가중)는 **알파 팩터 1개 + 변동성 팩터 1개 두 벌**로 쓰고 `risk_factor_id`가
   변동성 팩터를 가리킨다. 변동성 팩터 하나만 두고 그것을 참조하면 P2-06의
   `strategy.signal.no_alpha_factor`에 걸려 compile이 막힌다.
+- **BACKLOG-015(P2-07 관찰)**: `group.rank` 의 `unit_rule` 을 정한다. P2-07 은 횡단면 `rank`·`zscore`
+  만 무차원(`"1"`)으로 바꿨고(BACKLOG-003), 그룹 안 백분위 순위인 `group.rank` 는 입력 단위를 그대로
+  물려준다. 그룹 필드를 실제로 제공하는 이 PR 에서 섹터 안 순위 두 개를 더하는 그래프가 단위 오류로
+  막히는지 확인하고, 무차원으로 바꾸면 `test_factor_operators.py` 의 규칙 대조와 재현 테스트를 같이 둔다.
 
 ### P2-09 — 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI
 
@@ -600,6 +604,10 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   로딩), `form-projection.ts` 의 `CATALOGS` 중 `factor`·`subgraph`, `schema-assist.ts` 의 `subgraph`·
   `factor` 카탈로그 분기, i18n 키 `strategy.node.saved_*`·`strategy.field.node.factor_id`·
   `strategy.field.node.subgraph_id`·`assist.catalog.subgraph`.
+- **BACKLOG-014(P2-07 관찰)**: boolean 팩터 출력의 승격 노드(`__promote_<factor>` 조건 노드와 상수
+  `_one`·`_zero`)는 compile 된 spec 에만 있고 문서에는 없다. 실행 계획 패널·디버거 노드 목록은 compile
+  spec 의 그래프를 읽어 이 노드를 kind `unknown` 과 문서 밖 pointer 로 보인다. 사람 말 라벨("참/거짓을
+  1/0 으로")로 보이거나 숨기고, "소스 열기"가 원래 출력 노드(조건 노드의 predicate)를 짚게 한다.
 - outline·snippet 카탈로그(팩터 preset은 "예시" 그룹으로 강등, 튜토리얼 전용)·execution plan·graph·
   debugger가 1.2 pointer로.
 - 단위 테스트 전부 green. e2e fixture는 P3-03.

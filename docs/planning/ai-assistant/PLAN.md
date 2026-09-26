@@ -3,14 +3,14 @@ plan_version: 2
 project: ai-assistant
 project_status: SELF_CHECK
 current_phase: C
-current_pr: C-01,C-02
-active_prs: [C-01, C-02]
-parallel_window: [C-01, C-02]
-last_updated: 2026-09-26T14:26:47+09:00
+current_pr: C-02
+active_prs: [C-02]
+parallel_window: [C-02]
+last_updated: 2026-09-26T14:35:27+09:00
 planned_prs: 15
-merged_prs: 13
-approved_prs: 13
-progress_percent: 87
+merged_prs: 14
+approved_prs: 14
+progress_percent: 93
 ---
 
 # AI 어시스턴트 실시간 진행 계획
@@ -25,11 +25,11 @@ progress_percent: 87
 |---|---|
 | Project status | `SELF_CHECK` |
 | Current phase | `C` |
-| Current/next PR | `C-01,C-02` |
-| Active PR | `C-01, C-02` |
-| Progress | `13 / 15 merged (87%)` |
-| Approved | `13 / 15` |
-| Aggregated at | `2026-09-26 14:26 KST` |
+| Current/next PR | `C-02` |
+| Active PR | `C-02` |
+| Progress | `14 / 15 merged (93%)` |
+| Approved | `14 / 15` |
+| Aggregated at | `2026-09-26 14:35 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -182,8 +182,8 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | P0 | Planning package | 1 | 1 | `MERGED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
-| C | Phase A audit follow-up | 2 | 0 | `SELF_CHECK` |
-| **Total** |  | **15** | **13** | **87%** |
+| C | Phase A audit follow-up | 2 | 1 | `SELF_CHECK` |
+| **Total** |  | **15** | **14** | **93%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -251,12 +251,13 @@ NB-1~NB-10을 C-01이 닫는다. NB-11은 브랜치 상태(스택 base 격차)�
 backlog)은 보존한다. 파일 단위로 한쪽을 고르면 다른 쪽 기록이 조용히 사라진다(Phase B 감사 NB-5).
 
 Phase B 종료 감사(`audit_ai_phase_b.md`)도 **blocking 0**으로 PASS했다. 비차단 8건 중 NB-3은
-C-01이 매뉴얼을 고치며 닫았고, NB-1·NB-2·NB-5~NB-8은 C-02가 닫는다. NB-4는 코드를 고치지 않고
+C-01이 매뉴얼을 고치며 닫았고(C-02가 스크립트 경로와 변수 누락 시 조용히 끝난다는 경고를
+보탰다), NB-1·NB-2·NB-5~NB-8은 C-02가 닫는다. NB-4는 코드를 고치지 않고
 아래 backlog 2건으로 담당을 정한다.
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `SELF_CHECK` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` |
+| [x] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `MERGED` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` · [#190](https://github.com/Nochiski/Quant_study/pull/190) · 최종 `707cd4f9` · main 머지 `a3cc5f8b` |
 | [ ] | `C-02` | Phase B 감사 비차단 7건: 4xx 거부 문구 표 entity 단일화(생성 code 합집합), 적용 후 백테스트 blocked 시 요청 폐기·알림, SSE 좁히기 표 타입 가드, CORS 기본 origin 단일 owner, 두 page 어시스턴트 배선 훅, backlog 2건 담당 지정, PLAN 병합 규칙 정정 | C-01 | `SELF_CHECK` | 구현자 `impl-ai-b05-c01`, 워크트리 `wt-ai-c02`, 브랜치 `feat/ai-c-02-phase-b-followup` |
 
 Phase exit:
@@ -361,7 +362,8 @@ Phase exit:
   버리고 알림 줄에 "적용했지만 백테스트는 시작하지 않았다"를 보인다(spec "자동 백테스트
   금지" 쪽 결정, 회귀 테스트 수정 전 red 확인). 첫 구현은 이미 이은 실행이 게이트를 닫는 순간을
   blocked로 읽어 전체 e2e에서 걸렸고, ready 판정 때도 요청을 대기에서 꺼내도록 고쳤다. NB-3: C-01이
-  매뉴얼을 고쳐 C-02 범위에서 뺐다. NB-4: 코드는 두고 C 절 backlog 2건(검색 상한 통지 전용 이벤트,
+  매뉴얼을 고쳤고, C-02는 스크립트 경로와 "변수를 `1`로 주지 않으면 조용히 끝난다" 경고만 보탰다.
+  C-01(#190)이 main에 머지돼(`a3cc5f8b`) C-01 행을 `MERGED`로 바꿨다. NB-4: 코드는 두고 C 절 backlog 2건(검색 상한 통지 전용 이벤트,
   `ChatMessageView.turn_id`)의 담당을 "AI 후속 C-03(미착수)"으로 정했다. NB-5: C 절 서문의 PLAN
   충돌 규칙을 절 단위 병합으로 고쳤다. NB-6: SSE 좁히기 표 키를 이벤트 갈래 합집합으로 묶었고,
   정리 중 `constructor` 같은 프로토타입 이름 프레임이 통과하던 결함을 `Object.hasOwn`으로 막았다.

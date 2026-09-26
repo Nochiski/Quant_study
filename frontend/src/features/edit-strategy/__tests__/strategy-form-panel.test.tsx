@@ -258,13 +258,17 @@ describe("StrategyFormPanel controls", () => {
         range: null,
       },
     ]);
-    expect(section("risk").getByText("오류 1")).toHaveAttribute(
-      "title",
-      "너무 큽니다",
-    );
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "YAML 1.2로 읽히지 않아",
-    );
+    // 배지는 개수만 세고 원인 문장은 그 필드 아래 본문이다 — `title`은 hover 없는 입력에서
+    // 읽히지 않았다(WORKFLOW P1-04).
+    expect(section("risk").getByText("오류 1")).not.toHaveAttribute("title");
+    expect(
+      section("risk").getByRole("spinbutton", named("max_name_weight")),
+    ).toHaveAccessibleDescription("너무 큽니다");
+    expect(section("risk").getByText("너무 큽니다")).toBeVisible();
+    // 진단 본문은 live region이 아니다. assertive 알림은 트랜잭션 피드백 하나뿐이다(리뷰 P3).
+    expect(
+      screen.getAllByRole("alert").map((node) => node.textContent),
+    ).toEqual([expect.stringContaining("YAML 1.2로 읽히지 않아")]);
     // selection_method 기본값(top_n) 때문에 percentile은 읽히지 않는 필드다.
     const portfolio = projection.sections.find((s) => s.key === "portfolio");
     if (portfolio === undefined || portfolio.kind !== "object")
@@ -643,5 +647,94 @@ describe("StrategyFormPanel with the real transaction hook", () => {
     expect(
       section("risk").getByRole("spinbutton", named("max_name_weight")),
     ).toHaveValue(0.1);
+  });
+});
+
+describe("인라인 오류 본문과 문제 행 reveal (P1-04)", () => {
+  const WEIGHT_ERROR: DocumentDiagnostic = {
+    code: "strategy.risk.weight",
+    kind: "semantic",
+    severity: "error",
+    pointer: "/risk/max_name_weight",
+    message: "너무 큽니다",
+    range: null,
+  };
+
+  const renderWithSelection = (
+    selectedPointer: string | undefined,
+    revealSignal: number,
+  ) => {
+    const state = parsedState(MINIMAL);
+    return (
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, state.parse, [WEIGHT_ERROR])}
+        transactions={stubTransactions()}
+        catalogs={NO_CATALOGS}
+        selectedPointer={selectedPointer}
+        revealSignal={revealSignal}
+      />
+    );
+  };
+
+  it("접은 섹션이라도 문제 행이 가리키면 펴서 본문을 보인다", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(renderWithSelection(undefined, 0));
+
+    const body = section("risk").getByText("너무 큽니다");
+    expect(body).toBeVisible();
+    // 사용자가 섹션을 접으면 본문이 가려진다.
+    await user.click(
+      section("risk").getByRole("button", { name: /risk/ }),
+    );
+    expect(body).not.toBeVisible();
+
+    // 문제 행 클릭 = pointer 선택 + reveal 신호: 접힌 섹션이 다시 펴진다.
+    rerender(renderWithSelection("/risk/max_name_weight", 1));
+    expect(body).toBeVisible();
+    expect(
+      section("risk").getByRole("spinbutton", named("max_name_weight")),
+    ).toHaveAccessibleDescription("너무 큽니다");
+  });
+
+  it("오류가 여럿이어도 assertive 알림을 쌓지 않는다 (리뷰 P3)", () => {
+    const state = parsedState(MINIMAL);
+    render(
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, state.parse, [
+          WEIGHT_ERROR,
+          {
+            ...WEIGHT_ERROR,
+            pointer: "/portfolio/selection_count",
+            message: "종목 수가 너무 적습니다",
+          },
+        ])}
+        transactions={stubTransactions()}
+        catalogs={NO_CATALOGS}
+      />,
+    );
+
+    // 두 문장 모두 본문으로 보이지만 live region은 하나도 없다 — 동시에 삽입된 assertive
+    // 영역들이 서로를 끊어 먹으면 원인 문장이 오히려 안 읽힌다.
+    expect(section("risk").getByText("너무 큽니다")).toBeVisible();
+    expect(
+      section("portfolio").getByText("종목 수가 너무 적습니다"),
+    ).toBeVisible();
+    expect(screen.queryAllByRole("alert")).toEqual([]);
+  });
+
+  it("경고는 본문으로 보이되 assertive alert로 알리지 않는다", () => {
+    const state = parsedState(MINIMAL);
+    render(
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, state.parse, [
+          { ...WEIGHT_ERROR, severity: "warning", message: "조금 큽니다" },
+        ])}
+        transactions={stubTransactions()}
+        catalogs={NO_CATALOGS}
+      />,
+    );
+
+    expect(section("risk").getByText("조금 큽니다")).toBeVisible();
+    expect(screen.queryAllByRole("alert")).toEqual([]);
   });
 });

@@ -406,12 +406,32 @@ const ko = {
   "graph.editTitle": "그래프 편집",
   "graph.editable": "편집 가능",
   "graph.nodesTitle": "노드",
-  "graph.nodeKind": "노드 종류",
-  "graph.addNode": "노드 추가",
+  "graph.palette.label": "연산자 팔레트",
+  "graph.palette.search": "연산자 검색",
+  "graph.palette.searchPlaceholder": "이름·설명·계산식으로 검색",
+  "graph.palette.empty": "검색어와 맞는 연산자가 없습니다",
+  "graph.palette.addNode": "{operator} 노드 추가",
+  "graph.palette.arity": "입력 {count}개",
+  "graph.palette.params": "설정 {params}",
+  "graph.palette.unsupportedBadge": "미지원",
+  "graph.palette.unsupported":
+    "이 연산자를 계산할 수 있는 데이터 어댑터가 아직 없습니다. 문서에는 넣을 수 있지만 실행은 막힙니다",
+  "graph.palette.catalogLoading":
+    "연산자 목록을 불러오는 중입니다 — 지금은 노드 종류만 보입니다",
+  "graph.palette.catalogUnavailable":
+    "연산자 목록을 불러오지 못했습니다 — 지금은 노드 종류만 보이고, 연산자는 노드 속성에서 고르세요",
+  "graph.palette.locked": "노드를 추가할 수 없습니다: {reason}",
+  "graph.palette.settling":
+    "직전 편집이 문서에 반영되는 중입니다 — 잠시 후 다시 추가하세요",
+  "graph.addFailed.unknown-kind":
+    "{entry}: 이 노드 종류를 runtime schema에서 찾지 못해 추가하지 않았습니다",
+  "graph.addFailed.unsupported-schema":
+    "{entry}: 이 노드의 스키마로는 기본값을 만들지 못해 추가하지 않았습니다(재귀·과대 스키마)",
   "graph.editNode": "노드 편집: {node}",
   "graph.removeNode": "삭제",
   "graph.removeBlocked":
-    "{node}을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: {pointers}",
+    "{node}을(를) 다른 곳이 참조하고 있어 삭제하지 않았습니다: {nodes}",
+  "graph.outputReference": "그래프 출력",
   "graph.settingsTitle": "그래프 설정",
   "graph.selectedNode": "선택한 노드",
   "graph.noSelection": "노드를 선택하면 속성을 편집합니다",
@@ -1276,6 +1296,12 @@ const ko = {
   "form.list.empty": "항목이 없습니다",
   "form.list.blocked":
     "다른 곳이 참조하고 있어 삭제하지 않았습니다: {pointers}",
+  "form.list.addNoSchema":
+    "runtime schema를 아직 받지 못해 항목을 추가할 수 없습니다",
+  "form.list.addBlocked":
+    "이 목록의 항목 스키마를 runtime schema에서 따라갈 수 없어 추가할 수 없습니다",
+  "form.list.addSettling":
+    "직전 편집이 문서에 반영되는 중입니다 — 잠시 후 다시 추가하세요",
   "form.list.branchNeeded": "kind를 먼저 정하세요({kinds})",
   "form.list.presetExists": "이미 있음",
   "form.field.openGraph": "Graph에서 열기",
@@ -1876,11 +1902,31 @@ export const messages = {
     "graph.editTitle": "Edit graph",
     "graph.editable": "Editable",
     "graph.nodesTitle": "Nodes",
-    "graph.nodeKind": "Node kind",
-    "graph.addNode": "Add node",
+    "graph.palette.label": "Operator palette",
+    "graph.palette.search": "Search operators",
+    "graph.palette.searchPlaceholder": "Search by name, description or formula",
+    "graph.palette.empty": "No operator matches this search",
+    "graph.palette.addNode": "Add a {operator} node",
+    "graph.palette.arity": "{count} inputs",
+    "graph.palette.params": "settings {params}",
+    "graph.palette.unsupportedBadge": "Unsupported",
+    "graph.palette.unsupported":
+      "No connected data adapter can compute this operator yet. The document accepts it, but a run is blocked",
+    "graph.palette.catalogLoading":
+      "Loading the operator catalog — only node kinds are listed for now",
+    "graph.palette.catalogUnavailable":
+      "The operator catalog could not be loaded — only node kinds are listed; choose the operator in the node properties",
+    "graph.palette.locked": "Cannot add a node: {reason}",
+    "graph.palette.settling":
+      "The previous edit is still being applied — try adding again in a moment",
+    "graph.addFailed.unknown-kind":
+      "{entry}: this node kind is not in the runtime schema, so nothing was added",
+    "graph.addFailed.unsupported-schema":
+      "{entry}: default values could not be built from this node schema (recursive or oversized), so nothing was added",
     "graph.editNode": "Edit node: {node}",
     "graph.removeNode": "Remove",
-    "graph.removeBlocked": "{node} is still referenced, so it was not removed: {pointers}",
+    "graph.removeBlocked": "{node} is still referenced, so it was not removed: {nodes}",
+    "graph.outputReference": "Graph output",
     "graph.settingsTitle": "Graph settings",
     "graph.selectedNode": "Selected node",
     "graph.noSelection": "Select a node to edit its properties",
@@ -2775,6 +2821,12 @@ export const messages = {
     "form.list.remove": "Remove",
     "form.list.empty": "No items",
     "form.list.blocked": "Not removed: referenced elsewhere: {pointers}",
+    "form.list.addNoSchema":
+      "The runtime schema has not arrived yet, so nothing can be added",
+    "form.list.addBlocked":
+      "The item schema for this list cannot be followed in the runtime schema, so nothing can be added",
+    "form.list.addSettling":
+      "The previous edit is still being applied — try adding again in a moment",
     "form.list.branchNeeded": "Choose a kind first ({kinds})",
     "form.list.presetExists": "already present",
     "form.field.openGraph": "Open in Graph",

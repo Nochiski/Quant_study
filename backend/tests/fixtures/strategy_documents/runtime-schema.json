@@ -327,6 +327,7 @@
             }
           ],
           "default": null,
+          "minimum": 1,
           "x-description-key": "strategy.field.node.periods"
         }
       },
@@ -427,11 +428,13 @@
         },
         "window": {
           "type": "integer",
+          "minimum": 1,
           "x-description-key": "strategy.field.node.window"
         },
         "lag": {
           "type": "integer",
           "default": 0,
+          "minimum": 0,
           "x-description-key": "strategy.field.node.lag"
         }
       },

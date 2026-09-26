@@ -22,7 +22,15 @@ from ._nodes import (
     TimeSeriesNode,
     UnaryNode,
     UnaryOperator,
+    field_minimum,
 )
+
+# 정수 파라미터의 하한은 노드 dataclass 옆에 한 번만 선언한다(`_nodes.minimum`). runtime schema가
+# 같은 값을 JSON Schema `minimum`으로 발행하므로 화면이 만든 기본값과 검증기가
+# 어긋나지 않는다(P1-04).
+LAG_PERIODS_MINIMUM = field_minimum(UnaryNode, "periods")
+TIME_SERIES_WINDOW_MINIMUM = field_minimum(TimeSeriesNode, "window")
+TIME_SERIES_LAG_MINIMUM = field_minimum(TimeSeriesNode, "lag")
 
 
 class FactorValidationSeverity(StrEnum):
@@ -169,23 +177,27 @@ def validate_factor_graph(
                 )
             )
         elif isinstance(node, UnaryNode):
-            if node.operator is UnaryOperator.LAG and (node.periods is None or node.periods < 1):
+            if node.operator is UnaryOperator.LAG and (
+                node.periods is None or node.periods < LAG_PERIODS_MINIMUM
+            ):
                 issues.append(
                     _issue(
                         "factor.graph.lag_periods",
                         node.node_id,
                         path,
-                        f"lag 기간은 1 이상이어야 합니다: periods={node.periods}",
+                        f"lag 기간은 {LAG_PERIODS_MINIMUM} 이상이어야 합니다: "
+                        f"periods={node.periods}",
                     )
                 )
         elif isinstance(node, TimeSeriesNode):
-            if node.window < 1 or node.lag < 0:
+            if node.window < TIME_SERIES_WINDOW_MINIMUM or node.lag < TIME_SERIES_LAG_MINIMUM:
                 issues.append(
                     _issue(
                         "factor.graph.time_series_window",
                         node.node_id,
                         path,
-                        "window는 1 이상이고 lag는 0 이상이어야 합니다: "
+                        f"window는 {TIME_SERIES_WINDOW_MINIMUM} 이상이고 "
+                        f"lag는 {TIME_SERIES_LAG_MINIMUM} 이상이어야 합니다: "
                         f"window={node.window} lag={node.lag}",
                     )
                 )

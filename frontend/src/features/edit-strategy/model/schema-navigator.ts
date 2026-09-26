@@ -564,6 +564,40 @@ const scalarFallback = (node: JsonSchema): unknown => {
 
 export class UnsupportedSchemaShape extends Error {}
 
+/** nullable(`anyOf`) 포장을 벗긴 뒤의 선언 타입이 `integer`인가. */
+const isIntegerTyped = (root: JsonSchema, node: JsonSchema): boolean => {
+  if (node.type === "integer") return true;
+  if (!Array.isArray(node.anyOf)) return false;
+  const member = node.anyOf.filter(isObject).find((item) => item.type !== "null");
+  const resolved = member === undefined ? null : resolveRef(root, member);
+  return resolved?.type === "integer";
+};
+
+/**
+ * `default: null`인 정수 파라미터의 씨앗. 발행된 하한이 있으면 그 값, 없으면 null이다(P1-04 리뷰
+ * 차단 1).
+ *
+ * `default: null`은 "이 값을 비워 둔다"가 아니라 "선택 파라미터"라는 표시다. 그런데 고른 연산자가
+ * 그 파라미터를 요구하면(`unary.lag`의 `periods`) null인 채로 만들어진 노드는 만들자마자
+ * `factor.graph.lag_periods`로 거부된다 — `window`에서 고친 것과 같은 결함이다.
+ *
+ * 정수 타입만 본다. `number`이면서 null이 "제한 없음"을 뜻하는 선택 값(`portfolio.minimum_liquidity`,
+ * 하한 `0`)은 하한으로 채우면 뜻이 바뀐다 — 그런 필드는 null 그대로 둔다.
+ *
+ * `materializeSchemaValue`가 아니라 **호출자**가 쓴다(2차 리뷰 P3). 씨앗이 필요한지는 "고른
+ * 연산자가 이 파라미터를 요구하는가"이고, 그 사실의 owner는 스키마가 아니라 연산자 카탈로그다 —
+ * property 단위로 판단하면 `periods`를 읽지도 않는 `부호 뒤집기`에도 `periods: 1`이 붙는다.
+ * 규칙의 짝은 `backend/tests/fixtures/strategy_documents/parameter-seeds.json` golden이 묶는다.
+ */
+export const nullDefaultSeed = (root: JsonSchema, node: JsonSchema): unknown => {
+  const bound = node.minimum;
+  return typeof bound === "number" &&
+    Number.isInteger(bound) &&
+    isIntegerTyped(root, node)
+    ? bound
+    : null;
+};
+
 type MaterializeState = {
   ancestors: Set<JsonSchema>;
   budget: { remaining: number };

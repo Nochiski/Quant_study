@@ -425,6 +425,17 @@ def test_factor_authoring_mapping_is_owned_by_the_runtime_schema() -> None:
     }
 
 
+def test_parameter_seed_fixture_is_current() -> None:
+    """씨앗 golden은 두 런타임의 규칙을 묶는 표다 — 낡으면 frontend 대조가 옛 표를 통과시킨다."""
+    from tools.export_runtime_schema import parameter_seeds
+
+    fixture = json.loads((FIXTURES / "parameter-seeds.json").read_text(encoding="utf-8"))
+    assert fixture == {"seeds": parameter_seeds(strategy_document_schema())}, (
+        "parameter-seeds.json is stale; regenerate with: "
+        "uv run python tools/export_runtime_schema.py"
+    )
+
+
 def test_runtime_schema_fixture_is_current() -> None:
     """The frontend navigates the fixture copy in its own tests; it must equal the live schema."""
     fixture = json.loads((FIXTURES / "runtime-schema.json").read_text(encoding="utf-8"))

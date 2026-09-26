@@ -3,13 +3,13 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P1-03,P2-01
-active_prs: [P0-01, P1-01, P1-02, P1-03, P2-01]
-parallel_window: [P0-01, P1-01, P1-02, P1-03, P2-01]
-last_updated: 2026-09-21T07:45:41+09:00
+current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P2-01
+active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P2-01]
+parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P2-01]
+last_updated: 2026-09-21T08:28:37+09:00
 planned_prs: 28
 merged_prs: 0
-approved_prs: 3
+approved_prs: 4
 progress_percent: 0
 ---
 
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P2-01` |
-| Active PR | `P0-01, P1-01, P1-02, P1-03, P2-01` |
+| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P1-04,P2-01` |
+| Active PR | `P0-01, P1-01, P1-02, P1-03, P1-04, P2-01` |
 | Progress | `0 / 28 merged (0%)` |
-| Approved | `3 / 28` |
-| Aggregated at | `2026-09-21 07:45 KST` |
+| Approved | `4 / 28` |
+| Aggregated at | `2026-09-21 08:28 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -122,7 +122,7 @@ Phase exit:
 | [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `IN_REVIEW` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `review_lang2_p1_01` 1·2차 APPROVE(blocking 0), 후속 8건 반영 · 게이트: typecheck·lint·Vitest 658·build·e2e 19/19 |
 | [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `APPROVED` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE (1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2) |
 | [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `APPROVED` | [#177](https://github.com/Nochiski/Quant_study/pull/177) · `review_lang2_p1_03` 2차 APPROVE(1차 REQUEST_CHANGES 반영, 돌연변이 7건 실패 확인), 2차 P3 4건 후속 |
-| [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `WAITING` | — |
+| [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `APPROVED` | `review_lang2_p1_04` 4차 APPROVE (1·2·3차 REQUEST_CHANGES 차단 2·1·1, P3 7·3·2 전부 반영) |
 | [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `WAITING` | — |
 
 Phase exit:
@@ -223,6 +223,10 @@ Phase exit:
 
 | `P1-03` | `review_lang2_p1_03` | 1차 | `REQUEST_CHANGES` | 차단 2 · P2 2 · P3 7. **차단1**: `messages.ts`의 `en` 블록이 한글 계산식 6개를 담아 영어 화면에 한글이 떴다 — `satisfies Record<MessageKey, string>`는 키 존재만 보고 커버리지 테스트는 ko만 조회해서 타입·테스트·lint 어디도 잡지 않았다. **차단2**: 시간축 연산자 6개의 계산식·설명이 `lag`를 빠뜨려 엔진의 창(`x[t-lag-window+1 … t-lag]`, `_evaluation.py:388-407`)과 어긋났다 — 12-1 모멘텀을 화면대로 만들면 11-0이 되는데 백테스트는 통과한다. **P2**: `output_type_rule` 대조 테스트가 입력이 항상 숫자 시계열이라 세 규칙이 한 값으로 접혀 공회전(mutation 2건 미검출), 선언 순서 테스트가 레지스트리에서 파생한 값끼리 비교하는 동어반복. 전부 반영 |
 | `P1-03` | `review_lang2_p1_03` | 2차 | `APPROVE` | 차단 0. 1차 findings 전부 해소 확인, 돌연변이 7건이 모두 실패하는 것을 실증. 새 P3 4건(en `momentum`·`delta` 문장 자족성, ko 산문의 식별자 호칭, e2e의 산문 고정, WORKFLOW 줄바꿈)은 후속 커밋에서 반영. 스코프 밖 관찰(`_registry.py` 12-1 모멘텀 시드 `history=252` ↔ 그래프 최소 이력 273)은 BACKLOG-001로 기록 |
+| `P1-04` | `review_lang2_p1_04` | 1차 | `REQUEST_CHANGES` | 차단 2 · P3 7. **차단1**: 팔레트로 만든 `기간 집계` 노드가 `window: 0`이라 곧바로 거부됐다 — runtime schema가 하한을 발행하지 않아 화면이 0을 채웠다. 하한을 노드 dataclass 옆에 한 번 선언하고(`_nodes.minimum`) 검증기·스키마가 함께 읽게 고쳤다. **차단2**: Graph 탭 인라인 본문 테스트가 backend가 내지 않는 pointer로만 단언해, 실제 노드 객체 pointer에서는 본문이 어디에도 안 붙는 것을 못 잡았다. P3: `availability` 판정 반전, 팔레트 계산식 접근성, 진단 본문 `role="alert"` 제거, `referenceLabel` fallback, 공개 API 8→1, `filterPalette` 참조 동일성. Form 목록 pointer 표기는 의도적 제외로 근거 명시 |
+| `P1-04` | `review_lang2_p1_04` | 2차 | `REQUEST_CHANGES` | 차단 1 · 잔여 3. 1차 차단 2건은 실측으로 해소 확인(카탈로그 23개 씨앗 전수, 게이트 민감도 probe 2건). **차단**: 노드 카드에 진단 본문 마크업만 더하고 CSS가 따라오지 않아 긴 한글 문장이 버튼 옆 같은 줄로 갔다 — e2e boundingBox로 재현하고(`flex-wrap` 없음) 카드 아래 줄 전체 폭으로 고쳤다. 잔여: 같은 문장 3중 렌더·중복 DOM id → 선택 노드 패널 사본 제거·`useId`; `부호 뒤집기`에 쓰이지 않는 `periods: 1` → 씨앗을 `addNode`로 옮겨 카탈로그 `params`에만; TS·Python 씨앗 규칙 2중 구현 → `parameter-seeds.json` golden이 양쪽을 묶음 |
+| `P1-04` | `review_lang2_p1_04` | 3차 | `REQUEST_CHANGES` | 차단 1 · P3 2. 2차 차단·잔여 3건 해소를 리뷰어가 실측 확인(CSS 되돌리면 e2e 두 단언이 숫자로 실패, golden 돌연변이 2건이 양쪽을 동시에 깸, 팔레트 29개 씨앗 전수). **차단**: 본문이 자기 행과 8px·다음 노드 행과 4px라 근접성이 뒤집혀, 마지막이 아닌 노드의 오류가 아래 노드 것으로 읽혔다(진단 문장에 node_id 없음). 카드 사이 간격을 12px로 넓히고 카드 안 행 간격을 4px로 좁혔다. e2e에 오류 노드 뒤 노드를 하나 더 두고 거리 비교를 단언 — 되돌려 9.5 > 4로 실패 확인. P3: `ChosenOperator` 공개 API export, 기준선이 backend 소유 문장을 픽셀로 고정하던 것을 `mask`로 분리 |
+| `P1-04` | `review_lang2_p1_04` | 4차 | `APPROVE` | 새 결함 0. 3차 차단(본문 근접성)과 P3 2건이 해소된 것을 확인했다. 관측 기록: `document-routes.test.tsx`의 P6-03 키보드 테스트가 1회 flake(재실행 통과) — P1-04 변경과 무관한 자리다 |
 
 ## 검증 기록
 
@@ -249,6 +253,13 @@ Phase exit:
   **수정**: 4행(실행 설정·그래프 투영·schema 버전·업그레이드 변환)은 P0-01 개정본,
   편집 이력 1행은 `86ce099c` 판으로 해소. 재발 방지로 저장소 전체 충돌 표식 검출
   (`tools/quant_study_dev/conflict_markers.py`, 단위 테스트 8건, CI backend job step)을 추가했다.
+- 2026-09-21 — P1-04 구현·리뷰 3회: 연산자 팔레트(카탈로그·스키마 주도, 손으로 적은 목록 0), 추가·
+  삭제 실패의 사유 표시, 진단 본문 인라인. 구현 중 발견한 `window: 0` 결함은 하한을 노드 dataclass
+  옆에 한 번 선언하고 검증기·runtime schema가 함께 읽게 해 같은 PR에서 고쳤다(SoT 행 추가).
+  1차 REQUEST_CHANGES: `지연`의 `periods: null`과 노드 pointer 진단이 붙을 자리가 없던 것.
+  2차: 노드 카드 본문 CSS 누락(flex 한 줄)과 중복 렌더·중복 id·씨앗 범위·TS/Python 2중 구현.
+  3차: 본문 근접성이 뒤집혀 아래 노드 것으로 읽히던 것. 레이아웃 계약은 e2e boundingBox가 잠그고
+  기준선은 문장을 `mask`로 가려 backend 문구와 분리했다.
 - 2026-09-21 — P1-02 구현·리뷰 4회: PR #173. 되돌리기·다시 실행을 탭 밖 버튼과 IDE 전역
   단축키 두 경로로 내고, 편집 이력의 단일 정본을 편집기(CodeMirror history)로 못 박았다
   (SoT 행 추가). 1차 REQUEST_CHANGES: 같은 문서 전체 교체가 비격리 `setText`로 가 직후

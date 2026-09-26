@@ -9,6 +9,7 @@ import {
   type GraphFactorProjection,
   type GraphNodeProjection,
 } from "../model/factor-graph-projection";
+import type { OperatorCatalogState } from "../model/operator-palette";
 import type { JsonSchema } from "../model/schema-navigator";
 import {
   factorGraphPointer,
@@ -29,6 +30,8 @@ export type FactorGraphEditing = {
   schema: JsonSchema | null;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
+  /** 연산자 카탈로그(P1-03). 팔레트가 읽는다 — 없으면 노드 kind만 보인다. */
+  operators?: OperatorCatalogState;
   /** Graph → Form 왕복(P5-03). */
   onOpenForm?: (pointer: string) => void;
   /** 문서 경계(`documentEpoch`). 바뀌면 "재계산 중"에 쓰는 직전 투영을 버린다(3차 P1). */
@@ -109,8 +112,6 @@ const GraphState = ({
   );
 };
 
-const shortHash = (value: string): string => `${value.slice(0, 12)}…`;
-
 const FactorSummary = ({
   factor,
   registryVersion,
@@ -149,11 +150,12 @@ const FactorSummary = ({
         {factor.minimumHistorySessions} {t("plan.sessions")}
       </dd>
     </div>
+    {/* fingerprint는 `title`로 감추지 않고 본문으로 보인다 — hover 없는 입력에서도 읽히고 복사된다(P1-04). */}
     {factor.graphHash !== null ? (
       <div>
         <dt>{t("plan.graphFingerprint")}</dt>
         <dd>
-          <code title={factor.graphHash}>{shortHash(factor.graphHash)}</code>
+          <code className="factor-graph__fingerprint">{factor.graphHash}</code>
         </dd>
       </div>
     ) : null}
@@ -161,7 +163,7 @@ const FactorSummary = ({
       <div>
         <dt>{t("plan.planFingerprint")}</dt>
         <dd>
-          <code title={factor.planHash}>{shortHash(factor.planHash)}</code>
+          <code className="factor-graph__fingerprint">{factor.planHash}</code>
         </dd>
       </div>
     ) : null}
@@ -350,6 +352,7 @@ export const FactorGraphPanel = ({
         transactions={editing.transactions}
         catalogs={editing.catalogs}
         diagnostics={diagnostics}
+        operators={editing.operators}
         factorIndex={index}
         selectedPointer={selectedPointer}
         revealSignal={revealSignal}

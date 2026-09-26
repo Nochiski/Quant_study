@@ -30,6 +30,7 @@ import {
   editor,
   expectPhase,
   GOLDEN,
+  mustReplace,
   openEditor,
   replaceSource,
   requireData,
@@ -40,6 +41,14 @@ import {
 } from "./workbench-helpers";
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
+
+/** golden 그래프 끝에 붙이는 노드. 오류 노드 뒤에 비교 대상이 있어야 근접성을 잴 수 있다. */
+const TRAILING_NODE = [
+  "        - kind: field",
+  "          node_id: trailing",
+  "          field_id: price.close",
+  "",
+].join("\n");
 
 const rowFor = (region: Locator, securityId: string): Locator =>
   region.getByRole("row").filter({ hasText: securityId });
@@ -1070,9 +1079,14 @@ test.describe("professional YAML workflow", () => {
     await expect(editor).toBeVisible();
     await expect(editor.getByText("편집 가능")).toBeVisible();
 
-    // 노드 추가: 새 field 노드가 문서 끝에 들어가고 바로 선택된다.
-    await editor.getByRole("combobox", { name: "노드 종류" }).selectOption("field");
-    await editor.getByRole("button", { name: "노드 추가" }).click();
+    // 노드 추가: 연산자 팔레트에서 고르면 kind가 따라온다(WORKFLOW P1-04). 새 field 노드가 문서
+    // 끝에 들어가고 바로 선택된다.
+    await expect(
+      editor.getByRole("combobox", { name: "노드 종류" }),
+    ).toHaveCount(0);
+    await editor
+      .getByRole("button", { name: "데이터 필드 노드 추가", exact: true })
+      .click();
     await expect(
       editor.getByRole("status").filter({ hasText: "반영됨" }),
     ).toContainText("field 반영됨");
@@ -1169,6 +1183,115 @@ test.describe("professional YAML workflow", () => {
     // Graph → Form 왕복.
     await editor.getByRole("button", { name: /Form에서 열기/ }).click();
     await expect(page.getByRole("region", { name: "Form 편집" })).toBeVisible();
+  });
+
+  test("picks the operator first in the palette and the document stays valid (P1-04)", async ({
+    page,
+  }) => {
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(page, GOLDEN.replace("퀄리티 모멘텀", "P1-04 E2E 팔레트"));
+    await expectPhase(page, "검증 통과");
+
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editor = page.getByRole("region", { name: "그래프 편집" });
+    const palette = editor.getByRole("group", { name: "연산자 팔레트" });
+    await expect(palette).toBeVisible();
+    // kind 드롭다운은 없고, 카탈로그가 도착하면 연산자 이름과 계산식이 보인다(P1-03 카탈로그).
+    await expect(editor.getByRole("combobox", { name: "노드 종류" })).toHaveCount(0);
+    await expect(
+      palette.getByRole("button", { name: "기간 평균 노드 추가", exact: true }),
+    ).toBeVisible();
+
+    // `기간 평균`을 고른다: 필수 정수 파라미터(`window`)가 있어 하한이 없으면 `window: 0`인
+    // 노드가 만들어져 곧바로 검증 오류가 났다(P1-04). runtime schema가 하한을 발행하면서
+    // 추가만으로 유효한 노드가 된다.
+    await palette.getByRole("searchbox", { name: "연산자 검색" }).fill("기간 평균");
+    await palette
+      .getByRole("button", { name: "기간 평균 노드 추가", exact: true })
+      .click();
+    await expect(editor.getByRole("alert")).toHaveCount(0);
+    await expect(
+      editor.getByRole("status").filter({ hasText: "반영됨" }),
+    ).toContainText("mean 반영됨");
+
+    // 연산자를 고르면 kind와 파라미터 기본값이 따라오고, 문서는 그대로 검증을 통과한다.
+    await expectPhase(page, "검증 통과");
+    await page.getByRole("tab", { name: "YAML", exact: true }).click();
+    const edited = await currentSource(page);
+    expect(edited).toContain("\n        - kind: time_series\n");
+    expect(edited).toContain("\n          node_id: mean\n");
+    expect(edited).toContain("\n          operator: mean\n");
+    expect(edited).toContain("\n          input_node_id: mom_252\n");
+    // 파라미터 기본값은 runtime schema가 발행한 하한에서 온다(`window >= 1`).
+    expect(edited).toContain("\n          window: 1\n");
+  });
+
+  test("keeps a node card readable when that node carries a diagnostic (P1-04)", async ({
+    page,
+  }) => {
+    // 노드 카드 진단 본문의 **레이아웃 계약** 둘을 고정한다.
+    //  1. 본문이 이름·삭제 버튼과 같은 줄에 끼지 않고 카드 아래 줄 전체 폭을 쓴다(2차 리뷰 차단).
+    //  2. 본문이 남의 카드보다 자기 카드에 더 가깝다(3차 리뷰 차단). 진단 문장에 node_id가 없어
+    //     근접성이 곧 소유권이다.
+    // 계약은 아래 boundingBox 단언이 잠근다. 기준선 한 장은 보조 증거라 폭·테마 한 벌로 충분하고,
+    // 그래서 시각 프로젝트(4종)가 아니라 workflow 프로젝트에 둔다. 결함 자체는 테마와 무관하고
+    // 폭이 좁을수록 심한데 1440은 구성된 둘 중 좁은 쪽이다.
+    await openEditor(page, "/research/strategies/new");
+    // 오류를 **마지막이 아닌** 노드에 준다: 뒤에 노드가 없으면 근접성이 뒤집혀도 드러나지 않는다.
+    // golden의 마지막 노드(`mom_252`)를 깨고 그 뒤에 노드를 하나 더 둔다.
+    const withTrailingNode = mustReplace(
+      mustReplace(
+        mustReplace(GOLDEN, "퀄리티 모멘텀", "P1-04 노드 진단 레이아웃"),
+        "window: 252",
+        "window: 0",
+      ),
+      "      output_node_id: mom_252",
+      TRAILING_NODE + "      output_node_id: mom_252",
+    );
+    await replaceSource(page, withTrailingNode);
+    await expectPhase(page, "검증 오류");
+
+    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    const editorRegion = page.getByRole("region", { name: "그래프 편집" });
+    await expect(editorRegion).toBeVisible();
+    // 원인 문장이 그 노드 카드 안에 본문으로 있다.
+    const nodes = editorRegion.locator(".factor-graph__editor-nodes");
+    await expect(nodes).toContainText("window는 1 이상이고 lag는 0 이상이어야 합니다");
+
+    // 본문은 버튼들과 같은 줄이 아니라 카드 아래 줄 전체 폭을 쓴다. 레이아웃 계약이라 픽셀로
+    // 고정한다 — jsdom에는 레이아웃이 없어 단위 테스트로는 잡히지 않는다.
+    const body = nodes.locator(".strategy-form__diagnostics").first();
+    const removeButton = nodes
+      .getByRole("button", { name: "mom_252 · 삭제" })
+      .first();
+    const bodyBox = await body.boundingBox();
+    const buttonBox = await removeButton.boundingBox();
+    expect(bodyBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    if (bodyBox === null || buttonBox === null) return;
+    // 같은 줄이 아니다: 본문 위쪽이 버튼 아래쪽보다 아래에 있다.
+    expect(bodyBox.y).toBeGreaterThanOrEqual(buttonBox.y + buttonBox.height);
+    // 카드 폭을 거의 다 쓴다(버튼 옆 좁은 칸에 끼지 않았다).
+    const listBox = await nodes.boundingBox();
+    expect(listBox).not.toBeNull();
+    if (listBox === null) return;
+    expect(bodyBox.width).toBeGreaterThan(listBox.width * 0.8);
+
+    // 근접성이 소유권이다: 본문은 자기 행보다 **아래 노드 행**에서 더 멀어야 한다.
+    const nextRow = nodes.getByRole("button", { name: "노드 편집: trailing" });
+    const nextBox = await nextRow.boundingBox();
+    expect(nextBox).not.toBeNull();
+    if (nextBox === null) return;
+    const toOwnRow = bodyBox.y - (buttonBox.y + buttonBox.height);
+    const toNextRow = nextBox.y - (bodyBox.y + bodyBox.height);
+    expect(toOwnRow).toBeLessThanOrEqual(toNextRow);
+
+    await page.mouse.move(0, 0);
+    // 문장 자체는 backend 소유라 픽셀로 고정하지 않는다(`mask`). 이 기준선이 지키는 것은 카드
+    // 레이아웃이고, 문구가 다듬어져도 기준선을 다시 찍을 일이 없다.
+    await expect(nodes).toHaveScreenshot("graph-node-diagnostic.png", {
+      mask: [nodes.locator(".strategy-form__diagnostics")],
+    });
   });
 
   test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({

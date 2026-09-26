@@ -161,11 +161,9 @@ describe("문서 되돌리기·다시 실행 (P1-02)", () => {
     const before = source();
     expect(before).toBe(VERBOSE);
 
-    await user.selectOptions(
-      graph().getByRole("combobox", { name: "노드 종류" }),
-      "field",
+    await user.click(
+      graph().getByRole("button", { name: "데이터 필드 노드 추가" }),
     );
-    await user.click(graph().getByRole("button", { name: "노드 추가" }));
     await waitFor(() =>
       expect(source()).toContain("\n          node_id: field\n"),
     );

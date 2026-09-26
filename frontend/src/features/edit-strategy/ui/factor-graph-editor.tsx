@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { t, tName } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
@@ -13,19 +13,31 @@ import {
   renameNode,
   selectedNodePointer,
   setNodeField,
+  type AddNodeFailure,
 } from "../model/graph-transactions";
+import {
+  catalogNote,
+  operatorPalette,
+  type OperatorCatalogState,
+  type PaletteEntry,
+} from "../model/operator-palette";
 import { schemaFacts, type JsonSchema } from "../model/schema-navigator";
 import { factorGraphPointer } from "../model/use-execution-plans";
 import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import {
+  DiagnosticNotes,
   FormFieldsEditor,
   type CommitPlanner,
   type FormCatalogs,
 } from "./strategy-form-panel";
+import { OperatorPalette } from "./operator-palette";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 
 const NO_FOCUS = { focusEditor: false } as const;
+
+/** 삭제 거부 안내의 참조 pointer가 이 팩터의 몇 번째 노드를 가리키는가. 그래프 출력이면 매치가 없다. */
+const NODE_INDEX = /\/graph\/nodes\/(\d+)(?:\/|$)/u;
 
 type FactorGraphEditorProps = {
   tree: unknown;
@@ -33,6 +45,8 @@ type FactorGraphEditorProps = {
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   diagnostics: DocumentDiagnostic[];
+  /** 연산자 카탈로그(P1-03). 팔레트가 읽는 유일한 연산자 목록이다. */
+  operators?: OperatorCatalogState;
   factorIndex: number;
   selectedPointer?: string;
   /**
@@ -59,6 +73,7 @@ export const FactorGraphEditor = ({
   transactions,
   catalogs,
   diagnostics,
+  operators = { status: "loading" },
   factorIndex,
   selectedPointer,
   revealSignal,
@@ -70,6 +85,9 @@ export const FactorGraphEditor = ({
     selectedPointer,
     revealSignal,
   );
+  // 노드 카드 본문의 id 접두사. pointer 문자열을 id로 쓰면 같은 노드를 그리는 다른 자리와 충돌한다
+  // (2차 리뷰 P3: 노드 카드와 선택한 노드 패널이 같은 id를 냈다).
+  const notesPrefix = useId();
   const factors = authoredFactors(tree);
   const activeFactorId = factors[factorIndex]?.factorId ?? `#${factorIndex + 1}`;
   const factorPointer = `/factors/${factorIndex}`;
@@ -83,8 +101,14 @@ export const FactorGraphEditor = ({
       tName(schemaFacts(branch).descriptionKey),
     ]),
   );
-  const [kind, setKind] = useState<string>("");
-  const chosenKind = kind || (kinds[0]?.[0] ?? "");
+  // 팔레트 목록. kind 목록(`kinds`)은 노드 라벨과 팔레트의 입력으로만 남고 화면에서는 숨는다
+  // (WORKFLOW P1-04: kind 드롭다운 대신 연산자를 먼저 고른다).
+  const palette = operatorPalette(
+    schema,
+    tree,
+    factorPointer,
+    operators.status === "ready" ? operators.definitions : null,
+  );
   // 삭제 거부 안내는 판정을 낸 tree에만 붙는다(P4-03 리뷰 P2-2와 같은 규칙). `by`가 null이면 문서에서 못 찾은 경우.
   const [blocked, setBlocked] = useState<{
     tree: unknown;
@@ -92,7 +116,24 @@ export const FactorGraphEditor = ({
     by: string[] | null;
   } | null>(null);
   const blockedNow = blocked !== null && blocked.tree === tree ? blocked : null;
+  // 노드 추가 실패도 같은 규칙으로 그 문서에만 붙인다(P1-04).
+  const [addFailure, setAddFailure] = useState<{
+    tree: unknown;
+    entry: string;
+    reason: AddNodeFailure;
+  } | null>(null);
+  const addFailureNow =
+    addFailure !== null && addFailure.tree === tree ? addFailure : null;
   const disabled = transactions.disabled;
+  const paletteDisabled =
+    disabled !== null
+      ? t("graph.palette.locked").replace(
+          "{reason}",
+          t(`form.disabled.${disabled}`),
+        )
+      : transactions.settling
+        ? t("graph.palette.settling")
+        : null;
   const graphSection = projectObjectSection(
     schema,
     tree,
@@ -103,11 +144,21 @@ export const FactorGraphEditor = ({
   const nodes = graphSection?.lists.find((list) => list.key === "nodes");
   // 표시 이름은 `node_id`(없으면 첫 문자열 값)라 겹칠 수 있다 → 겹치면 문서 순번을 붙여 접근성 이름을 유일하게
   // 한다(리뷰 DEFECT-132-01(b)). 연산은 언제나 pointer로 한다.
-  const labelOf = (index: number): string => {
+  const labelOf = (index: number): string | null => {
     const items = nodes?.items ?? [];
-    const summary = items[index]?.summary ?? "";
+    const summary = items[index]?.summary;
+    if (summary === undefined) return null;
     const duplicated = items.filter((item) => item.summary === summary).length > 1;
     return duplicated ? `${summary} (${index + 1})` : summary;
+  };
+  // 삭제 거부 안내는 JSON Pointer가 아니라 사람이 보는 노드 이름으로 말한다(P1-04). 그래프 자신의
+  // `output_node_id`처럼 노드 밖 참조는 그 자리를 이름으로 부른다.
+  const referenceLabel = (pointer: string): string => {
+    const index = NODE_INDEX.exec(pointer)?.[1];
+    if (index === undefined) return t("graph.outputReference");
+    // 그린 목록 밖 인덱스면 이름이 없다. 안내 문장이 빈칸이 되지 않게 pointer 원문으로 떨어진다
+    // (리뷰 P3: 조용한 실패를 없애는 PR에서 안내가 비는 것은 같은 계열의 퇴행이다).
+    return labelOf(Number(index)) ?? pointer;
   };
   const nodePointer = selectedNodePointer(selectedPointer, factorPointer);
   const selectedItem =
@@ -146,9 +197,23 @@ export const FactorGraphEditor = ({
     };
   };
 
-  const add = (): void => {
-    const added = addNode(tree, factorPointer, chosenKind, schema);
-    if ("error" in added) return;
+  // 팔레트에서 고른 항목으로 노드를 만든다: kind와 파라미터 기본값은 `addNode`가 스키마에서 채우고
+  // 연산자는 고른 값 그대로다. 실패는 화면에 이유를 남긴다 — 조용히 아무 일도 안 하지 않는다(P1-04).
+  const add = (entry: PaletteEntry): void => {
+    const added = addNode(
+      tree,
+      factorPointer,
+      entry.kind,
+      schema,
+      entry.operator === null
+        ? null
+        : { operator: entry.operator, params: entry.params },
+    );
+    if ("error" in added) {
+      setAddFailure({ tree, entry: entry.name, reason: added.error });
+      return;
+    }
+    setAddFailure(null);
     const nextIndex = nodes?.items.length ?? 0;
     if (transactions.apply(added.ops, added.nodeId, GRAPH_OWNER, NO_FOCUS))
       onSelectPointer(`${graphPointer}/nodes/${nextIndex}`);
@@ -231,24 +296,20 @@ export const FactorGraphEditor = ({
         disabled={disabled !== null || transactions.settling}
       >
         <legend>{t("graph.nodesTitle")}</legend>
-        <div className="factor-graph__editor-add">
-          {kinds.length > 1 ? (
-            <select
-              aria-label={t("graph.nodeKind")}
-              value={chosenKind}
-              onChange={(event) => setKind(event.target.value)}
-            >
-              {kinds.map(([name]) => (
-                <option key={name} value={name}>
-                  {kindNames.get(name) ?? name}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          <Button size="small" onClick={add} disabled={chosenKind === ""}>
-            {t("graph.addNode")}
-          </Button>
-        </div>
+        <OperatorPalette
+          groups={palette}
+          disabledReason={paletteDisabled}
+          catalogNote={catalogNote(operators)}
+          onPick={add}
+        />
+        {addFailureNow === null ? null : (
+          <p className="strategy-form__invalid" role="alert">
+            {t(`graph.addFailed.${addFailureNow.reason}`).replace(
+              "{entry}",
+              addFailureNow.entry,
+            )}
+          </p>
+        )}
         {nodes === undefined || nodes.items.length === 0 ? (
           <p className="factor-graph__editor-state">{t("graph.noNodes")}</p>
         ) : (
@@ -256,7 +317,7 @@ export const FactorGraphEditor = ({
             {nodes.items.map((item, index) => {
               const kindField = item.fields.find((field) => field.key === "kind");
               const active = item.pointer === nodePointer;
-              const label = labelOf(index);
+              const label = labelOf(index) ?? item.pointer;
               return (
                 <li key={item.pointer} aria-current={active ? "true" : undefined}>
                   <button
@@ -286,6 +347,12 @@ export const FactorGraphEditor = ({
                   >
                     {t("graph.removeNode")}
                   </Button>
+                  {/* 노드 진단은 노드 객체 pointer로 오므로 그 카드 안에 본문을 붙인다 — Form 목록
+                      항목과 같은 모양이다(리뷰 차단 2). */}
+                  <DiagnosticNotes
+                    id={`${notesPrefix}-node-${index}`}
+                    diagnostics={item.diagnostics}
+                  />
                 </li>
               );
             })}
@@ -297,7 +364,10 @@ export const FactorGraphEditor = ({
               ? t("graph.removeMissing").replace("{node}", blockedNow.label)
               : t("graph.removeBlocked")
                   .replace("{node}", blockedNow.label)
-                  .replace("{pointers}", blockedNow.by.join(", "))}
+                  .replace(
+                    "{nodes}",
+                    [...new Set(blockedNow.by.map(referenceLabel))].join(", "),
+                  )}
           </p>
         ) : null}
       </fieldset>
@@ -309,6 +379,7 @@ export const FactorGraphEditor = ({
             transactions={transactions}
             catalogs={catalogs}
             owner={GRAPH_OWNER}
+            selectedPointer={selectedPointer}
           />
         </fieldset>
       ) : null}
@@ -356,6 +427,10 @@ export const FactorGraphEditor = ({
             catalogs={catalogs}
             owner={GRAPH_OWNER}
             planCommit={planNodeCommit}
+            selectedPointer={selectedPointer}
+            // 이 노드의 진단은 위 노드 카드가 이미 본문으로 들고 있다. 여기서 또 그리면 같은
+            // 문장이 한 화면에 두 번 나오고 정보는 늘지 않는다(2차 리뷰 P3).
+            sectionDiagnostics={false}
           />
         )}
       </fieldset>

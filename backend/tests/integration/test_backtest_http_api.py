@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
@@ -145,6 +146,8 @@ def _app_with_backtests(container: BackendContainer, backtests: BacktestRunServi
         portfolio_design=container.portfolio_design,
         strategy_traces=container.strategy_traces,
         backtest_runs=backtests,
+        # TestClient는 브라우저가 아니라 CORS를 거치지 않는다 — 허용할 origin이 없다.
+        allowed_origins=(),
     )
 
 
@@ -382,6 +385,89 @@ def test_cancel_during_raw_observation_loading_ends_cancelled_without_a_tape(
     assert '"status":"cancelled"' in events
     assert '"status":"completed"' not in events
     assert '"stage":"data"' not in events
+
+
+class _ReportingBarrierPort:
+    """진행 보고 능력만으로 로딩하는 테스트 포트(리뷰 P3-4).
+
+    배리어에서 멈췄다 풀리면 checkpoint 없이 진행을 먼저 보고한다. 그래서 취소가 진행 콜백의
+    `_update` 에서 처음 관측되는 경로를 탄다. 관측은 mock 어댑터에 위임한다.
+    """
+
+    def __init__(self, delegate: MockEquityDataAdapter) -> None:
+        self._delegate = delegate
+        self.entered = Event()
+        self.release = Event()
+        self.loaded = False
+
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        return self._delegate.load_raw_observations(query)
+
+    def load_raw_observations_reporting(
+        self,
+        query: RawObservationQuery,
+        *,
+        checkpoint: Callable[[], None],
+        progress: Callable[[float], None],
+    ) -> RawObservationSet:
+        self.entered.set()
+        if not self.release.wait(timeout=30):
+            raise TimeoutError("reporting raw load test barrier was not released")
+        progress(0.6)
+        result = self._delegate.load_raw_observations(query)
+        self.loaded = True
+        progress(1.0)
+        return result
+
+
+def test_cancel_first_observed_by_a_progress_callback_ends_cancelled(tmp_path: Path) -> None:
+    """이슈 #162 리뷰 P3-4: 진행 콜백이 취소의 첫 관측 지점이어도 `failed` 가 아니라 `cancelled`.
+
+    진행 보고 `_update` 가 던지는 `RunCancelledError` 를 어댑터·평가기·파이프라인이 삼키거나
+    다른 예외로 바꾸면 이 테스트가 잡는다. 취소 수락 뒤에는 `running` 이벤트가 끼지 않는다.
+    """
+    run_id = "run-cancel-in-progress-callback"
+    container = build_container(artifact_root=tmp_path / "unused")
+    adapter = cast(MockEquityDataAdapter, container.equity_data)
+    port = _ReportingBarrierPort(adapter)
+    backtests = BacktestRunService(
+        PortfolioDesignService(
+            port,
+            BacktestEnginePortfolioAdapter(),
+            factor_metadata=adapter,
+            factor_registry_version=build_default_factor_registry().version,
+        ),
+        container.strategy_repository,
+        cast(BacktestDataPort, container.equity_data),
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path / "artifacts"),
+        new_id=lambda: run_id,
+    )
+    client = TestClient(_app_with_backtests(container, backtests))
+
+    accepted = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    assert accepted.status_code == 202
+    assert port.entered.wait(timeout=30), "run never entered the reporting raw load"
+    try:
+        cancellation = client.post(f"/api/v1/backtests/{run_id}/cancel")
+        assert cancellation.json()["status"] == "cancel_requested"
+    finally:
+        port.release.set()
+
+    state = _wait(client, run_id)
+    assert state["status"] == "cancelled", state
+    assert state["error"] is None
+    assert state["error_code"] is None
+    assert port.loaded is False
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in client.get(f"/api/v1/backtests/{run_id}/events").text.splitlines()
+        if line.startswith("data: ")
+    ]
+    statuses = [event["status"] for event in events]
+    requested = statuses.index("cancel_requested")
+    assert "running" not in statuses[requested:], statuses
+    assert statuses[-1] == "cancelled"
 
 
 def test_data_failure_in_the_tape_stage_is_coded_and_hides_server_paths(
@@ -805,3 +891,32 @@ def test_conflicting_legacy_missing_policies_are_refused_at_start_with_a_code() 
     assert detail["code"] == "portfolio.strategy.invalid"
     codes = [issue["code"] for issue in detail["validation"]["issues"]]
     assert "run_environment.missing_policy_conflict" in codes
+
+
+def test_tape_stage_progress_advances_monotonically_within_a_bounded_event_count() -> None:
+    """이슈 #162: tape 단계가 `0.02` 한 번만 내고 끝나 실행 시간 대부분 동안 2% 에 고정됐다.
+
+    tape 단계 안에서 진행 값이 여러 번 오르고, 단계 이름은 `tape` 그대로이며, 전체 이벤트의 진행
+    값은 단조 증가한다. 평가기가 종목마다 보고해도 이벤트 수는 제한된다(SSE·메모리 보호).
+    """
+    client = TestClient(build_http_app())
+    accepted = client.post("/api/v1/backtests", json=_run_body(client))
+    assert accepted.status_code == 202
+    run_id = accepted.json()["run"]["run_id"]
+    assert _wait(client, run_id)["status"] == "completed"
+
+    stream = client.get(f"/api/v1/backtests/{run_id}/events").text
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in stream.splitlines()
+        if line.startswith("data: ")
+    ]
+    progress = [event["progress"] for event in events]
+    assert progress == sorted(progress), progress
+    tape = [event for event in events if event["stage"] == "tape"]
+    tape_progress = {event["progress"] for event in tape}
+    assert len(tape_progress) >= 5, tape
+    assert min(tape_progress) == pytest.approx(0.02)
+    assert max(tape_progress) <= 0.8
+    assert len(tape) <= 100, len(tape)
+    assert {event["stage"] for event in events} >= {"queued", "tape", "data", "engine", "completed"}

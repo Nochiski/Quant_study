@@ -336,3 +336,42 @@ def test_cross_sectional_demean_subtracts_the_member_peer_mean() -> None:
     }
 
     assert values == {"s1": 1.0, "s2": -1.0, "s3": 0.0}
+
+
+def test_evaluation_reports_progress_inside_the_time_series_node() -> None:
+    """이슈 #162: 실데이터에서 시계열 노드 하나가 tape 단계의 절반 가까이를 쓴다.
+
+    노드 완료 단위로만 진행을 올리면 그 노드 동안 막대가 멈춰 보이므로 종목 단위로도 올린다.
+    진행 콜백은 결과를 바꾸지 않는다.
+    """
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("close", "price.close", "field"),
+            TimeSeriesNode("mom", TimeSeriesOperator.MOMENTUM, "close", 2, "time_series"),
+        ),
+        output_node_id="mom",
+    )
+    observations = tuple(
+        FactorObservation(
+            as_of=date(2024, 1, day),
+            security_id=f"s{security}",
+            fields=(FactorFieldValue("price.close", float(day + security)),),
+            forward_return=None,
+        )
+        for day in (2, 3, 4)
+        for security in (1, 2, 3, 4)
+    )
+    reported: list[float] = []
+
+    evaluation = evaluate_factor_graph(graph, observations=observations, progress=reported.append)
+
+    assert evaluation == evaluate_factor_graph(graph, observations=observations)
+    assert reported == sorted(reported)
+    # 가중치 field 1 + 시계열 20 = 21. field 완료가 1/21 이고, 시계열 노드는 종목 4개(관측 3개씩)를
+    # 끝낼 때마다 5/21 씩 올린다. 필드 노드가 팩터 구간의 절반을 가져가지 않는다(리뷰 P3-1).
+    # 노드 계산은 0.96 까지이고 출력 값 조립이 1.0 을 채운다.
+    nodes = [value for value in reported if value <= 0.96]
+    assert sorted(set(nodes)) == pytest.approx(
+        [0.96 * share for share in (1 / 21, 6 / 21, 11 / 21, 16 / 21, 1.0)]
+    )
+    assert reported[-1] == 1.0

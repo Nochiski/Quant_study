@@ -19,7 +19,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - run: uv sync --locked --extra parquet --extra equity
+      - run: uv sync --locked --extra parquet --extra equity --extra llm
       - run: uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
       - run: uv run pytest -q
       - name: Equity layer tests
@@ -32,13 +32,59 @@ jobs:
           uv run --locked python -m unittest discover -s tools/tests -p 'test_*.py'
           uv run --project backend ruff check tools
           uv run --project backend pyright tools
-      - run: uv run ruff check src tests examples scripts
+      # `tools`는 `backend/tools/`다. 위 "Verify root server contract" step의 `tools`와
+      # 다르다 — 그쪽은 working-directory가 `.`라 저장소 루트를 가리킨다. 골든 재생성
+      # 도구가 lint·타입 검사 없이 머지되면, 도구가 깨져도 골든 테스트는 초록이고
+      # "재생성 명령이 안 돈다"로만 드러난다(C-01 감사 NB-6).
+      - run: uv run ruff check src tests examples scripts tools
       - run: uv run pyright
       - run: cargo fmt --manifest-path rust/backtest_core/Cargo.toml -- --check
       - run: cargo clippy --manifest-path rust/backtest_core/Cargo.toml --all-targets -- -D warnings
       # PyO3's extension-module feature deliberately skips libpython linking on Unix. Rust test
       # binaries need that link, so exercise the same code without the packaging-only feature.
       - run: cargo test --manifest-path rust/backtest_core/Cargo.toml --no-default-features
+
+  # 공급자 SDK는 optional extra `llm`이다. 설치되지 않은 환경이 정상이고(spec D4의 "설치 필요"
+  # 상태가 성립하려면 그래야 한다), 그 환경에서 어시스턴트 계약 스위트가 **수집되고 통과해야**
+  # 한다. extra 하나가 빠졌다고 SSE 순서·재개·409·비밀 누설 테스트가 통째로 사라지면 안 된다.
+  backend-no-extras:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: uv sync --locked
+      - run: uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
+      # A-07이 더한 네 파일도 여기 있어야 한다. 넷 다 SDK를 직접 import하지 않지만,
+      # 나중에 누가 그 의존을 들이면 이 job이 잡는 것이 이 job의 존재 이유다
+      # (C-01 감사 NB-7).
+      - run: >
+          uv run pytest -q
+          tests/integration/test_assistant_http_api.py
+          tests/test_bootstrap_assistant.py
+          tests/test_assistant_live_smoke.py
+          tests/application/test_assistant_prompt_fixtures.py
+          tests/application/test_assistant_scenarios.py
+          tests/application/test_assistant_usage.py
+          tests/architecture
+
+  # 유저 스토리 하네스(`docs/product/user-stories/`): 스토리 상태·e2e 태그·traceability 표가 서로
+  # 맞는지 본다. 검사기 단위 테스트는 backend job의 "Verify root server contract" step이 함께 돈다.
+  user-story-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --locked python -m quant_study_dev.user_story_trace
 
   frontend:
     runs-on: ubuntu-latest
@@ -107,6 +153,15 @@ jobs:
         working-directory: frontend
       - run: npx playwright install chromium
         working-directory: frontend
+      # 스토리 태그가 붙은 e2e가 이 게이트에서 실제로 수집되고 건너뛰지 않는지 본다. 정적 검사는
+      # project의 testMatch를 모르므로 Playwright가 만든 목록과 맞춘다(유저 스토리 하네스).
+      - name: 유저 스토리 e2e가 릴리스 게이트에 드는지 확인
+        shell: bash
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/story-list.json
+        run: |
+          node frontend/e2e/run-playwright.mjs --list --reporter=json
+          uv run --locked python -m quant_study_dev.user_story_trace --playwright-list "$PLAYWRIGHT_JSON_OUTPUT_NAME"
       - run: npm run test:e2e
         working-directory: frontend
       - name: Upload browser failure artifacts

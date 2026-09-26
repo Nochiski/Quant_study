@@ -124,6 +124,7 @@
 
 .ide__outline,
 .ide__inspector,
+.ide__assistant,
 .ide__debugger,
 .ide__editor,
 .ide__snippets {
@@ -137,11 +138,21 @@
   flex-direction: column;
 }
 
-.ide__inspector {
+.ide__inspector,
+.ide__assistant {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+/* 사이드바 본문만 스크롤한다 — 헤더(접기 버튼)는 긴 대화에서도 제자리에 남는다. */
+.ide__assistant-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
 }
 
 .ide__centre {
@@ -405,6 +416,7 @@
 }
 
 .ide__drawer .ide__inspector,
+.ide__drawer .ide__assistant,
 .ide__drawer .ide__debugger {
   width: 100%;
   height: 100%;

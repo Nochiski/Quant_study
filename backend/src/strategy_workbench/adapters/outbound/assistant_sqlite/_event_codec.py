@@ -76,7 +76,12 @@ def encode_event(event: ChatEvent) -> tuple[str, str]:
             return "proposal", _dumps({"proposal": _proposal_payload(event.proposal)})
         case Usage():
             return "usage", _dumps(
-                {"input_tokens": event.input_tokens, "output_tokens": event.output_tokens}
+                {
+                    "input_tokens": event.input_tokens,
+                    "output_tokens": event.output_tokens,
+                    "cache_read_tokens": event.cache_read_tokens,
+                    "cache_write_tokens": event.cache_write_tokens,
+                }
             )
         case Done():
             return "done", _dumps({"stop_reason": event.stop_reason})
@@ -120,6 +125,10 @@ def decode_event(tag: str, payload: str) -> ChatEvent:
             return Usage(
                 input_tokens=_int(body, "input_tokens", tag),
                 output_tokens=_int(body, "output_tokens", tag),
+                # 이 두 칸이 생기기 전에 저장된 이력에는 키가 없다. 그때는 0으로 읽는다 —
+                # 여기서 실패하면 이미 쌓인 대화 이력을 통째로 못 읽게 된다.
+                cache_read_tokens=_optional_int(body, "cache_read_tokens", tag),
+                cache_write_tokens=_optional_int(body, "cache_write_tokens", tag),
             )
         case "done":
             return Done(stop_reason=_text(body, "stop_reason", tag))
@@ -218,6 +227,17 @@ def _int(body: Mapping[str, object], key: str, tag: str) -> int:
             f"type={type(value).__name__}"
         )
     return value
+
+
+def _optional_int(body: Mapping[str, object], key: str, tag: str, default: int = 0) -> int:
+    """키가 없으면 기본값. 있으면 `_int`와 같은 엄격함으로 읽는다.
+
+    나중에 더해진 필드용이다. 없는 것은 옛 이력이라 정상이지만, 있는데 정수가 아니면 그건
+    깨진 데이터이므로 조용히 넘기지 않는다.
+    """
+    if key not in body:
+        return default
+    return _int(body, key, tag)
 
 
 def _bool(body: Mapping[str, object], key: str, tag: str) -> bool:

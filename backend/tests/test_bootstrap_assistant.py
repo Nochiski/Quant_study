@@ -2,7 +2,7 @@
 
 HTTP 계약은 `tests/integration/test_assistant_http_api.py`가 본다. 여기서 보는 것은 composition
 root가 **무엇을 어디서 읽어 무엇을 조립하는가**다: 환경 변수 이름, 저장소 밖으로 강제되는 비밀
-파일, 공급자 레지스트리가 비었을 때의 상태, authoring compile을 감싼 `StrategyCompilerPort`.
+파일, 공급자 레지스트리에 없는 종류의 상태, authoring compile을 감싼 `StrategyCompilerPort`.
 """
 
 from __future__ import annotations
@@ -72,18 +72,95 @@ def test_the_container_builds_the_three_assistant_services_together(tmp_path: Pa
     assert container.assistant_turns is not None
 
 
-def test_an_empty_provider_registry_reports_every_kind_as_not_installed(tmp_path: Path) -> None:
-    """A-05·A-06 전에는 레지스트리가 비어 있고, 그 사실이 화면까지 그대로 전달된다."""
-    assert PROVIDER_ADAPTER_FACTORIES == {}
+def test_a_kind_with_no_registered_factory_is_listed_as_not_installed(tmp_path: Path) -> None:
+    """레지스트리에 없는 종류도 숨기지 않고 "설치 필요"로 화면까지 전달된다.
+
+    화면은 선언된 종류를 **전부** 보여 주어야 한다 — 사용자가 왜 그 공급자를 못 고르는지
+    알아야 한다.
+
+    레지스트리를 **주입해서** 본다. 전역 `PROVIDER_ADAPTER_FACTORIES`를 읽으면 이 테스트가
+    "지금 누가 등록돼 있는가"에 묶여, A-06이 `openai`를 등록할 때 같이 고쳐야 한다. 여기서
+    보려는 것은 "등록되지 않은 종류의 표현"이고 그건 등록 현황과 무관하다.
+
+    "등록은 됐는데 SDK가 없다"는 경우는 `_refuse_import` 계열 테스트가 따로 본다.
+    """
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={},
+        )
+    )
+
+    availability = {item.kind: item for item in container.assistant_profiles.available_kinds()}
+
+    assert set(availability) == set(ProviderKind)
+    assert not any(item.installed for item in availability.values())
+    assert not any(item.default_model for item in availability.values())
+
+
+def _real_adapter_submodule_typo() -> LlmProviderPort:
+    """등록 팩토리가 우리 adapter 패키지 안의 없는 하위 모듈을 부른 상황.
+
+    이름을 손으로 지어내지 않고 **실제로 import해서** 진짜 `ModuleNotFoundError`를 받는다.
+    손으로 만든 이름은 우리가 믿는 경로를 다시 적는 것뿐이라, 패키지가 옮겨지거나 이름이
+    바뀌어 SDK 이름과 겹치게 되는 변화를 잡지 못한다.
+
+    `llm_anthropic/__init__.py`는 SDK를 import하지 않으므로 extra 없는 환경에서도 여기까지
+    온다 — 그래서 이 테스트는 두 구성에서 모두 돈다.
+    """
+    from strategy_workbench.adapters.outbound.llm_anthropic._definitely_not_here import (  # pyright: ignore[reportMissingImports]  # reason: 없는 모듈이어야 한다
+        build,
+    )
+
+    return build()
+
+
+def test_a_typo_inside_the_registered_adapter_is_not_disguised_as_a_missing_sdk(
+    tmp_path: Path,
+) -> None:
+    """우리 adapter 안의 오타 import가 "설치 필요"로 둔갑하면 안 된다.
+
+    둔갑하면 설정 화면은 SDK를 설치하라고만 말하고, 사용자는 이미 설치한 것을 다시 설치하려
+    든다. 진짜 원인인 우리 버그는 어디에도 드러나지 않는다. 판정 규칙은
+    `is_missing_provider_sdk`가 갖고, 여기서는 **등록된 adapter의 실제 경로**가 그 규칙의
+    "미설치" 쪽에 걸리지 않는지를 본다.
+    """
+    container = build_container(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={ProviderKind.ANTHROPIC: _real_adapter_submodule_typo},
+        )
+    )
+
+    with pytest.raises(ModuleNotFoundError) as raised:
+        container.assistant_profiles.available_kinds()
+
+    assert raised.value.name is not None
+    assert raised.value.name.startswith("strategy_workbench.adapters.outbound.llm_anthropic")
+    assert not is_missing_provider_sdk(ProviderKind.ANTHROPIC, raised.value)
+
+
+def test_the_default_registry_offers_the_installed_anthropic_adapter(tmp_path: Path) -> None:
+    """기본 레지스트리에 A-05 adapter가 등록돼 있고, SDK가 있으면 설치됨으로 해소된다.
+
+    SDK가 있어야 뜻이 있는 단언이라 `importorskip`으로 이 테스트만 건너뛴다. 모듈 최상단에서
+    adapter facade를 import하면 extra 없이는 이 파일 전체가 수집되지 않는다 — A-06도 같은
+    자리에 `llm_openai`를 더하므로 이 모양을 따른다.
+    """
+    pytest.importorskip("anthropic", reason="공급자 SDK는 optional extra `llm`이다")
+    from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import DEFAULT_MODEL
+
+    assert ProviderKind.ANTHROPIC in PROVIDER_ADAPTER_FACTORIES
     container = build_container(
         assistant=AssistantSettings(db_path=None, secrets_path=tmp_path / "secrets.json")
     )
 
-    availability = container.assistant_profiles.available_kinds()
+    availability = {item.kind: item for item in container.assistant_profiles.available_kinds()}
 
-    assert {item.kind for item in availability} == set(ProviderKind)
-    assert not any(item.installed for item in availability)
-    assert not any(item.default_model for item in availability)
+    assert availability[ProviderKind.ANTHROPIC].installed is True
+    assert availability[ProviderKind.ANTHROPIC].default_model == DEFAULT_MODEL
 
 
 def test_the_secrets_file_may_not_live_inside_the_repository() -> None:
@@ -192,9 +269,15 @@ def _refuse_import() -> LlmProviderPort:
     raise ModuleNotFoundError("No module named 'anthropic'", name="anthropic")
 
 
+# 절대 설치되지 않는 모듈 이름. "SDK가 없다"를 흉내 낼 때 실제 `anthropic`을 쓰면 안 된다 —
+# 그건 optional extra라 **설치된 구성도 정상**이고, 그때 판정은 정반대가 된다(설치된 SDK의 없는
+# 하위 모듈은 미설치가 아니라 우리 오타다). 테스트가 extra 설치 여부에 따라 뜻이 갈리면 안 된다.
+_ABSENT_SDK = "definitely_not_an_installed_sdk_a05"
+
+
 def _refuse_submodule_import() -> LlmProviderPort:
     """SDK가 지연 import를 쓰면 실패가 하위 모듈에서 난다. 그것도 미설치다."""
-    raise ModuleNotFoundError("No module named 'anthropic.types'", name="anthropic.types")
+    raise ModuleNotFoundError(f"No module named '{_ABSENT_SDK}.types'", name=f"{_ABSENT_SDK}.types")
 
 
 def _typo_import() -> LlmProviderPort:
@@ -287,7 +370,19 @@ def test_an_uninstalled_provider_refuses_profile_creation_instead_of_crashing(
         )
 
 
-def test_a_missing_sdk_submodule_still_counts_as_not_installed(tmp_path: Path) -> None:
+def test_a_missing_sdk_submodule_still_counts_as_not_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**없는** SDK의 하위 모듈에서 난 실패는 미설치다.
+
+    표를 `_ABSENT_SDK`로 바꾸는 이유는 `anthropic`이 이 저장소에서 optional extra이기
+    때문이다. 설치된 구성에서 `anthropic.types`를 쓰면 판정이 "우리 오타"로 뒤집혀
+    (아래 `_missing_submodule_of_an_installed_sdk` 케이스가 그쪽이다) 같은 테스트가 구성에
+    따라 다른 것을 검사하게 된다.
+    """
+    monkeypatch.setattr(
+        assistant_module, "PROVIDER_SDK_MODULES", {ProviderKind.ANTHROPIC: _ABSENT_SDK}
+    )
     container = build_container(
         assistant=AssistantSettings(
             db_path=None,
@@ -374,17 +469,26 @@ def test_an_installed_sdk_with_a_missing_submodule_is_not_swallowed_by_the_conta
         container.assistant_profiles.available_kinds()
 
 
-def test_a_missing_sdk_is_told_apart_from_our_own_import_bug() -> None:
-    """판정 함수 자체. 위 배선 테스트가 이 규칙 위에 선다."""
-    assert is_missing_provider_sdk(
-        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name="anthropic")
+def test_a_missing_sdk_is_told_apart_from_our_own_import_bug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """판정 함수 자체. 위 배선 테스트가 이 규칙 위에 선다.
+
+    하위 모듈 갈래는 **최상위 모듈이 실제로 없을 때만** 미설치다. `anthropic`은 optional
+    extra라 설치 여부가 구성마다 다르므로, 그 갈래는 `_ABSENT_SDK`로 확인한다.
+    """
+    monkeypatch.setattr(
+        assistant_module, "PROVIDER_SDK_MODULES", {ProviderKind.ANTHROPIC: _ABSENT_SDK}
     )
     assert is_missing_provider_sdk(
-        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name="anthropic.types")
+        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name=_ABSENT_SDK)
+    )
+    assert is_missing_provider_sdk(
+        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name=f"{_ABSENT_SDK}.types")
     )
     # 이름이 겹쳐 보이는 남의 패키지는 하위 모듈이 아니다.
     assert not is_missing_provider_sdk(
-        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name="anthropic_extras")
+        ProviderKind.ANTHROPIC, ModuleNotFoundError("", name=f"{_ABSENT_SDK}_extras")
     )
     # 다른 kind의 SDK는 이 kind의 미설치가 아니다.
     assert not is_missing_provider_sdk(

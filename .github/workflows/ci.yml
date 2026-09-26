@@ -19,7 +19,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy,rustfmt
-      - run: uv sync --locked --extra parquet --extra equity
+      - run: uv sync --locked --extra parquet --extra equity --extra llm
       - run: uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
       - run: uv run pytest -q
       - name: Equity layer tests
@@ -39,6 +39,25 @@ jobs:
       # PyO3's extension-module feature deliberately skips libpython linking on Unix. Rust test
       # binaries need that link, so exercise the same code without the packaging-only feature.
       - run: cargo test --manifest-path rust/backtest_core/Cargo.toml --no-default-features
+
+  # 공급자 SDK는 optional extra `llm`이다. 설치되지 않은 환경이 정상이고(spec D4의 "설치 필요"
+  # 상태가 성립하려면 그래야 한다), 그 환경에서 어시스턴트 계약 스위트가 **수집되고 통과해야**
+  # 한다. extra 하나가 빠졌다고 SSE 순서·재개·409·비밀 누설 테스트가 통째로 사라지면 안 된다.
+  backend-no-extras:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: uv sync --locked
+      - run: uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
+      - run: uv run pytest -q tests/integration/test_assistant_http_api.py tests/test_bootstrap_assistant.py tests/architecture
 
   frontend:
     runs-on: ubuntu-latest

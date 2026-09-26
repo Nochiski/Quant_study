@@ -306,8 +306,38 @@ class Proposal:
 
 @dataclass(frozen=True)
 class Usage:
+    """한 번의 공급자 호출이 쓴 토큰. **세 입력 칸은 서로 겹치지 않는다.**
+
+    `input_tokens`는 캐시 읽기·쓰기를 **제외한** 입력이고, 나머지 두 칸이 각각 캐시 읽기와
+    쓰기다. 공급자가 캐시를 `input_tokens`에 **포함해** 보고하면(OpenAI) adapter가 빼서 이
+    불변식에 맞춘다. 총입력은 저장하지 않고 `total_input_tokens`로 파생한다.
+
+    이 계약은 공급자 하나의 사실 서술이 아니라 **domain이 정한 불변식**이다. 공급자마다 같은
+    이름이 반대 뜻을 갖기 때문에 — Anthropic의 `input_tokens`는 캐시를 뺀 값이고 OpenAI의
+    `prompt_tokens`는 캐시를 포함한다 — 여기서 하나로 못 박지 않으면 세션 집계가 한쪽을 두 번
+    센다.
+
+    나누어 두는 이유는 성분마다 단가가 다르기 때문이다. 캐시 읽기는 싸고 쓰기는 입력보다
+    비싸므로, 합쳐 저장하면 비용을 되계산할 수 없다. 반대로 `input_tokens`만 더하면 집계가
+    실제 청구 입력을 과소 보고한다.
+
+    기본값 0은 호환을 위해서다. 채우지 않는 공급자 adapter와 이 필드가 생기기 전에 저장된
+    이력이 그대로 성립한다.
+    """
+
     input_tokens: int
     output_tokens: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+
+    @property
+    def total_input_tokens(self) -> int:
+        """이 호출의 총 입력 토큰. 세 칸이 겹치지 않으므로 단순 합이다.
+
+        **저장·전송 필드가 아니다.** 저장하면 성분과 합이 어긋난 이력이 생길 수 있고, 그때
+        어느 쪽이 맞는지 판단할 근거가 없다. 합이 필요한 곳에서 그때 더한다.
+        """
+        return self.input_tokens + self.cache_read_tokens + self.cache_write_tokens
 
 
 @dataclass(frozen=True)

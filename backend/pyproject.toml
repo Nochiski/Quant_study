@@ -21,6 +21,9 @@ equity = [
     "duckdb>=1.5",
     "requests>=2.32",
 ]
+llm = [
+    "anthropic>=1.0",
+]
 
 [dependency-groups]
 dev = [

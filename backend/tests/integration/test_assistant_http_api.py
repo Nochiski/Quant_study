@@ -1,8 +1,14 @@
 """`/api/v1/assistant/*` 계약 (설계 spec D6, WORKFLOW A-04).
 
 앱은 **실제 bootstrap 그래프**로 세운다(`build_http_app`). 가짜로 바꾸는 것은 공급자 adapter
-하나뿐이고 — A-05·A-06 전이라 진짜가 없다 — 저장소·비밀 파일·컴파일러는 전부 진짜다. 그래야
-라우트가 아니라 배선이 틀렸을 때도 이 테스트가 깨진다.
+하나뿐이고, 저장소·비밀 파일·컴파일러는 전부 진짜다. 그래야 라우트가 아니라 배선이 틀렸을
+때도 이 테스트가 깨진다.
+
+마지막 두 건(A-05)은 가짜를 한 겹 더 벗긴다. 진짜 `AnthropicLlmAdapter`를 쓰고 SDK
+클라이언트만 대본으로 바꿔, bootstrap 레지스트리에 등록된 그 클래스가 HTTP 왕복에서
+"설치 필요"가 아니라 probe 경로로 가는지 본다. **그 둘만** 공급자 SDK를 필요로 하므로 import를
+함수 안으로 내렸다 — 모듈 수준에서 묶으면 extra `llm` 없이 돌릴 때 이 파일 전체(SSE 순서·재개·
+409·비밀 누설)가 수집 단계에서 통째로 사라진다.
 
 비밀은 이 파일 전체에서 `_API_KEY` 하나만 쓴다. 마지막 테스트가 그 문자열이 어떤 응답 본문과
 로그에도 없음을 단언하므로, 새 라우트를 추가하면서 키를 응답에 흘리면 여기서 걸린다.
@@ -18,7 +24,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import httpx
 import pytest
@@ -26,8 +32,14 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+if TYPE_CHECKING:  # reason: 런타임 import는 extra 없는 구성을 깨뜨린다
+    import httpx2
+
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
-from strategy_workbench.bootstrap.facade.container import AssistantSettings
+from strategy_workbench.bootstrap.facade.container import (
+    PROVIDER_ADAPTER_FACTORIES,
+    AssistantSettings,
+)
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.assistant.facade.models import (
     ChatEvent,
@@ -46,6 +58,21 @@ from strategy_workbench.domain.assistant.facade.models import (
     TurnRequest,
     TurnStatus,
 )
+
+# 헬퍼가 받는 HTTP 클라이언트. 두 종류가 섞이는 데에는 이유가 있다.
+#
+# `TestClient`는 ASGI 앱을 in-process로 부르고, `_live_client`는 진짜 소켓으로 부른다(SSE를
+# 보려면 후자가 필요하다 — `_live_client` docstring). 그런데 starlette 1.6의 `TestClient`는
+# **설치된 전송 계층에 따라** `httpx` 또는 `httpx2`를 상속한다: `anthropic`(extra `llm`)이
+# `httpx2`를 끌고 오면 그쪽이고, 없으면 `httpx`다. 둘은 서로의 하위 타입이 아니므로 헬퍼를
+# 한쪽으로만 적으면 extra 설치 여부에 따라 타입 검사가 갈린다.
+#
+# `httpx2`를 **타입 검사에서만** 본다. 런타임 import를 두면 이 파일이 extra 없는 구성에서
+# 수집되지 않아 `backend-no-extras` 잡이 깨진다 — 그 잡이 지키려는 것이 바로 이 파일이다.
+# 문자열 별칭은 타입 검사기만 읽고, 주석은 `from __future__ import annotations`로 지연된다.
+AssistantClient: TypeAlias = "TestClient | httpx.Client"
+# 응답 타입도 같이 갈린다 — `TestClient.get(...)`이 돌려주는 것은 그 클라이언트 쪽 `Response`다.
+AssistantResponse: TypeAlias = "httpx.Response | httpx2.Response"
 
 _API_KEY = "sk-secret-workbench-ABCD1234"
 _ASSISTANT = "/api/v1/assistant"
@@ -165,14 +192,14 @@ def _live_client(tmp_path: Path, provider: _GatedProvider) -> Iterator[httpx.Cli
         thread.join(timeout=15.0)
 
 
-def _create_profile(client: httpx.Client, **overrides: Any) -> dict[str, Any]:
+def _create_profile(client: AssistantClient, **overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {"kind": "anthropic", "label": "내 Claude", "secret": _API_KEY}
     body.update(overrides)
     response = client.post(f"{_ASSISTANT}/providers", json=body)
     return {"status": response.status_code, "json": response.json()}
 
 
-def _start_session(client: httpx.Client) -> str:
+def _start_session(client: AssistantClient) -> str:
     response = client.post(f"{_ASSISTANT}/sessions", json={"document_ref": _DOCUMENT_REF})
     assert response.status_code == 201, response.text
     return response.json()["session_id"]
@@ -652,7 +679,7 @@ _DECLARED_ASSISTANT_CODES = frozenset(
 )
 
 
-def _openapi_assistant_codes(client: httpx.Client) -> set[str]:
+def _openapi_assistant_codes(client: AssistantClient) -> set[str]:
     """OpenAPI의 `Assistant*Detail` 스키마가 선언한 `code` 값 전부."""
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
     declared: set[str] = set()
@@ -735,7 +762,7 @@ def _profile_body(**overrides: Any) -> dict[str, Any]:
     return body
 
 
-def _code(response: httpx.Response) -> str:
+def _code(response: AssistantResponse) -> str:
     """응답 본문의 `detail.code`. 코드 없는 본문이면 테스트가 여기서 멈춘다."""
     payload = response.json()
     detail = payload["detail"]
@@ -744,7 +771,7 @@ def _code(response: httpx.Response) -> str:
     return str(detail["code"])
 
 
-def _wait_for_terminal_turn(client: httpx.Client, session_id: str) -> dict[str, Any]:
+def _wait_for_terminal_turn(client: AssistantClient, session_id: str) -> dict[str, Any]:
     """턴이 종료 상태로 기록될 때까지 이력을 다시 읽는다.
 
     턴은 진짜 스레드에서 돌고 종료 기록은 스트림이 끝난 뒤에 남는다. 고정된 `sleep`으로
@@ -757,3 +784,62 @@ def _wait_for_terminal_turn(client: httpx.Client, session_id: str) -> dict[str, 
         if statuses and TurnStatus.RUNNING.value not in statuses:
             return history
     raise AssertionError(f"turn never reached a terminal state — session_id={session_id}")
+
+
+# -- 등록된 진짜 adapter (A-05) ---------------------------------------------------------------
+
+
+def test_the_anthropic_adapter_is_registered_in_the_default_bootstrap_registry() -> None:
+    """레지스트리가 비어 있으면 아래 왕복 테스트가 가짜만 검증하게 된다."""
+    pytest.importorskip("anthropic", reason="공급자 SDK는 optional extra `llm`이다")
+    from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (
+        DEFAULT_MODEL,
+        AnthropicLlmAdapter,
+    )
+
+    factory = PROVIDER_ADAPTER_FACTORIES[ProviderKind.ANTHROPIC]
+
+    provider = factory()
+
+    assert isinstance(provider, AnthropicLlmAdapter)
+    assert provider.kind is ProviderKind.ANTHROPIC
+    assert provider.default_model() == DEFAULT_MODEL
+
+
+def test_creating_an_anthropic_profile_reaches_the_real_adapters_probe(tmp_path: Path) -> None:
+    """등록된 adapter 클래스를 그대로 쓰고 SDK 클라이언트만 대본으로 바꾼다.
+
+    "설치 필요"(422 `assistant.provider_not_installed`)가 아니라 probe를 거쳐 201이 나와야
+    레지스트리 배선이 살아 있는 것이다. 네트워크는 타지 않는다.
+    """
+    pytest.importorskip("anthropic", reason="공급자 SDK는 optional extra `llm`이다")
+    from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (
+        DEFAULT_MODEL,
+        AnthropicLlmAdapter,
+    )
+
+    from ..anthropic_stream_script import RecordingClientFactory, ScriptedMessagesClient
+
+    sdk = ScriptedMessagesClient()
+    factory = RecordingClientFactory(sdk)
+    app = build_http_app(
+        assistant=AssistantSettings(
+            db_path=None,
+            secrets_path=tmp_path / "secrets.json",
+            provider_factories={
+                ProviderKind.ANTHROPIC: lambda: AnthropicLlmAdapter(client_factory=factory)
+            },
+        )
+    )
+    client = TestClient(app)
+
+    created = _create_profile(client)
+
+    assert created["status"] == 201, created["json"]
+    assert created["json"]["model"] == DEFAULT_MODEL
+    assert created["json"]["secret_tail"] == _API_KEY[-4:]
+    # probe가 실제로 SDK 경계를 한 번 두드렸고, 비밀은 그 호출에만 쓰였다.
+    assert factory.seen == [(_API_KEY, None)]
+    assert [model for _, model in sdk.create_payloads] == [DEFAULT_MODEL]
+    kinds = {item["kind"]: item for item in client.get(f"{_ASSISTANT}/providers").json()["kinds"]}
+    assert kinds["anthropic"]["installed"] is True

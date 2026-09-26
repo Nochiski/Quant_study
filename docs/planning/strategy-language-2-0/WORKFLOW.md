@@ -276,8 +276,14 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 
 **Acceptance**
 
-- `FactorGraph`에서 `missing_policy` 제거. `build_factor_execution_plan`이 `missing: MissingPolicy`를
+- `build_factor_execution_plan`(실제 이름 `compile_factor_plan`)이 `missing: MissingPolicy`를
   **인자로** 받는다. 호출자가 `environment.missing`을 넘긴다.
+- **`FactorGraph.missing_policy` 필드 자체는 이 PR에서 지우지 않는다**(구현 시 결정, 1). 이 시점의
+  `CURRENT_SCHEMA_VERSION`은 아직 `"1.1"`이라 필드를 지우면 1.1 문서가 `structure.unknown_field`로
+  깨지고, 1.0 → 1.1 업그레이드 출력(`quality_momentum.v1_1.commented.yaml`, 이 패키지가 "건드리지
+  않는다"고 못 박은 fixture)이 곧바로 compile 실패가 된다. 대신 1.1 호환 입력으로 남기고 runtime
+  schema·`FieldContract`에 `x-deprecated`를 실어 화면 어휘에서 뺄 수 있게 한다. 물리 삭제는
+  `CURRENT_SCHEMA_VERSION` 1.2와 함께 오는 P2-03이다.
 - `domain/factor/_planning.py:122-131`의 plan payload에 결측 정책이 그대로 남아 `plan_hash`가 계속
   갈린다. `build_factor_matrix_cache_key`(`:153-160`)는 무변경. 회귀 테스트: 같은 전략을
   `missing: drop`과 `missing: zero`로 계획하면 `plan_hash`가 **다르다**.
@@ -285,9 +291,20 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   (`:49`, `:619`), `application/portfolio_design/_service.py`, `application/backtest_run/_service.py`.
   `graph.missing_policy` 참조 grep 0건 테스트.
 - P2-01 브리지가 `첫 팩터 graph.missing_policy`를 읽던 부분은 이 PR 이후 의미가 없어지므로, 1.1
-  문서에서 만들 때만 쓰는 legacy 입력으로 좁힌다.
-- runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성
-  (`FactorGraph`에서 `missing_policy`가 빠진다)과 생성 SDK 재생성(1절 규칙).
+  문서에서 만들 때만 쓰는 legacy 입력으로 좁힌다. **팩터별 값이 서로 다르면 대표값 하나를 고르지
+  않고 거부한다**(구현 시 결정, 2): 실행 설정은 단일 값이라 대표값을 고르면 팩터 일부가 조용히
+  다른 결측 처리로 계산된다. 진단 코드는 `run_environment.missing_policy_conflict`이고 메시지가
+  "`environment`를 명시하면 문서 값을 읽지 않으므로 통과한다"는 우회 경로를 안내한다. spec D7의
+  업그레이더 규칙("첫 팩터 값 + warning")은 P2-09 그대로다.
+- **팩터 sandbox 요청도 결측 정책을 갖는다**(구현 시 결정, 3): `FactorGraphRequest`·
+  `FactorPreviewRequest`의 `missing: MissingPolicy | None = None`. `None`이면 브리지의
+  `resolve_graph_missing_policy`가 그래프의 1.1 값으로 떨어뜨려, 실행 설정이 없는
+  `/factors/explain`·`/factors/preview`가 실제 실행과 같은 결측 정책·`plan_hash`를 낸다. 기본값을
+  `DROP`으로 고정하면 편집 화면의 실행 플랜 패널이 실제 실행과 갈린다(P2-02 리뷰 P1).
+- runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성과 생성 SDK
+  재생성(1절 규칙). `FactorGraph.missing_policy`는 `deprecated: true`가 붙어 남고,
+  `FactorDefinition.missing_policy`(팩터 카탈로그의 per-factor 기본값)는 빠진다 — 결측 정책은
+  카탈로그가 아니라 실행이 소유한다.
 
 **제약사항**: 캐시 키 회귀가 이 PR의 핵심 invariant다. 분리하지 않으면 P2-03의 대량 삭제에 묻힌다.
 
@@ -313,6 +330,12 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
     `application.portfolio_design`·`domain.portfolio`·`domain.strategy`)에 `domain.backtest`를
     추가한다. adapter → domain이라 순환이 없다.
   - `MissingPolicy`는 `domain/factor`에 그대로 둔다.
+- **P2-02가 남긴 1.1 호환 잔재를 이 PR에서 물리 삭제한다**: `FactorGraph.missing_policy` 필드,
+  `domain/factor/_nodes.py`의 `DEPRECATED_FIELD` 마커, `domain/strategy/_schema.py`의
+  `x-deprecated` 발행과 `FieldContract.deprecated`(다른 deprecated 필드가 생기지 않았다면),
+  브리지의 `resolve_graph_missing_policy`·`_missing_from_legacy_graphs`(문서 입력이 사라지면
+  `environment.missing`만 남는다). 1.2 문서의 `graph.missing_policy`는 `structure.unknown_field`가
+  된다. 1.1 문서에서의 이관은 P2-09 업그레이더가 맡는다.
 - **최상위 필수 키는 `schema_version`·`title` 둘**이다. `factors: tuple[FactorSignal, ...] = ()`로
   기본값을 주어 생략도 빈 배열도 `structure.missing_field`를 내지 않고, 두 경우 모두 semantic
   `strategy.factor.required`가 난다. 회귀 테스트: `schema_version: "1.2"\ntitle: ""\n`의 hydrate

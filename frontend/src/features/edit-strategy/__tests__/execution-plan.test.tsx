@@ -173,7 +173,10 @@ const currentState = (): DocumentState => ({
   phase: "semantically-valid",
 });
 
-const explanation = (graph: FactorGraphRequest["graph"]): FactorExplanation => {
+// backend 규칙(P2-02): 요청이 `missing` 을 생략하면 1.1 그래프의 값으로 떨어진다. mock 이
+// 그래프만 읽으면 요청에서 정책이 빠지는 회귀를 구조적으로 못 잡는다.
+const explanation = (body: FactorGraphRequest): FactorExplanation => {
+  const graph = body.graph;
   const contracts = graph.nodes.map((node, index) => ({
     node_id: node.node_id,
     value_type: "numeric_series" as const,
@@ -215,7 +218,7 @@ const explanation = (graph: FactorGraphRequest["graph"]): FactorExplanation => {
       referenced_factor_ids: [],
       referenced_subgraph_ids: [],
       minimum_history_sessions: contracts.at(-1)?.minimum_history_sessions ?? 0,
-      missing_policy: graph.missing_policy ?? "drop",
+      missing_policy: body.missing ?? graph.missing_policy ?? "drop",
       as_of_policy: "available_date_lte_as_of",
     },
     narrative: [],
@@ -227,7 +230,7 @@ const server = setupServer(
   http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
     const body = (await request.json()) as FactorGraphRequest;
     requests.push(body);
-    return HttpResponse.json(explanation(body.graph));
+    return HttpResponse.json(explanation(body));
   }),
 );
 
@@ -358,7 +361,7 @@ describe("execution plan orchestration", () => {
     server.use(
       http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
         const body = (await request.json()) as FactorGraphRequest;
-        const payload = explanation(body.graph);
+        const payload = explanation(body);
         return HttpResponse.json({
           ...payload,
           registry_version: "registry-v2",
@@ -386,7 +389,7 @@ describe("execution plan orchestration", () => {
       http.post(`${API}/api/v1/factors/explain`, async ({ request }) => {
         const body = (await request.json()) as FactorGraphRequest;
         return HttpResponse.json({
-          ...explanation(body.graph),
+          ...explanation(body),
           data_snapshot_id: "dataset-v2",
         });
       }),

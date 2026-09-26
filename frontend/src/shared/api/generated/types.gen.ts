@@ -1425,7 +1425,6 @@ export type FactorDefinition = {
    * Minimum History Sessions
    */
   minimum_history_sessions: number;
-  missing_policy: MissingPolicy;
   /**
    * Output Unit
    */
@@ -1568,6 +1567,9 @@ export type FactorExplanation = {
  * FactorGraph
  */
 export type FactorGraph = {
+  /**
+   * @deprecated
+   */
   missing_policy?: MissingPolicy;
   /**
    * Nodes
@@ -1601,6 +1603,7 @@ export type FactorGraphRequest = {
    */
   factor_ids?: Array<string>;
   graph: FactorGraph;
+  missing?: MissingPolicy | null;
   /**
    * Parameter Ids
    */
@@ -1717,6 +1720,7 @@ export type FactorPreviewRequest = {
    */
   factor_ids?: Array<string>;
   graph: FactorGraph;
+  missing?: MissingPolicy | null;
   /**
    * Parameters
    */
@@ -1885,6 +1889,10 @@ export type FieldContract = {
    * Default From
    */
   default_from?: string | null;
+  /**
+   * Deprecated
+   */
+  deprecated?: boolean;
   /**
    * Description Key
    */

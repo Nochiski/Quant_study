@@ -14,10 +14,12 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.domain.backtest._models import _execution_constraint_rows
 from strategy_workbench.domain.backtest.facade.environment import (
     RUN_ENVIRONMENT_CONSTRAINTS,
+    LegacyMissingPolicyConflictError,
     RunEnvironment,
     environment_from_legacy_spec,
     environment_hash,
     resolve_environment,
+    resolve_graph_missing_policy,
     run_environment_canonical_json,
     run_environment_schema,
     run_environment_schema_hash,
@@ -39,6 +41,21 @@ def _template() -> StrategySpec:
 
 def _environment() -> RunEnvironment:
     return RunEnvironment(start=date(2020, 1, 1), end=date(2020, 12, 31), universe_id="KOSPI200")
+
+
+def _spec_with_missing_policies(*policies: MissingPolicy) -> StrategySpec:
+    """팩터마다 1.1 `graph.missing_policy` 만 다른 문서."""
+    template = _template()
+    source = template.factors[0]
+    factors = tuple(
+        replace(
+            source,
+            factor_id=factor_id,
+            graph=replace(source.graph, missing_policy=policy),
+        )
+        for factor_id, policy in zip("ab", policies, strict=True)
+    )
+    return replace(template, factors=factors)
 
 
 def test_defaults_match_the_design_contract() -> None:
@@ -149,7 +166,7 @@ def test_schema_bounds_come_from_the_same_rows_the_model_validates_with() -> Non
     )
 
 
-def test_bridge_reads_data_execution_and_the_first_factor_missing_policy() -> None:
+def test_bridge_reads_data_execution_and_the_graph_missing_policy() -> None:
     spec = _template()
     graph = spec.factors[0].graph
 
@@ -170,6 +187,47 @@ def test_bridge_without_factors_falls_back_to_the_model_default() -> None:
     spec = replace(_template(), factors=())
 
     assert environment_from_legacy_spec(spec).missing is MissingPolicy.DROP
+
+
+def test_bridge_accepts_factors_that_agree_on_one_missing_policy() -> None:
+    spec = _spec_with_missing_policies(MissingPolicy.ZERO, MissingPolicy.ZERO)
+
+    assert environment_from_legacy_spec(spec).missing is MissingPolicy.ZERO
+
+
+def test_bridge_refuses_factors_that_disagree_on_the_missing_policy() -> None:
+    """P2-02: 팩터마다 결측 정책이 다르면 실행 설정 하나로 접을 수 없다 — 조용히 고르지 않는다."""
+    spec = _spec_with_missing_policies(MissingPolicy.ZERO, MissingPolicy.DROP)
+
+    with pytest.raises(LegacyMissingPolicyConflictError) as info:
+        environment_from_legacy_spec(spec)
+
+    message = str(info.value)
+    assert info.value.code == "run_environment.missing_policy_conflict"
+    assert info.value.by_factor == (("a", MissingPolicy.ZERO), ("b", MissingPolicy.DROP))
+    # error-messages.md: 식별자와 기대 vs 실제가 메시지에 들어간다.
+    assert "a=zero" in message and "b=drop" in message
+    assert "expected=" in message and "factors=2" in message
+    # 막다른 길이 아니라는 안내: 명시 실행 설정을 주면 이 문서로도 실행할 수 있다.
+    assert "environment 를 명시하면" in message and "통과한다" in message
+
+
+def test_single_graph_missing_policy_falls_back_to_the_document() -> None:
+    """실행 설정이 없는 팩터 sandbox 요청의 우선순위(2차 리뷰 P3).
+
+    `resolve_environment` 이 전략 실행에 대해 하는 판정과 같은 규칙이라 owner 옆에서 고정한다.
+    """
+    graph = replace(_template().factors[0].graph, missing_policy=MissingPolicy.ZERO)
+
+    assert resolve_graph_missing_policy(graph, None) is MissingPolicy.ZERO
+    assert resolve_graph_missing_policy(graph, MissingPolicy.DROP) is MissingPolicy.DROP
+
+
+def test_explicit_environment_skips_the_conflicting_legacy_values() -> None:
+    spec = _spec_with_missing_policies(MissingPolicy.ZERO, MissingPolicy.DROP)
+    explicit = _environment()
+
+    assert resolve_environment(spec, explicit) is explicit
 
 
 def test_explicit_environment_wins_over_the_legacy_document() -> None:

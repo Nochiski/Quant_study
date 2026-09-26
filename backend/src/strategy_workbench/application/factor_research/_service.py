@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from strategy_workbench.domain.backtest.facade.environment import (
+    resolve_graph_missing_policy,
+)
 from strategy_workbench.domain.factor.facade.analysis import analyze_factor_values
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorEvaluation,
@@ -94,6 +97,7 @@ class FactorResearchService:
         plan = compile_factor_plan(
             request.graph,
             registry_version=self._registry.version,
+            missing=resolve_graph_missing_policy(request.graph, request.missing),
             fields=metadata.fields,
             parameter_ids=request.parameter_ids,
             factor_ids=self._known_factor_ids(request.factor_ids),
@@ -130,6 +134,7 @@ class FactorResearchService:
             plan = compile_factor_plan(
                 request.graph,
                 registry_version=self._registry.version,
+                missing=resolve_graph_missing_policy(request.graph, request.missing),
                 fields=metadata.fields,
                 parameter_ids=parameter_ids,
                 factor_ids=self._known_factor_ids(request.factor_ids),
@@ -163,6 +168,7 @@ class FactorResearchService:
         full_evaluation = evaluate_factor_graph(
             request.graph,
             observations=observations,
+            missing=resolve_graph_missing_policy(request.graph, request.missing),
             parameters=request.parameters,
         )
         evaluation = FactorEvaluation(

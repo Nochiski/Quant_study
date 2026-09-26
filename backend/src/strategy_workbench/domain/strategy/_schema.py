@@ -24,6 +24,8 @@ Shape (JSON Schema 2020-12):
   the dataclass field metadata declared next to the field (P3-03).
 - required factor authoring fields carry `x-authoring-source` or `x-authoring-default`; this lets
   clients project a catalog row without duplicating FactorSignal field names or starter values.
+- 다음 schema 버전에서 사라지는 호환 전용 필드는 `x-deprecated`로 표시한다. 값은 여전히
+  유효하지만 편집 화면 어휘에서 빼도 되는 행이라는 뜻이다(P2-02, `graph.missing_policy`).
 """
 
 from __future__ import annotations
@@ -79,6 +81,9 @@ class FieldContract:
     format: str | None = None
     catalog: str | None = None  # `x-catalog`: catalog the identifier completes from
     reference: str | None = None  # `x-reference`: document-internal namespace of the identifier
+    # `x-deprecated`: 다음 schema 버전에서 사라지는 호환 전용 필드. 편집 화면은 이 행을
+    # 어휘에서 빼도 된다(P2-02, `graph.missing_policy`).
+    deprecated: bool = False
     minimum: float | None = None
     maximum: float | None = None
     exclusive_minimum: bool = False
@@ -320,6 +325,7 @@ class _SchemaBuilder:
                 "authoring-default",
                 "authoring-identity",
                 "default-from",
+                "deprecated",
             ):
                 if marker in field.metadata:
                     schema = {**schema, f"x-{marker}": _json_value(field.metadata[marker])}
@@ -369,6 +375,7 @@ class _SchemaBuilder:
                 format=inner.get("format"),
                 catalog=schema.get("x-catalog"),
                 reference=schema.get("x-reference"),
+                deprecated=schema.get("x-deprecated", False) is True,
                 minimum=constraint.minimum if constraint else None,
                 maximum=constraint.maximum if constraint else None,
                 exclusive_minimum=constraint.exclusive_minimum if constraint else False,

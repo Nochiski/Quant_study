@@ -9,7 +9,6 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
-from strategy_workbench.domain.backtest.facade.environment import resolve_environment
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioConstructionTrace,
@@ -34,6 +33,7 @@ from ._service import (
     PortfolioDesignService,
     PortfolioPipelineCancelledError,
     TraceObservationCapabilityError,
+    _resolve_environment_or_reject,
 )
 from ._trace_models import (
     RawStrategyTraceRow,
@@ -102,7 +102,10 @@ class StrategyTraceService:
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
-        environment = resolve_environment(spec, request.environment)
+        # 실행 설정 해소 실패는 preview·run 과 같은 구조화 진단으로 나간다(2차 리뷰 P3).
+        # trace 만 메시지 문자열로 납작하게 만들면 프론트가 코드로 분기하려고 본문을 파싱해야
+        # 한다.
+        environment = _resolve_environment_or_reject(spec, request.environment)
         if request.as_of is not None and not environment.start <= request.as_of <= environment.end:
             raise InvalidStrategyTraceRequestError(
                 "trace as_of is outside the run range — "

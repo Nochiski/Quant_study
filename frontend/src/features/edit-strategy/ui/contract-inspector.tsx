@@ -218,7 +218,6 @@ const CatalogDetails = ({
           [t("contract.availability"), factor.availability],
           [t("contract.outputUnit"), factor.output_unit],
           [t("contract.preference"), factor.preference],
-          [t("contract.missingPolicy"), factor.missing_policy],
           [
             t("contract.minimumHistory"),
             `${factor.minimum_history_sessions} ${t("contract.sessions")}`,

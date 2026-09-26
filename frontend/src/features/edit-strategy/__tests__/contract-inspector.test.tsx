@@ -116,7 +116,6 @@ const FACTOR_CATALOG = {
       factor_id: "momentum_12m",
       label: "12M Momentum",
       minimum_history_sessions: 252,
-      missing_policy: "drop",
       output_unit: "score",
       preference: "high",
       required_field_ids: ["close"],

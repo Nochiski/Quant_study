@@ -752,7 +752,8 @@
             "cross_sectional_median"
           ],
           "default": "drop",
-          "x-description-key": "strategy.field.factor_graph.missing_policy"
+          "x-description-key": "strategy.field.factor_graph.missing_policy",
+          "x-deprecated": true
         }
       },
       "required": [

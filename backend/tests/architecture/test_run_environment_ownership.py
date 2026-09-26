@@ -4,6 +4,10 @@
 `environment` 가 조용히 무시된다 — 매니페스트에는 명시 값이, 엔진에는 문서 값이 들어가는
 silent divergence 다. 소스 AST 로 세 서비스의 직접 참조가 0건인지 고정한다.
 `domain/backtest` 의 브리지(`_bridge.py`)는 1.1 문서를 읽는 것이 일이므로 대상이 아니다.
+
+P2-02 부터 결측 정책도 같은 규칙을 받는다: `graph.missing_policy` 는 1.1 호환 입력으로만 남고
+평가·플랜은 실행 설정의 `missing` 을 인자로 받는다. 브리지 밖에서 그 필드를 읽으면 실행 설정을
+바꿔도 결측 처리가 따라오지 않는다.
 """
 
 from __future__ import annotations
@@ -80,4 +84,31 @@ def test_every_preview_request_carries_the_resolved_environment() -> None:
     assert offenders == [], (
         "PortfolioPreviewRequest 가 실행 설정 없이 만들어진다 — "
         f"calls={offenders} (해소한 environment 를 그대로 넘겨야 한다)"
+    )
+
+
+# 결측 정책을 `graph.missing_policy` 에서 읽어도 되는 유일한 곳(1.1 → 실행 설정 브리지).
+MISSING_POLICY_READERS = ("domain/backtest/_bridge.py",)
+
+
+def _missing_policy_reads(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    return [
+        f"{path.relative_to(SRC_ROOT).as_posix()}:{node.lineno} {ast.unparse(node)}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "missing_policy"
+    ]
+
+
+def test_only_the_legacy_bridge_reads_the_graph_missing_policy() -> None:
+    allowed = {SRC_ROOT / name for name in MISSING_POLICY_READERS}
+    offenders = [
+        item
+        for path in sorted(SRC_ROOT.glob("**/*.py"))
+        if path not in allowed
+        for item in _missing_policy_reads(path)
+    ]
+    assert offenders == [], (
+        "`graph.missing_policy` 를 브리지 밖에서 읽는다 — "
+        f"reads={offenders} (실행 설정의 missing 을 인자로 받아야 한다)"
     )

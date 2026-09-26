@@ -189,9 +189,11 @@ class BacktestRunService:
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - _resolve always fills it
             raise InvalidBacktestRunError("resolved run spec has no strategy")
-        # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
-        # 해소 전 `spec.environment` 를 그대로 넘긴다 — preflight 는 문서만 검사하고, 문서
-        # 검증이 브리지보다 먼저여야 잘못된 문서가 코드화된 진단으로 거절된다.
+        # preflight 가 스펙 검증(InvalidPortfolioRequestError)·실행 설정 해소·플랜 컴파일까지
+        # 대신한다. 해소 전 `spec.environment` 를 그대로 넘겨 `_prepare` 안의 순서(문서 검증 →
+        # 브리지)를 타게 한다 — 그래야 잘못된 문서가 코드화된 진단으로 거절된다. 팩터별
+        # 결측 정책이 충돌하는 1.1 문서도 여기서 `portfolio.strategy.invalid` 안의
+        # `run_environment.missing_policy_conflict` 로 거절된다(P2-02 리뷰 P2).
         engine = self._portfolio_design.preflight(
             PortfolioPreviewRequest(strategy, environment=spec.environment)
         )
@@ -201,6 +203,7 @@ class BacktestRunService:
             )
         # 실행 설정을 여기서 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·tape·데이터 조회가
         # 모두 같은 값을 읽어야 명시 `environment` 가 조용히 무시되지 않는다(P2-01).
+        # preflight 가 이미 같은 해소를 통과시켰으므로 여기서는 예외가 남지 않는다.
         environment = resolve_environment(strategy, spec.environment)
         spec = replace(spec, environment=environment)
         for window in spec.metric_windows:

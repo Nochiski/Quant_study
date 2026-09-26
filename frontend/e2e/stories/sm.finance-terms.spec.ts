@@ -16,6 +16,7 @@ import {
   transcript,
 } from "../assistant-helpers";
 import {
+  currentSource,
   expectPhase,
   GOLDEN,
   mustReplace,
@@ -30,10 +31,8 @@ test(
     test.setTimeout(120_000);
     await ensureProvider(page);
     await openEditor(page, "/research/strategies/new");
-    await replaceSource(
-      page,
-      mustReplace(GOLDEN, "퀄리티 모멘텀", "US-SM-09 용어 배우기"),
-    );
+    const source = mustReplace(GOLDEN, "퀄리티 모멘텀", "US-SM-09 용어 배우기");
+    await replaceSource(page, source);
     await expectPhase(page, "검증 통과");
 
     // AI에게 결과 화면에서 본 용어를 묻는다. 편집기를 떠나지 않는다.
@@ -43,7 +42,10 @@ test(
       "위험 한 단위당 얼마나 벌었는지를 나타내는 숫자입니다.",
     );
     await expect(progress(page)).toHaveText("답변이 완료되었습니다.");
+    // 묻기만 했으므로 화면도 문서도 그대로다.
     await expect(page).toHaveURL(/\/research\/strategies\/new/u);
+    expect(await currentSource(page)).toBe(source);
+    await expectPhase(page, "검증 통과");
 
     // 문서의 금융 필드는 전략 구조에서 고르면 계약 패널이 한글 뜻을 보인다.
     await page.getByLabel("전략 구조 필터").fill("selection_count");

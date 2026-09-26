@@ -41,14 +41,17 @@ test(
     await expect(page.getByText("제안을 문서에 적용했습니다.")).toBeVisible();
     await expectPhase(page, "검증 통과");
 
-    // 저장하지 않은 채로 돌려 본다. 새 문서를 떠나므로 이탈 확인이 뜨면 나간다.
+    // 저장하지 않은 채로 돌려 본다. 적용한 문서는 시작 문서와 달라 저장되지 않은 상태(dirty)이므로,
+    // 실행 화면으로 가기 전에 이탈 확인이 반드시 한 번 뜬다(`DirtyLeaveGuard`).
     await expect(backtest(page)).toBeEnabled();
     await backtest(page).click();
     const leaveGuard = page.getByRole("button", { name: "나가기" });
-    const runStatus = page.getByRole("status", { name: "실행 상태" });
-    await expect(leaveGuard.or(runStatus)).toBeVisible({ timeout: 60_000 });
-    if (await leaveGuard.isVisible()) await leaveGuard.click();
+    await expect(leaveGuard).toBeVisible({ timeout: 60_000 });
+    await expect(page).toHaveURL(/\/research\/strategies\/new/u);
+    await leaveGuard.click();
+    await expect(leaveGuard).toHaveCount(0);
 
+    const runStatus = page.getByRole("status", { name: "실행 상태" });
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
     await expect(runStatus).toContainText("completed", { timeout: 120_000 });
     await expect(

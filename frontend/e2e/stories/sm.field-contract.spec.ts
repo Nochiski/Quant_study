@@ -32,9 +32,16 @@ test(
     await outline.getByRole("treeitem", { name: /max_name_weight/u }).click();
 
     const contract = page.getByRole("complementary", { name: "계약" });
+    // 제목은 필드의 사람 말 이름이고 JSON Pointer는 `Path` 항목으로 내려갔다(lang2 P1-03 화면 어휘).
     await expect(
-      contract.getByRole("heading", { name: "/risk/max_name_weight" }),
+      contract.getByRole("heading", { name: "종목별 최대 목표 비중 한도" }),
     ).toBeVisible();
+    await expect(
+      contract
+        .getByRole("term")
+        .filter({ hasText: /^Path$/u })
+        .locator("xpath=following-sibling::*[1]"),
+    ).toHaveText("/risk/max_name_weight");
     await expect(contract).toContainText("종목별 최대 목표 비중 한도");
     // 항목 이름(term) 바로 다음 칸(definition)이 그 값이다. 저장 값 0.05는 화면에서 5%로 읽힌다.
     const valueOf = (term: string) =>

@@ -3,13 +3,13 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_PROGRESS
 current_phase: P0,P1,P2
-current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P2-01
-active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
-parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01]
-last_updated: 2026-09-21T11:49:36+09:00
-planned_prs: 28
+current_pr: P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P1-06,P2-01
+active_prs: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01]
+parallel_window: [P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01]
+last_updated: 2026-09-26T14:11:02+09:00
+planned_prs: 29
 merged_prs: 0
-approved_prs: 4
+approved_prs: 6
 progress_percent: 0
 ---
 
@@ -25,11 +25,11 @@ progress_percent: 0
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `P0,P1,P2` |
-| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P2-01` |
-| Active PR | `P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P2-01` |
-| Progress | `0 / 28 merged (0%)` |
-| Approved | `4 / 28` |
-| Aggregated at | `2026-09-21 11:49 KST` |
+| Current/next PR | `P0-01,P1-01,P1-02,P1-03,P1-04,P1-05,P1-06,P2-01` |
+| Active PR | `P0-01, P1-01, P1-02, P1-03, P1-04, P1-05, P1-06, P2-01` |
+| Progress | `0 / 29 merged (0%)` |
+| Approved | `6 / 29` |
+| Aggregated at | `2026-09-26 14:11 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -79,13 +79,13 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 0 | `APPROVED` |
-| P1 | In-screen friction removal on 1.1 | 5 | 0 | `SELF_CHECK` |
+| P1 | In-screen friction removal on 1.1 | 6 | 0 | `SELF_CHECK` |
 | P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_PROGRESS` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | `WAITING` |
-| **Total** |  | **28** | **0** | **0%** |
+| **Total** |  | **29** | **0** | **0%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -112,7 +112,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Acceptance | WORKFLOW P1-05 |
 | Non-goals | 의미 오류 문구 손질(이미 한글), 그래프 새 화면(P4·P5), 실행 설정 UI(P2·P3) |
 | Branch/worktree | `feat/lang2-p1-05-structure-errors-ko` / `wt-lang2-p1-05` |
-| Base SHA | `0ce311bb` (P1-04 최종 tip, PR #181. 28 PR 계획 위로 cascade replay) |
+| Base SHA | `e6fb10b0` (P1-04 tip, PR #181. 2026-09-26 P1-02 표식 수정 `ac3a3d0e` 위로 cascade rebase — 직전 base `0ce311bb`) |
 | 문장 소유 | backend. `.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행("compile 진단의 `message`는 backend가 한글 문장으로 완성해 보내고 Problems panel은 그대로 보여준다")을 따른다. `messages.ts`에 진단 문장 템플릿을 두지 않는다 — P1-04와 겹치는 파일이 없다 |
 | 변경 파일 | backend 문장: `domain/strategy/_hydrate.py`(`structure.*` 전부 + 오타 제안 + `LEGACY_SHAPE_CODE`), `adapters/outbound/document_codec/_codec.py`(`document.*`·`yaml.*`·`<format>.syntax`) |
 | | backend 1.0 힌트: `domain/strategy/_upgrade.py`(`legacy_shape_hints` — 판정은 `UPGRADE_STEPS`와 같은 조건), `application/strategy_authoring/_service.py`(키 범위 코드 집합), `domain/strategy/facade/document.py` |
@@ -125,9 +125,23 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | | 문서: `docs/manual/strategy-workbench/README.md`(오류 문장 예시·`—` 읽는 법) |
 | | e2e 인프라(저장소 전체 결함, 리드 지시로 이 PR에서): `frontend/e2e/{lock,free-port,ports}.mjs`(신규)·`lock.test.mjs`(단위 22건, 두 프로세스 경합 1건 포함)·`run-playwright.mjs`·`playwright.config.ts`·`vite.config.ts`·`workbench-helpers.ts`·`workbench.infrastructure.spec.ts`·`e2e/README.md`. 머신 단위 잠금으로 워크트리 간 e2e를 직렬화하고, 포트를 `PW_BACKEND_PORT`·`PW_PREVIEW_PORT`로 연다 |
 | Focused tests | `uv run pytest tests/domain/test_strategy_diagnostic_messages.py tests/domain/test_strategy_constraints.py tests/domain/test_strategy_hydrate.py`, `npx vitest run src/features/edit-strategy/__tests__/document-upgrade.test.ts src/features/edit-strategy/__tests__/factor-graph-panel.test.tsx` |
-| Head SHA | 1차 리뷰 반영분 포함. 커밋이 자기 SHA를 담을 수 없어 push 후 확정 |
+| Head SHA | `45f1c4a3` (cascade rebase 뒤). 리뷰가 본 옛 SHA 대응: `5e8e0af0`→`91363442`, `a55e7a67`→`f9ae9d2a`, `3755b186`→`7f7eb69c`, `a263276b`→`45f1c4a3` |
 | Diff stat | base `0ce311bb` 대비 51 파일 `+2596 −162` (시각 기준선 4장 포함) |
-| Full gate | backend `pytest -q` 1694 passed · `ruff check src tests examples scripts` clean · `pyright` 0 · frontend `typecheck`·`lint`·`build` clean · `npm test` · e2e 20 passed(잠금 래퍼 아래). OpenAPI·runtime schema 재생성 diff 0 → 생성 SDK 변경 없음 |
+| Full gate | backend `pytest -q` 1694 passed · `ruff check src tests examples scripts` clean · `pyright` 0 · frontend `typecheck`·`lint`·`build` clean · `npm test` · e2e 20 passed(잠금 래퍼 아래). OpenAPI·runtime schema 재생성 diff 0 → 생성 SDK 변경 없음. cascade tip `45f1c4a3` 재실행은 `검증 기록` |
+
+### P1-06
+
+| 항목 | 값 |
+|---|---|
+| PR | `P1-06` |
+| Intent | Phase 1 감사(2026-09-21)의 BLOCKING 중 남은 PLAN 기록 결함(DEFECT-P1X-002)을 닫고, SoT 대장 비차단 N8·N9를 정정하며, 담당이 없던 이월 항목에 담당 PR을 붙인다 |
+| Acceptance | WORKFLOW P1-06 |
+| Non-goals | 코드 변경. 매뉴얼 재촬영(N1)은 담당만 정하고 실행하지 않는다 |
+| Branch/worktree | `docs/lang2-p1-06-phase1-records` / `wt-lang2-p1-06` |
+| Base SHA | `45f1c4a3` (P1-05 tip, cascade rebase 뒤) |
+| 변경 파일 | `docs/planning/strategy-language-2-0/PLAN.md`, `WORKFLOW.md`, `.claude/rules/strategy-workbench-sot.md` |
+| Focused tests | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` |
+| Full gate | 문서만 바뀐다. 코드 게이트는 base `45f1c4a3`의 결과(`검증 기록`)와 같다 |
 
 ---
 
@@ -145,17 +159,18 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `IN_REVIEW` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `review_lang2_p1_01` 1·2차 APPROVE(blocking 0), 후속 8건 반영 · 게이트: typecheck·lint·Vitest 658·build·e2e 19/19 |
+| [ ] | `P1-01` | 문제 목록·검증 배지를 탭과 무관하게 렌더 | P0-01 | `APPROVED` | [#168](https://github.com/Nochiski/Quant_study/pull/168) · `review_lang2_p1_01` 3차 APPROVE(1·2·3차 전부 APPROVE, blocking 0. 1차 P2 2·P3 6, 2차 새 P2 1·P3 5, 3차 P3 3 전부 반영 — 3차분 `ea7e2fa4`) · 게이트: typecheck·lint·Vitest 658·build·e2e 19/19 |
 | [ ] | `P1-02` | 되돌리기·다시 실행 버튼, 전역 단축키 | P1-01 | `APPROVED` | [#173](https://github.com/Nochiski/Quant_study/pull/173) · `review_lang2_p1_02` 4차 APPROVE (1차·3차 REQUEST_CHANGES 반영, 2차 APPROVE·새 P2) |
 | [ ] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `APPROVED` | [#177](https://github.com/Nochiski/Quant_study/pull/177) · `review_lang2_p1_03` 2차 APPROVE(1차 REQUEST_CHANGES 반영, 돌연변이 7건 실패 확인), 2차 P3 4건 후속 |
-| [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `APPROVED` | `review_lang2_p1_04` 4차 APPROVE (1·2·3차 REQUEST_CHANGES 차단 2·1·1, P3 7·3·2 전부 반영) |
-| [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `SELF_CHECK` | — |
+| [ ] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `APPROVED` | [#181](https://github.com/Nochiski/Quant_study/pull/181) · `review_lang2_p1_04` 4차 APPROVE (1·2·3차 REQUEST_CHANGES 차단 2·1·1, P3 7·3·2 전부 반영) |
+| [ ] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `APPROVED` | [#188](https://github.com/Nochiski/Quant_study/pull/188) · `review_lang2_p1_05` 3차 APPROVE(1차 REQUEST_CHANGES P1 1·P2 2·P3 13 → 2차 REQUEST_CHANGES 새 P1 1(POSIX 잠금 덮어쓰기)·P3 8, 수정 `5e8e0af0` → 3차 APPROVE P2 1·P3 2, 추가분 `a55e7a67` 확인 P3 3, 3차 반영 `3755b186`·`a263276b`. SHA는 rebase 전 값, 현 tip `45f1c4a3`) · 게이트: pytest 1695·Vitest 733·e2e 25/25 |
+| [ ] | `P1-06` | Phase 1 감사 후속(문서): PLAN 진행 기록 정정, SoT 하한·e2e 잠금 행, 이월 항목 담당 지정 | P1-05 | `SELF_CHECK` | PR_LINK_P1_06 |
 
 Phase exit:
 
-- [ ] e2e 그래프 시나리오가 YAML 탭 전환 없이 통과.
-- [ ] 노드 property·kind·연산자 설명 커버리지 100%.
-- [ ] SoT·책임분리 점검 서브에이전트 blocking 0.
+- [x] e2e 그래프 시나리오가 YAML 탭 전환 없이 통과. (Phase 1 감사 4절 (a) PASS — CI #188 `browser-e2e` 25/25)
+- [x] 노드 property·kind·연산자 설명 커버리지 100%. (감사 4절 (b) PASS — 발행은 생성기 구조로, 소비는 `screen-vocabulary.test.ts`로 고정)
+- [ ] SoT·책임분리 점검 서브에이전트 blocking 0. (감사 2026-09-21 BLOCKING 2 — DEFECT-P1X-001은 `ac3a3d0e`+cascade rebase, DEFECT-P1X-002는 P1-06이 해소. P1-06 리뷰 뒤 체크)
 
 ## P2 — backend schema 1.2
 
@@ -242,25 +257,88 @@ Phase exit:
 | `P0-01` | `review_lang2_p0_01` | 3 | `REQUEST_CHANGES` | P1 1 · 비차단 3. 2차 9건 종결 확인. P2-03 enum 소비자 목록에 재수출 지점(`specification.py`)이 들어가 순환이 되살아난 것을 고쳤다(삭제 대상, 실제 리다이렉트는 `engine_portfolio` 하나). `/risk/risk_factor_id` 행은 `owned_by_error` 없이 적용 조건만, 배타는 별개 validator error. P2-04·P2-05·P2-06에 OpenAPI 재생성 항목. P2-03에 `template()` 갱신과 12절 재점검 문장 |
 | `P0-01` | `review_lang2_p0_01` | 4 | `REQUEST_CHANGES` | P1 1 · 비차단 3. 3차 4건 종결 확인. P2-06·P2-07의 P1-03(연산자 카탈로그) 교차 의존이 미선언 → WORKFLOW 1절 교차 제약·Dependency 열에 P1-03. OpenAPI 재생성 사유에서 진단 코드 문자열 제외, active PR 문장 정정, P2-03 분할 시 PLAN 절차 참조 |
 | `P0-01` | `review_lang2_p0_01` | 5 | `APPROVE` | 4차 4건 종결. 잔여 문구 2건(active PR 문장을 13.7절 인용으로, 집계 도구 설명 방향) 반영 |
-| `P1-02` | `review_lang2_p1_02` | 1차 | `REQUEST_CHANGES` | blocking 1 + P3 7. **P1**: 같은 문서 안의 전체 교체(초안 복구 `use-autosave.ts`, 서버 초안 적용 `use-server-draft.ts`)가 `SourceEditor`의 같은-epoch 분기에서 격리 없는 `setText`로 가, CodeMirror `newGroupDelay`(500ms) 안에 친 글자와 한 undo 단계로 합쳐졌다 — 되돌리기 한 번에 복구한 초안이 통째로 사라진다. → 같은-epoch 분기를 `replaceRange(0, length)`로 통일하고 호출자가 없어진 `setText`를 핸들에서 제거, SoT 행 문구 정정, 회귀 테스트 추가. **P3**: 480px 이하 탭·버튼 겹침, 탭 밑줄이 버튼 아래에서 끊김, `aria-disabled` 스타일이 공용 `:disabled`와 불일치, 날짜 입력 포커스에서 Ctrl+Z 무반응, 핸들 대역 들여쓰기, PR 본문 spec D8→D9, 12절 초과 사유에 줄 수 누락. 코드 6건 반영, 본문 2건은 리드가 정정. **오기**: "업그레이드 적용 undo 잠금 테스트 없음"(P2)은 사실과 다르다 — `upgrade-banner.test.tsx`에 undo 단언 2건(직후 타이핑 케이스 포함)이 이미 있다 |
-| `P1-02` | `review_lang2_p1_02` | 2차 | `APPROVE`(코드) | 1차 blocking 해소를 확인. 구현이 권장(격리 주석 덧붙이기)보다 나은 방향 — 비격리 전체 교체 API 자체를 없앴고 새 회귀 테스트가 수정 전 실제로 실패함을 리뷰어가 재현. 1차 P2는 리뷰어가 철회(오기). P3 7건 중 5건 해소·1건 부분·1건 미해소(남은 둘은 PR 본문). **새 P2**: 탭 스트립의 `overflow-x: auto`가 `overflow-y`를 `auto`로 만들어 스크롤 컨테이너를 세우고, 탭 포커스 링(바깥 4px)이 위아래로 잘린다. 권장은 선언을 480px 미만으로 한정 |
+| `P1-01` | `review_lang2_p1_01` | 1차 | `APPROVE` | blocking 0 · P2 2 · P3 6. **P2**: 문제 목록이 편집 패널 바닥에 붙어 편집기와 사이에 약 137px 빈 영역이 생김, 목적지가 `current-view`일 때 화면상 아무 일도 없을 수 있음(Form·Graph에 reveal 훅 없음, runtime schema 도착 전 창). **P3**: route 테스트가 outline reveal과 진단 reveal을 구분 못 함, Graph 유지 테스트가 URL만 단언, JSON·Diff wire 테스트 없음, 배지 간격, PLAN 갱신 절차 누락, 12절 크기 초과 사유. 관찰: reveal 순서가 훅 호출 순서에만 고정 — P1-02가 같은 page에 훅을 끼우면 조용한 회귀(교차 PR 경고, BACKLOG-006) |
+| `P1-01` | `review_lang2_p1_01` | 2차 | `APPROVE` | blocking 0 · 새 P2 1 · P3 5. 1차 P2-1과 P3 5건 해소, P2-2·JSON wire는 부분. **R2-1(P2)**: Graph 탭에서 중첩된 `useRevealSelection` 둘이 서로 다른 요소를 끌고 바깥(plan DAG) 것이 이긴다 → `querySelectorAll`의 마지막 매치로 수렴. P3: 같은 행 재클릭 reveal 없음, `form !== null`을 schema 도착 대리값으로 씀, `scrollIntoView` 수신 요소 미단언, 훅 위치·타입 매개변수 이름, "PNG 8장 제외" 표기 오류 |
+| `P1-01` | `review_lang2_p1_01` | 3차 | `APPROVE` | blocking 0 · P3 3. 2차 R2-1·R2-2·R2-4·R2-5·R2-6 해소, R2-3 부분(선택사항). P3: `schemaLoaded` 단위 테스트가 `form: null`을 함께 넘겨 옛 조건과 구분되지 않음, 주석 오타 3곳, props 빈 줄 — 전부 `ea7e2fa4`로 반영(옛 조건으로 되돌리면 단언이 깨지는 것 확인). JSON 탭 wire 테스트는 끝내 없음(순수 판정 테스트가 덮어 수용) |
+| `P1-02` | `review_lang2_p1_02` | 1차 | `REQUEST_CHANGES` | P1 1 · P2 1 · P3 7. **P1**: 같은 문서 안의 전체 교체(초안 복구 `use-autosave.ts`, 서버 초안 적용 `use-server-draft.ts`)가 `SourceEditor`의 같은-epoch 분기에서 격리 없는 `setText`로 가, CodeMirror `newGroupDelay`(500ms) 안에 친 글자와 한 undo 단계로 합쳐졌다 — 되돌리기 한 번에 복구한 초안이 통째로 사라진다. → 같은-epoch 분기를 `replaceRange(0, length)`로 통일하고 호출자가 없어진 `setText`를 핸들에서 제거, SoT 행 문구 정정, 회귀 테스트 추가. **P3**: 480px 이하 탭·버튼 겹침, 탭 밑줄이 버튼 아래에서 끊김, `aria-disabled` 스타일이 공용 `:disabled`와 불일치, 날짜 입력 포커스에서 Ctrl+Z 무반응, 핸들 대역 들여쓰기, PR 본문 spec D8→D9, 12절 초과 사유에 줄 수 누락. 반영 수치: 코드 6건(P1 1 + P3 5 — 탭 겹침·밑줄·`aria-disabled`·대역 들여쓰기·날짜 입력 Ctrl+Z). PR 본문 2건(P3-4 spec 번호, P3-6 줄 수 근거)은 2차 시점에 각각 부분·미해소였고 4차 전에 리드가 본문을 정정했다 — 2차 행의 "5건 해소·1건 부분·1건 미해소"와 같은 사실을 세는 방식만 다르다. **오기**: "업그레이드 적용 undo 잠금 테스트 없음"(P2)은 사실과 다르다 — `upgrade-banner.test.tsx`에 undo 단언 2건(직후 타이핑 케이스 포함)이 이미 있다 |
+| `P1-02` | `review_lang2_p1_02` | 2차 | `APPROVE`(코드) | 1차 blocking 해소를 확인. 구현이 권장(격리 주석 덧붙이기)보다 나은 방향 — 비격리 전체 교체 API 자체를 없앴고 새 회귀 테스트가 수정 전 실제로 실패함을 리뷰어가 재현. 1차 P2는 리뷰어가 철회(오기). P3 7건 중 코드 5건 해소, PR 본문 2건은 부분 1(P3-4)·미해소 1(P3-6). **새 P2**: 탭 스트립의 `overflow-x: auto`가 `overflow-y`를 `auto`로 만들어 스크롤 컨테이너를 세우고, 탭 포커스 링(바깥 4px)이 위아래로 잘린다. 권장은 선언을 480px 미만으로 한정 |
 | `P1-02` | `review_lang2_p1_02` | 3차 | `REQUEST_CHANGES` | 링 클립은 해소됐으나(도장 픽셀·기하 양쪽 확인) 해법의 부작용 1건. **P2**: 스크롤포트를 위아래 8px 넓힌 `padding-block`+음수 `margin-block`이, 툴바 액션 줄과 탭 줄 사이 2px 간격을 넘어 검증 버튼 하단 6px을 덮어 그 영역 클릭을 가로챈다(28px 버튼의 21%가 무표시 사각지대). → padding·음수 margin을 걷고 링을 `outline-offset: -2px`로 탭 안쪽에 그려 해소, 검증 버튼 하단 actionability e2e 단언 추가(직전 해법에서 실패 확인). 리뷰어는 2차의 "겹침은 480px 이하에서만" 판단을 실제 앱 계측으로 철회(1440px에서 이미 넘침) — `overflow-x` 유지 결정 확정 |
 | `P1-02` | `review_lang2_p1_02` | 4차 | `APPROVE` | 코드 결함 0. 3차 P2(검증 버튼 하단 6px 클릭 가로채기)가 inset outline 교체로 해소되고, 회귀를 막는 e2e actionability 단언이 시각 project 4개에서 돈다. `overflow-x: auto` 유지, 탭 줄 한 줄·밑줄·`aria-disabled` 스타일·날짜 입력 단축키 모두 그대로. PR 본문 항목(spec D9, SoT와 어긋난 문장, 줄 수 근거, 테스트 수치)은 리드가 정정 |
-
 | `P1-03` | `review_lang2_p1_03` | 1차 | `REQUEST_CHANGES` | 차단 2 · P2 2 · P3 7. **차단1**: `messages.ts`의 `en` 블록이 한글 계산식 6개를 담아 영어 화면에 한글이 떴다 — `satisfies Record<MessageKey, string>`는 키 존재만 보고 커버리지 테스트는 ko만 조회해서 타입·테스트·lint 어디도 잡지 않았다. **차단2**: 시간축 연산자 6개의 계산식·설명이 `lag`를 빠뜨려 엔진의 창(`x[t-lag-window+1 … t-lag]`, `_evaluation.py:388-407`)과 어긋났다 — 12-1 모멘텀을 화면대로 만들면 11-0이 되는데 백테스트는 통과한다. **P2**: `output_type_rule` 대조 테스트가 입력이 항상 숫자 시계열이라 세 규칙이 한 값으로 접혀 공회전(mutation 2건 미검출), 선언 순서 테스트가 레지스트리에서 파생한 값끼리 비교하는 동어반복. 전부 반영 |
 | `P1-03` | `review_lang2_p1_03` | 2차 | `APPROVE` | 차단 0. 1차 findings 전부 해소 확인, 돌연변이 7건이 모두 실패하는 것을 실증. 새 P3 4건(en `momentum`·`delta` 문장 자족성, ko 산문의 식별자 호칭, e2e의 산문 고정, WORKFLOW 줄바꿈)은 후속 커밋에서 반영. 스코프 밖 관찰(`_registry.py` 12-1 모멘텀 시드 `history=252` ↔ 그래프 최소 이력 273)은 BACKLOG-001로 기록 |
 | `P1-04` | `review_lang2_p1_04` | 1차 | `REQUEST_CHANGES` | 차단 2 · P3 7. **차단1**: 팔레트로 만든 `기간 집계` 노드가 `window: 0`이라 곧바로 거부됐다 — runtime schema가 하한을 발행하지 않아 화면이 0을 채웠다. 하한을 노드 dataclass 옆에 한 번 선언하고(`_nodes.minimum`) 검증기·스키마가 함께 읽게 고쳤다. **차단2**: Graph 탭 인라인 본문 테스트가 backend가 내지 않는 pointer로만 단언해, 실제 노드 객체 pointer에서는 본문이 어디에도 안 붙는 것을 못 잡았다. P3: `availability` 판정 반전, 팔레트 계산식 접근성, 진단 본문 `role="alert"` 제거, `referenceLabel` fallback, 공개 API 8→1, `filterPalette` 참조 동일성. Form 목록 pointer 표기는 의도적 제외로 근거 명시 |
 | `P1-04` | `review_lang2_p1_04` | 2차 | `REQUEST_CHANGES` | 차단 1 · 잔여 3. 1차 차단 2건은 실측으로 해소 확인(카탈로그 23개 씨앗 전수, 게이트 민감도 probe 2건). **차단**: 노드 카드에 진단 본문 마크업만 더하고 CSS가 따라오지 않아 긴 한글 문장이 버튼 옆 같은 줄로 갔다 — e2e boundingBox로 재현하고(`flex-wrap` 없음) 카드 아래 줄 전체 폭으로 고쳤다. 잔여: 같은 문장 3중 렌더·중복 DOM id → 선택 노드 패널 사본 제거·`useId`; `부호 뒤집기`에 쓰이지 않는 `periods: 1` → 씨앗을 `addNode`로 옮겨 카탈로그 `params`에만; TS·Python 씨앗 규칙 2중 구현 → `parameter-seeds.json` golden이 양쪽을 묶음 |
 | `P1-04` | `review_lang2_p1_04` | 3차 | `REQUEST_CHANGES` | 차단 1 · P3 2. 2차 차단·잔여 3건 해소를 리뷰어가 실측 확인(CSS 되돌리면 e2e 두 단언이 숫자로 실패, golden 돌연변이 2건이 양쪽을 동시에 깸, 팔레트 29개 씨앗 전수). **차단**: 본문이 자기 행과 8px·다음 노드 행과 4px라 근접성이 뒤집혀, 마지막이 아닌 노드의 오류가 아래 노드 것으로 읽혔다(진단 문장에 node_id 없음). 카드 사이 간격을 12px로 넓히고 카드 안 행 간격을 4px로 좁혔다. e2e에 오류 노드 뒤 노드를 하나 더 두고 거리 비교를 단언 — 되돌려 9.5 > 4로 실패 확인. P3: `ChosenOperator` 공개 API export, 기준선이 backend 소유 문장을 픽셀로 고정하던 것을 `mask`로 분리 |
-| `P1-04` | `review_lang2_p1_04` | 4차 | `APPROVE` | 새 결함 0. 3차 차단(본문 근접성)과 P3 2건이 해소된 것을 확인했다. 관측 기록: `document-routes.test.tsx`의 P6-03 키보드 테스트가 1회 flake(재실행 통과) — P1-04 변경과 무관한 자리다 |
+| `P1-04` | `review_lang2_p1_04` | 4차 | `APPROVE` | 새 결함 0. 3차 차단(본문 근접성)과 P3 2건이 해소된 것을 확인했다. 관측 기록: `document-routes.test.tsx`의 P6-03 키보드 테스트가 1회 flake(재실행 통과) — P1-04 변경과 무관한 자리다(BACKLOG-007) |
+| `P1-05` | `review_lang2_p1_05` | 1차 | `REQUEST_CHANGES` | P1 1 · P2 2 · P3 13. **DEFECT-P105-001(P1)**: `structure.legacy_shape` 배너가 누르면 반드시 422 — 진단의 업그레이드 판정과 endpoint 판정이 달랐다 → `is_upgradeable_document` 하나로 일원화. **DEFECT-P105-002(P2)**: e2e 머신 잠금이 두 경합에서 둘 다 주인이 됨(실측) → 원자적 rename 획득. **DEFECT-P105-003(P2)**: `PW_BACKEND_PORT`가 vitest·dev 설정까지 새어 단위 게이트를 깸 → 빌드 자식에만 넘김. P3 13건(순환 진단 SCC, IPv6 포트 확인, 문서·기록 정정 등) 반영. 수정 `fb1588d9`·`6bedd7d8`(rebase 전 SHA) |
+| `P1-05` | `review_lang2_p1_05` | 2차 | `REQUEST_CHANGES` | 새 P1 1 · P3 8. 1차 blocking 3건 전부 해소 확인. **DEFECT-P105R2-001(P1)**: 1차 수정이 `tryAcquireLock`에서 `publishLock`을 유예 검사보다 먼저 불러, POSIX `rename(2)`가 빈 디렉터리를 덮어쓰는 성질 때문에 mkdir 방식 구현이 pid를 쓰기 전 창의 잠금을 빼앗는다 — 둘 다 주인이 되고 ubuntu CI 단위 테스트가 적색. Windows는 같은 rename이 EPERM이라 로컬 게이트로 보이지 않았다 → 자리가 비었을 때만 publish, 플랫폼 무관 단언 추가. 수정 `5e8e0af0`(rebase 뒤 `91363442`). POSIX 실행 확인은 ubuntu CI가 했다 |
+| `P1-05` | `review_lang2_p1_05` | 3차 | `APPROVE` | P1 0 · P2 1 · P3 2(추가분 P3 3). 2차 P1 해소를 ubuntu CI가 확정, P3 8건 반영 확인. **DEFECT-P105R3-001(P2)**: 두 프로세스 경합 테스트가 고정 900ms 보유에 기대 부하 중 간헐 실패 → 승자가 부모 IPC 신호로 잠금을 놓게. 추가분 `a55e7a67`(포트를 쥔 고아 서버 진단, 자동 kill 없음)을 확인했고 이 tip에서 CI 3 job이 처음 전부 초록. 3차 반영 `3755b186`(경합 신호·JSDoc·빌드 env 단언·조회 실패 degrade·오류 문구 순서)·`a263276b`(PLAN `package.json` 서술). rebase 뒤 각각 `f9ae9d2a`·`7f7eb69c`·`45f1c4a3` |
 
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
 |---|---|---|---|
+| `P1-03` | cascade tip `748bc62f`: backend `pytest -q`·`ruff check src tests examples scripts`·`pyright`, 루트 tools unittest·ruff·pyright, 충돌 표식 검사, frontend `api:generate` 후 생성물 diff·`typecheck`·`typecheck:e2e`·`lint`·`npm test` | pytest 1579 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 674/674 | 2026-09-26 |
+| `P1-04` | cascade tip `e6fb10b0`, 위와 같은 게이트 | pytest 1611 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 704/704 | 2026-09-26 |
+| `P1-05` | cascade tip `45f1c4a3`, 위와 같은 게이트 + `npm run test:e2e`(머신 잠금 아래) | pytest 1695 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 733/733 · e2e 25/25 | 2026-09-26 |
+| `P1-06` | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` | `PLAN.md is consistent: 0/29 merged, 6 approved` · 충돌 표식 0 | 2026-09-26 |
 
 ## 변경 기록
 
+- 2026-09-26 — P1-06(Phase 1 감사 후속, 문서). Phase 1 감사(2026-09-21, 판정 기준 `cf56b5b4`,
+  추가 확인 `a55e7a67`)는 exit (a)·(b)를 충족, (c)를 **BLOCKING 2건**으로 미충족 판정했다.
+  DEFECT-P1X-001(SoT 대장 충돌 표식, 정본 5행 이중 owner)은 P1-02 `ac3a3d0e`가 해소하고 검출
+  게이트를 세웠으며, P1-03~P1-05를 그 위로 cascade rebase해 스택 전체에서 표식이 0이 됐다.
+  DEFECT-P1X-002(PLAN이 P1-05 리뷰·blocking·PR 미기록)는 이 PR이 닫는다: P1-01·P1-05 상태를
+  `APPROVED`로, PR 링크(#181·#188), Review 기록에 P1-01 1~3차·P1-05 1~3차 행, P1-02 1·2차 행의
+  수치 표현 정정, rebase가 남긴 표 중간 빈 줄 제거, backlog 절에 잘못 들어간 변경 기록 8줄을 이
+  절로 옮겼다(같은 사실이 이미 있는 3줄은 기존 항목으로 흡수, 매뉴얼 1줄은 BACKLOG-002로).
+  비차단: SoT에서 N8(하한 행 — 스키마 빌더는 metadata를 optional로 읽는다)·N9(e2e 잠금·포트·
+  빌드 주소 행을 실제 owner로, `build-command.mjs` 포함)·연산자 가용성 담당(P2-04 → P2-07)을
+  정정하고, N1·N2·N3·N4·N5·N10과 P6-03 키보드 flake에 담당 PR을 붙였다(BACKLOG-002~007).
+  N6·N7·N11은 cleanup·관찰이라 담당 없이 둔다. 계획 PR 수 28 → 29.
+- 2026-09-26 — P1-03~P1-05 cascade rebase. P1-02 tip `ac3a3d0e` 위로 `rebase --onto`했다.
+  P1-03(옛 base `db3bc079`)은 충돌 없음 → `748bc62f`. P1-04는 3차 반영 커밋에서 PLAN `변경 기록`
+  충돌 1건(P1-02 수정 항목 ↔ P1-04 항목, 둘 다 추가라 양쪽을 남김) → `e6fb10b0`. P1-05는 충돌
+  없음 → `45f1c4a3`. 세 tip 모두 옛 tip과의 차이가 `ac3a3d0e` 내용뿐이고(코드 패치 동일), 표식
+  0·게이트 통과(`검증 기록`). 단계마다 `git diff --name-only --diff-filter=U`로 미해소 파일을
+  확인했다 — DEFECT-P1X-001을 만든 절차 누락의 재발 방지다.
+- 2026-09-21 — P1-05 3차 APPROVE와 반영. 2차 blocking 해소를 ubuntu CI가 확정했다. 새 P2
+  DEFECT-P105R3-001(경합 테스트가 고정 900ms 보유에 기대 부하 중 간헐 실패)은 승자가 부모의
+  IPC 신호로 잠금을 놓게 고쳤다(`3755b186`). 추가분 `a55e7a67`(포트를 쥔 고아 서버의 pid·시작
+  시각·커맨드를 오류에 담는다, 판정에 쓰지 않고 자동 kill 없음)도 APPROVE 유지, 이 tip에서 CI
+  세 job이 처음 전부 초록이었다. PLAN `package.json` 서술 정정 `a263276b`.
+- 2026-09-21 — P1-05 2차 REQUEST_CHANGES(DEFECT-P105R2-001) 수정.
+  **상황**: 1차 DEFECT-P105-002 수정이 잠금 획득을 원자적 rename 하나로 바꿨다.
+  **인풋**: 잠금 자리에 pid 파일이 아직 없는 빈 디렉터리가 있을 때(mkdir 방식 구현이 pid를 쓰기
+  전 창, 또는 `lock.test.mjs`의 "갓 만들어진 pid 없는 잠금" 단언) `tryAcquireLock`을 부른다.
+  **에러 위치**: `frontend/e2e/lock.mjs`의 `tryAcquireLock`이 `publishLock`을 유예 검사보다 먼저
+  불렀다. POSIX `rename(2)`는 대상이 빈 디렉터리면 성공하므로 유예 검사에 닿지 못한다.
+  **위험성**: POSIX에서 둘 다 주인이 되어 잠금이 막으려던 "옆 워크트리 backend를 테스트하고도
+  통과"(silent 오탐)가 되살아나고 ubuntu CI 단위 테스트가 적색이 된다. Windows는 같은 rename이
+  EPERM이라 로컬 게이트로는 보이지 않았다.
+  **수정**: `5e8e0af0` — 자리가 비었을 때만 publish한다. 잠금 코드를 다시 만질 때 1차 수정만
+  근거로 삼지 않는다(SoT e2e 잠금 행에 순서의 이유를 적었다).
+- 2026-09-21 — P1-05 1차 리뷰(REQUEST_CHANGES) 반영: 업그레이드 가능 판정을
+  `is_upgradeable_document` 하나로 모아 `structure.legacy_shape` 배너가 실제로 동작하게 했고
+  (전에는 눌러도 반드시 422), e2e 잠금 획득을 원자적 rename 하나로 바꿔 두 프로세스가 동시에
+  주인이 되던 경합 2종을 닫았으며, `PW_BACKEND_PORT`가 vitest·dev 설정까지 새어 단위 게이트를
+  깨던 경로를 막았다. 순환 진단은 SCC로 바꿔 고리에 묶인 노드를 하나도 빠뜨리지 않는다. 이 잠금 수정은
+  POSIX에서 반대 방향 경합을 새로 만들었고 2차 리뷰가 잡아 다시 고쳤다(위 2차 항목).
+- 2026-09-21 — P1-05에서 저장소 전체 e2e 결함을 고쳤다(리드 지시): Playwright `webServer`의
+  `reuseExistingServer: false`가 시작 시점 포트만 봐서, 워크트리 둘이 겹쳐 돌면 브라우저가 옆
+  체크아웃의 backend를 테스트하고도 통과할 수 있었다. 머신 단위 잠금으로 직렬화하고, 포트를
+  환경 변수로 열고, 포트가 막혀 있으면 조용히 재사용하지 않고 즉시 실패하게 했다.
+- 2026-09-21 — P1-05 구현: 구조·codec 진단이 backend에서 한글 문장으로 완성돼 나가고
+  (`.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행), `structure.legacy_shape`·
+  `STRUCTURE_CODES`·`FACTOR_GRAPH_CODES`·`expression_code()` 세 레지스트리 게이트가 생겼다.
+  `factor.*`는 더 이상 전략 문서 진단으로 나가지 않는다. 문장 golden이 레지스트리와 1:1이다.
+  리드 브리핑의 "진단 문장을 frontend i18n 템플릿으로" 방향은 SoT·WORKFLOW 원문과 충돌해 철회됐다.
+- 2026-09-21 — P2-09 acceptance 추가: `is_upgradeable_document`에 버전 상한을 두는 항목을
+  업그레이더 PR에 적었다. 판정을 넓힌 것은 P1-05가 이미 했고(진단이 "업그레이드하세요"라고 시킨
+  문서를 endpoint가 거절하던 모순 제거), 1.2가 들어오면 "미래 버전 + 옛 키 하나"가 1.1로
+  강등되는 경로가 되므로 상한은 버전 디스패치를 넣는 PR 몫이다. 옛 24 PR 계획 기준으로 이 줄을
+  P2-05에 적었던 것을 28 PR 계획에 맞춰 옮겼다.
 - 2026-09-21 — P1-02 결함 수정(Phase 1 감사 BLOCKING): SoT 대장에 커밋된 병합 충돌 표식.
   **상황**: P1-02를 28 PR 계획 tip(`ea7e2fa4`) 위로 `rebase --onto`할 때, 충돌 해소를
   `git add -A` + `rebase --continue` 반복 스크립트로 돌리면서 각 단계의 남은 표식을
@@ -366,39 +444,88 @@ Phase exit:
   12-1 모멘텀은 spec D1의 완료 정의 "퀀트 아이디어 5개"의 첫 번째라 노출이 크다.
 - **재현 test**: 없음(관찰만). 담당 PR이 시드 ↔ 그래프 최소 이력 동치 테스트를 함께 둔다.
 - **담당**: `P2-06`(`risk.risk_factor_id`·`saved_*` 제거로 레지스트리를 건드리는 PR).
-- 2026-09-20 — P1-01 구현 및 1차 리뷰: PR #168. 문서 상태 배지와 `DiagnosticsPanel`을
-  `SourceEditor` 밖 슬롯으로 올려 다섯 탭 모두에서 보이게 하고, 문제 행 클릭 목적지를
-  `resolveDiagnosticDestination`이 판정한다. `review_lang2_p1_01` APPROVE(blocking 0), 후속으로
-  편집기 높이 충전·선택 카드 `scrollIntoView`·route 테스트 강화 5건을 반영.
-- 2026-09-21 — P1-04 구현 및 1차 리뷰: 연산자 팔레트(카탈로그·스키마 주도), 추가·삭제 실패의 사유
-  표시, 진단 본문 인라인. 구현 중 발견한 `window: 0` 결함은 하한을 노드 dataclass 옆에 한 번
-  선언하고 검증기·runtime schema가 함께 읽게 해 같은 PR에서 고쳤다. `review_lang2_p1_04`
-  REQUEST_CHANGES(차단 2·P3 7) 전부 반영 — 남은 하나였던 `periods: null` 씨앗까지 막아 팔레트가
-  만든 노드가 곧바로 거부되지 않는다.
-- 2026-09-20 — P1-01 2차 리뷰 APPROVE(blocking 0). 중첩된 reveal 훅 둘이 서로 다른 요소를 끌던 R2-1을
-  "마지막 매치"로 고치고, 같은 문제 행 재클릭 reveal(R2-2)·명시적 `schemaLoaded`(R2-4)·
-  `scrollIntoView` 수신 요소 단언(R2-5)까지 반영.
-- 2026-09-21 — P1-05 1차 리뷰(REQUEST_CHANGES) 반영: 업그레이드 가능 판정을
-  `is_upgradeable_document` 하나로 모아 `structure.legacy_shape` 배너가 실제로 동작하게 했고
-  (전에는 눌러도 반드시 422), e2e 잠금 획득을 원자적 rename 하나로 바꿔 두 프로세스가 동시에
-  주인이 되던 경합 2종을 닫았으며, `PW_BACKEND_PORT`가 vitest·dev 설정까지 새어 단위 게이트를
-  깨던 경로를 막았다. 순환 진단은 SCC로 바꿔 고리에 묶인 노드를 하나도 빠뜨리지 않는다.
-- 2026-09-21 — 매뉴얼 스크린샷(`assets/04-structure-error.png` 등)은 옛 영문 화면이다. 한글
-  문장으로 바뀐 화면은 P1-05 후 Phase 1 감사에서 일괄 재촬영한다.
-- 2026-09-21 — P1-05 구현: 구조·codec 진단이 backend에서 한글 문장으로 완성돼 나가고
-  (`.claude/rules/strategy-workbench-sot.md` authoring 진단 코드 행), `structure.legacy_shape`·
-  `STRUCTURE_CODES`·`FACTOR_GRAPH_CODES`·`expression_code()` 세 레지스트리 게이트가 생겼다.
-  `factor.*`는 더 이상 전략 문서 진단으로 나가지 않는다. 문장 golden이 레지스트리와 1:1이다.
-  리드 브리핑의 "진단 문장을 frontend i18n 템플릿으로" 방향은 SoT·WORKFLOW 원문과 충돌해 철회됐다.
-- 2026-09-21 — P1-05에서 저장소 전체 e2e 결함을 고쳤다(리드 지시): Playwright `webServer`의
-  `reuseExistingServer: false`가 시작 시점 포트만 봐서, 워크트리 둘이 겹쳐 돌면 브라우저가 옆
-  체크아웃의 backend를 테스트하고도 통과할 수 있었다. 머신 단위 잠금으로 직렬화하고, 포트를
-  환경 변수로 열고, 포트가 막혀 있으면 조용히 재사용하지 않고 즉시 실패하게 했다.
-- 2026-09-21 — P2-09 acceptance 추가: `is_upgradeable_document`에 버전 상한을 두는 항목을
-  업그레이더 PR에 적었다. 판정을 넓힌 것은 P1-05가 이미 했고(진단이 "업그레이드하세요"라고 시킨
-  문서를 endpoint가 거절하던 모순 제거), 1.2가 들어오면 "미래 버전 + 옛 키 하나"가 1.1로
-  강등되는 경로가 되므로 상한은 버전 디스패치를 넣는 PR 몫이다. 옛 24 PR 계획 기준으로 이 줄을
-  P2-05에 적었던 것을 28 PR 계획에 맞춰 옮겼다.
+
+### BACKLOG-002: 매뉴얼이 옛 영문 화면이고 초안 복구 뒤 되돌리기를 안내하지 않는다 (감사 N1·N2)
+
+- **상황**: P1-03(화면 어휘)·P1-05(오류 문장)가 화면을 한글로 바꿨는데 매뉴얼 스크린샷은 P1
+  범위에서 한 장도 다시 찍지 않았다. P1-02 2차 리뷰가 "초안 복구 직후 되돌리기는 복구 이전
+  텍스트로 돌아간다"는 안내를 P1 스택 끝으로 넘겼는데 본문에 없다.
+- **인풋**: `npm run docs:capture`를 돌리지 않은 채 매뉴얼을 따라 한다.
+- **에러 위치**: `docs/manual/strategy-workbench/assets/*.png`(14장, 예 `04-structure-error.png`),
+  `docs/manual/strategy-workbench/README.md`(8절에 되돌리기 한 줄뿐, 초안 복구 안내 없음).
+- **위험성**: 매뉴얼이 실제와 다른 영문 오류·키 라벨을 보여 초보자가 따라 하다 막힌다. 동작
+  결함이 아니라 문서 drift다.
+- **담당**: `P3-03`(매뉴얼·README를 1.2로 고치는 PR — 1.2 화면으로 어차피 다시 찍어야 해 한 번에
+  한다). 되돌리기 본문 문장도 같은 PR에서.
+
+### BACKLOG-003: 횡단면 `zscore`·`rank`가 입력 단위를 물려줘 표준화한 두 팩터의 합이 거부된다 (감사 N3)
+
+- **상황**: P1-03 연산자 레지스트리. `cross_sectional.zscore`·`rank`의 계산식 설명은 무차원 값을
+  말하는데 `unit_rule`은 `SAME_AS_INPUT`이다. P1-03 1차 리뷰가 "별도 이슈"로 넘겼다.
+- **인풋**:
+  1. 필드 두 개 — `price.close`(단위 `KRW`), `valuation.pbr`(단위 `ratio`).
+  2. 각각 `cross_sectional.zscore` 노드를 붙이고 `binary.add`로 더한다.
+  3. `validate_factor_graph(graph, fields=(...))` → `valid=False`,
+     `factor.graph.unit_mismatch 더하기/빼기 단위가 다릅니다: left='KRW' right='ratio'`
+     (2026-09-26 probe, P1-05 tip `45f1c4a3`).
+- **에러 위치**: `backend/src/strategy_workbench/domain/factor/_operators.py`의 `RANK`·`ZSCORE`
+  정의(`unit_rule=UnitRule.SAME_AS_INPUT`) ↔ `domain/factor/_validation.py`의 더하기/빼기 단위 비교.
+- **위험성**: 표준화한 두 팩터를 한 그래프 안에서 합치는 교과서적 합성이 blocking error로
+  거부된다(false rejection). 화면 설명과 판정이 어긋나고, 그래프 탭만으로 전략을 만드는 완료
+  정의 경로에서 막힌다. `demean`·`winsorize`는 단위 보존이 맞아 대상이 아니다.
+- **재현 test**: 없음(위 probe). 담당 PR이 `test_factor_operators.py`의 `unit_rule` 대조에 넣는다.
+- **담당**: `P2-07`(단위 경고를 다루는 compile 단일 게이트 PR).
+
+### BACKLOG-004: `/factors/preview` 422가 `factor.graph.*` 코드를 그대로 낸다 (감사 N4)
+
+- **상황**: P1-05가 전략 문서 경로의 그래프 진단을 `strategy.expression.*`로 옮겼다. 팩터 연구
+  preview 경로는 그 범위 밖이었다(P1-05 1차 리뷰가 backlog로 넘김).
+- **인풋**: `POST /api/v1/factors/preview`에 검증을 통과하지 못하는 그래프(예: 순환).
+- **에러 위치**: `backend/src/strategy_workbench/adapters/inbound/http_api/_app.py`의
+  `preview_factor_graph` — `InvalidFactorRequestError`를 `"code": "factor.graph.invalid"`와 이슈
+  코드 `factor.graph.*`가 든 `validation`으로 그대로 422에 싣는다.
+- **위험성**: 같은 결함이 경로에 따라 두 네임스페이스로 나가 frontend가 코드 → 마커 매핑을 두 벌
+  가져야 하고, 사용자에게 내부 코드 문자열이 보인다. 지금은 frontend가 이 endpoint를 쓰지 않아
+  노출은 없다.
+- **담당**: `P5-03`(팩터 결과 미리보기 — 이 endpoint의 첫 frontend 소비자).
+
+### BACKLOG-005: 폭 640px 이하에서 IDE 뷰 탭이 사라진다 (감사 N5)
+
+- **상황**: Strategy Workbench IDE. 설계 하한은 1280px이고 그 아래는 `@media (max-width: 1279px)`
+  하나가 다룬다.
+- **인풋**: 창 폭을 640px 이하로 줄인다.
+- **에러 위치**: `frontend/src/widgets/strategy-ide/ui/strategy-ide.css` — 탭 줄 폭이 0이 되어 뷰
+  탭이 보이지 않는다.
+- **위험성**: 마우스로 뷰를 바꿀 수 없다(키보드 단축키로만). 설계 하한 밖이라 결함인지는 "좁은 폭
+  지원 범위" 제품 결정에 달렸다.
+- **담당**: `P4-04`(탭을 그래프·YAML 둘로 다시 짜는 PR). 지원 하한을 정하고 그 폭에서 탭이 보이는
+  단언을 둔다.
+
+### BACKLOG-006: 진단 reveal 순서가 훅 호출 순서와 "마지막 매치"에 기대고 있다 (감사 N10)
+
+- **상황**: P1-01 1차 리뷰 P3가 "reveal 순서가 훅 호출 순서에만 고정 — 다음 PR이 같은 page에 훅을
+  끼우거나 재배치하면 조용한 회귀"를 교차 PR 경고로 남겼고, 2차 R2-1이 중첩된 두 훅이 다른 요소를
+  끄는 결함을 실제로 잡았다. 지금은 `use-reveal-selection.ts`가 가장 깊은 매치를 고르고
+  `document-routes.test.tsx`의 "scrolls to the editor row, not the plan node" 테스트가 잠근다.
+- **인풋**: Form 탭 은퇴·목록형 편집기 제거처럼 reveal 훅을 가진 컴포넌트를 없애거나 옮긴다.
+- **에러 위치**: `frontend/src/features/edit-strategy/model/use-reveal-selection.ts`와 그 소비자
+  (`StrategyFormPanel`·`FactorGraphPanel`·`FactorGraphEditor`).
+- **위험성**: 문제 행을 눌렀을 때 plan 노드처럼 편집할 수 없는 요소로 스크롤이 가고, 테스트가
+  함께 지워지면 아무 게이트도 잡지 않는다.
+- **담당**: `P4-04`(Form 탭 은퇴로 훅 하나가 사라지는 첫 PR). 이후 `P6-03`(목록형 편집기 제거)도
+  같은 테스트를 새 캔버스 기준으로 유지한다.
+
+### BACKLOG-007: `document-routes.test.tsx`의 P6-03 키보드 테스트가 부하 중 간헐 실패한다
+
+- **상황**: 이름의 "P6-03"은 이전 yaml-ui initiative 번호다. describe "professional keyboard
+  workflow (P6-03)"의 "finds a JSON Pointer from a read-only view, returns to YAML and reveals its
+  source". P1-04 4차 리뷰와 Phase 1 감사가 전체 실행 중 각 1회 관측했고 단독 실행은 통과한다.
+- **인풋**: 머신 부하가 큰 상태에서 `npm test` 전체.
+- **에러 위치**: `frontend/src/app/__tests__/document-routes.test.tsx` 해당 테스트의 선택 영역
+  `waitFor` — 주석이 "reveal은 route 전환 뒤 비동기로 선택을 옮긴다, 부하 중에는 한 틱 늦는다"고
+  이미 적는다.
+- **위험성**: merge gate가 간헐 적색이 되어 재실행이 습관이 되면 진짜 회귀를 흘려보낸다.
+- **담당**: `P4-04`(JSON 탭 은퇴로 "read-only view에서 YAML로 돌아가는" 이 경로를 다시 쓴다).
 
 ## 갱신 절차
 

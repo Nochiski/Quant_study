@@ -29,7 +29,7 @@ React 19 · TanStack Router/Query · CodeMirror 6 · `yaml` 2.9 · Vitest · fas
 ```text
 main
  └─ P0-01  docs/strategy-language-2-0-plan          (이 패키지 + spec + ADR·로드맵·SoT 개정)
-     ├─ P1-01 ─ P1-02 ─ P1-03 ─ P1-04 ─ P1-05          화면 안 마찰 제거 (1.1 위, 독립)
+     ├─ P1-01 ─ P1-02 ─ P1-03 ─ P1-04 ─ P1-05 ─ P1-06   화면 안 마찰 제거 (1.1 위, 독립. P1-06은 감사 후속 문서)
      └─ P2-01 ─ … ─ P2-09                              backend schema 1.2 (9 PR, 아래 5절)
          └─ P3-01 ─ P3-02 ─ P3-03                    frontend 1.2 적응
              └─ P4-01 ─ P4-02 ─ P4-03 ─ P4-04        그래프 1수준: 파이프라인
@@ -199,6 +199,25 @@ missing window, type mismatch)이 전부 영문이다. SoT 규칙("compile 진�
 - `factor.graph.cycle`이 순환에 포함된 node_id 목록을, `duplicate_node`가 중복 id를 진단 `node_id`·
   메시지에 담는다. Graph 카드가 이를 하이라이트.
 - 메시지 golden 테스트(코드별 1개).
+
+### P1-06 — Phase 1 감사 후속(문서)
+
+**Intent**: Phase 1 종료 감사(2026-09-21)가 exit (c)를 BLOCKING 2건으로 막았다. SoT 대장 충돌
+표식(DEFECT-P1X-001)은 P1-02 `ac3a3d0e`와 P1-03~P1-05 cascade rebase로 해소됐다. 남은 PLAN 기록
+결함(DEFECT-P1X-002)과 비차단 SoT 문장·이월 담당을 코드 변경 없이 문서 PR 하나로 닫는다. 감사가
+권고로 신설한 PR이라 계획 PR 수가 28에서 29가 된다.
+
+**Acceptance**
+
+- PLAN P1 행이 실제 상태(PR 링크, 리뷰 회차·결과, 수정 커밋)를 담고, Review 기록 표에 P1-01·P1-05
+  전 회차 행이 있다. P1-02 1·2차 행의 수치가 서로 모순되지 않는다.
+- `관찰 backlog` 절에는 BACKLOG 항목만, 변경 기록은 `변경 기록` 절에만 있다.
+- 감사 비차단 N1·N2·N3·N4·N5·N10과 P6-03 키보드 flake에 `담당:` PR이 있다.
+- SoT 대장: 정수 하한 행이 두 소비자의 읽기 방식을 사실대로 적고(N8), e2e 잠금·포트·빌드 주소 행이
+  실제 owner 파일을 가리킨다(N9).
+- `update-plan-progress.ps1 -Check`와 충돌 표식 검사 통과.
+
+**Non-goal**: 코드 변경. 매뉴얼 재촬영은 담당만 정한다(BACKLOG-002, P3-03).
 
 **Phase 1 exit**
 

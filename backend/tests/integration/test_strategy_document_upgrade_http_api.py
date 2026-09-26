@@ -11,6 +11,10 @@ from strategy_workbench.adapters.inbound.http_api._strategy_document_contract im
     StrategyDocumentUpgrade422Response,
 )
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
+    LEGACY_UPGRADE_TARGET_VERSION,
+)
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 
@@ -71,9 +75,9 @@ def test_a_document_the_diagnostic_calls_1_0_actually_upgrades() -> None:
     """
     client = TestClient(build_http_app())
     source = _read("quality_momentum.v1_0.commented.yaml").replace(
-        'schema_version: "1.0"', 'schema_version: "1.1"'
+        'schema_version: "1.0"', f'schema_version: "{CURRENT_SCHEMA_VERSION}"'
     )
-    assert 'schema_version: "1.1"' in source
+    assert f'schema_version: "{CURRENT_SCHEMA_VERSION}"' in source
 
     compiled = client.post(
         "/api/v1/strategy-documents/compile", json={"source": source, "format": "yaml"}
@@ -88,8 +92,11 @@ def test_a_document_the_diagnostic_calls_1_0_actually_upgrades() -> None:
 
     assert upgraded.status_code == 200, upgraded.text
     body = upgraded.json()
-    assert 'schema_version: "1.1"' in body["source"]
-    assert body["compiled"]["diagnostics"] == []
+    # P2-03 이후 P2-09 전까지는 결과가 1.1 이라 은퇴 버전 진단이 실린다(중간 상태). P2-09 가
+    # 1.1 → 1.2 step 을 붙이면 진단이 없는 현재 버전 결과로 되돌린다.
+    assert f'schema_version: "{LEGACY_UPGRADE_TARGET_VERSION}"' in body["source"]
+    codes = [item["code"] for item in body["compiled"]["diagnostics"]]
+    assert codes == ["structure.unsupported_schema_version"]
 
 
 def test_upgrade_of_a_syntax_invalid_document_is_422_with_diagnostics() -> None:

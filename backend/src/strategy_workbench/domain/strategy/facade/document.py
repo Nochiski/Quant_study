@@ -22,10 +22,10 @@ from strategy_workbench.domain.strategy._upgrade import (
     apply_upgrade_steps,
     is_frozen_schema_version,
     is_legacy_document,
-    require_retired_schema_version,
-    strip_retired_execution_settings,
     is_upgradeable_document,
     legacy_shape_hints,
+    require_retired_schema_version,
+    strip_retired_execution_settings,
     upgrade_document_1_0,
 )
 

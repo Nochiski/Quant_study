@@ -21,6 +21,7 @@ from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import (
     SCRIPTED_MARKER,
     SLOW_ANSWER_DELAY_SCALE,
     ScriptedLlmProvider,
+    factor_window_proposal,
     scenario_for,
     search_then_failure,
     simple_answer,
@@ -110,6 +111,7 @@ class _ToolRecorder:
         ("천천히 설명해 줘", slow_answer),
         # 두 낱말이 같이 있으면 앞선 항목이 이긴다 — 선택이 질문 순서에 흔들리지 않게 고정한다.
         ("검색해서 제안해 줘", tool_then_proposal),
+        ("모멘텀 창을 줄인 안을 제안해 줘", factor_window_proposal),
     ],
 )
 def test_the_question_picks_the_scenario(text: str, expected: object) -> None:
@@ -174,6 +176,54 @@ def test_the_proposal_scenario_submits_a_broken_document_when_the_tool_fails() -
     list(tool_then_proposal(record))
 
     assert calls[1].arguments["source_text"] == "title: 깨진 제안\n"
+
+
+GRAPH_SOURCE = (
+    'title: "원래 제목"\n'
+    "factors:\n"
+    "  - factor_id: momentum\n"
+    "    graph:\n"
+    "      nodes:\n"
+    "        - kind: time_series\n"
+    "          node_id: mom_252\n"
+    "          window: 252\n"
+    "        - kind: time_series\n"
+    "          node_id: mom_60\n"
+    "          window: 60\n"
+)
+
+
+def test_the_window_scenario_changes_the_title_and_the_first_window_only() -> None:
+    """팩터 그래프를 바꿔야 frontend가 캐시에 없는 팩터 계획을 새로 조회한다(C-02 리뷰 P1-1)."""
+    tools = _ToolRecorder(source_text=GRAPH_SOURCE)
+
+    events = list(factor_window_proposal(tools))
+
+    assert [call.name for call in tools.calls] == [READ_CURRENT_STRATEGY, PROPOSE_STRATEGY]
+    proposed = tools.calls[1].arguments["source_text"]
+    assert isinstance(proposed, str)
+    changed = [
+        (before, after)
+        for before, after in zip(GRAPH_SOURCE.splitlines(), proposed.splitlines(), strict=True)
+        if before != after
+    ]
+    assert changed == [
+        ('title: "원래 제목"', 'title: "KRX 6개월 모멘텀"'),
+        ("          window: 252", "          window: 126"),
+    ]
+    assert _followed_by_another_event(events, PROPOSE_STRATEGY)
+
+
+def test_the_window_scenario_submits_a_broken_document_without_a_window() -> None:
+    """창이 없는 문서에서 그래프가 그대로인 제안으로 되돌아가지 않는다.
+
+    되돌아가면 e2e가 캐시된 팩터 계획 경로를 밟고도 통과한다.
+    """
+    tools = _ToolRecorder()
+
+    list(factor_window_proposal(tools))
+
+    assert tools.calls[1].arguments["source_text"] == "title: 깨진 제안\n"
 
 
 def test_the_search_scenario_shows_sources_then_retries_the_proposal_three_times() -> None:

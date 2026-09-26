@@ -1,4 +1,4 @@
-"""대본 시나리오 네 개와 질문 → 시나리오 선택 (WORKFLOW B-05, A-07 시나리오 fixture와 같은 내용).
+"""대본 시나리오 다섯 개와 질문 → 시나리오 선택 (WORKFLOW B-05, A-07 시나리오 fixture와 같은 내용).
 
 ## 왜 backend 안에 두는가
 
@@ -52,6 +52,7 @@ __all__ = [
     "scenario_for",
     "search_then_failure",
     "simple_answer",
+    "factor_window_proposal",
     "slow_answer",
     "tool_then_proposal",
 ]
@@ -87,6 +88,14 @@ _BROKEN_SOURCE = "title: 깨진 제안\n"
 # 제목 줄 하나만 바꾼다. 들여쓰기 없는 최상위 `title:`만 보므로 factor의 `label:`이나 중첩된
 # 키는 건드리지 않는다.
 _TITLE_LINE = re.compile(r"^title:.*$", re.MULTILINE)
+
+# 팩터 그래프를 바꾸는 제안(C-02 리뷰 P1-1). 첫 시계열 노드의 `window:` 값 하나만 바꾼다. 그래프가
+# 달라지므로 frontend는 캐시에 없는 팩터 계획(explain)을 새로 조회한다 — "적용 후 백테스트"가 그
+# 조회를 기다리는지 e2e가 이 경로로 본다.
+_WINDOW_LINE = re.compile(r"^(\s+window:\s*)\d+\s*$", re.MULTILINE)
+_SHORT_WINDOW = 126
+_WINDOW_PROPOSAL_TITLE = "KRX 6개월 모멘텀"
+_WINDOW_PROPOSAL_SUMMARY = "모멘텀 창을 252거래일에서 126거래일로 줄인다."
 
 # 조각 수 × adapter의 조각당 지연 × `SLOW_ANSWER_DELAY_SCALE`이 이 턴의 길이다. 기본값으로 20초를
 # 넘겨, 브라우저가 새로고침하고 다시 붙는 데 드는 1~2초가 그 안에 넉넉히 들어오게 한다.
@@ -170,6 +179,37 @@ def tool_then_proposal(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
     yield Done(stop_reason="end_turn")
 
 
+def factor_window_proposal(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
+    """현재 문서를 읽고 제목과 첫 시계열 창(`window:`)을 바꾼 제안을 제출한다.
+
+    제목만 바꾸는 `tool_then_proposal`과 달리 팩터 그래프가 달라진다. 창을 찾지 못하면 깨진
+    조각을 제안한다 — 그래프가 그대로인 제안으로 조용히 되돌아가면 e2e가 캐시된 계획 경로를 밟고도
+    통과한다.
+    """
+    read_call = ToolCall(call_id="call-read", name=READ_CURRENT_STRATEGY, arguments={})
+    yield read_call
+    current = execute_tool(read_call)
+    yield Usage(input_tokens=2100, output_tokens=180)
+
+    source_text = _window_proposal_source(current)
+    propose_call = ToolCall(
+        call_id="call-propose",
+        name=PROPOSE_STRATEGY,
+        arguments={
+            "title": _WINDOW_PROPOSAL_TITLE,
+            "summary": _WINDOW_PROPOSAL_SUMMARY,
+            "rationale": _PROPOSAL_RATIONALE,
+            "sources": [{"title": _KRX_MOMENTUM_SOURCE.title, "url": _KRX_MOMENTUM_SOURCE.url}],
+            "source_text": source_text,
+        },
+    )
+    yield propose_call
+    execute_tool(propose_call)
+    yield TextDelta(text="모멘텀 창을 줄인 안을 올렸습니다.")
+    yield Usage(input_tokens=3400, output_tokens=920)
+    yield Done(stop_reason="end_turn")
+
+
 def search_then_failure(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
     """검색 활동을 보인 뒤 같은 원문으로 세 번 거절당해 턴이 끝난다.
 
@@ -199,8 +239,10 @@ def search_then_failure(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
 
 
 # 질문에 들어 있는 낱말로 시나리오를 고른다. 먼저 맞는 항목이 이긴다 — "검색해서 제안해 줘"처럼
-# 둘 다 들어 있으면 제안 쪽이다.
+# 둘 다 들어 있으면 제안 쪽이다. "창을 줄"은 "제안"보다 앞이라 "창을 줄인 안을 제안해 줘"도
+# 그래프를 바꾸는 대본을 고른다.
 SCENARIO_KEYWORDS: tuple[tuple[str, ScenarioPlan], ...] = (
+    ("창을 줄", ScenarioPlan(factor_window_proposal)),
     ("제안", ScenarioPlan(tool_then_proposal)),
     ("검색", ScenarioPlan(search_then_failure)),
     ("천천히", ScenarioPlan(slow_answer, delay_scale=SLOW_ANSWER_DELAY_SCALE)),
@@ -215,21 +257,38 @@ def scenario_for(text: str) -> ScenarioPlan:
     return ScenarioPlan(simple_answer)
 
 
+def _current_source(current: ToolResult) -> str | None:
+    """`read_current_strategy` 결과에서 지금 원문을 꺼낸다. 읽지 못하면 None이다."""
+    if not current.ok:
+        return None
+    try:
+        payload = json.loads(current.content)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    source_text = payload.get("source_text")
+    if not isinstance(source_text, str) or source_text.strip() == "":
+        return None
+    return source_text
+
+
+def _window_proposal_source(current: ToolResult) -> str:
+    """지금 원문의 제목과 첫 `window:` 값을 바꾼다. 둘 중 하나라도 못 찾으면 깨진 조각이다."""
+    source_text = _current_source(current)
+    if source_text is None or _WINDOW_LINE.search(source_text) is None:
+        return _BROKEN_SOURCE
+    retitled = _TITLE_LINE.sub(f'title: "{_WINDOW_PROPOSAL_TITLE}"', source_text, count=1)
+    return _WINDOW_LINE.sub(lambda match: f"{match.group(1)}{_SHORT_WINDOW}", retitled, count=1)
+
+
 def _proposal_source(current: ToolResult) -> str:
     """`read_current_strategy` 결과에서 지금 원문을 꺼내 제목만 바꾼다.
 
     도구 결과를 읽지 못하면 깨진 조각을 제안한다. 조용히 그럴듯한 원문으로 되돌아가면 e2e가
     "제안이 왔다"까지만 보고 통과해, 도구 경로가 끊긴 사실이 검사 밖으로 나간다.
     """
-    if not current.ok:
-        return _BROKEN_SOURCE
-    try:
-        payload = json.loads(current.content)
-    except json.JSONDecodeError:
-        return _BROKEN_SOURCE
-    if not isinstance(payload, Mapping):
-        return _BROKEN_SOURCE
-    source_text = payload.get("source_text")
-    if not isinstance(source_text, str) or source_text.strip() == "":
+    source_text = _current_source(current)
+    if source_text is None:
         return _BROKEN_SOURCE
     return _TITLE_LINE.sub(f'title: "{_PROPOSAL_TITLE}"', source_text, count=1)

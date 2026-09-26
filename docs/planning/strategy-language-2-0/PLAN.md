@@ -6,7 +6,7 @@ current_phase: P1,P2
 current_pr: P1-06,P2-01
 active_prs: [P1-06, P2-01]
 parallel_window: [P1-06, P2-01]
-last_updated: 2026-09-27T01:28:38+09:00
+last_updated: 2026-09-27T01:44:25+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 6
@@ -29,7 +29,7 @@ progress_percent: 21
 | Active PR | `P1-06, P2-01` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `6 / 29` |
-| Aggregated at | `2026-09-27 01:28 KST` |
+| Aggregated at | `2026-09-27 01:44 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -275,6 +275,8 @@ Phase exit:
 | `P1-05` | `review_lang2_p1_05` | 2차 | `REQUEST_CHANGES` | 새 P1 1 · P3 8. 1차 blocking 3건 전부 해소 확인. **DEFECT-P105R2-001(P1)**: 1차 수정이 `tryAcquireLock`에서 `publishLock`을 유예 검사보다 먼저 불러, POSIX `rename(2)`가 빈 디렉터리를 덮어쓰는 성질 때문에 mkdir 방식 구현이 pid를 쓰기 전 창의 잠금을 빼앗는다 — 둘 다 주인이 되고 ubuntu CI 단위 테스트가 적색. Windows는 같은 rename이 EPERM이라 로컬 게이트로 보이지 않았다 → 자리가 비었을 때만 publish, 플랫폼 무관 단언 추가. 수정 `5e8e0af0`(rebase 뒤 `91363442`). POSIX 실행 확인은 ubuntu CI가 했다 |
 | `P1-05` | `review_lang2_p1_05` | 3차 | `APPROVE` | P1 0 · P2 1 · P3 2(추가분 P3 3). 2차 P1 해소를 ubuntu CI가 확정, P3 8건 반영 확인. **DEFECT-P105R3-001(P2)**: 두 프로세스 경합 테스트가 고정 900ms 보유에 기대 부하 중 간헐 실패 → 승자가 부모 IPC 신호로 잠금을 놓게. 추가분 `a55e7a67`(포트를 쥔 고아 서버 진단, 자동 kill 없음)을 확인했고 이 tip에서 CI 3 job이 처음 전부 초록. 3차 반영 `3755b186`(경합 신호·JSDoc·빌드 env 단언·조회 실패 degrade·오류 문구 순서)·`a263276b`(PLAN `package.json` 서술). rebase 뒤 각각 `f9ae9d2a`·`7f7eb69c`·`45f1c4a3` |
 | `P1-06` | `review_lang2_p1_06` | 1차 | `REQUEST_CHANGES` | P2 2 · P3 5. cascade rebase는 range-diff로 코드 드리프트 0, SoT 해소 규칙 일치, N3 독립 재현(`rank` 포함). **P2-1**: P1-02 행이 4차 APPROVE를 근거로 `APPROVED`인데 #173 head는 그 뒤의 코드 커밋 `ac3a3d0e`(새 도구·CI step)이고 리뷰 기록이 없다 → `IN_REVIEW`·"`ac3a3d0e` 리뷰 대기"로, 테스트 수 8 → 7 정정. **P2-2**: BACKLOG-002~007이 담당 PR의 WORKFLOW acceptance에 없다 → P2-07·P3-03·P4-04·P5-03·P6-03 acceptance에 한 줄씩 예약, BACKLOG-004는 소비자가 정해지지 않아 조건부 담당으로. P3: WORKFLOW:44 착수 조건을 P1-06으로, P1-05 Packet Diff stat·e2e 파일, P1-02 2차 행 수치(새 P2 2·P3 3), BACKLOG-003·004 줄 번호. 관찰(표식 게이트 경계)은 P1-02 5차 행에 |
+| `P1-06` | `review_lang2_p1_06` | 2차 | `APPROVE` | `909ae273` 판정. 1차 P2 2건(P1-02 `ac3a3d0e` 리뷰 대기 기록, BACKLOG의 WORKFLOW acceptance 예약)과 P3 5건 반영 확인. 그 뒤 추가분(병합 cascade·US-DM-06 스토리 e2e·병합 리뷰 P3 문서)은 별도 확인 |
+| `P0-01`~`P1-06` 병합 | `review_lang2_p1_06` | 병합 cascade | `APPROVE` | blocking 0 · P3 3. main(AI 스택 15개·#193·#195)을 7개 PR에 올린 병합 커밋과 정정 커밋만 봤다. 병합이 PR 고유 변경을 하나도 되돌리지 않았고(층마다 옛·새 범위 추가·삭제 줄 대조), AI 제안 적용은 P1-02 편집 이력 계약의 격리된 전체 교체 한 단계로 들어가며, 단축키 분기는 겹치지 않고, SoT 3-way 결과에 이중 owner·누락이 없다. 의미 충돌 수정 4건 중 테스트를 약화한 것은 없고(`9815b40b`는 단언 강화), 기준선 변화는 전부 P1 기능으로 설명된다. P3: SoT e2e 행의 "B-05가 hunk를 복사" 문장, AI 적용 → 되돌리기 버튼 브라우저 e2e 부재(BACKLOG-009), `currentSource` 우회를 BACKLOG-007에 잇기 — 전부 P1-06 `229eed5f`에서 반영 |
 
 ## 검증 기록
 
@@ -289,7 +291,8 @@ Phase exit:
 
 - 2026-09-27 — P0-01·P1-01~P1-05 main 머지. 머지 커밋 #167 `b438e58d`, #168 `3d6f2b42`, #173
   `bee2a4fd`, #177 `9cef7f3d`, #181 `3c1f1ab7`, #188 `7d525949`. 그 전에 AI 어시스턴트 스택 15개·#193·
-  #195(유저 스토리 하네스)를 merge cascade(리뷰된 SHA 보존)로 P0-01부터 P1-06까지 올렸다. 병합이 드러낸
+  #195(유저 스토리 하네스)를 merge cascade(리뷰된 SHA 보존)로 P0-01부터 P1-06까지 올렸고, 병합 커밋 리뷰는
+  APPROVE(blocking 0·P3 3)였다. 병합이 드러낸
   의미 충돌 네 건은 각 브랜치에서 고쳤다: AI 테스트의 편집기 대역(P1-02 핸들 계약), e2e 원문 읽기의
   reveal 경합(`currentSource` 안정 읽기), 계약 패널 스토리 e2e(P1-03 화면 어휘), 어시스턴트 대본 골든
   글자 수(P1-05 한글 진단). 인프라 기준선은 층마다 다시 찍었다.
@@ -570,7 +573,8 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **관련 우회**: 같은 현상(탭 전환 뒤 reveal이 한 틱 늦게 와 선택을 옮김)이 main 병합 중 브라우저 e2e에서도
   나왔다. `frontend/e2e/workbench-helpers.ts`의 `currentSource`가 전체 선택·복사를 두 번 연속 같은 값이
   나올 때까지 되풀이하게 해 막았다(`9a3e1fd0`). P4-04가 reveal 경로를 다시 쓸 때 이 우회를 걷을 수
-  있는지 함께 본다.
+  있는지 함께 본다. P4-04가 늦은 reveal을 고치면 이 우회(두 번 연속 같은 값까지 되풀이)도 함께 걷어내고
+  한 번 읽기로 되돌린다.
 
 ### BACKLOG-008: 충돌 표식 게이트가 일부 추적 텍스트를 건너뛰고, 주석이 검출 범위를 과장한다
 

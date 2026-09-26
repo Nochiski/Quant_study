@@ -37,6 +37,7 @@ BASE_DIR = os.environ.get("QL_HOME") or os.path.dirname(os.path.dirname(os.path.
 DB   = os.path.join(BASE_DIR, "data", "raw", "wisereport.db")
 KRX  = os.path.join(BASE_DIR, "data", "raw", "krx.db")
 WISE = "https://navercomp.wisereport.co.kr"
+FIN_GUBUN = "MAIN"   # cF3002/cF4002 재무 기준: 주재무제표(연결 우선, 없으면 별도). DQ-5 참조
 UA   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 WORKERS = 10
 JITTER  = (0.05, 0.25)
@@ -314,14 +315,18 @@ def main() -> None:
             out.append(("c1010001", "", v, body, nb, ms))
             # 컨센서스의 나머지 항목 축 — cF3002(손익 8항목 E + 차기분기 E 동봉) · cF4002(지표 E).
             # 연간 호출 하나에 DATAQ1~6(분기)까지 실려 오므로 분기 별도 호출은 없다 (실측).
+            # finGubun 은 MAIN(주재무제표) — 연결 재무제표가 있는 회사는 연결, 별도만 내는 회사는 별도가
+            # 온다. IFRSL(연결 고정)로 부르면 별도만 내는 회사(2026-09-26 실측 스테이지 808 중 84,
+            # 예 샘씨엔에스 252990)의 값이 전부 NULL 로 와서 조용히 결측이 된다(DQ-5). 기준은 YYMM
+            # 라벨의 "(IFRS연결)/(IFRS별도)" 로 stage `fs_basis` 에 그대로 남는다.
             for ep, extra in (("cF3002", {"frq": "0", "rpt": "0", "frqTyp": "0"}),
                               ("cF4002", {"frq": "0", "rpt": "5", "frqTyp": "0"})):
-                q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": "IFRSL", "cn": "",
+                q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": FIN_GUBUN, "cn": "",
                                             "encparam": encparam(), **extra})
                 _, v, body, nb, ms = fetch(cmp_cd, ep, "Y", f"{WISE}/company/{ep}.aspx?{q}")
                 if v == "ok" and body[:1] != b"{":
                     encparam(refresh=True)          # 토큰 만료 의심 — 1회 갱신 후 재시도
-                    q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": "IFRSL", "cn": "",
+                    q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": FIN_GUBUN, "cn": "",
                                                 "encparam": encparam(), **extra})
                     _, v, body, nb, ms = fetch(cmp_cd, ep, "Y", f"{WISE}/company/{ep}.aspx?{q}")
                 out.append((ep, "Y", v if body[:1] == b"{" or v != "ok" else "notjson",

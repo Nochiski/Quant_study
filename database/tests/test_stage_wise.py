@@ -480,3 +480,17 @@ def test_build_analyst_broker_parses_dates_and_classifies_opinions(tmp_path: Pat
     assert str(got[0][8]) == "2026-09-02" and got[0][9] == "measured"
     g8 = next(g for g in r.gates if g.name == "G8")
     assert g8.status is gates.GateStatus.PASS and g8.metrics["n_no_opinion"] == 1
+
+
+def test_fin_wise_separate_basis_rows_keep_values_and_fs_basis():
+    """별도(IFRS별도) 기준 응답(DQ-5, 수집기 finGubun=MAIN 이후 별도만 내는 회사의 정상 형태)도
+    연결과 같은 규약으로 파싱되고 fs_basis 가 'IFRS별도' 로 남는다."""
+    yymm = [x.replace("IFRS연결", "IFRS별도") for x in YYMM8[:6]]
+    rows = [{"ACCODE": "203170", "ACC_NM": "당기순이익", "P_ACCODE": None, "LVL": 1, "GRP_TYP": "", "UNT_TYP": "",
+             "ACKIND": "", "DATA1": 119.1, "DATA2": 151.4, "DATA3": -13.1, "DATA4": 33.2, "DATA5": 150.6, "DATA6": 359.0}]
+    body = _z({"YYMM": yymm, "DATA": rows, "FIN": "IFRS별도", "FRQ": "연간"})
+    res = parsers.parse_fin_wise([_blob("252990", "cF3002", "Y", body)])
+    assert len(res.rows) == 1
+    r = res.rows[0]
+    assert r["fs_basis"] == "IFRS별도" and r["period_label_5"] == "2025/12<br />(IFRS별도)"
+    assert r["val_5"] == "150.6" and r["accode"] == "203170"   # 파서는 값을 문자열로 보존(캐스팅은 stage 규칙)

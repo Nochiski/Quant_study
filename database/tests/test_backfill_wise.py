@@ -52,3 +52,14 @@ def test_probe_fetch_failure_is_treated_as_covered():
 def test_request_budget_per_stock():
     # ledger_health.wise.req_identity 의 상수와 맞물린다: 커버 15 · 무커버 4(목록 1 + cF5001 3)
     assert bw.REQ_COVERED == 15 and bw.REQ_NONE == 4
+
+
+def test_fin_screens_request_main_basis_not_consolidated_only():
+    """DQ-5(2026-09-26): cF3002/cF4002 를 연결(IFRSL) 고정으로 부르면 별도만 내는 회사(예 샘씨엔에스
+    252990)의 값이 전부 NULL 로 온다. 주재무제표(MAIN)로 불러야 연결 있는 회사는 연결, 없는 회사는
+    별도가 온다(09-26 실측: 252990 MAIN=별도 순이익 150.6억, 005930 MAIN=연결=IFRSL 과 동일)."""
+    import inspect
+    assert bw.FIN_GUBUN == "MAIN"
+    src = inspect.getsource(bw)
+    assert '"finGubun": "IFRSL"' not in src, "cF3002/cF4002 요청이 다시 연결 고정으로 돌아갔다"
+    assert src.count('"finGubun": FIN_GUBUN') == 2

@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
@@ -470,3 +470,109 @@ def test_cancelling_a_finished_turn_falls_back_to_the_repository() -> None:
     ManualTurnThread.run_all()
 
     assert harness.runner.cancel(turn.turn_id).status is TurnStatus.FAILED
+
+
+class _ObservingSessionRepository(InMemoryChatSessionRepository):
+    """`update_turn`이 도는 **그 순간** 러너가 뭐라고 답하는지 적어 두는 저장소.
+
+    `_finish`의 두 동작(종료 상태 저장, 슬롯 해제) 사이 창을 밖에서 들여다볼 방법이 이것뿐이다.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.observe: Callable[[], tuple[Turn | None, bool]] | None = None
+        self.observations: list[tuple[Turn | None, bool, Turn]] = []
+
+    def update_turn(self, turn: Turn) -> Turn:
+        if self.observe is not None:
+            occupied, settled = self.observe()
+            self.observations.append((occupied, settled, turn))
+        return super().update_turn(turn)
+
+
+def test_the_final_state_is_stored_before_the_session_slot_is_released() -> None:
+    """슬롯을 먼저 풀면 "레지스트리에 없는데 저장 행은 아직 RUNNING"인 창이 생긴다.
+
+    그 창에서 `POST /sessions/{id}/turns/{turn_id}/cancel`은 이미 끝난 턴을 RUNNING으로
+    답하고, 이력도 같은 거짓을 말한다. 클라이언트는 그 말을 믿고 스트림을 열려다 409를 받는다
+    (A-02 2차 리뷰가 A-04로 넘긴 확인 항목). 저장이 먼저면 창의 방향이 "아직 바쁘다" 쪽이라
+    안전하다.
+    """
+    sessions = _ObservingSessionRepository()
+    harness = _harness((TextDelta("안녕"), Done("end_turn")), sessions=sessions)
+    turn = harness.runner.start(harness.session.session_id, "질문", CONTEXT)
+    sessions.observe = lambda: (
+        harness.runner.occupied_turn(harness.session.session_id),
+        harness.runner.is_settled(turn.turn_id),
+    )
+
+    ManualTurnThread.run_all()
+
+    occupied, settled, written = sessions.observations[-1]
+    assert written.status is TurnStatus.COMPLETED
+    # 저장이 도는 동안 슬롯은 아직 잡혀 있고, 조회는 이미 최종 상태를 말한다.
+    assert occupied is not None
+    assert occupied.turn_id == turn.turn_id
+    assert occupied.status is TurnStatus.COMPLETED
+    assert settled is False
+    # 저장이 끝난 뒤에야 슬롯이 풀린다.
+    assert harness.runner.occupied_turn(harness.session.session_id) is None
+    assert harness.runner.is_settled(turn.turn_id) is True
+    assert harness.runner.state(turn.turn_id).status is TurnStatus.COMPLETED
+
+
+def test_the_slot_is_released_even_when_storing_the_final_state_fails() -> None:
+    """저장 실패가 슬롯을 영원히 잡아 두면 그 세션은 재시작 전까지 새 턴을 못 연다."""
+
+    class _RefusingRepository(InMemoryChatSessionRepository):
+        def update_turn(self, turn: Turn) -> Turn:
+            if turn.status is not TurnStatus.RUNNING:
+                raise RuntimeError("storage is down")
+            return super().update_turn(turn)
+
+    sessions = _RefusingRepository()
+    harness = _harness((TextDelta("안녕"), Done("end_turn")), sessions=sessions)
+    turn = harness.runner.start(harness.session.session_id, "질문", CONTEXT)
+
+    ManualTurnThread.run_all()
+
+    assert harness.runner.occupied_turn(harness.session.session_id) is None
+    assert harness.runner.is_settled(turn.turn_id) is True
+
+
+def test_every_registry_query_reports_the_same_status_after_a_timeout() -> None:
+    """`_expire`가 사유만 확정하고 `entry.turn`은 그대로 두는 창을 본다.
+
+    `_occupied_turn`이 `view()`가 아니라 `entry.turn`을 돌려주면, 그 창에서 이 함수만 RUNNING을
+    답하고 `state`·`turns`·`is_settled`는 FAILED를 답한다. 오늘 두 호출자가 `turn_id`만 읽어
+    무해할 뿐이고, 같은 레지스트리를 읽는 함수끼리 진실이 갈리면 다음 호출자가 조용히 틀린다.
+    """
+    observations: list[tuple[TurnStatus, TurnStatus]] = []
+
+    class _WatchingRepository(InMemoryChatSessionRepository):
+        def append_events(self, turn_id: str, events: Sequence[ChatEvent]) -> tuple[int, ...]:
+            sequences = super().append_events(turn_id, events)
+            if any(isinstance(event, Failure) for event in events):
+                # 종료 사유가 오가는 구간. `_expire`가 `decided`를 세운 뒤이고 `_finish` 전이다.
+                occupied = harness.runner.occupied_turn(harness.session.session_id)
+                assert occupied is not None
+                observations.append(
+                    (occupied.status, harness.runner.state(occupied.turn_id).status)
+                )
+            return sequences
+
+    harness = _harness(
+        (TextDelta("한"), TextDelta("참"), Done("end_turn")),
+        timeout_seconds=5.0,
+        clock_step=4.0,
+        sessions=_WatchingRepository(),
+    )
+    harness.runner.start(harness.session.session_id, "질문", CONTEXT)
+
+    ManualTurnThread.run_all()
+
+    # 두 조회가 언제 보든 같은 답을 해야 한다.
+    assert observations
+    assert all(occupied is state for occupied, state in observations)
+    # 그리고 그중 한 번은 `decided`가 세워진 뒤라 RUNNING이 아니다 — 창을 실제로 지나갔다는 증거.
+    assert TurnStatus.FAILED in [occupied for occupied, _ in observations]

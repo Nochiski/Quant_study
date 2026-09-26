@@ -70,6 +70,15 @@ class ChatSessionRepository(Protocol):
         """없으면 `TurnNotFoundError`."""
         ...
 
+    def turns(self, session_id: str) -> tuple[Turn, ...]:
+        """세션의 턴 전부를 시작 순서대로. 모르는 세션이면 `ChatSessionNotFoundError`.
+
+        이력 화면이 "이 턴은 왜 끝났나"를 이벤트만으로 알 수 없기 때문에 필요하다. 취소가 첫
+        이벤트보다 먼저 도착한 턴은 이벤트가 하나도 없이 CANCELLED로 끝나므로, 이벤트 목록에서
+        turn_id를 모아 역산하면 그 턴이 이력에서 통째로 사라진다.
+        """
+        ...
+
     def append_events(self, turn_id: str, events: Sequence[ChatEvent]) -> tuple[int, ...]:
         """이벤트를 저장하고 부여한 sequence를 순서대로 돌려준다.
 

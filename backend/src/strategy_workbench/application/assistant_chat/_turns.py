@@ -221,6 +221,41 @@ class AssistantTurnRunner:
                 return entry.view()
         return self._sessions.get_turn(turn_id)
 
+    def occupied_turn(self, session_id: str) -> Turn | None:
+        """이 세션의 슬롯을 잡고 있는 턴, 없으면 `None`.
+
+        판정 기준은 `start`와 같은 **레지스트리 존재**다. 취소 신호를 받은 턴도 스레드가
+        `_finish`에 닿기 전까지는 여기에 잡히고, 그동안 adapter가 마무리 이벤트를 더 낼 수
+        있다. 이벤트 스트림을 여는 쪽이 물어보는 것이 바로 그 질문이다 — "이 세션에 이벤트가
+        더 나올 턴이 있는가".
+
+        저장소는 보지 않는다. 저장소의 RUNNING 행은 이전 프로세스가 남긴 것일 수 있고, 그
+        턴은 더 이상 돌지 않는다.
+        """
+        with self._lock:
+            return self._occupied_turn(session_id)
+
+    def is_settled(self, turn_id: str) -> bool:
+        """이 턴에 이벤트가 더 붙을 수 있는지. 레지스트리에서 빠졌으면 끝났다.
+
+        종료 **상태**로는 이 질문에 답할 수 없다. 취소는 스레드가 신호를 읽기 전에 턴을
+        CANCELLED로 기록하므로, 상태만 보고 스트림을 닫으면 adapter가 마무리로 내는 이벤트를
+        클라이언트가 못 받는다. 슬롯이 풀리는 시점(`_finish`)은 모든 append 다음이다.
+        """
+        with self._lock:
+            return turn_id not in self._running
+
+    def turns(self, session_id: str) -> tuple[Turn, ...]:
+        """세션의 턴 이력. 슬롯을 잡고 있는 턴은 레지스트리의 최신 상태로 덮어 준다.
+
+        저장소 행의 상태는 `_finish`에서 마지막으로 갱신되므로, 러너가 먼저 확정한 사유(취소·
+        타임아웃)는 그 사이 이력 조회에 아직 보이지 않는다. `view()`가 그 확정을 반영한다.
+        """
+        stored = self._sessions.turns(session_id)
+        with self._lock:
+            live = {turn_id: entry.view() for turn_id, entry in self._running.items()}
+        return tuple(live.get(turn.turn_id, turn) for turn in stored)
+
     def events(self, session_id: str, *, after_sequence: int = -1) -> tuple[SequencedEvent, ...]:
         """세션 이벤트를 sequence 순으로. 모르는 세션은 빈 목록이 아니라 예외로 답한다.
 
@@ -340,14 +375,32 @@ class AssistantTurnRunner:
             entry.decided = status
 
     def _finish(self, turn_id: str, status: TurnStatus) -> None:
-        """슬롯을 풀고 종료 상태를 기록한다. 기록이 실패해도 슬롯은 이미 풀려 있다."""
+        """종료 상태를 확정·기록하고 **그다음에** 슬롯을 푼다. 기록이 실패해도 슬롯은 풀린다.
+
+        순서가 계약이다. pop을 먼저 하면 "레지스트리에는 없는데 저장된 행은 아직 RUNNING"인
+        창이 생기고, 그 창에서 조회가 거짓을 말한다 — 취소 응답과 이력이 이미 끝난 턴을
+        RUNNING으로 보여 주고, 클라이언트는 그 말을 믿고 스트림을 열려다 409를 받는다
+        (A-02 2차 리뷰가 A-04로 넘긴 확인 항목).
+
+        반대 순서에도 창은 있지만 방향이 안전하다. 기록은 끝났는데 슬롯이 아직 잡혀 있는
+        동안 `occupied_turn`은 그 턴을, `is_settled`는 거짓을 답한다. 즉 "아직 바쁘다"
+        쪽으로 틀리므로 새 턴은 409로 잠깐 미뤄지고 스트림은 한 번 더 폴링할 뿐이다. 잃는
+        이벤트도, 뒤집히는 판정도 없다.
+
+        그 창에서도 `state()`·`turns()`가 최종 상태를 말하도록 레지스트리 항목을 먼저
+        갱신한다. 그러지 않으면 정상 종료(`decided`가 없는 COMPLETED)가 `view()`에서 여전히
+        RUNNING으로 보인다.
+        """
         with self._lock:
-            entry = self._running.pop(turn_id, None)
-        if entry is None:
-            return
-        final = entry.decided or status
+            entry = self._running.get(turn_id)
+            if entry is None:
+                return
+            final = entry.decided or status
+            settled = _with_status(entry.turn, final, finished_at=self._now())
+            entry.decided = final
+            entry.turn = settled
         try:
-            self._sessions.update_turn(_with_status(entry.turn, final, finished_at=self._now()))
+            self._sessions.update_turn(settled)
         except Exception as error:
             logger.warning(
                 "could not persist the final turn state — turn_id=%s status=%s error_type=%s",
@@ -355,12 +408,23 @@ class AssistantTurnRunner:
                 final.value,
                 type(error).__name__,
             )
+        finally:
+            # 저장이 실패해도 슬롯은 반드시 푼다. 안 풀면 그 세션은 재시작 전까지 새 턴을
+            # 시작할 수 없다(점유 판정이 레지스트리 존재 기준이므로).
+            with self._lock:
+                self._running.pop(turn_id, None)
 
     def _occupied_turn(self, session_id: str) -> Turn | None:
-        """그 세션의 슬롯을 잡고 있는 턴. 취소 신호를 받았어도 스레드가 돌면 여전히 점유 중이다."""
+        """그 세션의 슬롯을 잡고 있는 턴. 취소 신호를 받았어도 스레드가 돌면 여전히 점유 중이다.
+
+        `state`·`turns`·`is_settled`와 같은 `view()` 기준으로 답한다. `entry.turn`을 그대로
+        돌려주면 `_expire`가 `decided`만 세우고 `entry.turn`은 그대로 두는 창에서 이 함수만
+        RUNNING을, 나머지는 FAILED를 말한다. 오늘은 두 호출자가 `turn_id`만 읽어 무해하지만,
+        같은 레지스트리를 읽는 함수끼리 진실이 갈리면 다음 호출자가 조용히 틀린다.
+        """
         for entry in self._running.values():
             if entry.turn.session_id == session_id:
-                return entry.turn
+                return entry.view()
         return None
 
 

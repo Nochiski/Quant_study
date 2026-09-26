@@ -182,6 +182,10 @@ application이 선언하는 도구(v1). 모든 스키마는 `additionalPropertie
   정하고 **집행은 토큰 예산과 같이 adapter(루프 주인)가 한다.** 서비스는 라운드를 세지 않는다.
 - `propose_strategy`가 3회 연속 검증에 실패하면 `Failure(PROPOSAL_INVALID)`로 끝낸다. 제안 없이 루프가
   자연 종료되면 `Done("end_turn")`이고 화면은 "제안 없이 답변만"으로 보인다.
+- **`Done`은 공급자 스트림이 끝났다는 표시일 뿐 턴 종료 판정이 아니다.** 턴이 끝났는지는 저장된 턴 상태
+  (`COMPLETED`/`FAILED`/`CANCELLED`)가 말하며, 도구가 세운 종료 사유는 손에 든 이벤트를 내보낸 뒤에
+  적용되므로 `Done` 뒤에 `Failure`가 올 수 있다. 소비자(SSE 스트림, frontend 리듀서)는 `Done`을 받았다고
+  스트림을 닫거나 턴을 완료로 표시하지 않는다.
 - 턴당 벽시계 타임아웃(기본 300초) 초과는 `Failure(TIMEOUT)`. 검색 `max_search_uses`(기본 8)와
   호출당 `max_output_tokens_per_call`(기본 16000)은 `TurnRequest`로 adapter에 전달된다.
 - 토큰 예산은 턴 단위이며 **집행은 adapter가 한다**(루프의 주인이 adapter이고 `TurnRequest`는 루프 시작 전에

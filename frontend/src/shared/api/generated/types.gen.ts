@@ -46,6 +46,264 @@ export type ApplicableWhen = {
 };
 
 /**
+ * Assistant409Response
+ */
+export type Assistant409Response = {
+  /**
+   * Detail
+   */
+  detail:
+    | ({
+        code: "assistant.turn_in_progress";
+      } & AssistantTurnInProgressDetail)
+    | ({
+        code: "assistant.no_running_turn";
+      } & AssistantNoRunningTurnDetail);
+};
+
+/**
+ * AssistantBaseUrlRejectedDetail
+ */
+export type AssistantBaseUrlRejectedDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.base_url_rejected";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * AssistantDocumentRefInvalidDetail
+ *
+ * `document_ref`가 "저장된 전략과 초안 중 정확히 하나" 규칙을 어겼다.
+ *
+ * spec D6이 적어 둔 네 코드 밖이지만, 세션 목록 조회는 사이드바가 열릴 때마다 타는 경로라
+ * 비거나 둘 다 채워진 참조가 실전에서 들어온다. 규칙을 판정하는 곳은 application의
+ * `DocumentRef`이고 여기서는 그 거절을 옮기기만 한다.
+ */
+export type AssistantDocumentRefInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.document_ref_invalid";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * AssistantEventEnvelopeView
+ *
+ * SSE 프레임 하나의 payload. `sequence`는 `id:` 줄과 같은 값이다.
+ */
+export type AssistantEventEnvelopeView = {
+  /**
+   * Event
+   */
+  event:
+    | ({
+        type: "text_delta";
+      } & TextDeltaView)
+    | ({
+        type: "thinking_summary";
+      } & ThinkingSummaryView)
+    | ({
+        type: "tool_call";
+      } & ToolCallView)
+    | ({
+        type: "tool_result";
+      } & ToolResultSummaryView)
+    | ({
+        type: "search_activity";
+      } & SearchActivityView)
+    | ({
+        type: "proposal";
+      } & ProposalView)
+    | ({
+        type: "usage";
+      } & UsageView)
+    | ({
+        type: "done";
+      } & DoneView)
+    | ({
+        type: "failure";
+      } & FailureView);
+  /**
+   * Sequence
+   */
+  sequence: number;
+  /**
+   * Turn Id
+   */
+  turn_id: string;
+};
+
+/**
+ * AssistantNoActiveProviderDetail
+ */
+export type AssistantNoActiveProviderDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.no_active_provider";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * AssistantNoRunningTurnDetail
+ */
+export type AssistantNoRunningTurnDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.no_running_turn";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * AssistantNotFoundDetail
+ */
+export type AssistantNotFoundDetail = {
+  /**
+   * Code
+   */
+  code:
+    | "assistant.session.not_found"
+    | "assistant.turn.not_found"
+    | "assistant.provider.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * AssistantNotFoundResponse
+ */
+export type AssistantNotFoundResponse = {
+  detail: AssistantNotFoundDetail;
+};
+
+/**
+ * AssistantProbeFailedDetail
+ *
+ * 연결 테스트 실패. `message`는 `failure` 열거값이 정하는 고정 문구뿐이다.
+ *
+ * SDK 예외 문자열을 넣지 않는 것이 핵심이다. 공급자 인증 오류 본문은 키 조각을 그대로 담는
+ * 일이 흔하고, 이 응답은 설정 화면에 그대로 뿌려진다(spec D2).
+ */
+export type AssistantProbeFailedDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.probe_failed";
+  failure: ProbeFailure;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * AssistantProviderNotInstalledDetail
+ */
+export type AssistantProviderNotInstalledDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.provider_not_installed";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * AssistantSecretMissingDetail
+ *
+ * 프로파일은 있는데 키 파일에 그 키가 없다.
+ *
+ * spec D6이 적어 둔 네 코드 밖이지만, 이 상태는 사용자가 키 파일을 지우거나 다른 기기에서
+ * DB만 복사해 오면 실제로 생긴다. 500으로 떨어뜨리면 화면이 "알 수 없는 오류"만 보여 주고,
+ * 다른 코드로 뭉개면 "키를 다시 넣으세요"라는 조치를 안내할 수 없다.
+ */
+export type AssistantSecretMissingDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.provider_secret_missing";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * AssistantTurnInProgressDetail
+ *
+ * 세션에 이미 도는 턴이 있다.
+ *
+ * `turn_id`는 **조회 시점에 이미 종료 상태일 수 있다.** 러너는 종료 상태를 저장한 뒤에
+ * 세션 슬롯을 풀기 때문에, 그 짧은 창에 도착한 시작 요청이 방금 끝난 턴의 id를 받는다.
+ * 오차 방향을 "아직 바쁘다" 쪽으로 고정한 결과이므로, 이 409는 영구 거절이 아니라 잠깐
+ * 뒤 다시 시도하면 되는 충돌이다.
+ */
+export type AssistantTurnInProgressDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.turn_in_progress";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Turn Id
+   *
+   * 충돌한 턴. 조회 시점에 이미 종료 상태일 수 있으므로 짧게 재시도한다.
+   */
+  turn_id: string;
+};
+
+/**
+ * AssistantUnprocessableResponse
+ */
+export type AssistantUnprocessableResponse = {
+  /**
+   * Detail
+   */
+  detail:
+    | ({
+        code: "assistant.provider_not_installed";
+      } & AssistantProviderNotInstalledDetail)
+    | ({
+        code: "assistant.no_active_provider";
+      } & AssistantNoActiveProviderDetail)
+    | ({
+        code: "assistant.probe_failed";
+      } & AssistantProbeFailedDetail)
+    | ({
+        code: "assistant.base_url_rejected";
+      } & AssistantBaseUrlRejectedDetail)
+    | ({
+        code: "assistant.provider_secret_missing";
+      } & AssistantSecretMissingDetail)
+    | ({
+        code: "assistant.document_ref_invalid";
+      } & AssistantDocumentRefInvalidDetail);
+};
+
+/**
  * BacktestResultNotReadyDetail
  */
 export type BacktestResultNotReadyDetail = {
@@ -410,6 +668,26 @@ export type CellKind =
   | "coverage_gap";
 
 /**
+ * ChatMessageView
+ */
+export type ChatMessageView = {
+  /**
+   * Created At
+   */
+  created_at: string;
+  role: ChatRole;
+  /**
+   * Text
+   */
+  text: string;
+};
+
+/**
+ * ChatRole
+ */
+export type ChatRole = "user" | "assistant";
+
+/**
  * ChoiceParameter
  */
 export type ChoiceParameter = {
@@ -540,6 +818,38 @@ export type ConstantNode = {
    * Value
    */
   value: number;
+};
+
+/**
+ * CreateProviderProfileRequest
+ *
+ * 프로파일 생성 요청. `secret`은 이 방향으로만 흐른다.
+ */
+export type CreateProviderProfileRequest = {
+  /**
+   * Base Url
+   */
+  base_url?: string | null;
+  kind: ProviderKind;
+  /**
+   * Label
+   */
+  label: string;
+  /**
+   * Model
+   */
+  model?: string | null;
+};
+
+/**
+ * CreateSessionRequest
+ */
+export type CreateSessionRequest = {
+  document_ref: DocumentRefView;
+  /**
+   * Title
+   */
+  title?: string;
 };
 
 /**
@@ -756,6 +1066,40 @@ export type DiffEntry = {
  * DiffKind
  */
 export type DiffKind = "added" | "removed" | "changed";
+
+/**
+ * DocumentRefView
+ *
+ * 세션이 붙은 문서. 저장된 전략과 초안 중 정확히 하나다(application이 검증한다).
+ */
+export type DocumentRefView = {
+  /**
+   * Draft Id
+   */
+  draft_id?: string | null;
+  /**
+   * Revision
+   */
+  revision?: number | null;
+  /**
+   * Strategy Id
+   */
+  strategy_id?: string | null;
+};
+
+/**
+ * DoneView
+ */
+export type DoneView = {
+  /**
+   * Stop Reason
+   */
+  stop_reason: string;
+  /**
+   * Type
+   */
+  type: "done";
+};
 
 /**
  * DrawdownPoint
@@ -1446,6 +1790,43 @@ export type FactorValue = {
    * Value
    */
   value: number | null;
+};
+
+/**
+ * FailureCode
+ *
+ * 턴이 정상 종료하지 못한 사유.
+ *
+ * `Failure.message`는 이 코드별 고정 문장에 진단 컨텍스트만 붙인다. SDK 예외 문자열·응답 본문을
+ * 그대로 넣지 않는다(spec D2: 비밀 스크럽). 예외는 코드로만 매핑한다.
+ */
+export type FailureCode =
+  | "auth"
+  | "rate_limit"
+  | "network"
+  | "refusal"
+  | "provider"
+  | "internal"
+  | "tool_rounds_exceeded"
+  | "timeout"
+  | "cancelled"
+  | "proposal_invalid"
+  | "output_truncated"
+  | "token_budget_exceeded";
+
+/**
+ * FailureView
+ */
+export type FailureView = {
+  code: FailureCode;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Type
+   */
+  type: "failure";
 };
 
 /**
@@ -2245,6 +2626,163 @@ export type PortfolioUnprocessableResponse = {
     | ({
         code: "portfolio.raw_observation.invalid";
       } & PortfolioRawObservationInvalidDetail);
+};
+
+/**
+ * ProbeFailure
+ *
+ * 연결 테스트가 실패한 사유.
+ *
+ * 화면이 "키를 확인하세요"와 "잠시 후 다시"를 구분하려면 필요하다.
+ */
+export type ProbeFailure =
+  "auth" | "model_not_found" | "network" | "rate_limit" | "unknown";
+
+/**
+ * ProbeResultView
+ *
+ * 연결 테스트 결과. `message`는 `failure`에서 유도된 고정 문구다(spec D2).
+ */
+export type ProbeResultView = {
+  failure: ProbeFailure | null;
+  /**
+   * Latency Ms
+   */
+  latency_ms: number | null;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Ok
+   */
+  ok: boolean;
+};
+
+/**
+ * ProposalCompileView
+ */
+export type ProposalCompileView = {
+  /**
+   * Diagnostics
+   */
+  diagnostics: Array<ProposalDiagnosticView>;
+  /**
+   * Ok
+   */
+  ok: boolean;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string | null;
+};
+
+/**
+ * ProposalDiagnosticView
+ */
+export type ProposalDiagnosticView = {
+  /**
+   * Code
+   */
+  code: string;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Pointer
+   */
+  pointer: string;
+  /**
+   * Severity
+   */
+  severity: string;
+};
+
+/**
+ * ProposalView
+ */
+export type ProposalView = {
+  proposal: StrategyProposalView;
+  /**
+   * Type
+   */
+  type: "proposal";
+};
+
+/**
+ * ProviderKind
+ *
+ * 지원 공급자. 값은 저장·전송 계약이므로 화면 이름(Claude/Codex)과 분리한다.
+ */
+export type ProviderKind = "anthropic" | "openai";
+
+/**
+ * ProviderKindView
+ *
+ * 설정 화면이 "설치 필요"를 그리는 데 필요한 사실.
+ */
+export type ProviderKindView = {
+  /**
+   * Default Model
+   */
+  default_model: string | null;
+  /**
+   * Installed
+   */
+  installed: boolean;
+  kind: ProviderKind;
+};
+
+/**
+ * ProviderProfileView
+ *
+ * 저장된 프로파일 하나. 키 자리에는 꼬리 4자리뿐이고, 짧은 키는 그마저 `null`이다.
+ */
+export type ProviderProfileView = {
+  /**
+   * Active
+   */
+  active: boolean;
+  /**
+   * Base Url
+   */
+  base_url: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  kind: ProviderKind;
+  /**
+   * Label
+   */
+  label: string;
+  /**
+   * Model
+   */
+  model: string;
+  /**
+   * Profile Id
+   */
+  profile_id: string;
+  /**
+   * Secret Tail
+   */
+  secret_tail: string | null;
+};
+
+/**
+ * ProvidersView
+ */
+export type ProvidersView = {
+  /**
+   * Kinds
+   */
+  kinds: Array<ProviderKindView>;
+  /**
+   * Profiles
+   */
+  profiles: Array<ProviderProfileView>;
 };
 
 /**
@@ -3115,6 +3653,24 @@ export type SavedSubgraphNode = {
 };
 
 /**
+ * SearchActivityView
+ */
+export type SearchActivityView = {
+  /**
+   * Query
+   */
+  query: string;
+  /**
+   * Sources
+   */
+  sources: Array<SourceView>;
+  /**
+   * Type
+   */
+  type: "search_activity";
+};
+
+/**
  * SecurityRef
  */
 export type SecurityRef = {
@@ -3140,6 +3696,53 @@ export type SecurityRef = {
  * SelectionMethod
  */
 export type SelectionMethod = "top_n" | "percentile";
+
+/**
+ * SessionHistoryView
+ *
+ * 사이드바가 새로 열릴 때 한 번에 복구하는 이력.
+ *
+ * 이벤트를 함께 싣는 이유는 spec D7의 복구 규칙 때문이다. 스트림을 열기도 전에 끝난 턴은
+ * `GET /sessions/{id}/events`가 409로 거절하므로, 그 턴의 이벤트를 볼 통로가 여기뿐이다.
+ */
+export type SessionHistoryView = {
+  /**
+   * Events
+   */
+  events: Array<AssistantEventEnvelopeView>;
+  /**
+   * Messages
+   */
+  messages: Array<ChatMessageView>;
+  session: SessionView;
+  /**
+   * Turns
+   */
+  turns: Array<TurnView>;
+};
+
+/**
+ * SessionView
+ */
+export type SessionView = {
+  /**
+   * Created At
+   */
+  created_at: string;
+  document_ref: DocumentRefView;
+  /**
+   * Provider Profile Id
+   */
+  provider_profile_id: string;
+  /**
+   * Session Id
+   */
+  session_id: string;
+  /**
+   * Title
+   */
+  title: string;
+};
 
 /**
  * SignalStep
@@ -3224,6 +3827,31 @@ export type SourcePosition = {
 export type SourceRange = {
   end: SourcePosition;
   start: SourcePosition;
+};
+
+/**
+ * SourceView
+ */
+export type SourceView = {
+  /**
+   * Title
+   */
+  title: string;
+  /**
+   * Url
+   */
+  url: string;
+};
+
+/**
+ * StartTurnRequest
+ */
+export type StartTurnRequest = {
+  context: TurnContextPayload;
+  /**
+   * Text
+   */
+  text: string;
 };
 
 /**
@@ -3582,6 +4210,37 @@ export type StrategyIdentity = {
    * Strategy Id
    */
   strategy_id: string;
+};
+
+/**
+ * StrategyProposalView
+ */
+export type StrategyProposalView = {
+  compile: ProposalCompileView;
+  /**
+   * Rationale
+   */
+  rationale: string;
+  /**
+   * Source Format
+   */
+  source_format: "yaml";
+  /**
+   * Source Text
+   */
+  source_text: string;
+  /**
+   * Sources
+   */
+  sources: Array<SourceView>;
+  /**
+   * Summary
+   */
+  summary: string;
+  /**
+   * Title
+   */
+  title: string;
 };
 
 /**
@@ -3982,6 +4641,34 @@ export type TargetTape = {
 };
 
 /**
+ * TextDeltaView
+ */
+export type TextDeltaView = {
+  /**
+   * Text
+   */
+  text: string;
+  /**
+   * Type
+   */
+  type: "text_delta";
+};
+
+/**
+ * ThinkingSummaryView
+ */
+export type ThinkingSummaryView = {
+  /**
+   * Text
+   */
+  text: string;
+  /**
+   * Type
+   */
+  type: "thinking_summary";
+};
+
+/**
  * TimeSeriesNode
  */
 export type TimeSeriesNode = {
@@ -4013,6 +4700,56 @@ export type TimeSeriesNode = {
  */
 export type TimeSeriesOperator =
   "mean" | "std" | "momentum" | "delta" | "min" | "max";
+
+/**
+ * ToolCallView
+ */
+export type ToolCallView = {
+  /**
+   * Arguments
+   */
+  arguments: {
+    [key: string]: unknown;
+  };
+  /**
+   * Call Id
+   */
+  call_id: string;
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Type
+   */
+  type: "tool_call";
+};
+
+/**
+ * ToolResultSummaryView
+ */
+export type ToolResultSummaryView = {
+  /**
+   * Call Id
+   */
+  call_id: string;
+  /**
+   * Name
+   */
+  name: string;
+  /**
+   * Ok
+   */
+  ok: boolean;
+  /**
+   * Summary
+   */
+  summary: string;
+  /**
+   * Type
+   */
+  type: "tool_result";
+};
 
 /**
  * TraceCancelledDetail
@@ -4177,6 +4914,91 @@ export type TraceValueStatus =
   | "reference_missing";
 
 /**
+ * TurnAcceptedView
+ *
+ * 202 응답. `accepted_sequence`를 그대로 `after_sequence`로 써서 스트림을 연다.
+ */
+export type TurnAcceptedView = {
+  /**
+   * Accepted Sequence
+   */
+  accepted_sequence: number;
+  /**
+   * Session Id
+   */
+  session_id: string;
+  /**
+   * Started At
+   */
+  started_at: string;
+  status: TurnStatus;
+  /**
+   * Turn Id
+   */
+  turn_id: string;
+};
+
+/**
+ * TurnContextPayload
+ *
+ * 한 턴이 보는 문서 상태. 서버가 문서를 들지 않으므로 요청마다 실려 온다(spec D7).
+ */
+export type TurnContextPayload = {
+  /**
+   * Diagnostics
+   */
+  diagnostics?: Array<string>;
+  /**
+   * Environment
+   */
+  environment?: {
+    [key: string]: unknown;
+  } | null;
+  /**
+   * Source Format
+   */
+  source_format?: string;
+  /**
+   * Source Text
+   */
+  source_text: string;
+};
+
+/**
+ * TurnStatus
+ *
+ * 진행 중 턴의 영속 상태. 종료 상태 세 개는 다시 바뀌지 않는다.
+ */
+export type TurnStatus = "running" | "completed" | "failed" | "cancelled";
+
+/**
+ * TurnView
+ */
+export type TurnView = {
+  /**
+   * Accepted Sequence
+   */
+  accepted_sequence: number;
+  /**
+   * Finished At
+   */
+  finished_at: string | null;
+  /**
+   * Session Id
+   */
+  session_id: string;
+  /**
+   * Started At
+   */
+  started_at: string;
+  status: TurnStatus;
+  /**
+   * Turn Id
+   */
+  turn_id: string;
+};
+
+/**
  * UnaryNode
  */
 export type UnaryNode = {
@@ -4321,6 +5143,24 @@ export type UpgradedDocument = {
 };
 
 /**
+ * UsageView
+ */
+export type UsageView = {
+  /**
+   * Input Tokens
+   */
+  input_tokens: number;
+  /**
+   * Output Tokens
+   */
+  output_tokens: number;
+  /**
+   * Type
+   */
+  type: "usage";
+};
+
+/**
  * ValidationError
  */
 export type ValidationError = {
@@ -4391,6 +5231,431 @@ export type WarningSeverity = "info" | "warning";
  * WeightingMethod
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
+
+/**
+ * CreateProviderProfileRequest
+ *
+ * 프로파일 생성 요청. `secret`은 이 방향으로만 흐른다.
+ */
+export type CreateProviderProfileRequestWritable = {
+  /**
+   * Base Url
+   */
+  base_url?: string | null;
+  kind: ProviderKind;
+  /**
+   * Label
+   */
+  label: string;
+  /**
+   * Model
+   */
+  model?: string | null;
+  /**
+   * Secret
+   *
+   * 공급자 API 키. 요청 전용이며 어떤 응답에도 실리지 않는다.
+   */
+  secret: string;
+};
+
+export type ListAssistantProvidersData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: "/api/v1/assistant/providers";
+};
+
+export type ListAssistantProvidersResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProvidersView;
+};
+
+export type ListAssistantProvidersResponse =
+  ListAssistantProvidersResponses[keyof ListAssistantProvidersResponses];
+
+export type CreateAssistantProviderData = {
+  body: CreateProviderProfileRequestWritable;
+  path?: never;
+  query?: never;
+  url: "/api/v1/assistant/providers";
+};
+
+export type CreateAssistantProviderErrors = {
+  /**
+   * Response 422 Createassistantprovider
+   *
+   * A coded assistant rejection or a malformed request envelope
+   */
+  422: AssistantUnprocessableResponse | RequestValidationResponse;
+};
+
+export type CreateAssistantProviderError =
+  CreateAssistantProviderErrors[keyof CreateAssistantProviderErrors];
+
+export type CreateAssistantProviderResponses = {
+  /**
+   * Successful Response
+   */
+  201: ProviderProfileView;
+};
+
+export type CreateAssistantProviderResponse =
+  CreateAssistantProviderResponses[keyof CreateAssistantProviderResponses];
+
+export type DeleteAssistantProviderData = {
+  body?: never;
+  path: {
+    /**
+     * Profile Id
+     */
+    profile_id: string;
+  };
+  query?: never;
+  url: "/api/v1/assistant/providers/{profile_id}";
+};
+
+export type DeleteAssistantProviderErrors = {
+  /**
+   * The session, turn or provider profile does not exist
+   */
+  404: AssistantNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type DeleteAssistantProviderError =
+  DeleteAssistantProviderErrors[keyof DeleteAssistantProviderErrors];
+
+export type DeleteAssistantProviderResponses = {
+  /**
+   * Successful Response
+   */
+  204: void;
+};
+
+export type DeleteAssistantProviderResponse =
+  DeleteAssistantProviderResponses[keyof DeleteAssistantProviderResponses];
+
+export type ActivateAssistantProviderData = {
+  body?: never;
+  path: {
+    /**
+     * Profile Id
+     */
+    profile_id: string;
+  };
+  query?: never;
+  url: "/api/v1/assistant/providers/{profile_id}/activate";
+};
+
+export type ActivateAssistantProviderErrors = {
+  /**
+   * The session, turn or provider profile does not exist
+   */
+  404: AssistantNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ActivateAssistantProviderError =
+  ActivateAssistantProviderErrors[keyof ActivateAssistantProviderErrors];
+
+export type ActivateAssistantProviderResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProviderProfileView;
+};
+
+export type ActivateAssistantProviderResponse =
+  ActivateAssistantProviderResponses[keyof ActivateAssistantProviderResponses];
+
+export type TestAssistantProviderData = {
+  body?: never;
+  path: {
+    /**
+     * Profile Id
+     */
+    profile_id: string;
+  };
+  query?: never;
+  url: "/api/v1/assistant/providers/{profile_id}/test";
+};
+
+export type TestAssistantProviderErrors = {
+  /**
+   * The session, turn or provider profile does not exist
+   */
+  404: AssistantNotFoundResponse;
+  /**
+   * Response 422 Testassistantprovider
+   *
+   * A coded assistant rejection or a malformed request envelope
+   */
+  422: AssistantUnprocessableResponse | RequestValidationResponse;
+};
+
+export type TestAssistantProviderError =
+  TestAssistantProviderErrors[keyof TestAssistantProviderErrors];
+
+export type TestAssistantProviderResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProbeResultView;
+};
+
+export type TestAssistantProviderResponse =
+  TestAssistantProviderResponses[keyof TestAssistantProviderResponses];
+
+export type ListAssistantSessionsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * Strategy Id
+     */
+    strategy_id?: string | null;
+    /**
+     * Revision
+     */
+    revision?: number | null;
+    /**
+     * Draft Id
+     */
+    draft_id?: string | null;
+  };
+  url: "/api/v1/assistant/sessions";
+};
+
+export type ListAssistantSessionsErrors = {
+  /**
+   * Response 422 Listassistantsessions
+   *
+   * A coded assistant rejection or a malformed request envelope
+   */
+  422: AssistantUnprocessableResponse | RequestValidationResponse;
+};
+
+export type ListAssistantSessionsError =
+  ListAssistantSessionsErrors[keyof ListAssistantSessionsErrors];
+
+export type ListAssistantSessionsResponses = {
+  /**
+   * Response Listassistantsessions
+   *
+   * Successful Response
+   */
+  200: Array<SessionView>;
+};
+
+export type ListAssistantSessionsResponse =
+  ListAssistantSessionsResponses[keyof ListAssistantSessionsResponses];
+
+export type CreateAssistantSessionData = {
+  body: CreateSessionRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/assistant/sessions";
+};
+
+export type CreateAssistantSessionErrors = {
+  /**
+   * Response 422 Createassistantsession
+   *
+   * A coded assistant rejection or a malformed request envelope
+   */
+  422: AssistantUnprocessableResponse | RequestValidationResponse;
+};
+
+export type CreateAssistantSessionError =
+  CreateAssistantSessionErrors[keyof CreateAssistantSessionErrors];
+
+export type CreateAssistantSessionResponses = {
+  /**
+   * Successful Response
+   */
+  201: SessionView;
+};
+
+export type CreateAssistantSessionResponse =
+  CreateAssistantSessionResponses[keyof CreateAssistantSessionResponses];
+
+export type GetAssistantSessionData = {
+  body?: never;
+  path: {
+    /**
+     * Session Id
+     */
+    session_id: string;
+  };
+  query?: never;
+  url: "/api/v1/assistant/sessions/{session_id}";
+};
+
+export type GetAssistantSessionErrors = {
+  /**
+   * The session, turn or provider profile does not exist
+   */
+  404: AssistantNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetAssistantSessionError =
+  GetAssistantSessionErrors[keyof GetAssistantSessionErrors];
+
+export type GetAssistantSessionResponses = {
+  /**
+   * Successful Response
+   */
+  200: SessionHistoryView;
+};
+
+export type GetAssistantSessionResponse =
+  GetAssistantSessionResponses[keyof GetAssistantSessionResponses];
+
+export type StreamAssistantEventsData = {
+  body?: never;
+  headers?: {
+    /**
+     * Last-Event-Id
+     */
+    "Last-Event-ID"?: number | null;
+  };
+  path: {
+    /**
+     * Session Id
+     */
+    session_id: string;
+  };
+  query?: {
+    /**
+     * After Sequence
+     */
+    after_sequence?: number;
+  };
+  url: "/api/v1/assistant/sessions/{session_id}/events";
+};
+
+export type StreamAssistantEventsErrors = {
+  /**
+   * The session, turn or provider profile does not exist
+   */
+  404: AssistantNotFoundResponse;
+  /**
+   * A turn is already running, or no turn is running to stream
+   */
+  409: Assistant409Response;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type StreamAssistantEventsError =
+  StreamAssistantEventsErrors[keyof StreamAssistantEventsErrors];
+
+export type StreamAssistantEventsResponses = {
+  /**
+   * Server-sent events. Each frame carries one AssistantEventEnvelopeView as its data, and the frame id repeats that envelope's sequence.
+   */
+  200: AssistantEventEnvelopeView;
+};
+
+export type StreamAssistantEventsResponse =
+  StreamAssistantEventsResponses[keyof StreamAssistantEventsResponses];
+
+export type StartAssistantTurnData = {
+  body: StartTurnRequest;
+  path: {
+    /**
+     * Session Id
+     */
+    session_id: string;
+  };
+  query?: never;
+  url: "/api/v1/assistant/sessions/{session_id}/turns";
+};
+
+export type StartAssistantTurnErrors = {
+  /**
+   * The session, turn or provider profile does not exist
+   */
+  404: AssistantNotFoundResponse;
+  /**
+   * A turn is already running, or no turn is running to stream
+   */
+  409: Assistant409Response;
+  /**
+   * Response 422 Startassistantturn
+   *
+   * A coded assistant rejection or a malformed request envelope
+   */
+  422: AssistantUnprocessableResponse | RequestValidationResponse;
+};
+
+export type StartAssistantTurnError =
+  StartAssistantTurnErrors[keyof StartAssistantTurnErrors];
+
+export type StartAssistantTurnResponses = {
+  /**
+   * Successful Response
+   */
+  202: TurnAcceptedView;
+};
+
+export type StartAssistantTurnResponse =
+  StartAssistantTurnResponses[keyof StartAssistantTurnResponses];
+
+export type CancelAssistantTurnData = {
+  body?: never;
+  path: {
+    /**
+     * Session Id
+     */
+    session_id: string;
+    /**
+     * Turn Id
+     */
+    turn_id: string;
+  };
+  query?: never;
+  url: "/api/v1/assistant/sessions/{session_id}/turns/{turn_id}/cancel";
+};
+
+export type CancelAssistantTurnErrors = {
+  /**
+   * The session, turn or provider profile does not exist
+   */
+  404: AssistantNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CancelAssistantTurnError =
+  CancelAssistantTurnErrors[keyof CancelAssistantTurnErrors];
+
+export type CancelAssistantTurnResponses = {
+  /**
+   * Successful Response
+   */
+  200: TurnView;
+};
+
+export type CancelAssistantTurnResponse =
+  CancelAssistantTurnResponses[keyof CancelAssistantTurnResponses];
 
 export type ListBacktestsData = {
   body?: never;

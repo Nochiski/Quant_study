@@ -170,6 +170,11 @@ class AssistantChatService:
     def list_for_document(self, document_ref: DocumentRef) -> tuple[ChatSession, ...]:
         return self._sessions.list_for_document(document_ref)
 
+    def messages(self, session_id: str) -> tuple[ChatMessage, ...]:
+        """세션의 대화 메시지를 순서대로. 모르는 세션이면 `ChatSessionNotFoundError`."""
+        self._sessions.get(session_id)
+        return self._sessions.messages(session_id)
+
     # -- 턴 -----------------------------------------------------------------------------------
 
     def send(

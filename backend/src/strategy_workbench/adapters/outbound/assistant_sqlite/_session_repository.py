@@ -200,6 +200,19 @@ class SQLiteChatSessionRepository:
             row = _turn_row(connection, turn_id)
         return _decode_turn(row)
 
+    def turns(self, session_id: str) -> tuple[Turn, ...]:
+        """세션의 턴 전부를 시작 순서대로. `chat_turns_by_session` 인덱스를 그대로 탄다."""
+        with self._database.transaction(write=False) as connection:
+            _session_row(connection, session_id)
+            rows = connection.execute(
+                f"SELECT {_TURN_COLUMNS} FROM chat_turns WHERE session_id = ?"
+                # `WITHOUT ROWID` 테이블이라 삽입 순서를 물어볼 수 없다. 시작 시각이 같은 턴은
+                # 직전 sequence로, 그것도 같으면 id로 갈라 순서를 결정적으로 만든다.
+                " ORDER BY started_at ASC, accepted_sequence ASC, turn_id ASC",
+                (session_id,),
+            ).fetchall()
+        return tuple(_decode_turn(row) for row in rows)
+
     # -- 이벤트 -------------------------------------------------------------------------------
 
     def append_events(self, turn_id: str, events: Sequence[ChatEvent]) -> tuple[int, ...]:

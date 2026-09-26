@@ -217,6 +217,10 @@ class InMemoryChatSessionRepository:
         except KeyError as error:
             raise TurnNotFoundError(turn_id) from error
 
+    def turns(self, session_id: str) -> tuple[Turn, ...]:
+        self.get(session_id)
+        return tuple(turn for turn in self._turns.values() if turn.session_id == session_id)
+
     # -- 이벤트 -------------------------------------------------------------------------------
 
     def append_events(self, turn_id: str, events: Sequence[ChatEvent]) -> tuple[int, ...]:

@@ -24,7 +24,9 @@ from strategy_workbench.application.strategy_authoring._service import (
     StrategyAuthoringService,
     StrategyDocumentContract,
     StrategyDocumentSchema,
+    StrategyOperatorCatalog,
     UpgradedDocument,
+    operator_catalog_hash,
 )
 
 __all__ = [
@@ -45,7 +47,9 @@ __all__ = [
     "StrategyDocumentContract",
     "StrategyDocumentService",
     "StrategyDocumentSchema",
+    "StrategyOperatorCatalog",
     "StrategyDraft",
     "StrategyDraftService",
     "UpgradedDocument",
+    "operator_catalog_hash",
 ]

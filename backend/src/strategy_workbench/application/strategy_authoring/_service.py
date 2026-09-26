@@ -17,12 +17,17 @@ excluded from `spec_hash`, and the save flow (P1-06/P1-07) assigns the real stra
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import cached_property
 from typing import Any
 
+from strategy_workbench.domain.factor.facade.operators import (
+    OperatorDefinition,
+    operator_definitions,
+)
 from strategy_workbench.domain.strategy.facade.document import (
     hydrate_strategy_document,
     is_legacy_document,
@@ -151,6 +156,29 @@ class StrategyDocumentContract:
     fields: tuple[FieldContract, ...]
 
 
+@dataclass(frozen=True)
+class StrategyOperatorCatalog:
+    """그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.
+
+    문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,
+    연산자 목록·arity·가용성을 손으로 적지 않는다.
+    """
+
+    catalog_hash: str
+    operators: tuple[OperatorDefinition, ...]
+
+
+def operator_catalog_hash(operators: tuple[OperatorDefinition, ...]) -> str:
+    """정의 전부의 canonical JSON sha256. 정의가 하나라도 바뀌면 ETag가 바뀐다."""
+    material = json.dumps(
+        [asdict(definition) for definition in operators],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
 def contract_hash(schema_hash: str, factor_registry_version: str, dataset_snapshot_id: str) -> str:
     """Identity of one contract representation: the schema plus the catalogs it pairs with."""
     material = f"{schema_hash}\n{factor_registry_version}\n{dataset_snapshot_id}".encode()
@@ -183,6 +211,17 @@ class StrategyAuthoringService:
     def schema(self) -> StrategyDocumentSchema:
         """Runtime schema derived from the model and the constraint catalog (pure, cached)."""
         return self._schema
+
+    @cached_property
+    def _operators(self) -> StrategyOperatorCatalog:
+        operators = operator_definitions()
+        return StrategyOperatorCatalog(
+            catalog_hash=operator_catalog_hash(operators), operators=operators
+        )
+
+    def operators(self) -> StrategyOperatorCatalog:
+        """연산자 정의 카탈로그 (domain.factor 레지스트리 그대로, pure·cached)."""
+        return self._operators
 
     @cached_property
     def _fields(self) -> tuple[FieldContract, ...]:

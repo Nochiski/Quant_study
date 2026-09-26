@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { t } from "../../../shared/config";
+import { t, tName } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import type { DocumentDiagnostic } from "../model/document-state";
 import { projectObjectSection } from "../model/form-projection";
@@ -14,7 +14,7 @@ import {
   selectedNodePointer,
   setNodeField,
 } from "../model/graph-transactions";
-import type { JsonSchema } from "../model/schema-navigator";
+import { schemaFacts, type JsonSchema } from "../model/schema-navigator";
 import { factorGraphPointer } from "../model/use-execution-plans";
 import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
@@ -75,6 +75,14 @@ export const FactorGraphEditor = ({
   const factorPointer = `/factors/${factorIndex}`;
   const graphPointer = factorGraphPointer(factorIndex);
   const kinds = nodeKinds(schema, tree, factorPointer);
+  // 노드 종류 이름은 backend가 분기 스키마에 발행한 설명 키에서 온다(P1-03). frontend에 kind
+  // 목록·이름을 손으로 적지 않는다.
+  const kindNames = new Map(
+    kinds.map(([kindKey, branch]) => [
+      kindKey,
+      tName(schemaFacts(branch).descriptionKey),
+    ]),
+  );
   const [kind, setKind] = useState<string>("");
   const chosenKind = kind || (kinds[0]?.[0] ?? "");
   // 삭제 거부 안내는 판정을 낸 tree에만 붙는다(P4-03 리뷰 P2-2와 같은 규칙). `by`가 null이면 문서에서 못 찾은 경우.
@@ -232,7 +240,7 @@ export const FactorGraphEditor = ({
             >
               {kinds.map(([name]) => (
                 <option key={name} value={name}>
-                  {name}
+                  {kindNames.get(name) ?? name}
                 </option>
               ))}
             </select>
@@ -258,9 +266,17 @@ export const FactorGraphEditor = ({
                     aria-label={t("graph.editNode").replace("{node}", label)}
                   >
                     <strong>{item.summary}</strong>
-                    {kindField !== undefined ? (
-                      <code>{String(kindField.value ?? "")}</code>
-                    ) : null}
+                    {kindField === undefined ? null : (
+                      <>
+                        {kindNames.get(String(kindField.value ?? "")) ===
+                        undefined ? null : (
+                          <span className="factor-graph__node-kind">
+                            {kindNames.get(String(kindField.value ?? ""))}
+                          </span>
+                        )}
+                        <code>{String(kindField.value ?? "")}</code>
+                      </>
+                    )}
                   </button>
                   <Button
                     size="small"

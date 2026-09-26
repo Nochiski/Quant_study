@@ -2296,6 +2296,79 @@ export type NodeValueType =
   "numeric_series" | "boolean_series" | "group_series" | "scalar";
 
 /**
+ * OperatorAvailability
+ *
+ * 정의 시점의 가용성. 실제 판정(어댑터 capability)은 P2-04이 추가한다.
+ */
+export type OperatorAvailability = "available" | "unsupported";
+
+/**
+ * OperatorDefinition
+ *
+ * `(kind, operator)` 조합 하나에 대한 화면용 정의.
+ */
+export type OperatorDefinition = {
+  /**
+   * Arity
+   */
+  arity: number;
+  availability: OperatorAvailability;
+  /**
+   * Description Key
+   */
+  description_key: string;
+  /**
+   * Example
+   */
+  example: string;
+  /**
+   * Formula Key
+   */
+  formula_key: string;
+  /**
+   * Kind
+   */
+  kind: string;
+  /**
+   * Operator
+   */
+  operator: string;
+  output_type_rule: OutputTypeRule;
+  /**
+   * Params
+   */
+  params: Array<OperatorParameter>;
+  unit_rule: UnitRule;
+};
+
+/**
+ * OperatorParameter
+ *
+ * 연산자가 읽는 노드 property 하나. 필수 여부는 노드 dataclass의 기본값이 정한다.
+ */
+export type OperatorParameter = {
+  /**
+   * Property Name
+   */
+  property_name: string;
+  /**
+   * Required
+   */
+  required: boolean;
+};
+
+/**
+ * OutputTypeRule
+ *
+ * `_validation.py`가 이 연산자의 출력 `NodeValueType`을 정하는 방식.
+ */
+export type OutputTypeRule =
+  | "same_as_input"
+  | "numeric_series"
+  | "numeric_if_any_series"
+  | "boolean_series";
+
+/**
  * Page
  */
 export type PageBacktestRunSummary = {
@@ -4237,6 +4310,25 @@ export type StrategyIdentity = {
 };
 
 /**
+ * StrategyOperatorCatalog
+ *
+ * 그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.
+ *
+ * 문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,
+ * 연산자 목록·arity·가용성을 손으로 적지 않는다.
+ */
+export type StrategyOperatorCatalog = {
+  /**
+   * Catalog Hash
+   */
+  catalog_hash: string;
+  /**
+   * Operators
+   */
+  operators: Array<OperatorDefinition>;
+};
+
+/**
  * StrategyProposalView
  */
 export type StrategyProposalView = {
@@ -5102,6 +5194,13 @@ export type UnaryNode = {
  * UnaryOperator
  */
 export type UnaryOperator = "negate" | "lag";
+
+/**
+ * UnitRule
+ *
+ * `_validation.py`가 이 연산자의 출력 단위를 정하는 방식.
+ */
+export type UnitRule = "same_as_input" | "combined" | "boolean";
 
 /**
  * UniverseCoverageSummary
@@ -6776,6 +6875,39 @@ export type GetStrategyDocumentContractResponses = {
 
 export type GetStrategyDocumentContractResponse =
   GetStrategyDocumentContractResponses[keyof GetStrategyDocumentContractResponses];
+
+export type GetStrategyOperatorCatalogData = {
+  body?: never;
+  headers?: {
+    /**
+     * If-None-Match
+     */
+    "if-none-match"?: string | null;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/strategy-documents/operators";
+};
+
+export type GetStrategyOperatorCatalogErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetStrategyOperatorCatalogError =
+  GetStrategyOperatorCatalogErrors[keyof GetStrategyOperatorCatalogErrors];
+
+export type GetStrategyOperatorCatalogResponses = {
+  /**
+   * Successful Response
+   */
+  200: StrategyOperatorCatalog;
+};
+
+export type GetStrategyOperatorCatalogResponse =
+  GetStrategyOperatorCatalogResponses[keyof GetStrategyOperatorCatalogResponses];
 
 export type GetStrategyDocumentSchemaData = {
   body?: never;

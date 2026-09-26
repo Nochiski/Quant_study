@@ -76,6 +76,16 @@
   color: var(--text-muted);
 }
 
+/* 라벨은 이름이 주다. 스키마 키는 보조 표기로 작고 흐리게 내려간다(P1-03). */
+.strategy-form__name {
+  font-weight: 600;
+}
+
+.strategy-form__key {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
 .strategy-form__control {
   display: flex;
   flex-wrap: wrap;

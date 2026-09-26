@@ -171,6 +171,9 @@ PR 크기는 [YAML Strategy Workbench WORKFLOW 12절](../strategy-workbench-yaml
 - Graph 편집기의 "노드 추가"가 kind 드롭다운 대신 연산자 목록(P1-03 카탈로그, 그룹: 데이터·시간축·
   종목 간·계산·조건)을 보이고 kind는 `addNode`가 채운다. `nodeKinds` 파생 로직은 유지하되 UI에서
   숨긴다.
+- `availability !== "available"`인 연산자(현재 `group` 2개)는 목록에서 비활성으로 내리거나 설명 끝에
+  "아직 지원되지 않습니다"를 붙인다. P1-03이 이름·설명을 붙여 놓아 지금은 실행되지 않는 경로로
+  사용자를 더 적극적으로 안내한다(P1-03 1차 리뷰 P3). 실제 capability 판정은 P2-07이다.
 - `addNode` 실패(`unknown-kind`·materialize 실패)와 `addItemOperation === null`이 `TransactionFeedbackNote`
   또는 버튼 옆 문구로 이유를 보인다. 비활성 버튼에는 `aria-describedby`로 이유.
 - 필드 오류 배지의 `title` 대신 필드 아래 `role="alert"` 본문. DAG 카드 fingerprint도 같은 방식.
@@ -383,6 +386,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   코드 삭제.
 - runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성(`risk_factor_id`
   필드가 응답 스키마에 노출된다. 진단 코드 문자열은 OpenAPI에 열거되지 않는다). frontend SDK는 P3-01.
+- BACKLOG-001: `price.momentum_12_1` 시드의 `history=252`가 그래프 최소 이력 273과 다르다
+  (`window=252` + `lag=21`). 시드 값을 그래프에서 파생하거나 둘이 같은지 단언하는 테스트를 둔다.
 
 ### P2-07 — compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported
 

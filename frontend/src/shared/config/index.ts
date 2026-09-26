@@ -1,1 +1,8 @@
-export { t, tOptional, type MessageKey } from "./messages";
+export {
+  messages,
+  t,
+  tDescription,
+  tName,
+  tOptional,
+  type MessageKey,
+} from "./messages";

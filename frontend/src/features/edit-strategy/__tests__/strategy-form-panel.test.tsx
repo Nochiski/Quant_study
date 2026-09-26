@@ -77,13 +77,21 @@ const renderPanel = (
   return projection;
 };
 
-/** 섹션 fieldset(legend = 섹션 키 [+ 힌트]). */
+/**
+ * 섹션 fieldset(legend = `▾ <섹션 이름> <섹션 키> [· 힌트]`). P1-03부터 라벨이 사람 말 이름을
+ * 먼저 보이므로 앞이 낱말 문자가 아닌 자리에서 키를 찾는다(이름만 있는 섹션은 이름으로 찾는다).
+ */
 const section = (name: string) =>
-  within(screen.getByRole("group", { name: new RegExp(`^${name}`) }));
+  within(screen.getByRole("group", { name: new RegExp(`(^|[^\\w])${name}`) }));
 
-/** 컨트롤의 접근성 이름은 `<key>` 또는 `<key>· <unit>`이다. */
+/**
+ * 컨트롤의 접근성 이름은 `<이름> <key>[ · <unit>]`이다. 헬퍼는 키 앞 경계만 느슨하게 본다 —
+ * JS의 `" + bs + "w`는 ASCII라 한글 뒤 경계까지 구분하지 못한다. 공백 자체는 아래 "라벨 어휘"
+ * 테스트가 유일한 정본으로 고정한다. `_`는 낱말 문자라 `selection_count`가
+ * `short_selection_count`에 걸리지 않는다.
+ */
 const named = (key: string) => ({
-  name: new RegExp(`^${key}(\\u00b7|$)`),
+  name: new RegExp(`(^|[^\\w])${key}(\\s|$)`),
 });
 
 describe("StrategyFormPanel controls", () => {
@@ -121,7 +129,7 @@ describe("StrategyFormPanel controls", () => {
       { focusEditor: false },
     );
 
-    const title = section("기본 정보").getByRole("textbox", named("title"));
+    const title = section("전략 문서").getByRole("textbox", named("title"));
     await user.clear(title);
     await user.type(title, "버림{Escape}");
     expect(title).toHaveValue("퀄리티 모멘텀");
@@ -293,7 +301,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
     expect(
       eligibility.getByRole("button", { name: "liquidity.adv · 삭제" }),
     ).toBeInTheDocument();
-    const root = section("기본 정보");
+    const root = section("전략 문서");
     expect(root.getByText("1.1")).toHaveAttribute("aria-labelledby");
     expect(root.queryByRole("textbox", named("schema_version"))).toBeNull();
     expect(root.queryByRole("button", { name: /schema_version ·/ })).toBeNull();
@@ -447,12 +455,50 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
   });
 });
 
+describe("StrategyFormPanel 라벨 어휘 (P1-03)", () => {
+  // 이 describe가 라벨 공백 규칙의 유일한 정본이다. `named()`·`section()`의 느슨한 정규식은
+  // 공백을 단언하지 못하므로 아래 단언을 완화하면 회귀 방어가 사라진다.
+  it("이름과 스키마 키를 띄어 읽는다", () => {
+    renderPanel(MINIMAL, stubTransactions());
+
+    // accname 계산은 인라인 요소의 결과를 각각 trim한다. 구분 공백이 `<span>` 안에 있으면
+    // "이름key"로 붙어 읽히므로 형제 text node여야 한다(P1-03 리뷰).
+    expect(
+      section("risk").getByRole("spinbutton", {
+        name: /^종목별 최대 목표 비중 한도 max_name_weight/,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      section("전략 문서").getByRole("textbox", { name: /^전략 이름 title$/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("단위 접미사도 키와 띄어 읽는다", () => {
+    renderPanel(MINIMAL, stubTransactions());
+
+    expect(
+      section("execution").getByRole("spinbutton", {
+        name: "체결 금액에 적용할 수수료 가정 fee_bps · bp",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("스키마 키가 없는 섹션은 이름만 보인다", () => {
+    renderPanel(MINIMAL, stubTransactions());
+
+    // 섹션 제목은 스키마 키가 없으면 이름만 남는다(루트 스칼라 섹션 = 문서 자신).
+    expect(
+      screen.getByRole("button", { name: "전략 문서", expanded: true }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("StrategyFormPanel section collapse (P4-04)", () => {
   it("toggles aria-expanded and hides the section body while keeping it in the DOM", async () => {
     const user = userEvent.setup();
     renderPanel(MINIMAL, stubTransactions());
     const toggle = section("risk").getByRole("button", {
-      name: "risk",
+      name: /risk$/,
       expanded: true,
     });
     const weight = () =>

@@ -456,6 +456,16 @@
   cursor: pointer;
 }
 
+/* 노드 종류는 이름이 주고 `kind` 키는 보조 `<code>`다(P1-03). */
+.factor-graph__node-kind {
+  color: var(--text-muted);
+}
+
+.factor-graph__editor-node code {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
 .factor-graph__editor-state {
   margin: 0;
   color: var(--text-muted);

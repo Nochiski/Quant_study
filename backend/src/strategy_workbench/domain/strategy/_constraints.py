@@ -352,17 +352,53 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
 # "owned by the validator only" — the registry, not a call site, is what owns them.
 EXPRESSION_CODES: frozenset[str] = frozenset(
     {
+        # `domain.factor`의 `FACTOR_GRAPH_CODES`를 그대로 옮긴 것. 두 집합이 어긋나면 그래프
+        # 진단이 전략 문서에 도착하지 못하므로 테스트가 대응을 고정한다(P1-05).
+        "strategy.expression.branch_type",
+        "strategy.expression.branch_unit",
+        "strategy.expression.cycle",
         "strategy.expression.duplicate_node",
-        "strategy.expression.output_missing",
+        "strategy.expression.field_missing",
+        "strategy.expression.group_field_missing",
+        "strategy.expression.group_field_type",
         "strategy.expression.input_missing",
-        "strategy.expression.parameter_missing",
+        "strategy.expression.input_type",
+        "strategy.expression.insufficient_history",
         "strategy.expression.lag_periods",
+        "strategy.expression.operand_type",
+        "strategy.expression.output_missing",
+        "strategy.expression.parameter_missing",
+        "strategy.expression.predicate_type",
+        "strategy.expression.saved_factor_missing",
+        "strategy.expression.saved_subgraph_missing",
+        "strategy.expression.time_series_window",
+        "strategy.expression.unit_mismatch",
+        "strategy.expression.winsor_bounds",
+        # 전략·포트폴리오 쪽에서만 나는 표현식 진단.
         "strategy.expression.parameter_type",
         "strategy.expression.reference_unsupported",
         "strategy.expression.output_type",
         "strategy.expression.calculation_non_finite",
     }
 )
+
+_FACTOR_GRAPH_PREFIX = "factor.graph."
+_EXPRESSION_PREFIX = "strategy.expression."
+
+
+def expression_code(factor_code: str) -> str:
+    """`domain.factor` 그래프 진단 코드를 전략 문서 네임스페이스로 옮긴다(P1-05).
+
+    전략 문서를 읽는 소비자에게 `factor.*`는 없는 네임스페이스다 — 코드 → 마커 매핑도 422 번역도
+    `strategy.*`만 안다. 전환을 손으로 적은 표 대신 접두사 치환 하나로 두어, 그래프 코드가 늘어도
+    alias가 빠지지 않게 한다. 결과가 `EXPRESSION_CODES`에 없으면 `semantic_issue`가 거절한다.
+    """
+    if not factor_code.startswith(_FACTOR_GRAPH_PREFIX):
+        raise ValueError(
+            "only factor graph codes can be aliased into the strategy namespace — "
+            f"code={factor_code!r} expected_prefix={_FACTOR_GRAPH_PREFIX!r}"
+        )
+    return _EXPRESSION_PREFIX + factor_code[len(_FACTOR_GRAPH_PREFIX) :]
 
 
 def field_applicability_index() -> Mapping[str, FieldApplicability]:

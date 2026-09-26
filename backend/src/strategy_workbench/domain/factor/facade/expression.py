@@ -23,6 +23,7 @@ from strategy_workbench.domain.factor._nodes import (
     TimeSeriesOperator,
     UnaryNode,
     UnaryOperator,
+    field_minimum,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "TimeSeriesOperator",
     "UnaryNode",
     "UnaryOperator",
+    "field_minimum",
 ]

@@ -41,7 +41,13 @@ describe("CodeEditor", () => {
   it("reports text changes made through the handle and maps offsets to positions", async () => {
     const onSelectionChange = vi.fn();
     const { ref, onChange } = await mount({ onSelectionChange });
-    act(() => ref.current?.setText("a: 1\nb: 2\n"));
+    act(() =>
+      ref.current?.replaceRange(
+        0,
+        ref.current.getText().length,
+        "a: 1\nb: 2\n",
+      ),
+    );
     expect(onChange).toHaveBeenLastCalledWith("a: 1\nb: 2\n", false);
     expect(ref.current?.offsetToPosition(6)).toEqual({ line: 1, column: 1 });
     expect(ref.current?.positionToOffset({ line: 1, column: 1 })).toBe(6);
@@ -135,9 +141,35 @@ describe("CodeEditor", () => {
     expect(ref.current?.getText()).toBe('title: "a"\n');
   });
 
+  it("undoes and redoes through the handle without the editor holding focus (P1-02)", async () => {
+    const { ref } = await mount();
+    expect(ref.current?.historyDepth()).toEqual({ undo: 0, redo: 0 });
+
+    // Form·Graph 트랜잭션과 같은 경로: `replaceRange` 한 번은 되돌리기 한 단계다.
+    act(() => ref.current?.replaceRange(7, 10, '"changed"'));
+    expect(ref.current?.getText()).toBe('title: "changed"\n');
+    expect(ref.current?.historyDepth()).toEqual({ undo: 1, redo: 0 });
+
+    // 편집기는 포커스가 없다(다른 탭이 보이는 동안 hidden으로 살아 있는 상태와 같다).
+    expect(document.activeElement).not.toBe(
+      document.querySelector(".cm-content"),
+    );
+    act(() => expect(ref.current?.undo()).toBe(true));
+    expect(ref.current?.getText()).toBe('title: "a"\n');
+    expect(ref.current?.historyDepth()).toEqual({ undo: 0, redo: 1 });
+    act(() => expect(ref.current?.undo()).toBe(false));
+
+    act(() => expect(ref.current?.redo()).toBe(true));
+    expect(ref.current?.getText()).toBe('title: "changed"\n');
+    expect(ref.current?.historyDepth()).toEqual({ undo: 1, redo: 0 });
+    act(() => expect(ref.current?.redo()).toBe(false));
+  });
+
   it("round-trips undo history through the opaque state", async () => {
     const { ref } = await mount();
-    act(() => ref.current?.setText("changed\n"));
+    act(() =>
+      ref.current?.replaceRange(0, ref.current.getText().length, "changed\n"),
+    );
     const snapshot = ref.current?.getHistoryState();
     expect(snapshot).toBeTruthy();
     act(() => ref.current?.restoreHistoryState(snapshot));

@@ -20,6 +20,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.portfolio_design import _service as _portfolio_service
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.factor.facade.expression import ConstantNode
+from strategy_workbench.domain.factor.facade.validation import FACTOR_GRAPH_CODES
 from strategy_workbench.domain.strategy import _validation
 from strategy_workbench.domain.strategy.facade.constraints import (
     EXPRESSION_CODES,
@@ -27,6 +28,7 @@ from strategy_workbench.domain.strategy.facade.constraints import (
     STRATEGY_SCALAR_CONSTRAINTS,
     AppliedStage,
     ScalarConstraint,
+    expression_code,
     field_default,
     resolve_scalar,
     scalar_constraint_index,
@@ -307,5 +309,19 @@ def test_unowned_validation_code_is_a_programming_error() -> None:
     with pytest.raises(ValueError, match="no owner"):
         semantic_issue("strategy.bogus.code", "bogus", "x")
 
-    # Codes outside the `strategy.` namespace belong to another registry and pass through.
-    assert semantic_issue("factor.graph.other", "p", "x").code == "factor.graph.other"
+    # `factor.*`는 전략 문서 진단이 될 수 없다: alias를 거치지 않은 코드는 프로그래밍 오류다(P1-05).
+    # 전에는 그대로 통과해서 frontend가 모르는 네임스페이스의 코드가 문제 목록에 섞였다.
+    with pytest.raises(ValueError, match="alias them with expression_code"):
+        semantic_issue("factor.graph.cycle", "p", "x")
+
+
+def test_every_factor_graph_code_has_a_strategy_expression_alias() -> None:
+    """그래프 진단이 전략 문서에 닿으려면 `strategy.expression.*` 자리가 먼저 있어야 한다(P1-05)."""
+    aliased = {expression_code(code) for code in FACTOR_GRAPH_CODES}
+
+    assert aliased <= EXPRESSION_CODES, sorted(aliased - EXPRESSION_CODES)
+
+
+def test_expression_alias_rejects_a_code_from_another_namespace() -> None:
+    with pytest.raises(ValueError, match="only factor graph codes"):
+        expression_code("strategy.expression.cycle")

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { t } from "../../../shared/config";
-import { Badge } from "../../../shared/ui";
 import {
   CodeEditor,
   type CodeEditorHandle,
@@ -12,13 +11,11 @@ import {
 } from "../../../shared/ui/code-editor";
 import {
   currentDiagnostics,
-  isSpecStale,
   type DocumentAction,
-  type DocumentDiagnostic,
   type DocumentState,
 } from "../model/document-state";
 import { deduplicateDiagnostics } from "../model/problem-list";
-import { DiagnosticsPanel } from "./diagnostics-panel";
+import "./source-editor.css";
 
 type SourceEditorProps = {
   state: DocumentState;
@@ -34,22 +31,14 @@ type SourceEditorProps = {
   onSelectionChange?: (selection: EditorSelection) => void;
 };
 
-const PHASE_TONE = {
-  editing: "neutral",
-  parsing: "neutral",
-  "syntax-invalid": "error",
-  "structure-invalid": "error",
-  "semantic-invalid": "error",
-  "structurally-valid": "info",
-  "semantically-valid": "ok",
-  saved: "ok",
-} as const;
-
 /**
  * Binds the domain-neutral editor to the document state machine (P3-01 → P3-02): text edits and
  * IME composition flow into the reducer and current diagnostics flow back as markers. The editor
  * is never remounted on a format switch — the language is reconfigured in place — so the undo
  * history survives the switch (editor ADR D3).
+ *
+ * 문서 상태 배지와 문제 목록은 이 컴포넌트 밖에 산다(`DocumentStatus`·`DiagnosticsPanel`) — 탭 패널 안에 있으면
+ * Graph·Form 탭에서 보이지 않기 때문이다(WORKFLOW P1-01).
  */
 export const SourceEditor = ({
   state,
@@ -85,19 +74,6 @@ export const SourceEditor = ({
     [documentDiagnostics],
   );
 
-  // Selecting a problem moves the editor to its range (WORKFLOW P3-04 acceptance). Clamp stale
-  // offsets defensively so an old range can never throw against shorter current text.
-  const selectDiagnostic = useCallback((diagnostic: DocumentDiagnostic) => {
-    const editor = handle.current;
-    if (!editor || diagnostic.range === null) return;
-    const length = editor.getText().length;
-    const from = Math.min(diagnostic.range.start.offset, length);
-    const to = Math.min(Math.max(diagnostic.range.end.offset, from), length);
-    editor.setSelection(from, to);
-    editor.scrollTo(from);
-    editor.focus();
-  }, []);
-
   // The editor can only raise the composition flag from a change (`view.composing`); the DOM
   // `compositionend` event is what lowers it, so a change delivered while an IME session is open
   // never re-enables parsing early.
@@ -114,28 +90,29 @@ export const SourceEditor = ({
     [dispatch],
   );
 
-  // External source replacement (load / format switch) is pushed into the editor.
+  // 같은 문서 안의 외부 교체(초안 복구·서버 초안 적용)는 되돌릴 수 있는 **한 단계**로 남고,
+  // **다른 문서**를 여는 것(`documentEpoch` 증가)은 이력에 남지 않는다 — 되돌리기로 앞 리비전의
+  // 텍스트에 닿으면 안 된다. epoch는 reducer의 `load`에서만 오르므로 이 비교가 "다른 문서인가"와 같다.
+  //
+  // 같은 epoch 분기가 `replaceRange`인 이유: 격리(`isolateHistory`)가 없으면 교체가 직후에 친 글자와
+  // 한 undo 단계로 묶여, 되돌리기 한 번에 복구한 초안이 통째로 사라진다(P1-02 리뷰 P1).
+  const loadedEpoch = useRef(state.documentEpoch);
   useEffect(() => {
-    handle.current?.setText(state.source);
-  }, [state.source]);
+    const editor = handle.current;
+    if (editor === null) return;
+    if (loadedEpoch.current !== state.documentEpoch) {
+      loadedEpoch.current = state.documentEpoch;
+      editor.loadText(state.source);
+      return;
+    }
+    // 편집기 자신의 편집이 reducer를 돌아 온 경우다 — 같은 텍스트를 다시 넣으면 빈 undo 단계가 쌓인다.
+    const current = editor.getText();
+    if (current === state.source) return;
+    editor.replaceRange(0, current.length, state.source);
+  }, [state.documentEpoch, state.source]);
 
   return (
     <div className="source-editor">
-      <div
-        className="source-editor__status"
-        role="status"
-        aria-label={t("document.status")}
-      >
-        <Badge tone={PHASE_TONE[state.phase]}>
-          {t(`document.phase.${state.phase}`)}
-        </Badge>
-        {isSpecStale(state) ? (
-          <Badge tone="warn">{t("document.stale")}</Badge>
-        ) : null}
-        {state.composing ? (
-          <Badge tone="neutral">{t("document.composing")}</Badge>
-        ) : null}
-      </div>
       <CodeEditor
         ref={bindHandle}
         value={state.source}
@@ -147,19 +124,6 @@ export const SourceEditor = ({
         diagnostics={diagnostics}
         completionSource={assist?.completionSource}
         hoverSource={assist?.hoverSource}
-      />
-      <DiagnosticsPanel
-        diagnostics={
-          documentDiagnostics.length > 0 || state.compiled === null
-            ? documentDiagnostics
-            : state.compiled.diagnostics
-        }
-        stale={
-          documentDiagnostics.length === 0 &&
-          state.compiled !== null &&
-          state.compiledVersion !== state.sourceVersion
-        }
-        onSelect={selectDiagnostic}
       />
     </div>
   );

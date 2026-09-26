@@ -1,0 +1,359 @@
+{
+  "catalog_hash": "63bbcecf966bfae0c22cdcc6a94d93de499f6cc42d196aefd5ac0cfda0c859d3",
+  "operators": [
+    {
+      "kind": "unary",
+      "operator": "negate",
+      "arity": 1,
+      "params": [],
+      "output_type_rule": "same_as_input",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.unary.negate",
+      "formula_key": "strategy.operator.unary.negate.formula",
+      "example": "{ kind: unary, node_id: inverted, operator: negate, input_node_id: pbr }"
+    },
+    {
+      "kind": "unary",
+      "operator": "lag",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "periods",
+          "required": false
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.unary.lag",
+      "formula_key": "strategy.operator.unary.lag.formula",
+      "example": "{ kind: unary, node_id: close_5d_ago, operator: lag, input_node_id: close, periods: 5 }"
+    },
+    {
+      "kind": "binary",
+      "operator": "add",
+      "arity": 2,
+      "params": [],
+      "output_type_rule": "numeric_if_any_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.binary.add",
+      "formula_key": "strategy.operator.binary.add.formula",
+      "example": "{ kind: binary, node_id: total, operator: add, left_node_id: equity, right_node_id: debt }"
+    },
+    {
+      "kind": "binary",
+      "operator": "subtract",
+      "arity": 2,
+      "params": [],
+      "output_type_rule": "numeric_if_any_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.binary.subtract",
+      "formula_key": "strategy.operator.binary.subtract.formula",
+      "example": "{ kind: binary, node_id: spread, operator: subtract, left_node_id: close, right_node_id: ma_20 }"
+    },
+    {
+      "kind": "binary",
+      "operator": "multiply",
+      "arity": 2,
+      "params": [],
+      "output_type_rule": "numeric_if_any_series",
+      "unit_rule": "combined",
+      "availability": "available",
+      "description_key": "strategy.operator.binary.multiply",
+      "formula_key": "strategy.operator.binary.multiply.formula",
+      "example": "{ kind: binary, node_id: traded_value, operator: multiply, left_node_id: close, right_node_id: volume }"
+    },
+    {
+      "kind": "binary",
+      "operator": "divide",
+      "arity": 2,
+      "params": [],
+      "output_type_rule": "numeric_if_any_series",
+      "unit_rule": "combined",
+      "availability": "available",
+      "description_key": "strategy.operator.binary.divide",
+      "formula_key": "strategy.operator.binary.divide.formula",
+      "example": "{ kind: binary, node_id: pbr, operator: divide, left_node_id: market_cap, right_node_id: book_value }"
+    },
+    {
+      "kind": "time_series",
+      "operator": "mean",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "window",
+          "required": true
+        },
+        {
+          "property_name": "lag",
+          "required": false
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.time_series.mean",
+      "formula_key": "strategy.operator.time_series.mean.formula",
+      "example": "{ kind: time_series, node_id: ma_20, operator: mean, input_node_id: close, window: 20 }"
+    },
+    {
+      "kind": "time_series",
+      "operator": "std",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "window",
+          "required": true
+        },
+        {
+          "property_name": "lag",
+          "required": false
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.time_series.std",
+      "formula_key": "strategy.operator.time_series.std.formula",
+      "example": "{ kind: time_series, node_id: vol_60, operator: std, input_node_id: daily_return, window: 60 }"
+    },
+    {
+      "kind": "time_series",
+      "operator": "momentum",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "window",
+          "required": true
+        },
+        {
+          "property_name": "lag",
+          "required": false
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.time_series.momentum",
+      "formula_key": "strategy.operator.time_series.momentum.formula",
+      "example": "{ kind: time_series, node_id: mom_12_1, operator: momentum, input_node_id: close, window: 252, lag: 21 }"
+    },
+    {
+      "kind": "time_series",
+      "operator": "delta",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "window",
+          "required": true
+        },
+        {
+          "property_name": "lag",
+          "required": false
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.time_series.delta",
+      "formula_key": "strategy.operator.time_series.delta.formula",
+      "example": "{ kind: time_series, node_id: growth, operator: delta, input_node_id: revenue, window: 252 }"
+    },
+    {
+      "kind": "time_series",
+      "operator": "min",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "window",
+          "required": true
+        },
+        {
+          "property_name": "lag",
+          "required": false
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.time_series.min",
+      "formula_key": "strategy.operator.time_series.min.formula",
+      "example": "{ kind: time_series, node_id: low_52w, operator: min, input_node_id: close, window: 252 }"
+    },
+    {
+      "kind": "time_series",
+      "operator": "max",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "window",
+          "required": true
+        },
+        {
+          "property_name": "lag",
+          "required": false
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.time_series.max",
+      "formula_key": "strategy.operator.time_series.max.formula",
+      "example": "{ kind: time_series, node_id: high_52w, operator: max, input_node_id: close, window: 252 }"
+    },
+    {
+      "kind": "cross_sectional",
+      "operator": "rank",
+      "arity": 1,
+      "params": [],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.cross_sectional.rank",
+      "formula_key": "strategy.operator.cross_sectional.rank.formula",
+      "example": "{ kind: cross_sectional, node_id: ranked, operator: rank, input_node_id: score }"
+    },
+    {
+      "kind": "cross_sectional",
+      "operator": "zscore",
+      "arity": 1,
+      "params": [],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.cross_sectional.zscore",
+      "formula_key": "strategy.operator.cross_sectional.zscore.formula",
+      "example": "{ kind: cross_sectional, node_id: standardized, operator: zscore, input_node_id: score }"
+    },
+    {
+      "kind": "cross_sectional",
+      "operator": "winsorize",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "lower_quantile",
+          "required": false
+        },
+        {
+          "property_name": "upper_quantile",
+          "required": false
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.cross_sectional.winsorize",
+      "formula_key": "strategy.operator.cross_sectional.winsorize.formula",
+      "example": "{ kind: cross_sectional, node_id: clipped, operator: winsorize, input_node_id: score, lower_quantile: 0.01, upper_quantile: 0.99 }"
+    },
+    {
+      "kind": "cross_sectional",
+      "operator": "demean",
+      "arity": 1,
+      "params": [],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "available",
+      "description_key": "strategy.operator.cross_sectional.demean",
+      "formula_key": "strategy.operator.cross_sectional.demean.formula",
+      "example": "{ kind: cross_sectional, node_id: centered, operator: demean, input_node_id: score }"
+    },
+    {
+      "kind": "group",
+      "operator": "neutralize",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "group_field_id",
+          "required": true
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "unsupported",
+      "description_key": "strategy.operator.group.neutralize",
+      "formula_key": "strategy.operator.group.neutralize.formula",
+      "example": "{ kind: group, node_id: sector_neutral, operator: neutralize, input_node_id: score, group_field_id: sector }"
+    },
+    {
+      "kind": "group",
+      "operator": "rank",
+      "arity": 1,
+      "params": [
+        {
+          "property_name": "group_field_id",
+          "required": true
+        }
+      ],
+      "output_type_rule": "numeric_series",
+      "unit_rule": "same_as_input",
+      "availability": "unsupported",
+      "description_key": "strategy.operator.group.rank",
+      "formula_key": "strategy.operator.group.rank.formula",
+      "example": "{ kind: group, node_id: sector_rank, operator: rank, input_node_id: score, group_field_id: sector }"
+    },
+    {
+      "kind": "comparison",
+      "operator": "gt",
+      "arity": 2,
+      "params": [],
+      "output_type_rule": "boolean_series",
+      "unit_rule": "boolean",
+      "availability": "available",
+      "description_key": "strategy.operator.comparison.gt",
+      "formula_key": "strategy.operator.comparison.gt.formula",
+      "example": "{ kind: comparison, node_id: liquid, operator: gt, left_node_id: traded_value, right_node_id: threshold }"
+    },
+    {
+      "kind": "comparison",
+      "operator": "gte",
+      "arity": 2,
+      "params": [],
+      "output_type_rule": "boolean_series",
+      "unit_rule": "boolean",
+      "availability": "available",
+      "description_key": "strategy.operator.comparison.gte",
+      "formula_key": "strategy.operator.comparison.gte.formula",
+      "example": "{ kind: comparison, node_id: at_least, operator: gte, left_node_id: roe, right_node_id: threshold }"
+    },
+    {
+      "kind": "comparison",
+      "operator": "lt",
+      "arity": 2,
+      "params": [],
+      "output_type_rule": "boolean_series",
+      "unit_rule": "boolean",
+      "availability": "available",
+      "description_key": "strategy.operator.comparison.lt",
+      "formula_key": "strategy.operator.comparison.lt.formula",
+      "example": "{ kind: comparison, node_id: cheap, operator: lt, left_node_id: pbr, right_node_id: threshold }"
+    },
+    {
+      "kind": "comparison",
+      "operator": "lte",
+      "arity": 2,
+      "params": [],
+      "output_type_rule": "boolean_series",
+      "unit_rule": "boolean",
+      "availability": "available",
+      "description_key": "strategy.operator.comparison.lte",
+      "formula_key": "strategy.operator.comparison.lte.formula",
+      "example": "{ kind: comparison, node_id: at_most, operator: lte, left_node_id: debt_ratio, right_node_id: threshold }"
+    },
+    {
+      "kind": "comparison",
+      "operator": "eq",
+      "arity": 2,
+      "params": [],
+      "output_type_rule": "boolean_series",
+      "unit_rule": "boolean",
+      "availability": "available",
+      "description_key": "strategy.operator.comparison.eq",
+      "formula_key": "strategy.operator.comparison.eq.formula",
+      "example": "{ kind: comparison, node_id: exactly, operator: eq, left_node_id: flag, right_node_id: one }"
+    }
+  ]
+}

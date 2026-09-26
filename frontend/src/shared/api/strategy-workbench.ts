@@ -14,6 +14,7 @@ import {
   getStrategyDocument,
   getStrategyDocumentContract,
   getStrategyDocumentSchema,
+  getStrategyOperatorCatalog,
   getBacktestStatus,
   listBacktests,
   listStrategies,
@@ -48,6 +49,7 @@ import type {
   MetricDefinition,
   MetricValue,
   NodeContract,
+  OperatorDefinition,
   PageBacktestRunSummary,
   PageRevisionSummary,
   PageStrategySummary,
@@ -65,6 +67,7 @@ import type {
   StrategyDocumentSchema,
   StrategyDraft,
   StrategyDraftConflictDetail,
+  StrategyOperatorCatalog,
   StrategyRevisionConflictDetail,
   StrategySpec,
   StrategySummary,
@@ -454,6 +457,12 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getStrategyDocumentSchema");
   },
 
+  /** 그래프 노드 연산자 정의 전부(P1-03, spec D8). 팔레트·라벨이 읽는 유일한 연산자 목록이다. */
+  async getStrategyOperatorCatalog(): Promise<StrategyOperatorCatalog> {
+    const response = await getStrategyOperatorCatalog();
+    return unwrap(response, "getStrategyOperatorCatalog");
+  },
+
   async getStrategyDocumentContract(): Promise<StrategyDocumentContractResponse> {
     const response = await getStrategyDocumentContract();
     return unwrap(response, "getStrategyDocumentContract");
@@ -527,6 +536,7 @@ export type {
   NodeContract,
   MetricDefinition,
   MetricValue,
+  OperatorDefinition,
   PageRevisionSummary,
   PageBacktestRunSummary,
   PageStrategySummary,
@@ -542,6 +552,7 @@ export type {
   StrategyDocumentContractResponse,
   StrategyDocumentSchema,
   StrategyDraft,
+  StrategyOperatorCatalog,
   StrategySpec,
   StrategySummary,
   StrategyTraceRequest,

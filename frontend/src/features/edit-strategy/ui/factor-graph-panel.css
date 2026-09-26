@@ -423,7 +423,45 @@
   align-items: center;
 }
 
-.factor-graph__editor-nodes {
+/* fingerprint는 본문으로 보이므로 좁은 칸에서 줄을 넘겨 가로 스크롤을 만들지 않는다(P1-04). */
+.factor-graph__fingerprint {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* 연산자 팔레트(P1-04): 검색 + kind별 그룹. 목록이 길어 자기 칸 안에서만 스크롤한다. */
+.factor-graph__palette {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.factor-graph__palette-search {
+  width: 100%;
+}
+
+.factor-graph__palette-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__palette-groups {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 18rem;
+  padding-right: var(--space-1);
+  overflow-y: auto;
+}
+
+.factor-graph__palette-group h4 {
+  margin: 0 0 var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.factor-graph__palette-group ul {
   display: grid;
   gap: var(--space-1);
   margin: 0;
@@ -431,10 +469,82 @@
   list-style: none;
 }
 
-.factor-graph__editor-nodes li {
+.factor-graph__palette-item {
+  display: grid;
+  gap: 2px;
+}
+
+.factor-graph__palette-item button {
   display: flex;
   gap: var(--space-2);
+  align-items: baseline;
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+  text-align: start;
+  cursor: pointer;
+}
+
+.factor-graph__palette-item button:hover:enabled {
+  border-color: var(--accent);
+}
+
+.factor-graph__palette-item button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.factor-graph__palette-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin: 0 0 0 var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.factor-graph__palette-signature {
+  font-family: var(--font-mono);
+}
+
+.factor-graph__palette-warning {
+  color: var(--status-warn);
+}
+
+/*
+  카드 **사이** 간격(12px)은 카드 **안** 줄 간격(4px)보다 넓다. 진단 본문은 자기 카드의 둘째
+  줄이므로 근접성이 곧 소유권을 말한다 — 두 간격이 뒤집혀 있으면(예전: 카드 안 8px, 카드 사이
+  4px) 마지막이 아닌 노드의 오류 문장이 **아래** 노드 것으로 읽혔다. 진단 문장에는 node_id가
+  없어서(`window는 1 이상이고 …`) 문장만으로는 주인을 알 수 없다(P1-04 3차 리뷰 차단).
+  계약은 e2e가 boundingBox 거리 비교로 고정한다(되돌리면 9.5 > 4로 실패하는 것을 확인했다).
+*/
+.factor-graph__editor-nodes {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factor-graph__editor-nodes li {
+  display: flex;
+  flex-wrap: wrap;
+  /* 행 간격은 좁게(자기 카드 안), 열 간격은 버튼 사이라 그대로. */
+  gap: var(--space-1) var(--space-2);
   align-items: center;
+}
+
+/*
+  노드 카드의 진단 본문은 이름 버튼·삭제 버튼과 같은 줄에 끼지 않고 카드 아래 줄 전체 폭을 쓴다.
+  `flex-wrap` 없이 두면 긴 한글 오류 문장이 버튼 옆 남은 폭으로 밀려 들어가 여러 줄로 접히고 행
+  높이가 튀며 이름 버튼이 눌렸다(P1-04 2차 리뷰 차단). 계약은 e2e가 boundingBox로 고정한다.
+*/
+.factor-graph__editor-nodes li > .strategy-form__diagnostics {
+  flex-basis: 100%;
+  /* 노드 이름과 같은 들여쓰기로 둬서 어느 카드의 문장인지 읽힌다. */
+  padding-left: var(--space-2);
 }
 
 .factor-graph__editor-nodes li[aria-current="true"] .factor-graph__editor-node {
@@ -454,6 +564,16 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+/* 노드 종류는 이름이 주고 `kind` 키는 보조 `<code>`다(P1-03). */
+.factor-graph__node-kind {
+  color: var(--text-muted);
+}
+
+.factor-graph__editor-node code {
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
 }
 
 .factor-graph__editor-state {

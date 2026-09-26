@@ -53,6 +53,15 @@ const settled = (
   });
 };
 
+/** 버전 줄은 현재 버전인데 본문이 1.0 문법일 때 backend가 다는 힌트(P1-05). */
+const LEGACY_SHAPE = {
+  ...UNSUPPORTED,
+  code: "structure.legacy_shape",
+  pointer: "/factors",
+  message:
+    "1.0 문법입니다. factors 아래에 또 factors 목록을 두던 방식이라 지금 버전에서는 읽지 못합니다.",
+};
+
 const STORED = { revision: 1, generated: false, requires_upgrade: true };
 
 describe("decideDocumentUpgrade", () => {
@@ -75,6 +84,20 @@ describe("decideDocumentUpgrade", () => {
     expect(decideDocumentUpgrade(settled(CURRENT), STORED)).toEqual({
       kind: "none",
     });
+  });
+
+  it("offers the upgrade when only the body is 1.0, not the version line", () => {
+    // P1-05: `structure.legacy_shape`도 사용자가 할 일이 업그레이드라 같은 배너를 띄운다.
+    expect(
+      decideDocumentUpgrade(settled(CURRENT, [LEGACY_SHAPE]), STORED),
+    ).toEqual({ kind: "upgradeable" });
+    // 다른 구조 오류는 배너를 띄우지 않는다: 고칠 곳은 문제 목록이 가리키는 그 줄이다.
+    expect(
+      decideDocumentUpgrade(
+        settled(CURRENT, [{ ...LEGACY_SHAPE, code: "structure.unknown_key" }]),
+        STORED,
+      ),
+    ).toEqual({ kind: "none" });
   });
 
   it("never proposes an upgrade for a compile result that belongs to older text", () => {

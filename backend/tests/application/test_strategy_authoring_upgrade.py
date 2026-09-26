@@ -23,6 +23,8 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
     SourceFormat,
 )
 from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
+    LEGACY_UPGRADE_TARGET_VERSION,
     upgrade_document_1_0,
 )
 
@@ -99,14 +101,36 @@ def test_upgrade_reports_diagnostics_of_the_upgraded_text_without_hiding_them() 
 
 
 @pytest.mark.parametrize("version", ['"1.1"', '"2.0"', "1.0"])
-def test_non_1_0_documents_are_refused(version: str) -> None:
+def test_a_1_0_body_upgrades_whatever_the_version_line_says(version: str) -> None:
+    """버전 줄만 손으로 고친 1.0 본문도 받아 준다(P1-05 1차 리뷰 DEFECT-P105-001).
+
+    진단이 `structure.legacy_shape`로 "업그레이드하세요"라고 시키고 배너까지 띄우므로, 여기서
+    거절하면 사용자에게 남는 길이 없다.
+    """
     source = _read("quality_momentum.v1_0.yaml").replace(
         'schema_version: "1.0"', f"schema_version: {version}"
     )
 
+    upgraded = _service().upgrade(CompileRequest(source, SourceFormat.YAML))
+
+    # P2-03 이후 P2-09 전까지는 결과가 1.1 이라 아직 compile 되지 않는다(중간 상태). P2-09 가
+    # 1.1 → 1.2 step 을 붙이면 `spec is not None` 으로 되돌린다.
+    assert upgraded.compiled.schema_version == LEGACY_UPGRADE_TARGET_VERSION
+    assert upgraded.compiled.spec is None
+    codes = [diagnostic.code for diagnostic in upgraded.compiled.diagnostics]
+    assert codes == ["structure.unsupported_schema_version"]
+
+
+def test_a_document_with_no_1_0_shape_is_refused() -> None:
+    """옛 판 모양이 하나도 없으면 그대로 거절한다 — 판정이 넓어져도 fail-closed 는 남는다."""
+    source = _read("quality_momentum.yaml").replace(
+        f'schema_version: "{CURRENT_SCHEMA_VERSION}"', 'schema_version: "2.0"'
+    )
+    assert 'schema_version: "2.0"' in source
+
     with pytest.raises(DocumentNotUpgradeableError, match="only schema 1.0") as info:
         _service().upgrade(CompileRequest(source, SourceFormat.YAML))
-    assert str(info.value.schema_version) in {"1.1", "2.0", "1.0"}
+    assert str(info.value.schema_version) == "2.0"
 
 
 def test_syntax_errors_carry_the_codec_diagnostics() -> None:

@@ -314,11 +314,41 @@ describe("StrategyFormPanel list sections", () => {
     return onOpenGraph;
   };
 
+  it("비활성 추가 버튼이 왜 못 누르는지 말한다 (P1-04)", () => {
+    // 직전 편집이 반영되는 중: 예전에는 버튼이 그냥 회색이고 화면에 이유가 없었다.
+    renderList(VERBOSE, { ...stub(), settling: true });
+    const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
+    const add = factors.getByRole("button", { name: "factors · 항목 추가" });
+    expect(add).toBeDisabled();
+    expect(add).toHaveAccessibleDescription(
+      "직전 편집이 문서에 반영되는 중입니다 — 잠시 후 다시 추가하세요",
+    );
+
+    cleanup();
+    // runtime schema가 아직 없으면 항목을 materialize할 수 없다 — 그 사실을 말한다.
+    const state = parsedState(VERBOSE);
+    render(
+      <StrategyFormPanel
+        projection={projectForm(SCHEMA, state.parse, [])}
+        schema={null}
+        transactions={stub()}
+        catalogs={{ equityFields: null, factors: null }}
+      />,
+    );
+    const noSchema = within(
+      screen.getByRole("group", { name: /\bfactors/ }),
+    ).getByRole("button", { name: "factors · 항목 추가" });
+    expect(noSchema).toBeDisabled();
+    expect(noSchema).toHaveAccessibleDescription(
+      "runtime schema를 아직 받지 못해 항목을 추가할 수 없습니다",
+    );
+  });
+
   it("adds items from the schema and from the factor catalog, and removes unreferenced items", async () => {
     const user = userEvent.setup();
     const transactions = stub();
     const onOpenGraph = renderList(VERBOSE, transactions);
-    const factors = within(screen.getByRole("group", { name: /^factors/ }));
+    const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.selectOptions(
       factors.getByRole("combobox", { name: "factors · 카탈로그에서 추가" }),
       "factor:server.momentum",
@@ -346,7 +376,7 @@ describe("StrategyFormPanel list sections", () => {
     );
     // 항목 필드는 P4-02 컨트롤을 재사용한다(항목 pointer 아래 replace-scalar).
     await user.selectOptions(
-      factors.getByRole("combobox", { name: /^direction/ }),
+      factors.getByRole("combobox", { name: /\bdirection/ }),
       "low",
     );
     expect(transactions.apply).toHaveBeenLastCalledWith(
@@ -356,7 +386,7 @@ describe("StrategyFormPanel list sections", () => {
       { focusEditor: false },
     );
     const parameters = within(
-      screen.getByRole("group", { name: /^parameters/ }),
+      screen.getByRole("group", { name: /\bparameters/ }),
     );
     await user.selectOptions(
       parameters.getByRole("combobox", { name: "parameters · 종류" }),
@@ -381,8 +411,8 @@ describe("StrategyFormPanel list sections", () => {
     // factor `label`은 생략하면 backend가 `factor_id`로 채운다 → placeholder도 그 값(P4-02 리뷰 013).
     const transactions = stub();
     renderList(VERBOSE.replace('    label: "모멘텀"\n', ""), transactions);
-    const factors = within(screen.getByRole("group", { name: /^factors/ }));
-    const label = factors.getAllByRole("textbox", { name: /^label/ })[0]!;
+    const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
+    const label = factors.getAllByRole("textbox", { name: /\blabel/ })[0]!;
     expect(label).toHaveValue("");
     expect(label).toHaveAttribute("placeholder", "momentum");
     expect(
@@ -479,7 +509,7 @@ describe("StrategyFormPanel list sections", () => {
     const transactions = stub();
     renderList(VERBOSE, transactions);
     const eligibility = within(
-      screen.getByRole("group", { name: /^eligibility/ }),
+      screen.getByRole("group", { name: /\beligibility/ }),
     );
     await user.click(eligibility.getByRole("button", { name: "rules · 항목 추가" }));
     expect(transactions.apply).toHaveBeenLastCalledWith(
@@ -506,7 +536,7 @@ describe("StrategyFormPanel list sections", () => {
         selectedPointer="/factors/0"
       />,
     );
-    const factors = within(screen.getByRole("group", { name: /^factors/ }));
+    const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
     expect(factors.getByRole("region", { name: "factors · momentum" })).toHaveAttribute(
       "aria-current",
       "true",
@@ -518,7 +548,7 @@ describe("StrategyFormPanel list sections", () => {
     const transactions = stub();
     renderList(MINIMAL, transactions);
     const parameters = within(
-      screen.getByRole("group", { name: /^parameters/ }),
+      screen.getByRole("group", { name: /\bparameters/ }),
     );
     await user.selectOptions(
       parameters.getByRole("combobox", { name: "parameters · 종류" }),
@@ -564,7 +594,7 @@ describe("StrategyFormPanel list sections", () => {
     };
     const { rerender } = render(view(source));
     const factors = () =>
-      within(screen.getByRole("group", { name: /^factors/ }));
+      within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.click(factors().getByRole("button", { name: "momentum · 삭제" }));
     expect(factors().getByRole("alert")).toHaveTextContent("/factors/1/");
     rerender(view(source.replace("weight: 0.6", "weight: 0.5")));
@@ -579,7 +609,7 @@ describe("StrategyFormPanel list sections", () => {
       "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: saved_factor\n          node_id: m\n          factor_id: momentum\n      output_node_id: m\nportfolio:\n",
     );
     renderList(source, transactions);
-    const factors = within(screen.getByRole("group", { name: /^factors/ }));
+    const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.click(factors.getByRole("button", { name: "momentum · 삭제" }));
     expect(transactions.apply).not.toHaveBeenCalled();
     expect(factors.getByRole("alert")).toHaveTextContent(

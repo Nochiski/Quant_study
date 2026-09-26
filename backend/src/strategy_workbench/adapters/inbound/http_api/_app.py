@@ -13,6 +13,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
+from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
+from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
@@ -118,6 +121,7 @@ from strategy_workbench.domain.strategy.facade.explanation import StrategyExplan
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 from strategy_workbench.domain.strategy.facade.validation import StrategyValidation
 
+from ._assistant_routes import register_assistant_routes
 from ._backtest_contract import (
     Backtest422Response,
     BacktestResultNotReadyResponse,
@@ -250,8 +254,21 @@ def create_app(
     portfolio_design: PortfolioDesignService,
     strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
-    allowed_origins: tuple[str, ...] = ("http://localhost:5173",),
+    assistant_profiles: ProviderProfileService | None = None,
+    assistant_chat: AssistantChatService | None = None,
+    assistant_turns: AssistantTurnRunner | None = None,
+    allowed_origins: tuple[str, ...],
 ) -> FastAPI:
+    """Compose the HTTP surface; the assistant routes appear only when their services arrive.
+
+    어시스턴트 서비스 셋은 항상 같이 만들어진다 — 하나를 세우는 컨테이너는 셋을 다 세운다.
+    `/api/v1/assistant`를 건드리지 않는 기존 테스트는 셋 다 넘기지 않고, 그러면 라우트가
+    "있는데 실패"가 아니라 아예 없는 상태가 된다.
+
+    `allowed_origins`는 기본값을 두지 않는다. 기본 origin의 owner는 조립 지점
+    (`bootstrap/_http.py`의 `DEFAULT_ALLOWED_ORIGINS`)이고, 여기에 같은 리터럴을 또 두면 개발 서버
+    포트를 옮길 때 한쪽만 바뀐다(Phase B 감사 NB-7).
+    """
     app = FastAPI(
         title="Quant Strategy Workbench API",
         version="0.1.0",
@@ -1047,6 +1064,15 @@ def create_app(
             raise _strategy_not_found(error) from error
         except StrategyRevisionConflictError as error:
             raise _revision_conflict(error) from error
+
+    if (
+        assistant_profiles is not None
+        and assistant_chat is not None
+        and assistant_turns is not None
+    ):
+        register_assistant_routes(
+            app, profiles=assistant_profiles, chat=assistant_chat, turns=assistant_turns
+        )
 
     # FastAPI sees plain dataclasses, while this inbound adapter owns wire-only constraints and
     # discriminator metadata. Mutate the cached schema once after every route is registered.

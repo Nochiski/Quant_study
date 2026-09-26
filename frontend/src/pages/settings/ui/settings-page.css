@@ -1,0 +1,23 @@
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-6);
+}
+
+.settings-page__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.settings-page__title {
+  margin: 0;
+  font-size: var(--text-size-display);
+  font-weight: var(--font-weight-strong);
+}
+
+.settings-page__description {
+  margin: 0;
+  color: var(--text-muted);
+}

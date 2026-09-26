@@ -15,6 +15,7 @@ from ._nodes import (
     ConstantNode,
     CrossSectionalNode,
     CrossSectionalOperator,
+    ExpressionNode,
     FactorComparisonOperator,
     FactorGraph,
     FieldNode,
@@ -41,6 +42,10 @@ _CHECKPOINT_BATCH = 256
 
 
 def _noop_checkpoint() -> None:
+    return None
+
+
+def _noop_progress(fraction: float) -> None:
     return None
 
 
@@ -124,11 +129,29 @@ def evaluate_factor_graph(
     observations: tuple[FactorObservation, ...],
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    progress: Callable[[float], None] = _noop_progress,
 ) -> FactorEvaluation:
+    """그래프를 평가한다. `progress` 는 그래프 평가 안의 완료 비율(0~1, 단조 증가)을 받는다.
+
+    노드 계산이 `_NODES_PROGRESS_SHARE` 까지, 출력 값 조립이 나머지를 채운다.
+    """
+
     computed = _compute_nodes(
-        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+        graph,
+        observations=observations,
+        parameters=parameters,
+        checkpoint=checkpoint,
+        progress=lambda fraction: progress(fraction * _NODES_PROGRESS_SHARE),
     )
-    return _evaluation_from_computed(graph, observations, computed, checkpoint=checkpoint)
+    return _evaluation_from_computed(
+        graph,
+        observations,
+        computed,
+        checkpoint=checkpoint,
+        progress=lambda fraction: progress(
+            _NODES_PROGRESS_SHARE + (1.0 - _NODES_PROGRESS_SHARE) * fraction
+        ),
+    )
 
 
 def _evaluation_from_computed(
@@ -137,6 +160,7 @@ def _evaluation_from_computed(
     computed: dict[str, list[FactorComputedValue]],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    progress: Callable[[float], None] = _noop_progress,
 ) -> FactorEvaluation:
     """Build the public output from an already evaluated node cache.
 
@@ -144,19 +168,24 @@ def _evaluation_from_computed(
     of one `_compute_nodes` invocation, rather than two calculations that merely ought to agree.
     """
     raw_output = computed[graph.output_node_id]
-    output = tuple(
-        FactorValue(
-            as_of=observation.as_of,
-            security_id=observation.security_id,
-            value=float(value)
-            if isinstance(value, (int, float)) and not isinstance(value, bool)
-            else None,
+    total = max(len(observations), 1)
+    output: list[FactorValue] = []
+    for index, (observation, value) in enumerate(
+        _checkpointed(zip(observations, raw_output, strict=True), checkpoint)
+    ):
+        if index % _CHECKPOINT_BATCH == 0:
+            progress(index / total)
+        output.append(
+            FactorValue(
+                as_of=observation.as_of,
+                security_id=observation.security_id,
+                value=float(value)
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+                else None,
+            )
         )
-        for observation, value in _checkpointed(
-            zip(observations, raw_output, strict=True), checkpoint
-        )
-    )
-    return FactorEvaluation(output_node_id=graph.output_node_id, values=output)
+    progress(1.0)
+    return FactorEvaluation(output_node_id=graph.output_node_id, values=tuple(output))
 
 
 def _compute_nodes(
@@ -165,17 +194,28 @@ def _compute_nodes(
     observations: tuple[FactorObservation, ...],
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    progress: Callable[[float], None] = _noop_progress,
 ) -> dict[str, list[FactorComputedValue]]:
     """Evaluate every node reachable from the output once; the cache is the single value source.
 
     `evaluate_factor_graph` returns the output node; `_trace.trace_factor_graph` projects the whole
     cache. Both read the same lists so trace values equal evaluation values by construction.
+
+    진행은 도달 가능한 노드마다 종류별 가중치(`_node_progress_weight`)로 몫을 나눠 노드 완료 때
+    올리고, 창 연산이라 가장 오래 걸리는 시계열 노드는 종목 하나를 끝낼 때마다 그 몫 안에서 올린다
+    (이슈 #162). 누적은 정수 가중치 합이라 끝값이 정확히 1.0 이다. 보고 빈도 조절은 호출자 몫이다.
     """
     nodes = {node.node_id: node for node in graph.nodes}
     parameter_values = {parameter.parameter_id: parameter.value for parameter in parameters}
     computed: dict[str, list[FactorComputedValue]] = {}
+    total_weight = _reachable_progress_weight(graph.output_node_id, nodes)
+    completed_weight = 0
+
+    def advance_within_node(node: ExpressionNode, fraction: float) -> None:
+        progress((completed_weight + fraction * _node_progress_weight(node)) / total_weight)
 
     def evaluate(node_id: str) -> list[FactorComputedValue]:
+        nonlocal completed_weight
         checkpoint()
         if node_id in computed:
             return computed[node_id]
@@ -226,7 +266,13 @@ def _compute_nodes(
         elif isinstance(node, UnaryNode):
             values = _unary(node, inputs[0], observations, checkpoint=checkpoint)
         elif isinstance(node, TimeSeriesNode):
-            values = _time_series(node, inputs[0], observations, checkpoint=checkpoint)
+            values = _time_series(
+                node,
+                inputs[0],
+                observations,
+                checkpoint=checkpoint,
+                advance=lambda fraction: advance_within_node(node, fraction),
+            )
         elif isinstance(node, CrossSectionalNode):
             values = _cross_sectional(node, inputs[0], observations, checkpoint=checkpoint)
         elif isinstance(node, GroupNode):
@@ -241,10 +287,46 @@ def _compute_nodes(
             )
         _require_finite_values(node.node_id, values, observations, checkpoint=checkpoint)
         computed[node_id] = values
+        completed_weight += _node_progress_weight(node)
+        progress(completed_weight / total_weight)
         return values
 
     evaluate(graph.output_node_id)
     return computed
+
+
+# 노드 계산이 평가 진행에서 차지하는 몫. 나머지는 출력 값 조립이다(4년 구간 실측 약 4%).
+_NODES_PROGRESS_SHARE = 0.96
+
+# 노드 종류별 진행 가중치. 실데이터 실측(이슈 #162, 모멘텀 252)에서 시계열 노드가 필드 노드의
+# 약 30배 시간을 썼다(창 길이만큼 값을 복사한다). 횡단면·그룹 노드는 날짜별 정렬이라 그 사이다.
+_TIME_SERIES_PROGRESS_WEIGHT = 20
+_SECTION_PROGRESS_WEIGHT = 3
+
+
+def _node_progress_weight(node: ExpressionNode) -> int:
+    if isinstance(node, TimeSeriesNode):
+        return _TIME_SERIES_PROGRESS_WEIGHT
+    if isinstance(node, (CrossSectionalNode, GroupNode)):
+        return _SECTION_PROGRESS_WEIGHT
+    return 1
+
+
+def _reachable_progress_weight(output_node_id: str, nodes: dict[str, ExpressionNode]) -> int:
+    """출력에서 도달 가능한 노드의 진행 가중치 합(진행 분모).
+
+    모르는 참조는 평가가 예외로 거부하므로 세지 않는다.
+    """
+
+    seen: set[str] = set()
+    pending = [output_node_id]
+    while pending:
+        node_id = pending.pop()
+        if node_id in seen or node_id not in nodes:
+            continue
+        seen.add(node_id)
+        pending.extend(node_dependencies(nodes[node_id]))
+    return max(sum(_node_progress_weight(nodes[node_id]) for node_id in seen), 1)
 
 
 def _require_finite_values(
@@ -381,9 +463,14 @@ def _time_series(
     observations: tuple[FactorObservation, ...],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
+    advance: Callable[[float], None] = _noop_progress,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
     by_security = _indices_by_security(observations, checkpoint=checkpoint)
+    # 종목마다 관측 수가 달라 종목 수로 세면 이력이 긴 종목 구간에서 느려진다.
+    # 처리한 관측 수로 센다.
+    observation_count = max(len(values), 1)
+    finished = 0
     for indices in _checkpointed(by_security.values(), checkpoint):
         for position, result_index in _checkpointed(enumerate(indices), checkpoint):
             end = position - node.lag + 1
@@ -405,6 +492,8 @@ def _time_series(
                 result[result_index] = min(window)
             else:
                 result[result_index] = max(window)
+        finished += len(indices)
+        advance(finished / observation_count)
     return result
 
 

@@ -19,7 +19,7 @@ change; the observation adapter owns their as_of vintage (D-006).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sized
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import TypeVar
@@ -86,6 +86,7 @@ from ._models import (
 from .ports.outgoing.engine_portfolio import EnginePortfolioPort
 from .ports.outgoing.raw_observations import (
     CancellableRawObservationPort,
+    ProgressReportingRawObservationPort,
     RawObservation,
     RawObservationContractViolation,
     RawObservationPort,
@@ -95,6 +96,24 @@ from .ports.outgoing.raw_observations import (
 
 _T = TypeVar("_T")
 _CHECKPOINT_BATCH = 256
+
+PipelineProgress = Callable[[float, str], None]
+"""파이프라인 안의 완료 비율(0~1, 단조 증가)과 사람이 읽는 현재 작업 설명을 받는 콜백."""
+
+# 파이프라인 진행 구간 경계. 실데이터(4년, 팩터 1개) 실측 시간 비율을 따른다(이슈 #162).
+# 화면은 정수 % 만 바뀌므로 구간 폭이 실제 시간에 비례해야 긴 구간에서도 막대가 고르게 오른다.
+# 실측 비율: 원시 로딩 약 17%, 재검증 약 2.5%, 팩터 입력 변환 약 8%, 팩터 평가 약 59%,
+# 포트폴리오 관측 약 10%, TargetTape 컴파일 약 3.5%.
+_PROGRESS_RAW_LOADED = 0.171
+_PROGRESS_VALIDATED = 0.196
+_PROGRESS_FACTOR_INPUTS = 0.197
+_PROGRESS_FACTORS_START = 0.279
+_PROGRESS_FACTORS_END = 0.87
+_PROGRESS_COMPILE = 0.966
+
+
+def _no_progress(fraction: float, message: str) -> None:
+    return None
 
 
 class InvalidPortfolioRequestError(ValueError):
@@ -241,7 +260,14 @@ class PortfolioDesignService:
         *,
         options: PortfolioPipelineOptions | None = None,
         cancelled: Callable[[], bool] = lambda: False,
+        progress: PipelineProgress = _no_progress,
     ) -> PortfolioPipelineResult:
+        """스펙을 검증하고 원시 관측에서 TargetTape 까지 만든다.
+
+        `progress` 는 원시 로딩 시작(0)부터 컴파일 완료(1)까지 단조 증가하는 비율을 받는다.
+        팩터 평가 구간은 팩터마다 같은 몫으로 나누고 그 안에서는 평가기의 노드·종목 단위 진행을
+        따른다. 보고 빈도는 조절하지 않는다 — 이벤트로 남길지는 호출자가 정한다.
+        """
         pipeline_options = options or PortfolioPipelineOptions()
 
         def checkpoint() -> None:
@@ -266,16 +292,32 @@ class PortfolioDesignService:
                 (plan.minimum_history_sessions - 1 for plan in plans.values()), default=0
             ),
         )
+        progress(0.0, "Loading raw observations")
         try:
-            if isinstance(self._observation_source, CancellableRawObservationPort):
+            if isinstance(self._observation_source, ProgressReportingRawObservationPort):
+                raw = self._observation_source.load_raw_observations_reporting(
+                    raw_query,
+                    checkpoint=checkpoint,
+                    progress=lambda fraction: progress(
+                        fraction * _PROGRESS_RAW_LOADED, "Loading raw observations"
+                    ),
+                )
+            elif isinstance(self._observation_source, CancellableRawObservationPort):
                 raw = self._observation_source.load_raw_observations_cancellable(
                     raw_query, checkpoint=checkpoint
                 )
             else:
                 raw = self._observation_source.load_raw_observations(raw_query)
+            progress(_PROGRESS_RAW_LOADED, "Validating raw observations")
             # Normal construction already validates the immutable value. Recheck at the consumer
             # boundary so a foreign/stale adapter cannot bypass the current port contract.
-            raw.validate_contract(checkpoint=checkpoint)
+            raw.validate_contract(
+                checkpoint=checkpoint,
+                progress=lambda fraction: progress(
+                    _between(_PROGRESS_RAW_LOADED, _PROGRESS_VALIDATED, fraction),
+                    "Validating raw observations",
+                ),
+            )
         except RawObservationContractViolation as error:
             raise RawObservationContractError(str(error)) from error
         checkpoint()
@@ -296,17 +338,50 @@ class PortfolioDesignService:
             checkpoint=checkpoint,
         )
         checkpoint()
+        progress(_PROGRESS_FACTOR_INPUTS, "Preparing factor inputs")
         factor_observations = tuple(
             _to_factor_observation(item, checkpoint=checkpoint)
-            for item in _checkpointed(raw.observations, checkpoint)
+            for item in _reported(
+                raw.observations,
+                checkpoint,
+                lambda fraction: progress(
+                    _between(_PROGRESS_FACTOR_INPUTS, _PROGRESS_FACTORS_START, fraction),
+                    "Preparing factor inputs",
+                ),
+            )
         )
         parameters = tuple(
             ResolvedFactorParameter(parameter.parameter_id, parameter.default)
             for parameter in spec.parameters
         )
         evaluations: list[FactorEvaluationRecord] = []
+        factor_count = max(len(spec.factors), 1)
         for factor_index, factor in enumerate(spec.factors):
             checkpoint()
+            factor_message = (
+                f"Evaluating factor {factor.factor_id} ({factor_index + 1}/{len(spec.factors)})"
+            )
+            progress(
+                _between(
+                    _PROGRESS_FACTORS_START, _PROGRESS_FACTORS_END, factor_index / factor_count
+                ),
+                factor_message,
+            )
+
+            def report_factor(
+                fraction: float, index: int = factor_index, message: str = factor_message
+            ) -> None:
+                # 팩터 경계를 (index + fraction) / count 한 식으로 계산해 다음 팩터 시작값과 같은
+                # float 가 되게 한다. 누적 덧셈은 팩터 3·6개에서 1ulp 역행했다(리뷰 P3-2).
+                progress(
+                    _between(
+                        _PROGRESS_FACTORS_START,
+                        _PROGRESS_FACTORS_END,
+                        (index + fraction) / factor_count,
+                    ),
+                    message,
+                )
+
             trace = None
             try:
                 if factor.factor_id == pipeline_options.trace_factor_id:
@@ -316,6 +391,7 @@ class PortfolioDesignService:
                         parameters=parameters,
                         selection=pipeline_options.trace_selection,
                         checkpoint=checkpoint,
+                        progress=report_factor,
                     )
                 else:
                     evaluation = evaluate_factor_graph(
@@ -323,6 +399,7 @@ class PortfolioDesignService:
                         observations=factor_observations,
                         parameters=parameters,
                         checkpoint=checkpoint,
+                        progress=report_factor,
                     )
             except NonFiniteFactorCalculationError as error:
                 node_index = next(
@@ -349,13 +426,23 @@ class PortfolioDesignService:
             )
         evaluation_records = tuple(evaluations)
         checkpoint()
+        progress(_PROGRESS_FACTORS_END, "Building portfolio observations")
         observations = _to_portfolio_observations(
             raw,
             evaluation_records,
             pipeline_options.starting_holdings,
             checkpoint=checkpoint,
+            progress=lambda fraction: progress(
+                _between(_PROGRESS_FACTORS_END, _PROGRESS_COMPILE, fraction),
+                "Building portfolio observations",
+            ),
         )
         checkpoint()
+        progress(_PROGRESS_COMPILE, "Compiling target tape")
+
+        def report_compile(fraction: float) -> None:
+            progress(_between(_PROGRESS_COMPILE, 1.0, fraction), "Compiling target tape")
+
         try:
             if pipeline_options.construction_trace_selection is None:
                 tape = compile_target_tape(
@@ -365,6 +452,7 @@ class PortfolioDesignService:
                     observations=observations,
                     schedule=schedule,
                     checkpoint=checkpoint,
+                    progress=report_compile,
                 )
                 construction_trace = None
             else:
@@ -376,6 +464,7 @@ class PortfolioDesignService:
                     schedule=schedule,
                     trace_selection=pipeline_options.construction_trace_selection,
                     checkpoint=checkpoint,
+                    progress=report_compile,
                 )
                 tape = compiled.tape
                 construction_trace = compiled.trace
@@ -393,6 +482,7 @@ class PortfolioDesignService:
             engine=engine,
             warnings=raw.warnings,
         )
+        progress(1.0, "Target tape compiled")
         return PortfolioPipelineResult(
             data_snapshot_id=raw.data_snapshot_id,
             factor_evaluations=evaluation_records,
@@ -653,6 +743,28 @@ def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterat
         yield item
 
 
+def _reported(
+    items: Iterable[_T], checkpoint: Callable[[], None], progress: Callable[[float], None]
+) -> Iterator[_T]:
+    """`_checkpointed` 와 같은 배치마다 완료 비율(0~1)도 보고한다. 끝나면 1.0 을 보고한다.
+
+    길이를 모르는 입력(지연 생성 값)은 중간 비율 없이 체크포인트만 걸고 끝에서 1.0 을 보고한다.
+    """
+    total = len(items) if isinstance(items, Sized) else None
+    for index, item in enumerate(items):
+        if index % _CHECKPOINT_BATCH == 0:
+            checkpoint()
+            if total:
+                progress(index / total)
+        yield item
+    progress(1.0)
+
+
+def _between(start: float, end: float, fraction: float) -> float:
+    """구간 [start, end] 안의 위치. 부동소수 오차로 end 를 넘지 않게 자른다."""
+    return min(start + (end - start) * fraction, end)
+
+
 def _reject_saved_references(spec: StrategySpec, plans: dict[str, FactorExecutionPlan]) -> None:
     # TODO(PLAN P5-03): evaluate referenced factors/subgraphs in topological order instead.
     issues = tuple(
@@ -756,11 +868,18 @@ def _to_portfolio_observations(
     starting_holdings: tuple[PortfolioStartingHolding, ...] | None = None,
     *,
     checkpoint: Callable[[], None] = lambda: None,
+    progress: Callable[[float], None] = lambda fraction: None,
 ) -> tuple[PortfolioObservation, ...]:
+    """`progress` 는 팩터 값 색인(0~0.3)과 관측 조립(0.3~1.0) 진행을 받는다."""
     in_range = set(_checkpointed(raw.sessions, checkpoint))
     values_by_key: dict[tuple[str, date, str], float | None] = {}
-    for record in _checkpointed(evaluations, checkpoint):
-        for value in _checkpointed(record.values, checkpoint):
+    record_count = max(len(evaluations), 1)
+    for record_index, record in enumerate(_checkpointed(evaluations, checkpoint)):
+
+        def report_record(fraction: float, index: int = record_index) -> None:
+            progress(0.3 * (index + fraction) / record_count)
+
+        for value in _reported(record.values, checkpoint, report_record):
             values_by_key[(record.factor_id, value.as_of, value.security_id)] = value.value
     opening_weights = (
         None
@@ -796,7 +915,9 @@ def _to_portfolio_observations(
                 else opening_weights.get(item.security_id, 0.0)
             ),
         )
-        for item in _checkpointed(raw.observations, checkpoint)
+        for item in _reported(
+            raw.observations, checkpoint, lambda fraction: progress(0.3 + 0.7 * fraction)
+        )
         if item.as_of in in_range
     )
 

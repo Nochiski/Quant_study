@@ -52,6 +52,18 @@ from .ports.outgoing.backtest_executor import (
 
 logger = logging.getLogger(__name__)
 
+# 실행 진행 막대에서 단계가 차지하는 구간. 실데이터 실측에서 tape 단계가 실행 시간의 96~97% 를
+# 쓰므로(이슈 #162, 6개월·9.5년 구간) 막대 대부분을 tape 에 주고 나머지 단계를 그 뒤에 둔다.
+_TAPE_PROGRESS_START = 0.02
+_TAPE_PROGRESS_END = 0.8
+_DATA_PROGRESS = 0.82
+_ENGINE_PROGRESS_START = 0.84
+_ENGINE_PROGRESS_END = 0.92
+_ARTIFACT_PROGRESS = 0.93
+# 팩터 평가기는 종목마다 진행을 보고한다. 같은 작업 설명 안에서 이 폭보다 작은 상승은 이벤트로
+# 남기지 않아 run 당 tape 이벤트 수를 약 100개 이하로 묶는다(SSE 재생·메모리 보호).
+_MIN_TAPE_PROGRESS_STEP = 0.01
+
 # run `error` 문자열에서 서버 절대 경로를 가린다. 어댑터 detail 이 `root=C:\...`·`/home/...`·
 # `\\server\share` 를 싣는데 화면(role=alert)에 그대로 나가면 서버 레이아웃·계정명·호스트명이
 # 새어 나간다. 원문은 서버 로그에. 규칙(오탐·미탐을 모두 줄이는 쪽으로):
@@ -422,7 +434,9 @@ class BacktestRunService:
         try:
             # tape 단계: 원시 관측 로딩 + 팩터 평가 + TargetTape 컴파일. 실데이터에서 실행 시간의
             # 대부분을 차지하므로 취소 콜백을 파이프라인 checkpoint 에 그대로 건다.
-            self._update(record, RunStatus.RUNNING, 0.02, "tape", "Compiling target tape")
+            self._update(
+                record, RunStatus.RUNNING, _TAPE_PROGRESS_START, "tape", "Compiling target tape"
+            )
             try:
                 # require_engine_compatible 은 start() 의 preflight 판정을 되풀이하는 심층 방어다 —
                 # 같은 순수 판정이라 정상 경로에서는 발동하지 않는다.
@@ -430,6 +444,7 @@ class BacktestRunService:
                     PortfolioPreviewRequest(strategy, environment=environment),
                     options=PortfolioPipelineOptions(require_engine_compatible=True),
                     cancelled=record.cancellation.is_set,
+                    progress=self._tape_progress(record),
                 ).preview
             except PortfolioPipelineCancelledError as error:
                 raise RunCancelledError("run cancelled while compiling target tape") from error
@@ -441,7 +456,7 @@ class BacktestRunService:
                     f"tape={tape.strategy_hash!r}"
                 )
             self._raise_if_cancelled(record)
-            self._update(record, RunStatus.RUNNING, 0.1, "data", "Loading market data")
+            self._update(record, RunStatus.RUNNING, _DATA_PROGRESS, "data", "Loading market data")
             security_ids = tuple(
                 sorted({target.security_id for frame in tape.frames for target in frame.targets})
             )
@@ -462,20 +477,30 @@ class BacktestRunService:
                 warnings=(*_as_data_warnings(preview.warnings), *dataset.warnings),
             )
             self._raise_if_cancelled(record)
-            self._update(record, RunStatus.RUNNING, 0.25, "engine", "Running backtest engine")
+            self._update(
+                record,
+                RunStatus.RUNNING,
+                _ENGINE_PROGRESS_START,
+                "engine",
+                "Running backtest engine",
+            )
             result = self._executor.execute(
                 BacktestExecutionRequest(run_id, spec, tape, dataset, provenance),
+                # 실행기는 자기 작업 안의 비율(0~1)을 보고한다. run 막대의 engine 구간으로 옮긴다.
                 progress=lambda value, stage, message: self._update(
                     record,
                     RunStatus.RUNNING,
-                    min(max(value, 0.25), 0.9),
+                    _ENGINE_PROGRESS_START
+                    + min(max(value, 0.0), 1.0) * (_ENGINE_PROGRESS_END - _ENGINE_PROGRESS_START),
                     stage,
                     message,
                 ),
                 cancelled=record.cancellation.is_set,
             )
             self._raise_if_cancelled(record)
-            self._update(record, RunStatus.RUNNING, 0.93, "artifact", "Committing artifacts")
+            self._update(
+                record, RunStatus.RUNNING, _ARTIFACT_PROGRESS, "artifact", "Committing artifacts"
+            )
             commit = self._artifact_store.commit(result)
             cancelled_after_commit = False
             with self._lock:
@@ -542,6 +567,26 @@ class BacktestRunService:
                         "failed",
                         "Run failed",
                     )
+
+    def _tape_progress(self, record: _RunRecord) -> Callable[[float, str], None]:
+        """파이프라인 진행(0~1)을 run 막대의 tape 구간으로 옮기고 이벤트 빈도를 묶는 콜백.
+
+        작업 설명이 바뀌면 항상 남기고, 같은 설명 안에서는 `_MIN_TAPE_PROGRESS_STEP` 이상 오를 때만
+        남긴다. run 스레드에서만 불리므로 마지막 보고값은 잠금 없이 이 클로저가 소유한다.
+        """
+
+        last_value = _TAPE_PROGRESS_START
+        last_message: str | None = None
+
+        def report(fraction: float, message: str) -> None:
+            nonlocal last_value, last_message
+            value = _TAPE_PROGRESS_START + fraction * (_TAPE_PROGRESS_END - _TAPE_PROGRESS_START)
+            if message == last_message and value - last_value < _MIN_TAPE_PROGRESS_STEP:
+                return
+            self._update(record, RunStatus.RUNNING, value, "tape", message)
+            last_value, last_message = value, message
+
+        return report
 
     def _update(
         self,

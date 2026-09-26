@@ -535,7 +535,13 @@ describe("StrategyIde", () => {
       JSON.parse(localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY) ?? "null"),
     ).toEqual({
       version: 1,
-      sizes: { outlineWidth: 256, inspectorWidth: 320, debuggerHeight: 220 },
+      sizes: {
+        outlineWidth: 256,
+        inspectorWidth: 320,
+        debuggerHeight: 220,
+        assistantWidth: 360,
+      },
+      open: { assistant: false },
     });
   });
 });

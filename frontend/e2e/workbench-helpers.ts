@@ -10,8 +10,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createClient } from "../src/shared/api/generated/client";
+import { backendOrigin, previewOrigin } from "./ports.mjs";
 
-export const BACKEND = "http://localhost:8000";
+export const BACKEND = backendOrigin();
 export const apiClient = createClient({ baseUrl: BACKEND });
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
 /** backend 소유 골든 fixture(schema 1.1). frontend 는 읽기만 한다(`frontend-testing.md`). */
@@ -58,7 +59,7 @@ export const requireData = <Value>(
 
 export const currentSource = async (page: Page) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: "http://localhost:5173",
+    origin: previewOrigin(),
   });
   await editor(page).click();
   await editor(page).press("Control+A");
@@ -94,6 +95,8 @@ export const saveAndWaitForRevision = async (page: Page, revision: number) => {
 export const mustReplace = (text: string, from: string, to: string): string => {
   const next = text.replace(from, to);
   if (next === text)
-    throw new Error(`golden fixture no longer contains ${JSON.stringify(from)}`);
+    throw new Error(
+      `golden fixture no longer contains ${JSON.stringify(from)}`,
+    );
   return next;
 };

@@ -198,6 +198,45 @@ def test_risk_factor_is_read_raw_even_under_rank_normalization() -> None:
     assert weights == pytest.approx({"a": 0.8, "b": 0.2})
 
 
+def test_future_dated_risk_factor_value_is_missing_risk_not_a_look_ahead_weight() -> None:
+    """기준일 뒤에 공개된 역가중 값은 비중에 쓰이지 않는다(look-ahead 가드, P2-06 리뷰 P2-1).
+
+    역가중 팩터는 합성 루프 밖에 있어서 `_score_candidate` 의 `FUTURE_DATA` 가드와 정규화 모집단
+    가드가 이 값을 보지 않는다. 막는 곳은 `_risk_value` 의 공개일 조건 하나라 따로 고정한다. 알파가
+    아니므로 선정·순위는 그대로이고, 그 종목만 `MISSING_RISK` 로 빠져 나머지가 비중을 나눠 갖는다.
+    """
+    alpha = _base(_factor("value"), normalization=SignalNormalization.NONE)
+    spec = _with_risk_factor(
+        replace(alpha, factors=(*alpha.factors, _factor("vol"))),
+        "vol",
+        weighting=WeightingMethod.RISK,
+    )
+    values = {"value": {"a": 3.0, "b": 2.0, "c": 1.0}, "vol": {"a": 1.0, "b": 2.0, "c": 4.0}}
+    observations = tuple(
+        replace(
+            observation,
+            factor_values=tuple(
+                replace(item, available_date=DAY + timedelta(days=1))
+                if observation.security_id == "a" and item.factor_id == "vol"
+                else item
+                for item in observation.factor_values
+            ),
+        )
+        for observation in _observations(values)
+    )
+
+    frame = _frame(spec, observations)
+    decisions = {item.security_id: item for item in frame.candidates}
+
+    # 공개일을 무시하면 a 가 1/1 : 1/2 로 2/3 을 받는다.
+    assert {target.security_id: target.weight for target in frame.targets} == pytest.approx(
+        {"b": 1.0}
+    )
+    assert ExclusionReason.MISSING_RISK in decisions["a"].exclusion_reasons
+    assert ExclusionReason.FUTURE_DATA not in decisions["a"].exclusion_reasons
+    assert decisions["a"].eligible and decisions["a"].rank == 1
+
+
 def test_non_positive_or_missing_risk_factor_value_keeps_the_missing_risk_exclusion() -> None:
     """`<= 0` 은 기존 `MISSING_RISK` 분기다.
 
@@ -316,6 +355,11 @@ def test_risk_factor_alone_satisfies_the_risk_weighting_source_rule() -> None:
 
     assert "strategy.risk.risk_field" not in _codes(with_factor, ValidationSeverity.ERROR)
     assert _codes(without_source, ValidationSeverity.ERROR) == ["strategy.risk.risk_field"]
+    (issue,) = [
+        i for i in validate_strategy(without_source).issues if i.code == "strategy.risk.risk_field"
+    ]
+    # 기대 대 실제(error-messages 규칙): 모드와 두 원천의 값이 문장에 실린다(P2-06 리뷰 P3-3).
+    assert "weighting='risk' risk_field_id=None risk_factor_id=None" in issue.message
 
 
 def test_risk_factor_id_must_name_a_factor_of_the_document() -> None:

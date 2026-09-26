@@ -37,5 +37,7 @@ paths:
   테스트로 누락을 막는다. `tOptional`은 없는 키를 조용히 삼킨다.
 - UI/API/i18n 변경 시 관련 Playwright spec의 test id, 문구, API path 영향을 검색하고 함께
   수정한다.
+- 유저 스토리를 지키는 e2e에는 `@story`와 `@US-*` 태그를 붙인다. 스토리 하나를 위한 새 e2e는
+  `frontend/e2e/stories/`에 둔다. 의무와 절차는 `.claude/rules/user-story-harness.md`가 소유한다.
 - mock 성공 경로뿐 아니라 PIT 경고, invalid spec, failed/pruned trial, cancellation, 부분 결과
   표시를 테스트한다.

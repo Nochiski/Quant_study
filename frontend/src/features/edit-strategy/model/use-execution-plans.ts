@@ -81,7 +81,9 @@ export const prepareExecutionPlans = (
 ): PreparedPlans => {
   const spec = currentSpec(state);
   if (spec === null) return { status: "blocked", reason: blockedReason(state) };
-  if (spec.factors.length === 0) return { status: "empty" };
+  // schema 1.2에서 `factors`는 생략 가능하다(최상위 필수 키는 두 개뿐).
+  const factors = spec.factors ?? [];
+  if (factors.length === 0) return { status: "empty" };
   if (source.schema === null || source.contract === null) {
     return source.state.schema === "loading" ||
       source.state.contract === "loading"
@@ -146,8 +148,9 @@ const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
   const parameterIds = (spec.parameters ?? []).map(
     (parameter) => parameter.parameter_id,
   );
-  const factorIds = spec.factors.map((factor) => factor.factor_id);
-  return spec.factors.map((factor, factorIndex) => ({
+  const factors = spec.factors ?? [];
+  const factorIds = factors.map((factor) => factor.factor_id);
+  return factors.map((factor, factorIndex) => ({
     factorIndex,
     factorId: factor.factor_id,
     label: factor.label,

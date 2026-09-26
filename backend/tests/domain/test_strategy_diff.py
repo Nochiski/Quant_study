@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
 from pathlib import Path
 
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
@@ -32,9 +31,7 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_docum
 
 
 def _template() -> StrategySpec:
-    return StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
-    ).template()
+    return StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template()
 
 
 def test_identical_specs_and_identity_changes_produce_no_entries() -> None:
@@ -50,13 +47,13 @@ def test_scalar_changes_are_reported_per_leaf_with_json_values() -> None:
         base,
         title="바뀐 제목",
         risk=replace(base.risk, max_name_weight=0.05),
-        data=replace(base.data, end=date(2026, 12, 31)),
+        portfolio=replace(base.portfolio, selection_count=30),
     )
 
     entries = diff_strategy_specs(base, target)
 
     assert entries == (
-        DiffEntry("/data/end", DiffKind.CHANGED, "2026-09-03", "2026-12-31"),
+        DiffEntry("/portfolio/selection_count", DiffKind.CHANGED, 20, 30),
         DiffEntry("/risk/max_name_weight", DiffKind.CHANGED, 0.1, 0.05),
         DiffEntry("/title", DiffKind.CHANGED, "새 팩터 전략", "바뀐 제목"),
     )

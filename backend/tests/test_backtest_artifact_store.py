@@ -17,6 +17,10 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     MetricValue,
     build_default_metric_registry,
 )
+from strategy_workbench.domain.backtest.facade.environment import (
+    RunEnvironment,
+    environment_hash,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
@@ -36,9 +40,11 @@ def _result() -> BacktestRunResult:
     strategy = StrategyDesignService(
         InMemoryStrategyRepository(),
         new_id=lambda: "unused",
-        today=lambda: date(2026, 9, 3),
     ).template()
-    run_spec = BacktestRunSpec(strategy)
+    environment = RunEnvironment(
+        start=date(2021, 1, 1), end=date(2026, 8, 31), universe_id="krx.common-stock"
+    )
+    run_spec = BacktestRunSpec(strategy, environment=environment)
     return BacktestRunResult(
         manifest=RunManifest(
             run_id="run-safe-001",
@@ -54,9 +60,11 @@ def _result() -> BacktestRunResult:
             metric_registry_version=registry.version,
             initial_cash=100.0,
             annualization_days=252,
-            fee_bps=0.0,
-            slippage_bps=0.0,
-            participation_rate=1.0,
+            fee_bps=environment.fee_bps,
+            slippage_bps=environment.slippage_bps,
+            participation_rate=environment.participation_rate,
+            environment=environment,
+            environment_hash=environment_hash(environment),
             strategy_provenance=StrategyProvenance(
                 StrategySourceKind.INLINE_DRAFT, "strategy", "1.1"
             ),

@@ -10,7 +10,6 @@ from ._nodes import (
     CrossSectionalOperator,
     FactorGraph,
     FieldNode,
-    MissingPolicy,
     TimeSeriesNode,
     TimeSeriesOperator,
 )
@@ -46,7 +45,6 @@ class FactorDefinition:
     output_unit: str
     required_field_ids: tuple[str, ...]
     minimum_history_sessions: int
-    missing_policy: MissingPolicy
     availability: FactorAvailability
     default_graph: FactorGraph | None
     tags: tuple[str, ...] = ()
@@ -616,7 +614,6 @@ def build_default_factor_registry() -> FactorRegistry:
             output_unit=seed.unit,
             required_field_ids=seed.fields,
             minimum_history_sessions=seed.history,
-            missing_policy=MissingPolicy.DROP,
             availability=(
                 FactorAvailability.IMPLEMENTED
                 if seed.factor_id in implemented

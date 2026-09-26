@@ -856,8 +856,8 @@ export const StrategyDebugger = ({
             type="date"
             aria-label={t("debugger.date")}
             value={selectedAsOf}
-            min={context?.start}
-            max={context?.end}
+            min={context?.start ?? undefined}
+            max={context?.end ?? undefined}
             aria-describedby={`${idBase}-date-note`}
             disabled={context === null}
             onChange={(event) => {

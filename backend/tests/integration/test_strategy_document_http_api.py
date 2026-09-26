@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
+GOLDEN_SPEC_HASH = "f14a9eaacf1214e8d697288ebed1047b723ef3de75fd222aafa19b400e6b43df"
 
 
 def _source(name: str) -> str:
@@ -36,11 +36,11 @@ def test_yaml_and_json_sources_compile_to_the_same_backend_hash() -> None:
     assert yaml_result["diagnostics"] == []
     assert yaml_result["spec_hash"] == GOLDEN_SPEC_HASH == json_result["spec_hash"]
     assert yaml_result["source_hash"] != json_result["source_hash"]
-    assert yaml_result["schema_version"] == "1.1"
+    assert yaml_result["schema_version"] == "1.2"
     assert yaml_result["spec"]["identity"] == {
         "strategy_id": "draft",
         "revision": 0,
-        "schema_version": "1.1",
+        "schema_version": "1.2",
     }
     assert yaml_result["canonical_json"] == json_result["canonical_json"]
     assert '"max_name_weight":0.05' in yaml_result["canonical_json"]
@@ -68,7 +68,7 @@ def test_semantic_error_points_at_the_exact_yaml_scalar_and_withholds_spec() -> 
 
 def test_missing_field_points_at_the_nearest_parent_range() -> None:
     client = TestClient(build_http_app())
-    source = _source("quality_momentum.yaml").replace('  end: "2026-08-31"\n', "")
+    source = _source("quality_momentum.yaml").replace("      output_node_id: mom_252\n", "")
 
     result = _compile(client, source)
 
@@ -76,8 +76,8 @@ def test_missing_field_points_at_the_nearest_parent_range() -> None:
     (diagnostic,) = result["diagnostics"]
     assert diagnostic["code"] == "structure.missing_field"
     assert diagnostic["kind"] == "structural"
-    assert diagnostic["pointer"] == "/data/end"
-    assert diagnostic["range"]["start"]["line"] == source.splitlines().index("data:") + 1
+    assert diagnostic["pointer"] == "/factors/0/graph/output_node_id"
+    assert diagnostic["range"]["start"]["line"] == source.splitlines().index("    graph:") + 1
 
 
 def test_unknown_key_points_at_the_key_itself() -> None:

@@ -27,7 +27,7 @@ export type StoredRevisionMeta = Pick<
  *   `POST /strategy-documents/upgrade`로 현재 버전 텍스트를 받아 편집기에 넣는다. 변환할 수 없는
  *   버전이면 backend가 `strategy_document.not_upgradeable` 422로 거부하고 배너가 그 문구를 보인다
  *   (frontend는 어떤 버전이 은퇴 버전인지 알지 않는다 — Phase 2 감사 DEFECT-P2X-002).
- * - `frozen-generated`: legacy JSON 동결 row. generated source는 이미 1.1이므로 업그레이드
+ * - `frozen-generated`: legacy JSON 동결 row. generated source는 이미 현재 버전이므로 업그레이드
  *   endpoint를 부르지 않고 새 revision 저장만 제안한다(P1-03 리뷰 잔여 위험 1).
  * - `none`: 배너 없음.
  */

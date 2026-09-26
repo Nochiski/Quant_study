@@ -19,8 +19,23 @@ from strategy_workbench.bootstrap.facade.http import build_http_app
 from tests.backtest_run_wait import wait_for_terminal_state
 
 
-def _scope(client: TestClient, spec: dict[str, Any]) -> tuple[str, list[str], str]:
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+def _environment(**overrides: Any) -> dict[str, Any]:
+    """실행 설정은 1.2 부터 요청 본문이 싣는다(P2-03). 1.1 템플릿이 갖고 있던 구간이다."""
+    return {
+        "start": "2021-09-04",
+        "end": "2026-09-03",
+        "universe_id": "krx.common-stock",
+        **overrides,
+    }
+
+
+def _scope(
+    client: TestClient, spec: dict[str, Any], environment: dict[str, Any] | None = None
+) -> tuple[str, list[str], str]:
+    preview = client.post(
+        "/api/v1/portfolio/preview",
+        json={"spec": spec, "environment": environment or _environment()},
+    )
     assert preview.status_code == 200, preview.text
     frame = preview.json()["tape"]["frames"][-1]
     security_ids = sorted(item["security_id"] for item in frame["candidates"][:3])
@@ -34,6 +49,7 @@ def _inline_request(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]
     factor = spec["factors"][0]
     return spec, {
         "strategy_source": {"kind": "inline_draft", "spec": spec},
+        "environment": _environment(),
         "as_of": as_of,
         "security_ids": security_ids,
         "factor_id": factor_id,
@@ -46,7 +62,7 @@ def _inline_request(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]
 def _save(client: TestClient, spec: dict[str, Any]) -> dict[str, Any]:
     document = copy.deepcopy(spec)
     document.pop("identity")
-    document["schema_version"] = "1.1"
+    document["schema_version"] = "1.2"
     response = client.post(
         "/api/v1/strategy-documents",
         json={
@@ -73,7 +89,7 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
     assert payload["provenance"] == {
         "kind": "inline_draft",
         "spec_hash": payload["spec_hash"],
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "strategy_id": None,
         "revision": None,
         "source_hash": None,
@@ -98,7 +114,9 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
     assert explained.status_code == 200, explained.text
     assert payload["plan_hash"] == explained.json()["plan"]["plan_hash"]
 
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec}).json()["tape"]
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": spec, "environment": _environment()}
+    ).json()["tape"]
     assert payload["snapshot_id"] == preview["data_snapshot_id"]
     frame = next(item for item in preview["frames"] if item["signal_as_of"] == request["as_of"])
     expected_candidates = [
@@ -131,8 +149,10 @@ def test_omitted_as_of_resolves_the_latest_executable_frame_for_inline_and_saved
 ) -> None:
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
-    spec["data"]["end"] = end
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+    environment = _environment(end=end)
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": spec, "environment": environment}
+    )
     assert preview.status_code == 200, preview.text
     expected = preview.json()["tape"]["frames"][-1]
     factor = spec["factors"][0]
@@ -153,6 +173,7 @@ def test_omitted_as_of_resolves_the_latest_executable_frame_for_inline_and_saved
             "/api/v1/strategies/debug/trace",
             json={
                 "strategy_source": source,
+                "environment": environment,
                 "security_ids": security_ids,
                 "factor_id": factor["factor_id"],
                 "node_ids": [factor["graph"]["output_node_id"]],
@@ -171,15 +192,16 @@ def test_omitted_as_of_resolves_the_latest_executable_frame_for_inline_and_saved
 def test_explicit_non_rebalance_date_keeps_raw_and_node_partial_trace() -> None:
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
-    spec["data"]["end"] = "2026-09-04"
-    _, security_ids, factor_id = _scope(client, spec)
+    environment = _environment(end="2026-09-04")
+    _, security_ids, factor_id = _scope(client, spec, environment)
     factor = spec["factors"][0]
 
     response = client.post(
         "/api/v1/strategies/debug/trace",
         json={
             "strategy_source": {"kind": "inline_draft", "spec": spec},
-            "as_of": spec["data"]["end"],
+            "environment": environment,
+            "as_of": environment["end"],
             "security_ids": security_ids,
             "factor_id": factor_id,
             "node_ids": [factor["graph"]["output_node_id"]],
@@ -189,7 +211,7 @@ def test_explicit_non_rebalance_date_keeps_raw_and_node_partial_trace() -> None:
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["as_of"] == spec["data"]["end"]
+    assert payload["as_of"] == environment["end"]
     assert payload["target"] is None
     assert payload["raw"]
     assert payload["trace"]["rows"]
@@ -225,13 +247,16 @@ def test_starting_holdings_change_the_actual_target_and_unknown_holding_is_rejec
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
     spec["portfolio"]["minimum_trade_weight"] = 0.2
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": spec, "environment": _environment()}
+    )
     assert preview.status_code == 200, preview.text
     frame = preview.json()["tape"]["frames"][0]
     security_ids = sorted(item["security_id"] for item in frame["candidates"])
     factor = spec["factors"][0]
     request = {
         "strategy_source": {"kind": "inline_draft", "spec": spec},
+        "environment": _environment(),
         "as_of": frame["signal_as_of"],
         "security_ids": security_ids,
         "factor_id": factor["factor_id"],
@@ -284,7 +309,7 @@ def test_starting_holdings_change_the_actual_target_and_unknown_holding_is_rejec
 def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() -> None:
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
-    spec["data"].update({"start": "2024-01-03", "end": "2024-01-09"})
+    environment = _environment(start="2024-01-03", end="2024-01-09")
     spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
     factor = spec["factors"][0]
     factor["graph"] = {
@@ -296,10 +321,10 @@ def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() ->
             }
         ],
         "output_node_id": "foreign-flow",
-        "missing_policy": "drop",
     }
     base = {
         "strategy_source": {"kind": "inline_draft", "spec": spec},
+        "environment": environment,
         "factor_id": factor["factor_id"],
         "node_ids": ["foreign-flow"],
         "include_raw": True,
@@ -360,7 +385,7 @@ def test_saved_revision_trace_is_hash_guarded_and_errors_are_structured() -> Non
     assert response.json()["provenance"] == {
         "kind": "saved_revision",
         "spec_hash": saved["spec_hash"],
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "strategy_id": saved["strategy_id"],
         "revision": 1,
         "source_hash": saved["source_hash"],
@@ -418,19 +443,20 @@ def test_non_finite_inline_number_is_a_coded_preflight_error(literal: str) -> No
     client = TestClient(build_http_app())
     _, request = _inline_request(client)
     encoded = json.dumps(request)
-    needle = '"fee_bps": 15.0'
+    # 1.2 부터 비용·참여율은 문서 밖이라, 문서에 남은 제약 필드로 같은 경로를 겨냥한다.
+    needle = '"max_name_weight": 0.1'
     assert needle in encoded
 
     response = client.post(
         "/api/v1/strategies/debug/trace",
-        content=encoded.replace(needle, f'"fee_bps": {literal}'),
+        content=encoded.replace(needle, f'"max_name_weight": {literal}'),
         headers={"content-type": "application/json"},
     )
 
     assert response.status_code == 422, response.text
     assert response.json()["detail"]["code"] == "portfolio.strategy.invalid"
     assert any(
-        issue["path"] == "execution.fee_bps"
+        issue["path"] == "risk.max_name_weight"
         for issue in response.json()["detail"]["validation"]["issues"]
     )
     TypeAdapter(Trace422Response).validate_python(response.json())
@@ -524,12 +550,12 @@ def test_factor_weight_overflow_is_invalid_before_preview_or_backtest_hashing() 
     )
     preview = client.post(
         "/api/v1/portfolio/preview",
-        content=raw_json({"spec": spec}),
+        content=raw_json({"spec": spec, "environment": _environment()}),
         headers={"content-type": "application/json"},
     )
     backtest = client.post(
         "/api/v1/backtests",
-        content=raw_json({"strategy": spec, "core": "python"}),
+        content=raw_json({"strategy": spec, "core": "python", "environment": _environment()}),
         headers={"content-type": "application/json"},
     )
 
@@ -592,20 +618,20 @@ def test_finite_factor_overflow_is_coded_on_preview_and_trace_and_fails_the_run(
             },
         ],
         "output_node_id": "overflow",
-        "missing_policy": "drop",
     }
     spec["portfolio"]["weighting"] = "factor_score"
-    spec["data"]["end"] = "2026-09-04"
+    environment = _environment(end="2026-09-04")
     trace_request = {
         "strategy_source": {"kind": "inline_draft", "spec": spec},
-        "as_of": spec["data"]["end"],
+        "environment": environment,
+        "as_of": environment["end"],
         "security_ids": ["sec-005930-1"],
         "factor_id": factor["factor_id"],
         "node_ids": ["overflow"],
     }
 
     responses = (
-        client.post("/api/v1/portfolio/preview", json={"spec": spec}),
+        client.post("/api/v1/portfolio/preview", json={"spec": spec, "environment": environment}),
         client.post("/api/v1/strategies/debug/trace", json=trace_request),
     )
 
@@ -626,7 +652,10 @@ def test_finite_factor_overflow_is_coded_on_preview_and_trace_and_fails_the_run(
 
     # 오버플로는 팩터를 평가해야 드러난다. 백테스트 시작은 데이터를 읽지 않아 접수되고(이슈 #158)
     # run 의 tape 단계가 같은 issue 코드·경로를 error 에 실어 실패한다.
-    backtest = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
+    backtest = client.post(
+        "/api/v1/backtests",
+        json={"strategy": spec, "core": "python", "environment": environment},
+    )
     assert backtest.status_code == 202, backtest.text
     state = wait_for_terminal_state(client, backtest.json()["run"]["run_id"])
     assert state["status"] == "failed", state
@@ -638,7 +667,7 @@ def test_finite_factor_overflow_is_coded_on_preview_and_trace_and_fails_the_run(
 def test_starting_holdings_without_a_target_frame_return_a_typed_preflight_error() -> None:
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
-    spec["data"].update({"start": "2026-09-04", "end": "2026-09-04"})
+    single_session = _environment(start="2026-09-04", end="2026-09-04")
     spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
     factor = spec["factors"][0]
 
@@ -646,7 +675,8 @@ def test_starting_holdings_without_a_target_frame_return_a_typed_preflight_error
         "/api/v1/strategies/debug/trace",
         json={
             "strategy_source": {"kind": "inline_draft", "spec": spec},
-            "as_of": spec["data"]["end"],
+            "environment": single_session,
+            "as_of": single_session["end"],
             "security_ids": ["sec-005930-1"],
             "factor_id": factor["factor_id"],
             "starting_holdings": [{"security_id": "sec-005930-1", "weight": 0.5}],
@@ -662,7 +692,7 @@ def test_starting_holdings_without_a_target_frame_return_a_typed_preflight_error
 def test_omitted_as_of_without_an_executable_frame_returns_a_typed_error() -> None:
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
-    spec["data"].update({"start": "2026-09-04", "end": "2026-09-04"})
+    single_session = _environment(start="2026-09-04", end="2026-09-04")
     spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
     factor = spec["factors"][0]
 
@@ -670,6 +700,7 @@ def test_omitted_as_of_without_an_executable_frame_returns_a_typed_error() -> No
         "/api/v1/strategies/debug/trace",
         json={
             "strategy_source": {"kind": "inline_draft", "spec": spec},
+            "environment": single_session,
             "security_ids": ["sec-005930-1"],
             "factor_id": factor["factor_id"],
             "node_ids": [factor["graph"]["output_node_id"]],
@@ -742,3 +773,26 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
             }
         }
     )
+
+
+def test_a_missing_environment_is_coded_on_trace_like_preview() -> None:
+    """P2-02 2차 리뷰 P3: trace 도 preview 와 같은 코드·details 구조로 거절한다.
+
+    trace 만 사유를 메시지 문자열로 납작하게 만들면 프론트가 코드로 분기하려고 본문을 파싱해야
+    한다. 1.2 에서 그 사유는 "실행 설정이 없다"다(P2-03).
+    """
+    client = TestClient(build_http_app())
+    spec, request = _inline_request(client)
+    request = {key: value for key, value in request.items() if key != "environment"}
+
+    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+    trace = client.post("/api/v1/strategies/debug/trace", json=request)
+
+    assert (preview.status_code, trace.status_code) == (422, 422), (preview.text, trace.text)
+    codes = [response.json()["detail"]["code"] for response in (preview, trace)]
+    assert codes == ["portfolio.strategy.invalid", "portfolio.strategy.invalid"]
+    issue_codes = [
+        [issue["code"] for issue in response.json()["detail"]["validation"]["issues"]]
+        for response in (preview, trace)
+    ]
+    assert issue_codes == [["run_environment.required"]] * 2

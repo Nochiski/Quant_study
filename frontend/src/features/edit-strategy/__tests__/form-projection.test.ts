@@ -64,13 +64,11 @@ describe("projectForm", () => {
 
   it("decides controls from the schema only", () => {
     const { sections } = projectForm(SCHEMA, parsed(VERBOSE), []);
-    const data = objectFields(sections, "data");
-    expect(field(data, "start").control).toEqual({ kind: "date" });
-    expect(field(data, "universe_id").control).toEqual({
+    const riskFields = objectFields(sections, "risk");
+    expect(field(riskFields, "risk_field_id").control).toEqual({
       kind: "catalog",
-      catalog: "universe",
+      catalog: "equity-field",
     });
-    expect(field(data, "market").control).toMatchObject({ kind: "enum" });
     const portfolio = objectFields(sections, "portfolio");
     expect(field(portfolio, "selection_count").control).toMatchObject({
       kind: "number",
@@ -102,22 +100,21 @@ describe("projectForm", () => {
   it("marks written fields from the tree and shows defaults for omitted ones", () => {
     const verbose = projectForm(SCHEMA, parsed(VERBOSE), []);
     const minimal = projectForm(SCHEMA, parsed(MINIMAL), []);
-    const verboseData = objectFields(verbose.sections, "data");
-    const minimalData = objectFields(minimal.sections, "data");
-    expect(field(verboseData, "market")).toMatchObject({
+    const verbosePortfolio = objectFields(verbose.sections, "portfolio");
+    const minimalPortfolio = objectFields(minimal.sections, "portfolio");
+    expect(field(verbosePortfolio, "rebalance")).toMatchObject({
       written: true,
-      value: "KRX",
+      value: "monthly",
     });
-    expect(field(minimalData, "market")).toMatchObject({
+    expect(field(minimalPortfolio, "rebalance")).toMatchObject({
       written: false,
-      value: "KRX",
+      value: "monthly",
       hasDefault: true,
-      defaultValue: "KRX",
+      defaultValue: "monthly",
     });
-    expect(field(minimalData, "start")).toMatchObject({
+    expect(field(minimalPortfolio, "selection_count")).toMatchObject({
       written: true,
-      required: true,
-      value: "2021-01-01",
+      value: 20,
     });
     expect(section(minimal.sections, "signal")).toMatchObject({
       kind: "object",
@@ -296,7 +293,7 @@ describe("projectForm", () => {
     expect(field(objectFields(sections, ""), "schema_version").control).toEqual(
       {
         kind: "const",
-        value: "1.1",
+        value: "1.2",
       },
     );
     const factors = section(sections, "factors");
@@ -396,7 +393,10 @@ describe("projectForm", () => {
       }
     };
     walk(SCHEMA);
-    expect([...found].sort()).toEqual([...CATALOGS].sort());
+    // 전략 문서가 쓰는 카탈로그는 Form이 아는 집합의 부분집합이어야 한다. `universe`처럼
+    // 실행 설정으로 옮겨간 카탈로그는 Form 쪽에 남아 있어도 된다(P2-03·P3-02).
+    expect(found.size).toBeGreaterThan(0);
+    expect([...found].every((name) => CATALOGS.includes(name as never))).toBe(true);
   });
 
   it("knows every x-reference namespace the runtime schema publishes (audit DEFECT-P5X-003)", () => {

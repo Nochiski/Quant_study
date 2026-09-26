@@ -28,6 +28,11 @@ from strategy_workbench.application.factor_research.facade.ports import (
     FactorMetadataPort,
     FactorMetadataSnapshot,
 )
+from strategy_workbench.domain.backtest.facade.environment import (
+    MissingRunEnvironmentError,
+    RunEnvironment,
+    require_environment,
+)
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -36,7 +41,7 @@ from strategy_workbench.domain.factor.facade.evaluation import (
     NonFiniteFactorCalculationError,
     evaluate_factor_graph,
 )
-from strategy_workbench.domain.factor.facade.expression import NodeValueType
+from strategy_workbench.domain.factor.facade.expression import MissingPolicy, NodeValueType
 from strategy_workbench.domain.factor.facade.planning import (
     FactorExecutionPlan,
     InvalidFactorGraphError,
@@ -201,6 +206,8 @@ class _PreparedPipeline:
     engine: EngineCompatibility
     metadata: FactorMetadataSnapshot
     plans: dict[str, FactorExecutionPlan]
+    # 문서 검증 뒤에 해소한 실행 설정. 호출자가 브리지를 다시 부르지 않게 같이 돌려준다.
+    environment: RunEnvironment
 
 
 @dataclass(frozen=True)
@@ -240,11 +247,17 @@ class PortfolioDesignService:
         시간이 데이터 구간·유니버스 크기에 비례하지 않는다 — 백테스트 시작 요청이 즉시 202 를
         돌려주기 위한 사전 검사다(이슈 #158). 데이터에 의존하는 실패(관측 부재·계약 위반·스냅샷
         불일치·비유한 계산)는 여기서 잡히지 않는다.
+
+        **`request.environment` 를 읽는다.** 1.2 부터 참여율(엔진 능력)과 결측 정책(플랜)이
+        실행 설정의 값이라 문서만으로는 같은 판정을 낼 수 없다. 그래서 실행 설정이 없으면 여기서도
+        코드화된 진단으로 거절한다 — 해소 단계가 사라져(문서 브리지 없음) `start()` 와 `_run` 이
+        서로 다른 값을 넘길 여지 자체가 없다(P2-03 결정 항목 종결).
         """
 
-        # 호환성은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게 명시한다.
+        # 엔진 호환성만은 값으로 돌려주는 계약이므로 기본값이 바뀌어도 예외 경로로 새지 않게
+        # 명시한다. 문서·실행 설정 오류는 위 docstring 대로 예외다.
         options = PortfolioPipelineOptions(require_engine_compatible=False)
-        return self._prepare(request.spec, options).engine
+        return self._prepare(request.spec, options, request.environment).engine
 
     def run_pipeline(
         self,
@@ -266,15 +279,19 @@ class PortfolioDesignService:
             _raise_if_cancelled(cancelled)
 
         spec = request.spec
-        prepared = self._prepare(spec, pipeline_options, checkpoint=checkpoint)
+        # 브리지는 `_prepare` 안에서 `validate_strategy` 뒤에 돈다 — 잘못된 문서는 코드화된
+        # 진단으로 거절되어야 하고, 그 판정의 owner 는 validator 다. 플랜이 결측 정책을
+        # 인자로 받으므로(P2-02) 해소한 실행 설정을 `_prepare` 가 돌려준다.
+        prepared = self._prepare(spec, pipeline_options, request.environment, checkpoint=checkpoint)
+        environment = prepared.environment
         engine = prepared.engine
         metadata = prepared.metadata
         plans = prepared.plans
         raw_query = RawObservationQuery(
-            market=spec.data.market.value,
-            universe_id=spec.data.universe_id,
-            start=spec.data.start,
-            end=spec.data.end,
+            market=environment.market.value,
+            universe_id=environment.universe_id,
+            start=environment.start,
+            end=environment.end,
             field_ids=_required_field_ids(spec, plans),
             # Plans count as_of itself; the port counts sessions strictly before start.
             history_sessions_before_start=max(
@@ -317,7 +334,7 @@ class PortfolioDesignService:
                 expected=metadata.data_snapshot_id,
                 actual=raw.data_snapshot_id,
             )
-        _reject_sessions_outside_strategy_range(raw, spec, checkpoint=checkpoint)
+        _reject_sessions_outside_run_range(raw, environment, checkpoint=checkpoint)
         schedule = compile_rebalance_schedule(spec, raw.sessions, checkpoint=checkpoint)
         pipeline_options = _resolve_default_trace_date(pipeline_options, schedule)
         _validate_loaded_trace_scope(
@@ -377,6 +394,7 @@ class PortfolioDesignService:
                     evaluation, trace = evaluate_factor_graph_with_trace(
                         factor.graph,
                         observations=factor_observations,
+                        missing=environment.missing,
                         parameters=parameters,
                         selection=pipeline_options.trace_selection,
                         checkpoint=checkpoint,
@@ -386,6 +404,7 @@ class PortfolioDesignService:
                     evaluation = evaluate_factor_graph(
                         factor.graph,
                         observations=factor_observations,
+                        missing=environment.missing,
                         parameters=parameters,
                         checkpoint=checkpoint,
                         progress=report_factor,
@@ -436,6 +455,7 @@ class PortfolioDesignService:
             if pipeline_options.construction_trace_selection is None:
                 tape = compile_target_tape(
                     spec,
+                    environment=environment,
                     data_snapshot_id=raw.data_snapshot_id,
                     sessions=raw.sessions,
                     observations=observations,
@@ -447,6 +467,7 @@ class PortfolioDesignService:
             else:
                 compiled = compile_target_tape_with_trace(
                     spec,
+                    environment=environment,
                     data_snapshot_id=raw.data_snapshot_id,
                     sessions=raw.sessions,
                     observations=observations,
@@ -485,17 +506,24 @@ class PortfolioDesignService:
         self,
         spec: StrategySpec,
         pipeline_options: PortfolioPipelineOptions,
+        environment: RunEnvironment | None,
         *,
         checkpoint: Callable[[], None] = lambda: None,
     ) -> _PreparedPipeline:
-        """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다."""
+        """파이프라인의 데이터 무관 앞부분. `preflight` 와 `run_pipeline` 이 같은 판정을 쓴다.
+
+        실행 설정 확정도 여기서 한다: 문서 검증이 먼저고(코드화된 진단의 owner 는 validator),
+        엔진 능력 판정은 `environment.participation_rate` 를, 플랜 컴파일은 `environment.missing`
+        을 인자로 받아야 한다(P2-02·P2-03).
+        """
 
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
         checkpoint()
+        resolved = _require_environment_or_reject(spec, environment)
 
-        engine = self._engine_portfolio.assess(spec)
+        engine = self._engine_portfolio.assess(spec, resolved)
         if pipeline_options.require_engine_compatible and not engine.compatible:
             raise IncompatiblePortfolioRequestError(engine)
         trace_requested = (
@@ -518,15 +546,20 @@ class PortfolioDesignService:
                 )
             )
         )
-        plans = self._plans(spec, metadata)
+        plans = self._plans(spec, metadata, resolved.missing)
         _reject_non_numeric_factor_outputs(spec, plans)
         _reject_saved_references(spec, plans)
         _validate_trace_selection(pipeline_options, plans)
         checkpoint()
-        return _PreparedPipeline(engine=engine, metadata=metadata, plans=plans)
+        return _PreparedPipeline(
+            engine=engine, metadata=metadata, plans=plans, environment=resolved
+        )
 
     def _plans(
-        self, spec: StrategySpec, metadata: FactorMetadataSnapshot
+        self,
+        spec: StrategySpec,
+        metadata: FactorMetadataSnapshot,
+        missing: MissingPolicy,
     ) -> dict[str, FactorExecutionPlan]:
         parameter_ids = tuple(parameter.parameter_id for parameter in spec.parameters)
         factor_ids = tuple(factor.factor_id for factor in spec.factors)
@@ -537,6 +570,7 @@ class PortfolioDesignService:
                 plans[factor.factor_id] = compile_factor_plan(
                     factor.graph,
                     registry_version=self._factor_registry_version,
+                    missing=missing,
                     fields=metadata.fields,
                     parameter_ids=parameter_ids,
                     factor_ids=factor_ids,
@@ -562,6 +596,24 @@ class PortfolioDesignService:
                 StrategyValidation(valid=False, issues=tuple(issues))
             )
         return plans
+
+
+def _require_environment_or_reject(
+    spec: StrategySpec, environment: RunEnvironment | None
+) -> RunEnvironment:
+    """요청이 실은 실행 설정을 확정하고, 없으면 요청 거부로 바꾼다.
+
+    실행 설정 부재는 서버 오류가 아니라 요청 문제라 `portfolio.strategy.invalid` 진단으로
+    나간다. `run_environment.*` 코드는 `strategy.*` 레지스트리 밖이라 그대로 전달된다.
+    `spec` 은 진단 문장에 실을 호출 맥락(전략 이름)을 주기 위해서만 읽는다.
+    """
+    try:
+        return require_environment(environment, requested_by=f"portfolio.preview({spec.title!r})")
+    except MissingRunEnvironmentError as error:
+        issue = semantic_issue(error.code, "environment", str(error))
+        raise InvalidPortfolioRequestError(
+            StrategyValidation(valid=False, issues=(issue,))
+        ) from error
 
 
 def _required_field_ids(
@@ -800,31 +852,31 @@ def _reject_non_numeric_factor_outputs(
         raise InvalidPortfolioRequestError(StrategyValidation(valid=False, issues=issues))
 
 
-def _reject_sessions_outside_strategy_range(
+def _reject_sessions_outside_run_range(
     raw: RawObservationSet,
-    spec: StrategySpec,
+    environment: RunEnvironment,
     *,
     checkpoint: Callable[[], None],
 ) -> None:
-    """Sessions must stay inside `spec.data.start..end` (fail-closed, D-004).
+    """Sessions must stay inside `environment.start..end` (fail-closed, D-004).
 
     A wider answer is fail-open: `compile_target_tape` would emit frames whose execution date has
-    no bar in the backtest dataset, which `application/backtest_run` queries for the strategy
-    range alone.
+    no bar in the backtest dataset, which `application/backtest_run` queries for the run range
+    alone.
     """
     outside = tuple(
         session
         for session in _checkpointed(raw.sessions, checkpoint)
-        if not spec.data.start <= session <= spec.data.end
+        if not environment.start <= session <= environment.end
     )
     if not outside:
         return
     raise RawObservationContractError(
-        "raw observation sessions fall outside the requested strategy range — "
-        f"expected={spec.data.start}..{spec.data.end} "
+        "raw observation sessions fall outside the requested run range — "
+        f"expected={environment.start}..{environment.end} "
         f"actual={raw.sessions[0]}..{raw.sessions[-1]} "
         f"outside={outside[:5]} outside_count={len(outside)} "
-        f"universe_id={spec.data.universe_id!r} snapshot={raw.data_snapshot_id!r}"
+        f"universe_id={environment.universe_id!r} snapshot={raw.data_snapshot_id!r}"
     )
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from strategy_workbench.domain.backtest.facade.environment import DEFAULT_MISSING_POLICY
 
 
 def test_factor_catalog_validate_and_explain_contract() -> None:
@@ -164,3 +165,56 @@ def test_factor_preview_fails_closed_when_the_expected_snapshot_differs() -> Non
         json=body | {"expected_data_snapshot_id": "mock-equity-v0.2-20260903"},
     )
     assert matching.status_code == 200
+
+
+def _momentum_graph() -> dict[str, object]:
+    graph: dict[str, object] = {
+        "nodes": [
+            {"node_id": "close", "field_id": "price.close", "kind": "field"},
+            {
+                "node_id": "mom",
+                "operator": "momentum",
+                "input_node_id": "close",
+                "window": 3,
+                "kind": "time_series",
+            },
+        ],
+        "output_node_id": "mom",
+    }
+    return graph
+
+
+def test_explain_reads_the_requested_missing_policy() -> None:
+    """요청의 `missing` 이 plan 과 `plan_hash` 를 가른다.
+
+    schema 1.2 그래프에는 결측 정책이 없으므로 sandbox 는 요청 값만 읽는다(P2-03). 정책마다
+    다른 plan 이어야 팩터 행렬 캐시 키가 섞이지 않는다.
+    """
+    client = TestClient(build_http_app())
+
+    plans = {
+        policy: client.post(
+            "/api/v1/factors/explain", json={"graph": _momentum_graph(), "missing": policy}
+        ).json()["plan"]
+        for policy in ("drop", "zero", "cross_sectional_median")
+    }
+
+    assert {policy: plan["missing_policy"] for policy, plan in plans.items()} == {
+        "drop": "drop",
+        "zero": "zero",
+        "cross_sectional_median": "cross_sectional_median",
+    }
+    assert len({plan["plan_hash"] for plan in plans.values()}) == 3
+
+
+def test_explain_without_a_missing_policy_uses_the_run_default() -> None:
+    """생략하면 실행 설정과 같은 기본값이다 — 편집 화면 플랜 패널이 실제 실행과 같아야 한다."""
+    client = TestClient(build_http_app())
+
+    omitted = client.post("/api/v1/factors/explain", json={"graph": _momentum_graph()})
+    explicit = client.post(
+        "/api/v1/factors/explain", json={"graph": _momentum_graph(), "missing": "drop"}
+    )
+
+    assert omitted.json()["plan"]["missing_policy"] == DEFAULT_MISSING_POLICY.value
+    assert omitted.json()["plan"]["plan_hash"] == explicit.json()["plan"]["plan_hash"]

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import yaml
+
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteStrategyRepository,
@@ -51,6 +53,64 @@ def frozen_spec_json() -> str:
 
 def frozen_source_text() -> str:
     return (FIXTURES / "quality_momentum.v1_0.yaml").read_text(encoding="utf-8")
+
+
+def retired_1_1_spec_json() -> str:
+    """보존된 1.1 원본을 그 버전의 canonical payload 로 만든 `spec_json`.
+
+    1.0 은 P1-03 이전 이력이고 실 DB 에 남아 있는 은퇴 row 는 사실상 전부 1.1 이다. 그 버전의
+    모델은 더 이상 없으므로(1.2 가 `data`·`execution` 을 지웠다) 저장 시점에 기록됐을 바이트를
+    fixture 에서 직접 만든다.
+    """
+    document = yaml.safe_load((FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8"))
+    return canonical_payload_json(document)
+
+
+def retired_spec_json(schema_version: str) -> str:
+    """같은 문서를 주어진 버전으로 각인한 `spec_json`.
+
+    `decode_record` 가 payload 의 `schema_version` 과 컬럼 값이 같은지 먼저 보므로, 미지 버전
+    거절을 시험하려면 둘 다 그 값이어야 한다 — 그래야 검사가 `_decode_frozen_spec` 까지 간다.
+    """
+    document = yaml.safe_load((FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8"))
+    document["schema_version"] = schema_version
+    return canonical_payload_json(document)
+
+
+def seed_retired_1_1_row(
+    path: Path, *, strategy_id: str = "frozen-1-1", schema_version: str = "1.1"
+) -> FrozenRow:
+    """은퇴 버전 row 하나를 raw SQL 로 심는다(기본은 1.1, 미지 버전 거절 테스트가 값을 바꾼다).
+
+    `source_*` 세 컬럼은 비운다 — 1.1 row 의 원문 검증은 저장 시점에 끝났고, 여기서 고정하려는
+    것은 "저장된 은퇴 버전 row 가 현재 버전으로 복원된다" 하나다.
+    """
+    open_repository(path).close()
+    spec_json = retired_spec_json(schema_version)
+    spec_hash = _sha256(spec_json)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO strategy_heads (strategy_id, latest_revision) VALUES (?, ?)",
+            (strategy_id, 1),
+        )
+        connection.execute(
+            "INSERT INTO strategy_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                strategy_id,
+                1,
+                schema_version,
+                spec_json,
+                spec_hash,
+                None,
+                None,
+                None,
+                "legacy_json",
+                FROZEN_CREATED_AT,
+                None,
+            ),
+        )
+        connection.commit()
+    return FrozenRow(strategy_id, 1, spec_json, spec_hash, None, None)
 
 
 def source_spec_hash(source: str, format: SourceFormat) -> str:

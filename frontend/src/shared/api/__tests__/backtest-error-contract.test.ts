@@ -22,6 +22,9 @@ const classify = (response: StartBacktest422): string => {
     // 읽지 않게 되면서(이슈 #158) 이 경로의 계약에서 빠졌다. 그 실패는 run 상태 `error` 로 온다.
     case "backtest.strategy.requires_upgrade":
       return `upgrade:${detail.message}`;
+    // schema 1.2 문서는 실행 설정을 담지 않으므로 시작 요청이 반드시 실어야 한다(P2-03).
+    case "backtest.run.environment_required":
+      return `environment:${detail.message}`;
     default: {
       const exhaustive: never = detail;
       return exhaustive;

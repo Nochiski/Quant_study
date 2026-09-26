@@ -43,9 +43,10 @@
   본문에 적은 문서는 사용자가 적용할 수단이 없어 그대로 버려진다.
 - 제출 전에 `validate_strategy_yaml` 검증을 통과시킨다. 서버가 같은 검증을 한 번 더 하며, 실패하면
   진단이 도구 오류로 되돌아온다.
-- 실행 설정(어느 시장을, 어느 기간을, 어떤 유니버스로 돌릴지 정하는 값과 비용 가정)은 사용자의
-  몫이다. 사용자가 바꿔 달라고 하지 않으면 현재 문서의 값을 그대로 옮긴다. 이 값들은 앞으로
-  문서 밖 실행 설정으로 옮겨 갈 예정이므로 임의로 바꾸면 사용자의 설정을 덮어쓰게 된다.
+- 실행 설정(어느 시장을, 어느 기간을, 어떤 유니버스로 돌릴지 정하는 값과 체결·비용 가정)은
+  전략 문서에 넣지 않는다. 이 값들은 문서 밖에서 실행할 때 사용자가 정하며, 문서에 적으면
+  검증에 실패한다. 사용자가 기간이나 비용을 바꿔 달라고 하면 전략 문서로는 바꿀 수 없고
+  실행 설정에서 정하는 값이라고 알린다.
 - 한 제안에서 여러 곳을 바꿨으면 근거에 무엇을 왜 바꿨는지 항목으로 나눠 적는다.
 
 ## 출처를 붙이는 법
@@ -62,21 +63,17 @@
 아래는 서버가 지금 실행 중인 스키마에서 생성한 것이며, 이것이 유일한 정본이다. 여기 없는 키나
 값은 존재하지 않는다고 보면 된다.
 
-- 최상위 키: schema_version (필수), title (필수), description, data (필수), eligibility, factors (필수), signal, portfolio, risk, execution, parameters
-- schema_version 고정값: 1.1
+- 최상위 키: schema_version (필수), title (필수), description, eligibility, factors, signal, portfolio, risk, parameters
+- schema_version 고정값: 1.2
 - 사용할 수 있는 kind 값: field, constant, parameter, unary, binary, time_series, cross_sectional, group, comparison, conditional, saved_factor, saved_subgraph, float, integer, choice
-- DataStep.market 값: KRX
-- DataStep.frequency 값: daily
 - EligibilityRule.operator, ComparisonNode.operator 값: gt | gte | lt | lte | eq
 - UnaryNode.operator 값: negate | lag
 - BinaryNode.operator 값: add | subtract | multiply | divide
 - TimeSeriesNode.operator 값: mean | std | momentum | delta | min | max
 - CrossSectionalNode.operator 값: rank | zscore | winsorize | demean
 - GroupNode.operator 값: neutralize | rank
-- FactorGraph.missing_policy 값: drop | keep | zero | cross_sectional_median
 - FactorSignal.direction 값: high | low
 - PortfolioStep.side 값: long_only | long_short
 - PortfolioStep.weighting 값: equal | factor_score | rank | risk
 - PortfolioStep.rebalance 값: every_n_sessions | weekly | monthly | quarterly
 - PortfolioStep.selection_method 값: top_n | percentile
-- ExecutionStep.timing 값: next_open

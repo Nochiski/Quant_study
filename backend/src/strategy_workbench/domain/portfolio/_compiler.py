@@ -9,6 +9,7 @@ from datetime import date
 from enum import Enum
 from typing import TypeGuard, TypeVar
 
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.strategy.facade.specification import (
     ComparisonOperator,
     FactorDirection,
@@ -111,6 +112,7 @@ def compile_rebalance_schedule(
 def compile_target_tape(
     spec: StrategySpec,
     *,
+    environment: RunEnvironment,
     data_snapshot_id: str,
     sessions: tuple[date, ...],
     observations: tuple[PortfolioObservation, ...],
@@ -125,6 +127,7 @@ def compile_target_tape(
     """
     return _compile_target_tape(
         spec,
+        environment=environment,
         data_snapshot_id=data_snapshot_id,
         sessions=sessions,
         observations=observations,
@@ -138,6 +141,7 @@ def compile_target_tape(
 def compile_target_tape_with_trace(
     spec: StrategySpec,
     *,
+    environment: RunEnvironment,
     data_snapshot_id: str,
     sessions: tuple[date, ...],
     observations: tuple[PortfolioObservation, ...],
@@ -149,6 +153,7 @@ def compile_target_tape_with_trace(
     """Compile once and return an out-of-band audit from that same calculation."""
     return _compile_target_tape(
         spec,
+        environment=environment,
         data_snapshot_id=data_snapshot_id,
         sessions=sessions,
         observations=observations,
@@ -162,6 +167,10 @@ def compile_target_tape_with_trace(
 def _compile_target_tape(
     spec: StrategySpec,
     *,
+    # 체결 시점은 전략 문서가 아니라 실행 설정이 소유한다(1.2, spec D3 S2). tape hash payload 와
+    # `TargetTape.execution_timing` 이 같은 값을 읽어야 같은 전략·다른 체결 시점이 같은 tape 로
+    # 취급되지 않는다.
+    environment: RunEnvironment,
     data_snapshot_id: str,
     sessions: tuple[date, ...],
     observations: tuple[PortfolioObservation, ...],
@@ -273,7 +282,7 @@ def _compile_target_tape(
     payload = {
         "data_snapshot_id": data_snapshot_id,
         "strategy_hash": strategy_hash,
-        "execution_timing": spec.execution.timing.value,
+        "execution_timing": environment.timing.value,
         "frames": canonical_frames,
     }
     tape_hash = _hash_payload(payload, checkpoint=checkpoint)
@@ -284,7 +293,7 @@ def _compile_target_tape(
             strategy_hash=strategy_hash,
             tape_hash=tape_hash,
             frames=frames,
-            execution_timing=spec.execution.timing.value,
+            execution_timing=environment.timing.value,
         ),
         trace=construction_trace,
     )

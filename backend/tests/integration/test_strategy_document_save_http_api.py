@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
+GOLDEN_SPEC_HASH = "f14a9eaacf1214e8d697288ebed1047b723ef3de75fd222aafa19b400e6b43df"
 
 
 def _source(name: str) -> str:
@@ -42,9 +42,9 @@ def test_save_get_revise_history_round_trip_preserves_source_and_hashes() -> Non
     assert document["spec"]["identity"] == {
         "strategy_id": strategy_id,
         "revision": 1,
-        "schema_version": "1.1",
+        "schema_version": "1.2",
     }
-    assert document["origin"] == "document" and document["schema_version"] == "1.1"
+    assert document["origin"] == "document" and document["schema_version"] == "1.2"
 
     fetched = client.get(f"/api/v1/strategies/{strategy_id}/revisions/1/document").json()
     assert fetched == document

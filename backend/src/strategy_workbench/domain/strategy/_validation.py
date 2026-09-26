@@ -196,18 +196,8 @@ def validate_strategy(
         )
     if not spec.title.strip():
         issues.append(semantic_issue("strategy.title.empty", "title", "전략 이름을 입력하세요."))
-    if spec.data.start > spec.data.end:
-        issues.append(
-            semantic_issue(
-                "strategy.data.date_order", "data.end", "종료일은 시작일 이후여야 합니다."
-            )
-        )
-    if not spec.data.universe_id.strip():
-        issues.append(
-            semantic_issue(
-                "strategy.data.universe_empty", "data.universe_id", "유니버스를 선택하세요."
-            )
-        )
+    # 기간·유니버스 검증은 1.2 부터 실행 설정이 소유한다 — `RunEnvironment.__post_init__`
+    # (`domain/backtest/_models.py`)이 같은 두 규칙을 건다. 전략 문서에는 그 필드가 없다.
     if not spec.factors:
         issues.append(
             semantic_issue("strategy.factor.required", "factors", "팩터를 하나 이상 추가하세요.")

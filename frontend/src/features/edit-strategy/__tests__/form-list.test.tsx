@@ -44,13 +44,11 @@ const FACTOR: FactorDefinition = {
   default_graph: {
     nodes: [{ kind: "field", node_id: "px", field_id: "price.close" }],
     output_node_id: "px",
-    missing_policy: "drop",
   },
   description: "Server factor",
   factor_id: "server.momentum",
   label: "Server momentum",
   minimum_history_sessions: 1,
-  missing_policy: "drop",
   output_unit: "score",
   preference: "high",
   required_field_ids: ["price.close"],

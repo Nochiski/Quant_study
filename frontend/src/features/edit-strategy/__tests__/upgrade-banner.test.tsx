@@ -279,7 +279,7 @@ describe("schema 1.0 upgrade banner", () => {
     await mount({ revision: 1, generated: true, requires_upgrade: true });
     expect(
       await screen.findByText(
-        "schema 1.0 동결 revision입니다. 생성된 문서는 이미 1.1이므로 편집 후 새 revision으로 저장하세요.",
+        "schema 1.0 동결 revision입니다. 생성된 문서는 이미 현재 버전이므로 편집 후 새 revision으로 저장하세요.",
       ),
     ).toBeVisible();
     expect(

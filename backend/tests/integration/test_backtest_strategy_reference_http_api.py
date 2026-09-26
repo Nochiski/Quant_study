@@ -27,11 +27,19 @@ def _wait(client: TestClient, run_id: str) -> dict[str, Any]:
     return wait_for_terminal_state(client, run_id)
 
 
+def _environment() -> dict[str, Any]:
+    """실행 설정은 1.2 부터 요청 본문이 싣는다(P2-03).
+
+    템플릿 기본 리밸런싱이 월간이라 구간이 한 달을 넘어야 tape 에 프레임이 생긴다.
+    """
+    return {"start": "2025-01-02", "end": "2026-01-16", "universe_id": "krx.common-stock"}
+
+
 def _saved_template(client: TestClient) -> dict[str, Any]:
     """Save the JSON template as a document revision so the run can reference it."""
     template = client.get("/api/v1/strategies/template").json()
     template.pop("identity")
-    template["schema_version"] = "1.1"
+    template["schema_version"] = "1.2"
     source = json.dumps(template, ensure_ascii=False, indent=2, default=str)
     created = client.post("/api/v1/strategy-documents", json={"source": source, "format": "json"})
     assert created.status_code == 201, created.text
@@ -51,6 +59,7 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
     requested = {
         "strategy_source": reference,
         "core": "python",
+        "environment": _environment(),
         "initial_cash": 123_456_789,
         "benchmark_security_id": "sec-benchmark",
         "annualization_days": 260,
@@ -58,7 +67,7 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
             {
                 "scope": "out_of_sample",
                 "start": "2025-01-02",
-                "end": document["spec"]["data"]["end"],
+                "end": _environment()["end"],
                 "label": "OOS 2025-01-02",
             }
         ],
@@ -68,7 +77,22 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
     run_id = accepted.json()["run"]["run_id"]
     accepted_request = client.get(f"/api/v1/backtests/{run_id}/request")
     assert accepted_request.status_code == 200
-    assert accepted_request.json() == {**requested, "strategy": None}
+    # 실행 설정을 주지 않은 요청은 접수 본문에도 None 으로 남는다 — 브리지 결과는 매니페스트에만.
+    # 응답은 해소된 실행 설정을 전부 채워 돌려준다(요청은 기본값을 생략했다).
+    assert accepted_request.json() == {
+        **requested,
+        "strategy": None,
+        "environment": {
+            "market": "KRX",
+            "frequency": "daily",
+            **_environment(),
+            "timing": "next_open",
+            "participation_rate": 0.1,
+            "fee_bps": 15.0,
+            "slippage_bps": 10.0,
+            "missing": "drop",
+        },
+    }
 
     replayed = client.post("/api/v1/backtests", json=accepted_request.json())
     assert replayed.status_code == 202, replayed.text
@@ -79,7 +103,7 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
     assert manifest["strategy_provenance"] == {
         "kind": "saved_revision",
         "spec_hash": document["spec_hash"],
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "strategy_id": document["strategy_id"],
         "revision": 1,
         "source_hash": document["source_hash"],
@@ -103,7 +127,11 @@ def test_stale_or_missing_reference_fails_before_a_run_exists() -> None:
 
     stale = client.post(
         "/api/v1/backtests",
-        json={"strategy_source": {**base, "expected_spec_hash": "0" * 64}, "core": "python"},
+        json={
+            "strategy_source": {**base, "expected_spec_hash": "0" * 64},
+            "core": "python",
+            "environment": _environment(),
+        },
     )
     assert stale.status_code == 409, stale.text
     assert stale.json()["detail"]["code"] == "backtest.strategy.stale"
@@ -115,6 +143,7 @@ def test_stale_or_missing_reference_fails_before_a_run_exists() -> None:
         json={
             "strategy_source": {**base, "revision": 9, "expected_spec_hash": document["spec_hash"]},
             "core": "python",
+            "environment": _environment(),
         },
     )
     assert missing.status_code == 404
@@ -126,13 +155,17 @@ def test_inline_draft_and_legacy_inline_spec_record_inline_provenance() -> None:
     client = TestClient(build_http_app())
     template = client.get("/api/v1/strategies/template").json()
 
-    legacy = client.post("/api/v1/backtests", json={"strategy": template, "core": "python"})
+    legacy = client.post(
+        "/api/v1/backtests",
+        json={"strategy": template, "core": "python", "environment": _environment()},
+    )
     assert legacy.status_code == 202, legacy.text
     draft = client.post(
         "/api/v1/backtests",
         json={
             "strategy_source": {"kind": "inline_draft", "spec": template, "source_hash": "ab" * 32},
             "core": "python",
+            "environment": _environment(),
         },
     )
     assert draft.status_code == 202, draft.text

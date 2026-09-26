@@ -42,10 +42,12 @@ main
   (`parallel_window`에 기록). 교차 제약 두 가지: **P2-06·P2-07은 P1-03(연산자 카탈로그)이 merge된 뒤
   착수한다**(두 PR이 카탈로그의 `saved_*` 제거·`availability`를 건드린다). P3-01의 base는 P2-09이며
   P1 스택 끝(P1-06)이 먼저 merge되어 있어야 한다.
-- **generated SDK 규칙(1.1 initiative와 같음)**: P2 backend PR은 `backend/openapi.json`만 재생성하고
-  `frontend/src/shared/api/generated`는 건드리지 않는다. SDK 재생성과 frontend 적응은 P3-01이 한
-  PR에서 한다. P2 PR은 backend gate만 merge gate로 삼고 CI `frontend`·`browser-e2e` job은 P3-01·P3-03의
-  exit 조건이다. 각 P2 PR 본문 `제약사항`에 이 사실을 적는다.
+- **generated SDK 규칙(P2-01에서 개정)**: OpenAPI를 바꾸는 backend PR은 같은 PR에서
+  `frontend/src/shared/api/generated`도 재생성해 별도 커밋으로 넣는다. CI `frontend` job이
+  `npm run api:generate` 뒤 `git diff --exit-code -- ../backend/openapi.json src/shared/api/generated`를
+  돌리므로, 생성 파일을 빼면 그 PR이 곧바로 빨간불이 된다. 커밋에는 **생성 산출물만** 넣고 소비자
+  배선(실행 설정 패널·요청 본문 연결)은 P3-01 그대로다. 재생성 뒤 `npm run typecheck`·`lint`·
+  `test`·`build`를 돌려 결과를 PR 본문에 적는다. `browser-e2e` job은 계속 P3-03의 exit 조건이다.
 - 실 DB 주의: P2-09 merge 전에는 실 SQLite에 1.2 revision을 저장하지 않는다(spec 7절).
 - fixture 이름과 역할(spec D7): P2-03부터 `quality_momentum.yaml`이 1.2가 되고, 1.1 원본은
   `quality_momentum.v1_1.yaml`로 복사해 보존한다(1.1 → 1.2 업그레이드 입력). 기존
@@ -263,7 +265,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   생성한 JSON Schema(필드별 타입·기본값·enum). 기존 `strategy_document_schema()` 빌더를 재사용하되
   전략 authoring runtime schema와는 **다른 산출물**이다(owner가 `domain/backtest`). 프론트가 실행
   설정 패널 기본값을 손으로 적지 않게 하는 경로다(P3-02가 소비).
-- OpenAPI 재생성. frontend SDK는 건드리지 않는다.
+- OpenAPI 재생성과 생성 SDK 재생성(1절 generated SDK 규칙). 소비자 배선은 P3-01 그대로.
 
 **Non-goal**: StrategySpec 변경. `missing_policy`(P2-02). enum 물리 이동(P2-03).
 
@@ -274,8 +276,14 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 
 **Acceptance**
 
-- `FactorGraph`에서 `missing_policy` 제거. `build_factor_execution_plan`이 `missing: MissingPolicy`를
+- `build_factor_execution_plan`(실제 이름 `compile_factor_plan`)이 `missing: MissingPolicy`를
   **인자로** 받는다. 호출자가 `environment.missing`을 넘긴다.
+- **`FactorGraph.missing_policy` 필드 자체는 이 PR에서 지우지 않는다**(구현 시 결정, 1). 이 시점의
+  `CURRENT_SCHEMA_VERSION`은 아직 `"1.1"`이라 필드를 지우면 1.1 문서가 `structure.unknown_field`로
+  깨지고, 1.0 → 1.1 업그레이드 출력(`quality_momentum.v1_1.commented.yaml`, 이 패키지가 "건드리지
+  않는다"고 못 박은 fixture)이 곧바로 compile 실패가 된다. 대신 1.1 호환 입력으로 남기고 runtime
+  schema·`FieldContract`에 `x-deprecated`를 실어 화면 어휘에서 뺄 수 있게 한다. 물리 삭제는
+  `CURRENT_SCHEMA_VERSION` 1.2와 함께 오는 P2-03이다.
 - `domain/factor/_planning.py:122-131`의 plan payload에 결측 정책이 그대로 남아 `plan_hash`가 계속
   갈린다. `build_factor_matrix_cache_key`(`:153-160`)는 무변경. 회귀 테스트: 같은 전략을
   `missing: drop`과 `missing: zero`로 계획하면 `plan_hash`가 **다르다**.
@@ -283,9 +291,20 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   (`:49`, `:619`), `application/portfolio_design/_service.py`, `application/backtest_run/_service.py`.
   `graph.missing_policy` 참조 grep 0건 테스트.
 - P2-01 브리지가 `첫 팩터 graph.missing_policy`를 읽던 부분은 이 PR 이후 의미가 없어지므로, 1.1
-  문서에서 만들 때만 쓰는 legacy 입력으로 좁힌다.
-- runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성
-  (`FactorGraph`에서 `missing_policy`가 빠진다). frontend SDK는 P3-01.
+  문서에서 만들 때만 쓰는 legacy 입력으로 좁힌다. **팩터별 값이 서로 다르면 대표값 하나를 고르지
+  않고 거부한다**(구현 시 결정, 2): 실행 설정은 단일 값이라 대표값을 고르면 팩터 일부가 조용히
+  다른 결측 처리로 계산된다. 진단 코드는 `run_environment.missing_policy_conflict`이고 메시지가
+  "`environment`를 명시하면 문서 값을 읽지 않으므로 통과한다"는 우회 경로를 안내한다. spec D7의
+  업그레이더 규칙("첫 팩터 값 + warning")은 P2-09 그대로다.
+- **팩터 sandbox 요청도 결측 정책을 갖는다**(구현 시 결정, 3): `FactorGraphRequest`·
+  `FactorPreviewRequest`의 `missing: MissingPolicy | None = None`. `None`이면 브리지의
+  `resolve_graph_missing_policy`가 그래프의 1.1 값으로 떨어뜨려, 실행 설정이 없는
+  `/factors/explain`·`/factors/preview`가 실제 실행과 같은 결측 정책·`plan_hash`를 낸다. 기본값을
+  `DROP`으로 고정하면 편집 화면의 실행 플랜 패널이 실제 실행과 갈린다(P2-02 리뷰 P1).
+- runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성과 생성 SDK
+  재생성(1절 규칙). `FactorGraph.missing_policy`는 `deprecated: true`가 붙어 남고,
+  `FactorDefinition.missing_policy`(팩터 카탈로그의 per-factor 기본값)는 빠진다 — 결측 정책은
+  카탈로그가 아니라 실행이 소유한다.
 
 **제약사항**: 캐시 키 회귀가 이 PR의 핵심 invariant다. 분리하지 않으면 P2-03의 대량 삭제에 묻힌다.
 
@@ -311,6 +330,12 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
     `application.portfolio_design`·`domain.portfolio`·`domain.strategy`)에 `domain.backtest`를
     추가한다. adapter → domain이라 순환이 없다.
   - `MissingPolicy`는 `domain/factor`에 그대로 둔다.
+- **P2-02가 남긴 1.1 호환 잔재를 이 PR에서 물리 삭제한다**: `FactorGraph.missing_policy` 필드,
+  `domain/factor/_nodes.py`의 `DEPRECATED_FIELD` 마커, `domain/strategy/_schema.py`의
+  `x-deprecated` 발행과 `FieldContract.deprecated`(다른 deprecated 필드가 생기지 않았다면),
+  브리지의 `resolve_graph_missing_policy`·`_missing_from_legacy_graphs`(문서 입력이 사라지면
+  `environment.missing`만 남는다). 1.2 문서의 `graph.missing_policy`는 `structure.unknown_field`가
+  된다. 1.1 문서에서의 이관은 P2-09 업그레이더가 맡는다.
 - **최상위 필수 키는 `schema_version`·`title` 둘**이다. `factors: tuple[FactorSignal, ...] = ()`로
   기본값을 주어 생략도 빈 배열도 `structure.missing_field`를 내지 않고, 두 경우 모두 semantic
   `strategy.factor.required`가 난다. 회귀 테스트: `schema_version: "1.2"\ntitle: ""\n`의 hydrate
@@ -325,9 +350,42 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - fixture: `quality_momentum.yaml`(1.2), `.json`, `.legacy.json`, `.minimal.yaml`이 같은 hash. 1.1
   원본을 `quality_momentum.v1_1.yaml`로 복사해 보존한다. **`quality_momentum.v1_1.commented.yaml`은
   건드리지 않는다**(1.0 → 1.1 기대 출력, 테스트 3곳이 단언 중).
-- runtime schema fixture 재생성. OpenAPI 재생성.
+- **P2-01 잔여 두 지점을 `environment`로 이관한다**(그때까지는 명시 실행 설정과 문서 값이 갈린다).
+  - `adapters/outbound/engine_portfolio/_adapter.py:42` — `requirements()`가
+    `spec.execution.participation_rate < 1.0`으로 `PARTIAL_FILL` 요구를 판정한다. `assess(spec)`·
+    `requirements(spec)` 시그니처에 `environment`를 더하고 호출자(`portfolio_design/_service.py`의
+    `_prepare`)가 넘긴다. adapter → domain이라 facade `DEPENDS_ON`에 `domain.backtest` 추가로 끝난다
+    (enum 이동 항목이 이미 같은 줄을 요구한다). **틀리는 방향은 과소 선언이다**: 문서
+    `execution.participation_rate = 1.0` + 명시 `environment.participation_rate = 0.1`이면
+    요구 집합에 `PARTIAL_FILL`이 빠져 능력 게이트가 조용히 약해진다(반대 조합은 과다 선언이라
+    무해). 회귀 테스트: "문서 1.0 + 환경 0.1이면 `requirements()`에 `PARTIAL_FILL`이 있다".
+  - `domain/portfolio/_compiler.py:249,259` — tape hash payload의 `execution_timing`과
+    `TargetTape.execution_timing`이 `spec.execution.timing`을 읽는다. `compile_target_tape`·
+    `compile_target_tape_with_trace`가 `environment`(또는 `timing`)를 인자로 받게 하고
+    `domain.portfolio` facade `DEPENDS_ON`에 `domain.backtest`를 추가한다(`domain.backtest`는
+    `domain.portfolio`를 읽지 않으므로 순환이 아니다). `ExecutionTiming` 값이 하나뿐이라 지금은
+    tape_hash가 변하지 않는다 — 회귀 테스트로 그 사실을 고정한다.
+- **결정 항목 2개**(코드 변경 전에 PLAN 변경 기록에 결론을 남긴다).
+  - `dataclass_json_schema`의 최종 owner. P2-01이 `domain/strategy/facade/schema.py`에서 수출하고
+    `domain/backtest/_schema.py`가 읽는다. 전략과 무관한 표기법이라 `domain.backtest →
+    domain.strategy` 화살표가 "유틸을 빌린다" 사유로 남는다 — enum을 옮겨 이 화살표를 끊으려 할 때
+    빌더 때문에 남는다. 규칙 위반은 아니다(`DEPENDS_ON` 선언됨, facade가 책임 이름을 가짐).
+  - 실행 설정 수치 범위(`RunEnvironment.__post_init__`과 런타임 스키마가 읽는 행)의 최종 owner.
+    P2-01은 `_constraints.py`의 `/execution/*` 행을 필드 이름으로 다시 걸어 쓴다. 이 PR이
+    `execution` 섹션을 지우면 그 행들이 전략 문서 포인터를 잃으므로 `domain/backtest`로 옮긴다.
+  - 실행 설정 스키마를 `application/strategy_authoring`이 서빙하는 것(P2-01 acceptance가 지정)도
+    같이 본다. authoring 유스케이스가 실행 설정을 소유하지는 않는다. 옮긴다면 P3-02와 함께.
+  - **`preflight`가 `environment`를 받지만 읽지 않는다.** P2-01의 `start()`는 브리지가 validator
+    보다 먼저 터지지 않도록 **해소 전** `spec.environment`를 넘기고, `_run`은 해소된 값을 넘긴다.
+    지금은 `preflight`가 문서만 검사해 무해하지만, P2-01의 AST 가드는 "키워드가 있는가"만 보므로
+    두 호출부가 **서로 다른 값**을 넘기는 상태를 통과시킨다. `_prepare`가 실행 설정을 읽게 되는
+    순간 `start()`는 문서 값으로, `_run`은 명시값으로 판정해 P2-01 P0과 같은 모양이 된다. 가드를
+    "두 호출부가 같은 값을 넘긴다"로 강화할지, `preflight` 시그니처에서 `environment`를 빼
+    문서 전용임을 타입으로 못 박을지 이 PR에서 정한다.
+- runtime schema fixture 재생성. OpenAPI 재생성과 생성 SDK 재생성(1절 규칙).
 
-**제약사항**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend는 P3-01까지 빨간불.
+**제약사항**: P2-09 전까지 1.1 row는 읽을 수 없다(테스트 DB만). frontend 소비자 배선은 P3-01까지
+그대로다(생성 SDK는 1절 규칙대로 각 PR이 재생성한다).
 이 PR이 P2 스택에서 12절 상한(600줄·10파일)에 가장 가깝다. 착수 시 바뀌는 파일 수를 먼저 세고,
 상한을 넘으면 **enum 이동을 별도 PR로 뗀다**(`data`·`execution` 제거가 먼저, enum 이동이 뒤). 분리하면 PR
 총수가 바뀌므로 README의 "WORKFLOW의 PR 범위를 바꾸면 먼저 변경 이유를 PLAN.md 변경 기록에 남긴다" 절차를
@@ -345,7 +403,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `none`이 1.1과 수치 동일한 회귀 테스트. `rank`·`zscore` 수치 테스트.
 - `_explanation.py`·semantic diff·contract 설명 갱신. i18n 키 추가는 P3-01.
 - runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성(`normalization`
-  enum이 응답 스키마에 노출된다). frontend SDK는 P3-01.
+  enum이 응답 스키마에 노출된다)과 생성 SDK 재생성(1절 규칙).
 
 ### P2-05 — 횡단면 eligibility(`EligibilityOperator`, exhaustive `_compare`, 2-pass)
 
@@ -371,8 +429,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   한다.
 - `ExclusionReason`은 `backend/openapi.json`의 응답 스키마에 노출되어 있으므로(현재 4곳) 멤버 추가는
   **API 계약 변경**이다. `export_openapi.py`로 재생성하고 diff를 확인한다(2절 "API contract" gate).
-  frontend SDK 재생성은 P3-01. 재생성을 빠뜨리면 프론트가 모르는 enum 값을 받아 trace 화면이 빈칸을
-  낸다.
+  생성 SDK도 같은 PR에서 재생성한다(1절 규칙). 재생성을 빠뜨리면 프론트가 모르는 enum 값을 받아
+  trace 화면이 빈칸을 낸다.
 
 ### P2-06 — `risk.risk_factor_id`, `saved_factor`·`saved_subgraph` 제거
 
@@ -405,7 +463,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `saved_factor`·`saved_subgraph`를 노드 union·스키마·연산자 카탈로그에서 제거. 실행 경로의 거부
   코드 삭제.
 - runtime schema fixture 재생성, `export_openapi.py`로 `backend/openapi.json` 재생성(`risk_factor_id`
-  필드가 응답 스키마에 노출된다. 진단 코드 문자열은 OpenAPI에 열거되지 않는다). frontend SDK는 P3-01.
+  필드가 응답 스키마에 노출된다. 진단 코드 문자열은 OpenAPI에 열거되지 않는다)과 생성 SDK
+  재생성(1절 규칙).
 - BACKLOG-001: `price.momentum_12_1` 시드의 `history=252`가 그래프 최소 이력 273과 다르다
   (`window=252` + `lag=21`). 시드 값을 그래프에서 파생하거나 둘이 같은지 단언하는 테스트를 둔다.
 
@@ -425,7 +484,7 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `strategy.operator.unsupported` error. 연산자 카탈로그 응답의 `availability`도 같은 capability로.
 - `export_openapi.py`로 `backend/openapi.json` 재생성(연산자 카탈로그 응답의 `availability` 값 집합이
   바뀐다. 진단 코드 문자열은 OpenAPI에 열거되지 않으므로 그 자체는 재생성 사유가 아니다. diff가 0이면
-  그 사실을 PR 본문에 적는다). frontend SDK는 P3-01.
+  그 사실을 PR 본문에 적는다). diff가 있으면 생성 SDK도 재생성한다(1절 규칙).
 - BACKLOG-003: 횡단면 `zscore`·`rank`의 `unit_rule`을 무차원(`"1"`)으로 바꾼다. 단위가 다른 두 필드를
   표준화해 더한 그래프가 `factor.graph.unit_mismatch` 없이 통과하는 재현 그래프 테스트와, `demean`·
   `winsorize`는 입력 단위를 보존하는 대조 테스트를 `test_factor_operators.py`에 둔다.
@@ -467,6 +526,13 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `adapters/outbound/strategy_sqlite/_record_codec.py`,
   `application/strategy_authoring/_service.py`). `is_frozen_schema_version`은 **변경 없음**
   (테스트로 고정).
+- P2-03이 저장 row 읽기를 위해 앞당긴 세 심볼도 같이 흡수한다:
+  `RETIRED_SCHEMA_VERSIONS`(현재 `{"1.0", "1.1"}` 리터럴 집합) → `FROZEN_SCHEMA_VERSIONS =
+  frozenset(UPGRADE_STEPS)`(체인 키에서 유도해 버전 추가 시 한 곳만 고친다),
+  `require_retired_schema_version` → 새 술어 이름으로 개명, `UnknownSchemaVersionError` →
+  `NotUpgradeableDocumentError`로 합치거나 그 계열 이름으로. 호출자는
+  `adapters/outbound/strategy_sqlite/_record_codec.py` 하나이고, 미지 버전 fail-closed 회귀
+  테스트(`tests/contract/test_strategy_repository_retired_1_1.py`)를 그대로 통과시켜야 한다.
 - 1.1 → 1.2 step(spec D7 변환 목록): `data`·`execution`·`graph.missing_policy` 제거 후 `environment`로
   반환(팩터별 정책이 다르면 첫 값 + warning), `signal.normalization: none` 명시, `saved_*` 노드는
   `strategy_document.upgrade_unsupported_node` 422. dict 경로·source 경로(ruamel) 같은 step 맵,
@@ -523,7 +589,34 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   결측 처리. 기본값은 **실행 설정 스키마** `GET /api/v1/run-environments/schema`(P2-01)에서 온다.
   전략 authoring runtime schema와 다른 산출물이며, 프론트에 기본값을 손으로 적지 않는다(테스트로
   고정). 마지막 사용값은 전략별 `localStorage`. 유니버스는 기존 catalog picker.
+- **범위(`minimum`/`maximum`)의 SoT는 `/run-environments/schema`다.** `backend/openapi.json`의
+  `RunEnvironment`에는 범위가 없다 — pydantic이 `__post_init__`를 들여다보지 못해 생성 SDK 타입에
+  실리지 않는다(P2-01에서 OpenAPI 재생성 diff가 0인 이유이기도 하다). 생성 타입만 믿는 화면은
+  서버가 거부할 값을 유효한 것으로 보므로, 패널은 범위도 스키마 엔드포인트에서 읽는다(테스트로 고정).
+- **결정 항목**: 명시 `environment`의 422를 필드 단위로 어떻게 표면화할지. 같은 사실이 문서에
+  있으면 `strategy.execution.participation` 코드가, 실행 설정에 있으면 pydantic 기본 분기가 나간다
+  (`Backtest422Response`가 `RequestValidationResponse`를 이미 union에 가져 계약 위반은 아니다).
+  `loc`이 `["body","environment"]`까지만 가리켜 어느 필드인지 구조화된 형태로는 알 수 없고 메시지
+  문자열에만 있다. 패널이 필드 옆에 오류를 붙이려면 파싱해야 하므로, inbound 계층에서
+  `RunEnvironment`를 먼저 구성해 코드화된 detail로 바꿀지 결정한다.
 - 기간이 전략 문서에서 오던 `dateRange` 의존 제거. OOS 창 검증은 실행 설정의 기간으로.
+- **P2-03이 잠근 `test.fixme` 4건을 해제한다**: `workbench.workflow.spec.ts`의
+  `creates, recovers, validates, versions, traces and backtests`와
+  `upgrades a frozen 1.0 revision …`, `workbench.real-equity.spec.ts`의
+  `edits the graph on real data …`, `workbench.infrastructure.spec.ts`의
+  `keeps a real debugger trace legible and inside the viewport`(`strategy-debugger.png` 기준선
+  4장도 그때 화면으로 재생성). 패널이 생기기 전에는 프론트가 `environment`를 싣지 못해
+  브라우저에서 시작한 run이 422 `backtest.run.environment_required`로 거절된다.
+- **전략 디버거 trace 요청도 같은 배선이 필요하다.** `POST /api/v1/strategies/debug/trace`가
+  `environment` 없이 나가면 preview·run과 같은 `portfolio.strategy.invalid` +
+  `run_environment.required`로 거절되어 "추적 재현 정보" 패널이 뜨지 않는다. 위 fixme
+  시나리오 안에 있으므로 해제와 같이 고친다. 최종 시나리오 재작성은 P3-03이 맡는다.
+- **디버거 컨텍스트의 `start`/`end`를 다시 non-null로 만든다.** P2-03이 실행 기간의 출처를
+  잃어 `widgets/strategy-ide/model/strategy-debugger-context.ts`가 두 값을 `null`로 고정했고,
+  그 결과 `features/debug-strategy/model/strategy-trace.ts`의 응답 날짜 범위 가드(`as_of`가
+  실행 기간 안인가, `execution_on <= end`인가)와 날짜 입력의 `min`/`max`가 꺼져 있다. 패널이
+  기간을 갖게 되면 두 필드를 실행 설정에서 채우고 타입을 `string`으로 되돌린다 — `string |
+  null`인 채로 끝나면 가드가 영구히 꺼진 채 남는다(P2-03 리뷰 P3-06).
 - 업그레이드 배너가 1.1 문서에도 뜨고, 응답의 `environment`로 실행 설정을 채운다(사용자 확인 후).
   `warnings`를 배너에 표시.
 - 백테스트 버튼 차단 사유에서 `factor-plan` 분기가 compile error로 흡수되는지 확인(남으면 결함으로

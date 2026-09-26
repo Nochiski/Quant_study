@@ -27,7 +27,7 @@ const context = (): StrategyDebuggerContext => ({
   specHash: "spec-hash",
   expectedSnapshotId: "snapshot-v1",
   expectedRegistryVersion: "registry-v1",
-  start: SPEC.data.start,
+  start: "2021-01-01",
   end: "2026-09-01",
   factors: [
     {

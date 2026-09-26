@@ -1,10 +1,6 @@
-# schema 1.1 생략형 fixture — 기본값과 같은 섹션·필드를 모두 생략해도 verbose 문서와 같은 spec_hash를 낸다.
-schema_version: "1.1"
+# schema 1.2 생략형 fixture — 기본값과 같은 섹션·필드를 모두 생략해도 verbose 문서와 같은 spec_hash를 낸다.
+schema_version: "1.2"
 title: "퀄리티 모멘텀"
-data:
-  start: "2021-01-01"
-  end: "2026-08-31"
-  universe_id: krx.common-stock
 factors:
   - factor_id: momentum
     label: "모멘텀"
@@ -25,5 +21,3 @@ portfolio:
   selection_count: 20
 risk:
   max_name_weight: 0.05
-execution:
-  fee_bps: 15.0

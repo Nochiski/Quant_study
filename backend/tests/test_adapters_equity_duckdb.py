@@ -36,6 +36,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.bootstrap.facade.container import build_container
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
     CellKind,
@@ -46,12 +47,10 @@ from strategy_workbench.domain.equity.facade.research_data import (
 )
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 from strategy_workbench.domain.strategy.facade.specification import (
-    DataStep,
     FactorDirection,
     FactorGraph,
     FactorSignal,
     FieldNode,
-    Market,
     RebalanceFrequency,
     StrategySpec,
     TimeSeriesNode,
@@ -77,16 +76,36 @@ PRICE_FIELDS = ("price.close", "price.adj_close", "price.market_cap")
 # 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 29 +
 # equity 내부 스코프 `price.adj_close`. 나머지 13 의 사유는 `_specs.UNSUPPORTED_FIELDS` 다.
 ALL_FIELDS = (
-    "price.close", "price.open", "price.volume", "price.market_cap",
-    "price.shares_outstanding", "price.trading_value", "price.adj_close",
-    "financial.revenue", "financial.gross_profit", "financial.operating_income",
-    "financial.net_income", "financial.operating_cash_flow", "financial.total_assets",
-    "financial.total_liabilities", "financial.book_equity",
-    "consensus.forward_eps", "consensus.forward_sales", "consensus.eps_dispersion",
-    "consensus.target_price", "consensus.recommendation", "consensus.analyst_count",
-    "flow.foreign_net_buy", "flow.institution_net_buy", "flow.retail_net_buy",
-    "short.short_sale_value", "short.borrowed_quantity", "credit.margin_balance",
-    "event.dividend_per_share", "event.buyback_amount", "event.insider_net_buy",
+    "price.close",
+    "price.open",
+    "price.volume",
+    "price.market_cap",
+    "price.shares_outstanding",
+    "price.trading_value",
+    "price.adj_close",
+    "financial.revenue",
+    "financial.gross_profit",
+    "financial.operating_income",
+    "financial.net_income",
+    "financial.operating_cash_flow",
+    "financial.total_assets",
+    "financial.total_liabilities",
+    "financial.book_equity",
+    "consensus.forward_eps",
+    "consensus.forward_sales",
+    "consensus.eps_dispersion",
+    "consensus.target_price",
+    "consensus.recommendation",
+    "consensus.analyst_count",
+    "flow.foreign_net_buy",
+    "flow.institution_net_buy",
+    "flow.retail_net_buy",
+    "short.short_sale_value",
+    "short.borrowed_quantity",
+    "credit.margin_balance",
+    "event.dividend_per_share",
+    "event.buyback_amount",
+    "event.insider_net_buy",
 )
 
 
@@ -237,9 +256,10 @@ def test_missing_market_cap_is_a_none_value_not_an_omission(adapter: EquityDuckd
     result = _raw(adapter, history=1)
     assert _field(result, START, "035420:1", "price.market_cap") is None
     # 시총은 `dataset_profile` 이 1세션으로 확정한 필드다 — START 세션에는 직전 세션 값이 온다.
-    assert _field(result, START, "005930:1", "price.market_cap") == wb_close(
-        "005930", date(2024, 1, 5)
-    ) * 5_969_782_550
+    assert (
+        _field(result, START, "005930:1", "price.market_cap")
+        == wb_close("005930", date(2024, 1, 5)) * 5_969_782_550
+    )
 
 
 def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
@@ -388,6 +408,7 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
     adapter: EquityDuckdbAdapter,
 ) -> None:
     """S08~S10 격자 — `fill_kind` → `CellKind`, 0 채움 금지, 겹친 셀의 원천 선택."""
+
     # 격자 3표는 `dataset_profile` 이 1세션으로 확정한 축이다(원장이 다음 날 공표된다). 그래서
     # 원장 행의 날짜와 그 값이 보이는 세션이 한 칸 어긋난다 — `seen()` 이 그 사상을 이름 붙인다.
     def seen(row_date: date) -> date:
@@ -416,27 +437,33 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
     loan = _cell(result, seen(START), "005930:1", "short.borrowed_quantity")
     assert (loan.value, loan.kind) == (None, CellKind.NOT_COLLECTED)
     sale = _cell(result, seen(date(2024, 1, 9)), "005930:1", "short.short_sale_value")
-    assert (sale.value, sale.kind) == (None, CellKind.MISSING)   # src_omitted
+    assert (sale.value, sale.kind) == (None, CellKind.MISSING)  # src_omitted
     assert _field(result, seen(date(2024, 1, 9)), "005930:1", "short.borrowed_quantity") == 12_345.0
-    assert _field(  # 음수 보존
-        result, seen(WB_HALT_DATE), "005930:1", "short.borrowed_quantity"
-    ) == -50.0
+    assert (
+        _field(  # 음수 보존
+            result, seen(WB_HALT_DATE), "005930:1", "short.borrowed_quantity"
+        )
+        == -50.0
+    )
     # ⑦ 신용잔고 — measured 값, src_omitted·empty_response 는 MISSING, not_collected 는 그대로
     assert _field(result, seen(START), "005930:1", "credit.margin_balance") == 8_359_855.0
     for session, kind in (
-        (date(2024, 1, 9), CellKind.MISSING),        # src_omitted — 0 으로 굳히지 않는다
+        (date(2024, 1, 9), CellKind.MISSING),  # src_omitted — 0 으로 굳히지 않는다
         (WB_HALT_DATE, CellKind.NOT_COLLECTED),
-        (date(2024, 1, 11), CellKind.MISSING),       # empty_response(잔고 이상 격리 셀)
+        (date(2024, 1, 11), CellKind.MISSING),  # empty_response(잔고 이상 격리 셀)
     ):
         cell = _cell(result, seen(session), "005930:1", "credit.margin_balance")
         assert (cell.value, cell.kind) == (None, kind), session
     # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖는다
     profiles = {p.field_id: p for p in adapter.list_fields()}
     assert profiles["credit.margin_balance"].coverage.supported_cell_kinds == (
-        CellKind.OBSERVED, CellKind.MISSING, CellKind.NOT_COLLECTED,
+        CellKind.OBSERVED,
+        CellKind.MISSING,
+        CellKind.NOT_COLLECTED,
     )
     assert profiles["price.close"].coverage.supported_cell_kinds == (
-        CellKind.OBSERVED, CellKind.MISSING,
+        CellKind.OBSERVED,
+        CellKind.MISSING,
     )
     assert profiles["short.short_sale_value"].dataset_id == "short_daily"
     assert profiles["flow.institution_net_buy"].description.startswith("[부분]")
@@ -492,9 +519,7 @@ def test_panel_lag_override_shifts_the_row_and_its_available_date(
 
 
 def test_panel_rejects_unknown_or_malformed_security_ids(adapter: EquityDuckdbAdapter) -> None:
-    unknown = adapter.load_panel(
-        ResearchPanelQuery(START, END, ("000660:9",), ("price.close",))
-    )
+    unknown = adapter.load_panel(ResearchPanelQuery(START, END, ("000660:9",), ("price.close",)))
     assert unknown.status is DataLoadStatus.INVALID_QUERY
     assert unknown.detail is not None and "000660:9" in unknown.detail
     malformed = adapter.load_panel(ResearchPanelQuery(START, END, ("000660",), ("price.close",)))
@@ -542,9 +567,7 @@ def test_backtest_dataset_drops_reference_rows_and_carries_ok_actions_only(
     assert dataset.data_snapshot_id == adapter.snapshot().snapshot_id
     hynix = [b for b in dataset.bars if b.security_id == "000660:1"]
     assert len(hynix) == len(WB_SESSIONS) - 1 and WB_HALT_DATE not in {b.session for b in hynix}
-    assert {b.session for b in dataset.bars if b.security_id == "036220:2"} == set(
-        WB_SESSIONS[8:]
-    )
+    assert {b.session for b in dataset.bars if b.security_id == "036220:2"} == set(WB_SESSIONS[8:])
     # `unknown_krx` 는 corp_event 에 유형이 없는 KRX 기준가 원천 행이라 방향을 share_factor 가
     # 정한다(0.5 → reverse_split). 엔진 어댑터와 같은 어휘를 쓴다 — 한쪽만 알면 같은 데이터로
     # 한쪽에서만 run 이 죽는다.
@@ -676,7 +699,7 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path)
     # 매크로가 없으면 그 매크로를 읽는 원천의 필드가 전부 빠진다 — 테이블 원천은 남는다
     served = {p.field_id for p in without.list_fields()}
     assert "price.close" in served and "consensus.target_price" in served
-    assert "price.adj_close" in served              # 표를 읽는다 — 카탈로그와 무관
+    assert "price.adj_close" in served  # 표를 읽는다 — 카탈로그와 무관
     assert not served & {"financial.book_equity", "consensus.forward_eps"}
     denied = _raw(without, fields=("financial.book_equity",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
@@ -727,13 +750,17 @@ def test_container_boots_with_the_duckdb_adapter(root: Path, tmp_path: Path) -> 
     assert "fin_std" in catalog.facets.dataset_ids
 
 
+def _environment() -> RunEnvironment:
+    """실행 설정은 1.2 부터 요청이 싣는다(P2-03)."""
+    return RunEnvironment(start=START, end=END, universe_id="krx.common-stock")
+
+
 def _momentum_spec(field_id: str) -> StrategySpec:
     template = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: END
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
     return replace(
         template,
-        data=DataStep(market=Market.KRX, start=START, end=END, universe_id="krx.common-stock"),
         factors=(
             FactorSignal(
                 factor_id="mom_3",
@@ -743,9 +770,7 @@ def _momentum_spec(field_id: str) -> StrategySpec:
                 graph=FactorGraph(
                     nodes=(
                         FieldNode("px", field_id, "field"),
-                        TimeSeriesNode(
-                            "mom", TimeSeriesOperator.MOMENTUM, "px", 3, "time_series"
-                        ),
+                        TimeSeriesNode("mom", TimeSeriesOperator.MOMENTUM, "px", 3, "time_series"),
                     ),
                     output_node_id="mom",
                 ),
@@ -772,7 +797,9 @@ def test_truthful_pipeline_momentum_across_a_split_is_continuous_on_adj_close(
     )
 
     def momentum(field_id: str) -> float:
-        result = service.run_pipeline(PortfolioPreviewRequest(_momentum_spec(field_id)))
+        result = service.run_pipeline(
+            PortfolioPreviewRequest(_momentum_spec(field_id), environment=_environment())
+        )
         assert result.data_snapshot_id == adapter.snapshot().snapshot_id
         assert result.preview.tape.frames
         values = result.factor_evaluations[0].values

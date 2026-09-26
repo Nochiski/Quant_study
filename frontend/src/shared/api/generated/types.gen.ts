@@ -304,6 +304,22 @@ export type AssistantUnprocessableResponse = {
 };
 
 /**
+ * BacktestEnvironmentRequiredDetail
+ *
+ * 실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
+ */
+export type BacktestEnvironmentRequiredDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.environment_required";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * BacktestResultNotReadyDetail
  */
 export type BacktestResultNotReadyDetail = {
@@ -397,6 +413,7 @@ export type BacktestRunSpec = {
    */
   benchmark_security_id?: string | null;
   core?: ExecutionCore;
+  environment?: RunEnvironment | null;
   /**
    * Initial Cash
    */
@@ -571,6 +588,9 @@ export type BacktestUnprocessableResponse = {
     | ({
         code: "backtest.run.invalid";
       } & BacktestRunInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
     | ({
         code: "backtest.strategy.requires_upgrade";
       } & BacktestStrategyRequiresUpgradeDetail)
@@ -926,26 +946,6 @@ export type DataSnapshot = {
 };
 
 /**
- * DataStep
- */
-export type DataStep = {
-  /**
-   * End
-   */
-  end: string;
-  frequency?: DataFrequency;
-  market?: Market;
-  /**
-   * Start
-   */
-  start: string;
-  /**
-   * Universe Id
-   */
-  universe_id: string;
-};
-
-/**
  * DataWarning
  */
 export type DataWarning = {
@@ -1240,25 +1240,6 @@ export type ExclusionReason =
 export type ExecutionCore = "rust" | "python";
 
 /**
- * ExecutionStep
- */
-export type ExecutionStep = {
-  /**
-   * Fee Bps
-   */
-  fee_bps?: number;
-  /**
-   * Participation Rate
-   */
-  participation_rate?: number;
-  /**
-   * Slippage Bps
-   */
-  slippage_bps?: number;
-  timing?: ExecutionTiming;
-};
-
-/**
  * ExecutionTiming
  */
 export type ExecutionTiming = "next_open";
@@ -1424,7 +1405,6 @@ export type FactorDefinition = {
    * Minimum History Sessions
    */
   minimum_history_sessions: number;
-  missing_policy: MissingPolicy;
   /**
    * Output Unit
    */
@@ -1567,7 +1547,6 @@ export type FactorExplanation = {
  * FactorGraph
  */
 export type FactorGraph = {
-  missing_policy?: MissingPolicy;
   /**
    * Nodes
    */
@@ -1600,6 +1579,7 @@ export type FactorGraphRequest = {
    */
   factor_ids?: Array<string>;
   graph: FactorGraph;
+  missing?: MissingPolicy | null;
   /**
    * Parameter Ids
    */
@@ -1716,6 +1696,7 @@ export type FactorPreviewRequest = {
    */
   factor_ids?: Array<string>;
   graph: FactorGraph;
+  missing?: MissingPolicy | null;
   /**
    * Parameters
    */
@@ -2591,6 +2572,7 @@ export type PortfolioPreview = {
  * PortfolioPreviewRequest
  */
 export type PortfolioPreviewRequest = {
+  environment?: RunEnvironment | null;
   spec: StrategySpec;
 };
 
@@ -3515,6 +3497,73 @@ export type RollingMetricPoint = {
 };
 
 /**
+ * RunEnvironment
+ *
+ * 한 번의 실행이 놓인 환경 — 시장·빈도·기간·유니버스·체결·비용·결측 정책(spec D6).
+ *
+ * 전략 문서가 아니라 실행이 소유하는 사실이다. 같은 전략을 다른 기간·유니버스·수수료로
+ * 돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도
+ * 전략 revision 이 늘지 않는다.
+ *
+ * `Market`·`DataFrequency`·`ExecutionTiming` 은 `DataStep`·`ExecutionStep` 이 사라진 P2-03
+ * 에서 이 모듈로 옮겨 왔다. `domain/strategy` 는 이 enum 을 더 이상 공개하지 않는다 —
+ * 호환 재수출을 두면 `domain.strategy → domain.backtest` 화살표가 생겨 기존 반대 방향과
+ * 순환이 된다. `MissingPolicy` 는 `domain.factor` 가 계속 소유한다.
+ */
+export type RunEnvironment = {
+  /**
+   * End
+   */
+  end: string;
+  /**
+   * Fee Bps
+   */
+  fee_bps?: number;
+  frequency?: DataFrequency;
+  market?: Market;
+  missing?: MissingPolicy;
+  /**
+   * Participation Rate
+   */
+  participation_rate?: number;
+  /**
+   * Slippage Bps
+   */
+  slippage_bps?: number;
+  /**
+   * Start
+   */
+  start: string;
+  timing?: ExecutionTiming;
+  /**
+   * Universe Id
+   */
+  universe_id: string;
+};
+
+/**
+ * RunEnvironmentSchema
+ *
+ * 실행 설정(`RunEnvironment`)의 런타임 JSON Schema; `schema_hash` 가 ETag 다.
+ *
+ * 전략 authoring 문서 스키마(`StrategyDocumentSchema`)와 별개 산출물이다 — 문서에는
+ * `schema_version` 이 있고 실행 설정에는 없다. 프론트 실행 설정 패널이 기본값·enum 을 손으로
+ * 적지 않게 하는 경로다(spec D6).
+ */
+export type RunEnvironmentSchema = {
+  /**
+   * Schema
+   */
+  schema: {
+    [key: string]: unknown;
+  };
+  /**
+   * Schema Hash
+   */
+  schema_hash: string;
+};
+
+/**
  * RunManifest
  *
  * What a finished run was made of.
@@ -3544,6 +3593,11 @@ export type RunManifest = {
    * Engine Version
    */
   engine_version: string;
+  environment: RunEnvironment;
+  /**
+   * Environment Hash
+   */
+  environment_hash: string;
   /**
    * Fee Bps
    */
@@ -4422,17 +4476,15 @@ export type StrategySourceKind = "saved_revision" | "inline_draft";
  * StrategySpec
  */
 export type StrategySpec = {
-  data: DataStep;
   /**
    * Description
    */
   description?: string;
   eligibility?: EligibilityStep;
-  execution?: ExecutionStep;
   /**
    * Factors
    */
-  factors: Array<FactorSignal>;
+  factors?: Array<FactorSignal>;
   identity: StrategyIdentity;
   /**
    * Parameters
@@ -4551,6 +4603,7 @@ export type StrategyTraceRequest = {
    * As Of
    */
   as_of?: string | null;
+  environment?: RunEnvironment | null;
   /**
    * Factor Id
    */
@@ -6422,6 +6475,39 @@ export type PreviewPortfolioResponses = {
 
 export type PreviewPortfolioResponse =
   PreviewPortfolioResponses[keyof PreviewPortfolioResponses];
+
+export type GetRunEnvironmentSchemaData = {
+  body?: never;
+  headers?: {
+    /**
+     * If-None-Match
+     */
+    "if-none-match"?: string | null;
+  };
+  path?: never;
+  query?: never;
+  url: "/api/v1/run-environments/schema";
+};
+
+export type GetRunEnvironmentSchemaErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetRunEnvironmentSchemaError =
+  GetRunEnvironmentSchemaErrors[keyof GetRunEnvironmentSchemaErrors];
+
+export type GetRunEnvironmentSchemaResponses = {
+  /**
+   * Successful Response
+   */
+  200: RunEnvironmentSchema;
+};
+
+export type GetRunEnvironmentSchemaResponse =
+  GetRunEnvironmentSchemaResponses[keyof GetRunEnvironmentSchemaResponses];
 
 export type ListStrategiesData = {
   body?: never;

@@ -327,7 +327,8 @@ test.describe("professional YAML workflow", () => {
 
     const workflow = conflicting.page;
     const securityIds = ["sec-005930-1", "sec-000660-1", "sec-035420-1"];
-    const factor = savedV4.spec.factors[0];
+    const savedFactors = savedV4.spec.factors ?? [];
+    const factor = savedFactors[0];
     if (factor === undefined) throw new Error("saved v4 has no factor");
     const traceRequest: StrategyTraceRequest = {
       strategy_source: {
@@ -376,7 +377,7 @@ test.describe("professional YAML workflow", () => {
       provenance: {
         kind: "saved_revision",
         spec_hash: savedV4.spec_hash,
-        schema_version: "1.1",
+        schema_version: "1.2",
         strategy_id: strategyId,
         revision: 4,
         source_hash: savedV4.source_hash,
@@ -594,7 +595,7 @@ test.describe("professional YAML workflow", () => {
             parameter_ids: (savedV4.spec.parameters ?? []).map(
               (parameter) => parameter.parameter_id,
             ),
-            factor_ids: savedV4.spec.factors.map((item) => item.factor_id),
+            factor_ids: savedFactors.map((item) => item.factor_id),
             subgraph_ids: [],
           },
         })

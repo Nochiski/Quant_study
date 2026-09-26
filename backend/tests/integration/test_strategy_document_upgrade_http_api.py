@@ -11,6 +11,10 @@ from strategy_workbench.adapters.inbound.http_api._strategy_document_contract im
     StrategyDocumentUpgrade422Response,
 )
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
+    LEGACY_UPGRADE_TARGET_VERSION,
+)
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 
@@ -31,20 +35,23 @@ def test_upgrade_returns_rewritten_source_and_its_compile_outcome() -> None:
     body = response.json()
     assert body["format"] == "yaml"
     assert body["source"] == _read("quality_momentum.v1_1.commented.yaml")
-    assert body["compiled"]["spec_hash"] and body["compiled"]["diagnostics"] == []
     assert body["compiled"]["schema_version"] == "1.1"
     assert body["source_hash"] == body["compiled"]["source_hash"]
 
-    # 돌려준 원문은 그대로 저장 가능한 1.1 문서다
+    # 현재 버전은 1.2 인데 이 엔드포인트는 아직 1.1 까지만 올린다 — 1.1 → 1.2 step 과 응답의
+    # `environment` 는 P2-09 다(spec D7). 그래서 돌려준 원문은 아직 저장할 수 없고, 진단이
+    # 은퇴 버전을 지목한다. 이 단언이 바뀌는 시점이 P2-09 다(WORKFLOW P2-03 제약사항).
+    assert body["compiled"]["spec_hash"] is None
+    assert [item["code"] for item in body["compiled"]["diagnostics"]] == [
+        "structure.unsupported_schema_version"
+    ]
     saved = client.post(
         "/api/v1/strategy-documents", json={"source": body["source"], "format": "yaml"}
     )
-    assert saved.status_code == 201, saved.text
-    assert saved.json()["spec_hash"] == body["compiled"]["spec_hash"]
-    assert saved.json()["requires_upgrade"] is False
+    assert saved.status_code == 422, saved.text
 
 
-def test_upgrade_of_a_1_1_document_is_422_not_upgradeable() -> None:
+def test_upgrade_of_a_current_version_document_is_422_not_upgradeable() -> None:
     client = TestClient(build_http_app())
 
     response = client.post(
@@ -55,7 +62,7 @@ def test_upgrade_of_a_1_1_document_is_422_not_upgradeable() -> None:
     assert response.status_code == 422, response.text
     detail = response.json()["detail"]
     assert detail["code"] == "strategy_document.not_upgradeable"
-    assert detail["schema_version"] == "1.1"
+    assert detail["schema_version"] == "1.2"
     TypeAdapter(StrategyDocumentUpgrade422Response).validate_python(response.json())
 
 
@@ -68,9 +75,9 @@ def test_a_document_the_diagnostic_calls_1_0_actually_upgrades() -> None:
     """
     client = TestClient(build_http_app())
     source = _read("quality_momentum.v1_0.commented.yaml").replace(
-        'schema_version: "1.0"', 'schema_version: "1.1"'
+        'schema_version: "1.0"', f'schema_version: "{CURRENT_SCHEMA_VERSION}"'
     )
-    assert 'schema_version: "1.1"' in source
+    assert f'schema_version: "{CURRENT_SCHEMA_VERSION}"' in source
 
     compiled = client.post(
         "/api/v1/strategy-documents/compile", json={"source": source, "format": "yaml"}
@@ -85,8 +92,11 @@ def test_a_document_the_diagnostic_calls_1_0_actually_upgrades() -> None:
 
     assert upgraded.status_code == 200, upgraded.text
     body = upgraded.json()
-    assert 'schema_version: "1.1"' in body["source"]
-    assert body["compiled"]["diagnostics"] == []
+    # P2-03 이후 P2-09 전까지는 결과가 1.1 이라 은퇴 버전 진단이 실린다(중간 상태). P2-09 가
+    # 1.1 → 1.2 step 을 붙이면 진단이 없는 현재 버전 결과로 되돌린다.
+    assert f'schema_version: "{LEGACY_UPGRADE_TARGET_VERSION}"' in body["source"]
+    codes = [item["code"] for item in body["compiled"]["diagnostics"]]
+    assert codes == ["structure.unsupported_schema_version"]
 
 
 def test_upgrade_of_a_syntax_invalid_document_is_422_with_diagnostics() -> None:
@@ -117,7 +127,8 @@ def test_upgrade_json_source_keeps_json_format() -> None:
     assert body["format"] == "json"
     assert '"schema_version": "1.1"' in body["source"]
     assert '"factors": [' in body["source"]
-    assert body["compiled"]["spec_hash"]
+    # 1.1 은 은퇴 버전이라 결과가 아직 컴파일되지 않는다(P2-09 까지의 중간 상태).
+    assert body["compiled"]["spec_hash"] is None
 
 
 def test_openapi_declares_the_upgrade_operation_and_its_422_union() -> None:

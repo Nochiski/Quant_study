@@ -223,7 +223,6 @@ ExpressionNode: TypeAlias = (
 class FactorGraph:
     nodes: tuple[ExpressionNode, ...] = field(metadata=DEFINES_NODE)
     output_node_id: str = field(metadata=REFERENCE_NODE)
-    missing_policy: MissingPolicy = MissingPolicy.DROP
 
 
 def _kind_of(node_type: type) -> str:

@@ -41,6 +41,10 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     compute_analytics,
     unavailable_metric_values,
 )
+from strategy_workbench.domain.backtest.facade.environment import (
+    RunEnvironment,
+    environment_hash,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestSeries,
@@ -138,13 +142,16 @@ class TargetTapeStrategy(DeclarativeTapeStrategy):
         spec: StrategySpec,
         tape: TargetTape,
         portfolio_bridge: BacktestEnginePortfolioAdapter,
+        *,
+        environment: RunEnvironment,
     ) -> None:
         self._spec = spec
+        self._environment = environment
         self._bridge = portfolio_bridge
         self._frames: dict[date, TapeFrame] = {
             frame.signal_as_of: TapeFrame(
                 action=portfolio_bridge.to_target_action(
-                    frame, max_participation=spec.execution.participation_rate
+                    frame, max_participation=environment.participation_rate
                 ),
                 reason=f"target_tape:{frame.signal_as_of.isoformat()}",
             )
@@ -152,7 +159,7 @@ class TargetTapeStrategy(DeclarativeTapeStrategy):
         }
 
     def requirements(self) -> StrategyRequirements:
-        return self._bridge.requirements(self._spec)
+        return self._bridge.requirements(self._spec, self._environment)
 
     def tape_frames(self) -> Mapping[date, TapeFrame]:
         return self._frames
@@ -179,6 +186,14 @@ class BacktestEngineExecutorAdapter:
         if strategy is None:
             raise ValueError(
                 "execution request must carry a resolved strategy — "
+                f"run_id={request.run_id} provenance={request.strategy_provenance.kind.value}"
+            )
+        # 비용·체결 파라미터는 실행 설정이 소유한다(P2-01). 요청자가 명시한 값이 엔진에 닿지
+        # 않으면 매니페스트에 적힌 수수료와 실제로 돌린 수수료가 달라진다.
+        environment = request.spec.environment
+        if environment is None:
+            raise ValueError(
+                "execution request must carry a resolved run environment — "
                 f"run_id={request.run_id} provenance={request.strategy_provenance.kind.value}"
             )
         self._check_cancelled(cancelled)
@@ -212,16 +227,21 @@ class BacktestEngineExecutorAdapter:
             RunConfig(
                 run_id=request.run_id,
                 initial_cash=request.spec.initial_cash,
-                fee_bps=strategy.execution.fee_bps,
+                fee_bps=environment.fee_bps,
                 annualization_days=request.spec.annualization_days,
                 max_gross_leverage=max(1.0, strategy.risk.gross_exposure),
             ),
-            slippage=FixedBpsSlippage(strategy.execution.slippage_bps),
-            max_participation=strategy.execution.participation_rate,
+            slippage=FixedBpsSlippage(environment.slippage_bps),
+            max_participation=environment.participation_rate,
             core=request.spec.core.value,
         )
         result = engine.run(
-            TargetTapeStrategy(strategy, request.target_tape, self._portfolio_bridge),
+            TargetTapeStrategy(
+                strategy,
+                request.target_tape,
+                self._portfolio_bridge,
+                environment=environment,
+            ),
             _columnar_feed(request.dataset.bars),
             corporate_actions=corporate_actions,
             universe=universe,
@@ -303,9 +323,11 @@ class BacktestEngineExecutorAdapter:
                 metric_registry_version=self._registry.version,
                 initial_cash=request.spec.initial_cash,
                 annualization_days=request.spec.annualization_days,
-                fee_bps=strategy.execution.fee_bps,
-                slippage_bps=strategy.execution.slippage_bps,
-                participation_rate=strategy.execution.participation_rate,
+                fee_bps=environment.fee_bps,
+                slippage_bps=environment.slippage_bps,
+                participation_rate=environment.participation_rate,
+                environment=environment,
+                environment_hash=environment_hash(environment),
                 strategy_provenance=request.strategy_provenance,
                 warnings=request.dataset.warnings,
             ),

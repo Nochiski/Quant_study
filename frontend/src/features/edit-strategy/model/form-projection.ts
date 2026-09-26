@@ -136,7 +136,11 @@ export type FormProjection = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Form이 picker를 아는 `x-catalog` 값. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
+/**
+ * Form이 후보 select를 아는 `x-catalog` 카탈로그. `universe`는 schema 1.2에서 전략 문서를 떠나
+ * 실행 설정 스키마로 옮겨갔지만(P2-03), 실행 설정 패널이 같은 컨트롤을 쓰므로 남겨 둔다
+ * (P3-02).
+ */
 export const CATALOGS = ["equity-field", "universe", "factor", "subgraph"] as const;
 /** Form이 후보 select를 아는 `x-reference` 네임스페이스. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
 export const NAMESPACES = ["node", "parameter"] as const;

@@ -38,6 +38,7 @@ from ._nodes import (
     FactorGraph,
     FieldNode,
     GroupNode,
+    MissingPolicy,
     ParameterNode,
     SavedFactorNode,
     SavedSubgraphNode,
@@ -105,6 +106,7 @@ def trace_factor_graph(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     selection: TraceSelection | None = None,
     checkpoint: Callable[[], None] = _noop_checkpoint,
@@ -113,11 +115,13 @@ def trace_factor_graph(
 
     Values come from the same cache `evaluate_factor_graph` reads, so they never diverge.
     """
-    bounds, nodes, order = _trace_context(
-        graph, observations, selection, checkpoint=checkpoint
-    )
+    bounds, nodes, order = _trace_context(graph, observations, selection, checkpoint=checkpoint)
     computed = _compute_nodes(
-        graph, observations=observations, parameters=parameters, checkpoint=checkpoint
+        graph,
+        observations=observations,
+        missing=missing,
+        parameters=parameters,
+        checkpoint=checkpoint,
     )
     return _project_trace(
         graph, observations, bounds, nodes, order, computed, checkpoint=checkpoint
@@ -128,6 +132,7 @@ def evaluate_factor_graph_with_trace(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     selection: TraceSelection | None = None,
     checkpoint: Callable[[], None] = _noop_checkpoint,
@@ -139,23 +144,18 @@ def evaluate_factor_graph_with_trace(
     the exact in-memory node cache. Callers do not run `evaluate_factor_graph` and
     `trace_factor_graph` independently.
     """
-    bounds, nodes, order = _trace_context(
-        graph, observations, selection, checkpoint=checkpoint
-    )
+    bounds, nodes, order = _trace_context(graph, observations, selection, checkpoint=checkpoint)
     computed = _compute_nodes(
         graph,
         observations=observations,
+        missing=missing,
         parameters=parameters,
         checkpoint=checkpoint,
         progress=progress,
     )
     return (
-        _evaluation_from_computed(
-            graph, observations, computed, checkpoint=checkpoint
-        ),
-        _project_trace(
-            graph, observations, bounds, nodes, order, computed, checkpoint=checkpoint
-        ),
+        _evaluation_from_computed(graph, observations, computed, checkpoint=checkpoint),
+        _project_trace(graph, observations, bounds, nodes, order, computed, checkpoint=checkpoint),
     )
 
 

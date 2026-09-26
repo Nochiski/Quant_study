@@ -66,6 +66,7 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -91,12 +92,10 @@ from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
     ComparisonOperator,
-    DataStep,
     EligibilityRule,
     EligibilityStep,
     FactorDirection,
     FactorSignal,
-    Market,
     RebalanceFrequency,
     StrategySpec,
     WeightingMethod,
@@ -107,10 +106,29 @@ from tests.backtest_run_wait import wait_for_terminal_run, wait_for_terminal_sta
 WINDOW = (date(2024, 1, 8), date(2024, 1, 12))
 
 
+def _environment() -> RunEnvironment:
+    """실행 설정은 1.2 부터 문서가 아니라 요청이 싣는다(P2-03)."""
+    return RunEnvironment(start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock")
+
+
+# HTTP 테스트는 `/api/v1/strategies/template` 문서를 그대로 쓴다. 템플릿의 기본 리밸런싱이
+# 월간이라 5 세션짜리 `WINDOW` 로는 프레임이 하나도 안 나온다 — 1.1 에서는 템플릿이 5년 구간을
+# 문서에 갖고 있었고, 1.2 에서는 그 구간을 요청이 싣는다.
+HTTP_WINDOW = (date(2023, 1, 2), date(2024, 1, 12))
+
+
+def _environment_json(**overrides: object) -> dict[str, Any]:
+    """HTTP 요청 본문에 싣는 실행 설정."""
+    return {
+        "start": HTTP_WINDOW[0].isoformat(),
+        "end": HTTP_WINDOW[1].isoformat(),
+        "universe_id": "krx.common-stock",
+        **overrides,
+    }
+
+
 def _template() -> StrategySpec:
-    return StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2024, 1, 12)
-    ).template()
+    return StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template()
 
 
 def _momentum() -> FactorSignal:
@@ -142,9 +160,6 @@ def _spec(*factors: FactorSignal) -> StrategySpec:
     )
     return replace(
         template,
-        data=DataStep(
-            market=Market.KRX, start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock"
-        ),
         factors=factors or (_momentum(), market_cap),
         portfolio=replace(
             template.portfolio,
@@ -169,7 +184,7 @@ def _service(
 
 
 def test_candidate_factor_values_equal_factor_graph_outputs() -> None:
-    result = _service().run_pipeline(PortfolioPreviewRequest(_spec()))
+    result = _service().run_pipeline(PortfolioPreviewRequest(_spec(), environment=_environment()))
 
     by_factor = {record.factor_id: record for record in result.factor_evaluations}
     assert set(by_factor) == {"momentum_3", "size"}
@@ -196,7 +211,7 @@ def test_explain_and_portfolio_compile_identical_plans_from_one_metadata_contrac
     spec = _spec()
     research = FactorResearchService(registry, adapter, adapter)
     result = _service(adapter, metadata=adapter, registry_version=registry.version).run_pipeline(
-        PortfolioPreviewRequest(spec)
+        PortfolioPreviewRequest(spec, environment=_environment())
     )
 
     factor_ids = tuple(factor.factor_id for factor in spec.factors)
@@ -232,15 +247,17 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
                 },
             ],
             "output_node_id": "neutral",
-            "missing_policy": "drop",
         }
         return ({**template, "factors": [{**factor, "graph": graph}]}, graph)
 
     invalid_spec, invalid_graph = request_spec("price.market_cap")
     explain_invalid = client.post("/api/v1/factors/explain", json={"graph": invalid_graph})
-    preview_invalid = client.post("/api/v1/portfolio/preview", json={"spec": invalid_spec})
+    preview_invalid = client.post(
+        "/api/v1/portfolio/preview", json={"spec": invalid_spec, "environment": _environment_json()}
+    )
     backtest_invalid = client.post(
-        "/api/v1/backtests", json={"strategy": invalid_spec, "core": "python"}
+        "/api/v1/backtests",
+        json={"strategy": invalid_spec, "core": "python", "environment": _environment_json()},
     )
     assert explain_invalid.status_code == 200
     assert preview_invalid.status_code == backtest_invalid.status_code == 422
@@ -256,9 +273,12 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
 
     valid_spec, valid_graph = request_spec("classification.sector")
     explain_valid = client.post("/api/v1/factors/explain", json={"graph": valid_graph})
-    preview_valid = client.post("/api/v1/portfolio/preview", json={"spec": valid_spec})
+    preview_valid = client.post(
+        "/api/v1/portfolio/preview", json={"spec": valid_spec, "environment": _environment_json()}
+    )
     backtest_valid = client.post(
-        "/api/v1/backtests", json={"strategy": valid_spec, "core": "python"}
+        "/api/v1/backtests",
+        json={"strategy": valid_spec, "core": "python", "environment": _environment_json()},
     )
     assert explain_valid.status_code == preview_valid.status_code == 200
     assert explain_valid.json()["validation"]["valid"] is True
@@ -286,7 +306,6 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
                     }
                 ],
                 "output_node_id": "sector",
-                "missing_policy": "drop",
             },
             "group_series",
         ),
@@ -304,7 +323,6 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
                     },
                 ],
                 "output_node_id": "positive",
-                "missing_policy": "drop",
             },
             "boolean_series",
         ),
@@ -312,7 +330,6 @@ def test_group_field_contract_is_shared_by_explain_portfolio_and_backtest() -> N
             {
                 "nodes": [{"node_id": "constant", "value": 1.0, "kind": "constant"}],
                 "output_node_id": "constant",
-                "missing_policy": "drop",
             },
             "scalar",
         ),
@@ -327,8 +344,13 @@ def test_non_numeric_factor_signal_output_is_explainable_but_not_executable(
     spec = {**template, "factors": [{**factor, "graph": graph}]}
 
     explanation = client.post("/api/v1/factors/explain", json={"graph": graph})
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
-    backtest = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": spec, "environment": _environment_json()}
+    )
+    backtest = client.post(
+        "/api/v1/backtests",
+        json={"strategy": spec, "core": "python", "environment": _environment_json()},
+    )
 
     assert explanation.status_code == 200
     assert explanation.json()["validation"]["valid"] is True
@@ -448,14 +470,15 @@ def test_unused_by_factor_non_finite_raw_field_fails_preview_trace_and_the_backt
     assert validate_strategy(spec).valid
 
     with pytest.raises(RawObservationContractError, match="raw numeric field value must be finite"):
-        portfolio.preview(PortfolioPreviewRequest(spec))
+        portfolio.preview(PortfolioPreviewRequest(spec, environment=_environment()))
 
     trace = StrategyTraceService(portfolio, InMemoryStrategyRepository())
     with pytest.raises(RawObservationContractError, match="raw numeric field value must be finite"):
         trace.trace(
             StrategyTraceRequest(
                 strategy_source=InlineDraft(spec, "inline_draft", "raw-contract-probe"),
-                as_of=spec.data.end,
+                environment=_environment(),
+                as_of=_environment().end,
                 security_ids=("sec-005930-1",),
                 factor_id=spec.factors[0].factor_id,
                 include_raw=True,
@@ -471,7 +494,9 @@ def test_unused_by_factor_non_finite_raw_field_fails_preview_trace_and_the_backt
         new_id=lambda: "raw-contract-run",
     )
     # 시작 요청은 데이터를 읽지 않으므로 접수되고, 계약 위반은 tape 단계에서 run 을 실패시킨다.
-    accepted = backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
+    accepted = backtests.start(
+        BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON, environment=_environment())
+    )
     state = wait_for_terminal_run(backtests, accepted.run.run_id)
     assert state.status.value == "failed", state
     assert state.error_code == "portfolio.raw_observation.invalid"
@@ -487,7 +512,7 @@ def test_non_finite_raw_opening_book_is_not_normalized_to_missing() -> None:
     )
 
     with pytest.raises(RawObservationContractError, match="previous_weight must be finite"):
-        portfolio.preview(PortfolioPreviewRequest(_spec()))
+        portfolio.preview(PortfolioPreviewRequest(_spec(), environment=_environment()))
 
 
 def test_duplicate_raw_fields_fail_closed_with_one_code_on_every_http_execution_route(
@@ -523,7 +548,9 @@ def test_duplicate_raw_fields_fail_closed_with_one_code_on_every_http_execution_
     factor = spec["factors"][0]
     responses = (
         (
-            client.post("/api/v1/portfolio/preview", json={"spec": spec}),
+            client.post(
+                "/api/v1/portfolio/preview", json={"spec": spec, "environment": _environment_json()}
+            ),
             Portfolio422Response,
         ),
         (
@@ -531,6 +558,7 @@ def test_duplicate_raw_fields_fail_closed_with_one_code_on_every_http_execution_
                 "/api/v1/strategies/debug/trace",
                 json={
                     "strategy_source": {"kind": "inline_draft", "spec": spec},
+                    "environment": _environment_json(),
                     "security_ids": ["sec-005930-1"],
                     "factor_id": factor["factor_id"],
                     "node_ids": [factor["graph"]["output_node_id"]],
@@ -547,7 +575,10 @@ def test_duplicate_raw_fields_fail_closed_with_one_code_on_every_http_execution_
         TypeAdapter(contract).validate_python(response.json())
 
     # 백테스트 시작은 데이터를 읽지 않아 접수되고, 같은 위반이 tape 단계에서 run 을 실패시킨다.
-    backtest = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
+    backtest = client.post(
+        "/api/v1/backtests",
+        json={"strategy": spec, "core": "python", "environment": _environment_json()},
+    )
     assert backtest.status_code == 202, backtest.text
     state = wait_for_terminal_state(client, backtest.json()["run"]["run_id"])
     assert state["status"] == "failed", state
@@ -561,7 +592,7 @@ def test_legacy_raw_port_keeps_preview_and_backtest_compatible(tmp_path: Path) -
     portfolio = _service(legacy, metadata=adapter)
     spec = _spec()
 
-    assert portfolio.preview(PortfolioPreviewRequest(spec)).tape.frames
+    assert portfolio.preview(PortfolioPreviewRequest(spec, environment=_environment())).tape.frames
     backtests = BacktestRunService(
         portfolio,
         InMemoryStrategyRepository(),
@@ -571,7 +602,9 @@ def test_legacy_raw_port_keeps_preview_and_backtest_compatible(tmp_path: Path) -
         new_id=lambda: "legacy-port-run",
     )
 
-    accepted = backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
+    accepted = backtests.start(
+        BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON, environment=_environment())
+    )
 
     assert accepted.run.run_id == "legacy-port-run"
     state = wait_for_terminal_run(backtests, "legacy-port-run")
@@ -585,7 +618,7 @@ def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: 
     portfolio = _service(adapter, metadata=_DriftedMetadata(adapter))
     spec = _spec()
     with pytest.raises(PortfolioSnapshotMismatchError, match="snapshot mismatch"):
-        portfolio.preview(PortfolioPreviewRequest(spec))
+        portfolio.preview(PortfolioPreviewRequest(spec, environment=_environment()))
 
     backtests = BacktestRunService(
         portfolio,
@@ -596,7 +629,9 @@ def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: 
         new_id=lambda: "must-not-complete",
     )
     # 스냅샷 대조는 원시 관측을 읽은 뒤에만 가능하므로 tape 단계에서 run 을 실패시킨다(#158).
-    accepted = backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
+    accepted = backtests.start(
+        BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON, environment=_environment())
+    )
     state = wait_for_terminal_run(backtests, accepted.run.run_id)
     assert state.status.value == "failed", state
     assert state.error_code == "portfolio.raw_observation.invalid"
@@ -606,7 +641,7 @@ def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: 
 
 def test_composite_score_is_the_direction_signed_weighted_sum_of_graph_outputs() -> None:
     spec = _spec()
-    result = _service().run_pipeline(PortfolioPreviewRequest(spec))
+    result = _service().run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
     weights = {f.factor_id: (f.weight, f.direction) for f in spec.factors}
 
     assert result.preview.tape.frames, "every-session rebalance must yield frames"
@@ -637,14 +672,14 @@ def test_composite_score_is_the_direction_signed_weighted_sum_of_graph_outputs()
 
 def test_graph_evaluation_matches_a_direct_evaluation_over_raw_pit_fields() -> None:
     spec = _spec()
-    result = _service().run_pipeline(PortfolioPreviewRequest(spec))
+    result = _service().run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
     momentum = spec.factors[0]
     raw = MockEquityDataAdapter.demo().load_raw_observations(
         RawObservationQuery(
             market="KRX",
             universe_id="krx.common-stock",
-            start=spec.data.start,
-            end=spec.data.end,
+            start=_environment().start,
+            end=_environment().end,
             field_ids=("price.close", "price.market_cap"),
             history_sessions_before_start=2,
         )
@@ -657,16 +692,20 @@ def test_graph_evaluation_matches_a_direct_evaluation_over_raw_pit_fields() -> N
         )
         for item in raw.observations
     )
-    direct = evaluate_factor_graph(momentum.graph, observations=observations).values
+    # 파이프라인과 같은 결측 정책으로 직접 평가한다: 정책의 owner 는 실행 설정이다(P2-02).
+    missing = _environment().missing
+    direct = evaluate_factor_graph(
+        momentum.graph, observations=observations, missing=missing
+    ).values
     pipeline = next(r for r in result.factor_evaluations if r.factor_id == "momentum_3").values
     assert direct == pipeline
-    trace = trace_factor_graph(momentum.graph, observations=observations)
+    trace = trace_factor_graph(momentum.graph, observations=observations, missing=missing)
     traced = {(v.as_of, v.security_id): v.value for v in trace.nodes[-1].values}
     assert all(traced[(v.as_of, v.security_id)] == v.value for v in pipeline)
 
 
 def test_factor_value_publication_date_is_the_latest_input_publication() -> None:
-    result = _service().run_pipeline(PortfolioPreviewRequest(_spec()))
+    result = _service().run_pipeline(PortfolioPreviewRequest(_spec(), environment=_environment()))
     raw_by_key = {
         (o.as_of, o.security_id): o
         for o in MockEquityDataAdapter.demo()
@@ -704,7 +743,9 @@ class _LeakyPort:
 
 def test_future_dated_raw_field_fails_closed_and_loud() -> None:
     with pytest.raises(LookAheadViolationError, match="available_date=2025"):
-        _service(_LeakyPort()).run_pipeline(PortfolioPreviewRequest(_spec()))
+        _service(_LeakyPort()).run_pipeline(
+            PortfolioPreviewRequest(_spec(), environment=_environment())
+        )
 
 
 def test_choice_parameter_referenced_by_a_parameter_node_is_a_validation_issue() -> None:
@@ -725,13 +766,17 @@ def test_choice_parameter_referenced_by_a_parameter_node_is_a_validation_issue()
     assert "strategy.expression.parameter_type" in issues
     assert issues["strategy.expression.parameter_type"].path == "factors.0.graph.nodes.1"
     with pytest.raises(InvalidPortfolioRequestError):
-        _service().run_pipeline(PortfolioPreviewRequest(spec))
+        _service().run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
 
     numeric = replace(spec, parameters=(ChoiceParameter("mode", 2, (1, 2), "choice"),))
     assert "strategy.expression.parameter_type" not in {
         issue.code for issue in validate_strategy(numeric).issues
     }
-    assert _service().run_pipeline(PortfolioPreviewRequest(numeric)).preview.tape.frames
+    assert (
+        _service()
+        .run_pipeline(PortfolioPreviewRequest(numeric, environment=_environment()))
+        .preview.tape.frames
+    )
 
 
 def test_saved_factor_reference_is_rejected_up_front_not_silently_missing() -> None:
@@ -748,7 +793,7 @@ def test_saved_factor_reference_is_rejected_up_front_not_silently_missing() -> N
     assert validate_strategy(spec).valid
 
     with pytest.raises(InvalidPortfolioRequestError) as excinfo:
-        _service().run_pipeline(PortfolioPreviewRequest(spec))
+        _service().run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
     (issue,) = excinfo.value.validation.issues
     assert issue.code == "strategy.expression.reference_unsupported"
     assert issue.path == "factors.1.graph"
@@ -757,9 +802,14 @@ def test_saved_factor_reference_is_rejected_up_front_not_silently_missing() -> N
 def test_unknown_universe_is_a_422_with_the_adapter_detail() -> None:
     client = TestClient(build_http_app())
     template = client.get("/api/v1/strategies/template").json()
-    template["data"]["universe_id"] = "nope.universe"
 
-    response = client.post("/api/v1/portfolio/preview", json={"spec": template})
+    response = client.post(
+        "/api/v1/portfolio/preview",
+        json={
+            "spec": template,
+            "environment": _environment_json(universe_id="nope.universe"),
+        },
+    )
 
     assert response.status_code == 422, response.text
     detail = response.json()["detail"]
@@ -771,7 +821,7 @@ def test_unknown_universe_is_a_422_with_the_adapter_detail() -> None:
 def test_structural_rejections_share_a_code_and_data_failures_fail_the_backtest_run() -> None:
     client = TestClient(build_http_app())
     template = client.get("/api/v1/strategies/template").json()
-    unknown_universe = {**template, "data": {**template["data"], "universe_id": "nope.universe"}}
+    unknown_universe = _environment_json(universe_id="nope.universe")
     first_factor = template["factors"][0]
     referencing = {
         **first_factor,
@@ -781,7 +831,6 @@ def test_structural_rejections_share_a_code_and_data_failures_fail_the_backtest_
                 {"node_id": "ref", "factor_id": first_factor["factor_id"], "kind": "saved_factor"}
             ],
             "output_node_id": "ref",
-            "missing_policy": first_factor["graph"]["missing_policy"],
         },
     }
     saved_reference = {
@@ -790,8 +839,14 @@ def test_structural_rejections_share_a_code_and_data_failures_fail_the_backtest_
     }
 
     # 구조적 거부(저장 팩터 참조)는 데이터를 읽기 전에 판정되므로 두 경로가 같은 422 코드를 낸다.
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": saved_reference})
-    run = client.post("/api/v1/backtests", json={"strategy": saved_reference, "core": "python"})
+    preview = client.post(
+        "/api/v1/portfolio/preview",
+        json={"spec": saved_reference, "environment": _environment_json()},
+    )
+    run = client.post(
+        "/api/v1/backtests",
+        json={"strategy": saved_reference, "core": "python", "environment": _environment_json()},
+    )
     assert preview.status_code == 422 and run.status_code == 422, (preview.text, run.text)
     assert (
         preview.json()["detail"]["code"]
@@ -801,10 +856,15 @@ def test_structural_rejections_share_a_code_and_data_failures_fail_the_backtest_
 
     # 데이터 부재(미지 유니버스)는 관측을 읽어야 알 수 있다. preview 는 422, 백테스트 시작은
     # 데이터를 읽지 않아 접수되고(이슈 #158) run 의 tape 단계가 같은 사유로 실패한다.
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": unknown_universe})
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": template, "environment": unknown_universe}
+    )
     assert preview.status_code == 422, preview.text
     assert preview.json()["detail"]["code"] == "portfolio.data.unavailable"
-    run = client.post("/api/v1/backtests", json={"strategy": unknown_universe, "core": "python"})
+    run = client.post(
+        "/api/v1/backtests",
+        json={"strategy": template, "core": "python", "environment": unknown_universe},
+    )
     assert run.status_code == 202, run.text
     state = wait_for_terminal_state(client, run.json()["run"]["run_id"])
     assert state["status"] == "failed", state
@@ -813,16 +873,21 @@ def test_structural_rejections_share_a_code_and_data_failures_fail_the_backtest_
 
 
 def test_unknown_universe_raises_a_typed_error_in_the_service() -> None:
-    spec = replace(_spec(), data=replace(_spec().data, universe_id="nope.universe"))
+    bogus = replace(_environment(), universe_id="nope.universe")
     with pytest.raises(RawObservationUnavailableError, match="nope.universe"):
-        _service().run_pipeline(PortfolioPreviewRequest(spec))
+        _service().run_pipeline(PortfolioPreviewRequest(_spec(), environment=bogus))
 
 
 def test_backtest_consumes_the_same_truthful_tape_as_preview() -> None:
     client = TestClient(build_http_app())
     template = client.get("/api/v1/strategies/template").json()
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": template}).json()
-    accepted = client.post("/api/v1/backtests", json={"strategy": template, "core": "python"})
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": template, "environment": _environment_json()}
+    ).json()
+    accepted = client.post(
+        "/api/v1/backtests",
+        json={"strategy": template, "core": "python", "environment": _environment_json()},
+    )
 
     assert accepted.status_code == 202, accepted.text
     run_id = accepted.json()["run"]["run_id"]
@@ -881,8 +946,10 @@ def test_non_members_do_not_enter_the_member_cross_section() -> None:
     )
     spec = _spec(zscored)
 
-    clean = _service().run_pipeline(PortfolioPreviewRequest(spec))
-    noisy = _service(_NonMemberNoisePort()).run_pipeline(PortfolioPreviewRequest(spec))
+    clean = _service().run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
+    noisy = _service(_NonMemberNoisePort()).run_pipeline(
+        PortfolioPreviewRequest(spec, environment=_environment())
+    )
 
     def member_values(result: object) -> dict[tuple[date, str], float | None]:
         return {
@@ -916,26 +983,27 @@ class _WideRangePort:
         return MockEquityDataAdapter.demo().load_raw_observations(widened)
 
 
-def test_sessions_outside_the_strategy_range_fail_closed() -> None:
+def test_sessions_outside_the_run_range_fail_closed() -> None:
     spec = _spec()
-    with pytest.raises(RawObservationContractError, match="outside the requested strategy range"):
-        _service(_WideRangePort()).run_pipeline(PortfolioPreviewRequest(spec))
+    with pytest.raises(RawObservationContractError, match="outside the requested run range"):
+        _service(_WideRangePort()).run_pipeline(
+            PortfolioPreviewRequest(spec, environment=_environment())
+        )
 
 
 def test_the_widened_window_would_otherwise_have_produced_extra_frames() -> None:
     """The probe is not vacuous: without the guard the wider answer reaches the compiler."""
-    spec = _spec()
     widened = MockEquityDataAdapter.demo().load_raw_observations(
         RawObservationQuery(
             market="KRX",
             universe_id="krx.common-stock",
-            start=spec.data.start,
-            end=spec.data.end + timedelta(days=14),
+            start=_environment().start,
+            end=_environment().end + timedelta(days=14),
             field_ids=("price.close", "price.market_cap"),
             history_sessions_before_start=2,
         )
     )
-    assert any(session > spec.data.end for session in widened.sessions)
+    assert any(session > _environment().end for session in widened.sessions)
 
 
 _WARNING_START = date(2024, 1, 2)  # the mock lacks calendar for the market-cap lag here
@@ -944,9 +1012,9 @@ _WARNING_START = date(2024, 1, 2)  # the mock lacks calendar for the market-cap 
 def test_raw_observation_warnings_reach_the_preview() -> None:
     """D-005: the adapter's caveats are part of the answer, not something the service drops."""
     spec = _spec()
-    spec = replace(spec, data=replace(spec.data, start=_WARNING_START))
+    early = replace(_environment(), start=_WARNING_START)
 
-    preview = _service().preview(PortfolioPreviewRequest(spec))
+    preview = _service().preview(PortfolioPreviewRequest(spec, environment=early))
 
     assert any("insufficient mock calendar for lag" in item for item in preview.warnings)
 
@@ -957,11 +1025,6 @@ def test_preview_warnings_are_recorded_in_the_run_manifest() -> None:
     close_factor = template["factors"][0]
     spec = {
         **template,
-        "data": {
-            **template["data"],
-            "start": _WARNING_START.isoformat(),
-            "end": WINDOW[1].isoformat(),
-        },
         "factors": [
             close_factor,
             {
@@ -981,11 +1044,14 @@ def test_preview_warnings_are_recorded_in_the_run_manifest() -> None:
         },
     }
 
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
+    early = _environment_json(start=_WARNING_START.isoformat())
+    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec, "environment": early})
     assert preview.status_code == 200, preview.text
     assert preview.json()["warnings"], "the probe strategy produced no adapter warning"
 
-    accepted = client.post("/api/v1/backtests", json={"strategy": spec, "core": "python"})
+    accepted = client.post(
+        "/api/v1/backtests", json={"strategy": spec, "core": "python", "environment": early}
+    )
     assert accepted.status_code == 202, accepted.text
     run_id = accepted.json()["run"]["run_id"]
     state = wait_for_terminal_state(client, run_id)
@@ -1006,7 +1072,7 @@ def test_run_pipeline_reports_monotonic_progress_through_every_phase() -> None:
     reported: list[tuple[float, str]] = []
 
     result = _service().run_pipeline(
-        PortfolioPreviewRequest(_spec()),
+        PortfolioPreviewRequest(_spec(), environment=_environment()),
         progress=lambda fraction, message: reported.append((fraction, message)),
     )
 
@@ -1018,7 +1084,7 @@ def test_run_pipeline_reports_monotonic_progress_through_every_phase() -> None:
     assert "momentum_3" in messages and "size" in messages
     # 팩터 2개인데 팩터 경계만이 아니라 노드 안에서도 올라간다.
     assert len(set(fractions)) > 2 + 4
-    baseline = _service().run_pipeline(PortfolioPreviewRequest(_spec()))
+    baseline = _service().run_pipeline(PortfolioPreviewRequest(_spec(), environment=_environment()))
     assert result.preview.tape.tape_hash == baseline.preview.tape.tape_hash
 
 
@@ -1045,7 +1111,7 @@ def test_run_pipeline_maps_raw_load_progress_into_the_loading_band() -> None:
     reported: list[tuple[float, str]] = []
 
     _service(_ProgressReportingRawPort()).run_pipeline(
-        PortfolioPreviewRequest(_spec()),
+        PortfolioPreviewRequest(_spec(), environment=_environment()),
         progress=lambda fraction, message: reported.append((fraction, message)),
     )
 
@@ -1067,7 +1133,7 @@ def test_run_pipeline_progress_never_steps_back_across_factor_boundaries(
     reported: list[float] = []
 
     _service().run_pipeline(
-        PortfolioPreviewRequest(_spec(*factors)),
+        PortfolioPreviewRequest(_spec(*factors), environment=_environment()),
         progress=lambda fraction, message: reported.append(fraction),
     )
 

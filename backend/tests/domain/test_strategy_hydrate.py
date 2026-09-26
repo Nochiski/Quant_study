@@ -5,7 +5,6 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import replace
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +53,7 @@ def test_identity_is_injected_from_the_envelope_not_the_document() -> None:
     spec = _hydrate_ok(_document())
 
     assert spec.identity == DRAFT
-    assert spec.identity.schema_version == "1.1"
+    assert spec.identity.schema_version == "1.2"
     saved = hydrate_strategy_document(_document(), identity=StrategyIdentity("s-1", 4))
     assert saved.spec is not None
     assert saved.spec.identity == StrategyIdentity("s-1", 4)
@@ -62,18 +61,19 @@ def test_identity_is_injected_from_the_envelope_not_the_document() -> None:
 
 def test_document_carrying_identity_is_rejected() -> None:
     document = _document()
-    document["identity"] = {"strategy_id": "x", "revision": 1, "schema_version": "1.1"}
+    document["identity"] = {"strategy_id": "x", "revision": 1, "schema_version": "1.2"}
 
     assert _issue_codes(document) == [("structure.unknown_key", "/identity")]
 
 
-@pytest.mark.parametrize("version", ["0.9", "2", 1.0, None])
+@pytest.mark.parametrize("version", ["0.9", "1.1", "2", 1.0, None])
 def test_unsupported_schema_version_fails_closed(version: object) -> None:
     document = _document()
     document["schema_version"] = version
 
     assert _issue_codes(document) == [("structure.unsupported_schema_version", "/schema_version")]
-    assert "1.1" in SUPPORTED_SCHEMA_VERSIONS
+    # 1.1 은 은퇴 버전이다 — 업그레이더(P2-09)를 거쳐서만 들어온다.
+    assert "1.2" in SUPPORTED_SCHEMA_VERSIONS and "1.1" not in SUPPORTED_SCHEMA_VERSIONS
 
 
 def test_missing_schema_version_fails_closed() -> None:
@@ -81,6 +81,60 @@ def test_missing_schema_version_fails_closed() -> None:
     del document["schema_version"]
 
     assert _issue_codes(document) == [("structure.missing_field", "/schema_version")]
+
+
+def test_only_schema_version_and_title_are_required() -> None:
+    """spec D3: 1.2 최상위 필수 키는 둘뿐이다. 나머지는 모델 기본값으로 채워진다.
+
+    `factors` 를 생략해도 빈 배열이어도 구조 오류가 아니다 — 새 전략이 "구조 오류"가 아니라
+    "팩터를 추가하세요"(semantic `strategy.factor.required`)로 시작하는 근거다(P4-04 시작 문서).
+    """
+    from strategy_workbench.domain.strategy.facade.validation import validate_strategy
+
+    for document in (
+        {"schema_version": "1.2", "title": ""},
+        {"schema_version": "1.2", "title": "", "factors": []},
+    ):
+        result = hydrate_strategy_document(document, identity=DRAFT)
+        assert result.ok, result.issues
+        assert result.spec is not None
+        assert result.spec.factors == ()
+        assert [issue.code for issue in validate_strategy(result.spec).issues] == [
+            "strategy.title.empty",
+            "strategy.factor.required",
+        ]
+
+
+@pytest.mark.parametrize(
+    ("pointer", "patch"),
+    [
+        (
+            "/data",
+            {
+                "data": {
+                    "market": "KRX",
+                    "start": "2021-01-01",
+                    "end": "2026-08-31",
+                    "universe_id": "krx.common-stock",
+                }
+            },
+        ),
+        ("/execution", {"execution": {"timing": "next_open", "fee_bps": 15.0}}),
+    ],
+)
+def test_execution_settings_are_unknown_keys_in_1_2(pointer: str, patch: dict[str, Any]) -> None:
+    """spec D3 S1~S2: 실행 설정은 문서를 떠났다. 남아 있으면 조용히 무시되지 않고 fail-closed."""
+    document = {**_document(), **patch}
+
+    assert (("structure.unknown_key", pointer)) in _issue_codes(document)
+
+
+def test_graph_missing_policy_is_an_unknown_key_in_1_2() -> None:
+    """spec D3 S3: 결측 정책은 실행 설정이 소유한다(P2-02). 1.2 문서에서는 키 자체가 없다."""
+    document = _document()
+    document["factors"][0]["graph"]["missing_policy"] = "zero"
+
+    assert ("structure.unknown_key", "/factors/0/graph/missing_policy") in _issue_codes(document)
 
 
 def test_unknown_keys_at_every_depth_carry_pointers() -> None:
@@ -97,11 +151,11 @@ def test_unknown_keys_at_every_depth_carry_pointers() -> None:
 
 def test_missing_required_fields_are_reported_not_defaulted() -> None:
     document = _document()
-    del document["data"]["start"]
+    del document["title"]
     del document["factors"][0]["graph"]["output_node_id"]
 
     codes = _issue_codes(document)
-    assert ("structure.missing_field", "/data/start") in codes
+    assert ("structure.missing_field", "/title") in codes
     assert ("structure.missing_field", "/factors/0/graph/output_node_id") in codes
 
 
@@ -118,14 +172,12 @@ def test_kind_discriminator_is_required_and_validated() -> None:
 
 def test_scalar_literals_are_typed_and_bad_literals_fail() -> None:
     document = _document()
-    document["data"]["start"] = "2021-13-01"
     document["portfolio"]["rebalance"] = "month_end"
     document["risk"]["max_name_weight"] = "5%"
     document["portfolio"]["selection_count"] = 20.5
     document["risk"]["sector_neutral"] = "yes"
 
     codes = _issue_codes(document)
-    assert ("structure.invalid_date", "/data/start") in codes
     assert ("structure.invalid_enum", "/portfolio/rebalance") in codes
     assert ("structure.type_mismatch", "/risk/max_name_weight") in codes
     assert ("structure.type_mismatch", "/portfolio/selection_count") in codes
@@ -134,16 +186,15 @@ def test_scalar_literals_are_typed_and_bad_literals_fail() -> None:
 
 def test_typed_fields_normalise_int_float_and_iso_dates() -> None:
     document = _document()
-    document["execution"]["fee_bps"] = 15
+    document["risk"]["max_name_weight"] = 1
     document["factors"][0]["weight"] = 1
     document["portfolio"]["selection_count"] = 20.0
 
     spec = _hydrate_ok(document)
 
-    assert spec.execution.fee_bps == 15.0 and isinstance(spec.execution.fee_bps, float)
+    assert spec.risk.max_name_weight == 1.0 and isinstance(spec.risk.max_name_weight, float)
     assert isinstance(spec.factors[0].weight, float)
     assert spec.portfolio.selection_count == 20 and isinstance(spec.portfolio.selection_count, int)
-    assert spec.data.start == date(2021, 1, 1)
 
 
 def test_parameter_value_union_folds_integral_floats_but_keeps_bool_and_str() -> None:
@@ -204,11 +255,11 @@ def test_datetime_on_a_date_field_and_huge_ints_fail_closed() -> None:
     from datetime import datetime
 
     document = _document()
-    document["data"]["start"] = datetime(2021, 1, 1)
+    document["factors"][0]["graph"]["nodes"][1]["lag"] = datetime(2021, 1, 1)
     document["risk"]["max_name_weight"] = 10**400
 
     codes = _issue_codes(document)
-    assert ("structure.invalid_date", "/data/start") in codes
+    assert ("structure.type_mismatch", "/factors/0/graph/nodes/1/lag") in codes
     assert ("structure.type_mismatch", "/risk/max_name_weight") in codes
 
 
@@ -227,12 +278,10 @@ def test_canonical_payload_normalises_negative_zero_and_choice_values() -> None:
     minus_zero = replace(
         spec,
         risk=replace(spec.risk, net_exposure=-0.0),
-        execution=replace(spec.execution, slippage_bps=0.0),
     )
     plus_zero = replace(
         spec,
         risk=replace(spec.risk, net_exposure=0.0),
-        execution=replace(spec.execution, slippage_bps=0.0),
     )
     assert strategy_spec_hash(minus_zero) == strategy_spec_hash(plus_zero)
     assert "-0.0" not in canonical_strategy_json(minus_zero)
@@ -328,13 +377,15 @@ def test_default_from_must_name_a_required_sibling_field() -> None:
     [
         ("signal", "method", "weighted_sum"),
         ("signal", "entry_percentile", 0.1),
-        ("execution", "order_style", "market"),
     ],
 )
 def test_removed_1_0_fields_are_flagged_as_legacy_shape(
     section: str, key: str, value: object
 ) -> None:
-    """schema 1.1 S2: 읽지 않던 세 필드는 fail-closed이고, 1.0 문법임을 문장이 말한다(P1-05)."""
+    """schema 1.1 S2: 읽지 않던 필드는 fail-closed이고, 1.0 문법임을 문장이 말한다(P1-05).
+
+    1.0 의 `execution.order_style` 은 1.2 에서 섹션째 사라져(`/execution`) 다른 행이 소유한다.
+    """
     document = copy.deepcopy(_document())
     document.setdefault(section, {})[key] = value
 

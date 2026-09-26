@@ -127,18 +127,22 @@ def evaluate_factor_graph(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
     progress: Callable[[float], None] = _noop_progress,
 ) -> FactorEvaluation:
     """그래프를 평가한다. `progress` 는 그래프 평가 안의 완료 비율(0~1, 단조 증가)을 받는다.
 
-    노드 계산이 `_NODES_PROGRESS_SHARE` 까지, 출력 값 조립이 나머지를 채운다.
+    노드 계산이 `_NODES_PROGRESS_SHARE` 까지, 출력 값 조립이 나머지를 채운다. `missing` 은 실행
+    설정(`RunEnvironment.missing`)이 소유한다 — schema 1.2 의 팩터 그래프에는 결측 정책이 없다
+    (P2-02 에서 인자로, P2-03 에서 필드 삭제).
     """
 
     computed = _compute_nodes(
         graph,
         observations=observations,
+        missing=missing,
         parameters=parameters,
         checkpoint=checkpoint,
         progress=lambda fraction: progress(fraction * _NODES_PROGRESS_SHARE),
@@ -192,6 +196,7 @@ def _compute_nodes(
     graph: FactorGraph,
     *,
     observations: tuple[FactorObservation, ...],
+    missing: MissingPolicy,
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
     progress: Callable[[float], None] = _noop_progress,
@@ -228,9 +233,7 @@ def _compute_nodes(
         inputs = [evaluate(dependency) for dependency in node_dependencies(node)]
         values: list[FactorComputedValue]
         if isinstance(node, FieldNode):
-            values = _field_values(
-                observations, node.field_id, graph.missing_policy, checkpoint=checkpoint
-            )
+            values = _field_values(observations, node.field_id, missing, checkpoint=checkpoint)
         elif isinstance(node, ConstantNode):
             values = [node.value for _ in _checkpointed(observations, checkpoint)]
         elif isinstance(node, ParameterNode):

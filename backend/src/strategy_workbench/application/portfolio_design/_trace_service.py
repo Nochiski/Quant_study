@@ -24,13 +24,16 @@ from strategy_workbench.domain.strategy.facade.provenance import (
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategySpec,
 )
+from strategy_workbench.domain.strategy.facade.validation import validate_strategy
 
 from ._models import PortfolioPipelineOptions, PortfolioPreviewRequest
 from ._service import (
+    InvalidPortfolioRequestError,
     InvalidPortfolioTraceSelectionError,
     PortfolioDesignService,
     PortfolioPipelineCancelledError,
     TraceObservationCapabilityError,
+    _require_environment_or_reject,
 )
 from ._trace_models import (
     RawStrategyTraceRow,
@@ -93,10 +96,19 @@ class StrategyTraceService:
     ) -> StrategyTraceResponse:
         spec, provenance = self._resolve(request)
         _raise_if_cancelled(cancelled)
-        if request.as_of is not None and not spec.data.start <= request.as_of <= spec.data.end:
+        # `as_of` 범위 판정이 실행 설정을 필요로 한다. 파이프라인이 하는 것과 같은 문서 검증을
+        # 여기서 먼저 한 번 돌려, 잘못된 문서가 실행 설정 진단보다 먼저 코드화된 진단으로
+        # 거절되게 한다(진단 순서의 owner 는 validator 다).
+        validation = validate_strategy(spec)
+        if not validation.valid:
+            raise InvalidPortfolioRequestError(validation)
+        # preview·run 과 같은 헬퍼를 쓴다 — 세 경로가 같은 `portfolio.strategy.invalid` +
+        # `validation.issues` 구조로 거절해야 프론트가 코드 하나만 번역한다(P2-02 2차 리뷰 P3).
+        environment = _require_environment_or_reject(spec, request.environment)
+        if request.as_of is not None and not environment.start <= request.as_of <= environment.end:
             raise InvalidStrategyTraceRequestError(
-                "trace as_of is outside the strategy data range — "
-                f"as_of={request.as_of} range={spec.data.start}..{spec.data.end}"
+                "trace as_of is outside the run range — "
+                f"as_of={request.as_of} range={environment.start}..{environment.end}"
             )
         factors = {factor.factor_id: factor for factor in spec.factors}
         if request.factor_id not in factors:
@@ -114,7 +126,7 @@ class StrategyTraceService:
         )
         try:
             pipeline = self._portfolio_design.run_pipeline(
-                PortfolioPreviewRequest(spec),
+                PortfolioPreviewRequest(spec, environment=environment),
                 options=PortfolioPipelineOptions(
                     trace_factor_id=request.factor_id,
                     trace_selection=selection,

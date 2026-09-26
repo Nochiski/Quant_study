@@ -24,6 +24,10 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.backtest.facade.environment import (
+    MissingRunEnvironmentError,
+    require_environment,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
@@ -109,6 +113,17 @@ class InvalidBacktestRunError(ValueError):
     pass
 
 
+class MissingBacktestRunEnvironmentError(InvalidBacktestRunError):
+    """실행 요청에 실행 설정이 없다(spec D3·D6, P2-03).
+
+    `InvalidBacktestRunError` 의 하위 타입으로 두되 HTTP 코드를 따로 준다. 프론트는 이 한
+    코드를 보고 "실행 설정을 채우라"는 화면(P3-02 실행 설정 패널)으로 보내야 하고,
+    `backtest.run.invalid` 에 묻으면 문장 파싱 말고는 구분할 방법이 없다. 하위 타입이므로
+    run 스레드의 방어 분기(`_run`)와 실패 코드 분류는 기존 `backtest.run.invalid` 를 그대로
+    쓴다 — 시작 요청이 앞에서 거르므로 그 경로로는 도달하지 않는다.
+    """
+
+
 class StrategyReferenceNotFoundError(LookupError):
     """The saved revision a run refers to does not exist."""
 
@@ -188,17 +203,32 @@ class BacktestRunService:
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - _resolve always fills it
             raise InvalidBacktestRunError("resolved run spec has no strategy")
-        for window in spec.metric_windows:
-            if window.start < strategy.data.start or window.end > strategy.data.end:
-                raise InvalidBacktestRunError(
-                    f"metric window exceeds strategy data range: {window.scope.value}"
-                )
+        # 실행 설정을 **preflight 앞에서** 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·
+        # tape·데이터 조회와 preflight 가 모두 같은 객체를 읽어야 명시 `environment` 가 조용히
+        # 무시되지 않는다(P2-01 P0). 1.2 는 문서에서 만드는 대체 경로가 없으므로 해소 단계가
+        # 사라졌고, 그래서 두 호출부가 다른 값을 볼 여지도 없다(P2-03 결정 항목).
+        try:
+            environment = require_environment(
+                spec.environment, requested_by=f"backtest.run({strategy.title!r})"
+            )
+        except MissingRunEnvironmentError as error:
+            raise MissingBacktestRunEnvironmentError(str(error)) from error
+        spec = replace(spec, environment=environment)
         # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
-        engine = self._portfolio_design.preflight(PortfolioPreviewRequest(strategy))
+        engine = self._portfolio_design.preflight(
+            PortfolioPreviewRequest(strategy, environment=environment)
+        )
         if not engine.compatible:
             raise InvalidBacktestRunError(
                 "strategy exceeds engine capabilities — " + _describe_engine_issues(engine)
             )
+        for window in spec.metric_windows:
+            if window.start < environment.start or window.end > environment.end:
+                raise InvalidBacktestRunError(
+                    "metric window exceeds the run range — "
+                    f"scope={window.scope.value} window={window.start}..{window.end} "
+                    f"run={environment.start}..{environment.end}"
+                )
         # TargetTape.strategy_hash 는 같은 spec 의 strategy_spec_hash 다. tape 없이도 provenance 를
         # 확정할 수 있고, tape 단계가 이 값을 다시 대조한다.
         executed_hash = strategy_spec_hash(strategy)
@@ -415,6 +445,11 @@ class BacktestRunService:
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - resolved before the thread starts
             raise InvalidBacktestRunError("resolved run spec has no strategy")
+        environment = spec.environment
+        if environment is None:  # pragma: no cover - start() pins it before the thread starts
+            raise MissingBacktestRunEnvironmentError(
+                f"resolved run spec has no run environment — run_id={run_id}"
+            )
         try:
             # tape 단계: 원시 관측 로딩 + 팩터 평가 + TargetTape 컴파일. 실데이터에서 실행 시간의
             # 대부분을 차지하므로 취소 콜백을 파이프라인 checkpoint 에 그대로 건다.
@@ -425,7 +460,7 @@ class BacktestRunService:
                 # require_engine_compatible 은 start() 의 preflight 판정을 되풀이하는 심층 방어다 —
                 # 같은 순수 판정이라 정상 경로에서는 발동하지 않는다.
                 preview = self._portfolio_design.run_pipeline(
-                    PortfolioPreviewRequest(strategy),
+                    PortfolioPreviewRequest(strategy, environment=environment),
                     options=PortfolioPipelineOptions(require_engine_compatible=True),
                     cancelled=record.cancellation.is_set,
                     progress=self._tape_progress(record),
@@ -448,8 +483,8 @@ class BacktestRunService:
                 raise InvalidBacktestRunError("target tape does not contain any positions")
             dataset = self._data_source.load_backtest_dataset(
                 BacktestDataQuery(
-                    start=strategy.data.start,
-                    end=strategy.data.end,
+                    start=environment.start,
+                    end=environment.end,
                     security_ids=security_ids,
                     benchmark_security_id=spec.benchmark_security_id,
                 )

@@ -16,4 +16,4 @@ export type {
   StrategyDocument,
   StrategySummary,
 } from "../../shared/api";
-export type { DataStep, StrategySpec } from "./model/strategy";
+export type { StrategySpec } from "./model/strategy";

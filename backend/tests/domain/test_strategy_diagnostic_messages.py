@@ -17,6 +17,8 @@ from __future__ import annotations
 import copy
 import json
 import re
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +38,9 @@ from strategy_workbench.domain.factor.facade.expression import (
     FieldNode,
 )
 from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
+from strategy_workbench.domain.strategy._hydrate import _hydrate
 from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
     STRUCTURE_CODES,
     hydrate_strategy_document,
 )
@@ -121,14 +125,15 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "schema_version 누락",
         lambda d: d.pop("schema_version"),
         "structure.missing_field",
-        "문서 맨 위에 schema_version을 적어 주세요 — missing='schema_version' supported=('1.1',)",
+        "문서 맨 위에 schema_version을 적어 주세요 — missing='schema_version' "
+        f"supported=('{CURRENT_SCHEMA_VERSION}',)",
     ),
     (
         "지원하지 않는 버전",
         lambda d: _set(d, "schema_version", "9.9"),
         "structure.unsupported_schema_version",
         "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 바꿔 줍니다 — "
-        "got='9.9' supported=('1.1',)",
+        f"got='9.9' supported=('{CURRENT_SCHEMA_VERSION}',)",
     ),
     (
         "모르는 키(오타)",
@@ -158,10 +163,11 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
     ),
     (
         "고를 수 없는 값",
-        lambda d: _set(d, "execution.timing", "next_opne"),
+        # schema 1.2(P2-03)는 `execution` 을 문서에서 뺐으므로 남아 있는 enum 필드로 본다.
+        lambda d: _set(d, "portfolio.side", "long_onyl"),
         "structure.invalid_enum",
-        "고를 수 있는 값이 아닙니다 혹시 `next_open`인가요? — "
-        "got='next_opne' suggestion='next_open' allowed=['next_open']",
+        "고를 수 있는 값이 아닙니다 혹시 `long_only`인가요? — "
+        "got='long_onyl' suggestion='long_only' allowed=['long_only', 'long_short']",
     ),
     (
         "목록 자리에 블록",
@@ -200,13 +206,8 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "structure.type_mismatch",
         "참 또는 거짓(true·false)이 와야 합니다 — expected=bool got='yes'",
     ),
-    (
-        "날짜 형식",
-        lambda d: _set(d, "data.start", "2021/01/01"),
-        "structure.invalid_date",
-        "날짜는 YYYY-MM-DD로 적어 주세요. 예: 2021-01-01 — "
-        "expected=YYYY-MM-DD example=2021-01-01 got='2021/01/01'",
-    ),
+    # "날짜 형식"(`structure.invalid_date`) 사례는 schema 1.2(P2-03)에서 뺐다. 날짜 필드이던
+    # `data.start`·`data.end` 가 실행 요청의 `environment` 로 옮겨져 전략 문서에는 날짜 필드가 없다.
     (
         "1.0 문법 — factors 두 겹",
         lambda d: _set(d, "factors", {"factors": d["factors"]}),
@@ -217,10 +218,11 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
     ),
     (
         "1.0 문법 — 은퇴한 키",
-        lambda d: _set(d, "execution.order_style", "market"),
+        # 1.0 의 `execution.order_style` 은 1.2 에서 섹션째 사라져 `signal.method` 로 본다.
+        lambda d: d.setdefault("signal", {}).update(method="weighted_sum"),
         "structure.legacy_shape",
         "1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우거나 업그레이드하세요 — "
-        "got='order_style' section='execution'",
+        "got='method' section='signal'",
     ),
     (
         "1.0 문법 — unary alias 노드",
@@ -405,9 +407,38 @@ def test_codec_limit_message_golden(
     assert _reject(source, limits=limits) == (code, message)
 
 
+@dataclass(frozen=True)
+class _Dated:
+    """날짜 필드 하나짜리 모델. `structure.invalid_date` 문장을 고정하는 데만 쓴다."""
+
+    start: date
+
+
+def test_invalid_date_message_golden() -> None:
+    """날짜 형식 문장의 golden.
+
+    schema 1.2(P2-03)에서 전략 문서의 날짜 필드(`data.start`·`data.end`)가 실행 요청의
+    `environment` 로 옮겨져 문서 변조로는 이 코드에 닿지 않는다. 코드와 문장은 날짜 필드를 가진
+    모델을 위해 hydrate 에 남으므로 날짜 필드 하나짜리 모델로 직접 확인한다.
+    """
+    issues: list[Any] = []
+    _hydrate(_Dated, {"start": "2021/01/01"}, "", issues)
+
+    assert [(issue.code, issue.message) for issue in issues] == [
+        (
+            "structure.invalid_date",
+            "날짜는 YYYY-MM-DD로 적어 주세요. 예: 2021-01-01 — "
+            "expected=YYYY-MM-DD example=2021-01-01 got='2021/01/01'",
+        )
+    ]
+
+
 def test_every_declared_code_has_a_message_golden() -> None:
     """코드 레지스트리와 문장 golden이 1:1이다 — 코드를 늘리면 문장도 같은 PR에서 늘어난다."""
     structural = {code for _n, _m, code, _msg in HYDRATE_GOLDEN}
+    # 날짜 형식은 schema 1.2 문서에 날짜 필드가 없어 문서 변조로는 닿지 않는다. 문장은 아래
+    # `test_invalid_date_message_golden` 이 hydrate 를 직접 불러 고정한다.
+    structural |= {"structure.invalid_date"}
     codec = {code for _n, _s, _f, code, _msg in CODEC_GOLDEN} | {
         code for _n, _s, _l, code, _msg in LIMIT_GOLDEN
     }
@@ -440,7 +471,7 @@ def test_no_english_sentence_reaches_the_reader(code: str, message: str) -> None
     [
         pytest.param("모르는 키", HYDRATE_GOLDEN[2][1], "max_name_weight", id="키"),
         pytest.param("모르는 kind", HYDRATE_GOLDEN[4][1], "time_series", id="kind"),
-        pytest.param("고를 수 없는 값", HYDRATE_GOLDEN[5][1], "next_open", id="enum"),
+        pytest.param("고를 수 없는 값", HYDRATE_GOLDEN[5][1], "long_only", id="enum"),
     ],
 )
 def test_near_miss_suggestion_appears_in_both_the_sentence_and_the_details(

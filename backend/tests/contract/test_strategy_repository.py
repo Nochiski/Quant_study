@@ -10,7 +10,7 @@ import sqlite3
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier
 
@@ -50,7 +50,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "c6bc9c4e38c431f77d7c3c5217ac664d1093f426b5a6d5b705a8571d1992b7d5"
+GOLDEN_SPEC_HASH = "f14a9eaacf1214e8d697288ebed1047b723ef3de75fd222aafa19b400e6b43df"
 T0 = datetime(2026, 9, 4, 9, 0, tzinfo=UTC)
 
 RepositoryFactory = Callable[[], StrategyRepositoryPort]
@@ -89,9 +89,7 @@ def _sqlite(path: Path) -> SQLiteStrategyRepository:
 
 
 def _template() -> StrategySpec:
-    return StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: date(2026, 9, 3)
-    ).template()
+    return StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "unused").template()
 
 
 def _legacy(spec: StrategySpec, strategy_id: str, revision: int, at: datetime = T0):
@@ -234,9 +232,7 @@ def test_legacy_revisions_have_no_source_and_keep_the_json_flow(
     factory: RepositoryFactory,
 ) -> None:
     repository = factory()
-    service = StrategyDesignService(
-        repository, new_id=lambda: "legacy-1", today=lambda: date(2026, 9, 3), now=lambda: T0
-    )
+    service = StrategyDesignService(repository, new_id=lambda: "legacy-1", now=lambda: T0)
     created = service.create(service.template())
     revised = service.revise("legacy-1", replace(created.spec, title="수정"), expected_revision=1)
 

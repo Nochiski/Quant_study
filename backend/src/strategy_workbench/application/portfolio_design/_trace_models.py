@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar, TypeAlias
 
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.equity.facade.research_data import CellKind
 from strategy_workbench.domain.factor.facade.trace import TraceValueStatus
 from strategy_workbench.domain.portfolio.facade.construction import (
@@ -35,6 +36,8 @@ class StrategyTraceRequest:
     starting_holdings: tuple[PortfolioStartingHolding, ...] | None = None
     offset: int = 0
     limit: int = 200
+    # preview 와 같은 optional 실행 설정(P2-01). `as_of` 범위 판정과 관측 조회가 이 값을 읽는다.
+    environment: RunEnvironment | None = None
 
     MAX_SECURITY_IDS: ClassVar[int] = 100
     MAX_NODE_IDS: ClassVar[int] = 100

@@ -44,7 +44,6 @@ const graph: FactorGraphRequest["graph"] = {
     { node_id: "zero", kind: "constant", value: 0 },
   ],
   output_node_id: "signal",
-  missing_policy: "drop",
 };
 
 const explanation = (): FactorExplanation => ({
@@ -73,6 +72,7 @@ const explanation = (): FactorExplanation => ({
     required_field_ids: ["price.close"],
   },
   plan: {
+    missing_policy: "drop",
     registry_version: "factor-registry-v7",
     graph_hash: "g".repeat(64),
     plan_hash: "p".repeat(64),
@@ -130,7 +130,6 @@ const explanation = (): FactorExplanation => ({
     referenced_factor_ids: [],
     referenced_subgraph_ids: ["sector-neutral-v2"],
     minimum_history_sessions: 252,
-    missing_policy: "drop",
     as_of_policy: "available_date_lte_as_of",
   },
 });

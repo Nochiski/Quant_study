@@ -34,6 +34,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import MarketBarRecord
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.portfolio.facade.construction import (
     CandidateSide,
     TargetFrame,
@@ -43,6 +44,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
 from tests.conftest import make_bar, make_instrument
 
 SIGNAL, EXECUTION = date(2018, 4, 27), date(2018, 4, 30)
+ENVIRONMENT = RunEnvironment(start=SIGNAL, end=EXECUTION, universe_id="krx.common-stock")
 
 
 @dataclass(frozen=True)
@@ -77,12 +79,15 @@ def _target(security_id: str, weight: float) -> TargetPosition:
 
 
 def _strategy(*targets: TargetPosition) -> TargetTapeStrategy:
-    spec = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "x", today=lambda: EXECUTION
-    ).template()
+    spec = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "x").template()
     frame = TargetFrame(signal_as_of=SIGNAL, execution_on=EXECUTION, targets=targets, candidates=())
     tape = TargetTape(data_snapshot_id="snap", strategy_hash="h", tape_hash="t", frames=(frame,))
-    return TargetTapeStrategy(spec, tape, BacktestEnginePortfolioAdapter())
+    return TargetTapeStrategy(
+        spec,
+        tape,
+        BacktestEnginePortfolioAdapter(),
+        environment=ENVIRONMENT,
+    )
 
 
 def test_adapter_delegates_to_evaluate_tape_and_only_adds_its_reasons() -> None:

@@ -15,13 +15,9 @@ import yaml
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.domain.strategy.facade.document import (
     SourceFormat,
-    hydrate_strategy_document,
     upgrade_document_1_0,
 )
-from strategy_workbench.domain.strategy.facade.specification import (
-    StrategyIdentity,
-    strategy_spec_hash,
-)
+from strategy_workbench.domain.strategy.facade.specification import StrategyIdentity
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 DRAFT = StrategyIdentity("draft", 0)
@@ -33,11 +29,15 @@ def _read(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def _hash_of(document: object) -> str:
+def _canonical(document: object) -> str:
+    """두 변환 경로의 결과 tree 동치 비교용 정규형.
+
+    1.0 업그레이드 출력은 1.1 이라 현재 모델(1.2)로 hydrate 되지 않는다 — 그래서 spec hash 가
+    아니라 tree 를 비교한다. hash 동치는 P2-09 가 1.1 → 1.2 step 을 붙인 뒤 1.2 출력으로
+    돌아온다(spec D7).
+    """
     assert isinstance(document, dict)
-    hydrated = hydrate_strategy_document(document, identity=DRAFT)
-    assert hydrated.ok and hydrated.spec is not None, hydrated.issues
-    return strategy_spec_hash(hydrated.spec)
+    return json.dumps(document, ensure_ascii=False, sort_keys=True)
 
 
 def test_commented_yaml_upgrade_matches_the_golden_byte_for_byte() -> None:
@@ -174,8 +174,8 @@ def test_crlf_source_is_normalised_to_lf() -> None:
     upgraded = RuamelDocumentCodec().upgrade_source(source, format=SourceFormat.YAML)
 
     assert CR not in upgraded
-    assert _hash_of(RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML).tree) == (
-        _hash_of(upgrade_document_1_0(yaml.safe_load(source)))
+    assert _canonical(RuamelDocumentCodec().parse(upgraded, format=SourceFormat.YAML).tree) == (
+        _canonical(upgrade_document_1_0(yaml.safe_load(source)))
     )
 
 
@@ -189,7 +189,7 @@ def test_upgraded_yaml_reparses_to_the_dict_path_tree_and_hash() -> None:
     assert reparsed.ok and reparsed.tree is not None
     expected = upgrade_document_1_0(yaml.safe_load(source))
     assert json.loads(json.dumps(reparsed.tree)) == json.loads(json.dumps(expected))
-    assert _hash_of(reparsed.tree) == _hash_of(expected)
+    assert _canonical(reparsed.tree) == _canonical(expected)
 
 
 def test_flow_style_factors_are_flattened_too() -> None:
@@ -207,7 +207,7 @@ def test_flow_style_factors_are_flattened_too() -> None:
     reparsed = codec.parse(upgraded, format=SourceFormat.YAML)
     assert reparsed.ok and reparsed.tree is not None
     assert isinstance(reparsed.tree["factors"], list)
-    assert _hash_of(reparsed.tree) == _hash_of(upgrade_document_1_0(yaml.safe_load(source)))
+    assert _canonical(reparsed.tree) == _canonical(upgrade_document_1_0(yaml.safe_load(source)))
 
 
 @pytest.mark.parametrize(("indent", "trailing"), [(2, LF), (4, ""), (4, LF)])

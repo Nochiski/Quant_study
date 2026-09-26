@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   ContractInspector,
@@ -21,7 +21,6 @@ import {
   PROJECTION_VIEWS,
   canValidateDocument,
   currentDiagnostics,
-  currentSpec,
   createNewDraftId,
   projectStrategySpec,
   revisionDraftId,
@@ -63,7 +62,7 @@ import {
  * 새 문서 시작 텍스트. `schema_version` 리터럴은 backend runtime schema의 `const`와 같아야 하며
  * `__tests__/new-strategy-starter.test.ts`가 fixture로 단언한다(Phase 2 감사 DEFECT-P2X-001).
  */
-export const NEW_STRATEGY_STARTER = 'schema_version: "1.1"\ntitle: ""\n';
+export const NEW_STRATEGY_STARTER = 'schema_version: "1.2"\ntitle: ""\n';
 const ROUTE = "/research/strategies/new";
 const NEW_DRAFT: DocumentSource = {
   kind: "new",
@@ -107,14 +106,9 @@ export const NewStrategyPage = () => {
     schemaVersion: assist.schemaVersion,
   });
   const executionPlans = useExecutionPlans(document, assist.inspectorSource);
-  const executableSpec = currentSpec(document);
-  const runDateRange = useMemo(
-    () =>
-      executableSpec === null
-        ? null
-        : { start: executableSpec.data.start, end: executableSpec.data.end },
-    [executableSpec],
-  );
+  // 실행 기간의 owner가 전략 문서에서 실행 설정으로 옮겨갔다(schema 1.2). 그 값을 편집하는
+  // 실행 설정 패널은 P3-01·P3-02에서 붙으므로 그때까지 기간은 지정되지 않은 상태다.
+  const runDateRange = null;
   const runSettings = useBacktestRunSettings(runDateRange);
   const backtest = useRunBacktest(
     document,

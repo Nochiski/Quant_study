@@ -50,7 +50,7 @@ const API = "http://localhost:8000";
 const FIXTURE_SPEC = JSON.parse(
   readBackendFixture("strategy_documents/quality_momentum.legacy.json"),
 ) as StrategySpec;
-const MOMENTUM_FACTOR = FIXTURE_SPEC.factors[0]!;
+const MOMENTUM_FACTOR = FIXTURE_SPEC.factors![0]!;
 const SPEC: StrategySpec = {
   ...FIXTURE_SPEC,
   title: "멀티 팩터",
@@ -70,7 +70,6 @@ const SPEC: StrategySpec = {
           },
         ],
         output_node_id: "book",
-        missing_policy: "keep",
       },
     },
   ],
@@ -150,7 +149,7 @@ const METADATA: ContractInspectorSource = {
   schema: {
     schema: { type: "object" },
     schema_hash: "schema-hash",
-    schema_version: "1.1",
+    schema_version: "1.2",
   },
   contract: {
     contract: {
@@ -159,7 +158,7 @@ const METADATA: ContractInspectorSource = {
       factor_registry_version: "registry-v1",
       fields: [],
       schema_hash: "schema-hash",
-      schema_version: "1.1",
+      schema_version: "1.2",
     },
     equity_catalog_url: "/api/v1/equity/catalog",
     factor_catalog_url: "/api/v1/factors/catalog",
@@ -216,7 +215,8 @@ const explanation = (graph: FactorGraphRequest["graph"]): FactorExplanation => {
       referenced_factor_ids: [],
       referenced_subgraph_ids: [],
       minimum_history_sessions: contracts.at(-1)?.minimum_history_sessions ?? 0,
-      missing_policy: graph.missing_policy ?? "drop",
+      // schema 1.2 그래프에는 결측 정책이 없다. 계획의 결측 정책은 실행 설정 기본값이다(P2-03).
+      missing_policy: "drop",
       as_of_policy: "available_date_lte_as_of",
     },
     narrative: [],
@@ -255,8 +255,8 @@ const wrapper = () => {
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
 };
-const BASE = 'schema_version: "1.1"\ntitle: "old"\n';
-const PROPOSED = 'schema_version: "1.1"\ntitle: "new"\n';
+const BASE = 'schema_version: "1.2"\ntitle: "old"\n';
+const PROPOSED = 'schema_version: "1.2"\ntitle: "new"\n';
 
 const editorOf = (initial: string) => {
   let text = initial;
@@ -338,7 +338,7 @@ const mountChain = () => {
         spec: SPEC,
         canonicalJson: JSON.stringify(SPEC),
         specHash: "s".repeat(64),
-        schemaVersion: "1.1",
+        schemaVersion: "1.2",
         sourceHash: "x".repeat(64),
         diagnostics: [],
       },

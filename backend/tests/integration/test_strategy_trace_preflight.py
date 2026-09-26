@@ -48,6 +48,7 @@ from strategy_workbench.application.portfolio_design.facade.trace import (
     StrategyTraceService,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.factor.facade.evaluation import FactorEvaluation, FactorValue
 from strategy_workbench.domain.factor.facade.expression import ConstantNode
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
@@ -82,7 +83,7 @@ class _NoRawAdapter:
 
 
 class _RejectingEngine:
-    def assess(self, spec):
+    def assess(self, spec, environment):
         return EngineCompatibility(
             compatible=False,
             requirements=EngineRequirementSummary("EverySession", (), (), ("unsupported",)),
@@ -164,15 +165,28 @@ def _spec():
     return StrategyDesignService(
         InMemoryStrategyRepository(),
         new_id=lambda: "unused",
-        today=lambda: date(2026, 9, 3),
     ).template()
 
 
-def _request(spec, *, node_ids: tuple[str, ...] = ()) -> StrategyTraceRequest:
+def _environment(**overrides) -> RunEnvironment:
+    """실행 설정은 1.2 부터 요청이 싣는다(P2-03). 1.1 템플릿이 문서에 갖고 있던 구간이다."""
+    return replace(
+        RunEnvironment(
+            start=date(2021, 9, 4), end=date(2026, 9, 3), universe_id="krx.common-stock"
+        ),
+        **overrides,
+    )
+
+
+def _request(
+    spec, *, node_ids: tuple[str, ...] = (), environment: RunEnvironment | None = None
+) -> StrategyTraceRequest:
     factor = spec.factors[0]
+    resolved = environment or _environment()
     return StrategyTraceRequest(
         strategy_source=InlineDraft(spec, "inline_draft"),
-        as_of=spec.data.end,
+        environment=resolved,
+        as_of=resolved.end,
         security_ids=("sec-005930-1",),
         factor_id=factor.factor_id,
         node_ids=node_ids,
@@ -229,7 +243,7 @@ def test_starting_holding_must_exist_on_the_actual_first_signal_frame() -> None:
 def test_starting_holding_requires_at_least_one_target_tape_frame() -> None:
     source = MockEquityDataAdapter.demo()
     spec = _every_session_spec()
-    spec = replace(spec, data=replace(spec.data, start=spec.data.end))
+    single_session = _environment(start=_environment().end)
     service = StrategyTraceService(
         PortfolioDesignService(
             source,
@@ -246,7 +260,7 @@ def test_starting_holding_requires_at_least_one_target_tape_frame() -> None:
     ):
         service.trace(
             replace(
-                _request(spec),
+                _request(spec, environment=single_session),
                 starting_holdings=(PortfolioStartingHolding("sec-005930-1", 0.5),),
             )
         )
@@ -317,10 +331,12 @@ def test_non_finite_inline_spec_fails_validation_before_raw_loading(value: float
     )
     service = StrategyTraceService(portfolio, InMemoryStrategyRepository())
     spec = _spec()
-    spec = replace(spec, execution=replace(spec.execution, fee_bps=value))
+    # 비용의 owner 가 실행 설정이므로 비유한 값도 실행 설정이 싣는다(1.2).
+    with pytest.raises(ValueError):
+        _environment(fee_bps=value)
 
     with pytest.raises(InvalidPortfolioRequestError):
-        service.trace(_request(spec))
+        service.trace(_request(replace(spec, risk=replace(spec.risk, max_name_weight=value))))
 
     assert source.raw_called is False
     assert source.metadata_called is False
@@ -464,10 +480,10 @@ def test_trace_scope_cancellation_stops_after_first_observation() -> None:
     source = MockEquityDataAdapter.demo()
     raw = source.load_raw_observations(
         RawObservationQuery(
-            market=spec.data.market.value,
-            universe_id=spec.data.universe_id,
-            start=spec.data.start,
-            end=spec.data.end,
+            market=_environment().market.value,
+            universe_id=_environment().universe_id,
+            start=_environment().start,
+            end=_environment().end,
             field_ids=("price.close",),
         )
     )
@@ -493,7 +509,7 @@ def test_trace_scope_cancellation_stops_after_first_observation() -> None:
     options = PortfolioPipelineOptions(
         trace_factor_id=spec.factors[0].factor_id,
         trace_selection=TraceSelection(
-            as_of=(spec.data.end,),
+            as_of=(_environment().end,),
             security_ids=("sec-005930-1",),
         ),
     )
@@ -506,7 +522,7 @@ def test_trace_scope_cancellation_stops_after_first_observation() -> None:
         portfolio_module._validate_loaded_trace_scope(
             options,
             scoped_raw,
-            first_signal_as_of=spec.data.end,
+            first_signal_as_of=_environment().end,
             checkpoint=checkpoint,
         )
 
@@ -517,10 +533,10 @@ def test_trace_scope_validates_each_requested_date_security_pair() -> None:
     spec = _spec()
     raw = MockEquityDataAdapter.demo().load_raw_observations(
         RawObservationQuery(
-            market=spec.data.market.value,
-            universe_id=spec.data.universe_id,
-            start=spec.data.start,
-            end=spec.data.end,
+            market=_environment().market.value,
+            universe_id=_environment().universe_id,
+            start=_environment().start,
+            end=_environment().end,
             field_ids=("price.close",),
         )
     )
@@ -572,7 +588,7 @@ def test_factor_output_cancellation_stops_before_target_and_projection(
             consumed += 1
             if consumed == 1:
                 stop.set()
-            yield FactorValue(spec.data.end, f"security-{index:04d}", float(index))
+            yield FactorValue(_environment().end, f"security-{index:04d}", float(index))
 
     def evaluate_with_latching_values(*args, **kwargs):
         return (
@@ -664,13 +680,12 @@ def test_raw_projection_stops_at_one_lookahead_row_and_reports_truncation() -> N
 
 
 def test_starting_holdings_none_preserves_adapter_book_while_empty_overrides_it() -> None:
-    spec = _spec()
     raw = MockEquityDataAdapter.demo().load_raw_observations(
         RawObservationQuery(
-            market=spec.data.market.value,
-            universe_id=spec.data.universe_id,
-            start=spec.data.start,
-            end=spec.data.end,
+            market=_environment().market.value,
+            universe_id=_environment().universe_id,
+            start=_environment().start,
+            end=_environment().end,
             field_ids=("price.close",),
         )
     )

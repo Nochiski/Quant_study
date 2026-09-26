@@ -44,7 +44,7 @@ FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_docum
 
 # 같은 의미의 YAML/JSON/legacy JSON fixture가 공유하는 canonical hash.
 # 재생성: strategy_spec_hash(hydrate_authoring_document(yaml.safe_load(quality_momentum.yaml)))
-QUALITY_MOMENTUM_SPEC_HASH = "d3a9c236306d1c53f8d7b5c09fd05df42b61b2848c7c8cfc5aeae61de793e781"
+QUALITY_MOMENTUM_SPEC_HASH = "22f95ea804a57f6bb8f7134127c2feb7d88e0a5a0bbc52481977c75cf0de5197"
 # hash 알고리즘 golden. 모델 모양과 무관하게 canonical 직렬화 규칙(sort_keys·최소 separator·
 # allow_nan=False·sha256)만 고정한다. payload는 2026-09-04 schema 1.0 fixture의 canonical payload를
 # literal 파일로 옮긴 것이라 모델이 1.1로 바뀌어도 값이 변하지 않는다. 값이 바뀌면 알고리즘이 바뀐

@@ -197,6 +197,14 @@ FIELD_APPLICABILITY: tuple[FieldApplicability, ...] = (
         (ApplicabilityCondition("/portfolio/weighting", equals="risk"),),
         "strategy.contract.applicable.risk_field_id",
     ),
+    # 적용 조건 warning 전용 행이다. `risk_field_id` 와의 배타는 별개 validator error
+    # (`strategy.risk.risk_source_conflict`)가 소유하므로 `owned_by_error` 를 붙이지 않는다 —
+    # 붙이면 `weighting: equal` 에 남겨 둔 `risk_factor_id` 가 아무 경고 없이 무시된다(spec D3 S6).
+    FieldApplicability(
+        "/risk/risk_factor_id",
+        (ApplicabilityCondition("/portfolio/weighting", equals="risk"),),
+        "strategy.contract.applicable.risk_factor_id",
+    ),
     FieldApplicability(
         "/signal/regime_minimum",
         (ApplicabilityCondition("/signal/regime_field_id", not_null=True),),
@@ -335,8 +343,12 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.risk.net_exposure",
         "strategy.risk.long_only_exposure",
         "strategy.risk.risk_field",
+        "strategy.risk.risk_source_conflict",
+        "strategy.risk.risk_factor_missing",
+        "strategy.risk.risk_factor_excluded",
         "strategy.risk.sector_neutral_side",
         "strategy.signal.regime_field",
+        "strategy.signal.no_alpha_factor",
         "strategy.parameter.duplicate",
         "strategy.parameter.bounds",
         "strategy.parameter.default",

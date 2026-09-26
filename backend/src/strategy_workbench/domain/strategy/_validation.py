@@ -31,6 +31,8 @@ from ._models import (
     PortfolioSide,
     StrategySpec,
     WeightingMethod,
+    composite_factors,
+    inverse_risk_factor_id,
 )
 
 
@@ -179,6 +181,60 @@ def _eligibility_rule_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
             )
 
 
+def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
+    """리스크 역가중의 원천(필드 또는 팩터)과 그 팩터를 합성에서 뺀 결과를 검사한다 (spec D3 S6).
+
+    원천 배타(`risk_source_conflict`)와 참조 확인(`risk_factor_missing`)은 `weighting` 과 무관한
+    문서 규칙이다 — 적용 조건은 `FIELD_APPLICABILITY` 행이 따로 warning 으로 낸다. 제외 warning 과
+    알파 0개 error 는 제외가 실제로 일어나는 경우(`inverse_risk_factor_id`)에만 낸다.
+    """
+    factor_ids = [factor.factor_id for factor in spec.factors]
+    risk_factor_id = spec.risk.risk_factor_id
+    if risk_factor_id is not None and spec.risk.risk_field_id is not None:
+        yield semantic_issue(
+            "strategy.risk.risk_source_conflict",
+            "risk.risk_factor_id",
+            "리스크 역가중 원천은 필드와 팩터 중 하나만 지정할 수 있습니다: "
+            f"risk_field_id={spec.risk.risk_field_id!r} risk_factor_id={risk_factor_id!r}",
+        )
+    if risk_factor_id is not None and risk_factor_id not in factor_ids:
+        yield semantic_issue(
+            "strategy.risk.risk_factor_missing",
+            "risk.risk_factor_id",
+            "리스크 팩터가 이 문서의 팩터 목록에 없습니다: "
+            f"risk_factor_id={risk_factor_id!r} factors={factor_ids!r}",
+        )
+    if (
+        spec.portfolio.weighting is WeightingMethod.RISK
+        and spec.risk.risk_field_id is None
+        and risk_factor_id is None
+    ):
+        yield semantic_issue(
+            "strategy.risk.risk_field",
+            "risk.risk_field_id",
+            "리스크 가중 방식을 쓰려면 리스크 필드나 리스크 팩터를 지정해야 합니다.",
+        )
+    excluded = inverse_risk_factor_id(spec)
+    if excluded is None or excluded not in factor_ids:
+        return
+    yield semantic_issue(
+        "strategy.risk.risk_factor_excluded",
+        "risk.risk_factor_id",
+        "리스크 팩터는 역가중에만 쓰이고 합성 점수에서는 빠집니다(가중치 무시): "
+        f"risk_factor_id={excluded!r}",
+        severity=ValidationSeverity.WARNING,
+    )
+    if not composite_factors(spec):
+        # 막지 않으면 모든 후보의 합성 점수가 `None` 이 되어 정렬이 `security_id` 사전순으로
+        # 떨어진다 — 예외도 진단도 없이 엉뚱한 종목이 선정되는 silent wrong result 다.
+        yield semantic_issue(
+            "strategy.signal.no_alpha_factor",
+            "factors",
+            "리스크 팩터를 빼고 나면 점수를 낼 알파 팩터가 없습니다. 알파 팩터를 하나 이상 "
+            f"추가하세요: risk_factor_id={excluded!r} factors={factor_ids!r}",
+        )
+
+
 def validate_strategy(
     spec: StrategySpec, *, written_pointers: Collection[str] | None = None
 ) -> StrategyValidation:
@@ -281,14 +337,7 @@ def validate_strategy(
                 "롱온리 전략은 총 익스포저와 순 익스포저가 같아야 합니다.",
             )
         )
-    if spec.portfolio.weighting is WeightingMethod.RISK and spec.risk.risk_field_id is None:
-        issues.append(
-            semantic_issue(
-                "strategy.risk.risk_field",
-                "risk.risk_field_id",
-                "리스크 가중 방식을 쓰려면 리스크 필드를 지정해야 합니다.",
-            )
-        )
+    issues.extend(_risk_source_issues(spec))
     if spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_ONLY:
         issues.append(
             semantic_issue(

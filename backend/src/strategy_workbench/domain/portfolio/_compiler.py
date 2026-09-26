@@ -26,6 +26,8 @@ from strategy_workbench.domain.strategy.facade.specification import (
     SignalNormalization,
     StrategySpec,
     WeightingMethod,
+    composite_factors,
+    inverse_risk_factor_id,
     strategy_spec_hash,
 )
 
@@ -663,7 +665,8 @@ def _cross_sectional_signals(
             f"supported={[item.value for item in SignalNormalization]}"
         )
     # 문서에 없는 팩터 값이 관측에 섞여 와도 모집단에 넣지 않는다. 합성에 안 들어가는 값이다.
-    scored_factor_ids = {factor.factor_id for factor in spec.factors}
+    # 리스크 역가중 팩터도 같다 — 역가중은 정규화 전 원시값을 읽는다(spec D3 S6).
+    scored_factor_ids = {factor.factor_id for factor in composite_factors(spec)}
     populations: dict[tuple[str, bool], list[tuple[str, float]]] = {}
     for observation in _checkpointed(observations, checkpoint):
         for value in observation.factor_values:
@@ -742,7 +745,9 @@ def _score_candidate(
     score = 0.0
     denominator = 0.0
     contributions: list[FactorContributionTrace] = []
-    for factor in spec.factors:
+    # 리스크 역가중 팩터는 합성에서 빠진다(spec D3 S6): 그 값의 결측·공개일은 알파 탈락
+    # (`MISSING_FACTOR`·`FUTURE_DATA`)이 아니라 비중 단계의 `MISSING_RISK` 로만 드러난다.
+    for factor in composite_factors(spec):
         value = factors.get(factor.factor_id)
         if value is None or value.value is None:
             reasons.append(ExclusionReason.MISSING_FACTOR)
@@ -1097,8 +1102,7 @@ def _weight_scores(
         elif spec.portfolio.weighting is WeightingMethod.RANK:
             score = float(len(selected) - min(order, len(selected)) + 1)
         else:
-            field_id = spec.risk.risk_field_id
-            risk = _field(observations[candidate.security_id], field_id)
+            risk = _risk_value(spec, observations[candidate.security_id])
             if risk is None or risk <= 0:
                 reasons[candidate.security_id] = ExclusionReason.MISSING_RISK
                 continue
@@ -1310,6 +1314,22 @@ def _finalize_decision(
         target_weight=weights.get(decision.security_id, 0.0) if selected else 0.0,
         exclusion_reasons=tuple(dict.fromkeys(reasons)),
     )
+
+
+def _risk_value(spec: StrategySpec, observation: PortfolioObservation) -> float | None:
+    """역가중 원천 값 하나. 팩터면 **정규화 전 원시 출력**, 아니면 데이터 필드 (spec D3 S6).
+
+    `rank`(1.2 기본값) 출력의 역수는 횡단면 최하위가 0 이라 무의미한 가중이 된다. 그래서 값은
+    정규화 맵이 아니라 `PortfolioObservation.factor_values` 에서 읽는다. 결측·공개일 초과·비유한은
+    `None` 으로 돌려주고 호출자가 `MISSING_RISK` 로 뺀다(`<= 0` 과 같은 분기).
+    """
+    factor_id = inverse_risk_factor_id(spec)
+    if factor_id is None:
+        return _field(observation, spec.risk.risk_field_id)
+    value = next((item for item in observation.factor_values if item.factor_id == factor_id), None)
+    if value is None or value.available_date > observation.as_of or not _number(value.value):
+        return None
+    return float(value.value)
 
 
 def _field(observation: PortfolioObservation, field_id: str | None) -> float | None:

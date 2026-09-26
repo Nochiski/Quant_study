@@ -143,7 +143,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "got='max_name_wieght' suggestion='max_name_weight' "
         "allowed=['gross_exposure', 'max_name_weight', "
         "'max_sector_weight', "
-        "'net_exposure', 'risk_field_id', 'sector_neutral']",
+        "'net_exposure', 'risk_factor_id', 'risk_field_id', 'sector_neutral']",
     ),
     (
         "필수 키 누락",

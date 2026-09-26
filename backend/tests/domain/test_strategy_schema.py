@@ -365,7 +365,11 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
         "#/$defs/PortfolioStep/liquidity_field_id": "equity-field",
         "#/$defs/RiskStep/risk_field_id": "equity-field",
     }
-    assert set(references.values()) == {"node", "parameter"}
+    assert set(references.values()) == {"node", "parameter", "factor"}
+    # 문서 안 팩터를 가리키는 참조는 리스크 역가중 팩터 하나뿐이다(P2-06, spec D3 S6).
+    assert [path for path, namespace in references.items() if namespace == "factor"] == [
+        "#/$defs/RiskStep/risk_factor_id"
+    ]
     defines = {
         f"{path}/{name}": prop["x-defines"]
         for path, node in [
@@ -375,7 +379,11 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
         for name, prop in node.get("properties", {}).items()
         if "x-defines" in prop
     }
-    assert defines == {"/parameters": "parameter", "#/$defs/FactorGraph/nodes": "node"}
+    assert defines == {
+        "/parameters": "parameter",
+        "/factors": "factor",
+        "#/$defs/FactorGraph/nodes": "node",
+    }
     assert set(defines.values()) == set(references.values())
     for path, namespace in defines.items():
         container, name = path.rsplit("/", 1)
@@ -399,6 +407,8 @@ def test_field_contracts_carry_the_identifier_markers() -> None:
     contracts = {c.pointer: c for c in strategy_field_contracts()}
     assert contracts["/eligibility/rules/*/field_id"].catalog == "equity-field"
     assert contracts["/signal/regime_field_id"].catalog == "equity-field"  # nullable keeps it
+    assert contracts["/risk/risk_factor_id"].reference == "factor"
+    assert contracts["/risk/risk_factor_id"].catalog is None
     assert contracts["/factors/*/graph/nodes/*/input_node_id"].reference == "node"
     assert contracts["/factors/*/graph/nodes/*/node_id"].catalog is None
     assert contracts["/factors/*/graph/nodes/*/node_id"].reference is None

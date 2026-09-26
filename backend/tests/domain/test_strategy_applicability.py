@@ -55,6 +55,9 @@ CASES: dict[str, tuple[Any, dict[str, Any], dict[str, Any]]] = {
         {"/portfolio/side": "long_short", "/risk/net_exposure": 0.0},
     ),
     "/risk/risk_field_id": ("price.market_cap", {}, {"/portfolio/weighting": "risk"}),
+    # fixture 의 유일한 팩터를 가리킨다. 적용 문맥(`risk`)에서는 알파가 0개라
+    # `strategy.signal.no_alpha_factor` error 가 나지만, 여기서 보는 것은 적용 조건 warning 뿐이다.
+    "/risk/risk_factor_id": ("momentum", {}, {"/portfolio/weighting": "risk"}),
     "/signal/regime_minimum": (0.5, {}, {"/signal/regime_field_id": "price.close"}),
 }
 

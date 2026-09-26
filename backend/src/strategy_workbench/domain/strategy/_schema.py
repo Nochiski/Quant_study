@@ -20,7 +20,7 @@ Shape (JSON Schema 2020-12):
 - catalog bounds appear as `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`, contract
   metadata as `x-unit`, `x-display-unit`, `x-applied-stage`, `x-description-key`, `examples`;
 - identifier fields carry `x-catalog` (equity-field: complete from that catalog) or
-  `x-reference` (node, parameter: complete from the document itself), read from
+  `x-reference` (node, parameter, factor: complete from the document itself), read from
   the dataclass field metadata declared next to the field (P3-03).
 - required factor authoring fields carry `x-authoring-source` or `x-authoring-default`; this lets
   clients project a catalog row without duplicating FactorSignal field names or starter values.

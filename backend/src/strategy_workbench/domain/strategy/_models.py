@@ -14,6 +14,9 @@ CURRENT_SCHEMA_VERSION = "1.2"
 # Editor metadata for identifier fields (see domain.factor._nodes for the node-side markers).
 CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
 DEFINES_PARAMETER = {"defines": "parameter"}
+# 문서 안 팩터 네임스페이스: `factors` 배열이 정의하고(`factor_id`) 리스크 역가중이 참조한다(P2-06).
+DEFINES_FACTOR = {"defines": "factor"}
+REFERENCE_FACTOR = {"reference": "factor"}
 # 생략 시 hydrate가 같은 mapping의 다른 필드 값을 넣는 파생 기본값 (schema 1.1, spec D1 S3).
 DEFAULT_FROM_FACTOR_ID = {"default-from": "factor_id"}
 
@@ -158,6 +161,10 @@ class RiskStep:
     max_sector_weight: float = 0.3
     sector_neutral: bool = False
     risk_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
+    # 역가중 원천을 데이터 필드 대신 문서의 팩터 출력으로 쓴다(schema 1.2, spec D3 S6).
+    # `weighting: risk` 에서만 읽히고, 그때 참조 팩터는 합성 점수에서 빠진다
+    # (`inverse_risk_factor_id`). `risk_field_id` 와 함께 쓰면 검증 error 다.
+    risk_factor_id: str | None = field(default=None, metadata=REFERENCE_FACTOR)
 
 
 ParameterValue: TypeAlias = float | int | str | bool
@@ -203,8 +210,31 @@ class StrategySpec:
     # 생략해도 빈 배열이어도 구조 오류가 아니다(spec D3). 두 경우 모두 semantic
     # `strategy.factor.required`가 나서, 새 전략이 "구조 오류"가 아니라 "팩터를 추가하세요"로
     # 시작한다 — 실행 설정이 빠진 1.2 최상위 필수 키는 `schema_version`·`title` 둘뿐이다.
-    factors: tuple[FactorSignal, ...] = ()
+    factors: tuple[FactorSignal, ...] = field(default=(), metadata=DEFINES_FACTOR)
     signal: SignalStep = SignalStep()
     portfolio: PortfolioStep = PortfolioStep()
     risk: RiskStep = RiskStep()
     parameters: tuple[ParameterDefinition, ...] = field(default=(), metadata=DEFINES_PARAMETER)
+
+
+def inverse_risk_factor_id(spec: StrategySpec) -> str | None:
+    """리스크 역가중에 쓰이는 팩터 id — 쓰이지 않으면 `None` (spec D3 S6).
+
+    `weighting: risk` 이고 `risk_factor_id` 가 설정됐을 때만 값이 있다. 다른 모드에서는
+    `risk_factor_id` 를 읽지 않으므로 그 팩터는 일반 알파로 남는다 — 적용 조건이 붙은 필드가
+    조건 밖에서 알파 합성을 바꾸면 "모드별로 읽히는 필드" 계약과 어긋난다. 이 판정의 유일한
+    owner 이고, 컴파일러(합성 제외·역가중)·검증(제외 warning·알파 0개 error)·설명이 같은 함수를
+    읽는다.
+    """
+    if spec.portfolio.weighting is not WeightingMethod.RISK:
+        return None
+    return spec.risk.risk_factor_id
+
+
+def composite_factors(spec: StrategySpec) -> tuple[FactorSignal, ...]:
+    """합성 점수에 들어가는 알파 팩터.
+
+    역가중 팩터는 `weight` 와 분모 `Σ|weight|` 양쪽에서 빠진다.
+    """
+    excluded = inverse_risk_factor_id(spec)
+    return tuple(factor for factor in spec.factors if factor.factor_id != excluded)

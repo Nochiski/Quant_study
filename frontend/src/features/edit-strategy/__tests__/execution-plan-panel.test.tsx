@@ -86,8 +86,6 @@ const explanation = (
     required_field_ids: [
       value.nodes[0]?.kind === "field" ? value.nodes[0].field_id : "",
     ],
-    referenced_factor_ids: [],
-    referenced_subgraph_ids: [],
     minimum_history_sessions: 252,
     as_of_policy: "available_date_lte_as_of",
   },
@@ -101,7 +99,7 @@ const factor = (
   fieldId: string,
   suffix: string,
 ): PlannedFactor => {
-  const request = { graph: graph(fieldId), parameter_ids: [], factor_ids: [] };
+  const request = { graph: graph(fieldId), parameter_ids: [] };
   return {
     factorIndex,
     factorId,

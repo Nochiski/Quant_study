@@ -149,7 +149,6 @@ const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
     (parameter) => parameter.parameter_id,
   );
   const factors = spec.factors ?? [];
-  const factorIds = factors.map((factor) => factor.factor_id);
   return factors.map((factor, factorIndex) => ({
     factorIndex,
     factorId: factor.factor_id,
@@ -157,8 +156,6 @@ const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
     request: {
       graph: factor.graph,
       parameter_ids: parameterIds,
-      factor_ids: factorIds,
-      subgraph_ids: [],
     },
   }));
 };

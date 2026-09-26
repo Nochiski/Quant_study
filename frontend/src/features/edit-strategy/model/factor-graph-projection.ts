@@ -125,10 +125,6 @@ const nodeDetails = (node: FactorNode | undefined): GraphNodeDetail[] => {
       ];
     case "group":
       return [{ label: "group_field_id", value: node.group_field_id }];
-    case "saved_factor":
-      return [{ label: "factor_id", value: node.factor_id }];
-    case "saved_subgraph":
-      return [{ label: "subgraph_id", value: node.subgraph_id }];
     default:
       return [];
   }

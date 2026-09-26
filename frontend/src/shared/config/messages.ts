@@ -551,6 +551,7 @@ const ko = {
   "strategy.contract.applicable.minimum_liquidity": "최소 유동성 하한",
   "strategy.contract.applicable.sector_neutral": "섹터 중립 여부",
   "strategy.contract.applicable.risk_field_id": "위험 가중에 쓰는 필드",
+  "strategy.contract.applicable.risk_factor_id": "위험 가중에 쓰는 팩터",
   "strategy.contract.applicable.regime_minimum": "레짐 값 하한",
   "strategy.contract.portfolio.selection_count":
     "롱 포트폴리오에 선택할 종목 수",
@@ -808,6 +809,9 @@ const ko = {
   "strategy.field.risk_step.risk_field_id": "위험 필드",
   "strategy.field.risk_step.risk_field_id.description":
     "위험 가중에 쓸 데이터 필드입니다.",
+  "strategy.field.risk_step.risk_factor_id": "위험 팩터",
+  "strategy.field.risk_step.risk_factor_id.description":
+    "위험 가중에 쓸 팩터입니다. 이 팩터는 점수 합산에서 빠지고 원시값의 역수로 비중을 나눕니다.",
   "strategy.type.execution_step": "체결 가정",
   "strategy.type.execution_step.description": "주문 시점과 비용 가정입니다.",
   "strategy.field.execution_step.timing": "주문 시점",
@@ -2053,6 +2057,8 @@ export const messages = {
     "strategy.contract.applicable.sector_neutral": "Sector neutrality",
     "strategy.contract.applicable.risk_field_id":
       "Field used for risk weighting",
+    "strategy.contract.applicable.risk_factor_id":
+      "Factor used for risk weighting",
     "strategy.contract.applicable.regime_minimum": "Regime value floor",
     "strategy.contract.portfolio.selection_count":
       "Number of names in the long portfolio",
@@ -2320,6 +2326,9 @@ export const messages = {
     "strategy.field.risk_step.risk_field_id": "Risk field",
     "strategy.field.risk_step.risk_field_id.description":
       "The data field used for risk weighting.",
+    "strategy.field.risk_step.risk_factor_id": "Risk factor",
+    "strategy.field.risk_step.risk_factor_id.description":
+      "The factor used for risk weighting. It is left out of the combined score and weights follow the inverse of its raw value.",
     "strategy.type.execution_step": "Execution step",
     "strategy.type.execution_step.description":
       "Order timing and cost assumptions.",

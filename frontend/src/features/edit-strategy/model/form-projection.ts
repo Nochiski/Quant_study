@@ -46,7 +46,7 @@ export type FormControl =
     }
   | {
       kind: "reference";
-      namespace: "node" | "parameter";
+      namespace: (typeof NAMESPACES)[number];
       candidates: readonly string[];
     }
   /** 스키마가 `const`로 고정한 값(`schema_version`): 편집 컨트롤 없이 읽기 전용으로 보인다. */
@@ -143,7 +143,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  */
 export const CATALOGS = ["equity-field", "universe", "factor", "subgraph"] as const;
 /** Form이 후보 select를 아는 `x-reference` 네임스페이스. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
-export const NAMESPACES = ["node", "parameter"] as const;
+export const NAMESPACES = ["node", "parameter", "factor"] as const;
 
 const controlFor = (
   root: JsonSchema,

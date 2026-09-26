@@ -123,7 +123,7 @@ describe("field applicability projection", () => {
       .map((property) => property["x-applicable-when"])
       .filter(isApplicableWhen)
       .map((when) => when.description_key);
-    expect(keys).toHaveLength(8);
+    expect(keys).toHaveLength(9);
     for (const key of keys) expect(tOptional(key), key).not.toBeNull();
     // 같은 구멍이 필드 설명 키에도 있다(Phase 2 감사 DEFECT-P2X-004): schema가 발행한 키는 전부 번역된다.
     const descriptionKeys = Object.values(defs)

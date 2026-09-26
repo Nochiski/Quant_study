@@ -69,6 +69,9 @@ describe("SSE 프레임 좁히기", () => {
       frame({ type: "usage", input_tokens: 1, output_tokens: 2 }),
       frame({ type: "proposal", proposal: { ...proposal, compile: undefined } }),
       frame({ type: "search_activity", query: "momentum", sources: [{ url: 1 }] }),
+      // 표의 프로토타입 이름. 예전 조회는 `Object` 생성자를 판정 함수로 불러 통과시켰다(감사 NB-6 정리 중 발견).
+      frame({ type: "constructor" }),
+      frame({ type: "toString" }),
     ];
 
     for (const value of rejected) {

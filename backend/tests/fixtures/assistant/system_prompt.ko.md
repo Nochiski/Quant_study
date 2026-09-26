@@ -66,12 +66,13 @@
 - 최상위 키: schema_version (필수), title (필수), description, eligibility, factors, signal, portfolio, risk, parameters
 - schema_version 고정값: 1.2
 - 사용할 수 있는 kind 값: field, constant, parameter, unary, binary, time_series, cross_sectional, group, comparison, conditional, saved_factor, saved_subgraph, float, integer, choice
-- EligibilityRule.operator, ComparisonNode.operator 값: gt | gte | lt | lte | eq
+- EligibilityRule.operator 값: gt | gte | lt | lte | eq | top_percent | top_count
 - UnaryNode.operator 값: negate | lag
 - BinaryNode.operator 값: add | subtract | multiply | divide
 - TimeSeriesNode.operator 값: mean | std | momentum | delta | min | max
 - CrossSectionalNode.operator 값: rank | zscore | winsorize | demean
 - GroupNode.operator 값: neutralize | rank
+- ComparisonNode.operator 값: gt | gte | lt | lte | eq
 - FactorSignal.direction 값: high | low
 - SignalStep.normalization 값: none | rank | zscore
 - PortfolioStep.side 값: long_only | long_short

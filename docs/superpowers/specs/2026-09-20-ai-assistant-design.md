@@ -132,8 +132,9 @@ class SequencedEvent:
     event: ChatEvent
 
 class FailureCode(StrEnum):
-    AUTH, RATE_LIMIT, NETWORK, REFUSAL, PROVIDER, TOOL_ROUNDS_EXCEEDED, TIMEOUT, CANCELLED,
-    PROPOSAL_INVALID, OUTPUT_TRUNCATED, TOKEN_BUDGET_EXCEEDED
+    AUTH, RATE_LIMIT, NETWORK, REFUSAL, PROVIDER, INTERNAL, TOOL_ROUNDS_EXCEEDED, TIMEOUT,
+    CANCELLED, PROPOSAL_INVALID, OUTPUT_TRUNCATED, TOKEN_BUDGET_EXCEEDED
+    # INTERNAL = 러너·서비스 내부 예외(공급자 탓이 아니다), message는 예외 타입 이름만
 
 @dataclass(frozen=True)
 class StrategyProposal:
@@ -150,6 +151,11 @@ class StrategyProposal:
 - `Failure.message`는 자유 문자열이지만 **SDK 예외 문자열·응답 본문을 그대로 넣지 않는다.** 예외는
   `FailureCode`로만 매핑하고 message는 코드별 고정 문장 + 예외 타입 이름까지만 허용한다(비밀
   스크럽, 완료 정의 3).
+- **`ProbeResult.message`도 같은 급으로 스크럽한다.** adapter는 `ProbeFailure` 사유만 고르고 문장은
+  고르지 못한다(`message`는 사유에서 유도되는 고정 문구다). 공급자 인증 오류 본문은
+  `Incorrect API key provided: sk-proj-…`처럼 키 조각을 담고, 이 값은 설정 화면 "연결 테스트"
+  결과로 HTTP 응답 본문까지 그대로 나간다. `assistant.probe_failed` 422 본문은 `failure` 코드를
+  보고 자기 문장을 고른다.
 
 ### D3. 유스케이스 (`application/assistant_chat`)
 
@@ -211,7 +217,9 @@ class ProviderSecretStore(Protocol): get / put / delete (profile_id)
 class ProviderProfileRepository(Protocol): list / get / add / delete / set_active
 class ChatSessionRepository(Protocol):
     create / get / list_for_document / append_message
+    messages(session_id) -> tuple[ChatMessage, ...]      # 다음 턴의 TurnRequest.messages 출처
     create_turn / update_turn / get_turn / append_events(turn_id, events) -> sequences
+    last_sequence(session_id) -> int                     # accepted_sequence용, 이력 전체를 읽지 않는다
     events(session_id, *, after_sequence=-1) -> tuple[SequencedEvent, ...]
 ```
 

@@ -6,7 +6,7 @@ current_phase: P1,P2
 current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06
 active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06]
 parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06]
-last_updated: 2026-09-27T06:19:18+09:00
+last_updated: 2026-09-27T06:32:59+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 10
@@ -29,7 +29,7 @@ progress_percent: 21
 | Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `10 / 29` |
-| Aggregated at | `2026-09-27 06:19 KST` |
+| Aggregated at | `2026-09-27 06:32 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -719,6 +719,10 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-27 — P2-01·P2-02 main 병합 리뷰 P3 반영(P2-06 PR 문서): 실행 설정 스키마 설명 키 7개의
+  frontend 문장·커버리지 테스트 부재를 BACKLOG-013 으로 P3-02 acceptance 에 예약하고, US-SM-10 비고에
+  "P3-02 가 설명 문장을 붙이면 `예정` 전환 검토"를 적었다.
+
 - 2026-09-27 — P2-06 구현(`IN_REVIEW`, [#200](https://github.com/Nochiski/Quant_study/pull/200)). `risk.risk_factor_id`(`x-reference: factor`,
   `factors` 는 `x-defines: factor`)와 적용 조건 행, 검증 코드 4개(`risk_source_conflict`·
   `risk_factor_missing`·`risk_factor_excluded`·`no_alpha_factor`), 합성 제외와 원시값 역가중을 넣고
@@ -1261,6 +1265,22 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **위험성**: 동작 결함은 아니다(도달 불가 분기·안 쓰는 번역). Contract Inspector 는 팩터 카탈로그를
   계속 불러오므로 쓰지 않는 요청이 하나 남는다(cleanup).
 - **담당**: `P3-01`(frontend 1.2 적응, 소비자 배선 owner). WORKFLOW P3-01 에 예약했다.
+
+### BACKLOG-013: 실행 설정 스키마의 설명 키 7개에 frontend 문장과 커버리지 테스트가 없다
+
+- **상황**: P2-01 이 `GET /api/v1/run-environments/schema` 를 만들고, 스키마 빌더
+  (`domain/strategy/_schema.py` 의 `dataclass_json_schema`)가 필드마다 `x-description-key` 를 붙인다.
+  P2-01·P2-02 main 병합 리뷰가 P3 로 관찰했다(2026-09-27).
+- **인풋**: 실행 설정 스키마를 받아 발행된 설명 키를 모은다 —
+  `strategy.field.run_environment.{start,end,market,frequency,universe_id,timing,missing}` 7개와
+  `run_environment.contract.{fee_bps,slippage_bps,participation_rate}` 3개.
+- **에러 위치**: `frontend/src/shared/config/messages.ts` 에 뒤의 3개(제약 행 설명)만 있고 앞의 7개는
+  한국어·영어 모두 없다. frontend 커버리지 테스트(`features/edit-strategy/__tests__/screen-vocabulary.test.ts`)는
+  전략 runtime schema fixture 만 순회해 실행 설정 스키마의 키를 보지 않는다.
+- **위험성**: 지금은 패널이 설명 키를 읽지 않아 화면 결함은 없다. P3-02 가 패널을 넓히며 키를 읽기
+  시작하면 번역 없는 키 문자열이 화면에 그대로 찍히고, 게이트가 없어 조용히 통과한다(누락 번역).
+- **스토리**: US-SM-10(실행 설정 용어 도움말, `미계획`) 비고에 이 예약을 적었다.
+- **담당**: `P3-02`(실행 설정 패널 확장). WORKFLOW P3-02 에 같은 번호로 예약했다.
 
 ## 갱신 절차
 

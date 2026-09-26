@@ -433,3 +433,49 @@ def test_unary_aliases_of_cross_sectional_operators_are_gone(operator: str) -> N
         ("structure.legacy_shape", "/factors/0/graph/nodes/2/operator")
     ]
     assert f"got=unary/{operator}" in result.issues[0].message
+
+
+def test_normalization_is_part_of_the_strategy_hash() -> None:
+    """`signal.normalization` 은 전략 의미라 해시가 값마다 달라야 한다(P2-04).
+
+    다르지 않으면 같은 `spec_hash` 아래에 서로 다른 합성 규칙 두 벌이 저장되고, 캐시된
+    백테스트 결과가 다른 전략의 것으로 재사용된다.
+    """
+    document = _document()
+    hashes = {}
+    for method in ("none", "rank", "zscore"):
+        candidate = copy.deepcopy(document)
+        candidate["signal"] = {"normalization": method}
+        result = hydrate_strategy_document(candidate, identity=DRAFT)
+        assert result.ok and result.spec is not None, [i.code for i in result.issues]
+        hashes[method] = strategy_spec_hash(result.spec)
+
+    assert len(set(hashes.values())) == 3
+
+
+def test_omitted_normalization_hashes_like_an_explicit_rank() -> None:
+    """생략과 기본값 명시가 같은 해시다 — 업그레이드된 문서만 `none` 을 적는다."""
+    omitted = _document()
+    omitted.pop("signal", None)
+    explicit = copy.deepcopy(omitted)
+    explicit["signal"] = {"normalization": "rank"}
+
+    both = [hydrate_strategy_document(item, identity=DRAFT) for item in (omitted, explicit)]
+    assert all(result.ok and result.spec is not None for result in both)
+
+    left, right = both
+    assert left.spec is not None and right.spec is not None
+    assert strategy_spec_hash(left.spec) == strategy_spec_hash(right.spec)
+
+
+def test_unknown_normalization_value_is_a_structural_enum_issue() -> None:
+    """모르는 값은 구조 오류로 fail-closed 한다 — 기본값으로 조용히 떨어지지 않는다."""
+    document = _document()
+    document["signal"] = {"normalization": "percentile"}
+
+    result = hydrate_strategy_document(document, identity=DRAFT)
+
+    assert not result.ok and result.spec is None
+    (issue,) = [item for item in result.issues if item.pointer == "/signal/normalization"]
+    assert issue.code == "structure.invalid_enum"
+    assert "percentile" in issue.message

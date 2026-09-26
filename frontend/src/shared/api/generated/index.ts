@@ -451,6 +451,7 @@ export type {
   SessionHistoryView,
   SessionUsageView,
   SessionView,
+  SignalNormalization,
   SignalStep,
   SourceDiagnostic,
   SourceFormat,

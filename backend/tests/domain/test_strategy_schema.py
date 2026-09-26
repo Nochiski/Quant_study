@@ -287,6 +287,12 @@ def test_field_contracts_cover_every_scalar_path_with_catalog_metadata() -> None
     assert liquidity.nullable and liquidity.default is None and liquidity.has_default
     node_kind = contracts["/factors/*/graph/nodes/*/kind"]
     assert node_kind.type == "string"  # one row per union branch shares the pointer template
+    # 결합 전 정규화는 enum 이라 `ScalarConstraint`(수치 전용) 행이 없다. 그래도 contract 행은
+    # 모델에서 파생되므로 편집 화면이 선택지와 기본값을 여기서 읽는다(P2-04).
+    normalization = contracts["/signal/normalization"]
+    assert normalization.type == "string" and not normalization.nullable
+    assert normalization.enum == ("none", "rank", "zscore")
+    assert normalization.default == "rank" and normalization.has_default
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         assert constraint.pointer in contracts, constraint.pointer
     assert all(isinstance(c, FieldContract) for c in contracts.values())

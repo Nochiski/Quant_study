@@ -767,6 +767,9 @@ const ko = {
   "strategy.type.signal_step": "신호 결합",
   "strategy.type.signal_step.description":
     "팩터 점수를 합친 뒤 후보를 남기는 기준입니다.",
+  "strategy.field.signal_step.normalization": "점수 정규화",
+  "strategy.field.signal_step.normalization.description":
+    "팩터 점수를 합치기 전에 순위·표준점수로 맞출지 정합니다.",
   "strategy.field.signal_step.score_threshold": "점수 하한",
   "strategy.field.signal_step.score_threshold.description":
     "이 점수보다 낮은 종목은 후보에서 뺍니다.",
@@ -2276,6 +2279,9 @@ export const messages = {
     "strategy.type.signal_step": "Signal step",
     "strategy.type.signal_step.description":
       "What the combined score has to clear to stay a candidate.",
+    "strategy.field.signal_step.normalization": "Score normalization",
+    "strategy.field.signal_step.normalization.description":
+      "Whether factor scores are ranked or z-scored before they are combined.",
     "strategy.field.signal_step.score_threshold": "Score floor",
     "strategy.field.signal_step.score_threshold.description":
       "Names scoring below this are dropped.",

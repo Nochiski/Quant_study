@@ -45,6 +45,10 @@ def _scope(
 
 def _inline_request(client: TestClient) -> tuple[dict[str, Any], dict[str, Any]]:
     spec = client.get("/api/v1/strategies/template").json()
+    # 이 테스트의 단언은 "trace 행 값 == 그 종목의 합성 점수" 다. 팩터 하나·weight 1.0·
+    # `direction: high` 에서 그 항등식은 정규화가 항등일 때만 성립하므로 `none` 으로 고정한다.
+    # 기본값 `rank` 의 횡단면 규칙은 도메인 테스트가 덮는다(P2-04 리뷰 P3).
+    spec["signal"] = dict(spec.get("signal") or {}, normalization="none")
     as_of, security_ids, factor_id = _scope(client, spec)
     factor = spec["factors"][0]
     return spec, {

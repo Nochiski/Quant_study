@@ -39,6 +39,19 @@ class FactorDirection(StrEnum):
     LOW = "low"
 
 
+class SignalNormalization(StrEnum):
+    """팩터 신호를 가중 합으로 합치기 전에 적용하는 횡단면 정규화 (schema 1.2, spec D4).
+
+    `NONE` 은 1.1 의 의미(원시값 가중 합)이고, 1.1 문서를 업그레이드할 때 명시된다. 새 문서의
+    기본값은 `RANK` 다 — 단위가 다른 팩터(PBR 과 ROE 등)를 원시값으로 더하면 큰 단위 하나가
+    합성 점수를 지배하기 때문이다.
+    """
+
+    NONE = "none"
+    RANK = "rank"
+    ZSCORE = "zscore"
+
+
 class PortfolioSide(StrEnum):
     LONG_ONLY = "long_only"
     LONG_SHORT = "long_short"
@@ -94,6 +107,8 @@ class FactorSignal:
 
 @dataclass(frozen=True)
 class SignalStep:
+    # 결합 전 정규화. 기본값이 `RANK` 라서 생략한 문서도 순위 합성이 된다(spec D3 S4).
+    normalization: SignalNormalization = SignalNormalization.RANK
     score_threshold: float | None = None
     regime_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
     regime_minimum: float | None = None

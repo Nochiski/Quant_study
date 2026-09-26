@@ -338,6 +338,63 @@ def test_cross_sectional_demean_subtracts_the_member_peer_mean() -> None:
     assert values == {"s1": 1.0, "s2": -1.0, "s3": 0.0}
 
 
+def test_cross_sectional_rank_pins_the_percentile_values() -> None:
+    """`cross_sectional_rank` 추출(P2-04)의 동작 보존을 값으로 고정한다.
+
+    격리 테스트(`..._ignore_non_members`)는 분모를 바꿔도 `alone` 과 `mixed` 가 똑같이 바뀌어
+    통과한다. 백분위 **값**을 고정해야 공식 변경이 실패로 드러난다(P2-04 리뷰 P2-3).
+    """
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("source", "value", "field"),
+            CrossSectionalNode("out", CrossSectionalOperator.RANK, "source", "cross_sectional"),
+        ),
+        output_node_id="out",
+    )
+    rows = (
+        _member_row(2, "s1", 1.0, member=True),
+        _member_row(2, "s2", 2.0, member=True),
+        _member_row(2, "s3", 2.0, member=True),
+        _member_row(2, "s4", 4.0, member=True),
+    )
+
+    values = {
+        v.security_id: v.value
+        for v in evaluate_factor_graph(graph, observations=rows, missing=MissingPolicy.DROP).values
+    }
+
+    # 순위 1, 2.5, 2.5, 4 → (r - 1) / (n - 1) = (r - 1) / 3.
+    assert values == {"s1": 0.0, "s2": 0.5, "s3": 0.5, "s4": 1.0}
+
+
+def test_group_rank_pins_the_percentile_values_within_each_sector() -> None:
+    """`GroupOperator.RANK` 도 같은 공식을 쓴다 — 섹터 안에서 0~1 백분위."""
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("source", "value", "field"),
+            GroupNode("out", GroupOperator.RANK, "source", "sector", "group"),
+        ),
+        output_node_id="out",
+    )
+    rows = (
+        replace(_member_row(2, "a1", 1.0, member=True), fields=_sector_fields(1.0, "A")),
+        replace(_member_row(2, "a2", 3.0, member=True), fields=_sector_fields(3.0, "A")),
+        replace(_member_row(2, "b1", 9.0, member=True), fields=_sector_fields(9.0, "B")),
+    )
+
+    values = {
+        v.security_id: v.value
+        for v in evaluate_factor_graph(graph, observations=rows, missing=MissingPolicy.DROP).values
+    }
+
+    # 섹터 A 는 2개라 0.0/1.0, 섹터 B 는 1개라 분모가 1 로 막혀 0.0.
+    assert values == {"a1": 0.0, "a2": 1.0, "b1": 0.0}
+
+
+def _sector_fields(value: float, sector: str) -> tuple[FactorFieldValue, ...]:
+    return (FactorFieldValue("value", value), FactorFieldValue("sector", sector))
+
+
 def test_evaluation_reports_progress_inside_the_time_series_node() -> None:
     """이슈 #162: 실데이터에서 시계열 노드 하나가 tape 단계의 절반 가까이를 쓴다.
 

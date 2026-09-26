@@ -37,6 +37,7 @@
     "signal": {
       "$ref": "#/$defs/SignalStep",
       "default": {
+        "normalization": "rank",
         "score_threshold": null,
         "regime_field_id": null,
         "regime_minimum": null
@@ -738,6 +739,16 @@
       "type": "object",
       "x-description-key": "strategy.type.signal_step",
       "properties": {
+        "normalization": {
+          "type": "string",
+          "enum": [
+            "none",
+            "rank",
+            "zscore"
+          ],
+          "default": "rank",
+          "x-description-key": "strategy.field.signal_step.normalization"
+        },
         "score_threshold": {
           "anyOf": [
             {

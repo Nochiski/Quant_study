@@ -3,13 +3,13 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_REVIEW
 current_phase: P1,P2
-current_pr: P1-06,P2-01,P2-02,P2-03
-active_prs: [P1-06, P2-01, P2-02, P2-03]
-parallel_window: [P1-06, P2-01, P2-02, P2-03]
-last_updated: 2026-09-27T04:01:14+09:00
+current_pr: P1-06,P2-01,P2-02,P2-03,P2-04
+active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04]
+parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04]
+last_updated: 2026-09-27T04:40:26+09:00
 planned_prs: 29
 merged_prs: 6
-approved_prs: 8
+approved_prs: 9
 progress_percent: 21
 ---
 
@@ -25,11 +25,11 @@ progress_percent: 21
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2` |
-| Current/next PR | `P1-06,P2-01,P2-02,P2-03` |
-| Active PR | `P1-06, P2-01, P2-02, P2-03` |
+| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04` |
+| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04` |
 | Progress | `6 / 29 merged (21%)` |
-| Approved | `8 / 29` |
-| Aggregated at | `2026-09-27 04:01 KST` |
+| Approved | `9 / 29` |
+| Aggregated at | `2026-09-27 04:40 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -223,6 +223,160 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | 제약사항 | **P2-09 전까지 은퇴 버전 문서의 업그레이드 결과는 저장·실행할 수 없다.** `POST /api/v1/strategy-documents/upgrade`가 아직 1.1까지만 올리므로(1.1 → 1.2 step 등록과 응답 `environment`는 P2-09 acceptance) 돌려준 원문의 compile 진단에 `structure.unsupported_schema_version`이 실린다. 저장된 은퇴 버전 row는 repository codec이 `strip_retired_execution_settings`까지 태워 현재 버전으로 읽으므로 목록·이력·문서 조회는 그대로 동작한다. **P2-03~P3-02 구간 브라우저 e2e는 시나리오 4건이 `test.fixme`다.** 상황: 프론트가 실행 요청에 `environment`를 싣지 않는다(그 배선은 P3-02 실행 설정 패널). 인풋: 편집기에서 백테스트 버튼 → `POST /api/v1/backtests`에 `environment` 없음. 에러 위치: `application/backtest_run/_service.py`의 `start()`가 `require_environment`로 422 `backtest.run.environment_required`를 낸다. 위험성: 브라우저에서 시작한 run이 전부 거절되어 e2e가 실제 회귀를 더는 못 잡는다. 전략 디버거 trace 요청도 같은 배선이 없어 `run_environment.required`로 거절되고 "추적 재현 정보" 패널이 뜨지 않는다(같은 fixme 시나리오 안이다) — 그 구간의 백테스트 경로는 명시 `environment`를 싣는 backend 통합 테스트가 검증한다. 잠근 시나리오: `workbench.workflow.spec.ts`의 `creates, recovers, validates, versions, traces and backtests`·`upgrades a frozen 1.0 revision …`, `workbench.real-equity.spec.ts`의 `edits the graph on real data …`, `workbench.infrastructure.spec.ts`의 `keeps a real debugger trace legible and inside the viewport`(trace 요청이 거절되어 "추적 재현 정보" 패널이 뜨지 않는다 — 픽셀 차이가 아니다). 되살리는 지점: P3-02(패널로 `environment` 배선·fixme 해제), P3-03(e2e fixture 1.2로 최종 시나리오 재작성). 크기: 이 PR은 12절 상한(600줄·10파일)을 크게 넘는다 — 최상위 모델 필드 두 개를 지우는 변경이라 hydrate·schema·validation·explanation·compile·adapter·fixture·테스트가 한 커밋 단위로 같이 움직여야 컴파일되고, enum 이동만 떼어내도 상한 안에 들어오지 않는다 |
 | Full gate | backend `uv run pytest -q`(1544 passed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 clean) · `pyright`(0 errors) / frontend `npm run api:generate`·`typecheck`·`lint`·`test`(639, 57파일)·`build` / `uv run --project backend pytest database/tests -q`(base `1dee07a` 와 같은 41 failed/1268 passed/33 errors — Windows symlink 권한(`WinError 1314`)으로 나는 기존 실패다) |
 
+| 항목 | 값 |
+|---|---|
+| PR | `P2-04` |
+| Intent | `signal.normalization`(none·rank·zscore)을 1.2 언어에 넣고 가중 합 **전에** 횡단면 정규화를 적용한다 |
+| Acceptance | WORKFLOW P2-04 |
+| Non-goals | 연산자 `availability` 판정(WORKFLOW 상 P2-07), 단위 경고 `strategy.signal.unit_mismatch`(P2-07), 횡단면 eligibility(P2-05), `risk.risk_factor_id`(P2-06), 업그레이더의 `normalization: none` 명시(P2-09), frontend i18n·소비자 배선(P3-01) |
+| Branch/worktree | `feat/lang2-p2-04-normalization` / `wt-lang2-p2-04` |
+| Base SHA | `0dd740e8` (`feat/lang2-p2-03-schema-1-2` APPROVED tip) — 옛 base 위 `dc8030d3` 계열 5커밋을 replay 했다. `git range-diff` 결과 코드 4커밋은 동일(`=`), PLAN 커밋만 base 쪽 PLAN 변경을 흡수해 달라졌다 |
+| Head SHA | 커밋 SHA는 PR 본문 참조 |
+| Diff stat | 커밋 11개(공식 SoT 정리 1 + 기능 1 + 계약 산출물 1 + frontend 기대값 1 + 문서 1 + 1차 리뷰 반영 `28003cf1` 1 + 시각 기준선 `80a5ddf5` 1 + PLAN 상태 갱신 2 + 2차 리뷰 반영 `2a10798d` 1 + 이 PLAN 커밋 1). `0dd740e8..80a5ddf5` 실측 36파일 +945/−43, 문서·PNG 제외 31파일 +833/−34 |
+| Focused tests | `uv run pytest tests/domain/test_portfolio_pipeline.py tests/domain/test_strategy_hydrate.py tests/domain/test_strategy_diff.py tests/domain/test_strategy_spec.py -q` |
+| 제약사항 | 12절 상한 중 **파일 수(10)를 넘긴다** — 29파일(리뷰 반영 뒤 문서·PNG 제외 31파일). 넘긴 몫은 (a) 골든 `spec_hash` 리터럴을 한 줄씩 고치는 테스트 6파일, (b) 새 테스트 4파일이다. src 변경은 6파일 99줄이고 handwritten diff 는 약 510줄로 줄 수 상한(600) 안쪽이다. 골든 hash 리터럴이 파일 6곳에 복사돼 있는 것 자체가 부채지만 한 곳으로 모으는 정리는 이 PR 범위 밖이라 backlog 로 남긴다. 중간 상태 base `5653c14e` 에서 작업하던 동안에는 P2-03 잔재(import 붕괴·`typecheck:e2e`·테스트 3건) 우회 커밋 두 개를 앞에 뒀고, P2-03 최종 tip `7ec8f337` 이 같은 수정을 담아 replay 에서 버렸다 |
+| Full gate | backend `uv sync --all-extras` · `maturin develop --release` · `uv run pytest -q`(1571 passed, 0 failed) · `ruff check src tests` · `ruff format --check`(이 PR 변경 파일 clean) · `pyright`(0) · `export_openapi.py` · `export_runtime_schema.py`(둘 다 재생성 후 diff 0) / frontend `npm ci`·`api:generate`(diff 0)·`typecheck`·`typecheck:e2e`·`lint`·`test`(639, 57파일)·`build` / e2e: 시각 기준선 4장(`strategy-workbench.png`, 1440/1920 × light/dark)을 계약 해시 변경으로 재생성(`80a5ddf5`). 이 수치들은 옛 tip 기준이다. 2차 리뷰 반영 뒤 게이트 전체와 `npm run test:e2e` 는 이 PLAN 커밋을 포함한 push tip 에서 다시 돌려 PR #184 댓글에 기록한다 |
+
+P2-04 결정 7건(WORKFLOW 원문과 다르게 갔거나 원문이 비워 둔 곳 4 + 리뷰 반영 3):
+
+1. **연산자 `availability` 판정은 이 PR 범위가 아니다.** WORKFLOW P2-04 acceptance 에 그 항목이
+   없고, `strategy.operator.unsupported` 와 카탈로그 `availability` 는 P2-07 acceptance 가 통째로
+   갖는다. WORKFLOW 1절 교차 제약도 "P2-06·P2-07 은 P1-03(연산자 카탈로그) merge 뒤 착수"라고
+   적어, P1-03 레지스트리가 없는 이 스택에서 먼저 만들면 owner 가 둘이 된다.
+2. **`plan_hash` 에는 `normalization` 을 넣지 않는다.** `plan_hash`(`domain/factor/_planning.py`)는
+   팩터 그래프 하나의 실행 계획 지문이고, 정규화는 팩터를 **합칠 때** 쓰는 signal 단계 사실이라
+   같은 팩터의 값·캐시가 정규화에 따라 달라지지 않는다. 넣으면 팩터 행렬 캐시가 근거 없이 쪼개진다.
+   전략 단위 지문(`spec_hash` → `strategy_hash` → `tape_hash`)에는 canonical payload 를 통해
+   자동으로 들어가며, 그 사실을 테스트로 고정했다.
+3. **정규화 모집단은 `domain/factor` 의 횡단면 동료 집단 규칙을 그대로 쓴다.** 한 리밸런싱
+   프레임은 기준일 하나이므로 남는 구분자는 `universe_member` 다(`_cross_section_indices` 와 같은
+   키). 유니버스 밖 행이 유니버스 안 종목의 순위를 움직이지 않고, 유니버스 밖 행끼리는 자기들끼리
+   한 집단이 된다. 결측·공개일 초과·비유한값은 모집단에서 빼며, 이는 `_score_candidate` 가 같은
+   값을 점수에서 버리는 사유와 1:1 로 같다.
+4. **순위·표준화 공식은 `domain/factor/_statistics.py` 가 소유한다.** `_evaluation.py` 가 같은
+   두 공식을 세 자리에 펼쳐 쓰고 있어서, 복사하면 `CrossSectionalOperator.RANK` 와
+   `signal.normalization: rank` 가 갈릴 수 있었다. `cross_sectional_rank`·`cross_sectional_zscore`
+   로 뽑고 `domain/factor/facade/cross_section.py` 로 공개해 `domain.portfolio` 가 읽는다
+   (`DEPENDS_ON` 에 `domain.factor` 추가, `domain.factor` 의 `DEPENDS_ON` 은 비어 있어 순환 아님).
+   동작 변경이 아니므로 별도 `refactor` 커밋이다.
+
+5. **점수 비례 가중(`weighting: factor_score`) 규칙: 선정이 2종목 이상이면 선정 종목 강도 = 합성 점수 − 기준점, 기준점 = `min(선정 최저 점수 이하인 eligible 비선정 종목 중 최고 점수, 선정 최저 − (선정 최고 − 선정 최저) / (선정 수 − 1))`(컷 아래 종목이 없으면 뒤 항), 선정 1종목이거나 강도가 모두 0 이면 균등 배분, 숏은 합성 점수 부호를 뒤집어 같은 규칙.**
+   1차(P2-1)·2차(R2-P204-001)·3차(R3-P204-001)·4차(R4-P204-001·002)·5차(R5-P204-001) 리뷰를 거쳐
+   리드가 정한 요건 7개와 4·5차 결정을 만족하는 규칙이다. 1차의 `zscore` 조합 차단 error, 2차의 `min(0, eligible
+   최저)` 바닥, 3차의 "컷 아래 최고만" 기준점은 모두 지웠다.
+   - **상황**: `weighting: factor_score`, 한 프레임의 eligible 후보와 선정 결과가 정해진 뒤.
+   - **인풋**: 선정 종목(롱 `long_ids`, 숏 `short_ids`)과 eligible 후보의 합성 점수. 합성 점수는
+     방향을 이미 반영해 **클수록 매수 선호**다(spec D4).
+   - **에러 위치(이전 규칙)**: `domain/portfolio/_compiler.py` 의 `_weight_scores`·
+     `_margin_strengths`. 1.1·1차는 `abs(합성 점수)` 라 `direction: low`·공매도 쪽에서 순서가
+     뒤집혔다. 2차는 eligible 최저 종목이 항상 강도 0 이라 1종목·동점 프레임이 비었다. 3차는
+     기준점이 컷 아래 최고뿐이라, 원시값 3, 2, 1+2⁻⁵², 1 에서 3종목을 고르면 `c` 가
+     `7.4e-17` 비중으로 tape 에 남았다.
+   - **위험성(이전 규칙)**: valid 문서가 예외도 경고도 없이 뒤집힌 비중, 빈 프레임, dust target 을
+     낸다(silent corrupt).
+   - **이 규칙이 지키는 요건**: (1) 리드 4차 결정대로 "선정 종목은 산술적으로 0 이 아닐 뿐 아니라
+     최소 평균 간격만큼의 강도를 가진다"로 해석한다. 기준점이 `선정 최저 − 평균 간격` 이하라서
+     그렇다. 그래서 최고/최저 강도 비는 선정 수를 넘지 않고 dust 가 생기지 않는다. (2) 선정
+     1종목이거나 전원 동점이고 아래 종목이 없으면 균등 배분한다. 전원 동점이고 아래 종목이 있으면
+     강도가 모두 같아 역시 균등이다. (3) 두 항 모두 점수의 평행 이동·양의 배율에 공변이라 비중이
+     불변이다. x 에 `low`, −x 에 `high` 를 준 두 문서는 `none`·`zscore` 에서 합성 점수가 같고
+     `rank` 에서 상수 1 차이(`−r` 대 `1 − r`)여도 보유 종목·비중이 같다. (4) 숏은 부호를 뒤집어
+     같은 규칙이다. (5) 선정 종목의 자기 점수가 오르면 자기 비중은 줄지 않는다(5차 리뷰
+     R5-P204-001). 선정 최저와 동점인 비선정 종목도 기준점 후보에 넣어(`<=`) 동점이 풀리고 묶일
+     때 기준점이 튀지 않게 했다. 평균 간격 하한이 있어 동점 후보가 들어와도 선정 종목의 강도는
+     0 이 되지 않는다(간격이 0 이면 강도가 모두 0 이라 균등 배분).
+   - **대안**:
+     | 규칙 | 어기는 요건 | 버린 이유 |
+     |---|---|---|
+     | `abs(합성 점수)` 비례(1.1·1차) | 3, 4 | `direction: low`·공매도 쪽 순서 반전 |
+     | 롱 바닥 `min(0, eligible 최저)`(2차) | 1, 2, `rank` 의 3 | eligible 최저 종목이 항상 0, 1종목·동점 프레임이 빈다 |
+     | 기준점 = 컷 아래 최고, 없으면 평균 간격(3차) | 1 의 확정 해석 | 근접 동점 선정 종목이 dust 비중(`7.4e-17`)을 받는다 |
+     | 4차 규칙에서 기준점 후보를 선정 최저보다 **엄격히** 낮은 종목으로 한정 | 5(단조성) | 선호 점수 1.0, 1.0, 1.02, −4 에서 2종목 선정 시 `a` 를 1.0 → 1.01 로 올리면 비중이 .499 → .333 으로 준다 |
+     | 기준점 = 선정 최저 − 평균 간격만 | 없음 | 최고/최저 강도 비가 **항상** 선정 수라, 컷 아래 종목이 멀리 떨어져 있어도 그 정보를 버린다 |
+     | 선정 순위 비례(N, N−1, …, 1) | 없음 | 점수 크기를 전혀 쓰지 않아 `weighting: rank` 와 같다 |
+   - **채택 규칙에도 해당하는 기각 사유(4차 리뷰 R4-P204-003)**:
+     - 기본값 `rank` 정규화에 동점이 없으면 선정 종목의 순위 간격이 균일해, 기준점이 늘
+       `선정 최저 − 평균 간격` 이 되고 강도가 N : … : 1 이다. 즉 **`weighting: rank` 와 같은 비중**이다
+       (100종목 상위 5 → 1:2:3:4:5). 순위 비례 대안을 버린 사유가 기본 설정에서는 채택 규칙에도
+       그대로 해당한다. `factor_score` 가 `weighting: rank` 와 달라지는 것은 `none`·`zscore` 이거나
+       `rank` 에 동점이 있을 때다.
+     - 컷 아래 eligible 종목이 없으면(`top_count: N` + 선정 N 처럼 흔한 경우) 채택 규칙은 "선정 최저 −
+       평균 간격만" 대안과 같다. 선정 2종목이면 점수와 무관하게 항상 2 : 1 이다. 그 대안을 버린
+       사유("점수 크기를 버린다")가 이 경우에는 채택 규칙에도 해당한다.
+     - 차이는 컷 아래 종목이 `선정 최저 − 평균 간격` 보다 더 아래 있을 때 그 거리를 쓴다는 점뿐이다.
+   - **알려진 성질(컷 아래가 먼 경우)**: 컷 아래 종목이 선정 최저에서 멀면 그 점수가 기준점이
+     되어 비중이 균등 쪽으로 평평해진다. 원시값 3, 2, 1, −100 에서 3종목 선정은 기준점 −100, 강도
+     103 : 102 : 101, 비중 .337 · .333 · .330 이다. 평균 간격 하한은 기준점이 선정 최저에 **너무
+     가까운** 쪽만 막는다. 그래서 컷 아래 종목이 `선정 최저 − 평균 간격` 과 선정 최저 사이에서
+     움직이는 동안에는 비중이 흔들리지 않지만, 그보다 아래에서 움직이면 비중이 따라 움직인다.
+     리드는 (a)안이 이 예의 흔들림도 줄인다고 봤으나 이 예의 비중은 3차 규칙과 같다. 테스트가 이
+     값을 고정한다. 먼 쪽도 막으려면 기준점에 아래쪽 한계(예: `선정 최저 − k × 평균 간격`)를 더하는
+     별도 결정이 필요하다.
+   - **1.1 과 달라지는 곳(정확한 불변 조건, 4차 규칙으로 재실측)**: 선정·보유 종목은 1.1 과 같다(1.1
+     도 선정 종목을 모두 보유했다). 비중은 롱이고 **기준점이 정확히 0** 일 때만 1.1 과 같다(예: 원시값
+     1~N 등간격을 전부 선정). `none`·`high` 실측:
+     | 입력 | 1.1 | 새 규칙 |
+     |---|---|---|
+     | 합성 점수 2.5, 1.0 전부 선정 | 5/7 · 2/7 | 2/3 · 1/3 |
+     | 원시값 10, 20, 40 전부 선정 | .143 · .286 · .571 | .176 · .294 · .529 |
+     | 원시값 1~5 상위 2 | .444 · .556 | 1/3 · 2/3 |
+     | 원시값 −2, −1, 1, 2, 3 상위 2 | .4 · .6 | 1/3 · 2/3 |
+     | `long_short` 2/2, 원시값 −3, −1, 1, 2, 5 의 숏 `a`·`b` | −.375 · −.125 | −1/3 · −1/6 |
+     | 같은 입력의 롱 `d`·`e` | .143 · .357 | 1/6 · 1/3 |
+     `direction: low` 와 공매도 쪽의 반전도 사라진다. 저장된 1.1 리비전은 `requires_upgrade` 로
+     실행이 막혀 있어서 이 차이는 P2-09 업그레이드(`normalization: none` 명시) 뒤에 드러난다. 과거
+     실행 결과 아티팩트는 바뀌지 않는다. WORKFLOW P2-09 acceptance 에 한 줄을 남겼다.
+   - **테스트**: 1~4차 경계를 값으로 고정했다. 3차에 넣은 선정 5 보유 5, `low`, 숏, eligible 1종목,
+     0 이하 1종목, 전원 동점, 전부 음수, 모집단 10·eligible 5, 거울 대칭 5경우에 4차 경계를 더했다.
+     4차 경계는 근접 동점(3차 tip 에서 red), 불균등 간격 5·4·2·1, 컷 동점 5·4·4·1, 컷 아래가 먼
+     3·2·1·−100, `rank` 무동점 = N…1 이다. 5차에 비교를 `<=` 로 바꾸며 컷 동점 5·4·4·1 기대값을
+     2/3·1/3 으로 고치고, 리뷰어 반례와 자기 점수 단조성 퍼즈(고정 시드, 선정 2~3, 0.25 격자로 컷
+     동점 유도, 150건)를 더했다. 5차 전 tip `34b20ef5` 에서 이 넷이 red 였다. `<` 로 되돌리면 컷
+     동점·반례·퍼즈가, `if below:` 를 지우면 불균등·먼 경우 테스트가 red 다.
+
+6. **(폐기) 강도 0 종목 제외.** 1차 리뷰 P2-1 에서 `rank` 모집단 최하위(백분위 0)가 `1e-12` 바닥값
+   때문에 dust 비중으로 tape 에 남던 문제를 "강도 0 이면 `SCORE_THRESHOLD` 로 뺀다"로 막았다.
+   사용자가 설정한 규칙이 아니라 dust 를 없애려던 장치였다. 3차에서 지웠을 때는 "dust 도 제외도
+   생기지 않는다"고 적었지만, 3차 규칙에서는 근접 동점 종목이 dust 비중을 받았다(4차 리뷰
+   R4-P204-001). 4차 규칙은 선정 종목의 강도가 최소 평균 간격이라 dust 가 생기지 않고, 강도가 모두
+   0 인 프레임은 균등 배분하므로 제외도 없다. `signal.score_threshold` 는 그대로 사용자 필터다.
+
+7. **정규화 값 조회는 catch-all default 대신 엄격 조회다**(1차 리뷰 P2-2 반영).
+   `normalized_signals.get(key, value.value)` 는 조회가 빗나가면 **원시값**으로 떨어져서,
+   정규화된 값과 원시값이 같은 가중 합에 섞인다 — 이 PR 이 없애려던 단위 지배가 진단도 예외도
+   없이 되살아난다. 결정 6(분기 exhaustive)과 같은 실패 모양이라 같은 정책을 쓴다:
+   `_signal_value` 가 `none` 분기에서만 원시값을 쓰고, 그 밖에는 `[...]` 로 조회해 `KeyError`
+   를 진단 컨텍스트(`as_of`·`security_id`·`factor_id`·`normalization`·모집단 크기)가 붙은
+   `ValueError` 로 올린다. 지금은 도달 불가이지만 P2-05 가 모집단 전제를 건드린다. 정규화 맵에서
+   한 종목을 빼 이 분기를 강제로 타는 테스트가 동작을 고정한다(2차 리뷰 R2-P204-002).
+
+WORKFLOW acceptance 중 **하지 않은 것 2건**:
+
+- **백테스트 골든은 바뀌지 않았다.** `rank` 기본값으로 갈아탄 뒤에도 기존 골든
+  (`test_backtest_http_api.py` 의 결과·지표 parity, `test_truthful_pipeline.py` 의 실행 경로)이
+  그대로 통과한다. 그 문서들이 팩터 하나짜리라 순위 변환이 순서를 보존해 선정·비중이 같기 때문이다.
+  `composite_score` 값 자체는 바뀌지만 골든이 그 값을 고정하지 않는다. WORKFLOW 는 "결과가 바뀌면
+  갱신"이라 조건이 성립하지 않았고, 대신 "`none` 이 1.1 과 같다"를 도메인·통합 두 층에서 테스트로
+  고정했다.
+
+- **은퇴한 1.1 리비전의 설명 문장이 그 리비전의 의미와 다르다**(1차 리뷰 P3, 기록만).
+  저장된 1.1 row 를 `adapters/outbound/strategy_sqlite/_record_codec.py` 가 `normalization`
+  없이 hydrate 하므로 기본값 `RANK` 가 붙고, `explain_strategy` 가 "횡단면 순위로 맞춘 뒤 …
+  결합" 이라고 말한다. 그 리비전의 실제 의미는 원시값 가중합이다. 실행은 `requires_upgrade`
+  가 막아(`backtest_run/_service.py`) 수치 손실은 없고, 문장을 바로잡는 owner 는 업그레이더가
+  `normalization: none` 을 명시하는 **P2-09** 다. 표시 문구만 남는 노출이라 이 PR 에서는
+  고치지 않고 기록한다.
+
+- **(정보) 이 PR 은 "P2-09 전까지 실 SQLite 에 1.2 revision 을 저장하지 않는다"(WORKFLOW 1절)에
+  의존한다.** 이 PR 이후 `normalization` 없이 저장된 1.2 `spec_json` 은 `_record_codec` 의
+  canonical 재직렬화 비교에서 탈락한다. 그 규칙이 이미 막고 있어 결함은 아니다.
+
+- **`quality_momentum.yaml` 에 `signal:` 블록을 넣지 않았다.** 이 verbose fixture 는 frontend 27개
+  테스트가 포인터·줄 위치로 읽고 있어(`readBackendFixture`), 섹션 하나를 끼우면 그 테스트들이
+  깨진다. 소비자 배선은 P3-01 범위라 fixture 를 그대로 두고, 명시 값 커버리지는
+  `quality_momentum.legacy.json` 과 hydrate 테스트가 맡는다. P3-01 이 frontend 투영을 만질 때
+  verbose fixture 에 같이 넣는 것을 권한다.
+
 P2-03 결정 9건(WORKFLOW 결정 항목 4 + 새 결정 5):
 
 1. **`dataclass_json_schema`의 owner는 `domain/strategy/facade/schema.py`에 그대로 둔다.**
@@ -345,7 +499,7 @@ Phase exit:
 | [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_REVIEW` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · 2차 APPROVE 대상 `1e0b095` + P3 후속 커밋 1개 · 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 반영, 2차 APPROVE(P3 6 → 코드 2 반영, 문서 3 이관, 본문 1 리드). 커밋 7개(backend 3 + 생성 SDK 1 + 리뷰 반영 3). 31파일은 12절 상한(8파일)을 넘어 논리 단위로 쪼갰다 — 모델·브리지 / 세 요청 배선 / 스키마 엔드포인트, 그리고 CI `api:generate` 게이트가 요구하는 생성 SDK. 게이트: pytest 1494·ruff·pyright(duckdb 4건 기존) · frontend typecheck·lint·Vitest 639·build |
 | [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `APPROVED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 APPROVE(P3 4건 후속 커밋). 커밋 12개(1차 5 + 1차 리뷰 반영 6 + 2차 리뷰 반영 1, history 재작성 없음). 게이트: pytest·ruff·pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest 639·build. `database/tests` 는 base `fff33fd` 와 같은 41 failed/1268 passed/33 errors(기존 실패, 이 PR 무관) |
 | [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `APPROVED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2` · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 반영, 2차 **APPROVE**(돌연변이 재실행 2 failed 확인, P3-07 이탈 타당). P2 둘 다 `_record_codec.py`의 은퇴 row 읽기 5줄이다: 1.1 row 테스트 0건(그 가지를 `raise`로 바꿔도 초록), 미지 `schema_version`이 fail-closed에서 silent 현재 버전 해석으로 바뀜. 게이트는 아래 Full gate |
-| [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `WAITING` | — |
+| [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `APPROVED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · 1차 → `28003cf1` · 2차 → `2a10798d` · 3차 → `70cfdffa` · 4차 → `22636fc3` · 5차 **APPROVE**(P3 R5-P204-001 단조성: 기준점 후보 비교를 `<=` 로, 리드 지시로 즉시 반영). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `WAITING` | — |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `WAITING` | — |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `WAITING` | — |
@@ -448,6 +602,11 @@ Phase exit:
 | `P2-01` | `review_lang2_p2_01` | 2 | `APPROVE` | 1차 10건 전부 해소 확인(재현 2개 재실행, 되돌리기 실험이 정확히 2건 실패). 새 findings 6건은 전부 P3·비차단. 코드 2건 반영 — 새 HTTP 테스트의 필드 단언이 사실상 항상 참(422 `input`이 요청 객체를 되돌려줘 모든 필드명이 본문에 있음) → `detail[0]["msg"]`·`loc` 기준으로 좁힘, `RUN_ENVIRONMENT_CONSTRAINTS`의 import 시점 bare `KeyError` → 누락 포인터·카탈로그를 실은 명시 `LookupError`. 문서 3건 이관 — P2-03에 "`preflight`가 `environment`를 받지만 읽지 않음"(두 호출부 값 동일성 가드 강화 또는 시그니처 정리), P3-02에 명시 `environment` 422의 필드 단위 표면 결정과 "범위 SoT는 `/run-environments/schema`, OpenAPI `RunEnvironment`에는 범위 없음". 나머지 1건(PR 본문의 수치·동작 변화 문장)은 리드가 처리 |
 | `P2-02` | `review_lang2_p2_02` | 1 | `REQUEST_CHANGES` | P1 1 · P2 3 · P3 3. 핵심 invariant 4개(기본값 경로 `plan_hash` 동일, 정책별 분기, 충돌 거부, 소비자 0건 가드)는 base 코드 대조와 가드 되돌리기 실험으로 실증 확인. **P1**: 팩터 sandbox(`/factors/explain`·`/factors/preview`)가 요청 `missing` 기본값 `DROP`에 고정돼 문서의 `graph.missing_policy`를 무시 — 편집 화면 실행 플랜 패널이 실제 실행과 다른 결측 정책·`plan_hash`를 표시(이 PR이 만든 회귀). **P2 3**: `backtest_run` 의 `LegacyMissingPolicyConflictError` catch가 preflight 뒤라 도달 불가(죽은 코드), `preflight` docstring·`start` 주석이 새 동작과 정반대, WORKFLOW P2-02 미갱신으로 물리 삭제가 어느 PR에도 미할당. **P3 3**: trace만 진단을 문자열로 떨어뜨림, `x-deprecated` 소비자 부재와 해석 시점 순서 미명시, AST 가드가 `missing_policy` 이름 전체를 잡아 `plan.missing_policy`까지 막음. 반영: 요청 `missing`을 `MissingPolicy | None`으로 바꾸고 `None`이면 브리지 `resolve_graph_missing_policy`가 그래프 값으로 해소(+ explain 회귀 테스트 2개, frontend mock을 `body.missing` 기준으로 정정), 죽은 catch 제거 + run 경로 422 shape 테스트, 세 주석 정정, WORKFLOW P2-02 결정 3건·P2-03 물리 삭제 항목 |
 | `P2-02` | `review_lang2_p2_02` | 2 | `APPROVE` | 1차 findings 6건 전부 해소 확인. P1 은 세 각도로 실증 재현 — 문서 값 반영(세 정책이 각자 값과 서로 다른 `plan_hash`), 경로 간 일치(`run_pipeline` 의 plan 과 `explain` 의 plan 이 `missing_policy`·`plan_hash` 모두 동일), 가드 되돌리기(application 에서 `request.graph.missing_policy` 를 읽으면 AST 테스트 실패). 새 findings 3건 + 미해소 1건은 전부 P3 비차단이며 후속 커밋 하나로 반영: trace 의 충돌 진단을 `_resolve_environment_or_reject` 로 통일해 preview·run 과 같은 `portfolio.strategy.invalid` + `validation.issues` 구조로, `/factors/preview` fallback 회귀 테스트(mock 관측에 결측 셀이 없어 이중체 포트로 값 수준 고정 — plan 과 값이 같은 정책을 읽는지), `resolve_graph_missing_policy` domain 단위 테스트를 owner 옆에, 모듈 내부 전용 헬퍼를 `_missing_from_legacy_graphs` 로 개명(WORKFLOW P2-03 삭제 목록도 함께). 리뷰어 권고 1건(`x-deprecated` 해석 시점을 P3-01 acceptance 에 명시)은 P3-01 소관으로 남긴다 |
+| `P2-04` | `review_lang2_p2_04` | 1 | `REQUEST_CHANGES` | P2 3 · P3 5. 기능(look-ahead 없음·수치 정확·`spec_hash` 변화가 새 키 하나로 설명됨)은 맞음. **P2-1**: `weighting: factor_score` × `normalization: zscore` 에서 `abs()` 때문에 최악 종목이 최대 비중, `rank` 최하위 0점이 `1e-12` 바닥값으로 dust target → `strategy.portfolio.weighting_normalization_incompatible` error + 0점 종목 `SCORE_THRESHOLD` 제외. **P2-2**: 정규화 조회 default 가 원시값 → `_signal_value` 엄격 조회·진단 `ValueError`. **P2-3**: 추출한 rank 공식 값이 기존 테스트로 고정 안 됨(돌연변이 통과) → `CrossSectionalOperator.RANK`·`GroupOperator.RANK` 백분위 값 테스트. P3 3건 코드 반영, 2건 문서 기록. 반영 커밋 `28003cf1` |
+| `P2-04` | `review_lang2_p2_0405_r2` | 2 | `REQUEST_CHANGES` | P2 1 · P3 1. 1차 blocking 은 전부 되돌리기 실험으로 닫힘 확인, replay 드리프트 없음. **R2-P204-001(P2)**: 1차 P2-1 이 증상만 막혔다 — `_weight_scores` 의 `abs(composite_score)` 때문에 기본값 `rank` 에서 `direction: low` 는 최선 종목이 빠지고 최악이 최대 비중, `long_short` 공매도 쪽은 가장 강한 숏이 빠진다. 1차 error 의 `allowed=` 가 `rank` 를 대안으로 안내했다 → 원인 수정(결정 5), error 제거. **R2-P204-002(P3)**: 엄격 조회를 되돌려도 초록 → 강제 누락 테스트. 반영 커밋 `2a10798d` |
+| `P2-04` | `review_lang2_p2_0405` | 3 | `REQUEST_CHANGES` | P2 1 · P3 1. 방향 반전(R2)은 원인 수준에서 닫힘 확인, 되돌리기 실험 4건 red. **R3-P204-001(P2)**: 롱 바닥 `min(0, eligible 최저)` 때문에 eligible 최저 종목의 강도가 항상 0 이라 `SCORE_THRESHOLD` 로 빠진다 — eligible 1종목·전원 동점 프레임이 비고, `top_count: 1` + `low` 는 매 프레임 보유 0, 5종목 선정은 4종목 보유, `rank` 에서 `high`/`low` 비대칭. **R3-P204-002(P3)**: "1.1 과 달라지는 곳" 이 실제보다 좁다. 리드가 비중 규칙 요건 7개를 정했고 결정 5 를 그 요건을 만족하는 규칙으로 다시 썼다 |
+| `P2-04` | `review_lang2_p2_0405` | 4 | `REQUEST_CHANGES` | P2 2 · P3 2. 3차 결함은 닫힘. **R4-P204-001(P2)**: 기준점이 컷 아래 최고뿐이라 원시값 3, 2, 1+2⁻⁵², 1 에서 선정 `c` 가 `7.4e-17` dust 비중, 폐기된 결정 6 의 "dust 없음" 문장과 모순. **R4-P204-002(P2)**: `if below:` 제거·`<=` 돌연변이가 351건 전부 통과(등간격 입력만 있고 컷 동점 없음). R4-P204-003(P3): `rank` 무동점에서 채택 규칙이 `weighting: rank` 와 같고, 컷 아래가 없으면 선정 2 는 항상 2:1. R4-P204-004(P3): ±1e308 overflow 는 `_finite` 로 요란하게 실패(기록만). 리드 결정 (a)안 반영 |
+| `P2-04` | `review_lang2_p2_0405` | 5 | `APPROVE` | 4차 blocking 2건 닫힘. P3 R5-P204-001: 컷 동점에서 비중이 불연속이라 자기 점수가 올라 자기 비중이 줄 수 있다(1.0, 1.0, 1.02, −4 선정 2 에서 `a` .499 → .333). 평균 간격 하한이 생겨 엄격 비교가 더는 필요 없으므로 `<=` 로 바꿨다(리드 지시) |
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
@@ -513,6 +672,28 @@ Phase exit:
   없음 → `45f1c4a3`. 세 tip 모두 옛 tip과의 차이가 `ac3a3d0e` 내용뿐이고(코드 패치 동일), 표식
   0·게이트 통과(`검증 기록`). 단계마다 `git diff --name-only --diff-filter=U`로 미해소 파일을
   확인했다 — DEFECT-P1X-001을 만든 절차 누락의 재발 방지다.
+- 2026-09-26 — P2-04 5차 리뷰 APPROVE. 비차단 P3 R5-P204-001 을 리드 지시로 반영했다. 기준점 후보
+  비교를 `<=` 로 바꿔 선정 최저와 동점인 비선정 종목도 후보에 넣었다. 컷 동점 기대값을 2/3·1/3 으로
+  고치고 리뷰어 반례와 자기 점수 단조성 퍼즈를 더했다. 결정 5·SoT 의 규칙 문장을 "이하인"으로 고쳤다.
+- 2026-09-26 — P2-04 4차 리뷰(REQUEST_CHANGES, P2 2·P3 2) 반영. 리드 결정 (a)안대로 기준점을
+  `min(컷 아래 최고, 선정 최저 − 평균 간격)` 으로 바꿔 근접 동점 dust 를 없앴다. 요건 1 은 "최소 평균
+  간격만큼의 강도"로 확정했다. 근접 동점·불균등 간격·컷 동점·컷 아래가 먼 경우·`rank` 무동점을
+  값으로 고정하고 엄격 비교·`if below:` 돌연변이가 red 인지 확인했다. 결정 5 에 채택 규칙에도
+  해당하는 기각 사유(R4-P204-003)와 컷 아래가 먼 경우의 성질을 적고, 1.1 차이 수치를 재실측했다.
+- 2026-09-26 — P2-04 3차 리뷰(REQUEST_CHANGES, P2 1·P3 1) 반영. 리드가 정한 `factor_score` 비중
+  요건 7개(선정 종목 비중 0 금지, 퇴화 프레임 균등, 거울 대칭, 숏 대칭, 규칙 문서화, 1.1 차이
+  정정, 경계 테스트)를 만족하는 규칙으로 결정 5 를 다시 썼다. 강도는 선정 컷 바로 아래 eligible
+  비선정 종목과의 점수 차(없으면 선정 최저 − 평균 간격)다. 결정 6(강도 0 제외)은 폐기했다.
+  1.1 과 비중이 같은 경우가 "기준점이 정확히 0" 뿐이라는 사실과 P2-09 영향을 적었다.
+- 2026-09-26 — P2-04 2차 리뷰(REQUEST_CHANGES, P2 1·P3 1) 반영. 점수 비례 가중이 합성 점수의
+  절댓값 대신 선호 방향 거리(롱은 `min(0, 최저 점수)` 바닥, 숏은 `max(0, 최고 점수)` 천장)를
+  쓰게 고쳐 `rank`·`zscore`·`none` 모두에서 `direction: low` 와 공매도 쪽의 비중 반전을 없앴다.
+  원인이 사라져 1차의 `zscore` 조합 차단 error 를 지우고 결정 5 를 다시 썼다. 엄격 조회 동작을
+  고정하는 테스트를 넣었다.
+- 2026-09-26 — 리뷰 기록 표의 P2-04 행이 P2-02 1·2차 행 사이에 끼어 있어 P2-02 행 뒤로 옮겼다(문서만).
+- 2026-09-26 — P2-04 를 P2-03 APPROVED tip `0dd740e8` 위로 replay 하고(코드 4커밋 range-diff 동일) 1차
+  리뷰 반영 `28003cf1`·시각 기준선 `80a5ddf5` 를 얹어 상태를 `IN_REVIEW` 로 갱신했다. 옛 PR head
+  `dc8030d3` 는 옛 base 위라 PR #184 가 CONFLICTING 이었다.
 - 2026-09-21 — P1-05 3차 APPROVE와 반영. 2차 blocking 해소를 ubuntu CI가 확정했다. 새 P2
   DEFECT-P105R3-001(경합 테스트가 고정 900ms 보유에 기대 부하 중 간헐 실패)은 승자가 부모의
   IPC 신호로 잠금을 놓게 고쳤다(`3755b186`). 추가분 `a55e7a67`(포트를 쥔 고아 서버의 pid·시작
@@ -589,6 +770,14 @@ Phase exit:
   frontend i18n이 렌더한다. Form·Graph 라벨이 키 대신 이름을 보인다. 1차 리뷰가 잡은 차단 2건
   (en 로케일 한글 계산식, 시간축 계산식의 `lag` 누락)과 공회전하던 `output_type_rule` 대조 테스트를
   고치고 2차 APPROVE. 스코프 밖 관찰은 BACKLOG-001.
+- 2026-09-21 — P2-04 구현 완료(SELF_CHECK). `signal.normalization`(기본 `rank`)을 모델·runtime
+  schema·OpenAPI·생성 SDK 에 넣고, `domain/portfolio/_compiler.py` 가 가중 합 **전에** 프레임
+  횡단면 정규화를 적용한다. 순위·표준화 공식은 `domain/factor/_statistics.py` 하나가 소유하게
+  정리해 팩터 그래프의 횡단면 연산자와 같은 정의를 쓴다. 정규화 모집단은 `(기준일,
+  universe_member)` 동료 집단이고 결측·공개일 초과·비유한값을 뺀다 — 결측 처리가 항상 정규화
+  앞이라는 순서를 테스트로 고정했다. `availability` 판정은 WORKFLOW 상 P2-07 이라 범위 밖으로
+  두었다. base 인 P2-03 tip 이 import 단계에서 깨져 있어 같은 결정(`missing` 생략 → `drop`)의
+  우회 커밋 두 개를 앞에 뒀고, P2-03 origin tip 위 rebase 에서 버릴 수 있게 분리해 두었다.
 - 2026-09-21 — P2-02 2차 리뷰 APPROVE. 1차 6건 해소 확인, 남은 P3 4건을 후속 커밋 하나로
   반영했다. trace 만 충돌 사유를 `InvalidStrategyTraceRequestError(str(error))` 로 납작하게
   만들어 프론트가 코드로 분기하려면 메시지를 파싱해야 했다 — preview·run 과 같은

@@ -537,6 +537,10 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   반환(팩터별 정책이 다르면 첫 값 + warning), `signal.normalization: none` 명시, `saved_*` 노드는
   `strategy_document.upgrade_unsupported_node` 422. dict 경로·source 경로(ruamel) 같은 step 맵,
   drift fail-closed.
+- `weighting: factor_score` 문서는 업그레이드 뒤 목표 비중이 1.1 결과와 다를 수 있다(P2-04
+  결정 5). 선정·보유 종목은 같고, 비중이 1.1 과 같은 경우는 롱이면서 강도 기준점이 정확히 0 일
+  때뿐이다. `direction: low`·`long_short`·부호 섞인 점수·일반 양수 점수 모두 달라질 수 있다.
+  "1.1 결과 보존" 검증에서 이 차이를 회귀로 세지 않도록 기대값을 결정 5 규칙으로 계산한다.
 - `POST /strategy-documents/upgrade` 응답에 `environment`·`warnings`.
 - repository codec이 1.0·1.1 row를 업그레이드해 읽고 무결성 검증 3종(1.1 spec D2 방식).
   saved-reference backtest 422.

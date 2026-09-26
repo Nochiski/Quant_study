@@ -31,7 +31,11 @@ from ._nodes import (
     UnaryOperator,
 )
 from ._planning import ResolvedFactorParameter
-from ._statistics import quantile, rank_items
+from ._statistics import (
+    cross_sectional_rank,
+    cross_sectional_zscore,
+    quantile,
+)
 from ._validation import node_dependencies
 
 FactorInputValue: TypeAlias = float | str | bool | None
@@ -522,16 +526,13 @@ def _cross_sectional(
             for index, value in _checkpointed(numeric, checkpoint):
                 result[index] = value - center
         elif node.operator is CrossSectionalOperator.RANK:
-            ranked = rank_items(numeric)
-            denominator = max(len(ranked) - 1, 1)
-            for index, rank in _checkpointed(ranked.items(), checkpoint):
-                result[index] = (rank - 1) / denominator
+            ranks = cross_sectional_rank([value for _, value in numeric])
+            for (index, _), rank in _checkpointed(zip(numeric, ranks, strict=True), checkpoint):
+                result[index] = rank
         elif node.operator is CrossSectionalOperator.ZSCORE:
-            samples = [value for _, value in numeric]
-            center = mean(samples)
-            deviation = pstdev(samples)
-            for index, value in _checkpointed(numeric, checkpoint):
-                result[index] = 0.0 if deviation == 0 else (value - center) / deviation
+            scores = cross_sectional_zscore([value for _, value in numeric])
+            for (index, _), score in _checkpointed(zip(numeric, scores, strict=True), checkpoint):
+                result[index] = score
         else:
             ordered = sorted(value for _, value in numeric)
             lower = quantile(ordered, node.lower_quantile)
@@ -569,10 +570,9 @@ def _group_transform(
             for index, value in _checkpointed(numeric, checkpoint):
                 result[index] = value - center
         else:
-            ranked = rank_items(numeric)
-            denominator = max(len(ranked) - 1, 1)
-            for index, rank in _checkpointed(ranked.items(), checkpoint):
-                result[index] = (rank - 1) / denominator
+            ranks = cross_sectional_rank([value for _, value in numeric])
+            for (index, _), rank in _checkpointed(zip(numeric, ranks, strict=True), checkpoint):
+                result[index] = rank
     return result
 
 

@@ -58,7 +58,7 @@
         "compile": {
           "diagnostics": [],
           "ok": true,
-          "spec_hash": "f14a9eaacf1214e8d697288ebed1047b723ef3de75fd222aafa19b400e6b43df"
+          "spec_hash": "d3a9c236306d1c53f8d7b5c09fd05df42b61b2848c7c8cfc5aeae61de793e781"
         },
         "rationale": "모멘텀 프리미엄은 KRX에서도 관측된다 (https://example.com/krx-momentum).",
         "source_format": "yaml",

@@ -10,12 +10,17 @@ from enum import Enum
 from typing import TypeGuard, TypeVar
 
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
+from strategy_workbench.domain.factor.facade.cross_section import (
+    cross_sectional_rank,
+    cross_sectional_zscore,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     ComparisonOperator,
     FactorDirection,
     PortfolioSide,
     RebalanceFrequency,
     SelectionMethod,
+    SignalNormalization,
     StrategySpec,
     WeightingMethod,
     strategy_spec_hash,
@@ -363,10 +368,13 @@ def _compile_frame(
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> _FrameCompilation:
     """One rebalance. `previous_weights` is the book carried in, never read off observations."""
+    # 정규화는 후보 하나로 판단할 수 없는 횡단면 사실이라 점수 계산보다 먼저 프레임 전체에서 센다.
+    normalized_signals = _cross_sectional_signals(spec, observations, checkpoint=checkpoint)
     scored = [
         _score_candidate(
             spec,
             observation,
+            normalized_signals=normalized_signals,
             include_trace=(
                 trace_security_ids is not None and observation.security_id in trace_security_ids
             ),
@@ -470,10 +478,98 @@ def _compile_frame(
     )
 
 
+def _signal_value(
+    spec: StrategySpec,
+    observation: PortfolioObservation,
+    factor_id: str,
+    raw: float,
+    normalized_signals: Mapping[tuple[str, str], float],
+) -> float:
+    """가중 합에 들어갈 값 하나. `none` 이면 원시값, 그 밖에는 정규화 값이다.
+
+    `none` 이 아닌데 조회가 빗나가면 **기본값으로 떨어지지 않고 올린다.** default 를 원시값으로
+    두면 정규화된 값과 원시값이 같은 가중 합에 섞여, 이 PR 이 없애려던 단위 지배가 진단도 예외도
+    없이 되살아난다(P2-04 리뷰 P2-2). 지금은 `_cross_sectional_signals` 의 모집단 술어와
+    `_score_candidate` 의 값 단위 탈락 술어가 글자 그대로 같아서 도달 불가이지만, 그 전제를
+    건드리는 변경(예: 모집단을 eligible 종목으로 좁히기)이 오면 조용히 틀리는 대신 멈춰야 한다.
+    """
+    if spec.signal.normalization is SignalNormalization.NONE:
+        return raw
+    try:
+        return normalized_signals[(factor_id, observation.security_id)]
+    except KeyError as error:
+        raise ValueError(
+            "normalized signal missing for a scored factor value — "
+            f"as_of={observation.as_of} security_id={observation.security_id!r} "
+            f"factor_id={factor_id!r} normalization={spec.signal.normalization.value!r} "
+            f"population_size={len(normalized_signals)}"
+        ) from error
+
+
+def _cross_sectional_signals(
+    spec: StrategySpec,
+    observations: tuple[PortfolioObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> dict[tuple[str, str], float]:
+    """`signal.normalization` 을 프레임 횡단면에 적용한 팩터 값 — 키는 (factor_id, security_id).
+
+    `none` 이면 빈 맵을 돌려주고 `_score_candidate` 가 원시값을 그대로 쓴다(1.1 의미, spec D4).
+
+    모집단은 `domain.factor` 의 횡단면 연산자와 같은 동료 집단 규칙을 따른다: 한 프레임은 기준일
+    하나이므로 남는 구분자는 `universe_member` 이고, 유니버스 밖 행은 유니버스 안 종목의 순위를
+    움직이지 못한다(D-001). 세 부류가 모집단에서 빠지며, 빠지는 사유는 `_score_candidate` 가
+    같은 값을 점수에서 버리는 사유와 같다.
+
+    1. 값이 `None` — 결측. `missing` 정책은 팩터 그래프 평가에서 이미 적용됐으므로
+       (`application/portfolio_design/_service.py`), 여기까지 남은 `None` 은 정책으로도 채우지
+       못한 결측이고 `MISSING_FACTOR` 로 탈락한다. 즉 정규화는 항상 결측 처리 **뒤**에 온다.
+    2. 공개일이 기준일보다 늦은 값 — `FUTURE_DATA`. 모집단에 넣으면 아직 알 수 없는 값이 다른
+       종목의 순위를 바꾸는 look-ahead 가 된다.
+    3. 유한하지 않은 값 — `_score_candidate` 가 `NonFinitePortfolioCalculationError` 로 올린다.
+       여기서는 건너뛰기만 해서 그 예외의 stage/context 가 그대로 유지되게 한다.
+    """
+    method = spec.signal.normalization
+    if method is SignalNormalization.NONE:
+        return {}
+    # 분기는 exhaustive 다. 값을 하나 더 늘렸을 때 catch-all 이 그것을 조용히 다른 정규화로
+    # 돌리면 진단도 예외도 없이 다른 종목이 선정된다(spec S5 가 `_compare` 에서 짚은 실패 모양).
+    if method is SignalNormalization.RANK:
+        normalize = cross_sectional_rank
+    elif method is SignalNormalization.ZSCORE:
+        normalize = cross_sectional_zscore
+    else:
+        raise ValueError(
+            f"unknown signal normalization — method={method!r} "
+            f"supported={[item.value for item in SignalNormalization]}"
+        )
+    # 문서에 없는 팩터 값이 관측에 섞여 와도 모집단에 넣지 않는다. 합성에 안 들어가는 값이다.
+    scored_factor_ids = {factor.factor_id for factor in spec.factors}
+    populations: dict[tuple[str, bool], list[tuple[str, float]]] = {}
+    for observation in _checkpointed(observations, checkpoint):
+        for value in observation.factor_values:
+            if value.factor_id not in scored_factor_ids:
+                continue
+            if value.value is None or not _number(value.value):
+                continue
+            if value.available_date > observation.as_of:
+                continue
+            key = (value.factor_id, observation.universe_member)
+            populations.setdefault(key, []).append((observation.security_id, float(value.value)))
+    normalized: dict[tuple[str, str], float] = {}
+    for (factor_id, _member), samples in _checkpointed(populations.items(), checkpoint):
+        scores = normalize([value for _, value in samples])
+        paired = zip(samples, scores, strict=True)
+        for (security_id, _raw), score in _checkpointed(paired, checkpoint):
+            normalized[(factor_id, security_id)] = score
+    return normalized
+
+
 def _score_candidate(
     spec: StrategySpec,
     observation: PortfolioObservation,
     *,
+    normalized_signals: Mapping[tuple[str, str], float],
     include_trace: bool,
 ) -> _ScoredCandidate:
     """Score one candidate. FUTURE_DATA covers dated values only.
@@ -561,8 +657,11 @@ def _score_candidate(
                 )
             continue
         direction = 1.0 if factor.direction is FactorDirection.HIGH else -1.0
+        signal_value = _signal_value(
+            spec, observation, factor.factor_id, value.value, normalized_signals
+        )
         weighted_value = _finite(
-            direction * factor.weight * value.value,
+            direction * factor.weight * signal_value,
             # Preserve the executable compiler's historical failure code/stage: the term is part
             # of the same composite-score operation, merely retained for the audit projection.
             stage="composite_score",
@@ -777,7 +876,7 @@ def _target_weights(
     )
     reasons: dict[str, ExclusionReason] = {}
     long_scores = _weight_scores(
-        spec, ranked, observations, long_ids, reasons, checkpoint=checkpoint
+        spec, ranked, observations, long_ids, reasons, short=False, checkpoint=checkpoint
     )
     short_scores = _weight_scores(
         spec,
@@ -785,6 +884,7 @@ def _target_weights(
         observations,
         short_ids,
         reasons,
+        short=True,
         checkpoint=checkpoint,
     )
     unconstrained = _proportional_allocate(long_scores, long_budget, checkpoint=checkpoint)
@@ -860,16 +960,22 @@ def _weight_scores(
     selected: set[str],
     reasons: dict[str, ExclusionReason],
     *,
+    short: bool,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, float]:
     scores: dict[str, float] = {}
+    strengths = (
+        _margin_strengths(ranked, selected, short=short)
+        if spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE
+        else {}
+    )
     for order, candidate in _checkpointed(enumerate(ranked, start=1), checkpoint):
         if candidate.security_id not in selected:
             continue
         if spec.portfolio.weighting is WeightingMethod.EQUAL:
             score = 1.0
         elif spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE:
-            score = max(abs(candidate.composite_score or 0.0), 1e-12)
+            score = strengths[candidate.security_id]
         elif spec.portfolio.weighting is WeightingMethod.RANK:
             score = float(len(selected) - min(order, len(selected)) + 1)
         else:
@@ -885,6 +991,61 @@ def _weight_scores(
             context=f"security_id={candidate.security_id!r} weighting={spec.portfolio.weighting}",
         )
     return scores
+
+
+def _margin_strengths(
+    ranked: list[CandidateDecision], selected: set[str], *, short: bool
+) -> dict[str, float]:
+    """점수 비례 가중(`weighting: factor_score`)의 선정 종목별 강도다. 비중은 이 값에 비례한다.
+
+    규칙(PLAN 결정 5): 선호 점수 p 는 롱이면 합성 점수, 숏이면 그 부호를 뒤집은 값이다.
+    선정이 2종목 이상이면 선정 종목 강도 = p − 기준점, 기준점 = `min(선정 최저 p 이하인 eligible
+    비선정 종목 중 최고 p, 선정 최저 p − 평균 간격)`, 평균 간격 = `(선정 최고 p − 선정 최저 p) /
+    (선정 수 − 1)` 이다. 컷 아래 종목이 없으면 뒤 항만 쓴다. 선정 1종목이거나 강도가
+    모두 0 이면(선정 전원 동점이고 아래 종목 없음) 균등 배분한다.
+
+    - 합성 점수는 방향을 이미 반영해서 **클수록 매수 선호**다(spec D4). 절댓값을 쓰면
+      `direction: low` 와 공매도 쪽에서 순서가 뒤집혔다(2차 리뷰 R2-P204-001).
+    - 기준점이 "선정 최저 − 평균 간격" 이하라서 선정 종목은 최소 평균 간격만큼의 강도를 갖는다.
+      eligible 최저를 바닥으로 두면 그 종목이 0 이 되어 1종목·동점 프레임이 비었고(3차 리뷰
+      R3-P204-001), 컷 아래 최고만 쓰면 근접 동점 종목이 dust 비중을 받았다(4차 리뷰
+      R4-P204-001). 그래서 최고/최저 강도 비는 선정 수를 넘지 않는다.
+    - 선정 최저와 동점인 비선정 종목도 기준점 후보에 넣는다(`<=`). 빼면 동점이 풀리고 묶일 때
+      기준점이 튀어 자기 점수가 올라도 자기 비중이 주는 경우가 생겼다(5차 리뷰 R5-P204-001).
+      평균 간격 하한이 있어 동점 후보가 들어와도 선정 종목의 강도는 0 이 되지 않는다(간격이
+      0 이면 강도가 모두 0 이라 균등 배분).
+    - 컷 아래 종목이 선정 최저에서 멀면 그 점수가 기준점이 되어 비중이 균등 쪽으로 평평해진다.
+      하한은 기준점이 선정 최저에 너무 가까운 쪽만 막는다(PLAN 결정 5 의 알려진 성질).
+    - 두 항 모두 점수의 평행 이동·양의 배율에 공변이라 비중은 불변이다. 그래서 x 에 `low` 를 준
+      문서와 −x 에 `high` 를 준 문서가 `rank`(두 합성 점수가 상수 1 차이)에서도 같은 비중을 낸다.
+    - 기준점은 같은 프레임의 eligible 후보에서만 구하므로 날짜를 가로지르지 않는다.
+    """
+    sign = -1.0 if short else 1.0
+    preference = {
+        candidate.security_id: sign * (candidate.composite_score or 0.0) for candidate in ranked
+    }
+    chosen = [value for security_id, value in preference.items() if security_id in selected]
+    if not chosen:
+        return {}
+    if len(chosen) == 1:
+        return {security_id: 1.0 for security_id in preference if security_id in selected}
+    lowest = min(chosen)
+    reference = lowest - (max(chosen) - lowest) / (len(chosen) - 1)
+    below = [
+        value
+        for security_id, value in preference.items()
+        if security_id not in selected and value <= lowest
+    ]
+    if below:
+        reference = min(reference, max(below))
+    strengths = {
+        security_id: value - reference
+        for security_id, value in preference.items()
+        if security_id in selected
+    }
+    if not any(strength > 0.0 for strength in strengths.values()):
+        return {security_id: 1.0 for security_id in strengths}
+    return strengths
 
 
 def _proportional_allocate(

@@ -787,9 +787,10 @@ def test_truthful_pipeline_momentum_across_a_split_is_continuous_on_adj_close(
 
 
 def test_raw_load_reports_monotonic_progress_ending_at_one(adapter: EquityDuckdbAdapter) -> None:
-    """이슈 #162: 실데이터 원시 로딩(질의 + 행 조립)은 수십 초라 진행을 보고한다.
+    """이슈 #162: 실데이터 원시 로딩(격자 조립 + 관측 조립 + 검증)은 수십 초라 진행을 보고한다.
 
-    질의가 끝나면 0.5, 행 조립 동안 그 뒤를 채워 1.0 에서 끝난다. 보고 유무가 결과를 바꾸지 않는다.
+    격자 구간(0~0.52)과 생성 시 계약 검증 구간(0.91~1.0) 안에서도 오르고 1.0 에서 끝난다.
+    보고 유무가 결과를 바꾸지 않는다.
     """
     query = RawObservationQuery("KRX", "krx.common-stock", START, END, PRICE_FIELDS, 0)
     reported: list[float] = []
@@ -802,5 +803,6 @@ def test_raw_load_reports_monotonic_progress_ending_at_one(adapter: EquityDuckdb
     assert result.observations == baseline.observations
     assert result.sessions == baseline.sessions
     assert reported == sorted(reported)
-    assert reported[0] == 0.5
+    assert any(0.0 < fraction < 0.52 for fraction in reported)
+    assert any(0.91 < fraction < 1.0 for fraction in reported)
     assert reported[-1] == 1.0

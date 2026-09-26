@@ -38,7 +38,7 @@ Contract:
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import InitVar, dataclass
 from datetime import date
 from typing import Protocol, TypeVar, runtime_checkable
@@ -71,6 +71,27 @@ def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterat
     for index, item in enumerate(items):
         if index % _CHECKPOINT_BATCH == 0:
             checkpoint()
+        yield item
+
+
+def _noop_progress(fraction: float) -> None:
+    pass
+
+
+def _reported(
+    items: Sequence[_T],
+    checkpoint: Callable[[], None],
+    progress: Callable[[float], None],
+    *,
+    start: float,
+    end: float,
+) -> Iterator[_T]:
+    """`_checkpointed` 와 같은 배치마다 [start, end) 구간의 진행도 보고한다."""
+    total = len(items)
+    for index, item in enumerate(items):
+        if index % _CHECKPOINT_BATCH == 0:
+            checkpoint()
+            progress(start + (end - start) * index / total)
         yield item
 
 
@@ -156,16 +177,32 @@ class RawObservationSet:
     detail: str | None = None
     warnings: tuple[str, ...] = ()
     validation_checkpoint: InitVar[Callable[[], None] | None] = None
+    validation_progress: InitVar[Callable[[float], None] | None] = None
 
     @property
     def ok(self) -> bool:
         return self.status is DataLoadStatus.OK
 
-    def __post_init__(self, validation_checkpoint: Callable[[], None] | None) -> None:
-        self.validate_contract(checkpoint=validation_checkpoint or _noop_checkpoint)
+    def __post_init__(
+        self,
+        validation_checkpoint: Callable[[], None] | None,
+        validation_progress: Callable[[float], None] | None,
+    ) -> None:
+        self.validate_contract(
+            checkpoint=validation_checkpoint or _noop_checkpoint,
+            progress=validation_progress or _noop_progress,
+        )
 
-    def validate_contract(self, *, checkpoint: Callable[[], None] = _noop_checkpoint) -> None:
-        """Validate at construction and consumer boundaries with bounded cancellation checks."""
+    def validate_contract(
+        self,
+        *,
+        checkpoint: Callable[[], None] = _noop_checkpoint,
+        progress: Callable[[float], None] = _noop_progress,
+    ) -> None:
+        """Validate at construction and consumer boundaries with bounded cancellation checks.
+
+        `progress` 는 관측을 세 번 훑는 검사의 완료 비율(0~1)을 받고 1.0 으로 끝난다(이슈 #162).
+        """
         checkpoint()
         if list(self.sessions) != sorted(set(self.sessions)):
             raise RawObservationContractViolation(
@@ -181,19 +218,26 @@ class RawObservationSet:
                 "raw observation history must precede the requested range — "
                 f"last_history={self.history_sessions[-1]} first_session={self.sessions[0]}"
             )
-        keys = [
-            (item.as_of, item.security_id) for item in _checkpointed(self.observations, checkpoint)
-        ]
-        if keys != sorted(set(keys)):
-            raise RawObservationContractViolation(
-                "raw observations must be ordered by (as_of, security_id) and unique — "
-                f"count={len(keys)}"
-            )
+        # "정렬되고 유일하다" 는 "인접 키가 엄격 증가한다" 와 같다. 전체 정렬(`sorted(set(keys))`)은
+        # 4년 구간 약 240만 키에서 8초 동안 진행 보고 없이 멈췄다(이슈 #162). 선형 비교로 대신한다.
+        previous: tuple[date, str] | None = None
+        for item in _reported(self.observations, checkpoint, progress, start=0.0, end=0.25):
+            key = (item.as_of, item.security_id)
+            if previous is not None and not previous < key:
+                raise RawObservationContractViolation(
+                    "raw observations must be ordered by (as_of, security_id) and unique — "
+                    f"count={len(self.observations)} previous={previous} key={key}"
+                )
+            previous = key
         # The evaluator counts lag and rolling windows by row position, not by calendar, so an
         # undeclared date silently shifts every window behind it (D-003). Fail closed instead.
         declared = set(self.sessions) | set(self.history_sessions)
         undeclared = sorted(
-            {item.as_of for item in _checkpointed(self.observations, checkpoint)} - declared
+            {
+                item.as_of
+                for item in _reported(self.observations, checkpoint, progress, start=0.25, end=0.35)
+            }
+            - declared
         )
         if undeclared:
             raise RawObservationContractViolation(
@@ -203,7 +247,7 @@ class RawObservationSet:
                 f"declared_history={len(self.history_sessions)} "
                 f"snapshot={self.data_snapshot_id!r}"
             )
-        for observation in _checkpointed(self.observations, checkpoint):
+        for observation in _reported(self.observations, checkpoint, progress, start=0.35, end=1.0):
             if not _finite_number(observation.previous_weight):
                 raise RawObservationContractViolation(
                     "raw observation previous_weight must be finite — "
@@ -234,6 +278,7 @@ class RawObservationSet:
                             f"field_id={field.field_id!r} value={value!r} "
                             f"snapshot={self.data_snapshot_id!r}"
                         )
+        progress(1.0)
 
 
 class RawObservationPort(Protocol):

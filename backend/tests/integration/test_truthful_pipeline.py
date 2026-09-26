@@ -1039,7 +1039,7 @@ class _ProgressReportingRawPort:
 
 
 def test_run_pipeline_maps_raw_load_progress_into_the_loading_band() -> None:
-    """이슈 #162: 로딩 진행을 보고하는 포트면 로딩 구간(0~0.28) 안에서 막대가 오른다."""
+    """이슈 #162: 로딩 진행을 보고하는 포트면 로딩 구간(0~0.171) 안에서 막대가 오른다."""
     reported: list[tuple[float, str]] = []
 
     _service(_ProgressReportingRawPort()).run_pipeline(
@@ -1048,6 +1048,25 @@ def test_run_pipeline_maps_raw_load_progress_into_the_loading_band() -> None:
     )
 
     loading = [fraction for fraction, message in reported if message == "Loading raw observations"]
-    assert loading == pytest.approx([0.0, 0.07, 0.28])
+    assert loading == pytest.approx([0.0, 0.04275, 0.171])
     fractions = [fraction for fraction, _ in reported]
     assert fractions == sorted(fractions)
+
+
+@pytest.mark.parametrize("factor_count", [3, 6])
+def test_run_pipeline_progress_never_steps_back_across_factor_boundaries(
+    factor_count: int,
+) -> None:
+    """이슈 #162 리뷰 P3-2: 팩터 구간을 누적 덧셈으로 나누면 3·6개에서 경계가 1ulp 역행했다."""
+    factors = tuple(
+        replace(_momentum(), factor_id=f"momentum_{index}", weight=1.0 / factor_count)
+        for index in range(factor_count)
+    )
+    reported: list[float] = []
+
+    _service().run_pipeline(
+        PortfolioPreviewRequest(_spec(*factors)),
+        progress=lambda fraction, message: reported.append(fraction),
+    )
+
+    assert reported == sorted(reported)

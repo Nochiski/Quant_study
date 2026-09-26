@@ -355,5 +355,11 @@ def test_evaluation_reports_progress_inside_the_time_series_node() -> None:
 
     assert evaluation == evaluate_factor_graph(graph, observations=observations)
     assert reported == sorted(reported)
-    # 도달 가능한 노드 2개: field 완료가 0.5, 시계열 노드가 종목 4개를 끝낼 때마다 0.125씩.
-    assert sorted(set(reported)) == [0.5, 0.625, 0.75, 0.875, 1.0]
+    # 가중치 field 1 + 시계열 20 = 21. field 완료가 1/21 이고, 시계열 노드는 종목 4개(관측 3개씩)를
+    # 끝낼 때마다 5/21 씩 올린다. 필드 노드가 팩터 구간의 절반을 가져가지 않는다(리뷰 P3-1).
+    # 노드 계산은 0.96 까지이고 출력 값 조립이 1.0 을 채운다.
+    nodes = [value for value in reported if value <= 0.96]
+    assert sorted(set(nodes)) == pytest.approx(
+        [0.96 * share for share in (1 / 21, 6 / 21, 11 / 21, 16 / 21, 1.0)]
+    )
+    assert reported[-1] == 1.0

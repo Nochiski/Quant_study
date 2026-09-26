@@ -137,6 +137,9 @@
 - Given 알파 팩터와 변동성 팩터가 있는 전략, When 비중 방식을 위험 기반으로 두고 변동성 팩터를
   고르면, Then 변동성 팩터는 합성 점수에서 빠지고 비중에만 쓰인다.
 - Given 변동성 팩터를 빼면 알파 팩터가 하나도 남지 않는 문서, Then compile 오류가 난다.
+- 비고: backend 에는 횡단면 eligibility(`top_percent`·`top_count`, 규칙마다 따로 센 모집단의 순위로
+  자르는 2-pass)와 순위 탈락 사유 `eligibility_rank_cut` 이 있다(P2-05). 변동성 역가중
+  (`risk.risk_factor_id`, P2-06)과 추적 화면 표시(P3-01)가 아직 없어 상태는 `예정`이다.
 
 ### US-CS-07 노드 캔버스에서 끌어서 잇고 되돌린다
 

@@ -161,10 +161,20 @@ describe("schema navigator", () => {
       "/eligibility/rules/0/operator",
       DOCUMENT,
     );
-    expect(valueOptions(operator!)).toEqual(["gt", "gte", "lt", "lte", "eq"]);
+    expect(valueOptions(operator!)).toEqual([
+      "gt",
+      "gte",
+      "lt",
+      "lte",
+      "eq",
+      "top_percent",
+      "top_count",
+    ]);
     const version = schemaAt(SCHEMA, "/schema_version", DOCUMENT);
     expect(valueOptions(version!)).toEqual(["1.2"]);
-    expect(typeLabel(operator!.node)).toBe("enum(gt|gte|lt|lte|eq)");
+    expect(typeLabel(operator!.node)).toBe(
+      "enum(gt|gte|lt|lte|eq|top_percent|top_count)",
+    );
   });
 
   it.each([

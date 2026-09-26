@@ -35,7 +35,7 @@ from strategy_workbench.domain.strategy.facade.constraints import (
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
-    ComparisonOperator,
+    EligibilityOperator,
     EligibilityRule,
     EligibilityStep,
     FloatParameter,
@@ -255,7 +255,7 @@ def test_every_unbounded_strategy_numeric_leaf_must_be_finite(value: float) -> N
             replace(
                 spec,
                 eligibility=EligibilityStep(
-                    (EligibilityRule("price.close", ComparisonOperator.GREATER_THAN, value),)
+                    (EligibilityRule("price.close", EligibilityOperator.GREATER_THAN, value),)
                 ),
             ),
             "eligibility.rules.0.value",
@@ -325,3 +325,55 @@ def test_every_factor_graph_code_has_a_strategy_expression_alias() -> None:
 def test_expression_alias_rejects_a_code_from_another_namespace() -> None:
     with pytest.raises(ValueError, match="only factor graph codes"):
         expression_code("strategy.expression.cycle")
+
+
+@pytest.mark.parametrize(
+    ("operator", "value"),
+    [
+        (EligibilityOperator.TOP_PERCENT, 0.0),
+        (EligibilityOperator.TOP_PERCENT, 1.5),
+        (EligibilityOperator.TOP_PERCENT, 20.0),
+        (EligibilityOperator.TOP_COUNT, 0.0),
+        (EligibilityOperator.TOP_COUNT, 2.5),
+        (EligibilityOperator.TOP_COUNT, -3.0),
+    ],
+)
+def test_out_of_range_cross_sectional_values_are_a_validation_error(
+    operator: EligibilityOperator, value: float
+) -> None:
+    """`top_percent: 20` 은 "상위 20%"로 읽히지만 cut 은 전부 통과다 — 조용히 필터가 사라진다."""
+    validation = validate_strategy(
+        replace(
+            _template(),
+            eligibility=EligibilityStep((EligibilityRule("price.turnover", operator, value),)),
+        )
+    )
+
+    issues = [
+        issue for issue in validation.issues if issue.code == "strategy.eligibility.rule_value"
+    ]
+    assert [issue.path for issue in issues] == ["eligibility.rules.0.value"]
+
+
+@pytest.mark.parametrize(
+    ("operator", "value"),
+    [
+        (EligibilityOperator.TOP_PERCENT, 0.2),
+        (EligibilityOperator.TOP_PERCENT, 1.0),
+        (EligibilityOperator.TOP_COUNT, 1.0),
+        (EligibilityOperator.TOP_COUNT, 200.0),
+        (EligibilityOperator.GREATER_THAN, -3.0),
+        (EligibilityOperator.EQUAL, 0.0),
+    ],
+)
+def test_values_the_cut_can_size_pass_validation(
+    operator: EligibilityOperator, value: float
+) -> None:
+    validation = validate_strategy(
+        replace(
+            _template(),
+            eligibility=EligibilityStep((EligibilityRule("price.turnover", operator, value),)),
+        )
+    )
+
+    assert "strategy.eligibility.rule_value" not in {issue.code for issue in validation.issues}

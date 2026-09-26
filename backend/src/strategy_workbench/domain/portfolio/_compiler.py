@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import date
+from decimal import Decimal
 from enum import Enum
 from typing import TypeGuard, TypeVar
 
@@ -15,7 +16,9 @@ from strategy_workbench.domain.factor.facade.cross_section import (
     cross_sectional_zscore,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
-    ComparisonOperator,
+    CROSS_SECTIONAL_ELIGIBILITY_OPERATORS,
+    EligibilityOperator,
+    EligibilityRule,
     FactorDirection,
     PortfolioSide,
     RebalanceFrequency,
@@ -47,6 +50,29 @@ from ._models import (
 
 _T = TypeVar("_T")
 _CHECKPOINT_BATCH = 256
+
+# 절대 규칙 = 횡단면이 아닌 나머지. 목록을 여기 다시 적지 않고 owner(`domain/strategy`)의
+# 횡단면 집합에서 뺀다 — 연산자가 늘면 두 집합이 같이 움직인다.
+_ABSOLUTE_ELIGIBILITY_OPERATORS: frozenset[EligibilityOperator] = (
+    frozenset(EligibilityOperator) - CROSS_SECTIONAL_ELIGIBILITY_OPERATORS
+)
+
+# 후보를 선정 순위에서 빼는 사유. `_score_candidate`(1-pass)와 횡단면 2-pass 가 같은 집합으로
+# `eligible` 을 다시 계산한다 — 2-pass 가 덧붙인 사유를 이 집합이 모르면 잘린 종목이 다시
+# 순위에 들어간다.
+_BLOCKING_EXCLUSIONS: frozenset[ExclusionReason] = frozenset(
+    {
+        ExclusionReason.NOT_IN_UNIVERSE,
+        ExclusionReason.FUTURE_DATA,
+        ExclusionReason.MISSING_ELIGIBILITY,
+        ExclusionReason.ELIGIBILITY_FAILED,
+        ExclusionReason.ELIGIBILITY_RANK_CUT,
+        ExclusionReason.MISSING_FACTOR,
+        ExclusionReason.SCORE_THRESHOLD,
+        ExclusionReason.REGIME_BLOCKED,
+        ExclusionReason.LIQUIDITY_FAILED,
+    }
+)
 
 
 def _noop_progress(fraction: float) -> None:
@@ -341,6 +367,10 @@ def _rebalance_pairs(
 class _ScoredCandidate:
     decision: CandidateDecision
     contributions: tuple[FactorContributionTrace, ...]
+    # 1-pass 절대 eligibility 규칙(`gt`~`eq`)을 전부 통과했는가. 2-pass 횡단면 모집단의 자격이며
+    # `decision.eligible`(유동성·레짐·팩터 결측·점수 문턱까지 반영)과 다르다 — 유동성 필터에
+    # 걸린 종목까지 분모에서 빼면 "상위 20%"의 모집단이 단계마다 달라진다(spec D3 S5).
+    passes_absolute_eligibility: bool
 
 
 @dataclass(frozen=True)
@@ -384,7 +414,9 @@ def _compile_frame(
     contributions_by_id = {
         item.decision.security_id: item.contributions for item in _checkpointed(scored, checkpoint)
     }
-    decisions = [item.decision for item in _checkpointed(scored, checkpoint)]
+    decisions = _apply_cross_sectional_eligibility(
+        spec, observations, scored, checkpoint=checkpoint
+    )
     ranked = sorted(
         (decision for decision in _checkpointed(decisions, checkpoint) if decision.eligible),
         key=lambda item: (-(item.composite_score or 0.0), item.security_id),
@@ -506,6 +538,93 @@ def _signal_value(
         ) from error
 
 
+def _apply_cross_sectional_eligibility(
+    spec: StrategySpec,
+    observations: tuple[PortfolioObservation, ...],
+    scored: list[_ScoredCandidate],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> list[CandidateDecision]:
+    """2-pass: 프레임 모집단의 순위로 `top_*` 규칙을 적용해 탈락 사유를 덧붙인다 (spec D3 S5).
+
+    **모집단**은 규칙마다 따로 센다 — 유니버스 멤버 중 절대 규칙(`gt`~`eq`)을 전부 통과했고 그
+    규칙의 `field_id` 값이 기준일까지 공개된 종목이다. 결측·공개일 초과 종목은 탈락시키면서
+    **분모에서도 뺀다**: 값을 모르는 종목을 분모에 세면 "거래대금 상위 20%"가 데이터 커버리지에
+    따라 실제 20%보다 적은 종목을 남긴다.
+
+    **동점**은 값 내림차순 → `security_id` 오름차순으로 자른다. 두 키가 전순서를 이뤄 같은 입력이
+    언제나 같은 컷을 낸다(비결정 선정 방지).
+
+    절대 규칙과 횡단면 규칙은 AND 다. 규칙이 여러 개면 각자의 모집단에서 잘리고, 한 번이라도
+    잘린 종목은 최종적으로 탈락한다.
+    """
+    rules = tuple(
+        rule
+        for rule in spec.eligibility.rules
+        if rule.operator in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS
+    )
+    decisions = [item.decision for item in _checkpointed(scored, checkpoint)]
+    if not rules:
+        return decisions
+    eligible_for_population = {
+        item.decision.security_id: item.passes_absolute_eligibility
+        for item in _checkpointed(scored, checkpoint)
+    }
+    # 1-pass 의 `_score_candidate` 와 **같은 방식**으로 필드를 찾는다(관측당 dict 한 벌, 중복
+    # `field_id` 면 마지막 항목이 이긴다). 한쪽이 선형 탐색이면 중복이 들어왔을 때 절대 규칙과
+    # 횡단면 모집단이 서로 다른 값을 읽는다 — 포트 계약이 중복을 거절하므로 실 파이프라인에서는
+    # 안 나지만, 이 함수는 공개 도메인 facade 를 통해 임의 관측으로도 불린다(리뷰 DEFECT-P3-2).
+    fields_by_security = {
+        observation.security_id: {item.field_id: item for item in observation.fields}
+        for observation in _checkpointed(observations, checkpoint)
+    }
+    added: dict[str, list[ExclusionReason]] = {}
+    for rule in rules:
+        population: list[tuple[str, float]] = []
+        for observation in _checkpointed(observations, checkpoint):
+            if not observation.universe_member:
+                continue  # 1-pass 가 이미 NOT_IN_UNIVERSE 로 탈락시켰다
+            if not eligible_for_population[observation.security_id]:
+                # 절대 규칙에서 이미 떨어진 종목에는 횡단면 사유를 덧붙이지 않는다. 모집단 밖이라
+                # 순위가 없고, 탈락 사유 목록에 도달하지도 않은 규칙 이야기가 섞이면 trace 화면이
+                # 실제로 걸린 규칙을 가린다.
+                continue
+            field = fields_by_security[observation.security_id].get(rule.field_id)
+            if field is None or not _number(field.value):
+                added.setdefault(observation.security_id, []).append(
+                    ExclusionReason.MISSING_ELIGIBILITY
+                )
+                continue
+            if field.available_date > observation.as_of:
+                added.setdefault(observation.security_id, []).append(ExclusionReason.FUTURE_DATA)
+                continue
+            population.append((observation.security_id, float(field.value)))
+        population.sort(key=lambda item: (-item[1], item[0]))
+        kept = _cross_sectional_cut(rule, len(population))
+        for security_id, _value in _checkpointed(population[kept:], checkpoint):
+            added.setdefault(security_id, []).append(ExclusionReason.ELIGIBILITY_RANK_CUT)
+    if not added:
+        return decisions
+    return [
+        _with_exclusions(decision, added.get(decision.security_id, ()))
+        for decision in _checkpointed(decisions, checkpoint)
+    ]
+
+
+def _with_exclusions(
+    decision: CandidateDecision, extra: Iterable[ExclusionReason]
+) -> CandidateDecision:
+    """탈락 사유를 덧붙이고 `eligible` 을 다시 판정한다. 순서는 1-pass 사유가 먼저다."""
+    reasons = tuple(dict.fromkeys((*decision.exclusion_reasons, *extra)))
+    if reasons == decision.exclusion_reasons:
+        return decision
+    return replace(
+        decision,
+        exclusion_reasons=reasons,
+        eligible=not any(reason in _BLOCKING_EXCLUSIONS for reason in reasons),
+    )
+
+
 def _cross_sectional_signals(
     spec: StrategySpec,
     observations: tuple[PortfolioObservation, ...],
@@ -584,14 +703,22 @@ def _score_candidate(
     if not observation.universe_member:
         reasons.append(ExclusionReason.NOT_IN_UNIVERSE)
     fields = {item.field_id: item for item in observation.fields}
+    # 1-pass: 절대 규칙만 본다. `top_*` 는 프레임 전체 모집단이 있어야 판정되므로
+    # `_apply_cross_sectional_eligibility` 가 2-pass 로 붙인다(spec D3 S5).
+    passes_absolute_eligibility = True
     for rule in spec.eligibility.rules:
+        if rule.operator in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS:
+            continue
         field = fields.get(rule.field_id)
         if field is None or not _number(field.value):
             reasons.append(ExclusionReason.MISSING_ELIGIBILITY)
+            passes_absolute_eligibility = False
         elif field.available_date > observation.as_of:
             reasons.append(ExclusionReason.FUTURE_DATA)
+            passes_absolute_eligibility = False
         elif not _compare(float(field.value), rule.operator, rule.value):
             reasons.append(ExclusionReason.ELIGIBILITY_FAILED)
+            passes_absolute_eligibility = False
     if spec.portfolio.liquidity_field_id and spec.portfolio.minimum_liquidity is not None:
         liquidity = fields.get(spec.portfolio.liquidity_field_id)
         if (
@@ -712,16 +839,6 @@ def _score_candidate(
         )
         if not passes:
             reasons.append(ExclusionReason.SCORE_THRESHOLD)
-    blocking = {
-        ExclusionReason.NOT_IN_UNIVERSE,
-        ExclusionReason.FUTURE_DATA,
-        ExclusionReason.MISSING_ELIGIBILITY,
-        ExclusionReason.ELIGIBILITY_FAILED,
-        ExclusionReason.MISSING_FACTOR,
-        ExclusionReason.SCORE_THRESHOLD,
-        ExclusionReason.REGIME_BLOCKED,
-        ExclusionReason.LIQUIDITY_FAILED,
-    }
     normalized = tuple(
         replace(
             item,
@@ -741,10 +858,11 @@ def _score_candidate(
         for item in contributions
     )
     return _ScoredCandidate(
+        passes_absolute_eligibility=passes_absolute_eligibility,
         decision=CandidateDecision(
             as_of=observation.as_of,
             security_id=observation.security_id,
-            eligible=not any(reason in blocking for reason in reasons),
+            eligible=not any(reason in _BLOCKING_EXCLUSIONS for reason in reasons),
             selected=False,
             composite_score=composite_score,
             rank=None,
@@ -1203,16 +1321,59 @@ def _field(observation: PortfolioObservation, field_id: str | None) -> float | N
     return float(value.value)
 
 
-def _compare(value: float, operator: ComparisonOperator, threshold: float) -> bool:
-    if operator is ComparisonOperator.GREATER_THAN:
+def _compare(value: float, operator: EligibilityOperator, threshold: float) -> bool:
+    """후보 하나의 값으로 판정하는 절대 규칙 비교 (spec D3 S5).
+
+    분기는 **exhaustive** 다. 예전 구현의 마지막 줄은 catch-all `return value == threshold` 라
+    모집단이 필요한 `top_*` 가 들어와도 예외 없이 "값이 같은가"로 답했다 — 진단도 로그도 없이
+    다른 종목이 선정되는 조용한 오필터다. 모르는 연산자는 여기서 멈춘다.
+    """
+    if operator is EligibilityOperator.GREATER_THAN:
         return value > threshold
-    if operator is ComparisonOperator.GREATER_THAN_OR_EQUAL:
+    if operator is EligibilityOperator.GREATER_THAN_OR_EQUAL:
         return value >= threshold
-    if operator is ComparisonOperator.LESS_THAN:
+    if operator is EligibilityOperator.LESS_THAN:
         return value < threshold
-    if operator is ComparisonOperator.LESS_THAN_OR_EQUAL:
+    if operator is EligibilityOperator.LESS_THAN_OR_EQUAL:
         return value <= threshold
-    return value == threshold
+    if operator is EligibilityOperator.EQUAL:
+        return value == threshold
+    raise ValueError(
+        "absolute eligibility comparison received an operator it cannot decide alone — "
+        f"operator={operator!r} value={value!r} threshold={threshold!r} "
+        f"expected={[member.value for member in _ABSOLUTE_ELIGIBILITY_OPERATORS]} "
+        f"cross_sectional={[member.value for member in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS]}"
+    )
+
+
+def _cross_sectional_cut(rule: EligibilityRule, population_size: int) -> int:
+    """`top_*` 규칙이 남길 종목 수. 둘 다 소수점을 버리고 모집단 크기로 잘린다.
+
+    비율은 **문서가 쓴 10진 표기 그대로** 곱한다(`Decimal(str(value))`). 이진 부동소수로
+    곱하면 `100 × 0.29` 가 `28.999…` 라 `floor` 가 28 을 내고, "상위 29%" 문서가 진단도 예외도
+    없이 한 종목을 더 떨군다. `repr(float)` 는 그 float 로 되돌아가는 최단 10진 표기라
+    문서에 적힌 리터럴을 그대로 복원한다.
+    """
+    if not _number(rule.value):
+        # validator(`strategy.eligibility.rule_value`·`strategy.number.non_finite`)가 먼저
+        # 막지만, 검증을 건너뛴 경로가 생기면 `math.floor(Decimal("NaN"))` 의 맨몸 ValueError
+        # 대신 어떤 규칙이었는지 말하고 멈춘다.
+        raise ValueError(
+            "cross-sectional eligibility cut received a non-finite size — "
+            f"operator={rule.operator!r} field_id={rule.field_id!r} value={rule.value!r} "
+            f"population_size={population_size}"
+        )
+    if rule.operator is EligibilityOperator.TOP_PERCENT:
+        kept = math.floor(Decimal(population_size) * Decimal(str(rule.value)))
+    elif rule.operator is EligibilityOperator.TOP_COUNT:
+        kept = math.floor(Decimal(str(rule.value)))
+    else:
+        raise ValueError(
+            "cross-sectional eligibility cut received an operator it cannot size — "
+            f"operator={rule.operator!r} field_id={rule.field_id!r} value={rule.value!r} "
+            f"expected={[member.value for member in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS]}"
+        )
+    return max(0, min(kept, population_size))
 
 
 def _number(value: object) -> TypeGuard[int | float]:

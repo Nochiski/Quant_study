@@ -91,7 +91,7 @@ from strategy_workbench.domain.portfolio.facade.construction import ExclusionRea
 from strategy_workbench.domain.strategy.facade.provenance import InlineDraft
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
-    ComparisonOperator,
+    EligibilityOperator,
     EligibilityRule,
     EligibilityStep,
     FactorDirection,
@@ -436,7 +436,7 @@ def _spec_using_market_cap_outside_the_factor(role: str) -> StrategySpec:
         return replace(
             spec,
             eligibility=EligibilityStep(
-                (EligibilityRule(field_id, ComparisonOperator.GREATER_THAN, 0.0),)
+                (EligibilityRule(field_id, EligibilityOperator.GREATER_THAN, 0.0),)
             ),
         )
     if role == "liquidity":

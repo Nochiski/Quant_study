@@ -485,6 +485,11 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `export_openapi.py`로 `backend/openapi.json` 재생성(연산자 카탈로그 응답의 `availability` 값 집합이
   바뀐다. 진단 코드 문자열은 OpenAPI에 열거되지 않으므로 그 자체는 재생성 사유가 아니다. diff가 0이면
   그 사실을 PR 본문에 적는다). diff가 있으면 생성 SDK도 재생성한다(1절 규칙).
+- **backlog(P2-05 리뷰 DEFECT-P3-1)**: 횡단면 eligibility 규칙이 모집단을 0으로 만드는 쪽에는
+  진단이 없다. `top_percent: 0.001`에 모집단 100이면 cut이 0이라 전원 `ELIGIBILITY_RANK_CUT`이다.
+  P2-05의 `strategy.eligibility.rule_value`는 "너무 관대한" 쪽(`20`을 비율로 적는 실수)만 막는다.
+  결과가 빈 포트폴리오라 조용하지 않아 P3으로 뒀다 — 이 PR에서 frame warning으로 다룰지 정하고,
+  다루지 않으면 그 판단을 PLAN 변경 기록에 남긴다.
 - BACKLOG-003: 횡단면 `zscore`·`rank`의 `unit_rule`을 무차원(`"1"`)으로 바꾼다. 단위가 다른 두 필드를
   표준화해 더한 그래프가 `factor.graph.unit_mismatch` 없이 통과하는 재현 그래프 테스트와, `demean`·
   `winsorize`는 입력 단위를 보존하는 대조 테스트를 `test_factor_operators.py`에 둔다.

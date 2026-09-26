@@ -329,6 +329,7 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.field.inapplicable",
         "strategy.title.empty",
         "strategy.factor.required",
+        "strategy.eligibility.rule_value",
         "strategy.factor.duplicate",
         "strategy.portfolio.liquidity_field",
         "strategy.risk.net_exposure",

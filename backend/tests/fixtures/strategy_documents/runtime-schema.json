@@ -119,7 +119,9 @@
             "gte",
             "lt",
             "lte",
-            "eq"
+            "eq",
+            "top_percent",
+            "top_count"
           ],
           "x-description-key": "strategy.field.eligibility_rule.operator"
         },

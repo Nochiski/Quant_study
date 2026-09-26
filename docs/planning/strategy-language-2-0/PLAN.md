@@ -287,6 +287,12 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-27 — P1-06 추가분(유저 스토리 하네스): P1-03~P1-05가 구현한 US-DM-06(화면의 말과 오류 문장을
+  쉬운 한글로)을 `구현됨-e2e`로 올렸다. 스토리 e2e `frontend/e2e/stories/dm.readable-korean.spec.ts` 두
+  건(`@story`·`@US-DM-06`)이 노드 종류·연산자·필드의 한글 이름과 설명, 노드 이름으로 말하는 삭제 거부,
+  오타 필드의 한글 문장과 제안, 1.0 키의 업그레이드 안내 문장과 배너를 본다. 수용 기준 네 항목을 P1
+  기능이 모두 덮어 스토리를 쪼개지 않았고, 배너가 저장된 리비전 화면에만 뜬다는 사실만 기준과 비고에
+  적었다. traceability는 `user_story_trace --write`로 다시 만들었다(검사·Playwright 목록 대조 통과).
 - 2026-09-26 — P1-02 5차 리뷰(`ac3a3d0e`) APPROVE, blocking 0·P3 4. 게이트가 사고 당시 트리
   `db3bc079`와 실제 git 충돌(기본 방식·diff3)을 exit 1로 잡고, 오탐 규칙이 `git diff --check`와
   같으며, CI step이 run 36220139969에서 실제로 돌았다. P1-02를 `APPROVED`로 되돌렸다. 앞서 5차

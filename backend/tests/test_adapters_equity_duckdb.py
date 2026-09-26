@@ -811,3 +811,25 @@ def test_truthful_pipeline_momentum_across_a_split_is_continuous_on_adj_close(
 
     assert momentum("price.adj_close") == pytest.approx(104_000 / 103_000 - 1)  # 전방 조정
     assert momentum("price.close") == pytest.approx(52_000 / 103_000 - 1)
+
+
+def test_raw_load_reports_monotonic_progress_ending_at_one(adapter: EquityDuckdbAdapter) -> None:
+    """이슈 #162: 실데이터 원시 로딩(격자 조립 + 관측 조립 + 검증)은 수십 초라 진행을 보고한다.
+
+    격자 구간(0~0.52)과 생성 시 계약 검증 구간(0.91~1.0) 안에서도 오르고 1.0 에서 끝난다.
+    보고 유무가 결과를 바꾸지 않는다.
+    """
+    query = RawObservationQuery("KRX", "krx.common-stock", START, END, PRICE_FIELDS, 0)
+    reported: list[float] = []
+
+    result = adapter.load_raw_observations_reporting(
+        query, checkpoint=lambda: None, progress=reported.append
+    )
+
+    baseline = adapter.load_raw_observations(query)
+    assert result.observations == baseline.observations
+    assert result.sessions == baseline.sessions
+    assert reported == sorted(reported)
+    assert any(0.0 < fraction < 0.52 for fraction in reported)
+    assert any(0.91 < fraction < 1.0 for fraction in reported)
+    assert reported[-1] == 1.0

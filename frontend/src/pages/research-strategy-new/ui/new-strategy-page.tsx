@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import {
   ContractInspector,
+  ProposalApplyDialog,
+  ProposalApplyFeedback,
   DirtyLeaveGuard,
   DocumentToolbar,
   FactorGraphPanel,
@@ -21,6 +23,8 @@ import {
   revisionDraftId,
   saveStatusText,
   saveStatusTone,
+  useApplyAssistantProposal,
+  useStrategyAssistant,
   useAutosave,
   useCompileDocument,
   useExecutionPlans,
@@ -36,6 +40,7 @@ import {
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
+import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
   useBacktestRunSettings,
@@ -89,6 +94,8 @@ export const NewStrategyPage = () => {
     schemaPending: assist.loading,
   });
   const { validateNow, validating } = useCompileDocument(document, dispatch);
+  // AI 제안은 업그레이드 적용과 같은 전체 범위 교체 경로를 쓴다(SoT 규칙의 두 번째 예외).
+  const proposalApply = useApplyAssistantProposal(document);
   const canValidate = !validating && canValidateDocument(document);
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
@@ -176,15 +183,33 @@ export const NewStrategyPage = () => {
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
+  const onProposalEditorReady = proposalApply.onEditorReady;
   const onEditorReady = useCallback(
     (editor: CodeEditorHandle | null): void => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
+      onProposalEditorReady(editor);
     },
-    [onOutlineEditorReady, onSnippetEditorReady, onTransactionsEditorReady],
+    [
+      onOutlineEditorReady,
+      onProposalEditorReady,
+      onSnippetEditorReady,
+      onTransactionsEditorReady,
+    ],
   );
   const runBacktest = useCallback(() => void startBacktest(), [startBacktest]);
+  // 어시스턴트 사이드바 배선(문서 참조·턴 컨텍스트·"적용 후 백테스트"·제안 카드 동작). 두 전략 화면이
+  // 같은 훅을 써서 한쪽만 콜백을 잃지 않는다(Phase B 감사 NB-8).
+  const strategyAssistant = useStrategyAssistant(proposalApply, document, {
+    draftId: serverDraftId,
+    environment: runSettings.requestOptions,
+    backtest: {
+      canRun: backtest.canRun,
+      settling: backtest.settling,
+      run: runBacktest,
+    },
+  });
   const selectSymbol = useCallback(
     (pointer: string): void => {
       outline.requestSourceReveal(pointer);
@@ -237,6 +262,14 @@ export const NewStrategyPage = () => {
   return (
     <>
       <StrategyIde
+        notice={
+          /* 제안 적용 결과는 문서 알림 줄에 둔다 — 사이드바 레일에는 사이드바가 소유한
+             라이브 영역 하나만 있어야 한다(B-03 리뷰). */
+          <ProposalApplyFeedback
+            apply={proposalApply}
+            chain={strategyAssistant.chain}
+          />
+        }
         title={t("page.newStrategy.title")}
         versionLabel={t("page.newStrategy.draft")}
         badges={<Badge tone="info">{t("page.newStrategy.draft")}</Badge>}
@@ -364,6 +397,16 @@ export const NewStrategyPage = () => {
             stale={outline.snapshot?.stale ?? false}
           />
         }
+        assistant={({ close }) => (
+          <AssistStrategySidebar
+            documentRef={strategyAssistant.documentRef}
+            readContext={strategyAssistant.readContext}
+            {...strategyAssistant.proposalHandlers}
+            // 닫기는 사이드바가 그린다(슬롯 헤더는 제목만) — 진행 중 턴 취소를 확인한 뒤 패널을
+            // 접는다(spec D7). 상단 바 토글과 Alt+A는 대화를 끝내지 않는 패널 조작이라 그대로다.
+            onClose={close}
+          />
+        )}
         debugger={
           <StrategyDebuggerPanel
             document={document}
@@ -403,6 +446,7 @@ export const NewStrategyPage = () => {
           </>
         }
       />
+      <ProposalApplyDialog apply={proposalApply} />
       <DirtyLeaveGuard dirty={document.dirty && !leaving} />
     </>
   );

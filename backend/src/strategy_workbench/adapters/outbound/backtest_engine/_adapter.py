@@ -198,6 +198,9 @@ class BacktestEngineExecutorAdapter:
             )
         self._check_cancelled(cancelled)
         started_at = datetime.now(UTC)
+        # 진행 값은 이 실행기 작업 안의 완료 비율(0~1)이다(`ProgressCallback` 계약). 준비 0.35,
+        # 엔진 루프가 끝난 뒤 지표 계산 0.78, 산출물 고정 0.88 이다. run 진행 막대의 engine 구간
+        # 배치(84~92%)는 유스케이스가 정한다(이슈 #162).
         progress(0.35, "engine.prepare", "Preparing market feed and strategy")
         universe = UniverseResult(
             memberships=tuple(

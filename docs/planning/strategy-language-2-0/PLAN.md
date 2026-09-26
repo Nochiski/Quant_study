@@ -53,6 +53,20 @@ progress_percent: 0
   생성 산출물만 넣고 소비자 배선은 P3-01 그대로다. `browser-e2e` job은 계속 P3-03의 exit 조건이다.
 - P1 스택과 P2 스택은 독립이라 병렬 진행할 수 있다. P3-01은 P1-05·P2-09 둘 다 merge 뒤 시작한다.
 - reviewer 서브에이전트는 Opus로만 배정한다. Phase 종료마다 SoT·책임분리 점검 서브에이전트를 돌린다.
+- 2026-09-27 리드 결정(머지 전략): P2-01·P2-02 는 main 반영 merge 커밋 리뷰 뒤 개별로 main 에
+  머지한다. **P2-03 ~ P3-02 구간은 main 에 개별 머지하지 않는다.** schema 1.2(P2-03)는 실행 요청에
+  `environment` 를 요구하는데, 브라우저가 그 값을 싣는 배선이 P3-02 의 실행 설정 패널이라, 그 사이
+  tip 을 main 에 넣으면 화면에서 백테스트·추적이 422 `backtest.run.environment_required` 로 막히는
+  사용자 회귀가 된다. 그래서 P3-02 가 승인되고 그 tip 에서 e2e 가 전부 green 이 되면 이 구간을
+  한 묶음으로 머지한다. 구간 안에서도 main 반영 cascade 는 계속한다. 이 구간 PR 의 CI
+  `browser-e2e` 는 red 일 수 있고, 각 PR 본문 제약사항에 실패 목록과 원인을 적는다. P2-03 main 반영
+  시점 실측 원인은 둘이고 둘 다 이 묶음 안에서 해소된다. (1) 실행 요청 `environment` 미배선(P3-02):
+  브라우저의 백테스트 시작이 422 `backtest.run.environment_required`, 추적이 422
+  `portfolio.strategy.invalid`(이슈 `run_environment.required`)다. (2) 1.1 → 1.2 업그레이더(P2-09):
+  US-SM-07 의 "1.0 동결 revision 업그레이드" 시나리오에서 업그레이드 응답이 1.1 원문이라 1.2 편집기가
+  구조 오류로 본다. 스토리 태그 e2e 는 잠그거나 태그를 떼지 않는다.
+  backend·frontend 단위 게이트와 유저 스토리 하네스 정적 검사는 green 이어야 한다. WORKFLOW 1절의
+  "P2 PR 은 backend gate 만 merge gate"와 "P2-09 전 실 DB 1.2 저장 금지"에 맞춘 결정이다.
 - 완료 정의는 spec 5절의 6항이다. 특히 퀀트 아이디어 5개(12-1 모멘텀, 저PBR+고ROE, 20일 이평 돌파,
   거래대금 상위 20%, 변동성 역가중)가 그래프 탭만으로 백테스트에 도달해야 한다.
 

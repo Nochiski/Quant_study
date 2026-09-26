@@ -9,6 +9,7 @@ import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
   gateBacktestSourceWithFactorPlans,
+  isBacktestSettling,
   type BacktestSourceDecision,
 } from "./backtest-source";
 import type { DocumentState } from "./document-state";
@@ -174,6 +175,8 @@ export const useRunBacktest = (
     run,
     decision,
     status,
+    /** 결정이 닫혀 있지만 팩터 계획 조회가 아직 끝나지 않았다(`isBacktestSettling`). */
+    settling: isBacktestSettling(decision, executionPlans),
     canRun:
       (status.kind === "accepted" || decision.kind !== "blocked") &&
       options !== null &&

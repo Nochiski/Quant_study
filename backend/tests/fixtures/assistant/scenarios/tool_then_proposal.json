@@ -1,0 +1,118 @@
+[
+  {
+    "event": {
+      "arguments": {},
+      "call_id": "call-read",
+      "name": "read_current_strategy",
+      "type": "tool_call"
+    },
+    "sequence": 0,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "call_id": "call-read",
+      "name": "read_current_strategy",
+      "ok": true,
+      "summary": "{\"source_text\": \"# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).\\n# identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.\\n# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 … (총 865자)",
+      "type": "tool_result"
+    },
+    "sequence": 1,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 1600,
+      "input_tokens": 2100,
+      "output_tokens": 180,
+      "type": "usage"
+    },
+    "sequence": 2,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "arguments": {
+        "rationale": "모멘텀 프리미엄은 KRX에서도 관측된다 (https://example.com/krx-momentum).",
+        "source_text": "# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).\n# identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.\n# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 아니라 요청의 environment가 소유한다.\nschema_version: \"1.2\"\ntitle: \"퀄리티 모멘텀\"\ndescription: \"\"\neligibility:\n  rules: []\nfactors:\n  - factor_id: momentum\n    label: \"모멘텀\"\n    direction: high\n    weight: 0.6\n    graph:\n      nodes:\n        - kind: field\n          node_id: close\n          field_id: price.close\n        - kind: time_series\n          node_id: mom_252\n          operator: momentum\n          input_node_id: close\n          window: 252\n      output_node_id: mom_252\nportfolio:\n  selection_count: 20\n  rebalance: monthly\nrisk:\n  max_name_weight: 0.05\nparameters: []\n",
+        "sources": [
+          {
+            "title": "KRX 모멘텀 리뷰",
+            "url": "https://example.com/krx-momentum"
+          }
+        ],
+        "summary": "12개월 모멘텀에서 최근 1개월을 뺀 순위로 상위 종목을 담는다.",
+        "title": "KRX 12-1 모멘텀"
+      },
+      "call_id": "call-propose",
+      "name": "propose_strategy",
+      "type": "tool_call"
+    },
+    "sequence": 3,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "proposal": {
+        "compile": {
+          "diagnostics": [],
+          "ok": true,
+          "spec_hash": "d3a9c236306d1c53f8d7b5c09fd05df42b61b2848c7c8cfc5aeae61de793e781"
+        },
+        "rationale": "모멘텀 프리미엄은 KRX에서도 관측된다 (https://example.com/krx-momentum).",
+        "source_format": "yaml",
+        "source_text": "# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).\n# identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.\n# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 아니라 요청의 environment가 소유한다.\nschema_version: \"1.2\"\ntitle: \"퀄리티 모멘텀\"\ndescription: \"\"\neligibility:\n  rules: []\nfactors:\n  - factor_id: momentum\n    label: \"모멘텀\"\n    direction: high\n    weight: 0.6\n    graph:\n      nodes:\n        - kind: field\n          node_id: close\n          field_id: price.close\n        - kind: time_series\n          node_id: mom_252\n          operator: momentum\n          input_node_id: close\n          window: 252\n      output_node_id: mom_252\nportfolio:\n  selection_count: 20\n  rebalance: monthly\nrisk:\n  max_name_weight: 0.05\nparameters: []\n",
+        "sources": [
+          {
+            "title": "KRX 모멘텀 리뷰",
+            "url": "https://example.com/krx-momentum"
+          }
+        ],
+        "summary": "12개월 모멘텀에서 최근 1개월을 뺀 순위로 상위 종목을 담는다.",
+        "title": "KRX 12-1 모멘텀"
+      },
+      "type": "proposal"
+    },
+    "sequence": 4,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "call_id": "call-propose",
+      "name": "propose_strategy",
+      "ok": true,
+      "summary": "제안이 접수되었습니다. 사용자가 문서에 적용할 수 있습니다. 이 턴에서는 더 제출하지 말고 설명으로 마무리하세요.",
+      "type": "tool_result"
+    },
+    "sequence": 5,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "text": "퀄리티 필터를 더한 안을 올렸습니다.",
+      "type": "text_delta"
+    },
+    "sequence": 6,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "cache_read_tokens": 1600,
+      "cache_write_tokens": 0,
+      "input_tokens": 1200,
+      "output_tokens": 920,
+      "type": "usage"
+    },
+    "sequence": 7,
+    "turn_id": "turn-1"
+  },
+  {
+    "event": {
+      "stop_reason": "end_turn",
+      "type": "done"
+    },
+    "sequence": 8,
+    "turn_id": "turn-1"
+  }
+]

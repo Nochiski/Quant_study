@@ -70,8 +70,10 @@
   상태가 "검증 통과"다. 제안이 바꾼 줄 말고는 문서가 그대로다.
 - Given 적용해서 문서가 제안의 기준 원문과 달라진 상태, When "적용 후 백테스트"를 누르면, Then
   "문서가 바뀌었습니다" 확인을 거쳐 백테스트 실행 화면으로 가고 결과가 나온다.
-- 비고: 대본 공급자의 "새 전략" 대본은 authoring schema를 따르는 본문을 가진다. schema 1.2(P2-03)가
-  섹션을 바꾸면 `tests/application/test_scripted_idea_proposal.py`가 먼저 깨지고 대본을 함께 고친다.
+- 비고: 대본 공급자의 "새 전략" 대본은 authoring schema를 따르는 본문을 가진다. 지금은 schema 1.1이
+  요구해서 기간·유니버스(`data`)와 수수료(`execution`)를 전략 안에 쓴다. 실행 설정을 언어 밖에 두는
+  제품 방향과 반대 모양이므로, schema 1.2를 머지하는 P2-03이 대본에서 두 섹션을 뺀다.
+  `tests/application/test_scripted_idea_proposal.py`가 그때 먼저 깨져 이 일을 알린다.
 
 ### US-DM-04 백테스트 결과에서 핵심 숫자와 자산 곡선을 본다
 

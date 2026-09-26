@@ -108,6 +108,9 @@ _WINDOW_PROPOSAL_SUMMARY = "모멘텀 창을 252거래일에서 126거래일로 
 # 가져온다** — 버전 리터럴의 owner는 `domain/strategy`이고, 새 전략 화면이 이미 runtime schema의
 # `const`와 같은 값을 쓴다.
 # 본문 섹션은 authoring schema를 따르므로 schema가 바뀌면 여기도 바뀌어야 한다.
+# 지금 본문의 `data`(시장·기간·유니버스)와 `execution`(체결·수수료)은 schema 1.1이 요구해서
+# 전략 안에 있다. 제품 방향은 실행 설정을 언어 밖에 두는 것이므로, schema 1.2(lang2 P2-03)를
+# 머지하는 PR이 이 두 섹션을 본문에서 빼고 이 대본을 함께 고친다.
 # `tests/application/test_scripted_idea_proposal.py`가 현재 schema로 깨끗이 compile되는지 고정해,
 # 섹션이 낡으면 backend 게이트에서 먼저 깨진다.
 _SCHEMA_VERSION_LINE = re.compile(r"^schema_version:.*$", re.MULTILINE)

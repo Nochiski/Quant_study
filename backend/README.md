@@ -14,7 +14,12 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   `backtest.run.invalid`·`portfolio.*` 422와 saved-reference 404/409는 OpenAPI/generated SDK의
   discriminated error 계약으로 함께 제공한다.
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
-- `GET /api/v1/backtests/{run_id}/events`: SSE progress stream
+- `GET /api/v1/backtests/{run_id}/events`: SSE progress stream. 진행률은 `tape` 2~80%(원시 로딩·팩터
+  평가·TargetTape 컴파일), `data` 82%, `engine` 84~92%, `artifact` 93% 구간이다. `tape` 안에서는 선택
+  능력 `ProgressReportingRawObservationPort`(duckdb 구현)의 로딩 진행, 계약 검증·팩터 입력 변환·
+  포트폴리오 관측 변환 루프, 팩터 평가기(노드 종류별 가중치, 시계열은 관측 단위), TargetTape 컴파일
+  진행이 1% 이상 오를 때마다 이벤트가 된다. 구간 폭은 실데이터 4년 구간 실측 시간 비율을 따른다
+  (이슈 #162).
 - `GET /api/v1/backtests/{run_id}/result`: versioned metrics, 차트 series, raw artifact, manifest 조회
 - `POST /api/v1/backtests/{run_id}/cancel`: 협력적 취소 요청
 

@@ -1,6 +1,7 @@
 """Declared dependencies for bootstrap; exports use named modules."""
 
 DEPENDS_ON: tuple[str, ...] = (
+    "application.assistant_chat",
     "application.equity_workspace",
     "application.backtest_run",
     "application.factor_research",
@@ -9,12 +10,18 @@ DEPENDS_ON: tuple[str, ...] = (
     "application.strategy_design",
     "adapters.inbound.http_api",
     "adapters.outbound.artifact_local",
+    "adapters.outbound.assistant_sqlite",
     "adapters.outbound.backtest_engine",
     "adapters.outbound.document_codec",
     "adapters.outbound.equity_duckdb",
     "adapters.outbound.equity_mock",
+    "adapters.outbound.llm_anthropic",
+    "adapters.outbound.llm_openai",
+    "adapters.outbound.llm_scripted",
     "adapters.outbound.engine_portfolio",
+    "adapters.outbound.secrets_local",
     "adapters.outbound.strategy_sqlite",
+    "domain.assistant",
     "domain.factor",
     "domain.analytics",
 )

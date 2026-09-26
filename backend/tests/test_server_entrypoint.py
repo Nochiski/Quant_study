@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from strategy_workbench.bootstrap import _http, _server
 
 
@@ -49,6 +51,29 @@ def test_http_runtime_owns_the_durable_repository_path(monkeypatch, tmp_path: Pa
     monkeypatch.setenv(_http.STRATEGY_REPOSITORY_PATH_ENV, str(configured))
 
     assert _http.runtime_strategy_repository_path() == configured
+
+
+def test_http_runtime_owns_the_browser_origin_allowlist(monkeypatch) -> None:
+    """포트를 옮겨 e2e를 돌릴 때 preview origin을 허용 목록에 넣을 수 있어야 한다.
+
+    목록이 기본값 하나로 고정돼 있으면 `PW_PREVIEW_PORT`로 포트를 옮긴 순간 브라우저 요청이
+    CORS로 막힌다 — 서버는 멀쩡한데 화면만 비어, 원인을 짚기 어려운 조합이다.
+    """
+    monkeypatch.delenv(_http.ALLOWED_ORIGINS_ENV, raising=False)
+    assert _http.runtime_allowed_origins() == _http.DEFAULT_ALLOWED_ORIGINS
+
+    monkeypatch.setenv(
+        _http.ALLOWED_ORIGINS_ENV, " http://localhost:15173 , http://localhost:5173 "
+    )
+    assert _http.runtime_allowed_origins() == (
+        "http://localhost:15173",
+        "http://localhost:5173",
+    )
+
+    # 값이 있는데 origin 이 하나도 없으면 조용히 기본값으로 돌아가지 않는다.
+    monkeypatch.setenv(_http.ALLOWED_ORIGINS_ENV, " , ")
+    with pytest.raises(ValueError, match="lists no origin"):
+        _http.runtime_allowed_origins()
 
 
 def test_importing_and_building_test_app_never_opens_the_runtime_database(

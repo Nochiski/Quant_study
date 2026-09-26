@@ -82,3 +82,19 @@ export const gateBacktestSourceWithFactorPlans = (
     return decision;
   return { kind: "blocked", reason: "factor-plan" };
 };
+
+/**
+ * 실행 결정이 닫혀 있지만 아직 문서 검증이 끝나지 않은 상태인지.
+ *
+ * 팩터가 있는 문서는 compile 뒤에 backend explain으로 팩터마다 실행 계획을 받아야 게이트가 열린다.
+ * 그 조회(또는 그 전제인 메타데이터 조회)가 도는 동안의 `factor-plan` 닫힘은 "실행할 수 없음"이 아니라
+ * "아직 모름"이다. "적용 후 백테스트"는 이 동안 기다려야 한다(C-02 리뷰 P1-1). 계획 오류·호환 불가·
+ * 메타데이터 없음은 끝난 판정이라 여기에 들지 않는다.
+ */
+export const isBacktestSettling = (
+  decision: BacktestSourceDecision,
+  plans: ExecutionPlansState,
+): boolean =>
+  decision.kind === "blocked" &&
+  decision.reason === "factor-plan" &&
+  (plans.status === "loading" || plans.status === "metadata-loading");

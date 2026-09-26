@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -30,8 +32,16 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
     FieldCatalogPort,
     SourceFormat,
 )
+from strategy_workbench.application.strategy_design.facade.ports import (
+    RevisionOrigin,
+    RevisionProvenance,
+    RevisionSource,
+    StrategyRevisionRecord,
+)
+from strategy_workbench.bootstrap.facade.container import build_container
 from strategy_workbench.domain.factor.facade.expression import FieldMetadata, NodeValueType
 from strategy_workbench.domain.factor.facade.operators import OperatorAvailability
+from strategy_workbench.domain.strategy.facade.specification import StrategyIdentity
 
 GOLDEN = (
     Path(__file__).resolve().parent.parent
@@ -238,3 +248,29 @@ def test_the_mock_adapter_answers_every_field_contract_and_provides_group_series
     field_ids = tuple(profile.field_id for profile in adapter.list_fields())
     assert catalog == adapter.resolve_factor_fields(field_ids).fields
     assert NodeValueType.GROUP_SERIES in {field.value_type for field in catalog}
+
+
+def test_storage_integrity_does_not_depend_on_the_connected_adapter() -> None:
+    """저장본 읽기는 어댑터 계약으로 판정하지 않는다.
+
+    무결성 검사(원문 → spec_hash)가 어댑터 필드 계약을 쓰면, 어댑터를 바꾸거나(mock ↔ duckdb)
+    필드가 빠진 순간 이미 저장된 revision 을 읽지 못해 목록·이력이 500 이 된다. 같은 원문을
+    compile 하면 연결된 어댑터 기준으로는 막힌다 — 실행 가능성은 compile 이 따로 말한다.
+    """
+    container = build_container(equity_adapter="mock")
+    source = GOLDEN.replace("field_id: price.close", "field_id: price.closee")
+    compiled = _compile(source, None)
+    assert compiled.spec is not None and compiled.spec_hash is not None
+    spec = replace(compiled.spec, identity=StrategyIdentity("stored", 1))
+    record = StrategyRevisionRecord(
+        spec=spec,
+        spec_hash=compiled.spec_hash,
+        source=RevisionSource(SourceFormat.YAML, source, compiled.source_hash),
+        provenance=RevisionProvenance(RevisionOrigin.DOCUMENT, datetime(2026, 9, 27, tzinfo=UTC)),
+    )
+
+    container.strategy_repository.add(record)
+
+    assert container.strategy_repository.get("stored").spec_hash == compiled.spec_hash
+    live = container.strategy_authoring.compile(CompileRequest(source, SourceFormat.YAML))
+    assert "strategy.expression.field_missing" in {item.code for item in live.diagnostics}

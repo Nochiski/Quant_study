@@ -90,6 +90,7 @@ from strategy_workbench.application.assistant_chat.facade.prompt import (
     SEARCH_BUDGET_EXHAUSTED_NOTICE,
 )
 from strategy_workbench.domain.assistant.facade.models import (
+    MIN_CALL_OUTPUT_TOKENS,
     ChatEvent,
     Done,
     Failure,
@@ -116,14 +117,9 @@ from ._payload import (
     notice_item,
 )
 
-__all__ = ["MIN_CALL_OUTPUT_TOKENS", "stream_turn"]
+__all__ = ["stream_turn"]
 
 logger = logging.getLogger(__name__)
-
-# 의미 있는 호출 하나의 최소 출력 토큰. 남은 예산이 이보다 작으면 호출하지 않고 예산 소진으로
-# 끝낸다. 값 자체는 A-07 실측으로 확정한다(spec D3: 기본값은 실측 뒤 확정). `llm_anthropic`과
-# 같은 값을 쓴다 — 같은 `TurnRequest`가 두 공급자에서 다른 종료 사유를 뜻하면 안 된다.
-MIN_CALL_OUTPUT_TOKENS = 256
 
 _CANCELLED_MESSAGE = "턴이 취소되어 공급자 호출을 중단했습니다"
 

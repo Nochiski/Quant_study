@@ -6,6 +6,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$scriptBytes = [System.IO.File]::ReadAllBytes($PSCommandPath)
+$scriptLine = 1
+foreach ($scriptByte in $scriptBytes) {
+    if ($scriptByte -eq 10) {
+        $scriptLine++
+    } elseif ($scriptByte -gt 127) {
+        throw ("$PSCommandPath line ${scriptLine}: non-ASCII byte found. " +
+            "Windows PowerShell 5.1 decodes BOM-less scripts with the system code page, " +
+            "so non-ASCII text is silently corrupted before it reaches PLAN.md. Keep this script ASCII-only.")
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($PlanPath)) {
     $PlanPath = Join-Path (Split-Path $PSScriptRoot -Parent) "PLAN.md"
 }
@@ -126,6 +138,7 @@ $phaseGoals = [ordered]@{
     "P0" = "Planning package"
     "A" = "Backend: ports, storage, HTTP, providers"
     "B" = "Frontend: settings, entity, sidebar, e2e"
+    "C" = "Phase A audit follow-up"
 }
 
 $unknownPhases = @($rows | Where-Object Phase -notin $phaseGoals.Keys)

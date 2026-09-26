@@ -127,7 +127,10 @@ main
 **Acceptance**
 
 - `adapters/outbound/llm_anthropic`: spec D4 행 전부. 체크 항목:
-  - [ ] `ToolSpec` → `tools[]`(`strict: true`), `web_search_20260209`(`max_uses = request.max_search_uses`)
+  - [ ] `ToolSpec` → `tools[]`(`strict: true`), `web_search_20260209`. SDK의 `max_uses`는
+    **호출당** 한도라 adapter가 턴 누적을 세어 호출마다
+    `max_uses = max(0, request.max_search_uses − 누적)`을 다시 계산하고, 0이면 도구를 뺀다
+    (spec D4 Anthropic 행).
   - [ ] 수동 도구 루프(`tool_use` → `execute_tool` → `tool_result`, `pause_turn` 재개, `refusal` → `Failure(REFUSAL)`,
     라운드가 `request.max_tool_rounds`를 넘으면 `Failure(TOOL_ROUNDS_EXCEEDED)`)
   - [ ] 스트리밍 → `TextDelta`·`ThinkingSummary`(`display: summarized`)·`SearchActivity`·`Usage`
@@ -187,7 +190,7 @@ main
 | 공급자 | 항목 | 통과 조건 | 실패 증상 |
 |---|---|---|---|
 | anthropic | thinking signature 왕복 | 도구 라운드 1회 이상을 공급자 실패 없이 완주 | 두 번째 호출 400 `Invalid signature in thinking block`. 화면에는 `Failure(PROVIDER)`로만 보이므로 블록 끝의 로컬 경고에서 `error_type=BadRequestError`를 본다 |
-| anthropic·openai | probe 사유 매핑 | 정상 키 `ok`, 틀린 키 `auth`, 없는 모델 `model_not_found` | 올바른 키가 `unknown`. 최소 출력 토큰 값은 adapter 상수가 소유하며 확인 문장에 숫자를 복제하지 않는다 |
+| anthropic·openai | probe 사유 매핑 | 정상 키 `ok`, 틀린 키 `auth`, 없는 모델 `model_not_found` | 올바른 키가 `unknown`. probe 출력 상한은 adapter 상수(`PROBE_MAX_TOKENS`·`PROBE_MAX_OUTPUT_TOKENS`)가 소유하며 확인 문장에 숫자를 복제하지 않는다 |
 | anthropic | `display: "summarized"` | 비어 있지 않은 `ThinkingSummary` 1건 이상 | 이벤트 자체가 없다 |
 | anthropic | 검색 결과 필드 | `SearchActivity`마다 `query`와 출처 제목·URL이 채워짐 | 검색은 했는데 출처가 빈다 |
 | anthropic·openai | 검색 상한 뒤 턴 지속 | 턴 누적 상한에 닿은 뒤에도 턴이 검색 없이 이어짐 | 상한에 닿자마자 턴이 실패로 끝난다 |
@@ -241,11 +244,15 @@ STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv 
   아니라 **쓰기**로 치른다(`_payload.py` 모듈 docstring). `Usage.cache_read_tokens`·
   `cache_write_tokens`로 실제 값을 재고, 검색 초과를 막는 이득과 견줘 "`max_uses` 고정 +
   소진 시에만 도구 제거"로 바꿀지 결정한다.
-- [ ] **`UsageView`에 캐시 두 칸을 싣는다** — domain `Usage`와 sqlite codec은 4칸인데 wire는
-  2칸이라 SSE·이력 응답에서 조용히 절삭된다. 세션 집계가 캐시를 뺀 입력 토큰으로 과소
-  보고하지 않으려면 여기서 채워야 한다(OpenAPI·생성 SDK 갱신 동반).
-- [ ] **상한 기본값 확정** — 라운드 12·호출당 16000·턴 64000·검색 8·`MIN_CALL_OUTPUT_TOKENS`
-  256(spec D3이 A-07 실측에 맡긴 값).
+- [x] **`UsageView`에 캐시 두 칸을 싣는다** — A-07이 닫았다. `UsageView`는 성분 4칸이고
+  (`_assistant_contract.py`의 `UsageView`), 총입력은 싣지 않는다(이벤트는 이력에 쌓이므로
+  성분과 합을 함께 저장하면 어긋난 이력이 남는다). 합이 필요한 화면은 세션 사용량의
+  `total_input_tokens`를 읽는다. OpenAPI·생성 SDK도 같이 갱신됐다.
+- [x] **상한 기본값 확정** — A-07이 닫았다. 라운드 12·호출당 16000·턴 64000·검색 8·타임아웃
+  300(+유예 10)을 그대로 두기로 하고 근거를 PLAN "A-07 기본값 확정 근거" 표와 spec D3
+  확정 문단에 남겼다. `MIN_CALL_OUTPUT_TOKENS`는 domain(`_models.py`)이 소유하고 adapter는 집행만 하며,
+  그 표 밖이다(NB-5).
+  실측으로 값을 바꿔야 하면 상수가 아니라 bootstrap 주입으로 한다.
 - [ ] **SDK 표면 확인 4건** — thinking 블록 signature 왕복, probe `max_tokens=64`,
   `display: "summarized"`가 실제로 텍스트를 채우는지, 검색 결과의 `title`이 비는 경우.
 
@@ -267,14 +274,14 @@ STRATEGY_WORKBENCH_LIVE_SMOKE=1 ANTHROPIC_API_KEY=... OPENAI_API_KEY=...     uv 
 - [ ] **probe `max_output_tokens=64`가 `effort: high`에서 400을 내지 않는지**, 그리고 추론
   미지원 모델을 골랐을 때 probe만 통과하고 턴이 매번 실패하는 경로. 후자면 probe에 `reasoning`을
   같이 싣는다.
-- [ ] **`MIN_CALL_OUTPUT_TOKENS` 실측** — `llm_anthropic`과 같은 256이며 값의 확정은 실측이다.
+- [ ] **`MIN_CALL_OUTPUT_TOKENS` 실측** — 두 adapter가 domain 상수 하나(256)를 같이 쓰며 값의 확정은 실측이다.
 - [ ] **`gpt-6-astra` 실존과 `developer` 통지에 대한 모델 반응**, 캐시 적중 실측
   (`Usage.cache_read_tokens`).
 - [ ] **`openai>=2.0` 하한 확인** — 실제로 확인한 표면은 3.16.2 하나다.
   `cache_write_tokens`·`Reasoning.context`·`ActionSearch.sources`는 최근 필드일 수 있어 2.x에서
   깨질 수 있다. 하한을 올리거나 2.0을 세워 확인한다.
-- [ ] **`UsageView` 확장** — 전송 계약이 아직 `input_tokens`·`output_tokens` 두 칸이라 캐시 두
-  칸이 화면까지 가지 않는다. 확장 시 `test_assistant_http_openai.py`의 `usage` 단언도 같이 고친다.
+- [x] **`UsageView` 확장** — A-07이 닫았다. 전송 계약이 성분 4칸이고
+  `test_assistant_http_openai.py`의 `usage` 단언도 그때 같이 고쳤다.
 
 **Phase A exit**
 

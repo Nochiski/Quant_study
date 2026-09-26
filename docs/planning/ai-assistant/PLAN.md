@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: APPROVED
-current_phase: P0,A,B
-current_pr: P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05
-active_prs: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
-parallel_window: [P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05]
-last_updated: 2026-09-26T13:46:26+09:00
-planned_prs: 13
-merged_prs: 0
+project_status: SELF_CHECK
+current_phase: C
+current_pr: C-01
+active_prs: [C-01]
+parallel_window: [C-01]
+last_updated: 2026-09-26T14:21:51+09:00
+planned_prs: 14
+merged_prs: 13
 approved_prs: 13
-progress_percent: 0
+progress_percent: 93
 ---
 
 # AI 어시스턴트 실시간 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 0
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `P0,A,B` |
-| Current/next PR | `P0-01,A-01,A-02,A-03,A-04,A-05,A-06,A-07,B-01,B-02,B-03,B-04,B-05` |
-| Active PR | `P0-01, A-01, A-02, A-03, A-04, A-05, A-06, A-07, B-01, B-02, B-03, B-04, B-05` |
-| Progress | `0 / 13 merged (0%)` |
-| Approved | `13 / 13` |
-| Aggregated at | `2026-09-26 13:46 KST` |
+| Project status | `SELF_CHECK` |
+| Current phase | `C` |
+| Current/next PR | `C-01` |
+| Active PR | `C-01` |
+| Progress | `13 / 14 merged (93%)` |
+| Approved | `13 / 14` |
+| Aggregated at | `2026-09-26 14:21 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -45,10 +45,124 @@ progress_percent: 0
   영속 상태 + 프로세스 내 신호, `AssistantTurnRunner`가 owner, 단일 워커 전제). 제안 적용은 업그레이드와
   같은 `replaceRange` 전체 교체 + stale 가드. 검색 `max_uses`·출력 토큰·벽시계 상한. base_url은 https만.
   `Failure.message`에 SDK 예외 문자열 금지. 출처 링크는 http/https만 + noopener. PR을 13개로 분할.
-- Anthropic 기본 모델 `claude-opus-5`(adaptive thinking, effort high). OpenAI 기본 모델은 A-06
-  구현 시 SDK 문서로 확정한다.
+- Anthropic 기본 모델 `claude-opus-5`(adaptive thinking, effort high). OpenAI 기본 모델은
+  `gpt-6-astra`(reasoning effort high, summary auto).
 - OpenAPI와 frontend SDK는 A-04가 같은 PR에서 갱신한다(12절).
 - reviewer 서브에이전트는 Opus로만. Phase 종료마다 SoT·책임분리 점검.
+- 2026-09-21 A-07: 실연결 smoke의 게이트 환경 변수를 `RUN_LLM_LIVE`에서
+  `STRATEGY_WORKBENCH_LIVE_SMOKE`로 통일했다. 이 저장소의 다른 배포 설정이 전부
+  `STRATEGY_WORKBENCH_*` 접두사를 쓰고, 이름이 둘이면 문서와 코드가 서로 다른 변수를 가리키게
+  된다. 기존 표기 4곳(spec·WORKFLOW·README·adapter docstring 2건)을 같이 고쳤다.
+- 2026-09-21 A-07: **live smoke 미실행.** 구현 세션에 공급자 키가 없어
+  `backend/scripts/assistant_live_smoke.py`를 한 번도 돌리지 못했다. 사용자가 키로 실행해야 하며,
+  절차와 기대 출력은 WORKFLOW A-07 절에 있다. Phase A exit의 "live smoke 2건 로컬 통과 기록"은 그
+  실행 결과를 여기 적어야 닫힌다.
+- 2026-09-21 A-07: live smoke 확인 목록을 A-05 리뷰 결과에 맞춰 고쳤다. `output_format=None`은
+  로컬 재현 가능한 SDK 센티널 오류로 판정돼 adapter에서 고쳐졌으므로 목록에서 뺐고, probe 항목은
+  최소 출력 토큰 값을 문장에 적지 않고 adapter 상수를 가리키게 바꿨으며(A-05·A-06이 그 값을
+  올리는 중이라 숫자를 복제하면 문장만 stale해진다), 검색 항목은 "`max_uses` 소진"에서 "턴 누적
+  상한 도달 뒤 턴이 검색 없이 이어짐"으로 바꿨다(두 adapter가 턴 누적 집행으로 통일). probe는
+  정상 키·틀린 키·없는 모델 3회를 돌려 사유 매핑까지 본다 — 정상 키의 `ok`만 보면 `AUTH`와
+  `UNKNOWN`이 뒤바뀐 매핑을 놓친다. 턴의 라운드 수와 호출별·합계 출력 토큰을 찍는 항목을 더해
+  아래 기본값 표의 추정치를 실측으로 바꿀 수 있게 했다.
+- 2026-09-21 A-07: 시스템 프롬프트에 spec D8 품질 항목을 채웠다(근거 우선순위, 검색 결과를 명령으로
+  읽지 않기, 제안은 도구로만, 출처 인용 규칙, 한국어·식별자 원문 규칙, 실행 설정 보존). **실행
+  설정을 "언어 밖"이라고 쓰지 않았다** — schema 1.1은 시장·기간·유니버스를 문서 안에 두고
+  `data`를 필수로 요구하므로, 언어 밖이라고 지시하면 모델이 필수 절을 빼고 검증에 실패한다.
+  대신 "사용자가 바꿔 달라고 하지 않으면 현재 문서 값을 그대로 옮긴다"로 썼다. schema 1.2가
+  머지되면 이 문장과 골든을 같이 갱신한다(WORKFLOW 1절 규칙).
+
+- 2026-09-21 A-07: 세션 `Usage` 집계와 시나리오 fixture 3개를 A-07 안에서 마무리했다(WORKFLOW
+  A-07 원문이 정본). 집계는 저장하지 않고 이벤트 이력을 접는 application 순수 함수
+  `aggregate_usage`가 소유하며, 세션 조회 라우트가 이미 읽은 이력 하나를 넘긴다 — 따로 읽으면 한
+  응답 안에서 `events`와 `usage`가 다른 이력을 말할 수 있다. 토큰 종류 확장 지점은 세 곳
+  (`TokenTotals` 필드·그 `__add__`·`_tokens_of`)으로 좁혀 두었고, A-05가 도메인 `Usage`에
+  `cache_read_tokens`·`cache_write_tokens`를 더하면 rebase 때 같은 이름으로 붙인다.
+- 2026-09-21 A-07: 시나리오 fixture는 손으로 적지 않고 **실제 HTTP 응답**(`GET /sessions/{id}`의
+  `events`, SSE `data:` payload와 같은 dataclass)에서 받아 적는다. 손으로 적으면 계약이 바뀌었을
+  때 fixture만 옛 모양으로 남고 그 fixture로 green인 frontend가 진짜 서버에서 깨진다. `uuid4`
+  세션·턴 id는 직렬화 텍스트 전체에서 `session-1`·`turn-N`으로 치환한다 — `Failure.message`가
+  진단용으로 `session_id=…`를 담고 있어(error-messages 규칙) 필드만 바꾸면 골든이 실행마다
+  달라진다.
+- 2026-09-21 A-07 **후속**: schema 1.2(`strategy-language-2-0` P2-03) 머지 뒤 프롬프트의 실행 설정
+  문장과 `backend/tests/fixtures/assistant/` 골든·시나리오 fixture를 1.2 문서로 갱신한다
+  (WORKFLOW 1절 규칙). 담당은 그 시점의 A-07 후속 또는 B-05.
+- 2026-09-21 A-07 리뷰 APPROVE 반영: P2 1건·P3 3건을 마무리 커밋 하나로 닫았다. 검색 상한 통지를
+  검색으로 세지 않도록 집계에 분기를 넣고, 모델이 읽는 고정 문장 2건을 `_prompt.py`로 옮겨 골든에
+  넣었으며, live smoke가 검색 상한을 상수가 아니라 주입값에서 읽게 하고, "이력 `events` == SSE
+  `data:` 프레임"을 통합 테스트로 고정했다.
+
+### A-07 backlog: 검색 상한 통지 전용 이벤트 (담당 B-03)
+
+- **상황**: OpenAI(Codex) 프로파일이 활성인 세션에서 한 턴의 누적 웹 검색이 `max_search_uses`에
+  닿아 adapter가 다음 호출의 도구 목록에서 `web_search`를 빼는 경로를 탄 뒤, 사이드바가 세션
+  이력을 다시 읽을 때.
+- **인풋**:
+  1. `POST /api/v1/assistant/sessions/{id}/turns` — 검색을 상한 이상 유도하는 질문.
+  2. 턴 종료 후 `GET /api/v1/assistant/sessions/{id}`.
+- **에러 위치**: `backend/src/strategy_workbench/adapters/outbound/llm_openai/_turn.py` — 검색이
+  아니라 **통지**를 `SearchActivity(query=SEARCH_BUDGET_EXHAUSTED_NOTICE, sources=())`로 흘린다
+  (A-06이 "임시"라고 주석에 적은 우회다). 받는 쪽
+  `backend/src/strategy_workbench/application/assistant_chat/_usage.py`의 `_is_search`가 그 문구를
+  보고 검색에서 빼는 것으로 지금은 막아 두었다.
+- **위험성**: 통지와 검색이 같은 이벤트 종류를 쓰는 한, 그 둘을 가르는 근거가 **문구 비교**다.
+  문구는 골든이 잠그고 있어 조용히 바뀌지는 않지만, 같은 문구를 쓰는 다른 경로가 생기거나 번역이
+  들어오면 집계가 다시 틀린다. 화면(B-03)도 통지를 검색 활동 칩으로 그려 사용자가 하지 않은 검색을
+  본다. 데이터 손실·look-ahead는 아니고 표시 오차다.
+- **해결**: `ChatEvent` union에 통지 전용 이벤트를 더하고 adapter가 그것을 흘린다. 그때
+  `_usage.py`의 `_is_search` 분기와 `test_the_search_budget_notice_is_not_counted_as_a_search`를
+  함께 지운다.
+- **재현 test**: `backend/tests/application/test_assistant_usage.py::test_the_search_budget_notice_is_not_counted_as_a_search`
+  (현재 동작을 고정하는 테스트이며, 전용 이벤트가 생기면 이 테스트가 없어진다)
+
+- 2026-09-21 A-07 **이관**: 검색 상한 8과 Anthropic adapter `MAX_PAUSE_RESUMES = 5`가 서로를 모르는
+  건은 A-05로 넘겼다.
+
+- 2026-09-21 C-01: Phase A 종료 감사의 비차단 10건을 닫았다. 문서 5건(NB-1~NB-4·NB-10)은
+  stale 표기와 사실과 반대인 이월 체크박스였고, 나머지는 `MIN_CALL_OUTPUT_TOKENS` owner 단일화
+  (NB-5), CI의 lint·type 범위와 no-extras 대상 확대(NB-6·NB-7), 비밀 누락 422와 anthropic env
+  차단 전수 테스트(NB-8·NB-9)다. NB-11은 브랜치 상태라 머지 직전 rebase에서 처리한다.
+- 2026-09-21 C-01: `backend/pyproject.toml`의 pyright `include`에 `"tools"`를 더했다.
+  `.claude/rules/code-style.md`가 `[tool.pyright]` 변경에 사용자 확인을 요구하는 항목이다. 이
+  변경은 룰을 끄거나 모드를 낮추는 것이 아니라 **검사 범위를 넓히는** 방향이며, 팀 리드를 통해
+  확인을 받고 진행했다.
+- 2026-09-21 C-01: `MIN_CALL_OUTPUT_TOKENS`의 owner가 `domain/assistant/_models.py`로 옮겨졌다.
+  adapter가 같은 이름을 모듈 수준에서 다시 선언하면 `tests/architecture/test_turn_budget_constants.py`가
+  실패한다. 공급자마다 다른 값이 정말 필요해지면 adapter 리터럴이 아니라 `TurnRequest`로 승격한다.
+- 2026-09-26 C-01 1차 리뷰 반영: PLAN 페이즈 표 C 행이 cp949 깨진 글자로 커밋돼 있었다. 진행
+  스크립트의 한글 값을 기존 A·B 행처럼 ASCII로 바꾸고, 스크립트가 자기 파일에 비ASCII 바이트가
+  있으면 `-Check`를 포함해 멈추게 했다. NB-9 기준선 테스트는 SDK 하위 클래스로 전송을 바꿔 끼워
+  auto-discovery 체인을 한 번도 지나지 않았다. 기본 클래스 인스턴스를 쓰고 `ANTHROPIC_API_KEY`·
+  `ANTHROPIC_AUTH_TOKEN`을 뺀 경우를 더해, SDK gate 조건을 지우는 돌연변이에서 빨개지게 했다.
+  B-05가 매뉴얼에 새로 넣은 `RUN_LLM_LIVE=1`도 `STRATEGY_WORKBENCH_LIVE_SMOKE`로 고쳤다.
+
+### A-07 기본값 확정 근거 (2026-09-21)
+
+`backend/tests/fixtures/assistant/` 골든의 실측 길이로 검토했고 **다섯 값 모두 그대로 둔다.**
+토큰 수는 한글 1음절≈1토큰, ASCII 3.5자≈1토큰으로 보수적으로 환산한 **추정치**다. live smoke의
+`turn_budget_measurements` 항목이 찍는 라운드 수·호출별 `usage.output_tokens`·턴 합계로 이 표를
+실측으로 바꾼다.
+
+| 값 | 기본값 | 근거 |
+|---|---:|---|
+| 호출당 출력(`DEFAULT_MAX_OUTPUT_TOKENS_PER_CALL`) | 16000 | 한 호출이 내야 하는 최대치는 `propose_strategy` 한 번이다. 제안 YAML 골든(`quality_momentum.yaml`) 869자 ≈ 250토큰, 여기에 제목·요약·근거(한글 산문)와 사고 요약을 더해도 1500~2500토큰이다. 6배 이상 여유 |
+| 턴 출력(`DEFAULT_MAX_TURN_OUTPUT_TOKENS`) | 64000 | 호출당 상한의 4배. 최장 경로는 도구 3회 + 검색 + 검증 3회 + 제출 3회이고 제출 라운드만 1500~2500토큰이므로 합계 추정 11000~15000토큰. 사고 요약이 몇 배로 늘어도 닿지 않는다 |
+| 도구 라운드(`DEFAULT_MAX_TOOL_ROUNDS`) | 12 | 라운드는 우리 도구 호출(`stop_reason == "tool_use"`)만 세고 서버 검색은 세지 않는다. 결정적 최단 경로는 읽기·필드·팩터·검증·제출 5라운드, 제안 재시도 상한(3회)까지 쓰면 9라운드. 12는 3라운드 여유 |
+| 검색(`DEFAULT_MAX_SEARCH_USES`) | 8 | 한 주제에 대한 교차 확인 2~3건 × 팩터 2~3개. 상한 집행은 공급자 쪽이며 Anthropic은 서버가, OpenAI는 adapter가 센다 |
+| 타임아웃(`DEFAULT_TURN_TIMEOUT_SECONDS` + `DEFAULT_TURN_GRACE_SECONDS`) | 300 + 10 | 러너가 이벤트 사이에서만 보는 벽시계 상한. adapter HTTP 타임아웃 120초보다 길어 호출 하나가 멈춰도 러너가 깨어난다 |
+
+남은 위험 두 가지는 live smoke로만 판정된다.
+
+1. **타임아웃 여유가 가장 얇다.** 위 최단 경로도 공급자 호출 5~6회다. `effort: high` 한 호출이
+   60초를 쓰면 300초에 닿는다. live smoke의 `probe` 지연과 턴 소요를 보고, 모자라면 A-01 상수가
+   아니라 `build_assistant_services`에서 `AssistantTurnRunner(timeout_seconds=...)`로 주입해
+   올린다(주입 자리는 이미 있다).
+2. ~~검색 8회와 `MAX_PAUSE_RESUMES = 5`의 관계가 확인되지 않았다.~~ **해소됨**(2026-09-21,
+   커밋 `57272513`). `llm_anthropic/_turn.py`의
+   `_max_total_pause_resumes(max_search_uses) = max_search_uses + MAX_PAUSE_RESUMES`가 두 상한의
+   결합을 구조적으로 끊었다 — 재개 예산이 검색 예산을 먹지 않는다. 재개 상한 케이스가
+   `tests/test_adapters_llm_anthropic.py`에서 그 동작을 고정한다. live smoke에서 다시 볼 항목이
+   아니다.
 
 ## 상태 값
 
@@ -61,10 +175,11 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| P0 | Planning package | 1 | 0 | `APPROVED` |
-| A | Backend: ports, storage, HTTP, providers | 7 | 0 | `APPROVED` |
-| B | Frontend: settings, entity, sidebar, e2e | 5 | 0 | `APPROVED` |
-| **Total** |  | **13** | **0** | **0%** |
+| P0 | Planning package | 1 | 1 | `MERGED` |
+| A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
+| B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
+| C | Phase A audit follow-up | 1 | 0 | `SELF_CHECK` |
+| **Total** |  | **14** | **13** | **93%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -88,19 +203,19 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P0-01` | 기획 패키지·설계 spec·SoT 행 예약 | 없음 | `APPROVED` | [#166](https://github.com/Nochiski/Quant_study/pull/166) · `review_ai_p0_01` 4차 APPROVE(1~3차 REQUEST_CHANGES 전부 해소, 잔여 P2 1건 머지 전 반영) |
+| [x] | `P0-01` | 기획 패키지·설계 spec·SoT 행 예약 | 없음 | `MERGED` | [#166](https://github.com/Nochiski/Quant_study/pull/166) · `review_ai_p0_01` 4차 APPROVE(1~3차 REQUEST_CHANGES 전부 해소, 잔여 P2 1건 머지 전 반영) |
 
 ## A — backend
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `APPROVED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
-| [ ] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `APPROVED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
-| [ ] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `APPROVED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
-| [ ] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `APPROVED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
-| [ ] | `A-05` | `llm_anthropic` adapter | A-04 | `APPROVED` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `c0219894`(A-04 최종 `9f39faec` 위 15커밋) · `review_ai_a_05` 3차 APPROVE(세 라운드 24건 전부 닫힘, 비인증 헤더 통과는 docstring 한 문장 P3 — A-06 rebase 뒤 A-05에 fast-forward) · live smoke 최우선: 선언되지 않은 서버 도구 결과 블록 history 수용 여부 |
-| [ ] | `A-06` | `llm_openai` adapter | A-05 | `APPROVED` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `6ada372f`(A-05 최종 `c0219894` 위 14커밋; org/project 헤더 `omit`, env 7종 기준선 테스트, spec D6 전수 표, P3 4 + A-05 P3 docstring 적재) · `review_ai_a_06` 2차 APPROVE · 확정 |
-| [ ] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `APPROVED` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring) → A-06 최종 `6ada372f` 위 rebase·캐시 필드·재생성 뒤 push·PR( 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) · **A-06 최종 `6ada372f` 위 replay 완료 `4fcad54c`**(10커밋, 33파일 +2971/−27; `UsageView` 성분 2칸·`TokenTotalsView` 성분+`total_input_tokens`, `MODEL_NOTICES`에 `search_budget_exhausted`, pytest 1957) · [#179](https://github.com/Nochiski/Quant_study/pull/179) · `review_ai_a_07` 1차 APPROVE(P2 1·P3 3) · 마무리 `e57ec183`(리뷰 4건) + `5009a03c`(B-05 발견: 첫 이벤트 전 취소 `Failure(CANCELLED)` 저장, 공급자 알린 취소 중복 억제; pytest 1964) — **최종 `5009a03c`**(`review_ai_a_07` 2차 APPROVE 유지, 돌연변이 3건 포착), B 스택 rebase 대상 |
+| [x] | `A-01` | `domain/assistant` 타입·도구 계약, `application/assistant_chat` 포트 5종·프로파일 서비스, SDK import 게이트, 경계 규칙 목록 | P0-01 | `MERGED` | [#169](https://github.com/Nochiski/Quant_study/pull/169) · `e8c6895` · `review_ai_a_01` 3차 APPROVE(비차단 P3 2건은 A-02 브랜치에 적재) · CI 대기 |
+| [x] | `A-02` | 채팅 유스케이스·컨텍스트 빌더·프롬프트·턴 러너, 가짜 공급자 테스트 | A-01 | `MERGED` | [#170](https://github.com/Nochiski/Quant_study/pull/170) · `8324ebc`(84570df + 후속 2: A-01 P3·A-02 P3·CI flake 수정) · `review_ai_a_02` 2차 APPROVE + 후속 확인 APPROVE · CI 대기 |
+| [x] | `A-03` | `assistant_sqlite`·`secrets_local` adapter | A-02 | `MERGED` | [#171](https://github.com/Nochiski/Quant_study/pull/171) · `d52436b7`(A-02 `8324ebc` 위 rebase, 내용 동일) · `review_ai_a_03` 2차 APPROVE · POSIX 모드 비트는 Linux CI로 확인 |
+| [x] | `A-04` | `/api/v1/assistant/*` + 턴 시작·SSE·취소, bootstrap, OpenAPI·SDK | A-03 | `MERGED` | [#174](https://github.com/Nochiski/Quant_study/pull/174) · `9f39faec`(A-03 `d52436b7` 위, 2차 P3 4건 반영) · `review_ai_a_04` 2차 APPROVE · CI 대기 |
+| [x] | `A-05` | `llm_anthropic` adapter | A-04 | `MERGED` | [#175](https://github.com/Nochiski/Quant_study/pull/175) · `c0219894`(A-04 최종 `9f39faec` 위 15커밋) · `review_ai_a_05` 3차 APPROVE(세 라운드 24건 전부 닫힘, 비인증 헤더 통과는 docstring 한 문장 P3 — A-06 rebase 뒤 A-05에 fast-forward) · live smoke 최우선: 선언되지 않은 서버 도구 결과 블록 history 수용 여부 |
+| [x] | `A-06` | `llm_openai` adapter | A-05 | `MERGED` | [#178](https://github.com/Nochiski/Quant_study/pull/178) · `6ada372f`(A-05 최종 `c0219894` 위 14커밋; org/project 헤더 `omit`, env 7종 기준선 테스트, spec D6 전수 표, P3 4 + A-05 P3 docstring 적재) · `review_ai_a_06` 2차 APPROVE · 확정 |
+| [x] | `A-07` | 프롬프트 최종본, 컨텍스트 품질, 시나리오 fixture 3개 | A-06 | `MERGED` | 구현 완료(로컬 `9250699f`, A-05 위 9커밋, `total_input_tokens` wire 필드·분리형 docstring) → A-06 최종 `6ada372f` 위 rebase·캐시 필드·재생성 뒤 push·PR( 골든 fixture·live smoke·기본값 근거·세션 Usage 집계(`aggregate_usage` 순수 함수, `SessionHistoryView.usage`)·시나리오 fixture 3개(실제 HTTP 응답에서 받아 적음), pytest 1821·ruff·pyright 0) → A-06 tip 위 rebase·캐시 필드 반영 뒤 push·PR · live smoke 미실행(키 없음, 사용자 실행 필요) · **A-06 최종 `6ada372f` 위 replay 완료 `4fcad54c`**(10커밋, 33파일 +2971/−27; `UsageView` 성분 2칸·`TokenTotalsView` 성분+`total_input_tokens`, `MODEL_NOTICES`에 `search_budget_exhausted`, pytest 1957) · [#179](https://github.com/Nochiski/Quant_study/pull/179) · `review_ai_a_07` 1차 APPROVE(P2 1·P3 3) · 마무리 `e57ec183`(리뷰 4건) + `5009a03c`(B-05 발견: 첫 이벤트 전 취소 `Failure(CANCELLED)` 저장, 공급자 알린 취소 중복 억제; pytest 1964) — **최종 `5009a03c`**(`review_ai_a_07` 2차 APPROVE 유지, 돌연변이 3건 포착), B 스택 rebase 대상 |
 
 Phase exit:
 
@@ -112,16 +227,31 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `APPROVED` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영 완료(로컬 `7fcc584e`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건, R2-1 `probingIds` Set·R2-2 제목 위계) · 2차 APPROVE_WITH_COMMENTS · R2-3·R2-4는 B-05 · cascade 뒤 A-07 위 rebase·push·PR · **A-07 최종 `4fcad54c` 위 replay `44ce20a4`**(7커밋, 충돌 없음, api:generate diff 0, vitest 659, 잠금 아래 e2e 19/19) · [#180](https://github.com/Nochiski/Quant_study/pull/180) · `review_ai_b_01` 3차 APPROVE(비차단 2: R2-3·R2-4 이관을 WORKFLOW B-05 acceptance에, 주석 과장) · 비차단 2건 커밋 + A-07 최종 `5009a03c` 위 rebase **최종 `5dc43c8b`**(8커밋, e2e 19/19, api:generate diff 0) — B-02 replay 대상 |
-| [ ] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `APPROVED` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋) · `review_ai_b_02` 3차 APPROVE(StrictMode probe 포함, e2e 19/19) · 어휘 단일 입구는 entity · cascade 뒤 push·PR · B-01 최종 `5dc43c8b` 위 replay + A-07 캐시 성분 반영 + DEFECT-AI-B05-001 정착 수정 **`22a86e39`**(14커밋, vitest 694, e2e 19/19) · [#182](https://github.com/Nochiski/Quant_study/pull/182) · `review_ai_b_02` 4차 APPROVE(P3 2: 훅 docstring 옛 규칙, PR 본문 bullet·결함 id) · docstring 정정 **최종 `0e460b97`** — B-03 replay 대상 |
-| [ ] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `APPROVED` | 구현 완료(로컬 `ecd530a6`, B-02 최종 `cb852032` 위 9커밋, vitest 728, 훅 API 적응: exhausted 재연결·rejected 정착·droppedFrames 경고, vitest 714·e2e 19/19) · `review_ai_b_03` 1차 REQUEST_CHANGES(P1 1: 이력보다 202가 먼저 오면 turns 순서 축이 갈라져 질문↔답 짝 밀림 — 리듀서 정렬을 B-03에서 수정, P2 4, P3 6) 반영 → 2차 REQUEST_CHANGES(1차 10/11 해소; 새 P1: 취소·실패 턴에도 완료 announce, P2: 제안 카드 aria-live 미적용, P3 4) 반영(결말별 status·제안 카드 aria-live·P3 4·이름 없는 section) → 3차 확인 중 · 후속 backlog: `ChatMessageView.turn_id` · `review_ai_b_03` 3차 APPROVE(P2 1: status 라이브 영역 상시 렌더, P3 3) · 마무리 커밋 후 **최종 `1445d982`**(B-02 `cb852032` 위 10커밋, vitest 729, e2e 19; 사이드바 자체 `<h2>` 제거, WORKFLOW B-04 Acceptance에 슬롯 landmark·`onClose` 위임 계약 2줄) · B-02 최종 `0e460b97` 위 replay **`92ce346a`**(`reduceTurn` 충돌 병합, 취소 하네스 `Failure(CANCELLED)` 보강, usage 픽스처; vitest 732, e2e 19/19) · [#185](https://github.com/Nochiski/Quant_study/pull/185) · `review_ai_b_03` 4차 APPROVE(P3 3은 C-01로) — **최종 `92ce346a`** |
-| [ ] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `APPROVED` | 구현 완료(로컬 `c6aaf55e`, B-03 `df7b25f4` 위 8커밋: 슬롯·적용 훅·페이지 배선·적용 후 백테스트·오버레이·spec 정정·사이드바 실장착·App 통합 테스트·`readContext` live 읽기·알림을 문서 notice 슬롯으로, vitest 762·e2e 19/19(어시스턴트 라우트 200 확인)·기준선 4장 재생성) · `review_ai_b_04` 1차 REQUEST_CHANGES(P1 3: 적용 알림이 패널 절반 차지·미소거, 좁은 화면 서랍 2개 동시, 드래그 임계 초과 시 되돌릴 수 없음; P2 2: en 한글, onClose 미배선; P3 7) → 반영 중 · 핵심 적용 설계(전체 범위 교체·undo 1스텝·live 재확인·stale 중단)는 승인 수준 · 2차 6건 반영 + B-03 최종 `1445d982` 위 replay **`c9fd1f3d`**(10커밋, vitest 776, e2e 19; 우측 패널 단일 열림, 오버레이 판정 기본 폭 상수, `onClose` 위임, 슬롯 헤더 보이는 h2) · `review_ai_b_04` 3차 REQUEST_CHANGES(2차 6건 해소 확인; 새 P1 1·P2 2·P3 3) · 후속 **`47041511`**(펼침 포커스·함수 슬롯 기본, 동일 제안 `changed=false` 알림+체인 진행, Acceptance 정정, 포맷 기억 제거; vitest 780) · `review_ai_b_04` 4차 APPROVE(주석 1줄 정정은 B-03 새 tip 위 replay 때) · 주석 정정 `d29cf637` · B-03 최종 `92ce346a` 위 replay **`25fc7edc`**(12커밋, vitest 783, e2e 19/19) · [#186](https://github.com/Nochiski/Quant_study/pull/186) · `review_ai_b_04` 5차 APPROVE — **최종 `25fc7edc`**, B-05 rebase 대상 |
-| [ ] | `B-05` | e2e(backend 대본 공급자 `llm_scripted`, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `APPROVED` | 구현자 `impl-ai-b05`, 워크트리 `wt-ai-b05`, 브랜치 `feat/ai-b-05-e2e-docs`(임시 base B-04 로컬 `8ee4808a`; 가짜 공급자 env 배선으로 e2e, A-07 시나리오는 읽기 참조) · 구현 완료(로컬 4커밋: e2e 잠금·포트 override(P1-05 `aa57028e` 동일 hunk + CORS), 대본 공급자 adapter `llm_scripted`(`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1`), e2e 시나리오 4 + B-01 이관 2, 매뉴얼 9절·README; e2e 23/23(포트 18000·15173), vitest 778, pytest 1411) · B-04 `c9fd1f3d` 위 rebase 완료(5커밋, e2e 24/24·vitest 794·pytest 1718; B-04 슬롯 계약 반영, 상주 status로 취소 문구 즉시 확인) · push **`0b982778`** · `review_ai_b_05` 1차 APPROVE 조건부(P1: 결함 id가 `database/` DEFECT-B05와 충돌 → `DEFECT-AI-B05-001`; P2 4: 재개 시나리오 여유 5초, 가짜 공급자 표식 없음, 재연결 중복 미검출, 적용 격리 미단언; P3 3) · B-04 `47041511` 위 rebase **`c5b4ddd0`**(시나리오 4개로 합침: 동일 제안 재적용 "바뀐 내용 없음" 알림 + 백테스트 진행 단언, 펼침 포커스 단언; e2e 23/23, vitest 798, pytest 1760) · 리뷰 후속 8건 **`b1412682`**(id 개명, 대본 지연 배율 20초+, 가짜 공급자 표식은 모델명+warning 로그(probe message는 spec D2로 불가), `toHaveText`, 제목 줄만 변경 단언, P3 3; 취소 시나리오는 A-07 수정 전 base라 "턴이 멈췄다" 단언으로; e2e 23/23, pytest 1762) · `review_ai_b_05` 2차 APPROVE(P2 1: 취소 대체 단언이 서버 취소 무시 회귀를 못 잡음 → reload 뒤 status "답변을 중지했습니다." 단언) · B-04 `25fc7edc` 위 rebase + 취소 사유 단언 조임(reload 없이) **`ea7b41d5`**(6커밋, e2e 23/23, vitest 801, pytest 1838) · [#189](https://github.com/Nochiski/Quant_study/pull/189) · R2-001(취소 증명을 서버 사실 둘로: 재조회 이력의 취소 사유 + 다음 턴 409 없음) + P1-05 `cf56b5b4` e2e 파일 바이트 동일 재복사 **`d84b0eda`**(vitest 809, e2e 23/23) · `review_ai_b_05` 3차 APPROVE(취소 단언 2가 러너 슬롯 계약으로 회귀 포착 확인, 재복사 9파일 blob 동일; P3 2: prettier 1줄, e2e README 잠금 문장) → P1-05 최종 `a263276b`(경합 테스트 신호화) 재복사 **최종 `2d5f2b26`**(e2e 인프라 6파일 blob 동일, README는 B-05 AI 절 때문에 3-way 병합, prettier 4곳; vitest 812) |
+| [x] | `B-01` | `/settings` 페이지, `configure-ai-providers` 섹션, `entities/assistant` 프로파일 query | A-07 | `MERGED` | 구현 완료(로컬 `9f536bb4`, A-04 `645efcb1` 위, 18 파일 +1542/−10, 게이트·e2e 19/19) · `review_ai_b_01` 1차 REQUEST_CHANGES(P1 1·P2 2) 반영 완료(로컬 `7fcc584e`: 키 실은 요청은 plain async, 접힘 시 base_url 미전송, 삭제 확인 포커스·live region, P3 4건, R2-1 `probingIds` Set·R2-2 제목 위계) · 2차 APPROVE_WITH_COMMENTS · R2-3·R2-4는 B-05 · cascade 뒤 A-07 위 rebase·push·PR · **A-07 최종 `4fcad54c` 위 replay `44ce20a4`**(7커밋, 충돌 없음, api:generate diff 0, vitest 659, 잠금 아래 e2e 19/19) · [#180](https://github.com/Nochiski/Quant_study/pull/180) · `review_ai_b_01` 3차 APPROVE(비차단 2: R2-3·R2-4 이관을 WORKFLOW B-05 acceptance에, 주석 과장) · 비차단 2건 커밋 + A-07 최종 `5009a03c` 위 rebase **최종 `5dc43c8b`**(8커밋, e2e 19/19, api:generate diff 0) — B-02 replay 대상 |
+| [x] | `B-02` | 세션·턴 query, 생성 SDK SSE 리더(재개·멱등), 이벤트 리듀서, property test | B-01 | `MERGED` | 구현 완료(로컬 `cb852032`, B-01 최종 `7fcc584e` 위 12커밋) · `review_ai_b_02` 3차 APPROVE(StrictMode probe 포함, e2e 19/19) · 어휘 단일 입구는 entity · cascade 뒤 push·PR · B-01 최종 `5dc43c8b` 위 replay + A-07 캐시 성분 반영 + DEFECT-AI-B05-001 정착 수정 **`22a86e39`**(14커밋, vitest 694, e2e 19/19) · [#182](https://github.com/Nochiski/Quant_study/pull/182) · `review_ai_b_02` 4차 APPROVE(P3 2: 훅 docstring 옛 규칙, PR 본문 bullet·결함 id) · docstring 정정 **최종 `0e460b97`** — B-03 replay 대상 |
+| [x] | `B-03` | `assist-strategy` 사이드바 feature(렌더 안전·취소 확인) | B-02 | `MERGED` | 구현 완료(로컬 `ecd530a6`, B-02 최종 `cb852032` 위 9커밋, vitest 728, 훅 API 적응: exhausted 재연결·rejected 정착·droppedFrames 경고, vitest 714·e2e 19/19) · `review_ai_b_03` 1차 REQUEST_CHANGES(P1 1: 이력보다 202가 먼저 오면 turns 순서 축이 갈라져 질문↔답 짝 밀림 — 리듀서 정렬을 B-03에서 수정, P2 4, P3 6) 반영 → 2차 REQUEST_CHANGES(1차 10/11 해소; 새 P1: 취소·실패 턴에도 완료 announce, P2: 제안 카드 aria-live 미적용, P3 4) 반영(결말별 status·제안 카드 aria-live·P3 4·이름 없는 section) → 3차 확인 중 · 후속 backlog: `ChatMessageView.turn_id` · `review_ai_b_03` 3차 APPROVE(P2 1: status 라이브 영역 상시 렌더, P3 3) · 마무리 커밋 후 **최종 `1445d982`**(B-02 `cb852032` 위 10커밋, vitest 729, e2e 19; 사이드바 자체 `<h2>` 제거, WORKFLOW B-04 Acceptance에 슬롯 landmark·`onClose` 위임 계약 2줄) · B-02 최종 `0e460b97` 위 replay **`92ce346a`**(`reduceTurn` 충돌 병합, 취소 하네스 `Failure(CANCELLED)` 보강, usage 픽스처; vitest 732, e2e 19/19) · [#185](https://github.com/Nochiski/Quant_study/pull/185) · `review_ai_b_03` 4차 APPROVE(P3 3은 C-01로) — **최종 `92ce346a`** |
+| [x] | `B-04` | IDE `assistant` 슬롯, 제안 적용(`replaceRange` + stale 가드)·미리보기·적용 후 백테스트 | B-03 | `MERGED` | 구현 완료(로컬 `c6aaf55e`, B-03 `df7b25f4` 위 8커밋: 슬롯·적용 훅·페이지 배선·적용 후 백테스트·오버레이·spec 정정·사이드바 실장착·App 통합 테스트·`readContext` live 읽기·알림을 문서 notice 슬롯으로, vitest 762·e2e 19/19(어시스턴트 라우트 200 확인)·기준선 4장 재생성) · `review_ai_b_04` 1차 REQUEST_CHANGES(P1 3: 적용 알림이 패널 절반 차지·미소거, 좁은 화면 서랍 2개 동시, 드래그 임계 초과 시 되돌릴 수 없음; P2 2: en 한글, onClose 미배선; P3 7) → 반영 중 · 핵심 적용 설계(전체 범위 교체·undo 1스텝·live 재확인·stale 중단)는 승인 수준 · 2차 6건 반영 + B-03 최종 `1445d982` 위 replay **`c9fd1f3d`**(10커밋, vitest 776, e2e 19; 우측 패널 단일 열림, 오버레이 판정 기본 폭 상수, `onClose` 위임, 슬롯 헤더 보이는 h2) · `review_ai_b_04` 3차 REQUEST_CHANGES(2차 6건 해소 확인; 새 P1 1·P2 2·P3 3) · 후속 **`47041511`**(펼침 포커스·함수 슬롯 기본, 동일 제안 `changed=false` 알림+체인 진행, Acceptance 정정, 포맷 기억 제거; vitest 780) · `review_ai_b_04` 4차 APPROVE(주석 1줄 정정은 B-03 새 tip 위 replay 때) · 주석 정정 `d29cf637` · B-03 최종 `92ce346a` 위 replay **`25fc7edc`**(12커밋, vitest 783, e2e 19/19) · [#186](https://github.com/Nochiski/Quant_study/pull/186) · `review_ai_b_04` 5차 APPROVE — **최종 `25fc7edc`**, B-05 rebase 대상 |
+| [x] | `B-05` | e2e(backend 대본 공급자 `llm_scripted`, 재개·취소), 매뉴얼·README·SoT·features README | B-04 | `MERGED` | 구현자 `impl-ai-b05`, 워크트리 `wt-ai-b05`, 브랜치 `feat/ai-b-05-e2e-docs`(임시 base B-04 로컬 `8ee4808a`; 가짜 공급자 env 배선으로 e2e, A-07 시나리오는 읽기 참조) · 구현 완료(로컬 4커밋: e2e 잠금·포트 override(P1-05 `aa57028e` 동일 hunk + CORS), 대본 공급자 adapter `llm_scripted`(`STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER=1`), e2e 시나리오 4 + B-01 이관 2, 매뉴얼 9절·README; e2e 23/23(포트 18000·15173), vitest 778, pytest 1411) · B-04 `c9fd1f3d` 위 rebase 완료(5커밋, e2e 24/24·vitest 794·pytest 1718; B-04 슬롯 계약 반영, 상주 status로 취소 문구 즉시 확인) · push **`0b982778`** · `review_ai_b_05` 1차 APPROVE 조건부(P1: 결함 id가 `database/` DEFECT-B05와 충돌 → `DEFECT-AI-B05-001`; P2 4: 재개 시나리오 여유 5초, 가짜 공급자 표식 없음, 재연결 중복 미검출, 적용 격리 미단언; P3 3) · B-04 `47041511` 위 rebase **`c5b4ddd0`**(시나리오 4개로 합침: 동일 제안 재적용 "바뀐 내용 없음" 알림 + 백테스트 진행 단언, 펼침 포커스 단언; e2e 23/23, vitest 798, pytest 1760) · 리뷰 후속 8건 **`b1412682`**(id 개명, 대본 지연 배율 20초+, 가짜 공급자 표식은 모델명+warning 로그(probe message는 spec D2로 불가), `toHaveText`, 제목 줄만 변경 단언, P3 3; 취소 시나리오는 A-07 수정 전 base라 "턴이 멈췄다" 단언으로; e2e 23/23, pytest 1762) · `review_ai_b_05` 2차 APPROVE(P2 1: 취소 대체 단언이 서버 취소 무시 회귀를 못 잡음 → reload 뒤 status "답변을 중지했습니다." 단언) · B-04 `25fc7edc` 위 rebase + 취소 사유 단언 조임(reload 없이) **`ea7b41d5`**(6커밋, e2e 23/23, vitest 801, pytest 1838) · [#189](https://github.com/Nochiski/Quant_study/pull/189) · R2-001(취소 증명을 서버 사실 둘로: 재조회 이력의 취소 사유 + 다음 턴 409 없음) + P1-05 `cf56b5b4` e2e 파일 바이트 동일 재복사 **`d84b0eda`**(vitest 809, e2e 23/23) · `review_ai_b_05` 3차 APPROVE(취소 단언 2가 러너 슬롯 계약으로 회귀 포착 확인, 재복사 9파일 blob 동일; P3 2: prettier 1줄, e2e README 잠금 문장) → P1-05 최종 `a263276b`(경합 테스트 신호화) 재복사 **최종 `2d5f2b26`**(e2e 인프라 6파일 blob 동일, README는 B-05 AI 절 때문에 3-way 병합, prettier 4곳; vitest 812) |
 
 Phase exit:
 
 - [ ] 완료 정의 1~5 기록.
 - [ ] SoT·책임분리 점검 blocking 0.
+
+## C — Phase A 감사 후속
+
+Phase A 종료 감사(`audit_ai_phase_a.md`)는 **blocking 0**으로 PASS했고, 비차단 11건 중
+NB-1~NB-10을 C-01이 닫는다. NB-11은 브랜치 상태(스택 base 격차)라 머지 직전 rebase에서
+처리한다 — `PLAN.md` 충돌은 base 쪽 값으로 해소한다.
+
+| 완료 | PR | 결과물 | Dependency | 상태 | Review |
+|---|---|---|---|---|---|
+| [ ] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `SELF_CHECK` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` |
+
+Phase exit:
+
+- [ ] NB-1~NB-10 닫힘, 각 항목이 코드·문서·테스트 중 어디서 닫혔는지 PR 본문에 기록.
+- [ ] no-extras job 확대판이 SDK 없는 환경에서 green.
 
 ## Review 기록
 
@@ -176,7 +306,25 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-26 — **P0-01~B-05 13 PR main 머지 완료**(#166·#169·#170·#171·#174·#175·#178·#179·#180·#182·#185·#186·#189, 스택 아래부터 `--merge`, 다음 PR base를 main으로 먼저 옮긴 뒤). 중간 PR은 PLAN.md만 리드 판으로 맞춘 main 병합 커밋을 얹었고(PLAN 외 파일은 각 tip과 동일, CI는 tip 결과 인용), 스택 전용 절(현재 결정의 A-07 항목·A-07 backlog·기본값 근거·C 절·A-05/A-06 변경 기록)은 C-01의 main 병합에서 절 단위로 합쳤다(Phase B 감사 NB-5). C-01은 1차 REQUEST_CHANGES(P2 3: PLAN 도구 cp949 깨짐, NB-9 기준선이 SDK gate 미통과, 매뉴얼 `RUN_LLM_LIVE`) → 반영 `afba06f3` → 2차 REQUEST_CHANGES(P2 1: probe 상한 owner 오기, 1차 지적 오판) → `de807566`.
 - 2026-09-26 — 세션 한도 중단 뒤 재개. B-05 **최종 `2d5f2b26`**, C-01 B-05 위 rebase **`b7e01b76`**(range-diff 6커밋 전부 동일, pytest 1992·vitest 812·계약 재생성 diff 0) push, 스택 최상단 `b7e01b76`에서 **전체 e2e 23/23**(백테스트 2건·적용 후 백테스트 포함). `review_ai_c_01` 1차 재착수(이전 리뷰는 결과 없이 중단). **Phase B 감사(`audit_ai_phase_b`, `bb51cec9`) PASS, blocking 0**, NON_BLOCKING 8건(NB-1 거부 문구 표 이중 owner, NB-2 적용 후 백테스트가 `blocked` 뒤 트리거 잔존 → armed 폐기로 결정, NB-3 매뉴얼 live smoke 변수, NB-4 backlog 담당 부재, NB-5 PLAN 병합 규칙, NB-6~8 P3)은 스택 최상단 **C-02** 하나로 처리. 완료 정의 1(실제 키 연결 테스트)·live smoke는 키 부재로 사용자 실행 필요.
+- 2026-09-21 — A-05 2차 리뷰 반영. **검색 예산 집행 방식을 유지하기로 결정**: 호출마다
+  `max_uses`를 잔량으로 줄이므로 검색이 한 번 일어나면 이후 호출의 캐시 접두가 깨진다(시스템
+  프롬프트를 캐시 쓰기로 과금). 대안("`max_uses` 고정 + 소진 시에만 도구 제거")은 접두를 턴당
+  한 번만 깨지만 초과를 `2 × max_search_uses − 1`까지 허용한다. 두 손해가 같은 자릿수라
+  추정만으로 고르지 않고, **A-07이 `Usage`의 캐시 두 칸으로 실측해 다시 본다**.
+  같은 리뷰에서 A-07로 넘긴 항목 5건을 WORKFLOW A-07 Acceptance에 체크 항목으로 적었다
+  (선언되지 않은 서버 도구 결과 블록이 든 history를 공급자가 받는지가 최우선).
+- 2026-09-21 — A-06 OpenAI 기본 모델을 `gpt-6-astra`로 확정. 근거는 설치된 `openai` 3.16.2의
+  `ChatModel` 목록 첫 항목이자 `Response.model` docstring 예시이고, 공식 모델 문서가 "가장 유능한
+  모델, 어디서 시작할지 모르겠으면 GPT-6 Astra"로 소개한다는 것. 화면 이름이 "Codex"지만 spec D4가
+  "최신 GPT 모델"을 요구했고 이 기능의 일이 코딩이 아니라 리서치라 codex 계열 대신 범용 플래그십을
+  골랐다. 실호출 확인은 A-07 live smoke 항목(모델 이름 수용, probe의 `max_output_tokens` 하한,
+  `developer` 통지 반응, 추론 항목 재전송 수용).
+- 2026-09-21 — A-06 probe의 `max_output_tokens`를 API 최솟값 16이 아니라 64로 둔다. 추론 모델은
+  본문 전에 추론 토큰을 먼저 쓰므로 상한이 추론분보다 작으면 400이 날 수 있고, 그러면 연결
+  테스트가 "키가 틀렸다"와 "상한이 낮다"를 구분하지 못한다. 모델별 실제 최솟값은 A-07 live
+  smoke에서 확인한다.
 - 2026-09-21 — 보안 결함(A-06 발견, A-05·A-06 수정): 프로파일에 base_url이 없으면 SDK가 `OPENAI_BASE_URL`/`ANTHROPIC_BASE_URL` 환경 변수를 읽어 spec D6 검사를 지나지 않은 호스트로 키가 나감 → 기본 base_url·api_key를 항상 명시해 SDK 환경 변수 폴백 차단(spec D6 한 줄). `Usage` 캐시 필드는 SDK 값 그대로 매핑.
 - 2026-09-21 — A-06(#178) PR 생성·리뷰 배정. `Usage` 캐시 의미 결정(번복 후 확정): domain은 **분리형**(`input_tokens` = 캐시 읽기·쓰기 제외, 세 칸 겹치지 않음) 유지, 총입력은 파생 `total_input_tokens`(A-05), OpenAI adapter가 원시 내역을 빼서 정규화(A-06), A-07 집계는 성분 합산 + wire `total_input_tokens`. 근거: 성분별 단가·저장 이력 의미 보존(A-05 리뷰어).
 - 2026-09-21 — C-01 추가 3건(B-01 probe 경합 deferred, B-02 세션 전환 동기 push+`delivered`+닫힘 플래그+afterEach, B-03 죽은 키·CSS·`.assist__head`) 완료 **`cfb704dd`**(B-05 `ea7b41d5` 위 6커밋, 21파일 +365/−78; pytest 1992, no-extras 118, vitest 801 ×3, e2e 23) · [#190](https://github.com/Nochiski/Quant_study/pull/190) · `review_ai_c_01` 1차 착수. B-05 최종 재복사 tip 위 `--onto` 1회 남음.

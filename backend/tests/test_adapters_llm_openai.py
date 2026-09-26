@@ -2,7 +2,8 @@
 
 네트워크를 쓰지 않는다. `tests/openai_stream_script.py`가 SDK가 흘렸을 이벤트 열을 대신 내주고,
 여기서는 adapter가 **무엇을 보내고 무엇으로 옮기며 어떤 상한을 집행하는지**만 본다. 실제 공급자
-호출은 A-07의 `RUN_LLM_LIVE=1` smoke가 맡는다.
+호출은 A-07의 `scripts/assistant_live_smoke.py`가 맡는다(게이트 환경 변수는
+`STRATEGY_WORKBENCH_LIVE_SMOKE`).
 """
 
 from __future__ import annotations
@@ -40,9 +41,6 @@ from strategy_workbench.adapters.outbound.llm_openai._payload import (  # noqa: 
     build_input,
     build_tools,
 )
-from strategy_workbench.adapters.outbound.llm_openai._turn import (  # noqa: E402  # reason: importorskip 이후 import
-    MIN_CALL_OUTPUT_TOKENS,
-)
 from strategy_workbench.adapters.outbound.llm_openai.facade.provider import (  # noqa: E402  # reason: importorskip 이후 import
     DEFAULT_MODEL,
     OpenAiLlmAdapter,
@@ -55,6 +53,7 @@ from strategy_workbench.application.assistant_chat.facade.prompt import (  # noq
     SEARCH_BUDGET_EXHAUSTED_NOTICE,
 )
 from strategy_workbench.domain.assistant.facade.models import (  # noqa: E402  # reason: importorskip 이후 import
+    MIN_CALL_OUTPUT_TOKENS,
     ChatEvent,
     ChatMessage,
     ChatRole,

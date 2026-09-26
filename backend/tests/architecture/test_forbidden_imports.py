@@ -2,13 +2,13 @@
 
 - domain/application never import pydantic: the inbound schema adapter owns discriminator metadata.
 - strategy_workbench never imports PyYAML: ruamel.yaml (YAML 1.2) is the only parser (adapter).
-- provider SDKs (`anthropic`, `openai`) live only in their own outbound adapters
-  (AI 어시스턴트 설계 spec D1/D4, A-01): domain/application see providers through
-  `LlmProviderPort`, so a second provider is a new adapter and not an edit to the tool loop.
+- 공급자 SDK(`anthropic`, `openai`)는 자기 outbound adapter 안에만 있다(AI 어시스턴트 설계 spec
+  D1/D4, A-01). domain·application은 `LlmProviderPort`로만 공급자를 보므로, 공급자를 하나 더
+  붙이는 일은 새 adapter를 만드는 것이지 도구 루프를 고치는 것이 아니다.
 
-Scope: these gates read `import` / `from … import` statements out of the AST. An import made
-through a string (`importlib.import_module("anthropic")`, `__import__`) is outside what they can
-see, so a reviewer of the provider adapters has to check that by eye.
+검사 범위: 이 게이트들은 AST에서 `import` / `from … import` 문만 읽는다. 문자열로 하는 import
+(`importlib.import_module("anthropic")`, `__import__`)는 볼 수 없으므로, 공급자 adapter를 읽는
+리뷰어가 눈으로 확인해야 한다.
 """
 
 from __future__ import annotations

@@ -162,7 +162,8 @@ def test_the_probe_question_names_the_constant_that_owns_the_token_limit(
 ) -> None:
     """확인할 것은 "A-05·A-06이 올린 값에서도 거부되는가"다.
 
-    문장이 값을 말해 주면 읽는 사람이 무엇을 시험하는지 안다. 다만 정본은 adapter 상수이므로
+    문장이 값을 말해 주면 읽는 사람이 무엇을 시험하는지 안다. 다만 정본은 adapter 상수
+    (`PROBE_MAX_TOKENS`·`PROBE_MAX_OUTPUT_TOKENS`)이므로
     문장이 그 상수 이름을 같이 대야, 값이 또 바뀌었을 때 어디를 볼지 알 수 있다.
     """
     for kind in ProviderKind:

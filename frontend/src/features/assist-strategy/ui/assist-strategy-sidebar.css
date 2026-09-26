@@ -14,14 +14,10 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  /* 자식은 동작 묶음 하나뿐이다. 제목은 이 feature를 꽂는 슬롯이 그린다(WORKFLOW B-04).
+     `space-between`을 그대로 두면 하나뿐인 자식이 왼쪽 끝으로 붙어 패널 오른쪽이 비어 보인다. */
+  justify-content: flex-end;
   gap: var(--space-2);
-}
-
-.assist__title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 700;
 }
 
 .assist__head-actions {

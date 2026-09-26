@@ -315,7 +315,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   인증 헤더를 `default_headers`에 **명시**하고 쓰지 않는 bearer 헤더는 지운다. 검증은 "무엇을
   넘겼는가"가 아니라 **실제 요청 헤더**로 한다 — 둘 사이에 실제로 차이가 생긴다.
 - **차단 여부는 SDK 소스로 확인한 전수 표로 관리한다.** 아래는 `openai` 3.16.2가 읽는 일곱이다
-  (`openai/_client.py`). SDK를 올릴 때 이 표를 다시 맞춘다. `anthropic` 쪽도 같은 방식으로 본다.
+  (`openai/_client.py`). SDK를 올릴 때 이 표를 다시 맞춘다.
 
   | 환경 변수 | 무엇을 바꾸나 | 차단 | 방법 |
   |---|---|---|---|
@@ -328,6 +328,33 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   | `OPENAI_CUSTOM_HEADERS` (그 밖의 줄) | 임의 헤더가 따라 붙음 | ✗ | SDK private(`_custom_headers`)을 비워야 해서 남겼다 |
   | `OPENAI_ADMIN_KEY` | admin 엔드포인트 인증 | 해당 없음 | 이 경로가 쓰지 않는 표면 |
   | `OPENAI_WEBHOOK_SECRET` | webhook 서명 검증 | 해당 없음 | 위와 같음 |
+
+  `anthropic` 1.7.0이 자격 증명·목적지를 정하려고 읽는 열넷은 아래다(로그·프록시 변수는 범위 밖). 열둘은
+  `anthropic/lib/credentials/_constants.py`의 `ENV_*` 상수이고, `ANTHROPIC_CUSTOM_HEADERS`와
+  `ANTHROPIC_WEBHOOK_SIGNING_KEY`는 그 밖에서 읽힌다.
+
+  | 환경 변수 | 무엇을 바꾸나 | 차단 | 방법 |
+  |---|---|---|---|
+  | `ANTHROPIC_API_KEY` | 누구의 키로 호출하나 | ✓ | `api_key`에 프로파일 비밀 명시 |
+  | `ANTHROPIC_AUTH_TOKEN` | bearer 인증으로 갈아탐 | ✓ | 명시 `api_key`가 탐색 체인을 gate, bearer 헤더는 지움 |
+  | `ANTHROPIC_BASE_URL` | 어느 호스트로 나가나 | ✓ | 프로파일이 없으면 기본 호스트 명시 |
+  | `ANTHROPIC_CUSTOM_HEADERS` (인증 줄) | 인증 헤더를 덮음 | ✓ | `default_headers`에 인증 헤더 명시 + bearer 지움 |
+  | `ANTHROPIC_CONFIG_DIR`·`ANTHROPIC_PROFILE` | 설정 파일에서 자격 증명을 찾음 | ✓ | 위와 같은 gate |
+  | `ANTHROPIC_IDENTITY_TOKEN`·`ANTHROPIC_IDENTITY_TOKEN_FILE` | workload identity로 토큰 교환 | ✓ | 위와 같은 gate |
+  | `ANTHROPIC_FEDERATION_RULE_ID`·`ANTHROPIC_ORGANIZATION_ID`·`ANTHROPIC_SERVICE_ACCOUNT_ID`·`ANTHROPIC_WORKSPACE_ID`·`ANTHROPIC_SCOPE` | 교환할 토큰의 주체·범위 | ✓ | 위와 같은 gate |
+  | `ANTHROPIC_CUSTOM_HEADERS` (그 밖의 줄) | 임의 헤더가 따라 붙음 | ✗ | OpenAI와 같은 이유로 남겼다 |
+  | `ANTHROPIC_WEBHOOK_SIGNING_KEY` | webhook 서명 검증 | 해당 없음 | 이 경로가 쓰지 않는 표면 |
+
+  Anthropic 쪽 차단의 대부분은 **명시 `api_key` 하나**가 해 준다. SDK는 `credentials`·`api_key`·
+  `auth_token`이 모두 `None`이고 클라이언트가 기본 클래스(`_is_base_client`)일 때만 자격 증명
+  auto-discovery 체인을 돌린다. 그래서 그 아래 열 변수는 체인에 들어가지도 못한다. 개별 차단
+  코드가 아니라 **그 gate가 유지되는지**가 지켜야 할 사실이고, 기준선 테스트가 두 경우로 실제 요청
+  헤더를 본다. 하나는 열넷을 전부 심는다. 다른 하나는 `ANTHROPIC_API_KEY`·`ANTHROPIC_AUTH_TOKEN`을
+  빼고 체인 변수만 심는다. 체인은 `ANTHROPIC_API_KEY`가 있으면 앞단에서 끝나 나머지를 읽지 않으므로,
+  gate 변화는 뒤의 경우만 잡는다. 테스트는 전송만 바꿔 끼우고 기본 클래스 인스턴스를 쓴다.
+  하위 클래스로 만들면 체인이 gate와 무관하게 돌지 않아 아무것도 보지 못한다. 목록은 손으로 적지
+  않고 SDK의 `ENV_*` 상수에서 읽으므로, SDK가 변수를 더 읽기 시작하면 기준선이 자동으로 그것까지
+  심는다.
 
   `organization = None`과 `omit`은 **둘 다** 필요하다. SDK는 두 헤더를 `Omit()`으로 둔 뒤
   `_custom_headers`를 그 뒤에 병합하므로, 속성만 비우면 `OPENAI_CUSTOM_HEADERS`의 같은 이름 줄이

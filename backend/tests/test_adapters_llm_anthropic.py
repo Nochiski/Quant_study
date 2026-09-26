@@ -36,7 +36,6 @@ from strategy_workbench.adapters.outbound.llm_anthropic._payload import (  # noq
 )
 from strategy_workbench.adapters.outbound.llm_anthropic._turn import (  # noqa: E402  # reason: 위와 같음
     MAX_PAUSE_RESUMES,
-    MIN_CALL_OUTPUT_TOKENS,
 )
 from strategy_workbench.adapters.outbound.llm_anthropic.facade.provider import (  # noqa: E402  # reason: 위와 같음
     DEFAULT_MODEL,
@@ -46,6 +45,7 @@ from strategy_workbench.application.assistant_chat.facade.ports import (  # noqa
     LlmProviderPort,
 )
 from strategy_workbench.domain.assistant.facade.models import (  # noqa: E402  # reason: 위와 같음
+    MIN_CALL_OUTPUT_TOKENS,
     ChatEvent,
     ChatMessage,
     ChatRole,

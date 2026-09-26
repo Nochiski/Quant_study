@@ -1007,7 +1007,6 @@ const ko = {
     "이 답변의 토큰 예산을 다 썼습니다. 질문을 좁혀 다시 물어보세요.",
   "assistant.turn.failure.unknown":
     "답변이 알 수 없는 이유로 중단되었습니다.",
-  "assistant.chat.title": "AI 어시스턴트",
   "assistant.chat.log": "대화 내용",
   "assistant.chat.session": "대화",
   "assistant.chat.session.new": "새 대화",
@@ -2102,7 +2101,6 @@ export const messages = {
       "This answer used up its token budget. Narrow the question and ask again.",
     "assistant.turn.failure.unknown":
       "The answer stopped for an unknown reason.",
-    "assistant.chat.title": "AI assistant",
     "assistant.chat.log": "Conversation",
     "assistant.chat.session": "Conversation",
     "assistant.chat.session.new": "New conversation",

@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, delay, http } from "msw";
+import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import type { ReactElement, ReactNode } from "react";
 import {
@@ -483,11 +483,17 @@ describe("AI 공급자 설정 섹션", () => {
         profile({ profile_id: "p-2", label: "둘째", active: false }),
       ],
     };
+    // 느린 카드를 테스트가 풀어 줄 때까지 "아직 비행 중"으로 붙잡아 둔다. 지연 값 차이에 기대면 부하 중에 순서가 뒤집혀
+    // 세 단언이 한꺼번에 무너진다. 해소 시점을 테스트가 쥐면 순서가 시계가 아니라 인과로 정해진다.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     server.use(
       http.post(
         `${API}/api/v1/assistant/providers/:profileId/test`,
         async ({ params }) => {
-          await delay(String(params.profileId) === "p-1" ? 400 : 20);
+          if (String(params.profileId) === "p-1") await held;
           return HttpResponse.json({
             ok: true,
             failure: null,
@@ -507,6 +513,10 @@ describe("AI 공급자 설정 섹션", () => {
     expect(await fast.findByText(/연결 확인됨/)).toBeInTheDocument();
     expect(slow.queryByText(/연결 확인됨/)).toBeNull();
     expect(slow.getByRole("button", { name: "연결 테스트" })).toBeDisabled();
+
+    // 매달린 응답을 남기지 않는다. 푸고 나면 느린 카드도 정상으로 끝난다.
+    release();
+    expect(await slow.findByText(/연결 확인됨/)).toBeInTheDocument();
   });
 
   it("404가 오면 목록을 다시 읽어 유령 카드를 지운다", async () => {

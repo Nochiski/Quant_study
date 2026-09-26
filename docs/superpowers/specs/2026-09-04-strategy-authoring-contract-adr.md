@@ -13,6 +13,12 @@
 > [schema 1.1 · GUI 편집 spec](./2026-09-17-strategy-schema-1-1-and-gui-editing-design.md) D5~D7,
 > 진행은 [strategy-gui-editing PLAN](../../planning/strategy-gui-editing/PLAN.md).
 >
+> 2026-09-20 schema 1.2·그래프 표현 개정: D8의 대상 사용자와 완료 정의를 개정한다 — 대상 사용자는
+> 비전공자를 포함하고, 완료 정의는 로드맵 원문 "코드를 몰라도 대부분의 cross-sectional 전략을 만들
+> 수 있다"로 되돌린다. 설계는
+> [schema 1.2·그래프 표현 spec](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md) D1~D2,
+> 진행은 [strategy-language-2-0 PLAN](../../planning/strategy-language-2-0/PLAN.md).
+>
 > Initiative: [YAML Strategy Workbench](../../planning/strategy-workbench-yaml-ui/README.md) —
 > 범위는 [WORKFLOW.md](../../planning/strategy-workbench-yaml-ui/WORKFLOW.md), PR 진행은
 > [PLAN.md](../../planning/strategy-workbench-yaml-ui/PLAN.md)
@@ -133,6 +139,11 @@ AND semantic blocking error == 0
 - compile은 알려진 credential 패턴을 capability diagnostic으로 거부한다 (P1-03 이후).
 
 ### D8. 제품 방향: YAML-first, no-code는 범위 조정
+
+2026-09-20 개정: 아래 대상 사용자와 완료 정의는
+[schema 1.2·그래프 표현 spec](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md) D1이
+개정했다. 대상 사용자는 비전공자를 포함하고 완료 정의는 로드맵 원문으로 돌아갔다. 아래 문단은
+2026-09-04 시점 결정의 기록으로 남긴다.
 
 - 전략 정의의 primary authoring은 YAML/JSON이다. 대상 사용자는 전문 트레이더다.
 - 로드맵의 완료 정의 "코드를 몰라도 대부분의 cross-sectional 전략을 만들 수 있다"는 다음으로

@@ -522,9 +522,10 @@ Python/Rust 결과가 같다.
 - [ ] draft autosave/recovery와 server revision conflict UX 구현.
 - [ ] 임의 Python plugin은 sandbox/reproducibility 별도 spec 전까지 제외.
 
-완료 게이트: 전략 정의는 verbose source로 작성하되 parameter search와 실험 실행은 source를 다시
-편집하지 않고 UI에서 수행할 수 있고, 전문 사용자는 typed graph와 식으로 제약 없이 확장하며 결과를
-재현할 수 있다 (2026-09-04 ADR D8로 조정).
+완료 게이트: 코드를 몰라도 대부분의 cross-sectional 전략을 만들 수 있고, 전문 사용자는 typed
+graph와 식으로 제약 없이 확장하며 결과를 재현할 수 있다. 2026-09-04 ADR D8이 낮춘 문장을
+2026-09-20 [schema 1.2·그래프 표현 initiative](../../planning/strategy-language-2-0/README.md)가
+원문으로 되돌렸다. 측정은 그 initiative의 퀀트 아이디어 5개다.
 
 ### M9 — 실제 Equity DuckDB adapter 전환
 
@@ -685,6 +686,9 @@ authoring 방식을 verbose YAML/JSON source로 전환했다. 이 initiative의 
 - M8 항목 중 revision history/diff, autosave/recovery, revision conflict, keyboard navigation은
   initiative P1-08, P3-06, P3-07, P4-08, P6-02, P6-03이 먼저 제공하며, 해당 PR merge 시 M8
   체크박스를 갱신한다. custom formula editor(표현식 DSL)는 initiative v1 non-goal이며 M8에 남는다.
+  그래프 표현 세 수준(파이프라인·레시피·고급 노드 캔버스)은
+  [schema 1.2·그래프 표현 initiative](../../planning/strategy-language-2-0/README.md)(2026-09-20)가
+  제공하며, 표현식 DSL은 그 뒤에도 non-goal로 남는다.
 - Form·Graph 직접 편집(schema 1.1 GUI 편집 initiative `docs/planning/strategy-gui-editing`, 2026-09-18)은
   source 트랜잭션으로 제공된다 — Form 필드·목록·중첩 목록, Graph 노드 추가·삭제·속성·입력 재연결·출력.
   ADR D5 개정 참고.

@@ -248,7 +248,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | adapter | SDK | 기본 모델 | 검색 | 스트리밍 |
 |---|---|---|---|---|
 | `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high`, `max_tokens = request.max_output_tokens_per_call` | `web_search_20260209` 서버 도구, 도메인 제한 없음. SDK의 `max_uses`는 **호출당** 한도라 adapter가 턴 누적 검색 횟수를 세어 호출마다 `max_uses = max(0, request.max_search_uses − 누적)`을 다시 계산하고, 0이면 그 호출의 도구 목록에서 `web_search`를 뺀다(D9 · OpenAI 행과 같은 집행) | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
-| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구(서버 측이라 개별 호출을 거부할 수 없다). adapter가 검색 호출 이벤트를 세어 누적이 `max_search_uses`에 닿으면 이후 공급자 호출의 도구 목록에서 `web_search`를 빼고 화면(`SearchActivity`)에 알린다. 모델에게 알리는 문장은 adapter가 저술하지 않고 application 프롬프트 owner가 준 고정 문구(`TurnRequest`에 실어 보내는 도구 결과 문구)만 쓴다(A-06에서 확정). 한 호출 안의 초과는 사후 관측만 가능하다. 실제 SDK 표면은 A-06에서 확정 | Responses 스트리밍 |
+| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구(서버 측이라 개별 호출을 거부할 수 없다). adapter가 검색 호출 이벤트를 세어 누적이 `max_search_uses`에 닿으면 이후 공급자 호출의 도구 목록에서 `web_search`를 빼고 화면(`SearchActivity`)에 알린다. 모델에게 알리는 문장은 adapter가 저술하지 않고 application 프롬프트 owner가 소유한 고정 문구(`_prompt.py`의 `SEARCH_BUDGET_EXHAUSTED_NOTICE`, facade로 노출)를 `developer` 입력 항목으로 전달한다 — `web_search`는 서버 도구라 답을 붙일 `function_call_output`이 없다(A-06에서 확정). 한 호출 안의 초과는 사후 관측만 가능하다. 요청은 `store=false`를 명시한다 — 주지 않으면 참이라 전략 원문·카탈로그가 공급자에 최소 30일 남고, 이 adapter는 대화 상태를 서버에 맡기지 않아 저장의 이득이 없다. 실제 SDK 표면은 A-06에서 확정 | Responses 스트리밍 |
 
 - `probe`는 최소 토큰 요청 한 번으로 키·모델·네트워크를 확인하고 `ProbeResult(ok, message,
   latency_ms, failure)`를 돌려준다. 실패 종류를 구분한다(인증·모델 없음·네트워크·요금 한도).
@@ -310,6 +310,26 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   `default_headers`로 들어가고 그것이 인증 헤더보다 뒤에 합쳐져 `X-Api-Key`를 덮어쓴다. adapter가
   인증 헤더를 `default_headers`에 **명시**하고 쓰지 않는 bearer 헤더는 지운다. 검증은 "무엇을
   넘겼는가"가 아니라 **실제 요청 헤더**로 한다 — 둘 사이에 실제로 차이가 생긴다.
+- **차단 여부는 SDK 소스로 확인한 전수 표로 관리한다.** 아래는 `openai` 3.16.2가 읽는 일곱이다
+  (`openai/_client.py`). SDK를 올릴 때 이 표를 다시 맞춘다. `anthropic` 쪽도 같은 방식으로 본다.
+
+  | 환경 변수 | 무엇을 바꾸나 | 차단 | 방법 |
+  |---|---|---|---|
+  | `OPENAI_API_KEY` | 누구의 키로 호출하나 | ✓ | `api_key`에 프로파일 비밀 명시 |
+  | `OPENAI_BASE_URL` | 어느 호스트로 나가나 | ✓ | 프로파일이 없으면 기본 호스트 명시 |
+  | `OPENAI_CUSTOM_HEADERS` (`Authorization` 줄) | 인증 헤더를 덮음 | ✓ | `default_headers`에 `Authorization` 명시 |
+  | `OPENAI_CUSTOM_HEADERS` (`OpenAI-Organization`·`OpenAI-Project` 줄) | 어느 조직·프로젝트로 과금·접근되나 | ✓ | `default_headers`에 두 이름을 `omit`으로 |
+  | `OPENAI_ORG_ID` | 위와 같음 | ✓ | 생성 뒤 `organization = None` |
+  | `OPENAI_PROJECT_ID` | 위와 같음 | ✓ | 생성 뒤 `project = None` |
+  | `OPENAI_CUSTOM_HEADERS` (그 밖의 줄) | 임의 헤더가 따라 붙음 | ✗ | SDK private(`_custom_headers`)을 비워야 해서 남겼다 |
+  | `OPENAI_ADMIN_KEY` | admin 엔드포인트 인증 | 해당 없음 | 이 경로가 쓰지 않는 표면 |
+  | `OPENAI_WEBHOOK_SECRET` | webhook 서명 검증 | 해당 없음 | 위와 같음 |
+
+  `organization = None`과 `omit`은 **둘 다** 필요하다. SDK는 두 헤더를 `Omit()`으로 둔 뒤
+  `_custom_headers`를 그 뒤에 병합하므로, 속성만 비우면 `OPENAI_CUSTOM_HEADERS`의 같은 이름 줄이
+  이긴다. 기준선 테스트는 변수를 전부 심고 **요청에 실린 자격 증명 값이 프로파일 비밀 하나뿐**임을
+  본다 — 개별 테스트가 "이 변수를 막았다"를 고정한다면 기준선은 "막지 못한 변수가 새로 생기면
+  드러난다"를 고정한다.
 - OpenAPI와 frontend generated SDK를 **같은 PR(A-04)에서** 갱신한다(12절). 비밀 필드는 요청 전용
   (`writeOnly`), 응답 스키마에 없다.
 

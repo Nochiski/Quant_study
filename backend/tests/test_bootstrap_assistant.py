@@ -163,6 +163,26 @@ def test_the_default_registry_offers_the_installed_anthropic_adapter(tmp_path: P
     assert availability[ProviderKind.ANTHROPIC].default_model == DEFAULT_MODEL
 
 
+def test_the_default_registry_offers_the_installed_openai_adapter(tmp_path: Path) -> None:
+    """기본 레지스트리에 A-06 adapter가 등록돼 있고, SDK가 있으면 설치됨으로 해소된다.
+
+    위 anthropic 건과 같은 모양이다. SDK가 있어야 뜻이 있는 단언이라 `importorskip`으로 이
+    테스트만 건너뛰고, adapter facade는 함수 안에서 import한다.
+    """
+    pytest.importorskip("openai", reason="공급자 SDK는 optional extra `llm`이다")
+    from strategy_workbench.adapters.outbound.llm_openai.facade.provider import DEFAULT_MODEL
+
+    assert ProviderKind.OPENAI in PROVIDER_ADAPTER_FACTORIES
+    container = build_container(
+        assistant=AssistantSettings(db_path=None, secrets_path=tmp_path / "secrets.json")
+    )
+
+    availability = {item.kind: item for item in container.assistant_profiles.available_kinds()}
+
+    assert availability[ProviderKind.OPENAI].installed is True
+    assert availability[ProviderKind.OPENAI].default_model == DEFAULT_MODEL
+
+
 def test_the_secrets_file_may_not_live_inside_the_repository() -> None:
     """저장소 안 경로는 어댑터가 생성 시점에 거절한다 — 평문 키가 git에 들어가는 사고 차단."""
     inside_repository = Path(__file__).resolve().parents[2] / "backend" / "secrets.json"

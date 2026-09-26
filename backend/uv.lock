@@ -729,6 +729,23 @@ wheels = [
 ]
 
 [[package]]
+name = "openai"
+version = "3.16.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "httpx2" },
+    { name = "jiter" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e2/c6/770171ef28854d8092ee2c3df68ef97d127362b28771e6b423c948894e07/openai-3.16.2.tar.gz", hash = "sha256:e129455fc6a744276cda63a9e2f0759207bc0cf24afc4cf356bf5029e631e955", size = 1696266, upload-time = "2026-09-18T21:27:23.586Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/17/72/2b1fe3e303db76ab2ba0c2de2b57822869bcb588db82334d4ff3aea8acf2/openai-3.16.2-py3-none-any.whl", hash = "sha256:660a7f8307e6605342ae84ff4425412e7cd19e5e9b298f975502df2a1a9a5d5f", size = 2053568, upload-time = "2026-09-18T21:27:20.885Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1027,6 +1044,7 @@ equity = [
 ]
 llm = [
     { name = "anthropic" },
+    { name = "openai" },
 ]
 parquet = [
     { name = "pyarrow" },
@@ -1049,6 +1067,7 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'equity'", specifier = ">=1.5" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "openai", marker = "extra == 'llm'", specifier = ">=2.0" },
     { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=15" },
     { name = "requests", marker = "extra == 'equity'", specifier = ">=2.32" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },

@@ -35,7 +35,11 @@ def test_factor_catalog_validate_and_explain_contract() -> None:
 
 
 def test_explain_marks_the_boolean_promotion_nodes_of_a_compiled_graph() -> None:
-    """실행 계획 화면이 승격 노드 이름 규칙을 복제하지 않게 wire 가 표식을 싣는다(감사 #13)."""
+    """실행 계획 화면이 승격 노드 이름 규칙을 복제하지 않게 wire 가 표식을 싣는다(감사 #13).
+
+    요청 그래프는 compile 이 승격한 모양 그대로다. 문서가 예약 접두사를 쓰면 compile 이 거절하므로
+    (DEFECT-232-01) 화면이 보내는 이 모양의 그래프는 compile 산출물뿐이다.
+    """
     client = TestClient(build_http_app())
     graph = {
         "nodes": [

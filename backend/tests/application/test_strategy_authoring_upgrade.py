@@ -304,3 +304,24 @@ def test_any_adapter_failure_is_a_drift_not_a_server_error() -> None:
 
     with pytest.raises(DocumentUpgradeDriftError, match="rewrite failed: IndexError"):
         _service(_CrashingCodec("")).upgrade(CompileRequest(source, SourceFormat.YAML))
+
+
+def test_an_upgraded_document_with_a_reserved_node_id_compiles_to_that_error() -> None:
+    """1.1 문서의 사용자 노드가 승격 예약 접두사를 쓰면 업그레이드는 원문을 다시 쓰고, 그 compile 이
+    예약 이름 error 로 저장을 막는다(DEFECT-232-01). 업그레이드는 노드 이름을 바꾸지 않는다."""
+    source = (
+        (FIXTURES / "quality_momentum.v1_1.yaml")
+        .read_text(encoding="utf-8")
+        .replace("node_id: close", "node_id: __promote_close")
+        .replace("input_node_id: close", "input_node_id: __promote_close")
+    )
+
+    upgraded = _service().upgrade(CompileRequest(source, SourceFormat.YAML))
+
+    assert "node_id: __promote_close" in upgraded.source
+    assert upgraded.compiled.spec is None
+    assert [
+        (item.code, item.pointer)
+        for item in upgraded.compiled.diagnostics
+        if item.severity.value == "error"
+    ] == [("strategy.factor.reserved_node_id", "/factors/0/graph/nodes/0/node_id")]

@@ -568,3 +568,100 @@ def test_the_mock_adapter_marks_its_raw_close_with_the_adjusted_field() -> None:
     assert _unadjusted(_compile(GOLDEN, adapter)) == [
         ("/factors/0/graph/nodes/0/field_id", "close")
     ]
+
+
+# -- 승격 예약 접두사 (DEFECT-232-01) -------------------------------------------------------------
+
+# 사용자가 compile 의 승격 모양(조건 노드와 상수 둘)을 예약 id 로 손수 쓴 팩터. 출력이 이미 숫자라
+# hydrate 는 아무것도 붙이지 않는다 — 그래서 spec 은 compile 이 승격한 그래프와 바이트까지 같다.
+_HAND_PROMOTED_FACTOR = """  - factor_id: above
+    label: "종가 100 초과"
+    direction: high
+    weight: 0.4
+    graph:
+      nodes:
+        - kind: field
+          node_id: px
+          field_id: price.close
+        - kind: constant
+          node_id: threshold
+          value: 100.0
+        - kind: comparison
+          node_id: above
+          operator: gt
+          left_node_id: px
+          right_node_id: threshold
+        - kind: constant
+          node_id: __promote_above_one
+          value: 1.0
+        - kind: constant
+          node_id: __promote_above_zero
+          value: 0.0
+        - kind: conditional
+          node_id: __promote_above
+          predicate_node_id: above
+          true_node_id: __promote_above_one
+          false_node_id: __promote_above_zero
+      output_node_id: __promote_above
+"""
+
+
+def test_a_hand_written_promotion_shape_is_rejected_at_its_node_ids() -> None:
+    """예약 접두사는 compile 이 붙이는 노드의 것이다: 문서가 쓰면 그 node_id 마다 error 다.
+
+    막지 않으면 compile 된 spec 이 승격한 그래프와 구분되지 않아, 실행 계획 설명이 사용자가 쓴
+    노드에 "compile 이 붙인 노드" 표식을 달고 화면이 문서 노드를 숨긴다(리뷰 #232).
+    """
+    compiled = _compile(_with_factor(_HAND_PROMOTED_FACTOR), None)
+
+    assert not compiled.ok
+    reserved = [
+        (item.pointer, item.node_id, item.severity)
+        for item in compiled.diagnostics
+        if item.code == "strategy.factor.reserved_node_id"
+    ]
+    assert reserved == [
+        (f"/factors/1/graph/nodes/{index}/node_id", node_id, DiagnosticSeverity.ERROR)
+        for index, node_id in (
+            (3, "__promote_above_one"),
+            (4, "__promote_above_zero"),
+            (5, "__promote_above"),
+        )
+    ]
+    [first] = [
+        item for item in compiled.diagnostics if item.code == "strategy.factor.reserved_node_id"
+    ][:1]
+    assert first.message == (
+        "__promote_ 로 시작하는 노드 이름은 참/거짓 출력을 점수로 바꿀 때 compile 이 쓰는 "
+        "예약 이름입니다. 다른 이름을 쓰세요: node_id='__promote_above_one' "
+        "reserved_prefix='__promote_'"
+    )
+    assert first.range is not None, "편집기가 그 node_id 값을 짚는다"
+
+
+def test_a_single_reserved_node_id_is_rejected_even_when_promotion_would_skip() -> None:
+    """예약 id 하나만 겹쳐도 거절한다(전에는 승격을 건너뛰고 출력 타입 오류로만 알렸다)."""
+    source = GOLDEN.replace("node_id: close", "node_id: __promote_close").replace(
+        "input_node_id: close", "input_node_id: __promote_close"
+    )
+
+    compiled = _compile(source, None)
+
+    assert [
+        (item.code, item.pointer) for item in compiled.diagnostics if item.severity.value == "error"
+    ] == [("strategy.factor.reserved_node_id", "/factors/0/graph/nodes/0/node_id")]
+
+
+def test_compile_generated_promotion_nodes_are_not_reserved_id_errors() -> None:
+    """compile 이 붙인 승격 노드는 문서에 없으므로 이 규칙에 걸리지 않는다."""
+    source = _with_factor(
+        _HAND_PROMOTED_FACTOR.replace("__promote_above", "flag_above").replace(
+            "output_node_id: flag_above", "output_node_id: above"
+        )
+    )
+
+    compiled = _compile(source, None)
+
+    assert compiled.ok, _errors(compiled)
+    assert compiled.spec is not None
+    assert compiled.spec.factors[1].graph.output_node_id == "__promote_above"

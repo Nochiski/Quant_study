@@ -51,7 +51,7 @@ from ._models import (
     composite_factors,
     inverse_risk_factor_id,
 )
-from ._promotion import promotion_node_ids
+from ._promotion import PROMOTION_NODE_PREFIX, is_reserved_node_id, promotion_node_ids
 
 
 class ValidationKind(StrEnum):
@@ -297,6 +297,35 @@ def _output_type_issue(
     )
 
 
+def _reserved_node_id_issues(
+    factor_index: int, graph: FactorGraph, written: frozenset[str]
+) -> list[ValidationIssue]:
+    """문서가 쓴 node_id 가 승격 예약 접두사로 시작하면 error (리뷰 #232 DEFECT-232-01).
+
+    승격 노드는 compile 이 문서 그래프 **끝에** 붙이므로 문서의 j 번째 노드는 spec 의 j 번째
+    노드다. 그래서 문서가 적은 자리(`written`)의 노드만 검사하고 붙인 노드는 건너뛴다. 이 규칙이
+    없으면 사용자가 승격 모양을 예약 id 로 그대로 쓴 그래프가 compile 이 승격한 그래프와 바이트까지
+    같아져, 화면이 문서 노드를 "compile 이 붙인 노드"로 숨긴다. 문서 없이 검증하는 호출자(JSON
+    spec API)는 `written` 이 비어 있어 판정하지 않는다.
+    """
+    issues: list[ValidationIssue] = []
+    for node_index, node in enumerate(graph.nodes):
+        pointer = f"/factors/{factor_index}/graph/nodes/{node_index}/node_id"
+        if pointer not in written or not is_reserved_node_id(node.node_id):
+            continue
+        issues.append(
+            semantic_issue(
+                "strategy.factor.reserved_node_id",
+                f"factors.{factor_index}.graph.nodes.{node_index}.node_id",
+                f"{PROMOTION_NODE_PREFIX} 로 시작하는 노드 이름은 참/거짓 출력을 점수로 바꿀 때 "
+                "compile 이 쓰는 예약 이름입니다. 다른 이름을 쓰세요: "
+                f"node_id={node.node_id!r} reserved_prefix={PROMOTION_NODE_PREFIX!r}",
+                node_id=node.node_id,
+            )
+        )
+    return issues
+
+
 # 어댑터 capability 가 없어 unsupported 인 노드에서는 같은 원인(그 필드 타입이 없다)을 그래프 검증이
 # 다시 말한다. unsupported 한 줄만 남긴다.
 _CAPABILITY_SHADOWED_CODES = frozenset(
@@ -495,7 +524,9 @@ def validate_strategy(
 
     `written_pointers` names the JSON Pointers the authoring document set explicitly. The typed
     spec cannot tell a written value from a default, so the applicability warning (spec D4) is
-    only emitted for pointers in this set; callers without a document pass nothing. A written
+    only emitted for pointers in this set; callers without a document pass nothing. 같은 집합으로
+    문서가 쓴 노드와 compile 이 붙인 승격 노드를 가려 예약 접두사 node_id 를 거절한다
+    (`strategy.factor.reserved_node_id`, 리뷰 #232). A written
     value equal to the model default is silent too: canonical documents (JSON projection, legacy
     generated source, format conversion) spell out every default and must not warn.
 
@@ -674,6 +705,7 @@ def validate_strategy(
     }
     for factor_index, factor in enumerate(spec.factors):
         base = f"factors.{factor_index}"
+        issues.extend(_reserved_node_id_issues(factor_index, factor.graph, written))
         for node_index, node in enumerate(factor.graph.nodes):
             if (
                 isinstance(node, ParameterNode)

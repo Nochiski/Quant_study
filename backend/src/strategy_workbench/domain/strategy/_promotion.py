@@ -12,9 +12,11 @@
   `_validation.py` 가 소유한다.
 - 붙인 뒤 출력은 숫자 시계열이므로 canonical payload 를 다시 hydrate 해도 또 붙지 않는다(저장소
   무결성 검사가 canonical JSON 을 다시 만들어 비교한다).
-- 예약 node_id 를 사용자가 이미 쓴 그래프는 승격하지 않는다. 중복 노드를 만들면 원인과 무관한
-  `duplicate_node` 진단이 문서에 없는 자리를 가리키게 된다. 그 경우 출력은 boolean 으로 남고
-  validator 가 `strategy.factor.output_type` 으로 이유(예약 id)를 말한다.
+- `PROMOTION_NODE_PREFIX` 는 예약 네임스페이스다. 문서가 이 접두사로 시작하는 node_id 를 쓰면
+  compile 이 `strategy.factor.reserved_node_id` error 로 거절한다(`_validation.py`, 리뷰 #232
+  DEFECT-232-01). 그래서 compile 을 통과한 spec 에서 이 접두사 노드는 승격이 붙인 것뿐이다. 문서를
+  거치지 않은 spec(JSON spec API)에서도 중복 노드를 만들지 않도록, 예약 id 가 이미 있는 그래프는
+  승격하지 않는다(출력은 boolean 으로 남고 validator 가 `strategy.factor.output_type` 으로 말한다).
 """
 
 from __future__ import annotations
@@ -34,6 +36,11 @@ from strategy_workbench.domain.factor.facade.validation import validate_factor_g
 from ._models import FactorSignal, StrategySpec
 
 PROMOTION_NODE_PREFIX = "__promote_"
+
+
+def is_reserved_node_id(node_id: str) -> bool:
+    """승격이 쓰는 예약 네임스페이스(`PROMOTION_NODE_PREFIX`)의 node_id 인가."""
+    return node_id.startswith(PROMOTION_NODE_PREFIX)
 
 
 def promotion_node_ids(factor_id: str) -> tuple[str, str, str]:
@@ -158,10 +165,13 @@ def synthesized_factor_nodes(graph: FactorGraph) -> tuple[SynthesizedNode, ...]:
     """컴파일된 팩터 그래프에서 compile 이 붙인 노드(그래프 순서). 사용자가 쓴 그래프면 빈 tuple.
 
     그래프만 보고 판정한다(실행 계획 설명 요청은 팩터 id 를 들고 오지 않는다): 출력 id 에서 팩터
-    id 를 읽고, 걷어 낸 그래프를 다시 승격하면 원래 그래프가 나올 때만 승격으로 인정한다. 예약 id 를
-    사용자가 직접 쓴 그래프는 승격되지 않으므로(`_promote_graph`) 이 검사를 통과하지 못한다.
+    id 를 읽고, 걷어 낸 그래프를 다시 승격하면 원래 그래프가 나올 때만 승격으로 인정한다.
+
+    그래프만으로는 사용자가 승격 모양을 예약 id 로 그대로 쓴 그래프와 구분할 수 없다. 그런 문서는
+    compile 이 예약 접두사로 거절하므로(`strategy.factor.reserved_node_id`) compile 된 spec 에는
+    나오지 않는다.
     """
-    if not graph.output_node_id.startswith(PROMOTION_NODE_PREFIX):
+    if not is_reserved_node_id(graph.output_node_id):
         return ()
     factor_id = graph.output_node_id.removeprefix(PROMOTION_NODE_PREFIX)
     if _demote_graph(graph, factor_id) is None:

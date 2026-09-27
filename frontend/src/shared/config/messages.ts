@@ -165,6 +165,12 @@ const ko = {
   "backtest.result.warnings.empty": "경고 없음",
   "backtest.warning.portfolio.sector_unknown_excluded":
     "섹터를 모르는 종목은 섹터 제약에서 뺐습니다",
+  "backtest.warning.benchmark.no_bar_at_start":
+    "벤치마크 첫 가격보다 앞선 구간이 있어 전체 구간 벤치마크 비교를 쓸 수 없습니다",
+  "backtest.warning.benchmark.suspended_sessions_carried":
+    "벤치마크 거래정지 세션은 직전 가격을 이어 썼습니다",
+  "backtest.warning.benchmark.delisted_sessions_frozen":
+    "벤치마크 상장이 끝난 뒤 세션은 마지막 값으로 멈췄습니다",
   // 지표의 쉬운 이름·뜻. 키는 backend Metric Registry의 metric_id이고 문장은 여기가 owner다
   // (결과 설명 spec R4). registry id 목록은 backend/tests/fixtures/analytics/metric_ids.json.
   "backtest.metric.total_return": "총수익률",
@@ -1792,6 +1798,12 @@ export const messages = {
     "backtest.result.warnings.empty": "No warnings",
     "backtest.warning.portfolio.sector_unknown_excluded":
       "Securities without a sector were left out of sector constraints",
+    "backtest.warning.benchmark.no_bar_at_start":
+      "Sessions before the benchmark's first price make the full-period benchmark comparison unavailable",
+    "backtest.warning.benchmark.suspended_sessions_carried":
+      "Suspended benchmark sessions carried the previous price",
+    "backtest.warning.benchmark.delisted_sessions_frozen":
+      "Benchmark sessions after its listing ended were frozen at the last value",
     "backtest.metric.total_return": "Total return",
     "backtest.metric.total_return.description":
       "How much the starting money grew or shrank by the end.",

@@ -134,6 +134,37 @@ describe("run 상세의 실행 설정", () => {
 });
 
 describe("run 상세의 데이터 경고", () => {
+  // main #239 가 벤치마크 경고를 원인별 코드로 나눴다. 코드마다 제목이 있어 코드 원문이 제목이 되지 않는다.
+  it.each([
+    "benchmark.no_bar_at_start",
+    "benchmark.suspended_sessions_carried",
+    "benchmark.delisted_sessions_frozen",
+    "portfolio.sector_unknown_excluded",
+  ])("%s 에 제목이 있다", async (code) => {
+    const base = result();
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          manifest: {
+            ...base.manifest,
+            warnings: [{ code, message: "서버 문장", severity: "warning" }],
+          },
+        }}
+      />,
+    );
+    const user = userEvent.setup();
+    const drawer = screen.getByRole("group", {
+      name: "Manifest · 데이터 경고 · 재현성 정보",
+    });
+    await user.click(
+      within(drawer).getByText("Manifest · 데이터 경고 · 재현성 정보"),
+    );
+    const warning = within(drawer).getByText("서버 문장").closest("p")!;
+    expect(warning.querySelector("strong")?.textContent).not.toBe(code);
+    expect(warning.querySelector("code")?.textContent).toBe(code);
+  });
+
   it("경고 제목을 코드로 고르고 서버 문장과 코드를 함께 보인다", async () => {
     const base = result();
     const sectorMessage =

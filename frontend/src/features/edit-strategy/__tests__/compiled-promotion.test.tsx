@@ -1,7 +1,8 @@
 /**
  * compile 이 붙인 boolean 출력 승격 노드(P2-07)를 실행 계획·그래프 화면이 문서 밖 노드로 보이지 않는다
  * (BACKLOG-014). 문서(아이디어 3, `gt` 출력)에는 노드가 넷이고, compile 된 spec 그래프에는 끝에
- * `__promote_<factor>` 조건 노드와 상수 둘이 더 붙는다. 화면은 문서 멤버십으로 둘을 가른다.
+ * `__promote_<factor>` 조건 노드와 상수 둘이 더 붙는다. 화면은 backend 가 실행 계획 설명에 싣는
+ * `synthesized_nodes` 표식으로 둘을 가른다(Phase 2 감사 #13). 접두사는 이 fixture 에만 있다.
  */
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -26,6 +27,7 @@ import {
   prepareExecutionPlans,
   type ExecutionPlansState,
   type FactorPlanRequest,
+  type PlannedFactor,
 } from "../model/use-execution-plans";
 import { ExecutionPlanPanel } from "../ui/execution-plan-panel";
 import { FactorGraphPanel } from "../ui/factor-graph-panel";
@@ -160,6 +162,23 @@ const EXPLANATION: FactorExplanation = {
     as_of_policy: "available_date_lte_as_of",
   },
   narrative: [],
+  synthesized_nodes: [
+    {
+      node_id: "__promote_ma20_breakout_one",
+      origin: "promotion",
+      role: "promotion_constant",
+    },
+    {
+      node_id: "__promote_ma20_breakout_zero",
+      origin: "promotion",
+      role: "promotion_constant",
+    },
+    {
+      node_id: "__promote_ma20_breakout",
+      origin: "promotion",
+      role: "promoted_output",
+    },
+  ],
 };
 
 const request = (): FactorPlanRequest => {
@@ -172,16 +191,19 @@ const readyState = (): ExecutionPlansState => ({
   status: "ready",
   expectedRegistryVersion: "registry-v1",
   expectedDataSnapshotId: "dataset-v1",
-  factors: [{ ...request(), explanation: EXPLANATION }],
+  factors: [planned()],
 });
 
+const planned = (
+  explanation: FactorExplanation = EXPLANATION,
+): PlannedFactor => ({ ...request(), explanation });
+
 describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
-  it("문서에 적힌 노드와 compile 이 붙인 노드를 문서 멤버십으로 가른다", () => {
-    const factor = request();
+  it("문서에 적힌 노드와 compile 이 붙인 노드를 backend 표식으로 가른다", () => {
+    const factor = planned();
 
     expect(factor.document).toEqual({
       nodeIds: ["close", "mean", "close_2", "gt"],
-      outputNodeId: "gt",
     });
     expect(
       factor.request.graph.nodes.map((node) => [
@@ -207,6 +229,30 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
     // 끊긴 참조는 붙인 노드가 아니다: 문서 쪽 결함으로 남아 포인터가 없다.
     expect(compiledNodeOrigin(factor, "typo")).toBe("document");
     expect(nodePointerById(factor, "typo")).toBeNull();
+  });
+
+  it("표식이 없으면 이름이 승격 노드처럼 보여도 문서 노드로 둔다(접두사를 읽지 않는다)", () => {
+    const factor = planned({ ...EXPLANATION, synthesized_nodes: [] });
+
+    expect(
+      factor.request.graph.nodes.map((node) =>
+        compiledNodeOrigin(factor, node.node_id),
+      ),
+    ).toEqual(Array(7).fill("document"));
+    expect(documentOutputNodeId(factor)).toBe("__promote_ma20_breakout");
+  });
+
+  it("문서를 읽지 못해도 표식으로 원래 출력을 찾는다", () => {
+    const factor = { ...planned(), document: null };
+
+    expect(compiledNodeOrigin(factor, "__promote_ma20_breakout")).toBe(
+      "boolean-score",
+    );
+    expect(documentOutputNodeId(factor)).toBe("gt");
+    expect(nodePointerById(factor, "__promote_ma20_breakout")).toBe(
+      "/factors/0/graph/nodes/3",
+    );
+    expect(nodePointerById(factor, "__promote_ma20_breakout_zero")).toBeNull();
   });
 
   it("실행 계획 표가 붙인 출력을 사람 말로 부르고 원래 출력 줄로 보낸다", async () => {

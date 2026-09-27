@@ -220,6 +220,7 @@ const explanation = (body: FactorGraphRequest): FactorExplanation => {
       as_of_policy: "available_date_lte_as_of",
     },
     narrative: [],
+    synthesized_nodes: [],
   };
 };
 
@@ -469,11 +470,15 @@ describe("execution plan orchestration", () => {
     expect(prepared.status).toBe("prepared");
     if (prepared.status !== "prepared") return;
 
+    const planned = {
+      ...prepared.requests[0],
+      explanation: explanation(prepared.requests[0].request),
+    };
     expect(factorNodePointer(1, 0)).toBe("/factors/1/graph/nodes/0");
-    expect(nodePointerById(prepared.requests[0], "mom_252")).toBe(
+    expect(nodePointerById(planned, "mom_252")).toBe(
       "/factors/0/graph/nodes/1",
     );
-    expect(nodePointerById(prepared.requests[0], "missing")).toBeNull();
+    expect(nodePointerById(planned, "missing")).toBeNull();
     expect(factorIndexAtPointer("/factors/1/graph/nodes/0/field_id")).toBe(1);
     expect(factorIndexAtPointer("/risk/max_name_weight")).toBeNull();
     expect(factorIndexAtPointer("/factors/01/graph")).toBeNull();

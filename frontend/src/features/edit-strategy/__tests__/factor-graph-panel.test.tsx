@@ -52,6 +52,7 @@ const explanation = (): FactorExplanation => ({
   registry_version: "factor-registry-v7",
   data_snapshot_id: "krx-pit-2026-09-01",
   narrative: [],
+  synthesized_nodes: [],
   validation: {
     valid: true,
     issues: [

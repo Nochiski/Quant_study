@@ -90,6 +90,7 @@ const explanation = (
     as_of_policy: "available_date_lte_as_of",
   },
   narrative: [],
+  synthesized_nodes: [],
 });
 
 const factor = (

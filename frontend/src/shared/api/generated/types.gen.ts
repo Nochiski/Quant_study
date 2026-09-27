@@ -1544,6 +1544,10 @@ export type FactorExplanation = {
    * Registry Version
    */
   registry_version: string;
+  /**
+   * Synthesized Nodes
+   */
+  synthesized_nodes: Array<SynthesizedNode>;
   validation: FactorGraphValidation;
 };
 
@@ -4733,6 +4737,36 @@ export type StrategyValidation = {
    */
   valid: boolean;
 };
+
+/**
+ * SynthesizedNode
+ *
+ * 문서에 줄이 없는, compile 이 붙인 노드 표식(P3-01, Phase 2 감사 #13).
+ *
+ * 화면은 이 표식으로 붙인 노드를 가른다. 승격 노드 이름 규칙(`PROMOTION_NODE_PREFIX`)을 화면이
+ * 복제하지 않게 하는 wire 계약이다. `origin` 은 붙인 단계이고 지금은 boolean 출력 승격뿐이다.
+ */
+export type SynthesizedNode = {
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Origin
+   */
+  origin: "promotion";
+  role: SynthesizedNodeRole;
+};
+
+/**
+ * SynthesizedNodeRole
+ *
+ * compile 이 붙인 노드의 역할.
+ *
+ * `promoted_output` 은 참/거짓 출력을 1/0 점수로 바꾼 조건 노드(그래프 출력)이고, 그 predicate 가
+ * 사용자가 쓴 원래 출력이다. `promotion_constant` 는 거기 딸린 참 1 / 거짓 0 상수다.
+ */
+export type SynthesizedNodeRole = "promoted_output" | "promotion_constant";
 
 /**
  * TargetFrame

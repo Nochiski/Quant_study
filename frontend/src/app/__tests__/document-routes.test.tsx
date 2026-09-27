@@ -1833,6 +1833,7 @@ const graphHandlers = () => [
       registry_version: "v1",
       data_snapshot_id: "snap",
       narrative: [],
+      synthesized_nodes: [],
       validation: {
         valid: true,
         issues: [],

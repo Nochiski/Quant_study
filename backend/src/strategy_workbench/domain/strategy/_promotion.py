@@ -19,7 +19,9 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from enum import StrEnum
+from typing import Literal
 
 from strategy_workbench.domain.factor.facade.expression import (
     ConditionalNode,
@@ -53,15 +55,14 @@ def _output_value_type(graph: FactorGraph) -> NodeValueType | None:
     return None
 
 
-def _promote(factor: FactorSignal) -> FactorSignal:
-    graph = factor.graph
+def _promote_graph(graph: FactorGraph, factor_id: str) -> FactorGraph:
     if _output_value_type(graph) is not NodeValueType.BOOLEAN_SERIES:
-        return factor
-    output_id, true_id, false_id = promotion_node_ids(factor.factor_id)
+        return graph
+    output_id, true_id, false_id = promotion_node_ids(factor_id)
     taken = {node.node_id for node in graph.nodes}
     if taken & {output_id, true_id, false_id}:
-        return factor
-    promoted = FactorGraph(
+        return graph
+    return FactorGraph(
         nodes=(
             *graph.nodes,
             ConstantNode(node_id=true_id, value=1.0, kind="constant"),
@@ -76,7 +77,11 @@ def _promote(factor: FactorSignal) -> FactorSignal:
         ),
         output_node_id=output_id,
     )
-    return replace(factor, graph=promoted)
+
+
+def _promote(factor: FactorSignal) -> FactorSignal:
+    graph = _promote_graph(factor.graph, factor.factor_id)
+    return factor if graph is factor.graph else replace(factor, graph=graph)
 
 
 def promote_boolean_factor_outputs(spec: StrategySpec) -> StrategySpec:
@@ -87,11 +92,11 @@ def promote_boolean_factor_outputs(spec: StrategySpec) -> StrategySpec:
     return replace(spec, factors=factors)
 
 
-def _demote(factor: FactorSignal) -> FactorSignal:
-    graph = factor.graph
-    output_id, true_id, false_id = promotion_node_ids(factor.factor_id)
+def _demote_graph(graph: FactorGraph, factor_id: str) -> FactorGraph | None:
+    """승격을 걷어 낸 사용자 그래프. `graph` 가 `factor_id` 로 승격된 그래프가 아니면 None."""
+    output_id, true_id, false_id = promotion_node_ids(factor_id)
     if graph.output_node_id != output_id or len(graph.nodes) < 3:
-        return factor
+        return None
     *authored, true_node, false_node, condition = graph.nodes
     if not (
         isinstance(true_node, ConstantNode)
@@ -101,13 +106,15 @@ def _demote(factor: FactorSignal) -> FactorSignal:
         and isinstance(condition, ConditionalNode)
         and condition.node_id == output_id
     ):
-        return factor
-    candidate = replace(
-        factor,
-        graph=FactorGraph(nodes=tuple(authored), output_node_id=condition.predicate_node_id),
-    )
+        return None
+    candidate = FactorGraph(nodes=tuple(authored), output_node_id=condition.predicate_node_id)
     # 정확한 역함수만 인정한다: 걷어 낸 그래프를 다시 승격하면 원래 그래프가 나와야 한다.
-    return candidate if _promote(candidate) == factor else factor
+    return candidate if _promote_graph(candidate, factor_id) == graph else None
+
+
+def _demote(factor: FactorSignal) -> FactorSignal:
+    graph = _demote_graph(factor.graph, factor.factor_id)
+    return factor if graph is None else replace(factor, graph=graph)
 
 
 def demote_boolean_factor_outputs(spec: StrategySpec) -> StrategySpec:
@@ -121,3 +128,47 @@ def demote_boolean_factor_outputs(spec: StrategySpec) -> StrategySpec:
     if factors == spec.factors:
         return spec
     return replace(spec, factors=factors)
+
+
+class SynthesizedNodeRole(StrEnum):
+    """compile 이 붙인 노드의 역할.
+
+    `promoted_output` 은 참/거짓 출력을 1/0 점수로 바꾼 조건 노드(그래프 출력)이고, 그 predicate 가
+    사용자가 쓴 원래 출력이다. `promotion_constant` 는 거기 딸린 참 1 / 거짓 0 상수다.
+    """
+
+    PROMOTED_OUTPUT = "promoted_output"
+    PROMOTION_CONSTANT = "promotion_constant"
+
+
+@dataclass(frozen=True)
+class SynthesizedNode:
+    """문서에 줄이 없는, compile 이 붙인 노드 표식(P3-01, Phase 2 감사 #13).
+
+    화면은 이 표식으로 붙인 노드를 가른다. 승격 노드 이름 규칙(`PROMOTION_NODE_PREFIX`)을 화면이
+    복제하지 않게 하는 wire 계약이다. `origin` 은 붙인 단계이고 지금은 boolean 출력 승격뿐이다.
+    """
+
+    node_id: str
+    origin: Literal["promotion"]
+    role: SynthesizedNodeRole
+
+
+def synthesized_factor_nodes(graph: FactorGraph) -> tuple[SynthesizedNode, ...]:
+    """컴파일된 팩터 그래프에서 compile 이 붙인 노드(그래프 순서). 사용자가 쓴 그래프면 빈 tuple.
+
+    그래프만 보고 판정한다(실행 계획 설명 요청은 팩터 id 를 들고 오지 않는다): 출력 id 에서 팩터
+    id 를 읽고, 걷어 낸 그래프를 다시 승격하면 원래 그래프가 나올 때만 승격으로 인정한다. 예약 id 를
+    사용자가 직접 쓴 그래프는 승격되지 않으므로(`_promote_graph`) 이 검사를 통과하지 못한다.
+    """
+    if not graph.output_node_id.startswith(PROMOTION_NODE_PREFIX):
+        return ()
+    factor_id = graph.output_node_id.removeprefix(PROMOTION_NODE_PREFIX)
+    if _demote_graph(graph, factor_id) is None:
+        return ()
+    output_id, true_id, false_id = promotion_node_ids(factor_id)
+    return (
+        SynthesizedNode(true_id, "promotion", SynthesizedNodeRole.PROMOTION_CONSTANT),
+        SynthesizedNode(false_id, "promotion", SynthesizedNodeRole.PROMOTION_CONSTANT),
+        SynthesizedNode(output_id, "promotion", SynthesizedNodeRole.PROMOTED_OUTPUT),
+    )

@@ -20,11 +20,10 @@ export type FactorPlanRequest = {
   label: string;
   request: FactorGraphRequest;
   /**
-   * 사용자가 문서에 적은 이 팩터 그래프의 노드 id(문서 순서)와 출력 노드 id. 컴파일된 그래프
-   * (`request.graph`)에는 compile 이 붙인 노드가 더 있을 수 있다(P2-07 boolean 출력 승격). 문서를
-   * 읽지 못하면 null 이고, 그때는 컴파일된 그래프를 그대로 문서로 본다.
+   * 사용자가 문서에 적은 이 팩터 그래프의 노드 id(문서 순서). "소스 열기" pointer 의 노드 index 를
+   * 문서에서 찾는 데 쓴다. 문서를 읽지 못하면 null 이고, 그때는 컴파일된 그래프 순서를 쓴다.
    */
-  document: { nodeIds: readonly string[]; outputNodeId: string | null } | null;
+  document: { nodeIds: readonly string[] } | null;
 };
 
 export type PlannedFactor = FactorPlanRequest & {
@@ -151,7 +150,7 @@ export const prepareExecutionPlans = (
   };
 };
 
-/** 컴파일된 spec 과 같은 버전의 parse tree. 다른 버전이면 문서 멤버십을 판정하지 않는다(null). */
+/** 컴파일된 spec 과 같은 버전의 parse tree. 다른 버전이면 문서 노드 index 를 쓰지 않는다(null). */
 const documentTree = (state: DocumentState): unknown =>
   state.parse?.status === "ok" && state.parsedVersion === state.sourceVersion
     ? state.parse.tree
@@ -172,12 +171,7 @@ const documentGraph = (
       ? ((node as Record<string, unknown>).node_id as string)
       : "",
   );
-  const output = valueAtPointer(tree, `${pointer}/output_node_id`);
-  return {
-    nodeIds,
-    outputNodeId:
-      output.present && typeof output.value === "string" ? output.value : null,
-  };
+  return { nodeIds };
 };
 
 const buildFactorPlanRequests = (
@@ -219,39 +213,44 @@ export const factorIndexAtPointer = (
 };
 
 /**
- * 컴파일된 그래프 노드의 출처(BACKLOG-014). `document`는 사용자가 적은 노드다. 문서에 없는 노드는
- * compile 이 붙인 것이다 — 지금은 boolean 출력 승격(P2-07, `domain/strategy/_promotion.py`)뿐이고,
- * 그래프 출력이 된 조건 노드가 `boolean-score`(참/거짓을 1/0 점수로), 거기 딸린 상수가 `support`다.
- * 판정은 문서 멤버십으로만 한다: 승격 노드 이름 규칙(접두사)을 frontend 에 적지 않는다.
+ * 컴파일된 그래프 노드의 출처(BACKLOG-014). `document`는 사용자가 적은 노드다. compile 이 붙인
+ * 노드는 backend 가 실행 계획 설명의 `synthesized_nodes` 표식으로 알려 준다 — 지금은 boolean 출력
+ * 승격(P2-07)뿐이고, 그래프 출력이 된 조건 노드가 `boolean-score`(참/거짓을 1/0 점수로), 거기 딸린
+ * 상수가 `support`다. 승격 노드 이름 규칙(접두사)의 owner 는 backend 라 frontend 에 적지 않는다
+ * (Phase 2 감사 #13). 표식이 없는 id(끊긴 참조 포함)는 문서 쪽 노드로 그대로 보인다.
  */
 export type CompiledNodeOrigin = "document" | "boolean-score" | "support";
 
 export const compiledNodeOrigin = (
-  factor: FactorPlanRequest,
+  factor: PlannedFactor,
   nodeId: string,
 ): CompiledNodeOrigin => {
-  // 컴파일된 그래프에도 없는 id(끊긴 참조)는 붙인 노드가 아니다: 문서 쪽 결함으로 그대로 보인다.
-  if (
-    factor.document === null ||
-    factor.document.nodeIds.includes(nodeId) ||
-    !factor.request.graph.nodes.some((node) => node.node_id === nodeId)
-  )
-    return "document";
-  return nodeId === factor.request.graph.output_node_id
-    ? "boolean-score"
-    : "support";
+  const marker = factor.explanation.synthesized_nodes.find(
+    (node) => node.node_id === nodeId,
+  );
+  if (marker === undefined) return "document";
+  return marker.role === "promoted_output" ? "boolean-score" : "support";
 };
 
-/** 사용자가 적은 출력 노드 id. 승격된 그래프면 원래 출력(조건 노드의 predicate)이다. */
-export const documentOutputNodeId = (factor: FactorPlanRequest): string =>
-  factor.document?.outputNodeId ?? factor.request.graph.output_node_id;
+/** 사용자가 적은 출력 노드 id. 승격된 그래프면 원래 출력(붙인 조건 노드의 predicate)이다. */
+export const documentOutputNodeId = (factor: PlannedFactor): string => {
+  const graph = factor.request.graph;
+  if (compiledNodeOrigin(factor, graph.output_node_id) !== "boolean-score")
+    return graph.output_node_id;
+  const output = graph.nodes.find(
+    (node) => node.node_id === graph.output_node_id,
+  );
+  return output?.kind === "conditional"
+    ? output.predicate_node_id
+    : graph.output_node_id;
+};
 
 /**
  * 노드가 가리키는 문서 위치. 문서 노드는 문서 안 순서로 찾는다. `boolean-score`는 원래 출력 노드를
  * 짚고("소스 열기"가 사용자가 쓴 줄로 간다), `support`는 문서에 대응하는 줄이 없어 null 이다.
  */
 export const nodePointerById = (
-  factor: FactorPlanRequest,
+  factor: PlannedFactor,
   nodeId: string,
 ): string | null => {
   const origin = compiledNodeOrigin(factor, nodeId);

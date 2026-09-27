@@ -12,6 +12,7 @@ from strategy_workbench.domain.factor.facade.planning import (
     ResolvedFactorParameter,
 )
 from strategy_workbench.domain.factor.facade.validation import FactorGraphValidation
+from strategy_workbench.domain.strategy.facade.promotion import SynthesizedNode
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,11 @@ class FactorExplanation:
     validation: FactorGraphValidation
     plan: FactorExecutionPlan | None
     narrative: tuple[str, ...]
+    # compile 이 붙인 노드 표식(P3-01, Phase 2 감사 #13). 실행 계획 화면은 전략 compile 이 낸
+    # 그래프를 이 경로로 설명받는데, 그 그래프에는 문서에 줄이 없는 승격 노드가 있다. 화면이 승격
+    # 노드 이름 규칙을 복제하지 않고 이 표식으로 가른다.
+    # 팩터 연구에서 직접 쓴 그래프면 빈 tuple 이다.
+    synthesized_nodes: tuple[SynthesizedNode, ...]
 
 
 @dataclass(frozen=True)

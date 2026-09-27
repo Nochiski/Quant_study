@@ -91,6 +91,7 @@ const plans = (): ExecutionPlansState => ({
           as_of_policy: "available_date_lte_as_of",
         },
         narrative: [],
+        synthesized_nodes: [],
       },
     },
   ],
@@ -184,8 +185,13 @@ describe("Strategy IDE debugger composition", () => {
     };
     factor.document = {
       nodeIds: factor.request.graph.nodes.slice(0, 2).map((node) => node.node_id),
-      outputNodeId: "mom_252",
     };
+    // backend 가 실행 계획 설명에 싣는 붙인 노드 표식(Phase 2 감사 #13).
+    factor.explanation.synthesized_nodes = [
+      { node_id: "__promote_momentum_one", origin: "promotion", role: "promotion_constant" },
+      { node_id: "__promote_momentum_zero", origin: "promotion", role: "promotion_constant" },
+      { node_id: "__promote_momentum", origin: "promotion", role: "promoted_output" },
+    ];
     const steps = factor.explanation.plan!.steps;
     factor.explanation.plan!.steps = [
       ...steps,

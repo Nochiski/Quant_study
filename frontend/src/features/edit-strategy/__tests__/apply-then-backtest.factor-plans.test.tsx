@@ -218,6 +218,7 @@ const explanation = (graph: FactorGraphRequest["graph"]): FactorExplanation => {
       as_of_policy: "available_date_lte_as_of",
     },
     narrative: [],
+    synthesized_nodes: [],
   };
 };
 

@@ -2438,6 +2438,13 @@
             "title": "Registry Version",
             "type": "string"
           },
+          "synthesized_nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SynthesizedNode"
+            },
+            "title": "Synthesized Nodes",
+            "type": "array"
+          },
           "validation": {
             "$ref": "#/components/schemas/FactorGraphValidation"
           }
@@ -2447,7 +2454,8 @@
           "data_snapshot_id",
           "validation",
           "plan",
-          "narrative"
+          "narrative",
+          "synthesized_nodes"
         ],
         "title": "FactorExplanation",
         "type": "object"
@@ -7522,6 +7530,39 @@
         ],
         "title": "StrategyValidation",
         "type": "object"
+      },
+      "SynthesizedNode": {
+        "description": "문서에 줄이 없는, compile 이 붙인 노드 표식(P3-01, Phase 2 감사 #13).\n\n화면은 이 표식으로 붙인 노드를 가른다. 승격 노드 이름 규칙(`PROMOTION_NODE_PREFIX`)을 화면이\n복제하지 않게 하는 wire 계약이다. `origin` 은 붙인 단계이고 지금은 boolean 출력 승격뿐이다.",
+        "properties": {
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "origin": {
+            "const": "promotion",
+            "title": "Origin",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/SynthesizedNodeRole"
+          }
+        },
+        "required": [
+          "node_id",
+          "origin",
+          "role"
+        ],
+        "title": "SynthesizedNode",
+        "type": "object"
+      },
+      "SynthesizedNodeRole": {
+        "description": "compile 이 붙인 노드의 역할.\n\n`promoted_output` 은 참/거짓 출력을 1/0 점수로 바꾼 조건 노드(그래프 출력)이고, 그 predicate 가\n사용자가 쓴 원래 출력이다. `promotion_constant` 는 거기 딸린 참 1 / 거짓 0 상수다.",
+        "enum": [
+          "promoted_output",
+          "promotion_constant"
+        ],
+        "title": "SynthesizedNodeRole",
+        "type": "string"
       },
       "TargetFrame": {
         "properties": {

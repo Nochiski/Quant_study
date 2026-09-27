@@ -775,10 +775,15 @@ P3-01 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 �
    runtime schema 계약을 넓히는데, stem 이 이미 backend 소유라 규칙 하나로 충분하다. 스키마 enum 전수
    커버리지 테스트와, 스키마·카탈로그가 발행하지 않는 `strategy.{section,field,node,operator}.*` 키가 사전에
    남으면 실패하는 역방향 테스트(`screen-vocabulary.test.ts`)를 같이 둔다 — 후자가 1.1 잔재 26개를 찾았다.
-2. **compile 이 붙인 승격 노드는 문서 멤버십으로 판정한다.** `__promote_` 접두사를 frontend 에 적지 않는다.
-   실행 계획 요청이 문서 tree 의 노드 id·출력 id 를 함께 들고(`FactorPlanRequest.document`),
-   `compiledNodeOrigin` 이 `document`·`boolean-score`(문서에 없는 그래프 출력)·`support`(나머지 붙인 노드)로
-   가른다. 컴파일된 그래프에도 없는 id(끊긴 참조)는 붙인 노드가 아니라 문서 결함으로 남긴다.
+2. **compile 이 붙인 승격 노드는 backend wire 표식으로 판정한다(Phase 2 감사 #13, 리드 결정).** `__promote_`
+   접두사를 frontend 에 적지 않는다. 처음에는 문서 tree 멤버십으로 갈랐는데, 리드가 감사 #13 을 backend
+   표식으로 정해 바꿨다. 실행 계획 설명 응답(`FactorExplanation.synthesized_nodes`)이 붙인 노드마다
+   `node_id`·`origin: "promotion"`·`role`(`promoted_output`·`promotion_constant`)을 싣고,
+   `compiledNodeOrigin` 이 이를 `boolean-score`·`support` 로 부른다. 표식은 `_promotion.py` 의
+   `synthesized_factor_nodes` 가 그래프만 보고 낸다(설명 요청은 팩터 id 를 들고 오지 않는다). 걷어 낸 뒤 다시
+   승격해 같아야만 인정하므로 이름만 흉내 낸 그래프는 표식을 받지 않는다. 그래서 `application/factor_research`
+   의 `DEPENDS_ON` 에 `domain.strategy` 가 들어간다. trace wire 에는 싣지 않는다: 디버거가 문서 노드 id 만
+   요청하므로(결정 3) 응답에 붙인 노드가 나올 길이 없다. 문서 tree 는 "소스 열기" 노드 index 를 찾는 데만 쓴다.
 3. **디버거는 붙인 노드를 숨긴다(사람 말 라벨이 아니다).** 디버거는 선택을 pointer 로 라우팅하는데, 붙인 출력의
    "소스 열기"가 원래 출력 줄을 가리키게 하면 두 노드가 같은 pointer 를 가져 붙인 노드를 고를 수 없다. 원래
    출력의 참/거짓 값이 같은 정보라 문서 노드만 추적하고 출력 노드를 사용자가 적은 출력으로 둔다. 실행 계획
@@ -1647,9 +1652,11 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   배너에는 사용자가 쓰지 않은 노드의 변경 여러 줄이 "의미 변경"으로 보인다. diff 자체는 해시가 보는
   것을 정확히 말하므로 계산 결함은 아니다.
 - **담당**: `P3-01`(execution plan·debugger 를 1.2 에 맞추는 PR). WORKFLOW P3-01 에 예약했다.
-- **처리**: P3-01. 문서 멤버십 판정 `compiledNodeOrigin`, 실행 계획 표·그래프 화면의 "참/거짓을 1/0으로" 행,
-  디버거의 문서 노드 전용 추적, backend `_diff.py` 의 `demote_boolean_factor_outputs`, draft diff 의 문서 tree
-  멤버십 걷기(P3 스택 결정 2~4). 재현 테스트 `compiled-promotion.test.tsx`·`test_strategy_diff.py` 승격 3건.
+- **처리**: P3-01. backend 표식 `synthesized_nodes`(실행 계획 설명 응답, Phase 2 감사 #13)를 읽는
+  `compiledNodeOrigin`, 실행 계획 표·그래프 화면의 "참/거짓을 1/0으로" 행, 디버거의 문서 노드 전용 추적,
+  backend `_diff.py` 의 `demote_boolean_factor_outputs`, draft diff 의 문서 tree 멤버십 걷기(P3 스택 결정
+  2~4). 재현 테스트 `compiled-promotion.test.tsx`·`test_strategy_diff.py` 승격 3건·`test_factor_output_gate.py`
+  표식 3건·`test_factor_http_api.py` 표식 1건.
 
 ### BACKLOG-015: 그룹 안 순위 `group.rank` 가 입력 단위를 물려준다
 

@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_REVIEW
 current_phase: P1,P2
-current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08
-active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08]
-parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08]
-last_updated: 2026-09-27T10:19:10+09:00
+current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08,P2-09
+active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09]
+parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09]
+last_updated: 2026-09-27T11:05:03+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 11
@@ -25,11 +25,11 @@ progress_percent: 21
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2` |
-| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08` |
-| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08` |
+| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08,P2-09` |
+| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `11 / 29` |
-| Aggregated at | `2026-09-27 10:19 KST` |
+| Aggregated at | `2026-09-27 11:05 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -296,6 +296,71 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Focused tests | `uv run pytest tests/integration/test_idea_fixtures.py tests/domain/test_factor_operators.py tests/integration/test_strategy_http_api.py tests/contract/test_raw_observation_port.py -q` |
 | 제약사항 | **파일 수가 12절 상한(10)을 넘는다(16), 분할하지 않는다.** 아이디어 fixture 5개는 acceptance 가 한 묶음으로 요구하는 데이터 파일이고, 리드 결정(빌더 node_id 정본)이 fixture 와 spec 예시를 같이 고치라고 해서 문서가 늘었다. backend 는 +597 줄이다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
 | Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·계약 산출물 diff·frontend typecheck·typecheck:e2e·lint·test·build·`api:generate` diff 0·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
+
+| 항목 | 값 |
+|---|---|
+| PR | `P2-09` |
+| Intent | 은퇴 버전(1.0·1.1) 문서가 현재 버전으로 오르는 경로를 연다. 버전 디스패치 업그레이더, 업그레이드 응답의 `environment`·`warnings`, 동결 row 를 같은 체인으로 읽기 |
+| Acceptance | WORKFLOW P2-09 |
+| Non-goals | 배너 문구·1.1 문서 배너·`environment` 로 실행 설정 채우기·warning 표시와 그 i18n(P3-02, WORKFLOW P3-02 에 예약), 실행 결과 캐시와 `run_fingerprint` 표기 버전(캐시를 처음 도입하는 PR), 실 DB 마이그레이션 |
+| Branch/worktree | `feat/lang2-p2-09-upgrader` / `wt-lang2-p2-09` |
+| Base SHA | P2-08 tip `dffc1d7b` |
+| Head SHA | [#216](https://github.com/Nochiski/Quant_study/pull/216) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
+| Diff stat | 생성 산출물(OpenAPI·SDK)·계획 문서를 뺀 handwritten **28파일 · +1911 / −526**. backend src 14파일 +913/−279(`_upgrade.py` 재작성 +435/−180, 신규 `domain/backtest/_retired.py` 227줄), test 10파일 +958/−226(신규 3: 실행 설정 변환 134·1.1 의미 보존 180·v1_2 golden 41줄), e2e·스토리 3파일 +36/−17, SoT 규칙 1파일 +4/−4 |
+| Focused tests | `uv run pytest tests/domain/test_strategy_upgrade.py tests/domain/test_retired_run_environment.py tests/contract/test_document_upgrade_source.py tests/application/test_strategy_authoring_upgrade.py tests/integration/test_strategy_document_upgrade_http_api.py tests/integration/test_upgrade_preserves_1_1_meaning.py tests/contract/test_strategy_repository_retired_1_1.py tests/contract/test_strategy_repository_frozen_1_0.py -q` |
+| 제약사항 | **12절 상한 초과(600줄·10파일 → 1911줄·28파일), 분할하지 않는다.** acceptance 가 "심볼 교체와 호출자 갱신을 같은 PR"로 묶었다 — facade 공개 심볼(`upgrade_document_1_0`·`is_legacy_document`·`RETIRED_SCHEMA_VERSIONS` 등)을 지우는 순간 source 경로 어댑터·repository codec·authoring 서비스와 그 테스트가 같이 움직여야 컴파일된다. 비테스트 src 는 913줄이고 그중 `_upgrade.py` 는 파일 재작성이라 diff 가 부풀었다(단계 맵·검증·결과 타입·실행 설정 읽기). 커밋을 논리 단위 8개로 나눠 리뷰 단위를 대신한다. e2e 는 P2-03~P3-02 묶음 머지 전략의 원인 (1)로만 red 이고 원인 (2)는 이 PR 이 해소한다(PR 본문 대조표) |
+| Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·계약 산출물 diff·`database/tests`·frontend typecheck·typecheck:e2e·lint·test·build·`api:generate` diff 0·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
+
+P2-09 결정 11건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
+
+1. **단계 맵의 값은 이름 붙은 step 튜플이고, 목표 버전은 디스패처가 찍는다.** WORKFLOW 는
+   `UPGRADE_STEPS: Mapping[str, tuple[UpgradeStep, ...]]` 라고 적지만 기존처럼 `(이름, step)` 쌍으로 둔다.
+   순서 고정 테스트와 단계 실패 메시지가 이름을 읽는다. `schema_version` 을 찍던 step 은 단계 밖으로
+   빼서 `apply_upgrade_steps` 가 단계마다 **그 단계의 목표 버전**(체인의 다음 키)을 찍는다. 단계의 검증
+   조건은 같은 키의 `_STAGE_LEFTOVERS`(1.0: `legacy_shape_hints`, 1.1: 실행 설정 세 자리)이고, 남으면
+   `NotUpgradeableDocumentError` 다(세 겹 `factors` 같은 입력이 1.1 로 찍힌 채 넘어가지 않는다).
+2. **공개 API 는 `upgrade_document(tree, *, until=None) -> UpgradeOutcome(tree, source_version,
+   environment, warnings)` 와 제자리 판 `apply_upgrade_steps` 둘이다.** 제자리 판은 source 경로(ruamel
+   CST)가 쓴다. `until` 은 체인 중간에서 멈춰 중간 golden(`.v1_1.commented.yaml`)을 바이트로 고정한다.
+   코덱 클래스의 `upgrade_source(..., until=None)` 도 같은 인자를 받지만 port 계약 밖의 선택 인자다.
+3. **체인 시작 버전과 버전 상한(BACKLOG-010).** 본문에 1.0 모양이 있으면 버전 줄과 상관없이 1.0 단계부터
+   탄다(1.0 step 은 옛 모양에만 반응해 1.1 본문에 무해). 상한은 "아는 버전"(동결 집합 ∪ 현재 버전) 또는
+   버전 줄 없음이다 — 숫자 비교(`"1.3" > "1.2"`)가 아니라 닫힌 집합이라 `"0.9"`·`"draft"` 같은 손상 값도
+   거절한다. 따옴표 없는 `1.0`(YAML float)은 문자열로 맞춘다. `is_upgradeable_document` 와 디스패처가 같은
+   `_chain_start` 를 읽는다.
+4. **`require_retired_schema_version`·`UnknownSchemaVersionError` 는 합치지 않고 지웠다.** repository
+   codec 이 `upgrade_document` 를 부르면 체인이 모르는 버전을 `NotUpgradeableDocumentError` 로 거절해
+   같은 fail-closed 가 된다. 메시지는 "neither current nor a known retired version" 을 유지해
+   `test_strategy_repository_retired_1_1.py` 의 미지 버전 테스트가 **그대로** 통과한다.
+5. **실행 설정 변환의 owner 는 `domain/backtest` 다.** 업그레이더는 떼어 낸 원문 값을
+   `RetiredExecutionSettings` 로 돌려주기만 한다 — `domain.strategy → domain.backtest` 화살표는 기존 반대
+   방향과 순환이 된다(P2-01 브리지와 같은 배치). `environment_from_retired_settings` 는 Result 값을 돌려주고
+   (`.claude/rules/python.md`), 하나라도 읽히지 않으면 `environment` 전체를 비운다 — 일부만 채운 실행
+   설정은 사용자가 지정한 적 없는 값을 사실처럼 보인다. 원문 필드 이름은 `data_section`·`execution_section`
+   이다(`settings.data.x` 는 `test_run_environment_ownership.py` 의 옛 섹션 읽기 가드에 걸린다).
+6. **팩터별 결측 정책 충돌은 spec 대로 첫 값 + warning 이다.** P2-02 의 런타임 브리지는 같은 충돌을
+   거부했지만(결정 2), 업그레이드는 사용자가 결과를 보고 실행 설정에서 고칠 수 있는 단계라 막을 이유가
+   없다. warning 이 쓴 값·출처·충돌 목록을 짚는다.
+7. **`weighting: factor_score` 문서에는 warning 을 낸다**(`strategy_document.upgrade_weighting_rule_changed`).
+   P2-04 결정 5 로 비중 규칙이 바뀌어 선정은 같아도 목표 비중이 1.1 과 다를 수 있다. 저장된 1.1 전략의
+   동작 변화를 사용자에게 알리는 통로가 업그레이드 응답 warning 이다(P3-02 가 배너에 표시). "1.1 결과
+   보존" 통합 테스트는 `equal` 비중으로 합성 점수를 1.1 공식과 대조한다.
+8. **warning 코드는 닫힌 `Literal` 이다.** OpenAPI·생성 SDK 에 enum 으로 나가 화면이 코드별 문장을 붙일
+   수 있고, 런타임 게이트(`UPGRADE_WARNING_CODES`)도 둔다. 실행 설정을 옮기지 못했다는 코드는
+   application 이 내지만 어휘 owner 는 `_upgrade.py` 다.
+9. **없던 `signal` 섹션은 모델 필드 순서 자리에 넣고, 이미 적힌 `normalization` 은 덮지 않는다.** 1.1
+   템플릿에는 `signal` 이 없다. 자리는 `StrategySpec` 필드 순서에서 읽는다(`factors` 뒤). 1.1 문서에
+   `normalization` 이 있으면 1.1 에서도 구조 오류였던 문서라 작성자 값을 둔다.
+10. **source 경로 주석 규칙을 두 경우로 넓혔다.** (a) 섹션을 통째로 지울 때(`data`·`execution`) 섹션 끝
+    아래 주석(다음 키 설명)은 섹션 안 **가장 깊은 마지막 키** 슬롯에 있으므로 거기서 읽고, 앞 키가 컨테이너면
+    그 가장 깊은 마지막 키 뒤로 옮긴다. (b) step 이 새 키를 넣으면 앞 키의 꼬리 주석을 새 키 뒤로 옮긴다 —
+    안 옮기면 `portfolio` 를 설명하던 주석이 새 `signal:` 위에 붙는다. 두 규칙은 돌연변이(로직 무력화)에서
+    각각 2·4건 red 로 확인했다. `_finish_emptied_sections` 는 체인 끝에서 `signal` 이 다시 채워져 중간
+    단계(`until`)에서만 닿지만, 규칙이 일반적이고 다음 단계가 섹션을 비울 수 있어 남긴다.
+11. **`saved_*` 노드가 있는 저장 row 는 무결성 오류로 멈춘다.** 업그레이드 API 는 422
+    `strategy_document.upgrade_unsupported_node`(pointer 포함)이고, repository codec 은 같은 예외가
+    `StrategyRepositoryStorageError` 가 된다 — 조용히 지운 spec 을 보이면 저장한 적 없는 그래프가 그
+    revision 의 사실로 뜬다. P2-06 이후에도 같은 row 는 hydrate 실패로 읽히지 않았으니 새 회귀는 아니다.
 
 P2-08 결정 6건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
 
@@ -719,15 +784,15 @@ Phase exit:
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `APPROVED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 **APPROVE**(blocking 0 · P2 1 · P3 4, 전부 반영: `77bd713c`·`7b707660`) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base `lang2/integration`(통합 머지 `c72f6257` 을 merge, 처음 착수는 P2-06 tip `36060527`) · 커밋 14개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → PLAN → 리뷰 P1 반영: 그래프 밖 필드 참조 → PLAN → 리뷰 P3-2 테스트) + 리뷰 반영 문서 · 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `IN_REVIEW` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 워크트리 `wt-lang2-p2-08`, 브랜치 `feat/lang2-p2-08-ideas` · base P2-07 tip `945fd081`(착수 `6e397a3b`, 이후 P2-07 을 merge 로 따라감) · 커밋 8개(BACKLOG-015 → mock 필드 → 아이디어 fixture·테스트 → 스파이크 결론 → 스토리 비고 → PLAN → 리드 결정 반영: 빌더 node_id → 문서·이 PLAN) · `GROUP_SERIES` 는 `unsupported` 유지(원장에 PIT 섹터 시계열 없음) · `review_lang2_p1_06` 1차 REQUEST_CHANGES(P1 1·P2 1·P3 3) → 반영(P2 는 BACKLOG-016) · 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `WAITING` | — |
+| [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `IN_REVIEW` | [#216](https://github.com/Nochiski/Quant_study/pull/216) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base P2-08 tip `dffc1d7b` · 커밋 8개(버전 디스패치·호출자 → 응답 `environment` → BACKLOG-011 정리 → OpenAPI → 생성 SDK → US-SM-07 e2e·스토리 → SoT·WORKFLOW → 이 PLAN) · 게이트는 push tip 에서 실측(PR 본문) |
 
 Phase exit:
 
-- [ ] 1.2 fixture 같은 hash, 1.1 fixture 전부 업그레이드 통과.
-- [ ] compile 통과 문서가 preview에서 422 없음(property).
-- [ ] `plan_hash`가 결측 정책으로 계속 갈린다(P2-02 회귀).
-- [ ] `ideas/*.yaml` 5개 backend 통과.
-- [ ] SoT·책임분리 점검 blocking 0, SoT "실행 설정" 행 채움·업그레이드 행 예약 해제.
+- [x] 1.2 fixture 같은 hash, 1.1 fixture 전부 업그레이드 통과. (P2-09 tip 실측: 1.0·1.1 golden 을 올린 두 결과의 `spec_hash` 가 같고 golden 에 `normalization: none` 을 명시한 1.2 문서와 같다 — `test_a_1_1_document_upgrades_to_the_same_meaning_as_the_1_0_golden`, e2e US-SM-07. 1.0 원문·1.0 commented·1.1 원문·1.1 commented(중간 golden)·canonical 1.0 JSON 이 전부 현재 버전으로 오른다)
+- [x] compile 통과 문서가 preview에서 422 없음(property). (P2-07 `test_compile_gate_property.py`, P2-09 tip backend 전체에서 통과)
+- [x] `plan_hash`가 결측 정책으로 계속 갈린다(P2-02 회귀). (`test_factor_missing_policy.py`, P2-09 tip 통과)
+- [x] `ideas/*.yaml` 5개 backend 통과. (P2-08 `test_idea_fixtures.py`, P2-09 tip 통과)
+- [ ] SoT·책임분리 점검 blocking 0, SoT "실행 설정" 행 채움·업그레이드 행 예약 해제. (SoT 두 행은 P2-09 가 고쳤다 — 실행 설정 행에 업그레이드 응답 `environment` 경로, 업그레이드 행 예약 표기 해제, 금지 절 "1.0 → 1.1 → 1.2". 점검 서브에이전트는 아직 돌리지 않았다)
 
 ## P3 — frontend 1.2 적응
 
@@ -838,6 +903,7 @@ Phase exit:
 | `P1-05` | cascade tip `45f1c4a3`, 위와 같은 게이트 + `npm run test:e2e`(머신 잠금 아래) | pytest 1695 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 733/733 · e2e 25/25 | 2026-09-26 |
 | `P1-06` | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` | `PLAN.md is consistent: 0/29 merged, 6 approved`(P1-02 5차 APPROVE 반영 뒤. 1차 리뷰 반영 시점에는 P1-02가 `ac3a3d0e` 리뷰 대기라 5) · 충돌 표식 0 | 2026-09-26 |
 
+| `P2-09` | push tip 게이트 전체 — PR [#216](https://github.com/Nochiski/Quant_study/pull/216) 본문 "테스트 계획" | 결과·실패 원인 대조는 PR 본문(US-SM-07 은 업그레이드·저장·hash 단언을 모두 지나 원인 (2) 해소, 남은 실패는 원인 (1) 실행 요청 environment 미배선 하나) | 2026-09-27 |
 | `P2-01` | `uv run pytest -q` (backend) | 1480 passed, 13 skipped | 2026-09-20 |
 | `P2-01` | `uv run pytest -q` (backend, 리뷰 반영 후) | 1493 passed, 13 skipped | 2026-09-21 |
 | `P2-01` | `uv run ruff check src tests` · `ruff format --check`(변경 30파일) | 통과 | 2026-09-20 |
@@ -845,6 +911,19 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-27 — P2-09 구현(`IN_REVIEW`, [#216](https://github.com/Nochiski/Quant_study/pull/216)). 업그레이더를 버전 디스패치로 다시 쓰고 1.1 → 1.2
+  단계(`data`·`execution`·`graph.missing_policy` 떼기, `signal.normalization: none` 명시, `saved_*` 거절)를
+  붙였다. 업그레이드 응답에 `environment`(옛 문서의 실행 설정)·`warnings` 를 싣고, 저장된 1.0·1.1 row 를
+  같은 체인으로 읽는다. 저장된 1.1 row 의 설명 문장이 `rank` 로 나오던 P2-04 1차 리뷰 P3 관찰도 이로써
+  닫힌다(복원 spec 이 `none`). `quality_momentum.v1_2.commented.yaml` 을 1.0 문서의 최종 기대 출력으로
+  두고 세 단언(application·contract·HTTP)을 옮겼다. BACKLOG-010·011 처리. 결정 11건은 P2-09 패킷.
+  e2e: 결과·실패 원인 대조는 PR 본문(US-SM-07 은 업그레이드·저장·hash 단언을 모두 지나 원인 (2) 해소, 남은 실패는 원인 (1) 실행 요청 environment 미배선 하나)
+- 2026-09-27 — P2-01 이 P2-09 로 넘긴 `run_fingerprint` 표기 버전 결정은 다시 넘긴다. P2-09 는 실행 결과
+  캐시를 도입하지 않는다(WORKFLOW P2-09 acceptance 에 없다). 캐시 lookup 이 없으면 옛 지문과의 잘못된
+  히트가 불가능하므로, 지문 표기 버전은 캐시 lookup 을 처음 도입하는 PR 이 정한다.
+- 2026-09-27 — WORKFLOW P3-02 에 P2-09 가 남긴 배너 소비 항목 4개를 예약했다: 사실과 달라진 배너 문구
+  ("1.1로 업그레이드" 등), warning 코드 3종 i18n, 새 422 `strategy_document.upgrade_unsupported_node` 문장,
+  `environment: null` 이면 패널을 채우지 않기.
 - 2026-09-27 — P2-08 1차 리뷰(REQUEST_CHANGES) 반영. **DEFECT-P208-001(P1)**: 아이디어 2 에 유니버스 조건
   `financial.book_equity gt 0` 을 넣었다. 자본잠식이면 PBR 이 음수라 `low` 1위가 되고, 적자까지 겹치면 ROE 가
   음수/음수 = 양수라 두 팩터 모두 최상위다(리뷰 실측: 미리보기 기간 보통주 28개). mock 합성 구간의 세 번째
@@ -1425,6 +1504,9 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   있다(판정 자체의 상한은 WORKFLOW P2-09 기존 항목). docstring 이 조건을 미래형으로 적어 두면 읽는
   사람이 아직 안전하다고 오해한다(문서 부채, 동작 결함은 위 항목이 소유).
 - **담당**: `P2-09`(버전 디스패치와 상한을 넣는 PR). WORKFLOW P2-09 에 같은 번호로 예약했다.
+- **처리**: P2-09(`1bb76712`). 판정에 버전 상한(아는 버전 집합)을 두고 docstring 을 현재 조건으로 고쳤다.
+  `test_an_unknown_version_line_is_never_downgraded_even_with_a_1_0_body` 가 `"1.3"`·`"2.0"`·`2.0`·`"0.9"`·
+  `"draft"` 를 고정한다(P2-09 결정 3).
 
 ### BACKLOG-011: `structure.invalid_date` 는 schema 1.2 문서로 닿을 수 없는 코드다
 
@@ -1438,6 +1520,9 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   코드를 위해 가짜 모델을 유지하게 만들어, 코드 목록이 실제 진단 집합보다 넓어 보인다(cleanup).
   업그레이더가 1.0·1.1 원문의 날짜를 이 분기로 읽는지 확인한 뒤 함께 지운다.
 - **담당**: `P2-09`(은퇴 버전 원문을 다루는 업그레이더 PR). WORKFLOW P2-09 에 예약했다.
+- **처리**: P2-09(`5cf065a7`). 업그레이더는 은퇴 문서의 날짜를 hydrate 가 아니라 `domain/backtest` 의
+  `environment_from_retired_settings` 로 읽으므로 코드·분기·golden 을 함께 지웠다. 날짜 필드가 모델에
+  돌아오면 hydrate 가 `unsupported hydrate type` 으로 멈추는지 테스트로 고정했다.
 
 ### BACKLOG-012: `saved_*` 제거로 도달할 수 없게 된 frontend 잔재
 

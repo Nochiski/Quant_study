@@ -454,15 +454,81 @@ const flowNeighbourOperation = flowDocument.chain(
   },
 );
 
+
 /**
- * 시퀀스 항목(비어 있지 않은 block 컨테이너) 하나의 dash 줄에 줄 끝 주석 `# 대시`를 달아 내용이 다음 줄에서
- * 시작하게 한 문서(`- # 대시` 다음 줄에 `- a`·`k: 1`)와, 그 항목 안이나 그 항목까지의 조상을 겨냥한 연산(#199).
- * 내용 줄은 원래 내용 열에 두므로 들여쓰기는 그대로 2칸 폭이다.
+ * 항목 값이 `-` 줄 다음 줄에서 시작하게 바꾸는 네 모양(#199, #206 리뷰 P3-1). `- # 대시` 한 가지로는 `-`와 내용
+ * 사이의 빈 줄·자기 줄 주석을 건너는 `-` 탐색과 bare `-` 경로를 뽑지 못했다.
  */
-const dashCommentDocumentAndOperation = documentAndOperation
-  .chain(([source, eol, tree]) => {
+const DASH_VARIANTS = ["comment", "bare", "blank", "own-comment"] as const;
+type DashVariant = (typeof DASH_VARIANTS)[number];
+
+const dashVariantText = (
+  head: string,
+  indent: string,
+  eol: string,
+  variant: DashVariant,
+): string => {
+  switch (variant) {
+    case "comment":
+      return `${head} # 대시${eol}${indent}`;
+    case "bare":
+      return `${head}${eol}${indent}`;
+    case "blank":
+      return `${head}${eol}${eol}${indent}`;
+    case "own-comment":
+      return `${head} # 대시${eol}${indent}# 속${eol}${indent}`;
+  }
+};
+
+/**
+ * 루트 스칼라와 시퀀스 키만 있는 문서. 항목은 스칼라, 스칼라 시퀀스, 스칼라 mapping이고 안쪽 시퀀스는 한 번 더 겹칠
+ * 수 있다(`- - - x`). 시퀀스 항목 아래 mapping 키는 폭 판정의 키 분기가 건너뛰므로 폭은 항목 `-` 열로 정해진다.
+ */
+const sequenceOnlyDocumentArbitrary = (() => {
+  const leafItem = fc.oneof(
+    scalarArbitrary,
+    fc.array(scalarArbitrary, { minLength: 1, maxLength: 3 }),
+    fc.dictionary(identifierArbitrary, scalarArbitrary, { minKeys: 1, maxKeys: 3 }),
+  );
+  const item = fc.oneof(
+    leafItem,
+    fc.array(fc.array(scalarArbitrary, { minLength: 1, maxLength: 2 }), {
+      minLength: 1,
+      maxLength: 2,
+    }),
+  );
+  return fc
+    .tuple(
+      fc.dictionary(identifierArbitrary, scalarArbitrary, { minKeys: 1, maxKeys: 2 }),
+      fc.dictionary(identifierArbitrary, fc.array(item, { minLength: 1, maxLength: 3 }), {
+        minKeys: 1,
+        maxKeys: 2,
+      }),
+    )
+    .map(([leaf, rest]) => ({ schema_version: "1.1", ...leaf, ...rest }));
+})();
+
+/** `-`만(겹침 포함) 있고 줄 끝 주석만 올 수 있는 줄. 그룹 1은 마지막 `-` 앞까지다. */
+const DASH_ONLY_LINE = /^( *(?:- +)*)-(?: +#.*)?$/;
+
+/**
+ * 시퀀스 항목(비어 있지 않은 block 컨테이너) 하나의 값을 `-` 줄 다음 줄로 내린 문서와, 그 항목 안이나 그 항목까지의
+ * 조상을 겨냥한 연산(#199). 내용 줄은 원래 내용 열에 두므로 들여쓰기는 그대로 2칸 폭이다. 삽입은 맨 앞
+ * (`index: 0`, 첫 키 앞 `before`)도 뽑는다 — `-` 줄 끝을 앵커로 쓰는 `parentLineEnd` 경로다(#206 리뷰 P3-1).
+ */
+const dashCommentDocumentAndOperation = fc
+  .tuple(
+    // 절반은 시퀀스만 있는 문서다: 중첩 mapping 키가 없어야 `detectIndentUnit`의 시퀀스 분기(항목 `-` 열)가 폭을
+    // 정한다. 일반 문서는 거의 항상 키 분기가 먼저 이겨 그 분기의 회귀를 놓쳤다(#206 리뷰 P3-1).
+    fc.oneof(strategyDocumentArbitrary(), sequenceOnlyDocumentArbitrary),
+    fc.constantFrom("\n", "\r\n") as fc.Arbitrary<"\n" | "\r\n">,
+    commentPlanArbitrary(),
+  )
+  .chain(([generated, eol, comments]) => {
+    const source = toYaml(generated, eol, comments);
     const parsed = parseSource(source, "yaml");
     if (parsed.status !== "ok") return fc.constant(null);
+    const tree = parsed.tree;
     const items = pointersOf(tree).filter((p) => {
       if (p.kind === "scalar" || !/\/\d+$/.test(p.pointer)) return false;
       const value = valueAtPointer(tree, p.pointer).value;
@@ -475,18 +541,22 @@ const dashCommentDocumentAndOperation = documentAndOperation
       return /^ *(?:- +)+$/.test(source.slice(lineStart, range.start.offset));
     });
     if (items.length === 0) return fc.constant(null);
-    return fc.constantFrom(...items).map((item) => {
-      const range = parsed.valueRanges.get(item.pointer)!;
-      const text = `${source.slice(0, range.start.offset)}# 대시${eol}${" ".repeat(range.start.column)}${source.slice(range.start.offset)}`;
-      const reparsed = parseSource(text, "yaml");
-      if (reparsed.status !== "ok" || JSON.stringify(reparsed.tree) !== JSON.stringify(tree))
-        return null;
-      return { source: text, eol, tree, item: item.pointer };
-    });
+    return fc
+      .tuple(fc.constantFrom(...items), fc.constantFrom(...DASH_VARIANTS))
+      .map(([item, variant]) => {
+        const range = parsed.valueRanges.get(item.pointer)!;
+        const head = source.slice(0, range.start.offset).replace(/ +$/, "");
+        const indent = " ".repeat(range.start.column);
+        const text = `${dashVariantText(head, indent, eol, variant)}${source.slice(range.start.offset)}`;
+        const reparsed = parseSource(text, "yaml");
+        if (reparsed.status !== "ok" || JSON.stringify(reparsed.tree) !== JSON.stringify(tree))
+          return null;
+        return { source: text, eol, tree, item: item.pointer, variant };
+      });
   })
   .filter((doc) => doc !== null)
   .chain((doc) => {
-    const { source, eol, tree, item } = doc!;
+    const { source, eol, tree, item, variant } = doc!;
     const pointers = pointersOf(tree).filter(
       (p) => !p.pointer.startsWith("/schema_version"),
     );
@@ -506,26 +576,48 @@ const dashCommentDocumentAndOperation = documentAndOperation
       choices.push(
         fc
           .tuple(fc.constantFrom(...mappings), identifierArbitrary, valueArbitrary)
-          .map(([p, key, value]) => ({
-            kind: "insert-key" as const,
-            parentPointer: p.pointer,
-            key: `new_${key}`,
-            value,
-          })),
+          .chain(([p, key, value]) => {
+            const siblings = Object.keys(
+              valueAtPointer(tree, p.pointer).value as Record<string, unknown>,
+            );
+            // 첫 키 앞(`before`)을 자주 뽑는다: 항목 자신이면 `-` 줄 끝이 앵커다.
+            const before = siblings.length
+              ? fc.option(fc.constantFrom(...siblings), { nil: undefined, freq: 2 })
+              : fc.constant(undefined);
+            return before.map((target) => ({
+              kind: "insert-key" as const,
+              parentPointer: p.pointer,
+              key: `new_${key}`,
+              value,
+              ...(target === undefined ? {} : { before: target }),
+            }));
+          }),
       );
     if (sequences.length)
       choices.push(
-        fc.tuple(fc.constantFrom(...sequences), valueArbitrary).map(([p, value]) => ({
-          kind: "insert-item" as const,
-          parentPointer: p.pointer,
-          value,
-        })),
+        fc.tuple(fc.constantFrom(...sequences), valueArbitrary).chain(([p, value]) => {
+          const length = (valueAtPointer(tree, p.pointer).value as unknown[]).length;
+          // 맨 앞(`index: 0`)을 따로 크게 뽑는다.
+          return fc
+            .oneof(
+              fc.constant(0),
+              fc.integer({ min: 0, max: length }),
+              fc.constant(undefined),
+            )
+            .map((index) => ({
+              kind: "insert-item" as const,
+              parentPointer: p.pointer,
+              value,
+              ...(index === undefined ? {} : { index }),
+            }));
+        }),
       );
     return fc.tuple(
       fc.constant(source),
       fc.constant(eol),
       fc.constant(tree),
       fc.constant(item),
+      fc.constant(variant),
       fc.oneof(...choices),
     );
   });
@@ -541,15 +633,35 @@ describe("flow containers as the target or around it (property, #199)", () => {
   }, 300_000);
 });
 
-describe("dash-line comments above the item content (property, #199)", () => {
-  it("edits inside or around the item with the edit invariants and keeps the dash-line comment unless the item is removed", () => {
+describe("items whose content starts below the dash line (property, #199)", () => {
+  it("edits inside or around the item with the edit invariants, keeps the dash-line comment and puts an emptied container at the dash column plus the unit", () => {
     fc.assert(
-      fc.property(dashCommentDocumentAndOperation, ([source, eol, tree, item, op]) => {
-        const edit = expectLawfulEdit(source, eol, tree, op);
-        if (edit === null) return;
-        const removesItem = op.kind === "remove" && ancestorOrSelf(op.pointer, item);
-        if (!removesItem) expect(edit.nextSource).toContain("# 대시");
-      }),
+      fc.property(
+        dashCommentDocumentAndOperation,
+        ([source, eol, tree, item, variant, op]) => {
+          const edit = expectLawfulEdit(source, eol, tree, op);
+          if (edit === null) return;
+          const removesItem = op.kind === "remove" && ancestorOrSelf(op.pointer, item);
+          if (!removesItem && (variant === "comment" || variant === "own-comment"))
+            expect(edit.nextSource).toContain("# 대시");
+          // `-`만 있는 줄 바로 아래의 빈 `[]`·`{}`는 그 `-` 열 + 문서 폭(2)에 온다. 짝수 검사만으로는 폭을 4로
+          // 잘못 잡아 6칸에 놓는 회귀를 놓친다(#206 리뷰 P3-1: `detectIndentUnit`).
+          const lines = edit.nextSource.split(eol);
+          lines.forEach((line, index) => {
+            if (!/^ *(?:\[\]|\{\})$/.test(line)) return;
+            const previous = lines
+              .slice(0, index)
+              .reverse()
+              .find((candidate) => candidate.trim() !== "");
+            const dashLine = previous === undefined ? null : DASH_ONLY_LINE.exec(previous);
+            if (dashLine === null) return;
+            expect(
+              line.length - line.trimStart().length,
+              JSON.stringify({ op, source, line }),
+            ).toBe(dashLine[1]!.length + 2);
+          });
+        },
+      ),
       { numRuns: Number(process.env.FC_NUM_RUNS ?? 200), ...fixedSeed },
     );
   }, 300_000);

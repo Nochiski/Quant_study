@@ -999,11 +999,15 @@ def _capped_allocate(
     return allocation
 
 
+# 등가중 합의 부동소수 오차(예: 20 x 0.05 = 1.0000000000000002)를 상한 초과로 보지 않는 여유.
+_SECTOR_CAP_TOLERANCE = 1e-12
+
+
 @dataclass(frozen=True)
 class _SectorConstraintResult:
     weights: dict[str, float]
-    # 섹터를 몰라 섹터 제약에서 뺀 종목 중 비중이 0이 아닌 것.
-    # 비중 0은 제약할 것이 없어 세지 않는다.
+    # 섹터를 몰라 섹터 제약에서 뺀 종목 중 비중이 0이 아닌 것. 비중 0은 제약할 것이 없어
+    # 세지 않는다. 섹터 제약이 이 프레임에서 걸릴 수 없으면 비운다.
     unknown_sector_ids: tuple[str, ...]
 
 
@@ -1023,11 +1027,16 @@ def _apply_sector_constraints(
     result = dict(weights)
     sectors: dict[str, list[str]] = {}
     unknown: list[str] = []
+    neutral = spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_SHORT
+    # 한 섹터의 노출은 프레임 전체 노출을 넘지 못한다. 중립이 꺼져 있고 전체 노출이 상한 이하면
+    # 섹터를 몰라도 결과가 같으므로 제외를 알리지 않는다(매 실행 붙는 경고는 무시하게 된다).
+    total_exposure = sum(abs(weight) for weight in weights.values())
+    could_bind = neutral or total_exposure - spec.risk.max_sector_weight > _SECTOR_CAP_TOLERANCE
     for security_id in _checkpointed(weights, checkpoint):
         sector = observations[security_id].sector_id
         # 빈 문자열도 전처럼 "모름"으로 본다(`or` 판정과 같은 집합).
         if not sector:
-            if result[security_id] != 0:
+            if could_bind and result[security_id] != 0:
                 unknown.append(security_id)
             continue
         sectors.setdefault(sector, []).append(security_id)
@@ -1037,7 +1046,7 @@ def _apply_sector_constraints(
             scale = spec.risk.max_sector_weight / exposure
             for security_id in _checkpointed(security_ids, checkpoint):
                 result[security_id] *= scale
-        if spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_SHORT:
+        if neutral:
             longs = sum(max(result[item], 0.0) for item in security_ids)
             shorts = sum(abs(min(result[item], 0.0)) for item in security_ids)
             matched = min(longs, shorts)

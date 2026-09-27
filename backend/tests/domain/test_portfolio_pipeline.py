@@ -494,6 +494,9 @@ def test_target_tape_hash_preserves_the_pre_cancellation_byte_contract(
     sector_id: str | None,
 ) -> None:
     spec = _spec()
+    if sector_id is None:
+        # 섹터 상한이 걸릴 수 있어야 경고가 붙는다(비중 1.0 > 상한 0.5).
+        spec = replace(spec, risk=replace(spec.risk, max_sector_weight=0.5))
     day = date(2026, 1, 2)
     tape = _compile(spec, (_observation(day, "a", 1.0, sector_id=sector_id),))
     assert bool(tape.warnings) is (sector_id is None)
@@ -745,7 +748,7 @@ def test_known_sectors_keep_their_cap_when_unknown_sector_names_are_mixed_in() -
 
 def test_unknown_sector_exclusion_is_reported_with_the_count_and_the_frames() -> None:
     spec = _unknown_sector_spec(selection_count=3, max_name_weight=0.5)
-    days = (date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6))
+    days = (date(2026, 1, 2), date(2026, 1, 5), date(2026, 1, 6), date(2026, 1, 7))
     observations = (
         _observation(days[0], "a", 3.0, sector_id=None),
         _observation(days[0], "b", 2.0, sector_id=None),
@@ -753,18 +756,25 @@ def test_unknown_sector_exclusion_is_reported_with_the_count_and_the_frames() ->
         _observation(days[1], "a", 3.0, sector_id="known"),
         _observation(days[1], "b", 2.0, sector_id="known"),
         _observation(days[1], "c", 1.0, sector_id=None),
+        # 세 번째 프레임은 섹터를 모두 안다. 분모에는 들고 영향 프레임에는 들지 않는다.
+        _observation(days[2], "a", 3.0, sector_id="known"),
+        _observation(days[2], "b", 2.0, sector_id="known"),
+        _observation(days[2], "c", 1.0, sector_id="known"),
     )
 
     tape = _compile(spec, observations, sessions=days)
 
-    assert len(tape.frames) == 2
+    assert len(tape.frames) == 3
     assert len(tape.warnings) == 1
     warning = tape.warnings[0]
     assert warning.code is PortfolioWarningCode.SECTOR_UNKNOWN_EXCLUDED
-    # 진단 문장에는 영향 프레임 수, 프레임별 signal_as_of 와 제외 종목 수, 상한 값이 들어간다.
-    assert "2/2" in warning.message
+    # 진단 문장에는 영향 프레임 수/전체 프레임 수, 프레임당 제외 종목 수 범위, 프레임별
+    # signal_as_of 와 제외 종목 수, 상한 값이 들어간다.
+    assert "영향 프레임 2/3개" in warning.message
+    assert "프레임당 제외 종목 1~2개" in warning.message
     assert "2026-01-02(2종목)" in warning.message
     assert "2026-01-05(1종목)" in warning.message
+    assert "2026-01-06" not in warning.message
     assert "max_sector_weight=0.3" in warning.message
 
 
@@ -820,3 +830,147 @@ def test_sector_neutral_skips_unknown_sector_names_and_keeps_known_pairs_neutral
     assert "sector_neutral=True" in tape.warnings[0].message
     assert "1/1" in tape.warnings[0].message
     assert "2026-01-02(2종목)" in tape.warnings[0].message
+
+
+def _long_short_unknown_sector_spec(
+    *,
+    gross_exposure: float,
+    net_exposure: float,
+    max_sector_weight: float,
+    sector_neutral: bool,
+):
+    spec = _spec()
+    return replace(
+        spec,
+        portfolio=replace(
+            spec.portfolio,
+            side=PortfolioSide.LONG_SHORT,
+            selection_count=2,
+            short_selection_count=2,
+        ),
+        risk=replace(
+            spec.risk,
+            gross_exposure=gross_exposure,
+            net_exposure=net_exposure,
+            max_name_weight=0.5,
+            max_sector_weight=max_sector_weight,
+            sector_neutral=sector_neutral,
+        ),
+    )
+
+
+def _long_short_unknown_sector_observations(day: date):
+    return (
+        _observation(day, "long-1", 4.0, sector_id=None),
+        _observation(day, "long-2", 3.0, sector_id=None),
+        _observation(day, "short-1", -3.0, sector_id=None),
+        _observation(day, "short-2", -4.0, sector_id=None),
+    )
+
+
+def test_sector_neutral_does_not_pair_unknown_sector_longs_and_shorts() -> None:
+    # 롱 예산 0.75, 숏 예산 0.25로 비대칭이다. 섹터를 모르는 종목을 "모르는 섹터" 한 묶음으로
+    # 중립화하면 롱이 숏에 맞춰 0.25로 줄어든다. 묶지 않으면 예산이 그대로 남는다.
+    spec = _long_short_unknown_sector_spec(
+        gross_exposure=1.0, net_exposure=0.5, max_sector_weight=1.0, sector_neutral=True
+    )
+    day = date(2026, 1, 2)
+
+    tape = _compile(spec, _long_short_unknown_sector_observations(day))
+    weights = {item.security_id: item.weight for item in tape.frames[0].targets}
+
+    assert weights["long-1"] == pytest.approx(0.375)
+    assert weights["long-2"] == pytest.approx(0.375)
+    assert weights["short-1"] == pytest.approx(-0.125)
+    assert weights["short-2"] == pytest.approx(-0.125)
+    assert [item.code for item in tape.warnings] == [PortfolioWarningCode.SECTOR_UNKNOWN_EXCLUDED]
+
+
+def test_zero_weight_unknown_sector_names_are_not_counted_as_excluded() -> None:
+    # net == gross 라 숏 예산이 0이다. 선택된 숏 종목은 비중 0으로 섹터 제약 단계에 들어오지만
+    # 제약할 비중이 없으므로 제외 종목 수에 넣지 않는다.
+    spec = _long_short_unknown_sector_spec(
+        gross_exposure=1.0, net_exposure=1.0, max_sector_weight=0.3, sector_neutral=False
+    )
+    day = date(2026, 1, 2)
+
+    tape = _compile(spec, _long_short_unknown_sector_observations(day))
+    weights = {item.security_id: item.weight for item in tape.frames[0].targets}
+
+    assert sum(weight for weight in weights.values() if weight > 0) == pytest.approx(1.0)
+    assert [item.code for item in tape.warnings] == [PortfolioWarningCode.SECTOR_UNKNOWN_EXCLUDED]
+    assert "프레임당 제외 종목 2~2개" in tape.warnings[0].message
+    assert "2026-01-02(2종목)" in tape.warnings[0].message
+
+
+def test_empty_sector_id_is_treated_as_unknown() -> None:
+    spec = _unknown_sector_spec(selection_count=10, max_name_weight=0.15)
+    day = date(2026, 1, 2)
+    observations = tuple(
+        _observation(day, f"s{index:02d}", float(10 - index), sector_id="") for index in range(10)
+    )
+
+    tape = _compile(spec, observations)
+
+    # 빈 문자열을 한 섹터로 보면 #203처럼 비중 합이 0.3으로 줄어든다.
+    assert sum(item.weight for item in tape.frames[0].targets) == pytest.approx(1.0)
+    assert [item.code for item in tape.warnings] == [PortfolioWarningCode.SECTOR_UNKNOWN_EXCLUDED]
+
+
+# 섹터 제약이 어떤 섹터 구성에서도 걸릴 수 없는 프레임에서는 경고하지 않는다. 한 섹터의 노출은
+# 프레임 전체 노출을 넘지 못하므로, 섹터 중립이 꺼져 있고 전체 노출이 상한 이하면 제외해도 결과가
+# 같다.
+@pytest.mark.parametrize(
+    ("side", "gross_exposure", "max_sector_weight", "sector_neutral", "warned"),
+    [
+        # 20 x 0.05 의 부동소수 합(1.0000000000000002)이 상한 1.0을 넘는다고 보지 않는다.
+        (PortfolioSide.LONG_ONLY, 1.0, 1.0, False, False),
+        (PortfolioSide.LONG_ONLY, 1.0, 0.99, False, True),
+        (PortfolioSide.LONG_SHORT, 1.0, 1.0, False, False),
+        (PortfolioSide.LONG_SHORT, 1.6, 1.0, False, True),
+        (PortfolioSide.LONG_SHORT, 1.0, 1.0, True, True),
+    ],
+)
+def test_unknown_sector_warning_appears_only_when_a_sector_constraint_could_bind(
+    side: PortfolioSide,
+    gross_exposure: float,
+    max_sector_weight: float,
+    sector_neutral: bool,
+    warned: bool,
+) -> None:
+    spec = _spec()
+    spec = replace(
+        spec,
+        portfolio=replace(
+            spec.portfolio,
+            side=side,
+            selection_count=20,
+            short_selection_count=20,
+            weighting=WeightingMethod.EQUAL,
+            selection_method=SelectionMethod.TOP_N,
+        ),
+        risk=replace(
+            spec.risk,
+            gross_exposure=gross_exposure,
+            net_exposure=0.0 if side is PortfolioSide.LONG_SHORT else 1.0,
+            max_name_weight=0.05,
+            max_sector_weight=max_sector_weight,
+            sector_neutral=sector_neutral,
+        ),
+    )
+    day = date(2026, 1, 2)
+    observations = (
+        *(
+            _observation(day, f"l{index:02d}", float(40 - index), sector_id=None)
+            for index in range(20)
+        ),
+        *(
+            _observation(day, f"s{index:02d}", float(-40 + index), sector_id=None)
+            for index in range(20)
+        ),
+    )
+
+    tape = _compile(spec, observations)
+
+    assert tape.frames[0].targets
+    assert bool(tape.warnings) is warned

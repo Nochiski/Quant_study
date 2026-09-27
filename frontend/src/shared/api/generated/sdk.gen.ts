@@ -249,7 +249,7 @@ export const testAssistantProvider = <ThrowOnError extends boolean = false>(
 /**
  * List Assistant Sessions
  *
- * 문서 하나의 세션 목록.
+ * 문서 하나(또는 백테스트 실행 하나)의 세션 목록.
  *
  * `document_ref`를 한 덩어리 문자열로 받지 않고 필드 셋으로 받는 이유는, 그래야 생성
  * SDK가 타입을 그대로 만들고 서버도 다시 parse하지 않기 때문이다.

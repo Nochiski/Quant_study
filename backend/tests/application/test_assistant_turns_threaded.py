@@ -49,6 +49,7 @@ from strategy_workbench.domain.assistant.facade.models import (
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 
 from ._assistant_fakes import (
+    FakeBacktestResults,
     FakeStrategyCompiler,
     InMemoryChatSessionRepository,
     InMemoryProviderProfileRepository,
@@ -124,6 +125,7 @@ def _build() -> tuple[AssistantTurnRunner, InMemoryChatSessionRepository, str, B
             equity_data=MockEquityDataAdapter.demo(),
             factor_registry=build_default_factor_registry(),
             compiler=compiler,
+            backtest_results=FakeBacktestResults(),
             today=lambda: date(2026, 9, 20),
         ),
         now=lambda: FIXED_NOW,

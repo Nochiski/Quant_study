@@ -1,0 +1,407 @@
+{
+  "run": {
+    "run_id": "run-sample-001",
+    "completed_at": "2026-09-01T09:00:00+00:00"
+  },
+  "environment": {
+    "market": "KRX",
+    "frequency": "daily",
+    "start": "2021-09-02",
+    "end": "2026-09-01",
+    "universe_id": "krx.common-stock",
+    "timing": "next_open",
+    "participation_rate": 0.1,
+    "fee_bps": 15.0,
+    "slippage_bps": 10.0,
+    "missing": "drop"
+  },
+  "capital": {
+    "initial_cash": 100000000.0,
+    "annualization_days": 252,
+    "benchmark_security_id": "sec-005930-1"
+  },
+  "strategy": {
+    "title": "KRX 모멘텀 표본",
+    "description": "최근 1년 수익률이 높은 종목을 매달 담는다.",
+    "source": {
+      "kind": "saved_revision",
+      "strategy_id": "strategy-sample",
+      "revision": 2
+    },
+    "factors": [
+      {
+        "factor_id": "price.close",
+        "label": "종가",
+        "direction": "high",
+        "weight": 1.0
+      }
+    ],
+    "portfolio": {
+      "side": "long_only",
+      "selection_count": 20,
+      "weighting": "equal",
+      "rebalance": "monthly",
+      "selection_method": "top_n",
+      "short_selection_count": 20,
+      "selection_percentile": 0.1,
+      "rebalance_every_n_sessions": 21,
+      "turnover_buffer_count": 0,
+      "minimum_trade_weight": 0.0,
+      "liquidity_field_id": null,
+      "minimum_liquidity": null
+    }
+  },
+  "metrics": [
+    {
+      "metric_id": "total_return",
+      "label": "Total return",
+      "category": "return",
+      "unit": "percent",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 0.3412,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "cagr",
+      "label": "CAGR",
+      "category": "return",
+      "unit": "percent",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 0.0921,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "volatility",
+      "label": "Volatility",
+      "category": "risk",
+      "unit": "percent",
+      "higher_is_better": false,
+      "scope": "full",
+      "value": 0.1874,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "sharpe",
+      "label": "Sharpe ratio",
+      "category": "risk_adjusted",
+      "unit": "ratio",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 0.87,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "sortino",
+      "label": "Sortino ratio",
+      "category": "risk_adjusted",
+      "unit": "ratio",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 1.12,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "max_drawdown",
+      "label": "Maximum drawdown",
+      "category": "risk",
+      "unit": "percent",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": -0.2231,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "calmar",
+      "label": "Calmar ratio",
+      "category": "risk_adjusted",
+      "unit": "ratio",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 0.41,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "turnover",
+      "label": "Turnover",
+      "category": "trade",
+      "unit": "ratio",
+      "higher_is_better": false,
+      "scope": "full",
+      "value": 0.35,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "max_drawdown_duration_sessions",
+      "label": "Maximum drawdown duration",
+      "category": "risk",
+      "unit": "sessions",
+      "higher_is_better": false,
+      "scope": "full",
+      "value": 143.0,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "max_drawdown_recovery_sessions",
+      "label": "Maximum drawdown recovery",
+      "category": "risk",
+      "unit": "sessions",
+      "higher_is_better": false,
+      "scope": "full",
+      "value": null,
+      "sample_count": 820,
+      "unavailable_reason": "drawdown_not_recovered"
+    },
+    {
+      "metric_id": "benchmark_return",
+      "label": "Benchmark return",
+      "category": "benchmark",
+      "unit": "percent",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 0.1805,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "excess_return",
+      "label": "Excess return",
+      "category": "benchmark",
+      "unit": "percent",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 0.1607,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "trade_count",
+      "label": "Closed trades",
+      "category": "trade",
+      "unit": "count",
+      "higher_is_better": null,
+      "scope": "full",
+      "value": 4.0,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "win_rate",
+      "label": "Win rate",
+      "category": "trade",
+      "unit": "percent",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 0.5,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "profit_factor",
+      "label": "Profit factor",
+      "category": "trade",
+      "unit": "ratio",
+      "higher_is_better": true,
+      "scope": "full",
+      "value": 1.8,
+      "sample_count": 820
+    },
+    {
+      "metric_id": "total_return",
+      "label": "Total return",
+      "category": "return",
+      "unit": "percent",
+      "higher_is_better": true,
+      "scope": "out_of_sample",
+      "scope_label": "OOS 2026-03-02",
+      "value": 0.0712,
+      "sample_count": 120
+    },
+    {
+      "metric_id": "sharpe",
+      "label": "Sharpe ratio",
+      "category": "risk_adjusted",
+      "unit": "ratio",
+      "higher_is_better": true,
+      "scope": "out_of_sample",
+      "scope_label": "OOS 2026-03-02",
+      "value": 0.64,
+      "sample_count": 120
+    }
+  ],
+  "equity": {
+    "sessions": 40,
+    "first": {
+      "session": "2023-01-02",
+      "equity": 100000000.0,
+      "benchmark_equity": 100000000.0
+    },
+    "last": {
+      "session": "2026-03-17",
+      "equity": 129250000.0,
+      "benchmark_equity": 117550000.0
+    },
+    "deepest_drawdown": {
+      "session": "2024-05-26",
+      "drawdown": -0.2231
+    }
+  },
+  "monthly_returns": [
+    {
+      "month": "2023-05",
+      "value": 0.01
+    },
+    {
+      "month": "2023-06",
+      "value": 0.02
+    },
+    {
+      "month": "2023-07",
+      "value": 0.03
+    },
+    {
+      "month": "2023-08",
+      "value": -0.03
+    },
+    {
+      "month": "2023-09",
+      "value": -0.02
+    },
+    {
+      "month": "2023-10",
+      "value": -0.01
+    },
+    {
+      "month": "2023-11",
+      "value": 0.0
+    },
+    {
+      "month": "2023-12",
+      "value": 0.01
+    },
+    {
+      "month": "2024-01",
+      "value": 0.02
+    },
+    {
+      "month": "2024-02",
+      "value": 0.03
+    },
+    {
+      "month": "2024-03",
+      "value": -0.03
+    },
+    {
+      "month": "2024-04",
+      "value": -0.02
+    },
+    {
+      "month": "2024-05",
+      "value": -0.01
+    },
+    {
+      "month": "2024-06",
+      "value": 0.0
+    },
+    {
+      "month": "2024-07",
+      "value": 0.01
+    },
+    {
+      "month": "2024-08",
+      "value": 0.02
+    },
+    {
+      "month": "2024-09",
+      "value": 0.03
+    },
+    {
+      "month": "2024-10",
+      "value": -0.03
+    },
+    {
+      "month": "2024-11",
+      "value": -0.02
+    },
+    {
+      "month": "2024-12",
+      "value": -0.01
+    },
+    {
+      "month": "2025-01",
+      "value": 0.0
+    },
+    {
+      "month": "2025-02",
+      "value": 0.01
+    },
+    {
+      "month": "2025-03",
+      "value": 0.02
+    },
+    {
+      "month": "2025-04",
+      "value": 0.03
+    },
+    {
+      "month": "2025-05",
+      "value": -0.03
+    },
+    {
+      "month": "2025-06",
+      "value": -0.02
+    },
+    {
+      "month": "2025-07",
+      "value": -0.01
+    },
+    {
+      "month": "2025-08",
+      "value": 0.0
+    },
+    {
+      "month": "2025-09",
+      "value": 0.01
+    },
+    {
+      "month": "2025-10",
+      "value": 0.02
+    },
+    {
+      "month": "2025-11",
+      "value": 0.03
+    },
+    {
+      "month": "2025-12",
+      "value": -0.03
+    },
+    {
+      "month": "2026-01",
+      "value": -0.02
+    },
+    {
+      "month": "2026-02",
+      "value": -0.01
+    },
+    {
+      "month": "2026-03",
+      "value": 0.0
+    },
+    {
+      "month": "2026-04",
+      "value": 0.01
+    }
+  ],
+  "warnings": [
+    {
+      "code": "data.coverage.gap",
+      "message": "2023-05 한 달 동안 일부 종목의 종가가 비어 있습니다.",
+      "severity": "warning"
+    }
+  ],
+  "activity": {
+    "orders": 6,
+    "fills": 5,
+    "closed_trades": 4
+  },
+  "omitted": {
+    "monthly_returns": 4
+  }
+}

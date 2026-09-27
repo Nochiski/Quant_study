@@ -40,7 +40,8 @@ from ._errors import AssistantStorageError
 from ._event_codec import decode_event, encode_event
 
 _SESSION_COLUMNS = """
-session_id, ordinal, strategy_id, revision, draft_id, provider_profile_id, created_at, title
+session_id, ordinal, strategy_id, revision, draft_id, run_id, provider_profile_id, created_at,
+title
 """
 _TURN_COLUMNS = "turn_id, session_id, status, accepted_sequence, started_at, finished_at"
 
@@ -62,13 +63,14 @@ class SQLiteChatSessionRepository:
             try:
                 connection.execute(
                     f"INSERT INTO chat_sessions ({_SESSION_COLUMNS})"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         session.session_id,
                         ordinal,
                         session.document_ref.strategy_id,
                         session.document_ref.revision,
                         session.document_ref.draft_id,
+                        session.document_ref.run_id,
                         session.provider_profile_id,
                         datetime_text(session.created_at, field="chat session created_at"),
                         session.title,
@@ -92,10 +94,15 @@ class SQLiteChatSessionRepository:
             rows = connection.execute(
                 f"""
                 SELECT {_SESSION_COLUMNS} FROM chat_sessions
-                WHERE strategy_id IS ? AND revision IS ? AND draft_id IS ?
+                WHERE strategy_id IS ? AND revision IS ? AND draft_id IS ? AND run_id IS ?
                 ORDER BY ordinal ASC
                 """,
-                (document_ref.strategy_id, document_ref.revision, document_ref.draft_id),
+                (
+                    document_ref.strategy_id,
+                    document_ref.revision,
+                    document_ref.draft_id,
+                    document_ref.run_id,
+                ),
             ).fetchall()
         return tuple(_decode_session(row) for row in rows)
 
@@ -323,6 +330,7 @@ def _decode_session(row: sqlite3.Row) -> ChatSession:
             strategy_id=optional_text_value(row, "strategy_id"),
             revision=optional_int_value(row, "revision"),
             draft_id=optional_text_value(row, "draft_id"),
+            run_id=optional_text_value(row, "run_id"),
         ),
         provider_profile_id=text_value(row, "provider_profile_id"),
         created_at=datetime_value(row["created_at"], field="chat session created_at"),

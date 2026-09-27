@@ -61,6 +61,7 @@ from strategy_workbench.domain.factor.facade.registry import build_default_facto
 from strategy_workbench.domain.strategy.facade.schema import strategy_document_schema
 
 from ._assistant_fakes import (
+    FakeBacktestResults,
     FakeStrategyCompiler,
     InMemoryChatSessionRepository,
     InMemoryProviderProfileRepository,
@@ -121,6 +122,7 @@ def _harness(
         equity_data=MockEquityDataAdapter.demo(),
         factor_registry=build_default_factor_registry(),
         compiler=compiler,
+        backtest_results=FakeBacktestResults(),
         today=lambda: TODAY,
     )
     sessions = InMemoryChatSessionRepository()
@@ -656,6 +658,7 @@ def test_a_tool_failure_comes_back_as_a_tool_error_not_a_provider_failure() -> N
             equity_data=MockEquityDataAdapter.demo(),
             factor_registry=build_default_factor_registry(),
             compiler=FakeStrategyCompiler(),
+            backtest_results=FakeBacktestResults(),
             today=lambda: TODAY,
         ),
     )
@@ -700,6 +703,7 @@ def _prompt_builder() -> AssistantContextBuilder:
         equity_data=MockEquityDataAdapter.demo(),
         factor_registry=build_default_factor_registry(),
         compiler=FakeStrategyCompiler(),
+        backtest_results=FakeBacktestResults(),
         today=lambda: TODAY,
     )
 
@@ -778,6 +782,7 @@ def test_the_summary_follows_the_schema_when_the_discriminator_is_renamed() -> N
         equity_data=MockEquityDataAdapter.demo(),
         factor_registry=build_default_factor_registry(),
         compiler=FakeStrategyCompiler(),
+        backtest_results=FakeBacktestResults(),
         today=lambda: TODAY,
         schema=lambda: renamed,
     )

@@ -8,7 +8,7 @@ application이 넘긴 `execute_tool` 콜백을 실제로 호출한다.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
 from strategy_workbench.application.assistant_chat.facade.chat import (
@@ -35,6 +35,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     Turn,
     TurnRequest,
 )
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
 
 
 class InMemoryProviderProfileRepository:
@@ -267,6 +268,20 @@ class FakeStrategyCompiler:
                 ),
             ),
         )
+
+
+class FakeBacktestResults:
+    """`BacktestResultPort` 가짜 구현. 넘겨받은 실행만 완료된 것으로 답한다.
+
+    `results`는 바깥이 쥔 사전을 그대로 본다. 테스트가 세션을 만든 뒤 항목을 지우면 "backend가
+    다시 시작해 결과가 사라졌다"를 흉내 낼 수 있다.
+    """
+
+    def __init__(self, results: Mapping[str, BacktestRunResult] | None = None) -> None:
+        self.results: dict[str, BacktestRunResult] = dict(results or {})
+
+    def completed_result(self, run_id: str) -> BacktestRunResult | None:
+        return self.results.get(run_id)
 
 
 class ManualTurnThread:

@@ -820,6 +820,8 @@ _DECLARED_ASSISTANT_CODES = frozenset(
         "assistant.base_url_rejected",
         "assistant.provider_secret_missing",
         "assistant.document_ref_invalid",
+        "assistant.result_unavailable",
+        "assistant.turn_context_mismatch",
         "assistant.turn_in_progress",
         "assistant.no_running_turn",
         "assistant.session.not_found",
@@ -877,8 +879,15 @@ def test_every_code_the_routes_actually_emit_is_in_the_contract(tmp_path: Path) 
     emitted.add(_code(client.get(f"{_ASSISTANT}/sessions/{session_id}/events")))
     emitted.add(_code(client.get(f"{_ASSISTANT}/sessions/absent")))
     emitted.add(_code(client.post(f"{_ASSISTANT}/sessions/{session_id}/turns/absent/cancel")))
+    # 결과 설명 세션(결과 설명 spec R7): 없는 실행, 모드와 맞지 않는 문서 컨텍스트.
+    emitted.add(
+        _code(client.post(f"{_ASSISTANT}/sessions", json={"document_ref": {"run_id": "absent"}}))
+    )
+    emitted.add(_code(client.post(f"{_ASSISTANT}/sessions/{session_id}/turns", json={"text": "?"})))
 
     assert emitted <= _openapi_assistant_codes(client)
+    assert "assistant.result_unavailable" in emitted
+    assert "assistant.turn_context_mismatch" in emitted
     assert "assistant.document_ref_invalid" in emitted
     assert "assistant.probe_failed" in emitted
 

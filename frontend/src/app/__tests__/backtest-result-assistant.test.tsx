@@ -109,6 +109,7 @@ let runStatus: "completed" | "running";
 let createdSessions: Record<string, unknown>[];
 let startedTurns: Record<string, unknown>[];
 let listedRunIds: (string | null)[];
+let turnSessionIds: string[];
 
 const server = setupServer(
   http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
@@ -161,7 +162,8 @@ const server = setupServer(
     createdSessions.push(body);
     return HttpResponse.json(
       {
-        session_id: "s-1",
+        // 실행마다 다른 대화가 만들어져야 한다. 같은 id를 돌려주면 대화가 섞인 것을 가려낼 수 없다.
+        session_id: `s-${createdSessions.length}`,
         title: "결과",
         provider_profile_id: "p-1",
         document_ref: body.document_ref,
@@ -172,12 +174,13 @@ const server = setupServer(
   }),
   http.post(
     `${API}/api/v1/assistant/sessions/:sessionId/turns`,
-    async ({ request }) => {
+    async ({ params, request }) => {
       startedTurns.push((await request.json()) as Record<string, unknown>);
+      turnSessionIds.push(String(params.sessionId));
       return HttpResponse.json(
         {
-          turn_id: "t-1",
-          session_id: "s-1",
+          turn_id: `t-${startedTurns.length}`,
+          session_id: String(params.sessionId),
           status: "running",
           accepted_sequence: -1,
           started_at: "2026-09-27T00:00:01Z",
@@ -231,20 +234,35 @@ beforeEach(() => {
   createdSessions = [];
   startedTurns = [];
   listedRunIds = [];
+  turnSessionIds = [];
 });
 
-const mount = () =>
+const mount = () => {
+  const history = createMemoryHistory({
+    initialEntries: [`/research/backtests/${RUN_ID}`],
+  });
   render(
     <App
-      history={createMemoryHistory({
-        initialEntries: [`/research/backtests/${RUN_ID}`],
-      })}
+      history={history}
       queryClient={
         new QueryClient({ defaultOptions: { queries: { retry: 0 } } })
       }
       operationsEnabled={false}
     />,
   );
+  return history;
+};
+
+const ask = async (
+  user: ReturnType<typeof userEvent.setup>,
+  panel: HTMLElement,
+  text: string,
+) => {
+  await user.type(
+    within(panel).getByRole("textbox", { name: "어시스턴트에게 보낼 메시지" }),
+    `${text}{Enter}`,
+  );
+};
 
 describe("백테스트 결과 화면의 AI 패널", () => {
   it("핵심 지표마다 영어 이름 옆에 쉬운 이름과 한 줄 뜻을 보인다", async () => {
@@ -335,5 +353,49 @@ describe("백테스트 결과 화면의 AI 패널", () => {
     expect(
       screen.queryByRole("button", { name: "AI에게 결과 묻기" }),
     ).toBeNull();
+  });
+
+  it("다른 실행으로 옮기면 패널이 닫히고 다시 열면 그 실행의 새 대화로 묻는다", async () => {
+    // 재실행은 같은 라우트라 페이지가 재사용된다. 패널 상태를 되돌리지 않으면 새 실행 화면의 질문이
+    // 앞 실행의 대화로 가서 다른 실행의 결과를 설명한다(D 스택 리뷰 P3-6).
+    const user = userEvent.setup();
+    const history = mount();
+    await user.click(
+      await screen.findByRole("button", { name: "AI에게 결과 묻기" }),
+    );
+    await ask(
+      user,
+      await screen.findByRole("complementary", { name: "AI 어시스턴트" }),
+      "첫 실행은 어때?",
+    );
+    await waitFor(() => expect(turnSessionIds).toEqual(["s-1"]));
+
+    history.push("/research/backtests/run-2");
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "AI 어시스턴트" }),
+      ).toBeNull(),
+    );
+    const toggle = await screen.findByRole("button", {
+      name: "AI에게 결과 묻기",
+    });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(toggle);
+    const panel = await screen.findByRole("complementary", {
+      name: "AI 어시스턴트",
+    });
+    expect(
+      await within(panel).findByText(/이 실행의 숫자를 쉬운 말로 풀어 줍니다/u),
+    ).toBeInTheDocument();
+    await ask(user, panel, "두 번째 실행은 어때?");
+
+    await waitFor(() => expect(turnSessionIds).toEqual(["s-1", "s-2"]));
+    expect(createdSessions.map((body) => body.document_ref)).toEqual([
+      { run_id: RUN_ID },
+      { run_id: "run-2" },
+    ]);
+    expect(listedRunIds).toContain("run-2");
   });
 });

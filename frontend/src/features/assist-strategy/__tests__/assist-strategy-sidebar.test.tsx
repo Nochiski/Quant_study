@@ -359,6 +359,22 @@ const textDelta = (
   event: { type: "text_delta", text },
 });
 
+/**
+ * 타입 계약(D 스택 리뷰 P3-4). 부르지 않는 함수라 런타임에는 아무 일도 없고 `tsc`만 읽는다. 전략
+ * 화면이 편집기 컨텍스트를 빠뜨리거나 결과 화면이 문서를 싣으면 컴파일이 깨져야 한다.
+ */
+export const sidebarPropsContract = () => [
+  // @ts-expect-error 전략 화면은 편집기 컨텍스트가 필수다.
+  <AssistStrategySidebar key="strategy" documentRef={DOCUMENT} />,
+  // @ts-expect-error 결과 화면은 문서 컨텍스트를 받지 않는다.
+  <AssistStrategySidebar
+    key="result"
+    documentRef={{ run_id: "run-1" }}
+    copy="result"
+    readContext={context}
+  />,
+];
+
 describe("AssistStrategySidebar", () => {
   it("활성 공급자가 없으면 설정으로 안내하고 입력창을 두지 않는다", async () => {
     providers = providersView(false);

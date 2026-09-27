@@ -4,8 +4,13 @@
  * 스토리 문구와 수용 기준의 정본은 `docs/product/user-stories/stories/dm.md`다. 공급자는 backend 대본
  * adapter다. 결과 세션은 서버가 `read_backtest_result` 도구만 주고, 대본은 그 도구 목록을 보고 결과 설명
  * 대본을 고른다(`_scenarios.py`의 `result_explanation`). 대본의 숫자는 도구가 돌려준 서버 요약에서
- * 읽으므로, 화면의 총수익률 값이 답에 그대로 나오면 "서버가 이 실행을 요약해 모델에게 줬다"와 "세션이
- * 설명 전용 모드로 돌았다"를 함께 확인한 것이다. 실제 모델 설명의 품질은 검사하지 않는다.
+ * 읽으므로, 화면의 총수익률 값이 답에 그대로 나오면 "서버가 이 실행을 요약해 모델에게 줬다"를 확인한
+ * 것이다.
+ *
+ * "설명 전용"은 제안 카드가 없다는 것으로 본다. 대본은 결과 턴의 도구 목록에 `propose_strategy`가
+ * 새어 들어오면 검증을 통과하는 제안(`RESULT_PROBE_TITLE`)을 시도한다. 그래서 결과 세션에 전략 도구가
+ * 섞이거나 제안 게이트가 사라지면 이 화면에 카드가 뜨고 아래 단언이 깨진다(D 스택 리뷰 P3-5). 실제
+ * 모델 설명의 품질은 검사하지 않는다.
  */
 import { expect, test } from "@playwright/test";
 
@@ -19,6 +24,9 @@ import {
   replaceSource,
   saveAndWaitForRevision,
 } from "../workbench-helpers";
+
+/** 결과 턴에 제안 도구가 새어 들어올 때 대본이 내는 제안의 제목(`_scenarios.py`의 `RESULT_PROBE_TITLE`). */
+const PROBE_PROPOSAL_TITLE = "결과 화면에서 새어 나온 제안";
 
 /** mock equity 어댑터의 종목 어휘. 벤치마크가 있어야 비교 문장이 나온다. */
 const BENCHMARK = "sec-005930-1";
@@ -100,7 +108,13 @@ test(
     await expect(log).toContainText(
       "과거 결과가 앞으로의 수익을 보장하지는 않습니다.",
     );
-    // 결과 화면의 대화는 설명 전용이다. 문서를 바꾸는 제안 카드가 없다.
+    // 결과 화면의 대화는 설명 전용이다. 문서를 바꾸는 제안 카드가 없다. 대본은 제안 도구가 새어
+    // 들어오면 이 제목의 제안을 시도하므로(`_scenarios.py`의 `RESULT_PROBE_TITLE`), 게이트가 무너지면
+    // 카드와 "검증 통과" 배지가 여기 나타난다.
+    await expect(
+      panel.getByRole("heading", { name: PROBE_PROPOSAL_TITLE }),
+    ).toHaveCount(0);
+    await expect(panel.getByText("검증 통과", { exact: true })).toHaveCount(0);
     await expect(
       panel.getByRole("button", { name: "문서에 적용" }),
     ).toHaveCount(0);

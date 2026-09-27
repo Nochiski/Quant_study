@@ -48,16 +48,25 @@ const COPY = {
   { empty: MessageKey; placeholder: MessageKey }
 >;
 
-export type AssistStrategySidebarProps = {
+/**
+ * 붙는 화면에 따라 갈리는 props(D 스택 리뷰 P3-4).
+ *
+ * 전략 화면은 편집기 컨텍스트가 **필수**다. 빠뜨리면 첫 질문에서야 422
+ * `assistant.turn_context_mismatch`로 드러나므로 타입이 먼저 막는다. 결과 화면(`copy: "result"`)은
+ * 서버가 실행 결과를 직접 읽어서 컨텍스트를 받지 않는다(결과 설명 spec R2·R5).
+ */
+type AssistScreenProps =
+  | {
+      /** 안내 문구의 종류. 기본은 전략 화면이다. */
+      copy?: "strategy";
+      /** 턴 시작 순간의 편집기 텍스트·진단·실행 설정. 서버가 문서를 들지 않으므로 턴마다 싣는다. */
+      readContext: () => TurnContextPayload;
+    }
+  | { copy: "result"; readContext?: never };
+
+export type AssistStrategySidebarProps = AssistScreenProps & {
   /** 이 사이드바가 붙은 문서(또는 백테스트 실행). 세션 목록의 범위다. */
   documentRef: DocumentRefView;
-  /**
-   * 턴 시작 순간의 편집기 텍스트·진단·실행 설정. 서버가 문서를 들지 않으므로 턴마다 싣는다.
-   * 결과 화면은 주지 않는다 — 서버가 실행 결과를 직접 읽는다(결과 설명 spec R2).
-   */
-  readContext?: () => TurnContextPayload;
-  /** 안내 문구의 종류. 기본은 전략 화면이다. */
-  copy?: AssistCopy;
   onPreviewProposal?: (action: AssistProposalAction) => void;
   onApplyProposal?: (action: AssistProposalAction) => void;
   onApplyProposalAndBacktest?: (action: AssistProposalAction) => void;

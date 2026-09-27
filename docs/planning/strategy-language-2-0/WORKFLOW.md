@@ -608,6 +608,10 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `_one`·`_zero`)는 compile 된 spec 에만 있고 문서에는 없다. 실행 계획 패널·디버거 노드 목록은 compile
   spec 의 그래프를 읽어 이 노드를 kind `unknown` 과 문서 밖 pointer 로 보인다. 사람 말 라벨("참/거짓을
   1/0 으로")로 보이거나 숨기고, "소스 열기"가 원래 출력 노드(조건 노드의 predicate)를 짚게 한다.
+  semantic diff 표(`semantic-diff-table.tsx`)와 충돌 배너(`conflict-banner.tsx`)도 같다: backend
+  `domain/strategy/_diff.py` 가 canonical payload 를 위치로 비교하므로 사용자 노드 하나를 더하면
+  그래프 끝의 승격 노드 셋이 "바뀐 것"으로 나온다. 승격 노드 줄을 원래 출력의 변경 한 줄로 접거나
+  diff 를 node_id 기준으로 맞춘다(수정 위치가 backend `_diff.py` 면 이 PR 이 같이 고친다).
 - outline·snippet 카탈로그(팩터 preset은 "예시" 그룹으로 강등, 튜토리얼 전용)·execution plan·graph·
   debugger가 1.2 pointer로.
 - 단위 테스트 전부 green. e2e fixture는 P3-03.

@@ -4,6 +4,7 @@ from datetime import date
 
 import pytest
 
+from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     FieldCatalogQuery,
     ResearchPanelPreviewRequest,
@@ -17,6 +18,11 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelResult,
     UniverseHistoryQuery,
 )
+from strategy_workbench.domain.factor.facade.registry import (
+    FactorAvailability,
+    build_default_factor_registry,
+)
+from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
 
 
 def _cell_value(
@@ -273,3 +279,23 @@ def test_unknown_field_is_an_expected_invalid_query_result() -> None:
 
     assert result.status is DataLoadStatus.INVALID_QUERY
     assert result.detail is not None and "unknown.field" in result.detail
+
+
+def test_mock_resolves_every_field_of_implemented_default_graphs() -> None:
+    """implemented 팩터는 mock 에서 바로 preview 된다(FACTORS.md) — 기본 graph 의 필드를 다 안다.
+
+    #234 는 신용잔고 변화에 `price.shares_outstanding` 을 더했다. mock 이 그 필드를 모르면 graph 가
+    필드 메타데이터 없이 검증에 떨어진다.
+    """
+    adapter = MockEquityDataAdapter.demo()
+    for definition in build_default_factor_registry().all():
+        if definition.availability is not FactorAvailability.IMPLEMENTED:
+            continue
+        assert definition.default_graph is not None
+        metadata = adapter.resolve_factor_fields(definition.required_field_ids)
+        resolved = {item.field_id for item in metadata.fields}
+        assert resolved == set(definition.required_field_ids), definition.factor_id
+        validation = validate_factor_graph(
+            definition.default_graph, fields=metadata.fields, require_field_metadata=True
+        )
+        assert validation.valid, (definition.factor_id, validation)

@@ -27,6 +27,13 @@
   창 네 분기와, 사업보고서 4분기를 만드는 앞 3분기가 모두 같은 구분이어야 하기 때문이다. 영구 결측은
   아니고 같은 구분의 분기가 다시 차면 값이 선다
 - `factor_id`, registry version, graph hash, data snapshot, parameters, as-of range가 재현성 키를 구성
+- `credit.margin_balance_change_20d`는 신용잔고율(잔고 주식수 ÷ 상장주식수)의 20세션 차이다(이슈 #234).
+  원 주식수의 변화율은 분할·병합을 신용 급증으로 읽고(035720 5:1 분할 뒤 +300%) 작은 첫 값에서
+  폭주했다. 두 필드는 각자 공개 랙(신용잔고 3세션 · 주식수 1세션)대로 나눈다 — 신용잔고 원천이 분할
+  거래정지 첫날부터 새 주식수 단위로 바뀌어 실원장에서는 이쪽이 분할 구간 튐이 가장 작다. 2026-09-27
+  전에 저장한 전략은 옛 graph(원 주식수 변화율·차이)를 문서에
+  복사해 두었으므로 자동으로 바뀌지 않는다 — 같은 factor_id 아래 두 정의가 공존하고 값 척도도
+  다르다. 새 정의를 쓰려면 팩터를 다시 넣는다
 
 | # | Factor ID | Category | Preference | Required Equity fields | Min history | Status |
 |---:|---|---|---|---|---:|---|
@@ -69,7 +76,7 @@
 | 37 | `short.short_balance_change_20d` | short | low | `short.short_balance_ratio` | 20 | catalog_only |
 | 38 | `short.borrow_utilization` | short | low | `short.borrowed_quantity`, `price.shares_outstanding` | 1 | catalog_only |
 | 39 | `short.short_covering` | short | high | `short.short_balance_ratio`, `price.close` | 20 | catalog_only |
-| 40 | `credit.margin_balance_change_20d` | credit | low | `credit.margin_balance` | 20 | implemented |
+| 40 | `credit.margin_balance_change_20d` | credit | low | `credit.margin_balance`, `price.shares_outstanding` | 20 | implemented |
 | 41 | `credit.margin_balance_ratio` | credit | low | `credit.margin_balance`, `price.shares_outstanding` | 1 | catalog_only |
 | 42 | `credit.credit_net_buy_20d` | credit | low | `credit.net_buy` | 20 | catalog_only |
 | 43 | `credit.collateral_ratio` | credit | high | `credit.collateral_value`, `credit.loan_value` | 1 | catalog_only |
@@ -94,5 +101,5 @@ validator/compiler/evaluator를 통과하며 UI(YAML source editor, 그리고 �
 | consensus | `consensus.forward_eps_growth` | rolling forward EPS growth |
 | flow | `flow.foreign_net_buy_20d` | 20-session foreign net-buy mean |
 | short | `short.short_balance_ratio` | short balance ratio |
-| credit | `credit.margin_balance_change_20d` | 20-session margin balance rate of change |
+| credit | `credit.margin_balance_change_20d` | 20-session change of margin balance ratio (balance / shares outstanding) |
 | event | `event.earnings_surprise` | PIT earnings surprise |

@@ -259,6 +259,15 @@ def build_demo_fixture() -> MockEquityFixture:
             coverage=full_coverage,
         ),
         _factor_field_profile(
+            field_id="price.shares_outstanding",
+            dataset_id="price_daily",
+            # 신용잔고율(잔고 ÷ 상장주식수)의 분모다(#234). 원장 정본과 같은 주식수 축이다.
+            label="Shares outstanding",
+            unit="shares",
+            value_type=FieldValueType.COUNT,
+            coverage=full_coverage,
+        ),
+        _factor_field_profile(
             field_id="event.earnings_surprise",
             dataset_id="event_pit",
             label="Earnings surprise",

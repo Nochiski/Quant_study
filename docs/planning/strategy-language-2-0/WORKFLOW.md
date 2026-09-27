@@ -659,6 +659,18 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   null`인 채로 끝나면 가드가 영구히 꺼진 채 남는다(P2-03 리뷰 P3-06).
 - 업그레이드 배너가 1.1 문서에도 뜨고, 응답의 `environment`로 실행 설정을 채운다(사용자 확인 후).
   `warnings`를 배너에 표시.
+- **P2-09 가 남긴 배너 소비 항목(예약)**: (1) 배너 문구 `upgrade.title`("schema 1.0 문서")·
+  `upgrade.body`("이 문서는 schema 1.0입니다. 1.1로 업그레이드하면 …")·`upgrade.action`("1.1로
+  업그레이드")·`upgrade.applied`("1.1로 다시 썼습니다 …")는 P2-09 부터 사실과 다르다 — 결과는 현재
+  버전이고 1.1 문서도 대상이다. 버전 중립 문구로 바꾸거나 응답에서 읽고, frontend 에 은퇴 버전
+  문자열을 두지 않는다(SoT authoring schema 버전 행). `workbench.workflow.spec.ts`·
+  `stories/dm.readable-korean.spec.ts` 가 버튼 이름으로 이 문구를 찾는다. (2) `warnings[].code` 는
+  OpenAPI enum(`strategy_document.upgrade_missing_policy_conflict`·`upgrade_weighting_rule_changed`·
+  `upgrade_environment_unavailable`)이라 코드별 i18n 이 필요하다(문장은 backend `message` 가 이미
+  한글로 완성해 보내므로 코드별 제목만이어도 된다). (3) 새 422 `strategy_document.upgrade_unsupported_node`
+  의 `upgrade.error.*` 문장. 없으면 지금처럼 `upgrade.error.request` 로 backend 문장을 보인다.
+  (4) `environment` 가 `null` 이면(옛 문서의 실행 설정을 옮기지 못함) 패널을 채우지 않고 warning 이
+  짚는 자리를 보인다 — 기본값으로 채우지 않는다.
 - 백테스트 버튼 차단 사유에서 `factor-plan` 분기가 compile error로 흡수되는지 확인(남으면 결함으로
   기록).
 - IDE 상단에 실행 설정 요약 띠(시안 1). 문서 밖임을 문구로.

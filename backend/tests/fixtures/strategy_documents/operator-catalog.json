@@ -1,5 +1,5 @@
 {
-  "catalog_hash": "5796507bf662a3a5194c504053cf8414e4a81c4158ec73d71c90d96fabada8f0",
+  "catalog_hash": "d3724c3c0d11d202d4f816408534be4fa68f2cd6b707e037a03a6e734339506d",
   "operators": [
     {
       "kind": "unary",
@@ -11,7 +11,8 @@
       "availability": "available",
       "description_key": "strategy.operator.unary.negate",
       "formula_key": "strategy.operator.unary.negate.formula",
-      "example": "{ kind: unary, node_id: inverted, operator: negate, input_node_id: pbr }"
+      "example": "{ kind: unary, node_id: inverted, operator: negate, input_node_id: pbr }",
+      "reads_past_sessions": false
     },
     {
       "kind": "unary",
@@ -28,7 +29,8 @@
       "availability": "available",
       "description_key": "strategy.operator.unary.lag",
       "formula_key": "strategy.operator.unary.lag.formula",
-      "example": "{ kind: unary, node_id: close_5d_ago, operator: lag, input_node_id: close, periods: 5 }"
+      "example": "{ kind: unary, node_id: close_5d_ago, operator: lag, input_node_id: close, periods: 5 }",
+      "reads_past_sessions": true
     },
     {
       "kind": "binary",
@@ -40,7 +42,8 @@
       "availability": "available",
       "description_key": "strategy.operator.binary.add",
       "formula_key": "strategy.operator.binary.add.formula",
-      "example": "{ kind: binary, node_id: total, operator: add, left_node_id: equity, right_node_id: debt }"
+      "example": "{ kind: binary, node_id: total, operator: add, left_node_id: equity, right_node_id: debt }",
+      "reads_past_sessions": false
     },
     {
       "kind": "binary",
@@ -52,7 +55,8 @@
       "availability": "available",
       "description_key": "strategy.operator.binary.subtract",
       "formula_key": "strategy.operator.binary.subtract.formula",
-      "example": "{ kind: binary, node_id: spread, operator: subtract, left_node_id: close, right_node_id: ma_20 }"
+      "example": "{ kind: binary, node_id: spread, operator: subtract, left_node_id: close, right_node_id: ma_20 }",
+      "reads_past_sessions": false
     },
     {
       "kind": "binary",
@@ -64,7 +68,8 @@
       "availability": "available",
       "description_key": "strategy.operator.binary.multiply",
       "formula_key": "strategy.operator.binary.multiply.formula",
-      "example": "{ kind: binary, node_id: traded_value, operator: multiply, left_node_id: close, right_node_id: volume }"
+      "example": "{ kind: binary, node_id: traded_value, operator: multiply, left_node_id: close, right_node_id: volume }",
+      "reads_past_sessions": false
     },
     {
       "kind": "binary",
@@ -76,7 +81,8 @@
       "availability": "available",
       "description_key": "strategy.operator.binary.divide",
       "formula_key": "strategy.operator.binary.divide.formula",
-      "example": "{ kind: binary, node_id: pbr, operator: divide, left_node_id: market_cap, right_node_id: book_value }"
+      "example": "{ kind: binary, node_id: pbr, operator: divide, left_node_id: market_cap, right_node_id: book_value }",
+      "reads_past_sessions": false
     },
     {
       "kind": "time_series",
@@ -97,7 +103,8 @@
       "availability": "available",
       "description_key": "strategy.operator.time_series.mean",
       "formula_key": "strategy.operator.time_series.mean.formula",
-      "example": "{ kind: time_series, node_id: ma_20, operator: mean, input_node_id: close, window: 20 }"
+      "example": "{ kind: time_series, node_id: ma_20, operator: mean, input_node_id: close, window: 20 }",
+      "reads_past_sessions": true
     },
     {
       "kind": "time_series",
@@ -118,7 +125,8 @@
       "availability": "available",
       "description_key": "strategy.operator.time_series.std",
       "formula_key": "strategy.operator.time_series.std.formula",
-      "example": "{ kind: time_series, node_id: vol_60, operator: std, input_node_id: daily_return, window: 60 }"
+      "example": "{ kind: time_series, node_id: vol_60, operator: std, input_node_id: daily_return, window: 60 }",
+      "reads_past_sessions": true
     },
     {
       "kind": "time_series",
@@ -139,7 +147,8 @@
       "availability": "available",
       "description_key": "strategy.operator.time_series.momentum",
       "formula_key": "strategy.operator.time_series.momentum.formula",
-      "example": "{ kind: time_series, node_id: mom_12_1, operator: momentum, input_node_id: close, window: 252, lag: 21 }"
+      "example": "{ kind: time_series, node_id: mom_12_1, operator: momentum, input_node_id: close, window: 252, lag: 21 }",
+      "reads_past_sessions": true
     },
     {
       "kind": "time_series",
@@ -160,7 +169,8 @@
       "availability": "available",
       "description_key": "strategy.operator.time_series.delta",
       "formula_key": "strategy.operator.time_series.delta.formula",
-      "example": "{ kind: time_series, node_id: growth, operator: delta, input_node_id: revenue, window: 252 }"
+      "example": "{ kind: time_series, node_id: growth, operator: delta, input_node_id: revenue, window: 252 }",
+      "reads_past_sessions": true
     },
     {
       "kind": "time_series",
@@ -181,7 +191,8 @@
       "availability": "available",
       "description_key": "strategy.operator.time_series.min",
       "formula_key": "strategy.operator.time_series.min.formula",
-      "example": "{ kind: time_series, node_id: low_52w, operator: min, input_node_id: close, window: 252 }"
+      "example": "{ kind: time_series, node_id: low_52w, operator: min, input_node_id: close, window: 252 }",
+      "reads_past_sessions": true
     },
     {
       "kind": "time_series",
@@ -202,7 +213,8 @@
       "availability": "available",
       "description_key": "strategy.operator.time_series.max",
       "formula_key": "strategy.operator.time_series.max.formula",
-      "example": "{ kind: time_series, node_id: high_52w, operator: max, input_node_id: close, window: 252 }"
+      "example": "{ kind: time_series, node_id: high_52w, operator: max, input_node_id: close, window: 252 }",
+      "reads_past_sessions": true
     },
     {
       "kind": "cross_sectional",
@@ -214,7 +226,8 @@
       "availability": "available",
       "description_key": "strategy.operator.cross_sectional.rank",
       "formula_key": "strategy.operator.cross_sectional.rank.formula",
-      "example": "{ kind: cross_sectional, node_id: ranked, operator: rank, input_node_id: score }"
+      "example": "{ kind: cross_sectional, node_id: ranked, operator: rank, input_node_id: score }",
+      "reads_past_sessions": false
     },
     {
       "kind": "cross_sectional",
@@ -226,7 +239,8 @@
       "availability": "available",
       "description_key": "strategy.operator.cross_sectional.zscore",
       "formula_key": "strategy.operator.cross_sectional.zscore.formula",
-      "example": "{ kind: cross_sectional, node_id: standardized, operator: zscore, input_node_id: score }"
+      "example": "{ kind: cross_sectional, node_id: standardized, operator: zscore, input_node_id: score }",
+      "reads_past_sessions": false
     },
     {
       "kind": "cross_sectional",
@@ -247,7 +261,8 @@
       "availability": "available",
       "description_key": "strategy.operator.cross_sectional.winsorize",
       "formula_key": "strategy.operator.cross_sectional.winsorize.formula",
-      "example": "{ kind: cross_sectional, node_id: clipped, operator: winsorize, input_node_id: score, lower_quantile: 0.01, upper_quantile: 0.99 }"
+      "example": "{ kind: cross_sectional, node_id: clipped, operator: winsorize, input_node_id: score, lower_quantile: 0.01, upper_quantile: 0.99 }",
+      "reads_past_sessions": false
     },
     {
       "kind": "cross_sectional",
@@ -259,7 +274,8 @@
       "availability": "available",
       "description_key": "strategy.operator.cross_sectional.demean",
       "formula_key": "strategy.operator.cross_sectional.demean.formula",
-      "example": "{ kind: cross_sectional, node_id: centered, operator: demean, input_node_id: score }"
+      "example": "{ kind: cross_sectional, node_id: centered, operator: demean, input_node_id: score }",
+      "reads_past_sessions": false
     },
     {
       "kind": "group",
@@ -276,7 +292,8 @@
       "availability": "unsupported",
       "description_key": "strategy.operator.group.neutralize",
       "formula_key": "strategy.operator.group.neutralize.formula",
-      "example": "{ kind: group, node_id: sector_neutral, operator: neutralize, input_node_id: score, group_field_id: sector }"
+      "example": "{ kind: group, node_id: sector_neutral, operator: neutralize, input_node_id: score, group_field_id: sector }",
+      "reads_past_sessions": false
     },
     {
       "kind": "group",
@@ -293,7 +310,8 @@
       "availability": "unsupported",
       "description_key": "strategy.operator.group.rank",
       "formula_key": "strategy.operator.group.rank.formula",
-      "example": "{ kind: group, node_id: sector_rank, operator: rank, input_node_id: score, group_field_id: sector }"
+      "example": "{ kind: group, node_id: sector_rank, operator: rank, input_node_id: score, group_field_id: sector }",
+      "reads_past_sessions": false
     },
     {
       "kind": "comparison",
@@ -305,7 +323,8 @@
       "availability": "available",
       "description_key": "strategy.operator.comparison.gt",
       "formula_key": "strategy.operator.comparison.gt.formula",
-      "example": "{ kind: comparison, node_id: liquid, operator: gt, left_node_id: traded_value, right_node_id: threshold }"
+      "example": "{ kind: comparison, node_id: liquid, operator: gt, left_node_id: traded_value, right_node_id: threshold }",
+      "reads_past_sessions": false
     },
     {
       "kind": "comparison",
@@ -317,7 +336,8 @@
       "availability": "available",
       "description_key": "strategy.operator.comparison.gte",
       "formula_key": "strategy.operator.comparison.gte.formula",
-      "example": "{ kind: comparison, node_id: at_least, operator: gte, left_node_id: roe, right_node_id: threshold }"
+      "example": "{ kind: comparison, node_id: at_least, operator: gte, left_node_id: roe, right_node_id: threshold }",
+      "reads_past_sessions": false
     },
     {
       "kind": "comparison",
@@ -329,7 +349,8 @@
       "availability": "available",
       "description_key": "strategy.operator.comparison.lt",
       "formula_key": "strategy.operator.comparison.lt.formula",
-      "example": "{ kind: comparison, node_id: cheap, operator: lt, left_node_id: pbr, right_node_id: threshold }"
+      "example": "{ kind: comparison, node_id: cheap, operator: lt, left_node_id: pbr, right_node_id: threshold }",
+      "reads_past_sessions": false
     },
     {
       "kind": "comparison",
@@ -341,7 +362,8 @@
       "availability": "available",
       "description_key": "strategy.operator.comparison.lte",
       "formula_key": "strategy.operator.comparison.lte.formula",
-      "example": "{ kind: comparison, node_id: at_most, operator: lte, left_node_id: debt_ratio, right_node_id: threshold }"
+      "example": "{ kind: comparison, node_id: at_most, operator: lte, left_node_id: debt_ratio, right_node_id: threshold }",
+      "reads_past_sessions": false
     },
     {
       "kind": "comparison",
@@ -353,7 +375,8 @@
       "availability": "available",
       "description_key": "strategy.operator.comparison.eq",
       "formula_key": "strategy.operator.comparison.eq.formula",
-      "example": "{ kind: comparison, node_id: exactly, operator: eq, left_node_id: flag, right_node_id: one }"
+      "example": "{ kind: comparison, node_id: exactly, operator: eq, left_node_id: flag, right_node_id: one }",
+      "reads_past_sessions": false
     }
   ]
 }

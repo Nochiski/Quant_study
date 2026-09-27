@@ -130,6 +130,14 @@ def _compile(source: str, catalog: FieldCatalogPort | None) -> CompiledDocument:
     return _service(catalog).compile(CompileRequest(source, SourceFormat.YAML))
 
 
+def _unadjusted(compiled: CompiledDocument) -> list[tuple[str, str | None]]:
+    return [
+        (diagnostic.pointer, diagnostic.node_id)
+        for diagnostic in compiled.diagnostics
+        if diagnostic.code == "strategy.field.unadjusted_price"
+    ]
+
+
 def _errors(compiled: CompiledDocument) -> list[tuple[str, str]]:
     return [
         (diagnostic.code, diagnostic.pointer)
@@ -419,3 +427,144 @@ def test_the_checked_paths_are_exactly_the_runtime_schema_equity_field_catalog()
     assert any("/graph/" in pointer for pointer in pointers), (
         "그래프 노드 필드는 그래프 검증이 본다"
     )
+
+
+# -- 원주가 시계열 변화 warning (BACKLOG-018) -----------------------------------------------
+
+# 어댑터가 원주가 종가에 조정 짝을 표시한 계약. 표시가 없는 `_CLOSE` 와 비교한다.
+_RAW_CLOSE = replace(_CLOSE, adjusted_field_id="price.adj_close")
+_ADJ_CLOSE = FieldMetadata(field_id="price.adj_close", unit="KRW")
+_MARKET_CAP = FieldMetadata(field_id="price.market_cap", unit="KRW")
+
+_RAW_PRICE_MESSAGE = (
+    "분할·증자·병합에 조정하지 않은 원주가를 과거 세션과 비교하는 연산에 넣어 결과가 분할·증자에 "
+    "오염될 수 있습니다. price.adj_close 를 쓰세요: field_id='price.close' "
+    "adjusted_field_id='price.adj_close' reader='mom_252' operator='momentum'"
+)
+
+# 일간 수익률의 60 세션 변동성. 원주가 잎 하나를 지연(lag)과 표준편차가 함께 읽는다.
+_VOLATILITY_FACTOR = """  - factor_id: volatility
+    label: "변동성"
+    direction: low
+    weight: 0.4
+    graph:
+      nodes:
+        - kind: field
+          node_id: px
+          field_id: {field}
+        - kind: unary
+          node_id: px_prev
+          operator: lag
+          input_node_id: px
+          periods: 1
+        - kind: binary
+          node_id: ret
+          operator: divide
+          left_node_id: px
+          right_node_id: px_prev
+        - kind: time_series
+          node_id: vol
+          operator: std
+          input_node_id: ret
+          window: 60
+      output_node_id: vol
+"""
+
+# 같은 날 값끼리의 비율. 과거 세션을 읽지 않으므로 원주가여도 오염되지 않는다.
+_SAME_DAY_FACTOR = """  - factor_id: price_to_cap
+    label: "종가/시가총액"
+    direction: low
+    weight: 0.4
+    graph:
+      nodes:
+        - kind: field
+          node_id: px
+          field_id: price.close
+        - kind: field
+          node_id: cap
+          field_id: price.market_cap
+        - kind: binary
+          node_id: ratio
+          operator: divide
+          left_node_id: px
+          right_node_id: cap
+      output_node_id: ratio
+"""
+
+# 골든의 모멘텀 잎만 수정주가로 바꾼 문서(나머지 팩터가 원주가를 어떻게 쓰는지만 보려고).
+_GOLDEN_ADJUSTED = GOLDEN.replace("field_id: price.close", "field_id: price.adj_close")
+
+
+def test_a_raw_price_under_a_past_session_operator_is_a_compile_warning() -> None:
+    """골든의 12개월 모멘텀은 원주가를 읽는다 — 막지 않고, 고칠 자리(`field_id`)를 짚어 알린다."""
+    compiled = _compile(GOLDEN, _Catalog(_RAW_CLOSE, _ADJ_CLOSE))
+
+    assert compiled.ok, _errors(compiled)
+    [diagnostic] = [
+        item for item in compiled.diagnostics if item.code == "strategy.field.unadjusted_price"
+    ]
+    assert diagnostic.severity is DiagnosticSeverity.WARNING
+    assert diagnostic.kind is DiagnosticKind.SEMANTIC
+    assert diagnostic.pointer == "/factors/0/graph/nodes/0/field_id"
+    assert diagnostic.node_id == "close"
+    assert diagnostic.message == _RAW_PRICE_MESSAGE
+    assert diagnostic.range is not None, "편집기가 그 field_id 값을 짚는다"
+
+
+def test_the_adjusted_price_under_the_same_operator_is_silent() -> None:
+    compiled = _compile(_GOLDEN_ADJUSTED, _Catalog(_RAW_CLOSE, _ADJ_CLOSE))
+
+    assert compiled.ok, _errors(compiled)
+    assert _unadjusted(compiled) == []
+
+
+def test_a_same_day_ratio_of_the_raw_price_is_silent() -> None:
+    """과거 세션을 읽지 않는 연산(같은 날 비율)은 원주가여도 오염되지 않는다."""
+    source = _GOLDEN_ADJUSTED.replace("portfolio:\n", f"{_SAME_DAY_FACTOR}portfolio:\n", 1)
+    assert "field_id: price.close" in source
+
+    compiled = _compile(source, _Catalog(_RAW_CLOSE, _ADJ_CLOSE, _MARKET_CAP))
+
+    assert compiled.ok, _errors(compiled)
+    assert _unadjusted(compiled) == []
+
+
+def test_a_raw_price_read_through_lag_and_a_window_warns_once_at_the_leaf() -> None:
+    """지연과 창 통계가 같은 잎을 읽어도 경고는 잎 하나에 한 번이다. 입력을 거슬러 올라가 찾는다."""
+    catalog = _Catalog(_RAW_CLOSE, _ADJ_CLOSE)
+
+    def with_volatility(field: str) -> str:
+        factor = _VOLATILITY_FACTOR.format(field=field)
+        return _GOLDEN_ADJUSTED.replace("portfolio:\n", f"{factor}portfolio:\n", 1)
+
+    raw = _compile(with_volatility("price.close"), catalog)
+    adjusted = _compile(with_volatility("price.adj_close"), catalog)
+
+    assert raw.ok and adjusted.ok, (_errors(raw), _errors(adjusted))
+    assert _unadjusted(raw) == [("/factors/1/graph/nodes/0/field_id", "px")]
+    assert _unadjusted(adjusted) == []
+
+
+def test_the_raw_price_is_judged_only_through_the_adapter_contract() -> None:
+    """원주가 판정은 어댑터 필드 계약의 표시가 소유한다.
+
+    표시가 없거나 어댑터가 없으면 말하지 않는다.
+    """
+    assert _unadjusted(_compile(GOLDEN, _Catalog(_CLOSE, _ADJ_CLOSE))) == []
+    assert _unadjusted(_compile(GOLDEN, None)) == []
+
+
+def test_the_mock_adapter_marks_its_raw_close_with_the_adjusted_field() -> None:
+    adapter = MockEquityDataAdapter.demo()
+    contracts = {field.field_id: field for field in adapter.factor_field_catalog()}
+
+    marked = {
+        field_id: field.adjusted_field_id
+        for field_id, field in contracts.items()
+        if field.adjusted_field_id is not None
+    }
+    assert marked == {"price.close": "price.adj_close"}
+    assert contracts["price.adj_close"].unit == contracts["price.close"].unit
+    assert _unadjusted(_compile(GOLDEN, adapter)) == [
+        ("/factors/0/graph/nodes/0/field_id", "close")
+    ]

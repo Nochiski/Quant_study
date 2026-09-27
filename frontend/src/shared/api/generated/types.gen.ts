@@ -2370,6 +2370,10 @@ export type OperatorDefinition = {
    * Params
    */
   params: Array<OperatorParameter>;
+  /**
+   * Reads Past Sessions
+   */
+  reads_past_sessions: boolean;
   unit_rule: UnitRule;
 };
 

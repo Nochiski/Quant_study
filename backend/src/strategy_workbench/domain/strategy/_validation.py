@@ -7,19 +7,23 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from strategy_workbench.domain.factor.facade.expression import (
+    ExpressionNode,
     FactorGraph,
     FieldMetadata,
+    FieldNode,
     NodeValueType,
     ParameterNode,
 )
 from strategy_workbench.domain.factor.facade.operators import (
     OperatorAvailability,
     operator_availability,
+    operator_reads_past_sessions,
     required_field_value_type,
 )
 from strategy_workbench.domain.factor.facade.validation import (
     FactorGraphValidation,
     FactorValidationSeverity,
+    node_dependencies,
     validate_factor_graph,
 )
 
@@ -386,6 +390,69 @@ def _field_reference_issues(
     return issues
 
 
+def _upstream_field_nodes(
+    start: ExpressionNode, nodes: Mapping[str, ExpressionNode]
+) -> Iterator[FieldNode]:
+    """`start` 의 입력을 거슬러 올라가 닿는 필드 잎 전부. 없는 id·순환은 그래프 검증이 말한다."""
+    seen: set[str] = set()
+    pending = list(node_dependencies(start))
+    while pending:
+        node_id = pending.pop()
+        if node_id in seen or node_id not in nodes:
+            continue
+        seen.add(node_id)
+        node = nodes[node_id]
+        if isinstance(node, FieldNode):
+            yield node
+        pending.extend(node_dependencies(node))
+
+
+def _unadjusted_price_issues(
+    factor_index: int, graph: FactorGraph, fields: Mapping[str, FieldMetadata]
+) -> list[ValidationIssue]:
+    """원주가 필드가 과거 세션을 읽는 연산자에 흘러들면 warning (BACKLOG-018, 이슈 #214).
+
+    원주가는 분할·증자·병합 날 수준이 끊긴다. 기간 수익률·모멘텀·이평·변동성·지연처럼 과거 세션
+    값을 읽는 연산에 넣으면 가짜 급등락·가짜 변동성·이평 돌파 소거가 생기는데, 값은 정상으로 보여
+    결과가 조용히 틀린다. 같은 날 값끼리의 연산(가격 필터·거래대금·같은 날 비율)은 오염되지 않는다.
+
+    두 성질은 손으로 적지 않는다: 어떤 연산자가 과거 세션을 읽는지는 연산자 카탈로그
+    (`OperatorDefinition.reads_past_sessions`), 어떤 필드가 원주가인지와 그 조정 짝은 연결된
+    어댑터의 필드 계약(`FieldMetadata.adjusted_field_id`)이 답한다. 막지 않고 알린다 — 절대 가격
+    수준을 일부러 비교하는 전략도 있다. 잎마다 한 번, 고칠 자리인 `field_id` 를 짚는다.
+    """
+    nodes = {node.node_id: node for node in graph.nodes}
+    readers: dict[str, ExpressionNode] = {}
+    for node in graph.nodes:
+        operator = getattr(node, "operator", None)
+        if not operator_reads_past_sessions(node.kind, getattr(operator, "value", operator)):
+            continue
+        for leaf in _upstream_field_nodes(node, nodes):
+            readers.setdefault(leaf.node_id, node)
+    issues: list[ValidationIssue] = []
+    for node_index, node in enumerate(graph.nodes):
+        reader = readers.get(node.node_id)
+        if reader is None or not isinstance(node, FieldNode):
+            continue
+        metadata = fields.get(node.field_id)
+        if metadata is None or metadata.adjusted_field_id is None:
+            continue
+        operator = getattr(reader, "operator", None)
+        issues.append(
+            semantic_issue(
+                "strategy.field.unadjusted_price",
+                f"factors.{factor_index}.graph.nodes.{node_index}.field_id",
+                "분할·증자·병합에 조정하지 않은 원주가를 과거 세션과 비교하는 연산에 넣어 결과가 "
+                f"분할·증자에 오염될 수 있습니다. {metadata.adjusted_field_id} 를 쓰세요: "
+                f"field_id={node.field_id!r} adjusted_field_id={metadata.adjusted_field_id!r} "
+                f"reader={reader.node_id!r} operator={getattr(operator, 'value', operator)!r}",
+                severity=ValidationSeverity.WARNING,
+                node_id=node.node_id,
+            )
+        )
+    return issues
+
+
 # 필드 계약 없이 추론한 필드 노드의 단위(`domain/factor` `_infer_contract`). 판정할 수 없는 값이다.
 _UNKNOWN_UNIT = "unknown"
 
@@ -438,6 +505,7 @@ def validate_strategy(
     넘기고 지금과 같이 계약 없이 검증한다.
     """
     field_contracts = None if fields is None else tuple(fields)
+    fields_by_id = {field.field_id: field for field in field_contracts or ()}
     provided = (
         None
         if field_contracts is None
@@ -654,6 +722,7 @@ def validate_strategy(
         output_issue = _output_type_issue(factor_index, factor.factor_id, factor.graph, validation)
         if output_issue is not None:
             issues.append(output_issue)
+        issues.extend(_unadjusted_price_issues(factor_index, factor.graph, fields_by_id))
         output_units.update(
             (factor.factor_id, contract.unit)
             for contract in validation.node_contracts

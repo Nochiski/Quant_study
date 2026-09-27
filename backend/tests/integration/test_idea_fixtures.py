@@ -54,6 +54,8 @@ from strategy_workbench.domain.strategy.facade.specification import (
 IDEAS = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents" / "ideas"
 
 # 파일 이름 → 그 아이디어가 compile 에서 내야 하는 진단 코드 전부(error 는 없어야 한다).
+# 가격 변화 잎은 수정주가라(BACKLOG-017) 원주가 warning
+# `strategy.field.unadjusted_price`(BACKLOG-018)가 없다 — 이 집합에 그 코드가 없는 것이 그 단언이다.
 _EXPECTED_DIAGNOSTICS: dict[str, frozenset[str]] = {
     "momentum_12_1.yaml": frozenset(),
     "low_pbr_high_roe.yaml": frozenset(),
@@ -187,6 +189,23 @@ def test_idea_fields_have_the_same_contract_on_the_real_data_adapter(
         assert (mock[field_id].unit, mock[field_id].value_type) == (real.unit, real.value_type), (
             field_id
         )
+        # compile 이 읽는 필드 계약의 원주가 표시(BACKLOG-018)도 두 어댑터가 같다.
+        [contract] = adapter.resolve_factor_fields((field_id,)).fields
+        assert contract.adjusted_field_id == real.adjusted_field_id, field_id
+
+
+def test_the_raw_price_version_of_an_idea_is_warned(
+    authoring: StrategyAuthoringService,
+) -> None:
+    """위 기대 집합의 "원주가 warning 없음"이 빈 단언이 아니다: 잎을 원주가로 되돌리면 난다."""
+    source = (IDEAS / "momentum_12_1.yaml").read_text(encoding="utf-8")
+    raw = source.replace("field_id: price.adj_close", "field_id: price.close")
+    assert raw != source
+
+    compiled = authoring.compile(CompileRequest(raw, SourceFormat.YAML))
+
+    assert compiled.ok
+    assert [item.code for item in compiled.diagnostics] == ["strategy.field.unadjusted_price"]
 
 
 @pytest.mark.parametrize("name", sorted(_EXPECTED_DIAGNOSTICS))

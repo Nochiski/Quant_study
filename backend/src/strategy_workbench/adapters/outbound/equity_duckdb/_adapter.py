@@ -361,9 +361,7 @@ class EquityDuckdbAdapter:
             name: self._source_unavailable_reason(spec) for name, spec in SOURCE_BY_NAME.items()
         }
         self._fields: dict[str, FieldSpec] = {
-            spec.field_id: spec
-            for spec in FIELD_SPECS
-            if self._source_reason[spec.source] is None
+            spec.field_id: spec for spec in FIELD_SPECS if self._source_reason[spec.source] is None
         }
         self._profile: dict[str, tuple[int, str]] = self._load_profile()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
@@ -541,9 +539,7 @@ class EquityDuckdbAdapter:
             return self._coverage_cache
         con = self._connect()
         try:
-            grid = con.execute(
-                f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}"
-            ).fetchone()
+            grid = con.execute(f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}").fetchone()
             n_grid = max(_as_int((grid or (0,))[0], "universe_daily rows"), 1)
             n_ticker = _as_int(
                 (
@@ -577,9 +573,7 @@ class EquityDuckdbAdapter:
                     if source.mode is SourceMode.GRID
                     else (n_ticker if source.axis is SourceAxis.TICKER else n_corp)
                 )
-                group = (
-                    f" GROUP BY {source.key_column}" if source.reduce is Reduce.SUM else ""
-                )
+                group = f" GROUP BY {source.key_column}" if source.reduce is Reduce.SUM else ""
                 for field_id in fields:
                     expr = self._fields[field_id].expr
                     if source.mode is SourceMode.GRID:
@@ -603,9 +597,7 @@ class EquityDuckdbAdapter:
         """`LATEST` 원천의 첫 공개일(캘린더 안으로 자른다). `GRID` 는 캘린더 시작이다."""
         if source.mode is SourceMode.GRID:
             return self._sessions[0]
-        row = con.execute(
-            f"SELECT min({source.available_expr}) FROM {relation} {where}"
-        ).fetchone()
+        row = con.execute(f"SELECT min({source.available_expr}) FROM {relation} {where}").fetchone()
         first = row[0] if row is not None else None
         if first is None:
             return self._sessions[0]
@@ -750,6 +742,7 @@ class EquityDuckdbAdapter:
                     field_id=field_id,
                     unit=self._fields[field_id].unit,
                     value_type=NodeValueType.NUMERIC_SERIES,
+                    adjusted_field_id=self._fields[field_id].adjusted_field_id,
                 )
                 for field_id in field_ids
                 if field_id in self._fields
@@ -975,9 +968,7 @@ class EquityDuckdbAdapter:
                     f"DESCRIBE SELECT * FROM {self._source(PRICE_TABLE)}"
                 ).fetchall()
             }
-            basis_expr = (
-                BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
-            )
+            basis_expr = BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
             price_rows = con.execute(
                 f"""
                 SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
@@ -1383,8 +1374,7 @@ class EquityDuckdbAdapter:
                     f"date ORDER BY {source.pick_order}) = 1"
                 )
             joins.append(
-                f"LEFT JOIN ({picked}) g{index} "
-                f"ON g{index}.k = r.ticker AND g{index}.d = r.date"
+                f"LEFT JOIN ({picked}) g{index} ON g{index}.k = r.ticker AND g{index}.d = r.date"
             )
             selects.append(
                 f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, "
@@ -1529,14 +1519,10 @@ class EquityDuckdbAdapter:
             entry: dict[str, _Observed] = {}
             for position, field_id in enumerate(fields):
                 value = _as_float(raw[3 + position], field_id)
-                entry[field_id] = _Observed(
-                    value, available, content, _cell_kind(value, None)
-                )
+                entry[field_id] = _Observed(value, available, content, _cell_kind(value, None))
             dates.setdefault(key, []).append(available)
             cells.setdefault(key, []).append(entry)
-        return {
-            key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates
-        }
+        return {key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates}
 
     @staticmethod
     def _rows_in(panel: _Panel, sessions: Sequence[date]) -> Iterator[_Row]:
@@ -1556,9 +1542,7 @@ class EquityDuckdbAdapter:
             found = panel.rows.get((row.ticker, cutoff))
             return None if found is None else found.cells.get(field_id)
         key = (
-            row.ticker
-            if source.axis is SourceAxis.TICKER
-            else panel.corp_by_ticker.get(row.ticker)
+            row.ticker if source.axis is SourceAxis.TICKER else panel.corp_by_ticker.get(row.ticker)
         )
         series = panel.latest.get(source.name, {}).get(key) if key is not None else None
         if series is None:

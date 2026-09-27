@@ -348,6 +348,8 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         # 그래프 밖 필드 참조가 연결된 데이터에 없거나 숫자 필드가 아니다(P2-07).
         "strategy.field.missing",
         "strategy.field.value_type",
+        # 원주가 필드가 과거 세션을 읽는 연산자에 흘러든다(BACKLOG-018, warning).
+        "strategy.field.unadjusted_price",
         "strategy.portfolio.liquidity_field",
         "strategy.risk.net_exposure",
         "strategy.risk.long_only_exposure",

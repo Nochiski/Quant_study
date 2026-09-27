@@ -3765,6 +3765,10 @@
             "title": "Params",
             "type": "array"
           },
+          "reads_past_sessions": {
+            "title": "Reads Past Sessions",
+            "type": "boolean"
+          },
           "unit_rule": {
             "$ref": "#/components/schemas/UnitRule"
           }
@@ -3779,7 +3783,8 @@
           "availability",
           "description_key",
           "formula_key",
-          "example"
+          "example",
+          "reads_past_sessions"
         ],
         "title": "OperatorDefinition",
         "type": "object"

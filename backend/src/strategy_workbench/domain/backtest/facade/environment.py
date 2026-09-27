@@ -15,6 +15,11 @@ from strategy_workbench.domain.backtest._requirement import (
     MissingRunEnvironmentError,
     require_environment,
 )
+from strategy_workbench.domain.backtest._retired import (
+    RetiredEnvironment,
+    RetiredEnvironmentProblem,
+    environment_from_retired_settings,
+)
 from strategy_workbench.domain.backtest._schema import (
     RUN_ENVIRONMENT_SCHEMA_ID,
     run_environment_schema,
@@ -30,7 +35,10 @@ __all__ = [
     "ExecutionTiming",
     "Market",
     "MissingRunEnvironmentError",
+    "RetiredEnvironment",
+    "RetiredEnvironmentProblem",
     "RunEnvironment",
+    "environment_from_retired_settings",
     "environment_hash",
     "require_environment",
     "run_environment_canonical_json",

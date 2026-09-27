@@ -1,10 +1,12 @@
 """StrategyAuthoringService.upgrade (spec D3·D7, P1-04 → P2-09).
 
 safe parse → 업그레이드 가능 판정 → 텍스트 변환 → drift 검사 → compile. 두 변환 경로(dict·CST)가
-어긋나면 결과를 돌려주지 않는다. 결과는 현재 버전 원문과 알릴 사실(`warnings`)이다."""
+어긋나면 결과를 돌려주지 않는다. 결과는 현재 버전 원문과, 옛 문서에서 떼어 낸 실행 설정·알릴
+사실(`environment`·`warnings`)이다."""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -23,13 +25,19 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
     ParsedDocument,
     SourceFormat,
 )
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
+    ENVIRONMENT_UNAVAILABLE_CODE,
     upgrade_document,
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 LF = chr(10)
+# 1.0·1.1 golden 이 `data`·`execution` 에 적어 둔 실행 설정.
+GOLDEN_ENVIRONMENT = RunEnvironment(
+    start=date(2021, 1, 1), end=date(2026, 8, 31), universe_id="krx.common-stock"
+)
 
 
 class _DriftingCodec:
@@ -58,7 +66,7 @@ def _read(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def test_upgrade_returns_current_text_and_a_clean_compile() -> None:
+def test_upgrade_returns_current_text_its_environment_and_a_clean_compile() -> None:
     """1.0 문서가 현재 버전까지 올라 곧바로 저장할 수 있는 원문이 된다(spec D7)."""
     source = _read("quality_momentum.v1_0.commented.yaml")
 
@@ -70,11 +78,13 @@ def test_upgrade_returns_current_text_and_a_clean_compile() -> None:
     assert upgraded.compiled.spec_hash is not None and upgraded.compiled.diagnostics == ()
     assert yaml.safe_load(upgraded.source) == upgrade_document(yaml.safe_load(source)).tree
     assert upgraded.source_hash == upgraded.compiled.source_hash
+    # 1.0 원문의 `data`·`execution`·`missing_policy` 가 실행 설정으로 돌아온다.
+    assert upgraded.environment == GOLDEN_ENVIRONMENT
     assert upgraded.warnings == ()
 
 
 def test_a_1_1_document_upgrades_to_the_same_meaning_as_the_1_0_golden() -> None:
-    """1.1 원문(P2-03 보존분)은 1.2 단계만 탄다. 결과는 같은 전략이다."""
+    """1.1 원문(P2-03 보존분)은 1.2 단계만 탄다. 결과는 같은 전략·같은 실행 설정이다."""
     from_1_1 = _service().upgrade(
         CompileRequest(_read("quality_momentum.v1_1.yaml"), SourceFormat.YAML)
     )
@@ -84,6 +94,7 @@ def test_a_1_1_document_upgrades_to_the_same_meaning_as_the_1_0_golden() -> None
 
     assert from_1_1.compiled.spec_hash is not None
     assert from_1_1.compiled.spec_hash == from_1_0.compiled.spec_hash
+    assert from_1_1.environment == from_1_0.environment == GOLDEN_ENVIRONMENT
     assert f"signal:{LF}  normalization: none{LF}portfolio:" in from_1_1.source
 
 
@@ -149,6 +160,25 @@ def test_a_saved_reference_node_refuses_the_upgrade_with_its_pointer() -> None:
     assert "saved_factor" in str(info.value)
 
 
+def test_settings_that_cannot_become_a_run_environment_are_warned_not_invented() -> None:
+    """옮기지 못한 실행 설정은 기본값으로 지어내지 않는다.
+
+    `environment` 는 비고 warning 이 자리를 짚는다.
+    """
+    source = _read("quality_momentum.v1_1.yaml").replace(
+        'start: "2021-01-01"', 'start: "2021/01/01"'
+    )
+
+    upgraded = _service().upgrade(CompileRequest(source, SourceFormat.YAML))
+
+    assert upgraded.compiled.spec_hash is not None  # 문서 업그레이드 자체는 성공한다
+    assert upgraded.environment is None
+    assert [(w.code, w.pointer) for w in upgraded.warnings] == [
+        (ENVIRONMENT_UNAVAILABLE_CODE, "/data/start")
+    ]
+    assert "2021/01/01" in upgraded.warnings[0].message
+
+
 def test_document_warnings_reach_the_result() -> None:
     source = _read("quality_momentum.v1_1.yaml").replace(
         "  rebalance: monthly", "  rebalance: monthly\n  weighting: factor_score"
@@ -159,6 +189,7 @@ def test_document_warnings_reach_the_result() -> None:
     assert [w.code for w in upgraded.warnings] == [
         "strategy_document.upgrade_weighting_rule_changed"
     ]
+    assert upgraded.environment == GOLDEN_ENVIRONMENT
 
 
 def test_syntax_errors_carry_the_codec_diagnostics() -> None:

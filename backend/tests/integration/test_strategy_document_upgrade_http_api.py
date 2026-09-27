@@ -21,7 +21,7 @@ def _read(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def test_upgrade_returns_current_source_and_a_savable_compile() -> None:
+def test_upgrade_returns_current_source_its_environment_and_a_savable_compile() -> None:
     client = TestClient(build_http_app())
 
     response = client.post(
@@ -36,6 +36,19 @@ def test_upgrade_returns_current_source_and_a_savable_compile() -> None:
     assert body["compiled"]["schema_version"] == CURRENT_SCHEMA_VERSION
     assert body["source_hash"] == body["compiled"]["source_hash"]
     assert body["compiled"]["spec_hash"] is not None and body["compiled"]["diagnostics"] == []
+    # 옛 문서의 실행 설정은 응답으로 돌아온다 — 화면이 실행 설정 패널을 채운다(P3-02).
+    assert body["environment"] == {
+        "market": "KRX",
+        "frequency": "daily",
+        "start": "2021-01-01",
+        "end": "2026-08-31",
+        "universe_id": "krx.common-stock",
+        "timing": "next_open",
+        "participation_rate": 0.1,
+        "fee_bps": 15.0,
+        "slippage_bps": 10.0,
+        "missing": "drop",
+    }
     assert body["warnings"] == []
 
     # P2-09 전에는 결과가 1.1 이라 저장이 422 였다. 이제 그대로 새 revision 이 된다.
@@ -44,6 +57,23 @@ def test_upgrade_returns_current_source_and_a_savable_compile() -> None:
     )
     assert saved.status_code == 201, saved.text
     assert saved.json()["spec_hash"] == body["compiled"]["spec_hash"]
+
+
+def test_upgrade_warnings_carry_code_pointer_and_message() -> None:
+    client = TestClient(build_http_app())
+    source = _read("quality_momentum.v1_1.yaml").replace('end: "2026-08-31"', 'end: "someday"')
+
+    response = client.post(
+        "/api/v1/strategy-documents/upgrade", json={"source": source, "format": "yaml"}
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["environment"] is None
+    assert [(w["code"], w["pointer"]) for w in body["warnings"]] == [
+        ("strategy_document.upgrade_environment_unavailable", "/data/end")
+    ]
+    assert "someday" in body["warnings"][0]["message"]
 
 
 def test_upgrade_of_a_current_version_document_is_422_not_upgradeable() -> None:
@@ -140,6 +170,7 @@ def test_upgrade_json_source_keeps_json_format() -> None:
     assert '"factors": [' in body["source"]
     assert '"data"' not in body["source"] and '"execution"' not in body["source"]
     assert body["compiled"]["spec_hash"] is not None
+    assert body["environment"] is not None
 
 
 def test_openapi_declares_the_upgrade_operation_and_its_422_union() -> None:
@@ -152,5 +183,5 @@ def test_openapi_declares_the_upgrade_operation_and_its_422_union() -> None:
     assert "422" in operation["responses"]
     components = schema["components"]["schemas"]
     assert "UpgradedDocument" in components
-    assert "warnings" in components["UpgradedDocument"]["properties"]
+    assert {"environment", "warnings"} <= set(components["UpgradedDocument"]["properties"])
     assert "StrategyDocumentUpgradeUnsupportedNodeDetail" in components

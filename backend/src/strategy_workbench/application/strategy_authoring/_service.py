@@ -25,6 +25,8 @@ from functools import cached_property
 from typing import Any
 
 from strategy_workbench.domain.backtest.facade.environment import (
+    RunEnvironment,
+    environment_from_retired_settings,
     run_environment_schema,
     run_environment_schema_hash,
 )
@@ -34,8 +36,10 @@ from strategy_workbench.domain.factor.facade.operators import (
     operator_definitions,
 )
 from strategy_workbench.domain.strategy.facade.document import (
+    ENVIRONMENT_UNAVAILABLE_CODE,
     LEGACY_SHAPE_CODE,
     NotUpgradeableDocumentError,
+    RetiredExecutionSettings,
     UpgradeUnsupportedNodeError,
     UpgradeWarning,
     hydrate_strategy_document,
@@ -85,13 +89,16 @@ class CompileRequest:
 class UpgradedDocument:
     """은퇴 schema 원문을 현재 버전으로 다시 쓴 결과와 그 원문의 compile 결과(spec D3·D7).
 
-    `warnings` 는 업그레이드는 됐지만 사용자가 알아야 하는 사실이다(spec D7).
+    `environment` 는 옛 문서의 `data`·`execution`·`missing_policy` 로 만든 실행 설정이다. 옮기지
+    못했으면(값이 없거나 읽히지 않음) 비어 있고, 그 사유는 `warnings` 가 자리와 함께 짚는다 —
+    기본값으로 지어내지 않는다. 화면은 이 값으로 실행 설정을 채운다(P3-02).
     """
 
     format: SourceFormat
     source: str
     source_hash: str
     compiled: CompiledDocument
+    environment: RunEnvironment | None
     warnings: tuple[UpgradeWarning, ...]
 
 
@@ -338,12 +345,14 @@ class StrategyAuthoringService:
         if mismatch is not None:
             raise DocumentUpgradeDriftError(*mismatch)
         compiled = self._compile_parsed(reparsed)
+        environment, environment_warnings = _environment_of(outcome.environment)
         return UpgradedDocument(
             format=request.format,
             source=upgraded,
             source_hash=compiled.source_hash,
             compiled=compiled,
-            warnings=outcome.warnings,
+            environment=environment,
+            warnings=(*outcome.warnings, *environment_warnings),
         )
 
     def compile(self, request: CompileRequest) -> CompiledDocument:
@@ -429,6 +438,20 @@ def _structural_range(parsed: ParsedDocument, code: str, pointer: str) -> Source
     if code in _KEY_RANGE_CODES and pointer in parsed.key_ranges:
         return parsed.key_ranges[pointer]
     return parsed.locate(pointer)
+
+
+def _environment_of(
+    settings: RetiredExecutionSettings | None,
+) -> tuple[RunEnvironment | None, tuple[UpgradeWarning, ...]]:
+    """옛 문서에서 떼어 낸 실행 설정 원문을 `RunEnvironment` 로. 못 옮긴 자리는 warning 으로."""
+    if settings is None:
+        return None, ()
+    result = environment_from_retired_settings(settings)
+    warnings = tuple(
+        UpgradeWarning(ENVIRONMENT_UNAVAILABLE_CODE, problem.pointer, problem.message)
+        for problem in result.problems
+    )
+    return result.environment, warnings
 
 
 def _first_mismatch(expected: object, actual: object, pointer: str) -> tuple[str, str] | None:

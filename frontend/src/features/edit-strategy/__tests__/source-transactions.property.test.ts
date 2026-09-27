@@ -22,6 +22,9 @@ import {
   type SourceOperation,
 } from "../model/source-transactions";
 
+/** CI가 보고한 반례 seed를 로컬에서 고정한다(#197). 비우면 fast-check가 매번 새 seed를 고른다. */
+const fixedSeed = process.env.FC_SEED ? { seed: Number(process.env.FC_SEED) } : {};
+
 /** 문서 텍스트(주석 포함)와 그 텍스트를 parse한 tree에 유효한 연산 하나. */
 const documentAndOperation = fc
   .tuple(
@@ -205,8 +208,8 @@ describe("source transactions (property)", () => {
         if (eol === "\r\n")
           expect(edit.nextSource.replaceAll("\r\n", "")).not.toContain("\n");
       }),
-      // 로컬 정밀 검사: `FC_NUM_RUNS=3000 npx vitest run <this file>`.
-      { numRuns: Number(process.env.FC_NUM_RUNS ?? 300) },
+      // 로컬 정밀 검사: `FC_NUM_RUNS=3000 npx vitest run <this file>`. CI 반례 재현: `FC_SEED=<seed>`.
+      { numRuns: Number(process.env.FC_NUM_RUNS ?? 300), ...fixedSeed },
     );
   }, 300_000);
 });
@@ -341,7 +344,7 @@ describe("flow containers (property)", () => {
         if (eol === "\r\n")
           expect(edit.nextSource.replaceAll("\r\n", "")).not.toContain("\n");
       }),
-      { numRuns: Number(process.env.FC_NUM_RUNS ?? 200) },
+      { numRuns: Number(process.env.FC_NUM_RUNS ?? 200), ...fixedSeed },
     );
   }, 300_000);
 });

@@ -146,3 +146,17 @@ def test_without_field_contracts_units_are_unknown_and_nothing_is_judged() -> No
     spec = _spec(_factor("momentum", "price.close"), _factor("value", "valuation.pbr"))
 
     assert _unit_warnings(spec) == []
+
+
+def test_a_factor_with_unknown_unit_is_left_out_of_the_comparison() -> None:
+    """단위를 모르는 팩터는 비교에서 빠진다 — 알려진 단위 하나와 섞여도 경고하지 않는다.
+
+    필드 계약 없이 `close` 는 `unknown`, `zscore(close)` 는 무차원 `"1"` 이다. `unknown` 을 단위
+    하나로 세면 두 단위가 달라 보여 거짓 경고가 뜬다(P2-07 리뷰 DEFECT-P3-2, 돌연변이 N9).
+    """
+    spec = _spec(
+        _factor("momentum", "price.close", standardize=True),
+        _factor("value", "valuation.pbr"),
+    )
+
+    assert _unit_warnings(spec) == []

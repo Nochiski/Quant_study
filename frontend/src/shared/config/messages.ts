@@ -811,7 +811,7 @@ const ko = {
     "위험 가중에 쓸 데이터 필드입니다.",
   "strategy.field.risk_step.risk_factor_id": "위험 팩터",
   "strategy.field.risk_step.risk_factor_id.description":
-    "위험 가중에 쓸 팩터입니다. 이 팩터는 점수 합산에서 빠지고 원시값의 역수로 비중을 나눕니다.",
+    "위험 가중에 쓸 팩터입니다. 비중 방식이 위험 가중(risk)일 때만 읽히고, 그때 이 팩터는 점수 합산에서 빠지며 원시값의 역수로 비중을 나눕니다.",
   "strategy.type.execution_step": "체결 가정",
   "strategy.type.execution_step.description": "주문 시점과 비용 가정입니다.",
   "strategy.field.execution_step.timing": "주문 시점",
@@ -2328,7 +2328,7 @@ export const messages = {
       "The data field used for risk weighting.",
     "strategy.field.risk_step.risk_factor_id": "Risk factor",
     "strategy.field.risk_step.risk_factor_id.description":
-      "The factor used for risk weighting. It is left out of the combined score and weights follow the inverse of its raw value.",
+      "The factor used for risk weighting. It is read only when weighting is risk; then it is left out of the combined score and weights follow the inverse of its raw value.",
     "strategy.type.execution_step": "Execution step",
     "strategy.type.execution_step.description":
       "Order timing and cost assumptions.",

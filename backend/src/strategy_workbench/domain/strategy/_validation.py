@@ -34,6 +34,7 @@ from ._constraints import (
 )
 from ._hydrate import SUPPORTED_SCHEMA_VERSIONS
 from ._models import (
+    CATALOG_EQUITY_FIELD,
     CROSS_SECTIONAL_ELIGIBILITY_OPERATORS,
     ChoiceParameter,
     EligibilityOperator,
@@ -229,7 +230,9 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         yield semantic_issue(
             "strategy.risk.risk_field",
             "risk.risk_field_id",
-            "리스크 가중 방식을 쓰려면 리스크 필드나 리스크 팩터를 지정해야 합니다.",
+            "리스크 가중 방식을 쓰려면 리스크 필드나 리스크 팩터를 지정해야 합니다: "
+            f"weighting={spec.portfolio.weighting.value!r} "
+            f"risk_field_id={spec.risk.risk_field_id!r} risk_factor_id={risk_factor_id!r}",
         )
     excluded = inverse_risk_factor_id(spec)
     if excluded is None or excluded not in factor_ids:
@@ -320,6 +323,66 @@ def _unsupported_operator_issues(
                 kind=ValidationKind.CAPABILITY,
             )
         )
+    return issues
+
+
+def _equity_field_references(value: object, path: str = "") -> Iterator[tuple[str, str]]:
+    """팩터 그래프 밖의 equity 필드 참조 `(path, field_id)` 전부.
+
+    대상은 모델 필드 metadata `catalog: equity-field`(`CATALOG_EQUITY_FIELD`)가 붙은 자리다. runtime
+    schema 의 `x-catalog: equity-field` 도 같은 metadata 에서 나오므로 목록을 따로 적지 않는다.
+    팩터 그래프 안의 필드·그룹 필드는 그래프 검증(`validate_factor_graph`)이 계약으로 본다.
+    """
+    if isinstance(value, FactorGraph):
+        return
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        for model_field in dataclasses.fields(value):
+            child_path = f"{path}.{model_field.name}" if path else model_field.name
+            child = getattr(value, model_field.name)
+            if model_field.metadata.get("catalog") == CATALOG_EQUITY_FIELD["catalog"]:
+                if isinstance(child, str):
+                    yield child_path, child
+                continue
+            yield from _equity_field_references(child, child_path)
+        return
+    if isinstance(value, (tuple, list)):
+        for index, item in enumerate(value):
+            yield from _equity_field_references(item, f"{path}.{index}" if path else str(index))
+
+
+def _field_reference_issues(
+    spec: StrategySpec, fields: tuple[FieldMetadata, ...]
+) -> list[ValidationIssue]:
+    """그래프 밖 필드 참조를 연결된 어댑터의 계약에서 찾는다(P2-07 리뷰 P1, spec D5).
+
+    네 자리(eligibility 규칙·유동성·레짐·리스크 필드)는 모두 값을 숫자로 읽는다(비교·하한·역가중).
+    그래서 없는 필드는 `strategy.field.missing`, 숫자 시계열이 아닌 필드는
+    `strategy.field.value_type` 이다. 적용 조건과 무관하게 검사한다 — 문서 참조 무결성이며, 노드·
+    팩터 참조가 모두 `*_missing` error 인 것과 같은 규칙이다(P2-06 결정 2).
+    """
+    by_id = {field.field_id: field for field in fields}
+    issues: list[ValidationIssue] = []
+    for path, field_id in _equity_field_references(spec):
+        metadata = by_id.get(field_id)
+        if metadata is None:
+            issues.append(
+                semantic_issue(
+                    "strategy.field.missing",
+                    path,
+                    "연결된 데이터에 없는 필드입니다. 필드 id 를 확인하세요: "
+                    f"field_id={field_id!r} path={path!r}",
+                )
+            )
+        elif metadata.value_type is not NodeValueType.NUMERIC_SERIES:
+            issues.append(
+                semantic_issue(
+                    "strategy.field.value_type",
+                    path,
+                    "이 자리는 값을 숫자로 읽으므로 숫자 필드를 써야 합니다: "
+                    f"field_id={field_id!r} actual={metadata.value_type.value!r} "
+                    "expected='numeric_series'",
+                )
+            )
     return issues
 
 
@@ -432,6 +495,8 @@ def validate_strategy(
             semantic_issue("strategy.factor.required", "factors", "팩터를 하나 이상 추가하세요.")
         )
     issues.extend(_eligibility_rule_issues(spec))
+    if field_contracts is not None:
+        issues.extend(_field_reference_issues(spec, field_contracts))
     # Scalar bounds are owned by the constraint catalog (P1-04); the schema API reads the same rows.
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         value = resolve_scalar(spec, constraint.pointer)

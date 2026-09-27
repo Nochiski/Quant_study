@@ -16,6 +16,7 @@ from ._nodes import (
     FieldMetadata,
     FieldNode,
     GroupNode,
+    GroupOperator,
     NodeValueType,
     ParameterNode,
     TimeSeriesNode,
@@ -26,6 +27,9 @@ from ._nodes import (
 
 # 출력이 무차원인 횡단면 연산(BACKLOG-003). `demean`·`winsorize` 는 값의 단위를 그대로 둔다.
 _DIMENSIONLESS_SECTIONS = frozenset({CrossSectionalOperator.RANK, CrossSectionalOperator.ZSCORE})
+# 출력이 무차원인 그룹 연산(BACKLOG-015). 그룹 안 순위는 횡단면 순위와 같은 백분위 공식
+# (`cross_sectional_rank`)이다. `neutralize` 는 그룹 평균을 빼므로 입력 단위를 그대로 둔다.
+_DIMENSIONLESS_GROUP_OPERATIONS = frozenset({GroupOperator.RANK})
 
 # 정수 파라미터의 하한은 노드 dataclass 옆에 한 번만 선언한다(`_nodes.minimum`). runtime schema가
 # 같은 값을 JSON Schema `minimum`으로 발행하므로 화면이 만든 기본값과 검증기가
@@ -535,6 +539,9 @@ def _infer_contract(
         if isinstance(node, CrossSectionalNode) and node.operator in _DIMENSIONLESS_SECTIONS:
             # 순위·z-score 는 입력 단위를 지운다(BACKLOG-003). 카탈로그 `UnitRule.DIMENSIONLESS`
             # 와 같은 규칙이며 `test_factor_operators.py` 가 둘을 대조한다.
+            unit = "1"
+        if isinstance(node, GroupNode) and node.operator in _DIMENSIONLESS_GROUP_OPERATIONS:
+            # 카탈로그 `UnitRule.DIMENSIONLESS` 와 같은 규칙이다(`test_factor_operators.py` 대조).
             unit = "1"
         if isinstance(node, GroupNode):
             group_metadata = fields.get(node.group_field_id)

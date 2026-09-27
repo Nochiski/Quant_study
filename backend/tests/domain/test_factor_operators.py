@@ -25,6 +25,8 @@ from strategy_workbench.domain.factor.facade.expression import (
     FactorGraph,
     FieldMetadata,
     FieldNode,
+    GroupNode,
+    GroupOperator,
     NodeValueType,
 )
 from strategy_workbench.domain.factor.facade.operators import (
@@ -314,10 +316,78 @@ def test_centering_and_clipping_keep_the_input_unit(operator: str) -> None:
     assert [issue.code for issue in validation.issues] == ["factor.graph.unit_mismatch"]
 
 
-def test_only_rank_and_zscore_are_dimensionless() -> None:
+def test_only_ranks_and_zscore_are_dimensionless() -> None:
     dimensionless = {
         key
         for key, definition in OPERATOR_DEFINITIONS.items()
         if definition.unit_rule is UnitRule.DIMENSIONLESS
     }
-    assert dimensionless == {("cross_sectional", "rank"), ("cross_sectional", "zscore")}
+    assert dimensionless == {
+        ("cross_sectional", "rank"),
+        ("cross_sectional", "zscore"),
+        ("group", "rank"),
+    }
+
+
+# -- BACKLOG-015: 그룹 안 순위도 단위를 지운다 -----------------------------------------------------
+
+_GROUP = FieldMetadata(
+    field_id="classification.sector", unit="category", value_type=NodeValueType.GROUP_SERIES
+)
+
+
+def _grouped_sum(operator: str) -> FactorGraph:
+    """단위가 다른 두 필드에 같은 그룹 연산을 붙인 뒤 더하는 그래프(섹터 안 순위 합)."""
+    return FactorGraph(
+        nodes=(
+            FieldNode(node_id="close", field_id="close", kind="field"),
+            FieldNode(node_id="pbr", field_id="pbr", kind="field"),
+            GroupNode(
+                node_id="close_in_sector",
+                operator=GroupOperator(operator),
+                input_node_id="close",
+                group_field_id="classification.sector",
+                kind="group",
+            ),
+            GroupNode(
+                node_id="pbr_in_sector",
+                operator=GroupOperator(operator),
+                input_node_id="pbr",
+                group_field_id="classification.sector",
+                kind="group",
+            ),
+            BinaryNode(
+                node_id="combined",
+                operator=BinaryOperator.ADD,
+                left_node_id="close_in_sector",
+                right_node_id="pbr_in_sector",
+                kind="binary",
+            ),
+        ),
+        output_node_id="combined",
+    )
+
+
+def test_sector_ranks_of_fields_with_different_units_can_be_added() -> None:
+    """KRW 필드와 ratio 필드의 섹터 안 순위 두 개를 더해도 단위 오류가 아니다(BACKLOG-015).
+
+    `group.rank` 는 `cross_sectional_rank` 로 그룹 안 0~1 백분위를 낸다 — 횡단면 `rank` 와 같은
+    공식이라 입력 단위가 남지 않는다. P2-07 tip 에서는 `factor.graph.unit_mismatch
+    left='KRW' right='ratio'` 로 거부됐다.
+    """
+    validation = validate_factor_graph(_grouped_sum("rank"), fields=(_PRICE, _PBR, _GROUP))
+
+    assert validation.valid, [issue.message for issue in validation.issues]
+    contracts = {contract.node_id: contract.unit for contract in validation.node_contracts}
+    assert contracts["close_in_sector"] == contracts["pbr_in_sector"] == "1"
+    assert contracts["combined"] == "1"
+
+
+def test_sector_neutralization_keeps_the_input_unit() -> None:
+    """대조군: 섹터 평균을 뺀 값은 원래 단위라 KRW 와 ratio 를 섞으면 여전히 단위 오류다."""
+    validation = validate_factor_graph(_grouped_sum("neutralize"), fields=(_PRICE, _PBR, _GROUP))
+
+    contracts = {contract.node_id: contract.unit for contract in validation.node_contracts}
+    assert contracts["close_in_sector"] == "KRW"
+    assert contracts["pbr_in_sector"] == "ratio"
+    assert [issue.code for issue in validation.issues] == ["factor.graph.unit_mismatch"]

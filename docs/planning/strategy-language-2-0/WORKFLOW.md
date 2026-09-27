@@ -503,8 +503,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   넘으면 **PLAN 변경 기록에 사유를 남기고 `unsupported`로 둔다**(P2-07 분기가 그대로 남는다).
 - fixture `ideas/*.yaml` 5개(spec 5절)가 hydrate·validate·preview까지 통과(backend 수준 완료 정의).
 - **ideas fixture는 레시피 빌더 산출 형태를 따른다**(spec D2). 다중 입력 연산자의 부가 입력은 새
-  소스 잎 노드다. 아이디어 3은 노드 4개(그중 잎 2개: `close`·`close_2`)다 — `close` → `ma20` → 잎
-  `close_2` → `breakout(gt, left=close_2, right=ma20)`. `comparison` 출력이 P2-07의 승격으로
+  소스 잎 노드다. 아이디어 3은 노드 4개(그중 잎 2개: `close`·`close_2`)다 — `close` → `mean` → 잎
+  `close_2` → `gt(left=close_2, right=mean)`(node_id 는 spec D2 빌더 규칙). `comparison` 출력이 P2-07의 승격으로
   통과한다. 체인 머리를 재참조하는 노드 3개 형태로 쓰지 않는다 — P5-03의 "e2e 산출물과 같은 hash"
   단언이 깨진다.
 - 아이디어 5(변동성 역가중)는 **알파 팩터 1개 + 변동성 팩터 1개 두 벌**로 쓰고 `risk_factor_id`가
@@ -775,11 +775,18 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   마지막이면 체인. 다중 입력 노드는 한 입력이 체인 꼬리이고 나머지 입력이 전부 체인 밖 잎
   (`field`·`constant`·`parameter`)일 때만 체인("÷ 시가총액", "종가 > 20일 이평"). **체인 머리
   재참조는 비체인**이다. 그 외는 "고급에서 편집".
-- 연산: 단계 추가(끝·중간) = `addNode`(kind·id `<operator>_<n>`·입력=직전·출력=마지막) + 다음
+- 연산: 단계 추가(끝·중간) = `addNode`(kind·id 는 spec D2 node_id 규칙·입력=직전·출력=마지막) + 다음
   노드 `input_node_id` 재배선; 삭제 = `remove` + 재배선(+출력 갱신); 이동 = 재배선; 파라미터 =
   `replaceScalar`; 연산자 교체 = 노드 항목 교체(kind 동반). 여러 연산은 `planSourceOperations`로 한
   undo 단계. 결과가 체인 불변식을 깨면 거부하고 이유 반환.
 - property test: 임의 체인 문서·임의 연산에 대해 tree 동치·체인 유지·범위 밖 바이트 보존.
+- 빌더 node_id 생성 규칙(spec D2: 바탕 이름 = 단계는 연산자·잎은 필드 id 끝 조각, 겹치면 `_2`…)이
+  `backend/tests/fixtures/strategy_documents/ideas/*.yaml` 과 일치함을 테스트로 고정한다(P2-08 결정 3).
+  빌더로 fixture 와 같은 연산 순서를 밟으면 node_id 열이 같아야 한다. P5-03 의 hash 단언이 이것에 기댄다.
+- 빌더의 **부가 잎 삽입 위치**와 **체인 꼬리의 입력 슬롯** 규칙을 정하고 spec D2 에 적는다(P2-08 리뷰
+  P3-2). `spec_hash` 는 노드 순서와 슬롯에 민감하다(리뷰 실측: 아이디어 3 의 `mean`·`close_2` 순서만 바꿔도
+  hash 가 바뀐다). fixture 의 현재 형태는 "부가 잎은 그것을 읽는 노드 바로 앞", "`divide` 는 꼬리가 `left`,
+  `gt` 는 꼬리가 `right`"다. 규칙이 fixture 와 다르면 fixture 를 함께 고치고, 일치를 테스트로 고정한다.
 
 ### P5-02 — 팔레트, 단계 카드 UI, 설명, 인라인 진단
 
@@ -806,6 +813,9 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - BACKLOG-004: 미리보기가 `POST /api/v1/factors/preview`를 쓰면 그 422(`factor.graph.invalid`와
   `factor.graph.*` 이슈 코드)를 `strategy.expression.*` 네임스페이스로 정리한다. 이 endpoint를 쓰지
   않으면 이 PR에서 BACKLOG-004의 담당을 다시 정한다.
+- BACKLOG-016: 0/1 이진 팩터(아이디어 3)의 선정이 동점 해소 순서(`security_id`)로 정해진다. 아이디어 e2e 를
+  확정할 때 해결 방식을 정한다 — (a) 보조 팩터로 동점 해소, (b) 동점 전원 균등 비중. 정한 방식을 spec 5절·
+  아이디어 3 fixture 에 반영하고 재현 테스트를 둔다.
 
 **Phase 5 exit**
 

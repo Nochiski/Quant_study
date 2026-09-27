@@ -3,10 +3,10 @@ plan_version: 2
 project: strategy-language-2-0
 project_status: IN_REVIEW
 current_phase: P1,P2
-current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07
-active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07]
-parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07]
-last_updated: 2026-09-27T09:21:24+09:00
+current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08
+active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08]
+parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08]
+last_updated: 2026-09-27T10:19:10+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 11
@@ -25,11 +25,11 @@ progress_percent: 21
 |---|---|
 | Project status | `IN_REVIEW` |
 | Current phase | `P1,P2` |
-| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07` |
-| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07` |
+| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08` |
+| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `11 / 29` |
-| Aggregated at | `2026-09-27 09:21 KST` |
+| Aggregated at | `2026-09-27 10:19 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -282,6 +282,61 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Focused tests | `uv run pytest tests/domain/test_factor_operators.py tests/domain/test_factor_output_gate.py tests/domain/test_signal_unit_mismatch.py tests/application/test_strategy_compile_gate.py tests/integration/test_compile_gate_property.py tests/integration/test_truthful_pipeline.py tests/test_adapters_equity_duckdb.py -q` |
 | 제약사항 | **12절 상한 초과(600줄·10파일 → 1823줄·24파일), 분할하지 않는다.** WORKFLOW 가 compile 게이트 네 가지(필드 계약·출력 타입·단위 경고·capability)와 BACKLOG-003 을 한 PR 로 묶었고, 넷이 `validate_strategy` 의 같은 인자(`fields`)와 compile 서비스의 같은 port 를 공유해 따로 떼면 중간 PR 이 인자만 있고 쓰는 곳이 없다. 비테스트는 523줄로 상한 안이고 초과분은 신규 테스트 4파일(1217줄)이다 — 12절이 "test 는 구현과 같은 PR"이라 분리할 수 없다. 커밋을 논리 단위 11개로 나눠 리뷰 단위를 대신한다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
 | Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·계약 산출물 diff·frontend typecheck·typecheck:e2e·lint·test·build·`api:generate` diff 0·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
+
+| 항목 | 값 |
+|---|---|
+| PR | `P2-08` |
+| Intent | 완료 정의 아이디어 5개를 backend 수준에서 닫고(hydrate·검증·미리보기), 실데이터 어댑터가 그룹 필드(`group_series`)를 줄 수 있는지 확인한다 |
+| Acceptance | WORKFLOW P2-08 |
+| Non-goals | 그래프 탭에서 아이디어를 만드는 e2e(P5-03), 빌더 쪽 node_id 생성 테스트(P5-01, 아래 결정 3), duckdb 그룹 필드 제공(원천 없음, 결정 1), 실데이터 섹터 상한 결함(이슈 #203, main 별도 수정), mock·duckdb 필드 계약 불일치(이슈 #207) |
+| Branch/worktree | `feat/lang2-p2-08-ideas` / `wt-lang2-p2-08` |
+| Base SHA | P2-07 tip `945fd081`. 착수는 `6e397a3b` 에서 했고 P2-07 의 통합 브랜치 merge 와 리뷰 반영을 merge 로 따라갔다 |
+| Head SHA | PR [#205](https://github.com/Nochiski/Quant_study/pull/205) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
+| Diff stat | 생성 연산자 카탈로그 fixture 와 계획 문서(PLAN·WORKFLOW)를 뺀 handwritten **16파일 · +610 / −15**. backend 13파일 +597/−8(src 4파일 +73/−2 중 mock 필드 59줄, 신규 `test_idea_fixtures.py` 273줄, 아이디어 fixture 5파일), spec D2 1파일, 스토리 2파일 |
+| Focused tests | `uv run pytest tests/integration/test_idea_fixtures.py tests/domain/test_factor_operators.py tests/integration/test_strategy_http_api.py tests/contract/test_raw_observation_port.py -q` |
+| 제약사항 | **파일 수가 12절 상한(10)을 넘는다(16), 분할하지 않는다.** 아이디어 fixture 5개는 acceptance 가 한 묶음으로 요구하는 데이터 파일이고, 리드 결정(빌더 node_id 정본)이 fixture 와 spec 예시를 같이 고치라고 해서 문서가 늘었다. backend 는 +597 줄이다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
+| Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·계약 산출물 diff·frontend typecheck·typecheck:e2e·lint·test·build·`api:generate` diff 0·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
+
+P2-08 결정 6건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
+
+1. **`GROUP_SERIES` 는 `unsupported` 로 남긴다.** 원장(`~/quant-ledger/data/equity`, 스냅샷
+   `b5f7f8c286fe6d45`)을 조사했다. `dataset_profile` 의 `classification.sector` 는 `corp.induty_code`
+   (KSIC 현재값, `point_in_time=false`, evidence "과거 시점 업종 시계열이 없어(WICS 보류)")다. WICS
+   `sector_snapshot` 테이블은 있지만 행이 2026-09-18 스냅샷 하나(2460 티커, `available_date` 같은 날)뿐이라
+   과거 세션에서는 셀이 없다. 어댑터 패널 코어는 값을 `float` 로만 나른다(`_Observed.value`). 그룹 필드를
+   내려면 문자열 값 경로와 두 포트 계약 테스트, equity 쪽 FIELD_MAP·게이트 판정(`classification.sector`
+   "굽지 않기로 한 2")을 함께 바꿔야 하는데, 그래도 과거 구간은 전부 결측이라 그룹 연산이 "가용"이 되는
+   순간 모든 실데이터 백테스트에서 빈 값이 된다. 선행 조건은 월별 WICS 백필(`database/docs/WICS_PROBE.md`
+   7-5절, 라이선스 go/no-go 는 사용자 결정)이다. P2-07 의 capability 분기(`strategy.operator.unsupported`,
+   카탈로그 `availability: unsupported`)가 그대로 남는다.
+2. **mock 어댑터에 `financial.net_income`·`price.trading_value` 를 더했다(WORKFLOW 밖).** 아이디어 2·4 가
+   읽는 필드다. P2-07 부터 compile 이 연결된 어댑터의 필드 계약을 읽으므로 mock 에 없으면 저장 전
+   `strategy.expression.field_missing`·`strategy.field.missing` 이고, P5-03 e2e(mock backend)가 백테스트에
+   닿지 못한다. 단위·값 타입은 duckdb 선언과 같게 두었고 `test_idea_fixtures.py` 가 아이디어가 쓰는 필드마다
+   두 어댑터 계약을 대조한다. 기존 필드 값은 그대로라 mock `snapshot_id` 는 올리지 않았다 — 캐시 키에는
+   spec hash(필드 id 포함)가 들어가 새 필드 질의가 옛 결과와 섞일 수 없다. 대안(ROE 를 mock 에 있는 필드로
+   바꾸기)은 아이디어의 의미를 바꾸므로 버렸다.
+3. **node_id 는 빌더 규칙이 정본이다(리드 결정, 2026-09-27).** spec D2 본문(빌더가 `<operator>_<n>` 으로
+   짓는다)과 아이디어 3 예시(`ma20`·`breakout`)가 어긋났다. 사용자가 빌더로 만든 문서가 실제 산출물이고
+   node_id 는 `spec_hash` 에 들어가므로 빌더 규칙을 정본으로 하고 fixture·spec 예시를 고쳤다. 규칙은
+   기존 `suggestNodeId` 와 같다: 바탕 이름을 그대로 쓰고 같은 그래프 안에서 겹치면 `_2`·`_3` … 을 붙인다.
+   바탕 이름은 단계가 연산자(`mean`·`gt`·`momentum`·`std`·`divide`), 잎이 필드 id 끝 조각(`close`·`close_2`)
+   이다. 팩터 그래프마다 이름 공간이 따로라 변동성 팩터의 수익률 단계도 `momentum` 이다.
+   `test_idea_fixtures.py::test_node_ids_follow_the_recipe_builder_naming` 이 fixture 쪽을, P5-01
+   acceptance 에 예약한 테스트가 빌더 쪽을 고정한다. 잎 바탕 이름(필드 id 끝 조각)은 spec D2 가 적지
+   않던 부분이라 같은 커밋에서 spec D2 에 적었다.
+4. **아이디어 4·5 의 빈칸을 채웠다.** spec 5절은 이름만 적는다. 아이디어 4 는 `price.trading_value`
+   `top_percent 0.2` 유니버스 조건 + 60 세션 모멘텀, 아이디어 5 는 12-1 모멘텀(알파) + 일간 수익률
+   (`momentum window 2`)의 60 세션 표준편차(변동성, `direction: low`) 두 벌이고 `weighting: risk`,
+   `max_name_weight: 0.1` 이다. 변동성 팩터 하나만 두면 `strategy.signal.no_alpha_factor` 다.
+5. **BACKLOG-015: `group.rank` 를 무차원으로 바꿨다.** 그룹 안 순위는 `cross_sectional_rank` 와 같은 백분위
+   공식이라 입력 단위가 남지 않는다. 카탈로그 `unit_rule` 과 검증기 추론을 같이 바꾸고,
+   `group.neutralize` 는 입력 단위를 지키는 대조 테스트를 두었다. 실데이터 그룹 필드는 없지만 mock
+   (`classification.sector`)과 도메인 검증으로 재현된다. OpenAPI diff 0, 연산자 카탈로그 fixture 만 바뀐다.
+6. **체인 형태 검사는 fixture 가드다.** `test_idea_fixtures.py` 가 spec D2 체인 규칙으로 fixture 를
+   확인하지만 판정의 owner 는 frontend `recipe-projection.ts`(P5-01)다. backend 제품 코드에는 체인 판정을
+   두지 않았다. 미리보기는 CI 에서 mock(9 세션이라 리밸런싱 프레임 0)으로 경로 전체를 태우고, 실데이터는
+   수동으로 한 번 확인했다(변경 기록).
 
 P2-07 결정 11건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
 
@@ -663,7 +718,7 @@ Phase exit:
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `APPROVED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility` · 1차 REQUEST_CHANGES(P2 2·P3 2) → `641c6f3b`·`efd6a768` · 2~5차 **APPROVE**. 3차 재배치 때 첫 커밋 `a35c1e40` 에 P2-04 새 테스트 한 줄의 enum 개명을 넣었고, P2-04 3차 재현 테스트 `8587d413` 를 더했다. P2-04 5차 반영 tip `35089901` 위로 rebase(코드 변경분 동일). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `APPROVED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 **APPROVE**(blocking 0 · P2 1 · P3 4, 전부 반영: `77bd713c`·`7b707660`) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base `lang2/integration`(통합 머지 `c72f6257` 을 merge, 처음 착수는 P2-06 tip `36060527`) · 커밋 14개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → PLAN → 리뷰 P1 반영: 그래프 밖 필드 참조 → PLAN → 리뷰 P3-2 테스트) + 리뷰 반영 문서 · 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `WAITING` | — |
+| [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `IN_REVIEW` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 워크트리 `wt-lang2-p2-08`, 브랜치 `feat/lang2-p2-08-ideas` · base P2-07 tip `945fd081`(착수 `6e397a3b`, 이후 P2-07 을 merge 로 따라감) · 커밋 8개(BACKLOG-015 → mock 필드 → 아이디어 fixture·테스트 → 스파이크 결론 → 스토리 비고 → PLAN → 리드 결정 반영: 빌더 node_id → 문서·이 PLAN) · `GROUP_SERIES` 는 `unsupported` 유지(원장에 PIT 섹터 시계열 없음) · `review_lang2_p1_06` 1차 REQUEST_CHANGES(P1 1·P2 1·P3 3) → 반영(P2 는 BACKLOG-016) · 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `WAITING` | — |
 
 Phase exit:
@@ -773,6 +828,7 @@ Phase exit:
 | `P2-05` | `review_lang2_p2_0405` | 4 | `APPROVE` | src 는 이전 APPROVE본과 바이트 동일, 재현 테스트 `8587d413` 는 균등 대체를 지우면 6건 red 로 판별력 있음. 첫 커밋의 enum 개명 한 줄은 P2-05 가 enum 을 바꾸므로 필요한 변경으로 확인. 해시 불변 |
 | `P2-05` | `review_lang2_p2_0405` | 5 | `APPROVE` | 4차본과 src 바이트 동일, 해시 불변. P2-04 R5 반영(`<=`) 뒤 재배치 |
 | `P2-06` | `review_lang2_p2_06` | 1 | `APPROVE` | blocking 0 · P2 1 · P3 4. acceptance 전 항목 충족, 돌연변이 11종 중 10종 red(M6 정규화 모집단 변형은 동치). **P2-1**: `_risk_value` 의 공개일 조건을 지워도 테스트가 전부 초록 — 역가중 팩터가 합성 루프 밖이라 그 한 줄이 유일한 look-ahead 가드다. 반영: 공개일 초과 → `MISSING_RISK`·선정 불변 테스트, 그 조건만 지우면 1건 red 확인(`77bd713c`). **P3**: form-list 삭제 가드 fixture 의 `saved_factor` → `risk.risk_factor_id` 참조, `risk_factor_id` 설명에 적용 조건, `strategy.risk.risk_field` 메시지에 값(`77bd713c`·`7b707660`), PR 본문 e2e 합계에 "9 did not run" |
+| `P2-08` | `review_lang2_p1_06` | 1 | `REQUEST_CHANGES` | P1 1 · P2 1 · P3 3 · 관찰 1. **DEFECT-P208-001(P1)**: 아이디어 2 에 자본총계 ≤ 0 조건이 없어 자본잠식 적자 기업이 PBR·ROE 두 팩터 모두 최상위(원장 실측 28개) → `financial.book_equity gt 0` 규칙 + mock 자본잠식 종목 재현 테스트(수정 전 red). **DEFECT-P208-002(P2)**: 0/1 이진 팩터 선정이 `security_id` 순서 → 리드 결정으로 BACKLOG-016(P5-03). P3: spec D2 옛 문장 정리, P5-01 슬롯·삽입 순서 예약, 아이디어 4 당일 거래대금 한계 주석. 관찰(assistant DB 격리 누락)은 AI 계획 몫이라 이 PR 밖 |
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
@@ -788,6 +844,47 @@ Phase exit:
 | `P2-01` | `uv run pyright` | 4 errors — 전부 `duckdb` 미설치(기존), 신규 파일 0 | 2026-09-20 |
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
+
+- 2026-09-27 — P2-08 1차 리뷰(REQUEST_CHANGES) 반영. **DEFECT-P208-001(P1)**: 아이디어 2 에 유니버스 조건
+  `financial.book_equity gt 0` 을 넣었다. 자본잠식이면 PBR 이 음수라 `low` 1위가 되고, 적자까지 겹치면 ROE 가
+  음수/음수 = 양수라 두 팩터 모두 최상위다(리뷰 실측: 미리보기 기간 보통주 28개). mock 합성 구간의 세 번째
+  종목(`sec-035420-1`)을 자본잠식 적자 기업으로 만들고, 규칙 없이 그 종목이 합성 1위로 선정됨(red)을 확인한 뒤
+  규칙으로 빠지는지 단언하는 테스트를 넣었다. 나머지 아이디어 점검: 1·4(모멘텀)는 가격 비율이라 분모가 양수이고
+  `momentum` 은 분모 0 을 결측으로 둔다. 3 은 나눗셈이 없다. 5 의 변동성은 표준편차라 음수가 없고 0 이하는
+  `MISSING_RISK` 로 빠진다. 부호 함정은 아이디어 2 뿐이다. 관련 한계로 원장 당기순이익은 최신 공시가 분기면
+  3개월, 사업보고서면 12개월 값이라 ROE 가 기간을 섞는다(fixture 주석). **DEFECT-P208-002(P2)** 는 리드 결정으로
+  BACKLOG-016(담당 P5-03)에 기록만 했다. **P3**: spec D2 의 옛 `<operator>_<n>` 문장을 정리하고 "접미사 규칙만
+  `suggestNodeId` 와 같다"로 좁혔다. 빌더의 부가 잎 삽입 위치·꼬리 슬롯 규칙을 P5-01 acceptance 에 예약했다.
+  아이디어 4 가 당일 거래대금 한 값으로 자르는 한계를 fixture 주석에 적었다.
+- 2026-09-27 — P2-08 리드 결정 반영. (1) node_id 는 spec D2 빌더 규칙이 정본이다. `ideas/*.yaml` 5개의
+  단계 node_id 를 빌더 이름(`mean`·`gt`·`momentum`·`std`·`divide`)으로 바꾸고 spec D2 아이디어 3 예시와
+  WORKFLOW P2-08 문장을 고쳤다. P5-01 acceptance 에 "빌더 node_id 생성 규칙이 ideas fixture 와 일치
+  (테스트로 고정)"을 예약했다(결정 3). (2) 실데이터 미리보기 기간 2021-01-04 ~ 2022-12-29 는 홀드아웃
+  기준(측정은 2020-03-19 이후, 규칙 정본은 미머지 PR #100) 안이다. 비중 합 0.3 은 이슈 #203 때문이다.
+  (3) P2-07 의 그래프 밖 필드 판정(`bf07bc11`)을 merge 로 따라간 뒤, mock 두 필드를 뺀 상태로
+  `test_idea_fixtures.py` 를 돌려 compile 이 `strategy.expression.field_missing`(`financial.net_income`,
+  그래프 필드)과 `strategy.field.missing`(`price.trading_value`, eligibility 규칙)을 내는 것을 확인했다.
+- 2026-09-27 — P2-08 구현(`IN_REVIEW`, [#205](https://github.com/Nochiski/Quant_study/pull/205)).
+  `backend/tests/fixtures/strategy_documents/ideas/*.yaml` 5개(12-1 모멘텀·저PBR + 고ROE·20일 이평 돌파·거래대금
+  상위 20%·변동성 역가중)를 레시피 빌더 산출 형태로 두고, mock 필드 계약으로 compile(진단 코드 집합까지)·
+  실행 설정을 실은 미리보기·체인 형태·실데이터 어댑터 필드 계약 일치를 `test_idea_fixtures.py` 가 본다.
+  mock 에 `financial.net_income`·`price.trading_value` 를 더했다. BACKLOG-015 처리. 실데이터 확인: duckdb
+  어댑터, `krx.common-stock`, 2021-01-04 ~ 2022-12-29 로 다섯 아이디어 모두 compile 통과(변동성 역가중만 의도한
+  warning `strategy.risk.risk_factor_excluded`)·미리보기 23 프레임·프레임당 목표 20종목·엔진 호환이었다.
+- 2026-09-27 — P2-08 `GROUP_SERIES` 스파이크 결론: **duckdb 어댑터는 그룹 필드를 주지 않고 그룹 연산은
+  `unsupported` 로 남긴다**(P2-07 분기 유지). 사유는 원장에 PIT 섹터 시계열이 없어서다. `classification.sector`
+  는 KSIC 현재값 라벨(`dataset_profile.point_in_time=false`)이고 WICS `sector_snapshot` 은 2026-09-18 스냅샷
+  하나뿐이다. 선행 조건은 월별 WICS 백필(WICS_PROBE 7-5절, 라이선스 결정 대기)이다. 자세한 근거는 P2-08 결정 1.
+- 2026-09-27 — P2-08 관찰 두 건(이 PR 범위 밖, 담당 미정). (1) **실데이터에서 섹터 상한이 포트폴리오 전체를
+  줄인다.** duckdb 어댑터는 `sector_id=None` 이라 `domain/portfolio/_compiler.py` 의 `_apply_sector_constraints`
+  가 선정 종목 전부를 `"__unknown__"` 한 섹터로 묶고 기본 `max_sector_weight 0.3` 으로 스케일한다. 위 실데이터
+  미리보기에서 23 프레임 모두 목표 비중 합이 0.3 이었다(종목당 0.05 × 0.3). 경고 없이 현금 70% 로 도는 silent
+  wrong result 다. mock 은 종목마다 섹터가 달라 테스트가 못 잡는다. 리드가 이슈
+  [#203](https://github.com/Nochiski/Quant_study/issues/203)으로 등록했고 1안(섹터를 모르는 종목은 섹터
+  상한에서 빼고 경고)으로 main 에서 별도 수정한다. P2-08 은 고치지 않는다. (2) mock 과 duckdb 의 필드 계약이 두 필드에서 다르다 — `consensus.forward_eps` 단위(mock `KRW/share`,
+  duckdb `KRW`), `credit.margin_balance` 단위·값 타입(mock `KRW`·amount, duckdb `shares`·count). mock 에서
+  통과한 단위 판정이 실데이터에서 달라질 수 있다. 아이디어 fixture 는 이 두 필드를 쓰지 않는다.
+  이슈 [#207](https://github.com/Nochiski/Quant_study/issues/207)로 등록됐다.
 
 - 2026-09-27 — P2-07 구현(`IN_REVIEW`, [#201](https://github.com/Nochiski/Quant_study/pull/201)). compile 이
   연결된 어댑터의 필드 계약(`FieldCatalogPort`)으로 `field_missing`·그룹 연산 capability
@@ -1377,7 +1474,7 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 
 - **상황**: P2-07 이 boolean 팩터 출력을 hydrate 에서 0/1 로 승격한다. 승격 노드(`__promote_<factor>`
   조건 노드와 상수 `_one`·`_zero`)는 compile 된 spec 에만 있고 사용자 문서에는 없다.
-- **인풋**: 출력이 비교 노드인 팩터(아이디어 3, `breakout(gt, close_2, ma20)`)를 편집기에서 compile 하고
+- **인풋**: 출력이 비교 노드인 팩터(아이디어 3, `gt(close_2, mean)`)를 편집기에서 compile 하고
   실행 계획 탭·디버거 노드 목록을 연다.
 - **에러 위치**: `frontend/src/features/edit-strategy/model/use-execution-plans.ts:151-160`(compile spec 의
   `factor.graph` 로 설명 요청)과 `nodePointerById`(`:181-190`) — 승격 노드의 index 가 문서 노드 목록
@@ -1405,6 +1502,25 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **위험성**: 섹터 안 백분위 두 개의 합이 `factor.graph.unit_mismatch` 로 거부된다(false rejection,
   BACKLOG-003 과 같은 모양). 실데이터 어댑터가 그룹 필드를 주기 전에는 도달하지 않는다.
 - **담당**: `P2-08`(duckdb `GROUP_SERIES` 스파이크). WORKFLOW P2-08 에 예약했다.
+- **처리**: P2-08(`4b4ccfea`). `group.rank` 의 `unit_rule` 을 `DIMENSIONLESS` 로, 검증기 추론을 무차원으로
+  바꿨다. 재현 테스트 `test_factor_operators.py::test_sector_ranks_of_fields_with_different_units_can_be_added`
+  (P2-07 tip 에서 `factor.graph.unit_mismatch` 로 실패 확인)와 대조 `test_sector_neutralization_keeps_the_input_unit`.
+
+### BACKLOG-016: 0/1 이진 팩터의 선정이 동점 해소 순서(`security_id`)로 정해진다 (P2-08 리뷰 DEFECT-P208-002)
+
+- **상황**: 아이디어 3(20일 이평 돌파, `ideas/ma20_breakout.yaml`)은 WORKFLOW P2-08 이 정한 대로 비교 노드
+  `gt(close_2, mean)` 의 참/거짓을 compile 이 0/1 로 승격한 점수다. `selection_count: 20`, 결합 전 정규화
+  `rank`.
+- **인풋**: 이평 위 종목이 20개를 넘는 평범한 기준일(실데이터에서 보통 수백 개)의 미리보기·백테스트.
+- **에러 위치**: `backend/src/strategy_workbench/domain/factor/_statistics.py:8-19` `cross_sectional_rank` 가
+  동점에 평균 순위를 주므로 1 인 종목이 전부 같은 점수다. `domain/portfolio/_compiler.py:422-425` 가
+  `(-composite_score, security_id)` 로 정렬해 상위 20 을 자른다.
+- **위험성**: "20일 이평 돌파" 전략의 실제 선정은 "이평 위 종목 중 종목코드가 가장 작은 20개"다. 결정적이라
+  테스트는 통과하지만, 종목코드 순서(대체로 상장 연차)라는 의도하지 않은 요인이 수익률을 만들고 사용자는
+  결과를 돌파 효과로 읽는다(silent 오해석). 아이디어 3 만이 아니라 0/1 이진 팩터 전반의 체계적 편향이다.
+- **해결 후보**: (a) 보조 팩터로 동점을 해소한다(예: 이평 괴리율 같은 연속 점수를 2순위 키로). (b) 동점
+  종목 전원을 균등 비중으로 담는다(`selection_count` 를 넘으면 규칙 필요).
+- **담당**: `P5-03`(아이디어 e2e 를 확정할 때 해결 방식을 정한다). WORKFLOW P5-03 에 예약했다.
 
 ## 갱신 절차
 

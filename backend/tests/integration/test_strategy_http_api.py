@@ -56,7 +56,7 @@ def test_http_adapter_exposes_real_mock_equity_catalog() -> None:
     )
     assert sector["value_type"] == "category"
     assert payload["snapshot"]["point_in_time"] is True
-    assert payload["total"] == 9
+    assert payload["total"] == 11
 
 
 def test_equity_catalog_filters_and_paginates_over_http() -> None:
@@ -69,9 +69,9 @@ def test_equity_catalog_filters_and_paginates_over_http() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total"] == 2
+    assert payload["total"] == 3
     assert payload["page"] == 2
-    assert payload["page_count"] == 2
+    assert payload["page_count"] == 3
     assert payload["fields"][0]["field_id"] == "price.market_cap"
 
 

@@ -1,5 +1,5 @@
 {
-  "catalog_hash": "4b292de3009760ebdf84b6f33f574abc00defc87f4a2daf369cd5a1db4b4830e",
+  "catalog_hash": "5796507bf662a3a5194c504053cf8414e4a81c4158ec73d71c90d96fabada8f0",
   "operators": [
     {
       "kind": "unary",
@@ -289,7 +289,7 @@
         }
       ],
       "output_type_rule": "numeric_series",
-      "unit_rule": "same_as_input",
+      "unit_rule": "dimensionless",
       "availability": "unsupported",
       "description_key": "strategy.operator.group.rank",
       "formula_key": "strategy.operator.group.rank.formula",

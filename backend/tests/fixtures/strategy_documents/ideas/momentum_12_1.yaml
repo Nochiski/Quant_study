@@ -1,0 +1,24 @@
+# lang2 완료 정의 아이디어 1 — 12-1 모멘텀(spec 5절). 레시피 빌더 산출 형태(spec D2):
+# 소스 잎 하나(close) → 단계 하나(252 세션 수익률, 최근 21 세션 제외).
+schema_version: "1.2"
+title: "12-1 모멘텀"
+factors:
+  - factor_id: momentum_12_1
+    label: "12-1 모멘텀"
+    direction: high
+    graph:
+      nodes:
+        - kind: field
+          node_id: close
+          field_id: price.close
+        - kind: time_series
+          node_id: momentum
+          operator: momentum
+          input_node_id: close
+          window: 252
+          lag: 21
+      output_node_id: momentum
+portfolio:
+  selection_count: 20
+risk:
+  max_name_weight: 0.05

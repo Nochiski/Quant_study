@@ -151,7 +151,8 @@
   점수와 분모에서 빠지고(warning `strategy.risk.risk_factor_excluded`), 정규화 전 원시값의 역수로
   비중을 나눈다. 빼고 나서 알파가 없으면 compile error `strategy.signal.no_alpha_factor` 다.
   화면에서 그 필드를 고르는 흐름과 추적 화면 표시(P3-01), e2e(P5-03)가 아직 없어 상태는
-  `예정`이다.
+  `예정`이다. 두 기능을 쓰는 완료 정의 문서는 `ideas/top_trading_value.yaml`·
+  `ideas/inverse_volatility.yaml` 이고 backend 에서 compile·미리보기까지 통과한다(P2-08).
 
 ### US-CS-07 노드 캔버스에서 끌어서 잇고 되돌린다
 

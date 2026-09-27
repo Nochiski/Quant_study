@@ -561,7 +561,8 @@ def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
 ) -> None:
     """compile 이 읽는 필드 계약 전부(P2-07). 같은 변환(`resolve_factor_fields`)을 거친다.
 
-    이 어댑터는 그룹 필드를 아직 주지 않으므로(P2-08 스파이크 전) 그룹 연산은 unsupported 다.
+    이 어댑터는 그룹 필드를 주지 않으므로 그룹 연산은 unsupported 다. P2-08 스파이크 결론:
+    원장에 PIT 섹터 시계열이 없다(`factor_field_catalog` docstring).
     """
     catalog = adapter.factor_field_catalog()
 

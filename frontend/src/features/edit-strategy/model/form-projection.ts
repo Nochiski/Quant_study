@@ -45,7 +45,7 @@ export type FormControl =
     }
   | {
       kind: "catalog";
-      catalog: "equity-field" | "universe" | "factor" | "subgraph";
+      catalog: (typeof CATALOGS)[number];
     }
   | {
       kind: "reference";
@@ -144,7 +144,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * 실행 설정 스키마로 옮겨갔지만(P2-03), 실행 설정 패널이 같은 컨트롤을 쓰므로 남겨 둔다
  * (P3-02).
  */
-export const CATALOGS = ["equity-field", "universe", "factor", "subgraph"] as const;
+export const CATALOGS = ["equity-field", "universe"] as const;
 /** Form이 후보 select를 아는 `x-reference` 네임스페이스. runtime schema fixture의 값 집합과 같아야 한다(테스트가 고정). */
 export const NAMESPACES = ["node", "parameter", "factor"] as const;
 

@@ -11,7 +11,6 @@ import {
 
 import type {
   DatasetFieldProfile,
-  FactorDefinition,
 } from "../../../shared/api";
 import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
@@ -52,7 +51,6 @@ import "./strategy-form-panel.css";
 
 export type FormCatalogs = {
   equityFields: readonly DatasetFieldProfile[] | null;
-  factors: readonly FactorDefinition[] | null;
 };
 
 type StrategyFormPanelProps = {
@@ -1061,20 +1059,15 @@ const FieldControl = (props: ControlProps) => {
   return <TextualControl {...props} />;
 };
 
-/** 카탈로그 select 항목. 목록이 없는 카탈로그(universe·subgraph)는 null → 텍스트 입력. */
+/** 카탈로그 select 항목. 목록이 없는 카탈로그(universe)는 null → 텍스트 입력. */
 const catalogOptions = (
-  catalog: "equity-field" | "universe" | "factor" | "subgraph",
+  catalog: Extract<FormControl, { kind: "catalog" }>["catalog"],
   catalogs: FormCatalogs,
 ): { value: string; label: string }[] | null => {
   if (catalog === "equity-field" && catalogs.equityFields !== null)
     return catalogs.equityFields.map((profile) => ({
       value: profile.field_id,
       label: `${profile.field_id} · ${profile.label}`,
-    }));
-  if (catalog === "factor" && catalogs.factors !== null)
-    return catalogs.factors.map((factor) => ({
-      value: factor.factor_id,
-      label: `${factor.factor_id} · ${factor.label}`,
     }));
   return null;
 };

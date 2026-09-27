@@ -359,7 +359,7 @@ describe("FactorGraphPanel", () => {
       tree: { factors: [{ factor_id: "f", direction: "high", graph }] },
       schema,
       transactions,
-      catalogs: { equityFields: null, factors: null },
+      catalogs: { equityFields: null },
     };
     const view = (state: ExecutionPlansState, documentKey = 1) => (
       <FactorGraphPanel

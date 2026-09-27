@@ -58,7 +58,7 @@ const stubTransactions = (
   ...overrides,
 });
 
-const NO_CATALOGS = { equityFields: null, factors: null };
+const NO_CATALOGS = { equityFields: null };
 
 const renderPanel = (
   source: string,

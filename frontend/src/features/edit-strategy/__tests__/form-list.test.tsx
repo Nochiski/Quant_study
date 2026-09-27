@@ -306,7 +306,7 @@ describe("StrategyFormPanel list sections", () => {
             : {}
         }
         transactions={transactions}
-        catalogs={{ equityFields: null, factors: [FACTOR] }}
+        catalogs={{ equityFields: null }}
         catalogSnippets={buildCanonicalSnippetCatalog({
           schema: SCHEMA,
           factors: [FACTOR],
@@ -336,7 +336,7 @@ describe("StrategyFormPanel list sections", () => {
         projection={projectForm(SCHEMA, state.parse, [])}
         schema={null}
         transactions={stub()}
-        catalogs={{ equityFields: null, factors: null }}
+        catalogs={{ equityFields: null }}
       />,
     );
     const noSchema = within(
@@ -536,7 +536,7 @@ describe("StrategyFormPanel list sections", () => {
         schema={SCHEMA}
         tree={state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {}}
         transactions={stub()}
-        catalogs={{ equityFields: null, factors: [FACTOR] }}
+        catalogs={{ equityFields: null }}
         selectedPointer="/factors/0"
       />,
     );
@@ -595,7 +595,7 @@ describe("StrategyFormPanel list sections", () => {
               : {}
           }
           transactions={stub()}
-          catalogs={{ equityFields: null, factors: [FACTOR] }}
+          catalogs={{ equityFields: null }}
         />
       );
     };

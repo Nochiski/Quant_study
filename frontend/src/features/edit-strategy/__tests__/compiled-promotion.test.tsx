@@ -203,7 +203,7 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
     const factor = planned();
 
     expect(factor.document).toEqual({
-      nodeIds: ["close", "mean", "close_2", "gt"],
+      nodeIds: ["adj_close", "mean", "adj_close_2", "gt"],
     });
     expect(
       factor.request.graph.nodes.map((node) => [
@@ -211,9 +211,9 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
         compiledNodeOrigin(factor, node.node_id),
       ]),
     ).toEqual([
-      ["close", "document"],
+      ["adj_close", "document"],
       ["mean", "document"],
-      ["close_2", "document"],
+      ["adj_close_2", "document"],
       ["gt", "document"],
       ["__promote_ma20_breakout_one", "support"],
       ["__promote_ma20_breakout_zero", "support"],
@@ -225,7 +225,7 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
       "/factors/0/graph/nodes/3",
     );
     expect(nodePointerById(factor, "__promote_ma20_breakout_one")).toBeNull();
-    expect(nodePointerById(factor, "close_2")).toBe("/factors/0/graph/nodes/2");
+    expect(nodePointerById(factor, "adj_close_2")).toBe("/factors/0/graph/nodes/2");
     // 끊긴 참조는 붙인 노드가 아니다: 문서 쪽 결함으로 남아 포인터가 없다.
     expect(compiledNodeOrigin(factor, "typo")).toBe("document");
     expect(nodePointerById(factor, "typo")).toBeNull();

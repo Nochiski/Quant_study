@@ -45,9 +45,11 @@ const REJECTION_MESSAGE: Record<AssistantRejectionCode, MessageKey> = {
   "assistant.provider_not_installed": "assistant.error.provider_not_installed",
   "assistant.provider_secret_missing":
     "assistant.error.provider_secret_missing",
+  "assistant.result_unavailable": "assistant.error.result_unavailable",
   "assistant.session.not_found": "assistant.error.not_found",
   "assistant.turn.not_found": "assistant.error.not_found",
   "assistant.turn_in_progress": "assistant.chat.turnInProgress",
+  "assistant.turn_context_mismatch": "assistant.error.turn_context_mismatch",
 };
 
 /** 서버가 보낸 코드 문자열이 생성 SDK가 아는 거부 코드인지. 모르면 일반 문구로 떨어진다. */

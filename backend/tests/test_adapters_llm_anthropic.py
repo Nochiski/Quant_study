@@ -57,6 +57,7 @@ from strategy_workbench.domain.assistant.facade.models import (  # noqa: E402  #
     ProviderProfile,
     ResearchCapability,
     SearchActivity,
+    SearchBudgetExhausted,
     Source,
     TextDelta,
     ThinkingSummary,
@@ -113,6 +114,7 @@ def make_request(
                 role=ChatRole.USER,
                 text="모멘텀 전략을 만들어 줘",
                 created_at=dt.datetime(2026, 9, 20, tzinfo=dt.UTC),
+                turn_id="turn-2",
             ),
         ),
         tools=TOOLS,
@@ -486,6 +488,53 @@ def test_the_search_budget_is_spent_across_calls_not_reset_every_call() -> None:
     assert search_tools(0)[0]["max_uses"] == 2  # 아직 안 썼다
     assert search_tools(1)[0]["max_uses"] == 1  # 한 번 썼다
     assert search_tools(2) == []  # 예산 소진 — 도구를 뺀다
+
+
+def _one_search_then_two_tool_rounds() -> ScriptedMessagesClient:
+    """검색 한 번 뒤 도구 라운드 두 번. 예산 1이면 둘째·셋째 호출에 검색 도구가 없다."""
+    return ScriptedMessagesClient(
+        CallScript(
+            events=(
+                server_tool_use_stop("srvtoolu-1", "첫 질의"),
+                search_result_stop("srvtoolu-1", (("A", "https://a.test"),)),
+            ),
+            message=final_message(
+                stop_reason="tool_use",
+                content=[tool_use_block("toolu-1", "read_current_strategy", {})],
+            ),
+        ),
+        CallScript(
+            message=final_message(
+                stop_reason="tool_use",
+                content=[tool_use_block("toolu-2", "read_current_strategy", {})],
+            ),
+        ),
+        CallScript(message=final_message(stop_reason="end_turn")),
+    )
+
+
+def test_the_spent_search_budget_is_announced_once_with_its_own_event() -> None:
+    """도구를 빼는 순간 화면에 전용 이벤트를 한 번 알린다(C-03, OpenAI adapter와 같은 이벤트).
+
+    검색 활동(`SearchActivity`)으로 알리면 사용자는 하지 않은 검색을 본다. 통지는 도구를 뺀 첫
+    호출 앞에 한 번만 나가고, 뒤 호출에서 되풀이하지 않는다.
+    """
+    events = run_turn(_one_search_then_two_tool_rounds(), request=make_request(max_search_uses=1))
+
+    kinds = [type(event).__name__ for event in events]
+    assert kinds.count("SearchBudgetExhausted") == 1
+    assert kinds.count("SearchActivity") == 1
+    # 첫 호출의 사용량 뒤, 도구를 뺀 둘째 호출의 사용량 앞이다.
+    usages = [index for index, kind in enumerate(kinds) if kind == "Usage"]
+    assert usages[0] < kinds.index("SearchBudgetExhausted") < usages[1]
+    assert failures(events) == []
+
+
+def test_no_budget_notice_when_no_search_was_ever_made() -> None:
+    """예산이 0이면 처음부터 도구가 없는 것이지 소진된 것이 아니다. 알릴 일이 없다."""
+    events = run_turn(_one_search_then_two_tool_rounds(), request=make_request(max_search_uses=0))
+
+    assert [event for event in events if isinstance(event, SearchBudgetExhausted)] == []
 
 
 def test_a_call_without_the_search_tool_still_carries_the_earlier_search_blocks() -> None:

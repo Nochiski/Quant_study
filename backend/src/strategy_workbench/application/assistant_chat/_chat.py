@@ -26,6 +26,13 @@ adapter가 한다(spec D3). 루프를 도는 주인이 adapter이고 `TurnReques
 예외 메시지에는 요청 URL·헤더·본문 일부가 섞여 들어올 수 있고, 그중에 API 키가 있을 수 있다.
 `Failure(PROVIDER)`는 예외 **타입 이름**까지만 적고, 진단이 더 필요하면 로컬 로그에 남긴다.
 
+## 모드는 세션이 정한다 (결과 설명 spec R5)
+
+전략 문서에 붙은 세션은 전략 도구·웹 검색·전략 프롬프트로, 백테스트 실행에 붙은 세션은 결과 도구
+하나·검색 없음·결과 설명 프롬프트로 돈다. 요청이 모드를 고르지 않으므로 한 세션의 턴이 모드를
+오가지 않는다. 결과 세션에서 `propose_strategy`를 가로채지 않는 것이 제안 차단의 실제 경계다 —
+준 도구 목록 밖의 호출은 전부 도구 오류다.
+
 ## 이벤트 영속화는 여기가 아니다
 
 `send`는 이벤트를 흘리기만 하고 저장하지 않는다. sequence를 붙여 저장소에 남기는 것은
@@ -65,10 +72,21 @@ from strategy_workbench.domain.assistant.facade.models import (
     TurnRequest,
     Usage,
 )
-from strategy_workbench.domain.assistant.facade.tools import ASSISTANT_TOOLS, PROPOSE_STRATEGY
+from strategy_workbench.domain.assistant.facade.tools import (
+    ASSISTANT_TOOLS,
+    PROPOSE_STRATEGY,
+    RESULT_EXPLAIN_TOOLS,
+)
 
 from ._context import AssistantContextBuilder
-from ._models import ChatSession, DocumentRef, TurnContext, compile_payload
+from ._models import (
+    ChatSession,
+    DocumentRef,
+    ResultContext,
+    TurnContext,
+    TurnContextMismatchError,
+    compile_payload,
+)
 from ._profiles import ProviderNotInstalledError, ProviderProfileService
 from ._prompt import (
     PROPOSAL_ACCEPTED_NOTICE,
@@ -114,6 +132,8 @@ class _TurnState:
     output_tokens: int = 0
     stop: FailureCode | None = None
     stop_message: str = ""
+    # 이번 턴에 모델에게 준 도구 이름. 이 밖의 호출은 모드와 무관하게 도구 오류다.
+    offered: frozenset[str] = frozenset()
     queue: deque[ChatEvent] = field(default_factory=deque)
     # adapter가 이미 내보낸 실패 코드. 같은 사유를 뒤에 한 번 더 붙이지 않으려고 기억한다.
     reported: set[FailureCode] = field(default_factory=set)
@@ -169,9 +189,15 @@ class AssistantChatService:
     # -- 세션 ---------------------------------------------------------------------------------
 
     def create_session(self, document_ref: DocumentRef, *, title: str) -> ChatSession:
+        """세션을 만든다. 결과 세션은 설명할 결과가 있을 때만 만든다.
+
+        결과가 없으면 `BacktestResultUnavailableError`다. 빈 세션이 목록에 쌓이지 않게 한다.
+        """
         profile = self._profiles.active()
         if profile is None:
             raise NoActiveProviderError(f"document_ref={document_ref!r}")
+        if document_ref.run_id is not None:
+            self._context_builder.result_context(document_ref.run_id)
         return self._sessions.create(
             ChatSession(
                 session_id=self._new_id(),
@@ -199,14 +225,22 @@ class AssistantChatService:
         self,
         session_id: str,
         text: str,
-        context: TurnContext,
+        context: TurnContext | None,
         *,
+        turn_id: str,
         cancelled: Callable[[], bool] = _never_cancelled,
     ) -> Iterator[ChatEvent]:
         """사용자 메시지를 보내고 이벤트를 흘린다.
 
-        세션·프로파일·비밀 확인과 사용자 메시지 저장은 호출 시점에 끝낸다(제너레이터 본문에
-        두면 소비자가 순회를 시작할 때까지 오류가 숨는다).
+        세션·프로파일·비밀·모드 확인과 사용자 메시지 저장은 호출 시점에 끝낸다(제너레이터 본문에
+        두면 소비자가 순회를 시작할 때까지 오류가 숨는다). 거절은 사용자 메시지를 저장하기 **전에**
+        난다 — 저장 뒤에 거절하면 답 없는 질문이 이력에 남아 다음 턴의 역할 교대가 깨진다.
+
+        `context`는 전략 세션에만 온다. 결과 세션은 서버가 실행 결과를 읽어 요약하므로 받지 않는다
+        (`TurnContextMismatchError`, 결과 설명 spec R5).
+
+        `turn_id`는 러너가 만든 턴 id다. 이 턴의 사용자·어시스턴트 메시지가 그 값을 갖는다 —
+        턴 id의 owner는 러너이고, 여기서는 메시지에 도장만 찍는다.
         """
         session = self._sessions.get(session_id)
         profile = self._profiles.active()
@@ -216,33 +250,54 @@ class AssistantChatService:
         if provider is None:
             raise ProviderNotInstalledError(profile.kind)
         secret = self._secrets.get(profile.profile_id)
+        run_id = session.document_ref.run_id
+        turn_context: TurnContext | ResultContext
+        if run_id is not None:
+            if context is not None:
+                raise TurnContextMismatchError(session.session_id, result_session=True)
+            turn_context = self._context_builder.result_context(run_id)
+            system = self._context_builder.result_system_prompt()
+            tools = RESULT_EXPLAIN_TOOLS
+            # 설명의 근거는 이 실행의 사실이면 충분하다. 기간 밖 시장 소식으로 결과를 설명하면
+            # 사용자가 "전략이 그걸 알았다"로 읽는다(결과 설명 spec R6).
+            research: frozenset[ResearchCapability] = frozenset()
+        else:
+            if context is None:
+                raise TurnContextMismatchError(session.session_id, result_session=False)
+            turn_context = context
+            system = self._context_builder.system_prompt()
+            tools = ASSISTANT_TOOLS
+            research = frozenset({ResearchCapability.WEB_SEARCH})
         self._sessions.append_message(
             session.session_id,
-            ChatMessage(role=ChatRole.USER, text=text, created_at=self._now()),
+            ChatMessage(role=ChatRole.USER, text=text, created_at=self._now(), turn_id=turn_id),
         )
         request = TurnRequest(
-            system=self._context_builder.system_prompt(),
+            system=system,
             messages=self._sessions.messages(session.session_id),
-            tools=ASSISTANT_TOOLS,
-            research=frozenset({ResearchCapability.WEB_SEARCH}),
+            tools=tools,
+            research=research,
             max_tool_rounds=self._max_tool_rounds,
             max_search_uses=self._max_search_uses,
             max_output_tokens_per_call=self._max_output_tokens_per_call,
             max_turn_output_tokens=self._max_turn_output_tokens,
         )
-        return self._stream(session, profile, provider, secret, request, context, cancelled)
+        return self._stream(
+            session, turn_id, profile, provider, secret, request, turn_context, cancelled
+        )
 
     def _stream(
         self,
         session: ChatSession,
+        turn_id: str,
         profile: ProviderProfile,
         provider: LlmProviderPort,
         secret: str,
         request: TurnRequest,
-        context: TurnContext,
+        context: TurnContext | ResultContext,
         cancelled: Callable[[], bool],
     ) -> Iterator[ChatEvent]:
-        state = _TurnState()
+        state = _TurnState(offered=frozenset(spec.name for spec in request.tools))
         text_parts: list[str] = []
 
         def execute_tool(call: ToolCall) -> ToolResult:
@@ -351,6 +406,7 @@ class AssistantChatService:
                         role=ChatRole.ASSISTANT,
                         text="".join(text_parts),
                         created_at=self._now(),
+                        turn_id=turn_id,
                     ),
                 )
 
@@ -359,7 +415,7 @@ class AssistantChatService:
     def _run_tool(
         self,
         call: ToolCall,
-        context: TurnContext,
+        context: TurnContext | ResultContext,
         state: _TurnState,
         session_id: str,
         cancelled: Callable[[], bool],
@@ -369,7 +425,9 @@ class AssistantChatService:
             state.stop_message = f"사용자가 턴을 취소했습니다 — session_id={session_id}"
             return ToolResult(call_id=call.call_id, ok=False, content=state.stop_message)
         # 라운드 수는 세지 않는다. 상한 집행은 루프의 주인인 adapter 몫이다(spec D3).
-        if call.name == PROPOSE_STRATEGY:
+        # 제안은 이번 턴에 준 도구일 때만 가로챈다. 결과 세션에서는 아래 builder가 모르는 도구로
+        # 돌려준다(모듈 docstring "모드는 세션이 정한다").
+        if call.name == PROPOSE_STRATEGY and call.name in state.offered:
             return self._propose(call, state, session_id)
         return self._context_builder.tool_result(call, context)
 

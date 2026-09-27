@@ -28,10 +28,12 @@ from fastapi.responses import StreamingResponse
 
 from strategy_workbench.application.assistant_chat.facade.chat import (
     AssistantChatService,
+    BacktestResultUnavailableError,
     ChatSession,
     DocumentRef,
     NoActiveProviderError,
     TurnContext,
+    TurnContextMismatchError,
 )
 from strategy_workbench.application.assistant_chat.facade.ports import (
     ChatSessionNotFoundError,
@@ -215,7 +217,7 @@ def register_assistant_routes(
         document_ref = _document_ref(request.document_ref)
         try:
             session = chat.create_session(document_ref, title=request.title)
-        except NoActiveProviderError as error:
+        except (NoActiveProviderError, BacktestResultUnavailableError) as error:
             raise _unprocessable(error) from error
         return _session_view(session)
 
@@ -229,13 +231,16 @@ def register_assistant_routes(
         strategy_id: str | None = Query(default=None, min_length=1),
         revision: int | None = Query(default=None, ge=1),
         draft_id: str | None = Query(default=None, min_length=1),
+        run_id: str | None = Query(default=None, min_length=1),
     ) -> tuple[SessionView, ...]:
-        """문서 하나의 세션 목록.
+        """문서 하나(또는 백테스트 실행 하나)의 세션 목록.
 
         `document_ref`를 한 덩어리 문자열로 받지 않고 필드 셋으로 받는 이유는, 그래야 생성
         SDK가 타입을 그대로 만들고 서버도 다시 parse하지 않기 때문이다.
         """
-        view = DocumentRefView(strategy_id=strategy_id, revision=revision, draft_id=draft_id)
+        view = DocumentRefView(
+            strategy_id=strategy_id, revision=revision, draft_id=draft_id, run_id=run_id
+        )
         return tuple(
             _session_view(session) for session in chat.list_for_document(_document_ref(view))
         )
@@ -292,7 +297,11 @@ def register_assistant_routes(
     def start_assistant_turn(session_id: str, request: StartTurnRequest) -> TurnAcceptedView:
         """턴을 시작하고 즉시 202로 답한다. 이벤트는 SSE로 따로 읽는다."""
         try:
-            turn = turns.start(session_id, request.text, _turn_context(request.context))
+            turn = turns.start(
+                session_id,
+                request.text,
+                None if request.context is None else _turn_context(request.context),
+            )
         except ChatSessionNotFoundError as error:
             raise _session_not_found(error) from error
         except TurnInProgressError as error:
@@ -308,6 +317,8 @@ def register_assistant_routes(
             NoActiveProviderError,
             ProviderNotInstalledError,
             ProviderSecretMissingError,
+            BacktestResultUnavailableError,
+            TurnContextMismatchError,
         ) as error:
             raise _unprocessable(error) from error
         return TurnAcceptedView(
@@ -446,7 +457,10 @@ def _document_ref(view: DocumentRefView) -> DocumentRef:
     """wire 값을 유스케이스 값으로. "정확히 하나" 규칙은 application이 판정한다."""
     try:
         return DocumentRef(
-            strategy_id=view.strategy_id, revision=view.revision, draft_id=view.draft_id
+            strategy_id=view.strategy_id,
+            revision=view.revision,
+            draft_id=view.draft_id,
+            run_id=view.run_id,
         )
     except ValueError as error:
         raise HTTPException(
@@ -460,6 +474,7 @@ def _document_ref_view(reference: DocumentRef) -> DocumentRefView:
         strategy_id=reference.strategy_id,
         revision=reference.revision,
         draft_id=reference.draft_id,
+        run_id=reference.run_id,
     )
 
 
@@ -487,7 +502,9 @@ def _unprocessable(
     | ProviderBaseUrlRejectedError
     | ProviderProbeFailedError
     | ProviderSecretMissingError
-    | NoActiveProviderError,
+    | NoActiveProviderError
+    | BacktestResultUnavailableError
+    | TurnContextMismatchError,
 ) -> HTTPException:
     """거절 하나를 코드 있는 422로. 어느 갈래도 비밀을 message에 넣지 않는다.
 
@@ -507,6 +524,10 @@ def _unprocessable(
         detail = {"code": "assistant.provider_not_installed", "message": str(error)}
     elif isinstance(error, ProviderSecretMissingError):
         detail = {"code": "assistant.provider_secret_missing", "message": str(error)}
+    elif isinstance(error, BacktestResultUnavailableError):
+        detail = {"code": "assistant.result_unavailable", "message": str(error)}
+    elif isinstance(error, TurnContextMismatchError):
+        detail = {"code": "assistant.turn_context_mismatch", "message": str(error)}
     else:
         detail = {"code": "assistant.no_active_provider", "message": str(error)}
     return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail)

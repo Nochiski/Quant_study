@@ -15,8 +15,11 @@ SDK에는 도구 루프를 대신 돌려 주는 `tool_runner`가 있지만 쓰�
 |---|---|---|
 | 도구 라운드 | `request.max_tool_rounds` 초과 | `TOOL_ROUNDS_EXCEEDED` |
 | 턴 토큰 예산 | `max_tokens = min(호출당, 남은 예산)`, 잔량 < 최소 호출 | `TOKEN_BUDGET_EXCEEDED` |
-| 검색 횟수 | 턴 누적을 세어 호출마다 `max_uses`를 줄이고, 0이면 도구를 뺀다 | (도구 없음) |
+| 검색 횟수 | 턴 누적을 세어 호출마다 `max_uses`를 줄이고, 0이면 도구를 뺀다 | 통지 이벤트 한 번 |
 | 재개 | 진전 없는 연속 재개 `MAX_PAUSE_RESUMES`, 총량 `검색예산 + 5` | `PROVIDER` |
+
+검색 상한은 실패가 아니다. 도구를 빼는 순간 화면에 `SearchBudgetExhausted`를 한 번 내고 턴은
+계속된다(OpenAI adapter와 같은 이벤트).
 
 **검색은 턴 누적이다.** SDK의 `max_uses`는 호출당 한도라, 한 번 계산해 모든 호출에 같은 값을
 보내면 라운드가 12번 도는 턴이 예산의 12배를 쓴다. 검색은 과금 대상이고 spec D9는 집행을
@@ -74,6 +77,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     FailureCode,
     ResearchCapability,
     SearchActivity,
+    SearchBudgetExhausted,
     Source,
     TextDelta,
     ThinkingSummary,
@@ -218,6 +222,11 @@ def stream_turn(
                 request.max_search_uses,
                 tool_rounds,
             )
+            # 화면에도 같은 순간 한 번 알린다(OpenAI adapter와 같은 이벤트, C-03). 모델은 서버가
+            # 돌려준 `max_uses_exceeded` 오류나 도구 목록의 변화로 알게 되므로 따로 문장을 보내지
+            # 않는다. 한 번도 검색하지 않았으면 처음부터 도구가 없던 것이지 소진이 아니다.
+            if search.uses > 0:
+                yield SearchBudgetExhausted()
         tools = build_tools(request, remaining_search_uses=remaining_search_uses)
         searches_before_call = search.uses
 

@@ -65,6 +65,7 @@ from strategy_workbench.domain.assistant.facade.models import (  # noqa: E402  #
     ProviderProfile,
     ResearchCapability,
     SearchActivity,
+    SearchBudgetExhausted,
     Source,
     TextDelta,
     ThinkingSummary,
@@ -122,6 +123,7 @@ def make_request(
                 role=ChatRole.USER,
                 text="모멘텀 전략을 만들어 줘",
                 created_at=dt.datetime(2026, 9, 20, tzinfo=dt.UTC),
+                turn_id="turn-2",
             ),
         ),
         tools=TOOLS,
@@ -253,6 +255,7 @@ def test_history_becomes_responses_input_items_in_order() -> None:
         role=ChatRole.ASSISTANT,
         text="어떤 시장을 보시나요?",
         created_at=dt.datetime(2026, 9, 19, tzinfo=dt.UTC),
+        turn_id="turn-1",
     )
     request = TurnRequest(
         system=request.system,
@@ -533,9 +536,14 @@ def test_the_search_budget_drops_the_tool_and_tells_the_model_once() -> None:
         item for item in dict_items(client.payloads[2].input) if item.get("role") == "developer"
     ]
     assert len(notices) == 1
-    assert [event for event in events if isinstance(event, SearchActivity)][-1] == SearchActivity(
-        query=SEARCH_BUDGET_EXHAUSTED_NOTICE, sources=()
-    )
+    # 화면에는 전용 이벤트 하나가 간다. 통지를 검색 활동으로 흘리면 사용자는 하지 않은 검색을
+    # 보고, 칩 본문으로 모델에게 쓴 지시문을 읽는다(C-03).
+    assert [event for event in events if isinstance(event, SearchBudgetExhausted)] == [
+        SearchBudgetExhausted()
+    ]
+    assert [event for event in events if isinstance(event, SearchActivity)] == [
+        SearchActivity(query="첫 검색", sources=())
+    ]
 
 
 def test_the_call_without_the_search_tool_still_carries_the_earlier_search_items() -> None:
@@ -610,6 +618,7 @@ def test_no_search_notice_when_research_was_never_requested() -> None:
     events = run_turn(client, request=make_request(research=frozenset(), max_search_uses=0))
 
     assert [event for event in events if isinstance(event, SearchActivity)] == []
+    assert [event for event in events if isinstance(event, SearchBudgetExhausted)] == []
     assert [
         item for item in dict_items(client.payloads[1].input) if item.get("role") == "developer"
     ] == []

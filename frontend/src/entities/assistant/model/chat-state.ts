@@ -69,6 +69,13 @@ export type AssistantTurnState = {
   thinking: readonly string[];
   tools: readonly AssistantToolActivity[];
   searches: readonly AssistantSearchActivity[];
+  /**
+   * 이 턴이 웹 검색 횟수 상한에 닿아 남은 호출에서 검색을 뺐는가.
+   *
+   * 검색 활동이 아니므로 `searches`에 넣지 않는다 — 넣으면 화면이 하지 않은 검색 칩을 그린다(C-03).
+   * 서버는 턴당 한 번만 보내지만 재전송돼도 같은 값이다.
+   */
+  searchBudgetExhausted: boolean;
   proposal: StrategyProposalView | null;
   /**
    * 이 턴이 쓴 토큰. `Usage` 이벤트를 접은 값이라 세션 누적은 여기서 더하지 않는다 —
@@ -125,6 +132,7 @@ const emptyTurn = (turnId: string): AssistantTurnState => ({
   thinking: [],
   tools: [],
   searches: [],
+  searchBudgetExhausted: false,
   proposal: null,
   usage: null,
   failure: null,
@@ -142,10 +150,9 @@ const settledStatus = (
  * 턴 배열의 순서 불변식: **서버가 아는 생성 순서**.
  *
  * 클라이언트가 처음 본 순서로 두면 턴 시작 202가 이력보다 먼저 도착한 세션에서 배열이
- * `[t-3, t-1, t-2]`가 된다. 소비자(`features/assist-strategy`의 transcript)는 n번째 사용자
- * 메시지를 n번째 턴의 질문으로 짝지으므로, 그 어긋남이 답변을 다른 질문에 붙이고 마지막 턴의
- * 질문을 잃는다. 한 번 어긋나면 이후 이력 재조회도 제자리 갱신뿐이라 스스로 복구되지 않는다
- * (B-03 리뷰 P1).
+ * `[t-3, t-1, t-2]`가 되어 대화가 뒤섞여 보인다. 한 번 어긋나면 이후 이력 재조회도 제자리 갱신뿐이라
+ * 스스로 복구되지 않는다(B-03 리뷰 P1). 질문과 턴의 짝은 이 순서가 아니라 메시지의 `turn_id`가
+ * 정한다(C-03) — 이 순서는 화면에 늘어놓는 차례만 맡는다.
  *
  * 기준은 `accepted_sequence`(턴 시작 직전 세션의 마지막 번호라 세션 안에서 단조), 같으면
  * `started_at`, 그것도 모르면(이벤트로만 본 턴) 지금 자리를 지킨다.
@@ -261,6 +268,10 @@ const applyEvent = (
           { query: event.query, sources: event.sources },
         ],
       };
+    case "search_budget_exhausted":
+      return turn.searchBudgetExhausted
+        ? turn
+        : { ...turn, searchBudgetExhausted: true };
     case "proposal":
       // 모델이 고쳐 다시 제출하면 마지막 제안이 그 턴의 제안이다.
       return { ...turn, proposal: event.proposal };

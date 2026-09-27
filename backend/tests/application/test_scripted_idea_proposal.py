@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
-from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import idea_to_new_strategy
+from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import (
+    idea_to_new_strategy,
+    result_explanation_with_proposal,
+)
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
     StrategyAuthoringService,
@@ -46,3 +49,30 @@ def test_the_new_strategy_idea_compiles_cleanly_from_the_new_strategy_starter() 
     assert list(compiled.diagnostics) == []
     assert compiled.spec is not None
     assert compiled.schema_version == CURRENT_SCHEMA_VERSION
+
+
+def test_the_result_probe_proposal_compiles_so_a_leaked_gate_would_show_a_card() -> None:
+    """결과 세션에 제안 도구가 새어 들어올 때 대본이 내는 제안도 깨끗이 compile되어야 한다.
+
+    compile에 실패하면 서비스가 제안을 거절해 카드가 생기지 않는다. 그러면 게이트가 사라져도
+    US-DM-08 e2e의 "제안 카드 없음" 단언이 여전히 통과한다(D 스택 리뷰 P3-5).
+    """
+    proposed: list[str] = []
+
+    def execute(call: ToolCall) -> ToolResult:
+        if call.name == PROPOSE_STRATEGY:
+            source_text = call.arguments["source_text"]
+            assert isinstance(source_text, str)
+            proposed.append(source_text)
+        return ToolResult(call_id=call.call_id, ok=True, content="{}")
+
+    list(result_explanation_with_proposal(execute))
+
+    service = StrategyAuthoringService(
+        RuamelDocumentCodec(),
+        factor_registry_version="scripted-probe-test",
+        dataset_snapshot_id=lambda: "scripted-probe-test",
+    )
+    compiled = service.compile(CompileRequest(proposed[0], SourceFormat.YAML))
+    assert list(compiled.diagnostics) == []
+    assert compiled.spec is not None

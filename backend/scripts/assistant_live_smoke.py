@@ -538,7 +538,12 @@ def _run_provider(kind: ProviderKind, secret: str, workspace: Path) -> ProviderS
         events: list[ChatEvent] = []
         stream_raised = False
         try:
-            events.extend(container.assistant_chat.send(session.session_id, _USER_MESSAGE, context))
+            # 러너를 거치지 않고 서비스를 바로 부르므로 턴 행이 없다. 메시지에 찍을 턴 id만 준다.
+            events.extend(
+                container.assistant_chat.send(
+                    session.session_id, _USER_MESSAGE, context, turn_id="live-smoke-turn"
+                )
+            )
         except Exception as error:
             # 예외 본문에는 요청 헤더·본문 조각이 섞여 올 수 있다. 타입 이름만 남긴다(spec D2).
             stream_raised = True

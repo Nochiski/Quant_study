@@ -1013,6 +1013,7 @@ Phase exit:
 | `P2-08` | `review_lang2_p1_06` | 1 | `REQUEST_CHANGES` | P1 1 · P2 1 · P3 3 · 관찰 1. **DEFECT-P208-001(P1)**: 아이디어 2 에 자본총계 ≤ 0 조건이 없어 자본잠식 적자 기업이 PBR·ROE 두 팩터 모두 최상위(원장 실측 28개) → `financial.book_equity gt 0` 규칙 + mock 자본잠식 종목 재현 테스트(수정 전 red). **DEFECT-P208-002(P2)**: 0/1 이진 팩터 선정이 `security_id` 순서 → 리드 결정으로 BACKLOG-016(P5-03). P3: spec D2 옛 문장 정리, P5-01 슬롯·삽입 순서 예약, 아이디어 4 당일 거래대금 한계 주석. 관찰(assistant DB 격리 누락)은 AI 계획 몫이라 이 PR 밖 |
 | `P2-08` | `review_lang2_p1_06` | 2 | `APPROVE` | `review_lang2_p2_08_r2.md`, tip `d99aa024`. DEFECT-P208-001 red→green (아이디어 2 eligibility). 새 관찰 **P2-NEW-1**: 가격 변화 아이디어 1·3·4·5 가 원주가 `price.close` 를 쓴다 → 이슈 #214 → BACKLOG-017 |
 | `P3-01` | `review_p3_01` | 1 | `APPROVE`(조건부) | `review_pr232.md`, tip `2fde473e`. blocking 0 · P2 1 · P3 3. **DEFECT-232-01(P2)**: 사용자가 승격 모양을 예약 id 로 그대로 쓴 그래프가 표식을 받아 문서 노드가 숨는다 → 리드 결정으로 예약 접두사 compile error(`strategy.factor.reserved_node_id`), SoT·docstring·결정 2 정정. P3: 1.1 블록 fixture 정리(232-02), 붙인 출력과 원래 출력의 선택 강조 중복(232-03), `PR_LINK`(232-04, 통합 merge 때 채움). 머지 전 조건: 통합 브랜치 반영(`26f426b5`)·BACKLOG-017·018 |
+| `P3-01` | `review_p3_01` | 2 | `APPROVE` | `review_pr232.md` 재리뷰 절, tip `6e5e71da`. blocking 0 · P2 2 · P3 1. 1차 결함 4건 해소 확인. **DEFECT-232-05(P2)**: 골든 `adj_close` 이관이 P3-03 에 예약되지 않음 → WORKFLOW P3-03 acceptance 에 한 줄(우회 필터 제거 포함). **DEFECT-232-06(P2)**: duckdb 원주가 표시·전달 삭제 돌연변이가 살아남음 → 통합 merge 뒤 계약 대조(`63392554`)와 선언표 단위 테스트로 둘 다 red. **DEFECT-232-07(P3)**: 한 단계 상류 탐색 돌연변이가 살아남음 → 중첩 경로 테스트 2건으로 red |
 | `P2-09` | `review_lang2_p2_09` | 1 | `REQUEST_CHANGES` | tip `e064d2af`. P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 빼서 1.1 의 팩터별 결측 처리가 경고 없이 바뀐다. 비차단 관찰 2. 반영 `a32ed9d7`(실효 값 판정, 관찰 1 float 1.1 테스트). 같은 시점 Phase 2 감사 NB-1 은 `17c68261` 이 고쳤다 |
 ## 검증 기록
 
@@ -1810,7 +1811,10 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   말하지 않는다. 테스트: 문장 golden, 같은 연산자의 `adj_close`·같은 날 비율은 조용, lag 와 창이 같은 잎을 읽어도
   한 번, 아이디어 fixture 0건과 원주가로 되돌린 판별. OpenAPI(`OperatorDefinition.reads_past_sessions`)·
   operator-catalog fixture·AI 시나리오 golden(`tool_then_proposal.json` 의 골든 문서가 원주가 모멘텀이라 warning
-  1건)을 재생성했다.
+  1건)을 재생성했다. 골든 `quality_momentum` 과 매뉴얼 샘플의 `adj_close` 이관, 테스트의 `RAW_PRICE_WARNING`
+  우회 필터 제거는 WORKFLOW P3-03 acceptance 에 예약했다(리뷰 #232 DEFECT-232-05). 재리뷰 테스트 공백 둘은
+  P3-01 이 닫았다: duckdb 선언표 표시와 어댑터 전달(DEFECT-232-06, 표시 삭제·전달 삭제 돌연변이 red),
+  여러 단계 밑 원주가 잎(DEFECT-232-07, 한 단계 탐색 돌연변이 red).
 
 ## 갱신 절차
 

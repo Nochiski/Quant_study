@@ -771,6 +771,13 @@ PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드
 - 매뉴얼 1절 샘플을 1.2로, 실행 설정 절 신설, "이 전략을 사람 말로" 표 갱신. README·frontend
   README·`backend/FACTORS.md` 1.2.
 - CI `frontend`·`browser-e2e` green(P2 스택의 exit 조건 해소).
+- **골든의 수정주가 이관(BACKLOG-018 후속, 리뷰 #232 DEFECT-232-05)**: 골든 `quality_momentum.yaml`·
+  `quality_momentum.json`·매뉴얼 1절 샘플의 `mom_252` 잎을 `price.adj_close` 로 옮긴다. 원주가 모멘텀은
+  P3-01 부터 compile warning `strategy.field.unadjusted_price` 가 나므로, 그대로 두면 warning 이 뜨는 문서를
+  정상 예시로 보인다. 옮긴 뒤 backend 테스트의 우회 필터(`test_strategy_document_http_api.py` 의
+  `RAW_PRICE_WARNING`·`_without_raw_price_warning`, `test_strategy_document_upgrade_http_api.py` 의 warning
+  기대)를 걷고, 골든 `spec_hash` 리터럴·AI 시나리오 golden·e2e 기대값을 재생성한다. 1.0·1.1 보존 fixture 는
+  옛 문서라 원주가 그대로 둔다(업그레이드는 필드를 바꾸지 않는다).
 - BACKLOG-002: 매뉴얼 스크린샷 14장을 `npm run docs:capture`로 1.2 한글 화면으로 다시 찍고, 8절에
   "초안 복구·서버 초안 적용 직후 되돌리기는 복구 이전 텍스트로 돌아간다"는 안내를 넣는다.
 - BACKLOG-008: 충돌 표식 게이트(`tools/quant_study_dev/conflict_markers.py`)가 `git ls-files`로 추적

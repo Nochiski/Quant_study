@@ -26,16 +26,26 @@ RUNTIME_PATH_GUARD = RuntimePathGuard(
 )
 sys.addaudithook(RUNTIME_PATH_GUARD)
 
-# 개발자 셸에 남은 값이 테스트를 실제 DB·비밀 파일로 보내지 않게 매 테스트에서 지운다.
-_RUNTIME_PATH_ENVS = (
-    _http.STRATEGY_REPOSITORY_PATH_ENV,
-    _http.ASSISTANT_DB_PATH_ENV,
-    _http.ASSISTANT_SECRETS_PATH_ENV,
+# composition root(`_http.py`)가 읽는 런타임 설정 환경 변수 전부. 개발자 셸에 남은 dev 서버
+# 값(실제 DB·비밀 경로, `EQUITY_ADAPTER=duckdb`와 원장 root, 가짜 공급자, CORS origin)이 테스트를
+# 실제 파일로 보내거나 결과를 개발자마다 다르게 만들지 않게 매 테스트에서 지운다. 값이 필요한
+# 테스트는 `monkeypatch.setenv`로 직접 준다. `*_ENV` 상수에서 유도하므로 새 변수도 따라온다
+# (#215 리뷰 P3-2).
+# 실키 스모크 opt-in(`STRATEGY_WORKBENCH_LIVE_SMOKE`)과 e2e 시드 CLI 변수는 런타임 설정이 아니라서
+# 대상이 아니다.
+RUNTIME_SETTING_ENVS = tuple(
+    sorted(
+        value
+        for name, value in vars(_http).items()
+        if name.endswith("_ENV")
+        and isinstance(value, str)
+        and value.startswith("STRATEGY_WORKBENCH_")
+    )
 )
 
 
 def _redirect_runtime_defaults(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
-    for name in _RUNTIME_PATH_ENVS:
+    for name in RUNTIME_SETTING_ENVS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(
         _http, "DEFAULT_STRATEGY_REPOSITORY_PATH", root / "strategy-revisions.sqlite3"
@@ -83,7 +93,8 @@ def isolate_runtime_state_paths(
     설정은 OS 사용자 설정 디렉터리의 비밀 파일을 연다. 테스트가 이것을 열면 개발자의 실제 대화 이력
     DB가 업그레이드되어, 브랜치를 바꾼 뒤 옛 코드의 테스트가 깨진다. 기본값 자체를 tmp로 바꾸므로
     기본값을 단언하는 테스트는 그대로 통과하고, 값을 명시한 테스트는 영향을 받지 않는다. 경로가
-    필요한 테스트는 이 fixture 값을 받아 쓴다.
+    필요한 테스트는 이 fixture 값을 받아 쓴다. 런타임 설정 환경 변수(`RUNTIME_SETTING_ENVS`)도
+    모두 지운다.
     """
     root = tmp_path_factory.mktemp("runtime-state")
     _redirect_runtime_defaults(monkeypatch, root)

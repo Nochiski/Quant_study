@@ -182,7 +182,9 @@ class AssistantTurnRunner:
                 finished_at=None,
             )
             cancel = threading.Event()
-            stream = self._chat.send(session_id, text, context, cancelled=cancel.is_set)
+            stream = self._chat.send(
+                session_id, text, context, turn_id=turn.turn_id, cancelled=cancel.is_set
+            )
             self._sessions.create_turn(turn)
             self._running[turn.turn_id] = _Running(turn=turn, cancel=cancel)
         thread = self._thread_factory(

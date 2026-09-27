@@ -22,7 +22,7 @@ __all__ = [
     "SYSTEM_PROMPT_TEMPLATE",
 ]
 
-# 웹 검색 상한을 다 썼을 때 모델과 화면에 함께 보이는 고정 문구 (설계 spec D4 OpenAI 행).
+# 웹 검색 상한을 다 썼을 때 모델에게 보내는 고정 문구 (설계 spec D4 OpenAI 행).
 #
 # **왜 프롬프트 owner가 이 문장을 갖는가.** Anthropic은 검색 도구의 `max_uses`를 서버가 집행하고
 # 초과를 모델에게 도구 오류로 알려 준다. OpenAI Responses의 `web_search`에는 그런 인자가 없어서
@@ -34,7 +34,8 @@ __all__ = [
 # application이 소유하므로(spec D8) 문구도 여기 둔다. adapter는 이 상수를 그대로 실어 나르기만
 # 한다.
 #
-# 한 문장이 모델 지시와 화면 통지(`SearchActivity`) 양쪽에 쓰이므로 둘 다에서 읽히게 썼다.
+# 이 문장은 모델에게만 간다. 화면은 전용 이벤트 `SearchBudgetExhausted`를 받아 자기 로케일
+# 문구로 그린다(C-03) — 예전에는 같은 문장을 `SearchActivity.query`에 실어 화면에도 보냈다.
 SEARCH_BUDGET_EXHAUSTED_NOTICE = (
     "이 턴에 허용된 웹 검색 횟수를 모두 썼습니다. 더 이상 검색하지 않고 지금까지 확인한 자료로만 "
     "답합니다. 확인하지 못한 사실은 모른다고 말합니다."

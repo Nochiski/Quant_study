@@ -34,7 +34,7 @@ EXPECTED_FAILURE_CODES = frozenset(
     }
 )
 
-# 같은 spec D2의 `ChatEvent` union 구성원 (9종).
+# 같은 spec D2의 `ChatEvent` union 구성원 (10종). `SearchBudgetExhausted`는 C-03이 더했다.
 EXPECTED_CHAT_EVENTS = frozenset(
     {
         "TextDelta",
@@ -42,6 +42,7 @@ EXPECTED_CHAT_EVENTS = frozenset(
         "ToolCall",
         "ToolResultSummary",
         "SearchActivity",
+        "SearchBudgetExhausted",
         "Proposal",
         "Usage",
         "Done",

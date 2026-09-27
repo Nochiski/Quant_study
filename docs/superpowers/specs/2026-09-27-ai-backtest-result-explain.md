@@ -113,11 +113,14 @@ Registry).
 `DocumentRef`에 `run_id`를 더한다. 세션은 저장 전략(`strategy_id`+`revision`), 초안(`draft_id`),
 실행(`run_id`) 중 **정확히 하나**에 붙는다. 결과 화면의 사이드바는 그 실행의 세션만 본다.
 
-- `assistant_sqlite` 스키마를 v2로 올린다. `chat_sessions`에 `run_id` 열을 더하고 CHECK를 셋 중
-  하나로 바꾼다. SQLite는 CHECK를 바꾸는 `ALTER`가 없어 테이블을 다시 만든다. 절차는 SQLite 문서의
-  12단계(외래 키 끔 → 새 테이블 생성·복사 → 옛 테이블 삭제 → 이름 변경 → `foreign_key_check` → 커밋 →
-  외래 키 켬)를 따른다. v1 파일은 이력을 잃지 않고 v2가 된다. 마이그레이션 테스트가 v1 파일의 세션·
-  턴·메시지·이벤트가 그대로 남는지 본다.
+- `assistant_sqlite` 스키마를 v3으로 올린다. v2는 AI 후속 C-03(#204, `chat_messages.turn_id`)이
+  먼저 가져갔다(리드 결정 2026-09-27). `chat_sessions`에 `run_id` 열을 더하고 CHECK를 셋 중 하나로
+  바꾼다. SQLite는 CHECK를 바꾸는 `ALTER`가 없어 테이블을 다시 만든다. `chat_sessions`는 다른 표가
+  외래 키로 참조하므로 외래 키를 끄고, `legacy_alter_table`을 켜 옛 표를 비켜 둔 뒤 원래 이름으로 새로
+  만들고 옮긴다(C-03과 같은 "비켜 두고 새로 만들기" — 새 이름으로 만든 뒤 바꾸면 SQLite가 이름을
+  따옴표로 감싸 manifest 대조가 깨진다). 끝나면 `foreign_key_check`로 고아 행을 보고 외래 키를
+  되돌린다. v1 파일은 v1 → v2 → v3 순서로, v2 파일은 v2 → v3으로 이력을 잃지 않고 올라간다.
+  마이그레이션 테스트가 세션·턴·메시지·이벤트가 그대로 남는지 본다.
 - 세션 목록 조회(`GET /sessions`)에 `run_id` 쿼리를 더한다.
 
 | 대안 | 기각 이유 |
@@ -214,7 +217,7 @@ OpenAPI와 frontend 생성 SDK는 같은 PR에서 갱신한다. 새 422 코드 �
 | PR | 내용 |
 |---|---|
 | D-01 | 이 문서, PLAN D 절, 집계 도구의 D phase |
-| D-02 | backend: `DocumentRef.run_id`·sqlite v2, `BacktestResultPort`·요약·도구·프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 프롬프트 골든, 지표 id 골든 |
+| D-02 | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·요약·도구·프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 프롬프트 골든, 지표 id 골든 |
 | D-03 | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e, US-DM-08 갱신, traceability, SoT 행, features README |
 
 ## 5. 완료 정의
@@ -225,11 +228,11 @@ OpenAPI와 frontend 생성 SDK는 같은 PR에서 갱신한다. 새 422 코드 �
 2. 핵심 성과 지표 여섯 개마다 영어 이름 옆에 쉬운 한글 이름과 한 줄 뜻이 보인다.
 3. 결과 세션에서 모델이 `propose_strategy`를 불러도 제안이 생기지 않는다(테스트).
 4. 요약 JSON이 상한을 넘지 않고, 잘린 항목이 `omitted`에 적힌다(테스트).
-5. v1 어시스턴트 DB가 이력을 잃지 않고 v2로 올라간다(테스트).
+5. v1·v2 어시스턴트 DB가 이력을 잃지 않고 v3으로 올라간다(테스트).
 6. registry 지표마다 ko·en 이름·뜻이 있다(테스트).
 
 ## 6. 롤백
 
-D-03은 결과 페이지의 패널과 문구 추가라 revert하면 결과 화면이 이전으로 돌아간다. D-02의 sqlite v2는
-v1으로 내려가는 경로가 없다. D-02를 revert하면 v2 파일을 v1 코드가 "지원하지 않는 버전"으로 거부하므로
+D-03은 결과 페이지의 패널과 문구 추가라 revert하면 결과 화면이 이전으로 돌아간다. D-02의 sqlite v3은
+v2로 내려가는 경로가 없다. D-02를 revert하면 v3 파일을 v2 코드가 "지원하지 않는 버전"으로 거부하므로
 `.local/assistant.sqlite3`를 지우거나 옮겨야 한다. 로컬 단일 사용자 도구라 이력 손실은 대화 기록뿐이다.

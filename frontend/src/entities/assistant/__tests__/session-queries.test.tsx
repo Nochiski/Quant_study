@@ -56,7 +56,12 @@ const server = setupServer(
     HttpResponse.json({
       session: { ...session, session_id: String(params.sessionId) },
       messages: [
-        { role: "user", text: "질문", created_at: "2026-09-20T00:00:00Z" },
+        {
+          role: "user",
+          text: "질문",
+          created_at: "2026-09-20T00:00:00Z",
+          turn_id: "t-1",
+        },
       ],
       turns: [],
       events: [],

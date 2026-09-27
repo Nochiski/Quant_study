@@ -521,6 +521,25 @@ describe("AssistStrategySidebar", () => {
     expect(screen.queryByRole("link", { name: "수상한 출처" })).toBeNull();
   });
 
+  it("검색 상한 통지는 검색 활동 칩이 아니라 안내 문구로 보인다", async () => {
+    // 예전에는 통지가 검색 활동으로 와서 "웹 검색" 칩과 모델에게 쓴 지시문이 보였다(C-03).
+    const user = userEvent.setup();
+    mount();
+    const connection = await ask(user);
+    connection.push({
+      sequence: 0,
+      turn_id: "t-1",
+      event: { type: "search_budget_exhausted" },
+    });
+
+    expect(
+      await screen.findByText(
+        "이 답변에서 쓸 수 있는 웹 검색 횟수를 모두 썼습니다. 지금까지 찾은 자료로 답합니다.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText("웹 검색")).toBeNull();
+  });
+
   it("모델이 보낸 HTML은 문자 그대로 보이고 요소가 되지 않는다", async () => {
     const user = userEvent.setup();
     const { container } = mount();
@@ -977,6 +996,7 @@ describe("AssistStrategySidebar", () => {
         {
           role: "user",
           text: "첫 대화의 질문",
+          turn_id: "t-old",
           created_at: "2026-09-20T00:00:01Z",
         },
       ],
@@ -1004,6 +1024,7 @@ describe("AssistStrategySidebar", () => {
         {
           role: "user",
           text: "둘째 대화의 질문",
+          turn_id: "t-new",
           created_at: "2026-09-20T00:00:02Z",
         },
       ],
@@ -1048,6 +1069,7 @@ describe("AssistStrategySidebar", () => {
         {
           role: "user",
           text: "앞 대화의 질문",
+          turn_id: "t-old",
           created_at: "2026-09-20T00:00:01Z",
         },
       ],

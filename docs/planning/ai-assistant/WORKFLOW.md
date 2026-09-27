@@ -193,7 +193,7 @@ main
 | anthropic·openai | probe 사유 매핑 | 정상 키 `ok`, 틀린 키 `auth`, 없는 모델 `model_not_found` | 올바른 키가 `unknown`. probe 출력 상한은 adapter 상수(`PROBE_MAX_TOKENS`·`PROBE_MAX_OUTPUT_TOKENS`)가 소유하며 확인 문장에 숫자를 복제하지 않는다 |
 | anthropic | `display: "summarized"` | 비어 있지 않은 `ThinkingSummary` 1건 이상 | 이벤트 자체가 없다 |
 | anthropic | 검색 결과 필드 | `SearchActivity`마다 `query`와 출처 제목·URL이 채워짐 | 검색은 했는데 출처가 빈다 |
-| anthropic·openai | 검색 상한 뒤 턴 지속 | 턴 누적 상한에 닿은 뒤에도 턴이 검색 없이 이어짐 | 상한에 닿자마자 턴이 실패로 끝난다 |
+| anthropic·openai | 검색 상한 뒤 턴 지속 | 턴 누적 상한에 닿은 뒤 `SearchBudgetExhausted`가 한 번 나오고 턴이 검색 없이 이어짐 | 상한에 닿자마자 턴이 실패로 끝난다 |
 | openai | 추론 항목 재전송 | 위 signature 왕복과 같은 관측 | 재전송 뒤 공급자 실패 |
 | openai | 기본 모델 실존 | adapter 기본 모델로 probe 성공 | `model_not_found` |
 | anthropic·openai | 상한 기본값 실측 | 제안 1건이 나온 턴의 라운드 수·호출별 `usage.output_tokens`·턴 합계를 기록 | 사용량 이벤트가 없다 |

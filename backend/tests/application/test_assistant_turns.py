@@ -360,6 +360,26 @@ def test_the_slot_frees_once_the_cancelled_thread_finishes() -> None:
     assert roles == [ChatRole.USER, ChatRole.ASSISTANT, ChatRole.USER]
 
 
+def test_every_message_is_stamped_with_the_turn_the_runner_started() -> None:
+    """메시지의 `turn_id`는 러너가 만든 턴 id다(C-03). 화면은 이 값으로 질문과 턴을 짝짓는다."""
+    harness = _harness((TextDelta("안녕"), Done("end_turn")))
+    first = harness.runner.start(harness.session.session_id, "q1", CONTEXT)
+    ManualTurnThread.run_all()
+    second = harness.runner.start(harness.session.session_id, "q2", CONTEXT)
+    ManualTurnThread.run_all()
+
+    stamped = [
+        (message.text, message.turn_id)
+        for message in harness.sessions.messages(harness.session.session_id)
+    ]
+    assert stamped == [
+        ("q1", first.turn_id),
+        ("안녕", first.turn_id),
+        ("q2", second.turn_id),
+        ("안녕", second.turn_id),
+    ]
+
+
 # -- [P2] 저장소가 흔들려도 세션이 잠기지 않는다 --------------------------------------------------
 
 

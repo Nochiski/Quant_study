@@ -122,7 +122,7 @@ def _send(
     text: str = "이 결과 좋은 거야?",
     context: TurnContext | None = None,
 ) -> list[ChatEvent]:
-    return list(harness.service.send(session.session_id, text, context))
+    return list(harness.service.send(session.session_id, text, context, turn_id="turn-1"))
 
 
 # -- 세션 --------------------------------------------------------------------------------------

@@ -54,6 +54,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     ProviderKind,
     ProviderProfile,
     SearchActivity,
+    SearchBudgetExhausted,
     SequencedEvent,
     Source,
     StrategyProposal,
@@ -388,6 +389,10 @@ def test_a_turn_streams_its_events_in_order_and_the_stream_closes(tmp_path: Path
         history = client.get(f"{_ASSISTANT}/sessions/{session_id}").json()
         assert [turn["status"] for turn in history["turns"]] == [TurnStatus.COMPLETED.value]
         assert [message["role"] for message in history["messages"]] == ["user", "assistant"]
+        # 화면은 질문을 이 id로 턴에 붙인다(C-03). 순서로 짝짓지 않는다.
+        assert [message["turn_id"] for message in history["messages"]] == [
+            history["turns"][0]["turn_id"]
+        ] * 2
         assert len(history["events"]) == 3
 
 
@@ -418,6 +423,7 @@ def test_the_history_events_are_byte_identical_to_the_sse_frames(tmp_path: Path)
                 query="KRX 모멘텀",
                 sources=(Source(title="리뷰", url="https://example.com/krx"),),
             ),
+            SearchBudgetExhausted(),
             ToolCall(call_id="call-1", name="read_current_strategy", arguments={"depth": 2}),
             ToolResultSummary(
                 call_id="call-1", name="read_current_strategy", ok=True, summary="{}"
@@ -450,12 +456,13 @@ def test_the_history_events_are_byte_identical_to_the_sse_frames(tmp_path: Path)
         with client.stream("GET", f"{_ASSISTANT}/sessions/{session_id}/events") as stream:
             lines = stream.iter_lines()
             gate.set()
-            frames = _read_frames(lines, until_id=7)
+            frames = _read_frames(lines, until_id=8)
         history = _wait_for_terminal_turn(client, session_id)
 
     assert [item["event"]["type"] for item in frames] == [
         "thinking_summary",
         "search_activity",
+        "search_budget_exhausted",
         "tool_call",
         "tool_result",
         "proposal",

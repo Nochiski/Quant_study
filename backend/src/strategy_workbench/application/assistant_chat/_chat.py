@@ -227,6 +227,7 @@ class AssistantChatService:
         text: str,
         context: TurnContext | None,
         *,
+        turn_id: str,
         cancelled: Callable[[], bool] = _never_cancelled,
     ) -> Iterator[ChatEvent]:
         """사용자 메시지를 보내고 이벤트를 흘린다.
@@ -237,6 +238,9 @@ class AssistantChatService:
 
         `context`는 전략 세션에만 온다. 결과 세션은 서버가 실행 결과를 읽어 요약하므로 받지 않는다
         (`TurnContextMismatchError`, 결과 설명 spec R5).
+
+        `turn_id`는 러너가 만든 턴 id다. 이 턴의 사용자·어시스턴트 메시지가 그 값을 갖는다 —
+        턴 id의 owner는 러너이고, 여기서는 메시지에 도장만 찍는다.
         """
         session = self._sessions.get(session_id)
         profile = self._profiles.active()
@@ -266,7 +270,7 @@ class AssistantChatService:
             research = frozenset({ResearchCapability.WEB_SEARCH})
         self._sessions.append_message(
             session.session_id,
-            ChatMessage(role=ChatRole.USER, text=text, created_at=self._now()),
+            ChatMessage(role=ChatRole.USER, text=text, created_at=self._now(), turn_id=turn_id),
         )
         request = TurnRequest(
             system=system,
@@ -278,11 +282,14 @@ class AssistantChatService:
             max_output_tokens_per_call=self._max_output_tokens_per_call,
             max_turn_output_tokens=self._max_turn_output_tokens,
         )
-        return self._stream(session, profile, provider, secret, request, turn_context, cancelled)
+        return self._stream(
+            session, turn_id, profile, provider, secret, request, turn_context, cancelled
+        )
 
     def _stream(
         self,
         session: ChatSession,
+        turn_id: str,
         profile: ProviderProfile,
         provider: LlmProviderPort,
         secret: str,
@@ -399,6 +406,7 @@ class AssistantChatService:
                         role=ChatRole.ASSISTANT,
                         text="".join(text_parts),
                         created_at=self._now(),
+                        turn_id=turn_id,
                     ),
                 )
 

@@ -38,6 +38,7 @@ __all__ = [
     "ProviderProfile",
     "ResearchCapability",
     "SearchActivity",
+    "SearchBudgetExhausted",
     "SequencedEvent",
     "Source",
     "StrategyProposal",
@@ -180,9 +181,20 @@ class ChatRole(StrEnum):
 
 @dataclass(frozen=True)
 class ChatMessage:
+    """대화 메시지 하나. `turn_id`는 이 메시지를 만든 턴이다.
+
+    사용자 메시지는 그 질문이 시작한 턴, 어시스턴트 메시지는 그 답을 낸 턴의 id를 갖는다. 화면은 이
+    값으로 질문을 턴에 붙인다 — 생성 순서로 짝지으면 메시지 수와 턴 수가 어긋나는 순간(턴 행 저장
+    실패, 답 텍스트 없이 끝난 턴) 질문이 다른 턴의 답에 붙는다(C-03).
+
+    `None`은 이 칼럼이 생기기 전(assistant DB v1)에 저장돼 어느 턴 뒤에도 오지 않는 메시지뿐이다.
+    새로 쓰는 메시지는 언제나 턴 id를 갖는다.
+    """
+
     role: ChatRole
     text: str
     created_at: datetime
+    turn_id: str | None
 
 
 @dataclass(frozen=True)
@@ -304,8 +316,24 @@ class ToolResultSummary:
 
 @dataclass(frozen=True)
 class SearchActivity:
+    """모델이 실제로 한 검색 한 번. 출처가 빈 것은 검색이 실패한 경우다."""
+
     query: str
     sources: tuple[Source, ...]
+
+
+@dataclass(frozen=True)
+class SearchBudgetExhausted:
+    """이 턴의 웹 검색 횟수 상한에 닿아 남은 호출에서 검색 도구를 뺐다는 통지.
+
+    검색이 아니므로 `SearchActivity`와 따로 둔다. 같은 종류로 흘리면 화면은 하지 않은 검색을
+    그리고, 사용량 집계는 통지와 검색을 문구로 갈라야 한다(C-03, A-07 리뷰 P2-1). 모델에게 가는
+    문장(`SEARCH_BUDGET_EXHAUSTED_NOTICE`)은 이 이벤트에 싣지 않는다 — 화면 문구는 소비자가
+    로케일별로 소유한다.
+
+    상한을 집행하는 공급자 adapter가 도구를 빼기 직전에 턴당 한 번 낸다. 한 번도 검색하지 않은
+    턴(상한이 0)에서는 내지 않는다.
+    """
 
 
 @dataclass(frozen=True)
@@ -378,6 +406,7 @@ ChatEvent: TypeAlias = (
     | ToolCall
     | ToolResultSummary
     | SearchActivity
+    | SearchBudgetExhausted
     | Proposal
     | Usage
     | Done

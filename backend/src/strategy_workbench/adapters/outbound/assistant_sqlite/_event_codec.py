@@ -27,6 +27,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     ProposalCompileResult,
     ProposalDiagnostic,
     SearchActivity,
+    SearchBudgetExhausted,
     Source,
     StrategyProposal,
     TextDelta,
@@ -72,6 +73,8 @@ def encode_event(event: ChatEvent) -> tuple[str, str]:
                     "sources": [_source_payload(source) for source in event.sources],
                 }
             )
+        case SearchBudgetExhausted():
+            return "search_budget_exhausted", _dumps({})
         case Proposal():
             return "proposal", _dumps({"proposal": _proposal_payload(event.proposal)})
         case Usage():
@@ -119,6 +122,8 @@ def decode_event(tag: str, payload: str) -> ChatEvent:
                 query=_text(body, "query", tag),
                 sources=_sources(body.get("sources"), tag),
             )
+        case "search_budget_exhausted":
+            return SearchBudgetExhausted()
         case "proposal":
             return Proposal(proposal=_proposal(body.get("proposal"), tag))
         case "usage":

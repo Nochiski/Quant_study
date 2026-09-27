@@ -110,7 +110,15 @@ class TurnRequest:
 
 # 공급자·application → 화면 이벤트 (세션 저장소에 sequence 번호와 함께 남는다)
 ChatEvent = TextDelta | ThinkingSummary | ToolCall | ToolResultSummary | SearchActivity
-          | Proposal | Usage | Done | Failure
+          | SearchBudgetExhausted | Proposal | Usage | Done | Failure
+
+# `SearchBudgetExhausted`(필드 없음)는 턴의 검색 횟수 상한에 닿아 adapter가 남은 호출에서 검색
+# 도구를 뺐다는 통지다(D4, C-03에서 추가). 검색이 아니므로 `SearchActivity`와 따로 두며 사용량
+# 집계는 세지 않는다. 모델에게 보내는 문장은 싣지 않고 화면 문구는 frontend가 로케일별로 소유한다.
+
+# 대화 메시지. `turn_id`는 그 메시지를 만든 턴이다(C-03에서 추가). 화면은 이 값으로 질문을 턴에
+# 붙인다. `None`은 assistant DB v1에서 올라온, 어느 턴 뒤에도 오지 않는 메시지뿐이다(D5).
+class ChatMessage: role: ChatRole; text: str; created_at: datetime; turn_id: str | None
 
 # `Usage`는 **분리형**이다 — 세 입력 칸은 서로 겹치지 않는다. `input_tokens`는 캐시 읽기·쓰기를
 # 제외한 입력이고, 공급자가 캐시를 `input_tokens`에 포함해 보고하면(OpenAI) adapter가 빼서 이
@@ -251,8 +259,8 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 
 | adapter | SDK | 기본 모델 | 검색 | 스트리밍 |
 |---|---|---|---|---|
-| `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high`, `max_tokens = request.max_output_tokens_per_call` | `web_search_20260209` 서버 도구, 도메인 제한 없음. SDK의 `max_uses`는 **호출당** 한도라 adapter가 턴 누적 검색 횟수를 세어 호출마다 `max_uses = max(0, request.max_search_uses − 누적)`을 다시 계산하고, 0이면 그 호출의 도구 목록에서 `web_search`를 뺀다(D9 · OpenAI 행과 같은 집행) | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
-| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구(서버 측이라 개별 호출을 거부할 수 없다). adapter가 검색 호출 이벤트를 세어 누적이 `max_search_uses`에 닿으면 이후 공급자 호출의 도구 목록에서 `web_search`를 빼고 화면(`SearchActivity`)에 알린다. 모델에게 알리는 문장은 adapter가 저술하지 않고 application 프롬프트 owner가 소유한 고정 문구(`_prompt.py`의 `SEARCH_BUDGET_EXHAUSTED_NOTICE`, facade로 노출)를 `developer` 입력 항목으로 전달한다 — `web_search`는 서버 도구라 답을 붙일 `function_call_output`이 없다(A-06에서 확정). 한 호출 안의 초과는 사후 관측만 가능하다. 요청은 `store=false`를 명시한다 — 주지 않으면 참이라 전략 원문·카탈로그가 공급자에 최소 30일 남고, 이 adapter는 대화 상태를 서버에 맡기지 않아 저장의 이득이 없다. 실제 SDK 표면은 A-06에서 확정 | Responses 스트리밍 |
+| `llm_anthropic` | `anthropic` (Python 공식) | `claude-opus-5`, `thinking: {type: "adaptive", display: "summarized"}`, `output_config.effort: high`, `max_tokens = request.max_output_tokens_per_call` | `web_search_20260209` 서버 도구, 도메인 제한 없음. SDK의 `max_uses`는 **호출당** 한도라 adapter가 턴 누적 검색 횟수를 세어 호출마다 `max_uses = max(0, request.max_search_uses − 누적)`을 다시 계산하고, 0이면 그 호출의 도구 목록에서 `web_search`를 빼고, 한 번이라도 검색했으면 화면에 `SearchBudgetExhausted`를 한 번 낸다(D9 · OpenAI 행과 같은 집행·같은 이벤트) | `client.messages.stream`. 도구 루프는 adapter의 수동 루프(`stop_reason == "tool_use"` → `execute_tool` → `tool_result`; `pause_turn` 재개; `refusal` → `Failure(REFUSAL)`) |
+| `llm_openai` | `openai` (Python 공식) | Responses API 최신 GPT 모델(A-06 구현 시 SDK 문서로 확정, PLAN 변경 기록에 근거), `max_output_tokens = request.max_output_tokens_per_call` | Responses `web_search` 도구(서버 측이라 개별 호출을 거부할 수 없다). adapter가 검색 호출 이벤트를 세어 누적이 `max_search_uses`에 닿으면 이후 공급자 호출의 도구 목록에서 `web_search`를 빼고 화면에는 `SearchBudgetExhausted`로 알린다(C-03 전에는 같은 문장을 `SearchActivity`에 실었다). 모델에게 알리는 문장은 adapter가 저술하지 않고 application 프롬프트 owner가 소유한 고정 문구(`_prompt.py`의 `SEARCH_BUDGET_EXHAUSTED_NOTICE`, facade로 노출)를 `developer` 입력 항목으로 전달한다 — `web_search`는 서버 도구라 답을 붙일 `function_call_output`이 없다(A-06에서 확정). 한 호출 안의 초과는 사후 관측만 가능하다. 요청은 `store=false`를 명시한다 — 주지 않으면 참이라 전략 원문·카탈로그가 공급자에 최소 30일 남고, 이 adapter는 대화 상태를 서버에 맡기지 않아 저장의 이득이 없다. 실제 SDK 표면은 A-06에서 확정 | Responses 스트리밍 |
 
 - `probe`는 최소 토큰 요청 한 번으로 키·모델·네트워크를 확인하고 `ProbeResult(ok, message,
   latency_ms, failure)`를 돌려준다. 실패 종류를 구분한다(인증·모델 없음·네트워크·요금 한도).
@@ -281,6 +289,11 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   플랫폼별로 분기한다. env `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH`로 경로를 바꿀 수 있고 저장소 안
   경로는 거부한다. OS 키체인 adapter는 후속.
 - 세션 저장에는 키·시스템 프롬프트 원문을 넣지 않는다(카탈로그 스냅샷 해시만).
+- 어시스턴트 DB 스키마는 v2다(C-03). v1 파일은 열 때 한 트랜잭션에서 제자리로 올린다:
+  `chat_messages.turn_id`를 "메시지 작성 시각 이전에 시작한 마지막 턴"으로 채우고(그런 턴이 없으면
+  NULL), v1이 검색 상한 통지를 `search_activity`로 저장한 행(검색어가 v1 통지 문장, 출처 없음)을
+  `search_budget_exhausted`로 다시 쓴다. 그래서 읽기·집계·화면에는 옛 표현을 가르는 분기가 없다.
+  `turn_id`에는 외래 키를 걸지 않는다 — 러너가 사용자 메시지를 턴 행보다 먼저 쓴다(D3).
 
 ### D6. HTTP API (`/api/v1/assistant`)
 
@@ -293,7 +306,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | DELETE | `/providers/{id}` | 삭제(키 포함) |
 | POST | `/sessions` | 세션 생성 `{document_ref}` |
 | GET | `/sessions?document_ref=` | 문서의 세션 목록 |
-| GET | `/sessions/{id}` | 메시지·턴 이력 |
+| GET | `/sessions/{id}` | 메시지·턴 이력. 메시지마다 그 메시지를 만든 턴의 `turn_id`(없으면 `null`)가 실린다 |
 | POST | `/sessions/{id}/turns` | 턴 시작 `{text, context: {source_text, source_format, environment?, diagnostics?}}` → 202 `{turn_id, accepted_sequence}`. `accepted_sequence`는 턴 시작 직전 세션의 마지막 sequence이며 클라이언트가 그대로 `after_sequence`로 쓴다. RUNNING 턴이 있으면 409 `assistant.turn_in_progress` |
 | GET | `/sessions/{id}/events?after_sequence=` | **SSE** `SequencedEvent` 스트림. backtest 이벤트 스트림(`/api/v1/backtests/{run_id}/events`)과 같은 프레이밍(`id`=sequence). 재개 위치는 `after_sequence` 쿼리 또는 `Last-Event-ID` 헤더(헤더가 있으면 우선). 진행 중(RUNNING) 턴이 없으면 409 `assistant.no_running_turn`으로 열지 않는다(프론트 규칙 D7의 backstop이며, 프론트는 409에 재시도하지 않고 이력으로 복구한다). 열린 동안 15초마다 `: keepalive` 주석을 보내고, 그 턴이 종료 상태가 되면 닫는다 |
 | POST | `/sessions/{id}/turns/{turn_id}/cancel` | 취소(영속 상태 CANCELLED + 프로세스 내 신호) |
@@ -370,7 +383,7 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 |---|---|
 | `entities/assistant` | 생성 SDK 타입, 프로파일·세션 query, SSE 리더는 **생성 SDK의 SSE 클라이언트**(`shared/api/generated/core/serverSentEvents.gen.ts`: fetch 기반, `id:` 파싱, 재시도 시 `Last-Event-ID` 부착)를 그대로 쓴다. `EventSource`를 쓰지 않는다(재연결 시 같은 URL을 반복해 중복 수신). 리듀서는 이미 반영한 sequence 이하를 무시한다(멱등). 진행 중 턴이 있을 때만 스트림을 열고 종료 상태에서 닫는다. `sseMaxRetryAttempts`를 명시(기본 5)하고, 409 `no_running_turn`은 재시도하지 않고 `GET /sessions/{id}` 이력으로 그 턴의 이벤트를 복구한다(턴 시작 직후 실패해 스트림을 열기 전에 끝난 경우) |
 | `features/configure-ai-providers` | 설정 화면 "AI 연결" 섹션. michelo DB 프로파일 섹션 패턴: 카드 목록(공급자 이름·라벨·모델·꼬리 4자리·활성 배지), 활성 전환, 삭제 확인, 추가 폼(공급자 선택 → 라벨·키·모델·base_url), "연결 테스트" 결과 인라인. 설치 안 된 공급자는 비활성 + 이유 |
-| `features/assist-strategy` | 우측 사이드바 채팅: 메시지 목록, 스트리밍 텍스트, 검색 활동 칩(질의·출처 링크), 도구 활동 접힘, 제안 카드(제목·한 문장·근거·출처·"미리보기"·"문서에 적용"·"적용 후 백테스트"), 취소, 세션 전환, 닫을 때 진행 중 턴 취소 확인. 적용은 `onApplyProposal(proposal)` 콜백으로 밖에 넘긴다(feature가 feature를 import하지 않는다) |
+| `features/assist-strategy` | 우측 사이드바 채팅: 메시지 목록(질문은 메시지의 `turn_id`로 턴에 붙인다 — 순서로 짝짓지 않는다), 스트리밍 텍스트, 검색 활동 칩(질의·출처 링크), 검색 상한 안내(칩이 아닌 문장), 도구 활동 접힘, 제안 카드(제목·한 문장·근거·출처·"미리보기"·"문서에 적용"·"적용 후 백테스트"), 취소, 세션 전환, 닫을 때 진행 중 턴 취소 확인. 적용은 `onApplyProposal(proposal)` 콜백으로 밖에 넘긴다(feature가 feature를 import하지 않는다) |
 | `pages/settings` | `/settings` 라우트. 섹션: AI 연결(위 feature) |
 | `widgets/app-shell` | 내비 하단 "설정" 링크 |
 | `widgets/strategy-ide` | 우측 레일에 `assistant` 슬롯. 계약 인스펙터와 **탭이 아니라 별개 패널**로 공존한다(B-04 결정 2026-09-21: 사용자 요구가 "우측 사이드바 하나"이고, 탭이면 채팅을 보는 동안 계약 인스펙터가 사라진다). 폭·펼침은 기존 `use-panel-layout`을 확장하며(`assistantWidth`·`assistantOpen`) 기본은 접힘이다. 1280px 미만은 기존 drawer 규칙이고, 그 이상이어도 좌우 패널이 편집기 최소 폭(480px)을 남기지 못하면 나중에 연 쪽을 오버레이로 돌린다 |

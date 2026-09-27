@@ -141,6 +141,7 @@
                 "failure": "#/components/schemas/FailureView",
                 "proposal": "#/components/schemas/ProposalView",
                 "search_activity": "#/components/schemas/SearchActivityView",
+                "search_budget_exhausted": "#/components/schemas/SearchBudgetExhaustedView",
                 "text_delta": "#/components/schemas/TextDeltaView",
                 "thinking_summary": "#/components/schemas/ThinkingSummaryView",
                 "tool_call": "#/components/schemas/ToolCallView",
@@ -164,6 +165,9 @@
               },
               {
                 "$ref": "#/components/schemas/SearchActivityView"
+              },
+              {
+                "$ref": "#/components/schemas/SearchBudgetExhaustedView"
               },
               {
                 "$ref": "#/components/schemas/ProposalView"
@@ -1022,6 +1026,7 @@
         "type": "string"
       },
       "ChatMessageView": {
+        "description": "대화 메시지 하나. `turn_id`는 이 메시지를 만든 턴이다(C-03).\n\n화면은 이 값으로 질문을 턴에 붙인다. `null`은 이 필드가 생기기 전에 저장돼 어느 턴 뒤에도 오지\n않는 메시지뿐이며, 화면은 그런 메시지를 어느 턴에도 달지 않는다.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -1034,12 +1039,24 @@
           "text": {
             "title": "Text",
             "type": "string"
+          },
+          "turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Id"
           }
         },
         "required": [
           "role",
           "text",
-          "created_at"
+          "created_at",
+          "turn_id"
         ],
         "title": "ChatMessageView",
         "type": "object"
@@ -6075,6 +6092,21 @@
           "sources"
         ],
         "title": "SearchActivityView",
+        "type": "object"
+      },
+      "SearchBudgetExhaustedView": {
+        "description": "검색 횟수 상한에 닿아 이 턴의 남은 호출에서 검색을 뺐다는 통지. 검색 활동이 아니다.\n\n본문 필드가 없다. 화면 문구는 frontend가 로케일별로 소유하고, 모델에게 보낸 지시문은 wire에\n싣지 않는다(C-03).",
+        "properties": {
+          "type": {
+            "const": "search_budget_exhausted",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "SearchBudgetExhaustedView",
         "type": "object"
       },
       "SecurityRef": {

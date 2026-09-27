@@ -160,10 +160,13 @@ def _send(
     harness: Harness,
     text: str = "요즘 KRX에서 통할 만한 모멘텀 전략 하나 만들어 줘",
     *,
+    turn_id: str = "turn-1",
     cancelled: Callable[[], bool] = lambda: False,
 ) -> list[ChatEvent]:
     return list(
-        harness.service.send(harness.session.session_id, text, CONTEXT, cancelled=cancelled)
+        harness.service.send(
+            harness.session.session_id, text, CONTEXT, turn_id=turn_id, cancelled=cancelled
+        )
     )
 
 
@@ -200,6 +203,23 @@ def test_text_only_turn_streams_events_and_stores_the_assistant_message() -> Non
     assert [message.role for message in messages] == [ChatRole.USER, ChatRole.ASSISTANT]
     assert messages[0].text == "안녕?"
     assert messages[1].text == "안녕하세요"
+
+
+def test_both_messages_of_a_turn_carry_its_turn_id() -> None:
+    """질문과 답이 어느 턴에서 나왔는지 저장한다(C-03).
+
+    화면은 이 id로 질문을 턴에 붙인다. 없으면 "n번째 사용자 메시지 = n번째 턴"이라는 순서
+    가정에 기대야 하고, 메시지 수와 턴 수가 어긋나는 순간 질문이 다른 턴의 답에 붙는다.
+    """
+    harness = _harness((TextDelta("안녕"), Done("end_turn")))
+
+    _send(harness, "첫 질문", turn_id="turn-7")
+
+    messages = harness.sessions.messages(harness.session.session_id)
+    assert [(message.role, message.turn_id) for message in messages] == [
+        (ChatRole.USER, "turn-7"),
+        (ChatRole.ASSISTANT, "turn-7"),
+    ]
     # 이벤트 영속화는 `AssistantTurnRunner`의 일이다. 서비스는 메시지만 남긴다.
     assert harness.sessions.events(harness.session.session_id) == ()
 

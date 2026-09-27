@@ -46,6 +46,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     ProviderKind,
     ProviderProfile,
     SearchActivity,
+    SearchBudgetExhausted,
     Source,
     StrategyProposal,
     TextDelta,
@@ -159,6 +160,7 @@ def _event_samples() -> dict[type, ChatEvent]:
         ToolCall(call_id="call-1", name="validate_strategy_yaml", arguments={"source": "a: 1"}),
         ToolResultSummary(call_id="call-1", name="validate_strategy_yaml", ok=True, summary="통과"),
         SearchActivity(query="KRX 모멘텀", sources=(Source(title="기사", url="https://a.test/1"),)),
+        SearchBudgetExhausted(),
         Proposal(proposal=proposal),
         # 캐시 두 칸도 0이 아니어야 왕복 검사가 뜻을 가진다. 기본값 그대로면 codec이
         # 두 필드를 통째로 흘려도 같은 값으로 복원돼 테스트가 조용히 통과한다.
@@ -272,8 +274,8 @@ def test_sessions_round_trip_and_list_by_document_reference(database: AssistantD
 def test_messages_keep_conversation_order(database: AssistantDatabase) -> None:
     repository = SQLiteChatSessionRepository(database)
     repository.create(_session())
-    repository.append_message("session-1", ChatMessage(ChatRole.USER, "질문", NOW))
-    repository.append_message("session-1", ChatMessage(ChatRole.ASSISTANT, "답변", NOW))
+    repository.append_message("session-1", ChatMessage(ChatRole.USER, "질문", NOW, "turn-1"))
+    repository.append_message("session-1", ChatMessage(ChatRole.ASSISTANT, "답변", NOW, "turn-1"))
 
     stored = repository.messages("session-1")
 
@@ -283,13 +285,31 @@ def test_messages_keep_conversation_order(database: AssistantDatabase) -> None:
     ]
 
 
+def test_messages_keep_the_turn_they_belong_to(database: AssistantDatabase) -> None:
+    """메시지의 `turn_id`가 왕복한다(C-03). 턴 행보다 먼저 써도 받는다.
+
+    러너는 거절(세션 없음·활성 공급자 없음)을 호출 스레드에서 돌려주려고 사용자 메시지를 턴 행보다
+    먼저 쓴다. 그래서 이 칼럼에는 외래 키를 걸지 않는다 — 걸면 첫 질문부터 거부된다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.append_message("session-1", ChatMessage(ChatRole.USER, "질문", NOW, "turn-9"))
+    repository.create_turn(_turn("turn-9"))
+    repository.append_message("session-1", ChatMessage(ChatRole.ASSISTANT, "답변", NOW, "turn-9"))
+
+    assert [message.turn_id for message in repository.messages("session-1")] == [
+        "turn-9",
+        "turn-9",
+    ]
+
+
 def test_missing_session_is_a_port_error(database: AssistantDatabase) -> None:
     repository = SQLiteChatSessionRepository(database)
 
     with pytest.raises(ChatSessionNotFoundError):
         repository.get("absent")
     with pytest.raises(ChatSessionNotFoundError):
-        repository.append_message("absent", ChatMessage(ChatRole.USER, "질문", NOW))
+        repository.append_message("absent", ChatMessage(ChatRole.USER, "질문", NOW, "turn-1"))
     with pytest.raises(ChatSessionNotFoundError):
         repository.messages("absent")
     with pytest.raises(ChatSessionNotFoundError):
@@ -631,14 +651,14 @@ def test_a_non_utc_aware_timestamp_is_stored_as_utc(database: AssistantDatabase)
     repository.create(_session())
     repository.append_message(
         "session-1",
-        ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 18, 30, tzinfo=seoul)),
+        ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 18, 30, tzinfo=seoul), "turn-1"),
     )
 
     assert repository.messages("session-1")[0].created_at == NOW
 
     with pytest.raises(ValueError, match="timezone-aware"):
         repository.append_message(
-            "session-1", ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 9, 30))
+            "session-1", ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 9, 30), "turn-1")
         )
 
 

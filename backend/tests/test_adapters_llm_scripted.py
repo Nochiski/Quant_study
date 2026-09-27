@@ -25,6 +25,7 @@ from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import (
     factor_window_proposal,
     idea_to_new_strategy,
     scenario_for,
+    search_budget_answer,
     search_then_failure,
     simple_answer,
     slow_answer,
@@ -38,6 +39,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     ProviderKind,
     ProviderProfile,
     SearchActivity,
+    SearchBudgetExhausted,
     TextDelta,
     ToolCall,
     ToolResult,
@@ -70,8 +72,10 @@ def _request(text: str) -> TurnRequest:
     return TurnRequest(
         system="system",
         messages=(
-            ChatMessage(role=ChatRole.ASSISTANT, text="이전 답", created_at=created_at),
-            ChatMessage(role=ChatRole.USER, text=text, created_at=created_at),
+            ChatMessage(
+                role=ChatRole.ASSISTANT, text="이전 답", created_at=created_at, turn_id="turn-1"
+            ),
+            ChatMessage(role=ChatRole.USER, text=text, created_at=created_at, turn_id="turn-2"),
         ),
         tools=ASSISTANT_TOOLS,
         research=frozenset(),
@@ -118,6 +122,8 @@ class _ToolRecorder:
         ("많이 오른 대형주를 사는 새 전략을 만들어 줘", idea_to_new_strategy),
         ("새 전략으로 제안해 줘", idea_to_new_strategy),
         ("샤프 비율이 무슨 뜻이야?", concept_answer),
+        # "검색 상한"은 "검색"보다 앞이라 검색 실패 대본으로 새지 않는다.
+        ("검색 상한까지 KRX 자료를 찾아 줘", search_budget_answer),
     ],
 )
 def test_the_question_picks_the_scenario(text: str, expected: object) -> None:
@@ -245,6 +251,23 @@ def test_the_search_scenario_shows_sources_then_retries_the_proposal_three_times
     assert [call.name for call in tools.calls] == [PROPOSE_STRATEGY] * 3
     # 세 번째 거절 뒤 application이 턴을 끊는다. 그 판정은 다음 이벤트 앞에서 일어나므로 대본은
     # 마지막 도구 호출 뒤에도 이벤트를 하나 더 낸다.
+    assert isinstance(events[-1], Done)
+
+
+def test_the_search_budget_scenario_announces_the_limit_after_its_searches() -> None:
+    """검색 두 번 뒤 상한 통지 하나, 그다음 검색 없이 답한다(C-03, 유저 스토리 US-CS-04).
+
+    통지는 검색 활동이 아니다. 화면이 통지를 칩으로 그리지 않는지 e2e가 이 대본으로 본다.
+    """
+    events = list(search_budget_answer(_ToolRecorder()))
+
+    kinds = [type(event) for event in events]
+    assert kinds.count(SearchActivity) == 2
+    assert kinds.count(SearchBudgetExhausted) == 1
+    assert kinds.index(SearchBudgetExhausted) > max(
+        index for index, kind in enumerate(kinds) if kind is SearchActivity
+    )
+    assert TextDelta in kinds[kinds.index(SearchBudgetExhausted) :]
     assert isinstance(events[-1], Done)
 
 

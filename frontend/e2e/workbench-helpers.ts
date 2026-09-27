@@ -190,7 +190,9 @@ export const fillRunEnvironment = async (
     }
   };
   if (via === "band") {
-    await expect(band).toContainText("시작일·종료일·유니버스 칸이 비어 있습니다");
+    await expect(band).toContainText(
+      "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
+    );
     await press(band.getByRole("button", { name: "실행 설정 채우기" }));
     await expect(fields[0][0]).toBeFocused();
   } else {

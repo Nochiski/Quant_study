@@ -28,7 +28,14 @@ import {
 /** 두 번째 실행에서 바꾸는 시작일. 첫 실행과 다른 기간이면 된다. */
 const LATER_START = "2023-01-02";
 
-/** 백테스트를 시작해 끝까지 기다리고, 결과 화면의 실행 기록에서 실행 기간 줄을 읽는다. */
+/** 결과 화면 실행 기록의 "실행 설정" 묶음에서 칸 하나의 줄. 칸 이름은 실행 설정 스키마 라벨이다. */
+const recordedRow = (page: Page, label: string) =>
+  page
+    .getByRole("group", { name: "실행 설정", exact: true })
+    .getByText(label, { exact: true })
+    .locator("xpath=..");
+
+/** 백테스트를 시작해 끝까지 기다리고, 결과 화면의 실행 기록에서 시작일 줄을 연다. */
 const runAndReadPeriod = async (page: Page): Promise<string> => {
   await expect(backtest(page)).toBeEnabled();
   await backtest(page).click();
@@ -42,10 +49,7 @@ const runAndReadPeriod = async (page: Page): Promise<string> => {
   });
   await expect(drawer).toBeVisible({ timeout: 120_000 });
   await drawer.getByText("Manifest · 데이터 경고 · 재현성 정보").click();
-  const period = drawer
-    .getByText("실행 기간", { exact: true })
-    .locator("xpath=..");
-  await expect(period).toBeVisible();
+  await expect(recordedRow(page, "시작일")).toBeVisible();
   return new URL(page.url()).pathname.split("/").at(-1)!;
 };
 
@@ -68,7 +72,7 @@ test(
     const summary = page.getByRole("region", { name: "실행 설정 요약" });
     await expect(summary).toContainText("전략 문서 밖의 값입니다");
     await expect(summary).toContainText(
-      "시작일·종료일·유니버스 칸이 비어 있습니다",
+      "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
     );
     await expect(backtest(page)).toBeDisabled();
 
@@ -82,14 +86,15 @@ test(
       page.getByRole("combobox", { name: "체결 시점" }),
     ).toHaveValue("next_open");
     await expect(
-      page.getByRole("spinbutton", { name: "수수료(bp)" }),
+      page.getByRole("spinbutton", { name: "수수료 (bp)" }),
     ).toHaveValue("15");
     await expect(
-      page.getByRole("spinbutton", { name: "슬리피지(bp)" }),
+      page.getByRole("spinbutton", { name: "슬리피지 (bp)" }),
     ).toHaveValue("10");
+    // 참여율은 스키마의 표시 단위(%)로 보인다. 요청에는 비율 0.1 로 실린다.
     await expect(
-      page.getByRole("spinbutton", { name: "참여율(비율)" }),
-    ).toHaveValue("0.1");
+      page.getByRole("spinbutton", { name: "참여율 (%)" }),
+    ).toHaveValue("10");
     await expect(
       page.getByRole("combobox", { name: "결측 처리" }),
     ).toHaveValue("drop");
@@ -98,10 +103,37 @@ test(
 
     await fillRunEnvironment(page);
     await expect(summary).toContainText(RUN_ENVIRONMENT.start);
-    const firstRun = await runAndReadPeriod(page);
+
+    // 기간·유니버스를 정한 뒤 다른 칸이 틀리면 띠가 그 칸 이름과 이유를 말하고, 버튼이 그 칸으로
+    // 초점을 옮긴다(DEFECT-242-01).
+    await toggle.click();
+    const fee = page.getByRole("spinbutton", { name: "수수료 (bp)" });
+    await fee.fill("-1");
+    await toggle.click();
+    await expect(summary).toContainText(
+      "실행 설정의 수수료 칸을 고치세요: 0bp 이상이어야 합니다.",
+    );
+    await expect(backtest(page)).toBeDisabled();
+    await summary.getByRole("button", { name: "실행 설정 고치기" }).click();
+    await expect(fee).toBeFocused();
+    await fee.fill("15");
+    await toggle.click();
     await expect(
-      page.getByText("실행 기간", { exact: true }).locator("xpath=.."),
-    ).toContainText(`${RUN_ENVIRONMENT.start} → ${RUN_ENVIRONMENT.end}`);
+      summary.getByRole("button", { name: "실행 설정 고치기" }),
+    ).toHaveCount(0);
+
+    const firstRun = await runAndReadPeriod(page);
+    await expect(recordedRow(page, "시작일")).toContainText(
+      RUN_ENVIRONMENT.start,
+    );
+    await expect(recordedRow(page, "종료일")).toContainText(
+      RUN_ENVIRONMENT.end,
+    );
+    // 기록의 enum 은 패널과 같은 값 이름, 참여율은 표시 단위로 보인다(DEFECT-242-04).
+    await expect(recordedRow(page, "결측 처리")).toContainText(
+      "그 종목을 빼기",
+    );
+    await expect(recordedRow(page, "참여율 (%)")).toContainText("10%");
 
     // 같은 전략으로 돌아와 기간만 바꾼다. 마지막 사용값이 이 전략의 실행 설정을 다시 채운다.
     await openEditor(page, strategyUrl);
@@ -112,9 +144,7 @@ test(
     await expect(summary).toContainText(LATER_START);
     await expectPhase(page, "저장됨");
     const secondRun = await runAndReadPeriod(page);
-    await expect(
-      page.getByText("실행 기간", { exact: true }).locator("xpath=.."),
-    ).toContainText(`${LATER_START} → ${RUN_ENVIRONMENT.end}`);
+    await expect(recordedRow(page, "시작일")).toContainText(LATER_START);
 
     // 전략 문서는 그대로다: 두 실행 모두 같은 revision·같은 strategy hash 이고 실행 설정만 다르다.
     const [first, second] = await Promise.all(

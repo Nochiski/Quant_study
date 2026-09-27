@@ -935,11 +935,19 @@ def price_adj_table(root: Path) -> pa.Table:
         con.close()
 
 
-def write_catalog(root: Path, *, snapshot: str | None = None, with_macros: bool = True) -> Path:
+def write_catalog(
+    root: Path,
+    *,
+    snapshot: str | None = None,
+    with_macros: bool = True,
+    legacy_fin_view: bool = False,
+) -> Path:
     """`equity.duckdb`(입력이 갖춰진 매크로 전부) + `_catalog_meta.json` 을 쓴다.
 
     `snapshot` 을 주면 meta 의 snapshot_id 를 그 값으로 둔다(stale 카탈로그 부정 픽스처).
     `with_macros=False` 면 매크로 없이 `macros_skipped` 만 남긴다.
+    `legacy_fin_view=True` 면 `v_fin_latest` 가 `period_frontier` 열 없이 구워진다 — #225 전에
+    만든 카탈로그(재생성 전 로컬·서버 판) 부정 픽스처.
     """
     import duckdb  # 테스트 전용 — backend optional extra `equity`
 
@@ -958,6 +966,8 @@ def write_catalog(root: Path, *, snapshot: str | None = None, with_macros: bool 
                 skipped[name] = f"not_built: inputs={absent or list(inputs)}"
                 continue
             sources = {t: _partition_source(root, t, builds[t]) for t in inputs}
+            if legacy_fin_view and name == "v_fin_latest":
+                body = body.replace("o.period_frontier, ", "")
             con.execute(f"CREATE MACRO {signature} AS TABLE " + body.format(**sources))
             macros.append(signature)
     finally:

@@ -767,6 +767,31 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path)
     assert result.detail is not None and "macros_skipped" in result.detail
 
 
+def test_catalog_without_required_view_column_drops_only_that_source(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """옛 카탈로그(`v_fin_latest` 에 `period_frontier` 가 없다)는 재무 원천만 뺀다 (#233 리뷰 P2-1).
+
+    매크로는 게시돼 있어 `macros_skipped` 가드는 통과한다. 예전에는 fin 원천의 `row_filter` 가
+    커버율 질의에서 BinderException 을 던져 `list_fields()` 전체가 죽었다 — 필드 목록을 쓰는 화면과
+    AI 컨텍스트가 모두 막혔다. 지금은 부팅 때 열을 확인해 재무 필드만 빠지고 경고를 남긴다.
+    """
+    root = build_workbench_root(tmp_path / "equity", catalog=False)
+    write_catalog(root, legacy_fin_view=True)
+    with caplog.at_level("WARNING"):
+        legacy = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in legacy.list_fields()}
+    assert "price.close" in served and "consensus.forward_eps" in served
+    assert not served & {"financial.book_equity", "financial.net_income"}
+    denied = _raw(legacy, fields=("financial.book_equity",))
+    assert denied.status is DataLoadStatus.INVALID_QUERY
+    assert denied.detail is not None and "catalog_columns_missing" in denied.detail
+    assert "period_frontier" in denied.detail
+    assert _raw(legacy, fields=("price.close",)).ok
+    warned = [r.getMessage() for r in caplog.records if "catalog_columns_missing" in r.getMessage()]
+    assert warned and "v_fin_latest" in warned[0] and "카탈로그" in warned[0]
+
+
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:
     root = build_workbench_root(tmp_path / "equity")
     (root / "universe_policy" / "MANIFEST.json").unlink()

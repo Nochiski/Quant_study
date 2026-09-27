@@ -96,6 +96,9 @@ class SourceSpec:
     `pick_order` 는 두 모드에 다 쓴다 — `LATEST` 는 (축 키, available_date) 당 1행,
     `GRID` 는 (축 키, date) 당 1행을 고른다. GRID 에서 필요한 것은 `flow_daily` 뿐이다
     (grain 에 `src` 가 들어 한 격자 셀에 원천 수만큼 행이 올 수 있다).
+
+    `required_columns` 는 매크로 원천이 선언 밖에서(`row_filter` 등) 읽는 열이다. 매크로는 게시돼
+    있어도 옛 카탈로그면 그 열이 없을 수 있어, 어댑터가 부팅 때 확인하고 없으면 이 원천만 뺀다.
     """
 
     name: str
@@ -115,6 +118,7 @@ class SourceSpec:
     requires: tuple[str, ...]
     frequency: str
     kind_expr: str | None = None
+    required_columns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -219,6 +223,8 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_basis=_DART_LAG_BASIS,
         requires=(FIN_TABLE, DISCLOSURE_TABLE, CORP_TICKER_TABLE, FIN_MACRO),
         frequency="quarterly",
+        # #225 전에 만든 카탈로그의 v_fin_latest 에는 이 열이 없다 — 재생성 전까지 재무만 뺀다.
+        required_columns=("period_frontier",),
     ),
     SourceSpec(
         name="consensus_eps",

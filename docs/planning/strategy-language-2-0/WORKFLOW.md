@@ -30,7 +30,7 @@ React 19 · TanStack Router/Query · CodeMirror 6 · `yaml` 2.9 · Vitest · fas
 main
  └─ P0-01  docs/strategy-language-2-0-plan          (이 패키지 + spec + ADR·로드맵·SoT 개정)
      ├─ P1-01 ─ P1-02 ─ P1-03 ─ P1-04 ─ P1-05 ─ P1-06   화면 안 마찰 제거 (1.1 위, 독립. P1-06은 감사 후속 문서)
-     └─ P2-01 ─ … ─ P2-09                              backend schema 1.2 (9 PR, 아래 5절)
+     └─ P2-01 ─ … ─ P2-09 ─ P2-10                      backend schema 1.2 (10 PR, 아래 5절. P2-10은 감사 후속 문서)
          └─ P3-01 ─ P3-02 ─ P3-03                    frontend 1.2 적응
              └─ P4-01 ─ P4-02 ─ P4-03 ─ P4-04        그래프 1수준: 파이프라인
                  └─ P5-01 ─ P5-02 ─ P5-03            그래프 2수준: 레시피
@@ -578,6 +578,33 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   가 1.0·1.1 원문의 날짜를 읽는 경로에서 쓰이지 않으면 코드·분기·golden 을 함께 지운다.
 - OpenAPI 재생성. `database/tests` 계약 확인.
 
+### P2-10 — Phase 2 감사 후속(문서)
+
+**Intent**: Phase 2 종료 감사(2026-09-27, `e064d2af`)가 exit "SoT·책임분리 점검 blocking 0"을 BLOCKING
+2건으로 막았다. 둘 다 기록 결함이다. PLAN 이 머지·통합·리뷰 이력을 잃었고(DEFECT-P2X-001), 이슈 #214
+결정이 lang2 에 넘긴 아이디어 fixture 수정주가 전환의 담당이 없다(DEFECT-P2X-002). 코드 변경 없이 문서
+PR 하나로 닫는다. 감사가 넘긴 P3 계약 누락도 acceptance 에 예약한다. 감사가 권고로 신설한 PR 이라 계획
+PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드)은 코드라 P2-09 가 고쳤다(`17c68261`).
+
+**Acceptance**
+
+- PLAN P1-06·P2-01~P2-09 행이 실제 상태와 머지 커밋을 담는다. main 머지(P1-06·P2-01·P2-02)는
+  `MERGED`, 통합 브랜치 머지(P2-03~P2-08)는 새 상태 `INTEGRATED` 다. 원 PR 이 CLOSED 인 P2-03~P2-06 은
+  그 사유(통합 머지 `c72f6257`, GitHub 가 커밋 차이 없는 base 변경을 거부)를 적는다.
+- 집계 도구가 `INTEGRATED` 를 센다: `[x]` 는 `MERGED`·`INTEGRATED` 둘 다이고, `-Check` 가 main 머지 수와
+  통합 머지 수를 따로 낸다. PLAN `상태 값` 절이 같은 뜻을 적는다.
+- Review 기록 표에 빠진 행(P2-01·P2-02 main 병합 리뷰 2회, P2-03 1·2차, P2-04·P2-05 6차, P2-07 1·2차,
+  P2-08 2차, P2-09 1차)이 있고 표 중간 빈 줄이 없다(Review·검증 기록 각 1곳).
+- `현재 결정`의 묶음 머지 항목이 통합 브랜치 `lang2/integration`, 머지 커밋, CLOSED PR, 추적 draft #202 를
+  적는다.
+- BACKLOG-017(수정주가 전환, #212 연결)을 4요소로 등록하고 P3-01 acceptance 에 예약한다.
+- 감사 8절 P3 계약 목록 17행이 P3 acceptance 와 빠짐없이 대응한다. 누락 #3·#7·#11·#13·#15·#16 을
+  예약한다(#13 은 식별 수단 결정을 함께 적는다).
+- `update-plan-progress.ps1 -Check`, 유저 스토리 하네스, 충돌 표식 검사 통과.
+
+**Non-goal**: 코드 변경. 감사 비차단 NB-2(a)(b)·NB-3·NB-4·NB-6 은 이 PR 이 다루지 않는다(PLAN 변경 기록에
+남은 목록).
+
 **Phase 2 exit**
 
 - [ ] 1.2 fixture 같은 hash. 1.1 fixture 전부 업그레이드 통과.
@@ -614,6 +641,26 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   diff 를 node_id 기준으로 맞춘다(수정 위치가 backend `_diff.py` 면 이 PR 이 같이 고친다).
 - outline·snippet 카탈로그(팩터 preset은 "예시" 그룹으로 강등, 튜토리얼 전용)·execution plan·graph·
   debugger가 1.2 pointer로.
+- **착수 전 cascade(Phase 2 감사 NB-7)**: `lang2/integration` 이 main 을 따라간다. 통합 브랜치의 main
+  기반은 `a4ccfd7a` 이고, 그 뒤 main 머지가 여럿이다(#204·#206·#213·#208·#209·#210·#215, 그리고 BACKLOG-017 의
+  선행 조건 #218 `28d13b69`). 그 merge 를 먼저 하고 P3-01 packet 에 SHA 를 적는다.
+- **BACKLOG-017(Phase 2 감사 DEFECT-P2X-002)**: 아이디어 fixture 1·3·4·5(`momentum_12_1`·`ma20_breakout`·
+  `top_trading_value`·`inverse_volatility`)의 가격 변화 잎을 `price.close` 에서 `price.adj_close` 로 옮긴다
+  (#214 결정). `test_idea_fixtures.py` 의 어댑터 필드 계약 대조에 `price.adj_close` 를 넣는다. 선행 조건은
+  #218 이 통합 브랜치에 들어온 것이다(위 cascade). 아이디어 2(ROE)의 `financial.net_income` 기간 혼재는
+  #212(main 담당)이고 이 PR 은 fixture 주석에 이슈 링크만 단다. P5-01(빌더 = fixture node_id)·P5-03(e2e
+  산출물 hash)이 원주가 형태를 고정하기 전에 끝나야 한다.
+- **탈락 사유 i18n(Phase 2 감사 8절 #7, PLAN P2-05 결정 4)**: trace·디버거의 `ExclusionReason` 전체(P2-05 의
+  `eligibility_rank_cut` 포함)에 사람 말 문장을 붙이고, enum 전체가 번역됐는지 테스트로 고정한다. 지금
+  화면은 사유를 원문 코드로 찍는다.
+- **승격 노드 식별(Phase 2 감사 8절 #13, BACKLOG-014 보강)**: 결정 — backend 가 plan·trace wire 의 노드에
+  합성 여부 표식(예: `origin: "promotion"`)을 내보내고 OpenAPI 에 싣는다. frontend 는 `__promote_` 접두사를
+  복제하지 않는다(접두사 `PROMOTION_NODE_PREFIX` 의 owner 는 backend `_promotion.py` 하나다). 표식을 내는
+  backend 변경은 이 PR 이 같이 한다.
+- **새 compile 진단의 화면 매핑(Phase 2 감사 8절 #11)**: 그래프 밖 `strategy.field.missing`·
+  `strategy.field.value_type` 과 그래프 안 `strategy.expression.field_missing` 이 같은 "없는 필드"를 두 코드로
+  낸다. 문제 목록·편집기 마커가 두 코드와 kind `capability`(`strategy.operator.unsupported`)를 모두 pointer
+  자리에 보이는지 단위 테스트로 확인한다. 문장은 backend 가 완성해 보낸다.
 - 단위 테스트 전부 green. e2e fixture는 P3-03.
 
 ### P3-02 — 실행 설정 패널 확장, 1.1 업그레이드 배너, 실행 설정 띠
@@ -671,6 +718,20 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   의 `upgrade.error.*` 문장. 없으면 지금처럼 `upgrade.error.request` 로 backend 문장을 보인다.
   (4) `environment` 가 `null` 이면(옛 문서의 실행 설정을 옮기지 못함) 패널을 채우지 않고 warning 이
   짚는 자리를 보인다 — 기본값으로 채우지 않는다.
+- **은퇴 버전 문구 6키(Phase 2 감사 8절 #15)**: 위 (1)의 4키 밖에도 1.1 동결 뒤 사실과 다른 키가 6개다
+  (ko·en 각각). `upgrade.frozenGenerated`, `upgrade.backtestBlocked`,
+  `upgrade.error.strategy_document.not_upgradeable`("schema 1.0 문서만 …"),
+  `history.frozen`("1.0 동결" — **1.1 revision 에도 이 라벨이 붙는다**),
+  `backtest.error.backtest.strategy.requires_upgrade`, `trace.error.trace.strategy.requires_upgrade`.
+  버전 중립 문구로 바꾸거나 응답의 `schema_version` 을 읽는다(SoT: frontend 는 은퇴 버전 문자열을 갖지 않는다).
+- **팩터 sandbox 요청의 결측 정책(Phase 2 감사 8절 #3, PLAN P2-03 결정 6)**: 실행 계획 패널의 explain·
+  preview 요청(`use-execution-plans.ts`)에 실행 설정 패널의 `missing` 을 싣는다. 싣지 않으면 패널에서
+  `zero` 를 골랐을 때 실행 계획의 `plan_hash` 가 실제 run 과 갈린다(P2-02 리뷰 P1 과 같은 모양). 값의
+  출처인 패널이 이 PR 에 생기므로 P3-01 이 아니라 여기다.
+- **run 상세의 실행 설정 표시(Phase 2 감사 8절 #16)**: `entities/backtest/ui/backtest-run-detail.tsx` 가
+  manifest 의 `environment`(기간·유니버스·체결·비용·결측)와 `environment_hash` 를 보인다. 1.2 부터 이것이
+  그 실행 설정의 유일한 기록이다(SoT "실행 재현성 → 결과 화면이 그대로 노출"). P3 exit "같은 전략·다른
+  기간 → 같은 spec_hash" 를 화면에서 확인하는 수단이기도 하다.
 - 백테스트 버튼 차단 사유에서 `factor-plan` 분기가 compile error로 흡수되는지 확인(남으면 결함으로
   기록).
 - IDE 상단에 실행 설정 요약 띠(시안 1). 문서 밖임을 문구로.
@@ -746,6 +807,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `insertItem`. 빈 그래프는 semantic error "첫 단계를 추가하세요"로 카드에 표시(backend 메시지).
 - 미리보기 패널: 기준일 입력, 기존 trace API로 유니버스·필터 통과·결측 제외 수와 상위 N 종목·
   합산 점수(막대). 편집 후 compile ok에서만 갱신, stale 배지.
+- 필터 탈락은 규칙 탈락(`eligibility_failed`)과 순위 탈락(`eligibility_rank_cut`, P2-05)을 나눠 센다
+  (WORKFLOW P2-05 탈락 사유 항목, Phase 2 감사 8절 #7).
 
 ### P4-04 — 탭을 그래프·YAML 둘로, 기본 탭 그래프, Form·JSON 은퇴, 빈 화면 e2e
 

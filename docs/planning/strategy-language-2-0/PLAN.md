@@ -1,16 +1,17 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: IN_REVIEW
-current_phase: P1,P2
-current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08,P2-09
-active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09]
-parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09]
-last_updated: 2026-09-27T11:22:56+09:00
-planned_prs: 29
-merged_prs: 6
-approved_prs: 11
-progress_percent: 21
+project_status: CHANGES_REQUESTED
+current_phase: P2
+current_pr: P2-09,P2-10
+active_prs: [P2-09, P2-10]
+parallel_window: [P2-09, P2-10]
+last_updated: 2026-09-27T12:14:48+09:00
+planned_prs: 30
+merged_prs: 9
+integrated_prs: 6
+approved_prs: 15
+progress_percent: 50
 ---
 
 # schema 1.2 · 그래프 표현 실시간 진행 계획
@@ -23,16 +24,17 @@ progress_percent: 21
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
-| Current phase | `P1,P2` |
-| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08,P2-09` |
-| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09` |
-| Progress | `6 / 29 merged (21%)` |
-| Approved | `11 / 29` |
-| Aggregated at | `2026-09-27 11:22 KST` |
+| Project status | `CHANGES_REQUESTED` |
+| Current phase | `P2` |
+| Current/next PR | `P2-09,P2-10` |
+| Active PR | `P2-09, P2-10` |
+| Progress | `15 / 30 done (50%), main 9, integration 6` |
+| Approved | `15 / 30` |
+| Aggregated at | `2026-09-27 12:14 KST` |
 <!-- PLAN:SUMMARY:END -->
 
-진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
+진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
+(`MERGED`)와 lang2 통합 브랜치 머지(`INTEGRATED`, 아래 상태 값)를 따로 센다. frontmatter와 위 표, Phase 집계는
 [update-plan-progress.ps1](./tools/update-plan-progress.ps1)이 생성하며 직접 수정하지 않는다.
 
 ## 현재 결정
@@ -65,6 +67,11 @@ progress_percent: 21
   구조 오류로 본다. 스토리 태그 e2e 는 잠그거나 태그를 떼지 않는다.
   backend·frontend 단위 게이트와 유저 스토리 하네스 정적 검사는 green 이어야 한다. WORKFLOW 1절의
   "P2 PR 은 backend gate 만 merge gate"와 "P2-09 전 실 DB 1.2 저장 금지"에 맞춘 결정이다.
+  **실행 방식(Phase 2 감사 DEFECT-P2X-001 기록)**: 묶음은 통합 브랜치 `lang2/integration` 에 모은다(main
+  기반 `a4ccfd7a`). P2-03(#183)·P2-04(#184)·P2-05(#187)·P2-06(#200)은 APPROVE 상태로 통합 머지 커밋
+  `c72f6257` 에 들어갔고, 원 PR 은 CLOSED 다 — GitHub 가 커밋 차이 없는 base 변경을 거부해 각 PR 에 사유
+  댓글을 남기고 닫았다. P2-07(#201)부터는 PR 을 통합 브랜치 base 로 열어 머지한다(#201 `013da821`, #205
+  `48eff6d8`). 통합 브랜치의 main 머지는 추적 draft PR #202 가 맡는다. 이 PR 들의 tracker 상태는 `INTEGRATED` 다.
 - 2026-09-27 P2-07 주의(리뷰 DEFECT-P3-3): P2-07 부터 hydrate 가 boolean 팩터 출력에 승격 노드를
   붙인다. 그래서 P2-03~P2-06 판(통합 브랜치 포함)으로 저장한 1.2 revision 중 출력이 비교 노드인 팩터가
   있는 row 는 저장소 무결성 검사(canonical JSON 재생성 비교)에서 읽히지 않는다. **통합 브랜치로 로컬
@@ -86,6 +93,7 @@ progress_percent: 21
 | `IN_REVIEW` | diff 고정, review sub-agent 검토 중 |
 | `CHANGES_REQUESTED` | blocking finding 수정 중 |
 | `APPROVED` | reviewer 승인, merge gate 확인 중 |
+| `INTEGRATED` | 리뷰 APPROVE 뒤 `lang2/integration` 통합 브랜치에 머지됨. main 은 묶음 머지(draft #202) 대기. `[x]` 로 센다 |
 | `MERGED` | 로컬 gate 후 main merge 완료 |
 | `PAUSED` | 제품·계약 결정이 필요해 일시 정지 |
 
@@ -95,16 +103,16 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 ## Phase 자동 집계
 
 <!-- PLAN:PHASES:START -->
-| Phase | Goal | PR | Merged | Status |
-|---|---|---:|---:|---|
-| P0 | Planning package and contract docs | 1 | 1 | `MERGED` |
-| P1 | In-screen friction removal on 1.1 | 6 | 5 | `IN_REVIEW` |
-| P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_REVIEW` |
-| P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
-| P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
-| P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
-| P6 | Graph level 3: node canvas | 3 | 0 | `WAITING` |
-| **Total** |  | **29** | **6** | **21%** |
+| Phase | Goal | PR | Main | Integrated | Status |
+|---|---|---:|---:|---:|---|
+| P0 | Planning package and contract docs | 1 | 1 | 0 | `MERGED` |
+| P1 | In-screen friction removal on 1.1 | 6 | 6 | 0 | `MERGED` |
+| P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 2 | 6 | `CHANGES_REQUESTED` |
+| P3 | Frontend 1.2 adaptation | 3 | 0 | 0 | `WAITING` |
+| P4 | Graph level 1: pipeline | 4 | 0 | 0 | `WAITING` |
+| P5 | Graph level 2: recipe | 3 | 0 | 0 | `WAITING` |
+| P6 | Graph level 3: node canvas | 3 | 0 | 0 | `WAITING` |
+| **Total** |  | **30** | **9** | **6** | **50%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -365,6 +373,30 @@ P2-09 결정 11건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 
     `strategy_document.upgrade_unsupported_node`(pointer 포함)이고, repository codec 은 같은 예외가
     `StrategyRepositoryStorageError` 가 된다 — 조용히 지운 spec 을 보이면 저장한 적 없는 그래프가 그
     revision 의 사실로 뜬다. P2-06 이후에도 같은 row 는 hydrate 실패로 읽히지 않았으니 새 회귀는 아니다.
+
+| 항목 | 값 |
+|---|---|
+| PR | `P2-10` |
+| Intent | Phase 2 감사(2026-09-27)의 BLOCKING 2건(DEFECT-P2X-001 PLAN 기록, DEFECT-P2X-002 수정주가 전환 담당)을 닫고, 감사가 넘긴 P3 계약 누락을 acceptance 에 예약한다 |
+| Acceptance | WORKFLOW P2-10 |
+| Non-goals | 코드 변경(감사 NB-1 은 P2-09 `17c68261`). 감사 비차단 NB-2(a)(b)·NB-3·NB-4·NB-6(아래 변경 기록의 남은 목록) |
+| Branch/worktree | `docs/lang2-p2-10-phase2-records` / `wt-lang2-p2-10` |
+| Base SHA | P2-09 `17c68261` |
+| 변경 파일 | `docs/planning/strategy-language-2-0/PLAN.md`, `WORKFLOW.md`, `tools/update-plan-progress.ps1` |
+| Focused tests | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.user_story_trace`, `uv run --locked python -m quant_study_dev.conflict_markers` |
+| Full gate | 문서와 집계 도구만 바뀐다. 코드 게이트는 base `17c68261` 의 결과(P2-09 PR 본문)와 같다 |
+
+P2-10 결정 2건:
+
+1. **통합 브랜치 머지는 새 상태 `INTEGRATED` 로 센다.** `[x]` 는 대상 브랜치(main 또는 `lang2/integration`)에
+   머지된 PR 이고, 집계는 main 머지와 통합 머지를 따로 낸다(frontmatter `merged_prs`·`integrated_prs`, Phase 표
+   `Main`·`Integrated` 열). `APPROVED` 에 비고만 다는 안은 `-Check` 가 머지 수를 여전히 0 으로 내서 감사가
+   짚은 증상이 남는다. `MERGED` 로 세는 안은 main 에 없는 변경을 main 머지로 읽게 한다. 프로젝트 `COMPLETE` 는
+   main 머지로만 판정한다. READY 판정은 의존 PR 이 `MERGED` 또는 `INTEGRATED` 면 충족이다(이후 lang2 PR 은
+   통합 브랜치를 base 로 연다). 도구 파일에 한글 주석을 넣으며 UTF-8 BOM 을 붙였다 — Windows PowerShell 5.1 은
+   BOM 없는 스크립트를 ANSI 로 읽는다. 출력 문자열은 ASCII 로 둔다.
+2. **승격 노드 식별 수단은 backend wire 표식이다**(P3-01 예약, 감사 8절 #13). frontend 가 `__promote_` 접두사를
+   손으로 적으면 `PROMOTION_NODE_PREFIX`(backend `_promotion.py`)의 이중 owner 가 된다. 리드 결정이다.
 
 P2-08 결정 6건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
 
@@ -768,27 +800,29 @@ Phase exit:
 | [x] | `P1-03` | 연산자 카탈로그(backend)·노드/필드 한글 이름·설명 | P1-02 | `MERGED` | [#177](https://github.com/Nochiski/Quant_study/pull/177) · `review_lang2_p1_03` 2차 APPROVE(1차 REQUEST_CHANGES 반영, 돌연변이 7건 실패 확인), 2차 P3 4건 후속 · main 머지 `9cef7f3d`(#177, 2026-09-27) |
 | [x] | `P1-04` | 연산자 먼저 고르기(kind 자동), 조용한 실패 피드백, 오류 본문 인라인 | P1-03 | `MERGED` | [#181](https://github.com/Nochiski/Quant_study/pull/181) · `review_lang2_p1_04` 4차 APPROVE (1·2·3차 REQUEST_CHANGES 차단 2·1·1, P3 7·3·2 전부 반영) · main 머지 `3c1f1ab7`(#181, 2026-09-27) |
 | [x] | `P1-05` | 구조 오류 한글화, 진단 코드 네임스페이스, 순환·중복 진단에 node_id | P1-04 | `MERGED` | [#188](https://github.com/Nochiski/Quant_study/pull/188) · `review_lang2_p1_05` 3차 APPROVE(1차 REQUEST_CHANGES P1 1·P2 2·P3 13 → 2차 REQUEST_CHANGES 새 P1 1(POSIX 잠금 덮어쓰기)·P3 8, 수정 `5e8e0af0` → 3차 APPROVE P2 1·P3 2, 추가분 `a55e7a67` 확인 P3 3, 3차 반영 `3755b186`·`a263276b`. SHA는 rebase 전 값, 현 tip `45f1c4a3`) · 게이트: pytest 1695·Vitest 733·e2e 25/25 · main 머지 `7d525949`(#188, 2026-09-27) |
-| [ ] | `P1-06` | Phase 1 감사 후속(문서): PLAN 진행 기록 정정, SoT 하한·e2e 잠금 행, 이월 항목 담당 지정 | P1-05 | `IN_REVIEW` | [#191](https://github.com/Nochiski/Quant_study/pull/191) · `review_lang2_p1_06` 2차 APPROVE(`909ae273`, 1차 REQUEST_CHANGES P2 2·P3 5 반영). 이후 추가분 — main 병합 cascade, US-DM-06 스토리 e2e, 병합 리뷰 P3 문서 반영 — 은 리뷰 대기 |
+| [x] | `P1-06` | Phase 1 감사 후속(문서): PLAN 진행 기록 정정, SoT 하한·e2e 잠금 행, 이월 항목 담당 지정 | P1-05 | `MERGED` | [#191](https://github.com/Nochiski/Quant_study/pull/191) · `review_lang2_p1_06` 2차 APPROVE(`909ae273`, 1차 REQUEST_CHANGES P2 2·P3 5 반영) · 추가분(main 병합 cascade, US-DM-06 스토리 e2e, 병합 리뷰 P3 반영)은 병합 cascade 리뷰 APPROVE · main 머지 `0cfb4959`(#191, 2026-09-26) |
 
 Phase exit:
 
 - [x] e2e 그래프 시나리오가 YAML 탭 전환 없이 통과. (Phase 1 감사 4절 (a) PASS — CI #188 `browser-e2e` 25/25)
 - [x] 노드 property·kind·연산자 설명 커버리지 100%. (감사 4절 (b) PASS — 발행은 생성기 구조로, 소비는 `screen-vocabulary.test.ts`로 고정)
-- [ ] SoT·책임분리 점검 서브에이전트 blocking 0. (감사 2026-09-21 BLOCKING 2 — DEFECT-P1X-001은 `ac3a3d0e`+cascade rebase, DEFECT-P1X-002는 P1-06이 해소. `ac3a3d0e`는 5차 APPROVE, P0-01~P1-05는 main 머지. P1-06 머지 뒤 체크)
+- [x] SoT·책임분리 점검 서브에이전트 blocking 0. (감사 2026-09-21 BLOCKING 2 — DEFECT-P1X-001은 `ac3a3d0e`+cascade rebase, DEFECT-P1X-002는 P1-06이 해소. `ac3a3d0e`는 5차 APPROVE, P0-01~P1-06 전부 main 머지 — P1-06 `0cfb4959`)
 
 ## P2 — backend schema 1.2
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `IN_REVIEW` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · 2차 APPROVE 대상 `1e0b095` + P3 후속 커밋 1개 · 구현자 `impl-lang2-p2-01`, 워크트리 `wt-lang2-p2-01`, 브랜치 `feat/lang2-p2-01-run-environment` · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 반영, 2차 APPROVE(P3 6 → 코드 2 반영, 문서 3 이관, 본문 1 리드). 커밋 7개(backend 3 + 생성 SDK 1 + 리뷰 반영 3). 31파일은 12절 상한(8파일)을 넘어 논리 단위로 쪼갰다 — 모델·브리지 / 세 요청 배선 / 스키마 엔드포인트, 그리고 CI `api:generate` 게이트가 요구하는 생성 SDK. 게이트: pytest 1494·ruff·pyright(duckdb 4건 기존) · frontend typecheck·lint·Vitest 639·build |
-| [ ] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `APPROVED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · 구현자 `impl-lang2-p2-02`, 워크트리 `wt-lang2-p2-02`, 브랜치 `feat/lang2-p2-02-missing-policy` · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 반영, 2차 APPROVE(P3 4건 후속 커밋). 커밋 12개(1차 5 + 1차 리뷰 반영 6 + 2차 리뷰 반영 1, history 재작성 없음). 게이트: pytest·ruff·pyright 0 · frontend api:generate diff 0·typecheck·lint·Vitest 639·build. `database/tests` 는 base `fff33fd` 와 같은 41 failed/1268 passed/33 errors(기존 실패, 이 PR 무관) |
-| [ ] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `APPROVED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · 워크트리 `wt-lang2-p2-03`, 브랜치 `feat/lang2-p2-03-schema-1-2` · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 반영, 2차 **APPROVE**(돌연변이 재실행 2 failed 확인, P3-07 이탈 타당). P2 둘 다 `_record_codec.py`의 은퇴 row 읽기 5줄이다: 1.1 row 테스트 0건(그 가지를 `raise`로 바꿔도 초록), 미지 `schema_version`이 fail-closed에서 silent 현재 버전 해석으로 바뀜. 게이트는 아래 Full gate |
-| [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `APPROVED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · 1차 → `28003cf1` · 2차 → `2a10798d` · 3차 → `70cfdffa` · 4차 → `22636fc3` · 5차 **APPROVE**(P3 R5-P204-001 단조성: 기준점 후보 비교를 `<=` 로, 리드 지시로 즉시 반영). 게이트는 push tip 에서 재실행(PR 댓글) |
-| [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `APPROVED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility` · 1차 REQUEST_CHANGES(P2 2·P3 2) → `641c6f3b`·`efd6a768` · 2~5차 **APPROVE**. 3차 재배치 때 첫 커밋 `a35c1e40` 에 P2-04 새 테스트 한 줄의 enum 개명을 넣었고, P2-04 3차 재현 테스트 `8587d413` 를 더했다. P2-04 5차 반영 tip `35089901` 위로 rebase(코드 변경분 동일). 게이트는 push tip 에서 재실행(PR 댓글) |
-| [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `APPROVED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 **APPROVE**(blocking 0 · P2 1 · P3 4, 전부 반영: `77bd713c`·`7b707660`) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base `lang2/integration`(통합 머지 `c72f6257` 을 merge, 처음 착수는 P2-06 tip `36060527`) · 커밋 14개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → PLAN → 리뷰 P1 반영: 그래프 밖 필드 참조 → PLAN → 리뷰 P3-2 테스트) + 리뷰 반영 문서 · 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `IN_REVIEW` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 워크트리 `wt-lang2-p2-08`, 브랜치 `feat/lang2-p2-08-ideas` · base P2-07 tip `945fd081`(착수 `6e397a3b`, 이후 P2-07 을 merge 로 따라감) · 커밋 8개(BACKLOG-015 → mock 필드 → 아이디어 fixture·테스트 → 스파이크 결론 → 스토리 비고 → PLAN → 리드 결정 반영: 빌더 node_id → 문서·이 PLAN) · `GROUP_SERIES` 는 `unsupported` 유지(원장에 PIT 섹터 시계열 없음) · `review_lang2_p1_06` 1차 REQUEST_CHANGES(P1 1·P2 1·P3 3) → 반영(P2 는 BACKLOG-016) · 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `IN_REVIEW` | [#217](https://github.com/Nochiski/Quant_study/pull/217) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base `lang2/integration`(P2-07·P2-08 머지 `48eff6d8`. 착수는 P2-08 tip `dffc1d7b`, 리뷰 반영 `d99aa024` 와 통합 브랜치를 merge 로 따라갔다. 처음 연 #216 은 P2-08 브랜치 삭제로 닫혀 #217 로 다시 열었다) · 커밋 8개(버전 디스패치·호출자 → 응답 `environment` → BACKLOG-011 정리 → OpenAPI → 생성 SDK → US-SM-07 e2e·스토리 → SoT·WORKFLOW → 이 PLAN) · 게이트는 push tip 에서 실측(PR 본문) |
+| [x] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `MERGED` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 2차 APPROVE · main 병합 cascade 리뷰 2회 APPROVE(`review_lang2_p2_merge_0102`·`_r2`) · main 머지 `2d08157a`(#172, 2026-09-26) |
+| [x] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `MERGED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 2차 APPROVE · main 병합 cascade 리뷰 2회 APPROVE · main 머지 `1fb099f7`(#176, 2026-09-26) |
+| [x] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `INTEGRATED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 2차 APPROVE · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) |
+| [x] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `INTEGRATED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 1~4차 REQUEST_CHANGES → 5차 APPROVE → 6차 APPROVE(R5 단조성 반영 `71d6655d` 확인) · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) |
+| [x] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `INTEGRATED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 1차 REQUEST_CHANGES(P2 2·P3 2) → 2~6차 APPROVE · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) |
+| [x] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `INTEGRATED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 APPROVE(blocking 0·P2 1·P3 4, 전부 반영 `77bd713c`·`7b707660`) · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) |
+| [x] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `INTEGRATED` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · `review_lang2_p2_07` 1차 REQUEST_CHANGES(P1 1: 그래프 밖 필드 참조가 필드 계약 검사를 빠져나감·P3 3) → 2차 APPROVE(tip `945fd081`) · 통합 머지 `013da821`(#201, base `lang2/integration`, 2026-09-27) |
+| [x] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `INTEGRATED` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 1차 REQUEST_CHANGES(P1 1 DEFECT-P208-001·P2 1·P3 3) → 2차 APPROVE(`d99aa024`, 새 관찰 P2-NEW-1 원주가 오염 → 이슈 #214 → BACKLOG-017) · 통합 머지 `48eff6d8`(#205, 2026-09-27) |
+| [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `CHANGES_REQUESTED` | [#217](https://github.com/Nochiski/Quant_study/pull/217) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base `lang2/integration`(처음 연 #216 은 P2-08 브랜치 삭제로 닫혀 #217 로 다시 열었다) · `review_lang2_p2_09` 1차 REQUEST_CHANGES(P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 뺀다 — 반영 대기) · Phase 2 감사 NB-1(현재 판 문서 업그레이드) 수정 `17c68261` |
+
+| [ ] | `P2-10` | Phase 2 감사 후속(문서): PLAN 머지·통합·리뷰 기록 정정, `INTEGRATED` 상태, BACKLOG-017, P3 계약 누락 예약 | P2-09 | `IN_REVIEW` | PR 본문 참조 · 워크트리 `wt-lang2-p2-10`, 브랜치 `docs/lang2-p2-10-phase2-records` · base P2-09 `17c68261` |
 
 Phase exit:
 
@@ -796,7 +830,7 @@ Phase exit:
 - [x] compile 통과 문서가 preview에서 422 없음(property). (P2-07 `test_compile_gate_property.py`, P2-09 tip backend 전체에서 통과)
 - [x] `plan_hash`가 결측 정책으로 계속 갈린다(P2-02 회귀). (`test_factor_missing_policy.py`, P2-09 tip 통과)
 - [x] `ideas/*.yaml` 5개 backend 통과. (P2-08 `test_idea_fixtures.py`, P2-09 tip 통과)
-- [ ] SoT·책임분리 점검 blocking 0, SoT "실행 설정" 행 채움·업그레이드 행 예약 해제. (SoT 두 행은 P2-09 가 고쳤다 — 실행 설정 행에 업그레이드 응답 `environment` 경로, 업그레이드 행 예약 표기 해제, 금지 절 "1.0 → 1.1 → 1.2". 점검 서브에이전트는 아직 돌리지 않았다)
+- [ ] SoT·책임분리 점검 blocking 0, SoT "실행 설정" 행 채움·업그레이드 행 예약 해제. (SoT 두 행은 P2-09 가 고쳤다 — 실행 설정 행에 업그레이드 응답 `environment` 경로, 업그레이드 행 예약 표기 해제, 금지 절 "1.0 → 1.1 → 1.2". Phase 2 감사(2026-09-27, `e064d2af`)는 FAIL — BLOCKING 2건 DEFECT-P2X-001·002 는 둘 다 기록 결함이고 P2-10 이 닫는다. 코드·계약은 통과. 이 PR 의 재감사 통과 뒤 체크한다)
 
 ## P3 — frontend 1.2 적응
 
@@ -881,11 +915,14 @@ Phase exit:
 | `P1-06` | `review_lang2_p1_06` | 1차 | `REQUEST_CHANGES` | P2 2 · P3 5. cascade rebase는 range-diff로 코드 드리프트 0, SoT 해소 규칙 일치, N3 독립 재현(`rank` 포함). **P2-1**: P1-02 행이 4차 APPROVE를 근거로 `APPROVED`인데 #173 head는 그 뒤의 코드 커밋 `ac3a3d0e`(새 도구·CI step)이고 리뷰 기록이 없다 → `IN_REVIEW`·"`ac3a3d0e` 리뷰 대기"로, 테스트 수 8 → 7 정정. **P2-2**: BACKLOG-002~007이 담당 PR의 WORKFLOW acceptance에 없다 → P2-07·P3-03·P4-04·P5-03·P6-03 acceptance에 한 줄씩 예약, BACKLOG-004는 소비자가 정해지지 않아 조건부 담당으로. P3: WORKFLOW:44 착수 조건을 P1-06으로, P1-05 Packet Diff stat·e2e 파일, P1-02 2차 행 수치(새 P2 2·P3 3), BACKLOG-003·004 줄 번호. 관찰(표식 게이트 경계)은 P1-02 5차 행에 |
 | `P1-06` | `review_lang2_p1_06` | 2차 | `APPROVE` | `909ae273` 판정. 1차 P2 2건(P1-02 `ac3a3d0e` 리뷰 대기 기록, BACKLOG의 WORKFLOW acceptance 예약)과 P3 5건 반영 확인. 그 뒤 추가분(병합 cascade·US-DM-06 스토리 e2e·병합 리뷰 P3 문서)은 별도 확인 |
 | `P0-01`~`P1-06` 병합 | `review_lang2_p1_06` | 병합 cascade | `APPROVE` | blocking 0 · P3 3. main(AI 스택 15개·#193·#195)을 7개 PR에 올린 병합 커밋과 정정 커밋만 봤다. 병합이 PR 고유 변경을 하나도 되돌리지 않았고(층마다 옛·새 범위 추가·삭제 줄 대조), AI 제안 적용은 P1-02 편집 이력 계약의 격리된 전체 교체 한 단계로 들어가며, 단축키 분기는 겹치지 않고, SoT 3-way 결과에 이중 owner·누락이 없다. 의미 충돌 수정 4건 중 테스트를 약화한 것은 없고(`9815b40b`는 단언 강화), 기준선 변화는 전부 P1 기능으로 설명된다. P3: SoT e2e 행의 "B-05가 hunk를 복사" 문장, AI 적용 → 되돌리기 버튼 브라우저 e2e 부재(BACKLOG-009), `currentSource` 우회를 BACKLOG-007에 잇기 — 전부 P1-06 `229eed5f`에서 반영 |
-
 | `P2-01` | `review_lang2_p2_01` | 1 | `REQUEST_CHANGES` | P0 1 · P1 1 · P2 4 · P3 3. **P0**: 명시 `environment`가 run의 tape 파이프라인(`backtest_run/_service.py`의 `preflight`·`run_pipeline`)에 미전달 — 데이터셋·엔진·매니페스트는 명시값을, 관측 조회·tape는 문서 브리지 값을 써서 preview가 422로 거절하는 유니버스를 run이 completed로 기록. **P1**: 명시 `environment`가 제약 검증 우회 — 범위 밖 값이 202 접수 뒤 `backtest.run.internal`로 늦게 실패, 런타임 스키마에도 범위 없음. **P2 4**: 지문 표기 변경 미기록, `environment_hash`의 int/float 비대칭, 매니페스트 비용 3필드가 `environment`와 중복·미대조(fixture가 이미 불일치), `engine_portfolio` PARTIAL_FILL 과소 선언 방향 미기록. **P3 3**: trace 메시지 미갱신, 해시 분리 테스트에 `start` 누락, 범용 빌더 owner. 반영: 파이프라인 전달 + architecture 테스트를 AST 전달 검사로 확장, `RunEnvironment.__post_init__` 검증(범위는 `_constraints.py` `/execution/*` 행 재사용)·float 정규화, 매니페스트 비용 축 대조, 문서 검증 → 브리지 순서 정정(부수 회귀 6건), P2-03에 방향·결정 항목 |
 | `P2-01` | `review_lang2_p2_01` | 2 | `APPROVE` | 1차 10건 전부 해소 확인(재현 2개 재실행, 되돌리기 실험이 정확히 2건 실패). 새 findings 6건은 전부 P3·비차단. 코드 2건 반영 — 새 HTTP 테스트의 필드 단언이 사실상 항상 참(422 `input`이 요청 객체를 되돌려줘 모든 필드명이 본문에 있음) → `detail[0]["msg"]`·`loc` 기준으로 좁힘, `RUN_ENVIRONMENT_CONSTRAINTS`의 import 시점 bare `KeyError` → 누락 포인터·카탈로그를 실은 명시 `LookupError`. 문서 3건 이관 — P2-03에 "`preflight`가 `environment`를 받지만 읽지 않음"(두 호출부 값 동일성 가드 강화 또는 시그니처 정리), P3-02에 명시 `environment` 422의 필드 단위 표면 결정과 "범위 SoT는 `/run-environments/schema`, OpenAPI `RunEnvironment`에는 범위 없음". 나머지 1건(PR 본문의 수치·동작 변화 문장)은 리드가 처리 |
 | `P2-02` | `review_lang2_p2_02` | 1 | `REQUEST_CHANGES` | P1 1 · P2 3 · P3 3. 핵심 invariant 4개(기본값 경로 `plan_hash` 동일, 정책별 분기, 충돌 거부, 소비자 0건 가드)는 base 코드 대조와 가드 되돌리기 실험으로 실증 확인. **P1**: 팩터 sandbox(`/factors/explain`·`/factors/preview`)가 요청 `missing` 기본값 `DROP`에 고정돼 문서의 `graph.missing_policy`를 무시 — 편집 화면 실행 플랜 패널이 실제 실행과 다른 결측 정책·`plan_hash`를 표시(이 PR이 만든 회귀). **P2 3**: `backtest_run` 의 `LegacyMissingPolicyConflictError` catch가 preflight 뒤라 도달 불가(죽은 코드), `preflight` docstring·`start` 주석이 새 동작과 정반대, WORKFLOW P2-02 미갱신으로 물리 삭제가 어느 PR에도 미할당. **P3 3**: trace만 진단을 문자열로 떨어뜨림, `x-deprecated` 소비자 부재와 해석 시점 순서 미명시, AST 가드가 `missing_policy` 이름 전체를 잡아 `plan.missing_policy`까지 막음. 반영: 요청 `missing`을 `MissingPolicy | None`으로 바꾸고 `None`이면 브리지 `resolve_graph_missing_policy`가 그래프 값으로 해소(+ explain 회귀 테스트 2개, frontend mock을 `body.missing` 기준으로 정정), 죽은 catch 제거 + run 경로 422 shape 테스트, 세 주석 정정, WORKFLOW P2-02 결정 3건·P2-03 물리 삭제 항목 |
 | `P2-02` | `review_lang2_p2_02` | 2 | `APPROVE` | 1차 findings 6건 전부 해소 확인. P1 은 세 각도로 실증 재현 — 문서 값 반영(세 정책이 각자 값과 서로 다른 `plan_hash`), 경로 간 일치(`run_pipeline` 의 plan 과 `explain` 의 plan 이 `missing_policy`·`plan_hash` 모두 동일), 가드 되돌리기(application 에서 `request.graph.missing_policy` 를 읽으면 AST 테스트 실패). 새 findings 3건 + 미해소 1건은 전부 P3 비차단이며 후속 커밋 하나로 반영: trace 의 충돌 진단을 `_resolve_environment_or_reject` 로 통일해 preview·run 과 같은 `portfolio.strategy.invalid` + `validation.issues` 구조로, `/factors/preview` fallback 회귀 테스트(mock 관측에 결측 셀이 없어 이중체 포트로 값 수준 고정 — plan 과 값이 같은 정책을 읽는지), `resolve_graph_missing_policy` domain 단위 테스트를 owner 옆에, 모듈 내부 전용 헬퍼를 `_missing_from_legacy_graphs` 로 개명(WORKFLOW P2-03 삭제 목록도 함께). 리뷰어 권고 1건(`x-deprecated` 해석 시점을 P3-01 acceptance 에 명시)은 P3-01 소관으로 남긴다 |
+| `P2-01`·`P2-02` main 병합 | `review_lang2_p1_06` | 병합 cascade 1 | `APPROVE` | `review_lang2_p2_merge_0102.md`. #172 merge `87de0fec`(P0-01 main 반영판)·#176 merge `3f4dce21`. blocking·P3 0. #193 진행 보고·취소 checkpoint 보존, P2-02 `missing` 이관 의미 불변, own-diff 되돌림 0 |
+| `P2-01`·`P2-02` main 병합 | `review_lang2_p1_06` | 병합 cascade 2 | `APPROVE` | `review_lang2_p2_merge_0102_r2.md`. #172 merge `0913f49b`(main `0cfb4959` = P0·P1 전체)·#176 merge `2ad24f3e`. blocking 0. P1·P2 상호 되돌림 없음, `DEPENDS_ON` 합집합 비순환(돌연변이로 두 원소 필요 확인) |
+| `P2-03` | `review_lang2_p2_03` | 1 | `REQUEST_CHANGES` | P2 2·P3 8. P2 둘 다 `_record_codec.py` 의 은퇴 row 읽기 5줄: 1.1 row 테스트 0건(그 가지를 `raise` 로 바꿔도 초록), 미지 `schema_version` 이 fail-closed 에서 silent 현재 버전 해석으로 바뀜 |
+| `P2-03` | `review_lang2_p2_03` | 2 | `APPROVE` | 돌연변이 재실행 2 failed 확인, P3-07 이탈 타당 |
 | `P2-04` | `review_lang2_p2_04` | 1 | `REQUEST_CHANGES` | P2 3 · P3 5. 기능(look-ahead 없음·수치 정확·`spec_hash` 변화가 새 키 하나로 설명됨)은 맞음. **P2-1**: `weighting: factor_score` × `normalization: zscore` 에서 `abs()` 때문에 최악 종목이 최대 비중, `rank` 최하위 0점이 `1e-12` 바닥값으로 dust target → `strategy.portfolio.weighting_normalization_incompatible` error + 0점 종목 `SCORE_THRESHOLD` 제외. **P2-2**: 정규화 조회 default 가 원시값 → `_signal_value` 엄격 조회·진단 `ValueError`. **P2-3**: 추출한 rank 공식 값이 기존 테스트로 고정 안 됨(돌연변이 통과) → `CrossSectionalOperator.RANK`·`GroupOperator.RANK` 백분위 값 테스트. P3 3건 코드 반영, 2건 문서 기록. 반영 커밋 `28003cf1` |
 | `P2-04` | `review_lang2_p2_0405_r2` | 2 | `REQUEST_CHANGES` | P2 1 · P3 1. 1차 blocking 은 전부 되돌리기 실험으로 닫힘 확인, replay 드리프트 없음. **R2-P204-001(P2)**: 1차 P2-1 이 증상만 막혔다 — `_weight_scores` 의 `abs(composite_score)` 때문에 기본값 `rank` 에서 `direction: low` 는 최선 종목이 빠지고 최악이 최대 비중, `long_short` 공매도 쪽은 가장 강한 숏이 빠진다. 1차 error 의 `allowed=` 가 `rank` 를 대안으로 안내했다 → 원인 수정(결정 5), error 제거. **R2-P204-002(P3)**: 엄격 조회를 되돌려도 초록 → 강제 누락 테스트. 반영 커밋 `2a10798d` |
 | `P2-04` | `review_lang2_p2_0405` | 3 | `REQUEST_CHANGES` | P2 1 · P3 1. 방향 반전(R2)은 원인 수준에서 닫힘 확인, 되돌리기 실험 4건 red. **R3-P204-001(P2)**: 롱 바닥 `min(0, eligible 최저)` 때문에 eligible 최저 종목의 강도가 항상 0 이라 `SCORE_THRESHOLD` 로 빠진다 — eligible 1종목·전원 동점 프레임이 비고, `top_count: 1` + `low` 는 매 프레임 보유 0, 5종목 선정은 4종목 보유, `rank` 에서 `high`/`low` 비대칭. **R3-P204-002(P3)**: "1.1 과 달라지는 곳" 이 실제보다 좁다. 리드가 비중 규칙 요건 7개를 정했고 결정 5 를 그 요건을 만족하는 규칙으로 다시 썼다 |
@@ -896,8 +933,14 @@ Phase exit:
 | `P2-05` | `review_lang2_p2_0405` | 3 | `APPROVE` | P2-04 2차 반영 tip 위 재배치 확인. 코드 커밋 range-diff 는 문맥 줄 두 개만 다르고 `backend/src`·`backend/tests`·`frontend/src` 변경분이 바이트 동일, 기준선 해시 불변. P2-04 R3-P204-001 이 이 PR 의 `top_count: 1` 로 재현돼 재현 테스트 `8587d413` 을 더했다 |
 | `P2-05` | `review_lang2_p2_0405` | 4 | `APPROVE` | src 는 이전 APPROVE본과 바이트 동일, 재현 테스트 `8587d413` 는 균등 대체를 지우면 6건 red 로 판별력 있음. 첫 커밋의 enum 개명 한 줄은 P2-05 가 enum 을 바꾸므로 필요한 변경으로 확인. 해시 불변 |
 | `P2-05` | `review_lang2_p2_0405` | 5 | `APPROVE` | 4차본과 src 바이트 동일, 해시 불변. P2-04 R5 반영(`<=`) 뒤 재배치 |
+| `P2-04` | `review_lang2_p2_0405` | 6 | `APPROVE` | `review_lang2_p2_0405_r6.md`, tip `35089901`. R5-P204-001(P3) 닫힘 — `_margin_strengths` 의 `below` 조건 `<` → `<=` 한 줄. 단조성 퍼즈 20,000회 위반 0 |
+| `P2-05` | `review_lang2_p2_0405` | 6 | `APPROVE` | 같은 파일, tip `803e49c2`. P2-04 R5 반영 위 재배치, 코드 변경분 동일 |
 | `P2-06` | `review_lang2_p2_06` | 1 | `APPROVE` | blocking 0 · P2 1 · P3 4. acceptance 전 항목 충족, 돌연변이 11종 중 10종 red(M6 정규화 모집단 변형은 동치). **P2-1**: `_risk_value` 의 공개일 조건을 지워도 테스트가 전부 초록 — 역가중 팩터가 합성 루프 밖이라 그 한 줄이 유일한 look-ahead 가드다. 반영: 공개일 초과 → `MISSING_RISK`·선정 불변 테스트, 그 조건만 지우면 1건 red 확인(`77bd713c`). **P3**: form-list 삭제 가드 fixture 의 `saved_factor` → `risk.risk_factor_id` 참조, `risk_factor_id` 설명에 적용 조건, `strategy.risk.risk_field` 메시지에 값(`77bd713c`·`7b707660`), PR 본문 e2e 합계에 "9 did not run" |
+| `P2-07` | `review_lang2_p2_07` | 1 | `REQUEST_CHANGES` | P1 1: 그래프 밖 필드 참조(eligibility·유동성·레짐·리스크)가 compile 필드 계약 검사를 빠져나간다. P3 3 |
+| `P2-07` | `review_lang2_p2_07` | 2 | `APPROVE` | 같은 파일 10절, tip `945fd081`(`bf07bc11`·`97193304`·`f8b052cc`). P1 1·P3 3 닫힘, 새 결함 없음 |
 | `P2-08` | `review_lang2_p1_06` | 1 | `REQUEST_CHANGES` | P1 1 · P2 1 · P3 3 · 관찰 1. **DEFECT-P208-001(P1)**: 아이디어 2 에 자본총계 ≤ 0 조건이 없어 자본잠식 적자 기업이 PBR·ROE 두 팩터 모두 최상위(원장 실측 28개) → `financial.book_equity gt 0` 규칙 + mock 자본잠식 종목 재현 테스트(수정 전 red). **DEFECT-P208-002(P2)**: 0/1 이진 팩터 선정이 `security_id` 순서 → 리드 결정으로 BACKLOG-016(P5-03). P3: spec D2 옛 문장 정리, P5-01 슬롯·삽입 순서 예약, 아이디어 4 당일 거래대금 한계 주석. 관찰(assistant DB 격리 누락)은 AI 계획 몫이라 이 PR 밖 |
+| `P2-08` | `review_lang2_p1_06` | 2 | `APPROVE` | `review_lang2_p2_08_r2.md`, tip `d99aa024`. DEFECT-P208-001 red→green (아이디어 2 eligibility). 새 관찰 **P2-NEW-1**: 가격 변화 아이디어 1·3·4·5 가 원주가 `price.close` 를 쓴다 → 이슈 #214 → BACKLOG-017 |
+| `P2-09` | `review_lang2_p2_09` | 1 | `REQUEST_CHANGES` | tip `e064d2af`. P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 빼서 1.1 의 팩터별 결측 처리가 경고 없이 바뀐다. 비차단 관찰 2. 반영 대기. 같은 시점 Phase 2 감사 NB-1 은 `17c68261` 이 고쳤다 |
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
@@ -906,7 +949,7 @@ Phase exit:
 | `P1-04` | cascade tip `e6fb10b0`, 위와 같은 게이트 | pytest 1611 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 704/704 | 2026-09-26 |
 | `P1-05` | cascade tip `45f1c4a3`, 위와 같은 게이트 + `npm run test:e2e`(머신 잠금 아래) | pytest 1695 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 733/733 · e2e 25/25 | 2026-09-26 |
 | `P1-06` | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` | `PLAN.md is consistent: 0/29 merged, 6 approved`(P1-02 5차 APPROVE 반영 뒤. 1차 리뷰 반영 시점에는 P1-02가 `ac3a3d0e` 리뷰 대기라 5) · 충돌 표식 0 | 2026-09-26 |
-
+| `P2-10` | `update-plan-progress.ps1 -Check`, `user_story_trace`, `conflict_markers` | PR 본문 참조 | 2026-09-27 |
 | `P2-09` | push tip 게이트 전체 — PR [#217](https://github.com/Nochiski/Quant_study/pull/217) 본문 "테스트 계획" | 결과·실패 원인 대조는 PR 본문(US-SM-07 은 업그레이드·저장·hash 단언을 모두 지나 원인 (2) 해소, 남은 실패는 원인 (1) 실행 요청 environment 미배선 하나) | 2026-09-27 |
 | `P2-01` | `uv run pytest -q` (backend) | 1480 passed, 13 skipped | 2026-09-20 |
 | `P2-01` | `uv run pytest -q` (backend, 리뷰 반영 후) | 1493 passed, 13 skipped | 2026-09-21 |
@@ -914,6 +957,22 @@ Phase exit:
 | `P2-01` | `uv run pyright` | 4 errors — 전부 `duckdb` 미설치(기존), 신규 파일 0 | 2026-09-20 |
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
+
+- 2026-09-27 — P2-10 구현(`IN_REVIEW`, PR 본문 참조). Phase 2 감사(`e064d2af`, FAIL — BLOCKING 2건 모두 기록)
+  후속. (1) DEFECT-P2X-001: P1-06·P2-01·P2-02 를 main 머지(`0cfb4959`·`2d08157a`·`1fb099f7`)로, P2-03~P2-08
+  을 통합 브랜치 머지(`c72f6257`·`013da821`·`48eff6d8`)로 고치고 새 상태 `INTEGRATED` 를 집계 도구와 상태 값
+  절에 더했다. Review 기록에 빠진 10행을 넣고 표 중간 빈 줄 두 곳을 지웠다. 현재 결정의 묶음 머지 항목에
+  통합 브랜치 실행 방식을 적었다. Phase 1 exit (c)를 체크했다(P1-06 머지). (2) DEFECT-P2X-002: BACKLOG-017
+  (수정주가 전환, #212 링크)을 등록하고 P3-01 에 예약했다. (3) 감사 8절 P3 계약 17행을 acceptance 와 대조해
+  누락 6건을 예약했다 — #3 sandbox `missing`(P3-02), #7 탈락 사유 i18n(P3-01, P4-03 규칙/순위 구분), #11 새
+  진단 코드 화면 매핑(P3-01), #13 승격 노드 표식(P3-01, backend wire 표식으로 결정), #15 은퇴 버전 문구 6키
+  (P3-02), #16 run 상세 `environment` 표시(P3-02). NB-7(P3-01 착수 전 main cascade)도 P3-01 에 적었다.
+  남은 감사 비차단: NB-2(a) eligibility 절대/횡단면 갈림 SoT 행, NB-2(b) `run_environment.*` 진단 코드
+  네임스페이스 SoT 행, NB-3 spec D6·D7 구현 결과 단락, NB-4 매니페스트 평면 비용 필드 유지 여부·지문 표기
+  버전 PR ID, NB-6 단위 규칙 SoT 문장 — 담당 미정(리드). NB-2(c)는 P2-09 `17c68261` 이 테스트로 닫았다.
+- 2026-09-27 — P2-09 Phase 2 감사 NB-1 반영(`17c68261`). 업그레이드 체인은 문서가 선언한 은퇴 버전에서만
+  시작한다. 현재 판 문서의 1.0 모양은 제자리에서 고칠 구조 오류이고, frontend 배너가 이 경우에 뜨지 않는다
+  (US-DM-06 수용 기준 개정). 자세한 것은 P2-09 결정 3.
 
 - 2026-09-27 — P2-09 구현(`IN_REVIEW`, [#217](https://github.com/Nochiski/Quant_study/pull/217)). 업그레이더를 버전 디스패치로 다시 쓰고 1.1 → 1.2
   단계(`data`·`execution`·`graph.missing_policy` 떼기, `signal.normalization: none` 명시, `saved_*` 거절)를
@@ -1610,6 +1669,28 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **해결 후보**: (a) 보조 팩터로 동점을 해소한다(예: 이평 괴리율 같은 연속 점수를 2순위 키로). (b) 동점
   종목 전원을 균등 비중으로 담는다(`selection_count` 를 넘으면 규칙 필요).
 - **담당**: `P5-03`(아이디어 e2e 를 확정할 때 해결 방식을 정한다). WORKFLOW P5-03 에 예약했다.
+
+### BACKLOG-017: 가격 변화 아이디어 fixture 가 원주가 `price.close` 를 쓴다 (Phase 2 감사 DEFECT-P2X-002, 이슈 #214)
+
+- **상황**: P2-08 2차 리뷰가 찾은 관찰 P2-NEW-1 이다. 리드가 이슈 #214 로 올려 결정했다 — 가격 변화를 재는
+  계산(수익률·모멘텀·이평·변동성·돌파)은 수정주가 `price.adj_close` 를 쓰고, `price.close` 는 절대 가격이
+  필요한 곳에 남긴다. main 쪽 레지스트리·mock 은 PR #218 이 옮겼다(main 머지 `28d13b69`, 2026-09-27). #214
+  결정문은 "lang2 아이디어 fixture 는 통합 브랜치에서 따라간다(P5-03 hash 전에)"라고 넘겼고, #218 본문도
+  그 일을 범위 밖으로 적었다. lang2 쪽 담당이 없었다.
+- **인풋**: `backend/tests/fixtures/strategy_documents/ideas/` 의 `momentum_12_1`·`ma20_breakout`·
+  `top_trading_value`·`inverse_volatility` 를 실데이터(duckdb 어댑터)로 미리보기·백테스트한다.
+- **에러 위치**: 위 네 fixture 의 가격 잎 `field_id: price.close`(`grep -n field_id ideas/*.yaml`), 어댑터 필드
+  계약 대조 `backend/tests/integration/test_idea_fixtures.py`.
+- **위험성**: silent wrong result. 원장 실측으로 2020~2022년 가격계수가 5% 넘게 바뀐 사건이 380건이다. 50:1
+  병합 종목은 12-1 모멘텀이 +4900% 로 1위가 되고, 무상증자·분할은 가짜 급락·가짜 변동성·이평 돌파 소거를
+  만든다. 아이디어 5개는 initiative 완료 정의의 측정 대상이라 P5-01(빌더 산출물 = fixture node_id)·
+  P5-03(e2e 산출물 hash)이 원주가 형태로 굳으면 대표 전략이 경고 없이 틀린 결과로 닫힌다.
+- **관련**: 아이디어 2(저PBR + 고ROE)의 `financial.net_income` 은 분기 3개월·연간 12개월 값이 섞인다(이슈 #212,
+  main 담당, OPEN). 이 BACKLOG 는 fixture 주석에 #212 링크만 단다. mock·duckdb 필드 계약 불일치 #207 도 main
+  담당이다(Phase 2 감사 NB-5).
+- **선행 조건**: #218 이 main 에 머지됐다(완료). 통합 브랜치가 main 을 따라가야 한다(WORKFLOW P3-01 착수 전
+  cascade).
+- **담당**: `P3-01`. WORKFLOW P3-01 acceptance 에 같은 번호로 예약했다. 늦어도 P5-01 착수 전이다.
 
 ## 갱신 절차
 

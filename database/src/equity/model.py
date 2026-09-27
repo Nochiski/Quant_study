@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.16.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.17.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -148,6 +148,11 @@ RULES_VERSION = "e1.16.0"                # BuildRecord.rules_version 에 실린�
 #            스코프로 선언(DEFECT-E02) → `dataset_profile` 79 → 83행.
 #         산출 자체가 안 바뀌는 항목(카탈로그·계약 자원 제한 C04 · rebase 승인 기록 C08 ·
 #         롤백 C03 · 빌드 순서 파일 C09)도 같은 판에 들어간다.
+# e1.17.0: 2026-09-27 재무 흐름 필드 TTM(#212·#227). `factor_readiness`(S20)의 evidence·caveat
+#         문구가 바뀐다 — V02·V04·G01·G02·G04 는 TTM 기간, Q04·Q05·V05·Q07 은 TTM 과 원 계정의
+#         기간 차이를 적는다. 같은 입력에서 산출 해시가 달라지므로 EG5a 비교 판을 올린다.
+#         카탈로그 매크로 `v_fin_latest`(TTM 분기값을 회계기간 축에서 세운다)는 빌드 산출이 아니라
+#         `catalog` 재생성으로 반영된다.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

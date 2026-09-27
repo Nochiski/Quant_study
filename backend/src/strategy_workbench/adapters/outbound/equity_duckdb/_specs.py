@@ -430,8 +430,8 @@ _FIN_TTM_NOTE = (
     "**이 행의 공시일까지 전부 알 수 있었을 때만** 선다(4분기·현금흐름 분기값이 기대는 창 밖 "
     "보고서의 접수일까지 본다). 하나라도 비거나(분기 누락·직전 분기 미수집) 늦게 접수됐거나, 창 "
     "안에 연결·별도가 섞였거나 매출 기준(revenue_basis)이 섞였으면 값은 결측(MISSING)이고 3개월·"
-    "연간 값으로 대신하지 않는다(부분합 금지). available_date 는 창의 마지막 분기 보고서 접수일이고, "
-    "사업보고서 행의 TTM 은 연간 값과 같다"
+    "연간 값으로 대신하지 않는다(부분합 금지). available_date 는 창의 마지막 분기 보고서 "
+    "접수일이고, 사업보고서 행의 TTM 은 연간 값과 같다"
 )
 _FIN_EVIDENCE = (
     "equity.duckdb v_fin_latest(as_of) ← fin_std(vintage_kind='api_restated', CFS 우선 "
@@ -631,8 +631,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         description=(
             f"{_FIN_TTM_NOTE}. 원장 현금흐름은 보고서 종류와 무관하게 연초누계라(DEFECT-C02) 1분기 "
             "3개월 · 반기 6개월 · 3분기 9개월 · 사업보고서 12개월이 섞였다. TTM 의 분기값"
-            "(자기 누계 − 바로 앞 분기 보고서 누계, 1분기는 누계 그대로)은 직전 보고서가 없으면 NULL 이라 "
-            "손익 TTM 보다 결측이 많을 수 있다. 연초누계 원값은 이 필드로 나가지 않는다."
+            "(자기 누계 − 바로 앞 분기 보고서 누계, 1분기는 누계 그대로)은 직전 보고서가 없으면 "
+            "NULL 이라 손익 TTM 보다 결측이 많을 수 있다. 연초누계 원값은 이 필드로 나가지 않는다."
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,

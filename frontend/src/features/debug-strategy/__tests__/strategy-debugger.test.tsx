@@ -392,6 +392,10 @@ describe("StrategyDebugger", () => {
     });
     expect(screen.getByText("3.50%")).toBeInTheDocument();
     expect(screen.getByText("missing_factor")).toBeInTheDocument();
+    // 사유는 사람 말이 먼저고 코드는 보조 표기다(P3-01).
+    expect(screen.getByText("missing_factor").parentElement).toHaveTextContent(
+      "팩터 값 없음 missing_factor",
+    );
     expect(screen.getAllByText("1 원시 데이터")).toHaveLength(2);
     expect(screen.getAllByText("7 위험 제약 후")).toHaveLength(2);
     expect(screen.queryByText("8 주문 차이 추정")).not.toBeInTheDocument();

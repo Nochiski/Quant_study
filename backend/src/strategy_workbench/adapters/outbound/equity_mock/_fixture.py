@@ -28,6 +28,11 @@ class MockSplit:
 MOCK_SPLIT = MockSplit(security_index=0, effective=date(2018, 5, 4), ratio=50.0)
 
 
+# 원주가 필드 → 시점 간 변화를 잴 때 쓸 조정 짝(필드 계약 `FieldMetadata.adjusted_field_id`,
+# BACKLOG-018). mock 의 원주가 필드 중 조정 짝이 있는 것은 종가 하나다.
+ADJUSTED_FIELD_BY_RAW: dict[str, str] = {"price.close": "price.adj_close"}
+
+
 def adjusted_close(raw_close: float, *, security_index: int, session: date) -> float:
     """원주가 → 전방 조정 수정주가. 그 날까지 적용된 사건 계수만 곱하므로 PIT다."""
     if security_index == MOCK_SPLIT.security_index and session >= MOCK_SPLIT.effective:

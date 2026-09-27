@@ -124,7 +124,7 @@ const renderEditor = (
         tree: treeOf(source),
         schema: SCHEMA,
         transactions,
-        catalogs: { equityFields: null, factors: null },
+        catalogs: { equityFields: null },
         operators,
         onOpenForm,
       }}
@@ -459,7 +459,7 @@ describe("연산자 팔레트와 조용하지 않은 실패 (P1-04)", () => {
           tree: treeOf(RECURSIVE_SOURCE),
           schema: RECURSIVE_SCHEMA,
           transactions,
-          catalogs: { equityFields: null, factors: null },
+          catalogs: { equityFields: null },
           operators: { status: "ready", definitions: [] },
         }}
       />,
@@ -497,7 +497,7 @@ describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () =>
           tree: treeOf(VERBOSE),
           schema: SCHEMA,
           transactions: stub(),
-          catalogs: { equityFields: null, factors: null },
+          catalogs: { equityFields: null },
           operators: CATALOG,
         }}
       />,

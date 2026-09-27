@@ -49,6 +49,7 @@ const plans = (): ExecutionPlansState => ({
         graph: FACTOR.graph,
         parameter_ids: [],
       },
+      document: null,
       explanation: {
         registry_version: "registry-v1",
         data_snapshot_id: "snapshot-v1",
@@ -90,6 +91,7 @@ const plans = (): ExecutionPlansState => ({
           as_of_policy: "available_date_lte_as_of",
         },
         narrative: [],
+        synthesized_nodes: [],
       },
     },
   ],
@@ -155,6 +157,73 @@ describe("Strategy IDE debugger composition", () => {
       revision: 5,
       expected_spec_hash: "spec-hash",
     });
+  });
+
+  it("traces only the authored nodes when compile appended boolean promotion nodes (BACKLOG-014)", () => {
+    // compile 이 그래프 끝에 붙인 승격 노드는 문서에 줄이 없다. 디버거는 사용자가 적은 노드만 싣고,
+    // 출력 노드는 사용자가 적은 출력이다(붙인 조건 노드가 아니다).
+    const promoted = plans();
+    if (promoted.status !== "ready") throw new Error("test setup");
+    const factor = promoted.factors[0]!;
+    factor.request = {
+      ...factor.request,
+      graph: {
+        nodes: [
+          ...factor.request.graph.nodes,
+          { kind: "constant", node_id: "__promote_momentum_one", value: 1 },
+          { kind: "constant", node_id: "__promote_momentum_zero", value: 0 },
+          {
+            kind: "conditional",
+            node_id: "__promote_momentum",
+            predicate_node_id: "mom_252",
+            true_node_id: "__promote_momentum_one",
+            false_node_id: "__promote_momentum_zero",
+          },
+        ],
+        output_node_id: "__promote_momentum",
+      },
+    };
+    factor.document = {
+      nodeIds: factor.request.graph.nodes.slice(0, 2).map((node) => node.node_id),
+    };
+    // backend 가 실행 계획 설명에 싣는 붙인 노드 표식(Phase 2 감사 #13).
+    factor.explanation.synthesized_nodes = [
+      { node_id: "__promote_momentum_one", origin: "promotion", role: "promotion_constant" },
+      { node_id: "__promote_momentum_zero", origin: "promotion", role: "promotion_constant" },
+      { node_id: "__promote_momentum", origin: "promotion", role: "promoted_output" },
+    ];
+    const steps = factor.explanation.plan!.steps;
+    factor.explanation.plan!.steps = [
+      ...steps,
+      ...["__promote_momentum_one", "__promote_momentum_zero"].map(
+        (nodeId, index) => ({
+          ...steps[0]!,
+          sequence: steps.length + index + 1,
+          node_id: nodeId,
+          operation: "constant",
+        }),
+      ),
+      {
+        ...steps[1]!,
+        sequence: steps.length + 3,
+        node_id: "__promote_momentum",
+        operation: "conditional",
+        input_node_ids: [
+          "mom_252",
+          "__promote_momentum_one",
+          "__promote_momentum_zero",
+        ],
+      },
+    ];
+
+    const traced =
+      buildStrategyDebuggerAvailability(documentState(), promoted).context
+        ?.factors[0];
+    expect(traced?.outputNodeId).toBe("mom_252");
+    expect(traced?.nodes.map((node) => [node.nodeId, node.pointer])).toEqual([
+      ["close", "/factors/0/graph/nodes/0"],
+      ["mom_252", "/factors/0/graph/nodes/1"],
+    ]);
   });
 
   it("fails closed for a stale document or an unpinned execution plan", () => {

@@ -37,6 +37,7 @@ from strategy_workbench.domain.factor.facade.operators import (
     UnitRule,
     operator_definitions,
     operator_description_keys,
+    operator_reads_past_sessions,
 )
 from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
 
@@ -253,6 +254,35 @@ def test_declared_rules_match_the_inferred_contract(
 def test_arity_matches_the_node_input_count() -> None:
     for (kind, operator), definition in OPERATOR_DEFINITIONS.items():
         assert definition.arity == len(_node_inputs(kind)), f"{kind}.{operator}"
+
+
+@pytest.mark.parametrize(
+    "definition",
+    operator_definitions(),
+    ids=lambda item: f"{item.kind}.{item.operator}",
+)
+def test_reads_past_sessions_matches_the_inferred_history(definition: OperatorDefinition) -> None:
+    """`reads_past_sessions` 는 실제 추론과 같다: 입력보다 긴 이력을 요구하면 과거 세션을 읽는다.
+
+    compile 의 원주가 warning(BACKLOG-018)이 이 성질을 읽는다. 손으로 적은 표시값이 추론과
+    갈라지면 과거 세션을 읽는 새 연산자가 경고 없이 원주가를 받는다.
+    """
+    shapes = tuple("series" for _ in range(definition.arity))
+    validation = validate_factor_graph(
+        _sample_graph(definition, cast(tuple[Shape, ...], shapes)),
+        fields=(_PRICE, _RATIO, _SECTOR),
+    )
+    contracts = {contract.node_id: contract for contract in validation.node_contracts}
+    source_history = max(
+        contracts[f"source_{index}"].minimum_history_sessions for index in range(definition.arity)
+    )
+
+    assert definition.reads_past_sessions is (
+        contracts["subject"].minimum_history_sessions > source_history
+    )
+    assert operator_reads_past_sessions(definition.kind, definition.operator) is (
+        definition.reads_past_sessions
+    )
 
 
 # -- BACKLOG-003: 횡단면 표준화는 단위를 지운다 ----------------------------------------------------

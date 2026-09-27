@@ -98,6 +98,10 @@ class OperatorDefinition:
     description_key: str  # i18n 키 stem — `<stem>`은 이름, `<stem>.description`은 한 줄 설명
     formula_key: str  # `<stem>.formula`
     example: str  # YAML flow 표기 한 줄
+    # 출력이 입력의 과거 세션 값을 읽는다(창 통계·기간 변화·지연). 입력 수준이 사건일에 끊기는
+    # 원주가면 가짜 수익률·변동성·이평 돌파가 생긴다 — compile 의 `strategy.field.unadjusted_price`
+    # warning 이 이 성질을 읽는다(BACKLOG-018). 같은 날 값만 쓰는 연산자는 False 다.
+    reads_past_sessions: bool
 
 
 def _node_input_count(node_type: type) -> int:
@@ -142,6 +146,7 @@ def _definition(
     output_type_rule: OutputTypeRule,
     unit_rule: UnitRule,
     example: str,
+    reads_past_sessions: bool = False,
 ) -> OperatorDefinition:
     kind = _kind_of(node_type)
     stem = f"strategy.operator.{kind}.{operator.value}"
@@ -157,6 +162,7 @@ def _definition(
         description_key=stem,
         formula_key=f"{stem}.formula",
         example=example,
+        reads_past_sessions=reads_past_sessions,
     )
 
 
@@ -172,6 +178,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
         UnaryNode,
         UnaryOperator.LAG,
         params=("periods",),
+        reads_past_sessions=True,
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
         unit_rule=UnitRule.SAME_AS_INPUT,
         example=(
@@ -222,6 +229,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
     _definition(
         TimeSeriesNode,
         TimeSeriesOperator.MEAN,
+        reads_past_sessions=True,
         params=("window", "lag"),
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
         unit_rule=UnitRule.SAME_AS_INPUT,
@@ -233,6 +241,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
     _definition(
         TimeSeriesNode,
         TimeSeriesOperator.STANDARD_DEVIATION,
+        reads_past_sessions=True,
         params=("window", "lag"),
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
         unit_rule=UnitRule.SAME_AS_INPUT,
@@ -244,6 +253,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
     _definition(
         TimeSeriesNode,
         TimeSeriesOperator.MOMENTUM,
+        reads_past_sessions=True,
         params=("window", "lag"),
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
         unit_rule=UnitRule.SAME_AS_INPUT,
@@ -255,6 +265,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
     _definition(
         TimeSeriesNode,
         TimeSeriesOperator.DELTA,
+        reads_past_sessions=True,
         params=("window", "lag"),
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
         unit_rule=UnitRule.SAME_AS_INPUT,
@@ -266,6 +277,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
     _definition(
         TimeSeriesNode,
         TimeSeriesOperator.MINIMUM,
+        reads_past_sessions=True,
         params=("window", "lag"),
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
         unit_rule=UnitRule.SAME_AS_INPUT,
@@ -277,6 +289,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
     _definition(
         TimeSeriesNode,
         TimeSeriesOperator.MAXIMUM,
+        reads_past_sessions=True,
         params=("window", "lag"),
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
         unit_rule=UnitRule.SAME_AS_INPUT,
@@ -421,6 +434,18 @@ def operator_definitions(
         )
         for definition in _DEFINITIONS
     )
+
+
+_READS_PAST_SESSIONS: frozenset[tuple[str, str]] = frozenset(
+    (definition.kind, definition.operator)
+    for definition in _DEFINITIONS
+    if definition.reads_past_sessions
+)
+
+
+def operator_reads_past_sessions(kind: str, operator: str | None) -> bool:
+    """`(kind, operator)` 연산자가 입력의 과거 세션 값을 읽는가. operator 가 없는 kind 는 False."""
+    return operator is not None and (kind, operator) in _READS_PAST_SESSIONS
 
 
 _KEYS_BY_ENUM: Mapping[type, Mapping[str, str]] = MappingProxyType(

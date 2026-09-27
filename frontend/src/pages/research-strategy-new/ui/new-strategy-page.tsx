@@ -383,7 +383,6 @@ export const NewStrategyPage = () => {
               catalogs={{
                 equityFields:
                   assist.inspectorSource.equityCatalog?.fields ?? null,
-                factors: assist.inspectorSource.factorCatalog?.factors ?? null,
               }}
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
@@ -404,8 +403,6 @@ export const NewStrategyPage = () => {
                 catalogs: {
                   equityFields:
                     assist.inspectorSource.equityCatalog?.fields ?? null,
-                  factors:
-                    assist.inspectorSource.factorCatalog?.factors ?? null,
                 },
                 operators: assist.operators,
                 onOpenForm: openForm,

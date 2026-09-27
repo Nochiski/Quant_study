@@ -1039,11 +1039,11 @@ test.describe("professional YAML workflow", () => {
     expect(formSaved.spec_hash).toBe(yamlSaved.spec_hash);
     expect(formSaved.source_hash).toBe(yamlSaved.source_hash);
 
-    // 카탈로그에서 팩터 추가 → source에 항목이 생기고 검증을 통과하며 Graph 화면에 새 팩터가 보인다.
+    // 예시 팩터 추가 → source에 항목이 생기고 검증을 통과하며 Graph 화면에 새 팩터가 보인다.
     await page.getByRole("tab", { name: "Form", exact: true }).click();
     const factors = form.getByRole("group", { name: /\bfactors\b/ });
     const catalog = factors.getByRole("combobox", {
-      name: "factors · 카탈로그에서 추가",
+      name: "factors · 예시 팩터에서 추가",
     });
     const options = catalog.locator("option:not([disabled])");
     await expect.poll(async () => options.count()).toBeGreaterThan(1);

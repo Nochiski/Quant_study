@@ -18,6 +18,7 @@ from strategy_workbench.domain.factor.facade.validation import (
     required_field_ids,
     validate_factor_graph,
 )
+from strategy_workbench.domain.strategy.facade.promotion import synthesized_factor_nodes
 
 from ._catalog import FactorCatalog, FactorCatalogQuery, build_factor_catalog
 from ._models import (
@@ -105,6 +106,7 @@ class FactorResearchService:
                 validation=validation,
                 plan=None,
                 narrative=("Resolve validation errors before compiling the PIT plan.",),
+                synthesized_nodes=synthesized_factor_nodes(request.graph),
             )
         plan = compile_factor_plan(
             request.graph,
@@ -125,6 +127,7 @@ class FactorResearchService:
                 f"Require {plan.minimum_history_sessions} session(s) of warm-up history.",
                 f"Cache by snapshot, plan, parameters, and as-of range: {plan.plan_hash[:12]}.",
             ),
+            synthesized_nodes=synthesized_factor_nodes(request.graph),
         )
 
     def preview(self, request: FactorPreviewRequest) -> FactorPreview:

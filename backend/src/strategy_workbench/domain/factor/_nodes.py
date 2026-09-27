@@ -99,6 +99,10 @@ class FieldMetadata:
     unit: str
     value_type: NodeValueType = NodeValueType.NUMERIC_SERIES
     available_history_sessions: int | None = None
+    # 이 필드가 분할·증자·병합에 조정하지 않은 원주가 시계열이면, 시점 간 변화를 잴 때 대신 쓸 조정
+    # 필드 id(`price.close` → `price.adj_close`, 이슈 #214). 사실의 owner 는 어댑터 필드 계약이다.
+    # 원주가가 아니거나 조정 짝이 없으면 None 이다(BACKLOG-018).
+    adjusted_field_id: str | None = None
 
 
 @dataclass(frozen=True)

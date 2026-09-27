@@ -11,7 +11,6 @@ import {
 
 import type {
   DatasetFieldProfile,
-  FactorDefinition,
 } from "../../../shared/api";
 import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
@@ -52,7 +51,6 @@ import "./strategy-form-panel.css";
 
 export type FormCatalogs = {
   equityFields: readonly DatasetFieldProfile[] | null;
-  factors: readonly FactorDefinition[] | null;
 };
 
 type StrategyFormPanelProps = {
@@ -64,7 +62,7 @@ type StrategyFormPanelProps = {
   schema?: JsonSchema | null;
   /** 현재 parse tree(삭제 가드의 참조 탐색용). 없으면 참조 없음으로 본다. */
   tree?: unknown;
-  /** 팩터 카탈로그 preset(스니펫 카탈로그의 factor 항목) — "카탈로그에서 추가" 메뉴. */
+  /** 팩터 카탈로그 preset(스니펫 카탈로그의 예시 항목) — "예시 팩터에서 추가" 메뉴(튜토리얼 전용). */
   catalogSnippets?: readonly CanonicalSnippet[];
   /** 팩터 항목의 graph를 Graph 화면에서 열기(view=graph, pointer 선택). 없으면 버튼을 그리지 않는다. */
   onOpenGraph?: (pointer: string) => void;
@@ -421,7 +419,7 @@ const FormListSectionView = ({
           </Button>
           {presets.length > 0 ? (
             <select
-              aria-label={`${section.key} · ${t("form.list.addFromCatalog")}`}
+              aria-label={`${section.key} · ${t("form.list.addExample")}`}
               value=""
               disabled={settling}
               onChange={(event) => {
@@ -437,7 +435,7 @@ const FormListSectionView = ({
                   );
               }}
             >
-              <option value="">{t("form.list.addFromCatalog")}</option>
+              <option value="">{t("form.list.addExample")}</option>
               {presets.map((snippet) => (
                 <option
                   key={snippet.id}
@@ -805,16 +803,17 @@ const FormFieldRow = ({
   };
   // 라벨은 이름을 보이고 스키마 키는 보조 `<code>`다(P1-03). 설명은 `<stem>.description`.
   const name = tName(field.descriptionKey);
-  // 연산자 필드는 고른 연산자의 설명·계산식을 보인다: "이 노드가 수행할 연산"보다 화면에서
-  // 답이 되는 문장이 "최근 지정 기간의 평균"이다(연산자 카탈로그의 `x-operator` 키).
-  const operatorKey =
+  // enum 필드는 고른 값의 설명·계산식이 있으면 그것을 보인다: "이 노드가 수행할 연산"보다 화면에서
+  // 답이 되는 문장이 "최근 지정 기간의 평균"이다(연산자는 카탈로그의 `x-operator` 키, 나머지 enum은
+  // `<stem>.value.<값>` 키 — 값 설명이 없으면 필드 설명으로 떨어진다).
+  const valueKey =
     field.control.kind === "enum" && typeof field.value === "string"
       ? (field.control.labelKeys?.[field.value] ?? null)
       : null;
   const description =
-    tDescription(operatorKey) ?? tDescription(field.descriptionKey);
+    tDescription(valueKey) ?? tDescription(field.descriptionKey);
   const formula =
-    operatorKey === null ? null : tOptional(`${operatorKey}.formula`);
+    valueKey === null ? null : tOptional(`${valueKey}.formula`);
   // 컨트롤이 자기 오류 본문을 가리킨다: 배지 개수만으로는 무엇이 잘못됐는지 알 수 없다(P1-04).
   const describedBy = [
     invalid === null ? null : invalidId,
@@ -1011,7 +1010,7 @@ const FieldControl = (props: ControlProps) => {
       control.kind === "enum"
         ? control.values.map((value) => ({
             value,
-            // 연산자 값은 카탈로그가 발행한 이름으로 보인다. 이름이 없으면 값 그대로.
+            // 값은 이름 키(연산자는 카탈로그, 나머지는 `<stem>.value.<값>`)로 보인다. 없으면 값 그대로.
             label: tName(control.labelKeys?.[value]) ?? value,
           }))
         : control.kind === "reference"
@@ -1060,20 +1059,15 @@ const FieldControl = (props: ControlProps) => {
   return <TextualControl {...props} />;
 };
 
-/** 카탈로그 select 항목. 목록이 없는 카탈로그(universe·subgraph)는 null → 텍스트 입력. */
+/** 카탈로그 select 항목. 목록이 없는 카탈로그(universe)는 null → 텍스트 입력. */
 const catalogOptions = (
-  catalog: "equity-field" | "universe" | "factor" | "subgraph",
+  catalog: Extract<FormControl, { kind: "catalog" }>["catalog"],
   catalogs: FormCatalogs,
 ): { value: string; label: string }[] | null => {
   if (catalog === "equity-field" && catalogs.equityFields !== null)
     return catalogs.equityFields.map((profile) => ({
       value: profile.field_id,
       label: `${profile.field_id} · ${profile.label}`,
-    }));
-  if (catalog === "factor" && catalogs.factors !== null)
-    return catalogs.factors.map((factor) => ({
-      value: factor.factor_id,
-      label: `${factor.factor_id} · ${factor.label}`,
     }));
   return null;
 };

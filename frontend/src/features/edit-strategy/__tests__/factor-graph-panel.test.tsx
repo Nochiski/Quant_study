@@ -52,6 +52,7 @@ const explanation = (): FactorExplanation => ({
   registry_version: "factor-registry-v7",
   data_snapshot_id: "krx-pit-2026-09-01",
   narrative: [],
+  synthesized_nodes: [],
   validation: {
     valid: true,
     issues: [
@@ -145,6 +146,7 @@ const plannedFactor = (
     graph: graphValue,
     parameter_ids: [],
   },
+  document: null,
   explanation: graphExplanation,
 });
 
@@ -359,7 +361,7 @@ describe("FactorGraphPanel", () => {
       tree: { factors: [{ factor_id: "f", direction: "high", graph }] },
       schema,
       transactions,
-      catalogs: { equityFields: null, factors: null },
+      catalogs: { equityFields: null },
     };
     const view = (state: ExecutionPlansState, documentKey = 1) => (
       <FactorGraphPanel

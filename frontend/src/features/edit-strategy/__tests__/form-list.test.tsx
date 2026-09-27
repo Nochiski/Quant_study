@@ -306,7 +306,7 @@ describe("StrategyFormPanel list sections", () => {
             : {}
         }
         transactions={transactions}
-        catalogs={{ equityFields: null, factors: [FACTOR] }}
+        catalogs={{ equityFields: null }}
         catalogSnippets={buildCanonicalSnippetCatalog({
           schema: SCHEMA,
           factors: [FACTOR],
@@ -336,7 +336,7 @@ describe("StrategyFormPanel list sections", () => {
         projection={projectForm(SCHEMA, state.parse, [])}
         schema={null}
         transactions={stub()}
-        catalogs={{ equityFields: null, factors: null }}
+        catalogs={{ equityFields: null }}
       />,
     );
     const noSchema = within(
@@ -354,7 +354,7 @@ describe("StrategyFormPanel list sections", () => {
     const onOpenGraph = renderList(VERBOSE, transactions);
     const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.selectOptions(
-      factors.getByRole("combobox", { name: "factors · 카탈로그에서 추가" }),
+      factors.getByRole("combobox", { name: "factors · 예시 팩터에서 추가" }),
       "factor:server.momentum",
     );
     expect(transactions.apply).toHaveBeenLastCalledWith(
@@ -536,7 +536,7 @@ describe("StrategyFormPanel list sections", () => {
         schema={SCHEMA}
         tree={state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {}}
         transactions={stub()}
-        catalogs={{ equityFields: null, factors: [FACTOR] }}
+        catalogs={{ equityFields: null }}
         selectedPointer="/factors/0"
       />,
     );
@@ -595,7 +595,7 @@ describe("StrategyFormPanel list sections", () => {
               : {}
           }
           transactions={stub()}
-          catalogs={{ equityFields: null, factors: [FACTOR] }}
+          catalogs={{ equityFields: null }}
         />
       );
     };

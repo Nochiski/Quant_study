@@ -1,5 +1,26 @@
-import type { StrategyDocument } from "../../../shared/api";
+import type { StrategyDocument, UpgradedDocument } from "../../../shared/api";
+import { t, type MessageKey } from "../../../shared/config";
 import type { DocumentState } from "./document-state";
+
+/** 업그레이드 응답 warning 코드(OpenAPI enum, P2-09). 생성 타입에서 파생한다(복제 아님). */
+export type UpgradeWarningCode = UpgradedDocument["warnings"][number]["code"];
+
+/**
+ * warning 코드별 제목(P3-01). 문장은 backend `message`가 한글로 완성해 보내므로 여기는 코드가 무엇을
+ * 뜻하는지 한 줄 제목만 둔다. `Record`라 생성 enum 에 코드가 늘면 typecheck 가 번역 누락을 막는다.
+ * 배너에 그리는 것은 P3-02 다(WORKFLOW P3-02 "P2-09 가 남긴 배너 소비 항목").
+ */
+const UPGRADE_WARNING_TITLES: Record<UpgradeWarningCode, MessageKey> = {
+  "strategy_document.upgrade_missing_policy_conflict":
+    "upgrade.warning.strategy_document.upgrade_missing_policy_conflict",
+  "strategy_document.upgrade_weighting_rule_changed":
+    "upgrade.warning.strategy_document.upgrade_weighting_rule_changed",
+  "strategy_document.upgrade_environment_unavailable":
+    "upgrade.warning.strategy_document.upgrade_environment_unavailable",
+};
+
+export const upgradeWarningTitle = (code: UpgradeWarningCode): string =>
+  t(UPGRADE_WARNING_TITLES[code]);
 
 /**
  * 업그레이드를 제안해야 하는 backend 구조 진단 코드.

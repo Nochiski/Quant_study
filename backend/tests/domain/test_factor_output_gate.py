@@ -31,9 +31,15 @@ from strategy_workbench.domain.strategy.facade.document import (
     PROMOTION_NODE_PREFIX,
     hydrate_strategy_document,
 )
+from strategy_workbench.domain.strategy.facade.promotion import (
+    SynthesizedNode,
+    SynthesizedNodeRole,
+    synthesized_factor_nodes,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     ConditionalNode,
     ConstantNode,
+    FactorGraph,
     FieldMetadata,
     NodeValueType,
     StrategyIdentity,
@@ -205,6 +211,65 @@ def test_a_taken_promotion_id_skips_promotion_and_the_gate_explains_why() -> Non
     assert len(messages) == 1
     assert "__promote_breakout" in messages[0]
     assert "boolean_series" in messages[0]
+
+
+# -- 붙인 노드 표식(P3-01, Phase 2 감사 #13) ----------------------------------------------------
+
+
+def test_promoted_graph_marks_the_three_synthesized_nodes_in_graph_order() -> None:
+    graph = _hydrate(_document(_BREAKOUT_NODES, "breakout")).factors[0].graph
+
+    assert synthesized_factor_nodes(graph) == (
+        SynthesizedNode(
+            "__promote_breakout_one", "promotion", SynthesizedNodeRole.PROMOTION_CONSTANT
+        ),
+        SynthesizedNode(
+            "__promote_breakout_zero", "promotion", SynthesizedNodeRole.PROMOTION_CONSTANT
+        ),
+        SynthesizedNode("__promote_breakout", "promotion", SynthesizedNodeRole.PROMOTED_OUTPUT),
+    )
+    assert tuple(node.node_id for node in graph.nodes[-3:]) == tuple(
+        node.node_id for node in synthesized_factor_nodes(graph)
+    )
+
+
+def test_user_graphs_have_no_synthesized_nodes() -> None:
+    numeric = _hydrate(_document(_BREAKOUT_NODES[:2], "ma20", factor_id="ma")).factors[0].graph
+    taken = (
+        _hydrate(
+            _document(
+                [
+                    *_BREAKOUT_NODES,
+                    {"kind": "constant", "node_id": "__promote_breakout", "value": 1.0},
+                ],
+                "breakout",
+            )
+        )
+        .factors[0]
+        .graph
+    )
+
+    assert synthesized_factor_nodes(numeric) == ()
+    assert synthesized_factor_nodes(taken) == ()
+
+
+def test_a_hand_written_lookalike_is_not_marked_as_synthesized() -> None:
+    """이름만 승격 노드처럼 쓴 그래프는 표식을 받지 않는다: 다시 승격해 같아야만 인정한다."""
+    promoted = _hydrate(_document(_BREAKOUT_NODES, "breakout")).factors[0].graph
+    *authored, one, zero, condition = promoted.nodes
+    assert isinstance(one, ConstantNode)
+    # 참 상수 값을 바꾸면 승격의 역함수가 아니다(0/1 이 아닌 점수).
+    lookalike = FactorGraph(
+        nodes=(
+            *authored,
+            ConstantNode(node_id=one.node_id, value=2.0, kind="constant"),
+            zero,
+            condition,
+        ),
+        output_node_id=promoted.output_node_id,
+    )
+
+    assert synthesized_factor_nodes(lookalike) == ()
 
 
 # -- scalar·group 출력 -----------------------------------------------------------------------------

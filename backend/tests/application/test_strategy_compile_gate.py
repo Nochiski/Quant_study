@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -129,6 +130,14 @@ def _compile(source: str, catalog: FieldCatalogPort | None) -> CompiledDocument:
     return _service(catalog).compile(CompileRequest(source, SourceFormat.YAML))
 
 
+def _unadjusted(compiled: CompiledDocument) -> list[tuple[str, str | None]]:
+    return [
+        (diagnostic.pointer, diagnostic.node_id)
+        for diagnostic in compiled.diagnostics
+        if diagnostic.code == "strategy.field.unadjusted_price"
+    ]
+
+
 def _errors(compiled: CompiledDocument) -> list[tuple[str, str]]:
     return [
         (diagnostic.code, diagnostic.pointer)
@@ -138,6 +147,11 @@ def _errors(compiled: CompiledDocument) -> list[tuple[str, str]]:
 
 
 # -- field_missing -------------------------------------------------------------------------------
+
+# 없는 필드 진단은 그래프 안(`strategy.expression.field_missing`)과
+# 밖(`strategy.field.missing`) 두 코드다.
+# 둘 다 기계 디테일(`field_id=…`) 앞에 한글 문장이 있어야 한다(P3-01 리드 결정).
+_HANGUL = re.compile(r"[가-힣]")
 
 
 def test_an_unknown_field_is_a_compile_error_once_an_adapter_is_connected() -> None:
@@ -151,6 +165,9 @@ def test_an_unknown_field_is_a_compile_error_once_an_adapter_is_connected() -> N
     ]
     diagnostic = compiled.diagnostics[0]
     assert "price.closee" in diagnostic.message
+    # 문제 목록은 backend 문장을 그대로 보인다.
+    # frontend 는 진단 코드를 번역하지 않는다(SoT 진단 코드 행).
+    assert _HANGUL.search(diagnostic.message.split("field_id=")[0]), diagnostic.message
     assert diagnostic.range is not None, "편집기가 그 노드 줄을 짚을 수 있다"
 
 
@@ -345,6 +362,7 @@ def test_an_unknown_field_outside_the_graph_is_a_compile_error(slot: str) -> Non
     assert _errors(typo) == [("strategy.field.missing", pointer)]
     [diagnostic] = [item for item in typo.diagnostics if item.code == "strategy.field.missing"]
     assert "price.closex" in diagnostic.message
+    assert _HANGUL.search(diagnostic.message.split("field_id=")[0]), diagnostic.message
     assert diagnostic.range is not None, "편집기가 그 필드 줄을 짚을 수 있다"
 
 
@@ -409,3 +427,285 @@ def test_the_checked_paths_are_exactly_the_runtime_schema_equity_field_catalog()
     assert any("/graph/" in pointer for pointer in pointers), (
         "그래프 노드 필드는 그래프 검증이 본다"
     )
+
+
+# -- 원주가 시계열 변화 warning (BACKLOG-018) -----------------------------------------------
+
+# 어댑터가 원주가 종가에 조정 짝을 표시한 계약. 표시가 없는 `_CLOSE` 와 비교한다.
+_RAW_CLOSE = replace(_CLOSE, adjusted_field_id="price.adj_close")
+_ADJ_CLOSE = FieldMetadata(field_id="price.adj_close", unit="KRW")
+_MARKET_CAP = FieldMetadata(field_id="price.market_cap", unit="KRW")
+
+_RAW_PRICE_MESSAGE = (
+    "분할·증자·병합에 조정하지 않은 원주가를 과거 세션과 비교하는 연산에 넣어 결과가 분할·증자에 "
+    "오염될 수 있습니다. price.adj_close 를 쓰세요: field_id='price.close' "
+    "adjusted_field_id='price.adj_close' reader='mom_252' operator='momentum'"
+)
+
+# 일간 수익률의 60 세션 변동성. 원주가 잎 하나를 지연(lag)과 표준편차가 함께 읽는다.
+_VOLATILITY_FACTOR = """  - factor_id: volatility
+    label: "변동성"
+    direction: low
+    weight: 0.4
+    graph:
+      nodes:
+        - kind: field
+          node_id: px
+          field_id: {field}
+        - kind: unary
+          node_id: px_prev
+          operator: lag
+          input_node_id: px
+          periods: 1
+        - kind: binary
+          node_id: ret
+          operator: divide
+          left_node_id: px
+          right_node_id: px_prev
+        - kind: time_series
+          node_id: vol
+          operator: std
+          input_node_id: ret
+          window: 60
+      output_node_id: vol
+"""
+
+# 같은 날 값끼리의 비율. 과거 세션을 읽지 않으므로 원주가여도 오염되지 않는다.
+_SAME_DAY_FACTOR = """  - factor_id: price_to_cap
+    label: "종가/시가총액"
+    direction: low
+    weight: 0.4
+    graph:
+      nodes:
+        - kind: field
+          node_id: px
+          field_id: price.close
+        - kind: field
+          node_id: cap
+          field_id: price.market_cap
+        - kind: binary
+          node_id: ratio
+          operator: divide
+          left_node_id: px
+          right_node_id: cap
+      output_node_id: ratio
+"""
+
+# 골든의 모멘텀 잎만 수정주가로 바꾼 문서(나머지 팩터가 원주가를 어떻게 쓰는지만 보려고).
+_GOLDEN_ADJUSTED = GOLDEN.replace("field_id: price.close", "field_id: price.adj_close")
+
+
+def test_a_raw_price_under_a_past_session_operator_is_a_compile_warning() -> None:
+    """골든의 12개월 모멘텀은 원주가를 읽는다 — 막지 않고, 고칠 자리(`field_id`)를 짚어 알린다."""
+    compiled = _compile(GOLDEN, _Catalog(_RAW_CLOSE, _ADJ_CLOSE))
+
+    assert compiled.ok, _errors(compiled)
+    [diagnostic] = [
+        item for item in compiled.diagnostics if item.code == "strategy.field.unadjusted_price"
+    ]
+    assert diagnostic.severity is DiagnosticSeverity.WARNING
+    assert diagnostic.kind is DiagnosticKind.SEMANTIC
+    assert diagnostic.pointer == "/factors/0/graph/nodes/0/field_id"
+    assert diagnostic.node_id == "close"
+    assert diagnostic.message == _RAW_PRICE_MESSAGE
+    assert diagnostic.range is not None, "편집기가 그 field_id 값을 짚는다"
+
+
+def test_the_adjusted_price_under_the_same_operator_is_silent() -> None:
+    compiled = _compile(_GOLDEN_ADJUSTED, _Catalog(_RAW_CLOSE, _ADJ_CLOSE))
+
+    assert compiled.ok, _errors(compiled)
+    assert _unadjusted(compiled) == []
+
+
+def test_a_same_day_ratio_of_the_raw_price_is_silent() -> None:
+    """과거 세션을 읽지 않는 연산(같은 날 비율)은 원주가여도 오염되지 않는다."""
+    source = _GOLDEN_ADJUSTED.replace("portfolio:\n", f"{_SAME_DAY_FACTOR}portfolio:\n", 1)
+    assert "field_id: price.close" in source
+
+    compiled = _compile(source, _Catalog(_RAW_CLOSE, _ADJ_CLOSE, _MARKET_CAP))
+
+    assert compiled.ok, _errors(compiled)
+    assert _unadjusted(compiled) == []
+
+
+def test_a_raw_price_read_through_lag_and_a_window_warns_once_at_the_leaf() -> None:
+    """지연과 창 통계가 같은 잎을 읽어도 경고는 잎 하나에 한 번이다. 입력을 거슬러 올라가 찾는다."""
+    catalog = _Catalog(_RAW_CLOSE, _ADJ_CLOSE)
+
+    def with_volatility(field: str) -> str:
+        factor = _VOLATILITY_FACTOR.format(field=field)
+        return _GOLDEN_ADJUSTED.replace("portfolio:\n", f"{factor}portfolio:\n", 1)
+
+    raw = _compile(with_volatility("price.close"), catalog)
+    adjusted = _compile(with_volatility("price.adj_close"), catalog)
+
+    assert raw.ok and adjusted.ok, (_errors(raw), _errors(adjusted))
+    assert _unadjusted(raw) == [("/factors/1/graph/nodes/0/field_id", "px")]
+    assert _unadjusted(adjusted) == []
+
+
+def test_the_raw_price_is_judged_only_through_the_adapter_contract() -> None:
+    """원주가 판정은 어댑터 필드 계약의 표시가 소유한다.
+
+    표시가 없거나 어댑터가 없으면 말하지 않는다.
+    """
+    assert _unadjusted(_compile(GOLDEN, _Catalog(_CLOSE, _ADJ_CLOSE))) == []
+    assert _unadjusted(_compile(GOLDEN, None)) == []
+
+
+def test_the_mock_adapter_marks_its_raw_close_with_the_adjusted_field() -> None:
+    adapter = MockEquityDataAdapter.demo()
+    contracts = {field.field_id: field for field in adapter.factor_field_catalog()}
+
+    marked = {
+        field_id: field.adjusted_field_id
+        for field_id, field in contracts.items()
+        if field.adjusted_field_id is not None
+    }
+    assert marked == {"price.close": "price.adj_close"}
+    assert contracts["price.adj_close"].unit == contracts["price.close"].unit
+    assert _unadjusted(_compile(GOLDEN, adapter)) == [
+        ("/factors/0/graph/nodes/0/field_id", "close")
+    ]
+
+
+# -- 승격 예약 접두사 (DEFECT-232-01) -------------------------------------------------------------
+
+# 사용자가 compile 의 승격 모양(조건 노드와 상수 둘)을 예약 id 로 손수 쓴 팩터. 출력이 이미 숫자라
+# hydrate 는 아무것도 붙이지 않는다 — 그래서 spec 은 compile 이 승격한 그래프와 바이트까지 같다.
+_HAND_PROMOTED_FACTOR = """  - factor_id: above
+    label: "종가 100 초과"
+    direction: high
+    weight: 0.4
+    graph:
+      nodes:
+        - kind: field
+          node_id: px
+          field_id: price.close
+        - kind: constant
+          node_id: threshold
+          value: 100.0
+        - kind: comparison
+          node_id: above
+          operator: gt
+          left_node_id: px
+          right_node_id: threshold
+        - kind: constant
+          node_id: __promote_above_one
+          value: 1.0
+        - kind: constant
+          node_id: __promote_above_zero
+          value: 0.0
+        - kind: conditional
+          node_id: __promote_above
+          predicate_node_id: above
+          true_node_id: __promote_above_one
+          false_node_id: __promote_above_zero
+      output_node_id: __promote_above
+"""
+
+
+def test_a_hand_written_promotion_shape_is_rejected_at_its_node_ids() -> None:
+    """예약 접두사는 compile 이 붙이는 노드의 것이다: 문서가 쓰면 그 node_id 마다 error 다.
+
+    막지 않으면 compile 된 spec 이 승격한 그래프와 구분되지 않아, 실행 계획 설명이 사용자가 쓴
+    노드에 "compile 이 붙인 노드" 표식을 달고 화면이 문서 노드를 숨긴다(리뷰 #232).
+    """
+    compiled = _compile(_with_factor(_HAND_PROMOTED_FACTOR), None)
+
+    assert not compiled.ok
+    reserved = [
+        (item.pointer, item.node_id, item.severity)
+        for item in compiled.diagnostics
+        if item.code == "strategy.factor.reserved_node_id"
+    ]
+    assert reserved == [
+        (f"/factors/1/graph/nodes/{index}/node_id", node_id, DiagnosticSeverity.ERROR)
+        for index, node_id in (
+            (3, "__promote_above_one"),
+            (4, "__promote_above_zero"),
+            (5, "__promote_above"),
+        )
+    ]
+    [first] = [
+        item for item in compiled.diagnostics if item.code == "strategy.factor.reserved_node_id"
+    ][:1]
+    assert first.message == (
+        "__promote_ 로 시작하는 노드 이름은 참/거짓 출력을 점수로 바꿀 때 compile 이 쓰는 "
+        "예약 이름입니다. 다른 이름을 쓰세요: node_id='__promote_above_one' "
+        "reserved_prefix='__promote_'"
+    )
+    assert first.range is not None, "편집기가 그 node_id 값을 짚는다"
+
+
+def test_a_single_reserved_node_id_is_rejected_even_when_promotion_would_skip() -> None:
+    """예약 id 하나만 겹쳐도 거절한다(전에는 승격을 건너뛰고 출력 타입 오류로만 알렸다)."""
+    source = GOLDEN.replace("node_id: close", "node_id: __promote_close").replace(
+        "input_node_id: close", "input_node_id: __promote_close"
+    )
+
+    compiled = _compile(source, None)
+
+    assert [
+        (item.code, item.pointer) for item in compiled.diagnostics if item.severity.value == "error"
+    ] == [("strategy.factor.reserved_node_id", "/factors/0/graph/nodes/0/node_id")]
+
+
+def test_compile_generated_promotion_nodes_are_not_reserved_id_errors() -> None:
+    """compile 이 붙인 승격 노드는 문서에 없으므로 이 규칙에 걸리지 않는다."""
+    source = _with_factor(
+        _HAND_PROMOTED_FACTOR.replace("__promote_above", "flag_above").replace(
+            "output_node_id: flag_above", "output_node_id: above"
+        )
+    )
+
+    compiled = _compile(source, None)
+
+    assert compiled.ok, _errors(compiled)
+    assert compiled.spec is not None
+    assert compiled.spec.factors[1].graph.output_node_id == "__promote_above"
+
+
+# 원주가 잎이 과거 세션 연산자 바로 밑이 아니라 같은 날 연산 여러 단계 밑에 있는 그래프(리뷰 #232
+# DEFECT-232-07). 한 단계 입력만 보는 판정은 이 경고를 잃는다.
+_NESTED_RAW_PRICE = {
+    "rank_of_scaled_price": (
+        """        - {kind: field, node_id: px, field_id: price.close}
+        - {kind: constant, node_id: two, value: 2.0}
+        - {kind: binary, node_id: scaled, operator: multiply, left_node_id: px, right_node_id: two}
+        - {kind: cross_sectional, node_id: ranked, operator: rank, input_node_id: scaled}
+        - {kind: time_series, node_id: smoothed, operator: mean, input_node_id: ranked, window: 20}
+""",
+        "smoothed",
+    ),
+    "ratio_under_window": (
+        """        - {kind: field, node_id: px, field_id: price.close}
+        - {kind: field, node_id: cap, field_id: price.market_cap}
+        - {kind: binary, node_id: ratio, operator: divide, left_node_id: px, right_node_id: cap}
+        - {kind: time_series, node_id: ratio_vol, operator: std, input_node_id: ratio, window: 20}
+""",
+        "ratio_vol",
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_NESTED_RAW_PRICE))
+def test_a_raw_price_several_steps_below_a_past_session_operator_warns(shape: str) -> None:
+    nodes, output = _NESTED_RAW_PRICE[shape]
+    factor = (
+        "  - factor_id: nested\n"
+        '    label: "중첩"\n'
+        "    direction: high\n"
+        "    weight: 0.4\n"
+        "    graph:\n"
+        "      nodes:\n"
+        f"{nodes}"
+        f"      output_node_id: {output}\n"
+    )
+    source = _GOLDEN_ADJUSTED.replace("portfolio:\n", f"{factor}portfolio:\n", 1)
+
+    compiled = _compile(source, _Catalog(_RAW_CLOSE, _ADJ_CLOSE, _MARKET_CAP))
+
+    assert compiled.ok, _errors(compiled)
+    assert _unadjusted(compiled) == [("/factors/1/graph/nodes/0/field_id", "px")]

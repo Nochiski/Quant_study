@@ -30,6 +30,51 @@ def test_factor_catalog_validate_and_explain_contract() -> None:
     assert explanation.json()["data_snapshot_id"] == "mock-equity-v0.2-20260903"
     assert explanation.json()["plan"]["as_of_policy"] == "available_date_lte_as_of"
     assert len(explanation.json()["plan"]["plan_hash"]) == 64
+    # 팩터 연구에서 쓴 그래프에는 compile 이 붙인 노드가 없다.
+    assert explanation.json()["synthesized_nodes"] == []
+
+
+def test_explain_marks_the_boolean_promotion_nodes_of_a_compiled_graph() -> None:
+    """실행 계획 화면이 승격 노드 이름 규칙을 복제하지 않게 wire 가 표식을 싣는다(감사 #13).
+
+    요청 그래프는 compile 이 승격한 모양 그대로다. 문서가 예약 접두사를 쓰면 compile 이 거절하므로
+    (DEFECT-232-01) 화면이 보내는 이 모양의 그래프는 compile 산출물뿐이다.
+    """
+    client = TestClient(build_http_app())
+    graph = {
+        "nodes": [
+            {"kind": "field", "node_id": "close", "field_id": "price.close"},
+            {"kind": "constant", "node_id": "threshold", "value": 100.0},
+            {
+                "kind": "comparison",
+                "node_id": "above",
+                "operator": "gt",
+                "left_node_id": "close",
+                "right_node_id": "threshold",
+            },
+            {"kind": "constant", "node_id": "__promote_above_one", "value": 1.0},
+            {"kind": "constant", "node_id": "__promote_above_zero", "value": 0.0},
+            {
+                "kind": "conditional",
+                "node_id": "__promote_above",
+                "predicate_node_id": "above",
+                "true_node_id": "__promote_above_one",
+                "false_node_id": "__promote_above_zero",
+            },
+        ],
+        "output_node_id": "__promote_above",
+    }
+
+    response = client.post("/api/v1/factors/explain", json={"graph": graph})
+
+    assert response.status_code == 200
+    assert response.json()["synthesized_nodes"] == [
+        {"node_id": "__promote_above_one", "origin": "promotion", "role": "promotion_constant"},
+        {"node_id": "__promote_above_zero", "origin": "promotion", "role": "promotion_constant"},
+        {"node_id": "__promote_above", "origin": "promotion", "role": "promoted_output"},
+    ]
+    steps = [step["node_id"] for step in response.json()["plan"]["steps"]]
+    assert set(steps) >= {"__promote_above_one", "__promote_above_zero", "__promote_above"}
 
 
 def test_explain_resolves_numeric_and_group_metadata_inside_the_backend() -> None:

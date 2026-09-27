@@ -28,13 +28,6 @@ const spec = (revision: number, title: string) => ({
   identity: { strategy_id: "s1", revision, schema_version: "1.1" },
   title,
   description: "",
-  data: {
-    market: "KRX",
-    start: "2021-09-03",
-    end: "2026-09-03",
-    universe_id: "krx.common-stock",
-    frequency: "daily",
-  },
   eligibility: { rules: [] },
   factors: [],
   signal: {
@@ -53,11 +46,6 @@ const spec = (revision: number, title: string) => ({
     net_exposure: 1,
     max_name_weight: 0.1,
     max_sector_weight: 0.3,
-  },
-  execution: {
-    timing: "next_open",
-    fee_bps: 15,
-    slippage_bps: 10,
   },
   parameters: [],
 });

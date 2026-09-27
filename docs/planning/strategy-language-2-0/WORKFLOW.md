@@ -642,6 +642,9 @@ PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드
   `domain/strategy/_diff.py` 가 canonical payload 를 위치로 비교하므로 사용자 노드 하나를 더하면
   그래프 끝의 승격 노드 셋이 "바뀐 것"으로 나온다. 승격 노드 줄을 원래 출력의 변경 한 줄로 접거나
   diff 를 node_id 기준으로 맞춘다(수정 위치가 backend `_diff.py` 면 이 PR 이 같이 고친다).
+- 추적·미리보기 화면의 탈락 사유(`ExclusionReason`, OpenAPI enum) 전부에 사람 말 문장(ko·en)을 둔다.
+  P2-04~P2-06 이 더한 `eligibility_rank_cut`·`missing_risk` 를 포함하고, 생성 enum 전수 커버리지 테스트로
+  누락을 막는다(PLAN P2-05 결정 4, 리드 결정 2026-09-27).
 - outline·snippet 카탈로그(팩터 preset은 "예시" 그룹으로 강등, 튜토리얼 전용)·execution plan·graph·
   debugger가 1.2 pointer로.
 - **착수 전 cascade(Phase 2 감사 NB-7)**: `lang2/integration` 이 main 을 따라간다. 통합 브랜치의 main
@@ -736,7 +739,8 @@ PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드
   `stories/dm.readable-korean.spec.ts` 가 버튼 이름으로 이 문구를 찾는다. (2) `warnings[].code` 는
   OpenAPI enum(`strategy_document.upgrade_missing_policy_conflict`·`upgrade_weighting_rule_changed`·
   `upgrade_environment_unavailable`)이라 코드별 i18n 이 필요하다(문장은 backend `message` 가 이미
-  한글로 완성해 보내므로 코드별 제목만이어도 된다). (3) 새 422 `strategy_document.upgrade_unsupported_node`
+  한글로 완성해 보내므로 코드별 제목만이어도 된다). 제목 문장과 `upgradeWarningTitle` 은 P3-01 이 넣었다 —
+  배너에 그리기만 하면 된다. (3) 새 422 `strategy_document.upgrade_unsupported_node`
   의 `upgrade.error.*` 문장. 없으면 지금처럼 `upgrade.error.request` 로 backend 문장을 보인다.
   (4) `environment` 가 `null` 이면(옛 문서의 실행 설정을 옮기지 못함) 패널을 채우지 않고 warning 이
   짚는 자리를 보인다 — 기본값으로 채우지 않는다.
@@ -767,6 +771,13 @@ PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드
 - 매뉴얼 1절 샘플을 1.2로, 실행 설정 절 신설, "이 전략을 사람 말로" 표 갱신. README·frontend
   README·`backend/FACTORS.md` 1.2.
 - CI `frontend`·`browser-e2e` green(P2 스택의 exit 조건 해소).
+- **골든의 수정주가 이관(BACKLOG-018 후속, 리뷰 #232 DEFECT-232-05)**: 골든 `quality_momentum.yaml`·
+  `quality_momentum.json`·매뉴얼 1절 샘플의 `mom_252` 잎을 `price.adj_close` 로 옮긴다. 원주가 모멘텀은
+  P3-01 부터 compile warning `strategy.field.unadjusted_price` 가 나므로, 그대로 두면 warning 이 뜨는 문서를
+  정상 예시로 보인다. 옮긴 뒤 backend 테스트의 우회 필터(`test_strategy_document_http_api.py` 의
+  `RAW_PRICE_WARNING`·`_without_raw_price_warning`, `test_strategy_document_upgrade_http_api.py` 의 warning
+  기대)를 걷고, 골든 `spec_hash` 리터럴·AI 시나리오 golden·e2e 기대값을 재생성한다. 1.0·1.1 보존 fixture 는
+  옛 문서라 원주가 그대로 둔다(업그레이드는 필드를 바꾸지 않는다).
 - BACKLOG-002: 매뉴얼 스크린샷 14장을 `npm run docs:capture`로 1.2 한글 화면으로 다시 찍고, 8절에
   "초안 복구·서버 초안 적용 직후 되돌리기는 복구 이전 텍스트로 돌아간다"는 안내를 넣는다.
 - BACKLOG-008: 충돌 표식 게이트(`tools/quant_study_dev/conflict_markers.py`)가 `git ls-files`로 추적

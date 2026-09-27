@@ -516,6 +516,8 @@ export type {
   StreamBacktestEventsError,
   StreamBacktestEventsErrors,
   StreamBacktestEventsResponses,
+  SynthesizedNode,
+  SynthesizedNodeRole,
   TargetFrame,
   TargetPosition,
   TargetTape,

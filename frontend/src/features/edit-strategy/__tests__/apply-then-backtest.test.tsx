@@ -20,8 +20,8 @@ import { ProposalApplyFeedback } from "../ui/proposal-apply-dialog";
 
 afterEach(cleanup);
 
-const BASE = 'schema_version: "1.1"\ntitle: "old"\n';
-const PROPOSED = 'schema_version: "1.1"\ntitle: "new"\n';
+const BASE = 'schema_version: "1.2"\ntitle: "old"\n';
+const PROPOSED = 'schema_version: "1.2"\ntitle: "new"\n';
 
 const editorOf = (initial: string) => {
   let text = initial;
@@ -83,11 +83,11 @@ const compiled = (state: DocumentState, error: boolean): DocumentState =>
       diagnostics: error
         ? [
             {
-              code: "structure.missing_key",
+              code: "structure.missing_field",
               kind: "structural",
               severity: "error",
-              pointer: "/data",
-              message: "data 섹션이 필요합니다.",
+              pointer: "/title",
+              message: "title 필드가 필요합니다.",
               range: null,
             },
           ]
@@ -254,7 +254,7 @@ describe("useApplyProposalThenBacktest", () => {
 
     const typedOver = documentReducer(settled, {
       type: "edit",
-      source: 'schema_version: "1.1"\ntitle: "mine"\n',
+      source: 'schema_version: "1.2"\ntitle: "mine"\n',
     });
     rerender({ state: typedOver, canRun: true });
     expect(hook.result.current.chain.notStarted).toBe(false);
@@ -300,7 +300,7 @@ describe("useApplyProposalThenBacktest", () => {
 
   it("확인 창에서 취소하면 실행도 잇지 않는다", () => {
     const { editor, run, hook } = mountChain();
-    editor.edit('schema_version: "1.1"\ntitle: "mine"\n');
+    editor.edit('schema_version: "1.2"\ntitle: "mine"\n');
     act(() =>
       hook.result.current.chain.applyThenBacktest({
         source: PROPOSED,
@@ -326,7 +326,7 @@ describe("useApplyProposalThenBacktest", () => {
     // 적용한 텍스트가 reducer에 닿은 뒤, 검증이 끝나기 전에 사용자가 이어서 고친다.
     rerender({ state: edited(PROPOSED), canRun: false });
     expect(hook.result.current.chain.waiting).toBe(true);
-    const typedOver = edited('schema_version: "1.1"\ntitle: "new but mine"\n');
+    const typedOver = edited('schema_version: "1.2"\ntitle: "new but mine"\n');
     rerender({ state: compiled(parsed(typedOver), false), canRun: true });
 
     expect(run).not.toHaveBeenCalled();

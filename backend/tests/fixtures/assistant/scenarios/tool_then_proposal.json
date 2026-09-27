@@ -56,7 +56,14 @@
     "event": {
       "proposal": {
         "compile": {
-          "diagnostics": [],
+          "diagnostics": [
+            {
+              "code": "strategy.field.unadjusted_price",
+              "message": "분할·증자·병합에 조정하지 않은 원주가를 과거 세션과 비교하는 연산에 넣어 결과가 분할·증자에 오염될 수 있습니다. price.adj_close 를 쓰세요: field_id='price.close' adjusted_field_id='price.adj_close' reader='mom_252' operator='momentum'",
+              "pointer": "/factors/0/graph/nodes/0/field_id",
+              "severity": "warning"
+            }
+          ],
           "ok": true,
           "spec_hash": "22f95ea804a57f6bb8f7134127c2feb7d88e0a5a0bbc52481977c75cf0de5197"
         },

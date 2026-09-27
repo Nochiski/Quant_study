@@ -44,7 +44,14 @@ from strategy_workbench.domain.factor.facade.expression import (
     NodeValueType,
 )
 
-from ._fixture import MOCK_SPLIT, Membership, Observation, adjusted_close, build_demo_fixture
+from ._fixture import (
+    ADJUSTED_FIELD_BY_RAW,
+    MOCK_SPLIT,
+    Membership,
+    Observation,
+    adjusted_close,
+    build_demo_fixture,
+)
 
 _MOCK_EPOCH = date(2000, 1, 3)  # Monday
 _MOCK_SECTORS = ("technology", "industrial", "consumer")
@@ -107,6 +114,7 @@ class MockEquityDataAdapter:
                             if profile.value_type is FieldValueType.CATEGORY
                             else NodeValueType.NUMERIC_SERIES
                         ),
+                        adjusted_field_id=ADJUSTED_FIELD_BY_RAW.get(field_id),
                     )
                 )
         return FactorMetadataSnapshot(

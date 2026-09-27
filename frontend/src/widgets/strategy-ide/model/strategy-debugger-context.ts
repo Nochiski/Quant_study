@@ -3,8 +3,10 @@ import type {
   StrategyDebuggerUnavailableReason,
 } from "../../../features/debug-strategy";
 import {
+  compiledNodeOrigin,
   currentCompile,
   decideBacktestSource,
+  documentOutputNodeId,
   factorGraphPointer,
   gateBacktestSourceWithFactorPlans,
   nodePointerById,
@@ -57,7 +59,13 @@ export const buildStrategyDebuggerAvailability = (
   const factors = plans.factors.flatMap((factor) => {
     const plan = factor.explanation.plan;
     if (!factor.explanation.validation.valid || plan === null) return [];
-    const nodes = plan.steps.flatMap((step) => {
+    // 디버거는 사용자가 적은 노드만 추적한다. compile 이 붙인 승격 노드(BACKLOG-014)는 문서에 줄이
+    // 없어 선택·"소스 열기"가 원래 출력과 겹치므로 숨기고, 출력 노드는 사용자가 적은 출력이다.
+    const authoredSteps = plan.steps.filter(
+      (step) => compiledNodeOrigin(factor, step.node_id) === "document",
+    );
+    const outputNodeId = documentOutputNodeId(factor);
+    const nodes = authoredSteps.flatMap((step) => {
       const pointer = nodePointerById(factor, step.node_id);
       return pointer === null
         ? []
@@ -70,8 +78,8 @@ export const buildStrategyDebuggerAvailability = (
           ];
     });
     if (
-      nodes.length !== plan.steps.length ||
-      !nodes.some((node) => node.nodeId === factor.request.graph.output_node_id)
+      nodes.length !== authoredSteps.length ||
+      !nodes.some((node) => node.nodeId === outputNodeId)
     )
       return [];
     return [
@@ -79,7 +87,7 @@ export const buildStrategyDebuggerAvailability = (
         factorId: factor.factorId,
         label: factor.label,
         pointer: factorGraphPointer(factor.factorIndex),
-        outputNodeId: factor.request.graph.output_node_id,
+        outputNodeId,
         expectedPlanHash: plan.plan_hash,
         nodes,
       },

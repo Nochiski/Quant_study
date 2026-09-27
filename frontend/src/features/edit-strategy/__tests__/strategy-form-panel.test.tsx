@@ -58,7 +58,7 @@ const stubTransactions = (
   ...overrides,
 });
 
-const NO_CATALOGS = { equityFields: null, factors: null };
+const NO_CATALOGS = { equityFields: null };
 
 const renderPanel = (
   source: string,
@@ -253,7 +253,7 @@ describe("StrategyFormPanel controls", () => {
       feedback: {
         status: "error",
         owner: "form",
-        label: "fee_bps",
+        label: "max_name_weight",
         reason: "parse",
       },
     });
@@ -415,7 +415,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
           feedback: {
             status: "error",
             owner: "form",
-            label: "fee_bps",
+            label: "max_name_weight",
             reason,
           },
         }),
@@ -513,6 +513,44 @@ describe("StrategyFormPanel 라벨 어휘 (P1-03)", () => {
         name: "종목별 최대 목표 비중 한도 max_name_weight · %",
       }),
     ).toBeInTheDocument();
+  });
+
+  it("enum 선택지를 원문 값 대신 이름으로 보이고 고른 값의 뜻을 설명한다 (P3-01)", async () => {
+    const user = userEvent.setup();
+    const transactions = stubTransactions();
+    renderPanel(MINIMAL, transactions);
+
+    // 결합 전 정규화(P2-04)는 문서에 없어도 스키마 기본값(`rank`)으로 그려진다.
+    const normalization = section("signal").getByRole("combobox", {
+      name: /^점수 정규화 normalization/,
+    });
+    expect(normalization).toHaveDisplayValue("순위로 맞춘 뒤 가중 합");
+    expect(
+      within(normalization)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual([
+      "원시값 그대로 가중 합(단위가 같을 때만)",
+      "순위로 맞춘 뒤 가중 합",
+      "표준점수로 맞춘 뒤 가중 합",
+    ]);
+    // 필드 설명 대신 고른 값의 설명이 보인다.
+    expect(
+      section("signal").getByText(/기준일마다 종목 간 순위\(0~1\)로 바꾼 뒤/),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(normalization, "zscore");
+    expect(transactions.apply).toHaveBeenLastCalledWith(
+      {
+        kind: "insert-key",
+        parentPointer: "",
+        key: "signal",
+        value: { normalization: "zscore" },
+      },
+      "normalization",
+      "form",
+      { focusEditor: false },
+    );
   });
 
   it("스키마 키가 없는 섹션은 이름만 보인다", () => {

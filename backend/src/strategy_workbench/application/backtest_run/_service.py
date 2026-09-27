@@ -42,6 +42,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
 )
 from strategy_workbench.domain.strategy.facade.specification import strategy_spec_hash
 
+from ._gc_policy import full_collections_suspended
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
 from .ports.outgoing.backtest_data import BacktestDataPort, BacktestDataQuery
 from .ports.outgoing.backtest_executor import (
@@ -425,6 +426,21 @@ class BacktestRunService:
         spec: BacktestRunSpec,
         provenance: StrategyProvenance,
     ) -> None:
+        """run 스레드 본문. 전체 수집(2세대)을 run 이 끝날 때까지 미룬다(이슈 #196).
+
+        tape 단계가 만드는 수백만 개의 오래 사는 객체 때문에 전체 수집이 매번 수 초씩 GIL 을 쥐고
+        다른 HTTP 요청까지 세웠다. 범위와 복원 규칙은 `_gc_policy` 가 소유한다.
+        """
+
+        with full_collections_suspended():
+            self._execute(run_id, spec, provenance)
+
+    def _execute(
+        self,
+        run_id: str,
+        spec: BacktestRunSpec,
+        provenance: StrategyProvenance,
+    ) -> None:
         record = self._record(run_id)
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - resolved before the thread starts
@@ -663,7 +679,7 @@ def _describe_failure(error: BaseException) -> str:
     """run 상태의 `error` 문자열(화면 노출용).
 
     검증 실패는 issue 코드·경로를, 엔진 비호환은 부족한 능력을 실어야 화면에서 원인을 알 수 있다.
-    서버 절대 경로는 가린다 — 원문은 `_run` 이 로그로 남긴다.
+    서버 절대 경로는 가린다 — 원문은 `_execute` 가 로그로 남긴다.
     """
 
     text = f"{type(error).__name__}: {error}"

@@ -6,7 +6,7 @@ current_phase: P1,P2
 current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08,P2-09
 active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09]
 parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09]
-last_updated: 2026-09-27T11:05:03+09:00
+last_updated: 2026-09-27T11:22:56+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 11
@@ -29,7 +29,7 @@ progress_percent: 21
 | Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `11 / 29` |
-| Aggregated at | `2026-09-27 11:05 KST` |
+| Aggregated at | `2026-09-27 11:22 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -304,8 +304,8 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Acceptance | WORKFLOW P2-09 |
 | Non-goals | 배너 문구·1.1 문서 배너·`environment` 로 실행 설정 채우기·warning 표시와 그 i18n(P3-02, WORKFLOW P3-02 에 예약), 실행 결과 캐시와 `run_fingerprint` 표기 버전(캐시를 처음 도입하는 PR), 실 DB 마이그레이션 |
 | Branch/worktree | `feat/lang2-p2-09-upgrader` / `wt-lang2-p2-09` |
-| Base SHA | P2-08 tip `dffc1d7b` |
-| Head SHA | [#216](https://github.com/Nochiski/Quant_study/pull/216) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
+| Base SHA | `lang2/integration` (`48eff6d8`, P2-07·P2-08 머지). 착수는 P2-08 tip `dffc1d7b` 에서 했고 P2-08 리뷰 반영 `d99aa024` 와 통합 브랜치를 차례로 merge 로 따라갔다(두 번째 merge 는 트리 변화 없음) |
+| Head SHA | [#217](https://github.com/Nochiski/Quant_study/pull/217) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
 | Diff stat | 생성 산출물(OpenAPI·SDK)·계획 문서를 뺀 handwritten **28파일 · +1911 / −526**. backend src 14파일 +913/−279(`_upgrade.py` 재작성 +435/−180, 신규 `domain/backtest/_retired.py` 227줄), test 10파일 +958/−226(신규 3: 실행 설정 변환 134·1.1 의미 보존 180·v1_2 golden 41줄), e2e·스토리 3파일 +36/−17, SoT 규칙 1파일 +4/−4 |
 | Focused tests | `uv run pytest tests/domain/test_strategy_upgrade.py tests/domain/test_retired_run_environment.py tests/contract/test_document_upgrade_source.py tests/application/test_strategy_authoring_upgrade.py tests/integration/test_strategy_document_upgrade_http_api.py tests/integration/test_upgrade_preserves_1_1_meaning.py tests/contract/test_strategy_repository_retired_1_1.py tests/contract/test_strategy_repository_frozen_1_0.py -q` |
 | 제약사항 | **12절 상한 초과(600줄·10파일 → 1911줄·28파일), 분할하지 않는다.** acceptance 가 "심볼 교체와 호출자 갱신을 같은 PR"로 묶었다 — facade 공개 심볼(`upgrade_document_1_0`·`is_legacy_document`·`RETIRED_SCHEMA_VERSIONS` 등)을 지우는 순간 source 경로 어댑터·repository codec·authoring 서비스와 그 테스트가 같이 움직여야 컴파일된다. 비테스트 src 는 913줄이고 그중 `_upgrade.py` 는 파일 재작성이라 diff 가 부풀었다(단계 맵·검증·결과 타입·실행 설정 읽기). 커밋을 논리 단위 8개로 나눠 리뷰 단위를 대신한다. e2e 는 P2-03~P3-02 묶음 머지 전략의 원인 (1)로만 red 이고 원인 (2)는 이 PR 이 해소한다(PR 본문 대조표) |
@@ -784,7 +784,7 @@ Phase exit:
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `APPROVED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 **APPROVE**(blocking 0 · P2 1 · P3 4, 전부 반영: `77bd713c`·`7b707660`) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base `lang2/integration`(통합 머지 `c72f6257` 을 merge, 처음 착수는 P2-06 tip `36060527`) · 커밋 14개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → PLAN → 리뷰 P1 반영: 그래프 밖 필드 참조 → PLAN → 리뷰 P3-2 테스트) + 리뷰 반영 문서 · 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `IN_REVIEW` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 워크트리 `wt-lang2-p2-08`, 브랜치 `feat/lang2-p2-08-ideas` · base P2-07 tip `945fd081`(착수 `6e397a3b`, 이후 P2-07 을 merge 로 따라감) · 커밋 8개(BACKLOG-015 → mock 필드 → 아이디어 fixture·테스트 → 스파이크 결론 → 스토리 비고 → PLAN → 리드 결정 반영: 빌더 node_id → 문서·이 PLAN) · `GROUP_SERIES` 는 `unsupported` 유지(원장에 PIT 섹터 시계열 없음) · `review_lang2_p1_06` 1차 REQUEST_CHANGES(P1 1·P2 1·P3 3) → 반영(P2 는 BACKLOG-016) · 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `IN_REVIEW` | [#216](https://github.com/Nochiski/Quant_study/pull/216) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base P2-08 tip `dffc1d7b` · 커밋 8개(버전 디스패치·호출자 → 응답 `environment` → BACKLOG-011 정리 → OpenAPI → 생성 SDK → US-SM-07 e2e·스토리 → SoT·WORKFLOW → 이 PLAN) · 게이트는 push tip 에서 실측(PR 본문) |
+| [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `IN_REVIEW` | [#217](https://github.com/Nochiski/Quant_study/pull/217) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base `lang2/integration`(P2-07·P2-08 머지 `48eff6d8`. 착수는 P2-08 tip `dffc1d7b`, 리뷰 반영 `d99aa024` 와 통합 브랜치를 merge 로 따라갔다. 처음 연 #216 은 P2-08 브랜치 삭제로 닫혀 #217 로 다시 열었다) · 커밋 8개(버전 디스패치·호출자 → 응답 `environment` → BACKLOG-011 정리 → OpenAPI → 생성 SDK → US-SM-07 e2e·스토리 → SoT·WORKFLOW → 이 PLAN) · 게이트는 push tip 에서 실측(PR 본문) |
 
 Phase exit:
 
@@ -903,7 +903,7 @@ Phase exit:
 | `P1-05` | cascade tip `45f1c4a3`, 위와 같은 게이트 + `npm run test:e2e`(머신 잠금 아래) | pytest 1695 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 733/733 · e2e 25/25 | 2026-09-26 |
 | `P1-06` | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` | `PLAN.md is consistent: 0/29 merged, 6 approved`(P1-02 5차 APPROVE 반영 뒤. 1차 리뷰 반영 시점에는 P1-02가 `ac3a3d0e` 리뷰 대기라 5) · 충돌 표식 0 | 2026-09-26 |
 
-| `P2-09` | push tip 게이트 전체 — PR [#216](https://github.com/Nochiski/Quant_study/pull/216) 본문 "테스트 계획" | 결과·실패 원인 대조는 PR 본문(US-SM-07 은 업그레이드·저장·hash 단언을 모두 지나 원인 (2) 해소, 남은 실패는 원인 (1) 실행 요청 environment 미배선 하나) | 2026-09-27 |
+| `P2-09` | push tip 게이트 전체 — PR [#217](https://github.com/Nochiski/Quant_study/pull/217) 본문 "테스트 계획" | 결과·실패 원인 대조는 PR 본문(US-SM-07 은 업그레이드·저장·hash 단언을 모두 지나 원인 (2) 해소, 남은 실패는 원인 (1) 실행 요청 environment 미배선 하나) | 2026-09-27 |
 | `P2-01` | `uv run pytest -q` (backend) | 1480 passed, 13 skipped | 2026-09-20 |
 | `P2-01` | `uv run pytest -q` (backend, 리뷰 반영 후) | 1493 passed, 13 skipped | 2026-09-21 |
 | `P2-01` | `uv run ruff check src tests` · `ruff format --check`(변경 30파일) | 통과 | 2026-09-20 |
@@ -911,7 +911,7 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
-- 2026-09-27 — P2-09 구현(`IN_REVIEW`, [#216](https://github.com/Nochiski/Quant_study/pull/216)). 업그레이더를 버전 디스패치로 다시 쓰고 1.1 → 1.2
+- 2026-09-27 — P2-09 구현(`IN_REVIEW`, [#217](https://github.com/Nochiski/Quant_study/pull/217)). 업그레이더를 버전 디스패치로 다시 쓰고 1.1 → 1.2
   단계(`data`·`execution`·`graph.missing_policy` 떼기, `signal.normalization: none` 명시, `saved_*` 거절)를
   붙였다. 업그레이드 응답에 `environment`(옛 문서의 실행 설정)·`warnings` 를 싣고, 저장된 1.0·1.1 row 를
   같은 체인으로 읽는다. 저장된 1.1 row 의 설명 문장이 `rank` 로 나오던 P2-04 1차 리뷰 P3 관찰도 이로써

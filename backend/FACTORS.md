@@ -7,20 +7,25 @@
 - 상태 `implemented`: M3 mock Equity adapter에서 즉시 preview 가능
 - 상태 `catalog_only`: ID와 데이터 요구사항은 예약됐지만 기본 실행 graph는 후속 구현 대상
 - 모든 입력은 `available_date <= as_of`인 PIT 관측값만 사용
+- 가격 변화(수익률·모멘텀·이평·변동성·낙폭·고점 거리·베타)는 수정주가 `price.adj_close`(전방
+  조정, 그날까지 적용된 분할·증자·병합 계수만 곱해 과거 값이 바뀌지 않는다)를 읽는다. 원주가
+  `price.close`는 같은 날 두 값을 견주는 비율(장중 수익률·목표주가 괴리·배당수익률)과 거래대금에만
+  쓴다. 야간 수익률은 수정 시가 필드가 없어 `adj_close[t]/adj_close[t-1] × open[t]/close[t]`로 만든다
+  (이슈 #214)
 - `factor_id`, registry version, graph hash, data snapshot, parameters, as-of range가 재현성 키를 구성
 
 | # | Factor ID | Category | Preference | Required Equity fields | Min history | Status |
 |---:|---|---|---|---|---:|---|
-| 1 | `price.momentum_12_1` | price | high | `price.close` | 252 | implemented |
-| 2 | `price.momentum_6_1` | price | high | `price.close` | 126 | catalog_only |
-| 3 | `price.reversal_1m` | price | low | `price.close` | 21 | catalog_only |
-| 4 | `price.volatility_60d` | price | low | `price.close` | 60 | catalog_only |
-| 5 | `price.beta_252d` | price | low | `price.close`, `benchmark.close` | 252 | catalog_only |
-| 6 | `price.max_drawdown_252d` | price | low | `price.close` | 252 | catalog_only |
-| 7 | `price.distance_52w_high` | price | high | `price.close` | 252 | catalog_only |
-| 8 | `price.overnight_return_20d` | price | high | `price.open`, `price.close` | 21 | catalog_only |
+| 1 | `price.momentum_12_1` | price | high | `price.adj_close` | 252 | implemented |
+| 2 | `price.momentum_6_1` | price | high | `price.adj_close` | 126 | catalog_only |
+| 3 | `price.reversal_1m` | price | low | `price.adj_close` | 21 | catalog_only |
+| 4 | `price.volatility_60d` | price | low | `price.adj_close` | 60 | catalog_only |
+| 5 | `price.beta_252d` | price | low | `price.adj_close`, `benchmark.close` | 252 | catalog_only |
+| 6 | `price.max_drawdown_252d` | price | low | `price.adj_close` | 252 | catalog_only |
+| 7 | `price.distance_52w_high` | price | high | `price.adj_close` | 252 | catalog_only |
+| 8 | `price.overnight_return_20d` | price | high | `price.open`, `price.close`, `price.adj_close` | 21 | catalog_only |
 | 9 | `price.intraday_return_20d` | price | high | `price.open`, `price.close` | 21 | catalog_only |
-| 10 | `price.liquidity_amihud_20d` | price | low | `price.close`, `price.volume` | 21 | catalog_only |
+| 10 | `price.liquidity_amihud_20d` | price | low | `price.adj_close`, `price.close`, `price.volume` | 21 | catalog_only |
 | 11 | `financial.book_to_market` | financial | high | `financial.book_equity`, `price.market_cap` | 1 | implemented |
 | 12 | `financial.earnings_yield` | financial | high | `financial.net_income`, `price.market_cap` | 1 | catalog_only |
 | 13 | `financial.sales_to_price` | financial | high | `financial.revenue`, `price.market_cap` | 1 | catalog_only |

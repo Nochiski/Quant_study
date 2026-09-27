@@ -47,7 +47,8 @@ unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로
 경고로 **각각** 건수 기록) + `security_span` 구간 + `adj_factor` factor_ok 행(S07 과 같은 유형
 매핑)이며 `adj_factor` 가 없으면 예외다 — 분할 구간을 사건 없이 돌리는 백테스트는 조용히 틀린다.
 저녁 잠정 행(`basis='evening'`, 규칙 e1.15.0)은 KRX 확정 전 키움 종가라 확정 행과 한 카운터에
-섞지 않는다: "그날 데이터가 깨졌다"(`n_invalid`)와 "잠정이라 뺐다"(`n_provisional`)는 다른 사실이다.
+섞지 않는다: "그날 데이터가 깨졌다"(`invalid_bars`)와 "잠정이라 뺐다"(`n_provisional`)는 다른
+사실이다.
 창 안 마지막 bar 뒤의 사건(정지 중 감자 뒤 상폐)은 엔진이 정산 못 하므로 빼고 경고로 남긴다.
 
 duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑터 생성 시 지연 import
@@ -70,6 +71,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataQuery,
     BacktestDataset,
     CorporateActionRecord,
+    InvalidBarRecord,
     MarketBarRecord,
     UniverseMembershipRecord,
 )
@@ -1032,7 +1034,7 @@ class EquityDuckdbAdapter:
             by_ticker.setdefault(key[0], []).append((security_id, key))
         bars: list[MarketBarRecord] = []
         n_reference = 0
-        n_invalid = 0
+        invalid_bars: list[InvalidBarRecord] = []
         n_provisional = 0
         for ticker, raw_date, open_, high, low, close, volume, kind, basis in price_rows:
             session = _as_date(raw_date, "price_daily.date")
@@ -1052,11 +1054,13 @@ class EquityDuckdbAdapter:
                     continue
                 prices = [_as_float(v, "price") for v in (open_, high, low, close)]
                 if any(p is None or p <= 0 for p in prices):
-                    n_invalid += 1  # GAP-14(open NULL ∧ volume>0) 류 — Bar 가 거절하는 행
+                    # GAP-14(open NULL ∧ volume>0) 류 — Bar 가 거절하는 행. 거래된 날이라 정지와
+                    # 가를 수 있게 세션을 넘긴다(이슈 #241).
+                    invalid_bars.append(InvalidBarRecord(session, security_id))
                     continue
                 o, h, lo, c = (float(p) for p in prices if p is not None)
                 if h < max(o, c) or lo > min(o, c):
-                    n_invalid += 1
+                    invalid_bars.append(InvalidBarRecord(session, security_id))
                     continue
                 bars.append(
                     MarketBarRecord(
@@ -1158,13 +1162,13 @@ class EquityDuckdbAdapter:
                     ),
                 )
             )
-        if n_invalid:
+        if invalid_bars:
             warnings.append(
                 DataWarning(
                     code="equity.invalid_ohlc_rows_dropped",
                     message=(
                         "OHLC가 NULL·0 이하이거나 서로 맞지 않는 행을 버렸다(GAP-14) — "
-                        f"dropped={n_invalid}"
+                        f"dropped={len(invalid_bars)}"
                     ),
                 )
             )
@@ -1190,6 +1194,7 @@ class EquityDuckdbAdapter:
             corporate_actions=tuple(actions),
             benchmark_security_id=query.benchmark_security_id,
             warnings=tuple(warnings),
+            invalid_bars=tuple(invalid_bars),
         )
 
     # ── 패널 코어 ─────────────────────────────────────────────────────────────

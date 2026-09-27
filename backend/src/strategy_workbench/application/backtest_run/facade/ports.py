@@ -7,6 +7,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.backtest_data im
     BacktestDataQuery,
     BacktestDataset,
     CorporateActionRecord,
+    InvalidBarRecord,
     MarketBarRecord,
     UniverseMembershipRecord,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "BacktestExecutorPort",
     "CancellationCheck",
     "CorporateActionRecord",
+    "InvalidBarRecord",
     "MarketBarRecord",
     "ProgressCallback",
     "RunCancelledError",

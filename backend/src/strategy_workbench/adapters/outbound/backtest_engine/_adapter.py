@@ -448,10 +448,14 @@ def _benchmark_warnings(
     """벤치마크 곡선이 bar 그대로가 아닌 세션을 원인별 manifest 경고로 알린다(이슈 #226·#229).
 
     - 첫 bar 전 세션(`benchmark.no_bar_at_start`): 값을 비워 전체 구간 벤치마크 지표가 사용 불가다.
-      상장 전인지 거래정지인지는 멤버십 `first_session`으로 가른다.
-    - 이어 쓴 세션 중 멤버십 `last_session` 이하(`benchmark.suspended_sessions_carried`): 거래정지.
+      상장 전인지 거래정지인지는 멤버십 `first_session`으로, 무효 행인지는 `dataset.invalid_bars`로
+      가른다.
+    - 이어 쓴 세션 중 무효 OHLC 행(`benchmark.invalid_bar_sessions_carried`): 거래된 날인데 원장
+      행이 GAP-14라 bar가 없다(이슈 #241).
+    - 나머지 이어 쓴 세션 중 멤버십 `last_session` 이하(`benchmark.suspended_sessions_carried`):
+      거래정지.
     - 이어 쓴 세션 중 `last_session` 뒤(`benchmark.delisted_sessions_frozen`): 상장이 끝난 뒤 동결.
-      멤버십이 없으면 이어 쓴 세션을 모두 거래정지로 센다.
+      멤버십이 없으면 무효 행이 아닌 이어 쓴 세션을 모두 거래정지로 센다.
 
     화면과 AI 결과 설명은 code와 message를 그대로 쓴다. 코드가 달라 한 목록에서 서로 섞이지 않는다.
     """
@@ -462,19 +466,29 @@ def _benchmark_warnings(
     membership = next(
         (item for item in dataset.memberships if item.security_id == benchmark_id), None
     )
+    invalid = {item.session for item in dataset.invalid_bars if item.security_id == benchmark_id}
     warnings: list[DataWarning] = []
     # 첫 bar 뒤로는 이어 쓰기로 값이 모두 차므로, 값이 없는 세션은 곧 첫 bar 전 세션이다.
     leading = [session for session in ordered if session not in values]
     if leading:
         first_bar = min(values) if values else None
+        leading_invalid = sum(1 for session in leading if session in invalid)
         if membership is not None and ordered and membership.first_session > ordered[0]:
             cause = f"상장 전이다(first_session={membership.first_session.isoformat()})"
         elif first_bar is None:
             cause = "창 안에 벤치마크 종목의 bar가 하나도 없다"
+        elif leading_invalid == len(leading):
+            cause = "창 시작 세션의 원장 행이 무효(GAP-14)였다(거래는 있었다)"
+        elif leading_invalid:
+            cause = (
+                f"창 시작부터 거래정지 중이었고 그중 {leading_invalid}세션은 원장 행이 "
+                "무효(GAP-14)였다"
+            )
         elif membership is not None:
             cause = "창 시작부터 거래정지 중이었다"
         else:
             cause = "상장 전이거나 거래정지 중이었다"
+        invalid_note = f"invalid_sessions={leading_invalid} " if leading_invalid else ""
         warnings.append(
             DataWarning(
                 code="benchmark.no_bar_at_start",
@@ -482,15 +496,30 @@ def _benchmark_warnings(
                     "벤치마크 종목의 첫 bar보다 앞선 세션은 살 수 없어 벤치마크 값을 비웠다 — "
                     f"{cause}. 그래서 전체 구간의 benchmark_return·excess_return은 사용 불가다. "
                     "첫 bar 이후에 시작하는 측정 창은 영향을 받지 않는다. "
-                    f"benchmark={benchmark_id} leading_sessions={len(leading)} "
+                    f"benchmark={benchmark_id} leading_sessions={len(leading)} {invalid_note}"
                     f"first_bar={first_bar.isoformat() if first_bar else '없음'} "
                     f"sessions={_listed_sessions(leading)}"
                 ),
             )
         )
     last_listed = membership.last_session if membership is not None else None
-    suspended = [s for s in carried if last_listed is None or s <= last_listed]
     frozen = [s for s in carried if last_listed is not None and s > last_listed]
+    listed = [s for s in carried if last_listed is None or s <= last_listed]
+    invalid_carried = [s for s in listed if s in invalid]
+    suspended = [s for s in listed if s not in invalid]
+    if invalid_carried:
+        warnings.append(
+            DataWarning(
+                code="benchmark.invalid_bar_sessions_carried",
+                message=(
+                    "벤치마크 종목의 원장 행이 무효(OHLC 결측·0 이하·불일치, GAP-14)라 bar로 내지 "
+                    "않은 세션은 직전 종가(분할·병합 반영)를 이어 썼다 — 거래정지가 아니라 거래된 "
+                    "날이다. 같은 실행의 equity.invalid_ohlc_rows_dropped 경고가 그 행을 센다. "
+                    f"benchmark={benchmark_id} invalid_sessions={len(invalid_carried)} "
+                    f"sessions={_listed_sessions(invalid_carried)}"
+                ),
+            )
+        )
     if suspended:
         warnings.append(
             DataWarning(

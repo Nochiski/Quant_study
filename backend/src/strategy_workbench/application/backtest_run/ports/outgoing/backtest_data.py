@@ -34,6 +34,17 @@ class UniverseMembershipRecord:
 
 
 @dataclass(frozen=True)
+class InvalidBarRecord:
+    """원장 행은 거래(`price_kind='trade'`)인데 OHLC가 무효라 bar로 내지 않은 세션(GAP-14).
+
+    거래정지(기준가 행)와 달리 실제로 거래된 날이다. 벤치마크 경고가 둘을 가르는 데 쓴다(이슈 #241).
+    """
+
+    session: date
+    security_id: str
+
+
+@dataclass(frozen=True)
 class CorporateActionRecord:
     session: date
     security_id: str
@@ -50,6 +61,8 @@ class BacktestDataset:
     corporate_actions: tuple[CorporateActionRecord, ...]
     benchmark_security_id: str | None
     warnings: tuple[DataWarning, ...] = ()
+    # 무효 OHLC 행으로 뺀 (세션, 종목). 원천에 그런 행이 없으면 비어 있다.
+    invalid_bars: tuple[InvalidBarRecord, ...] = ()
 
 
 class BacktestDataPort(Protocol):

@@ -807,7 +807,8 @@ def test_추정_폴백이_임계_아래면_통과한다(make_stage_tree, tmp_pat
     assert _gate(r, "EG3_fin_std").metrics["n_period_end_inferred_recent_over_max"] == 0
 
 
-def _march_fy() -> tuple[list[tuple[str, str | None]],
+def _march_fy(rcept_dt: dict[str, date] | None = None,
+              ) -> tuple[list[tuple[str, str | None]],
                          list[tuple[str, str, str, str, date, date | None, str | None]],
                          list[dict[str, object]], dict[str, date]]:
     """3월 결산 법인 — 2020-04 ~ 2021-03 회계연도와 다음 회계연도의 1~3분기.
@@ -833,7 +834,8 @@ def _march_fy() -> tuple[list[tuple[str, str | None]],
         ("20220214000901", "2021", "11014", date(2022, 2, 14), date(2021, 12, 31), "11013",
          date(2021, 4, 1), 22.0, 24.0),
     ]
-    reports = [(r, corp, y, rc, dt, pt, ac) for r, y, rc, dt, pt, ac, _f, _o, _c in spec]
+    reports = [(r, corp, y, rc, (rcept_dt or {}).get(r, dt), pt, ac)
+               for r, y, rc, dt, pt, ac, _f, _o, _c in spec]
     fin = [row for r, y, rc, _dt, _pt, _ac, _f, op, cf in spec for row in (
         _fin_row(corp, y, rc, r, sj="IS", account_id="ifrs-full_OperatingIncomeLoss",
                  account_nm="영업이익", amount=op),
@@ -869,3 +871,43 @@ def test_비12월_결산은_같은_회계연도_분기로_4분기와_현금흐�
     assert _num(rows["20210813000901"]["cf_operating_q"]) == Decimal(7)
     assert _num(rows["20211115000901"]["cf_operating_q"]) == Decimal(8)
     assert _num(rows["20220214000901"]["cf_operating_q"]) == Decimal(9)
+
+
+def test_파생_공개일은_구성_분기가_늦게_접수되면_그_접수일이다(make_stage_tree,
+                                                             tmp_path: Path) -> None:
+    """#248 리뷰 P2-1 — 3분기(2020-12) 보고서가 사업보고서(2021-06-21)보다 늦은 2021-07-01 에 접수됐다.
+
+    4분기 파생·사업보고서 현금흐름 분기값은 그 3분기 값을 빼므로 2021-07-01 전에는 알 수 없다.
+    파생 공개일이 사업보고서 접수일에 머물면 구성 행 공개 전에 파생이 보인다(look-ahead).
+    """
+    late = date(2021, 7, 1)
+    corps, reports, fin, starts = _march_fy({"20210215000901": late})
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20210621000901", "period_end_basis", "document"), period_from=starts)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    annual = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}["20210621000901"]  # type: ignore[arg-type]
+    assert _num(annual["op_profit_q4_derived"]) == Decimal(13)
+    assert annual["q4_derived_available_date"] == late
+    assert _num(annual["cf_operating_q"]) == Decimal(12)
+    assert annual["cf_q_available_date"] == late
+    assert annual["available_date"] == date(2021, 6, 21)
+
+
+def test_격리된_분기는_파생의_구성_행이_되지_않는다(make_stage_tree, tmp_path: Path) -> None:
+    """#248 리뷰 P3-2 — 3분기 보고서가 접수지연 상한 밖이라 격리됐다(`rcept_lag_out_of_range`).
+
+    소비자가 볼 수 없는 행으로 파생을 만들면 검증할 수 없는 값이 나간다(예전 12월 결산 117행).
+    4분기 파생은 NULL(부분합 금지), 구성 수는 사업보고서 + 1·2분기 = 3, 사업보고서의 현금흐름
+    분기값도 직전 분기가 없어 NULL 이다.
+    """
+    corps, reports, fin, starts = _march_fy({"20210215000901": date(2026, 1, 15)})
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin,
+                    ("20210621000901", "period_end_basis", "document"), period_from=starts)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert [x["reject_reason"] for x in _rejects(r.out_dir)] == [   # type: ignore[arg-type]
+        "rcept_lag_out_of_range"]
+    annual = {str(x["rcept_no"]): x for x in _rows(r.out_dir)}["20210621000901"]  # type: ignore[arg-type]
+    assert annual["op_profit_q4_derived"] is None
+    assert annual["q4_derived_n_rows"] == 3
+    assert annual["cf_operating_q"] is None
+    assert annual["cf_q_n_rows"] == 1

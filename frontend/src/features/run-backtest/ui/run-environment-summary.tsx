@@ -3,7 +3,7 @@ import type { BacktestRunSettingsController } from "../model/use-backtest-run-se
 import {
   runEnvironmentLabel,
   runEnvironmentOptionLabel,
-} from "../model/run-environment-labels";
+} from "../../../entities/backtest";
 import "./run-environment-summary.css";
 
 type RunEnvironmentSummaryProps = {
@@ -22,7 +22,8 @@ export const RunEnvironmentSummary = ({
     environmentFields,
     environmentValues,
     schemaStatus,
-    missingLabels,
+    blockedReason,
+    problemKind,
     openPanelAtFirstProblem,
   } = controller;
   return (
@@ -37,25 +38,7 @@ export const RunEnvironmentSummary = ({
             ? t("backtest.settings.environment.schemaError")
             : t("backtest.settings.environment.schemaLoading")}
         </span>
-      ) : environment === null ? (
-        <>
-          <span className="run-environment-summary__incomplete" role="status">
-            {missingLabels.length > 0
-              ? t("runEnvironment.summary.incomplete").replace(
-                  "{fields}",
-                  missingLabels.join("·"),
-                )
-              : t("backtest.settings.blocked")}
-          </span>
-          <button
-            type="button"
-            className="run-environment-summary__fill"
-            onClick={openPanelAtFirstProblem}
-          >
-            {t("runEnvironment.summary.fill")}
-          </button>
-        </>
-      ) : (
+      ) : environment === null ? null : (
         <dl>
           {environmentFields.map((field) => {
             const value = environmentValues[field.name] ?? "";
@@ -72,6 +55,28 @@ export const RunEnvironmentSummary = ({
           })}
         </dl>
       )}
+      {/* 막힌 이유는 툴바 tooltip 이 아니라 여기서 보이는 문장이다. 버튼이 그 칸으로 초점을 옮긴다
+          (DEFECT-242-01). 문장은 툴바·"적용 후 백테스트" 알림과 같은 `blockedReason` 이다. */}
+      {schemaStatus === "ready" &&
+      blockedReason !== null &&
+      problemKind !== null ? (
+        <>
+          <span className="run-environment-summary__incomplete" role="status">
+            {blockedReason}
+          </span>
+          <button
+            type="button"
+            className="run-environment-summary__fill"
+            onClick={openPanelAtFirstProblem}
+          >
+            {t(
+              problemKind === "missing"
+                ? "runEnvironment.summary.fill"
+                : "runEnvironment.summary.fix",
+            )}
+          </button>
+        </>
+      ) : null}
       <small>{t("runEnvironment.summary.outside")}</small>
     </section>
   );

@@ -7,12 +7,16 @@ import {
   initialRunEnvironmentValues,
   runEnvironmentFields,
   runEnvironmentValuesOf,
+  runEnvironmentWireValues,
   validateRunEnvironment,
   type RunEnvironmentField,
   type RunEnvironmentValidation,
   type RunEnvironmentValues,
 } from "./run-environment";
-import { runEnvironmentLabel } from "./run-environment-labels";
+import {
+  runSettingsBlockedReason,
+  runSettingsProblems,
+} from "./run-settings-problems";
 import {
   buildBacktestRunOptions,
   DEFAULT_BACKTEST_RUN_SETTINGS,
@@ -132,9 +136,13 @@ export const useBacktestRunSettings = (storageKey: string) => {
   const replaceEnvironment = useCallback(
     (next: RunEnvironmentValues): void => {
       setEdited({ key: storageKey, values: next });
-      writeStored(storageKey, next);
+      // 저장은 요청 단위로 한다 — 표시 단위(참여율 %)가 바뀌어도 저장값의 뜻은 그대로다.
+      writeStored(
+        storageKey,
+        runEnvironmentWireValues(environmentFields, next),
+      );
     },
-    [storageKey],
+    [environmentFields, storageKey],
   );
   const setEnvironmentValue = useCallback(
     (name: string, value: string): void =>
@@ -148,11 +156,14 @@ export const useBacktestRunSettings = (storageKey: string) => {
       ),
     [],
   );
+  // 실행을 막는 칸(패널 순서). 차단 문장과 "이 칸으로 가기"가 같은 목록을 읽는다(DEFECT-242-01).
+  const problems = useMemo(
+    () => runSettingsProblems(environmentFields, environment.errors, result),
+    [environment.errors, environmentFields, result],
+  );
   /** 패널을 열고 아직 맞지 않은 첫 칸(없으면 첫 칸)에 초점을 옮긴다. */
   const openPanelAtFirstProblem = useCallback((): void => {
-    const target =
-      environmentFields.find((field) => environment.errors[field.name])?.name ??
-      environmentFields[0]?.name;
+    const target = problems[0]?.target ?? environmentFields[0]?.name;
     setPanel((current) => ({
       open: true,
       focus:
@@ -160,25 +171,15 @@ export const useBacktestRunSettings = (storageKey: string) => {
           ? current.focus
           : { field: target, nonce: (current.focus?.nonce ?? 0) + 1 },
     }));
-  }, [environment.errors, environmentFields]);
-  // 비어 있어서 막힌 칸의 이름. 차단 안내가 "어느 칸을 채우라"를 칸 이름으로 말한다.
-  const missingLabels = useMemo(
-    () =>
-      environmentFields
-        .filter((field) => environment.errors[field.name] === "required")
-        .map(runEnvironmentLabel),
-    [environment.errors, environmentFields],
-  );
+  }, [environmentFields, problems]);
   const blockedReason = result.valid
     ? null
     : schema.isError
       ? t("backtest.settings.environment.schemaError")
-      : missingLabels.length > 0
-        ? t("backtest.settings.incomplete").replace(
-            "{fields}",
-            missingLabels.join("·"),
-          )
-        : t("backtest.settings.blocked");
+      : schema.data === undefined
+        ? t("backtest.settings.environment.schemaLoading")
+        : (runSettingsBlockedReason(problems) ??
+          t("backtest.settings.blocked"));
   /** 업그레이드 응답처럼 완성된 실행 설정으로 칸 전부를 바꾼다(사용자가 누른 뒤에만 부른다). */
   const applyEnvironment = useCallback(
     (next: RunEnvironment): void =>
@@ -204,8 +205,16 @@ export const useBacktestRunSettings = (storageKey: string) => {
     /** 검증을 통과한 실행 설정. 추적·실행 계획 요청이 같은 값을 싣는다. 없으면 null. */
     environment: environment.valid ? environment.environment : null,
     environmentErrors: environment.errors,
-    /** 비어 있는 필수 칸의 이름(차단 안내·요약 띠가 쓴다). */
-    missingLabels,
+    /**
+     * 막힌 칸의 종류. 빈 칸뿐이면 "missing"(요약 띠 버튼이 "실행 설정 채우기"), 값이 틀린 칸이 있으면
+     * "invalid"("실행 설정 고치기"). 막힌 칸이 없으면 null.
+     */
+    problemKind:
+      problems.length === 0
+        ? null
+        : problems.every((problem) => problem.kind === "missing")
+          ? ("missing" as const)
+          : ("invalid" as const),
     /**
      * 실행을 막는 이유 한 문장. 툴바 차단 안내와 "적용 후 백테스트" 알림이 같은 문장을 쓴다. 실행할 수
      * 있으면 null.

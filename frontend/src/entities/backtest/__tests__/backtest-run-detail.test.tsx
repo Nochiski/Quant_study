@@ -8,7 +8,16 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { BacktestRunResult } from "../../../shared/api";
+import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
+import { runEnvironmentFields } from "../model/run-environment-fields";
 import { BacktestRunDetail } from "../ui/backtest-run-detail";
+
+/** backend 가 만든 실행 설정 스키마 사본(`tools/export_runtime_schema.py`). */
+const FIELDS = runEnvironmentFields(
+  JSON.parse(
+    readBackendFixture("strategy_documents/run-environment-schema.json"),
+  ) as Record<string, unknown>,
+);
 
 afterEach(cleanup);
 
@@ -64,8 +73,8 @@ const result = (): BacktestRunResult => ({
 });
 
 describe("run 상세의 실행 설정", () => {
-  it("manifest 의 실행 설정과 environment hash 를 보인다", async () => {
-    render(<BacktestRunDetail result={result()} />);
+  it("manifest 의 실행 설정을 스키마 칸 순서·이름·단위·값 이름으로 보이고 environment hash 를 보인다", async () => {
+    render(<BacktestRunDetail result={result()} environmentFields={FIELDS} />);
     const user = userEvent.setup();
     const drawer = screen.getByRole("group", {
       name: "Manifest · 데이터 경고 · 재현성 정보",
@@ -76,17 +85,51 @@ describe("run 상세의 실행 설정", () => {
 
     const row = (label: string) =>
       within(drawer).getByText(label, { exact: true }).closest("div")!;
-    expect(row("실행 기간")).toHaveTextContent("2023-01-02 → 2026-04-30");
+    // 칸 목록은 손으로 적지 않고 실행 설정 스키마에서 읽는다(DEFECT-242-04). enum 은 패널과 같은 값 이름,
+    // 숫자는 스키마 표시 단위(참여율 %)로 보인다.
+    const labels = within(
+      within(drawer).getByRole("group", { name: "실행 설정" }),
+    )
+      .getAllByRole("term")
+      .map((term) => term.textContent);
+    expect(labels).toEqual([
+      "시장",
+      "빈도",
+      "시작일",
+      "종료일",
+      "유니버스",
+      "체결 시점",
+      "참여율 (%)",
+      "수수료 (bp)",
+      "슬리피지 (bp)",
+      "결측 처리",
+      "실행 설정 hash",
+    ]);
+    expect(row("시장")).toHaveTextContent("한국거래소(KRX)");
+    expect(row("빈도")).toHaveTextContent("일봉");
+    expect(row("시작일")).toHaveTextContent("2023-01-02");
     expect(row("유니버스")).toHaveTextContent("krx.common-stock");
-    expect(row("시장 · 빈도 · 체결")).toHaveTextContent(
-      "KRX · daily · next_open",
-    );
+    expect(row("체결 시점")).toHaveTextContent("다음 거래일 시가");
     // 평면 비용 필드(15bp)가 아니라 실행 설정이 실제로 쓴 값을 보인다(P3-02 결정 4).
-    expect(row("비용 가정")).toHaveTextContent(
-      "수수료 7bp · 슬리피지 3bp · 참여율 0.2",
-    );
-    expect(row("결측 처리")).toHaveTextContent("zero");
+    expect(row("참여율 (%)")).toHaveTextContent("20%");
+    expect(row("수수료 (bp)")).toHaveTextContent("7bp");
+    expect(row("결측 처리")).toHaveTextContent("0으로 채우기");
     expect(row("실행 설정 hash")).toHaveTextContent(`${"e".repeat(16)}…`);
+  });
+
+  it("스키마를 아직 못 읽었으면 기록된 키와 값을 그대로 보인다", async () => {
+    render(<BacktestRunDetail result={result()} environmentFields={null} />);
+    const user = userEvent.setup();
+    const drawer = screen.getByRole("group", {
+      name: "Manifest · 데이터 경고 · 재현성 정보",
+    });
+    await user.click(
+      within(drawer).getByText("Manifest · 데이터 경고 · 재현성 정보"),
+    );
+    const row = within(drawer)
+      .getByText("missing", { exact: true })
+      .closest("div")!;
+    expect(row).toHaveTextContent("zero");
   });
 });
 

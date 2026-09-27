@@ -271,6 +271,16 @@
   margin-top: var(--space-4);
 }
 
+.run-detail .manifest-records {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.run-detail .manifest-environment h5 {
+  margin: 0 0 var(--space-2);
+}
+
 .run-detail .manifest-grid dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

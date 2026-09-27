@@ -7,12 +7,13 @@ import type {
   RunEnvironmentFieldError,
 } from "../model/run-environment";
 import type { BacktestRunSettingsError } from "../model/run-settings";
+import { runEnvironmentErrorMessage } from "../model/run-settings-problems";
 import type { BacktestRunSettingsController } from "../model/use-backtest-run-settings";
 import "./backtest-run-settings.css";
 import {
   runEnvironmentLabel,
   runEnvironmentOptionLabel,
-} from "../model/run-environment-labels";
+} from "../../../entities/backtest";
 
 type BacktestRunSettingsProps = {
   controller: BacktestRunSettingsController;
@@ -21,26 +22,6 @@ type BacktestRunSettingsProps = {
 
 const errorMessage = (error: BacktestRunSettingsError): string =>
   t(`backtest.settings.error.${error}`);
-
-const boundOf = (
-  field: RunEnvironmentField,
-  error: RunEnvironmentFieldError,
-): number | null => {
-  if (error === "minimum") return field.minimum;
-  if (error === "exclusiveMinimum") return field.exclusiveMinimum;
-  if (error === "maximum") return field.maximum;
-  if (error === "exclusiveMaximum") return field.exclusiveMaximum;
-  return null;
-};
-
-const fieldErrorMessage = (
-  field: RunEnvironmentField,
-  error: RunEnvironmentFieldError,
-): string =>
-  t(`backtest.settings.environment.error.${error}`).replace(
-    "{bound}",
-    String(boundOf(field, error) ?? ""),
-  );
 
 const EnvironmentInput = ({
   field,
@@ -67,7 +48,7 @@ const EnvironmentInput = ({
     "aria-describedby": describedBy,
     "aria-invalid": error === undefined ? undefined : true,
     "aria-required": field.required || undefined,
-    "data-env-field": field.name,
+    "data-run-field": field.name,
   } as const;
   return (
     <div className="backtest-settings__field">
@@ -119,7 +100,7 @@ const EnvironmentInput = ({
       )}
       {error === undefined ? null : (
         <small id={errorId} className="backtest-settings__field-error">
-          {fieldErrorMessage(field, error)}
+          {runEnvironmentErrorMessage(field, error)}
         </small>
       )}
     </div>
@@ -159,7 +140,7 @@ export const BacktestRunSettings = ({
     if (handledNonce.current === focusNonce) return;
     handledNonce.current = focusNonce;
     const target = popoverRef.current?.querySelector<HTMLElement>(
-      `[data-env-field="${CSS.escape(focusField)}"]`,
+      `[data-run-field="${CSS.escape(focusField)}"]`,
     );
     target?.focus();
     target?.scrollIntoView?.({ block: "nearest" });
@@ -237,6 +218,7 @@ export const BacktestRunSettings = ({
               inputMode="decimal"
               step="any"
               type="number"
+              data-run-field="initial_cash"
               value={fields.initialCashKrw}
               onChange={(event) =>
                 setField("initialCashKrw", event.target.value)
@@ -263,6 +245,7 @@ export const BacktestRunSettings = ({
               inputMode="numeric"
               step="1"
               type="number"
+              data-run-field="annualization_days"
               value={fields.annualizationDays}
               onChange={(event) =>
                 setField("annualizationDays", event.target.value)
@@ -273,6 +256,7 @@ export const BacktestRunSettings = ({
             <span>{t("backtest.settings.oosStart")}</span>
             <input
               type="date"
+              data-run-field="oos_out_of_range"
               value={fields.oosStart}
               onChange={(event) => setField("oosStart", event.target.value)}
             />

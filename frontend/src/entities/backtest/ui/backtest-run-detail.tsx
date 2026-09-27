@@ -6,6 +6,11 @@ import type {
 import { t, tOptional } from "../../../shared/config";
 import { useId } from "react";
 import { metricPlainCopy } from "../model/metric-copy";
+import {
+  runEnvironmentLabel,
+  runEnvironmentValueLabel,
+  type RunEnvironmentField,
+} from "../model/run-environment-fields";
 import "./backtest-run-detail.css";
 
 type ChartSeries = {
@@ -135,10 +140,35 @@ const MetricCell = ({
   </>
 );
 
+/**
+ * 실행된 실행 설정의 행. 칸 목록·순서·이름·단위·enum 값 이름은 실행 설정 스키마에서 읽는다
+ * (DEFECT-242-04). 스키마를 아직 못 읽었으면 기록된 키와 값을 그대로 보인다.
+ */
+const environmentRows = (
+  environment: BacktestRunResult["manifest"]["environment"],
+  fields: readonly RunEnvironmentField[] | null,
+): { key: string; label: string; value: string }[] => {
+  const record = environment as unknown as Record<string, unknown>;
+  if (fields === null)
+    return Object.entries(record).map(([key, value]) => ({
+      key,
+      label: key,
+      value: value === null || value === undefined ? "—" : String(value),
+    }));
+  return fields.map((field) => ({
+    key: field.name,
+    label: runEnvironmentLabel(field),
+    value: runEnvironmentValueLabel(field, record[field.name]),
+  }));
+};
+
 export const BacktestRunDetail = ({
   result,
+  environmentFields = null,
 }: {
   result: BacktestRunResult;
+  /** 실행 설정 스키마의 칸. page 가 스키마 query 에서 넘긴다. 없으면 기록된 키 그대로 보인다. */
+  environmentFields?: readonly RunEnvironmentField[] | null;
 }) => {
   const titleId = useId();
   const definitions = new Map(
@@ -376,135 +406,115 @@ export const BacktestRunDetail = ({
       >
         <summary>{t("backtest.result.manifest")}</summary>
         <div className="manifest-grid">
-          <dl>
-            <div>
-              <dt>{t("backtest.result.manifest.schema")}</dt>
-              <dd>{result.manifest.schema_version}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.engine")}</dt>
-              <dd>{result.manifest.engine_version}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.core")}</dt>
-              <dd>{result.manifest.engine_core.toUpperCase()}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.initialCash")}</dt>
-              <dd>{result.manifest.initial_cash.toLocaleString("ko-KR")}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.benchmark")}</dt>
-              <dd>{result.manifest.run_spec.benchmark_security_id ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.annualizationDays")}</dt>
-              <dd>{result.manifest.annualization_days}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.metricWindows")}</dt>
-              <dd>
-                {result.manifest.run_spec.metric_windows?.length
-                  ? result.manifest.run_spec.metric_windows
-                      .map(
-                        (window) =>
-                          `${window.scope}: ${window.start} → ${window.end}`,
-                      )
-                      .join(" · ")
-                  : "—"}
-              </dd>
-            </div>
-            {/* 실행 설정은 1.2 부터 전략 문서 밖에 있고 이 기록이 그 값의 유일한 사본이다(Phase 2 감사
-                #16). 같은 전략을 다른 기간으로 돌리면 strategy hash 는 같고 environment hash 만 갈린다. */}
-            <div>
-              <dt>{t("backtest.result.manifest.environment.period")}</dt>
-              <dd>
-                {result.manifest.environment.start} →{" "}
-                {result.manifest.environment.end}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.environment.universe")}</dt>
-              <dd>{result.manifest.environment.universe_id}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.environment.market")}</dt>
-              <dd>
-                {[
-                  result.manifest.environment.market,
-                  result.manifest.environment.frequency,
-                  result.manifest.environment.timing,
-                ]
-                  .filter((value) => value !== undefined)
-                  .join(" · ")}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.environment.costs")}</dt>
-              <dd>
-                {t("backtest.result.manifest.environment.costs.value")
-                  .replace("{fee}", String(result.manifest.environment.fee_bps))
-                  .replace(
-                    "{slippage}",
-                    String(result.manifest.environment.slippage_bps),
-                  )
-                  .replace(
-                    "{participation}",
-                    String(result.manifest.environment.participation_rate),
+          <div className="manifest-records">
+            <dl>
+              <div>
+                <dt>{t("backtest.result.manifest.schema")}</dt>
+                <dd>{result.manifest.schema_version}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.engine")}</dt>
+                <dd>{result.manifest.engine_version}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.core")}</dt>
+                <dd>{result.manifest.engine_core.toUpperCase()}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.initialCash")}</dt>
+                <dd>{result.manifest.initial_cash.toLocaleString("ko-KR")}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.benchmark")}</dt>
+                <dd>{result.manifest.run_spec.benchmark_security_id ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.annualizationDays")}</dt>
+                <dd>{result.manifest.annualization_days}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.metricWindows")}</dt>
+                <dd>
+                  {result.manifest.run_spec.metric_windows?.length
+                    ? result.manifest.run_spec.metric_windows
+                        .map(
+                          (window) =>
+                            `${window.scope}: ${window.start} → ${window.end}`,
+                        )
+                        .join(" · ")
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.fingerprint")}</dt>
+                <dd title={result.manifest.run_fingerprint}>
+                  {result.manifest.run_fingerprint.slice(0, 16)}…
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.strategy")}</dt>
+                <dd>{result.manifest.run_spec.strategy?.title ?? "—"}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.source")}</dt>
+                <dd title={result.manifest.strategy_provenance.spec_hash}>
+                  {result.manifest.strategy_provenance.kind === "saved_revision"
+                    ? `${result.manifest.strategy_provenance.strategy_id} r${result.manifest.strategy_provenance.revision}`
+                    : t("backtest.result.manifest.inline")}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.strategyHash")}</dt>
+                <dd title={result.manifest.strategy_hash}>
+                  {result.manifest.strategy_hash.slice(0, 16)}…
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.targetHash")}</dt>
+                <dd title={result.manifest.target_tape_hash}>
+                  {result.manifest.target_tape_hash.slice(0, 16)}…
+                </dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.snapshot")}</dt>
+                <dd>{result.manifest.data_snapshot_id}</dd>
+              </div>
+              <div>
+                <dt>{t("backtest.result.manifest.completed")}</dt>
+                <dd>
+                  {new Date(result.manifest.completed_at).toLocaleString(
+                    "ko-KR",
                   )}
-              </dd>
+                </dd>
+              </div>
+            </dl>
+            {/* 실행 설정은 1.2 부터 전략 문서 밖에 있고 이 기록이 그 값의 유일한 사본이다(Phase 2 감사
+              #16). 같은 전략을 다른 기간으로 돌리면 strategy hash 는 같고 environment hash 만 갈린다. */}
+            <div
+              className="manifest-environment"
+              role="group"
+              aria-label={t("backtest.result.manifest.environment")}
+            >
+              <h5>{t("backtest.result.manifest.environment")}</h5>
+              <dl>
+                {environmentRows(
+                  result.manifest.environment,
+                  environmentFields,
+                ).map((row) => (
+                  <div key={row.key}>
+                    <dt>{row.label}</dt>
+                    <dd title={row.value}>{row.value}</dd>
+                  </div>
+                ))}
+                <div>
+                  <dt>{t("backtest.result.manifest.environment.hash")}</dt>
+                  <dd title={result.manifest.environment_hash}>
+                    {result.manifest.environment_hash.slice(0, 16)}…
+                  </dd>
+                </div>
+              </dl>
             </div>
-            <div>
-              <dt>{t("backtest.result.manifest.environment.missing")}</dt>
-              <dd>{result.manifest.environment.missing ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.environment.hash")}</dt>
-              <dd title={result.manifest.environment_hash}>
-                {result.manifest.environment_hash.slice(0, 16)}…
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.fingerprint")}</dt>
-              <dd title={result.manifest.run_fingerprint}>
-                {result.manifest.run_fingerprint.slice(0, 16)}…
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.strategy")}</dt>
-              <dd>{result.manifest.run_spec.strategy?.title ?? "—"}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.source")}</dt>
-              <dd title={result.manifest.strategy_provenance.spec_hash}>
-                {result.manifest.strategy_provenance.kind === "saved_revision"
-                  ? `${result.manifest.strategy_provenance.strategy_id} r${result.manifest.strategy_provenance.revision}`
-                  : t("backtest.result.manifest.inline")}
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.strategyHash")}</dt>
-              <dd title={result.manifest.strategy_hash}>
-                {result.manifest.strategy_hash.slice(0, 16)}…
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.targetHash")}</dt>
-              <dd title={result.manifest.target_tape_hash}>
-                {result.manifest.target_tape_hash.slice(0, 16)}…
-              </dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.snapshot")}</dt>
-              <dd>{result.manifest.data_snapshot_id}</dd>
-            </div>
-            <div>
-              <dt>{t("backtest.result.manifest.completed")}</dt>
-              <dd>
-                {new Date(result.manifest.completed_at).toLocaleString("ko-KR")}
-              </dd>
-            </div>
-          </dl>
+          </div>
           <div className="manifest-warnings">
             <h5>{t("backtest.result.warnings")}</h5>
             {(result.manifest.warnings ?? []).length === 0 ? (

@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
@@ -25,7 +31,10 @@ import {
   buildBacktestRunOptions,
   DEFAULT_BACKTEST_RUN_SETTINGS,
 } from "../model/run-settings";
-import { useBacktestRunSettings } from "../model/use-backtest-run-settings";
+import {
+  RUN_ENVIRONMENT_STORAGE_PREFIX,
+  useBacktestRunSettings,
+} from "../model/use-backtest-run-settings";
 import { BacktestRunActions } from "../ui/backtest-run-actions";
 import { BacktestRunSettings } from "../ui/backtest-run-settings";
 import { RunEnvironmentSummary } from "../ui/run-environment-summary";
@@ -357,7 +366,7 @@ describe("run environment panel", () => {
     // 차단 안내와 요약 띠가 "어느 칸을 채우라"를 칸 이름으로 말한다(P3-02 결정 1 보충).
     expect(
       screen.getByRole("region", { name: "실행 설정 요약" }),
-    ).toHaveTextContent("시작일·종료일·유니버스 칸이 비어 있습니다");
+    ).toHaveTextContent("실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.");
     expect(screen.getByTestId("blocked")).toHaveTextContent(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
     );
@@ -394,6 +403,103 @@ describe("run environment panel", () => {
       screen.queryByRole("button", { name: "실행 설정 채우기" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("blocked")).toBeEmptyDOMElement();
+  });
+
+  // DEFECT-242-01: 기간·유니버스를 정한 뒤 다른 칸의 값이 틀리면, 차단 문장이 그 칸 이름과 이유를 말하고
+  // 요약 띠의 버튼이 그 칸으로 초점을 옮긴다. "기간과 유니버스를 정하세요" 같은 고정 문장이 나오면 안 된다.
+  it("names the wrong field and its reason when a filled environment has an out-of-range fee", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const fee = screen.getByRole("spinbutton", { name: /수수료/ });
+    await user.clear(fee);
+    await user.type(fee, "-1");
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+
+    const reason = "실행 설정의 수수료 칸을 고치세요: 0bp 이상이어야 합니다.";
+    expect(screen.getByTestId("blocked")).toHaveTextContent(reason);
+    const band = screen.getByRole("region", { name: "실행 설정 요약" });
+    expect(band).toHaveTextContent(reason);
+    expect(band).not.toHaveTextContent("시작일·종료일·유니버스");
+
+    await user.click(
+      within(band).getByRole("button", { name: "실행 설정 고치기" }),
+    );
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).toHaveFocus();
+  });
+
+  it("points at the end date when the period is reversed and counts the other wrong fields", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const end = screen.getByLabelText(/^종료일/);
+    await user.clear(end);
+    await user.type(end, "2020-12-31");
+    expect(screen.getByTestId("blocked")).toHaveTextContent(
+      "실행 설정의 종료일 칸을 고치세요: 종료일은 시작일과 같거나 그 뒤여야 합니다.",
+    );
+
+    // 여러 칸이 틀리면 스키마 순서의 첫 칸을 말하고 나머지 개수를 붙인다.
+    const slippage = screen.getByRole("spinbutton", { name: /슬리피지/ });
+    await user.clear(slippage);
+    await user.type(slippage, "-5");
+    expect(screen.getByTestId("blocked")).toHaveTextContent(
+      "실행 설정의 종료일 칸을 고치세요: 종료일은 시작일과 같거나 그 뒤여야 합니다. 이 밖에 1칸이 더 맞지 않습니다.",
+    );
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    await user.click(screen.getByRole("button", { name: "실행 설정 고치기" }));
+    expect(screen.getByLabelText(/^종료일/)).toHaveFocus();
+  });
+
+  it("names a run option field when only the run options are wrong", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    await user.clear(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+    );
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+
+    expect(screen.getByTestId("blocked")).toHaveTextContent(
+      "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
+    );
+    const band = screen.getByRole("region", { name: "실행 설정 요약" });
+    await user.click(
+      within(band).getByRole("button", { name: "실행 설정 고치기" }),
+    );
+    expect(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+    ).toHaveFocus();
+  });
+
+  // DEFECT-242-04 (a): 단위는 스키마(`x-unit`·`x-display-unit`)에서 읽는다. 참여율은 %로 보이고 비율로 보낸다.
+  it("shows the participation rate in the schema display unit and sends the ratio", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const participation = screen.getByRole("spinbutton", {
+      name: "참여율 (%)",
+    });
+    expect(participation).toHaveValue(10);
+    expect(screen.getByRole("spinbutton", { name: "수수료 (bp)" })).toHaveValue(
+      15,
+    );
+    await user.clear(participation);
+    await user.type(participation, "25");
+    expect(requestBody()?.environment).toEqual({
+      ...ENVIRONMENT,
+      participation_rate: 0.25,
+    });
+    // 마지막 사용값은 요청 단위(비율)로 저장한다 — 표시 단위가 바뀌어도 저장값의 뜻은 그대로다.
+    const stored = JSON.parse(
+      localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`) ??
+        "{}",
+    ) as Record<string, string>;
+    expect(stored.participation_rate).toBe("0.25");
+    await user.clear(participation);
+    await user.type(participation, "150");
+    expect(screen.getByText("100% 이하여야 합니다.")).toBeInTheDocument();
+    expect(requestBody()).toBeNull();
   });
 
   it.each([
@@ -450,7 +556,7 @@ describe("run environment panel", () => {
     expect(fee).toHaveValue(7);
     await user.clear(fee);
     await user.type(fee, "2");
-    expect(screen.getByText("3 이상이어야 합니다.")).toBeInTheDocument();
+    expect(screen.getByText("3bp 이상이어야 합니다.")).toBeInTheDocument();
   });
 
   it("sends the filled environment and reports schema bounds and date order beside each field", async () => {
@@ -466,11 +572,11 @@ describe("run environment panel", () => {
     const participation = screen.getByRole("spinbutton", { name: /참여율/ });
     await user.clear(participation);
     await user.type(participation, "0");
-    expect(screen.getByText("0보다 커야 합니다.")).toBeInTheDocument();
+    expect(screen.getByText("0%보다 커야 합니다.")).toBeInTheDocument();
     expect(participation).toHaveAttribute("aria-invalid", "true");
     expect(requestBody()).toBeNull();
     await user.clear(participation);
-    await user.type(participation, "0.2");
+    await user.type(participation, "20");
 
     const end = screen.getByLabelText(/^종료일/);
     await user.clear(end);

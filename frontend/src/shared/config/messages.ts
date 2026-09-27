@@ -73,9 +73,8 @@ const ko = {
   "backtest.settings.options": "실행 옵션",
   "runEnvironment.summary.label": "실행 설정 요약",
   "runEnvironment.summary.title": "실행 설정",
-  "runEnvironment.summary.incomplete":
-    "{fields} 칸이 비어 있습니다. 채우면 백테스트와 추적이 열립니다.",
   "runEnvironment.summary.fill": "실행 설정 채우기",
+  "runEnvironment.summary.fix": "실행 설정 고치기",
   "runEnvironment.summary.outside": "전략 문서 밖의 값입니다. 바꿔도 전략 버전은 그대로입니다.",
   "backtest.settings.core": "실행 core",
   "backtest.settings.core.rust": "Persistent Rust",
@@ -89,6 +88,9 @@ const ko = {
   "backtest.settings.oosStart.hint": "실행 기간 안의 날짜입니다. 이날부터 종료일까지를 표본 밖 구간으로 따로 잽니다.",
   "backtest.settings.blocked": "실행 설정의 잘못된 값을 먼저 수정하세요.",
   "backtest.settings.incomplete": "실행 설정에서 {fields} 칸을 채우세요.",
+  "backtest.settings.problem.missing": "실행 설정의 {field} 칸을 채우세요.",
+  "backtest.settings.problem.invalid": "실행 설정의 {field} 칸을 고치세요: {reason}",
+  "backtest.settings.problem.more": "이 밖에 {count}칸이 더 맞지 않습니다.",
   "backtest.settings.error.initial_cash":
     "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
   "backtest.settings.error.annualization_days":
@@ -150,13 +152,7 @@ const ko = {
   "backtest.result.manifest.annualizationDays": "연환산 거래일",
   "backtest.result.manifest.metricWindows": "평가 구간",
   "backtest.result.manifest.fingerprint": "Run fingerprint",
-  "backtest.result.manifest.environment.period": "실행 기간",
-  "backtest.result.manifest.environment.universe": "유니버스",
-  "backtest.result.manifest.environment.market": "시장 · 빈도 · 체결",
-  "backtest.result.manifest.environment.costs": "비용 가정",
-  "backtest.result.manifest.environment.costs.value":
-    "수수료 {fee}bp · 슬리피지 {slippage}bp · 참여율 {participation}",
-  "backtest.result.manifest.environment.missing": "결측 처리",
+  "backtest.result.manifest.environment": "실행 설정",
   "backtest.result.manifest.environment.hash": "실행 설정 hash",
   "backtest.result.manifest.strategy": "Strategy",
   "backtest.result.manifest.source": "Strategy source",
@@ -325,7 +321,7 @@ const ko = {
   "debugger.unavailable.execution-plan":
     "현재 FactorGraph 실행 계획을 확정할 수 없어 추적을 차단했습니다.",
   "debugger.unavailable.environment":
-    "추적은 실행 설정의 기간·유니버스 위에서 돕니다. 실행 설정에서 기간과 유니버스를 정하세요.",
+    "추적은 실행 설정 위에서 돕니다. 위 실행 설정 요약 띠가 고칠 칸을 알려 줍니다.",
   "debugger.blocked.document": "현재 실행 가능한 문서가 없습니다.",
   "debugger.blocked.date": "유효한 기준일을 선택하세요.",
   "debugger.blocked.security": "종목 ID를 1개 이상, 최대 100개 입력하세요.",
@@ -675,9 +671,9 @@ const ko = {
   // 실행 설정 제약 행의 `x-description-key`. 발행처는 `GET /api/v1/run-environments/schema` 이며
   // (owner `domain/backtest`), schema 1.2 에서 전략 문서의 `execution` 섹션이 사라지면서
   // `strategy.contract.execution.*` 세 줄을 이 이름으로 옮겼다(P2-03). 렌더는 P3-02 패널이다.
-  "run_environment.contract.participation_rate": "참여율(비율)",
-  "run_environment.contract.fee_bps": "수수료(bp)",
-  "run_environment.contract.slippage_bps": "슬리피지(bp)",
+  "run_environment.contract.participation_rate": "참여율",
+  "run_environment.contract.fee_bps": "수수료",
+  "run_environment.contract.slippage_bps": "슬리피지",
   "strategy.field.run_environment.market": "시장",
   "strategy.field.run_environment.market.description": "종목과 가격을 읽을 거래소입니다.",
   "strategy.field.run_environment.market.value.KRX": "한국거래소(KRX)",
@@ -1703,9 +1699,8 @@ export const messages = {
     "backtest.settings.options": "Run options",
     "runEnvironment.summary.label": "Run settings summary",
     "runEnvironment.summary.title": "Run settings",
-    "runEnvironment.summary.incomplete":
-      "Empty: {fields}. Fill them to enable backtests and traces.",
     "runEnvironment.summary.fill": "Fill the run settings",
+    "runEnvironment.summary.fix": "Fix the run settings",
     "runEnvironment.summary.outside": "These values live outside the strategy document; changing them keeps the strategy version.",
     "backtest.settings.core": "Execution core",
     "backtest.settings.core.rust": "Persistent Rust",
@@ -1719,6 +1714,9 @@ export const messages = {
     "backtest.settings.oosStart.hint": "A date inside the run period. Measures from this date to the end date as the out-of-sample window.",
     "backtest.settings.blocked": "Fix the invalid run settings first.",
     "backtest.settings.incomplete": "Fill {fields} in the run settings.",
+    "backtest.settings.problem.missing": "Fill {field} in the run settings.",
+    "backtest.settings.problem.invalid": "Fix {field} in the run settings: {reason}",
+    "backtest.settings.problem.more": "{count} more field(s) need attention.",
     "backtest.settings.error.initial_cash":
       "Enter initial capital as a number; the server validates its accepted range.",
     "backtest.settings.error.annualization_days":
@@ -1781,13 +1779,7 @@ export const messages = {
     "backtest.result.manifest.annualizationDays": "Annualization sessions",
     "backtest.result.manifest.metricWindows": "Metric windows",
     "backtest.result.manifest.fingerprint": "Run fingerprint",
-    "backtest.result.manifest.environment.period": "Run period",
-    "backtest.result.manifest.environment.universe": "Universe",
-    "backtest.result.manifest.environment.market": "Market · frequency · execution",
-    "backtest.result.manifest.environment.costs": "Cost assumptions",
-    "backtest.result.manifest.environment.costs.value":
-      "fee {fee}bp · slippage {slippage}bp · participation {participation}",
-    "backtest.result.manifest.environment.missing": "Missing values",
+    "backtest.result.manifest.environment": "Run settings",
     "backtest.result.manifest.environment.hash": "Run settings hash",
     "backtest.result.manifest.strategy": "Strategy",
     "backtest.result.manifest.source": "Strategy source",
@@ -1955,7 +1947,7 @@ export const messages = {
     "debugger.unavailable.execution-plan":
       "Trace is blocked because the current FactorGraph execution plan cannot be pinned.",
     "debugger.unavailable.environment":
-      "A trace runs on the run settings' period and universe. Set them in the run settings.",
+      "A trace runs on the run settings. The run settings summary above names the field to fix.",
     "debugger.blocked.document": "There is no executable current document.",
     "debugger.blocked.date": "Select a valid as-of date.",
     "debugger.blocked.security": "Enter between 1 and 100 security IDs.",
@@ -2312,9 +2304,9 @@ export const messages = {
       "Maximum target weight per security",
     "strategy.contract.risk.max_sector_weight":
       "Maximum target weight per sector",
-    "run_environment.contract.participation_rate": "Participation (ratio)",
-    "run_environment.contract.fee_bps": "Fee (bp)",
-    "run_environment.contract.slippage_bps": "Slippage (bp)",
+    "run_environment.contract.participation_rate": "Participation",
+    "run_environment.contract.fee_bps": "Fee",
+    "run_environment.contract.slippage_bps": "Slippage",
     "strategy.field.run_environment.market": "Market",
     "strategy.field.run_environment.market.description": "Exchange whose securities and prices are read.",
     "strategy.field.run_environment.market.value.KRX": "Korea Exchange (KRX)",

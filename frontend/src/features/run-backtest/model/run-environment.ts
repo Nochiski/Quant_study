@@ -1,33 +1,24 @@
+import {
+  runEnvironmentDisplayValue,
+  runEnvironmentWireNumber,
+  runEnvironmentWireText,
+  type RunEnvironmentField,
+} from "../../../entities/backtest";
 import type { RunEnvironment } from "../../../shared/api";
 
 /**
- * 실행 설정(`RunEnvironment`) 패널의 필드 모델(P3-02, spec D6).
+ * 실행 설정(`RunEnvironment`) 패널의 입력 값과 검증(P3-02, spec D6).
  *
- * 필드 목록·순서·enum·기본값·범위·설명 키·카탈로그는 전부 실행 설정 스키마
- * (`GET /api/v1/run-environments/schema`)에서 읽는다. 필드 이름을 여기 손으로 적지 않는다 — 생성 SDK
- * 타입에는 범위가 없어(pydantic 이 `__post_init__` 를 보지 못한다) 그 타입만 믿으면 서버가 거부할 값을
- * 유효하다고 본다. 이 모듈의 검증은 빠른 피드백이고 최종 판정은 backend 가 한다.
+ * 필드 모델(목록·순서·enum·기본값·범위·단위)은 `entities/backtest` 의 `runEnvironmentFields` 가 스키마에서
+ * 읽는다. 입력 칸 값은 **표시 단위** 문자열이고(참여율은 %), 요청에 실을 때와 저장할 때만 요청 단위로
+ * 바꾼다. 이 모듈의 검증은 빠른 피드백이고 최종 판정은 backend 가 한다.
  */
 
-export type RunEnvironmentControl = "select" | "number" | "date" | "text";
-
-export type RunEnvironmentField = {
-  name: string;
-  control: RunEnvironmentControl;
-  /** enum 값(선택지). enum 이 아니면 빈 배열. */
-  options: readonly string[];
-  /** 스키마 `default` 의 문자열 표기. 없으면 null — 기간·유니버스는 기본값이 없다. */
-  defaultValue: string | null;
-  required: boolean;
-  minimum: number | null;
-  exclusiveMinimum: number | null;
-  maximum: number | null;
-  exclusiveMaximum: number | null;
-  /** 이름(`<key>`)·한 줄 뜻(`<key>.description`)·enum 값 이름(`<key>.value.<값>`)의 stem. */
-  descriptionKey: string | null;
-  /** `x-catalog`. 목록 endpoint 가 없는 카탈로그(`universe`)는 텍스트 입력이다. */
-  catalog: string | null;
-};
+export {
+  runEnvironmentFields,
+  type RunEnvironmentControl,
+  type RunEnvironmentField,
+} from "../../../entities/backtest";
 
 /** 입력 칸의 문자열 값. 필드 이름 → 값. */
 export type RunEnvironmentValues = Readonly<Record<string, string>>;
@@ -52,66 +43,36 @@ export type RunEnvironmentValidation =
 
 type Json = Record<string, unknown>;
 
-const isRecord = (value: unknown): value is Json =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const numberOrNull = (value: unknown): number | null =>
-  typeof value === "number" && Number.isFinite(value) ? value : null;
-
-const stringOrNull = (value: unknown): string | null =>
-  typeof value === "string" ? value : null;
-
-const controlOf = (node: Json): RunEnvironmentControl => {
-  if (Array.isArray(node.enum)) return "select";
-  if (node.type === "number" || node.type === "integer") return "number";
-  if (node.format === "date") return "date";
-  return "text";
-};
-
-/** 스키마 `properties` 순서 그대로의 필드 목록. */
-export const runEnvironmentFields = (schema: Json): RunEnvironmentField[] => {
-  const properties = isRecord(schema.properties) ? schema.properties : {};
-  const required = new Set(
-    Array.isArray(schema.required)
-      ? schema.required.filter(
-          (name): name is string => typeof name === "string",
-        )
-      : [],
-  );
-  return Object.entries(properties).flatMap(([name, node]) => {
-    if (!isRecord(node)) return [];
-    const fallback = node.default;
-    return [
-      {
-        name,
-        control: controlOf(node),
-        options: Array.isArray(node.enum) ? node.enum.map(String) : [],
-        defaultValue:
-          fallback === undefined || fallback === null ? null : String(fallback),
-        required: required.has(name),
-        minimum: numberOrNull(node.minimum),
-        exclusiveMinimum: numberOrNull(node.exclusiveMinimum),
-        maximum: numberOrNull(node.maximum),
-        exclusiveMaximum: numberOrNull(node.exclusiveMaximum),
-        descriptionKey: stringOrNull(node["x-description-key"]),
-        catalog: stringOrNull(node["x-catalog"]),
-      },
-    ];
-  });
-};
-
 /**
  * 패널의 첫 값. 저장된 마지막 사용값이 있으면 그 필드는 그 값, 없으면 스키마 기본값, 기본값도 없으면 빈 칸.
- * 저장값은 스키마에 있는 필드만 받는다(스키마가 바뀐 뒤 남은 옛 키는 버린다).
+ * 저장값은 요청 단위 문자열이라 표시 단위로 바꿔 받고, 스키마에 있는 필드만 받는다(스키마가 바뀐 뒤 남은
+ * 옛 키는 버린다).
  */
 export const initialRunEnvironmentValues = (
   fields: readonly RunEnvironmentField[],
   stored: RunEnvironmentValues | null,
 ): RunEnvironmentValues =>
   Object.fromEntries(
+    fields.map((field) => {
+      const saved = stored?.[field.name];
+      return [
+        field.name,
+        saved === undefined
+          ? (field.defaultValue ?? "")
+          : runEnvironmentDisplayValue(field, saved),
+      ];
+    }),
+  );
+
+/** 표시 단위 칸 값 → 요청 단위 문자열(마지막 사용값 저장용). */
+export const runEnvironmentWireValues = (
+  fields: readonly RunEnvironmentField[],
+  values: RunEnvironmentValues,
+): RunEnvironmentValues =>
+  Object.fromEntries(
     fields.map((field) => [
       field.name,
-      stored?.[field.name] ?? field.defaultValue ?? "",
+      runEnvironmentWireText(field, values[field.name] ?? ""),
     ]),
   );
 
@@ -125,10 +86,9 @@ export const runEnvironmentValuesOf = (
   const record = environment as unknown as Json;
   return Object.fromEntries(
     fields.map((field) => {
-      const value = record[field.name];
       return [
         field.name,
-        value === undefined || value === null ? "" : String(value),
+        runEnvironmentDisplayValue(field, record[field.name]),
       ];
     }),
   );
@@ -188,7 +148,7 @@ export const validateRunEnvironment = (
         errors[field.name] = bound;
         continue;
       }
-      environment[field.name] = value;
+      environment[field.name] = runEnvironmentWireNumber(field, value);
       continue;
     }
     if (field.control === "date" && !validDate(text)) {

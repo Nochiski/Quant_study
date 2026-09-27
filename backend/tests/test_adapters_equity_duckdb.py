@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -88,6 +89,9 @@ ALL_FIELDS = (
     "short.short_sale_value", "short.borrowed_quantity", "credit.margin_balance",
     "event.dividend_per_share", "event.buyback_amount", "event.insider_net_buy",
 )
+
+# 경고 문장이 한글로 완성됐는지 보는 표지(SoT 경고 문장 행, 이슈 #229).
+_HANGUL = re.compile("[가-힣]")
 
 
 @pytest.fixture(scope="module")
@@ -274,7 +278,8 @@ def test_history_is_truncated_at_calendar_start_with_a_warning(
     result = _raw(adapter, start=date(2023, 12, 27), end=date(2023, 12, 28), history=5)
     assert result.ok
     assert result.history_sessions == (WB_SESSIONS[0],)
-    assert any("insufficient calendar for warm-up history" in w for w in result.warnings)
+    # 경고 문장은 한글로 완성하고 재현용 key=value 는 그대로 둔다(SoT, 이슈 #229).
+    assert any("워밍업" in w and "requested=5" in w for w in result.warnings)
 
 
 def _cell(result, as_of: date, security_id: str, field_id: str):
@@ -663,6 +668,7 @@ def test_backtest_dataset_drops_actions_after_the_last_bar_with_a_warning(
     dropped = dataset.warnings[1]
     assert dropped.severity is WarningSeverity.WARNING
     assert "dropped=1" in dropped.message and "000660:1@2024-01-10:reverse_split" in dropped.message
+    assert all(_HANGUL.search(item.message) for item in dataset.warnings)
 
 
 def test_backtest_dataset_counts_provisional_evening_rows_apart_from_invalid_ones(
@@ -684,6 +690,7 @@ def test_backtest_dataset_counts_provisional_evening_rows_apart_from_invalid_one
     warnings = {w.code: w.message for w in dataset.warnings}
     assert "equity.invalid_ohlc_rows_dropped" not in warnings
     assert "dropped=1" in warnings["equity.provisional_rows_dropped"]
+    assert _HANGUL.search(warnings["equity.provisional_rows_dropped"])
 
 
 def test_backtest_dataset_reads_roots_without_the_basis_column(

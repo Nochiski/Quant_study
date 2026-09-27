@@ -1141,7 +1141,7 @@ class EquityDuckdbAdapter:
             DataWarning(
                 code="equity.reference_rows_dropped",
                 message=(
-                    f"price_kind='reference' rows (기준가·정지일) are not emitted as bars — "
+                    "기준가 행(price_kind='reference', 거래정지일)은 bar로 내보내지 않았다 — "
                     f"dropped={n_reference}"
                 ),
                 severity=WarningSeverity.INFO,
@@ -1152,8 +1152,8 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.provisional_rows_dropped",
                     message=(
-                        f"price_daily.basis <> '{CONFIRMED_BASIS}' rows (저녁 잠정판 T 세션 — "
-                        f"KRX 확정 전 키움 종가) are not emitted as bars — "
+                        f"price_daily.basis <> '{CONFIRMED_BASIS}' 행(저녁 잠정판 T 세션 — "
+                        "KRX 확정 전 키움 종가)은 bar로 내보내지 않았다 — "
                         f"dropped={n_provisional}"
                     ),
                 )
@@ -1163,7 +1163,7 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.invalid_ohlc_rows_dropped",
                     message=(
-                        f"rows with NULL/non-positive or inconsistent OHLC dropped (GAP-14) — "
+                        "OHLC가 NULL·0 이하이거나 서로 맞지 않는 행을 버렸다(GAP-14) — "
                         f"dropped={n_invalid}"
                     ),
                 )
@@ -1173,8 +1173,8 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.corporate_action_without_bar_dropped",
                     message=(
-                        "corporate actions with no traded bar at/after the event inside the "
-                        "window were dropped (position frozen at its last trade) — "
+                        "창 안에서 사건 세션이나 그 뒤에 거래된 bar가 없는 기업 행동을 뺐다"
+                        "(포지션은 마지막 체결가에 동결된다) — "
                         f"dropped={len(unsettleable)} "
                         + ", ".join(
                             f"{a.security_id}@{a.session}:{a.action_type}"
@@ -1239,7 +1239,8 @@ class EquityDuckdbAdapter:
         warnings: tuple[str, ...] = ()
         if history_first < 0:
             warnings = (
-                f"insufficient calendar for warm-up history — requested={history} "
+                "워밍업 이력에 쓸 거래일 달력이 모자라 달력 시작부터 읽었다 — "
+                f"requested={history} "
                 f"available={first} calendar_start={self._sessions[0]} start={start}",
             )
             history_first = 0
@@ -1311,7 +1312,8 @@ class EquityDuckdbAdapter:
         warnings: list[str] = []
         if first_index - max_lag < 0 and max_lag > 0:
             warnings.append(
-                f"insufficient calendar for lag — max_lag={max_lag} "
+                "랙만큼 거슬러 올라갈 거래일 달력이 모자라 달력 시작부터 읽었다 — "
+                f"max_lag={max_lag} "
                 f"first_session={window.sessions[0]} calendar_start={self._sessions[0]}"
             )
         fetch_start, fetch_end = self._sessions[fetch_first], window.sessions[-1]

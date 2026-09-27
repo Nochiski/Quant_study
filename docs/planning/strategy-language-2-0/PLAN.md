@@ -864,7 +864,7 @@ P3-01 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 �
 | Head SHA | PR 본문 참조(게이트 실측 SHA 와 같이 적는다) |
 | Full gate | push tip 에서 backend 전체·ruff·pyright·`export_openapi`·`api:generate` diff 0·frontend typecheck·typecheck:e2e·lint·test·build·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e`(잠금 러너) |
 
-P3-02 결정(WORKFLOW 원문이 비워 둔 곳):
+P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
 
 1. **기간·유니버스에는 기본값이 없다.** 실행 설정 스키마가 `start`·`end`·`universe_id` 에 `default` 를 주지
    않는다 — backend 는 요청에 실행 설정이 없으면 기본값을 지어내지 않고 거절한다(`require_environment`).
@@ -888,6 +888,15 @@ P3-02 결정(WORKFLOW 원문이 비워 둔 곳):
    않는다. 배너 문구는 버전 중립으로 바꾸고 은퇴 버전 문자열을 frontend 에 두지 않는다(#15 6키 포함).
 6. **실행 계획 sandbox 요청은 패널의 `missing` 을 싣는다(#3).** 값의 출처가 패널이므로 page 가 edit-strategy
    의 `useExecutionPlans` 에 넘긴다(feature 간 import 금지).
+7. **`factor-plan` 차단 사유는 compile error 로 흡수됐다(확인 항목).** 그래프 결함은 compile 이 먼저 막는다 —
+   compile(P2-07)과 실행 계획 설명이 같은 어댑터 필드 계약을 읽는다. 남는 `factor-plan` 은 계획 조회 대기·전송
+   실패·카탈로그 버전 불일치라 문서 결함이 아니고, 대기 중인 경우는 `isBacktestSettling` 이 "아직 모름"으로
+   따로 다룬다. 결함으로 기록하지 않는다.
+8. **US-DM-05 e2e 를 이 PR 이 쓴다.** 스토리의 e2e 담당은 P3-03 이었지만, 패널·요약 띠·run 상세가 이 PR 에서
+   생기고 "같은 전략, 다른 기간 → 같은 strategy hash" 를 브라우저에서 보는 시나리오(WORKFLOW P3-03 두 번째
+   시나리오)를 같은 흐름으로 확인할 수 있다(`stories/dm.run-environment.spec.ts`). US-DM-05 는 `구현됨-e2e` 로
+   올리고, P3-03 에는 1.1 revision 업그레이드 → 실행 설정 채움 → 저장 → 백테스트 시나리오(US-SM-07 e2e 가 같은
+   흐름을 1.0 revision 으로 이미 돈다)와 골든 이관이 남는다.
 
 ---
 

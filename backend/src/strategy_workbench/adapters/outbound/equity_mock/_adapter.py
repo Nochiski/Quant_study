@@ -528,6 +528,10 @@ def _factor_field_value(
         return 10_000_000_000.0 + security_index * 2_000_000_000.0 + trend * 10_000
     if field_id == "financial.book_equity":
         return 4_000_000_000.0 + security_index * 900_000_000.0 + trend * 1_000
+    if field_id == "financial.net_income":
+        # TTM 은 분기 공시마다 한 번 바뀐다 — 약 63세션(한 분기) 동안 같은 값이다(#212).
+        quarter = session_index // 63
+        return 400_000_000.0 + security_index * 90_000_000.0 + quarter * (security_index + 1) * 1e6
     if field_id == "consensus.forward_eps":
         return 2_000.0 + security_index * 350.0 + trend * 0.2
     if field_id == "flow.foreign_net_buy":

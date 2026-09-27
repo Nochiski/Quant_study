@@ -28,8 +28,10 @@ from strategy_workbench.domain.equity.facade.research_data import DatasetFieldPr
 EXPECTED_SHARED = frozenset(
     {
         "price.close",
+        "price.adj_close",
         "price.market_cap",
         "financial.book_equity",
+        "financial.net_income",
         "consensus.forward_eps",
         "flow.foreign_net_buy",
         "credit.margin_balance",

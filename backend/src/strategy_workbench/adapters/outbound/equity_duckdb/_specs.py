@@ -419,10 +419,19 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
 
 # ── 필드 ──────────────────────────────────────────────────────────────────────
 
-_FIN_PERIOD_NOTE = (
-    "기간 어휘는 report_code 가 정한다 — 11011 은 12개월, 11012·11013·11014 는 3개월이다"
-    "(DEFECT-C02). 즉 as-of 최신 관측이 분기면 3개월 값, 사업보고서면 12개월 값이라 시계열이 "
-    "기간을 섞는다. TTM 합성은 팩터층 몫이고 v_fin_latest 가 ttm_* 를 따로 낸다"
+# 흐름 계정(손익·현금흐름)은 v_fin_latest 의 ttm_* 를 낸다(#212). 원 계정은 보고서 종류가
+# 기간을 정해(11011 12개월 · 11012~14 3개월 손익, 현금흐름은 연초누계 — DEFECT-C02) as-of 최신
+# 관측을 그대로 내면 같은 날 종목마다 기간이 섞였다. TTM 은 뷰가 PIT 로 세운다 — 판단은
+# 뷰(equity 층) 몫이고 어댑터는 컬럼만 고른다.
+_FIN_TTM_NOTE = (
+    "**최근 4분기 합(TTM)** 이다 — 최신 공시가 분기보고서든 사업보고서든 늘 12개월 값이다. "
+    "v_fin_latest 가 회계기간 순서로 분기값(3개월)을 세워 4행을 더한다 — 사업보고서의 4분기는 "
+    "연간 − 같은 회계연도 1분기·반기·3분기라 비12월 결산도 같은 규칙이다. 연속 4분기의 분기값이 "
+    "**이 행의 공시일까지 전부 알 수 있었을 때만** 선다(4분기·현금흐름 분기값이 기대는 창 밖 "
+    "보고서의 접수일까지 본다). 하나라도 비거나(분기 누락·직전 분기 미수집) 늦게 접수됐거나, 창 "
+    "안에 연결·별도가 섞였거나 매출 기준(revenue_basis)이 섞였으면 값은 결측(MISSING)이고 3개월·"
+    "연간 값으로 대신하지 않는다(부분합 금지). available_date 는 창의 마지막 분기 보고서 "
+    "접수일이고, 사업보고서 행의 TTM 은 연간 값과 같다"
 )
 _FIN_EVIDENCE = (
     "equity.duckdb v_fin_latest(as_of) ← fin_std(vintage_kind='api_restated', CFS 우선 "
@@ -559,13 +568,13 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec(
         field_id="financial.revenue",
         source="fin",
-        expr="revenue",
-        label="매출액",
+        expr="ttm_revenue",
+        label="매출액(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
         verdict="부분",
         description=(
-            f"{_FIN_PERIOD_NOTE}. 금융업 470사는 표준계정 매출이 없어 대체 축을 쓴다"
+            f"{_FIN_TTM_NOTE}. 금융업 470사는 표준계정 매출이 없어 대체 축을 쓴다"
             "(revenue_basis ∈ standard·banking_gross·insurance_gross·consensus·unavailable, "
             "GAP-01) — 이 필드는 값만 내고 basis 는 내지 않는다."
         ),
@@ -575,13 +584,13 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec(
         field_id="financial.gross_profit",
         source="fin",
-        expr="gross_profit",
-        label="매출총이익",
+        expr="ttm_gross_profit",
+        label="매출총이익(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
         verdict="지원",
         description=(
-            f"{_FIN_PERIOD_NOTE}. 절단본 커버율 0.945, 삼성전자 2018 111,377,004백만원 = "
+            f"{_FIN_TTM_NOTE}. 절단본 커버율 0.945, 삼성전자 2018 111,377,004백만원 = "
             "매출 − 매출원가 원 단위 일치(DESIGN §10 P30)."
         ),
         disclosure_basis=_FIN_DISCLOSURE,
@@ -590,39 +599,40 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     FieldSpec(
         field_id="financial.operating_income",
         source="fin",
-        expr="op_profit",
-        label="영업이익",
+        expr="ttm_op_profit",
+        label="영업이익(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
         verdict="지원",
-        description=_FIN_PERIOD_NOTE,
+        description=_FIN_TTM_NOTE,
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
     ),
     FieldSpec(
         field_id="financial.net_income",
         source="fin",
-        expr="net_income",
-        label="당기순이익",
+        expr="ttm_net_income",
+        label="당기순이익(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
         verdict="지원",
-        description=_FIN_PERIOD_NOTE,
+        description=_FIN_TTM_NOTE,
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
     ),
     FieldSpec(
         field_id="financial.operating_cash_flow",
         source="fin",
-        expr="cf_operating_ytd",
-        label="영업활동현금흐름(연초누계)",
+        expr="ttm_cf_operating",
+        label="영업활동현금흐름(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
         verdict="부분",
         description=(
-            "현금흐름은 보고서 종류와 무관하게 **연초누계**다(DEFECT-C02). 분기 축(cf_operating_q "
-            "= 자기 누계 − 직전 보고서 누계)은 직전 판본이 없으면 NULL 이라 축을 고르는 것은 "
-            "소비 측 몫이고, 이 필드는 누계 축을 낸다(FIELD_MAP §2 '두 축을 다 싣는다')."
+            f"{_FIN_TTM_NOTE}. 원장 현금흐름은 보고서 종류와 무관하게 연초누계라(DEFECT-C02) 1분기 "
+            "3개월 · 반기 6개월 · 3분기 9개월 · 사업보고서 12개월이 섞였다. TTM 의 분기값"
+            "(자기 누계 − 바로 앞 분기 보고서 누계, 1분기는 누계 그대로)은 직전 보고서가 없으면 "
+            "NULL 이라 손익 TTM 보다 결측이 많을 수 있다. 연초누계 원값은 이 필드로 나가지 않는다."
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,

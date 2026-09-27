@@ -15,6 +15,17 @@
   `price.close`는 같은 날 두 값을 견주는 비율(장중 수익률·목표주가 괴리·배당수익률)과 거래대금에만
   쓴다. 야간 수익률은 수정 시가 필드가 없어 `adj_close[t]/adj_close[t-1] × open[t]/close[t]`로 만든다
   (이슈 #214)
+- 재무 흐름 필드 `financial.revenue`·`gross_profit`·`operating_income`·`net_income`·
+  `operating_cash_flow`는 **최근 4분기 합(TTM)** 이다. 최신 공시가 분기보고서든 사업보고서든 늘
+  12개월 값이고, 연속 4분기가 공시일 기준으로 전부 접수됐을 때만 값이 선다. 4분기를 채울 수 없으면
+  결측이며 3개월·연간 값으로 대신하지 않는다(이슈 #212). 잔고 필드 `financial.book_equity`·
+  `total_assets`·`total_liabilities`는 보고 기간 말 시점 값이라 TTM 대상이 아니다. ROE·ROA·이익수익률
+  같은 비율은 TTM 분자와 최신 잔고 분모를 쓴다. field_id·registry version·data snapshot id는
+  그대로라 이 변경(2026-09-27) 이전 실행과 데이터 스냅샷이 같아도 재무 팩터 값은 다르다 — 이전 실행
+  결과와 재무 팩터 값을 직접 비교하지 않는다(#235)
+- 연결재무제표(CFS)와 별도재무제표(OFS)를 오가는 법인은 전환 뒤 최대 약 7분기 동안 TTM이 비어 있다.
+  창 네 분기와, 사업보고서 4분기를 만드는 앞 3분기가 모두 같은 구분이어야 하기 때문이다. 영구 결측은
+  아니고 같은 구분의 분기가 다시 차면 값이 선다
 - `factor_id`, registry version, graph hash, data snapshot, parameters, as-of range가 재현성 키를 구성
 
 | # | Factor ID | Category | Preference | Required Equity fields | Min history | Status |

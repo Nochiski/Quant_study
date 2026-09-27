@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
@@ -697,6 +697,134 @@ def test_a_hand_edited_v2_file_is_refused_before_it_is_rewritten(tmp_path: Path)
         AssistantDatabase(path)
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+
+
+def _write_v1_file(path: Path) -> None:
+    """v1 스키마(A-03)로 만든 파일. 세션·턴·메시지·이벤트를 하나씩 남긴다(`turn_id` 칸이 없다)."""
+    with sqlite3.connect(path) as connection:
+        for _object_type, _name, statement in _schema.V1_SCHEMA_OBJECTS:
+            connection.execute(statement)
+        connection.execute(f"PRAGMA application_id = {_schema._APPLICATION_ID}")
+        connection.execute("PRAGMA user_version = 1")
+        connection.execute(
+            """
+            INSERT INTO chat_sessions (
+                session_id, ordinal, strategy_id, revision, draft_id,
+                provider_profile_id, created_at, title
+            ) VALUES ('session-v1', 0, NULL, NULL, 'draft-1', 'profile-1',
+                      '2026-09-20T09:00:00.000000+00:00', 'v1 대화')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO chat_turns VALUES (
+                'turn-v1', 'session-v1', 'completed', -1,
+                '2026-09-20T09:01:00.000000+00:00', '2026-09-20T09:02:00.000000+00:00'
+            )
+            """
+        )
+        for ordinal, role, text, created_at in (
+            (0, "user", "샤프 비율이 뭐야?", "2026-09-20T09:01:00.000000+00:00"),
+            (1, "assistant", "위험 한 단위당 수익입니다.", "2026-09-20T09:01:30.000000+00:00"),
+        ):
+            connection.execute(
+                "INSERT INTO chat_messages VALUES ('session-v1', ?, ?, ?, ?)",
+                (ordinal, role, text, created_at),
+            )
+        event_type, event_json = encode_event(TextDelta(text="위험 한 단위당"))
+        connection.execute(
+            "INSERT INTO chat_events VALUES ('session-v1', 0, 'turn-v1', ?, ?)",
+            (event_type, event_json),
+        )
+
+
+def _schema_sql(path: Path) -> dict[str, str]:
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute(
+            "SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name"
+        ).fetchall()
+    return {str(name): str(sql) for name, sql in rows}
+
+
+def _add_orphan_turn(path: Path) -> None:
+    """없는 세션을 가리키는 턴. 외래 키를 끈 연결로만 쓴다 — 올리기의 마지막 검사에 걸리게 한다."""
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute(
+            """
+            INSERT INTO chat_turns VALUES (
+                'turn-orphan', 'no-such-session', 'completed', -1,
+                '2026-09-20T10:00:00.000000+00:00', NULL
+            )
+            """
+        )
+
+
+def test_a_v1_file_climbs_to_v3_without_losing_history(tmp_path: Path) -> None:
+    """v1 파일은 v1 → v2(C-03) → v3(결과 설명) 순서로 한 번에 오른다."""
+    path = tmp_path / "assistant.sqlite3"
+    _write_v1_file(path)
+
+    with AssistantDatabase(path) as database:
+        repository = SQLiteChatSessionRepository(database)
+        old = repository.get("session-v1")
+        assert old.document_ref == DocumentRef(strategy_id=None, revision=None, draft_id="draft-1")
+        assert [
+            (message.role, message.text, message.turn_id)
+            for message in repository.messages("session-v1")
+        ] == [
+            (ChatRole.USER, "샤프 비율이 뭐야?", "turn-v1"),
+            (ChatRole.ASSISTANT, "위험 한 단위당 수익입니다.", "turn-v1"),
+        ]
+        assert [item.event for item in repository.events("session-v1")] == [
+            TextDelta(text="위험 한 단위당")
+        ]
+        run_ref = DocumentRef(strategy_id=None, revision=None, draft_id=None, run_id="run-1")
+        repository.create(_session("session-run", document_ref=run_ref))
+        assert [item.session_id for item in repository.list_for_document(run_ref)] == [
+            "session-run"
+        ]
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert "run_id" in _schema_sql(path)["chat_sessions"]
+    assert "turn_id" in _schema_sql(path)["chat_messages"]
+
+
+@pytest.mark.parametrize(("writer", "version"), [(_write_v1_file, 1), (_write_v2_file, 2)])
+def test_a_failed_upgrade_rolls_back_whole_and_the_retry_is_idempotent(
+    tmp_path: Path, writer: Callable[[Path], None], version: int
+) -> None:
+    """올리기는 한 트랜잭션이다. 마지막 검사에서 실패하면 파일은 원래 버전 그대로 남는다.
+
+    v1 파일은 v2 단계를 지난 뒤 v3 단계 끝(`foreign_key_check`)에서 실패하도록 고아 턴을 심는다.
+    중간 상태(v2 표 모양에 v1 번호)가 남으면 다음 열기가 manifest 검사에서 영영 거부된다. 원인을
+    치운 뒤 다시 열면 오르고, 한 번 더 열어도 아무것도 바뀌지 않는다.
+    """
+    path = tmp_path / "assistant.sqlite3"
+    writer(path)
+    _add_orphan_turn(path)
+    before = _schema_sql(path)
+
+    with pytest.raises(AssistantStorageError, match="parent is missing"):
+        AssistantDatabase(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == version
+    assert _schema_sql(path) == before
+
+    with sqlite3.connect(path) as connection:
+        connection.execute("DELETE FROM chat_turns WHERE turn_id = 'turn-orphan'")
+    with AssistantDatabase(path):
+        pass
+    upgraded = _schema_sql(path)
+    with AssistantDatabase(path) as reopened:
+        sessions = SQLiteChatSessionRepository(reopened)
+        session_id = "session-v1" if version == 1 else "session-old"
+        assert sessions.get(session_id).session_id == session_id
+    assert _schema_sql(path) == upgraded
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
 def test_every_chat_event_union_member_has_a_round_trip_sample() -> None:

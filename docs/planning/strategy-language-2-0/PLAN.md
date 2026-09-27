@@ -973,7 +973,8 @@ Phase exit:
   감사 비차단 담당(리드 지시로 지정, WORKFLOW 각 acceptance 에 예약): NB-2(a) eligibility SoT 행 → P3-01,
   NB-2(b) `run_environment.*` 진단 코드 SoT 행 → P3-02, NB-3 spec D6·D7 구현 결과 단락 → P3-03, NB-4(a) 매니페스트
   평면 비용 필드 유지·제거 → P3-02, NB-6 단위 규칙 SoT 문장 → P3-03. **NB-4(b) `run_fingerprint` 표기 버전은
-  미정 — 리드 결정 필요**: 실행 결과 캐시 lookup 을 도입하는 PR 이 lang2 계획(P3~P6)에 없어 붙일 PR 이 없다.
+  lang2 범위 밖(리드 결정)**: 담당은 캐시 lookup 을 도입하는 PR(미계획)이고, 그 PR 의 acceptance 에서 표기
+  버전을 정한다. 이 필드는 캐시 lookup 이 있어야 의미가 있는데 lang2 계획(P3~P6)에는 그 PR 이 없다.
   NB-2(c)는 P2-09 `17c68261` 이 테스트로 닫았다. BACKLOG-018(원주가 시계열 변화 경고, 리드 결정)을 P3-01 에
   예약했다.
 - 2026-09-27 — P2-09 Phase 2 감사 NB-1 반영(`17c68261`). 업그레이드 체인은 문서가 선언한 은퇴 버전에서만

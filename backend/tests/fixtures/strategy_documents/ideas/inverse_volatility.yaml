@@ -10,12 +10,12 @@ factors:
     graph:
       nodes:
         - kind: field
-          node_id: close
-          field_id: price.close
+          node_id: adj_close
+          field_id: price.adj_close
         - kind: time_series
           node_id: momentum
           operator: momentum
-          input_node_id: close
+          input_node_id: adj_close
           window: 252
           lag: 21
       output_node_id: momentum
@@ -25,12 +25,12 @@ factors:
     graph:
       nodes:
         - kind: field
-          node_id: close
-          field_id: price.close
+          node_id: adj_close
+          field_id: price.adj_close
         - kind: time_series
           node_id: momentum
           operator: momentum
-          input_node_id: close
+          input_node_id: adj_close
           window: 2
         - kind: time_series
           node_id: std

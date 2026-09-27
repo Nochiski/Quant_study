@@ -21,6 +21,7 @@ from strategy_workbench.application.assistant_chat.facade.profiles import (
     ProviderNotInstalledError,
 )
 from strategy_workbench.bootstrap import _assistant as assistant_module
+from strategy_workbench.bootstrap import _http as http_module
 from strategy_workbench.bootstrap._assistant import (
     _AuthoringStrategyCompiler,  # pyright: ignore[reportPrivateUsage]  # reason: composition root가 소유한 port 구현이라 공개 facade가 없다
 )
@@ -196,6 +197,7 @@ def test_the_secrets_file_may_not_live_inside_the_repository() -> None:
             equity_data=container.equity_data,
             factor_registry=_factor_registry(),
             strategy_authoring=container.strategy_authoring,
+            backtest_runs=container.backtest_runs,
         )
 
 
@@ -226,7 +228,10 @@ def test_the_runtime_settings_fall_back_to_the_documented_defaults(
 
     settings = runtime_assistant_settings()
 
-    assert settings.db_path == DEFAULT_ASSISTANT_DB_PATH
+    # conftest가 모듈 기본값을 테스트마다 tmp로 옮긴다(#211). 폴백 대상은 모듈의 그 기본값이고,
+    # 문서화된 실제 위치는 import 시점 값으로 따로 확인한다.
+    assert settings.db_path == http_module.DEFAULT_ASSISTANT_DB_PATH
+    assert DEFAULT_ASSISTANT_DB_PATH.parts[-2:] == (".local", "assistant.sqlite3")
     # `None`은 "OS 규칙이 정하는 사용자 설정 디렉터리"라는 뜻이고, 그 계산의 owner는 어댑터다.
     assert settings.secrets_path is None
     assert settings.allow_insecure_base_url is False

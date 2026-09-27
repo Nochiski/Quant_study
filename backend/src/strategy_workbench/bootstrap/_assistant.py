@@ -55,6 +55,12 @@ from strategy_workbench.application.assistant_chat.facade.context import Assista
 from strategy_workbench.application.assistant_chat.facade.ports import LlmProviderPort
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
+from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestResultNotReadyError,
+    BacktestRunNotFoundError,
+    BacktestRunResult,
+    BacktestRunService,
+)
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
@@ -317,6 +323,7 @@ def build_assistant_services(
     equity_data: EquityDataPort,
     factor_registry: FactorRegistry,
     strategy_authoring: StrategyAuthoringService,
+    backtest_runs: BacktestRunService,
     today: Callable[[], date] = date.today,
 ) -> AssistantServices:
     """프로파일·세션 저장소부터 턴 러너까지 한 그래프로 묶는다.
@@ -349,6 +356,7 @@ def build_assistant_services(
         equity_data=equity_data,
         factor_registry=factor_registry,
         compiler=compiler,
+        backtest_results=_RunServiceBacktestResults(backtest_runs),
         today=today,
     )
     chat = AssistantChatService(
@@ -395,6 +403,24 @@ class _AuthoringStrategyCompiler:
                 for diagnostic in compiled.diagnostics
             ),
         )
+
+
+class _RunServiceBacktestResults:
+    """`BacktestResultPort` 구현: 실행 레지스트리의 완료 결과를 그대로 넘긴다(결과 설명 spec R2).
+
+    `_AuthoringStrategyCompiler`와 같은 모양이다. 어시스턴트가 `backtest_run` 유스케이스를
+    import하지 않도록 bootstrap이 감싼다. "없음"과 "아직 안 끝남"을 None 하나로 접는 것만
+    한다 — 어시스턴트 쪽 대응이 같다(설명할 결과가 없다).
+    """
+
+    def __init__(self, runs: BacktestRunService) -> None:
+        self._runs = runs
+
+    def completed_result(self, run_id: str) -> BacktestRunResult | None:
+        try:
+            return self._runs.result(run_id)
+        except (BacktestRunNotFoundError, BacktestResultNotReadyError):
+            return None
 
 
 def _now() -> datetime:

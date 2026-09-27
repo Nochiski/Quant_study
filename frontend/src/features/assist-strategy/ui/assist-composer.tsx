@@ -11,6 +11,8 @@ type AssistComposerProps = {
   running: boolean;
   /** 세션 생성·턴 시작 요청이 도는 중. 같은 질문을 두 번 보내지 않게 막는다. */
   busy: boolean;
+  /** 입력칸 안내. 붙은 화면이 무엇을 묻는 곳인지에 따라 다르다. */
+  placeholder: string;
   onSend: (text: string) => void;
   onCancel: () => void;
 };
@@ -26,6 +28,7 @@ export const AssistComposer = ({
   restore,
   running,
   busy,
+  placeholder,
   onSend,
   onCancel,
 }: AssistComposerProps) => {
@@ -72,7 +75,7 @@ export const AssistComposer = ({
         id={inputId}
         rows={3}
         value={text}
-        placeholder={t("assistant.chat.input.placeholder")}
+        placeholder={placeholder}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={onKeyDown}
       />

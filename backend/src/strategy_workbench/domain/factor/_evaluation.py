@@ -205,84 +205,132 @@ def _compute_nodes(
     올리고, 창 연산이라 가장 오래 걸리는 시계열 노드는 종목 하나를 끝낼 때마다 그 몫 안에서 올린다
     (이슈 #162). 누적은 정수 가중치 합이라 끝값이 정확히 1.0 이다. 보고 빈도 조절은 호출자 몫이다.
     """
-    nodes = {node.node_id: node for node in graph.nodes}
-    parameter_values = {parameter.parameter_id: parameter.value for parameter in parameters}
-    computed: dict[str, list[FactorComputedValue]] = {}
-    total_weight = _reachable_progress_weight(graph.output_node_id, nodes)
-    completed_weight = 0
+    evaluator = _NodeEvaluator(
+        graph,
+        observations=observations,
+        missing=missing,
+        parameters=parameters,
+        checkpoint=checkpoint,
+        progress=progress,
+    )
+    evaluator.evaluate(graph.output_node_id)
+    return evaluator.computed
 
-    def advance_within_node(node: ExpressionNode, fraction: float) -> None:
-        progress((completed_weight + fraction * _node_progress_weight(node)) / total_weight)
 
-    def evaluate(node_id: str) -> list[FactorComputedValue]:
-        nonlocal completed_weight
-        checkpoint()
-        if node_id in computed:
-            return computed[node_id]
+class _NodeEvaluator:
+    """노드 캐시를 채우는 재귀 평가기. `_compute_nodes` 한 번의 호출 동안만 산다.
+
+    예전에는 재귀를 클로저(`evaluate` 가 자기 이름을 부르는 내부 함수)로 했는데, 그 함수는 자기
+    cell 로 자신을 참조하는 순환(함수 → cell → 함수)을 남긴다. cell 들이 `observations` 를 쥐어
+    평가가 끝나도 관측 튜플 전체가 참조 카운트로 풀리지 않고 다음 전체 수집(2세대)을 기다렸다 —
+    4년 실데이터에서 약 830만 객체, run 종료 뒤 수 GB(이슈 #196). 메서드 재귀는 호출마다 바운드
+    메서드를 잠깐 만들 뿐 인스턴스가 자신을 붙잡지 않으므로, 호출이 끝나면 참조 카운트로 풀린다.
+    """
+
+    def __init__(
+        self,
+        graph: FactorGraph,
+        *,
+        observations: tuple[FactorObservation, ...],
+        missing: MissingPolicy,
+        parameters: tuple[ResolvedFactorParameter, ...],
+        checkpoint: Callable[[], None],
+        progress: Callable[[float], None],
+    ) -> None:
+        self._nodes = {node.node_id: node for node in graph.nodes}
+        self._parameter_values = {
+            parameter.parameter_id: parameter.value for parameter in parameters
+        }
+        self._observations = observations
+        self._missing = missing
+        self._checkpoint = checkpoint
+        self._progress = progress
+        self._computed: dict[str, list[FactorComputedValue]] = {}
+        self._total_weight = _reachable_progress_weight(graph.output_node_id, self._nodes)
+        self._completed_weight = 0
+
+    @property
+    def computed(self) -> dict[str, list[FactorComputedValue]]:
+        return self._computed
+
+    def _advance_within_node(self, node: ExpressionNode, fraction: float) -> None:
+        self._progress(
+            (self._completed_weight + fraction * _node_progress_weight(node)) / self._total_weight
+        )
+
+    def evaluate(self, node_id: str) -> list[FactorComputedValue]:
+        self._checkpoint()
+        if node_id in self._computed:
+            return self._computed[node_id]
         try:
-            node = nodes[node_id]
+            node = self._nodes[node_id]
         except KeyError as error:
             raise ValueError(
                 f"factor evaluation references unknown node — node_id={node_id!r}"
             ) from error
-        inputs = [evaluate(dependency) for dependency in node_dependencies(node)]
+        inputs = [self.evaluate(dependency) for dependency in node_dependencies(node)]
         values: list[FactorComputedValue]
         if isinstance(node, FieldNode):
-            values = _field_values(observations, node.field_id, missing, checkpoint=checkpoint)
+            values = _field_values(
+                self._observations, node.field_id, self._missing, checkpoint=self._checkpoint
+            )
         elif isinstance(node, ConstantNode):
-            values = [node.value for _ in _checkpointed(observations, checkpoint)]
+            values = [node.value for _ in _checkpointed(self._observations, self._checkpoint)]
         elif isinstance(node, ParameterNode):
-            if node.parameter_id not in parameter_values:
+            if node.parameter_id not in self._parameter_values:
                 raise ValueError(
                     "factor evaluation parameter is unresolved — "
                     f"node_id={node.node_id!r} parameter_id={node.parameter_id!r}"
                 )
-            value = parameter_values[node.parameter_id]
+            value = self._parameter_values[node.parameter_id]
             if isinstance(value, (str, bool)):
                 raise ValueError(
                     "numeric factor parameter has incompatible value — "
                     f"parameter_id={node.parameter_id!r} value={value!r}"
                 )
-            values = [float(value) for _ in _checkpointed(observations, checkpoint)]
+            values = [float(value) for _ in _checkpointed(self._observations, self._checkpoint)]
         elif isinstance(node, BinaryNode):
             values = [
                 _binary(node.operator, left, right)
-                for left, right in _checkpointed(zip(*inputs, strict=True), checkpoint)
+                for left, right in _checkpointed(zip(*inputs, strict=True), self._checkpoint)
             ]
         elif isinstance(node, ComparisonNode):
             values = [
                 _compare(node.operator, left, right)
-                for left, right in _checkpointed(zip(*inputs, strict=True), checkpoint)
+                for left, right in _checkpointed(zip(*inputs, strict=True), self._checkpoint)
             ]
         elif isinstance(node, ConditionalNode):
             values = [
                 true_value if predicate is True else false_value if predicate is False else None
                 for predicate, true_value, false_value in _checkpointed(
-                    zip(*inputs, strict=True), checkpoint
+                    zip(*inputs, strict=True), self._checkpoint
                 )
             ]
         elif isinstance(node, UnaryNode):
-            values = _unary(node, inputs[0], observations, checkpoint=checkpoint)
+            values = _unary(node, inputs[0], self._observations, checkpoint=self._checkpoint)
         elif isinstance(node, TimeSeriesNode):
             values = _time_series(
                 node,
                 inputs[0],
-                observations,
-                checkpoint=checkpoint,
-                advance=lambda fraction: advance_within_node(node, fraction),
+                self._observations,
+                checkpoint=self._checkpoint,
+                advance=lambda fraction: self._advance_within_node(node, fraction),
             )
         elif isinstance(node, CrossSectionalNode):
-            values = _cross_sectional(node, inputs[0], observations, checkpoint=checkpoint)
+            values = _cross_sectional(
+                node, inputs[0], self._observations, checkpoint=self._checkpoint
+            )
         elif isinstance(node, GroupNode):
-            values = _group_transform(node, inputs[0], observations, checkpoint=checkpoint)
-        _require_finite_values(node.node_id, values, observations, checkpoint=checkpoint)
-        computed[node_id] = values
-        completed_weight += _node_progress_weight(node)
-        progress(completed_weight / total_weight)
+            values = _group_transform(
+                node, inputs[0], self._observations, checkpoint=self._checkpoint
+            )
+        _require_finite_values(
+            node.node_id, values, self._observations, checkpoint=self._checkpoint
+        )
+        self._computed[node_id] = values
+        self._completed_weight += _node_progress_weight(node)
+        self._progress(self._completed_weight / self._total_weight)
         return values
-
-    evaluate(graph.output_node_id)
-    return computed
 
 
 # 노드 계산이 평가 진행에서 차지하는 몫. 나머지는 출력 값 조립이다(4년 구간 실측 약 4%).

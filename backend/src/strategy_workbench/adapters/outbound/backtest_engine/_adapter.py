@@ -26,6 +26,7 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
     BacktestEnginePortfolioAdapter,
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataset,
     BacktestExecutionRequest,
     CancellationCheck,
     MarketBarRecord,
@@ -252,7 +253,7 @@ class BacktestEngineExecutorAdapter:
         # artifact로 다시 옮겨질 중간 산물일 뿐이라 만들 이유가 없다.
         tables = engine.event_store.result_tables()
         artifacts, outcomes = _artifacts(tables)
-        benchmark = _benchmark_values(request)
+        benchmark = _benchmark_values(request.dataset, request.spec.initial_cash)
         # net exposure 공식은 `_artifacts`가 단일 정본이다 — 여기서 다시 계산하지 않는다.
         points = tuple(
             AnalysisPoint(
@@ -348,15 +349,51 @@ class BacktestEngineExecutorAdapter:
             raise RunCancelledError("run cancelled")
 
 
-def _benchmark_values(request: BacktestExecutionRequest) -> dict[date, float]:
-    benchmark_id = request.dataset.benchmark_security_id
+# 엔진이 보유 수량에 적용하는 확인된 사건(`_apply_corporate_action`)과 같은 집합이다. 알림 전용
+# 사건(주식 수 변화만 확인)은 가격 반비례가 확인되지 않아 곡선도 조정하지 않는다.
+_PRICE_ADJUSTING_ACTIONS = frozenset(
+    {CorporateActionType.SPLIT.value, CorporateActionType.REVERSE_SPLIT.value}
+)
+
+
+def _benchmark_values(dataset: BacktestDataset, initial_cash: float) -> dict[date, float]:
+    """벤치마크 종목을 첫 세션에 `initial_cash`어치 사서 들고 있는 곡선.
+
+    bar는 원주가라 분할·병합 날 끊긴다. 엔진이 전략 보유 수량에 적용하는 것과 같은 사건
+    (`dataset.corporate_actions`의 split·reverse_split, `ratio` = 주식 수 배율)을 사건 세션부터
+    누적해 곱하면 보유자가 실제로 가진 가치가 된다(이슈 #219). 사건 세션에 bar가 없으면 다음 bar부터
+    반영된다. 첫 bar 이전·당일 사건은 기준값에도 곱해져 곡선을 움직이지 않는다.
+    """
+    benchmark_id = dataset.benchmark_security_id
     if benchmark_id is None:
         return {}
-    bars = tuple(item for item in request.dataset.bars if item.security_id == benchmark_id)
+    bars = sorted(
+        (item for item in dataset.bars if item.security_id == benchmark_id),
+        key=lambda item: item.session,
+    )
     if not bars:
         return {}
-    first = bars[0].close
-    return {item.session: request.spec.initial_cash * item.close / first for item in bars}
+    actions = sorted(
+        (
+            (item.session, float(item.ratio))
+            for item in dataset.corporate_actions
+            if item.security_id == benchmark_id and item.action_type in _PRICE_ADJUSTING_ACTIONS
+        ),
+        key=lambda item: item[0],
+    )
+    values: dict[date, float] = {}
+    cumulative = 1.0
+    applied = 0
+    base: float | None = None
+    for bar in bars:
+        while applied < len(actions) and actions[applied][0] <= bar.session:
+            cumulative *= actions[applied][1]
+            applied += 1
+        adjusted = bar.close * cumulative
+        if base is None:
+            base = adjusted
+        values[bar.session] = initial_cash * adjusted / base
+    return values
 
 
 def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:

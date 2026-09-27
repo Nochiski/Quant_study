@@ -1,5 +1,6 @@
 # lang2 완료 정의 아이디어 3 — 20일 이평 돌파(spec 5절). 정본 형태는 노드 4개, 그중 잎 2개다(spec D2):
-# close → mean(20) → 잎 close_2 → gt(left=close_2, right=mean). 체인 머리(close)를 다시 읽지 않는다.
+# adj_close → mean(20) → 잎 adj_close_2 → gt(left=adj_close_2, right=mean). 체인 머리(adj_close)를
+# 다시 읽지 않는다. 종가와 이평 모두 수정주가로 재야 분할·병합 날 가짜 돌파가 없다(이슈 #214).
 # node_id 는 빌더 규칙(연산자·필드 이름, 겹치면 `_2`)이다. 비교 출력(참/거짓)은 compile 이 0/1 점수로
 # 승격한다(P2-07).
 schema_version: "1.2"
@@ -11,20 +12,20 @@ factors:
     graph:
       nodes:
         - kind: field
-          node_id: close
-          field_id: price.close
+          node_id: adj_close
+          field_id: price.adj_close
         - kind: time_series
           node_id: mean
           operator: mean
-          input_node_id: close
+          input_node_id: adj_close
           window: 20
         - kind: field
-          node_id: close_2
-          field_id: price.close
+          node_id: adj_close_2
+          field_id: price.adj_close
         - kind: comparison
           node_id: gt
           operator: gt
-          left_node_id: close_2
+          left_node_id: adj_close_2
           right_node_id: mean
       output_node_id: gt
 portfolio:

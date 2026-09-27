@@ -25,9 +25,11 @@ const EVERY_CODE = Object.keys({
   "assistant.provider.not_found": true,
   "assistant.provider_not_installed": true,
   "assistant.provider_secret_missing": true,
+  "assistant.result_unavailable": true,
   "assistant.session.not_found": true,
   "assistant.turn.not_found": true,
   "assistant.turn_in_progress": true,
+  "assistant.turn_context_mismatch": true,
 } satisfies Record<AssistantRejectionCode, true>) as AssistantRejectionCode[];
 
 /** 일반 문구로 두기로 정한 코드. 이미 끝난 턴의 중지 거절은 이력이 곧 설명한다. */

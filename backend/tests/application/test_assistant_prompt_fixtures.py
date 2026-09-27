@@ -20,7 +20,7 @@ from types import ModuleType
 
 import pytest
 
-from strategy_workbench.domain.assistant.facade.tools import ASSISTANT_TOOLS
+from strategy_workbench.domain.assistant.facade.tools import ASSISTANT_TOOLS, RESULT_EXPLAIN_TOOLS
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 _TOOLS_DIR = _BACKEND_ROOT / "tools"
@@ -111,3 +111,16 @@ def test_the_notice_golden_is_a_flat_map_of_non_empty_korean_sentences(
     assert notices
     for key, sentence in notices.items():
         assert isinstance(sentence, str) and sentence.strip(), key
+
+
+def test_the_result_explain_goldens_carry_only_the_result_tool(exporter: ModuleType) -> None:
+    """결과 설명 세션의 도구·프롬프트가 전략 도구를 부르면 모드 경계가 무너진다(spec R5)."""
+    entries = json.loads((exporter.FIXTURE_DIR / "result_tools.json").read_text(encoding="utf-8"))
+    prompt = (exporter.FIXTURE_DIR / "result_explain_prompt.ko.md").read_text(encoding="utf-8")
+
+    assert [entry["name"] for entry in entries] == [spec.name for spec in RESULT_EXPLAIN_TOOLS]
+    for entry in entries:
+        assert entry["input_schema"]["additionalProperties"] is False, entry["name"]
+        assert "required" in entry["input_schema"], entry["name"]
+    assert [spec.name for spec in RESULT_EXPLAIN_TOOLS if spec.name not in prompt] == []
+    assert [spec.name for spec in ASSISTANT_TOOLS if spec.name in prompt] == []

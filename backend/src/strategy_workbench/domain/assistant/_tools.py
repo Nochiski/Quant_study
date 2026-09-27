@@ -21,7 +21,9 @@ __all__ = [
     "LIST_EQUITY_FIELDS",
     "LIST_FACTOR_CATALOG",
     "PROPOSE_STRATEGY",
+    "READ_BACKTEST_RESULT",
     "READ_CURRENT_STRATEGY",
+    "RESULT_EXPLAIN_TOOLS",
     "VALIDATE_STRATEGY_YAML",
 ]
 
@@ -30,6 +32,7 @@ LIST_EQUITY_FIELDS = "list_equity_fields"
 LIST_FACTOR_CATALOG = "list_factor_catalog"
 VALIDATE_STRATEGY_YAML = "validate_strategy_yaml"
 PROPOSE_STRATEGY = "propose_strategy"
+READ_BACKTEST_RESULT = "read_backtest_result"
 
 
 def _no_input() -> dict[str, object]:
@@ -129,5 +132,20 @@ ASSISTANT_TOOLS: tuple[ToolSpec, ...] = (
             "required": ["title", "summary", "rationale", "sources", "source_text"],
             "additionalProperties": False,
         },
+    ),
+)
+
+# 결과 설명 세션이 받는 도구(결과 설명 spec R2·R5). 전략 도구와 섞지 않는다 — 결과 화면에는 적용할
+# 편집기가 없어 제안 도구를 주면 모델이 쓸모없는 제안을 만들고, 문서를 읽는 도구는 읽을 문서가 없다.
+RESULT_EXPLAIN_TOOLS: tuple[ToolSpec, ...] = (
+    ToolSpec(
+        name=READ_BACKTEST_RESULT,
+        description=(
+            "사용자가 보고 있는 백테스트 실행 하나의 결과 요약을 돌려준다. 기간과 실행 설정, "
+            "전략 요약, 성과 지표(이름·단위·높을수록 좋은지·값), 자산 곡선의 처음과 끝, "
+            "가장 깊은 낙폭의 날짜, 최근 월별 수익률, 데이터 경고를 담는다. 길이 상한 때문에 "
+            "덜어 낸 항목은 omitted에 개수로 적힌다. 답하기 전에 반드시 먼저 호출한다."
+        ),
+        input_schema=_no_input(),
     ),
 )

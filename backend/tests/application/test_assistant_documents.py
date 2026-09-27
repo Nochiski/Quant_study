@@ -55,6 +55,37 @@ def test_a_draft_reference_with_a_revision_is_rejected() -> None:
         DocumentRef(strategy_id=None, revision=99, draft_id="draft-9")
 
 
+def test_a_run_reference_names_one_completed_backtest() -> None:
+    """결과 설명 세션은 실행 하나에 붙는다(결과 설명 spec R3)."""
+    reference = DocumentRef(strategy_id=None, revision=None, draft_id=None, run_id="run-7")
+
+    assert reference.run_id == "run-7"
+    assert reference.is_result
+
+
+def test_strategy_and_draft_references_are_not_results() -> None:
+    assert not DocumentRef(strategy_id="strategy-1", revision=3, draft_id=None).is_result
+    assert not DocumentRef(strategy_id=None, revision=None, draft_id="draft-9").is_result
+
+
+@pytest.mark.parametrize(
+    ("strategy_id", "draft_id"),
+    [("strategy-1", None), (None, "draft-9")],
+)
+def test_a_run_reference_cannot_also_name_a_document(
+    strategy_id: str | None, draft_id: str | None
+) -> None:
+    with pytest.raises(ValueError, match="exactly one") as raised:
+        DocumentRef(strategy_id=strategy_id, revision=None, draft_id=draft_id, run_id="run-7")
+
+    assert "run_id='run-7'" in str(raised.value)
+
+
+def test_a_run_reference_with_a_revision_is_rejected() -> None:
+    with pytest.raises(ValueError, match="run document_ref has no revision"):
+        DocumentRef(strategy_id=None, revision=2, draft_id=None, run_id="run-7")
+
+
 def test_compile_payload_reports_a_passing_document() -> None:
     result = ProposalCompileResult(ok=True, spec_hash="spec-hash-1", diagnostics=())
 

@@ -75,6 +75,9 @@ FIN_LAG_SESSIONS = 0        # 재무 available_date 컷오프 기본 랙(세션)
 # 분기 하나가 빠지면 4행 창이 5분기에 걸쳐 365일 이상이 되므로 상한은 그보다 작아야 한다. 400 이던
 # 동안 누락 창이 TTM 으로 섰다(실원장 289행, #212) — 정상 창과 누락 창 사이(281~364일)는 실측 0행이다.
 TTM_SPAN_MIN_DAYS, TTM_SPAN_MAX_DAYS = 240, 300
+# 인접 분기 보고서의 period_end 간격(일) — 실원장 90~92일(비분기말 결산도 분기 간격이다). 현금흐름
+# 분기값(누계 − 직전 누계)은 직전 행이 바로 앞 분기일 때만 선다.
+QUARTER_GAP_MIN_DAYS, QUARTER_GAP_MAX_DAYS = 80, 100
 
 # 매크로 이름 → (시그니처, 읽는 테이블). 시그니처는 catalog._MACRO_NAME_RE 규약.
 SIGNATURES: dict[str, str] = {
@@ -294,10 +297,19 @@ WHERE rn = 1
     #      리터럴로 본다.
     #   ② 재무제표 구분: (corp_code, period_end, report_code) 당 **CFS 우선** 한 행 → `fs_div_used`.
     #      동률은 available_date 최신 → rcept_no 최신(정정 재제출).
-    #   ③ TTM: 3개월 축(`report_code='11011'` 은 `<계정>_q4_derived`, 나머지는 원 계정 — 현금흐름은
-    #      `_q`)의 4행 합인데 **4분기가 전부 보일 때만**이다. 조건 셋을 다 건다 — 창의 non-null 이
-    #      4개 · 창의 period_end 폭이 3분기(240~300일) · 창 안 모든 행의 available_date 가 이 행의
-    #      available_date 이하(정정 재제출로 옛 분기가 나중에 접수되면 그 행에서만 TTM 이 선다).
+    #   ③ TTM: 분기값(3개월) 4행 합인데 **4분기가 전부 보일 때만**이다. 분기값은 뷰가 회계기간 축
+    #      (법인별 period_end 순서)에서 직접 만든다 — fin_std 의 `<계정>_q4_derived`·`cf_operating_q`
+    #      는 `bsns_year` 로 묶여 비12월 결산에서 다른 회계연도 분기로 만들어지고(#227 리뷰 P1-1),
+    #      창 밖 분기에 기대는데도 공개일 가드를 받지 않았다(P1-2). 그래서 쓰지 않는다.
+    #      · 손익: 분기 보고서는 원 계정(3개월). 사업보고서는 연간 − 직전 3행인데, 직전 3행이
+    #        1분기·반기·3분기 보고서 순서이고 폭이 3분기(TTM_SPAN)이며 fs_div·매출 기준이 같을 때만
+    #        선다. 그래서 사업보고서 행의 TTM 은 항등식으로 연간과 같다.
+    #      · 현금흐름: 1분기 보고서는 누계 그대로, 나머지는 누계 − 바로 앞 분기 보고서 누계(간격
+    #        QUARTER_GAP, 같은 fs_div).
+    #      · 분기값의 공개일 = 그 값을 만든 행들의 available_date max. 창 안 네 분기값의 공개일이
+    #        모두 이 행의 available_date 이하일 때만 선다 — 창 밖 행에 기대는 파생도 가드를 받는다.
+    #      · 창의 non-null 4개 · 창의 period_end 폭이 3분기(240~300일) · 창 안 fs_div 가 하나(연결과
+    #        별도를 더하지 않는다, P2-1) · 매출은 창 안 revenue_basis 도 하나(P3-2).
     #      하나라도 어긋나면 NULL 이다 — 부분합을 내면 분기 하나가 빠진 채 연간처럼 읽힌다.
     #   ④ `has_correction` = `disclosure_version.first_correction_dt <= cutoff`(DEFECT-E01 —
     #      정적 플래그가 아니라 기준일 판정이다). 링크가 없으면 FALSE.
@@ -327,24 +339,85 @@ pick AS (
         FROM vis v)
     WHERE rn = 1
 ),
-q AS (
+prev AS (
     SELECT p.*,
-           CASE WHEN p.report_code = '11011' THEN p.revenue_q4_derived
-                ELSE p.revenue END                                   AS q_revenue,
-           CASE WHEN p.report_code = '11011' THEN p.gross_profit_q4_derived
-                ELSE p.gross_profit END                              AS q_gross_profit,
-           CASE WHEN p.report_code = '11011' THEN p.op_profit_q4_derived
-                ELSE p.op_profit END                                 AS q_op_profit,
-           CASE WHEN p.report_code = '11011' THEN p.net_income_q4_derived
-                ELSE p.net_income END                                AS q_net_income,
-           p.cf_operating_q                                          AS q_cf_operating
+           count(*) OVER w3                                          AS p_n,
+           min(p.period_end) OVER w3                                 AS p_first_end,
+           max(p.available_date) OVER w3                             AS p_max_available,
+           min(p.fs_div) OVER w3                                     AS p_fs_min,
+           max(p.fs_div) OVER w3                                     AS p_fs_max,
+           min(p.revenue_basis) OVER w3                              AS p_basis_min,
+           max(p.revenue_basis) OVER w3                              AS p_basis_max,
+           sum(p.revenue) OVER w3                                    AS p_sum_revenue,
+           count(p.revenue) OVER w3                                  AS p_cnt_revenue,
+           sum(p.gross_profit) OVER w3                               AS p_sum_gross_profit,
+           count(p.gross_profit) OVER w3                             AS p_cnt_gross_profit,
+           sum(p.op_profit) OVER w3                                  AS p_sum_op_profit,
+           count(p.op_profit) OVER w3                                AS p_cnt_op_profit,
+           sum(p.net_income) OVER w3                                 AS p_sum_net_income,
+           count(p.net_income) OVER w3                               AS p_cnt_net_income,
+           (lag(p.report_code, 3) OVER s = '11013' AND lag(p.report_code, 2) OVER s = '11012'
+            AND lag(p.report_code, 1) OVER s = '11014')              AS p_fiscal_chain,
+           lag(p.report_code, 1) OVER s                              AS p1_report_code,
+           lag(p.period_end, 1) OVER s                               AS p1_period_end,
+           lag(p.fs_div, 1) OVER s                                   AS p1_fs_div,
+           lag(p.available_date, 1) OVER s                           AS p1_available,
+           lag(p.cf_operating_ytd, 1) OVER s                         AS p1_cf_operating_ytd
     FROM pick p
+    WINDOW s AS (PARTITION BY p.corp_code ORDER BY p.period_end, p.report_code),
+           w3 AS (PARTITION BY p.corp_code ORDER BY p.period_end, p.report_code
+                  ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING)
+),
+chain AS (
+    SELECT r.*,
+           (r.report_code = '11011' AND r.p_n = 3 AND coalesce(r.p_fiscal_chain, FALSE)
+            AND date_diff('day', r.p_first_end, r.period_end)
+                BETWEEN {ttm_span_min} AND {ttm_span_max}
+            AND r.p_fs_min = r.fs_div AND r.p_fs_max = r.fs_div)    AS annual_ok,
+           (r.p1_report_code = CASE r.report_code WHEN '11012' THEN '11013'
+                                                  WHEN '11014' THEN '11012'
+                                                  WHEN '11011' THEN '11014' END
+            AND r.p1_fs_div = r.fs_div
+            AND date_diff('day', r.p1_period_end, r.period_end)
+                BETWEEN {quarter_gap_min} AND {quarter_gap_max})     AS cf_prev_ok
+    FROM prev r
+),
+q AS (
+    SELECT c.*,
+           CASE WHEN c.report_code <> '11011' THEN c.revenue
+                WHEN c.annual_ok AND c.p_cnt_revenue = 3
+                     AND c.p_basis_min = c.revenue_basis AND c.p_basis_max = c.revenue_basis
+                THEN c.revenue - c.p_sum_revenue END                 AS q_revenue,
+           CASE WHEN c.report_code <> '11011' THEN c.gross_profit
+                WHEN c.annual_ok AND c.p_cnt_gross_profit = 3
+                THEN c.gross_profit - c.p_sum_gross_profit END       AS q_gross_profit,
+           CASE WHEN c.report_code <> '11011' THEN c.op_profit
+                WHEN c.annual_ok AND c.p_cnt_op_profit = 3
+                THEN c.op_profit - c.p_sum_op_profit END             AS q_op_profit,
+           CASE WHEN c.report_code <> '11011' THEN c.net_income
+                WHEN c.annual_ok AND c.p_cnt_net_income = 3
+                THEN c.net_income - c.p_sum_net_income END           AS q_net_income,
+           CASE WHEN c.report_code = '11013' THEN c.cf_operating_ytd
+                WHEN c.cf_prev_ok
+                THEN c.cf_operating_ytd - c.p1_cf_operating_ytd END  AS q_cf_operating,
+           CASE WHEN c.report_code = '11011'
+                THEN greatest(c.available_date, c.p_max_available)
+                ELSE c.available_date END                            AS q_income_available,
+           CASE WHEN c.report_code = '11013' THEN c.available_date
+                ELSE greatest(c.available_date, coalesce(c.p1_available, c.available_date))
+                END                                                  AS q_cf_available
+    FROM chain c
 ),
 ttm AS (
     SELECT q.*,
            count(*) OVER w                                           AS ttm_n_rows,
-           max(q.available_date) OVER w                              AS ttm_max_available,
+           max(q.q_income_available) OVER w                          AS ttm_income_available,
+           max(q.q_cf_available) OVER w                              AS ttm_cf_available,
            min(q.period_end) OVER w                                  AS ttm_first_period_end,
+           min(q.fs_div) OVER w                                      AS ttm_fs_min,
+           max(q.fs_div) OVER w                                      AS ttm_fs_max,
+           min(q.revenue_basis) OVER w                               AS ttm_basis_min,
+           max(q.revenue_basis) OVER w                               AS ttm_basis_max,
            sum(q.q_revenue) OVER w                                   AS ttm_sum_revenue,
            count(q.q_revenue) OVER w                                 AS ttm_cnt_revenue,
            sum(q.q_gross_profit) OVER w                              AS ttm_sum_gross_profit,
@@ -361,25 +434,29 @@ ttm AS (
 ),
 ok AS (
     SELECT t.*,
-           (t.ttm_n_rows = 4
-            AND t.ttm_max_available <= t.available_date
+           (t.ttm_n_rows = 4 AND t.ttm_fs_min = t.ttm_fs_max
             AND date_diff('day', t.ttm_first_period_end, t.period_end)
-                BETWEEN {ttm_span_min} AND {ttm_span_max}) AS ttm_window_ok
+                BETWEEN {ttm_span_min} AND {ttm_span_max})           AS ttm_window_ok
     FROM ttm t
 )
 SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
        o.bsns_year, o.rcept_no, o.period_start, o.currency,
        o.revenue, o.revenue_basis, o.gross_profit, o.op_profit, o.net_income,
        o.total_asset, o.total_liab, o.total_equity, o.cf_operating_ytd, o.cf_operating_q,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_revenue = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
+                 AND o.ttm_cnt_revenue = 4 AND o.ttm_basis_min = o.ttm_basis_max
             THEN o.ttm_sum_revenue END                               AS ttm_revenue,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_gross_profit = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
+                 AND o.ttm_cnt_gross_profit = 4
             THEN o.ttm_sum_gross_profit END                          AS ttm_gross_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_op_profit = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
+                 AND o.ttm_cnt_op_profit = 4
             THEN o.ttm_sum_op_profit END                             AS ttm_op_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_net_income = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
+                 AND o.ttm_cnt_net_income = 4
             THEN o.ttm_sum_net_income END                            AS ttm_net_income,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_cf_operating = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cf_available <= o.available_date
+                 AND o.ttm_cnt_cf_operating = 4
             THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
        coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
        o.available_date, o.available_basis
@@ -397,6 +474,8 @@ def render_body(name: str, sources: dict[str, str], template: str | None = None)
     return body.format(lag_factor=FACTOR_LAG_SESSIONS, lag_price=PRICE_LAG_SESSIONS,
                        lag_consensus=CONSENSUS_LAG_SESSIONS, lag_fin=FIN_LAG_SESSIONS,
                        ttm_span_min=TTM_SPAN_MIN_DAYS, ttm_span_max=TTM_SPAN_MAX_DAYS,
+                       quarter_gap_min=QUARTER_GAP_MIN_DAYS,
+                       quarter_gap_max=QUARTER_GAP_MAX_DAYS,
                        **fill).strip()
 
 
@@ -456,6 +535,7 @@ def install_temp_macros(con: duckdb.DuckDBPyConnection, sources: dict[str, str],
 
 
 __all__ = ["CONSENSUS_LAG_SESSIONS", "FACTOR_LAG_SESSIONS", "FIN_LAG_SESSIONS", "MACRO_DEPENDS",
-           "MACRO_INPUTS", "PRICE_LAG_SESSIONS", "SIGNATURES", "TEMPLATES", "TTM_SPAN_MAX_DAYS",
+           "MACRO_INPUTS", "PRICE_LAG_SESSIONS", "QUARTER_GAP_MAX_DAYS",
+           "QUARTER_GAP_MIN_DAYS", "SIGNATURES", "TEMPLATES", "TTM_SPAN_MAX_DAYS",
            "TTM_SPAN_MIN_DAYS", "install_temp_macros", "parquet_source", "render_body",
            "render_macros"]

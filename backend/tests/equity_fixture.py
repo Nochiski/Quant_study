@@ -734,24 +734,85 @@ pick AS (
         FROM vis v)
     WHERE rn = 1
 ),
-q AS (
+prev AS (
     SELECT p.*,
-           CASE WHEN p.report_code = '11011' THEN p.revenue_q4_derived
-                ELSE p.revenue END                                   AS q_revenue,
-           CASE WHEN p.report_code = '11011' THEN p.gross_profit_q4_derived
-                ELSE p.gross_profit END                              AS q_gross_profit,
-           CASE WHEN p.report_code = '11011' THEN p.op_profit_q4_derived
-                ELSE p.op_profit END                                 AS q_op_profit,
-           CASE WHEN p.report_code = '11011' THEN p.net_income_q4_derived
-                ELSE p.net_income END                                AS q_net_income,
-           p.cf_operating_q                                          AS q_cf_operating
+           count(*) OVER w3                                          AS p_n,
+           min(p.period_end) OVER w3                                 AS p_first_end,
+           max(p.available_date) OVER w3                             AS p_max_available,
+           min(p.fs_div) OVER w3                                     AS p_fs_min,
+           max(p.fs_div) OVER w3                                     AS p_fs_max,
+           min(p.revenue_basis) OVER w3                              AS p_basis_min,
+           max(p.revenue_basis) OVER w3                              AS p_basis_max,
+           sum(p.revenue) OVER w3                                    AS p_sum_revenue,
+           count(p.revenue) OVER w3                                  AS p_cnt_revenue,
+           sum(p.gross_profit) OVER w3                               AS p_sum_gross_profit,
+           count(p.gross_profit) OVER w3                             AS p_cnt_gross_profit,
+           sum(p.op_profit) OVER w3                                  AS p_sum_op_profit,
+           count(p.op_profit) OVER w3                                AS p_cnt_op_profit,
+           sum(p.net_income) OVER w3                                 AS p_sum_net_income,
+           count(p.net_income) OVER w3                               AS p_cnt_net_income,
+           (lag(p.report_code, 3) OVER s = '11013' AND lag(p.report_code, 2) OVER s = '11012'
+            AND lag(p.report_code, 1) OVER s = '11014')              AS p_fiscal_chain,
+           lag(p.report_code, 1) OVER s                              AS p1_report_code,
+           lag(p.period_end, 1) OVER s                               AS p1_period_end,
+           lag(p.fs_div, 1) OVER s                                   AS p1_fs_div,
+           lag(p.available_date, 1) OVER s                           AS p1_available,
+           lag(p.cf_operating_ytd, 1) OVER s                         AS p1_cf_operating_ytd
     FROM pick p
+    WINDOW s AS (PARTITION BY p.corp_code ORDER BY p.period_end, p.report_code),
+           w3 AS (PARTITION BY p.corp_code ORDER BY p.period_end, p.report_code
+                  ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING)
+),
+chain AS (
+    SELECT r.*,
+           (r.report_code = '11011' AND r.p_n = 3 AND coalesce(r.p_fiscal_chain, FALSE)
+            AND date_diff('day', r.p_first_end, r.period_end)
+                BETWEEN 240 AND 300
+            AND r.p_fs_min = r.fs_div AND r.p_fs_max = r.fs_div)    AS annual_ok,
+           (r.p1_report_code = CASE r.report_code WHEN '11012' THEN '11013'
+                                                  WHEN '11014' THEN '11012'
+                                                  WHEN '11011' THEN '11014' END
+            AND r.p1_fs_div = r.fs_div
+            AND date_diff('day', r.p1_period_end, r.period_end)
+                BETWEEN 80 AND 100)     AS cf_prev_ok
+    FROM prev r
+),
+q AS (
+    SELECT c.*,
+           CASE WHEN c.report_code <> '11011' THEN c.revenue
+                WHEN c.annual_ok AND c.p_cnt_revenue = 3
+                     AND c.p_basis_min = c.revenue_basis AND c.p_basis_max = c.revenue_basis
+                THEN c.revenue - c.p_sum_revenue END                 AS q_revenue,
+           CASE WHEN c.report_code <> '11011' THEN c.gross_profit
+                WHEN c.annual_ok AND c.p_cnt_gross_profit = 3
+                THEN c.gross_profit - c.p_sum_gross_profit END       AS q_gross_profit,
+           CASE WHEN c.report_code <> '11011' THEN c.op_profit
+                WHEN c.annual_ok AND c.p_cnt_op_profit = 3
+                THEN c.op_profit - c.p_sum_op_profit END             AS q_op_profit,
+           CASE WHEN c.report_code <> '11011' THEN c.net_income
+                WHEN c.annual_ok AND c.p_cnt_net_income = 3
+                THEN c.net_income - c.p_sum_net_income END           AS q_net_income,
+           CASE WHEN c.report_code = '11013' THEN c.cf_operating_ytd
+                WHEN c.cf_prev_ok
+                THEN c.cf_operating_ytd - c.p1_cf_operating_ytd END  AS q_cf_operating,
+           CASE WHEN c.report_code = '11011'
+                THEN greatest(c.available_date, c.p_max_available)
+                ELSE c.available_date END                            AS q_income_available,
+           CASE WHEN c.report_code = '11013' THEN c.available_date
+                ELSE greatest(c.available_date, coalesce(c.p1_available, c.available_date))
+                END                                                  AS q_cf_available
+    FROM chain c
 ),
 ttm AS (
     SELECT q.*,
            count(*) OVER w                                           AS ttm_n_rows,
-           max(q.available_date) OVER w                              AS ttm_max_available,
+           max(q.q_income_available) OVER w                          AS ttm_income_available,
+           max(q.q_cf_available) OVER w                              AS ttm_cf_available,
            min(q.period_end) OVER w                                  AS ttm_first_period_end,
+           min(q.fs_div) OVER w                                      AS ttm_fs_min,
+           max(q.fs_div) OVER w                                      AS ttm_fs_max,
+           min(q.revenue_basis) OVER w                               AS ttm_basis_min,
+           max(q.revenue_basis) OVER w                               AS ttm_basis_max,
            sum(q.q_revenue) OVER w                                   AS ttm_sum_revenue,
            count(q.q_revenue) OVER w                                 AS ttm_cnt_revenue,
            sum(q.q_gross_profit) OVER w                              AS ttm_sum_gross_profit,
@@ -768,25 +829,29 @@ ttm AS (
 ),
 ok AS (
     SELECT t.*,
-           (t.ttm_n_rows = 4
-            AND t.ttm_max_available <= t.available_date
+           (t.ttm_n_rows = 4 AND t.ttm_fs_min = t.ttm_fs_max
             AND date_diff('day', t.ttm_first_period_end, t.period_end)
-                BETWEEN 240 AND 300) AS ttm_window_ok
+                BETWEEN 240 AND 300)           AS ttm_window_ok
     FROM ttm t
 )
 SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
        o.bsns_year, o.rcept_no, o.period_start, o.currency,
        o.revenue, o.revenue_basis, o.gross_profit, o.op_profit, o.net_income,
        o.total_asset, o.total_liab, o.total_equity, o.cf_operating_ytd, o.cf_operating_q,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_revenue = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
+                 AND o.ttm_cnt_revenue = 4 AND o.ttm_basis_min = o.ttm_basis_max
             THEN o.ttm_sum_revenue END                               AS ttm_revenue,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_gross_profit = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
+                 AND o.ttm_cnt_gross_profit = 4
             THEN o.ttm_sum_gross_profit END                          AS ttm_gross_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_op_profit = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
+                 AND o.ttm_cnt_op_profit = 4
             THEN o.ttm_sum_op_profit END                             AS ttm_op_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_net_income = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
+                 AND o.ttm_cnt_net_income = 4
             THEN o.ttm_sum_net_income END                            AS ttm_net_income,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_cf_operating = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cf_available <= o.available_date
+                 AND o.ttm_cnt_cf_operating = 4
             THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
        coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
        o.available_date, o.available_basis
@@ -954,6 +1019,9 @@ WB_BASE_CLOSE = {"005930": 70_000, "000660": 100_000, "035420": 200_000, "036220
 WB_CORP = {"005930": "C05930", "005935": "C05930", "000660": "C00660", "035420": "C35420",
            "036220": "C36220"}
 WB_FIN_RCEPT = {  # (corp, period_end) → 접수번호. `disclosure_version` 이 정정 여부를 붙인다
+    ("C05930", date(2022, 3, 31)): "R05930Q1_22",
+    ("C05930", date(2022, 6, 30)): "R05930Q2_22",
+    ("C05930", date(2022, 9, 30)): "R05930Q3_22",
     ("C05930", date(2022, 12, 31)): "R05930FY22",
     ("C05930", date(2023, 3, 31)): "R05930Q1",
     ("C05930", date(2023, 6, 30)): "R05930Q2",
@@ -963,9 +1031,26 @@ WB_FIN_RCEPT = {  # (corp, period_end) → 접수번호. `disclosure_version` �
     ("C36220", date(2023, 12, 31)): "R36220FY",
 }
 # 005930 2023 4분기 = 연간 − 3분기 누계. 연간 460 = 100 + 110 + 120 + 130 이라 TTM 이 연간과 같다.
-# 2022 사업보고서의 4분기 파생값이 있어 2023 3분기 행에서도 TTM(2022 4분기 ~ 2023 3분기)이 선다 —
+# 2022 4분기는 뷰가 연간 − 2022 1~3분기로 세운다(매출 400 − 305 = 95 · 순이익 80 − 62 = 18 · 영업현금
+# 누계 90 − 70 = 20). 그래서 2023 3분기 행에서도 TTM(2022 4분기 ~ 2023 3분기)이 선다 —
 # 매출 95 + 100 + 110 + 120 = 425, 순이익 18 + 20 + 22 + 24 = 84, 영업현금 20 + 25 + 35 + 40 = 120.
+# `*_q4_derived`·`cf_operating_q` 는 fin_std 파생 블록이고 뷰는 읽지 않는다(#227 리뷰 P1-1·P1-2).
 WB_FIN_ROWS: list[dict[str, object]] = [
+    {"corp_code": "C05930", "period_end": date(2022, 3, 31), "report_code": "11013",
+     "bsns_year": "2022", "rcept_no": "R05930Q1_22", "available_date": date(2022, 5, 16),
+     "revenue": 100, "gross_profit": 40, "op_profit": 30, "net_income": 20,
+     "total_asset": 960, "total_liab": 380, "total_equity": 580,
+     "cf_operating_ytd": 25, "cf_operating_q": 25},
+    {"corp_code": "C05930", "period_end": date(2022, 6, 30), "report_code": "11012",
+     "bsns_year": "2022", "rcept_no": "R05930Q2_22", "available_date": date(2022, 8, 16),
+     "revenue": 100, "gross_profit": 40, "op_profit": 30, "net_income": 20,
+     "total_asset": 970, "total_liab": 385, "total_equity": 585,
+     "cf_operating_ytd": 50, "cf_operating_q": 25},
+    {"corp_code": "C05930", "period_end": date(2022, 9, 30), "report_code": "11014",
+     "bsns_year": "2022", "rcept_no": "R05930Q3_22", "available_date": date(2022, 11, 14),
+     "revenue": 105, "gross_profit": 42, "op_profit": 32, "net_income": 22,
+     "total_asset": 980, "total_liab": 390, "total_equity": 590,
+     "cf_operating_ytd": 70, "cf_operating_q": 20},
     {"corp_code": "C05930", "period_end": date(2022, 12, 31), "report_code": "11011",
      "bsns_year": "2022", "rcept_no": "R05930FY22", "available_date": date(2023, 3, 14),
      "revenue": 400, "gross_profit": 160, "op_profit": 120, "net_income": 80,

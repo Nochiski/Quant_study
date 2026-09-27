@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:strategy-workbench:run-environment:1",
+  "title": "RunEnvironment",
+  "type": "object",
+  "properties": {
+    "market": {
+      "type": "string",
+      "enum": [
+        "KRX"
+      ],
+      "default": "KRX",
+      "x-description-key": "strategy.field.run_environment.market"
+    },
+    "frequency": {
+      "type": "string",
+      "enum": [
+        "daily"
+      ],
+      "default": "daily",
+      "x-description-key": "strategy.field.run_environment.frequency"
+    },
+    "start": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "x-description-key": "strategy.field.run_environment.start"
+    },
+    "end": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "x-description-key": "strategy.field.run_environment.end"
+    },
+    "universe_id": {
+      "type": "string",
+      "x-description-key": "strategy.field.run_environment.universe_id",
+      "x-catalog": "universe"
+    },
+    "timing": {
+      "type": "string",
+      "enum": [
+        "next_open"
+      ],
+      "default": "next_open",
+      "x-description-key": "strategy.field.run_environment.timing"
+    },
+    "participation_rate": {
+      "type": "number",
+      "default": 0.1,
+      "x-description-key": "run_environment.contract.participation_rate",
+      "x-unit": "ratio",
+      "x-applied-stage": "execution",
+      "exclusiveMinimum": 0.0,
+      "maximum": 1.0,
+      "x-display-unit": "%",
+      "examples": [
+        0.1
+      ]
+    },
+    "fee_bps": {
+      "type": "number",
+      "default": 15.0,
+      "x-description-key": "run_environment.contract.fee_bps",
+      "x-unit": "bps",
+      "x-applied-stage": "execution",
+      "minimum": 0.0,
+      "x-display-unit": "bp",
+      "examples": [
+        15.0
+      ]
+    },
+    "slippage_bps": {
+      "type": "number",
+      "default": 10.0,
+      "x-description-key": "run_environment.contract.slippage_bps",
+      "x-unit": "bps",
+      "x-applied-stage": "execution",
+      "minimum": 0.0,
+      "x-display-unit": "bp",
+      "examples": [
+        10.0
+      ]
+    },
+    "missing": {
+      "type": "string",
+      "enum": [
+        "drop",
+        "keep",
+        "zero",
+        "cross_sectional_median"
+      ],
+      "default": "drop",
+      "x-description-key": "strategy.field.run_environment.missing"
+    }
+  },
+  "required": [
+    "start",
+    "end",
+    "universe_id"
+  ],
+  "additionalProperties": false,
+  "$defs": {}
+}

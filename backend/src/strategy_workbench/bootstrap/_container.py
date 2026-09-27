@@ -74,6 +74,9 @@ class BackendContainer:
 
 
 EQUITY_ADAPTERS = ("mock", "duckdb")
+# `artifact_root`를 주지 않은 컨테이너의 백테스트 산출물 위치. `build_container`가 호출 시점에 읽는
+# 모듈 상수라 테스트가 개발자 로컬 `.local/`을 쓰지 않게 tmp로 바꿀 수 있다(#211).
+DEFAULT_RUN_ARTIFACT_ROOT = Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
 
 
 def build_container(
@@ -128,9 +131,7 @@ def build_container(
         source_spec_hash=_source_spec_hash_resolver(strategy_authoring),
     )
     strategy_draft_repository = SQLiteStrategyDraftRepository(strategy_repository_path)
-    run_artifact_root = artifact_root or (
-        Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
-    )
+    run_artifact_root = artifact_root or DEFAULT_RUN_ARTIFACT_ROOT
     strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
     backtest_runs = BacktestRunService(
         portfolio_design,

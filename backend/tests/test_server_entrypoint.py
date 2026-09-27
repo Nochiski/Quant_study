@@ -82,13 +82,22 @@ def test_importing_and_building_test_app_never_opens_the_runtime_database(
     configured = tmp_path / "runtime" / "strategies.sqlite3"
     monkeypatch.setenv(_http.STRATEGY_REPOSITORY_PATH_ENV, str(configured))
     environment = os.environ.copy()
+    # 하위 프로세스는 테스트 격리 fixture와 경로 가드 밖이다. 기본 컨테이너가 만드는 산출물
+    # 디렉터리를 직접 tmp로 옮겨 개발자 로컬 `.local/backtest-runs`를 만들지 않게 한다(#211).
+    child_artifacts = tmp_path / "child-backtest-runs"
+    child_program = "\n".join(
+        (
+            "import sys",
+            "from pathlib import Path",
+            "from strategy_workbench.bootstrap import _container",
+            "_container.DEFAULT_RUN_ARTIFACT_ROOT = Path(sys.argv[1])",
+            "from strategy_workbench.bootstrap.facade.http import build_http_app",
+            "build_http_app()",
+        )
+    )
 
     completed = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from strategy_workbench.bootstrap.facade.http import build_http_app; build_http_app()",
-        ],
+        [sys.executable, "-c", child_program, str(child_artifacts)],
         check=False,
         capture_output=True,
         env=environment,
@@ -98,5 +107,6 @@ def test_importing_and_building_test_app_never_opens_the_runtime_database(
 
     assert completed.returncode == 0, completed.stderr
     assert not configured.exists()
+    assert child_artifacts.is_dir()
     _http.build_runtime_http_app()
     assert configured.is_file()

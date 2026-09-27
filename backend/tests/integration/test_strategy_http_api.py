@@ -48,6 +48,7 @@ def test_http_adapter_exposes_real_mock_equity_catalog() -> None:
     assert payload["snapshot"]["source"] == "deterministic-memory-fixture"
     assert {field["field_id"] for field in payload["fields"]} >= {
         "price.close",
+        "price.adj_close",
         "financial.book_equity",
         "classification.sector",
     }
@@ -56,7 +57,8 @@ def test_http_adapter_exposes_real_mock_equity_catalog() -> None:
     )
     assert sector["value_type"] == "category"
     assert payload["snapshot"]["point_in_time"] is True
-    assert payload["total"] == 10
+    # 원주가·수정주가(이슈 #214)와 TTM 순이익(#212) 포함
+    assert payload["total"] == 11
 
 
 def test_equity_catalog_filters_and_paginates_over_http() -> None:

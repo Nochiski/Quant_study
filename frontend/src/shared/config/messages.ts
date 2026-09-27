@@ -753,7 +753,7 @@ const ko = {
     "그래프 안에서 이 노드를 가리키는 이름입니다.",
   "strategy.field.node.field_id": "데이터 필드",
   "strategy.field.node.field_id.description":
-    "값을 읽어 올 원천 데이터 필드입니다.",
+    "값을 읽어 올 원천 데이터 필드입니다. 수익률·모멘텀·이평·변동성처럼 가격 변화를 잴 때는 수정주가 price.adj_close를, 그날의 절대 가격이 필요한 가격 필터에는 원주가 price.close를 씁니다. 수정주가는 대부분의 분할·증자·병합을 반영하지만, 원장에 확인된 계수가 없거나 계수가 늦게 공개된 사건은 조정 공백으로 남을 수 있습니다.",
   "strategy.field.node.value": "값",
   "strategy.field.node.value.description": "이 노드가 내보낼 고정 숫자입니다.",
   "strategy.field.node.parameter_id": "파라미터 이름",
@@ -960,7 +960,7 @@ const ko = {
     "stdev(x[t-lag-window+1 … t-lag])",
   "strategy.operator.time_series.momentum": "기간 수익률",
   "strategy.operator.time_series.momentum.description":
-    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 첫 값 대비 마지막 값 변화율입니다. 집계 기간 252, 건너뛰는 세션 21이 12-1 모멘텀입니다.",
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 첫 값 대비 마지막 값 변화율입니다. 집계 기간 252, 건너뛰는 세션 21이 12-1 모멘텀입니다. 가격에 쓸 때는 수정주가 price.adj_close를 입력으로 둡니다. 원주가 price.close는 분할·병합 날 가짜 급등락을 만듭니다.",
   "strategy.operator.time_series.momentum.formula":
     "x[t-lag] / x[t-lag-window+1] - 1",
   "strategy.operator.time_series.delta": "기간 변화량",
@@ -2332,7 +2332,7 @@ export const messages = {
       "The name other nodes use to refer to this one.",
     "strategy.field.node.field_id": "Data field",
     "strategy.field.node.field_id.description":
-      "The source field the value is read from.",
+      "The source field the value is read from. Use the adjusted close price.adj_close for returns, momentum, moving averages and volatility, and the raw close price.close only where the day's absolute price matters, such as a price filter. The adjusted close reflects most splits, bonus issues and reverse splits, but events without a confirmed ledger factor or with a late-published factor can still leave gaps.",
     "strategy.field.node.value": "Value",
     "strategy.field.node.value.description":
       "The fixed number this node emits.",
@@ -2550,7 +2550,7 @@ export const messages = {
       "stdev(x[t-lag-window+1 … t-lag])",
     "strategy.operator.time_series.momentum": "Momentum",
     "strategy.operator.time_series.momentum.description":
-      "Change across the window sessions ending lag sessions back; window 252 with lag 21 is 12-1 momentum.",
+      "Change across the window sessions ending lag sessions back; window 252 with lag 21 is 12-1 momentum. For prices, feed the adjusted close price.adj_close; the raw close price.close jumps on splits and reverse splits.",
     "strategy.operator.time_series.momentum.formula":
       "x[t-lag] / x[t-lag-window+1] - 1",
     "strategy.operator.time_series.delta": "Delta",

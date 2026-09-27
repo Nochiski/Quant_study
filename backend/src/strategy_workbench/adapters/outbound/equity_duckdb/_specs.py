@@ -457,7 +457,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         unit="KRW",
         value_type=FieldValueType.PRICE,
         verdict="부분",
-        description="KRX 원주가 — 분할·증자 조정 없음(원칙 ②). 조정가는 price.adj_close.",
+        description=(
+            "KRX 원주가 — 분할·증자 조정 없음(원칙 ②). 사건일에 끊기므로 수익률·모멘텀·이평·"
+            "변동성은 price.adj_close 로 잰다. 원주가는 가격 필터·거래대금처럼 그날의 절대 "
+            "가격이 필요한 곳에 쓴다."
+        ),
         disclosure_basis="정규장 종가 확정 시점",
         evidence="price_daily.close ← stg_price_daily ∪ stg_etf_price_daily (EG20 원주가 불변)",
     ),
@@ -545,7 +549,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         description=(
             "원주가 × 그날까지 공개·적용된 계수(adj_factor factor_ok 행, apply_date 축)의 누적 "
             "share_factor. 첫 관측 수준 고정, 사건 뒤 가격을 올린다 — (security, date) 의 순수 "
-            "함수라 창·as_of 에 무관(완전 PIT)."
+            "함수라 창·as_of 에 무관(완전 PIT). 레지스트리 가격 변화 팩터(수익률·모멘텀·이평·"
+            "변동성)의 입력이다. 수준은 첫 관측 기준이라 종목 간 가격 비교에는 쓰지 않는다."
         ),
         disclosure_basis=(
             "원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date 다음 세션))"

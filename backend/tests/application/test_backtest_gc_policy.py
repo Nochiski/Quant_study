@@ -36,6 +36,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestExecutionRequest,
     CancellationCheck,
     ProgressCallback,
+    RunCancelledError,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
@@ -124,11 +125,18 @@ def test_overlapping_scopes_restore_only_after_the_last_one_exits() -> None:
 
 
 class _RecordingExecutor:
-    """실행기 호출 시점의 GC 임계값을 기록하고, 요청되면 실패하는 테스트용 실행기."""
+    """실행기 호출 시점의 GC 임계값을 기록하는 테스트용 실행기.
 
-    def __init__(self, *, failure: Exception | None = None) -> None:
+    `failure` 가 있으면 그 예외로 실패한다. `hold` 이면 `entered` 를 올리고 `release` 까지
+    기다렸다가, 그사이 취소가 들어왔으면 `RunCancelledError` 로 빠진다(엔진 단계 취소 경로).
+    """
+
+    def __init__(self, *, failure: Exception | None = None, hold: bool = False) -> None:
         self._delegate = BacktestEngineExecutorAdapter(build_default_metric_registry())
         self._failure = failure
+        self._hold = hold
+        self.entered = Event()
+        self.release = Event()
         self.thresholds: list[tuple[int, int, int]] = []
 
     def execute(
@@ -139,6 +147,12 @@ class _RecordingExecutor:
         cancelled: CancellationCheck,
     ) -> BacktestRunResult:
         self.thresholds.append(gc.get_threshold())
+        if self._hold:
+            self.entered.set()
+            if not self.release.wait(timeout=10):
+                raise TimeoutError("executor test barrier was not released")
+            if cancelled():
+                raise RunCancelledError("cancelled at the executor test barrier")
         if self._failure is not None:
             raise self._failure
         return self._delegate.execute(request, progress=progress, cancelled=cancelled)
@@ -228,5 +242,22 @@ def test_failed_run_restores_the_threshold(tmp_path: Path) -> None:
     status = _finish(runs, "gc-failed")
 
     assert status == "failed"
+    assert executor.thresholds == [_suspended()]
+    assert gc.get_threshold() == ORIGINAL_THRESHOLD
+
+
+def test_cancelled_run_restores_the_threshold(tmp_path: Path) -> None:
+    # 취소는 run 스레드 안에서 `RunCancelledError` 로 빠져 `_run` 의 범위를 지난다. 나중에 취소를
+    # 스레드 밖으로 옮기는 변경이 복원을 우회하면 프로세스 전체의 전체 수집이 영구히 꺼진다.
+    executor = _RecordingExecutor(hold=True)
+    runs = _runs(executor, tmp_path, "gc-cancelled")
+
+    runs.start(BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON))
+    assert executor.entered.wait(timeout=10)
+    runs.cancel("gc-cancelled")
+    executor.release.set()
+    status = _finish(runs, "gc-cancelled")
+
+    assert status == "cancelled"
     assert executor.thresholds == [_suspended()]
     assert gc.get_threshold() == ORIGINAL_THRESHOLD

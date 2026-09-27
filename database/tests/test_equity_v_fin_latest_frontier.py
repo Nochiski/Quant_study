@@ -121,6 +121,21 @@ def test_같은_날_여러_기간이_접수되면_최근_기간만_frontier_다(
     }
 
 
+def test_같은_기간_같은_날_보고서가_둘이면_보고서_종류가_큰_행만_frontier_다() -> None:
+    """#233 리뷰 P3-1 — 결산월 변경 전후로 같은 period_end 에 보고서 종류가 둘인 경우(실원장 1건).
+
+    frontier 키는 (period_end, report_code) 다. report_code 를 키에서 빼면 두 행이 다 frontier 가
+    되어, 어댑터의 `pick_order`(report_code DESC)가 아니라 뷰 판정만으로는 한 행이 서지 않는다.
+    """
+    annual = _row("C5", date(2022, 12, 31), date(2023, 3, 20))
+    third = (*annual[:2], "11014", *annual[3:5], "RC5Q3", *annual[6:])
+    con = _connect([annual, third])
+    rows = con.execute(
+        "SELECT report_code, period_frontier FROM v_fin_latest(?) WHERE corp_code = 'C5'",
+        [_AS_OF]).fetchall()
+    assert dict(rows) == {"11011": False, "11014": True}
+
+
 def test_어느_컷오프에서도_고른_행은_그때까지_공개된_가장_최근_기간이다() -> None:
     con = _connect(_LATE_CORRECTION)
     day = date(2023, 3, 1)

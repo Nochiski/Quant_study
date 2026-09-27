@@ -4,12 +4,12 @@ ADR: docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md (D1, D
 
 - The payload shape is derived from the dataclass type hints, so there is no second DTO.
 - Unknown keys at any depth, missing required fields, type mismatches, unknown `kind`
-  discriminators, bad enum/date literals and unsupported schema versions are structural
+  discriminators, bad enum literals and unsupported schema versions are structural
   issues with a JSON Pointer. Only what the model declares as a default is filled in — a
   dataclass default (schema 1.1 makes the boilerplate sections, `data.market`, factor `weight`
   optional this way) or a `default-from` sibling field (`label` ← `factor_id`); a missing
   required field is never guessed.
-- Typed scalar fields normalise `1`/`1.0`, ISO date strings and enum strings; the
+- Typed scalar fields normalise `1`/`1.0` and enum strings; the
   `ParameterValue` union keeps bool/str as-is and folds integral floats to int.
 
 진단 문장은 한국어로 완성해 보낸다(P1-05). Problems panel은 `message`를 그대로 보여주고 다시
@@ -27,7 +27,6 @@ import types
 import typing
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
 from enum import Enum, StrEnum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
@@ -45,9 +44,13 @@ LEGACY_SHAPE_CODE = "structure.legacy_shape"
 # 이 모듈이 낼 수 있는 구조 진단 코드 전부. codec 코드에 `diagnostic_code()` 게이트가 있듯,
 # 구조 코드에도 게이트를 둬서 목록에 없는 코드가 조용히 생기지 않게 한다. 코드마다 문장 golden이
 # 하나씩 있다는 사실도 이 집합으로 강제한다(`tests/domain/test_strategy_diagnostic_messages.py`).
+#
+# 날짜 형식 코드(`structure.invalid_date`)는 P2-09 에서 지웠다(BACKLOG-011). 1.2 문서에는 날짜
+# 필드가 없고(`data.start`·`end` 는 실행 설정, P2-03), 은퇴 문서의 날짜는 업그레이드 응답의 실행
+# 설정으로 옮기는 `domain/backtest` 가 읽는다. 날짜 필드를 모델에 다시 들이면 hydrate 가
+# `unsupported hydrate type` 으로 바로 멈춘다 — 그때 코드와 문장 golden 을 함께 되살린다.
 STRUCTURE_CODES: frozenset[str] = frozenset(
     {
-        "structure.invalid_date",
         "structure.invalid_enum",
         LEGACY_SHAPE_CODE,
         "structure.missing_field",
@@ -495,22 +498,6 @@ def _hydrate_scalar(tp: Any, value: object, pointer: str, issues: list[Structura
             "structure.type_mismatch",
             pointer,
             f"문자열이 와야 합니다 — expected=str got={value!r}",
-        )
-    if tp is date:
-        # datetime is a date subclass; a timestamp on a date field is a different value, not a date.
-        if isinstance(value, date) and not isinstance(value, datetime):
-            return value
-        if isinstance(value, str):
-            try:
-                return date.fromisoformat(value)
-            except ValueError:
-                pass
-        return _issue(
-            issues,
-            "structure.invalid_date",
-            pointer,
-            "날짜는 YYYY-MM-DD로 적어 주세요. 예: 2021-01-01 — "
-            f"expected=YYYY-MM-DD example=2021-01-01 got={value!r}",
         )
     raise TypeError(  # pragma: no cover - model authoring error
         f"unsupported hydrate type {tp!r} at pointer={pointer!r}"

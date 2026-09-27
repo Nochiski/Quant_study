@@ -51,13 +51,6 @@ const spec = (strategyId: string, revision: number, title: string) => ({
   identity: { strategy_id: strategyId, revision, schema_version: "1.2" },
   title,
   description: "",
-  data: {
-    market: "KRX",
-    start: "2021-09-03",
-    end: "2026-09-03",
-    universe_id: "krx.common-stock",
-    frequency: "daily",
-  },
   eligibility: { rules: [] },
   factors: [],
   signal: {
@@ -76,11 +69,6 @@ const spec = (strategyId: string, revision: number, title: string) => ({
     net_exposure: 1,
     max_name_weight: 0.1,
     max_sector_weight: 0.3,
-  },
-  execution: {
-    timing: "next_open",
-    fee_bps: 15,
-    slippage_bps: 10,
   },
   parameters: [],
 });
@@ -125,7 +113,6 @@ factors:
           window: 252
           lag: 0
       output_node_id: mom_252
-      missing_policy: drop
 `;
 const graphSpec = (strategyId: string, revision: number) => ({
   ...spec(strategyId, revision, "그래프 전략"),
@@ -148,7 +135,6 @@ const graphSpec = (strategyId: string, revision: number) => ({
           },
         ],
         output_node_id: "mom_252",
-        missing_policy: "drop",
       },
     },
   ],
@@ -178,13 +164,11 @@ const FACTOR = {
   default_graph: {
     nodes: [{ kind: "field", node_id: "px", field_id: "price.close" }],
     output_node_id: "px",
-    missing_policy: "drop",
   },
   description: "Server factor",
   factor_id: "server.momentum",
   label: "Server momentum",
   minimum_history_sessions: 1,
-  missing_policy: "drop",
   output_unit: "score",
   preference: "high",
   required_field_ids: ["price.close"],

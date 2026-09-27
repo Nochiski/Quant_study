@@ -135,7 +135,7 @@
 - e2e 담당: 없음
 - 기능 영역: schema 업그레이드 · 동결 리비전
 - e2e:
-  - `frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it
+  - `frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision to the current schema, saves it and backtests it
   - `frontend/e2e/workbench.workflow.spec.ts` :: migrates a source-less legacy revision without changing meaning
 
 수용 기준
@@ -145,7 +145,12 @@
   백테스트가 끝까지 돈다. 전략 이력에는 옛 버전에만 "1.0 동결" 표시가 남는다.
 - Given 원문 없이 JSON으로만 저장된 옛 전략, Then "legacy JSON에서 생성된 문서"라는 안내와 함께
   열리고, 저장하면 의미 해시가 같은 새 버전이 된다.
-- 비고: 1.1 → 1.2 업그레이드는 P2-09·P3-02가 이 스토리의 수용 기준을 넓힌다.
+- 비고: P2-09부터 업그레이드는 1.0 → 1.1 → 1.2 전체 경로를 타고, 저장한 새 버전은 현재 schema다.
+  의미 해시는 1.1 합성 방식(`signal.normalization: none`)을 명시한 golden 문서와 같다. 버튼 이름
+  "1.1로 업그레이드"와 결과 안내 문구는 아직 1.1을 말한다 — 배너 문구, 1.1 문서의 업그레이드,
+  응답 `environment`로 실행 설정 채우기, `warnings` 표시는 P3-02가 이 스토리의 수용 기준을 넓힌다.
+  P3-02 전에는 저장한 새 버전의 백테스트 시작이 실행 요청 `environment` 미배선으로 422라 e2e가
+  그 단계에서 멈춘다(lang2 묶음 머지 전략의 허용 원인 (1)).
 
 ### US-SM-08 Form·Graph로 고쳐도 YAML 원문은 그 줄만 바뀐다
 

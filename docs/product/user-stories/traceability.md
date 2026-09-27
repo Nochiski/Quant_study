@@ -42,7 +42,7 @@ PR ID다. 그 계획 패키지는 P0-01이 main에 올리기 전까지 `docs/str
 | US-DM-03 | 정동민 | 말로 한 아이디어를 AI가 전략으로 바꿔 주고 바로 백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용한 뒤 적용 후 백테스트가 실행 화면까지 간다<br>`frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 빈 새 전략에서 AI에게 아이디어를 말해 받은 전략을 적용하고 백테스트한다 |
 | US-DM-04 | 정동민 | 백테스트 결과에서 핵심 숫자와 자산 곡선을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.backtest-result.spec.ts` :: US-DM-04 저장한 전략을 백테스트하면 핵심 성과 지표 여섯 개와 자산 곡선이 보인다 |
 | US-DM-05 | 정동민 | 기간·유니버스·수수료·슬리피지를 전략 밖 실행 설정에서 정한다 | `예정` | P2-01, P2-03, P3-02, P3-03 | P3-03 | — |
-| US-DM-06 | 정동민 | 화면의 말과 오류 문장을 쉬운 한글로 읽는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 그래프 편집 화면은 노드 종류·연산자·필드를 한글 이름과 설명으로 보이고 삭제 거부를 노드 이름으로 말한다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 필드 이름을 틀리거나 1.0 문법을 쓰면 문제 목록이 한글로 고칠 방법을 말하고 업그레이드를 안내한다 |
+| US-DM-06 | 정동민 | 화면의 말과 오류 문장을 쉬운 한글로 읽는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 그래프 편집 화면은 노드 종류·연산자·필드를 한글 이름과 설명으로 보이고 삭제 거부를 노드 이름으로 말한다<br>`frontend/e2e/stories/dm.readable-korean.spec.ts` :: US-DM-06 필드 이름을 틀리거나 1.0 문법을 쓰면 문제 목록이 한글로 고칠 방법을 말한다 |
 | US-DM-07 | 정동민 | 빈 문서에서 그래프 화면만으로 전략을 만들어 백테스트한다 | `예정` | P4-04, P5-03 | P4-04, P5-03 | — |
 | US-DM-08 | 정동민 | 백테스트 결과를 AI에게 쉬운 말로 풀어 달라고 한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-explain.spec.ts` :: US-DM-08 완료된 백테스트 결과에서 AI에게 좋은 결과인지 물으면 지표 뜻과 벤치마크 비교를 쉬운 말로 답한다 |
 | US-DM-09 | 정동민 | AI 제안을 적용한 뒤 버튼 한 번으로 되돌린다 | `예정` | P3-03 | P3-03 | — |
@@ -52,7 +52,7 @@ PR ID다. 그 계획 패키지는 P0-01이 main에 올리기 전까지 `docs/str
 | US-SM-04 | 한상목 | 키보드만으로 경로를 찾고 검증·저장·백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.keyboard.spec.ts` :: US-SM-04 키보드만으로 문서 경로를 찾고 검증·저장·백테스트까지 간다 |
 | US-SM-05 | 한상목 | 실행 기록으로 같은 백테스트를 그대로 다시 돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: cancels a nonterminal run and replays the server-owned request byte-for-byte<br>`frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-06 | 한상목 | 같은 전략을 다른 실행 설정으로 돌려도 전략 해시는 같다 | `예정` | P3-03 | P3-03 | — |
-| US-SM-07 | 한상목 | 예전 형식으로 저장한 전략을 새 형식으로 올린다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: migrates a source-less legacy revision without changing meaning<br>`frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it |
+| US-SM-07 | 한상목 | 예전 형식으로 저장한 전략을 새 형식으로 올린다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: migrates a source-less legacy revision without changing meaning<br>`frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision to the current schema, saves it and backtests it |
 | US-SM-08 | 한상목 | Form·Graph로 고쳐도 YAML 원문은 그 줄만 바뀐다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: adds a node in the Graph editor, rewires an input, refreshes the plan and saves<br>`frontend/e2e/workbench.workflow.spec.ts` :: edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan |
 | US-SM-09 | 한상목 | 모르는 금융 개념을 편집 흐름 안에서 설명받는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.finance-terms.spec.ts` :: US-SM-09 편집 중에 AI와 계약 패널로 금융 개념의 뜻을 확인한다 |
 | US-SM-10 | 한상목 | 실행 설정 항목 옆에서 용어 뜻을 바로 본다 | `미계획` | — | — | — |

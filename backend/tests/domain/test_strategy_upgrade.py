@@ -1,7 +1,7 @@
-"""schema 1.0 → 1.1 업그레이드 변환 (spec D3, P1-03).
+"""은퇴 schema 문서 업그레이드 — 버전 디스패치 체인 (spec D3·D7, P1-03 → P2-09).
 
-**현재 버전은 1.2 다.** 이 모듈이 아직 1.1 까지만 올리므로 결과는 저장·실행할 수 없는 중간
-산출물이다 — 1.1 → 1.2 step 과 버전 디스패치는 P2-09 가 붙인다(spec D7).
+1.0 문서는 1.0 → 1.1 → 1.2 를 차례로 타고, 1.1 문서는 1.1 → 1.2 만 탄다. 단계마다 그 단계의
+목표 버전을 찍고, 그 단계가 없애야 하는 옛 모양이 남았으면 거절한다.
 """
 
 from __future__ import annotations
@@ -16,26 +16,31 @@ import pytest
 import yaml
 from ruamel.yaml import YAML
 
+from strategy_workbench.domain.strategy import _upgrade as _upgrade_module
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
-    LEGACY_SCHEMA_VERSION,
-    LEGACY_UPGRADE_TARGET_VERSION,
+    FROZEN_SCHEMA_VERSIONS,
+    UPGRADE_CHAIN,
     UPGRADE_STEPS,
-    NotALegacyDocumentError,
+    UPGRADE_WARNING_CODES,
+    NotUpgradeableDocumentError,
+    UpgradeUnsupportedNodeError,
+    UpgradeWarning,
     apply_upgrade_steps,
     hydrate_strategy_document,
     is_frozen_schema_version,
-    is_legacy_document,
     is_upgradeable_document,
     legacy_shape_hints,
-    upgrade_document_1_0,
+    upgrade_document,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
+    SignalNormalization,
     StrategyIdentity,
 )
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 DRAFT = StrategyIdentity("draft", 0)
+V1_0, V1_1 = UPGRADE_CHAIN[0], UPGRADE_CHAIN[1]
 
 
 def _yaml(name: str) -> dict[str, Any]:
@@ -44,155 +49,405 @@ def _yaml(name: str) -> dict[str, Any]:
     return loaded
 
 
-def _upgrade(document: dict[str, Any]) -> dict[str, Any]:
-    """테스트 편의: 변환 결과를 dict[str, Any]로 다룬다(프로덕션 시그니처는 object 값)."""
-    return dict(upgrade_document_1_0(document))
+def _tree(document: dict[str, Any], *, until: str | None = None) -> dict[str, Any]:
+    """테스트 편의: 변환 결과 tree 를 dict[str, Any] 로 다룬다(프로덕션 시그니처는 object 값)."""
+    tree = upgrade_document(document, until=until).tree
+    assert isinstance(tree, dict)
+    return tree
 
 
-def test_upgrade_golden_matches_the_preserved_1_1_fixture() -> None:
-    """1.0 golden 을 올리면 보존된 1.1 원본과 같은 tree 다(빈 `signal` 만 남는다).
+def _current_of(name: str) -> dict[str, Any]:
+    """1.1 fixture 의 1.2 기대 tree.
 
-    step 이 찍는 버전은 **자기 목표 버전**(1.1)이다. `CURRENT_SCHEMA_VERSION` 을 찍으면
-    "1.2 라고 적혀 있지만 `data`·`execution` 이 남은 문서"가 나와 중간 단계 검증이 사라진다.
+    실행 설정 세 자리를 빼고 1.1 의미(원시값 가중 합)를 명시한다.
     """
-    upgraded = upgrade_document_1_0(_yaml("quality_momentum.v1_0.yaml"))
+    expected = _yaml(name)
+    expected.pop("data")
+    expected.pop("execution")
+    for factor in expected["factors"]:
+        factor["graph"].pop("missing_policy", None)
+    signal = expected.setdefault("signal", {})
+    signal["normalization"] = SignalNormalization.NONE.value
+    expected["schema_version"] = CURRENT_SCHEMA_VERSION
+    return expected
 
-    expected = _yaml("quality_momentum.v1_1.yaml")
-    assert upgraded == {**expected, "signal": {}}
-    assert upgraded["schema_version"] == LEGACY_UPGRADE_TARGET_VERSION
 
+def test_the_chain_is_keyed_by_from_version_and_ends_at_the_current_version() -> None:
+    """동결 집합은 체인 키에서 유도된다.
 
-def test_the_1_1_upgrade_output_is_not_runnable_until_the_1_2_step_exists() -> None:
-    """P2-09 전까지의 중간 상태를 명시적으로 고정한다(WORKFLOW P2-03 제약사항).
-
-    1.0 문서의 업그레이드 결과는 은퇴 버전이라 hydrate 되지 않는다. 이 단언이 사라지는 시점이
-    P2-09 가 1.1 → 1.2 step 을 붙였다는 신호다.
+    단계 검증 조건 맵은 같은 키 집합이어야 한다(감사 NB-2(c)).
     """
-    upgraded = upgrade_document_1_0(_yaml("quality_momentum.v1_0.yaml"))
+    assert tuple(UPGRADE_STEPS) == UPGRADE_CHAIN[:-1]
+    assert set(_upgrade_module._STAGE_LEFTOVERS) == set(UPGRADE_STEPS)  # pyright: ignore[reportPrivateUsage]  # reason: 두 버전 맵의 키 동일성을 고정한다
+    assert UPGRADE_CHAIN[-1] == CURRENT_SCHEMA_VERSION
+    assert frozenset(UPGRADE_STEPS) == FROZEN_SCHEMA_VERSIONS
+    assert CURRENT_SCHEMA_VERSION not in FROZEN_SCHEMA_VERSIONS
 
-    hydrated = hydrate_strategy_document(upgraded, identity=DRAFT)
 
-    assert not hydrated.ok
+def test_a_1_0_document_climbs_the_whole_chain_to_a_hydratable_current_document() -> None:
+    outcome = upgrade_document(_yaml("quality_momentum.v1_0.yaml"))
+
+    assert outcome.source_version == V1_0
+    assert outcome.tree == {**_current_of("quality_momentum.v1_1.yaml")}
+    hydrated = hydrate_strategy_document(outcome.tree, identity=DRAFT)
+    assert hydrated.ok, hydrated.issues
+    assert hydrated.spec is not None
+    assert hydrated.spec.signal.normalization is SignalNormalization.NONE
+
+
+def test_a_1_1_document_takes_only_the_last_stage() -> None:
+    outcome = upgrade_document(_yaml("quality_momentum.v1_1.yaml"))
+
+    assert outcome.source_version == V1_1
+    assert outcome.tree == _current_of("quality_momentum.v1_1.yaml")
+    assert hydrate_strategy_document(outcome.tree, identity=DRAFT).ok
+
+
+def test_the_1_0_stage_stops_at_its_own_target_version() -> None:
+    """중간 단계는 자기 목표 버전을 찍는다 — 1.0 step 이 곧장 현재 버전을 찍으면 "1.2 라고 적혔지만
+    `data`·`execution` 이 남은 문서"가 나와 중간 검증이 사라진다(spec D7)."""
+    intermediate = _tree(_yaml("quality_momentum.v1_0.yaml"), until=V1_1)
+
+    assert intermediate == {**_yaml("quality_momentum.v1_1.yaml"), "signal": {}}
+    assert intermediate["schema_version"] == V1_1
+    # 중간 산출물은 은퇴 버전이라 현재 모델로는 hydrate 되지 않는다.
+    hydrated = hydrate_strategy_document(intermediate, identity=DRAFT)
     assert [issue.code for issue in hydrated.issues] == ["structure.unsupported_schema_version"]
+
+
+def test_climbing_in_two_hops_equals_climbing_at_once() -> None:
+    """1.0 → 1.1 결과를 다시 올린 것과 1.0 을 한 번에 올린 것이 같다(경로 무관)."""
+    document = _yaml("quality_momentum.v1_0.yaml")
+
+    assert upgrade_document(_tree(document, until=V1_1)).tree == upgrade_document(document).tree
+
+
+def test_the_1_1_stage_moves_execution_settings_to_the_outcome() -> None:
+    """지운 실행 설정은 버리지 않고 결과의 `environment` 로 돌려준다(spec D7) — 원문 값 그대로."""
+    outcome = upgrade_document(_yaml("quality_momentum.v1_1.yaml"))
+
+    assert outcome.environment is not None
+    assert outcome.environment.data_section == {
+        "market": "KRX",
+        "start": "2021-01-01",
+        "end": "2026-08-31",
+        "universe_id": "krx.common-stock",
+        "frequency": "daily",
+    }
+    assert outcome.environment.execution_section == {"timing": "next_open", "fee_bps": 15.0}
+    assert outcome.environment.missing_policy == "drop"
+    assert outcome.environment.missing_policy_pointer == "/factors/0/graph/missing_policy"
+    assert outcome.warnings == ()
+
+
+def test_a_stop_before_the_1_1_stage_moves_nothing() -> None:
+    assert upgrade_document(_yaml("quality_momentum.v1_0.yaml"), until=V1_1).environment is None
+
+
+def test_differing_missing_policies_use_the_first_and_warn() -> None:
+    """spec D7: 팩터별 정책이 다르면 첫 값 + warning. 실행 설정의 결측 처리는 전략 전체에 하나다."""
+    document = _yaml("quality_momentum.v1_1.yaml")
+    second = copy.deepcopy(document["factors"][0])
+    second["factor_id"] = "momentum_zero"
+    second["graph"]["missing_policy"] = "zero"
+    document["factors"].append(second)
+
+    outcome = upgrade_document(document)
+
+    assert outcome.environment is not None and outcome.environment.missing_policy == "drop"
+    assert [(w.code, w.pointer) for w in outcome.warnings] == [
+        (
+            "strategy_document.upgrade_missing_policy_conflict",
+            "/factors/1/graph/missing_policy",
+        )
+    ]
+    assert "used='drop'" in outcome.warnings[0].message
+    assert all("missing_policy" not in f["graph"] for f in _tree(document)["factors"])
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "used", "changed"),
+    [
+        pytest.param(None, "zero", "drop", "momentum_zero", id="omitted-first"),
+        pytest.param("zero", None, "zero", "momentum_default", id="omitted-second"),
+    ],
+)
+def test_an_omitted_missing_policy_counts_as_the_1_1_default_drop(
+    first: str | None, second: str | None, used: str, changed: str
+) -> None:
+    """P2-09 리뷰 DEFECT-P1-1: 생략한 팩터도 실효 값(1.1 기본값 `drop`)으로 충돌 판정에 넣는다.
+
+    명시한 팩터만 세면 "a 생략(=drop) + b `zero`" 문서가 `missing=zero`·warning 없음으로
+    올라가, 1.1 에서 `drop` 이던 a 의 결측이 0 으로 채워진다(합성 점수·선정이 조용히 바뀐다).
+    main 의 P2-02 브리지도 실효 값으로 판정했다. 순서를 바꿔 두 경우를 본다: 첫 팩터의 실효 값을
+    쓰고 다른 쪽을 warning 으로 짚는다.
+    """
+    document = _yaml("quality_momentum.v1_1.yaml")
+    base = copy.deepcopy(document["factors"][0])
+    factors = []
+    for factor_id, policy in (
+        ("momentum_zero" if first == "zero" else "momentum_default", first),
+        ("momentum_zero" if second == "zero" else "momentum_default", second),
+    ):
+        factor = copy.deepcopy(base)
+        factor["factor_id"] = factor_id
+        factor["graph"].pop("missing_policy", None)
+        if policy is not None:
+            factor["graph"]["missing_policy"] = policy
+        factors.append(factor)
+    document["factors"] = factors
+
+    outcome = upgrade_document(document)
+
+    assert outcome.environment is not None and outcome.environment.missing_policy == used
+    assert [(w.code, w.pointer) for w in outcome.warnings] == [
+        ("strategy_document.upgrade_missing_policy_conflict", "/factors/1/graph/missing_policy")
+    ]
+    message = outcome.warnings[0].message
+    assert f"used={used!r}" in message
+    assert changed in message  # 결측 처리가 바뀌는 팩터를 이름으로 짚는다
+    other = "zero" if used == "drop" else "drop"
+    assert f"{other!r}->{used!r}" in message
+
+
+def test_all_omitted_missing_policies_carry_the_1_1_default_without_a_warning() -> None:
+    """모든 팩터가 생략하면 전부 `drop` 이라 충돌이 없다. 실행 설정 기본값과 같은 값이다."""
+    document = _yaml("quality_momentum.v1_1.yaml")
+    del document["factors"][0]["graph"]["missing_policy"]
+
+    outcome = upgrade_document(document)
+
+    assert outcome.environment is not None and outcome.environment.missing_policy == "drop"
+    assert outcome.warnings == ()
+
+
+def test_an_unquoted_1_1_version_line_is_the_declared_1_1() -> None:
+    """P2-09 리뷰 관찰 1: 따옴표 없는 `schema_version: 1.1` 은 YAML float 다.
+
+    선언은 여전히 1.1 이다.
+    """
+    document = _yaml("quality_momentum.v1_1.yaml")
+    document["schema_version"] = 1.1
+
+    outcome = upgrade_document(document)
+
+    assert outcome.source_version == V1_1
+    assert outcome.tree == _current_of("quality_momentum.v1_1.yaml")
+
+
+def test_factor_score_weighting_warns_that_weights_may_differ_from_1_1() -> None:
+    """P2-04 결정 5: `factor_score` 는 선정은 같지만 목표 비중이 1.1 과 다를 수 있다."""
+    document = _yaml("quality_momentum.v1_1.yaml")
+    document["portfolio"]["weighting"] = "factor_score"
+
+    outcome = upgrade_document(document)
+
+    assert [(w.code, w.pointer) for w in outcome.warnings] == [
+        ("strategy_document.upgrade_weighting_rule_changed", "/portfolio/weighting")
+    ]
+
+
+def test_every_warning_code_is_registered() -> None:
+    with pytest.raises(ValueError, match="no owner"):
+        UpgradeWarning("strategy_document.made_up", "", "")  # pyright: ignore[reportArgumentType]  # reason: 런타임 게이트 확인
+    assert "strategy_document.upgrade_environment_unavailable" in UPGRADE_WARNING_CODES
+
+
+def test_a_missing_signal_section_is_inserted_in_model_order() -> None:
+    """1.1 템플릿에는 `signal` 이 없다. 새 섹션은 모델 순서 자리(`factors` 뒤)에 들어간다."""
+    tree = _tree(_yaml("quality_momentum.v1_1.yaml"))
+
+    keys = list(tree)
+    assert keys.index("signal") == keys.index("factors") + 1
+    assert keys[0] == "schema_version"
+
+
+def test_an_explicit_normalization_is_kept() -> None:
+    """작성자가 이미 적은 값은 덮지 않는다 — 기본값을 채우거나 지우지 않는다는 규칙 그대로."""
+    document = _yaml("quality_momentum.v1_1.yaml")
+    document["signal"] = {"normalization": "zscore"}
+
+    assert _tree(document)["signal"] == {"normalization": "zscore"}
+
+
+@pytest.mark.parametrize("kind", ["saved_factor", "saved_subgraph"])
+def test_saved_reference_nodes_refuse_the_upgrade(kind: str) -> None:
+    """spec D7: 실행 경로가 원래 없던 노드라 잃는 것이 없다. 조용히 지우지 않고 거절한다."""
+    document = _yaml("quality_momentum.v1_1.yaml")
+    document["factors"][0]["graph"]["nodes"].append({"kind": kind, "node_id": "ref"})
+
+    with pytest.raises(UpgradeUnsupportedNodeError) as info:
+        upgrade_document(document)
+
+    assert info.value.pointer == "/factors/0/graph/nodes/2/kind"
+    assert info.value.code == "strategy_document.upgrade_unsupported_node"
+    assert kind in str(info.value)
 
 
 def test_upgrade_does_not_mutate_its_input() -> None:
     document = _yaml("quality_momentum.v1_0.yaml")
     snapshot = copy.deepcopy(document)
 
-    upgrade_document_1_0(document)
+    upgrade_document(document)
 
     assert document == snapshot
 
 
+def test_the_output_is_not_upgradeable_again() -> None:
+    """멱등: 업그레이드 결과는 현재 버전이고 옛 모양이 없어서 다시 올릴 것이 없다."""
+    upgraded = _tree(_yaml("quality_momentum.v1_0.yaml"))
+
+    assert not is_upgradeable_document(upgraded)
+    with pytest.raises(NotUpgradeableDocumentError, match="already current"):
+        upgrade_document(upgraded)
+
+
 def test_frozen_means_any_version_other_than_current() -> None:
-    """Phase 1 감사 DEFECT-P1X-001·003: 현재 버전은 모델 기본값과 같은 상수 하나이고, 동결 술어는
-    `== "1.0"`이 아니라 `!= CURRENT`다(1.2 도입 때 1.1 row도 동결이 된다)."""
+    """Phase 1 감사 DEFECT-P1X-001·003: 동결 술어는 `!= CURRENT` 그대로다.
+
+    P2-09 에서도 바꾸지 않는다(spec D7).
+    """
     assert StrategyIdentity("x", 1).schema_version == CURRENT_SCHEMA_VERSION
     assert not is_frozen_schema_version(CURRENT_SCHEMA_VERSION)
-    assert is_frozen_schema_version(LEGACY_SCHEMA_VERSION)
+    for version in FROZEN_SCHEMA_VERSIONS:
+        assert is_frozen_schema_version(version)
     assert is_frozen_schema_version("0.9")
-    assert is_frozen_schema_version("1.1")
+    assert is_frozen_schema_version("1.3")
 
 
-@pytest.mark.parametrize("version", [CURRENT_SCHEMA_VERSION, "2.0", 1.0, None])
-def test_a_1_0_body_upgrades_whatever_the_version_line_says(version: object) -> None:
-    """버전 줄만 손으로 고친 1.0 본문도 업그레이드된다(P1-05 1차 리뷰 DEFECT-P105-001).
-
-    진단(`structure.legacy_shape`)이 "업그레이드하세요"라고 시키고 배너까지 띄우므로, 판정이
-    버전 문자열만 보면 버튼이 반드시 422로 끝난다. 판정 owner를 하나로 두고 둘이 같은 조건을
-    읽게 한 결과를 여기서 고정한다.
-    """
+def test_an_unquoted_1_0_version_line_is_still_the_declared_1_0() -> None:
+    """따옴표 없는 `schema_version: 1.0` 은 YAML 이 float 로 읽는다. 선언은 여전히 1.0 이다."""
     document = _yaml("quality_momentum.v1_0.yaml")
+    document["schema_version"] = 1.0
+
+    outcome = upgrade_document(document)
+
+    assert outcome.source_version == V1_0
+    assert outcome.tree["schema_version"] == CURRENT_SCHEMA_VERSION
+    assert hydrate_strategy_document(outcome.tree, identity=DRAFT).ok
+
+
+# 1.0 전용 모양 하나씩. 현재 버전 문서에 섞일 수 있는 옛 키의 종류 전부다(`legacy_shape_hints` 가
+# 짚는 네 갈래: 두 겹 factors, 은퇴 키 3개, unary alias).
+_LEGACY_SHAPES: dict[str, Any] = {
+    "nested-factors": lambda d: d.__setitem__("factors", {"factors": d["factors"]}),
+    "signal-method": lambda d: d.setdefault("signal", {}).__setitem__("method", "weighted_sum"),
+    "signal-entry": lambda d: d.setdefault("signal", {}).__setitem__("entry_percentile", 0.2),
+    "execution-order-style": lambda d: d.__setitem__("execution", {"order_style": "market"}),
+    "unary-alias": lambda d: (
+        d["factors"]["factors"] if isinstance(d["factors"], dict) else d["factors"]
+    )[0]["graph"]["nodes"].append(
+        {"kind": "unary", "node_id": "legacy_rank", "operator": "rank", "input_node_id": "close"}
+    ),
+}
+_CURRENT_BASES = (
+    "quality_momentum.yaml",
+    *(f"ideas/{p.name}" for p in sorted((FIXTURES / "ideas").glob("*.yaml"))),
+)
+
+
+def _with_shapes(base: str, shapes: tuple[str, ...]) -> dict[str, Any]:
+    document = _yaml(base)
+    first = document["factors"][0]["graph"]["nodes"][0]
+    for name in shapes:
+        _LEGACY_SHAPES[name](document)
+    if "unary-alias" in shapes:  # 별칭 노드의 입력을 그 문서의 첫 잎으로 맞춘다
+        factors = (
+            document["factors"]["factors"]
+            if isinstance(document["factors"], dict)
+            else document["factors"]
+        )
+        factors[0]["graph"]["nodes"][-1]["input_node_id"] = first["node_id"]
+    return document
+
+
+def _subsets() -> list[tuple[str, ...]]:
+    names = tuple(_LEGACY_SHAPES)
+    return [
+        tuple(name for bit, name in enumerate(names) if mask >> bit & 1)
+        for mask in range(1, 1 << len(names))
+    ]
+
+
+@pytest.mark.parametrize("base", _CURRENT_BASES)
+def test_a_current_document_with_any_mix_of_1_0_shapes_is_a_structure_error_not_an_upgrade(
+    base: str,
+) -> None:
+    """Phase 2 감사 NB-1: 문서가 선언한 버전을 믿는다(property — 옛 모양 5종의 모든 조합).
+
+    버전 줄이 현재 판인 문서에 1.0 키가 섞이면 업그레이드 대상이 아니라 제자리에서 고칠 구조
+    오류다. 체인을 1.0 부터 태우면 1.1 → 1.2 단계가 `normalization: none` 을 조용히 넣어 1.2 기본값
+    `rank` 의 의미를 바꾸고, 문서에 없던 `/data/*` 를 짚는 warning 까지 낸다(감사 탐침 실측).
+    그래서 판정은 거절이고, 진단 문장은 업그레이드를 시키지 않는다(시키는 일은 눌러서 되어야 한다).
+    """
+    for shapes in _subsets():
+        document = _with_shapes(base, shapes)
+        assert legacy_shape_hints(document), shapes
+
+        assert not is_upgradeable_document(document), shapes
+        with pytest.raises(NotUpgradeableDocumentError, match="already current") as info:
+            upgrade_document(document)
+        assert "fix them in place" in str(info.value), shapes
+
+        # 구조 오류로 멈추고, 어느 문장도 업그레이드를 시키지 않는다. `execution` 절은 1.2 에서 절
+        # 자체가 모르는 키라 `structure.unknown_key` 로 짚히고, 나머지 옛 모양은 `legacy_shape` 다.
+        issues = hydrate_strategy_document(document, identity=DRAFT).issues
+        codes = {issue.code for issue in issues}
+        assert codes, shapes
+        assert codes <= {"structure.legacy_shape", "structure.unknown_key"}, (shapes, codes)
+        if set(shapes) != {"execution-order-style"}:
+            assert "structure.legacy_shape" in codes, (shapes, codes)
+        assert all("업그레이드" not in issue.message for issue in issues), shapes
+
+
+@pytest.mark.parametrize("version", [V1_1, None])
+def test_an_older_shape_than_the_declared_version_refuses_the_upgrade(version: object) -> None:
+    """선언된 버전보다 앞선 단계는 타지 않는다(NB-1). 1.1 선언 문서에 1.0 모양이 섞였거나 버전
+    줄이 없으면, 체인을 어디서 시작할지 문서가 말하지 않으므로 거절한다."""
+    document = _with_shapes("quality_momentum.v1_1.yaml", ("signal-method",))
     if version is None:
         del document["schema_version"]
     else:
         document["schema_version"] = version
 
-    assert not is_legacy_document(document)
-    assert is_upgradeable_document(document)
-
-    upgraded = upgrade_document_1_0(document)
-
-    # 버전 줄은 결과 버전으로 정규화되고 1.0 모양은 사라진다.
-    # P2-03 이후 P2-09 전까지는 1.0 변환이 1.1(`LEGACY_UPGRADE_TARGET_VERSION`)에서 멈춰 결과가
-    # `structure.unsupported_schema_version` 으로 거절되는 중간 상태다. P2-09 가 1.1 → 1.2 step 을
-    # 붙이면 이 단언을 `CURRENT_SCHEMA_VERSION`·hydrate 성공으로 되돌린다.
-    assert upgraded["schema_version"] == LEGACY_UPGRADE_TARGET_VERSION
-    assert isinstance(upgraded["factors"], list)
-    hydrated = hydrate_strategy_document(upgraded, identity=DRAFT)
-    assert [issue.code for issue in hydrated.issues] == ["structure.unsupported_schema_version"]
-
-
-def test_a_document_with_no_1_0_shape_stays_fail_closed() -> None:
-    """옛 판 모양이 하나도 없으면 그대로 거절한다 — 저장 row 읽기 경로가 이 예외에 기댄다."""
-    document = _yaml("quality_momentum.yaml")
-    document["schema_version"] = "0.9"
-
     assert not is_upgradeable_document(document)
-    with pytest.raises(NotALegacyDocumentError, match="only schema 1.0 documents or bodies"):
-        upgrade_document_1_0(document)
+    expected = "older than the declared version" if version is not None else "missing"
+    with pytest.raises(NotUpgradeableDocumentError, match=expected):
+        upgrade_document(document)
+
+
+@pytest.mark.parametrize("version", ["1.3", "2.0", 2.0, "0.9", "draft"])
+def test_an_unknown_version_line_is_never_downgraded_even_with_a_1_0_body(version: object) -> None:
+    """버전 상한(P1-05 2차 리뷰 P3-7, BACKLOG-010): "미래 버전 + 옛 키 하나"를 1.x 로 강등하지
+    않는다. 모르는 버전은 본문 모양과 상관없이 거절한다 — 저장 row 읽기가 이 거절에 기댄다."""
+    document = _yaml("quality_momentum.v1_0.yaml")
+    document["schema_version"] = version
+
+    assert legacy_shape_hints(document) != {}
+    assert not is_upgradeable_document(document)
+    with pytest.raises(NotUpgradeableDocumentError, match="neither current nor a known retired"):
+        upgrade_document(document)
 
 
 def test_a_valid_current_document_is_never_mistaken_for_an_old_one() -> None:
-    """정상 1.1 문서에 오탐이 없다. 오탐이면 멀쩡한 문서에 업그레이드 배너가 뜬다."""
+    """정상 1.2 문서에 오탐이 없다. 오탐이면 멀쩡한 문서에 업그레이드 배너가 뜬다."""
     document = _yaml("quality_momentum.yaml")
 
     assert legacy_shape_hints(document) == {}
     assert not is_upgradeable_document(document)
 
 
-@pytest.mark.parametrize(
-    ("name", "mutate"),
-    [
-        pytest.param(
-            "factors 두 겹",
-            lambda d: d.__setitem__("factors", {"factors": d["factors"]}),
-            id="nested-factors",
-        ),
-        pytest.param(
-            "은퇴한 키",
-            # 1.0 의 `execution.order_style` 은 1.2 에서 섹션째 사라져 `signal.method` 로 본다.
-            lambda d: d.setdefault("signal", {}).__setitem__("method", "weighted_sum"),
-            id="removed-field",
-        ),
-        pytest.param(
-            "unary alias 노드",
-            lambda d: d["factors"][0]["graph"]["nodes"].append(
-                {
-                    "kind": "unary",
-                    "node_id": "ranked",
-                    "operator": "rank",
-                    "input_node_id": "close",
-                }
-            ),
-            id="unary-alias",
-        ),
-    ],
-)
-def test_every_shape_the_diagnostic_points_at_can_actually_be_upgraded(
-    name: str, mutate: Any
-) -> None:
-    """진단이 짚는 세 모양이 전부 실제로 업그레이드된다.
+def test_a_stage_that_leaves_its_old_shape_behind_is_refused() -> None:
+    """단계마다 검증한다.
 
-    진단이 시키는 일은 눌러서 되어야 한다 — 하나라도 판정에서 빠지면 그 문서의 배너가 422로
-    끝나고 사용자에게 남는 길이 없다.
+    한 번 평탄화해도 옛 모양이 남으면(세 겹 factors) 다음 단계로 넘기지 않는다.
     """
-    document = _yaml("quality_momentum.yaml")
-    mutate(document)
+    document = _yaml("quality_momentum.v1_0.yaml")
+    document["factors"] = {"factors": {"factors": document["factors"]["factors"]}}
 
-    assert legacy_shape_hints(document) != {}, name
-    assert is_upgradeable_document(document), name
-
-    upgraded = upgrade_document_1_0(document)
-
-    assert legacy_shape_hints(upgraded) == {}, name
-    # P2-09 전 중간 상태: 결과는 1.1 이라 1.2 hydrate 가 은퇴 버전으로 거절한다(위 테스트와 같다).
-    assert upgraded["schema_version"] == LEGACY_UPGRADE_TARGET_VERSION, name
-    hydrated = hydrate_strategy_document(upgraded, identity=DRAFT)
-    assert [issue.code for issue in hydrated.issues] == ["structure.unsupported_schema_version"], (
-        name
-    )
+    with pytest.raises(NotUpgradeableDocumentError, match=f"stage {V1_0}->{V1_1}") as info:
+        upgrade_document(document)
+    assert "/factors" in str(info.value)
 
 
 def test_unary_aliases_move_to_cross_sectional_and_drop_periods() -> None:
@@ -221,7 +476,7 @@ def test_unary_aliases_move_to_cross_sectional_and_drop_periods() -> None:
         ]
     )
 
-    upgraded = _upgrade(document)
+    upgraded = _tree(document)
 
     by_id = {node["node_id"]: node for node in upgraded["factors"][0]["graph"]["nodes"]}
     assert (by_id["r"]["kind"], by_id["r"]["operator"]) == ("cross_sectional", "rank")
@@ -248,23 +503,27 @@ def test_removed_fields_go_and_nothing_else_changes() -> None:
     document["execution"] = {"timing": "next_open", "fee_bps": 15.0, "order_style": "market"}
     document["portfolio"]["selection_count"] = 7  # 명시값은 그대로
 
-    upgraded = _upgrade(document)
+    outcome = upgrade_document(document)
+    upgraded = _tree(document)
 
-    assert upgraded["signal"] == {"score_threshold": 1.5}
-    assert upgraded["execution"] == {"timing": "next_open", "fee_bps": 15.0}
+    assert upgraded["signal"] == {"score_threshold": 1.5, "normalization": "none"}
+    # 1.0 전용 `order_style` 은 1.0 단계에서 지워져 실행 설정으로 넘어가지 않는다.
+    assert outcome.environment is not None
+    assert outcome.environment.execution_section == {"timing": "next_open", "fee_bps": 15.0}
     assert upgraded["portfolio"]["selection_count"] == 7
-    assert "description" in upgraded and upgraded["eligibility"] == {
-        "rules": []
-    }  # 기본값을 지우지 않는다
+    assert upgraded["description"] == "" and upgraded["eligibility"] == {"rules": []}
 
 
-def test_step_order_is_declared_and_flattening_precedes_node_rules() -> None:
-    names = [name for name, _ in UPGRADE_STEPS]
-    assert names == ["schema_version", "flatten_factors", "remove_dead_fields", "unary_aliases"]
+def test_stage_step_order_is_declared_and_flattening_precedes_node_rules() -> None:
+    names = {version: [name for name, _ in steps] for version, steps in UPGRADE_STEPS.items()}
+    assert names == {
+        V1_0: ["flatten_factors", "remove_dead_fields", "unary_aliases"],
+        V1_1: ["reject_saved_nodes", "strip_execution_settings", "explicit_normalization"],
+    }
 
 
 def test_steps_apply_identically_to_ruamel_round_trip_containers() -> None:
-    """P1-04의 source 경로가 같은 step을 CST에 쓴다: 결과 tree가 dict 경로와 같고 주석이 남는다."""
+    """source 경로가 같은 체인을 CST 에 쓴다: 결과 tree 가 dict 경로와 같고 주석·따옴표가 남는다."""
     text = (FIXTURES / "quality_momentum.v1_0.yaml").read_text(encoding="utf-8")
     loader = YAML(typ="rt")
     document = loader.load(text)
@@ -274,11 +533,10 @@ def test_steps_apply_identically_to_ruamel_round_trip_containers() -> None:
     buffer = StringIO()
     loader.dump(document, buffer)
     dumped = buffer.getvalue()
-    assert json.loads(json.dumps(yaml.safe_load(dumped))) == upgrade_document_1_0(
-        yaml.safe_load(text)
-    )
+    assert json.loads(json.dumps(yaml.safe_load(dumped))) == _tree(yaml.safe_load(text))
     assert dumped.startswith("# P0-01 golden authoring fixture")  # 선두 주석 보존
+    # 따옴표 보존은 loader 설정(`preserve_quotes`) 몫이라 여기서는 어느 쪽이든 현재 버전이면 된다.
     assert (
-        f"schema_version: '{LEGACY_UPGRADE_TARGET_VERSION}'" in dumped
-        or f'schema_version: "{LEGACY_UPGRADE_TARGET_VERSION}"' in dumped
+        f"schema_version: '{CURRENT_SCHEMA_VERSION}'" in dumped
+        or f'schema_version: "{CURRENT_SCHEMA_VERSION}"' in dumped
     )

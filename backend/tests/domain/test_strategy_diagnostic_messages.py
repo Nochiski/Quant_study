@@ -206,14 +206,14 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "structure.type_mismatch",
         "참 또는 거짓(true·false)이 와야 합니다 — expected=bool got='yes'",
     ),
-    # "날짜 형식"(`structure.invalid_date`) 사례는 schema 1.2(P2-03)에서 뺐다. 날짜 필드이던
+    # "날짜 형식"(`structure.invalid_date`)은 코드째 지웠다(P2-09, BACKLOG-011). 날짜 필드이던
     # `data.start`·`data.end` 가 실행 요청의 `environment` 로 옮겨져 전략 문서에는 날짜 필드가 없다.
     (
         "1.0 문법 — factors 두 겹",
         lambda d: _set(d, "factors", {"factors": d["factors"]}),
         "structure.legacy_shape",
         "1.0 문법입니다. factors 아래에 또 factors 목록을 두던 방식이라 지금 버전에서는 읽지 "
-        "못합니다. 안쪽 목록을 factors 바로 아래로 올리거나 업그레이드하세요 — "
+        "못합니다. 안쪽 목록을 factors 바로 아래로 올리세요 — "
         "expected=sequence got=dict",
     ),
     (
@@ -221,8 +221,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         # 1.0 의 `execution.order_style` 은 1.2 에서 섹션째 사라져 `signal.method` 로 본다.
         lambda d: d.setdefault("signal", {}).update(method="weighted_sum"),
         "structure.legacy_shape",
-        "1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우거나 업그레이드하세요 — "
-        "got='method' section='signal'",
+        "1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우세요 — got='method' section='signal'",
     ),
     (
         "1.0 문법 — unary alias 노드",
@@ -233,7 +232,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         ),
         "structure.legacy_shape",
         "1.0 문법입니다. unary rank는 지금 버전에서 cross_sectional의 rank로 옮겨졌습니다. "
-        "kind와 operator를 함께 바꾸거나 업그레이드하세요 — "
+        "kind와 operator를 함께 바꾸세요 — "
         "got=unary/rank expected=cross_sectional/rank",
     ),
     (
@@ -409,36 +408,24 @@ def test_codec_limit_message_golden(
 
 @dataclass(frozen=True)
 class _Dated:
-    """날짜 필드 하나짜리 모델. `structure.invalid_date` 문장을 고정하는 데만 쓴다."""
+    """날짜 필드 하나짜리 모델. 날짜 필드가 모델에 돌아오면 조용히 통과하지 않는지 본다."""
 
     start: date
 
 
-def test_invalid_date_message_golden() -> None:
-    """날짜 형식 문장의 golden.
+def test_a_date_field_is_an_authoring_error_not_a_silent_pass() -> None:
+    """BACKLOG-011: `structure.invalid_date` 는 1.2 문서로 닿을 수 없어 코드째 지웠다.
 
-    schema 1.2(P2-03)에서 전략 문서의 날짜 필드(`data.start`·`data.end`)가 실행 요청의
-    `environment` 로 옮겨져 문서 변조로는 이 코드에 닿지 않는다. 코드와 문장은 날짜 필드를 가진
-    모델을 위해 hydrate 에 남으므로 날짜 필드 하나짜리 모델로 직접 확인한다.
+    날짜 필드를 모델에 다시 들이면 hydrate 가 그 자리에서 멈춰야 한다 — 그래야 코드와 문장
+    golden 을 함께 되살릴 일이 드러난다.
     """
-    issues: list[Any] = []
-    _hydrate(_Dated, {"start": "2021/01/01"}, "", issues)
-
-    assert [(issue.code, issue.message) for issue in issues] == [
-        (
-            "structure.invalid_date",
-            "날짜는 YYYY-MM-DD로 적어 주세요. 예: 2021-01-01 — "
-            "expected=YYYY-MM-DD example=2021-01-01 got='2021/01/01'",
-        )
-    ]
+    with pytest.raises(TypeError, match="unsupported hydrate type"):
+        _hydrate(_Dated, {"start": "2021-01-01"}, "", [])
 
 
 def test_every_declared_code_has_a_message_golden() -> None:
     """코드 레지스트리와 문장 golden이 1:1이다 — 코드를 늘리면 문장도 같은 PR에서 늘어난다."""
     structural = {code for _n, _m, code, _msg in HYDRATE_GOLDEN}
-    # 날짜 형식은 schema 1.2 문서에 날짜 필드가 없어 문서 변조로는 닿지 않는다. 문장은 아래
-    # `test_invalid_date_message_golden` 이 hydrate 를 직접 불러 고정한다.
-    structural |= {"structure.invalid_date"}
     codec = {code for _n, _s, _f, code, _msg in CODEC_GOLDEN} | {
         code for _n, _s, _l, code, _msg in LIMIT_GOLDEN
     }

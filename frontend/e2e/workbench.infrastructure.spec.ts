@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getHealth } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
 import { backendOrigin } from "./ports.mjs";
+import { fillRunEnvironment } from "./workbench-helpers";
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = readFileSync(
@@ -28,6 +29,8 @@ const REQUIRED_BACKEND_RESOURCES = [
   "/api/v1/strategy-documents/contract",
   "/api/v1/equity/catalog",
   "/api/v1/factors/catalog",
+  // 실행 설정 패널·요약 띠가 필드와 기본값을 읽는다(P3-02).
+  "/api/v1/run-environments/schema",
 ] as const;
 type RequiredBackendResource = (typeof REQUIRED_BACKEND_RESOURCES)[number];
 
@@ -211,13 +214,9 @@ test("matches the professional workbench viewport and theme baseline", async ({
   await expect(page).toHaveScreenshot("strategy-workbench.png");
 });
 
-// P3-02(실행 설정 패널)에서 되살린다. 전략 디버거는 `POST /api/v1/strategies/debug/trace` 를
-// 부르는데, schema 1.2 는 기간·유니버스를 전략 문서에서 빼 실행 요청의 `environment` 로 옮겼고
-// (P2-03) 그 값을 싣는 프론트 배선이 그 패널이다. 그때까지 trace 는 preview·run 과 같은
-// `portfolio.strategy.invalid` + `run_environment.required` 로 거절되어 "추적 재현 정보" 패널이
-// 뜨지 않는다(픽셀 차이가 아니라 요청 거절이다).
-// 되살릴 때 바꿀 것: `strategy-debugger.png` 기준선 4장을 그때 화면으로 재생성.
-test.fixme("keeps a real debugger trace legible and inside the viewport", async ({
+// 전략 디버거의 trace 요청은 실행 설정(기간·유니버스)을 싣는다 — schema 1.2 부터 그 값은 전략 문서 밖의
+// 실행 설정 패널이 정한다(P3-02). 정하기 전에는 추적이 막힌다.
+test("keeps a real debugger trace legible and inside the viewport", async ({
   page,
 }) => {
   await openWorkbench(page);
@@ -225,6 +224,7 @@ test.fixme("keeps a real debugger trace legible and inside the viewport", async 
   await expect(page.getByRole("status", { name: "문서 상태" })).toContainText(
     "검증 통과",
   );
+  await fillRunEnvironment(page);
   const resizeDebugger = page.getByRole("separator", {
     name: "중간 결과 크기 조절",
   });

@@ -116,3 +116,66 @@ export const mustReplace = (text: string, from: string, to: string): string => {
     );
   return next;
 };
+
+/**
+ * e2e 가 실행 설정 패널에 넣는 기간·유니버스(P3-02). schema 1.2 부터 이 값은 전략 문서 밖에 있고, 실행
+ * 설정 스키마가 기본값을 주지 않아 사용자가 정해야 백테스트·추적이 열린다. mock 어댑터는 fixture 달력 밖
+ * 세션을 (종목, 날짜)의 함수로 합성하므로 옛 골든(1.1)의 기간을 그대로 쓴다.
+ */
+export const RUN_ENVIRONMENT = {
+  start: "2021-01-01",
+  end: "2026-08-31",
+  universe_id: "krx.common-stock",
+} as const;
+
+/** 실행 설정 스키마 기본값(`GET /api/v1/run-environments/schema`)을 채운 요청 본문의 `environment`. */
+export const REQUESTED_ENVIRONMENT = {
+  market: "KRX",
+  frequency: "daily",
+  ...RUN_ENVIRONMENT,
+  timing: "next_open",
+  participation_rate: 0.1,
+  fee_bps: 15,
+  slippage_bps: 10,
+  missing: "drop",
+} as const;
+
+/**
+ * 실행 설정 패널을 열어 기간·유니버스를 채우고 닫는다. `keyboard` 면 패널을 여닫을 때도 포인터 없이 초점과
+ * Enter 만 쓴다(US-SM-04 키보드 스토리).
+ */
+export const fillRunEnvironment = async (
+  page: Page,
+  { keyboard = false }: { keyboard?: boolean } = {},
+  environment: { start: string; end: string; universe_id: string } = RUN_ENVIRONMENT,
+) => {
+  const toggle = page.getByLabel("실행 설정 열기");
+  const fields = [
+    [page.getByLabel("시작일", { exact: true }), environment.start],
+    [page.getByLabel("종료일", { exact: true }), environment.end],
+    [
+      page.getByRole("textbox", { name: "유니버스", exact: true }),
+      environment.universe_id,
+    ],
+  ] as const;
+  if (keyboard) {
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+  } else {
+    await toggle.click();
+  }
+  // `fill` 은 포인터를 쓰지 않는다. 날짜 칸을 타자로 채우면 브라우저 locale 의 칸 순서(월/일/연)에 묶인다.
+  for (const [field, value] of fields) {
+    await field.fill(value);
+    await expect(field).toHaveValue(value);
+  }
+  await expect(
+    page.getByRole("region", { name: "실행 설정 요약" }),
+  ).toContainText(environment.universe_id);
+  if (keyboard) {
+    await toggle.focus();
+    await page.keyboard.press("Enter");
+  } else {
+    await toggle.click();
+  }
+};

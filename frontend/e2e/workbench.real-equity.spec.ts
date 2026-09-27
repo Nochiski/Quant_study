@@ -23,6 +23,7 @@ import {
   backtest,
   currentSource,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
@@ -51,11 +52,15 @@ const START_TIMEOUT_MS = 15_000;
 const COMPLETE_TIMEOUT_MS = 420_000;
 const TEST_TIMEOUT_MS = 900_000;
 
-const realDataSource = (title: string): string => {
-  const titled = mustReplace(GOLDEN, "퀄리티 모멘텀", title);
-  const started = mustReplace(titled, 'start: "2021-01-01"', `start: "${BACKTEST_START}"`);
-  return mustReplace(started, 'end: "2026-08-31"', `end: "${BACKTEST_END}"`);
-};
+// 실행 기간·유니버스는 schema 1.2 부터 전략 문서가 아니라 실행 설정 패널이 정한다(P2-03·P3-02).
+const REAL_RUN_ENVIRONMENT = {
+  start: BACKTEST_START,
+  end: BACKTEST_END,
+  universe_id: "krx.common-stock",
+} as const;
+
+const realDataSource = (title: string): string =>
+  mustReplace(GOLDEN, "퀄리티 모멘텀", title);
 
 test.describe("real equity data", () => {
   test.skip(
@@ -65,15 +70,7 @@ test.describe("real equity data", () => {
   test.describe.configure({ mode: "serial" });
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  // P3-02(실행 설정 패널)에서 되살린다. schema 1.2 는 실행 기간·유니버스를 전략 문서에서 빼
-  // 실행 요청의 `environment` 로 옮겼고(P2-03), 그 값을 싣는 프론트 배선이 그 패널이다. 기간에는
-  // 스키마 기본값이 있을 수 없어 요청에 상수를 박는 shim 으로 앞당길 수 없다. 그때까지 브라우저에서
-  // 시작한 백테스트는 422 `backtest.run.environment_required` 로 거절된다. 최종 시나리오 재작성은
-  // P3-03(e2e fixture 1.2)이 맡는다.
-  // 되살릴 때 바꿀 것: `realDataSource` 가 GOLDEN 의 `start`/`end` 를 치환하는데 1.2 문서에는 그
-  // 키가 없어 `mustReplace` 가 던진다 — 구간은 실행 설정으로 옮겨야 한다. 그리고 기대 요청 본문의
-  // `environment`.
-  test.fixme("edits the graph on real data, saves the revision and completes a backtest", async ({
+  test("edits the graph on real data, saves the revision and completes a backtest", async ({
     page,
   }) => {
     const title = `실데이터 그래프 편집 ${Date.now().toString(36)}`;
@@ -118,8 +115,6 @@ test.describe("real equity data", () => {
     const edited = await currentSource(page);
     expect(edited).toContain(`\n          field_id: ${REWIRED_FIELD}\n`);
     expect(edited).toContain("\n          input_node_id: field\n");
-    expect(edited).toContain(`start: "${BACKTEST_START}"`);
-    expect(edited).toContain(`end: "${BACKTEST_END}"`);
     await saveAndWaitForRevision(page, 2);
     const saved = requireData(
       (
@@ -146,7 +141,9 @@ test.describe("real equity data", () => {
       "momentum",
     ]);
 
-    // 백테스트: 실데이터 duckdb 어댑터 + Rust core. 저장된 revision 을 그대로 실행한다.
+    // 백테스트: 실데이터 duckdb 어댑터 + Rust core. 저장된 revision 을 그대로 실행한다. 기간·유니버스는
+    // 실행 설정 패널에서 정한다.
+    await fillRunEnvironment(page, {}, REAL_RUN_ENVIRONMENT);
     const settingsToggle = page.getByLabel("실행 설정 열기");
     await settingsToggle.click();
     await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue("rust");
@@ -174,6 +171,7 @@ test.describe("real equity data", () => {
     expect((await submittedRun).postDataJSON()).toMatchObject({
       core: "rust",
       benchmark_security_id: BENCHMARK_SECURITY_ID,
+      environment: REAL_RUN_ENVIRONMENT,
       strategy_source: {
         kind: "saved_revision",
         strategy_id: strategyId,

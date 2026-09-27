@@ -15,7 +15,12 @@ import {
   ensureProvider,
   openAssistant,
 } from "../assistant-helpers";
-import { backtest, expectPhase, openEditor } from "../workbench-helpers";
+import {
+  backtest,
+  expectPhase,
+  fillRunEnvironment,
+  openEditor,
+} from "../workbench-helpers";
 
 /** 대본이 제안하는 전략 제목(`_scenarios.py`의 `_IDEA_TITLE`). */
 const IDEA_TITLE = "KRX 대형 모멘텀";
@@ -40,6 +45,9 @@ test(
     await card.getByRole("button", { name: "문서에 적용" }).click();
     await expect(page.getByText("제안을 문서에 적용했습니다.")).toBeVisible();
     await expectPhase(page, "검증 통과");
+
+    // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02).
+    await fillRunEnvironment(page);
 
     // 저장하지 않은 채로 돌려 본다. 적용한 문서는 시작 문서와 달라 저장되지 않은 상태(dirty)이므로,
     // 실행 화면으로 가기 전에 이탈 확인이 반드시 한 번 뜬다(`DirtyLeaveGuard`).

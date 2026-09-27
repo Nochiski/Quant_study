@@ -112,7 +112,7 @@ test(
     await expect(problems).toContainText("지우세요");
     await expect(problems).not.toContainText("업그레이드");
     await expect(
-      page.getByRole("region", { name: "schema 1.0 문서" }),
+      page.getByRole("region", { name: "이전 schema 문서" }),
     ).toHaveCount(0);
   },
 );

@@ -13,6 +13,7 @@ import { expect, test } from "@playwright/test";
 import {
   backtest,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
@@ -86,6 +87,8 @@ test(
     await replaceSource(page, source);
     await expectPhase(page, "검증 통과");
     await saveAndWaitForRevision(page, 1);
+    // 추적과 백테스트는 실행 설정의 기간·유니버스 위에서 돈다(P3-02).
+    await fillRunEnvironment(page);
 
     // 중간 결과: 파생 팩터의 마지막 노드를 골라 종목 셋을 추적한다.
     await page

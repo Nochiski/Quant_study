@@ -10,6 +10,7 @@ import { expect, test } from "@playwright/test";
 import {
   backtest,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
@@ -43,6 +44,8 @@ test(
     await expectPhase(page, "검증 통과");
     await saveAndWaitForRevision(page, 1);
 
+    // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02).
+    await fillRunEnvironment(page);
     await expect(backtest(page)).toBeEnabled();
     await backtest(page).click();
 

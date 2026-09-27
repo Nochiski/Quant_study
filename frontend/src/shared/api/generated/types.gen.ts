@@ -121,6 +121,9 @@ export type AssistantEventEnvelopeView = {
         type: "search_activity";
       } & SearchActivityView)
     | ({
+        type: "search_budget_exhausted";
+      } & SearchBudgetExhaustedView)
+    | ({
         type: "proposal";
       } & ProposalView)
     | ({
@@ -229,6 +232,25 @@ export type AssistantProviderNotInstalledDetail = {
 };
 
 /**
+ * AssistantResultUnavailableDetail
+ *
+ * 결과 세션이 가리키는 실행의 결과가 없다(결과 설명 spec R3·R7).
+ *
+ * 모르는 실행이거나 끝나지 않았거나 실패했다. 실행 레지스트리가 프로세스 안에만 있어 backend를
+ * 다시 시작한 뒤의 옛 결과 세션도 여기로 온다.
+ */
+export type AssistantResultUnavailableDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.result_unavailable";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * AssistantSecretMissingDetail
  *
  * 프로파일은 있는데 키 파일에 그 키가 없다.
@@ -242,6 +264,24 @@ export type AssistantSecretMissingDetail = {
    * Code
    */
   code: "assistant.provider_secret_missing";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * AssistantTurnContextMismatchDetail
+ *
+ * 턴 요청의 `context`가 세션 모드와 맞지 않는다(결과 설명 spec R5).
+ *
+ * 전략 세션은 편집기 상태를 턴마다 받아야 하고, 결과 세션은 받지 않는다.
+ */
+export type AssistantTurnContextMismatchDetail = {
+  /**
+   * Code
+   */
+  code: "assistant.turn_context_mismatch";
   /**
    * Message
    */
@@ -300,7 +340,13 @@ export type AssistantUnprocessableResponse = {
       } & AssistantSecretMissingDetail)
     | ({
         code: "assistant.document_ref_invalid";
-      } & AssistantDocumentRefInvalidDetail);
+      } & AssistantDocumentRefInvalidDetail)
+    | ({
+        code: "assistant.result_unavailable";
+      } & AssistantResultUnavailableDetail)
+    | ({
+        code: "assistant.turn_context_mismatch";
+      } & AssistantTurnContextMismatchDetail);
 };
 
 /**
@@ -670,6 +716,11 @@ export type CellKind =
 
 /**
  * ChatMessageView
+ *
+ * 대화 메시지 하나. `turn_id`는 이 메시지를 만든 턴이다(C-03).
+ *
+ * 화면은 이 값으로 질문을 턴에 붙인다. `null`은 이 필드가 생기기 전에 저장돼 어느 턴 뒤에도 오지
+ * 않는 메시지뿐이며, 화면은 그런 메시지를 어느 턴에도 달지 않는다.
  */
 export type ChatMessageView = {
   /**
@@ -681,6 +732,10 @@ export type ChatMessageView = {
    * Text
    */
   text: string;
+  /**
+   * Turn Id
+   */
+  turn_id: string | null;
 };
 
 /**
@@ -1071,7 +1126,9 @@ export type DiffKind = "added" | "removed" | "changed";
 /**
  * DocumentRefView
  *
- * 세션이 붙은 문서. 저장된 전략과 초안 중 정확히 하나다(application이 검증한다).
+ * 세션이 붙은 대상. 저장된 전략·초안·백테스트 실행 중 정확히 하나다(application이 검증한다).
+ *
+ * `run_id`에 붙은 세션은 결과 설명 전용이다(결과 설명 spec R3·R5).
  */
 export type DocumentRefView = {
   /**
@@ -1082,6 +1139,10 @@ export type DocumentRefView = {
    * Revision
    */
   revision?: number | null;
+  /**
+   * Run Id
+   */
+  run_id?: string | null;
   /**
    * Strategy Id
    */
@@ -3848,6 +3909,21 @@ export type SearchActivityView = {
 };
 
 /**
+ * SearchBudgetExhaustedView
+ *
+ * 검색 횟수 상한에 닿아 이 턴의 남은 호출에서 검색을 뺐다는 통지. 검색 활동이 아니다.
+ *
+ * 본문 필드가 없다. 화면 문구는 frontend가 로케일별로 소유하고, 모델에게 보낸 지시문은 wire에
+ * 싣지 않는다(C-03).
+ */
+export type SearchBudgetExhaustedView = {
+  /**
+   * Type
+   */
+  type: "search_budget_exhausted";
+};
+
+/**
  * SecurityRef
  */
 export type SecurityRef = {
@@ -4046,9 +4122,14 @@ export type SourceView = {
 
 /**
  * StartTurnRequest
+ *
+ * 턴 시작 요청. `context`는 전략 세션에만 싣는다.
+ *
+ * 결과 세션은 서버가 실행 결과를 읽어 요약하므로 문서 컨텍스트가 없다. 모드와 맞지 않으면 422
+ * `assistant.turn_context_mismatch`다(결과 설명 spec R5·R7).
  */
 export type StartTurnRequest = {
-  context: TurnContextPayload;
+  context?: TurnContextPayload | null;
   /**
    * Text
    */
@@ -5729,6 +5810,10 @@ export type ListAssistantSessionsData = {
      * Draft Id
      */
     draft_id?: string | null;
+    /**
+     * Run Id
+     */
+    run_id?: string | null;
   };
   url: "/api/v1/assistant/sessions";
 };

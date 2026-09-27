@@ -1,7 +1,21 @@
-"""대본 시나리오 일곱 개와 질문 → 시나리오 선택 (WORKFLOW B-05, A-07 시나리오 fixture와 같은 내용).
+"""대본 시나리오 아홉 개와 질문 → 시나리오 선택 (WORKFLOW B-05, A-07 시나리오 fixture와 같은 내용).
 
 "새 전략"(`idea_to_new_strategy`)과 "샤프"(`concept_answer`)는 유저 스토리 e2e(US-DM-03·US-SM-09)가
-쓰려고 뒤에 더한 대본이라 A-07 골든에는 없다.
+쓰려고 뒤에 더한 대본이라 A-07 골든에는 없다. "검색 상한"(`search_budget_answer`, C-03·US-CS-04)과
+결과 설명(`result_explanation`, US-DM-08)도 같다.
+
+## 결과 설명 대본은 질문이 아니라 도구 목록으로 고른다
+
+결과 세션에서는 무엇을 물어도 이 대본이 돈다. application이 결과 세션에만 `read_backtest_result`를
+주기 때문이다(결과 설명 spec R5). 그래서 이 대본이 골라졌다는 것 자체가 "세션 모드가 도구 목록을
+바꿨다"의 증거이고, e2e는 그 대본의 답이 화면에 뜨는 것으로 모드 분기까지 확인한다. 답에 들어가는
+숫자는 도구가 돌려준 서버 요약에서 읽는다 — 상수로 적으면 요약이 모델에 닿지 않아도 e2e가 통과한다.
+
+결과 턴의 도구 목록에 `propose_strategy`까지 있으면(`result_explanation_with_proposal`) 설명 뒤에
+검증을 통과하는 전략을 제안해 본다. 정상 서버에서는 결과 세션이 그 도구를 주지 않으므로 이 갈래가
+돌지 않는다. 누가 결과 세션에 전략 도구를 섞거나 제안 게이트를 없애면 결과 화면에 제안 카드가 뜨고,
+US-DM-08 e2e의 "제안 카드 없음" 단언이 그때 실제로 깨진다(D 스택 리뷰 P3-5). 모델이 시키지 않은
+제안을 시도하는 경우를 대본이 대신 흉내 내는 것이다.
 
 ## 왜 backend 안에 두는가
 
@@ -35,6 +49,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     ChatEvent,
     Done,
     SearchActivity,
+    SearchBudgetExhausted,
     Source,
     TextDelta,
     ToolCall,
@@ -43,8 +58,10 @@ from strategy_workbench.domain.assistant.facade.models import (
 )
 from strategy_workbench.domain.assistant.facade.tools import (
     PROPOSE_STRATEGY,
+    READ_BACKTEST_RESULT,
     READ_CURRENT_STRATEGY,
 )
+from strategy_workbench.domain.strategy.facade.document import CURRENT_SCHEMA_VERSION
 
 __all__ = [
     "SCENARIO_KEYWORDS",
@@ -53,11 +70,14 @@ __all__ = [
     "Scenario",
     "ScenarioPlan",
     "scenario_for",
+    "search_budget_answer",
     "search_then_failure",
     "simple_answer",
     "factor_window_proposal",
     "concept_answer",
     "idea_to_new_strategy",
+    "result_explanation",
+    "result_explanation_with_proposal",
     "slow_answer",
     "tool_then_proposal",
 ]
@@ -134,7 +154,7 @@ factors:
       nodes:
         - kind: field
           node_id: close
-          field_id: price.close
+          field_id: price.adj_close
         - kind: time_series
           node_id: mom_252
           operator: momentum
@@ -218,6 +238,61 @@ def concept_answer(_execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
     for part in _CONCEPT_ANSWER_PARTS:
         yield TextDelta(text=part)
     yield Usage(input_tokens=1900, output_tokens=150)
+    yield Done(stop_reason="end_turn")
+
+
+def result_explanation(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
+    """결과 요약을 읽고 핵심 지표를 쉬운 말로 풀어 답한다(US-DM-08).
+
+    숫자는 전부 도구 결과에서 읽는다(모듈 docstring). 요약을 읽지 못하면 그렇다고 말한다 — 그럴듯한
+    숫자로 되돌아가면 e2e가 "답이 왔다"까지만 보고 통과한다.
+    """
+    yield from _result_explanation_events(execute_tool, done=True)
+
+
+def _result_explanation_events(execute_tool: ExecuteTool, *, done: bool) -> Iterator[ChatEvent]:
+    read_call = ToolCall(call_id="call-read-result", name=READ_BACKTEST_RESULT, arguments={})
+    yield read_call
+    summary = _result_summary(execute_tool(read_call))
+    yield Usage(input_tokens=2400, output_tokens=160)
+    for part in _result_answer_parts(summary):
+        yield TextDelta(text=part)
+    yield Usage(input_tokens=3100, output_tokens=420)
+    if done:
+        yield Done(stop_reason="end_turn")
+
+
+# 결과 턴에서 제안 도구가 새어 들어왔을 때 대본이 내는 제안의 제목(모듈 docstring). e2e가 이 제목의
+# 카드가 결과 화면에 없음을 본다.
+RESULT_PROBE_TITLE = "결과 화면에서 새어 나온 제안"
+
+
+def result_explanation_with_proposal(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
+    """결과를 설명한 뒤 전략 제안까지 시도한다. 결과 세션에 제안 도구가 있을 때만 골라진다.
+
+    문서가 없는 결과 세션이라 지금 원문에서 버전 줄을 가져올 수 없다. 그래서 버전은 domain 상수
+    `CURRENT_SCHEMA_VERSION`에서 읽는다(버전 리터럴을 적지 않는다, SoT 규칙). 본문은 새 전략 대본과
+    같다 — 검증을 통과해야 제안 카드가 실제로 생긴다.
+    """
+    yield from _result_explanation_events(execute_tool, done=False)
+    propose_call = ToolCall(
+        call_id="call-propose-probe",
+        name=PROPOSE_STRATEGY,
+        arguments={
+            "title": RESULT_PROBE_TITLE,
+            "summary": _IDEA_SUMMARY,
+            "rationale": _PROPOSAL_RATIONALE,
+            "sources": [],
+            "source_text": (
+                f'schema_version: "{CURRENT_SCHEMA_VERSION}"\n'
+                f'title: "{RESULT_PROBE_TITLE}"\n{_IDEA_BODY}'
+            ),
+        },
+    )
+    yield propose_call
+    execute_tool(propose_call)
+    # 도구 결과·제안 이벤트는 다음 이벤트를 흘릴 때 큐에서 나간다(`tool_then_proposal` docstring).
+    yield Usage(input_tokens=3300, output_tokens=900)
     yield Done(stop_reason="end_turn")
 
 
@@ -352,22 +427,48 @@ def search_then_failure(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
     yield Done(stop_reason="end_turn")
 
 
+def search_budget_answer(_execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
+    """검색 두 번 뒤 검색 횟수 상한 통지를 받고, 검색 없이 모은 자료로 답한다.
+
+    진짜 adapter가 상한에 닿았을 때 내는 순서와 같다 — 앞 호출의 검색·사용량, 도구를 뺀 호출 앞의
+    통지, 그 호출의 답. 화면이 통지를 검색 활동 칩으로 그리지 않고 안내 문구로 보이는지 e2e가 이
+    대본으로 본다.
+    """
+    yield SearchActivity(query="KRX 모멘텀 팩터 2026", sources=(_KRX_MOMENTUM_SOURCE,))
+    yield SearchActivity(query="KRX 팩터 성과 보고", sources=(_FACTOR_REVIEW_SOURCE,))
+    yield Usage(input_tokens=2600, output_tokens=240)
+    yield SearchBudgetExhausted()
+    yield TextDelta(text="찾은 자료 두 건으로 정리하면, ")
+    yield TextDelta(text="KRX에서도 모멘텀 프리미엄이 관측됩니다.")
+    yield Usage(input_tokens=3100, output_tokens=180)
+    yield Done(stop_reason="end_turn")
+
+
 # 질문에 들어 있는 낱말로 시나리오를 고른다. 먼저 맞는 항목이 이긴다 — "검색해서 제안해 줘"처럼
 # 둘 다 들어 있으면 제안 쪽이다. "창을 줄"은 "제안"보다 앞이라 "창을 줄인 안을 제안해 줘"도
 # 그래프를 바꾸는 대본을 고른다. "새 전략"도 "제안"보다 앞이라 "새 전략으로 제안해 줘"는
-# 전체 전략을 쓴다.
+# 전체 전략을 쓴다. "검색 상한"은 "검색"보다 앞이라 검색 실패 대본으로 새지 않는다.
 SCENARIO_KEYWORDS: tuple[tuple[str, ScenarioPlan], ...] = (
     ("창을 줄", ScenarioPlan(factor_window_proposal)),
     ("새 전략", ScenarioPlan(idea_to_new_strategy)),
     ("제안", ScenarioPlan(tool_then_proposal)),
+    ("검색 상한", ScenarioPlan(search_budget_answer)),
     ("검색", ScenarioPlan(search_then_failure)),
     ("천천히", ScenarioPlan(slow_answer, delay_scale=SLOW_ANSWER_DELAY_SCALE)),
     ("샤프", ScenarioPlan(concept_answer)),
 )
 
 
-def scenario_for(text: str) -> ScenarioPlan:
-    """질문 한 줄로 시나리오를 고른다. 아무 낱말도 없으면 단순 답변이다."""
+def scenario_for(text: str, *, offered: frozenset[str] = frozenset()) -> ScenarioPlan:
+    """질문 한 줄로 시나리오를 고른다. 아무 낱말도 없으면 단순 답변이다.
+
+    결과 세션(`read_backtest_result`를 받은 턴)은 질문과 무관하게 결과 설명이다(모듈 docstring).
+    """
+    if READ_BACKTEST_RESULT in offered:
+        # 결과 세션에 제안 도구가 새어 들어오면 제안을 시도한다(모듈 docstring, 리뷰 P3-5).
+        if PROPOSE_STRATEGY in offered:
+            return ScenarioPlan(result_explanation_with_proposal)
+        return ScenarioPlan(result_explanation)
     for keyword, plan in SCENARIO_KEYWORDS:
         if keyword in text:
             return plan
@@ -388,6 +489,79 @@ def _current_source(current: ToolResult) -> str | None:
     if not isinstance(source_text, str) or source_text.strip() == "":
         return None
     return source_text
+
+
+def _result_summary(result: ToolResult) -> Mapping[str, object] | None:
+    """`read_backtest_result` 결과 JSON. 읽지 못하면 None이다."""
+    if not result.ok:
+        return None
+    try:
+        payload = json.loads(result.content)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, Mapping) else None
+
+
+def _full_metric(summary: Mapping[str, object], metric_id: str) -> float | None:
+    metrics = summary.get("metrics")
+    if not isinstance(metrics, list):
+        return None
+    for entry in metrics:
+        if (
+            isinstance(entry, Mapping)
+            and entry.get("metric_id") == metric_id
+            and entry.get("scope") == "full"
+        ):
+            value = entry.get("value")
+            return float(value) if isinstance(value, int | float) else None
+    return None
+
+
+def _percent(value: float) -> str:
+    """결과 화면의 퍼센트 표기와 같은 모양(소수 둘째 자리). e2e가 화면 값과 답을 맞춰 본다."""
+    return f"{value * 100:.2f}%"
+
+
+def _result_answer_parts(summary: Mapping[str, object] | None) -> tuple[str, ...]:
+    if summary is None:
+        return ("결과 요약을 읽지 못해 이 실행을 설명할 수 없습니다.",)
+    parts = ["이 결과를 쉬운 말로 풀어 보겠습니다. "]
+    total = _full_metric(summary, "total_return")
+    if total is not None:
+        direction = "늘었다" if total >= 0 else "줄었다"
+        parts.append(
+            f"총수익률(Total return)은 {_percent(total)}입니다. "
+            f"처음 넣은 돈이 끝날 때 그만큼 {direction}는 뜻입니다. "
+        )
+    capital = summary.get("capital")
+    benchmark = capital.get("benchmark_security_id") if isinstance(capital, Mapping) else None
+    benchmark_return = _full_metric(summary, "benchmark_return")
+    excess = _full_metric(summary, "excess_return")
+    if isinstance(benchmark, str) and benchmark_return is not None and excess is not None:
+        verdict = "더 벌었습니다" if excess >= 0 else "덜 벌었습니다"
+        parts.append(
+            f"같은 기간 벤치마크({benchmark})는 {_percent(benchmark_return)}였고, "
+            f"전략은 벤치마크보다 {_percent(abs(excess))} {verdict}. "
+        )
+    else:
+        parts.append(
+            "이 실행에는 벤치마크가 없어 시장과 비교하지 못했습니다. "
+            "실행 설정에서 벤치마크 종목을 정하고 다시 돌리면 비교할 수 있습니다. "
+        )
+    sharpe = _full_metric(summary, "sharpe")
+    if sharpe is not None:
+        parts.append(
+            f"샤프 비율(Sharpe ratio)은 {sharpe:.2f}입니다. 위험 한 단위당 얼마나 벌었는지를 "
+            "뜻합니다. 보통 1을 넘으면 괜찮은 편으로 봅니다. "
+        )
+    drawdown = _full_metric(summary, "max_drawdown")
+    if drawdown is not None:
+        parts.append(
+            f"최대 낙폭(Maximum drawdown)은 {_percent(drawdown)}입니다. 가장 높았던 때에서 가장 "
+            "많이 떨어진 폭입니다. 그만큼 떨어지는 시기를 견딜 수 있는지 생각해 보세요. "
+        )
+    parts.append("과거 결과가 앞으로의 수익을 보장하지는 않습니다.")
+    return tuple(parts)
 
 
 def _window_proposal_source(current: ToolResult) -> str:

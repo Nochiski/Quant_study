@@ -166,6 +166,8 @@ const EVENT_FIELDS: Record<
     isString(event.summary),
   search_activity: (event) =>
     isString(event.query) && isSourceList(event.sources),
+  // 본문 필드가 없는 통지다. 갈래 이름만으로 충분하다.
+  search_budget_exhausted: () => true,
   proposal: (event) => isProposal(event.proposal),
   usage: (event) =>
     isFiniteNumber(event.input_tokens) &&

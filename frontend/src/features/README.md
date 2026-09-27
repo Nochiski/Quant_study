@@ -9,7 +9,7 @@ widget·page가 한다.
 | `debug-strategy` | 서버 trace 표현 — 종목별 점수·순위·비중을 읽기 전용으로 보인다 |
 | `run-backtest` | 실행 설정(코어·초기 자본·벤치마크·지표 구간)과 실행 시작 |
 | `configure-ai-providers` | 설정 화면의 "AI 어시스턴트 공급자" 섹션: 카드 목록·활성 전환·삭제 확인·추가 폼·연결 테스트. 키는 폼의 비제어 입력을 지나 요청 본문으로만 가고 state·캐시에 남지 않는다 |
-| `assist-strategy` | 전략 화면 우측 채팅 사이드바: 메시지·스트리밍 텍스트·검색 활동·도구 활동·제안 카드·취소·세션 전환. 제안 적용은 콜백으로 밖에 넘긴다(feature가 feature를 부르지 않는다) |
+| `assist-strategy` | 전략 화면 우측 채팅 사이드바: 메시지·스트리밍 텍스트·검색 활동·도구 활동·제안 카드·취소·세션 전환. 제안 적용은 콜백으로 밖에 넘긴다(feature가 feature를 부르지 않는다). 백테스트 결과 화면도 같은 사이드바를 `copy="result"`·실행 참조로 붙인다(결과 설명 spec R1). 그때는 문서 컨텍스트를 싣지 않고 제안 콜백도 없다 |
 
 AI 어시스턴트 두 slice의 계약 정본은
 [설계 spec](../../../docs/superpowers/specs/2026-09-20-ai-assistant-design.md) D7이다.

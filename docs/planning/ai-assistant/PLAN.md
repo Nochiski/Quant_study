@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: COMPLETE
-current_phase: complete
-current_pr: none
-active_prs: []
-parallel_window: []
-last_updated: 2026-09-26T22:10:58+09:00
-planned_prs: 15
-merged_prs: 15
-approved_prs: 15
-progress_percent: 100
+project_status: IN_REVIEW
+current_phase: D
+current_pr: D-01,D-02,D-03
+active_prs: [D-01, D-02, D-03]
+parallel_window: [D-01, D-02, D-03]
+last_updated: 2026-09-27T11:24:14+09:00
+planned_prs: 19
+merged_prs: 16
+approved_prs: 16
+progress_percent: 84
 ---
 
 # AI 어시스턴트 실시간 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 100
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `COMPLETE` |
-| Current phase | `complete` |
-| Current/next PR | `none` |
-| Active PR | none |
-| Progress | `15 / 15 merged (100%)` |
-| Approved | `15 / 15` |
-| Aggregated at | `2026-09-26 22:10 KST` |
+| Project status | `IN_REVIEW` |
+| Current phase | `D` |
+| Current/next PR | `D-01,D-02,D-03` |
+| Active PR | `D-01, D-02, D-03` |
+| Progress | `16 / 19 merged (84%)` |
+| Approved | `16 / 19` |
+| Aggregated at | `2026-09-27 11:24 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -92,11 +92,11 @@ progress_percent: 100
   넣었으며, live smoke가 검색 상한을 상수가 아니라 주입값에서 읽게 하고, "이력 `events` == SSE
   `data:` 프레임"을 통합 테스트로 고정했다.
 
-### A-07 backlog: 검색 상한 통지 전용 이벤트 (담당 B-03 → C-03 재배정)
+### A-07 backlog: 검색 상한 통지 전용 이벤트 (담당 B-03 → C-03 재배정, **C-03에서 닫힘**)
 
 B-03 행·리뷰 기록·변경 기록 어디에도 이 건의 처리나 이관 기록이 없었다(Phase B 감사 NB-4).
 2026-09-26 담당을 "AI 후속 C-03(미착수)"으로 옮겼고, 현재 위치의 4요소 기록은 C 절 backlog가
-정본이다. 아래는 A-07 시점의 원 기록이다.
+정본이다. 2026-09-27 C-03이 닫았다(C 절 backlog 1). 아래는 A-07 시점의 원 기록이다.
 
 - **상황**: OpenAI(Codex) 프로파일이 활성인 세션에서 한 턴의 누적 웹 검색이 `max_search_uses`에
   닿아 adapter가 다음 호출의 도구 목록에서 `web_search`를 빼는 경로를 탄 뒤, 사이드바가 세션
@@ -182,8 +182,9 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | P0 | Planning package | 1 | 1 | `MERGED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
-| C | Phase A/B audit follow-up | 2 | 2 | `MERGED` |
-| **Total** |  | **15** | **15** | **100%** |
+| C | Phase A/B audit follow-up | 3 | 3 | `MERGED` |
+| D | Backtest result explanation (US-DM-08) | 3 | 0 | `IN_REVIEW` |
+| **Total** |  | **19** | **16** | **84%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -259,6 +260,7 @@ C-01이 매뉴얼을 고치며 닫았고(C-02가 스크립트 경로와 변수 �
 |---|---|---|---|---|---|
 | [x] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `MERGED` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` · [#190](https://github.com/Nochiski/Quant_study/pull/190) · 최종 `707cd4f9` · main 머지 `a3cc5f8b` |
 | [x] | `C-02` | Phase B 감사 비차단 7건: 4xx 거부 문구 표 entity 단일화(생성 code 합집합), 적용 후 백테스트 blocked 시 요청 폐기·알림, SSE 좁히기 표 타입 가드, CORS 기본 origin 단일 owner, 두 page 어시스턴트 배선 훅, backlog 2건 담당 지정, PLAN 병합 규칙 정정 | C-01 | `MERGED` | [#192](https://github.com/Nochiski/Quant_study/pull/192) · 최종 `0a030884`, 머지 `16e6e994` · `review_ai_c_02` 1차 REQUEST_CHANGES(P1 1: 팩터 계획 조회 중 게이트 일시 닫힘을 blocked로 읽어 적용 후 백테스트 미실행) → `settling` 신호로 대기 유지 + 팩터 창 변경 e2e 시나리오 → 2차 APPROVE(blocking·non-blocking 0) · 전체 e2e 24/24 |
+| [x] | `C-03` | C 절 backlog 2건: 검색 상한 통지 전용 `ChatEvent`(`SearchBudgetExhausted`, 두 adapter·저장·SSE·SDK·리듀서·사이드바 안내 ko/en), `ChatMessageView.turn_id`와 id 짝짓기, assistant DB v2 제자리 업그레이드(옛 통지 행 재기록·`turn_id` 채움), 대본 "검색 상한" 시나리오와 US-CS-04 e2e | C-02 | `MERGED` | 구현자 `impl-ai-c03`, 워크트리 `wt-ai-c03`, 브랜치 `feat/ai-c-03-backlog`(origin/main `a4ccfd7a` 위) · PR 본문에 게이트 결과 · main 머지 `5213ffe2`(#204) |
 
 Phase exit:
 
@@ -266,10 +268,11 @@ Phase exit:
 - [x] no-extras job 확대판이 SDK 없는 환경에서 green.
 - [x] Phase B 감사 NB-1~NB-8 처리 결과(C-02 닫힘 6건, C-01 닫힘 1건, backlog 이관 1건)를 C-02 PR
   본문에 기록.
+- [ ] C 절 backlog 2건(NB-4 이관분)을 C-03이 닫는다 — 구현·게이트 완료, 머지 대기.
 
 ### C 절 backlog (Phase B 감사 NB-4)
 
-**1. 검색 상한 통지 전용 `ChatEvent`와 화면 분기** — 담당 AI 후속 C-03(미착수)
+**1. 검색 상한 통지 전용 `ChatEvent`와 화면 분기** — 담당 AI 후속 C-03, **닫힘**(아래 "C-03 처리")
 
 - **상황**: OpenAI 프로파일이 활성인 세션에서 한 턴의 누적 웹 검색이 `max_search_uses`에 닿는다.
 - **인풋**:
@@ -289,8 +292,14 @@ Phase exit:
   분기와 아래 재현 테스트를 지운다.
 - **재현 test**: `backend/tests/application/test_assistant_usage.py::test_the_search_budget_notice_is_not_counted_as_a_search`
   (현재 동작 고정). frontend 쪽 없음.
+- **C-03 처리**: domain `SearchBudgetExhausted`(필드 없음)를 union에 더하고 OpenAI adapter는 통지
+  대신 그것을, Anthropic adapter는 도구를 빼는 순간(한 번이라도 검색했을 때) 같은 이벤트를 낸다.
+  저장 태그 `search_budget_exhausted`, wire `SearchBudgetExhaustedView`, SSE 좁히기 표, 리듀서
+  `searchBudgetExhausted`, 사이드바 안내(`assistant.chat.search.limit` ko/en)까지 이었다. `_is_search`
+  문구 비교는 지웠고 재현 테스트는 같은 이름으로 전용 이벤트를 세지 않는지 본다. 옛 이력은 assistant
+  DB v2 업그레이드가 v1 통지 행을 전용 이벤트로 다시 쓴다(설계 결정은 PR 본문).
 
-**2. `ChatMessageView.turn_id`** — 담당 AI 후속 C-03(미착수)
+**2. `ChatMessageView.turn_id`** — 담당 AI 후속 C-03, **닫힘**(아래 "C-03 처리")
 
 - **상황**: 한 세션에 턴이 여러 개 쌓인 뒤 사이드바가 세션 이력으로 대화를 다시 그린다.
 - **인풋**: `GET /api/v1/assistant/sessions/{id}` 응답의 `messages` 배열(사용자·어시스턴트 메시지).
@@ -304,6 +313,46 @@ Phase exit:
   질문이 다른 턴의 답에 붙는다(표시 오차, silent). 지금은 리듀서의 턴 순서 불변식이 막고 있을
   뿐이다. 데이터 손실은 아니다. 계약에 `turn_id`를 싣고 그 값으로 짝지으면 추정이 사라진다.
 - **재현 test**: 없음. C-03이 backend 계약 테스트와 transcript 단위 테스트를 함께 더한다.
+- **C-03 처리**: domain `ChatMessage.turn_id`(러너가 만든 id를 `send`가 두 메시지에 찍는다),
+  `chat_messages.turn_id` 칼럼(외래 키 없음 — 사용자 메시지가 턴 행보다 먼저 쓰인다), wire
+  `ChatMessageView.turn_id: string | null`, `assistTranscript`의 id 짝짓기. 순서 기반 테스트는 메시지
+  수와 턴 수가 어긋나는 두 경우(앞에 고아 질문, 질문 없는 턴)로 강화했다. v1 행은 "작성 시각 이전에
+  시작한 마지막 턴"으로 채우고 그런 턴이 없으면 NULL이다.
+
+## D — 백테스트 결과 설명 (US-DM-08)
+
+설계는 [결과 설명 spec](../../superpowers/specs/2026-09-27-ai-backtest-result-explain.md)이 정본이다.
+결과 화면에 기존 사이드바를 붙이고, 실행 하나에 붙는 결과 세션에서 모델이 서버가 읽은 결과 요약만
+받아 설명한다. 결과 세션은 설명 전용이라 제안·검색이 없다. 지표의 쉬운 한글 이름·뜻은 frontend
+i18n이 `metric_id`를 키로 소유한다.
+
+| 완료 | PR | 결과물 | Dependency | 상태 | Review |
+|---|---|---|---|---|---|
+| [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_REVIEW` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` · [#208](https://github.com/Nochiski/Quant_study/pull/208) · tip `2e7fc03e`(origin/main C-03 merge 후 spec v3 정정) · 리뷰 대기 |
+| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `IN_REVIEW` | 브랜치 `feat/ai-d-02-result-explain-backend` · [#209](https://github.com/Nochiski/Quant_study/pull/209) · tip `2c07225e`(D-01 merge로 C-03 따라감, 스키마 v3·`version == 2` 분기·v2 선언 sha256 고정, v1→v3 직행·실패 롤백·재시도 멱등 테스트) · pytest 2314 · 리뷰 대기 |
+| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `IN_REVIEW` | 브랜치 `feat/ai-d-03-result-explain-frontend` · [#210](https://github.com/Nochiski/Quant_study/pull/210) · `review_ai_d` 1차 APPROVE(blocking 0, P3 7건 반영·1건 D-04) · 게이트 SHA `35d41a38`(pytest 2316, vitest 980, 전체 e2e 40/40, US-DM-08 `구현됨-e2e`) · 재확인 대기 |
+
+Phase exit:
+
+- [ ] spec 완료 정의 1~6 기록.
+- [ ] US-DM-08 `구현됨-e2e`, 전체 e2e 게이트에서 스토리 e2e 통과.
+- [ ] SoT·책임분리 점검 blocking 0.
+
+### D 절 backlog (D 스택 리뷰 P3-7) — 담당 AI 후속 D-04(미착수)
+
+**결과 패널의 도구 활동이 요약 JSON 원문을 보인다**
+
+- **상황**: 퀀트를 모르는 사용자가 백테스트 결과 화면의 AI 패널에서 질문한다.
+- **인풋**: "이 결과 좋은 거야?" — 결과 세션 턴이 `read_backtest_result`를 한 번 부른다.
+- **에러 위치**: `backend/src/strategy_workbench/application/assistant_chat/_chat.py`의 `_summarise`가
+  도구 결과 앞 200자를 `ToolResultSummary.summary`로 싣고,
+  `frontend/src/features/assist-strategy/ui/assist-transcript.tsx`의 도구 활동이 그 문자열을 그대로 보인다.
+  결과 도구에서는 `{"run":{"run_id":…},"environment":…} (총 7220자)` 같은 영어 키 JSON이 된다.
+- **위험성**: 기능·데이터 결함은 아니다(표시 문제). US-DM-08의 "쉬운 말" 목표와 달리 대화 첫 줄에 JSON이
+  뜬다. 전략 화면 도구 활동과 같은 기존 동작이라 D 스택 범위 밖으로 두었다.
+- **해결 방향**: 결과 도구의 요약을 "결과 요약을 읽었습니다" 같은 고정 문장으로 바꾸거나, 화면이 도구
+  이름별 문구(`assistant.chat.toolName.*`)만 보이고 원문을 접는다. 요약 문장의 owner를 먼저 정한다.
+- **재현 test**: 없음(D-04가 transcript 테스트와 함께 더한다).
 
 ## Review 기록
 
@@ -363,6 +412,18 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-27 — D 스택 리뷰(`review_ai_d`) 세 PR APPROVE(blocking 0). P3 8건 중 7건을 D-03 tip에 반영했다. P3-5 대본이 결과 턴에 새어 들어온 제안 도구로 검증 통과 제안을 시도(e2e가 카드 없음 단언으로 잡음, 돌연변이 red 확인), P3-6 실행 전환 초기화 회귀 테스트(로직 제거 시 red 확인), P3-2 고아 행 메시지에 표·외래 키·행 키·복구 안내, P3-1 spec 덜어 내기 순서에 팩터, P3-3 테스트 docstring 키 stem, P3-4 사이드바 props를 화면별 합집합으로(타입 테스트), P3-8 대본 조사. P3-7(결과 도구 활동의 JSON 원문)은 위 D 절 backlog로 D-04(미착수)에 넘겼다.
+- 2026-09-27 — D-02에 마이그레이션 테스트 셋을 보탰다: v1 파일의 v1→v2→v3 직행(메시지 `turn_id`·이벤트·세션 보존), v1·v2 파일에서 마지막 `foreign_key_check` 실패 시 원래 버전·DDL 그대로 롤백, 원인 제거 뒤 재시도와 재열기 멱등. C-03 마이그레이션 테스트는 그대로 통과. 최상단 `406e2fc0`에서 전체 게이트 재실행(pytest 2314, vitest 979, e2e 40/40).
+- 2026-09-27 — C-03(#204) main 머지를 D 스택이 merge로 따라갔다. assistant DB v2는 C-03(`chat_messages.turn_id`)이 가져갔고 결과 세션의 `chat_sessions.run_id`는 **v3**이다(`version == 2` 분기, 부모 표라 외래 키 끄고 `legacy_alter_table`로 비켜 두기). v2 선언은 sha256으로 고정. `send`의 `turn_id` 인자와 모드 분기를 함께 살렸다. 최상단 `b8a909d4`에서 pytest 2311, vitest 979, 전체 e2e 40/40, 하네스·목록 대조 통과.
+- 2026-09-27 — D-01~D-03 스택 PR 생성(#208 → #209 → #210, 머지하지 않음). 스택 최상단 `834caf3b`에서 backend pytest 2296 passed·ruff·pyright, frontend vitest 975·typecheck·lint, 전체 e2e 39/39(새 스토리 e2e `@US-DM-08` 포함), 하네스 검사·Playwright 목록 대조 통과. US-DM-08 `미계획` → `구현됨-e2e`. 구현 중 세션 목록 조회가 `run_id`를 빠뜨려 422가 나던 것을 D-03에서 고쳤다(gateway·query 키).
+- 2026-09-27 — D 절 신설(US-DM-08 백테스트 결과 설명). 사용자 지시 "전략 언어는 진짜 전략만 담고, AI를 통해 사용성까지 증대"·"전부 다 진행해". 설계 spec `2026-09-27-ai-backtest-result-explain.md`, PR 셋(D-01 spec, D-02 backend, D-03 frontend·e2e)을 스택으로 올린다. 집계 도구에 D phase를 더했다. assistant_sqlite 스키마는 C-03이 v2를 가져가고(#204) D-02가 v3(`chat_sessions.run_id`)로 그 뒤에 올린다(리드 결정).
+- 2026-09-27 — **C-03 착수·구현**(`impl-ai-c03`, `wt-ai-c03`, `feat/ai-c-03-backlog`). C 절 backlog 2건을
+  한 PR로 닫는다. 검색 상한 통지는 전용 이벤트 `SearchBudgetExhausted`가 되어 두 adapter가 같은 순간에
+  내고, 사이드바는 "웹 검색" 칩 대신 안내 문구를 보인다. 메시지는 `turn_id`를 갖고 화면은 그 값으로
+  질문을 턴에 붙인다. 옛 이력 호환은 **읽기 분기가 아니라 저장소 업그레이드**로 정했다 — assistant DB를
+  v2로 올리며 v1 통지 행을 다시 쓰고 `turn_id`를 시각 규칙으로 채운다. 그래서 codec·집계·화면 어디에도
+  옛 표현을 가르는 문구 비교가 남지 않는다. 대본 공급자에 "검색 상한" 시나리오를 더해 US-CS-04 e2e가
+  스트림·새로고침 두 경로에서 안내 문구와 칩 개수를 본다.
 - 2026-09-26 — **AI 어시스턴트 initiative 15/15 PR main 머지 완료**(C-01 #190 `a3cc5f8b`, C-02 #192 `16e6e994`). Phase A·B 감사 blocking 0, 감사 후속 NB 전부 닫힘 또는 backlog(C 절 2건, 담당 AI 후속 C-03 미착수). 남은 것은 사용자 키가 필요한 live smoke 2건과 완료 정의 1(실제 키 연결 테스트)뿐이다.
 - 2026-09-26 — C-02가 Phase B 감사 비차단 건을 처리했다. NB-1: 4xx 거부 문구 표를
   `entities/assistant`의 `Record<AssistantRejectionCode, MessageKey>` 하나로 모으고

@@ -32,6 +32,8 @@ describe("SSE 프레임 좁히기", () => {
         summary: "실패",
       },
       { type: "search_activity", query: "momentum", sources: [] },
+      // 본문 필드가 없는 갈래다. 표에서 빠지면 이 통지 프레임이 런타임에 전부 버려진다(C-03).
+      { type: "search_budget_exhausted" },
       { type: "proposal", proposal },
       {
         type: "usage",

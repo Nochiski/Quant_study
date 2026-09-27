@@ -1,3 +1,6 @@
+from strategy_workbench.application.assistant_chat.ports.outgoing.backtest_results import (
+    BacktestResultPort,
+)
 from strategy_workbench.application.assistant_chat.ports.outgoing.chat_sessions import (
     ChatSessionNotFoundError,
     ChatSessionRepository,
@@ -19,6 +22,7 @@ from strategy_workbench.application.assistant_chat.ports.outgoing.strategy_compi
 )
 
 __all__ = [
+    "BacktestResultPort",
     "ChatSessionNotFoundError",
     "ChatSessionRepository",
     "LlmProviderPort",

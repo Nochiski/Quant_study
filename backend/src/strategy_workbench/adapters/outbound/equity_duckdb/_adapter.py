@@ -756,6 +756,13 @@ class EquityDuckdbAdapter:
             ),
         )
 
+    def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
+        """compile 이 읽는 필드 계약 전부(P2-07). `resolve_factor_fields` 와 같은 변환을 거친다.
+
+        그룹 필드는 아직 주지 않으므로 그래프의 그룹 연산은 compile 에서 unsupported 다(P2-08).
+        """
+        return self.resolve_factor_fields(tuple(self._fields)).fields
+
     def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         """`RESEARCH_UNIVERSE_ID` 위의 raw 패널을 팩터 관측으로. status 가 없어 실패는 예외."""
         unknown = self._unknown_fields(query.required_field_ids)

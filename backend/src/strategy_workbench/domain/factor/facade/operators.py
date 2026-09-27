@@ -5,8 +5,10 @@ from strategy_workbench.domain.factor._operators import (
     OperatorParameter,
     OutputTypeRule,
     UnitRule,
+    operator_availability,
     operator_definitions,
     operator_description_keys,
+    required_field_value_type,
 )
 
 __all__ = [
@@ -16,6 +18,8 @@ __all__ = [
     "OperatorParameter",
     "OutputTypeRule",
     "UnitRule",
+    "operator_availability",
     "operator_definitions",
     "operator_description_keys",
+    "required_field_value_type",
 ]

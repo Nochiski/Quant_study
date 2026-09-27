@@ -110,6 +110,11 @@ class MockEquityDataAdapter:
             fields=tuple(fields),
         )
 
+    def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
+        """compile 이 읽는 필드 계약 전부(P2-07). `resolve_factor_fields` 와 같은 변환을 거친다."""
+        field_ids = tuple(profile.field_id for profile in self._profiles)
+        return self.resolve_factor_fields(field_ids).fields
+
     def load_universe(self, query: UniverseHistoryQuery) -> UniverseHistoryResult:
         sessions = tuple(
             session for session in self._sessions if query.start <= session <= query.end

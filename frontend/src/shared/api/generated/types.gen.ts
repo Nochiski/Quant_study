@@ -2265,7 +2265,7 @@ export type NodeValueType =
 /**
  * OperatorAvailability
  *
- * 정의 시점의 가용성. 실제 판정(어댑터 capability)은 P2-04이 추가한다.
+ * 연결된 어댑터에서 이 연산자를 실행할 수 있는가(`operator_availability`가 판정).
  */
 export type OperatorAvailability = "available" | "unsupported";
 
@@ -4335,7 +4335,8 @@ export type StrategyIdentity = {
  * 그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.
  *
  * 문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,
- * 연산자 목록·arity·가용성을 손으로 적지 않는다.
+ * 연산자 목록·arity·가용성을 손으로 적지 않는다. `availability` 는 연결된 어댑터 capability 로
+ * 판정하므로(P2-07) 해시도 어댑터에 따라 다르다 — 어댑터를 바꾸면 ETag 가 바뀐다.
  */
 export type StrategyOperatorCatalog = {
   /**
@@ -5214,7 +5215,8 @@ export type UnaryOperator = "negate" | "lag";
  *
  * `_validation.py`가 이 연산자의 출력 단위를 정하는 방식.
  */
-export type UnitRule = "same_as_input" | "combined" | "boolean";
+export type UnitRule =
+  "same_as_input" | "combined" | "boolean" | "dimensionless";
 
 /**
  * UniverseCoverageSummary

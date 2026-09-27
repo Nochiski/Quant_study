@@ -358,7 +358,7 @@ def test_non_numeric_factor_signal_output_is_explainable_but_not_executable(
         detail = response.json()["detail"]
         assert detail["code"] == "portfolio.strategy.invalid"
         assert {item["code"] for item in detail["validation"]["issues"]} == {
-            "strategy.expression.output_type"
+            "strategy.factor.output_type"
         }
 
 

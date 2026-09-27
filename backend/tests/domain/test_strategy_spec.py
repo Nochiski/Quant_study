@@ -72,6 +72,8 @@ def test_validation_reports_unknown_parameter_and_invalid_bounds() -> None:
         "strategy.expression.parameter_missing",
         "strategy.parameter.bounds",
         "strategy.parameter.default",
+        # 파라미터 노드 하나가 출력이라 종목을 가르지 못하는 scalar 다(P2-07 compile 게이트).
+        "strategy.factor.output_type",
     }
 
 

@@ -6,8 +6,19 @@ from collections.abc import Collection, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from strategy_workbench.domain.factor.facade.expression import ParameterNode
+from strategy_workbench.domain.factor.facade.expression import (
+    FactorGraph,
+    FieldMetadata,
+    NodeValueType,
+    ParameterNode,
+)
+from strategy_workbench.domain.factor.facade.operators import (
+    OperatorAvailability,
+    operator_availability,
+    required_field_value_type,
+)
 from strategy_workbench.domain.factor.facade.validation import (
+    FactorGraphValidation,
     FactorValidationSeverity,
     validate_factor_graph,
 )
@@ -23,17 +34,20 @@ from ._constraints import (
 )
 from ._hydrate import SUPPORTED_SCHEMA_VERSIONS
 from ._models import (
+    CATALOG_EQUITY_FIELD,
     CROSS_SECTIONAL_ELIGIBILITY_OPERATORS,
     ChoiceParameter,
     EligibilityOperator,
     FloatParameter,
     IntegerParameter,
     PortfolioSide,
+    SignalNormalization,
     StrategySpec,
     WeightingMethod,
     composite_factors,
     inverse_risk_factor_id,
 )
+from ._promotion import promotion_node_ids
 
 
 class ValidationKind(StrEnum):
@@ -83,12 +97,16 @@ def semantic_issue(
     *,
     severity: ValidationSeverity = ValidationSeverity.ERROR,
     node_id: str | None = None,
+    kind: ValidationKind = ValidationKind.SEMANTIC,
 ) -> ValidationIssue:
     """Build a semantic `ValidationIssue`, checking the code against its registry (D-007).
 
     This is the only sanctioned way to mint a `strategy.*` issue, in the domain and in the
     application alike: constructing `ValidationIssue` directly would let a code exist that no
     registry row describes, which the schema API and the UI could not explain.
+
+    `kind` 는 진단 분류다. 문서가 틀린 것이 아니라 연결된 데이터가 못 하는 것(어댑터 capability)은
+    `CAPABILITY` 로 낸다(P2-07 `strategy.operator.unsupported`).
 
     `factor.*` 코드는 전략 문서 진단으로 그대로 나갈 수 없다(P1-05). 전에는 alias가 없는 그래프
     코드가 검사 없이 통과해, frontend가 모르는 네임스페이스의 코드가 문제 목록에 섞였다. 지금은
@@ -108,7 +126,7 @@ def semantic_issue(
         code=code,
         path=path,
         message=message,
-        kind=ValidationKind.SEMANTIC,
+        kind=kind,
         severity=severity,
         node_id=node_id,
     )
@@ -237,8 +255,174 @@ def _risk_source_issues(spec: StrategySpec) -> Iterator[ValidationIssue]:
         )
 
 
+def _output_type_issue(
+    factor_index: int, factor_id: str, graph: FactorGraph, validation: FactorGraphValidation
+) -> ValidationIssue | None:
+    """팩터 출력이 종목별 숫자 점수(`numeric_series`)가 아니면 compile error (P2-07, spec D5).
+
+    실행 경계의 `_reject_non_numeric_factor_outputs` 와 같은 판정을 compile 로 앞당긴 것이다.
+    boolean 출력은 hydrate 가 이미 0/1 로 승격했으므로 여기 오는 boolean 은 승격이 막힌 경우
+    (예약 node_id 충돌, 또는 문서를 거치지 않은 JSON spec)뿐이다. group 출력은 필드 계약이 있어야
+    보인다 — 계약 없이 필드 노드는 숫자로 추론된다.
+    """
+    output = next(
+        (
+            contract
+            for contract in validation.node_contracts
+            if contract.node_id == graph.output_node_id
+        ),
+        None,
+    )
+    if output is None or output.value_type is NodeValueType.NUMERIC_SERIES:
+        return None
+    detail = f"factor_id={factor_id!r} actual={output.value_type.value!r} expected='numeric_series'"
+    reason = "팩터 출력은 종목별 숫자 점수여야 합니다"
+    if output.value_type is NodeValueType.BOOLEAN_SERIES:
+        taken = sorted({node.node_id for node in graph.nodes} & set(promotion_node_ids(factor_id)))
+        if taken:
+            reason = (
+                "참/거짓 출력을 0/1 점수로 바꾸는 데 쓰는 예약 node_id 를 이미 다른 노드가 쓰고 "
+                "있습니다. 그 노드의 이름을 바꾸세요"
+            )
+            detail = f"{detail} reserved={taken!r}"
+    return semantic_issue(
+        "strategy.factor.output_type",
+        f"factors.{factor_index}.graph.output_node_id",
+        f"{reason}: {detail}",
+        node_id=graph.output_node_id,
+    )
+
+
+# 어댑터 capability 가 없어 unsupported 인 노드에서는 같은 원인(그 필드 타입이 없다)을 그래프 검증이
+# 다시 말한다. unsupported 한 줄만 남긴다.
+_CAPABILITY_SHADOWED_CODES = frozenset(
+    {"factor.graph.group_field_missing", "factor.graph.group_field_type"}
+)
+
+
+def _unsupported_operator_issues(
+    factor_index: int, graph: FactorGraph, provided: frozenset[NodeValueType]
+) -> list[ValidationIssue]:
+    """연결된 어댑터가 요구 필드 타입을 주지 않는 연산자 노드마다 capability error (spec D5)."""
+    issues: list[ValidationIssue] = []
+    for node_index, node in enumerate(graph.nodes):
+        if operator_availability(node.kind, provided) is OperatorAvailability.AVAILABLE:
+            continue
+        required = required_field_value_type(node.kind)
+        operator = getattr(node, "operator", None)
+        issues.append(
+            semantic_issue(
+                "strategy.operator.unsupported",
+                f"factors.{factor_index}.graph.nodes.{node_index}",
+                "연결된 데이터가 이 연산에 필요한 필드를 제공하지 않아 실행할 수 없습니다: "
+                f"node_id={node.node_id!r} kind={node.kind!r} "
+                f"operator={getattr(operator, 'value', operator)!r} "
+                f"required={getattr(required, 'value', required)!r} "
+                f"provided={sorted(item.value for item in provided)!r}",
+                node_id=node.node_id,
+                kind=ValidationKind.CAPABILITY,
+            )
+        )
+    return issues
+
+
+def _equity_field_references(value: object, path: str = "") -> Iterator[tuple[str, str]]:
+    """팩터 그래프 밖의 equity 필드 참조 `(path, field_id)` 전부.
+
+    대상은 모델 필드 metadata `catalog: equity-field`(`CATALOG_EQUITY_FIELD`)가 붙은 자리다. runtime
+    schema 의 `x-catalog: equity-field` 도 같은 metadata 에서 나오므로 목록을 따로 적지 않는다.
+    팩터 그래프 안의 필드·그룹 필드는 그래프 검증(`validate_factor_graph`)이 계약으로 본다.
+    """
+    if isinstance(value, FactorGraph):
+        return
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        for model_field in dataclasses.fields(value):
+            child_path = f"{path}.{model_field.name}" if path else model_field.name
+            child = getattr(value, model_field.name)
+            if model_field.metadata.get("catalog") == CATALOG_EQUITY_FIELD["catalog"]:
+                if isinstance(child, str):
+                    yield child_path, child
+                continue
+            yield from _equity_field_references(child, child_path)
+        return
+    if isinstance(value, (tuple, list)):
+        for index, item in enumerate(value):
+            yield from _equity_field_references(item, f"{path}.{index}" if path else str(index))
+
+
+def _field_reference_issues(
+    spec: StrategySpec, fields: tuple[FieldMetadata, ...]
+) -> list[ValidationIssue]:
+    """그래프 밖 필드 참조를 연결된 어댑터의 계약에서 찾는다(P2-07 리뷰 P1, spec D5).
+
+    네 자리(eligibility 규칙·유동성·레짐·리스크 필드)는 모두 값을 숫자로 읽는다(비교·하한·역가중).
+    그래서 없는 필드는 `strategy.field.missing`, 숫자 시계열이 아닌 필드는
+    `strategy.field.value_type` 이다. 적용 조건과 무관하게 검사한다 — 문서 참조 무결성이며, 노드·
+    팩터 참조가 모두 `*_missing` error 인 것과 같은 규칙이다(P2-06 결정 2).
+    """
+    by_id = {field.field_id: field for field in fields}
+    issues: list[ValidationIssue] = []
+    for path, field_id in _equity_field_references(spec):
+        metadata = by_id.get(field_id)
+        if metadata is None:
+            issues.append(
+                semantic_issue(
+                    "strategy.field.missing",
+                    path,
+                    "연결된 데이터에 없는 필드입니다. 필드 id 를 확인하세요: "
+                    f"field_id={field_id!r} path={path!r}",
+                )
+            )
+        elif metadata.value_type is not NodeValueType.NUMERIC_SERIES:
+            issues.append(
+                semantic_issue(
+                    "strategy.field.value_type",
+                    path,
+                    "이 자리는 값을 숫자로 읽으므로 숫자 필드를 써야 합니다: "
+                    f"field_id={field_id!r} actual={metadata.value_type.value!r} "
+                    "expected='numeric_series'",
+                )
+            )
+    return issues
+
+
+# 필드 계약 없이 추론한 필드 노드의 단위(`domain/factor` `_infer_contract`). 판정할 수 없는 값이다.
+_UNKNOWN_UNIT = "unknown"
+
+
+def _unit_mismatch_issue(
+    spec: StrategySpec, output_units: dict[str, str]
+) -> ValidationIssue | None:
+    """정규화 없이 단위가 다른 알파 팩터를 더하면 warning (P2-07, spec D4).
+
+    `none` 은 원시 점수의 가중 합이라 큰 단위 팩터가 합성 점수를 지배한다. 1.1 에서 올라온 문서가
+    예전 결과를 그대로 내는 모드라 막지 않고 알린다. 합성에 들어가는 팩터(`composite_factors`)만
+    비교하고, 단위를 모르는 팩터(필드 계약 없음)는 판정에서 뺀다.
+    """
+    if spec.signal.normalization is not SignalNormalization.NONE:
+        return None
+    units = {
+        factor.factor_id: output_units[factor.factor_id]
+        for factor in composite_factors(spec)
+        if output_units.get(factor.factor_id, _UNKNOWN_UNIT) != _UNKNOWN_UNIT
+    }
+    if len(set(units.values())) <= 1:
+        return None
+    return semantic_issue(
+        "strategy.signal.unit_mismatch",
+        "signal.normalization",
+        "정규화 없이(`none`) 단위가 다른 팩터 점수를 그대로 더합니다. 단위가 큰 팩터가 합성 점수를 "
+        "좌우하니 결합 정규화를 rank 나 zscore 로 바꾸는 것을 고려하세요: "
+        f"normalization='none' units={units!r}",
+        severity=ValidationSeverity.WARNING,
+    )
+
+
 def validate_strategy(
-    spec: StrategySpec, *, written_pointers: Collection[str] | None = None
+    spec: StrategySpec,
+    *,
+    written_pointers: Collection[str] | None = None,
+    fields: Collection[FieldMetadata] | None = None,
 ) -> StrategyValidation:
     """Semantic validation of a typed spec.
 
@@ -247,7 +431,18 @@ def validate_strategy(
     only emitted for pointers in this set; callers without a document pass nothing. A written
     value equal to the model default is silent too: canonical documents (JSON projection, legacy
     generated source, format conversion) spell out every default and must not warn.
+
+    `fields` 는 연결된 equity 어댑터가 제공하는 필드 계약 전부다(P2-07, spec D5). 주어지면 그래프
+    검증이 계약을 요구해 없는 `field_id` 가 `strategy.expression.field_missing` 으로 저장 전에
+    나고, 단위·그룹 타입도 실제 계약으로 추론한다. 어댑터가 없는 컨텍스트(CLI·테스트)는 None 을
+    넘기고 지금과 같이 계약 없이 검증한다.
     """
+    field_contracts = None if fields is None else tuple(fields)
+    provided = (
+        None
+        if field_contracts is None
+        else frozenset(field.value_type for field in field_contracts)
+    )
     issues: list[ValidationIssue] = []
     written = frozenset(written_pointers or ())
     for applicability in FIELD_APPLICABILITY:
@@ -300,6 +495,8 @@ def validate_strategy(
             semantic_issue("strategy.factor.required", "factors", "팩터를 하나 이상 추가하세요.")
         )
     issues.extend(_eligibility_rule_issues(spec))
+    if field_contracts is not None:
+        issues.extend(_field_reference_issues(spec, field_contracts))
     # Scalar bounds are owned by the constraint catalog (P1-04); the schema API reads the same rows.
     for constraint in STRATEGY_SCALAR_CONSTRAINTS:
         value = resolve_scalar(spec, constraint.pointer)
@@ -396,6 +593,7 @@ def validate_strategy(
                 )
 
     factor_ids = [factor.factor_id for factor in spec.factors]
+    output_units: dict[str, str] = {}
     if len(factor_ids) != len(set(factor_ids)):
         issues.append(
             semantic_issue("strategy.factor.duplicate", "factors", "팩터 ID는 중복될 수 없습니다.")
@@ -425,7 +623,16 @@ def validate_strategy(
         validation = validate_factor_graph(
             factor.graph,
             parameter_ids=tuple(parameter_ids),
+            fields=field_contracts or (),
+            require_field_metadata=field_contracts is not None,
         )
+        unsupported = (
+            []
+            if provided is None
+            else _unsupported_operator_issues(factor_index, factor.graph, provided)
+        )
+        unsupported_nodes = {issue.node_id for issue in unsupported}
+        issues.extend(unsupported)
         issues.extend(
             semantic_issue(
                 expression_code(factor_issue.code),
@@ -439,7 +646,22 @@ def validate_strategy(
                 node_id=factor_issue.node_id,
             )
             for factor_issue in validation.issues
+            if not (
+                factor_issue.node_id in unsupported_nodes
+                and factor_issue.code in _CAPABILITY_SHADOWED_CODES
+            )
         )
+        output_issue = _output_type_issue(factor_index, factor.factor_id, factor.graph, validation)
+        if output_issue is not None:
+            issues.append(output_issue)
+        output_units.update(
+            (factor.factor_id, contract.unit)
+            for contract in validation.node_contracts
+            if contract.node_id == factor.graph.output_node_id
+        )
+    unit_issue = _unit_mismatch_issue(spec, output_units)
+    if unit_issue is not None:
+        issues.append(unit_issue)
 
     return StrategyValidation(
         valid=not any(issue.severity is ValidationSeverity.ERROR for issue in issues),

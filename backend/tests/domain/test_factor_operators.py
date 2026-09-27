@@ -17,7 +17,11 @@ import pytest
 
 from strategy_workbench.domain.factor.facade.expression import (
     EXPRESSION_NODE_KINDS,
+    BinaryNode,
+    BinaryOperator,
     ConstantNode,
+    CrossSectionalNode,
+    CrossSectionalOperator,
     FactorGraph,
     FieldMetadata,
     FieldNode,
@@ -209,6 +213,8 @@ def _expected_value_type(rule: OutputTypeRule, shapes: tuple[Shape, ...]) -> Nod
 def _expected_unit(definition: OperatorDefinition, source_units: list[str]) -> str:
     if definition.unit_rule is UnitRule.BOOLEAN:
         return "bool"
+    if definition.unit_rule is UnitRule.DIMENSIONLESS:
+        return "1"
     if definition.unit_rule is UnitRule.COMBINED:
         symbol = "*" if definition.operator == "multiply" else "/"
         return f"({source_units[0]}{symbol}{source_units[1]})"
@@ -245,3 +251,73 @@ def test_declared_rules_match_the_inferred_contract(
 def test_arity_matches_the_node_input_count() -> None:
     for (kind, operator), definition in OPERATOR_DEFINITIONS.items():
         assert definition.arity == len(_node_inputs(kind)), f"{kind}.{operator}"
+
+
+# -- BACKLOG-003: 횡단면 표준화는 단위를 지운다 ----------------------------------------------------
+
+_PBR = FieldMetadata(field_id="pbr", unit="ratio", value_type=NodeValueType.NUMERIC_SERIES)
+
+
+def _standardized_sum(operator: str) -> FactorGraph:
+    """단위가 다른 두 필드를 같은 횡단면 연산으로 바꾼 뒤 더하는 그래프."""
+    return FactorGraph(
+        nodes=(
+            FieldNode(node_id="close", field_id="close", kind="field"),
+            FieldNode(node_id="pbr", field_id="pbr", kind="field"),
+            CrossSectionalNode(
+                node_id="close_std",
+                operator=CrossSectionalOperator(operator),
+                input_node_id="close",
+                kind="cross_sectional",
+            ),
+            CrossSectionalNode(
+                node_id="pbr_std",
+                operator=CrossSectionalOperator(operator),
+                input_node_id="pbr",
+                kind="cross_sectional",
+            ),
+            BinaryNode(
+                node_id="combined",
+                operator=BinaryOperator.ADD,
+                left_node_id="close_std",
+                right_node_id="pbr_std",
+                kind="binary",
+            ),
+        ),
+        output_node_id="combined",
+    )
+
+
+@pytest.mark.parametrize("operator", ["zscore", "rank"])
+def test_standardized_fields_with_different_units_can_be_added(operator: str) -> None:
+    """KRW 필드와 ratio 필드를 표준화해 더하는 교과서적 합성이 단위 오류로 막히지 않는다.
+
+    P1-05 tip 에서는 `factor.graph.unit_mismatch left='KRW' right='ratio'` 로 거부됐다(감사 N3).
+    순위·z-score 는 값이 몇 번째인지·평균에서 몇 표준편차인지라 입력 단위가 남지 않는다.
+    """
+    validation = validate_factor_graph(_standardized_sum(operator), fields=(_PRICE, _PBR))
+
+    assert validation.valid, [issue.message for issue in validation.issues]
+    assert "factor.graph.unit_mismatch" not in {issue.code for issue in validation.issues}
+    contracts = {contract.node_id: contract.unit for contract in validation.node_contracts}
+    assert contracts["close_std"] == contracts["pbr_std"] == contracts["combined"] == "1"
+
+
+@pytest.mark.parametrize("operator", ["demean", "winsorize"])
+def test_centering_and_clipping_keep_the_input_unit(operator: str) -> None:
+    """대조군: 평균을 빼거나 극단값을 자른 값은 원래 단위 그대로라 섞으면 여전히 단위 오류다."""
+    validation = validate_factor_graph(_standardized_sum(operator), fields=(_PRICE, _PBR))
+
+    contracts = {contract.node_id: contract.unit for contract in validation.node_contracts}
+    assert contracts["close_std"] == "KRW"
+    assert contracts["pbr_std"] == "ratio"
+    assert [issue.code for issue in validation.issues] == ["factor.graph.unit_mismatch"]
+
+
+def test_only_rank_and_zscore_are_dimensionless() -> None:
+    dimensionless = {
+        key
+        for key, definition in OPERATOR_DEFINITIONS.items()
+        if definition.unit_rule is UnitRule.DIMENSIONLESS
+    }
+    assert dimensionless == {("cross_sectional", "rank"), ("cross_sectional", "zscore")}

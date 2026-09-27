@@ -477,11 +477,25 @@ class EquityDuckdbAdapter:
         """
         if not spec.required_columns or not spec.is_macro:
             return None
+        import duckdb as module  # 지연 import — 생성자의 `_open(None)` 이 이미 설치를 확인했다
+
         con = self._connect()
         try:
             described = con.execute(
                 f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
             ).fetchall()
+        except module.Error as error:
+            # 스냅샷은 맞는데 매크로가 가리키는 parquet 가 빠진 카탈로그 등 — 생성자 밖으로 던지면
+            # 어댑터 전체가 뜨지 못한다(#233 리뷰 후속). 이 원천만 빼고 사유를 남긴다.
+            reason = (
+                f"카탈로그 매크로 {spec.relation} 를 읽을 수 없어 원천 {spec.name} 의 필드를 "
+                "뺀다 — 카탈로그를 다시 만들거나 원장 파일을 확인해야 한다"
+                "(`ledger_sync verify`·`catalog`) "
+                f"(catalog_macro_unreadable) — error={type(error).__name__}: {error} "
+                f"catalog={self._catalog.path}"
+            )
+            logger.warning(reason)
+            return reason
         finally:
             con.close()
         present = {str(row[0]) for row in described}

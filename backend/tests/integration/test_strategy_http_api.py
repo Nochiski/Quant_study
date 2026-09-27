@@ -57,7 +57,7 @@ def test_http_adapter_exposes_real_mock_equity_catalog() -> None:
     )
     assert sector["value_type"] == "category"
     assert payload["snapshot"]["point_in_time"] is True
-    # 원주가·수정주가(이슈 #214)와 아이디어용 당기순이익·거래대금(P2-08) 포함
+    # 원주가·수정주가(이슈 #214), TTM 순이익(#212, P2-08 아이디어도 쓴다), 거래대금(P2-08) 포함
     assert payload["total"] == 12
 
 

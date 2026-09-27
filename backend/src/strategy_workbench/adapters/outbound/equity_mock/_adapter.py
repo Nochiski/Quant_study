@@ -550,7 +550,12 @@ def _factor_field_value(
             return -(100_000_000.0 + trend * 10)
         return 4_000_000_000.0 + security_index * 900_000_000.0 + trend * 1_000
     if field_id == "financial.net_income":
-        income = 300_000_000.0 + security_index * 50_000_000.0 + trend * 100
+        # TTM 은 분기 공시마다 한 번 바뀐다 — 약 63세션(한 분기) 동안 같은 값이다(#212).
+        quarter = session_index // 63
+        income = (
+            400_000_000.0 + security_index * 90_000_000.0 + quarter * (security_index + 1) * 1e6
+        )
+        # 자본잠식 종목은 순손실이다(P2-08 아이디어 함정). 크기는 TTM 규칙을 그대로 따른다.
         return -income if impaired else income
     if field_id == "consensus.forward_eps":
         return 2_000.0 + security_index * 350.0 + trend * 0.2

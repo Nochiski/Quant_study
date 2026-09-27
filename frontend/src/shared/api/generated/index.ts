@@ -359,6 +359,8 @@ export type {
   PortfolioStep,
   PortfolioStrategyInvalidDetail,
   PortfolioUnprocessableResponse,
+  PortfolioWarning,
+  PortfolioWarningCode,
   PreviewEquityDataData,
   PreviewEquityDataError,
   PreviewEquityDataErrors,

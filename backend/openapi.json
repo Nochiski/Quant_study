@@ -4372,6 +4372,32 @@
         "title": "PortfolioUnprocessableResponse",
         "type": "object"
       },
+      "PortfolioWarning": {
+        "description": "컴파일러가 tape 를 만들며 알린 경고 한 건. `message` 는 한글로 완성된 진단 문장이다.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/PortfolioWarningCode"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "PortfolioWarning",
+        "type": "object"
+      },
+      "PortfolioWarningCode": {
+        "description": "tape 를 막지는 않지만 결과 해석을 바꾸는 컴파일러 경고의 코드.\n\n값은 실행 결과 매니페스트의 `DataWarning.code` 로 그대로 나간다.",
+        "enum": [
+          "portfolio.sector_unknown_excluded"
+        ],
+        "title": "PortfolioWarningCode",
+        "type": "string"
+      },
       "ProbeFailure": {
         "description": "연결 테스트가 실패한 사유.\n\n화면이 \"키를 확인하세요\"와 \"잠시 후 다시\"를 구분하려면 필요하다.",
         "enum": [
@@ -7707,6 +7733,14 @@
           "tape_hash": {
             "title": "Tape Hash",
             "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PortfolioWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [

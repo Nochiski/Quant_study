@@ -6,7 +6,7 @@ current_phase: P1,P2
 current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07
 active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07]
 parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07]
-last_updated: 2026-09-27T08:51:43+09:00
+last_updated: 2026-09-27T09:09:25+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 11
@@ -29,7 +29,7 @@ progress_percent: 21
 | Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `11 / 29` |
-| Aggregated at | `2026-09-27 08:51 KST` |
+| Aggregated at | `2026-09-27 09:09 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -274,12 +274,12 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Branch/worktree | `feat/lang2-p2-07-compile-gate` / `wt-lang2-p2-07` |
 | Base SHA | `lang2/integration` (`c72f6257`, P2-03~P2-06 통합 머지, main `a4ccfd7a` 기반). 착수는 P2-06 tip `36060527` 에서 했고, P2-06 문서 커밋 `dd1fbebd` 와 통합 브랜치를 차례로 merge 로 따라갔다 |
 | Head SHA | PR [#201](https://github.com/Nochiski/Quant_study/pull/201) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
-| Diff stat | 생성 산출물(OpenAPI·SDK·연산자 카탈로그 fixture)·문서를 뺀 handwritten **24파일 · +1524 / −35**. 비테스트 backend src 15파일 +426/−31(신규 `_promotion.py` 87줄·`field_catalog.py` 21줄, `_validation.py` +159), test 9파일 +1098/−4(신규 4파일: 출력 타입 312·compile 게이트 276·property 248·단위 경고 148줄, 나머지는 BACKLOG-003 76줄·duckdb 16줄·e2e 19줄과 기대값 3줄) |
+| Diff stat | 생성 산출물(OpenAPI·SDK·연산자 카탈로그 fixture)·문서를 뺀 handwritten **24파일 · +1809 / −35**. 비테스트 backend src 15파일 +492/−31(신규 `_promotion.py` 87줄·`field_catalog.py` 21줄, `_validation.py` +225), test 9파일 +1317/−4(신규 4파일: compile 게이트 411·property 332·출력 타입 312·단위 경고 148줄, 나머지는 BACKLOG-003 76줄·duckdb 16줄·e2e 19줄과 기대값 3줄) |
 | Focused tests | `uv run pytest tests/domain/test_factor_operators.py tests/domain/test_factor_output_gate.py tests/domain/test_signal_unit_mismatch.py tests/application/test_strategy_compile_gate.py tests/integration/test_compile_gate_property.py tests/integration/test_truthful_pipeline.py tests/test_adapters_equity_duckdb.py -q` |
-| 제약사항 | **12절 상한 초과(600줄·10파일 → 1524줄·24파일), 분할하지 않는다.** WORKFLOW 가 compile 게이트 네 가지(필드 계약·출력 타입·단위 경고·capability)와 BACKLOG-003 을 한 PR 로 묶었고, 넷이 `validate_strategy` 의 같은 인자(`fields`)와 compile 서비스의 같은 port 를 공유해 따로 떼면 중간 PR 이 인자만 있고 쓰는 곳이 없다. 비테스트는 457줄로 상한 안이고 초과분은 신규 테스트 4파일(984줄)이다 — 12절이 "test 는 구현과 같은 PR"이라 분리할 수 없다. 커밋을 논리 단위 10개로 나눠 리뷰 단위를 대신한다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
+| 제약사항 | **12절 상한 초과(600줄·10파일 → 1809줄·24파일), 분할하지 않는다.** WORKFLOW 가 compile 게이트 네 가지(필드 계약·출력 타입·단위 경고·capability)와 BACKLOG-003 을 한 PR 로 묶었고, 넷이 `validate_strategy` 의 같은 인자(`fields`)와 compile 서비스의 같은 port 를 공유해 따로 떼면 중간 PR 이 인자만 있고 쓰는 곳이 없다. 비테스트는 523줄로 상한 안이고 초과분은 신규 테스트 4파일(1203줄)이다 — 12절이 "test 는 구현과 같은 PR"이라 분리할 수 없다. 커밋을 논리 단위 11개로 나눠 리뷰 단위를 대신한다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
 | Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·계약 산출물 diff·frontend typecheck·typecheck:e2e·lint·test·build·`api:generate` diff 0·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
 
-P2-07 결정 10건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
+P2-07 결정 11건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
 
 1. **승격은 새 노드 종류 없이 조건 노드 하나와 상수 둘이다.** hydrate(`domain/strategy/_promotion.py`)가
    boolean 출력 그래프 끝에 `__promote_<factor>_one`(1.0)·`_zero`(0.0) 상수와 조건 노드
@@ -322,6 +322,13 @@ P2-07 결정 10건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 
 10. **새 `strategy.*` 코드 3개**(`strategy.factor.output_type`·`strategy.operator.unsupported`·
    `strategy.signal.unit_mismatch`)는 `SEMANTIC_ONLY_CODES` 에 등록했다. 진단 코드 문자열은 OpenAPI 에
    열거되지 않는다. OpenAPI diff 는 `UnitRule` 의 새 값과 설명 두 줄이다.
+11. **그래프 밖 필드 참조도 compile 이 판정한다(리뷰 조기 알림 P1).** WORKFLOW 는 `field_missing`
+   만 적어 그래프 노드만 덮었다. eligibility 규칙·유동성·레짐·리스크 필드 네 자리는 검사를 받지 않아
+   오타가 진단 0건으로 통과하고 미리보기 422 `portfolio.data.unavailable` 이 됐다. 대상은 모델 metadata
+   `catalog: equity-field`(runtime schema `x-catalog` 의 원천)에서 걸어 찾고(목록을 따로 적지 않는다),
+   없는 필드는 `strategy.field.missing`, 숫자 시계열이 아닌 필드는 `strategy.field.value_type` 이다(네
+   자리 모두 값을 숫자로 읽는다). 적용 조건과 무관하게 검사한다 — 참조 무결성 규칙(P2-06 결정 2)과
+   같다. 새 코드 둘도 `SEMANTIC_ONLY_CODES` 에 등록했다.
 
 P2-06 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
 
@@ -651,7 +658,7 @@ Phase exit:
 | [ ] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `APPROVED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 워크트리 `wt-lang2-p2-04`, 브랜치 `feat/lang2-p2-04-normalization` · 1차 → `28003cf1` · 2차 → `2a10798d` · 3차 → `70cfdffa` · 4차 → `22636fc3` · 5차 **APPROVE**(P3 R5-P204-001 단조성: 기준점 후보 비교를 `<=` 로, 리드 지시로 즉시 반영). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `APPROVED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility` · 1차 REQUEST_CHANGES(P2 2·P3 2) → `641c6f3b`·`efd6a768` · 2~5차 **APPROVE**. 3차 재배치 때 첫 커밋 `a35c1e40` 에 P2-04 새 테스트 한 줄의 enum 개명을 넣었고, P2-04 3차 재현 테스트 `8587d413` 를 더했다. P2-04 5차 반영 tip `35089901` 위로 rebase(코드 변경분 동일). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `APPROVED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 **APPROVE**(blocking 0 · P2 1 · P3 4, 전부 반영: `77bd713c`·`7b707660`) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base `lang2/integration`(통합 머지 `c72f6257` 을 merge, 처음 착수는 P2-06 tip `36060527`) · 커밋 11개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → 이 PLAN) · 게이트는 push tip 에서 실측(PR 본문) |
+| [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base `lang2/integration`(통합 머지 `c72f6257` 을 merge, 처음 착수는 P2-06 tip `36060527`) · 커밋 12개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → PLAN → 리뷰 조기 알림 P1 반영: 그래프 밖 필드 참조) + PLAN 갱신 · 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `WAITING` | — |
 | [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `WAITING` | — |
 
@@ -784,7 +791,8 @@ Phase exit:
   hydrate 에서 0/1 로 승격하며, scalar·group 출력은 `strategy.factor.output_type`, 정규화 없는 단위
   혼합은 `strategy.signal.unit_mismatch` warning 이다. BACKLOG-003(횡단면 `rank`·`zscore` 무차원) 처리.
   compile 통과 문서가 미리보기 사전 검사에서 거부되지 않는다는 property 테스트를 두었다. US-CS-02 e2e 가
-  분모 필드 오타를 compile 오류로 먼저 확인한다. 관찰 두 건을 BACKLOG-014(승격 노드 화면 표시, P3-01)와
+  분모 필드 오타를 compile 오류로 먼저 확인한다. 리뷰 조기 알림 P1(그래프 밖 필드 참조 네 자리의 오타가
+  compile 을 통과)을 같은 PR 에서 닫았다(결정 11). 관찰 두 건을 BACKLOG-014(승격 노드 화면 표시, P3-01)와
   BACKLOG-015(`group.rank` 단위, P2-08)로 예약했다.
 - 2026-09-27 — P2-07 판단: **P2-05 DEFECT-P3-1(횡단면 eligibility 가 모집단을 0 으로 자르는 쪽)은 이
   PR 에서 다루지 않는다.** compile 은 모집단 크기를 모른다 — 모집단은 실행 설정(유니버스·기간)과 데이터가

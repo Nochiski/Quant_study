@@ -35,7 +35,12 @@ def test_upgrade_returns_current_source_its_environment_and_a_savable_compile() 
     assert body["source"] == _read("quality_momentum.v1_2.commented.yaml")
     assert body["compiled"]["schema_version"] == CURRENT_SCHEMA_VERSION
     assert body["source_hash"] == body["compiled"]["source_hash"]
-    assert body["compiled"]["spec_hash"] is not None and body["compiled"]["diagnostics"] == []
+    assert body["compiled"]["spec_hash"] is not None
+    # 옛 골든의 모멘텀은 원주가를 읽는다 — 업그레이드는 필드를 바꾸지 않으므로 원주가 warning 하나만
+    # 남는다(BACKLOG-018). 저장을 막지 않는다.
+    assert [item["code"] for item in body["compiled"]["diagnostics"]] == [
+        "strategy.field.unadjusted_price"
+    ]
     # 옛 문서의 실행 설정은 응답으로 돌아온다 — 화면이 실행 설정 패널을 채운다(P3-02).
     assert body["environment"] == {
         "market": "KRX",

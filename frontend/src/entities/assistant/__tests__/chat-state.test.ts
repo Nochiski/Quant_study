@@ -77,7 +77,12 @@ const history = (
     created_at: "2026-09-20T00:00:00Z",
   },
   messages: [
-    { role: "user", text: "모멘텀 전략을 제안해줘", created_at: "2026-09-20T00:00:00Z" },
+    {
+      role: "user",
+      text: "모멘텀 전략을 제안해줘",
+      created_at: "2026-09-20T00:00:00Z",
+      turn_id: "turn-1",
+    },
   ],
   turns,
   events,
@@ -163,6 +168,27 @@ describe("어시스턴트 채팅 리듀서", () => {
     });
     expect(turn.proposal?.title).toBe("모멘텀 v1");
     expect(state.lastSequence).toBe(7);
+  });
+
+  it("검색 상한 통지는 검색 활동이 아니라 턴의 표시로 접는다", () => {
+    // 통지를 검색 목록에 넣으면 화면이 하지 않은 검색 칩을 그린다(C-03).
+    const state = fold(
+      opened(),
+      events([
+        envelope(0, {
+          type: "search_activity",
+          query: "momentum factor",
+          sources: [],
+        }),
+        envelope(1, { type: "search_budget_exhausted" }),
+        envelope(2, text("찾은 자료로 답합니다")),
+      ]),
+    );
+
+    const turn = state.turns[0];
+    expect(turn.searches).toEqual([{ query: "momentum factor", sources: [] }]);
+    expect(turn.searchBudgetExhausted).toBe(true);
+    expect(turn.text).toBe("찾은 자료로 답합니다");
   });
 
   it("`Done`으로 턴을 완료로 표시하지 않고 그 뒤의 `Failure`도 받아 둔다", () => {
@@ -356,6 +382,7 @@ const arbitraryEvent = fc.oneof(
   fc.string({ minLength: 1, maxLength: 4 }).map(
     (value): ChatEvent => ({ type: "search_activity", query: value, sources: [] }),
   ),
+  fc.constant<ChatEvent>({ type: "search_budget_exhausted" }),
   fc.integer({ min: 0, max: 50 }).map(
     (value): ChatEvent => ({
       type: "usage",

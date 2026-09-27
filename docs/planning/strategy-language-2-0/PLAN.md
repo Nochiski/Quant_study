@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: IN_PROGRESS
+project_status: IN_REVIEW
 current_phase: P3
 current_pr: P3-02
 active_prs: [P3-02]
 parallel_window: [P3-02]
-last_updated: 2026-09-27T20:31:35+09:00
+last_updated: 2026-09-27T22:15:10+09:00
 planned_prs: 30
 merged_prs: 9
 integrated_prs: 9
@@ -24,13 +24,13 @@ progress_percent: 60
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P3` |
 | Current/next PR | `P3-02` |
 | Active PR | `P3-02` |
 | Progress | `18 / 30 done (60%), main 9, integration 9` |
 | Approved | `18 / 30` |
-| Aggregated at | `2026-09-27 20:31 KST` |
+| Aggregated at | `2026-09-27 22:15 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -108,7 +108,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | P0 | Planning package and contract docs | 1 | 1 | 0 | `MERGED` |
 | P1 | In-screen friction removal on 1.1 | 6 | 6 | 0 | `MERGED` |
 | P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 2 | 8 | `INTEGRATED` |
-| P3 | Frontend 1.2 adaptation | 3 | 0 | 1 | `IN_PROGRESS` |
+| P3 | Frontend 1.2 adaptation | 3 | 0 | 1 | `IN_REVIEW` |
 | P4 | Graph level 1: pipeline | 4 | 0 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | 0 | `WAITING` |
@@ -868,9 +868,12 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
 
 1. **기간·유니버스에는 기본값이 없다.** 실행 설정 스키마가 `start`·`end`·`universe_id` 에 `default` 를 주지
    않는다 — backend 는 요청에 실행 설정이 없으면 기본값을 지어내지 않고 거절한다(`require_environment`).
-   패널도 같은 규칙을 따른다: 세 칸은 비어서 시작하고, 채우기 전까지 백테스트·추적 버튼이 "실행 설정에서
-   기간과 유니버스를 정하세요"로 막힌다. 나머지 필드는 스키마 `default` 로 채운다. 마지막 사용값은 전략별
-   `localStorage`(저장된 전략은 `strategy_id`, 새 전략은 새 전략 한 칸)가 다시 채운다.
+   패널도 같은 규칙을 따른다: 세 칸은 비어서 시작하고, 채우기 전까지 백테스트·추적 버튼이 비어 있는 칸 이름을
+   적은 문장("실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.")으로 막힌다. IDE 위 요약 띠도 빈 칸 이름을
+   말하고 "실행 설정 채우기" 버튼을 가진다 — 누르면 패널이 열리고 첫 빈 칸에 초점이 간다(리드 보충). 나머지
+   필드는 스키마 `default` 로 채운다. 마지막 사용값은 전략별 `localStorage`(저장된 전략은 `strategy_id`, 새
+   전략은 새 전략 한 칸)가 다시 채운다. 저장소 접근·읽기·쓰기가 예외를 던지면(사생활 모드·할당량) 모두 삼키고
+   스키마 기본값에서 시작한다 — 화면 동작은 저장값이 없을 때와 같다.
 2. **패널은 스키마를 그대로 그린다.** 필드 목록·순서·enum·기본값·범위(`minimum`·`exclusiveMinimum`·
    `maximum`)·단위·설명 키·카탈로그를 스키마에서 읽고 필드 이름을 손으로 적지 않는다. enum 은 select,
    숫자는 범위 검증이 붙은 입력, `format: date` 는 날짜 입력, `x-catalog: universe` 는 카탈로그 목록이 없어
@@ -897,6 +900,20 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
    시나리오)를 같은 흐름으로 확인할 수 있다(`stories/dm.run-environment.spec.ts`). US-DM-05 는 `구현됨-e2e` 로
    올리고, P3-03 에는 1.1 revision 업그레이드 → 실행 설정 채움 → 저장 → 백테스트 시나리오(US-SM-07 e2e 가 같은
    흐름을 1.0 revision 으로 이미 돈다)와 골든 이관이 남는다.
+9. **AI 가 적용한 문서도 같은 이유로 막힌다(리드 보충, 결정 5 와 같은 원칙).** 실행 설정은 문서 밖이라 제안
+   적용이 채우지 않는다. "적용 후 백테스트"가 실행 설정이 비어 시작하지 못하면 "백테스트를 시작하지
+   않았습니다" 알림 뒤에 툴바와 같은 차단 문장을 붙인다(`ProposalApplyFeedback` 의 `blockedReason`, 문장의
+   정본은 `useBacktestRunSettings().blockedReason`). 칸으로 가는 버튼은 바로 위 요약 띠 하나만 둔다. US-DM-03
+   e2e 가 이 길(적용 후 백테스트 → 차단 문장 → 띠의 "실행 설정 채우기" → 직접 실행)을 밟는다. AI 가 실행 설정
+   값을 제안하는 기능은 범위 밖이다(BACKLOG-019).
+10. **run 상세 데이터 경고는 코드로 제목을 고른다.** `backtest.warning.<code>` 가 있으면 제목으로, 없으면 코드를
+    제목으로 보이고, 서버가 완성한 한글 문장(`message`)은 그대로, 코드는 보조 표기로 둔다.
+    `portfolio.sector_unknown_excluded`(#203)에 제목을 붙였다. 경고 코드가 늘거나 문장이 바뀌어도(main #239)
+    화면 구조는 그대로다.
+11. **e2e 는 문서 검증이 끝난 뒤에 문서 상태를 단언한다(#240 대응 일부).** 문서 상태 배지가 `data-settled`
+    (`isDocumentSettled`: compile 버전이 입력 버전을 따라잡았거나 구문 오류라 compile 이 시작되지 않음)를 내고,
+    `waitForSettledDocument` 가 이를 기다린다. `expectPhase`·`fillRunEnvironment` 가 먼저 부른다. #240 의 원인
+    확정(부하 재현율 측정)은 이 PR 범위 밖이라 이슈에 남긴다.
 
 ---
 
@@ -956,7 +973,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-06 | `INTEGRATED` | [#232](https://github.com/Nochiski/Quant_study/pull/232) · `review_p3_01` 1차 조건부 APPROVE(`2fde473e`) → 2차 APPROVE(`6e5e71da`, 재리뷰 P2 2·P3 1 반영 `08451303`) · 통합 머지 `c4d0f481`(#232, `lang2/integration`, 2026-09-27) |
-| [ ] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `IN_PROGRESS` | 워크트리 `wt-lang2-p3-02`, 브랜치 `feat/lang2-p3-02-run-environment` · base `lang2/integration` `c4d0f481` |
+| [ ] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `IN_REVIEW` | [#242](https://github.com/Nochiski/Quant_study/pull/242) · 워크트리 `wt-lang2-p3-02`, 브랜치 `feat/lang2-p3-02-run-environment` · base `lang2/integration` `c4d0f481` → `6ffab152` 병합 |
 | [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `WAITING` | — |
 
 Phase exit:
@@ -1079,6 +1096,9 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-27 — P3-02 리드 보충 반영(#242): 차단 문장에 빈 칸 이름, 요약 띠 "실행 설정 채우기" 초점 경로,
+  `localStorage` 예외 무해화 테스트, AI 적용 문서의 같은 차단(결정 9, BACKLOG-019 신설), run 상세 경고 코드 기반
+  제목(결정 10), e2e 검증 완료 대기(결정 11, #240). US-DM-03·04·08 수용 기준에 "실행 설정 채우기" 단계를 넣었다.
 - 2026-09-27 — P3-01 구현(`IN_REVIEW`, [#232](https://github.com/Nochiski/Quant_study/pull/232)). 은퇴 포인터 가드, enum 값 이름과 1.1·`saved_*` 죽은 어휘 키
   정리, BACKLOG-012(팩터·서브그래프 카탈로그 분기)·BACKLOG-014(승격 노드 표시·의미 diff) 처리, 스니펫 두
   그룹, 업그레이드 warning 제목, 추적 화면 탈락 사유 문장. 결정 8건은 P3 스택 패킷. SDK 는 P2 PR 들이 이미
@@ -1862,6 +1882,18 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   우회 필터 제거는 WORKFLOW P3-03 acceptance 에 예약했다(리뷰 #232 DEFECT-232-05). 재리뷰 테스트 공백 둘은
   P3-01 이 닫았다: duckdb 선언표 표시와 어댑터 전달(DEFECT-232-06, 표시 삭제·전달 삭제 돌연변이 red),
   여러 단계 밑 원주가 잎(DEFECT-232-07, 한 단계 탐색 돌연변이 red).
+
+### BACKLOG-019: AI 가 실행 설정(기간·유니버스) 값을 제안하지 않는다 (P3-02 리드 보충, 범위 밖)
+
+- **상황**: schema 1.2 부터 기간·유니버스·비용은 전략 문서 밖의 실행 설정이다. AI 어시스턴트의 제안은 전략
+  문서만 바꾸고, 실행 설정은 사용자가 패널에서 정한다(P3-02 결정 5·9).
+- **인풋**: 빈 새 전략에서 "최근 많이 오른 대형주를 사는 전략"을 요청하고 "적용 후 백테스트"를 누른다.
+- **에러 위치**: 결함이 아니다. `features/edit-strategy/model/use-apply-then-backtest.ts` 의 체인이 실행 게이트
+  (`canRun`)가 닫혀 "시작하지 않았다"로 끝나고, 알림이 빈 칸 이름을 말한다. 제안 카드에는 실행 설정 값이 없다.
+- **위험성**: 없음(의도된 제한). 다만 아이디어에 기간이 담긴 요청("2020년 이후로")에서 사용자가 같은 값을 한 번
+  더 입력해야 한다. AI 가 실행 설정을 제안하려면 제안 카드에 문서와 별개의 `environment` 칸과 "실행 설정에 채우기"
+  확인 단계가 필요하고, 자동 적용 금지(spec Non-goals)를 지켜야 한다.
+- **담당**: 미정(AI 어시스턴트 후속). lang2 범위 밖.
 
 ## 갱신 절차
 

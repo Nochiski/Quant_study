@@ -6,7 +6,7 @@ current_phase: P3
 current_pr: P3-02
 active_prs: [P3-02]
 parallel_window: [P3-02]
-last_updated: 2026-09-27T23:10:07+09:00
+last_updated: 2026-09-27T23:24:12+09:00
 planned_prs: 30
 merged_prs: 9
 integrated_prs: 9
@@ -30,7 +30,7 @@ progress_percent: 60
 | Active PR | `P3-02` |
 | Progress | `18 / 30 done (60%), main 9, integration 9` |
 | Approved | `18 / 30` |
-| Aggregated at | `2026-09-27 23:10 KST` |
+| Aggregated at | `2026-09-27 23:24 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -914,7 +914,8 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
    값을 제안하는 기능은 범위 밖이다(BACKLOG-019).
 10. **run 상세 데이터 경고는 코드로 제목을 고른다.** `backtest.warning.<code>` 가 있으면 제목으로, 없으면 코드를
     제목으로 보이고, 서버가 완성한 한글 문장(`message`)은 그대로, 코드는 보조 표기로 둔다.
-    `portfolio.sector_unknown_excluded`(#203)에 제목을 붙였다. 경고 코드가 늘거나 문장이 바뀌어도(main #239)
+    `portfolio.sector_unknown_excluded`(#203)와 main #239 의 `benchmark.no_bar_at_start`·
+    `benchmark.suspended_sessions_carried`·`benchmark.delisted_sessions_frozen` 에 제목을 붙였다. 경고 코드가 늘거나 문장이 바뀌어도(main #239)
     화면 구조는 그대로다.
 11. **e2e 는 문서 검증이 끝난 뒤에 문서 상태를 단언한다(#240 대응 일부).** 문서 상태 배지가 `data-settled`
     (`isDocumentSettled`: compile 버전이 입력 버전을 따라잡았거나 구문 오류라 compile 이 시작되지 않음)를 내고,

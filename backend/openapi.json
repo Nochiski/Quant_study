@@ -6565,6 +6565,43 @@
         "title": "StrategyDocumentUpgradeDriftResponse",
         "type": "object"
       },
+      "StrategyDocumentUpgradeUnsupportedNodeDetail": {
+        "description": "1.2 에 없는 `saved_*` 노드 때문에 업그레이드를 거절했다(spec D7, P2-09).\n\n`pointer` 는 그 노드의 kind 자리다.",
+        "properties": {
+          "code": {
+            "const": "strategy_document.upgrade_unsupported_node",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "pointer",
+          "message"
+        ],
+        "title": "StrategyDocumentUpgradeUnsupportedNodeDetail",
+        "type": "object"
+      },
+      "StrategyDocumentUpgradeUnsupportedNodeResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyDocumentUpgradeUnsupportedNodeDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyDocumentUpgradeUnsupportedNodeResponse",
+        "type": "object"
+      },
       "StrategyDraft": {
         "properties": {
           "base_revision": {
@@ -8388,11 +8425,50 @@
         "title": "UniversePreview",
         "type": "object"
       },
+      "UpgradeWarning": {
+        "description": "업그레이드는 됐지만 사용자가 알아야 하는 사실 하나. `message` 는 한글 문장 + 기계 디테일.",
+        "properties": {
+          "code": {
+            "enum": [
+              "strategy_document.upgrade_missing_policy_conflict",
+              "strategy_document.upgrade_weighting_rule_changed",
+              "strategy_document.upgrade_environment_unavailable"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "pointer": {
+            "title": "Pointer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "pointer",
+          "message"
+        ],
+        "title": "UpgradeWarning",
+        "type": "object"
+      },
       "UpgradedDocument": {
-        "description": "A 1.0 source rewritten as 1.1 text plus what that text compiles to (spec D3).",
+        "description": "은퇴 schema 원문을 현재 버전으로 다시 쓴 결과와 그 원문의 compile 결과(spec D3·D7).\n\n`environment` 는 옛 문서의 `data`·`execution`·`missing_policy` 로 만든 실행 설정이다. 옮기지\n못했으면(값이 없거나 읽히지 않음) 비어 있고, 그 사유는 `warnings` 가 자리와 함께 짚는다 —\n기본값으로 지어내지 않는다. 화면은 이 값으로 실행 설정을 채운다(P3-02).",
         "properties": {
           "compiled": {
             "$ref": "#/components/schemas/CompiledDocument"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunEnvironment"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "format": {
             "$ref": "#/components/schemas/SourceFormat"
@@ -8404,13 +8480,22 @@
           "source_hash": {
             "title": "Source Hash",
             "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/UpgradeWarning"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
           "format",
           "source",
           "source_hash",
-          "compiled"
+          "compiled",
+          "environment",
+          "warnings"
         ],
         "title": "UpgradedDocument",
         "type": "object"
@@ -11013,7 +11098,7 @@
     },
     "/api/v1/strategy-documents/upgrade": {
       "post": {
-        "description": "Rewrite a schema 1.0 source as 1.1 (comments and order kept) and compile the result.\n\nThe rewrite must parse to exactly what the domain dict transform yields; otherwise the\nservice refuses with `strategy_document.upgrade_drift` rather than returning text that\nwould silently mean something else (spec D3).",
+        "description": "Rewrite a retired-schema source as the current version and compile the result.\n\nComments and order are kept. The rewrite must parse to exactly what the domain dict\ntransform yields; otherwise the service refuses with `strategy_document.upgrade_drift`\nrather than returning text that would silently mean something else (spec D3). The\nexecution settings the retired document carried come back as `environment`, and facts\nthe user should know (a folded missing policy, a changed weighting rule, settings that\ncould not be moved) as `warnings` (spec D7).",
         "operationId": "upgradeStrategyDocument",
         "requestBody": {
           "content": {
@@ -11051,6 +11136,9 @@
                       "$ref": "#/components/schemas/StrategyDocumentUpgradeDriftResponse"
                     },
                     {
+                      "$ref": "#/components/schemas/StrategyDocumentUpgradeUnsupportedNodeResponse"
+                    },
+                    {
                       "$ref": "#/components/schemas/RequestValidationResponse"
                     }
                   ],
@@ -11058,7 +11146,7 @@
                 }
               }
             },
-            "description": "Syntax errors, a non-1.0 document, or upgrade rule drift"
+            "description": "Syntax errors, a document with no upgrade chain, a saved-reference node, or upgrade rule drift"
           }
         },
         "summary": "Upgrade Strategy Document"

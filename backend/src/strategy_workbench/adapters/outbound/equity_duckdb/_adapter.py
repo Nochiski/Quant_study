@@ -759,7 +759,11 @@ class EquityDuckdbAdapter:
     def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
         """compile 이 읽는 필드 계약 전부(P2-07). `resolve_factor_fields` 와 같은 변환을 거친다.
 
-        그룹 필드는 아직 주지 않으므로 그래프의 그룹 연산은 compile 에서 unsupported 다(P2-08).
+        그룹 필드(`group_series`)는 주지 않으므로 그래프의 그룹 연산은 compile 에서 unsupported
+        다. P2-08 스파이크가 원장을 확인했다: `dataset_profile` 의 `classification.sector` 는 시점
+        축 없는 KSIC 현재값(`point_in_time=false`)이고, WICS `sector_snapshot` 은 스냅샷 하나뿐이라
+        과거 세션에 값이 없다. 월별 WICS 백필(`database/docs/WICS_PROBE.md` 7-5절, 라이선스 미결)이
+        들어와야 PIT 그룹 필드를 낼 수 있다.
         """
         return self.resolve_factor_fields(tuple(self._fields)).fields
 

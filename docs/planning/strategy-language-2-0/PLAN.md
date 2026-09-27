@@ -344,7 +344,10 @@ P2-09 결정 11건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 
    이다(`settings.data.x` 는 `test_run_environment_ownership.py` 의 옛 섹션 읽기 가드에 걸린다).
 6. **팩터별 결측 정책 충돌은 spec 대로 첫 값 + warning 이다.** P2-02 의 런타임 브리지는 같은 충돌을
    거부했지만(결정 2), 업그레이드는 사용자가 결과를 보고 실행 설정에서 고칠 수 있는 단계라 막을 이유가
-   없다. warning 이 쓴 값·출처·충돌 목록을 짚는다.
+   없다. warning 이 쓴 값·출처와 결측 처리가 바뀌는 팩터(`factor_id: 옛값->새값`)를 짚는다. 판정은
+   **실효 값**으로 한다(P2-09 리뷰 DEFECT-P1-1): 결측 정책을 생략한 팩터는 1.1 기본값 `drop` 으로 센다.
+   명시한 팩터만 세면 "a 생략 + b `zero`" 가 warning 없이 `zero` 가 되어 a 의 결측 처리가 조용히 바뀐다.
+   1.1 기본값은 `_upgrade.py` 의 과거 사실 상수다(`DEFAULT_MISSING_POLICY` import 는 순환이다).
 7. **`weighting: factor_score` 문서에는 warning 을 낸다**(`strategy_document.upgrade_weighting_rule_changed`).
    P2-04 결정 5 로 비중 규칙이 바뀌어 선정은 같아도 목표 비중이 1.1 과 다를 수 있다. 저장된 1.1 전략의
    동작 변화를 사용자에게 알리는 통로가 업그레이드 응답 warning 이다(P3-02 가 배너에 표시). "1.1 결과

@@ -113,8 +113,10 @@ def build_demo_fixture() -> MockEquityFixture:
         DatasetFieldProfile(
             field_id="consensus.forward_eps",
             dataset_id="consensus_daily",
-            label="12개월 선행 EPS",
-            unit="KRW/share",
+            # 단위·값 타입은 원장 정본(equity_duckdb FIELD_SPECS)과 같아야 한다(#207). 원장은 FY1
+            # 컨센서스 평균을 내며 12개월 선행 합성은 하지 않는다.
+            label="선행 EPS(FY1 컨센서스 평균)",
+            unit="KRW",
             value_type=FieldValueType.PRICE,
             frequency="daily",
             available_date_basis="first_seen_fetched_date",
@@ -180,9 +182,10 @@ def build_demo_fixture() -> MockEquityFixture:
         _factor_field_profile(
             field_id="credit.margin_balance",
             dataset_id="credit_daily",
-            label="Margin balance",
-            unit="KRW",
-            value_type=FieldValueType.AMOUNT,
+            # 원장 정본은 신용융자 잔고 주식수 축이다(금액축은 단위 미상이라 나가지 않는다, #207).
+            label="Margin balance (shares)",
+            unit="shares",
+            value_type=FieldValueType.COUNT,
             coverage=full_coverage,
         ),
         _factor_field_profile(
@@ -237,7 +240,7 @@ def build_demo_fixture() -> MockEquityFixture:
                         "credit.margin_balance",
                         session,
                         session,
-                        1_000_000_000.0 + security_index * 100_000_000.0 + index * 1_000_000,
+                        8_000_000.0 + security_index * 1_000_000.0 + index * 10_000,
                         CellKind.OBSERVED,
                     ),
                     Observation(

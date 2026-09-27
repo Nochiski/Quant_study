@@ -522,7 +522,8 @@ def _factor_field_value(
     if field_id == "short.short_balance_ratio":
         return 0.01 + security_index * 0.015 + (session_index % 7) * 0.0001
     if field_id == "credit.margin_balance":
-        return 1_000_000_000.0 + security_index * 100_000_000.0 + trend * 1_000
+        # 주식수 축(원장 정본 단위 shares, #207)
+        return 8_000_000.0 + security_index * 1_000_000.0 + trend * 10
     if field_id == "event.earnings_surprise":
         return (security_index - 1) * 0.05 + (session_index % 3) * 0.005
     return float(stable + trend)

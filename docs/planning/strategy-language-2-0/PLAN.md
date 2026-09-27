@@ -292,9 +292,9 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Branch/worktree | `feat/lang2-p2-08-ideas` / `wt-lang2-p2-08` |
 | Base SHA | P2-07 tip `945fd081`. 착수는 `6e397a3b` 에서 했고 P2-07 의 통합 브랜치 merge 와 리뷰 반영을 merge 로 따라갔다 |
 | Head SHA | PR [#205](https://github.com/Nochiski/Quant_study/pull/205) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
-| Diff stat | 생성 연산자 카탈로그 fixture 를 뺀 handwritten **15파일 · +568 / −10**. src 4파일 +73/−2(mock 필드 59줄), test 4파일 +317/−6(신규 `test_idea_fixtures.py` 240줄), 아이디어 fixture 5파일 173줄, 스토리 2파일 +5/−2 |
+| Diff stat | 생성 연산자 카탈로그 fixture 와 계획 문서(PLAN·WORKFLOW)를 뺀 handwritten **16파일 · +610 / −15**. backend 13파일 +597/−8(src 4파일 +73/−2 중 mock 필드 59줄, 신규 `test_idea_fixtures.py` 273줄, 아이디어 fixture 5파일), spec D2 1파일, 스토리 2파일 |
 | Focused tests | `uv run pytest tests/integration/test_idea_fixtures.py tests/domain/test_factor_operators.py tests/integration/test_strategy_http_api.py tests/contract/test_raw_observation_port.py -q` |
-| 제약사항 | **파일 수가 12절 상한(10)을 넘는다(15), 분할하지 않는다.** 아이디어 fixture 5개는 acceptance 가 한 묶음으로 요구하는 데이터 파일이다. 줄 수는 600 안이다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
+| 제약사항 | **파일 수가 12절 상한(10)을 넘는다(16), 분할하지 않는다.** 아이디어 fixture 5개는 acceptance 가 한 묶음으로 요구하는 데이터 파일이고, 리드 결정(빌더 node_id 정본)이 fixture 와 spec 예시를 같이 고치라고 해서 문서가 늘었다. backend 는 +597 줄이다. e2e 는 P2-03~P3-02 묶음 머지 전략의 두 원인으로만 red 다(PR 본문 대조표) |
 | Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·계약 산출물 diff·frontend typecheck·typecheck:e2e·lint·test·build·`api:generate` diff 0·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
 
 P2-08 결정 6건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):

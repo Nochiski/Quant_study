@@ -44,6 +44,7 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
     SourceFormat,
 )
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
+from strategy_workbench.domain.portfolio.facade.construction import ExclusionReason
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategySpec,
     composite_factors,
@@ -257,6 +258,38 @@ def test_ma20_breakout_is_four_nodes_with_two_leaves_and_a_promoted_output(
     # 비교 출력(boolean)은 P2-07 승격으로 0/1 숫자 점수가 되어 compile 을 통과한다.
     (factor,) = _spec(authoring, "ma20_breakout.yaml").factors
     assert factor.graph.output_node_id.startswith("__promote_")
+
+
+# mock 합성 구간(픽스처 달력 밖)에서 자본총계·당기순이익이 음수인 종목(DEFECT-P208-001 재현용).
+_CAPITAL_IMPAIRED = "sec-035420-1"
+# 픽스처 달력(2024-01-02 ~ 01-12) 밖이라 mock 이 모든 필드를 합성하고 월말 리밸런싱 프레임이 생긴다.
+_SYNTHETIC_ENVIRONMENT = RunEnvironment(
+    start=date(2024, 2, 1), end=date(2024, 4, 30), universe_id="krx.common-stock"
+)
+
+
+def test_low_pbr_high_roe_excludes_capital_impaired_companies(
+    authoring: StrategyAuthoringService, portfolio: PortfolioDesignService
+) -> None:
+    """자본총계가 0 이하인 종목은 아이디어 2 에서 빠진다(DEFECT-P208-001).
+
+    자본총계 < 0 이면 PBR 이 음수라 `direction: low` 의 1위가 되고, 적자까지 겹치면 ROE 가
+    음수/음수 = 양수라 `direction: high` 에서도 상위다. 조건이 없으면 완전자본잠식 적자 기업이
+    "저PBR·고ROE" 합성 1위로 뽑힌다. 유니버스 조건 `financial.book_equity gt 0` 이 먼저 거른다.
+    """
+    spec = _spec(authoring, "low_pbr_high_roe.yaml")
+
+    tape = portfolio.preview(PortfolioPreviewRequest(spec, _SYNTHETIC_ENVIRONMENT)).tape
+
+    assert tape.frames, "합성 구간에서 리밸런싱 프레임이 나와야 단언이 공허하지 않다"
+    for frame in tape.frames:
+        decisions = {item.security_id: item for item in frame.candidates}
+        impaired = decisions[_CAPITAL_IMPAIRED]
+        assert not impaired.selected, frame.signal_as_of
+        assert ExclusionReason.ELIGIBILITY_FAILED in impaired.exclusion_reasons
+        assert {target.security_id for target in frame.targets} == set(decisions) - {
+            _CAPITAL_IMPAIRED
+        }
 
 
 def test_inverse_volatility_weights_by_a_second_factor_outside_the_composite(

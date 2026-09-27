@@ -1,7 +1,15 @@
 # lang2 완료 정의 아이디어 2 — 저PBR + 고ROE(spec 5절). 팩터 두 개를 결합 전 순위로 맞춰 더한다
 # (signal.normalization 기본값 rank). 나눗셈의 분모는 레시피 빌더가 새로 만드는 잎이다(spec D2).
+# 자본총계가 0 이하인 종목은 유니버스 조건으로 먼저 거른다. 자본잠식이면 PBR 이 음수라 "가장 싼" 종목이
+# 되고, 적자까지 겹치면 ROE 가 음수/음수 = 양수라 두 팩터 모두 최상위가 된다(P2-08 리뷰 DEFECT-P208-001).
+# 한계: 원장의 당기순이익은 최신 공시가 분기면 3개월, 사업보고서면 12개월 값이라 ROE 가 기간을 섞는다.
 schema_version: "1.2"
 title: "저PBR + 고ROE"
+eligibility:
+  rules:
+    - field_id: financial.book_equity
+      operator: gt
+      value: 0
 factors:
   - factor_id: pbr
     label: "PBR"

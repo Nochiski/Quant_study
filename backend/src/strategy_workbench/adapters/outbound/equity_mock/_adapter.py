@@ -48,6 +48,10 @@ from ._fixture import Membership, Observation, build_demo_fixture
 
 _MOCK_EPOCH = date(2000, 1, 3)  # Monday
 _MOCK_SECTORS = ("technology", "industrial", "consumer")
+# 합성 구간에서 완전자본잠식(자본총계 < 0)이면서 적자인 종목의 순번(세 번째, sec-035420-1).
+# 실데이터에 이런 기업이 있고(P2-08 리뷰 실측 28개), 자본총계를 분모로 쓰는 팩터가
+# 부호 함정에 빠지는지 테스트가 mock 에서 재현할 수 있어야 한다(DEFECT-P208-001).
+_CAPITAL_IMPAIRED_INDEX = 2
 # (market, universe_id) -> venue the fixture memberships are keyed by.
 _MOCK_UNIVERSES: dict[tuple[str, str], str] = {("KRX", "krx.common-stock"): "XKRX"}
 
@@ -518,8 +522,15 @@ def _factor_field_value(
         return 40_000.0 + security_index * 20_000.0 + trend
     if field_id == "price.market_cap":
         return 10_000_000_000.0 + security_index * 2_000_000_000.0 + trend * 10_000
+    impaired = security_index == _CAPITAL_IMPAIRED_INDEX
     if field_id == "financial.book_equity":
+        if impaired:
+            # 자본잠식 규모가 순손실보다 작다 — 음수/음수 ROE 가 크게 나와 함정이 1위로 드러난다.
+            return -(100_000_000.0 + trend * 10)
         return 4_000_000_000.0 + security_index * 900_000_000.0 + trend * 1_000
+    if field_id == "financial.net_income":
+        income = 300_000_000.0 + security_index * 50_000_000.0 + trend * 100
+        return -income if impaired else income
     if field_id == "consensus.forward_eps":
         return 2_000.0 + security_index * 350.0 + trend * 0.2
     if field_id == "flow.foreign_net_buy":

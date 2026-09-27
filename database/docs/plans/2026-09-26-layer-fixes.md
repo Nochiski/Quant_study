@@ -208,3 +208,8 @@ wise 5검사 pass ⑤ 모 플랜 §1-7 DQ-7~11 조치 열이 결과 숫자로 �
 FY2025 `capex_basis`: standard 2,320 · ppe_parts 203 · none_in_cf 104 · ppe_incl_invprop 3 · unavailable 1. capex NULL 이면서 영업현금흐름은 있는 회사 **310 → 1**.
 
 주의(운영): equity 판 보관 한도(`--keep`) 때문에 T-A 이전 판(m_20260924T040605)이 지워져 회귀 기준을 정규화 이전 판(110658)으로 바꿨다 — 표준 capex 는 T-A 검증(GA3)에서 이미 p0 대비 0 diff 였으므로 추이적으로 성립. 검증 스크립트 `logs/verify_fa.sh`·`verify_fa2.sh`·`verify_fa2_reg.py`, 로그 `logs/verify_fa*.log`.
+
+## 9. 예정 — T-E 스테이지 계정명 정규화 열 (2026-09-29 화, 사용자 09-27 확인)
+
+`stg_fin` 에 원문 `account_nm` 은 그대로 두고 **`account_nm_norm`**(공백 제거) 열을 추가한다. 실측(09-27): 고유 계정명 72,488 → 공백 제거 55,489, 변형 군 11,765(관련 행 1,400만/1,540만), 특수 공백·NFKC 차이 0 → "공백 제거"만으로 충분.
+절차: ① stage 규칙(`rules_dart.py` stg_fin)에 파생 열 + 스테이지 규칙 버전 인상(`test_stage_model` 2.3.0 고정 갱신) ② `fin_std.sql` 이 그 열을 입력으로 선언하고 자체 `regexp_replace` 제거(`nm_exact` 는 `account_nm = account_nm_norm` 그대로) ③ 절단본 픽스처 `stg_fin` 에 열 추가 ④ 저녁 정규 판에서 값 변경 0 확인(`verify_fa2_reg.py` 방식, 기준 = 09-28 판). 09-29 아침 GB3·5일째 그림자 통과 뒤 착수.

@@ -683,7 +683,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         expr="est_mean",
         label="선행 EPS(FY1 컨센서스 평균)",
         unit="KRW",
-        value_type=FieldValueType.PRICE,
+        # 주당 금액이다. 원장 dataset_profile 의 value_type='amount' 와 같다(#230).
+        value_type=FieldValueType.AMOUNT,
         verdict="부분",
         description=(
             "**12개월 선행이 아니다** — equity 는 target_period 별 값만 주고 12M 합성은 팩터층 "
@@ -897,7 +898,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         expr="dps_krw",
         label="주당 현금배당금(최근 사업보고서)",
         unit="KRW",
-        value_type=FieldValueType.PRICE,
+        # 주당 금액이다. 원장 dataset_profile 의 value_type='amount' 와 같다(#230).
+        value_type=FieldValueType.AMOUNT,
         verdict="부분",
         description=(
             "**락일·기준일이 없다** — 값이 서는 시점은 사업보고서 접수일뿐이라 TR·배당 재투자 "

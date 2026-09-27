@@ -135,7 +135,8 @@ def build_demo_fixture() -> MockEquityFixture:
             value_type=FieldValueType.AMOUNT,
             frequency="quarterly",
             available_date_basis="filing available_date",
-            recommended_lag_sessions=0,
+            # 랙은 원장 dataset_profile 과 같아야 한다(#230). 접수일 다음 세션부터 쓴다.
+            recommended_lag_sessions=1,
             description="공시 available_date 이후에만 보인다.",
             disclosure_basis="DART 접수일 기준 사용 가능",
             evidence="DART 재무제표 자본총계 표준계정",
@@ -161,7 +162,7 @@ def build_demo_fixture() -> MockEquityFixture:
             value_type=FieldValueType.AMOUNT,
             frequency="quarterly",
             available_date_basis="filing available_date",
-            recommended_lag_sessions=0,
+            recommended_lag_sessions=1,
             # 원장(duckdb)과 같은 의미다(#212): 공시일 기준 최근 4분기 합이고, 4분기를 채울 수
             # 없으면 값을 내지 않는다(3개월·연간 값으로 대신하지 않는다).
             description=(
@@ -184,13 +185,14 @@ def build_demo_fixture() -> MockEquityFixture:
             field_id="consensus.forward_eps",
             dataset_id="consensus_daily",
             # 단위·값 타입은 원장 정본(equity_duckdb FIELD_SPECS)과 같아야 한다(#207). 원장은 FY1
-            # 컨센서스 평균을 내며 12개월 선행 합성은 하지 않는다.
+            # 컨센서스 평균을 내며 12개월 선행 합성은 하지 않는다. 값 타입(주당 금액)·월 빈도·
+            # 랙 1은 원장 dataset_profile 과 같다(#230).
             label="선행 EPS(FY1 컨센서스 평균)",
             unit="KRW",
-            value_type=FieldValueType.PRICE,
-            frequency="daily",
+            value_type=FieldValueType.AMOUNT,
+            frequency="monthly",
             available_date_basis="first_seen_fetched_date",
-            recommended_lag_sessions=0,
+            recommended_lag_sessions=1,
             description="관측점의 최초 수집 판본과 이후 revision을 보존한다.",
             disclosure_basis="수집 시스템 최초 관측일",
             evidence="컨센서스 원천 판본·수집시각 로그",
@@ -216,7 +218,7 @@ def build_demo_fixture() -> MockEquityFixture:
             value_type=FieldValueType.AMOUNT,
             frequency="daily",
             available_date_basis="session",
-            recommended_lag_sessions=0,
+            recommended_lag_sessions=1,
             description="실제 0, 원천 생략 0, 미수집을 CellKind로 구분한다.",
             disclosure_basis="거래일별 투자자 매매 집계",
             evidence="KRX 투자자별 거래실적",
@@ -257,6 +259,8 @@ def build_demo_fixture() -> MockEquityFixture:
             unit="shares",
             value_type=FieldValueType.COUNT,
             coverage=full_coverage,
+            # 원장은 실입수 기준 3세션 뒤에 공개한다(EQUITY_FIELD_MAP DEFECT-E01 정정, #230).
+            recommended_lag_sessions=3,
         ),
         _factor_field_profile(
             field_id="event.earnings_surprise",
@@ -395,43 +399,45 @@ def build_demo_fixture() -> MockEquityFixture:
                 5_400.0,
                 CellKind.OBSERVED,
             ),
+            # flow 는 원장처럼 랙 1이라(#230) 관측 세션 다음 세션에 보인다. 셀 종류를 보는 테스트의
+            # as_of(01-03·01-04·01-08)가 그대로이도록 관측을 한 세션 앞에 둔다.
             Observation(
                 securities[0].security_id,
                 "flow.foreign_net_buy",
-                sessions[1],
-                sessions[1],
+                sessions[0],
+                sessions[0],
                 0.0,
                 CellKind.OBSERVED,
             ),
             Observation(
                 securities[1].security_id,
                 "flow.foreign_net_buy",
-                sessions[1],
-                sessions[1],
+                sessions[0],
+                sessions[0],
                 None,
                 CellKind.MISSING,
             ),
             Observation(
                 securities[0].security_id,
                 "flow.foreign_net_buy",
-                sessions[2],
-                sessions[2],
+                sessions[1],
+                sessions[1],
                 0.0,
                 CellKind.SOURCE_OMITTED_ZERO,
             ),
             Observation(
                 securities[1].security_id,
                 "flow.foreign_net_buy",
-                sessions[2],
-                sessions[2],
+                sessions[1],
+                sessions[1],
                 None,
                 CellKind.NOT_COLLECTED,
             ),
             Observation(
                 securities[2].security_id,
                 "flow.foreign_net_buy",
-                sessions[4],
-                sessions[4],
+                sessions[3],
+                sessions[3],
                 None,
                 CellKind.COVERAGE_GAP,
             ),
@@ -471,6 +477,7 @@ def _factor_field_profile(
     unit: str,
     value_type: FieldValueType,
     coverage: FieldCoverageCapability,
+    recommended_lag_sessions: int = 0,
 ) -> DatasetFieldProfile:
     return DatasetFieldProfile(
         field_id=field_id,
@@ -480,7 +487,7 @@ def _factor_field_profile(
         value_type=value_type,
         frequency="daily",
         available_date_basis="point-in-time session fixture",
-        recommended_lag_sessions=0,
+        recommended_lag_sessions=recommended_lag_sessions,
         description="Deterministic mock subset for the replaceable Equity DB adapter.",
         disclosure_basis="Mock PIT availability contract",
         evidence="M3 factor research fixture",

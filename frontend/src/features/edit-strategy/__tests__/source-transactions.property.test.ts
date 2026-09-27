@@ -219,7 +219,7 @@ describe("source transactions (property)", () => {
  * `# 꼬리`를 붙인 문서와, 그 컨테이너 안을 겨냥한 연산 하나(#150 리뷰 P2-4: backlog 14·18 경로의 생성기).
  * flow 안 주석은 YAML이 거의 허용하지 않으므로 그 subtree의 주석은 지운다.
  */
-const flowDocumentAndOperation = documentAndOperation
+const flowDocument = documentAndOperation
   .chain(([source, eol, tree]) => {
     const containers = pointersOf(tree).filter((p) => {
       if (p.kind === "scalar") return false;
@@ -265,8 +265,10 @@ const flowDocumentAndOperation = documentAndOperation
     });
   })
   .filter((doc) => doc !== null)
-  .chain((doc) => {
-    const { source, eol, tree, container } = doc!;
+  .map((doc) => doc!);
+
+const flowDocumentAndOperation = flowDocument.chain(
+  ({ source, eol, tree, container }) => {
     const inside = pointersOf(tree).filter((p) => p.pointer.startsWith(`${container}/`));
     const mappings = pointersOf(tree).filter(
       (p) => p.kind === "mapping" && (p.pointer === container || p.pointer.startsWith(`${container}/`)),
@@ -305,7 +307,8 @@ const flowDocumentAndOperation = documentAndOperation
       fc.constant(container),
       fc.oneof(...choices),
     );
-  });
+  },
+);
 
 describe("flow containers (property)", () => {
   it("rewrites the flow container only: reparsed tree equals the tree operation, lines outside survive byte for byte, the trailing comment survives", () => {
@@ -343,6 +346,209 @@ describe("flow containers (property)", () => {
         expect(kept.filter((c) => before.includes(c))).toEqual(before);
         if (eol === "\r\n")
           expect(edit.nextSource.replaceAll("\r\n", "")).not.toContain("\n");
+      }),
+      { numRuns: Number(process.env.FC_NUM_RUNS ?? 200), ...fixedSeed },
+    );
+  }, 300_000);
+});
+
+/**
+ * 새 두 property가 함께 보는 편집 불변식: tree 동치, 편집 범위 밖 줄의 바이트 동일, 문서 폭(2칸)의 배수인
+ * 들여쓰기, 주석은 생기지 않고 삭제가 아니면 사라지지도 않음, CRLF 유지. 편집을 돌려준다.
+ */
+const expectLawfulEdit = (
+  source: string,
+  eol: "\n" | "\r\n",
+  tree: Record<string, unknown>,
+  op: SourceOperation,
+) => {
+  const expected = applyToTree(tree, op);
+  expect(expected, `${op.kind} must be valid`).not.toBeNull();
+  const result = planSourceOperation(source, "yaml", op);
+  expect(result.status, JSON.stringify({ op, source })).toBe("ok");
+  if (result.status !== "ok") return null;
+  const { edit } = result;
+  const reparsed = parseSource(edit.nextSource, "yaml");
+  expect(reparsed.status).toBe("ok");
+  expect(reparsed.tree).toEqual(expected);
+  const lines = source.split(eol);
+  const nextLines = edit.nextSource.split(eol);
+  const lineOf = (offset: number): number =>
+    source.slice(0, offset).split(eol).length - 1;
+  const firstTouched = lineOf(edit.from);
+  const tailCount = lines.length - lineOf(Math.max(edit.from, edit.to)) - 1;
+  expect(nextLines.slice(0, firstTouched)).toEqual(lines.slice(0, firstTouched));
+  expect(nextLines.slice(nextLines.length - tailCount)).toEqual(
+    lines.slice(lines.length - tailCount),
+  );
+  // 생성 문서는 2칸 폭이다. 빈 컨테이너를 다음 줄로 옮길 때 5칸이 되던 결함(#199)을 막는다.
+  for (const line of nextLines)
+    expect(
+      (line.length - line.trimStart().length) % 2,
+      JSON.stringify({ op, source, line }),
+    ).toBe(0);
+  const before = commentLines(source);
+  const kept = commentLines(edit.nextSource);
+  if (op.kind === "remove") expect(kept.every((c) => before.includes(c))).toBe(true);
+  else expect(kept).toEqual(before);
+  if (eol === "\r\n")
+    expect(edit.nextSource.replaceAll("\r\n", "")).not.toContain("\n");
+  return edit;
+};
+
+const ancestorOrSelf = (pointer: string, of: string): boolean =>
+  of === pointer || of.startsWith(`${pointer}/`);
+
+/**
+ * flow 컨테이너 **자신과 그 바깥** block 조상을 겨냥한 연산(#199). 위 flow property는 컨테이너 안만 겨냥해,
+ * flow 컨테이너가 부모의 마지막 내용일 때 부모를 비우거나 그 옆에 넣는 경로(`- - [a, b]`의 유일 항목 삭제)를
+ * 뽑지 못했다.
+ */
+const flowNeighbourOperation = flowDocument.chain(
+  ({ source, eol, tree, container }) => {
+    const pointers = pointersOf(tree).filter(
+      (p) => !p.pointer.startsWith("/schema_version"),
+    );
+    const outer = pointers.filter((p) => ancestorOrSelf(p.pointer, container));
+    const strictOuter = outer.filter((p) => p.pointer !== container);
+    const sequences = strictOuter.filter((p) => p.kind === "sequence");
+    const mappings = [
+      { pointer: "", kind: "mapping" as const },
+      ...strictOuter.filter((p) => p.kind === "mapping"),
+    ];
+    const choices: fc.Arbitrary<SourceOperation>[] = [
+      fc
+        .constantFrom(...outer)
+        .map((p) => ({ kind: "remove" as const, pointer: p.pointer })),
+      fc
+        .tuple(fc.constantFrom(...mappings), identifierArbitrary, valueArbitrary)
+        .map(([p, key, value]) => ({
+          kind: "insert-key" as const,
+          parentPointer: p.pointer,
+          key: `new_${key}`,
+          value,
+        })),
+    ];
+    if (sequences.length)
+      choices.push(
+        fc
+          .tuple(fc.constantFrom(...sequences), valueArbitrary)
+          .chain(([p, value]) => {
+            const items = valueAtPointer(tree, p.pointer).value as unknown[];
+            return fc
+              .option(fc.integer({ min: 0, max: items.length }), { nil: undefined })
+              .map((index) => ({
+                kind: "insert-item" as const,
+                parentPointer: p.pointer,
+                value,
+                index,
+              }));
+          }),
+      );
+    return fc.tuple(
+      fc.constant(source),
+      fc.constant(eol),
+      fc.constant(tree),
+      fc.oneof(...choices),
+    );
+  },
+);
+
+/**
+ * 시퀀스 항목(비어 있지 않은 block 컨테이너) 하나의 dash 줄에 줄 끝 주석 `# 대시`를 달아 내용이 다음 줄에서
+ * 시작하게 한 문서(`- # 대시` 다음 줄에 `- a`·`k: 1`)와, 그 항목 안이나 그 항목까지의 조상을 겨냥한 연산(#199).
+ * 내용 줄은 원래 내용 열에 두므로 들여쓰기는 그대로 2칸 폭이다.
+ */
+const dashCommentDocumentAndOperation = documentAndOperation
+  .chain(([source, eol, tree]) => {
+    const parsed = parseSource(source, "yaml");
+    if (parsed.status !== "ok") return fc.constant(null);
+    const items = pointersOf(tree).filter((p) => {
+      if (p.kind === "scalar" || !/\/\d+$/.test(p.pointer)) return false;
+      const value = valueAtPointer(tree, p.pointer).value;
+      const size = Array.isArray(value)
+        ? value.length
+        : Object.keys(value as Record<string, unknown>).length;
+      const range = parsed.valueRanges.get(p.pointer);
+      if (size === 0 || range === undefined) return false;
+      const lineStart = source.lastIndexOf("\n", range.start.offset - 1) + 1;
+      return /^ *(?:- +)+$/.test(source.slice(lineStart, range.start.offset));
+    });
+    if (items.length === 0) return fc.constant(null);
+    return fc.constantFrom(...items).map((item) => {
+      const range = parsed.valueRanges.get(item.pointer)!;
+      const text = `${source.slice(0, range.start.offset)}# 대시${eol}${" ".repeat(range.start.column)}${source.slice(range.start.offset)}`;
+      const reparsed = parseSource(text, "yaml");
+      if (reparsed.status !== "ok" || JSON.stringify(reparsed.tree) !== JSON.stringify(tree))
+        return null;
+      return { source: text, eol, tree, item: item.pointer };
+    });
+  })
+  .filter((doc) => doc !== null)
+  .chain((doc) => {
+    const { source, eol, tree, item } = doc!;
+    const pointers = pointersOf(tree).filter(
+      (p) => !p.pointer.startsWith("/schema_version"),
+    );
+    const inside = pointers.filter((p) => ancestorOrSelf(item, p.pointer));
+    const choices: fc.Arbitrary<SourceOperation>[] = [
+      fc
+        .constantFrom(
+          ...pointers.filter(
+            (p) => ancestorOrSelf(item, p.pointer) || ancestorOrSelf(p.pointer, item),
+          ),
+        )
+        .map((p) => ({ kind: "remove" as const, pointer: p.pointer })),
+    ];
+    const mappings = inside.filter((p) => p.kind === "mapping");
+    const sequences = inside.filter((p) => p.kind === "sequence");
+    if (mappings.length)
+      choices.push(
+        fc
+          .tuple(fc.constantFrom(...mappings), identifierArbitrary, valueArbitrary)
+          .map(([p, key, value]) => ({
+            kind: "insert-key" as const,
+            parentPointer: p.pointer,
+            key: `new_${key}`,
+            value,
+          })),
+      );
+    if (sequences.length)
+      choices.push(
+        fc.tuple(fc.constantFrom(...sequences), valueArbitrary).map(([p, value]) => ({
+          kind: "insert-item" as const,
+          parentPointer: p.pointer,
+          value,
+        })),
+      );
+    return fc.tuple(
+      fc.constant(source),
+      fc.constant(eol),
+      fc.constant(tree),
+      fc.constant(item),
+      fc.oneof(...choices),
+    );
+  });
+
+describe("flow containers as the target or around it (property, #199)", () => {
+  it("removes or inserts around a flow container with the edit invariants", () => {
+    fc.assert(
+      fc.property(flowNeighbourOperation, ([source, eol, tree, op]) => {
+        expectLawfulEdit(source, eol, tree, op);
+      }),
+      { numRuns: Number(process.env.FC_NUM_RUNS ?? 200), ...fixedSeed },
+    );
+  }, 300_000);
+});
+
+describe("dash-line comments above the item content (property, #199)", () => {
+  it("edits inside or around the item with the edit invariants and keeps the dash-line comment unless the item is removed", () => {
+    fc.assert(
+      fc.property(dashCommentDocumentAndOperation, ([source, eol, tree, item, op]) => {
+        const edit = expectLawfulEdit(source, eol, tree, op);
+        if (edit === null) return;
+        const removesItem = op.kind === "remove" && ancestorOrSelf(op.pointer, item);
+        if (!removesItem) expect(edit.nextSource).toContain("# 대시");
       }),
       { numRuns: Number(process.env.FC_NUM_RUNS ?? 200), ...fixedSeed },
     );

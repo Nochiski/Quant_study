@@ -834,6 +834,103 @@ describe("flow containers (backlog 14)", () => {
   });
 });
 
+describe("flow values as the last content and emptied containers on a later line (#199)", () => {
+  const eols = [
+    ["LF", "\n"],
+    ["CRLF", "\r\n"],
+  ] as const;
+
+  it.each(eols)(
+    "empties the inner sequence when its only item is a flow collection under a dash (%s)",
+    (_name, eol) => {
+      // 비워지는 부모의 내용 끝을 leaf 끝으로만 잡으면 닫는 `]`·`}`가 교체 범위 밖에 남아 preflight가 거부했다.
+      const lines = (...rows: string[]) => rows.join(eol);
+      expect(
+        ok(lines("g:", "  - - [a, b]", "z: 2", ""), { kind: "remove", pointer: "/g/0/0" })
+          .nextSource,
+      ).toBe(lines("g:", "  - []", "z: 2", ""));
+      expect(
+        ok(lines("g:", "  - - { k: 1 } # c", "z: 2", ""), {
+          kind: "remove",
+          pointer: "/g/0/0",
+        }).nextSource,
+      ).toBe(lines("g:", "  - [] # c", "z: 2", ""));
+      expect(
+        ok(lines("a:", "  b: [x, y]", "z: 2", ""), { kind: "remove", pointer: "/a/b" })
+          .nextSource,
+      ).toBe(lines("a: {}", "z: 2", ""));
+    },
+  );
+
+  it.each(eols)(
+    "removes or inserts around a flow item that spans several lines, closing bracket included (%s)",
+    (_name, eol) => {
+      const lines = (...rows: string[]) => rows.join(eol);
+      const source = lines("l:", "  - x", "  - [", "      a", "    ]", "z: 2", "");
+      expect(ok(source, { kind: "remove", pointer: "/l/1" }).nextSource).toBe(
+        lines("l:", "  - x", "z: 2", ""),
+      );
+      expect(
+        ok(source, { kind: "insert-item", parentPointer: "/l", value: "y" })
+          .nextSource,
+      ).toBe(lines("l:", "  - x", "  - [", "      a", "    ]", "  - y", "z: 2", ""));
+    },
+  );
+
+  it.each(eols)(
+    "puts an emptied container below a dash-line comment at the dash column plus the document's indent unit (%s)",
+    (_name, eol) => {
+      // `- # c` 다음 줄에서 시작한 내용을 비우면 `[]`·`{}`는 `-` 열 + 문서 폭에 온다. 예전에는 `-`를 찾지 못해
+      // 내용 줄 들여쓰기 뒤에 ` []`를 써서 2칸 문서에서 5칸이 되었다.
+      const lines = (...rows: string[]) => rows.join(eol);
+      expect(
+        ok(lines("g:", "  - # c", "    - a", "z: 2", ""), { kind: "remove", pointer: "/g/0/0" })
+          .nextSource,
+      ).toBe(lines("g:", "  - # c", "    []", "z: 2", ""));
+      expect(
+        ok(lines("g:", "  - # c", "    k: 1", ""), { kind: "remove", pointer: "/g/0/k" })
+          .nextSource,
+      ).toBe(lines("g:", "  - # c", "    {}", ""));
+      expect(
+        ok(lines("g:", "  - - # c", "      - a", ""), { kind: "remove", pointer: "/g/0/0/0" })
+          .nextSource,
+      ).toBe(lines("g:", "  - - # c", "      []", ""));
+      expect(
+        ok(lines("g:", "    - # c", "        - a", ""), { kind: "remove", pointer: "/g/0/0" })
+          .nextSource,
+      ).toBe(lines("g:", "    - # c", "        []", ""));
+    },
+  );
+
+  it.each(eols)(
+    "removes or inserts into an item whose content starts below its dash line (%s)",
+    (_name, eol) => {
+      // 항목 값이 `- # c`·`-` 다음 줄에서 시작하면 `-`를 같은 줄에서만 찾던 예전 코드는 항목 삭제와 맨 앞 삽입을
+      // 거부했다. flow 항목을 block으로 열면 `-` 다음 줄에 내용이 오므로 우리 편집 결과도 이 모양이다.
+      const lines = (...rows: string[]) => rows.join(eol);
+      const source = lines("g:", "  - # c", "    # d", "    k: 1", "  -", "    - a", "z: 2", "");
+      expect(ok(source, { kind: "remove", pointer: "/g/0" }).nextSource).toBe(
+        lines("g:", "  -", "    - a", "z: 2", ""),
+      );
+      expect(ok(source, { kind: "remove", pointer: "/g/1" }).nextSource).toBe(
+        lines("g:", "  - # c", "    # d", "    k: 1", "z: 2", ""),
+      );
+      expect(
+        ok(source, { kind: "insert-key", parentPointer: "/g/0", key: "j", value: 0, before: "k" })
+          .nextSource,
+      ).toBe(lines("g:", "  - # c", "    j: 0", "    # d", "    k: 1", "  -", "    - a", "z: 2", ""));
+      expect(
+        ok(source, { kind: "insert-item", parentPointer: "/g/1", value: "b", index: 0 })
+          .nextSource,
+      ).toBe(lines("g:", "  - # c", "    # d", "    k: 1", "  -", "    - b", "    - a", "z: 2", ""));
+      expect(
+        ok(source, { kind: "insert-item", parentPointer: "/g", value: "x", index: 0 })
+          .nextSource,
+      ).toBe(lines("g:", "  - x", "  - # c", "    # d", "    k: 1", "  -", "    - a", "z: 2", ""));
+    },
+  );
+});
+
 describe("planSourceOperations (backlog 13)", () => {
   const BASE =
     'schema_version: "1.1"\nrisk:\n  max_name_weight: 0.05\nparameters: []\n';

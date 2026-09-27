@@ -6,7 +6,7 @@ current_phase: P3
 current_pr: P3-02
 active_prs: [P3-02]
 parallel_window: [P3-02]
-last_updated: 2026-09-27T22:15:10+09:00
+last_updated: 2026-09-27T23:10:07+09:00
 planned_prs: 30
 merged_prs: 9
 integrated_prs: 9
@@ -30,7 +30,7 @@ progress_percent: 60
 | Active PR | `P3-02` |
 | Progress | `18 / 30 done (60%), main 9, integration 9` |
 | Approved | `18 / 30` |
-| Aggregated at | `2026-09-27 22:15 KST` |
+| Aggregated at | `2026-09-27 23:10 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -869,13 +869,19 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
 1. **기간·유니버스에는 기본값이 없다.** 실행 설정 스키마가 `start`·`end`·`universe_id` 에 `default` 를 주지
    않는다 — backend 는 요청에 실행 설정이 없으면 기본값을 지어내지 않고 거절한다(`require_environment`).
    패널도 같은 규칙을 따른다: 세 칸은 비어서 시작하고, 채우기 전까지 백테스트·추적 버튼이 비어 있는 칸 이름을
-   적은 문장("실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.")으로 막힌다. IDE 위 요약 띠도 빈 칸 이름을
-   말하고 "실행 설정 채우기" 버튼을 가진다 — 누르면 패널이 열리고 첫 빈 칸에 초점이 간다(리드 보충). 나머지
+   적은 문장("실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.")으로 막힌다. 값이 틀린 칸(범위·형식·
+   `start > end`, 실행 옵션)이 있으면 패널 순서의 첫 칸 이름과 이유를 말하고 나머지 개수를 붙인다("실행 설정의
+   수수료 칸을 고치세요: 0bp 이상이어야 합니다.", DEFECT-242-01). 문장은 IDE 위 요약 띠에 보이는 문장으로
+   있고, 띠의 "실행 설정 채우기"/"실행 설정 고치기"가 패널을 열어 그 칸에 초점을 옮긴다(리드 보충). 칸 이름은
+   스키마 라벨에서 읽는다. 나머지
    필드는 스키마 `default` 로 채운다. 마지막 사용값은 전략별 `localStorage`(저장된 전략은 `strategy_id`, 새
    전략은 새 전략 한 칸)가 다시 채운다. 저장소 접근·읽기·쓰기가 예외를 던지면(사생활 모드·할당량) 모두 삼키고
    스키마 기본값에서 시작한다 — 화면 동작은 저장값이 없을 때와 같다.
 2. **패널은 스키마를 그대로 그린다.** 필드 목록·순서·enum·기본값·범위(`minimum`·`exclusiveMinimum`·
-   `maximum`)·단위·설명 키·카탈로그를 스키마에서 읽고 필드 이름을 손으로 적지 않는다. enum 은 select,
+   `maximum`)·단위(`x-unit`·`x-display-unit`)·설명 키·카탈로그를 스키마에서 읽고 필드 이름을 손으로 적지
+   않는다. `ratio`→`%` 는 표시만 백분율이고 요청·저장은 비율이다(참여율 10 ↔ 0.1). run 상세의 실행 기록도
+   같은 필드 모델(`entities/backtest` `runEnvironmentFields`)로 칸 이름·단위·enum 값 이름을 보인다
+   (DEFECT-242-04). e2e 의 `REQUESTED_ENVIRONMENT` 는 요청 계약 단언이라 기본값을 손으로 적어 둔다. enum 은 select,
    숫자는 범위 검증이 붙은 입력, `format: date` 는 날짜 입력, `x-catalog: universe` 는 카탈로그 목록이 없어
    텍스트 입력이다(Form 의 universe 카탈로그 컨트롤과 같은 규칙).
 3. **명시 `environment` 의 422 는 필드 단위 구조로 바꾸지 않는다(결정 항목).** 패널이 같은 스키마의 범위·필수와

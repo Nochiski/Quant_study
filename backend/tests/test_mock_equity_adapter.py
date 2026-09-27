@@ -86,6 +86,44 @@ def test_panel_hides_future_consensus_revision_until_available_date() -> None:
     )
 
 
+def test_mock_net_income_is_pit_ttm_that_switches_on_the_filing_date() -> None:
+    """mock 도 duckdb 와 같은 의미다 — `financial.net_income` 은 공시일 기준 최근 4분기 합(TTM)이다.
+
+    #212: 기간 개념이 없던 mock 은 분기·연간 혼재를 못 잡았다. 000660 은 2023 3분기 보고서가 늦게
+    (01-05) 접수돼, 그 전 세션은 반기 말 TTM, 그날부터 3분기 말 TTM 이다. 4분기를 채울 수 없는 종목
+    (035420)은 값이 없다 — 3개월 값으로 대신하지 않는다.
+    """
+    container = build_container()
+    profile = next(
+        item
+        for item in container.equity_workspace.catalog().fields
+        if item.field_id == "financial.net_income"
+    )
+    assert "TTM" in profile.label
+    result = container.equity_data.load_panel(
+        ResearchPanelQuery(
+            start=date(2024, 1, 4),
+            end=date(2024, 1, 5),
+            security_ids=("sec-000660-1", "sec-035420-1"),
+            field_ids=("financial.net_income",),
+        )
+    )
+    cells = {(cell.as_of, cell.security_id): cell for cell in result.cells}
+    before = cells[(date(2024, 1, 4), "sec-000660-1")]
+    after = cells[(date(2024, 1, 5), "sec-000660-1")]
+    assert (before.value, before.source_effective_date, before.available_date) == (
+        -8_000_000_000_000.0,
+        date(2023, 6, 30),
+        date(2023, 8, 14),
+    )
+    assert (after.value, after.source_effective_date, after.available_date) == (
+        -6_000_000_000_000.0,
+        date(2023, 9, 30),
+        date(2024, 1, 5),
+    )
+    assert not any(security_id == "sec-035420-1" for _, security_id in cells)
+
+
 def test_panel_applies_recommended_lag_and_allows_explicit_override() -> None:
     container = build_container()
     default_lag = container.equity_data.load_panel(

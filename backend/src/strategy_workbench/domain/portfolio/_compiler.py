@@ -45,6 +45,8 @@ from ._models import (
     CandidateSide,
     ExclusionReason,
     PortfolioObservation,
+    PortfolioWarning,
+    PortfolioWarningCode,
     TargetFrame,
     TargetPosition,
     TargetTape,
@@ -245,6 +247,7 @@ def _compile_target_tape(
     # The book is folded frame by frame: the compiler owns `previous_weight` from the second
     # rebalance on, and `PortfolioObservation.previous_weight` seeds only the first (D-002).
     carried: dict[str, float] | None = None
+    unknown_sector_frames: list[tuple[date, int]] = []
     frame_count = max(len(prepared_schedule.pairs), 1)
     for frame_index, (signal_as_of, execution_on) in enumerate(
         _checkpointed(prepared_schedule.pairs, checkpoint)
@@ -279,6 +282,8 @@ def _compile_target_tape(
             checkpoint=checkpoint,
         )
         frame = frame_result.frame
+        if frame_result.unknown_sector_ids:
+            unknown_sector_frames.append((signal_as_of, len(frame_result.unknown_sector_ids)))
         _require_finite_tree(
             frame,
             stage="frame",
@@ -327,9 +332,40 @@ def _compile_target_tape(
             tape_hash=tape_hash,
             frames=frames,
             execution_timing=environment.timing.value,
+            warnings=_sector_unknown_warnings(spec, unknown_sector_frames, len(frames)),
         ),
         trace=construction_trace,
     )
+
+
+_WARNING_FRAME_LIST_LIMIT = 5
+
+
+def _sector_unknown_warnings(
+    spec: StrategySpec,
+    affected: list[tuple[date, int]],
+    frame_total: int,
+) -> tuple[PortfolioWarning, ...]:
+    """섹터 제약에서 뺀 종목을 tape 한 건의 경고로 모은다(프레임마다 한 줄이면 수백 줄이 된다)."""
+    if not affected:
+        return ()
+    counts = [count for _, count in affected]
+    listed = ", ".join(
+        f"{as_of.isoformat()}({count}종목)" for as_of, count in affected[:_WARNING_FRAME_LIST_LIMIT]
+    )
+    rest = len(affected) - _WARNING_FRAME_LIST_LIMIT
+    if rest > 0:
+        listed += f" 외 {rest}개 프레임"
+    message = (
+        "섹터 정보가 없는 종목을 섹터 제약"
+        f"(max_sector_weight={spec.risk.max_sector_weight:g}, "
+        f"sector_neutral={spec.risk.sector_neutral}) 계산에서 제외했습니다. "
+        f"영향 프레임 {len(affected)}/{frame_total}개, 프레임당 제외 종목 "
+        f"{min(counts)}~{max(counts)}개입니다. 종목 상한"
+        f"(max_name_weight={spec.risk.max_name_weight:g})은 그대로 적용했습니다. "
+        f"프레임(signal_as_of): {listed}"
+    )
+    return (PortfolioWarning(code=PortfolioWarningCode.SECTOR_UNKNOWN_EXCLUDED, message=message),)
 
 
 def _rebalance_pairs(
@@ -380,12 +416,15 @@ class _TargetWeightResult:
     constrained: dict[str, float]
     unconstrained: dict[str, float]
     reasons: dict[str, ExclusionReason]
+    unknown_sector_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class _FrameCompilation:
     frame: TargetFrame
     trace_candidates: tuple[PortfolioCandidateTrace, ...] = ()
+    # 섹터 제약에서 뺀 종목(이슈 #203). tape 단위 경고로 모은다.
+    unknown_sector_ids: tuple[str, ...] = ()
 
 
 def _compile_frame(
@@ -509,6 +548,7 @@ def _compile_frame(
             candidates=ordered_decisions,
         ),
         trace_candidates=trace_candidates,
+        unknown_sector_ids=weight_result.unknown_sector_ids,
     )
 
 
@@ -1049,11 +1089,14 @@ def _target_weights(
                 reasons[security_id] = ExclusionReason.MINIMUM_TRADE
             if previous != 0:
                 weights[security_id] = previous
-    weights = _apply_sector_constraints(spec, weights, observations, checkpoint=checkpoint)
+    sector_result = _apply_sector_constraints(spec, weights, observations, checkpoint=checkpoint)
     return _TargetWeightResult(
-        constrained=_apply_side_budgets(weights, long_budget, short_budget, checkpoint=checkpoint),
+        constrained=_apply_side_budgets(
+            sector_result.weights, long_budget, short_budget, checkpoint=checkpoint
+        ),
         unconstrained=unconstrained,
         reasons=reasons,
+        unknown_sector_ids=sector_result.unknown_sector_ids,
     )
 
 
@@ -1248,17 +1291,46 @@ def _capped_allocate(
     return allocation
 
 
+# 등가중 합의 부동소수 오차(예: 20 x 0.05 = 1.0000000000000002)를 상한 초과로 보지 않는 여유.
+_SECTOR_CAP_TOLERANCE = 1e-12
+
+
+@dataclass(frozen=True)
+class _SectorConstraintResult:
+    weights: dict[str, float]
+    # 섹터를 몰라 섹터 제약에서 뺀 종목 중 비중이 0이 아닌 것. 비중 0은 제약할 것이 없어
+    # 세지 않는다. 섹터 제약이 이 프레임에서 걸릴 수 없으면 비운다.
+    unknown_sector_ids: tuple[str, ...]
+
+
 def _apply_sector_constraints(
     spec: StrategySpec,
     weights: dict[str, float],
     observations: dict[str, PortfolioObservation],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> dict[str, float]:
+) -> _SectorConstraintResult:
+    """섹터 상한과 섹터 중립을 적용한다. 섹터를 모르는 종목은 두 제약 모두에서 뺀다.
+
+    모르는 섹터를 한 섹터로 묶으면 서로 다른 섹터일 수 있는 종목이 상한 하나를 나눠 쓴다. 섹터
+    원천이 없는 실데이터에서는 전 종목이 그 묶음에 들어가 비중 합이 `max_sector_weight` 로
+    조용히 줄었다(이슈 #203). 뺀 종목은 호출자가 경고로 알린다.
+    """
     result = dict(weights)
     sectors: dict[str, list[str]] = {}
+    unknown: list[str] = []
+    neutral = spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_SHORT
+    # 한 섹터의 노출은 프레임 전체 노출을 넘지 못한다. 중립이 꺼져 있고 전체 노출이 상한 이하면
+    # 섹터를 몰라도 결과가 같으므로 제외를 알리지 않는다(매 실행 붙는 경고는 무시하게 된다).
+    total_exposure = sum(abs(weight) for weight in weights.values())
+    could_bind = neutral or total_exposure - spec.risk.max_sector_weight > _SECTOR_CAP_TOLERANCE
     for security_id in _checkpointed(weights, checkpoint):
-        sector = observations[security_id].sector_id or "__unknown__"
+        sector = observations[security_id].sector_id
+        # 빈 문자열도 전처럼 "모름"으로 본다(`or` 판정과 같은 집합).
+        if not sector:
+            if could_bind and result[security_id] != 0:
+                unknown.append(security_id)
+            continue
         sectors.setdefault(sector, []).append(security_id)
     for security_ids in _checkpointed(sectors.values(), checkpoint):
         exposure = sum(abs(result[item]) for item in security_ids)
@@ -1266,7 +1338,7 @@ def _apply_sector_constraints(
             scale = spec.risk.max_sector_weight / exposure
             for security_id in _checkpointed(security_ids, checkpoint):
                 result[security_id] *= scale
-        if spec.risk.sector_neutral and spec.portfolio.side is PortfolioSide.LONG_SHORT:
+        if neutral:
             longs = sum(max(result[item], 0.0) for item in security_ids)
             shorts = sum(abs(min(result[item], 0.0)) for item in security_ids)
             matched = min(longs, shorts)
@@ -1276,7 +1348,7 @@ def _apply_sector_constraints(
                     result[security_id] = weight * matched / longs if longs > 0 else 0.0
                 elif weight < 0:
                     result[security_id] = weight * matched / shorts if shorts > 0 else 0.0
-    return result
+    return _SectorConstraintResult(weights=result, unknown_sector_ids=tuple(sorted(unknown)))
 
 
 def _finalize_decision(

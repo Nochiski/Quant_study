@@ -339,7 +339,7 @@ def test_financials_are_the_latest_filing_and_every_share_class_shares_them(
     # 아니라 **다음 세션(01-05)** 부터 보인다. 공시가 장 마감 뒤에 올라오므로 당일 매매에 쓸 수
     # 없다(TECH_DEBT §4 — 이 랙이 0이던 동안 확정 look-ahead 였다).
     early = _cell(result, date(2024, 1, 4), "005930:1", "financial.revenue")
-    assert (early.value, early.available_date) == (120.0, date(2023, 11, 14))
+    assert (early.value, early.available_date) == (425.0, date(2023, 11, 14))
     late = _cell(result, date(2024, 1, 5), "005930:1", "financial.revenue")
     assert (late.value, late.available_date) == (460.0, date(2024, 1, 4))
     assert _field(result, START, "005930:1", "financial.book_equity") == 615.0
@@ -351,7 +351,8 @@ def test_financials_are_the_latest_filing_and_every_share_class_shares_them(
     # 036220 의 보고서 공개일은 01-09 이고 랙 1세션이라 01-10 부터 보인다.
     missing = _cell(result, date(2024, 1, 10), "036220:2", "financial.revenue")
     assert (missing.value, missing.kind) == (None, CellKind.MISSING)
-    assert _field(result, date(2024, 1, 10), "036220:2", "financial.net_income") == 7.0
+    # 잔고 계정은 사업보고서 한 행으로 선다(재무상태표 시점 값)
+    assert _field(result, date(2024, 1, 10), "036220:2", "financial.book_equity") == 40.0
     # 재무 원천이 없는 종목(ETF)은 셀 자체가 없다 — mock 값으로 채우지 않는다
     assert not _has(result, START, "069500:1", "financial.revenue")
     # 창 독립: 같은 셀은 창을 좁혀도 같다(as-of 값은 (security, 컷오프) 의 함수다)
@@ -359,6 +360,51 @@ def test_financials_are_the_latest_filing_and_every_share_class_shares_them(
     assert _field(narrow, START, "005930:1", "financial.revenue") == _field(
         result, START, "005930:1", "financial.revenue"
     )
+
+
+def test_flow_financials_are_pit_ttm_not_the_latest_report_period(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """흐름 계정(매출·이익·영업현금)은 최근 4분기 합(TTM)이다 — 보고서 종류가 기간을 바꾸지 않는다.
+
+    #212: 예전에는 최신 공시가 분기면 3개월, 사업보고서면 12개월 값이 나와 ROE 같은 비율이
+    공시 시즌마다 계단식으로 튀었다. 지금은 `v_fin_latest` 의 `ttm_*` 를 그대로 낸다. TTM 은 창
+    안 4분기가 이 행의 공개일까지 전부 공개됐을 때만 서고(부분합 금지), 아니면 셀은 MISSING 이다.
+    """
+    fields = (
+        "financial.revenue",
+        "financial.gross_profit",
+        "financial.operating_income",
+        "financial.net_income",
+        "financial.operating_cash_flow",
+    )
+    result = _raw(adapter, start=date(2024, 1, 3), end=END, fields=fields, universe="krx.all")
+    # 01-04: 사업보고서(01-04 접수, 랙 1세션)가 아직 안 보여 2023 3분기 행이 최신이다.
+    # 3분기 3개월 값(24)이 아니라 2022 4분기 ~ 2023 3분기 합이다.
+    before = {f: _cell(result, date(2024, 1, 4), "005930:1", f) for f in fields}
+    assert {f: c.value for f, c in before.items()} == {
+        "financial.revenue": 425.0,
+        "financial.gross_profit": 38.0 + 40.0 + 44.0 + 48.0,
+        "financial.operating_income": 28.0 + 30.0 + 33.0 + 36.0,
+        "financial.net_income": 84.0,
+        "financial.operating_cash_flow": 120.0,
+    }
+    assert {c.available_date for c in before.values()} == {date(2023, 11, 14)}
+    # 01-05: 사업보고서가 보이는 첫 세션 — TTM 이 연간 값과 같고 공개일이 사업보고서 접수일이다.
+    after = {f: _cell(result, date(2024, 1, 5), "005930:1", f) for f in fields}
+    assert {f: c.value for f, c in after.items()} == {
+        "financial.revenue": 460.0,
+        "financial.gross_profit": 184.0,
+        "financial.operating_income": 138.0,
+        "financial.net_income": 92.0,
+        "financial.operating_cash_flow": 150.0,
+    }
+    assert {c.available_date for c in after.values()} == {date(2024, 1, 4)}
+    # 앞 분기가 없어 4분기를 채울 수 없으면 3개월·12개월 값으로 대신하지 않고 MISSING 이다
+    # (000660 은 2023 반기 1행, 036220 은 2023 사업보고서 1행뿐).
+    for security_id, as_of in (("000660:1", START), ("036220:2", date(2024, 1, 10))):
+        cell = _cell(result, as_of, security_id, "financial.net_income")
+        assert (cell.value, cell.kind) == (None, CellKind.MISSING), security_id
 
 
 def test_consensus_picks_the_nearest_target_period_and_the_measured_source(
@@ -488,9 +534,10 @@ def test_latest_fields_never_show_a_filing_before_its_available_date(
         )
     )
     assert panel.ok
-    # 01-09 에서 4세션 전 = 01-03 → 사업보고서(01-04 공개)는 아직 보이지 않는다
+    # 01-09 에서 4세션 전 = 01-03 → 사업보고서(01-04 공개)는 아직 보이지 않는다. 값은 3분기 행의
+    # TTM(2022 4분기 ~ 2023 3분기 매출 합)이다.
     (cell,) = panel.cells
-    assert (cell.value, cell.available_date) == (120.0, date(2023, 11, 14))
+    assert (cell.value, cell.available_date) == (425.0, date(2023, 11, 14))
     assert cell.source_effective_date == date(2023, 9, 30)  # 내용일 = 기간 말일
 
 

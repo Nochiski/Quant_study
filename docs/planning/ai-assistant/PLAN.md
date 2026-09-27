@@ -6,7 +6,7 @@ current_phase: D
 current_pr: D-01,D-02,D-03
 active_prs: [D-01, D-02, D-03]
 parallel_window: [D-01, D-02, D-03]
-last_updated: 2026-09-27T10:12:42+09:00
+last_updated: 2026-09-27T10:23:28+09:00
 planned_prs: 19
 merged_prs: 16
 approved_prs: 16
@@ -29,7 +29,7 @@ progress_percent: 84
 | Active PR | `D-01, D-02, D-03` |
 | Progress | `16 / 19 merged (84%)` |
 | Approved | `16 / 19` |
-| Aggregated at | `2026-09-27 10:12 KST` |
+| Aggregated at | `2026-09-27 10:23 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -328,9 +328,9 @@ i18n이 `metric_id`를 키로 소유한다.
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_REVIEW` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` · [#208](https://github.com/Nochiski/Quant_study/pull/208) · tip `e2eef17d` · 리뷰 대기 |
-| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `IN_REVIEW` | 브랜치 `feat/ai-d-02-result-explain-backend` · [#209](https://github.com/Nochiski/Quant_study/pull/209) · tip `f7c88ba4`(2커밋: 기능, 대본·지표 골든) · pytest 2296 · 리뷰 대기 |
-| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `IN_REVIEW` | 브랜치 `feat/ai-d-03-result-explain-frontend` · [#210](https://github.com/Nochiski/Quant_study/pull/210) · 게이트 SHA `834caf3b`(vitest 975, 전체 e2e 39/39, US-DM-08 `구현됨-e2e`) · 리뷰 대기 |
+| [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_REVIEW` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` · [#208](https://github.com/Nochiski/Quant_study/pull/208) · tip `2e7fc03e`(origin/main C-03 merge 후 spec v3 정정) · 리뷰 대기 |
+| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `IN_REVIEW` | 브랜치 `feat/ai-d-02-result-explain-backend` · [#209](https://github.com/Nochiski/Quant_study/pull/209) · tip `0948c456`(D-01 merge로 C-03 따라감, 스키마 v3·`version == 2` 분기·v2 선언 sha256 고정) · pytest 2311 · 리뷰 대기 |
+| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `IN_REVIEW` | 브랜치 `feat/ai-d-03-result-explain-frontend` · [#210](https://github.com/Nochiski/Quant_study/pull/210) · 게이트 SHA `b8a909d4`(vitest 979, 전체 e2e 40/40, US-DM-08 `구현됨-e2e`) · 리뷰 대기 |
 
 Phase exit:
 
@@ -396,6 +396,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-27 — C-03(#204) main 머지를 D 스택이 merge로 따라갔다. assistant DB v2는 C-03(`chat_messages.turn_id`)이 가져갔고 결과 세션의 `chat_sessions.run_id`는 **v3**이다(`version == 2` 분기, 부모 표라 외래 키 끄고 `legacy_alter_table`로 비켜 두기). v2 선언은 sha256으로 고정. `send`의 `turn_id` 인자와 모드 분기를 함께 살렸다. 최상단 `b8a909d4`에서 pytest 2311, vitest 979, 전체 e2e 40/40, 하네스·목록 대조 통과.
 - 2026-09-27 — D-01~D-03 스택 PR 생성(#208 → #209 → #210, 머지하지 않음). 스택 최상단 `834caf3b`에서 backend pytest 2296 passed·ruff·pyright, frontend vitest 975·typecheck·lint, 전체 e2e 39/39(새 스토리 e2e `@US-DM-08` 포함), 하네스 검사·Playwright 목록 대조 통과. US-DM-08 `미계획` → `구현됨-e2e`. 구현 중 세션 목록 조회가 `run_id`를 빠뜨려 422가 나던 것을 D-03에서 고쳤다(gateway·query 키).
 - 2026-09-27 — D 절 신설(US-DM-08 백테스트 결과 설명). 사용자 지시 "전략 언어는 진짜 전략만 담고, AI를 통해 사용성까지 증대"·"전부 다 진행해". 설계 spec `2026-09-27-ai-backtest-result-explain.md`, PR 셋(D-01 spec, D-02 backend, D-03 frontend·e2e)을 스택으로 올린다. 집계 도구에 D phase를 더했다. assistant_sqlite 스키마는 C-03이 v2를 가져가고(#204) D-02가 v3(`chat_sessions.run_id`)로 그 뒤에 올린다(리드 결정).
 - 2026-09-27 — **C-03 착수·구현**(`impl-ai-c03`, `wt-ai-c03`, `feat/ai-c-03-backlog`). C 절 backlog 2건을

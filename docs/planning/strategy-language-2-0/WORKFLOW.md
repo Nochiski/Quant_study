@@ -667,7 +667,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `stories/dm.readable-korean.spec.ts` 가 버튼 이름으로 이 문구를 찾는다. (2) `warnings[].code` 는
   OpenAPI enum(`strategy_document.upgrade_missing_policy_conflict`·`upgrade_weighting_rule_changed`·
   `upgrade_environment_unavailable`)이라 코드별 i18n 이 필요하다(문장은 backend `message` 가 이미
-  한글로 완성해 보내므로 코드별 제목만이어도 된다). (3) 새 422 `strategy_document.upgrade_unsupported_node`
+  한글로 완성해 보내므로 코드별 제목만이어도 된다). 제목 문장과 `upgradeWarningTitle` 은 P3-01 이 넣었다 —
+  배너에 그리기만 하면 된다. (3) 새 422 `strategy_document.upgrade_unsupported_node`
   의 `upgrade.error.*` 문장. 없으면 지금처럼 `upgrade.error.request` 로 backend 문장을 보인다.
   (4) `environment` 가 `null` 이면(옛 문서의 실행 설정을 옮기지 못함) 패널을 채우지 않고 warning 이
   짚는 자리를 보인다 — 기본값으로 채우지 않는다.

@@ -2,11 +2,11 @@
 plan_version: 2
 project: strategy-language-2-0
 project_status: IN_REVIEW
-current_phase: P1,P2
-current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08,P2-09
-active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09]
-parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09]
-last_updated: 2026-09-27T11:22:56+09:00
+current_phase: P1,P2,P3
+current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08,P2-09,P3-01
+active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09, P3-01]
+parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09, P3-01]
+last_updated: 2026-09-27T12:33:46+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 11
@@ -24,12 +24,12 @@ progress_percent: 21
 | Field | Value |
 |---|---|
 | Project status | `IN_REVIEW` |
-| Current phase | `P1,P2` |
-| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08,P2-09` |
-| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09` |
+| Current phase | `P1,P2,P3` |
+| Current/next PR | `P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08,P2-09,P3-01` |
+| Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08, P2-09, P3-01` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `11 / 29` |
-| Aggregated at | `2026-09-27 11:22 KST` |
+| Aggregated at | `2026-09-27 12:33 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -100,7 +100,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | P0 | Planning package and contract docs | 1 | 1 | `MERGED` |
 | P1 | In-screen friction removal on 1.1 | 6 | 5 | `IN_REVIEW` |
 | P2 | Backend schema 1.2 (environment split, 9 PRs) | 9 | 0 | `IN_REVIEW` |
-| P3 | Frontend 1.2 adaptation | 3 | 0 | `WAITING` |
+| P3 | Frontend 1.2 adaptation | 3 | 0 | `IN_REVIEW` |
 | P4 | Graph level 1: pipeline | 4 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | `WAITING` |
@@ -747,6 +747,62 @@ P2-02 결정 3건(WORKFLOW 원문과 다르게 간 곳):
    설정 밖에서 도는 sandbox라 `RunEnvironment`가 없다. WORKFLOW의 소비자 목록에는 없지만
    `compile_factor_plan` 호출자라 어디선가는 정책을 말해야 한다.
 
+### P3 스택
+
+| 항목 | 값 |
+|---|---|
+| PR | `P3-01` |
+| Intent | frontend 를 schema 1.2 계약에 맞춘다: 은퇴 포인터 제거, 새 필드(결합 전 정규화·횡단면 eligibility·`risk_factor_id`)를 화면 어휘로 편집·표시, `saved_*` 잔재 정리(BACKLOG-012), compile 이 붙인 승격 노드 표시(BACKLOG-014) |
+| Acceptance | WORKFLOW P3-01 |
+| Non-goals | 실행 설정 패널·요청 본문의 `environment` 배선·업그레이드 배너 문구와 warning 표시(P3-02), e2e fixture 1.2·매뉴얼(P3-03), 그래프 탭 아이디어 e2e(P5-03), compile 진단 문장의 frontend 번역(SoT: backend 가 한글로 완성해 보낸다) |
+| Branch/worktree | `feat/lang2-p3-01-frontend-1-2` / `wt-lang2-p3-01` |
+| Base SHA | P2-09 tip `e064d2af` 에서 착수, P2-09 리뷰 반영 `17c68261` 을 merge 로 따라갔다 |
+| Head SHA | PR 본문 참조(게이트 실측 SHA 와 같이 적는다) |
+| Diff stat | PR 본문 참조(P2-09 tip 대비 handwritten, 계획 문서 제외) |
+| Focused tests | `npx vitest run src/features/edit-strategy src/features/debug-strategy src/widgets src/app/__tests__/retired-pointers.test.ts`, `uv run pytest tests/domain/test_strategy_diff.py -q` |
+| 제약사항 | **12절 상한(600줄·10파일)을 넘는다.** acceptance 가 SDK 적응·새 필드 i18n·BACKLOG 두 건·outline·snippet·plan·debugger 를 한 PR 로 묶었다. 비테스트 src 는 +700줄 안팎이고 그중 i18n 사전이 가장 크다(enum 값 이름 23개·탈락 사유 13개·warning 제목 3개 × ko·en, 죽은 키 36개 삭제). 커밋을 논리 단위(어휘·BACKLOG-012·포인터 가드·스니펫·BACKLOG-014·warning·탈락 사유)로 나눠 리뷰 단위를 대신한다. e2e 는 P2-03~P3-02 묶음 머지 전략의 원인 (1) 실행 요청 `environment` 미배선으로만 red 다(PR 본문 대조표) |
+| Full gate | PR 본문 "테스트 계획" 참조 — push tip 에서 backend 전체·ruff·pyright·`export_openapi`·`api:generate` diff 0·frontend typecheck·typecheck:e2e·lint·test·build·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e` |
+
+P3-01 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 곳):
+
+1. **enum 값 이름 키는 property 설명 키 stem 아래 `<stem>.value.<값>` 이다.** 연산자 enum 은 backend 가
+   `x-operator` 로 값별 키를 내려주지만 나머지 enum(정규화·eligibility 연산자·비중·리밸런싱 등 7개)은
+   property stem 만 있다. 키 규칙은 `schema-navigator.ts` 의 `schemaFacts().valueLabelKeys` 한 곳이 소유하고
+   값 목록은 스키마 `enum` 에서 읽는다. backend 가 값별 키를 발행하게(`x-enum-keys`) 바꾸는 대안은 OpenAPI·
+   runtime schema 계약을 넓히는데, stem 이 이미 backend 소유라 규칙 하나로 충분하다. 스키마 enum 전수
+   커버리지 테스트와, 스키마·카탈로그가 발행하지 않는 `strategy.{section,field,node,operator}.*` 키가 사전에
+   남으면 실패하는 역방향 테스트(`screen-vocabulary.test.ts`)를 같이 둔다 — 후자가 1.1 잔재 26개를 찾았다.
+2. **compile 이 붙인 승격 노드는 문서 멤버십으로 판정한다.** `__promote_` 접두사를 frontend 에 적지 않는다.
+   실행 계획 요청이 문서 tree 의 노드 id·출력 id 를 함께 들고(`FactorPlanRequest.document`),
+   `compiledNodeOrigin` 이 `document`·`boolean-score`(문서에 없는 그래프 출력)·`support`(나머지 붙인 노드)로
+   가른다. 컴파일된 그래프에도 없는 id(끊긴 참조)는 붙인 노드가 아니라 문서 결함으로 남긴다.
+3. **디버거는 붙인 노드를 숨긴다(사람 말 라벨이 아니다).** 디버거는 선택을 pointer 로 라우팅하는데, 붙인 출력의
+   "소스 열기"가 원래 출력 줄을 가리키게 하면 두 노드가 같은 pointer 를 가져 붙인 노드를 고를 수 없다. 원래
+   출력의 참/거짓 값이 같은 정보라 문서 노드만 추적하고 출력 노드를 사용자가 적은 출력으로 둔다. 실행 계획
+   표·그래프 화면은 "참/거짓을 1/0으로" 한 행으로 보이고 상수 둘은 숨긴다.
+4. **의미 diff 는 두 경로가 각자 걷는다.** revision diff(backend `_diff.py`)는 `_promotion.py` 에 둔 승격의
+   정확한 역함수 `demote_boolean_factor_outputs`(걷어 낸 뒤 다시 승격하면 원래가 나와야만 인정)를, 편집 중
+   draft diff(frontend `diff-projection.ts`, 두 canonical 을 직접 비교)는 문서 tree 멤버십을 쓴다. draft 쪽에
+   backend 규칙을 복제하지 않으려는 선택이다. 승격은 사용자 그래프의 함수라 걷어 낸 두 payload 가 같으면
+   `spec_hash` 도 같아 "변경 없음" 판정은 그대로다. node_id 기준 비교(WORKFLOW 대안)는 순서만 바뀐 그래프를
+   빈 diff 로 만들어 `spec_hash` 와 어긋나므로 버렸다.
+5. **스니펫 카탈로그는 "섹션"·"예시 팩터" 두 그룹이다.** 손으로 적은 다섯 영역(`data`·`factor`·`signal`·
+   `risk`·`execution`)은 1.2 에서 둘이 늘 비었다. 섹션 스니펫은 스키마 루트의 object 섹션을 스키마 순서로
+   싣고(유니버스 조건·포트폴리오 구성이 새로 들어온다), 팩터 preset 은 튜토리얼 안내와 함께 "예시"로
+   내렸다. Form 목록의 preset 메뉴도 "예시 팩터에서 추가"다(e2e 버튼 이름 같이 고침).
+6. **compile 진단 코드는 frontend 에서 번역하지 않는다.** 리드 브리핑은 "새 진단 코드 i18n"(그래프 안
+   `strategy.expression.field_missing`·밖 `strategy.field.missing`)을 적었지만 SoT 진단 코드 행과 P1-05 결정
+   (진단 문장을 frontend 템플릿으로 옮기는 방향 철회)이 막는다. 두 코드의 backend 문장이 한글로 완성돼 있음을
+   확인했다. 업그레이드 warning 코드 3종은 제목 키만 둔다(`upgradeWarningTitle`, 생성 enum 에서 파생한
+   `Record` 라 누락이 typecheck 에서 막힌다) — 배너에 그리는 것은 P3-02 다.
+7. **탈락 사유 i18n 표를 넣었다**(PLAN P2-05 결정 4 가 P3-01 로 넘긴 것, US-CS-06). 13종 모두 사람 말이 먼저이고
+   코드는 `<code>` 보조 표기라 코드로 찾는 기존 e2e 단언이 그대로 통한다. 순위로 잘린 종목("상위 비율·개수
+   밖")이 규칙 위반("거르기 조건 불통과")과 구분된다.
+8. **verbose fixture 에 `signal:` 절을 넣지 않았다**(P2-04 권고). 정규화 기본값은 문서에 없어도 Form 이 스키마
+   기본값으로 그리고 테스트가 그것을 고정한다. fixture 를 바꾸면 줄 위치로 읽는 frontend 테스트 27개가 같이
+   움직여 이 PR 의 목적과 무관한 diff 가 커진다. 단위 테스트 안의 불투명한 `schema_version: "1.1"` 문자열
+   리터럴(구조를 보지 않는 24개 파일)도 이 PR 에서 옮기지 않았다 — 포인터 가드는 은퇴 포인터만 본다.
+
 ---
 
 ## P0 — 기획 패키지와 계약 문서
@@ -802,7 +858,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-06 | `WAITING` | — |
+| [ ] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-06 | `IN_REVIEW` | PR_LINK · 워크트리 `wt-lang2-p3-01`, 브랜치 `feat/lang2-p3-01-frontend-1-2` · base `feat/lang2-p2-09-upgrader`(P2-09 가 통합 브랜치에 머지되면 리드가 옮긴다) |
 | [ ] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `WAITING` | — |
 | [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `WAITING` | — |
 
@@ -914,6 +970,13 @@ Phase exit:
 | `P2-01` | `uv run pyright` | 4 errors — 전부 `duckdb` 미설치(기존), 신규 파일 0 | 2026-09-20 |
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
+
+- 2026-09-27 — P3-01 구현(`IN_REVIEW`, PR_LINK). 은퇴 포인터 가드, enum 값 이름과 1.1·`saved_*` 죽은 어휘 키
+  정리, BACKLOG-012(팩터·서브그래프 카탈로그 분기)·BACKLOG-014(승격 노드 표시·의미 diff) 처리, 스니펫 두
+  그룹, 업그레이드 warning 제목, 추적 화면 탈락 사유 문장. 결정 8건은 P3 스택 패킷. SDK 는 P2 PR 들이 이미
+  재생성해 `api:generate` diff 가 0 이었다. US-CS-05·06 비고 갱신(상태 `예정` 유지, e2e P5-03). e2e 대조는 PR 본문.
+- 2026-09-27 — P3-01 이 WORKFLOW P3-02 의 "배너 소비 항목 (2) warning 코드별 i18n" 중 키·제목 문장을 먼저
+  넣었다(`upgradeWarningTitle`). P3-02 는 배너에 그리기만 한다.
 
 - 2026-09-27 — P2-09 구현(`IN_REVIEW`, [#217](https://github.com/Nochiski/Quant_study/pull/217)). 업그레이더를 버전 디스패치로 다시 쓰고 1.1 → 1.2
   단계(`data`·`execution`·`graph.missing_policy` 떼기, `signal.normalization: none` 명시, `saved_*` 거절)를
@@ -1542,6 +1605,9 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **위험성**: 동작 결함은 아니다(도달 불가 분기·안 쓰는 번역). Contract Inspector 는 팩터 카탈로그를
   계속 불러오므로 쓰지 않는 요청이 하나 남는다(cleanup).
 - **담당**: `P3-01`(frontend 1.2 적응, 소비자 배선 owner). WORKFLOW P3-01 에 예약했다.
+- **처리**: P3-01. Contract Inspector 팩터 join·Form `factor`·`subgraph` 카탈로그·팩터 select·편집기 완성
+  분기와 문장을 지웠다. 팩터 카탈로그 자원은 실행 계획 레지스트리 판정과 예시 스니펫이 계속 읽어 남긴다.
+  스키마가 발행하지 않는 어휘 키가 사전에 남으면 실패하는 테스트가 재발을 막는다.
 
 ### BACKLOG-013: 실행 설정 스키마의 설명 키 7개에 frontend 문장과 커버리지 테스트가 없다
 
@@ -1578,6 +1644,9 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   배너에는 사용자가 쓰지 않은 노드의 변경 여러 줄이 "의미 변경"으로 보인다. diff 자체는 해시가 보는
   것을 정확히 말하므로 계산 결함은 아니다.
 - **담당**: `P3-01`(execution plan·debugger 를 1.2 에 맞추는 PR). WORKFLOW P3-01 에 예약했다.
+- **처리**: P3-01. 문서 멤버십 판정 `compiledNodeOrigin`, 실행 계획 표·그래프 화면의 "참/거짓을 1/0으로" 행,
+  디버거의 문서 노드 전용 추적, backend `_diff.py` 의 `demote_boolean_factor_outputs`, draft diff 의 문서 tree
+  멤버십 걷기(P3 스택 결정 2~4). 재현 테스트 `compiled-promotion.test.tsx`·`test_strategy_diff.py` 승격 3건.
 
 ### BACKLOG-015: 그룹 안 순위 `group.rank` 가 입력 단위를 물려준다
 

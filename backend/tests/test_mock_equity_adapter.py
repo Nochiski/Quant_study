@@ -55,7 +55,7 @@ def test_container_uses_explicit_mock_adapter_without_silent_fallback() -> None:
         build_container(equity_adapter="duckdb")
 
 
-def test_panel_hides_future_consensus_revision_until_available_date() -> None:
+def test_panel_hides_future_consensus_revision_until_the_lagged_session() -> None:
     # 개정값의 available_date 는 01-05 다. 컨센서스 랙은 원장처럼 1세션이라(#230) 다음 세션인
     # 01-08 부터 보이고, 01-05 까지는 이전 값이다.
     container = build_container()
@@ -88,7 +88,7 @@ def test_panel_hides_future_consensus_revision_until_available_date() -> None:
     )
 
 
-def test_mock_net_income_is_pit_ttm_that_switches_on_the_filing_date() -> None:
+def test_mock_net_income_is_pit_ttm_that_switches_one_session_after_filing() -> None:
     """mock 도 duckdb 와 같은 의미다 — `financial.net_income` 은 공시일 기준 최근 4분기 합(TTM)이다.
 
     #212: 기간 개념이 없던 mock 은 분기·연간 혼재를 못 잡았다. 000660 은 2023 3분기 보고서가 늦게

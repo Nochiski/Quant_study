@@ -3,7 +3,8 @@
 테스트·e2e 는 `equity_mock`, 실사용은 `equity_duckdb` 를 쓴다. compile 은 연결된 어댑터의 필드
 계약(`resolve_factor_fields`·`list_fields`)으로 단위 경고·field_missing·타입 검사를 하므로, 같은
 field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 green 인 문서가 실데이터에서만 다르게
-동작한다. 정본은 원장 스키마를 옮긴 duckdb 선언표(`FIELD_SPECS`)이고 mock 이 거기에 맞춘다.
+동작한다. 정본은 원장이다. mock 은 원장 스키마를 옮긴 duckdb 선언표(`FIELD_SPECS`)에 단위·값
+타입을 맞추고, 선언표의 값 타입과 mock 의 랙은 원장 `dataset_profile` 선언에 맞춘다(아래 #230 절).
 
 대조는 선언표를 직접 읽는다 — 손 픽스처 루트의 `list_fields()` 는 그 루트에 원천 테이블이 있는
 필드만 내므로, 새 `FieldSpec` 이 픽스처보다 먼저 들어오면 대조를 빠져나갈 수 있다.
@@ -124,10 +125,17 @@ def _ledger_profiles() -> dict[str, Any]:
     pytest.importorskip("duckdb", reason="원장 선언 모듈이 duckdb 를 import 한다(extra `equity`)")
     if not _EQUITY_SRC.is_dir():
         pytest.fail(f"원장 선언 경로가 없다 — path={_EQUITY_SRC}")
-    if str(_EQUITY_SRC) not in sys.path:
+    # 경로는 import 하는 동안만 올린다. `database/src` 최상위의 일반 이름 모듈(api·stage 등)이
+    # 이후 테스트의 import 를 가리지 않게 한다(저장소 관례, test_core_parity.py).
+    added = str(_EQUITY_SRC) not in sys.path
+    if added:
         sys.path.insert(0, str(_EQUITY_SRC))
-    rules_s19 = importlib.import_module("equity.rules_s19")
-    return {profile.field_id: profile for _, profile in rules_s19.owned_fields()}
+    try:
+        rules_s19 = importlib.import_module("equity.rules_s19")
+        return {profile.field_id: profile for _, profile in rules_s19.owned_fields()}
+    finally:
+        if added:
+            sys.path.remove(str(_EQUITY_SRC))
 
 
 @pytest.mark.parametrize("field_id", _shared_field_ids())

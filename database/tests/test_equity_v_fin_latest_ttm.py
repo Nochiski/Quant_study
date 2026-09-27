@@ -223,3 +223,38 @@ def test_창_안에_매출_기준이_섞이면_TTM_매출을_세우지_않는다
     ])
     assert _ttm(con, "B5", date(2022, 12, 31), "ttm_revenue") == 460
     assert _ttm(con, "B5", date(2023, 3, 31), "ttm_revenue") is None
+
+
+def test_사업보고서_4분기는_앞_3분기가_같은_재무제표_구분일_때만_선다() -> None:
+    """재리뷰 P2-R1 ① — 1~3분기는 별도(OFS), 사업보고서부터 연결(CFS)인 법인.
+
+    창 [2021 사업보고서, 2022 1분기·반기·3분기]는 전부 연결이라 창 검사를 통과한다. 그러나 2021
+    4분기 = 연결 연간 − 별도 1~3분기라 범위가 다른 이익의 차다. 이 가드가 빠지면 실원장 순이익
+    1,014행·매출 1,034행이 그런 값으로 선다.
+    """
+    con = _connect([
+        _fin("N6", date(2021, 3, 31), date(2021, 5, 17), net_income=10, fs_div="OFS"),
+        _fin("N6", date(2021, 6, 30), date(2021, 8, 16), net_income=11, fs_div="OFS"),
+        _fin("N6", date(2021, 9, 30), date(2021, 11, 15), net_income=12, fs_div="OFS"),
+        _fin("N6", date(2021, 12, 31), date(2022, 3, 21), net_income=60),
+        _fin("N6", date(2022, 3, 31), date(2022, 5, 16), net_income=14),
+        _fin("N6", date(2022, 6, 30), date(2022, 8, 16), net_income=15),
+        _fin("N6", date(2022, 9, 30), date(2022, 11, 14), net_income=16),
+    ])
+    assert _ttm(con, "N6", date(2022, 9, 30)) is None
+
+
+def test_현금흐름_분기값은_직전_행이_바로_앞_분기_보고서일_때만_선다() -> None:
+    """재리뷰 P2-R1 ② — 첫 해 3분기 보고서가 `11013` 으로 실린 법인(01167056 유형).
+
+    사업보고서의 직전 행은 간격이 한 분기(92일)지만 3분기 보고서(`11014`)가 아니다. 누계 차이
+    120 − 90 은 분기값으로 쓸 수 없다. 이 가드가 빠지면 실원장 영업현금 759행이 그런 값으로 선다.
+    """
+    con = _connect([
+        _fin("N7", date(2021, 9, 30), date(2021, 11, 15), report="11013", cf_ytd=90),
+        _fin("N7", date(2021, 12, 31), date(2022, 3, 21), cf_ytd=120),
+        _fin("N7", date(2022, 3, 31), date(2022, 5, 16), cf_ytd=20),
+        _fin("N7", date(2022, 6, 30), date(2022, 8, 16), cf_ytd=45),
+        _fin("N7", date(2022, 9, 30), date(2022, 11, 14), cf_ytd=75),
+    ])
+    assert _ttm(con, "N7", date(2022, 9, 30), "ttm_cf_operating") is None

@@ -602,8 +602,11 @@ PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드
   예약한다(#13 은 식별 수단 결정을 함께 적는다).
 - `update-plan-progress.ps1 -Check`, 유저 스토리 하네스, 충돌 표식 검사 통과.
 
-**Non-goal**: 코드 변경. 감사 비차단 NB-2(a)(b)·NB-3·NB-4·NB-6 은 이 PR 이 다루지 않는다(PLAN 변경 기록에
-남은 목록).
+- BACKLOG-018(원주가 시계열 변화 경고, 리드 결정)을 4요소로 등록하고 P3-01 acceptance 에 예약한다.
+- 감사 비차단 NB-2(a)(b)·NB-3·NB-4·NB-6 에 담당 PR 을 정하고 그 acceptance 에 예약한다. 붙일 PR 이 없는
+  항목은 "미정 — 리드 결정 필요"와 사유를 적는다.
+
+**Non-goal**: 코드 변경. 비차단 항목은 담당만 정하고 실행하지 않는다.
 
 **Phase 2 exit**
 
@@ -661,6 +664,17 @@ PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드
   `strategy.field.value_type` 과 그래프 안 `strategy.expression.field_missing` 이 같은 "없는 필드"를 두 코드로
   낸다. 문제 목록·편집기 마커가 두 코드와 kind `capability`(`strategy.operator.unsupported`)를 모두 pointer
   자리에 보이는지 단위 테스트로 확인한다. 문장은 backend 가 완성해 보낸다.
+- **BACKLOG-018(리드 결정)**: compile 단일 게이트(P2-07 계열)에 warning 을 더한다. 시계열 변화를 재는
+  연산자(기간 수익률·모멘텀·이동평균·변동성·낙폭 등)의 입력 잎이 원주가 가격 필드(`price.close` 등, 분할·증자
+  조정 없음)이면 "분할·증자에 오염될 수 있습니다. `price.adj_close` 를 쓰세요" 라는 backend 한글 완성 문장을
+  낸다. 연산자 집합과 "원주가" 판정은 손으로 적지 않는다 — 연산자 카탈로그(`OperatorDefinition`)와 어댑터
+  필드 계약에 성질을 두고 읽는다(없으면 이 PR 이 더한다). 코드를 `SEMANTIC_ONLY_CODES` 에 등록하고, 문장
+  golden·해당 문서만 warning 이 나는 테스트·BACKLOG-017 로 옮긴 아이디어 fixture 가 warning 0 인 테스트를 둔다.
+- **SoT 대장 eligibility 행(Phase 2 감사 NB-2(a))**: `.claude/rules/strategy-workbench-sot.md` 에 eligibility
+  연산자 행을 더한다. owner 는 `domain/strategy/_models.py` 의 `EligibilityOperator`·
+  `CROSS_SECTIONAL_ELIGIBILITY_OPERATORS`(절대/횡단면 갈림), 판정은 `domain/portfolio/_compiler.py` 의
+  exhaustive `_compare`·`_cross_sectional_cut`, 값 범위는 validator `strategy.eligibility.rule_value` 다. 이
+  PR 이 eligibility 연산자 i18n 을 다루므로 여기서 적는다.
 - 단위 테스트 전부 green. e2e fixture는 P3-03.
 
 ### P3-02 — 실행 설정 패널 확장, 1.1 업그레이드 배너, 실행 설정 띠
@@ -680,6 +694,14 @@ PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드
   `missing`)에 frontend 문장(한국어·영어, 이름과 `.description`)을 붙이고, `/run-environments/schema`
   가 발행한 설명 키가 전부 번역됐는지 보는 커버리지 테스트를 둔다(전략 runtime schema 쪽
   `screen-vocabulary.test.ts` 와 같은 모양). 패널 항목 옆 한 줄 뜻 표시는 US-SM-10 과 잇는다.
+- **SoT 대장 `run_environment.*` 진단 코드(Phase 2 감사 NB-2(b))**: `authoring 진단 코드` 행 밖에 있는
+  `run_environment.*` 네임스페이스(owner `domain/backtest/_requirement.py`·`_models.py` 의
+  `RUN_ENVIRONMENT_CONSTRAINTS`, preview·trace 경로는 `portfolio_design/_service.py` 가 레지스트리 밖으로
+  통과시킨다)를 SoT 대장에 적는다. 이 PR 이 그 코드를 화면에 번역하고 아래 결정 항목을 정하므로 여기서 한다.
+- **매니페스트 평면 비용 필드(Phase 2 감사 NB-4(a))**: `RunManifest` 의 `fee_bps`·`slippage_bps`·
+  `participation_rate` 평면 필드는 `environment` 와 중복이다(P2-01 제약사항은 "제거는 P2-03"이라 적었지만
+  P2-03 이 다루지 않았다). run 상세가 `environment` 를 보이게 되는 이 PR 에서 유지(호환)·제거를 정하고 PLAN 에
+  한 줄 남긴다. 제거면 OpenAPI·생성 SDK 를 같은 PR 에서 바꾼다.
 - **결정 항목**: 명시 `environment`의 422를 필드 단위로 어떻게 표면화할지. 같은 사실이 문서에
   있으면 `strategy.execution.participation` 코드가, 실행 설정에 있으면 pydantic 기본 분기가 나간다
   (`Backtest422Response`가 `RequestValidationResponse`를 이미 union에 가져 계약 위반은 아니다).
@@ -752,6 +774,14 @@ PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드
   cp949·UTF-16·`.lock`·`build/`·`dist/` 표식 검출 테스트를 둔다.
 - BACKLOG-009: 사이드바 제안을 "문서에 적용"한 뒤 툴바 "실행 취소" 한 번으로 적용 전 원문으로 돌아가는
   브라우저 스토리 e2e(`@story`·`@US-DM-09`)를 더하고 US-DM-09를 `구현됨-e2e`로 올린다.
+- **spec D6·D7 구현 결과(Phase 2 감사 NB-3)**: 설계 spec D6·D7 에 "구현 결과(P2-03·P2-09)" 단락을 둔다
+  (P2-08 이 D2 를 정리한 방식). D7 의 현재형 "`_upgrade.py` 는 단일 버전 변환기다", `UPGRADE_STEPS` 값 타입(이름
+  붙은 쌍), `UpgradeOutcome` 모양(`source_version` 추가, 도메인 `environment` 는 `RetiredExecutionSettings`,
+  응답 `environment` 는 nullable), 선언 버전 규칙(NB-1), saved-reference 422 코드(`backtest.strategy.requires_upgrade`),
+  D6 의 삭제된 브리지 문장을 사실대로 고친다. 1.2 문서를 정리하는 이 PR 의 범위다.
+- **연산자 행의 단위 규칙 문장(Phase 2 감사 NB-6)**: SoT 연산자 행에 "단위 추론 owner 는 검증기
+  (`domain/factor/_validation.py` 의 무차원 집합), 카탈로그 `unit_rule` 은 `test_factor_operators.py` 가 묶는
+  표시값"을 한 줄 적는다. 규칙 문서를 1.2 로 정리하는 이 PR 에서 한다.
 
 **Phase 3 exit**
 

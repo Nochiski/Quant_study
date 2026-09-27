@@ -377,9 +377,9 @@ P2-09 결정 11건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 
 | 항목 | 값 |
 |---|---|
 | PR | `P2-10` |
-| Intent | Phase 2 감사(2026-09-27)의 BLOCKING 2건(DEFECT-P2X-001 PLAN 기록, DEFECT-P2X-002 수정주가 전환 담당)을 닫고, 감사가 넘긴 P3 계약 누락을 acceptance 에 예약한다 |
+| Intent | Phase 2 감사(2026-09-27)의 BLOCKING 2건(DEFECT-P2X-001 PLAN 기록, DEFECT-P2X-002 수정주가 전환 담당)을 닫고, 감사가 넘긴 P3 계약 누락·비차단 항목·BACKLOG-018 을 담당 PR acceptance 에 예약한다 |
 | Acceptance | WORKFLOW P2-10 |
-| Non-goals | 코드 변경(감사 NB-1 은 P2-09 `17c68261`). 감사 비차단 NB-2(a)(b)·NB-3·NB-4·NB-6(아래 변경 기록의 남은 목록) |
+| Non-goals | 코드 변경(감사 NB-1 은 P2-09 `17c68261`, 리뷰 DEFECT-P1-1 은 `a32ed9d7`). 감사 비차단 항목과 BACKLOG-018 은 담당만 정하고 실행하지 않는다 |
 | Branch/worktree | `docs/lang2-p2-10-phase2-records` / `wt-lang2-p2-10` |
 | Base SHA | P2-09 `17c68261` |
 | 변경 파일 | `docs/planning/strategy-language-2-0/PLAN.md`, `WORKFLOW.md`, `tools/update-plan-progress.ps1` |
@@ -967,9 +967,12 @@ Phase exit:
   누락 6건을 예약했다 — #3 sandbox `missing`(P3-02), #7 탈락 사유 i18n(P3-01, P4-03 규칙/순위 구분), #11 새
   진단 코드 화면 매핑(P3-01), #13 승격 노드 표식(P3-01, backend wire 표식으로 결정), #15 은퇴 버전 문구 6키
   (P3-02), #16 run 상세 `environment` 표시(P3-02). NB-7(P3-01 착수 전 main cascade)도 P3-01 에 적었다.
-  남은 감사 비차단: NB-2(a) eligibility 절대/횡단면 갈림 SoT 행, NB-2(b) `run_environment.*` 진단 코드
-  네임스페이스 SoT 행, NB-3 spec D6·D7 구현 결과 단락, NB-4 매니페스트 평면 비용 필드 유지 여부·지문 표기
-  버전 PR ID, NB-6 단위 규칙 SoT 문장 — 담당 미정(리드). NB-2(c)는 P2-09 `17c68261` 이 테스트로 닫았다.
+  감사 비차단 담당(리드 지시로 지정, WORKFLOW 각 acceptance 에 예약): NB-2(a) eligibility SoT 행 → P3-01,
+  NB-2(b) `run_environment.*` 진단 코드 SoT 행 → P3-02, NB-3 spec D6·D7 구현 결과 단락 → P3-03, NB-4(a) 매니페스트
+  평면 비용 필드 유지·제거 → P3-02, NB-6 단위 규칙 SoT 문장 → P3-03. **NB-4(b) `run_fingerprint` 표기 버전은
+  미정 — 리드 결정 필요**: 실행 결과 캐시 lookup 을 도입하는 PR 이 lang2 계획(P3~P6)에 없어 붙일 PR 이 없다.
+  NB-2(c)는 P2-09 `17c68261` 이 테스트로 닫았다. BACKLOG-018(원주가 시계열 변화 경고, 리드 결정)을 P3-01 에
+  예약했다.
 - 2026-09-27 — P2-09 Phase 2 감사 NB-1 반영(`17c68261`). 업그레이드 체인은 문서가 선언한 은퇴 버전에서만
   시작한다. 현재 판 문서의 1.0 모양은 제자리에서 고칠 구조 오류이고, frontend 배너가 이 경우에 뜨지 않는다
   (US-DM-06 수용 기준 개정). 자세한 것은 P2-09 결정 3.
@@ -1691,6 +1694,22 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **선행 조건**: #218 이 main 에 머지됐다(완료). 통합 브랜치가 main 을 따라가야 한다(WORKFLOW P3-01 착수 전
   cascade).
 - **담당**: `P3-01`. WORKFLOW P3-01 acceptance 에 같은 번호로 예약했다. 늦어도 P5-01 착수 전이다.
+
+### BACKLOG-018: 원주가 가격 필드로 시계열 변화를 재는 문서에 경고가 없다 (#218 후속, 리드 결정)
+
+- **상황**: #218 이 기본 팩터 레지스트리를 `price.adj_close` 로 옮겼다(main `28d13b69`). 하지만 사용자가 이미
+  쓴 전략 문서와 매뉴얼 샘플은 원주가 `price.close` 로 기간 수익률·이동평균·변동성·낙폭 같은 시계열 변화를
+  계산한다. compile 은 이 조합을 알리지 않는다.
+- **인풋**: `field: price.close` 잎을 `time_series` 의 `momentum`·`mean`·`std` 등 변화 연산자에 넣은 문서를
+  compile·저장·실행한다(예: 1.2 golden `quality_momentum.yaml` 의 `mom_252`).
+- **에러 위치**: compile 단일 게이트 `domain/strategy/_validation.py`(P2-07 이 필드 계약·출력 타입·단위 경고를 둔
+  곳)에 해당 진단이 없다.
+- **위험성**: silent wrong result. 실데이터의 분할·증자·병합 사건(2020~2022년 380건, #214)이 가짜 수익률·가짜
+  변동성·이평 소거를 만든다. 레지스트리를 쓰지 않고 직접 쓴 문서는 #218 의 혜택을 받지 못하고, 사용자는 경고
+  없이 오염된 결과를 전략 효과로 읽는다.
+- **결정(리드)**: compile 에 warning 을 추가한다. 시계열 변화 연산자의 입력이 원주가 가격 필드이면 "분할·증자에
+  오염될 수 있습니다. `price.adj_close` 를 쓰세요" 를 backend 한글 완성 문장으로 낸다.
+- **담당**: `P3-01`(backend 진단 추가와 테스트). WORKFLOW P3-01 acceptance 에 같은 번호로 예약했다.
 
 ## 갱신 절차
 

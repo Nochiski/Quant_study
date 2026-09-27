@@ -6,7 +6,7 @@ current_phase: D
 current_pr: D-01,D-02,D-03
 active_prs: [D-01, D-02, D-03]
 parallel_window: [D-01, D-02, D-03]
-last_updated: 2026-09-27T10:39:32+09:00
+last_updated: 2026-09-27T11:24:14+09:00
 planned_prs: 19
 merged_prs: 16
 approved_prs: 16
@@ -29,7 +29,7 @@ progress_percent: 84
 | Active PR | `D-01, D-02, D-03` |
 | Progress | `16 / 19 merged (84%)` |
 | Approved | `16 / 19` |
-| Aggregated at | `2026-09-27 10:39 KST` |
+| Aggregated at | `2026-09-27 11:24 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -330,7 +330,7 @@ i18n이 `metric_id`를 키로 소유한다.
 |---|---|---|---|---|---|
 | [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_REVIEW` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` · [#208](https://github.com/Nochiski/Quant_study/pull/208) · tip `2e7fc03e`(origin/main C-03 merge 후 spec v3 정정) · 리뷰 대기 |
 | [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `IN_REVIEW` | 브랜치 `feat/ai-d-02-result-explain-backend` · [#209](https://github.com/Nochiski/Quant_study/pull/209) · tip `2c07225e`(D-01 merge로 C-03 따라감, 스키마 v3·`version == 2` 분기·v2 선언 sha256 고정, v1→v3 직행·실패 롤백·재시도 멱등 테스트) · pytest 2314 · 리뷰 대기 |
-| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `IN_REVIEW` | 브랜치 `feat/ai-d-03-result-explain-frontend` · [#210](https://github.com/Nochiski/Quant_study/pull/210) · 게이트 SHA `406e2fc0`(pytest 2314, vitest 979, 전체 e2e 40/40, US-DM-08 `구현됨-e2e`) · 리뷰 대기 |
+| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `IN_REVIEW` | 브랜치 `feat/ai-d-03-result-explain-frontend` · [#210](https://github.com/Nochiski/Quant_study/pull/210) · `review_ai_d` 1차 APPROVE(blocking 0, P3 7건 반영·1건 D-04) · 게이트 SHA `35d41a38`(pytest 2316, vitest 980, 전체 e2e 40/40, US-DM-08 `구현됨-e2e`) · 재확인 대기 |
 
 Phase exit:
 

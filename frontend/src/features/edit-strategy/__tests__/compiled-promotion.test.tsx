@@ -34,7 +34,9 @@ import { FactorGraphPanel } from "../ui/factor-graph-panel";
 
 afterEach(cleanup);
 
-const SOURCE = readBackendFixture("strategy_documents/ideas/ma20_breakout.yaml");
+const SOURCE = readBackendFixture(
+  "strategy_documents/ideas/ma20_breakout.yaml",
+);
 const PARSED = parseSource(SOURCE, "yaml");
 if (PARSED.status !== "ok") throw new Error("idea fixture must parse");
 const AUTHORED = (PARSED.tree as { factors: { graph: FactorGraph }[] })
@@ -134,7 +136,8 @@ const EXPLANATION: FactorExplanation = {
     issues: [],
     node_contracts: PROMOTED.nodes.map((node) => ({
       node_id: node.node_id,
-      value_type: node.kind === "comparison" ? "boolean_series" : "numeric_series",
+      value_type:
+        node.kind === "comparison" ? "boolean_series" : "numeric_series",
       unit: node.kind === "field" || node.kind === "time_series" ? "KRW" : "1",
       minimum_history_sessions: node.kind === "time_series" ? 20 : 1,
     })),
@@ -150,7 +153,8 @@ const EXPLANATION: FactorExplanation = {
     steps: PROMOTED.nodes.map((node, index) => ({
       sequence: index + 1,
       node_id: node.node_id,
-      operation: "operator" in node ? `${node.kind}.${node.operator}` : node.kind,
+      operation:
+        "operator" in node ? `${node.kind}.${node.operator}` : node.kind,
       input_node_ids: inputsOf(node),
       output_type:
         node.kind === "comparison" ? "boolean_series" : "numeric_series",
@@ -225,7 +229,9 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
       "/factors/0/graph/nodes/3",
     );
     expect(nodePointerById(factor, "__promote_ma20_breakout_one")).toBeNull();
-    expect(nodePointerById(factor, "adj_close_2")).toBe("/factors/0/graph/nodes/2");
+    expect(nodePointerById(factor, "adj_close_2")).toBe(
+      "/factors/0/graph/nodes/2",
+    );
     // 끊긴 참조는 붙인 노드가 아니다: 문서 쪽 결함으로 남아 포인터가 없다.
     expect(compiledNodeOrigin(factor, "typo")).toBe("document");
     expect(nodePointerById(factor, "typo")).toBeNull();
@@ -259,7 +265,10 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
     const user = userEvent.setup();
     const onSelectPointer = vi.fn();
     render(
-      <ExecutionPlanPanel state={readyState()} onSelectPointer={onSelectPointer} />,
+      <ExecutionPlanPanel
+        state={readyState()}
+        onSelectPointer={onSelectPointer}
+      />,
     );
 
     const table = screen.getByRole("table");
@@ -271,7 +280,9 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
         name: "참/거짓을 1/0으로 소스 열기: /factors/0/graph/nodes/3",
       }),
     );
-    expect(onSelectPointer).toHaveBeenLastCalledWith("/factors/0/graph/nodes/3");
+    expect(onSelectPointer).toHaveBeenLastCalledWith(
+      "/factors/0/graph/nodes/3",
+    );
   });
 
   it("그래프 화면도 붙인 출력 카드를 사람 말로 보이고 소스 열기가 원래 출력으로 간다", async () => {
@@ -287,14 +298,51 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
     );
 
     const list = screen.getAllByRole("listitem");
-    expect(
-      list.map((item) => item.textContent ?? "").join("\n"),
-    ).not.toMatch(/__promote_/);
+    expect(list.map((item) => item.textContent ?? "").join("\n")).not.toMatch(
+      /__promote_/,
+    );
     const card = screen
       .getByRole("button", { name: "그래프 노드 선택: 참/거짓을 1/0으로" })
       .closest("li") as HTMLElement;
     expect(within(card).getByText("OUTPUT")).toBeInTheDocument();
-    await user.click(within(card).getByRole("button", { name: "소스에서 열기" }));
+    await user.click(
+      within(card).getByRole("button", { name: "소스에서 열기" }),
+    );
     expect(onOpenSource).toHaveBeenLastCalledWith("/factors/0/graph/nodes/3");
+  });
+
+  it("원래 출력 줄을 고르면 그 노드 하나만 선택으로 강조한다(붙인 출력과 겹치지 않는다)", () => {
+    // 붙인 출력의 pointer 는 원래 출력 줄이라 pointer 만으로 고르면 두 카드·두 행이 함께 켜진다
+    // (리뷰 #232 DEFECT-232-03). 선택은 사용자가 쓴 원래 출력이 받는다.
+    const selectedPointer = "/factors/0/graph/nodes/3";
+    render(
+      <>
+        <FactorGraphPanel
+          state={readyState()}
+          diagnostics={[]}
+          selectedPointer={selectedPointer}
+          onSelectPointer={vi.fn()}
+          onOpenSource={vi.fn()}
+        />
+        <ExecutionPlanPanel
+          state={readyState()}
+          selectedPointer={selectedPointer}
+          onSelectPointer={vi.fn()}
+        />
+      </>,
+    );
+
+    const current = screen
+      .getAllByRole("listitem")
+      .filter((item) => item.getAttribute("aria-current") === "true");
+    expect(current).toHaveLength(1);
+    expect(
+      within(current[0]!).getByRole("button", { name: "그래프 노드 선택: gt" }),
+    ).toBeInTheDocument();
+    const selectedRows = within(screen.getByRole("table"))
+      .getAllByRole("row")
+      .filter((row) => row.getAttribute("aria-selected") === "true");
+    expect(selectedRows).toHaveLength(1);
+    expect(selectedRows[0]!.textContent).not.toContain("참/거짓을 1/0으로");
   });
 });

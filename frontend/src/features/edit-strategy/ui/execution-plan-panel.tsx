@@ -185,7 +185,9 @@ export const ExecutionPlanPanel = ({
                   const name = booleanScore
                     ? t("plan.node.booleanScore")
                     : step.node_id;
+                  // 붙인 출력은 원래 출력 줄을 가리키므로 선택은 원래 출력 행이 받는다(리뷰 #232).
                   const selected =
+                    !booleanScore &&
                     pointer !== null &&
                     pointerSelectsNode(selectedPointer, pointer);
                   return (
@@ -206,7 +208,9 @@ export const ExecutionPlanPanel = ({
                           {booleanScore ? (
                             <>
                               <strong>{name}</strong>
-                              <span>{t("plan.node.booleanScore.description")}</span>
+                              <span>
+                                {t("plan.node.booleanScore.description")}
+                              </span>
                             </>
                           ) : (
                             <>

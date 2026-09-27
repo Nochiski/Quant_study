@@ -181,10 +181,13 @@ const GraphNode = ({
   onSelectPointer: (pointer: string) => void;
   onOpenSource: (pointer: string) => void;
 }) => {
-  const selected =
-    node.pointer !== null && pointerSelectsNode(selectedPointer, node.pointer);
   // compile 이 붙인 출력 노드는 사용자가 이름을 지은 적이 없어 사람 말로 부른다(BACKLOG-014).
   const booleanScore = node.origin === "boolean-score";
+  // 붙인 출력의 pointer 는 원래 출력 줄이라 선택 강조는 원래 출력 카드 하나가 받는다(리뷰 #232).
+  const selected =
+    !booleanScore &&
+    node.pointer !== null &&
+    pointerSelectsNode(selectedPointer, node.pointer);
   const name = booleanScore ? t("plan.node.booleanScore") : node.nodeId;
   return (
     <li
@@ -374,7 +377,9 @@ export const FactorGraphPanel = ({
     return (
       <>
         <GraphState
-          state={projection.status !== "ready" ? projection : { status: "empty" }}
+          state={
+            projection.status !== "ready" ? projection : { status: "empty" }
+          }
           diagnostics={diagnostics}
           onOpenSource={onOpenSource}
         />
@@ -406,7 +411,9 @@ export const FactorGraphPanel = ({
         <div>
           <strong>{t("graph.title")}</strong>
           <span>
-            {editing === undefined ? t("graph.planOnly") : t("graph.planWithEdit")}
+            {editing === undefined
+              ? t("graph.planOnly")
+              : t("graph.planWithEdit")}
           </span>
           {recomputing ? (
             <Badge tone="warn">{t("graph.recomputing")}</Badge>

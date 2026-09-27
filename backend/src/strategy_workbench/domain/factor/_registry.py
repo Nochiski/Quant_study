@@ -147,7 +147,7 @@ def _implemented_graphs() -> dict[str, FactorGraph]:
         "credit.margin_balance_change_20d": FactorGraph(
             nodes=(
                 FieldNode("balance", "credit.margin_balance", "field"),
-                TimeSeriesNode("change", TimeSeriesOperator.DELTA, "balance", 20, "time_series"),
+                TimeSeriesNode("change", TimeSeriesOperator.MOMENTUM, "balance", 20, "time_series"),
             ),
             output_node_id="change",
         ),
@@ -526,7 +526,7 @@ _SEEDS = (
         FactorCategory.CREDIT,
         FactorPreference.LOW,
         "ratio",
-        ("credit.margin_balance", "price.market_cap"),
+        ("credit.margin_balance", "price.shares_outstanding"),
         1,
     ),
     _CatalogSeed(

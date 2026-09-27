@@ -1306,13 +1306,35 @@ test.describe("professional YAML workflow", () => {
     });
   });
 
-  test("upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({
+  test("upgrades a frozen 1.0 revision to the current schema, saves it and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({
     page,
   }) => {
     const frozen = seedFrozenRevisionRows();
     const nextRevision = 2;
     const banner = page.getByRole("region", { name: "schema 1.0 문서" });
+    // 배너 문구의 "1.1"은 P3-02가 업그레이드 배너를 다시 쓸 때 바뀐다. 업그레이드 결과 자체는
+    // P2-09부터 현재 버전(1.0 → 1.1 → 1.2)이다.
     const upgrade = banner.getByRole("button", { name: "1.1로 업그레이드" });
+    // 업그레이드는 의미를 바꾸지 않는다: 1.0 동결 문서(`quality_momentum.v1_0.yaml`)의 현재 버전
+    // 의미는 golden fixture에 1.1 합성 방식(원시값 가중 합)을 명시한 문서와 같다. 현재 버전
+    // 문자열도 backend가 답한 값을 쓴다(frontend는 schema 버전 리터럴을 갖지 않는다).
+    const expected = requireData(
+      (
+        await compileStrategyDocument({
+          client: apiClient,
+          body: {
+            source: mustReplace(
+              GOLDEN,
+              "portfolio:\n",
+              "signal:\n  normalization: none\nportfolio:\n",
+            ),
+            format: "yaml",
+          },
+        })
+      ).data,
+      "compile the golden fixture with the 1.1 composite made explicit",
+    );
+    expect(expected.spec_hash).not.toBeNull();
 
     await openEditor(
       page,
@@ -1333,8 +1355,10 @@ test.describe("professional YAML workflow", () => {
     expect((await upgraded).status()).toBe(200);
     await expect(banner).toContainText("1.1로 다시 썼습니다");
     const source = await currentSource(page);
-    expect(source).toContain('schema_version: "1.1"');
+    expect(source).toContain(`schema_version: "${expected.schema_version}"`);
+    expect(source).toContain("  normalization: none\n");
     expect(source).not.toContain("  factors:\n");
+    expect(source).not.toContain("\ndata:\n");
     await expectPhase(page, "검증 통과");
 
     await saveAndWaitForRevision(page, nextRevision);
@@ -1348,19 +1372,9 @@ test.describe("professional YAML workflow", () => {
       ).data,
       "get upgraded frozen-doc revision",
     );
-    expect(savedV2.schema_version).toBe("1.1");
+    expect(savedV2.schema_version).toBe(expected.schema_version);
     expect(savedV2.requires_upgrade).toBe(false);
-    // 업그레이드는 의미를 바꾸지 않는다: 1.1 golden fixture와 같은 spec hash.
-    const golden = requireData(
-      (
-        await compileStrategyDocument({
-          client: apiClient,
-          body: { source: GOLDEN, format: "yaml" },
-        })
-      ).data,
-      "compile 1.1 golden fixture",
-    );
-    expect(savedV2.spec_hash).toBe(golden.spec_hash);
+    expect(savedV2.spec_hash).toBe(expected.spec_hash);
 
     await expect(backtest(page)).toBeEnabled();
     const submittedRun = page.waitForRequest(

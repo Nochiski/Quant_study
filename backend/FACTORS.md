@@ -59,7 +59,7 @@
 | 38 | `short.borrow_utilization` | short | low | `short.borrowed_quantity`, `price.shares_outstanding` | 1 | catalog_only |
 | 39 | `short.short_covering` | short | high | `short.short_balance_ratio`, `price.close` | 20 | catalog_only |
 | 40 | `credit.margin_balance_change_20d` | credit | low | `credit.margin_balance` | 20 | implemented |
-| 41 | `credit.margin_balance_ratio` | credit | low | `credit.margin_balance`, `price.market_cap` | 1 | catalog_only |
+| 41 | `credit.margin_balance_ratio` | credit | low | `credit.margin_balance`, `price.shares_outstanding` | 1 | catalog_only |
 | 42 | `credit.credit_net_buy_20d` | credit | low | `credit.net_buy` | 20 | catalog_only |
 | 43 | `credit.collateral_ratio` | credit | high | `credit.collateral_value`, `credit.loan_value` | 1 | catalog_only |
 | 44 | `credit.forced_liquidation_pressure` | credit | low | `credit.forced_liquidation`, `price.trading_value` | 20 | catalog_only |
@@ -83,5 +83,5 @@ validator/compiler/evaluator를 통과하며 UI(YAML source editor, 그리고 �
 | consensus | `consensus.forward_eps_growth` | rolling forward EPS growth |
 | flow | `flow.foreign_net_buy_20d` | 20-session foreign net-buy mean |
 | short | `short.short_balance_ratio` | short balance ratio |
-| credit | `credit.margin_balance_change_20d` | 20-session margin balance delta |
+| credit | `credit.margin_balance_change_20d` | 20-session margin balance rate of change |
 | event | `event.earnings_surprise` | PIT earnings surprise |

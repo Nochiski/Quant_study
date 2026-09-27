@@ -44,7 +44,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     NodeValueType,
 )
 
-from ._fixture import Membership, Observation, build_demo_fixture
+from ._fixture import MOCK_SPLIT, Membership, Observation, adjusted_close, build_demo_fixture
 
 _MOCK_EPOCH = date(2000, 1, 3)  # Monday
 _MOCK_SECTORS = ("technology", "industrial", "consumer")
@@ -210,6 +210,7 @@ class MockEquityDataAdapter:
                             field_id,
                             security_index=security_index,
                             session_index=session_index,
+                            session=session,
                         ),
                     )
                     for field_id in query.required_field_ids
@@ -349,7 +350,10 @@ class MockEquityDataAdapter:
         return RawFieldValue(
             field_id=field_id,
             value=_factor_field_value(
-                field_id, security_index=security_index, session_index=effective_index
+                field_id,
+                security_index=security_index,
+                session_index=effective_index,
+                session=_session_at(effective_index),
             ),
             available_date=session,
             kind=CellKind.OBSERVED,
@@ -488,6 +492,12 @@ def _business_day_index(session: date) -> int:
     return weeks * 5 + min(remainder, 5)
 
 
+def _session_at(business_day_index: int) -> date:
+    """`_business_day_index`의 역함수 — 절대 세션 번호가 가리키는 평일."""
+    weeks, remainder = divmod(business_day_index, 5)
+    return _MOCK_EPOCH + timedelta(days=weeks * 7 + remainder)
+
+
 def _business_sessions(start: date, end: date) -> tuple[date, ...]:
     sessions: list[date] = []
     cursor = start
@@ -503,14 +513,17 @@ def _factor_field_value(
     *,
     security_index: int,
     session_index: int,
+    session: date,
 ) -> float | str:
     if field_id.endswith("sector") or field_id.endswith("sector_code"):
         return ("technology", "industrial", "consumer")[security_index % 3]
+    if field_id in ("price.close", "price.adj_close"):
+        return _mock_close(
+            field_id, security_index=security_index, session_index=session_index, session=session
+        )
     stable = int.from_bytes(hashlib.sha256(field_id.encode("utf-8")).digest()[:2], "big")
     scale = 1 + stable % 17
     trend = (session_index + 1) * (security_index + 1) * scale
-    if field_id == "price.close":
-        return 40_000.0 + security_index * 20_000.0 + trend
     if field_id == "price.market_cap":
         return 10_000_000_000.0 + security_index * 2_000_000_000.0 + trend * 10_000
     if field_id == "financial.book_equity":
@@ -526,3 +539,20 @@ def _factor_field_value(
     if field_id == "event.earnings_surprise":
         return (security_index - 1) * 0.05 + (session_index % 3) * 0.005
     return float(stable + trend)
+
+
+def _mock_close(field_id: str, *, security_index: int, session_index: int, session: date) -> float:
+    """합성 구간의 종가. 추세는 원주가 키 하나로 만들어 두 필드가 같은 가격 경로를 공유한다.
+
+    분할 종목은 사건 전 원주가가 사건 뒤 수준의 `ratio`배라, 사건 뒤 원주가는 사건이 없는 종목과
+    같은 식이 된다(사건 뒤 창의 기존 값이 그대로다). 수정주가는 사건 전 수준에 이어 붙는다.
+    """
+    stable = int.from_bytes(hashlib.sha256(b"price.close").digest()[:2], "big")
+    trend = (session_index + 1) * (security_index + 1) * (1 + stable % 17)
+    after_split = 40_000.0 + security_index * 20_000.0 + trend
+    if security_index != MOCK_SPLIT.security_index:
+        return after_split
+    raw = after_split if session >= MOCK_SPLIT.effective else after_split * MOCK_SPLIT.ratio
+    if field_id == "price.close":
+        return raw
+    return adjusted_close(raw, security_index=security_index, session=session)

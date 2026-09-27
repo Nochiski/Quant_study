@@ -404,13 +404,17 @@ class EquityDuckdbAdapter:
         """
         if PROFILE_TABLE not in self._tables:
             return {}
+        # 지연 import — 모듈 머리의 duckdb 는 TYPE_CHECKING 전용이라 except 절이 이름으로 참조하면
+        # 이 경로에서 NameError 가 난다(#245).
+        import duckdb as module
+
         con = _open(None)
         try:
             rows = con.execute(
                 "SELECT field_id, recommended_lag_sessions, available_date_basis "
                 f"FROM {self._source(PROFILE_TABLE)}"
             ).fetchall()
-        except duckdb.Error as exc:  # 컬럼이 없는 구판 표 — 폴백으로 내려간다
+        except module.Error as exc:  # 파일이 빠졌거나 컬럼이 없는 구판 표 — 진단을 담아 멈춘다
             raise EquityDuckdbSetupError(
                 f"{PROFILE_TABLE} exists but is unreadable — root={self._root} error={exc}"
             ) from exc

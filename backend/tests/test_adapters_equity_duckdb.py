@@ -838,6 +838,21 @@ def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:
         EquityDuckdbAdapter(tmp_path / "nowhere")
 
 
+def test_unreadable_dataset_profile_fails_with_setup_error(tmp_path: Path) -> None:
+    """`dataset_profile` 이 MANIFEST 에는 있는데 읽히지 않으면 진단이 담긴 설정 오류다 (#245).
+
+    예외 절이 `duckdb.Error` 를 이름으로 참조하는데 duckdb 는 `TYPE_CHECKING` 에서만 import 돼,
+    이 경로에 들어가면 설정 오류 대신 NameError 가 났다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    removed = sorted((root / "dataset_profile").rglob("*.parquet"))
+    assert removed, f"dataset_profile 파티션 파일이 없다 — root={root}"
+    for path in removed:
+        path.unlink()
+    with pytest.raises(EquityDuckdbSetupError, match="dataset_profile exists but is unreadable"):
+        EquityDuckdbAdapter(root)
+
+
 # ── 부팅 · 파이프라인 ─────────────────────────────────────────────────────────
 
 

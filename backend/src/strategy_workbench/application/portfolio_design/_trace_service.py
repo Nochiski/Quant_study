@@ -231,7 +231,11 @@ class StrategyTraceService:
             raw=raw,
             raw_truncated=raw_truncated,
             target=target,
-            warnings=pipeline.preview.warnings,
+            # 원시 관측 경고 뒤에 tape 컴파일 경고(섹터 제약 제외 등, 이슈 #203)를 붙인다.
+            warnings=(
+                *pipeline.preview.warnings,
+                *(item.message for item in pipeline.preview.tape.warnings),
+            ),
         )
 
     def _resolve(

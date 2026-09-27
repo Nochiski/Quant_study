@@ -475,9 +475,22 @@ class BacktestRunService:
             )
             # The preview's caveats travel with the data they describe, so the manifest records
             # every warning the run was built on, not just the market-data ones.
+            # tape 컴파일 경고는 컴파일러 코드를 그대로 쓴다(이슈 #203). 원시 관측 코드로 묶으면
+            # 결과 화면에서 출처가 틀린다.
             dataset = replace(
                 dataset,
-                warnings=(*_as_data_warnings(preview.warnings), *dataset.warnings),
+                warnings=(
+                    *_as_data_warnings(preview.warnings),
+                    *(
+                        DataWarning(
+                            code=item.code.value,
+                            message=item.message,
+                            severity=WarningSeverity.WARNING,
+                        )
+                        for item in preview.tape.warnings
+                    ),
+                    *dataset.warnings,
+                ),
             )
             self._raise_if_cancelled(record)
             self._update(

@@ -42,12 +42,18 @@ test(
     await expect(card).toBeVisible({ timeout: 60_000 });
     await expect(card).toContainText("검증 통과");
 
-    await card.getByRole("button", { name: "문서에 적용" }).click();
-    await expect(page.getByText("제안을 문서에 적용했습니다.")).toBeVisible();
+    // "적용 후 백테스트": 문서는 적용되고 검증을 통과하지만, 실행 설정(기간·유니버스)은 전략 문서 밖이라
+    // AI 적용이 채우지 않는다. 사람이 고친 문서와 같은 이유로 막히고 알림이 어느 칸인지 말한다(P3-02
+    // 결정 1·5).
+    await card.getByRole("button", { name: "적용 후 백테스트" }).click();
     await expectPhase(page, "검증 통과");
+    await expect(
+      page.getByText(/백테스트를 시작하지 않았습니다/u),
+    ).toContainText("실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.");
+    await expect(backtest(page)).toBeDisabled();
 
-    // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02).
-    await fillRunEnvironment(page);
+    // 요약 띠의 "실행 설정 채우기"로 패널을 열어 기간·유니버스를 정한다.
+    await fillRunEnvironment(page, { via: "band" });
 
     // 저장하지 않은 채로 돌려 본다. 적용한 문서는 시작 문서와 달라 저장되지 않은 상태(dirty)이므로,
     // 실행 화면으로 가기 전에 이탈 확인이 반드시 한 번 뜬다(`DirtyLeaveGuard`).

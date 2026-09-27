@@ -4,7 +4,7 @@
  * `workbench.real-equity.spec.ts`(opt-in 실데이터)가 같은 접근성 이름·API path 를 보도록 한 곳에 둔다.
  * 접근성 이름이 바뀌면 CI 의 workflow spec 이 먼저 깨지고, 여기서 고치면 real-equity 도 함께 따라온다.
  */
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,10 +43,24 @@ export const replaceSource = async (page: Page, source: string) => {
   await editor(page).fill(source);
 };
 
-export const expectPhase = async (page: Page, phase: string) => {
-  await expect(page.getByRole("status", { name: "문서 상태" })).toContainText(
-    phase,
+/**
+ * 편집기에 넣은 텍스트의 검증(parse·compile)이 끝나기를 기다린다. 부하가 큰 러너에서 검증 결과가
+ * 도착하기 전의 중간 상태를 단언이 읽는 경합을 막는다(#240 후보 (a)). 문서 상태 배지의
+ * `data-settled` 는 compile 버전이 입력 버전을 따라잡았거나 구문 오류로 compile 이 시작되지 않을 때
+ * 참이다(`isDocumentSettled`).
+ */
+export const waitForSettledDocument = async (page: Page) => {
+  const status = page.getByRole("status", { name: "문서 상태" });
+  await expect(status, "문서 검증이 입력 버전을 따라잡는다(#240)").toHaveAttribute(
+    "data-settled",
+    "true",
   );
+  return status;
+};
+
+export const expectPhase = async (page: Page, phase: string) => {
+  const status = await waitForSettledDocument(page);
+  await expect(status).toContainText(phase);
 };
 
 export const requireData = <Value>(
@@ -142,14 +156,23 @@ export const REQUESTED_ENVIRONMENT = {
 
 /**
  * 실행 설정 패널을 열어 기간·유니버스를 채우고 닫는다. `keyboard` 면 패널을 여닫을 때도 포인터 없이 초점과
- * Enter 만 쓴다(US-SM-04 키보드 스토리).
+ * Enter 만 쓴다(US-SM-04 키보드 스토리). `via: "band"` 는 사용자가 막혔을 때 밟는 길이다 — 요약 띠가
+ * 비어 있는 칸 이름을 말하고, 띠의 "실행 설정 채우기"가 패널을 열어 첫 빈 칸(시작일)에 초점을 옮긴다
+ * (P3-02 결정 1 보충, US-DM-03·04·08 수용 기준). 세 칸이 모두 비어 있는 상태에서만 쓴다.
  */
 export const fillRunEnvironment = async (
   page: Page,
-  { keyboard = false }: { keyboard?: boolean } = {},
+  {
+    keyboard = false,
+    via = "toggle",
+  }: { keyboard?: boolean; via?: "toggle" | "band" } = {},
   environment: { start: string; end: string; universe_id: string } = RUN_ENVIRONMENT,
 ) => {
+  // 실행 설정은 문서 밖이지만, 편집기 검증이 끝나기 전에 패널을 여닫으면 뒤이은 문서 단언이 중간
+  // 상태를 읽는다(#240). 먼저 검증을 끝낸다.
+  await waitForSettledDocument(page);
   const toggle = page.getByLabel("실행 설정 열기");
+  const band = page.getByRole("region", { name: "실행 설정 요약" });
   const fields = [
     [page.getByLabel("시작일", { exact: true }), environment.start],
     [page.getByLabel("종료일", { exact: true }), environment.end],
@@ -158,24 +181,26 @@ export const fillRunEnvironment = async (
       environment.universe_id,
     ],
   ] as const;
-  if (keyboard) {
-    await toggle.focus();
-    await page.keyboard.press("Enter");
+  const press = async (target: Locator) => {
+    if (keyboard) {
+      await target.focus();
+      await page.keyboard.press("Enter");
+    } else {
+      await target.click();
+    }
+  };
+  if (via === "band") {
+    await expect(band).toContainText("시작일·종료일·유니버스 칸이 비어 있습니다");
+    await press(band.getByRole("button", { name: "실행 설정 채우기" }));
+    await expect(fields[0][0]).toBeFocused();
   } else {
-    await toggle.click();
+    await press(toggle);
   }
   // `fill` 은 포인터를 쓰지 않는다. 날짜 칸을 타자로 채우면 브라우저 locale 의 칸 순서(월/일/연)에 묶인다.
   for (const [field, value] of fields) {
     await field.fill(value);
     await expect(field).toHaveValue(value);
   }
-  await expect(
-    page.getByRole("region", { name: "실행 설정 요약" }),
-  ).toContainText(environment.universe_id);
-  if (keyboard) {
-    await toggle.focus();
-    await page.keyboard.press("Enter");
-  } else {
-    await toggle.click();
-  }
+  await expect(band).toContainText(environment.universe_id);
+  await press(toggle);
 };

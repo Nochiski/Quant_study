@@ -312,7 +312,9 @@ def _migrate(connection: sqlite3.Connection) -> None:
         if orphans:
             raise AssistantStorageError(
                 "SQLite assistant schema has rows whose parent is missing — "
-                f"violations={[tuple(row) for row in orphans[:5]]} total={len(orphans)}"
+                f"total={len(orphans)} {_describe_orphans(connection, orphans)}; the file was left "
+                "unchanged. Back it up, then delete those child rows (or move the file aside to "
+                "start with an empty assistant history) and restart"
             )
         connection.commit()
     except Exception:
@@ -366,6 +368,48 @@ def _upgrade_v2_to_v3(connection: sqlite3.Connection) -> None:
         if (object_type, name) == ("index", "chat_sessions_order"):
             connection.execute(statement)
     connection.execute("PRAGMA user_version = 3")
+
+
+# 고아 행을 표마다 몇 개까지 적을지. 전부 적으면 메시지가 수천 줄이 될 수 있다.
+_ORPHAN_SAMPLE = 5
+
+
+def _describe_orphans(connection: sqlite3.Connection, violations: list[sqlite3.Row]) -> str:
+    """`foreign_key_check` 위반을 "어느 표의 어느 키가 어느 부모를 잃었나"로 옮긴다.
+
+    이 어댑터의 표는 전부 `WITHOUT ROWID`라 `foreign_key_check`의 rowid 칸이 비어 있다. 그대로
+    실으면 사용자는 어느 행을 치워야 하는지 모르고 파일을 통째로 지우게 된다. 그래서 위반한 외래
+    키의 자식 칸으로 부모가 없는 행을 다시 찾아 기본 키를 적는다.
+    """
+    parts: list[str] = []
+    for table, parent, fk_id in sorted({(row[0], row[2], row[3]) for row in violations}):
+        links = [
+            (str(link[3]), str(link[4]))
+            for link in connection.execute(f'PRAGMA foreign_key_list("{table}")').fetchall()
+            if link[0] == fk_id
+        ]
+        keys = [
+            str(column[1])
+            for column in sorted(
+                connection.execute(f'PRAGMA table_info("{table}")').fetchall(),
+                key=lambda column: column[5],
+            )
+            if column[5] > 0
+        ]
+        # 기본 키와 잃은 부모를 가리키는 칸을 함께 적는다. 어느 행이 무엇을 못 찾았는지 보인다.
+        shown = keys + [frm for frm, _to in links if frm not in keys]
+        # 자식 칸이 NULL인 행은 외래 키 위반이 아니다(SQLite 규칙). 그 행을 고아로 적지 않는다.
+        present = " AND ".join(f'c."{frm}" IS NOT NULL' for frm, _to in links)
+        matches = " AND ".join(f'p."{to}" = c."{frm}"' for frm, to in links)
+        rows = connection.execute(
+            f'SELECT {", ".join(f"c.{column}" for column in shown)} FROM "{table}" AS c '
+            f'WHERE {present} AND NOT EXISTS (SELECT 1 FROM "{parent}" AS p WHERE {matches}) '
+            f"LIMIT {_ORPHAN_SAMPLE}"
+        ).fetchall()
+        described = [dict(zip(shown, tuple(row), strict=True)) for row in rows]
+        columns = ", ".join(f"{frm}->{parent}.{to}" for frm, to in links)
+        parts.append(f"table={table} foreign_key=({columns}) orphan_keys={described}")
+    return " | ".join(parts)
 
 
 def _pragma_int(connection: sqlite3.Connection, name: str) -> int:

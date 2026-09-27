@@ -18,6 +18,7 @@ import pytest
 
 from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import (
     DEFAULT_SCRIPTED_MODEL,
+    RESULT_PROBE_TITLE,
     SCRIPTED_MARKER,
     SLOW_ANSWER_DELAY_SCALE,
     ScriptedLlmProvider,
@@ -25,6 +26,7 @@ from strategy_workbench.adapters.outbound.llm_scripted.facade.provider import (
     factor_window_proposal,
     idea_to_new_strategy,
     result_explanation,
+    result_explanation_with_proposal,
     scenario_for,
     search_budget_answer,
     search_then_failure,
@@ -422,6 +424,27 @@ def test_a_result_session_picks_the_result_scenario_whatever_the_question() -> N
     assert scenario_for("이 결과 좋은 거야?").run is simple_answer
 
 
+def test_a_result_turn_that_leaked_the_proposal_tool_tries_to_propose() -> None:
+    """결과 턴에 제안 도구가 새어 들어오면 대본이 제안을 시도한다(D 스택 리뷰 P3-5).
+
+    정상 서버는 결과 세션에 그 도구를 주지 않는다. 이 갈래가 있어야 게이트가 사라졌을 때 US-DM-08
+    e2e의 "제안 카드 없음" 단언이 실제로 깨진다.
+    """
+    leaked = frozenset(spec.name for spec in (*RESULT_EXPLAIN_TOOLS, *ASSISTANT_TOOLS))
+    assert (
+        scenario_for("이 결과 좋은 거야?", offered=leaked).run is result_explanation_with_proposal
+    )
+
+    tool = _SummaryTool(summarize_backtest_result(sample_backtest_result()))
+    events = list(result_explanation_with_proposal(tool))
+
+    assert [call.name for call in tool.calls] == [READ_BACKTEST_RESULT, PROPOSE_STRATEGY]
+    assert tool.calls[1].arguments["title"] == RESULT_PROBE_TITLE
+    # 제안 이벤트는 다음 이벤트를 흘릴 때 큐에서 나간다. 도구 호출 뒤에 이벤트가 더 있어야 한다.
+    assert _followed_by_another_event(events, PROPOSE_STRATEGY)
+    assert isinstance(events[-1], Done)
+
+
 def test_the_result_scenario_explains_the_numbers_the_server_summarised() -> None:
     summary = summarize_backtest_result(sample_backtest_result())
     tool = _SummaryTool(summary)
@@ -433,8 +456,8 @@ def test_the_result_scenario_explains_the_numbers_the_server_summarised() -> Non
     assert "총수익률(Total return)은 34.12%입니다." in answer
     assert "벤치마크(sec-005930-1)는 18.05%였고" in answer
     assert "벤치마크보다 16.07% 더 벌었습니다" in answer
-    assert "샤프 비율(Sharpe ratio) 0.87" in answer
-    assert "최대 낙폭(Maximum drawdown) -22.31%" in answer
+    assert "샤프 비율(Sharpe ratio)은 0.87입니다." in answer
+    assert "최대 낙폭(Maximum drawdown)은 -22.31%입니다." in answer
     assert answer.endswith("과거 결과가 앞으로의 수익을 보장하지는 않습니다.")
     assert isinstance(events[-1], Done)
 

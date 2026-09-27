@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$Check,
     [string]$PlanPath
@@ -50,9 +50,14 @@ $allowedStatuses = @(
     "IN_REVIEW",
     "CHANGES_REQUESTED",
     "APPROVED",
+    "INTEGRATED",
     "MERGED",
     "PAUSED"
 )
+
+# `[x]` 는 대상 브랜치에 머지된 PR 이다. main 머지는 `MERGED`, lang2 통합 브랜치(`lang2/integration`)
+# 머지는 `INTEGRATED` 다(Phase 2 감사 DEFECT-P2X-001). 통합 브랜치는 P3-02 뒤 main 에 한 번에 머지된다.
+$doneStatuses = @("MERGED", "INTEGRATED")
 
 $unknownStatuses = @($rows | Where-Object Status -notin $allowedStatuses)
 if ($unknownStatuses.Count -gt 0) {
@@ -61,8 +66,8 @@ if ($unknownStatuses.Count -gt 0) {
 
 $checkboxMismatches = @(
     $rows | Where-Object {
-        ($_.Checked -and $_.Status -ne "MERGED") -or
-        (-not $_.Checked -and $_.Status -eq "MERGED")
+        ($_.Checked -and $_.Status -notin $doneStatuses) -or
+        (-not $_.Checked -and $_.Status -in $doneStatuses)
     }
 )
 if ($checkboxMismatches.Count -gt 0) {
@@ -125,7 +130,7 @@ if ($activeRows.Count -gt 1) {
 $phaseGoals = [ordered]@{
     "P0" = "Planning package and contract docs"
     "P1" = "In-screen friction removal on 1.1"
-    "P2" = "Backend schema 1.2 (environment split, 9 PRs)"
+    "P2" = "Backend schema 1.2 (environment split, 10 PRs)"
     "P3" = "Frontend 1.2 adaptation"
     "P4" = "Graph level 1: pipeline"
     "P5" = "Graph level 2: recipe"
@@ -154,18 +159,20 @@ foreach ($row in $rows) {
     }
     if ($row.Status -eq "READY") {
         $unmergedDependencyIds = @(
-            $dependencyIds | Where-Object { $rowById[$_].Status -ne "MERGED" }
+            $dependencyIds | Where-Object { $rowById[$_].Status -notin $doneStatuses }
         )
         if ($unmergedDependencyIds.Count -gt 0) {
-            throw "$($row.Id) is READY but dependencies are not MERGED: $($unmergedDependencyIds -join ', ')"
+            throw "$($row.Id) is READY but dependencies are not MERGED or INTEGRATED: $($unmergedDependencyIds -join ', ')"
         }
     }
 }
 
 $total = $rows.Count
-$merged = @($rows | Where-Object Checked).Count
-$approved = @($rows | Where-Object Status -in @("APPROVED", "MERGED")).Count
-$progress = if ($total -eq 0) { 0 } else { [math]::Round(($merged * 100.0) / $total) }
+$done = @($rows | Where-Object Checked).Count
+$merged = @($rows | Where-Object Status -eq "MERGED").Count
+$integrated = @($rows | Where-Object Status -eq "INTEGRATED").Count
+$approved = @($rows | Where-Object Status -in @("APPROVED", "INTEGRATED", "MERGED")).Count
+$progress = if ($total -eq 0) { 0 } else { [math]::Round(($done * 100.0) / $total) }
 $orderedActiveRows = @(
     foreach ($id in $parallelIds) {
         if ($rowById.ContainsKey($id) -and $rowById[$id].Status -in $activeStatuses) {
@@ -196,7 +203,7 @@ $currentRows = if ($orderedActiveRows.Count -gt 0) {
     if ($readyRows.Count -gt 0) {
         @($readyRows[0])
     } else {
-        @($rows | Where-Object Status -ne "MERGED" | Select-Object -First 1)
+        @($rows | Where-Object Status -notin $doneStatuses | Select-Object -First 1)
     }
 }
 
@@ -248,6 +255,7 @@ $frontmatterValues = [ordered]@{
     "last_updated" = $isoTimestamp
     "planned_prs" = $total
     "merged_prs" = $merged
+    "integrated_prs" = $integrated
     "approved_prs" = $approved
     "progress_percent" = $progress
 }
@@ -275,7 +283,7 @@ $summaryLines = @(
     "| Current phase | ``$currentPhase`` |",
     "| Current/next PR | ``$currentPr`` |",
     "| Active PR | $activePrText |",
-    "| Progress | ``$merged / $total merged ($progress%)`` |",
+    "| Progress | ``$done / $total done ($progress%), main $merged, integration $integrated`` |",
     "| Approved | ``$approved / $total`` |",
     "| Aggregated at | ``$displayTimestamp`` |",
     "<!-- PLAN:SUMMARY:END -->"
@@ -289,18 +297,22 @@ $updated = [regex]::Replace($updated, $summaryPattern, $summary, 1)
 
 $phaseLines = [System.Collections.Generic.List[string]]::new()
 $phaseLines.Add("<!-- PLAN:PHASES:START -->")
-$phaseLines.Add("| Phase | Goal | PR | Merged | Status |")
-$phaseLines.Add("|---|---|---:|---:|---|")
+$phaseLines.Add("| Phase | Goal | PR | Main | Integrated | Status |")
+$phaseLines.Add("|---|---|---:|---:|---:|---|")
 
 foreach ($phase in $phaseGoals.Keys) {
     $phaseRows = @($rows | Where-Object Phase -eq $phase)
     if ($phaseRows.Count -eq 0) {
         throw "No tracker rows found for phase $phase"
     }
-    $phaseMerged = @($phaseRows | Where-Object Checked).Count
+    $phaseDone = @($phaseRows | Where-Object Checked).Count
+    $phaseMerged = @($phaseRows | Where-Object Status -eq "MERGED").Count
+    $phaseIntegrated = @($phaseRows | Where-Object Status -eq "INTEGRATED").Count
     $phaseActive = @($phaseRows | Where-Object Status -in $activeStatuses)
     if ($phaseMerged -eq $phaseRows.Count) {
         $phaseStatus = "MERGED"
+    } elseif ($phaseDone -eq $phaseRows.Count) {
+        $phaseStatus = "INTEGRATED"
     } elseif ($phaseActive.Count -gt 0) {
         $phaseStatus = Get-AggregateActiveStatus -CandidateRows $phaseActive
     } elseif (@($phaseRows | Where-Object Status -eq "READY").Count -gt 0) {
@@ -310,10 +322,10 @@ foreach ($phase in $phaseGoals.Keys) {
     } else {
         $phaseStatus = "WAITING"
     }
-    $phaseLines.Add("| $phase | $($phaseGoals[$phase]) | $($phaseRows.Count) | $phaseMerged | ``$phaseStatus`` |")
+    $phaseLines.Add("| $phase | $($phaseGoals[$phase]) | $($phaseRows.Count) | $phaseMerged | $phaseIntegrated | ``$phaseStatus`` |")
 }
 
-$phaseLines.Add("| **Total** |  | **$total** | **$merged** | **$progress%** |")
+$phaseLines.Add("| **Total** |  | **$total** | **$merged** | **$integrated** | **$progress%** |")
 $phaseLines.Add("<!-- PLAN:PHASES:END -->")
 $phaseSummary = $phaseLines -join $lineEnding
 $phasePattern = '(?s)<!-- PLAN:PHASES:START -->.*?<!-- PLAN:PHASES:END -->'
@@ -326,7 +338,7 @@ if ($Check) {
     if ($updated -cne $original) {
         throw "PLAN.md aggregates are stale. Run update-plan-progress.ps1 without -Check."
     }
-    Write-Output "PLAN.md is consistent: $merged/$total merged, $approved approved."
+    Write-Output "PLAN.md is consistent: $done/$total done ($merged merged to main, $integrated integrated), $approved approved."
     exit 0
 }
 
@@ -334,4 +346,4 @@ if ($updated -cne $original) {
     [System.IO.File]::WriteAllText($resolvedPlanPath, $updated, $utf8NoBom)
 }
 
-Write-Output "Updated PLAN.md: $merged/$total merged, $approved approved, status=$projectStatus."
+Write-Output "Updated PLAN.md: $done/$total done ($merged merged to main, $integrated integrated), $approved approved, status=$projectStatus."

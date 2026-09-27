@@ -48,6 +48,11 @@ REMOVED_FIELDS: tuple[tuple[str, str], ...] = (
 RETIRED_EXECUTION_SECTIONS: tuple[str, ...] = ("data", "execution")
 # 1.2 의 노드 union 에 없는 kind(spec D3 S7). 실행 경로가 원래 없었으므로 잃는 것이 없다.
 RETIRED_NODE_KINDS: tuple[str, ...] = ("saved_factor", "saved_subgraph")
+# 1.1 `FactorGraph.missing_policy` 의 모델 기본값. 1.1 모델은 지워졌고 이 값은 더 바뀌지 않는 과거
+# 사실이다. 실행 설정 기본값(`domain/backtest` 의 `DEFAULT_MISSING_POLICY`)과 값은 같지만
+# import 하면 `domain.strategy → domain.backtest` 순환이 된다. 결측 정책을 생략한 1.1 팩터의
+# 실효 값이다.
+_RETIRED_DEFAULT_MISSING_POLICY = "drop"
 
 # `unary` operator → (1.1 kind, 1.1 operator). rank/zscore/winsorize는 평가 코드가 cross_sectional로
 # 치환하던 순수 alias였고, neutralize는 cross-sectional demean이었다 (P1-02에서 제거).
@@ -448,6 +453,16 @@ def _put_in_model_order(document: MutableMapping[str, object], key: str, value: 
     _insert_before(document, anchor, key, value)
 
 
+def _factor_label(document: Mapping[str, object], graph_pointer: str) -> str:
+    """warning 문장에 쓸 팩터 이름: `factor_id`, 없으면 자리(`/factors/N`)."""
+    factor_pointer = graph_pointer.removesuffix("/graph")
+    factors = document.get("factors")
+    index = int(factor_pointer.rsplit("/", 1)[1])
+    factor = factors[index] if isinstance(factors, MutableSequence) else None
+    factor_id = factor.get("factor_id") if isinstance(factor, Mapping) else None
+    return str(factor_id) if factor_id is not None else factor_pointer
+
+
 def _plain_mapping(value: object) -> dict[str, object]:
     if not isinstance(value, Mapping):
         return {}
@@ -459,22 +474,35 @@ def _retired_settings(
 ) -> tuple[RetiredExecutionSettings, list[UpgradeWarning]]:
     """1.1 단계에 들어가기 직전의 문서에서 실행 설정 원문 값과 알릴 사실을 읽는다(읽기만)."""
     warnings: list[UpgradeWarning] = []
+    # 팩터마다 **실효** 결측 정책. 생략한 팩터는 1.1 기본값으로 계산됐으므로 그 값으로 센다 — 명시한
+    # 팩터만 세면 "a 생략(drop) + b zero" 가 warning 없이 zero 가 되어 a 의 결측 처리가 조용히
+    # 바뀐다(P2-09 리뷰 DEFECT-P1-1, main P2-02 브리지와 같은 판정).
     policies = [
-        (f"{pointer}/missing_policy", graph["missing_policy"])
+        (
+            _factor_label(document, pointer),
+            f"{pointer}/missing_policy",
+            graph.get("missing_policy", _RETIRED_DEFAULT_MISSING_POLICY),
+            "missing_policy" not in graph,
+        )
         for pointer, graph in _graphs(document)
-        if "missing_policy" in graph
     ]
-    first_pointer, first_policy = policies[0] if policies else (None, None)
-    conflicts = [(pointer, value) for pointer, value in policies[1:] if value != first_policy]
+    first_label, first_pointer, first_policy, _ = (
+        policies[0] if policies else (None, None, None, False)
+    )
+    conflicts = [entry for entry in policies[1:] if entry[2] != first_policy]
     if conflicts:
+        changed = [
+            f"{label}: {value!r}->{first_policy!r}" + (" (생략=1.1 기본값)" if omitted else "")
+            for label, _pointer, value, omitted in conflicts
+        ]
         warnings.append(
             UpgradeWarning(
                 MISSING_POLICY_CONFLICT_CODE,
-                conflicts[0][0],
+                conflicts[0][1],
                 "팩터마다 결측 처리가 달라 첫 팩터의 값만 실행 설정으로 옮겼습니다. 새 형식에서는 "
-                "결측 처리가 전략 전체에 하나입니다. 실행 설정에서 확인하세요 — "
-                f"used={first_policy!r} from={first_pointer} "
-                f"conflicts={[(pointer, value) for pointer, value in conflicts]!r}",
+                "결측 처리가 전략 전체에 하나라, 다른 값을 쓰던 팩터는 결측 처리가 바뀝니다. 실행 "
+                "설정에서 확인하세요 — "
+                f"used={first_policy!r} from={first_label}({first_pointer}) changed={changed}",
             )
         )
     portfolio = document.get("portfolio")

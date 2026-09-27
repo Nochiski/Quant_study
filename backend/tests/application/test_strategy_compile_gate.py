@@ -665,3 +665,47 @@ def test_compile_generated_promotion_nodes_are_not_reserved_id_errors() -> None:
     assert compiled.ok, _errors(compiled)
     assert compiled.spec is not None
     assert compiled.spec.factors[1].graph.output_node_id == "__promote_above"
+
+
+# 원주가 잎이 과거 세션 연산자 바로 밑이 아니라 같은 날 연산 여러 단계 밑에 있는 그래프(리뷰 #232
+# DEFECT-232-07). 한 단계 입력만 보는 판정은 이 경고를 잃는다.
+_NESTED_RAW_PRICE = {
+    "rank_of_scaled_price": (
+        """        - {kind: field, node_id: px, field_id: price.close}
+        - {kind: constant, node_id: two, value: 2.0}
+        - {kind: binary, node_id: scaled, operator: multiply, left_node_id: px, right_node_id: two}
+        - {kind: cross_sectional, node_id: ranked, operator: rank, input_node_id: scaled}
+        - {kind: time_series, node_id: smoothed, operator: mean, input_node_id: ranked, window: 20}
+""",
+        "smoothed",
+    ),
+    "ratio_under_window": (
+        """        - {kind: field, node_id: px, field_id: price.close}
+        - {kind: field, node_id: cap, field_id: price.market_cap}
+        - {kind: binary, node_id: ratio, operator: divide, left_node_id: px, right_node_id: cap}
+        - {kind: time_series, node_id: ratio_vol, operator: std, input_node_id: ratio, window: 20}
+""",
+        "ratio_vol",
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_NESTED_RAW_PRICE))
+def test_a_raw_price_several_steps_below_a_past_session_operator_warns(shape: str) -> None:
+    nodes, output = _NESTED_RAW_PRICE[shape]
+    factor = (
+        "  - factor_id: nested\n"
+        '    label: "중첩"\n'
+        "    direction: high\n"
+        "    weight: 0.4\n"
+        "    graph:\n"
+        "      nodes:\n"
+        f"{nodes}"
+        f"      output_node_id: {output}\n"
+    )
+    source = _GOLDEN_ADJUSTED.replace("portfolio:\n", f"{factor}portfolio:\n", 1)
+
+    compiled = _compile(source, _Catalog(_RAW_CLOSE, _ADJ_CLOSE, _MARKET_CAP))
+
+    assert compiled.ok, _errors(compiled)
+    assert _unadjusted(compiled) == [("/factors/1/graph/nodes/0/field_id", "px")]

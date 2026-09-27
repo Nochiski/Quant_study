@@ -1,0 +1,43 @@
+# lang2 완료 정의 아이디어 2 — 저PBR + 고ROE(spec 5절). 팩터 두 개를 결합 전 순위로 맞춰 더한다
+# (signal.normalization 기본값 rank). 나눗셈의 분모는 레시피 빌더가 새로 만드는 잎이다(spec D2).
+schema_version: "1.2"
+title: "저PBR + 고ROE"
+factors:
+  - factor_id: pbr
+    label: "PBR"
+    direction: low
+    graph:
+      nodes:
+        - kind: field
+          node_id: market_cap
+          field_id: price.market_cap
+        - kind: field
+          node_id: book_equity
+          field_id: financial.book_equity
+        - kind: binary
+          node_id: pbr
+          operator: divide
+          left_node_id: market_cap
+          right_node_id: book_equity
+      output_node_id: pbr
+  - factor_id: roe
+    label: "ROE"
+    direction: high
+    graph:
+      nodes:
+        - kind: field
+          node_id: net_income
+          field_id: financial.net_income
+        - kind: field
+          node_id: book_equity
+          field_id: financial.book_equity
+        - kind: binary
+          node_id: roe
+          operator: divide
+          left_node_id: net_income
+          right_node_id: book_equity
+      output_node_id: roe
+portfolio:
+  selection_count: 20
+risk:
+  max_name_weight: 0.05

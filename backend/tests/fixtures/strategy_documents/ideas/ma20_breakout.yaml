@@ -1,0 +1,32 @@
+# lang2 완료 정의 아이디어 3 — 20일 이평 돌파(spec 5절). 정본 형태는 노드 4개, 그중 잎 2개다(spec D2):
+# close → ma20 → 잎 close_2 → breakout(gt, left=close_2, right=ma20). 체인 머리(close)를 다시 읽지
+# 않는다. 비교 출력(참/거짓)은 compile 이 0/1 점수로 승격한다(P2-07).
+schema_version: "1.2"
+title: "20일 이평 돌파"
+factors:
+  - factor_id: ma20_breakout
+    label: "20일 이평 돌파"
+    direction: high
+    graph:
+      nodes:
+        - kind: field
+          node_id: close
+          field_id: price.close
+        - kind: time_series
+          node_id: ma20
+          operator: mean
+          input_node_id: close
+          window: 20
+        - kind: field
+          node_id: close_2
+          field_id: price.close
+        - kind: comparison
+          node_id: breakout
+          operator: gt
+          left_node_id: close_2
+          right_node_id: ma20
+      output_node_id: breakout
+portfolio:
+  selection_count: 20
+risk:
+  max_name_weight: 0.05

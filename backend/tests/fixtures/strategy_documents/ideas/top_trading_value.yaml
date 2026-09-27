@@ -1,0 +1,28 @@
+# lang2 완료 정의 아이디어 4 — 거래대금 상위 20%(spec 5절). 횡단면 유니버스 조건(top_percent, P2-05)으로
+# 기준일마다 거래대금 상위 20% 종목만 남기고, 그 안에서 60 세션 모멘텀으로 고른다.
+schema_version: "1.2"
+title: "거래대금 상위 20%"
+eligibility:
+  rules:
+    - field_id: price.trading_value
+      operator: top_percent
+      value: 0.2
+factors:
+  - factor_id: momentum_60
+    label: "60일 모멘텀"
+    direction: high
+    graph:
+      nodes:
+        - kind: field
+          node_id: close
+          field_id: price.close
+        - kind: time_series
+          node_id: mom_60
+          operator: momentum
+          input_node_id: close
+          window: 60
+      output_node_id: mom_60
+portfolio:
+  selection_count: 20
+risk:
+  max_name_weight: 0.05

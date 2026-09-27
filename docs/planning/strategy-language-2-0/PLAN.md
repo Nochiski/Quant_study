@@ -6,7 +6,7 @@ current_phase: P1,P2
 current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08
 active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08]
 parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08]
-last_updated: 2026-09-27T09:50:42+09:00
+last_updated: 2026-09-27T10:19:10+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 11
@@ -29,7 +29,7 @@ progress_percent: 21
 | Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `11 / 29` |
-| Aggregated at | `2026-09-27 09:50 KST` |
+| Aggregated at | `2026-09-27 10:19 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -718,7 +718,7 @@ Phase exit:
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `APPROVED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility` · 1차 REQUEST_CHANGES(P2 2·P3 2) → `641c6f3b`·`efd6a768` · 2~5차 **APPROVE**. 3차 재배치 때 첫 커밋 `a35c1e40` 에 P2-04 새 테스트 한 줄의 enum 개명을 넣었고, P2-04 3차 재현 테스트 `8587d413` 를 더했다. P2-04 5차 반영 tip `35089901` 위로 rebase(코드 변경분 동일). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `APPROVED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 **APPROVE**(blocking 0 · P2 1 · P3 4, 전부 반영: `77bd713c`·`7b707660`) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base `lang2/integration`(통합 머지 `c72f6257` 을 merge, 처음 착수는 P2-06 tip `36060527`) · 커밋 14개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → PLAN → 리뷰 P1 반영: 그래프 밖 필드 참조 → PLAN → 리뷰 P3-2 테스트) + 리뷰 반영 문서 · 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `IN_REVIEW` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 워크트리 `wt-lang2-p2-08`, 브랜치 `feat/lang2-p2-08-ideas` · base P2-07 tip `945fd081`(착수 `6e397a3b`, 이후 P2-07 을 merge 로 따라감) · 커밋 8개(BACKLOG-015 → mock 필드 → 아이디어 fixture·테스트 → 스파이크 결론 → 스토리 비고 → PLAN → 리드 결정 반영: 빌더 node_id → 문서·이 PLAN) · `GROUP_SERIES` 는 `unsupported` 유지(원장에 PIT 섹터 시계열 없음) · 게이트는 push tip 에서 실측(PR 본문) |
+| [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `IN_REVIEW` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 워크트리 `wt-lang2-p2-08`, 브랜치 `feat/lang2-p2-08-ideas` · base P2-07 tip `945fd081`(착수 `6e397a3b`, 이후 P2-07 을 merge 로 따라감) · 커밋 8개(BACKLOG-015 → mock 필드 → 아이디어 fixture·테스트 → 스파이크 결론 → 스토리 비고 → PLAN → 리드 결정 반영: 빌더 node_id → 문서·이 PLAN) · `GROUP_SERIES` 는 `unsupported` 유지(원장에 PIT 섹터 시계열 없음) · `review_lang2_p1_06` 1차 REQUEST_CHANGES(P1 1·P2 1·P3 3) → 반영(P2 는 BACKLOG-016) · 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `WAITING` | — |
 
 Phase exit:
@@ -828,6 +828,7 @@ Phase exit:
 | `P2-05` | `review_lang2_p2_0405` | 4 | `APPROVE` | src 는 이전 APPROVE본과 바이트 동일, 재현 테스트 `8587d413` 는 균등 대체를 지우면 6건 red 로 판별력 있음. 첫 커밋의 enum 개명 한 줄은 P2-05 가 enum 을 바꾸므로 필요한 변경으로 확인. 해시 불변 |
 | `P2-05` | `review_lang2_p2_0405` | 5 | `APPROVE` | 4차본과 src 바이트 동일, 해시 불변. P2-04 R5 반영(`<=`) 뒤 재배치 |
 | `P2-06` | `review_lang2_p2_06` | 1 | `APPROVE` | blocking 0 · P2 1 · P3 4. acceptance 전 항목 충족, 돌연변이 11종 중 10종 red(M6 정규화 모집단 변형은 동치). **P2-1**: `_risk_value` 의 공개일 조건을 지워도 테스트가 전부 초록 — 역가중 팩터가 합성 루프 밖이라 그 한 줄이 유일한 look-ahead 가드다. 반영: 공개일 초과 → `MISSING_RISK`·선정 불변 테스트, 그 조건만 지우면 1건 red 확인(`77bd713c`). **P3**: form-list 삭제 가드 fixture 의 `saved_factor` → `risk.risk_factor_id` 참조, `risk_factor_id` 설명에 적용 조건, `strategy.risk.risk_field` 메시지에 값(`77bd713c`·`7b707660`), PR 본문 e2e 합계에 "9 did not run" |
+| `P2-08` | `review_lang2_p1_06` | 1 | `REQUEST_CHANGES` | P1 1 · P2 1 · P3 3 · 관찰 1. **DEFECT-P208-001(P1)**: 아이디어 2 에 자본총계 ≤ 0 조건이 없어 자본잠식 적자 기업이 PBR·ROE 두 팩터 모두 최상위(원장 실측 28개) → `financial.book_equity gt 0` 규칙 + mock 자본잠식 종목 재현 테스트(수정 전 red). **DEFECT-P208-002(P2)**: 0/1 이진 팩터 선정이 `security_id` 순서 → 리드 결정으로 BACKLOG-016(P5-03). P3: spec D2 옛 문장 정리, P5-01 슬롯·삽입 순서 예약, 아이디어 4 당일 거래대금 한계 주석. 관찰(assistant DB 격리 누락)은 AI 계획 몫이라 이 PR 밖 |
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
@@ -844,6 +845,17 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-27 — P2-08 1차 리뷰(REQUEST_CHANGES) 반영. **DEFECT-P208-001(P1)**: 아이디어 2 에 유니버스 조건
+  `financial.book_equity gt 0` 을 넣었다. 자본잠식이면 PBR 이 음수라 `low` 1위가 되고, 적자까지 겹치면 ROE 가
+  음수/음수 = 양수라 두 팩터 모두 최상위다(리뷰 실측: 미리보기 기간 보통주 28개). mock 합성 구간의 세 번째
+  종목(`sec-035420-1`)을 자본잠식 적자 기업으로 만들고, 규칙 없이 그 종목이 합성 1위로 선정됨(red)을 확인한 뒤
+  규칙으로 빠지는지 단언하는 테스트를 넣었다. 나머지 아이디어 점검: 1·4(모멘텀)는 가격 비율이라 분모가 양수이고
+  `momentum` 은 분모 0 을 결측으로 둔다. 3 은 나눗셈이 없다. 5 의 변동성은 표준편차라 음수가 없고 0 이하는
+  `MISSING_RISK` 로 빠진다. 부호 함정은 아이디어 2 뿐이다. 관련 한계로 원장 당기순이익은 최신 공시가 분기면
+  3개월, 사업보고서면 12개월 값이라 ROE 가 기간을 섞는다(fixture 주석). **DEFECT-P208-002(P2)** 는 리드 결정으로
+  BACKLOG-016(담당 P5-03)에 기록만 했다. **P3**: spec D2 의 옛 `<operator>_<n>` 문장을 정리하고 "접미사 규칙만
+  `suggestNodeId` 와 같다"로 좁혔다. 빌더의 부가 잎 삽입 위치·꼬리 슬롯 규칙을 P5-01 acceptance 에 예약했다.
+  아이디어 4 가 당일 거래대금 한 값으로 자르는 한계를 fixture 주석에 적었다.
 - 2026-09-27 — P2-08 리드 결정 반영. (1) node_id 는 spec D2 빌더 규칙이 정본이다. `ideas/*.yaml` 5개의
   단계 node_id 를 빌더 이름(`mean`·`gt`·`momentum`·`std`·`divide`)으로 바꾸고 spec D2 아이디어 3 예시와
   WORKFLOW P2-08 문장을 고쳤다. P5-01 acceptance 에 "빌더 node_id 생성 규칙이 ideas fixture 와 일치
@@ -1493,6 +1505,22 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **처리**: P2-08(`4b4ccfea`). `group.rank` 의 `unit_rule` 을 `DIMENSIONLESS` 로, 검증기 추론을 무차원으로
   바꿨다. 재현 테스트 `test_factor_operators.py::test_sector_ranks_of_fields_with_different_units_can_be_added`
   (P2-07 tip 에서 `factor.graph.unit_mismatch` 로 실패 확인)와 대조 `test_sector_neutralization_keeps_the_input_unit`.
+
+### BACKLOG-016: 0/1 이진 팩터의 선정이 동점 해소 순서(`security_id`)로 정해진다 (P2-08 리뷰 DEFECT-P208-002)
+
+- **상황**: 아이디어 3(20일 이평 돌파, `ideas/ma20_breakout.yaml`)은 WORKFLOW P2-08 이 정한 대로 비교 노드
+  `gt(close_2, mean)` 의 참/거짓을 compile 이 0/1 로 승격한 점수다. `selection_count: 20`, 결합 전 정규화
+  `rank`.
+- **인풋**: 이평 위 종목이 20개를 넘는 평범한 기준일(실데이터에서 보통 수백 개)의 미리보기·백테스트.
+- **에러 위치**: `backend/src/strategy_workbench/domain/factor/_statistics.py:8-19` `cross_sectional_rank` 가
+  동점에 평균 순위를 주므로 1 인 종목이 전부 같은 점수다. `domain/portfolio/_compiler.py:422-425` 가
+  `(-composite_score, security_id)` 로 정렬해 상위 20 을 자른다.
+- **위험성**: "20일 이평 돌파" 전략의 실제 선정은 "이평 위 종목 중 종목코드가 가장 작은 20개"다. 결정적이라
+  테스트는 통과하지만, 종목코드 순서(대체로 상장 연차)라는 의도하지 않은 요인이 수익률을 만들고 사용자는
+  결과를 돌파 효과로 읽는다(silent 오해석). 아이디어 3 만이 아니라 0/1 이진 팩터 전반의 체계적 편향이다.
+- **해결 후보**: (a) 보조 팩터로 동점을 해소한다(예: 이평 괴리율 같은 연속 점수를 2순위 키로). (b) 동점
+  종목 전원을 균등 비중으로 담는다(`selection_count` 를 넘으면 규칙 필요).
+- **담당**: `P5-03`(아이디어 e2e 를 확정할 때 해결 방식을 정한다). WORKFLOW P5-03 에 예약했다.
 
 ## 갱신 절차
 

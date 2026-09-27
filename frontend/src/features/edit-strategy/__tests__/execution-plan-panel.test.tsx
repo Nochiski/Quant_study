@@ -105,6 +105,7 @@ const factor = (
     factorId,
     label,
     request,
+    document: null,
     explanation: explanation(request.graph, suffix),
   };
 };

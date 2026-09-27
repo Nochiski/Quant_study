@@ -145,6 +145,7 @@ const plannedFactor = (
     graph: graphValue,
     parameter_ids: [],
   },
+  document: null,
   explanation: graphExplanation,
 });
 

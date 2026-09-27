@@ -85,3 +85,39 @@ def promote_boolean_factor_outputs(spec: StrategySpec) -> StrategySpec:
     if factors == spec.factors:
         return spec
     return replace(spec, factors=factors)
+
+
+def _demote(factor: FactorSignal) -> FactorSignal:
+    graph = factor.graph
+    output_id, true_id, false_id = promotion_node_ids(factor.factor_id)
+    if graph.output_node_id != output_id or len(graph.nodes) < 3:
+        return factor
+    *authored, true_node, false_node, condition = graph.nodes
+    if not (
+        isinstance(true_node, ConstantNode)
+        and true_node.node_id == true_id
+        and isinstance(false_node, ConstantNode)
+        and false_node.node_id == false_id
+        and isinstance(condition, ConditionalNode)
+        and condition.node_id == output_id
+    ):
+        return factor
+    candidate = replace(
+        factor,
+        graph=FactorGraph(nodes=tuple(authored), output_node_id=condition.predicate_node_id),
+    )
+    # 정확한 역함수만 인정한다: 걷어 낸 그래프를 다시 승격하면 원래 그래프가 나와야 한다.
+    return candidate if _promote(candidate) == factor else factor
+
+
+def demote_boolean_factor_outputs(spec: StrategySpec) -> StrategySpec:
+    """`promote_boolean_factor_outputs` 가 붙인 노드를 걷어 낸 spec(사용자가 쓴 그래프).
+
+    표시 전용이다. 의미 diff 가 사용자가 쓴 변경만 말하게 할 때 쓴다(BACKLOG-014): 위치 비교는
+    사용자 노드 하나를 더할 때 끝에 붙은 승격 노드 셋을 "바뀐 것"으로 보인다. 승격은 사용자 그래프의
+    함수라 걷어 낸 두 spec 이 같으면 원래 spec(과 `spec_hash`)도 같다. 실행·해시에는 쓰지 않는다.
+    """
+    factors = tuple(_demote(factor) for factor in spec.factors)
+    if factors == spec.factors:
+        return spec
+    return replace(spec, factors=factors)

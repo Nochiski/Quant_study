@@ -7,6 +7,7 @@ import {
   type FactorGraphRequest,
   type StrategySpec,
 } from "../../../shared/api";
+import { valueAtPointer } from "../../../shared/lib/yaml12";
 import {
   isSchemaContractCompatible,
   type ContractInspectorSource,
@@ -18,6 +19,12 @@ export type FactorPlanRequest = {
   factorId: string;
   label: string;
   request: FactorGraphRequest;
+  /**
+   * 사용자가 문서에 적은 이 팩터 그래프의 노드 id(문서 순서)와 출력 노드 id. 컴파일된 그래프
+   * (`request.graph`)에는 compile 이 붙인 노드가 더 있을 수 있다(P2-07 boolean 출력 승격). 문서를
+   * 읽지 못하면 null 이고, 그때는 컴파일된 그래프를 그대로 문서로 본다.
+   */
+  document: { nodeIds: readonly string[]; outputNodeId: string | null } | null;
 };
 
 export type PlannedFactor = FactorPlanRequest & {
@@ -140,11 +147,43 @@ export const prepareExecutionPlans = (
     status: "prepared",
     expectedRegistryVersion: registryVersion,
     expectedDataSnapshotId: datasetVersion,
-    requests: buildFactorPlanRequests(spec),
+    requests: buildFactorPlanRequests(spec, documentTree(state)),
   };
 };
 
-const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
+/** 컴파일된 spec 과 같은 버전의 parse tree. 다른 버전이면 문서 멤버십을 판정하지 않는다(null). */
+const documentTree = (state: DocumentState): unknown =>
+  state.parse?.status === "ok" && state.parsedVersion === state.sourceVersion
+    ? state.parse.tree
+    : null;
+
+const documentGraph = (
+  tree: unknown,
+  factorIndex: number,
+): FactorPlanRequest["document"] => {
+  if (tree === null) return null;
+  const pointer = factorGraphPointer(factorIndex);
+  const nodes = valueAtPointer(tree, `${pointer}/nodes`);
+  if (!nodes.present || !Array.isArray(nodes.value)) return null;
+  const nodeIds = nodes.value.map((node: unknown) =>
+    typeof node === "object" &&
+    node !== null &&
+    typeof (node as Record<string, unknown>).node_id === "string"
+      ? ((node as Record<string, unknown>).node_id as string)
+      : "",
+  );
+  const output = valueAtPointer(tree, `${pointer}/output_node_id`);
+  return {
+    nodeIds,
+    outputNodeId:
+      output.present && typeof output.value === "string" ? output.value : null,
+  };
+};
+
+const buildFactorPlanRequests = (
+  spec: StrategySpec,
+  tree: unknown,
+): FactorPlanRequest[] => {
   const parameterIds = (spec.parameters ?? []).map(
     (parameter) => parameter.parameter_id,
   );
@@ -157,6 +196,7 @@ const buildFactorPlanRequests = (spec: StrategySpec): FactorPlanRequest[] => {
       graph: factor.graph,
       parameter_ids: parameterIds,
     },
+    document: documentGraph(tree, factorIndex),
   }));
 };
 
@@ -178,13 +218,50 @@ export const factorIndexAtPointer = (
   return Number.isSafeInteger(index) ? index : null;
 };
 
+/**
+ * 컴파일된 그래프 노드의 출처(BACKLOG-014). `document`는 사용자가 적은 노드다. 문서에 없는 노드는
+ * compile 이 붙인 것이다 — 지금은 boolean 출력 승격(P2-07, `domain/strategy/_promotion.py`)뿐이고,
+ * 그래프 출력이 된 조건 노드가 `boolean-score`(참/거짓을 1/0 점수로), 거기 딸린 상수가 `support`다.
+ * 판정은 문서 멤버십으로만 한다: 승격 노드 이름 규칙(접두사)을 frontend 에 적지 않는다.
+ */
+export type CompiledNodeOrigin = "document" | "boolean-score" | "support";
+
+export const compiledNodeOrigin = (
+  factor: FactorPlanRequest,
+  nodeId: string,
+): CompiledNodeOrigin => {
+  // 컴파일된 그래프에도 없는 id(끊긴 참조)는 붙인 노드가 아니다: 문서 쪽 결함으로 그대로 보인다.
+  if (
+    factor.document === null ||
+    factor.document.nodeIds.includes(nodeId) ||
+    !factor.request.graph.nodes.some((node) => node.node_id === nodeId)
+  )
+    return "document";
+  return nodeId === factor.request.graph.output_node_id
+    ? "boolean-score"
+    : "support";
+};
+
+/** 사용자가 적은 출력 노드 id. 승격된 그래프면 원래 출력(조건 노드의 predicate)이다. */
+export const documentOutputNodeId = (factor: FactorPlanRequest): string =>
+  factor.document?.outputNodeId ?? factor.request.graph.output_node_id;
+
+/**
+ * 노드가 가리키는 문서 위치. 문서 노드는 문서 안 순서로 찾는다. `boolean-score`는 원래 출력 노드를
+ * 짚고("소스 열기"가 사용자가 쓴 줄로 간다), `support`는 문서에 대응하는 줄이 없어 null 이다.
+ */
 export const nodePointerById = (
   factor: FactorPlanRequest,
   nodeId: string,
 ): string | null => {
-  const index = factor.request.graph.nodes.findIndex(
-    (node) => node.node_id === nodeId,
-  );
+  const origin = compiledNodeOrigin(factor, nodeId);
+  if (origin === "support") return null;
+  const target =
+    origin === "boolean-score" ? documentOutputNodeId(factor) : nodeId;
+  const index =
+    factor.document === null
+      ? factor.request.graph.nodes.findIndex((node) => node.node_id === target)
+      : factor.document.nodeIds.indexOf(target);
   return index < 0 ? null : factorNodePointer(factor.factorIndex, index);
 };
 

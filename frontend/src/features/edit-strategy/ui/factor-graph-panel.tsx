@@ -183,6 +183,9 @@ const GraphNode = ({
 }) => {
   const selected =
     node.pointer !== null && pointerSelectsNode(selectedPointer, node.pointer);
+  // compile 이 붙인 출력 노드는 사용자가 이름을 지은 적이 없어 사람 말로 부른다(BACKLOG-014).
+  const booleanScore = node.origin === "boolean-score";
+  const name = booleanScore ? t("plan.node.booleanScore") : node.nodeId;
   return (
     <li
       className={`factor-graph__node factor-graph__node--${node.kind}`}
@@ -202,10 +205,14 @@ const GraphNode = ({
           className="factor-graph__node-select"
           disabled={node.pointer === null}
           onClick={() => node.pointer !== null && onSelectPointer(node.pointer)}
-          aria-label={t("graph.selectNode").replace("{node}", node.nodeId)}
+          aria-label={t("graph.selectNode").replace("{node}", name)}
         >
-          <strong>{node.nodeId}</strong>
-          <code>{node.operation}</code>
+          <strong>{name}</strong>
+          {booleanScore ? (
+            <span>{t("plan.node.booleanScore.description")}</span>
+          ) : (
+            <code>{node.operation}</code>
+          )}
         </button>
         {node.isOutput ? <Badge tone="accent">OUTPUT</Badge> : null}
         {!node.planned ? (

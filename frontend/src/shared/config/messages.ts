@@ -1067,6 +1067,9 @@ const ko = {
   "plan.sessions": "세션",
   "plan.pitPolicy": "PIT 정책",
   "plan.missingPolicy": "결측 정책",
+  "plan.node.booleanScore": "참/거짓을 1/0으로",
+  "plan.node.booleanScore.description":
+    "출력이 참/거짓이라 점수로 쓰도록 컴파일이 붙인 단계입니다. 참은 1, 거짓은 0입니다.",
   "plan.graphFingerprint": "Graph fingerprint",
   "plan.planFingerprint": "Plan/cache fingerprint",
   "plan.table": "백엔드가 컴파일한 topological factor execution plan",
@@ -2583,6 +2586,9 @@ export const messages = {
     "plan.sessions": "sessions",
     "plan.pitPolicy": "PIT policy",
     "plan.missingPolicy": "Missing policy",
+    "plan.node.booleanScore": "True/false as 1/0",
+    "plan.node.booleanScore.description":
+      "Added by compile so a true/false output can be used as a score: true is 1, false is 0.",
     "plan.graphFingerprint": "Graph fingerprint",
     "plan.planFingerprint": "Plan/cache fingerprint",
     "plan.table": "Backend-compiled topological factor execution plan",

@@ -139,6 +139,7 @@ $phaseGoals = [ordered]@{
     "A" = "Backend: ports, storage, HTTP, providers"
     "B" = "Frontend: settings, entity, sidebar, e2e"
     "C" = "Phase A/B audit follow-up"
+    "D" = "Backtest result explanation (US-DM-08)"
 }
 
 $unknownPhases = @($rows | Where-Object Phase -notin $phaseGoals.Keys)

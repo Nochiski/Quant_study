@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: IN_REVIEW
-current_phase: C
-current_pr: C-03
-active_prs: [C-03]
+project_status: IN_PROGRESS
+current_phase: D
+current_pr: D-01
+active_prs: [D-01]
 parallel_window: []
-last_updated: 2026-09-27T09:17:58+09:00
-planned_prs: 16
-merged_prs: 15
-approved_prs: 15
-progress_percent: 94
+last_updated: 2026-09-27T10:02:18+09:00
+planned_prs: 19
+merged_prs: 16
+approved_prs: 16
+progress_percent: 84
 ---
 
 # AI 어시스턴트 실시간 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 94
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
-| Current phase | `C` |
-| Current/next PR | `C-03` |
-| Active PR | `C-03` |
-| Progress | `15 / 16 merged (94%)` |
-| Approved | `15 / 16` |
-| Aggregated at | `2026-09-27 09:17 KST` |
+| Project status | `IN_PROGRESS` |
+| Current phase | `D` |
+| Current/next PR | `D-01` |
+| Active PR | `D-01` |
+| Progress | `16 / 19 merged (84%)` |
+| Approved | `16 / 19` |
+| Aggregated at | `2026-09-27 10:02 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -182,8 +182,9 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | P0 | Planning package | 1 | 1 | `MERGED` |
 | A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
-| C | Phase A/B audit follow-up | 3 | 2 | `IN_REVIEW` |
-| **Total** |  | **16** | **15** | **94%** |
+| C | Phase A/B audit follow-up | 3 | 3 | `MERGED` |
+| D | Backtest result explanation (US-DM-08) | 3 | 0 | `IN_PROGRESS` |
+| **Total** |  | **19** | **16** | **84%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -259,7 +260,7 @@ C-01이 매뉴얼을 고치며 닫았고(C-02가 스크립트 경로와 변수 �
 |---|---|---|---|---|---|
 | [x] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `MERGED` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` · [#190](https://github.com/Nochiski/Quant_study/pull/190) · 최종 `707cd4f9` · main 머지 `a3cc5f8b` |
 | [x] | `C-02` | Phase B 감사 비차단 7건: 4xx 거부 문구 표 entity 단일화(생성 code 합집합), 적용 후 백테스트 blocked 시 요청 폐기·알림, SSE 좁히기 표 타입 가드, CORS 기본 origin 단일 owner, 두 page 어시스턴트 배선 훅, backlog 2건 담당 지정, PLAN 병합 규칙 정정 | C-01 | `MERGED` | [#192](https://github.com/Nochiski/Quant_study/pull/192) · 최종 `0a030884`, 머지 `16e6e994` · `review_ai_c_02` 1차 REQUEST_CHANGES(P1 1: 팩터 계획 조회 중 게이트 일시 닫힘을 blocked로 읽어 적용 후 백테스트 미실행) → `settling` 신호로 대기 유지 + 팩터 창 변경 e2e 시나리오 → 2차 APPROVE(blocking·non-blocking 0) · 전체 e2e 24/24 |
-| [ ] | `C-03` | C 절 backlog 2건: 검색 상한 통지 전용 `ChatEvent`(`SearchBudgetExhausted`, 두 adapter·저장·SSE·SDK·리듀서·사이드바 안내 ko/en), `ChatMessageView.turn_id`와 id 짝짓기, assistant DB v2 제자리 업그레이드(옛 통지 행 재기록·`turn_id` 채움), 대본 "검색 상한" 시나리오와 US-CS-04 e2e | C-02 | `IN_REVIEW` | 구현자 `impl-ai-c03`, 워크트리 `wt-ai-c03`, 브랜치 `feat/ai-c-03-backlog`(origin/main `a4ccfd7a` 위) · PR 본문에 게이트 결과 |
+| [x] | `C-03` | C 절 backlog 2건: 검색 상한 통지 전용 `ChatEvent`(`SearchBudgetExhausted`, 두 adapter·저장·SSE·SDK·리듀서·사이드바 안내 ko/en), `ChatMessageView.turn_id`와 id 짝짓기, assistant DB v2 제자리 업그레이드(옛 통지 행 재기록·`turn_id` 채움), 대본 "검색 상한" 시나리오와 US-CS-04 e2e | C-02 | `MERGED` | 구현자 `impl-ai-c03`, 워크트리 `wt-ai-c03`, 브랜치 `feat/ai-c-03-backlog`(origin/main `a4ccfd7a` 위) · PR 본문에 게이트 결과 · main 머지 `5213ffe2`(#204) |
 
 Phase exit:
 
@@ -317,6 +318,25 @@ Phase exit:
   `ChatMessageView.turn_id: string | null`, `assistTranscript`의 id 짝짓기. 순서 기반 테스트는 메시지
   수와 턴 수가 어긋나는 두 경우(앞에 고아 질문, 질문 없는 턴)로 강화했다. v1 행은 "작성 시각 이전에
   시작한 마지막 턴"으로 채우고 그런 턴이 없으면 NULL이다.
+
+## D — 백테스트 결과 설명 (US-DM-08)
+
+설계는 [결과 설명 spec](../../superpowers/specs/2026-09-27-ai-backtest-result-explain.md)이 정본이다.
+결과 화면에 기존 사이드바를 붙이고, 실행 하나에 붙는 결과 세션에서 모델이 서버가 읽은 결과 요약만
+받아 설명한다. 결과 세션은 설명 전용이라 제안·검색이 없다. 지표의 쉬운 한글 이름·뜻은 frontend
+i18n이 `metric_id`를 키로 소유한다.
+
+| 완료 | PR | 결과물 | Dependency | 상태 | Review |
+|---|---|---|---|---|---|
+| [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_PROGRESS` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` |
+| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `PLANNED` | 브랜치 `feat/ai-d-02-result-explain-backend` |
+| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `PLANNED` | 브랜치 `feat/ai-d-03-result-explain-frontend` |
+
+Phase exit:
+
+- [ ] spec 완료 정의 1~6 기록.
+- [ ] US-DM-08 `구현됨-e2e`, 전체 e2e 게이트에서 스토리 e2e 통과.
+- [ ] SoT·책임분리 점검 blocking 0.
 
 ## Review 기록
 
@@ -376,6 +396,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-27 — D 절 신설(US-DM-08 백테스트 결과 설명). 사용자 지시 "전략 언어는 진짜 전략만 담고, AI를 통해 사용성까지 증대"·"전부 다 진행해". 설계 spec `2026-09-27-ai-backtest-result-explain.md`, PR 셋(D-01 spec, D-02 backend, D-03 frontend·e2e)을 스택으로 올린다. 집계 도구에 D phase를 더했다. assistant_sqlite 스키마는 C-03이 v2를 가져가고(#204) D-02가 v3(`chat_sessions.run_id`)로 그 뒤에 올린다(리드 결정).
 - 2026-09-27 — **C-03 착수·구현**(`impl-ai-c03`, `wt-ai-c03`, `feat/ai-c-03-backlog`). C 절 backlog 2건을
   한 PR로 닫는다. 검색 상한 통지는 전용 이벤트 `SearchBudgetExhausted`가 되어 두 adapter가 같은 순간에
   내고, 사이드바는 "웹 검색" 칩 대신 안내 문구를 보인다. 메시지는 `turn_id`를 갖고 화면은 그 값으로

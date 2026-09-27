@@ -4177,6 +4177,35 @@ export type StrategyDocumentUpgradeDriftResponse = {
 };
 
 /**
+ * StrategyDocumentUpgradeUnsupportedNodeDetail
+ *
+ * 1.2 에 없는 `saved_*` 노드 때문에 업그레이드를 거절했다(spec D7, P2-09).
+ *
+ * `pointer` 는 그 노드의 kind 자리다.
+ */
+export type StrategyDocumentUpgradeUnsupportedNodeDetail = {
+  /**
+   * Code
+   */
+  code: "strategy_document.upgrade_unsupported_node";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Pointer
+   */
+  pointer: string;
+};
+
+/**
+ * StrategyDocumentUpgradeUnsupportedNodeResponse
+ */
+export type StrategyDocumentUpgradeUnsupportedNodeResponse = {
+  detail: StrategyDocumentUpgradeUnsupportedNodeDetail;
+};
+
+/**
  * StrategyDraft
  */
 export type StrategyDraft = {
@@ -5317,12 +5346,40 @@ export type UniversePreview = {
 };
 
 /**
+ * UpgradeWarning
+ *
+ * 업그레이드는 됐지만 사용자가 알아야 하는 사실 하나. `message` 는 한글 문장 + 기계 디테일.
+ */
+export type UpgradeWarning = {
+  /**
+   * Code
+   */
+  code:
+    | "strategy_document.upgrade_missing_policy_conflict"
+    | "strategy_document.upgrade_weighting_rule_changed"
+    | "strategy_document.upgrade_environment_unavailable";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Pointer
+   */
+  pointer: string;
+};
+
+/**
  * UpgradedDocument
  *
- * A 1.0 source rewritten as 1.1 text plus what that text compiles to (spec D3).
+ * 은퇴 schema 원문을 현재 버전으로 다시 쓴 결과와 그 원문의 compile 결과(spec D3·D7).
+ *
+ * `environment` 는 옛 문서의 `data`·`execution`·`missing_policy` 로 만든 실행 설정이다. 옮기지
+ * 못했으면(값이 없거나 읽히지 않음) 비어 있고, 그 사유는 `warnings` 가 자리와 함께 짚는다 —
+ * 기본값으로 지어내지 않는다. 화면은 이 값으로 실행 설정을 채운다(P3-02).
  */
 export type UpgradedDocument = {
   compiled: CompiledDocument;
+  environment: RunEnvironment | null;
   format: SourceFormat;
   /**
    * Source
@@ -5332,6 +5389,10 @@ export type UpgradedDocument = {
    * Source Hash
    */
   source_hash: string;
+  /**
+   * Warnings
+   */
+  warnings: Array<UpgradeWarning>;
 };
 
 /**
@@ -7002,12 +7063,13 @@ export type UpgradeStrategyDocumentErrors = {
   /**
    * Response 422 Upgradestrategydocument
    *
-   * Syntax errors, a non-1.0 document, or upgrade rule drift
+   * Syntax errors, a document with no upgrade chain, a saved-reference node, or upgrade rule drift
    */
   422:
     | StrategyDocumentInvalidResponse
     | StrategyDocumentNotUpgradeableResponse
     | StrategyDocumentUpgradeDriftResponse
+    | StrategyDocumentUpgradeUnsupportedNodeResponse
     | RequestValidationResponse;
 };
 

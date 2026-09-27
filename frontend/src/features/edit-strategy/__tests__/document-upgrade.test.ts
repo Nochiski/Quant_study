@@ -6,7 +6,11 @@ import {
   initialDocumentState,
   type DocumentState,
 } from "../model/document-state";
-import { decideDocumentUpgrade } from "../model/document-upgrade";
+import {
+  decideDocumentUpgrade,
+  upgradeWarningTitle,
+  type UpgradeWarningCode,
+} from "../model/document-upgrade";
 
 const LEGACY = 'schema_version: "1.0"\ntitle: 옛 문서\n';
 const CURRENT = 'schema_version: "1.1"\ntitle: 새 문서\n';
@@ -143,5 +147,23 @@ describe("decideDocumentUpgrade", () => {
     expect(decideDocumentUpgrade(settled(CURRENT), null)).toEqual({
       kind: "none",
     });
+  });
+});
+
+describe("upgradeWarningTitle (P3-01)", () => {
+  it("names every upgrade warning code the backend can send", () => {
+    // 코드 목록은 생성 타입(OpenAPI enum)이 소유한다. 번역 누락은 `Record` 타입이, 없는 코드는
+    // 아래 `satisfies` 가 typecheck 에서 막는다.
+    const codes = [
+      "strategy_document.upgrade_missing_policy_conflict",
+      "strategy_document.upgrade_weighting_rule_changed",
+      "strategy_document.upgrade_environment_unavailable",
+    ] as const satisfies readonly UpgradeWarningCode[];
+
+    expect(codes.map(upgradeWarningTitle)).toEqual([
+      "팩터마다 달랐던 결측 처리를 하나로 합쳤습니다",
+      "점수 비례 비중의 계산 규칙이 바뀌었습니다",
+      "옛 문서의 실행 설정을 옮기지 못했습니다",
+    ]);
   });
 });

@@ -1002,6 +1002,12 @@ const ko = {
     "업그레이드 결과가 변환 규칙과 어긋나 중단했습니다. 원문은 그대로입니다.",
   "upgrade.error.strategy_document.not_upgradeable":
     "schema 1.0 문서만 업그레이드할 수 있습니다.",
+  "upgrade.warning.strategy_document.upgrade_missing_policy_conflict":
+    "팩터마다 달랐던 결측 처리를 하나로 합쳤습니다",
+  "upgrade.warning.strategy_document.upgrade_weighting_rule_changed":
+    "점수 비례 비중의 계산 규칙이 바뀌었습니다",
+  "upgrade.warning.strategy_document.upgrade_environment_unavailable":
+    "옛 문서의 실행 설정을 옮기지 못했습니다",
   "upgrade.error.strategy_document.invalid":
     "구문 오류가 있어 업그레이드할 수 없습니다. 먼저 구문을 고치세요.",
   "history.frozen": "1.0 동결",
@@ -2520,6 +2526,12 @@ export const messages = {
       "The rewritten text disagreed with the upgrade rules, so it was rejected. The text is unchanged.",
     "upgrade.error.strategy_document.not_upgradeable":
       "Only schema 1.0 documents can be upgraded.",
+    "upgrade.warning.strategy_document.upgrade_missing_policy_conflict":
+      "Per-factor missing-value policies were merged into one",
+    "upgrade.warning.strategy_document.upgrade_weighting_rule_changed":
+      "The score-proportional weighting rule changed",
+    "upgrade.warning.strategy_document.upgrade_environment_unavailable":
+      "The old document's run settings could not be carried over",
     "upgrade.error.strategy_document.invalid":
       "Syntax errors block the upgrade. Fix the syntax first.",
     "history.frozen": "1.0 frozen",

@@ -165,6 +165,76 @@ def test_differing_missing_policies_use_the_first_and_warn() -> None:
     assert all("missing_policy" not in f["graph"] for f in _tree(document)["factors"])
 
 
+@pytest.mark.parametrize(
+    ("first", "second", "used", "changed"),
+    [
+        pytest.param(None, "zero", "drop", "momentum_zero", id="omitted-first"),
+        pytest.param("zero", None, "zero", "momentum_default", id="omitted-second"),
+    ],
+)
+def test_an_omitted_missing_policy_counts_as_the_1_1_default_drop(
+    first: str | None, second: str | None, used: str, changed: str
+) -> None:
+    """P2-09 리뷰 DEFECT-P1-1: 생략한 팩터도 실효 값(1.1 기본값 `drop`)으로 충돌 판정에 넣는다.
+
+    명시한 팩터만 세면 "a 생략(=drop) + b `zero`" 문서가 `missing=zero`·warning 없음으로
+    올라가, 1.1 에서 `drop` 이던 a 의 결측이 0 으로 채워진다(합성 점수·선정이 조용히 바뀐다).
+    main 의 P2-02 브리지도 실효 값으로 판정했다. 순서를 바꿔 두 경우를 본다: 첫 팩터의 실효 값을
+    쓰고 다른 쪽을 warning 으로 짚는다.
+    """
+    document = _yaml("quality_momentum.v1_1.yaml")
+    base = copy.deepcopy(document["factors"][0])
+    factors = []
+    for factor_id, policy in (
+        ("momentum_zero" if first == "zero" else "momentum_default", first),
+        ("momentum_zero" if second == "zero" else "momentum_default", second),
+    ):
+        factor = copy.deepcopy(base)
+        factor["factor_id"] = factor_id
+        factor["graph"].pop("missing_policy", None)
+        if policy is not None:
+            factor["graph"]["missing_policy"] = policy
+        factors.append(factor)
+    document["factors"] = factors
+
+    outcome = upgrade_document(document)
+
+    assert outcome.environment is not None and outcome.environment.missing_policy == used
+    assert [(w.code, w.pointer) for w in outcome.warnings] == [
+        ("strategy_document.upgrade_missing_policy_conflict", "/factors/1/graph/missing_policy")
+    ]
+    message = outcome.warnings[0].message
+    assert f"used={used!r}" in message
+    assert changed in message  # 결측 처리가 바뀌는 팩터를 이름으로 짚는다
+    other = "zero" if used == "drop" else "drop"
+    assert f"{other!r}->{used!r}" in message
+
+
+def test_all_omitted_missing_policies_carry_the_1_1_default_without_a_warning() -> None:
+    """모든 팩터가 생략하면 전부 `drop` 이라 충돌이 없다. 실행 설정 기본값과 같은 값이다."""
+    document = _yaml("quality_momentum.v1_1.yaml")
+    del document["factors"][0]["graph"]["missing_policy"]
+
+    outcome = upgrade_document(document)
+
+    assert outcome.environment is not None and outcome.environment.missing_policy == "drop"
+    assert outcome.warnings == ()
+
+
+def test_an_unquoted_1_1_version_line_is_the_declared_1_1() -> None:
+    """P2-09 리뷰 관찰 1: 따옴표 없는 `schema_version: 1.1` 은 YAML float 다.
+
+    선언은 여전히 1.1 이다.
+    """
+    document = _yaml("quality_momentum.v1_1.yaml")
+    document["schema_version"] = 1.1
+
+    outcome = upgrade_document(document)
+
+    assert outcome.source_version == V1_1
+    assert outcome.tree == _current_of("quality_momentum.v1_1.yaml")
+
+
 def test_factor_score_weighting_warns_that_weights_may_differ_from_1_1() -> None:
     """P2-04 결정 5: `factor_score` 는 선정은 같지만 목표 비중이 1.1 과 다를 수 있다."""
     document = _yaml("quality_momentum.v1_1.yaml")

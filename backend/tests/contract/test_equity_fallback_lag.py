@@ -74,3 +74,61 @@ def test_손_픽스처_dataset_profile_랙이_원장_선언과_같다() -> None:
     )
 
     assert not drift, f"손 픽스처 랙이 원장과 다르다 — (field_id, fixture, ledger)={drift}"
+
+
+# ── 폴백 사용 경고 ─────────────────────────────────────────────────────────────
+# 폴백 값을 원장과 맞춰도 원장 선언이 바뀌면 다시 조용히 어긋날 수 있다. 그래서 폴백 랙을 쓰는
+# 필드가 있으면 어댑터가 부팅할 때 한 번 경고한다(카탈로그 경고 #233 과 같은 경로·형식).
+FALLBACK_CODE = "profile_lag_fallback"
+
+
+def _fallback_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage() for record in caplog.records if FALLBACK_CODE in record.getMessage()
+    ]
+
+
+def test_root_without_dataset_profile_warns_once_at_boot(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    root = build_workbench_root(tmp_path / "equity", profile=False)
+
+    with caplog.at_level("WARNING"):
+        adapter = EquityDuckdbAdapter(root)
+        adapter.list_fields()
+        adapter.list_fields()
+
+    warned = _fallback_warnings(caplog)
+    assert len(warned) == 1, warned
+    message = warned[0]
+    assert "dataset_profile" in message and "폴백" in message
+    assert f"fields={len(FIELD_BY_ID)} " in message
+    assert "table_present=False" in message
+    assert str(root) in message
+
+
+def test_partial_dataset_profile_warns_with_the_fields_that_fall_back(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    rows = [row for row in WB_PROFILE_ROWS if row[0] != "credit.margin_balance"]
+    root = build_workbench_root(tmp_path / "equity", profile_rows=rows)
+
+    with caplog.at_level("WARNING"):
+        EquityDuckdbAdapter(root)
+
+    warned = _fallback_warnings(caplog)
+    assert len(warned) == 1, warned
+    assert "fields=1 " in warned[0]
+    assert "credit.margin_balance" in warned[0]
+    assert "table_present=True" in warned[0]
+
+
+def test_complete_dataset_profile_raises_no_fallback_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    root = build_workbench_root(tmp_path / "equity")
+
+    with caplog.at_level("WARNING"):
+        EquityDuckdbAdapter(root).list_fields()
+
+    assert _fallback_warnings(caplog) == []

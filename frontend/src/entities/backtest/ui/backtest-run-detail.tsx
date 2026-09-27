@@ -414,6 +414,56 @@ export const BacktestRunDetail = ({
                   : "—"}
               </dd>
             </div>
+            {/* 실행 설정은 1.2 부터 전략 문서 밖에 있고 이 기록이 그 값의 유일한 사본이다(Phase 2 감사
+                #16). 같은 전략을 다른 기간으로 돌리면 strategy hash 는 같고 environment hash 만 갈린다. */}
+            <div>
+              <dt>{t("backtest.result.manifest.environment.period")}</dt>
+              <dd>
+                {result.manifest.environment.start} →{" "}
+                {result.manifest.environment.end}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("backtest.result.manifest.environment.universe")}</dt>
+              <dd>{result.manifest.environment.universe_id}</dd>
+            </div>
+            <div>
+              <dt>{t("backtest.result.manifest.environment.market")}</dt>
+              <dd>
+                {[
+                  result.manifest.environment.market,
+                  result.manifest.environment.frequency,
+                  result.manifest.environment.timing,
+                ]
+                  .filter((value) => value !== undefined)
+                  .join(" · ")}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("backtest.result.manifest.environment.costs")}</dt>
+              <dd>
+                {t("backtest.result.manifest.environment.costs.value")
+                  .replace("{fee}", String(result.manifest.environment.fee_bps))
+                  .replace(
+                    "{slippage}",
+                    String(result.manifest.environment.slippage_bps),
+                  )
+                  .replace(
+                    "{participation}",
+                    String(result.manifest.environment.participation_rate),
+                  )}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("backtest.result.manifest.environment.missing")}</dt>
+              <dd>{result.manifest.environment.missing ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>{t("backtest.result.manifest.environment.hash")}</dt>
+              <dd title={result.manifest.environment_hash}>
+                {result.manifest.environment_hash.slice(0, 16)}…
+              </dd>
+            </div>
             <div>
               <dt>{t("backtest.result.manifest.fingerprint")}</dt>
               <dd title={result.manifest.run_fingerprint}>

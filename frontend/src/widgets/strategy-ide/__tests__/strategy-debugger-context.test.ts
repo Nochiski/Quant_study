@@ -5,7 +5,7 @@ import {
   type DocumentState,
   type ExecutionPlansState,
 } from "../../../features/edit-strategy";
-import type { StrategySpec } from "../../../shared/api";
+import type { RunEnvironment, StrategySpec } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { buildStrategyDebuggerAvailability } from "../model/strategy-debugger-context";
 
@@ -17,6 +17,12 @@ const SPEC: StrategySpec = {
   factors: [FIXTURE.factors![0]!],
 };
 const FACTOR = SPEC.factors![0]!;
+/** 실행 설정 패널이 검증한 값(P3-02). 추적 요청과 기간 가드가 같은 값을 읽는다. */
+const ENVIRONMENT: RunEnvironment = {
+  start: "2021-01-01",
+  end: "2026-08-31",
+  universe_id: "krx.common-stock",
+};
 
 const documentState = (): DocumentState => ({
   ...initialDocumentState("yaml", "current source"),
@@ -99,7 +105,7 @@ const plans = (): ExecutionPlansState => ({
 
 describe("Strategy IDE debugger composition", () => {
   it("packages the editor-owned inline source with backend-owned plan identities", () => {
-    expect(buildStrategyDebuggerAvailability(documentState(), plans())).toEqual(
+    expect(buildStrategyDebuggerAvailability(documentState(), plans(), ENVIRONMENT)).toEqual(
       {
         reason: null,
         context: {
@@ -113,8 +119,9 @@ describe("Strategy IDE debugger composition", () => {
           specHash: "spec-hash",
           expectedSnapshotId: "snapshot-v1",
           expectedRegistryVersion: "registry-v1",
-          start: null,
-          end: null,
+          environment: ENVIRONMENT,
+          start: "2021-01-01",
+          end: "2026-08-31",
           factors: [
             {
               factorId: "momentum",
@@ -150,7 +157,7 @@ describe("Strategy IDE debugger composition", () => {
       baseSpecHash: "spec-hash",
     };
     expect(
-      buildStrategyDebuggerAvailability(state, plans()).context?.strategySource,
+      buildStrategyDebuggerAvailability(state, plans(), ENVIRONMENT).context?.strategySource,
     ).toEqual({
       kind: "saved_revision",
       strategy_id: "strategy-1",
@@ -217,7 +224,7 @@ describe("Strategy IDE debugger composition", () => {
     ];
 
     const traced =
-      buildStrategyDebuggerAvailability(documentState(), promoted).context
+      buildStrategyDebuggerAvailability(documentState(), promoted, ENVIRONMENT).context
         ?.factors[0];
     expect(traced?.outputNodeId).toBe("mom_252");
     expect(traced?.nodes.map((node) => [node.nodeId, node.pointer])).toEqual([
@@ -231,16 +238,17 @@ describe("Strategy IDE debugger composition", () => {
       buildStrategyDebuggerAvailability(
         { ...documentState(), sourceVersion: 8 },
         plans(),
+        ENVIRONMENT,
       ),
     ).toEqual({ context: null, reason: "document" });
     expect(
-      buildStrategyDebuggerAvailability(documentState(), { status: "loading" }),
+      buildStrategyDebuggerAvailability(documentState(), { status: "loading" }, ENVIRONMENT),
     ).toEqual({ context: null, reason: "preparing" });
     const invalidPlans = plans();
     if (invalidPlans.status !== "ready") throw new Error("test setup");
     invalidPlans.factors[0]!.explanation.plan = null;
     expect(
-      buildStrategyDebuggerAvailability(documentState(), invalidPlans),
+      buildStrategyDebuggerAvailability(documentState(), invalidPlans, ENVIRONMENT),
     ).toEqual({ context: null, reason: "execution-plan" });
 
     const incompletePlans = plans();
@@ -253,7 +261,14 @@ describe("Strategy IDE debugger composition", () => {
       incompletePlans.factors[0]!.explanation.plan!.steps[1]!,
     ];
     expect(
-      buildStrategyDebuggerAvailability(documentState(), incompletePlans),
+      buildStrategyDebuggerAvailability(documentState(), incompletePlans, ENVIRONMENT),
     ).toEqual({ context: null, reason: "execution-plan" });
+  });
+
+  it("does not trace until the run settings give a period and universe", () => {
+    // 실행 설정 없이 보낸 trace 는 backend 가 `run_environment.required` 로 거절한다(P3-02).
+    expect(
+      buildStrategyDebuggerAvailability(documentState(), plans(), null),
+    ).toEqual({ context: null, reason: "environment" });
   });
 });

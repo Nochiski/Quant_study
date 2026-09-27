@@ -2,6 +2,7 @@ import type {
   StrategyDebuggerContext,
   StrategyDebuggerUnavailableReason,
 } from "../../../features/debug-strategy";
+import type { RunEnvironment } from "../../../shared/api";
 import {
   compiledNodeOrigin,
   currentCompile,
@@ -38,6 +39,7 @@ const unavailableReason = (
 export const buildStrategyDebuggerAvailability = (
   document: DocumentState,
   plans: ExecutionPlansState,
+  environment: RunEnvironment | null,
 ): StrategyDebuggerAvailability => {
   const compiled = currentCompile(document);
   if (compiled === null) return { context: null, reason: "document" };
@@ -95,6 +97,8 @@ export const buildStrategyDebuggerAvailability = (
   });
   if (factors.length !== (compiled.spec.factors ?? []).length)
     return { context: null, reason: "execution-plan" };
+  // 실행 설정(기간·유니버스)은 실행 설정 패널이 owner 다(P3-02). 정해지기 전에는 추적하지 않는다.
+  if (environment === null) return { context: null, reason: "environment" };
 
   return {
     reason: null,
@@ -106,9 +110,9 @@ export const buildStrategyDebuggerAvailability = (
       specHash: compiled.specHash,
       expectedSnapshotId: plans.expectedDataSnapshotId,
       expectedRegistryVersion: plans.expectedRegistryVersion,
-      // 실행 기간의 owner가 실행 설정으로 옮겨갔다(schema 1.2). 편집 패널 배선은 P3-01·P3-02.
-      start: null,
-      end: null,
+      environment,
+      start: environment.start,
+      end: environment.end,
       factors,
     },
   };

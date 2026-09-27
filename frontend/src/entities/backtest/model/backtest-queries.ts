@@ -39,6 +39,20 @@ export const backtestHistoryQuery = (
         : false,
   });
 
+/**
+ * 실행 설정 스키마(P2-01, spec D6). 배포로만 바뀌고 서버가 `schema_hash` 를 ETag 로 답하므로 전략 문서
+ * 스키마와 같은 staleTime 을 쓴다. 실행 설정 패널이 필드·기본값·범위를 읽는 유일한 출처다.
+ */
+export const runEnvironmentSchemaQuery = () =>
+  queryOptions({
+    queryKey: ["backtest", "run-environment-schema"],
+    queryFn: () => strategyWorkbenchApi.getRunEnvironmentSchema(),
+    staleTime: 5 * 60_000,
+  });
+
+export const useRunEnvironmentSchema = () =>
+  useQuery(runEnvironmentSchemaQuery());
+
 export const useStartBacktest = () => {
   const queryClient = useQueryClient();
   return useMutation({

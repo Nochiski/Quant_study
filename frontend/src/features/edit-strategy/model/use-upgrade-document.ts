@@ -23,7 +23,15 @@ export type UpgradeFailure =
 export type UpgradeStatus =
   | { kind: "idle" }
   | { kind: "pending" }
-  | { kind: "applied" }
+  /**
+   * 적용됐다. `environment` 는 옛 문서가 들고 있던 실행 설정(옮기지 못했으면 null)이고, `warnings` 는
+   * 사용자가 알아야 할 동작 변화다(P2-09). 실행 설정은 사용자가 배너에서 누를 때만 패널에 들어간다.
+   */
+  | {
+      kind: "applied";
+      environment: UpgradedDocument["environment"];
+      warnings: UpgradedDocument["warnings"];
+    }
   | ({ kind: "failed" } & UpgradeFailure);
 
 export type DocumentUpgrade = {
@@ -39,7 +47,7 @@ type ScopedStatus = { scope: string; value: UpgradeStatus };
 const IDLE: UpgradeStatus = { kind: "idle" };
 
 /**
- * 1.0 텍스트를 backend 변환으로 1.1로 바꿔 편집기에 넣는다(WORKFLOW P2-02). 응답 source는
+ * 은퇴 버전 텍스트를 backend 변환으로 현재 버전으로 바꿔 편집기에 넣는다(WORKFLOW P2-02·P3-02). 응답 source는
  * `CodeEditorHandle.replaceRange` 한 번(history 격리)으로 적용되어 실행 취소 1단계가 되고, 편집기의
  * change 이벤트가 reducer `edit`로 흘러 문서는 dirty·재컴파일 흐름을 탄다. 실패하면 텍스트는 그대로다.
  *
@@ -100,7 +108,11 @@ export const useUpgradeDocument = (
         current.focus();
         // replaceRange가 낸 change가 reducer `edit`로 이미 흘렀으므로 다음 버전이 소유자다.
         setStatus(
-          { kind: "applied" },
+          {
+            kind: "applied",
+            environment: upgraded.environment,
+            warnings: upgraded.warnings,
+          },
           `${state.documentEpoch}:${state.sourceVersion + 1}:${state.savedVersion}`,
         );
       },

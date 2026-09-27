@@ -1,10 +1,18 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
-import { t } from "../../../shared/config";
+import { t, tDescription } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
+import type {
+  RunEnvironmentField,
+  RunEnvironmentFieldError,
+} from "../model/run-environment";
 import type { BacktestRunSettingsError } from "../model/run-settings";
 import type { BacktestRunSettingsController } from "../model/use-backtest-run-settings";
 import "./backtest-run-settings.css";
+import {
+  runEnvironmentLabel,
+  runEnvironmentOptionLabel,
+} from "./run-environment-labels";
 
 type BacktestRunSettingsProps = {
   controller: BacktestRunSettingsController;
@@ -14,12 +22,128 @@ type BacktestRunSettingsProps = {
 const errorMessage = (error: BacktestRunSettingsError): string =>
   t(`backtest.settings.error.${error}`);
 
-/** Execution assumptions are independent from StrategySpec authoring and sent as RunSpec fields. */
+const boundOf = (
+  field: RunEnvironmentField,
+  error: RunEnvironmentFieldError,
+): number | null => {
+  if (error === "minimum") return field.minimum;
+  if (error === "exclusiveMinimum") return field.exclusiveMinimum;
+  if (error === "maximum") return field.maximum;
+  if (error === "exclusiveMaximum") return field.exclusiveMaximum;
+  return null;
+};
+
+const fieldErrorMessage = (
+  field: RunEnvironmentField,
+  error: RunEnvironmentFieldError,
+): string =>
+  t(`backtest.settings.environment.error.${error}`).replace(
+    "{bound}",
+    String(boundOf(field, error) ?? ""),
+  );
+
+const EnvironmentInput = ({
+  field,
+  value,
+  error,
+  onChange,
+}: {
+  field: RunEnvironmentField;
+  value: string;
+  error: RunEnvironmentFieldError | undefined;
+  onChange: (value: string) => void;
+}) => {
+  const inputId = useId();
+  const hintId = useId();
+  const errorId = useId();
+  const description = tDescription(field.descriptionKey);
+  const describedBy =
+    [description === null ? null : hintId, error === undefined ? null : errorId]
+      .filter((id): id is string => id !== null)
+      .join(" ") || undefined;
+  // 한 줄 뜻·오류는 label 밖에 둔다 — label 안에 두면 접근 가능한 이름이 뜻 문장까지 늘어난다.
+  const common = {
+    id: inputId,
+    "aria-describedby": describedBy,
+    "aria-invalid": error === undefined ? undefined : true,
+    "aria-required": field.required || undefined,
+  } as const;
+  return (
+    <div className="backtest-settings__field">
+      <label htmlFor={inputId}>{runEnvironmentLabel(field)}</label>
+      {field.control === "select" ? (
+        <select
+          {...common}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        >
+          {field.options.map((option) => (
+            <option key={option} value={option}>
+              {runEnvironmentOptionLabel(field, option)}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          {...common}
+          autoComplete="off"
+          spellCheck={false}
+          type={
+            field.control === "number"
+              ? "number"
+              : field.control === "date"
+                ? "date"
+                : "text"
+          }
+          inputMode={field.control === "number" ? "decimal" : undefined}
+          step={field.control === "number" ? "any" : undefined}
+          min={
+            field.control === "number"
+              ? (field.minimum ?? field.exclusiveMinimum ?? undefined)
+              : undefined
+          }
+          max={
+            field.control === "number"
+              ? (field.maximum ?? field.exclusiveMaximum ?? undefined)
+              : undefined
+          }
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+      {description === null ? null : (
+        <small id={hintId} className="backtest-settings__hint">
+          {description}
+        </small>
+      )}
+      {error === undefined ? null : (
+        <small id={errorId} className="backtest-settings__field-error">
+          {fieldErrorMessage(field, error)}
+        </small>
+      )}
+    </div>
+  );
+};
+
+/**
+ * 실행 설정 패널. 실행 환경(시장·빈도·기간·유니버스·체결·비용·결측)은 실행 설정 스키마가 그리는
+ * 칸이고, 그 아래 실행 옵션(core·초기 자본·벤치마크·연환산·OOS)은 실행 요청(`BacktestRunSpec`)의
+ * 필드다. 둘 다 전략 문서 밖이라 바꿔도 전략 revision 이 늘지 않는다(spec D6).
+ */
 export const BacktestRunSettings = ({
   controller,
   disabled = false,
 }: BacktestRunSettingsProps) => {
-  const { fields, setField, result, dateRange } = controller;
+  const {
+    fields,
+    setField,
+    result,
+    schemaStatus,
+    environmentFields,
+    environmentValues,
+    environmentErrors,
+    setEnvironmentValue,
+  } = controller;
   const [open, setOpen] = useState(false);
   return (
     <details
@@ -36,8 +160,37 @@ export const BacktestRunSettings = ({
         </Badge>
       </summary>
       <div className="backtest-settings__popover" hidden={!open}>
+        <fieldset
+          disabled={disabled}
+          className="backtest-settings__environment"
+        >
+          <legend>{t("backtest.settings.environment")}</legend>
+          <p className="backtest-settings__note">
+            {t("backtest.settings.environment.note")}
+          </p>
+          {schemaStatus === "ready" ? (
+            environmentFields.map((field) => (
+              <EnvironmentInput
+                key={field.name}
+                field={field}
+                value={environmentValues[field.name] ?? ""}
+                error={environmentErrors[field.name]}
+                onChange={(value) => setEnvironmentValue(field.name, value)}
+              />
+            ))
+          ) : (
+            <p
+              className="backtest-settings__note"
+              role={schemaStatus === "error" ? "alert" : "status"}
+            >
+              {schemaStatus === "error"
+                ? t("backtest.settings.environment.schemaError")
+                : t("backtest.settings.environment.schemaLoading")}
+            </p>
+          )}
+        </fieldset>
         <fieldset disabled={disabled}>
-          <legend className="sr-only">{t("backtest.settings.title")}</legend>
+          <legend>{t("backtest.settings.options")}</legend>
           <label>
             <span>{t("backtest.settings.core")}</span>
             <select
@@ -100,13 +253,11 @@ export const BacktestRunSettings = ({
               value={fields.oosStart}
               onChange={(event) => setField("oosStart", event.target.value)}
             />
+            <small className="backtest-settings__hint">
+              {t("backtest.settings.oosStart.hint")}
+            </small>
           </label>
         </fieldset>
-        <p className="backtest-settings__range">
-          {dateRange === null
-            ? t("backtest.settings.rangeUnavailable")
-            : `${dateRange.start} → ${dateRange.end}`}
-        </p>
         {result.valid ? null : (
           <ul className="backtest-settings__errors" role="alert">
             {result.errors.map((error) => (

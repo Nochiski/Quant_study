@@ -81,9 +81,17 @@ const blockedReason = (
  * the expected dataset and registry generations; the backend resolves field metadata and owns
  * plan order, contracts, history and hashes.
  */
+/**
+ * 실행 계획 sandbox 요청의 결측 정책(Phase 2 감사 #3). 실행 설정 패널의 값을 page 가 넘긴다 — 같은 값을
+ * 실행 요청도 싣으므로 실행 계획의 `plan_hash` 가 실제 run 과 같다. null 이면 backend 가 실행 설정과 같은
+ * 기본값(`DEFAULT_MISSING_POLICY`)을 쓴다.
+ */
+export type ExecutionPlanMissing = FactorGraphRequest["missing"];
+
 export const prepareExecutionPlans = (
   state: DocumentState,
   source: ContractInspectorSource,
+  missing: ExecutionPlanMissing = null,
 ): PreparedPlans => {
   const spec = currentSpec(state);
   if (spec === null) return { status: "blocked", reason: blockedReason(state) };
@@ -146,7 +154,7 @@ export const prepareExecutionPlans = (
     status: "prepared",
     expectedRegistryVersion: registryVersion,
     expectedDataSnapshotId: datasetVersion,
-    requests: buildFactorPlanRequests(spec, documentTree(state)),
+    requests: buildFactorPlanRequests(spec, documentTree(state), missing),
   };
 };
 
@@ -177,6 +185,7 @@ const documentGraph = (
 const buildFactorPlanRequests = (
   spec: StrategySpec,
   tree: unknown,
+  missing: ExecutionPlanMissing,
 ): FactorPlanRequest[] => {
   const parameterIds = (spec.parameters ?? []).map(
     (parameter) => parameter.parameter_id,
@@ -189,6 +198,7 @@ const buildFactorPlanRequests = (
     request: {
       graph: factor.graph,
       parameter_ids: parameterIds,
+      ...(missing === null || missing === undefined ? {} : { missing }),
     },
     document: documentGraph(tree, factorIndex),
   }));
@@ -275,10 +285,11 @@ export const pointerSelectsNode = (
 export const useExecutionPlans = (
   state: DocumentState,
   source: ContractInspectorSource,
+  missing: ExecutionPlanMissing = null,
 ): ExecutionPlansState => {
   const prepared = useMemo(
-    () => prepareExecutionPlans(state, source),
-    [source, state],
+    () => prepareExecutionPlans(state, source, missing),
+    [missing, source, state],
   );
   const requests = prepared.status === "prepared" ? prepared.requests : [];
   const expectedRegistryVersion =

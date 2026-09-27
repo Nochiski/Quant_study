@@ -58,6 +58,23 @@ const ko = {
   "backtest.settings.open": "실행 설정 열기",
   "backtest.settings.ready": "준비됨",
   "backtest.settings.invalid": "입력 확인",
+  "backtest.settings.environment": "실행 환경",
+  "backtest.settings.environment.note": "시장·기간·유니버스·체결·비용·결측 처리는 전략 문서 밖의 실행 설정입니다. 바꿔도 전략 버전은 늘지 않고, 실행 기록에만 남습니다.",
+  "backtest.settings.environment.schemaLoading": "실행 설정 항목을 불러오는 중입니다.",
+  "backtest.settings.environment.schemaError": "실행 설정 항목을 불러오지 못해 백테스트를 시작할 수 없습니다. 서버 연결을 확인하세요.",
+  "backtest.settings.environment.error.required": "값을 정하세요.",
+  "backtest.settings.environment.error.number": "숫자를 입력하세요.",
+  "backtest.settings.environment.error.minimum": "{bound} 이상이어야 합니다.",
+  "backtest.settings.environment.error.exclusiveMinimum": "{bound}보다 커야 합니다.",
+  "backtest.settings.environment.error.maximum": "{bound} 이하여야 합니다.",
+  "backtest.settings.environment.error.exclusiveMaximum": "{bound}보다 작아야 합니다.",
+  "backtest.settings.environment.error.date": "YYYY-MM-DD 형식의 날짜를 입력하세요.",
+  "backtest.settings.environment.error.order": "종료일은 시작일과 같거나 그 뒤여야 합니다.",
+  "backtest.settings.options": "실행 옵션",
+  "runEnvironment.summary.label": "실행 설정 요약",
+  "runEnvironment.summary.title": "실행 설정",
+  "runEnvironment.summary.incomplete": "기간과 유니버스가 정해지지 않았습니다. 실행 설정에서 정하면 백테스트와 추적이 열립니다.",
+  "runEnvironment.summary.outside": "전략 문서 밖의 값입니다. 바꿔도 전략 버전은 그대로입니다.",
   "backtest.settings.core": "실행 core",
   "backtest.settings.core.rust": "Persistent Rust",
   "backtest.settings.core.python": "Python reference",
@@ -67,15 +84,15 @@ const ko = {
     "비우면 벤치마크 없이 실행합니다. ID 형식은 연결된 데이터 어댑터가 정합니다(유니버스의 종목 ID 그대로).",
   "backtest.settings.annualizationDays": "연환산 거래일",
   "backtest.settings.oosStart": "OOS 시작일 (선택)",
-  "backtest.settings.rangeUnavailable":
-    "유효한 StrategySpec의 데이터 기간이 필요합니다.",
+  "backtest.settings.oosStart.hint": "실행 기간 안의 날짜입니다. 이날부터 종료일까지를 표본 밖 구간으로 따로 잽니다.",
   "backtest.settings.blocked": "실행 설정의 잘못된 값을 먼저 수정하세요.",
+  "backtest.settings.incomplete": "실행 설정에서 기간과 유니버스를 정하세요.",
   "backtest.settings.error.initial_cash":
     "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
   "backtest.settings.error.annualization_days":
     "연환산 거래일을 정확히 전송 가능한 정수로 입력하세요. 허용 범위는 서버가 검증합니다.",
-  "backtest.settings.error.date_range_unavailable":
-    "OOS 구간을 만들려면 전략 검증을 먼저 완료하세요.",
+  "backtest.settings.error.environment": "실행 환경 칸을 모두 올바르게 채우세요.",
+  "backtest.settings.error.oos_out_of_range": "OOS 시작일은 실행 기간 안이어야 합니다.",
   "backtest.actions.title": "백테스트 실행 제어",
   "backtest.actions.cancel": "실행 취소",
   "backtest.actions.cancelling": "취소 요청됨",
@@ -131,6 +148,14 @@ const ko = {
   "backtest.result.manifest.annualizationDays": "연환산 거래일",
   "backtest.result.manifest.metricWindows": "평가 구간",
   "backtest.result.manifest.fingerprint": "Run fingerprint",
+  "backtest.result.manifest.environment.period": "실행 기간",
+  "backtest.result.manifest.environment.universe": "유니버스",
+  "backtest.result.manifest.environment.market": "시장 · 빈도 · 체결",
+  "backtest.result.manifest.environment.costs": "비용 가정",
+  "backtest.result.manifest.environment.costs.value":
+    "수수료 {fee}bp · 슬리피지 {slippage}bp · 참여율 {participation}",
+  "backtest.result.manifest.environment.missing": "결측 처리",
+  "backtest.result.manifest.environment.hash": "실행 설정 hash",
   "backtest.result.manifest.strategy": "Strategy",
   "backtest.result.manifest.source": "Strategy source",
   "backtest.result.manifest.inline": "inline draft",
@@ -295,6 +320,8 @@ const ko = {
   "debugger.unavailable.no-factors": "추적할 팩터가 없습니다.",
   "debugger.unavailable.execution-plan":
     "현재 FactorGraph 실행 계획을 확정할 수 없어 추적을 차단했습니다.",
+  "debugger.unavailable.environment":
+    "추적은 실행 설정의 기간·유니버스 위에서 돕니다. 실행 설정에서 기간과 유니버스를 정하세요.",
   "debugger.blocked.document": "현재 실행 가능한 문서가 없습니다.",
   "debugger.blocked.date": "유효한 기준일을 선택하세요.",
   "debugger.blocked.security": "종목 ID를 1개 이상, 최대 100개 입력하세요.",
@@ -644,10 +671,30 @@ const ko = {
   // 실행 설정 제약 행의 `x-description-key`. 발행처는 `GET /api/v1/run-environments/schema` 이며
   // (owner `domain/backtest`), schema 1.2 에서 전략 문서의 `execution` 섹션이 사라지면서
   // `strategy.contract.execution.*` 세 줄을 이 이름으로 옮겼다(P2-03). 렌더는 P3-02 패널이다.
-  "run_environment.contract.participation_rate":
-    "시장 거래량 대비 최대 주문 참여율",
-  "run_environment.contract.fee_bps": "체결 금액에 적용할 수수료 가정",
-  "run_environment.contract.slippage_bps": "체결 가격의 슬리피지 가정",
+  "run_environment.contract.participation_rate": "참여율(비율)",
+  "run_environment.contract.fee_bps": "수수료(bp)",
+  "run_environment.contract.slippage_bps": "슬리피지(bp)",
+  "strategy.field.run_environment.market": "시장",
+  "strategy.field.run_environment.market.description": "종목과 가격을 읽을 거래소입니다.",
+  "strategy.field.run_environment.market.value.KRX": "한국거래소(KRX)",
+  "strategy.field.run_environment.frequency": "빈도",
+  "strategy.field.run_environment.frequency.description": "신호를 계산하고 가격을 읽는 간격입니다.",
+  "strategy.field.run_environment.frequency.value.daily": "일봉",
+  "strategy.field.run_environment.start": "시작일",
+  "strategy.field.run_environment.start.description": "백테스트가 첫 신호를 내는 날입니다. 이력이 필요한 팩터는 이보다 앞선 값을 읽습니다.",
+  "strategy.field.run_environment.end": "종료일",
+  "strategy.field.run_environment.end.description": "백테스트가 마지막으로 평가하는 날입니다.",
+  "strategy.field.run_environment.universe_id": "유니버스",
+  "strategy.field.run_environment.universe_id.description": "기준일마다 후보로 삼을 종목 목록의 ID입니다. 예: krx.common-stock",
+  "strategy.field.run_environment.timing": "체결 시점",
+  "strategy.field.run_environment.timing.description": "신호가 나온 뒤 주문이 체결되는 시점입니다.",
+  "strategy.field.run_environment.timing.value.next_open": "다음 거래일 시가",
+  "strategy.field.run_environment.missing": "결측 처리",
+  "strategy.field.run_environment.missing.description": "팩터 입력값이 비었을 때 계산을 어떻게 이어 갈지 정합니다.",
+  "strategy.field.run_environment.missing.value.drop": "그 종목을 빼기",
+  "strategy.field.run_environment.missing.value.keep": "빈 값 그대로 두기",
+  "strategy.field.run_environment.missing.value.zero": "0으로 채우기",
+  "strategy.field.run_environment.missing.value.cross_sectional_median": "같은 날 중앙값으로 채우기",
   // -- 화면 어휘 (P1-03, spec D8) -------------------------------------------------
   // backend가 발행한 설명 키는 stem이다: `<stem>`은 이름(라벨), `<stem>.description`은
   // 한 줄 설명. 연산자는 `<stem>.formula`로 계산식을 더한다. 목록 자체는 runtime schema의
@@ -1059,24 +1106,20 @@ const ko = {
   "leave.leave": "나가기",
   "page.revision.untitled": "제목 없는 전략",
   "page.revision.generated": "legacy JSON에서 생성된 문서",
-  "upgrade.title": "schema 1.0 문서",
-  "upgrade.body":
-    "이 문서는 schema 1.0입니다. 1.1로 업그레이드하면 주석과 순서를 유지한 채 현재 규칙으로 다시 씁니다(실행 취소 1단계).",
-  "upgrade.action": "1.1로 업그레이드",
+  "upgrade.title": "이전 schema 문서",
+  "upgrade.body": "이 문서는 지원이 끝난 schema 버전입니다. 업그레이드하면 주석과 순서를 유지한 채 현재 규칙으로 다시 씁니다(실행 취소 1단계).",
+  "upgrade.action": "현재 버전으로 업그레이드",
   "upgrade.pending": "업그레이드 중…",
-  "upgrade.applied": "1.1로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
-  "upgrade.frozenGenerated":
-    "schema 1.0 동결 revision입니다. 생성된 문서는 이미 현재 버전이므로 편집 후 새 revision으로 저장하세요.",
-  "upgrade.backtestBlocked":
-    "저장된 1.0 revision으로는 백테스트를 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  "upgrade.applied": "현재 버전으로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
+  "upgrade.frozenGenerated": "이전 schema로 동결된 revision입니다. 생성된 문서는 이미 현재 버전이므로 편집 후 새 revision으로 저장하세요.",
+  "upgrade.backtestBlocked": "저장된 이전 schema revision으로는 백테스트를 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "upgrade.error.editor": "편집기가 준비되지 않아 업그레이드하지 못했습니다.",
   "upgrade.error.composing": "입력 중에는 업그레이드할 수 없습니다.",
   "upgrade.error.request":
     "업그레이드 요청이 실패했습니다. 원문은 그대로입니다. ({detail})",
   "upgrade.error.strategy_document.upgrade_drift":
     "업그레이드 결과가 변환 규칙과 어긋나 중단했습니다. 원문은 그대로입니다.",
-  "upgrade.error.strategy_document.not_upgradeable":
-    "schema 1.0 문서만 업그레이드할 수 있습니다.",
+  "upgrade.error.strategy_document.not_upgradeable": "지원이 끝난 schema 버전의 문서만 업그레이드할 수 있습니다.",
   "upgrade.warning.strategy_document.upgrade_missing_policy_conflict":
     "팩터마다 달랐던 결측 처리를 하나로 합쳤습니다",
   "upgrade.warning.strategy_document.upgrade_weighting_rule_changed":
@@ -1085,7 +1128,13 @@ const ko = {
     "옛 문서의 실행 설정을 옮기지 못했습니다",
   "upgrade.error.strategy_document.invalid":
     "구문 오류가 있어 업그레이드할 수 없습니다. 먼저 구문을 고치세요.",
-  "history.frozen": "1.0 동결",
+  "upgrade.error.strategy_document.upgrade_unsupported_node": "새 버전에 없는 노드(저장된 팩터·서브그래프 참조)가 있어 업그레이드할 수 없습니다. 그 노드를 그래프로 풀어 쓴 뒤 다시 시도하세요.",
+  "upgrade.warnings": "업그레이드하면서 알아 둘 점",
+  "upgrade.environment.found": "옛 문서에 있던 실행 설정: {summary}",
+  "upgrade.environment.apply": "실행 설정에 채우기",
+  "upgrade.environment.applied": "옛 문서의 실행 설정을 채웠습니다. 실행 설정 요약에서 확인하세요.",
+  "upgrade.environment.unavailable": "옛 문서의 실행 설정을 옮기지 못해 실행 설정을 채우지 않았습니다. 알아 둘 점을 보고 직접 정하세요.",
+  "history.frozen": "이전 버전 동결",
   "assist.type": "타입",
   "assist.required": "필수",
   "assist.optional": "선택",
@@ -1180,10 +1229,8 @@ const ko = {
   "toolbar.run.open": "백테스트 보기",
   "toolbar.run.accepted": "백테스트 {runId} 접수됨",
   "toolbar.run.failed": "백테스트 시작 실패",
-  "backtest.error.backtest.strategy.requires_upgrade":
-    "저장된 1.0 revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
-  "trace.error.trace.strategy.requires_upgrade":
-    "저장된 1.0 revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  "backtest.error.backtest.strategy.requires_upgrade": "저장된 이전 schema revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다: {detail}",
   "trace.error.trace.engine.incompatible":
     "선택한 실행 엔진이 이 전략을 추적할 수 없습니다. 다른 실행 core를 고르세요.",
@@ -1637,6 +1684,23 @@ export const messages = {
     "backtest.settings.open": "Open run settings",
     "backtest.settings.ready": "Ready",
     "backtest.settings.invalid": "Check input",
+    "backtest.settings.environment": "Run environment",
+    "backtest.settings.environment.note": "Market, period, universe, execution, costs and missing-value handling are run settings outside the strategy document. Changing them adds no strategy revision; only the run record keeps them.",
+    "backtest.settings.environment.schemaLoading": "Loading the run setting fields.",
+    "backtest.settings.environment.schemaError": "The run setting fields could not be loaded, so a backtest cannot start. Check the server connection.",
+    "backtest.settings.environment.error.required": "Choose a value.",
+    "backtest.settings.environment.error.number": "Enter a number.",
+    "backtest.settings.environment.error.minimum": "Must be at least {bound}.",
+    "backtest.settings.environment.error.exclusiveMinimum": "Must be greater than {bound}.",
+    "backtest.settings.environment.error.maximum": "Must be at most {bound}.",
+    "backtest.settings.environment.error.exclusiveMaximum": "Must be less than {bound}.",
+    "backtest.settings.environment.error.date": "Enter a date as YYYY-MM-DD.",
+    "backtest.settings.environment.error.order": "The end date must be on or after the start date.",
+    "backtest.settings.options": "Run options",
+    "runEnvironment.summary.label": "Run settings summary",
+    "runEnvironment.summary.title": "Run settings",
+    "runEnvironment.summary.incomplete": "No period or universe yet. Set them in the run settings to enable backtests and traces.",
+    "runEnvironment.summary.outside": "These values live outside the strategy document; changing them keeps the strategy version.",
     "backtest.settings.core": "Execution core",
     "backtest.settings.core.rust": "Persistent Rust",
     "backtest.settings.core.python": "Python reference",
@@ -1646,15 +1710,15 @@ export const messages = {
       "Leave empty to run without a benchmark. The ID format is owned by the connected data adapter (use a universe security ID as is).",
     "backtest.settings.annualizationDays": "Annualization sessions",
     "backtest.settings.oosStart": "OOS start date (optional)",
-    "backtest.settings.rangeUnavailable":
-      "A valid StrategySpec data range is required.",
+    "backtest.settings.oosStart.hint": "A date inside the run period. Measures from this date to the end date as the out-of-sample window.",
     "backtest.settings.blocked": "Fix the invalid run settings first.",
+    "backtest.settings.incomplete": "Set the period and universe in the run settings.",
     "backtest.settings.error.initial_cash":
       "Enter initial capital as a number; the server validates its accepted range.",
     "backtest.settings.error.annualization_days":
       "Enter annualization sessions as a losslessly representable integer; the server validates its accepted range.",
-    "backtest.settings.error.date_range_unavailable":
-      "Validate the strategy before defining an OOS window.",
+    "backtest.settings.error.environment": "Fill every run environment field correctly.",
+    "backtest.settings.error.oos_out_of_range": "The OOS start date must be inside the run period.",
     "backtest.actions.title": "Backtest run controls",
     "backtest.actions.cancel": "Cancel run",
     "backtest.actions.cancelling": "Cancellation requested",
@@ -1711,6 +1775,14 @@ export const messages = {
     "backtest.result.manifest.annualizationDays": "Annualization sessions",
     "backtest.result.manifest.metricWindows": "Metric windows",
     "backtest.result.manifest.fingerprint": "Run fingerprint",
+    "backtest.result.manifest.environment.period": "Run period",
+    "backtest.result.manifest.environment.universe": "Universe",
+    "backtest.result.manifest.environment.market": "Market · frequency · execution",
+    "backtest.result.manifest.environment.costs": "Cost assumptions",
+    "backtest.result.manifest.environment.costs.value":
+      "fee {fee}bp · slippage {slippage}bp · participation {participation}",
+    "backtest.result.manifest.environment.missing": "Missing values",
+    "backtest.result.manifest.environment.hash": "Run settings hash",
     "backtest.result.manifest.strategy": "Strategy",
     "backtest.result.manifest.source": "Strategy source",
     "backtest.result.manifest.inline": "inline draft",
@@ -1874,6 +1946,8 @@ export const messages = {
     "debugger.unavailable.no-factors": "There is no factor to trace.",
     "debugger.unavailable.execution-plan":
       "Trace is blocked because the current FactorGraph execution plan cannot be pinned.",
+    "debugger.unavailable.environment":
+      "A trace runs on the run settings' period and universe. Set them in the run settings.",
     "debugger.blocked.document": "There is no executable current document.",
     "debugger.blocked.date": "Select a valid as-of date.",
     "debugger.blocked.security": "Enter between 1 and 100 security IDs.",
@@ -2230,12 +2304,30 @@ export const messages = {
       "Maximum target weight per security",
     "strategy.contract.risk.max_sector_weight":
       "Maximum target weight per sector",
-    "run_environment.contract.participation_rate":
-      "Maximum order participation relative to market volume",
-    "run_environment.contract.fee_bps":
-      "Fee assumption applied to notional traded",
-    "run_environment.contract.slippage_bps":
-      "Execution price slippage assumption",
+    "run_environment.contract.participation_rate": "Participation (ratio)",
+    "run_environment.contract.fee_bps": "Fee (bp)",
+    "run_environment.contract.slippage_bps": "Slippage (bp)",
+    "strategy.field.run_environment.market": "Market",
+    "strategy.field.run_environment.market.description": "Exchange whose securities and prices are read.",
+    "strategy.field.run_environment.market.value.KRX": "Korea Exchange (KRX)",
+    "strategy.field.run_environment.frequency": "Frequency",
+    "strategy.field.run_environment.frequency.description": "Interval at which signals are computed and prices read.",
+    "strategy.field.run_environment.frequency.value.daily": "Daily",
+    "strategy.field.run_environment.start": "Start date",
+    "strategy.field.run_environment.start.description": "First date the backtest issues a signal. Factors that need history read earlier values.",
+    "strategy.field.run_environment.end": "End date",
+    "strategy.field.run_environment.end.description": "Last date the backtest evaluates.",
+    "strategy.field.run_environment.universe_id": "Universe",
+    "strategy.field.run_environment.universe_id.description": "ID of the security list considered on each date, e.g. krx.common-stock.",
+    "strategy.field.run_environment.timing": "Execution timing",
+    "strategy.field.run_environment.timing.description": "When an order fills after its signal.",
+    "strategy.field.run_environment.timing.value.next_open": "Next session open",
+    "strategy.field.run_environment.missing": "Missing values",
+    "strategy.field.run_environment.missing.description": "How the calculation continues when a factor input is empty.",
+    "strategy.field.run_environment.missing.value.drop": "Drop the security",
+    "strategy.field.run_environment.missing.value.keep": "Keep the empty value",
+    "strategy.field.run_environment.missing.value.zero": "Fill with zero",
+    "strategy.field.run_environment.missing.value.cross_sectional_median": "Fill with the same-day median",
     // -- 화면 어휘 (P1-03, spec D8) -------------------------------------------------
     // backend가 발행한 설명 키는 stem이다: `<stem>`은 이름(라벨), `<stem>.description`은
     // 한 줄 설명. 연산자는 `<stem>.formula`로 계산식을 더한다. 목록 자체는 runtime schema의
@@ -2664,25 +2756,20 @@ export const messages = {
     "leave.leave": "Leave",
     "page.revision.untitled": "Untitled strategy",
     "page.revision.generated": "Generated from legacy JSON",
-    "upgrade.title": "Schema 1.0 document",
-    "upgrade.body":
-      "This document is schema 1.0. Upgrading rewrites it under the current rules while keeping comments and order (one undo step).",
-    "upgrade.action": "Upgrade to 1.1",
+    "upgrade.title": "Older schema document",
+    "upgrade.body": "This document uses a retired schema version. Upgrading rewrites it under the current rules while keeping comments and order (one undo step).",
+    "upgrade.action": "Upgrade to the current version",
     "upgrade.pending": "Upgrading…",
-    "upgrade.applied":
-      "Rewritten as 1.1. Review it, then save it as a new revision.",
-    "upgrade.frozenGenerated":
-      "This is a frozen schema 1.0 revision. The generated document is already on the current version: edit it and save a new revision.",
-    "upgrade.backtestBlocked":
-      "A stored 1.0 revision cannot run a backtest. Upgrade it and save a new revision first.",
+    "upgrade.applied": "Rewritten as the current version. Review it, then save it as a new revision.",
+    "upgrade.frozenGenerated": "This revision is frozen on an older schema. The generated document is already on the current version: edit it and save a new revision.",
+    "upgrade.backtestBlocked": "A stored older-schema revision cannot run a backtest. Upgrade it and save a new revision first.",
     "upgrade.error.editor": "The editor is not ready, so nothing was upgraded.",
     "upgrade.error.composing": "Cannot upgrade while composing input.",
     "upgrade.error.request":
       "The upgrade request failed. The text is unchanged. ({detail})",
     "upgrade.error.strategy_document.upgrade_drift":
       "The rewritten text disagreed with the upgrade rules, so it was rejected. The text is unchanged.",
-    "upgrade.error.strategy_document.not_upgradeable":
-      "Only schema 1.0 documents can be upgraded.",
+    "upgrade.error.strategy_document.not_upgradeable": "Only documents on a retired schema version can be upgraded.",
     "upgrade.warning.strategy_document.upgrade_missing_policy_conflict":
       "Per-factor missing-value policies were merged into one",
     "upgrade.warning.strategy_document.upgrade_weighting_rule_changed":
@@ -2691,7 +2778,13 @@ export const messages = {
       "The old document's run settings could not be carried over",
     "upgrade.error.strategy_document.invalid":
       "Syntax errors block the upgrade. Fix the syntax first.",
-    "history.frozen": "1.0 frozen",
+    "upgrade.error.strategy_document.upgrade_unsupported_node": "A node the current version lacks (a saved factor or subgraph reference) blocks the upgrade. Expand it into the graph and try again.",
+    "upgrade.warnings": "Things to know about this upgrade",
+    "upgrade.environment.found": "Run settings from the old document: {summary}",
+    "upgrade.environment.apply": "Fill the run settings",
+    "upgrade.environment.applied": "Filled the run settings from the old document. Check the run settings summary.",
+    "upgrade.environment.unavailable": "The old document's run settings could not be carried over, so nothing was filled. Read the notes and set them yourself.",
+    "history.frozen": "Frozen (older schema)",
     "assist.type": "Type",
     "assist.required": "required",
     "assist.optional": "optional",
@@ -2788,10 +2881,8 @@ export const messages = {
     "toolbar.run.open": "View backtest",
     "toolbar.run.accepted": "Backtest {runId} accepted",
     "toolbar.run.failed": "Backtest could not start",
-    "backtest.error.backtest.strategy.requires_upgrade":
-      "A stored 1.0 revision cannot run. Upgrade it and save a new revision first.",
-    "trace.error.trace.strategy.requires_upgrade":
-      "A stored 1.0 revision cannot be traced. Upgrade it and save a new revision first.",
+    "backtest.error.backtest.strategy.requires_upgrade": "A stored older-schema revision cannot run. Upgrade it and save a new revision first.",
+    "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
     "trace.error.trace.request.invalid": "The trace request is invalid: {detail}",
     "trace.error.trace.engine.incompatible":
       "The selected engine cannot trace this strategy. Choose another execution core.",

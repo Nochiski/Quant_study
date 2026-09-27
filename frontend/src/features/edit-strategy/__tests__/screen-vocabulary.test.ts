@@ -36,6 +36,11 @@ const CATALOG = JSON.parse(
   }[];
 };
 
+/** 실행 설정 스키마(다른 산출물, P3-02). `strategy.field.run_environment.*` 키는 여기서 발행된다. */
+const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/run-environment-schema.json"),
+) as Json;
+
 const HANGUL = /[가-힣]/;
 
 /** 스키마 어디에 있든 `x-description-key` 전부. 객체 stem과 property stem을 함께 모은다. */
@@ -189,16 +194,18 @@ describe("화면 어휘 커버리지", () => {
   it("스키마가 더는 발행하지 않는 화면 어휘 키가 사전에 남지 않는다", () => {
     // schema 1.2 에서 사라진 `data`·`execution`·`graph.missing_policy`와 `saved_*` 노드(P2-03·
     // P2-06)의 문장이 사전에 남아 있었다(BACKLOG-012). 스키마·카탈로그가 발행하는 키만 둔다.
-    // `strategy.field.run_environment.*` 는 실행 설정 스키마(다른 산출물)가 발행하므로 제외한다.
+    // `strategy.field.run_environment.*` 는 실행 설정 스키마(다른 산출물)가 발행한다 — 그 스키마도 순회한다.
     const published = new Set<string>();
-    for (const stem of descriptionStems(SCHEMA, new Set())) {
-      published.add(stem);
-      published.add(`${stem}.description`);
-    }
-    // 값 설명(`.value.<값>.description`)은 뜻이 이름만으로 드러나지 않는 값에만 있는 선택 항목이다.
-    for (const key of enumValueKeys(SCHEMA, [])) {
-      published.add(key);
-      published.add(`${key}.description`);
+    for (const schema of [SCHEMA, RUN_ENVIRONMENT_SCHEMA]) {
+      for (const stem of descriptionStems(schema, new Set())) {
+        published.add(stem);
+        published.add(`${stem}.description`);
+      }
+      // 값 설명(`.value.<값>.description`)은 뜻이 이름만으로 드러나지 않는 값에만 있는 선택 항목이다.
+      for (const key of enumValueKeys(schema, [])) {
+        published.add(key);
+        published.add(`${key}.description`);
+      }
     }
     for (const definition of CATALOG.operators) {
       published.add(definition.description_key);
@@ -207,10 +214,7 @@ describe("화면 어휘 커버리지", () => {
     }
     const owned = /^strategy\.(section|field|node|operator|type)\./;
     const orphans = Object.keys(messages.ko).filter(
-      (key) =>
-        owned.test(key) &&
-        !key.startsWith("strategy.field.run_environment.") &&
-        !published.has(key),
+      (key) => owned.test(key) && !published.has(key),
     );
 
     expect(orphans).toEqual([]);

@@ -1,0 +1,43 @@
+.run-environment-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: var(--text-size-small);
+}
+
+.run-environment-summary > strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.run-environment-summary dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.run-environment-summary dl > div {
+  display: flex;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.run-environment-summary dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.run-environment-summary__incomplete {
+  color: var(--status-warn);
+}
+
+.run-environment-summary > small {
+  margin-left: auto;
+}

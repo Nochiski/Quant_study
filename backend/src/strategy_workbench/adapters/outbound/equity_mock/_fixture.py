@@ -14,6 +14,27 @@ from strategy_workbench.domain.equity.facade.research_data import (
 )
 
 
+# 분할 사건 하나. `security_index` 종목은 `effective` 세션부터 원주가가 `1 / ratio`로 떨어지고,
+# 전방 조정 수정주가(첫 관측 수준 고정)는 사건 뒤 원주가 × `ratio`로 이어진다. 실제 삼성전자
+# 2018-05-04 50:1 액면분할을 본떴다. fixture 달력(2024-01)은 사건 뒤라 그 안의 수정주가는 원주가
+# × `ratio`다. 가격 변화 팩터가 원주가를 읽으면 이 사건에 오염된다(이슈 #214).
+@dataclass(frozen=True)
+class MockSplit:
+    security_index: int
+    effective: date
+    ratio: float
+
+
+MOCK_SPLIT = MockSplit(security_index=0, effective=date(2018, 5, 4), ratio=50.0)
+
+
+def adjusted_close(raw_close: float, *, security_index: int, session: date) -> float:
+    """원주가 → 전방 조정 수정주가. 그 날까지 적용된 사건 계수만 곱하므로 PIT다."""
+    if security_index == MOCK_SPLIT.security_index and session >= MOCK_SPLIT.effective:
+        return raw_close * MOCK_SPLIT.ratio
+    return raw_close
+
+
 @dataclass(frozen=True)
 class Membership:
     security: SecurityRef
@@ -65,9 +86,31 @@ def build_demo_fixture() -> MockEquityFixture:
             frequency="daily",
             available_date_basis="session close",
             recommended_lag_sessions=0,
-            description="KRX 원주가. 조정값은 별도 factor로 적용한다.",
+            description=(
+                "KRX 원주가 — 분할·증자·병합에 조정하지 않는다. 표시·거래대금·가격 필터처럼 "
+                "그날의 절대 가격이 필요할 때 쓴다. 수익률·모멘텀·이평·변동성은 price.adj_close."
+            ),
             disclosure_basis="정규장 종가 확정 시점",
             evidence="KRX 일별매매정보 종가 필드",
+            coverage=full_coverage,
+        ),
+        DatasetFieldProfile(
+            field_id="price.adj_close",
+            dataset_id="price_adj_daily",
+            label="수정 종가(전방 조정)",
+            unit="KRW",
+            value_type=FieldValueType.PRICE,
+            frequency="daily",
+            available_date_basis="session close",
+            recommended_lag_sessions=0,
+            description=(
+                "원주가 × 그날까지 적용된 분할·증자·병합 계수의 누적곱. 첫 관측 수준을 고정하고 "
+                "사건 뒤 가격을 올리므로 과거 값이 바뀌지 않는다(PIT). 실데이터에서는 확인 안 된 "
+                "사건이 조정되지 않고 남을 수 있다. 수익률·모멘텀·이평·변동성 "
+                "계산에 쓴다. mock 분할: sec-005930-1 2018-05-04 50:1."
+            ),
+            disclosure_basis="원주가 세션 확정 + 사건 계수 공개",
+            evidence="KRX 일별매매정보 종가 × mock 분할 사건 계수",
             coverage=full_coverage,
         ),
         DatasetFieldProfile(
@@ -219,6 +262,18 @@ def build_demo_fixture() -> MockEquityFixture:
                     ),
                     Observation(
                         security.security_id,
+                        "price.adj_close",
+                        session,
+                        session,
+                        adjusted_close(
+                            70_000.0 + security_index * 40_000.0 + index * 500.0,
+                            security_index=security_index,
+                            session=session,
+                        ),
+                        CellKind.OBSERVED,
+                    ),
+                    Observation(
+                        security.security_id,
                         "price.market_cap",
                         session,
                         session,
@@ -338,6 +393,7 @@ def build_demo_fixture() -> MockEquityFixture:
             point_in_time=True,
             dataset_revisions=(
                 DatasetRevision("price_daily", "mock-r3", sessions[-1]),
+                DatasetRevision("price_adj_daily", "mock-r1", sessions[-1]),
                 DatasetRevision("fin_std", "mock-r2", sessions[-1]),
                 DatasetRevision("consensus_daily", "mock-r4", sessions[-1]),
                 DatasetRevision("flow_daily", "mock-r1", sessions[-1]),

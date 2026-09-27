@@ -8,6 +8,8 @@
 
 - [설계 spec](../../superpowers/specs/2026-09-20-ai-assistant-design.md): 결정(D1~D9), non-goal,
   완료 정의. 이 initiative의 계약 SoT (2026-09-20 P0-01 리뷰 반영판)
+- [결과 설명 spec](../../superpowers/specs/2026-09-27-ai-backtest-result-explain.md): 백테스트
+  결과 화면 사이드바·결과 세션·설명 전용 모드·지표 쉬운 이름의 owner(D 절, US-DM-08)
 - [WORKFLOW.md](./WORKFLOW.md): Phase별 PR scope packet과 Phase 종료 gate
 - [PLAN.md](./PLAN.md): PR 상태, 리뷰·검증 결과를 계속 갱신하는 단일 진행 추적 파일
 - [tools/update-plan-progress.ps1](./tools/update-plan-progress.ps1): PLAN.md 집계 갱신

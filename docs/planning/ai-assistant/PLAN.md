@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: COMPLETE
-current_phase: complete
-current_pr: none
-active_prs: []
+project_status: IN_PROGRESS
+current_phase: D
+current_pr: D-01
+active_prs: [D-01]
 parallel_window: []
-last_updated: 2026-09-26T22:10:58+09:00
-planned_prs: 15
+last_updated: 2026-09-27T09:00:24+09:00
+planned_prs: 18
 merged_prs: 15
 approved_prs: 15
-progress_percent: 100
+progress_percent: 83
 ---
 
 # AI 어시스턴트 실시간 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 100
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `COMPLETE` |
-| Current phase | `complete` |
-| Current/next PR | `none` |
-| Active PR | none |
-| Progress | `15 / 15 merged (100%)` |
-| Approved | `15 / 15` |
-| Aggregated at | `2026-09-26 22:10 KST` |
+| Project status | `IN_PROGRESS` |
+| Current phase | `D` |
+| Current/next PR | `D-01` |
+| Active PR | `D-01` |
+| Progress | `15 / 18 merged (83%)` |
+| Approved | `15 / 18` |
+| Aggregated at | `2026-09-27 09:00 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -183,7 +183,8 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
 | C | Phase A/B audit follow-up | 2 | 2 | `MERGED` |
-| **Total** |  | **15** | **15** | **100%** |
+| D | Backtest result explanation (US-DM-08) | 3 | 0 | `IN_PROGRESS` |
+| **Total** |  | **18** | **15** | **83%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -305,6 +306,25 @@ Phase exit:
   뿐이다. 데이터 손실은 아니다. 계약에 `turn_id`를 싣고 그 값으로 짝지으면 추정이 사라진다.
 - **재현 test**: 없음. C-03이 backend 계약 테스트와 transcript 단위 테스트를 함께 더한다.
 
+## D — 백테스트 결과 설명 (US-DM-08)
+
+설계는 [결과 설명 spec](../../superpowers/specs/2026-09-27-ai-backtest-result-explain.md)이 정본이다.
+결과 화면에 기존 사이드바를 붙이고, 실행 하나에 붙는 결과 세션에서 모델이 서버가 읽은 결과 요약만
+받아 설명한다. 결과 세션은 설명 전용이라 제안·검색이 없다. 지표의 쉬운 한글 이름·뜻은 frontend
+i18n이 `metric_id`를 키로 소유한다.
+
+| 완료 | PR | 결과물 | Dependency | 상태 | Review |
+|---|---|---|---|---|---|
+| [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_PROGRESS` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` |
+| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v2, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `PLANNED` | 브랜치 `feat/ai-d-02-result-explain-backend` |
+| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `PLANNED` | 브랜치 `feat/ai-d-03-result-explain-frontend` |
+
+Phase exit:
+
+- [ ] spec 완료 정의 1~6 기록.
+- [ ] US-DM-08 `구현됨-e2e`, 전체 e2e 게이트에서 스토리 e2e 통과.
+- [ ] SoT·책임분리 점검 blocking 0.
+
 ## Review 기록
 
 | PR | Reviewer | 회차 | 결과 | 비고 |
@@ -363,6 +383,7 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-27 — D 절 신설(US-DM-08 백테스트 결과 설명). 사용자 지시 "전략 언어는 진짜 전략만 담고, AI를 통해 사용성까지 증대"·"전부 다 진행해". 설계 spec `2026-09-27-ai-backtest-result-explain.md`, PR 셋(D-01 spec, D-02 backend, D-03 frontend·e2e)을 스택으로 올린다. 집계 도구에 D phase를 더했다. assistant_sqlite 스키마 v2(`chat_sessions.run_id`)는 C-03 구현자에게 미리 알렸다 — 둘 다 스키마를 올리면 나중 머지가 v3로 rebase한다.
 - 2026-09-26 — **AI 어시스턴트 initiative 15/15 PR main 머지 완료**(C-01 #190 `a3cc5f8b`, C-02 #192 `16e6e994`). Phase A·B 감사 blocking 0, 감사 후속 NB 전부 닫힘 또는 backlog(C 절 2건, 담당 AI 후속 C-03 미착수). 남은 것은 사용자 키가 필요한 live smoke 2건과 완료 정의 1(실제 키 연결 테스트)뿐이다.
 - 2026-09-26 — C-02가 Phase B 감사 비차단 건을 처리했다. NB-1: 4xx 거부 문구 표를
   `entities/assistant`의 `Record<AssistantRejectionCode, MessageKey>` 하나로 모으고

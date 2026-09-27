@@ -73,6 +73,8 @@ class _Node:
     node_id: str
     kind: str
     inputs: tuple[str, ...]
+    # 레시피 빌더가 이 노드의 id 를 지을 때 쓰는 바탕 이름 — 잎은 필드 id 의 끝 조각, 단계는 연산자.
+    name_base: str
 
 
 @pytest.fixture(scope="module")
@@ -124,7 +126,15 @@ def _document_nodes(authoring: StrategyAuthoringService, name: str) -> dict[str,
                 for item in type(node).__dataclass_fields__
                 if item.endswith("_node_id")
             )
-            nodes.append(_Node(node.node_id, str(node.kind), inputs))
+            field_id = getattr(node, "field_id", None)
+            operator = getattr(node, "operator", None)
+            if isinstance(field_id, str):
+                base = field_id.rsplit(".", 1)[-1]
+            elif operator is not None:
+                base = str(operator)
+            else:
+                base = str(node.kind)
+            nodes.append(_Node(node.node_id, str(node.kind), inputs, base))
         graphs[factor.factor_id] = nodes
     return graphs
 
@@ -209,17 +219,40 @@ def test_every_factor_graph_is_a_recipe_chain(
         assert extra_leaves == leaves - {head.node_id}, f"{factor_id}: 쓰이지 않는 잎"
 
 
+@pytest.mark.parametrize("name", sorted(_EXPECTED_DIAGNOSTICS))
+def test_node_ids_follow_the_recipe_builder_naming(
+    authoring: StrategyAuthoringService, name: str
+) -> None:
+    """spec D2 빌더 규칙: 바탕 이름을 그대로 쓰고, 그래프 안에서 겹치면 `_2`·`_3` … 을 붙인다.
+
+    바탕 이름은 단계가 연산자, 잎이 필드 id 의 끝 조각이다(`price.close` → `close`). node_id 는
+    `spec_hash` 에 들어가므로 fixture 가 빌더 출력과 한 글자라도 다르면 P5-03 의 hash 단언이 깨진다.
+    이름 짓기의 owner 는 frontend 빌더(`graph-transactions.ts` 의 `suggestNodeId`, P5-01 이 레시피로
+    확장)이고, 여기서는 fixture 가 그 규칙대로 적혔는지만 본다. 빌더 쪽 고정은 P5-01 테스트다.
+    """
+    for factor_id, nodes in _document_nodes(authoring, name).items():
+        taken: set[str] = set()
+        for node in nodes:
+            expected = node.name_base
+            suffix = 2
+            while expected in taken:
+                expected = f"{node.name_base}_{suffix}"
+                suffix += 1
+            assert node.node_id == expected, f"{factor_id}: {node.node_id} ≠ 빌더 이름 {expected}"
+            taken.add(node.node_id)
+
+
 def test_ma20_breakout_is_four_nodes_with_two_leaves_and_a_promoted_output(
     authoring: StrategyAuthoringService,
 ) -> None:
-    """아이디어 3 의 정본 형태(spec D2): close → ma20 → 잎 close_2 → breakout(gt, close_2, ma20)."""
+    """아이디어 3 의 정본 형태(spec D2): close → mean → 잎 close_2 → gt(close_2, mean)."""
     (nodes,) = _document_nodes(authoring, "ma20_breakout.yaml").values()
 
     assert [(node.node_id, node.kind, node.inputs) for node in nodes] == [
         ("close", "field", ()),
-        ("ma20", "time_series", ("close",)),
+        ("mean", "time_series", ("close",)),
         ("close_2", "field", ()),
-        ("breakout", "comparison", ("close_2", "ma20")),
+        ("gt", "comparison", ("close_2", "mean")),
     ]
     # 비교 출력(boolean)은 P2-07 승격으로 0/1 숫자 점수가 되어 compile 을 통과한다.
     (factor,) = _spec(authoring, "ma20_breakout.yaml").factors

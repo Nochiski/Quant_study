@@ -15,11 +15,11 @@ factors:
           node_id: book_equity
           field_id: financial.book_equity
         - kind: binary
-          node_id: pbr
+          node_id: divide
           operator: divide
           left_node_id: market_cap
           right_node_id: book_equity
-      output_node_id: pbr
+      output_node_id: divide
   - factor_id: roe
     label: "ROE"
     direction: high
@@ -32,11 +32,11 @@ factors:
           node_id: book_equity
           field_id: financial.book_equity
         - kind: binary
-          node_id: roe
+          node_id: divide
           operator: divide
           left_node_id: net_income
           right_node_id: book_equity
-      output_node_id: roe
+      output_node_id: divide
 portfolio:
   selection_count: 20
 risk:

@@ -13,12 +13,12 @@ factors:
           node_id: close
           field_id: price.close
         - kind: time_series
-          node_id: mom_12_1
+          node_id: momentum
           operator: momentum
           input_node_id: close
           window: 252
           lag: 21
-      output_node_id: mom_12_1
+      output_node_id: momentum
   - factor_id: volatility_60
     label: "60일 변동성"
     direction: low
@@ -28,16 +28,16 @@ factors:
           node_id: close
           field_id: price.close
         - kind: time_series
-          node_id: daily_return
+          node_id: momentum
           operator: momentum
           input_node_id: close
           window: 2
         - kind: time_series
-          node_id: vol_60
+          node_id: std
           operator: std
-          input_node_id: daily_return
+          input_node_id: momentum
           window: 60
-      output_node_id: vol_60
+      output_node_id: std
 portfolio:
   selection_count: 20
   weighting: risk

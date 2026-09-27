@@ -17,11 +17,11 @@ factors:
           node_id: close
           field_id: price.close
         - kind: time_series
-          node_id: mom_60
+          node_id: momentum
           operator: momentum
           input_node_id: close
           window: 60
-      output_node_id: mom_60
+      output_node_id: momentum
 portfolio:
   selection_count: 20
 risk:

@@ -72,6 +72,7 @@ class UnitRule(StrEnum):
     BOOLEAN = "boolean"  # `bool`
     # 무차원 `"1"`. 횡단면 순위·z-score 는 "몇 번째인가"·"평균에서 몇 표준편차인가"라 입력 단위가
     # 남지 않는다(BACKLOG-003). 입력 단위를 물려주면 표준화한 두 팩터의 합이 단위 오류로 막힌다.
+    # 그룹 안 순위도 같은 백분위 공식이라 무차원이다(BACKLOG-015).
     DIMENSIONLESS = "dimensionless"
 
 
@@ -339,7 +340,7 @@ _DEFINITIONS: tuple[OperatorDefinition, ...] = (
         GroupOperator.RANK,
         params=("group_field_id",),
         output_type_rule=OutputTypeRule.NUMERIC_SERIES,
-        unit_rule=UnitRule.SAME_AS_INPUT,
+        unit_rule=UnitRule.DIMENSIONLESS,
         example=(
             "{ kind: group, node_id: sector_rank, operator: rank, input_node_id: score,"
             " group_field_id: sector }"

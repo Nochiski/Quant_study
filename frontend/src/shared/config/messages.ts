@@ -174,7 +174,7 @@ const ko = {
     "최대 낙폭의 바닥에서 이전 고점을 되찾기까지 걸린 거래일 수입니다.",
   "backtest.metric.benchmark_return": "벤치마크 수익률",
   "backtest.metric.benchmark_return.description":
-    "비교 기준 종목이 같은 기간 낸 수익률입니다.",
+    "비교 기준 종목을 첫날 사서 같은 기간 들고 있었을 때의 수익률입니다. 분할·병합은 보유 주식 수로 반영하고, 거래정지 세션은 직전 가치를 이어 쓰며, 배당은 넣지 않습니다.",
   "backtest.metric.excess_return": "초과 수익률",
   "backtest.metric.excess_return.description":
     "전략 수익률에서 벤치마크 수익률을 뺀 값입니다.",
@@ -1737,7 +1737,7 @@ export const messages = {
       "Trading days from the deepest low back to the previous peak.",
     "backtest.metric.benchmark_return": "Benchmark return",
     "backtest.metric.benchmark_return.description":
-      "What the comparison security returned over the same period.",
+      "What buying the comparison security on the first day and holding it returned over the same period. Splits and reverse splits are applied to the share count, suspended sessions carry the previous value, and dividends are not included.",
     "backtest.metric.excess_return": "Excess return",
     "backtest.metric.excess_return.description":
       "Strategy return minus benchmark return.",

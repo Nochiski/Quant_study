@@ -354,7 +354,7 @@ describe("StrategyFormPanel list sections", () => {
     const onOpenGraph = renderList(VERBOSE, transactions);
     const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.selectOptions(
-      factors.getByRole("combobox", { name: "factors · 카탈로그에서 추가" }),
+      factors.getByRole("combobox", { name: "factors · 예시 팩터에서 추가" }),
       "factor:server.momentum",
     );
     expect(transactions.apply).toHaveBeenLastCalledWith(

@@ -62,7 +62,7 @@ type StrategyFormPanelProps = {
   schema?: JsonSchema | null;
   /** 현재 parse tree(삭제 가드의 참조 탐색용). 없으면 참조 없음으로 본다. */
   tree?: unknown;
-  /** 팩터 카탈로그 preset(스니펫 카탈로그의 factor 항목) — "카탈로그에서 추가" 메뉴. */
+  /** 팩터 카탈로그 preset(스니펫 카탈로그의 예시 항목) — "예시 팩터에서 추가" 메뉴(튜토리얼 전용). */
   catalogSnippets?: readonly CanonicalSnippet[];
   /** 팩터 항목의 graph를 Graph 화면에서 열기(view=graph, pointer 선택). 없으면 버튼을 그리지 않는다. */
   onOpenGraph?: (pointer: string) => void;
@@ -419,7 +419,7 @@ const FormListSectionView = ({
           </Button>
           {presets.length > 0 ? (
             <select
-              aria-label={`${section.key} · ${t("form.list.addFromCatalog")}`}
+              aria-label={`${section.key} · ${t("form.list.addExample")}`}
               value=""
               disabled={settling}
               onChange={(event) => {
@@ -435,7 +435,7 @@ const FormListSectionView = ({
                   );
               }}
             >
-              <option value="">{t("form.list.addFromCatalog")}</option>
+              <option value="">{t("form.list.addExample")}</option>
               {presets.map((snippet) => (
                 <option
                   key={snippet.id}

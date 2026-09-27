@@ -29,8 +29,9 @@ const SIGNAL_SCHEMA: JsonSchema = {
 
 const SIGNAL_SNIPPET: CanonicalSnippet = {
   id: "section:signal",
-  category: "signal",
+  category: "section",
   label: "signal",
+  descriptionKey: "strategy.section.signal",
   kind: "section",
   sectionKey: "signal",
   identity: null,
@@ -126,7 +127,7 @@ describe("snippet insertion coordinator", () => {
 });
 
 describe("SnippetCatalog", () => {
-  it("renders all five areas and invokes the labelled keyboard button", async () => {
+  it("renders the section and example groups and invokes the labelled keyboard button", async () => {
     const user = userEvent.setup();
     const onInsert = vi.fn();
     render(
@@ -138,13 +139,14 @@ describe("SnippetCatalog", () => {
       />,
     );
 
-    for (const heading of ["데이터", "팩터", "신호", "리스크", "실행"]) {
-      expect(
-        screen.getByRole("heading", { name: heading }),
-      ).toBeInTheDocument();
-    }
+    // schema 1.2: 섹션은 스키마에서, 팩터 preset 은 튜토리얼용 "예시"로 강등(P3-01).
+    expect(
+      screen.getAllByRole("heading").map((heading) => heading.textContent),
+    ).toEqual(["섹션", "예시 팩터"]);
+    expect(screen.getByText(/튜토리얼용 예시입니다/)).toBeInTheDocument();
+    // 섹션은 이름을 먼저, 스키마 키를 보조로 보인다.
     await user.click(
-      screen.getByRole("button", { name: "signal · 현재 커서에 삽입" }),
+      screen.getByRole("button", { name: "신호 결합 · 현재 커서에 삽입" }),
     );
     expect(onInsert).toHaveBeenCalledWith(SIGNAL_SNIPPET);
   });

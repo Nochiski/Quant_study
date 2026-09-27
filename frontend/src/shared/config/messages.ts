@@ -588,7 +588,7 @@ const ko = {
   // `screen-vocabulary.test.ts`가 fixture를 순회해 누락 키를 잡는다.
   "strategy.document": "전략 문서",
   "strategy.document.description":
-    "유니버스·팩터·포트폴리오·리스크·실행을 한 벌로 적은 전략 정의입니다.",
+    "종목 거르기·팩터·포트폴리오·리스크를 한 벌로 적은 전략 정의입니다. 시장·기간·수수료는 실행 설정이 정합니다.",
   "strategy.section.schema_version": "문서 버전",
   "strategy.section.schema_version.description":
     "이 문서가 따르는 authoring 스키마 버전입니다.",
@@ -615,9 +615,6 @@ const ko = {
   "strategy.section.parameters": "탐색 파라미터",
   "strategy.section.parameters.description":
     "최적화가 값을 바꿔 가며 시험할 파라미터 정의입니다.",
-  "strategy.type.data_step": "데이터 구간",
-  "strategy.type.data_step.description":
-    "시장·주기·기간·유니버스를 묶은 데이터 설정입니다.",
   "strategy.type.eligibility_rule": "거르기 규칙",
   "strategy.type.eligibility_rule.description":
     "데이터 필드 하나를 기준값과 견주는 조건입니다.",
@@ -817,8 +814,6 @@ const ko = {
   "strategy.field.risk_step.risk_factor_id": "위험 팩터",
   "strategy.field.risk_step.risk_factor_id.description":
     "위험 가중에 쓸 팩터입니다. 비중 방식이 위험 가중(risk)일 때만 읽히고, 그때 이 팩터는 점수 합산에서 빠지며 원시값의 역수로 비중을 나눕니다.",
-  "strategy.type.execution_step": "체결 가정",
-  "strategy.type.execution_step.description": "주문 시점과 비용 가정입니다.",
   "strategy.parameter.float": "실수 파라미터",
   "strategy.parameter.float.description":
     "소수 범위에서 값을 찾는 파라미터입니다.",
@@ -2106,7 +2101,7 @@ export const messages = {
     // `screen-vocabulary.test.ts`가 fixture를 순회해 누락 키를 잡는다.
     "strategy.document": "Strategy document",
     "strategy.document.description":
-      "One strategy definition: universe, factors, portfolio, risk and execution.",
+      "One strategy definition: eligibility, factors, portfolio and risk. Market, period and costs belong to the run settings.",
     "strategy.section.schema_version": "Document version",
     "strategy.section.schema_version.description":
       "The authoring schema version this document follows.",
@@ -2134,9 +2129,6 @@ export const messages = {
     "strategy.section.parameters": "Search parameters",
     "strategy.section.parameters.description":
       "Parameters an optimisation sweeps over.",
-    "strategy.type.data_step": "Data window",
-    "strategy.type.data_step.description":
-      "Market, frequency, period and universe in one block.",
     "strategy.type.eligibility_rule": "Eligibility rule",
     "strategy.type.eligibility_rule.description":
       "One condition comparing a data field against a threshold.",
@@ -2344,9 +2336,6 @@ export const messages = {
     "strategy.field.risk_step.risk_factor_id": "Risk factor",
     "strategy.field.risk_step.risk_factor_id.description":
       "The factor used for risk weighting. It is read only when weighting is risk; then it is left out of the combined score and weights follow the inverse of its raw value.",
-    "strategy.type.execution_step": "Execution step",
-    "strategy.type.execution_step.description":
-      "Order timing and cost assumptions.",
     "strategy.parameter.float": "Float parameter",
     "strategy.parameter.float.description":
       "A parameter searched over a real-valued range.",

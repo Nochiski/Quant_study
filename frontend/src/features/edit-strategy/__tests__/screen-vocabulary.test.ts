@@ -205,7 +205,7 @@ describe("화면 어휘 커버리지", () => {
       published.add(`${definition.description_key}.description`);
       published.add(definition.formula_key);
     }
-    const owned = /^strategy\.(section|field|node|operator)\./;
+    const owned = /^strategy\.(section|field|node|operator|type)\./;
     const orphans = Object.keys(messages.ko).filter(
       (key) =>
         owned.test(key) &&

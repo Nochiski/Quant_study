@@ -24,7 +24,9 @@ from strategy_workbench.domain.factor.facade.registry import build_default_facto
 def test_신용잔고율은_잔고_주식수를_상장주식수로_나눈다() -> None:
     definition = build_default_factor_registry().get("credit.margin_balance_ratio")
     assert definition.required_field_ids == ("credit.margin_balance", "price.shares_outstanding")
-    numerator, denominator = (FIELD_BY_ID[field_id].unit for field_id in definition.required_field_ids)
+    numerator, denominator = (
+        FIELD_BY_ID[field_id].unit for field_id in definition.required_field_ids
+    )
     # 분자·분모 단위가 같아야 선언 단위 ratio(무차원)가 선다 — 주식수 ÷ 원이면 주가 수준에 끌려간다.
     assert (numerator, denominator, definition.output_unit) == ("shares", "shares", "ratio")
 

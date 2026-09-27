@@ -56,6 +56,7 @@ duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑
 
 from __future__ import annotations
 
+import logging
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterator, Sequence
@@ -141,6 +142,8 @@ from ._specs import (
 
 if TYPE_CHECKING:
     import duckdb
+
+logger = logging.getLogger(__name__)
 
 MARKET = "KRX"
 VENUE = "XKRX"
@@ -464,7 +467,35 @@ class EquityDuckdbAdapter:
                 f"catalog macros not published (macros_skipped) — missing={skipped} "
                 f"catalog={self._catalog.path} macros={list(self._catalog.macros)}"
             )
-        return None
+        return self._missing_columns_reason(spec)
+
+    def _missing_columns_reason(self, spec: SourceSpec) -> str | None:
+        """매크로가 있어도 옛 카탈로그면 원천이 요구하는 열이 없다 — 그 원천만 빼고 경고한다.
+
+        열 확인 없이 두면 `row_filter` 가 커버율 질의에서 BinderException 을 던져 `list_fields()`
+        전체가 죽는다(#233 리뷰 P2-1). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
+        """
+        if not spec.required_columns or not spec.is_macro:
+            return None
+        con = self._connect()
+        try:
+            described = con.execute(
+                f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
+            ).fetchall()
+        finally:
+            con.close()
+        present = {str(row[0]) for row in described}
+        missing = [column for column in spec.required_columns if column not in present]
+        if not missing:
+            return None
+        reason = (
+            f"카탈로그 매크로 {spec.relation} 에 원천 {spec.name} 이 읽는 열이 없어 이 원천의 "
+            "필드를 뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
+            f"`python -m equity catalog`) (catalog_columns_missing) — missing={missing} "
+            f"catalog={self._catalog.path}"
+        )
+        logger.warning(reason)
+        return reason
 
     @property
     def backfill_end(self) -> date:

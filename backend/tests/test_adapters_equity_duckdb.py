@@ -386,6 +386,24 @@ def test_flow_financials_are_pit_ttm_not_the_latest_report_period(
         assert (cell.value, cell.kind) == (None, CellKind.MISSING), security_id
 
 
+def test_late_old_period_correction_does_not_revert_financials_to_that_period(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """옛 기간 정정본이 늦게 접수돼도 셀은 컷오프까지 공개된 가장 최근 기간을 유지한다 (#225).
+
+    000660 은 2023 반기(08-14 접수) 뒤에 2023 1분기 정정본이 2024-01-09 에 접수된다. 랙 1세션이라
+    01-10 부터 보인다. 예전에는 컷오프 이하 "가장 늦게 접수된 행" 을 골라 01-10 부터 1분기 값
+    (자본 1,120)으로 되돌아갔다. 지금은 `v_fin_latest.period_frontier` 가 참인 행만 본다.
+    """
+    result = _raw(adapter, start=START, end=END, fields=ALL_FIELDS, universe="krx.all")
+    for session in (date(2024, 1, 10), date(2024, 1, 11), END):
+        cell = _cell(result, session, "000660:1", "financial.book_equity")
+        assert (cell.value, cell.available_date) == (1_200.0, date(2023, 8, 14)), session
+    # 창 독립: 정정본 공개 뒤 세션만 좁혀 물어도 같다
+    narrow = _raw(adapter, start=END, end=END, fields=("financial.book_equity",))
+    assert _field(narrow, END, "000660:1", "financial.book_equity") == 1_200.0
+
+
 def test_consensus_picks_the_nearest_target_period_and_the_measured_source(
     adapter: EquityDuckdbAdapter,
 ) -> None:
@@ -747,6 +765,31 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path)
     skipped = EquityDuckdbAdapter(root)
     result = _raw(skipped, fields=("financial.book_equity",))
     assert result.detail is not None and "macros_skipped" in result.detail
+
+
+def test_catalog_without_required_view_column_drops_only_that_source(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """옛 카탈로그(`v_fin_latest` 에 `period_frontier` 가 없다)는 재무 원천만 뺀다 (#233 리뷰 P2-1).
+
+    매크로는 게시돼 있어 `macros_skipped` 가드는 통과한다. 예전에는 fin 원천의 `row_filter` 가
+    커버율 질의에서 BinderException 을 던져 `list_fields()` 전체가 죽었다 — 필드 목록을 쓰는 화면과
+    AI 컨텍스트가 모두 막혔다. 지금은 부팅 때 열을 확인해 재무 필드만 빠지고 경고를 남긴다.
+    """
+    root = build_workbench_root(tmp_path / "equity", catalog=False)
+    write_catalog(root, legacy_fin_view=True)
+    with caplog.at_level("WARNING"):
+        legacy = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in legacy.list_fields()}
+    assert "price.close" in served and "consensus.forward_eps" in served
+    assert not served & {"financial.book_equity", "financial.net_income"}
+    denied = _raw(legacy, fields=("financial.book_equity",))
+    assert denied.status is DataLoadStatus.INVALID_QUERY
+    assert denied.detail is not None and "catalog_columns_missing" in denied.detail
+    assert "period_frontier" in denied.detail
+    assert _raw(legacy, fields=("price.close",)).ok
+    warned = [r.getMessage() for r in caplog.records if "catalog_columns_missing" in r.getMessage()]
+    assert warned and "v_fin_latest" in warned[0] and "카탈로그" in warned[0]
 
 
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:

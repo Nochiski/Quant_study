@@ -449,6 +449,7 @@ export type {
   SaveStrategyDraftResponse,
   SaveStrategyDraftResponses,
   SearchActivityView,
+  SearchBudgetExhaustedView,
   SecurityRef,
   SelectionMethod,
   SessionHistoryView,

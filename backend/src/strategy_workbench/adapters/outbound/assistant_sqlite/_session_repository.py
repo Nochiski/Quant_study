@@ -116,8 +116,8 @@ class SQLiteChatSessionRepository:
             )
             connection.execute(
                 """
-                INSERT INTO chat_messages (session_id, ordinal, role, text, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO chat_messages (session_id, ordinal, role, text, created_at, turn_id)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -125,6 +125,7 @@ class SQLiteChatSessionRepository:
                     message.role.value,
                     message.text,
                     datetime_text(message.created_at, field="chat message created_at"),
+                    message.turn_id,
                 ),
             )
 
@@ -133,7 +134,7 @@ class SQLiteChatSessionRepository:
             _session_row(connection, session_id)
             rows = connection.execute(
                 """
-                SELECT role, text, created_at FROM chat_messages
+                SELECT role, text, created_at, turn_id FROM chat_messages
                 WHERE session_id = ? ORDER BY ordinal ASC
                 """,
                 (session_id,),
@@ -350,6 +351,7 @@ def _decode_message(row: sqlite3.Row) -> ChatMessage:
         role=role,
         text=text_value(row, "text"),
         created_at=datetime_value(row["created_at"], field="chat message created_at"),
+        turn_id=optional_text_value(row, "turn_id"),
     )
 
 

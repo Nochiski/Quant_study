@@ -121,6 +121,9 @@ export type AssistantEventEnvelopeView = {
         type: "search_activity";
       } & SearchActivityView)
     | ({
+        type: "search_budget_exhausted";
+      } & SearchBudgetExhaustedView)
+    | ({
         type: "proposal";
       } & ProposalView)
     | ({
@@ -713,6 +716,11 @@ export type CellKind =
 
 /**
  * ChatMessageView
+ *
+ * 대화 메시지 하나. `turn_id`는 이 메시지를 만든 턴이다(C-03).
+ *
+ * 화면은 이 값으로 질문을 턴에 붙인다. `null`은 이 필드가 생기기 전에 저장돼 어느 턴 뒤에도 오지
+ * 않는 메시지뿐이며, 화면은 그런 메시지를 어느 턴에도 달지 않는다.
  */
 export type ChatMessageView = {
   /**
@@ -724,6 +732,10 @@ export type ChatMessageView = {
    * Text
    */
   text: string;
+  /**
+   * Turn Id
+   */
+  turn_id: string | null;
 };
 
 /**
@@ -3872,6 +3884,21 @@ export type SearchActivityView = {
    * Type
    */
   type: "search_activity";
+};
+
+/**
+ * SearchBudgetExhaustedView
+ *
+ * 검색 횟수 상한에 닿아 이 턴의 남은 호출에서 검색을 뺐다는 통지. 검색 활동이 아니다.
+ *
+ * 본문 필드가 없다. 화면 문구는 frontend가 로케일별로 소유하고, 모델에게 보낸 지시문은 wire에
+ * 싣지 않는다(C-03).
+ */
+export type SearchBudgetExhaustedView = {
+  /**
+   * Type
+   */
+  type: "search_budget_exhausted";
 };
 
 /**

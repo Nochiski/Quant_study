@@ -47,6 +47,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     ProviderKind,
     ProviderProfile,
     SearchActivity,
+    SearchBudgetExhausted,
     Source,
     StrategyProposal,
     TextDelta,
@@ -160,6 +161,7 @@ def _event_samples() -> dict[type, ChatEvent]:
         ToolCall(call_id="call-1", name="validate_strategy_yaml", arguments={"source": "a: 1"}),
         ToolResultSummary(call_id="call-1", name="validate_strategy_yaml", ok=True, summary="통과"),
         SearchActivity(query="KRX 모멘텀", sources=(Source(title="기사", url="https://a.test/1"),)),
+        SearchBudgetExhausted(),
         Proposal(proposal=proposal),
         # 캐시 두 칸도 0이 아니어야 왕복 검사가 뜻을 가진다. 기본값 그대로면 codec이
         # 두 필드를 통째로 흘려도 같은 값으로 복원돼 테스트가 조용히 통과한다.
@@ -292,8 +294,8 @@ def test_run_sessions_round_trip_and_list_apart_from_documents(
 def test_messages_keep_conversation_order(database: AssistantDatabase) -> None:
     repository = SQLiteChatSessionRepository(database)
     repository.create(_session())
-    repository.append_message("session-1", ChatMessage(ChatRole.USER, "질문", NOW))
-    repository.append_message("session-1", ChatMessage(ChatRole.ASSISTANT, "답변", NOW))
+    repository.append_message("session-1", ChatMessage(ChatRole.USER, "질문", NOW, "turn-1"))
+    repository.append_message("session-1", ChatMessage(ChatRole.ASSISTANT, "답변", NOW, "turn-1"))
 
     stored = repository.messages("session-1")
 
@@ -303,13 +305,31 @@ def test_messages_keep_conversation_order(database: AssistantDatabase) -> None:
     ]
 
 
+def test_messages_keep_the_turn_they_belong_to(database: AssistantDatabase) -> None:
+    """메시지의 `turn_id`가 왕복한다(C-03). 턴 행보다 먼저 써도 받는다.
+
+    러너는 거절(세션 없음·활성 공급자 없음)을 호출 스레드에서 돌려주려고 사용자 메시지를 턴 행보다
+    먼저 쓴다. 그래서 이 칼럼에는 외래 키를 걸지 않는다 — 걸면 첫 질문부터 거부된다.
+    """
+    repository = SQLiteChatSessionRepository(database)
+    repository.create(_session())
+    repository.append_message("session-1", ChatMessage(ChatRole.USER, "질문", NOW, "turn-9"))
+    repository.create_turn(_turn("turn-9"))
+    repository.append_message("session-1", ChatMessage(ChatRole.ASSISTANT, "답변", NOW, "turn-9"))
+
+    assert [message.turn_id for message in repository.messages("session-1")] == [
+        "turn-9",
+        "turn-9",
+    ]
+
+
 def test_missing_session_is_a_port_error(database: AssistantDatabase) -> None:
     repository = SQLiteChatSessionRepository(database)
 
     with pytest.raises(ChatSessionNotFoundError):
         repository.get("absent")
     with pytest.raises(ChatSessionNotFoundError):
-        repository.append_message("absent", ChatMessage(ChatRole.USER, "질문", NOW))
+        repository.append_message("absent", ChatMessage(ChatRole.USER, "질문", NOW, "turn-1"))
     with pytest.raises(ChatSessionNotFoundError):
         repository.messages("absent")
     with pytest.raises(ChatSessionNotFoundError):
@@ -583,13 +603,13 @@ def test_a_run_session_row_names_nothing_else(tmp_path: Path) -> None:
                 connection.execute(insert, row)
 
 
-def _write_v1_file(path: Path) -> None:
-    """v1 스키마로 만든 파일에 세션·턴·메시지·이벤트를 하나씩 남긴다(v2 이전 사용자 파일)."""
+def _write_v2_file(path: Path) -> None:
+    """v2 스키마(C-03)로 만든 파일에 세션·턴·메시지·이벤트를 하나씩 남긴다(v3 이전 사용자 파일)."""
     with sqlite3.connect(path) as connection:
-        for _object_type, _name, statement in _schema._V1_SCHEMA_OBJECTS:
+        for _object_type, _name, statement in _schema.V2_SCHEMA_OBJECTS:
             connection.execute(statement)
         connection.execute(f"PRAGMA application_id = {_schema._APPLICATION_ID}")
-        connection.execute("PRAGMA user_version = 1")
+        connection.execute("PRAGMA user_version = 2")
         connection.execute(
             """
             INSERT INTO chat_sessions (
@@ -610,7 +630,8 @@ def _write_v1_file(path: Path) -> None:
         connection.execute(
             """
             INSERT INTO chat_messages VALUES (
-                'session-old', 0, 'user', '모멘텀이 뭐야?', '2026-09-20T09:30:00.000000+00:00'
+                'session-old', 0, 'user', '모멘텀이 뭐야?',
+                '2026-09-20T09:30:00.000000+00:00', 'turn-old'
             )
             """
         )
@@ -621,19 +642,19 @@ def _write_v1_file(path: Path) -> None:
         )
 
 
-def test_a_v1_file_is_upgraded_to_v2_without_losing_history(tmp_path: Path) -> None:
-    """v1 사용자 파일은 이력을 그대로 둔 채 실행 세션을 받을 수 있게 된다(결과 설명 spec R3)."""
+def test_a_v2_file_is_upgraded_to_v3_without_losing_history(tmp_path: Path) -> None:
+    """v2 사용자 파일은 이력을 그대로 둔 채 실행 세션을 받을 수 있게 된다(결과 설명 spec R3)."""
     path = tmp_path / "assistant.sqlite3"
-    _write_v1_file(path)
+    _write_v2_file(path)
 
     with AssistantDatabase(path) as database:
         repository = SQLiteChatSessionRepository(database)
         old = repository.get("session-old")
         assert old.document_ref == DocumentRef(strategy_id="s-1", revision=3, draft_id=None)
         assert old.title == "옛 대화"
-        assert [message.text for message in repository.messages("session-old")] == [
-            "모멘텀이 뭐야?"
-        ]
+        assert [
+            (message.text, message.turn_id) for message in repository.messages("session-old")
+        ] == [("모멘텀이 뭐야?", "turn-old")]
         assert [turn.turn_id for turn in repository.turns("session-old")] == ["turn-old"]
         assert [item.event for item in repository.events("session-old")] == [
             TextDelta(text="모멘텀은")
@@ -645,8 +666,13 @@ def test_a_v1_file_is_upgraded_to_v2_without_losing_history(tmp_path: Path) -> N
         ]
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == _schema.SCHEMA_VERSION
-    # 다시 열 때는 이미 v2라 마이그레이션 없이 manifest 검사만 통과한다.
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        # 자식 표의 외래 키는 여전히 원래 이름을 가리킨다(`legacy_alter_table`, 모듈 docstring).
+        (messages_ddl,) = connection.execute(
+            "SELECT sql FROM sqlite_schema WHERE name = 'chat_messages'"
+        ).fetchone()
+        assert "REFERENCES chat_sessions(session_id)" in messages_ddl
+    # 다시 열 때는 이미 v3이라 올리기 없이 manifest 검사만 통과한다.
     with AssistantDatabase(path) as reopened:
         assert SQLiteChatSessionRepository(reopened).get("session-old").title == "옛 대화"
 
@@ -660,17 +686,17 @@ def test_foreign_keys_stay_on_after_the_schema_is_prepared() -> None:
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
-def test_a_hand_edited_v1_file_is_refused_before_it_is_rewritten(tmp_path: Path) -> None:
-    """v1 선언과 다른 파일을 v2로 옮기면 누가 완화한 제약이 새 파일에 조용히 묻힌다."""
+def test_a_hand_edited_v2_file_is_refused_before_it_is_rewritten(tmp_path: Path) -> None:
+    """v2 선언과 다른 파일을 v3으로 옮기면 누가 완화한 제약이 새 파일에 조용히 묻힌다."""
     path = tmp_path / "assistant.sqlite3"
-    _write_v1_file(path)
+    _write_v2_file(path)
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE extra (id TEXT)")
 
-    with pytest.raises(AssistantStorageError, match="version 1"):
+    with pytest.raises(AssistantStorageError, match="version 2"):
         AssistantDatabase(path)
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
 
 
 def test_every_chat_event_union_member_has_a_round_trip_sample() -> None:
@@ -764,14 +790,14 @@ def test_a_non_utc_aware_timestamp_is_stored_as_utc(database: AssistantDatabase)
     repository.create(_session())
     repository.append_message(
         "session-1",
-        ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 18, 30, tzinfo=seoul)),
+        ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 18, 30, tzinfo=seoul), "turn-1"),
     )
 
     assert repository.messages("session-1")[0].created_at == NOW
 
     with pytest.raises(ValueError, match="timezone-aware"):
         repository.append_message(
-            "session-1", ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 9, 30))
+            "session-1", ChatMessage(ChatRole.USER, "질문", datetime(2026, 9, 20, 9, 30), "turn-1")
         )
 
 

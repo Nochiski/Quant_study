@@ -10,8 +10,8 @@
  * 검사 밖으로 나가기 때문이다. 여기서 가짜인 것은 모델 하나뿐이고 나머지 경로는 전부 진짜다.
  *
  * 대본은 질문에 든 낱말로 고른다(`_scenarios.py`의 `SCENARIO_KEYWORDS`): "창을 줄"이면 팩터 창을
- * 줄인 제안, "제안"이면 도구 호출 후 제목만 바꾼 제안, "검색"이면 검색 활동 후 검증 3회 실패,
- * "천천히"면 긴 스트리밍, 그 밖이면 짧은 답변이다.
+ * 줄인 제안, "제안"이면 도구 호출 후 제목만 바꾼 제안, "검색 상한"이면 검색 두 번 뒤 상한 통지와
+ * 답, "검색"이면 검색 활동 후 검증 3회 실패, "천천히"면 긴 스트리밍, 그 밖이면 짧은 답변이다.
  *
  * 스크린샷은 만들지 않는다. 시각 기준선의 owner는 `workbench.infrastructure.spec.ts`이고, 이
  * 파일은 동작만 본다.
@@ -365,6 +365,46 @@ test.describe("AI 어시스턴트", () => {
       // 실패한 턴은 문서를 건드리지 않는다 — 실행 게이트도 그대로다.
       await expectPhase(page, "저장됨");
       await expect(backtest(page)).toBeEnabled();
+    },
+  );
+
+  test(
+    "검색 상한에 닿은 턴은 검색 칩 대신 안내 문구를 보이고 새로고침해도 같다",
+    { tag: ["@story", "@US-CS-04"] },
+    async ({ page }) => {
+      await ensureProvider(page);
+      await saveStrategyRevision(page, "C-03 검색 상한");
+      await openAssistant(page);
+
+      await ask(page, "검색 상한까지 KRX 자료를 찾아 줘");
+      await expect(progress(page)).toHaveText("답변이 완료되었습니다.");
+
+      // 스트림으로 그린 화면과 이력(`GET /sessions/{id}`)으로 다시 그린 화면이 같아야 한다 — 통지가
+      // 저장소·SSE·이력 세 경로를 모두 지나는지 본다(C-03).
+      for (const phase of ["스트림", "새로고침"] as const) {
+        if (phase === "새로고침") {
+          await page.reload();
+          await expect(editor(page)).toBeVisible();
+        }
+        const turn = transcript(page).getByRole("article").last();
+        await expect(turn, phase).toContainText(
+          "이 답변에서 쓸 수 있는 웹 검색 횟수를 모두 썼습니다. 지금까지 찾은 자료로 답합니다.",
+        );
+        await expect(turn, phase).toContainText(
+          "KRX에서도 모멘텀 프리미엄이 관측됩니다.",
+        );
+        // 칩은 실제로 한 검색 두 건뿐이다. 통지가 검색으로 그려지면 셋이 된다.
+        await expect(
+          turn.getByRole("listitem").filter({ hasText: "웹 검색" }),
+          phase,
+        ).toHaveCount(2);
+        await expect(turn, phase).toContainText("KRX 모멘텀 팩터 2026");
+        await expect(turn, phase).toContainText("KRX 팩터 성과 보고");
+        // 모델에게 보낸 지시문은 화면에 나오지 않는다.
+        await expect(turn, phase).not.toContainText(
+          "이 턴에 허용된 웹 검색 횟수를 모두 썼습니다.",
+        );
+      }
     },
   );
 });

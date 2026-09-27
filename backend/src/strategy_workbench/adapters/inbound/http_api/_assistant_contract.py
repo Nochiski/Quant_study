@@ -1,7 +1,7 @@
 """AI 어시스턴트 라우트의 wire 계약 (설계 spec D6).
 
 application·domain 값 타입에는 **판별자(discriminator)가 없다.** `ChatEvent`는 공통 상위 타입
-없이 9개 dataclass의 합집합이고, 그 설계는 파이썬 소비자가 `isinstance`로 전부를 다루도록
+없이 10개 dataclass의 합집합이고, 그 설계는 파이썬 소비자가 `isinstance`로 전부를 다루도록
 강제하려는 것이다(spec D2). 그런데 JSON 한 줄을 받은 브라우저는 `isinstance`를 쓸 수 없으므로,
 타입 이름을 값으로 실어 주는 것은 **전송 계층의 일**이다. 그래서 `type` 리터럴과 그 합집합
 메타데이터를 이 파일이 소유한다(`_execution_error_contract.py`와 같은 관례).
@@ -42,6 +42,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     ProposalCompileResult,
     ProviderKind,
     SearchActivity,
+    SearchBudgetExhausted,
     SequencedEvent,
     Source,
     StrategyProposal,
@@ -99,8 +100,8 @@ __all__ = [
 ]
 
 # SSE 프레임의 `event:` 이름. 백테스트 스트림이 `progress` 하나를 쓰는 것과 같은 프레이밍이다
-# (spec D6). 이벤트 종류는 `event:` 줄이 아니라 payload의 `type`이 말한다 — 이름을 9개로 쪼개면
-# 클라이언트가 리스너를 9번 달아야 하고, 새 이벤트를 추가할 때마다 프론트가 깨진다.
+# (spec D6). 이벤트 종류는 `event:` 줄이 아니라 payload의 `type`이 말한다 — 이름을 갈래 수만큼
+# 쪼개면 클라이언트가 갈래마다 리스너를 달아야 하고, 새 이벤트를 추가할 때마다 프론트가 깨진다.
 ASSISTANT_EVENT_NAME = "assistant"
 
 
@@ -197,9 +198,16 @@ class SessionView:
 
 @dataclass(frozen=True)
 class ChatMessageView:
+    """대화 메시지 하나. `turn_id`는 이 메시지를 만든 턴이다(C-03).
+
+    화면은 이 값으로 질문을 턴에 붙인다. `null`은 이 필드가 생기기 전에 저장돼 어느 턴 뒤에도 오지
+    않는 메시지뿐이며, 화면은 그런 메시지를 어느 턴에도 달지 않는다.
+    """
+
     role: ChatRole
     text: str
     created_at: datetime
+    turn_id: str | None
 
 
 @dataclass(frozen=True)
@@ -320,6 +328,17 @@ class SearchActivityView:
 
 
 @dataclass(frozen=True)
+class SearchBudgetExhaustedView:
+    """검색 횟수 상한에 닿아 이 턴의 남은 호출에서 검색을 뺐다는 통지. 검색 활동이 아니다.
+
+    본문 필드가 없다. 화면 문구는 frontend가 로케일별로 소유하고, 모델에게 보낸 지시문은 wire에
+    싣지 않는다(C-03).
+    """
+
+    type: Literal["search_budget_exhausted"]
+
+
+@dataclass(frozen=True)
 class ProposalView:
     type: Literal["proposal"]
     proposal: StrategyProposalView
@@ -359,6 +378,7 @@ AssistantEventView: TypeAlias = Annotated[
     | ToolCallView
     | ToolResultSummaryView
     | SearchActivityView
+    | SearchBudgetExhaustedView
     | ProposalView
     | UsageView
     | DoneView
@@ -625,7 +645,12 @@ def probe_result_view(result: ProbeResult) -> ProbeResultView:
 
 
 def message_view(message: ChatMessage) -> ChatMessageView:
-    return ChatMessageView(role=message.role, text=message.text, created_at=message.created_at)
+    return ChatMessageView(
+        role=message.role,
+        text=message.text,
+        created_at=message.created_at,
+        turn_id=message.turn_id,
+    )
 
 
 def session_usage_view(usage: SessionUsage) -> SessionUsageView:
@@ -708,6 +733,8 @@ def _event_view(event: ChatEvent) -> AssistantEventView:
                 query=event.query,
                 sources=_sources_view(event.sources),
             )
+        case SearchBudgetExhausted():
+            return SearchBudgetExhaustedView(type="search_budget_exhausted")
         case Proposal():
             return ProposalView(type="proposal", proposal=_proposal_view(event.proposal))
         case Usage():

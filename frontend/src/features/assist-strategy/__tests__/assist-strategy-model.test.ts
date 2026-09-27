@@ -18,9 +18,24 @@ const history = (): SessionHistoryView => ({
     created_at: "2026-09-20T00:00:00Z",
   },
   messages: [
-    { role: "user", text: "첫 질문", created_at: "2026-09-20T00:00:01Z" },
-    { role: "assistant", text: "첫 답", created_at: "2026-09-20T00:00:02Z" },
-    { role: "user", text: "둘째 질문", created_at: "2026-09-20T00:00:03Z" },
+    {
+      role: "user",
+      text: "첫 질문",
+      created_at: "2026-09-20T00:00:01Z",
+      turn_id: "t-1",
+    },
+    {
+      role: "assistant",
+      text: "첫 답",
+      created_at: "2026-09-20T00:00:02Z",
+      turn_id: "t-1",
+    },
+    {
+      role: "user",
+      text: "둘째 질문",
+      created_at: "2026-09-20T00:00:03Z",
+      turn_id: "t-2",
+    },
   ],
   turns: [
     {
@@ -71,6 +86,53 @@ describe("assistTranscript", () => {
     ]);
   });
 
+  it("메시지 수와 턴 수가 어긋나도 질문은 자기 턴에 붙는다", () => {
+    // 옛 이력에서 올라온, 어느 턴 뒤에도 오지 않는 질문(turn_id null)이 맨 앞에 있고 t-1의 질문은
+    // 그 뒤에 있다. 순서로 짝지으면 "고아 질문"이 t-1에, "첫 질문"이 t-2에 붙는다(C-03).
+    const base = history();
+    const state = assistantChatReducer(emptyAssistantChatState, {
+      type: "history",
+      history: {
+        ...base,
+        messages: [
+          {
+            role: "user",
+            text: "고아 질문",
+            created_at: "2026-09-20T00:00:00Z",
+            turn_id: null,
+          },
+          ...base.messages,
+        ],
+      },
+    });
+
+    expect(
+      assistTranscript(state, {}).map((entry) => [entry.turnId, entry.prompt]),
+    ).toEqual([
+      ["t-1", "첫 질문"],
+      ["t-2", "둘째 질문"],
+    ]);
+  });
+
+  it("질문이 없는 턴은 비워 두고 뒤 턴의 질문을 당겨 오지 않는다", () => {
+    // t-1의 질문 행이 없는 이력. 순서로 짝지으면 t-2의 질문이 t-1에 붙고 t-2는 비어 보인다.
+    const base = history();
+    const state = assistantChatReducer(emptyAssistantChatState, {
+      type: "history",
+      history: {
+        ...base,
+        messages: base.messages.filter((message) => message.turn_id === "t-2"),
+      },
+    });
+
+    expect(
+      assistTranscript(state, {}).map((entry) => [entry.turnId, entry.prompt]),
+    ).toEqual([
+      ["t-1", null],
+      ["t-2", "둘째 질문"],
+    ]);
+  });
+
   it("falls back to the text just sent when the history has not caught up", () => {
     const state = assistantChatReducer(emptyAssistantChatState, {
       type: "turn",
@@ -88,8 +150,8 @@ describe("assistTranscript", () => {
   });
 
   it("이력이 늦게 와도 턴 순서는 서버가 아는 생성 순서를 지킨다", () => {
-    // 턴 시작 202가 이력보다 먼저 도착한 세션. 리듀서가 관측 순서로 쌓으면 [t-3, t-1, t-2]가 되고
-    // 질문이 한 칸씩 밀린다(B-03 리뷰 P1).
+    // 턴 시작 202가 이력보다 먼저 도착한 세션. 리듀서가 관측 순서로 쌓으면 [t-3, t-1, t-2]가 되어
+    // 대화가 뒤섞여 보인다(B-03 리뷰 P1). 질문은 turn_id로 붙으므로 순서와 무관하게 자기 턴에 있다.
     const afterStart = assistantChatReducer(
       { ...emptyAssistantChatState, sessionId: "s-1" },
       {

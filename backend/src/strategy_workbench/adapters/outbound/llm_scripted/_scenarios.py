@@ -1,7 +1,8 @@
-"""대본 시나리오 여덟 개와 질문 → 시나리오 선택 (WORKFLOW B-05, A-07 시나리오 fixture와 같은 내용).
+"""대본 시나리오 아홉 개와 질문 → 시나리오 선택 (WORKFLOW B-05, A-07 시나리오 fixture와 같은 내용).
 
 "새 전략"(`idea_to_new_strategy`)과 "샤프"(`concept_answer`)는 유저 스토리 e2e(US-DM-03·US-SM-09)가
-쓰려고 뒤에 더한 대본이라 A-07 골든에는 없다. 결과 설명(`result_explanation`, US-DM-08)도 같다.
+쓰려고 뒤에 더한 대본이라 A-07 골든에는 없다. "검색 상한"(`search_budget_answer`, C-03·US-CS-04)과
+결과 설명(`result_explanation`, US-DM-08)도 같다.
 
 ## 결과 설명 대본은 질문이 아니라 도구 목록으로 고른다
 
@@ -42,6 +43,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     ChatEvent,
     Done,
     SearchActivity,
+    SearchBudgetExhausted,
     Source,
     TextDelta,
     ToolCall,
@@ -61,6 +63,7 @@ __all__ = [
     "Scenario",
     "ScenarioPlan",
     "scenario_for",
+    "search_budget_answer",
     "search_then_failure",
     "simple_answer",
     "factor_window_proposal",
@@ -377,14 +380,32 @@ def search_then_failure(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
     yield Done(stop_reason="end_turn")
 
 
+def search_budget_answer(_execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
+    """검색 두 번 뒤 검색 횟수 상한 통지를 받고, 검색 없이 모은 자료로 답한다.
+
+    진짜 adapter가 상한에 닿았을 때 내는 순서와 같다 — 앞 호출의 검색·사용량, 도구를 뺀 호출 앞의
+    통지, 그 호출의 답. 화면이 통지를 검색 활동 칩으로 그리지 않고 안내 문구로 보이는지 e2e가 이
+    대본으로 본다.
+    """
+    yield SearchActivity(query="KRX 모멘텀 팩터 2026", sources=(_KRX_MOMENTUM_SOURCE,))
+    yield SearchActivity(query="KRX 팩터 성과 보고", sources=(_FACTOR_REVIEW_SOURCE,))
+    yield Usage(input_tokens=2600, output_tokens=240)
+    yield SearchBudgetExhausted()
+    yield TextDelta(text="찾은 자료 두 건으로 정리하면, ")
+    yield TextDelta(text="KRX에서도 모멘텀 프리미엄이 관측됩니다.")
+    yield Usage(input_tokens=3100, output_tokens=180)
+    yield Done(stop_reason="end_turn")
+
+
 # 질문에 들어 있는 낱말로 시나리오를 고른다. 먼저 맞는 항목이 이긴다 — "검색해서 제안해 줘"처럼
 # 둘 다 들어 있으면 제안 쪽이다. "창을 줄"은 "제안"보다 앞이라 "창을 줄인 안을 제안해 줘"도
 # 그래프를 바꾸는 대본을 고른다. "새 전략"도 "제안"보다 앞이라 "새 전략으로 제안해 줘"는
-# 전체 전략을 쓴다.
+# 전체 전략을 쓴다. "검색 상한"은 "검색"보다 앞이라 검색 실패 대본으로 새지 않는다.
 SCENARIO_KEYWORDS: tuple[tuple[str, ScenarioPlan], ...] = (
     ("창을 줄", ScenarioPlan(factor_window_proposal)),
     ("새 전략", ScenarioPlan(idea_to_new_strategy)),
     ("제안", ScenarioPlan(tool_then_proposal)),
+    ("검색 상한", ScenarioPlan(search_budget_answer)),
     ("검색", ScenarioPlan(search_then_failure)),
     ("천천히", ScenarioPlan(slow_answer, delay_scale=SLOW_ANSWER_DELAY_SCALE)),
     ("샤프", ScenarioPlan(concept_answer)),

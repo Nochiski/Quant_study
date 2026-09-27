@@ -135,6 +135,7 @@ const AssistTurnBlock = ({
     turn.thinking.length > 0 ||
     turn.tools.length > 0 ||
     turn.searches.length > 0 ||
+    turn.searchBudgetExhausted ||
     proposal !== null ||
     turn.failure !== null;
   return (
@@ -165,6 +166,13 @@ const AssistTurnBlock = ({
           {turn.searches.length === 0 ? null : (
             <AssistSearchList searches={turn.searches} />
           )}
+          {turn.searchBudgetExhausted ? (
+            // 검색 활동이 아니므로 "웹 검색" 칩을 달지 않는다. 문구는 모델에게 보낸 지시문이 아니라
+            // 사용자에게 쓰는 안내다(C-03).
+            <p className="assist-search-limit">
+              {t("assistant.chat.search.limit")}
+            </p>
+          ) : null}
           {turn.text === "" ? null : (
             // 델타마다 같은 텍스트 노드가 갈리므로 라이브 영역에서 뺀다 — 그러지 않으면 토큰 하나마다
             // 누적된 문단 전체가 다시 낭독된다. 진행·완료는 사이드바의 status가 한 번씩 알린다.

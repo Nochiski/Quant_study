@@ -1461,6 +1461,8 @@ const ko = {
   "assistant.chat.toolName.validate_strategy_yaml": "전략 YAML 검증",
   "assistant.chat.toolName.propose_strategy": "전략 제안 제출",
   "assistant.chat.search": "웹 검색",
+  "assistant.chat.search.limit":
+    "이 답변에서 쓸 수 있는 웹 검색 횟수를 모두 썼습니다. 지금까지 찾은 자료로 답합니다.",
   "assistant.chat.stream.exhausted":
     "연결이 끊겼습니다. 답변은 서버에서 계속 진행되고 있습니다.",
   "assistant.chat.stream.retry": "다시 연결",
@@ -2994,6 +2996,8 @@ export const messages = {
     "assistant.chat.toolName.validate_strategy_yaml": "Validate strategy YAML",
     "assistant.chat.toolName.propose_strategy": "Submit strategy proposal",
     "assistant.chat.search": "Web search",
+    "assistant.chat.search.limit":
+      "This answer used all of its web searches. It answers from the sources found so far.",
     "assistant.chat.stream.exhausted":
       "The connection dropped. The answer keeps running on the server.",
     "assistant.chat.stream.retry": "Reconnect",

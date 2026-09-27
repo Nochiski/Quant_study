@@ -329,7 +329,7 @@ i18n이 `metric_id`를 키로 소유한다.
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_PROGRESS` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` |
-| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v2, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `PLANNED` | 브랜치 `feat/ai-d-02-result-explain-backend` |
+| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `PLANNED` | 브랜치 `feat/ai-d-02-result-explain-backend` |
 | [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `PLANNED` | 브랜치 `feat/ai-d-03-result-explain-frontend` |
 
 Phase exit:

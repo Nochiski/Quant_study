@@ -4,10 +4,15 @@
 가지다.
 
 1. `system_prompt()` — runtime schema를 걸어 전략 언어 요약을 **생성**하고 템플릿에 채운다.
-   필드 이름·enum 값을 손으로 적지 않는 것이 요점이다(SoT 규칙).
+   필드 이름·enum 값을 손으로 적지 않는 것이 요점이다(SoT 규칙). 결과 설명 세션은
+   `result_system_prompt()`를 쓴다.
 2. `tool_result()` — 모델이 부른 도구를 실행해 모델에게 돌려줄 텍스트를 만든다.
    `propose_strategy`만은 세션 상태(시도 횟수)와 이벤트 방출이 필요해 `AssistantChatService`가
    가로챈다.
+
+도구는 **컨텍스트의 종류가 정한다**(결과 설명 spec R5). 문서 컨텍스트(`TurnContext`)에는 전략
+도구만, 결과 컨텍스트(`ResultContext`)에는 결과 도구만 답한다. 다른 모드의 도구 이름은 모르는
+도구와 같이 도구 오류로 돌아간다 — 모드 경계를 프롬프트 한 줄에만 걸어 두지 않으려는 것이다.
 """
 
 from __future__ import annotations
@@ -23,14 +28,17 @@ from strategy_workbench.domain.assistant.facade.tools import (
     LIST_EQUITY_FIELDS,
     LIST_FACTOR_CATALOG,
     PROPOSE_STRATEGY,
+    READ_BACKTEST_RESULT,
     READ_CURRENT_STRATEGY,
     VALIDATE_STRATEGY_YAML,
 )
 from strategy_workbench.domain.factor.facade.registry import FactorRegistry
 from strategy_workbench.domain.strategy.facade.schema import strategy_document_schema
 
-from ._models import TurnContext, compile_payload
-from ._prompt import SYSTEM_PROMPT_TEMPLATE
+from ._models import BacktestResultUnavailableError, ResultContext, TurnContext, compile_payload
+from ._prompt import RESULT_EXPLAIN_PROMPT_TEMPLATE, SYSTEM_PROMPT_TEMPLATE
+from ._result_context import summarize_backtest_result
+from .ports.outgoing.backtest_results import BacktestResultPort
 from .ports.outgoing.strategy_compiler import StrategyCompilerPort
 
 __all__ = ["AssistantContextBuilder"]
@@ -42,7 +50,11 @@ _DISCRIMINATOR_NAME = "propertyName"
 
 
 class AssistantContextBuilder:
-    """모델이 보는 사실을 모은다: 전략 언어 요약, 데이터·팩터 카탈로그, 현재 문서, 검증 결과."""
+    """모델이 보는 사실을 모은다.
+
+    전략 언어 요약, 데이터·팩터 카탈로그, 현재 문서, 검증 결과, 그리고 결과 세션의 실행 결과
+    요약이다.
+    """
 
     def __init__(
         self,
@@ -50,12 +62,14 @@ class AssistantContextBuilder:
         equity_data: EquityDataPort,
         factor_registry: FactorRegistry,
         compiler: StrategyCompilerPort,
+        backtest_results: BacktestResultPort,
         today: Callable[[], date],
         schema: Callable[[], Mapping[str, object]] = strategy_document_schema,
     ) -> None:
         self._equity_data = equity_data
         self._factor_registry = factor_registry
         self._compiler = compiler
+        self._backtest_results = backtest_results
         self._today = today
         self._schema = schema
 
@@ -75,12 +89,31 @@ class AssistantContextBuilder:
             schema_summary=self._language_summary,
         )
 
-    def tool_result(self, call: ToolCall, context: TurnContext) -> ToolResult:
+    def result_system_prompt(self) -> str:
+        """결과 설명 세션의 시스템 프롬프트. 결과 사실은 도구로 가므로 날짜와 도구 이름만 채운다."""
+        return RESULT_EXPLAIN_PROMPT_TEMPLATE.format(
+            today=self._today().isoformat(),
+            tool_read_result=READ_BACKTEST_RESULT,
+        )
+
+    def result_context(self, run_id: str) -> ResultContext:
+        """완료된 실행의 요약. 결과가 없으면 `BacktestResultUnavailableError`."""
+        result = self._backtest_results.completed_result(run_id)
+        if result is None:
+            raise BacktestResultUnavailableError(run_id)
+        return ResultContext(run_id=run_id, summary=summarize_backtest_result(result))
+
+    def tool_result(self, call: ToolCall, context: TurnContext | ResultContext) -> ToolResult:
         """도구 하나를 실행한다. 모르는 이름은 예외가 아니라 도구 오류로 돌려준다.
 
         모델이 없는 도구를 부르는 것은 예상된 실패다. 예외로 올리면 턴 전체가 죽지만, 오류
-        결과로 돌려주면 모델이 카탈로그 안의 도구로 고쳐 부른다.
+        결과로 돌려주면 모델이 카탈로그 안의 도구로 고쳐 부른다. 다른 모드의 도구도 같다(모듈
+        docstring).
         """
+        if isinstance(context, ResultContext):
+            if call.name == READ_BACKTEST_RESULT:
+                return ToolResult(call_id=call.call_id, ok=True, content=context.summary)
+            return _unsupported(call)
         if call.name == READ_CURRENT_STRATEGY:
             return _ok(call, _current_strategy_payload(context))
         if call.name == LIST_EQUITY_FIELDS:
@@ -89,14 +122,7 @@ class AssistantContextBuilder:
             return _ok(call, self._factor_catalog_payload())
         if call.name == VALIDATE_STRATEGY_YAML:
             return self._validate(call)
-        return ToolResult(
-            call_id=call.call_id,
-            ok=False,
-            content=(
-                f"지원하지 않는 도구입니다 — name={call.name!r}. 도구 목록에 있는 이름만 "
-                "사용하세요."
-            ),
-        )
+        return _unsupported(call)
 
     def _equity_fields_payload(self) -> dict[str, object]:
         return {
@@ -142,6 +168,16 @@ class AssistantContextBuilder:
             ok=outcome.ok,
             content=json.dumps(compile_payload(outcome), ensure_ascii=False),
         )
+
+
+def _unsupported(call: ToolCall) -> ToolResult:
+    return ToolResult(
+        call_id=call.call_id,
+        ok=False,
+        content=(
+            f"지원하지 않는 도구입니다 — name={call.name!r}. 도구 목록에 있는 이름만 사용하세요."
+        ),
+    )
 
 
 def _ok(call: ToolCall, payload: Mapping[str, object]) -> ToolResult:

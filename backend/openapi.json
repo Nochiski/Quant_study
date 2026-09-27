@@ -317,6 +317,26 @@
         "title": "AssistantProviderNotInstalledDetail",
         "type": "object"
       },
+      "AssistantResultUnavailableDetail": {
+        "description": "결과 세션이 가리키는 실행의 결과가 없다(결과 설명 spec R3·R7).\n\n모르는 실행이거나 끝나지 않았거나 실패했다. 실행 레지스트리가 프로세스 안에만 있어 backend를\n다시 시작한 뒤의 옛 결과 세션도 여기로 온다.",
+        "properties": {
+          "code": {
+            "const": "assistant.result_unavailable",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantResultUnavailableDetail",
+        "type": "object"
+      },
       "AssistantSecretMissingDetail": {
         "description": "프로파일은 있는데 키 파일에 그 키가 없다.\n\nspec D6이 적어 둔 네 코드 밖이지만, 이 상태는 사용자가 키 파일을 지우거나 다른 기기에서\nDB만 복사해 오면 실제로 생긴다. 500으로 떨어뜨리면 화면이 \"알 수 없는 오류\"만 보여 주고,\n다른 코드로 뭉개면 \"키를 다시 넣으세요\"라는 조치를 안내할 수 없다.",
         "properties": {
@@ -335,6 +355,26 @@
           "message"
         ],
         "title": "AssistantSecretMissingDetail",
+        "type": "object"
+      },
+      "AssistantTurnContextMismatchDetail": {
+        "description": "턴 요청의 `context`가 세션 모드와 맞지 않는다(결과 설명 spec R5).\n\n전략 세션은 편집기 상태를 턴마다 받아야 하고, 결과 세션은 받지 않는다.",
+        "properties": {
+          "code": {
+            "const": "assistant.turn_context_mismatch",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AssistantTurnContextMismatchDetail",
         "type": "object"
       },
       "AssistantTurnInProgressDetail": {
@@ -373,7 +413,9 @@
                 "assistant.no_active_provider": "#/components/schemas/AssistantNoActiveProviderDetail",
                 "assistant.probe_failed": "#/components/schemas/AssistantProbeFailedDetail",
                 "assistant.provider_not_installed": "#/components/schemas/AssistantProviderNotInstalledDetail",
-                "assistant.provider_secret_missing": "#/components/schemas/AssistantSecretMissingDetail"
+                "assistant.provider_secret_missing": "#/components/schemas/AssistantSecretMissingDetail",
+                "assistant.result_unavailable": "#/components/schemas/AssistantResultUnavailableDetail",
+                "assistant.turn_context_mismatch": "#/components/schemas/AssistantTurnContextMismatchDetail"
               },
               "propertyName": "code"
             },
@@ -395,6 +437,12 @@
               },
               {
                 "$ref": "#/components/schemas/AssistantDocumentRefInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantResultUnavailableDetail"
+              },
+              {
+                "$ref": "#/components/schemas/AssistantTurnContextMismatchDetail"
               }
             ],
             "title": "Detail"
@@ -1689,7 +1737,7 @@
         "type": "string"
       },
       "DocumentRefView": {
-        "description": "세션이 붙은 문서. 저장된 전략과 초안 중 정확히 하나다(application이 검증한다).",
+        "description": "세션이 붙은 대상. 저장된 전략·초안·백테스트 실행 중 정확히 하나다(application이 검증한다).\n\n`run_id`에 붙은 세션은 결과 설명 전용이다(결과 설명 spec R3·R5).",
         "properties": {
           "draft_id": {
             "anyOf": [
@@ -1712,6 +1760,17 @@
               }
             ],
             "title": "Revision"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
           },
           "strategy_id": {
             "anyOf": [
@@ -6409,9 +6468,17 @@
         "type": "object"
       },
       "StartTurnRequest": {
+        "description": "턴 시작 요청. `context`는 전략 세션에만 싣는다.\n\n결과 세션은 서버가 실행 결과를 읽어 요약하므로 문서 컨텍스트가 없다. 모드와 맞지 않으면 422\n`assistant.turn_context_mismatch`다(결과 설명 spec R5·R7).",
         "properties": {
           "context": {
-            "$ref": "#/components/schemas/TurnContextPayload"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnContextPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "text": {
             "minLength": 1,
@@ -6420,8 +6487,7 @@
           }
         },
         "required": [
-          "text",
-          "context"
+          "text"
         ],
         "title": "StartTurnRequest",
         "type": "object"
@@ -8967,7 +9033,7 @@
     },
     "/api/v1/assistant/sessions": {
       "get": {
-        "description": "문서 하나의 세션 목록.\n\n`document_ref`를 한 덩어리 문자열로 받지 않고 필드 셋으로 받는 이유는, 그래야 생성\nSDK가 타입을 그대로 만들고 서버도 다시 parse하지 않기 때문이다.",
+        "description": "문서 하나(또는 백테스트 실행 하나)의 세션 목록.\n\n`document_ref`를 한 덩어리 문자열로 받지 않고 필드 셋으로 받는 이유는, 그래야 생성\nSDK가 타입을 그대로 만들고 서버도 다시 parse하지 않기 때문이다.",
         "operationId": "listAssistantSessions",
         "parameters": [
           {
@@ -9019,6 +9085,23 @@
                 }
               ],
               "title": "Draft Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Run Id"
             }
           }
         ],

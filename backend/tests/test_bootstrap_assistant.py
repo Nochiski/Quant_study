@@ -196,6 +196,7 @@ def test_the_secrets_file_may_not_live_inside_the_repository() -> None:
             equity_data=container.equity_data,
             factor_registry=_factor_registry(),
             strategy_authoring=container.strategy_authoring,
+            backtest_runs=container.backtest_runs,
         )
 
 

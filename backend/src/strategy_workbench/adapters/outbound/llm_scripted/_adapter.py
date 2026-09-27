@@ -104,7 +104,9 @@ class ScriptedLlmProvider:
         cancelled: Callable[[], bool],
     ) -> Iterator[ChatEvent]:
         """마지막 사용자 질문으로 시나리오를 고르고 그 대본을 흘린다."""
-        plan = scenario_for(_last_user_text(request))
+        plan = scenario_for(
+            _last_user_text(request), offered=frozenset(spec.name for spec in request.tools)
+        )
         delay = self._step_delay_seconds * plan.delay_scale
         for event in plan.run(execute_tool):
             if cancelled():

@@ -162,7 +162,7 @@ class AssistantTurnRunner:
 
     # -- 명령 ---------------------------------------------------------------------------------
 
-    def start(self, session_id: str, text: str, context: TurnContext) -> Turn:
+    def start(self, session_id: str, text: str, context: TurnContext | None) -> Turn:
         """턴 하나를 시작한다. 그 세션에 도는 턴이 있으면 `TurnInProgressError`.
 
         `chat_service.send`는 호출 스레드에서 부른다. 세션 없음·활성 프로파일 없음 같은 거절을

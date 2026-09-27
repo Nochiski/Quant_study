@@ -23,6 +23,7 @@ import pytest
 from strategy_workbench.adapters.outbound.assistant_sqlite._schema import (
     SCHEMA_VERSION,
     V1_SCHEMA_OBJECTS,
+    V2_SCHEMA_OBJECTS,
 )
 from strategy_workbench.adapters.outbound.assistant_sqlite.facade.repository import (
     AssistantDatabase,
@@ -44,12 +45,13 @@ V1_NOTICE = (
 
 # v1 DDL 전체의 sha256. v1 파일은 이미 사용자에게 있으므로 이 선언은 바뀌면 안 된다.
 V1_SCHEMA_SHA256 = "18897f5972c14160161488bdd8f8342b994496c8bf35ccc0aedfd8ef0097779b"
+# v2 DDL 전체의 sha256. v3(결과 설명 D-02)이 나온 뒤로는 v2 파일도 사용자 디스크에 있는 사실이다.
+V2_SCHEMA_SHA256 = "d5fdf368b1cdece825f1fc65f08fce7415c1379aa0b834e1d56615100f8cac20"
 
 
-def _v1_schema_digest() -> str:
+def _schema_digest(objects: tuple[tuple[str, str, str], ...]) -> str:
     joined = "\n".join(
-        f"{object_type}:{name}:{statement.strip()}"
-        for object_type, name, statement in V1_SCHEMA_OBJECTS
+        f"{object_type}:{name}:{statement.strip()}" for object_type, name, statement in objects
     )
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
@@ -115,11 +117,17 @@ def _user_version(path: Path) -> int:
 
 def test_the_version_1_schema_declaration_is_frozen() -> None:
     """v1 선언을 고치면 사용자 디스크의 v1 파일이 manifest 검사에서 거부된다."""
-    assert _v1_schema_digest() == V1_SCHEMA_SHA256
+    assert _schema_digest(V1_SCHEMA_OBJECTS) == V1_SCHEMA_SHA256
 
 
-def test_the_current_schema_version_is_two() -> None:
-    assert SCHEMA_VERSION == 2
+def test_the_version_2_schema_declaration_is_frozen() -> None:
+    """v2 선언을 고치면 사용자 디스크의 v2 파일이 v3으로 올리기 전에 거부된다."""
+    assert _schema_digest(V2_SCHEMA_OBJECTS) == V2_SCHEMA_SHA256
+
+
+def test_the_current_schema_version_is_three() -> None:
+    """v2는 C-03(`chat_messages.turn_id`), v3은 결과 설명(`chat_sessions.run_id`)이다."""
+    assert SCHEMA_VERSION == 3
 
 
 def test_a_version_1_file_is_upgraded_in_place_and_stamps_messages_with_their_turn(
@@ -146,8 +154,9 @@ def test_a_version_1_file_is_upgraded_in_place_and_stamps_messages_with_their_tu
         (ChatRole.USER, "둘째 질문", "turn-b"),
         (ChatRole.ASSISTANT, "둘째 답", "turn-b"),
     ]
-    assert _user_version(path) == 2
-    # 올린 파일을 다시 열어도 v2 manifest와 글자 단위로 같다.
+    # v1 파일은 v2를 거쳐 지금 버전까지 한 번에 올라간다.
+    assert _user_version(path) == SCHEMA_VERSION
+    # 올린 파일을 다시 열어도 지금 버전 manifest와 글자 단위로 같다.
     with AssistantDatabase(path) as reopened:
         assert len(SQLiteChatSessionRepository(reopened).messages("session-1")) == 4
 

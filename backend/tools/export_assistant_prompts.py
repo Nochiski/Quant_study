@@ -26,11 +26,19 @@
 (`tests/fixtures/strategy_documents/runtime-schema.json`)로 고정한다. 그 fixture가 live 스키마와
 같다는 것은 `tests/domain/test_strategy_schema.py`가 따로 지키므로, 스키마 변경은 그 테스트에서
 한 번, 프롬프트 골든에서 또 한 번 드러난다.
+
+## 결과 설명 골든 (결과 설명 spec R2)
+
+결과 설명 세션의 프롬프트·도구·요약도 같은 이유로 잠근다. 요약은
+`tests/assistant_result_samples.py`의 결정적 표본에서 뽑는다. 모델이 받는 요약은 공백 없는 한 줄
+JSON이지만, 골든은 diff를 읽을 수 있게 들여쓰기해 적는다 — 내용이 같으면 바이트 차이는 모델에게
+의미가 없다.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
@@ -38,9 +46,24 @@ from pathlib import Path
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.application.assistant_chat.facade.context import AssistantContextBuilder
 from strategy_workbench.application.assistant_chat.facade.prompt import MODEL_NOTICES
-from strategy_workbench.domain.assistant.facade.models import ProposalCompileResult
-from strategy_workbench.domain.assistant.facade.tools import ASSISTANT_TOOLS
+from strategy_workbench.application.assistant_chat.facade.result_context import (
+    summarize_backtest_result,
+)
+from strategy_workbench.domain.assistant.facade.models import ProposalCompileResult, ToolSpec
+from strategy_workbench.domain.assistant.facade.tools import ASSISTANT_TOOLS, RESULT_EXPLAIN_TOOLS
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
+
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+# 결정적 결과 표본은 `tests` 패키지에 있다. 스크립트로 직접 실행하면 sys.path[0]이 `tools/`라
+# `backend/`를 먼저 세운다(`export_assistant_scenarios.py`와 같은 관례).
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
+
+from tests.assistant_result_samples import (  # noqa: E402  # reason: sys.path를 먼저 세워야 import된다
+    SAMPLE_RUN_ID,
+    sample_backtest_result,
+)
 
 __all__ = [
     "FIXTURE_DIR",
@@ -51,7 +74,6 @@ __all__ = [
     "main",
 ]
 
-_BACKEND_ROOT = Path(__file__).resolve().parent.parent
 FIXTURE_DIR = _BACKEND_ROOT / "tests" / "fixtures" / "assistant"
 RUNTIME_SCHEMA_FIXTURE = (
     _BACKEND_ROOT / "tests" / "fixtures" / "strategy_documents" / "runtime-schema.json"
@@ -78,24 +100,38 @@ class _UnusedStrategyCompiler:
         )
 
 
+class _SampleBacktestResults:
+    """`BacktestResultPort` 자리에 결정적 표본 하나만 둔다."""
+
+    def completed_result(self, run_id: str) -> BacktestRunResult | None:
+        return sample_backtest_result() if run_id == SAMPLE_RUN_ID else None
+
+
 def _context_builder() -> AssistantContextBuilder:
     schema = json.loads(RUNTIME_SCHEMA_FIXTURE.read_text(encoding="utf-8"))
     return AssistantContextBuilder(
         equity_data=MockEquityDataAdapter.demo(),
         factor_registry=build_default_factor_registry(),
         compiler=_UnusedStrategyCompiler(),
+        backtest_results=_SampleBacktestResults(),
         today=lambda: FIXTURE_TODAY,
         schema=lambda: schema,
     )
 
 
-def _tools_document() -> str:
-    """도구 5종의 이름·설명·입력 스키마. 모델이 읽는 계약 전부다."""
+def _tools_document(tools: tuple[ToolSpec, ...]) -> str:
+    """도구의 이름·설명·입력 스키마. 모델이 읽는 계약 전부다."""
     payload = [
         {"name": spec.name, "description": spec.description, "input_schema": spec.input_schema}
-        for spec in ASSISTANT_TOOLS
+        for spec in tools
     ]
     return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
+def _result_context_document() -> str:
+    """결정적 표본 실행의 요약. 모델이 결과에서 보는 것 전부다(들여쓰기만 다르다)."""
+    summary = summarize_backtest_result(sample_backtest_result())
+    return json.dumps(json.loads(summary), indent=2, ensure_ascii=False) + "\n"
 
 
 def _notices_document() -> str:
@@ -105,10 +141,14 @@ def _notices_document() -> str:
 
 def build_artifacts() -> Mapping[str, str]:
     """파일 이름 → 내용. 테스트와 이 스크립트가 같은 함수를 쓴다(골든의 owner는 하나다)."""
+    builder = _context_builder()
     return {
-        "system_prompt.ko.md": _context_builder().system_prompt(),
-        "tools.json": _tools_document(),
+        "system_prompt.ko.md": builder.system_prompt(),
+        "tools.json": _tools_document(ASSISTANT_TOOLS),
         "model_notices.json": _notices_document(),
+        "result_explain_prompt.ko.md": builder.result_system_prompt(),
+        "result_tools.json": _tools_document(RESULT_EXPLAIN_TOOLS),
+        "result_context.json": _result_context_document(),
     }
 
 

@@ -132,11 +132,21 @@ def build_container(
         Path(__file__).resolve().parents[3] / ".local" / "backtest-runs"
     )
     strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
+    backtest_runs = BacktestRunService(
+        portfolio_design,
+        strategy_repository,
+        equity_data,
+        BacktestEngineExecutorAdapter(metric_registry),
+        LocalArtifactStore(run_artifact_root),
+        new_id=lambda: str(uuid4()),
+    )
+    # 결과 설명 세션이 완료된 실행을 읽으므로 실행 레지스트리를 먼저 세운다(결과 설명 spec R2).
     assistant_services = build_assistant_services(
         settings=assistant,
         equity_data=equity_data,
         factor_registry=factor_registry,
         strategy_authoring=strategy_authoring,
+        backtest_runs=backtest_runs,
     )
     return BackendContainer(
         equity_data=equity_data,
@@ -161,14 +171,7 @@ def build_container(
         ),
         portfolio_design=portfolio_design,
         strategy_traces=strategy_traces,
-        backtest_runs=BacktestRunService(
-            portfolio_design,
-            strategy_repository,
-            equity_data,
-            BacktestEngineExecutorAdapter(metric_registry),
-            LocalArtifactStore(run_artifact_root),
-            new_id=lambda: str(uuid4()),
-        ),
+        backtest_runs=backtest_runs,
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,
         assistant_turns=assistant_services.turns,

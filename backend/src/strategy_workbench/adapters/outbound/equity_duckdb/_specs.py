@@ -96,6 +96,9 @@ class SourceSpec:
     `pick_order` 는 두 모드에 다 쓴다 — `LATEST` 는 (축 키, available_date) 당 1행,
     `GRID` 는 (축 키, date) 당 1행을 고른다. GRID 에서 필요한 것은 `flow_daily` 뿐이다
     (grain 에 `src` 가 들어 한 격자 셀에 원천 수만큼 행이 올 수 있다).
+
+    `required_columns` 는 매크로 원천이 선언 밖에서(`row_filter` 등) 읽는 열이다. 매크로는 게시돼
+    있어도 옛 카탈로그면 그 열이 없을 수 있어, 어댑터가 부팅 때 확인하고 없으면 이 원천만 뺀다.
     """
 
     name: str
@@ -115,6 +118,7 @@ class SourceSpec:
     requires: tuple[str, ...]
     frequency: str
     kind_expr: str | None = None
+    required_columns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -213,13 +217,17 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         available_expr="available_date",
         content_expr="period_end",
         reduce=Reduce.PICK,
-        row_filter=None,
+        # 옛 기간 정정본이 더 늦은 기간보다 늦게 접수되면 그 행은 고르지 않는다 — 컷오프에서 고를
+        # 행은 "공개된 가장 최근 기간" 이고 그 판정은 뷰가 한다(v_fin_latest.period_frontier, #225).
+        row_filter="period_frontier",
         # 같은 접수일에 여러 기간이 실리면(정정 일괄 재제출) 최신 기간·최신 보고서 종류를 고른다.
         pick_order="period_end DESC, report_code DESC",
         lag_sessions=0,
         lag_basis=_DART_LAG_BASIS,
         requires=(FIN_TABLE, DISCLOSURE_TABLE, CORP_TICKER_TABLE, FIN_MACRO),
         frequency="quarterly",
+        # #225 전에 만든 카탈로그의 v_fin_latest 에는 이 열이 없다 — 재생성 전까지 재무만 뺀다.
+        required_columns=("period_frontier",),
     ),
     SourceSpec(
         name="consensus_eps",

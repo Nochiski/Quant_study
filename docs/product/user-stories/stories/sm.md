@@ -112,6 +112,12 @@
   동작 수준에서만 확인하며, 서버 쪽 재실행 계약은 backend 테스트가 소유한다.
 - 비고: P3-02부터 백테스트·추적 전에 실행 설정 패널에서 기간과 유니버스를 정한다. 이 값은 전략 문서 밖에 있어
   바꿔도 전략 버전이 늘지 않고, 전략별 마지막 사용값으로 다시 채워진다. IDE 위 요약 띠가 지금 값을 보인다.
+- 비고: "데이터 경고"의 문장은 backend가 한글로 완성해 보낸다(en 로케일에서도 한글). 벤치마크 종목에
+  bar가 없는 세션은 원인별로 따로 뜬다. 창 시작이 첫 bar보다 앞서면 `benchmark.no_bar_at_start`가
+  벤치마크 지표가 사용 불가인 이유를 적는다. 거래정지는 `benchmark.suspended_sessions_carried`,
+  상장이 끝난 뒤 동결은 `benchmark.delisted_sessions_frozen`이다(이슈 #229). mock 데이터에는 정지가
+  없어 브라우저 e2e는 이 경고를 밟지 않는다. backend `tests/application/test_benchmark_suspension.py`가
+  확인한다.
 
 ### US-SM-06 같은 전략을 다른 실행 설정으로 돌려도 전략 해시는 같다
 

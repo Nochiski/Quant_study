@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
@@ -247,6 +248,8 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
         "corporate_action_feed_empty",
         "mock_equity_data",
     }
+    # 경고 문장은 backend가 한글로 완성한다(SoT 경고 문장 행, 이슈 #229).
+    assert all(re.search("[가-힣]", item["message"]) for item in result["manifest"]["warnings"])
     assert len(result["metric_definitions"]) == 21
     assert len(result["metrics"]) == 42
     assert {item["scope"] for item in result["metrics"]} == {

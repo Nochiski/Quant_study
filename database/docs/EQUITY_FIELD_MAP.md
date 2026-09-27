@@ -148,7 +148,7 @@
 |---|---|---|---|---|
 | `price_daily` | ticker | GRID (ticker, date) | 없음 | `price.close`·`open`·`volume`·`market_cap`·`shares_outstanding`·`trading_value` |
 | `v_adj_price_fwd` | ticker | GRID | 없음 | `price.adj_close`(내부 스코프) |
-| `v_fin_latest` | **corp** | LATEST(available_date) | 판본·`fs_div` 는 뷰가 접고, 같은 접수일의 여러 기간은 `period_end DESC, report_code DESC` | `financial.*` 8 |
+| `v_fin_latest` | **corp** | LATEST(available_date) | 판본·`fs_div` 는 뷰가 접고, 같은 접수일의 여러 기간은 `period_end DESC, report_code DESC`. **`period_frontier` 가 참인 행만 본다**(#225) — 옛 기간 정정본이 더 늦은 기간보다 늦게 접수되면(restated 판본은 공개일이 정정 접수일로 밀린다) 그 행을 고르지 않아, 셀은 컷오프까지 공개된 가장 최근 기간을 유지한다 | `financial.*` 8 |
 | `v_consensus`(metric=eps / revenue) | ticker | LATEST | 관측 달 이후로 끝나는 `target_period` 중 가장 가까운 것(**FY1**), 동률 `obs_month DESC` | `consensus.forward_eps`·`forward_sales`·`eps_dispersion` |
 | `opinion_daily` | ticker | LATEST | 잰 판본 우선(`coverage_degraded=false` = wise), 동률 `src` 사전순 | `consensus.target_price`·`recommendation`·`analyst_count` |
 | `dividend_event` | **corp** | LATEST | 종류(`stock_knd`) 축을 접는다 — 값 있는 행 우선 → 최신 `bsns_year`·`reprt_code` → `stock_knd` 사전순(한글 정렬상 '보통주' 가 '우선주' 앞) | `event.dividend_per_share` |

@@ -181,7 +181,8 @@ class MockEquityDataAdapter:
                 cutoff = self._cutoff(session, lag_by_field[field_id])
                 if cutoff is None:
                     warnings.add(
-                        f"insufficient mock calendar for lag — field_id={field_id} as_of={session}"
+                        "mock 거래일 달력이 랙만큼 거슬러 올라가기에 모자라다 — "
+                        f"field_id={field_id} as_of={session}"
                     )
                     continue
                 for security_id in query.security_ids:
@@ -346,7 +347,8 @@ class MockEquityDataAdapter:
             cutoff = self._cutoff(session, lag_sessions)
             if cutoff is None:
                 warnings.add(
-                    f"insufficient mock calendar for lag — field_id={field_id} as_of={session}"
+                    "mock 거래일 달력이 랙만큼 거슬러 올라가기에 모자라다 — "
+                    f"field_id={field_id} as_of={session}"
                 )
                 return None
             candidate = self._latest_observation(
@@ -434,14 +436,14 @@ class MockEquityDataAdapter:
                 DataWarning(
                     code="mock_equity_data",
                     message=(
-                        "Deterministic mock OHLCV is active; replace the adapter for "
-                        "production research."
+                        "결정적으로 생성한 mock OHLCV로 실행했다. 실제 연구에는 실데이터 "
+                        "어댑터로 바꿔야 한다."
                     ),
                     severity=WarningSeverity.INFO,
                 ),
                 DataWarning(
                     code="corporate_action_feed_empty",
-                    message="The mock run declares an empty corporate-action feed.",
+                    message="mock 실행은 기업 행동 피드를 비워 둔다(분할·병합 없음).",
                 ),
             ),
         )

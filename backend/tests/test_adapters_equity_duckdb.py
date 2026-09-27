@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -108,6 +109,9 @@ ALL_FIELDS = (
     "event.buyback_amount",
     "event.insider_net_buy",
 )
+
+# 경고 문장이 한글로 완성됐는지 보는 표지(SoT 경고 문장 행, 이슈 #229).
+_HANGUL = re.compile("[가-힣]")
 
 
 @pytest.fixture(scope="module")
@@ -295,7 +299,8 @@ def test_history_is_truncated_at_calendar_start_with_a_warning(
     result = _raw(adapter, start=date(2023, 12, 27), end=date(2023, 12, 28), history=5)
     assert result.ok
     assert result.history_sessions == (WB_SESSIONS[0],)
-    assert any("insufficient calendar for warm-up history" in w for w in result.warnings)
+    # 경고 문장은 한글로 완성하고 재현용 key=value 는 그대로 둔다(SoT, 이슈 #229).
+    assert any("워밍업" in w and "requested=5" in w for w in result.warnings)
 
 
 def _cell(result, as_of: date, security_id: str, field_id: str):
@@ -405,6 +410,24 @@ def test_flow_financials_are_pit_ttm_not_the_latest_report_period(
     for security_id, as_of in (("000660:1", START), ("036220:2", date(2024, 1, 10))):
         cell = _cell(result, as_of, security_id, "financial.net_income")
         assert (cell.value, cell.kind) == (None, CellKind.MISSING), security_id
+
+
+def test_late_old_period_correction_does_not_revert_financials_to_that_period(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """옛 기간 정정본이 늦게 접수돼도 셀은 컷오프까지 공개된 가장 최근 기간을 유지한다 (#225).
+
+    000660 은 2023 반기(08-14 접수) 뒤에 2023 1분기 정정본이 2024-01-09 에 접수된다. 랙 1세션이라
+    01-10 부터 보인다. 예전에는 컷오프 이하 "가장 늦게 접수된 행" 을 골라 01-10 부터 1분기 값
+    (자본 1,120)으로 되돌아갔다. 지금은 `v_fin_latest.period_frontier` 가 참인 행만 본다.
+    """
+    result = _raw(adapter, start=START, end=END, fields=ALL_FIELDS, universe="krx.all")
+    for session in (date(2024, 1, 10), date(2024, 1, 11), END):
+        cell = _cell(result, session, "000660:1", "financial.book_equity")
+        assert (cell.value, cell.available_date) == (1_200.0, date(2023, 8, 14)), session
+    # 창 독립: 정정본 공개 뒤 세션만 좁혀 물어도 같다
+    narrow = _raw(adapter, start=END, end=END, fields=("financial.book_equity",))
+    assert _field(narrow, END, "000660:1", "financial.book_equity") == 1_200.0
 
 
 def test_consensus_picks_the_nearest_target_period_and_the_measured_source(
@@ -685,6 +708,7 @@ def test_backtest_dataset_drops_actions_after_the_last_bar_with_a_warning(
     dropped = dataset.warnings[1]
     assert dropped.severity is WarningSeverity.WARNING
     assert "dropped=1" in dropped.message and "000660:1@2024-01-10:reverse_split" in dropped.message
+    assert all(_HANGUL.search(item.message) for item in dataset.warnings)
 
 
 def test_backtest_dataset_counts_provisional_evening_rows_apart_from_invalid_ones(
@@ -706,6 +730,7 @@ def test_backtest_dataset_counts_provisional_evening_rows_apart_from_invalid_one
     warnings = {w.code: w.message for w in dataset.warnings}
     assert "equity.invalid_ohlc_rows_dropped" not in warnings
     assert "dropped=1" in warnings["equity.provisional_rows_dropped"]
+    assert _HANGUL.search(warnings["equity.provisional_rows_dropped"])
 
 
 def test_backtest_dataset_reads_roots_without_the_basis_column(
@@ -787,6 +812,31 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path)
     skipped = EquityDuckdbAdapter(root)
     result = _raw(skipped, fields=("financial.book_equity",))
     assert result.detail is not None and "macros_skipped" in result.detail
+
+
+def test_catalog_without_required_view_column_drops_only_that_source(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """옛 카탈로그(`v_fin_latest` 에 `period_frontier` 가 없다)는 재무 원천만 뺀다 (#233 리뷰 P2-1).
+
+    매크로는 게시돼 있어 `macros_skipped` 가드는 통과한다. 예전에는 fin 원천의 `row_filter` 가
+    커버율 질의에서 BinderException 을 던져 `list_fields()` 전체가 죽었다 — 필드 목록을 쓰는 화면과
+    AI 컨텍스트가 모두 막혔다. 지금은 부팅 때 열을 확인해 재무 필드만 빠지고 경고를 남긴다.
+    """
+    root = build_workbench_root(tmp_path / "equity", catalog=False)
+    write_catalog(root, legacy_fin_view=True)
+    with caplog.at_level("WARNING"):
+        legacy = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in legacy.list_fields()}
+    assert "price.close" in served and "consensus.forward_eps" in served
+    assert not served & {"financial.book_equity", "financial.net_income"}
+    denied = _raw(legacy, fields=("financial.book_equity",))
+    assert denied.status is DataLoadStatus.INVALID_QUERY
+    assert denied.detail is not None and "catalog_columns_missing" in denied.detail
+    assert "period_frontier" in denied.detail
+    assert _raw(legacy, fields=("price.close",)).ok
+    warned = [r.getMessage() for r in caplog.records if "catalog_columns_missing" in r.getMessage()]
+    assert warned and "v_fin_latest" in warned[0] and "카탈로그" in warned[0]
 
 
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:

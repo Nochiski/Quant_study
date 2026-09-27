@@ -222,8 +222,13 @@ const detectIndentUnit = (
     if (segments.length < 2 || segments[segments.length - 1] !== "0") continue;
     const parentColumn =
       parsed.keyRanges.get(parentPointerOf(pointer))?.start.column ?? 0;
+    // 항목 자기 `-`의 열이다. 값 줄의 첫 글자를 쓰면 `- # 메모` 다음 줄에서 시작한 값의 열을 `-` 열로 오인한다(#199).
+    const dashOffset = dashOffsetOf(source, range.start.offset);
     const lineStart = lineStartOf(source, range.start.offset);
-    const dash = source.slice(lineStart).search(/\S|$/);
+    const dash =
+      dashOffset === null
+        ? source.slice(lineStart).search(/\S|$/)
+        : dashOffset - lineStartOf(source, dashOffset);
     if (dash > parentColumn) return dash - parentColumn;
   }
   return 2;
@@ -239,11 +244,30 @@ const lineEndOf = (source: string, offset: number): number => {
   return source[newline - 1] === "\r" ? newline - 1 : newline;
 };
 
-/** 시퀀스 항목 값 앞의 `-` offset. `- - x`처럼 겹친 항목도 자기 `-`만 잡는다. 없으면 null. */
+/**
+ * 시퀀스 항목 값 앞의 `-` offset. `- - x`처럼 겹친 항목도 자기 `-`만 잡는다. 값이 `- # 메모`나 `-` 다음 줄에서
+ * 시작하면(그 사이의 빈 줄·자기 줄 주석 포함) 위 줄의 `-`를 잡는다 — 항목 값이 줄의 첫 내용이면 YAML 구조상
+ * 바로 위 내용 줄이 그 항목의 `-` 줄이다. 같은 줄만 보던 예전에는 이 모양의 항목을 지우거나 그 안 맨 앞에
+ * 넣는 연산이 거부되었고, 안을 비우면 `[]`가 `-` 열 + 폭이 아닌 5칸에 놓였다(#199). 없으면 null.
+ */
 const dashOffsetOf = (source: string, valueStart: number): number | null => {
   let cursor = valueStart - 1;
   while (cursor >= 0 && source[cursor] === " ") cursor -= 1;
-  return cursor >= 0 && source[cursor] === "-" ? cursor : null;
+  if (cursor < 0) return null;
+  if (source[cursor] === "-") return cursor;
+  if (source[cursor] !== "\n") return null;
+  let newline = cursor;
+  while (newline >= 0) {
+    const start = lineStartOf(source, newline);
+    const line = source.slice(start, newline).replace(/\r$/, "");
+    if (line.trim() === "" || /^\s*#/.test(line)) {
+      newline = start - 1;
+      continue;
+    }
+    const dashLine = /^( *(?:- +)*)-(?:[ \t]+#.*|[ \t]*)$/.exec(line);
+    return dashLine === null ? null : start + dashLine[1]!.length;
+  }
+  return null;
 };
 
 /** offset 앞의 같은 줄 내용이 `- `(겹침 포함)뿐인가: 시퀀스 항목 첫 줄에 붙어 있는 키/값. */
@@ -444,7 +468,9 @@ const planReplaceScalar = (
 /**
  * pointer 아래 **내용**의 마지막 offset. yaml 노드 range는 mapping/sequence 뒤에 따라오는 주석 줄까지
  * 포함할 수 있어 삽입·삭제 경계로 쓰면 다음 키를 설명하는 주석을 삼킨다. 그래서 키 범위와 leaf
- * (스칼라·빈 컨테이너) 값 범위만 모아 최댓값을 잡는다.
+ * (스칼라·빈 컨테이너) 값 범위만 모아 최댓값을 잡는다. 비어 있지 않은 flow 컨테이너(`[a, b]`·`{ k: 1 }`)는
+ * 닫는 괄호가 마지막 leaf 뒤에 있으므로 자기 범위 끝도 넣는다 — flow 범위는 닫는 괄호에서 끝나고 뒤 주석을
+ * 품지 않는다. 빠뜨리면 `- - [a, b]`의 유일 항목을 지울 때 `]`가 남아 preflight가 거부했다(#199).
  */
 const contentEnd = (
   source: string,
@@ -466,7 +492,8 @@ const contentEnd = (
       (!isRecord(value) && !Array.isArray(value)) ||
       (isRecord(value) && Object.keys(value).length === 0) ||
       (Array.isArray(value) && value.length === 0);
-    if (leaf) end = Math.max(end, range.end.offset);
+    if (leaf || isFlowContainer(source, parsed, candidate))
+      end = Math.max(end, range.end.offset);
   }
   if (end < 0) return null;
   // block scalar(`|`/`>`)의 값 range는 마지막 줄바꿈까지 포함한다(P3-01 리뷰 P1-1): 내용의 끝으로 되돌린다.
@@ -550,7 +577,10 @@ const insertAt = (
   };
 };
 
-/** 부모 `key:` 줄 끝(줄 끝 주석 뒤). 시퀀스 항목이 부모면(`- - x`) 바깥 `-` 뒤. */
+/**
+ * 부모 `key:` 줄 끝(줄 끝 주석 뒤). 시퀀스 항목이 부모면(`- - x`) 바깥 `-` 뒤. 항목 내용이 `- # 메모` 다음 줄에서
+ * 시작하면 `-` 줄 끝(주석 뒤)이다 — `-` 바로 뒤에 넣으면 그 주석이 새 내용 줄 끝으로 밀린다(#199).
+ */
 const parentLineEnd = (
   source: string,
   parsed: Extract<ParsedSource, { status: "ok" }>,
@@ -561,7 +591,9 @@ const parentLineEnd = (
   const parentRange = parsed.valueRanges.get(parentPointer);
   if (parentRange === undefined) return null;
   const dash = dashOffsetOf(source, parentRange.start.offset);
-  return dash === null ? null : dash + 1;
+  if (dash === null) return null;
+  const dashLineEnd = lineEndOf(source, dash);
+  return dashLineEnd < parentRange.start.offset ? dashLineEnd : dash + 1;
 };
 
 const planInsertKey = (

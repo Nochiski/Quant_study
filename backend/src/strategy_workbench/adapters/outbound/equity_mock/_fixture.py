@@ -84,6 +84,22 @@ def build_demo_fixture() -> MockEquityFixture:
             evidence="KRX 일별매매정보·종목기본정보",
             coverage=full_coverage,
         ),
+        # 아이디어 4(거래대금 상위 20%)의 유니버스 조건 필드(P2-08). 단위·값 타입은 실데이터
+        # 어댑터 선언(`equity_duckdb/_specs.py`)과 같다 — `test_idea_fixtures.py` 가 대조한다.
+        DatasetFieldProfile(
+            field_id="price.trading_value",
+            dataset_id="price_daily",
+            label="거래대금",
+            unit="KRW",
+            value_type=FieldValueType.AMOUNT,
+            frequency="daily",
+            available_date_basis="session close",
+            recommended_lag_sessions=0,
+            description="정규장 거래대금.",
+            disclosure_basis="정규장 종가 확정 시점",
+            evidence="KRX 일별매매정보 거래대금 필드",
+            coverage=full_coverage,
+        ),
         DatasetFieldProfile(
             field_id="financial.book_equity",
             dataset_id="fin_std",
@@ -96,6 +112,33 @@ def build_demo_fixture() -> MockEquityFixture:
             description="공시 available_date 이후에만 보인다.",
             disclosure_basis="DART 접수일 기준 사용 가능",
             evidence="DART 재무제표 자본총계 표준계정",
+            coverage=FieldCoverageCapability(
+                starts_on=sessions[0],
+                ends_on=sessions[-1],
+                venues=("XKRX",),
+                estimated_coverage_pct=82.0,
+                supported_cell_kinds=(
+                    CellKind.OBSERVED,
+                    CellKind.MISSING,
+                    CellKind.COVERAGE_GAP,
+                ),
+                point_in_time=True,
+                requires_confirmation=True,
+            ),
+        ),
+        # 아이디어 2(저PBR + 고ROE)의 ROE 분자(P2-08). 자본총계와 같은 공시 기준이다.
+        DatasetFieldProfile(
+            field_id="financial.net_income",
+            dataset_id="fin_std",
+            label="당기순이익",
+            unit="KRW",
+            value_type=FieldValueType.AMOUNT,
+            frequency="quarterly",
+            available_date_basis="filing available_date",
+            recommended_lag_sessions=0,
+            description="공시 available_date 이후에만 보인다.",
+            disclosure_basis="DART 접수일 기준 사용 가능",
+            evidence="DART 재무제표 당기순이익 표준계정",
             coverage=FieldCoverageCapability(
                 starts_on=sessions[0],
                 ends_on=sessions[-1],
@@ -226,6 +269,14 @@ def build_demo_fixture() -> MockEquityFixture:
                     ),
                     Observation(
                         security.security_id,
+                        "price.trading_value",
+                        session,
+                        session,
+                        500_000_000_000.0 + security_index * 150_000_000_000.0 + index * 1_000_000,
+                        CellKind.OBSERVED,
+                    ),
+                    Observation(
+                        security.security_id,
                         "short.short_balance_ratio",
                         session,
                         session,
@@ -266,6 +317,14 @@ def build_demo_fixture() -> MockEquityFixture:
                 date(2023, 12, 31),
                 sessions[2],
                 363_000_000_000_000.0,
+                CellKind.OBSERVED,
+            ),
+            Observation(
+                securities[0].security_id,
+                "financial.net_income",
+                date(2023, 12, 31),
+                sessions[2],
+                15_000_000_000_000.0,
                 CellKind.OBSERVED,
             ),
             Observation(

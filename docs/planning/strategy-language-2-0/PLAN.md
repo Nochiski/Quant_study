@@ -813,13 +813,19 @@ P3-01 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 �
    `node_id`·`origin: "promotion"`·`role`(`promoted_output`·`promotion_constant`)을 싣고,
    `compiledNodeOrigin` 이 이를 `boolean-score`·`support` 로 부른다. 표식은 `_promotion.py` 의
    `synthesized_factor_nodes` 가 그래프만 보고 낸다(설명 요청은 팩터 id 를 들고 오지 않는다). 걷어 낸 뒤 다시
-   승격해 같아야만 인정하므로 이름만 흉내 낸 그래프는 표식을 받지 않는다. 그래서 `application/factor_research`
+   승격해 같아야만 인정한다. 그래프만으로는 사용자가 승격 모양을 예약 id 로 그대로 쓴 그래프를 가를 수 없으므로
+   **예약 접두사는 문서에서 거절된다**: 문서가 `__promote_` 로 시작하는 node_id 를 쓰면 compile 이
+   `strategy.factor.reserved_node_id` error 를 낸다(리뷰 #232 DEFECT-232-01, 리드 결정). 문서가 쓴 노드는
+   `written_pointers` 의 `/factors/i/graph/nodes/j/node_id` 로 가린다 — 승격은 끝에만 붙으므로 문서의 j 번째가
+   spec 의 j 번째다. 1.1 문서는 업그레이드가 이름을 바꾸지 않고, 다시 쓴 원문의 compile 이 같은 error 로 저장을
+   막는다. 그래서 `application/factor_research`
    의 `DEPENDS_ON` 에 `domain.strategy` 가 들어간다. trace wire 에는 싣지 않는다: 디버거가 문서 노드 id 만
    요청하므로(결정 3) 응답에 붙인 노드가 나올 길이 없다. 문서 tree 는 "소스 열기" 노드 index 를 찾는 데만 쓴다.
 3. **디버거는 붙인 노드를 숨긴다(사람 말 라벨이 아니다).** 디버거는 선택을 pointer 로 라우팅하는데, 붙인 출력의
    "소스 열기"가 원래 출력 줄을 가리키게 하면 두 노드가 같은 pointer 를 가져 붙인 노드를 고를 수 없다. 원래
    출력의 참/거짓 값이 같은 정보라 문서 노드만 추적하고 출력 노드를 사용자가 적은 출력으로 둔다. 실행 계획
-   표·그래프 화면은 "참/거짓을 1/0으로" 한 행으로 보이고 상수 둘은 숨긴다.
+   표·그래프 화면은 "참/거짓을 1/0으로" 한 행으로 보이고 상수 둘은 숨긴다. 같은 이유로 두 화면의 선택 강조도
+   원래 출력이 받는다 — pointer 가 같아 둘 다 켜지던 것을 붙인 출력에서 끈다(리뷰 #232 DEFECT-232-03).
 4. **의미 diff 는 두 경로가 각자 걷는다.** revision diff(backend `_diff.py`)는 `_promotion.py` 에 둔 승격의
    정확한 역함수 `demote_boolean_factor_outputs`(걷어 낸 뒤 다시 승격하면 원래가 나와야만 인정)를, 편집 중
    draft diff(frontend `diff-projection.ts`, 두 canonical 을 직접 비교)는 문서 tree 멤버십을 쓴다. draft 쪽에
@@ -841,7 +847,9 @@ P3-01 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 �
 8. **verbose fixture 에 `signal:` 절을 넣지 않았다**(P2-04 권고). 정규화 기본값은 문서에 없어도 Form 이 스키마
    기본값으로 그리고 테스트가 그것을 고정한다. fixture 를 바꾸면 줄 위치로 읽는 frontend 테스트 27개가 같이
    움직여 이 PR 의 목적과 무관한 diff 가 커진다. 단위 테스트 안의 불투명한 `schema_version: "1.1"` 문자열
-   리터럴(구조를 보지 않는 24개 파일)도 이 PR 에서 옮기지 않았다 — 포인터 가드는 은퇴 포인터만 본다.
+   리터럴(구조를 보지 않는 24개 파일)도 이 PR 에서 옮기지 않았다 — 포인터 가드는 은퇴 포인터만 본다. 다만
+   1.1 전용 **블록**(`data:`·`execution:`·`graph.missing_policy`)은 단위 테스트 fixture 에서 지웠다(리뷰 #232
+   DEFECT-232-02: 성능 fixture, canonical 대표 바이트, 편집 트랜잭션·스니펫 텍스트, Form feedback 라벨).
 
 ---
 
@@ -1004,6 +1012,7 @@ Phase exit:
 | `P2-07` | `review_lang2_p2_07` | 2 | `APPROVE` | 같은 파일 10절, tip `945fd081`(`bf07bc11`·`97193304`·`f8b052cc`). P1 1·P3 3 닫힘, 새 결함 없음 |
 | `P2-08` | `review_lang2_p1_06` | 1 | `REQUEST_CHANGES` | P1 1 · P2 1 · P3 3 · 관찰 1. **DEFECT-P208-001(P1)**: 아이디어 2 에 자본총계 ≤ 0 조건이 없어 자본잠식 적자 기업이 PBR·ROE 두 팩터 모두 최상위(원장 실측 28개) → `financial.book_equity gt 0` 규칙 + mock 자본잠식 종목 재현 테스트(수정 전 red). **DEFECT-P208-002(P2)**: 0/1 이진 팩터 선정이 `security_id` 순서 → 리드 결정으로 BACKLOG-016(P5-03). P3: spec D2 옛 문장 정리, P5-01 슬롯·삽입 순서 예약, 아이디어 4 당일 거래대금 한계 주석. 관찰(assistant DB 격리 누락)은 AI 계획 몫이라 이 PR 밖 |
 | `P2-08` | `review_lang2_p1_06` | 2 | `APPROVE` | `review_lang2_p2_08_r2.md`, tip `d99aa024`. DEFECT-P208-001 red→green (아이디어 2 eligibility). 새 관찰 **P2-NEW-1**: 가격 변화 아이디어 1·3·4·5 가 원주가 `price.close` 를 쓴다 → 이슈 #214 → BACKLOG-017 |
+| `P3-01` | `review_p3_01` | 1 | `APPROVE`(조건부) | `review_pr232.md`, tip `2fde473e`. blocking 0 · P2 1 · P3 3. **DEFECT-232-01(P2)**: 사용자가 승격 모양을 예약 id 로 그대로 쓴 그래프가 표식을 받아 문서 노드가 숨는다 → 리드 결정으로 예약 접두사 compile error(`strategy.factor.reserved_node_id`), SoT·docstring·결정 2 정정. P3: 1.1 블록 fixture 정리(232-02), 붙인 출력과 원래 출력의 선택 강조 중복(232-03), `PR_LINK`(232-04, 통합 merge 때 채움). 머지 전 조건: 통합 브랜치 반영(`26f426b5`)·BACKLOG-017·018 |
 | `P2-09` | `review_lang2_p2_09` | 1 | `REQUEST_CHANGES` | tip `e064d2af`. P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 빼서 1.1 의 팩터별 결측 처리가 경고 없이 바뀐다. 비차단 관찰 2. 반영 `a32ed9d7`(실효 값 판정, 관찰 1 float 1.1 테스트). 같은 시점 Phase 2 감사 NB-1 은 `17c68261` 이 고쳤다 |
 ## 검증 기록
 

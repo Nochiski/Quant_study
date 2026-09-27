@@ -1,17 +1,17 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: IN_REVIEW
+project_status: IN_PROGRESS
 current_phase: P3
-current_pr: P3-01
-active_prs: [P3-01]
-parallel_window: [P3-01]
-last_updated: 2026-09-27T18:36:39+09:00
+current_pr: P3-02
+active_prs: [P3-02]
+parallel_window: [P3-02]
+last_updated: 2026-09-27T20:31:35+09:00
 planned_prs: 30
 merged_prs: 9
-integrated_prs: 8
-approved_prs: 17
-progress_percent: 57
+integrated_prs: 9
+approved_prs: 18
+progress_percent: 60
 ---
 
 # schema 1.2 · 그래프 표현 실시간 진행 계획
@@ -24,13 +24,13 @@ progress_percent: 57
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `IN_PROGRESS` |
 | Current phase | `P3` |
-| Current/next PR | `P3-01` |
-| Active PR | `P3-01` |
-| Progress | `17 / 30 done (57%), main 9, integration 8` |
-| Approved | `17 / 30` |
-| Aggregated at | `2026-09-27 18:36 KST` |
+| Current/next PR | `P3-02` |
+| Active PR | `P3-02` |
+| Progress | `18 / 30 done (60%), main 9, integration 9` |
+| Approved | `18 / 30` |
+| Aggregated at | `2026-09-27 20:31 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -108,11 +108,11 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | P0 | Planning package and contract docs | 1 | 1 | 0 | `MERGED` |
 | P1 | In-screen friction removal on 1.1 | 6 | 6 | 0 | `MERGED` |
 | P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 2 | 8 | `INTEGRATED` |
-| P3 | Frontend 1.2 adaptation | 3 | 0 | 0 | `IN_REVIEW` |
+| P3 | Frontend 1.2 adaptation | 3 | 0 | 1 | `IN_PROGRESS` |
 | P4 | Graph level 1: pipeline | 4 | 0 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | 0 | `WAITING` |
-| **Total** |  | **30** | **9** | **8** | **57%** |
+| **Total** |  | **30** | **9** | **9** | **60%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -851,6 +851,44 @@ P3-01 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 �
    1.1 전용 **블록**(`data:`·`execution:`·`graph.missing_policy`)은 단위 테스트 fixture 에서 지웠다(리뷰 #232
    DEFECT-232-02: 성능 fixture, canonical 대표 바이트, 편집 트랜잭션·스니펫 텍스트, Form feedback 라벨).
 
+
+| 항목 | 값 |
+|---|---|
+| PR | `P3-02` |
+| Intent | 실행 요청(백테스트·추적·실행 계획 sandbox)이 `environment` 를 싣게 한다. 실행 설정 패널이 필드를 **실행 설정 스키마**(`GET /api/v1/run-environments/schema`)에서 그리고, 업그레이드 응답의 `environment` 로 채울 수 있고, run 상세가 실행된 `environment` 를 보인다. P2-03 이 잠근 e2e fixme 4건을 푼다 |
+| Acceptance | WORKFLOW P3-02(+ Phase 2 감사 예약 #3·#15·#16·NB-2(b)·NB-4(a)), 업그레이드 응답 `environment` → 실행 요청 경로(US-SM-07 `workbench.workflow.spec.ts:1309`) |
+| 종료 조건 | 전체 e2e 에서 `environment` 미배선 실패 7건과 `test.fixme` 4건이 0. 이 PR 이 P2-03~P3-02 묶음의 main 머지 조건(전체 e2e·CI green)의 마지막 관문이다 |
+| Non-goals | 골든·매뉴얼 1.2·원주가 이관(P3-03), 실행 결과 캐시·`run_fingerprint` 표기 버전(캐시 도입 PR), 그래프 탭(P4) |
+| Branch/worktree | `feat/lang2-p3-02-run-environment` / `wt-lang2-p3-02` |
+| Base SHA | `lang2/integration` `c4d0f481`(#232 통합 머지) |
+| Head SHA | PR 본문 참조(게이트 실측 SHA 와 같이 적는다) |
+| Full gate | push tip 에서 backend 전체·ruff·pyright·`export_openapi`·`api:generate` diff 0·frontend typecheck·typecheck:e2e·lint·test·build·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e`(잠금 러너) |
+
+P3-02 결정(WORKFLOW 원문이 비워 둔 곳):
+
+1. **기간·유니버스에는 기본값이 없다.** 실행 설정 스키마가 `start`·`end`·`universe_id` 에 `default` 를 주지
+   않는다 — backend 는 요청에 실행 설정이 없으면 기본값을 지어내지 않고 거절한다(`require_environment`).
+   패널도 같은 규칙을 따른다: 세 칸은 비어서 시작하고, 채우기 전까지 백테스트·추적 버튼이 "실행 설정에서
+   기간과 유니버스를 정하세요"로 막힌다. 나머지 필드는 스키마 `default` 로 채운다. 마지막 사용값은 전략별
+   `localStorage`(저장된 전략은 `strategy_id`, 새 전략은 새 전략 한 칸)가 다시 채운다.
+2. **패널은 스키마를 그대로 그린다.** 필드 목록·순서·enum·기본값·범위(`minimum`·`exclusiveMinimum`·
+   `maximum`)·단위·설명 키·카탈로그를 스키마에서 읽고 필드 이름을 손으로 적지 않는다. enum 은 select,
+   숫자는 범위 검증이 붙은 입력, `format: date` 는 날짜 입력, `x-catalog: universe` 는 카탈로그 목록이 없어
+   텍스트 입력이다(Form 의 universe 카탈로그 컨트롤과 같은 규칙).
+3. **명시 `environment` 의 422 는 필드 단위 구조로 바꾸지 않는다(결정 항목).** 패널이 같은 스키마의 범위·필수와
+   기간 순서(`start <= end`)를 빠른 피드백으로 먼저 막아, 필드 옆 오류는 패널이 스스로 낸다. 그래도 서버가
+   거절하면(스키마 밖 규칙) 기존 툴바 실패 문구가 backend detail 을 보인다. inbound 에서 `RunEnvironment` 를
+   다시 구성해 코드화된 detail 로 바꾸는 대안은 pydantic 메시지 문자열을 파싱하지 않고도 필드를 알 수 있게
+   하지만, 패널 검증이 같은 SoT 를 읽는 동안에는 도달 경로가 없어 계약만 넓힌다.
+4. **매니페스트 평면 비용 필드는 유지한다(NB-4(a)).** `RunManifest.fee_bps`·`slippage_bps`·
+   `participation_rate` 는 `environment` 와 같은 값이지만, 이미 저장된 run 과 결과 설명 도구가 읽는
+   필드라 지우면 OpenAPI·저장소 호환이 함께 움직인다. 화면(run 상세)은 `environment` 만 읽는다.
+5. **업그레이드 응답의 `environment` 는 사용자가 누를 때 패널에 채운다.** 배너가 "실행 설정에 채우기"를
+   보이고, 누르면 패널 값이 바뀐다. `environment` 가 `null` 이면 버튼 대신 warning 을 보이고 패널을 건드리지
+   않는다. 배너 문구는 버전 중립으로 바꾸고 은퇴 버전 문자열을 frontend 에 두지 않는다(#15 6키 포함).
+6. **실행 계획 sandbox 요청은 패널의 `missing` 을 싣는다(#3).** 값의 출처가 패널이므로 page 가 edit-strategy
+   의 `useExecutionPlans` 에 넘긴다(feature 간 import 금지).
+
 ---
 
 ## P0 — 기획 패키지와 계약 문서
@@ -908,8 +946,8 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-06 | `IN_REVIEW` | [#232](https://github.com/Nochiski/Quant_study/pull/232) · 워크트리 `wt-lang2-p3-01`, 브랜치 `feat/lang2-p3-01-frontend-1-2` · base `lang2/integration`(P2-09·P2-10 통합 머지 뒤 리드가 옮겼다) · `review_p3_01` 이 `2fde473e` 기준 리뷰 중 |
-| [ ] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `WAITING` | — |
+| [x] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-06 | `INTEGRATED` | [#232](https://github.com/Nochiski/Quant_study/pull/232) · `review_p3_01` 1차 조건부 APPROVE(`2fde473e`) → 2차 APPROVE(`6e5e71da`, 재리뷰 P2 2·P3 1 반영 `08451303`) · 통합 머지 `c4d0f481`(#232, `lang2/integration`, 2026-09-27) |
+| [ ] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `IN_PROGRESS` | 워크트리 `wt-lang2-p3-02`, 브랜치 `feat/lang2-p3-02-run-environment` · base `lang2/integration` `c4d0f481` |
 | [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `WAITING` | — |
 
 Phase exit:

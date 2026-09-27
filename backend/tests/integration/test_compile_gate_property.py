@@ -33,6 +33,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     InvalidPortfolioRequestError,
     PortfolioDesignService,
     PortfolioPreviewRequest,
+    RawObservationUnavailableError,
 )
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
@@ -246,3 +247,86 @@ def test_every_sampled_deeper_graph_that_compiles_passes_the_preview_preflight(
 
     assert outcomes["compiled"] > 30, outcomes
     assert outcomes["rejected"] > 0, outcomes
+
+
+# -- 그래프 밖 필드 참조 --------------------------------------------------------------------------
+#
+# 사전 검사는 관측 데이터를 읽지 않으므로 이 자리의 없는 필드는 미리보기의 원시 관측 로딩에서야
+# 드러난다(422 `portfolio.data.unavailable`, P2-07 리뷰 P1). 그래서 여기서는 실제 미리보기를 돌린다.
+# 공간은 네 자리 × (어댑터가 주는 필드 전부 + 없는 필드 둘)이다. 팩터 그래프는 통과하는 것 하나로
+# 고정한다.
+
+_FIXED_FACTOR = {
+    "factor_id": "momentum",
+    "label": "momentum",
+    "direction": "high",
+    "weight": 1.0,
+    "graph": {
+        "nodes": [
+            {"kind": "field", "node_id": "close", "field_id": "price.close"},
+            {
+                "kind": "time_series",
+                "node_id": "mom",
+                "operator": "momentum",
+                "input_node_id": "close",
+                "window": 5,
+            },
+        ],
+        "output_node_id": "mom",
+    },
+}
+
+
+def _with_reference(slot: str, field_id: str) -> str:
+    document: dict[str, Any] = {
+        "schema_version": CURRENT_SCHEMA_VERSION,
+        "title": "그래프 밖 필드 property",
+        "factors": [_FIXED_FACTOR],
+        "portfolio": {"selection_count": 5, "rebalance": "monthly"},
+        "risk": {"max_name_weight": 0.2},
+    }
+    if slot == "eligibility":
+        document["eligibility"] = {
+            "rules": [{"field_id": field_id, "operator": "gte", "value": -1e12}]
+        }
+    elif slot == "liquidity":
+        document["portfolio"] |= {"liquidity_field_id": field_id, "minimum_liquidity": -1e12}
+    elif slot == "regime":
+        document["signal"] = {"regime_field_id": field_id, "regime_minimum": -1e12}
+    else:
+        document["portfolio"]["weighting"] = "risk"
+        document["risk"]["risk_field_id"] = field_id
+    return json.dumps(document, ensure_ascii=False)
+
+
+_SLOTS = ("eligibility", "liquidity", "regime", "risk")
+
+
+def test_every_outside_graph_reference_that_compiles_previews_without_422(
+    adapter: MockEquityDataAdapter,
+    authoring: StrategyAuthoringService,
+    portfolio: PortfolioDesignService,
+) -> None:
+    field_ids = [
+        *(field.field_id for field in adapter.factor_field_catalog()),
+        "price.closex",
+        "no.such_field",
+    ]
+    outcomes: Counter[str] = Counter()
+    leaks: list[str] = []
+    for slot, field_id in itertools.product(_SLOTS, field_ids):
+        compiled = authoring.compile(
+            CompileRequest(_with_reference(slot, field_id), SourceFormat.JSON)
+        )
+        if compiled.spec is None:
+            outcomes["rejected"] += 1
+            continue
+        outcomes["compiled"] += 1
+        try:
+            portfolio.preview(PortfolioPreviewRequest(compiled.spec, _ENVIRONMENT))
+        except (InvalidPortfolioRequestError, RawObservationUnavailableError) as error:
+            leaks.append(f"{slot}={field_id} → {type(error).__name__}: {error}")
+    assert not leaks, f"compile 통과 문서가 미리보기에서 422 가 됐다({len(leaks)}건): {leaks[:5]}"
+    # 양쪽을 실제로 밟는다: 통과하는 숫자 필드와, 막히는 없는 필드·그룹 필드가 모두 있다.
+    assert outcomes["compiled"] >= len(_SLOTS), outcomes
+    assert outcomes["rejected"] >= 3 * len(_SLOTS), outcomes

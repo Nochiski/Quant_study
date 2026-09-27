@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -274,3 +275,137 @@ def test_storage_integrity_does_not_depend_on_the_connected_adapter() -> None:
     assert container.strategy_repository.get("stored").spec_hash == compiled.spec_hash
     live = container.strategy_authoring.compile(CompileRequest(source, SourceFormat.YAML))
     assert "strategy.expression.field_missing" in {item.code for item in live.diagnostics}
+
+
+# -- 그래프 밖 필드 참조(`x-catalog: equity-field`) -----------------------------------------------
+
+# 문서에서 팩터 그래프 밖에 있는 필드 참조 네 자리. 원문 치환으로 하나씩 켠다(`{field}` 자리에 필드
+# id). 목록은 테스트가 적지만 구현은 모델 metadata 에서 파생한다 — 아래
+# `test_the_checked_paths_are_exactly_the_runtime_schema_equity_field_catalog` 가 둘을 대조한다.
+_OUTSIDE_GRAPH_REFERENCES: dict[str, tuple[tuple[tuple[str, str], ...], str]] = {
+    "eligibility": (
+        (
+            (
+                "  rules: []\n",
+                "  rules:\n    - field_id: {field}\n      operator: gt\n      value: 0\n",
+            ),
+        ),
+        "/eligibility/rules/0/field_id",
+    ),
+    "liquidity": (
+        (
+            (
+                "  rebalance: monthly\n",
+                "  rebalance: monthly\n  liquidity_field_id: {field}\n  minimum_liquidity: 1.0\n",
+            ),
+        ),
+        "/portfolio/liquidity_field_id",
+    ),
+    "regime": (
+        (
+            (
+                "portfolio:\n",
+                "signal:\n  regime_field_id: {field}\n  regime_minimum: 0.0\nportfolio:\n",
+            ),
+        ),
+        "/signal/regime_field_id",
+    ),
+    "risk": (
+        (
+            ("  rebalance: monthly\n", "  rebalance: monthly\n  weighting: risk\n"),
+            ("  max_name_weight: 0.05\n", "  max_name_weight: 0.05\n  risk_field_id: {field}\n"),
+        ),
+        "/risk/risk_field_id",
+    ),
+}
+
+
+def _outside_graph_source(slot: str, field_id: str) -> str:
+    source = GOLDEN
+    for old, new in _OUTSIDE_GRAPH_REFERENCES[slot][0]:
+        assert old in source, (slot, old)
+        source = source.replace(old, new.format(field=field_id), 1)
+    return source
+
+
+@pytest.mark.parametrize("slot", sorted(_OUTSIDE_GRAPH_REFERENCES))
+def test_an_unknown_field_outside_the_graph_is_a_compile_error(slot: str) -> None:
+    """그래프 밖 참조도 연결된 어댑터의 계약에서 찾는다(P2-07 리뷰 P1, spec D5).
+
+    막지 않으면 compile 은 진단 0건으로 통과하고 미리보기가 422 `portfolio.data.unavailable`,
+    백테스트는 202 로 받은 뒤 tape 단계에서 실패한다.
+    """
+    adapter = MockEquityDataAdapter.demo()
+    pointer = _OUTSIDE_GRAPH_REFERENCES[slot][1]
+
+    valid = _compile(_outside_graph_source(slot, "price.close"), adapter)
+    typo = _compile(_outside_graph_source(slot, "price.closex"), adapter)
+
+    assert valid.ok, _errors(valid)
+    assert _errors(typo) == [("strategy.field.missing", pointer)]
+    [diagnostic] = [item for item in typo.diagnostics if item.code == "strategy.field.missing"]
+    assert "price.closex" in diagnostic.message
+    assert diagnostic.range is not None, "편집기가 그 필드 줄을 짚을 수 있다"
+
+
+@pytest.mark.parametrize("slot", sorted(_OUTSIDE_GRAPH_REFERENCES))
+def test_a_group_field_where_a_number_is_read_is_a_compile_error(slot: str) -> None:
+    """네 자리 모두 숫자로 읽는다(비교·유동성 하한·레짐 하한·역가중). 그룹 필드는 쓸 수 없다."""
+    compiled = _compile(
+        _outside_graph_source(slot, "classification.sector"), MockEquityDataAdapter.demo()
+    )
+
+    assert _errors(compiled) == [("strategy.field.value_type", _OUTSIDE_GRAPH_REFERENCES[slot][1])]
+    [diagnostic] = [
+        item for item in compiled.diagnostics if item.code == "strategy.field.value_type"
+    ]
+    assert "actual='group_series'" in diagnostic.message
+
+
+@pytest.mark.parametrize("slot", sorted(_OUTSIDE_GRAPH_REFERENCES))
+def test_without_an_adapter_outside_graph_references_are_not_judged(slot: str) -> None:
+    assert _compile(_outside_graph_source(slot, "price.closex"), None).ok
+
+
+def _equity_field_pointers(schema: dict[str, Any]) -> set[str]:
+    """runtime schema 에서 `x-catalog: equity-field` 인 property 의 pointer(배열 항목은 `*`)."""
+    found: set[str] = set()
+
+    def walk(node: object, pointer: str, seen: frozenset[str]) -> None:
+        if not isinstance(node, dict):
+            return
+        if node.get("x-catalog") == "equity-field":
+            found.add(pointer)
+        reference = node.get("$ref")
+        if isinstance(reference, str):
+            name = reference.rsplit("/", 1)[-1]
+            if name not in seen:
+                walk(schema["$defs"][name], pointer, seen | {name})
+        for name, child in (node.get("properties") or {}).items():
+            walk(child, f"{pointer}/{name}", seen)
+        walk(node.get("items"), f"{pointer}/*", seen)
+        for key in ("anyOf", "oneOf", "allOf"):
+            for child in node.get(key) or ():
+                walk(child, pointer, seen)
+
+    walk(schema, "", frozenset())
+    return found
+
+
+def test_the_checked_paths_are_exactly_the_runtime_schema_equity_field_catalog() -> None:
+    """검사 대상은 runtime schema 의 `x-catalog: equity-field` 와 같은 집합이다(그래프 노드 제외).
+
+    검사기가 목록을 따로 들면 새 필드 참조가 생길 때 한쪽만 늘어난다. 모델 metadata 가 단일
+    owner 이고 스키마와 검사기가 둘 다 그것을 읽는다. 여기서는 스키마 쪽 집합이 이 테스트의 네
+    자리와 같은지 본다 — 새 자리가 생기면 이 테스트가 실패해 위 표에 사례를 더하게 한다.
+    """
+    pointers = _equity_field_pointers(_service(None).schema().schema)
+
+    outside_graph = {pointer for pointer in pointers if "/graph/" not in pointer}
+    checked = {
+        pointer.replace("/0/", "/*/") for _edits, pointer in _OUTSIDE_GRAPH_REFERENCES.values()
+    }
+    assert outside_graph == checked
+    assert any("/graph/" in pointer for pointer in pointers), (
+        "그래프 노드 필드는 그래프 검증이 본다"
+    )

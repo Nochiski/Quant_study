@@ -345,6 +345,9 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.factor.output_type",
         # 연결된 어댑터가 연산에 필요한 필드 타입을 주지 않는다(P2-07, capability 진단).
         "strategy.operator.unsupported",
+        # 그래프 밖 필드 참조가 연결된 데이터에 없거나 숫자 필드가 아니다(P2-07).
+        "strategy.field.missing",
+        "strategy.field.value_type",
         "strategy.portfolio.liquidity_field",
         "strategy.risk.net_exposure",
         "strategy.risk.long_only_exposure",

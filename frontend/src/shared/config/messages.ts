@@ -140,6 +140,73 @@ const ko = {
   "backtest.result.manifest.completed": "Completed",
   "backtest.result.warnings": "Data warnings",
   "backtest.result.warnings.empty": "경고 없음",
+  // 지표의 쉬운 이름·뜻. 키는 backend Metric Registry의 metric_id이고 문장은 여기가 owner다
+  // (결과 설명 spec R4). registry id 목록은 backend/tests/fixtures/analytics/metric_ids.json.
+  "backtest.metric.total_return": "총수익률",
+  "backtest.metric.total_return.description":
+    "처음 넣은 돈이 끝날 때 몇 % 늘었거나 줄었는지입니다.",
+  "backtest.metric.cagr": "연평균 수익률",
+  "backtest.metric.cagr.description":
+    "해마다 평균 몇 %씩 불어났는지로 바꿔 본 값입니다.",
+  "backtest.metric.volatility": "변동성",
+  "backtest.metric.volatility.description":
+    "수익률이 얼마나 크게 오르내렸는지입니다. 클수록 불안정합니다.",
+  "backtest.metric.sharpe": "샤프 비율",
+  "backtest.metric.sharpe.description":
+    "흔들림 한 단위당 얼마나 벌었는지입니다. 클수록 덜 흔들리며 벌었습니다.",
+  "backtest.metric.sortino": "소르티노 비율",
+  "backtest.metric.sortino.description":
+    "떨어질 때의 흔들림만 위험으로 보고 잰 샤프 비율입니다.",
+  "backtest.metric.max_drawdown": "최대 낙폭",
+  "backtest.metric.max_drawdown.description":
+    "가장 높았던 때에서 가장 많이 떨어진 폭입니다.",
+  "backtest.metric.calmar": "칼마 비율",
+  "backtest.metric.calmar.description":
+    "연평균 수익률을 최대 낙폭으로 나눈 값입니다. 클수록 큰 손실에 비해 잘 벌었습니다.",
+  "backtest.metric.turnover": "회전율",
+  "backtest.metric.turnover.description":
+    "기간 동안 거래한 금액이 평균 자산의 몇 배인지입니다. 클수록 자주 갈아타 비용이 늘어납니다.",
+  "backtest.metric.max_drawdown_duration_sessions": "최장 하락 기간",
+  "backtest.metric.max_drawdown_duration_sessions.description":
+    "직전 고점 아래에 머문 가장 긴 거래일 수입니다.",
+  "backtest.metric.max_drawdown_recovery_sessions": "최대 낙폭 회복 기간",
+  "backtest.metric.max_drawdown_recovery_sessions.description":
+    "최대 낙폭의 바닥에서 이전 고점을 되찾기까지 걸린 거래일 수입니다.",
+  "backtest.metric.benchmark_return": "벤치마크 수익률",
+  "backtest.metric.benchmark_return.description":
+    "비교 기준 종목이 같은 기간 낸 수익률입니다.",
+  "backtest.metric.excess_return": "초과 수익률",
+  "backtest.metric.excess_return.description":
+    "전략 수익률에서 벤치마크 수익률을 뺀 값입니다.",
+  "backtest.metric.trade_count": "청산 거래 수",
+  "backtest.metric.trade_count.description":
+    "사고팔기를 끝낸 거래의 수입니다.",
+  "backtest.metric.win_rate": "승률",
+  "backtest.metric.win_rate.description":
+    "청산 거래 가운데 이익으로 끝난 비율입니다.",
+  "backtest.metric.profit_factor": "손익비",
+  "backtest.metric.profit_factor.description":
+    "이익 합계를 손실 합계로 나눈 값입니다. 1보다 크면 번 돈이 잃은 돈보다 많습니다.",
+  "backtest.metric.average_gross_exposure": "평균 총투자 비중",
+  "backtest.metric.average_gross_exposure.description":
+    "자산 가운데 평균적으로 주식에 들어가 있던 비율입니다(매수·공매도 합).",
+  "backtest.metric.maximum_gross_exposure": "최대 총투자 비중",
+  "backtest.metric.maximum_gross_exposure.description":
+    "자산 가운데 주식에 가장 많이 들어가 있던 비율입니다.",
+  "backtest.metric.average_net_exposure": "평균 순투자 비중",
+  "backtest.metric.average_net_exposure.description":
+    "매수 비중에서 공매도 비중을 뺀 평균 비율입니다.",
+  "backtest.metric.total_fees": "총수수료",
+  "backtest.metric.total_fees.description":
+    "거래하며 낸 수수료 합계입니다.",
+  "backtest.metric.total_slippage_cost": "슬리피지 비용",
+  "backtest.metric.total_slippage_cost.description":
+    "원하던 가격과 실제 체결 가격의 차이로 잃은 금액입니다.",
+  "backtest.metric.total_carry_cost": "대차·신용 비용",
+  "backtest.metric.total_carry_cost.description":
+    "공매도 대차료와 신용 이자로 낸 금액입니다.",
+  "page.backtest.askAi": "AI에게 결과 묻기",
+  "page.backtest.assistant": "AI 어시스턴트",
   "page.operations.placeholderTitle": "운영 기능은 아직 제공되지 않습니다",
   "page.operations.placeholder":
     "이 화면은 주문·포지션·리스크 기능의 자리만 잡아 둔 것이며 실제 거래를 수행하지 않습니다.",
@@ -1436,6 +1503,8 @@ const ko = {
   "assistant.chat.input": "어시스턴트에게 보낼 메시지",
   "assistant.chat.input.placeholder":
     "무엇을 만들고 싶은지 적으세요. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
+  "assistant.chat.input.placeholder.result":
+    "결과에서 궁금한 것을 적으세요. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
   "assistant.chat.send": "보내기",
   "assistant.chat.stop": "중지",
   "assistant.chat.progress": "진행 상태",
@@ -1443,6 +1512,8 @@ const ko = {
   "assistant.chat.empty": "무엇이든 물어보세요",
   "assistant.chat.empty.description":
     "들어온 데이터와 인터넷 검색으로 시장을 조사해 전략을 제안합니다. 제안은 직접 적용하기 전까지 문서를 바꾸지 않습니다.",
+  "assistant.chat.empty.description.result":
+    "이 실행의 숫자를 쉬운 말로 풀어 줍니다. \"이 결과 좋은 거야?\"처럼 물어보세요. 이 대화는 전략 문서를 바꾸지 않습니다.",
   "assistant.chat.noProvider": "연결된 AI 공급자가 없습니다",
   "assistant.chat.noProvider.description":
     "설정에서 Claude·Codex 연결을 등록하면 이 사이드바를 쓸 수 있습니다.",
@@ -1632,6 +1703,71 @@ export const messages = {
     "backtest.result.manifest.completed": "Completed",
     "backtest.result.warnings": "Data warnings",
     "backtest.result.warnings.empty": "No warnings",
+    "backtest.metric.total_return": "Total return",
+    "backtest.metric.total_return.description":
+      "How much the starting money grew or shrank by the end.",
+    "backtest.metric.cagr": "Annual growth rate",
+    "backtest.metric.cagr.description":
+      "The yearly rate that would have produced the same result.",
+    "backtest.metric.volatility": "Volatility",
+    "backtest.metric.volatility.description":
+      "How much returns swung up and down. Higher means bumpier.",
+    "backtest.metric.sharpe": "Sharpe ratio",
+    "backtest.metric.sharpe.description":
+      "Return earned per unit of swing. Higher means a smoother gain.",
+    "backtest.metric.sortino": "Sortino ratio",
+    "backtest.metric.sortino.description":
+      "A Sharpe ratio that counts only downward swings as risk.",
+    "backtest.metric.max_drawdown": "Maximum drawdown",
+    "backtest.metric.max_drawdown.description":
+      "The deepest fall from a previous peak.",
+    "backtest.metric.calmar": "Calmar ratio",
+    "backtest.metric.calmar.description":
+      "Annual growth divided by the deepest fall. Higher means more gain per worst loss.",
+    "backtest.metric.turnover": "Turnover",
+    "backtest.metric.turnover.description":
+      "Traded value as a multiple of average capital. Higher means more trading costs.",
+    "backtest.metric.max_drawdown_duration_sessions": "Longest time under water",
+    "backtest.metric.max_drawdown_duration_sessions.description":
+      "The most trading days spent below a previous peak.",
+    "backtest.metric.max_drawdown_recovery_sessions": "Recovery from the deepest fall",
+    "backtest.metric.max_drawdown_recovery_sessions.description":
+      "Trading days from the deepest low back to the previous peak.",
+    "backtest.metric.benchmark_return": "Benchmark return",
+    "backtest.metric.benchmark_return.description":
+      "What the comparison security returned over the same period.",
+    "backtest.metric.excess_return": "Excess return",
+    "backtest.metric.excess_return.description":
+      "Strategy return minus benchmark return.",
+    "backtest.metric.trade_count": "Closed trades",
+    "backtest.metric.trade_count.description":
+      "How many round trips were completed.",
+    "backtest.metric.win_rate": "Win rate",
+    "backtest.metric.win_rate.description":
+      "Share of closed trades that ended in profit.",
+    "backtest.metric.profit_factor": "Profit factor",
+    "backtest.metric.profit_factor.description":
+      "Total profit divided by total loss. Above 1 means more was won than lost.",
+    "backtest.metric.average_gross_exposure": "Average gross exposure",
+    "backtest.metric.average_gross_exposure.description":
+      "Average share of capital held in stocks, long plus short.",
+    "backtest.metric.maximum_gross_exposure": "Maximum gross exposure",
+    "backtest.metric.maximum_gross_exposure.description":
+      "The highest share of capital held in stocks.",
+    "backtest.metric.average_net_exposure": "Average net exposure",
+    "backtest.metric.average_net_exposure.description":
+      "Average long share minus short share.",
+    "backtest.metric.total_fees": "Total fees",
+    "backtest.metric.total_fees.description":
+      "All commissions paid for trading.",
+    "backtest.metric.total_slippage_cost": "Slippage cost",
+    "backtest.metric.total_slippage_cost.description":
+      "Money lost to the gap between the intended and the filled price.",
+    "backtest.metric.total_carry_cost": "Borrow and margin cost",
+    "backtest.metric.total_carry_cost.description":
+      "Fees paid for borrowing shares and margin interest.",
+    "page.backtest.askAi": "Ask AI about this result",
+    "page.backtest.assistant": "AI assistant",
     "page.operations.placeholderTitle": "Operations are not available yet",
     "page.operations.placeholder":
       "This screen only reserves the place for orders, positions and risk; it does not trade.",
@@ -2969,6 +3105,8 @@ export const messages = {
     "assistant.chat.input": "Message for the assistant",
     "assistant.chat.input.placeholder":
       "Describe what you want to build. Enter sends, Shift+Enter adds a line.",
+    "assistant.chat.input.placeholder.result":
+      "Ask about this result. Enter sends, Shift+Enter adds a line.",
     "assistant.chat.send": "Send",
     "assistant.chat.stop": "Stop",
     "assistant.chat.progress": "Progress",
@@ -2976,6 +3114,8 @@ export const messages = {
     "assistant.chat.empty": "Ask anything",
     "assistant.chat.empty.description":
       "The assistant researches the market with the connected data and web search, then proposes a strategy. Nothing touches your document until you apply it.",
+    "assistant.chat.empty.description.result":
+      "The assistant explains this run's numbers in plain words. Try \"Is this result good?\" This conversation never changes the strategy document.",
     "assistant.chat.noProvider": "No AI provider is connected",
     "assistant.chat.noProvider.description":
       "Register a Claude or Codex connection in settings to use this sidebar.",

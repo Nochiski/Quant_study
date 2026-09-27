@@ -35,13 +35,21 @@ import { assistTranscript, type AssistTranscriptEntry } from "./transcript";
 type Selection =
   { kind: "auto" } | { kind: "new" } | { kind: "session"; id: string };
 
-/** 턴 시작 시점에 실어 보낸 질문과 문서 원문. 원문은 제안 적용 전 확인의 기준이다(spec D9). */
-type TurnPrompt = { text: string; sourceText: string };
+/**
+ * 턴 시작 시점에 실어 보낸 질문과 문서 원문. 원문은 제안 적용 전 확인의 기준이다(spec D9).
+ * 결과 설명 세션은 문서를 싣지 않으므로 원문이 없다.
+ */
+type TurnPrompt = { text: string; sourceText: string | null };
 
 export type UseAssistChatOptions = {
   documentRef: DocumentRefView;
-  /** 턴을 시작하는 순간의 편집기 상태. 값이 아니라 함수인 이유는 타이핑마다 사이드바를 다시 그리지 않기 위함이다. */
-  readContext: () => TurnContextPayload;
+  /**
+   * 턴을 시작하는 순간의 편집기 상태. 값이 아니라 함수인 이유는 타이핑마다 사이드바를 다시 그리지 않기 위함이다.
+   *
+   * 결과 설명 세션(`documentRef.run_id`)은 주지 않는다. 서버가 실행 결과를 읽어 요약하며, 문서를 실으면
+   * 422 `assistant.turn_context_mismatch`다(결과 설명 spec R5).
+   */
+  readContext?: () => TurnContextPayload;
 };
 
 /** 보내지 못한 질문을 입력칸으로 되돌리는 지시. `nonce`가 바뀔 때만 복원한다. */
@@ -230,14 +238,20 @@ export const useAssistChat = ({
   );
 
   const beginTurn = (id: string, text: string) => {
-    const context = readContext();
+    const context = readContext?.();
     startTurn.mutate(
-      { sessionId: id, request: { text, context } },
+      {
+        sessionId: id,
+        request: context === undefined ? { text } : { text, context },
+      },
       {
         onSuccess: (turn) => {
           setPrompts((previous) => ({
             ...previous,
-            [turn.turn_id]: { text, sourceText: context.source_text },
+            [turn.turn_id]: {
+              text,
+              sourceText: context?.source_text ?? null,
+            },
           }));
           setPendingPrompt(null);
           dispatch({ type: "turn", turn });

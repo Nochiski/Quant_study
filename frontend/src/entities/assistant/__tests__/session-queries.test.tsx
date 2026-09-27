@@ -20,6 +20,7 @@ import {
 import { AssistantRequestError, type SessionView } from "../../../shared/api";
 import {
   assistantSessionQuery,
+  assistantSessionsKey,
   assistantSessionsQuery,
   useCancelAssistantTurn,
   useCreateAssistantSession,
@@ -153,6 +154,20 @@ describe("어시스턴트 세션·턴 query", () => {
     ]);
     // 생성 성공은 그 문서의 세션 목록만 무효화한다.
     await waitFor(() => expect(listQueries).toHaveLength(2));
+  });
+
+  it("결과 설명 세션 목록은 실행 id로 읽고 실행마다 캐시를 나눈다", async () => {
+    const queryClient = client();
+    const view = renderHook(
+      () => useQuery(assistantSessionsQuery({ run_id: "run-1" })),
+      { wrapper: wrapperFor(queryClient) },
+    );
+
+    await waitFor(() => expect(view.result.current.data).toHaveLength(1));
+    expect(listQueries[0].get("run_id")).toBe("run-1");
+    expect(assistantSessionsKey({ run_id: "run-1" })).not.toEqual(
+      assistantSessionsKey({ run_id: "run-2" }),
+    );
   });
 
   it("턴 시작은 `accepted_sequence`를 그대로 돌려준다", async () => {

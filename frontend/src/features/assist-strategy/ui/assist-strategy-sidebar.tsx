@@ -7,7 +7,7 @@ import {
   type StrategyProposalView,
   type TurnContextPayload,
 } from "../../../entities/assistant";
-import { t } from "../../../shared/config";
+import { t, type MessageKey } from "../../../shared/config";
 import { Link } from "../../../shared/lib/router";
 import { Button, EmptyState } from "../../../shared/ui";
 import { useAssistChat } from "../model/use-assist-chat";
@@ -26,11 +26,38 @@ export type AssistProposalAction = {
   baseSourceText: string | null;
 };
 
+/**
+ * 사이드바가 붙은 화면의 종류. 안내 문구만 가른다.
+ *
+ * `result`는 백테스트 결과 화면이다(결과 설명 spec R1). 그 화면에서 "무엇을 만들고 싶은지 적으세요"는
+ * 틀린 안내다. 모드 자체(도구·제안 여부)는 서버가 세션으로 정하므로 여기서 다시 판단하지 않는다.
+ */
+export type AssistCopy = "strategy" | "result";
+
+const COPY = {
+  strategy: {
+    empty: "assistant.chat.empty.description",
+    placeholder: "assistant.chat.input.placeholder",
+  },
+  result: {
+    empty: "assistant.chat.empty.description.result",
+    placeholder: "assistant.chat.input.placeholder.result",
+  },
+} as const satisfies Record<
+  AssistCopy,
+  { empty: MessageKey; placeholder: MessageKey }
+>;
+
 export type AssistStrategySidebarProps = {
-  /** 이 사이드바가 붙은 문서. 세션 목록의 범위다. */
+  /** 이 사이드바가 붙은 문서(또는 백테스트 실행). 세션 목록의 범위다. */
   documentRef: DocumentRefView;
-  /** 턴 시작 순간의 편집기 텍스트·진단·실행 설정. 서버가 문서를 들지 않으므로 턴마다 싣는다. */
-  readContext: () => TurnContextPayload;
+  /**
+   * 턴 시작 순간의 편집기 텍스트·진단·실행 설정. 서버가 문서를 들지 않으므로 턴마다 싣는다.
+   * 결과 화면은 주지 않는다 — 서버가 실행 결과를 직접 읽는다(결과 설명 spec R2).
+   */
+  readContext?: () => TurnContextPayload;
+  /** 안내 문구의 종류. 기본은 전략 화면이다. */
+  copy?: AssistCopy;
   onPreviewProposal?: (action: AssistProposalAction) => void;
   onApplyProposal?: (action: AssistProposalAction) => void;
   onApplyProposalAndBacktest?: (action: AssistProposalAction) => void;
@@ -48,6 +75,7 @@ export type AssistStrategySidebarProps = {
 export const AssistStrategySidebar = ({
   documentRef,
   readContext,
+  copy = "strategy",
   onPreviewProposal,
   onApplyProposal,
   onApplyProposalAndBacktest,
@@ -216,7 +244,7 @@ export const AssistStrategySidebar = ({
           {chat.entries.length === 0 && chat.pendingPrompt === null ? (
             <EmptyState
               title={t("assistant.chat.empty")}
-              description={t("assistant.chat.empty.description")}
+              description={t(COPY[copy].empty)}
             />
           ) : (
             <AssistTranscript
@@ -283,6 +311,7 @@ export const AssistStrategySidebar = ({
             restore={chat.draftRestore}
             running={chat.running !== null}
             busy={chat.busy}
+            placeholder={t(COPY[copy].placeholder)}
             onSend={chat.send}
             onCancel={chat.cancel}
           />

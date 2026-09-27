@@ -148,7 +148,8 @@ def _implemented_graphs() -> dict[str, FactorGraph]:
         # 급증으로 읽고(035720 5:1 분할 뒤 +300%) 작은 첫 값에서 폭주했다(#234).
         # 두 필드는 각자 dataset_profile 랙(신용잔고 3 · 주식수 1)대로 들어온다. 기준일로 맞추려고
         # 주식수를 2세션 더 물리지 않는다 — 실원장에서 신용잔고 원천은 거래정지 첫날부터 새 주식수
-        # 단위로 바뀌어(주식수 급변일보다 대개 0~2세션 앞) 랙 그대로 나눌 때 분할 구간 튐이 가장 작다.
+        # 단위로 바뀌어(주식수 급변일보다 대개 0~2세션 앞) 랙 그대로 나눌 때 분할 구간 튐이 가장
+        # 작다.
         "credit.margin_balance_change_20d": FactorGraph(
             nodes=(
                 FieldNode("balance", "credit.margin_balance", "field"),

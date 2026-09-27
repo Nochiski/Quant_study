@@ -323,11 +323,15 @@ P2-09 결정 11건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 
    environment, warnings)` 와 제자리 판 `apply_upgrade_steps` 둘이다.** 제자리 판은 source 경로(ruamel
    CST)가 쓴다. `until` 은 체인 중간에서 멈춰 중간 golden(`.v1_1.commented.yaml`)을 바이트로 고정한다.
    코덱 클래스의 `upgrade_source(..., until=None)` 도 같은 인자를 받지만 port 계약 밖의 선택 인자다.
-3. **체인 시작 버전과 버전 상한(BACKLOG-010).** 본문에 1.0 모양이 있으면 버전 줄과 상관없이 1.0 단계부터
-   탄다(1.0 step 은 옛 모양에만 반응해 1.1 본문에 무해). 상한은 "아는 버전"(동결 집합 ∪ 현재 버전) 또는
-   버전 줄 없음이다 — 숫자 비교(`"1.3" > "1.2"`)가 아니라 닫힌 집합이라 `"0.9"`·`"draft"` 같은 손상 값도
-   거절한다. 따옴표 없는 `1.0`(YAML float)은 문자열로 맞춘다. `is_upgradeable_document` 와 디스패처가 같은
-   `_chain_start` 를 읽는다.
+3. **체인은 문서가 선언한 은퇴 버전에서 시작한다(버전 상한 BACKLOG-010, Phase 2 감사 NB-1 반영).**
+   선언된 버전보다 앞선 단계는 타지 않는다. 버전 줄이 현재 판인데 1.0 모양이 섞인 문서는 업그레이드가
+   아니라 제자리에서 고칠 구조 오류다 — 처음 구현은 이 문서를 1.0 단계부터 태웠고, 그러면 1.1 → 1.2
+   단계가 `normalization: none` 을 조용히 넣어 1.2 기본값 `rank` 의 뜻을 바꾸고 문서에 없던 `/data/*` 를
+   짚는 warning 3건을 냈다(감사 탐침 실측). 그래서 `structure.legacy_shape` 문장은 업그레이드를 시키지 않고
+   frontend 배너도 이 코드에 반응하지 않는다(US-DM-06 수용 기준 개정). 선언된 은퇴 버전보다 앞선 모양이
+   섞였거나(1.1 선언 + 1.0 키) 버전 줄이 없으면 거절한다. 모르는 버전은 닫힌 집합으로 거절한다 — 숫자
+   비교(`"1.3" > "1.2"`)가 아니라서 `"0.9"`·`"draft"` 같은 손상 값도 거절한다. 따옴표 없는 `1.0`(YAML
+   float)은 문자열로 맞춘다. `is_upgradeable_document` 와 디스패처가 같은 `_chain_start` 를 읽는다.
 4. **`require_retired_schema_version`·`UnknownSchemaVersionError` 는 합치지 않고 지웠다.** repository
    codec 이 `upgrade_document` 를 부르면 체인이 모르는 버전을 `NotUpgradeableDocumentError` 로 거절해
    같은 fail-closed 가 된다. 메시지는 "neither current nor a known retired version" 을 유지해

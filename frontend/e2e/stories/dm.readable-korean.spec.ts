@@ -76,14 +76,14 @@ test(
 );
 
 test(
-  "US-DM-06 필드 이름을 틀리거나 1.0 문법을 쓰면 문제 목록이 한글로 고칠 방법을 말하고 업그레이드를 안내한다",
+  "US-DM-06 필드 이름을 틀리거나 1.0 문법을 쓰면 문제 목록이 한글로 고칠 방법을 말한다",
   { tag: ["@story", "@US-DM-06"] },
   async ({ page }) => {
     const valid = mustReplace(GOLDEN, "퀄리티 모멘텀", "US-DM-06 오류 문장");
     await openEditor(page, "/research/strategies/new");
     await replaceSource(page, valid);
     await expectPhase(page, "검증 통과");
-    // 업그레이드 배너는 저장된 리비전 화면에 있다. 저장해 두고 그 화면에서 고쳐 쓴다.
+    // 저장된 리비전 화면에서 고쳐 쓴다(업그레이드 배너가 사는 화면이라 배너가 없는지도 본다).
     await saveAndWaitForRevision(page, 1);
     const problems = page.getByRole("region", { name: "문제" });
 
@@ -96,9 +96,9 @@ test(
     await expect(problems).toContainText("모르는 키입니다");
     await expect(problems).toContainText("혹시 `max_name_weight`인가요?");
 
-    // 1.0에서만 쓰던 키를 적으면: 문장이 그 사실과 할 일(지우거나 업그레이드)을 말하고, 화면이
-    // 업그레이드 안내를 띄운다. schema 1.2(P2-03)에는 `execution` 절이 없어 1.0 의
-    // `signal.method` 를 쓴다.
+    // 1.0에서만 쓰던 키를 적으면: 문장이 그 사실과 할 일(지우기)을 말한다. 문서가 현재 버전을
+    // 선언했으므로 업그레이드 대상이 아니고 배너도 없다(lang2 Phase 2 감사 NB-1). schema
+    // 1.2(P2-03)에는 `execution` 절이 없어 1.0 의 `signal.method` 를 쓴다.
     await replaceSource(
       page,
       mustReplace(
@@ -109,11 +109,10 @@ test(
     );
     await expectPhase(page, "구조 오류");
     await expect(problems).toContainText("1.0에서만 쓰던 키입니다");
-    await expect(problems).toContainText("업그레이드하세요");
-    const upgrade = page.getByRole("region", { name: "schema 1.0 문서" });
-    await expect(upgrade).toBeVisible();
+    await expect(problems).toContainText("지우세요");
+    await expect(problems).not.toContainText("업그레이드");
     await expect(
-      upgrade.getByRole("button", { name: "1.1로 업그레이드" }),
-    ).toBeVisible();
+      page.getByRole("region", { name: "schema 1.0 문서" }),
+    ).toHaveCount(0);
   },
 );

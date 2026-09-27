@@ -213,7 +213,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         lambda d: _set(d, "factors", {"factors": d["factors"]}),
         "structure.legacy_shape",
         "1.0 문법입니다. factors 아래에 또 factors 목록을 두던 방식이라 지금 버전에서는 읽지 "
-        "못합니다. 안쪽 목록을 factors 바로 아래로 올리거나 업그레이드하세요 — "
+        "못합니다. 안쪽 목록을 factors 바로 아래로 올리세요 — "
         "expected=sequence got=dict",
     ),
     (
@@ -221,8 +221,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         # 1.0 의 `execution.order_style` 은 1.2 에서 섹션째 사라져 `signal.method` 로 본다.
         lambda d: d.setdefault("signal", {}).update(method="weighted_sum"),
         "structure.legacy_shape",
-        "1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우거나 업그레이드하세요 — "
-        "got='method' section='signal'",
+        "1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우세요 — got='method' section='signal'",
     ),
     (
         "1.0 문법 — unary alias 노드",
@@ -233,7 +232,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         ),
         "structure.legacy_shape",
         "1.0 문법입니다. unary rank는 지금 버전에서 cross_sectional의 rank로 옮겨졌습니다. "
-        "kind와 operator를 함께 바꾸거나 업그레이드하세요 — "
+        "kind와 operator를 함께 바꾸세요 — "
         "got=unary/rank expected=cross_sectional/rank",
     ),
     (

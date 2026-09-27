@@ -185,8 +185,9 @@ def test_schema_1_0_document_is_rejected() -> None:
 def test_nested_factors_shape_is_reported_as_1_0_syntax() -> None:
     """1.0의 `factors: {factors: [...]}`는 1.1에서 sequence 자리의 mapping이다 (S1).
 
-    버전 줄이 1.1이라 버전 진단이 뜨지 않으므로, "이건 예전 문법"이라는 사실은 이 코드가 말한다
-    (P1-05 `structure.legacy_shape` — frontend 업그레이드 배너가 같이 반응한다).
+    버전 줄이 현재 판이라 버전 진단이 뜨지 않으므로, "이건 예전 문법"이라는 사실은 이 코드가
+    말한다(P1-05 `structure.legacy_shape`). 현재 판 문서는 업그레이드 대상이 아니라 제자리에서 고칠
+    구조 오류다(lang2 Phase 2 감사 NB-1).
     """
     document = _load_yaml("quality_momentum.yaml")
     document["factors"] = {"factors": document["factors"]}

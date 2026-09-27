@@ -227,8 +227,10 @@ def _with_legacy_hints(
 ) -> tuple[StructuralIssue, ...]:
     """1.0 문법이 놓인 자리의 구조 오류를 `structure.legacy_shape`로 바꿔 단다.
 
-    코드가 바뀌면 frontend 업그레이드 배너가 이 문서에도 뜬다(P1-05). pointer는 그대로 두므로
-    편집기가 가리키는 범위는 달라지지 않고, 1.0 문법이 없는 문서는 이 함수가 원본을 그대로 돌려준다.
+    현재 판 문서의 1.0 문법은 업그레이드 대상이 아니라 제자리에서 고칠 구조 오류다(lang2 Phase 2
+    감사 NB-1). 문장이 고칠 방법을 말하고, frontend 업그레이드 배너는 이 코드에 반응하지 않는다.
+    pointer는 그대로 두므로 편집기가 가리키는 범위는 달라지지 않고, 1.0 문법이 없는 문서는 이 함수가
+    원본을 그대로 돌려준다.
     """
     hints = legacy_shape_hints(document)
     if not hints:

@@ -57,7 +57,7 @@ const settled = (
   });
 };
 
-/** 버전 줄은 현재 버전인데 본문이 1.0 문법일 때 backend가 다는 힌트(P1-05). */
+/** 버전 줄은 현재 버전인데 본문이 1.0 문법일 때 backend가 다는 구조 진단(P1-05). */
 const LEGACY_SHAPE = {
   ...UNSUPPORTED,
   code: "structure.legacy_shape",
@@ -90,16 +90,17 @@ describe("decideDocumentUpgrade", () => {
     });
   });
 
-  it("offers the upgrade when only the body is 1.0, not the version line", () => {
-    // P1-05: `structure.legacy_shape`도 사용자가 할 일이 업그레이드라 같은 배너를 띄운다.
+  it("does not offer the upgrade when only the body is 1.0, not the version line", () => {
+    // lang2 Phase 2 감사 NB-1: backend는 선언된 버전을 믿어 현재 버전 문서를 업그레이드하지 않는다.
+    // `structure.legacy_shape`는 제자리에서 고칠 구조 오류라 다른 구조 오류처럼 배너가 없다.
+    const current = { ...STORED, requires_upgrade: false };
     expect(
-      decideDocumentUpgrade(settled(CURRENT, [LEGACY_SHAPE]), STORED),
-    ).toEqual({ kind: "upgradeable" });
-    // 다른 구조 오류는 배너를 띄우지 않는다: 고칠 곳은 문제 목록이 가리키는 그 줄이다.
+      decideDocumentUpgrade(settled(CURRENT, [LEGACY_SHAPE]), current),
+    ).toEqual({ kind: "none" });
     expect(
       decideDocumentUpgrade(
         settled(CURRENT, [{ ...LEGACY_SHAPE, code: "structure.unknown_key" }]),
-        STORED,
+        current,
       ),
     ).toEqual({ kind: "none" });
   });

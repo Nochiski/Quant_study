@@ -594,9 +594,6 @@ const ko = {
   "strategy.section.description": "전략 설명",
   "strategy.section.description.description":
     "이 전략이 무엇을 노리는지 자유롭게 적습니다.",
-  "strategy.section.data": "데이터",
-  "strategy.section.data.description":
-    "어느 시장의 어느 기간·유니버스를 읽을지 정합니다.",
   "strategy.section.eligibility": "종목 거르기",
   "strategy.section.eligibility.description":
     "팩터를 계산하기 전에 유니버스에서 뺄 조건입니다.",
@@ -611,28 +608,12 @@ const ko = {
     "몇 종목을 어떤 비중으로 담고 언제 다시 맞출지 정합니다.",
   "strategy.section.risk": "리스크 제약",
   "strategy.section.risk.description": "익스포저와 종목·섹터 비중 한도입니다.",
-  "strategy.section.execution": "체결 가정",
-  "strategy.section.execution.description":
-    "주문 시점과 참여율·수수료·슬리피지 가정입니다.",
   "strategy.section.parameters": "탐색 파라미터",
   "strategy.section.parameters.description":
     "최적화가 값을 바꿔 가며 시험할 파라미터 정의입니다.",
   "strategy.type.data_step": "데이터 구간",
   "strategy.type.data_step.description":
     "시장·주기·기간·유니버스를 묶은 데이터 설정입니다.",
-  "strategy.field.data_step.market": "시장",
-  "strategy.field.data_step.market.description": "시세를 읽어 올 거래소입니다.",
-  "strategy.field.data_step.start": "시작일",
-  "strategy.field.data_step.start.description":
-    "백테스트가 읽기 시작하는 첫날입니다.",
-  "strategy.field.data_step.end": "종료일",
-  "strategy.field.data_step.end.description":
-    "백테스트가 읽는 마지막 날입니다.",
-  "strategy.field.data_step.universe_id": "유니버스",
-  "strategy.field.data_step.universe_id.description":
-    "후보 종목 집합의 식별자입니다.",
-  "strategy.field.data_step.frequency": "데이터 주기",
-  "strategy.field.data_step.frequency.description": "관측을 읽는 간격입니다.",
   "strategy.type.eligibility_rule": "거르기 규칙",
   "strategy.type.eligibility_rule.description":
     "데이터 필드 하나를 기준값과 견주는 조건입니다.",
@@ -642,9 +623,20 @@ const ko = {
   "strategy.field.eligibility_rule.operator": "비교 방식",
   "strategy.field.eligibility_rule.operator.description":
     "필드 값과 기준값을 견주는 방법입니다.",
+  "strategy.field.eligibility_rule.operator.value.gt": "기준값보다 큰",
+  "strategy.field.eligibility_rule.operator.value.gte": "기준값 이상인",
+  "strategy.field.eligibility_rule.operator.value.lt": "기준값보다 작은",
+  "strategy.field.eligibility_rule.operator.value.lte": "기준값 이하인",
+  "strategy.field.eligibility_rule.operator.value.eq": "기준값과 같은",
+  "strategy.field.eligibility_rule.operator.value.top_percent": "값이 큰 쪽 상위 비율 안에 드는",
+  "strategy.field.eligibility_rule.operator.value.top_percent.description":
+    "다른 조건을 통과한 종목 중 이 필드 값이 큰 순서로 기준값 비율(0.2 = 상위 20%)만 남깁니다.",
+  "strategy.field.eligibility_rule.operator.value.top_count": "값이 큰 쪽 상위 개수 안에 드는",
+  "strategy.field.eligibility_rule.operator.value.top_count.description":
+    "다른 조건을 통과한 종목 중 이 필드 값이 큰 순서로 기준값 개수만 남깁니다.",
   "strategy.field.eligibility_rule.value": "기준값",
   "strategy.field.eligibility_rule.value.description":
-    "비교에 쓰는 숫자입니다.",
+    "비교에 쓰는 숫자입니다. 상위 비율이면 0~1 사이 비율(0.2 = 상위 20%), 상위 개수면 종목 수입니다.",
   "strategy.type.eligibility_step": "종목 거르기",
   "strategy.type.eligibility_step.description":
     "팩터 계산 전에 유니버스를 좁히는 규칙 묶음입니다.",
@@ -676,12 +668,6 @@ const ko = {
   "strategy.node.conditional": "조건 분기",
   "strategy.node.conditional.description":
     "조건이 참일 때와 거짓일 때 다른 값을 냅니다.",
-  "strategy.node.saved_factor": "저장된 팩터",
-  "strategy.node.saved_factor.description":
-    "이미 저장한 팩터의 값을 들여옵니다.",
-  "strategy.node.saved_subgraph": "저장된 부분 그래프",
-  "strategy.node.saved_subgraph.description":
-    "이미 저장한 그래프 조각을 들여옵니다.",
   "strategy.field.node.kind": "노드 종류",
   "strategy.field.node.kind.description":
     "이 노드가 무엇을 하는 노드인지 정합니다.",
@@ -730,11 +716,6 @@ const ko = {
   "strategy.field.node.false_node_id": "거짓일 때 값",
   "strategy.field.node.false_node_id.description":
     "조건이 거짓인 종목에 쓸 값입니다.",
-  "strategy.field.node.factor_id": "팩터 이름",
-  "strategy.field.node.factor_id.description": "값을 가져올 저장된 팩터입니다.",
-  "strategy.field.node.subgraph_id": "부분 그래프 이름",
-  "strategy.field.node.subgraph_id.description":
-    "값을 가져올 저장된 그래프 조각입니다.",
   "strategy.type.factor_graph": "팩터 계산 그래프",
   "strategy.type.factor_graph.description":
     "노드를 이어 팩터 값을 만드는 계산식입니다.",
@@ -744,9 +725,6 @@ const ko = {
   "strategy.field.factor_graph.output_node_id": "출력 노드",
   "strategy.field.factor_graph.output_node_id.description":
     "팩터 값으로 쓸 마지막 노드입니다.",
-  "strategy.field.factor_graph.missing_policy": "결측 처리",
-  "strategy.field.factor_graph.missing_policy.description":
-    "값이 없는 종목을 어떻게 다룰지 정합니다.",
   "strategy.type.factor_signal": "알파 팩터",
   "strategy.type.factor_signal.description":
     "종목 점수 하나와 그 가중치입니다.",
@@ -759,6 +737,8 @@ const ko = {
   "strategy.field.factor_signal.direction": "선호 방향",
   "strategy.field.factor_signal.direction.description":
     "값이 클수록 좋은지 작을수록 좋은지 정합니다.",
+  "strategy.field.factor_signal.direction.value.high": "클수록 좋음",
+  "strategy.field.factor_signal.direction.value.low": "작을수록 좋음",
   "strategy.field.factor_signal.weight": "가중치",
   "strategy.field.factor_signal.weight.description":
     "여러 팩터를 합칠 때 이 팩터가 갖는 비중입니다.",
@@ -771,6 +751,15 @@ const ko = {
   "strategy.field.signal_step.normalization": "점수 정규화",
   "strategy.field.signal_step.normalization.description":
     "팩터 점수를 합치기 전에 순위·표준점수로 맞출지 정합니다.",
+  "strategy.field.signal_step.normalization.value.none": "원시값 그대로 가중 합(단위가 같을 때만)",
+  "strategy.field.signal_step.normalization.value.none.description":
+    "팩터 값을 바꾸지 않고 가중치만 곱해 더합니다. 단위가 다른 팩터를 섞으면 큰 단위가 점수를 좌우합니다.",
+  "strategy.field.signal_step.normalization.value.rank": "순위로 맞춘 뒤 가중 합",
+  "strategy.field.signal_step.normalization.value.rank.description":
+    "기준일마다 종목 간 순위(0~1)로 바꾼 뒤 가중치를 곱해 더합니다.",
+  "strategy.field.signal_step.normalization.value.zscore": "표준점수로 맞춘 뒤 가중 합",
+  "strategy.field.signal_step.normalization.value.zscore.description":
+    "기준일마다 종목 간 평균 0, 표준편차 1로 바꾼 뒤 가중치를 곱해 더합니다.",
   "strategy.field.signal_step.score_threshold": "점수 하한",
   "strategy.field.signal_step.score_threshold.description":
     "이 점수보다 낮은 종목은 후보에서 뺍니다.",
@@ -786,15 +775,27 @@ const ko = {
   "strategy.field.portfolio_step.side": "매매 방향",
   "strategy.field.portfolio_step.side.description":
     "매수만 할지 매수·매도를 함께 할지 정합니다.",
+  "strategy.field.portfolio_step.side.value.long_only": "매수만",
+  "strategy.field.portfolio_step.side.value.long_short": "매수와 공매도",
   "strategy.field.portfolio_step.weighting": "비중 산정",
   "strategy.field.portfolio_step.weighting.description":
     "선택한 종목에 비중을 주는 방법입니다.",
+  "strategy.field.portfolio_step.weighting.value.equal": "같은 비중",
+  "strategy.field.portfolio_step.weighting.value.factor_score": "점수 차이에 비례",
+  "strategy.field.portfolio_step.weighting.value.rank": "순위에 비례",
+  "strategy.field.portfolio_step.weighting.value.risk": "위험이 작을수록 크게",
   "strategy.field.portfolio_step.rebalance": "리밸런싱 주기",
   "strategy.field.portfolio_step.rebalance.description":
     "목표 비중을 다시 맞추는 간격입니다.",
+  "strategy.field.portfolio_step.rebalance.value.every_n_sessions": "지정한 거래일마다",
+  "strategy.field.portfolio_step.rebalance.value.weekly": "매주",
+  "strategy.field.portfolio_step.rebalance.value.monthly": "매월",
+  "strategy.field.portfolio_step.rebalance.value.quarterly": "분기마다",
   "strategy.field.portfolio_step.selection_method": "선택 방식",
   "strategy.field.portfolio_step.selection_method.description":
     "상위 개수로 고를지 상위 비율로 고를지 정합니다.",
+  "strategy.field.portfolio_step.selection_method.value.top_n": "상위 개수",
+  "strategy.field.portfolio_step.selection_method.value.percentile": "상위 비율",
   "strategy.field.portfolio_step.liquidity_field_id": "유동성 필드",
   "strategy.field.portfolio_step.liquidity_field_id.description":
     "거래 가능성을 판정할 데이터 필드입니다.",
@@ -814,9 +815,6 @@ const ko = {
     "위험 가중에 쓸 팩터입니다. 비중 방식이 위험 가중(risk)일 때만 읽히고, 그때 이 팩터는 점수 합산에서 빠지며 원시값의 역수로 비중을 나눕니다.",
   "strategy.type.execution_step": "체결 가정",
   "strategy.type.execution_step.description": "주문 시점과 비용 가정입니다.",
-  "strategy.field.execution_step.timing": "주문 시점",
-  "strategy.field.execution_step.timing.description":
-    "신호가 난 뒤 언제 체결한다고 볼지 정합니다.",
   "strategy.parameter.float": "실수 파라미터",
   "strategy.parameter.float.description":
     "소수 범위에서 값을 찾는 파라미터입니다.",
@@ -2102,9 +2100,6 @@ export const messages = {
     "strategy.section.description": "Strategy description",
     "strategy.section.description.description":
       "Free text describing what this strategy is after.",
-    "strategy.section.data": "Data",
-    "strategy.section.data.description":
-      "Which market, period and universe the run reads.",
     "strategy.section.eligibility": "Eligibility",
     "strategy.section.eligibility.description":
       "Conditions that drop names from the universe before factors are computed.",
@@ -2120,29 +2115,12 @@ export const messages = {
     "strategy.section.risk": "Risk",
     "strategy.section.risk.description":
       "Exposure limits and per-name / per-sector weight caps.",
-    "strategy.section.execution": "Execution",
-    "strategy.section.execution.description":
-      "Order timing plus participation, fee and slippage assumptions.",
     "strategy.section.parameters": "Search parameters",
     "strategy.section.parameters.description":
       "Parameters an optimisation sweeps over.",
     "strategy.type.data_step": "Data window",
     "strategy.type.data_step.description":
       "Market, frequency, period and universe in one block.",
-    "strategy.field.data_step.market": "Market",
-    "strategy.field.data_step.market.description":
-      "The exchange prices are read from.",
-    "strategy.field.data_step.start": "Start date",
-    "strategy.field.data_step.start.description":
-      "First day the backtest reads.",
-    "strategy.field.data_step.end": "End date",
-    "strategy.field.data_step.end.description": "Last day the backtest reads.",
-    "strategy.field.data_step.universe_id": "Universe",
-    "strategy.field.data_step.universe_id.description":
-      "Identifier of the candidate security set.",
-    "strategy.field.data_step.frequency": "Frequency",
-    "strategy.field.data_step.frequency.description":
-      "Interval at which observations are read.",
     "strategy.type.eligibility_rule": "Eligibility rule",
     "strategy.type.eligibility_rule.description":
       "One condition comparing a data field against a threshold.",
@@ -2152,9 +2130,21 @@ export const messages = {
     "strategy.field.eligibility_rule.operator": "Comparison",
     "strategy.field.eligibility_rule.operator.description":
       "How the field value is compared with the threshold.",
+    "strategy.field.eligibility_rule.operator.value.gt": "greater than the threshold",
+    "strategy.field.eligibility_rule.operator.value.gte": "at least the threshold",
+    "strategy.field.eligibility_rule.operator.value.lt": "less than the threshold",
+    "strategy.field.eligibility_rule.operator.value.lte": "at most the threshold",
+    "strategy.field.eligibility_rule.operator.value.eq": "equal to the threshold",
+    "strategy.field.eligibility_rule.operator.value.top_percent":
+      "within the top fraction by value",
+    "strategy.field.eligibility_rule.operator.value.top_percent.description":
+      "Keeps the names with the largest values, as a fraction of those passing the other rules (0.2 = top 20%).",
+    "strategy.field.eligibility_rule.operator.value.top_count": "within the top count by value",
+    "strategy.field.eligibility_rule.operator.value.top_count.description":
+      "Keeps the given number of names with the largest values among those passing the other rules.",
     "strategy.field.eligibility_rule.value": "Threshold",
     "strategy.field.eligibility_rule.value.description":
-      "The number used in the comparison.",
+      "The number used in the comparison. For a top fraction it is a ratio between 0 and 1 (0.2 = top 20%); for a top count it is a number of names.",
     "strategy.type.eligibility_step": "Eligibility step",
     "strategy.type.eligibility_step.description":
       "The rules that narrow the universe before factors run.",
@@ -2189,12 +2179,6 @@ export const messages = {
     "strategy.node.conditional": "Conditional",
     "strategy.node.conditional.description":
       "Yields one value when the condition holds and another when it does not.",
-    "strategy.node.saved_factor": "Saved factor",
-    "strategy.node.saved_factor.description":
-      "Brings in the value of an already saved factor.",
-    "strategy.node.saved_subgraph": "Saved subgraph",
-    "strategy.node.saved_subgraph.description":
-      "Brings in an already saved fragment of a graph.",
     "strategy.field.node.kind": "Node kind",
     "strategy.field.node.kind.description": "What kind of node this is.",
     "strategy.field.node.node_id": "Node name",
@@ -2246,12 +2230,6 @@ export const messages = {
     "strategy.field.node.false_node_id": "Value when false",
     "strategy.field.node.false_node_id.description":
       "The value used where the condition does not hold.",
-    "strategy.field.node.factor_id": "Factor name",
-    "strategy.field.node.factor_id.description":
-      "The saved factor the value comes from.",
-    "strategy.field.node.subgraph_id": "Subgraph name",
-    "strategy.field.node.subgraph_id.description":
-      "The saved graph fragment the value comes from.",
     "strategy.type.factor_graph": "Factor graph",
     "strategy.type.factor_graph.description":
       "The wired nodes that produce the factor value.",
@@ -2261,9 +2239,6 @@ export const messages = {
     "strategy.field.factor_graph.output_node_id": "Output node",
     "strategy.field.factor_graph.output_node_id.description":
       "The node whose value becomes the factor.",
-    "strategy.field.factor_graph.missing_policy": "Missing policy",
-    "strategy.field.factor_graph.missing_policy.description":
-      "What happens to names with no value.",
     "strategy.type.factor_signal": "Alpha factor",
     "strategy.type.factor_signal.description":
       "One scoring factor and its weight.",
@@ -2276,6 +2251,8 @@ export const messages = {
     "strategy.field.factor_signal.direction": "Direction",
     "strategy.field.factor_signal.direction.description":
       "Whether a higher or a lower value is preferred.",
+    "strategy.field.factor_signal.direction.value.high": "higher is better",
+    "strategy.field.factor_signal.direction.value.low": "lower is better",
     "strategy.field.factor_signal.weight": "Weight",
     "strategy.field.factor_signal.weight.description":
       "This factor's share when scores are combined.",
@@ -2288,6 +2265,16 @@ export const messages = {
     "strategy.field.signal_step.normalization": "Score normalization",
     "strategy.field.signal_step.normalization.description":
       "Whether factor scores are ranked or z-scored before they are combined.",
+    "strategy.field.signal_step.normalization.value.none":
+      "Weighted sum of raw values (same units only)",
+    "strategy.field.signal_step.normalization.value.none.description":
+      "Multiplies raw factor values by their weights and adds them. Mixing units lets the larger unit dominate.",
+    "strategy.field.signal_step.normalization.value.rank": "Weighted sum after ranking",
+    "strategy.field.signal_step.normalization.value.rank.description":
+      "Turns each factor into a cross-sectional rank (0 to 1) on each date, then adds the weighted ranks.",
+    "strategy.field.signal_step.normalization.value.zscore": "Weighted sum after z-scoring",
+    "strategy.field.signal_step.normalization.value.zscore.description":
+      "Turns each factor into a cross-sectional z-score (mean 0, sd 1) on each date, then adds them.",
     "strategy.field.signal_step.score_threshold": "Score floor",
     "strategy.field.signal_step.score_threshold.description":
       "Names scoring below this are dropped.",
@@ -2303,15 +2290,27 @@ export const messages = {
     "strategy.field.portfolio_step.side": "Side",
     "strategy.field.portfolio_step.side.description":
       "Long only, or long and short.",
+    "strategy.field.portfolio_step.side.value.long_only": "Long only",
+    "strategy.field.portfolio_step.side.value.long_short": "Long and short",
     "strategy.field.portfolio_step.weighting": "Weighting",
     "strategy.field.portfolio_step.weighting.description":
       "How weight is assigned to the selected names.",
+    "strategy.field.portfolio_step.weighting.value.equal": "Equal weight",
+    "strategy.field.portfolio_step.weighting.value.factor_score": "Proportional to score margin",
+    "strategy.field.portfolio_step.weighting.value.rank": "Proportional to rank",
+    "strategy.field.portfolio_step.weighting.value.risk": "Larger when risk is lower",
     "strategy.field.portfolio_step.rebalance": "Rebalance",
     "strategy.field.portfolio_step.rebalance.description":
       "How often target weights are reset.",
+    "strategy.field.portfolio_step.rebalance.value.every_n_sessions": "Every N sessions",
+    "strategy.field.portfolio_step.rebalance.value.weekly": "Weekly",
+    "strategy.field.portfolio_step.rebalance.value.monthly": "Monthly",
+    "strategy.field.portfolio_step.rebalance.value.quarterly": "Quarterly",
     "strategy.field.portfolio_step.selection_method": "Selection method",
     "strategy.field.portfolio_step.selection_method.description":
       "Select by top count or by top fraction.",
+    "strategy.field.portfolio_step.selection_method.value.top_n": "Top count",
+    "strategy.field.portfolio_step.selection_method.value.percentile": "Top fraction",
     "strategy.field.portfolio_step.liquidity_field_id": "Liquidity field",
     "strategy.field.portfolio_step.liquidity_field_id.description":
       "The data field used to judge tradability.",
@@ -2332,9 +2331,6 @@ export const messages = {
     "strategy.type.execution_step": "Execution step",
     "strategy.type.execution_step.description":
       "Order timing and cost assumptions.",
-    "strategy.field.execution_step.timing": "Timing",
-    "strategy.field.execution_step.timing.description":
-      "When a signal is assumed to be filled.",
     "strategy.parameter.float": "Float parameter",
     "strategy.parameter.float.description":
       "A parameter searched over a real-valued range.",

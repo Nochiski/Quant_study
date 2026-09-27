@@ -42,6 +42,58 @@ const field = (fields: FormField[], key: string): FormField => {
 };
 
 describe("projectForm", () => {
+  it("draws the schema 1.2 fields from the runtime schema without a hand-written list (P3-01)", () => {
+    // 문서에 적지 않은 필드도 스키마만으로 컨트롤이 생긴다: 결합 전 정규화(P2-04), 횡단면
+    // eligibility 연산자(P2-05), 역가중 팩터 참조(P2-06).
+    const source = [
+      'schema_version: "1.2"',
+      "title: 신규 필드",
+      "eligibility:",
+      "  rules:",
+      "    - field_id: price.trading_value",
+      "      operator: top_percent",
+      "      value: 0.2",
+      "factors:",
+      "  - factor_id: momentum",
+      "    graph:",
+      "      nodes:",
+      "        - { kind: field, node_id: close, field_id: price.close }",
+      "      output_node_id: close",
+      "",
+    ].join("\n");
+    const { sections } = projectForm(SCHEMA, parsed(source), []);
+
+    const normalization = field(objectFields(sections, "signal"), "normalization");
+    expect(normalization).toMatchObject({ written: false, value: "rank" });
+    expect(normalization.control).toEqual({
+      kind: "enum",
+      values: ["none", "rank", "zscore"],
+      labelKeys: {
+        none: "strategy.field.signal_step.normalization.value.none",
+        rank: "strategy.field.signal_step.normalization.value.rank",
+        zscore: "strategy.field.signal_step.normalization.value.zscore",
+      },
+    });
+
+    const eligibility = section(sections, "eligibility");
+    if (eligibility.kind !== "object") throw new Error("eligibility");
+    const [rule] = eligibility.lists[0]!.items;
+    const operator = field(rule!.fields, "operator");
+    expect(operator.value).toBe("top_percent");
+    expect(operator.control).toMatchObject({
+      kind: "enum",
+      values: expect.arrayContaining(["top_percent", "top_count"]),
+    });
+
+    const riskFactor = field(objectFields(sections, "risk"), "risk_factor_id");
+    expect(riskFactor.control).toEqual({
+      kind: "reference",
+      namespace: "factor",
+      candidates: ["momentum"],
+    });
+  });
+
+
   it("lists sections in schema order: root scalars first, then every root property", () => {
     const { sections } = projectForm(SCHEMA, parsed(VERBOSE), []);
     const rootKeys = Object.keys(SCHEMA.properties as object);
@@ -77,7 +129,10 @@ describe("projectForm", () => {
     expect(field(portfolio, "side").control).toEqual({
       kind: "enum",
       values: ["long_only", "long_short"],
-      labelKeys: null,
+      labelKeys: {
+        long_only: "strategy.field.portfolio_step.side.value.long_only",
+        long_short: "strategy.field.portfolio_step.side.value.long_short",
+      },
     });
     const risk = objectFields(sections, "risk");
     expect(field(risk, "sector_neutral").control).toEqual({ kind: "boolean" });
@@ -147,7 +202,10 @@ describe("projectForm", () => {
     expect(field(momentum!.fields, "direction").control).toEqual({
       kind: "enum",
       values: ["high", "low"],
-      labelKeys: null,
+      labelKeys: {
+        high: "strategy.field.factor_signal.direction.value.high",
+        low: "strategy.field.factor_signal.direction.value.low",
+      },
     });
     expect(field(momentum!.fields, "graph").control).toEqual({
       kind: "graph-link",

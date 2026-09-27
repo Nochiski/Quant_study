@@ -37,7 +37,10 @@ export type FormControl =
   | {
       kind: "enum";
       values: readonly string[];
-      /** `x-operator`: enum 값 → 이름 키 stem. 연산자 enum에만 있고 나머지는 null(P1-03). */
+      /**
+       * enum 값 → 이름 키 stem(`schemaFacts().valueLabelKeys`). 연산자 enum은 `x-operator`(P1-03),
+       * 나머지 enum은 `<property stem>.value.<값>`(P3-01)이다. 설명 키가 없는 enum만 null.
+       */
       labelKeys: Readonly<Record<string, string>> | null;
     }
   | {
@@ -168,11 +171,11 @@ const controlFor = (
       };
   }
   if (facts.enumValues.length > 0)
-    // 연산자 enum은 값마다 이름 키가 따로 온다(`x-operator`). 나머지 enum은 값을 그대로 보인다.
+    // 값마다 이름 키가 있다(연산자는 `x-operator`, 나머지는 `<stem>.value.<값>`). 번역이 없으면 값 그대로.
     return {
       kind: "enum",
       values: facts.enumValues,
-      labelKeys: facts.operatorKeys,
+      labelKeys: facts.valueLabelKeys,
     };
   if (facts.type === "boolean") return { kind: "boolean" };
   if (facts.type === "integer" || facts.type === "number")

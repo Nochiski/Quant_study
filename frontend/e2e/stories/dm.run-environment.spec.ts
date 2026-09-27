@@ -68,7 +68,7 @@ test(
     const summary = page.getByRole("region", { name: "실행 설정 요약" });
     await expect(summary).toContainText("전략 문서 밖의 값입니다");
     await expect(summary).toContainText(
-      "기간과 유니버스가 정해지지 않았습니다",
+      "시작일·종료일·유니버스 칸이 비어 있습니다",
     );
     await expect(backtest(page)).toBeDisabled();
 

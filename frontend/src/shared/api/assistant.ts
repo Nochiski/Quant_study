@@ -171,6 +171,8 @@ export const assistantSessionApi = {
           strategy_id: documentRef.strategy_id ?? null,
           revision: documentRef.revision ?? null,
           draft_id: documentRef.draft_id ?? null,
+          // 결과 설명 세션은 실행에 붙는다(결과 설명 spec R3). 빠뜨리면 참조가 비어 422다.
+          run_id: documentRef.run_id ?? null,
         },
       }),
       "listAssistantSessions",

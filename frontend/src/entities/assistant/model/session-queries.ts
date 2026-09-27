@@ -19,6 +19,8 @@ export const assistantSessionsKey = (documentRef: DocumentRefView) =>
     documentRef.strategy_id ?? null,
     documentRef.revision ?? null,
     documentRef.draft_id ?? null,
+    // 실행마다 세션 목록이 다르다. 키에서 빠지면 모든 결과 화면이 한 캐시를 나눠 쓴다.
+    documentRef.run_id ?? null,
   ] as const;
 
 export const assistantSessionKey = (sessionId: string) =>

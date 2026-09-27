@@ -266,6 +266,8 @@ beforeEach(() => {
 });
 
 type MountOptions = {
+  /** 결과 화면처럼 붙일 때(결과 설명 spec R1). 주면 문서 컨텍스트 없이 이 대상에 붙는다. */
+  result?: { runId: string };
   onPreviewProposal?: (action: AssistProposalAction) => void;
   onApplyProposal?: (action: AssistProposalAction) => void;
   onApplyProposalAndBacktest?: (action: AssistProposalAction) => void;
@@ -279,7 +281,7 @@ const context = (): TurnContextPayload => ({
   environment: { initial_cash: 10_000_000 },
 });
 
-const mount = (options: MountOptions = {}) => {
+const mount = ({ result, ...options }: MountOptions = {}) => {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -290,13 +292,20 @@ const mount = (options: MountOptions = {}) => {
   const homeRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => (
-      <AssistStrategySidebar
-        documentRef={DOCUMENT}
-        readContext={context}
-        {...options}
-      />
-    ),
+    component: () =>
+      result === undefined ? (
+        <AssistStrategySidebar
+          documentRef={DOCUMENT}
+          readContext={context}
+          {...options}
+        />
+      ) : (
+        <AssistStrategySidebar
+          documentRef={{ run_id: result.runId }}
+          copy="result"
+          {...options}
+        />
+      ),
   });
   const settingsRoute = createRoute({
     getParentRoute: () => rootRoute,
@@ -350,6 +359,22 @@ const textDelta = (
   event: { type: "text_delta", text },
 });
 
+/**
+ * 타입 계약(D 스택 리뷰 P3-4). 부르지 않는 함수라 런타임에는 아무 일도 없고 `tsc`만 읽는다. 전략
+ * 화면이 편집기 컨텍스트를 빠뜨리거나 결과 화면이 문서를 싣으면 컴파일이 깨져야 한다.
+ */
+export const sidebarPropsContract = () => [
+  // @ts-expect-error 전략 화면은 편집기 컨텍스트가 필수다.
+  <AssistStrategySidebar key="strategy" documentRef={DOCUMENT} />,
+  // @ts-expect-error 결과 화면은 문서 컨텍스트를 받지 않는다.
+  <AssistStrategySidebar
+    key="result"
+    documentRef={{ run_id: "run-1" }}
+    copy="result"
+    readContext={context}
+  />,
+];
+
 describe("AssistStrategySidebar", () => {
   it("활성 공급자가 없으면 설정으로 안내하고 입력창을 두지 않는다", async () => {
     providers = providersView(false);
@@ -397,6 +422,28 @@ describe("AssistStrategySidebar", () => {
         within(log).getByText("저변동 구간이라 모멘텀을 권합니다."),
       ).toBeInTheDocument(),
     );
+  });
+
+  it("결과 화면에 붙이면 실행에 대화를 붙이고 문서 컨텍스트 없이 턴을 시작한다", async () => {
+    const user = userEvent.setup();
+    mount({ result: { runId: "run-1" } });
+
+    // 결과 화면의 안내는 전략을 만들라고 하지 않는다.
+    expect(
+      await screen.findByText(/이 실행의 숫자를 쉬운 말로 풀어 줍니다/u),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "어시스턴트에게 보낼 메시지" }),
+    ).toHaveAttribute(
+      "placeholder",
+      "결과에서 궁금한 것을 적으세요. Enter로 보내고 Shift+Enter로 줄을 바꿉니다.",
+    );
+
+    await send(user, "이 결과 좋은 거야?");
+
+    expect(createdSessions[0].document_ref).toEqual({ run_id: "run-1" });
+    // 서버가 실행 결과를 직접 읽는다. 문서를 실으면 422 turn_context_mismatch다(spec R5).
+    expect(startedTurns[0].body).toEqual({ text: "이 결과 좋은 거야?" });
   });
 
   it("Shift+Enter는 줄을 바꾸고 전송하지 않는다", async () => {

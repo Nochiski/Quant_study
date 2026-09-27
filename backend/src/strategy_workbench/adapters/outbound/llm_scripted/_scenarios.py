@@ -11,6 +11,12 @@
 바꿨다"의 증거이고, e2e는 그 대본의 답이 화면에 뜨는 것으로 모드 분기까지 확인한다. 답에 들어가는
 숫자는 도구가 돌려준 서버 요약에서 읽는다 — 상수로 적으면 요약이 모델에 닿지 않아도 e2e가 통과한다.
 
+결과 턴의 도구 목록에 `propose_strategy`까지 있으면(`result_explanation_with_proposal`) 설명 뒤에
+검증을 통과하는 전략을 제안해 본다. 정상 서버에서는 결과 세션이 그 도구를 주지 않으므로 이 갈래가
+돌지 않는다. 누가 결과 세션에 전략 도구를 섞거나 제안 게이트를 없애면 결과 화면에 제안 카드가 뜨고,
+US-DM-08 e2e의 "제안 카드 없음" 단언이 그때 실제로 깨진다(D 스택 리뷰 P3-5). 모델이 시키지 않은
+제안을 시도하는 경우를 대본이 대신 흉내 내는 것이다.
+
 ## 왜 backend 안에 두는가
 
 e2e는 브라우저부터 SQLite까지 실제 경로를 그대로 지나야 의미가 있다. 공급자 응답만 MSW로 가로채면
@@ -55,6 +61,7 @@ from strategy_workbench.domain.assistant.facade.tools import (
     READ_BACKTEST_RESULT,
     READ_CURRENT_STRATEGY,
 )
+from strategy_workbench.domain.strategy.facade.document import CURRENT_SCHEMA_VERSION
 
 __all__ = [
     "SCENARIO_KEYWORDS",
@@ -70,6 +77,7 @@ __all__ = [
     "concept_answer",
     "idea_to_new_strategy",
     "result_explanation",
+    "result_explanation_with_proposal",
     "slow_answer",
     "tool_then_proposal",
 ]
@@ -239,6 +247,10 @@ def result_explanation(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
     숫자는 전부 도구 결과에서 읽는다(모듈 docstring). 요약을 읽지 못하면 그렇다고 말한다 — 그럴듯한
     숫자로 되돌아가면 e2e가 "답이 왔다"까지만 보고 통과한다.
     """
+    yield from _result_explanation_events(execute_tool, done=True)
+
+
+def _result_explanation_events(execute_tool: ExecuteTool, *, done: bool) -> Iterator[ChatEvent]:
     read_call = ToolCall(call_id="call-read-result", name=READ_BACKTEST_RESULT, arguments={})
     yield read_call
     summary = _result_summary(execute_tool(read_call))
@@ -246,6 +258,41 @@ def result_explanation(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
     for part in _result_answer_parts(summary):
         yield TextDelta(text=part)
     yield Usage(input_tokens=3100, output_tokens=420)
+    if done:
+        yield Done(stop_reason="end_turn")
+
+
+# 결과 턴에서 제안 도구가 새어 들어왔을 때 대본이 내는 제안의 제목(모듈 docstring). e2e가 이 제목의
+# 카드가 결과 화면에 없음을 본다.
+RESULT_PROBE_TITLE = "결과 화면에서 새어 나온 제안"
+
+
+def result_explanation_with_proposal(execute_tool: ExecuteTool) -> Iterator[ChatEvent]:
+    """결과를 설명한 뒤 전략 제안까지 시도한다. 결과 세션에 제안 도구가 있을 때만 골라진다.
+
+    문서가 없는 결과 세션이라 지금 원문에서 버전 줄을 가져올 수 없다. 그래서 버전은 domain 상수
+    `CURRENT_SCHEMA_VERSION`에서 읽는다(버전 리터럴을 적지 않는다, SoT 규칙). 본문은 새 전략 대본과
+    같다 — 검증을 통과해야 제안 카드가 실제로 생긴다.
+    """
+    yield from _result_explanation_events(execute_tool, done=False)
+    propose_call = ToolCall(
+        call_id="call-propose-probe",
+        name=PROPOSE_STRATEGY,
+        arguments={
+            "title": RESULT_PROBE_TITLE,
+            "summary": _IDEA_SUMMARY,
+            "rationale": _PROPOSAL_RATIONALE,
+            "sources": [],
+            "source_text": (
+                f'schema_version: "{CURRENT_SCHEMA_VERSION}"\n'
+                f'title: "{RESULT_PROBE_TITLE}"\n{_IDEA_BODY}'
+            ),
+        },
+    )
+    yield propose_call
+    execute_tool(propose_call)
+    # 도구 결과·제안 이벤트는 다음 이벤트를 흘릴 때 큐에서 나간다(`tool_then_proposal` docstring).
+    yield Usage(input_tokens=3300, output_tokens=900)
     yield Done(stop_reason="end_turn")
 
 
@@ -418,6 +465,9 @@ def scenario_for(text: str, *, offered: frozenset[str] = frozenset()) -> Scenari
     결과 세션(`read_backtest_result`를 받은 턴)은 질문과 무관하게 결과 설명이다(모듈 docstring).
     """
     if READ_BACKTEST_RESULT in offered:
+        # 결과 세션에 제안 도구가 새어 들어오면 제안을 시도한다(모듈 docstring, 리뷰 P3-5).
+        if PROPOSE_STRATEGY in offered:
+            return ScenarioPlan(result_explanation_with_proposal)
         return ScenarioPlan(result_explanation)
     for keyword, plan in SCENARIO_KEYWORDS:
         if keyword in text:
@@ -501,14 +551,14 @@ def _result_answer_parts(summary: Mapping[str, object] | None) -> tuple[str, ...
     sharpe = _full_metric(summary, "sharpe")
     if sharpe is not None:
         parts.append(
-            f"샤프 비율(Sharpe ratio) {sharpe:.2f}은 위험 한 단위당 얼마나 벌었는지를 뜻합니다. "
-            "보통 1을 넘으면 괜찮은 편으로 봅니다. "
+            f"샤프 비율(Sharpe ratio)은 {sharpe:.2f}입니다. 위험 한 단위당 얼마나 벌었는지를 "
+            "뜻합니다. 보통 1을 넘으면 괜찮은 편으로 봅니다. "
         )
     drawdown = _full_metric(summary, "max_drawdown")
     if drawdown is not None:
         parts.append(
-            f"최대 낙폭(Maximum drawdown) {_percent(drawdown)}은 가장 높았던 때에서 가장 많이 "
-            "떨어진 폭입니다. 그만큼 떨어지는 시기를 견딜 수 있는지 생각해 보세요. "
+            f"최대 낙폭(Maximum drawdown)은 {_percent(drawdown)}입니다. 가장 높았던 때에서 가장 "
+            "많이 떨어진 폭입니다. 그만큼 떨어지는 시기를 견딜 수 있는지 생각해 보세요. "
         )
     parts.append("과거 결과가 앞으로의 수익을 보장하지는 않습니다.")
     return tuple(parts)

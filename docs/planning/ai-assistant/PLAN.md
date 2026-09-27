@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: ai-assistant
-project_status: IN_PROGRESS
+project_status: IN_REVIEW
 current_phase: D
-current_pr: D-01
-active_prs: [D-01]
-parallel_window: []
-last_updated: 2026-09-27T10:02:18+09:00
+current_pr: D-01,D-02,D-03
+active_prs: [D-01, D-02, D-03]
+parallel_window: [D-01, D-02, D-03]
+last_updated: 2026-09-27T11:24:14+09:00
 planned_prs: 19
 merged_prs: 16
 approved_prs: 16
@@ -23,13 +23,13 @@ progress_percent: 84
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `IN_REVIEW` |
 | Current phase | `D` |
-| Current/next PR | `D-01` |
-| Active PR | `D-01` |
+| Current/next PR | `D-01,D-02,D-03` |
+| Active PR | `D-01, D-02, D-03` |
 | Progress | `16 / 19 merged (84%)` |
 | Approved | `16 / 19` |
-| Aggregated at | `2026-09-27 10:02 KST` |
+| Aggregated at | `2026-09-27 11:24 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 ## 현재 결정
@@ -183,7 +183,7 @@ tracker 규칙을 따른다(`PLANNED`·`READY`·`WAITING`·`IN_PROGRESS`·`SELF_
 | A | Backend: ports, storage, HTTP, providers | 7 | 7 | `MERGED` |
 | B | Frontend: settings, entity, sidebar, e2e | 5 | 5 | `MERGED` |
 | C | Phase A/B audit follow-up | 3 | 3 | `MERGED` |
-| D | Backtest result explanation (US-DM-08) | 3 | 0 | `IN_PROGRESS` |
+| D | Backtest result explanation (US-DM-08) | 3 | 0 | `IN_REVIEW` |
 | **Total** |  | **19** | **16** | **84%** |
 <!-- PLAN:PHASES:END -->
 
@@ -328,15 +328,31 @@ i18n이 `metric_id`를 키로 소유한다.
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_PROGRESS` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` |
-| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `PLANNED` | 브랜치 `feat/ai-d-02-result-explain-backend` |
-| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `PLANNED` | 브랜치 `feat/ai-d-03-result-explain-frontend` |
+| [ ] | `D-01` | 결과 설명 설계 spec, PLAN D 절, 집계 도구 D phase | C-02 | `IN_REVIEW` | 구현자 `impl-ai-result-explain`, 워크트리 `wt-ai-d01`, 브랜치 `feat/ai-d-01-result-explain` · [#208](https://github.com/Nochiski/Quant_study/pull/208) · tip `2e7fc03e`(origin/main C-03 merge 후 spec v3 정정) · 리뷰 대기 |
+| [ ] | `D-02` | backend: `DocumentRef.run_id`·sqlite v3, `BacktestResultPort`·결과 요약·`read_backtest_result`·설명 프롬프트·모드 분기, HTTP·OpenAPI·SDK, 대본 시나리오, 골든 | D-01 | `IN_REVIEW` | 브랜치 `feat/ai-d-02-result-explain-backend` · [#209](https://github.com/Nochiski/Quant_study/pull/209) · tip `2c07225e`(D-01 merge로 C-03 따라감, 스키마 v3·`version == 2` 분기·v2 선언 sha256 고정, v1→v3 직행·실패 롤백·재시도 멱등 테스트) · pytest 2314 · 리뷰 대기 |
+| [ ] | `D-03` | frontend: 결과 페이지 사이드바, 지표 한글 이름·뜻, 거부 문구, 스토리 e2e(US-DM-08), traceability, SoT 행 | D-02 | `IN_REVIEW` | 브랜치 `feat/ai-d-03-result-explain-frontend` · [#210](https://github.com/Nochiski/Quant_study/pull/210) · `review_ai_d` 1차 APPROVE(blocking 0, P3 7건 반영·1건 D-04) · 게이트 SHA `35d41a38`(pytest 2316, vitest 980, 전체 e2e 40/40, US-DM-08 `구현됨-e2e`) · 재확인 대기 |
 
 Phase exit:
 
 - [ ] spec 완료 정의 1~6 기록.
 - [ ] US-DM-08 `구현됨-e2e`, 전체 e2e 게이트에서 스토리 e2e 통과.
 - [ ] SoT·책임분리 점검 blocking 0.
+
+### D 절 backlog (D 스택 리뷰 P3-7) — 담당 AI 후속 D-04(미착수)
+
+**결과 패널의 도구 활동이 요약 JSON 원문을 보인다**
+
+- **상황**: 퀀트를 모르는 사용자가 백테스트 결과 화면의 AI 패널에서 질문한다.
+- **인풋**: "이 결과 좋은 거야?" — 결과 세션 턴이 `read_backtest_result`를 한 번 부른다.
+- **에러 위치**: `backend/src/strategy_workbench/application/assistant_chat/_chat.py`의 `_summarise`가
+  도구 결과 앞 200자를 `ToolResultSummary.summary`로 싣고,
+  `frontend/src/features/assist-strategy/ui/assist-transcript.tsx`의 도구 활동이 그 문자열을 그대로 보인다.
+  결과 도구에서는 `{"run":{"run_id":…},"environment":…} (총 7220자)` 같은 영어 키 JSON이 된다.
+- **위험성**: 기능·데이터 결함은 아니다(표시 문제). US-DM-08의 "쉬운 말" 목표와 달리 대화 첫 줄에 JSON이
+  뜬다. 전략 화면 도구 활동과 같은 기존 동작이라 D 스택 범위 밖으로 두었다.
+- **해결 방향**: 결과 도구의 요약을 "결과 요약을 읽었습니다" 같은 고정 문장으로 바꾸거나, 화면이 도구
+  이름별 문구(`assistant.chat.toolName.*`)만 보이고 원문을 접는다. 요약 문장의 owner를 먼저 정한다.
+- **재현 test**: 없음(D-04가 transcript 테스트와 함께 더한다).
 
 ## Review 기록
 
@@ -396,6 +412,10 @@ Phase exit:
 
 ## 변경 기록
 
+- 2026-09-27 — D 스택 리뷰(`review_ai_d`) 세 PR APPROVE(blocking 0). P3 8건 중 7건을 D-03 tip에 반영했다. P3-5 대본이 결과 턴에 새어 들어온 제안 도구로 검증 통과 제안을 시도(e2e가 카드 없음 단언으로 잡음, 돌연변이 red 확인), P3-6 실행 전환 초기화 회귀 테스트(로직 제거 시 red 확인), P3-2 고아 행 메시지에 표·외래 키·행 키·복구 안내, P3-1 spec 덜어 내기 순서에 팩터, P3-3 테스트 docstring 키 stem, P3-4 사이드바 props를 화면별 합집합으로(타입 테스트), P3-8 대본 조사. P3-7(결과 도구 활동의 JSON 원문)은 위 D 절 backlog로 D-04(미착수)에 넘겼다.
+- 2026-09-27 — D-02에 마이그레이션 테스트 셋을 보탰다: v1 파일의 v1→v2→v3 직행(메시지 `turn_id`·이벤트·세션 보존), v1·v2 파일에서 마지막 `foreign_key_check` 실패 시 원래 버전·DDL 그대로 롤백, 원인 제거 뒤 재시도와 재열기 멱등. C-03 마이그레이션 테스트는 그대로 통과. 최상단 `406e2fc0`에서 전체 게이트 재실행(pytest 2314, vitest 979, e2e 40/40).
+- 2026-09-27 — C-03(#204) main 머지를 D 스택이 merge로 따라갔다. assistant DB v2는 C-03(`chat_messages.turn_id`)이 가져갔고 결과 세션의 `chat_sessions.run_id`는 **v3**이다(`version == 2` 분기, 부모 표라 외래 키 끄고 `legacy_alter_table`로 비켜 두기). v2 선언은 sha256으로 고정. `send`의 `turn_id` 인자와 모드 분기를 함께 살렸다. 최상단 `b8a909d4`에서 pytest 2311, vitest 979, 전체 e2e 40/40, 하네스·목록 대조 통과.
+- 2026-09-27 — D-01~D-03 스택 PR 생성(#208 → #209 → #210, 머지하지 않음). 스택 최상단 `834caf3b`에서 backend pytest 2296 passed·ruff·pyright, frontend vitest 975·typecheck·lint, 전체 e2e 39/39(새 스토리 e2e `@US-DM-08` 포함), 하네스 검사·Playwright 목록 대조 통과. US-DM-08 `미계획` → `구현됨-e2e`. 구현 중 세션 목록 조회가 `run_id`를 빠뜨려 422가 나던 것을 D-03에서 고쳤다(gateway·query 키).
 - 2026-09-27 — D 절 신설(US-DM-08 백테스트 결과 설명). 사용자 지시 "전략 언어는 진짜 전략만 담고, AI를 통해 사용성까지 증대"·"전부 다 진행해". 설계 spec `2026-09-27-ai-backtest-result-explain.md`, PR 셋(D-01 spec, D-02 backend, D-03 frontend·e2e)을 스택으로 올린다. 집계 도구에 D phase를 더했다. assistant_sqlite 스키마는 C-03이 v2를 가져가고(#204) D-02가 v3(`chat_sessions.run_id`)로 그 뒤에 올린다(리드 결정).
 - 2026-09-27 — **C-03 착수·구현**(`impl-ai-c03`, `wt-ai-c03`, `feat/ai-c-03-backlog`). C 절 backlog 2건을
   한 PR로 닫는다. 검색 상한 통지는 전용 이벤트 `SearchBudgetExhausted`가 되어 두 adapter가 같은 순간에

@@ -806,8 +806,15 @@ def test_a_failed_upgrade_rolls_back_whole_and_the_retry_is_idempotent(
     _add_orphan_turn(path)
     before = _schema_sql(path)
 
-    with pytest.raises(AssistantStorageError, match="parent is missing"):
+    with pytest.raises(AssistantStorageError, match="parent is missing") as raised:
         AssistantDatabase(path)
+    # 어느 표의 어느 행을 치워야 하는지와 복구 방법을 말해야 한다(D 스택 리뷰 P3-2). 표가 전부
+    # `WITHOUT ROWID`라 `foreign_key_check`의 rowid 칸만으로는 행을 가리킬 수 없다.
+    message = str(raised.value)
+    assert "table=chat_turns" in message
+    assert "session_id->chat_sessions.session_id" in message
+    assert "{'turn_id': 'turn-orphan', 'session_id': 'no-such-session'}" in message
+    assert "delete those child rows" in message
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA user_version").fetchone()[0] == version

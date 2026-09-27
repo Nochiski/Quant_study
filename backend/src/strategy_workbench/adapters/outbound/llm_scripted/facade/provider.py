@@ -4,6 +4,7 @@ from strategy_workbench.adapters.outbound.llm_scripted._adapter import (
     ScriptedLlmProvider,
 )
 from strategy_workbench.adapters.outbound.llm_scripted._scenarios import (
+    RESULT_PROBE_TITLE,
     SCENARIO_KEYWORDS,
     SLOW_ANSWER_DELAY_SCALE,
     ExecuteTool,
@@ -13,6 +14,7 @@ from strategy_workbench.adapters.outbound.llm_scripted._scenarios import (
     factor_window_proposal,
     idea_to_new_strategy,
     result_explanation,
+    result_explanation_with_proposal,
     scenario_for,
     search_budget_answer,
     search_then_failure,
@@ -33,7 +35,9 @@ __all__ = [
     "concept_answer",
     "factor_window_proposal",
     "idea_to_new_strategy",
+    "RESULT_PROBE_TITLE",
     "result_explanation",
+    "result_explanation_with_proposal",
     "scenario_for",
     "search_budget_answer",
     "search_then_failure",

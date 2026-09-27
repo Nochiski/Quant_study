@@ -1,10 +1,10 @@
 """지표 id 골든이 Metric Registry와 같은지 본다 (결과 설명 spec R4).
 
-지표의 쉬운 한글 이름·뜻은 frontend i18n이 `metric.<metric_id>`를 키로 소유한다. frontend 테스트는
-backend를 부르지 못하므로 이 골든(`tests/fixtures/analytics/metric_ids.json`)을 읽어 id마다 ko·en
-문구가 있는지 본다. 이 테스트는 골든이 registry와 같은지를 지킨다. 지표를 더하면 여기서 먼저 깨지고,
-골든을 고치면 frontend 테스트가 문구를 쓰라고 깨진다 — 두 단계가 이어져야 새 지표가 뜻 없이 화면에
-나가지 않는다.
+지표의 쉬운 한글 이름·뜻은 frontend i18n이 `backtest.metric.<metric_id>`를 키로 소유한다.
+frontend 테스트는 backend를 부르지 못하므로 이 골든(`tests/fixtures/analytics/metric_ids.json`)을
+읽어 id마다 ko·en 문구가 있는지 본다. 이 테스트는 골든이 registry와 같은지를 지킨다. 지표를 더하면
+여기서 먼저 깨지고, 골든을 고치면 frontend 테스트가 문구를 쓰라고 깨진다 — 두 단계가 이어져야 새
+지표가 뜻 없이 화면에 나가지 않는다.
 """
 
 from __future__ import annotations

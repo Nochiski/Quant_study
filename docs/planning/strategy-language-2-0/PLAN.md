@@ -1,12 +1,12 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: CHANGES_REQUESTED
+project_status: IN_REVIEW
 current_phase: P2
 current_pr: P2-09,P2-10
 active_prs: [P2-09, P2-10]
 parallel_window: [P2-09, P2-10]
-last_updated: 2026-09-27T12:16:20+09:00
+last_updated: 2026-09-27T12:30:40+09:00
 planned_prs: 30
 merged_prs: 9
 integrated_prs: 6
@@ -24,13 +24,13 @@ progress_percent: 50
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `CHANGES_REQUESTED` |
+| Project status | `IN_REVIEW` |
 | Current phase | `P2` |
 | Current/next PR | `P2-09,P2-10` |
 | Active PR | `P2-09, P2-10` |
 | Progress | `15 / 30 done (50%), main 9, integration 6` |
 | Approved | `15 / 30` |
-| Aggregated at | `2026-09-27 12:16 KST` |
+| Aggregated at | `2026-09-27 12:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -107,7 +107,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 |---|---|---:|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 1 | 0 | `MERGED` |
 | P1 | In-screen friction removal on 1.1 | 6 | 6 | 0 | `MERGED` |
-| P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 2 | 6 | `CHANGES_REQUESTED` |
+| P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 2 | 6 | `IN_REVIEW` |
 | P3 | Frontend 1.2 adaptation | 3 | 0 | 0 | `WAITING` |
 | P4 | Graph level 1: pipeline | 4 | 0 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | 0 | `WAITING` |
@@ -384,7 +384,7 @@ P2-09 결정 11건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 
 | Acceptance | WORKFLOW P2-10 |
 | Non-goals | 코드 변경(감사 NB-1 은 P2-09 `17c68261`, 리뷰 DEFECT-P1-1 은 `a32ed9d7`). 감사 비차단 항목과 BACKLOG-018 은 담당만 정하고 실행하지 않는다 |
 | Branch/worktree | `docs/lang2-p2-10-phase2-records` / `wt-lang2-p2-10` |
-| Base SHA | P2-09 `17c68261` |
+| Base SHA | P2-09 `17c68261`(착수), 리뷰 DEFECT-P1-1 반영 `a32ed9d7` 을 merge 로 따라갔다 |
 | 변경 파일 | `docs/planning/strategy-language-2-0/PLAN.md`, `WORKFLOW.md`, `tools/update-plan-progress.ps1` |
 | Focused tests | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.user_story_trace`, `uv run --locked python -m quant_study_dev.conflict_markers` |
 | Full gate | 문서와 집계 도구만 바뀐다. 코드 게이트는 base `17c68261` 의 결과(P2-09 PR 본문)와 같다 |
@@ -823,9 +823,9 @@ Phase exit:
 | [x] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `INTEGRATED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 APPROVE(blocking 0·P2 1·P3 4, 전부 반영 `77bd713c`·`7b707660`) · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) |
 | [x] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `INTEGRATED` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · `review_lang2_p2_07` 1차 REQUEST_CHANGES(P1 1: 그래프 밖 필드 참조가 필드 계약 검사를 빠져나감·P3 3) → 2차 APPROVE(tip `945fd081`) · 통합 머지 `013da821`(#201, base `lang2/integration`, 2026-09-27) |
 | [x] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `INTEGRATED` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 1차 REQUEST_CHANGES(P1 1 DEFECT-P208-001·P2 1·P3 3) → 2차 APPROVE(`d99aa024`, 새 관찰 P2-NEW-1 원주가 오염 → 이슈 #214 → BACKLOG-017) · 통합 머지 `48eff6d8`(#205, 2026-09-27) |
-| [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `CHANGES_REQUESTED` | [#217](https://github.com/Nochiski/Quant_study/pull/217) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base `lang2/integration`(처음 연 #216 은 P2-08 브랜치 삭제로 닫혀 #217 로 다시 열었다) · `review_lang2_p2_09` 1차 REQUEST_CHANGES(P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 뺀다 — 반영 대기) · Phase 2 감사 NB-1(현재 판 문서 업그레이드) 수정 `17c68261` |
+| [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `IN_REVIEW` | [#217](https://github.com/Nochiski/Quant_study/pull/217) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base `lang2/integration`(처음 연 #216 은 P2-08 브랜치 삭제로 닫혀 #217 로 다시 열었다) · `review_lang2_p2_09` 1차 REQUEST_CHANGES(P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 뺀다) → 반영 `a32ed9d7`, 재확인 대기 · Phase 2 감사 NB-1(현재 판 문서 업그레이드) 수정 `17c68261` |
 
-| [ ] | `P2-10` | Phase 2 감사 후속(문서): PLAN 머지·통합·리뷰 기록 정정, `INTEGRATED` 상태, BACKLOG-017, P3 계약 누락 예약 | P2-09 | `IN_REVIEW` | [#222](https://github.com/Nochiski/Quant_study/pull/222) · 워크트리 `wt-lang2-p2-10`, 브랜치 `docs/lang2-p2-10-phase2-records` · base P2-09 `17c68261` |
+| [ ] | `P2-10` | Phase 2 감사 후속(문서): PLAN 머지·통합·리뷰 기록 정정, `INTEGRATED` 상태, BACKLOG-017, P3 계약 누락 예약 | P2-09 | `IN_REVIEW` | [#222](https://github.com/Nochiski/Quant_study/pull/222) · 워크트리 `wt-lang2-p2-10`, 브랜치 `docs/lang2-p2-10-phase2-records` · base P2-09(`17c68261` 에서 착수, `a32ed9d7` 을 merge 로 따라감) |
 
 Phase exit:
 
@@ -943,7 +943,7 @@ Phase exit:
 | `P2-07` | `review_lang2_p2_07` | 2 | `APPROVE` | 같은 파일 10절, tip `945fd081`(`bf07bc11`·`97193304`·`f8b052cc`). P1 1·P3 3 닫힘, 새 결함 없음 |
 | `P2-08` | `review_lang2_p1_06` | 1 | `REQUEST_CHANGES` | P1 1 · P2 1 · P3 3 · 관찰 1. **DEFECT-P208-001(P1)**: 아이디어 2 에 자본총계 ≤ 0 조건이 없어 자본잠식 적자 기업이 PBR·ROE 두 팩터 모두 최상위(원장 실측 28개) → `financial.book_equity gt 0` 규칙 + mock 자본잠식 종목 재현 테스트(수정 전 red). **DEFECT-P208-002(P2)**: 0/1 이진 팩터 선정이 `security_id` 순서 → 리드 결정으로 BACKLOG-016(P5-03). P3: spec D2 옛 문장 정리, P5-01 슬롯·삽입 순서 예약, 아이디어 4 당일 거래대금 한계 주석. 관찰(assistant DB 격리 누락)은 AI 계획 몫이라 이 PR 밖 |
 | `P2-08` | `review_lang2_p1_06` | 2 | `APPROVE` | `review_lang2_p2_08_r2.md`, tip `d99aa024`. DEFECT-P208-001 red→green (아이디어 2 eligibility). 새 관찰 **P2-NEW-1**: 가격 변화 아이디어 1·3·4·5 가 원주가 `price.close` 를 쓴다 → 이슈 #214 → BACKLOG-017 |
-| `P2-09` | `review_lang2_p2_09` | 1 | `REQUEST_CHANGES` | tip `e064d2af`. P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 빼서 1.1 의 팩터별 결측 처리가 경고 없이 바뀐다. 비차단 관찰 2. 반영 대기. 같은 시점 Phase 2 감사 NB-1 은 `17c68261` 이 고쳤다 |
+| `P2-09` | `review_lang2_p2_09` | 1 | `REQUEST_CHANGES` | tip `e064d2af`. P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 빼서 1.1 의 팩터별 결측 처리가 경고 없이 바뀐다. 비차단 관찰 2. 반영 `a32ed9d7`(실효 값 판정, 관찰 1 float 1.1 테스트). 같은 시점 Phase 2 감사 NB-1 은 `17c68261` 이 고쳤다 |
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |

@@ -612,6 +612,9 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `domain/strategy/_diff.py` 가 canonical payload 를 위치로 비교하므로 사용자 노드 하나를 더하면
   그래프 끝의 승격 노드 셋이 "바뀐 것"으로 나온다. 승격 노드 줄을 원래 출력의 변경 한 줄로 접거나
   diff 를 node_id 기준으로 맞춘다(수정 위치가 backend `_diff.py` 면 이 PR 이 같이 고친다).
+- 추적·미리보기 화면의 탈락 사유(`ExclusionReason`, OpenAPI enum) 전부에 사람 말 문장(ko·en)을 둔다.
+  P2-04~P2-06 이 더한 `eligibility_rank_cut`·`missing_risk` 를 포함하고, 생성 enum 전수 커버리지 테스트로
+  누락을 막는다(PLAN P2-05 결정 4, 리드 결정 2026-09-27).
 - outline·snippet 카탈로그(팩터 preset은 "예시" 그룹으로 강등, 튜토리얼 전용)·execution plan·graph·
   debugger가 1.2 pointer로.
 - 단위 테스트 전부 green. e2e fixture는 P3-03.

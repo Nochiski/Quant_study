@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -139,6 +140,11 @@ def _errors(compiled: CompiledDocument) -> list[tuple[str, str]]:
 
 # -- field_missing -------------------------------------------------------------------------------
 
+# 없는 필드 진단은 그래프 안(`strategy.expression.field_missing`)과
+# 밖(`strategy.field.missing`) 두 코드다.
+# 둘 다 기계 디테일(`field_id=…`) 앞에 한글 문장이 있어야 한다(P3-01 리드 결정).
+_HANGUL = re.compile(r"[가-힣]")
+
 
 def test_an_unknown_field_is_a_compile_error_once_an_adapter_is_connected() -> None:
     source = GOLDEN.replace("field_id: price.close", "field_id: price.closee")
@@ -151,6 +157,9 @@ def test_an_unknown_field_is_a_compile_error_once_an_adapter_is_connected() -> N
     ]
     diagnostic = compiled.diagnostics[0]
     assert "price.closee" in diagnostic.message
+    # 문제 목록은 backend 문장을 그대로 보인다.
+    # frontend 는 진단 코드를 번역하지 않는다(SoT 진단 코드 행).
+    assert _HANGUL.search(diagnostic.message.split("field_id=")[0]), diagnostic.message
     assert diagnostic.range is not None, "편집기가 그 노드 줄을 짚을 수 있다"
 
 
@@ -345,6 +354,7 @@ def test_an_unknown_field_outside_the_graph_is_a_compile_error(slot: str) -> Non
     assert _errors(typo) == [("strategy.field.missing", pointer)]
     [diagnostic] = [item for item in typo.diagnostics if item.code == "strategy.field.missing"]
     assert "price.closex" in diagnostic.message
+    assert _HANGUL.search(diagnostic.message.split("field_id=")[0]), diagnostic.message
     assert diagnostic.range is not None, "편집기가 그 필드 줄을 짚을 수 있다"
 
 

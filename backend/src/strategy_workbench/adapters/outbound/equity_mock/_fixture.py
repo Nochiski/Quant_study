@@ -111,6 +111,33 @@ def build_demo_fixture() -> MockEquityFixture:
             ),
         ),
         DatasetFieldProfile(
+            field_id="financial.net_income",
+            dataset_id="fin_std",
+            label="당기순이익(TTM)",
+            unit="KRW",
+            value_type=FieldValueType.AMOUNT,
+            frequency="quarterly",
+            available_date_basis="filing available_date",
+            recommended_lag_sessions=0,
+            # 원장(duckdb)과 같은 의미다(#212): 공시일 기준 최근 4분기 합이고, 4분기를 채울 수
+            # 없으면 값을 내지 않는다(3개월·연간 값으로 대신하지 않는다).
+            description=(
+                "최근 4분기 합(TTM). 보고서 종류와 무관하게 늘 12개월 값이며, 창의 마지막 분기 "
+                "보고서 접수일(available_date)부터 보인다. 4분기를 채울 수 없으면 값이 없다."
+            ),
+            disclosure_basis="DART 정기보고서 접수일 기준 사용 가능",
+            evidence="DART 재무제표 당기순이익 표준계정의 분기 축 4행 합",
+            coverage=FieldCoverageCapability(
+                starts_on=sessions[0],
+                ends_on=sessions[-1],
+                venues=("XKRX",),
+                estimated_coverage_pct=67.0,
+                supported_cell_kinds=(CellKind.OBSERVED, CellKind.COVERAGE_GAP),
+                point_in_time=True,
+                requires_confirmation=True,
+            ),
+        ),
+        DatasetFieldProfile(
             field_id="consensus.forward_eps",
             dataset_id="consensus_daily",
             # 단위·값 타입은 원장 정본(equity_duckdb FIELD_SPECS)과 같아야 한다(#207). 원장은 FY1
@@ -269,6 +296,32 @@ def build_demo_fixture() -> MockEquityFixture:
                 date(2023, 12, 31),
                 sessions[2],
                 363_000_000_000_000.0,
+                CellKind.OBSERVED,
+            ),
+            # TTM 순이익: 000660 은 3분기 보고서가 늦게(sessions[3]) 접수돼 그 전엔 반기 말
+            # TTM 이다. 035420 은 4분기를 채울 수 없어 관측이 없다.
+            Observation(
+                securities[0].security_id,
+                "financial.net_income",
+                date(2023, 9, 30),
+                date(2023, 11, 14),
+                15_000_000_000_000.0,
+                CellKind.OBSERVED,
+            ),
+            Observation(
+                securities[1].security_id,
+                "financial.net_income",
+                date(2023, 6, 30),
+                date(2023, 8, 14),
+                -8_000_000_000_000.0,
+                CellKind.OBSERVED,
+            ),
+            Observation(
+                securities[1].security_id,
+                "financial.net_income",
+                date(2023, 9, 30),
+                sessions[3],
+                -6_000_000_000_000.0,
                 CellKind.OBSERVED,
             ),
             Observation(

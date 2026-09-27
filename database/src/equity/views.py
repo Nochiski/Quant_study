@@ -71,8 +71,10 @@ FACTOR_LAG_SESSIONS = 0     # 계수 available_date 컷오프 기본 랙(세션)
 PRICE_LAG_SESSIONS = 0      # 가격 행 컷오프 랙(세션) — 0 이라 `date <= as_of` 와 같다
 CONSENSUS_LAG_SESSIONS = 0  # 컨센서스 available_date 컷오프 기본 랙(세션). 아래 v_consensus 근거
 FIN_LAG_SESSIONS = 0        # 재무 available_date 컷오프 기본 랙(세션). 아래 v_fin_latest 근거
-# TTM 창(4분기)의 period_end 폭 허용 범위(일) — 3분기 간격 ≈ 273일. 밖이면 분기가 빠진 것이다.
-TTM_SPAN_MIN_DAYS, TTM_SPAN_MAX_DAYS = 240, 400
+# TTM 창(4분기)의 period_end 폭 허용 범위(일) — 연속 4분기의 첫·끝 분기말 간격은 273~276일이다.
+# 분기 하나가 빠지면 4행 창이 5분기에 걸쳐 365일 이상이 되므로 상한은 그보다 작아야 한다. 400 이던
+# 동안 누락 창이 TTM 으로 섰다(실원장 289행, #212) — 정상 창과 누락 창 사이(281~364일)는 실측 0행이다.
+TTM_SPAN_MIN_DAYS, TTM_SPAN_MAX_DAYS = 240, 300
 
 # 매크로 이름 → (시그니처, 읽는 테이블). 시그니처는 catalog._MACRO_NAME_RE 규약.
 SIGNATURES: dict[str, str] = {
@@ -294,7 +296,7 @@ WHERE rn = 1
     #      동률은 available_date 최신 → rcept_no 최신(정정 재제출).
     #   ③ TTM: 3개월 축(`report_code='11011'` 은 `<계정>_q4_derived`, 나머지는 원 계정 — 현금흐름은
     #      `_q`)의 4행 합인데 **4분기가 전부 보일 때만**이다. 조건 셋을 다 건다 — 창의 non-null 이
-    #      4개 · 창의 period_end 폭이 3분기(240~400일) · 창 안 모든 행의 available_date 가 이 행의
+    #      4개 · 창의 period_end 폭이 3분기(240~300일) · 창 안 모든 행의 available_date 가 이 행의
     #      available_date 이하(정정 재제출로 옛 분기가 나중에 접수되면 그 행에서만 TTM 이 선다).
     #      하나라도 어긋나면 NULL 이다 — 부분합을 내면 분기 하나가 빠진 채 연간처럼 읽힌다.
     #   ④ `has_correction` = `disclosure_version.first_correction_dt <= cutoff`(DEFECT-E01 —

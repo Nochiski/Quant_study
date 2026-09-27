@@ -87,8 +87,9 @@ FACTORS: tuple[FactorSpec, ...] = (
     _f("V01", "PBR", ("price.market_cap", "financial.book_equity"), "factor_layer",
        "FACTORS §1 V01 = 시가총액 / 자본총계.", registry="financial.book_to_market"),
     _f("V02", "PER", ("price.market_cap", "financial.net_income"), "factor_layer",
-       "FACTORS §1 V02 = 시가총액 / 당기순이익. 기간 축(분기 3개월 / 사업 12개월)은 report_code "
-       "가 정하므로 TTM 합성은 팩터층 몫이다.", registry="financial.earnings_yield"),
+       "FACTORS §1 V02 = 시가총액 / 당기순이익. financial.net_income 은 최근 4분기 합(TTM, "
+       "v_fin_latest — #212)이라 보고서 종류가 기간을 바꾸지 않는다.",
+       registry="financial.earnings_yield"),
     _f("V03", "PSR", ("price.market_cap", "financial.revenue", "financial.revenue_basis"),
        "equity", "FACTORS §1 V03 = 시가총액 / 매출액.",
        caveat="**금융업 매출 규칙을 확정했다(2026-09-08)** — 합산식을 새로 정의하지 않고 기준을 "
@@ -100,7 +101,7 @@ FACTORS: tuple[FactorSpec, ...] = (
               "equity 가 고칠 것이 아니다(BLOCKED_FACTORS §5-1).",
        registry="financial.sales_to_price"),
     _f("V04", "PCR", ("price.market_cap", "financial.operating_cash_flow"), "factor_layer",
-       "FACTORS §1 V04 = 시가총액 / 영업활동현금흐름(연초누계 축)."),
+       "FACTORS §1 V04 = 시가총액 / 영업활동현금흐름(TTM 축, #212)."),
     _f("V05", "EV/EBITDA", ("price.market_cap", "financial.borrowings", "financial.cash",
                             "financial.operating_income", "financial.depreciation"),
        "factor_layer",
@@ -131,11 +132,13 @@ FACTORS: tuple[FactorSpec, ...] = (
     _f("Q04", "발생액", ("financial.net_income", "financial.operating_cash_flow",
                        "financial.total_assets"), "factor_layer",
        "FACTORS §2 Q04 = (순이익 − 영업활동현금흐름) / 자산총계. 현금흐름표는 DART 에만 있다.",
-       caveat="현금흐름은 전 보고서가 연초누계다(DEFECT-C02) — 손익(분기 3개월)과 기간을 맞추는 "
-              "것은 팩터층 몫이다.", registry="financial.accruals"),
+       caveat="순이익·영업현금 둘 다 최근 4분기 합(TTM)이라 기간이 맞는다(#212). 영업현금 TTM 은 "
+              "분기 차분 축이라 직전 보고서가 없으면 결측이다.", registry="financial.accruals"),
     _f("Q05", "FCF 수익률", ("financial.operating_cash_flow", "financial.capex",
                           "price.market_cap"), "factor_layer",
-       "FACTORS §2 Q05 = (영업활동현금흐름 − CAPEX) / 시가총액.", caveat="Q04 와 같은 기간 축."),
+       "FACTORS §2 Q05 = (영업활동현금흐름 − CAPEX) / 시가총액.",
+       caveat="영업현금은 TTM(#212)인데 financial.capex 는 연초누계라 기간이 다르다 — 맞추는 것은 "
+              "팩터층 몫이다."),
     _f("Q06", "부채비율", ("financial.total_liabilities", "financial.book_equity"),
        "factor_layer", "FACTORS §2 Q06 = 부채총계 / 자본총계.", registry="financial.leverage"),
     _f("Q07", "이자보상배율", ("financial.operating_income", "financial.interest_expense"),

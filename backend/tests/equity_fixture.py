@@ -771,7 +771,7 @@ ok AS (
            (t.ttm_n_rows = 4
             AND t.ttm_max_available <= t.available_date
             AND date_diff('day', t.ttm_first_period_end, t.period_end)
-                BETWEEN 240 AND 400) AS ttm_window_ok
+                BETWEEN 240 AND 300) AS ttm_window_ok
     FROM ttm t
 )
 SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
@@ -954,6 +954,7 @@ WB_BASE_CLOSE = {"005930": 70_000, "000660": 100_000, "035420": 200_000, "036220
 WB_CORP = {"005930": "C05930", "005935": "C05930", "000660": "C00660", "035420": "C35420",
            "036220": "C36220"}
 WB_FIN_RCEPT = {  # (corp, period_end) → 접수번호. `disclosure_version` 이 정정 여부를 붙인다
+    ("C05930", date(2022, 12, 31)): "R05930FY22",
     ("C05930", date(2023, 3, 31)): "R05930Q1",
     ("C05930", date(2023, 6, 30)): "R05930Q2",
     ("C05930", date(2023, 9, 30)): "R05930Q3",
@@ -962,7 +963,16 @@ WB_FIN_RCEPT = {  # (corp, period_end) → 접수번호. `disclosure_version` �
     ("C36220", date(2023, 12, 31)): "R36220FY",
 }
 # 005930 2023 4분기 = 연간 − 3분기 누계. 연간 460 = 100 + 110 + 120 + 130 이라 TTM 이 연간과 같다.
+# 2022 사업보고서의 4분기 파생값이 있어 2023 3분기 행에서도 TTM(2022 4분기 ~ 2023 3분기)이 선다 —
+# 매출 95 + 100 + 110 + 120 = 425, 순이익 18 + 20 + 22 + 24 = 84, 영업현금 20 + 25 + 35 + 40 = 120.
 WB_FIN_ROWS: list[dict[str, object]] = [
+    {"corp_code": "C05930", "period_end": date(2022, 12, 31), "report_code": "11011",
+     "bsns_year": "2022", "rcept_no": "R05930FY22", "available_date": date(2023, 3, 14),
+     "revenue": 400, "gross_profit": 160, "op_profit": 120, "net_income": 80,
+     "total_asset": 990, "total_liab": 395, "total_equity": 595,
+     "cf_operating_ytd": 90, "cf_operating_q": 20,
+     "revenue_q4_derived": 95, "gross_profit_q4_derived": 38,
+     "op_profit_q4_derived": 28, "net_income_q4_derived": 18},
     {"corp_code": "C05930", "period_end": date(2023, 3, 31), "report_code": "11013",
      "bsns_year": "2023", "rcept_no": "R05930Q1", "available_date": date(2023, 5, 15),
      "revenue": 100, "gross_profit": 40, "op_profit": 30, "net_income": 20,

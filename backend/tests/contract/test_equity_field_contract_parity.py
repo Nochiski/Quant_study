@@ -30,6 +30,7 @@ EXPECTED_SHARED = frozenset(
         "price.close",
         "price.market_cap",
         "financial.book_equity",
+        "financial.net_income",
         "consensus.forward_eps",
         "flow.foreign_net_buy",
         "credit.margin_balance",

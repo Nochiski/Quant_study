@@ -194,7 +194,7 @@ const buildFactorPlanRequests = (
   }));
 };
 
-/** schema 1.1: `factors`가 루트 시퀀스이므로 팩터 그래프는 `/factors/{i}/graph`에 있다. */
+/** schema 1.1 부터: `factors`가 루트 시퀀스이므로 팩터 그래프는 `/factors/{i}/graph`에 있다. */
 export const factorGraphPointer = (factorIndex: number): string =>
   `/factors/${factorIndex}/graph`;
 

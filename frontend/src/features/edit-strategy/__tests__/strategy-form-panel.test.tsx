@@ -253,7 +253,7 @@ describe("StrategyFormPanel controls", () => {
       feedback: {
         status: "error",
         owner: "form",
-        label: "fee_bps",
+        label: "max_name_weight",
         reason: "parse",
       },
     });
@@ -415,7 +415,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
           feedback: {
             status: "error",
             owner: "form",
-            label: "fee_bps",
+            label: "max_name_weight",
             reason,
           },
         }),

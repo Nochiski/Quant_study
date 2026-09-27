@@ -75,7 +75,7 @@ const rootProperty = (schema: JsonSchema, key: string): JsonSchema | null => {
 };
 
 type FactorAuthoringContract = {
-  /** 팩터 시퀀스의 루트 키(schema 1.1: `factors`는 최상위 배열). 이름은 스키마에서 읽는다. */
+  /** 팩터 시퀀스의 루트 키(schema 1.1 부터: `factors`는 최상위 배열). 이름은 스키마에서 읽는다. */
   sectionKey: string;
   item: JsonSchema;
 };

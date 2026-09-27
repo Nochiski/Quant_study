@@ -216,8 +216,8 @@ describe("canonical StrategySpec snippets", () => {
       "# 첫 키 설명\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nrisk: {}\n",
     ],
     [
-      "risk:\n  a: 1\n# 주석\nsig\ndata: {}\n",
-      "risk:\n  a: 1\n# 주석\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\ndata: {}\n",
+      "risk:\n  a: 1\n# 주석\nsig\nportfolio: {}\n",
+      "risk:\n  a: 1\n# 주석\nsignal:\n  normalization: rank\n  score_threshold: null\n  regime_field_id: null\n  regime_minimum: null\nportfolio: {}\n",
     ],
     [
       "\nsig\nrisk: {}\n",

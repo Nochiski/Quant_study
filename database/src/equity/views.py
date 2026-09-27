@@ -301,6 +301,12 @@ WHERE rn = 1
     #      하나라도 어긋나면 NULL 이다 — 부분합을 내면 분기 하나가 빠진 채 연간처럼 읽힌다.
     #   ④ `has_correction` = `disclosure_version.first_correction_dt <= cutoff`(DEFECT-E01 —
     #      정적 플래그가 아니라 기준일 판정이다). 링크가 없으면 FALSE.
+    #   ⑤ `period_frontier` = 이 행의 available_date 까지 공개된 행(같은 날 포함) 중 이 행이
+    #      가장 최근 (period_end, report_code) 인가(#225). restated 판본은 정정 재제출이 있으면 그
+    #      기간 행의 공개일이 정정 접수일로 밀려, 옛 기간 행이 더 늦은 기간보다 늦게 접수될 수 있다.
+    #      세션 컷오프에서 한 행을 고르는 소비자는 이 열이 참인 행만 보고 컷오프 이하 마지막 공개일
+    #      행을 고른다 — 그 행이 곧 "컷오프까지 공개된 가장 최근 기간" 이다. 판정은 이 행 공개일
+    #      이하의 행만 보므로 look-ahead 가 없고, as_of 를 늦춰도 이미 보이던 행의 값은 그대로다.
     # 랙 기본값 0 세션(FIN_LAG_SESSIONS): `available_date` 가 DART 접수일이라 이미 '그날 알 수
     # 있었던 날' 이다. `dataset_profile`(S19)이 생기면 그 값으로 교체한다.
     "v_fin_latest": """
@@ -364,7 +370,11 @@ ok AS (
            (t.ttm_n_rows = 4
             AND t.ttm_max_available <= t.available_date
             AND date_diff('day', t.ttm_first_period_end, t.period_end)
-                BETWEEN {ttm_span_min} AND {ttm_span_max}) AS ttm_window_ok
+                BETWEEN {ttm_span_min} AND {ttm_span_max}) AS ttm_window_ok,
+           (strftime(t.period_end, '%Y%m%d') || t.report_code) = max(
+               strftime(t.period_end, '%Y%m%d') || t.report_code) OVER (
+               PARTITION BY t.corp_code ORDER BY t.available_date
+               RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)    AS period_frontier
     FROM ttm t
 )
 SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
@@ -382,7 +392,7 @@ SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
        CASE WHEN o.ttm_window_ok AND o.ttm_cnt_cf_operating = 4
             THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
        coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
-       o.available_date, o.available_basis
+       o.period_frontier, o.available_date, o.available_basis
 FROM ok o
 LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
        ON d.rcept_no = o.rcept_no

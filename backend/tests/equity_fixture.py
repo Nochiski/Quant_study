@@ -710,6 +710,7 @@ WHERE rn = 1
 """
 # 재무 판본 뷰(S21 본판) — `equity.views.TEMPLATES['v_fin_latest']` 본문 사본. 판본(vintage)과
 # 재무제표 구분(CFS 우선)만 접고 기간 축은 남긴다. TTM 은 4분기가 전부 보일 때만 선다.
+# `period_frontier` 는 공개일까지 보인 행 중 이 행이 가장 최근 기간인가다(#225).
 _FIN_LATEST_SQL = """
 WITH cut AS (
     SELECT k.date AS cutoff
@@ -771,7 +772,11 @@ ok AS (
            (t.ttm_n_rows = 4
             AND t.ttm_max_available <= t.available_date
             AND date_diff('day', t.ttm_first_period_end, t.period_end)
-                BETWEEN 240 AND 300) AS ttm_window_ok
+                BETWEEN 240 AND 300) AS ttm_window_ok,
+           (strftime(t.period_end, '%Y%m%d') || t.report_code) = max(
+               strftime(t.period_end, '%Y%m%d') || t.report_code) OVER (
+               PARTITION BY t.corp_code ORDER BY t.available_date
+               RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)    AS period_frontier
     FROM ttm t
 )
 SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
@@ -789,7 +794,7 @@ SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
        CASE WHEN o.ttm_window_ok AND o.ttm_cnt_cf_operating = 4
             THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
        coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
-       o.available_date, o.available_basis
+       o.period_frontier, o.available_date, o.available_basis
 FROM ok o
 LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
        ON d.rcept_no = o.rcept_no
@@ -959,6 +964,7 @@ WB_FIN_RCEPT = {  # (corp, period_end) → 접수번호. `disclosure_version` �
     ("C05930", date(2023, 6, 30)): "R05930Q2",
     ("C05930", date(2023, 9, 30)): "R05930Q3",
     ("C05930", date(2023, 12, 31)): "R05930FY",
+    ("C00660", date(2023, 3, 31)): "R00660Q1C",
     ("C00660", date(2023, 6, 30)): "R00660Q2",
     ("C36220", date(2023, 12, 31)): "R36220FY",
 }
@@ -1006,6 +1012,13 @@ WB_FIN_ROWS: list[dict[str, object]] = [
      "fs_div": "OFS", "revenue": 999, "gross_profit": 999, "op_profit": 999, "net_income": 999,
      "total_asset": 9999, "total_liab": 9999, "total_equity": 9999,
      "cf_operating_ytd": 999, "cf_operating_q": 999},
+    # 000660 2023 1분기 정정본 — 반기(2023-08-14)보다 늦게 접수됐다(restated 판본은 공개일이
+    # 정정 접수일로 밀린다). 셀은 이 옛 기간으로 되돌아가면 안 된다(#225, `period_frontier`).
+    {"corp_code": "C00660", "period_end": date(2023, 3, 31), "report_code": "11013",
+     "bsns_year": "2023", "rcept_no": "R00660Q1C", "available_date": date(2024, 1, 9),
+     "revenue": 190, "gross_profit": 76, "op_profit": 57, "net_income": 38,
+     "total_asset": 1900, "total_liab": 780, "total_equity": 1120,
+     "cf_operating_ytd": 40, "cf_operating_q": 40},
     # 036220 — 값이 일부만 있는 행(매출 결측 → MISSING, 순이익 7 → OBSERVED). 창 안 공개일.
     {"corp_code": "C36220", "period_end": date(2023, 12, 31), "report_code": "11011",
      "bsns_year": "2023", "rcept_no": "R36220FY", "available_date": date(2024, 1, 9),

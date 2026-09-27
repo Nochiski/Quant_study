@@ -210,7 +210,9 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         available_expr="available_date",
         content_expr="period_end",
         reduce=Reduce.PICK,
-        row_filter=None,
+        # 옛 기간 정정본이 더 늦은 기간보다 늦게 접수되면 그 행은 고르지 않는다 — 컷오프에서 고를
+        # 행은 "공개된 가장 최근 기간" 이고 그 판정은 뷰가 한다(v_fin_latest.period_frontier, #225).
+        row_filter="period_frontier",
         # 같은 접수일에 여러 기간이 실리면(정정 일괄 재제출) 최신 기간·최신 보고서 종류를 고른다.
         pick_order="period_end DESC, report_code DESC",
         lag_sessions=0,

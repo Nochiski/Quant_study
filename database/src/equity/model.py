@@ -150,7 +150,9 @@ RULES_VERSION = "e1.17.0"                # BuildRecord.rules_version 에 실린�
 #         롤백 C03 · 빌드 순서 파일 C09)도 같은 판에 들어간다.
 # e1.17.0: 2026-09-27 재무 흐름 필드 TTM(#212·#227). `factor_readiness`(S20)의 evidence·caveat
 #         문구가 바뀐다 — V02·V04·G01·G02·G04 는 TTM 기간, Q04·Q05·V05·Q07 은 TTM 과 원 계정의
-#         기간 차이를 적는다. 같은 입력에서 산출 해시가 달라지므로 EG5a 비교 판을 올린다.
+#         기간 차이를 적는다. S12 `FIELDS_FIN` 의 흐름 5필드 label·evidence(TTM)도 바뀌어
+#         `fin_std` 의 `field_profiles` 를 거쳐 `dataset_profile`(S19) 산출도 달라진다(`fin_std`
+#         값 자체는 그대로다). 같은 입력에서 두 산출 해시가 달라지므로 EG5a 비교 판을 올린다.
 #         카탈로그 매크로 `v_fin_latest`(TTM 분기값을 회계기간 축에서 세운다)는 빌드 산출이 아니라
 #         `catalog` 재생성으로 반영된다.
 

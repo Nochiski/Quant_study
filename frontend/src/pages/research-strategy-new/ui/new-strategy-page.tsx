@@ -309,6 +309,7 @@ export const NewStrategyPage = () => {
           <ProposalApplyFeedback
             apply={proposalApply}
             chain={strategyAssistant.chain}
+            blockedReason={runSettings.blockedReason}
           />
         }
         title={t("page.newStrategy.title")}
@@ -365,13 +366,7 @@ export const NewStrategyPage = () => {
             saving={status.kind === "saving"}
             onRun={runBacktest}
             canRun={backtest.canRun}
-            runBlockedReason={
-              runSettings.result.valid
-                ? undefined
-                : runSettings.environment === null
-                  ? t("backtest.settings.incomplete")
-                  : t("backtest.settings.blocked")
-            }
+            runBlockedReason={runSettings.blockedReason ?? undefined}
             runSettings={
               <BacktestRunSettings
                 controller={runSettings}

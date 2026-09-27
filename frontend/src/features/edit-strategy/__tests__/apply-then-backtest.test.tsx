@@ -240,6 +240,33 @@ describe("useApplyProposalThenBacktest", () => {
     );
   });
 
+  it("실행 설정이 비어 막혔으면 사람이 고친 문서와 같은 차단 이유를 함께 말한다", () => {
+    // 상황: AI 제안을 적용했고 문서는 컴파일됐지만 실행 설정의 기간·유니버스가 비어 게이트가 닫혔다
+    // (P3-02 결정 5 — 실행 설정은 문서 밖이라 AI 적용이 채우지 않는다).
+    const { hook, rerender } = mountChain();
+    act(() =>
+      hook.result.current.chain.applyThenBacktest({
+        source: PROPOSED,
+        baseSource: BASE,
+      }),
+    );
+    rerender({
+      state: compiled(parsed(edited(PROPOSED)), false),
+      canRun: false,
+    });
+    render(
+      <ProposalApplyFeedback
+        apply={hook.result.current.apply}
+        chain={hook.result.current.chain}
+        blockedReason="실행 설정에서 시작일·종료일·유니버스 칸을 채우세요."
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "백테스트를 시작하지 않았습니다. 실행할 수 있게 되면 직접 실행하세요. 실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
+    );
+  });
+
   it("시작하지 않았다는 알림은 문서를 고치면 걷힌다", () => {
     const { run, hook, rerender } = mountChain();
     act(() =>

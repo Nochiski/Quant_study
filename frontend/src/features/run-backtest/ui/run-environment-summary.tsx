@@ -3,7 +3,7 @@ import type { BacktestRunSettingsController } from "../model/use-backtest-run-se
 import {
   runEnvironmentLabel,
   runEnvironmentOptionLabel,
-} from "./run-environment-labels";
+} from "../model/run-environment-labels";
 import "./run-environment-summary.css";
 
 type RunEnvironmentSummaryProps = {
@@ -17,8 +17,14 @@ type RunEnvironmentSummaryProps = {
 export const RunEnvironmentSummary = ({
   controller,
 }: RunEnvironmentSummaryProps) => {
-  const { environment, environmentFields, environmentValues, schemaStatus } =
-    controller;
+  const {
+    environment,
+    environmentFields,
+    environmentValues,
+    schemaStatus,
+    missingLabels,
+    openPanelAtFirstProblem,
+  } = controller;
   return (
     <section
       className="run-environment-summary"
@@ -32,9 +38,23 @@ export const RunEnvironmentSummary = ({
             : t("backtest.settings.environment.schemaLoading")}
         </span>
       ) : environment === null ? (
-        <span className="run-environment-summary__incomplete" role="status">
-          {t("runEnvironment.summary.incomplete")}
-        </span>
+        <>
+          <span className="run-environment-summary__incomplete" role="status">
+            {missingLabels.length > 0
+              ? t("runEnvironment.summary.incomplete").replace(
+                  "{fields}",
+                  missingLabels.join("·"),
+                )
+              : t("backtest.settings.blocked")}
+          </span>
+          <button
+            type="button"
+            className="run-environment-summary__fill"
+            onClick={openPanelAtFirstProblem}
+          >
+            {t("runEnvironment.summary.fill")}
+          </button>
+        </>
       ) : (
         <dl>
           {environmentFields.map((field) => {

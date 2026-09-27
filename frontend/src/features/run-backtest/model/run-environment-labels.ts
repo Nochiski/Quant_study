@@ -1,5 +1,5 @@
 import { tName, tOptional } from "../../../shared/config";
-import type { RunEnvironmentField } from "../model/run-environment";
+import type { RunEnvironmentField } from "./run-environment";
 
 /** 실행 설정 칸의 이름. 설명 키가 없으면 필드 이름을 그대로 보인다(스키마가 키를 발행하지 않은 경우). */
 export const runEnvironmentLabel = (field: RunEnvironmentField): string =>

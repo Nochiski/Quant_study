@@ -73,7 +73,9 @@ const ko = {
   "backtest.settings.options": "실행 옵션",
   "runEnvironment.summary.label": "실행 설정 요약",
   "runEnvironment.summary.title": "실행 설정",
-  "runEnvironment.summary.incomplete": "기간과 유니버스가 정해지지 않았습니다. 실행 설정에서 정하면 백테스트와 추적이 열립니다.",
+  "runEnvironment.summary.incomplete":
+    "{fields} 칸이 비어 있습니다. 채우면 백테스트와 추적이 열립니다.",
+  "runEnvironment.summary.fill": "실행 설정 채우기",
   "runEnvironment.summary.outside": "전략 문서 밖의 값입니다. 바꿔도 전략 버전은 그대로입니다.",
   "backtest.settings.core": "실행 core",
   "backtest.settings.core.rust": "Persistent Rust",
@@ -86,7 +88,7 @@ const ko = {
   "backtest.settings.oosStart": "OOS 시작일 (선택)",
   "backtest.settings.oosStart.hint": "실행 기간 안의 날짜입니다. 이날부터 종료일까지를 표본 밖 구간으로 따로 잽니다.",
   "backtest.settings.blocked": "실행 설정의 잘못된 값을 먼저 수정하세요.",
-  "backtest.settings.incomplete": "실행 설정에서 기간과 유니버스를 정하세요.",
+  "backtest.settings.incomplete": "실행 설정에서 {fields} 칸을 채우세요.",
   "backtest.settings.error.initial_cash":
     "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
   "backtest.settings.error.annualization_days":
@@ -165,6 +167,8 @@ const ko = {
   "backtest.result.manifest.completed": "Completed",
   "backtest.result.warnings": "Data warnings",
   "backtest.result.warnings.empty": "경고 없음",
+  "backtest.warning.portfolio.sector_unknown_excluded":
+    "섹터를 모르는 종목은 섹터 제약에서 뺐습니다",
   // 지표의 쉬운 이름·뜻. 키는 backend Metric Registry의 metric_id이고 문장은 여기가 owner다
   // (결과 설명 spec R4). registry id 목록은 backend/tests/fixtures/analytics/metric_ids.json.
   "backtest.metric.total_return": "총수익률",
@@ -1699,7 +1703,9 @@ export const messages = {
     "backtest.settings.options": "Run options",
     "runEnvironment.summary.label": "Run settings summary",
     "runEnvironment.summary.title": "Run settings",
-    "runEnvironment.summary.incomplete": "No period or universe yet. Set them in the run settings to enable backtests and traces.",
+    "runEnvironment.summary.incomplete":
+      "Empty: {fields}. Fill them to enable backtests and traces.",
+    "runEnvironment.summary.fill": "Fill the run settings",
     "runEnvironment.summary.outside": "These values live outside the strategy document; changing them keeps the strategy version.",
     "backtest.settings.core": "Execution core",
     "backtest.settings.core.rust": "Persistent Rust",
@@ -1712,7 +1718,7 @@ export const messages = {
     "backtest.settings.oosStart": "OOS start date (optional)",
     "backtest.settings.oosStart.hint": "A date inside the run period. Measures from this date to the end date as the out-of-sample window.",
     "backtest.settings.blocked": "Fix the invalid run settings first.",
-    "backtest.settings.incomplete": "Set the period and universe in the run settings.",
+    "backtest.settings.incomplete": "Fill {fields} in the run settings.",
     "backtest.settings.error.initial_cash":
       "Enter initial capital as a number; the server validates its accepted range.",
     "backtest.settings.error.annualization_days":
@@ -1792,6 +1798,8 @@ export const messages = {
     "backtest.result.manifest.completed": "Completed",
     "backtest.result.warnings": "Data warnings",
     "backtest.result.warnings.empty": "No warnings",
+    "backtest.warning.portfolio.sector_unknown_excluded":
+      "Securities without a sector were left out of sector constraints",
     "backtest.metric.total_return": "Total return",
     "backtest.metric.total_return.description":
       "How much the starting money grew or shrank by the end.",

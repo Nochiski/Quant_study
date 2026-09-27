@@ -3,7 +3,7 @@ import type {
   MetricDefinition,
   MetricValue,
 } from "../../../shared/api";
-import { t } from "../../../shared/config";
+import { t, tOptional } from "../../../shared/config";
 import { useId } from "react";
 import { metricPlainCopy } from "../model/metric-copy";
 import "./backtest-run-detail.css";
@@ -510,12 +510,22 @@ export const BacktestRunDetail = ({
             {(result.manifest.warnings ?? []).length === 0 ? (
               <p>{t("backtest.result.warnings.empty")}</p>
             ) : (
-              (result.manifest.warnings ?? []).map((warning) => (
-                <p key={warning.code}>
-                  <strong>{warning.code}</strong>
-                  {warning.message}
-                </p>
-              ))
+              (result.manifest.warnings ?? []).map((warning, index) => {
+                // 제목은 경고 코드로 고른다. 문장(message)은 서버가 완성한 진단이라 그대로 두고, 제목이
+                // 없는 새 코드는 코드를 제목으로 보인다 — 서버가 코드를 늘려도 화면이 비지 않는다.
+                const title = tOptional(`backtest.warning.${warning.code}`);
+                return (
+                  <p key={`${warning.code}:${index}`}>
+                    <strong>{title ?? warning.code}</strong>
+                    <span>{warning.message}</span>
+                    {title === null ? null : (
+                      <code className="manifest-warnings__code">
+                        {warning.code}
+                      </code>
+                    )}
+                  </p>
+                );
+              })
             )}
           </div>
         </div>

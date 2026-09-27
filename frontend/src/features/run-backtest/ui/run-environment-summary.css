@@ -41,3 +41,13 @@
 .run-environment-summary > small {
   margin-left: auto;
 }
+
+.run-environment-summary__fill {
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: var(--surface-raised);
+  font: inherit;
+  cursor: pointer;
+}

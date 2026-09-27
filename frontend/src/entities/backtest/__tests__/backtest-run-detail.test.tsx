@@ -89,3 +89,53 @@ describe("run 상세의 실행 설정", () => {
     expect(row("실행 설정 hash")).toHaveTextContent(`${"e".repeat(16)}…`);
   });
 });
+
+describe("run 상세의 데이터 경고", () => {
+  it("경고 제목을 코드로 고르고 서버 문장과 코드를 함께 보인다", async () => {
+    const base = result();
+    const sectorMessage =
+      "섹터 정보가 없는 종목 3개를 섹터 상한·섹터 중립 계산에서 뺐습니다(프레임 2개).";
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          manifest: {
+            ...base.manifest,
+            warnings: [
+              {
+                code: "portfolio.sector_unknown_excluded",
+                message: sectorMessage,
+                severity: "warning",
+              },
+              // 제목이 없는 새 코드(예: 서버가 나중에 늘린 벤치마크 경고)는 코드를 제목으로 보인다.
+              {
+                code: "benchmark.future_code",
+                message: "새 경고 문장",
+                severity: "warning",
+              },
+            ],
+          },
+        }}
+      />,
+    );
+    const user = userEvent.setup();
+    const drawer = screen.getByRole("group", {
+      name: "Manifest · 데이터 경고 · 재현성 정보",
+    });
+    await user.click(
+      within(drawer).getByText("Manifest · 데이터 경고 · 재현성 정보"),
+    );
+
+    const sector = within(drawer)
+      .getByText("섹터를 모르는 종목은 섹터 제약에서 뺐습니다")
+      .closest("p")!;
+    expect(sector).toHaveTextContent(sectorMessage);
+    expect(sector).toHaveTextContent("portfolio.sector_unknown_excluded");
+
+    const unknown = within(drawer)
+      .getByText("benchmark.future_code", { selector: "strong" })
+      .closest("p")!;
+    expect(unknown).toHaveTextContent("새 경고 문장");
+    expect(unknown.querySelector("code")).toBeNull();
+  });
+});

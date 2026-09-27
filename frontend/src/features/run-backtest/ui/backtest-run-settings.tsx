@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import { t, tDescription } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
@@ -12,7 +12,7 @@ import "./backtest-run-settings.css";
 import {
   runEnvironmentLabel,
   runEnvironmentOptionLabel,
-} from "./run-environment-labels";
+} from "../model/run-environment-labels";
 
 type BacktestRunSettingsProps = {
   controller: BacktestRunSettingsController;
@@ -67,6 +67,7 @@ const EnvironmentInput = ({
     "aria-describedby": describedBy,
     "aria-invalid": error === undefined ? undefined : true,
     "aria-required": field.required || undefined,
+    "data-env-field": field.name,
   } as const;
   return (
     <div className="backtest-settings__field">
@@ -143,13 +144,31 @@ export const BacktestRunSettings = ({
     environmentValues,
     environmentErrors,
     setEnvironmentValue,
+    panel,
+    setPanelOpen,
   } = controller;
-  const [open, setOpen] = useState(false);
+  const { open, focus } = panel;
+  const popoverRef = useRef<HTMLDivElement>(null);
+  // 요약 띠·차단 안내가 "이 칸으로 가기"를 요청하면 패널이 열린 뒤 그 칸에 초점을 옮긴다. 요청 한 번
+  // (nonce)에 한 번만 움직여, 사용자가 패널을 닫았다 다시 열 때 초점을 빼앗지 않는다.
+  const handledNonce = useRef<number | null>(null);
+  const focusNonce = focus?.nonce ?? null;
+  const focusField = focus?.field ?? null;
+  useEffect(() => {
+    if (!open || focusNonce === null || focusField === null) return;
+    if (handledNonce.current === focusNonce) return;
+    handledNonce.current = focusNonce;
+    const target = popoverRef.current?.querySelector<HTMLElement>(
+      `[data-env-field="${CSS.escape(focusField)}"]`,
+    );
+    target?.focus();
+    target?.scrollIntoView?.({ block: "nearest" });
+  }, [focusField, focusNonce, open]);
   return (
     <details
       className="backtest-settings"
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => setPanelOpen(event.currentTarget.open)}
     >
       <summary aria-label={t("backtest.settings.open")}>
         {t("backtest.settings.title")}
@@ -159,7 +178,11 @@ export const BacktestRunSettings = ({
             : t("backtest.settings.invalid")}
         </Badge>
       </summary>
-      <div className="backtest-settings__popover" hidden={!open}>
+      <div
+        ref={popoverRef}
+        className="backtest-settings__popover"
+        hidden={!open}
+      >
         <fieldset
           disabled={disabled}
           className="backtest-settings__environment"

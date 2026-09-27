@@ -149,6 +149,7 @@ const Harness = ({ storageKey = "strategy-1" }: { storageKey?: string }) => {
       <output data-testid="request">
         {JSON.stringify(controller.requestOptions)}
       </output>
+      <output data-testid="blocked">{controller.blockedReason}</output>
       <button
         type="button"
         onClick={() =>
@@ -353,9 +354,81 @@ describe("run environment panel", () => {
     expect(screen.getAllByText("값을 정하세요.")).toHaveLength(3);
     expect(screen.getByText("입력 확인")).toBeInTheDocument();
     expect(requestBody()).toBeNull();
+    // 차단 안내와 요약 띠가 "어느 칸을 채우라"를 칸 이름으로 말한다(P3-02 결정 1 보충).
     expect(
       screen.getByRole("region", { name: "실행 설정 요약" }),
-    ).toHaveTextContent("기간과 유니버스가 정해지지 않았습니다");
+    ).toHaveTextContent("시작일·종료일·유니버스 칸이 비어 있습니다");
+    expect(screen.getByTestId("blocked")).toHaveTextContent(
+      "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
+    );
+  });
+
+  it("opens the panel at the first empty field from the summary band", async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<Harness />);
+    const band = await screen.findByRole("region", { name: "실행 설정 요약" });
+    const fill = await screen.findByRole("button", {
+      name: "실행 설정 채우기",
+    });
+    expect(band).toContainElement(fill);
+
+    await user.click(fill);
+    const start = screen.getByLabelText(/^시작일/);
+    expect(start).toBeVisible();
+    expect(start).toHaveFocus();
+
+    // 채운 칸은 건너뛰고 다음 빈 칸으로 간다. 남은 칸만 차단 안내에 남는다.
+    await user.type(start, "2021-01-01");
+    await user.click(screen.getByRole("button", { name: "실행 설정 채우기" }));
+    expect(screen.getByLabelText(/^종료일/)).toHaveFocus();
+    expect(screen.getByTestId("blocked")).toHaveTextContent(
+      "실행 설정에서 종료일·유니버스 칸을 채우세요.",
+    );
+
+    await user.type(screen.getByLabelText(/^종료일/), "2026-08-31");
+    await user.type(
+      screen.getByRole("textbox", { name: "유니버스" }),
+      "krx.common-stock",
+    );
+    expect(
+      screen.queryByRole("button", { name: "실행 설정 채우기" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("blocked")).toBeEmptyDOMElement();
+  });
+
+  it.each([
+    [
+      "the storage accessor throws",
+      () =>
+        vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+          throw new DOMException("denied", "SecurityError");
+        }),
+    ],
+    [
+      "reads and writes throw",
+      () => {
+        vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+          throw new DOMException("denied", "SecurityError");
+        });
+        return vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+          throw new DOMException("full", "QuotaExceededError");
+        });
+      },
+    ],
+  ])("starts from schema defaults and still runs when %s", async (_, block) => {
+    block();
+    try {
+      renderWithQuery(<Harness />);
+      const user = await openSettings();
+      expect(screen.getByRole("spinbutton", { name: /수수료/ })).toHaveValue(
+        15,
+      );
+      expect(screen.getByLabelText(/^시작일/)).toHaveValue("");
+      await fillPeriodAndUniverse(user);
+      expect(requestBody()?.environment).toEqual(ENVIRONMENT);
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it("reads defaults and bounds from the endpoint instead of hand-written values", async () => {

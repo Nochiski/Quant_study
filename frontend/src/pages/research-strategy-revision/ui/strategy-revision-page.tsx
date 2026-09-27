@@ -399,11 +399,7 @@ export const StrategyRevisionPage = () => {
             runBlockedReason={
               backtestRejectedForUpgrade
                 ? t("upgrade.backtestBlocked")
-                : runSettings.result.valid
-                  ? undefined
-                  : runSettings.environment === null
-                    ? t("backtest.settings.incomplete")
-                    : t("backtest.settings.blocked")
+                : (runSettings.blockedReason ?? undefined)
             }
             runSettings={
               <BacktestRunSettings
@@ -482,6 +478,7 @@ export const StrategyRevisionPage = () => {
             <ProposalApplyFeedback
               apply={proposalApply}
               chain={strategyAssistant.chain}
+              blockedReason={runSettings.blockedReason}
             />
             <UpgradeBanner
               upgrade={documentUpgrade}

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 
 import { useRunEnvironmentSchema } from "../../../entities/backtest";
 import type { RunEnvironment } from "../../../shared/api";
+import { t } from "../../../shared/config";
 import {
   initialRunEnvironmentValues,
   runEnvironmentFields,
@@ -11,6 +12,7 @@ import {
   type RunEnvironmentValidation,
   type RunEnvironmentValues,
 } from "./run-environment";
+import { runEnvironmentLabel } from "./run-environment-labels";
 import {
   buildBacktestRunOptions,
   DEFAULT_BACKTEST_RUN_SETTINGS,
@@ -66,6 +68,16 @@ const NO_FIELDS: readonly RunEnvironmentField[] = [];
 type ScopedValues = { key: string; values: RunEnvironmentValues };
 
 /**
+ * 패널 열림과 "이 칸으로 가기" 요청. 요약 띠·차단 안내가 패널을 열고 첫 빈 칸에 초점을 옮기는 경로다 —
+ * 퀀트에 익숙하지 않은 사용자가 막혔을 때 다음에 할 일이 한 번의 누름이어야 한다(P3-02 리드 보충).
+ * `nonce` 는 같은 칸을 다시 요청해도 초점이 다시 가게 한다.
+ */
+export type RunSettingsPanelState = {
+  open: boolean;
+  focus: { field: string; nonce: number } | null;
+};
+
+/**
  * 실행 설정 패널의 상태 owner(P3-02). `storageKey` 는 전략 id(새 전략은 호출자가 정한 한 칸)다.
  *
  * 실행 설정 칸의 값은 사용자가 고치기 전까지 스키마 기본값과 저장된 마지막 사용값에서 파생하고, 고치면
@@ -77,6 +89,10 @@ export const useBacktestRunSettings = (storageKey: string) => {
     DEFAULT_BACKTEST_RUN_SETTINGS,
   );
   const [edited, setEdited] = useState<ScopedValues | null>(null);
+  const [panel, setPanel] = useState<RunSettingsPanelState>({
+    open: false,
+    focus: null,
+  });
   const environmentFields = useMemo(
     () =>
       schema.data === undefined
@@ -125,6 +141,44 @@ export const useBacktestRunSettings = (storageKey: string) => {
       replaceEnvironment({ ...environmentValues, [name]: value }),
     [environmentValues, replaceEnvironment],
   );
+  const setPanelOpen = useCallback(
+    (open: boolean): void =>
+      setPanel((current) =>
+        current.open === open ? current : { ...current, open },
+      ),
+    [],
+  );
+  /** 패널을 열고 아직 맞지 않은 첫 칸(없으면 첫 칸)에 초점을 옮긴다. */
+  const openPanelAtFirstProblem = useCallback((): void => {
+    const target =
+      environmentFields.find((field) => environment.errors[field.name])?.name ??
+      environmentFields[0]?.name;
+    setPanel((current) => ({
+      open: true,
+      focus:
+        target === undefined
+          ? current.focus
+          : { field: target, nonce: (current.focus?.nonce ?? 0) + 1 },
+    }));
+  }, [environment.errors, environmentFields]);
+  // 비어 있어서 막힌 칸의 이름. 차단 안내가 "어느 칸을 채우라"를 칸 이름으로 말한다.
+  const missingLabels = useMemo(
+    () =>
+      environmentFields
+        .filter((field) => environment.errors[field.name] === "required")
+        .map(runEnvironmentLabel),
+    [environment.errors, environmentFields],
+  );
+  const blockedReason = result.valid
+    ? null
+    : schema.isError
+      ? t("backtest.settings.environment.schemaError")
+      : missingLabels.length > 0
+        ? t("backtest.settings.incomplete").replace(
+            "{fields}",
+            missingLabels.join("·"),
+          )
+        : t("backtest.settings.blocked");
   /** 업그레이드 응답처럼 완성된 실행 설정으로 칸 전부를 바꾼다(사용자가 누른 뒤에만 부른다). */
   const applyEnvironment = useCallback(
     (next: RunEnvironment): void =>
@@ -150,6 +204,16 @@ export const useBacktestRunSettings = (storageKey: string) => {
     /** 검증을 통과한 실행 설정. 추적·실행 계획 요청이 같은 값을 싣는다. 없으면 null. */
     environment: environment.valid ? environment.environment : null,
     environmentErrors: environment.errors,
+    /** 비어 있는 필수 칸의 이름(차단 안내·요약 띠가 쓴다). */
+    missingLabels,
+    /**
+     * 실행을 막는 이유 한 문장. 툴바 차단 안내와 "적용 후 백테스트" 알림이 같은 문장을 쓴다. 실행할 수
+     * 있으면 null.
+     */
+    blockedReason,
+    panel,
+    setPanelOpen,
+    openPanelAtFirstProblem,
   };
 };
 

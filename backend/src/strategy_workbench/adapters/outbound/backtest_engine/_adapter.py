@@ -46,6 +46,7 @@ from strategy_workbench.domain.backtest.facade.environment import environment_ha
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestSeries,
+    DataWarning,
     RawArtifactBundle,
     RawCost,
     RawFill,
@@ -249,7 +250,11 @@ class BacktestEngineExecutorAdapter:
         # artifact로 다시 옮겨질 중간 산물일 뿐이라 만들 이유가 없다.
         tables = engine.event_store.result_tables()
         artifacts, outcomes = _artifacts(tables)
-        benchmark = _benchmark_values(request.dataset, request.spec.initial_cash)
+        benchmark, carried = _benchmark_series(
+            request.dataset,
+            request.spec.initial_cash,
+            tuple(item.session for item in artifacts.snapshots),
+        )
         # net exposure 공식은 `_artifacts`가 단일 정본이다 — 여기서 다시 계산하지 않는다.
         points = tuple(
             AnalysisPoint(
@@ -326,7 +331,10 @@ class BacktestEngineExecutorAdapter:
                 environment=environment,
                 environment_hash=environment_hash(environment),
                 strategy_provenance=request.strategy_provenance,
-                warnings=request.dataset.warnings,
+                warnings=(
+                    *request.dataset.warnings,
+                    *_benchmark_carry_warnings(request.dataset, carried),
+                ),
             ),
             metric_definitions=self._registry.definitions(),
             metrics=tuple(metrics),
@@ -390,6 +398,57 @@ def _benchmark_values(dataset: BacktestDataset, initial_cash: float) -> dict[dat
             base = adjusted
         values[bar.session] = initial_cash * adjusted / base
     return values
+
+
+def _benchmark_series(
+    dataset: BacktestDataset, initial_cash: float, sessions: Sequence[date]
+) -> tuple[dict[date, float], tuple[date, ...]]:
+    """run 세션마다의 벤치마크 값과, bar가 없어 직전 값을 이어 쓴 세션들.
+
+    벤치마크 종목이 거래정지·상장폐지로 bar가 없는 세션에는 직전 값(분할·병합 반영)을 이어 쓴다
+    (이슈 #226). 엔진이 정지 종목을 평가하는 규칙과 같다 — `Portfolio.mark`(Python·Rust core)는
+    bar가 있는 종목의 평가 가격만 갱신하므로 정지 종목은 직전 종가로 계속 평가된다. 정지 중 사건은
+    엔진이 다음 bar 세션에 정산하듯 `_benchmark_values`가 다음 bar부터 반영한다. 첫 bar 이전 세션은
+    이어 쓸 값이 없어(살 수 없었다) 비워 두고, 그 경우 벤치마크 지표는 전과 같이 사용 불가다.
+    """
+    by_bar = _benchmark_values(dataset, initial_cash)
+    if not by_bar:
+        return {}, ()
+    values: dict[date, float] = {}
+    carried: list[date] = []
+    last: float | None = None
+    for session in sorted(sessions):
+        value = by_bar.get(session)
+        if value is not None:
+            last = value
+        elif last is not None:
+            value = last
+            carried.append(session)
+        else:
+            continue
+        values[session] = value
+    return values, tuple(carried)
+
+
+def _benchmark_carry_warnings(
+    dataset: BacktestDataset, carried: tuple[date, ...]
+) -> tuple[DataWarning, ...]:
+    """이어 쓴 세션이 있으면 manifest 경고 한 줄. 화면은 code와 message를 그대로 보여 준다."""
+    if not carried:
+        return ()
+    shown = ", ".join(session.isoformat() for session in carried[:10])
+    more = f" (+{len(carried) - 10})" if len(carried) > 10 else ""
+    return (
+        DataWarning(
+            code="benchmark.suspended_sessions_carried",
+            message=(
+                "벤치마크 종목에 bar가 없는 세션(거래정지·상장폐지)은 직전 종가(분할·병합 반영)를 "
+                "이어 썼다 — 엔진이 정지 종목을 평가하는 규칙과 같다. "
+                f"benchmark={dataset.benchmark_security_id} carried_sessions={len(carried)} "
+                f"sessions={shown}{more}"
+            ),
+        ),
+    )
 
 
 def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:

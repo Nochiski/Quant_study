@@ -6,7 +6,7 @@ current_phase: P2
 current_pr: P2-09,P2-10
 active_prs: [P2-09, P2-10]
 parallel_window: [P2-09, P2-10]
-last_updated: 2026-09-27T12:14:48+09:00
+last_updated: 2026-09-27T12:16:20+09:00
 planned_prs: 30
 merged_prs: 9
 integrated_prs: 6
@@ -30,7 +30,7 @@ progress_percent: 50
 | Active PR | `P2-09, P2-10` |
 | Progress | `15 / 30 done (50%), main 9, integration 6` |
 | Approved | `15 / 30` |
-| Aggregated at | `2026-09-27 12:14 KST` |
+| Aggregated at | `2026-09-27 12:16 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -822,7 +822,7 @@ Phase exit:
 | [x] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `INTEGRATED` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 1차 REQUEST_CHANGES(P1 1 DEFECT-P208-001·P2 1·P3 3) → 2차 APPROVE(`d99aa024`, 새 관찰 P2-NEW-1 원주가 오염 → 이슈 #214 → BACKLOG-017) · 통합 머지 `48eff6d8`(#205, 2026-09-27) |
 | [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `CHANGES_REQUESTED` | [#217](https://github.com/Nochiski/Quant_study/pull/217) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base `lang2/integration`(처음 연 #216 은 P2-08 브랜치 삭제로 닫혀 #217 로 다시 열었다) · `review_lang2_p2_09` 1차 REQUEST_CHANGES(P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 뺀다 — 반영 대기) · Phase 2 감사 NB-1(현재 판 문서 업그레이드) 수정 `17c68261` |
 
-| [ ] | `P2-10` | Phase 2 감사 후속(문서): PLAN 머지·통합·리뷰 기록 정정, `INTEGRATED` 상태, BACKLOG-017, P3 계약 누락 예약 | P2-09 | `IN_REVIEW` | PR 본문 참조 · 워크트리 `wt-lang2-p2-10`, 브랜치 `docs/lang2-p2-10-phase2-records` · base P2-09 `17c68261` |
+| [ ] | `P2-10` | Phase 2 감사 후속(문서): PLAN 머지·통합·리뷰 기록 정정, `INTEGRATED` 상태, BACKLOG-017, P3 계약 누락 예약 | P2-09 | `IN_REVIEW` | [#222](https://github.com/Nochiski/Quant_study/pull/222) · 워크트리 `wt-lang2-p2-10`, 브랜치 `docs/lang2-p2-10-phase2-records` · base P2-09 `17c68261` |
 
 Phase exit:
 
@@ -958,7 +958,7 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
-- 2026-09-27 — P2-10 구현(`IN_REVIEW`, PR 본문 참조). Phase 2 감사(`e064d2af`, FAIL — BLOCKING 2건 모두 기록)
+- 2026-09-27 — P2-10 구현(`IN_REVIEW`, [#222](https://github.com/Nochiski/Quant_study/pull/222)). Phase 2 감사(`e064d2af`, FAIL — BLOCKING 2건 모두 기록)
   후속. (1) DEFECT-P2X-001: P1-06·P2-01·P2-02 를 main 머지(`0cfb4959`·`2d08157a`·`1fb099f7`)로, P2-03~P2-08
   을 통합 브랜치 머지(`c72f6257`·`013da821`·`48eff6d8`)로 고치고 새 상태 `INTEGRATED` 를 집계 도구와 상태 값
   절에 더했다. Review 기록에 빠진 10행을 넣고 표 중간 빈 줄 두 곳을 지웠다. 현재 결정의 묶음 머지 항목에

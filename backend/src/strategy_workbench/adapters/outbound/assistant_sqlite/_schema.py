@@ -6,6 +6,18 @@
 
 `application_id`를 따로 두어 남의 SQLite 파일을 이 스키마로 덮어쓰지 않는다. 빈 파일만 claim하고,
 다른 application id를 만나면 거부한다(`strategy_sqlite/_schema.py`와 같은 방어).
+
+## 버전
+
+| 버전 | 바뀐 것 |
+|---|---|
+| 1 | 최초(A-03) |
+| 2 | `chat_messages.turn_id` 추가, v1 검색 상한 통지 행을 전용 이벤트로(C-03) |
+
+v1 파일은 열 때 제자리에서 v2로 올린다. v1 선언(`V1_SCHEMA_OBJECTS`)은 이미 사용자 디스크에 쓰인
+사실이라 고치지 않는다 — manifest 검사가 그 선언과 글자 단위로 비교하므로, 고치면 v1 파일이 올리기
+전에 거부된다. 올리기는 v1 manifest를 먼저 확인하고 한 트랜잭션에서 끝낸다. 중간에 실패하면 파일은
+v1 그대로 남는다.
 """
 
 from __future__ import annotations
@@ -13,13 +25,14 @@ from __future__ import annotations
 import sqlite3
 
 from ._errors import AssistantStorageError
+from ._upgrade_v2 import copy_messages_with_turn_ids, rewrite_v1_search_budget_notices
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # ASCII-ish "SWAI". 전략 revision DB의 0x5357524B("SWRK")와 달라야 두 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53574149
 
-_V1_SCHEMA_OBJECTS: tuple[tuple[str, str, str], ...] = (
+V1_SCHEMA_OBJECTS: tuple[tuple[str, str, str], ...] = (
     (
         "table",
         "provider_profiles",
@@ -158,8 +171,40 @@ _V1_SCHEMA_OBJECTS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# v2의 `chat_messages`. `turn_id`에는 외래 키를 걸지 않는다 — 러너는 거절(세션 없음·활성 공급자
+# 없음)을 호출 스레드에서 돌려주려고 사용자 메시지를 턴 행보다 **먼저** 쓴다. 걸면 모든 첫 질문이
+# 거부된다. NULL은 v1에서 올라온, 어느 턴 뒤에도 오지 않는 메시지뿐이다(`_upgrade_v2.py`).
+_CHAT_MESSAGES_V2 = """
+        CREATE TABLE chat_messages (
+            session_id TEXT NOT NULL COLLATE BINARY,
+            ordinal INTEGER NOT NULL CHECK (
+                typeof(ordinal) = 'integer' AND ordinal >= 0
+            ),
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+            text TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            turn_id TEXT COLLATE BINARY CHECK (
+                turn_id IS NULL OR length(trim(turn_id)) >= 1
+            ),
+            PRIMARY KEY (session_id, ordinal),
+            FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
+                ON UPDATE RESTRICT ON DELETE RESTRICT
+        ) WITHOUT ROWID
+        """
+
+V2_SCHEMA_OBJECTS: tuple[tuple[str, str, str], ...] = tuple(
+    ("table", "chat_messages", _CHAT_MESSAGES_V2)
+    if (object_type, name) == ("table", "chat_messages")
+    else (object_type, name, statement)
+    for object_type, name, statement in V1_SCHEMA_OBJECTS
+)
+
+# 지금 버전의 선언. 새 파일은 이것으로 만들고, 열 때마다 이것과 대조한다.
+_CURRENT_SCHEMA_OBJECTS = V2_SCHEMA_OBJECTS
+
+
 def migrate_schema(connection: sqlite3.Connection) -> None:
-    """빈 파일에만 스키마를 만들고, 남의 파일이나 미래 버전은 거부한다."""
+    """빈 파일에는 스키마를 만들고 v1 파일은 v2로 올린다. 남의 파일이나 미래 버전은 거부한다."""
     try:
         connection.execute("BEGIN IMMEDIATE")
         application_id = _pragma_int(connection, "application_id")
@@ -172,7 +217,7 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                     "refusing to claim a non-empty SQLite database without this "
                     f"application id — user_version={version} objects={footprint}"
                 )
-            for _object_type, _name, statement in _V1_SCHEMA_OBJECTS:
+            for _object_type, _name, statement in _CURRENT_SCHEMA_OBJECTS:
                 connection.execute(statement)
             connection.execute(f"PRAGMA application_id = {_APPLICATION_ID}")
             connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -183,17 +228,37 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
                 f"application_id={application_id} expected={_APPLICATION_ID}"
             )
 
+        if version == 1:
+            _validate_manifest(connection, V1_SCHEMA_OBJECTS, version=1)
+            _upgrade_v1_to_v2(connection)
+            version = 2
         if version != SCHEMA_VERSION:
             raise AssistantStorageError(
                 "SQLite assistant schema version is not supported — "
                 f"stored={version} supported={SCHEMA_VERSION}"
             )
-        _validate_manifest(connection, _V1_SCHEMA_OBJECTS, version=SCHEMA_VERSION)
+        _validate_manifest(connection, _CURRENT_SCHEMA_OBJECTS, version=SCHEMA_VERSION)
         connection.commit()
     except Exception:
         if connection.in_transaction:
             connection.rollback()
         raise
+
+
+def _upgrade_v1_to_v2(connection: sqlite3.Connection) -> None:
+    """v1 파일을 제자리에서 v2로. 호출자의 트랜잭션 안에서 돈다.
+
+    SQLite는 칼럼 추가(`ADD COLUMN`)를 원래 DDL 끝에 이어 붙여 저장하므로 v2 선언과 글자 단위로
+    같아지지 않는다. 그래서 표를 새로 만들고 옮긴다. 옛 표를 먼저 다른 이름으로 비켜 두는 이유는
+    새 표가 같은 이름(`chat_messages`)으로 선언과 똑같이 저장돼야 하기 때문이다 — 새 표를 다른
+    이름으로 만든 뒤 바꾸면 SQLite가 이름을 따옴표로 감싸 DDL 글자가 달라진다.
+    """
+    connection.execute("ALTER TABLE chat_messages RENAME TO chat_messages_v1")
+    connection.execute(_CHAT_MESSAGES_V2)
+    copy_messages_with_turn_ids(connection, source_table="chat_messages_v1")
+    connection.execute("DROP TABLE chat_messages_v1")
+    rewrite_v1_search_budget_notices(connection)
+    connection.execute("PRAGMA user_version = 2")
 
 
 def _pragma_int(connection: sqlite3.Connection, name: str) -> int:

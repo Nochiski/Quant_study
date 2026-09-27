@@ -50,8 +50,9 @@ Anthropic은 `web_search` 도구 정의에 `max_uses`를 실어 서버가 세고
   호출이 끝난 뒤에야 개수를 안다. 상한은 "호출당"이 아니라 "다음 호출을 열 때의 누적"이다.
 - **도구가 사라지는 이유를 모델에게 말해 줘야 한다.** 말없이 빼면 모델이 같은 시도를 반복한다.
   그 문장은 adapter가 쓰지 않고 프롬프트 owner인 application의 상수
-  (`SEARCH_BUDGET_EXHAUSTED_NOTICE`)를 그대로 실어 나른다. 같은 문장을 `SearchActivity`로도 내
-  화면이 왜 검색이 멈췄는지 보이게 한다.
+  (`SEARCH_BUDGET_EXHAUSTED_NOTICE`)를 그대로 실어 나른다. 화면에는 그 문장이 아니라 전용
+  이벤트 `SearchBudgetExhausted`를 내 왜 검색이 멈췄는지 보이게 한다 — 검색 활동으로 흘리면
+  사용자는 하지 않은 검색을 본다(C-03).
 
 ## 취소
 
@@ -97,6 +98,7 @@ from strategy_workbench.domain.assistant.facade.models import (
     FailureCode,
     ResearchCapability,
     SearchActivity,
+    SearchBudgetExhausted,
     Source,
     TextDelta,
     ThinkingSummary,
@@ -176,12 +178,9 @@ def stream_turn(
         # 처음부터 도구가 없는 것이지 소진된 것이 아니다(현재 배선에서는 기본값 8이라 도달하지
         # 않지만, 값의 owner는 application이라 여기서 가정하지 않는다).
         if search_uses > 0 and wants_search and not search_allowed and not search_notice_sent:
-            # 도구를 빼기 **전에** 알린다. 모델은 다음 요청의 입력에서, 사용자는 지금 화면에서
-            # 같은 문장을 본다. 문장의 owner는 application이다(spec D4).
-            #
-            # 통지를 `SearchActivity.query`에 싣는 것은 임시다. 그 필드의 뜻은 "검색어"이고
-            # 화면이 "검색: {query}"로 그리면 문장이 검색어 자리에 들어간다. 화면 표현(전용
-            # 이벤트인지, 판별 플래그인지)은 B-03이 정한다 — domain 변경이라 여기 범위가 아니다.
+            # 도구를 빼기 **전에** 알린다. 모델은 다음 요청의 입력에서 고정 문장을(owner는
+            # application, spec D4), 사용자는 지금 화면에서 전용 이벤트의 안내 문구를 본다.
+            # 모델에게 쓴 지시문을 화면으로 보내지 않는다 — 화면 문구는 frontend가 소유한다.
             logger.info(
                 "openai web search budget spent — model=%s search_uses=%d max_search_uses=%d",
                 model,
@@ -189,7 +188,7 @@ def stream_turn(
                 request.max_search_uses,
             )
             input_items.append(notice_item(SEARCH_BUDGET_EXHAUSTED_NOTICE))
-            yield SearchActivity(query=SEARCH_BUDGET_EXHAUSTED_NOTICE, sources=())
+            yield SearchBudgetExhausted()
             search_notice_sent = True
 
         tools = build_tools(request, web_search=search_allowed)

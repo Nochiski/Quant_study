@@ -1773,6 +1773,11 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **선행 조건**: #218 이 main 에 머지됐다(완료). 통합 브랜치가 main 을 따라가야 한다(WORKFLOW P3-01 착수 전
   cascade).
 - **담당**: `P3-01`. WORKFLOW P3-01 acceptance 에 같은 번호로 예약했다. 늦어도 P5-01 착수 전이다.
+- **처리**: fixture 네 개의 가격 잎 전환과 node_id(`adj_close`·`adj_close_2`)는 통합 브랜치 main cascade
+  (`9e8bdabc`)가 의미 충돌 수정으로 먼저 했다. P3-01 은 그 merge(`26f426b5`) 뒤 나머지를 닫았다: 아이디어 2
+  주석에 #212 링크, `test_idea_fixtures.py` 의 어댑터 계약 대조에 원주가 표시(`adjusted_field_id`)를 더하고,
+  잎을 원주가로 되돌리면 warning 이 나는 판별 테스트를 둔다. frontend `compiled-promotion.test.tsx` 의 노드 id 도
+  따라 바꿨다.
 
 ### BACKLOG-018: 원주가 가격 필드로 시계열 변화를 재는 문서에 경고가 없다 (#218 후속, 리드 결정)
 
@@ -1789,6 +1794,14 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **결정(리드)**: compile 에 warning 을 추가한다. 시계열 변화 연산자의 입력이 원주가 가격 필드이면 "분할·증자에
   오염될 수 있습니다. `price.adj_close` 를 쓰세요" 를 backend 한글 완성 문장으로 낸다.
 - **담당**: `P3-01`(backend 진단 추가와 테스트). WORKFLOW P3-01 acceptance 에 같은 번호로 예약했다.
+- **처리**: P3-01. warning `strategy.field.unadjusted_price`(`SEMANTIC_ONLY_CODES`). 연산자 성질은 카탈로그
+  `OperatorDefinition.reads_past_sessions`(time_series 여섯 개와 `unary.lag`, 실제 이력 추론과 대조), 원주가
+  판정은 필드 계약 `FieldMetadata.adjusted_field_id`(mock·duckdb 가 `price.close` → `price.adj_close`). 과거
+  세션을 읽는 연산자의 입력을 거슬러 원주가 잎마다 한 번, 그 `field_id` 를 짚는다. 어댑터가 없거나 표시가 없으면
+  말하지 않는다. 테스트: 문장 golden, 같은 연산자의 `adj_close`·같은 날 비율은 조용, lag 와 창이 같은 잎을 읽어도
+  한 번, 아이디어 fixture 0건과 원주가로 되돌린 판별. OpenAPI(`OperatorDefinition.reads_past_sessions`)·
+  operator-catalog fixture·AI 시나리오 golden(`tool_then_proposal.json` 의 골든 문서가 원주가 모멘텀이라 warning
+  1건)을 재생성했다.
 
 ## 갱신 절차
 

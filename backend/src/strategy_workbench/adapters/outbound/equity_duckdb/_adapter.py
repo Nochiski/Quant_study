@@ -56,6 +56,7 @@ duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑
 
 from __future__ import annotations
 
+import logging
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterator, Sequence
@@ -141,6 +142,8 @@ from ._specs import (
 
 if TYPE_CHECKING:
     import duckdb
+
+logger = logging.getLogger(__name__)
 
 MARKET = "KRX"
 VENUE = "XKRX"
@@ -464,7 +467,35 @@ class EquityDuckdbAdapter:
                 f"catalog macros not published (macros_skipped) — missing={skipped} "
                 f"catalog={self._catalog.path} macros={list(self._catalog.macros)}"
             )
-        return None
+        return self._missing_columns_reason(spec)
+
+    def _missing_columns_reason(self, spec: SourceSpec) -> str | None:
+        """매크로가 있어도 옛 카탈로그면 원천이 요구하는 열이 없다 — 그 원천만 빼고 경고한다.
+
+        열 확인 없이 두면 `row_filter` 가 커버율 질의에서 BinderException 을 던져 `list_fields()`
+        전체가 죽는다(#233 리뷰 P2-1). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
+        """
+        if not spec.required_columns or not spec.is_macro:
+            return None
+        con = self._connect()
+        try:
+            described = con.execute(
+                f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
+            ).fetchall()
+        finally:
+            con.close()
+        present = {str(row[0]) for row in described}
+        missing = [column for column in spec.required_columns if column not in present]
+        if not missing:
+            return None
+        reason = (
+            f"카탈로그 매크로 {spec.relation} 에 원천 {spec.name} 이 읽는 열이 없어 이 원천의 "
+            "필드를 뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
+            f"`python -m equity catalog`) (catalog_columns_missing) — missing={missing} "
+            f"catalog={self._catalog.path}"
+        )
+        logger.warning(reason)
+        return reason
 
     @property
     def backfill_end(self) -> date:
@@ -1110,7 +1141,7 @@ class EquityDuckdbAdapter:
             DataWarning(
                 code="equity.reference_rows_dropped",
                 message=(
-                    f"price_kind='reference' rows (기준가·정지일) are not emitted as bars — "
+                    "기준가 행(price_kind='reference', 거래정지일)은 bar로 내보내지 않았다 — "
                     f"dropped={n_reference}"
                 ),
                 severity=WarningSeverity.INFO,
@@ -1121,8 +1152,8 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.provisional_rows_dropped",
                     message=(
-                        f"price_daily.basis <> '{CONFIRMED_BASIS}' rows (저녁 잠정판 T 세션 — "
-                        f"KRX 확정 전 키움 종가) are not emitted as bars — "
+                        f"price_daily.basis <> '{CONFIRMED_BASIS}' 행(저녁 잠정판 T 세션 — "
+                        "KRX 확정 전 키움 종가)은 bar로 내보내지 않았다 — "
                         f"dropped={n_provisional}"
                     ),
                 )
@@ -1132,7 +1163,7 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.invalid_ohlc_rows_dropped",
                     message=(
-                        f"rows with NULL/non-positive or inconsistent OHLC dropped (GAP-14) — "
+                        "OHLC가 NULL·0 이하이거나 서로 맞지 않는 행을 버렸다(GAP-14) — "
                         f"dropped={n_invalid}"
                     ),
                 )
@@ -1142,8 +1173,8 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.corporate_action_without_bar_dropped",
                     message=(
-                        "corporate actions with no traded bar at/after the event inside the "
-                        "window were dropped (position frozen at its last trade) — "
+                        "창 안에서 사건 세션이나 그 뒤에 거래된 bar가 없는 기업 행동을 뺐다"
+                        "(포지션은 마지막 체결가에 동결된다) — "
                         f"dropped={len(unsettleable)} "
                         + ", ".join(
                             f"{a.security_id}@{a.session}:{a.action_type}"
@@ -1208,7 +1239,8 @@ class EquityDuckdbAdapter:
         warnings: tuple[str, ...] = ()
         if history_first < 0:
             warnings = (
-                f"insufficient calendar for warm-up history — requested={history} "
+                "워밍업 이력에 쓸 거래일 달력이 모자라 달력 시작부터 읽었다 — "
+                f"requested={history} "
                 f"available={first} calendar_start={self._sessions[0]} start={start}",
             )
             history_first = 0
@@ -1280,7 +1312,8 @@ class EquityDuckdbAdapter:
         warnings: list[str] = []
         if first_index - max_lag < 0 and max_lag > 0:
             warnings.append(
-                f"insufficient calendar for lag — max_lag={max_lag} "
+                "랙만큼 거슬러 올라갈 거래일 달력이 모자라 달력 시작부터 읽었다 — "
+                f"max_lag={max_lag} "
                 f"first_session={window.sessions[0]} calendar_start={self._sessions[0]}"
             )
         fetch_start, fetch_end = self._sessions[fetch_first], window.sessions[-1]

@@ -955,7 +955,7 @@ def test_raw_observation_warnings_reach_the_preview() -> None:
 
     preview = _service().preview(PortfolioPreviewRequest(spec))
 
-    assert any("insufficient mock calendar for lag" in item for item in preview.warnings)
+    assert any("mock 거래일 달력" in item for item in preview.warnings)
 
 
 def test_preview_warnings_are_recorded_in_the_run_manifest() -> None:

@@ -831,7 +831,11 @@ ok AS (
     SELECT t.*,
            (t.ttm_n_rows = 4 AND t.ttm_fs_min = t.ttm_fs_max
             AND date_diff('day', t.ttm_first_period_end, t.period_end)
-                BETWEEN 240 AND 300)           AS ttm_window_ok
+                BETWEEN 240 AND 300)           AS ttm_window_ok,
+           (strftime(t.period_end, '%Y%m%d') || t.report_code) = max(
+               strftime(t.period_end, '%Y%m%d') || t.report_code) OVER (
+               PARTITION BY t.corp_code ORDER BY t.available_date
+               RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)    AS period_frontier
     FROM ttm t
 )
 SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
@@ -854,7 +858,7 @@ SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
                  AND o.ttm_cnt_cf_operating = 4
             THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
        coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
-       o.available_date, o.available_basis
+       o.period_frontier, o.available_date, o.available_basis
 FROM ok o
 LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
        ON d.rcept_no = o.rcept_no
@@ -931,11 +935,19 @@ def price_adj_table(root: Path) -> pa.Table:
         con.close()
 
 
-def write_catalog(root: Path, *, snapshot: str | None = None, with_macros: bool = True) -> Path:
+def write_catalog(
+    root: Path,
+    *,
+    snapshot: str | None = None,
+    with_macros: bool = True,
+    legacy_fin_view: bool = False,
+) -> Path:
     """`equity.duckdb`(입력이 갖춰진 매크로 전부) + `_catalog_meta.json` 을 쓴다.
 
     `snapshot` 을 주면 meta 의 snapshot_id 를 그 값으로 둔다(stale 카탈로그 부정 픽스처).
     `with_macros=False` 면 매크로 없이 `macros_skipped` 만 남긴다.
+    `legacy_fin_view=True` 면 `v_fin_latest` 가 `period_frontier` 열 없이 구워진다 — #225 전에
+    만든 카탈로그(재생성 전 로컬·서버 판) 부정 픽스처.
     """
     import duckdb  # 테스트 전용 — backend optional extra `equity`
 
@@ -954,6 +966,8 @@ def write_catalog(root: Path, *, snapshot: str | None = None, with_macros: bool 
                 skipped[name] = f"not_built: inputs={absent or list(inputs)}"
                 continue
             sources = {t: _partition_source(root, t, builds[t]) for t in inputs}
+            if legacy_fin_view and name == "v_fin_latest":
+                body = body.replace("o.period_frontier, ", "")
             con.execute(f"CREATE MACRO {signature} AS TABLE " + body.format(**sources))
             macros.append(signature)
     finally:
@@ -1027,6 +1041,7 @@ WB_FIN_RCEPT = {  # (corp, period_end) → 접수번호. `disclosure_version` �
     ("C05930", date(2023, 6, 30)): "R05930Q2",
     ("C05930", date(2023, 9, 30)): "R05930Q3",
     ("C05930", date(2023, 12, 31)): "R05930FY",
+    ("C00660", date(2023, 3, 31)): "R00660Q1C",
     ("C00660", date(2023, 6, 30)): "R00660Q2",
     ("C36220", date(2023, 12, 31)): "R36220FY",
 }
@@ -1091,6 +1106,13 @@ WB_FIN_ROWS: list[dict[str, object]] = [
      "fs_div": "OFS", "revenue": 999, "gross_profit": 999, "op_profit": 999, "net_income": 999,
      "total_asset": 9999, "total_liab": 9999, "total_equity": 9999,
      "cf_operating_ytd": 999, "cf_operating_q": 999},
+    # 000660 2023 1분기 정정본 — 반기(2023-08-14)보다 늦게 접수됐다(restated 판본은 공개일이
+    # 정정 접수일로 밀린다). 셀은 이 옛 기간으로 되돌아가면 안 된다(#225, `period_frontier`).
+    {"corp_code": "C00660", "period_end": date(2023, 3, 31), "report_code": "11013",
+     "bsns_year": "2023", "rcept_no": "R00660Q1C", "available_date": date(2024, 1, 9),
+     "revenue": 190, "gross_profit": 76, "op_profit": 57, "net_income": 38,
+     "total_asset": 1900, "total_liab": 780, "total_equity": 1120,
+     "cf_operating_ytd": 40, "cf_operating_q": 40},
     # 036220 — 값이 일부만 있는 행(매출 결측 → MISSING, 순이익 7 → OBSERVED). 창 안 공개일.
     {"corp_code": "C36220", "period_end": date(2023, 12, 31), "report_code": "11011",
      "bsns_year": "2023", "rcept_no": "R36220FY", "available_date": date(2024, 1, 9),

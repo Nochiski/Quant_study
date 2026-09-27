@@ -1189,13 +1189,15 @@ WB_SHORT_ROWS: list[ShortRow] = [
     ("000660", WB_SPLIT_DATE, 2_000, 100_000_000, 7_000,
      ("measured", "shard_done"), ("measured", "unit_ok")),
 ]
+# 신용잔고 랙은 원장처럼 3세션이다(이슈 #246). 행을 01-04~01-09 에 두어 랙 뒤에 보이는 세션이
+# 01-09~01-12 로 캘린더 안에 들어오게 한다.
 WB_CREDIT_ROWS: list[CreditRow] = [
-    ("005930", WB_SPLIT_DATE, 8_359_855, ("measured", "unit_ok")),
-    ("005930", date(2024, 1, 9), None, ("src_omitted", "unit_ok")),
-    ("005930", WB_HALT_DATE, None, ("not_collected", "none")),
+    ("005930", date(2024, 1, 4), 8_359_855, ("measured", "unit_ok")),
+    ("005930", date(2024, 1, 5), None, ("src_omitted", "unit_ok")),
+    ("005930", date(2024, 1, 8), None, ("not_collected", "none")),
     # 잔고 > 상장주식수로 격리된 원장 행의 자리 — 셀은 남고 종류는 empty_response 다(결정 9)
-    ("005930", date(2024, 1, 11), None, ("empty_response", "unit_ok")),
-    ("000660", WB_SPLIT_DATE, 1_234, ("measured", "unit_ok")),
+    ("005930", date(2024, 1, 9), None, ("empty_response", "unit_ok")),
+    ("000660", date(2024, 1, 4), 1_234, ("measured", "unit_ok")),
 ]
 WB_HOLDER_ROWS: list[HolderRow] = [
     ("H1", "elestock", "홍길동", "C05930", 1_000, date(2024, 1, 9)),
@@ -1217,7 +1219,10 @@ def wb_close(ticker: str, session: date) -> float:
 
 
 # `dataset_profile`(S19) 이 확정한 필드별 공개시차 — 서버 실측 모양 그대로다(랙 0 은 장중 가격
-# 축뿐이고 나머지는 1세션). 어댑터는 이 표를 정본으로 읽고, 표가 없을 때만 원천 상수로 폴백한다.
+# 축, 신용잔고는 실입수 기준 3세션, 나머지는 1세션). 어댑터는 이 표를 정본으로 읽고, 표가 없을
+# 때만 원천 상수로 폴백한다. 원장 선언과 같은지는 `tests/contract/test_equity_fallback_lag.py` 가
+# 본다(이슈 #246).
+WB_PROFILE_LAG_THREE = ("credit.margin_balance",)
 WB_PROFILE_LAG_ZERO = (
     "price.close",
     "price.open",
@@ -1256,7 +1261,7 @@ WB_PROFILE_FIELDS = (
 WB_PROFILE_ROWS = [
     (
         field_id,
-        0 if field_id in WB_PROFILE_LAG_ZERO else 1,
+        0 if field_id in WB_PROFILE_LAG_ZERO else 3 if field_id in WB_PROFILE_LAG_THREE else 1,
         "session_close" if field_id in WB_PROFILE_LAG_ZERO else "next_session_open",
     )
     for field_id in WB_PROFILE_FIELDS

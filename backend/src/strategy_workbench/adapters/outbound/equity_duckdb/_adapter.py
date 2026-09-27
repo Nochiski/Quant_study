@@ -423,11 +423,19 @@ class EquityDuckdbAdapter:
         }
 
     def _field_lag(self, field_id: str) -> tuple[int, str]:
-        """field_id 의 (랙, 근거). 대장에 있으면 대장, 없으면 원천 상수 폴백."""
+        """field_id 의 (랙, 근거). 대장에 있으면 대장, 없으면 필드·원천 상수 폴백.
+
+        폴백 상수는 원장 선언과 같은 값이다(이슈 #246). 한 원천 안에서 랙이 갈리는 필드는
+        `FieldSpec.lag_sessions` 가 원천 값을 덮는다.
+        """
         entry = self._profile.get(field_id)
         if entry is not None:
             return entry
-        source = SOURCE_BY_NAME[self._fields[field_id].source]
+        spec = self._fields[field_id]
+        source = SOURCE_BY_NAME[spec.source]
+        if spec.lag_sessions is not None:
+            basis = spec.lag_basis or source.lag_basis
+            return spec.lag_sessions, f"{basis} (fallback: no {PROFILE_TABLE} row)"
         return source.lag_sessions, f"{source.lag_basis} (fallback: no {PROFILE_TABLE} row)"
 
     def _load_policies(self) -> dict[str, tuple[str, ...]]:

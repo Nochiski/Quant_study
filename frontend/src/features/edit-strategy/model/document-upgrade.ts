@@ -5,13 +5,14 @@ import type { DocumentState } from "./document-state";
  * 업그레이드를 제안해야 하는 backend 구조 진단 코드.
  *
  * - `structure.unsupported_schema_version`: 문서가 스스로 지원하지 않는 버전이라고 적었다.
- * - `structure.legacy_shape`: 버전 줄은 현재 버전인데 본문이 1.0 문법이다(P1-05). 이 경우도
- *   사용자가 할 일은 업그레이드라 배너를 같이 띄운다. 어떤 문법이 1.0인지는 backend가 판정하고
- *   frontend는 코드만 본다(은퇴 버전 문자열을 갖지 않는다는 기존 규칙 그대로).
+ *
+ * `structure.legacy_shape`(버전 줄은 현재 버전인데 본문에 1.0 문법이 섞임)는 배너를 띄우지 않는다.
+ * backend는 문서가 선언한 버전을 믿어 그런 문서를 업그레이드하지 않고(422 not_upgradeable, lang2
+ * Phase 2 감사 NB-1), 진단 문장이 제자리에서 고칠 방법을 말한다. 배너를 띄우면 누를 때마다 실패하는
+ * 버튼이 된다(P1-05 DEFECT-P105-001과 같은 모순).
  */
 const UPGRADE_SUGGESTING_CODES = new Set([
   "structure.unsupported_schema_version",
-  "structure.legacy_shape",
 ]);
 
 /** 열린 revision 중 배너 판정에 필요한 봉투 필드만 받는다(생성 타입에서 파생, 복제 아님). */

@@ -111,11 +111,13 @@ def test_upgrade_of_a_saved_reference_node_is_422_unsupported_node() -> None:
     TypeAdapter(StrategyDocumentUpgrade422Response).validate_python(response.json())
 
 
-def test_a_document_the_diagnostic_calls_1_0_actually_upgrades() -> None:
-    """진단이 "업그레이드하세요"라고 시킨 문서는 버튼을 눌러서 된다(P1-05 1차 리뷰 DEFECT-P105-001).
+def test_a_current_document_with_1_0_syntax_is_a_fix_in_place_error_not_an_upgrade() -> None:
+    """Phase 2 감사 NB-1: 문서가 선언한 버전을 믿는다.
 
-    버전 줄은 현재 판인데 본문만 옛 판인 문서다. 진단과 판정이 같은 조건을 읽는지 이 경로로
-    확인한다. 결과는 곧바로 진단이 없는 현재 버전 문서다.
+    버전 줄이 현재 판인데 본문에 1.0 문법이 섞인 문서는 compile 이 `structure.legacy_shape` 로
+    제자리에서 고칠 방법을 말하고(업그레이드를 시키지 않는다), 업그레이드 endpoint 는 422
+    `not_upgradeable` 로 거절한다. 진단이 시키는 일과 endpoint 판정이 여전히 어긋나지 않는다
+    (P1-05 DEFECT-P105-001 의 계약).
     """
     client = TestClient(build_http_app())
     source = _read("quality_momentum.v1_0.commented.yaml").replace(
@@ -127,17 +129,18 @@ def test_a_document_the_diagnostic_calls_1_0_actually_upgrades() -> None:
         "/api/v1/strategy-documents/compile", json={"source": source, "format": "yaml"}
     )
     assert compiled.status_code == 200, compiled.text
-    codes = {item["code"] for item in compiled.json()["diagnostics"]}
-    assert "structure.legacy_shape" in codes
+    legacy = [d for d in compiled.json()["diagnostics"] if d["code"] == "structure.legacy_shape"]
+    assert legacy and all("업그레이드" not in d["message"] for d in legacy)
 
     upgraded = client.post(
         "/api/v1/strategy-documents/upgrade", json={"source": source, "format": "yaml"}
     )
 
-    assert upgraded.status_code == 200, upgraded.text
-    body = upgraded.json()
-    assert body["source"] == _read("quality_momentum.v1_2.commented.yaml")
-    assert body["compiled"]["diagnostics"] == []
+    assert upgraded.status_code == 422, upgraded.text
+    detail = upgraded.json()["detail"]
+    assert detail["code"] == "strategy_document.not_upgradeable"
+    assert "fix them in place" in detail["message"]
+    TypeAdapter(StrategyDocumentUpgrade422Response).validate_python(upgraded.json())
 
 
 def test_upgrade_of_a_syntax_invalid_document_is_422_with_diagnostics() -> None:

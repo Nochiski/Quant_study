@@ -115,18 +115,81 @@ def test_upgrade_reports_diagnostics_of_the_upgraded_text_without_hiding_them() 
     assert codes == ["strategy.risk.max_name_weight"]
 
 
-@pytest.mark.parametrize("version", ['"1.1"', f'"{CURRENT_SCHEMA_VERSION}"', "1.0"])
-def test_a_1_0_body_upgrades_under_any_known_version_line(version: str) -> None:
-    """버전 줄만 손으로 고친 1.0 본문도 받아 준다(P1-05 1차 리뷰 DEFECT-P105-001)."""
+def test_an_unquoted_1_0_version_line_upgrades() -> None:
+    """따옴표 없는 `schema_version: 1.0` 도 선언된 1.0 이다."""
     source = _read("quality_momentum.v1_0.yaml").replace(
-        'schema_version: "1.0"', f"schema_version: {version}"
+        'schema_version: "1.0"', "schema_version: 1.0"
     )
 
     upgraded = _service().upgrade(CompileRequest(source, SourceFormat.YAML))
 
     assert upgraded.compiled.schema_version == CURRENT_SCHEMA_VERSION
-    assert upgraded.compiled.spec is not None
-    assert upgraded.compiled.diagnostics == ()
+    assert upgraded.compiled.spec is not None and upgraded.compiled.diagnostics == ()
+
+
+@pytest.mark.parametrize("version", ['"1.1"', f'"{CURRENT_SCHEMA_VERSION}"'])
+def test_a_1_0_body_under_a_later_version_line_is_refused(version: str) -> None:
+    """Phase 2 감사 NB-1: 문서가 선언한 버전보다 앞선 단계는 타지 않는다."""
+    source = _read("quality_momentum.v1_0.yaml").replace(
+        'schema_version: "1.0"', f"schema_version: {version}"
+    )
+
+    with pytest.raises(DocumentNotUpgradeableError) as info:
+        _service().upgrade(CompileRequest(source, SourceFormat.YAML))
+    assert str(info.value.schema_version) == version.strip('"')
+
+
+# 감사 탐침(`ap2_probe_upgrade.py`) 문서: 1.2 작성자가 옛 예제를 베껴 팩터 하나에 `unary rank` 를
+# 적었고 `signal` 은 생략했다(= 1.2 기본값 `rank`).
+CURRENT_WITH_ONE_1_0_NODE = """\
+schema_version: "1.2"
+title: "1.2 문서에 옛 unary rank 한 줄"
+factors:
+  - factor_id: pbr
+    direction: low
+    graph:
+      nodes:
+        - kind: field
+          node_id: pbr
+          field_id: valuation.pbr
+        - kind: unary
+          node_id: ranked
+          operator: rank
+          input_node_id: pbr
+      output_node_id: ranked
+  - factor_id: mom
+    direction: high
+    graph:
+      nodes:
+        - kind: field
+          node_id: close
+          field_id: price.close
+        - kind: time_series
+          node_id: m
+          operator: momentum
+          input_node_id: close
+          window: 20
+      output_node_id: m
+portfolio:
+  selection_count: 20
+"""
+
+
+def test_a_current_document_with_a_1_0_node_is_fixed_in_place_not_upgraded() -> None:
+    """NB-1 회귀: 업그레이드가 `normalization: none` 을 조용히 넣고 문서에 없던 `/data/*` warning 을
+    내던 경로를 막는다. compile 은 구조 오류와 제자리 수정 방법을 말하고, 업그레이드는 거절한다."""
+    assert f'schema_version: "{CURRENT_SCHEMA_VERSION}"' in CURRENT_WITH_ONE_1_0_NODE
+    request = CompileRequest(CURRENT_WITH_ONE_1_0_NODE, SourceFormat.YAML)
+
+    compiled = _service().compile(request)
+
+    assert [(d.code, d.pointer) for d in compiled.diagnostics] == [
+        ("structure.legacy_shape", "/factors/0/graph/nodes/1/operator")
+    ]
+    assert "kind와 operator를 함께 바꾸세요" in compiled.diagnostics[0].message
+    assert "업그레이드" not in compiled.diagnostics[0].message
+    with pytest.raises(DocumentNotUpgradeableError, match="fix them in place"):
+        _service().upgrade(request)
 
 
 def test_a_future_version_line_is_refused_even_with_a_1_0_body() -> None:

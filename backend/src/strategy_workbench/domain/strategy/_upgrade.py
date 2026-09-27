@@ -287,42 +287,57 @@ def _version_text(value: object) -> str | None:
 def _chain_start(document: Mapping[str, object]) -> str:
     """체인을 시작할 버전 — 업그레이드 가능 판정의 유일한 owner.
 
-    본문에 1.0 모양이 있으면 버전 줄과 상관없이 1.0 단계부터 탄다(P1-05 DEFECT-P105-001: 진단이
-    "업그레이드하세요"라고 시킨 문서는 눌러서 된다). 1.0 step 들은 옛 모양에만 반응하므로 1.1
-    본문에 적용해도 그대로다. 다만 **버전 상한**이 있다: 버전 줄이 모르는 버전(미래 버전·손상된
-    값)이면 본문 모양과 상관없이 거절한다 — "미래 버전 + 옛 키 하나"를 1.x 로 강등해 읽으면
-    그 버전이 지우거나 뜻을 바꾼 키가 현재 모델로 조용히 해석된다(P1-05 2차 리뷰 P3-7).
-    버전 줄이 없는 1.0 본문은 받는다(미래 버전이라고 볼 근거가 없다).
+    **문서가 스스로 선언한 버전을 믿는다**(Phase 2 감사 NB-1). 체인은 선언된 은퇴 버전에서 시작하고
+    그보다 앞선 단계는 타지 않는다. 그래서 받는 문서는 버전 줄이 은퇴 버전인 것뿐이다.
+
+    - 버전 줄이 현재 판인데 1.0 모양이 섞였으면 업그레이드가 아니라 제자리에서 고칠 구조 오류다
+      (hydrate 가 `structure.legacy_shape` 로 짚는다). 체인을 1.0 부터 태우면 1.1 → 1.2 단계가
+      `normalization: none` 을 조용히 넣어 1.2 기본값 `rank` 의 뜻을 바꾸고, 문서에 없던 실행
+      설정 자리를 짚는 warning 을 낸다.
+    - 선언된 은퇴 버전보다 앞선 모양이 본문에 섞였으면(1.1 선언 + 1.0 키) 거절한다. 어느 단계부터
+      태울지 문서가 말하는 것과 본문이 다르다.
+    - 버전 줄이 없거나 모르는 버전(미래 버전·손상된 값)이면 거절한다. 모르는 버전을 1.x 로 강등해
+      읽으면 그 버전이 지우거나 뜻을 바꾼 키가 현재 모델로 조용히 해석된다(버전 상한, P1-05 2차
+      리뷰 P3-7·BACKLOG-010). 저장 row 읽기가 이 거절에 기대 fail-closed 다.
 
     Raises:
-        NotUpgradeableDocumentError: 모르는 버전이거나, 현재 버전인데 옛 모양이 없을 때.
+        NotUpgradeableDocumentError: 위 거절 사유 중 하나일 때.
     """
     raw = document.get("schema_version")
     version = _version_text(raw)
-    known = version is None or version in UPGRADE_CHAIN
-    if not known:
-        raise NotUpgradeableDocumentError(
-            raw, "schema_version is neither current nor a known retired version"
-        )
-    if legacy_shape_hints(document):
-        return UPGRADE_CHAIN[0]
     if version in FROZEN_SCHEMA_VERSIONS:
+        for stage in UPGRADE_CHAIN[: UPGRADE_CHAIN.index(version)]:
+            older = _STAGE_LEFTOVERS[stage](document)
+            if older:
+                raise NotUpgradeableDocumentError(
+                    raw,
+                    "the body carries shapes older than the declared version — "
+                    f"stage={stage} pointers={list(older)}",
+                )
         return version
+    if version == CURRENT_SCHEMA_VERSION:
+        shapes = list(legacy_shape_hints(document))
+        raise NotUpgradeableDocumentError(
+            raw,
+            "schema_version is already current; retired-version shapes in a current document "
+            f"are structure errors — fix them in place: shapes={shapes}"
+            if shapes
+            else "schema_version is already current and the body has no retired-version shapes",
+        )
+    if version is None:
+        raise NotUpgradeableDocumentError(
+            raw, "schema_version is missing — the chain starts at the declared retired version"
+        )
     raise NotUpgradeableDocumentError(
-        raw,
-        "schema_version is already current and the body has no retired-version shapes"
-        if version is not None
-        else "schema_version is missing and the body has no retired-version shapes",
+        raw, "schema_version is neither current nor a known retired version"
     )
 
 
 def is_upgradeable_document(document: Mapping[str, object]) -> bool:
-    """이 문서를 업그레이드 체인에 태울 수 있는가.
+    """이 문서를 업그레이드 체인에 태울 수 있는가 — `_chain_start` 와 같은 판정.
 
-    `_chain_start` 와 같은 판정이다: 버전 줄이 은퇴 버전이거나, 버전 줄이 현재 판·없음이고 본문이
-    옛 판 모양이면 참이다. 버전 줄이 모르는 버전(`"1.3"`·`"2.0"`)이면 본문과 상관없이 거짓이다 —
-    판정에 상한이 있다(P1-05 2차 리뷰 P3-7, BACKLOG-010). 진단 `structure.legacy_shape` 는 버전
-    줄이 현재 판일 때만 나므로(`_hydrate.py`) 진단이 시키는 문서는 모두 여기서 참이다.
+    버전 줄이 은퇴 버전이고 본문에 그보다 앞선 모양이 없을 때만 참이다. 현재 판 문서의 1.0 키는
+    `structure.legacy_shape` 진단이 제자리에서 고치라고 안내한다(업그레이드를 시키지 않는다).
     """
     try:
         _chain_start(document)
@@ -336,24 +351,27 @@ def is_upgradeable_document(document: Mapping[str, object]) -> bool:
 # 판정 조건은 1.0 단계 step들이 이미 아는 것과 같다. 어떤 문법이 1.0 것인지를 두 벌 적지 않으려고
 # step과 같은 모양을 읽는다: step이 바뀌면 이 함수도 같은 PR에서 바뀐다.
 def legacy_shape_hints(document: Mapping[str, object]) -> dict[str, str]:
-    """`schema_version`은 현재 버전인데 본문만 1.0인 문서에서, 1.0 문법이 놓인 자리와 힌트.
+    """1.0 문법이 놓인 자리와, 그 자리를 지금 문법으로 고치는 한글 힌트.
 
-    hydrate가 같은 pointer에 낸 구조 오류를 이 힌트로 바꿔 단다(`structure.legacy_shape`).
-    `expected a sequence, got dict` 같은 문장만으로는 "이건 예전 문법"이라는 사실이 보이지 않는다.
+    hydrate가 현재 판 문서에서 같은 pointer에 낸 구조 오류를 이 힌트로 바꿔 단다
+    (`structure.legacy_shape`). `expected a sequence, got dict` 같은 문장만으로는 "이건 예전
+    문법"이라는 사실이 보이지 않는다. 현재 판 문서는 업그레이드 대상이 아니므로(NB-1) 힌트는
+    업그레이드를 시키지 않고 제자리 수정만 말한다 — 진단이 시키는 일은 해서 되어야 한다.
+    같은 함수가 1.0 단계의 검증 조건(`_STAGE_LEFTOVERS`)이기도 하다.
     """
     hints: dict[str, str] = {}
     factors = document.get("factors")
     if isinstance(factors, Mapping) and "factors" in factors:
         hints["/factors"] = (
             "1.0 문법입니다. factors 아래에 또 factors 목록을 두던 방식이라 지금 버전에서는 읽지 "
-            "못합니다. 안쪽 목록을 factors 바로 아래로 올리거나 업그레이드하세요 — "
+            "못합니다. 안쪽 목록을 factors 바로 아래로 올리세요 — "
             f"expected=sequence got={type(factors).__name__}"
         )
     for section, key in REMOVED_FIELDS:
         block = document.get(section)
         if isinstance(block, Mapping) and key in block:
             hints[f"/{section}/{key}"] = (
-                f"1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우거나 업그레이드하세요 — "
+                f"1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우세요 — "
                 f"got={key!r} section={section!r}"
             )
     for pointer, node in _graph_nodes(document):
@@ -367,7 +385,7 @@ def legacy_shape_hints(document: Mapping[str, object]) -> dict[str, str]:
         # `unary` kind 자체는 1.1에도 있다. 걸리는 자리는 은퇴한 operator 값이다.
         hints[f"{pointer}/operator"] = (
             f"1.0 문법입니다. unary {operator}는 지금 버전에서 {kind}의 {renamed}로 "
-            f"옮겨졌습니다. kind와 operator를 함께 바꾸거나 업그레이드하세요 — "
+            f"옮겨졌습니다. kind와 operator를 함께 바꾸세요 — "
             f"got=unary/{operator} expected={kind}/{renamed}"
         )
     return hints

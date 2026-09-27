@@ -2773,6 +2773,28 @@ export type PortfolioUnprocessableResponse = {
 };
 
 /**
+ * PortfolioWarning
+ *
+ * 컴파일러가 tape 를 만들며 알린 경고 한 건. `message` 는 한글로 완성된 진단 문장이다.
+ */
+export type PortfolioWarning = {
+  code: PortfolioWarningCode;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * PortfolioWarningCode
+ *
+ * tape 를 막지는 않지만 결과 해석을 바꾸는 컴파일러 경고의 코드.
+ *
+ * 값은 실행 결과 매니페스트의 `DataWarning.code` 로 그대로 나간다.
+ */
+export type PortfolioWarningCode = "portfolio.sector_unknown_excluded";
+
+/**
  * ProbeFailure
  *
  * 연결 테스트가 실패한 사유.
@@ -4918,6 +4940,10 @@ export type TargetTape = {
    * Tape Hash
    */
   tape_hash: string;
+  /**
+   * Warnings
+   */
+  warnings?: Array<PortfolioWarning>;
 };
 
 /**

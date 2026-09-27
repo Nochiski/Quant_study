@@ -1004,6 +1004,80 @@ def test_preview_warnings_are_recorded_in_the_run_manifest() -> None:
     assert recorded["portfolio.raw_observation"] in preview.json()["warnings"]
 
 
+class _UnknownSectorPort:
+    """섹터 PIT 원천이 없는 실데이터 어댑터(duckdb)처럼 모든 관측의 `sector_id` 를 비운다."""
+
+    def __init__(self, delegate: MockEquityDataAdapter) -> None:
+        self._delegate = delegate
+
+    def load_raw_observations(
+        self, query: RawObservationQuery, *, checkpoint=lambda: None
+    ) -> RawObservationSet:
+        result = self._delegate.load_raw_observations(query)
+        return replace(
+            result,
+            observations=tuple(replace(item, sector_id=None) for item in result.observations),
+        )
+
+    def load_raw_observations_cancellable(
+        self, query: RawObservationQuery, *, checkpoint
+    ) -> RawObservationSet:
+        checkpoint()
+        return self.load_raw_observations(query)
+
+
+def test_unknown_sectors_keep_the_full_book_and_warn_in_preview_trace_and_run(
+    tmp_path: Path,
+) -> None:
+    """이슈 #203: 섹터 없는 관측이 기본 섹터 상한 0.3에 묶여 비중 합이 0.3이 되던 결함."""
+    delegate = MockEquityDataAdapter.demo()
+    portfolio = _service(_UnknownSectorPort(delegate), metadata=delegate)
+    template_spec = _spec()
+    # mock 은 3종목이다. 종목 상한 0.5 면 종목당 1/3 로 예산 1.0을 다 쓸 수 있다. 섹터 상한은
+    # 기본값 0.3 그대로라 섹터 없는 종목을 한 묶음으로 보면 합이 0.3으로 줄어든다.
+    spec = replace(template_spec, risk=replace(template_spec.risk, max_name_weight=0.5))
+    assert spec.risk.max_sector_weight == pytest.approx(0.3)
+
+    preview = portfolio.preview(PortfolioPreviewRequest(spec))
+
+    full_frames = [frame for frame in preview.tape.frames if len(frame.targets) == 3]
+    assert full_frames, "the probe produced no frame that selects every mock security"
+    for frame in preview.tape.frames:
+        total = sum(item.weight for item in frame.targets)
+        assert total == pytest.approx(min(1.0, 0.5 * len(frame.targets))), frame.signal_as_of
+    codes = [item.code.value for item in preview.tape.warnings]
+    assert codes == ["portfolio.sector_unknown_excluded"]
+    message = preview.tape.warnings[0].message
+    assert f"{len(preview.tape.frames)}/{len(preview.tape.frames)}" in message
+
+    # 디버거(preview 진단 화면)가 읽는 trace 응답의 경고에도 같은 문장이 실린다.
+    trace = StrategyTraceService(portfolio, InMemoryStrategyRepository()).trace(
+        StrategyTraceRequest(
+            strategy_source=InlineDraft(spec, "inline_draft", "unknown-sector-probe"),
+            as_of=spec.data.end,
+            security_ids=("sec-005930-1",),
+            factor_id=spec.factors[0].factor_id,
+        )
+    )
+    assert message in trace.warnings
+
+    # 실행 결과 매니페스트에는 컴파일러 코드 그대로 남는다(원시 관측 경고 코드로 뭉개지 않는다).
+    backtests = BacktestRunService(
+        portfolio,
+        InMemoryStrategyRepository(),
+        delegate,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        new_id=lambda: "unknown-sector-run",
+    )
+    accepted = backtests.start(BacktestRunSpec(strategy=spec, core=ExecutionCore.PYTHON))
+    state = wait_for_terminal_run(backtests, accepted.run.run_id)
+    assert state.status.value == "completed", state
+    manifest = backtests.result("unknown-sector-run").manifest
+    recorded = {item.code: item.message for item in manifest.warnings}
+    assert recorded.get("portfolio.sector_unknown_excluded") == message
+
+
 def test_run_pipeline_reports_monotonic_progress_through_every_phase() -> None:
     """이슈 #162: tape 단계가 실행 시간의 97% 를 쓰는데 진행 콜백이 없어 2% 에 고정됐다.
 

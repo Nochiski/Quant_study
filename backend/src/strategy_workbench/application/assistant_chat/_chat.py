@@ -201,12 +201,16 @@ class AssistantChatService:
         text: str,
         context: TurnContext,
         *,
+        turn_id: str,
         cancelled: Callable[[], bool] = _never_cancelled,
     ) -> Iterator[ChatEvent]:
         """사용자 메시지를 보내고 이벤트를 흘린다.
 
         세션·프로파일·비밀 확인과 사용자 메시지 저장은 호출 시점에 끝낸다(제너레이터 본문에
         두면 소비자가 순회를 시작할 때까지 오류가 숨는다).
+
+        `turn_id`는 러너가 만든 턴 id다. 이 턴의 사용자·어시스턴트 메시지가 그 값을 갖는다 —
+        턴 id의 owner는 러너이고, 여기서는 메시지에 도장만 찍는다.
         """
         session = self._sessions.get(session_id)
         profile = self._profiles.active()
@@ -218,7 +222,7 @@ class AssistantChatService:
         secret = self._secrets.get(profile.profile_id)
         self._sessions.append_message(
             session.session_id,
-            ChatMessage(role=ChatRole.USER, text=text, created_at=self._now()),
+            ChatMessage(role=ChatRole.USER, text=text, created_at=self._now(), turn_id=turn_id),
         )
         request = TurnRequest(
             system=self._context_builder.system_prompt(),
@@ -230,11 +234,14 @@ class AssistantChatService:
             max_output_tokens_per_call=self._max_output_tokens_per_call,
             max_turn_output_tokens=self._max_turn_output_tokens,
         )
-        return self._stream(session, profile, provider, secret, request, context, cancelled)
+        return self._stream(
+            session, turn_id, profile, provider, secret, request, context, cancelled
+        )
 
     def _stream(
         self,
         session: ChatSession,
+        turn_id: str,
         profile: ProviderProfile,
         provider: LlmProviderPort,
         secret: str,
@@ -351,6 +358,7 @@ class AssistantChatService:
                         role=ChatRole.ASSISTANT,
                         text="".join(text_parts),
                         created_at=self._now(),
+                        turn_id=turn_id,
                     ),
                 )
 

@@ -108,7 +108,9 @@ FACTORS: tuple[FactorSpec, ...] = (
        "FACTORS §1 V05 = (시총 + 순차입금) / (영업이익 + 감가상각). GAP-02 의 3계정 중 "
        "borrowings·depreciation 이 여기 걸린다 — 실재 판정은 dataset_profile 커버율이 한다.",
        caveat="차입금·감가상각은 fin_map 매핑이 늦게 붙어 커버 구간이 짧다 — first_usable_date "
-              "가 그 사실이다."),
+              "가 그 사실이다. 영업이익은 최근 4분기 합(TTM, #212)인데 financial.depreciation 은 "
+              "원 계정(분기 3개월 · 사업보고서 12개월)이라 기간이 다르다 — 맞추는 것은 팩터층 "
+              "몫이다."),
     _f("V06", "배당수익률", ("event.dividend_per_share", "price.close"), "factor_layer",
        "FACTORS §1 V06 = 주당배당금 / 주가.",
        caveat="배당 기준일·락일 원천이 없어 DPS 를 붙일 수 있는 날짜는 사업보고서 접수일뿐이다 "
@@ -143,7 +145,9 @@ FACTORS: tuple[FactorSpec, ...] = (
        "factor_layer", "FACTORS §2 Q06 = 부채총계 / 자본총계.", registry="financial.leverage"),
     _f("Q07", "이자보상배율", ("financial.operating_income", "financial.interest_expense"),
        "factor_layer", "FACTORS §2 Q07 = 영업이익 / 이자비용. GAP-02 interest_expense.",
-       caveat="이자비용 커버 구간이 짧다 — first_usable_date 참조."),
+       caveat="이자비용 커버 구간이 짧다 — first_usable_date 참조. 영업이익은 최근 4분기 "
+              "합(TTM, #212)인데 financial.interest_expense 는 원 계정(분기 3개월 · 사업보고서 "
+              "12개월)이라 기간이 다르다 — 맞추는 것은 팩터층 몫이다."),
     _f("Q08", "NOA 비율", ("financial.total_assets", "financial.cash",
                         "financial.total_liabilities", "financial.borrowings"), "factor_layer",
        "FACTORS §2 Q08 = 순영업자산 / 자산총계. GAP-02 borrowings.",
@@ -152,7 +156,8 @@ FACTORS: tuple[FactorSpec, ...] = (
     # 3. 성장
     _f("G01", "매출성장률", ("financial.revenue", "financial.revenue_basis",
                           "financial.revenue_basis_prev"), "equity",
-       "FACTORS §3 G01 = (당기 매출 / 전기 매출) − 1. 기준 단절을 가릴 재료를 요구 목록에 "
+       "FACTORS §3 G01 = (당기 매출 / 전기 매출) − 1. financial.revenue 는 최근 4분기 합(TTM, "
+       "#212)이라 당기·전기는 TTM 대 1년 전 TTM 이다. 기준 단절을 가릴 재료를 요구 목록에 "
        "함께 넣어 「매출만 있으면 계산된다」는 오해를 막는다.",
        caveat="**매출 기준 단절을 재료로 막는다(2026-09-08)** — financial.revenue_basis 가 "
               "financial.revenue_basis_prev 와 다르면 그 해 성장률은 결측 처리하라. 서버 현판 "
@@ -161,13 +166,15 @@ FACTORS: tuple[FactorSpec, ...] = (
               "−72% 는 전부 가짜이고 한화생명은 직전이 0이라 나눗셈 자체가 성립하지 않는다. "
               "equity 는 두 라벨을 싣기만 하고 버리지 않는다(WORKFLOW §0-2)."),
     _f("G02", "영업이익성장률", ("financial.operating_income",), "factor_layer",
-       "FACTORS §3 G02 = (당기 영업이익 / 전기) − 1."),
+       "FACTORS §3 G02 = (당기 영업이익 / 전기) − 1. financial.operating_income 은 최근 "
+       "4분기 합(TTM, #212)이라 당기·전기는 TTM 대 1년 전 TTM 이다."),
     _f("G03", "자산성장률", ("financial.total_assets",), "factor_layer",
        "FACTORS §3 G03 = (당기 자산 / 전기) − 1. 역방향 팩터다.",
        registry="financial.asset_growth"),
     _f("G04", "EPS 성장률", ("financial.net_income", "price.shares_outstanding"), "equity",
        "FACTORS §3 G04 = (당기 EPS / 전기) − 1 이고 **EPS = 순이익 ÷ 주식수**다 — 나눗셈은 "
-       "팩터층 몫이라는 F05·V02 와 같은 규약이다.",
+       "팩터층 몫이라는 F05·V02 와 같은 규약이다. financial.net_income 은 최근 4분기 합(TTM, "
+       "#212)이라 EPS 도 TTM EPS 다.",
        caveat="**요구 재료를 바꿨다(2026-09-08)** — 옛 선언은 `financial.eps_basic` 을 가리켰는데 "
               "그 원장 값은 **주식분할 미조정**이라(삼성전자 2018 1분기 85,435 vs 사업보고서 "
               "6,461 — 50:1 분할) 시계열 비율이 분할 구간에서 13배 가짜 점프를 낸다. 재료를 "

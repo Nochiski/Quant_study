@@ -20,7 +20,9 @@
   12개월 값이고, 연속 4분기가 공시일 기준으로 전부 접수됐을 때만 값이 선다. 4분기를 채울 수 없으면
   결측이며 3개월·연간 값으로 대신하지 않는다(이슈 #212). 잔고 필드 `financial.book_equity`·
   `total_assets`·`total_liabilities`는 보고 기간 말 시점 값이라 TTM 대상이 아니다. ROE·ROA·이익수익률
-  같은 비율은 TTM 분자와 최신 잔고 분모를 쓴다
+  같은 비율은 TTM 분자와 최신 잔고 분모를 쓴다. field_id·registry version·data snapshot id는
+  그대로라 이 변경(2026-09-27) 이전 실행과 재현 지문이 같아도 재무 팩터 값은 다르다 — 이전 실행
+  결과와 재무 팩터 값을 직접 비교하지 않는다
 - `factor_id`, registry version, graph hash, data snapshot, parameters, as-of range가 재현성 키를 구성
 
 | # | Factor ID | Category | Preference | Required Equity fields | Min history | Status |

@@ -6,7 +6,7 @@ current_phase: P1,P2
 current_pr: P1-06,P2-01,P2-02,P2-03,P2-04,P2-05,P2-06,P2-07,P2-08
 active_prs: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08]
 parallel_window: [P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08]
-last_updated: 2026-09-27T09:33:46+09:00
+last_updated: 2026-09-27T09:50:42+09:00
 planned_prs: 29
 merged_prs: 6
 approved_prs: 11
@@ -29,7 +29,7 @@ progress_percent: 21
 | Active PR | `P1-06, P2-01, P2-02, P2-03, P2-04, P2-05, P2-06, P2-07, P2-08` |
 | Progress | `6 / 29 merged (21%)` |
 | Approved | `11 / 29` |
-| Aggregated at | `2026-09-27 09:33 KST` |
+| Aggregated at | `2026-09-27 09:50 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -288,7 +288,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | PR | `P2-08` |
 | Intent | 완료 정의 아이디어 5개를 backend 수준에서 닫고(hydrate·검증·미리보기), 실데이터 어댑터가 그룹 필드(`group_series`)를 줄 수 있는지 확인한다 |
 | Acceptance | WORKFLOW P2-08 |
-| Non-goals | 그래프 탭에서 아이디어를 만드는 e2e(P5-03), 레시피 빌더의 node_id 명명(P5-01, 아래 결정 3), duckdb 그룹 필드 제공(원천 없음, 결정 1), 실데이터 섹터 상한 결함(아래 변경 기록 관찰, 리드 판단 대기) |
+| Non-goals | 그래프 탭에서 아이디어를 만드는 e2e(P5-03), 빌더 쪽 node_id 생성 테스트(P5-01, 아래 결정 3), duckdb 그룹 필드 제공(원천 없음, 결정 1), 실데이터 섹터 상한 결함(이슈 #203, main 별도 수정), mock·duckdb 필드 계약 불일치(이슈 #207) |
 | Branch/worktree | `feat/lang2-p2-08-ideas` / `wt-lang2-p2-08` |
 | Base SHA | P2-07 tip `945fd081`. 착수는 `6e397a3b` 에서 했고 P2-07 의 통합 브랜치 merge 와 리뷰 반영을 merge 로 따라갔다 |
 | Head SHA | PR [#205](https://github.com/Nochiski/Quant_study/pull/205) 본문 참조(게이트 실측 SHA 와 같이 적는다) |
@@ -316,11 +316,15 @@ P2-08 결정 6건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 �
    두 어댑터 계약을 대조한다. 기존 필드 값은 그대로라 mock `snapshot_id` 는 올리지 않았다 — 캐시 키에는
    spec hash(필드 id 포함)가 들어가 새 필드 질의가 옛 결과와 섞일 수 없다. 대안(ROE 를 mock 에 있는 필드로
    바꾸기)은 아이디어의 의미를 바꾸므로 버렸다.
-3. **node_id 는 spec D2 의 아이디어 3 정본 예시를 따랐다.** 잎은 필드 id 의 끝 조각(`close`, 두 번째는
-   `close_2`), 단계는 뜻 있는 이름(`ma20`·`breakout`·`mom_12_1`·`vol_60`)이다. spec D2 본문은 빌더가
-   node_id 를 `<operator>_<n>` 으로 채운다고도 적어 두 문장이 어긋난다. node_id 는 canonical payload 에
-   들어가므로 P5-03 의 "빌더 산출물과 같은 hash" 단언은 P5-01 빌더 명명이 이 fixture 와 같아야 성립한다.
-   P5-01 이 명명을 정할 때 이 fixture 를 기준으로 삼거나 fixture 를 함께 고친다.
+3. **node_id 는 빌더 규칙이 정본이다(리드 결정, 2026-09-27).** spec D2 본문(빌더가 `<operator>_<n>` 으로
+   짓는다)과 아이디어 3 예시(`ma20`·`breakout`)가 어긋났다. 사용자가 빌더로 만든 문서가 실제 산출물이고
+   node_id 는 `spec_hash` 에 들어가므로 빌더 규칙을 정본으로 하고 fixture·spec 예시를 고쳤다. 규칙은
+   기존 `suggestNodeId` 와 같다: 바탕 이름을 그대로 쓰고 같은 그래프 안에서 겹치면 `_2`·`_3` … 을 붙인다.
+   바탕 이름은 단계가 연산자(`mean`·`gt`·`momentum`·`std`·`divide`), 잎이 필드 id 끝 조각(`close`·`close_2`)
+   이다. 팩터 그래프마다 이름 공간이 따로라 변동성 팩터의 수익률 단계도 `momentum` 이다.
+   `test_idea_fixtures.py::test_node_ids_follow_the_recipe_builder_naming` 이 fixture 쪽을, P5-01
+   acceptance 에 예약한 테스트가 빌더 쪽을 고정한다. 잎 바탕 이름(필드 id 끝 조각)은 spec D2 가 적지
+   않던 부분이라 같은 커밋에서 spec D2 에 적었다.
 4. **아이디어 4·5 의 빈칸을 채웠다.** spec 5절은 이름만 적는다. 아이디어 4 는 `price.trading_value`
    `top_percent 0.2` 유니버스 조건 + 60 세션 모멘텀, 아이디어 5 는 12-1 모멘텀(알파) + 일간 수익률
    (`momentum window 2`)의 60 세션 표준편차(변동성, `direction: low`) 두 벌이고 `weighting: risk`,
@@ -714,7 +718,7 @@ Phase exit:
 | [ ] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `APPROVED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 워크트리 `wt-lang2-p2-05`, 브랜치 `feat/lang2-p2-05-eligibility` · 1차 REQUEST_CHANGES(P2 2·P3 2) → `641c6f3b`·`efd6a768` · 2~5차 **APPROVE**. 3차 재배치 때 첫 커밋 `a35c1e40` 에 P2-04 새 테스트 한 줄의 enum 개명을 넣었고, P2-04 3차 재현 테스트 `8587d413` 를 더했다. P2-04 5차 반영 tip `35089901` 위로 rebase(코드 변경분 동일). 게이트는 push tip 에서 재실행(PR 댓글) |
 | [ ] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `APPROVED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 **APPROVE**(blocking 0 · P2 1 · P3 4, 전부 반영: `77bd713c`·`7b707660`) · 워크트리 `wt-lang2-p2-06`, 브랜치 `feat/lang2-p2-06-risk-factor` · base P2-05 tip `4262796f` · 커밋 7개(BACKLOG-001 → `saved_*` 제거 → `risk_factor_id` → 계약 산출물 → 생성 SDK → frontend 소비자 → 시각 기준선) + 이 PLAN 커밋. 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `IN_REVIEW` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · 워크트리 `wt-lang2-p2-07`, 브랜치 `feat/lang2-p2-07-compile-gate` · base `lang2/integration`(통합 머지 `c72f6257` 을 merge, 처음 착수는 P2-06 tip `36060527`) · 커밋 14개(BACKLOG-003 → 승격·출력 타입 → 필드 계약·capability → 무결성 테스트 → 단위 경고 → property → 계약 산출물 → 생성 SDK → 스토리·e2e → SoT → PLAN → 리뷰 P1 반영: 그래프 밖 필드 참조 → PLAN → 리뷰 P3-2 테스트) + 리뷰 반영 문서 · 게이트는 push tip 에서 실측(PR 본문) |
-| [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `IN_REVIEW` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 워크트리 `wt-lang2-p2-08`, 브랜치 `feat/lang2-p2-08-ideas` · base P2-07 tip `945fd081`(착수 `6e397a3b`, 이후 P2-07 을 merge 로 따라감) · 커밋 6개(BACKLOG-015 → mock 필드 → 아이디어 fixture·테스트 → 스파이크 결론 → 스토리 비고 → 이 PLAN) · `GROUP_SERIES` 는 `unsupported` 유지(원장에 PIT 섹터 시계열 없음) · 게이트는 push tip 에서 실측(PR 본문) |
+| [ ] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `IN_REVIEW` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 워크트리 `wt-lang2-p2-08`, 브랜치 `feat/lang2-p2-08-ideas` · base P2-07 tip `945fd081`(착수 `6e397a3b`, 이후 P2-07 을 merge 로 따라감) · 커밋 8개(BACKLOG-015 → mock 필드 → 아이디어 fixture·테스트 → 스파이크 결론 → 스토리 비고 → PLAN → 리드 결정 반영: 빌더 node_id → 문서·이 PLAN) · `GROUP_SERIES` 는 `unsupported` 유지(원장에 PIT 섹터 시계열 없음) · 게이트는 push tip 에서 실측(PR 본문) |
 | [ ] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `WAITING` | — |
 
 Phase exit:
@@ -840,6 +844,14 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-27 — P2-08 리드 결정 반영. (1) node_id 는 spec D2 빌더 규칙이 정본이다. `ideas/*.yaml` 5개의
+  단계 node_id 를 빌더 이름(`mean`·`gt`·`momentum`·`std`·`divide`)으로 바꾸고 spec D2 아이디어 3 예시와
+  WORKFLOW P2-08 문장을 고쳤다. P5-01 acceptance 에 "빌더 node_id 생성 규칙이 ideas fixture 와 일치
+  (테스트로 고정)"을 예약했다(결정 3). (2) 실데이터 미리보기 기간 2021-01-04 ~ 2022-12-29 는 홀드아웃
+  기준(측정은 2020-03-19 이후, 규칙 정본은 미머지 PR #100) 안이다. 비중 합 0.3 은 이슈 #203 때문이다.
+  (3) P2-07 의 그래프 밖 필드 판정(`bf07bc11`)을 merge 로 따라간 뒤, mock 두 필드를 뺀 상태로
+  `test_idea_fixtures.py` 를 돌려 compile 이 `strategy.expression.field_missing`(`financial.net_income`,
+  그래프 필드)과 `strategy.field.missing`(`price.trading_value`, eligibility 규칙)을 내는 것을 확인했다.
 - 2026-09-27 — P2-08 구현(`IN_REVIEW`, [#205](https://github.com/Nochiski/Quant_study/pull/205)).
   `backend/tests/fixtures/strategy_documents/ideas/*.yaml` 5개(12-1 모멘텀·저PBR + 고ROE·20일 이평 돌파·거래대금
   상위 20%·변동성 역가중)를 레시피 빌더 산출 형태로 두고, mock 필드 계약으로 compile(진단 코드 집합까지)·
@@ -855,10 +867,12 @@ Phase exit:
   줄인다.** duckdb 어댑터는 `sector_id=None` 이라 `domain/portfolio/_compiler.py` 의 `_apply_sector_constraints`
   가 선정 종목 전부를 `"__unknown__"` 한 섹터로 묶고 기본 `max_sector_weight 0.3` 으로 스케일한다. 위 실데이터
   미리보기에서 23 프레임 모두 목표 비중 합이 0.3 이었다(종목당 0.05 × 0.3). 경고 없이 현금 70% 로 도는 silent
-  wrong result 다. mock 은 종목마다 섹터가 달라 테스트가 못 잡는다. 리드에게 4요소로 보고했고 처리 방식은 판단
-  대기다. (2) mock 과 duckdb 의 필드 계약이 두 필드에서 다르다 — `consensus.forward_eps` 단위(mock `KRW/share`,
+  wrong result 다. mock 은 종목마다 섹터가 달라 테스트가 못 잡는다. 리드가 이슈
+  [#203](https://github.com/Nochiski/Quant_study/issues/203)으로 등록했고 1안(섹터를 모르는 종목은 섹터
+  상한에서 빼고 경고)으로 main 에서 별도 수정한다. P2-08 은 고치지 않는다. (2) mock 과 duckdb 의 필드 계약이 두 필드에서 다르다 — `consensus.forward_eps` 단위(mock `KRW/share`,
   duckdb `KRW`), `credit.margin_balance` 단위·값 타입(mock `KRW`·amount, duckdb `shares`·count). mock 에서
   통과한 단위 판정이 실데이터에서 달라질 수 있다. 아이디어 fixture 는 이 두 필드를 쓰지 않는다.
+  이슈 [#207](https://github.com/Nochiski/Quant_study/issues/207)로 등록됐다.
 
 - 2026-09-27 — P2-07 구현(`IN_REVIEW`, [#201](https://github.com/Nochiski/Quant_study/pull/201)). compile 이
   연결된 어댑터의 필드 계약(`FieldCatalogPort`)으로 `field_missing`·그룹 연산 capability
@@ -1448,7 +1462,7 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 
 - **상황**: P2-07 이 boolean 팩터 출력을 hydrate 에서 0/1 로 승격한다. 승격 노드(`__promote_<factor>`
   조건 노드와 상수 `_one`·`_zero`)는 compile 된 spec 에만 있고 사용자 문서에는 없다.
-- **인풋**: 출력이 비교 노드인 팩터(아이디어 3, `breakout(gt, close_2, ma20)`)를 편집기에서 compile 하고
+- **인풋**: 출력이 비교 노드인 팩터(아이디어 3, `gt(close_2, mean)`)를 편집기에서 compile 하고
   실행 계획 탭·디버거 노드 목록을 연다.
 - **에러 위치**: `frontend/src/features/edit-strategy/model/use-execution-plans.ts:151-160`(compile spec 의
   `factor.graph` 로 설명 요청)과 `nodePointerById`(`:181-190`) — 승격 노드의 index 가 문서 노드 목록

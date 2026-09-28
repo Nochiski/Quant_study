@@ -565,6 +565,10 @@ def _factor_field_value(
         return (security_index - 1) * 100_000_000.0 + trend * 10_000
     if field_id == "short.short_balance_ratio":
         return 0.01 + security_index * 0.015 + (session_index % 7) * 0.0001
+    if field_id == "price.shares_outstanding":
+        # 신용잔고(800만 주대)보다 커야 잔고율이 0~1 사이에 선다 — 잔고율은 약 0.2% 다. 창 안에서
+        # 바뀌지 않는다.
+        return 5_000_000_000.0 + security_index * 500_000_000.0
     if field_id == "credit.margin_balance":
         # 주식수 축(원장 정본 단위 shares, #207)
         return 8_000_000.0 + security_index * 1_000_000.0 + trend * 10

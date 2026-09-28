@@ -57,8 +57,9 @@ def test_http_adapter_exposes_real_mock_equity_catalog() -> None:
     )
     assert sector["value_type"] == "category"
     assert payload["snapshot"]["point_in_time"] is True
-    # 원주가·수정주가(이슈 #214), TTM 순이익(#212, P2-08 아이디어도 쓴다), 거래대금(P2-08) 포함
-    assert payload["total"] == 12
+    # 원주가·수정주가(이슈 #214), TTM 순이익(#212, P2-08 아이디어도 쓴다), 거래대금(P2-08),
+    # 신용잔고율 분모 상장주식수(#234) 포함
+    assert payload["total"] == 13
 
 
 def test_equity_catalog_filters_and_paginates_over_http() -> None:
@@ -71,9 +72,9 @@ def test_equity_catalog_filters_and_paginates_over_http() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["total"] == 3
+    assert payload["total"] == 4
     assert payload["page"] == 2
-    assert payload["page_count"] == 3
+    assert payload["page_count"] == 4
     assert payload["fields"][0]["field_id"] == "price.market_cap"
 
 

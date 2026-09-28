@@ -144,10 +144,19 @@ def _implemented_graphs() -> dict[str, FactorGraph]:
             output_node_id="mean",
         ),
         "short.short_balance_ratio": _field_graph("short.short_balance_ratio"),
+        # 잔고율(잔고 주식수 / 상장주식수)의 20세션 변화. 원 주식수의 변화율은 분할·병합을 신용
+        # 급증으로 읽고(035720 5:1 분할 뒤 +300%) 작은 첫 값에서 폭주했다(#234).
+        # 두 필드는 각자 dataset_profile 랙(신용잔고 3 · 주식수 1)대로 들어온다. 기준일로 맞추려고
+        # 주식수를 2세션 더 물리지 않는다 — 액면 분할·병합·감자에서 신용잔고 원천은 거래정지
+        # 첫날부터 새 주식수 단위로 바뀌어(주식수 급변일보다 대개 0~2세션 앞) 랙 그대로 나눌 때
+        # 사건 구간 튐이 가장 작다. 무상증자는 원천이 새 단위로 바뀌지 않아 약 20세션 음의 편향이
+        # 남는다(#249).
         "credit.margin_balance_change_20d": FactorGraph(
             nodes=(
                 FieldNode("balance", "credit.margin_balance", "field"),
-                TimeSeriesNode("change", TimeSeriesOperator.MOMENTUM, "balance", 20, "time_series"),
+                FieldNode("shares", "price.shares_outstanding", "field"),
+                BinaryNode("ratio", BinaryOperator.DIVIDE, "balance", "shares", "binary"),
+                TimeSeriesNode("change", TimeSeriesOperator.DELTA, "ratio", 20, "time_series"),
             ),
             output_node_id="change",
         ),
@@ -516,11 +525,11 @@ _SEEDS = (
     ),
     _CatalogSeed(
         "credit.margin_balance_change_20d",
-        "신용잔고 변화",
+        "신용잔고율 변화",
         FactorCategory.CREDIT,
         FactorPreference.LOW,
         "ratio",
-        ("credit.margin_balance",),
+        ("credit.margin_balance", "price.shares_outstanding"),
         20,
     ),
     _CatalogSeed(

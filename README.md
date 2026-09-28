@@ -265,6 +265,10 @@ uv run server
 `frontend/e2e/README.md`). 실데이터 security_id는 `{ticker}:{span_seq}`(예: `005930:1`)이며 실행 설정의
 벤치마크는 비우면 벤치마크 없이 실행한다.
 
+기동 뒤에는 서버 로그의 부팅 경고를 한 번 본다. `catalog_columns_missing`·`catalog_macro_unreadable`은 그
+원천의 필드를 빼고 떴다는 뜻이라 카탈로그를 다시 만들고(`ledger_sync catalog`), `profile_lag_fallback`은
+`dataset_profile`이 없거나 행이 빠져 폴백 랙으로 읽는다는 뜻이라 `sync`로 그 표를 받는다(LEDGER_SYNC §5).
+
 ## 검증: Zipline 대조
 
 엔진 회계는 Zipline과의 세션 단위 equity 대조로 검증됐다 — buy-hold, 골든크로스, 슬리피지

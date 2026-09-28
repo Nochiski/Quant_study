@@ -757,8 +757,12 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 | `flow.*`·`short.*`·`credit.*`(격자) | 원장 날짜 당일 | 원장 날짜 **다음** 세션 |
 
 **이 변경으로 백테스트 성과는 대체로 나빠진다.** 예전 숫자가 낙관 방향으로 틀려 있었기 때문이고,
-지금 값이 맞는 값이다. `dataset_profile` 이 없는 옛 루트는 예전처럼 동작하되
-`list_fields()` 의 `available_date_basis` 에 `fallback` 이라고 적힌다 — 조용히 되돌아가지 않는다.
+지금 값이 맞는 값이다. `dataset_profile` 이 없는 옛 루트(또는 대장에 행이 없는 필드)는 어댑터의
+폴백 랙(`_specs.py` 의 `SourceSpec.lag_sessions`·`FieldSpec.lag_sessions`)으로 읽는다. 폴백 랙은 원장
+선언의 사본이라 값이 같고(`backend/tests/contract/test_equity_fallback_lag.py` 가 원장 `rules_s19` 선언과
+대조한다, 이슈 #246 · PR #255), `list_fields()` 의 `available_date_basis` 에 `fallback` 이 적히며 부팅
+로그에 `profile_lag_fallback` 경고가 한 번 남는다. 원장 선언이 바뀌면 폴백 루트만 어긋나므로
+`dataset_profile` 을 받아 둔다.
 필드마다 더 늘리고 싶으면 질의의 `lag_overrides` 를 쓴다(줄일 수는 없다).
 
 ---
@@ -772,7 +776,8 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
   + **대장 2표**(`dataset_profile`·`factor_readiness`). 가격/모멘텀/변동성 전략용.
 - `full` 21표 ≈ 3.7GB: 재무·컨센서스·의견·수급·공매도·신용·배당·지분 추가.
 - **`dataset_profile` 을 빼면 안 된다**(216KB). 어댑터가 필드별 공개시차를 이 표에서 읽는다 —
-  없으면 원천 상수(전부 0세션)로 폴백해 한 세션 이른 값이 나온다(위 「소비자가 먼저 알 것」 ②).
+  없으면 원장 선언을 옮겨 둔 폴백 랙으로 읽고 부팅 때 `profile_lag_fallback` 경고를 남긴다. 값은 지금
+  원장과 같지만 원장 선언이 바뀌면 이 루트만 조용히 어긋나므로 받아야 한다(위 「소비자가 먼저 알 것」 ②).
 - **`_pinned/` 은 받지 않는다** — 재빌드 시 stage 입력을 고정한 하드링크 사본이라 읽기에 불필요하고,
   rsync 하면 하드링크가 풀려 실제 크기(수 GB)로 복사된다. `_asof/`·`_tmp/`·`_failed/` 도 같다.
 - 스크립트가 `baseline.json` 을 함께 받고 **카탈로그를 다시 만든다**. 매크로 본문이 절대경로를
@@ -789,3 +794,12 @@ cd backend && uv run --extra parquet --extra equity server
 `ValueError` 로 죽는다 — 조용한 mock 폴백은 없다. 구현은
 `backend/src/strategy_workbench/bootstrap/_http.py` 의 `runtime_equity_selection()`,
 회귀 테스트는 `backend/tests/test_http_equity_env.py`.
+
+**기동 뒤 부팅 로그 경고** — duckdb 어댑터는 아래 경우에 뜨기는 하되 로그에 경고를 남긴다. 코드는 경고
+문장 안 괄호에 있다.
+- `catalog_columns_missing` — 옛 카탈로그라 매크로에 원천이 읽는 열이 없다(#233). 그 원천의 필드를
+  뺀다. 카탈로그를 다시 만든다(`ledger_sync catalog` 또는 `python -m equity … catalog`).
+- `catalog_macro_unreadable` — 매크로가 가리키는 parquet 가 빠졌거나 손상됐다(#245). 그 원천의 필드를
+  뺀다. `ledger_sync verify` 로 파일을 확인하고 카탈로그를 다시 만든다.
+- `profile_lag_fallback` — `dataset_profile` 에 랙 행이 없는 필드를 폴백 랙으로 읽는다(#255). 필드는
+  빠지지 않는다. `dataset_profile` 을 받는다(`ledger_sync`).

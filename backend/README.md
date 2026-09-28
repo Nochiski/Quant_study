@@ -139,8 +139,12 @@ bootstrap ─> application + adapters
 `adapters/outbound/equity_duckdb/_specs.py`(`FIELD_SPECS`)이고 지금 30개다(price 7·financial 8·consensus 6·
 flow 3·short 2·credit 1·event 3). 새 필드는 이 표에 한 행을 더한다. 표에 없는 field_id는 `list_fields()`
 밖이고 질의하면 `INVALID_QUERY`이며, 사유는 `UNSUPPORTED_FIELDS`가 적는다. 필드별 공개 랙의 정본은 원장
-`dataset_profile`의 `recommended_lag_sessions`이고 adapter가 부팅할 때 읽는다. domain/application은
-수정하지 않는다. mock으로 조용히 fallback하지 않고 bootstrap에서 adapter를 명시적으로 고른다.
+`dataset_profile`의 `recommended_lag_sessions`이고 adapter가 부팅할 때 읽는다. 표가 없거나 행이 빠진
+필드는 `_specs.py`의 폴백 랙(`SourceSpec.lag_sessions`·`FieldSpec.lag_sessions`)으로 읽는데, 이 값은
+원장 선언의 사본이고 `tests/contract/test_equity_fallback_lag.py`가 원장 선언과 대조한다. 폴백을 쓰면
+부팅 로그에 `profile_lag_fallback` 경고가 한 번 남고, 해법은 `ledger_sync`로 `dataset_profile`을
+동기화하는 것이다(#255). domain/application은 수정하지 않는다. adapter 자체는 mock으로 조용히
+fallback하지 않고 bootstrap에서 명시적으로 고른다.
 
 ## 현재 골격
 

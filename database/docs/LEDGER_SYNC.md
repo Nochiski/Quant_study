@@ -98,12 +98,15 @@ project 만, 없으면 mock 릴리스 게이트만 돈다 — `frontend/e2e/READ
 `catalog` 산출물이다(서버 것으로 덮으면 워크벤치의 stale-catalog 가드가 무력화된다).
 
 워크벤치 duckdb 어댑터는 뜰 때 원천마다 카탈로그 매크로를 읽을 수 있는지 보고, 못 읽는 원천의 필드만
-빼고 뜬다. 이때 부팅 로그에 경고가 남으면 로컬 카탈로그를 다시 만든다(`ledger_sync catalog`).
+빼고 뜬다. 이때 부팅 로그에 아래 앞 두 경고가 남으면 로컬 카탈로그를 다시 만든다(`ledger_sync catalog`).
 
 - `catalog_columns_missing` — 옛 카탈로그라 매크로에 원천이 읽는 열이 없다(예 `v_fin_latest` 의
   `period_frontier`, #233). 그 원천(재무)의 필드가 빠진다.
 - `catalog_macro_unreadable` — 매크로가 가리키는 parquet 가 빠졌거나 손상돼 매크로를 읽을 수 없다(#245).
   파일 손상이 의심되면 카탈로그를 만들기 전에 `verify --offline` 으로 파티션 해시부터 확인한다.
+- `profile_lag_fallback` — 루트에 `dataset_profile` 이 없거나 랙 행이 빠진 필드가 있어 어댑터가 그 필드를
+  폴백 랙으로 읽는다(#255). 필드는 빠지지 않고 폴백 값도 원장 선언과 같지만, 원장 선언이 바뀌면 이 루트만
+  어긋난다. 카탈로그 재생성으로는 풀리지 않는다 — `sync` 로 `dataset_profile` 표를 받는다.
 
 빠진 필드와 사유는 `EQUITY_FIELD_MAP.md` §3 「부팅 검사」에 정리돼 있다.
 

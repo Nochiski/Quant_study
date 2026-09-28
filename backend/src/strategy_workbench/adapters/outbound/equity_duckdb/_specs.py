@@ -138,9 +138,16 @@ class FieldSpec:
     # 분할·증자 조정 없는 원주가 시계열이면 시점 간 변화를 잴 때 쓸 조정 필드 id(BACKLOG-018).
     # compile 이 필드 계약(`FieldMetadata.adjusted_field_id`)으로 읽어 warning 을 낸다.
     adjusted_field_id: str | None = None
+    # 원천 폴백 랙(`SourceSpec.lag_sessions`)과 다른 필드만 적는다. 한 원천 안에서 원장
+    # dataset_profile 의 랙이 갈리는 경우다(price 원천의 market_cap·shares_outstanding, 이슈 #246).
+    lag_sessions: int | None = None
+    lag_basis: str | None = None
 
 
 # ── 원천 (읽는 자리) ──────────────────────────────────────────────────────────
+# 폴백 랙은 원장 dataset_profile(S19) 선언과 같다. 표가 없는 루트(옛 루트·부분 동기화 루트)에서도
+# 원장보다 짧게 읽으면 공개 전 값을 조용히 쓰게 된다(silent look-ahead, 이슈 #246). 같은지는
+# `tests/contract/test_equity_fallback_lag.py` 가 원장 선언과 대조한다.
 
 _PRICE_LAG_BASIS = (
     "price_daily.available_date = date (S04 available_rule — 가격류 stage lag_known=true, 공표 "
@@ -150,23 +157,32 @@ _ADJ_LAG_BASIS = (
     "price_adj_daily.available_date = date (S23 available_rule — fold_date = greatest(apply_date, "
     "available_date) 규약상 접힌 계수는 전부 그날 이전에 공개됐다) → 0 세션"
 )
+_SHARES_LAG_BASIS = (
+    "price_daily.shares_out ← stg_listing_daily(stage lag_known=false) — KRX 일별 마스터 게시 "
+    "시각을 모른다 → dataset_profile(S19) 선언과 같은 1 세션"
+)
 _DART_LAG_BASIS = (
-    "available_date = rcept_dt (DART 접수일, basis derived) — 접수일 자체가 공개일이라 세션 랙을 "
-    "더하면 이중 계산이다 → 0 세션"
+    "available_date = rcept_dt (DART 접수일, basis derived) — 접수 시각 미제공이라 그날 장중에 쓸 "
+    "수 있었는지 모른다 → dataset_profile(S19) 선언과 같은 1 세션"
 )
 _CONSENSUS_LAG_BASIS = (
-    "views.CONSENSUS_LAG_SESSIONS=0 — wise available_date = fetched_date(measured), v3 = "
-    "collected_date(measured)로 둘 다 우리가 실제로 관측한 날이다"
+    "wise available_date = fetched_date(measured), v3 = collected_date(measured) — 관측 시각은 "
+    "미측정이라 dataset_profile(S19) 선언과 같은 1 세션(v3 의 +1영업일은 dataset_profile 이 "
+    "적용한다)"
 )
 _OPINION_LAG_BASIS = (
     "opinion_daily.available_date = obs_date — wise 는 measured(fetched_date), v3 는 default + "
-    "coverage_degraded(수집 시각 컬럼 없음, DESIGN §4-6) → 0 세션이되 v3 구간은 잰 값이 아니다"
+    "coverage_degraded(수집 시각 컬럼 없음, DESIGN §4-6) → dataset_profile(S19) 선언과 같은 1 "
+    "세션이되 v3 구간은 잰 값이 아니다"
 )
 _GRID_LAG_BASIS = (
     "available_date = date (basis default) — S08~S10 stage 원천이 전부 lag_known=false 라 공표 "
-    "시각을 모른다. 랙 0 은 '원장 날짜가 곧 그날 알 수 있던 날' 이라는 **가정**이고 신용잔고는 "
-    "실제로 T+1 공표다 → 세션 랙 확정은 dataset_profile(S19) 몫이니 그때까지 소비자가 "
-    "lag_overrides 로 물려 써야 한다(FIELD_MAP §3 S09 주석)"
+    "시각을 모른다 → 익일 지식으로 쓴다. dataset_profile(S19) 선언과 같은 1 세션"
+)
+_CREDIT_LAG_BASIS = (
+    "available_date = 잔고 기준일 (basis default) — 공표는 T+2 이나 우리 체인은 T+3 아침에 받는다"
+    "(stage lag_known=false, 실입수 observed − date = +3일) → dataset_profile(S19) 선언과 같은 "
+    "3 세션(EQUITY_FIELD_MAP DEFECT-E01 정정)"
 )
 
 SOURCE_SPECS: tuple[SourceSpec, ...] = (
@@ -222,7 +238,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         row_filter="period_frontier",
         # 같은 접수일에 여러 기간이 실리면(정정 일괄 재제출) 최신 기간·최신 보고서 종류를 고른다.
         pick_order="period_end DESC, report_code DESC",
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_DART_LAG_BASIS,
         requires=(FIN_TABLE, DISCLOSURE_TABLE, CORP_TICKER_TABLE, FIN_MACRO),
         frequency="quarterly",
@@ -243,7 +259,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         # 관측 달 이후로 끝나는 회계기간(= FY1 이상)만 남기고 그 중 가장 가까운 기간을 고른다.
         row_filter="metric = 'eps' AND target_period >= strftime(obs_month, '%Y%m')",
         pick_order="target_period ASC, obs_month DESC",
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_CONSENSUS_LAG_BASIS,
         requires=(CONSENSUS_TABLE, CONSENSUS_MACRO),
         frequency="monthly",
@@ -261,7 +277,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         reduce=Reduce.PICK,
         row_filter="metric = 'revenue' AND target_period >= strftime(obs_month, '%Y%m')",
         pick_order="target_period ASC, obs_month DESC",
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_CONSENSUS_LAG_BASIS,
         requires=(CONSENSUS_TABLE, CONSENSUS_MACRO),
         frequency="monthly",
@@ -281,7 +297,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         # 같은 (ticker, obs_date) 에 wise·v3 가 공존한다(DESIGN §4-6) — 잰 판본(coverage_degraded
         # = FALSE = wise)을 먼저 고르고 동률은 src 사전순. 겹친 구간의 값은 5축 전부 일치했다(P37).
         pick_order="coverage_degraded NULLS LAST, src",
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_OPINION_LAG_BASIS,
         requires=(OPINION_TABLE,),
         frequency="daily",
@@ -301,7 +317,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         # 종류(stock_knd) 축을 접는다 — 값이 있는 행 우선, 최신 사업연도, 동률은 stock_knd 사전순
         # (한글 정렬상 '보통주' 가 '우선주' 앞). 고른 한 값이 그 법인의 전 종류주 티커로 나간다.
         pick_order="(dps_krw IS NULL), bsns_year DESC, reprt_code DESC, stock_knd",
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_DART_LAG_BASIS,
         requires=(DIVIDEND_TABLE, CORP_TICKER_TABLE),
         frequency="annual",
@@ -319,7 +335,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         reduce=Reduce.SUM,
         row_filter="event_type = 'tsstk_aq'",
         pick_order=None,
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_DART_LAG_BASIS,
         requires=(EVENT_TABLE,),
         frequency="event",
@@ -345,7 +361,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         # 고른 한 행의 값이 그대로 나가고, 두 원천이 겹치는 셀은 절단본 0 이며 서버에서도
         # `EG3_flow_daily.n_src_overlap` 이 매 빌드 센다. `src` 자체는 필드로 내지 않는다.
         pick_order="(src IS DISTINCT FROM 'kiwoom'), src",
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_GRID_LAG_BASIS,
         requires=(FLOW_TABLE,),
         frequency="daily",
@@ -364,7 +380,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         reduce=Reduce.NONE,
         row_filter=None,
         pick_order=None,  # grain (date, ticker) — 격자 셀당 1행
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_GRID_LAG_BASIS,
         requires=(SHORT_TABLE,),
         frequency="daily",
@@ -383,7 +399,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         reduce=Reduce.NONE,
         row_filter=None,
         pick_order=None,
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_GRID_LAG_BASIS,
         requires=(SHORT_TABLE,),
         frequency="daily",
@@ -402,8 +418,8 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         reduce=Reduce.NONE,
         row_filter=None,
         pick_order=None,
-        lag_sessions=0,
-        lag_basis=_GRID_LAG_BASIS,
+        lag_sessions=3,
+        lag_basis=_CREDIT_LAG_BASIS,
         requires=(CREDIT_TABLE,),
         frequency="daily",
         kind_expr="fill_kind['kind']",
@@ -421,7 +437,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         reduce=Reduce.SUM,
         row_filter="src = 'elestock'",
         pick_order=None,
-        lag_sessions=0,
+        lag_sessions=1,
         lag_basis=_DART_LAG_BASIS,
         requires=(HOLDER_TABLE, CORP_TICKER_TABLE),
         frequency="event",
@@ -523,6 +539,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis="정규장 종가 확정 시점 · KRX 상장주식수",
         evidence="price_daily.mktcap_krw = close × shares_out (stage MKTCAP 대조 불일치 0)",
+        lag_sessions=1,
+        lag_basis=_SHARES_LAG_BASIS,
     ),
     FieldSpec(
         field_id="price.shares_outstanding",
@@ -539,6 +557,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis="KRX 일별 상장주식수(그날 원장)",
         evidence="price_daily.shares_out ← stg_listing_daily.list_shrs (listing 행 없으면 NULL)",
+        lag_sessions=1,
+        lag_basis=_SHARES_LAG_BASIS,
     ),
     FieldSpec(
         field_id="price.trading_value",
@@ -898,8 +918,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             f"`empty_response`(→ MISSING)로 남는다(DESIGN §9 결정 9). {_FILL_KIND_NOTE}."
         ),
         disclosure_basis=(
-            "원장 날짜(basis default) — KIS 신용잔고는 실제로 T+1 공표이나 랙 축은 "
-            "dataset_profile(S19)이 확정한다"
+            "원장 날짜(basis default) — 신용잔고는 T+2 공표이고 우리 체인은 T+3 아침에 받는다. "
+            "그래서 dataset_profile(S19)이 3 세션 뒤부터 쓰게 정한다"
+            "(EQUITY_FIELD_MAP DEFECT-E01 정정)"
         ),
         evidence="credit_daily.whol_loan_rmnd_stcn_shr ← stg_credit_daily(KIS 신용잔고) 무수정",
     ),

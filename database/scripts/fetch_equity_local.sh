@@ -16,7 +16,7 @@ set -euo pipefail
 
 DEST="${1:?사용법: fetch_equity_local.sh <로컬 경로> [minimal|full]}"
 MODE="${2:-minimal}"
-REMOTE="${EQUITY_REMOTE:?EQUITY_REMOTE 가 비어 있다 — 서버 ssh 호스트(~/.ssh/config 별칭 또는 주소)를 export EQUITY_REMOTE=<호스트> 로 준다. 공개 저장소라 기본값을 두지 않는다}"
+REMOTE="${EQUITY_REMOTE:-kael-server}"
 REMOTE_ROOT="${EQUITY_REMOTE_ROOT:-~/quant-ledger/data/equity}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 

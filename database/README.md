@@ -123,7 +123,7 @@ cd database
 uv run --no-project --python 3.11 --with pytest --with duckdb --with requests python -m pytest tests -q
 ```
 
-- 서버 배포: `rsync -avz --exclude='.venv' --exclude='__pycache__' database/src/ <서버>:~/quant-ledger/src/` (`scripts/` 도 동일). 서버에만 있는 파일(`src/equity_s23/`, `rebuild_share.py`)은 플랜 P0 에서 저장소로 회수 예정.
+- 서버 배포: `rsync -avz --exclude='.venv' --exclude='__pycache__' database/src/ kael-server:~/quant-ledger/src/` (`scripts/` 도 동일). 서버에만 있는 파일(`src/equity_s23/`, `rebuild_share.py`)은 플랜 P0 에서 저장소로 회수 예정.
 - 키·토큰: 코드는 `QL_ENV` 또는 `~/kael-system-v3/.env` 에서만 읽는다. 레포에는 넣지 않는다.
 - 협업자 로컬 동기화(서버 equity 층 → `~/quant-ledger/data/equity`): `database\scripts\ledger_sync.ps1 sync`, 검증 `verify --offline`, 일일 등록 `register_daily_sync.ps1`. 절차·판단 기준은 `docs/LEDGER_SYNC.md`.
 
@@ -171,7 +171,7 @@ crontab 복구용 원문 9줄(이 표와 같은 값이다. 서버가 초기화�
 
 문서에 없던 환경변수: `QL_KW_EVENING_HHMM`(키움 저녁 수집 하한, 크론에 2105) · `QL_EVENING_BUILD_DEADLINE`
 (잠정 빌드 시작 한도, 기본 21:45) · `QL_KW_FH_NOT_BEFORE` · `QL_BACKUP_TIMEOUT` · `QL_BACKUP_ROOT` ·
-`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy. `QL_REMOTE` 는 서버 ssh 호스트로 필수이고 기본값이 없다 — 공개 저장소라 적지 않는다. `fetch_equity_local.sh` 의 `EQUITY_REMOTE` 도 같다).
+`QL_ENV` · `QL_EQUITY_CONTINUE` · `QL_EQUITY_KEEP` · `QL_HOME` · `QL_REMOTE`·`QL_REMOTE_ROOT`(deploy).
 
 ### 원장 백업 — `scripts/backup_raw.sh`
 

@@ -12,7 +12,7 @@
 있고 요청은 "equity 부터, `_pinned`·`_tmp`·`_failed` 제외, 테이블 폴더 안 `v=…` 최신 파티션만" 이다.
 `raw` 는 매일 갱신되는 SQLite 원장이라 복사 중 갱신되면 사본이 깨지므로 범위에서 뺀다.
 
-기존 `database/scripts/fetch_equity_local.sh` 는 `rsync` + ssh alias(`<서버>`) 전제인데,
+기존 `database/scripts/fetch_equity_local.sh` 는 `rsync` + ssh alias(`kael-server`) 전제인데,
 협업자 SFTP 계정은 쉘이 막혀 있어(`This service allows sftp connections only`) rsync 를 쓸 수 없다.
 로컬(Windows)에도 rsync 가 없다.
 

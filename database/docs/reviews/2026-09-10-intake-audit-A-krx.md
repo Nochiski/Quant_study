@@ -212,7 +212,7 @@
 ## 4. 사용한 질의 (재현용 핵심 SQL)
 
 접속은 전부 읽기 전용:
-`ssh <서버> 'cd ~/quant-ledger && timeout 300 sqlite3 -header -column "file:data/raw/krx.db?mode=ro"' < query.sql`
+`ssh kael-server 'cd ~/quant-ledger && timeout 300 sqlite3 -header -column "file:data/raw/krx.db?mode=ro"' < query.sql`
 
 ```sql
 -- [1] 행수 추이

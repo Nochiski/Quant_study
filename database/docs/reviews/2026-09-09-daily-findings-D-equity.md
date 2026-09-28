@@ -1,7 +1,7 @@
 # findings_D — equity 층 일일 갱신 조사 (2026-09-09)
 
 조사 대상: `stage parquet → equity 28표 → dataset_profile·factor_readiness → 카탈로그 → 소비자`.
-표기: **실측** = 서버(`<서버>:~/quant-ledger`)·저장소 파일에서 직접 읽은 값, **추정** = 코드·문서 유추.
+표기: **실측** = 서버(`kael-server:~/quant-ledger`)·저장소 파일에서 직접 읽은 값, **추정** = 코드·문서 유추.
 서버는 읽기만 했다.
 
 관측 시점 실측값(문서와 어긋나는 것 포함):

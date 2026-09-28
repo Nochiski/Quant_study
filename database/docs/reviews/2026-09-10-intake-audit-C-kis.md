@@ -1,6 +1,6 @@
 # KIS 신용잔고 검수 — 2026-09-10 적재분
 
-- 대상: `data/raw/kis.db` · `kis_credit_balance` (서버 `<서버>:~/quant-ledger`, 전부 read-only 조회)
+- 대상: `data/raw/kis.db` · `kis_credit_balance` (서버 `kael-server:~/quant-ledger`, 전부 read-only 조회)
 - 대조: `data/raw/krx.db` (`krx_stk_bydd_trd`·`krx_ksq_bydd_trd`) · `data/raw/kiwoom.db` (`ka10099_stock_master` snap 20260910)
 - 오늘 실행: `daily_run.db` `run_id=21` · `2026-09-09T21:20:35Z ~ 21:47:14Z` (= KST 09-10 06:20~06:47)
   `calls=2655 new_rows=2817 dup_skipped=74856 tickers=2655/2655 window=20260801~20260910 dup_pairs 0->0 failures=0`

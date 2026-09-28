@@ -5,11 +5,11 @@ S22 가 고정한 규약: 서버 `~/quant-ledger/data/equity/baseline.json` 은
 `database/src/equity/baseline_locked.json` 의 사본이어야 한다. 설치 경로는 하나뿐이다.
 
     scp database/src/equity/baseline_locked.json \
-        <서버>:~/quant-ledger/data/equity/baseline.json
+        kael-server:~/quant-ledger/data/equity/baseline.json
 
 검사:
 
-    scp <서버>:~/quant-ledger/data/equity/baseline.json /tmp/server_baseline.json
+    scp kael-server:~/quant-ledger/data/equity/baseline.json /tmp/server_baseline.json
     uv run python database/scripts/check_baseline_lock.py /tmp/server_baseline.json
 
 바이트가 다르면 상수 차이를 함께 찍는다(`thresholds.<G>` 는 `threshold_<G>` 로 펴서 비교) —

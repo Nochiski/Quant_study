@@ -1,6 +1,6 @@
 # findings B — DART(공시·재무·문서 ZIP) · WISE(컨센서스) 원장 수집기 조사
 
-조사일 2026-09-09 (KST). 저장소 워크트리 `/Users/claudeoscarmonet/orca/workspaces/Quant_study/데이터베이스`, 서버 `<서버>:~/quant-ledger`.
+조사일 2026-09-09 (KST). 저장소 워크트리 `/Users/claudeoscarmonet/orca/workspaces/Quant_study/데이터베이스`, 서버 `kael-server:~/quant-ledger`.
 읽기 전용으로만 조사했다. **API 키 값은 이 문서 어디에도 없다 (key_id 만).**
 
 > 표기 — **실측**: 서버 쿼리/로그/파일시스템에서 직접 잰 값. **추정**: 코드·문서에서 유추한 값.

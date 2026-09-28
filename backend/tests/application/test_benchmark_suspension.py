@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from backtest_engine import BacktestEngine, RunConfig
+from backtest_engine.engine.core import core_available
 from backtest_engine.types.actions import (
     ActionKind,
     ExecutionPolicy,
@@ -43,6 +44,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataQuery,
     BacktestDataset,
     CorporateActionRecord,
+    InvalidBarRecord,
     UniverseMembershipRecord,
 )
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult, DataWarning
@@ -196,6 +198,7 @@ def test_no_benchmark_means_no_values_and_no_carry() -> None:
 # 벤치마크 지표가 사용 불가가 되는 이유를 경고로 알린다.
 DELIST_CODE = "benchmark.delisted_sessions_frozen"
 LEADING_CODE = "benchmark.no_bar_at_start"
+RUST_ONLY = pytest.mark.skipif(not core_available("rust"), reason="backtest_core 확장 없음")
 
 
 class _BenchmarkGaps:
@@ -304,7 +307,7 @@ def test_window_starting_inside_a_suspension_explains_the_unavailable_benchmark(
     assert "first_bar=2024-01-10" in leading.message
     assert "benchmark_return" in leading.message
     # 상장은 창 시작부터라(멤버십 first_session) 이유는 거래정지다.
-    assert "거래정지" in leading.message
+    assert "창 시작부터 거래정지 중이었다" in leading.message
     assert not [item for item in result.manifest.warnings if item.code == CARRY_CODE]
 
 
@@ -378,7 +381,7 @@ class _BuyAndHold:
         )
 
 
-@pytest.mark.parametrize("core", ["python", "rust"])
+@pytest.mark.parametrize("core", ["python", pytest.param("rust", marks=RUST_ONLY)])
 def test_benchmark_curve_follows_the_engine_holder_through_suspension_split_and_delisting(
     core: str,
 ) -> None:
@@ -435,3 +438,90 @@ def test_benchmark_curve_follows_the_engine_holder_through_suspension_split_and_
         assert held / holder[start] == pytest.approx(values[session] / values[start], rel=1e-9), (
             session
         )
+
+
+# 이슈 #241: 무효 OHLC 행(GAP-14)으로 빠진 세션은 거래정지가 아니다. 거래된 날이다.
+INVALID_CODE = "benchmark.invalid_bar_sessions_carried"
+
+
+def _with_invalid(dataset: BacktestDataset, *sessions: date) -> BacktestDataset:
+    return replace(
+        dataset,
+        invalid_bars=tuple(InvalidBarRecord(session, BENCHMARK) for session in sessions),
+    )
+
+
+def _warnings_by_code(dataset: BacktestDataset, sessions: tuple[date, ...]) -> dict[str, str]:
+    values, carried = _benchmark_series(dataset, 1_000.0, sessions)
+    return {
+        item.code: item.message for item in _benchmark_warnings(dataset, sessions, values, carried)
+    }
+
+
+def test_invalid_ohlc_session_is_reported_apart_from_suspension() -> None:
+    # D2 는 무효 행, D3 은 정지(행 없음)다. D4 가 재개 bar 다.
+    dataset = _with_invalid(
+        replace(
+            _dataset((_bar(D1, 100.0), _bar(D4, 110.0)), ()),
+            memberships=(UniverseMembershipRecord(BENCHMARK, D1, D5),),
+        ),
+        D2,
+    )
+
+    warnings = _warnings_by_code(dataset, (D1, D2, D3, D4))
+
+    assert "invalid_sessions=1 " in warnings[INVALID_CODE]
+    assert "sessions=2021-05-18" in warnings[INVALID_CODE]
+    assert "GAP-14" in warnings[INVALID_CODE]
+    assert "carried_sessions=1 " in warnings[CARRY_CODE]
+    assert "sessions=2021-05-20" in warnings[CARRY_CODE]
+
+
+def test_window_starting_on_invalid_rows_names_the_invalid_rows_not_a_suspension() -> None:
+    dataset = _with_invalid(
+        replace(
+            _dataset((_bar(D3, 100.0), _bar(D4, 110.0)), ()),
+            memberships=(UniverseMembershipRecord(BENCHMARK, D1, D5),),
+        ),
+        D1,
+        D2,
+    )
+
+    warnings = _warnings_by_code(dataset, (D1, D2, D3, D4))
+
+    assert set(warnings) == {LEADING_CODE}
+    assert "창 시작 세션의 원장 행이 무효(GAP-14)였다" in warnings[LEADING_CODE]
+    assert "거래정지" not in warnings[LEADING_CODE]
+    assert "invalid_sessions=2 " in warnings[LEADING_CODE]
+
+
+def test_window_starting_in_a_suspension_with_an_invalid_row_names_both() -> None:
+    dataset = _with_invalid(
+        replace(
+            _dataset((_bar(D3, 100.0), _bar(D4, 110.0)), ()),
+            memberships=(UniverseMembershipRecord(BENCHMARK, D1, D5),),
+        ),
+        D2,
+    )
+
+    warnings = _warnings_by_code(dataset, (D1, D2, D3, D4))
+
+    assert (
+        "창 시작부터 거래정지 중이었고 그중 1세션은 원장 행이 무효(GAP-14)였다"
+        in warnings[LEADING_CODE]
+    )
+    assert "invalid_sessions=1 " in warnings[LEADING_CODE]
+
+
+def test_listed_benchmark_without_any_bar_in_the_window_says_so() -> None:
+    """#241 P3-2: 멤버십이 있어도 창 안에 bar 가 하나도 없으면 그 사실을 원인으로 적는다."""
+    dataset = replace(
+        _dataset((_bar(D1, 100.0, security_id="other"),), ()),
+        memberships=(UniverseMembershipRecord(BENCHMARK, D1, D5),),
+    )
+
+    warnings = _warnings_by_code(dataset, (D1, D2))
+
+    assert set(warnings) == {LEADING_CODE}
+    assert "창 안에 벤치마크 종목의 bar가 하나도 없다" in warnings[LEADING_CODE]
+    assert "거래정지" not in warnings[LEADING_CODE]

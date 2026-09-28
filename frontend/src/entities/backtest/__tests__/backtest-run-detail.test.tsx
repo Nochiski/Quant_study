@@ -139,6 +139,7 @@ describe("run 상세의 데이터 경고", () => {
     "benchmark.no_bar_at_start",
     "benchmark.suspended_sessions_carried",
     "benchmark.delisted_sessions_frozen",
+    "benchmark.invalid_bar_sessions_carried",
     "portfolio.sector_unknown_excluded",
   ])("%s 에 제목이 있다", async (code) => {
     const base = result();
@@ -211,5 +212,81 @@ describe("run 상세의 데이터 경고", () => {
       .closest("p")!;
     expect(unknown).toHaveTextContent("새 경고 문장");
     expect(unknown.querySelector("code")).toBeNull();
+  });
+});
+
+describe("사용 불가 지표의 이유", () => {
+  // 이슈 #241 P3-4: 지표 칸의 사용 불가 사유는 로케일 문구로 보이고, 그 이유를 적은 데이터 경고가
+  // 있으면 칸에서 바로 그 경고로 간다. 전에는 "benchmark not available" 원문만 보였고 이유는 접힌
+  // manifest 안에만 있었다.
+  const unavailableBenchmark = (
+    warnings: BacktestRunResult["manifest"]["warnings"],
+  ): BacktestRunResult => {
+    const base = result();
+    return {
+      ...base,
+      manifest: { ...base.manifest, warnings },
+      metric_definitions: [
+        {
+          metric_id: "benchmark_return",
+          label: "Benchmark return",
+          category: "benchmark",
+          unit: "percent",
+          higher_is_better: true,
+          nullable: true,
+        },
+      ],
+      metrics: [
+        {
+          metric_id: "benchmark_return",
+          value: null,
+          scope: "full",
+          sample_count: 120,
+          unavailable_reason: "benchmark_not_available",
+        },
+      ],
+    };
+  };
+
+  it("사유를 로케일 문구로 보이고 이유를 적은 경고로 이어 준다", async () => {
+    render(
+      <BacktestRunDetail
+        result={unavailableBenchmark([
+          {
+            code: "benchmark.no_bar_at_start",
+            message: "창 시작부터 거래정지 중이었다",
+            severity: "warning",
+          },
+        ])}
+      />,
+    );
+    const row = screen
+      .getByRole("table")
+      .querySelector("tbody tr") as HTMLElement;
+    expect(row).toHaveTextContent("벤치마크 값이 비어 계산할 수 없습니다");
+    expect(row).not.toHaveTextContent("benchmark not available");
+
+    const drawer = screen.getByRole("group", {
+      name: "Manifest · 데이터 경고 · 재현성 정보",
+    });
+    expect(drawer).not.toHaveAttribute("open");
+    const link = within(row).getByRole("link", {
+      name: "데이터 경고에서 이유 보기",
+    });
+    await userEvent.setup().click(link);
+
+    expect(drawer).toHaveAttribute("open");
+    const target = document.getElementById(link.getAttribute("href")!.slice(1));
+    expect(target).toHaveTextContent("창 시작부터 거래정지 중이었다");
+    expect(target).toHaveTextContent("benchmark.no_bar_at_start");
+  });
+
+  it("이유를 적은 경고가 없으면 사유 문구만 보인다", () => {
+    render(<BacktestRunDetail result={unavailableBenchmark([])} />);
+    const row = screen
+      .getByRole("table")
+      .querySelector("tbody tr") as HTMLElement;
+    expect(row).toHaveTextContent("벤치마크 값이 비어 계산할 수 없습니다");
+    expect(within(row).queryByRole("link")).toBeNull();
   });
 });

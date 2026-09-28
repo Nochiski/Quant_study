@@ -115,9 +115,13 @@
 - 비고: "데이터 경고"의 문장은 backend가 한글로 완성해 보낸다(en 로케일에서도 한글). 벤치마크 종목에
   bar가 없는 세션은 원인별로 따로 뜬다. 창 시작이 첫 bar보다 앞서면 `benchmark.no_bar_at_start`가
   벤치마크 지표가 사용 불가인 이유를 적는다. 거래정지는 `benchmark.suspended_sessions_carried`,
-  상장이 끝난 뒤 동결은 `benchmark.delisted_sessions_frozen`이다(이슈 #229). mock 데이터에는 정지가
-  없어 브라우저 e2e는 이 경고를 밟지 않는다. backend `tests/application/test_benchmark_suspension.py`가
-  확인한다.
+  상장이 끝난 뒤 동결은 `benchmark.delisted_sessions_frozen`이다(이슈 #229). 원장 행이 무효(GAP-14)라
+  빠진 거래일은 거래정지와 따로 `benchmark.invalid_bar_sessions_carried`로 뜬다(이슈 #241). mock
+  데이터에는 정지가 없어 브라우저 e2e는 이 경고를 밟지 않는다. backend
+  `tests/application/test_benchmark_suspension.py`가 확인한다.
+- 비고: 값이 없는 지표 칸은 사용 불가 사유를 로케일 문구로 보인다(예: "벤치마크 값이 비어 계산할 수
+  없습니다"). 그 이유를 적은 데이터 경고가 있으면 칸의 "데이터 경고에서 이유 보기"가 접힌 Manifest를
+  펼치고 그 경고로 간다(이슈 #241). frontend `backtest-run-detail.test.tsx`가 확인한다.
 
 ### US-SM-06 같은 전략을 다른 실행 설정으로 돌려도 전략 해시는 같다
 

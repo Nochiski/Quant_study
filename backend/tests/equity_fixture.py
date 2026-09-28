@@ -1277,6 +1277,7 @@ def build_workbench_root(
     profile: bool = True,
     extra_factor_rows: list[FactorRow] | None = None,
     evening_session: date | None = None,
+    invalid_ohlc: tuple[str, date] | None = None,
     profile_rows: list[tuple[str, int, str]] | None = None,
 ) -> Path:
     """워크벤치 어댑터 손 픽스처 equity_root 를 만든다.
@@ -1289,6 +1290,9 @@ def build_workbench_root(
     생기고 그 세션에 005930 잠정 행 1개(키움 종가·거래량만, OHL NULL)가 붙는다. 주지 않으면
     `basis` 컬럼 자체가 없는 옛 판 루트다.
 
+    `invalid_ohlc=(ticker, session)` 을 주면 그 행이 거래 행(volume>0)인데 open 이 NULL 인 GAP-14
+    모양이 된다(어댑터가 bar 로 내지 않는 무효 행).
+
     `profile_rows` 를 주면 `dataset_profile` 을 그 행으로 쓴다(기본 `WB_PROFILE_ROWS`). 일부 필드의
     행만 빠진 대장을 만들 때 쓴다.
     """
@@ -1300,9 +1304,12 @@ def build_workbench_root(
                 continue
             close = wb_close(ticker, session)
             halted = ticker == "000660" and session == WB_HALT_DATE
+            invalid = invalid_ohlc == (ticker, session)
             prices.append(
                 (ticker, session, None, None, None, close, 0)
                 if halted
+                else (ticker, session, None, close + 200, close - 200, close, 1_000)
+                if invalid
                 else (ticker, session, close - 100, close + 200, close - 200, close, 1_000)
             )
             universe.append(

@@ -31,6 +31,23 @@ class MetricScope(StrEnum):
     WINDOW = "window"
 
 
+class MetricUnavailableReason(StrEnum):
+    """지표 값이 없을 때(`MetricValue.value is None`) 그 이유. 값은 wire 계약이다.
+
+    화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유하고, 목록은 골든
+    `tests/fixtures/analytics/metric_unavailable_reasons.json` 이 두 쪽을 묶는다(이슈 #241).
+    """
+
+    ZERO_RETURN_VARIANCE = "zero_return_variance"
+    NO_DOWNSIDE_VARIATION = "no_downside_variation"
+    NO_DRAWDOWN = "no_drawdown"
+    MAXIMUM_DRAWDOWN_NOT_RECOVERED = "maximum_drawdown_not_recovered"
+    BENCHMARK_NOT_AVAILABLE = "benchmark_not_available"
+    NO_CLOSED_TRADES = "no_closed_trades"
+    NO_LOSING_CLOSED_TRADE = "no_losing_closed_trade"
+    NO_OBSERVATIONS_IN_SCOPE = "no_observations_in_scope"
+
+
 @dataclass(frozen=True)
 class MetricDefinition:
     metric_id: str

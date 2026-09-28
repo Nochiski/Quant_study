@@ -8,6 +8,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     AnalysisPoint,
     AnalyticsInput,
     MetricScope,
+    MetricUnavailableReason,
     TradeOutcome,
     build_default_metric_registry,
     compute_analytics,
@@ -108,7 +109,7 @@ def test_requested_empty_scope_is_serialized_as_unavailable_instead_of_disappear
         build_default_metric_registry(),
         scope=MetricScope.VALIDATION,
         scope_label="weekend only",
-        reason="no_observations_in_scope",
+        reason=MetricUnavailableReason.NO_OBSERVATIONS_IN_SCOPE,
     )
 
     assert len(values) == 21

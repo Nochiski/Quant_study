@@ -9,8 +9,11 @@
    토큰만 먹고 설명에 쓸 정보는 늘지 않는다.
 3. **길이 상한을 지킨다.** 직렬화한 JSON이 `max_chars`를 넘으면 정해진 순서로 덜어 내고 덜어 낸
    개수를 `omitted`에 적는다. 모델이 "없다"와 "잘렸다"를 구분해야 해서다. 순서는 월별 수익률(오래된
-   달부터) → 데이터 경고(뒤에서부터) → full이 아닌 구간 지표(뒤에서부터) → 팩터(뒤에서부터)다.
-   full 구간 지표는 자르지 않는다. 사용자가 화면에서 보는 숫자가 그것이다.
+   달부터) → 데이터 경고(info를 먼저, 같은 등급은 뒤에서부터) → full이 아닌 구간 지표(뒤에서부터) →
+   팩터(뒤에서부터) → 결과 숫자를 해석하는 경고(뒤에서부터)다. full 구간 지표는 자르지 않는다.
+   사용자가 화면에서 보는 숫자가 그것이다. 결과 숫자를 해석하는 경고(`benchmark.*`, 섹터 제약
+   제외)는 그 full 지표가 왜 사용 불가인지, 초과수익을 어떻게 읽어야 하는지를 알려 주므로 가장
+   늦게 던다(이슈 #241).
 
 필드 이름은 JSON 키로만 쓴다. 전략 언어 요약과 달리 모델이 이 키로 문서를 쓰지 않으므로 스키마에서
 생성하지 않는다. 실행 설정은 `RunEnvironment`를 통째로 옮겨 필드가 늘면 따라 늘게 한다.
@@ -19,7 +22,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from datetime import date, datetime
 from enum import Enum
@@ -43,6 +46,11 @@ MAX_RESULT_CONTEXT_CHARS = 12_000
 
 # 월별 수익률은 최근 3년만 싣는다. 그보다 오래된 달은 "최근 흐름"을 설명하는 데 거의 쓰이지 않는다.
 MAX_SUMMARY_MONTHS = 36
+
+# 결과 숫자(full 지표)를 해석하는 경고의 code 접두어. 요약이 상한을 넘을 때 가장 늦게 던다
+# (모듈 docstring 3, 이슈 #241). 벤치마크 경고는 benchmark_return·excess_return이 사용 불가인 이유와
+# 동결 구간의 초과수익 해석을, 섹터 제외 경고는 섹터 상한이 왜 적용되지 않았는지를 알려 준다.
+_METRIC_EXPLAINING_WARNING_PREFIXES = ("benchmark.", "portfolio.sector_unknown_excluded")
 
 # 사용자가 쓴 자유 문장의 길이 상한. 제목·설명 하나가 상한을 혼자 다 먹지 못하게 한다.
 _MAX_TITLE_CHARS = 200
@@ -104,12 +112,14 @@ def summarize_backtest_result(
         },
     }
 
-    # 덜어 낼 목록과 `omitted` 키의 짝. 앞에 있는 것부터 줄인다(모듈 docstring 3).
-    shrinkable: tuple[tuple[str, list[object], bool], ...] = (
-        ("monthly_returns", months, True),
-        ("warnings", warnings, False),
-        ("window_metrics", window_metrics, False),
-        ("factors", factors, False),
+    # 덜어 낼 목록, `omitted` 키, 덜 항목을 고르는 규칙의 짝. 앞에 있는 것부터 줄인다(모듈
+    # docstring 3). 고를 항목이 없으면 다음 단계로 넘어간다.
+    shrinkable: tuple[tuple[str, list[object], Callable[[list[object]], int | None]], ...] = (
+        ("monthly_returns", months, _first),
+        ("warnings", warnings, _ordinary_warning),
+        ("window_metrics", window_metrics, _last),
+        ("factors", factors, _last),
+        ("warnings", warnings, _last),
     )
     while True:
         payload["metrics"] = full_metrics + window_metrics
@@ -118,9 +128,10 @@ def summarize_backtest_result(
         text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         if len(text) <= max_chars:
             return text
-        for key, items, oldest_first in shrinkable:
-            if items:
-                items.pop(0 if oldest_first else -1)
+        for key, items, pick in shrinkable:
+            index = pick(items)
+            if index is not None:
+                items.pop(index)
                 omitted[key] = omitted.get(key, 0) + 1
                 break
         else:
@@ -129,6 +140,28 @@ def summarize_backtest_result(
                 f"section — run_id={manifest.run_id} chars={len(text)} max_chars={max_chars} "
                 f"full_metrics={len(full_metrics)}"
             )
+
+
+def _first(items: list[object]) -> int | None:
+    return 0 if items else None
+
+
+def _last(items: list[object]) -> int | None:
+    return len(items) - 1 if items else None
+
+
+def _ordinary_warning(items: list[object]) -> int | None:
+    """결과 숫자를 해석하지 않는 경고 중 덜 것 하나. info를 먼저, 같은 등급은 뒤에서부터 고른다."""
+    ordinary = [
+        (index, item)
+        for index, item in enumerate(items)
+        if isinstance(item, dict)
+        and not str(item.get("code", "")).startswith(_METRIC_EXPLAINING_WARNING_PREFIXES)
+    ]
+    if not ordinary:
+        return None
+    info = [index for index, item in ordinary if item.get("severity") == "info"]
+    return info[-1] if info else ordinary[-1][0]
 
 
 def _metric_payload(metric: MetricValue, definition: MetricDefinition | None) -> dict[str, object]:

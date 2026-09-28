@@ -65,6 +65,7 @@ def watch_stdin(stop: dict) -> None:
                 pass
         except Exception:
             pass
+        stop["reason"] = "입력이 닫혔다(연결이 끊겼거나, 터미널이 아닌 곳에서 실행했다)"
         stop["flag"] = True
 
     threading.Thread(target=run, daemon=True).start()
@@ -167,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     con.execute("CALL start_ui_server()")
     print(f"화면 켜짐 — 맥북 브라우저에서 http://localhost:{a.port} (끝내려면 Ctrl+C)", flush=True)
 
-    stop = {"flag": False}
+    stop: dict = {"flag": False, "reason": "종료 신호"}
 
     def _stop(*_: object) -> None:
         stop["flag"] = True
@@ -181,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
         con.execute("CALL stop_ui_server()")
     finally:
         con.close()
-    print("화면 종료", flush=True)
+    print(f"화면 종료 — {stop['reason']}", flush=True)
     return 0
 
 

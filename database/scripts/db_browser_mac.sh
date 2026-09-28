@@ -6,6 +6,9 @@
 set -u
 PORT="${PORT:-4213}"
 SCRIPT="${DB_BROWSER_SCRIPT:-scripts/db_browser.py}"
+# 입력을 계속 열어 둔다(tail -f /dev/null) — 서버 쪽은 입력이 닫히면 "연결 끊김"으로 보고 스스로
+# 꺼지므로, 터미널이 아닌 곳(Claude Code 의 `!` 등)에서 불러도 바로 꺼지지 않게 한다.
+# Ctrl+C 를 누르면 tail 과 ssh 가 같이 끝나고, 서버 쪽도 입력이 닫혀 따라 끝난다.
 ( sleep 8; open "http://localhost:$PORT" ) &
-exec ssh -t -L "$PORT:localhost:$PORT" kael-server \
+tail -f /dev/null | ssh -o ExitOnForwardFailure=yes -L "$PORT:localhost:$PORT" kael-server \
   "cd ~/quant-ledger && .venv/bin/python $SCRIPT --port $PORT"

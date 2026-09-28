@@ -3689,3 +3689,161 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     expect(view.state.doc.toString()).toBe(typed);
   });
 });
+
+describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
+  /** backend 업그레이더가 돌려준다고 가정한 현재 버전 원문. 변환 규칙은 backend 소유라 모양만 흉내 낸다. */
+  const UPGRADED = 'schema_version: "1.2"\ntitle: 퀄리티 모멘텀\n';
+  /** 옛 문서가 들고 있던 실행 설정(업그레이드 응답 `environment`). 마지막 사용값과 기간이 다르다. */
+  const OLD_ENVIRONMENT = {
+    ...RUN_ENVIRONMENT,
+    start: "2019-01-02",
+    end: "2024-12-30",
+  };
+  const WARNING = {
+    code: "strategy_document.upgrade_weighting_rule_changed",
+    pointer: "/portfolio/weighting",
+    message:
+      "점수 비례 비중은 이제 기준점 위의 몫으로 나눕니다: weighting='factor_score'",
+  } as const;
+
+  /** 은퇴 버전 원문이면 backend 처럼 구조 오류 하나로 답하고, 아니면 기본 handler 와 같은 모양으로 답한다. */
+  const compiledResponse = (source: string, retired: string) => {
+    if (source === retired) {
+      return {
+        format: "yaml",
+        source_hash: "r".repeat(64),
+        schema_version: null,
+        spec: null,
+        canonical_json: null,
+        spec_hash: null,
+        diagnostics: [
+          {
+            code: "structure.unsupported_schema_version",
+            kind: "structural",
+            severity: "error",
+            pointer: "/schema_version",
+            message:
+              "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 바꿔 줍니다",
+          },
+        ],
+      };
+    }
+    const compiledSpec = spec("draft", 0, "퀄리티 모멘텀");
+    const { identity, ...canonicalSpec } = compiledSpec;
+    return {
+      format: "yaml",
+      source_hash: "b".repeat(64),
+      schema_version: "1.2",
+      spec: compiledSpec,
+      canonical_json: JSON.stringify({
+        ...canonicalSpec,
+        schema_version: identity.schema_version,
+      }),
+      spec_hash: "9".repeat(64),
+      diagnostics: [],
+    };
+  };
+
+  const serveRetiredCompile = (retired: string, upgradeRequests: string[]) =>
+    server.use(
+      http.post(
+        `${API}/api/v1/strategy-documents/compile`,
+        async ({ request }) => {
+          const body = (await request.json()) as { source: string };
+          compiledSources.push(body.source);
+          return HttpResponse.json(compiledResponse(body.source, retired));
+        },
+      ),
+      http.post(
+        `${API}/api/v1/strategy-documents/upgrade`,
+        async ({ request }) => {
+          const body = (await request.json()) as { source: string };
+          upgradeRequests.push(body.source);
+          return HttpResponse.json({
+            format: "yaml",
+            source: UPGRADED,
+            source_hash: "u".repeat(64),
+            compiled: compiledResponse(UPGRADED, retired),
+            environment: OLD_ENVIRONMENT,
+            warnings: [WARNING],
+          });
+        },
+      ),
+    );
+
+  it.each([
+    ["1.1", "strategy_documents/quality_momentum.v1_1.yaml"],
+    ["1.0", "strategy_documents/quality_momentum.v1_0.yaml"],
+  ])(
+    "schema %s 문서를 붙여 넣으면 배너로 업그레이드하고 실행 설정을 채워 저장한다",
+    async (_version, fixture) => {
+      const user = userEvent.setup();
+      const retired = readBackendFixture(fixture);
+      const upgradeRequests: string[] = [];
+      serveRetiredCompile(retired, upgradeRequests);
+      const history = mount("/research/strategies/new");
+      const view = await editor();
+      replaceText(view, retired);
+
+      const banner = await screen.findByRole("region", {
+        name: "이전 schema 문서",
+      });
+      expect(banner).toHaveTextContent(
+        "이 문서는 지원이 끝난 schema 버전입니다",
+      );
+      const upgrade = within(banner).getByRole("button", {
+        name: "현재 버전으로 업그레이드",
+      });
+      await waitFor(() => expect(upgrade).toBeEnabled());
+      expect(saveButton()).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: /백테스트 실행/ }),
+      ).toBeDisabled();
+
+      await user.click(upgrade);
+      await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
+      // 업그레이드 요청은 편집기 원문 그대로다. 옛 문서의 실행 설정·알아 둘 점이 배너에 남는다.
+      expect(upgradeRequests).toEqual([retired]);
+      expect(banner).toHaveTextContent("현재 버전으로 다시 썼습니다");
+      expect(banner).toHaveTextContent(WARNING.message);
+      await user.click(
+        within(banner).getByRole("button", { name: "실행 설정에 채우기" }),
+      );
+      expect(banner).toHaveTextContent("옛 문서의 실행 설정을 채웠습니다.");
+
+      // 업그레이드는 되돌리기 한 단계다(전체 범위 교체 경로).
+      act(() => expect(undo(view)).toBe(true));
+      expect(view.state.doc.toString()).toBe(retired);
+      await user.click(
+        await within(
+          await screen.findByRole("region", { name: "이전 schema 문서" }),
+        ).findByRole("button", { name: "현재 버전으로 업그레이드" }),
+      );
+      await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
+
+      // 채운 실행 설정이 실행 요청에 그대로 실린다(초안 실행).
+      const run = screen.getByRole("button", { name: /백테스트 실행/ });
+      await waitFor(() => expect(run).toBeEnabled());
+      await user.click(run);
+      await waitFor(() => expect(started).toHaveLength(1));
+      expect(started[0]).toMatchObject({
+        environment: OLD_ENVIRONMENT,
+        strategy_source: { kind: "inline_draft" },
+      });
+      await user.click(
+        within(await screen.findByRole("alertdialog")).getByRole("button", {
+          name: "머무르기",
+        }),
+      );
+
+      await waitFor(() => expect(saveButton()).toBeEnabled());
+      await user.click(saveButton());
+      await waitFor(() =>
+        expect(history.location.pathname).toBe(
+          "/research/strategies/s9/revisions/1",
+        ),
+      );
+      expect(posted).toEqual([{ format: "yaml", source: UPGRADED }]);
+    },
+  );
+});

@@ -336,7 +336,7 @@ Phase exit:
   1~6을 하나씩 대조한 기록이 없다).
 - [x] US-DM-08 `구현됨-e2e`, 전체 e2e 게이트에서 스토리 e2e 통과. — #210 게이트 SHA `35d41a38`에서 전체
   e2e 40/40(`@US-DM-08` 포함), 스토리 표 `구현됨-e2e`.
-- [ ] SoT·책임분리 점검 blocking 0. — Phase D 점검 기록 없음. `review_ai_d` 1차 APPROVE(blocking 0)만 있다.
+- [ ] SoT·책임분리 점검 blocking 0. — Phase D 점검 기록 없음. #208·#209·#210 스택 리뷰 `review_ai_d` 1차 APPROVE(blocking 0)만 있다.
 
 ### D 절 backlog (D 스택 리뷰 P3-7) — 담당 AI 후속 D-04(미착수, 트래커 행 없음 — initiative 완료 뒤 남은 후속)
 

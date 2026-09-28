@@ -21,8 +21,8 @@ PR ID다. 계획 문서에 없는 PR은 GitHub 번호(`#123`)로 적는다.
 |---|---:|---:|---:|---:|---:|
 | 김철수 | 4 | 2 | 1 | 1 | 8 |
 | 정동민 | 7 | 1 | 1 | 0 | 9 |
-| 한상목 | 8 | 1 | 0 | 1 | 10 |
-| 합계 | 19 | 4 | 2 | 2 | 27 |
+| 한상목 | 9 | 0 | 0 | 1 | 10 |
+| 합계 | 20 | 3 | 2 | 2 | 27 |
 
 ### 스토리별 추적
 
@@ -50,7 +50,7 @@ PR ID다. 계획 문서에 없는 PR은 GitHub 번호(`#123`)로 적는다.
 | US-SM-03 | 한상목 | 저장할 때마다 새 버전이 쌓이고 버전끼리의 차이와 충돌을 본다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-04 | 한상목 | 키보드만으로 경로를 찾고 검증·저장·백테스트한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.keyboard.spec.ts` :: US-SM-04 키보드만으로 문서 경로를 찾고 검증·저장·백테스트까지 간다 |
 | US-SM-05 | 한상목 | 실행 기록으로 같은 백테스트를 그대로 다시 돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: cancels a nonterminal run and replays the server-owned request byte-for-byte<br>`frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
-| US-SM-06 | 한상목 | 같은 전략을 다른 실행 설정으로 돌려도 전략 해시는 같다 | `구현됨-e2e없음` | P3-03 | P3-03 | — |
+| US-SM-06 | 한상목 | 같은 전략을 다른 실행 설정으로 돌려도 전략 해시는 같다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.run-environment.spec.ts` :: US-DM-05 실행 설정에서 기간만 바꿔 다시 돌려도 전략은 그대로이고 실행 기록에 바꾼 기간이 남는다 |
 | US-SM-07 | 한상목 | 예전 형식으로 저장한 전략을 새 형식으로 올린다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: migrates a source-less legacy revision without changing meaning<br>`frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision to the current schema, fills its run settings, saves it and backtests it |
 | US-SM-08 | 한상목 | Form·Graph로 고쳐도 YAML 원문은 그 줄만 바뀐다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: adds a node in the Graph editor, rewires an input, refreshes the plan and saves<br>`frontend/e2e/workbench.workflow.spec.ts` :: edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan |
 | US-SM-09 | 한상목 | 모르는 금융 개념을 편집 흐름 안에서 설명받는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.finance-terms.spec.ts` :: US-SM-09 편집 중에 AI와 계약 패널로 금융 개념의 뜻을 확인한다 |

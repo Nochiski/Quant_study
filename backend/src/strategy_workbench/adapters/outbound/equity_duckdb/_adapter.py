@@ -277,6 +277,31 @@ class _Window:
         return (*self.history, *self.requested)
 
 
+def _catalog_error_types() -> tuple[type[Exception], ...]:
+    """원천을 빼도 되는 duckdb 오류 — 카탈로그·원장 파일의 성질이라 재시작해도 그대로인 것.
+
+    duckdb 예외 계층(`duckdb.Error` 아래 약 30종)을 훑어 고른다(#245 리뷰 P3-1·P3-4).
+    - 파일: `IOException`(누락·읽기 실패, `HTTPException` 포함) · `InvalidInputException`(손상·
+      0바이트 parquet) · `PermissionException`(권한)
+    - 카탈로그: `CatalogException`(매크로·표 누락) · `ParserException`(구운 매크로 본문을 못 읽음)
+      · `BinderException`(열·스키마 드리프트)
+    나머지는 일시적이거나 원천과 무관해 올린다 — `InterruptException` · `OutOfMemoryException` ·
+    `InternalException` · `FatalException` · `ConnectionException` · `TransactionException` ·
+    `SerializationException` 과 값 변환 계열(`ConversionException` 등, 바인딩만 하는 DESCRIBE 에서는
+    나지 않는다).
+    """
+    import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
+
+    return (
+        module.IOException,
+        module.InvalidInputException,
+        module.PermissionException,
+        module.CatalogException,
+        module.ParserException,
+        module.BinderException,
+    )
+
+
 def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     """duckdb 연결 — 지연 import(optional extra `equity`). `path` 는 read_only 로 여는 카탈로그."""
     try:
@@ -402,13 +427,17 @@ class EquityDuckdbAdapter:
         """
         if PROFILE_TABLE not in self._tables:
             return {}
+        # 지연 import — 모듈 머리의 duckdb 는 TYPE_CHECKING 전용이라 except 절이 이름으로 참조하면
+        # 이 경로에서 NameError 가 난다(#245).
+        import duckdb as module
+
         con = _open(None)
         try:
             rows = con.execute(
                 "SELECT field_id, recommended_lag_sessions, available_date_basis "
                 f"FROM {self._source(PROFILE_TABLE)}"
             ).fetchall()
-        except duckdb.Error as exc:  # 컬럼이 없는 구판 표 — 폴백으로 내려간다
+        except module.Error as exc:  # 파일이 빠졌거나 컬럼이 없는 구판 표 — 진단을 담아 멈춘다
             raise EquityDuckdbSetupError(
                 f"{PROFILE_TABLE} exists but is unreadable — root={self._root} error={exc}"
             ) from exc
@@ -480,6 +509,20 @@ class EquityDuckdbAdapter:
             described = con.execute(
                 f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
             ).fetchall()
+        except _catalog_error_types() as error:
+            # 스냅샷은 맞는데 매크로가 가리키는 parquet 가 빠졌거나 손상된 카탈로그 등 — 생성자
+            # 밖으로 던지면 어댑터 전체가 뜨지 못한다(#233 리뷰 후속). 이 원천만 빼고 사유를 남긴다.
+            # 사유는 재시작 전까지 캐시되므로 카탈로그·파일 성격의 오류만 잡고, 중단·메모리 부족
+            # 같은 일시적 오류는 그대로 올린다(#245 리뷰 P3-1·P3-4).
+            reason = (
+                f"카탈로그 매크로 {spec.relation} 를 읽을 수 없어 원천 {spec.name} 의 필드를 "
+                "뺀다 — 카탈로그를 다시 만들거나 원장 파일을 확인해야 한다"
+                "(`ledger_sync verify`·`catalog`) "
+                f"(catalog_macro_unreadable) — error={type(error).__name__}: {error} "
+                f"catalog={self._catalog.path}"
+            )
+            logger.warning(reason)
+            return reason
         finally:
             con.close()
         present = {str(row[0]) for row in described}

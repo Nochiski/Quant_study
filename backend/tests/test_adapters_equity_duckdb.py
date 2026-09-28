@@ -839,6 +839,93 @@ def test_catalog_without_required_view_column_drops_only_that_source(
     assert warned and "v_fin_latest" in warned[0] and "카탈로그" in warned[0]
 
 
+def test_unreadable_catalog_macro_at_boot_drops_only_that_source(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """부팅 때 열 확인(DESCRIBE)이 duckdb 오류를 내도 어댑터는 뜨고 그 원천만 빠진다.
+
+    #233 리뷰 후속.
+
+    스냅샷은 맞는데 매크로가 가리키는 parquet 파일이 빠진 카탈로그다. #233 전에는 재무 질의만
+    실패했는데, #233 의 부팅 DESCRIBE 가 IOException 을 생성자 밖으로 던져 어댑터 전체가 죽었다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    removed = sorted((root / "fin_std").rglob("*.parquet"))
+    assert removed, f"fin_std 파티션 파일이 없다 — root={root}"
+    for path in removed:
+        path.unlink()
+    with caplog.at_level("WARNING"):
+        broken = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in broken.list_fields()}
+    assert "price.close" in served and "consensus.forward_eps" in served
+    assert not served & {"financial.book_equity", "financial.net_income"}
+    denied = _raw(broken, fields=("financial.book_equity",))
+    assert denied.status is DataLoadStatus.INVALID_QUERY
+    assert denied.detail is not None and "catalog_macro_unreadable" in denied.detail
+    assert _raw(broken, fields=("price.close",)).ok
+    warned = [
+        r.getMessage() for r in caplog.records if "catalog_macro_unreadable" in r.getMessage()
+    ]
+    assert warned and "v_fin_latest" in warned[0]
+
+
+@pytest.mark.parametrize("payload", [b"garbage" * 50, b""], ids=["garbage", "empty"])
+def test_corrupt_catalog_parquet_at_boot_drops_only_that_source(
+    tmp_path: Path, payload: bytes
+) -> None:
+    """손상·0바이트 parquet 는 duckdb `InvalidInputException` 이다 — 원천만 빼고 뜬다 (#245 P3-4).
+
+    예외 목록을 카탈로그 성격으로 좁히면서 이 예외가 빠져, 부팅 전체가 다시 실패했다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    files = sorted((root / "fin_std").rglob("*.parquet"))
+    assert files, f"fin_std 파티션 파일이 없다 — root={root}"
+    for path in files:
+        path.write_bytes(payload)
+    broken = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in broken.list_fields()}
+    assert "price.close" in served
+    assert not served & {"financial.book_equity", "financial.net_income"}
+    denied = _raw(broken, fields=("financial.book_equity",))
+    assert denied.detail is not None and "catalog_macro_unreadable" in denied.detail
+    assert "InvalidInputException" in denied.detail
+
+
+def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """일시적 duckdb 오류(중단·메모리 부족)는 원천을 빼는 사유가 아니다 (#245 리뷰 P3-1).
+
+    부팅 때 뺀 원천은 `_source_reason` 에 캐시돼 재시작할 때까지 돌아오지 않는다. 그래서 잡는 것은
+    카탈로그 성격의 오류(파일 누락·매크로 누락·스키마 드리프트)뿐이고, 나머지는 그대로 올려 부팅을
+    다시 시도하게 한다.
+    """
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    real_connect = EquityDuckdbAdapter._connect
+
+    class _Interrupting:
+        def __init__(self, inner: duckdb.DuckDBPyConnection) -> None:
+            self._inner = inner
+
+        def execute(self, sql: str, *args: object) -> duckdb.DuckDBPyConnection:
+            if sql.startswith("DESCRIBE"):
+                raise duckdb.InterruptException("simulated interrupt during DESCRIBE")
+            return self._inner.execute(sql, *args)
+
+        def close(self) -> None:
+            self._inner.close()
+
+    monkeypatch.setattr(
+        EquityDuckdbAdapter,
+        "_connect",
+        lambda self: _Interrupting(real_connect(self)),
+    )
+    with pytest.raises(duckdb.InterruptException, match="simulated interrupt"):
+        EquityDuckdbAdapter(root)
+
+
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:
     root = build_workbench_root(tmp_path / "equity")
     (root / "universe_policy" / "MANIFEST.json").unlink()
@@ -846,6 +933,21 @@ def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:
         EquityDuckdbAdapter(root)
     with pytest.raises(EquityDuckdbSetupError, match="not a directory"):
         EquityDuckdbAdapter(tmp_path / "nowhere")
+
+
+def test_unreadable_dataset_profile_fails_with_setup_error(tmp_path: Path) -> None:
+    """`dataset_profile` 이 MANIFEST 에는 있는데 읽히지 않으면 진단이 담긴 설정 오류다 (#245).
+
+    예외 절이 `duckdb.Error` 를 이름으로 참조하는데 duckdb 는 `TYPE_CHECKING` 에서만 import 돼,
+    이 경로에 들어가면 설정 오류 대신 NameError 가 났다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    removed = sorted((root / "dataset_profile").rglob("*.parquet"))
+    assert removed, f"dataset_profile 파티션 파일이 없다 — root={root}"
+    for path in removed:
+        path.unlink()
+    with pytest.raises(EquityDuckdbSetupError, match="dataset_profile exists but is unreadable"):
+        EquityDuckdbAdapter(root)
 
 
 # ── 부팅 · 파이프라인 ─────────────────────────────────────────────────────────

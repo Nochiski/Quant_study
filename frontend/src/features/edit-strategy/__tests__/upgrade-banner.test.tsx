@@ -24,7 +24,27 @@ const LEGACY =
   'schema_version: "1.0"\ntitle: 옛 문서\nfactors:\n  factors: []\n';
 const UPGRADED = 'schema_version: "1.1"\ntitle: 옛 문서\nfactors: []\n';
 const upgradeRequests: { source: string; format: string }[] = [];
-let upgradeMode: "ok" | "drift" | "network" = "ok";
+let upgradeMode: "ok" | "drift" | "network" | "no-environment" = "ok";
+/** 업그레이드 응답의 옛 문서 실행 설정(P2-09 `environment`). */
+const OLD_ENVIRONMENT = {
+  market: "KRX",
+  frequency: "daily",
+  start: "2021-01-01",
+  end: "2026-08-31",
+  universe_id: "krx.common-stock",
+  timing: "next_open",
+  participation_rate: 0.1,
+  fee_bps: 15,
+  slippage_bps: 10,
+  missing: "drop",
+} as const;
+const WARNING = {
+  code: "strategy_document.upgrade_weighting_rule_changed",
+  pointer: "/portfolio/weighting",
+  message:
+    "점수 비례 비중은 이제 기준점 위의 몫으로 나눕니다: weighting='factor_score'",
+} as const;
+const appliedEnvironments: unknown[] = [];
 
 const compiledResponse = (source: string) => {
   const legacy = source.includes('schema_version: "1.0"');
@@ -78,6 +98,17 @@ const server = setupServer(
       source: UPGRADED,
       source_hash: "u".repeat(64),
       compiled: compiledResponse(UPGRADED),
+      environment: upgradeMode === "no-environment" ? null : OLD_ENVIRONMENT,
+      warnings:
+        upgradeMode === "no-environment"
+          ? [
+              {
+                code: "strategy_document.upgrade_environment_unavailable",
+                pointer: "",
+                message: "옛 문서의 기간을 읽지 못했습니다: start=None",
+              },
+            ]
+          : [WARNING],
     });
   }),
 );
@@ -86,6 +117,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
   upgradeRequests.length = 0;
+  appliedEnvironments.length = 0;
   upgradeMode = "ok";
 });
 afterAll(() => server.close());
@@ -135,7 +167,12 @@ const Harness = ({
       >
         Commit revision
       </button>
-      <UpgradeBanner upgrade={upgrade} />
+      <UpgradeBanner
+        upgrade={upgrade}
+        onApplyEnvironment={(environment) =>
+          appliedEnvironments.push(environment)
+        }
+      />
       <SourceEditor
         state={state}
         dispatch={dispatch}
@@ -167,12 +204,12 @@ const mount = async (
 };
 
 const upgradeButton = () =>
-  screen.getByRole("button", { name: "1.1로 업그레이드" });
+  screen.getByRole("button", { name: "현재 버전으로 업그레이드" });
 
-describe("schema 1.0 upgrade banner", () => {
+describe("retired schema upgrade banner", () => {
   it("rewrites the editor text through the backend and leaves the document dirty with one undo step", async () => {
     const view = await mount();
-    expect(await screen.findByText("schema 1.0 문서")).toBeVisible();
+    expect(await screen.findByText("이전 schema 문서")).toBeVisible();
     await waitFor(() => expect(upgradeButton()).toBeEnabled());
     expect(screen.getByTestId("dirty")).toHaveTextContent("false");
 
@@ -183,17 +220,17 @@ describe("schema 1.0 upgrade banner", () => {
     expect(screen.getByTestId("dirty")).toHaveTextContent("true");
     expect(
       await screen.findByText(
-        "1.1로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
+        "현재 버전으로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
       ),
     ).toBeVisible();
-    // 1.1 텍스트가 다시 컴파일되어 배너의 업그레이드 제안이 사라진다.
+    // 현재 버전 텍스트가 다시 컴파일되어 배너의 업그레이드 제안이 사라진다.
     await waitFor(() =>
       expect(screen.getByTestId("phase")).toHaveTextContent(
         "semantically-valid",
       ),
     );
     expect(
-      screen.queryByRole("button", { name: "1.1로 업그레이드" }),
+      screen.queryByRole("button", { name: "현재 버전으로 업그레이드" }),
     ).toBeNull();
 
     act(() => {
@@ -234,7 +271,7 @@ describe("schema 1.0 upgrade banner", () => {
     await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
     expect(
       await screen.findByText(
-        "1.1로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
+        "현재 버전으로 다시 썼습니다. 검토 후 새 revision으로 저장하세요.",
       ),
     ).toBeVisible();
 
@@ -242,7 +279,7 @@ describe("schema 1.0 upgrade banner", () => {
 
     await waitFor(() =>
       expect(
-        screen.queryByRole("region", { name: "schema 1.0 문서" }),
+        screen.queryByRole("region", { name: "이전 schema 문서" }),
       ).toBeNull(),
     );
   });
@@ -279,12 +316,63 @@ describe("schema 1.0 upgrade banner", () => {
     await mount({ revision: 1, generated: true, requires_upgrade: true });
     expect(
       await screen.findByText(
-        "schema 1.0 동결 revision입니다. 생성된 문서는 이미 1.1이므로 편집 후 새 revision으로 저장하세요.",
+        "이전 schema로 동결된 revision입니다. 생성된 문서는 이미 현재 버전이므로 편집 후 새 revision으로 저장하세요.",
       ),
     ).toBeVisible();
     expect(
-      screen.queryByRole("button", { name: "1.1로 업그레이드" }),
+      screen.queryByRole("button", { name: "현재 버전으로 업그레이드" }),
     ).toBeNull();
     expect(upgradeRequests).toEqual([]);
+  });
+
+  it("shows the upgrade warnings and fills the run settings only when the user asks", async () => {
+    await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+
+    const banner = await screen.findByRole("region", {
+      name: "이전 schema 문서",
+    });
+    // warning 은 코드별 제목(P3-01)과 backend 가 한글로 완성한 문장을 함께 보인다.
+    expect(banner).toHaveTextContent(
+      "점수 비례 비중의 계산 규칙이 바뀌었습니다",
+    );
+    expect(banner).toHaveTextContent(WARNING.message);
+    expect(banner).toHaveTextContent(
+      "옛 문서에 있던 실행 설정: 2021-01-01 → 2026-08-31 · krx.common-stock",
+    );
+    expect(appliedEnvironments).toEqual([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "실행 설정에 채우기" }));
+
+    expect(appliedEnvironments).toEqual([OLD_ENVIRONMENT]);
+    expect(banner).toHaveTextContent("옛 문서의 실행 설정을 채웠습니다.");
+    expect(
+      screen.queryByRole("button", { name: "실행 설정에 채우기" }),
+    ).toBeNull();
+  });
+
+  it("does not fill defaults when the old document's run settings could not be carried over", async () => {
+    upgradeMode = "no-environment";
+    await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+
+    const banner = await screen.findByRole("region", {
+      name: "이전 schema 문서",
+    });
+    await waitFor(() =>
+      expect(banner).toHaveTextContent(
+        "옛 문서의 실행 설정을 옮기지 못했습니다",
+      ),
+    );
+    expect(banner).toHaveTextContent("옛 문서의 기간을 읽지 못했습니다");
+    expect(banner).toHaveTextContent(
+      "옛 문서의 실행 설정을 옮기지 못해 실행 설정을 채우지 않았습니다.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "실행 설정에 채우기" }),
+    ).toBeNull();
+    expect(appliedEnvironments).toEqual([]);
   });
 });

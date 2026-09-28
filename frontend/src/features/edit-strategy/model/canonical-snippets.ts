@@ -1,8 +1,12 @@
 /**
  * Canonical StrategySpec snippets projected from the backend runtime schema and coherent factor
  * catalog. This module owns no field list, enum, default, graph shape or factor direction: those
- * values are copied from backend-owned contracts. The five category names are UI placement from
- * WORKFLOW P4-05, not a second validation model.
+ * values are copied from backend-owned contracts.
+ *
+ * 그룹은 둘이다(P3-01). `section`은 스키마 루트의 object 섹션(schema 1.2: 유니버스 조건·신호 결합·
+ * 포트폴리오 구성·리스크 제약)을 스키마 순서대로 싣는다 — 섹션 목록을 여기 적지 않는다. `example`은
+ * 팩터 레지스트리의 preset 이며 튜토리얼 전용이다: 전략은 빈 팩터에서 직접 구성하는 것이 주 경로이고
+ * (2026-09-20 제품 결정), 예시는 그 옆에 강등해 둔다.
  */
 import type { FactorDefinition } from "../../../shared/api";
 import {
@@ -24,13 +28,7 @@ import {
   type SourceOperation,
 } from "./source-transactions";
 
-export const SNIPPET_CATEGORIES = [
-  "data",
-  "factor",
-  "signal",
-  "risk",
-  "execution",
-] as const;
+export const SNIPPET_CATEGORIES = ["section", "example"] as const;
 
 export type SnippetCategory = (typeof SNIPPET_CATEGORIES)[number];
 
@@ -39,6 +37,8 @@ export type CanonicalSnippet = {
   category: SnippetCategory;
   /** Backend field name or factor label. */
   label: string;
+  /** 섹션 스니펫의 설명 키 stem(`x-description-key`). 화면은 이름을 먼저, 키를 보조로 보인다. */
+  descriptionKey: string | null;
   /** 섹션 스니펫은 루트 키를 추가하고, 팩터 스니펫은 루트 `factors` 시퀀스에 항목을 추가한다. */
   kind: "section" | "factor";
   sectionKey: string;
@@ -75,7 +75,7 @@ const rootProperty = (schema: JsonSchema, key: string): JsonSchema | null => {
 };
 
 type FactorAuthoringContract = {
-  /** 팩터 시퀀스의 루트 키(schema 1.1: `factors`는 최상위 배열). 이름은 스키마에서 읽는다. */
+  /** 팩터 시퀀스의 루트 키(schema 1.1 부터: `factors`는 최상위 배열). 이름은 스키마에서 읽는다. */
   sectionKey: string;
   item: JsonSchema;
 };
@@ -153,24 +153,37 @@ const factorValue = (
   return identity === null ? null : { value, identity };
 };
 
-/** Builds the five-area catalog without copying StrategySpec keys or defaults into frontend code. */
+/** 스키마 루트 property 중 object 섹션의 키(스키마 순서). 배열(`factors`)·스칼라는 섹션 스니펫이 아니다. */
+const objectSectionKeys = (schema: JsonSchema): string[] =>
+  Object.keys(isRecord(schema.properties) ? schema.properties : {}).filter(
+    (key) => {
+      const property = rootProperty(schema, key);
+      return (
+        property !== null && resolveRef(schema, property)?.type === "object"
+      );
+    },
+  );
+
+/** Builds the catalog without copying StrategySpec keys or defaults into frontend code. */
 export const buildCanonicalSnippetCatalog = (
   source: SnippetCatalogSource,
 ): CanonicalSnippet[] => {
   if (source.status !== "ready" || source.schema === null) return [];
   const { schema, factors } = source;
   const snippets: CanonicalSnippet[] = [];
-  for (const category of SNIPPET_CATEGORIES) {
-    if (category === "factor") continue;
-    const property = rootProperty(schema, category);
+  for (const key of objectSectionKeys(schema)) {
+    const property = rootProperty(schema, key);
     if (property === null) continue;
+    const descriptionKey = property["x-description-key"];
     try {
       snippets.push({
-        id: `section:${category}`,
-        category,
-        label: category,
+        id: `section:${key}`,
+        category: "section",
+        label: key,
+        descriptionKey:
+          typeof descriptionKey === "string" ? descriptionKey : null,
         kind: "section",
-        sectionKey: category,
+        sectionKey: key,
         identity: null,
         value: materializeSchemaValue(schema, property),
       });
@@ -188,8 +201,9 @@ export const buildCanonicalSnippetCatalog = (
     if (preset === null) continue;
     snippets.push({
       id: `factor:${String(preset.identity.value)}`,
-      category: "factor",
+      category: "example",
       label: factor.label,
+      descriptionKey: null,
       kind: "factor",
       sectionKey: contract.sectionKey,
       identity: preset.identity,

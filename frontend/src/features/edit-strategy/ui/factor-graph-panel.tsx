@@ -181,8 +181,14 @@ const GraphNode = ({
   onSelectPointer: (pointer: string) => void;
   onOpenSource: (pointer: string) => void;
 }) => {
+  // compile 이 붙인 출력 노드는 사용자가 이름을 지은 적이 없어 사람 말로 부른다(BACKLOG-014).
+  const booleanScore = node.origin === "boolean-score";
+  // 붙인 출력의 pointer 는 원래 출력 줄이라 선택 강조는 원래 출력 카드 하나가 받는다(리뷰 #232).
   const selected =
-    node.pointer !== null && pointerSelectsNode(selectedPointer, node.pointer);
+    !booleanScore &&
+    node.pointer !== null &&
+    pointerSelectsNode(selectedPointer, node.pointer);
+  const name = booleanScore ? t("plan.node.booleanScore") : node.nodeId;
   return (
     <li
       className={`factor-graph__node factor-graph__node--${node.kind}`}
@@ -202,10 +208,14 @@ const GraphNode = ({
           className="factor-graph__node-select"
           disabled={node.pointer === null}
           onClick={() => node.pointer !== null && onSelectPointer(node.pointer)}
-          aria-label={t("graph.selectNode").replace("{node}", node.nodeId)}
+          aria-label={t("graph.selectNode").replace("{node}", name)}
         >
-          <strong>{node.nodeId}</strong>
-          <code>{node.operation}</code>
+          <strong>{name}</strong>
+          {booleanScore ? (
+            <span>{t("plan.node.booleanScore.description")}</span>
+          ) : (
+            <code>{node.operation}</code>
+          )}
         </button>
         {node.isOutput ? <Badge tone="accent">OUTPUT</Badge> : null}
         {!node.planned ? (
@@ -367,7 +377,9 @@ export const FactorGraphPanel = ({
     return (
       <>
         <GraphState
-          state={projection.status !== "ready" ? projection : { status: "empty" }}
+          state={
+            projection.status !== "ready" ? projection : { status: "empty" }
+          }
           diagnostics={diagnostics}
           onOpenSource={onOpenSource}
         />
@@ -399,7 +411,9 @@ export const FactorGraphPanel = ({
         <div>
           <strong>{t("graph.title")}</strong>
           <span>
-            {editing === undefined ? t("graph.planOnly") : t("graph.planWithEdit")}
+            {editing === undefined
+              ? t("graph.planOnly")
+              : t("graph.planWithEdit")}
           </span>
           {recomputing ? (
             <Badge tone="warn">{t("graph.recomputing")}</Badge>

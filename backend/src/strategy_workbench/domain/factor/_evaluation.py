@@ -23,15 +23,17 @@ from ._nodes import (
     GroupOperator,
     MissingPolicy,
     ParameterNode,
-    SavedFactorNode,
-    SavedSubgraphNode,
     TimeSeriesNode,
     TimeSeriesOperator,
     UnaryNode,
     UnaryOperator,
 )
 from ._planning import ResolvedFactorParameter
-from ._statistics import quantile, rank_items
+from ._statistics import (
+    cross_sectional_rank,
+    cross_sectional_zscore,
+    quantile,
+)
 from ._validation import node_dependencies
 
 FactorInputValue: TypeAlias = float | str | bool | None
@@ -64,12 +66,6 @@ class FactorFieldValue:
 
 
 @dataclass(frozen=True)
-class FactorReferenceValue:
-    reference_id: str
-    value: float | None
-
-
-@dataclass(frozen=True)
 class FactorObservation:
     """One (as_of, security) row of raw inputs.
 
@@ -84,7 +80,6 @@ class FactorObservation:
     as_of: date
     security_id: str
     fields: tuple[FactorFieldValue, ...]
-    references: tuple[FactorReferenceValue, ...] = ()
     forward_return: float | None = None
     universe_member: bool = True
 
@@ -135,8 +130,8 @@ def evaluate_factor_graph(
     """그래프를 평가한다. `progress` 는 그래프 평가 안의 완료 비율(0~1, 단조 증가)을 받는다.
 
     노드 계산이 `_NODES_PROGRESS_SHARE` 까지, 출력 값 조립이 나머지를 채운다. `missing` 은 실행
-    설정(`RunEnvironment.missing`)이 소유한다 — P2-02 이후 그래프의 deprecated `missing_policy` 는
-    읽지 않는다.
+    설정(`RunEnvironment.missing`)이 소유한다 — schema 1.2 의 팩터 그래프에는 결측 정책이 없다
+    (P2-02 에서 인자로, P2-03 에서 필드 삭제).
     """
 
     computed = _compute_nodes(
@@ -329,14 +324,6 @@ class _NodeEvaluator:
             values = _group_transform(
                 node, inputs[0], self._observations, checkpoint=self._checkpoint
             )
-        elif isinstance(node, SavedFactorNode):
-            values = _reference_values(
-                self._observations, f"factor:{node.factor_id}", checkpoint=self._checkpoint
-            )
-        elif isinstance(node, SavedSubgraphNode):
-            values = _reference_values(
-                self._observations, f"subgraph:{node.subgraph_id}", checkpoint=self._checkpoint
-            )
         _require_finite_values(
             node.node_id, values, self._observations, checkpoint=self._checkpoint
         )
@@ -430,25 +417,6 @@ def _field_values(
                     result[index] = fill
         return result
     return list(raw)
-
-
-def _reference_values(
-    observations: tuple[FactorObservation, ...],
-    reference_id: str,
-    *,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> list[FactorComputedValue]:
-    return [
-        next(
-            (
-                reference.value
-                for reference in observation.references
-                if reference.reference_id == reference_id
-            ),
-            None,
-        )
-        for observation in _checkpointed(observations, checkpoint)
-    ]
 
 
 def _binary(
@@ -570,16 +538,13 @@ def _cross_sectional(
             for index, value in _checkpointed(numeric, checkpoint):
                 result[index] = value - center
         elif node.operator is CrossSectionalOperator.RANK:
-            ranked = rank_items(numeric)
-            denominator = max(len(ranked) - 1, 1)
-            for index, rank in _checkpointed(ranked.items(), checkpoint):
-                result[index] = (rank - 1) / denominator
+            ranks = cross_sectional_rank([value for _, value in numeric])
+            for (index, _), rank in _checkpointed(zip(numeric, ranks, strict=True), checkpoint):
+                result[index] = rank
         elif node.operator is CrossSectionalOperator.ZSCORE:
-            samples = [value for _, value in numeric]
-            center = mean(samples)
-            deviation = pstdev(samples)
-            for index, value in _checkpointed(numeric, checkpoint):
-                result[index] = 0.0 if deviation == 0 else (value - center) / deviation
+            scores = cross_sectional_zscore([value for _, value in numeric])
+            for (index, _), score in _checkpointed(zip(numeric, scores, strict=True), checkpoint):
+                result[index] = score
         else:
             ordered = sorted(value for _, value in numeric)
             lower = quantile(ordered, node.lower_quantile)
@@ -617,10 +582,9 @@ def _group_transform(
             for index, value in _checkpointed(numeric, checkpoint):
                 result[index] = value - center
         else:
-            ranked = rank_items(numeric)
-            denominator = max(len(ranked) - 1, 1)
-            for index, rank in _checkpointed(ranked.items(), checkpoint):
-                result[index] = (rank - 1) / denominator
+            ranks = cross_sectional_rank([value for _, value in numeric])
+            for (index, _), rank in _checkpointed(zip(numeric, ranks, strict=True), checkpoint):
+                result[index] = rank
     return result
 
 

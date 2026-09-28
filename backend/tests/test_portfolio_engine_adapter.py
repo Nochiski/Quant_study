@@ -12,6 +12,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.portfolio.facade.construction import (
     CandidateSide,
     TargetFrame,
@@ -24,8 +25,14 @@ def _spec():
     return StrategyDesignService(
         InMemoryStrategyRepository(),
         new_id=lambda: "unused",
-        today=lambda: date(2026, 9, 3),
     ).template()
+
+
+def _environment() -> RunEnvironment:
+    """참여율의 owner 는 1.2 부터 실행 설정이다(P2-03)."""
+    return RunEnvironment(
+        start=date(2026, 1, 2), end=date(2026, 12, 31), universe_id="krx.common-stock"
+    )
 
 
 def test_requirements_are_negotiated_before_engine_execution() -> None:
@@ -37,8 +44,8 @@ def test_requirements_are_negotiated_before_engine_execution() -> None:
         risk=replace(spec.risk, gross_exposure=1.5, net_exposure=0.0),
     )
 
-    requirements = adapter.requirements(leveraged_long_short)
-    compatibility = adapter.assess(leveraged_long_short)
+    requirements = adapter.requirements(leveraged_long_short, _environment())
+    compatibility = adapter.assess(leveraged_long_short, _environment())
 
     assert requirements.features == frozenset(
         (

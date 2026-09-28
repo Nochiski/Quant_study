@@ -34,6 +34,7 @@ import {
   currentSource,
   editor,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
@@ -51,12 +52,16 @@ const PROPOSED_TITLE = "KRX 12-1 모멘텀";
 const WINDOW_PROPOSED_TITLE = "KRX 6개월 모멘텀";
 const PROPOSED_WINDOW = 126;
 
-/** 전 시나리오가 같은 문서에서 돌지 않도록, 테스트마다 자기 리비전을 만든다. */
+/**
+ * 전 시나리오가 같은 문서에서 돌지 않도록, 테스트마다 자기 리비전을 만든다. "적용 후 백테스트"가 실행을
+ * 시작할 수 있게 실행 설정(기간·유니버스)도 정해 둔다 — 전략 문서 밖의 값이다(P3-02).
+ */
 const saveStrategyRevision = async (page: Page, title: string) => {
   await openEditor(page, "/research/strategies/new");
   await replaceSource(page, mustReplace(GOLDEN, "퀄리티 모멘텀", title));
   await expectPhase(page, "검증 통과");
   await saveAndWaitForRevision(page, 1);
+  await fillRunEnvironment(page);
   return strategyIdentity(page);
 };
 

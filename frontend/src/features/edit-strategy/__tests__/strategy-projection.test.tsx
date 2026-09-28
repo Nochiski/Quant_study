@@ -26,7 +26,7 @@ const SPEC = {
 // Exact representative bytes returned by backend canonical_strategy_json: root schema version,
 // no storage identity, sorted keys, and Python float lexical forms preserved.
 const CANONICAL =
-  '{"execution":{"fee_bps":15.0},"risk":{"minimum_trade_weight":0.0},"schema_version":"1.1"}';
+  '{"risk":{"max_name_weight":0.05,"minimum_trade_weight":0.0},"schema_version":"1.1"}';
 
 const outcome = (valid = true): CompileOutcome => ({
   spec: valid ? SPEC : null,
@@ -80,7 +80,7 @@ describe("StrategySpec projection model", () => {
     if (projection.status === "ready") {
       expect(projection.canonicalJson).toBe(CANONICAL);
       expect(projection.canonicalJson).toContain('"schema_version":"1.1"');
-      expect(projection.canonicalJson).toContain('"fee_bps":15.0');
+      expect(projection.canonicalJson).toContain('"minimum_trade_weight":0.0');
       expect(projection.canonicalJson).not.toContain("identity");
     }
   });
@@ -156,9 +156,7 @@ describe("StrategySpec projection UI", () => {
   it("labels stale and unavailable projections without offering them as current", () => {
     if (ready.status !== "ready") throw new Error("fixture must project");
     const { rerender } = render(
-      <StrategyProjectionPanel
-        projection={{ ...ready, stale: true }}
-      />,
+      <StrategyProjectionPanel projection={{ ...ready, stale: true }} />,
     );
     const region = screen.getByRole("region", { name: "StrategySpec JSON" });
     expect(region).toHaveTextContent("STALE");
@@ -170,9 +168,7 @@ describe("StrategySpec projection UI", () => {
     );
 
     rerender(
-      <StrategyProjectionPanel
-        projection={{ status: "unavailable" }}
-      />,
+      <StrategyProjectionPanel projection={{ status: "unavailable" }} />,
     );
     expect(screen.getByRole("status")).toHaveTextContent(
       "검증을 통과한 StrategySpec이 아직 없습니다",

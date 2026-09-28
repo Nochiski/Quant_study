@@ -1,6 +1,10 @@
 import { t } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
-import { isSpecStale, type DocumentState } from "../model/document-state";
+import {
+  isDocumentSettled,
+  isSpecStale,
+  type DocumentState,
+} from "../model/document-state";
 import "./document-status.css";
 
 const PHASE_TONE = {
@@ -23,6 +27,9 @@ export const DocumentStatus = ({ state }: { state: DocumentState }) => (
     className="document-status"
     role="status"
     aria-label={t("document.status")}
+    // 검증이 이 텍스트 버전을 따라잡았는지. 화면 문구는 그대로고 e2e 대기 조건만 쓴다(#240).
+    data-settled={isDocumentSettled(state)}
+    data-source-version={state.sourceVersion}
   >
     <Badge tone={PHASE_TONE[state.phase]}>
       {t(`document.phase.${state.phase}`)}

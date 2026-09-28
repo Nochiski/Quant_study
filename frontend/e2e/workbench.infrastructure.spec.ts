@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { getHealth } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
 import { backendOrigin } from "./ports.mjs";
+import { fillRunEnvironment } from "./workbench-helpers";
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
 const GOLDEN = readFileSync(
@@ -28,6 +29,8 @@ const REQUIRED_BACKEND_RESOURCES = [
   "/api/v1/strategy-documents/contract",
   "/api/v1/equity/catalog",
   "/api/v1/factors/catalog",
+  // 실행 설정 패널·요약 띠가 필드와 기본값을 읽는다(P3-02).
+  "/api/v1/run-environments/schema",
 ] as const;
 type RequiredBackendResource = (typeof REQUIRED_BACKEND_RESOURCES)[number];
 
@@ -211,6 +214,8 @@ test("matches the professional workbench viewport and theme baseline", async ({
   await expect(page).toHaveScreenshot("strategy-workbench.png");
 });
 
+// 전략 디버거의 trace 요청은 실행 설정(기간·유니버스)을 싣는다 — schema 1.2 부터 그 값은 전략 문서 밖의
+// 실행 설정 패널이 정한다(P3-02). 정하기 전에는 추적이 막힌다.
 test("keeps a real debugger trace legible and inside the viewport", async ({
   page,
 }) => {
@@ -219,6 +224,7 @@ test("keeps a real debugger trace legible and inside the viewport", async ({
   await expect(page.getByRole("status", { name: "문서 상태" })).toContainText(
     "검증 통과",
   );
+  await fillRunEnvironment(page);
   const resizeDebugger = page.getByRole("separator", {
     name: "중간 결과 크기 조절",
   });

@@ -17,10 +17,16 @@ import pytest
 
 from strategy_workbench.domain.factor.facade.expression import (
     EXPRESSION_NODE_KINDS,
+    BinaryNode,
+    BinaryOperator,
     ConstantNode,
+    CrossSectionalNode,
+    CrossSectionalOperator,
     FactorGraph,
     FieldMetadata,
     FieldNode,
+    GroupNode,
+    GroupOperator,
     NodeValueType,
 )
 from strategy_workbench.domain.factor.facade.operators import (
@@ -31,6 +37,7 @@ from strategy_workbench.domain.factor.facade.operators import (
     UnitRule,
     operator_definitions,
     operator_description_keys,
+    operator_reads_past_sessions,
 )
 from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
 
@@ -209,6 +216,8 @@ def _expected_value_type(rule: OutputTypeRule, shapes: tuple[Shape, ...]) -> Nod
 def _expected_unit(definition: OperatorDefinition, source_units: list[str]) -> str:
     if definition.unit_rule is UnitRule.BOOLEAN:
         return "bool"
+    if definition.unit_rule is UnitRule.DIMENSIONLESS:
+        return "1"
     if definition.unit_rule is UnitRule.COMBINED:
         symbol = "*" if definition.operator == "multiply" else "/"
         return f"({source_units[0]}{symbol}{source_units[1]})"
@@ -245,3 +254,170 @@ def test_declared_rules_match_the_inferred_contract(
 def test_arity_matches_the_node_input_count() -> None:
     for (kind, operator), definition in OPERATOR_DEFINITIONS.items():
         assert definition.arity == len(_node_inputs(kind)), f"{kind}.{operator}"
+
+
+@pytest.mark.parametrize(
+    "definition",
+    operator_definitions(),
+    ids=lambda item: f"{item.kind}.{item.operator}",
+)
+def test_reads_past_sessions_matches_the_inferred_history(definition: OperatorDefinition) -> None:
+    """`reads_past_sessions` 는 실제 추론과 같다: 입력보다 긴 이력을 요구하면 과거 세션을 읽는다.
+
+    compile 의 원주가 warning(BACKLOG-018)이 이 성질을 읽는다. 손으로 적은 표시값이 추론과
+    갈라지면 과거 세션을 읽는 새 연산자가 경고 없이 원주가를 받는다.
+    """
+    shapes = tuple("series" for _ in range(definition.arity))
+    validation = validate_factor_graph(
+        _sample_graph(definition, cast(tuple[Shape, ...], shapes)),
+        fields=(_PRICE, _RATIO, _SECTOR),
+    )
+    contracts = {contract.node_id: contract for contract in validation.node_contracts}
+    source_history = max(
+        contracts[f"source_{index}"].minimum_history_sessions for index in range(definition.arity)
+    )
+
+    assert definition.reads_past_sessions is (
+        contracts["subject"].minimum_history_sessions > source_history
+    )
+    assert operator_reads_past_sessions(definition.kind, definition.operator) is (
+        definition.reads_past_sessions
+    )
+
+
+# -- BACKLOG-003: 횡단면 표준화는 단위를 지운다 ----------------------------------------------------
+
+_PBR = FieldMetadata(field_id="pbr", unit="ratio", value_type=NodeValueType.NUMERIC_SERIES)
+
+
+def _standardized_sum(operator: str) -> FactorGraph:
+    """단위가 다른 두 필드를 같은 횡단면 연산으로 바꾼 뒤 더하는 그래프."""
+    return FactorGraph(
+        nodes=(
+            FieldNode(node_id="close", field_id="close", kind="field"),
+            FieldNode(node_id="pbr", field_id="pbr", kind="field"),
+            CrossSectionalNode(
+                node_id="close_std",
+                operator=CrossSectionalOperator(operator),
+                input_node_id="close",
+                kind="cross_sectional",
+            ),
+            CrossSectionalNode(
+                node_id="pbr_std",
+                operator=CrossSectionalOperator(operator),
+                input_node_id="pbr",
+                kind="cross_sectional",
+            ),
+            BinaryNode(
+                node_id="combined",
+                operator=BinaryOperator.ADD,
+                left_node_id="close_std",
+                right_node_id="pbr_std",
+                kind="binary",
+            ),
+        ),
+        output_node_id="combined",
+    )
+
+
+@pytest.mark.parametrize("operator", ["zscore", "rank"])
+def test_standardized_fields_with_different_units_can_be_added(operator: str) -> None:
+    """KRW 필드와 ratio 필드를 표준화해 더하는 교과서적 합성이 단위 오류로 막히지 않는다.
+
+    P1-05 tip 에서는 `factor.graph.unit_mismatch left='KRW' right='ratio'` 로 거부됐다(감사 N3).
+    순위·z-score 는 값이 몇 번째인지·평균에서 몇 표준편차인지라 입력 단위가 남지 않는다.
+    """
+    validation = validate_factor_graph(_standardized_sum(operator), fields=(_PRICE, _PBR))
+
+    assert validation.valid, [issue.message for issue in validation.issues]
+    assert "factor.graph.unit_mismatch" not in {issue.code for issue in validation.issues}
+    contracts = {contract.node_id: contract.unit for contract in validation.node_contracts}
+    assert contracts["close_std"] == contracts["pbr_std"] == contracts["combined"] == "1"
+
+
+@pytest.mark.parametrize("operator", ["demean", "winsorize"])
+def test_centering_and_clipping_keep_the_input_unit(operator: str) -> None:
+    """대조군: 평균을 빼거나 극단값을 자른 값은 원래 단위 그대로라 섞으면 여전히 단위 오류다."""
+    validation = validate_factor_graph(_standardized_sum(operator), fields=(_PRICE, _PBR))
+
+    contracts = {contract.node_id: contract.unit for contract in validation.node_contracts}
+    assert contracts["close_std"] == "KRW"
+    assert contracts["pbr_std"] == "ratio"
+    assert [issue.code for issue in validation.issues] == ["factor.graph.unit_mismatch"]
+
+
+def test_only_ranks_and_zscore_are_dimensionless() -> None:
+    dimensionless = {
+        key
+        for key, definition in OPERATOR_DEFINITIONS.items()
+        if definition.unit_rule is UnitRule.DIMENSIONLESS
+    }
+    assert dimensionless == {
+        ("cross_sectional", "rank"),
+        ("cross_sectional", "zscore"),
+        ("group", "rank"),
+    }
+
+
+# -- BACKLOG-015: 그룹 안 순위도 단위를 지운다 -----------------------------------------------------
+
+_GROUP = FieldMetadata(
+    field_id="classification.sector", unit="category", value_type=NodeValueType.GROUP_SERIES
+)
+
+
+def _grouped_sum(operator: str) -> FactorGraph:
+    """단위가 다른 두 필드에 같은 그룹 연산을 붙인 뒤 더하는 그래프(섹터 안 순위 합)."""
+    return FactorGraph(
+        nodes=(
+            FieldNode(node_id="close", field_id="close", kind="field"),
+            FieldNode(node_id="pbr", field_id="pbr", kind="field"),
+            GroupNode(
+                node_id="close_in_sector",
+                operator=GroupOperator(operator),
+                input_node_id="close",
+                group_field_id="classification.sector",
+                kind="group",
+            ),
+            GroupNode(
+                node_id="pbr_in_sector",
+                operator=GroupOperator(operator),
+                input_node_id="pbr",
+                group_field_id="classification.sector",
+                kind="group",
+            ),
+            BinaryNode(
+                node_id="combined",
+                operator=BinaryOperator.ADD,
+                left_node_id="close_in_sector",
+                right_node_id="pbr_in_sector",
+                kind="binary",
+            ),
+        ),
+        output_node_id="combined",
+    )
+
+
+def test_sector_ranks_of_fields_with_different_units_can_be_added() -> None:
+    """KRW 필드와 ratio 필드의 섹터 안 순위 두 개를 더해도 단위 오류가 아니다(BACKLOG-015).
+
+    `group.rank` 는 `cross_sectional_rank` 로 그룹 안 0~1 백분위를 낸다 — 횡단면 `rank` 와 같은
+    공식이라 입력 단위가 남지 않는다. P2-07 tip 에서는 `factor.graph.unit_mismatch
+    left='KRW' right='ratio'` 로 거부됐다.
+    """
+    validation = validate_factor_graph(_grouped_sum("rank"), fields=(_PRICE, _PBR, _GROUP))
+
+    assert validation.valid, [issue.message for issue in validation.issues]
+    contracts = {contract.node_id: contract.unit for contract in validation.node_contracts}
+    assert contracts["close_in_sector"] == contracts["pbr_in_sector"] == "1"
+    assert contracts["combined"] == "1"
+
+
+def test_sector_neutralization_keeps_the_input_unit() -> None:
+    """대조군: 섹터 평균을 뺀 값은 원래 단위라 KRW 와 ratio 를 섞으면 여전히 단위 오류다."""
+    validation = validate_factor_graph(_grouped_sum("neutralize"), fields=(_PRICE, _PBR, _GROUP))
+
+    contracts = {contract.node_id: contract.unit for contract in validation.node_contracts}
+    assert contracts["close_in_sector"] == "KRW"
+    assert contracts["pbr_in_sector"] == "ratio"
+    assert [issue.code for issue in validation.issues] == ["factor.graph.unit_mismatch"]

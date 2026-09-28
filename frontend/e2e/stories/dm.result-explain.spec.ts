@@ -18,6 +18,7 @@ import { ensureProvider } from "../assistant-helpers";
 import {
   backtest,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
@@ -45,10 +46,12 @@ test(
     await expectPhase(page, "검증 통과");
     await saveAndWaitForRevision(page, 1);
 
+    // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02).
+    await fillRunEnvironment(page, { via: "band" });
     const settingsToggle = page.getByLabel("실행 설정 열기");
     await settingsToggle.click();
     await page
-      .getByRole("textbox", { name: "벤치마크 종목 ID" })
+      .getByRole("textbox", { name: /^벤치마크 종목 ID/ })
       .fill(BENCHMARK);
     await settingsToggle.click();
     await expect(backtest(page)).toBeEnabled();

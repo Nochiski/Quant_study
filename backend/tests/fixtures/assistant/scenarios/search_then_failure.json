@@ -54,7 +54,7 @@
       "call_id": "call-propose-1",
       "name": "propose_strategy",
       "ok": false,
-      "summary": "제안이 서버 검증을 통과하지 못해 사용자에게 전달되지 않았습니다. 아래 진단이 가리키는 위치를 고쳐 다시 제출하세요. 같은 원문을 그대로 다시 보내면 같은 진단이 돌아옵니다.\n{\"ok\": false, \"spec_hash\": null, \"diagnostics\": [{\"code\": \"structure.missing_field\", \"pointer\": \"/data… (총 429자)",
+      "summary": "제안이 서버 검증을 통과하지 못해 사용자에게 전달되지 않았습니다. 아래 진단이 가리키는 위치를 고쳐 다시 제출하세요. 같은 원문을 그대로 다시 보내면 같은 진단이 돌아옵니다.\n{\"ok\": false, \"spec_hash\": null, \"diagnostics\": [{\"code\": \"structure.unsupported_schema_version\", \"poi… (총 343자)",
       "type": "tool_result"
     },
     "sequence": 3,
@@ -86,7 +86,7 @@
       "call_id": "call-propose-2",
       "name": "propose_strategy",
       "ok": false,
-      "summary": "제안이 서버 검증을 통과하지 못해 사용자에게 전달되지 않았습니다. 아래 진단이 가리키는 위치를 고쳐 다시 제출하세요. 같은 원문을 그대로 다시 보내면 같은 진단이 돌아옵니다.\n{\"ok\": false, \"spec_hash\": null, \"diagnostics\": [{\"code\": \"structure.missing_field\", \"pointer\": \"/data… (총 429자)",
+      "summary": "제안이 서버 검증을 통과하지 못해 사용자에게 전달되지 않았습니다. 아래 진단이 가리키는 위치를 고쳐 다시 제출하세요. 같은 원문을 그대로 다시 보내면 같은 진단이 돌아옵니다.\n{\"ok\": false, \"spec_hash\": null, \"diagnostics\": [{\"code\": \"structure.unsupported_schema_version\", \"poi… (총 343자)",
       "type": "tool_result"
     },
     "sequence": 5,
@@ -118,7 +118,7 @@
       "call_id": "call-propose-3",
       "name": "propose_strategy",
       "ok": false,
-      "summary": "제안이 서버 검증을 통과하지 못해 사용자에게 전달되지 않았습니다. 아래 진단이 가리키는 위치를 고쳐 다시 제출하세요. 같은 원문을 그대로 다시 보내면 같은 진단이 돌아옵니다.\n{\"ok\": false, \"spec_hash\": null, \"diagnostics\": [{\"code\": \"structure.missing_field\", \"pointer\": \"/data… (총 429자)",
+      "summary": "제안이 서버 검증을 통과하지 못해 사용자에게 전달되지 않았습니다. 아래 진단이 가리키는 위치를 고쳐 다시 제출하세요. 같은 원문을 그대로 다시 보내면 같은 진단이 돌아옵니다.\n{\"ok\": false, \"spec_hash\": null, \"diagnostics\": [{\"code\": \"structure.unsupported_schema_version\", \"poi… (총 343자)",
       "type": "tool_result"
     },
     "sequence": 7,

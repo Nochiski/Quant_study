@@ -23,7 +23,16 @@ const failureText = (
 export const ProposalApplyFeedback = ({
   apply,
   chain,
-}: ProposalApplyProps & { chain?: ProposalBacktestChain }) => {
+  blockedReason = null,
+}: ProposalApplyProps & {
+  chain?: ProposalBacktestChain;
+  /**
+   * 실행을 막는 이유 한 문장(툴바 차단 안내와 같은 문장). AI 가 적용한 문서도 실행 설정이 비면
+   * 사람이 고친 문서와 같은 이유로 막힌다(P3-02 결정 5) — "왜 안 돌았는지"를 같은 자리에서 말한다.
+   * 칸으로 가는 버튼은 바로 위 실행 설정 요약 띠가 가진다.
+   */
+  blockedReason?: string | null;
+}) => {
   const { status } = apply;
   if (chain?.waiting === true)
     return (
@@ -37,6 +46,7 @@ export const ProposalApplyFeedback = ({
     return (
       <p className="proposal-apply__feedback" role="status">
         {t("assistant.apply.backtestNotStarted")}
+        {blockedReason === null ? null : ` ${blockedReason}`}
       </p>
     );
   if (status.kind === "applied")

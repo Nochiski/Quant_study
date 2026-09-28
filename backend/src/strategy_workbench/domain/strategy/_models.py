@@ -1,21 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
 from enum import StrEnum
 from typing import Literal, TypeAlias
 
 from strategy_workbench.domain.factor.facade.expression import FactorGraph
 
 # 새 문서로 받는 유일한 authoring schema 버전. 모델 기본값·hydrate·스키마·어댑터가 전부 이 상수를
-# 읽는다(Phase 1 감사 DEFECT-P1X-001: 리터럴을 두 곳에 적지 않는다). 1.0 문서·저장 row는
+# 읽는다(Phase 1 감사 DEFECT-P1X-001: 리터럴을 두 곳에 적지 않는다). 은퇴한 버전의 문서·저장 row는
 # `_upgrade.py`의 변환을 거쳐서만 들어온다(spec D2·D3).
-CURRENT_SCHEMA_VERSION = "1.1"
+CURRENT_SCHEMA_VERSION = "1.2"
 
 # Editor metadata for identifier fields (see domain.factor._nodes for the node-side markers).
-CATALOG_UNIVERSE = {"catalog": "universe"}
 CATALOG_EQUITY_FIELD = {"catalog": "equity-field"}
 DEFINES_PARAMETER = {"defines": "parameter"}
+# 문서 안 팩터 네임스페이스: `factors` 배열이 정의하고(`factor_id`) 리스크 역가중이 참조한다(P2-06).
+DEFINES_FACTOR = {"defines": "factor"}
+REFERENCE_FACTOR = {"reference": "factor"}
 # 생략 시 hydrate가 같은 mapping의 다른 필드 값을 넣는 파생 기본값 (schema 1.1, spec D1 S3).
 DEFAULT_FROM_FACTOR_ID = {"default-from": "factor_id"}
 
@@ -28,25 +29,50 @@ def _factor_authoring(source: str, *, identity: bool = False) -> dict[str, objec
     return metadata
 
 
-class Market(StrEnum):
-    KRX = "KRX"
+class EligibilityOperator(StrEnum):
+    """유니버스 필터 한 줄의 비교 방식 (schema 1.2, spec D3 S5).
 
+    앞의 다섯(`gt`~`eq`)은 후보 하나의 값만 보면 판정되는 **절대** 규칙이고, `top_*` 는 같은
+    기준일 프레임의 **횡단면** 순위를 봐야 판정된다. `value` 의 의미도 갈린다 — 절대 규칙은
+    비교 임계값, `top_percent` 는 비율, `top_count` 는 개수다.
 
-class DataFrequency(StrEnum):
-    DAILY = "daily"
+    이 enum 은 전용이다. 값이 겹친다고 다른 비교 연산자 enum 에 얹으면 `top_*` 가 그 enum 의
+    소비자(팩터 그래프 `comparison` 노드 등)로 흘러들어, 모집단 없이 판정할 수 없는 값이
+    catch-all 분기에서 조용히 다른 비교로 떨어진다.
+    """
 
-
-class ComparisonOperator(StrEnum):
     GREATER_THAN = "gt"
     GREATER_THAN_OR_EQUAL = "gte"
     LESS_THAN = "lt"
     LESS_THAN_OR_EQUAL = "lte"
     EQUAL = "eq"
+    TOP_PERCENT = "top_percent"
+    TOP_COUNT = "top_count"
+
+
+# 절대/횡단면 갈림의 유일한 owner. 컴파일러의 1-pass·2-pass 와 validator 가 같은 집합을 읽는다 —
+# 목록을 소비자마다 다시 적으면 연산자를 늘릴 때 한쪽만 바뀌어 새 연산자가 1-pass 로 샌다.
+CROSS_SECTIONAL_ELIGIBILITY_OPERATORS: frozenset[EligibilityOperator] = frozenset(
+    {EligibilityOperator.TOP_PERCENT, EligibilityOperator.TOP_COUNT}
+)
 
 
 class FactorDirection(StrEnum):
     HIGH = "high"
     LOW = "low"
+
+
+class SignalNormalization(StrEnum):
+    """팩터 신호를 가중 합으로 합치기 전에 적용하는 횡단면 정규화 (schema 1.2, spec D4).
+
+    `NONE` 은 1.1 의 의미(원시값 가중 합)이고, 1.1 문서를 업그레이드할 때 명시된다. 새 문서의
+    기본값은 `RANK` 다 — 단위가 다른 팩터(PBR 과 ROE 등)를 원시값으로 더하면 큰 단위 하나가
+    합성 점수를 지배하기 때문이다.
+    """
+
+    NONE = "none"
+    RANK = "rank"
+    ZSCORE = "zscore"
 
 
 class PortfolioSide(StrEnum):
@@ -73,10 +99,6 @@ class RebalanceFrequency(StrEnum):
     QUARTERLY = "quarterly"
 
 
-class ExecutionTiming(StrEnum):
-    NEXT_OPEN = "next_open"
-
-
 @dataclass(frozen=True)
 class StrategyIdentity:
     strategy_id: str
@@ -84,19 +106,10 @@ class StrategyIdentity:
     schema_version: str = CURRENT_SCHEMA_VERSION
 
 
-@dataclass(frozen=True, kw_only=True)
-class DataStep:
-    market: Market = Market.KRX
-    start: date
-    end: date
-    universe_id: str = field(metadata=CATALOG_UNIVERSE)
-    frequency: DataFrequency = DataFrequency.DAILY
-
-
 @dataclass(frozen=True)
 class EligibilityRule:
     field_id: str = field(metadata=CATALOG_EQUITY_FIELD)
-    operator: ComparisonOperator
+    operator: EligibilityOperator
     value: float
 
 
@@ -117,6 +130,8 @@ class FactorSignal:
 
 @dataclass(frozen=True)
 class SignalStep:
+    # 결합 전 정규화. 기본값이 `RANK` 라서 생략한 문서도 순위 합성이 된다(spec D3 S4).
+    normalization: SignalNormalization = SignalNormalization.RANK
     score_threshold: float | None = None
     regime_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
     regime_minimum: float | None = None
@@ -146,14 +161,10 @@ class RiskStep:
     max_sector_weight: float = 0.3
     sector_neutral: bool = False
     risk_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
-
-
-@dataclass(frozen=True)
-class ExecutionStep:
-    timing: ExecutionTiming = ExecutionTiming.NEXT_OPEN
-    participation_rate: float = 0.1
-    fee_bps: float = 15.0
-    slippage_bps: float = 10.0
+    # 역가중 원천을 데이터 필드 대신 문서의 팩터 출력으로 쓴다(schema 1.2, spec D3 S6).
+    # `weighting: risk` 에서만 읽히고, 그때 참조 팩터는 합성 점수에서 빠진다
+    # (`inverse_risk_factor_id`). `risk_field_id` 와 함께 쓰면 검증 error 다.
+    risk_factor_id: str | None = field(default=None, metadata=REFERENCE_FACTOR)
 
 
 ParameterValue: TypeAlias = float | int | str | bool
@@ -195,11 +206,35 @@ class StrategySpec:
     identity: StrategyIdentity
     title: str
     description: str = ""
-    data: DataStep
     eligibility: EligibilityStep = EligibilityStep()
-    factors: tuple[FactorSignal, ...]
+    # 생략해도 빈 배열이어도 구조 오류가 아니다(spec D3). 두 경우 모두 semantic
+    # `strategy.factor.required`가 나서, 새 전략이 "구조 오류"가 아니라 "팩터를 추가하세요"로
+    # 시작한다 — 실행 설정이 빠진 1.2 최상위 필수 키는 `schema_version`·`title` 둘뿐이다.
+    factors: tuple[FactorSignal, ...] = field(default=(), metadata=DEFINES_FACTOR)
     signal: SignalStep = SignalStep()
     portfolio: PortfolioStep = PortfolioStep()
     risk: RiskStep = RiskStep()
-    execution: ExecutionStep = ExecutionStep()
     parameters: tuple[ParameterDefinition, ...] = field(default=(), metadata=DEFINES_PARAMETER)
+
+
+def inverse_risk_factor_id(spec: StrategySpec) -> str | None:
+    """리스크 역가중에 쓰이는 팩터 id — 쓰이지 않으면 `None` (spec D3 S6).
+
+    `weighting: risk` 이고 `risk_factor_id` 가 설정됐을 때만 값이 있다. 다른 모드에서는
+    `risk_factor_id` 를 읽지 않으므로 그 팩터는 일반 알파로 남는다 — 적용 조건이 붙은 필드가
+    조건 밖에서 알파 합성을 바꾸면 "모드별로 읽히는 필드" 계약과 어긋난다. 이 판정의 유일한
+    owner 이고, 컴파일러(합성 제외·역가중)·검증(제외 warning·알파 0개 error)·설명이 같은 함수를
+    읽는다.
+    """
+    if spec.portfolio.weighting is not WeightingMethod.RISK:
+        return None
+    return spec.risk.risk_factor_id
+
+
+def composite_factors(spec: StrategySpec) -> tuple[FactorSignal, ...]:
+    """합성 점수에 들어가는 알파 팩터.
+
+    역가중 팩터는 `weight` 와 분모 `Σ|weight|` 양쪽에서 빠진다.
+    """
+    excluded = inverse_risk_factor_id(spec)
+    return tuple(factor for factor in spec.factors if factor.factor_id != excluded)

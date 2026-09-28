@@ -10,6 +10,7 @@ import { expect, test } from "@playwright/test";
 import {
   backtest,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
@@ -43,6 +44,10 @@ test(
     await expectPhase(page, "검증 통과");
     await saveAndWaitForRevision(page, 1);
 
+    // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02). 비어 있으면
+    // 백테스트가 막히고, 요약 띠가 빈 칸 이름과 "실행 설정 채우기"를 보인다.
+    await expect(backtest(page)).toBeDisabled();
+    await fillRunEnvironment(page, { via: "band" });
     await expect(backtest(page)).toBeEnabled();
     await backtest(page).click();
 

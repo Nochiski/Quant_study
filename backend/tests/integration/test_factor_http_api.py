@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from strategy_workbench.domain.backtest.facade.environment import DEFAULT_MISSING_POLICY
 
 
 def test_factor_catalog_validate_and_explain_contract() -> None:
@@ -29,6 +30,51 @@ def test_factor_catalog_validate_and_explain_contract() -> None:
     assert explanation.json()["data_snapshot_id"] == "mock-equity-v0.2-20260903"
     assert explanation.json()["plan"]["as_of_policy"] == "available_date_lte_as_of"
     assert len(explanation.json()["plan"]["plan_hash"]) == 64
+    # 팩터 연구에서 쓴 그래프에는 compile 이 붙인 노드가 없다.
+    assert explanation.json()["synthesized_nodes"] == []
+
+
+def test_explain_marks_the_boolean_promotion_nodes_of_a_compiled_graph() -> None:
+    """실행 계획 화면이 승격 노드 이름 규칙을 복제하지 않게 wire 가 표식을 싣는다(감사 #13).
+
+    요청 그래프는 compile 이 승격한 모양 그대로다. 문서가 예약 접두사를 쓰면 compile 이 거절하므로
+    (DEFECT-232-01) 화면이 보내는 이 모양의 그래프는 compile 산출물뿐이다.
+    """
+    client = TestClient(build_http_app())
+    graph = {
+        "nodes": [
+            {"kind": "field", "node_id": "close", "field_id": "price.close"},
+            {"kind": "constant", "node_id": "threshold", "value": 100.0},
+            {
+                "kind": "comparison",
+                "node_id": "above",
+                "operator": "gt",
+                "left_node_id": "close",
+                "right_node_id": "threshold",
+            },
+            {"kind": "constant", "node_id": "__promote_above_one", "value": 1.0},
+            {"kind": "constant", "node_id": "__promote_above_zero", "value": 0.0},
+            {
+                "kind": "conditional",
+                "node_id": "__promote_above",
+                "predicate_node_id": "above",
+                "true_node_id": "__promote_above_one",
+                "false_node_id": "__promote_above_zero",
+            },
+        ],
+        "output_node_id": "__promote_above",
+    }
+
+    response = client.post("/api/v1/factors/explain", json={"graph": graph})
+
+    assert response.status_code == 200
+    assert response.json()["synthesized_nodes"] == [
+        {"node_id": "__promote_above_one", "origin": "promotion", "role": "promotion_constant"},
+        {"node_id": "__promote_above_zero", "origin": "promotion", "role": "promotion_constant"},
+        {"node_id": "__promote_above", "origin": "promotion", "role": "promoted_output"},
+    ]
+    steps = [step["node_id"] for step in response.json()["plan"]["steps"]]
+    assert set(steps) >= {"__promote_above_one", "__promote_above_zero", "__promote_above"}
 
 
 def test_explain_resolves_numeric_and_group_metadata_inside_the_backend() -> None:
@@ -166,7 +212,7 @@ def test_factor_preview_fails_closed_when_the_expected_snapshot_differs() -> Non
     assert matching.status_code == 200
 
 
-def _momentum_graph(missing_policy: str | None = None) -> dict[str, object]:
+def _momentum_graph() -> dict[str, object]:
     graph: dict[str, object] = {
         "nodes": [
             {"node_id": "close", "field_id": "price.close", "kind": "field"},
@@ -180,22 +226,20 @@ def _momentum_graph(missing_policy: str | None = None) -> dict[str, object]:
         ],
         "output_node_id": "mom",
     }
-    if missing_policy is not None:
-        graph["missing_policy"] = missing_policy
     return graph
 
 
-def test_explain_falls_back_to_the_document_missing_policy() -> None:
-    """P2-02 리뷰 P1: 요청이 `missing` 을 생략하면 1.1 문서 값으로 떨어진다.
+def test_explain_reads_the_requested_missing_policy() -> None:
+    """요청의 `missing` 이 plan 과 `plan_hash` 를 가른다.
 
-    편집 화면의 실행 플랜 패널이 이 경로를 쓴다. 기본값으로 고정하면 패널이 실제 실행과 다른
-    결측 정책과 다른 `plan_hash` 를 보인다.
+    schema 1.2 그래프에는 결측 정책이 없으므로 sandbox 는 요청 값만 읽는다(P2-03). 정책마다
+    다른 plan 이어야 팩터 행렬 캐시 키가 섞이지 않는다.
     """
     client = TestClient(build_http_app())
 
     plans = {
         policy: client.post(
-            "/api/v1/factors/explain", json={"graph": _momentum_graph(policy)}
+            "/api/v1/factors/explain", json={"graph": _momentum_graph(), "missing": policy}
         ).json()["plan"]
         for policy in ("drop", "zero", "cross_sectional_median")
     }
@@ -205,27 +249,17 @@ def test_explain_falls_back_to_the_document_missing_policy() -> None:
         "zero": "zero",
         "cross_sectional_median": "cross_sectional_median",
     }
-    # 정책마다 다른 plan 이어야 팩터 행렬 캐시 키가 섞이지 않는다.
     assert len({plan["plan_hash"] for plan in plans.values()}) == 3
 
 
-def test_explain_prefers_the_explicit_missing_over_the_document() -> None:
+def test_explain_without_a_missing_policy_uses_the_run_default() -> None:
+    """생략하면 실행 설정과 같은 기본값이다 — 편집 화면 플랜 패널이 실제 실행과 같아야 한다."""
     client = TestClient(build_http_app())
 
-    explicit = client.post(
-        "/api/v1/factors/explain",
-        json={"graph": _momentum_graph("zero"), "missing": "drop"},
-    )
     omitted = client.post("/api/v1/factors/explain", json={"graph": _momentum_graph()})
-
-    assert explicit.json()["plan"]["missing_policy"] == "drop"
-    # 문서에 값이 없으면 모델 기본값(`drop`)이다.
-    assert omitted.json()["plan"]["missing_policy"] == "drop"
-    assert (
-        explicit.json()["plan"]["plan_hash"]
-        != (
-            client.post("/api/v1/factors/explain", json={"graph": _momentum_graph("zero")}).json()[
-                "plan"
-            ]["plan_hash"]
-        )
+    explicit = client.post(
+        "/api/v1/factors/explain", json={"graph": _momentum_graph(), "missing": "drop"}
     )
+
+    assert omitted.json()["plan"]["missing_policy"] == DEFAULT_MISSING_POLICY.value
+    assert omitted.json()["plan"]["plan_hash"] == explicit.json()["plan"]["plan_hash"]

@@ -33,15 +33,37 @@
   font-size: 11px;
 }
 
+/*
+ * 한글은 음절마다 줄을 바꿀 수 있어, 좁아지면 버튼 글자가 "검/증"처럼 한 음절씩 선다(이슈 #260). 버튼
+ * 글자는 낱말 안에서 꺾지 않는다(`keep-all`). 편집기 칸이 아주 좁을 때(AI 패널을 연 1440px 등)는 버튼이
+ * 낱말 폭까지 줄어야 칸 안에 남으므로 줄어드는 것 자체는 막지 않는다.
+ */
 .doc-toolbar__actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
 
+.doc-toolbar__actions .ui-button {
+  word-break: keep-all;
+}
+
+/* 오류 문장은 버튼 줄 아래 한 줄을 통째로 쓰고, 길면 그 안에서 줄을 바꾼다. */
 .doc-toolbar__error {
+  flex-basis: 100%;
+  min-width: 0;
   color: var(--status-error);
   font-size: var(--text-size-small);
+  overflow-wrap: anywhere;
+}
+
+.doc-toolbar__error-reason {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+}
+
+.doc-toolbar__error-reason > summary {
+  cursor: pointer;
 }
 
 .doc-toolbar__run-status {

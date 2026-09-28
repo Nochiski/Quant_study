@@ -131,6 +131,7 @@ from ._backtest_contract import (
     BacktestRunNotFoundResponse,
     BacktestStrategyNotFoundResponse,
     BacktestStrategyStaleResponse,
+    CodedBodyValidationRoute,
 )
 from ._execution_error_contract import (
     Portfolio422Response,
@@ -316,25 +317,6 @@ def create_app(
             strategy_id=strategy_id,
         )
 
-    @app.post(
-        "/api/v1/backtests",
-        operation_id="startBacktest",
-        status_code=status.HTTP_202_ACCEPTED,
-        responses={
-            404: {
-                "model": BacktestStrategyNotFoundResponse,
-                "description": "The immutable strategy revision does not exist",
-            },
-            409: {
-                "model": BacktestStrategyStaleResponse,
-                "description": "The saved revision hash differs from the expected hash",
-            },
-            422: {
-                "model": Backtest422Response,
-                "description": "Malformed envelope or a coded backtest preflight diagnostic",
-            },
-        },
-    )
     def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
         try:
             return backtest_runs.start(spec)
@@ -370,6 +352,31 @@ def create_app(
             # 시작 요청은 데이터를 읽지 않는 사전 검사만 한다(이슈 #158). 관측 데이터 부재·계약
             # 위반은 run 스레드의 tape 단계에서 run 상태 `failed` + `error` 로 기록된다.
             raise _portfolio_http_error(error) from error
+
+    # 본문 검증 실패를 코드화된 422 로 내려고 이 라우트만 `CodedBodyValidationRoute` 로 등록한다
+    # (이슈 #260). `app.post` 데코레이터는 라우트 클래스를 받지 않는다.
+    app.router.add_api_route(
+        "/api/v1/backtests",
+        start_backtest,
+        methods=["POST"],
+        operation_id="startBacktest",
+        status_code=status.HTTP_202_ACCEPTED,
+        route_class_override=CodedBodyValidationRoute,
+        responses={
+            404: {
+                "model": BacktestStrategyNotFoundResponse,
+                "description": "The immutable strategy revision does not exist",
+            },
+            409: {
+                "model": BacktestStrategyStaleResponse,
+                "description": "The saved revision hash differs from the expected hash",
+            },
+            422: {
+                "model": Backtest422Response,
+                "description": "A coded backtest preflight or request-body diagnostic",
+            },
+        },
+    )
 
     @app.get(
         "/api/v1/backtests/{run_id}",

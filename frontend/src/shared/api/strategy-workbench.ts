@@ -156,6 +156,29 @@ export const invalidDocumentSummary = (error: unknown): string | undefined => {
   return `${pointer}: ${first.message}${rest > 0 ? ` (+${rest})` : ""}`;
 };
 
+/**
+ * FastAPI 기본 422(`detail` 배열)의 진단 문장. 첫 오류의 본문 경로와 문장에 나머지 개수를 붙인다. 코드화된
+ * 계약이 없는 라우트에서도 서버 사유를 버리지 않으려는 방어다(이슈 #260: 배열 detail 에서 `code`·`message`
+ * 를 꺼내지 못해 사유가 사라졌다). 화면 본문이 아니라 접힌 진단 상세에 쓴다.
+ */
+export const requestValidationSummary = (
+  error: unknown,
+): string | undefined => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return undefined;
+  const detail = (error as { detail: unknown }).detail;
+  if (!Array.isArray(detail) || detail.length === 0) return undefined;
+  const first = detail[0] as { loc?: unknown; msg?: unknown };
+  const location = Array.isArray(first.loc) ? first.loc.map(String) : [];
+  const path =
+    (location[0] === "body" && location.length > 1
+      ? location.slice(1)
+      : location
+    ).join(".") || "-";
+  const rest = detail.length - 1;
+  return `${path}: ${String(first.msg ?? "")}${rest > 0 ? ` (+${rest})` : ""}`;
+};
+
 /** Runtime check at the HTTP boundary for the generated structured 409 detail. */
 const revisionConflictDetail = (
   error: unknown,
@@ -258,7 +281,9 @@ const requestError = (
     context,
     responseStatus,
     errorCode(response.error),
-    errorField(response.error, "message") ?? invalidDocumentSummary(response.error),
+    errorField(response.error, "message") ??
+      invalidDocumentSummary(response.error) ??
+      requestValidationSummary(response.error),
     conflict?.latest_revision ?? null,
     draftConflict?.current ?? null,
   );

@@ -505,6 +505,38 @@
         "title": "BacktestResultNotReadyResponse",
         "type": "object"
       },
+      "BacktestRunFieldInvalidDetail": {
+        "description": "요청 본문이 스키마나 칸 규칙을 어겼다(이슈 #260).\n\n`field` 는 본문의 점 경로(`initial_cash`, `environment.fee_bps`)다. 본문이 JSON 이 아니거나\n본문 전체가 빠져 칸을 특정할 수 없으면 null 이다. `message` 는 진단용 원문이고, 화면 문장은\nfrontend 가 `code` 로 번역한다.",
+        "properties": {
+          "code": {
+            "const": "backtest.run.field_invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "field",
+          "message"
+        ],
+        "title": "BacktestRunFieldInvalidDetail",
+        "type": "object"
+      },
       "BacktestRunInvalidDetail": {
         "properties": {
           "code": {
@@ -916,6 +948,7 @@
             "discriminator": {
               "mapping": {
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
+                "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
                 "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
@@ -925,6 +958,9 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/BacktestRunInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
               },
               {
                 "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
@@ -9633,19 +9669,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/BacktestUnprocessableResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RequestValidationResponse"
-                    }
-                  ],
-                  "title": "Response 422 Startbacktest"
+                  "$ref": "#/components/schemas/BacktestUnprocessableResponse"
                 }
               }
             },
-            "description": "Malformed envelope or a coded backtest preflight diagnostic"
+            "description": "A coded backtest preflight or request-body diagnostic"
           }
         },
         "summary": "Start Backtest"

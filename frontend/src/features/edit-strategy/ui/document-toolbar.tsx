@@ -41,6 +41,31 @@ const decisionLabel = (decision: BacktestSourceDecision): string => {
 };
 
 /**
+ * 시작 거절 한 줄. 본문은 코드의 번역, 번역이 없으면 일반 문구다. 서버 사유는 접힌 상세로 내린다 —
+ * 결과 화면의 run 실패 표시와 같은 방식이다(이슈 #260, `.claude/rules/frontend-api-state.md`). 줄은 버튼 줄
+ * 아래에 따로 두어 긴 문장이 버튼 폭을 빼앗지 않게 한다.
+ */
+const RunFailure = ({
+  detail,
+  code,
+}: {
+  detail: string | null;
+  code: string | null;
+}) => (
+  <div className="doc-toolbar__error" role="alert">
+    {t("toolbar.run.failed")}:{" "}
+    {(code === null ? null : tOptional(`backtest.error.${code}`)) ??
+      t("toolbar.run.failedGeneric")}
+    {detail === null ? null : (
+      <details className="doc-toolbar__error-reason">
+        <summary>{t("toolbar.run.serverReason")}</summary>
+        {detail}
+      </details>
+    )}
+  </div>
+);
+
+/**
  * Editor header actions and identity line (WORKFLOW P3-05): schema version, source hash,
  * backend canonical spec hash (never a frontend-computed one), then Validate · Save · Backtest.
  * Save and Backtest are disabled while the document is invalid or its compile result is stale.
@@ -135,16 +160,10 @@ export const DocumentToolbar = ({
             {t("toolbar.run.accepted").replace("{runId}", runStatus.runId)}
           </span>
         ) : null}
-        {runStatus.kind === "failed" ? (
-          <span className="doc-toolbar__error" role="alert">
-            {t("toolbar.run.failed")}:{" "}
-            {(runStatus.code === null
-              ? null
-              : tOptional(`backtest.error.${runStatus.code}`)) ??
-              runStatus.detail}
-          </span>
-        ) : null}
       </div>
+      {runStatus.kind === "failed" ? (
+        <RunFailure detail={runStatus.detail} code={runStatus.code} />
+      ) : null}
     </div>
   );
 };

@@ -801,6 +801,7 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
     # 관측 데이터 부재·계약 위반은 시작 요청이 아니라 run 상태 `failed` 로 전달된다(이슈 #158).
     assert set(detail["discriminator"]["mapping"]) == {
         "backtest.run.invalid",
+        "backtest.run.field_invalid",
         "backtest.run.environment_required",
         "backtest.strategy.requires_upgrade",
         "portfolio.strategy.invalid",
@@ -822,7 +823,12 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
 
     assert semantic_response.status_code == malformed_response.status_code == 422
     assert semantic_response.json()["detail"]["code"] == "portfolio.strategy.invalid"
-    assert isinstance(malformed_response.json()["detail"], list)
+    # 본문 검증 실패도 FastAPI 기본 배열이 아니라 코드화된 detail 이다(이슈 #260). 422 계약에
+    # 배열 형식이 남아 있으면 프론트는 코드 없는 422 를 처리할 경로를 따로 가져야 한다.
+    assert malformed_response.json()["detail"]["code"] == "backtest.run.field_invalid"
+    assert malformed_response.json()["detail"]["field"] == "core"
+    responses_422 = operation["responses"]["422"]["content"]["application/json"]["schema"]
+    assert responses_422["$ref"].endswith("BacktestUnprocessableResponse"), responses_422
     adapter = TypeAdapter(Backtest422Response)
     adapter.validate_python(semantic_response.json())
     adapter.validate_python(malformed_response.json())
@@ -875,13 +881,13 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
     body = _run_body(client, "python")
     body.pop("environment")
 
-    # 422 본문의 `input` 은 요청한 environment 객체를 통째로 되돌려주므로 모든 필드 이름이
-    # 응답 텍스트에 들어 있다. 진단이 어느 필드를 지목하는지 보려면 `msg` 로 좁혀야 한다.
-    for field_name, bad, expected in (
-        ("participation_rate", 50.0, "field=participation_rate"),
-        ("fee_bps", -1.0, "field=fee_bps"),
-        ("start", "2026-12-31", "end must be on or after start"),
-        ("universe_id", "   ", "requires a universe id"),
+    # 거절은 코드화된 detail 의 `field` 로 어느 칸인지 가리킨다(이슈 #260).
+    # 기간 순서 위반은 종료일 칸이다.
+    for field_name, bad, field, expected in (
+        ("participation_rate", 50.0, "environment.participation_rate", "field=participation_rate"),
+        ("fee_bps", -1.0, "environment.fee_bps", "field=fee_bps"),
+        ("start", "2026-12-31", "environment.end", "end must be on or after start"),
+        ("universe_id", "   ", "environment.universe_id", "requires a universe id"),
     ):
         response = client.post(
             "/api/v1/backtests",
@@ -889,13 +895,55 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
         )
         assert response.status_code == 422, (field_name, response.text)
         detail = response.json()["detail"]
-        assert len(detail) == 1, (field_name, detail)
-        assert expected in detail[0]["msg"], (field_name, detail[0]["msg"])
-        # 현재 `loc` 은 environment 객체까지만 가리킨다. 필드 단위 표면은 P3-02 결정 항목이다.
-        assert detail[0]["loc"][-1] == "environment", (field_name, detail[0]["loc"])
+        assert detail["code"] == "backtest.run.field_invalid", (field_name, detail)
+        assert detail["field"] == field, (field_name, detail)
+        assert expected in detail["message"], (field_name, detail["message"])
 
     accepted = client.post("/api/v1/backtests", json={**body, "environment": environment})
     assert accepted.status_code == 202, accepted.text
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field", "expected"),
+    [
+        ({"initial_cash": 0}, "initial_cash", "initial_cash must be positive"),
+        ({"initial_cash": -5}, "initial_cash", "initial_cash=-5"),
+        ({"annualization_days": 0}, "annualization_days", "annualization_days must be positive"),
+        ({"annualization_days": "abc"}, "annualization_days", "input='abc'"),
+    ],
+)
+def test_invalid_run_options_are_a_coded_422_naming_the_field(
+    overrides: dict[str, Any], field: str, expected: str
+) -> None:
+    """본문 검증 실패는 `backtest.run.field_invalid` 로 어느 칸이 왜 틀렸는지 말한다(이슈 #260).
+
+    전에는 `BacktestRunSpec.__post_init__` 의 `ValueError` 가 FastAPI 기본 422(배열 `detail`,
+    `loc: ["body"]`, 코드 없음)로 나가, 프론트가 코드도 사유도 읽지 못하고 영문 진단을 띄웠다.
+    """
+    client = TestClient(build_http_app())
+    response = client.post("/api/v1/backtests", json={**_run_body(client, "python"), **overrides})
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "backtest.run.field_invalid"
+    assert detail["field"] == field
+    assert expected in detail["message"], detail["message"]
+    TypeAdapter(Backtest422Response).validate_python(response.json())
+
+
+def test_malformed_start_body_is_a_coded_422_without_a_field() -> None:
+    client = TestClient(build_http_app())
+    response = client.post(
+        "/api/v1/backtests",
+        content=b"{not json",
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "backtest.run.field_invalid"
+    assert detail["field"] is None
+    TypeAdapter(Backtest422Response).validate_python(response.json())
 
 
 def test_start_without_an_environment_is_a_coded_422() -> None:

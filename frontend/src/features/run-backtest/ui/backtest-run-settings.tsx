@@ -9,7 +9,10 @@ import {
   type RunEnvironmentFieldError,
 } from "../model/run-environment";
 import type { BacktestRunSettingsError } from "../model/run-settings";
-import { runEnvironmentErrorMessage } from "../model/run-settings-problems";
+import {
+  runEnvironmentErrorMessage,
+  runOptionErrorMessage,
+} from "../model/run-settings-problems";
 import type { BacktestRunSettingsController } from "../model/use-backtest-run-settings";
 import "./backtest-run-settings.css";
 import {
@@ -21,9 +24,6 @@ type BacktestRunSettingsProps = {
   controller: BacktestRunSettingsController;
   disabled?: boolean;
 };
-
-const errorMessage = (error: BacktestRunSettingsError): string =>
-  t(`backtest.settings.error.${error}`);
 
 /** 날짜 칸이 덜 채워졌는지: 연도만 쳤거나 없는 날짜(2월 31일)면 값은 빈 문자열이고 `badInput` 이 선다. */
 const isIncompleteDate = (event: SyntheticEvent<HTMLInputElement>): boolean =>
@@ -149,6 +149,9 @@ export const BacktestRunSettings = ({
     setPanelOpen,
   } = controller;
   const { open, focus } = panel;
+  const optionErrors: ReadonlySet<BacktestRunSettingsError> = new Set(
+    result.errors,
+  );
   const popoverRef = useRef<HTMLDivElement>(null);
   // 요약 띠·차단 안내가 "이 칸으로 가기"를 요청하면 패널이 열린 뒤 그 칸에 초점을 옮긴다. 요청 한 번
   // (nonce)에 한 번만 움직여, 사용자가 패널을 닫았다 다시 열 때 초점을 빼앗지 않는다.
@@ -239,6 +242,7 @@ export const BacktestRunSettings = ({
               step="any"
               type="number"
               data-run-field="initial_cash"
+              aria-invalid={optionErrors.has("initial_cash") ? true : undefined}
               value={fields.initialCashKrw}
               onChange={(event) =>
                 setField("initialCashKrw", event.target.value)
@@ -266,6 +270,9 @@ export const BacktestRunSettings = ({
               step="1"
               type="number"
               data-run-field="annualization_days"
+              aria-invalid={
+                optionErrors.has("annualization_days") ? true : undefined
+              }
               value={fields.annualizationDays}
               onChange={(event) =>
                 setField("annualizationDays", event.target.value)
@@ -279,6 +286,9 @@ export const BacktestRunSettings = ({
               min={DATE_INPUT_MINIMUM}
               max={DATE_INPUT_MAXIMUM}
               data-run-field="oos_out_of_range"
+              aria-invalid={
+                optionErrors.has("oos_out_of_range") ? true : undefined
+              }
               value={fields.oosStart}
               onChange={(event) => setField("oosStart", event.target.value)}
             />
@@ -290,7 +300,7 @@ export const BacktestRunSettings = ({
         {result.valid ? null : (
           <ul className="backtest-settings__errors" role="alert">
             {result.errors.map((error) => (
-              <li key={error}>{errorMessage(error)}</li>
+              <li key={error}>{runOptionErrorMessage(error)}</li>
             ))}
           </ul>
         )}

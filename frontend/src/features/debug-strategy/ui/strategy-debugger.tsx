@@ -256,7 +256,6 @@ const VirtualNodeChain = ({
 };
 
 const BLOCKED_MESSAGES = {
-  document: "debugger.blocked.document",
   date: "debugger.blocked.date",
   security: "debugger.blocked.security",
   factor: "debugger.blocked.factor",
@@ -281,9 +280,13 @@ const StateNotice = ({ state }: { state: StrategyTraceState }) => {
     );
   if (state.kind === "success") return null;
   const key =
-    state.kind === "blocked"
-      ? BLOCKED_MESSAGES[state.reason]
-      : STATE_MESSAGES[state.kind];
+    state.kind !== "blocked"
+      ? STATE_MESSAGES[state.kind]
+      : // 문맥이 없는 이유는 식별 줄의 `debugger.unavailable.*` 한 문장이 말한다. 여기서 또 말하지 않는다.
+        state.reason === "unavailable"
+        ? null
+        : BLOCKED_MESSAGES[state.reason];
+  if (key === null) return null;
   return (
     <div className="strategy-debugger__state" role="status">
       <p>{t(key)}</p>

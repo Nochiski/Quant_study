@@ -381,6 +381,10 @@ try {
   // 편집기 글 길이에 따라 중간 결과가 화면 아래로 밀릴 수 있어 문장까지 스크롤한다.
   await traceBlocked.scrollIntoViewIfNeeded();
   await expect(traceBlocked).toBeInViewport();
+  // 막힌 이유는 한 문장이다 — 문서 탓으로 오진하는 문장이 함께 뜨지 않는다(#260).
+  await expect(
+    debuggerRegion.getByText("현재 실행 가능한 문서가 없습니다."),
+  ).toHaveCount(0);
   await capture(page, "20-trace-blocked.png", debuggerRegion);
 
   // 6절: 실행 설정 패널. e2e `fillRunEnvironment`(toggle 경로)와 같은 단계·셀렉터다.
@@ -462,46 +466,26 @@ try {
   await page
     .getByRole("combobox", { name: "실행 core" })
     .selectOption("python");
-  // 6절 표의 값을 먼저 채우고 초기 자본만 0으로 둔다 — 실패 화면(08)도 표와 같은 벤치마크를 보여야 한다(#148 리뷰).
+  // 6절 표의 값을 먼저 채우고 초기 자본만 0으로 둔다 — 막힌 화면(08)도 표와 같은 벤치마크를 보여야 한다(#148 리뷰).
   await page
     .getByRole("textbox", { name: "벤치마크 종목 ID" })
     .fill("sec-005930-1");
   await page.getByRole("spinbutton", { name: "연환산 거래일" }).fill("252");
   const initialCash = page.getByRole("spinbutton", { name: "초기 자본 (KRW)" });
   await initialCash.fill("0");
-  const rejectedRun = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      new URL(response.url()).pathname === "/api/v1/backtests",
+  // 초기 자본 0은 서버가 거절하는 값이라 패널이 먼저 막는다(#260). 요청은 나가지 않고, 요약 띠가 칸
+  // 이름과 이유를 말하며, 패널 아래 오류 목록에도 같은 이유가 보인다.
+  await expect(backtestButton).toBeDisabled();
+  await expect(summaryBand).toContainText(
+    "실행 설정의 초기 자본 칸을 고치세요: 0보다 큰 숫자를 입력하세요.",
   );
-  await backtestButton.click();
-  const rejectedResponse = await rejectedRun;
-  expect(rejectedResponse.status()).toBe(422);
-  expect(rejectedResponse.request().postDataJSON()).toMatchObject({
-    core: "python",
-    initial_cash: 0,
-    environment: RUN_ENVIRONMENT,
-  });
-  const rejectedPayload = await rejectedResponse.json();
-  expect(Array.isArray(rejectedPayload.detail)).toBe(true);
-  expect(rejectedPayload.detail).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        loc: ["body"],
-        msg: expect.stringContaining("initial_cash must be positive"),
-        type: "value_error",
-        input: expect.objectContaining({ initial_cash: 0 }),
-      }),
-    ]),
+  await expect(settingsPopover.getByRole("alert")).toContainText(
+    "초기 자본: 0보다 큰 숫자를 입력하세요.",
   );
-  expect(backtestPosts).toHaveLength(1);
-  expect(new URL(page.url()).pathname).toBe(
-    `/research/strategies/${strategyId}/revisions/2`,
-  );
-  await expect(page.getByRole("alert")).toContainText("백테스트 시작 실패");
-  // 팝오버는 안쪽 스크롤이라 맨 아래 실행 옵션(초기 자본 0)이 잘린다. 팝오버를 끝까지 내려 실패
-  // 원인 칸과 상단 오류 문장이 한 화면에 들어오게 하고, 팝오버 아래 끝이 뷰포트 밖이면 이 장면만
-  // 뷰포트를 늘린다.
+  expect(backtestPosts).toHaveLength(0);
+  // 팝오버는 안쪽 스크롤이라 맨 아래 실행 옵션(초기 자본 0)이 잘린다. 팝오버를 끝까지 내려 막힌
+  // 칸과 오류 목록이 한 화면에 들어오게 하고, 팝오버 아래 끝이 뷰포트 밖이면 이 장면만 뷰포트를
+  // 늘린다.
   try {
     await fitViewportTo(page, settingsPopover, () =>
       settingsPopover.evaluate((element) => {
@@ -543,7 +527,7 @@ try {
   if (typeof runId !== "string" || runId === "") {
     throw new Error("백테스트 실행 ID가 202 응답에 없습니다.");
   }
-  expect(backtestPosts).toHaveLength(2);
+  expect(backtestPosts).toHaveLength(1);
   const resultUrl = `${frontendUrl}/research/backtests/${runId}`;
   await expect(page).toHaveURL(resultUrl);
   await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(

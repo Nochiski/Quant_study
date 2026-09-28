@@ -2782,28 +2782,15 @@ describe("StrategySpec Diff projection (P4-08)", () => {
 });
 
 describe("backtest from the editor (P3-05)", () => {
-  it("blocks a lossy integer locally and lets the backend reject a safe negative integer", async () => {
+  it("blocks lossy and non-positive integers locally before any request", async () => {
     server.use(
       http.post(`${API}/api/v1/backtests`, async ({ request }) => {
         started.push((await request.json()) as Record<string, unknown>);
-        return HttpResponse.json(
-          {
-            detail: [
-              {
-                type: "greater_than",
-                loc: ["body", "annualization_days"],
-                msg: "Input should be greater than 0",
-                input: -1,
-                ctx: { gt: 0 },
-              },
-            ],
-          },
-          { status: 422 },
-        );
+        return HttpResponse.json({ detail: "unexpected" }, { status: 500 });
       }),
     );
     const user = userEvent.setup();
-    const history = mount("/research/strategies/s1/revisions/2");
+    mount("/research/strategies/s1/revisions/2");
     await editor();
     const run = screen.getByRole("button", { name: /백테스트 실행/ });
     await waitFor(() => expect(run).toBeEnabled());
@@ -2819,17 +2806,81 @@ describe("backtest from the editor (P3-05)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "정확히 전송 가능한 정수",
     );
-    expect(started).toHaveLength(0);
-
+    // 0 이하도 backend 가 거절하므로 패널이 먼저 막는다(이슈 #260).
     fireEvent.change(annualization, { target: { value: "-1" } });
+    await waitFor(() => expect(run).toBeDisabled());
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "연환산 거래일: 1 이상이고 정확히 전송 가능한 정수를 입력하세요.",
+    );
+    expect(started).toHaveLength(0);
+  });
+
+  // 이슈 #260 DEFECT-1: 시작 거절은 개발자 진단(`API request failed: … status=422 code=…`)이 아니라 코드의
+  // 번역 문장으로 보이고, 서버 사유는 접힌 상세로 내려간다.
+  it("shows a coded start rejection as a translated sentence with the server reason folded", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+        started.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.field_invalid",
+              field: "initial_cash",
+              message:
+                "Value error, initial_cash must be positive — initial_cash=0.0 — field=initial_cash",
+            },
+          },
+          { status: 422 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2");
+    await editor();
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
 
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ annualization_days: -1 });
-    expect(await screen.findByRole("alert")).toHaveTextContent("status=422");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "백테스트 시작 실패: 서버가 실행 설정의 값 하나를 받지 않았습니다.",
+    );
+    expect(alert).not.toHaveTextContent("API request failed");
+    expect(alert).not.toHaveTextContent("status=422");
+    const reason = within(alert).getByText("서버 사유");
+    expect(reason.closest("details")).not.toHaveAttribute("open");
+    expect(reason.closest("details")).toHaveTextContent(
+      "initial_cash must be positive",
+    );
     expect(history.location.pathname).toBe(
       "/research/strategies/s1/revisions/2",
+    );
+  });
+
+  it("falls back to a general sentence when the rejection has no translation", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json(
+          { detail: [{ type: "missing", loc: ["body"], msg: "Field required" }] },
+          { status: 422 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/s1/revisions/2");
+    await editor();
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "백테스트 시작 실패: 서버가 실행 요청을 받지 않았습니다.",
+    );
+    expect(alert).not.toHaveTextContent("API request failed");
+    expect(within(alert).getByText("서버 사유").closest("details")).toHaveTextContent(
+      "body: Field required",
     );
   });
 

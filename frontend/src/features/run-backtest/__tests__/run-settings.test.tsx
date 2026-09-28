@@ -291,24 +291,27 @@ describe("backtest run settings", () => {
     });
   });
 
+  // 이슈 #260: 0 이하는 backend(`BacktestRunSpec.__post_init__`)가 거절한다. 패널이 먼저 막지 않으면 배지는
+  // "준비됨"인데 시작이 422 로 거절되고, 사용자는 어느 칸이 문제인지 모른다.
   it.each(["0", "-1"])(
-    "forwards safe semantic boundary %s for the backend contract to decide",
-    (annualizationDays) => {
-      const result = buildBacktestRunOptions(
-        {
-          core: "rust",
-          initialCashKrw: "0",
-          benchmarkSecurityId: "",
-          annualizationDays,
-          oosStart: "",
-        },
-        VALID,
-      );
-      expect(result.valid).toBe(true);
-      expect(result.options?.annualization_days).toBe(
-        Number(annualizationDays),
-      );
-      expect(result.options?.initial_cash).toBe(0);
+    "blocks non-positive initial cash and annualization days %s before the request",
+    (value) => {
+      expect(
+        buildBacktestRunOptions(
+          {
+            core: "rust",
+            initialCashKrw: value,
+            benchmarkSecurityId: "",
+            annualizationDays: value,
+            oosStart: "",
+          },
+          VALID,
+        ),
+      ).toEqual({
+        valid: false,
+        options: null,
+        errors: ["initial_cash", "annualization_days"],
+      });
     },
   );
 
@@ -455,14 +458,16 @@ describe("run environment panel", () => {
     renderWithQuery(<Harness />);
     const user = await openSettings();
     await fillPeriodAndUniverse(user);
-    await user.clear(
-      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
-    );
+    const cash = screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" });
+    await user.clear(cash);
+    await user.type(cash, "0");
     await user.click(screen.getByLabelText("실행 설정 열기"));
 
+    // 실행 옵션 칸도 실행 설정 칸과 같은 문장 틀로 칸 이름과 이유를 말한다(이슈 #260).
     expect(screen.getByTestId("blocked")).toHaveTextContent(
-      "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
+      "실행 설정의 초기 자본 칸을 고치세요: 0보다 큰 숫자를 입력하세요.",
     );
+    expect(requestBody()).toBeNull();
     const band = screen.getByRole("region", { name: "실행 설정 요약" });
     await user.click(
       within(band).getByRole("button", { name: "실행 설정 고치기" }),
@@ -675,8 +680,9 @@ describe("run environment panel", () => {
     await user.clear(cash);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
+      "초기 자본: 0보다 큰 숫자를 입력하세요.",
     );
+    expect(cash).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText("입력 확인")).toBeInTheDocument();
   });
 });

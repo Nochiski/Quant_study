@@ -126,6 +126,18 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
 NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = tuple(RUN_ENVIRONMENT_CONSTRAINTS)
 
 
+class InvalidRunFieldError(ValueError):
+    """실행 요청의 칸 하나가 규칙을 어겼다. `field` 는 그 칸의 이름이다(이슈 #260).
+
+    `ValueError` 라 pydantic 이 요청 본문 검증 오류로 감싼다. 칸 이름을 예외에 실어 두면 inbound 가
+    `loc` 이 객체까지만 가리키는 `__post_init__` 오류에서도 어느 칸인지 말할 수 있다.
+    """
+
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+
+
 def _describe_bound(constraint: ScalarConstraint) -> str:
     """`0 < x <= 1` 모양의 기대 범위 문장(진단 메시지용)."""
     parts: list[str] = []
@@ -167,22 +179,25 @@ class RunEnvironment:
         for name in NUMERIC_ENVIRONMENT_FIELDS:
             object.__setattr__(self, name, float(getattr(self, name)))
         if self.start > self.end:
-            raise ValueError(
+            raise InvalidRunFieldError(
+                "end",
                 "run environment end must be on or after start — "
-                f"start={self.start} end={self.end} universe_id={self.universe_id!r}"
+                f"start={self.start} end={self.end} universe_id={self.universe_id!r}",
             )
         if not self.universe_id.strip():
-            raise ValueError(
+            raise InvalidRunFieldError(
+                "universe_id",
                 "run environment requires a universe id — "
-                f"universe_id={self.universe_id!r} range={self.start}..{self.end}"
+                f"universe_id={self.universe_id!r} range={self.start}..{self.end}",
             )
         for name, constraint in RUN_ENVIRONMENT_CONSTRAINTS.items():
             value = getattr(self, name)
             if not constraint.satisfied_by(value):
-                raise ValueError(
+                raise InvalidRunFieldError(
+                    name,
                     "run environment value is out of range — "
                     f"field={name} value={value!r} expected={_describe_bound(constraint)} "
-                    f"({constraint.message})"
+                    f"({constraint.message})",
                 )
 
 
@@ -225,9 +240,16 @@ class BacktestRunSpec:
 
     def __post_init__(self) -> None:
         if self.initial_cash <= 0:
-            raise ValueError("initial_cash must be positive")
+            raise InvalidRunFieldError(
+                "initial_cash",
+                f"initial_cash must be positive — initial_cash={self.initial_cash!r}",
+            )
         if self.annualization_days <= 0:
-            raise ValueError("annualization_days must be positive")
+            raise InvalidRunFieldError(
+                "annualization_days",
+                "annualization_days must be positive — "
+                f"annualization_days={self.annualization_days!r}",
+            )
 
 
 @dataclass(frozen=True)

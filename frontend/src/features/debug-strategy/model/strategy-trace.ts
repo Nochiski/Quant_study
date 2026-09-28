@@ -61,7 +61,18 @@ export type StrategyTraceSelection = {
 export type PreparedStrategyTrace =
   | {
       kind: "blocked";
-      reason: "document" | "date" | "security" | "factor" | "node" | "holdings";
+      /**
+       * `unavailable` 은 추적 문맥이 없다는 뜻이다. 왜 없는지(문서·준비 중·팩터 없음·실행 계획·실행 설정)는
+       * 상위 `StrategyDebuggerUnavailableReason` 이 한 문장으로 말하므로 여기서 사유를 다시 짓지 않는다
+       * (이슈 #260: 실행 설정만 비었는데 "실행 가능한 문서가 없다"가 함께 떴다).
+       */
+      reason:
+        | "unavailable"
+        | "date"
+        | "security"
+        | "factor"
+        | "node"
+        | "holdings";
     }
   | {
       kind: "ready";
@@ -144,7 +155,7 @@ export const prepareStrategyTrace = (
   context: StrategyDebuggerContext | null,
   selection: StrategyTraceSelection,
 ): PreparedStrategyTrace => {
-  if (context === null) return { kind: "blocked", reason: "document" };
+  if (context === null) return { kind: "blocked", reason: "unavailable" };
   if (selection.asOf !== "" && !validIsoDate(selection.asOf))
     return { kind: "blocked", reason: "date" };
   const securityIds = parseSecurityIds(selection.security);

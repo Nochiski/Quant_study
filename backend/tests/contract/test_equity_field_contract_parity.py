@@ -3,7 +3,8 @@
 테스트·e2e 는 `equity_mock`, 실사용은 `equity_duckdb` 를 쓴다. compile 은 연결된 어댑터의 필드
 계약(`resolve_factor_fields`·`list_fields`)으로 단위 경고·field_missing·타입 검사를 하므로, 같은
 field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 green 인 문서가 실데이터에서만 다르게
-동작한다. 정본은 원장 스키마를 옮긴 duckdb 선언표(`FIELD_SPECS`)이고 mock 이 거기에 맞춘다.
+동작한다. 정본은 원장이다. mock 은 원장 스키마를 옮긴 duckdb 선언표(`FIELD_SPECS`)에 단위·값
+타입을 맞추고, 선언표의 값 타입과 mock 의 랙은 원장 `dataset_profile` 선언에 맞춘다(아래 #230 절).
 
 대조는 선언표를 직접 읽는다 — 손 픽스처 루트의 `list_fields()` 는 그 루트에 원천 테이블이 있는
 필드만 내므로, 새 `FieldSpec` 이 픽스처보다 먼저 들어오면 대조를 빠져나갈 수 있다.
@@ -11,12 +12,16 @@ field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 g
 
 from __future__ import annotations
 
+import importlib
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_BY_ID,
+    SOURCE_BY_NAME,
     UNSUPPORTED_FIELDS,
 )
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
@@ -126,3 +131,63 @@ def test_duckdb_선언표의_원주가_표시는_같은_단위의_실재하는_�
     for raw, adjusted in marked.items():
         assert FIELD_BY_ID[adjusted].unit == FIELD_BY_ID[raw].unit
         assert FIELD_BY_ID[adjusted].adjusted_field_id is None, "조정 짝은 원주가가 아니다"
+
+
+# ── 랙·빈도·값 타입 (#230) ─────────────────────────────────────────────────────
+# 랙과 값 타입의 정본은 원장 `dataset_profile`(S19)이다. 원장 빌드가 그 표를 만드는 선언
+# (`database/src/equity` 의 `rules_s*.FIELDS`)을 그대로 읽어 대조한다. 실원장 파일 없이 CI
+# 에서 돈다.
+# 빈도는 원장 어휘(session·report)가 아니라 duckdb 어댑터가 `list_fields()` 로 내는 어휘
+# (`SourceSpec.frequency`)로 맞춘다. mock 이 대신 서는 것은 그 어댑터이기 때문이다.
+_EQUITY_SRC = Path(__file__).resolve().parents[3] / "database" / "src"
+
+
+def _ledger_profiles() -> dict[str, Any]:
+    """원장 빌드가 `dataset_profile` 로 내는 필드 선언(field_id → `FieldProfile`)."""
+    pytest.importorskip("duckdb", reason="원장 선언 모듈이 duckdb 를 import 한다(extra `equity`)")
+    if not _EQUITY_SRC.is_dir():
+        pytest.fail(f"원장 선언 경로가 없다 — path={_EQUITY_SRC}")
+    # 경로는 import 하는 동안만 올린다. `database/src` 최상위의 일반 이름 모듈(api·stage 등)이
+    # 이후 테스트의 import 를 가리지 않게 한다(저장소 관례, test_core_parity.py).
+    added = str(_EQUITY_SRC) not in sys.path
+    if added:
+        sys.path.insert(0, str(_EQUITY_SRC))
+    try:
+        rules_s19 = importlib.import_module("equity.rules_s19")
+        return {profile.field_id: profile for _, profile in rules_s19.owned_fields()}
+    finally:
+        if added:
+            sys.path.remove(str(_EQUITY_SRC))
+
+
+@pytest.mark.parametrize("field_id", _shared_field_ids())
+def test_공통_필드의_랙이_원장_선언과_같다(field_id: str) -> None:
+    """mock 은 PIT 를 이 랙으로 흉내 낸다. 다르면 mock 에서 본 공개 시점이 실데이터와 어긋난다."""
+    mock = _mock_profiles()[field_id]
+    ledger = _ledger_profiles()[field_id]
+    assert mock.recommended_lag_sessions == ledger.recommended_lag_sessions, (
+        f"mock 랙이 원장 dataset_profile 과 다르다 — field_id={field_id} "
+        f"expected={ledger.recommended_lag_sessions} got={mock.recommended_lag_sessions}"
+    )
+
+
+@pytest.mark.parametrize("field_id", _shared_field_ids())
+def test_공통_필드의_빈도가_duckdb_어댑터와_같다(field_id: str) -> None:
+    mock = _mock_profiles()[field_id]
+    expected = SOURCE_BY_NAME[FIELD_BY_ID[field_id].source].frequency
+    assert mock.frequency == expected, (
+        f"mock 빈도가 duckdb 어댑터와 다르다 — field_id={field_id} "
+        f"expected={expected} got={mock.frequency}"
+    )
+
+
+@pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
+def test_duckdb_선언표의_값_타입이_원장_선언과_같다(field_id: str) -> None:
+    """`FIELD_SPECS` 는 원장 스키마를 옮긴 표다. 값 타입이 원장 `dataset_profile` 과 같아야 한다."""
+    ledger = _ledger_profiles().get(field_id)
+    assert ledger is not None, f"원장 dataset_profile 에 없는 field_id — field_id={field_id}"
+    got = FIELD_BY_ID[field_id].value_type.value
+    assert got == ledger.value_type, (
+        f"FIELD_SPECS 값 타입이 원장 dataset_profile 과 다르다 — field_id={field_id} "
+        f"expected={ledger.value_type} got={got}"
+    )

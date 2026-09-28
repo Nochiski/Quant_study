@@ -258,3 +258,15 @@ GT-F(2) 의 "2024 이전 행 불변" 은 `filed_date`·`target_raw` 기준이다
 - 게이트 GT-I: 픽스처 재구성 뒤 전체 테스트 통과, EG4 33건.
 
 순서: T-G ∥ T-H(에이전트 둘, 파일 겹침 없음: T-G 는 `scripts/equity_diff.py`·`tests/test_equity_diff.py`·`docs/EQUITY_GATES.md` §diff, T-H 는 `src/equity/rules_s12.py`·`src/equity/sql/fin_std.sql`(basis 어휘)·`src/fin_map.py`·`tests/test_equity_s12_fin.py`·`docs/EQUITY_GATES.md` §S12) → 커밋 → 09-29 배포 묶음에 포함.
+
+### T-E·T-G·T-H 코드 완료 (09-28 밤, 커밋 87450dfa·316a7b22·946dab0a·81d6c634)
+
+| 태스크 | 산출 | 서버 반영 |
+|---|---|---|
+| T-E | `stg_fin.account_nm_norm` 파생 열(stage 2.3.0→2.4.0), `fin_std` 가 선언 입력으로 읽음. 절단본 재빌드 해시 동일 = 산출 불변 | **stage 먼저** `run_stage_all.sh <snap> stg_fin` → 그 뒤 equity. 순서 어기면 EG0 가 `stg_fin.account_nm_norm` 결측으로 FAIL |
+| T-G | `scripts/equity_diff.py`(테스트 18) + expect 예시 3종(`docs/equity_diff/`) | 서버 `logs/equity_diff_expect_{th,tf}.json` 업로드 완료 |
+| T-H | `EG8_fin_std` 커버리지 게이트 + basis 결측 사유 2분할(e1.21.0) | 첫 재빌드는 기록만(직전 판에 `coverage_by_group` 없음), 판정은 그다음 판부터 |
+
+주의: stage 규칙 버전 인상 → 배포 뒤 **첫 판에서 stage health C4 가 전 표를 `rules_changed` 로 비교 생략**(두 번째 판부터 복귀). equity EG5a 는 매일 `skip(inputs_changed)` 이므로 값 불변 확인은 T-G diff 로 한다.
+
+**09-29 실행 순서**(`logs/tuesday_runbook.sh <step>`): `gb3` → `shadow5` → 배포(`deploy.sh --apply --allow-branch feat/v3-merge`) → `stage_fin`(T-E) → `tf`(T-F 재파싱·문서층 4표) → `fin_std`(T-E·T-H 재빌드 + diff 게이트 + 2회 빌드 결정성) → `s11`(T-F, disclosure_version 재빌드 + diff) → `report`. 그 뒤 M1 종결 판정 → M2 W0 착수.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
@@ -239,10 +240,13 @@ class BacktestRunSpec:
     metric_windows: tuple[MetricWindow, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.initial_cash <= 0:
+        # NaN 은 `<= 0` 비교를 빠져나가고 inf 는 양수라, 유한성을 따로 보지 않으면 접수된 뒤
+        # 엔진에서 `InvalidOperation` 으로 죽는다(#268 리뷰 P3-5).
+        if not math.isfinite(self.initial_cash) or self.initial_cash <= 0:
             raise InvalidRunFieldError(
                 "initial_cash",
-                f"initial_cash must be positive — initial_cash={self.initial_cash!r}",
+                "initial_cash must be a finite positive number — "
+                f"initial_cash={self.initial_cash!r}",
             )
         if self.annualization_days <= 0:
             raise InvalidRunFieldError(

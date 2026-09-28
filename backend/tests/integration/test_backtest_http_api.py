@@ -906,8 +906,13 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
 @pytest.mark.parametrize(
     ("overrides", "field", "expected"),
     [
-        ({"initial_cash": 0}, "initial_cash", "initial_cash must be positive"),
+        ({"initial_cash": 0}, "initial_cash", "initial_cash must be a finite positive number"),
         ({"initial_cash": -5}, "initial_cash", "initial_cash=-5"),
+        # 유한하지 않은 값은 비교(`<= 0`)를 빠져나가 202 로 접수된 뒤 엔진에서
+        # `InvalidOperation` 으로 죽었다(#268 리뷰 P3-5). 접수 단계에서 같은 코드로 거절한다.
+        ({"initial_cash": "NaN"}, "initial_cash", "initial_cash=nan"),
+        ({"initial_cash": "Infinity"}, "initial_cash", "initial_cash=inf"),
+        ({"initial_cash": "-Infinity"}, "initial_cash", "initial_cash=-inf"),
         ({"annualization_days": 0}, "annualization_days", "annualization_days must be positive"),
         ({"annualization_days": "abc"}, "annualization_days", "input='abc'"),
     ],
@@ -929,6 +934,22 @@ def test_invalid_run_options_are_a_coded_422_naming_the_field(
     assert detail["field"] == field
     assert expected in detail["message"], detail["message"]
     TypeAdapter(Backtest422Response).validate_python(response.json())
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity"])
+@pytest.mark.parametrize("name", ["participation_rate", "fee_bps", "slippage_bps"])
+def test_non_finite_run_environment_numbers_are_a_coded_422(name: str, bad: str) -> None:
+    """실행 설정의 수치 칸도 유한하지 않으면 접수 단계에서 그 칸을 짚어 거절한다(#268 리뷰 P3-5)."""
+    client = TestClient(build_http_app())
+    body = _run_body(client, "python")
+    body["environment"] = {**body["environment"], name: bad}
+
+    response = client.post("/api/v1/backtests", json=body)
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert detail["code"] == "backtest.run.field_invalid"
+    assert detail["field"] == f"environment.{name}"
 
 
 def test_malformed_start_body_is_a_coded_422_without_a_field() -> None:

@@ -1,17 +1,17 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: IN_REVIEW
+project_status: READY
 current_phase: P3
-current_pr: P3-02
-active_prs: [P3-02]
-parallel_window: [P3-02]
-last_updated: 2026-09-27T23:24:12+09:00
+current_pr: P3-03
+active_prs: []
+parallel_window: []
+last_updated: 2026-09-28T09:17:22+09:00
 planned_prs: 30
 merged_prs: 9
-integrated_prs: 9
-approved_prs: 18
-progress_percent: 60
+integrated_prs: 10
+approved_prs: 19
+progress_percent: 63
 ---
 
 # schema 1.2 · 그래프 표현 실시간 진행 계획
@@ -24,13 +24,13 @@ progress_percent: 60
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_REVIEW` |
+| Project status | `READY` |
 | Current phase | `P3` |
-| Current/next PR | `P3-02` |
-| Active PR | `P3-02` |
-| Progress | `18 / 30 done (60%), main 9, integration 9` |
-| Approved | `18 / 30` |
-| Aggregated at | `2026-09-27 23:24 KST` |
+| Current/next PR | `P3-03` |
+| Active PR | none |
+| Progress | `19 / 30 done (63%), main 9, integration 10` |
+| Approved | `19 / 30` |
+| Aggregated at | `2026-09-28 09:17 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -72,6 +72,20 @@ progress_percent: 60
   `c72f6257` 에 들어갔고, 원 PR 은 CLOSED 다 — GitHub 가 커밋 차이 없는 base 변경을 거부해 각 PR 에 사유
   댓글을 남기고 닫았다. P2-07(#201)부터는 PR 을 통합 브랜치 base 로 열어 머지한다(#201 `013da821`, #205
   `48eff6d8`). 통합 브랜치의 main 머지는 추적 draft PR #202 가 맡는다. 이 PR 들의 tracker 상태는 `INTEGRATED` 다.
+- 2026-09-28 리드 결정(통합 브랜치 main 머지 뒤 기록·base 규칙): P3-02(#242)가 통합 머지 `59d94f8d` 로
+  들어와 P2-03 ~ P3-02 묶음이 닫혔다. 통합 브랜치 `lang2/integration` 의 main 머지(추적 PR #202)와 그 뒤는
+  다음을 따른다.
+  1. **기록**: #202 머지 커밋이 생기면 main 위 docs PR 하나로 `INTEGRATED` 행 전부(P2-03 ~ P2-10, P3-01,
+     P3-02)를 `MERGED` 로 바꾸고 각 Review 열 끝에 "· main 머지 (머지 커밋 SHA)(#202, 날짜)"를 붙인다. 통합 머지 SHA 는
+     지우지 않는다 — 리뷰가 본 tip 과 main 에 들어간 커밋을 둘 다 추적한다. 그 PR 뒤 `-Check` 의
+     `integrated_prs` 는 0 이다. 상태 값 `INTEGRATED` 는 이력 해석을 위해 표에 남긴다. SHA 는 머지를 수행한
+     쪽이 알리고, 기록 PR 담당은 리드가 정한다.
+  2. **base**: #202 머지 뒤 여는 lang2 PR(P3-03 ~ P6-03)은 main 을 base 로 연다. 통합 브랜치는 은퇴한다(새
+     커밋 금지, 삭제는 리드). #202 머지 전에 통합 브랜치 base 로 연 PR 은 브랜치에 main 을 merge 하고 게이트를
+     다시 돌린 뒤 `gh pr edit <번호> --base main` 으로 옮긴다 — 통합 브랜치 커밋이 모두 main 에 있어 diff 는 그
+     PR 의 커밋만 남는다. 스택 PR 의 base 는 WORKFLOW 1절대로 직전 PR 브랜치다.
+  3. **게이트**: 묶음 예외(이 구간 PR 의 CI `browser-e2e` red 허용)는 P3-02 로 끝난다. P3-03 부터는 CI 전체
+     job green 이 머지 조건이다. main 반영 cascade 는 통합 브랜치 대신 각 PR 브랜치가 main 을 merge 해 따라간다.
 - 2026-09-27 P2-07 주의(리뷰 DEFECT-P3-3): P2-07 부터 hydrate 가 boolean 팩터 출력에 승격 노드를
   붙인다. 그래서 P2-03~P2-06 판(통합 브랜치 포함)으로 저장한 1.2 revision 중 출력이 비교 노드인 팩터가
   있는 row 는 저장소 무결성 검사(canonical JSON 재생성 비교)에서 읽히지 않는다. **통합 브랜치로 로컬
@@ -93,7 +107,7 @@ progress_percent: 60
 | `IN_REVIEW` | diff 고정, review sub-agent 검토 중 |
 | `CHANGES_REQUESTED` | blocking finding 수정 중 |
 | `APPROVED` | reviewer 승인, merge gate 확인 중 |
-| `INTEGRATED` | 리뷰 APPROVE 뒤 `lang2/integration` 통합 브랜치에 머지됨. main 은 묶음 머지(draft #202) 대기. `[x]` 로 센다 |
+| `INTEGRATED` | 리뷰 APPROVE 뒤 `lang2/integration` 통합 브랜치에 머지됨. main 은 묶음 머지(draft #202) 대기. `[x]` 로 센다. #202 머지 뒤 `MERGED` 로 바꾸고 Review 열에 main 머지 커밋을 더한다(현재 결정 2026-09-28) |
 | `MERGED` | 로컬 gate 후 main merge 완료 |
 | `PAUSED` | 제품·계약 결정이 필요해 일시 정지 |
 
@@ -108,11 +122,11 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | P0 | Planning package and contract docs | 1 | 1 | 0 | `MERGED` |
 | P1 | In-screen friction removal on 1.1 | 6 | 6 | 0 | `MERGED` |
 | P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 2 | 8 | `INTEGRATED` |
-| P3 | Frontend 1.2 adaptation | 3 | 0 | 1 | `IN_REVIEW` |
+| P3 | Frontend 1.2 adaptation | 3 | 0 | 2 | `READY` |
 | P4 | Graph level 1: pipeline | 4 | 0 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | 0 | `WAITING` |
-| **Total** |  | **30** | **9** | **9** | **60%** |
+| **Total** |  | **30** | **9** | **10** | **63%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -860,8 +874,8 @@ P3-01 결정 8건(WORKFLOW 원문이 비워 둔 곳과 원문 밖으로 나간 �
 | 종료 조건 | 전체 e2e 에서 `environment` 미배선 실패 7건과 `test.fixme` 4건이 0. 이 PR 이 P2-03~P3-02 묶음의 main 머지 조건(전체 e2e·CI green)의 마지막 관문이다 |
 | Non-goals | 골든·매뉴얼 1.2·원주가 이관(P3-03), 실행 결과 캐시·`run_fingerprint` 표기 버전(캐시 도입 PR), 그래프 탭(P4) |
 | Branch/worktree | `feat/lang2-p3-02-run-environment` / `wt-lang2-p3-02` |
-| Base SHA | `lang2/integration` `c4d0f481`(#232 통합 머지) |
-| Head SHA | PR 본문 참조(게이트 실측 SHA 와 같이 적는다) |
+| Base SHA | `lang2/integration` `c4d0f481`(#232 통합 머지). 통합 브랜치 `6ffab152`(`c4f0365c`)·`cb9b1b3f`(`f5ac99e6`)를 merge 로 따라갔다 |
+| Head SHA | `dc02417a`(게이트 실측 SHA 와 같다) → 통합 머지 `59d94f8d`(#242, 2026-09-28) |
 | Full gate | push tip 에서 backend 전체·ruff·pyright·`export_openapi`·`api:generate` diff 0·frontend typecheck·typecheck:e2e·lint·test·build·하네스 검사·충돌 표식·PLAN `-Check`·`npm run test:e2e`(잠금 러너) |
 
 P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
@@ -980,13 +994,13 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-06 | `INTEGRATED` | [#232](https://github.com/Nochiski/Quant_study/pull/232) · `review_p3_01` 1차 조건부 APPROVE(`2fde473e`) → 2차 APPROVE(`6e5e71da`, 재리뷰 P2 2·P3 1 반영 `08451303`) · 통합 머지 `c4d0f481`(#232, `lang2/integration`, 2026-09-27) |
-| [ ] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `IN_REVIEW` | [#242](https://github.com/Nochiski/Quant_study/pull/242) · 워크트리 `wt-lang2-p3-02`, 브랜치 `feat/lang2-p3-02-run-environment` · base `lang2/integration` `c4d0f481` → `6ffab152` 병합 |
-| [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `WAITING` | — |
+| [x] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `INTEGRATED` | [#242](https://github.com/Nochiski/Quant_study/pull/242) · `review_pr242` 1차 REQUEST_CHANGES(`7ba3005e`, P1 1·P2 2·P3 1) → 2차 APPROVE(`dc02417a`, 재리뷰 P3 2 → 이슈 #251) · 통합 브랜치 `6ffab152`·`cb9b1b3f`(main #227·#237·#233·#239) 병합 · 통합 머지 `59d94f8d`(#242, `lang2/integration`, 2026-09-28) |
+| [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `READY` | — · base 는 통합 브랜치 main 머지 규칙(현재 결정 2026-09-28)을 따른다 |
 
 Phase exit:
 
 - [ ] CI 전체 green.
-- [ ] 같은 전략·다른 기간 → 같은 spec_hash e2e.
+- [x] 같은 전략·다른 기간 → 같은 spec_hash e2e. (P3-02 결정 8, `stories/dm.run-environment.spec.ts` US-DM-05 — 같은 strategy hash·다른 environment hash)
 - [ ] SoT·책임분리 점검 blocking 0.
 
 ## P4 — 그래프 1수준: 파이프라인
@@ -1085,6 +1099,8 @@ Phase exit:
 | `P2-08` | `review_lang2_p1_06` | 2 | `APPROVE` | `review_lang2_p2_08_r2.md`, tip `d99aa024`. DEFECT-P208-001 red→green (아이디어 2 eligibility). 새 관찰 **P2-NEW-1**: 가격 변화 아이디어 1·3·4·5 가 원주가 `price.close` 를 쓴다 → 이슈 #214 → BACKLOG-017 |
 | `P3-01` | `review_p3_01` | 1 | `APPROVE`(조건부) | `review_pr232.md`, tip `2fde473e`. blocking 0 · P2 1 · P3 3. **DEFECT-232-01(P2)**: 사용자가 승격 모양을 예약 id 로 그대로 쓴 그래프가 표식을 받아 문서 노드가 숨는다 → 리드 결정으로 예약 접두사 compile error(`strategy.factor.reserved_node_id`), SoT·docstring·결정 2 정정. P3: 1.1 블록 fixture 정리(232-02), 붙인 출력과 원래 출력의 선택 강조 중복(232-03), `PR_LINK`(232-04, 통합 merge 때 채움). 머지 전 조건: 통합 브랜치 반영(`26f426b5`)·BACKLOG-017·018 |
 | `P3-01` | `review_p3_01` | 2 | `APPROVE` | `review_pr232.md` 재리뷰 절, tip `6e5e71da`. blocking 0 · P2 2 · P3 1. 1차 결함 4건 해소 확인. **DEFECT-232-05(P2)**: 골든 `adj_close` 이관이 P3-03 에 예약되지 않음 → WORKFLOW P3-03 acceptance 에 한 줄(우회 필터 제거 포함). **DEFECT-232-06(P2)**: duckdb 원주가 표시·전달 삭제 돌연변이가 살아남음 → 통합 merge 뒤 계약 대조(`63392554`)와 선언표 단위 테스트로 둘 다 red. **DEFECT-232-07(P3)**: 한 단계 상류 탐색 돌연변이가 살아남음 → 중첩 경로 테스트 2건으로 red |
+| `P3-02` | `review_pr242` | 1 | `REQUEST_CHANGES` | `review_pr242.md`, tip `7ba3005e`. blocking 1. **DEFECT-242-01(P1)**: 기간·유니버스를 정한 뒤 수수료만 -1 이어도 "기간과 유니버스를 정하세요" 고정 문장, 칸으로 가는 경로 없음 → 칸별 차단 문장(첫 칸 이름·이유·나머지 개수)과 요약 띠 초점 경로(`4d9989ca`). DEFECT-242-02(P2) AI 적용 뒤 차단 사유 안내·DEFECT-242-03(P2) #240 검증 완료 대기 helper → `304fd221`·`7e36416b`. DEFECT-242-04(P3) 스키마 단위·run 상세 스키마 기반 칸·enum 값 이름 → `4d9989ca`. (c) e2e `REQUESTED_ENVIRONMENT` 는 요청 계약 단언이라 유지(결정 2) |
+| `P3-02` | `review_pr242` | 2 | `APPROVE` | `review_pr242.md` 재리뷰 절, tip `dc02417a`(통합 `cb9b1b3f` 병합 뒤). blocking 0. 1차 4건 해소 확인. 재리뷰 P3 2건(업그레이드 채우기의 12자리 초과 비율 반올림, run 상세의 스키마 밖 기록 키 숨김)은 이슈 #251 로 넘겼다 |
 | `P2-09` | `review_lang2_p2_09` | 1 | `REQUEST_CHANGES` | tip `e064d2af`. P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 빼서 1.1 의 팩터별 결측 처리가 경고 없이 바뀐다. 비차단 관찰 2. 반영 `a32ed9d7`(실효 값 판정, 관찰 1 float 1.1 테스트). 같은 시점 Phase 2 감사 NB-1 은 `17c68261` 이 고쳤다 |
 ## 검증 기록
 
@@ -1103,6 +1119,9 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-28 — P3-02 통합 머지(`59d94f8d`, #242) 기록: P3-02 `INTEGRATED`, P3-03 `READY`, P3 Phase exit
+  "같은 전략·다른 기간" 체크, Review 기록 2행. 현재 결정에 통합 브랜치 main 머지 뒤 규칙(`INTEGRATED` → `MERGED`
+  기록, 이후 PR base 는 main, 묶음 예외 종료)을 적고 상태 값 표·WORKFLOW 1절에 연결했다.
 - 2026-09-27 — P3-02 리드 보충 반영(#242): 차단 문장에 빈 칸 이름, 요약 띠 "실행 설정 채우기" 초점 경로,
   `localStorage` 예외 무해화 테스트, AI 적용 문서의 같은 차단(결정 9, BACKLOG-019 신설), run 상세 경고 코드 기반
   제목(결정 10), e2e 검증 완료 대기(결정 11, #240). US-DM-03·04·08 수용 기준에 "실행 설정 채우기" 단계를 넣었다.

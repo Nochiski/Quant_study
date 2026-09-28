@@ -42,6 +42,10 @@ main
   (`parallel_window`에 기록). 교차 제약 두 가지: **P2-06·P2-07은 P1-03(연산자 카탈로그)이 merge된 뒤
   착수한다**(두 PR이 카탈로그의 `saved_*` 제거·`availability`를 건드린다). P3-01의 base는 P2-09이며
   P1 스택 끝(P1-06)이 먼저 merge되어 있어야 한다.
+- **통합 브랜치 뒤 base(2026-09-28)**: P2-03 ~ P3-02 는 통합 브랜치 `lang2/integration` 에 모였다(PLAN 현재
+  결정 머지 전략). 통합 브랜치가 main 에 머지되면(추적 PR #202) 이후 PR(P3-03 ~ P6-03)의 스택 첫 PR 은 main 을
+  base 로 연다. 그 전에 통합 브랜치 base 로 연 PR 은 main 을 merge 하고 게이트를 다시 돌린 뒤 base 를 main 으로
+  옮긴다. 기록(`INTEGRATED` → `MERGED`)과 게이트 규칙은 PLAN 현재 결정 2026-09-28 이 정본이다.
 - **generated SDK 규칙(P2-01에서 개정)**: OpenAPI를 바꾸는 backend PR은 같은 PR에서
   `frontend/src/shared/api/generated`도 재생성해 별도 커밋으로 넣는다. CI `frontend` job이
   `npm run api:generate` 뒤 `git diff --exit-code -- ../backend/openapi.json src/shared/api/generated`를

@@ -18,7 +18,12 @@ const fixtureDirectory = resolve(
   backendDirectory,
   "tests/fixtures/strategy_documents",
 );
-const fixturePath = resolve(fixtureDirectory, "quality_momentum.yaml");
+// 01~05·16 편집기 글은 매뉴얼 1절 샘플 그대로다. `test_manual_sample_compiles` 와 같은 규칙
+// ("## 1." 뒤 첫 yaml 블록)으로 읽어, 사용자가 붙여 넣는 글과 그림이 같게 한다(#263 리뷰 P3-2).
+const manualPath = resolve(
+  repositoryRoot,
+  "docs/manual/strategy-workbench/README.md",
+);
 // 승격 노드(18)를 보일 조건형 아이디어. 비교 출력(참/거짓)을 compile 이 0/1 점수로 승격한다.
 const promotedIdeaPath = resolve(fixtureDirectory, "ideas/ma20_breakout.yaml");
 // 포트 기본값은 e2e 와 같은 상수에서 온다 — 여기만 숫자를 따로 적으면 워크트리가 포트를 옮겼을 때
@@ -205,16 +210,23 @@ if (!existsSync(databasePath)) {
 }
 await mkdir(outputDirectory, { recursive: true });
 
-const golden = (await readFile(fixturePath, "utf8")).replace(/\r\n?/gu, "\n");
+const manualText = (await readFile(manualPath, "utf8")).replace(/\r\n?/gu, "\n");
+const manualSample = /```yaml\n([\s\S]*?)```/u.exec(
+  manualText.slice(manualText.indexOf("## 1.")),
+)?.[1];
+if (manualSample === undefined) {
+  throw new Error("매뉴얼 1절에 yaml 블록이 없습니다.");
+}
 const promotedIdea = (await readFile(promotedIdeaPath, "utf8")).replace(
   /\r\n?/gu,
   "\n",
 );
 const titleV1 = "사용자 매뉴얼 모멘텀";
 const titleV2 = `${titleV1} 개선안`;
-const sourceV1 = golden
-  .replace('title: "퀄리티 모멘텀"', `title: "${titleV1}"`)
-  .replace("selection_count: 20", "selection_count: 2");
+const sourceV1 = manualSample;
+if (!sourceV1.includes(`title: "${titleV1}"`)) {
+  throw new Error(`매뉴얼 1절 샘플의 title 이 "${titleV1}" 이 아닙니다.`);
+}
 const sourceV2 = sourceV1.replace(titleV1, titleV2);
 
 const browser = await chromium.launch({
@@ -363,11 +375,12 @@ try {
   await debuggerHandle.focus();
   await debuggerHandle.press("End");
   await expect(debuggerHandle).toHaveAttribute("aria-valuenow", "480");
-  await expect(
-    debuggerRegion
-      .getByRole("status")
-      .filter({ hasText: "추적은 실행 설정 위에서 돕니다." }),
-  ).toBeInViewport();
+  const traceBlocked = debuggerRegion
+    .getByRole("status")
+    .filter({ hasText: "추적은 실행 설정 위에서 돕니다." });
+  // 편집기 글 길이에 따라 중간 결과가 화면 아래로 밀릴 수 있어 문장까지 스크롤한다.
+  await traceBlocked.scrollIntoViewIfNeeded();
+  await expect(traceBlocked).toBeInViewport();
   await capture(page, "20-trace-blocked.png", debuggerRegion);
 
   // 6절: 실행 설정 패널. e2e `fillRunEnvironment`(toggle 경로)와 같은 단계·셀렉터다.
@@ -580,6 +593,8 @@ try {
     `${frontendUrl}/research/strategies/${strategyId}/revisions/2`,
   );
   await expect(editor).toBeVisible();
+  // 검증이 끝난 뒤 찍는다 — 분석 중이면 배지가 `구문 통과`로 찍힌다(#263 리뷰 P3-1).
+  await expectPhase(page, "저장됨");
   await page.keyboard.press("Control+K");
   await expect(page.getByRole("dialog")).toBeVisible();
   await capture(page, "12-command-palette.png");

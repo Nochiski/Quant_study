@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.20.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.21.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -178,6 +178,22 @@ RULES_VERSION = "e1.20.0"                # BuildRecord.rules_version 에 실린�
 #          ③ `CAPEX_FALLBACK` 이름 목록을 **자산 종류 24 × 접미어 2 = 48종**으로 펼쳤다 —
 #             표준계정코드를 하나도 안 단 회사는 모든 종류를 평이한 이름으로 적는다(00159971
 #             FY2015 는 8줄 중 2줄만 세어졌다). 완전일치 규칙은 그대로다(곱집합을 펼칠 뿐).
+# e1.21.0: T-H 1단계(플랜 2026-09-26-layer-fixes §11) — **NULL 사유 어휘 + 예상 대상 기준
+#          커버리지**.
+#          ① `capex_basis`·`revenue_basis` 의 `unavailable` 을 각각 둘로 갈랐다:
+#             `no_cf_statement`(영업·투자 소계가 둘 다 없어 현금흐름표를 읽은 적이 없다 = F-A3
+#             0 규칙의 분모 밖) / `unmapped`(표는 있는데 대응표가 못 잡았다), 매출은
+#             `no_is_statement`(IS·CIS 행 없음) / `unmapped`. **값은 그대로고 라벨만 갈린다** —
+#             재빌드 diff 에서 값 변경은 이 라벨 재명명뿐이어야 한다. 어휘가 5 → 6종(capex) ·
+#             5 → 6종(revenue)으로 늘어 EG3 의 어휘 폐쇄·`n_revenue_basis_conflict` 판정도 바뀐다.
+#             `wide_acct` 는 이제 `val` 이 아니라 **`grp`(그룹 축)** 에서 출발한다 — 24 계정이
+#             하나도 안 걸린 그룹도 행을 가져야 사유를 말할 수 있다.
+#          ② 새 게이트 **EG8_fin_std** — 그룹(`fs_div` × 템플릿(banking·insurance·standard) ×
+#             `report_code`)마다 6 계정의 **예상 대상(채택 + 격리) 대비** 유효 비율을
+#             `coverage_by_group` 으로 기록하고, 직전 커밋 빌드의 같은 metric 과 견줘 예상 대상
+#             20 이상인 그룹의 비율이 0.5 이상 떨어지거나 0 이 되면 FAIL 한다(0.05 이상·영향
+#             5건 이상은 기록형 warn). DQ-6(금융 템플릿 순이익 전건 NULL)·DQ-8(capex 311사
+#             NULL)이 EG7 3% 를 안 넘은 이유는 분모가 「만들어진 행」이었기 때문이다.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

@@ -18,6 +18,7 @@
 -- 이름 대조는 **공백을 뗀 판**으로 한다(F-A2) — `fin` 의 `account_nm_norm` 과 `_acct` 토큰이
 -- 같은 규칙(rules_s12.norm_nm)으로 정규화돼 있다. 완전일치 규칙은 그대로다(공백만 무시).
 -- 취득 줄이 아예 없는 현금흐름표는 `capex_zero` 가 0 으로 읽는다(F-A3, basis `none_in_cf`).
+-- 그 분모 밖(표가 없음 · 표는 있는데 못 잡음)은 basis 가 사유를 말한다(T-H, 아래).
 --
 -- 기간: `period_end` = `stg_doc_meta.period_to`(main), `report_code` = `doc_acode`.
 -- `doc_acode` 는 1분기·3분기를 둘 다 11013 으로 적으므로 `period_from → period_to` 개월 수로
@@ -43,10 +44,14 @@
 -- **직전 회계연도 같은 보고서**(`bsns_year` − 1, 같은 `report_code`·`fs_div`)가 어느 규칙이었는지를
 -- 남긴다. 둘이 다르면 매출 시계열이 끊긴 것이고(삼성카드 2024 `standard` 4.38조 → 2025
 -- `banking_gross` 3.84조), 그 구간의 성장률을 버릴지는 **팩터층이** 정한다.
--- capex 기준: `capex_basis ∈ {standard, ppe_parts, ppe_incl_invprop, none_in_cf, unavailable}`
--- — 같은 자리·같은 규약의 라벨이다. 합산 뒤에는 값만으로 출처를 알 수 없으므로 산출 규칙을 행에
--- 싣는다(`_prev` 축은 두지 않는다). `ppe_incl_invprop` 는 투자부동산이 섞여 정의가 다르고,
--- `none_in_cf` 는 0 을 읽은 근거라 소비 측이 둘을 가릴 수 있어야 한다.
+-- capex 기준: `capex_basis ∈ {standard, ppe_parts, ppe_incl_invprop, none_in_cf,
+-- no_cf_statement, unmapped}` — 같은 자리·같은 규약의 라벨이다. 합산 뒤에는 값만으로 출처를 알
+-- 수 없으므로 산출 규칙을 행에 싣는다(`_prev` 축은 두지 않는다). `ppe_incl_invprop` 는
+-- 투자부동산이 섞여 정의가 다르고, `none_in_cf` 는 0 을 읽은 근거라 소비 측이 둘을 가릴 수
+-- 있어야 한다. 뒤의 둘은 **값이 없는 사유**다(T-H): `no_cf_statement` = 현금흐름표를 읽은 적이
+-- 없다(영업·투자 소계 둘 다 없음 = 0 규칙의 분모 밖) · `unmapped` = 표는 있는데 대응표가 못
+-- 잡았다. 매출도 같은 꼴로 `no_is_statement`(IS·CIS 행 없음) 와 `unmapped` 로 갈린다 — 한 낱말
+-- (`unavailable`)로 묶여 있던 동안 DQ-6·DQ-8 같은 대응 실패가 게이트 숫자에 안 보였다.
 --
 -- PIT: `available_date = rcept_dt`(derived, `stg_disclosure`). `stg_rcept_dt_map` 은 stage 에
 -- 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 · `restated_unknown = true`(4A).
@@ -368,37 +373,43 @@ cfqmeta AS (
                                           WHEN '11011' THEN '11014' END
 ),
 wide_acct AS (
-    SELECT corp_code, bsns_year, reprt_code, fs_div,
-           max(v) FILTER (WHERE metric = 'revenue')              AS revenue,
-           max(basis) FILTER (WHERE metric = 'revenue' AND v IS NOT NULL) AS revenue_basis,
-           max(v) FILTER (WHERE metric = 'cost_of_sales')        AS cost_of_sales,
-           max(v) FILTER (WHERE metric = 'gross_profit')         AS gross_profit,
-           max(v) FILTER (WHERE metric = 'op_profit')            AS op_profit,
-           max(v) FILTER (WHERE metric = 'pretax_income')        AS pretax_income,
-           max(v) FILTER (WHERE metric = 'net_income')           AS net_income,
-           max(v) FILTER (WHERE metric = 'net_income_owners')    AS net_income_owners,
-           max(v) FILTER (WHERE metric = 'eps_basic')            AS eps_basic,
-           max(v) FILTER (WHERE metric = 'depreciation')         AS depreciation,
-           max(v) FILTER (WHERE metric = 'interest_expense')     AS interest_expense,
-           max(v) FILTER (WHERE metric = 'total_asset')          AS total_asset,
-           max(v) FILTER (WHERE metric = 'total_liab')           AS total_liab,
-           max(v) FILTER (WHERE metric = 'total_equity')         AS total_equity,
-           max(v) FILTER (WHERE metric = 'equity_owners')        AS equity_owners,
-           max(v) FILTER (WHERE metric = 'cash')                 AS cash,
-           max(v) FILTER (WHERE metric = 'inventories')          AS inventories,
-           max(v) FILTER (WHERE metric = 'current_assets')       AS current_assets,
-           max(v) FILTER (WHERE metric = 'current_liab')         AS current_liab,
-           max(v) FILTER (WHERE metric = 'lease_liab')           AS lease_liab,
-           max(v) FILTER (WHERE metric = 'borrowings')           AS borrowings,
-           max(v) FILTER (WHERE metric = 'cf_operating_ytd')     AS cf_operating_ytd,
-           max(v) FILTER (WHERE metric = 'cf_investing_ytd')     AS cf_investing_ytd,
-           max(v) FILTER (WHERE metric = 'cf_financing_ytd')     AS cf_financing_ytd,
-           max(v) FILTER (WHERE metric = 'capex_ytd')            AS capex_ytd,
+    -- **그룹 축이 정본**이다 — 대응표 24 계정 중 하나도 안 걸린 그룹(표준계정 행은 있지만 전부
+    -- 다른 계정)도 행을 가져야 `basis` 라벨이 「왜 값이 없는가」 를 말할 수 있다(T-H). `val` 로만
+    -- 몰면 그런 그룹이 `wide` 에서 빠져 최종 SELECT 가 라벨을 지어내야 한다.
+    SELECT g.corp_code, g.bsns_year, g.reprt_code, g.fs_div,
+           max(a.v) FILTER (WHERE a.metric = 'revenue')              AS revenue,
+           max(a.basis) FILTER (WHERE a.metric = 'revenue' AND a.v IS NOT NULL) AS revenue_basis,
+           max(a.v) FILTER (WHERE a.metric = 'cost_of_sales')        AS cost_of_sales,
+           max(a.v) FILTER (WHERE a.metric = 'gross_profit')         AS gross_profit,
+           max(a.v) FILTER (WHERE a.metric = 'op_profit')            AS op_profit,
+           max(a.v) FILTER (WHERE a.metric = 'pretax_income')        AS pretax_income,
+           max(a.v) FILTER (WHERE a.metric = 'net_income')           AS net_income,
+           max(a.v) FILTER (WHERE a.metric = 'net_income_owners')    AS net_income_owners,
+           max(a.v) FILTER (WHERE a.metric = 'eps_basic')            AS eps_basic,
+           max(a.v) FILTER (WHERE a.metric = 'depreciation')         AS depreciation,
+           max(a.v) FILTER (WHERE a.metric = 'interest_expense')     AS interest_expense,
+           max(a.v) FILTER (WHERE a.metric = 'total_asset')          AS total_asset,
+           max(a.v) FILTER (WHERE a.metric = 'total_liab')           AS total_liab,
+           max(a.v) FILTER (WHERE a.metric = 'total_equity')         AS total_equity,
+           max(a.v) FILTER (WHERE a.metric = 'equity_owners')        AS equity_owners,
+           max(a.v) FILTER (WHERE a.metric = 'cash')                 AS cash,
+           max(a.v) FILTER (WHERE a.metric = 'inventories')          AS inventories,
+           max(a.v) FILTER (WHERE a.metric = 'current_assets')       AS current_assets,
+           max(a.v) FILTER (WHERE a.metric = 'current_liab')         AS current_liab,
+           max(a.v) FILTER (WHERE a.metric = 'lease_liab')           AS lease_liab,
+           max(a.v) FILTER (WHERE a.metric = 'borrowings')           AS borrowings,
+           max(a.v) FILTER (WHERE a.metric = 'cf_operating_ytd')     AS cf_operating_ytd,
+           max(a.v) FILTER (WHERE a.metric = 'cf_investing_ytd')     AS cf_investing_ytd,
+           max(a.v) FILTER (WHERE a.metric = 'cf_financing_ytd')     AS cf_financing_ytd,
+           max(a.v) FILTER (WHERE a.metric = 'capex_ytd')            AS capex_ytd,
            -- 합산 뒤에는 값만으로 출처를 알 수 없다 — 집계 한 줄(standard)인지 자산별 줄의
            -- 합(ppe_parts)인지를 `revenue_basis` 와 같은 꼴로 싣는다(DQ-8).
-           max(basis) FILTER (WHERE metric = 'capex_ytd' AND v IS NOT NULL) AS capex_basis
-    FROM val
-    GROUP BY corp_code, bsns_year, reprt_code, fs_div
+           max(a.basis) FILTER (WHERE a.metric = 'capex_ytd' AND a.v IS NOT NULL) AS capex_basis
+    FROM grp g
+    LEFT JOIN val a
+      ON a.corp_code = g.corp_code AND a.bsns_year = g.bsns_year
+     AND a.reprt_code = g.reprt_code AND a.fs_div = g.fs_div
+    GROUP BY g.corp_code, g.bsns_year, g.reprt_code, g.fs_div
 ),
 capex_zero AS (
     -- **유형자산 취득 줄이 없는 그룹**(F-A3) — 값 있는 PPE 취득 줄이 하나도 없는 현금흐름표.
@@ -429,21 +440,36 @@ capex_zero AS (
 ),
 wide AS (
     -- 0 규칙은 `val`·`best_tier` 를 건드리지 않고 **뒤에서** 덮는다 — tier 해석은 그대로 두고
-    -- 「줄이 없다」 는 사실만 읽는다. 현금흐름표가 있다는 증거는 영업·투자 소계이고, 표가 아예
-    -- 없는 그룹은 안 샀다는 증거도 없으므로 NULL(`unavailable`) 로 남는다.
+    -- 「줄이 없다」 는 사실만 읽는다. 현금흐름표가 있다는 증거는 영업·투자 소계다.
     -- `capex_q`(분기 차분)는 `val` 에서 나오므로 여기 0 은 옮겨가지 않는다 — 누계 축의 사실만
     -- 고친다.
+    -- **값이 없는 사유도 여기서 라벨이 된다**(T-H, 2026-09-28). 예전에는 둘 다 `unavailable`
+    -- 한 낱말이라 「볼 표가 없었다」 와 「표는 있는데 대응표가 못 잡았다」 가 구별되지 않았고,
+    -- 그래서 DQ-6·DQ-8 같은 대응 실패가 게이트 숫자에 안 보였다. 갈래는 0 규칙의 분모를 그대로
+    -- 뒤집어 쓴다: 영업·투자 소계가 둘 다 없으면 현금흐름표를 읽은 적이 없고
+    -- (`no_cf_statement`), 있으면 표는 있었는데 못 잡은 것이다(`unmapped`). 매출은 같은 자리를
+    -- `req`(IS·CIS 행이 있는 그룹)가 맡는다 — 행이 없으면 `no_is_statement`, 있으면 `unmapped`.
     SELECT w.* REPLACE (
+             CASE WHEN w.revenue_basis IS NOT NULL THEN w.revenue_basis
+                  WHEN r.corp_code IS NOT NULL     THEN 'unmapped'
+                  ELSE 'no_is_statement' END                    AS revenue_basis,
              CASE WHEN w.capex_ytd IS NULL AND z.corp_code IS NOT NULL
                        AND (w.cf_operating_ytd IS NOT NULL OR w.cf_investing_ytd IS NOT NULL)
                   THEN 0 ELSE w.capex_ytd END                   AS capex_ytd,
-             CASE WHEN w.capex_ytd IS NULL AND z.corp_code IS NOT NULL
+             CASE WHEN w.capex_basis IS NOT NULL THEN w.capex_basis
+                  WHEN z.corp_code IS NOT NULL
                        AND (w.cf_operating_ytd IS NOT NULL OR w.cf_investing_ytd IS NOT NULL)
-                  THEN 'none_in_cf' ELSE w.capex_basis END      AS capex_basis)
+                       THEN 'none_in_cf'
+                  WHEN w.cf_operating_ytd IS NULL AND w.cf_investing_ytd IS NULL
+                       THEN 'no_cf_statement'
+                  ELSE 'unmapped' END                           AS capex_basis)
     FROM wide_acct w
     LEFT JOIN capex_zero z
       ON z.corp_code = w.corp_code AND z.bsns_year = w.bsns_year
      AND z.reprt_code = w.reprt_code AND z.fs_div = w.fs_div
+    LEFT JOIN req r
+      ON r.corp_code = w.corp_code AND r.bsns_year = w.bsns_year
+     AND r.reprt_code = w.reprt_code AND r.fs_div = w.fs_div
 ),
 basis_prev AS (
     -- 직전 회계연도(`bsns_year` − 1) 의 같은 `report_code`·`fs_div` 행이 어떤 매출 기준으로
@@ -455,8 +481,8 @@ basis_prev AS (
     -- `val` 의 pick 과 같은 규약이다.
     SELECT j.corp_code, TRY_CAST(j.bsns_year AS INTEGER)          AS fy,
            j.report_code, j.fs_div,
-           CASE WHEN count(DISTINCT coalesce(w.revenue_basis, 'unavailable')) = 1
-                THEN min(coalesce(w.revenue_basis, 'unavailable'))
+           CASE WHEN count(DISTINCT w.revenue_basis) = 1
+                THEN min(w.revenue_basis)
            END                                                    AS revenue_basis
     FROM judged j
     JOIN dup d
@@ -504,9 +530,9 @@ SELECT
     j.period_start,
     j.period_end_basis,
     j.currency,
-    coalesce(w.revenue_basis, 'unavailable')                    AS revenue_basis,
+    w.revenue_basis,
     bp.revenue_basis                                            AS revenue_basis_prev,
-    coalesce(w.capex_basis, 'unavailable')                      AS capex_basis,
+    w.capex_basis,
     TRUE                                                        AS restated_unknown,
     w.revenue, w.cost_of_sales, w.gross_profit, w.op_profit, w.pretax_income,
     w.net_income, w.net_income_owners, w.eps_basic, w.depreciation, w.interest_expense,

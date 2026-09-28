@@ -46,6 +46,14 @@ equity 는 **두 라벨을 싣기만 한다**. 무엇을 버릴지는 팩터층�
 F-A4 로 자산별 합은 `agg='sum_abs'`(크기의 합 — 한 표 안에서 부호가 섞인다)이고 이름 목록은 자산
 종류 × 접미어 48종으로 펼쳤으며, `pick` 은 공백 없는 원문을 먼저 본다.
 
+**값이 없는 사유**(T-H, 2026-09-28): 두 basis 어휘의 `unavailable` 을 각각 둘로 갈랐다 —
+`capex_basis` 는 `no_cf_statement`(현금흐름표를 읽은 적이 없다 = F-A3 0 규칙의 분모 밖)와
+`unmapped`(표는 있는데 대응표가 못 잡았다), `revenue_basis` 는 `no_is_statement`(IS·CIS 행 없음)와
+`unmapped` 다. 고칠 대상이 원천인지 대응표인지를 행이 스스로 말한다. 같은 사정으로
+**EG8_fin_std** 가 그룹(`fs_div` × 템플릿 × `report_code`)마다 **예상 대상 대비** 유효 비율을
+기록하고 직전 판과 견준다 — DQ-6·DQ-8 이 전 게이트를 통과한 이유는 분모가 「만들어진 행」이었기
+때문이다.
+
 격리 4종(EG7): `non_krw`(`is_krw` 아님 — 원 단위 축 밖) · `period_unresolved` ·
 `rcept_lag_out_of_range` · `duplicate_vintage`(서로 다른 (bsns_year, reprt_code) 가 같은 grain 으로
 접힘 — 어느 쪽이 옳은지 규칙이 못 고르므로 둘 다 격리한다).
@@ -67,14 +75,21 @@ SQL_PATH = SQL_DIR / "fin_std.sql"
 VINTAGE_KIND = "api_restated"
 VINTAGE_KIND_VOCAB: tuple[str, ...] = ("api_restated", "original", "corrected")   # 4C 확장분 포함
 PERIOD_END_BASIS_VOCAB: tuple[str, ...] = ("document", "inferred")
+# **값이 없는 사유**(T-H, 2026-09-28). 예전에는 둘 다 `unavailable` 한 낱말이라 「볼 표가
+# 없었다」 와 「표는 있는데 대응표가 못 잡았다」 가 구별되지 않았다 — DQ-6(금융 템플릿 순이익
+# 전건 NULL)·DQ-8(capex 311사 NULL)이 게이트를 다 통과한 통로가 그 자리다. 고칠 대상이
+# 원천(표가 없다)인지 대응표(못 잡았다)인지를 행이 스스로 말해야 한다.
+REVENUE_BASIS_NULL_REASONS: tuple[str, ...] = ("no_is_statement", "unmapped")
+CAPEX_BASIS_NULL_REASONS: tuple[str, ...] = ("no_cf_statement", "unmapped")
 REVENUE_BASIS_VOCAB: tuple[str, ...] = ("standard", "banking_gross", "insurance_gross",
-                                        "consensus", "unavailable")
-# capex 산출 기준(DQ-8 · 2026-09-26 F-A1·F-A3) — `standard` = 집계 한 줄 ·
+                                        "consensus", *REVENUE_BASIS_NULL_REASONS)
+# capex 산출 기준(DQ-8 · 2026-09-26 F-A1·F-A3 · 2026-09-28 T-H) — `standard` = 집계 한 줄 ·
 # `ppe_parts` = 자산별 줄의 합 · `ppe_incl_invprop` = 유형자산+투자부동산 합산 줄(정의가 다르다) ·
 # `none_in_cf` = 현금흐름표는 있는데 유형자산 취득 줄이 없어 0 으로 읽은 것 ·
-# `unavailable` = 판단 근거 자체가 없다(현금흐름표 부재 · 값 모호).
+# `no_cf_statement` = 현금흐름표를 읽은 적이 없다(영업·투자 소계 둘 다 없음 = 0 규칙의 분모 밖) ·
+# `unmapped` = 표는 있는데 대응표가 못 잡았다(값이 모호해 NULL 이 된 것 포함).
 CAPEX_BASIS_VOCAB: tuple[str, ...] = ("standard", "ppe_parts", "ppe_incl_invprop",
-                                      "none_in_cf", "unavailable")
+                                      "none_in_cf", *CAPEX_BASIS_NULL_REASONS)
 REPORT_CODE_VOCAB: tuple[str, ...] = ("11011", "11012", "11013", "11014")
 FS_DIV_VOCAB: tuple[str, ...] = ("CFS", "OFS")
 REJECT_REASONS: tuple[str, ...] = ("non_krw", "period_unresolved", "rcept_lag_out_of_range",
@@ -387,10 +402,11 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
             ctx, f'SELECT count(*) FROM "{v}" WHERE '
                  "q4_derived_available_date < available_date "
                  "OR cf_q_available_date < available_date"),
-        # 매출 대체 근거는 표준 태그가 없을 때만 붙는다
+        # 매출 대체 근거는 표준 태그가 없을 때만 붙는다. 값이 없는 행은 **사유 어휘**여야
+        # 한다(T-H) — 값이 있는데 사유가 붙거나 그 반대면 라벨이 거짓말을 한 것이다.
         "n_revenue_basis_conflict": _n(
             ctx, f'SELECT count(*) FROM "{v}" WHERE (revenue IS NULL) <> '
-                 "(revenue_basis = 'unavailable')"),
+                 f"(revenue_basis IN ({_vocab_sql(REVENUE_BASIS_NULL_REASONS)}))"),
         # 직전 회계연도 기준 — 어휘는 같고, 직전 해가 없으면 NULL 이다
         "n_revenue_basis_prev_outside_vocab": _n(
             ctx, f'SELECT count(*) FROM "{v}" WHERE revenue_basis_prev IS NOT NULL '
@@ -480,6 +496,230 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
 eg3_fin_std.gate_name = "EG3_fin_std"       # type: ignore[attr-defined]
 
 
+# ── EG8_fin_std — 예상 대상 기준 그룹별 커버리지 (T-H 1단계, 2026-09-28) ───────
+# 분모가 「만들어진 행」이면 대응 실패가 보이지 않는다. DQ-6(은행·보험 템플릿의 순이익이 전건
+# NULL — 계정 코드가 달랐다)도 DQ-8(capex 311사 NULL)도 EG7 격리 비율 3% 를 넘지 않았다:
+# 그 행들은 **격리된 것이 아니라 값만 빈 채 채택**됐기 때문이다. 그래서 분모를 그룹의
+# **예상 대상**(채택 행 + 격리 행)으로 두고 그룹마다 유효 비율을 기록한 뒤 직전 판과 견준다.
+#
+# 그룹 축 = `fs_div` × 템플릿 × `report_code`. 템플릿은 `.sql` 의 `req` CTE 와 **같은 술어**를
+# 게이트가 `stg_fin` 위에서 되풀이 계산한 것이다(게이트는 `.sql` 을 베끼지 않는다는 규약 —
+# EG3 의 기간 판정 재계산과 같다). 요구 태그는 `fin_map.REVENUE_FALLBACK` 의 `require` 가
+# 정본이고, 둘 다 가진 법인은 **banking** 으로 센다(템플릿 축은 매출 tier 보다 거친 축이다 —
+# tier 는 보험이 먼저지만 여기서 갈라 보려는 것은 계정 서식이고 은행 서식이 더 흔하다).
+COVERAGE_METRICS: tuple[str, ...] = ("revenue", "op_profit", "net_income", "total_asset",
+                                     "cf_operating_ytd", "capex_ytd")
+TEMPLATE_STANDARD = "standard"
+_TEMPLATE_BY_BASIS: dict[str, str] = {"banking_gross": "banking",
+                                      "insurance_gross": "insurance"}
+_TEMPLATE_ORDER: tuple[str, ...] = ("banking", "insurance")      # 앞에서 먼저 판정한다
+
+
+def _template_tags() -> tuple[tuple[str, str], ...]:
+    by_template = {_TEMPLATE_BY_BASIS[str(fb["basis"])]: str(fb["require"][0])
+                   for fb in REVENUE_FALLBACK}
+    return tuple((t, by_template[t]) for t in _TEMPLATE_ORDER)
+
+
+TEMPLATE_TAGS: tuple[tuple[str, str], ...] = _template_tags()
+TEMPLATE_VOCAB: tuple[str, ...] = (*_TEMPLATE_ORDER, TEMPLATE_STANDARD)
+# `account_id` → concept. `.sql` 의 `fin` CTE 와 같은 판이어야 게이트가 같은 그룹을 본다.
+CONCEPT_PREFIX_PATTERN = "^(ifrs-full_|ifrs_|dart_)"
+_GROUP_SEP = "|"
+_REPORT_CODE_UNKNOWN = "unknown"           # 기간 미해소로 격리된 행의 자리
+_COV_VIEW = "_eg8_fin_std_coverage"
+GATE_NAME_EG8 = "EG8_fin_std"
+
+# 판정 규칙 자체이지 조정 상수가 아니라 baseline 에 등재하지 않는다(`_INFERRED_RECENT_DAYS_
+# DEFAULT` 와 같은 취급). 플랜 §11 T-H 가 고정한 숫자다.
+_COVERAGE_MIN_EXPECTED = 20      # 기록·판정 대상 그룹의 예상 대상 하한 (작은 그룹은 잡음이다)
+_COVERAGE_FAIL_DROP = 0.5        # 폐기형 낙폭
+_COVERAGE_WARN_DROP = 0.05       # 기록형 경보 낙폭
+_COVERAGE_WARN_MIN_ROWS = 5      # 경보 최소 영향 건수(추정)
+_COVERAGE_EXAMPLES = 3           # 경보마다 붙는 대표 사례 수
+_COVERAGE_DETAIL_MAX = 5         # FAIL detail 한 줄에 펴는 항목 수(전량은 metrics 에 있다)
+
+
+def _coverage_source_sql(ctx: EquityGateContext) -> str:
+    """채택 행 ∪ 격리 행에 그룹 축 라벨을 붙인 뷰의 SQL."""
+    concept = f"regexp_replace(account_id, '{CONCEPT_PREFIX_PATTERN}', '')"
+    flags = ",\n           ".join(
+        f"coalesce(bool_or({concept} = '{tag}') FILTER (WHERE sj_div IN ('IS', 'CIS')), FALSE)"
+        f" AS has_{name}" for name, tag in TEMPLATE_TAGS)
+    case = " ".join(f"WHEN t.has_{name} THEN '{name}'" for name, _ in TEMPLATE_TAGS)
+    cols = ", ".join(f'o."{m}"' for m in COVERAGE_METRICS)
+    parts = [
+        f"SELECT o.corp_code, o.bsns_year, o.period_end, o.fs_div,\n"
+        f"       coalesce(o.report_code, '{_REPORT_CODE_UNKNOWN}') AS report_code,\n"
+        f"       CASE {case} ELSE '{TEMPLATE_STANDARD}' END AS template,\n"
+        f"       {adopted} AS adopted, {cols}\n"
+        f'FROM "{view}" o\n'
+        "LEFT JOIN tg t ON t.corp_code = o.corp_code AND t.bsns_year = o.bsns_year\n"
+        " AND t.fs_div = o.fs_div AND t.rcept_no = o.rcept_no"
+        for view, adopted in ((ctx.out_view, "TRUE"), (ctx.reject_view, "FALSE"))
+        if view is not None]
+    # `tg` 의 키는 `.sql` 의 `grp`(그룹당 min(rcept_no))과 같은 자리다 — 산출에는 `reprt_code`
+    # 가 없고(1Q·3Q 는 `doc_acode` 로 다시 갈린다) `rcept_no` 가 그 그룹의 이름표다.
+    return ("WITH tg AS (\n"
+            "    SELECT corp_code, bsns_year, fs_div, min(rcept_no) AS rcept_no,\n"
+            f"           {flags}\n"
+            "    FROM stg_fin\n"
+            "    GROUP BY corp_code, bsns_year, reprt_code, fs_div\n"
+            ")\n" + "\nUNION ALL\n".join(parts))
+
+
+def _coverage_measure(ctx: EquityGateContext) -> tuple[dict[str, dict[str, object]],
+                                                       dict[str, object]]:
+    """그룹별 (예상 대상, 채택, 계정별 유효 건수·비율) 과 전체 합계."""
+    sel = ", ".join(f'count("{m}") FILTER (WHERE adopted)' for m in COVERAGE_METRICS)
+    rows = ctx.con.execute(
+        f'SELECT fs_div, template, report_code, count(*), count(*) FILTER (WHERE adopted), {sel} '
+        f'FROM "{_COV_VIEW}" GROUP BY 1, 2, 3 ORDER BY 1, 2, 3').fetchall()
+    by_group: dict[str, dict[str, object]] = {}
+    t_expected = t_adopted = 0
+    t_valid = dict.fromkeys(COVERAGE_METRICS, 0)
+    for r in rows:
+        key = _GROUP_SEP.join(str(x) for x in r[:3])
+        n_expected, n_adopted = int(str(r[3])), int(str(r[4]))
+        valid = {m: int(str(r[5 + i])) for i, m in enumerate(COVERAGE_METRICS)}
+        by_group[key] = {
+            "n_expected": n_expected, "n_adopted": n_adopted,
+            "metrics": {m: {"n_valid": n, "ratio": round(n / n_expected, 6) if n_expected else 0.0}
+                        for m, n in valid.items()}}
+        t_expected += n_expected
+        t_adopted += n_adopted
+        for m, n in valid.items():
+            t_valid[m] += n
+    total: dict[str, object] = {
+        "n_expected": t_expected, "n_adopted": t_adopted,
+        "metrics": {m: {"n_valid": n, "ratio": round(n / t_expected, 6) if t_expected else 0.0}
+                    for m, n in t_valid.items()}}
+    return by_group, total
+
+
+def _coverage_examples(ctx: EquityGateContext, group: str, metric: str) -> list[str]:
+    """그 그룹에서 값이 비어 있는 채택 행의 grain 키 — 경보를 사람이 바로 좇을 수 있게."""
+    fs_div, template, report_code = group.split(_GROUP_SEP)
+    rows = ctx.con.execute(
+        "SELECT corp_code || '|' || CAST(period_end AS VARCHAR) || '|' || report_code "
+        f'|| \'|\' || fs_div FROM "{_COV_VIEW}" WHERE adopted AND "{metric}" IS NULL '
+        "AND fs_div = ? AND template = ? AND report_code = ? "
+        f"ORDER BY 1 LIMIT {_COVERAGE_EXAMPLES}", [fs_div, template, report_code]).fetchall()
+    return [str(r[0]) for r in rows]
+
+
+def _previous_gate_metric(ctx: EquityGateContext, gate: str, key: str) -> object | None:
+    """직전 커밋 빌드가 남긴 게이트 metric(`BuildRecord.gates`). 없으면 None."""
+    prev = ctx.previous
+    if prev is None:
+        return None
+    for g in prev.gates:
+        if isinstance(g, dict) and g.get("name") == gate:
+            metrics = g.get("metrics")
+            if isinstance(metrics, dict):
+                return metrics.get(key)
+    return None
+
+
+def _coverage_drops(now: dict[str, dict[str, object]], prev: dict[str, object],
+                    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """직전 판 대비 낙폭 — (폐기, 경보). 직전 판에 없던 그룹·계정은 판정 축이 없다."""
+    fails: list[dict[str, object]] = []
+    warns: list[dict[str, object]] = []
+    for group, cur in now.items():
+        old = prev.get(group)
+        if not isinstance(old, dict):
+            continue
+        old_metrics = old.get("metrics")
+        if not isinstance(old_metrics, dict):
+            continue
+        n_expected = int(str(cur["n_expected"]))
+        cur_metrics = dict(cur["metrics"])          # type: ignore[arg-type]
+        for metric in COVERAGE_METRICS:
+            before_cell, after_cell = old_metrics.get(metric), cur_metrics.get(metric)
+            if not isinstance(before_cell, dict) or before_cell.get("ratio") is None:
+                continue
+            if not isinstance(after_cell, dict):      # 계정 목록이 판 사이에 바뀐 경우
+                continue
+            before = float(str(before_cell["ratio"]))
+            after = float(str(after_cell["ratio"]))
+            drop = before - after
+            if drop < _COVERAGE_WARN_DROP:
+                continue
+            n_affected = int(round(drop * n_expected))
+            entry: dict[str, object] = {
+                "group": group, "metric": metric,
+                "ratio_before": before, "ratio_after": after, "drop": round(drop, 6),
+                "n_expected": n_expected,
+                "n_expected_before": int(str(old.get("n_expected", 0))),
+                "n_valid": int(str(after_cell["n_valid"])),
+                "n_affected_est": n_affected, "examples": []}
+            if drop >= _COVERAGE_FAIL_DROP or (after == 0.0 and before >= _COVERAGE_FAIL_DROP):
+                fails.append(entry)
+            elif n_affected >= _COVERAGE_WARN_MIN_ROWS:
+                warns.append(entry)
+    return fails, warns
+
+
+def eg8_fin_std_coverage(ctx: EquityGateContext) -> GateResult:
+    """EG8_fin_std (T-H 1단계) — 그룹별 **예상 대상 대비 유효 비율**과 직전 판 대비 낙폭.
+
+    분모는 그룹의 예상 대상(채택 + 격리)이고 분자는 채택 행 중 값이 있는 것이다. 격리 행을
+    분모에 넣는 이유는 「값이 나와야 했던 대상」이 격리로 사라지는 것도 커버리지 손실이기
+    때문이다(DQ-5·DEFECT-F01 이 그 유형). 격리 뷰가 없는 ctx(`reject_view is None`)에서는
+    분모가 채택 행뿐이다 — 빌드 경로는 격리 0 건이어도 뷰를 만들므로 실제로는 늘 둘 다다.
+
+    판정은 **직전 판이 있을 때만** 한다: 예상 대상 `_COVERAGE_MIN_EXPECTED` 이상인 그룹에서
+    유효 비율이 `_COVERAGE_FAIL_DROP` 이상 떨어지거나, 직전이 그 값 이상이었는데 0 이 되면
+    FAIL 이다. 그보다 작은 낙폭은 영향 건수가 `_COVERAGE_WARN_MIN_ROWS` 이상일 때 기록형
+    경보다. 직전 판이 없으면(첫 빌드·규칙 판본 교체 직후) 기록만 한다 — 절대 수준에 임계를
+    걸면 계정 서식이 원래 다른 그룹(금융 템플릿의 `gross_profit` 등)이 매번 걸린다.
+
+    기록은 `coverage_by_group` 으로 `BuildRecord.gates` 에 실리고 **다음 빌드가 그것을 읽는다**
+    (`_previous_gate_metric`). JSON 이 커지지 않게 예상 대상 하한을 넘는 그룹만 남긴다.
+    """
+    ctx.con.execute(f'CREATE OR REPLACE TEMP VIEW "{_COV_VIEW}" AS {_coverage_source_sql(ctx)}')
+    by_group, total = _coverage_measure(ctx)
+    recorded = {k: v for k, v in by_group.items()
+                if int(str(v["n_expected"])) >= _COVERAGE_MIN_EXPECTED}
+    prev = _previous_gate_metric(ctx, GATE_NAME_EG8, "coverage_by_group")
+    fails: list[dict[str, object]] = []
+    warns: list[dict[str, object]] = []
+    if isinstance(prev, dict):
+        fails, warns = _coverage_drops(recorded, prev)
+        for e in (*fails, *warns):
+            e["examples"] = _coverage_examples(ctx, str(e["group"]), str(e["metric"]))
+    metrics: dict[str, object] = {
+        "coverage_by_group": recorded,
+        "coverage_total": total,
+        "n_groups": len(by_group),
+        "n_groups_recorded": len(recorded),
+        "coverage_min_expected": _COVERAGE_MIN_EXPECTED,
+        "coverage_fail_drop": _COVERAGE_FAIL_DROP,
+        "coverage_warn_drop": _COVERAGE_WARN_DROP,
+        "coverage_warn_min_rows": _COVERAGE_WARN_MIN_ROWS,
+        "coverage_compared": isinstance(prev, dict),
+        "previous_build": None if ctx.previous is None else ctx.previous.build_id,
+        "coverage_fail": fails, "coverage_warn": warns,
+        "n_coverage_fail": len(fails), "n_coverage_warn": len(warns)}
+    if fails:
+        # detail 은 사람이 읽는 한 줄이라 앞의 몇 건만 편다 — 전량은 metrics 에 있다.
+        head = "; ".join(f"{e['group']}.{e['metric']} {e['ratio_before']} → "
+                         f"{e['ratio_after']} (n_expected={e['n_expected']} "
+                         f"examples={e['examples']})" for e in fails[:_COVERAGE_DETAIL_MAX])
+        more = len(fails) - _COVERAGE_DETAIL_MAX
+        return GateResult(GATE_NAME_EG8, GateStatus.FAIL,
+                          head + (f" … +{more}" if more > 0 else ""), metrics)
+    detail = ("직전 판 대비 커버리지 낙폭 없음" if isinstance(prev, dict)
+              else "직전 판 기록 없음 — 커버리지 기록만")
+    if warns:
+        detail += f" (warn {len(warns)})"
+    return GateResult(GATE_NAME_EG8, GateStatus.PASS, detail, metrics)
+
+
+eg8_fin_std_coverage.gate_name = GATE_NAME_EG8      # type: ignore[attr-defined]
+
+
 def eg6_fin_std(ctx: EquityGateContext) -> GateResult:
     """EG6-P08 — `fin_std` ⋈ `disclosure_version` 무매칭률의 12월 결산 / 비12월 결산 비대칭.
 
@@ -557,7 +797,9 @@ FIELDS_FIN: tuple[FieldProfile, ...] = (
          "② financial.revenue_basis_prev 와 다르면 성장률은 결측으로 버린다. 값은 그대로 "
          "내보내고 임계는 소비자가 정한다(WORKFLOW §0-2). 근거는 서버 현판 93,986행 실측 — "
          "기준 분포 standard 92,861행/2,951법인 · unavailable 718/173 · banking_gross 269/39 · "
-         "insurance_gross 138/13. 오늘 상장 보통주 2,308 중 합산식으로 매출을 내는 27종목이 "
+         "insurance_gross 138/13 (T-H 이전 판의 실측 — 그 뒤로 unavailable 718 은 "
+         "no_is_statement·unmapped 둘로 갈려 나간다). 오늘 상장 보통주 2,308 중 합산식으로 "
+         "매출을 내는 27종목이 "
          "시총 330조(5.6%)이고(BLOCKED_FACTORS §5-1), standard 와 합산식을 섞어 쓴 법인이 20 · "
          "직전 회계연도 대비 기준이 바뀐 행이 367(136법인)이다. 그중 합산식이 끼어든 것은 "
          "18법인 46건 — 삼성카드 2024 standard 4.38조 → 2025 banking_gross 3.84조(가짜 −12%) · "
@@ -582,9 +824,12 @@ FIELDS_FIN: tuple[FieldProfile, ...] = (
     # 상태). 어휘는 REVENUE_BASIS_VOCAB 로 닫혀 있고 임계·판정은 넣지 않는다.
     _fin("financial.revenue_basis", "revenue_basis", "매출 산출 기준", "", "category",
          "fin_std.revenue_basis ∈ {standard, banking_gross, insurance_gross, consensus, "
-         "unavailable}. 매출이 NULL 인 행은 반드시 unavailable 이고(EG3 "
-         "n_revenue_basis_conflict), 합산식은 require 태그가 있을 때만 발동한다(보험 → 은행 "
-         "순). PSR·영업이익률을 한 순위표에 섞을 수 있는지는 이 라벨을 보고 소비자가 정한다.",
+         "no_is_statement, unmapped}. 매출이 NULL 인 행은 반드시 뒤의 두 **사유** 중 "
+         "하나이고(EG3 n_revenue_basis_conflict), 합산식은 require 태그가 있을 때만 "
+         "발동한다(보험 → 은행 순). no_is_statement = 손익계산서(IS·CIS) 행이 아예 없다 · "
+         "unmapped = 표는 있는데 대응표가 못 잡았다(값이 갈려 모호한 것 포함) — 고칠 대상이 "
+         "원천인지 대응표인지를 가르는 축이다(2026-09-28 T-H, 그 전에는 둘 다 unavailable). "
+         "PSR·영업이익률을 한 순위표에 섞을 수 있는지는 이 라벨을 보고 소비자가 정한다.",
          scope="internal"),
     _fin("financial.revenue_basis_prev", "revenue_basis_prev", "직전 회계연도 매출 산출 기준",
          "", "category",
@@ -597,7 +842,7 @@ FIELDS_FIN: tuple[FieldProfile, ...] = (
     # 출처를 알 수 없으므로 산출 규칙을 행에 싣는다. 어휘는 CAPEX_BASIS_VOCAB 로 닫혀 있다.
     _fin("financial.capex_basis", "capex_basis", "유형자산 취득 산출 기준", "", "category",
          "fin_std.capex_basis ∈ {standard, ppe_parts, ppe_incl_invprop, none_in_cf, "
-         "unavailable}. standard = 집계 한 줄"
+         "no_cf_statement, unmapped}. standard = 집계 한 줄"
          "(ifrs-full_PurchaseOfPropertyPlantAndEquipmentClassifiedAsInvestingActivities 또는 "
          "'유형자산의 취득') · ppe_parts = 자산별 줄(dart_PurchaseOf* 9종 + 표준계정코드 미사용 "
          "이름 48종)의 **크기 합**(부호가 섞여 sum_abs, 언제나 양수). 09-26 실측에서 같은 회사가 "
@@ -606,9 +851,12 @@ FIELDS_FIN: tuple[FieldProfile, ...] = (
          "밖이라 제외한다. ppe_incl_invprop = 유형자산과 투자부동산을 한 줄로 적은 회사(7사) — "
          "정의가 다르므로 standard·ppe_parts 와 **섞어 횡단면을 세우면 안 된다**. "
          "none_in_cf = 현금흐름표는 있는데 유형자산 취득 줄이 없어(리스·무형만 있거나 집계 줄이 "
-         "값 공란) 0 으로 읽은 것 — 값은 0 이고 결측이 아니다. unavailable = 현금흐름표가 없거나 "
-         "값이 모호해 판단 근거 자체가 없는 행(NULL). FCF(Q05) 를 시계열로 쓸 때 기준이 바뀌는 "
-         "구간은 이 라벨로 가른다.",
+         "값 공란) 0 으로 읽은 것 — 값은 0 이고 결측이 아니다. 값이 NULL 인 행의 **사유**는 "
+         "둘로 갈린다(2026-09-28 T-H, 그 전에는 둘 다 unavailable): no_cf_statement = 영업·투자 "
+         "소계가 둘 다 없어 현금흐름표를 읽은 적이 없다(0 규칙의 분모 밖이라 「안 샀다」 와 "
+         "섞으면 안 된다) · unmapped = 표는 있는데 대응표가 못 잡았다 — 고칠 대상이 원천인지 "
+         "대응표인지를 가른다. FCF(Q05) 를 시계열로 쓸 때 기준이 바뀌는 구간은 이 라벨로 "
+         "가른다.",
          scope="internal"),
     # equity 내부 스코프 — FIELD_MAP §3 이 "dataset_profile(S19)이 노출 여부를 정한다" 한 16계정
     _fin("financial.cost_of_sales", "cost_of_sales", "매출원가", "KRW", "amount",
@@ -696,7 +944,7 @@ FIN_STD = register(EquityTable(
     reject_reasons=REJECT_REASONS,
     consts=("period_end_lag_max_days", "rcept_lag_p99_days", "quarter_months",
             "half_months", "three_quarter_months"),
-    extra_gates=(eg3_fin_std, eg6_fin_std),
+    extra_gates=(eg3_fin_std, eg8_fin_std_coverage, eg6_fin_std),
     field_profiles=FIELDS_FIN,
 ))
 
@@ -705,13 +953,16 @@ TABLES: tuple[EquityTable, ...] = (FIN_STD,)
 BASELINE_SEED = Path(__file__).parent / "baseline_seed_s12.json"
 """이 슬라이스가 요구하는 상수의 초기값(절단본 실측). 승인 뒤 `baseline.json` 에 병합한다."""
 
-__all__ = ["ACCOUNTS", "BASELINE_SEED", "CAPEX_BASIS_VOCAB", "CF_ACCOUNTS", "CF_PRIOR_REPORT",
-           "CF_Q_COLUMNS",
+__all__ = ["ACCOUNTS", "BASELINE_SEED", "CAPEX_BASIS_NULL_REASONS", "CAPEX_BASIS_VOCAB",
+           "CF_ACCOUNTS", "CF_PRIOR_REPORT",
+           "CF_Q_COLUMNS", "CONCEPT_PREFIX_PATTERN", "COVERAGE_METRICS", "GATE_NAME_EG8",
+           "TEMPLATE_STANDARD", "TEMPLATE_TAGS", "TEMPLATE_VOCAB",
            "TIER_CAPEX_COMBINED", "TIER_CAPEX_PARTS", "TIER_CONCEPT", "TIER_CONCEPT_ALT",
            "TIER_NM",
            "TIER_REVENUE_FALLBACK",
            "EXTRA_ACCOUNTS", "FIN_STD", "FLOW_ACCOUNTS", "PERIOD_END_BASIS_VOCAB",
            "PREV_FY_PREDICATE",
-           "Q4_COLUMNS", "REJECT_REASONS", "REPORT_CODE_VOCAB", "REVENUE_BASIS_VOCAB",
+           "Q4_COLUMNS", "REJECT_REASONS", "REPORT_CODE_VOCAB", "REVENUE_BASIS_NULL_REASONS",
+           "REVENUE_BASIS_VOCAB",
            "STOCK_ACCOUNTS", "TABLES", "VINTAGE_KIND", "VINTAGE_KIND_VOCAB", "acct_rows",
            "acct_values_sql", "norm_nm"]

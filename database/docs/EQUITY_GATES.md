@@ -2515,7 +2515,7 @@ EG5c metrics 에 뷰별 `columns_added`·`columns_removed`·`schema_changed` 와
 |---|---|
 | 왜 | DART 현금흐름표는 유형자산 취득을 집계 한 줄(2,218사) 또는 자산별 줄로 적고 **같은 회사가 둘 다 적는 경우는 0건**이다. 대응표가 집계 줄만 잡아 FY2025 연간 2,631사 중 **311사**의 `capex_ytd` 가 NULL 이었고(그중 211사는 자산별 합으로 산출 가능), 그것이 09-23 유니버스 `qual_fcf_assets` 결측 34 중 32 의 원인이다 |
 | 규칙 | `_acct` 에 tier `d_ppe_parts` 두 줄(kind `concept` 9종 · kind `nm_nonstd` 11종, 둘 다 `agg='sum'`). 집계 줄이 하나라도 있으면 `best_tier` 의 `min(tier)` 가 a/b/c 에서 끝내므로 **이중계상은 구조적으로 불가능**하다. `nm_nonstd` 는 표준계정코드 미사용 행만 보는 kind 다 — `건설중인자산의 취득`·`기타유형자산의 취득`·`비품의 취득` 이 표준 태그의 계정명이기도 해서, 평범한 `nm` 으로 두면 같은 줄이 두 번 더해진다 |
-| 신설 컬럼 | `capex_basis` ∈ {`standard`, `ppe_parts`, `ppe_incl_invprop`, `none_in_cf`, `unavailable`} — `wide_acct` 에서 `max(basis) FILTER (WHERE metric='capex_ytd' AND v IS NOT NULL)`, 최종 SELECT 에서 `coalesce(…, 'unavailable')`. `revenue_basis` 와 같은 자리·같은 규약이고 **`capex_basis_prev` 는 두지 않는다** |
+| 신설 컬럼 | `capex_basis` ∈ {`standard`, `ppe_parts`, `ppe_incl_invprop`, `none_in_cf`, `no_cf_statement`, `unmapped`}(뒤의 둘은 §11-8 이 `unavailable` 을 가른 것) — `wide_acct` 에서 `max(basis) FILTER (WHERE metric='capex_ytd' AND v IS NOT NULL)`, 최종 SELECT 에서 `coalesce(…, 'unavailable')`. `revenue_basis` 와 같은 자리·같은 규약이고 **`capex_basis_prev` 는 두지 않는다** |
 | 폐기형 | `n_capex_basis_outside_vocab`(NULL 도 위반) — 어휘 폐쇄뿐이다. 복구 규모에는 임계를 걸지 않는다 |
 | 기록형 | `n_by_capex_basis` — `ppe_parts` 행 수가 이 규칙이 실제로 복구한 크기다(플랜 GA2 가 이 값으로 판정한다: FY2025 11011 `ppe_parts` ≥ 205) |
 | 부호 | 합산 전에 `abs()` 하지 않는다. 한 회사 안에서 부호는 일관이고(실측) 취득액(크기)으로 바꾸는 것은 소비 측 몫이다(compat `mappings.py` · 팩터층 동일) |
@@ -2529,9 +2529,138 @@ EG5c metrics 에 뷰별 `columns_added`·`columns_removed`·`schema_changed` 와
 |---|---|
 | F-A1 합산 줄 | 유형자산과 투자부동산을 **한 줄로** 적는 7사(정규화 이름 `유형자산및투자부동산의취득`·`투자부동산및유형자산의취득`, 유니버스 024110·030200 KT·000370·046890). tier **`e_ppe_combined`**(kind `nm_nonstd`, `agg='pick'`, basis `ppe_incl_invprop`) 가 `d_ppe_parts` **뒤**에 붙는다 — 자산별 합이 있으면 PPE 정의에 정확히 맞으므로 먼저 쓴다. 표준 태그를 단 회사는 tier a 가 이미 `standard` 로 잡는다. 자산별 비표준 이름도 3종(`건설중인유형자산의 취득`·`기타의유형자산의 취득`·`건설중인자산(유형자산)의 취득`) 늘었다 |
 | F-A2 이름 정규화 | 계정명 대조를 **공백 뗀 판**으로 한다 — `.sql` 의 `fin.account_nm_norm = regexp_replace(account_nm, '\s+', '', 'g')` ↔ `_acct` 토큰(`rules_s12.norm_nm()`). DART 계정명의 공백은 회사마다 임의다(CF 90,456행에 공백). `cf_operating_ytd` 이름 목록에 `영업활동으로인한순현금흐름` 을 더했고 **`영업활동으로부터창출된현금흐름` 은 넣지 않는다**(이자·법인세 차감 전 소계). 완전일치 규칙(fin_map 규칙 1)은 그대로다 — 공백만 무시한다 |
-| F-A3 0 규칙 | `capex_zero` CTE — 현금흐름표가 있고(영업 또는 투자 소계가 잡혔고) **값 있는 유형자산 취득 줄이 하나도 없는** 그룹은 `capex_ytd = 0` · `capex_basis='none_in_cf'`. 판정 축은 OR: capex 토큰(집계 concept · 자산별 9종 · 비표준 이름 · 합산 줄)에 걸린 줄 · 정규화 이름에 '유형자산' 과 '취득' 이 함께 든 줄. **금액이 있는** 줄이 하나라도 있으면 막는다(값 모호로 NULL 인 것과 안 산 것을 섞지 않는다). 금액이 빈 줄은 「샀다」 는 증거가 아니라 막지 않는다 — 집계 줄이 값 공란인 9사가 여기 든다. 현금흐름표 자체가 없으면 NULL(`unavailable`) |
+| F-A3 0 규칙 | `capex_zero` CTE — 현금흐름표가 있고(영업 또는 투자 소계가 잡혔고) **값 있는 유형자산 취득 줄이 하나도 없는** 그룹은 `capex_ytd = 0` · `capex_basis='none_in_cf'`. 판정 축은 OR: capex 토큰(집계 concept · 자산별 9종 · 비표준 이름 · 합산 줄)에 걸린 줄 · 정규화 이름에 '유형자산' 과 '취득' 이 함께 든 줄. **금액이 있는** 줄이 하나라도 있으면 막는다(값 모호로 NULL 인 것과 안 산 것을 섞지 않는다). 금액이 빈 줄은 「샀다」 는 증거가 아니라 막지 않는다 — 집계 줄이 값 공란인 9사가 여기 든다. 현금흐름표 자체가 없으면 NULL 이고 사유 라벨은 `no_cf_statement` 다(§11-8) |
 | 왜 0 인가 | 현금흐름표는 그 기간의 현금흐름을 **다 적는 표**다. 리스·무형·소프트웨어·금융자산 취득만 있고 유형자산 취득 줄이 아예 없으면 그 기간에 유형자산을 안 산 것이고, 충실한 읽기는 결측이 아니라 0 이다(FY2025 92사). 결측으로 두면 FCF 가 통째로 비어 회사가 팩터 모집단에서 사라진다 |
 | F-A4 부호 | `d_ppe_parts` 의 `agg` 는 **`sum_abs`**(크기의 합) — 한 표 안에서 표준 태그 줄은 +, 비표준 줄은 − 로 적는 회사가 있어(00402989 FY2016: 건물 +34.79억·기계장치 +20.42 vs 공구와 기구 −12.59·시설물 −9.11) 그냥 더하면 취득이 상계된다. e1.19.0 서버 재빌드에서 `ppe_parts` 361행 중 53행이 줄어 드러났다. `ppe_parts` capex 는 **언제나 양의 크기**이고 `standard` 는 부호를 그대로 둔다(소비 측이 abs) |
 | F-A4 이름 확장 | `CAPEX_FALLBACK["nm"]` 을 **자산 종류 24 × 접미어 2 = 48종**의 곱집합으로 펼쳤다(`토지의취득`·`토지취득`·`기계장치의취득`…). 표준계정코드를 하나도 안 단 회사는 모든 종류를 평이한 이름으로 적는다(00159971 FY2015 8줄 중 2줄만 세어졌다). 펼친 목록이라 **완전일치 규칙은 그대로**고, `nm_nonstd` 가 `NOT account_std` 행만 보므로 표준 태그 줄은 여전히 두 번 세어지지 않는다. 사용권자산·리스자산·투자부동산은 종류 목록에 없다 |
 | F-A4 pick 우선순위 | `hit.nm_exact`(0 = 공백 정규화 없이도 걸리던 줄·태그 히트 포함, 1 = 공백을 떼야 걸린 줄)를 `val` 이 본다: **exact 히트의 값이 하나면 그것** → exact 히트가 없고 전체 값이 하나면 그것 → 아니면 NULL(모호). `sum`·`sum_abs` 는 전체 히트를 쓴다. 정규화가 만든 모호(아래 「잔여 위험」)로 `cf_operating_ytd` 2행이 값 → NULL 로 퇴행한 것을 되돌린다(00364795 FY2018 · 00926522 2019) |
 | 무회귀 | `val`·`best_tier` 는 건드리지 않는다 — 0 규칙은 `wide` 에서 뒤에 덮고 `capex_q`(분기 차분)로는 옮겨가지 않는다. 절단본 220행 재빌드에서 61컬럼 전부 값 변화 0(`capex_basis` 220 `standard` 유지). **잔여 위험**: 공백 정규화로 tier `c_nm` 의 `pick` 이 새로 갈릴 수 있다(표준 태그가 아예 없는 그룹에서 공백 변형 두 줄이 값이 다를 때). 절단본에서는 `cf_financing_ytd` 3그룹이 그런 꼴인데 셋 다 표준 태그가 있어 tier a 가 이기고(00722500, `non_krw` 격리) 산출은 안 바뀌었다 — 서버 재빌드(e1.19.0)에서 실제로 `cf_operating_ytd` 2행이 이렇게 퇴행했고, 위 **F-A4 pick 우선순위**가 그 통로를 닫았다(공백 변형은 동점자일 때만 본다) |
+
+### 11-8. `EG8_fin_std` 신설 — NULL 사유 어휘와 예상 대상 기준 커버리지 (T-H 1단계, 2026-09-28)
+
+플랜 [`plans/2026-09-26-layer-fixes.md`](plans/2026-09-26-layer-fixes.md) §11 · 자문
+[`research/2026-09-28-gpt-data-quality-consult.md`](research/2026-09-28-gpt-data-quality-consult.md)
+§2. 규칙 판본 `e1.21.0`.
+
+**왜**: DQ-6(은행·보험 템플릿의 순이익이 전건 NULL — 그 서식은 계정 코드가 다르다)도
+DQ-8(capex 311사 NULL)도 **모든 게이트를 통과했다**. EG7 격리 비율은 표 전체를 분모로 쓰고,
+그 행들은 격리된 것이 아니라 **값만 빈 채 채택**됐기 때문이다. 「값이 나와야 했던 대상 중 몇이
+나왔는가」를 세는 축이 아무 데도 없었다.
+
+#### ① NULL 사유 어휘 — `unavailable` 을 둘로 가른다
+
+| 컬럼 | 값이 나온 라벨 | 값이 없는 **사유** |
+|---|---|---|
+| `capex_basis` | `standard` · `ppe_parts` · `ppe_incl_invprop` · `none_in_cf`(0 으로 읽음) | `no_cf_statement` = 영업·투자 소계가 둘 다 없다(현금흐름표를 읽은 적이 없음 = §11-7 F-A3 0 규칙 분모의 **뒤집은 판**) · `unmapped` = 표는 있는데 대응표가 못 잡았다(`pick` 이 갈려 모호한 것 포함) |
+| `revenue_basis` | `standard` · `banking_gross` · `insurance_gross` · `consensus` | `no_is_statement` = IS·CIS 행이 아예 없다(`req` CTE 에 그룹이 없다) · `unmapped` = 표는 있는데 못 잡았다 |
+
+고칠 대상이 **원천**인지 **대응표**인지를 행이 스스로 말한다. 어휘 정본은
+`rules_s12.CAPEX_BASIS_VOCAB`·`REVENUE_BASIS_VOCAB`(각각 6종)이고 NULL 사유만 따로
+`*_NULL_REASONS` 로 묶여 `EG3_fin_std.n_revenue_basis_conflict` 의 우변이 된다.
+**값은 하나도 안 바뀐다** — 재빌드 diff(§12)에서 나와야 하는 값 변경은 이 라벨 재명명뿐이다.
+`wide_acct` 가 `val` 이 아니라 **`grp`(그룹 축)** 에서 출발하도록 바꾼 것도 같은 이유다: 24 계정이
+하나도 안 걸린 그룹이 `wide` 에서 빠지면 최종 SELECT 가 `coalesce` 로 라벨을 지어내야 한다.
+
+#### ② `EG8_fin_std` — 그룹별 예상 대상 대비 유효 비율
+
+| 항목 | 내용 |
+|---|---|
+| 그룹 축 | `fs_div` × **템플릿** × `report_code`. 템플릿은 `.sql` 의 `req` CTE 와 **같은 술어**를 게이트가 `stg_fin` 위에서 되풀이 계산한다(게이트는 `.sql` 을 베끼지 않는다 — EG3 기간 판정과 같은 규약): `RevenueFromInterest` 태그 → `banking`, 아니면 `InvestmentIncome` → `insurance`, 그 밖 `standard`. 요구 태그 정본은 `fin_map.REVENUE_FALLBACK` 의 `require` 이고, 산출에는 `reprt_code` 가 없으므로(1Q·3Q 는 `doc_acode` 로 다시 갈린다) 그룹 조인 키는 `(corp_code, bsns_year, fs_div, rcept_no)` — `.sql` `grp` 의 `min(rcept_no)` 와 같은 자리다 |
+| 분모(예상 대상) | 그 그룹의 **채택 행 + 격리 행**. 격리를 넣는 이유는 값이 나와야 했던 대상이 격리로 사라지는 것도 커버리지 손실이기 때문이다(DQ-5·DEFECT-F01 이 그 유형). 기간 미해소로 격리돼 `report_code` 가 없는 행은 그룹 키에서 `unknown` 자리에 모인다 |
+| 분자 | **채택 행 중 값이 있는 것**. 계정은 `revenue`·`op_profit`·`net_income`·`total_asset`·`cf_operating_ytd`·`capex_ytd` 여섯(`rules_s12.COVERAGE_METRICS`) |
+| 기록형 | `coverage_by_group`(예상 대상 **20 이상**인 그룹만 — MANIFEST 가 커지지 않게) · `coverage_total`(전 그룹 합계) · `n_groups` · `n_groups_recorded`. `BuildRecord.gates` 에 실리고 **다음 빌드가 그것을 읽는다** |
+| 폐기형 | 직전 커밋 빌드의 같은 metric 과 견줘, 예상 대상 20 이상인 그룹에서 유효 비율이 **0.5 이상 떨어지거나**, 직전이 0.5 이상이었는데 **0 이 되면** FAIL |
+| 경보(기록형) | 낙폭 0.05 이상이고 추정 영향 건수(`낙폭 × 예상 대상`)가 5 이상이면 `coverage_warn` |
+| 경보 내용 | 항목마다 그룹·계정·전/후 비율·낙폭·예상 대상·유효 건수·추정 영향 건수 + **대표 사례 3건**(키는 `corp_code`·`period_end`·`report_code`·`fs_div` 를 막대 기호로 이은 문자열) |
+| 직전 판이 없으면 | **기록만 하고 PASS**(첫 빌드·규칙 판본 교체 직후). 절대 수준에 임계를 걸지 않는 이유는 계정 서식이 원래 다른 그룹(금융 템플릿의 `gross_profit` 등)이 매번 걸리기 때문이다 |
+| 상수 | 넷 다 **판정 규칙 자체**라 baseline 에 등재하지 않는다(`rules_s12._COVERAGE_MIN_EXPECTED` 20 · `_COVERAGE_FAIL_DROP` 0.5 · `_COVERAGE_WARN_DROP` 0.05 · `_COVERAGE_WARN_MIN_ROWS` 5). `_INFERRED_RECENT_DAYS_DEFAULT` 와 같은 취급이다 |
+| 실행 순서 | `extra_gates=(EG3_fin_std, EG8_fin_std, EG6_fin_std)` — EG3 바로 뒤. FAIL 하면 뒤 게이트는 `skip(upstream_failed)` 다 |
+
+**절단본 실측(220 채택 + 6 격리)**: 그룹 12(`CFS`·`OFS` × 보고서 종류 4 + 은행 템플릿 1법인의
+CFS 4) 중 예상 대상 20 이상은 `CFS|standard|11011` 48 · `11012` 47 · `11013` 49 · `11014` 42 넷.
+전체 유효 비율은 `net_income` 0.9646, 나머지 다섯 0.9735(분모에 격리 6 이 들어 있어 1.0 이 아니다).
+
+**플랜 GT-H 판정**: DQ-6 상황(금융 템플릿 순이익 0%)을 손 트리로 넣으면 FAIL 하고 대표 사례가
+나오며, 직전 판이 없으면 같은 데이터가 PASS(기록만) 한다 —
+`test_직전_판보다_순이익_커버리지가_무너지면_폐기한다`·`test_직전_판이_없으면_같은_판이_기록만_하고_통과한다`.
+
+**서버 첫 반영 시 주의**: 직전 판(`m_20260926T132656_683291Z`)에는 `EG8_fin_std` 기록이 없으므로
+첫 재빌드는 **기록만** 한다(판정은 그다음 판부터). 2단계(M2 T2.2b `factor_inputs`)는 플랜 §11 참조.
+
+## 12. 판 대 판 전 컬럼 diff — `scripts/equity_diff.py` (T-G, 2026-09-28)
+
+플랜 [`plans/2026-09-26-layer-fixes.md`](plans/2026-09-26-layer-fixes.md) §11. **게이트가 아니라
+게이트 밖의 축이다** — EG1~EG21 은 새 판 하나를 놓고 「이 판이 스스로 옳은가」를 묻고, 이것은 두 판을
+놓고 「규칙 변경이 **무엇을** 바꿨는가」를 묻는다. 09-24~26 의 capex 수정에서 오케스트레이터가 손으로
+짜 돌리던 ad-hoc DuckDB 스크립트를 저장소 도구로 굳혔고, 그 손작업이 실제 회귀를 세 번 잡았다
+(§11-7 F-A4 의 `ppe_parts` 부호 상계 53행 · `cf_operating_ytd` 2행 값→NULL 퇴행 · 공백 정규화가
+만든 `pick` 모호).
+
+### 12-1. 무엇을 세는가
+
+| 축 | 정의 |
+|---|---|
+| 비교 단위 | 표의 **선언 grain**(`rules_s*.py` 의 `EquityTable.grain`)으로 두 판을 FULL OUTER JOIN 한 행. `--key a,b` 로 덮어쓸 수 있다(선언이 없는 표·절단본 실험용) |
+| 컬럼 카운터 | `value_to_null`(값→NULL) · `null_to_value`(NULL→값) · `value_changed`. 수치 컬럼의 값 변경은 **상대 허용오차**(`--tol 1e-9` 기본, `--tol capex_ytd=1e-6` 로 컬럼별), 그 밖은 완전일치 |
+| 행 카운터 | `rows_added` · `rows_removed` |
+| 묶음 | `*_basis` 계열과 `available_date`·`*_available_date` 를 따로 합산한다 — 어휘 축과 공개시점 축은 값 축과 위험이 다르다 |
+| 제외 | 운영 메타(`v`·`build_id`·`built_at_utc` 류)와 **선언 컬럼이 아닌 하이브 키**(`year`). 보고서 `excluded_columns` 에 무엇을 뺐는지 싣는다. `_reject/` 는 산출이 아니므로 읽지 않는다 |
+| 스키마 차이 | 한쪽에만 있는 컬럼은 비교하지 않고 `columns_only_in_after`·`columns_only_in_before` 로 보고한다(새 컬럼을 「전 행 NULL→값」으로 세면 숫자가 의미를 잃는다) |
+| 대표 사례 | 0 이 아닌 카운터마다 키 + 전/후 값 3건(`--max-examples`). 미설명이 남은 카운터는 **미설명 쪽을** 보여 준다 |
+
+판 기본값은 `--after` = MANIFEST `current_build`, `--before` = MANIFEST 순서상 그 직전이면서
+**디스크에 남은** 판이다(keep=3 GC 로 사라진 판은 후보가 아니고, 후보가 없으면 거절한다).
+
+**키 위생을 먼저 본다.** grain 에 중복이나 NULL 이 있으면 조인이 팬아웃해 아래 숫자가 전부 거짓이
+되므로, 컬럼 비교를 하지 않고 `rc 1` 로 끝낸다(EG3-P01 이 통과한 판이면 일어나지 않는다).
+
+### 12-2. 예상 변경 선언 `--expect`
+
+항목은 `{column, kind, where, note}` 이고 `kind` 는 위 5종이다. `where` 는 **after 행 컬럼** 위의
+SQL 술어이며(before 값은 `before_<컬럼>`, 행 삭제처럼 after 가 없는 카운터는 그쪽을 쓴다), 같은
+(컬럼, kind) 의 항목은 OR 로 묶인다. 술어에 걸린 변경은 `explained`, 나머지는 `unexplained` 다.
+변경 건수가 0 인 선언도 술어를 **실행해 본다** — 오타 난 `where` 가 조용히 지나가면 다음 판에서
+「설명된 줄 알았던」 변경이 게이트를 그냥 통과한다. JSON 이 정본이고(서버 venv 에 PyYAML 이 없을 수
+있다) PyYAML 이 있으면 같은 모양의 YAML 도 읽는다. 문서용 예시:
+[`equity_diff/expect_fa4_example.json`](equity_diff/expect_fa4_example.json)(§11-7 F-A1~F-A4).
+
+### 12-3. 판정 (`--gate`)
+
+| rc | 언제 |
+|---|---|
+| **2** | **미설명** 값→NULL > 0 · **미설명** 행 삭제 > 0 · **미설명** `available_date` 변경 > 0 중 하나라도 |
+| **1** | 사용법·데이터 오류 — 키 중복/NULL, 없는 판, 직전 판 없음, expect 술어 실행 불가 |
+| **0** | 그 밖 |
+
+세 축만 폐기형인 이유: 있던 값이 사라지는 것(값→NULL)과 PIT 표에서 행이 사라지는 것은 규칙 개선의
+산출이 아니라 회귀이고, 공개시점 축이 움직이면 look-ahead 판정 자체가 흔들린다. **미설명 값 변경 ·
+NULL→값은 기록형**이다 — 결측 복구·정의 교정이 정상적으로 만드는 변경이 대부분 이 두 갈래다.
+`--gate` 없이 돌리면 언제나 rc 0 이고 보고서만 낸다.
+
+### 12-4. 결정성 `--determinism <build_a> <build_b>`
+
+MANIFEST 의 **파티션 `content_hash` 만** 본다(데이터를 읽지 않는다). 같은 스냅샷으로 두 번 지은
+판의 해시가 같은지 보는 축이며, 규칙 판본을 올린 빌드에서 EG5a 가 `skip(rules_changed)` 로 비켜
+가는 자리를 메운다(§2-4). 하나라도 다르면 rc 2.
+
+### 12-5. 실행
+
+```bash
+# 로컬 (절단본·스크래치 루트)
+uv run --project backend python database/scripts/equity_diff.py \
+    --root <루트> --table fin_std --before <bid> --after <bid> \
+    --expect database/docs/equity_diff/expect_fa4_example.json --gate
+
+# 서버 (읽기 전용). `deploy.sh` 는 src/ 와 scripts/ 만 민다 — expect 파일은 scp 로 같이 올린다
+scp database/docs/equity_diff/expect_fa4_example.json \
+    kael-server:quant-ledger/logs/equity_diff_expect_fa4.json
+ssh kael-server 'cd quant-ledger && PYTHONPATH=src .venv/bin/python \
+  scripts/equity_diff.py --table fin_std \
+    --before m_20260926T110658_462262Z --after m_20260926T132656_683291Z \
+    --expect logs/equity_diff_expect_fa4.json --gate'
+ssh kael-server 'cd quant-ledger && PYTHONPATH=src .venv/bin/python \
+  scripts/equity_diff.py --table fin_std --determinism <build_a> <build_b>'
+```
+
+JSON 보고서는 `--out` 이 없으면 **루트의 부모 아래** `logs/equity_diff/<표>_<before>_<after>.json`
+이다(표준 서버 루트에서는 `data/logs/equity_diff/`). 마크다운 요약은 stdout 으로 나간다.

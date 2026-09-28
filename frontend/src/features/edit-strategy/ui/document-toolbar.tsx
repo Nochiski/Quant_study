@@ -19,6 +19,8 @@ type DocumentToolbarProps = {
   canRun: boolean;
   runBlockedReason?: string;
   runSettings?: ReactNode;
+  /** 거절이 가리킨 요청 본문의 칸(점 경로) → 실행 설정 칸 이름. 모르면 null. */
+  runFieldLabel?: (field: string) => string | null;
   decision: BacktestSourceDecision;
   runStatus: RunBacktestStatus;
 };
@@ -48,13 +50,23 @@ const decisionLabel = (decision: BacktestSourceDecision): string => {
 const RunFailure = ({
   detail,
   code,
+  fieldLabel,
 }: {
   detail: string | null;
   code: string | null;
+  fieldLabel: string | null;
 }) => (
   <div className="doc-toolbar__error" role="alert">
     {t("toolbar.run.failed")}:{" "}
-    {(code === null ? null : tOptional(`backtest.error.${code}`)) ??
+    {/* 칸 이름을 알면 `<code>.named` 문장에 넣는다. 번역이 없는 코드는 일반 문구로 떨어진다. */}
+    {(code === null
+      ? null
+      : fieldLabel === null
+        ? tOptional(`backtest.error.${code}`)
+        : (tOptional(`backtest.error.${code}.named`)?.replace(
+            "{field}",
+            fieldLabel,
+          ) ?? tOptional(`backtest.error.${code}`))) ??
       t("toolbar.run.failedGeneric")}
     {detail === null ? null : (
       <details className="doc-toolbar__error-reason">
@@ -82,6 +94,7 @@ export const DocumentToolbar = ({
   canRun,
   runBlockedReason,
   runSettings,
+  runFieldLabel,
   decision,
   runStatus,
 }: DocumentToolbarProps) => {
@@ -162,7 +175,15 @@ export const DocumentToolbar = ({
         ) : null}
       </div>
       {runStatus.kind === "failed" ? (
-        <RunFailure detail={runStatus.detail} code={runStatus.code} />
+        <RunFailure
+          detail={runStatus.detail}
+          code={runStatus.code}
+          fieldLabel={
+            runStatus.field === null || runFieldLabel === undefined
+              ? null
+              : runFieldLabel(runStatus.field)
+          }
+        />
       ) : null}
     </div>
   );

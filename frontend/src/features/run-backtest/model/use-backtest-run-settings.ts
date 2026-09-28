@@ -14,6 +14,7 @@ import {
   type RunEnvironmentValues,
 } from "./run-environment";
 import {
+  runFieldLabel,
   runSettingsBlockedReason,
   runSettingsProblems,
 } from "./run-settings-problems";
@@ -212,6 +213,10 @@ export const useBacktestRunSettings = (storageKey: string) => {
         ? t("backtest.settings.environment.schemaLoading")
         : (runSettingsBlockedReason(problems) ??
           t("backtest.settings.blocked"));
+  const fieldLabel = useCallback(
+    (path: string): string | null => runFieldLabel(environmentFields, path),
+    [environmentFields],
+  );
   /** 업그레이드 응답처럼 완성된 실행 설정으로 칸 전부를 바꾼다(사용자가 누른 뒤에만 부른다). */
   const applyEnvironment = useCallback(
     (next: RunEnvironment): void =>
@@ -235,6 +240,8 @@ export const useBacktestRunSettings = (storageKey: string) => {
     setEnvironmentValue,
     setEnvironmentIncomplete,
     applyEnvironment,
+    /** 서버 거절의 `field`(요청 본문 점 경로) → 패널 칸 이름. 모르면 null. */
+    runFieldLabel: fieldLabel,
     /** 검증을 통과한 실행 설정. 추적·실행 계획 요청이 같은 값을 싣는다. 없으면 null. */
     environment: environment.valid ? environment.environment : null,
     environmentErrors: environment.errors,

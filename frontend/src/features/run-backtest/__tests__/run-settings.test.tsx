@@ -32,6 +32,7 @@ import {
   buildBacktestRunOptions,
   DEFAULT_BACKTEST_RUN_SETTINGS,
 } from "../model/run-settings";
+import { runFieldLabel } from "../model/run-settings-problems";
 import {
   RUN_ENVIRONMENT_STORAGE_PREFIX,
   useBacktestRunSettings,
@@ -348,6 +349,19 @@ describe("run environment panel", () => {
     servedSchema = RUN_ENVIRONMENT_SCHEMA;
     server.use(schemaHandler);
     localStorage.clear();
+  });
+
+  // #260: 서버 거절의 `field`(본문 점 경로)를 패널 칸 이름으로 바꾼다. 모르는 경로는 이름을 지어내지 않는다.
+  it("names the panel field a coded start rejection points at", () => {
+    const fields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
+    expect(runFieldLabel(fields, "initial_cash")).toBe("초기 자본");
+    expect(runFieldLabel(fields, "annualization_days")).toBe("연환산 거래일");
+    expect(runFieldLabel(fields, "environment.fee_bps")).toBe("수수료");
+    expect(runFieldLabel(fields, "environment.end")).toBe("종료일");
+    expect(runFieldLabel(fields, "metric_windows.0.start")).toBe("OOS 시작일");
+    expect(runFieldLabel(fields, "core")).toBe("실행 core");
+    expect(runFieldLabel(fields, "strategy_source")).toBeNull();
+    expect(runFieldLabel(fields, "environment.unknown")).toBeNull();
   });
 
   // #266 리뷰 P3-1: 덜 친 날짜 칸은 값이 빈 문자열이다. 검증이 이를 "비었다"로만 보면 칸 아래는 "끝까지

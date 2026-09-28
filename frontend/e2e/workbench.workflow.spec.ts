@@ -689,7 +689,7 @@ test.describe("professional YAML workflow", () => {
     await backtest(workflow).click();
     const failure = workflow.getByRole("alert");
     await expect(failure).toContainText(
-      "백테스트 시작 실패: 서버가 실행 설정의 값 하나를 받지 않았습니다.",
+      "백테스트 시작 실패: 서버가 실행 설정의 초기 자본 칸 값을 받지 않았습니다.",
     );
     await expect(failure).not.toContainText("API request failed");
     await expect(failure).not.toContainText("status=422");

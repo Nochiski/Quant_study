@@ -1268,6 +1268,8 @@ const ko = {
   // `backtest-error-contract.test.ts` 가 `openapi.json` 과 대조한다(이슈 #260).
   "backtest.error.backtest.run.field_invalid":
     "서버가 실행 설정의 값 하나를 받지 않았습니다. 서버 사유의 field 칸을 실행 설정에서 고친 뒤 다시 시작하세요.",
+  "backtest.error.backtest.run.field_invalid.named":
+    "서버가 실행 설정의 {field} 칸 값을 받지 않았습니다. 그 칸을 고친 뒤 다시 시작하세요.",
   "backtest.error.backtest.run.invalid":
     "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
   "backtest.error.backtest.run.environment_required":
@@ -2965,6 +2967,8 @@ export const messages = {
     "toolbar.run.serverReason": "Server reason",
     "backtest.error.backtest.run.field_invalid":
       "The server rejected a run settings value. Fix the field named in the server reason, then start again.",
+    "backtest.error.backtest.run.field_invalid.named":
+      "The server rejected the {field} run setting. Fix that field, then start again.",
     "backtest.error.backtest.run.invalid":
       "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy.",
     "backtest.error.backtest.run.environment_required":

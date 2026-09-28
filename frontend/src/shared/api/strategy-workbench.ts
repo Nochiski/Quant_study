@@ -97,6 +97,8 @@ export class ApiRequestError extends Error {
   readonly detail: string | undefined;
   readonly latestRevision: number | null;
   readonly currentDraft: StrategyDraft | null;
+  /** 거절이 가리킨 요청 본문의 칸(점 경로, 예 `initial_cash`). detail 에 `field` 가 없으면 undefined. */
+  readonly field: string | undefined;
 
   constructor(
     context: string,
@@ -105,6 +107,7 @@ export class ApiRequestError extends Error {
     detail?: string,
     latestRevision: number | null = null,
     currentDraft: StrategyDraft | null = null,
+    field?: string,
   ) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
@@ -115,6 +118,7 @@ export class ApiRequestError extends Error {
     this.detail = detail;
     this.latestRevision = latestRevision;
     this.currentDraft = currentDraft;
+    this.field = field;
   }
 }
 
@@ -139,6 +143,17 @@ const errorField = (
 
 const errorCode = (error: unknown): string | undefined =>
   errorField(error, "code");
+
+/** detail 의 `field`(문자열일 때만). `errorField` 는 null 을 "null" 문자열로 바꾸므로 따로 읽는다. */
+const detailFieldPath = (error: unknown): string | undefined => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return undefined;
+  const detail = (error as { detail: unknown }).detail;
+  if (typeof detail !== "object" || detail === null || !("field" in detail))
+    return undefined;
+  const value = (detail as { field: unknown }).field;
+  return typeof value === "string" ? value : undefined;
+};
 
 /**
  * 저장·revise·upgrade의 `strategy_document.invalid` detail에는 `message`가 없다 — 첫 error 진단(pointer + 문구)을
@@ -286,6 +301,7 @@ const requestError = (
       requestValidationSummary(response.error),
     conflict?.latest_revision ?? null,
     draftConflict?.current ?? null,
+    detailFieldPath(response.error),
   );
 };
 

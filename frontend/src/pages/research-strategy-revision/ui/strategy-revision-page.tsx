@@ -407,6 +407,7 @@ export const StrategyRevisionPage = () => {
                 disabled={backtest.status.kind === "starting"}
               />
             }
+            runFieldLabel={runSettings.runFieldLabel}
             decision={backtest.decision}
             runStatus={backtest.status}
           />

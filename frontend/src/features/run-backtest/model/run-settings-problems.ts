@@ -69,6 +69,35 @@ type RunOptionError = Exclude<BacktestRunSettingsError, "environment">;
 export const runOptionErrorName = (error: RunOptionError): string =>
   t(`backtest.settings.problem.name.${error}`);
 
+/**
+ * 서버 거절이 가리킨 요청 본문의 칸(`backtest.run.field_invalid` 의 `field`, 점 경로)을 패널 칸 이름으로
+ * 바꾼다. 실행 설정 칸은 `environment.<이름>`, 실행 옵션은 `BacktestRunSpec` 필드 이름이다. 모르는 경로면
+ * 이름을 지어내지 않고 null 을 준다.
+ */
+export const runFieldLabel = (
+  fields: readonly RunEnvironmentField[],
+  path: string,
+): string | null => {
+  const [head, next] = path.split(".");
+  if (head === "environment") {
+    const field = fields.find((candidate) => candidate.name === next);
+    return field === undefined ? null : runEnvironmentName(field);
+  }
+  switch (head) {
+    case "initial_cash":
+    case "annualization_days":
+      return runOptionErrorName(head);
+    case "metric_windows":
+      return runOptionErrorName("oos_out_of_range");
+    case "core":
+      return t("backtest.settings.core");
+    case "benchmark_security_id":
+      return t("backtest.settings.benchmark");
+    default:
+      return null;
+  }
+};
+
 /** 실행 옵션 칸의 오류 한 줄: "초기 자본: 0보다 큰 숫자를 입력하세요." 실행 환경 오류는 이유만. */
 export const runOptionErrorMessage = (
   error: BacktestRunSettingsError,

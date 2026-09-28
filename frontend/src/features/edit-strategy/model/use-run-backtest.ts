@@ -23,7 +23,13 @@ export type RunBacktestStatus =
    * `code`는 backend 거절 detail의 코드(예: `backtest.strategy.requires_upgrade`), 없으면 null.
    * `detail`은 접힌 진단 상세에 둘 서버 사유다. 화면 본문은 `code`의 번역이 맡는다(이슈 #260).
    */
-  | { kind: "failed"; detail: string | null; code: string | null };
+  | {
+      kind: "failed";
+      detail: string | null;
+      code: string | null;
+      /** 거절이 가리킨 요청 본문의 칸(점 경로). 없으면 null. */
+      field: string | null;
+    };
 
 export type BacktestRunOptions = Omit<
   BacktestRunSpec,
@@ -144,6 +150,8 @@ export const useRunBacktest = (
                   : String(error),
             code:
               error instanceof ApiRequestError ? (error.code ?? null) : null,
+            field:
+              error instanceof ApiRequestError ? (error.field ?? null) : null,
           },
         });
       }

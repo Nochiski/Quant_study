@@ -2843,8 +2843,9 @@ describe("backtest from the editor (P3-05)", () => {
 
     await waitFor(() => expect(started).toHaveLength(1));
     const alert = await screen.findByRole("alert");
+    // 거절이 가리킨 칸(`field`)을 실행 설정의 칸 이름으로 말한다.
     expect(alert).toHaveTextContent(
-      "백테스트 시작 실패: 서버가 실행 설정의 값 하나를 받지 않았습니다.",
+      "백테스트 시작 실패: 서버가 실행 설정의 초기 자본 칸 값을 받지 않았습니다. 그 칸을 고친 뒤 다시 시작하세요.",
     );
     expect(alert).not.toHaveTextContent("API request failed");
     expect(alert).not.toHaveTextContent("status=422");
@@ -2857,6 +2858,36 @@ describe("backtest from the editor (P3-05)", () => {
       "/research/strategies/s1/revisions/2",
     );
   });
+
+  it("names the rejected run environment field on the new strategy screen too", async () => {
+    server.use(
+      ...graphHandlers(),
+      http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+        started.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.field_invalid",
+              field: "environment.fee_bps",
+              message:
+                "Value error, run environment value is out of range — field=environment.fee_bps",
+            },
+          },
+          { status: 422 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const run = await screen.findByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "백테스트 시작 실패: 서버가 실행 설정의 수수료 칸 값을 받지 않았습니다.",
+    );
+  }, 15_000);
 
   it("falls back to a general sentence when the rejection has no translation", async () => {
     server.use(

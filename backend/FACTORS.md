@@ -1,10 +1,13 @@
 # Factor Registry v1
 
 이 문서는 `domain.factor`의 `FactorRegistry`가 공개하는 50개 안정 ID와 Equity field 요구사항을
-사람이 검토할 수 있게 고정한 카탈로그입니다. 실행 의미의 SoT는 코드의 versioned registry이며,
-문서는 테스트로 registry와 드리프트하지 않는지 확인합니다.
+사람이 검토할 수 있게 고정한 카탈로그입니다. 실행 의미의 SoT는 코드의 versioned registry입니다.
+테스트(`tests/domain/test_factor_research.py`)는 registry의 모든 factor ID가 이 문서에 있는지와
+`implemented` 행이 7개인지만 확인합니다. 범주·선호·필드·최소 이력 열은 registry를 고칠 때 같은
+PR에서 사람이 맞춥니다.
 
-- 상태 `implemented`: M3 mock Equity adapter에서 즉시 preview 가능
+- 상태 `implemented`: 기본 graph가 registry에 있다. 편집기는 이 팩터만 예시 조각으로 넣어 주며,
+  넣으면 graph가 전략 문서에 복사된다
 - 상태 `catalog_only`: ID와 데이터 요구사항은 예약됐지만 기본 실행 graph는 후속 구현 대상
 - 모든 입력은 `available_date <= as_of`인 PIT 관측값만 사용
 - 가격 변화(수익률·모멘텀·이평·변동성·낙폭·고점 거리·베타)는 수정주가 `price.adj_close`(전방
@@ -104,8 +107,8 @@ validator/compiler/evaluator를 통과하며 UI(YAML source editor, 그리고 �
 
 | Category | Executable default | Core operation |
 |---|---|---|
-| price | `price.momentum_12_1` | 252-session momentum, 21-session skip, cross-sectional rank |
-| financial | `financial.book_to_market` | PIT book equity / lagged market cap, rank |
+| price | `price.momentum_12_1` | 수정주가 `price.adj_close`의 252-session momentum, 21-session skip, cross-sectional rank |
+| financial | `financial.book_to_market` | PIT book equity / market cap(공개 랙은 원장 `dataset_profile`), rank |
 | consensus | `consensus.forward_eps_growth` | rolling forward EPS growth |
 | flow | `flow.foreign_net_buy_20d` | 20-session foreign net-buy mean |
 | short | `short.short_balance_ratio` | short balance ratio |

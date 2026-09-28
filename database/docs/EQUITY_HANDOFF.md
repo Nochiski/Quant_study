@@ -375,7 +375,7 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ## 6. `RULES_VERSION` 상향 규칙
 
-`database/src/equity/model.py:25` 의 `RULES_VERSION` 은 `BuildRecord.rules_version` 에 실린다.
+`database/src/equity/model.py` 의 `RULES_VERSION`(2026-09-28 현재 e1.18.0)은 `BuildRecord.rules_version` 에 실린다.
 
 - **산출을 바꾸는 규칙 변경이면 반드시 올린다.** `sql/*.sql`·`rules_*.py` 의 산출식·
   선언 컬럼·`field_profiles`·게이트 술어가 대상이다.
@@ -460,6 +460,10 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 ---
 
 ## 8-2. 서버 반영 이력 — 2026-09-07 (e1.6.0 → e1.13.0)
+
+> **현행 안내(2026-09-28)**: 8-2~8-5 의 서버 반영 이력은 2026-09-09(e1.14.0, P0 정렬)에서 멈췄다. 그 뒤
+> 판본 e1.15.0~e1.18.0 의 변경 내용은 `database/src/equity/model.py` 의 `RULES_VERSION` 위 판본별 주석에,
+> 운영 상태는 `database/README.md` 상태 표에 있다.
 
 이 날 서버 `data/equity/` 가 크게 움직였다. 배포 전 코드 백업
 `/tmp/equity_backup_e160_20260907T014756Z`, baseline 백업 `baseline.json.bak_s05_ratio`·`.bak_s17_tol`.
@@ -620,7 +624,8 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
   **어댑터가 `dataset_profile` 을 읽어 필드별 랙을 적용하는 형태로 한 번에** 교체해야 한다
   (한 필드군만 고치면 어댑터 안에서 규약이 갈린다).
 - **`consensus.*` 의 `target_period` 선택**이 어댑터 규칙(FY1)이다 — 레지스트리 라벨
-  "12개월 선행 EPS" 와 값의 뜻이 다르다.
+  "12개월 선행 EPS" 와 값의 뜻이 다르다. *(라벨은 해소 — #207·#221 로 duckdb·mock 어댑터 라벨이 모두
+  「선행 EPS(FY1 컨센서스 평균)」이다. FY1 선택 규칙은 그대로다.)*
 
 ### 조정가 축 (S23 이 남긴 것)
 - **`n_unadjusted_events` 의 소비 규약이 없다** — equity 는 수를 싣지만 "몇 이상이면 거른다" 는
@@ -707,6 +712,12 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 
 ### ① 전 종목 유니버스(`krx.common-stock`)로는 run 이 죽는다 — `krx.liquid` 를 쓸 것
 
+> **갱신(2026-09-28)**: 워크벤치 백테스트 경로에서는 이제 run 이 죽지 않는다. 워크벤치 duckdb 어댑터의
+> `load_backtest_dataset` 이 창 안에서 사건 세션이나 그 뒤에 거래된 bar 가 없는 기업 행동을 빼고
+> `equity.corporate_action_without_bar_dropped` 경고로 남긴다(`7f9c7e15`, 포지션은 마지막 체결가에
+> 동결된다). 커널 어댑터 `backtest_engine.adapters.equity_duckdb` 에는 같은 거르기가 없어, 커널을 그
+> 어댑터로 직접 돌리는 경로는 확인하지 않았다. 아래는 당시 서술이다.
+
 정지된 뒤 데이터 끝까지 재개하지 않은 종목에 감자·병합이 걸리면 커널이
 `CorporateActionWithoutBar` 를 던지고 **run 전체가 중단된다**(부분 결과도 없다).
 서버 실측 26건 · 25종목이고 전부 `status='suspended'` 다. 자세한 것은 `TECH_DEBT.md` §10.
@@ -732,6 +743,8 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 어댑터가 공개시차를 자기 상수(전부 0세션)로 우기던 것을 고쳐 `dataset_profile` 의 필드별 값을
 읽는다(커밋 `8014655`). 대장이 정한 랙은 **72필드 중 65가 1세션**이고 0세션은 장중 가격 축
 7개뿐이다. 즉 어댑터가 내던 30필드 중 **25개가 한 세션 이르게 열려 있었다** — 확정 look-ahead 였다.
+*(당시 숫자다. 2026-09-19 DEFECT-E01 정정으로 `credit.margin_balance` 는 3세션이 됐고 — 아래 표의
+`credit.*` 행 중 신용잔고는 원장 날짜 세 세션 뒤다 — 대장은 2026-09-28 현재 83행이다.)*
 
 바뀐 것:
 

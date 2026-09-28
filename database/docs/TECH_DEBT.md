@@ -6,7 +6,7 @@
 > |---|---|---|
 > | 2 | 절단본이 저장소에 없다 | **완료** `54776b6` — 403 파일 추적 + CI 단계 추가 |
 > | 4 | 어댑터 공개시차 하드코딩 | **완료** `8014655` — `dataset_profile` 을 읽는다 |
-> | 10 | 정지 종목 감자가 run 을 죽인다 | **equity 몫 완료** `ae0b549` — `no_bar_after_apply` 표기. 정산 정책은 커널 몫 |
+> | 10 | 정지 종목 감자가 run 을 죽인다 | **equity 몫 완료** `ae0b549` — `no_bar_after_apply` 표기. 정산 정책은 커널 몫(워크벤치 어댑터는 `7f9c7e15` 부터 그런 사건을 빼고 경고한다, §10 머리) |
 > | 1·3·5·6·7·8·9 | | **미완** — 우선순위는 아래 표 |
 >
 > **2026-09-09 조사에서 나온 등재 전 후보**(상세는 `reviews/2026-09-09-daily-findings-*.md`, 처리 순서는 `plans/2026-09-09-daily-incremental.md` §11): stage 스냅샷 GC 없음(37 GB) · stage G5 `src_mtime` 비교 미구현 · equity EG13·EG14·EG19 미구현 · `stg_doc_parse_log` `t_*_ms` 로 content_hash 비결정 · KIS `kis_credit_balance` 중복 1,084,443행(12.1%) · equity `_pinned` GC 없음(≈1 GB/일). **§4 는 문서가 낡았다** — 코드는 `8014655` 로 해결됐고 남은 위험은 `dataset_profile` 부재 시 랙 0 폴백뿐(플랜 Task 5.4).
@@ -741,6 +741,15 @@ DuckDB 가 공통 부분식을 항상 재사용해 주지는 않는다.
 ---
 
 ## 10. 정지된 채 재개하지 않는 종목의 기업행위가 **백테스트 run 전체를 죽인다** (전 종목 실측에서 처음 드러남)
+
+> **갱신(2026-09-28)**: 아래 (다)는 `ae0b549`(e1.7.0 `adj_factor.no_bar_after_apply`)로 끝났다. 워크벤치
+> 백테스트 경로는 커널 정책을 기다리지 않고 `7f9c7e15` 에서 우회했다 — 워크벤치 duckdb 어댑터의
+> `load_backtest_dataset` 이 창 안에서 사건 세션이나 그 뒤에 거래된 bar 가 없는 기업 행동을 빼고
+> `equity.corporate_action_without_bar_dropped` 경고로 남긴다. 그 포지션은 마지막 체결가에 동결되고,
+> 아래 「왜 그냥 사건을 버리면 된다가 답이 아닌가」의 대가(수량이 사건 전 그대로 남는다)는 경고로 드러낸
+> 채 받아들였다. 커널 쪽 (가)·(나)는 없다 — `engine/loop.py` 의 `_settlement_session` 은 여전히
+> `CorporateActionWithoutBar` 를 던지고, 커널 어댑터 `backtest_engine.adapters.equity_duckdb` 에는 같은
+> 거르기가 없다. 아래 본문은 2026-09-06 당시 서술이다.
 
 ### 무엇이 문제인가
 

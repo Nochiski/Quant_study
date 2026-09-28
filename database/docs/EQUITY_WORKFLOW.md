@@ -22,9 +22,9 @@ v1.1 은 "엔진에 재무·컨센서스 포트가 없다" 고 결론지었으�
 | `BacktestDataPort` | `…/backtest_data.py` | 백테스트 데이터셋 |
 | 커널 `BarSource`·`UniverseSource`·`CorporateActionSource` | `backend/src/backtest_engine/ports/` | 원주가 Bar · span → `Membership` · `CorporateActionEvent(ts=효력일)` |
 
-현재 조립은 `bootstrap/_container.py::build_container(equity_adapter="mock")` 이고 다른 값은 거절된다. 계약 테스트 `backend/tests/contract/test_raw_observation_port.py` 는 `ADAPTERS=[mock]` 로 매개변수화돼 있다. **equity 층의 완료 = `equity_duckdb` 어댑터가 이 `ADAPTERS` 에 들어가 전량 green 이고 `equity_adapter="duckdb"` 로 컨테이너가 뜨는 것**이다.
+현재 조립은 `bootstrap/_container.py::build_container(equity_adapter="mock")` 이고 다른 값은 거절된다. 계약 테스트 `backend/tests/contract/test_raw_observation_port.py` 는 `ADAPTERS=[mock]` 로 매개변수화돼 있다. **equity 층의 완료 = `equity_duckdb` 어댑터가 이 `ADAPTERS` 에 들어가 전량 green 이고 `equity_adapter="duckdb"` 로 컨테이너가 뜨는 것**이다. *(2026-09-05 당시 서술 — 지금은 `build_container` 가 `equity_adapter="duckdb"`(S21)를 받고 계약 테스트 `ADAPTERS` 에 `equity_duckdb` 가 들어 있다. 2026-09-28 확인)*
 
-팩터 재료의 형태는 `backend/FACTORS.md`(레지스트리 50 팩터)가 요구하는 **field_id 42종**이며, equity 컬럼과의 대응·판정은 `EQUITY_FIELD_MAP.md` 에 있다(**지원 16 · 부분 16 · 미지원 9 · 미확인 1** — 2026-09-06 S19 판정 반영, FIELD_MAP §3).
+팩터 재료의 형태는 `backend/FACTORS.md`(레지스트리 50 팩터)가 요구하는 **field_id 42종**이며, equity 컬럼과의 대응·판정은 `EQUITY_FIELD_MAP.md` 에 있다(**지원 16 · 부분 16 · 미지원 9 · 미확인 1** — 2026-09-06 S19 판정 반영, FIELD_MAP §3. 이 집계는 그 뒤 판정 변경으로 낡았다 — 현재 판정은 FIELD_MAP §2 표를 직접 본다).
 
 ### 0-2. 세 층의 책임
 
@@ -182,7 +182,7 @@ S00·S01·S02·S03·S04·S05(축소: split·bonus·capred 만)·S06·S03B·S07 +
 
 | 위험 | 징후 | 완화 | 롤백 |
 |---|---|---|---|
-| `price.close` 조정 여부 충돌 | 분할 구간 모멘텀이 게이트를 전부 통과한 채 틀림 | `price.adj_close` 필드 분리 + FX 삼성전자 2018-05-04 + EG8 거래량 항 · 레지스트리 개정(결정 6) | 어댑터 필드 매핑만 교체 |
+| `price.close` 조정 여부 충돌 | 분할 구간 모멘텀이 게이트를 전부 통과한 채 틀림 | `price.adj_close` 필드 분리 + FX 삼성전자 2018-05-04 + EG8 거래량 항 · 레지스트리 개정(결정 6 — #218 로 끝남, 가격 변화 팩터는 `price.adj_close`) | 어댑터 필드 매핑만 교체 |
 | 문서층 코드 미병합(`stage/doc-p1`) | S11 입력 재현 불가 | 착수 조건 = main 병합 · 데이터는 `_pinned/` 고정 | 핀 유지 |
 | 정정 모집단 술어 3종 불일치 | E-G6a/E-G7 임계가 장식 | 사다리 5단 baseline 선등재 | 임계 skip |
 | 서버 RAM 15GB | 4단계·격자 빌드 스왑(09-05 문서층 사고 재발) | 연도 파티션 루프 · threads 3 · `temp_directory` · 큰 집계 스트리밍 | tmp 폐기, MANIFEST 불변 |

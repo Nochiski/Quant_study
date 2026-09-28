@@ -12,14 +12,7 @@ from fastapi.testclient import TestClient
 from strategy_workbench.bootstrap.facade.http import build_http_app
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
-GOLDEN_SPEC_HASH = "22f95ea804a57f6bb8f7134127c2feb7d88e0a5a0bbc52481977c75cf0de5197"
-# 골든의 12개월 모멘텀은 원주가 `price.close` 를 읽는다. mock 어댑터가 그 필드를 원주가로 표시하므로
-# compile 은 warning 하나를 낸다(BACKLOG-018). 막지 않는 알림이라 spec·hash 는 그대로다.
-RAW_PRICE_WARNING = "strategy.field.unadjusted_price"
-
-
-def _without_raw_price_warning(diagnostics: list[dict]) -> list[dict]:
-    return [item for item in diagnostics if item["code"] != RAW_PRICE_WARNING]
+GOLDEN_SPEC_HASH = "69064ce14c47ac2c94ad8a1620da4d4326313f1da4aa42b54d15643e5111ca44"
 
 
 def _source(name: str) -> str:
@@ -40,10 +33,10 @@ def test_yaml_and_json_sources_compile_to_the_same_backend_hash() -> None:
     yaml_result = _compile(client, _source("quality_momentum.yaml"))
     json_result = _compile(client, _source("quality_momentum.json"), format="json")
 
-    assert [item["code"] for item in yaml_result["diagnostics"]] == [RAW_PRICE_WARNING]
-    assert [(item["code"], item["pointer"]) for item in json_result["diagnostics"]] == [
-        (item["code"], item["pointer"]) for item in yaml_result["diagnostics"]
-    ]
+    # 골든의 모멘텀은 수정주가 `price.adj_close` 를 읽는다 — 정상 예시는 경고도 없이 통과해야 한다
+    # (BACKLOG-018 후속, 리뷰 #232 DEFECT-232-05).
+    assert yaml_result["diagnostics"] == []
+    assert json_result["diagnostics"] == []
     assert yaml_result["spec_hash"] == GOLDEN_SPEC_HASH == json_result["spec_hash"]
     assert yaml_result["source_hash"] != json_result["source_hash"]
     assert yaml_result["schema_version"] == "1.2"
@@ -66,7 +59,7 @@ def test_semantic_error_points_at_the_exact_yaml_scalar_and_withholds_spec() -> 
 
     assert result["spec"] is None and result["spec_hash"] is None
     assert result["canonical_json"] is None
-    (diagnostic,) = _without_raw_price_warning(result["diagnostics"])
+    (diagnostic,) = result["diagnostics"]
     assert diagnostic["code"] == "strategy.risk.max_name_weight"
     assert diagnostic["kind"] == "semantic"
     assert diagnostic["severity"] == "error"
@@ -167,8 +160,8 @@ def test_every_semantic_issue_is_reported_together_with_its_own_pointer() -> Non
     assert by_code["strategy.parameter.bounds"]["pointer"] == "/parameters/0"
     bounds = by_code["strategy.parameter.bounds"]["range"]
     assert source.splitlines()[bounds["start"]["line"]].lstrip().startswith("- parameter_id")
-    assert all(d["severity"] == "error" for d in _without_raw_price_warning(result["diagnostics"]))
-    assert all(d["node_id"] is None for d in _without_raw_price_warning(result["diagnostics"]))
+    assert all(d["severity"] == "error" for d in result["diagnostics"])
+    assert all(d["node_id"] is None for d in result["diagnostics"])
 
 
 def test_factor_graph_issue_names_the_node_and_points_into_the_graph() -> None:
@@ -211,7 +204,7 @@ def test_json_format_diagnostics_carry_json_ranges() -> None:
 
     result = _compile(client, source, format="json")
 
-    (diagnostic,) = _without_raw_price_warning(result["diagnostics"])
+    (diagnostic,) = result["diagnostics"]
     assert diagnostic["code"] == "strategy.risk.max_name_weight"
     start, end = diagnostic["range"]["start"], diagnostic["range"]["end"]
     assert source[start["offset"] : end["offset"]] == "1.5"

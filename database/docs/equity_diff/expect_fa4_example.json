@@ -1,0 +1,74 @@
+{
+ "_note": [
+  "scripts/equity_diff.py --expect 의 문서용 예시 — fin_std 를 e1.18.0(m_20260926T110658_462262Z)",
+  "에서 e1.20.0(m_20260926T132656_683291Z) 로 올린 판(DQ-8 후속 F-A1~F-A4)에서 **예상한** 변경만",
+  "적는다. 여기 안 적힌 변경은 unexplained 로 남고, 그중 값→NULL · 행 삭제 · available_date",
+  "변경이 있으면 --gate 가 rc 2 로 떨어진다.",
+  "where 는 **after 행** 컬럼 위의 SQL 술어다(before 값은 before_<컬럼> 으로 본다).",
+  "capex_basis 어휘는 그 판 기준(standard · ppe_parts · ppe_incl_invprop · none_in_cf ·",
+  "unavailable)이다 — 어휘가 바뀌면 이 파일도 같이 고친다.",
+  "YAML 로 써도 되지만(PyYAML 이 있을 때) 서버 venv 에는 없을 수 있어 예시는 JSON 이다."
+ ],
+ "expect": [
+  {
+   "column": "capex_ytd",
+   "kind": "null_to_value",
+   "where": "capex_basis IN ('ppe_parts', 'ppe_incl_invprop', 'none_in_cf')",
+   "note": "F-A1·F-A3·F-A4 — 자산별 합(ppe_parts) · 합산 줄(ppe_incl_invprop) · 현금흐름표는 있는데 취득 줄이 없는 0 규칙(none_in_cf)이 NULL 이던 capex 를 채운다"
+  },
+  {
+   "column": "capex_q",
+   "kind": "null_to_value",
+   "where": "capex_basis IN ('ppe_parts', 'ppe_incl_invprop', 'none_in_cf')",
+   "note": "분기 차분은 ytd 를 따라간다 — 같은 그룹에서만 새로 채워져야 한다"
+  },
+  {
+   "column": "capex_basis",
+   "kind": "value_changed",
+   "where": "capex_basis IN ('ppe_parts', 'ppe_incl_invprop', 'none_in_cf')",
+   "note": "basis 자체의 전환(unavailable → 새 어휘, ppe_parts → ppe_incl_invprop). standard 로 바뀌는 행은 예상 밖이므로 일부러 안 적는다"
+  },
+  {
+   "column": "capex_ytd",
+   "kind": "value_changed",
+   "where": "capex_basis = 'ppe_parts'",
+   "note": "F-A4 — agg sum → sum_abs(부호 섞인 회사의 상계 제거) + 이름 48종 확장으로 자산별 합이 커진다. standard 판 capex 는 이 창에서 한 건도 바뀌면 안 된다"
+  },
+  {
+   "column": "capex_q",
+   "kind": "value_changed",
+   "where": "capex_basis = 'ppe_parts'",
+   "note": "위 합의 분기 차분"
+  },
+  {
+   "column": "cf_operating_ytd",
+   "kind": "null_to_value",
+   "note": "F-A2 — 계정명 공백 정규화로 '영업활동으로 인한 순현금흐름' 류가 새로 걸린다(where 없음 = 이 컬럼의 NULL→값 전부가 예상 안)"
+  },
+  {
+   "column": "cf_investing_ytd",
+   "kind": "null_to_value",
+   "note": "F-A2 공백 정규화"
+  },
+  {
+   "column": "cf_financing_ytd",
+   "kind": "null_to_value",
+   "note": "F-A2 공백 정규화"
+  },
+  {
+   "column": "cf_operating_q",
+   "kind": "null_to_value",
+   "note": "F-A2 공백 정규화 — 분기 차분"
+  },
+  {
+   "column": "cf_investing_q",
+   "kind": "null_to_value",
+   "note": "F-A2 공백 정규화 — 분기 차분"
+  },
+  {
+   "column": "cf_financing_q",
+   "kind": "null_to_value",
+   "note": "F-A2 공백 정규화 — 분기 차분"
+  }
+ ]
+}

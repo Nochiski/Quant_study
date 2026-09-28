@@ -1,5 +1,10 @@
 # ADR: Frontend router와 route composition (P0-04)
 
+> **현행 안내(2026-09-28)**: D2 route tree는 P2-02 당시 모양이다. 이후 전략 목록(`/research/strategies`)·
+> 백테스트 목록(`/research/backtests`)·설정(`/settings`) route가 늘었고, 현재 tree의 정본은
+> `frontend/src/app/router/routes.tsx`다. D2의 flag 판정·query 설명이 코드와 다르면 코드를 따른다.
+> 아래는 2026-09-04 결정 기록이다.
+
 > 작성: 2026-09-04
 >
 > 상태: Accepted

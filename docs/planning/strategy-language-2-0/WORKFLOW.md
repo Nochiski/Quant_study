@@ -791,7 +791,9 @@ PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`. P3-03 에 남는 
   `RAW_PRICE_WARNING`·`_without_raw_price_warning`, `test_strategy_document_upgrade_http_api.py` 의 warning
   기대)를 걷고, 골든 `spec_hash` 리터럴·AI 시나리오 golden·e2e 기대값을 재생성한다. 1.0·1.1 보존 fixture 는
   옛 문서라 원주가 그대로 둔다(업그레이드는 필드를 바꾸지 않는다). — **담당: 골든 이관·우회 필터 제거·재생성은
-  선행 코드 PR `impl-prep`, 매뉴얼 1절 샘플은 매뉴얼 PR**(골든 이관 → 매뉴얼 샘플 → 재촬영 순서).
+  선행 코드 PR `impl-prep`, 매뉴얼 1절 샘플은 매뉴얼 PR**(골든 이관 → 매뉴얼 샘플 → 재촬영 순서). 실제로는
+  선행 코드 PR #259 가 매뉴얼 1절 샘플까지 함께 옮겼고(`test_manual_sample_compiles` 가 같은 PR 에서 돈다),
+  매뉴얼 PR 은 그 뒤 재촬영한다.
 - BACKLOG-002: 매뉴얼 스크린샷 14장을 `npm run docs:capture`로 1.2 한글 화면으로 다시 찍고, 8절에
   "초안 복구·서버 초안 적용 직후 되돌리기는 복구 이전 텍스트로 돌아간다"는 안내를 넣는다. — **담당: 매뉴얼
   PR**(선행 코드 PR 머지 뒤).

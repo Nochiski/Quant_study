@@ -20,7 +20,7 @@
           {
             "kind": "field",
             "node_id": "close",
-            "field_id": "price.close"
+            "field_id": "price.adj_close"
           },
           {
             "kind": "time_series",

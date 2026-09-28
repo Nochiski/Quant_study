@@ -26,6 +26,7 @@
 | field_id | equity 산출 | 판정 | 비고 |
 |---|---|---|---|
 | `price.close` | `price_daily.close`(원주가) | **지원**(2026-09-06 판정 변경) | 판정 근거: 위 충돌(registry `price.momentum_12_1` 이 조정가를 전제)의 **해소안 중 equity 몫이 구현됐다** — `price.adj_close`(`v_adj_price_fwd`, 전방 조정, 결정 6 · S21 후속 09-05)가 별도 필드로 실재하고 `price.close` 는 원주가로 뜻이 닫혔다. 남은 것은 레지스트리 가격 그래프가 `price.close` 를 요구하는 **엔진 저장소 이슈 #64** 이고 equity 필드의 미결 조건이 아니다(S19 `dataset_profile.requires_confirmation=false`). 소비자 경고는 프로파일 행의 `evidence` 가 나른다 |
+| `price.adj_close` | `price_adj_daily.adj_close`(전방 조정, S23) | 지원 | **2026-09-28 §2 어휘로 옮겼다** — #218 이 레지스트리의 가격 변화 팩터(모멘텀·반전·변동성·베타·낙폭·고점 거리·야간 수익률·Amihud)를 이 필드로 옮겨 레지스트리 요구 필드가 됐는데 이 표를 두고 가 `check_field_map.py` 가 rc=1 이었다(문서 감사 결정 5). 원장 선언도 같이 `field_scope='field_map'` 으로 바꿨다(rules e1.19.0 · FX-6-006). 조정 규칙·원천은 §1 「가격 조정」 행이 정본이고, 아래 §3 의 「내부 스코프」 서술은 그 전 기록이다 |
 | `price.open` | `price_daily.open` | **부분** | NULL 유지 정책 · `Bar.open` 은 필수·>0 (GAP-14) |
 | `price.volume` | `price_daily.volume_shr` / `v_adj_volume`·`v_adj_volume_fwd` | 지원 | 조정 여부 명시 필요. **어댑터가 내는 값은 원거래량**이고, 조정 거래량은 `price_adj_daily.adj_volume_shr`(S23) 컬럼으로 parquet 소비자에게만 열려 있다 — 별도 field_id 를 만들지 않았다(FACTORS 정본 54 의 M03 은 원거래량을 쓴다) |
 | `price.market_cap` | `price_daily.mktcap_krw` / `v_firm_mktcap` | 지원 | **랙 1세션 확정(S19, 2026-09-06)** — 값이 `close × shares_out` 이고 `shares_out` 은 `stg_listing_daily.list_shrs`(stage `lag_known=false` = 공표 시각 미상)에서 온다. STAGE_HANDOFF §2 「lag_known=false 는 lag 0 을 적용하면 안 된다」 를 그대로 따랐다. **S21 축소 어댑터의 본문 상수 `PRICE_LAG_SESSIONS=0` 은 본판에서 이 값으로 교체**된다(DESIGN §11 ②). `price.shares_outstanding` 도 같은 이유로 1세션 |
@@ -115,7 +116,7 @@
 - **S11 이 낸 내부 스코프 1**: `event.disclosure_delay_days`(`disclosure_version.delay_days`) — FACTORS §7 의 파생 팩터 "공시 지연" 재료다(구 GAP-05 「산출이 26테이블에 없다」를 4A 가 닫았다). 음수(기한 전 제출)가 정상값이라 부호 규약을 소비자가 정해야 해서 `requires_confirmation=true`.
 - **S03 이 낸 내부 스코프 5**(DESIGN §4-7 EQD-07): `universe.status`·`universe.admin_state`·`universe.delist_signal`·`universe.mktcap`·`universe.adv20`. 전부 랙 1세션 — 값 원천이 `stg_listing_daily`·`stg_master_daily`·`stg_disclosure`(stage `lag_known=false`)다. `universe.admin_state` 만 `requires_confirmation=true`(GAP-06 KOSPI 비대칭)이고 그것이 FACTORS E07 을 막는다.
 
-- **§2 표 42 중 `dataset_profile`(S19) 프로파일 행을 갖는 것 = 30**(2026-09-06 S19-2 재계수, 절단본·서버 공통 — 행수의 정본은 문서가 아니라 `EquityTable.field_profiles` 다). S19 1차의 24 에 격자 3테이블의 **6**(`flow.foreign_net_buy`·`flow.institution_net_buy`·`flow.retail_net_buy`·`short.short_sale_value`·`short.borrowed_quantity`·`credit.margin_balance`)이 더해졌다. `dataset_profile` 전체는 66 → **72행**(field_map 스코프 30 + equity 내부 스코프 42 — S19-2 당시 수치다. 2026-09-28 현재는 83행 = field_map 35 + 내부 48 이고, 정본은 `tests/test_equity_s19_profile.py` 의 `N_FIELDS` 다). 어댑터 `list_fields()` 30(= FIELD_MAP 29 + 내부 `price.adj_close`)과 **집합이 정확히 같다** — 어댑터가 못 내는 필드를 선언하지 않는 것이 S19-2 의 규율이다.
+- **§2 표 42 중 `dataset_profile`(S19) 프로파일 행을 갖는 것 = 30**(2026-09-06 S19-2 재계수, 절단본·서버 공통 — 행수의 정본은 문서가 아니라 `EquityTable.field_profiles` 다). S19 1차의 24 에 격자 3테이블의 **6**(`flow.foreign_net_buy`·`flow.institution_net_buy`·`flow.retail_net_buy`·`short.short_sale_value`·`short.borrowed_quantity`·`credit.margin_balance`)이 더해졌다. `dataset_profile` 전체는 66 → **72행**(field_map 스코프 30 + equity 내부 스코프 42 — S19-2 당시 수치다. 2026-09-28 현재는 83행 = field_map 36 + 내부 47 이고(`price.adj_close` 가 #259 로 field_map 스코프가 됐다), 정본은 `tests/test_equity_s19_profile.py` 의 `N_FIELDS` 다). 어댑터 `list_fields()` 30(= FIELD_MAP 29 + 내부 `price.adj_close`)과 **집합이 정확히 같다** — 어댑터가 못 내는 필드를 선언하지 않는 것이 S19-2 의 규율이다.
 - **프로파일 행이 없는 12** = 미지원 10(`benchmark.close`·`flow.block_buy`·`flow.block_sell`·`credit.net_buy`·`credit.collateral_value`·`credit.loan_value`·`credit.forced_liquidation`·`event.earnings_surprise`·`event.index_membership_change`·`event.disclosure_sentiment`) + **격자 테이블에 컬럼이 없는 2**(`flow.foreign_ownership` — 원천 `stg_foreign_daily`(ka10008) 미탑재, S08-2 대기 / `short.short_balance_ratio` — 공매도량 ÷ 상장주식수라 비율 계산이 팩터층 몫). 선언만 하고 NULL 로 두면 `factor_readiness` 가 거짓으로 ready 를 낸다.
 - **격자 6필드의 랙은 1 세션**(`recommended_lag_days` 1) — **신용잔고만 3 세션**(DEFECT-E01 정정: T+2 공표, 우리 체인 T+3 입수, §1 「랙 단위」). 세 슬라이스의 stage 원장이 전부 `lag_known=false` 라 §1 의 '나머지 전부 1 세션' 이 신용잔고 밖의 다섯에 그대로 적용된다. 어댑터는 이 랙을 `dataset_profile` 에서 읽고, 표가 없는 루트에서 쓰는 폴백 상수(`_specs.py` `lag_sessions`)도 같은 값으로 맞췄다(**해소 2026-09-28, 워크벤치 #246** — 폴백을 쓰면 어댑터가 부팅 때 `profile_lag_fallback` 경고를 남긴다). 소비자가 `lag_overrides` 로 물려 쓸 필요는 없다.
 - **`factor_readiness`(S20) 절단본 판정은 35 ready / 19 blocked**(S19-2 전 31/23). 새로 열린 넷은 F01·F06·F07·F09 이고, F03 은 재료가 생겨 `field_unavailable` → `partial_support`(GAP-03 — `orgn` 이 기관 7주체 합과 다르고 값의 기준이 공표되지 않았다)로 옮겨 갔다.
@@ -148,7 +149,7 @@
 | 원천 | 축 | 읽는 방식 | grain 축소 규칙 | field_id |
 |---|---|---|---|---|
 | `price_daily` | ticker | GRID (ticker, date) | 없음 | `price.close`·`open`·`volume`·`market_cap`·`shares_outstanding`·`trading_value` |
-| `price_adj_daily`(S23 표 — 예전 원천 매크로 `v_adj_price_fwd` 는 같은 값을 내는 읽기 경로로 남았다) | ticker | GRID | 없음 | `price.adj_close`(내부 스코프) |
+| `price_adj_daily`(S23 표 — 예전 원천 매크로 `v_adj_price_fwd` 는 같은 값을 내는 읽기 경로로 남았다) | ticker | GRID | 없음 | `price.adj_close`(2026-09-28 부터 §2 어휘, 그 전엔 내부 스코프) |
 | `v_fin_latest` | **corp** | LATEST(available_date) | 판본·`fs_div` 는 뷰가 접고, 같은 접수일의 여러 기간은 `period_end DESC, report_code DESC`. **`period_frontier` 가 참인 행만 본다**(#225) — 옛 기간 정정본이 더 늦은 기간보다 늦게 접수되면(restated 판본은 공개일이 정정 접수일로 밀린다) 그 행을 고르지 않아, 셀은 컷오프까지 공개된 가장 최근 기간을 유지한다 | `financial.*` 8 |
 | `v_consensus`(metric=eps / revenue) | ticker | LATEST | 관측 달 이후로 끝나는 `target_period` 중 가장 가까운 것(**FY1**), 동률 `obs_month DESC` | `consensus.forward_eps`·`forward_sales`·`eps_dispersion` |
 | `opinion_daily` | ticker | LATEST | 잰 판본 우선(`coverage_degraded=false` = wise), 동률 `src` 사전순 | `consensus.target_price`·`recommendation`·`analyst_count` |
@@ -164,7 +165,7 @@
 
 ## 4. 유지 규약
 
-- 레지스트리(`backend/FACTORS.md`)가 바뀌면 이 표를 같은 PR 에서 갱신한다. `check_field_map.py` 는 레지스트리 필드 집합 − 표 필드 집합 = ∅ 를 검사한다.
+- 레지스트리(`backend/FACTORS.md`)가 바뀌면 이 표를 같은 PR 에서 갱신한다. `check_field_map.py` 는 레지스트리 필드 집합 − 표 필드 집합 = ∅ 를 검사하고, CI(`backend` job 「Equity field map covers the factor registry」)와 `database/tests/test_check_field_map.py` 가 돌린다. §2 에 행을 넣거나 빼면 원장 선언의 `field_scope`(`field_map`/`internal`)도 같이 옮긴다 — `test_equity_s19_profile.py` 가 두 집합이 갈리면 막는다.
 - 판정 변경은 근거(슬라이스·실측 절)를 남긴다.
 
 ## 5. `consensus.coverage_*` — S24 `coverage_daily` (2026-09-11, 사용자 요청 09-10)

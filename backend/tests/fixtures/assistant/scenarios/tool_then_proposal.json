@@ -14,7 +14,7 @@
       "call_id": "call-read",
       "name": "read_current_strategy",
       "ok": true,
-      "summary": "{\"source_text\": \"# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).\\n# identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.\\n# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 … (총 865자)",
+      "summary": "{\"source_text\": \"# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).\\n# identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.\\n# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 … (총 869자)",
       "type": "tool_result"
     },
     "sequence": 1,
@@ -35,7 +35,7 @@
     "event": {
       "arguments": {
         "rationale": "모멘텀 프리미엄은 KRX에서도 관측된다 (https://example.com/krx-momentum).",
-        "source_text": "# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).\n# identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.\n# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 아니라 요청의 environment가 소유한다.\nschema_version: \"1.2\"\ntitle: \"퀄리티 모멘텀\"\ndescription: \"\"\neligibility:\n  rules: []\nfactors:\n  - factor_id: momentum\n    label: \"모멘텀\"\n    direction: high\n    weight: 0.6\n    graph:\n      nodes:\n        - kind: field\n          node_id: close\n          field_id: price.close\n        - kind: time_series\n          node_id: mom_252\n          operator: momentum\n          input_node_id: close\n          window: 252\n      output_node_id: mom_252\nportfolio:\n  selection_count: 20\n  rebalance: monthly\nrisk:\n  max_name_weight: 0.05\nparameters: []\n",
+        "source_text": "# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).\n# identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.\n# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 아니라 요청의 environment가 소유한다.\nschema_version: \"1.2\"\ntitle: \"퀄리티 모멘텀\"\ndescription: \"\"\neligibility:\n  rules: []\nfactors:\n  - factor_id: momentum\n    label: \"모멘텀\"\n    direction: high\n    weight: 0.6\n    graph:\n      nodes:\n        - kind: field\n          node_id: close\n          field_id: price.adj_close\n        - kind: time_series\n          node_id: mom_252\n          operator: momentum\n          input_node_id: close\n          window: 252\n      output_node_id: mom_252\nportfolio:\n  selection_count: 20\n  rebalance: monthly\nrisk:\n  max_name_weight: 0.05\nparameters: []\n",
         "sources": [
           {
             "title": "KRX 모멘텀 리뷰",
@@ -56,20 +56,13 @@
     "event": {
       "proposal": {
         "compile": {
-          "diagnostics": [
-            {
-              "code": "strategy.field.unadjusted_price",
-              "message": "분할·증자·병합에 조정하지 않은 원주가를 과거 세션과 비교하는 연산에 넣어 결과가 분할·증자에 오염될 수 있습니다. price.adj_close 를 쓰세요: field_id='price.close' adjusted_field_id='price.adj_close' reader='mom_252' operator='momentum'",
-              "pointer": "/factors/0/graph/nodes/0/field_id",
-              "severity": "warning"
-            }
-          ],
+          "diagnostics": [],
           "ok": true,
-          "spec_hash": "22f95ea804a57f6bb8f7134127c2feb7d88e0a5a0bbc52481977c75cf0de5197"
+          "spec_hash": "69064ce14c47ac2c94ad8a1620da4d4326313f1da4aa42b54d15643e5111ca44"
         },
         "rationale": "모멘텀 프리미엄은 KRX에서도 관측된다 (https://example.com/krx-momentum).",
         "source_format": "yaml",
-        "source_text": "# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).\n# identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.\n# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 아니라 요청의 environment가 소유한다.\nschema_version: \"1.2\"\ntitle: \"퀄리티 모멘텀\"\ndescription: \"\"\neligibility:\n  rules: []\nfactors:\n  - factor_id: momentum\n    label: \"모멘텀\"\n    direction: high\n    weight: 0.6\n    graph:\n      nodes:\n        - kind: field\n          node_id: close\n          field_id: price.close\n        - kind: time_series\n          node_id: mom_252\n          operator: momentum\n          input_node_id: close\n          window: 252\n      output_node_id: mom_252\nportfolio:\n  selection_count: 20\n  rebalance: monthly\nrisk:\n  max_name_weight: 0.05\nparameters: []\n",
+        "source_text": "# P0-01 golden authoring fixture — WORKFLOW 2.2의 완전한 verbose YAML 예시 (schema 1.2).\n# identity(strategy_id/revision)는 문서 밖 revision envelope가 소유한다.\n# 실행 설정(시장·기간·유니버스·체결·비용·결측)은 문서가 아니라 요청의 environment가 소유한다.\nschema_version: \"1.2\"\ntitle: \"퀄리티 모멘텀\"\ndescription: \"\"\neligibility:\n  rules: []\nfactors:\n  - factor_id: momentum\n    label: \"모멘텀\"\n    direction: high\n    weight: 0.6\n    graph:\n      nodes:\n        - kind: field\n          node_id: close\n          field_id: price.adj_close\n        - kind: time_series\n          node_id: mom_252\n          operator: momentum\n          input_node_id: close\n          window: 252\n      output_node_id: mom_252\nportfolio:\n  selection_count: 20\n  rebalance: monthly\nrisk:\n  max_name_weight: 0.05\nparameters: []\n",
         "sources": [
           {
             "title": "KRX 모멘텀 리뷰",

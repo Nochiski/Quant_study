@@ -176,7 +176,7 @@
 **HTTPS + mTLS (Caddy).** 서버에 SSH 계정을 만들지 않는다.
 
 ```
-data.kaelinvestment.com {
+<공개 도메인> {
     tls {
         client_auth {
             mode require_and_verify
@@ -200,7 +200,7 @@ data.kaelinvestment.com {
 
 ```bash
 curl --cert sangmok.crt --key sangmok.key \
-     -O https://data.kaelinvestment.com/v/<build_id>/krx_stk_bydd_trd.parquet
+     -O https://<공개 도메인>/v/<build_id>/krx_stk_bydd_trd.parquet
 ```
 ```sql
 SELECT ticker, bas_dd, tdd_clsprc FROM '~/quant-data/krx_stk_bydd_trd.parquet'

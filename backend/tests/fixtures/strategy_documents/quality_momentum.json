@@ -7,7 +7,7 @@
       "graph": {
         "output_node_id": "mom_252",
         "nodes": [
-          {"kind": "field", "node_id": "close", "field_id": "price.close"},
+          {"kind": "field", "node_id": "close", "field_id": "price.adj_close"},
           {
             "kind": "time_series",
             "node_id": "mom_252",

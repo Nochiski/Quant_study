@@ -1126,14 +1126,14 @@ Phase exit:
   나누기 전에 여기 적는다. P3-03 과 겹치는 문서 항목은 이번 문서 작업이 가져간다. (1) 문서 갱신 PR A: README·
   frontend README·`backend/FACTORS.md` 의 1.2 정리, spec D6·D7 "구현 결과" 단락(Phase 2 감사 NB-3), SoT 연산자
   행의 단위 규칙 문장(NB-6). (2) 매뉴얼 PR(별도, 선행 코드 PR 머지 뒤): 매뉴얼 1.2 전환과 실행 설정 절,
-  BACKLOG-002(스크린샷 재촬영·8절 되돌리기 안내). (3) 선행 코드 PR `impl-prep`: 골든 `quality_momentum`
+  BACKLOG-002(스크린샷 재촬영·8절 되돌리기 안내). (3) 선행 코드 PR `impl-prep`(#259): 골든 `quality_momentum`
   `adj_close` 이관과 `RAW_PRICE_WARNING` 우회 필터 제거. P3-03 에 남는 것은 e2e fixture 1.2 와 "1.1 revision
   열기 → 업그레이드 → 실행 설정 채워짐 → 저장 → 백테스트" 시나리오, BACKLOG-008, BACKLOG-009, CI 전체 green 이다.
   "같은 전략·다른 기간 → 같은 spec_hash" 시나리오는 P3-02 가 이미 채웠다(P3 Phase exit). PR 번호는 아직 없어
   이름으로 적는다. P3-03 상태는 `READY` 그대로다. WORKFLOW P3-03 acceptance 각 항목 옆에 담당을 적었다.
 - 2026-09-28 — 문서 최신화 감사에서 찾은 제품 결함: 새 전략 화면(`/research/strategies/new`)에 1.0·1.1 문서
   업그레이드 배너가 없다(`UpgradeBanner` 는 저장된 revision 화면에만 있다). 문서는 현재 동작("저장된 revision
-  화면에서 업그레이드")으로 쓰고, 결함은 별도 이슈로 연다(이슈 번호 미정). P3-03 범위에는 넣지 않는다.
+  화면에서 업그레이드")으로 쓰고, 결함은 별도 이슈로 연다(#257). P3-03 범위에는 넣지 않는다.
 - 2026-09-28 — 문서 최신화 감사 반영(기록 정정). BACKLOG-003(P2-07 `e159e572`)·BACKLOG-013(P3-02 `4e6bbd62`)에
   빠져 있던 "처리" 줄을 넣었다. P2-09 행의 "재확인 대기"를 리뷰어 최종 재확인 APPROVE(`a32ed9d7`, #217 머지
   head 와 같다)로 고치고 Review 기록에 P2-09 2회차와 P2-10 행을 더했다. P2 Phase exit 의 SoT·책임분리 항목은

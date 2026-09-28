@@ -256,10 +256,12 @@ test("keeps a real debugger trace legible and inside the viewport", async ({
     debuggerPanel.getByRole("tablist", { name: "추적 결과" }),
     viewport,
   );
-  await expectWithinViewport(
-    debuggerPanel.getByRole("tabpanel", { name: "연결 추적" }),
-    viewport,
-  );
+  // 연결 추적은 중간 결과 패널 안에서 스크롤된다(1920 에서 패널보다 22px 길다). 패널이 페이지 맨 아래에
+  // 붙으면 넘친 몫이 viewport 밖 좌표가 되므로, 사용자가 하듯 추적을 스크롤해 들인 뒤 한 화면에 들어오는지
+  // 본다. 전에는 골든의 원주가 warning 이 페이지를 130px 늘여 패널이 위로 올라가 있어 우연히 통과했다.
+  const tracePanel = debuggerPanel.getByRole("tabpanel", { name: "연결 추적" });
+  await tracePanel.scrollIntoViewIfNeeded();
+  await expectWithinViewport(tracePanel, viewport);
   await page.mouse.move(0, 0);
   await expect(debuggerPanel).toHaveScreenshot("strategy-debugger.png");
 });

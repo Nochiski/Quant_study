@@ -408,21 +408,22 @@ test.describe("professional YAML workflow", () => {
     ).toEqual([
       {
         security_id: "sec-000660-1",
-        field_id: "price.close",
+        field_id: "price.adj_close",
         value: 212_570,
         available_date: "2026-07-31",
         kind: "observed",
       },
       {
+        // mock 의 005930 은 1:50 분할이 있어 전방 조정가는 원주가의 50배다(첫 관측 수준 고정).
         security_id: "sec-005930-1",
-        field_id: "price.close",
-        value: 116_285,
+        field_id: "price.adj_close",
+        value: 5_814_250,
         available_date: "2026-07-31",
         kind: "observed",
       },
       {
         security_id: "sec-035420-1",
-        field_id: "price.close",
+        field_id: "price.adj_close",
         value: 308_855,
         available_date: "2026-07-31",
         kind: "observed",
@@ -579,7 +580,7 @@ test.describe("professional YAML workflow", () => {
       name: "원시 필드 값, 공개일과 데이터 상태",
     });
     const raw660 = rowFor(raw, "sec-000660-1");
-    await expect(raw660).toContainText("price.close");
+    await expect(raw660).toContainText("price.adj_close");
     await expect(raw660).toContainText("212,570");
     await expect(raw660).toContainText("2026-07-31");
     await expect(raw660).toContainText("observed");
@@ -615,7 +616,7 @@ test.describe("professional YAML workflow", () => {
       minimum_history_sessions: 252,
       as_of_policy: "available_date_lte_as_of",
       missing_policy: "drop",
-      required_field_ids: ["price.close"],
+      required_field_ids: ["price.adj_close"],
       output_node_id: "mom_252",
     });
     expect(plan.graph_hash).toHaveLength(64);
@@ -643,7 +644,7 @@ test.describe("professional YAML workflow", () => {
         await expect(planRow).toContainText(input);
     }
     await expect(
-      planPanel.getByText("price.close", { exact: true }),
+      planPanel.getByText("price.adj_close", { exact: true }),
     ).toBeVisible();
 
     const settingsToggle = workflow.getByLabel("실행 설정 열기");
@@ -1327,15 +1328,21 @@ test.describe("professional YAML workflow", () => {
       name: "현재 버전으로 업그레이드",
     });
     // 업그레이드는 의미를 바꾸지 않는다: 1.0 동결 문서(`quality_momentum.v1_0.yaml`)의 현재 버전
-    // 의미는 golden fixture에 1.1 합성 방식(원시값 가중 합)을 명시한 문서와 같다. 현재 버전
-    // 문자열도 backend가 답한 값을 쓴다(frontend는 schema 버전 리터럴을 갖지 않는다).
+    // 의미는 golden fixture에 1.1 합성 방식(원시값 가중 합)을 명시한 문서와 같다. 동결 문서의
+    // 모멘텀은 원주가를 읽고 업그레이드는 필드를 바꾸지 않으므로, 수정주가로 옮긴 골든의 잎을
+    // 원주가로 되돌려 비교한다(DEFECT-232-05). 현재 버전 문자열도 backend가 답한 값을 쓴다
+    // (frontend는 schema 버전 리터럴을 갖지 않는다).
     const expected = requireData(
       (
         await compileStrategyDocument({
           client: apiClient,
           body: {
             source: mustReplace(
-              GOLDEN,
+              mustReplace(
+                GOLDEN,
+                "field_id: price.adj_close\n",
+                "field_id: price.close\n",
+              ),
               "portfolio:\n",
               "signal:\n  normalization: none\nportfolio:\n",
             ),

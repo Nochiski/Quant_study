@@ -52,10 +52,28 @@ class StrategyDocumentUpgradeDriftResponse:
     detail: StrategyDocumentUpgradeDriftDetail
 
 
+@dataclass(frozen=True)
+class StrategyDocumentUpgradeUnsupportedNodeDetail:
+    """1.2 에 없는 `saved_*` 노드 때문에 업그레이드를 거절했다(spec D7, P2-09).
+
+    `pointer` 는 그 노드의 kind 자리다.
+    """
+
+    code: Literal["strategy_document.upgrade_unsupported_node"]
+    pointer: str
+    message: str
+
+
+@dataclass(frozen=True)
+class StrategyDocumentUpgradeUnsupportedNodeResponse:
+    detail: StrategyDocumentUpgradeUnsupportedNodeDetail
+
+
 StrategyDocumentUpgrade422Response: TypeAlias = (
     StrategyDocumentInvalidResponse
     | StrategyDocumentNotUpgradeableResponse
     | StrategyDocumentUpgradeDriftResponse
+    | StrategyDocumentUpgradeUnsupportedNodeResponse
     | RequestValidationResponse
 )
 

@@ -17,6 +17,8 @@ from __future__ import annotations
 import copy
 import json
 import re
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +38,9 @@ from strategy_workbench.domain.factor.facade.expression import (
     FieldNode,
 )
 from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
+from strategy_workbench.domain.strategy._hydrate import _hydrate
 from strategy_workbench.domain.strategy.facade.document import (
+    CURRENT_SCHEMA_VERSION,
     STRUCTURE_CODES,
     hydrate_strategy_document,
 )
@@ -121,14 +125,15 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "schema_version 누락",
         lambda d: d.pop("schema_version"),
         "structure.missing_field",
-        "문서 맨 위에 schema_version을 적어 주세요 — missing='schema_version' supported=('1.1',)",
+        "문서 맨 위에 schema_version을 적어 주세요 — missing='schema_version' "
+        f"supported=('{CURRENT_SCHEMA_VERSION}',)",
     ),
     (
         "지원하지 않는 버전",
         lambda d: _set(d, "schema_version", "9.9"),
         "structure.unsupported_schema_version",
         "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 바꿔 줍니다 — "
-        "got='9.9' supported=('1.1',)",
+        f"got='9.9' supported=('{CURRENT_SCHEMA_VERSION}',)",
     ),
     (
         "모르는 키(오타)",
@@ -138,7 +143,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "got='max_name_wieght' suggestion='max_name_weight' "
         "allowed=['gross_exposure', 'max_name_weight', "
         "'max_sector_weight', "
-        "'net_exposure', 'risk_field_id', 'sector_neutral']",
+        "'net_exposure', 'risk_factor_id', 'risk_field_id', 'sector_neutral']",
     ),
     (
         "필수 키 누락",
@@ -153,15 +158,16 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "모르는 kind입니다 혹시 `time_series`인가요? — got='time_seris' "
         "suggestion='time_series' "
         "allowed=['binary', 'comparison', 'conditional', 'constant', 'cross_sectional', "
-        "'field', 'group', 'parameter', 'saved_factor', 'saved_subgraph', "
+        "'field', 'group', 'parameter', "
         "'time_series', 'unary']",
     ),
     (
         "고를 수 없는 값",
-        lambda d: _set(d, "execution.timing", "next_opne"),
+        # schema 1.2(P2-03)는 `execution` 을 문서에서 뺐으므로 남아 있는 enum 필드로 본다.
+        lambda d: _set(d, "portfolio.side", "long_onyl"),
         "structure.invalid_enum",
-        "고를 수 있는 값이 아닙니다 혹시 `next_open`인가요? — "
-        "got='next_opne' suggestion='next_open' allowed=['next_open']",
+        "고를 수 있는 값이 아닙니다 혹시 `long_only`인가요? — "
+        "got='long_onyl' suggestion='long_only' allowed=['long_only', 'long_short']",
     ),
     (
         "목록 자리에 블록",
@@ -200,27 +206,22 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "structure.type_mismatch",
         "참 또는 거짓(true·false)이 와야 합니다 — expected=bool got='yes'",
     ),
-    (
-        "날짜 형식",
-        lambda d: _set(d, "data.start", "2021/01/01"),
-        "structure.invalid_date",
-        "날짜는 YYYY-MM-DD로 적어 주세요. 예: 2021-01-01 — "
-        "expected=YYYY-MM-DD example=2021-01-01 got='2021/01/01'",
-    ),
+    # "날짜 형식"(`structure.invalid_date`)은 코드째 지웠다(P2-09, BACKLOG-011). 날짜 필드이던
+    # `data.start`·`data.end` 가 실행 요청의 `environment` 로 옮겨져 전략 문서에는 날짜 필드가 없다.
     (
         "1.0 문법 — factors 두 겹",
         lambda d: _set(d, "factors", {"factors": d["factors"]}),
         "structure.legacy_shape",
         "1.0 문법입니다. factors 아래에 또 factors 목록을 두던 방식이라 지금 버전에서는 읽지 "
-        "못합니다. 안쪽 목록을 factors 바로 아래로 올리거나 업그레이드하세요 — "
+        "못합니다. 안쪽 목록을 factors 바로 아래로 올리세요 — "
         "expected=sequence got=dict",
     ),
     (
         "1.0 문법 — 은퇴한 키",
-        lambda d: _set(d, "execution.order_style", "market"),
+        # 1.0 의 `execution.order_style` 은 1.2 에서 섹션째 사라져 `signal.method` 로 본다.
+        lambda d: d.setdefault("signal", {}).update(method="weighted_sum"),
         "structure.legacy_shape",
-        "1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우거나 업그레이드하세요 — "
-        "got='order_style' section='execution'",
+        "1.0에서만 쓰던 키입니다. 지금 버전은 읽지 않으니 지우세요 — got='method' section='signal'",
     ),
     (
         "1.0 문법 — unary alias 노드",
@@ -231,7 +232,7 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         ),
         "structure.legacy_shape",
         "1.0 문법입니다. unary rank는 지금 버전에서 cross_sectional의 rank로 옮겨졌습니다. "
-        "kind와 operator를 함께 바꾸거나 업그레이드하세요 — "
+        "kind와 operator를 함께 바꾸세요 — "
         "got=unary/rank expected=cross_sectional/rank",
     ),
     (
@@ -405,6 +406,23 @@ def test_codec_limit_message_golden(
     assert _reject(source, limits=limits) == (code, message)
 
 
+@dataclass(frozen=True)
+class _Dated:
+    """날짜 필드 하나짜리 모델. 날짜 필드가 모델에 돌아오면 조용히 통과하지 않는지 본다."""
+
+    start: date
+
+
+def test_a_date_field_is_an_authoring_error_not_a_silent_pass() -> None:
+    """BACKLOG-011: `structure.invalid_date` 는 1.2 문서로 닿을 수 없어 코드째 지웠다.
+
+    날짜 필드를 모델에 다시 들이면 hydrate 가 그 자리에서 멈춰야 한다 — 그래야 코드와 문장
+    golden 을 함께 되살릴 일이 드러난다.
+    """
+    with pytest.raises(TypeError, match="unsupported hydrate type"):
+        _hydrate(_Dated, {"start": "2021-01-01"}, "", [])
+
+
 def test_every_declared_code_has_a_message_golden() -> None:
     """코드 레지스트리와 문장 golden이 1:1이다 — 코드를 늘리면 문장도 같은 PR에서 늘어난다."""
     structural = {code for _n, _m, code, _msg in HYDRATE_GOLDEN}
@@ -440,7 +458,7 @@ def test_no_english_sentence_reaches_the_reader(code: str, message: str) -> None
     [
         pytest.param("모르는 키", HYDRATE_GOLDEN[2][1], "max_name_weight", id="키"),
         pytest.param("모르는 kind", HYDRATE_GOLDEN[4][1], "time_series", id="kind"),
-        pytest.param("고를 수 없는 값", HYDRATE_GOLDEN[5][1], "next_open", id="enum"),
+        pytest.param("고를 수 없는 값", HYDRATE_GOLDEN[5][1], "long_only", id="enum"),
     ],
 )
 def test_near_miss_suggestion_appears_in_both_the_sentence_and_the_details(

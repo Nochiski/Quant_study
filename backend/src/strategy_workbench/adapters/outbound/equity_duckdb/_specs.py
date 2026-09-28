@@ -135,6 +135,9 @@ class FieldSpec:
     description: str
     disclosure_basis: str
     evidence: str
+    # 분할·증자 조정 없는 원주가 시계열이면 시점 간 변화를 잴 때 쓸 조정 필드 id(BACKLOG-018).
+    # compile 이 필드 계약(`FieldMetadata.adjusted_field_id`)으로 읽어 warning 을 낸다.
+    adjusted_field_id: str | None = None
     # 원천 폴백 랙(`SourceSpec.lag_sessions`)과 다른 필드만 적는다. 한 원천 안에서 원장
     # dataset_profile 의 랙이 갈리는 경우다(price 원천의 market_cap·shares_outstanding, 이슈 #246).
     lag_sessions: int | None = None
@@ -491,6 +494,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis="정규장 종가 확정 시점",
         evidence="price_daily.close ← stg_price_daily ∪ stg_etf_price_daily (EG20 원주가 불변)",
+        adjusted_field_id="price.adj_close",
     ),
     FieldSpec(
         field_id="price.open",
@@ -711,7 +715,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         expr="est_mean",
         label="선행 EPS(FY1 컨센서스 평균)",
         unit="KRW",
-        value_type=FieldValueType.PRICE,
+        # 주당 금액이다. 원장 dataset_profile 의 value_type='amount' 와 같다(#230).
+        value_type=FieldValueType.AMOUNT,
         verdict="부분",
         description=(
             "**12개월 선행이 아니다** — equity 는 target_period 별 값만 주고 12M 합성은 팩터층 "
@@ -925,7 +930,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         expr="dps_krw",
         label="주당 현금배당금(최근 사업보고서)",
         unit="KRW",
-        value_type=FieldValueType.PRICE,
+        # 주당 금액이다. 원장 dataset_profile 의 value_type='amount' 와 같다(#230).
+        value_type=FieldValueType.AMOUNT,
         verdict="부분",
         description=(
             "**락일·기준일이 없다** — 값이 서는 시점은 사업보고서 접수일뿐이라 TR·배당 재투자 "

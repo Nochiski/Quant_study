@@ -42,6 +42,58 @@ const field = (fields: FormField[], key: string): FormField => {
 };
 
 describe("projectForm", () => {
+  it("draws the schema 1.2 fields from the runtime schema without a hand-written list (P3-01)", () => {
+    // 문서에 적지 않은 필드도 스키마만으로 컨트롤이 생긴다: 결합 전 정규화(P2-04), 횡단면
+    // eligibility 연산자(P2-05), 역가중 팩터 참조(P2-06).
+    const source = [
+      'schema_version: "1.2"',
+      "title: 신규 필드",
+      "eligibility:",
+      "  rules:",
+      "    - field_id: price.trading_value",
+      "      operator: top_percent",
+      "      value: 0.2",
+      "factors:",
+      "  - factor_id: momentum",
+      "    graph:",
+      "      nodes:",
+      "        - { kind: field, node_id: close, field_id: price.close }",
+      "      output_node_id: close",
+      "",
+    ].join("\n");
+    const { sections } = projectForm(SCHEMA, parsed(source), []);
+
+    const normalization = field(objectFields(sections, "signal"), "normalization");
+    expect(normalization).toMatchObject({ written: false, value: "rank" });
+    expect(normalization.control).toEqual({
+      kind: "enum",
+      values: ["none", "rank", "zscore"],
+      labelKeys: {
+        none: "strategy.field.signal_step.normalization.value.none",
+        rank: "strategy.field.signal_step.normalization.value.rank",
+        zscore: "strategy.field.signal_step.normalization.value.zscore",
+      },
+    });
+
+    const eligibility = section(sections, "eligibility");
+    if (eligibility.kind !== "object") throw new Error("eligibility");
+    const [rule] = eligibility.lists[0]!.items;
+    const operator = field(rule!.fields, "operator");
+    expect(operator.value).toBe("top_percent");
+    expect(operator.control).toMatchObject({
+      kind: "enum",
+      values: expect.arrayContaining(["top_percent", "top_count"]),
+    });
+
+    const riskFactor = field(objectFields(sections, "risk"), "risk_factor_id");
+    expect(riskFactor.control).toEqual({
+      kind: "reference",
+      namespace: "factor",
+      candidates: ["momentum"],
+    });
+  });
+
+
   it("lists sections in schema order: root scalars first, then every root property", () => {
     const { sections } = projectForm(SCHEMA, parsed(VERBOSE), []);
     const rootKeys = Object.keys(SCHEMA.properties as object);
@@ -64,13 +116,11 @@ describe("projectForm", () => {
 
   it("decides controls from the schema only", () => {
     const { sections } = projectForm(SCHEMA, parsed(VERBOSE), []);
-    const data = objectFields(sections, "data");
-    expect(field(data, "start").control).toEqual({ kind: "date" });
-    expect(field(data, "universe_id").control).toEqual({
+    const riskFields = objectFields(sections, "risk");
+    expect(field(riskFields, "risk_field_id").control).toEqual({
       kind: "catalog",
-      catalog: "universe",
+      catalog: "equity-field",
     });
-    expect(field(data, "market").control).toMatchObject({ kind: "enum" });
     const portfolio = objectFields(sections, "portfolio");
     expect(field(portfolio, "selection_count").control).toMatchObject({
       kind: "number",
@@ -79,7 +129,10 @@ describe("projectForm", () => {
     expect(field(portfolio, "side").control).toEqual({
       kind: "enum",
       values: ["long_only", "long_short"],
-      labelKeys: null,
+      labelKeys: {
+        long_only: "strategy.field.portfolio_step.side.value.long_only",
+        long_short: "strategy.field.portfolio_step.side.value.long_short",
+      },
     });
     const risk = objectFields(sections, "risk");
     expect(field(risk, "sector_neutral").control).toEqual({ kind: "boolean" });
@@ -102,22 +155,21 @@ describe("projectForm", () => {
   it("marks written fields from the tree and shows defaults for omitted ones", () => {
     const verbose = projectForm(SCHEMA, parsed(VERBOSE), []);
     const minimal = projectForm(SCHEMA, parsed(MINIMAL), []);
-    const verboseData = objectFields(verbose.sections, "data");
-    const minimalData = objectFields(minimal.sections, "data");
-    expect(field(verboseData, "market")).toMatchObject({
+    const verbosePortfolio = objectFields(verbose.sections, "portfolio");
+    const minimalPortfolio = objectFields(minimal.sections, "portfolio");
+    expect(field(verbosePortfolio, "rebalance")).toMatchObject({
       written: true,
-      value: "KRX",
+      value: "monthly",
     });
-    expect(field(minimalData, "market")).toMatchObject({
+    expect(field(minimalPortfolio, "rebalance")).toMatchObject({
       written: false,
-      value: "KRX",
+      value: "monthly",
       hasDefault: true,
-      defaultValue: "KRX",
+      defaultValue: "monthly",
     });
-    expect(field(minimalData, "start")).toMatchObject({
+    expect(field(minimalPortfolio, "selection_count")).toMatchObject({
       written: true,
-      required: true,
-      value: "2021-01-01",
+      value: 20,
     });
     expect(section(minimal.sections, "signal")).toMatchObject({
       kind: "object",
@@ -150,7 +202,10 @@ describe("projectForm", () => {
     expect(field(momentum!.fields, "direction").control).toEqual({
       kind: "enum",
       values: ["high", "low"],
-      labelKeys: null,
+      labelKeys: {
+        high: "strategy.field.factor_signal.direction.value.high",
+        low: "strategy.field.factor_signal.direction.value.low",
+      },
     });
     expect(field(momentum!.fields, "graph").control).toEqual({
       kind: "graph-link",
@@ -296,7 +351,7 @@ describe("projectForm", () => {
     expect(field(objectFields(sections, ""), "schema_version").control).toEqual(
       {
         kind: "const",
-        value: "1.1",
+        value: "1.2",
       },
     );
     const factors = section(sections, "factors");
@@ -396,7 +451,10 @@ describe("projectForm", () => {
       }
     };
     walk(SCHEMA);
-    expect([...found].sort()).toEqual([...CATALOGS].sort());
+    // 전략 문서가 쓰는 카탈로그는 Form이 아는 집합의 부분집합이어야 한다. `universe`처럼
+    // 실행 설정으로 옮겨간 카탈로그는 Form 쪽에 남아 있어도 된다(P2-03·P3-02).
+    expect(found.size).toBeGreaterThan(0);
+    expect([...found].every((name) => CATALOGS.includes(name as never))).toBe(true);
   });
 
   it("knows every x-reference namespace the runtime schema publishes (audit DEFECT-P5X-003)", () => {

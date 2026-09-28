@@ -13,7 +13,6 @@ from strategy_workbench.bootstrap.facade.http import build_http_app
 
 def _preview_body(client: TestClient) -> dict[str, Any]:
     spec = client.get("/api/v1/strategies/template").json()
-    spec["data"].update({"start": "2026-01-02", "end": "2026-01-16"})
     spec["portfolio"].update(
         {
             "selection_count": 2,
@@ -22,7 +21,15 @@ def _preview_body(client: TestClient) -> dict[str, Any]:
         }
     )
     spec["risk"].update({"max_name_weight": 0.6, "max_sector_weight": 1.0})
-    return {"spec": spec}
+    # 실행 설정은 1.2 부터 요청 본문이 싣는다(P2-03).
+    return {
+        "spec": spec,
+        "environment": {
+            "start": "2026-01-02",
+            "end": "2026-01-16",
+            "universe_id": "krx.common-stock",
+        },
+    }
 
 
 def test_portfolio_preview_returns_candidates_target_tape_and_engine_contract() -> None:

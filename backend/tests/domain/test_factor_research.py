@@ -10,10 +10,10 @@ from strategy_workbench.domain.factor.facade.analysis import analyze_factor_valu
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
-    FactorReferenceValue,
     evaluate_factor_graph,
 )
 from strategy_workbench.domain.factor.facade.expression import (
+    EXPRESSION_NODE_KINDS,
     BinaryNode,
     BinaryOperator,
     ConditionalNode,
@@ -26,8 +26,6 @@ from strategy_workbench.domain.factor.facade.expression import (
     GroupOperator,
     MissingPolicy,
     ParameterNode,
-    SavedFactorNode,
-    SavedSubgraphNode,
     TimeSeriesNode,
     TimeSeriesOperator,
     UnaryNode,
@@ -43,7 +41,10 @@ from strategy_workbench.domain.factor.facade.registry import (
     FactorCategory,
     build_default_factor_registry,
 )
-from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
+from strategy_workbench.domain.factor.facade.validation import (
+    FACTOR_GRAPH_CODES,
+    validate_factor_graph,
+)
 
 
 def test_registry_is_the_versioned_source_of_truth_for_fifty_factor_ids() -> None:
@@ -59,6 +60,34 @@ def test_registry_is_the_versioned_source_of_truth_for_fifty_factor_ids() -> Non
     assert len(implemented) == 7
     assert {item.category for item in implemented} == set(FactorCategory)
     assert all(item.default_graph is not None for item in implemented)
+
+
+def test_catalog_history_of_every_implemented_factor_is_its_graph_minimum() -> None:
+    """BACKLOG-001: 카탈로그의 `minimum_history_sessions` 는 구현 그래프가 요구하는 이력과 같다.
+
+    12-1 모멘텀은 `window=252` + `lag=21` 이라 273 세션이 필요한데 시드가 252 로 적혀 있었다.
+    이 값은 화면이 보여 주는 워밍업 길이라, 짧게 적히면 앞 구간이 조용히 결측이 되는 데이터를
+    골라도 사용자는 알 수 없다. 구현 팩터 전부를 그래프 검증 결과와 대조한다.
+    """
+    implemented = [
+        item
+        for item in build_default_factor_registry().all()
+        if item.availability is FactorAvailability.IMPLEMENTED
+    ]
+
+    mismatched = {
+        item.factor_id: (
+            item.minimum_history_sessions,
+            validate_factor_graph(item.default_graph).minimum_history_sessions,
+        )
+        for item in implemented
+        if item.default_graph is not None
+        and item.minimum_history_sessions
+        != validate_factor_graph(item.default_graph).minimum_history_sessions
+    }
+
+    assert len(implemented) == 7
+    assert mismatched == {}
 
 
 def test_factor_catalog_document_tracks_every_registry_identifier() -> None:
@@ -141,32 +170,17 @@ def test_all_quick_transforms_evaluate_deterministically() -> None:
     assert any(value.value is not None for value in first.values)
 
 
-def test_parameter_and_saved_references_are_first_class_nodes() -> None:
+def test_parameter_references_are_first_class_nodes() -> None:
     graph = FactorGraph(
         nodes=(
-            SavedFactorNode("factor", "quality", "saved_factor"),
-            SavedSubgraphNode("subgraph", "scale", "saved_subgraph"),
+            FieldNode("close", "price.close", "field"),
             ParameterNode("weight", "w", "parameter"),
-            BinaryNode("weighted", BinaryOperator.MULTIPLY, "factor", "weight", "binary"),
-            BinaryNode("sum", BinaryOperator.ADD, "weighted", "subgraph", "binary"),
+            BinaryNode("weighted", BinaryOperator.MULTIPLY, "close", "weight", "binary"),
         ),
-        output_node_id="sum",
+        output_node_id="weighted",
     )
-    validation = validate_factor_graph(
-        graph,
-        parameter_ids=("w",),
-        factor_ids=("quality",),
-        subgraph_ids=("scale",),
-    )
-    observation = FactorObservation(
-        date(2024, 1, 2),
-        "s1",
-        (),
-        (
-            FactorReferenceValue("factor:quality", 2.0),
-            FactorReferenceValue("subgraph:scale", 1.0),
-        ),
-    )
+    validation = validate_factor_graph(graph, parameter_ids=("w",))
+    observation = FactorObservation(date(2024, 1, 2), "s1", (FactorFieldValue("price.close", 2.0),))
 
     evaluation = evaluate_factor_graph(
         graph,
@@ -176,7 +190,20 @@ def test_parameter_and_saved_references_are_first_class_nodes() -> None:
     )
 
     assert validation.valid
-    assert evaluation.values[0].value == pytest.approx(7.0)
+    assert evaluation.values[0].value == pytest.approx(6.0)
+
+
+def test_saved_reference_nodes_are_not_part_of_the_graph_language() -> None:
+    """spec D3 S7: `saved_factor`·`saved_subgraph` 는 노드 union 에서 빠졌다(M8 라이브러리가
+    되살릴 때 다시 넣는다). 실행 경로가 거부하던 노드를 문법이 받지 않으므로 거부 코드도 없다."""
+    assert not {"saved_factor", "saved_subgraph"} & set(EXPRESSION_NODE_KINDS)
+    assert (
+        not {
+            "factor.graph.saved_factor_missing",
+            "factor.graph.saved_subgraph_missing",
+        }
+        & FACTOR_GRAPH_CODES
+    )
 
 
 def test_plan_and_cache_fingerprints_cover_all_reproducibility_inputs() -> None:
@@ -336,6 +363,63 @@ def test_cross_sectional_demean_subtracts_the_member_peer_mean() -> None:
     }
 
     assert values == {"s1": 1.0, "s2": -1.0, "s3": 0.0}
+
+
+def test_cross_sectional_rank_pins_the_percentile_values() -> None:
+    """`cross_sectional_rank` 추출(P2-04)의 동작 보존을 값으로 고정한다.
+
+    격리 테스트(`..._ignore_non_members`)는 분모를 바꿔도 `alone` 과 `mixed` 가 똑같이 바뀌어
+    통과한다. 백분위 **값**을 고정해야 공식 변경이 실패로 드러난다(P2-04 리뷰 P2-3).
+    """
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("source", "value", "field"),
+            CrossSectionalNode("out", CrossSectionalOperator.RANK, "source", "cross_sectional"),
+        ),
+        output_node_id="out",
+    )
+    rows = (
+        _member_row(2, "s1", 1.0, member=True),
+        _member_row(2, "s2", 2.0, member=True),
+        _member_row(2, "s3", 2.0, member=True),
+        _member_row(2, "s4", 4.0, member=True),
+    )
+
+    values = {
+        v.security_id: v.value
+        for v in evaluate_factor_graph(graph, observations=rows, missing=MissingPolicy.DROP).values
+    }
+
+    # 순위 1, 2.5, 2.5, 4 → (r - 1) / (n - 1) = (r - 1) / 3.
+    assert values == {"s1": 0.0, "s2": 0.5, "s3": 0.5, "s4": 1.0}
+
+
+def test_group_rank_pins_the_percentile_values_within_each_sector() -> None:
+    """`GroupOperator.RANK` 도 같은 공식을 쓴다 — 섹터 안에서 0~1 백분위."""
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("source", "value", "field"),
+            GroupNode("out", GroupOperator.RANK, "source", "sector", "group"),
+        ),
+        output_node_id="out",
+    )
+    rows = (
+        replace(_member_row(2, "a1", 1.0, member=True), fields=_sector_fields(1.0, "A")),
+        replace(_member_row(2, "a2", 3.0, member=True), fields=_sector_fields(3.0, "A")),
+        replace(_member_row(2, "b1", 9.0, member=True), fields=_sector_fields(9.0, "B")),
+    )
+
+    values = {
+        v.security_id: v.value
+        for v in evaluate_factor_graph(graph, observations=rows, missing=MissingPolicy.DROP).values
+    }
+
+    # 섹터 A 는 2개라 0.0/1.0, 섹터 B 는 1개라 분모가 1 로 막혀 0.0.
+    assert values == {"a1": 0.0, "a2": 1.0, "b1": 0.0}
+
+
+def _sector_fields(value: float, sector: str) -> tuple[FactorFieldValue, ...]:
+    return (FactorFieldValue("value", value), FactorFieldValue("sector", sector))
 
 
 def test_evaluation_reports_progress_inside_the_time_series_node() -> None:

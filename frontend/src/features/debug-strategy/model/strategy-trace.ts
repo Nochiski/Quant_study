@@ -1,4 +1,5 @@
 import type {
+  RunEnvironment,
   StrategyTraceRequest,
   StrategyTraceResponse,
 } from "../../../shared/api";
@@ -30,13 +31,24 @@ export type StrategyDebuggerContext = {
   specHash: string;
   expectedSnapshotId: string;
   expectedRegistryVersion: string;
+  /**
+   * 추적이 놓일 실행 설정(schema 1.2 부터 전략 문서 밖, P3-02). 실행 요청과 같은 값을 trace 요청에
+   * 싣는다 — 없으면 backend 가 `run_environment.required` 로 거절한다.
+   */
+  environment: RunEnvironment;
+  /** 실행 기간(= `environment.start`·`end`). 응답 날짜 범위 가드와 날짜 입력 범위가 읽는다. */
   start: string;
   end: string;
   factors: StrategyDebuggerFactor[];
 };
 
+/** `environment` 는 실행 설정 패널의 기간·유니버스가 아직 정해지지 않았다는 뜻이다. */
 export type StrategyDebuggerUnavailableReason =
-  "document" | "preparing" | "no-factors" | "execution-plan";
+  | "document"
+  | "preparing"
+  | "no-factors"
+  | "execution-plan"
+  | "environment";
 
 export type StrategyTraceSelection = {
   asOf: string;
@@ -154,6 +166,7 @@ export const prepareStrategyTrace = (
     "node_ids" | "include_raw" | "offset" | "limit"
   > = {
     strategy_source: context.strategySource,
+    environment: context.environment,
     security_ids: securityIds,
     factor_id: factor.factorId,
     ...(selection.asOf === "" ? {} : { as_of: selection.asOf }),
@@ -333,10 +346,11 @@ const responseDateMatches = (
   request: StrategyTraceRequest,
   response: StrategyTraceResponse,
 ): boolean => {
+  const { start, end } = prepared.expected;
   if (
     !validIsoDate(response.as_of) ||
-    response.as_of < prepared.expected.start ||
-    response.as_of > prepared.expected.end ||
+    response.as_of < start ||
+    response.as_of > end ||
     (request.as_of != null && response.as_of !== request.as_of)
   )
     return false;
@@ -345,7 +359,7 @@ const responseDateMatches = (
     response.target.signal_as_of === response.as_of &&
     validIsoDate(response.target.execution_on) &&
     response.target.execution_on > response.as_of &&
-    response.target.execution_on <= prepared.expected.end
+    response.target.execution_on <= end
   );
 };
 

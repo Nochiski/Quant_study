@@ -12,7 +12,7 @@ describe("traceErrorMessage (Phase 1 감사 위험 5b)", () => {
       "strategy revision 1 requires upgrade",
     );
     expect(traceErrorMessage(error)).toBe(
-      "저장된 1.0 revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+      "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
     );
   });
 

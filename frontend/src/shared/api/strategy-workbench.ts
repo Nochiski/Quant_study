@@ -16,6 +16,7 @@ import {
   getStrategyDocumentSchema,
   getStrategyOperatorCatalog,
   getBacktestStatus,
+  getRunEnvironmentSchema,
   listBacktests,
   listStrategies,
   listStrategyRevisions,
@@ -34,7 +35,6 @@ import type {
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
-  DataStep,
   DatasetFieldProfile,
   DiffEntry,
   FactorCatalog,
@@ -58,6 +58,8 @@ import type {
   ReviseDocumentRequest,
   RevisionDiff,
   RevisionSummary,
+  RunEnvironment,
+  RunEnvironmentSchema,
   SaveDocumentRequest,
   SaveStrategyDraftRequest,
   SavedRevisionReference,
@@ -458,6 +460,15 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getStrategyDocumentSchema");
   },
 
+  /**
+   * 실행 설정(`RunEnvironment`) 런타임 JSON Schema(P2-01, spec D6). 실행 설정 패널이 필드·기본값·
+   * 범위를 여기서 읽는다 — 생성 SDK 타입에는 범위가 없다(pydantic 이 `__post_init__` 를 보지 못한다).
+   */
+  async getRunEnvironmentSchema(): Promise<RunEnvironmentSchema> {
+    const response = await getRunEnvironmentSchema();
+    return unwrap(response, "getRunEnvironmentSchema");
+  },
+
   /** 그래프 노드 연산자 정의 전부(P1-03, spec D8). 팔레트·라벨이 읽는 유일한 연산자 목록이다. */
   async getStrategyOperatorCatalog(): Promise<StrategyOperatorCatalog> {
     const response = await getStrategyOperatorCatalog();
@@ -524,7 +535,6 @@ export type {
   BacktestStartResponse,
   CompileRequest,
   CompiledDocument,
-  DataStep,
   DatasetFieldProfile,
   DiffEntry,
   FactorCatalog,
@@ -546,6 +556,8 @@ export type {
   ReviseDocumentRequest,
   RevisionDiff,
   RevisionSummary,
+  RunEnvironment,
+  RunEnvironmentSchema,
   SaveDocumentRequest,
   SaveStrategyDraftRequest,
   SavedRevisionReference,

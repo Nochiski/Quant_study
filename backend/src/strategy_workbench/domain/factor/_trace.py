@@ -40,8 +40,6 @@ from ._nodes import (
     GroupNode,
     MissingPolicy,
     ParameterNode,
-    SavedFactorNode,
-    SavedSubgraphNode,
     TimeSeriesNode,
     TimeSeriesOperator,
     UnaryNode,
@@ -57,7 +55,6 @@ class TraceValueStatus(StrEnum):
     WARM_UP = "warm_up"
     DIVIDE_BY_ZERO = "divide_by_zero"
     GROUP_MISSING = "group_missing"
-    REFERENCE_MISSING = "reference_missing"
 
 
 @dataclass(frozen=True)
@@ -75,8 +72,7 @@ class TracedValue:
     """One (as_of, security) row of a node.
 
     `inputs` are the dependency values on the same row; time-series windows are not expanded
-    (the status explains warm-up). Saved references that exist but hold None also report
-    `reference_missing` until P5-03 splits source-omitted from missing.
+    (the status explains warm-up).
     """
 
     as_of: date
@@ -303,8 +299,6 @@ def _status(
         return TraceValueStatus.OK
     if isinstance(node, FieldNode):
         return TraceValueStatus.MISSING_INPUT
-    if isinstance(node, (SavedFactorNode, SavedSubgraphNode)):
-        return TraceValueStatus.REFERENCE_MISSING
     if isinstance(node, BinaryNode):
         if node.operator is BinaryOperator.DIVIDE and all(
             _as_number(item) is not None for item in inputs

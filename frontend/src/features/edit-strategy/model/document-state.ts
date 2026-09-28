@@ -342,6 +342,17 @@ export const canValidateDocument = (state: DocumentState): boolean =>
   state.parsedVersion === state.sourceVersion &&
   state.parse?.status === "ok";
 
+/**
+ * 지금 텍스트의 검증이 끝났다: compile 이 이 버전을 따라잡았거나, 구문 오류라 compile 이 시작되지
+ * 않는다. 문서 상태 배지가 `data-settled` 로 드러내 e2e 가 중간 상태를 단언하지 않게 한다(#240).
+ */
+export const isDocumentSettled = (state: DocumentState): boolean =>
+  !state.composing &&
+  (state.compiledVersion === state.sourceVersion ||
+    (state.parsedVersion === state.sourceVersion &&
+      state.parse !== null &&
+      state.parse.status !== "ok"));
+
 /** A compiled spec that no longer matches the text: view-only, shown with an explicit badge. */
 export const isSpecStale = (state: DocumentState): boolean =>
   state.compiled?.spec != null && state.compiledVersion !== state.sourceVersion;

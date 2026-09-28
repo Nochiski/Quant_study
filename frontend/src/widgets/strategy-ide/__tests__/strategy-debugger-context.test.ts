@@ -5,7 +5,7 @@ import {
   type DocumentState,
   type ExecutionPlansState,
 } from "../../../features/edit-strategy";
-import type { StrategySpec } from "../../../shared/api";
+import type { RunEnvironment, StrategySpec } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { buildStrategyDebuggerAvailability } from "../model/strategy-debugger-context";
 
@@ -14,9 +14,15 @@ const FIXTURE = JSON.parse(
 ) as StrategySpec;
 const SPEC: StrategySpec = {
   ...FIXTURE,
-  factors: [FIXTURE.factors[0]!],
+  factors: [FIXTURE.factors![0]!],
 };
-const FACTOR = SPEC.factors[0]!;
+const FACTOR = SPEC.factors![0]!;
+/** 실행 설정 패널이 검증한 값(P3-02). 추적 요청과 기간 가드가 같은 값을 읽는다. */
+const ENVIRONMENT: RunEnvironment = {
+  start: "2021-01-01",
+  end: "2026-08-31",
+  universe_id: "krx.common-stock",
+};
 
 const documentState = (): DocumentState => ({
   ...initialDocumentState("yaml", "current source"),
@@ -47,10 +53,9 @@ const plans = (): ExecutionPlansState => ({
       label: FACTOR.label,
       request: {
         graph: FACTOR.graph,
-        factor_ids: [FACTOR.factor_id],
         parameter_ids: [],
-        subgraph_ids: [],
       },
+      document: null,
       explanation: {
         registry_version: "registry-v1",
         data_snapshot_id: "snapshot-v1",
@@ -62,6 +67,7 @@ const plans = (): ExecutionPlansState => ({
           required_field_ids: ["price.close"],
         },
         plan: {
+          missing_policy: "drop",
           graph_hash: "graph-hash",
           plan_hash: "plan-hash",
           registry_version: "registry-v1",
@@ -87,13 +93,11 @@ const plans = (): ExecutionPlansState => ({
             },
           ],
           required_field_ids: ["price.close"],
-          referenced_factor_ids: [],
-          referenced_subgraph_ids: [],
           minimum_history_sessions: 252,
-          missing_policy: "drop",
           as_of_policy: "available_date_lte_as_of",
         },
         narrative: [],
+        synthesized_nodes: [],
       },
     },
   ],
@@ -101,7 +105,7 @@ const plans = (): ExecutionPlansState => ({
 
 describe("Strategy IDE debugger composition", () => {
   it("packages the editor-owned inline source with backend-owned plan identities", () => {
-    expect(buildStrategyDebuggerAvailability(documentState(), plans())).toEqual(
+    expect(buildStrategyDebuggerAvailability(documentState(), plans(), ENVIRONMENT)).toEqual(
       {
         reason: null,
         context: {
@@ -115,8 +119,9 @@ describe("Strategy IDE debugger composition", () => {
           specHash: "spec-hash",
           expectedSnapshotId: "snapshot-v1",
           expectedRegistryVersion: "registry-v1",
-          start: SPEC.data.start,
-          end: SPEC.data.end,
+          environment: ENVIRONMENT,
+          start: "2021-01-01",
+          end: "2026-08-31",
           factors: [
             {
               factorId: "momentum",
@@ -152,7 +157,7 @@ describe("Strategy IDE debugger composition", () => {
       baseSpecHash: "spec-hash",
     };
     expect(
-      buildStrategyDebuggerAvailability(state, plans()).context?.strategySource,
+      buildStrategyDebuggerAvailability(state, plans(), ENVIRONMENT).context?.strategySource,
     ).toEqual({
       kind: "saved_revision",
       strategy_id: "strategy-1",
@@ -161,21 +166,89 @@ describe("Strategy IDE debugger composition", () => {
     });
   });
 
+  it("traces only the authored nodes when compile appended boolean promotion nodes (BACKLOG-014)", () => {
+    // compile 이 그래프 끝에 붙인 승격 노드는 문서에 줄이 없다. 디버거는 사용자가 적은 노드만 싣고,
+    // 출력 노드는 사용자가 적은 출력이다(붙인 조건 노드가 아니다).
+    const promoted = plans();
+    if (promoted.status !== "ready") throw new Error("test setup");
+    const factor = promoted.factors[0]!;
+    factor.request = {
+      ...factor.request,
+      graph: {
+        nodes: [
+          ...factor.request.graph.nodes,
+          { kind: "constant", node_id: "__promote_momentum_one", value: 1 },
+          { kind: "constant", node_id: "__promote_momentum_zero", value: 0 },
+          {
+            kind: "conditional",
+            node_id: "__promote_momentum",
+            predicate_node_id: "mom_252",
+            true_node_id: "__promote_momentum_one",
+            false_node_id: "__promote_momentum_zero",
+          },
+        ],
+        output_node_id: "__promote_momentum",
+      },
+    };
+    factor.document = {
+      nodeIds: factor.request.graph.nodes.slice(0, 2).map((node) => node.node_id),
+    };
+    // backend 가 실행 계획 설명에 싣는 붙인 노드 표식(Phase 2 감사 #13).
+    factor.explanation.synthesized_nodes = [
+      { node_id: "__promote_momentum_one", origin: "promotion", role: "promotion_constant" },
+      { node_id: "__promote_momentum_zero", origin: "promotion", role: "promotion_constant" },
+      { node_id: "__promote_momentum", origin: "promotion", role: "promoted_output" },
+    ];
+    const steps = factor.explanation.plan!.steps;
+    factor.explanation.plan!.steps = [
+      ...steps,
+      ...["__promote_momentum_one", "__promote_momentum_zero"].map(
+        (nodeId, index) => ({
+          ...steps[0]!,
+          sequence: steps.length + index + 1,
+          node_id: nodeId,
+          operation: "constant",
+        }),
+      ),
+      {
+        ...steps[1]!,
+        sequence: steps.length + 3,
+        node_id: "__promote_momentum",
+        operation: "conditional",
+        input_node_ids: [
+          "mom_252",
+          "__promote_momentum_one",
+          "__promote_momentum_zero",
+        ],
+      },
+    ];
+
+    const traced =
+      buildStrategyDebuggerAvailability(documentState(), promoted, ENVIRONMENT).context
+        ?.factors[0];
+    expect(traced?.outputNodeId).toBe("mom_252");
+    expect(traced?.nodes.map((node) => [node.nodeId, node.pointer])).toEqual([
+      ["close", "/factors/0/graph/nodes/0"],
+      ["mom_252", "/factors/0/graph/nodes/1"],
+    ]);
+  });
+
   it("fails closed for a stale document or an unpinned execution plan", () => {
     expect(
       buildStrategyDebuggerAvailability(
         { ...documentState(), sourceVersion: 8 },
         plans(),
+        ENVIRONMENT,
       ),
     ).toEqual({ context: null, reason: "document" });
     expect(
-      buildStrategyDebuggerAvailability(documentState(), { status: "loading" }),
+      buildStrategyDebuggerAvailability(documentState(), { status: "loading" }, ENVIRONMENT),
     ).toEqual({ context: null, reason: "preparing" });
     const invalidPlans = plans();
     if (invalidPlans.status !== "ready") throw new Error("test setup");
     invalidPlans.factors[0]!.explanation.plan = null;
     expect(
-      buildStrategyDebuggerAvailability(documentState(), invalidPlans),
+      buildStrategyDebuggerAvailability(documentState(), invalidPlans, ENVIRONMENT),
     ).toEqual({ context: null, reason: "execution-plan" });
 
     const incompletePlans = plans();
@@ -188,7 +261,14 @@ describe("Strategy IDE debugger composition", () => {
       incompletePlans.factors[0]!.explanation.plan!.steps[1]!,
     ];
     expect(
-      buildStrategyDebuggerAvailability(documentState(), incompletePlans),
+      buildStrategyDebuggerAvailability(documentState(), incompletePlans, ENVIRONMENT),
     ).toEqual({ context: null, reason: "execution-plan" });
+  });
+
+  it("does not trace until the run settings give a period and universe", () => {
+    // 실행 설정 없이 보낸 trace 는 backend 가 `run_environment.required` 로 거절한다(P3-02).
+    expect(
+      buildStrategyDebuggerAvailability(documentState(), plans(), null),
+    ).toEqual({ context: null, reason: "environment" });
   });
 });

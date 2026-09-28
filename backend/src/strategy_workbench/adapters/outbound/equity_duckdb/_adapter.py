@@ -277,6 +277,31 @@ class _Window:
         return (*self.history, *self.requested)
 
 
+def _catalog_error_types() -> tuple[type[Exception], ...]:
+    """원천을 빼도 되는 duckdb 오류 — 카탈로그·원장 파일의 성질이라 재시작해도 그대로인 것.
+
+    duckdb 예외 계층(`duckdb.Error` 아래 약 30종)을 훑어 고른다(#245 리뷰 P3-1·P3-4).
+    - 파일: `IOException`(누락·읽기 실패, `HTTPException` 포함) · `InvalidInputException`(손상·
+      0바이트 parquet) · `PermissionException`(권한)
+    - 카탈로그: `CatalogException`(매크로·표 누락) · `ParserException`(구운 매크로 본문을 못 읽음)
+      · `BinderException`(열·스키마 드리프트)
+    나머지는 일시적이거나 원천과 무관해 올린다 — `InterruptException` · `OutOfMemoryException` ·
+    `InternalException` · `FatalException` · `ConnectionException` · `TransactionException` ·
+    `SerializationException` 과 값 변환 계열(`ConversionException` 등, 바인딩만 하는 DESCRIBE 에서는
+    나지 않는다).
+    """
+    import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
+
+    return (
+        module.IOException,
+        module.InvalidInputException,
+        module.PermissionException,
+        module.CatalogException,
+        module.ParserException,
+        module.BinderException,
+    )
+
+
 def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     """duckdb 연결 — 지연 import(optional extra `equity`). `path` 는 read_only 로 여는 카탈로그."""
     try:
@@ -364,9 +389,7 @@ class EquityDuckdbAdapter:
             name: self._source_unavailable_reason(spec) for name, spec in SOURCE_BY_NAME.items()
         }
         self._fields: dict[str, FieldSpec] = {
-            spec.field_id: spec
-            for spec in FIELD_SPECS
-            if self._source_reason[spec.source] is None
+            spec.field_id: spec for spec in FIELD_SPECS if self._source_reason[spec.source] is None
         }
         self._profile: dict[str, tuple[int, str]] = self._load_profile()
         self._warn_lag_fallback()
@@ -405,13 +428,17 @@ class EquityDuckdbAdapter:
         """
         if PROFILE_TABLE not in self._tables:
             return {}
+        # 지연 import — 모듈 머리의 duckdb 는 TYPE_CHECKING 전용이라 except 절이 이름으로 참조하면
+        # 이 경로에서 NameError 가 난다(#245).
+        import duckdb as module
+
         con = _open(None)
         try:
             rows = con.execute(
                 "SELECT field_id, recommended_lag_sessions, available_date_basis "
                 f"FROM {self._source(PROFILE_TABLE)}"
             ).fetchall()
-        except duckdb.Error as exc:  # 컬럼이 없는 구판 표 — 폴백으로 내려간다
+        except module.Error as exc:  # 파일이 빠졌거나 컬럼이 없는 구판 표 — 진단을 담아 멈춘다
             raise EquityDuckdbSetupError(
                 f"{PROFILE_TABLE} exists but is unreadable — root={self._root} error={exc}"
             ) from exc
@@ -510,6 +537,20 @@ class EquityDuckdbAdapter:
             described = con.execute(
                 f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
             ).fetchall()
+        except _catalog_error_types() as error:
+            # 스냅샷은 맞는데 매크로가 가리키는 parquet 가 빠졌거나 손상된 카탈로그 등 — 생성자
+            # 밖으로 던지면 어댑터 전체가 뜨지 못한다(#233 리뷰 후속). 이 원천만 빼고 사유를 남긴다.
+            # 사유는 재시작 전까지 캐시되므로 카탈로그·파일 성격의 오류만 잡고, 중단·메모리 부족
+            # 같은 일시적 오류는 그대로 올린다(#245 리뷰 P3-1·P3-4).
+            reason = (
+                f"카탈로그 매크로 {spec.relation} 를 읽을 수 없어 원천 {spec.name} 의 필드를 "
+                "뺀다 — 카탈로그를 다시 만들거나 원장 파일을 확인해야 한다"
+                "(`ledger_sync verify`·`catalog`) "
+                f"(catalog_macro_unreadable) — error={type(error).__name__}: {error} "
+                f"catalog={self._catalog.path}"
+            )
+            logger.warning(reason)
+            return reason
         finally:
             con.close()
         present = {str(row[0]) for row in described}
@@ -600,9 +641,7 @@ class EquityDuckdbAdapter:
             return self._coverage_cache
         con = self._connect()
         try:
-            grid = con.execute(
-                f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}"
-            ).fetchone()
+            grid = con.execute(f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}").fetchone()
             n_grid = max(_as_int((grid or (0,))[0], "universe_daily rows"), 1)
             n_ticker = _as_int(
                 (
@@ -636,9 +675,7 @@ class EquityDuckdbAdapter:
                     if source.mode is SourceMode.GRID
                     else (n_ticker if source.axis is SourceAxis.TICKER else n_corp)
                 )
-                group = (
-                    f" GROUP BY {source.key_column}" if source.reduce is Reduce.SUM else ""
-                )
+                group = f" GROUP BY {source.key_column}" if source.reduce is Reduce.SUM else ""
                 for field_id in fields:
                     expr = self._fields[field_id].expr
                     if source.mode is SourceMode.GRID:
@@ -662,9 +699,7 @@ class EquityDuckdbAdapter:
         """`LATEST` 원천의 첫 공개일(캘린더 안으로 자른다). `GRID` 는 캘린더 시작이다."""
         if source.mode is SourceMode.GRID:
             return self._sessions[0]
-        row = con.execute(
-            f"SELECT min({source.available_expr}) FROM {relation} {where}"
-        ).fetchone()
+        row = con.execute(f"SELECT min({source.available_expr}) FROM {relation} {where}").fetchone()
         first = row[0] if row is not None else None
         if first is None:
             return self._sessions[0]
@@ -809,11 +844,23 @@ class EquityDuckdbAdapter:
                     field_id=field_id,
                     unit=self._fields[field_id].unit,
                     value_type=NodeValueType.NUMERIC_SERIES,
+                    adjusted_field_id=self._fields[field_id].adjusted_field_id,
                 )
                 for field_id in field_ids
                 if field_id in self._fields
             ),
         )
+
+    def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
+        """compile 이 읽는 필드 계약 전부(P2-07). `resolve_factor_fields` 와 같은 변환을 거친다.
+
+        그룹 필드(`group_series`)는 주지 않으므로 그래프의 그룹 연산은 compile 에서 unsupported
+        다. P2-08 스파이크가 원장을 확인했다: `dataset_profile` 의 `classification.sector` 는 시점
+        축 없는 KSIC 현재값(`point_in_time=false`)이고, WICS `sector_snapshot` 은 스냅샷 하나뿐이라
+        과거 세션에 값이 없다. 월별 WICS 백필(`database/docs/WICS_PROBE.md` 7-5절, 라이선스 미결)이
+        들어와야 PIT 그룹 필드를 낼 수 있다.
+        """
+        return self.resolve_factor_fields(tuple(self._fields)).fields
 
     def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         """`RESEARCH_UNIVERSE_ID` 위의 raw 패널을 팩터 관측으로. status 가 없어 실패는 예외."""
@@ -1023,9 +1070,7 @@ class EquityDuckdbAdapter:
                     f"DESCRIBE SELECT * FROM {self._source(PRICE_TABLE)}"
                 ).fetchall()
             }
-            basis_expr = (
-                BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
-            )
+            basis_expr = BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
             price_rows = con.execute(
                 f"""
                 SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
@@ -1433,8 +1478,7 @@ class EquityDuckdbAdapter:
                     f"date ORDER BY {source.pick_order}) = 1"
                 )
             joins.append(
-                f"LEFT JOIN ({picked}) g{index} "
-                f"ON g{index}.k = r.ticker AND g{index}.d = r.date"
+                f"LEFT JOIN ({picked}) g{index} ON g{index}.k = r.ticker AND g{index}.d = r.date"
             )
             selects.append(
                 f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, "
@@ -1579,14 +1623,10 @@ class EquityDuckdbAdapter:
             entry: dict[str, _Observed] = {}
             for position, field_id in enumerate(fields):
                 value = _as_float(raw[3 + position], field_id)
-                entry[field_id] = _Observed(
-                    value, available, content, _cell_kind(value, None)
-                )
+                entry[field_id] = _Observed(value, available, content, _cell_kind(value, None))
             dates.setdefault(key, []).append(available)
             cells.setdefault(key, []).append(entry)
-        return {
-            key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates
-        }
+        return {key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates}
 
     @staticmethod
     def _rows_in(panel: _Panel, sessions: Sequence[date]) -> Iterator[_Row]:
@@ -1606,9 +1646,7 @@ class EquityDuckdbAdapter:
             found = panel.rows.get((row.ticker, cutoff))
             return None if found is None else found.cells.get(field_id)
         key = (
-            row.ticker
-            if source.axis is SourceAxis.TICKER
-            else panel.corp_by_ticker.get(row.ticker)
+            row.ticker if source.axis is SourceAxis.TICKER else panel.corp_by_ticker.get(row.ticker)
         )
         series = panel.latest.get(source.name, {}).get(key) if key is not None else None
         if series is None:

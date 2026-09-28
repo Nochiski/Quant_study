@@ -99,6 +99,11 @@ export class ApiRequestError extends Error {
   readonly currentDraft: StrategyDraft | null;
   /** 거절이 가리킨 요청 본문의 칸(점 경로, 예 `initial_cash`). detail 에 `field` 가 없으면 undefined. */
   readonly field: string | undefined;
+  /**
+   * 코드가 없는 FastAPI 기본 422(배열 `detail`)의 진단 요약. `detail` 과 달리 화면 본문에 쓰지 않고 접힌 진단
+   * 상세에만 쓴다 — 저장·업그레이드 배너와 추적 오류는 `detail` 을 본문으로 그린다(#268 리뷰 P3-4).
+   */
+  readonly diagnostic: string | undefined;
 
   constructor(
     context: string,
@@ -108,6 +113,7 @@ export class ApiRequestError extends Error {
     latestRevision: number | null = null,
     currentDraft: StrategyDraft | null = null,
     field?: string,
+    diagnostic?: string,
   ) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
@@ -119,6 +125,7 @@ export class ApiRequestError extends Error {
     this.latestRevision = latestRevision;
     this.currentDraft = currentDraft;
     this.field = field;
+    this.diagnostic = diagnostic;
   }
 }
 
@@ -174,7 +181,8 @@ export const invalidDocumentSummary = (error: unknown): string | undefined => {
 /**
  * FastAPI 기본 422(`detail` 배열)의 진단 문장. 첫 오류의 본문 경로와 문장에 나머지 개수를 붙인다. 코드화된
  * 계약이 없는 라우트에서도 서버 사유를 버리지 않으려는 방어다(이슈 #260: 배열 detail 에서 `code`·`message`
- * 를 꺼내지 못해 사유가 사라졌다). 화면 본문이 아니라 접힌 진단 상세에 쓴다.
+ * 를 꺼내지 못해 사유가 사라졌다). `ApiRequestError.diagnostic` 에만 싣는다 — 화면 본문이 아니라 접힌 진단 상세에
+ * 쓴다.
  */
 export const requestValidationSummary = (
   error: unknown,
@@ -297,11 +305,11 @@ const requestError = (
     responseStatus,
     errorCode(response.error),
     errorField(response.error, "message") ??
-      invalidDocumentSummary(response.error) ??
-      requestValidationSummary(response.error),
+      invalidDocumentSummary(response.error),
     conflict?.latest_revision ?? null,
     draftConflict?.current ?? null,
     detailFieldPath(response.error),
+    requestValidationSummary(response.error),
   );
 };
 

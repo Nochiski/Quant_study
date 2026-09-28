@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -28,14 +31,19 @@ from strategy_workbench.domain.strategy.facade.document import (
     SourceFormat,
 )
 from strategy_workbench.domain.strategy.facade.specification import SignalNormalization
+from tests import frozen_revision_rows
 from tests.frozen_revision_rows import (
+    E2E_SCHEMA_ENV,
+    E2E_SUFFIX_ENV,
     FIXTURES,
     open_repository,
+    seed_retired_1_1_document_row,
     seed_retired_1_1_row,
     source_spec_hash,
 )
 
 RETIRED_VERSION = "1.1"
+SEED_CLI = Path(frozen_revision_rows.__file__)
 
 
 def _authoring() -> StrategyAuthoringService:
@@ -115,6 +123,69 @@ def test_list_history_and_document_views_stay_green_on_a_retired_1_1_row(tmp_pat
     # generated source 는 그대로 컴파일된다 — hash 는 저장된 1.1 hash 와 다르다(문서가 달라졌다).
     recompiled = source_spec_hash(document.source, SourceFormat.JSON)
     assert recompiled != row.spec_hash
+
+
+def test_a_retired_1_1_document_row_serves_its_saved_yaml_for_upgrade(tmp_path: Path) -> None:
+    """원문이 함께 저장된 1.1 row 는 generated source 가 아니라 그 YAML 원문을 돌려준다.
+
+    revision 화면의 "현재 버전으로 업그레이드"는 이 원문을 upgrade API 에 보내는 경로다. e2e·매뉴얼
+    캡처가 CLI(`STRATEGY_WORKBENCH_E2E_SEED_SCHEMA=1.1`)로 심는 row 가 이것이다.
+    """
+    path = tmp_path / "document.sqlite3"
+    row = seed_retired_1_1_document_row(path)
+    authoring = _authoring()
+
+    with open_repository(path) as repository:
+        record = repository.get(row.strategy_id, 1)
+        documents = StrategyDocumentService(authoring, repository, new_id=lambda: "unused")
+        document = documents.get(row.strategy_id, 1)
+
+    assert record.requires_upgrade is True
+    assert record.spec.identity.schema_version == RETIRED_VERSION
+    assert not document.generated and document.format is SourceFormat.YAML
+    assert document.source == row.source_text
+    assert document.source.startswith('schema_version: "1.1"')
+    assert document.requires_upgrade and document.schema_version == RETIRED_VERSION
+
+
+def _run_seed_cli(path: Path, schema: str) -> subprocess.CompletedProcess[str]:
+    environment = {**os.environ, E2E_SUFFIX_ENV: "-cli", E2E_SCHEMA_ENV: schema}
+    return subprocess.run(
+        [sys.executable, str(SEED_CLI), str(path)],
+        cwd=SEED_CLI.parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("schema", "expected"),
+    [("", ["frozen-doc-cli", "frozen-legacy-cli"]), ("1.1", ["retired-1-1-cli"])],
+)
+def test_the_seed_cli_picks_the_retired_version_from_its_environment(
+    tmp_path: Path, schema: str, expected: list[str]
+) -> None:
+    """e2e 는 기본값(1.0 row 둘)을, 매뉴얼 촬영은 `1.1`(원문 있는 row 하나)을 CLI 로 심는다.
+
+    환경 변수 분기가 함수 계약과 따로 놀지 않게 CLI 를 직접 돌린다(#263 리뷰 P3-5).
+    """
+    path = tmp_path / "cli.sqlite3"
+    completed = _run_seed_cli(path, schema)
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == ", ".join(f"{strategy_id}@1" for strategy_id in expected)
+    with open_repository(path) as repository:
+        assert all(repository.get(strategy_id, 1).requires_upgrade for strategy_id in expected)
+
+
+def test_the_seed_cli_refuses_an_unknown_retired_version(tmp_path: Path) -> None:
+    completed = _run_seed_cli(tmp_path / "cli.sqlite3", "1.2")
+
+    assert completed.returncode != 0
+    assert f"{E2E_SCHEMA_ENV} must be 1.0 or 1.1" in completed.stderr
 
 
 @pytest.mark.parametrize("schema_version", ["1.3", "9.9"])

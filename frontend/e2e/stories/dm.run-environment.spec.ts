@@ -110,8 +110,22 @@ test(
     await expect(summary).toContainText("2026-08-31");
 
     // OOS 시작일은 선택 칸이지만, 덜 친 채 떠나면 OOS 없이 조용히 실행되지 않고 막힌다(#266 리뷰 P2-1).
+    // 칸을 떠나지 않고 백테스트 단축키를 눌러도 같다 — 칸을 떠날 때만 덜 친 상태를 읽으면 단축키가 OOS 없이
+    // 실행을 시작했다(#266 재리뷰 P3-1).
+    const starts: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/backtests"
+      )
+        starts.push(request.url());
+    });
     await oos.click();
     await page.keyboard.type("2024");
+    await page.keyboard.press("Control+Shift+Enter");
+    await expect(oos).toBeFocused();
+    await expect(oos).toHaveAttribute("aria-invalid", "true");
+    await expect(backtest(page)).toBeDisabled();
     await universe.click();
     await expect(oos).toHaveValue("");
     await expect(oos).toHaveAttribute("aria-invalid", "true");
@@ -123,6 +137,9 @@ test(
       "실행 설정의 OOS 시작일 칸을 고치세요: 연·월·일까지 모두 올바르게 입력하세요.",
     );
     await expect(backtest(page)).toBeDisabled();
+    // 띠의 "실행 설정 고치기"가 OOS 칸으로 초점을 옮긴다(#266 재리뷰 P3-2).
+    await summary.getByRole("button", { name: "실행 설정 고치기" }).click();
+    await expect(oos).toBeFocused();
 
     await oos.click();
     await page.keyboard.type("20240102");
@@ -130,6 +147,9 @@ test(
     await expect(oosIncomplete).toHaveCount(0);
     await expect(oos).not.toHaveAttribute("aria-invalid", "true");
     await expect(backtest(page)).toBeEnabled();
+    // 덜 친 OOS 로는 시작 요청이 한 번도 나가지 않았다.
+    expect(starts).toEqual([]);
+    await expect(page).toHaveURL(/\/research\/strategies\/new/u);
   },
 );
 

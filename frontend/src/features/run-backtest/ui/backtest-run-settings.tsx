@@ -47,8 +47,9 @@ const EnvironmentInput = ({
   const errorId = useId();
   const description = tDescription(field.descriptionKey);
   // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 값만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
-  // 안에서 자리를 옮기는 동안 이벤트를 내지 않으므로, 칸을 떠날 때와 값이 바뀔 때 `badInput` 을 읽어
-  // 컨트롤러에 알린다. 검증이 그 칸을 날짜 오류로 보고, 칸 아래·요약 띠가 같은 문장을 쓴다(#266 리뷰 P3-1).
+  // 안에서 자리를 채우는 동안 input 이벤트를 내지 않으므로, 키를 뗄 때·값이 바뀔 때·칸을 떠날 때 `badInput` 을
+  // 읽어 컨트롤러에 알린다. 키를 뗄 때 읽지 않으면 칸을 떠나지 않고 누른 백테스트 단축키가 덜 친 칸을 보지
+  // 못한다(#266 재리뷰 P3-1). 검증이 그 칸을 날짜 오류로 보고, 칸 아래·요약 띠가 같은 문장을 쓴다.
   const describedBy =
     [description === null ? null : hintId, error === undefined ? null : errorId]
       .filter((id): id is string => id !== null)
@@ -109,6 +110,7 @@ const EnvironmentInput = ({
             onIncompleteChange(isIncompleteDate(event));
             onChange(event.target.value);
           }}
+          onKeyUp={(event) => onIncompleteChange(isIncompleteDate(event))}
           onBlur={(event) => onIncompleteChange(isIncompleteDate(event))}
         />
       )}
@@ -149,6 +151,12 @@ export const BacktestRunSettings = ({
     setPanelOpen,
   } = controller;
   const { open, focus } = panel;
+  // OOS 칸의 덜 친 상태. 키를 뗄 때마다 불리므로 바뀐 때만 필드를 고친다.
+  const markOosIncomplete = (event: SyntheticEvent<HTMLInputElement>): void => {
+    const incomplete = isIncompleteDate(event);
+    if ((fields.oosStartIncomplete ?? false) !== incomplete)
+      setField("oosStartIncomplete", incomplete);
+  };
   const optionErrors: ReadonlySet<BacktestRunSettingsError> = new Set(
     result.errors,
   );
@@ -297,12 +305,11 @@ export const BacktestRunSettings = ({
               }
               value={fields.oosStart}
               onChange={(event) => {
-                setField("oosStartIncomplete", isIncompleteDate(event));
+                markOosIncomplete(event);
                 setField("oosStart", event.target.value);
               }}
-              onBlur={(event) =>
-                setField("oosStartIncomplete", isIncompleteDate(event))
-              }
+              onKeyUp={markOosIncomplete}
+              onBlur={markOosIncomplete}
             />
             <small className="backtest-settings__hint">
               {t("backtest.settings.oosStart.hint")}

@@ -497,6 +497,25 @@ describe("run environment panel", () => {
     expect(screen.getByLabelText(/^종료일/)).toHaveFocus();
   });
 
+  // #266 재리뷰 P3-2: OOS 오류의 "고치기" 대상은 오류 코드가 아니라 OOS 칸(`oos_start`)이다. 대응 표를
+  // 되돌리면 초점이 어디로도 가지 않는다.
+  it("moves focus to the OOS start field when it is outside the run period", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    await user.type(screen.getByLabelText(/^OOS 시작일/), "2020-12-31");
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+
+    const band = screen.getByRole("region", { name: "실행 설정 요약" });
+    expect(band).toHaveTextContent(
+      "실행 설정의 OOS 시작일 칸을 고치세요: 실행 기간 안의 날짜여야 합니다.",
+    );
+    await user.click(
+      within(band).getByRole("button", { name: "실행 설정 고치기" }),
+    );
+    expect(screen.getByLabelText(/^OOS 시작일/)).toHaveFocus();
+  });
+
   it("names a run option field when only the run options are wrong", async () => {
     renderWithQuery(<Harness />);
     const user = await openSettings();

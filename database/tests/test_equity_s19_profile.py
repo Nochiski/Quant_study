@@ -54,10 +54,12 @@ CHAIN: tuple[str, ...] = (
 # 2026-09-19 감사 DEFECT-E02: KIS 축 4(flow 2 · short 2)를 **내부 스코프**로 선언 → 83.
 # 카탈로그만 보는 소비자에게 원천 정지(2026-08-14)를 `coverage_to` 로 알리는 것이 목적이고,
 # FIELD_MAP §2 어휘·어댑터 `list_fields()` 는 그대로다.
+# 2026-09-28 문서 감사 결정 5: `price.adj_close` 를 내부 스코프에서 FIELD_MAP §2 어휘로 옮겼다(#218 이
+# 레지스트리 가격 변화 팩터의 입력으로 삼았다) → field_map 35 → 36 · internal 48 → 47 · 어휘 45 → 46.
 N_FIELDS = 83                    # 선언 행수 — 코드가 정본이라 서버에서도 같다
-N_FIELD_MAP_SCOPE = 35           # FIELD_MAP §2 42 어휘 중 프로파일 행을 갖는 것
-N_INTERNAL_SCOPE = 48            # equity 내부 스코프(price.adj_close·fin_std 계정·4B·유니버스 …)
-N_FIELD_MAP_VOCAB = 45           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
+N_FIELD_MAP_SCOPE = 36           # FIELD_MAP §2 어휘 중 프로파일 행을 갖는 것
+N_INTERNAL_SCOPE = 47            # equity 내부 스코프(fin_std 계정·4B·유니버스 …)
+N_FIELD_MAP_VOCAB = 46           # FIELD_MAP §2 표의 field_id 수 (check_field_map.py 와 같은 축)
                                  # 2026-09-07: `flow.foreign_limit_exhaustion` 신설(F08 재료)
 PROFILE_GATES = ["EG0", "EG7", "EG1", "EG2", "EG3", "EG2_dataset_profile", "EG9", "EG4", "EG5a"]
 
@@ -148,6 +150,18 @@ def test_field_map_스코프_행은_전부_대응표_어휘_안이다(built) -> 
                                           "'field_map'")}
     assert got <= vocab
     assert len(got) == N_FIELD_MAP_SCOPE
+
+
+def test_내부_스코프_행은_대응표_어휘_밖이다(built) -> None:
+    """두 스코프는 §2 어휘로 갈린다 — 어휘에 든 필드를 `internal` 로 선언하면 대응표와 원장이 갈린 것이다.
+
+    `price.adj_close` 가 그랬다: #218 이 레지스트리 입력으로 삼아 §2 에 행이 들어가야 했는데 원장은
+    내부 스코프로 남아 있었다(2026-09-28 문서 감사 결정 5).
+    """
+    _, r = built
+    internal = {f for (f,) in _rows(r.out_dir, "SELECT field_id FROM dp WHERE field_scope = "
+                                               "'internal'")}
+    assert internal & _field_map_vocab() == set()
 
 
 def test_대응표_어휘_중_행이_없는_필드는_어댑터의_unavailable_이다(built) -> None:

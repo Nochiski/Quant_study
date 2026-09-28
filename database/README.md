@@ -10,7 +10,7 @@ KRX·키움·KIS·DART·WISE 원장 수집기, stage 층 빌더, 문서층(L1) �
 |---|---|
 | 원장 | **일일 체인 가동 중** — 2026-09-17 전체 체인 가동(저녁 슬롯·아침 슬롯). 수집 시각은 아래 "운영 (P6) → 크론 전체표" |
 | stage | 66테이블. 저녁 잠정판(`basis=evening`)·아침 확정판(`basis=krx`)을 매일 빌드한다(플랜 v2 페이즈 B) |
-| equity | 29표·코드 규칙 **e1.18.0**(`src/equity/model.py` `RULES_VERSION`, #248 fin_std 회계기간 파생). 판본을 올리는 규칙은 `EQUITY_HANDOFF.md` §6 |
+| equity | 29표·코드 규칙 **e1.19.0**(`src/equity/model.py` `RULES_VERSION`, #259 `price.adj_close` field_map 스코프 · 그 전 e1.18.0 은 #248 fin_std 회계기간 파생). 판본을 올리는 규칙은 `EQUITY_HANDOFF.md` §6 |
 | 진행 중 | **일일 증분 플랜 v2** `docs/plans/2026-09-11-daily-incremental-v2.md`(상태 블록이 정본) — 페이즈 A 저녁 원장 슬롯·페이즈 B 잠정/확정 빌드 **가동**(09-17 전체 체인), 페이즈 C Kael-alpha 인계 완료, 페이즈 D 범위 확정. 09-19 전수 감사 수정은 `docs/plans/2026-09-19-pipeline-audit-fix.md`. v1 `docs/plans/2026-09-09-daily-incremental.md` 는 P0~P3 기록. 사용자 행동 대기: 키움 앱키 추가 발급(`DECISIONS_PENDING.md` 결정 5 R5 후속) |
 | 크론 | **18:05 `daily_evening.sh`**(당일: 키움 투자자·공매도는 21:05 원장 직행 ∥ DART ∥ WISE 스냅샷) · 21:20 `build_evening.sh`(잠정 빌드) · 06:00 `daily_ledger.sh`(키움 마스터, 대차, KIS, DART 재스윕) · 08:10 `daily_build.sh`(KRX → 외국인 보유 → 머지 → 건전성 → **확정 빌드 포함**, 09-17 `--no-build` 제거) · 워치독 21:50/23:30/10:00 · 토 03:30 백업 · 일 04:30 gc. 전체는 아래 "운영 (P6) → 크론 전체표" |
 

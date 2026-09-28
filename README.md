@@ -240,8 +240,9 @@ npm run dev
 카엘 서버의 equity 층(29표, 현재 빌드 약 1.5GB)을 SFTP 읽기 전용 계정으로 로컬에 받아 워크벤치와
 엔진이 읽는다. 절차·판단 기준의 정본은 [database/docs/LEDGER_SYNC.md](database/docs/LEDGER_SYNC.md)다.
 
-먼저 두 가지를 준비한다. 서버 주소는 저장소에 두지 않으므로 `setx QL_SYNC_HOST <주소>`로 사용자
-환경변수에 한 번 넣는다(새 창부터 적용). 빠지면 `sync`가 접속 전에 `error: server host is not set`으로
+먼저 두 가지를 준비한다. 서버 주소와 SFTP 계정은 저장소에 두지 않으므로 `setx QL_SYNC_HOST <주소>`·
+`setx QL_SYNC_USER <계정>`으로 사용자 환경변수에 한 번 넣는다(새 창부터 적용, 계정은 서버 운영자에게
+받는다). 빠지면 `sync`가 접속 전에 `error: server host is not set` 또는 `error: server user is not set`으로
 끝난다. 동기화 래퍼는 backend 환경의 duckdb를 쓰므로 위 [바로 실행](#바로-실행)의 `uv sync`처럼
 `equity` extra를 설치해 둔다.
 

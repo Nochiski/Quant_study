@@ -53,6 +53,8 @@ GOLDEN = (
 ).read_text(encoding="utf-8")
 
 _CLOSE = FieldMetadata(field_id="price.close", unit="KRW")
+# 골든의 모멘텀 잎이 읽는 수정주가. 골든을 compile 하는 어댑터는 이 계약을 답해야 한다.
+_ADJ_CLOSE = FieldMetadata(field_id="price.adj_close", unit="KRW")
 _SECTOR_AS_GROUP = FieldMetadata(
     field_id="classification.sector", unit="category", value_type=NodeValueType.GROUP_SERIES
 )
@@ -155,9 +157,9 @@ _HANGUL = re.compile(r"[가-힣]")
 
 
 def test_an_unknown_field_is_a_compile_error_once_an_adapter_is_connected() -> None:
-    source = GOLDEN.replace("field_id: price.close", "field_id: price.closee")
+    source = GOLDEN.replace("field_id: price.adj_close", "field_id: price.closee")
 
-    compiled = _compile(source, _Catalog(_CLOSE))
+    compiled = _compile(source, _Catalog(_ADJ_CLOSE))
 
     assert not compiled.ok
     assert _errors(compiled) == [
@@ -172,7 +174,7 @@ def test_an_unknown_field_is_a_compile_error_once_an_adapter_is_connected() -> N
 
 
 def test_without_an_adapter_an_unknown_field_still_compiles() -> None:
-    source = GOLDEN.replace("field_id: price.close", "field_id: price.closee")
+    source = GOLDEN.replace("field_id: price.adj_close", "field_id: price.closee")
 
     assert _compile(source, None).ok
 
@@ -190,7 +192,7 @@ def test_the_cs02_denominator_typo_is_caught_by_compile_on_the_mock_adapter() ->
 
 def test_the_field_catalog_is_read_per_compile() -> None:
     """어댑터가 계약의 owner 다 — bootstrap 에서 복사해 두지 않는다(스냅샷 id 와 같은 규칙)."""
-    catalog = _Catalog(_CLOSE)
+    catalog = _Catalog(_ADJ_CLOSE)
     service = _service(catalog)
 
     service.compile(CompileRequest(GOLDEN, SourceFormat.YAML))
@@ -203,7 +205,9 @@ def test_the_field_catalog_is_read_per_compile() -> None:
 
 
 def test_a_group_node_is_unsupported_when_the_adapter_has_no_group_field() -> None:
-    compiled = _compile(_with_factor(_GROUP_FACTOR), _Catalog(_CLOSE, _SECTOR_AS_NUMBER))
+    compiled = _compile(
+        _with_factor(_GROUP_FACTOR), _Catalog(_CLOSE, _ADJ_CLOSE, _SECTOR_AS_NUMBER)
+    )
 
     assert not compiled.ok
     [diagnostic] = [
@@ -221,7 +225,7 @@ def test_a_group_node_is_unsupported_when_the_adapter_has_no_group_field() -> No
 
 
 def test_a_group_node_compiles_when_the_adapter_provides_a_group_field() -> None:
-    compiled = _compile(_with_factor(_GROUP_FACTOR), _Catalog(_CLOSE, _SECTOR_AS_GROUP))
+    compiled = _compile(_with_factor(_GROUP_FACTOR), _Catalog(_CLOSE, _ADJ_CLOSE, _SECTOR_AS_GROUP))
 
     assert compiled.ok, _errors(compiled)
 
@@ -234,8 +238,8 @@ def test_without_an_adapter_a_group_node_compiles_as_before() -> None:
     ("catalog", "expected"),
     [
         (None, OperatorAvailability.UNSUPPORTED),
-        (_Catalog(_CLOSE, _SECTOR_AS_NUMBER), OperatorAvailability.UNSUPPORTED),
-        (_Catalog(_CLOSE, _SECTOR_AS_GROUP), OperatorAvailability.AVAILABLE),
+        (_Catalog(_ADJ_CLOSE, _SECTOR_AS_NUMBER), OperatorAvailability.UNSUPPORTED),
+        (_Catalog(_ADJ_CLOSE, _SECTOR_AS_GROUP), OperatorAvailability.AVAILABLE),
     ],
     ids=["no-adapter", "numeric-only", "group-field"],
 )
@@ -252,8 +256,8 @@ def test_operator_catalog_availability_follows_the_same_capability(
 
 def test_operator_catalog_hash_changes_with_availability() -> None:
     """ETag 가 가용성을 덮어야 어댑터를 바꾼 뒤 화면이 옛 팔레트를 304 로 재사용하지 않는다."""
-    without = _service(_Catalog(_CLOSE)).operators().catalog_hash
-    with_group = _service(_Catalog(_CLOSE, _SECTOR_AS_GROUP)).operators().catalog_hash
+    without = _service(_Catalog(_ADJ_CLOSE)).operators().catalog_hash
+    with_group = _service(_Catalog(_ADJ_CLOSE, _SECTOR_AS_GROUP)).operators().catalog_hash
 
     assert without != with_group
 
@@ -276,7 +280,7 @@ def test_storage_integrity_does_not_depend_on_the_connected_adapter() -> None:
     compile 하면 연결된 어댑터 기준으로는 막힌다 — 실행 가능성은 compile 이 따로 말한다.
     """
     container = build_container(equity_adapter="mock")
-    source = GOLDEN.replace("field_id: price.close", "field_id: price.closee")
+    source = GOLDEN.replace("field_id: price.adj_close", "field_id: price.closee")
     compiled = _compile(source, None)
     assert compiled.spec is not None and compiled.spec_hash is not None
     spec = replace(compiled.spec, identity=StrategyIdentity("stored", 1))
@@ -433,7 +437,6 @@ def test_the_checked_paths_are_exactly_the_runtime_schema_equity_field_catalog()
 
 # 어댑터가 원주가 종가에 조정 짝을 표시한 계약. 표시가 없는 `_CLOSE` 와 비교한다.
 _RAW_CLOSE = replace(_CLOSE, adjusted_field_id="price.adj_close")
-_ADJ_CLOSE = FieldMetadata(field_id="price.adj_close", unit="KRW")
 _MARKET_CAP = FieldMetadata(field_id="price.market_cap", unit="KRW")
 
 _RAW_PRICE_MESSAGE = (
@@ -491,13 +494,14 @@ _SAME_DAY_FACTOR = """  - factor_id: price_to_cap
       output_node_id: ratio
 """
 
-# 골든의 모멘텀 잎만 수정주가로 바꾼 문서(나머지 팩터가 원주가를 어떻게 쓰는지만 보려고).
-_GOLDEN_ADJUSTED = GOLDEN.replace("field_id: price.close", "field_id: price.adj_close")
+# 골든의 모멘텀 잎만 원주가로 되돌린 문서. 골든은 수정주가를 읽으므로(BACKLOG-018 후속,
+# 리뷰 #232 DEFECT-232-05) warning 이 나는 쪽은 이렇게 만든다.
+_GOLDEN_RAW = GOLDEN.replace("field_id: price.adj_close", "field_id: price.close")
 
 
 def test_a_raw_price_under_a_past_session_operator_is_a_compile_warning() -> None:
-    """골든의 12개월 모멘텀은 원주가를 읽는다 — 막지 않고, 고칠 자리(`field_id`)를 짚어 알린다."""
-    compiled = _compile(GOLDEN, _Catalog(_RAW_CLOSE, _ADJ_CLOSE))
+    """원주가 12개월 모멘텀은 막지 않고, 고칠 자리(`field_id`)를 짚어 알린다."""
+    compiled = _compile(_GOLDEN_RAW, _Catalog(_RAW_CLOSE, _ADJ_CLOSE))
 
     assert compiled.ok, _errors(compiled)
     [diagnostic] = [
@@ -512,7 +516,7 @@ def test_a_raw_price_under_a_past_session_operator_is_a_compile_warning() -> Non
 
 
 def test_the_adjusted_price_under_the_same_operator_is_silent() -> None:
-    compiled = _compile(_GOLDEN_ADJUSTED, _Catalog(_RAW_CLOSE, _ADJ_CLOSE))
+    compiled = _compile(GOLDEN, _Catalog(_RAW_CLOSE, _ADJ_CLOSE))
 
     assert compiled.ok, _errors(compiled)
     assert _unadjusted(compiled) == []
@@ -520,7 +524,7 @@ def test_the_adjusted_price_under_the_same_operator_is_silent() -> None:
 
 def test_a_same_day_ratio_of_the_raw_price_is_silent() -> None:
     """과거 세션을 읽지 않는 연산(같은 날 비율)은 원주가여도 오염되지 않는다."""
-    source = _GOLDEN_ADJUSTED.replace("portfolio:\n", f"{_SAME_DAY_FACTOR}portfolio:\n", 1)
+    source = GOLDEN.replace("portfolio:\n", f"{_SAME_DAY_FACTOR}portfolio:\n", 1)
     assert "field_id: price.close" in source
 
     compiled = _compile(source, _Catalog(_RAW_CLOSE, _ADJ_CLOSE, _MARKET_CAP))
@@ -535,7 +539,7 @@ def test_a_raw_price_read_through_lag_and_a_window_warns_once_at_the_leaf() -> N
 
     def with_volatility(field: str) -> str:
         factor = _VOLATILITY_FACTOR.format(field=field)
-        return _GOLDEN_ADJUSTED.replace("portfolio:\n", f"{factor}portfolio:\n", 1)
+        return GOLDEN.replace("portfolio:\n", f"{factor}portfolio:\n", 1)
 
     raw = _compile(with_volatility("price.close"), catalog)
     adjusted = _compile(with_volatility("price.adj_close"), catalog)
@@ -550,8 +554,8 @@ def test_the_raw_price_is_judged_only_through_the_adapter_contract() -> None:
 
     표시가 없거나 어댑터가 없으면 말하지 않는다.
     """
-    assert _unadjusted(_compile(GOLDEN, _Catalog(_CLOSE, _ADJ_CLOSE))) == []
-    assert _unadjusted(_compile(GOLDEN, None)) == []
+    assert _unadjusted(_compile(_GOLDEN_RAW, _Catalog(_CLOSE, _ADJ_CLOSE))) == []
+    assert _unadjusted(_compile(_GOLDEN_RAW, None)) == []
 
 
 def test_the_mock_adapter_marks_its_raw_close_with_the_adjusted_field() -> None:
@@ -565,7 +569,7 @@ def test_the_mock_adapter_marks_its_raw_close_with_the_adjusted_field() -> None:
     }
     assert marked == {"price.close": "price.adj_close"}
     assert contracts["price.adj_close"].unit == contracts["price.close"].unit
-    assert _unadjusted(_compile(GOLDEN, adapter)) == [
+    assert _unadjusted(_compile(_GOLDEN_RAW, adapter)) == [
         ("/factors/0/graph/nodes/0/field_id", "close")
     ]
 
@@ -703,7 +707,7 @@ def test_a_raw_price_several_steps_below_a_past_session_operator_warns(shape: st
         f"{nodes}"
         f"      output_node_id: {output}\n"
     )
-    source = _GOLDEN_ADJUSTED.replace("portfolio:\n", f"{factor}portfolio:\n", 1)
+    source = GOLDEN.replace("portfolio:\n", f"{factor}portfolio:\n", 1)
 
     compiled = _compile(source, _Catalog(_RAW_CLOSE, _ADJ_CLOSE, _MARKET_CAP))
 

@@ -213,3 +213,11 @@ FY2025 `capex_basis`: standard 2,320 · ppe_parts 203 · none_in_cf 104 · ppe_i
 
 `stg_fin` 에 원문 `account_nm` 은 그대로 두고 **`account_nm_norm`**(공백 제거) 열을 추가한다. 실측(09-27): 고유 계정명 72,488 → 공백 제거 55,489, 변형 군 11,765(관련 행 1,400만/1,540만), 특수 공백·NFKC 차이 0 → "공백 제거"만으로 충분.
 절차: ① stage 규칙(`rules_dart.py` stg_fin)에 파생 열 + 스테이지 규칙 버전 인상(`test_stage_model` 2.3.0 고정 갱신) ② `fin_std.sql` 이 그 열을 입력으로 선언하고 자체 `regexp_replace` 제거(`nm_exact` 는 `account_nm = account_nm_norm` 그대로) ③ 절단본 픽스처 `stg_fin` 에 열 추가 ④ 저녁 정규 판에서 값 변경 0 확인(`verify_fa2_reg.py` 방식, 기준 = 09-28 판). 09-29 아침 GB3·5일째 그림자 통과 뒤 착수.
+
+## 10. T-F 정정 안내 페이지 서식 드리프트 (2026-09-28 승인, 코드 오늘 · 서버 09-29)
+
+**사실(09-28 실측, `logs/probe_corr*.py`)**: DART 정정 표지가 2025년부터 표 형식으로 바뀌어 최초제출일이 앵커 다음 줄로 내려가고 "3. 정정사유" 가 항목별 열이 됐다. `stg_doc_correction` 의 최초제출일 파싱 실패 2023 0.7% · 2024 2.4% → **2025 96.6% · 2026 99.1%**(정정대상·정정사유도 같이 NULL, 항목 표는 정상). 소비처 S11 `disclosure_version` 은 기간 라벨로 연결해 `candidate_status` 는 99.9% unique 그대로지만, 교차검증 `date_check='exact'` 가 2024 1,212 → 2025 44 → 2026 8 로 꺼졌다. 사다리 지표 `n_correction_filed_parsed` 는 기록형이라 20개월간 경보 없음.
+
+**조치**: ① 파서(`parsers_doc.correction_page`)를 줄 배치에 무관하게(같은 줄이 비면 다음 줄, 정정사유는 항목 열에서 합성) 고치고 `PARSER_VERSION` p1.4 → p1.5 ② 프리패스에 접수번호 목록 재파싱 경로(전량 4.5h 대신 2,400건만) ③ S11 게이트에 최근 90일 파싱 성공률(≥50건에서 <0.5 FAIL, 기록형 비율) ④ B-40(1·3분기 판정 3개월 가정) TECH_DEBT 등재.
+
+**게이트 GT-F**: (1) 파서 단위 테스트(2025 배치 2종·옛 배치 불변) (2) 서버: 미파싱 2,392건 재파싱 뒤 2025~2026 파싱 성공률 **≥ 95%**, 2024 이전 행 전건 불변 (3) `disclosure_version` 재빌드 뒤 2025~2026 `date_check` exact ≥ 90%(no_zip 제외), `candidate_status` 분포 불변 (4) 전체 테스트 통과. 서버 절차는 09-29 아침 GB3 뒤 T-E 와 함께.

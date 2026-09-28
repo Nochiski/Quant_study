@@ -272,6 +272,21 @@ describe("backtest run settings", () => {
     ]);
   });
 
+  // #266 리뷰 P2-1: OOS 시작일을 덜 치면 칸 값은 빈 문자열이다. 비운 것과 구분하지 않으면 OOS 구간 없이
+  // 실행돼 사용자가 원한 표본 밖 측정이 아무 표시 없이 사라진다. 비운 칸은 그대로 통과한다(선택 칸).
+  it("blocks a half-typed OOS start instead of silently running without the OOS window", () => {
+    expect(
+      buildBacktestRunOptions(
+        { ...DEFAULT_BACKTEST_RUN_SETTINGS, oosStartIncomplete: true },
+        VALID,
+      ),
+    ).toEqual({ valid: false, options: null, errors: ["oos_incomplete"] });
+    expect(
+      buildBacktestRunOptions(DEFAULT_BACKTEST_RUN_SETTINGS, VALID).options
+        ?.metric_windows,
+    ).toEqual([]);
+  });
+
   it("blocks an unsafe integer before Number conversion can mutate the wire value", () => {
     expect(
       buildBacktestRunOptions(

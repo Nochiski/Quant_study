@@ -98,6 +98,8 @@ const ko = {
     "연환산 거래일을 정확히 전송 가능한 정수로 입력하세요. 허용 범위는 서버가 검증합니다.",
   "backtest.settings.error.environment": "실행 환경 칸을 모두 올바르게 채우세요.",
   "backtest.settings.error.oos_out_of_range": "OOS 시작일은 실행 기간 안이어야 합니다.",
+  "backtest.settings.error.oos_incomplete":
+    "OOS 시작일을 연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
   "backtest.actions.title": "백테스트 실행 제어",
   "backtest.actions.cancel": "실행 취소",
   "backtest.actions.cancelling": "취소 요청됨",
@@ -1752,6 +1754,8 @@ export const messages = {
       "Enter annualization sessions as a losslessly representable integer; the server validates its accepted range.",
     "backtest.settings.error.environment": "Fill every run environment field correctly.",
     "backtest.settings.error.oos_out_of_range": "The OOS start date must be inside the run period.",
+    "backtest.settings.error.oos_incomplete":
+      "Enter the full OOS start year, month and day. Leave it empty to run without an OOS window.",
     "backtest.actions.title": "Backtest run controls",
     "backtest.actions.cancel": "Cancel run",
     "backtest.actions.cancelling": "Cancellation requested",

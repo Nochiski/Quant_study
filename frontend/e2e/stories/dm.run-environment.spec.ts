@@ -23,7 +23,6 @@ import {
   RUN_ENVIRONMENT,
   saveAndWaitForRevision,
   strategyIdentity,
-  waitForSettledDocument,
 } from "../workbench-helpers";
 
 /** 두 번째 실행에서 바꾸는 시작일. 첫 실행과 다른 기간이면 된다. */
@@ -59,7 +58,11 @@ test(
   { tag: ["@story", "@US-DM-05"] },
   async ({ page }) => {
     await openEditor(page, "/research/strategies/new");
-    await waitForSettledDocument(page);
+    await replaceSource(
+      page,
+      mustReplace(GOLDEN, "퀄리티 모멘텀", "US-DM-05 날짜 입력"),
+    );
+    await expectPhase(page, "검증 통과");
     const summary = page.getByRole("region", { name: "실행 설정 요약" });
     await summary.getByRole("button", { name: "실행 설정 채우기" }).click();
     const start = page.getByLabel("시작일", { exact: true });
@@ -95,15 +98,32 @@ test(
     await expect(end).toHaveValue("2026-08-31");
     await expect(incomplete).toHaveCount(0);
 
+    const universe = page.getByRole("textbox", {
+      name: "유니버스",
+      exact: true,
+    });
+    await universe.fill(RUN_ENVIRONMENT.universe_id);
+    await expect(summary).toContainText("2021-01-01");
+    await expect(summary).toContainText("2026-08-31");
+
+    // OOS 시작일은 선택 칸이지만, 덜 친 채 떠나면 OOS 없이 조용히 실행되지 않고 막힌다(#266 리뷰 P2-1).
+    await oos.click();
+    await page.keyboard.type("2024");
+    await universe.click();
+    await expect(oos).toHaveValue("");
+    await expect(oos).toHaveAttribute("aria-invalid", "true");
+    const oosIncomplete = page.getByText(
+      "OOS 시작일을 연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
+    );
+    await expect(oosIncomplete.first()).toBeVisible();
+    await expect(backtest(page)).toBeDisabled();
+
     await oos.click();
     await page.keyboard.type("20240102");
     await expect(oos).toHaveValue("2024-01-02");
-
-    await page
-      .getByRole("textbox", { name: "유니버스", exact: true })
-      .fill(RUN_ENVIRONMENT.universe_id);
-    await expect(summary).toContainText("2021-01-01");
-    await expect(summary).toContainText("2026-08-31");
+    await expect(oosIncomplete).toHaveCount(0);
+    await expect(oos).not.toHaveAttribute("aria-invalid", "true");
+    await expect(backtest(page)).toBeEnabled();
   },
 );
 

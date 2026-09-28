@@ -8,7 +8,10 @@ import {
   DATE_INPUT_MINIMUM,
   type RunEnvironmentFieldError,
 } from "./run-environment";
-import type { BacktestRunSettingsResult } from "./run-settings";
+import type {
+  BacktestRunSettingsError,
+  BacktestRunSettingsResult,
+} from "./run-settings";
 
 /**
  * 실행을 막는 칸 하나(DEFECT-242-01). `target` 은 패널 입력의 `data-run-field` 값이라 "이 칸으로 가기"가 그
@@ -32,6 +35,17 @@ const boundOf = (
   if (error === "maximum") return field.maximum;
   if (error === "exclusiveMaximum") return field.exclusiveMaximum;
   return null;
+};
+
+/** 실행 옵션 오류 → 그 칸의 `data-run-field`. OOS 시작일 칸 하나에 오류 두 가지가 걸린다. */
+const OPTION_FIELD: Record<
+  Exclude<BacktestRunSettingsError, "environment">,
+  string
+> = {
+  initial_cash: "initial_cash",
+  annualization_days: "annualization_days",
+  oos_out_of_range: "oos_start",
+  oos_incomplete: "oos_start",
 };
 
 /** 칸 옆 오류 문장. 범위에는 스키마의 표시 단위를 붙인다(예: "0bp 이상이어야 합니다."). */
@@ -83,10 +97,13 @@ export const runSettingsProblems = (
           },
     ];
   }),
-  ...result.errors
-    .filter((error) => error !== "environment")
+  ...(result.errors as readonly BacktestRunSettingsError[])
+    .filter(
+      (error): error is Exclude<BacktestRunSettingsError, "environment"> =>
+        error !== "environment",
+    )
     .map((error): RunSettingsProblem => ({
-      target: error,
+      target: OPTION_FIELD[error],
       kind: "invalid",
       name: error,
       sentence: t(`backtest.settings.error.${error}`),

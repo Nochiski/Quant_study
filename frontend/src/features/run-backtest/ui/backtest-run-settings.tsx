@@ -149,6 +149,9 @@ export const BacktestRunSettings = ({
     setPanelOpen,
   } = controller;
   const { open, focus } = panel;
+  const oosInvalid = (
+    result.errors as readonly BacktestRunSettingsError[]
+  ).some((error) => error === "oos_out_of_range" || error === "oos_incomplete");
   const popoverRef = useRef<HTMLDivElement>(null);
   // 요약 띠·차단 안내가 "이 칸으로 가기"를 요청하면 패널이 열린 뒤 그 칸에 초점을 옮긴다. 요청 한 번
   // (nonce)에 한 번만 움직여, 사용자가 패널을 닫았다 다시 열 때 초점을 빼앗지 않는다.
@@ -278,9 +281,16 @@ export const BacktestRunSettings = ({
               type="date"
               min={DATE_INPUT_MINIMUM}
               max={DATE_INPUT_MAXIMUM}
-              data-run-field="oos_out_of_range"
+              data-run-field="oos_start"
+              aria-invalid={oosInvalid || undefined}
               value={fields.oosStart}
-              onChange={(event) => setField("oosStart", event.target.value)}
+              onChange={(event) => {
+                setField("oosStartIncomplete", isIncompleteDate(event));
+                setField("oosStart", event.target.value);
+              }}
+              onBlur={(event) =>
+                setField("oosStartIncomplete", isIncompleteDate(event))
+              }
             />
             <small className="backtest-settings__hint">
               {t("backtest.settings.oosStart.hint")}

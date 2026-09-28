@@ -7,14 +7,25 @@ export type BacktestRunSettingsFields = {
   benchmarkSecurityId: string;
   annualizationDays: string;
   oosStart: string;
+  /**
+   * OOS 시작일 칸을 덜 쳤는지(브라우저 `validity.badInput`). 덜 친 날짜 칸의 값은 빈 문자열이라 이 표시가
+   * 없으면 비운 칸과 구분할 수 없다(#266 리뷰 P2-1).
+   */
+  oosStartIncomplete?: boolean;
 };
 
 /**
  * `environment` 는 실행 설정 칸 중 하나라도 비었거나 규칙을 어겼다는 뜻이다(칸별 사유는 패널이 보인다).
  * `oos_out_of_range` 는 OOS 시작일이 실행 기간 밖이다 — 기간의 owner 는 실행 설정이다(schema 1.2).
+ * `oos_incomplete` 는 OOS 시작일을 덜 쳤다는 뜻이다. 비운 칸은 OOS 없이 실행하지만, 덜 친 칸을 비운 칸처럼
+ * 보내면 사용자가 원한 OOS 구간이 아무 표시 없이 사라진다.
  */
 export type BacktestRunSettingsError =
-  "initial_cash" | "annualization_days" | "environment" | "oos_out_of_range";
+  | "initial_cash"
+  | "annualization_days"
+  | "environment"
+  | "oos_out_of_range"
+  | "oos_incomplete";
 
 export type BacktestRunOptions = Omit<
   BacktestRunSpec,
@@ -64,6 +75,8 @@ export const buildBacktestRunOptions = (
   if (!environment.valid) errors.push("environment");
 
   const oosStart = fields.oosStart.trim();
+  if (oosStart === "" && fields.oosStartIncomplete === true)
+    errors.push("oos_incomplete");
   const range = environment.valid ? environment.environment : null;
   if (
     oosStart !== "" &&

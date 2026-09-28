@@ -45,10 +45,12 @@ def remote(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeRemote:
 
 # RFC 5737 문서용 주소 — 공개 저장소라 실제 서버 주소는 코드·테스트 어디에도 두지 않는다.
 TEST_HOST = "203.0.113.10"
+# 계정명도 같다 — 실제 SFTP 계정은 환경변수(`QL_SYNC_USER`)에만 둔다.
+TEST_USER = "ledger-reader"
 
 
 def _base(root: Path) -> list[str]:
-    return ["--root", str(root), "--layer", "equity", "--host", TEST_HOST]
+    return ["--root", str(root), "--layer", "equity", "--host", TEST_HOST, "--user", TEST_USER]
 
 
 def test_plan_pull_status_round_trip(remote: FakeRemote, tmp_path: Path, capsys) -> None:
@@ -292,3 +294,72 @@ def test_local_verbs_do_not_need_a_host(tmp_path: Path, capsys,
     no_host = ["--root", str(tmp_path), "--layer", "equity"]
     assert cli.main([*no_host, "--json", "status"]) == cli.EXIT_OK
 
+
+
+@pytest.fixture
+def no_connect(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    """접속 시도를 기록한다 — 설정 오류는 접속 **전에** 끝나야 한다."""
+    attempts: list[object] = []
+
+    @contextmanager
+    def refuse(endpoint, *, accept_new_host_key=False):  # noqa: ANN001, ANN202  # reason: open_sftp 대체
+        attempts.append(endpoint)
+        raise AssertionError("설정 오류인데 접속을 시도했다")
+        yield
+
+    monkeypatch.setattr(cli, "open_sftp", refuse)
+    return attempts
+
+
+@pytest.mark.parametrize("verb", [["plan"], ["pull"], ["verify"], ["sync"], ["status", "--remote"]])
+def test_remote_verbs_fail_before_connecting_without_a_user(
+        verb: list[str], no_connect: list[object], tmp_path: Path, capsys,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """계정명은 기본값이 없다(공개 저장소) — 빠지면 접속 전에 무엇을 설정할지 말하며 2 로 끝난다.
+
+    sync 는 일일 작업의 로그 규약대로 콘솔(stdout)·로그·`last_run.json` 에 남기고, 나머지는 stderr 다.
+    """
+    monkeypatch.delenv("QL_SYNC_USER", raising=False)
+    no_user = ["--root", str(tmp_path), "--layer", "equity", "--host", TEST_HOST]
+    assert cli.main([*no_user, *verb]) == cli.EXIT_ERROR
+    captured = capsys.readouterr()
+    said = captured.err if verb != ["sync"] else captured.out
+    assert "server user is not set" in said
+    assert "QL_SYNC_USER" in said and "--user" in said
+    assert no_connect == []
+    if verb == ["sync"]:
+        last = json.loads((tmp_path / "equity" / "_sync" / "last_run.json").read_text("utf-8"))
+        assert last["exit_code"] == cli.EXIT_ERROR
+        assert "server user is not set" in last["error"]
+
+
+@pytest.mark.parametrize("verb", [["--json", "status"], ["gc"]])
+def test_local_verbs_do_not_need_a_user(verb: list[str], no_connect: list[object],
+                                        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """로컬 상태만 읽는 동사는 계정명·주소 없이 돈다."""
+    monkeypatch.delenv("QL_SYNC_USER", raising=False)
+    monkeypatch.delenv("QL_SYNC_HOST", raising=False)
+    local = ["--root", str(tmp_path), "--layer", "equity"]
+    assert cli.main([*local, *verb]) == cli.EXIT_OK
+    assert no_connect == []
+
+
+def test_user_comes_only_from_the_argument_or_the_environment(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """코드에 계정명 기본값을 두지 않는다 — 환경변수가 없으면 빈 값이다."""
+    monkeypatch.delenv("QL_SYNC_USER", raising=False)
+    assert cli.build_parser().parse_args(["status"]).user == ""
+    monkeypatch.setenv("QL_SYNC_USER", TEST_USER)
+    assert cli.build_parser().parse_args(["status"]).user == TEST_USER
+
+
+def test_offline_verify_does_not_need_a_user(remote: FakeRemote, tmp_path: Path, capsys,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    """받아 둔 빌드의 hash 대조는 로컬만 읽는다 — 계정명·주소 없이 0 으로 끝난다."""
+    assert cli.main([*_base(tmp_path), "pull"]) == cli.EXIT_OK
+    monkeypatch.delenv("QL_SYNC_USER", raising=False)
+    monkeypatch.delenv("QL_SYNC_HOST", raising=False)
+    capsys.readouterr()
+    local = ["--root", str(tmp_path), "--layer", "equity"]
+    assert cli.main([*local, "verify", "--offline"]) == cli.EXIT_OK
+    assert "not set" not in capsys.readouterr().err

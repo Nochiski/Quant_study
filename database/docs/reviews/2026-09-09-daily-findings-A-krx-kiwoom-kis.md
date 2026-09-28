@@ -2,7 +2,7 @@
 
 조사일 2026-09-09 · 읽기 전용 · 수집기 실행 0콜 · 저장소 수정 0건
 대상 코드: `database/src/{backfill_krx,backfill_kw,backfill_kis,load_kiwoom_raw,master_daily,sustain,api,rt}.py`, `database/scripts/daily_wise.sh`
-서버: `kael-server:~/quant-ledger` — **`src/` 8개 파일 전부 저장소 최신 main 과 바이트 동일**(`diff` 실측). 서버에만 있는 파일 1개: `src/probe_krx_timing.py`(저장소 미등록).
+서버: `<서버>:~/quant-ledger` — **`src/` 8개 파일 전부 저장소 최신 main 과 바이트 동일**(`diff` 실측). 서버에만 있는 파일 1개: `src/probe_krx_timing.py`(저장소 미등록).
 
 표기 규칙: **실측** = 서버 쿼리·로그·프로브 DB 에서 직접 잰 값 / **추정** = 코드에서 유추한 값 / **문서** = `docs/` 인용.
 

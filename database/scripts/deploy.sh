@@ -19,7 +19,7 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"     # …/database
 WORKTREE="$(cd "$REPO/.." && pwd)"                           # 저장소 루트(backend/ 가 있는 곳)
-REMOTE="${QL_REMOTE:-kael-server}"
+REMOTE="${QL_REMOTE:?QL_REMOTE 가 비어 있다 — 서버 ssh 호스트(~/.ssh/config 별칭 또는 주소)를 export QL_REMOTE=<호스트> 로 준다. 공개 저장소라 기본값을 두지 않는다}"
 ROOT="${QL_REMOTE_ROOT:-quant-ledger}"                       # 원격 홈 기준 상대경로
 
 APPLY=0

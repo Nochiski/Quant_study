@@ -220,12 +220,12 @@ v3  12,701 − 5,068 = 7,633
 
 ```bash
 # 파이프라인 단계별 시각·행수 (콜 수 산출의 기반)
-ssh kael-server 'cd ~/kael-system-v3 && sqlite3 -header -column data/quant.db \
+ssh <서버> 'cd ~/kael-system-v3 && sqlite3 -header -column data/quant.db \
   "SELECT job_name, started_at, finished_at, status, rows_affected
    FROM pipeline_runs WHERE started_at >= \"2026-09-01\" ORDER BY run_id;"'
 
 # 로그에 남는 키움/KIS 실콜을 KST 일자로 집계 (briefing·insight 분)
-ssh kael-server 'python3' <<'PY'
+ssh <서버> 'python3' <<'PY'
 import re, datetime, collections
 pat = re.compile(r"^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})")
 agg = collections.defaultdict(collections.Counter)
@@ -242,10 +242,10 @@ for d in sorted(agg): print(d, dict(agg[d]))
 PY
 
 # 429 일자별
-ssh kael-server 'awk "/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/{d=substr(\$1,1,10)} /429 rate limited/{c[d]++} END{for(k in c) print k,c[k]}" \
+ssh <서버> 'awk "/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/{d=substr(\$1,1,10)} /429 rate limited/{c[d]++} END{for(k in c) print k,c[k]}" \
   ~/logs/kael-v3/pipeline.log | sort'
 
 # 8005 흔적
-ssh kael-server 'grep -rh "8005" ~/quant-ledger/logs/*.log'
-ssh kael-server 'grep -n "oauth2/token" ~/logs/kael-v3/briefing.log | tail -5'
+ssh <서버> 'grep -rh "8005" ~/quant-ledger/logs/*.log'
+ssh <서버> 'grep -n "oauth2/token" ~/logs/kael-v3/briefing.log | tail -5'
 ```

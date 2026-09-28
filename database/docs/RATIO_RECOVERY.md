@@ -138,4 +138,4 @@ event_type = 'bonus' 이고 ratio IS NULL 인 행에 한해:
 
 ---
 
-*근거는 전부 2026-09-07 `kael-server:~/quant-ledger` 읽기 전용 실측. 코드·데이터 변경 없음.*
+*근거는 전부 2026-09-07 `<서버>:~/quant-ledger` 읽기 전용 실측. 코드·데이터 변경 없음.*

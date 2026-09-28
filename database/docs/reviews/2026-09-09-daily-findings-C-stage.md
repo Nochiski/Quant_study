@@ -1,6 +1,6 @@
 # findings C — stage 층 일일 증분 설계용 사실 수집
 
-조사일 2026-09-09 · 워크트리 `/Users/claudeoscarmonet/orca/workspaces/Quant_study/데이터베이스` (main, `b9f2aaf`) · 서버 `kael-server:~/quant-ledger` 읽기 전용.
+조사일 2026-09-09 · 워크트리 `/Users/claudeoscarmonet/orca/workspaces/Quant_study/데이터베이스` (main, `b9f2aaf`) · 서버 `<서버>:~/quant-ledger` 읽기 전용.
 표기: **실측** = 서버 파일/DB/로그에서 직접 잰 값, **추정** = 코드·문서에서 유추. 저장소·서버 파일 무변경.
 
 ---

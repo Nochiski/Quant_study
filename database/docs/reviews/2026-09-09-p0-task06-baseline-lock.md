@@ -284,14 +284,14 @@ if missing:
 
 ```bash
 # ✗ 절대 금지 — 지금 락을 그대로 설치하면 corp_event 빌드가 KeyError 로 죽는다
-# scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equity/baseline.json
+# scp database/src/equity/baseline_locked.json <서버>:~/quant-ledger/data/equity/baseline.json
 
 # ✓ 4-1 을 적용해 락을 고친 **뒤**, 문서가 정한 유일한 설치 경로로
 scp database/src/equity/baseline_locked.json \
-    kael-server:~/quant-ledger/data/equity/baseline.json
+    <서버>:~/quant-ledger/data/equity/baseline.json
 
 # 확인 (exit 0 = 바이트 동일)
-scp kael-server:~/quant-ledger/data/equity/baseline.json /tmp/server_baseline.json
+scp <서버>:~/quant-ledger/data/equity/baseline.json /tmp/server_baseline.json
 uv run python database/scripts/check_baseline_lock.py /tmp/server_baseline.json
 ```
 
@@ -348,7 +348,7 @@ HANDOFF §6 이 명시한다. `equity_rebuild_all.sh pass1` 후 `pass2` 를 돌�
 # (a) 락 ↔ 서버 바이트 동일
 uv run python database/scripts/check_baseline_lock.py /tmp/server_baseline.json   # exit 0
 # (b) skip(no_baseline) 잔존 0 · fail 0  (HANDOFF §7-4)
-ssh kael-server "cd ~/quant-ledger && bash scripts/equity_gate_all.sh"
+ssh <서버> "cd ~/quant-ledger && bash scripts/equity_gate_all.sh"
 # (c) catalog·contract 지문이 28표 current_build 와 일치 (§3-2 대조를 다시)
 ```
 

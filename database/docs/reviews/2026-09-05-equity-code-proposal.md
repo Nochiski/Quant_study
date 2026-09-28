@@ -1058,9 +1058,9 @@ ZERO_VOLUME_DROPPED["equity"] = True     # 정지행(volume=0) 은 Bar 로 안 �
 
 ```bash
 # 로컬 (workspace/dongmin)
-rsync -av --delete src/equity/     kael-server:~/quant-ledger/src/equity/
+rsync -av --delete src/equity/     <서버>:~/quant-ledger/src/equity/
 rsync -av          scripts/run_equity.sh scripts/equity_slice_from_stage.py \
-                                   kael-server:~/quant-ledger/scripts/
+                                   <서버>:~/quant-ledger/scripts/
 ```
 stage 와 같은 배치다 — `run_stage.sh` 가 `PYTHONPATH=~/quant-ledger/src` 를 쓰고 `stage/` 가 그 아래 있다.
 

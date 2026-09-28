@@ -6,7 +6,7 @@
 
 **Architecture:** 원장은 소스별 **가장 이른 확정 시각**에 받는다 — 18:05 저녁 슬롯(키움 투자자·공매도 당일, DART 당일, WISE 스냅샷)과 아침 슬롯(06:00 대차·마스터·KIS, 07:10 외국인 보유, 08:10 KRX). 저녁 키움 행은 KRX 대조 없이 원장에 바로 넣는다(사용자 결정). stage·equity 는 저녁에 잠정판(`basis=evening`, 종가는 키움 값), 아침에 확정판(`basis=krx`)을 만든다. 스코어링은 Kael-alpha 가 equity 잠정판 위에서 돌린다.
 
-**Tech Stack:** v1 과 동일 — Python 3.12 · sqlite3 · duckdb · bash/cron(UTC) · flock · 텔레그램. 서버 `kael-server:~/quant-ledger`.
+**Tech Stack:** v1 과 동일 — Python 3.12 · sqlite3 · duckdb · bash/cron(UTC) · flock · 텔레그램. 서버 `<서버>:~/quant-ledger`.
 
 **v1 과의 관계:** `2026-09-09-daily-incremental.md` 의 P0~P3 결과·결정 R1~R10·결정 6·7 은 그대로 유효하다. v1 의 시간표(§10)와 P4~P6 은 이 문서가 대체한다. v1 은 갱신을 멈추고 이 문서의 상태 블록이 정본이 된다.
 

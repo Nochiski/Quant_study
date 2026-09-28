@@ -170,7 +170,7 @@
 **HTTPS + mTLS (Caddy).** 서버에 SSH 계정을 만들지 않는다.
 
 ```
-data.kaelinvestment.com {
+<공개 도메인> {
     tls {
         client_auth {
             mode require_and_verify
@@ -194,7 +194,7 @@ data.kaelinvestment.com {
 
 ```bash
 curl --cert sangmok.crt --key sangmok.key \
-     -O https://data.kaelinvestment.com/v/<build_id>/krx_stk_bydd_trd.parquet
+     -O https://<공개 도메인>/v/<build_id>/krx_stk_bydd_trd.parquet
 ```
 ```sql
 SELECT ticker, bas_dd, tdd_clsprc FROM '~/quant-data/krx_stk_bydd_trd.parquet'
@@ -294,7 +294,7 @@ WHERE bas_dd >= '2020-01-01';
   불완전한 산출물이라 보관 가치도 없다
 - **수정**: 시작 시 `build/` 하위 미완성 산출물을 정리
 
-## 실측 근거 (2026-08-25, kael-server)
+## 실측 근거 (2026-08-25, <서버>)
 
 | 항목 | 값 |
 |---|---|

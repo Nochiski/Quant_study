@@ -6,7 +6,7 @@
 
 **Architecture:** 체인 두 개(flock 직렬). **06:00 KST 수집 체인** [캘린더 → 키움 마스터·WISE → 키움 시계열 fetch → KIS → DART·문서] 은 KRX 를 뺀 전 소스를 받고(다른 플랫폼은 06:00 에 전날 데이터가 있다는 사용자 추정, 키움은 P0 프로브로 확인), **08:10 KST 빌드 체인** [KRX(T+1 08:00 공표) → 키움 KRX 대조·머지 → 원장 건전성 → stage 전량 → equity 전량 → catalog·contract → 요약] 이 이어진다. 각 단계는 실측 기대치로 고정된 게이트를 통과해야 다음 단계로 간다. 기존 `daily_wise.sh` 는 06:00 체인의 첫 단계가 된다. 증분 러너는 백필 코드를 건드리지 않고 별도 파일로 신설한다(백필 코드 동결). stage·equity 는 증분 경로가 없으므로 **전량 재빌드**를 매일 산다(실측 22.5분 + 8분, 유휴 창 안).
 
-**Tech Stack:** Python 3.12 · sqlite3 · duckdb 1.5.5 · bash/cron(UTC) · flock · 텔레그램 Bot API(curl). 서버 `kael-server:~/quant-ledger`, 저장소 `database/`.
+**Tech Stack:** Python 3.12 · sqlite3 · duckdb 1.5.5 · bash/cron(UTC) · flock · 텔레그램 Bot API(curl). 서버 `<서버>:~/quant-ledger`, 저장소 `database/`.
 
 **근거:** 2026-09-09 서버 실측 조사 5건 — `docs/reviews/2026-09-09-daily-findings-{A,B,C,D,E}-*.md`. 이 문서의 숫자는 전부 그 조사에서 왔고, `[A §2-1]` 식으로 절을 가리킨다. 리뷰 2회(1차 blocking 6건·2차 blocking 4건) 반영본.
 
@@ -193,7 +193,7 @@
 ### Task 0.9: 서버 배포 정렬
 
 - [x] **Step 1**: 처분 판정(09-09, `reviews` 대신 조사 요약을 여기 기록): `src/equity_s23/` 는 e1.7.0 구본 사본(현행 `src/equity` 의 부분집합, 참조 0건) → **서버 삭제**. `rebuild_share.py` 는 `backend/ops/` 와 md5 동일 → 저장소 정본은 그쪽, 서버엔 `deploy.sh` 가 별도 라인으로 민다. `probe_krx_timing.py` 는 한 번도 안 돌았고(산출 DB 없음) 새 `probe_kw_timing.py` 가 대체 → 회수하지 않고 삭제. `export_csv.py`·`api.py.bak` 삭제. **`sync_v3_wise.py` 는 유지** — `rules_s17.py:458-467` 이 v3 미러 재개를 사람 승인 옵션으로 명시(플랜 초안의 '서버에서도 지운다' 는 철회).
-- [x] **Step 2**: 배포 명령을 `scripts/deploy.sh` 로 고정(dry-run 기본, `--apply`; 토큰 캐시·`sync_v3_wise.py` exclude): `rsync -avz --delete --exclude='.venv' --exclude='__pycache__' --exclude='.k*_token.json' database/src/ kael-server:~/quant-ledger/src/` + `scripts/`. `--delete` 는 `--dry-run` 검토 후.
+- [x] **Step 2**: 배포 명령을 `scripts/deploy.sh` 로 고정(dry-run 기본, `--apply`; 토큰 캐시·`sync_v3_wise.py` exclude): `rsync -avz --delete --exclude='.venv' --exclude='__pycache__' --exclude='.k*_token.json' database/src/ <서버>:~/quant-ledger/src/` + `scripts/`. `--delete` 는 `--dry-run` 검토 후.
 - [x] **Step 3**: 커밋 (09-09 `--apply` 실행, 재실행 dry-run 전송·삭제 0 = G0#12)
 
 ### 게이트 G0 — 전부 통과해야 P1 시작

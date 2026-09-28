@@ -4,7 +4,7 @@
 `EQUITY_DESIGN.md`(테이블 카탈로그·뷰·소비자 계약), 게이트의 정본은 `EQUITY_GATES.md`,
 슬라이스 순서·DoD 의 정본은 `EQUITY_WORKFLOW.md`, 필드 대응의 정본은 `EQUITY_FIELD_MAP.md` 다.
 여기 적힌 것은 **그 넷을 실제로 돌리는 방법과, 돌리다 막혔을 때 어디를 보는가** 뿐이다.
-숫자는 전부 2026-09-06 서버(`kael-server:~/quant-ledger`) 실측이며 근거는 DESIGN §10 P17~P42 다.
+숫자는 전부 2026-09-06 서버(`<서버>:~/quant-ledger`) 실측이며 근거는 DESIGN §10 P17~P42 다.
 
 ---
 
@@ -124,7 +124,7 @@ stage ─┬─ trading_calendar ─┬─ price_daily ─┬─ corp_event ─ 
 
 ## 3. 서버에서 돌리는 법
 
-전제: `ssh kael-server`, 코드 루트 `~/quant-ledger`, venv `.venv`.
+전제: `ssh <서버>`, 코드 루트 `~/quant-ledger`, venv `.venv`.
 **서버 출력은 반드시 `export LC_ALL=C` 로 읽어라** — 한글 UTF-8 이 섞인 게이트 detail 을
 로케일 없이 grep/cut 하면 깨진다.
 
@@ -132,21 +132,21 @@ stage ─┬─ trading_calendar ─┬─ price_daily ─┬─ corp_event ─ 
 
 ```bash
 # 로컬 저장소 → 서버 (equity 만. src/stage 는 stage 세션이 main 에서 배포한다 — 건드리지 말 것)
-rsync -rq --delete --exclude '__pycache__' database/src/equity/ kael-server:~/quant-ledger/src/equity/
-scp database/scripts/run_equity.sh kael-server:~/quant-ledger/scripts/run_equity.sh
+rsync -rq --delete --exclude '__pycache__' database/src/equity/ <서버>:~/quant-ledger/src/equity/
+scp database/scripts/run_equity.sh <서버>:~/quant-ledger/scripts/run_equity.sh
 ```
 
 배포가 맞았는지 확인(경로 목록의 정렬 순서는 로케일 때문에 다를 수 있으니 파일별 해시를 본다):
 
 ```bash
-ssh kael-server "cd ~/quant-ledger/src/equity && find . \( -name '*.py' -o -name '*.json' -o -name '*.sql' \) \
+ssh <서버> "cd ~/quant-ledger/src/equity && find . \( -name '*.py' -o -name '*.json' -o -name '*.sql' \) \
   | grep -v __pycache__ | sed 's#^\./##' | sort | xargs sha256sum | awk '{print \$2, \$1}' | sort"
 ```
 
 ### 3-2. 표 하나 빌드
 
 ```bash
-ssh kael-server
+ssh <서버>
 cd ~/quant-ledger
 scripts/run_equity.sh <table> --threads 3 --memory-limit 8GB
 ```
@@ -160,8 +160,8 @@ scripts/run_equity.sh <table> --threads 3 --memory-limit 8GB
 ```bash
 # 배포 1회 — 러너는 저장소에 산다
 scp database/scripts/equity_rebuild_all.sh database/scripts/equity_manifest_row.py \
-    kael-server:~/quant-ledger/scripts/
-ssh kael-server "cd ~/quant-ledger && chmod +x scripts/equity_rebuild_all.sh && \
+    <서버>:~/quant-ledger/scripts/
+ssh <서버> "cd ~/quant-ledger && chmod +x scripts/equity_rebuild_all.sh && \
     nohup bash scripts/equity_rebuild_all.sh pass1 > logs/equity/rebuild_pass1_driver.log 2>&1 &"
 # 진행: tail -f logs/equity/rebuild_pass1_driver.log
 # 결과: logs/equity/rebuild_pass1/summary.tsv  (table, rc, 초, build_id, content_hash, n_rows,
@@ -178,8 +178,8 @@ ssh kael-server "cd ~/quant-ledger && chmod +x scripts/equity_rebuild_all.sh && 
 커밋된 29표를 **빌드 없이 재판정**만 하려면(baseline 상수를 바꾼 뒤 확인용):
 
 ```bash
-scp database/scripts/equity_gate_all.sh kael-server:~/quant-ledger/scripts/
-ssh kael-server "cd ~/quant-ledger && bash scripts/equity_gate_all.sh"
+scp database/scripts/equity_gate_all.sh <서버>:~/quant-ledger/scripts/
+ssh <서버> "cd ~/quant-ledger && bash scripts/equity_gate_all.sh"
 # 결과: logs/equity/gate_all/summary.txt (표별 rc·fail 수·게이트 상태)
 ```
 
@@ -282,10 +282,10 @@ top3 adj **+173.84%** vs top3 raw **+143.40%**. Rust `backtest_core` 가 없으�
 
 ```bash
 # 로컬에서 서버 사본을 받아 대조
-scp kael-server:~/quant-ledger/data/equity/baseline.json /tmp/server_baseline.json
+scp <서버>:~/quant-ledger/data/equity/baseline.json /tmp/server_baseline.json
 uv run python database/scripts/check_baseline_lock.py /tmp/server_baseline.json
 # 확정본을 서버에 설치(= 바이트 동일을 보장하는 유일한 경로)
-scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equity/baseline.json
+scp database/src/equity/baseline_locked.json <서버>:~/quant-ledger/data/equity/baseline.json
 ```
 
 `baseline_seed_s*.json` 은 **슬라이스별 제안 시드**(절단본 실측 + 근거 note)이고 정본이 아니다.
@@ -441,7 +441,7 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 **재생성 절차**(생성 스크립트는 저장소에 없다 — 아래를 따라 다시 만든다):
 
 1. 서버에서 대상 stage 표의 `current_build` 를 확인한다:
-   `ssh kael-server "cd ~/quant-ledger && python3 -c \"import json;print(json.load(open('data/stage/<t>/MANIFEST.json'))['current_build'])\""`
+   `ssh <서버> "cd ~/quant-ledger && python3 -c \"import json;print(json.load(open('data/stage/<t>/MANIFEST.json'))['current_build'])\""`
 2. 그 판본의 parquet 을 티커/법인 축으로 걸러 로컬에 쓴다. 축은 표마다 다르다:
    - 티커 축(`stg_listing_daily`·`stg_price_daily`·격자 원천 등): README 의 티커 15
    - 법인 축(`stg_event_*`·`stg_capital`·`stg_shares`·`stg_fin`·`stg_doc_*` 등): 그 15티커의 `corp_code` 11
@@ -752,7 +752,7 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 
 ## 13. 소비자 기동 (워크벤치 · 로컬 데이터)
 
-**로컬 데이터 내려받기(협업자, SFTP 계정)** — `database/scripts/ledger_sync.ps1 sync` (2026-09-19, `docs/LEDGER_SYNC.md`). `quantshare` 계정은 쉘이 없어 아래 rsync 스크립트를 쓸 수 없다. 29표 현재 빌드 전부(≈1.5GB)를 받고 카탈로그까지 재생성한다.
+**로컬 데이터 내려받기(협업자, SFTP 계정)** — `database/scripts/ledger_sync.ps1 sync` (2026-09-19, `docs/LEDGER_SYNC.md`). 협업자 SFTP 계정은 쉘이 없어 아래 rsync 스크립트를 쓸 수 없다. 29표 현재 빌드 전부(≈1.5GB)를 받고 카탈로그까지 재생성한다.
 
 **로컬 데이터 내려받기(운영자, rsync)** — `database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]`
 - `minimal`(기본) 12표 ≈ 2.1GB: 가격·**조정가**·유니버스·조정계수·기업행위·식별 4표

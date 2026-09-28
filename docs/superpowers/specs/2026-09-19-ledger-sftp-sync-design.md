@@ -2,7 +2,7 @@
 
 - **작성일**: 2026-09-19
 - **상태**: 구현 완료(2026-09-19) — `database/src/ledger_sync/`, `frontend/e2e/workbench.real-equity.spec.ts`. 실측은 `database/docs/LEDGER_SYNC.md` §4·PR 본문
-- **대상**: 카엘 서버(주소는 `QL_SYNC_HOST`, 계정 `quantshare`, SFTP 전용·읽기 전용)의 `equity` 층을 로컬로
+- **대상**: 카엘 서버(주소는 `QL_SYNC_HOST`, 계정은 `QL_SYNC_USER` — 공개 저장소라 둘 다 적지 않는다. SFTP 전용·읽기 전용)의 `equity` 층을 로컬로
   받아 워크벤치·엔진이 읽게 하고, 이후 매일 증분으로 따라가며, 실데이터 위에서 그래프를 편집한 전략의
   백테스트를 E2E 로 검증한다.
 
@@ -12,8 +12,8 @@
 있고 요청은 "equity 부터, `_pinned`·`_tmp`·`_failed` 제외, 테이블 폴더 안 `v=…` 최신 파티션만" 이다.
 `raw` 는 매일 갱신되는 SQLite 원장이라 복사 중 갱신되면 사본이 깨지므로 범위에서 뺀다.
 
-기존 `database/scripts/fetch_equity_local.sh` 는 `rsync` + ssh alias(`kael-server`) 전제인데,
-`quantshare` 계정은 쉘이 막혀 있어(`This service allows sftp connections only`) rsync 를 쓸 수 없다.
+기존 `database/scripts/fetch_equity_local.sh` 는 `rsync` + ssh alias(`<서버>`) 전제인데,
+협업자 SFTP 계정은 쉘이 막혀 있어(`This service allows sftp connections only`) rsync 를 쓸 수 없다.
 로컬(Windows)에도 rsync 가 없다.
 
 ## 서버 실측 (2026-09-19)

@@ -1,6 +1,6 @@
 # START_HERE — equity 층에 들어오는 사람이 처음 읽을 것
 
-*기준: 2026-09-08 · 서버 `kael-server:~/quant-ledger` 실측 · `RULES_VERSION` **e1.14.0***
+*기준: 2026-09-08 · 서버 `<서버>:~/quant-ledger` 실측 · `RULES_VERSION` **e1.14.0***
 
 ---
 

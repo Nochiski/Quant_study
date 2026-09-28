@@ -39,4 +39,4 @@
 ## 4. 참고 경로
 - 코드 규칙: `.claude/rules/*.md`(ruff 100컬럼·한글 폭 2, pyright basic, 새 라이브러리 금지, 테스트는 손계산 픽스처)
 - stage 빌더 재사용 후보: `src/stage/manifest.py`(원자 교체·keep=3), `snapshot.py`, `gates.py` 골격. 파서는 `src/stage/parsers.py` 의 blob 언네스트 계약(ParseResult·metrics·G8 등식) 참고.
-- 서버: `ssh kael-server`, `~/quant-ledger`, `.venv/bin/python`(3.12, duckdb 1.5.5), 배포는 rsync. 크론은 daily_wise 06:00 KST 하나뿐.
+- 서버: `ssh <서버>`, `~/quant-ledger`, `.venv/bin/python`(3.12, duckdb 1.5.5), 배포는 rsync. 크론은 daily_wise 06:00 KST 하나뿐.

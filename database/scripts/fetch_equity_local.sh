@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 서버 equity 층을 로컬로 내려받아 워크벤치·백테스트가 읽을 수 있게 만든다 (운영자 rsync 경로).
-# 협업자 SFTP 계정(quantshare, 쉘 없음)은 rsync 가 안 되므로 `ledger_sync.ps1`/`ledger_sync.sh` 를 쓴다
+# 협업자 SFTP 계정(쉘 없음)은 rsync 가 안 되므로 `ledger_sync.ps1`/`ledger_sync.sh` 를 쓴다
 # (`docs/LEDGER_SYNC.md`).
 #
 #   database/scripts/fetch_equity_local.sh <로컬 경로> [minimal|full]
@@ -16,7 +16,7 @@ set -euo pipefail
 
 DEST="${1:?사용법: fetch_equity_local.sh <로컬 경로> [minimal|full]}"
 MODE="${2:-minimal}"
-REMOTE="${EQUITY_REMOTE:-kael-server}"
+REMOTE="${EQUITY_REMOTE:?EQUITY_REMOTE 가 비어 있다 — 서버 ssh 호스트(~/.ssh/config 별칭 또는 주소)를 export EQUITY_REMOTE=<호스트> 로 준다. 공개 저장소라 기본값을 두지 않는다}"
 REMOTE_ROOT="${EQUITY_REMOTE_ROOT:-~/quant-ledger/data/equity}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 

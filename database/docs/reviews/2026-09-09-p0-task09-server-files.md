@@ -1,6 +1,6 @@
 # P0 Task 0.9 — 서버 전용 파일 처분 판정
 
-조사 시각 2026-09-09 · 저장소 `feat/daily-p0` @ `74181bd` · 서버 `kael-server:~/quant-ledger` (읽기 전용)
+조사 시각 2026-09-09 · 저장소 `feat/daily-p0` @ `74181bd` · 서버 `<서버>:~/quant-ledger` (읽기 전용)
 
 ## 0. 조사 중 상황이 바뀌었다 (먼저 읽을 것)
 
@@ -36,9 +36,9 @@
 
 | 파일 | 판정 | 근거 |
 |---|---|---|
-| `database/scripts/check_baseline_lock.py` | **배포 불필요 (로컬 실행)** | docstring 자체가 로컬 워크플로다: `scp kael-server:~/quant-ledger/data/equity/baseline.json /tmp/… && uv run python database/scripts/check_baseline_lock.py /tmp/server_baseline.json`. 대조 대상은 저장소 `baseline_locked.json` 이라 서버에 사본이 없다. **플랜 P0 Task 0.6 이 이 스크립트로 서버 파일을 대조하는 것도 로컬 실행이 전제**다. 다만 배포해도 해롭지 않으므로(§3 dry-run 에 포함) 굳이 exclude 하지 않는다. |
+| `database/scripts/check_baseline_lock.py` | **배포 불필요 (로컬 실행)** | docstring 자체가 로컬 워크플로다: `scp <서버>:~/quant-ledger/data/equity/baseline.json /tmp/… && uv run python database/scripts/check_baseline_lock.py /tmp/server_baseline.json`. 대조 대상은 저장소 `baseline_locked.json` 이라 서버에 사본이 없다. **플랜 P0 Task 0.6 이 이 스크립트로 서버 파일을 대조하는 것도 로컬 실행이 전제**다. 다만 배포해도 해롭지 않으므로(§3 dry-run 에 포함) 굳이 exclude 하지 않는다. |
 | `database/scripts/check_field_map.py` | 배포 불필요 (로컬) | `backend/FACTORS.md` 와 `database/docs/EQUITY_FIELD_MAP.md` 를 읽는다 — 둘 다 서버에 없다. 배포하면 서버에서는 항상 rc=2. |
-| `database/scripts/fetch_equity_local.sh` | 배포 불필요 (로컬) | `rsync kael-server:… → 로컬` 방향이다. 서버에서 실행하면 자기 자신을 당긴다. |
+| `database/scripts/fetch_equity_local.sh` | 배포 불필요 (로컬) | `rsync <서버>:… → 로컬` 방향이다. 서버에서 실행하면 자기 자신을 당긴다. |
 | `database/scripts/run_mvp_backtest.py` | 배포 불필요 (로컬) | `uv run --project backend` 로 워크벤치 컨테이너를 부팅한다. 서버에 `backend/` 트리가 없다. |
 | `database/scripts/doc_fixtures_from_sample.py` | **배포 (저장소 정본)** | 서버 `7fef12c1`(09-04) vs 저장소 `2452c881`. diff 는 **docstring 3곳의 줄바꿈·문구뿐이고 로직은 동일**. 저장소판이 `DOC_DESIGN v1.1` 의 판 번호와 "사람이 대조한 뒤" 문구를 잃었다는 사소한 정보 손실이 있으나 동작에 영향 없음. 저장소가 정본이므로 덮어쓴다. |
 
@@ -100,7 +100,7 @@ Task 0.7 이 본뜰 때 고칠 점 3가지:
 # "둘 중 어느 쪽이 정본인가" 를 다시 묻게 만든다. 저장소에 없으면 서버에도 없어야 한다.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"     # …/database
-REMOTE="${QL_REMOTE:-kael-server}"
+REMOTE="${QL_REMOTE:-<서버>}"
 ROOT="${QL_REMOTE_ROOT:-quant-ledger}"                       # 원격 홈 기준 상대경로
 
 DRY="--dry-run"
@@ -184,9 +184,9 @@ run_mvp_backtest.py             (신규 · 로컬 전용이나 무해)
 1. `database/scripts/deploy.sh` 를 위 초안대로 커밋.
 2. `deploy.sh`(인자 없음)로 dry-run 재확인 — 삭제 목록이 §4-A 와 같은지.
 3. 서버 `src/equity_s23` 를 지우기 전에 **최후 백업 한 번**:
-   `ssh kael-server 'cd ~/quant-ledger && tar czf /tmp/equity_s23_20260909.tgz src/equity_s23'`
+   `ssh <서버> 'cd ~/quant-ledger && tar czf /tmp/equity_s23_20260909.tgz src/equity_s23'`
    (구본이라 되살릴 일은 없겠지만, `--delete` 첫 실행이므로.)
 4. `deploy.sh --apply`.
-5. 배포 직후 검증: `ssh kael-server 'cd ~/quant-ledger && ls src/.kw_token.json src/.kis_token.json src/sync_v3_wise.py src/rebuild_share.py && ls -d src/equity_s23 2>&1'`
+5. 배포 직후 검증: `ssh <서버> 'cd ~/quant-ledger && ls src/.kw_token.json src/.kis_token.json src/sync_v3_wise.py src/rebuild_share.py && ls -d src/equity_s23 2>&1'`
    → 앞 4개는 있고 마지막은 "No such file" 이어야 한다.
 6. `sync_v3_wise.py` 재개 여부는 **별건으로 사람에게 물을 것** (rules_s17 `_V3_MIRROR_NOTE`).

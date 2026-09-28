@@ -331,7 +331,7 @@ D = 폐지종목 프로브 1콜/종목. **D ∈ [717 실측하한, 1,494 계획�
 ### S0. 사전 확인 (콜 0)
 
 ```bash
-ssh kael-server 'df -h /; free -g; uptime; ls /var/run/reboot-required 2>/dev/null && echo REBOOT_PENDING'
+ssh <서버> 'df -h /; free -g; uptime; ls /var/run/reboot-required 2>/dev/null && echo REBOOT_PENDING'
 ```
 - **검증**: 여유 ≥ 100G, loadavg < 1.0.
 - **판정**: `REBOOT_PENDING` 이면 **배포 전에 재부팅 일정을 잡는다.** `unattended-upgrades` 가 14.6시간 백필 중간에 재부팅하면 B02 때문에 재개가 안 된다(A등급 수정 후에도 partial 재수집).
@@ -339,7 +339,7 @@ ssh kael-server 'df -h /; free -g; uptime; ls /var/run/reboot-required 2>/dev/nu
 ### S1. Python 환경 — **카엘 venv 를 쓰지 마라. 시스템 3.12 로 자체 venv 를 판다**
 
 ```bash
-ssh kael-server 'python3 -m venv ~/quant-ledger/.venv && ~/quant-ledger/.venv/bin/pip install requests duckdb'
+ssh <서버> 'python3 -m venv ~/quant-ledger/.venv && ~/quant-ledger/.venv/bin/pip install requests duckdb'
 ```
 - **왜 자체 venv 인가**: 우리가 카엘 `.venv` 에 패키지를 하나라도 넣는 순간 `uv.lock` 과 어긋나고, 카엘의 다음 `uv sync` 가 우리 것을 지운다. 반대로 카엘 재동기화가 우리 실행을 깨뜨린다. `.venv-krx` 는 **pykrx 1.2.8 포함 — 우리 규칙상 금지 대상**이라 재사용 불가.
 - **호환성 실측**: `ast.parse(feature_version=(3,9))` 로 `src/` 9파일 전수 통과. `match/case`·`X|Y` 어노테이션·`zoneinfo`·`tomllib` 미사용. 의존성은 **stdlib + `requests` 단 하나**. 즉 3.9로도 돌지만 격리를 위해 자체 venv 를 쓴다.
@@ -385,9 +385,9 @@ QL_ROOT=~/quant-ledger ~/quant-ledger/.venv/bin/python ~/quant-ledger/src/backfi
 
 ```bash
 # (a) systemd user 유닛 + linger 활성화  ← 권장
-ssh kael-server 'sudo loginctl enable-linger "$USER"'   # 비밀번호 필요
+ssh <서버> 'sudo loginctl enable-linger "$USER"'   # 비밀번호 필요
 # (b) tmux/screen 세션
-ssh kael-server 'tmux new -d -s ql "QL_ROOT=~/quant-ledger ~/quant-ledger/.venv/bin/python ~/quant-ledger/src/backfill_kw.py --tr ka10008 ..."'
+ssh <서버> 'tmux new -d -s ql "QL_ROOT=~/quant-ledger ~/quant-ledger/.venv/bin/python ~/quant-ledger/src/backfill_kw.py --tr ka10008 ..."'
 ```
 - **검증**: SSH 를 끊고 5분 뒤 재접속해 `tmux ls` 또는 `systemctl --user status` 로 살아있는지 확인. `data/raw/kiwoom.db` 의 `ingest_shard` 행수가 증가 중인지 확인.
 

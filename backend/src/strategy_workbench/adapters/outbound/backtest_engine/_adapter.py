@@ -42,7 +42,10 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     compute_analytics,
     unavailable_metric_values,
 )
-from strategy_workbench.domain.backtest.facade.environment import environment_hash
+from strategy_workbench.domain.backtest.facade.environment import (
+    RunEnvironment,
+    environment_hash,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestSeries,
@@ -142,14 +145,15 @@ class TargetTapeStrategy(DeclarativeTapeStrategy):
         tape: TargetTape,
         portfolio_bridge: BacktestEnginePortfolioAdapter,
         *,
-        max_participation: float,
+        environment: RunEnvironment,
     ) -> None:
         self._spec = spec
+        self._environment = environment
         self._bridge = portfolio_bridge
         self._frames: dict[date, TapeFrame] = {
             frame.signal_as_of: TapeFrame(
                 action=portfolio_bridge.to_target_action(
-                    frame, max_participation=max_participation
+                    frame, max_participation=environment.participation_rate
                 ),
                 reason=f"target_tape:{frame.signal_as_of.isoformat()}",
             )
@@ -157,7 +161,7 @@ class TargetTapeStrategy(DeclarativeTapeStrategy):
         }
 
     def requirements(self) -> StrategyRequirements:
-        return self._bridge.requirements(self._spec)
+        return self._bridge.requirements(self._spec, self._environment)
 
     def tape_frames(self) -> Mapping[date, TapeFrame]:
         return self._frames
@@ -238,7 +242,7 @@ class BacktestEngineExecutorAdapter:
                 strategy,
                 request.target_tape,
                 self._portfolio_bridge,
-                max_participation=environment.participation_rate,
+                environment=environment,
             ),
             _columnar_feed(request.dataset.bars),
             corporate_actions=corporate_actions,
@@ -250,10 +254,9 @@ class BacktestEngineExecutorAdapter:
         # artifact로 다시 옮겨질 중간 산물일 뿐이라 만들 이유가 없다.
         tables = engine.event_store.result_tables()
         artifacts, outcomes = _artifacts(tables)
+        run_sessions = tuple(item.session for item in artifacts.snapshots)
         benchmark, carried = _benchmark_series(
-            request.dataset,
-            request.spec.initial_cash,
-            tuple(item.session for item in artifacts.snapshots),
+            request.dataset, request.spec.initial_cash, run_sessions
         )
         # net exposure 공식은 `_artifacts`가 단일 정본이다 — 여기서 다시 계산하지 않는다.
         points = tuple(
@@ -333,7 +336,7 @@ class BacktestEngineExecutorAdapter:
                 strategy_provenance=request.strategy_provenance,
                 warnings=(
                     *request.dataset.warnings,
-                    *_benchmark_carry_warnings(request.dataset, carried),
+                    *_benchmark_warnings(request.dataset, run_sessions, benchmark, carried),
                 ),
             ),
             metric_definitions=self._registry.definitions(),
@@ -430,25 +433,95 @@ def _benchmark_series(
     return values, tuple(carried)
 
 
-def _benchmark_carry_warnings(
-    dataset: BacktestDataset, carried: tuple[date, ...]
+_WARNING_SESSION_LIST_LIMIT = 10
+
+
+def _listed_sessions(sessions: Sequence[date]) -> str:
+    """경고에 적을 세션 목록. 앞 10개만 쓰고 나머지는 개수로 적는다."""
+    shown = ", ".join(session.isoformat() for session in sessions[:_WARNING_SESSION_LIST_LIMIT])
+    rest = len(sessions) - _WARNING_SESSION_LIST_LIMIT
+    return f"{shown} (+{rest})" if rest > 0 else shown
+
+
+def _benchmark_warnings(
+    dataset: BacktestDataset,
+    sessions: Sequence[date],
+    values: Mapping[date, float],
+    carried: Sequence[date],
 ) -> tuple[DataWarning, ...]:
-    """이어 쓴 세션이 있으면 manifest 경고 한 줄. 화면은 code와 message를 그대로 보여 준다."""
-    if not carried:
+    """벤치마크 곡선이 bar 그대로가 아닌 세션을 원인별 manifest 경고로 알린다(이슈 #226·#229).
+
+    - 첫 bar 전 세션(`benchmark.no_bar_at_start`): 값을 비워 전체 구간 벤치마크 지표가 사용 불가다.
+      상장 전인지 거래정지인지는 멤버십 `first_session`으로 가른다.
+    - 이어 쓴 세션 중 멤버십 `last_session` 이하(`benchmark.suspended_sessions_carried`): 거래정지.
+    - 이어 쓴 세션 중 `last_session` 뒤(`benchmark.delisted_sessions_frozen`): 상장이 끝난 뒤 동결.
+      멤버십이 없으면 이어 쓴 세션을 모두 거래정지로 센다.
+
+    화면과 AI 결과 설명은 code와 message를 그대로 쓴다. 코드가 달라 한 목록에서 서로 섞이지 않는다.
+    """
+    benchmark_id = dataset.benchmark_security_id
+    if benchmark_id is None:
         return ()
-    shown = ", ".join(session.isoformat() for session in carried[:10])
-    more = f" (+{len(carried) - 10})" if len(carried) > 10 else ""
-    return (
-        DataWarning(
-            code="benchmark.suspended_sessions_carried",
-            message=(
-                "벤치마크 종목에 bar가 없는 세션(거래정지·상장폐지)은 직전 종가(분할·병합 반영)를 "
-                "이어 썼다 — 엔진이 정지 종목을 평가하는 규칙과 같다. "
-                f"benchmark={dataset.benchmark_security_id} carried_sessions={len(carried)} "
-                f"sessions={shown}{more}"
-            ),
-        ),
+    ordered = sorted(sessions)
+    membership = next(
+        (item for item in dataset.memberships if item.security_id == benchmark_id), None
     )
+    warnings: list[DataWarning] = []
+    # 첫 bar 뒤로는 이어 쓰기로 값이 모두 차므로, 값이 없는 세션은 곧 첫 bar 전 세션이다.
+    leading = [session for session in ordered if session not in values]
+    if leading:
+        first_bar = min(values) if values else None
+        if membership is not None and ordered and membership.first_session > ordered[0]:
+            cause = f"상장 전이다(first_session={membership.first_session.isoformat()})"
+        elif first_bar is None:
+            cause = "창 안에 벤치마크 종목의 bar가 하나도 없다"
+        elif membership is not None:
+            cause = "창 시작부터 거래정지 중이었다"
+        else:
+            cause = "상장 전이거나 거래정지 중이었다"
+        warnings.append(
+            DataWarning(
+                code="benchmark.no_bar_at_start",
+                message=(
+                    "벤치마크 종목의 첫 bar보다 앞선 세션은 살 수 없어 벤치마크 값을 비웠다 — "
+                    f"{cause}. 그래서 전체 구간의 benchmark_return·excess_return은 사용 불가다. "
+                    "첫 bar 이후에 시작하는 측정 창은 영향을 받지 않는다. "
+                    f"benchmark={benchmark_id} leading_sessions={len(leading)} "
+                    f"first_bar={first_bar.isoformat() if first_bar else '없음'} "
+                    f"sessions={_listed_sessions(leading)}"
+                ),
+            )
+        )
+    last_listed = membership.last_session if membership is not None else None
+    suspended = [s for s in carried if last_listed is None or s <= last_listed]
+    frozen = [s for s in carried if last_listed is not None and s > last_listed]
+    if suspended:
+        warnings.append(
+            DataWarning(
+                code="benchmark.suspended_sessions_carried",
+                message=(
+                    "벤치마크 종목이 거래정지돼 bar가 없는 세션은 직전 종가(분할·병합 반영)를 "
+                    "이어 썼다 — 엔진이 정지 종목을 평가하는 규칙과 같다. "
+                    f"benchmark={benchmark_id} carried_sessions={len(suspended)} "
+                    f"sessions={_listed_sessions(suspended)}"
+                ),
+            )
+        )
+    if frozen and last_listed is not None:
+        warnings.append(
+            DataWarning(
+                code="benchmark.delisted_sessions_frozen",
+                message=(
+                    "벤치마크 종목의 상장이 끝난 뒤(상장폐지 등) 세션은 마지막 값에 동결했다 — "
+                    "엔진이 상장 종료 종목의 포지션을 마지막 평가 가격에 두는 규칙과 같다. "
+                    "benchmark_return·excess_return은 이 구간을 포함해 계산했지만 이 구간의 "
+                    "벤치마크는 거래되지 않은 값이므로 초과수익을 실제 비교로 읽지 않는다. "
+                    f"benchmark={benchmark_id} frozen_sessions={len(frozen)} "
+                    f"last_session={last_listed.isoformat()} sessions={_listed_sessions(frozen)}"
+                ),
+            )
+        )
+    return tuple(warnings)
 
 
 def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:

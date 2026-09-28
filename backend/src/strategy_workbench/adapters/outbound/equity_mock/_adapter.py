@@ -44,10 +44,21 @@ from strategy_workbench.domain.factor.facade.expression import (
     NodeValueType,
 )
 
-from ._fixture import MOCK_SPLIT, Membership, Observation, adjusted_close, build_demo_fixture
+from ._fixture import (
+    ADJUSTED_FIELD_BY_RAW,
+    MOCK_SPLIT,
+    Membership,
+    Observation,
+    adjusted_close,
+    build_demo_fixture,
+)
 
 _MOCK_EPOCH = date(2000, 1, 3)  # Monday
 _MOCK_SECTORS = ("technology", "industrial", "consumer")
+# 합성 구간에서 완전자본잠식(자본총계 < 0)이면서 적자인 종목의 순번(세 번째, sec-035420-1).
+# 실데이터에 이런 기업이 있고(P2-08 리뷰 실측 28개), 자본총계를 분모로 쓰는 팩터가
+# 부호 함정에 빠지는지 테스트가 mock 에서 재현할 수 있어야 한다(DEFECT-P208-001).
+_CAPITAL_IMPAIRED_INDEX = 2
 # (market, universe_id) -> venue the fixture memberships are keyed by.
 _MOCK_UNIVERSES: dict[tuple[str, str], str] = {("KRX", "krx.common-stock"): "XKRX"}
 
@@ -103,12 +114,18 @@ class MockEquityDataAdapter:
                             if profile.value_type is FieldValueType.CATEGORY
                             else NodeValueType.NUMERIC_SERIES
                         ),
+                        adjusted_field_id=ADJUSTED_FIELD_BY_RAW.get(field_id),
                     )
                 )
         return FactorMetadataSnapshot(
             data_snapshot_id=self._snapshot.snapshot_id,
             fields=tuple(fields),
         )
+
+    def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
+        """compile 이 읽는 필드 계약 전부(P2-07). `resolve_factor_fields` 와 같은 변환을 거친다."""
+        field_ids = tuple(profile.field_id for profile in self._profiles)
+        return self.resolve_factor_fields(field_ids).fields
 
     def load_universe(self, query: UniverseHistoryQuery) -> UniverseHistoryResult:
         sessions = tuple(
@@ -164,7 +181,8 @@ class MockEquityDataAdapter:
                 cutoff = self._cutoff(session, lag_by_field[field_id])
                 if cutoff is None:
                     warnings.add(
-                        f"insufficient mock calendar for lag — field_id={field_id} as_of={session}"
+                        "mock 거래일 달력이 랙만큼 거슬러 올라가기에 모자라다 — "
+                        f"field_id={field_id} as_of={session}"
                     )
                     continue
                 for security_id in query.security_ids:
@@ -329,7 +347,8 @@ class MockEquityDataAdapter:
             cutoff = self._cutoff(session, lag_sessions)
             if cutoff is None:
                 warnings.add(
-                    f"insufficient mock calendar for lag — field_id={field_id} as_of={session}"
+                    "mock 거래일 달력이 랙만큼 거슬러 올라가기에 모자라다 — "
+                    f"field_id={field_id} as_of={session}"
                 )
                 return None
             candidate = self._latest_observation(
@@ -417,14 +436,14 @@ class MockEquityDataAdapter:
                 DataWarning(
                     code="mock_equity_data",
                     message=(
-                        "Deterministic mock OHLCV is active; replace the adapter for "
-                        "production research."
+                        "결정적으로 생성한 mock OHLCV로 실행했다. 실제 연구에는 실데이터 "
+                        "어댑터로 바꿔야 한다."
                     ),
                     severity=WarningSeverity.INFO,
                 ),
                 DataWarning(
                     code="corporate_action_feed_empty",
-                    message="The mock run declares an empty corporate-action feed.",
+                    message="mock 실행은 기업 행동 피드를 비워 둔다(분할·병합 없음).",
                 ),
             ),
         )
@@ -526,12 +545,20 @@ def _factor_field_value(
     trend = (session_index + 1) * (security_index + 1) * scale
     if field_id == "price.market_cap":
         return 10_000_000_000.0 + security_index * 2_000_000_000.0 + trend * 10_000
+    impaired = security_index == _CAPITAL_IMPAIRED_INDEX
     if field_id == "financial.book_equity":
+        if impaired:
+            # 자본잠식 규모가 순손실보다 작다 — 음수/음수 ROE 가 크게 나와 함정이 1위로 드러난다.
+            return -(100_000_000.0 + trend * 10)
         return 4_000_000_000.0 + security_index * 900_000_000.0 + trend * 1_000
     if field_id == "financial.net_income":
         # TTM 은 분기 공시마다 한 번 바뀐다 — 약 63세션(한 분기) 동안 같은 값이다(#212).
         quarter = session_index // 63
-        return 400_000_000.0 + security_index * 90_000_000.0 + quarter * (security_index + 1) * 1e6
+        income = (
+            400_000_000.0 + security_index * 90_000_000.0 + quarter * (security_index + 1) * 1e6
+        )
+        # 자본잠식 종목은 순손실이다(P2-08 아이디어 함정). 크기는 TTM 규칙을 그대로 따른다.
+        return -income if impaired else income
     if field_id == "consensus.forward_eps":
         return 2_000.0 + security_index * 350.0 + trend * 0.2
     if field_id == "flow.foreign_net_buy":

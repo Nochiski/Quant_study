@@ -96,6 +96,9 @@ class SourceSpec:
     `pick_order` 는 두 모드에 다 쓴다 — `LATEST` 는 (축 키, available_date) 당 1행,
     `GRID` 는 (축 키, date) 당 1행을 고른다. GRID 에서 필요한 것은 `flow_daily` 뿐이다
     (grain 에 `src` 가 들어 한 격자 셀에 원천 수만큼 행이 올 수 있다).
+
+    `required_columns` 는 매크로 원천이 선언 밖에서(`row_filter` 등) 읽는 열이다. 매크로는 게시돼
+    있어도 옛 카탈로그면 그 열이 없을 수 있어, 어댑터가 부팅 때 확인하고 없으면 이 원천만 뺀다.
     """
 
     name: str
@@ -115,6 +118,7 @@ class SourceSpec:
     requires: tuple[str, ...]
     frequency: str
     kind_expr: str | None = None
+    required_columns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -131,6 +135,9 @@ class FieldSpec:
     description: str
     disclosure_basis: str
     evidence: str
+    # 분할·증자 조정 없는 원주가 시계열이면 시점 간 변화를 잴 때 쓸 조정 필드 id(BACKLOG-018).
+    # compile 이 필드 계약(`FieldMetadata.adjusted_field_id`)으로 읽어 warning 을 낸다.
+    adjusted_field_id: str | None = None
 
 
 # ── 원천 (읽는 자리) ──────────────────────────────────────────────────────────
@@ -210,13 +217,17 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         available_expr="available_date",
         content_expr="period_end",
         reduce=Reduce.PICK,
-        row_filter=None,
+        # 옛 기간 정정본이 더 늦은 기간보다 늦게 접수되면 그 행은 고르지 않는다 — 컷오프에서 고를
+        # 행은 "공개된 가장 최근 기간" 이고 그 판정은 뷰가 한다(v_fin_latest.period_frontier, #225).
+        row_filter="period_frontier",
         # 같은 접수일에 여러 기간이 실리면(정정 일괄 재제출) 최신 기간·최신 보고서 종류를 고른다.
         pick_order="period_end DESC, report_code DESC",
         lag_sessions=0,
         lag_basis=_DART_LAG_BASIS,
         requires=(FIN_TABLE, DISCLOSURE_TABLE, CORP_TICKER_TABLE, FIN_MACRO),
         frequency="quarterly",
+        # #225 전에 만든 카탈로그의 v_fin_latest 에는 이 열이 없다 — 재생성 전까지 재무만 뺀다.
+        required_columns=("period_frontier",),
     ),
     SourceSpec(
         name="consensus_eps",
@@ -467,6 +478,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis="정규장 종가 확정 시점",
         evidence="price_daily.close ← stg_price_daily ∪ stg_etf_price_daily (EG20 원주가 불변)",
+        adjusted_field_id="price.adj_close",
     ),
     FieldSpec(
         field_id="price.open",
@@ -683,7 +695,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         expr="est_mean",
         label="선행 EPS(FY1 컨센서스 평균)",
         unit="KRW",
-        value_type=FieldValueType.PRICE,
+        # 주당 금액이다. 원장 dataset_profile 의 value_type='amount' 와 같다(#230).
+        value_type=FieldValueType.AMOUNT,
         verdict="부분",
         description=(
             "**12개월 선행이 아니다** — equity 는 target_period 별 값만 주고 12M 합성은 팩터층 "
@@ -897,7 +910,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         expr="dps_krw",
         label="주당 현금배당금(최근 사업보고서)",
         unit="KRW",
-        value_type=FieldValueType.PRICE,
+        # 주당 금액이다. 원장 dataset_profile 의 value_type='amount' 와 같다(#230).
+        value_type=FieldValueType.AMOUNT,
         verdict="부분",
         description=(
             "**락일·기준일이 없다** — 값이 서는 시점은 사업보고서 접수일뿐이라 TR·배당 재투자 "

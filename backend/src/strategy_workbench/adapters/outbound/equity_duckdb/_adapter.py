@@ -56,6 +56,7 @@ duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑
 
 from __future__ import annotations
 
+import logging
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterator, Sequence
@@ -141,6 +142,8 @@ from ._specs import (
 
 if TYPE_CHECKING:
     import duckdb
+
+logger = logging.getLogger(__name__)
 
 MARKET = "KRX"
 VENUE = "XKRX"
@@ -361,9 +364,7 @@ class EquityDuckdbAdapter:
             name: self._source_unavailable_reason(spec) for name, spec in SOURCE_BY_NAME.items()
         }
         self._fields: dict[str, FieldSpec] = {
-            spec.field_id: spec
-            for spec in FIELD_SPECS
-            if self._source_reason[spec.source] is None
+            spec.field_id: spec for spec in FIELD_SPECS if self._source_reason[spec.source] is None
         }
         self._profile: dict[str, tuple[int, str]] = self._load_profile()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
@@ -464,7 +465,35 @@ class EquityDuckdbAdapter:
                 f"catalog macros not published (macros_skipped) — missing={skipped} "
                 f"catalog={self._catalog.path} macros={list(self._catalog.macros)}"
             )
-        return None
+        return self._missing_columns_reason(spec)
+
+    def _missing_columns_reason(self, spec: SourceSpec) -> str | None:
+        """매크로가 있어도 옛 카탈로그면 원천이 요구하는 열이 없다 — 그 원천만 빼고 경고한다.
+
+        열 확인 없이 두면 `row_filter` 가 커버율 질의에서 BinderException 을 던져 `list_fields()`
+        전체가 죽는다(#233 리뷰 P2-1). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
+        """
+        if not spec.required_columns or not spec.is_macro:
+            return None
+        con = self._connect()
+        try:
+            described = con.execute(
+                f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
+            ).fetchall()
+        finally:
+            con.close()
+        present = {str(row[0]) for row in described}
+        missing = [column for column in spec.required_columns if column not in present]
+        if not missing:
+            return None
+        reason = (
+            f"카탈로그 매크로 {spec.relation} 에 원천 {spec.name} 이 읽는 열이 없어 이 원천의 "
+            "필드를 뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
+            f"`python -m equity catalog`) (catalog_columns_missing) — missing={missing} "
+            f"catalog={self._catalog.path}"
+        )
+        logger.warning(reason)
+        return reason
 
     @property
     def backfill_end(self) -> date:
@@ -541,9 +570,7 @@ class EquityDuckdbAdapter:
             return self._coverage_cache
         con = self._connect()
         try:
-            grid = con.execute(
-                f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}"
-            ).fetchone()
+            grid = con.execute(f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}").fetchone()
             n_grid = max(_as_int((grid or (0,))[0], "universe_daily rows"), 1)
             n_ticker = _as_int(
                 (
@@ -577,9 +604,7 @@ class EquityDuckdbAdapter:
                     if source.mode is SourceMode.GRID
                     else (n_ticker if source.axis is SourceAxis.TICKER else n_corp)
                 )
-                group = (
-                    f" GROUP BY {source.key_column}" if source.reduce is Reduce.SUM else ""
-                )
+                group = f" GROUP BY {source.key_column}" if source.reduce is Reduce.SUM else ""
                 for field_id in fields:
                     expr = self._fields[field_id].expr
                     if source.mode is SourceMode.GRID:
@@ -603,9 +628,7 @@ class EquityDuckdbAdapter:
         """`LATEST` 원천의 첫 공개일(캘린더 안으로 자른다). `GRID` 는 캘린더 시작이다."""
         if source.mode is SourceMode.GRID:
             return self._sessions[0]
-        row = con.execute(
-            f"SELECT min({source.available_expr}) FROM {relation} {where}"
-        ).fetchone()
+        row = con.execute(f"SELECT min({source.available_expr}) FROM {relation} {where}").fetchone()
         first = row[0] if row is not None else None
         if first is None:
             return self._sessions[0]
@@ -750,11 +773,23 @@ class EquityDuckdbAdapter:
                     field_id=field_id,
                     unit=self._fields[field_id].unit,
                     value_type=NodeValueType.NUMERIC_SERIES,
+                    adjusted_field_id=self._fields[field_id].adjusted_field_id,
                 )
                 for field_id in field_ids
                 if field_id in self._fields
             ),
         )
+
+    def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
+        """compile 이 읽는 필드 계약 전부(P2-07). `resolve_factor_fields` 와 같은 변환을 거친다.
+
+        그룹 필드(`group_series`)는 주지 않으므로 그래프의 그룹 연산은 compile 에서 unsupported
+        다. P2-08 스파이크가 원장을 확인했다: `dataset_profile` 의 `classification.sector` 는 시점
+        축 없는 KSIC 현재값(`point_in_time=false`)이고, WICS `sector_snapshot` 은 스냅샷 하나뿐이라
+        과거 세션에 값이 없다. 월별 WICS 백필(`database/docs/WICS_PROBE.md` 7-5절, 라이선스 미결)이
+        들어와야 PIT 그룹 필드를 낼 수 있다.
+        """
+        return self.resolve_factor_fields(tuple(self._fields)).fields
 
     def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         """`RESEARCH_UNIVERSE_ID` 위의 raw 패널을 팩터 관측으로. status 가 없어 실패는 예외."""
@@ -964,9 +999,7 @@ class EquityDuckdbAdapter:
                     f"DESCRIBE SELECT * FROM {self._source(PRICE_TABLE)}"
                 ).fetchall()
             }
-            basis_expr = (
-                BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
-            )
+            basis_expr = BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
             price_rows = con.execute(
                 f"""
                 SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
@@ -1110,7 +1143,7 @@ class EquityDuckdbAdapter:
             DataWarning(
                 code="equity.reference_rows_dropped",
                 message=(
-                    f"price_kind='reference' rows (기준가·정지일) are not emitted as bars — "
+                    "기준가 행(price_kind='reference', 거래정지일)은 bar로 내보내지 않았다 — "
                     f"dropped={n_reference}"
                 ),
                 severity=WarningSeverity.INFO,
@@ -1121,8 +1154,8 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.provisional_rows_dropped",
                     message=(
-                        f"price_daily.basis <> '{CONFIRMED_BASIS}' rows (저녁 잠정판 T 세션 — "
-                        f"KRX 확정 전 키움 종가) are not emitted as bars — "
+                        f"price_daily.basis <> '{CONFIRMED_BASIS}' 행(저녁 잠정판 T 세션 — "
+                        "KRX 확정 전 키움 종가)은 bar로 내보내지 않았다 — "
                         f"dropped={n_provisional}"
                     ),
                 )
@@ -1132,7 +1165,7 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.invalid_ohlc_rows_dropped",
                     message=(
-                        f"rows with NULL/non-positive or inconsistent OHLC dropped (GAP-14) — "
+                        "OHLC가 NULL·0 이하이거나 서로 맞지 않는 행을 버렸다(GAP-14) — "
                         f"dropped={n_invalid}"
                     ),
                 )
@@ -1142,8 +1175,8 @@ class EquityDuckdbAdapter:
                 DataWarning(
                     code="equity.corporate_action_without_bar_dropped",
                     message=(
-                        "corporate actions with no traded bar at/after the event inside the "
-                        "window were dropped (position frozen at its last trade) — "
+                        "창 안에서 사건 세션이나 그 뒤에 거래된 bar가 없는 기업 행동을 뺐다"
+                        "(포지션은 마지막 체결가에 동결된다) — "
                         f"dropped={len(unsettleable)} "
                         + ", ".join(
                             f"{a.security_id}@{a.session}:{a.action_type}"
@@ -1208,7 +1241,8 @@ class EquityDuckdbAdapter:
         warnings: tuple[str, ...] = ()
         if history_first < 0:
             warnings = (
-                f"insufficient calendar for warm-up history — requested={history} "
+                "워밍업 이력에 쓸 거래일 달력이 모자라 달력 시작부터 읽었다 — "
+                f"requested={history} "
                 f"available={first} calendar_start={self._sessions[0]} start={start}",
             )
             history_first = 0
@@ -1280,7 +1314,8 @@ class EquityDuckdbAdapter:
         warnings: list[str] = []
         if first_index - max_lag < 0 and max_lag > 0:
             warnings.append(
-                f"insufficient calendar for lag — max_lag={max_lag} "
+                "랙만큼 거슬러 올라갈 거래일 달력이 모자라 달력 시작부터 읽었다 — "
+                f"max_lag={max_lag} "
                 f"first_session={window.sessions[0]} calendar_start={self._sessions[0]}"
             )
         fetch_start, fetch_end = self._sessions[fetch_first], window.sessions[-1]
@@ -1372,8 +1407,7 @@ class EquityDuckdbAdapter:
                     f"date ORDER BY {source.pick_order}) = 1"
                 )
             joins.append(
-                f"LEFT JOIN ({picked}) g{index} "
-                f"ON g{index}.k = r.ticker AND g{index}.d = r.date"
+                f"LEFT JOIN ({picked}) g{index} ON g{index}.k = r.ticker AND g{index}.d = r.date"
             )
             selects.append(
                 f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, "
@@ -1518,14 +1552,10 @@ class EquityDuckdbAdapter:
             entry: dict[str, _Observed] = {}
             for position, field_id in enumerate(fields):
                 value = _as_float(raw[3 + position], field_id)
-                entry[field_id] = _Observed(
-                    value, available, content, _cell_kind(value, None)
-                )
+                entry[field_id] = _Observed(value, available, content, _cell_kind(value, None))
             dates.setdefault(key, []).append(available)
             cells.setdefault(key, []).append(entry)
-        return {
-            key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates
-        }
+        return {key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates}
 
     @staticmethod
     def _rows_in(panel: _Panel, sessions: Sequence[date]) -> Iterator[_Row]:
@@ -1545,9 +1575,7 @@ class EquityDuckdbAdapter:
             found = panel.rows.get((row.ticker, cutoff))
             return None if found is None else found.cells.get(field_id)
         key = (
-            row.ticker
-            if source.axis is SourceAxis.TICKER
-            else panel.corp_by_ticker.get(row.ticker)
+            row.ticker if source.axis is SourceAxis.TICKER else panel.corp_by_ticker.get(row.ticker)
         )
         series = panel.latest.get(source.name, {}).get(key) if key is not None else None
         if series is None:

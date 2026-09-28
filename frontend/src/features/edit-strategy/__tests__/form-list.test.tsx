@@ -44,7 +44,6 @@ const FACTOR: FactorDefinition = {
   default_graph: {
     nodes: [{ kind: "field", node_id: "px", field_id: "price.close" }],
     output_node_id: "px",
-    missing_policy: "drop",
   },
   description: "Server factor",
   factor_id: "server.momentum",
@@ -185,24 +184,28 @@ describe("list transactions (P4-03)", () => {
       "yaml",
     );
     if (tree.status !== "ok") throw new Error("fixture");
+    // schema 1.2 에서 문서 안 팩터를 가리키는 필드는 리스크 역가중 팩터(`risk.risk_factor_id`)
+    // 하나뿐이다(P2-06, `saved_factor` 노드는 문법에서 빠졌다).
     const doc = {
       ...tree.tree,
+      risk: {
+        ...(tree.tree.risk as Record<string, unknown>),
+        risk_factor_id: "momentum",
+      },
       factors: [
         ...(tree.tree.factors as unknown[]),
         {
           factor_id: "blend",
           direction: "high",
           graph: {
-            nodes: [
-              { kind: "saved_factor", node_id: "m", factor_id: "momentum" },
-            ],
+            nodes: [{ kind: "field", node_id: "m", field_id: "price.close" }],
             output_node_id: "m",
           },
         },
       ],
     };
     expect(findReferences(doc, "factor", "momentum", "/factors/0")).toEqual([
-      { pointer: "/factors/1/graph/nodes/0/factor_id" },
+      { pointer: "/risk/risk_factor_id" },
     ]);
     expect(findReferences(doc, "factor", "blend", "/factors/1")).toEqual([]);
     expect(
@@ -303,7 +306,7 @@ describe("StrategyFormPanel list sections", () => {
             : {}
         }
         transactions={transactions}
-        catalogs={{ equityFields: null, factors: [FACTOR] }}
+        catalogs={{ equityFields: null }}
         catalogSnippets={buildCanonicalSnippetCatalog({
           schema: SCHEMA,
           factors: [FACTOR],
@@ -333,7 +336,7 @@ describe("StrategyFormPanel list sections", () => {
         projection={projectForm(SCHEMA, state.parse, [])}
         schema={null}
         transactions={stub()}
-        catalogs={{ equityFields: null, factors: null }}
+        catalogs={{ equityFields: null }}
       />,
     );
     const noSchema = within(
@@ -351,7 +354,7 @@ describe("StrategyFormPanel list sections", () => {
     const onOpenGraph = renderList(VERBOSE, transactions);
     const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.selectOptions(
-      factors.getByRole("combobox", { name: "factors · 카탈로그에서 추가" }),
+      factors.getByRole("combobox", { name: "factors · 예시 팩터에서 추가" }),
       "factor:server.momentum",
     );
     expect(transactions.apply).toHaveBeenLastCalledWith(
@@ -533,7 +536,7 @@ describe("StrategyFormPanel list sections", () => {
         schema={SCHEMA}
         tree={state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {}}
         transactions={stub()}
-        catalogs={{ equityFields: null, factors: [FACTOR] }}
+        catalogs={{ equityFields: null }}
         selectedPointer="/factors/0"
       />,
     );
@@ -575,7 +578,10 @@ describe("StrategyFormPanel list sections", () => {
     const user = userEvent.setup();
     const source = VERBOSE.replace(
       "portfolio:\n",
-      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: saved_factor\n          node_id: m\n          factor_id: momentum\n      output_node_id: m\nportfolio:\n",
+      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: field\n          node_id: m\n          field_id: price.close\n      output_node_id: m\nportfolio:\n",
+    ).replace(
+      "  max_name_weight: 0.05\n",
+      "  max_name_weight: 0.05\n  risk_factor_id: momentum\n",
     );
     const view = (text: string) => {
       const state = parsedState(text);
@@ -589,7 +595,7 @@ describe("StrategyFormPanel list sections", () => {
               : {}
           }
           transactions={stub()}
-          catalogs={{ equityFields: null, factors: [FACTOR] }}
+          catalogs={{ equityFields: null }}
         />
       );
     };
@@ -597,24 +603,29 @@ describe("StrategyFormPanel list sections", () => {
     const factors = () =>
       within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.click(factors().getByRole("button", { name: "momentum · 삭제" }));
-    expect(factors().getByRole("alert")).toHaveTextContent("/factors/1/");
+    expect(factors().getByRole("alert")).toHaveTextContent(
+      "/risk/risk_factor_id",
+    );
     rerender(view(source.replace("weight: 0.6", "weight: 0.5")));
     expect(factors().queryByRole("alert")).toBeNull();
   });
 
-  it("refuses to remove an item that another node references and lists the references", async () => {
+  it("refuses to remove an item that another field references and lists the references", async () => {
     const user = userEvent.setup();
     const transactions = stub();
     const source = VERBOSE.replace(
       "portfolio:\n",
-      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: saved_factor\n          node_id: m\n          factor_id: momentum\n      output_node_id: m\nportfolio:\n",
+      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes:\n        - kind: field\n          node_id: m\n          field_id: price.close\n      output_node_id: m\nportfolio:\n",
+    ).replace(
+      "  max_name_weight: 0.05\n",
+      "  max_name_weight: 0.05\n  risk_factor_id: momentum\n",
     );
     renderList(source, transactions);
     const factors = within(screen.getByRole("group", { name: /\bfactors/ }));
     await user.click(factors.getByRole("button", { name: "momentum · 삭제" }));
     expect(transactions.apply).not.toHaveBeenCalled();
     expect(factors.getByRole("alert")).toHaveTextContent(
-      "/factors/1/graph/nodes/0/factor_id",
+      "/risk/risk_factor_id",
     );
     await user.click(factors.getByRole("button", { name: "blend · 삭제" }));
     expect(transactions.apply).toHaveBeenLastCalledWith(

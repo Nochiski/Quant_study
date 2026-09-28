@@ -22,10 +22,10 @@ def test_schema_endpoint_serves_the_runtime_schema_with_its_hash_as_etag() -> No
     )
     assert body["schema_hash"] == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     assert response.headers["ETag"] == f'"{body["schema_hash"]}"'
-    assert body["schema_version"] == "1.1"
+    assert body["schema_version"] == "1.2"
     assert body["schema"]["properties"]["schema_version"] == {
         "type": "string",
-        "const": "1.1",
+        "const": "1.2",
         "x-description-key": "strategy.section.schema_version",
     }
     assert body["schema"]["additionalProperties"] is False
@@ -64,15 +64,16 @@ def test_contract_endpoint_pairs_fields_with_registry_versions_and_links() -> No
     assert body["factor_catalog_url"] == "/api/v1/factors/catalog"
     assert body["equity_catalog_url"] == "/api/v1/equity/catalog"
     by_pointer = {row["pointer"]: row for row in contract["fields"]}
-    row = by_pointer["/execution/fee_bps"]
+    # 비용·기간은 1.2 에서 전략 문서를 떠났다(P2-03) — 실행 설정 스키마가 그 행을 소유한다.
+    row = by_pointer["/risk/max_name_weight"]
     assert (row["type"], row["unit"], row["display_unit"], row["applied_stage"]) == (
         "number",
-        "bps",
-        "bp",
-        "execution",
+        "ratio",
+        "%",
+        "risk",
     )
-    assert row["minimum"] == 0 and row["default"] == 15.0 and row["example"] == 15.0
-    assert by_pointer["/data/start"]["format"] == "date"
+    assert row["maximum"] == 1.0 and row["default"] == 0.1
+    assert not [pointer for pointer in by_pointer if pointer.startswith(("/data/", "/execution/"))]
     assert by_pointer["/portfolio/rebalance"]["enum"]
 
 

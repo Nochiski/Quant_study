@@ -36,6 +36,11 @@ const CATALOG = JSON.parse(
   }[];
 };
 
+/** 실행 설정 스키마(다른 산출물, P3-02). `strategy.field.run_environment.*` 키는 여기서 발행된다. */
+const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/run-environment-schema.json"),
+) as Json;
+
 const HANGUL = /[가-힣]/;
 
 /** 스키마 어디에 있든 `x-description-key` 전부. 객체 stem과 property stem을 함께 모은다. */
@@ -69,11 +74,34 @@ const operatorStems = (node: unknown, found: Set<string>): Set<string> => {
   return found;
 };
 
+/** 연산자가 아닌 enum property 의 값 이름 키(`<stem>.value.<값>`) 전부. */
+const enumValueKeys = (node: unknown, found: string[]): string[] => {
+  if (Array.isArray(node)) {
+    for (const item of node) enumValueKeys(item, found);
+    return found;
+  }
+  if (node === null || typeof node !== "object") return found;
+  const record = node as Json;
+  const stem = record["x-description-key"];
+  if (
+    Array.isArray(record.enum) &&
+    typeof stem === "string" &&
+    record["x-operator"] === undefined
+  ) {
+    for (const value of record.enum)
+      found.push(`${stem}.value.${String(value)}`);
+  }
+  for (const value of Object.values(record)) enumValueKeys(value, found);
+  return found;
+};
+
 describe("화면 어휘 커버리지", () => {
   it("runtime schema가 발행한 설명 키에 이름과 한 줄 설명이 있다", () => {
     const stems = [...descriptionStems(SCHEMA, new Set())].sort();
 
-    expect(stems.length).toBeGreaterThan(100);
+    // 순회가 실제로 키를 찾았는지 보는 하한이다. schema 1.2(P2-03)에서 `data`·`execution` 절이
+    // 빠져 1.1 의 100여 개보다 줄었다.
+    expect(stems.length).toBeGreaterThan(80);
     const missing = stems.filter(
       (stem) => tName(stem) === null || tDescription(stem) === null,
     );
@@ -129,9 +157,11 @@ describe("화면 어휘 커버리지", () => {
         (["ko", "en"] as const)
           .filter(
             (locale) =>
-              !(messages[locale][
-                definition.formula_key as keyof (typeof messages)["ko"]
-              ] ?? "").includes(parameter.property_name),
+              !(
+                messages[locale][
+                  definition.formula_key as keyof (typeof messages)["ko"]
+                ] ?? ""
+              ).includes(parameter.property_name),
           )
           .map(
             (locale) =>
@@ -141,6 +171,53 @@ describe("화면 어휘 커버리지", () => {
     );
 
     expect(missing).toEqual([]);
+  });
+
+  it("enum 값마다 이름이 있다(연산자 enum 은 카탈로그 키를 쓴다)", () => {
+    // 선택지를 원문 값(`top_percent`·`zscore`)으로 보이지 않게 한다(P3-01). 키는 property stem
+    // 아래 `.value.<값>` 이고, 값 목록은 스키마에서 읽어 여기 손으로 적지 않는다.
+    const values = enumValueKeys(SCHEMA, []);
+
+    expect(values.length).toBeGreaterThan(0);
+    const missing = values.flatMap((key) =>
+      (["ko", "en"] as const)
+        .filter(
+          (locale) =>
+            (messages[locale] as Record<string, string | undefined>)[key] ===
+            undefined,
+        )
+        .map((locale) => `${key} ${locale}`),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("스키마가 더는 발행하지 않는 화면 어휘 키가 사전에 남지 않는다", () => {
+    // schema 1.2 에서 사라진 `data`·`execution`·`graph.missing_policy`와 `saved_*` 노드(P2-03·
+    // P2-06)의 문장이 사전에 남아 있었다(BACKLOG-012). 스키마·카탈로그가 발행하는 키만 둔다.
+    // `strategy.field.run_environment.*` 는 실행 설정 스키마(다른 산출물)가 발행한다 — 그 스키마도 순회한다.
+    const published = new Set<string>();
+    for (const schema of [SCHEMA, RUN_ENVIRONMENT_SCHEMA]) {
+      for (const stem of descriptionStems(schema, new Set())) {
+        published.add(stem);
+        published.add(`${stem}.description`);
+      }
+      // 값 설명(`.value.<값>.description`)은 뜻이 이름만으로 드러나지 않는 값에만 있는 선택 항목이다.
+      for (const key of enumValueKeys(schema, [])) {
+        published.add(key);
+        published.add(`${key}.description`);
+      }
+    }
+    for (const definition of CATALOG.operators) {
+      published.add(definition.description_key);
+      published.add(`${definition.description_key}.description`);
+      published.add(definition.formula_key);
+    }
+    const owned = /^strategy\.(section|field|node|operator|type)\./;
+    const orphans = Object.keys(messages.ko).filter(
+      (key) => owned.test(key) && !published.has(key),
+    );
+
+    expect(orphans).toEqual([]);
   });
 
   it("스키마의 `x-operator`와 카탈로그가 같은 키를 가리킨다", () => {

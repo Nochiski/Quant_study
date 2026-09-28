@@ -1,6 +1,7 @@
 import { useMemo, type ComponentProps } from "react";
 
 import { StrategyDebugger } from "../../../features/debug-strategy";
+import type { RunEnvironment } from "../../../shared/api";
 import {
   ExecutionPlanPanel,
   type DocumentState,
@@ -11,6 +12,8 @@ import { buildStrategyDebuggerAvailability } from "../model/strategy-debugger-co
 type StrategyDebuggerPanelProps = {
   document: DocumentState;
   executionPlans: ExecutionPlansState;
+  /** 실행 설정 패널이 검증한 실행 설정. 없으면 추적이 막힌다(P3-02). */
+  environment: RunEnvironment | null;
   publicationOwnerKey: string;
   asOf?: string;
   security?: string;
@@ -25,6 +28,7 @@ type StrategyDebuggerPanelProps = {
 export const StrategyDebuggerPanel = ({
   document,
   executionPlans,
+  environment,
   publicationOwnerKey,
   asOf,
   security,
@@ -33,8 +37,9 @@ export const StrategyDebuggerPanel = ({
   onSelectPointer,
 }: StrategyDebuggerPanelProps) => {
   const availability = useMemo(
-    () => buildStrategyDebuggerAvailability(document, executionPlans),
-    [document, executionPlans],
+    () =>
+      buildStrategyDebuggerAvailability(document, executionPlans, environment),
+    [document, environment, executionPlans],
   );
   return (
     <StrategyDebugger

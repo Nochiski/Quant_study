@@ -1,10 +1,12 @@
-import { useId, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 
 import {
   BacktestRunDetail,
+  runEnvironmentFields,
   useBacktestRequest,
   useBacktestResult,
   useBacktestStatus,
+  useRunEnvironmentSchema,
   type BacktestRunState,
 } from "../../../entities/backtest";
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
@@ -80,6 +82,15 @@ export const BacktestRunPage = () => {
   const request = useBacktestRequest(runId);
   const completed = status.data?.status === "completed";
   const result = useBacktestResult(runId, completed);
+  // run 상세의 실행 설정 칸 이름·단위·값 이름은 실행 설정 스키마에서 읽는다(DEFECT-242-04).
+  const runEnvironmentSchema = useRunEnvironmentSchema();
+  const environmentFields = useMemo(
+    () =>
+      runEnvironmentSchema.data === undefined
+        ? null
+        : runEnvironmentFields(runEnvironmentSchema.data.schema),
+    [runEnvironmentSchema.data],
+  );
   const assistantId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
   const [panel, setPanel] = useState<AssistantPanel>({
@@ -180,7 +191,12 @@ export const BacktestRunPage = () => {
             {t("page.backtest.resultError")}
           </p>
         ) : null}
-        {result.data ? <BacktestRunDetail result={result.data} /> : null}
+        {result.data ? (
+          <BacktestRunDetail
+            result={result.data}
+            environmentFields={environmentFields}
+          />
+        ) : null}
       </div>
       {assistantAvailable && panel.mounted ? (
         // 결과 화면의 AI 패널. landmark·이름·제목은 여기가 소유하고 채팅 feature는 이름 없는

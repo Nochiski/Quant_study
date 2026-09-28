@@ -249,6 +249,8 @@ export {
   type SnippetEditResult,
 } from "./model/canonical-snippets";
 export {
+  compiledNodeOrigin,
+  documentOutputNodeId,
   factorIndexAtPointer,
   factorGraphPointer,
   factorNodePointer,
@@ -256,6 +258,7 @@ export {
   pointerSelectsNode,
   prepareExecutionPlans,
   useExecutionPlans,
+  type CompiledNodeOrigin,
   type ExecutionPlansState,
   type FactorPlanRequest,
   type PlannedFactor,

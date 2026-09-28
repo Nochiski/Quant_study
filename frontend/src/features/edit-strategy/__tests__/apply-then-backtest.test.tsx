@@ -20,8 +20,8 @@ import { ProposalApplyFeedback } from "../ui/proposal-apply-dialog";
 
 afterEach(cleanup);
 
-const BASE = 'schema_version: "1.1"\ntitle: "old"\n';
-const PROPOSED = 'schema_version: "1.1"\ntitle: "new"\n';
+const BASE = 'schema_version: "1.2"\ntitle: "old"\n';
+const PROPOSED = 'schema_version: "1.2"\ntitle: "new"\n';
 
 const editorOf = (initial: string) => {
   let text = initial;
@@ -83,11 +83,11 @@ const compiled = (state: DocumentState, error: boolean): DocumentState =>
       diagnostics: error
         ? [
             {
-              code: "structure.missing_key",
+              code: "structure.missing_field",
               kind: "structural",
               severity: "error",
-              pointer: "/data",
-              message: "data 섹션이 필요합니다.",
+              pointer: "/title",
+              message: "title 필드가 필요합니다.",
               range: null,
             },
           ]
@@ -240,6 +240,33 @@ describe("useApplyProposalThenBacktest", () => {
     );
   });
 
+  it("실행 설정이 비어 막혔으면 사람이 고친 문서와 같은 차단 이유를 함께 말한다", () => {
+    // 상황: AI 제안을 적용했고 문서는 컴파일됐지만 실행 설정의 기간·유니버스가 비어 게이트가 닫혔다
+    // (P3-02 결정 5 — 실행 설정은 문서 밖이라 AI 적용이 채우지 않는다).
+    const { hook, rerender } = mountChain();
+    act(() =>
+      hook.result.current.chain.applyThenBacktest({
+        source: PROPOSED,
+        baseSource: BASE,
+      }),
+    );
+    rerender({
+      state: compiled(parsed(edited(PROPOSED)), false),
+      canRun: false,
+    });
+    render(
+      <ProposalApplyFeedback
+        apply={hook.result.current.apply}
+        chain={hook.result.current.chain}
+        blockedReason="실행 설정에서 시작일·종료일·유니버스 칸을 채우세요."
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "백테스트를 시작하지 않았습니다. 실행할 수 있게 되면 직접 실행하세요. 실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
+    );
+  });
+
   it("시작하지 않았다는 알림은 문서를 고치면 걷힌다", () => {
     const { run, hook, rerender } = mountChain();
     act(() =>
@@ -254,7 +281,7 @@ describe("useApplyProposalThenBacktest", () => {
 
     const typedOver = documentReducer(settled, {
       type: "edit",
-      source: 'schema_version: "1.1"\ntitle: "mine"\n',
+      source: 'schema_version: "1.2"\ntitle: "mine"\n',
     });
     rerender({ state: typedOver, canRun: true });
     expect(hook.result.current.chain.notStarted).toBe(false);
@@ -300,7 +327,7 @@ describe("useApplyProposalThenBacktest", () => {
 
   it("확인 창에서 취소하면 실행도 잇지 않는다", () => {
     const { editor, run, hook } = mountChain();
-    editor.edit('schema_version: "1.1"\ntitle: "mine"\n');
+    editor.edit('schema_version: "1.2"\ntitle: "mine"\n');
     act(() =>
       hook.result.current.chain.applyThenBacktest({
         source: PROPOSED,
@@ -326,7 +353,7 @@ describe("useApplyProposalThenBacktest", () => {
     // 적용한 텍스트가 reducer에 닿은 뒤, 검증이 끝나기 전에 사용자가 이어서 고친다.
     rerender({ state: edited(PROPOSED), canRun: false });
     expect(hook.result.current.chain.waiting).toBe(true);
-    const typedOver = edited('schema_version: "1.1"\ntitle: "new but mine"\n');
+    const typedOver = edited('schema_version: "1.2"\ntitle: "new but mine"\n');
     rerender({ state: compiled(parsed(typedOver), false), canRun: true });
 
     expect(run).not.toHaveBeenCalled();

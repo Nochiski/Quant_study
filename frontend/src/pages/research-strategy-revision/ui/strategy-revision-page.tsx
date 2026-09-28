@@ -25,7 +25,6 @@ import {
   PROJECTION_VIEWS,
   canValidateDocument,
   currentDiagnostics,
-  currentSpec,
   projectStrategySpec,
   revisionDraftId,
   saveStatusText,
@@ -53,6 +52,7 @@ import {
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
+  RunEnvironmentSummary,
   useBacktestRunSettings,
 } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
@@ -117,16 +117,15 @@ export const StrategyRevisionPage = () => {
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
   });
-  const executionPlans = useExecutionPlans(document, assist.inspectorSource);
-  const executableSpec = currentSpec(document);
-  const runDateRange = useMemo(
-    () =>
-      executableSpec === null
-        ? null
-        : { start: executableSpec.data.start, end: executableSpec.data.end },
-    [executableSpec],
+  // 실행 설정(시장·기간·유니버스·체결·비용·결측)은 전략 문서 밖에 있고 패널이 owner 다(schema 1.2,
+  // P3-02). 마지막 사용값은 이 전략의 local UI state 다.
+  const runSettings = useBacktestRunSettings(strategyId);
+  // 실행 계획 sandbox 도 실행과 같은 결측 정책을 싣는다(Phase 2 감사 #3).
+  const executionPlans = useExecutionPlans(
+    document,
+    assist.inspectorSource,
+    runSettings.environment?.missing ?? null,
   );
-  const runSettings = useBacktestRunSettings(runDateRange);
   const backtest = useRunBacktest(
     document,
     executionPlans,
@@ -376,6 +375,7 @@ export const StrategyRevisionPage = () => {
             replace: true,
           })
         }
+        runEnvironment={<RunEnvironmentSummary controller={runSettings} />}
         documentHistory={<DocumentHistoryActions history={history} />}
         documentStatus={<DocumentStatus state={document} />}
         problems={
@@ -399,9 +399,7 @@ export const StrategyRevisionPage = () => {
             runBlockedReason={
               backtestRejectedForUpgrade
                 ? t("upgrade.backtestBlocked")
-                : runSettings.result.valid
-                  ? undefined
-                  : t("backtest.settings.blocked")
+                : (runSettings.blockedReason ?? undefined)
             }
             runSettings={
               <BacktestRunSettings
@@ -428,7 +426,6 @@ export const StrategyRevisionPage = () => {
               catalogs={{
                 equityFields:
                   assist.inspectorSource.equityCatalog?.fields ?? null,
-                factors: assist.inspectorSource.factorCatalog?.factors ?? null,
               }}
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
@@ -449,8 +446,6 @@ export const StrategyRevisionPage = () => {
                 catalogs: {
                   equityFields:
                     assist.inspectorSource.equityCatalog?.fields ?? null,
-                  factors:
-                    assist.inspectorSource.factorCatalog?.factors ?? null,
                 },
                 operators: assist.operators,
                 onOpenForm: openForm,
@@ -483,10 +478,12 @@ export const StrategyRevisionPage = () => {
             <ProposalApplyFeedback
               apply={proposalApply}
               chain={strategyAssistant.chain}
+              blockedReason={runSettings.blockedReason}
             />
             <UpgradeBanner
               upgrade={documentUpgrade}
               backtestRejected={backtestRejectedForUpgrade}
+              onApplyEnvironment={runSettings.applyEnvironment}
             />
             {status.kind === "conflict" &&
             status.strategyId !== null &&
@@ -541,6 +538,7 @@ export const StrategyRevisionPage = () => {
           <StrategyDebuggerPanel
             document={document}
             executionPlans={executionPlans}
+            environment={runSettings.environment}
             publicationOwnerKey={debuggerPublicationOwner}
             asOf={search.asOf}
             security={search.security}

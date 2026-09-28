@@ -1,9 +1,5 @@
 import type { BacktestRunSpec } from "../../../shared/api";
-
-export type BacktestDateRange = {
-  start: string;
-  end: string;
-};
+import type { RunEnvironmentValidation } from "./run-environment";
 
 export type BacktestRunSettingsFields = {
   core: NonNullable<BacktestRunSpec["core"]>;
@@ -13,8 +9,12 @@ export type BacktestRunSettingsFields = {
   oosStart: string;
 };
 
+/**
+ * `environment` 는 실행 설정 칸 중 하나라도 비었거나 규칙을 어겼다는 뜻이다(칸별 사유는 패널이 보인다).
+ * `oos_out_of_range` 는 OOS 시작일이 실행 기간 밖이다 — 기간의 owner 는 실행 설정이다(schema 1.2).
+ */
 export type BacktestRunSettingsError =
-  "initial_cash" | "annualization_days" | "date_range_unavailable";
+  "initial_cash" | "annualization_days" | "environment" | "oos_out_of_range";
 
 export type BacktestRunOptions = Omit<
   BacktestRunSpec,
@@ -43,10 +43,11 @@ export const DEFAULT_BACKTEST_RUN_SETTINGS: BacktestRunSettingsFields = {
 /**
  * Parse UI representation only. The backend remains the owner of accepted execution semantics,
  * defaults and final validation; successful fields are sent explicitly for a reproducible run.
+ * 실행 설정(`environment`)은 패널이 스키마로 검증한 값을 그대로 싣는다(P3-02).
  */
 export const buildBacktestRunOptions = (
   fields: BacktestRunSettingsFields,
-  dateRange: BacktestDateRange | null,
+  environment: RunEnvironmentValidation,
 ): BacktestRunSettingsResult => {
   const errors: BacktestRunSettingsError[] = [];
   const initialCashText = fields.initialCashKrw.trim();
@@ -60,12 +61,19 @@ export const buildBacktestRunOptions = (
   // the business range remain backend-owned semantics.
   if (annualizationText === "" || !Number.isSafeInteger(annualizationDays))
     errors.push("annualization_days");
+  if (!environment.valid) errors.push("environment");
 
   const oosStart = fields.oosStart.trim();
-  if (oosStart !== "" && dateRange === null)
-    errors.push("date_range_unavailable");
+  const range = environment.valid ? environment.environment : null;
+  if (
+    oosStart !== "" &&
+    range !== null &&
+    (oosStart < range.start || oosStart > range.end)
+  )
+    errors.push("oos_out_of_range");
 
-  if (errors.length > 0) return { valid: false, options: null, errors };
+  if (errors.length > 0 || range === null)
+    return { valid: false, options: null, errors };
 
   return {
     valid: true,
@@ -75,14 +83,15 @@ export const buildBacktestRunOptions = (
       initial_cash: initialCashKrw,
       benchmark_security_id: fields.benchmarkSecurityId.trim() || null,
       annualization_days: annualizationDays,
+      environment: range,
       metric_windows:
-        oosStart === "" || dateRange === null
+        oosStart === ""
           ? []
           : [
               {
                 scope: "out_of_sample",
                 start: oosStart,
-                end: dateRange.end,
+                end: range.end,
                 label: `OOS ${oosStart}`,
               },
             ],

@@ -6,6 +6,7 @@
 .snippet-catalog__help,
 .snippet-catalog__state,
 .snippet-catalog__empty,
+.snippet-catalog__note,
 .snippet-catalog__feedback {
   margin: 0;
   color: var(--text-muted);

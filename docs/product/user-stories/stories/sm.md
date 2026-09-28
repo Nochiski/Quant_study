@@ -23,6 +23,8 @@
   저장"과 "백테스트"가 막히며, 문제 목록에 `/risk/max_name_wieght` 경로가 보인다.
 - Given 오타를 고친 문서, When "검증"을 누르면, Then 다시 "검증 통과"가 된다.
 - Given 저장하지 않은 편집, When 새로고침하면, Then 복구본과 서버 초안을 불러와 편집하던 글을 되찾는다.
+- 비고: P3-02부터 백테스트·추적 전에 실행 설정 패널에서 기간과 유니버스를 정한다. 이 값은 전략 문서 밖에 있어
+  바꿔도 전략 버전이 늘지 않고, 전략별 마지막 사용값으로 다시 채워진다. IDE 위 요약 띠가 지금 값을 보인다.
 
 ### US-SM-02 필드의 단위·범위·기본값을 계약 패널에서 확인한다
 
@@ -82,6 +84,8 @@
 - Given 같은 문서, When `Ctrl+Enter`를 누르면 서버 검증이 다시 돌고, `Ctrl+S`를 누르면 v1이
   저장되고 문서 상태가 "저장됨"이다.
 - Given 저장된 v1, When `Ctrl+Shift+Enter`를 누르면, Then 백테스트 실행 화면으로 가고 결과가 나온다.
+- 비고: P3-02부터 백테스트·추적 전에 실행 설정 패널에서 기간과 유니버스를 정한다. 이 값은 전략 문서 밖에 있어
+  바꿔도 전략 버전이 늘지 않고, 전략별 마지막 사용값으로 다시 채워진다. IDE 위 요약 띠가 지금 값을 보인다.
 
 ### US-SM-05 실행 기록으로 같은 백테스트를 그대로 다시 돌린다
 
@@ -106,6 +110,14 @@
   재실행"을 누르면 서버가 기억한 요청 그대로 새 실행이 시작된다.
 - 비고: 취소·재실행 테스트는 `/api/v1/backtests/**`를 브라우저에서 대신 응답한다. 마지막 기준은 화면
   동작 수준에서만 확인하며, 서버 쪽 재실행 계약은 backend 테스트가 소유한다.
+- 비고: P3-02부터 백테스트·추적 전에 실행 설정 패널에서 기간과 유니버스를 정한다. 이 값은 전략 문서 밖에 있어
+  바꿔도 전략 버전이 늘지 않고, 전략별 마지막 사용값으로 다시 채워진다. IDE 위 요약 띠가 지금 값을 보인다.
+- 비고: "데이터 경고"의 문장은 backend가 한글로 완성해 보낸다(en 로케일에서도 한글). 벤치마크 종목에
+  bar가 없는 세션은 원인별로 따로 뜬다. 창 시작이 첫 bar보다 앞서면 `benchmark.no_bar_at_start`가
+  벤치마크 지표가 사용 불가인 이유를 적는다. 거래정지는 `benchmark.suspended_sessions_carried`,
+  상장이 끝난 뒤 동결은 `benchmark.delisted_sessions_frozen`이다(이슈 #229). mock 데이터에는 정지가
+  없어 브라우저 e2e는 이 경고를 밟지 않는다. backend `tests/application/test_benchmark_suspension.py`가
+  확인한다.
 
 ### US-SM-06 같은 전략을 다른 실행 설정으로 돌려도 전략 해시는 같다
 
@@ -135,17 +147,22 @@
 - e2e 담당: 없음
 - 기능 영역: schema 업그레이드 · 동결 리비전
 - e2e:
-  - `frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision, saves it as 1.1 and backtests it
+  - `frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision to the current schema, fills its run settings, saves it and backtests it
   - `frontend/e2e/workbench.workflow.spec.ts` :: migrates a source-less legacy revision without changing meaning
 
 수용 기준
 
-- Given schema 1.0 리비전, Then "이 문서는 schema 1.0입니다" 안내가 뜨고 백테스트가 막힌다.
-- Given 그 안내, When "1.1로 업그레이드"를 누르고 저장하면, Then 새 버전이 생기고 안내가 사라지며
-  백테스트가 끝까지 돈다. 전략 이력에는 옛 버전에만 "1.0 동결" 표시가 남는다.
+- Given schema 1.0·1.1 리비전, Then "이 문서는 지원이 끝난 schema 버전입니다" 안내가 뜨고 백테스트가
+  막힌다.
+- Given 그 안내, When "현재 버전으로 업그레이드"를 누르면, Then 알아 둘 점(warning)과 옛 문서에 있던 실행
+  설정이 보인다. When "실행 설정에 채우기"를 누르고 저장하면, Then 새 버전이 생기고 안내가 사라지며
+  옛 실행 설정(기간·유니버스·비용)으로 백테스트가 끝까지 돈다. 옛 실행 설정을 옮기지 못한 문서는
+  채우지 않고 그 사실을 알린다. 전략 이력에는 옛 버전에만 "이전 버전 동결" 표시가 남는다.
 - Given 원문 없이 JSON으로만 저장된 옛 전략, Then "legacy JSON에서 생성된 문서"라는 안내와 함께
   열리고, 저장하면 의미 해시가 같은 새 버전이 된다.
-- 비고: 1.1 → 1.2 업그레이드는 P2-09·P3-02가 이 스토리의 수용 기준을 넓힌다.
+- 비고: P2-09부터 업그레이드는 1.0 → 1.1 → 1.2 전체 경로를 타고, 저장한 새 버전은 현재 schema다.
+  의미 해시는 1.1 합성 방식(`signal.normalization: none`)을 명시한 golden 문서와 같다. P3-02가 배너
+  문구를 버전 중립으로 바꾸고 응답 `environment`로 실행 설정 채우기와 `warnings` 표시를 더했다.
 
 ### US-SM-08 Form·Graph로 고쳐도 YAML 원문은 그 줄만 바뀐다
 
@@ -214,3 +231,9 @@
 제품 결정 필요: 전략 문서 필드는 계약 패널이 설명하지만 실행 설정 패널에는 설명이 없다. lang2 P3-02가
 실행 설정 패널을 넓히지만 acceptance에 항목 설명이 없고, P2-01의 실행 설정 스키마가 설명 키를 낼지도
 정해지지 않았다. 설명 키의 owner와 표시 위치를 정해야 한다.
+
+- 비고: P3-02가 실행 설정 스키마 필드(시장·빈도·기간·유니버스·체결·참여율·수수료·슬리피지·결측 처리)
+  옆에 한 줄 뜻을 붙였다(BACKLOG-013, 키는 backend·문장은 frontend, 커버리지 테스트). 수수료·슬리피지
+  기준은 채워졌다. OOS 시작일·연환산 거래일·벤치마크는 실행 설정 스키마가 아니라 실행 요청 필드라
+  설명 키의 owner가 정해지지 않았다 — 벤치마크·OOS 시작일은 frontend 힌트 문장이 있고 연환산 거래일은
+  없다. 그 셋의 키 owner를 정하기 전까지 상태는 `미계획`이다.

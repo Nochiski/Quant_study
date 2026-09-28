@@ -61,12 +61,14 @@ def test_container_uses_explicit_mock_adapter_without_silent_fallback() -> None:
         build_container(equity_adapter="duckdb")
 
 
-def test_panel_hides_future_consensus_revision_until_available_date() -> None:
+def test_panel_hides_future_consensus_revision_until_the_lagged_session() -> None:
+    # 개정값의 available_date 는 01-05 다. 컨센서스 랙은 원장처럼 1세션이라(#230) 다음 세션인
+    # 01-08 부터 보이고, 01-05 까지는 이전 값이다.
     container = build_container()
     result = container.equity_data.load_panel(
         ResearchPanelQuery(
-            start=date(2024, 1, 4),
-            end=date(2024, 1, 5),
+            start=date(2024, 1, 5),
+            end=date(2024, 1, 8),
             security_ids=("sec-005930-1",),
             field_ids=("consensus.forward_eps",),
         )
@@ -75,7 +77,7 @@ def test_panel_hides_future_consensus_revision_until_available_date() -> None:
     assert (
         _cell_value(
             result,
-            as_of=date(2024, 1, 4),
+            as_of=date(2024, 1, 5),
             security_id="sec-005930-1",
             field_id="consensus.forward_eps",
         )
@@ -84,7 +86,7 @@ def test_panel_hides_future_consensus_revision_until_available_date() -> None:
     assert (
         _cell_value(
             result,
-            as_of=date(2024, 1, 5),
+            as_of=date(2024, 1, 8),
             security_id="sec-005930-1",
             field_id="consensus.forward_eps",
         )
@@ -92,12 +94,12 @@ def test_panel_hides_future_consensus_revision_until_available_date() -> None:
     )
 
 
-def test_mock_net_income_is_pit_ttm_that_switches_on_the_filing_date() -> None:
+def test_mock_net_income_is_pit_ttm_that_switches_one_session_after_filing() -> None:
     """mock 도 duckdb 와 같은 의미다 — `financial.net_income` 은 공시일 기준 최근 4분기 합(TTM)이다.
 
     #212: 기간 개념이 없던 mock 은 분기·연간 혼재를 못 잡았다. 000660 은 2023 3분기 보고서가 늦게
-    (01-05) 접수돼, 그 전 세션은 반기 말 TTM, 그날부터 3분기 말 TTM 이다. 4분기를 채울 수 없는 종목
-    (035420)은 값이 없다 — 3개월 값으로 대신하지 않는다.
+    (01-05) 접수돼, 재무 랙 1세션(원장과 같다, #230) 뒤인 01-08 부터 3분기 말 TTM 이고 그 전 세션은
+    반기 말 TTM 이다. 4분기를 채울 수 없는 종목(035420)은 값이 없다 — 3개월 값으로 대신하지 않는다.
     """
     container = build_container()
     profile = next(
@@ -108,15 +110,15 @@ def test_mock_net_income_is_pit_ttm_that_switches_on_the_filing_date() -> None:
     assert "TTM" in profile.label
     result = container.equity_data.load_panel(
         ResearchPanelQuery(
-            start=date(2024, 1, 4),
-            end=date(2024, 1, 5),
+            start=date(2024, 1, 5),
+            end=date(2024, 1, 8),
             security_ids=("sec-000660-1", "sec-035420-1"),
             field_ids=("financial.net_income",),
         )
     )
     cells = {(cell.as_of, cell.security_id): cell for cell in result.cells}
-    before = cells[(date(2024, 1, 4), "sec-000660-1")]
-    after = cells[(date(2024, 1, 5), "sec-000660-1")]
+    before = cells[(date(2024, 1, 5), "sec-000660-1")]
+    after = cells[(date(2024, 1, 8), "sec-000660-1")]
     assert (before.value, before.source_effective_date, before.available_date) == (
         -8_000_000_000_000.0,
         date(2023, 6, 30),

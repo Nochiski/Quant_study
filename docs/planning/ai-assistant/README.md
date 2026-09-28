@@ -1,5 +1,10 @@
 # AI 어시스턴트 기획 패키지
 
+> **현행 안내(2026-09-28)**: 이 initiative는 **완료**됐다. 트래커의 19개 PR(P0 1, A 7, B 5, C 3, D 3)이
+> 모두 main에 머지됐고 마지막은 D-03 #210 `8fbf19f3`(2026-09-27)이다. 남은 후속은 D-04(결과 도구 활동의
+> JSON 원문, 트래커 행 없음)와 사용자 공급자 키가 필요한 live smoke 2건이다. 상태는 [PLAN.md](./PLAN.md)가
+> 정본이다.
+
 설정 화면에서 LLM 공급자(Claude·Codex)를 연결하고, 전략 화면 우측 사이드바 채팅에서 LLM이 현재
 전략·데이터 카탈로그·인터넷 검색으로 시장을 조사해 전략을 제안하게 하는 initiative의 기획 자료를
 한곳에 보관한다.
@@ -31,7 +36,10 @@
 - `PLAN.md`가 진행 상태의 단일 기준이다.
 - 이 initiative는 schema 1.2·그래프 표현 initiative(PR #167)와 파일이 겹치지 않는다. 어시스턴트는 현재
   스키마 버전을 runtime schema에서 읽으므로 1.1이든 1.2든 같은 코드로 동작한다. 단 그쪽이 먼저
-  머지되면 A-07 fixture와 B-05 e2e를 1.2 문서로 갱신한다.
+  머지되면 A-07 fixture와 B-05 e2e를 1.2 문서로 갱신한다. — **역사 기록(2026-09-28)**: schema 1.2는
+  #202(`a4be517a`)로 main에 들어왔고, `backend/tests/fixtures/assistant/` 골든·시나리오는 이미 1.2
+  문서다. 대본 공급자(`llm_scripted`)는 `schema_version`을 적지 않고 편집기 원문이나
+  `CURRENT_SCHEMA_VERSION`을 따라간다.
 
 ## 진행 상태 갱신 규칙
 

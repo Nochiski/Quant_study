@@ -37,7 +37,9 @@
 2. 구현자 검증이 끝나면 `SELF_CHECK`로 바꾸고 검증 명령과 결과를 기록한다.
 3. diff를 고정한 뒤 새 리뷰 서브에이전트 한 명을 배정하고 `IN_REVIEW`로 바꾼다.
 4. 수정이 생기면 같은 리뷰어가 재검토한다.
-5. `APPROVED` 후 로컬 gate를 통과하면 merge하고 체크박스와 상태를 `MERGED`로 바꾼다.
+5. `APPROVED` 후 로컬 gate와 CI 전체 job이 green이면 merge하고 체크박스와 상태를 `MERGED`로 바꾼다.
+   CI 전체 green 조건은 P3-03부터 예외 없이 적용한다(P2-03~P3-02 묶음의 `browser-e2e` red 허용은 끝났다,
+   PLAN 현재 결정 2026-09-28 규칙 3).
 6. PR row와 변경 기록을 수정한 뒤 `tools/update-plan-progress.ps1`을 실행한다.
 7. Phase가 끝날 때마다 별도 서브에이전트로 SoT(`.claude/rules/strategy-workbench-sot.md`)와
    책임 분리(`backend-package-boundary.md`, `frontend-fsd.md`)를 점검하고 결과를 Phase exit에

@@ -244,14 +244,17 @@ Phase exit:
 
 Phase exit:
 
-- [ ] Latest main에서 backend/frontend/browser E2E CI가 성공한다.
+- [x] Latest main에서 backend/frontend/browser E2E CI가 성공한다. — 2026-09-28 문서 최신화 감사 기록: main
+  `7fb77d57`의 CI 5 job(`backend`·`backend-no-extras`·`frontend`·`browser-e2e`·`user-story-harness`)이 모두
+  success다. #74~#79 머지 당시(2026-09-06)에는 미충족이었고, 그 사실은 아래 문단이 보존한다.
 - [x] backend/frontend를 실제로 동시에 실행해 전략 생성·오류 수정·저장/복구·백테스트·trace/risk·history/diff 전체 시나리오를 수행하고 실행 보고서를 남긴다.
 - [x] P0-01의 migration 조건을 실제 browser에서 통과해 Quick/Advanced를 제거하고 backend legacy wire 호환은 유지하기로 결정했다.
 - [x] 모든 PR에 reviewer `APPROVE` 기록이 있다.
 
 2026-09-06 제품 소유자가 GitHub billing/spending-limit의 `steps=[]` 차단을 인지한 상태에서,
 기록된 로컬 전체 gate를 근거로 #74~#79 직접 머지를 명시 지시했다. 실패한 원격 CI를 성공으로
-표기하지 않으며 위 CI exit 항목은 미충족 상태로 보존한다.
+표기하지 않으며 위 CI exit 항목은 미충족 상태로 보존한다. (역사 기록: 이 항목은 2026-09-28 뒤 main CI
+green으로 체크했다. 위 머지들이 CI 없이 들어갔다는 사실은 그대로다.)
 
 ---
 

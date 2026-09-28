@@ -31,6 +31,7 @@ from strategy_workbench.domain.strategy.facade.specification import SignalNormal
 from tests.frozen_revision_rows import (
     FIXTURES,
     open_repository,
+    seed_retired_1_1_document_row,
     seed_retired_1_1_row,
     source_spec_hash,
 )
@@ -115,6 +116,29 @@ def test_list_history_and_document_views_stay_green_on_a_retired_1_1_row(tmp_pat
     # generated source 는 그대로 컴파일된다 — hash 는 저장된 1.1 hash 와 다르다(문서가 달라졌다).
     recompiled = source_spec_hash(document.source, SourceFormat.JSON)
     assert recompiled != row.spec_hash
+
+
+def test_a_retired_1_1_document_row_serves_its_saved_yaml_for_upgrade(tmp_path: Path) -> None:
+    """원문이 함께 저장된 1.1 row 는 generated source 가 아니라 그 YAML 원문을 돌려준다.
+
+    revision 화면의 "현재 버전으로 업그레이드"는 이 원문을 upgrade API 에 보내는 경로다. e2e·매뉴얼
+    캡처가 CLI(`STRATEGY_WORKBENCH_E2E_SEED_SCHEMA=1.1`)로 심는 row 가 이것이다.
+    """
+    path = tmp_path / "document.sqlite3"
+    row = seed_retired_1_1_document_row(path)
+    authoring = _authoring()
+
+    with open_repository(path) as repository:
+        record = repository.get(row.strategy_id, 1)
+        documents = StrategyDocumentService(authoring, repository, new_id=lambda: "unused")
+        document = documents.get(row.strategy_id, 1)
+
+    assert record.requires_upgrade is True
+    assert record.spec.identity.schema_version == RETIRED_VERSION
+    assert not document.generated and document.format is SourceFormat.YAML
+    assert document.source == row.source_text
+    assert document.source.startswith('schema_version: "1.1"')
+    assert document.requires_upgrade and document.schema_version == RETIRED_VERSION
 
 
 @pytest.mark.parametrize("schema_version", ["1.3", "9.9"])

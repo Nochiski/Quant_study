@@ -123,6 +123,53 @@ def seed_retired_1_1_row(
     return FrozenRow(strategy_id, 1, spec_json, spec_hash, None, None)
 
 
+def retired_1_1_source_text() -> str:
+    """사용자가 1.1 시절 편집기에서 저장했을 YAML 원문. 보존 fixture 의 머리 주석(저장소 이력
+    설명)은 사용자가 쓴 글이 아니므로 뺀다."""
+    lines = (FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8").splitlines()
+    while lines and lines[0].startswith("#"):
+        lines.pop(0)
+    return "\n".join(lines) + "\n"
+
+
+def seed_retired_1_1_document_row(path: Path, *, strategy_id: str = "retired-1-1") -> FrozenRow:
+    """YAML 원문이 함께 저장된(`origin='document'`) 1.1 row 하나를 raw SQL 로 심는다.
+
+    실 DB 의 은퇴 row 는 대부분 편집기에서 저장한 이 모양이다. 원문이 있어야 revision 화면이
+    업그레이드 배너의 "현재 버전으로 업그레이드" 경로를 보인다(`seed_retired_1_1_row` 의 legacy
+    JSON row 는 새 revision 저장 안내만 보인다). `spec_json` 은 같은 원문을 1.1 canonical payload 로
+    만든 바이트다.
+    """
+    open_repository(path).close()
+    text = retired_1_1_source_text()
+    spec_json = canonical_payload_json(yaml.safe_load(text))
+    spec_hash = _sha256(spec_json)
+    text_hash = _sha256(text)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO strategy_heads (strategy_id, latest_revision) VALUES (?, ?)",
+            (strategy_id, 1),
+        )
+        connection.execute(
+            "INSERT INTO strategy_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                strategy_id,
+                1,
+                "1.1",
+                spec_json,
+                spec_hash,
+                "yaml",
+                text,
+                text_hash,
+                "document",
+                FROZEN_CREATED_AT,
+                None,
+            ),
+        )
+        connection.commit()
+    return FrozenRow(strategy_id, 1, spec_json, spec_hash, text, text_hash)
+
+
 def source_spec_hash(source: str, format: SourceFormat) -> str:
     authoring = StrategyAuthoringService(
         RuamelDocumentCodec(), factor_registry_version="r", dataset_snapshot_id=lambda: "s"
@@ -215,6 +262,9 @@ def utc_now_text() -> str:
 
 E2E_DB_ENV = "STRATEGY_WORKBENCH_E2E_DB"
 E2E_SUFFIX_ENV = "STRATEGY_WORKBENCH_E2E_SEED_SUFFIX"
+# 심을 은퇴 버전. 비우면 1.0 row 두 개(e2e 기본), `1.1` 이면 원문이 있는 1.1 문서 row 하나
+# (`retired-1-1<suffix>`, 사용자 매뉴얼 캡처 스크립트가 업그레이드 배너를 찍을 때 쓴다).
+E2E_SCHEMA_ENV = "STRATEGY_WORKBENCH_E2E_SEED_SCHEMA"
 
 
 if __name__ == "__main__":
@@ -229,5 +279,13 @@ if __name__ == "__main__":
     argument = sys.argv[1] if len(sys.argv) == 2 else os.environ.get(E2E_DB_ENV)
     if len(sys.argv) > 2 or not argument:
         raise SystemExit(f"usage: frozen_revision_rows.py <sqlite path> (or {E2E_DB_ENV}=<path>)")
-    seeded = seed_frozen_rows(Path(argument), id_suffix=os.environ.get(E2E_SUFFIX_ENV, ""))
+    suffix = os.environ.get(E2E_SUFFIX_ENV, "")
+    schema = os.environ.get(E2E_SCHEMA_ENV, "") or "1.0"
+    if schema == "1.0":
+        seeded = seed_frozen_rows(Path(argument), id_suffix=suffix)
+    elif schema == "1.1":
+        row = seed_retired_1_1_document_row(Path(argument), strategy_id=f"retired-1-1{suffix}")
+        seeded = {"document": row}
+    else:
+        raise SystemExit(f"{E2E_SCHEMA_ENV} must be 1.0 or 1.1 — got={schema!r}")
     print(", ".join(f"{row.strategy_id}@{row.revision}" for row in seeded.values()))

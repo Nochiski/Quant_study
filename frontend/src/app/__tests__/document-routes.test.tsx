@@ -31,6 +31,7 @@ import {
 
 
 import { backtestHistoryQuery } from "../../entities/backtest";
+import { RUN_ENVIRONMENT_STORAGE_PREFIX } from "../../features/run-backtest";
 import { strategiesQuery } from "../../entities/strategy";
 import {
   strategyWorkbenchApi,
@@ -206,7 +207,32 @@ let assistantStream: {
   close: () => void;
 } | null = null;
 
+/**
+ * 실행 설정 패널의 마지막 사용값(P3-02). 화면 흐름 테스트는 사용자가 이미 기간·유니버스를 정해 둔
+ * 상태에서 시작한다 — 패널 자체의 동작은 `features/run-backtest` 테스트가 본다.
+ */
+const RUN_ENVIRONMENT = {
+  market: "KRX",
+  frequency: "daily",
+  start: "2021-01-01",
+  // 추적 mock 응답의 기준일(2026-09-01)·체결일(2026-09-02)이 실행 기간 안에 들도록 잡는다 — 응답 날짜
+  // 가드가 실행 기간을 읽는다(P3-02 에서 다시 켜졌다).
+  end: "2026-09-30",
+  universe_id: "krx.common-stock",
+  timing: "next_open",
+  participation_rate: 0.1,
+  fee_bps: 15,
+  slippage_bps: 10,
+  missing: "drop",
+} as const;
+const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/run-environment-schema.json"),
+) as Record<string, unknown>;
+
 const server = setupServer(
+  http.get(`${API}/api/v1/run-environments/schema`, () =>
+    HttpResponse.json({ schema_hash: "run-env", schema: RUN_ENVIRONMENT_SCHEMA }),
+  ),
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json(
       { detail: { code: "strategy.draft.not_found" } },
@@ -516,6 +542,19 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeEach(() => {
+  localStorage.setItem(
+    `${RUN_ENVIRONMENT_STORAGE_PREFIX}:last`,
+    JSON.stringify(
+      Object.fromEntries(
+        Object.entries(RUN_ENVIRONMENT).map(([key, value]) => [
+          key,
+          String(value),
+        ]),
+      ),
+    ),
+  );
+});
 afterEach(() => {
   cleanup();
   server.resetHandlers();
@@ -2835,6 +2874,7 @@ describe("backtest from the editor (P3-05)", () => {
         benchmark_security_id: null,
         annualization_days: 252,
         metric_windows: [],
+        environment: RUN_ENVIRONMENT,
         strategy_source: {
           kind: "saved_revision",
           strategy_id: "s1",
@@ -2864,6 +2904,7 @@ describe("backtest from the editor (P3-05)", () => {
       benchmark_security_id: null,
       annualization_days: 252,
       metric_windows: [],
+      environment: RUN_ENVIRONMENT,
       strategy_source: {
         kind: "inline_draft",
         spec: expect.objectContaining({ title: "퀄리티 모멘텀" }),
@@ -2930,7 +2971,7 @@ describe("backtest from the editor (P3-05)", () => {
     expect(screen.queryByText(/run-stale.*접수됨/)).not.toBeInTheDocument();
   });
 
-  it("explains a saved 1.0 revision the backend refuses to run and disables the run control", async () => {
+  it("explains a saved retired-schema revision the backend refuses to run and disables the run control", async () => {
     server.use(
       http.post(`${API}/api/v1/backtests`, async ({ request }) => {
         started.push((await request.json()) as Record<string, unknown>);
@@ -2961,10 +3002,10 @@ describe("backtest from the editor (P3-05)", () => {
       },
     });
     const banner = await screen.findByRole("region", {
-      name: "schema 1.0 문서",
+      name: "이전 schema 문서",
     });
     expect(banner).toHaveTextContent(
-      "저장된 1.0 revision으로는 백테스트를 실행할 수 없습니다",
+      "저장된 이전 schema revision으로는 백테스트를 실행할 수 없습니다",
     );
     expect(run).toBeDisabled();
     expect(history.location.pathname).toBe(

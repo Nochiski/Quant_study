@@ -78,6 +78,8 @@ export {
   type ReviseDocumentRequest,
   type RevisionDiff,
   type RevisionSummary,
+  type RunEnvironment,
+  type RunEnvironmentSchema,
   type SaveDocumentRequest,
   type SaveStrategyDraftRequest,
   type SavedRevisionReference,

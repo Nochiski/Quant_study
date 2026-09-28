@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +23,8 @@ from strategy_workbench.domain.backtest.facade.environment import (
     run_environment_schema_hash,
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+
+FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
 
 
 def _environment() -> RunEnvironment:
@@ -197,4 +201,13 @@ def test_schema_hash_is_stable_and_splits_on_content() -> None:
     )
     assert run_environment_schema_hash({**schema, "title": "Other"}) != (
         run_environment_schema_hash(schema)
+    )
+
+
+def test_run_environment_schema_fixture_is_current() -> None:
+    """frontend 실행 설정 패널 테스트가 읽는 사본이 실제 스키마와 같다(P3-02, BACKLOG-013)."""
+    fixture = json.loads((FIXTURES / "run-environment-schema.json").read_text(encoding="utf-8"))
+    assert fixture == run_environment_schema(), (
+        "run-environment-schema.json is stale; regenerate with: "
+        "uv run python tools/export_runtime_schema.py"
     )

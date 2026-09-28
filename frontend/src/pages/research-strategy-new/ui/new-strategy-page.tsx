@@ -48,6 +48,7 @@ import {
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import {
   BacktestRunSettings,
+  RunEnvironmentSummary,
   useBacktestRunSettings,
 } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
@@ -57,6 +58,9 @@ import {
   StrategyDebuggerPanel,
   StrategyIde,
 } from "../../../widgets/strategy-ide";
+
+/** 새 전략 화면의 실행 설정 마지막 사용값 칸(`useBacktestRunSettings` 의 저장 키). */
+const NEW_STRATEGY_RUN_SETTINGS_KEY = "new";
 
 /**
  * 새 문서 시작 텍스트. `schema_version` 리터럴은 backend runtime schema의 `const`와 같아야 하며
@@ -105,11 +109,15 @@ export const NewStrategyPage = () => {
   const autosave = useAutosave(document, dispatch, {
     schemaVersion: assist.schemaVersion,
   });
-  const executionPlans = useExecutionPlans(document, assist.inspectorSource);
-  // 실행 기간의 owner가 전략 문서에서 실행 설정으로 옮겨갔다(schema 1.2). 그 값을 편집하는
-  // 실행 설정 패널은 P3-01·P3-02에서 붙으므로 그때까지 기간은 지정되지 않은 상태다.
-  const runDateRange = null;
-  const runSettings = useBacktestRunSettings(runDateRange);
+  // 실행 설정은 전략 문서 밖에 있고 패널이 owner 다(schema 1.2, P3-02). 새 전략은 전략 id 가 없어 한
+  // 칸(`new`)에 두고, 저장 뒤 revision 화면은 마지막 사용값으로 이어받는다.
+  const runSettings = useBacktestRunSettings(NEW_STRATEGY_RUN_SETTINGS_KEY);
+  // 실행 계획 sandbox 도 실행과 같은 결측 정책을 싣는다(Phase 2 감사 #3).
+  const executionPlans = useExecutionPlans(
+    document,
+    assist.inspectorSource,
+    runSettings.environment?.missing ?? null,
+  );
   const backtest = useRunBacktest(
     document,
     executionPlans,
@@ -301,6 +309,7 @@ export const NewStrategyPage = () => {
           <ProposalApplyFeedback
             apply={proposalApply}
             chain={strategyAssistant.chain}
+            blockedReason={runSettings.blockedReason}
           />
         }
         title={t("page.newStrategy.title")}
@@ -336,6 +345,7 @@ export const NewStrategyPage = () => {
             replace: true,
           })
         }
+        runEnvironment={<RunEnvironmentSummary controller={runSettings} />}
         documentHistory={<DocumentHistoryActions history={history} />}
         documentStatus={<DocumentStatus state={document} />}
         problems={
@@ -356,11 +366,7 @@ export const NewStrategyPage = () => {
             saving={status.kind === "saving"}
             onRun={runBacktest}
             canRun={backtest.canRun}
-            runBlockedReason={
-              runSettings.result.valid
-                ? undefined
-                : t("backtest.settings.blocked")
-            }
+            runBlockedReason={runSettings.blockedReason ?? undefined}
             runSettings={
               <BacktestRunSettings
                 controller={runSettings}
@@ -455,6 +461,7 @@ export const NewStrategyPage = () => {
           <StrategyDebuggerPanel
             document={document}
             executionPlans={executionPlans}
+            environment={runSettings.environment}
             publicationOwnerKey={debuggerPublicationOwner}
             asOf={search.asOf}
             security={search.security}

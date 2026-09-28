@@ -27,6 +27,11 @@ const context = (): StrategyDebuggerContext => ({
   specHash: "spec-hash",
   expectedSnapshotId: "snapshot-v1",
   expectedRegistryVersion: "registry-v1",
+  environment: {
+    start: "2021-01-01",
+    end: "2026-09-01",
+    universe_id: "krx.common-stock",
+  },
   start: "2021-01-01",
   end: "2026-09-01",
   factors: [
@@ -166,6 +171,29 @@ describe("strategy trace request contract", () => {
         include_raw: false,
         limit: 2,
       },
+    });
+  });
+
+  it("sends the run settings with every linked and selected request", () => {
+    // 실행 설정이 없는 trace 는 backend 가 `run_environment.required` 로 거절한다(P3-02).
+    const prepared = prepareStrategyTrace(context(), {
+      asOf: "2026-08-31",
+      security: "sec-a",
+      factorId: "momentum",
+      nodeId: "ranked",
+    });
+
+    expect(prepared.kind).toBe("ready");
+    if (prepared.kind !== "ready") return;
+    const environment = context().environment;
+    for (const request of [
+      ...prepared.linkedRequests,
+      prepared.selectedRequest,
+    ])
+      expect(request.environment).toEqual(environment);
+    expect(prepared.expected).toMatchObject({
+      start: environment.start,
+      end: environment.end,
     });
   });
 

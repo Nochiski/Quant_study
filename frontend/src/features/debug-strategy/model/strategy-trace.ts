@@ -1,4 +1,5 @@
 import type {
+  RunEnvironment,
   StrategyTraceRequest,
   StrategyTraceResponse,
 } from "../../../shared/api";
@@ -31,17 +32,23 @@ export type StrategyDebuggerContext = {
   expectedSnapshotId: string;
   expectedRegistryVersion: string;
   /**
-   * 실행 기간. schema 1.2부터 전략 문서가 아니라 실행 설정이 소유하고, 그 값을 편집하는
-   * 패널은 P3-01·P3-02에서 붙는다. 그때까지는 알 수 없어 `null`이며, 응답 날짜 범위
-   * 가드는 값이 있을 때만 건다.
+   * 추적이 놓일 실행 설정(schema 1.2 부터 전략 문서 밖, P3-02). 실행 요청과 같은 값을 trace 요청에
+   * 싣는다 — 없으면 backend 가 `run_environment.required` 로 거절한다.
    */
-  start: string | null;
-  end: string | null;
+  environment: RunEnvironment;
+  /** 실행 기간(= `environment.start`·`end`). 응답 날짜 범위 가드와 날짜 입력 범위가 읽는다. */
+  start: string;
+  end: string;
   factors: StrategyDebuggerFactor[];
 };
 
+/** `environment` 는 실행 설정 패널의 기간·유니버스가 아직 정해지지 않았다는 뜻이다. */
 export type StrategyDebuggerUnavailableReason =
-  "document" | "preparing" | "no-factors" | "execution-plan";
+  | "document"
+  | "preparing"
+  | "no-factors"
+  | "execution-plan"
+  | "environment";
 
 export type StrategyTraceSelection = {
   asOf: string;
@@ -69,8 +76,8 @@ export type PreparedStrategyTrace =
         registryVersion: string;
         planHash: string;
         sourceVersion: number;
-        start: string | null;
-        end: string | null;
+        start: string;
+        end: string;
       };
     };
 
@@ -159,6 +166,7 @@ export const prepareStrategyTrace = (
     "node_ids" | "include_raw" | "offset" | "limit"
   > = {
     strategy_source: context.strategySource,
+    environment: context.environment,
     security_ids: securityIds,
     factor_id: factor.factorId,
     ...(selection.asOf === "" ? {} : { as_of: selection.asOf }),
@@ -341,8 +349,8 @@ const responseDateMatches = (
   const { start, end } = prepared.expected;
   if (
     !validIsoDate(response.as_of) ||
-    (start !== null && response.as_of < start) ||
-    (end !== null && response.as_of > end) ||
+    response.as_of < start ||
+    response.as_of > end ||
     (request.as_of != null && response.as_of !== request.as_of)
   )
     return false;
@@ -351,7 +359,7 @@ const responseDateMatches = (
     response.target.signal_as_of === response.as_of &&
     validIsoDate(response.target.execution_on) &&
     response.target.execution_on > response.as_of &&
-    (end === null || response.target.execution_on <= end)
+    response.target.execution_on <= end
   );
 };
 

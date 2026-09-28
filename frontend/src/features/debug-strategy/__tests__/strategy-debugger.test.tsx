@@ -47,6 +47,11 @@ const context = (sourceVersion = 3): StrategyDebuggerContext => ({
   specHash: "spec-hash",
   expectedSnapshotId: "snapshot-v1",
   expectedRegistryVersion: "registry-v1",
+  environment: {
+    start: "2025-01-01",
+    end: "2026-09-01",
+    universe_id: "krx.common-stock",
+  },
   start: "2025-01-01",
   end: "2026-09-01",
   factors: [

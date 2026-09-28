@@ -29,9 +29,11 @@ import {
   currentSource,
   editor,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
+  REQUESTED_ENVIRONMENT,
   replaceSource,
   requireData,
   save,
@@ -337,6 +339,7 @@ test.describe("professional YAML workflow", () => {
         revision: 4,
         expected_spec_hash: savedV4.spec_hash,
       },
+      environment: REQUESTED_ENVIRONMENT,
       security_ids: securityIds,
       factor_id: factor.factor_id,
       node_ids: factor.graph.nodes.map((node) => node.node_id),
@@ -344,6 +347,9 @@ test.describe("professional YAML workflow", () => {
       offset: 0,
       limit: factor.graph.nodes.length * securityIds.length,
     };
+    // 추적은 실행 설정의 기간·유니버스 위에서 돈다(P3-02). 이 페이지는 따로 연 브라우저 문맥이라
+    // 마지막 사용값이 없어 사용자가 정한다.
+    await fillRunEnvironment(workflow);
     await workflow
       .getByRole("textbox", { name: "종목 ID", exact: true })
       .fill(securityIds.join(", "));
@@ -468,7 +474,9 @@ test.describe("professional YAML workflow", () => {
       target_weight: 0.05,
       exclusion_reasons: [],
     });
-    expect(candidate660.composite_score).toBeCloseTo(0.026670144121170077);
+    // schema 1.2 의 결합 전 정규화 기본값은 순위(`rank`)다(P2-04). 세 종목 기준일 모집단에서 가운데
+    // 순위라 합성 점수가 0.5 이고, 원시 모멘텀 값(0.02667…)은 노드 추적 행에 남는다.
+    expect(candidate660.composite_score).toBeCloseTo(0.5);
     const construction660 = requireData(
       targetTrace.construction.find(
         (row) => row.security_id === "sec-000660-1",
@@ -494,7 +502,7 @@ test.describe("professional YAML workflow", () => {
     });
     expect(
       construction660.factor_contributions[0]?.normalized_contribution,
-    ).toBeCloseTo(0.026670144121170077);
+    ).toBeCloseTo(0.5);
     const excludedCandidate = requireData(
       targetTrace.candidates.find((row) => row.security_id === "sec-005930-1"),
       "excluded candidate for sec-005930-1",
@@ -507,7 +515,7 @@ test.describe("professional YAML workflow", () => {
       target_weight: 0,
       exclusion_reasons: ["outside_selection"],
     });
-    expect(excludedCandidate.composite_score).toBeCloseTo(0.024320848454952193);
+    expect(excludedCandidate.composite_score).toBeCloseTo(0);
     const excludedConstruction = requireData(
       targetTrace.construction.find(
         (row) => row.security_id === "sec-005930-1",
@@ -679,6 +687,7 @@ test.describe("professional YAML workflow", () => {
       initial_cash: 123_456_789,
       benchmark_security_id: "sec-005930-1",
       annualization_days: 260,
+      environment: REQUESTED_ENVIRONMENT,
       metric_windows: [
         {
           scope: "out_of_sample",
@@ -1306,15 +1315,17 @@ test.describe("professional YAML workflow", () => {
     });
   });
 
-  test("upgrades a frozen 1.0 revision to the current schema, saves it and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({
+  test("upgrades a frozen 1.0 revision to the current schema, fills its run settings, saves it and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({
     page,
   }) => {
     const frozen = seedFrozenRevisionRows();
     const nextRevision = 2;
-    const banner = page.getByRole("region", { name: "schema 1.0 문서" });
-    // 배너 문구의 "1.1"은 P3-02가 업그레이드 배너를 다시 쓸 때 바뀐다. 업그레이드 결과 자체는
-    // P2-09부터 현재 버전(1.0 → 1.1 → 1.2)이다.
-    const upgrade = banner.getByRole("button", { name: "1.1로 업그레이드" });
+    // 배너 문구는 버전 중립이다(P3-02) — 어느 버전이 은퇴했는지는 backend 가 판정하고, 결과는 현재
+    // 버전(1.0 → 1.1 → 1.2)이다.
+    const banner = page.getByRole("region", { name: "이전 schema 문서" });
+    const upgrade = banner.getByRole("button", {
+      name: "현재 버전으로 업그레이드",
+    });
     // 업그레이드는 의미를 바꾸지 않는다: 1.0 동결 문서(`quality_momentum.v1_0.yaml`)의 현재 버전
     // 의미는 golden fixture에 1.1 합성 방식(원시값 가중 합)을 명시한 문서와 같다. 현재 버전
     // 문자열도 backend가 답한 값을 쓴다(frontend는 schema 버전 리터럴을 갖지 않는다).
@@ -1341,7 +1352,9 @@ test.describe("professional YAML workflow", () => {
       `/research/strategies/${frozen.document}/revisions/1`,
     );
     await expectPhase(page, "구조 오류");
-    await expect(banner).toContainText("이 문서는 schema 1.0입니다");
+    await expect(banner).toContainText(
+      "이 문서는 지원이 끝난 schema 버전입니다",
+    );
     await expect(backtest(page)).toBeDisabled();
     await expect(upgrade).toBeEnabled();
 
@@ -1352,8 +1365,20 @@ test.describe("professional YAML workflow", () => {
           "/api/v1/strategy-documents/upgrade",
     );
     await upgrade.click();
-    expect((await upgraded).status()).toBe(200);
-    await expect(banner).toContainText("1.1로 다시 썼습니다");
+    const upgradedResponse = await upgraded;
+    expect(upgradedResponse.status()).toBe(200);
+    const oldEnvironment = (
+      (await upgradedResponse.json()) as { environment: unknown }
+    ).environment;
+    expect(oldEnvironment).not.toBeNull();
+    await expect(banner).toContainText("현재 버전으로 다시 썼습니다");
+    // 옛 문서의 실행 설정(`data`·`execution`)은 문서를 떠나 응답으로 왔다. 사용자가 누를 때만
+    // 실행 설정 패널에 들어간다.
+    await banner.getByRole("button", { name: "실행 설정에 채우기" }).click();
+    await expect(banner).toContainText("옛 문서의 실행 설정을 채웠습니다.");
+    await expect(
+      page.getByRole("region", { name: "실행 설정 요약" }),
+    ).toContainText("krx.common-stock");
     const source = await currentSource(page);
     expect(source).toContain(`schema_version: "${expected.schema_version}"`);
     expect(source).toContain("  normalization: none\n");
@@ -1390,6 +1415,8 @@ test.describe("professional YAML workflow", () => {
         revision: nextRevision,
         expected_spec_hash: savedV2.spec_hash,
       },
+      // 업그레이드 응답의 실행 설정이 그대로 실행 요청에 실린다(US-SM-07).
+      environment: oldEnvironment,
     });
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
@@ -1397,9 +1424,9 @@ test.describe("professional YAML workflow", () => {
       { timeout: 120_000 },
     );
 
-    // legacy JSON 동결 row: generated source가 이미 1.1이므로 업그레이드 대신 새 revision 저장만 제안한다.
+    // legacy JSON 동결 row: generated source가 이미 현재 버전이므로 업그레이드 대신 새 revision 저장만 제안한다.
     await openEditor(page, `/research/strategies/${frozen.legacy}/revisions/1`);
-    await expect(banner).toContainText("schema 1.0 동결 revision입니다");
+    await expect(banner).toContainText("이전 schema로 동결된 revision입니다");
     await expect(upgrade).toHaveCount(0);
     await expectPhase(page, "검증 통과");
 
@@ -1411,22 +1438,22 @@ test.describe("professional YAML workflow", () => {
       .getByRole("row")
       .filter({ hasText: frozen.legacy })
       .first();
-    await expect(legacyRow).toContainText("1.0 동결");
+    await expect(legacyRow).toContainText("이전 버전 동결");
     const docRow = page
       .getByRole("row")
       .filter({ hasText: frozen.document })
       .first();
     await expect(docRow).toContainText(`v${nextRevision}`);
-    await expect(docRow).not.toContainText("1.0 동결");
+    await expect(docRow).not.toContainText("이전 버전 동결");
     await docRow.getByRole("button", { name: /Revision 펼치기/u }).click();
     const revisions = page.getByRole("region", {
       name: new RegExp(`저장 revision 목록: .*${frozen.document}`, "u"),
     });
     await expect(
       revisions.getByRole("row").filter({ hasText: "v1" }),
-    ).toContainText("1.0 동결");
+    ).toContainText("이전 버전 동결");
     await expect(
       revisions.getByRole("row").filter({ hasText: `v${nextRevision}` }),
-    ).not.toContainText("1.0 동결");
+    ).not.toContainText("이전 버전 동결");
   });
 });

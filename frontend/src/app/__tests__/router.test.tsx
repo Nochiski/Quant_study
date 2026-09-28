@@ -564,7 +564,7 @@ describe("App Shell routes", () => {
     );
     mount("/research/strategies");
     const row = (await screen.findByText("Frozen strategy")).closest("tr")!;
-    expect(within(row).getByText("1.0 동결")).toBeInTheDocument();
+    expect(within(row).getByText("이전 버전 동결")).toBeInTheDocument();
     await user.click(
       within(row).getByRole("button", {
         name: "Revision 펼치기: Frozen strategy (frozen-legacy)",
@@ -574,8 +574,8 @@ describe("App Shell routes", () => {
       name: "저장 revision 목록: Frozen strategy (frozen-legacy)",
     });
     const rows = within(revisions).getAllByRole("row").slice(1);
-    expect(within(rows[0]!).getByText("1.0 동결")).toBeInTheDocument();
-    expect(within(rows[1]!).queryByText("1.0 동결")).toBeNull();
+    expect(within(rows[0]!).getByText("이전 버전 동결")).toBeInTheDocument();
+    expect(within(rows[1]!).queryByText("이전 버전 동결")).toBeNull();
   });
 
   it("paginates strategy and revision pages with distinct disclosure ownership", async () => {

@@ -465,6 +465,22 @@ describe("execution plan orchestration", () => {
     expect(result.current).toEqual({ status: "blocked", reason: "stale" });
   });
 
+  it("carries the run settings' missing policy so the plan hash matches the run", () => {
+    // Phase 2 감사 #3: 패널에서 `zero` 를 골랐는데 sandbox 가 기본값으로 계획하면 `plan_hash` 가 갈린다.
+    const chosen = prepareExecutionPlans(currentState(), METADATA, "zero");
+    const unset = prepareExecutionPlans(currentState(), METADATA, null);
+
+    expect(chosen.status).toBe("prepared");
+    expect(unset.status).toBe("prepared");
+    if (chosen.status !== "prepared" || unset.status !== "prepared") return;
+    expect(chosen.requests.map((item) => item.request.missing)).toEqual(
+      chosen.requests.map(() => "zero"),
+    );
+    // 정하지 않았으면 싣지 않는다 — backend 가 실행 설정과 같은 기본값을 쓴다.
+    for (const item of unset.requests)
+      expect(item.request).not.toHaveProperty("missing");
+  });
+
   it("maps factor and node selections to exact RFC 6901 pointers", () => {
     const prepared = prepareExecutionPlans(currentState(), METADATA);
     expect(prepared.status).toBe("prepared");

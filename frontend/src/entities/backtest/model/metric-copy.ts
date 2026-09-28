@@ -1,4 +1,4 @@
-import { tDescription, tName } from "../../../shared/config";
+import { tDescription, tName, tOptional } from "../../../shared/config";
 
 /** 지표 하나의 쉬운 이름과 한 줄 뜻. */
 export type MetricPlainCopy = { name: string; description: string };
@@ -15,4 +15,25 @@ export const metricPlainCopy = (metricId: string): MetricPlainCopy | null => {
   const name = tName(stem);
   const description = tDescription(stem);
   return name === null || description === null ? null : { name, description };
+};
+
+/**
+ * 지표 사용 불가 사유(`MetricValue.unavailable_reason`)의 로케일 문구(이슈 #241).
+ *
+ * 키는 `backtest.metricUnavailable.<reason>`이고 사유 목록은 backend `MetricUnavailableReason`이
+ * 소유한다. 문구가 없는 새 사유는 원문의 밑줄만 공백으로 바꿔 보인다 — 칸이 비지 않게 한다.
+ */
+export const metricUnavailableCopy = (reason: string): string =>
+  tOptional(`backtest.metricUnavailable.${reason}`) ??
+  reason.replaceAll("_", " ");
+
+/**
+ * 사용 불가 사유마다 그 이유를 적는 데이터 경고 코드. 실행에 이 경고가 있으면 지표 칸에서 그
+ * 경고로 이어 준다. 벤치마크 지표는 창 시작이 첫 가격보다 앞설 때 비고, 그 이유는
+ * `benchmark.no_bar_at_start`가 적는다(#229·#241).
+ */
+export const EXPLAINING_WARNING_CODES: Readonly<
+  Record<string, readonly string[]>
+> = {
+  benchmark_not_available: ["benchmark.no_bar_at_start"],
 };

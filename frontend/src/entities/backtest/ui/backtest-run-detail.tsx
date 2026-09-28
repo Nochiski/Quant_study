@@ -4,8 +4,12 @@ import type {
   MetricValue,
 } from "../../../shared/api";
 import { t, tOptional } from "../../../shared/config";
-import { useId } from "react";
-import { metricPlainCopy } from "../model/metric-copy";
+import { useId, useRef } from "react";
+import {
+  EXPLAINING_WARNING_CODES,
+  metricPlainCopy,
+  metricUnavailableCopy,
+} from "../model/metric-copy";
 import {
   runEnvironmentLabel,
   runEnvironmentValueLabel,
@@ -123,19 +127,35 @@ const formatMetric = (
   return metric.value.toFixed(precision);
 };
 
+/** 사용 불가 지표 칸에서 이유를 적은 데이터 경고로 가는 연결. */
+type MetricExplanation = { href: string; open: () => void };
+
 const MetricCell = ({
   metric,
   definition,
+  explanation = null,
 }: {
   metric: MetricValue;
   definition: MetricDefinition;
+  explanation?: MetricExplanation | null;
 }) => (
   <>
     <strong className={metric.value === null ? "is-unavailable" : ""}>
       {formatMetric(metric, definition)}
     </strong>
-    {metric.value === null && (
-      <small>{metric.unavailable_reason?.replaceAll("_", " ")}</small>
+    {metric.value === null && metric.unavailable_reason && (
+      <small>
+        {metricUnavailableCopy(metric.unavailable_reason)}
+        {explanation === null ? null : (
+          <>
+            {" "}
+            {/* 접힌 manifest 를 먼저 펼친 뒤 기본 이동으로 그 경고까지 스크롤한다. */}
+            <a href={explanation.href} onClick={explanation.open}>
+              {t("backtest.result.metricUnavailable.explain")}
+            </a>
+          </>
+        )}
+      </small>
     )}
   </>
 );
@@ -171,6 +191,22 @@ export const BacktestRunDetail = ({
   environmentFields?: readonly RunEnvironmentField[] | null;
 }) => {
   const titleId = useId();
+  const drawer = useRef<HTMLDetailsElement>(null);
+  const warnings = result.manifest.warnings ?? [];
+  const warningId = (index: number) => `${titleId}-warning-${index}`;
+  // 사용 불가 사유를 적은 경고로 가는 연결(이슈 #241). 이유 경고가 없으면 사유 문구만 보인다.
+  const explanationFor = (metric: MetricValue): MetricExplanation | null => {
+    if (metric.value !== null || !metric.unavailable_reason) return null;
+    const codes = EXPLAINING_WARNING_CODES[metric.unavailable_reason] ?? [];
+    const index = warnings.findIndex((warning) => codes.includes(warning.code));
+    if (index < 0) return null;
+    return {
+      href: `#${warningId(index)}`,
+      open: () => {
+        if (drawer.current !== null) drawer.current.open = true;
+      },
+    };
+  };
   const definitions = new Map(
     result.metric_definitions.map((item) => [item.metric_id, item]),
   );
@@ -215,7 +251,11 @@ export const BacktestRunDetail = ({
           return (
             <div key={metricId}>
               <span>{definition.label}</span>
-              <MetricCell definition={definition} metric={metric} />
+              <MetricCell
+                definition={definition}
+                explanation={explanationFor(metric)}
+                metric={metric}
+              />
               {plain === null ? null : (
                 <p className="metric-highlights__plain">
                   <dfn>{plain.name}</dfn> {plain.description}
@@ -338,7 +378,11 @@ export const BacktestRunDetail = ({
                     </td>
                     <td>{definition.category.replaceAll("_", " ")}</td>
                     <td>
-                      <MetricCell definition={definition} metric={metric} />
+                      <MetricCell
+                        definition={definition}
+                        explanation={explanationFor(metric)}
+                        metric={metric}
+                      />
                     </td>
                     <td>{metric.sample_count}</td>
                   </tr>
@@ -403,6 +447,7 @@ export const BacktestRunDetail = ({
       <details
         className="manifest-drawer"
         aria-label={t("backtest.result.manifest")}
+        ref={drawer}
       >
         <summary>{t("backtest.result.manifest")}</summary>
         <div className="manifest-grid">
@@ -517,15 +562,15 @@ export const BacktestRunDetail = ({
           </div>
           <div className="manifest-warnings">
             <h5>{t("backtest.result.warnings")}</h5>
-            {(result.manifest.warnings ?? []).length === 0 ? (
+            {warnings.length === 0 ? (
               <p>{t("backtest.result.warnings.empty")}</p>
             ) : (
-              (result.manifest.warnings ?? []).map((warning, index) => {
+              warnings.map((warning, index) => {
                 // 제목은 경고 코드로 고른다. 문장(message)은 서버가 완성한 진단이라 그대로 두고, 제목이
                 // 없는 새 코드는 코드를 제목으로 보인다 — 서버가 코드를 늘려도 화면이 비지 않는다.
                 const title = tOptional(`backtest.warning.${warning.code}`);
                 return (
-                  <p key={`${warning.code}:${index}`}>
+                  <p id={warningId(index)} key={`${warning.code}:${index}`}>
                     <strong>{title ?? warning.code}</strong>
                     <span>{warning.message}</span>
                     {title === null ? null : (

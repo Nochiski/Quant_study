@@ -12,7 +12,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
+from strategy_workbench.domain.analytics.facade.metrics import (
+    MetricUnavailableReason,
+    build_default_metric_registry,
+)
 
 _FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "analytics" / "metric_ids.json"
 
@@ -25,4 +28,21 @@ def test_the_metric_id_golden_lists_every_registry_metric_in_order() -> None:
 
     assert stored == expected, (
         f"{_FIXTURE.name} is stale; write the registry ids in registry order: {expected}"
+    )
+
+
+_REASON_FIXTURE = _FIXTURE.with_name("metric_unavailable_reasons.json")
+
+
+def test_the_unavailable_reason_golden_lists_every_reason_in_order() -> None:
+    """지표 사용 불가 사유도 frontend i18n(`backtest.metricUnavailable.<reason>`)이 문구를 소유한다.
+
+    사유가 늘면 여기서 먼저 깨지고, 골든을 고치면 frontend 테스트가 문구를 쓰라고 깨진다(이슈 #241).
+    """
+    expected = [reason.value for reason in MetricUnavailableReason]
+
+    stored = json.loads(_REASON_FIXTURE.read_text(encoding="utf-8"))
+
+    assert stored == expected, (
+        f"{_REASON_FIXTURE.name} is stale; write the reasons in enum order: {expected}"
     )

@@ -171,6 +171,27 @@ const ko = {
     "벤치마크 거래정지 세션은 직전 가격을 이어 썼습니다",
   "backtest.warning.benchmark.delisted_sessions_frozen":
     "벤치마크 상장이 끝난 뒤 세션은 마지막 값으로 멈췄습니다",
+  "backtest.warning.benchmark.invalid_bar_sessions_carried":
+    "벤치마크 원장 행이 무효인 거래일은 직전 가격을 이어 썼습니다",
+  // 지표 칸의 사용 불가 사유. 키는 backend `MetricUnavailableReason` 값이고 목록은
+  // backend/tests/fixtures/analytics/metric_unavailable_reasons.json 이 묶는다(이슈 #241).
+  "backtest.metricUnavailable.zero_return_variance":
+    "수익률 변동이 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_downside_variation":
+    "손실 쪽 변동이 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_drawdown":
+    "낙폭이 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.maximum_drawdown_not_recovered":
+    "최대 낙폭에서 아직 회복하지 않았습니다",
+  "backtest.metricUnavailable.benchmark_not_available":
+    "벤치마크 값이 비어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_closed_trades":
+    "청산된 거래가 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_losing_closed_trade":
+    "손실로 청산된 거래가 없어 계산할 수 없습니다",
+  "backtest.metricUnavailable.no_observations_in_scope":
+    "이 구간에 관측이 없어 계산할 수 없습니다",
+  "backtest.result.metricUnavailable.explain": "데이터 경고에서 이유 보기",
   // 지표의 쉬운 이름·뜻. 키는 backend Metric Registry의 metric_id이고 문장은 여기가 owner다
   // (결과 설명 spec R4). registry id 목록은 backend/tests/fixtures/analytics/metric_ids.json.
   "backtest.metric.total_return": "총수익률",
@@ -1804,6 +1825,25 @@ export const messages = {
       "Suspended benchmark sessions carried the previous price",
     "backtest.warning.benchmark.delisted_sessions_frozen":
       "Benchmark sessions after its listing ended were frozen at the last value",
+    "backtest.warning.benchmark.invalid_bar_sessions_carried":
+      "Benchmark trading days with an invalid ledger row carried the previous price",
+    "backtest.metricUnavailable.zero_return_variance":
+      "Returns never varied, so this cannot be computed",
+    "backtest.metricUnavailable.no_downside_variation":
+      "There was no downside variation, so this cannot be computed",
+    "backtest.metricUnavailable.no_drawdown":
+      "There was no drawdown, so this cannot be computed",
+    "backtest.metricUnavailable.maximum_drawdown_not_recovered":
+      "The maximum drawdown has not recovered yet",
+    "backtest.metricUnavailable.benchmark_not_available":
+      "Benchmark values are missing, so this cannot be computed",
+    "backtest.metricUnavailable.no_closed_trades":
+      "No trade was closed, so this cannot be computed",
+    "backtest.metricUnavailable.no_losing_closed_trade":
+      "No trade closed at a loss, so this cannot be computed",
+    "backtest.metricUnavailable.no_observations_in_scope":
+      "This window has no observations, so this cannot be computed",
+    "backtest.result.metricUnavailable.explain": "See why in data warnings",
     "backtest.metric.total_return": "Total return",
     "backtest.metric.total_return.description":
       "How much the starting money grew or shrank by the end.",

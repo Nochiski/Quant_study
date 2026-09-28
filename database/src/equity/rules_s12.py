@@ -929,10 +929,11 @@ FIN_STD = register(EquityTable(
     sql_path=SQL_PATH,
     input_columns={
         # `account_detail`·`ord`·`observed_date` 는 재수집 판본을 접는 축이다(자연키 8열 +
-        # first_write_wins) — 산출 컬럼이 아니다.
+        # first_write_wins) — 산출 컬럼이 아니다. `account_nm_norm` 은 stage 가 적는 공백 제거
+        # 계정명(T-E)이고 `nm_exact` 우선순위가 원문 `account_nm` 과의 동일성으로 갈린다.
         "stg_fin": ("corp_code", "bsns_year", "reprt_code", "fs_div", "sj_div", "account_id",
-                    "account_detail", "ord", "account_nm", "thstrm_amount", "account_std",
-                    "is_krw", "currency", "rcept_no", "observed_date"),
+                    "account_detail", "ord", "account_nm", "account_nm_norm", "thstrm_amount",
+                    "account_std", "is_krw", "currency", "rcept_no", "observed_date"),
         "stg_doc_meta": ("rcept_no", "member_role", "doc_acode", "period_from", "period_to"),
         "stg_disclosure": ("rcept_no", "rcept_dt", "observed_date"),
         # 링크 판본을 같이 고정한다(EG6_fin_std 무매칭 비대칭이 읽는다). `stg_rcept_dt_map` 은

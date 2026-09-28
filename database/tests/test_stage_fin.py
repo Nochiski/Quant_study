@@ -33,7 +33,7 @@ def _fin(rcept_no: str, corp: str = "00126380", year: str = "2024", reprt: str =
          fs: str = "CFS", sj: str = "IS", acct: str = "ifrs-full_Revenue", detail: str = "-",
          ord_: str = "23", amt: str = "300870903000000", cur: str = "KRW",
          resp_year: str | None = None, collected: str = "2026-08-30T13:42:37",
-         nm: str = "매출액") -> tuple[str, ...]:
+         nm: str | None = "매출액") -> tuple[str | None, ...]:
     return (f"h{rcept_no}{acct}{detail}{ord_}{collected}", detail, acct, nm, "", "제 54 기",
             resp_year or year, corp, cur, "258935494000000", "제 55 기", ord_, rcept_no, reprt,
             sj, "손익계산서", "", amt, "제 56 기", year, corp, fs, reprt, collected, "", "",
@@ -215,6 +215,37 @@ def test_fin_categorize_flags_and_detail_path(snap: snapshot.Snapshot, tmp_path:
     other = con.execute("SELECT bsns_year, bsns_year_resp, bsns_year_mismatch, currency, is_krw,"
                         f" year FROM t WHERE rcept_no='{R_OTHER}'").fetchone()
     assert other == ("2015", "2014", True, "USD", False, 2016)   # 키는 요청축, 파티션은 rcept 연도
+
+
+def test_fin_derives_account_nm_norm_by_stripping_every_space(tmp_path: Path) -> None:
+    """T-E — 계정명의 공백을 전부 뗀 판을 stage 가 **병기**한다(원문은 그대로).
+
+    DART 계정명의 공백은 회사마다 임의라 소비층(equity `fin_std`)이 이름 완전일치를 하려면
+    공백 없는 판이 필요하다. 공백이 없던 이름은 두 컬럼이 같고(`nm_exact` 축), NULL 은 NULL.
+    """
+    rule = rules.RULES["stg_fin"]
+    assert "account_nm_norm" in {e.name for e in rule.extras}
+    d = tmp_path / "raw_nm"
+    d.mkdir()
+    rows = FIN_ROWS + [
+        _fin(R_SAMSUNG, sj="IS", acct="ifrs-full_ProfitLoss", ord_="7", amt="1",
+             nm="당기 순이익(손 실)"),
+        _fin(R_SAMSUNG, sj="IS", acct="ifrs-full_GrossProfit", ord_="8", amt="2", nm=None),
+    ]
+    _write_dart(d / "dart.db", DISC_ROWS, rows)
+    s = snapshot.make_snapshot({"dart": d / "dart.db"}, tmp_path / "snapshots", snapshot_id="s_nm")
+    _build("stg_rcept_dt_map", s, tmp_path)
+    r = _build("stg_fin", s, tmp_path)
+    assert r.ok, [(g.name, g.detail) for g in r.gates]
+    con = _read(tmp_path, r)
+    spaced = con.execute("SELECT account_nm, account_nm_norm FROM t "
+                         "WHERE account_id='ifrs-full_ProfitLoss'").fetchone()
+    assert spaced == ("당기 순이익(손 실)", "당기순이익(손실)")      # 원문 보존 + 공백 제거 판
+    assert con.execute("SELECT account_nm_norm FROM t "
+                       "WHERE account_id='ifrs-full_GrossProfit'").fetchone() == (None,)
+    plain = con.execute("SELECT account_nm, account_nm_norm FROM t "
+                        "WHERE account_id='ifrs-full_Revenue' LIMIT 1").fetchone()
+    assert plain == ("매출액", "매출액")
 
 
 def test_fin_dedups_identical_payload_recollection(snap: snapshot.Snapshot, tmp_path: Path) -> None:

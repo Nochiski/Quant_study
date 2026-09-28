@@ -15,8 +15,8 @@
 -- 모든 종류를 평이한 이름으로 적는다) 합은 부호가 섞여도 **크기**로 더한다.
 -- 그 뒤에 `e_ppe_combined`(유형자산+투자부동산 **합산 줄** 7사, F-A1)가 있고 basis 가
 -- `ppe_incl_invprop` 라 정의 차이가 행에 남는다 — 자산별 합이 있으면 그것이 이긴다.
--- 이름 대조는 **공백을 뗀 판**으로 한다(F-A2) — `fin` 의 `account_nm_norm` 과 `_acct` 토큰이
--- 같은 규칙(rules_s12.norm_nm)으로 정규화돼 있다. 완전일치 규칙은 그대로다(공백만 무시).
+-- 이름 대조는 **공백을 뗀 판**으로 한다(F-A2) — stage 가 적는 `stg_fin.account_nm_norm`(T-E)과
+-- `_acct` 토큰이 같은 규칙(rules_s12.norm_nm)으로 정규화돼 있다. 완전일치 규칙은 그대로다.
 -- 취득 줄이 아예 없는 현금흐름표는 `capex_zero` 가 0 으로 읽는다(F-A3, basis `none_in_cf`).
 -- 그 분모 밖(표가 없음 · 표는 있는데 못 잡음)은 basis 가 사유를 말한다(T-H, 아래).
 --
@@ -138,8 +138,10 @@ fin AS (
            -- 90,456행에 공백) 원문으로 완전일치하면 같은 계정이 결측이 된다. 토큰도 같은 규칙으로
            -- 정규화된 판이 `_acct` 에 들어 있다(rules_s12.norm_nm). 원문은 `pick` 의 우선순위
            -- (`nm_exact`)에 쓴다 — 공백 변형을 받아들이되 **원래 이기던 줄이 계속 이겨야** 한다.
+           -- 공백 뗀 판은 **stage 가 적는다**(T-E, `rules_dart.STG_FIN.extras.account_nm_norm`).
+           -- 같은 정규화를 소비층마다 되풀이하지 않는다 — 여기서는 읽기만 한다.
            f.account_nm,
-           regexp_replace(f.account_nm, '\s+', '', 'g')                   AS account_nm_norm,
+           f.account_nm_norm,
            f.account_std,
            f.thstrm_amount
     FROM stg_fin f

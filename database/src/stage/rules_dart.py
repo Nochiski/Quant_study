@@ -99,6 +99,16 @@ STG_FIN = TableRule(
                     "CASE WHEN s.\"account_detail\" IN ('-', '') THEN NULL::VARCHAR[] "
                     "ELSE string_split(s.\"account_detail\", '|') END"),
         ExtraColumn("is_krw", "s.\"currency\" = 'KRW'"),
+        # 계정명의 공백을 전부 뗀 판. 원문 `account_nm` 은 그대로 두고 **병기**한다 — DART 계정명의
+        # 공백은 회사마다 임의라('영업활동으로 인한 순현금흐름') 원문 완전일치만으로는 같은 계정이
+        # 결측이 된다(소비층 equity `fin_std` 의 이름 대조 축). 서버 실측 09-27: 고유 계정명
+        # 72,488 → 공백 제거 55,489 · 특수 공백 0 · NFKC 차이 0 이라 **공백 제거만** 한다.
+        # 원장 컬럼이 아니라 `account_nm` 의 §5 정규화 판(NFKC·공백 축약)을 다시 줄인다 —
+        # 소비층이 보는 값은 stage 가 적은 `account_nm` 이므로 그것과 같은 판이어야 한다.
+        # `nm_account_nm` 은 `build.py _stage_sql` 이 normalize_text 컬럼마다 거는 조인 별칭이다.
+        ExtraColumn("account_nm_norm",
+                    "regexp_replace(coalesce(nm_account_nm.norm, s.\"account_nm\"), "
+                    r"'\s+', '', 'g')"),
     ),
     invariants=(
         Invariant("currency_null", "currency IS NULL OR currency = ''"),

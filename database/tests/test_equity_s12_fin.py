@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -375,9 +376,11 @@ def _fin_row(corp: str, year: str, reprt: str, rcept: str, *, sj: str, account_i
              account_std: bool = True) -> dict[str, object]:
     # `account_std` = stage 의 `account_id <> '-표준계정코드 미사용-'`(rules_dart). 비표준 이름
     # 폴백(capex 자산별 합)을 시험하려면 이 축을 손으로 내려야 한다.
+    # `account_nm_norm` 도 stage 파생 컬럼(T-E)이라 같은 규칙(공백 제거)으로 여기서 만든다.
     return {"corp_code": corp, "bsns_year": year, "reprt_code": reprt, "fs_div": "CFS",
             "sj_div": sj, "account_id": account_id, "account_detail": "",
             "ord": ord_, "account_nm": account_nm,
+            "account_nm_norm": re.sub(r"\s+", "", account_nm),
             "thstrm_amount": amount, "account_std": account_std, "is_krw": is_krw,
             "currency": currency, "rcept_no": rcept, "observed_date": observed}
 

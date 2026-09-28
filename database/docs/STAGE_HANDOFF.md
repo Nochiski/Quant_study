@@ -42,7 +42,7 @@
 | KIS | `stg_calls_kis` | 355,027 | 357,682 | 2,655 | unversioned 로그 · d1·d2 비키 |
 | KIS | `stg_units_kis` | 355,027 | 355,027 | 0 | unversioned 로그 |
 | DART | `stg_rcept_dt_map` | 3,443,898 | 3,444,518 | 620 | 참조표 rcept_no→rcept_dt · 페이지 중복 620 접힘 · key_unique |
-| DART | `stg_fin` | 15,375,024 | 15,375,024 | 0 | 8컬럼 요청축 키 · wide 6금액 Decimal(38,4) · available=참조표(미스 0) · `is_krw`·`account_std` |
+| DART | `stg_fin` | 15,375,024 | 15,375,024 | 0 | 8컬럼 요청축 키 · wide 6금액 Decimal(38,4) · available=참조표(미스 0) · `is_krw`·`account_std`·`account_nm_norm`(계정명 공백 제거, T-E) |
 | DART | `stg_dividend` | 384,232 | 384,232 | 0 | 키 = row_hash + 요청축 + se·stock_knd · `se` 라벨이 단위 → 스케일 없음 |
 | DART | `stg_shares` | 97,194 | 97,194 | 0 | 키 = row_hash + … · `row_kind` · 비숫자 다수(G2 12%) |
 | DART | `stg_capital` | 283,479 | 283,479 | 0 | `isu_dcrs_de` 점표기 + `_raw` · 연도 오타 셀 격리 15 |

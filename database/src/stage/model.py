@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-RULES_VERSION = "2.3.0"
+RULES_VERSION = "2.4.0"
 PS_HEADROOM_DIGITS = 2   # survey 최대 자릿수 + 2 (성장 여유). 초과 = cast_failed → G2
 
 # 빌드 basis — 하루 2판 규약 (플랜 v2 §4 Task B.1). 빌드 id 접두어가 판을 구분한다:
@@ -86,7 +86,12 @@ class ColumnRule:
 
 @dataclass(frozen=True)
 class ExtraColumn:
-    """categorize 파생 컬럼 — 같은 행의 원장 컬럼만 참조하는 SQL (`s."원장컬럼"`). §1 1:1 안."""
+    """categorize 파생 컬럼 — 같은 행의 원장 컬럼만 참조하는 SQL (`s."원장컬럼"`). §1 1:1 안.
+
+    예외 하나: `normalize_text` 컬럼의 **정규화 판**을 쓰려면 `build.py _stage_sql` 이 거는
+    조인 별칭 `nm_<원장컬럼>`(`coalesce(nm_x.norm, s."x")`)을 참조한다 — 소비층이 보는 값은
+    원장 원문이 아니라 stage 가 적은 정규화 판이기 때문이다(`stg_fin.account_nm_norm`).
+    """
 
     name: str
     sql: str

@@ -188,6 +188,10 @@ RULES_VERSION = "e1.21.0"                # BuildRecord.rules_version 에 실린�
 #             5 → 6종(revenue)으로 늘어 EG3 의 어휘 폐쇄·`n_revenue_basis_conflict` 판정도 바뀐다.
 #             `wide_acct` 는 이제 `val` 이 아니라 **`grp`(그룹 축)** 에서 출발한다 — 24 계정이
 #             하나도 안 걸린 그룹도 행을 가져야 사유를 말할 수 있다.
+#          ② T-E(플랜 §9) 동승 — `fin_std` 가 계정명 공백 제거를 스스로 하지 않고 stage 의
+#             `stg_fin.account_nm_norm`(stage RULES_VERSION 2.4.0)을 **선언 입력**으로 읽는다.
+#             산출값은 불변이고 선언면만 늘었다(EQUITY_HANDOFF §6 의 인상 사유). e1.21.0 을 실은
+#             판이 서버에 아직 없어(최신 e1.20.0) 같은 판본에 묶는다 — EG5a 비교축이 갈리지 않는다.
 #          ② 새 게이트 **EG8_fin_std** — 그룹(`fs_div` × 템플릿(banking·insurance·standard) ×
 #             `report_code`)마다 6 계정의 **예상 대상(채택 + 격리) 대비** 유효 비율을
 #             `coverage_by_group` 으로 기록하고, 직전 커밋 빌드의 같은 metric 과 견줘 예상 대상

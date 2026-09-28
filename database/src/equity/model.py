@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.18.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.19.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -160,6 +160,9 @@ RULES_VERSION = "e1.18.0"                # BuildRecord.rules_version 에 실린�
 #         비12월 결산에서 다음 회계연도 분기를 빼던 값과 그 공개일이 바뀌고, 구성 행을 산출에 남는
 #         행으로 좁혀 격리된 분기로 만든 파생도 사라진다. `dataset_profile` 의 내부 스코프 필드
 #         `financial.cf_operating_q` 커버율도 따라 바뀐다.
+# e1.19.0: 2026-09-28 `price.adj_close` 의 `field_scope` 가 `internal` → `field_map`(S23 선언). #218 이
+#         레지스트리 가격 변화 팩터를 이 필드로 옮겨 FIELD_MAP §2 어휘가 됐다(문서 감사 결정 5).
+#         값·랙·커버는 그대로이고 `dataset_profile` 한 행의 `field_scope`·`evidence` 만 바뀐다.
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

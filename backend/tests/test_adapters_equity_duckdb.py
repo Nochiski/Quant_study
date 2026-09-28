@@ -829,6 +829,28 @@ def test_unreadable_catalog_macro_at_boot_drops_only_that_source(
     assert warned and "v_fin_latest" in warned[0]
 
 
+@pytest.mark.parametrize("payload", [b"garbage" * 50, b""], ids=["garbage", "empty"])
+def test_corrupt_catalog_parquet_at_boot_drops_only_that_source(
+    tmp_path: Path, payload: bytes
+) -> None:
+    """손상·0바이트 parquet 는 duckdb `InvalidInputException` 이다 — 원천만 빼고 뜬다 (#245 P3-4).
+
+    예외 목록을 카탈로그 성격으로 좁히면서 이 예외가 빠져, 부팅 전체가 다시 실패했다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    files = sorted((root / "fin_std").rglob("*.parquet"))
+    assert files, f"fin_std 파티션 파일이 없다 — root={root}"
+    for path in files:
+        path.write_bytes(payload)
+    broken = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in broken.list_fields()}
+    assert "price.close" in served
+    assert not served & {"financial.book_equity", "financial.net_income"}
+    denied = _raw(broken, fields=("financial.book_equity",))
+    assert denied.detail is not None and "catalog_macro_unreadable" in denied.detail
+    assert "InvalidInputException" in denied.detail
+
+
 def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -39,7 +39,13 @@ Form과 Graph는 첫 버전에서 별도 전략 편집 모델을 만들지 않�
 
 ### 2.2 v1 authoring 문법
 
-v1은 canonical field name과 raw value를 그대로 쓰는 verbose YAML/JSON으로 확정한다. 시각적으로 간단해 보이기 위한 별도 문자열 DSL이나 단위 sugar를 도입하지 않는다. 아래 예시는 schema 1.1(2026-09-18, `factors` 평탄화·`signal.method` 등 미사용 필드 제거)이며 backend 골든 fixture `backend/tests/fixtures/strategy_documents/quality_momentum.yaml`과 같다.
+v1은 canonical field name과 raw value를 그대로 쓰는 verbose YAML/JSON으로 확정한다. 시각적으로 간단해 보이기 위한 별도 문자열 DSL이나 단위 sugar를 도입하지 않는다. 아래 예시는 schema 1.1(2026-09-18, `factors` 평탄화·`signal.method` 등 미사용 필드 제거) 당시의 골든이다.
+
+> **현행 안내(2026-09-28)**: 현재 버전은 schema 1.2다. 1.2는 `data`·`execution`·`graph.missing_policy`를
+> 문서에서 뺐고, 시장·기간·유니버스·체결·비용·결측은 실행 요청의 `environment`(실행 설정)가 소유한다.
+> 현행 골든은 `backend/tests/fixtures/strategy_documents/quality_momentum.yaml`(1.2)이고, 아래 1.1 예시와
+> 같은 본문은 `quality_momentum.v1_1.yaml`에 업그레이드 입력으로 보존돼 있다. 1.2 계약은
+> [strategy-language-2-0](../strategy-language-2-0/README.md)이 소유한다.
 
 ```yaml
 schema_version: "1.1"
@@ -82,7 +88,8 @@ parameters: []
 ```
 
 - `max_name_weight: 5%` 대신 `max_name_weight: 0.05`를 저장한다.
-- `fee: 15bps` 대신 `fee_bps: 15.0`을 저장한다.
+- `fee: 15bps` 대신 `fee_bps: 15.0`을 저장한다. (schema 1.2부터 `fee_bps`는 전략 문서가 아니라 실행 설정
+  `environment`의 값이다.)
 - `rebalance: month_end` 대신 실제 enum인 `rebalance: monthly`를 저장한다.
 - `rank(neutralize(...))` 같은 표현식 문자열 대신 `graph.nodes[]`를 저장한다.
 - `%`, `bps` 같은 사람이 읽기 좋은 단위는 Contract Inspector가 backend contract metadata로 표시한다.

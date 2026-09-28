@@ -48,6 +48,22 @@ logger.warning(
 )
 ```
 
+위 예시는 내부 예외·로그 메시지다. 사용자에게 그대로 보이는 문장은 아래 절을 따른다.
+
+## 사용자 대면 문장과 내부 메시지의 언어
+
+- 사용자에게 그대로 보이는 문장은 backend가 **한글로 완성**해 보낸다. compile 진단의 `message`
+  (`ValidationIssue`)와 결과·데이터 경고의 `message`(`DataWarning`·`PortfolioWarning`·
+  `ResearchDataWarning`)가 여기 든다. 영문 안정 키 `code`를 함께 싣고, 재현용 컨텍스트(종목·세션·
+  개수 등)는 문장 안에 `key=value` 원문으로 남긴다. 소비자(frontend·AI 결과 설명)는 문장을 다시
+  조립·번역하지 않는다. 정본은 `.claude/rules/strategy-workbench-sot.md`의 "authoring 진단 코드"·
+  "결과·데이터 경고 문장" 행이다.
+- 진단 코드의 네임스페이스(`strategy.*`·`structure.*`·codec 코드, 팩터 그래프 `factor.graph.*`를
+  `strategy.expression.*`로 옮기는 규칙)도 같은 SoT의 "authoring 진단 코드" 행이 소유한다. 레지스트리에
+  없는 코드를 호출 지점에서 새로 만들지 않는다.
+- 내부 예외·로그 메시지의 언어는 정한 규칙이 없다. 지금은 영문과 한글이 섞여 있다(예외는 영문이
+  많고, 최근 로그 경고에는 한글이 있다). 어느 언어로 쓰든 위 컨텍스트 규칙은 같다.
+
 ## 보안 예외
 
 다음 경우는 detail 을 축약/마스킹한다:

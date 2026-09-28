@@ -15,16 +15,19 @@ paths:
 - 아키텍처 패턴 제안 전: **근본 원인 해결 방법 우선** 제시
 - 커밋 전 테스트 통과 필수
   - **기존 실패(baseline) 처리**: main에서 이미 실패하던 테스트는 게이트에서 제외. (1) 내 변경과 관련된 테스트는 통과 필수, (2) 기존 실패 여부는 **격리 재실행 우선**(해당 테스트 파일만 단독 실행 — 내 변경과 무관 영역이면 충분), main 직접 대조가 필요하면 작업 트리를 건드리는 stash/checkout 대신 `git worktree add`로 별도 트리 생성 후 확인(worktree는 가상환경 미공유 — 의존성 설치 먼저), 확인 결과를 PR body에 명시, (3) **새로 깨진 테스트만 blocker**. 기존 실패를 고치겠다고 범위 밖 파일을 같은 커밋에서 수정하지 말 것 — 고치려면 별도 커밋/PR로 분리(기능/cleanup 분리 원칙)
-- 커밋 전 변경된 `.py` 파일 lint / type check 통과 필수 (CI와 동일 범위 — PR diff 기준):
+- 커밋 전 lint / type check 0 오류 필수. CI(`.github/workflows/ci.yml`)는 PR diff가 아니라 **전체**를
+  검사하므로 로컬도 같은 범위로 돌린다:
   ```bash
-  files=$(git diff --name-only --diff-filter=ACMR origin/main...HEAD -- '*.py')
-  [ -n "$files" ] && ruff check $files
-  [ -n "$files" ] && pyright $files
+  cd backend && uv run ruff check src tests examples scripts tools && uv run pyright
+  # 저장소 루트의 tools/ (CI "Verify root server contract" step)
+  uv run --project backend ruff check tools && uv run --project backend pyright tools
   ```
-- lint gate는 PR diff만 검사 (legacy 부채 grandfathered):
-  - 신규 파일/변경된 파일은 ruff + pyright 모두 통과 필요
-  - legacy 파일을 수정하면 그 파일이 lint 대상이 됨 — 동일 PR 내 같이 fix 또는 라인별 ignore
-  - legacy cleanup만 하는 PR은 별도로 진행
+  - backend pyright 범위는 `backend/pyproject.toml`의 `[tool.pyright] include`다.
+  - 기존 오류를 grandfather하는 diff 기준 게이트는 없다. 오류가 나면 같은 PR에서 고치거나 사유를
+    단 라인별 ignore를 둔다(아래 ignore 규칙).
+- 로컬 환경은 CI와 같은 extra로 맞춘다: `cd backend && uv sync --locked --extra parquet --extra equity --extra llm`
+  뒤 `uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release`. extra가 빠지면
+  pyright가 없는 모듈을 오류로 보고한다.
 - lint 룰 무시 시 reason 코멘트 의무:
   - ruff: `# noqa: F401  # reason: ...`
   - pyright: `# pyright: ignore[reportOptionalMemberAccess]  # reason: ...`

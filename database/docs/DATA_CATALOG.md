@@ -3,6 +3,10 @@
 작성 2026-08-21 · 통합 판정본. 입력 = `f_kael_consume` / `f_backtest_req` / `f_korea_market` / `f_source_map` / `f_schema_final`(+`schema_final.sql`) / `f_critic` 6종 + `design/plan_O_ops.md`.
 **본 문서 작성에 쓴 API 콜 0.** 검증은 `final/equity_pilot.db` 읽기전용 재조회로만 했다(§9).
 
+> **현행 안내(2026-09-28)**: 이 문서는 2026-08-21 판정본이다. 「보유」 칸은 그날 기준이라 지금과 다르다 —
+> 예를 들어 PR-02 수정주가는 equity 층 S23 조정가 표 `price_adj_daily` 로 만들어져 워크벤치 필드
+> `price.adj_close` 로 나간다. 지금의 필드 대응과 판정은 `EQUITY_FIELD_MAP.md` 를 본다.
+
 **이 문서 하나만 보고 "무엇을 더 받아야 하는가"를 결정할 수 있게 만들었다.**
 
 ---

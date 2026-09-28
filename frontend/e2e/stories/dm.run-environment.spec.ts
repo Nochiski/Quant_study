@@ -55,7 +55,7 @@ const runAndReadPeriod = async (page: Page): Promise<string> => {
 
 test(
   "US-DM-05 실행 설정에서 기간만 바꿔 다시 돌려도 전략은 그대로이고 실행 기록에 바꾼 기간이 남는다",
-  { tag: ["@story", "@US-DM-05"] },
+  { tag: ["@story", "@US-DM-05", "@US-SM-06"] },
   async ({ page }) => {
     test.setTimeout(300_000);
     await openEditor(page, "/research/strategies/new");

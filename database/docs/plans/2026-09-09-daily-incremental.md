@@ -445,8 +445,8 @@
 
 - [ ] 서버 산출이 정본. 워크벤치 사용자는 필요할 때 `fetch_equity_local.sh <dest> minimal`(2.1 GB)로 당긴다(매일 자동 push 안 함). 스크립트가 `dataset_profile`·`factor_readiness` 포함을 **검증**하고 없으면 실패.
 - [ ] 알려진 제약을 규약에 명시: 매일 `snapshot_id` 가 바뀌므로 **전날 만든 `target_tape` 는 새 데이터셋에서 거부**되고(`_adapter.py:129`), `_asof/` 는 3일치만 남는다(`ASOF_KEEP`). 백테스트 재현이 필요하면 그날의 `fetch` 사본을 보관한다.
-- [ ] backend PR(공용 영역·별도): `equity_duckdb` 어댑터가 루트에 `dataset_profile` 이 없으면 **기동 실패**(현재는 랙 0 으로 조용히 폴백 → 확정 look-ahead) [D §4-3].
-- [ ] `TECH_DEBT.md §4` 본문을 "코드는 8014655 로 해결, 남은 것은 폴백 차단" 으로 갱신.
+- [x] backend PR(공용 영역·별도): `equity_duckdb` 어댑터가 루트에 `dataset_profile` 이 없으면 **기동 실패**(현재는 랙 0 으로 조용히 폴백 → 확정 look-ahead) [D §4-3]. — 2026-09-28 워크벤치 #255(이슈 #246)가 기동 실패 대신 폴백 랙을 원장 선언과 같게 맞추고(`backend/tests/contract/test_equity_fallback_lag.py` 가 대조) 폴백을 쓰면 부팅 때 `profile_lag_fallback` 경고를 남기는 쪽으로 닫았다.
+- [x] `TECH_DEBT.md §4` 본문을 "코드는 8014655 로 해결, 남은 것은 폴백 차단" 으로 갱신. — 2026-09-28 §4 제목·머리 안내에 반영.
 
 ### Task 5.5: 09-10 검수 후속 (근거 `reviews/2026-09-10-intake-audit-summary.md`, 결정 6)
 

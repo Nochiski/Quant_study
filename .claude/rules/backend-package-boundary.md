@@ -40,8 +40,10 @@ bootstrap ─> application + adapters
   `document_codec`은 domain의 `UPGRADE_STEPS`를 주석·순서를 보존하는 컨테이너 위에서 실행만
   하며, 결과가 dict 경로와 같은 tree를 내는지는 application이 다시 parse해 검사한다.
 - `bootstrap`: concrete adapter를 선택하고 주입하는 유일한 composition root다.
-- `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 접근은 향후
-  `adapters/outbound/backtest_engine`에서만 허용한다.
+- `backend/src/backtest_engine`/`backend/rust/backtest_core`는 실행 커널이다. 커널을 import하는
+  노드는 둘이다: `adapters/outbound/backtest_engine`(실행·벤치마크 곡선)과
+  `adapters/outbound/engine_portfolio`(엔진 요구사항·능력 판정, 목표 행동 변환). 그 밖의 노드에서
+  커널을 import하지 않는다. 이 경계를 막는 architecture 테스트는 아직 없어 리뷰로 지킨다.
 
 ## 노드와 facade
 
@@ -63,11 +65,21 @@ bootstrap ─> application + adapters
 - 조회 계약 SoT는 `application/equity_workspace/ports/outgoing/equity_data.py`다. raw PIT
   관측 계약은 `application/portfolio_design/ports/outgoing/raw_observations.py`가 별도로
   소유하며, 두 포트는 같은 셀에 같은 값·공개일을 답해야 한다.
-- 현재 기준 구현은 `adapters/outbound/equity_mock`이다. fixture는 결정적이고
-  PIT available-date, revision, recommended lag, 실제 0/결측/미수집/coverage gap을 구분한다.
-- 실제 DB가 와도 domain/application을 DB 스키마에 맞춰 바꾸지 않는다. 새
-  `adapters/outbound/equity_duckdb`가 port에 맞춘다.
+- 구현은 둘이다. `adapters/outbound/equity_mock`은 테스트·e2e용 결정적 fixture이며 PIT
+  available-date, revision, recommended lag, 실제 0/결측/미수집/coverage gap을 구분한다.
+  `adapters/outbound/equity_duckdb`는 실데이터(로컬 원장)를 읽는다. 어느 쪽을 쓸지는
+  composition root가 정한다: `bootstrap/_http.py`가 `STRATEGY_WORKBENCH_EQUITY_ADAPTER`(기본
+  `mock`)와 `STRATEGY_WORKBENCH_EQUITY_ROOT`를 읽고, 허용 값 목록은 `bootstrap/_container.py`의
+  `EQUITY_ADAPTERS`다.
+- 두 어댑터가 같은 field_id에 답하는 필드 계약(단위·값 타입·랙·빈도)의 owner는
+  `.claude/rules/strategy-workbench-sot.md`의 equity 필드 계약 행이다.
+- 실제 DB에 맞춰 domain/application을 DB 스키마대로 바꾸지 않는다. `equity_duckdb`가 port에
+  맞춘다.
 - 설정한 adapter가 없거나 실패하면 mock으로 조용히 fallback하지 않는다.
+  이 금지는 adapter를 통째로 갈아 끼우는 것에 대한 것이다. `equity_duckdb`가 원장
+  `dataset_profile`에 행이 없는 필드를 선언표 상수로 읽는 랙 폴백은 허용하되, 그 상수는 원장
+  선언과 같아야 하고(`tests/contract/test_equity_fallback_lag.py`) 부팅 경고
+  `profile_lag_fallback`으로 드러낸다.
 - mock의 raw PIT port(`load_raw_observations`)는 fixture 달력 안에서는 `load_panel`과 같은
   Observation 행·PIT cut-off를 읽고, 달력 밖에서는 절대 영업일 index 기반 synthetic 시계열을
   만든다. 두 경우 모두 (security, date)만의 함수이며 query window에 의존하지 않는다. 실패는
@@ -83,5 +95,14 @@ bootstrap ─> application + adapters
 
 import는 절대·상대 표기를 가리지 않는다. 게이트가 파일 위치로 상대 import를 절대 모듈명으로
 복원해 같은 두 검사에 태운다 (DEFECT-101 이전에는 `level == 0`만 봐서 상대 표기가 검사 밖이었다).
+
+같은 `backend/tests/architecture/` 폴더의 게이트가 셋 더 있다.
+
+- `test_forbidden_imports.py`: domain·application은 pydantic을 import하지 않고, 누구도 PyYAML을
+  import하지 않으며(YAML 1.2 파서는 ruamel.yaml 하나), 공급자 SDK(`anthropic`·`openai`)는 자기
+  outbound adapter 안에만 있다. AST의 `import` 문만 보므로 문자열 import는 리뷰로 확인한다.
+- `test_run_environment_ownership.py`: 실행 설정은 `RunEnvironment` 하나가 소유한다. `src`
+  전체에서 옛 전략 문서 경로(`data`·`execution`·`missing_policy`) 읽기가 0건이다.
+- `test_turn_budget_constants.py`: AI 턴 예산 상수를 공급자 adapter가 다시 선언하지 않는다.
 
 새 위반은 whitelist에 넣지 말고 owner나 방향을 다시 설계한다.

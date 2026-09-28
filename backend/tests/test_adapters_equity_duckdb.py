@@ -61,7 +61,9 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from tests.equity_fixture import (
     WB_EVENING_SESSION,
     WB_HALT_DATE,
+    WB_PROFILE_LAG_THREE,
     WB_PROFILE_LAG_ZERO,
+    WB_PROFILE_ROWS,
     WB_SESSIONS,
     WB_SPLIT_DATE,
     build_workbench_root,
@@ -166,7 +168,8 @@ def test_list_fields_serves_every_declared_field_whose_source_is_built(
     assert set(profiles) == set(ALL_FIELDS)
     # 랙의 정본은 `dataset_profile` 이다 — 어댑터 상수가 아니라 대장 값이 나와야 한다.
     assert {f: profiles[f].recommended_lag_sessions for f in ALL_FIELDS} == {
-        f: (0 if f in WB_PROFILE_LAG_ZERO else 1) for f in ALL_FIELDS
+        f: (0 if f in WB_PROFILE_LAG_ZERO else 3 if f in WB_PROFILE_LAG_THREE else 1)
+        for f in ALL_FIELDS
     }
     assert profiles["price.close"].available_date_basis == "session_close"
     assert profiles["credit.margin_balance"].available_date_basis == "next_session_open"
@@ -515,14 +518,20 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
         )
         == -50.0
     )
-    # ⑦ 신용잔고 — measured 값, src_omitted·empty_response 는 MISSING, not_collected 는 그대로
-    assert _field(result, seen(START), "005930:1", "credit.margin_balance") == 8_359_855.0
+
+    # ⑦ 신용잔고 — measured 값, src_omitted·empty_response 는 MISSING, not_collected 는 그대로.
+    # 신용 랙은 원장처럼 3세션이라(이슈 #246) 원장 행 날짜와 보이는 세션이 세 칸 어긋난다.
+    def seen_credit(row_date: date) -> date:
+        return WB_SESSIONS[WB_SESSIONS.index(row_date) + 3]
+
+    measured = _field(result, seen_credit(date(2024, 1, 4)), "005930:1", "credit.margin_balance")
+    assert measured == 8_359_855.0
     for session, kind in (
-        (date(2024, 1, 9), CellKind.MISSING),  # src_omitted — 0 으로 굳히지 않는다
-        (WB_HALT_DATE, CellKind.NOT_COLLECTED),
-        (date(2024, 1, 11), CellKind.MISSING),  # empty_response(잔고 이상 격리 셀)
+        (date(2024, 1, 5), CellKind.MISSING),  # src_omitted — 0 으로 굳히지 않는다
+        (date(2024, 1, 8), CellKind.NOT_COLLECTED),
+        (date(2024, 1, 9), CellKind.MISSING),  # empty_response(잔고 이상 격리 셀)
     ):
-        cell = _cell(result, seen(session), "005930:1", "credit.margin_balance")
+        cell = _cell(result, seen_credit(session), "005930:1", "credit.margin_balance")
         assert (cell.value, cell.kind) == (None, kind), session
     # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖는다
     profiles = {p.field_id: p for p in adapter.list_fields()}
@@ -761,7 +770,12 @@ def test_lag_falls_back_to_source_constants_and_says_so_when_the_profile_is_abse
     """
     root = build_workbench_root(tmp_path / "equity", profile=False)
     profiles = {p.field_id: p for p in EquityDuckdbAdapter(root).list_fields()}
-    assert all(p.recommended_lag_sessions == 0 for p in profiles.values())
+    # 폴백 값도 원장 선언과 같다 — 표가 없다고 원장보다 짧게 읽지 않는다(이슈 #246). 원장과의
+    # 대조는 `tests/contract/test_equity_fallback_lag.py` 가 한다.
+    fixture_lags = {field_id: lag for field_id, lag, _ in WB_PROFILE_ROWS}
+    assert {f: p.recommended_lag_sessions for f, p in profiles.items()} == {
+        f: fixture_lags[f] for f in profiles
+    }
     assert all(
         "fallback: no dataset_profile row" in p.available_date_basis for p in profiles.values()
     )
@@ -769,7 +783,7 @@ def test_lag_falls_back_to_source_constants_and_says_so_when_the_profile_is_abse
     with_profile = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity2"))
     served = {p.field_id: p for p in with_profile.list_fields()}
     assert not any("fallback" in p.available_date_basis for p in served.values())
-    assert served["credit.margin_balance"].recommended_lag_sessions == 1
+    assert served["credit.margin_balance"].recommended_lag_sessions == 3
 
 
 # ── 카탈로그·환경 실패 ────────────────────────────────────────────────────────

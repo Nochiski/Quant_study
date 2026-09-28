@@ -394,6 +394,7 @@ class EquityDuckdbAdapter:
             spec.field_id: spec for spec in FIELD_SPECS if self._source_reason[spec.source] is None
         }
         self._profile: dict[str, tuple[int, str]] = self._load_profile()
+        self._warn_lag_fallback()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
 
     # ── 구성 ──────────────────────────────────────────────────────────────────
@@ -451,12 +452,39 @@ class EquityDuckdbAdapter:
             if field_id is not None and lag is not None
         }
 
+    def _warn_lag_fallback(self) -> None:
+        """대장(`dataset_profile`)에 랙 행이 없는 필드가 있으면 부팅 때 한 번 경고한다(이슈 #246).
+
+        폴백 상수는 원장 선언과 같게 맞췄지만, 원장 선언이 바뀌면 이 루트에서만 조용히 어긋난다.
+        근거 문자열의 `fallback` 표시만으로는 아무도 보지 않으므로 운영 로그에 남긴다.
+        """
+        fallback = sorted(field_id for field_id in self._fields if field_id not in self._profile)
+        if not fallback:
+            return
+        rest = len(fallback) - 10
+        shown = ", ".join(fallback[:10]) + (f" (+{rest})" if rest > 0 else "")
+        logger.warning(
+            f"{PROFILE_TABLE} 에 랙 행이 없는 필드는 어댑터의 폴백 랙(원천 상수)으로 읽는다 — "
+            "폴백 값은 원장 선언과 맞췄지만 원장이 바뀌면 조용히 어긋나므로 원장의 "
+            f"{PROFILE_TABLE}(S19)을 동기화해야 한다(`ledger_sync`) (profile_lag_fallback) — "
+            f"table_present={PROFILE_TABLE in self._tables} fields={len(fallback)} "
+            f"field_ids=[{shown}] root={self._root}"
+        )
+
     def _field_lag(self, field_id: str) -> tuple[int, str]:
-        """field_id 의 (랙, 근거). 대장에 있으면 대장, 없으면 원천 상수 폴백."""
+        """field_id 의 (랙, 근거). 대장에 있으면 대장, 없으면 필드·원천 상수 폴백.
+
+        폴백 상수는 원장 선언과 같은 값이다(이슈 #246). 한 원천 안에서 랙이 갈리는 필드는
+        `FieldSpec.lag_sessions` 가 원천 값을 덮는다.
+        """
         entry = self._profile.get(field_id)
         if entry is not None:
             return entry
-        source = SOURCE_BY_NAME[self._fields[field_id].source]
+        spec = self._fields[field_id]
+        source = SOURCE_BY_NAME[spec.source]
+        if spec.lag_sessions is not None:
+            basis = spec.lag_basis or source.lag_basis
+            return spec.lag_sessions, f"{basis} (fallback: no {PROFILE_TABLE} row)"
         return source.lag_sessions, f"{source.lag_basis} (fallback: no {PROFILE_TABLE} row)"
 
     def _load_policies(self) -> dict[str, tuple[str, ...]]:

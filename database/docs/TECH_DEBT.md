@@ -5,11 +5,11 @@
 > | # | 항목 | 상태 |
 > |---|---|---|
 > | 2 | 절단본이 저장소에 없다 | **완료** `54776b6` — 403 파일 추적 + CI 단계 추가 |
-> | 4 | 어댑터 공개시차 하드코딩 | **완료** `8014655` — `dataset_profile` 을 읽는다 |
-> | 10 | 정지 종목 감자가 run 을 죽인다 | **equity 몫 완료** `ae0b549` — `no_bar_after_apply` 표기. 정산 정책은 커널 몫 |
+> | 4 | 어댑터 공개시차 하드코딩 | **완료** `8014655` — `dataset_profile` 을 읽는다. 표가 없을 때의 폴백 랙도 원장 선언과 같다(#255, 2026-09-28) |
+> | 10 | 정지 종목 감자가 run 을 죽인다 | **equity 몫 완료** `ae0b549` — `no_bar_after_apply` 표기. 정산 정책은 커널 몫(워크벤치 어댑터는 `7f9c7e15` 부터 그런 사건을 빼고 경고한다, §10 머리) |
 > | 1·3·5·6·7·8·9 | | **미완** — 우선순위는 아래 표 |
 >
-> **2026-09-09 조사에서 나온 등재 전 후보**(상세는 `reviews/2026-09-09-daily-findings-*.md`, 처리 순서는 `plans/2026-09-09-daily-incremental.md` §11): stage 스냅샷 GC 없음(37 GB) · stage G5 `src_mtime` 비교 미구현 · equity EG13·EG14·EG19 미구현 · `stg_doc_parse_log` `t_*_ms` 로 content_hash 비결정 · KIS `kis_credit_balance` 중복 1,084,443행(12.1%) · equity `_pinned` GC 없음(≈1 GB/일). **§4 는 문서가 낡았다** — 코드는 `8014655` 로 해결됐고 남은 위험은 `dataset_profile` 부재 시 랙 0 폴백뿐(플랜 Task 5.4).
+> **2026-09-09 조사에서 나온 등재 전 후보**(상세는 `reviews/2026-09-09-daily-findings-*.md`, 처리 순서는 `plans/2026-09-09-daily-incremental.md` §11): stage 스냅샷 GC 없음(37 GB) · stage G5 `src_mtime` 비교 미구현 · equity EG13·EG14·EG19 미구현 · `stg_doc_parse_log` `t_*_ms` 로 content_hash 비결정 · KIS `kis_credit_balance` 중복 1,084,443행(12.1%) · equity `_pinned` GC 없음(≈1 GB/일). **§4 는 문서가 낡았다** — 코드는 `8014655` 로 해결됐고, 남은 위험이던 `dataset_profile` 부재 시 랙 0 폴백(플랜 Task 5.4)도 2026-09-28 워크벤치 #255 로 해소됐다(폴백 랙을 원장 선언과 같게 맞추고, 폴백을 쓰면 부팅 때 `profile_lag_fallback` 경고).
 >
 > **2026-09-10 첫 적재분 검수에서 나온 등재 전 후보**(상세·근거는 `reviews/2026-09-10-intake-audit-summary.md`): 키움 폐지 직전 4축 영구 결측 3종목(096610 7세션 등 — 복구 불가, 알려진 구멍) · KIS 재수집 판본 중복 536군이 equity `credit_daily` 격자 유일성을 깨뜨릴 전망(판본 선택 규칙 미정) · ~~키움 merge `INSERT OR REPLACE` 가 매일 전체 이력을 재기록(`collected_at` 소실)~~(09-10 결정 6-1 로 신규 행만 적재로 전환) · KIS 잔고율 분모는 공표일(T+2) 주식수 · 액면병합 종목의 KIS 잔고 항등식 파괴 · WISE 커버 판정 오탐·키움 유예 로직·DART 분기 창은 **09-10 핫픽스 완료**(`52d0f48`, 서버 배포).
 >
@@ -233,7 +233,12 @@ stg_flow_split_daily/MANIFEST.json  → 파티션 11개(year=2009~2019), 합 3,9
 
 ---
 
-## 4. 어댑터가 "언제부터 이 값을 알 수 있었나" 를 **자기 상수로 우겨서** 대장(`dataset_profile`)과 어긋난다 — **실제 미래 훔쳐보기**
+## 4. 어댑터가 "언제부터 이 값을 알 수 있었나" 를 **자기 상수로 우겨서** 대장(`dataset_profile`)과 어긋난다 — **실제 미래 훔쳐보기** (**완료**: `8014655` 대장 읽기 + #255 폴백 정렬·경고)
+
+> **현행 안내(2026-09-28)**: 어댑터는 `8014655` 부터 `dataset_profile` 의 필드별 랙을 읽는다. 표가 없는
+> 루트에서 쓰는 폴백 상수(`_specs.py` 의 `SourceSpec.lag_sessions`·`FieldSpec.lag_sessions`)도 #255 로 원장
+> 선언과 같은 값이 됐고(`backend/tests/contract/test_equity_fallback_lag.py` 가 대조), 폴백을 쓰면 부팅 때
+> `profile_lag_fallback` 경고를 한 번 남긴다. 아래는 2026-09-06 당시 서술이다.
 
 ### 무엇이 문제인가
 
@@ -742,6 +747,15 @@ DuckDB 가 공통 부분식을 항상 재사용해 주지는 않는다.
 
 ## 10. 정지된 채 재개하지 않는 종목의 기업행위가 **백테스트 run 전체를 죽인다** (전 종목 실측에서 처음 드러남)
 
+> **갱신(2026-09-28)**: 아래 (다)는 `ae0b549`(e1.7.0 `adj_factor.no_bar_after_apply`)로 끝났다. 워크벤치
+> 백테스트 경로는 커널 정책을 기다리지 않고 `7f9c7e15` 에서 우회했다 — 워크벤치 duckdb 어댑터의
+> `load_backtest_dataset` 이 창 안에서 사건 세션이나 그 뒤에 거래된 bar 가 없는 기업 행동을 빼고
+> `equity.corporate_action_without_bar_dropped` 경고로 남긴다. 그 포지션은 마지막 체결가에 동결되고,
+> 아래 「왜 그냥 사건을 버리면 된다가 답이 아닌가」의 대가(수량이 사건 전 그대로 남는다)는 경고로 드러낸
+> 채 받아들였다. 커널 쪽 (가)·(나)는 없다 — `engine/loop.py` 의 `_settlement_session` 은 여전히
+> `CorporateActionWithoutBar` 를 던지고, 커널 어댑터 `backtest_engine.adapters.equity_duckdb` 에는 같은
+> 거르기가 없다. 아래 본문은 2026-09-06 당시 서술이다.
+
 ### 무엇이 문제인가
 
 2026-09-06, 서버 전 종목 데이터 위에서 MVP-B 백테스트를 처음 돌렸다(그전까지는 절단본 15종목
@@ -1090,6 +1104,7 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **위험성**: 드리프트 조사 출발점이 거짓이 된다. 조치: rc 를 모아 `"partial": true` 로 기록 후 non-zero 종료.
 
 ### B-38: E01 은 선언 축(recommended_lag_sessions=3)만 고쳤다 — `available_date ≤ T−1` 만 거는 소비자는 여전히 2세션 앞선다
+- **종결(2026-09-28, 어댑터 쪽)**: 워크벤치 duckdb 어댑터는 `dataset_profile` 의 랙을 읽어 `credit.margin_balance` 에 3세션을 적용하고, 표가 없는 루트의 폴백 상수도 3세션이다(#255, `backend/tests/contract/test_equity_fallback_lag.py` 가 원장 선언과 대조). 커널 어댑터(`backtest_engine.adapters.equity_duckdb`)는 신용 필드를 읽지 않는다. `credit_daily` parquet 를 직접 읽으며 `available_date` 만 거는 소비자에게는 아래 서술이 그대로 남는다.
 - **상황**: `credit_daily.available_date = deal_date` 유지(플랜 §2 결정 1 — 백필 구간 PIT 보존).
 - **인풋**: 워크벤치·엔진이 `dataset_profile.recommended_lag_sessions` 를 실제로 적용하는지 미확인.
 - **에러 위치**: `src/equity/rules_s10.py`(선언) vs 소비 측 어댑터의 lag 적용 코드.

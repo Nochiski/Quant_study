@@ -1,13 +1,18 @@
 """S21 본판 — 절단본 체인 위에서 워크벤치 `equity_duckdb` 어댑터·컨테이너·MVP-B 백테스트 왕복
 (EQUITY_WORKFLOW §3-5 · DESIGN §7 · §10 P25/P40).
 
-체인 **20테이블**(`trading_calendar`→`corp`→`security`→`security_span`→`corp_ticker`→`price_daily`→
-`corp_event`→`adj_factor`→**`price_adj_daily`**→`universe_daily`→`universe_policy`→`disclosure_version`→`fin_std`→
-`holder_daily`→`dividend_event`→`consensus_daily`→`opinion_daily`→**`flow_daily`→`short_daily`→
-`credit_daily`**) + `catalog.publish`(매크로 8)를 스크래치에 짓고, 같은 모노레포의
+체인 **26테이블 + `dataset_profile`**(S19 테스트와 같은 순서 — 워크벤치가 읽는 20테이블에
+`index_daily`·`ownership_snapshot`·`audit_opinion`·`shares_outstanding`·`treasury_stock`·
+`opinion_broker_daily` 를 더한 것은 S19 `dataset_profile` 이 전 원천의 커버율을 재기 때문이다) +
+`catalog.publish`(매크로 8)를 스크래치에 짓고, 같은 모노레포의
 `backend/src`(`contract.default_engine_src()`) 에서 워크벤치 어댑터를 import 한다 —
 numpy·pyarrow·duckdb 가 필요하다(`uv run --with duckdb --with pyarrow --with numpy`;
 컨테이너·백테스트 2건은 ruamel.yaml 까지 — `uv run --project backend pytest …`).
+
+**공개시차는 운영과 같이 `dataset_profile`(S19)이 정한다**(이슈 #246). 대장이 없으면 어댑터는
+원천 상수로 폴백하지만, 그 경로는 backend `tests/contract/test_equity_fallback_lag.py` 가 본다.
+그래서 아래 손계산의 "공개일"은 원장 행의 available_date 이고, 셀이 **보이는** 세션은 그 필드의
+대장 랙만큼 뒤다 — 가격 축(close·open·volume·trading_value·adj_close) 0, 신용잔고 3, 나머지 1.
 
 손계산 기대값(절단본 원자료):
   가격(`stg_price_daily`·`stg_listing_daily`) — 005930 2018-04-27 종가 2,650,000(거래) ·
@@ -16,21 +21,27 @@ numpy·pyarrow·duckdb 가 필요하다(`uv run --with duckdb --with pyarrow --w
   05-03 adj_close 2,650,000(원주가 그대로), 05-04 51,900 × 50 = 2,595,000 — 창·as_of 에 무관한
   (security, date) 값. list_shrs 05-03 128,386,494 → 05-04 6,419,324,700.
   재무(`stg_fin`) — 삼성전자 2018 사업보고서(접수 2019-04-01) 매출 243,771,415,000,000 ·
-  매출총이익 111,377,004,000,000 · 자산총계 339,357,244,000,000. 그 전 세션(03-29)에는 아직
-  2018 3분기(접수 2018-11-14)가 최신이다 = PIT. 흐름 계정은 최근 4분기 합(TTM, #212)이라 그날
+  매출총이익 111,377,004,000,000 · 자산총계 339,357,244,000,000. 재무 랙 1이라 사업보고서는
+  다음 세션(04-02)부터 보이고, 접수일(04-01)까지는 아직 2018 3분기(접수 2018-11-14)가 최신이다
+  = PIT. 흐름 계정은 최근 4분기 합(TTM, #212)이라 그날
   매출은 3분기 3개월치(65,459,993,000,000)가 아니라 2017 4분기 ~ 2018 3분기 합
   250,484,777,000,000 이다. 사업보고서 행의 TTM 은 연간 값과 같다.
-  배당(`stg_dividend`) — 00126380 2017 사업연도 보통주 DPS 42,500(접수 2018-04-02). 종류 축을
+  배당(`stg_dividend`) — 00126380 2017 사업연도 보통주 DPS 42,500(접수 2018-04-02, 랙 1이라
+  04-03 부터 보인다). 종류 축을
   접으므로 우선주 티커 005935 도 같은 값을 받는다(FIELD_MAP §2 부분 판정 ②).
   컨센서스(`stg_v3_revision_daily`) — 005930 2026-08 관측점 EPS 47,929원(target_period 202612,
   접수 2026-08-04). v3 판본이라 est_min·est_max 가 없어 `consensus.eps_dispersion` 은 결측이다.
   의견(`stg_v3_analyst_opinions`) — 005930 2026-08-20 목표주가 491,875 · 의견 4.04 · 24기관.
-  임원지분(`stg_holder_elestock`) — 00126380 2026-08-20 접수 2건 합 −410주.
+  임원지분(`stg_holder_elestock`) — 00126380 2026-08-14 접수 4건 합 1,040주 · 08-20 접수 2건 합
+  −410주(랙 1이라 절단본 끝 08-20 에는 08-14 합이 최신이다).
   수급(`stg_flow_daily_kiwoom`) — 005930 2018-05-04 외국인 순매수 −53,845,000,000원(원장 원값,
   stage 가 백만원 ×1e6 을 이미 했다) · 개인 655,449,000,000 · 기관 −591,578,000,000.
   공매도(`stg_short_daily_kiwoom`) — 005930 2018-05-04 거래대금 103,425,481,000원
   (= `shrts_trde_prica_krw`, 거래량 `shrts_qty_shr` 1,964,027주).
-  신용(`stg_credit_daily`) — 005930 2018-05-04 융자잔고 8,359,855주.
+  신용(`stg_credit_daily`) — 005930 2018-05-04 융자잔고 8,359,855주(랙 3이라 05-10 부터 보인다).
+  수급·공매도·대차는 랙 1이라 05-04 행이 다음 세션(05-08, 05-07 대체공휴일)에 보인다.
+  시총·상장주식수도 랙 1(상장주식수 게시 시각 미측정)이라 05-04 세션에는 05-03 행(분할 전
+  주식수)이 보이고 분할 뒤 주식수는 05-08 부터다.
 """
 from __future__ import annotations
 
@@ -60,21 +71,26 @@ from equity import (
     rules_s16,
     rules_s17,
     rules_s18,
+    rules_s19,
     rules_s23,
 )
 from equity.baseline import Baseline, load
+from equity.model import RULES
 
 pytest.importorskip("numpy", reason="strategy_workbench 부팅이 backtest_engine(numpy)을 요구한다")
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
-CHAIN = (rules_s02.TRADING_CALENDAR, rules_s01.CORP, rules_s01.SECURITY, rules_s02.SECURITY_SPAN,
-         rules_s01.CORP_TICKER, rules_s04.PRICE_DAILY, rules_s05.CORP_EVENT, rules_s06.ADJ_FACTOR,
-         rules_s23.PRICE_ADJ_DAILY,
-         rules_s03.UNIVERSE_DAILY, rules_s03.UNIVERSE_POLICY,
-         rules_s11.DISCLOSURE_VERSION, rules_s12.FIN_STD,
-         rules_s15.HOLDER_DAILY, rules_s16.DIVIDEND_EVENT,
-         rules_s17.CONSENSUS_DAILY, rules_s18.OPINION_DAILY,
-         rules_s08.FLOW_DAILY, rules_s09.SHORT_DAILY, rules_s10.CREDIT_DAILY)
+# S19 테스트(`test_equity_s19_profile.CHAIN`)와 같은 선행 순서 + `dataset_profile`. 워크벤치가 읽지
+# 않는 6테이블은 S19 커버율 계산의 입력이라 짓는다.
+CHAIN_NAMES = (
+    "trading_calendar", "corp", "security", "corp_ticker", "security_span", "index_daily",
+    "price_daily", "corp_event", "adj_factor", "price_adj_daily",
+    "universe_daily", "universe_policy",
+    "flow_daily", "short_daily", "credit_daily",
+    "disclosure_version", "fin_std", "holder_daily", "ownership_snapshot", "audit_opinion",
+    "shares_outstanding", "treasury_stock", "dividend_event", "consensus_daily",
+    "opinion_daily", "opinion_broker_daily")
+CHAIN = (*(RULES[name] for name in CHAIN_NAMES), rules_s19.DATASET_PROFILE)
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 FIELDS = ("price.close", "price.adj_close", "price.market_cap")
 # 체인이 다 서면 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 29 + 내부 스코프 price.adj_close.
@@ -93,19 +109,15 @@ ALL_FIELDS = (
 )
 SPLIT = date(2018, 5, 4)
 HALT_LAST = date(2018, 5, 3)
+AFTER_SPLIT = date(2018, 5, 8)  # 분할 적용일 다음 세션(05-07 대체공휴일) — 랙 1 필드가 05-04 행을 본다
 SHARES_BEFORE, SHARES_AFTER = 128_386_494, 6_419_324_700
 BACKFILL_END = date(2026, 8, 20)
 
 
 def seed() -> Baseline:
-    """S01~S18 seed 를 테이블 단위로 병합(S07 테스트와 같은 규약)."""
+    """전 슬라이스 seed 를 테이블 단위로 병합(S19 테스트와 같은 규약 — 체인이 S19 까지 간다)."""
     merged: dict[str, dict[str, object]] = {}
-    for p in (rules_s01.BASELINE_SEED, Path(rules_s02.__file__).parent / "baseline_seed_s02.json",
-              rules_s03.BASELINE_SEED, rules_s04.BASELINE_SEED, rules_s05.BASELINE_SEED,
-              rules_s06.BASELINE_SEED, rules_s08.BASELINE_SEED, rules_s09.BASELINE_SEED,
-              rules_s10.BASELINE_SEED, rules_s11.BASELINE_SEED, rules_s12.BASELINE_SEED,
-              rules_s15.BASELINE_SEED, rules_s16.BASELINE_SEED, rules_s17.BASELINE_SEED,
-              rules_s18.BASELINE_SEED):
+    for p in sorted(Path(rules_s19.__file__).parent.glob("baseline_seed_s*.json")):
         for k, v in load(p).data.items():
             if not k.startswith("_") and k != "measured_at" and isinstance(v, dict):
                 merged.setdefault(k, {}).update(v)
@@ -156,6 +168,8 @@ def test_snapshot_id_는_카탈로그_meta_와_같다(adapter, built: Path) -> N
     meta = json.loads((built / catalog.META_NAME).read_text(encoding="utf-8"))
     assert adapter.snapshot().snapshot_id == meta["snapshot_id"]
     assert {p.field_id for p in adapter.list_fields()} == set(ALL_FIELDS)
+    # 체인이 `dataset_profile` 까지 지어 어댑터가 대장 경로를 밟는다 — 폴백 랙은 쓰지 않는다(#246)
+    assert not [p.field_id for p in adapter.list_fields() if "fallback" in p.available_date_basis]
     # 카탈로그는 S21 본판이 요구하는 매크로 둘을 새로 싣는다(v_consensus·v_fin_latest)
     names = {sig.split("(", 1)[0] for sig in meta["macros"]}
     assert {"v_adj_price_fwd", "v_consensus", "v_fin_latest"} <= names
@@ -170,10 +184,13 @@ def test_005930_2018_분할_전후_원주가_조정가_시총(adapter) -> None:
     assert _value(r, HALT_LAST, "005930:1", "price.adj_close") == pytest.approx(2_650_000)
     assert _value(r, SPLIT, "005930:1", "price.adj_close") == pytest.approx(51_900 * 50)
     assert _value(r, HALT_LAST, "005930:1", "price.market_cap") == 2_650_000 * SHARES_BEFORE
-    assert _value(r, SPLIT, "005930:1", "price.market_cap") == 51_900 * SHARES_AFTER
-    # 세 필드 모두 공개일 = 세션(랙 0)
+    # 시총은 대장 랙 1이라 분할 적용일에는 05-03 행(분할 전 주식수)이고, 분할 뒤 값은 다음 세션이다
+    assert _value(r, SPLIT, "005930:1", "price.market_cap") == 2_650_000 * SHARES_BEFORE
+    assert _value(r, AFTER_SPLIT, "005930:1", "price.market_cap") == 51_900 * SHARES_AFTER
+    # 공개일은 원장 행 날짜다 — 가격 두 필드는 랙 0이라 그 세션, 시총은 전 세션
     o = next(o for o in r.observations if (o.as_of, o.security_id) == (SPLIT, "005930:1"))
-    assert {f.available_date for f in o.fields} == {SPLIT}
+    assert {f.field_id: f.available_date for f in o.fields} == {
+        "price.close": SPLIT, "price.adj_close": SPLIT, "price.market_cap": HALT_LAST}
 
 
 def test_adj_close_는_창을_바꿔도_같은_셀이_같다(adapter) -> None:
@@ -255,7 +272,9 @@ def test_2018_05_04_가격_6필드는_KRX_원장_행_그대로다(adapter) -> No
     assert _value(r, SPLIT, "005930:1", "price.close") == 51_900
     assert _value(r, SPLIT, "005930:1", "price.volume") == 39_565_391       # 원거래량(무조정)
     assert _value(r, SPLIT, "005930:1", "price.trading_value") == 2_078_017_927_600
-    assert _value(r, SPLIT, "005930:1", "price.shares_outstanding") == SHARES_AFTER
+    # 상장주식수는 대장 랙 1 — 05-04 행(분할 뒤)은 다음 세션에, 05-04 세션에는 05-03 행이 보인다
+    assert _value(r, AFTER_SPLIT, "005930:1", "price.shares_outstanding") == SHARES_AFTER
+    assert _value(r, SPLIT, "005930:1", "price.shares_outstanding") == SHARES_BEFORE
     assert _value(r, HALT_LAST, "005930:1", "price.shares_outstanding") == SHARES_BEFORE
     # 정지일(기준가 행)은 시가가 NULL 이라 MISSING 이고 거래량 0 은 실제 관측이다
     from strategy_workbench.domain.equity.facade.research_data import CellKind
@@ -264,37 +283,41 @@ def test_2018_05_04_가격_6필드는_KRX_원장_행_그대로다(adapter) -> No
     assert _value(r, HALT_LAST, "005930:1", "price.volume") == 0
 
 
-def test_삼성전자_2018_사업보고서_재무는_접수일부터_보인다(adapter) -> None:
-    """`financial.*` — 법인 축 fin_std 를 corp_ticker 로 편 값. 접수 전 세션엔 3분기가 최신이다.
+def test_삼성전자_2018_사업보고서_재무는_접수_다음_세션부터_보인다(adapter) -> None:
+    """`financial.*` — 법인 축 fin_std 를 corp_ticker 로 편 값. 재무 랙은 1세션이라(dataset_profile,
+    접수 시각 미제공) 사업보고서는 접수 다음 세션부터 보이고, 접수일까지는 3분기가 최신이다.
 
     흐름 계정은 최근 4분기 합(TTM)이다(#212) — 사업보고서 행은 연간과 같고, 3분기 행은 3개월이
     아니라 직전 4분기 합이다.
     """
     r = _raw(adapter, date(2019, 3, 29), date(2019, 4, 5), universe="krx.all",
              fields=ALL_FIELDS)
-    filed = _cell(r, date(2019, 4, 1), "005930:1", "financial.revenue")
+    filed = _cell(r, date(2019, 4, 2), "005930:1", "financial.revenue")
     assert filed.value == 243_771_415_000_000
     assert filed.available_date == date(2019, 4, 1)
-    assert _value(r, date(2019, 4, 1), "005930:1",
+    assert _value(r, date(2019, 4, 2), "005930:1",
                   "financial.gross_profit") == 111_377_004_000_000
-    assert _value(r, date(2019, 4, 1), "005930:1",
+    assert _value(r, date(2019, 4, 2), "005930:1",
                   "financial.total_assets") == 339_357_244_000_000
-    # PIT — 03-29 에는 사업보고서가 아직 접수되지 않아 2018 3분기(2018-11-14 접수)가 최신이다.
-    # 값은 3분기 3개월치(65,459,993,000,000)가 아니라 2017 4분기 ~ 2018 3분기 매출 합이다.
-    before = _cell(r, date(2019, 3, 29), "005930:1", "financial.revenue")
-    assert (before.value, before.available_date) == (250_484_777_000_000, date(2018, 11, 14))
+    # PIT — 접수일(04-01) 당일까지는 사업보고서가 아직 보이지 않아 2018 3분기(2018-11-14 접수)가
+    # 최신이다. 값은 3분기 3개월치(65,459,993,000,000)가 아니라 2017 4분기 ~ 2018 3분기 매출 합이다.
+    for as_of in (date(2019, 3, 29), date(2019, 4, 1)):
+        before = _cell(r, as_of, "005930:1", "financial.revenue")
+        assert (before.value, before.available_date) == (
+            250_484_777_000_000, date(2018, 11, 14)), as_of
     # 같은 법인의 우선주 티커도 같은 값을 받는다(법인 축 전개 규약)
-    assert _value(r, date(2019, 4, 1), "005935:1", "financial.revenue") == 243_771_415_000_000
+    assert _value(r, date(2019, 4, 2), "005935:1", "financial.revenue") == 243_771_415_000_000
 
 
 def test_삼성전자_2017_배당은_종류_축을_접어_전_종류주에_같은_값이다(adapter) -> None:
     r = _raw(adapter, date(2018, 3, 29), date(2018, 4, 5), universe="krx.all",
              fields=ALL_FIELDS)
-    cell = _cell(r, date(2018, 4, 2), "005930:1", "event.dividend_per_share")
+    # 배당 랙 1(dataset_profile, 접수 시각 미제공) — 04-02 접수분은 04-03 부터 보인다
+    cell = _cell(r, date(2018, 4, 3), "005930:1", "event.dividend_per_share")
     assert (cell.value, cell.available_date) == (42_500.0, date(2018, 4, 2))
-    assert _value(r, date(2018, 4, 2), "005935:1", "event.dividend_per_share") == 42_500.0
-    # 접수 전 세션은 직전 사업연도(2016) 값이다
-    earlier = _cell(r, date(2018, 3, 30), "005930:1", "event.dividend_per_share")
+    assert _value(r, date(2018, 4, 3), "005935:1", "event.dividend_per_share") == 42_500.0
+    # 접수일 당일까지는 직전 사업연도(2016) 값이다
+    earlier = _cell(r, date(2018, 4, 2), "005930:1", "event.dividend_per_share")
     assert (earlier.value, earlier.available_date) == (28_500.0, date(2017, 3, 31))
 
 
@@ -310,9 +333,10 @@ def test_2026_08_컨센서스_의견_임원지분_1셀(adapter) -> None:
     assert _value(r, BACKFILL_END, "005930:1", "consensus.target_price") == 491_875.0
     assert _value(r, BACKFILL_END, "005930:1", "consensus.recommendation") == 4.04
     assert _value(r, BACKFILL_END, "005930:1", "consensus.analyst_count") == 24.0
-    # 같은 접수일의 임원 2건 합 (−410주). majorstock 축은 섞이지 않는다
+    # 같은 접수일의 임원 건 합. 랙 1이라 절단본 끝(08-20) 접수 2건(−410주)은 다음 세션 몫이고,
+    # 08-20 세션에는 08-14 접수 4건 합(1,040주)이 최신이다. majorstock 축은 섞이지 않는다
     insider = _cell(r, BACKFILL_END, "005930:1", "event.insider_net_buy")
-    assert (insider.value, insider.available_date) == (-410.0, BACKFILL_END)
+    assert (insider.value, insider.available_date) == (1_040.0, date(2026, 8, 14))
     # 절단본 corp_event 에 tsstk_aq 행이 없어 자사주 필드는 목록엔 있어도 셀이 없다(합성 금지)
     o = next(o for o in r.observations
              if (o.as_of, o.security_id) == (BACKFILL_END, "005930:1"))
@@ -331,29 +355,36 @@ def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) 
     r = _raw(adapter, date(2018, 5, 2), date(2018, 5, 31), fields=ALL_FIELDS)
     assert r.ok, r.detail
     # ① 수급 — 절단본은 겹침 0 이라 키움 행 하나가 그대로 나간다(12주체 합 0 항등식의 그 행)
-    foreign = _cell(r, SPLIT, "005930:1", "flow.foreign_net_buy")
+    # 격자 수급·공매도·대차는 랙 1(익일 지식)이라 05-04 행이 다음 세션(05-08)에 보인다
+    foreign = _cell(r, AFTER_SPLIT, "005930:1", "flow.foreign_net_buy")
     assert (foreign.value, foreign.available_date, foreign.kind) == (
         -53_845_000_000.0, SPLIT, CellKind.OBSERVED)
-    assert _value(r, SPLIT, "005930:1", "flow.retail_net_buy") == 655_449_000_000.0
-    assert _value(r, SPLIT, "005930:1", "flow.institution_net_buy") == -591_578_000_000.0
+    assert _value(r, AFTER_SPLIT, "005930:1", "flow.retail_net_buy") == 655_449_000_000.0
+    assert _value(r, AFTER_SPLIT, "005930:1", "flow.institution_net_buy") == -591_578_000_000.0
     # ② 공매도 거래대금 — 키움 축 고정(같은 셀의 KIS 축은 not_collected 라 섞이면 결측이 된다)
-    short = _cell(r, SPLIT, "005930:1", "short.short_sale_value")
+    short = _cell(r, AFTER_SPLIT, "005930:1", "short.short_sale_value")
     assert (short.value, short.kind) == (103_425_481_000.0, CellKind.OBSERVED)
     # 대차 — S09-2(09-08) 로 키움 축(ka20068)이 붙으면서 **결측이던 셀이 관측이 됐다**. 예전에는
     # KIS 축뿐이라 005930 은 수집 로그가 덮지 않아 NOT_COLLECTED 였다.
     # 이 셀 자체가 단위 확정의 세 번째 증거다: 50:1 분할 당일이라 잔고가 1,453,095(05-03) →
     # 46,026,975(05-04)로 뛰고, 금액 ÷ 잔고는 분할 전 2,650,000원 · 분할 후 51,900원으로
     # 양쪽 다 그날 종가와 같다. 주 단위가 아니면 이 두 값이 동시에 맞을 수 없다.
-    lending = _cell(r, SPLIT, "005930:1", "short.borrowed_quantity")
+    lending = _cell(r, AFTER_SPLIT, "005930:1", "short.borrowed_quantity")
     assert (lending.value, lending.kind) == (46_026_975.0, CellKind.OBSERVED)
-    # ③ 신용융자 잔고(주식수) — 금액축은 단위 미상이라 내지 않는다
-    credit = _cell(r, SPLIT, "005930:1", "credit.margin_balance")
+    # ③ 신용융자 잔고(주식수) — 금액축은 단위 미상이라 내지 않는다. 랙 3(실입수 T+3,
+    #    DEFECT-E01)이라 05-04 행은 세 세션 뒤(05-10)에 보인다
+    credit = _cell(r, date(2018, 5, 10), "005930:1", "credit.margin_balance")
     assert (credit.value, credit.available_date, credit.kind) == (
         8_359_855.0, SPLIT, CellKind.OBSERVED)
-    # ④ 백필 끝 세션의 신용 셀은 `src_omitted`(유닛 창 안인데 원장 행이 없다) — 0 이 아니라 NULL
-    #    이고 SOURCE_OMITTED_ZERO 대신 MISSING 으로 접힌다(_specs 의 사유 문장 참조)
-    last = _raw(adapter, date(2026, 8, 18), BACKFILL_END, fields=ALL_FIELDS)
-    omitted = _cell(last, BACKFILL_END, "005930:1", "credit.margin_balance")
+    # ④ 백필 끝 세션의 신용 원장 행은 `src_omitted`(유닛 창 안인데 원장 행이 없다) — 0 이 아니라
+    #    NULL 이고 SOURCE_OMITTED_ZERO 대신 MISSING 으로 접힌다(_specs 의 사유 문장 참조). 랙 3이면
+    #    그 행은 절단본 뒤에야 보이므로 랙을 0으로 물려 행 자체의 셀 종류를 본다
+    from strategy_workbench.domain.equity.facade.research_data import FieldLag, ResearchPanelQuery
+    panel = adapter.load_panel(ResearchPanelQuery(
+        start=BACKFILL_END, end=BACKFILL_END, security_ids=("005930:1",),
+        field_ids=("credit.margin_balance",),
+        lag_overrides=(FieldLag("credit.margin_balance", 0),)))
+    omitted = next(c for c in panel.cells if c.as_of == BACKFILL_END)
     assert (omitted.value, omitted.kind) == (None, CellKind.MISSING)
     assert omitted.available_date == BACKFILL_END
 

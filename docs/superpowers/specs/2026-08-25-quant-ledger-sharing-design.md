@@ -1,5 +1,11 @@
 # quant-ledger 원장 공유 설계
 
+> **현행 안내(2026-09-28)**: 이 문서의 Phase 2~3(HTTPS + mTLS 공개 경로와 접근)은 진행하지 않았다.
+> 협업자 접근은 [SFTP 동기화 설계](./2026-09-19-ledger-sftp-sync-design.md)의 읽기 전용 SFTP로
+> 대체됐고, 받는 층은 raw가 아니라 equity다. 아래 KNOWN_GAPS는 2026-08-25 raw 공유 기준이며,
+> 수정주가(`price.adj_close`)와 재무(`financial.*`)는 이후 equity 층이 제공한다. 아래는 2026-08-25
+> 설계 기록이다.
+
 - **작성일**: 2026-08-25
 - **상태**: Phase 1(리빌드 파이프라인) 구현 완료 · Phase 2~3(공개 경로·접근) 대기
 - **대상**: 카엘 서버(`kael-mini-server`)의 `quant-ledger` 원장을 협업자(상목)에게 읽기 전용으로 공유

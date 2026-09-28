@@ -43,9 +43,10 @@ main
   착수한다**(두 PR이 카탈로그의 `saved_*` 제거·`availability`를 건드린다). P3-01의 base는 P2-09이며
   P1 스택 끝(P1-06)이 먼저 merge되어 있어야 한다.
 - **통합 브랜치 뒤 base(2026-09-28)**: P2-03 ~ P3-02 는 통합 브랜치 `lang2/integration` 에 모였다(PLAN 현재
-  결정 머지 전략). 통합 브랜치가 main 에 머지되면(추적 PR #202) 이후 PR(P3-03 ~ P6-03)의 스택 첫 PR 은 main 을
-  base 로 연다. 그 전에 통합 브랜치 base 로 연 PR 은 main 을 merge 하고 게이트를 다시 돌린 뒤 base 를 main 으로
-  옮긴다. 기록(`INTEGRATED` → `MERGED`)과 게이트 규칙은 PLAN 현재 결정 2026-09-28 이 정본이다.
+  결정 머지 전략). 통합 브랜치는 2026-09-28 main 에 머지됐고(#202, `a4be517a`) 곧바로 원격에서 삭제됐다. 그래서
+  이후 PR(P3-03 ~ P6-03)의 스택 첫 PR 은 main 을 base 로 연다. 통합 브랜치 base 로 열려 있던 PR 은 main 을
+  merge 하고 게이트를 다시 돌린 뒤 base 를 main 으로 옮기는 규칙이었다. 기록(`INTEGRATED` → `MERGED`, #253)과
+  게이트 규칙은 PLAN 현재 결정 2026-09-28 이 정본이다.
 - **generated SDK 규칙(P2-01에서 개정)**: OpenAPI를 바꾸는 backend PR은 같은 PR에서
   `frontend/src/shared/api/generated`도 재생성해 별도 커밋으로 넣는다. CI `frontend` job이
   `npm run api:generate` 뒤 `git diff --exit-code -- ../backend/openapi.json src/shared/api/generated`를
@@ -768,35 +769,46 @@ PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드
 
 ### P3-03 — e2e fixture 1.2, 매뉴얼·README 1.2
 
+**범위 조정(리드 결정 2026-09-28, PLAN 변경 기록 먼저)**: 아래 항목 가운데 문서 항목은 이번 문서 작업이
+가져간다. 각 항목 끝의 **담당**이 정본이다. PR 번호가 아직 없어 이름으로 적는다 — 문서 갱신 PR A, 매뉴얼
+PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`(#259). P3-03 에 남는 것은 e2e fixture 1.2·"1.1 revision
+업그레이드" 시나리오, BACKLOG-008, BACKLOG-009, CI green 이다.
+
 **Acceptance**
 
 - e2e 골든을 1.2 문서로. "1.1 revision 열기 → 업그레이드 → 실행 설정 채워짐 → 저장 → 백테스트"
-  시나리오 추가. "같은 전략, 다른 기간 → 같은 spec_hash" 시나리오.
+  시나리오 추가. "같은 전략, 다른 기간 → 같은 spec_hash" 시나리오. — **담당: P3-03**. spec_hash
+  시나리오는 P3-02 가 이미 채웠다(`stories/dm.run-environment.spec.ts`, PLAN P3 Phase exit).
 - 매뉴얼 1절 샘플을 1.2로, 실행 설정 절 신설, "이 전략을 사람 말로" 표 갱신. README·frontend
-  README·`backend/FACTORS.md` 1.2.
-- CI `frontend`·`browser-e2e` green(P2 스택의 exit 조건 해소).
+  README·`backend/FACTORS.md` 1.2. — **담당: 매뉴얼 부분은 매뉴얼 PR, README·frontend README·
+  `backend/FACTORS.md` 는 문서 갱신 PR A**.
+- CI `frontend`·`browser-e2e` green(P2 스택의 exit 조건 해소). — **담당: P3-03**(P3-03 부터 CI 전체 job
+  green 이 머지 조건).
 - **골든의 수정주가 이관(BACKLOG-018 후속, 리뷰 #232 DEFECT-232-05)**: 골든 `quality_momentum.yaml`·
   `quality_momentum.json`·매뉴얼 1절 샘플의 `mom_252` 잎을 `price.adj_close` 로 옮긴다. 원주가 모멘텀은
   P3-01 부터 compile warning `strategy.field.unadjusted_price` 가 나므로, 그대로 두면 warning 이 뜨는 문서를
   정상 예시로 보인다. 옮긴 뒤 backend 테스트의 우회 필터(`test_strategy_document_http_api.py` 의
   `RAW_PRICE_WARNING`·`_without_raw_price_warning`, `test_strategy_document_upgrade_http_api.py` 의 warning
   기대)를 걷고, 골든 `spec_hash` 리터럴·AI 시나리오 golden·e2e 기대값을 재생성한다. 1.0·1.1 보존 fixture 는
-  옛 문서라 원주가 그대로 둔다(업그레이드는 필드를 바꾸지 않는다).
+  옛 문서라 원주가 그대로 둔다(업그레이드는 필드를 바꾸지 않는다). — **담당: 골든 이관·우회 필터 제거·재생성은
+  선행 코드 PR `impl-prep`(#259). 매뉴얼 1절 샘플의 필드와 그 문단도 골든과 같이 #259 가 옮겼고, 재촬영은 매뉴얼 PR**(골든 이관 → 매뉴얼 샘플 → 재촬영 순서).
 - BACKLOG-002: 매뉴얼 스크린샷 14장을 `npm run docs:capture`로 1.2 한글 화면으로 다시 찍고, 8절에
-  "초안 복구·서버 초안 적용 직후 되돌리기는 복구 이전 텍스트로 돌아간다"는 안내를 넣는다.
+  "초안 복구·서버 초안 적용 직후 되돌리기는 복구 이전 텍스트로 돌아간다"는 안내를 넣는다. — **담당: 매뉴얼
+  PR**(선행 코드 PR 머지 뒤).
 - BACKLOG-008: 충돌 표식 게이트(`tools/quant_study_dev/conflict_markers.py`)가 `git ls-files`로 추적
   파일만 열거하고, `.lock`과 비 UTF-8 텍스트도 검사하며, 주석이 7자 밑줄 검출을 사실대로 적는다.
-  cp949·UTF-16·`.lock`·`build/`·`dist/` 표식 검출 테스트를 둔다.
+  cp949·UTF-16·`.lock`·`build/`·`dist/` 표식 검출 테스트를 둔다. — **담당: P3-03**.
 - BACKLOG-009: 사이드바 제안을 "문서에 적용"한 뒤 툴바 "실행 취소" 한 번으로 적용 전 원문으로 돌아가는
-  브라우저 스토리 e2e(`@story`·`@US-DM-09`)를 더하고 US-DM-09를 `구현됨-e2e`로 올린다.
+  브라우저 스토리 e2e(`@story`·`@US-DM-09`)를 더하고 US-DM-09를 `구현됨-e2e`로 올린다. — **담당: P3-03**.
 - **spec D6·D7 구현 결과(Phase 2 감사 NB-3)**: 설계 spec D6·D7 에 "구현 결과(P2-03·P2-09)" 단락을 둔다
   (P2-08 이 D2 를 정리한 방식). D7 의 현재형 "`_upgrade.py` 는 단일 버전 변환기다", `UPGRADE_STEPS` 값 타입(이름
   붙은 쌍), `UpgradeOutcome` 모양(`source_version` 추가, 도메인 `environment` 는 `RetiredExecutionSettings`,
   응답 `environment` 는 nullable), 선언 버전 규칙(NB-1), saved-reference 422 코드(`backtest.strategy.requires_upgrade`),
-  D6 의 삭제된 브리지 문장을 사실대로 고친다. 1.2 문서를 정리하는 이 PR 의 범위다.
+  D6 의 삭제된 브리지 문장을 사실대로 고친다. 1.2 문서를 정리하는 이 PR 의 범위다. — **담당: 문서 갱신
+  PR A**.
 - **연산자 행의 단위 규칙 문장(Phase 2 감사 NB-6)**: SoT 연산자 행에 "단위 추론 owner 는 검증기
   (`domain/factor/_validation.py` 의 무차원 집합), 카탈로그 `unit_rule` 은 `test_factor_operators.py` 가 묶는
-  표시값"을 한 줄 적는다. 규칙 문서를 1.2 로 정리하는 이 PR 에서 한다.
+  표시값"을 한 줄 적는다. 규칙 문서를 1.2 로 정리하는 이 PR 에서 한다. — **담당: 문서 갱신 PR A**.
 
 **Phase 3 exit**
 

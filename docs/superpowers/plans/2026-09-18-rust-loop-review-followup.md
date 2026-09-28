@@ -1,5 +1,9 @@
 # Rust 루프 드라이버 리뷰 후속 구현 계획
 
+> **현행 안내(2026-09-28)**: 이 계획은 **완료**됐다. PR 11개(#123 → #146 → #127 → #128 → #129 → #134 → #136 →
+> #137 → #138 → #141 → #142)가 2026-09-18 main에 머지됐고 이슈 #98은 같은 날 닫혔다. 계획의 #124는 base
+> 브랜치 삭제로 닫혀 #146으로 다시 열렸다. 이 문서는 역사 기록이다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 이슈 #98 PR 스택(#107→#109→#110) 머지 후 리뷰(2026-09-18, Rust·Python·성능 실측 3인)에서 나온 결함·SoT 중복·죽은 코드·성능 여지를 전부 해소하고, 게이트를 정직한 측정 경계(`run()` + 결과 조회)로 다시 판정한다.

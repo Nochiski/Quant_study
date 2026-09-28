@@ -375,7 +375,7 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 
 ## 6. `RULES_VERSION` 상향 규칙
 
-`database/src/equity/model.py:25` 의 `RULES_VERSION` 은 `BuildRecord.rules_version` 에 실린다.
+`database/src/equity/model.py` 의 `RULES_VERSION`(2026-09-28 현재 e1.19.0)은 `BuildRecord.rules_version` 에 실린다.
 
 - **산출을 바꾸는 규칙 변경이면 반드시 올린다.** `sql/*.sql`·`rules_*.py` 의 산출식·
   선언 컬럼·`field_profiles`·게이트 술어가 대상이다.
@@ -460,6 +460,10 @@ scp database/src/equity/baseline_locked.json kael-server:~/quant-ledger/data/equ
 ---
 
 ## 8-2. 서버 반영 이력 — 2026-09-07 (e1.6.0 → e1.13.0)
+
+> **현행 안내(2026-09-28)**: 8-2~8-5 의 서버 반영 이력은 2026-09-09(e1.14.0, P0 정렬)에서 멈췄다. 그 뒤
+> 판본 e1.15.0~e1.19.0 의 변경 내용은 `database/src/equity/model.py` 의 `RULES_VERSION` 위 판본별 주석에,
+> 운영 상태는 `database/README.md` 상태 표에 있다.
 
 이 날 서버 `data/equity/` 가 크게 움직였다. 배포 전 코드 백업
 `/tmp/equity_backup_e160_20260907T014756Z`, baseline 백업 `baseline.json.bak_s05_ratio`·`.bak_s17_tol`.
@@ -620,7 +624,8 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
   **어댑터가 `dataset_profile` 을 읽어 필드별 랙을 적용하는 형태로 한 번에** 교체해야 한다
   (한 필드군만 고치면 어댑터 안에서 규약이 갈린다).
 - **`consensus.*` 의 `target_period` 선택**이 어댑터 규칙(FY1)이다 — 레지스트리 라벨
-  "12개월 선행 EPS" 와 값의 뜻이 다르다.
+  "12개월 선행 EPS" 와 값의 뜻이 다르다. *(라벨은 해소 — #207·#221 로 duckdb·mock 어댑터 라벨이 모두
+  「선행 EPS(FY1 컨센서스 평균)」이다. FY1 선택 규칙은 그대로다.)*
 
 ### 조정가 축 (S23 이 남긴 것)
 - **`n_unadjusted_events` 의 소비 규약이 없다** — equity 는 수를 싣지만 "몇 이상이면 거른다" 는
@@ -707,6 +712,12 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 
 ### ① 전 종목 유니버스(`krx.common-stock`)로는 run 이 죽는다 — `krx.liquid` 를 쓸 것
 
+> **갱신(2026-09-28)**: 워크벤치 백테스트 경로에서는 이제 run 이 죽지 않는다. 워크벤치 duckdb 어댑터의
+> `load_backtest_dataset` 이 창 안에서 사건 세션이나 그 뒤에 거래된 bar 가 없는 기업 행동을 빼고
+> `equity.corporate_action_without_bar_dropped` 경고로 남긴다(`7f9c7e15`, 포지션은 마지막 체결가에
+> 동결된다). 커널 어댑터 `backtest_engine.adapters.equity_duckdb` 에는 같은 거르기가 없어, 커널을 그
+> 어댑터로 직접 돌리는 경로는 확인하지 않았다. 아래는 당시 서술이다.
+
 정지된 뒤 데이터 끝까지 재개하지 않은 종목에 감자·병합이 걸리면 커널이
 `CorporateActionWithoutBar` 를 던지고 **run 전체가 중단된다**(부분 결과도 없다).
 서버 실측 26건 · 25종목이고 전부 `status='suspended'` 다. 자세한 것은 `TECH_DEBT.md` §10.
@@ -732,6 +743,8 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 어댑터가 공개시차를 자기 상수(전부 0세션)로 우기던 것을 고쳐 `dataset_profile` 의 필드별 값을
 읽는다(커밋 `8014655`). 대장이 정한 랙은 **72필드 중 65가 1세션**이고 0세션은 장중 가격 축
 7개뿐이다. 즉 어댑터가 내던 30필드 중 **25개가 한 세션 이르게 열려 있었다** — 확정 look-ahead 였다.
+*(당시 숫자다. 2026-09-19 DEFECT-E01 정정으로 `credit.margin_balance` 는 3세션이 됐고 — 아래 표의
+`credit.*` 행 중 신용잔고는 원장 날짜 세 세션 뒤다 — 대장은 2026-09-28 현재 83행이다.)*
 
 바뀐 것:
 
@@ -744,8 +757,12 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 | `flow.*`·`short.*`·`credit.*`(격자) | 원장 날짜 당일 | 원장 날짜 **다음** 세션 |
 
 **이 변경으로 백테스트 성과는 대체로 나빠진다.** 예전 숫자가 낙관 방향으로 틀려 있었기 때문이고,
-지금 값이 맞는 값이다. `dataset_profile` 이 없는 옛 루트는 예전처럼 동작하되
-`list_fields()` 의 `available_date_basis` 에 `fallback` 이라고 적힌다 — 조용히 되돌아가지 않는다.
+지금 값이 맞는 값이다. `dataset_profile` 이 없는 옛 루트(또는 대장에 행이 없는 필드)는 어댑터의
+폴백 랙(`_specs.py` 의 `SourceSpec.lag_sessions`·`FieldSpec.lag_sessions`)으로 읽는다. 폴백 랙은 원장
+선언의 사본이라 값이 같고(`backend/tests/contract/test_equity_fallback_lag.py` 가 원장 `rules_s19` 선언과
+대조한다, 이슈 #246 · PR #255), `list_fields()` 의 `available_date_basis` 에 `fallback` 이 적히며 부팅
+로그에 `profile_lag_fallback` 경고가 한 번 남는다. 원장 선언이 바뀌면 폴백 루트만 어긋나므로
+`dataset_profile` 을 받아 둔다.
 필드마다 더 늘리고 싶으면 질의의 `lag_overrides` 를 쓴다(줄일 수는 없다).
 
 ---
@@ -759,7 +776,8 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
   + **대장 2표**(`dataset_profile`·`factor_readiness`). 가격/모멘텀/변동성 전략용.
 - `full` 21표 ≈ 3.7GB: 재무·컨센서스·의견·수급·공매도·신용·배당·지분 추가.
 - **`dataset_profile` 을 빼면 안 된다**(216KB). 어댑터가 필드별 공개시차를 이 표에서 읽는다 —
-  없으면 원천 상수(전부 0세션)로 폴백해 한 세션 이른 값이 나온다(위 「소비자가 먼저 알 것」 ②).
+  없으면 원장 선언을 옮겨 둔 폴백 랙으로 읽고 부팅 때 `profile_lag_fallback` 경고를 남긴다. 값은 지금
+  원장과 같지만 원장 선언이 바뀌면 이 루트만 조용히 어긋나므로 받아야 한다(위 「소비자가 먼저 알 것」 ②).
 - **`_pinned/` 은 받지 않는다** — 재빌드 시 stage 입력을 고정한 하드링크 사본이라 읽기에 불필요하고,
   rsync 하면 하드링크가 풀려 실제 크기(수 GB)로 복사된다. `_asof/`·`_tmp/`·`_failed/` 도 같다.
 - 스크립트가 `baseline.json` 을 함께 받고 **카탈로그를 다시 만든다**. 매크로 본문이 절대경로를
@@ -776,3 +794,12 @@ cd backend && uv run --extra parquet --extra equity server
 `ValueError` 로 죽는다 — 조용한 mock 폴백은 없다. 구현은
 `backend/src/strategy_workbench/bootstrap/_http.py` 의 `runtime_equity_selection()`,
 회귀 테스트는 `backend/tests/test_http_equity_env.py`.
+
+**기동 뒤 부팅 로그 경고** — duckdb 어댑터는 아래 경우에 뜨기는 하되 로그에 경고를 남긴다. 코드는 경고
+문장 안 괄호에 있다.
+- `catalog_columns_missing` — 옛 카탈로그라 매크로에 원천이 읽는 열이 없다(#233). 그 원천의 필드를
+  뺀다. 카탈로그를 다시 만든다(`ledger_sync catalog` 또는 `python -m equity … catalog`).
+- `catalog_macro_unreadable` — 매크로가 가리키는 parquet 가 빠졌거나 손상됐다(#245). 그 원천의 필드를
+  뺀다. `ledger_sync verify` 로 파일을 확인하고 카탈로그를 다시 만든다.
+- `profile_lag_fallback` — `dataset_profile` 에 랙 행이 없는 필드를 폴백 랙으로 읽는다(#255). 필드는
+  빠지지 않는다. `dataset_profile` 을 받는다(`ledger_sync`).

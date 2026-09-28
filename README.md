@@ -34,9 +34,13 @@ npm run dev
 
 ```powershell
 cd backend
-uv sync
+uv sync --extra parquet --extra equity --extra llm
 uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
 ```
+
+extra 목록은 CI(`.github/workflows/ci.yml`)와 같다. `equity`는 실데이터 duckdb adapter, `llm`은 AI
+어시스턴트 공급자 SDK다. extra를 빼고 `uv sync`를 다시 돌리면 설치해 둔 extra 패키지와
+`maturin develop`로 넣은 Rust 확장이 함께 빠지므로, 그때는 위 두 줄을 다시 실행한다.
 
 ## 현재 제품 범위
 
@@ -47,6 +51,11 @@ uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release
 | 팩터 그래프, TargetTape와 노드별 중간 결과 추적             | 구현 완료                                                        |
 | Python reference·Persistent Rust 백테스트와 전문 결과 화면  | 구현 완료                                                        |
 | 전략·리비전·백테스트 이력과 실행 provenance                 | 구현 완료                                                        |
+| 실행 설정 패널(시장·기간·유니버스·체결·비용)                | 구현 완료. schema 1.2부터 전략 문서 밖에서 실행마다 정한다       |
+| schema 1.2 업그레이더                                       | 구현 완료. 1.0·1.1 문서를 1.2로 옮긴다                           |
+| AI 어시스턴트                                               | 구현 완료. 설정 화면에서 공급자 연결, 전략 화면 채팅에서 제안 적용 |
+| 백테스트 결과 AI 설명                                       | 구현 완료. 결과 화면 사이드바에서 결과와 지표를 쉬운 말로 설명   |
+| 그래프 표현(파이프라인·레시피·노드 캔버스)                  | 후속. strategy-language-2-0 P4~P6                                |
 | 실제 시장 DB                                                | 카엘 서버 equity 층을 `ledger_sync`로 로컬에 받아 duckdb 어댑터로 연결(기본은 PIT mock adapter) |
 | 배포·실시간·주문·운영 리스크                                | 자동매매 확장을 위한 `향후` 경계이며 아직 실제 주문 기능이 아님  |
 
@@ -55,6 +64,8 @@ JSON/Diff는 같은 compile 결과의 read-only projection이고, Form과 Graph�
 projection 위에서 source 트랜잭션으로 YAML을 고치는 편집기다(주석·순서 보존, undo 한 번). frontend가
 전략 의미나 `spec_hash`를 별도로 계산하지 않는다. 실제 배포는 편집 중 draft가 아닌
 `strategy_id + revision + spec_hash` 참조만 허용하는 방향으로 확장한다.
+schema 1.2부터 시장·기간·유니버스·체결·비용은 전략 문서가 아니라 실행 요청의 `RunEnvironment`(실행
+설정)가 소유한다. 실행 설정을 바꿔도 `spec_hash`와 revision은 그대로이고 `environment_hash`만 달라진다.
 
 ## 구조
 
@@ -69,25 +80,55 @@ backend/
 ├─ benchmarks/              # 성능 측정 baseline
 └─ reference/               # 2026-08-17 설계·Zipline 관찰 아카이브
 frontend/                   # workbench UI: FSD app→pages→widgets→features→entities→shared
-docs/                       # 공용 설계·로드맵·리포트
+docs/
+├─ manual/                  # 사용자 매뉴얼
+├─ planning/                # initiative 기획 패키지(WORKFLOW·PLAN)
+├─ product/user-stories/    # 페르소나·유저 스토리 하네스
+└─ superpowers/             # 설계 spec·ADR·로드맵, 구현 플랜, 스파이크
+tools/quant_study_dev/      # 루트 개발 명령: `uv run server`, 유저 스토리 검사(user_story_trace), 병합 충돌 표식 검사(conflict_markers)
 database/                   # 원장 수집(KRX·키움·KIS·DART·WISE)·stage·equity 파이프라인 + 서버 SFTP 동기화(ledger_sync) — src·docs·tests 추적, data/·logs/ 는 git 제외
 workspace/         # 개인 작업 공간 workspace/<이름>/ — docs·src 추적, data/·logs/ 는 git 제외
 ```
 
-Strategy Workbench의 전체 계획과 체크리스트는
-[Strategy Workbench 구현 로드맵](docs/superpowers/specs/2026-09-03-strategy-workbench-roadmap.md)에 있다.
-YAML-first authoring 전환은 완료됐으며 계약은
-[Strategy Authoring Contract ADR](docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md),
-PR 진행은 [docs/planning/strategy-workbench-yaml-ui/PLAN.md](docs/planning/strategy-workbench-yaml-ui/PLAN.md)가
-완료 상태를 추적한다. 전략 작성 화면의 YAML source와 JSON/Form/Graph/Diff projection은 같은
-StrategySpec 계약을 사용한다. Parameter Search는 이 route 위에 연결할 후속 milestone이다.
+전략 작성 화면의 YAML source와 JSON/Form/Graph/Diff projection은 같은 StrategySpec 계약을 사용한다.
+Parameter Search는 이 route 위에 연결할 후속 milestone이다.
 Equity 층은 `backend`의 duckdb outbound adapter(`STRATEGY_WORKBENCH_EQUITY_ADAPTER=duckdb`)가 읽고,
 환경변수를 주지 않으면 같은 application port를 구현하는 PIT mock adapter로 뜬다. 실데이터 연결 절차는
 아래 [실데이터 연결](#실데이터-연결) 절 참고.
 
+## 문서 색인
+
+Strategy Workbench의 전체 계획과 체크리스트는
+[Strategy Workbench 구현 로드맵](docs/superpowers/specs/2026-09-03-strategy-workbench-roadmap.md)이
+소유한다. 작성 계약의 출발점은
+[Strategy Authoring Contract ADR](docs/superpowers/specs/2026-09-04-strategy-authoring-contract-adr.md)이다.
+
+기획 패키지는 initiative마다 WORKFLOW(PR scope)와 PLAN(진행 상태의 단일 기준)을 둔다.
+
+| 기획 패키지                                                                           | 범위                                         | 상태                  |
+| ------------------------------------------------------------------------------------- | -------------------------------------------- | --------------------- |
+| [strategy-workbench-yaml-ui](docs/planning/strategy-workbench-yaml-ui/README.md)     | YAML-first Strategy Workbench 문서 IDE       | 완료                  |
+| [strategy-gui-editing](docs/planning/strategy-gui-editing/README.md)                 | schema 1.1, Form/Graph 편집                  | 완료                  |
+| [ai-assistant](docs/planning/ai-assistant/README.md)                                 | AI 어시스턴트, 백테스트 결과 AI 설명         | 완료                  |
+| [strategy-language-2-0](docs/planning/strategy-language-2-0/README.md)               | schema 1.2, 실행 설정, 그래프 표현           | 진행 중 (다음 P3-03)  |
+
+설계 spec:
+
+- [schema 1.1 · GUI 편집](docs/superpowers/specs/2026-09-17-strategy-schema-1-1-and-gui-editing-design.md)
+- [AI 어시스턴트](docs/superpowers/specs/2026-09-20-ai-assistant-design.md)
+- [전략 언어 2.0(schema 1.2 · 그래프 표현)](docs/superpowers/specs/2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md)
+- [AI 백테스트 결과 설명](docs/superpowers/specs/2026-09-27-ai-backtest-result-explain.md)
+
+제품과 사용자:
+
+- [사용자 매뉴얼](docs/manual/strategy-workbench/README.md): 화면을 따라가는 사용법
+- [유저 스토리 하네스](docs/product/user-stories/README.md): 페르소나 세 명의 스토리와 e2e 추적.
+  모든 개발의 기준선이다(`.claude/rules/user-story-harness.md`).
+
 ## 설계 아티팩트 요약
 
-원본은 [백테스트 엔진 설계 노트](https://claude.ai/code/artifact/d1124798-840e-4282-a945-8317e4b7066d?org=20cfa914-bd88-4167-936b-209dd561dfb7)다.
+원본은 [백테스트 엔진 설계 노트](https://claude.ai/code/artifact/d1124798-840e-4282-a945-8317e4b7066d?org=20cfa914-bd88-4167-936b-209dd561dfb7)이고,
+저장소 사본은 [backend/reference/sangmok/result/html/index.html](backend/reference/sangmok/result/html/index.html)이다.
 Zipline 사용법 자체보다 커스텀 엔진을 만들기 전에 전략 I/O 계약, 책임 경계,
 Capability 협상과 향후 Rust 포팅 경계를 고정한 구현 전 설계 기준이다.
 
@@ -159,9 +200,9 @@ Requirements → Capability 검증 → StrategyEvent + 읽기 전용 Context
 
 ```bash
 cd backend
-uv sync --extra parquet             # 의존성 설치 (Python 3.11+, pyarrow 포함)
+uv sync --extra parquet --extra equity --extra llm   # 의존성 설치 (Python 3.11+, CI와 같은 extra)
 uv run pytest                       # 엔진 + Strategy Workbench 테스트
-uv run ruff check src tests examples scripts
+uv run ruff check src tests examples scripts tools
 uv run pyright
 uv run python examples/run_demo.py      # PyKRX CSV(005930)로 골든크로스 백테스트
 uv run python examples/run_krx_demo.py  # KRX 원장 parquet 슬라이스로 동일 전략 실행
@@ -199,13 +240,18 @@ npm run dev
 카엘 서버의 equity 층(29표, 현재 빌드 약 1.5GB)을 SFTP 읽기 전용 계정으로 로컬에 받아 워크벤치와
 엔진이 읽는다. 절차·판단 기준의 정본은 [database/docs/LEDGER_SYNC.md](database/docs/LEDGER_SYNC.md)다.
 
+먼저 두 가지를 준비한다. 서버 주소와 SFTP 계정은 저장소에 두지 않으므로 `setx QL_SYNC_HOST <주소>`·
+`setx QL_SYNC_USER <계정>`으로 사용자 환경변수에 한 번 넣는다(새 창부터 적용, 계정은 서버 운영자에게
+받는다). 빠지면 `sync`가 접속 전에 `error: server host is not set` 또는 `error: server user is not set`으로
+끝난다. 동기화 래퍼는 backend 환경의 duckdb를 쓰므로 위 [바로 실행](#바로-실행)의 `uv sync`처럼
+`equity` extra를 설치해 둔다.
+
 ```powershell
 # 1) 전량 수신 + 판본·파일·내용 검증 + 카탈로그 재생성 (~/quant-ledger/data/equity)
 database\scripts\ledger_sync.ps1 sync
 
 # 2) 매일 10:00 KST 증분 동기화 등록(서버 아침 확정판 뒤). 판본이 바뀐 표만 받고 같은 파티션은 재사용한다
-database\scripts
-egister_daily_sync.ps1
+database\scripts\register_daily_sync.ps1
 
 # 3) 워크벤치를 실데이터로 기동
 $env:STRATEGY_WORKBENCH_EQUITY_ADAPTER = "duckdb"
@@ -219,6 +265,10 @@ uv run server
 `$env:E2E_REAL_EQUITY_ROOT = <루트>; npm run test:e2e`로 돌린다(변수가 없으면 mock 릴리스 게이트만 돈다,
 `frontend/e2e/README.md`). 실데이터 security_id는 `{ticker}:{span_seq}`(예: `005930:1`)이며 실행 설정의
 벤치마크는 비우면 벤치마크 없이 실행한다.
+
+기동 뒤에는 서버 로그의 부팅 경고를 한 번 본다. `catalog_columns_missing`·`catalog_macro_unreadable`은 그
+원천의 필드를 빼고 떴다는 뜻이라 카탈로그를 다시 만들고(`ledger_sync catalog`), `profile_lag_fallback`은
+`dataset_profile`이 없거나 행이 빠져 폴백 랙으로 읽는다는 뜻이라 `sync`로 그 표를 받는다(LEDGER_SYNC §5).
 
 ## 검증: Zipline 대조
 
@@ -256,11 +306,12 @@ uv run server
 | `code-style.md`               | `**/*.py`                            | 기존 헬퍼 재사용, 기능/정리 커밋 분리, ruff·pyright 게이트, 네이밍 |
 | `python.md`                   | `**/*.py`                            | 성공/실패는 튜플 대신 Result 값 타입으로                           |
 | `error-messages.md`           | `**/*.py`                            | 예외·로그에 재현 가능한 컨텍스트 포함                              |
-| `testing.md`                  | `backend/tests/`, `backend/scripts/` | 산출물 파일 존재/내용을 단언하는 테스트 금지                       |
+| `testing.md`                  | `{backend,database}/{tests,scripts}/`, `tools/tests/` | 산출물 파일 존재/내용을 단언하는 테스트 금지, 런타임 상태 경로 격리 |
 | `pr-review.md`                | 전체                                 | PR 본문 양식, 결함 보고 4요소                                      |
 | `collaboration-language.md`   | 전체                                 | 코드 주석·Issue·PR 한글 작성 규칙의 단일 정본                      |
 | `backend-package-boundary.md` | `backend/**/*.py`                    | 헥사고날 방향, facade, `DEPENDS_ON`, mock adapter 경계             |
-| `strategy-workbench-sot.md`   | `backend/`, `frontend/`              | 전략·팩터·지표·상태의 단일 owner                                   |
+| `strategy-workbench-sot.md`   | `backend/`, `frontend/`, `database/src/equity/`, 관련 spec·기획 패키지 | 전략·팩터·지표·상태의 단일 owner |
+| `user-story-harness.md`       | `backend/`, `frontend/`, `docs/{product/user-stories,planning,manual}/` | 사용자 동작을 바꾸는 PR은 관련 유저 스토리와 e2e 태그를 같은 PR에서 갱신 |
 | `frontend-fsd.md`             | `frontend/src/`                      | FSD 단방향, slice 격리, public API                                 |
 | `frontend-api-state.md`       | frontend API/state                   | 생성 SDK, 서버·draft·UI 상태 소유권                                |
 | `frontend-ui-quality.md`      | frontend UI                          | primitive, token, 접근성, i18n, raw metric                         |

@@ -95,11 +95,14 @@ const ko = {
   "backtest.settings.problem.name.initial_cash": "초기 자본",
   "backtest.settings.problem.name.annualization_days": "연환산 거래일",
   "backtest.settings.problem.name.oos_out_of_range": "OOS 시작일",
+  "backtest.settings.problem.name.oos_incomplete": "OOS 시작일",
   "backtest.settings.error.initial_cash": "0보다 큰 숫자를 입력하세요.",
   "backtest.settings.error.annualization_days":
     "1 이상이고 정확히 전송 가능한 정수를 입력하세요.",
   "backtest.settings.error.environment": "실행 환경 칸을 모두 올바르게 채우세요.",
   "backtest.settings.error.oos_out_of_range": "실행 기간 안의 날짜여야 합니다.",
+  "backtest.settings.error.oos_incomplete":
+    "연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
   "backtest.actions.title": "백테스트 실행 제어",
   "backtest.actions.cancel": "실행 취소",
   "backtest.actions.cancelling": "취소 요청됨",
@@ -1767,11 +1770,14 @@ export const messages = {
     "backtest.settings.problem.name.initial_cash": "Initial capital",
     "backtest.settings.problem.name.annualization_days": "Annualization sessions",
     "backtest.settings.problem.name.oos_out_of_range": "OOS start date",
+    "backtest.settings.problem.name.oos_incomplete": "OOS start date",
     "backtest.settings.error.initial_cash": "Enter a number greater than 0.",
     "backtest.settings.error.annualization_days":
       "Enter a losslessly representable integer of at least 1.",
     "backtest.settings.error.environment": "Fill every run environment field correctly.",
     "backtest.settings.error.oos_out_of_range": "Must be a date inside the run period.",
+    "backtest.settings.error.oos_incomplete":
+      "Enter the full year, month and day. Leave it empty to run without an OOS window.",
     "backtest.actions.title": "Backtest run controls",
     "backtest.actions.cancel": "Cancel run",
     "backtest.actions.cancelling": "Cancellation requested",

@@ -285,12 +285,21 @@ export const BacktestRunSettings = ({
               type="date"
               min={DATE_INPUT_MINIMUM}
               max={DATE_INPUT_MAXIMUM}
-              data-run-field="oos_out_of_range"
+              data-run-field="oos_start"
               aria-invalid={
-                optionErrors.has("oos_out_of_range") ? true : undefined
+                optionErrors.has("oos_out_of_range") ||
+                optionErrors.has("oos_incomplete")
+                  ? true
+                  : undefined
               }
               value={fields.oosStart}
-              onChange={(event) => setField("oosStart", event.target.value)}
+              onChange={(event) => {
+                setField("oosStartIncomplete", isIncompleteDate(event));
+                setField("oosStart", event.target.value);
+              }}
+              onBlur={(event) =>
+                setField("oosStartIncomplete", isIncompleteDate(event))
+              }
             />
             <small className="backtest-settings__hint">
               {t("backtest.settings.oosStart.hint")}

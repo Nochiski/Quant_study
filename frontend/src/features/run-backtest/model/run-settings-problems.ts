@@ -37,6 +37,17 @@ const boundOf = (
   return null;
 };
 
+/** 실행 옵션 오류 → 그 칸의 `data-run-field`. OOS 시작일 칸 하나에 오류 두 가지가 걸린다. */
+const OPTION_FIELD: Record<
+  Exclude<BacktestRunSettingsError, "environment">,
+  string
+> = {
+  initial_cash: "initial_cash",
+  annualization_days: "annualization_days",
+  oos_out_of_range: "oos_start",
+  oos_incomplete: "oos_start",
+};
+
 /** 칸 옆 오류 문장. 범위에는 스키마의 표시 단위를 붙인다(예: "0bp 이상이어야 합니다."). */
 export const runEnvironmentErrorMessage = (
   field: RunEnvironmentField,
@@ -105,7 +116,7 @@ export const runSettingsProblems = (
     .map((error): RunSettingsProblem => {
       const name = runOptionErrorName(error);
       return {
-        target: error,
+        target: OPTION_FIELD[error],
         kind: "invalid",
         name,
         sentence: t("backtest.settings.problem.invalid")

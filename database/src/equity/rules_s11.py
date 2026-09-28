@@ -67,6 +67,36 @@ CORRECTION_PREFIXES: tuple[str, ...] = ("기재정정", "첨부정정")
 FIN_ITEM_KEYWORDS: tuple[str, ...] = ("재무제표", "재무상태표", "손익계산서", "현금흐름표",
                                       "자본변동표", "요약재무")
 
+# ── 최근 창 정정 파싱률 (서식 드리프트 감지, 2026-09-28) ──────────────────────
+# DART 정정신고 첫 장 서식이 2025년에 바뀌어 `stg_doc_correction` 의 `filed_date` 파싱이 조용히
+# 무너졌다(2025년 96.6% · 2026년 99.1% 가 NULL, `parsers_doc` p1.4 → p1.5 로 수리). 사다리 L5
+# `n_correction_filed_parsed` 는 **전 구간 누적**이라 최근 1년이 통째로 죽어도 비율이 거의 안
+# 움직인다 — 20개월을 아무도 못 봤다. 그래서 최근 창만 따로 재고, 창의 기준일(`asof`)은 산출의
+# `max(rcept_dt)` 로 잡는다: 오늘 날짜로 잡으면 과거 스냅샷 재빌드에서 창이 늘 비어 판정이 잠든다.
+CORR_RECENT_WINDOW_DAYS = 90
+# 표본이 이보다 얇으면 판정하지 않는다(기록형) — 연휴·부분 도착으로 몇 건만 든 창이 폐기를 부른다.
+CORR_RECENT_MIN_N = 50
+# 서식이 통째로 바뀐 수준. 이 아래면 폐기(FAIL).
+CORR_RECENT_FAIL_RATIO = 0.5
+# 0.5 ≤ 비율 < 0.9 는 경고선이지만 `GateStatus` 에 WARN 이 없어(PASS·FAIL·SKIP 셋뿐) 기록형
+# `corr_recent_parse_warn` 으로만 남긴다 — WARN 을 새로 만들면 전 게이트의 판정 축이 바뀐다.
+CORR_RECENT_WARN_RATIO = 0.9
+
+
+def corr_recent_sql(view: str, *, only_parsed: bool) -> str:
+    """최근 창 안에서 ZIP 정정신고 첫 장이 있는 정정 건수(`only_parsed` 면 파싱 성공분).
+
+    `page_found`·`filed_date_status` 는 산출 컬럼이 아니라 **stage 축**이다 — 산출이 만들지 않은
+    축으로 재야 항진명제가 아니다(GATES §5-C 규약). `stg_doc_correction` 은 `key_unique=True` 라
+    JOIN 으로 팬아웃이 없다(`.sql` 의 `corr` CTE 와 같은 근거).
+    """
+    parsed = " AND c.filed_date_status = 'parsed'" if only_parsed else ""
+    return (f'SELECT count(*) FROM "{view}" o JOIN stg_doc_correction c '
+            "ON c.rcept_no = o.rcept_no WHERE o.is_correction AND c.page_found "
+            f"AND date_diff('day', o.rcept_dt, (SELECT max(rcept_dt) FROM \"{view}\")) "
+            f"BETWEEN 0 AND {CORR_RECENT_WINDOW_DAYS}{parsed}")
+
+
 # ── 모집단 SQL 재사용 (sql/disclosure_version.sql 의 periodic CTE 까지) ────────
 _POPULATION_MARKER = "-- ==== eg1:"
 
@@ -153,6 +183,12 @@ def _f(ctx: EquityGateContext, sql: str) -> float | None:
     return float(str(row[0]))
 
 
+def _asof(ctx: EquityGateContext, view: str) -> object:
+    """최근 창의 기준일 — 산출의 `max(rcept_dt)`. 행이 없으면 None."""
+    row = ctx.con.execute(f'SELECT max(rcept_dt) FROM "{view}"').fetchone()
+    return None if row is None else row[0]
+
+
 def _vocab_sql(values: tuple[str, ...]) -> str:
     return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
 
@@ -175,6 +211,11 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
     `_measured` 참조값이고 게이트가 비교하지 않는다 — 접수는 매일 늘어난다.
     """
     v = ctx.out_view
+    recent_page = _n(ctx, corr_recent_sql(v, only_parsed=False))
+    recent_parsed = _n(ctx, corr_recent_sql(v, only_parsed=True))
+    recent_ratio = (recent_parsed / recent_page) if recent_page else None
+    recent_drift = (recent_page >= CORR_RECENT_MIN_N and recent_ratio is not None
+                    and recent_ratio < CORR_RECENT_FAIL_RATIO)
     ladder_stage = {name: _n(ctx, sql) for name, sql in LADDER}
     ladder_out = {name: _n(ctx, sql.format(v=v)) for name, sql in LADDER_OUT}
     # 격리 행(rcept_dt 결측)은 산출에서 빠지므로 L1 만 격리 수를 되돌려 비교한다.
@@ -242,6 +283,9 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
                  f"(corr_prefix IN ({_vocab_sql(CORRECTION_PREFIXES)}))"),
         "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                            "WHERE available_date IS DISTINCT FROM rcept_dt"),
+        # 최근 창 정정 파싱률 — 표본 CORR_RECENT_MIN_N 이상이고 비율이 CORR_RECENT_FAIL_RATIO
+        # 미만일 때만 폐기한다(서식 드리프트). 그 밖에는 0 이고 비율은 metrics 로 남는다.
+        "n_corr_recent_parse_drift": 1 if recent_drift else 0,
     }
     metrics: dict[str, object] = {
         "ladder_stage": ladder_stage, "ladder_out": ladder_out,
@@ -265,6 +309,16 @@ def eg3_disclosure_version(ctx: EquityGateContext) -> GateResult:
         "max_prior_corr_count": _n(ctx, f'SELECT coalesce(max(prior_corr_count), 0) FROM "{v}"'),
         "reject_by_reason": dict(ctx.reject_by_reason),
         "fin_item_keywords": list(FIN_ITEM_KEYWORDS),
+        "corr_recent_asof": str(_asof(ctx, v)),
+        "corr_recent_window_days": CORR_RECENT_WINDOW_DAYS,
+        "n_corr_recent_page": recent_page,
+        "n_corr_recent_parsed": recent_parsed,
+        "corr_recent_parse_ratio": recent_ratio,
+        "corr_recent_min_n": CORR_RECENT_MIN_N,
+        "corr_recent_fail_ratio": CORR_RECENT_FAIL_RATIO,
+        # WARN 상태가 없어 기록형으로 남기는 경고선 (0.5 ≤ 비율 < 0.9 도 True)
+        "corr_recent_parse_warn": (recent_ratio is not None
+                                   and recent_ratio < CORR_RECENT_WARN_RATIO),
     }
     bad = {k: n for k, n in checks.items() if n}
     merged: dict[str, object] = {**checks, **metrics}
@@ -424,9 +478,10 @@ TABLES: tuple[EquityTable, ...] = (DISCLOSURE_VERSION,)
 BASELINE_SEED = Path(__file__).parent / "baseline_seed_s11.json"
 """이 슬라이스가 요구하는 상수의 초기값(절단본 실측). 승인 뒤 `baseline.json` 에 병합한다."""
 
-__all__ = ["BASELINE_SEED", "CANDIDATE_STATUS_VOCAB", "CORRECTION_PREFIXES", "DATE_CHECK_VOCAB",
-           "POPULATION_DUP_SQL",
+__all__ = ["BASELINE_SEED", "CANDIDATE_STATUS_VOCAB", "CORRECTION_PREFIXES",
+           "CORR_RECENT_FAIL_RATIO", "CORR_RECENT_MIN_N", "CORR_RECENT_WARN_RATIO",
+           "CORR_RECENT_WINDOW_DAYS", "DATE_CHECK_VOCAB", "POPULATION_DUP_SQL",
            "DATE_CHECK_UNMEASURED", "DISCLOSURE_VERSION", "EXCLUDED_TOKENS",
            "FIN_ITEM_KEYWORDS", "GROUP_KEY_BASIS_VOCAB", "KIND_VOCAB", "LADDER", "LADDER_OUT",
            "LINKED_STATUS", "LINK_BASIS_VOCAB", "PERIODIC_PREFIXES", "REJECT_REASONS", "TABLES",
-           "population_sql"]
+           "corr_recent_sql", "population_sql"]

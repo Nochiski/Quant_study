@@ -525,3 +525,80 @@ def test_문서층이_뒤처진_정정은_no_page가_아니라_not_parsed다(
     g3 = _gate(r, "EG3_disclosure_version")
     assert g3.status is GateStatus.PASS
     assert g3.metrics["n_date_check_material_mismatch"] == 0
+
+
+# ── 최근 창 정정 파싱률(서식 드리프트 감지, 2026-09-28) ──────────────────────
+
+
+def test_최근_창_정정_파싱률은_절단본에서_기록형이다(built: build.BuildResult) -> None:
+    """절단본의 최근 90일 정정은 1건(2026-08-31)이고 그 1건이 `unparsed` 다 — 2025 서식 드리프트.
+
+    표본이 `CORR_RECENT_MIN_N` 미만이면 판정하지 않는다(기록형). 비율은 그래도 남는다.
+    """
+    m = _gate(built, "EG3_disclosure_version").metrics
+    assert (m["n_corr_recent_page"], m["n_corr_recent_parsed"]) == (1, 0)
+    assert m["corr_recent_parse_ratio"] == 0.0
+    assert m["corr_recent_asof"] == "2026-08-31" and m["corr_recent_window_days"] == 90
+    assert m["n_corr_recent_parse_drift"] == 0        # 표본 1건 < 50 → 기록만
+    assert _gate(built, "EG3_disclosure_version").status is GateStatus.PASS
+
+
+def _drift_rows(n_corr: int, n_parsed: int) -> tuple[list[dict[str, object]],
+                                                     list[dict[str, object]]]:
+    """법인 n_corr 개 × (원본 1 + 정정 1). 정정은 전부 최근 창 안이고 앞 n_parsed 건만 파싱 성공."""
+    disclosures: list[dict[str, object]] = [
+        # `_build_hand` 의 EG4 손 픽스처가 이 접수번호를 본다
+        _disclosure("20200101000001", date(2020, 3, 30), "00099999",
+                    "사업보고서 (2019.12)", False),
+    ]
+    corrections: list[dict[str, object]] = []
+    for i in range(n_corr):
+        corp = f"{i:08d}"
+        orig = f"202603010{i:05d}"
+        corr = f"202607010{i:05d}"
+        disclosures.append(_disclosure(orig, date(2026, 3, 30), corp,
+                                       "사업보고서 (2025.12)", False, rm=True))
+        disclosures.append(_disclosure(corr, date(2026, 7, 15), corp,
+                                       "[기재정정]사업보고서 (2025.12)", True))
+        if i < n_parsed:
+            corrections.append(_correction(corr, date(2026, 3, 30)))
+        else:
+            corrections.append(_correction(corr, None, status="unparsed"))
+    return disclosures, corrections
+
+
+def test_최근_창_정정_파싱률이_절반_아래면_EG3_가_폐기한다(make_stage_tree,
+                                                        tmp_path: Path) -> None:
+    """서식이 통째로 바뀐 수준(20/60 = 0.333) — 표본 50건 이상이면 폐기형."""
+    disclosures, corrections = _drift_rows(60, 20)
+    r = _build_hand(make_stage_tree, tmp_path, disclosures, corrections)
+    g = _gate(r, "EG3_disclosure_version")
+    assert g.status is GateStatus.FAIL and "n_corr_recent_parse_drift=1" in g.detail
+    assert (g.metrics["n_corr_recent_page"], g.metrics["n_corr_recent_parsed"]) == (60, 20)
+    assert round(float(str(g.metrics["corr_recent_parse_ratio"])), 5) == 0.33333
+    assert g.metrics["corr_recent_parse_warn"] is True
+    assert not r.ok
+
+
+def test_최근_창_파싱률이_경고선_아래면_기록만_한다(make_stage_tree, tmp_path: Path) -> None:
+    """0.5 ≤ 비율 < 0.9 는 경고선 — `GateStatus` 에 WARN 이 없어 기록형으로만 남긴다."""
+    disclosures, corrections = _drift_rows(60, 40)
+    r = _build_hand(make_stage_tree, tmp_path, disclosures, corrections)
+    g = _gate(r, "EG3_disclosure_version")
+    assert g.status is GateStatus.PASS and r.ok
+    assert g.metrics["corr_recent_parse_warn"] is True
+    assert g.metrics["n_corr_recent_parse_drift"] == 0
+
+
+def test_최근_창_파싱률이_정상이면_경고도_없다(make_stage_tree, tmp_path: Path) -> None:
+    disclosures, corrections = _drift_rows(60, 55)
+    r = _build_hand(make_stage_tree, tmp_path, disclosures, corrections)
+    g = _gate(r, "EG3_disclosure_version")
+    assert g.status is GateStatus.PASS and r.ok
+    assert g.metrics["corr_recent_parse_warn"] is False
+    assert g.metrics["n_corr_recent_parse_drift"] == 0
+
+
+def test_최근_창_상수_선언() -> None:
+    assert (rules_s11.CORR_RECENT_WINDOW_DAYS, rules_s11.CORR_RECENT_MIN_N) == (90, 50)
+    assert (rules_s11.CORR_RECENT_FAIL_RATIO, rules_s11.CORR_RECENT_WARN_RATIO) == (0.5, 0.9)

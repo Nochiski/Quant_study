@@ -221,3 +221,14 @@ FY2025 `capex_basis`: standard 2,320 · ppe_parts 203 · none_in_cf 104 · ppe_i
 **조치**: ① 파서(`parsers_doc.correction_page`)를 줄 배치에 무관하게(같은 줄이 비면 다음 줄, 정정사유는 항목 열에서 합성) 고치고 `PARSER_VERSION` p1.4 → p1.5 ② 프리패스에 접수번호 목록 재파싱 경로(전량 4.5h 대신 2,400건만) ③ S11 게이트에 최근 90일 파싱 성공률(≥50건에서 <0.5 FAIL, 기록형 비율) ④ B-40(1·3분기 판정 3개월 가정) TECH_DEBT 등재.
 
 **게이트 GT-F**: (1) 파서 단위 테스트(2025 배치 2종·옛 배치 불변) (2) 서버: 미파싱 2,392건 재파싱 뒤 2025~2026 파싱 성공률 **≥ 95%**, 2024 이전 행 전건 불변 (3) `disclosure_version` 재빌드 뒤 2025~2026 `date_check` exact ≥ 90%(no_zip 제외), `candidate_status` 분포 불변 (4) 전체 테스트 통과. 서버 절차는 09-29 아침 GB3 뒤 T-E 와 함께.
+
+**T-F 코드 완료(09-28, 커밋 아래) — 서버 절차(09-29 아침, GB3 뒤)**
+```bash
+cd /home/kael/quant-ledger; SNAP=<09-29 아침 확정 빌드의 snapshot-id>
+# 1) 재파싱 대상 = 캐시에서 정정 표지가 있는 접수 전부(≈17,600) — 미파싱 2,392 만 골라도 되지만 parser p1.5 일관성을 위해 전부
+.venv/bin/python -c "import json,pathlib,sys; r=pathlib.Path('data/stage/_tmp/doc/%s/stg_doc_correction'%sys.argv[1]); print('\n'.join(sorted({json.loads(l)['rcept_no'] for f in r.glob('year=*.jsonl') for l in f.open(encoding='utf-8') if l.strip()})))" $SNAP > /tmp/corr_$SNAP.txt
+# 2) 표적 재파싱(≈30분): PYTHONPATH=src .venv/bin/python -m stage.doc_prepass --snapshot-id $SNAP --repair /tmp/corr_$SNAP.txt --workers 3
+# 3) 문서층 4표: scripts/run_stage_all.sh $SNAP stg_doc_meta stg_doc_section stg_doc_correction stg_doc_parse_log
+# 4) S11: scripts/run_equity.sh disclosure_version
+```
+GT-F(2) 의 "2024 이전 행 불변" 은 `filed_date`·`target_raw` 기준이다 — `reason_raw` 는 옛 서식에서도 비어 있던 행이 항목 열로 채워질 수 있다(NULL→값만 허용). 대조 사본 `logs/tf_before_corr.parquet`(17,618행, 판 m_20260924T035856). 후속: 서버 재파싱 뒤 절단본 픽스처 `tests/fixtures/stage_slice` 의 정정 6건(p1.4)을 다시 떠서 S11 최근 창 단언 3개·`DATE_CHECK` 갱신.

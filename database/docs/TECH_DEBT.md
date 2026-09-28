@@ -1095,3 +1095,15 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **인풋**: 워크벤치·엔진이 `dataset_profile.recommended_lag_sessions` 를 실제로 적용하는지 미확인.
 - **에러 위치**: `src/equity/rules_s10.py`(선언) vs 소비 측 어댑터의 lag 적용 코드.
 - **위험성**: look-ahead 잔존 가능. 조치: 어댑터가 lag 를 읽어 필터하는지 확인, 안 하면 `available_date` 를 `deal_date + 3세션` 파생으로 바꾸는 규칙 변경 검토.
+
+## 2026-09-28 T-F(정정 첫 장 2025 서식) 에서 분리한 항목
+
+### B-40: `fin_std` 의 1분기/3분기 판정이 "기간 3개월 이하" 라서 4~5개월 첫 분기를 3분기로 적는다
+- **상황**: `doc_acode='11013'`(1분기·3분기 공용 코드)으로 들어온 분기보고서 중 **첫 분기 기간이 3개월이 아닌** 것. 신규 상장·신설 법인의 첫 분기(설립일 ~ 분기말 4~5개월)와 결산월을 바꾼 법인의 과도기 분기가 그렇다. 서버 실측 2016~2025 채택 행 **25건**.
+- **인풋**:
+  1. `stg_doc_meta` 에 `period_from=2021-11-01` · `period_to=2022-03-31`(5개월) · `doc_acode='11013'` 인 main 멤버가 있는 접수 1건.
+  2. `scripts/run_equity.sh fin_std` → `report_code` 산출.
+- **에러 위치**: `src/equity/sql/fin_std.sql:287-291` — `WHEN date_diff('month', h.period_from, h.period_to) + 1 <= k.quarter_months THEN '11013' ELSE '11014'`. 기간 **길이**만 보고 회계연도 안의 **위치**를 보지 않는다. 문서 머리말(같은 파일 23-24행)도 같은 규칙을 정본으로 적고 있다.
+- **위험성**: **silent corrupt**. 1분기 값이 3분기(`11014`) 라벨을 달고 실리면 ① 같은 (corp_code, bsns_year, '11014') 에 진짜 3분기가 오면서 `duplicate_vintage` 격리로 **양쪽 다 사라지거나**(행째 소실), 부딪히지 않으면 ② 3분기 누계로 읽혀 Q4 파생(`q4_*` = 사업보고서 − 3분기)과 CF 분기 파생(`cf_q_*`)이 **한 분기 어긋난 값**을 낸다 — 팩터 쪽에서는 부호가 뒤집힌 성장률로 나타난다. 어느 쪽도 게이트가 못 잡는다: `EG3_fin_std` 의 `n_fiscal_month_mismatch` 는 기록형이고, 25건은 EG7 전역 격리 비율에 묻힌다.
+- **조치(제안)**: 길이 대신 **회계연도 안의 위치**로 가른다. ① `period_to` 가 `corp.fiscal_month` 말일 + 3개월(= 회계연도 시작 + 3개월)이면 1분기, + 9개월이면 3분기 — `corp.fiscal_month` 는 현재값 스냅샷이라 결산월을 바꾼 법인은 문서 `period_from` 이 회계연도 시작과 같은지로 보조 판정한다. ② 또는 `period_from` = 회계연도 시작이면 1분기. 어느 쪽이든 `corp` 를 `fin_std` 입력으로 이미 고정하고 있어(후보 규칙이 `fiscal_month` 를 쓴다) 새 입력이 필요하지 않다. 바꾸면 기존 25건의 `report_code` 가 바뀌므로 EG5a 해시가 한 번 깨진다 — 재빌드 전후 건수 대조를 같이 남긴다.
+- **위치**: `src/equity/sql/fin_std.sql`, `src/equity/rules_s12.py`

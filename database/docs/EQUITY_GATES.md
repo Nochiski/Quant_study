@@ -2092,6 +2092,22 @@ workspace/dongmin/src/equity/
 | 모집단 dedup (서버 1차 빌드 FAIL, 09-06) | 모집단 = 정기보고서 접수 **행** 전건 | **접수번호당 1행**으로 접는다. `stg_disclosure` 는 `write_mode='append_only'` · `key_unique=False`(rules_dart.py — 재수집 판본이 G6 축) 라 같은 `rcept_no` 가 여러 행으로 쌓인다: 서버 실측 203건(정기보고서 안 26건, 중복 쌍은 투영 컬럼이 전부 같다). grain 이 `rcept_no` 인데 안 접으면 산출이 같은 행을 두 번 내고 EG1 이 그만큼 어긋난다(**서버 1차 빌드 198,189 vs count(DISTINCT rcept_no) 198,163, delta −26** → 폐기). 모집단 CTE 에 `QUALIFY row_number() OVER (PARTITION BY rcept_no ORDER BY observed_date …) = 1`(first_write_wins, EG6-P04 규약; 동률은 투영 컬럼 전체로 깨 EG5a 를 지킨다). EG1 우변도 `count(DISTINCT rcept_no)` 로 축을 맞추고, 접힌 수는 `n_population_dup_rcept`(기록형)로 남긴다. `stg_doc_index` 도 같은 규약이라 조인 전에 접는다(`idx` CTE); `stg_doc_correction` 은 `key_unique=True` 라 접지 않는다. 사다리·E-G7 의 stage 축도 `count(DISTINCT rcept_no)`·`EXISTS` 로 바꿔 팬아웃을 막았다 | 서버 빌드 로그 · `test_부정_재수집_판본이_모집단에_둘이면_한_행만_낸다` |
 | 상수 | 없음 | `deadline_days_annual` 90 · `deadline_days_interim` 45(법정) · `date_check_near_days` 7(어휘 경계). 뒤 하나는 SQL 숫자 리터럴 금지 규약(`test_sql파일에_상수_하드코딩_없음`)의 통로다 | `baseline_seed_s11.json` |
 
+**S11 최근 창 정정 파싱률 (2026-09-28 추가, `EG3_disclosure_version`)**
+
+DART 정정신고 첫 장 서식이 2025년에 바뀌어 `stg_doc_correction` 의 `target_raw`·`filed_raw`/`filed_date`·`reason_raw` 가 2025년 96.6% · 2026년 99.1% NULL 이 됐다(항목 표는 계속 파싱됐다). `date_check='exact'` 는 2024년 1,212 → 2025년 44 로 떨어졌고, 사다리 L5 `n_correction_filed_parsed` 는 **전 구간 누적**이라 최근 1년이 통째로 죽어도 거의 움직이지 않아 20개월 동안 아무도 못 봤다. 파서는 `parsers_doc` p1.4 → **p1.5** 로 수리했고(값이 앵커와 다른 셀에 있으면 다음 줄을 잇고, 사라진 `3. 정정사유` 앵커는 정정사항 표의 `정정사유` 열에서 유도) 같은 사고가 다시 조용히 지나가지 않도록 최근 창 지표를 붙였다.
+
+| 항목 | 정의 |
+|---|---|
+| 모집단 | 최근 창 안(`rcept_dt` 가 기준일에서 `CORR_RECENT_WINDOW_DAYS`=90일 이내)의 **정정 접수** 중 ZIP 정정신고 첫 장이 있는 것(stage `stg_doc_correction.page_found`) |
+| 분자 | 그중 `filed_date_status='parsed'` |
+| 기준일 | 산출의 `max(rcept_dt)`(metrics `corr_recent_asof`). 오늘 날짜로 잡으면 과거 스냅샷 재빌드에서 창이 늘 비어 판정이 잠든다 |
+| 판정 | 표본 ≥ `CORR_RECENT_MIN_N`(50) **그리고** 비율 < `CORR_RECENT_FAIL_RATIO`(0.5) 일 때만 **FAIL**(`n_corr_recent_parse_drift`=1). 표본이 얇으면(연휴·부분 도착) 기록만 한다 |
+| 경고선 | 비율 < `CORR_RECENT_WARN_RATIO`(0.9) 는 기록형 `corr_recent_parse_warn`=true. `stage.gates.GateStatus` 는 PASS·FAIL·SKIP 셋뿐이라 WARN 상태를 새로 만들지 않았다 — 만들면 전 게이트의 판정 축이 바뀐다 |
+| 기록형 metrics | `n_corr_recent_page` · `n_corr_recent_parsed` · `corr_recent_parse_ratio` · `corr_recent_asof` · `corr_recent_window_days` · `corr_recent_min_n` · `corr_recent_fail_ratio` · `corr_recent_parse_warn` |
+| 축 | `page_found`·`filed_date_status` 는 산출 컬럼이 아니라 **stage 축**이다(§5-C 규약 — 산출이 만들지 않은 축으로 재야 항진명제가 아니다). `stg_doc_correction` 은 `key_unique=True` 라 JOIN 팬아웃이 없다 |
+| 절단본 | 최근 창에 정정 1건(2026-08-31)·파싱 0 → 비율 0.0 이지만 표본 1 < 50 이라 PASS + 기록. 서식 드리프트가 절단본에도 실재한다(픽스처는 p1.4 판이라 재파싱 전까지 그대로) |
+| 테스트 | `test_equity_s11_disclosure.py::test_최근_창_*` 4건(절단본 기록형 · 20/60 폐기 · 40/60 경고만 · 55/60 정상) |
+
 **S12 `fin_std` 구현 정정 (2026-09-06, `rules_s12.py`)**
 
 | 항목 | 초안 | 정정 | 근거 |

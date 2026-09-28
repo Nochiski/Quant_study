@@ -275,8 +275,77 @@ def test_correction_page_from_td_cells_g3_and_anchored_date() -> None:
     root = _root(G3_HEAD.replace("{BODY}", CORR_G3_TD))
     c = pd_.correction_page(root)
     assert c is not None and c["filed_date"] == "20250312"     # 첫 날짜(제출일 표)가 아니라 앵커 뒤
-    assert c["reason_raw"] is None
+    # `3. 정정사유` 앵커가 없는 2025 서식이라 항목 열에서 유도한다(p1.5 전에는 NULL 이었다)
+    assert c["reason_raw"] == "착오"
     assert json.loads(c["items"] or "[]")[0]["정정요구ㆍ명령관련여부"] == "-"
+
+
+# 2025년 서식 — 값이 앵커 셀이 아니라 **다음 셀**에 있고, 정정사유는 항목별 열이 됐다(§1.7 2025).
+CORR_G3_2025 = ('<LIBRARY><CORRECTION><TITLE ATOC="Y">정 정 신 고 (보고)</TITLE>'
+                '<TABLE><TR><TD>2025 년 3 월 25 일</TD></TR>'
+                '<TR><TD>1. 정정대상 공시서류 :</TD><TD>사업보고서</TD></TR>'
+                '<TR><TD>2. 정정대상 공시서류의 최초제출일 :</TD><TD>{DATE}</TD></TR>'
+                '<TR><TD>3. 정정사항</TD></TR></TABLE>'
+                '<TABLE><TR><TH>항  목</TH><TH>정정요구ㆍ명령관련 여부</TH><TH>정정사유</TH>'
+                '<TH>정 정 전</TH><TH>정 정 후</TH></TR>'
+                '<TR><TD>VIII. 임원 및 직원 등에 관한 사항</TD><TD>아니오</TD><TD>기재내용정정</TD>'
+                '<TD>주1)</TD><TD>주2)</TD></TR>'
+                '<TR><TD>(첨부서류) 자기주식보고서</TD><TD>아니오</TD><TD>단순오기재</TD>'
+                '<TD>(정정 전)</TD><TD>(정정 후)</TD></TR></TABLE></CORRECTION></LIBRARY>')
+
+
+@pytest.mark.parametrize("raw,ymd", [("2024.03.20", "20240320"),
+                                     ("2024 년  8 월  14 일", "20240814"),
+                                     ("2024-03-20", "20240320")])
+def test_correction_page_2025_layout_reads_the_filed_date_from_the_next_cell(
+        raw: str, ymd: str) -> None:
+    root = _root(G3_HEAD.replace("{BODY}", CORR_G3_2025.replace("{DATE}", raw)))
+    c = pd_.correction_page(root)
+    assert c is not None
+    assert c["filed_date"] == ymd and c["filed_date_status"] == "parsed"
+    assert c["filed_raw"] == " ".join(raw.split())        # 수평 공백은 정제에서 접힌다
+    assert c["target_raw"] == "사업보고서"                  # 앵커와 값이 다른 셀로 쪼개졌다
+
+
+def test_correction_page_2025_layout_derives_the_reason_from_the_item_column() -> None:
+    root = _root(G3_HEAD.replace("{BODY}", CORR_G3_2025.replace("{DATE}", "2024.03.20")))
+    c = pd_.correction_page(root)
+    assert c is not None and c["n_items"] == "2"
+    # `3. 정정사유` 앵커가 사라지고 항목별 열이 됐다 → 서로 다른 값을 순서대로 이어 붙인다
+    assert c["reason_raw"] == "기재내용정정 | 단순오기재"
+
+
+def test_correction_page_2025_layout_deduplicates_the_derived_reason() -> None:
+    body = CORR_G3_2025.replace("{DATE}", "2024.03.20").replace("단순오기재", "기재내용정정")
+    c = pd_.correction_page(_root(G3_HEAD.replace("{BODY}", body)))
+    assert c is not None and c["reason_raw"] == "기재내용정정"
+
+
+def test_correction_page_next_line_is_never_the_following_anchor_or_the_item_header() -> None:
+    """값이 아예 없는 서식 — 다음 줄이 `2.`·`3.`·표 머리(`항  목`)면 집지 않는다."""
+    body = ('<LIBRARY><CORRECTION><TITLE ATOC="Y">정 정 신 고 (보고)</TITLE>'
+            '<TABLE><TR><TD>1. 정정대상 공시서류 :</TD></TR>'
+            '<TR><TD>2. 정정대상 공시서류의 최초제출일 :</TD></TR></TABLE>'
+            '<TABLE><TR><TH>항  목</TH><TH>정정사유</TH></TR>'
+            '<TR><TD>V. 감사의견</TD><TD>착오</TD></TR></TABLE></CORRECTION></LIBRARY>')
+    c = pd_.correction_page(_root(G3_HEAD.replace("{BODY}", body)))
+    assert c is not None
+    assert c["target_raw"] is None                    # 다음 줄이 `2.` 앵커
+    assert c["filed_raw"] is None and c["filed_date_status"] == "unparsed"   # 다음 줄이 표 머리
+    assert c["reason_raw"] == "착오"
+
+
+def test_correction_page_old_layout_output_is_byte_identical() -> None:
+    """≤2024 서식의 산출은 한 글자도 바뀌지 않는다 — 171k 문서를 다시 파싱해도 같은 행."""
+    c = pd_.correction_page(_root(G1_HEAD.replace("{BODY}", CORR_G1)))
+    assert c == {
+        "page_found": "true", "target_raw": "사업보고서", "filed_raw": "2020년 03월 30일",
+        "filed_date": "20200330", "filed_date_status": "parsed",
+        "reason_raw": "당기순이익 기재 오류", "n_items": "1",
+        "items": json.dumps([{"항목": "포괄손익계산서", "정정사유": "기재 오류",
+                              "정정전": "266,596,241", "정정후": "266,596,242"}],
+                            ensure_ascii=False),
+        "corr_text_chars": c["corr_text_chars"]}
 
 
 def test_correction_page_absent_unparsed_and_calendar_invalid_dates() -> None:

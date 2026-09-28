@@ -20,7 +20,11 @@ from html.parser import HTMLParser
 
 from .doc_vocab import DocVocab
 
-PARSER_VERSION = "p1.4"     # 정제·파싱 규칙이 바뀌면 올린다 — 프리패스 summary.json 에 기록
+# 정제·파싱 규칙이 바뀌면 올린다 — 프리패스 summary.json 에 기록.
+# p1.5(2026-09-28): 정정신고 첫 장 2025년 서식. 값이 앵커와 **다른 셀·다른 줄**로 갈라졌고
+#   (`2. …최초제출일 :` 다음 줄에 `2024.03.20`), `3. 정정사유` 앵커가 사라져 정정사유가
+#   정정사항 표의 항목별 열이 됐다 — 세 원문 필드가 2025년 96.6% · 2026년 99.1% NULL 이었다.
+PARSER_VERSION = "p1.5"
 STD_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 
 
@@ -377,7 +381,10 @@ def toc_rows(root: ET.Element, vocab: DocVocab,
 
 _FILED_ANCHOR_RE = re.compile(r"최초\s*제출일\s*[:：]?[ ]*([^\n]{0,40})")
 _DATE_RE = re.compile(r"(\d{4})\s*[년.\-/월]\s*(\d{1,2})\s*[년월.\-/]\s*(\d{1,2})(?:\s*일)?")
-_TARGET_RE = re.compile(r"1\.\s*정정대상\s*공시서류\s*[:：]?[ ]*([^\n]*?)"
+# 콜론 앞은 **수평 공백만** 허용한다 — `\s*` 로 두면 앵커 셀과 값 셀이 갈린 2025 서식에서
+# 줄바꿈을 삼켜 다음 줄 전체(예: `3. 정정사항`)를 대상 서류로 집는다.
+# 갈린 값은 `_next_value_line` 이 잇는다.
+_TARGET_RE = re.compile(r"1\.\s*정정대상\s*공시서류[^\S\n]*[:：]?[ ]*([^\n]*?)"
                         r"(?=[ ]*2\.\s*정정대상|\n|$)")
 _REASON_RE = re.compile(r"3\.\s*정정사유\s*[:：]?\s*(.*?)(?=\s*4\.\s*정정사항|$)", re.S)
 _BLOCK_TAGS = frozenset({"P", "TD", "TH", "TITLE", "TR", "TABLE"})
@@ -406,6 +413,30 @@ def _block_text(el: ET.Element) -> str:
     return _HSPACE_RE.sub(" ", "".join(parts))
 
 
+_NEXT_ANCHOR_RE = re.compile(r"^[ ]*[2-4][ ]*[.．]")     # 다음 번호 항목 (`2.`·`3.`·`4.`)
+_ITEM_HEADER_RE = re.compile(r"^[ ]*항[ ]*목")           # 정정사항 표 머리 (`항  목`)
+
+
+def _next_value_line(flat: str, end: int) -> str | None:
+    """앵커 줄 **다음**의 첫 비어 있지 않은 줄 — 2025 서식은 값을 다음 셀에 넣는다(§1.7).
+
+    다음 번호 항목(`2.`·`3.`·`4.`)이나 정정사항 표 머리(`항  목`)로 시작하는 줄은 값이 아니라
+    **다음 항목**이므로 집지 않는다 — 집으면 값이 빈 서식에서 항목 제목이 원문 필드로 샌다.
+    연도 네 자리(`2024.03.20`)는 `[2-4][ ]*[.．]` 에 걸리지 않는다(`2` 다음이 `0`).
+    """
+    nl = flat.find("\n", end)
+    if nl < 0:
+        return None
+    for line in flat[nl + 1:].split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        if _NEXT_ANCHOR_RE.match(s) or _ITEM_HEADER_RE.match(s):
+            return None
+        return s
+    return None
+
+
 def _calendar_ymd(d: re.Match[str]) -> str | None:
     """정규식 매치 → YYYYMMDD. 13월·45일·`20011년`(→ 0011년) 같은 오기(§1.7)는 None —
     G2 cast_failed 로 새지 않게. 연도는 1990~2099 만(Y2040 실측: 1건이 `110516` 으로 새었다).
@@ -421,19 +452,34 @@ def _calendar_ymd(d: re.Match[str]) -> str | None:
 
 
 def correction_page(root: ET.Element) -> dict[str, str | None] | None:
-    """`CORRECTION` 첫 장 → 원문 필드 (§1.7·§3.3). 요소 평문에 앵커 정규식 — P 줄·TD 셀 모두."""
+    """`CORRECTION` 첫 장 → 원문 필드 (§1.7·§3.3). 요소 평문에 앵커 정규식 — P 줄·TD 셀 모두.
+
+    2025년 서식(p1.5)은 값을 앵커와 **다른 셀**에 넣으므로 앵커 줄 나머지가 비었으면(제출일은
+    날짜가 없으면) `_next_value_line` 으로 다음 줄을 잇고, 사라진 `3. 정정사유` 앵커는 정정사항
+    표의 `정정사유` 열에서 유도한다. ≤2024 서식의 산출은 그대로다.
+    """
     corr = root.find(".//CORRECTION")
     if corr is None:
         return None
     flat = _block_text(corr)
     tgt = _TARGET_RE.search(flat)
+    target_raw = (tgt.group(1).strip() or None) if tgt else None
+    if tgt is not None and target_raw is None:
+        target_raw = _next_value_line(flat, tgt.end())      # 앵커 셀과 값 셀이 갈린 2025 서식
     rsn = _REASON_RE.search(flat)
+    reason_raw = _norm_cell(rsn.group(1)) if rsn else ""
     filed_raw: str | None = None
     filed: str | None = None
     m = _FILED_ANCHOR_RE.search(flat)
     if m is not None:
         d = _DATE_RE.search(m.group(1))
         filed_raw = (m.group(1) if d is None else m.group(1)[:d.end()]).strip() or None
+        if d is None:
+            # 같은 줄에 날짜가 없다 → 다음 줄. 날짜가 있을 때만 바꾼다(`미상` 같은 원문은 지킨다).
+            nxt = _next_value_line(flat, m.end())
+            d = _DATE_RE.search(nxt) if nxt is not None else None
+            if d is not None and nxt is not None:
+                filed_raw = nxt[:d.end()].strip() or None
         if d is not None:
             filed = _calendar_ymd(d)
     items: list[dict[str, str]] = []
@@ -448,13 +494,17 @@ def correction_page(root: ET.Element) -> dict[str, str | None] | None:
             cells = [_norm_cell(text_of(c)) for c in tr]
             items.append({hdr[i]: cells[i] for i in range(min(len(hdr), len(cells)))})
         break
+    if not reason_raw:
+        # 2025 서식에는 `3. 정정사유` 앵커가 없다 — 정정사항 표의 항목별 열에서 유도한다.
+        seen = list(dict.fromkeys(v for it in items if (v := it.get("정정사유", ""))))
+        reason_raw = " | ".join(seen)
     return {
         "page_found": "true",
-        "target_raw": (tgt.group(1).strip() or None) if tgt else None,
+        "target_raw": target_raw,
         "filed_raw": filed_raw,
         "filed_date": filed,
         "filed_date_status": "parsed" if filed else "unparsed",
-        "reason_raw": (_norm_cell(rsn.group(1)) or None) if rsn else None,
+        "reason_raw": reason_raw or None,
         "n_items": str(len(items)),
         "items": json.dumps(items, ensure_ascii=False),
         "corr_text_chars": str(len(flat)),

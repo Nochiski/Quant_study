@@ -511,6 +511,9 @@ def repair(db: Path, docs_dir: Path, cache_root: Path, snapshot_id: str, rcept_l
     scratch.rmdir()
     summary, extra = summarize_from_cache(cache, snapshot_id, str(prev["input_hash"]),
                                           int(prev.get("d0_zip_missing", 0)), d2_limit, d3_limit)
+    # 증분 이력도 이어받는다 — 일일 증분으로 이어 온 캐시를 수리하면(서버 절차가 그 순서다)
+    # 여기서 안 옮길 때 `increments` 가 통째로 사라져 "이 캐시가 어느 판에서 왔는가" 를 잃는다.
+    summary.increments = list(prev.get("increments", []))
     summary.repairs = list(prev.get("repairs", [])) + [{
         "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), "n_docs": len(rcept_list),
         "parser_version": parsers_doc.PARSER_VERSION}]

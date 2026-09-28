@@ -118,27 +118,6 @@ export type ContractCatalogProjection =
       snapshot: ResearchCatalog["snapshot"];
     }
   | {
-      kind: "factor";
-      status:
-        | "loading"
-        | "error"
-        | "mismatch"
-        | "unselected"
-        | "not-loaded"
-        | "not-found";
-      id: string | null;
-      expectedVersion: string;
-      actualVersion: string | null;
-    }
-  | {
-      kind: "factor";
-      status: "ready";
-      id: string;
-      expectedVersion: string;
-      actualVersion: string;
-      factor: FactorCatalog["factors"][number];
-    }
-  | {
       kind: "other";
       status: "unsupported";
       namespace: string;
@@ -452,64 +431,6 @@ const catalogProjection = (
         }
       : {
           kind: "equity-field",
-          status: "not-found",
-          id,
-          expectedVersion,
-          actualVersion,
-        };
-  }
-  if (field.catalog === "factor") {
-    const expectedVersion = source.contract!.contract.factor_registry_version;
-    const actualVersion = source.factorCatalog?.registry_version ?? null;
-    if (source.state.factorCatalog !== "ready" || source.factorCatalog === null)
-      return {
-        kind: "factor",
-        status:
-          source.state.factorCatalog === "ready"
-            ? "error"
-            : source.state.factorCatalog,
-        id,
-        expectedVersion,
-        actualVersion,
-      };
-    if (actualVersion !== expectedVersion)
-      return {
-        kind: "factor",
-        status: "mismatch",
-        id,
-        expectedVersion,
-        actualVersion,
-      };
-    if (id === null)
-      return {
-        kind: "factor",
-        status: "unselected",
-        id,
-        expectedVersion,
-        actualVersion,
-      };
-    const match = source.factorCatalog!.factors.find(
-      (candidate) => candidate.factor_id === id,
-    );
-    if (!match && source.factorCatalog!.page_count > 1)
-      return {
-        kind: "factor",
-        status: "not-loaded",
-        id,
-        expectedVersion,
-        actualVersion,
-      };
-    return match
-      ? {
-          kind: "factor",
-          status: "ready",
-          id,
-          expectedVersion,
-          actualVersion,
-          factor: match,
-        }
-      : {
-          kind: "factor",
           status: "not-found",
           id,
           expectedVersion,

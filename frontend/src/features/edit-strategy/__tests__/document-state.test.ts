@@ -8,6 +8,7 @@ import {
   currentSpec,
   documentReducer,
   initialDocumentState,
+  isDocumentSettled,
   isSpecStale,
   isCompleteCompileOutcome,
   shouldCompile,
@@ -152,6 +153,36 @@ describe("document state machine", () => {
     expect(currentDiagnostics(state).map((d) => [d.kind, d.code])).toEqual([
       ["syntax", "yaml.syntax"],
     ]);
+  });
+
+  it("reports settled only once validation caught up with the latest text (#240)", () => {
+    let state = initialDocumentState("yaml", "");
+    state = run(state, { type: "edit", source: "title: a\n" });
+    // 입력 직후·parse 뒤·compile 전은 모두 중간 상태다 — e2e 가 여기서 문서 상태를 단언하면 안 된다.
+    expect(isDocumentSettled(state)).toBe(false);
+    state = run(state, {
+      type: "parsed",
+      version: state.sourceVersion,
+      result: parseSource(state.source, "yaml"),
+    });
+    expect(isDocumentSettled(state)).toBe(false);
+    state = run(state, {
+      type: "compiled",
+      version: state.sourceVersion,
+      outcome: okOutcome(),
+    });
+    expect(isDocumentSettled(state)).toBe(true);
+
+    // 구문 오류는 compile 이 시작되지 않으므로 parse 결과가 곧 끝난 판정이다.
+    state = run(state, { type: "edit", source: 'title: "unterminated\n' });
+    expect(isDocumentSettled(state)).toBe(false);
+    state = run(state, {
+      type: "parsed",
+      version: state.sourceVersion,
+      result: parseSource(state.source, "yaml"),
+    });
+    expect(state.phase).toBe("syntax-invalid");
+    expect(isDocumentSettled(state)).toBe(true);
   });
 
   it("discards out-of-order parse and compile replies", () => {

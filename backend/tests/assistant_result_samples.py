@@ -26,7 +26,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
-    environment_from_legacy_spec,
+    RunEnvironment,
     environment_hash,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -53,6 +53,9 @@ _TODAY = date(2026, 9, 1)
 _FIRST_SESSION = date(2023, 1, 2)
 _MONTHS = 40
 _BENCHMARK = "sec-005930-1"
+# schema 1.2 문서는 실행 설정을 담지 않는다(lang2 P2-03). 결과 설명이 요약할 실행 설정은 run 이
+# 소유하므로 표본도 run 쪽에 명시한다 — 값은 1.1 템플릿이 만들던 5년 구간·기본 비용과 같다.
+_ENVIRONMENT = RunEnvironment(start=date(2021, 9, 2), end=_TODAY, universe_id="krx.common-stock")
 
 # full 구간 지표 값. registry에 있는 id만 쓴다 — 없는 id를 넣으면 요약이 정의 없이 옮기는 경로만
 # 보게 된다.
@@ -85,14 +88,13 @@ def sample_backtest_result() -> BacktestRunResult:
     template = StrategyDesignService(
         InMemoryStrategyRepository(),
         new_id=lambda: "unused",
-        today=lambda: _TODAY,
     ).template()
     strategy = replace(
         template,
         title="KRX 모멘텀 표본",
         description="최근 1년 수익률이 높은 종목을 매달 담는다.",
     )
-    environment = environment_from_legacy_spec(strategy)
+    environment = _ENVIRONMENT
     created = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
     metrics = tuple(
         MetricValue(
@@ -192,7 +194,7 @@ def sample_backtest_result() -> BacktestRunResult:
             strategy_provenance=StrategyProvenance(
                 StrategySourceKind.SAVED_REVISION,
                 "spec-hash-sample",
-                "1.1",
+                "1.2",
                 strategy_id="strategy-sample",
                 revision=2,
             ),

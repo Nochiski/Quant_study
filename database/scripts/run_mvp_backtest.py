@@ -80,7 +80,14 @@ class RunSummary:
         return self.status == "completed"
 
 
-def momentum_spec(start: date, end: date, universe_id: str, price_field: str, top: int):
+def run_environment(start: date, end: date, universe_id: str):
+    """실행 설정. schema 1.2 부터 시장·기간·유니버스는 전략 문서가 아니라 실행이 소유한다."""
+    from strategy_workbench.domain.backtest.facade.environment import Market, RunEnvironment
+
+    return RunEnvironment(market=Market.KRX, start=start, end=end, universe_id=universe_id)
+
+
+def momentum_spec(price_field: str, top: int):
     """레지스트리 `price.momentum_12_1` 그래프의 FieldNode 만 `price_field` 로 바꾼 월간 롱온리."""
     from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
         InMemoryStrategyRepository,
@@ -88,12 +95,10 @@ def momentum_spec(start: date, end: date, universe_id: str, price_field: str, to
     from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
     from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
     from strategy_workbench.domain.strategy.facade.specification import (
-        DataStep,
         FactorDirection,
         FactorGraph,
         FactorSignal,
         FieldNode,
-        Market,
         PortfolioSide,
         RebalanceFrequency,
         SelectionMethod,
@@ -107,14 +112,11 @@ def momentum_spec(start: date, end: date, universe_id: str, price_field: str, to
             replace(node, field_id=price_field) if isinstance(node, FieldNode) else node
             for node in definition.default_graph.nodes),
         output_node_id=definition.default_graph.output_node_id,
-        missing_policy=definition.default_graph.missing_policy,
     )
-    template = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "mvp",
-                                     today=lambda: end).template()
+    template = StrategyDesignService(InMemoryStrategyRepository(), new_id=lambda: "mvp").template()
     return replace(
         template,
         title=f"MVP-B {FACTOR_ID} on {price_field}",
-        data=DataStep(market=Market.KRX, start=start, end=end, universe_id=universe_id),
         # schema 1.1: `factors`는 `FactorStep` 래퍼 없이 FactorSignal 시퀀스다
         # (GUI 편집 initiative P1-01 평탄화).
         factors=(FactorSignal(
@@ -141,12 +143,14 @@ def run(root: Path, start: date, end: date, universe_id: str, *, price_field: st
     container = build_container(
         equity_adapter="duckdb", equity_root=root,
         artifact_root=artifact_root or root / "_runs" / f"mvp_{uuid4().hex[:8]}")
-    spec = momentum_spec(start, end, universe_id, price_field, top)
-    pipeline = container.portfolio_design.run_pipeline(PortfolioPreviewRequest(spec))
+    spec = momentum_spec(price_field, top)
+    environment = run_environment(start, end, universe_id)
+    pipeline = container.portfolio_design.run_pipeline(
+        PortfolioPreviewRequest(spec, environment=environment))
     tape = pipeline.preview.tape
     sessions = {o.as_of for o in pipeline.observations}
     response = container.backtest_runs.start(BacktestRunSpec(
-        strategy=spec, core=ExecutionCore.PYTHON))
+        strategy=spec, core=ExecutionCore.PYTHON, environment=environment))
     run_id = response.run.run_id
     terminal = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED}
     state = container.backtest_runs.state(run_id)

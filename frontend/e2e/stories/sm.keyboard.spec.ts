@@ -9,6 +9,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
@@ -58,6 +59,10 @@ test(
       /\/research\/strategies\/[^/]+\/revisions\/1(?:\?.*)?$/u,
     );
     await expectPhase(page, "저장됨");
+
+    // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02). 패널도
+    // 포인터 없이 초점과 Enter 로 여닫는다.
+    await fillRunEnvironment(page, { keyboard: true });
 
     // Ctrl+Shift+Enter: 저장된 v1로 백테스트가 시작되고 끝난다.
     await page.keyboard.press("Control+Shift+Enter");

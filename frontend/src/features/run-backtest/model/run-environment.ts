@@ -1,0 +1,179 @@
+import {
+  runEnvironmentDisplayValue,
+  runEnvironmentWireNumber,
+  runEnvironmentWireText,
+  type RunEnvironmentField,
+} from "../../../entities/backtest";
+import type { RunEnvironment } from "../../../shared/api";
+
+/**
+ * 실행 설정(`RunEnvironment`) 패널의 입력 값과 검증(P3-02, spec D6).
+ *
+ * 필드 모델(목록·순서·enum·기본값·범위·단위)은 `entities/backtest` 의 `runEnvironmentFields` 가 스키마에서
+ * 읽는다. 입력 칸 값은 **표시 단위** 문자열이고(참여율은 %), 요청에 실을 때와 저장할 때만 요청 단위로
+ * 바꾼다. 이 모듈의 검증은 빠른 피드백이고 최종 판정은 backend 가 한다.
+ */
+
+export {
+  runEnvironmentFields,
+  type RunEnvironmentControl,
+  type RunEnvironmentField,
+} from "../../../entities/backtest";
+
+/** 입력 칸의 문자열 값. 필드 이름 → 값. */
+export type RunEnvironmentValues = Readonly<Record<string, string>>;
+
+export type RunEnvironmentFieldError =
+  | "required"
+  | "number"
+  | "minimum"
+  | "exclusiveMinimum"
+  | "maximum"
+  | "exclusiveMaximum"
+  | "date"
+  | "order";
+
+export type RunEnvironmentValidation =
+  | { valid: true; environment: RunEnvironment; errors: Record<string, never> }
+  | {
+      valid: false;
+      environment: null;
+      errors: Readonly<Record<string, RunEnvironmentFieldError>>;
+    };
+
+type Json = Record<string, unknown>;
+
+/**
+ * 패널의 첫 값. 저장된 마지막 사용값이 있으면 그 필드는 그 값, 없으면 스키마 기본값, 기본값도 없으면 빈 칸.
+ * 저장값은 요청 단위 문자열이라 표시 단위로 바꿔 받고, 스키마에 있는 필드만 받는다(스키마가 바뀐 뒤 남은
+ * 옛 키는 버린다).
+ */
+export const initialRunEnvironmentValues = (
+  fields: readonly RunEnvironmentField[],
+  stored: RunEnvironmentValues | null,
+): RunEnvironmentValues =>
+  Object.fromEntries(
+    fields.map((field) => {
+      const saved = stored?.[field.name];
+      return [
+        field.name,
+        saved === undefined
+          ? (field.defaultValue ?? "")
+          : runEnvironmentDisplayValue(field, saved),
+      ];
+    }),
+  );
+
+/** 표시 단위 칸 값 → 요청 단위 문자열(마지막 사용값 저장용). */
+export const runEnvironmentWireValues = (
+  fields: readonly RunEnvironmentField[],
+  values: RunEnvironmentValues,
+): RunEnvironmentValues =>
+  Object.fromEntries(
+    fields.map((field) => [
+      field.name,
+      runEnvironmentWireText(field, values[field.name] ?? ""),
+    ]),
+  );
+
+/**
+ * 업그레이드 응답처럼 완성된 `RunEnvironment` 를 패널 값으로 옮긴다. 스키마에 없는 키는 버린다.
+ */
+export const runEnvironmentValuesOf = (
+  fields: readonly RunEnvironmentField[],
+  environment: RunEnvironment,
+): RunEnvironmentValues => {
+  const record = environment as unknown as Json;
+  return Object.fromEntries(
+    fields.map((field) => {
+      return [
+        field.name,
+        runEnvironmentDisplayValue(field, record[field.name]),
+      ];
+    }),
+  );
+};
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+const validDate = (value: string): boolean => {
+  if (!ISO_DATE.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return (
+    !Number.isNaN(parsed.valueOf()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
+};
+
+const numberError = (
+  field: RunEnvironmentField,
+  value: number,
+): RunEnvironmentFieldError | null => {
+  if (field.minimum !== null && value < field.minimum) return "minimum";
+  if (field.exclusiveMinimum !== null && value <= field.exclusiveMinimum)
+    return "exclusiveMinimum";
+  if (field.maximum !== null && value > field.maximum) return "maximum";
+  if (field.exclusiveMaximum !== null && value >= field.exclusiveMaximum)
+    return "exclusiveMaximum";
+  return null;
+};
+
+/**
+ * 칸마다 스키마 규칙(필수·숫자·범위·날짜·enum)을 보고, 전부 맞으면 요청에 실을 `RunEnvironment` 를 만든다.
+ *
+ * 기간 순서(`start <= end`)는 스키마가 말하지 않는 `RunEnvironment.__post_init__` 규칙이다. 생성 타입의
+ * 두 필드 이름으로 빠른 피드백만 하고, 어긋나면 서버가 다시 거절한다.
+ */
+export const validateRunEnvironment = (
+  fields: readonly RunEnvironmentField[],
+  values: RunEnvironmentValues,
+): RunEnvironmentValidation => {
+  const errors: Record<string, RunEnvironmentFieldError> = {};
+  const environment: Record<string, string | number> = {};
+  for (const field of fields) {
+    const text = (values[field.name] ?? "").trim();
+    if (text === "") {
+      if (field.required || field.defaultValue !== null)
+        errors[field.name] = "required";
+      continue;
+    }
+    if (field.control === "number") {
+      const value = Number(text);
+      if (!Number.isFinite(value)) {
+        errors[field.name] = "number";
+        continue;
+      }
+      const bound = numberError(field, value);
+      if (bound !== null) {
+        errors[field.name] = bound;
+        continue;
+      }
+      environment[field.name] = runEnvironmentWireNumber(field, value);
+      continue;
+    }
+    if (field.control === "date" && !validDate(text)) {
+      errors[field.name] = "date";
+      continue;
+    }
+    if (field.control === "select" && !field.options.includes(text)) {
+      errors[field.name] = "required";
+      continue;
+    }
+    environment[field.name] = text;
+  }
+  const typed = environment as unknown as Partial<RunEnvironment>;
+  if (
+    typeof typed.start === "string" &&
+    typeof typed.end === "string" &&
+    errors.end === undefined &&
+    typed.start > typed.end
+  )
+    errors.end = "order";
+  if (Object.keys(errors).length > 0)
+    return { valid: false, environment: null, errors };
+  return {
+    valid: true,
+    environment: environment as unknown as RunEnvironment,
+    errors: {},
+  };
+};

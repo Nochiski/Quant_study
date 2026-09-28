@@ -26,6 +26,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunSummary,
     BacktestStartResponse,
     InvalidBacktestRunError,
+    MissingBacktestRunEnvironmentError,
     RunStatus,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
@@ -80,6 +81,7 @@ from strategy_workbench.application.strategy_authoring.facade.authoring import (
     DocumentNotUpgradeableError,
     DocumentUpgradeDriftError,
     DocumentUpgradeSyntaxError,
+    DocumentUpgradeUnsupportedNodeError,
     InvalidStrategyDocumentError,
     InvalidStrategyDraftError,
     ReviseDocumentRequest,
@@ -140,6 +142,7 @@ from ._strategy_document_contract import (
     StrategyDocumentSave422Response,
     StrategyDocumentUpgrade422Response,
     StrategyDocumentUpgradeDriftDetail,
+    StrategyDocumentUpgradeUnsupportedNodeDetail,
 )
 from ._strategy_draft_contract import (
     StrategyDraft422Response,
@@ -335,6 +338,12 @@ def create_app(
     def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
         try:
             return backtest_runs.start(spec)
+        # `InvalidBacktestRunError` 의 하위 타입이므로 반드시 먼저 잡는다.
+        except MissingBacktestRunEnvironmentError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "backtest.run.environment_required", "message": str(error)},
+            ) from error
         except InvalidBacktestRunError as error:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -777,16 +786,22 @@ def create_app(
         responses={
             422: {
                 "model": StrategyDocumentUpgrade422Response,
-                "description": "Syntax errors, a non-1.0 document, or upgrade rule drift",
+                "description": (
+                    "Syntax errors, a document with no upgrade chain, a saved-reference node, "
+                    "or upgrade rule drift"
+                ),
             },
         },
     )
     def upgrade_strategy_document(request: CompileRequest) -> UpgradedDocument:
-        """Rewrite a schema 1.0 source as 1.1 (comments and order kept) and compile the result.
+        """Rewrite a retired-schema source as the current version and compile the result.
 
-        The rewrite must parse to exactly what the domain dict transform yields; otherwise the
-        service refuses with `strategy_document.upgrade_drift` rather than returning text that
-        would silently mean something else (spec D3).
+        Comments and order are kept. The rewrite must parse to exactly what the domain dict
+        transform yields; otherwise the service refuses with `strategy_document.upgrade_drift`
+        rather than returning text that would silently mean something else (spec D3). The
+        execution settings the retired document carried come back as `environment`, and facts
+        the user should know (a folded missing policy, a changed weighting rule, settings that
+        could not be moved) as `warnings` (spec D7).
         """
         try:
             return strategy_authoring.upgrade(request)
@@ -809,6 +824,15 @@ def create_app(
                 detail=asdict(
                     StrategyDocumentUpgradeDriftDetail(
                         "strategy_document.upgrade_drift", error.pointer, str(error)
+                    )
+                ),
+            ) from error
+        except DocumentUpgradeUnsupportedNodeError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=asdict(
+                    StrategyDocumentUpgradeUnsupportedNodeDetail(
+                        "strategy_document.upgrade_unsupported_node", error.pointer, str(error)
                     )
                 ),
             ) from error

@@ -31,6 +31,7 @@ import {
 
 
 import { backtestHistoryQuery } from "../../entities/backtest";
+import { RUN_ENVIRONMENT_STORAGE_PREFIX } from "../../features/run-backtest";
 import { strategiesQuery } from "../../entities/strategy";
 import {
   strategyWorkbenchApi,
@@ -48,16 +49,9 @@ import { App } from "../app";
 const API = "http://localhost:8000";
 
 const spec = (strategyId: string, revision: number, title: string) => ({
-  identity: { strategy_id: strategyId, revision, schema_version: "1.1" },
+  identity: { strategy_id: strategyId, revision, schema_version: "1.2" },
   title,
   description: "",
-  data: {
-    market: "KRX",
-    start: "2021-09-03",
-    end: "2026-09-03",
-    universe_id: "krx.common-stock",
-    frequency: "daily",
-  },
   eligibility: { rules: [] },
   factors: [],
   signal: {
@@ -77,11 +71,6 @@ const spec = (strategyId: string, revision: number, title: string) => ({
     max_name_weight: 0.1,
     max_sector_weight: 0.3,
   },
-  execution: {
-    timing: "next_open",
-    fee_bps: 15,
-    slippage_bps: 10,
-  },
   parameters: [],
 });
 
@@ -93,7 +82,7 @@ const document = (
 ) => ({
   strategy_id: strategyId,
   revision,
-  schema_version: "1.1",
+  schema_version: "1.2",
   format: "yaml",
   source,
   source_hash: "b".repeat(64),
@@ -105,8 +94,8 @@ const document = (
   created_at: "2026-09-04T09:30:00+00:00",
 });
 
-const STORED = 'schema_version: "1.1"\ntitle: 퀄리티 모멘텀\n';
-const GRAPH_SOURCE = `schema_version: "1.1"
+const STORED = 'schema_version: "1.2"\ntitle: 퀄리티 모멘텀\n';
+const GRAPH_SOURCE = `schema_version: "1.2"
 title: 그래프 전략
 factors:
   - factor_id: momentum
@@ -125,7 +114,6 @@ factors:
           window: 252
           lag: 0
       output_node_id: mom_252
-      missing_policy: drop
 `;
 const graphSpec = (strategyId: string, revision: number) => ({
   ...spec(strategyId, revision, "그래프 전략"),
@@ -148,7 +136,6 @@ const graphSpec = (strategyId: string, revision: number) => ({
           },
         ],
         output_node_id: "mom_252",
-        missing_policy: "drop",
       },
     },
   ],
@@ -167,7 +154,7 @@ const SIGNAL_SCHEMA_RESPONSE = {
     additionalProperties: false,
   },
   schema_hash: "h".repeat(64),
-  schema_version: "1.1",
+  schema_version: "1.2",
 };
 const RUNTIME_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/runtime-schema.json"),
@@ -178,13 +165,11 @@ const FACTOR = {
   default_graph: {
     nodes: [{ kind: "field", node_id: "px", field_id: "price.close" }],
     output_node_id: "px",
-    missing_policy: "drop",
   },
   description: "Server factor",
   factor_id: "server.momentum",
   label: "Server momentum",
   minimum_history_sessions: 1,
-  missing_policy: "drop",
   output_unit: "score",
   preference: "high",
   required_field_ids: ["price.close"],
@@ -222,7 +207,32 @@ let assistantStream: {
   close: () => void;
 } | null = null;
 
+/**
+ * 실행 설정 패널의 마지막 사용값(P3-02). 화면 흐름 테스트는 사용자가 이미 기간·유니버스를 정해 둔
+ * 상태에서 시작한다 — 패널 자체의 동작은 `features/run-backtest` 테스트가 본다.
+ */
+const RUN_ENVIRONMENT = {
+  market: "KRX",
+  frequency: "daily",
+  start: "2021-01-01",
+  // 추적 mock 응답의 기준일(2026-09-01)·체결일(2026-09-02)이 실행 기간 안에 들도록 잡는다 — 응답 날짜
+  // 가드가 실행 기간을 읽는다(P3-02 에서 다시 켜졌다).
+  end: "2026-09-30",
+  universe_id: "krx.common-stock",
+  timing: "next_open",
+  participation_rate: 0.1,
+  fee_bps: 15,
+  slippage_bps: 10,
+  missing: "drop",
+} as const;
+const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/run-environment-schema.json"),
+) as Record<string, unknown>;
+
 const server = setupServer(
+  http.get(`${API}/api/v1/run-environments/schema`, () =>
+    HttpResponse.json({ schema_hash: "run-env", schema: RUN_ENVIRONMENT_SCHEMA }),
+  ),
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json(
       { detail: { code: "strategy.draft.not_found" } },
@@ -284,7 +294,7 @@ const server = setupServer(
     return HttpResponse.json({
       format: "yaml",
       source_hash: "b".repeat(64),
-      schema_version: "1.1",
+      schema_version: "1.2",
       spec: compiledSpec,
       canonical_json: JSON.stringify({
         ...canonicalSpec,
@@ -317,7 +327,7 @@ const server = setupServer(
     HttpResponse.json({
       schema: { type: "object", properties: {}, additionalProperties: false },
       schema_hash: "h".repeat(64),
-      schema_version: "1.1",
+      schema_version: "1.2",
     }),
   ),
   http.get(`${API}/api/v1/strategy-documents/contract`, () =>
@@ -328,7 +338,7 @@ const server = setupServer(
         factor_registry_version: "v1",
         fields: [],
         schema_hash: "h".repeat(64),
-        schema_version: "1.1",
+        schema_version: "1.2",
       },
       equity_catalog_url: "/api/v1/equity/catalog",
       factor_catalog_url: "/api/v1/factors/catalog",
@@ -532,6 +542,19 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeEach(() => {
+  localStorage.setItem(
+    `${RUN_ENVIRONMENT_STORAGE_PREFIX}:last`,
+    JSON.stringify(
+      Object.fromEntries(
+        Object.entries(RUN_ENVIRONMENT).map(([key, value]) => [
+          key,
+          String(value),
+        ]),
+      ),
+    ),
+  );
+});
 afterEach(() => {
   cleanup();
   server.resetHandlers();
@@ -600,13 +623,13 @@ const WORKFLOW_ROUTES = [
   {
     name: "new strategy",
     route: "/research/strategies/new",
-    initialSource: 'schema_version: "1.1"\ntitle: ""\n',
+    initialSource: 'schema_version: "1.2"\ntitle: ""\n',
     editedSource:
-      'schema_version: "1.1"\ntitle: ""\ndescription: keyboard save\n',
+      'schema_version: "1.2"\ntitle: ""\ndescription: keyboard save\n',
     savedPath: "/research/strategies/s9/revisions/1",
     savedRequest: {
       format: "yaml",
-      source: 'schema_version: "1.1"\ntitle: ""\ndescription: keyboard save\n',
+      source: 'schema_version: "1.2"\ntitle: ""\ndescription: keyboard save\n',
     },
     backtestSource: "inline_draft",
   },
@@ -631,7 +654,7 @@ const serveRuntimeGraphDocument = (): void => {
       HttpResponse.json({
         schema: RUNTIME_SCHEMA,
         schema_hash: "h".repeat(64),
-        schema_version: "1.1",
+        schema_version: "1.2",
       }),
     ),
     http.get(
@@ -872,7 +895,7 @@ describe("professional keyboard workflow (P6-03)", () => {
 
 describe("document routes (P2-04)", () => {
   it.each([
-    ["/research/strategies/new", 'schema_version: "1.1"\ntitle: ""\n'],
+    ["/research/strategies/new", 'schema_version: "1.2"\ntitle: ""\n'],
     ["/research/strategies/s1/revisions/2", STORED],
   ])("wires a runtime-schema snippet through %s", async (route, prefix) => {
     server.use(
@@ -986,7 +1009,7 @@ describe("document routes (P2-04)", () => {
         HttpResponse.json({
           schema: RUNTIME_SCHEMA,
           schema_hash: "h".repeat(64),
-          schema_version: "1.1",
+          schema_version: "1.2",
         }),
       ),
       http.get(`${API}/api/v1/factors/catalog`, () =>
@@ -1088,7 +1111,7 @@ describe("document routes (P2-04)", () => {
           source: recovered,
           format: "yaml",
           source_hash: "d".repeat(64),
-          schema_version: "1.1",
+          schema_version: "1.2",
           updated_at: "2026-09-05T01:02:03Z",
           strategy_id: "s1",
           base_revision: 2,
@@ -1120,7 +1143,7 @@ describe("document routes (P2-04)", () => {
           source: `${STORED}description: wrong identity\n`,
           format: "yaml",
           source_hash: "d".repeat(64),
-          schema_version: "1.1",
+          schema_version: "1.2",
           updated_at: "2026-09-05T01:02:03Z",
           strategy_id: "s1",
           base_revision: 2,
@@ -1168,7 +1191,7 @@ describe("document routes (P2-04)", () => {
                 source: "title: another draft\n",
                 format: "yaml",
                 source_hash: "e".repeat(64),
-                schema_version: "1.1",
+                schema_version: "1.2",
                 updated_at: "2026-09-05T01:02:04Z",
                 strategy_id: "s1",
                 base_revision: 2,
@@ -1233,7 +1256,7 @@ describe("document routes (P2-04)", () => {
 
     const history = mount("/research/strategies/new");
     const view = await editor();
-    const source = 'schema_version: "1.1"\ntitle: first edit\n';
+    const source = 'schema_version: "1.2"\ntitle: first edit\n';
     replaceText(view, source);
 
     await waitFor(() => expect(writes).toHaveLength(1), { timeout: 3_000 });
@@ -1249,7 +1272,7 @@ describe("document routes (P2-04)", () => {
     const history = mount("/research/strategies/new");
     const view = await editor();
     expect(screen.getAllByText("초안").length).toBeGreaterThan(0);
-    replaceText(view, 'schema_version: "1.1"\ntitle: 새 전략 A\n');
+    replaceText(view, 'schema_version: "1.2"\ntitle: 새 전략 A\n');
     expect(screen.getByText("저장되지 않은 변경")).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "리비전 저장" })).toBeEnabled(),
@@ -1261,7 +1284,7 @@ describe("document routes (P2-04)", () => {
       ),
     );
     expect(posted).toEqual([
-      { format: "yaml", source: 'schema_version: "1.1"\ntitle: 새 전략 A\n' },
+      { format: "yaml", source: 'schema_version: "1.2"\ntitle: 새 전략 A\n' },
     ]);
     // The revision page opens from the cache the save filled: no extra document fetch, no prompt.
     expect(
@@ -1303,7 +1326,7 @@ describe("document routes (P2-04)", () => {
     );
     const history = mount("/research/strategies/new");
     const view = await editor();
-    const first = 'schema_version: "1.1"\ntitle: A\n';
+    const first = 'schema_version: "1.2"\ntitle: A\n';
     const second = `${first}description: typed while saving\n`;
     replaceText(view, first);
     await waitFor(() => expect(saveButton()).toBeEnabled());
@@ -1595,7 +1618,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
         HttpResponse.json({
           schema: RUNTIME_SCHEMA,
           schema_hash: "h".repeat(64),
-          schema_version: "1.1",
+          schema_version: "1.2",
         }),
       ),
     );
@@ -1621,8 +1644,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       await user.click(screen.getByRole("tab", { name: "JSON" }));
       const json = await screen.findByLabelText("StrategySpec JSON");
       await waitFor(() => expect(json).toBeVisible());
-      expect(json.textContent).toContain('"market":"KRX"');
-      expect(json.textContent).toContain('"schema_version":"1.1"');
+      expect(json.textContent).toContain('"schema_version":"1.2"');
       expect(json.textContent).not.toContain("identity");
       expect(within(json).getByText("현재 문서")).toBeInTheDocument();
 
@@ -1630,9 +1652,9 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       const form = await formPanel();
       await waitFor(() => expect(form).toBeVisible());
       // 값은 parse tree에서, 없는 필드는 runtime schema 기본값 placeholder로 온다.
-      const data = await formSection("data");
-      expect(data.getByRole("combobox", { name: /\bmarket/ })).toHaveValue(
-        "KRX",
+      const portfolio = await formSection("portfolio");
+      expect(portfolio.getByRole("combobox", { name: /\bside/ })).toHaveValue(
+        "long_only",
       );
       expect(within(form).queryByText("strategy_id")).not.toBeInTheDocument();
       expect(within(form).queryByText("revision")).not.toBeInTheDocument();
@@ -1679,7 +1701,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
 
   it("edits through the Form into the hidden editor, keeps comments, compiles, and undoes in one step", async () => {
     const commented =
-      '# 문서 머리말\nschema_version: "1.1"\ntitle: 퀄리티 모멘텀 # 제목 메모\nrisk:\n  # 집중도 상한\n  max_name_weight: 0.05\n';
+      '# 문서 머리말\nschema_version: "1.2"\ntitle: 퀄리티 모멘텀 # 제목 메모\nrisk:\n  # 집중도 상한\n  max_name_weight: 0.05\n';
     server.use(
       http.get(
         `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
@@ -1715,14 +1737,14 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     await waitFor(() => expect(saveButton()).toBeEnabled());
 
     // 미작성 필드의 첫 값은 섹션에 insert-key, 문서 다른 부분은 그대로.
-    const data = await formSection("data");
+    const portfolio = await formSection("portfolio");
     await user.selectOptions(
-      data.getByRole("combobox", { name: /\bfrequency/ }),
-      "daily",
+      portfolio.getByRole("combobox", { name: /\bside/ }),
+      "long_short",
     );
     await waitFor(() =>
       expect(view.state.doc.toString()).toBe(
-        `${expected}data:\n  frequency: daily\n`,
+        `${expected}portfolio:\n  side: long_short\n`,
       ),
     );
 
@@ -1734,7 +1756,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
   });
 
   it("keeps a stored JSON document as the editable source while the Form is locked", async () => {
-    const jsonSource = '{"schema_version":"1.1","title":"JSON source"}';
+    const jsonSource = '{"schema_version":"1.2","title":"JSON source"}';
     server.use(
       http.get(
         `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
@@ -1777,10 +1799,10 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     const user = userEvent.setup();
     mount("/research/strategies/s1/revisions/2");
     const view = await editor();
-    replaceText(view, 'schema_version: "1.1"\ntitle: last-valid\n');
+    replaceText(view, 'schema_version: "1.2"\ntitle: last-valid\n');
     await waitFor(() => expect(saveButton()).toBeEnabled());
 
-    replaceText(view, 'schema_version: "1.1"\ntitle: [broken\n');
+    replaceText(view, 'schema_version: "1.2"\ntitle: [broken\n');
     await user.click(screen.getByRole("tab", { name: "Form" }));
     const form = await formPanel();
     // stale은 같은 버전의 parse가 실패한 뒤에만 참이다(P4-04 후속) — 디바운스가 끝날 때까지 기다린다.
@@ -1806,7 +1828,7 @@ const graphCompileWith = (diagnostics: readonly unknown[]) =>
     return HttpResponse.json({
       format: "yaml",
       source_hash: "b".repeat(64),
-      schema_version: "1.1",
+      schema_version: "1.2",
       spec: compiledSpec,
       canonical_json: JSON.stringify({
         ...canonicalSpec,
@@ -1823,14 +1845,14 @@ const graphHandlers = () => [
     HttpResponse.json({
       schema: RUNTIME_SCHEMA,
       schema_hash: "h".repeat(64),
-      schema_version: "1.1",
+      schema_version: "1.2",
     }),
   ),
   http.get(`${API}/api/v1/equity/catalog`, () =>
     HttpResponse.json({
       snapshot: {
         snapshot_id: "snap",
-        schema_version: "1.1",
+        schema_version: "1.2",
         built_at: "2026-09-05T00:00:00Z",
         source: "route-test",
         point_in_time: true,
@@ -1850,6 +1872,7 @@ const graphHandlers = () => [
       registry_version: "v1",
       data_snapshot_id: "snap",
       narrative: [],
+      synthesized_nodes: [],
       validation: {
         valid: true,
         issues: [],
@@ -1896,8 +1919,6 @@ const graphHandlers = () => [
           },
         ],
         required_field_ids: ["price.close"],
-        referenced_factor_ids: [],
-        referenced_subgraph_ids: [],
         minimum_history_sessions: 252,
         missing_policy: "drop",
         as_of_policy: "available_date_lte_as_of",
@@ -1928,7 +1949,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     as_of: request.as_of ?? "2026-08-31",
     provenance: {
       kind: "saved_revision",
-      schema_version: "1.1",
+      schema_version: "1.2",
       spec_hash: "7".repeat(64),
       source_hash: "b".repeat(64),
       strategy_id: "s1",
@@ -2052,7 +2073,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           as_of: resolvedAsOf,
           provenance: {
             kind: "inline_draft",
-            schema_version: "1.1",
+            schema_version: "1.2",
             spec_hash: "7".repeat(64),
             source_hash: "b".repeat(64),
             strategy_id: null,
@@ -2191,7 +2212,7 @@ describe("FactorGraph read-only projection (P4-07)", () => {
           as_of: body.as_of,
           provenance: {
             kind: "saved_revision",
-            schema_version: "1.1",
+            schema_version: "1.2",
             spec_hash: specHash,
             source_hash: "b".repeat(64),
             strategy_id: "s1",
@@ -2429,7 +2450,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
           return HttpResponse.json({
             format: "yaml",
             source_hash: "b".repeat(64),
-            schema_version: "1.1",
+            schema_version: "1.2",
             spec: compiledSpec,
             canonical_json: JSON.stringify({
               ...canonicalSpec,
@@ -2458,7 +2479,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
 
     await user.click(screen.getByRole("tab", { name: "YAML" }));
     const invalidView = await editor();
-    replaceText(invalidView, 'schema_version: "1.1"\ntitle: "broken\n');
+    replaceText(invalidView, 'schema_version: "1.2"\ntitle: "broken\n');
     await waitFor(() => expect(saveButton()).toBeDisabled());
     await user.click(screen.getByRole("tab", { name: "Diff" }));
     const invalidPanel = await screen.findByLabelText("StrategySpec Diff");
@@ -2475,7 +2496,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
   it("compares exact stored sources and backend semantic revision diff", async () => {
     const revisionSource = (revision: number) =>
       revision === 1
-        ? 'schema_version: "1.1"\ntitle: 이전 전략\n'
+        ? 'schema_version: "1.2"\ntitle: 이전 전략\n'
         : revision === 3
           ? `${STORED}description: 서버 최신\n`
           : STORED;
@@ -2564,7 +2585,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
           return HttpResponse.json({
             format: "yaml",
             source_hash: "b".repeat(64),
-            schema_version: "1.1",
+            schema_version: "1.2",
             spec: compiledSpec,
             canonical_json: JSON.stringify(semantic),
             spec_hash: specHash,
@@ -2637,9 +2658,9 @@ describe("StrategySpec Diff projection (P4-08)", () => {
           return HttpResponse.json({
             format: "yaml",
             source_hash: "b".repeat(64),
-            schema_version: "1.1",
+            schema_version: "1.2",
             spec: compiledSpec,
-            canonical_json: '{"schema_version":"1.1","title":"same"}',
+            canonical_json: '{"schema_version":"1.2","title":"same"}',
             spec_hash: "2".repeat(64),
             diagnostics: [],
           });
@@ -2721,7 +2742,7 @@ describe("StrategySpec Diff projection (P4-08)", () => {
             document(
               String(params.strategyId),
               revision,
-              `schema_version: "1.1"\ntitle: revision ${revision}\n`,
+              `schema_version: "1.2"\ntitle: revision ${revision}\n`,
               `revision ${revision}`,
             ),
           );
@@ -2853,6 +2874,7 @@ describe("backtest from the editor (P3-05)", () => {
         benchmark_security_id: null,
         annualization_days: 252,
         metric_windows: [],
+        environment: RUN_ENVIRONMENT,
         strategy_source: {
           kind: "saved_revision",
           strategy_id: "s1",
@@ -2882,6 +2904,7 @@ describe("backtest from the editor (P3-05)", () => {
       benchmark_security_id: null,
       annualization_days: 252,
       metric_windows: [],
+      environment: RUN_ENVIRONMENT,
       strategy_source: {
         kind: "inline_draft",
         spec: expect.objectContaining({ title: "퀄리티 모멘텀" }),
@@ -2948,7 +2971,7 @@ describe("backtest from the editor (P3-05)", () => {
     expect(screen.queryByText(/run-stale.*접수됨/)).not.toBeInTheDocument();
   });
 
-  it("explains a saved 1.0 revision the backend refuses to run and disables the run control", async () => {
+  it("explains a saved retired-schema revision the backend refuses to run and disables the run control", async () => {
     server.use(
       http.post(`${API}/api/v1/backtests`, async ({ request }) => {
         started.push((await request.json()) as Record<string, unknown>);
@@ -2979,10 +3002,10 @@ describe("backtest from the editor (P3-05)", () => {
       },
     });
     const banner = await screen.findByRole("region", {
-      name: "schema 1.0 문서",
+      name: "이전 schema 문서",
     });
     expect(banner).toHaveTextContent(
-      "저장된 1.0 revision으로는 백테스트를 실행할 수 없습니다",
+      "저장된 이전 schema revision으로는 백테스트를 실행할 수 없습니다",
     );
     expect(run).toBeDisabled();
     expect(history.location.pathname).toBe(
@@ -3541,7 +3564,7 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     expect(assistantTurns[0].context.source_text).toBe(before);
     expect(assistantTurns[0].context.source_format).toBe("yaml");
 
-    const proposed = 'schema_version: "1.1"\ntitle: "저변동 모멘텀"\n';
+    const proposed = 'schema_version: "1.2"\ntitle: "저변동 모멘텀"\n';
     act(() =>
       stream.push({
         sequence: 1,
@@ -3595,7 +3618,7 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     await user.keyboard("{Enter}");
 
     const typedAfterSend =
-      'schema_version: "1.1"\ntitle: "보낸 뒤에 친 제목"\n';
+      'schema_version: "1.2"\ntitle: "보낸 뒤에 친 제목"\n';
     replaceText(view, typedAfterSend);
     act(() => release?.());
 
@@ -3639,9 +3662,9 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     const view = await editor();
     const stream = await askAssistant(user);
 
-    const typed = 'schema_version: "1.1"\ntitle: "직접 쓴 제목"\n';
+    const typed = 'schema_version: "1.2"\ntitle: "직접 쓴 제목"\n';
     replaceText(view, typed);
-    const proposed = 'schema_version: "1.1"\ntitle: "저변동 모멘텀"\n';
+    const proposed = 'schema_version: "1.2"\ntitle: "저변동 모멘텀"\n';
     act(() =>
       stream.push({
         sequence: 1,

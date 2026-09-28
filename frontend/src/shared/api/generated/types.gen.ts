@@ -350,6 +350,22 @@ export type AssistantUnprocessableResponse = {
 };
 
 /**
+ * BacktestEnvironmentRequiredDetail
+ *
+ * 실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
+ */
+export type BacktestEnvironmentRequiredDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.environment_required";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * BacktestResultNotReadyDetail
  */
 export type BacktestResultNotReadyDetail = {
@@ -619,6 +635,9 @@ export type BacktestUnprocessableResponse = {
         code: "backtest.run.invalid";
       } & BacktestRunInvalidDetail)
     | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
         code: "backtest.strategy.requires_upgrade";
       } & BacktestStrategyRequiresUpgradeDetail)
     | ({
@@ -787,11 +806,6 @@ export type ComparisonNode = {
    */
   right_node_id: string;
 };
-
-/**
- * ComparisonOperator
- */
-export type ComparisonOperator = "gt" | "gte" | "lt" | "lte" | "eq";
 
 /**
  * CompileRequest
@@ -982,26 +996,6 @@ export type DataSnapshot = {
 };
 
 /**
- * DataStep
- */
-export type DataStep = {
-  /**
-   * End
-   */
-  end: string;
-  frequency?: DataFrequency;
-  market?: Market;
-  /**
-   * Start
-   */
-  start: string;
-  /**
-   * Universe Id
-   */
-  universe_id: string;
-};
-
-/**
  * DataWarning
  */
 export type DataWarning = {
@@ -1178,6 +1172,22 @@ export type DrawdownPoint = {
 };
 
 /**
+ * EligibilityOperator
+ *
+ * 유니버스 필터 한 줄의 비교 방식 (schema 1.2, spec D3 S5).
+ *
+ * 앞의 다섯(`gt`~`eq`)은 후보 하나의 값만 보면 판정되는 **절대** 규칙이고, `top_*` 는 같은
+ * 기준일 프레임의 **횡단면** 순위를 봐야 판정된다. `value` 의 의미도 갈린다 — 절대 규칙은
+ * 비교 임계값, `top_percent` 는 비율, `top_count` 는 개수다.
+ *
+ * 이 enum 은 전용이다. 값이 겹친다고 다른 비교 연산자 enum 에 얹으면 `top_*` 가 그 enum 의
+ * 소비자(팩터 그래프 `comparison` 노드 등)로 흘러들어, 모집단 없이 판정할 수 없는 값이
+ * catch-all 분기에서 조용히 다른 비교로 떨어진다.
+ */
+export type EligibilityOperator =
+  "gt" | "gte" | "lt" | "lte" | "eq" | "top_percent" | "top_count";
+
+/**
  * EligibilityRule
  */
 export type EligibilityRule = {
@@ -1185,7 +1195,7 @@ export type EligibilityRule = {
    * Field Id
    */
   field_id: string;
-  operator: ComparisonOperator;
+  operator: EligibilityOperator;
   /**
    * Value
    */
@@ -1287,6 +1297,7 @@ export type ExclusionReason =
   | "future_data"
   | "missing_eligibility"
   | "eligibility_failed"
+  | "eligibility_rank_cut"
   | "missing_factor"
   | "score_threshold"
   | "regime_blocked"
@@ -1300,25 +1311,6 @@ export type ExclusionReason =
  * ExecutionCore
  */
 export type ExecutionCore = "rust" | "python";
-
-/**
- * ExecutionStep
- */
-export type ExecutionStep = {
-  /**
-   * Fee Bps
-   */
-  fee_bps?: number;
-  /**
-   * Participation Rate
-   */
-  participation_rate?: number;
-  /**
-   * Slippage Bps
-   */
-  slippage_bps?: number;
-  timing?: ExecutionTiming;
-};
 
 /**
  * ExecutionTiming
@@ -1549,14 +1541,6 @@ export type FactorExecutionPlan = {
    */
   plan_hash: string;
   /**
-   * Referenced Factor Ids
-   */
-  referenced_factor_ids: Array<string>;
-  /**
-   * Referenced Subgraph Ids
-   */
-  referenced_subgraph_ids: Array<string>;
-  /**
    * Registry Version
    */
   registry_version: string;
@@ -1621,6 +1605,10 @@ export type FactorExplanation = {
    * Registry Version
    */
   registry_version: string;
+  /**
+   * Synthesized Nodes
+   */
+  synthesized_nodes: Array<SynthesizedNode>;
   validation: FactorGraphValidation;
 };
 
@@ -1628,10 +1616,6 @@ export type FactorExplanation = {
  * FactorGraph
  */
 export type FactorGraph = {
-  /**
-   * @deprecated
-   */
-  missing_policy?: MissingPolicy;
   /**
    * Nodes
    */
@@ -1646,8 +1630,6 @@ export type FactorGraph = {
     | GroupNode
     | ComparisonNode
     | ConditionalNode
-    | SavedFactorNode
-    | SavedSubgraphNode
   >;
   /**
    * Output Node Id
@@ -1659,20 +1641,12 @@ export type FactorGraph = {
  * FactorGraphRequest
  */
 export type FactorGraphRequest = {
-  /**
-   * Factor Ids
-   */
-  factor_ids?: Array<string>;
   graph: FactorGraph;
   missing?: MissingPolicy | null;
   /**
    * Parameter Ids
    */
   parameter_ids?: Array<string>;
-  /**
-   * Subgraph Ids
-   */
-  subgraph_ids?: Array<string>;
 };
 
 /**
@@ -1776,20 +1750,12 @@ export type FactorPreviewRequest = {
    * Expected Data Snapshot Id
    */
   expected_data_snapshot_id?: string | null;
-  /**
-   * Factor Ids
-   */
-  factor_ids?: Array<string>;
   graph: FactorGraph;
   missing?: MissingPolicy | null;
   /**
    * Parameters
    */
   parameters?: Array<ResolvedFactorParameter>;
-  /**
-   * Subgraph Ids
-   */
-  subgraph_ids?: Array<string>;
 };
 
 /**
@@ -1950,10 +1916,6 @@ export type FieldContract = {
    * Default From
    */
   default_from?: string | null;
-  /**
-   * Deprecated
-   */
-  deprecated?: boolean;
   /**
    * Description Key
    */
@@ -2368,7 +2330,7 @@ export type NodeValueType =
 /**
  * OperatorAvailability
  *
- * 정의 시점의 가용성. 실제 판정(어댑터 capability)은 P2-04이 추가한다.
+ * 연결된 어댑터에서 이 연산자를 실행할 수 있는가(`operator_availability`가 판정).
  */
 export type OperatorAvailability = "available" | "unsupported";
 
@@ -2408,6 +2370,10 @@ export type OperatorDefinition = {
    * Params
    */
   params: Array<OperatorParameter>;
+  /**
+   * Reads Past Sessions
+   */
+  reads_past_sessions: boolean;
   unit_rule: UnitRule;
 };
 
@@ -3584,6 +3550,10 @@ export type RiskStep = {
    */
   net_exposure?: number;
   /**
+   * Risk Factor Id
+   */
+  risk_factor_id?: string | null;
+  /**
    * Risk Field Id
    */
   risk_field_id?: string | null;
@@ -3616,10 +3586,10 @@ export type RollingMetricPoint = {
  * 돌려도 `spec_hash` 는 그대로고 `environment_hash` 만 갈린다. 그래서 실행 설정을 바꿔도
  * 전략 revision 이 늘지 않는다.
  *
- * enum 은 현재 소유 위치(`domain.strategy` 의 `Market`·`DataFrequency`·`ExecutionTiming`,
- * `domain.factor` 의 `MissingPolicy`)를 그대로 읽는다. 물리 이동은 `DataStep`·`ExecutionStep`
- * 이 사라지는 P2-03 이다 — 지금 옮기면 `domain.strategy` 가 재수출해야 하고 의존 화살표가
- * 순환한다.
+ * `Market`·`DataFrequency`·`ExecutionTiming` 은 `DataStep`·`ExecutionStep` 이 사라진 P2-03
+ * 에서 이 모듈로 옮겨 왔다. `domain/strategy` 는 이 enum 을 더 이상 공개하지 않는다 —
+ * 호환 재수출을 두면 `domain.strategy → domain.backtest` 화살표가 생겨 기존 반대 방향과
+ * 순환이 된다. `MissingPolicy` 는 `domain.factor` 가 계속 소유한다.
  */
 export type RunEnvironment = {
   /**
@@ -3816,24 +3786,6 @@ export type SaveStrategyDraftRequest = {
 };
 
 /**
- * SavedFactorNode
- */
-export type SavedFactorNode = {
-  /**
-   * Factor Id
-   */
-  factor_id: string;
-  /**
-   * Kind
-   */
-  kind: "saved_factor";
-  /**
-   * Node Id
-   */
-  node_id: string;
-};
-
-/**
  * SavedRevisionReference
  *
  * Resolve an immutable revision and fail before calculation if its hash differs.
@@ -3870,24 +3822,6 @@ export type SavedStrategy = {
    * Spec Hash
    */
   spec_hash: string;
-};
-
-/**
- * SavedSubgraphNode
- */
-export type SavedSubgraphNode = {
-  /**
-   * Kind
-   */
-  kind: "saved_subgraph";
-  /**
-   * Node Id
-   */
-  node_id: string;
-  /**
-   * Subgraph Id
-   */
-  subgraph_id: string;
 };
 
 /**
@@ -4022,9 +3956,21 @@ export type SessionView = {
 };
 
 /**
+ * SignalNormalization
+ *
+ * 팩터 신호를 가중 합으로 합치기 전에 적용하는 횡단면 정규화 (schema 1.2, spec D4).
+ *
+ * `NONE` 은 1.1 의 의미(원시값 가중 합)이고, 1.1 문서를 업그레이드할 때 명시된다. 새 문서의
+ * 기본값은 `RANK` 다 — 단위가 다른 팩터(PBR 과 ROE 등)를 원시값으로 더하면 큰 단위 하나가
+ * 합성 점수를 지배하기 때문이다.
+ */
+export type SignalNormalization = "none" | "rank" | "zscore";
+
+/**
  * SignalStep
  */
 export type SignalStep = {
+  normalization?: SignalNormalization;
   /**
    * Regime Field Id
    */
@@ -4342,6 +4288,35 @@ export type StrategyDocumentUpgradeDriftResponse = {
 };
 
 /**
+ * StrategyDocumentUpgradeUnsupportedNodeDetail
+ *
+ * 1.2 에 없는 `saved_*` 노드 때문에 업그레이드를 거절했다(spec D7, P2-09).
+ *
+ * `pointer` 는 그 노드의 kind 자리다.
+ */
+export type StrategyDocumentUpgradeUnsupportedNodeDetail = {
+  /**
+   * Code
+   */
+  code: "strategy_document.upgrade_unsupported_node";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Pointer
+   */
+  pointer: string;
+};
+
+/**
+ * StrategyDocumentUpgradeUnsupportedNodeResponse
+ */
+export type StrategyDocumentUpgradeUnsupportedNodeResponse = {
+  detail: StrategyDocumentUpgradeUnsupportedNodeDetail;
+};
+
+/**
  * StrategyDraft
  */
 export type StrategyDraft = {
@@ -4500,7 +4475,8 @@ export type StrategyIdentity = {
  * 그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.
  *
  * 문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,
- * 연산자 목록·arity·가용성을 손으로 적지 않는다.
+ * 연산자 목록·arity·가용성을 손으로 적지 않는다. `availability` 는 연결된 어댑터 capability 로
+ * 판정하므로(P2-07) 해시도 어댑터에 따라 다르다 — 어댑터를 바꾸면 ETag 가 바뀐다.
  */
 export type StrategyOperatorCatalog = {
   /**
@@ -4607,17 +4583,15 @@ export type StrategySourceKind = "saved_revision" | "inline_draft";
  * StrategySpec
  */
 export type StrategySpec = {
-  data: DataStep;
   /**
    * Description
    */
   description?: string;
   eligibility?: EligibilityStep;
-  execution?: ExecutionStep;
   /**
    * Factors
    */
-  factors: Array<FactorSignal>;
+  factors?: Array<FactorSignal>;
   identity: StrategyIdentity;
   /**
    * Parameters
@@ -4870,6 +4844,36 @@ export type StrategyValidation = {
    */
   valid: boolean;
 };
+
+/**
+ * SynthesizedNode
+ *
+ * 문서에 줄이 없는, compile 이 붙인 노드 표식(P3-01, Phase 2 감사 #13).
+ *
+ * 화면은 이 표식으로 붙인 노드를 가른다. 승격 노드 이름 규칙(`PROMOTION_NODE_PREFIX`)을 화면이
+ * 복제하지 않게 하는 wire 계약이다. `origin` 은 붙인 단계이고 지금은 boolean 출력 승격뿐이다.
+ */
+export type SynthesizedNode = {
+  /**
+   * Node Id
+   */
+  node_id: string;
+  /**
+   * Origin
+   */
+  origin: "promotion";
+  role: SynthesizedNodeRole;
+};
+
+/**
+ * SynthesizedNodeRole
+ *
+ * compile 이 붙인 노드의 역할.
+ *
+ * `promoted_output` 은 참/거짓 출력을 1/0 점수로 바꾼 조건 노드(그래프 출력)이고, 그 predicate 가
+ * 사용자가 쓴 원래 출력이다. `promotion_constant` 는 거기 딸린 참 1 / 거짓 0 상수다.
+ */
+export type SynthesizedNodeRole = "promoted_output" | "promotion_constant";
 
 /**
  * TargetFrame
@@ -5244,12 +5248,7 @@ export type TraceUnprocessableResponse = {
  * TraceValueStatus
  */
 export type TraceValueStatus =
-  | "ok"
-  | "missing_input"
-  | "warm_up"
-  | "divide_by_zero"
-  | "group_missing"
-  | "reference_missing";
+  "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
 
 /**
  * TurnAcceptedView
@@ -5390,7 +5389,8 @@ export type UnaryOperator = "negate" | "lag";
  *
  * `_validation.py`가 이 연산자의 출력 단위를 정하는 방식.
  */
-export type UnitRule = "same_as_input" | "combined" | "boolean";
+export type UnitRule =
+  "same_as_input" | "combined" | "boolean" | "dimensionless";
 
 /**
  * UniverseCoverageSummary
@@ -5491,12 +5491,40 @@ export type UniversePreview = {
 };
 
 /**
+ * UpgradeWarning
+ *
+ * 업그레이드는 됐지만 사용자가 알아야 하는 사실 하나. `message` 는 한글 문장 + 기계 디테일.
+ */
+export type UpgradeWarning = {
+  /**
+   * Code
+   */
+  code:
+    | "strategy_document.upgrade_missing_policy_conflict"
+    | "strategy_document.upgrade_weighting_rule_changed"
+    | "strategy_document.upgrade_environment_unavailable";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Pointer
+   */
+  pointer: string;
+};
+
+/**
  * UpgradedDocument
  *
- * A 1.0 source rewritten as 1.1 text plus what that text compiles to (spec D3).
+ * 은퇴 schema 원문을 현재 버전으로 다시 쓴 결과와 그 원문의 compile 결과(spec D3·D7).
+ *
+ * `environment` 는 옛 문서의 `data`·`execution`·`missing_policy` 로 만든 실행 설정이다. 옮기지
+ * 못했으면(값이 없거나 읽히지 않음) 비어 있고, 그 사유는 `warnings` 가 자리와 함께 짚는다 —
+ * 기본값으로 지어내지 않는다. 화면은 이 값으로 실행 설정을 채운다(P3-02).
  */
 export type UpgradedDocument = {
   compiled: CompiledDocument;
+  environment: RunEnvironment | null;
   format: SourceFormat;
   /**
    * Source
@@ -5506,6 +5534,10 @@ export type UpgradedDocument = {
    * Source Hash
    */
   source_hash: string;
+  /**
+   * Warnings
+   */
+  warnings: Array<UpgradeWarning>;
 };
 
 /**
@@ -7180,12 +7212,13 @@ export type UpgradeStrategyDocumentErrors = {
   /**
    * Response 422 Upgradestrategydocument
    *
-   * Syntax errors, a non-1.0 document, or upgrade rule drift
+   * Syntax errors, a document with no upgrade chain, a saved-reference node, or upgrade rule drift
    */
   422:
     | StrategyDocumentInvalidResponse
     | StrategyDocumentNotUpgradeableResponse
     | StrategyDocumentUpgradeDriftResponse
+    | StrategyDocumentUpgradeUnsupportedNodeResponse
     | RequestValidationResponse;
 };
 

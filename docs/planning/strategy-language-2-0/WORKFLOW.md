@@ -30,7 +30,7 @@ React 19 · TanStack Router/Query · CodeMirror 6 · `yaml` 2.9 · Vitest · fas
 main
  └─ P0-01  docs/strategy-language-2-0-plan          (이 패키지 + spec + ADR·로드맵·SoT 개정)
      ├─ P1-01 ─ P1-02 ─ P1-03 ─ P1-04 ─ P1-05 ─ P1-06   화면 안 마찰 제거 (1.1 위, 독립. P1-06은 감사 후속 문서)
-     └─ P2-01 ─ … ─ P2-09                              backend schema 1.2 (9 PR, 아래 5절)
+     └─ P2-01 ─ … ─ P2-09 ─ P2-10                      backend schema 1.2 (10 PR, 아래 5절. P2-10은 감사 후속 문서)
          └─ P3-01 ─ P3-02 ─ P3-03                    frontend 1.2 적응
              └─ P4-01 ─ P4-02 ─ P4-03 ─ P4-04        그래프 1수준: 파이프라인
                  └─ P5-01 ─ P5-02 ─ P5-03            그래프 2수준: 레시피
@@ -42,6 +42,10 @@ main
   (`parallel_window`에 기록). 교차 제약 두 가지: **P2-06·P2-07은 P1-03(연산자 카탈로그)이 merge된 뒤
   착수한다**(두 PR이 카탈로그의 `saved_*` 제거·`availability`를 건드린다). P3-01의 base는 P2-09이며
   P1 스택 끝(P1-06)이 먼저 merge되어 있어야 한다.
+- **통합 브랜치 뒤 base(2026-09-28)**: P2-03 ~ P3-02 는 통합 브랜치 `lang2/integration` 에 모였다(PLAN 현재
+  결정 머지 전략). 통합 브랜치가 main 에 머지되면(추적 PR #202) 이후 PR(P3-03 ~ P6-03)의 스택 첫 PR 은 main 을
+  base 로 연다. 그 전에 통합 브랜치 base 로 연 PR 은 main 을 merge 하고 게이트를 다시 돌린 뒤 base 를 main 으로
+  옮긴다. 기록(`INTEGRATED` → `MERGED`)과 게이트 규칙은 PLAN 현재 결정 2026-09-28 이 정본이다.
 - **generated SDK 규칙(P2-01에서 개정)**: OpenAPI를 바꾸는 backend PR은 같은 PR에서
   `frontend/src/shared/api/generated`도 재생성해 별도 커밋으로 넣는다. CI `frontend` job이
   `npm run api:generate` 뒤 `git diff --exit-code -- ../backend/openapi.json src/shared/api/generated`를
@@ -485,6 +489,11 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `export_openapi.py`로 `backend/openapi.json` 재생성(연산자 카탈로그 응답의 `availability` 값 집합이
   바뀐다. 진단 코드 문자열은 OpenAPI에 열거되지 않으므로 그 자체는 재생성 사유가 아니다. diff가 0이면
   그 사실을 PR 본문에 적는다). diff가 있으면 생성 SDK도 재생성한다(1절 규칙).
+- **backlog(P2-05 리뷰 DEFECT-P3-1)**: 횡단면 eligibility 규칙이 모집단을 0으로 만드는 쪽에는
+  진단이 없다. `top_percent: 0.001`에 모집단 100이면 cut이 0이라 전원 `ELIGIBILITY_RANK_CUT`이다.
+  P2-05의 `strategy.eligibility.rule_value`는 "너무 관대한" 쪽(`20`을 비율로 적는 실수)만 막는다.
+  결과가 빈 포트폴리오라 조용하지 않아 P3으로 뒀다 — 이 PR에서 frame warning으로 다룰지 정하고,
+  다루지 않으면 그 판단을 PLAN 변경 기록에 남긴다.
 - BACKLOG-003: 횡단면 `zscore`·`rank`의 `unit_rule`을 무차원(`"1"`)으로 바꾼다. 단위가 다른 두 필드를
   표준화해 더한 그래프가 `factor.graph.unit_mismatch` 없이 통과하는 재현 그래프 테스트와, `demean`·
   `winsorize`는 입력 단위를 보존하는 대조 테스트를 `test_factor_operators.py`에 둔다.
@@ -498,13 +507,17 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   넘으면 **PLAN 변경 기록에 사유를 남기고 `unsupported`로 둔다**(P2-07 분기가 그대로 남는다).
 - fixture `ideas/*.yaml` 5개(spec 5절)가 hydrate·validate·preview까지 통과(backend 수준 완료 정의).
 - **ideas fixture는 레시피 빌더 산출 형태를 따른다**(spec D2). 다중 입력 연산자의 부가 입력은 새
-  소스 잎 노드다. 아이디어 3은 노드 4개(그중 잎 2개: `close`·`close_2`)다 — `close` → `ma20` → 잎
-  `close_2` → `breakout(gt, left=close_2, right=ma20)`. `comparison` 출력이 P2-07의 승격으로
+  소스 잎 노드다. 아이디어 3은 노드 4개(그중 잎 2개: `close`·`close_2`)다 — `close` → `mean` → 잎
+  `close_2` → `gt(left=close_2, right=mean)`(node_id 는 spec D2 빌더 규칙). `comparison` 출력이 P2-07의 승격으로
   통과한다. 체인 머리를 재참조하는 노드 3개 형태로 쓰지 않는다 — P5-03의 "e2e 산출물과 같은 hash"
   단언이 깨진다.
 - 아이디어 5(변동성 역가중)는 **알파 팩터 1개 + 변동성 팩터 1개 두 벌**로 쓰고 `risk_factor_id`가
   변동성 팩터를 가리킨다. 변동성 팩터 하나만 두고 그것을 참조하면 P2-06의
   `strategy.signal.no_alpha_factor`에 걸려 compile이 막힌다.
+- **BACKLOG-015(P2-07 관찰)**: `group.rank` 의 `unit_rule` 을 정한다. P2-07 은 횡단면 `rank`·`zscore`
+  만 무차원(`"1"`)으로 바꿨고(BACKLOG-003), 그룹 안 백분위 순위인 `group.rank` 는 입력 단위를 그대로
+  물려준다. 그룹 필드를 실제로 제공하는 이 PR 에서 섹터 안 순위 두 개를 더하는 그래프가 단위 오류로
+  막히는지 확인하고, 무차원으로 바꾸면 `test_factor_operators.py` 의 규칙 대조와 재현 테스트를 같이 둔다.
 
 ### P2-09 — 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI
 
@@ -526,10 +539,21 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `adapters/outbound/strategy_sqlite/_record_codec.py`,
   `application/strategy_authoring/_service.py`). `is_frozen_schema_version`은 **변경 없음**
   (테스트로 고정).
+- P2-03이 저장 row 읽기를 위해 앞당긴 세 심볼도 같이 흡수한다:
+  `RETIRED_SCHEMA_VERSIONS`(현재 `{"1.0", "1.1"}` 리터럴 집합) → `FROZEN_SCHEMA_VERSIONS =
+  frozenset(UPGRADE_STEPS)`(체인 키에서 유도해 버전 추가 시 한 곳만 고친다),
+  `require_retired_schema_version` → 새 술어 이름으로 개명, `UnknownSchemaVersionError` →
+  `NotUpgradeableDocumentError`로 합치거나 그 계열 이름으로. 호출자는
+  `adapters/outbound/strategy_sqlite/_record_codec.py` 하나이고, 미지 버전 fail-closed 회귀
+  테스트(`tests/contract/test_strategy_repository_retired_1_1.py`)를 그대로 통과시켜야 한다.
 - 1.1 → 1.2 step(spec D7 변환 목록): `data`·`execution`·`graph.missing_policy` 제거 후 `environment`로
   반환(팩터별 정책이 다르면 첫 값 + warning), `signal.normalization: none` 명시, `saved_*` 노드는
   `strategy_document.upgrade_unsupported_node` 422. dict 경로·source 경로(ruamel) 같은 step 맵,
   drift fail-closed.
+- `weighting: factor_score` 문서는 업그레이드 뒤 목표 비중이 1.1 결과와 다를 수 있다(P2-04
+  결정 5). 선정·보유 종목은 같고, 비중이 1.1 과 같은 경우는 롱이면서 강도 기준점이 정확히 0 일
+  때뿐이다. `direction: low`·`long_short`·부호 섞인 점수·일반 양수 점수 모두 달라질 수 있다.
+  "1.1 결과 보존" 검증에서 이 차이를 회귀로 세지 않도록 기대값을 결정 5 규칙으로 계산한다.
 - `POST /strategy-documents/upgrade` 응답에 `environment`·`warnings`.
 - repository codec이 1.0·1.1 row를 업그레이드해 읽고 무결성 검증 3종(1.1 spec D2 방식).
   saved-reference backtest 422.
@@ -548,7 +572,45 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   모순을 없애려고), 아는 버전이 1.0·1.1 둘뿐이라 상한이 없어도 됐다. 1.2가 들어오면 "미래 버전 +
   옛 키 하나"가 1.1로 강등되는 경로가 되므로, 버전 디스패치를 넣는 이 PR에서 판정에 상한을 함께
   둔다(P1-05 2차 리뷰 P3-7).
+- **BACKLOG-010(P2 구현자 관찰)**: 위 상한을 넣으면서 `is_upgradeable_document` docstring 도 고친다.
+  지금 docstring 은 "지금은 아는 버전이 1.0·1.1 둘뿐 … schema 1.2 가 들어오면"이라고 적는데, 1.2 는
+  P2-03 부터 현재 버전이라 이 문장은 이미 사실이 아니고 상한 추가를 이 PR 에 떠넘기는 문장만
+  남았다.
+- **BACKLOG-011(P2 구현자 관찰)**: `structure.invalid_date` 를 정리한다. 1.2 문서에는 날짜 필드가
+  없어(`data.start`·`end` 가 실행 설정으로 이동, P2-03) 문서로는 도달할 수 없는 코드다. 지금은
+  `STRUCTURE_CODES` 에 남아 golden 테스트가 날짜 필드 하나짜리 가짜 모델로 문장을 고정한다. 업그레이더
+  가 1.0·1.1 원문의 날짜를 읽는 경로에서 쓰이지 않으면 코드·분기·golden 을 함께 지운다.
 - OpenAPI 재생성. `database/tests` 계약 확인.
+
+### P2-10 — Phase 2 감사 후속(문서)
+
+**Intent**: Phase 2 종료 감사(2026-09-27, `e064d2af`)가 exit "SoT·책임분리 점검 blocking 0"을 BLOCKING
+2건으로 막았다. 둘 다 기록 결함이다. PLAN 이 머지·통합·리뷰 이력을 잃었고(DEFECT-P2X-001), 이슈 #214
+결정이 lang2 에 넘긴 아이디어 fixture 수정주가 전환의 담당이 없다(DEFECT-P2X-002). 코드 변경 없이 문서
+PR 하나로 닫는다. 감사가 넘긴 P3 계약 누락도 acceptance 에 예약한다. 감사가 권고로 신설한 PR 이라 계획
+PR 수가 29 에서 30 이 된다. 감사 NB-1(현재 판 문서 업그레이드)은 코드라 P2-09 가 고쳤다(`17c68261`).
+
+**Acceptance**
+
+- PLAN P1-06·P2-01~P2-09 행이 실제 상태와 머지 커밋을 담는다. main 머지(P1-06·P2-01·P2-02)는
+  `MERGED`, 통합 브랜치 머지(P2-03~P2-08)는 새 상태 `INTEGRATED` 다. 원 PR 이 CLOSED 인 P2-03~P2-06 은
+  그 사유(통합 머지 `c72f6257`, GitHub 가 커밋 차이 없는 base 변경을 거부)를 적는다.
+- 집계 도구가 `INTEGRATED` 를 센다: `[x]` 는 `MERGED`·`INTEGRATED` 둘 다이고, `-Check` 가 main 머지 수와
+  통합 머지 수를 따로 낸다. PLAN `상태 값` 절이 같은 뜻을 적는다.
+- Review 기록 표에 빠진 행(P2-01·P2-02 main 병합 리뷰 2회, P2-03 1·2차, P2-04·P2-05 6차, P2-07 1·2차,
+  P2-08 2차, P2-09 1차)이 있고 표 중간 빈 줄이 없다(Review·검증 기록 각 1곳).
+- `현재 결정`의 묶음 머지 항목이 통합 브랜치 `lang2/integration`, 머지 커밋, CLOSED PR, 추적 draft #202 를
+  적는다.
+- BACKLOG-017(수정주가 전환, #212 연결)을 4요소로 등록하고 P3-01 acceptance 에 예약한다.
+- 감사 8절 P3 계약 목록 17행이 P3 acceptance 와 빠짐없이 대응한다. 누락 #3·#7·#11·#13·#15·#16 을
+  예약한다(#13 은 식별 수단 결정을 함께 적는다).
+- `update-plan-progress.ps1 -Check`, 유저 스토리 하네스, 충돌 표식 검사 통과.
+
+- BACKLOG-018(원주가 시계열 변화 경고, 리드 결정)을 4요소로 등록하고 P3-01 acceptance 에 예약한다.
+- 감사 비차단 NB-2(a)(b)·NB-3·NB-4·NB-6 에 담당 PR 을 정하고 그 acceptance 에 예약한다. 붙일 PR 이 없는
+  항목은 "미정 — 리드 결정 필요"와 사유를 적는다.
+
+**Non-goal**: 코드 변경. 비차단 항목은 담당만 정하고 실행하지 않는다.
 
 **Phase 2 exit**
 
@@ -569,9 +631,57 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - `npm run api:generate` 후 diff 0. `/data/*`·`/execution/*`·`/graph/missing_policy` pointer 참조가
   소스·테스트에서 사라진다(grep 0건 테스트).
 - `signal.normalization`·횡단면 eligibility·`risk_factor_id`의 i18n(설명·적용 조건) 추가. Form이 새
-  필드를 스키마에서 자동으로 그린다(손으로 적지 않는다).
+  필드를 스키마에서 자동으로 그린다(손으로 적지 않는다). `risk_factor_id` 의 이름·설명·적용 조건 키는
+  P2-06 이 먼저 넣었다(runtime schema 가 발행한 키는 전부 번역돼야 한다는 단위 테스트가 강제한다).
+- **BACKLOG-012(P2-06 관찰)**: `saved_*` 제거로 도달할 수 없게 된 frontend 잔재를 지운다. Contract
+  Inspector 의 팩터 카탈로그 join(`contract-inspector.ts` 의 `catalog === "factor"` 분기와 그 자원
+  로딩), `form-projection.ts` 의 `CATALOGS` 중 `factor`·`subgraph`, `schema-assist.ts` 의 `subgraph`·
+  `factor` 카탈로그 분기, i18n 키 `strategy.node.saved_*`·`strategy.field.node.factor_id`·
+  `strategy.field.node.subgraph_id`·`assist.catalog.subgraph`.
+- **BACKLOG-014(P2-07 관찰)**: boolean 팩터 출력의 승격 노드(`__promote_<factor>` 조건 노드와 상수
+  `_one`·`_zero`)는 compile 된 spec 에만 있고 문서에는 없다. 실행 계획 패널·디버거 노드 목록은 compile
+  spec 의 그래프를 읽어 이 노드를 kind `unknown` 과 문서 밖 pointer 로 보인다. 사람 말 라벨("참/거짓을
+  1/0 으로")로 보이거나 숨기고, "소스 열기"가 원래 출력 노드(조건 노드의 predicate)를 짚게 한다.
+  semantic diff 표(`semantic-diff-table.tsx`)와 충돌 배너(`conflict-banner.tsx`)도 같다: backend
+  `domain/strategy/_diff.py` 가 canonical payload 를 위치로 비교하므로 사용자 노드 하나를 더하면
+  그래프 끝의 승격 노드 셋이 "바뀐 것"으로 나온다. 승격 노드 줄을 원래 출력의 변경 한 줄로 접거나
+  diff 를 node_id 기준으로 맞춘다(수정 위치가 backend `_diff.py` 면 이 PR 이 같이 고친다).
+- 추적·미리보기 화면의 탈락 사유(`ExclusionReason`, OpenAPI enum) 전부에 사람 말 문장(ko·en)을 둔다.
+  P2-04~P2-06 이 더한 `eligibility_rank_cut`·`missing_risk` 를 포함하고, 생성 enum 전수 커버리지 테스트로
+  누락을 막는다(PLAN P2-05 결정 4, 리드 결정 2026-09-27).
 - outline·snippet 카탈로그(팩터 preset은 "예시" 그룹으로 강등, 튜토리얼 전용)·execution plan·graph·
   debugger가 1.2 pointer로.
+- **착수 전 cascade(Phase 2 감사 NB-7)**: `lang2/integration` 이 main 을 따라간다. 통합 브랜치의 main
+  기반은 `a4ccfd7a` 이고, 그 뒤 main 머지가 여럿이다(#204·#206·#213·#208·#209·#210·#215, 그리고 BACKLOG-017 의
+  선행 조건 #218 `28d13b69`). 그 merge 를 먼저 하고 P3-01 packet 에 SHA 를 적는다.
+- **BACKLOG-017(Phase 2 감사 DEFECT-P2X-002)**: 아이디어 fixture 1·3·4·5(`momentum_12_1`·`ma20_breakout`·
+  `top_trading_value`·`inverse_volatility`)의 가격 변화 잎을 `price.close` 에서 `price.adj_close` 로 옮긴다
+  (#214 결정). `test_idea_fixtures.py` 의 어댑터 필드 계약 대조에 `price.adj_close` 를 넣는다. 선행 조건은
+  #218 이 통합 브랜치에 들어온 것이다(위 cascade). 아이디어 2(ROE)의 `financial.net_income` 기간 혼재는
+  #212(main 담당)이고 이 PR 은 fixture 주석에 이슈 링크만 단다. P5-01(빌더 = fixture node_id)·P5-03(e2e
+  산출물 hash)이 원주가 형태를 고정하기 전에 끝나야 한다.
+- **탈락 사유 i18n(Phase 2 감사 8절 #7, PLAN P2-05 결정 4)**: trace·디버거의 `ExclusionReason` 전체(P2-05 의
+  `eligibility_rank_cut` 포함)에 사람 말 문장을 붙이고, enum 전체가 번역됐는지 테스트로 고정한다. 지금
+  화면은 사유를 원문 코드로 찍는다.
+- **승격 노드 식별(Phase 2 감사 8절 #13, BACKLOG-014 보강)**: 결정 — backend 가 plan·trace wire 의 노드에
+  합성 여부 표식(예: `origin: "promotion"`)을 내보내고 OpenAPI 에 싣는다. frontend 는 `__promote_` 접두사를
+  복제하지 않는다(접두사 `PROMOTION_NODE_PREFIX` 의 owner 는 backend `_promotion.py` 하나다). 표식을 내는
+  backend 변경은 이 PR 이 같이 한다.
+- **새 compile 진단의 화면 매핑(Phase 2 감사 8절 #11)**: 그래프 밖 `strategy.field.missing`·
+  `strategy.field.value_type` 과 그래프 안 `strategy.expression.field_missing` 이 같은 "없는 필드"를 두 코드로
+  낸다. 문제 목록·편집기 마커가 두 코드와 kind `capability`(`strategy.operator.unsupported`)를 모두 pointer
+  자리에 보이는지 단위 테스트로 확인한다. 문장은 backend 가 완성해 보낸다.
+- **BACKLOG-018(리드 결정)**: compile 단일 게이트(P2-07 계열)에 warning 을 더한다. 시계열 변화를 재는
+  연산자(기간 수익률·모멘텀·이동평균·변동성·낙폭 등)의 입력 잎이 원주가 가격 필드(`price.close` 등, 분할·증자
+  조정 없음)이면 "분할·증자에 오염될 수 있습니다. `price.adj_close` 를 쓰세요" 라는 backend 한글 완성 문장을
+  낸다. 연산자 집합과 "원주가" 판정은 손으로 적지 않는다 — 연산자 카탈로그(`OperatorDefinition`)와 어댑터
+  필드 계약에 성질을 두고 읽는다(없으면 이 PR 이 더한다). 코드를 `SEMANTIC_ONLY_CODES` 에 등록하고, 문장
+  golden·해당 문서만 warning 이 나는 테스트·BACKLOG-017 로 옮긴 아이디어 fixture 가 warning 0 인 테스트를 둔다.
+- **SoT 대장 eligibility 행(Phase 2 감사 NB-2(a))**: `.claude/rules/strategy-workbench-sot.md` 에 eligibility
+  연산자 행을 더한다. owner 는 `domain/strategy/_models.py` 의 `EligibilityOperator`·
+  `CROSS_SECTIONAL_ELIGIBILITY_OPERATORS`(절대/횡단면 갈림), 판정은 `domain/portfolio/_compiler.py` 의
+  exhaustive `_compare`·`_cross_sectional_cut`, 값 범위는 validator `strategy.eligibility.rule_value` 다. 이
+  PR 이 eligibility 연산자 i18n 을 다루므로 여기서 적는다.
 - 단위 테스트 전부 green. e2e fixture는 P3-03.
 
 ### P3-02 — 실행 설정 패널 확장, 1.1 업그레이드 배너, 실행 설정 띠
@@ -586,6 +696,19 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `RunEnvironment`에는 범위가 없다 — pydantic이 `__post_init__`를 들여다보지 못해 생성 SDK 타입에
   실리지 않는다(P2-01에서 OpenAPI 재생성 diff가 0인 이유이기도 하다). 생성 타입만 믿는 화면은
   서버가 거부할 값을 유효한 것으로 보므로, 패널은 범위도 스키마 엔드포인트에서 읽는다(테스트로 고정).
+- **BACKLOG-013(P2-01·P2-02 병합 리뷰 P3)**: 실행 설정 스키마가 발행하는 설명 키
+  `strategy.field.run_environment.*` 7개(`start`·`end`·`market`·`frequency`·`universe_id`·`timing`·
+  `missing`)에 frontend 문장(한국어·영어, 이름과 `.description`)을 붙이고, `/run-environments/schema`
+  가 발행한 설명 키가 전부 번역됐는지 보는 커버리지 테스트를 둔다(전략 runtime schema 쪽
+  `screen-vocabulary.test.ts` 와 같은 모양). 패널 항목 옆 한 줄 뜻 표시는 US-SM-10 과 잇는다.
+- **SoT 대장 `run_environment.*` 진단 코드(Phase 2 감사 NB-2(b))**: `authoring 진단 코드` 행 밖에 있는
+  `run_environment.*` 네임스페이스(owner `domain/backtest/_requirement.py`·`_models.py` 의
+  `RUN_ENVIRONMENT_CONSTRAINTS`, preview·trace 경로는 `portfolio_design/_service.py` 가 레지스트리 밖으로
+  통과시킨다)를 SoT 대장에 적는다. 이 PR 이 그 코드를 화면에 번역하고 아래 결정 항목을 정하므로 여기서 한다.
+- **매니페스트 평면 비용 필드(Phase 2 감사 NB-4(a))**: `RunManifest` 의 `fee_bps`·`slippage_bps`·
+  `participation_rate` 평면 필드는 `environment` 와 중복이다(P2-01 제약사항은 "제거는 P2-03"이라 적었지만
+  P2-03 이 다루지 않았다). run 상세가 `environment` 를 보이게 되는 이 PR 에서 유지(호환)·제거를 정하고 PLAN 에
+  한 줄 남긴다. 제거면 OpenAPI·생성 SDK 를 같은 PR 에서 바꾼다.
 - **결정 항목**: 명시 `environment`의 422를 필드 단위로 어떻게 표면화할지. 같은 사실이 문서에
   있으면 `strategy.execution.participation` 코드가, 실행 설정에 있으면 pydantic 기본 분기가 나간다
   (`Backtest422Response`가 `RequestValidationResponse`를 이미 union에 가져 계약 위반은 아니다).
@@ -593,8 +716,52 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   문자열에만 있다. 패널이 필드 옆에 오류를 붙이려면 파싱해야 하므로, inbound 계층에서
   `RunEnvironment`를 먼저 구성해 코드화된 detail로 바꿀지 결정한다.
 - 기간이 전략 문서에서 오던 `dateRange` 의존 제거. OOS 창 검증은 실행 설정의 기간으로.
+- **P2-03이 잠근 `test.fixme` 4건을 해제한다**: `workbench.workflow.spec.ts`의
+  `creates, recovers, validates, versions, traces and backtests`와
+  `upgrades a frozen 1.0 revision …`, `workbench.real-equity.spec.ts`의
+  `edits the graph on real data …`, `workbench.infrastructure.spec.ts`의
+  `keeps a real debugger trace legible and inside the viewport`(`strategy-debugger.png` 기준선
+  4장도 그때 화면으로 재생성). 패널이 생기기 전에는 프론트가 `environment`를 싣지 못해
+  브라우저에서 시작한 run이 422 `backtest.run.environment_required`로 거절된다.
+- **전략 디버거 trace 요청도 같은 배선이 필요하다.** `POST /api/v1/strategies/debug/trace`가
+  `environment` 없이 나가면 preview·run과 같은 `portfolio.strategy.invalid` +
+  `run_environment.required`로 거절되어 "추적 재현 정보" 패널이 뜨지 않는다. 위 fixme
+  시나리오 안에 있으므로 해제와 같이 고친다. 최종 시나리오 재작성은 P3-03이 맡는다.
+- **디버거 컨텍스트의 `start`/`end`를 다시 non-null로 만든다.** P2-03이 실행 기간의 출처를
+  잃어 `widgets/strategy-ide/model/strategy-debugger-context.ts`가 두 값을 `null`로 고정했고,
+  그 결과 `features/debug-strategy/model/strategy-trace.ts`의 응답 날짜 범위 가드(`as_of`가
+  실행 기간 안인가, `execution_on <= end`인가)와 날짜 입력의 `min`/`max`가 꺼져 있다. 패널이
+  기간을 갖게 되면 두 필드를 실행 설정에서 채우고 타입을 `string`으로 되돌린다 — `string |
+  null`인 채로 끝나면 가드가 영구히 꺼진 채 남는다(P2-03 리뷰 P3-06).
 - 업그레이드 배너가 1.1 문서에도 뜨고, 응답의 `environment`로 실행 설정을 채운다(사용자 확인 후).
   `warnings`를 배너에 표시.
+- **P2-09 가 남긴 배너 소비 항목(예약)**: (1) 배너 문구 `upgrade.title`("schema 1.0 문서")·
+  `upgrade.body`("이 문서는 schema 1.0입니다. 1.1로 업그레이드하면 …")·`upgrade.action`("1.1로
+  업그레이드")·`upgrade.applied`("1.1로 다시 썼습니다 …")는 P2-09 부터 사실과 다르다 — 결과는 현재
+  버전이고 1.1 문서도 대상이다. 버전 중립 문구로 바꾸거나 응답에서 읽고, frontend 에 은퇴 버전
+  문자열을 두지 않는다(SoT authoring schema 버전 행). `workbench.workflow.spec.ts`·
+  `stories/dm.readable-korean.spec.ts` 가 버튼 이름으로 이 문구를 찾는다. (2) `warnings[].code` 는
+  OpenAPI enum(`strategy_document.upgrade_missing_policy_conflict`·`upgrade_weighting_rule_changed`·
+  `upgrade_environment_unavailable`)이라 코드별 i18n 이 필요하다(문장은 backend `message` 가 이미
+  한글로 완성해 보내므로 코드별 제목만이어도 된다). 제목 문장과 `upgradeWarningTitle` 은 P3-01 이 넣었다 —
+  배너에 그리기만 하면 된다. (3) 새 422 `strategy_document.upgrade_unsupported_node`
+  의 `upgrade.error.*` 문장. 없으면 지금처럼 `upgrade.error.request` 로 backend 문장을 보인다.
+  (4) `environment` 가 `null` 이면(옛 문서의 실행 설정을 옮기지 못함) 패널을 채우지 않고 warning 이
+  짚는 자리를 보인다 — 기본값으로 채우지 않는다.
+- **은퇴 버전 문구 6키(Phase 2 감사 8절 #15)**: 위 (1)의 4키 밖에도 1.1 동결 뒤 사실과 다른 키가 6개다
+  (ko·en 각각). `upgrade.frozenGenerated`, `upgrade.backtestBlocked`,
+  `upgrade.error.strategy_document.not_upgradeable`("schema 1.0 문서만 …"),
+  `history.frozen`("1.0 동결" — **1.1 revision 에도 이 라벨이 붙는다**),
+  `backtest.error.backtest.strategy.requires_upgrade`, `trace.error.trace.strategy.requires_upgrade`.
+  버전 중립 문구로 바꾸거나 응답의 `schema_version` 을 읽는다(SoT: frontend 는 은퇴 버전 문자열을 갖지 않는다).
+- **팩터 sandbox 요청의 결측 정책(Phase 2 감사 8절 #3, PLAN P2-03 결정 6)**: 실행 계획 패널의 explain·
+  preview 요청(`use-execution-plans.ts`)에 실행 설정 패널의 `missing` 을 싣는다. 싣지 않으면 패널에서
+  `zero` 를 골랐을 때 실행 계획의 `plan_hash` 가 실제 run 과 갈린다(P2-02 리뷰 P1 과 같은 모양). 값의
+  출처인 패널이 이 PR 에 생기므로 P3-01 이 아니라 여기다.
+- **run 상세의 실행 설정 표시(Phase 2 감사 8절 #16)**: `entities/backtest/ui/backtest-run-detail.tsx` 가
+  manifest 의 `environment`(기간·유니버스·체결·비용·결측)와 `environment_hash` 를 보인다. 1.2 부터 이것이
+  그 실행 설정의 유일한 기록이다(SoT "실행 재현성 → 결과 화면이 그대로 노출"). P3 exit "같은 전략·다른
+  기간 → 같은 spec_hash" 를 화면에서 확인하는 수단이기도 하다.
 - 백테스트 버튼 차단 사유에서 `factor-plan` 분기가 compile error로 흡수되는지 확인(남으면 결함으로
   기록).
 - IDE 상단에 실행 설정 요약 띠(시안 1). 문서 밖임을 문구로.
@@ -608,6 +775,13 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - 매뉴얼 1절 샘플을 1.2로, 실행 설정 절 신설, "이 전략을 사람 말로" 표 갱신. README·frontend
   README·`backend/FACTORS.md` 1.2.
 - CI `frontend`·`browser-e2e` green(P2 스택의 exit 조건 해소).
+- **골든의 수정주가 이관(BACKLOG-018 후속, 리뷰 #232 DEFECT-232-05)**: 골든 `quality_momentum.yaml`·
+  `quality_momentum.json`·매뉴얼 1절 샘플의 `mom_252` 잎을 `price.adj_close` 로 옮긴다. 원주가 모멘텀은
+  P3-01 부터 compile warning `strategy.field.unadjusted_price` 가 나므로, 그대로 두면 warning 이 뜨는 문서를
+  정상 예시로 보인다. 옮긴 뒤 backend 테스트의 우회 필터(`test_strategy_document_http_api.py` 의
+  `RAW_PRICE_WARNING`·`_without_raw_price_warning`, `test_strategy_document_upgrade_http_api.py` 의 warning
+  기대)를 걷고, 골든 `spec_hash` 리터럴·AI 시나리오 golden·e2e 기대값을 재생성한다. 1.0·1.1 보존 fixture 는
+  옛 문서라 원주가 그대로 둔다(업그레이드는 필드를 바꾸지 않는다).
 - BACKLOG-002: 매뉴얼 스크린샷 14장을 `npm run docs:capture`로 1.2 한글 화면으로 다시 찍고, 8절에
   "초안 복구·서버 초안 적용 직후 되돌리기는 복구 이전 텍스트로 돌아간다"는 안내를 넣는다.
 - BACKLOG-008: 충돌 표식 게이트(`tools/quant_study_dev/conflict_markers.py`)가 `git ls-files`로 추적
@@ -615,6 +789,14 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   cp949·UTF-16·`.lock`·`build/`·`dist/` 표식 검출 테스트를 둔다.
 - BACKLOG-009: 사이드바 제안을 "문서에 적용"한 뒤 툴바 "실행 취소" 한 번으로 적용 전 원문으로 돌아가는
   브라우저 스토리 e2e(`@story`·`@US-DM-09`)를 더하고 US-DM-09를 `구현됨-e2e`로 올린다.
+- **spec D6·D7 구현 결과(Phase 2 감사 NB-3)**: 설계 spec D6·D7 에 "구현 결과(P2-03·P2-09)" 단락을 둔다
+  (P2-08 이 D2 를 정리한 방식). D7 의 현재형 "`_upgrade.py` 는 단일 버전 변환기다", `UPGRADE_STEPS` 값 타입(이름
+  붙은 쌍), `UpgradeOutcome` 모양(`source_version` 추가, 도메인 `environment` 는 `RetiredExecutionSettings`,
+  응답 `environment` 는 nullable), 선언 버전 규칙(NB-1), saved-reference 422 코드(`backtest.strategy.requires_upgrade`),
+  D6 의 삭제된 브리지 문장을 사실대로 고친다. 1.2 문서를 정리하는 이 PR 의 범위다.
+- **연산자 행의 단위 규칙 문장(Phase 2 감사 NB-6)**: SoT 연산자 행에 "단위 추론 owner 는 검증기
+  (`domain/factor/_validation.py` 의 무차원 집합), 카탈로그 `unit_rule` 은 `test_factor_operators.py` 가 묶는
+  표시값"을 한 줄 적는다. 규칙 문서를 1.2 로 정리하는 이 PR 에서 한다.
 
 **Phase 3 exit**
 
@@ -670,6 +852,8 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   `insertItem`. 빈 그래프는 semantic error "첫 단계를 추가하세요"로 카드에 표시(backend 메시지).
 - 미리보기 패널: 기준일 입력, 기존 trace API로 유니버스·필터 통과·결측 제외 수와 상위 N 종목·
   합산 점수(막대). 편집 후 compile ok에서만 갱신, stale 배지.
+- 필터 탈락은 규칙 탈락(`eligibility_failed`)과 순위 탈락(`eligibility_rank_cut`, P2-05)을 나눠 센다
+  (WORKFLOW P2-05 탈락 사유 항목, Phase 2 감사 8절 #7).
 
 ### P4-04 — 탭을 그래프·YAML 둘로, 기본 탭 그래프, Form·JSON 은퇴, 빈 화면 e2e
 
@@ -711,11 +895,18 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
   마지막이면 체인. 다중 입력 노드는 한 입력이 체인 꼬리이고 나머지 입력이 전부 체인 밖 잎
   (`field`·`constant`·`parameter`)일 때만 체인("÷ 시가총액", "종가 > 20일 이평"). **체인 머리
   재참조는 비체인**이다. 그 외는 "고급에서 편집".
-- 연산: 단계 추가(끝·중간) = `addNode`(kind·id `<operator>_<n>`·입력=직전·출력=마지막) + 다음
+- 연산: 단계 추가(끝·중간) = `addNode`(kind·id 는 spec D2 node_id 규칙·입력=직전·출력=마지막) + 다음
   노드 `input_node_id` 재배선; 삭제 = `remove` + 재배선(+출력 갱신); 이동 = 재배선; 파라미터 =
   `replaceScalar`; 연산자 교체 = 노드 항목 교체(kind 동반). 여러 연산은 `planSourceOperations`로 한
   undo 단계. 결과가 체인 불변식을 깨면 거부하고 이유 반환.
 - property test: 임의 체인 문서·임의 연산에 대해 tree 동치·체인 유지·범위 밖 바이트 보존.
+- 빌더 node_id 생성 규칙(spec D2: 바탕 이름 = 단계는 연산자·잎은 필드 id 끝 조각, 겹치면 `_2`…)이
+  `backend/tests/fixtures/strategy_documents/ideas/*.yaml` 과 일치함을 테스트로 고정한다(P2-08 결정 3).
+  빌더로 fixture 와 같은 연산 순서를 밟으면 node_id 열이 같아야 한다. P5-03 의 hash 단언이 이것에 기댄다.
+- 빌더의 **부가 잎 삽입 위치**와 **체인 꼬리의 입력 슬롯** 규칙을 정하고 spec D2 에 적는다(P2-08 리뷰
+  P3-2). `spec_hash` 는 노드 순서와 슬롯에 민감하다(리뷰 실측: 아이디어 3 의 `mean`·`close_2` 순서만 바꿔도
+  hash 가 바뀐다). fixture 의 현재 형태는 "부가 잎은 그것을 읽는 노드 바로 앞", "`divide` 는 꼬리가 `left`,
+  `gt` 는 꼬리가 `right`"다. 규칙이 fixture 와 다르면 fixture 를 함께 고치고, 일치를 테스트로 고정한다.
 
 ### P5-02 — 팔레트, 단계 카드 UI, 설명, 인라인 진단
 
@@ -742,6 +933,9 @@ backend 소스 13개에 걸쳐 12절 크기 규칙을 지킬 수 없다"가 bloc
 - BACKLOG-004: 미리보기가 `POST /api/v1/factors/preview`를 쓰면 그 422(`factor.graph.invalid`와
   `factor.graph.*` 이슈 코드)를 `strategy.expression.*` 네임스페이스로 정리한다. 이 endpoint를 쓰지
   않으면 이 PR에서 BACKLOG-004의 담당을 다시 정한다.
+- BACKLOG-016: 0/1 이진 팩터(아이디어 3)의 선정이 동점 해소 순서(`security_id`)로 정해진다. 아이디어 e2e 를
+  확정할 때 해결 방식을 정한다 — (a) 보조 팩터로 동점 해소, (b) 동점 전원 균등 비중. 정한 방식을 spec 5절·
+  아이디어 3 fixture 에 반영하고 재현 테스트를 둔다.
 
 **Phase 5 exit**
 

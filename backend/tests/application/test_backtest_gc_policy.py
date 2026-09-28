@@ -45,6 +45,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
 from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult, ExecutionCore
 from strategy_workbench.domain.factor.facade.expression import (
     FactorGraph,
@@ -53,10 +54,8 @@ from strategy_workbench.domain.factor.facade.expression import (
     TimeSeriesOperator,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
-    DataStep,
     FactorDirection,
     FactorSignal,
-    Market,
     RebalanceFrequency,
     StrategySpec,
 )
@@ -158,9 +157,13 @@ class _RecordingExecutor:
         return self._delegate.execute(request, progress=progress, cancelled=cancelled)
 
 
+# schema 1.2 문서는 기간·유니버스를 담지 않는다(lang2 P2-03). 실행 설정은 run 요청이 싣는다.
+_ENVIRONMENT = RunEnvironment(start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock")
+
+
 def _spec() -> StrategySpec:
     template = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: WINDOW[1]
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
     momentum = FactorSignal(
         factor_id="momentum_3",
@@ -177,9 +180,6 @@ def _spec() -> StrategySpec:
     )
     return replace(
         template,
-        data=DataStep(
-            market=Market.KRX, start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock"
-        ),
         factors=(momentum,),
         portfolio=replace(
             template.portfolio,
@@ -226,7 +226,9 @@ def test_run_thread_defers_full_collections_until_the_run_completes(tmp_path: Pa
     executor = _RecordingExecutor()
     runs = _runs(executor, tmp_path, "gc-completed")
 
-    runs.start(BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON))
+    runs.start(
+        BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=_ENVIRONMENT)
+    )
     status = _finish(runs, "gc-completed")
 
     assert status == "completed"
@@ -238,7 +240,9 @@ def test_failed_run_restores_the_threshold(tmp_path: Path) -> None:
     executor = _RecordingExecutor(failure=RuntimeError("engine exploded"))
     runs = _runs(executor, tmp_path, "gc-failed")
 
-    runs.start(BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON))
+    runs.start(
+        BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=_ENVIRONMENT)
+    )
     status = _finish(runs, "gc-failed")
 
     assert status == "failed"
@@ -252,7 +256,9 @@ def test_cancelled_run_restores_the_threshold(tmp_path: Path) -> None:
     executor = _RecordingExecutor(hold=True)
     runs = _runs(executor, tmp_path, "gc-cancelled")
 
-    runs.start(BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON))
+    runs.start(
+        BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=_ENVIRONMENT)
+    )
     assert executor.entered.wait(timeout=10)
     runs.cancel("gc-cancelled")
     executor.release.set()

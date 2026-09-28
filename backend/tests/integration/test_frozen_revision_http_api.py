@@ -49,7 +49,7 @@ def test_document_api_marks_frozen_revisions(tmp_path: Path) -> None:
     assert body["spec"]["factors"][0]["factor_id"] == "momentum"  # 응답 spec은 1.1 모양
     assert legacy.status_code == 200, legacy.text
     assert legacy.json()["requires_upgrade"] is True and legacy.json()["generated"] is True
-    assert '"schema_version": "1.1"' in legacy.json()["source"]
+    assert '"schema_version": "1.2"' in legacy.json()["source"]
 
     listed = client.get("/api/v1/strategies")
     assert listed.status_code == 200

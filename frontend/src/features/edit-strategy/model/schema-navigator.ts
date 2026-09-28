@@ -41,6 +41,12 @@ export type SchemaFacts = {
    * 키를 조립하지 않도록 backend가 매핑을 통째로 내려준다(P1-03, spec D8).
    */
   operatorKeys: Readonly<Record<string, string>> | null;
+  /**
+   * enum 값 → 이름 키. 연산자 enum 은 `operatorKeys` 그대로이고, 나머지 enum 은 property 설명 키
+   * stem 아래 `<stem>.value.<값>`이다(P3-01: `top_percent`·`zscore` 같은 원문 값을 선택지에 보이지
+   * 않는다). 키 규칙만 여기 있고 값 목록은 스키마 `enum`에서 온다. 설명 키가 없으면 null.
+   */
+  valueLabelKeys: Readonly<Record<string, string>> | null;
   appliedStage: string | null;
   catalog: string | null;
   reference: string | null;
@@ -496,9 +502,12 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
         (candidate) => candidate !== null && candidate !== undefined,
       )
     : undefined;
+  const enumValues = Array.isArray(node.enum) ? node.enum.map(String) : [];
+  const descriptionKey = stringAt(node, "x-description-key");
+  const operatorKeys = stringRecordAt(node, "x-operator");
   return {
     type,
-    enumValues: Array.isArray(node.enum) ? node.enum.map(String) : [],
+    enumValues,
     hasConst: own("const"),
     constValue: node.const,
     hasDefault: own("default"),
@@ -509,8 +518,18 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
     format: stringAt(node, "format"),
     unit: stringAt(node, "x-unit"),
     displayUnit: stringAt(node, "x-display-unit"),
-    descriptionKey: stringAt(node, "x-description-key"),
-    operatorKeys: stringRecordAt(node, "x-operator"),
+    descriptionKey,
+    operatorKeys,
+    valueLabelKeys:
+      operatorKeys ??
+      (descriptionKey === null || enumValues.length === 0
+        ? null
+        : Object.fromEntries(
+            enumValues.map((value) => [
+              value,
+              `${descriptionKey}.value.${value}`,
+            ]),
+          )),
     appliedStage: stringAt(node, "x-applied-stage"),
     catalog: stringAt(node, "x-catalog"),
     reference: stringAt(node, "x-reference"),

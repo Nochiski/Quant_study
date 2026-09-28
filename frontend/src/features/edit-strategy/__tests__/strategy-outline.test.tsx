@@ -36,10 +36,6 @@ const SCHEMA: JsonSchema = {
     schema_version: { type: "string" },
     title: { type: "string" },
     description: { type: "string" },
-    data: {
-      type: "object",
-      properties: { market: { type: "string" } },
-    },
     eligibility: {
       type: "object",
       properties: {
@@ -84,7 +80,6 @@ const SCHEMA: JsonSchema = {
       type: "object",
       properties: { max_name_weight: { type: "number" } },
     },
-    execution: objectSection,
     parameters: {
       type: "array",
       "x-defines": "parameter",
@@ -94,11 +89,9 @@ const SCHEMA: JsonSchema = {
 };
 
 const SOURCE = [
-  'schema_version: "1.1"',
+  'schema_version: "1.2"',
   "title: momentum",
   'description: ""',
-  "data:",
-  "  market: KRX",
   "eligibility:",
   "  rules:",
   "    - field_id: price.close",
@@ -113,7 +106,6 @@ const SOURCE = [
   "portfolio: {}",
   "risk:",
   "  max_name_weight: 0.05",
-  "execution: {}",
   "parameters: []",
   "",
 ].join("\n");
@@ -146,13 +138,11 @@ describe("Strategy Outline projection", () => {
     const nodes = projectStrategyOutline(result, SCHEMA);
     expect(nodes.map((node) => node.label)).toEqual([
       "identity",
-      "data",
       "eligibility",
       "factors",
       "signal",
       "portfolio",
       "risk",
-      "execution",
       "parameters",
     ]);
     const factor = findOutlineNode(nodes, "/factors/0");
@@ -292,7 +282,7 @@ describe("Strategy Outline projection", () => {
     act(() => result.current.onSelectOutlineNode(basics!));
     expect(onSelectedPointer).toHaveBeenLastCalledWith(undefined, "outline");
 
-    editorSource = 'schema_version: "1.1"\ntitle: minimal\n';
+    editorSource = 'schema_version: "1.2"\ntitle: minimal\n';
     const loaded = documentReducer(parsedState(), {
       type: "load",
       format: "yaml",
@@ -639,6 +629,8 @@ describe("Strategy Outline tree", () => {
     expect(
       within(tree).getByRole("treeitem", { name: "max_name_weight" }),
     ).toBeVisible();
-    expect(within(tree).queryByRole("treeitem", { name: "data" })).toBeNull();
+    expect(
+      within(tree).queryByRole("treeitem", { name: "eligibility" }),
+    ).toBeNull();
   });
 });

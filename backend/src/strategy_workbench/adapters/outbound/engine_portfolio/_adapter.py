@@ -23,6 +23,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     EngineCompatibility,
     EngineRequirementSummary,
 )
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.portfolio.facade.construction import TargetFrame
 from strategy_workbench.domain.strategy.facade.specification import (
     PortfolioSide,
@@ -33,13 +34,20 @@ from strategy_workbench.domain.strategy.facade.specification import (
 class BacktestEnginePortfolioAdapter:
     """Translate strategy SoT into engine requirements and executable target actions."""
 
-    def requirements(self, spec: StrategySpec) -> StrategyRequirements:
+    def requirements(self, spec: StrategySpec, environment: RunEnvironment) -> StrategyRequirements:
+        """실행에 필요한 엔진 능력. 참여율은 전략 문서가 아니라 실행 설정이 소유한다(1.2).
+
+        틀리는 방향이 한쪽으로 치우쳐 있어서 인자를 받는다: 문서
+        `execution.participation_rate = 1.0` 에 명시 `environment.participation_rate = 0.1` 이면
+        실제 실행은 부분 체결을 쓰는데 요구 집합에 `PARTIAL_FILL` 이 빠져 능력 게이트가 조용히
+        약해진다(반대 조합은 과다 선언이라 무해하다).
+        """
         features: set[EngineFeature] = set()
         if spec.portfolio.side is PortfolioSide.LONG_SHORT:
             features.add(EngineFeature.SHORT_SELLING)
         if spec.risk.gross_exposure > 1.0:
             features.add(EngineFeature.MARGIN)
-        if spec.execution.participation_rate < 1.0:
+        if environment.participation_rate < 1.0:
             features.add(EngineFeature.PARTIAL_FILL)
         return StrategyRequirements(
             histories=(),
@@ -49,8 +57,8 @@ class BacktestEnginePortfolioAdapter:
             features=frozenset(features),
         )
 
-    def assess(self, spec: StrategySpec) -> EngineCompatibility:
-        requirements = self.requirements(spec)
+    def assess(self, spec: StrategySpec, environment: RunEnvironment) -> EngineCompatibility:
+        requirements = self.requirements(spec, environment)
         report = validate_requirements(requirements, reference_engine_capabilities())
         return EngineCompatibility(
             compatible=report.ok,

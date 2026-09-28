@@ -63,13 +63,19 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
 - 그래프 표현의 세 수준은 모두 같은 parse tree를 읽는다. 파이프라인은 최상위 섹션, 레시피는
   팩터 하나의 `graph.nodes`가 **단일 입력 체인**일 때의 순서 목록 투영, 고급은 임의 DAG.
 - 배관(`kind`·`node_id`·`input_node_id`·`output_node_id`)은 언어에 남지만 **그래프 표현에서는
-  사용자에게 보이지 않는다.** 레시피 빌더가 노드를 추가할 때 kind는 연산자에서, node_id는
-  `<operator>_<n>`으로, 입력은 직전 단계로, 출력은 마지막 단계로 채운다(1.1 `addNode` 규칙 확장).
-  고급 화면의 접힌 "식별자" 영역에서만 보인다.
+  사용자에게 보이지 않는다.** 레시피 빌더가 노드를 추가할 때 kind는 연산자에서, node_id는 아래
+  규칙으로, 입력은 직전 단계로, 출력은 마지막 단계로 채운다(1.1 `addNode` 규칙 확장).
+  node_id 규칙(정본, 2026-09-27 P2-08): 바탕 이름을 그대로 쓰고 같은 그래프 안에서 겹치면 `_2`·`_3` …
+  을 붙인다. 접미사 규칙은 `suggestNodeId`와 같다. 바탕 이름은 단계 노드가 연산자(`mean`·`gt`), 잎
+  노드가 필드 id의 끝 조각(`price.close` → `close`)이다. 잎 바탕 이름은 지금 `addNode`(바탕 `field`)와
+  달라 P5-01이 새로 구현한다. node_id·노드 순서·입력 슬롯이 모두 `spec_hash`에 들어가므로
+  `ideas/*.yaml` fixture도 이 규칙으로 적는다. 부가 잎을 넣는 위치와 체인 꼬리가 들어갈 입력 슬롯의
+  규칙은 P5-01이 정하고 fixture와의 일치를 테스트로 고정한다. 고급 화면의 접힌 "식별자" 영역에서만
+  보인다.
 - **다중 입력 연산자의 부가 입력은 항상 새 소스 잎 노드다**(정본). 레시피 빌더는 `binary`·
   `comparison`처럼 입력이 둘인 연산자를 추가할 때 부가 입력을 데이터 필드 picker로 물어 `field`·
   `constant`·`parameter` 잎 노드를 **새로 만든다**. 체인 머리를 다시 참조하는 형태(`left: close`,
-  `right: ma20`처럼 `close`를 두 곳에서 읽는 그래프)는 손으로 쓸 수 있지만 **비체인으로 판정해
+  `right: mean`처럼 `close`를 두 곳에서 읽는 그래프)는 손으로 쓸 수 있지만 **비체인으로 판정해
   고급 수준으로 보낸다.** 같은 아이디어가 문서 두 벌로 갈리지 않게 하는 규칙이며, `ideas/*.yaml`
   fixture는 레시피 빌더 산출 형태를 따른다.
 - 체인 판정 규칙(정본): 소스 노드 하나로 시작해 각 노드가 직전 노드만 참조하고 `output_node_id`가
@@ -78,9 +84,9 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
   체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다.
 - 아이디어 3(20일 이평 돌파)의 정본 노드 형태는 노드 4개(그중 잎 2개: `close`·`close_2`)다:
   `close`(field `price.close`) →
-  `ma20`(time_series mean, window 20, input `close`) → 잎 `close_2`(field `price.close`) →
-  `breakout`(comparison gt, `left_node_id: close_2`, `right_node_id: ma20`, 출력). 마지막 노드가
-  다중 입력이고 한 입력(`ma20`)이 체인 꼬리, 나머지(`close_2`)가 잎이므로 체인이다.
+  `mean`(time_series mean, window 20, input `close`) → 잎 `close_2`(field `price.close`) →
+  `gt`(comparison gt, `left_node_id: close_2`, `right_node_id: mean`, 출력). 마지막 노드가
+  다중 입력이고 한 입력(`mean`)이 체인 꼬리, 나머지(`close_2`)가 잎이므로 체인이다.
 
 ### D3. 기존 YAML 규칙 중 실행 환경을 UI로 편입한다 (schema 1.2)
 

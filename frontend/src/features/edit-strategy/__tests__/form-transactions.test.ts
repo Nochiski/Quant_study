@@ -63,12 +63,14 @@ describe("parseDraft", () => {
   });
 
   it("reads dates and passes text through", () => {
-    const data = objectSection("data");
-    expect(parseDraft(fieldOf(data, "start").control, "2024-01-02")).toEqual({
+    // schema 1.2 전략 문서에는 날짜 필드가 없다(기간은 실행 설정이 소유한다, P2-03). 컨트롤을
+    // 직접 만들어 파서만 검증한다 — 실행 설정 패널이 같은 컨트롤을 쓴다(P3-02).
+    const dateControl = { kind: "date" } as const;
+    expect(parseDraft(dateControl, "2024-01-02")).toEqual({
       status: "ok",
       value: "2024-01-02",
     });
-    expect(parseDraft(fieldOf(data, "start").control, "2024/01/02")).toEqual({
+    expect(parseDraft(dateControl, "2024/01/02")).toEqual({
       status: "invalid",
       reason: "date",
     });

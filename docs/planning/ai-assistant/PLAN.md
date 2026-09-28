@@ -258,7 +258,7 @@ C-01이 매뉴얼을 고치며 닫았고(C-02가 스크립트 경로와 변수 �
 |---|---|---|---|---|---|
 | [x] | `C-01` | 감사 비차단 10건: stale 표기·이월 체크박스 정정, `MIN_CALL_OUTPUT_TOKENS` owner 단일화, CI lint·type 범위와 no-extras 대상 확대, 비밀 누락 422·anthropic env 전수 테스트 | A-07 | `MERGED` | 구현자 `impl-ai-a07`, 워크트리 `wt-ai-c01`, 브랜치 `feat/ai-c-01-audit-followup` · [#190](https://github.com/Nochiski/Quant_study/pull/190) · 최종 `707cd4f9` · main 머지 `a3cc5f8b` |
 | [x] | `C-02` | Phase B 감사 비차단 7건: 4xx 거부 문구 표 entity 단일화(생성 code 합집합), 적용 후 백테스트 blocked 시 요청 폐기·알림, SSE 좁히기 표 타입 가드, CORS 기본 origin 단일 owner, 두 page 어시스턴트 배선 훅, backlog 2건 담당 지정, PLAN 병합 규칙 정정 | C-01 | `MERGED` | [#192](https://github.com/Nochiski/Quant_study/pull/192) · 최종 `0a030884`, 머지 `16e6e994` · `review_ai_c_02` 1차 REQUEST_CHANGES(P1 1: 팩터 계획 조회 중 게이트 일시 닫힘을 blocked로 읽어 적용 후 백테스트 미실행) → `settling` 신호로 대기 유지 + 팩터 창 변경 e2e 시나리오 → 2차 APPROVE(blocking·non-blocking 0) · 전체 e2e 24/24 |
-| [x] | `C-03` | C 절 backlog 2건: 검색 상한 통지 전용 `ChatEvent`(`SearchBudgetExhausted`, 두 adapter·저장·SSE·SDK·리듀서·사이드바 안내 ko/en), `ChatMessageView.turn_id`와 id 짝짓기, assistant DB v2 제자리 업그레이드(옛 통지 행 재기록·`turn_id` 채움), 대본 "검색 상한" 시나리오와 US-CS-04 e2e | C-02 | `MERGED` | 구현자 `impl-ai-c03`, 워크트리 `wt-ai-c03`, 브랜치 `feat/ai-c-03-backlog`(origin/main `a4ccfd7a` 위) · PR 본문에 게이트 결과 · `review_ai_c03` APPROVE(tip `3995e778`, blocking 0) · main 머지 `5213ffe2`(#204) |
+| [x] | `C-03` | C 절 backlog 2건: 검색 상한 통지 전용 `ChatEvent`(`SearchBudgetExhausted`, 두 adapter·저장·SSE·SDK·리듀서·사이드바 안내 ko/en), `ChatMessageView.turn_id`와 id 짝짓기, assistant DB v2 제자리 업그레이드(옛 통지 행 재기록·`turn_id` 채움), 대본 "검색 상한" 시나리오와 US-CS-04 e2e | C-02 | `MERGED` | 구현자 `impl-ai-c03`, 워크트리 `wt-ai-c03`, 브랜치 `feat/ai-c-03-backlog`(origin/main `a4ccfd7a` 위) · PR 본문에 게이트 결과 · #204 리뷰 `review_ai_c03` APPROVE(tip `3995e778`, blocking 0) · main 머지 `5213ffe2`(#204) |
 
 Phase exit:
 
@@ -403,7 +403,7 @@ Phase exit:
 | C-01 | `review_ai_c_01` | 3 | APPROVE | `707cd4f9`. P2-N1 닫힘, 리드 main 병합 커밋이 PLAN.md만 바꿈, 두 판 내용 손실 0 |
 | C-02 | `review_ai_c_02` | 1 | REQUEST_CHANGES | P1 1(팩터 그래프 변경 제안에서 explain 조회 중 게이트 일시 닫힘을 blocked로 읽어 적용 후 백테스트 미실행 — 기존 e2e는 캐시 경로라 미검출), P3 3 |
 | C-02 | `review_ai_c_02` | 2 | APPROVE | `0a030884`. 실제 훅 조합 프로브 4종 green(StrictMode 포함), settling 무시 돌연변이 6건 red, 영구 대기 경로 없음, blocking·non-blocking 0 |
-| C-03 | `review_ai_c03`(리뷰어 `review_lang2_p1_06`) | 1 | APPROVE | `review_ai_c03.md`, tip `3995e778`(#204 머지 head). blocking 0. main 코드로 만든 실제 v1 DB 업그레이드 손실 0·멱등·실패 롤백, `turn_id` 역채움 경계, 두 adapter 발화 대칭, US-CS-04 e2e 돌연변이 세 층 red 확인. 관찰 2(결함 아님: v1 턴 행 없는 질문 숨김, 소진 호출이 마지막이면 통지 없음). PLAN·#204 본문에는 없던 기록이라 2026-09-28 문서 최신화 감사가 더했다. main 머지 `5213ffe2` |
+| C-03 | `review_ai_c03`(리뷰어 `review_lang2_p1_06`) | 1 | APPROVE | #204 리뷰(`review_ai_c03.md`), tip `3995e778`(#204 머지 head). blocking 0. main 코드로 만든 실제 v1 DB 업그레이드 손실 0·멱등·실패 롤백, `turn_id` 역채움 경계, 두 adapter 발화 대칭, US-CS-04 e2e 돌연변이 세 층 red 확인. 관찰 2(결함 아님: v1 턴 행 없는 질문 숨김, 소진 호출이 마지막이면 통지 없음). PLAN·#204 본문에는 없던 기록이라 2026-09-28 문서 최신화 감사가 더했다. main 머지 `5213ffe2` |
 | D-01·D-02·D-03 | `review_ai_d` | 1 | APPROVE | 스택 세 PR 함께, blocking 0. P3 8건 중 7건(P3-1~P3-6·P3-8)을 D-03 tip에 반영(게이트 SHA `35d41a38`), P3-7(결과 도구 활동의 JSON 원문)은 D 절 backlog D-04로. 근거는 #210 본문 "리뷰 반영" 절. 반영분 재확인 기록 없음 |
 
 ## 검증 기록

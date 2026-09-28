@@ -980,7 +980,7 @@ Phase exit:
 | [x] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `MERGED` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · `review_lang2_p2_07` 1차 REQUEST_CHANGES(P1 1: 그래프 밖 필드 참조가 필드 계약 검사를 빠져나감·P3 3) → 2차 APPROVE(tip `945fd081`) · 통합 머지 `013da821`(#201, base `lang2/integration`, 2026-09-27) · main 머지 `a4be517a`(#202, 2026-09-28) |
 | [x] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `MERGED` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 1차 REQUEST_CHANGES(P1 1 DEFECT-P208-001·P2 1·P3 3) → 2차 APPROVE(`d99aa024`, 새 관찰 P2-NEW-1 원주가 오염 → 이슈 #214 → BACKLOG-017) · 통합 머지 `48eff6d8`(#205, 2026-09-27) · main 머지 `a4be517a`(#202, 2026-09-28) |
 | [x] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `MERGED` | [#217](https://github.com/Nochiski/Quant_study/pull/217) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base `lang2/integration`(처음 연 #216 은 P2-08 브랜치 삭제로 닫혀 #217 로 다시 열었다) · `review_lang2_p2_09` 1차 REQUEST_CHANGES(P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 뺀다) → 반영 `a32ed9d7` → 같은 리뷰어 최종 재확인 APPROVE(tip `a32ed9d7`, blocking 0, Review 기록 2회차) · Phase 2 감사 NB-1(현재 판 문서 업그레이드) 수정 `17c68261` · 통합 머지 `4936a840`(#217, `lang2/integration`, 2026-09-27, 머지 head `a32ed9d7`) · main 머지 `a4be517a`(#202, 2026-09-28) |
-| [x] | `P2-10` | Phase 2 감사 후속(문서): PLAN 머지·통합·리뷰 기록 정정, `INTEGRATED` 상태, BACKLOG-017, P3 계약 누락 예약 | P2-09 | `MERGED` | [#222](https://github.com/Nochiski/Quant_study/pull/222) · 워크트리 `wt-lang2-p2-10`, 브랜치 `docs/lang2-p2-10-phase2-records` · base P2-09(`17c68261` 에서 착수, `a32ed9d7` 을 merge 로 따라감) · 별도 PR 리뷰 기록 없음. Phase 2 재감사(`audit_lang2_phase_2` 10절, tip `c8e1e37a`)가 이 PR 의 diff 를 대조해 PASS · 통합 머지 `e6422e98`(#222, `lang2/integration`, 2026-09-27, 머지 head `c8e1e37a`) · main 머지 `a4be517a`(#202, 2026-09-28) |
+| [x] | `P2-10` | Phase 2 감사 후속(문서): PLAN 머지·통합·리뷰 기록 정정, `INTEGRATED` 상태, BACKLOG-017, P3 계약 누락 예약 | P2-09 | `MERGED` | [#222](https://github.com/Nochiski/Quant_study/pull/222) · 워크트리 `wt-lang2-p2-10`, 브랜치 `docs/lang2-p2-10-phase2-records` · base P2-09(`17c68261` 에서 착수, `a32ed9d7` 을 merge 로 따라감) · 별도 PR 리뷰 기록 없음. Phase 2 재감사(#222 재감사 10절(`audit_lang2_phase_2.md`), tip `c8e1e37a`)가 이 PR 의 diff 를 대조해 PASS · 통합 머지 `e6422e98`(#222, `lang2/integration`, 2026-09-27, 머지 head `c8e1e37a`) · main 머지 `a4be517a`(#202, 2026-09-28) |
 
 Phase exit:
 
@@ -988,7 +988,7 @@ Phase exit:
 - [x] compile 통과 문서가 preview에서 422 없음(property). (P2-07 `test_compile_gate_property.py`, P2-09 tip backend 전체에서 통과)
 - [x] `plan_hash`가 결측 정책으로 계속 갈린다(P2-02 회귀). (`test_factor_missing_policy.py`, P2-09 tip 통과)
 - [x] `ideas/*.yaml` 5개 backend 통과. (P2-08 `test_idea_fixtures.py`, P2-09 tip 통과)
-- [x] SoT·책임분리 점검 blocking 0, SoT "실행 설정" 행 채움·업그레이드 행 예약 해제. (SoT 두 행은 P2-09 가 고쳤다 — 실행 설정 행에 업그레이드 응답 `environment` 경로, 업그레이드 행 예약 표기 해제, 금지 절 "1.0 → 1.1 → 1.2". Phase 2 감사(2026-09-27, `e064d2af`)는 FAIL — BLOCKING 2건 DEFECT-P2X-001·002 는 둘 다 기록 결함이고 P2-10 이 닫는다. 코드·계약은 통과. 이 PR 의 재감사 통과 뒤 체크한다) → **재감사 PASS**(2026-09-27, `audit_lang2_phase_2` 10절, P2-10 tip `c8e1e37a`): 두 BLOCKING 닫힘, 새 BLOCKING 0, 새 비차단 3건(NB-R1 버전 줄 "1.1" + 1.0 본문의 배너·endpoint 불일치, NB-R2 tracker 빈 줄 — 2026-09-28 지움, NB-R3 `INTEGRATED` 전환 절차·도구 테스트). 재감사가 조건으로 둔 P2-09 재확인은 최종 APPROVE(`a32ed9d7`)로 닫혔다. 체크는 2026-09-28 문서 최신화 감사가 기록했다
+- [x] SoT·책임분리 점검 blocking 0, SoT "실행 설정" 행 채움·업그레이드 행 예약 해제. (SoT 두 행은 P2-09 가 고쳤다 — 실행 설정 행에 업그레이드 응답 `environment` 경로, 업그레이드 행 예약 표기 해제, 금지 절 "1.0 → 1.1 → 1.2". Phase 2 감사(2026-09-27, `e064d2af`)는 FAIL — BLOCKING 2건 DEFECT-P2X-001·002 는 둘 다 기록 결함이고 P2-10 이 닫는다. 코드·계약은 통과. 이 PR 의 재감사 통과 뒤 체크한다) → **재감사 PASS**(2026-09-27, #222 재감사 10절(`audit_lang2_phase_2.md`), P2-10 tip `c8e1e37a`): 두 BLOCKING 닫힘, 새 BLOCKING 0, 새 비차단 3건(NB-R1 버전 줄 "1.1" + 1.0 본문의 배너·endpoint 불일치, NB-R2 tracker 빈 줄 — 2026-09-28 지움, NB-R3 `INTEGRATED` 전환 절차·도구 테스트). 재감사가 조건으로 둔 P2-09 재확인은 최종 APPROVE(`a32ed9d7`)로 닫혔다. 체크는 2026-09-28 문서 최신화 감사가 기록했다
 
 ## P3 — frontend 1.2 적응
 
@@ -1103,8 +1103,8 @@ Phase exit:
 | `P3-02` | `review_pr242` | 1 | `REQUEST_CHANGES` | `review_pr242.md`, tip `7ba3005e`. blocking 1. **DEFECT-242-01(P1)**: 기간·유니버스를 정한 뒤 수수료만 -1 이어도 "기간과 유니버스를 정하세요" 고정 문장, 칸으로 가는 경로 없음 → 칸별 차단 문장(첫 칸 이름·이유·나머지 개수)과 요약 띠 초점 경로(`4d9989ca`). DEFECT-242-02(P2) AI 적용 뒤 차단 사유 안내·DEFECT-242-03(P2) #240 검증 완료 대기 helper → `304fd221`·`7e36416b`. DEFECT-242-04(P3) 스키마 단위·run 상세 스키마 기반 칸·enum 값 이름 → `4d9989ca`. (c) e2e `REQUESTED_ENVIRONMENT` 는 요청 계약 단언이라 유지(결정 2) |
 | `P3-02` | `review_pr242` | 2 | `APPROVE` | `review_pr242.md` 재리뷰 절, tip `dc02417a`(통합 `cb9b1b3f` 병합 뒤). blocking 0. 1차 4건 해소 확인. 재리뷰 P3 2건(업그레이드 채우기의 12자리 초과 비율 반올림, run 상세의 스키마 밖 기록 키 숨김)은 이슈 #251 로 넘겼다 |
 | `P2-09` | `review_lang2_p2_09` | 1 | `REQUEST_CHANGES` | tip `e064d2af`. P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 빼서 1.1 의 팩터별 결측 처리가 경고 없이 바뀐다. 비차단 관찰 2. 반영 `a32ed9d7`(실효 값 판정, 관찰 1 float 1.1 테스트). 같은 시점 Phase 2 감사 NB-1 은 `17c68261` 이 고쳤다 |
-| `P2-09` | `review_lang2_p2_09` | 2 | `APPROVE` | `review_lang2_p2_09.md` 12절(최종 재확인), tip `a32ed9d7`(#217 머지 head). blocking 0. P1-1·NB-1 닫힘, 돌연변이 13건 전부 red, backend 2529 passed. 남은 비차단: 머지 전 `a32ed9d7` CI 실패 집합 확인, 은퇴 `saved_*` row 실 DB 확인. 2026-09-28 문서 최신화 감사가 누락된 이 행을 더했다 |
-| `P2-10` | 기록 없음 | — | — | 별도 PR 리뷰 기록이 없다(#222 리뷰·댓글 0건). Phase 2 재감사(`audit_lang2_phase_2` 10절, tip `c8e1e37a` = #222 머지 head)가 이 PR 의 기록 정정·`INTEGRATED` 도구 diff·8절 17행 예약을 대조해 PASS 했다 |
+| `P2-09` | `review_lang2_p2_09` | 2 | `APPROVE` | #217 리뷰 12절(최종 재확인, `review_lang2_p2_09.md`), tip `a32ed9d7`(#217 머지 head). blocking 0. P1-1·NB-1 닫힘, 돌연변이 13건 전부 red, backend 2529 passed. 남은 비차단: 머지 전 `a32ed9d7` CI 실패 집합 확인, 은퇴 `saved_*` row 실 DB 확인. 2026-09-28 문서 최신화 감사가 누락된 이 행을 더했다 |
+| `P2-10` | 기록 없음 | — | — | 별도 PR 리뷰 기록이 없다(#222 리뷰·댓글 0건). Phase 2 재감사(#222 재감사 10절(`audit_lang2_phase_2.md`), tip `c8e1e37a` = #222 머지 head)가 이 PR 의 기록 정정·`INTEGRATED` 도구 diff·8절 17행 예약을 대조해 PASS 했다 |
 ## 검증 기록
 
 | PR | 명령 | 결과 | 일시 |
@@ -1137,7 +1137,7 @@ Phase exit:
 - 2026-09-28 — 문서 최신화 감사 반영(기록 정정). BACKLOG-003(P2-07 `e159e572`)·BACKLOG-013(P3-02 `4e6bbd62`)에
   빠져 있던 "처리" 줄을 넣었다. P2-09 행의 "재확인 대기"를 리뷰어 최종 재확인 APPROVE(`a32ed9d7`, #217 머지
   head 와 같다)로 고치고 Review 기록에 P2-09 2회차와 P2-10 행을 더했다. P2 Phase exit 의 SoT·책임분리 항목은
-  Phase 2 재감사(`audit_lang2_phase_2` 10절, #222 머지 head `c8e1e37a`) PASS 로 체크했다. 재감사 비차단 NB-R2
+  Phase 2 재감사(#222 재감사 10절(`audit_lang2_phase_2.md`), #222 머지 head `c8e1e37a`) PASS 로 체크했다. 재감사 비차단 NB-R2
   (P2-09·P2-10 행 사이 빈 줄 때문에 P2-10 행이 표로 렌더되지 않음)도 지웠다. 현재 작업 Packet 을 P3-03 으로
   바꾸고, 통합 브랜치 은퇴·삭제(2026-09-28 #202 머지 직후)를 과거형으로 적었다. README 갱신 규칙 5 에 P3-03
   부터의 CI 전체 green 조건을 반영했다.

@@ -64,8 +64,8 @@ describe("parseSource", () => {
     expect(slice(text, locateRange(parsed, "/risk/max_name_wieght")!)).toBe(
       "0.05",
     );
-    expect(locateRange(parsed, "/data/end_date")).toEqual(
-      parsed.valueRanges.get("/data"),
+    expect(locateRange(parsed, "/risk/nope")).toEqual(
+      parsed.valueRanges.get("/risk"),
     );
     expect(locateRange(parsed, "/nowhere/deep")).toEqual(
       parsed.valueRanges.get(""),

@@ -135,6 +135,9 @@ class FieldSpec:
     description: str
     disclosure_basis: str
     evidence: str
+    # 분할·증자 조정 없는 원주가 시계열이면 시점 간 변화를 잴 때 쓸 조정 필드 id(BACKLOG-018).
+    # compile 이 필드 계약(`FieldMetadata.adjusted_field_id`)으로 읽어 warning 을 낸다.
+    adjusted_field_id: str | None = None
 
 
 # ── 원천 (읽는 자리) ──────────────────────────────────────────────────────────
@@ -475,6 +478,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis="정규장 종가 확정 시점",
         evidence="price_daily.close ← stg_price_daily ∪ stg_etf_price_daily (EG20 원주가 불변)",
+        adjusted_field_id="price.adj_close",
     ),
     FieldSpec(
         field_id="price.open",

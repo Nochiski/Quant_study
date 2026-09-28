@@ -6,17 +6,28 @@ import math
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, fields, is_dataclass, replace
 from datetime import date
+from decimal import Decimal
 from enum import Enum
 from typing import TypeGuard, TypeVar
 
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
+from strategy_workbench.domain.factor.facade.cross_section import (
+    cross_sectional_rank,
+    cross_sectional_zscore,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
-    ComparisonOperator,
+    CROSS_SECTIONAL_ELIGIBILITY_OPERATORS,
+    EligibilityOperator,
+    EligibilityRule,
     FactorDirection,
     PortfolioSide,
     RebalanceFrequency,
     SelectionMethod,
+    SignalNormalization,
     StrategySpec,
     WeightingMethod,
+    composite_factors,
+    inverse_risk_factor_id,
     strategy_spec_hash,
 )
 
@@ -43,6 +54,29 @@ from ._models import (
 
 _T = TypeVar("_T")
 _CHECKPOINT_BATCH = 256
+
+# 절대 규칙 = 횡단면이 아닌 나머지. 목록을 여기 다시 적지 않고 owner(`domain/strategy`)의
+# 횡단면 집합에서 뺀다 — 연산자가 늘면 두 집합이 같이 움직인다.
+_ABSOLUTE_ELIGIBILITY_OPERATORS: frozenset[EligibilityOperator] = (
+    frozenset(EligibilityOperator) - CROSS_SECTIONAL_ELIGIBILITY_OPERATORS
+)
+
+# 후보를 선정 순위에서 빼는 사유. `_score_candidate`(1-pass)와 횡단면 2-pass 가 같은 집합으로
+# `eligible` 을 다시 계산한다 — 2-pass 가 덧붙인 사유를 이 집합이 모르면 잘린 종목이 다시
+# 순위에 들어간다.
+_BLOCKING_EXCLUSIONS: frozenset[ExclusionReason] = frozenset(
+    {
+        ExclusionReason.NOT_IN_UNIVERSE,
+        ExclusionReason.FUTURE_DATA,
+        ExclusionReason.MISSING_ELIGIBILITY,
+        ExclusionReason.ELIGIBILITY_FAILED,
+        ExclusionReason.ELIGIBILITY_RANK_CUT,
+        ExclusionReason.MISSING_FACTOR,
+        ExclusionReason.SCORE_THRESHOLD,
+        ExclusionReason.REGIME_BLOCKED,
+        ExclusionReason.LIQUIDITY_FAILED,
+    }
+)
 
 
 def _noop_progress(fraction: float) -> None:
@@ -113,6 +147,7 @@ def compile_rebalance_schedule(
 def compile_target_tape(
     spec: StrategySpec,
     *,
+    environment: RunEnvironment,
     data_snapshot_id: str,
     sessions: tuple[date, ...],
     observations: tuple[PortfolioObservation, ...],
@@ -127,6 +162,7 @@ def compile_target_tape(
     """
     return _compile_target_tape(
         spec,
+        environment=environment,
         data_snapshot_id=data_snapshot_id,
         sessions=sessions,
         observations=observations,
@@ -140,6 +176,7 @@ def compile_target_tape(
 def compile_target_tape_with_trace(
     spec: StrategySpec,
     *,
+    environment: RunEnvironment,
     data_snapshot_id: str,
     sessions: tuple[date, ...],
     observations: tuple[PortfolioObservation, ...],
@@ -151,6 +188,7 @@ def compile_target_tape_with_trace(
     """Compile once and return an out-of-band audit from that same calculation."""
     return _compile_target_tape(
         spec,
+        environment=environment,
         data_snapshot_id=data_snapshot_id,
         sessions=sessions,
         observations=observations,
@@ -164,6 +202,10 @@ def compile_target_tape_with_trace(
 def _compile_target_tape(
     spec: StrategySpec,
     *,
+    # 체결 시점은 전략 문서가 아니라 실행 설정이 소유한다(1.2, spec D3 S2). tape hash payload 와
+    # `TargetTape.execution_timing` 이 같은 값을 읽어야 같은 전략·다른 체결 시점이 같은 tape 로
+    # 취급되지 않는다.
+    environment: RunEnvironment,
     data_snapshot_id: str,
     sessions: tuple[date, ...],
     observations: tuple[PortfolioObservation, ...],
@@ -278,7 +320,7 @@ def _compile_target_tape(
     payload = {
         "data_snapshot_id": data_snapshot_id,
         "strategy_hash": strategy_hash,
-        "execution_timing": spec.execution.timing.value,
+        "execution_timing": environment.timing.value,
         "frames": canonical_frames,
     }
     tape_hash = _hash_payload(payload, checkpoint=checkpoint)
@@ -289,7 +331,7 @@ def _compile_target_tape(
             strategy_hash=strategy_hash,
             tape_hash=tape_hash,
             frames=frames,
-            execution_timing=spec.execution.timing.value,
+            execution_timing=environment.timing.value,
             warnings=_sector_unknown_warnings(spec, unknown_sector_frames, len(frames)),
         ),
         trace=construction_trace,
@@ -363,6 +405,10 @@ def _rebalance_pairs(
 class _ScoredCandidate:
     decision: CandidateDecision
     contributions: tuple[FactorContributionTrace, ...]
+    # 1-pass 절대 eligibility 규칙(`gt`~`eq`)을 전부 통과했는가. 2-pass 횡단면 모집단의 자격이며
+    # `decision.eligible`(유동성·레짐·팩터 결측·점수 문턱까지 반영)과 다르다 — 유동성 필터에
+    # 걸린 종목까지 분모에서 빼면 "상위 20%"의 모집단이 단계마다 달라진다(spec D3 S5).
+    passes_absolute_eligibility: bool
 
 
 @dataclass(frozen=True)
@@ -393,10 +439,13 @@ def _compile_frame(
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> _FrameCompilation:
     """One rebalance. `previous_weights` is the book carried in, never read off observations."""
+    # 정규화는 후보 하나로 판단할 수 없는 횡단면 사실이라 점수 계산보다 먼저 프레임 전체에서 센다.
+    normalized_signals = _cross_sectional_signals(spec, observations, checkpoint=checkpoint)
     scored = [
         _score_candidate(
             spec,
             observation,
+            normalized_signals=normalized_signals,
             include_trace=(
                 trace_security_ids is not None and observation.security_id in trace_security_ids
             ),
@@ -406,7 +455,9 @@ def _compile_frame(
     contributions_by_id = {
         item.decision.security_id: item.contributions for item in _checkpointed(scored, checkpoint)
     }
-    decisions = [item.decision for item in _checkpointed(scored, checkpoint)]
+    decisions = _apply_cross_sectional_eligibility(
+        spec, observations, scored, checkpoint=checkpoint
+    )
     ranked = sorted(
         (decision for decision in _checkpointed(decisions, checkpoint) if decision.eligible),
         key=lambda item: (-(item.composite_score or 0.0), item.security_id),
@@ -501,10 +552,186 @@ def _compile_frame(
     )
 
 
+def _signal_value(
+    spec: StrategySpec,
+    observation: PortfolioObservation,
+    factor_id: str,
+    raw: float,
+    normalized_signals: Mapping[tuple[str, str], float],
+) -> float:
+    """가중 합에 들어갈 값 하나. `none` 이면 원시값, 그 밖에는 정규화 값이다.
+
+    `none` 이 아닌데 조회가 빗나가면 **기본값으로 떨어지지 않고 올린다.** default 를 원시값으로
+    두면 정규화된 값과 원시값이 같은 가중 합에 섞여, 이 PR 이 없애려던 단위 지배가 진단도 예외도
+    없이 되살아난다(P2-04 리뷰 P2-2). 지금은 `_cross_sectional_signals` 의 모집단 술어와
+    `_score_candidate` 의 값 단위 탈락 술어가 글자 그대로 같아서 도달 불가이지만, 그 전제를
+    건드리는 변경(예: 모집단을 eligible 종목으로 좁히기)이 오면 조용히 틀리는 대신 멈춰야 한다.
+    """
+    if spec.signal.normalization is SignalNormalization.NONE:
+        return raw
+    try:
+        return normalized_signals[(factor_id, observation.security_id)]
+    except KeyError as error:
+        raise ValueError(
+            "normalized signal missing for a scored factor value — "
+            f"as_of={observation.as_of} security_id={observation.security_id!r} "
+            f"factor_id={factor_id!r} normalization={spec.signal.normalization.value!r} "
+            f"population_size={len(normalized_signals)}"
+        ) from error
+
+
+def _apply_cross_sectional_eligibility(
+    spec: StrategySpec,
+    observations: tuple[PortfolioObservation, ...],
+    scored: list[_ScoredCandidate],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> list[CandidateDecision]:
+    """2-pass: 프레임 모집단의 순위로 `top_*` 규칙을 적용해 탈락 사유를 덧붙인다 (spec D3 S5).
+
+    **모집단**은 규칙마다 따로 센다 — 유니버스 멤버 중 절대 규칙(`gt`~`eq`)을 전부 통과했고 그
+    규칙의 `field_id` 값이 기준일까지 공개된 종목이다. 결측·공개일 초과 종목은 탈락시키면서
+    **분모에서도 뺀다**: 값을 모르는 종목을 분모에 세면 "거래대금 상위 20%"가 데이터 커버리지에
+    따라 실제 20%보다 적은 종목을 남긴다.
+
+    **동점**은 값 내림차순 → `security_id` 오름차순으로 자른다. 두 키가 전순서를 이뤄 같은 입력이
+    언제나 같은 컷을 낸다(비결정 선정 방지).
+
+    절대 규칙과 횡단면 규칙은 AND 다. 규칙이 여러 개면 각자의 모집단에서 잘리고, 한 번이라도
+    잘린 종목은 최종적으로 탈락한다.
+    """
+    rules = tuple(
+        rule
+        for rule in spec.eligibility.rules
+        if rule.operator in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS
+    )
+    decisions = [item.decision for item in _checkpointed(scored, checkpoint)]
+    if not rules:
+        return decisions
+    eligible_for_population = {
+        item.decision.security_id: item.passes_absolute_eligibility
+        for item in _checkpointed(scored, checkpoint)
+    }
+    # 1-pass 의 `_score_candidate` 와 **같은 방식**으로 필드를 찾는다(관측당 dict 한 벌, 중복
+    # `field_id` 면 마지막 항목이 이긴다). 한쪽이 선형 탐색이면 중복이 들어왔을 때 절대 규칙과
+    # 횡단면 모집단이 서로 다른 값을 읽는다 — 포트 계약이 중복을 거절하므로 실 파이프라인에서는
+    # 안 나지만, 이 함수는 공개 도메인 facade 를 통해 임의 관측으로도 불린다(리뷰 DEFECT-P3-2).
+    fields_by_security = {
+        observation.security_id: {item.field_id: item for item in observation.fields}
+        for observation in _checkpointed(observations, checkpoint)
+    }
+    added: dict[str, list[ExclusionReason]] = {}
+    for rule in rules:
+        population: list[tuple[str, float]] = []
+        for observation in _checkpointed(observations, checkpoint):
+            if not observation.universe_member:
+                continue  # 1-pass 가 이미 NOT_IN_UNIVERSE 로 탈락시켰다
+            if not eligible_for_population[observation.security_id]:
+                # 절대 규칙에서 이미 떨어진 종목에는 횡단면 사유를 덧붙이지 않는다. 모집단 밖이라
+                # 순위가 없고, 탈락 사유 목록에 도달하지도 않은 규칙 이야기가 섞이면 trace 화면이
+                # 실제로 걸린 규칙을 가린다.
+                continue
+            field = fields_by_security[observation.security_id].get(rule.field_id)
+            if field is None or not _number(field.value):
+                added.setdefault(observation.security_id, []).append(
+                    ExclusionReason.MISSING_ELIGIBILITY
+                )
+                continue
+            if field.available_date > observation.as_of:
+                added.setdefault(observation.security_id, []).append(ExclusionReason.FUTURE_DATA)
+                continue
+            population.append((observation.security_id, float(field.value)))
+        population.sort(key=lambda item: (-item[1], item[0]))
+        kept = _cross_sectional_cut(rule, len(population))
+        for security_id, _value in _checkpointed(population[kept:], checkpoint):
+            added.setdefault(security_id, []).append(ExclusionReason.ELIGIBILITY_RANK_CUT)
+    if not added:
+        return decisions
+    return [
+        _with_exclusions(decision, added.get(decision.security_id, ()))
+        for decision in _checkpointed(decisions, checkpoint)
+    ]
+
+
+def _with_exclusions(
+    decision: CandidateDecision, extra: Iterable[ExclusionReason]
+) -> CandidateDecision:
+    """탈락 사유를 덧붙이고 `eligible` 을 다시 판정한다. 순서는 1-pass 사유가 먼저다."""
+    reasons = tuple(dict.fromkeys((*decision.exclusion_reasons, *extra)))
+    if reasons == decision.exclusion_reasons:
+        return decision
+    return replace(
+        decision,
+        exclusion_reasons=reasons,
+        eligible=not any(reason in _BLOCKING_EXCLUSIONS for reason in reasons),
+    )
+
+
+def _cross_sectional_signals(
+    spec: StrategySpec,
+    observations: tuple[PortfolioObservation, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> dict[tuple[str, str], float]:
+    """`signal.normalization` 을 프레임 횡단면에 적용한 팩터 값 — 키는 (factor_id, security_id).
+
+    `none` 이면 빈 맵을 돌려주고 `_score_candidate` 가 원시값을 그대로 쓴다(1.1 의미, spec D4).
+
+    모집단은 `domain.factor` 의 횡단면 연산자와 같은 동료 집단 규칙을 따른다: 한 프레임은 기준일
+    하나이므로 남는 구분자는 `universe_member` 이고, 유니버스 밖 행은 유니버스 안 종목의 순위를
+    움직이지 못한다(D-001). 세 부류가 모집단에서 빠지며, 빠지는 사유는 `_score_candidate` 가
+    같은 값을 점수에서 버리는 사유와 같다.
+
+    1. 값이 `None` — 결측. `missing` 정책은 팩터 그래프 평가에서 이미 적용됐으므로
+       (`application/portfolio_design/_service.py`), 여기까지 남은 `None` 은 정책으로도 채우지
+       못한 결측이고 `MISSING_FACTOR` 로 탈락한다. 즉 정규화는 항상 결측 처리 **뒤**에 온다.
+    2. 공개일이 기준일보다 늦은 값 — `FUTURE_DATA`. 모집단에 넣으면 아직 알 수 없는 값이 다른
+       종목의 순위를 바꾸는 look-ahead 가 된다.
+    3. 유한하지 않은 값 — `_score_candidate` 가 `NonFinitePortfolioCalculationError` 로 올린다.
+       여기서는 건너뛰기만 해서 그 예외의 stage/context 가 그대로 유지되게 한다.
+    """
+    method = spec.signal.normalization
+    if method is SignalNormalization.NONE:
+        return {}
+    # 분기는 exhaustive 다. 값을 하나 더 늘렸을 때 catch-all 이 그것을 조용히 다른 정규화로
+    # 돌리면 진단도 예외도 없이 다른 종목이 선정된다(spec S5 가 `_compare` 에서 짚은 실패 모양).
+    if method is SignalNormalization.RANK:
+        normalize = cross_sectional_rank
+    elif method is SignalNormalization.ZSCORE:
+        normalize = cross_sectional_zscore
+    else:
+        raise ValueError(
+            f"unknown signal normalization — method={method!r} "
+            f"supported={[item.value for item in SignalNormalization]}"
+        )
+    # 문서에 없는 팩터 값이 관측에 섞여 와도 모집단에 넣지 않는다. 합성에 안 들어가는 값이다.
+    # 리스크 역가중 팩터도 같다 — 역가중은 정규화 전 원시값을 읽는다(spec D3 S6).
+    scored_factor_ids = {factor.factor_id for factor in composite_factors(spec)}
+    populations: dict[tuple[str, bool], list[tuple[str, float]]] = {}
+    for observation in _checkpointed(observations, checkpoint):
+        for value in observation.factor_values:
+            if value.factor_id not in scored_factor_ids:
+                continue
+            if value.value is None or not _number(value.value):
+                continue
+            if value.available_date > observation.as_of:
+                continue
+            key = (value.factor_id, observation.universe_member)
+            populations.setdefault(key, []).append((observation.security_id, float(value.value)))
+    normalized: dict[tuple[str, str], float] = {}
+    for (factor_id, _member), samples in _checkpointed(populations.items(), checkpoint):
+        scores = normalize([value for _, value in samples])
+        paired = zip(samples, scores, strict=True)
+        for (security_id, _raw), score in _checkpointed(paired, checkpoint):
+            normalized[(factor_id, security_id)] = score
+    return normalized
+
+
 def _score_candidate(
     spec: StrategySpec,
     observation: PortfolioObservation,
     *,
+    normalized_signals: Mapping[tuple[str, str], float],
     include_trace: bool,
 ) -> _ScoredCandidate:
     """Score one candidate. FUTURE_DATA covers dated values only.
@@ -519,14 +746,22 @@ def _score_candidate(
     if not observation.universe_member:
         reasons.append(ExclusionReason.NOT_IN_UNIVERSE)
     fields = {item.field_id: item for item in observation.fields}
+    # 1-pass: 절대 규칙만 본다. `top_*` 는 프레임 전체 모집단이 있어야 판정되므로
+    # `_apply_cross_sectional_eligibility` 가 2-pass 로 붙인다(spec D3 S5).
+    passes_absolute_eligibility = True
     for rule in spec.eligibility.rules:
+        if rule.operator in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS:
+            continue
         field = fields.get(rule.field_id)
         if field is None or not _number(field.value):
             reasons.append(ExclusionReason.MISSING_ELIGIBILITY)
+            passes_absolute_eligibility = False
         elif field.available_date > observation.as_of:
             reasons.append(ExclusionReason.FUTURE_DATA)
+            passes_absolute_eligibility = False
         elif not _compare(float(field.value), rule.operator, rule.value):
             reasons.append(ExclusionReason.ELIGIBILITY_FAILED)
+            passes_absolute_eligibility = False
     if spec.portfolio.liquidity_field_id and spec.portfolio.minimum_liquidity is not None:
         liquidity = fields.get(spec.portfolio.liquidity_field_id)
         if (
@@ -550,7 +785,9 @@ def _score_candidate(
     score = 0.0
     denominator = 0.0
     contributions: list[FactorContributionTrace] = []
-    for factor in spec.factors:
+    # 리스크 역가중 팩터는 합성에서 빠진다(spec D3 S6): 그 값의 결측·공개일은 알파 탈락
+    # (`MISSING_FACTOR`·`FUTURE_DATA`)이 아니라 비중 단계의 `MISSING_RISK` 로만 드러난다.
+    for factor in composite_factors(spec):
         value = factors.get(factor.factor_id)
         if value is None or value.value is None:
             reasons.append(ExclusionReason.MISSING_FACTOR)
@@ -592,8 +829,11 @@ def _score_candidate(
                 )
             continue
         direction = 1.0 if factor.direction is FactorDirection.HIGH else -1.0
+        signal_value = _signal_value(
+            spec, observation, factor.factor_id, value.value, normalized_signals
+        )
         weighted_value = _finite(
-            direction * factor.weight * value.value,
+            direction * factor.weight * signal_value,
             # Preserve the executable compiler's historical failure code/stage: the term is part
             # of the same composite-score operation, merely retained for the audit projection.
             stage="composite_score",
@@ -644,16 +884,6 @@ def _score_candidate(
         )
         if not passes:
             reasons.append(ExclusionReason.SCORE_THRESHOLD)
-    blocking = {
-        ExclusionReason.NOT_IN_UNIVERSE,
-        ExclusionReason.FUTURE_DATA,
-        ExclusionReason.MISSING_ELIGIBILITY,
-        ExclusionReason.ELIGIBILITY_FAILED,
-        ExclusionReason.MISSING_FACTOR,
-        ExclusionReason.SCORE_THRESHOLD,
-        ExclusionReason.REGIME_BLOCKED,
-        ExclusionReason.LIQUIDITY_FAILED,
-    }
     normalized = tuple(
         replace(
             item,
@@ -673,10 +903,11 @@ def _score_candidate(
         for item in contributions
     )
     return _ScoredCandidate(
+        passes_absolute_eligibility=passes_absolute_eligibility,
         decision=CandidateDecision(
             as_of=observation.as_of,
             security_id=observation.security_id,
-            eligible=not any(reason in blocking for reason in reasons),
+            eligible=not any(reason in _BLOCKING_EXCLUSIONS for reason in reasons),
             selected=False,
             composite_score=composite_score,
             rank=None,
@@ -808,7 +1039,7 @@ def _target_weights(
     )
     reasons: dict[str, ExclusionReason] = {}
     long_scores = _weight_scores(
-        spec, ranked, observations, long_ids, reasons, checkpoint=checkpoint
+        spec, ranked, observations, long_ids, reasons, short=False, checkpoint=checkpoint
     )
     short_scores = _weight_scores(
         spec,
@@ -816,6 +1047,7 @@ def _target_weights(
         observations,
         short_ids,
         reasons,
+        short=True,
         checkpoint=checkpoint,
     )
     unconstrained = _proportional_allocate(long_scores, long_budget, checkpoint=checkpoint)
@@ -894,21 +1126,26 @@ def _weight_scores(
     selected: set[str],
     reasons: dict[str, ExclusionReason],
     *,
+    short: bool,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> dict[str, float]:
     scores: dict[str, float] = {}
+    strengths = (
+        _margin_strengths(ranked, selected, short=short)
+        if spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE
+        else {}
+    )
     for order, candidate in _checkpointed(enumerate(ranked, start=1), checkpoint):
         if candidate.security_id not in selected:
             continue
         if spec.portfolio.weighting is WeightingMethod.EQUAL:
             score = 1.0
         elif spec.portfolio.weighting is WeightingMethod.FACTOR_SCORE:
-            score = max(abs(candidate.composite_score or 0.0), 1e-12)
+            score = strengths[candidate.security_id]
         elif spec.portfolio.weighting is WeightingMethod.RANK:
             score = float(len(selected) - min(order, len(selected)) + 1)
         else:
-            field_id = spec.risk.risk_field_id
-            risk = _field(observations[candidate.security_id], field_id)
+            risk = _risk_value(spec, observations[candidate.security_id])
             if risk is None or risk <= 0:
                 reasons[candidate.security_id] = ExclusionReason.MISSING_RISK
                 continue
@@ -919,6 +1156,61 @@ def _weight_scores(
             context=f"security_id={candidate.security_id!r} weighting={spec.portfolio.weighting}",
         )
     return scores
+
+
+def _margin_strengths(
+    ranked: list[CandidateDecision], selected: set[str], *, short: bool
+) -> dict[str, float]:
+    """점수 비례 가중(`weighting: factor_score`)의 선정 종목별 강도다. 비중은 이 값에 비례한다.
+
+    규칙(PLAN 결정 5): 선호 점수 p 는 롱이면 합성 점수, 숏이면 그 부호를 뒤집은 값이다.
+    선정이 2종목 이상이면 선정 종목 강도 = p − 기준점, 기준점 = `min(선정 최저 p 이하인 eligible
+    비선정 종목 중 최고 p, 선정 최저 p − 평균 간격)`, 평균 간격 = `(선정 최고 p − 선정 최저 p) /
+    (선정 수 − 1)` 이다. 컷 아래 종목이 없으면 뒤 항만 쓴다. 선정 1종목이거나 강도가
+    모두 0 이면(선정 전원 동점이고 아래 종목 없음) 균등 배분한다.
+
+    - 합성 점수는 방향을 이미 반영해서 **클수록 매수 선호**다(spec D4). 절댓값을 쓰면
+      `direction: low` 와 공매도 쪽에서 순서가 뒤집혔다(2차 리뷰 R2-P204-001).
+    - 기준점이 "선정 최저 − 평균 간격" 이하라서 선정 종목은 최소 평균 간격만큼의 강도를 갖는다.
+      eligible 최저를 바닥으로 두면 그 종목이 0 이 되어 1종목·동점 프레임이 비었고(3차 리뷰
+      R3-P204-001), 컷 아래 최고만 쓰면 근접 동점 종목이 dust 비중을 받았다(4차 리뷰
+      R4-P204-001). 그래서 최고/최저 강도 비는 선정 수를 넘지 않는다.
+    - 선정 최저와 동점인 비선정 종목도 기준점 후보에 넣는다(`<=`). 빼면 동점이 풀리고 묶일 때
+      기준점이 튀어 자기 점수가 올라도 자기 비중이 주는 경우가 생겼다(5차 리뷰 R5-P204-001).
+      평균 간격 하한이 있어 동점 후보가 들어와도 선정 종목의 강도는 0 이 되지 않는다(간격이
+      0 이면 강도가 모두 0 이라 균등 배분).
+    - 컷 아래 종목이 선정 최저에서 멀면 그 점수가 기준점이 되어 비중이 균등 쪽으로 평평해진다.
+      하한은 기준점이 선정 최저에 너무 가까운 쪽만 막는다(PLAN 결정 5 의 알려진 성질).
+    - 두 항 모두 점수의 평행 이동·양의 배율에 공변이라 비중은 불변이다. 그래서 x 에 `low` 를 준
+      문서와 −x 에 `high` 를 준 문서가 `rank`(두 합성 점수가 상수 1 차이)에서도 같은 비중을 낸다.
+    - 기준점은 같은 프레임의 eligible 후보에서만 구하므로 날짜를 가로지르지 않는다.
+    """
+    sign = -1.0 if short else 1.0
+    preference = {
+        candidate.security_id: sign * (candidate.composite_score or 0.0) for candidate in ranked
+    }
+    chosen = [value for security_id, value in preference.items() if security_id in selected]
+    if not chosen:
+        return {}
+    if len(chosen) == 1:
+        return {security_id: 1.0 for security_id in preference if security_id in selected}
+    lowest = min(chosen)
+    reference = lowest - (max(chosen) - lowest) / (len(chosen) - 1)
+    below = [
+        value
+        for security_id, value in preference.items()
+        if security_id not in selected and value <= lowest
+    ]
+    if below:
+        reference = min(reference, max(below))
+    strengths = {
+        security_id: value - reference
+        for security_id, value in preference.items()
+        if security_id in selected
+    }
+    if not any(strength > 0.0 for strength in strengths.values()):
+        return {security_id: 1.0 for security_id in strengths}
+    return strengths
 
 
 def _proportional_allocate(
@@ -1096,6 +1388,22 @@ def _finalize_decision(
     )
 
 
+def _risk_value(spec: StrategySpec, observation: PortfolioObservation) -> float | None:
+    """역가중 원천 값 하나. 팩터면 **정규화 전 원시 출력**, 아니면 데이터 필드 (spec D3 S6).
+
+    `rank`(1.2 기본값) 출력의 역수는 횡단면 최하위가 0 이라 무의미한 가중이 된다. 그래서 값은
+    정규화 맵이 아니라 `PortfolioObservation.factor_values` 에서 읽는다. 결측·공개일 초과·비유한은
+    `None` 으로 돌려주고 호출자가 `MISSING_RISK` 로 뺀다(`<= 0` 과 같은 분기).
+    """
+    factor_id = inverse_risk_factor_id(spec)
+    if factor_id is None:
+        return _field(observation, spec.risk.risk_field_id)
+    value = next((item for item in observation.factor_values if item.factor_id == factor_id), None)
+    if value is None or value.available_date > observation.as_of or not _number(value.value):
+        return None
+    return float(value.value)
+
+
 def _field(observation: PortfolioObservation, field_id: str | None) -> float | None:
     if field_id is None:
         return None
@@ -1105,16 +1413,59 @@ def _field(observation: PortfolioObservation, field_id: str | None) -> float | N
     return float(value.value)
 
 
-def _compare(value: float, operator: ComparisonOperator, threshold: float) -> bool:
-    if operator is ComparisonOperator.GREATER_THAN:
+def _compare(value: float, operator: EligibilityOperator, threshold: float) -> bool:
+    """후보 하나의 값으로 판정하는 절대 규칙 비교 (spec D3 S5).
+
+    분기는 **exhaustive** 다. 예전 구현의 마지막 줄은 catch-all `return value == threshold` 라
+    모집단이 필요한 `top_*` 가 들어와도 예외 없이 "값이 같은가"로 답했다 — 진단도 로그도 없이
+    다른 종목이 선정되는 조용한 오필터다. 모르는 연산자는 여기서 멈춘다.
+    """
+    if operator is EligibilityOperator.GREATER_THAN:
         return value > threshold
-    if operator is ComparisonOperator.GREATER_THAN_OR_EQUAL:
+    if operator is EligibilityOperator.GREATER_THAN_OR_EQUAL:
         return value >= threshold
-    if operator is ComparisonOperator.LESS_THAN:
+    if operator is EligibilityOperator.LESS_THAN:
         return value < threshold
-    if operator is ComparisonOperator.LESS_THAN_OR_EQUAL:
+    if operator is EligibilityOperator.LESS_THAN_OR_EQUAL:
         return value <= threshold
-    return value == threshold
+    if operator is EligibilityOperator.EQUAL:
+        return value == threshold
+    raise ValueError(
+        "absolute eligibility comparison received an operator it cannot decide alone — "
+        f"operator={operator!r} value={value!r} threshold={threshold!r} "
+        f"expected={[member.value for member in _ABSOLUTE_ELIGIBILITY_OPERATORS]} "
+        f"cross_sectional={[member.value for member in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS]}"
+    )
+
+
+def _cross_sectional_cut(rule: EligibilityRule, population_size: int) -> int:
+    """`top_*` 규칙이 남길 종목 수. 둘 다 소수점을 버리고 모집단 크기로 잘린다.
+
+    비율은 **문서가 쓴 10진 표기 그대로** 곱한다(`Decimal(str(value))`). 이진 부동소수로
+    곱하면 `100 × 0.29` 가 `28.999…` 라 `floor` 가 28 을 내고, "상위 29%" 문서가 진단도 예외도
+    없이 한 종목을 더 떨군다. `repr(float)` 는 그 float 로 되돌아가는 최단 10진 표기라
+    문서에 적힌 리터럴을 그대로 복원한다.
+    """
+    if not _number(rule.value):
+        # validator(`strategy.eligibility.rule_value`·`strategy.number.non_finite`)가 먼저
+        # 막지만, 검증을 건너뛴 경로가 생기면 `math.floor(Decimal("NaN"))` 의 맨몸 ValueError
+        # 대신 어떤 규칙이었는지 말하고 멈춘다.
+        raise ValueError(
+            "cross-sectional eligibility cut received a non-finite size — "
+            f"operator={rule.operator!r} field_id={rule.field_id!r} value={rule.value!r} "
+            f"population_size={population_size}"
+        )
+    if rule.operator is EligibilityOperator.TOP_PERCENT:
+        kept = math.floor(Decimal(population_size) * Decimal(str(rule.value)))
+    elif rule.operator is EligibilityOperator.TOP_COUNT:
+        kept = math.floor(Decimal(str(rule.value)))
+    else:
+        raise ValueError(
+            "cross-sectional eligibility cut received an operator it cannot size — "
+            f"operator={rule.operator!r} field_id={rule.field_id!r} value={rule.value!r} "
+            f"expected={[member.value for member in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS]}"
+        )
+    return max(0, min(kept, population_size))
 
 
 def _number(value: object) -> TypeGuard[int | float]:

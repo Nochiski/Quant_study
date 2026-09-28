@@ -50,13 +50,6 @@ const CONTRACT: FieldContract[] = [
     required: true,
     catalog: "equity-field",
   },
-  {
-    pointer: "/factors/*/graph/nodes/*/factor_id",
-    branch: "saved_factor",
-    type: "string",
-    required: true,
-    catalog: "factor",
-  },
 ];
 
 const EQUITY_CATALOG = {
@@ -170,11 +163,6 @@ const TREE = {
       graph: {
         nodes: [
           { node_id: "px", kind: "field", field_id: "close" },
-          {
-            node_id: "saved",
-            kind: "saved_factor",
-            factor_id: "momentum_12m",
-          },
         ],
         output_node_id: "px",
       },
@@ -372,23 +360,6 @@ describe("contract projection", () => {
       return;
     expect(result.catalog.field.coverage.point_in_time).toBe(true);
     expect(result.catalog.snapshot.dataset_revisions[0].revision).toBe("r12");
-  });
-
-  it("joins saved factor ids to the contract-pinned registry", () => {
-    const result = projectContractInspector(
-      source(),
-      "/factors/0/graph/nodes/1/factor_id",
-      TREE,
-      false,
-    );
-    expect(result.status).toBe("ready");
-    if (result.status !== "ready") return;
-    expect(result.catalog).toMatchObject({
-      kind: "factor",
-      status: "ready",
-      id: "momentum_12m",
-      actualVersion: "factor-registry-v1",
-    });
   });
 
   it("fails closed for schema-contract drift and does not join catalog version drift", () => {

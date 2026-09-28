@@ -125,11 +125,7 @@ const CatalogDetails = ({
   if (catalog.status !== "ready") {
     return (
       <section className="contract-inspector__section">
-        <h3>
-          {catalog.kind === "equity-field"
-            ? t("contract.fieldDetails")
-            : t("contract.factorDetails")}
-        </h3>
+        <h3>{t("contract.fieldDetails")}</h3>
         <Rows rows={versionRows} />
         <p
           className={`contract-inspector__notice${catalog.status === "mismatch" ? " contract-inspector__notice--warn" : ""}`}
@@ -145,88 +141,56 @@ const CatalogDetails = ({
     );
   }
 
-  if (catalog.kind === "equity-field") {
-    const { field, snapshot } = catalog;
-    const revisions = snapshot.dataset_revisions
-      .map((revision) => `${revision.dataset_id}@${revision.revision}`)
-      .join(", ");
-    return (
-      <section className="contract-inspector__section">
-        <h3>{t("contract.fieldDetails")}</h3>
-        <div className="contract-inspector__catalog-card">
-          <strong>{field.label}</strong>
-          <code>{field.field_id}</code>
-          <p>{field.description}</p>
-        </div>
-        <Rows
-          rows={[
-            ...versionRows,
-            [
-              t("dataset.catalog.dataset"),
-              <code key="dataset">{field.dataset_id}</code>,
-            ],
-            [t("contract.frequency"), field.frequency],
-            [t("contract.valueType"), field.value_type],
-            [t("ide.inspector.unit"), field.unit],
-            [t("contract.pointInTime"), yesNo(field.coverage.point_in_time)],
-            [t("dataset.field.availability"), field.available_date_basis],
-            [t("dataset.field.disclosure"), field.disclosure_basis],
-            [
-              t("dataset.field.recommendedLag"),
-              `${field.recommended_lag_sessions} ${t("contract.sessions")}`,
-            ],
-            [
-              t("contract.coverage"),
-              `${field.coverage.estimated_coverage_pct}%`,
-            ],
-            [
-              t("contract.window"),
-              `${field.coverage.starts_on} → ${field.coverage.ends_on}`,
-            ],
-            [t("contract.venues"), field.coverage.venues.join(", ") || EMPTY],
-            [
-              t("contract.cellKinds"),
-              field.coverage.supported_cell_kinds.join(", ") || EMPTY,
-            ],
-            [t("dataset.field.evidence"), field.evidence],
-            [
-              t("contract.snapshot"),
-              <code key="snapshot">{snapshot.snapshot_id}</code>,
-            ],
-            [t("contract.source"), snapshot.source],
-            [t("contract.builtAt"), snapshot.built_at],
-            [t("contract.datasetRevisions"), revisions || EMPTY],
-          ]}
-        />
-      </section>
-    );
-  }
-
-  const { factor } = catalog;
+  const { field, snapshot } = catalog;
+  const revisions = snapshot.dataset_revisions
+    .map((revision) => `${revision.dataset_id}@${revision.revision}`)
+    .join(", ");
   return (
     <section className="contract-inspector__section">
-      <h3>{t("contract.factorDetails")}</h3>
+      <h3>{t("contract.fieldDetails")}</h3>
       <div className="contract-inspector__catalog-card">
-        <strong>{factor.label}</strong>
-        <code>{factor.factor_id}</code>
-        <p>{factor.description}</p>
+        <strong>{field.label}</strong>
+        <code>{field.field_id}</code>
+        <p>{field.description}</p>
       </div>
       <Rows
         rows={[
           ...versionRows,
-          [t("contract.category"), factor.category],
-          [t("contract.availability"), factor.availability],
-          [t("contract.outputUnit"), factor.output_unit],
-          [t("contract.preference"), factor.preference],
           [
-            t("contract.minimumHistory"),
-            `${factor.minimum_history_sessions} ${t("contract.sessions")}`,
+            t("dataset.catalog.dataset"),
+            <code key="dataset">{field.dataset_id}</code>,
+          ],
+          [t("contract.frequency"), field.frequency],
+          [t("contract.valueType"), field.value_type],
+          [t("ide.inspector.unit"), field.unit],
+          [t("contract.pointInTime"), yesNo(field.coverage.point_in_time)],
+          [t("dataset.field.availability"), field.available_date_basis],
+          [t("dataset.field.disclosure"), field.disclosure_basis],
+          [
+            t("dataset.field.recommendedLag"),
+            `${field.recommended_lag_sessions} ${t("contract.sessions")}`,
           ],
           [
-            t("contract.requiredFields"),
-            factor.required_field_ids.join(", ") || EMPTY,
+            t("contract.coverage"),
+            `${field.coverage.estimated_coverage_pct}%`,
           ],
-          [t("contract.tags"), factor.tags?.join(", ") || EMPTY],
+          [
+            t("contract.window"),
+            `${field.coverage.starts_on} → ${field.coverage.ends_on}`,
+          ],
+          [t("contract.venues"), field.coverage.venues.join(", ") || EMPTY],
+          [
+            t("contract.cellKinds"),
+            field.coverage.supported_cell_kinds.join(", ") || EMPTY,
+          ],
+          [t("dataset.field.evidence"), field.evidence],
+          [
+            t("contract.snapshot"),
+            <code key="snapshot">{snapshot.snapshot_id}</code>,
+          ],
+          [t("contract.source"), snapshot.source],
+          [t("contract.builtAt"), snapshot.built_at],
+          [t("contract.datasetRevisions"), revisions || EMPTY],
         ]}
       />
     </section>

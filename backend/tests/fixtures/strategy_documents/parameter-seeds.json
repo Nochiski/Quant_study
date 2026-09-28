@@ -3,6 +3,7 @@
     "FloatParameter.step": null,
     "PortfolioStep.liquidity_field_id": null,
     "PortfolioStep.minimum_liquidity": null,
+    "RiskStep.risk_factor_id": null,
     "RiskStep.risk_field_id": null,
     "SignalStep.regime_field_id": null,
     "SignalStep.regime_minimum": null,

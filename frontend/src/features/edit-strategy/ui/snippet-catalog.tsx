@@ -1,6 +1,6 @@
 import { useId } from "react";
 
-import { t } from "../../../shared/config";
+import { t, tName } from "../../../shared/config";
 import {
   SNIPPET_CATEGORIES,
   type CanonicalSnippet,
@@ -23,7 +23,7 @@ const feedbackText = (feedback: SnippetFeedback): string | null => {
   return `${feedback.label}: ${t(`snippet.error.${feedback.reason}`)}`;
 };
 
-/** Five-area, schema-driven snippet catalog. Applying a snippet remains the model hook's job. */
+/** 섹션·예시 두 그룹의 스키마 기반 스니펫 카탈로그. 적용은 model 훅이 맡는다. */
 export const SnippetCatalog = ({
   snippets,
   sourceStatus,
@@ -61,6 +61,11 @@ export const SnippetCatalog = ({
                 aria-labelledby={headingId}
               >
                 <h3 id={headingId}>{t(`snippet.category.${category}`)}</h3>
+                {category === "example" ? (
+                  <p className="snippet-catalog__note">
+                    {t("snippet.example.note")}
+                  </p>
+                ) : null}
                 {entries.length === 0 ? (
                   <p className="snippet-catalog__empty">{t("snippet.empty")}</p>
                 ) : (
@@ -70,12 +75,15 @@ export const SnippetCatalog = ({
                         <button
                           type="button"
                           className="snippet-catalog__insert"
-                          aria-label={`${snippet.label} · ${t("snippet.insert")}`}
+                          aria-label={`${tName(snippet.descriptionKey) ?? snippet.label} · ${t("snippet.insert")}`}
                           onClick={() => onInsert(snippet)}
                         >
                           <span className="snippet-catalog__label">
                             {snippet.kind === "section" ? (
-                              <code>{snippet.label}</code>
+                              <>
+                                {tName(snippet.descriptionKey) ?? null}{" "}
+                                <code>{snippet.label}</code>
+                              </>
                             ) : (
                               snippet.label
                             )}

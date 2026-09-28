@@ -1,11 +1,12 @@
 import type { StrategyTraceResponse } from "../../../shared/api";
+import type { ExclusionReason } from "./exclusion-reason";
 
 export type TargetTapeProjectionRow = {
   securityId: string;
   score: number | null;
   rank: number | null;
   selected: boolean | null;
-  exclusionReasons: string[];
+  exclusionReasons: ExclusionReason[];
   targetWeight: number | null;
   nodeValue: number | boolean | null;
   nodeStatus: string | null;

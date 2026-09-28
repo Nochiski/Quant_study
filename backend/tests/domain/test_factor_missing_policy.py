@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import fields
 from datetime import date
 
 from strategy_workbench.domain.factor.facade.evaluation import (
@@ -25,9 +25,11 @@ from strategy_workbench.domain.factor.facade.expression import (
 from strategy_workbench.domain.factor.facade.planning import compile_factor_plan
 from strategy_workbench.domain.factor.facade.trace import evaluate_factor_graph_with_trace
 
-# P2-02 이전(`graph.missing_policy` 를 읽던 시점)에 같은 그래프가 내던 값. 결측 정책을 인자로
-# 옮겨도 기본값 경로의 팩터 행렬 캐시 키가 갈리지 않는다는 회귀 고정이다.
-PLAN_HASH_BEFORE_P2_02 = "6aa3a44540f01b9a108fc7961a8fd47bf9b64e6ab0b8e225ff59c491bb597c2a"
+# 같은 그래프·같은 기본 결측 정책의 plan hash 골든. P2-02 는 정책을 인자로 옮기면서도 이 값을
+# 유지했지만(`6aa3a445…`), P2-03 이 `FactorGraph.missing_policy` 필드 자체를 지우면서 `graph_hash`
+# 가 바뀌어 값이 한 번 갈렸다. 팩터 행렬 캐시는 코드베이스에 아직 없어 잘못된 히트는 불가능하고,
+# 영향은 이 골든 하나다(1.1 문서는 P2-09 업그레이더를 거쳐 들어온다).
+PLAN_HASH_1_2 = "e8bdd889366602ffa16c40e3c1d4de04c7f040f637252ec7217cf50679d13f4e"
 
 
 def _graph() -> FactorGraph:
@@ -71,32 +73,30 @@ def test_plan_hash_splits_on_the_environment_missing_policy() -> None:
     assert dropped.graph_hash == zeroed.graph_hash
 
 
-def test_default_missing_policy_keeps_the_plan_hash_it_had_before_the_move() -> None:
+def test_default_missing_policy_plan_hash_is_pinned() -> None:
     plan = compile_factor_plan(
         _graph(), registry_version="test-registry", missing=MissingPolicy.DROP
     )
 
-    assert plan.plan_hash == PLAN_HASH_BEFORE_P2_02
+    assert plan.plan_hash == PLAN_HASH_1_2
 
 
-def test_plan_reads_the_argument_not_the_deprecated_graph_field() -> None:
-    """1.1 호환으로 남은 `graph.missing_policy` 는 plan 의 결측 정책을 정하지 않는다.
+def test_the_graph_no_longer_carries_a_missing_policy() -> None:
+    """P2-03: 결측 정책의 owner 는 실행 설정 하나다 — 그래프에 같은 사실을 두 번 두지 않는다.
 
-    그 필드는 1.1 문서의 일부라 `graph_hash` 에는 아직 들어간다(1.2 에서 사라진다). plan 이
-    읽는 값은 실행 설정에서 온 `missing` 하나뿐이다.
+    필드가 남아 있으면 `graph_hash` 가 정책에 따라 갈려서, 실행 설정만 바꾼 두 실행이 서로 다른
+    팩터 식으로 취급된다.
     """
-    legacy = replace(_graph(), missing_policy=MissingPolicy.ZERO)
-
-    planned = compile_factor_plan(legacy, registry_version="r", missing=MissingPolicy.DROP)
-
-    assert planned.missing_policy == "drop"
+    assert not hasattr(_graph(), "missing_policy")
+    assert "missing_policy" not in {field.name for field in fields(FactorGraph)}
 
 
-def test_evaluation_fills_by_the_argument_not_by_the_graph_field() -> None:
-    legacy = replace(_field_graph(), missing_policy=MissingPolicy.ZERO)
+def test_evaluation_fills_by_the_argument() -> None:
     observations = _observations()
 
-    dropped = evaluate_factor_graph(legacy, observations=observations, missing=MissingPolicy.DROP)
+    dropped = evaluate_factor_graph(
+        _field_graph(), observations=observations, missing=MissingPolicy.DROP
+    )
     zeroed = evaluate_factor_graph(
         _field_graph(), observations=observations, missing=MissingPolicy.ZERO
     )

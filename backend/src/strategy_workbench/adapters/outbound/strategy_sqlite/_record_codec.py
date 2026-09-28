@@ -18,7 +18,7 @@ from strategy_workbench.domain.strategy.facade.document import (
     SourceFormat,
     hydrate_strategy_document,
     is_frozen_schema_version,
-    upgrade_document_1_0,
+    upgrade_document,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
@@ -82,10 +82,8 @@ def decode_record(
         if payload.get("schema_version") != schema_version:
             raise ValueError("schema_version column does not match the canonical strategy payload")
         spec_hash = required_text(row, "spec_hash")
-        # 동결 판정 술어는 port와 같은 domain 함수 하나다(DEFECT-P1X-003). 동결 row 중에서도
-        # `upgrade_document_1_0`이 받아 주는 것은 버전이 은퇴 버전이거나 본문이 옛 판 모양인
-        # 문서다(`is_upgradeable_document`). 둘 다 아니면 NotALegacyDocumentError(ValueError)로
-        # fail-closed한다.
+        # 동결 판정 술어는 port와 같은 domain 함수 하나다(DEFECT-P1X-003). 은퇴 버전마다 필요한
+        # 변환 단계는 domain 업그레이드 체인이 버전 디스패치로 고른다.
         frozen = is_frozen_schema_version(schema_version)
         if frozen:
             spec = _decode_frozen_spec(
@@ -154,10 +152,24 @@ def _decode_frozen_spec(
 ) -> StrategySpec:
     """Read a retired-schema row without a model for that schema (spec D2).
 
-    The 1.0 model no longer exists, so "the source compiles to the stored spec" cannot be
-    re-proven. The row is immutable and was proven when written; what is verified here is that
-    the stored bytes are what the hash column claims and that the domain upgrade transform still
-    understands them. The spec keeps the row's retired `schema_version` as its frozen marker.
+    은퇴 버전의 모델은 더 이상 없으므로 "source 가 저장된 spec 으로 컴파일된다"를 다시 증명할 수
+    없다. row 는 immutable 이고 기록 시점에 이미 증명됐다. 여기서 검증하는 것은 저장된 바이트가
+    hash 컬럼이 말하는 그 바이트인지와, 도메인 업그레이드 변환이 아직 그 문서를 이해하는지다.
+    spec 은 row 가 저장된 은퇴 버전을 동결 표식으로 그대로 들고 나간다.
+
+    변환은 domain 업그레이드 체인(`upgrade_document`) 하나로 현재 버전까지 간다: 1.0 row 는
+    1.0 → 1.1 → 1.2, 1.1 row 는 1.1 → 1.2 를 탄다. 1.1 → 1.2 단계가 `normalization: none` 을
+    명시하므로 복원한 spec 의 합성 방식이 그 revision 의 실제 의미(원시값 가중 합)와 같다 — 기본값
+    `rank` 로 읽으면 설명 문장이 저장된 적 없는 의미를 말한다(P2-04 1차 리뷰 P3). 떼어 낸 실행
+    설정은 읽지 않는다: 동결 row 는 실행할 수 없고(`requires_upgrade`), 실행 설정은 업그레이드
+    응답이 사용자에게 돌려준다.
+
+    무결성 검증 세 가지(spec D2): 저장된 바이트가 hash 컬럼과 같다(여기), 컬럼과 payload 의 버전이
+    같다(`decode_record`), 체인이 그 문서를 끝까지 올려 현재 모델로 hydrate 된다(여기). 체인 대상은
+    **알려진 은퇴 버전**뿐이다 — `is_frozen_schema_version` 은 "현재 버전이 아닌 모든 것"이라 열린
+    집합이어서, 모르는 버전(`"1.3"`·`"9.9"`)은 체인이 `NotUpgradeableDocumentError` 로 거절한다.
+    그러지 않으면 미래 버전이나 손상된 값이 조용히 현재 모델로 해석되고, `spec_hash` 검증은 변환
+    전에 끝나 그 변형을 잡지 못한다(P2-03 리뷰 P2-02).
     """
     computed = canonical_json_spec_hash(spec_json)
     if computed != spec_hash:
@@ -165,7 +177,7 @@ def _decode_frozen_spec(
             "frozen spec_json bytes do not match the stored spec_hash -- "
             f"strategy_id={strategy_id} revision={revision} computed={computed} stored={spec_hash}"
         )
-    upgraded = upgrade_document_1_0(payload)
+    upgraded = upgrade_document(payload).tree
     hydration = hydrate_strategy_document(
         upgraded, identity=StrategyIdentity(strategy_id, revision, CURRENT_SCHEMA_VERSION)
     )

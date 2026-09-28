@@ -124,7 +124,7 @@ const renderEditor = (
         tree: treeOf(source),
         schema: SCHEMA,
         transactions,
-        catalogs: { equityFields: null, factors: null },
+        catalogs: { equityFields: null },
         operators,
         onOpenForm,
       }}
@@ -206,19 +206,12 @@ describe("FactorGraphEditor (P5-02)", () => {
       "graph",
       { focusEditor: false },
     );
-    // 그래프 설정: output_node_id(reference)·missing_policy(enum).
+    // 그래프 설정: output_node_id(reference). missing_policy 는 1.2 에서 실행 설정으로 갔다.
     const settings = within(editor().getByRole("group", { name: "그래프 설정" }));
     await user.selectOptions(settings.getByRole("combobox", { name: /\boutput_node_id/ }), "px");
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "replace-scalar", pointer: "/factors/0/graph/output_node_id", value: "px" },
       "output_node_id",
-      "graph",
-      { focusEditor: false },
-    );
-    await user.selectOptions(settings.getByRole("combobox", { name: /\bmissing_policy/ }), "zero");
-    expect(transactions.apply).toHaveBeenLastCalledWith(
-      { kind: "replace-scalar", pointer: "/factors/0/graph/missing_policy", value: "zero" },
-      "missing_policy",
       "graph",
       { focusEditor: false },
     );
@@ -466,7 +459,7 @@ describe("연산자 팔레트와 조용하지 않은 실패 (P1-04)", () => {
           tree: treeOf(RECURSIVE_SOURCE),
           schema: RECURSIVE_SCHEMA,
           transactions,
-          catalogs: { equityFields: null, factors: null },
+          catalogs: { equityFields: null },
           operators: { status: "ready", definitions: [] },
         }}
       />,
@@ -504,7 +497,7 @@ describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () =>
           tree: treeOf(VERBOSE),
           schema: SCHEMA,
           transactions: stub(),
-          catalogs: { equityFields: null, factors: null },
+          catalogs: { equityFields: null },
           operators: CATALOG,
         }}
       />,

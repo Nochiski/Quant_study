@@ -30,7 +30,7 @@
 
 | # | Factor ID | Category | Preference | Required Equity fields | Min history | Status |
 |---:|---|---|---|---|---:|---|
-| 1 | `price.momentum_12_1` | price | high | `price.adj_close` | 252 | implemented |
+| 1 | `price.momentum_12_1` | price | high | `price.adj_close` | 273 | implemented |
 | 2 | `price.momentum_6_1` | price | high | `price.adj_close` | 126 | catalog_only |
 | 3 | `price.reversal_1m` | price | low | `price.adj_close` | 21 | catalog_only |
 | 4 | `price.volatility_60d` | price | low | `price.adj_close` | 60 | catalog_only |

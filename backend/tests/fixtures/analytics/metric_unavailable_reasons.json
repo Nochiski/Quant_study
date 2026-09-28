@@ -1,0 +1,10 @@
+[
+  "zero_return_variance",
+  "no_downside_variation",
+  "no_drawdown",
+  "maximum_drawdown_not_recovered",
+  "benchmark_not_available",
+  "no_closed_trades",
+  "no_losing_closed_trade",
+  "no_observations_in_scope"
+]

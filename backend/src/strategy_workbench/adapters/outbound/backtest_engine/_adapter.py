@@ -37,6 +37,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     AnalysisPoint,
     AnalyticsInput,
     MetricRegistry,
+    MetricUnavailableReason,
     TradeOutcome,
     build_default_metric_registry,
     compute_analytics,
@@ -302,7 +303,7 @@ class BacktestEngineExecutorAdapter:
                         self._registry,
                         scope=window.scope,
                         scope_label=window.label,
-                        reason="no_observations_in_scope",
+                        reason=MetricUnavailableReason.NO_OBSERVATIONS_IN_SCOPE,
                     )
                 )
         progress(0.88, "artifacts", "Freezing raw run artifacts")

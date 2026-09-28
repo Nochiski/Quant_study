@@ -10,6 +10,7 @@ from ._models import (
     DrawdownPoint,
     EquityCurvePoint,
     MetricScope,
+    MetricUnavailableReason,
     MetricValue,
     MonthlyReturnPoint,
     RollingMetricPoint,
@@ -22,7 +23,7 @@ def unavailable_metric_values(
     *,
     scope: MetricScope,
     scope_label: str | None,
-    reason: str,
+    reason: MetricUnavailableReason,
 ) -> tuple[MetricValue, ...]:
     """Keep an explicitly requested empty scope visible instead of dropping it."""
     return tuple(
@@ -32,7 +33,7 @@ def unavailable_metric_values(
             scope=scope,
             scope_label=scope_label,
             sample_count=0,
-            unavailable_reason=reason,
+            unavailable_reason=reason.value,
         )
         for definition in registry.definitions()
     )
@@ -71,7 +72,9 @@ def compute_analytics(
     profit_factor = sum(winning) / abs(sum(losing)) if losing else None
     sample_count = len(returns)
 
-    def value(metric_id: str, number: float | None, reason: str | None = None) -> MetricValue:
+    def value(
+        metric_id: str, number: float | None, reason: MetricUnavailableReason | None = None
+    ) -> MetricValue:
         registry.get(metric_id)
         return MetricValue(
             metric_id=metric_id,
@@ -79,33 +82,35 @@ def compute_analytics(
             scope=scope,
             scope_label=scope_label,
             sample_count=sample_count,
-            unavailable_reason=reason if number is None else None,
+            unavailable_reason=reason.value if number is None and reason is not None else None,
         )
 
     metrics = (
         value("total_return", total_return),
         value("cagr", cagr),
         value("volatility", volatility),
-        value("sharpe", sharpe, "zero_return_variance"),
-        value("sortino", sortino, "no_downside_variation"),
+        value("sharpe", sharpe, MetricUnavailableReason.ZERO_RETURN_VARIANCE),
+        value("sortino", sortino, MetricUnavailableReason.NO_DOWNSIDE_VARIATION),
         value("max_drawdown", max_drawdown),
-        value("calmar", calmar, "no_drawdown"),
+        value("calmar", calmar, MetricUnavailableReason.NO_DRAWDOWN),
         value("turnover", turnover),
         value("max_drawdown_duration_sessions", float(max_duration)),
         value(
             "max_drawdown_recovery_sessions",
             float(recovery) if recovery is not None else None,
-            "maximum_drawdown_not_recovered",
+            MetricUnavailableReason.MAXIMUM_DRAWDOWN_NOT_RECOVERED,
         ),
-        value("benchmark_return", benchmark_return, "benchmark_not_available"),
+        value(
+            "benchmark_return", benchmark_return, MetricUnavailableReason.BENCHMARK_NOT_AVAILABLE
+        ),
         value(
             "excess_return",
             total_return - benchmark_return if benchmark_return is not None else None,
-            "benchmark_not_available",
+            MetricUnavailableReason.BENCHMARK_NOT_AVAILABLE,
         ),
         value("trade_count", float(len(data.trades))),
-        value("win_rate", win_rate, "no_closed_trades"),
-        value("profit_factor", profit_factor, "no_losing_closed_trade"),
+        value("win_rate", win_rate, MetricUnavailableReason.NO_CLOSED_TRADES),
+        value("profit_factor", profit_factor, MetricUnavailableReason.NO_LOSING_CLOSED_TRADE),
         value(
             "average_gross_exposure",
             sum(item.gross_exposure for item in points) / len(points),

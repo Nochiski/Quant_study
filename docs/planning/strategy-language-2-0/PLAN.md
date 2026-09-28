@@ -6,10 +6,10 @@ current_phase: P3
 current_pr: P3-03
 active_prs: []
 parallel_window: []
-last_updated: 2026-09-28T09:17:22+09:00
+last_updated: 2026-09-28T09:36:34+09:00
 planned_prs: 30
-merged_prs: 9
-integrated_prs: 10
+merged_prs: 19
+integrated_prs: 0
 approved_prs: 19
 progress_percent: 63
 ---
@@ -28,9 +28,9 @@ progress_percent: 63
 | Current phase | `P3` |
 | Current/next PR | `P3-03` |
 | Active PR | none |
-| Progress | `19 / 30 done (63%), main 9, integration 10` |
+| Progress | `19 / 30 done (63%), main 19, integration 0` |
 | Approved | `19 / 30` |
-| Aggregated at | `2026-09-28 09:17 KST` |
+| Aggregated at | `2026-09-28 09:36 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -121,12 +121,12 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 |---|---|---:|---:|---:|---|
 | P0 | Planning package and contract docs | 1 | 1 | 0 | `MERGED` |
 | P1 | In-screen friction removal on 1.1 | 6 | 6 | 0 | `MERGED` |
-| P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 2 | 8 | `INTEGRATED` |
-| P3 | Frontend 1.2 adaptation | 3 | 0 | 2 | `READY` |
+| P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 10 | 0 | `MERGED` |
+| P3 | Frontend 1.2 adaptation | 3 | 2 | 0 | `READY` |
 | P4 | Graph level 1: pipeline | 4 | 0 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | 0 | `WAITING` |
-| **Total** |  | **30** | **9** | **10** | **63%** |
+| **Total** |  | **30** | **19** | **0** | **63%** |
 <!-- PLAN:PHASES:END -->
 
 ## 현재 작업 Packet
@@ -971,15 +971,15 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P2-01` | `RunEnvironment` 모델·브리지(`domain/backtest`), 실행 요청 optional `environment`, manifest·캐시 키, `/run-environments/schema` | P0-01 | `MERGED` | [#172](https://github.com/Nochiski/Quant_study/pull/172) · `review_lang2_p2_01` 1차 REQUEST_CHANGES(P0 1·P1 1·P2 4·P3 3) → 2차 APPROVE · main 병합 cascade 리뷰 2회 APPROVE(`review_lang2_p2_merge_0102`·`_r2`) · main 머지 `2d08157a`(#172, 2026-09-26) |
 | [x] | `P2-02` | `graph.missing_policy` 제거 → `environment.missing`(plan 인자, `plan_hash` 유지) | P2-01 | `MERGED` | [#176](https://github.com/Nochiski/Quant_study/pull/176) · `review_lang2_p2_02` 1차 REQUEST_CHANGES(P1 1·P2 3·P3 3) → 2차 APPROVE · main 병합 cascade 리뷰 2회 APPROVE · main 머지 `1fb099f7`(#176, 2026-09-26) |
-| [x] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `INTEGRATED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 2차 APPROVE · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) |
-| [x] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `INTEGRATED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 1~4차 REQUEST_CHANGES → 5차 APPROVE → 6차 APPROVE(R5 단조성 반영 `71d6655d` 확인) · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) |
-| [x] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `INTEGRATED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 1차 REQUEST_CHANGES(P2 2·P3 2) → 2~6차 APPROVE · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) |
-| [x] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `INTEGRATED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 APPROVE(blocking 0·P2 1·P3 4, 전부 반영 `77bd713c`·`7b707660`) · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) |
-| [x] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `INTEGRATED` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · `review_lang2_p2_07` 1차 REQUEST_CHANGES(P1 1: 그래프 밖 필드 참조가 필드 계약 검사를 빠져나감·P3 3) → 2차 APPROVE(tip `945fd081`) · 통합 머지 `013da821`(#201, base `lang2/integration`, 2026-09-27) |
-| [x] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `INTEGRATED` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 1차 REQUEST_CHANGES(P1 1 DEFECT-P208-001·P2 1·P3 3) → 2차 APPROVE(`d99aa024`, 새 관찰 P2-NEW-1 원주가 오염 → 이슈 #214 → BACKLOG-017) · 통합 머지 `48eff6d8`(#205, 2026-09-27) |
-| [x] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `INTEGRATED` | [#217](https://github.com/Nochiski/Quant_study/pull/217) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base `lang2/integration`(처음 연 #216 은 P2-08 브랜치 삭제로 닫혀 #217 로 다시 열었다) · `review_lang2_p2_09` 1차 REQUEST_CHANGES(P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 뺀다) → 반영 `a32ed9d7`, 재확인 대기 · Phase 2 감사 NB-1(현재 판 문서 업그레이드) 수정 `17c68261` · 통합 머지 `4936a840`(#217, `lang2/integration`, 2026-09-27) |
+| [x] | `P2-03` | `data`·`execution` 제거, `CURRENT_SCHEMA_VERSION` 1.2, 필수 키 2개, fixture·hash golden | P2-02 | `MERGED` | [#183](https://github.com/Nochiski/Quant_study/pull/183) · `review_lang2_p2_03` 1차 REQUEST_CHANGES(P2 2·P3 8) → 2차 APPROVE · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) · main 머지 `a4be517a`(#202, 2026-09-28) |
+| [x] | `P2-04` | `signal.normalization`과 결합 전 정규화 | P2-03 | `MERGED` | [#184](https://github.com/Nochiski/Quant_study/pull/184) · 1~4차 REQUEST_CHANGES → 5차 APPROVE → 6차 APPROVE(R5 단조성 반영 `71d6655d` 확인) · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) · main 머지 `a4be517a`(#202, 2026-09-28) |
+| [x] | `P2-05` | 횡단면 eligibility(전용 `EligibilityOperator`, exhaustive `_compare`, 2-pass) | P2-04 | `MERGED` | [#187](https://github.com/Nochiski/Quant_study/pull/187) · 1차 REQUEST_CHANGES(P2 2·P3 2) → 2~6차 APPROVE · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) · main 머지 `a4be517a`(#202, 2026-09-28) |
+| [x] | `P2-06` | `risk.risk_factor_id`(합성 제외·원시값 역가중), `saved_*` 제거 | P2-05, P1-03 | `MERGED` | [#200](https://github.com/Nochiski/Quant_study/pull/200) · `review_lang2_p2_06` 1차 APPROVE(blocking 0·P2 1·P3 4, 전부 반영 `77bd713c`·`7b707660`) · 통합 머지 `c72f6257`(`lang2/integration`, 2026-09-27). 원 PR 은 CLOSED — GitHub 가 커밋 차이 없는 base 변경을 거부해 사유 댓글과 함께 닫았다(현재 결정 묶음 머지 항목) · main 머지 `a4be517a`(#202, 2026-09-28) |
+| [x] | `P2-07` | compile 단일 게이트: `field_missing`, boolean 승격, 단위 경고, 연산자 unsupported | P2-06, P1-03 | `MERGED` | [#201](https://github.com/Nochiski/Quant_study/pull/201) · `review_lang2_p2_07` 1차 REQUEST_CHANGES(P1 1: 그래프 밖 필드 참조가 필드 계약 검사를 빠져나감·P3 3) → 2차 APPROVE(tip `945fd081`) · 통합 머지 `013da821`(#201, base `lang2/integration`, 2026-09-27) · main 머지 `a4be517a`(#202, 2026-09-28) |
+| [x] | `P2-08` | duckdb `GROUP_SERIES` 스파이크, `ideas/*.yaml` 5개(레시피 산출 형태) | P2-07 | `MERGED` | [#205](https://github.com/Nochiski/Quant_study/pull/205) · 1차 REQUEST_CHANGES(P1 1 DEFECT-P208-001·P2 1·P3 3) → 2차 APPROVE(`d99aa024`, 새 관찰 P2-NEW-1 원주가 오염 → 이슈 #214 → BACKLOG-017) · 통합 머지 `48eff6d8`(#205, 2026-09-27) · main 머지 `a4be517a`(#202, 2026-09-28) |
+| [x] | `P2-09` | 1.1 → 1.2 업그레이더(버전 디스패치), upgrade 응답 `environment`, 동결 읽기, OpenAPI | P2-08 | `MERGED` | [#217](https://github.com/Nochiski/Quant_study/pull/217) · 워크트리 `wt-lang2-p2-09`, 브랜치 `feat/lang2-p2-09-upgrader` · base `lang2/integration`(처음 연 #216 은 P2-08 브랜치 삭제로 닫혀 #217 로 다시 열었다) · `review_lang2_p2_09` 1차 REQUEST_CHANGES(P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 뺀다) → 반영 `a32ed9d7`, 재확인 대기 · Phase 2 감사 NB-1(현재 판 문서 업그레이드) 수정 `17c68261` · 통합 머지 `4936a840`(#217, `lang2/integration`, 2026-09-27) · main 머지 `a4be517a`(#202, 2026-09-28) |
 
-| [x] | `P2-10` | Phase 2 감사 후속(문서): PLAN 머지·통합·리뷰 기록 정정, `INTEGRATED` 상태, BACKLOG-017, P3 계약 누락 예약 | P2-09 | `INTEGRATED` | [#222](https://github.com/Nochiski/Quant_study/pull/222) · 워크트리 `wt-lang2-p2-10`, 브랜치 `docs/lang2-p2-10-phase2-records` · base P2-09(`17c68261` 에서 착수, `a32ed9d7` 을 merge 로 따라감) · 통합 머지 `e6422e98`(#222, `lang2/integration`, 2026-09-27) |
+| [x] | `P2-10` | Phase 2 감사 후속(문서): PLAN 머지·통합·리뷰 기록 정정, `INTEGRATED` 상태, BACKLOG-017, P3 계약 누락 예약 | P2-09 | `MERGED` | [#222](https://github.com/Nochiski/Quant_study/pull/222) · 워크트리 `wt-lang2-p2-10`, 브랜치 `docs/lang2-p2-10-phase2-records` · base P2-09(`17c68261` 에서 착수, `a32ed9d7` 을 merge 로 따라감) · 통합 머지 `e6422e98`(#222, `lang2/integration`, 2026-09-27) · main 머지 `a4be517a`(#202, 2026-09-28) |
 
 Phase exit:
 
@@ -993,8 +993,8 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [x] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-06 | `INTEGRATED` | [#232](https://github.com/Nochiski/Quant_study/pull/232) · `review_p3_01` 1차 조건부 APPROVE(`2fde473e`) → 2차 APPROVE(`6e5e71da`, 재리뷰 P2 2·P3 1 반영 `08451303`) · 통합 머지 `c4d0f481`(#232, `lang2/integration`, 2026-09-27) |
-| [x] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `INTEGRATED` | [#242](https://github.com/Nochiski/Quant_study/pull/242) · `review_pr242` 1차 REQUEST_CHANGES(`7ba3005e`, P1 1·P2 2·P3 1) → 2차 APPROVE(`dc02417a`, 재리뷰 P3 2 → 이슈 #251) · 통합 브랜치 `6ffab152`·`cb9b1b3f`(main #227·#237·#233·#239) 병합 · 통합 머지 `59d94f8d`(#242, `lang2/integration`, 2026-09-28) |
+| [x] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-06 | `MERGED` | [#232](https://github.com/Nochiski/Quant_study/pull/232) · `review_p3_01` 1차 조건부 APPROVE(`2fde473e`) → 2차 APPROVE(`6e5e71da`, 재리뷰 P2 2·P3 1 반영 `08451303`) · 통합 머지 `c4d0f481`(#232, `lang2/integration`, 2026-09-27) · main 머지 `a4be517a`(#202, 2026-09-28) |
+| [x] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `MERGED` | [#242](https://github.com/Nochiski/Quant_study/pull/242) · `review_pr242` 1차 REQUEST_CHANGES(`7ba3005e`, P1 1·P2 2·P3 1) → 2차 APPROVE(`dc02417a`, 재리뷰 P3 2 → 이슈 #251) · 통합 브랜치 `6ffab152`·`cb9b1b3f`(main #227·#237·#233·#239) 병합 · 통합 머지 `59d94f8d`(#242, `lang2/integration`, 2026-09-28) · main 머지 `a4be517a`(#202, 2026-09-28) |
 | [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `READY` | — · base 는 통합 브랜치 main 머지 규칙(현재 결정 2026-09-28)을 따른다 |
 
 Phase exit:
@@ -1119,6 +1119,9 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-28 — 통합 브랜치 main 머지(#202, `a4be517a`) 기록: 현재 결정 2026-09-28 규칙 1 대로 `INTEGRATED` 행
+  10개(P2-03 ~ P2-10, P3-01, P3-02)를 `MERGED` 로 바꾸고 Review 열에 main 머지 커밋을 더했다. 통합 머지 SHA 는
+  그대로 둔다.
 - 2026-09-28 — P3-02 통합 머지(`59d94f8d`, #242) 기록: P3-02 `INTEGRATED`, P3-03 `READY`, P3 Phase exit
   "같은 전략·다른 기간" 체크, Review 기록 2행. 현재 결정에 통합 브랜치 main 머지 뒤 규칙(`INTEGRATED` → `MERGED`
   기록, 이후 PR base 는 main, 묶음 예외 종료)을 적고 상태 값 표·WORKFLOW 1절에 연결했다.

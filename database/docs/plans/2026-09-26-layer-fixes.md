@@ -232,3 +232,29 @@ cd /home/kael/quant-ledger; SNAP=<09-29 아침 확정 빌드의 snapshot-id>
 # 4) S11: scripts/run_equity.sh disclosure_version
 ```
 GT-F(2) 의 "2024 이전 행 불변" 은 `filed_date`·`target_raw` 기준이다 — `reason_raw` 는 옛 서식에서도 비어 있던 행이 항목 열로 채워질 수 있다(NULL→값만 허용). 대조 사본 `logs/tf_before_corr.parquet`(17,618행, 판 m_20260924T035856). 후속: 서버 재파싱 뒤 절단본 픽스처 `tests/fixtures/stage_slice` 의 정정 6건(p1.4)을 다시 떠서 S11 최근 창 단언 3개·`DATE_CHECK` 갱신.
+
+---
+
+## 11. GPT 자문 채택분 T-G · T-H · T-I (2026-09-28 승인 "ㅇㅇ")
+
+근거: [`../research/2026-09-28-gpt-data-quality-consult.md`](../research/2026-09-28-gpt-data-quality-consult.md) §2. 공통 원칙: **분모는 "만들어진 행"이 아니라 "예상 대상"**, 경보에는 영향 건수·대표 사례·최초 발생 판·이유를 같이.
+
+### T-G 전 컬럼 diff 게이트 (지금, 코드만)
+- `scripts/equity_diff.py`: 같은 equity 표의 두 판(`--before <build_id> --after <build_id>`, 기본 = 직전 커밋 판 vs 현재 판)을 grain 키로 FULL OUTER JOIN 해 컬럼별로 **값→NULL · NULL→값 · 값→다른 값(부동소수는 컬럼별 허용오차) · 행 추가 · 행 삭제 · basis/available_date 변경**을 세고, 대표 사례 3건(키·전·후)을 붙여 JSON+표로 낸다. 운영 메타(빌드 시각 등)는 비교에서 뺀다.
+- **예상 변경 선언** `--expect <yaml>`: 컬럼·조건(예 `capex_ytd: null_to_value only where capex_basis in (ppe_parts, none_in_cf)`)·허용 방향을 적으면 그 밖의 변경은 `unexplained` 로 집계. `--gate` 면 unexplained 값→NULL·행 삭제·available_date 변경 > 0 이면 rc 2.
+- EG5a 가 `skip(rules_changed)` 인 빌드에서 **신판 2회 빌드 결정성**(같은 스냅샷으로 두 번 지어 content_hash 동일)을 `scripts/run_equity.sh` 뒤에 붙일 수 있게 `--determinism` 옵션(두 build_id 의 파티션 해시 비교).
+- 테스트: 절단본 두 판(픽스처 빌드 → 규칙 한 줄 바꿔 재빌드)으로 각 변경 유형이 정확히 집계되는지, expect 파일이 unexplained 를 0 으로 만드는지.
+- 게이트 GT-G: 09-26 의 fin_std 세 판(110658·130415·132656)에 대해 손으로 낸 숫자(값→NULL 0·표준 capex 변경 0·ppe_parts 증가 1,402)와 **동일 결과**.
+
+### T-H 예상 대상 기준 커버리지 (지금 1단계 = fin_std, M2 에서 2단계 = factor_inputs)
+- 1단계 `rules_s12.py` EG3_fin_std 에 기록형 지표 `coverage_by_group`: 그룹 = `fs_div` × 템플릿(`req` CTE 의 has_interest_revenue → banking · has_investment_income → insurance · 그 밖 standard) × 보고서 종류, 지표 = revenue·op_profit·net_income·total_asset·cf_operating_ytd·capex_ytd. 분모 = 그룹의 **fin_std 채택 행 + 격리 행**(격리는 `_reject` 에서, 예상 대상 = 표준계정이 있는 stg_fin 그룹 = EG1 우변). 분자 = 값 있음. 직전 판의 같은 표와 비교해 **≥20 대상 그룹에서 유효 비율이 50%p 이상 떨어지거나 0 이 되면 FAIL**, 5%p 이상·5건 이상이면 기록형 warn. 대표 사례 3건 동반.
+- NULL 사유 1단계: `capex_basis` 어휘에 이미 있는 `unavailable` 을 `no_cf_statement`(현금흐름표 없음) 와 `unmapped`(현금흐름표는 있는데 대응 실패) 로 나눈다 — F-A3 의 0 규칙 분모를 그대로 쓴다. revenue_basis 도 `unavailable` 을 같은 두 갈래로.
+- 2단계(M2 T2.2b): factor_inputs 의 12개 모델 입력(VOL60·E/P·배당·OPM·FCF/A·M_PULL_C·리비전 4·신용·외국인)마다 예상 대상(유니버스) 대비 유효 건수와 사유 분포를 판 메타에 기록, 전부 NULL 인 입력이 있으면 판 FAIL.
+- 게이트 GT-H: 09-23 판 재현에서 DQ-6 상황(금융 템플릿 순이익 0%)을 넣으면 FAIL 하고, 현재 판은 PASS 하며 은행·보험 그룹의 순이익 유효 비율이 표에 나온다.
+
+### T-I 골든·절단본 픽스처의 형태 다양성 (T-F 서버 재파싱 뒤, 09-29~30)
+- 절단본 `tests/fixtures/stage_slice` 에 이번 결함 원문 각 1건 추가: 별도 결산 회사(252990) · 금융 템플릿(003540 이미 있음 + 은행 1) · 분할 capex(00159971 형) · 부호 혼재(00402989 형) · 2025 정정 표지 1건 · 비12월 결산 1건. 슬라이스 스크립트가 있으면 그것으로, 없으면 `scripts/` 에 추출 스크립트를 두고 재현 가능하게.
+- 골든 27건에 위 유형의 기대값 6건 추가(EG4). S11 최근 창 단언·`DATE_CHECK` 갱신(T-F 보고 항목).
+- 게이트 GT-I: 픽스처 재구성 뒤 전체 테스트 통과, EG4 33건.
+
+순서: T-G ∥ T-H(에이전트 둘, 파일 겹침 없음: T-G 는 `scripts/equity_diff.py`·`tests/test_equity_diff.py`·`docs/EQUITY_GATES.md` §diff, T-H 는 `src/equity/rules_s12.py`·`src/equity/sql/fin_std.sql`(basis 어휘)·`src/fin_map.py`·`tests/test_equity_s12_fin.py`·`docs/EQUITY_GATES.md` §S12) → 커밋 → 09-29 배포 묶음에 포함.

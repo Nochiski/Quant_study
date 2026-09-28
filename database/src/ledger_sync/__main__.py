@@ -74,12 +74,12 @@ def _endpoint(args: argparse.Namespace) -> SftpEndpoint:
     if not args.host:
         raise RemoteConnectError(
             "server host is not set — pass --host or set QL_SYNC_HOST "
-            f"(verb={args.verb}, user={args.user}, port={args.port})")
+            f"(verb={args.verb}, user={'set' if args.user else 'unset'}, port={args.port})")
     if not args.user:
         # 계정명도 주소처럼 기본값을 두지 않는다 — 공개 저장소라 코드에 적지 않는다.
         raise RemoteConnectError(
             "server user is not set — pass --user or set QL_SYNC_USER "
-            f"(verb={args.verb}, host={args.host}, port={args.port})")
+            f"(verb={args.verb}, host={'set' if args.host else 'unset'}, port={args.port})")
     return SftpEndpoint(host=args.host, user=args.user, key_path=Path(args.key).expanduser(),
                         port=args.port)
 

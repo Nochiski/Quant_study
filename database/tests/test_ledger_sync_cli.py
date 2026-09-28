@@ -333,7 +333,7 @@ def test_remote_verbs_fail_before_connecting_without_a_user(
         assert "server user is not set" in last["error"]
 
 
-@pytest.mark.parametrize("verb", [["--json", "status"], ["gc"]])
+@pytest.mark.parametrize("verb", [["--json", "status"], ["gc"], ["catalog"]])
 def test_local_verbs_do_not_need_a_user(verb: list[str], no_connect: list[object],
                                         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """로컬 상태만 읽는 동사는 계정명·주소 없이 돈다."""
@@ -363,3 +363,118 @@ def test_offline_verify_does_not_need_a_user(remote: FakeRemote, tmp_path: Path,
     local = ["--root", str(tmp_path), "--layer", "equity"]
     assert cli.main([*local, "verify", "--offline"]) == cli.EXIT_OK
     assert "not set" not in capsys.readouterr().err
+
+
+# ── 서버 주소·계정은 출력에 남기지 않는다(#259 리뷰 P3-3) ─────────────────────────────
+# 사용자가 오류 문장을 공개 이슈에 그대로 붙여도 주소·계정이 새지 않아야 한다. 진단에는 설정 여부로 충분하다.
+
+
+def _everything_printed(tmp_path: Path, captured: pytest.CaptureFixture[str]) -> str:
+    out = captured.readouterr()
+    texts = [out.out, out.err]
+    for path in (tmp_path / "equity" / "_sync").rglob("*"):
+        if path.is_file():
+            texts.append(path.read_text(encoding="utf-8"))
+    return "\n".join(texts)
+
+
+@pytest.mark.parametrize("verb", [["plan"], ["pull"], ["verify"], ["sync"], ["status", "--remote"]])
+def test_a_missing_user_does_not_print_the_host(verb: list[str], no_connect: list[object],
+                                                tmp_path: Path, capsys,
+                                                monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("QL_SYNC_USER", raising=False)
+    no_user = ["--root", str(tmp_path), "--layer", "equity", "--host", TEST_HOST]
+    assert cli.main([*no_user, *verb]) == cli.EXIT_ERROR
+    printed = _everything_printed(tmp_path, capsys)
+    assert "server user is not set" in printed
+    assert TEST_HOST not in printed
+
+
+def test_a_missing_host_does_not_print_the_user(no_connect: list[object], tmp_path: Path,
+                                                capsys, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("QL_SYNC_HOST", raising=False)
+    no_host = ["--root", str(tmp_path), "--layer", "equity", "--user", TEST_USER]
+    assert cli.main([*no_host, "sync"]) == cli.EXIT_ERROR
+    printed = _everything_printed(tmp_path, capsys)
+    assert "server host is not set" in printed
+    assert TEST_USER not in printed
+
+
+class _FakeParamiko:
+    """접속 단계만 흉내 내는 paramiko 대역 — 오류 문장에 주소·계정을 싣는 실제 라이브러리 동작을 재현한다."""
+
+    class SSHException(Exception):
+        pass
+
+    class AuthenticationException(SSHException):
+        pass
+
+    class BadHostKeyException(SSHException):
+        pass
+
+    class MissingHostKeyPolicy:
+        pass
+
+    class RejectPolicy(MissingHostKeyPolicy):
+        pass
+
+    def __init__(self, failure: BaseException) -> None:
+        failure_ = failure
+
+        class SSHClient:
+            def load_system_host_keys(self, path: str) -> None:
+                pass
+
+            def set_missing_host_key_policy(self, policy: object) -> None:
+                pass
+
+            def connect(self, *args: object, **kwargs: object) -> None:
+                raise failure_
+
+            def close(self) -> None:
+                pass
+
+        self.SSHClient = SSHClient
+
+
+@pytest.mark.parametrize("failure_kind", ["socket", "auth", "unknown_host"])
+def test_connect_failures_do_not_print_the_host_or_user(
+        failure_kind: str, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch) -> None:
+    """paramiko·소켓 오류 문장은 주소·계정을 담는다 — 로그·`last_run.json` 에 옮기기 전에 가린다."""
+    import sys
+
+    fake = _FakeParamiko(OSError())
+    failures = {
+        "socket": OSError(f"Unable to connect to port 22 on {TEST_HOST}"),
+        "auth": fake.AuthenticationException(f"Authentication failed for {TEST_USER}"),
+        "unknown_host": fake.SSHException(f"Server '{TEST_HOST}' not found in known_hosts"),
+    }
+    monkeypatch.setitem(sys.modules, "paramiko", _FakeParamiko(failures[failure_kind]))
+    key = tmp_path / "id_test"
+    key.write_text("not a real key", encoding="utf-8")
+
+    rc = cli.main([*_base(tmp_path), "--key", str(key), "sync"])
+
+    assert rc == cli.EXIT_ERROR
+    printed = _everything_printed(tmp_path, capsys)
+    assert "sync aborted" in printed
+    assert TEST_HOST not in printed and TEST_USER not in printed
+
+
+def test_transfer_retry_errors_do_not_print_the_host_or_user(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from ledger_sync.remote import RemoteTransferError, SftpEndpoint, SftpRemote
+
+    monkeypatch.setitem(sys.modules, "paramiko", _FakeParamiko(OSError()))
+    remote = SftpRemote(SftpEndpoint(host=TEST_HOST, user=TEST_USER, key_path=tmp_path / "k"),
+                        retries=1)
+
+    def broken() -> None:
+        raise OSError(f"Socket closed by {TEST_USER}@{TEST_HOST}")
+
+    with pytest.raises(RemoteTransferError) as caught:
+        remote._retry("listdir /equity", broken)
+    assert TEST_HOST not in str(caught.value) and TEST_USER not in str(caught.value)
+    assert "listdir /equity" in str(caught.value)

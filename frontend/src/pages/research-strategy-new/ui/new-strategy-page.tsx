@@ -18,6 +18,7 @@ import {
   StrategyProjectionPanel,
   StrategyDiffPanel,
   StrategyOutline,
+  UpgradeBanner,
   PROJECTION_VIEWS,
   canValidateDocument,
   currentDiagnostics,
@@ -42,6 +43,7 @@ import {
   useFormProjection,
   useSourceTransactions,
   useStrategyDocument,
+  useUpgradeDocument,
   type DocumentSource,
   type StrategyView,
 } from "../../../features/edit-strategy";
@@ -103,6 +105,9 @@ export const NewStrategyPage = () => {
     schemaPending: assist.loading,
   });
   const { validateNow, validating } = useCompileDocument(document, dispatch);
+  // 붙여 넣은 은퇴 버전 문서도 revision 화면과 같은 경로로 올린다(#257). 저장본이 없으므로 판정은
+  // 현재 텍스트의 compile 진단만 읽는다.
+  const documentUpgrade = useUpgradeDocument(document, null);
   // AI 제안은 업그레이드 적용과 같은 전체 범위 교체 경로를 쓴다(SoT 규칙의 두 번째 예외).
   const proposalApply = useApplyAssistantProposal(document);
   const canValidate = !validating && canValidateDocument(document);
@@ -218,6 +223,7 @@ export const NewStrategyPage = () => {
   const onOutlineEditorReady = outline.onEditorReady;
   const onSnippetEditorReady = snippets.onEditorReady;
   const onTransactionsEditorReady = transactions.onEditorReady;
+  const onUpgradeEditorReady = documentUpgrade.onEditorReady;
   const onProblemsEditorReady = problems.onEditorReady;
   const onHistoryEditorReady = history.onEditorReady;
   const onProposalEditorReady = proposalApply.onEditorReady;
@@ -226,6 +232,7 @@ export const NewStrategyPage = () => {
       onOutlineEditorReady(editor);
       onSnippetEditorReady(editor);
       onTransactionsEditorReady(editor);
+      onUpgradeEditorReady(editor);
       onProblemsEditorReady(editor);
       onHistoryEditorReady(editor);
       onProposalEditorReady(editor);
@@ -235,6 +242,7 @@ export const NewStrategyPage = () => {
       onProposalEditorReady,
       onSnippetEditorReady,
       onTransactionsEditorReady,
+      onUpgradeEditorReady,
       onProblemsEditorReady,
       onHistoryEditorReady,
     ],
@@ -304,13 +312,19 @@ export const NewStrategyPage = () => {
     <>
       <StrategyIde
         notice={
-          /* 제안 적용 결과는 문서 알림 줄에 둔다 — 사이드바 레일에는 사이드바가 소유한
-             라이브 영역 하나만 있어야 한다(B-03 리뷰). */
-          <ProposalApplyFeedback
-            apply={proposalApply}
-            chain={strategyAssistant.chain}
-            blockedReason={runSettings.blockedReason}
-          />
+          <>
+            {/* 제안 적용 결과는 문서 알림 줄에 둔다 — 사이드바 레일에는 사이드바가 소유한
+                라이브 영역 하나만 있어야 한다(B-03 리뷰). */}
+            <ProposalApplyFeedback
+              apply={proposalApply}
+              chain={strategyAssistant.chain}
+              blockedReason={runSettings.blockedReason}
+            />
+            <UpgradeBanner
+              upgrade={documentUpgrade}
+              onApplyEnvironment={runSettings.applyEnvironment}
+            />
+          </>
         }
         title={t("page.newStrategy.title")}
         versionLabel={t("page.newStrategy.draft")}

@@ -145,16 +145,17 @@
 
 ### US-SM-07 예전 형식으로 저장한 전략을 새 형식으로 올린다
 
-> 한상목으로서 예전 schema로 저장한 전략을 열었을 때 의미를 바꾸지 않고 새 형식으로 올리고 싶다.
-> 그래야 옛 전략도 계속 돌릴 수 있다.
+> 한상목으로서 예전 schema로 저장한 전략을 열거나 예전에 쓰던 YAML을 새 전략에 붙여 넣었을 때 의미를
+> 바꾸지 않고 새 형식으로 올리고 싶다. 그래야 옛 전략도 계속 돌릴 수 있다.
 
 - 상태: `구현됨-e2e`
 - 담당 PR: 없음
 - e2e 담당: 없음
-- 기능 영역: schema 업그레이드 · 동결 리비전
+- 기능 영역: schema 업그레이드 · 동결 리비전 · 새 전략
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision to the current schema, fills its run settings, saves it and backtests it
   - `frontend/e2e/workbench.workflow.spec.ts` :: migrates a source-less legacy revision without changing meaning
+  - `frontend/e2e/stories/sm.upgrade-new-strategy.spec.ts` :: US-SM-07 새 전략 화면에 옛 schema YAML을 붙여 넣으면 배너로 올리고 실행 설정을 채워 저장·백테스트한다
 
 수용 기준
 
@@ -164,13 +165,17 @@
   설정이 보인다. When "실행 설정에 채우기"를 누르고 저장하면, Then 새 버전이 생기고 안내가 사라지며
   옛 실행 설정(기간·유니버스·비용)으로 백테스트가 끝까지 돈다. 옛 실행 설정을 옮기지 못한 문서는
   채우지 않고 그 사실을 알린다. 전략 이력에는 옛 버전에만 "이전 버전 동결" 표시가 남는다.
+- Given 새 전략 화면에 schema 1.0·1.1 YAML을 붙여 넣은 상태, Then 같은 안내가 뜨고 저장과 백테스트가
+  막힌다. When "현재 버전으로 업그레이드" → "실행 설정에 채우기" → "리비전 저장"을 누르면, Then 편집기
+  글이 현재 버전으로 바뀐 채 revision 1이 생기고, 옛 실행 설정으로 백테스트가 끝까지 돈다(#257).
 - Given 원문 없이 JSON으로만 저장된 옛 전략, Then "legacy JSON에서 생성된 문서"라는 안내와 함께
   열리고, 저장하면 의미 해시가 같은 새 버전이 된다.
 - 비고: P2-09부터 업그레이드는 1.0 → 1.1 → 1.2 전체 경로를 타고, 저장한 새 버전은 현재 schema다.
   의미 해시는 1.1 합성 방식(`signal.normalization: none`)을 명시한 golden 문서와 같다. P3-02가 배너
   문구를 버전 중립으로 바꾸고 응답 `environment`로 실행 설정 채우기와 `warnings` 표시를 더했다.
-- 비고: 태그 e2e는 1.0 리비전 경로만 밟는다. 1.1 리비전을 열어 업그레이드하는 브라우저 시나리오는
-  P3-03 acceptance에 있다.
+- 비고: 저장된 리비전 경로의 태그 e2e는 1.0 리비전만 밟는다. 1.1 리비전을 열어 업그레이드하는 브라우저
+  시나리오는 P3-03 acceptance에 있다. 새 전략 화면 경로(#257)는 1.1 원문으로 저장·백테스트까지, 1.0
+  원문으로 업그레이드·검증 통과까지 e2e가 본다.
 
 ### US-SM-08 Form·Graph로 고쳐도 YAML 원문은 그 줄만 바뀐다
 

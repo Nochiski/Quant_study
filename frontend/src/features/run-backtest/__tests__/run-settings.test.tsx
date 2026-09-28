@@ -25,6 +25,7 @@ import type { BacktestRunSpec, RunEnvironment } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   runEnvironmentFields,
+  validateRunEnvironment,
   type RunEnvironmentValidation,
 } from "../model/run-environment";
 import {
@@ -347,6 +348,19 @@ describe("run environment panel", () => {
     servedSchema = RUN_ENVIRONMENT_SCHEMA;
     server.use(schemaHandler);
     localStorage.clear();
+  });
+
+  // #266 리뷰 P3-1: 덜 친 날짜 칸은 값이 빈 문자열이다. 검증이 이를 "비었다"로만 보면 칸 아래는 "끝까지
+  // 치라"고 하는데 요약 띠·차단 문장은 "채우라"고 해 같은 칸을 두고 두 원인을 말한다.
+  it("reports a half-typed date as a date error, not a missing value", () => {
+    const fields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
+    const values = { start: "", end: "", universe_id: "" };
+    expect(validateRunEnvironment(fields, values).errors.start).toBe(
+      "required",
+    );
+    expect(
+      validateRunEnvironment(fields, values, new Set(["start"])).errors,
+    ).toMatchObject({ start: "date", end: "required" });
   });
 
   it("draws every field from the run environment schema in schema order", () => {

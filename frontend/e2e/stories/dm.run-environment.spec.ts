@@ -82,21 +82,24 @@ test(
     await expect(end).toBeFocused();
 
     // 연도만 친 채 다른 칸으로 가면 칸은 비어 있고, "값을 정하세요." 대신 날짜를 끝까지 치라고 말한다.
-    const incomplete = page.getByText(
-      "연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01",
-    );
+    // 칸 아래 문장(칸의 설명)과 요약 띠가 같은 원인을 말한다(#266 리뷰 P3-1).
+    const incomplete = "연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01";
     await end.click();
     await page.keyboard.type("2026");
     await oos.click();
     await expect(end).toHaveValue("");
-    await expect(incomplete).toBeVisible();
+    await expect(end).toHaveAccessibleDescription(new RegExp(incomplete, "u"));
+    await expect(summary).toContainText(
+      `실행 설정의 종료일 칸을 고치세요: ${incomplete}`,
+    );
+    await expect(summary).not.toContainText("종료일·유니버스 칸을 채우세요");
     await expect(end).toHaveAttribute("aria-invalid", "true");
 
     // 칸을 다시 눌러 대시까지 넣어 쳐도 같은 날짜가 들어가고, 모자란다는 문장은 사라진다.
     await end.click();
     await page.keyboard.type("2026-08-31");
     await expect(end).toHaveValue("2026-08-31");
-    await expect(incomplete).toHaveCount(0);
+    await expect(page.getByText(incomplete)).toHaveCount(0);
 
     const universe = page.getByRole("textbox", {
       name: "유니버스",

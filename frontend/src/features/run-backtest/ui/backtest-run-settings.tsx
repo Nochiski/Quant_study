@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
+import { useEffect, useId, useRef, type SyntheticEvent } from "react";
 
 import { t, tDescription } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
@@ -34,31 +34,30 @@ const EnvironmentInput = ({
   value,
   error,
   onChange,
+  onIncompleteChange,
 }: {
   field: RunEnvironmentField;
   value: string;
   error: RunEnvironmentFieldError | undefined;
   onChange: (value: string) => void;
+  onIncompleteChange: (incomplete: boolean) => void;
 }) => {
   const inputId = useId();
   const hintId = useId();
   const errorId = useId();
   const description = tDescription(field.descriptionKey);
-  // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 검증만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
-  // 안에서 자리를 옮기는 동안 이벤트를 내지 않으므로, 칸을 떠날 때와 값이 바뀔 때 `badInput` 을 읽어 "날짜를
-  // 끝까지 치라"는 문장으로 바꿔 보인다. 값이 생기면 검증 결과를 그대로 쓴다.
-  const [incomplete, setIncomplete] = useState(false);
-  const shown: RunEnvironmentFieldError | undefined =
-    incomplete && value === "" ? "date" : error;
+  // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 값만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
+  // 안에서 자리를 옮기는 동안 이벤트를 내지 않으므로, 칸을 떠날 때와 값이 바뀔 때 `badInput` 을 읽어
+  // 컨트롤러에 알린다. 검증이 그 칸을 날짜 오류로 보고, 칸 아래·요약 띠가 같은 문장을 쓴다(#266 리뷰 P3-1).
   const describedBy =
-    [description === null ? null : hintId, shown === undefined ? null : errorId]
+    [description === null ? null : hintId, error === undefined ? null : errorId]
       .filter((id): id is string => id !== null)
       .join(" ") || undefined;
   // 한 줄 뜻·오류는 label 밖에 둔다 — label 안에 두면 접근 가능한 이름이 뜻 문장까지 늘어난다.
   const common = {
     id: inputId,
     "aria-describedby": describedBy,
-    "aria-invalid": shown === undefined ? undefined : true,
+    "aria-invalid": error === undefined ? undefined : true,
     "aria-required": field.required || undefined,
     "data-run-field": field.name,
   } as const;
@@ -107,10 +106,10 @@ const EnvironmentInput = ({
           }
           value={value}
           onChange={(event) => {
-            setIncomplete(isIncompleteDate(event));
+            onIncompleteChange(isIncompleteDate(event));
             onChange(event.target.value);
           }}
-          onBlur={(event) => setIncomplete(isIncompleteDate(event))}
+          onBlur={(event) => onIncompleteChange(isIncompleteDate(event))}
         />
       )}
       {description === null ? null : (
@@ -118,9 +117,9 @@ const EnvironmentInput = ({
           {description}
         </small>
       )}
-      {shown === undefined ? null : (
+      {error === undefined ? null : (
         <small id={errorId} className="backtest-settings__field-error">
-          {runEnvironmentErrorMessage(field, shown)}
+          {runEnvironmentErrorMessage(field, error)}
         </small>
       )}
     </div>
@@ -145,6 +144,7 @@ export const BacktestRunSettings = ({
     environmentValues,
     environmentErrors,
     setEnvironmentValue,
+    setEnvironmentIncomplete,
     panel,
     setPanelOpen,
   } = controller;
@@ -203,6 +203,9 @@ export const BacktestRunSettings = ({
                 value={environmentValues[field.name] ?? ""}
                 error={environmentErrors[field.name]}
                 onChange={(value) => setEnvironmentValue(field.name, value)}
+                onIncompleteChange={(incomplete) =>
+                  setEnvironmentIncomplete(field.name, incomplete)
+                }
               />
             ))
           ) : (

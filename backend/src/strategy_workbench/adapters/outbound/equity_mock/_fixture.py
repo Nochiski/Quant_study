@@ -28,6 +28,11 @@ class MockSplit:
 MOCK_SPLIT = MockSplit(security_index=0, effective=date(2018, 5, 4), ratio=50.0)
 
 
+# 원주가 필드 → 시점 간 변화를 잴 때 쓸 조정 짝(필드 계약 `FieldMetadata.adjusted_field_id`,
+# BACKLOG-018). mock 의 원주가 필드 중 조정 짝이 있는 것은 종가 하나다.
+ADJUSTED_FIELD_BY_RAW: dict[str, str] = {"price.close": "price.adj_close"}
+
+
 def adjusted_close(raw_close: float, *, security_index: int, session: date) -> float:
     """원주가 → 전방 조정 수정주가. 그 날까지 적용된 사건 계수만 곱하므로 PIT다."""
     if security_index == MOCK_SPLIT.security_index and session >= MOCK_SPLIT.effective:
@@ -127,6 +132,22 @@ def build_demo_fixture() -> MockEquityFixture:
             evidence="KRX 일별매매정보·종목기본정보",
             coverage=full_coverage,
         ),
+        # 아이디어 4(거래대금 상위 20%)의 유니버스 조건 필드(P2-08). 단위·값 타입은 실데이터
+        # 어댑터 선언(`equity_duckdb/_specs.py`)과 같다 — `test_idea_fixtures.py` 가 대조한다.
+        DatasetFieldProfile(
+            field_id="price.trading_value",
+            dataset_id="price_daily",
+            label="거래대금",
+            unit="KRW",
+            value_type=FieldValueType.AMOUNT,
+            frequency="daily",
+            available_date_basis="session close",
+            recommended_lag_sessions=0,
+            description="정규장 거래대금.",
+            disclosure_basis="정규장 종가 확정 시점",
+            evidence="KRX 일별매매정보 거래대금 필드",
+            coverage=full_coverage,
+        ),
         DatasetFieldProfile(
             field_id="financial.book_equity",
             dataset_id="fin_std",
@@ -154,6 +175,7 @@ def build_demo_fixture() -> MockEquityFixture:
                 requires_confirmation=True,
             ),
         ),
+        # 아이디어 2(저PBR + 고ROE)의 ROE 분자(P2-08). 자본총계와 같은 공시 기준이다.
         DatasetFieldProfile(
             field_id="financial.net_income",
             dataset_id="fin_std",
@@ -315,6 +337,14 @@ def build_demo_fixture() -> MockEquityFixture:
                     ),
                     Observation(
                         security.security_id,
+                        "price.trading_value",
+                        session,
+                        session,
+                        500_000_000_000.0 + security_index * 150_000_000_000.0 + index * 1_000_000,
+                        CellKind.OBSERVED,
+                    ),
+                    Observation(
+                        security.security_id,
                         "short.short_balance_ratio",
                         session,
                         session,
@@ -381,6 +411,14 @@ def build_demo_fixture() -> MockEquityFixture:
                 date(2023, 9, 30),
                 sessions[3],
                 -6_000_000_000_000.0,
+                CellKind.OBSERVED,
+            ),
+            Observation(
+                securities[0].security_id,
+                "financial.net_income",
+                date(2023, 12, 31),
+                sessions[2],
+                15_000_000_000_000.0,
                 CellKind.OBSERVED,
             ),
             Observation(

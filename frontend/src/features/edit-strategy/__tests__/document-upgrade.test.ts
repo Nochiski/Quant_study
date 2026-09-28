@@ -1,12 +1,20 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
+import { messages } from "../../../shared/config";
 import { parseSource } from "../../../shared/lib/yaml12";
+import { backendFixturePath } from "../../../shared/testing/backend-fixtures";
 import {
   documentReducer,
   initialDocumentState,
   type DocumentState,
 } from "../model/document-state";
-import { decideDocumentUpgrade } from "../model/document-upgrade";
+import {
+  decideDocumentUpgrade,
+  upgradeWarningTitle,
+  type UpgradeWarningCode,
+} from "../model/document-upgrade";
 
 const LEGACY = 'schema_version: "1.0"\ntitle: 옛 문서\n';
 const CURRENT = 'schema_version: "1.1"\ntitle: 새 문서\n';
@@ -53,7 +61,7 @@ const settled = (
   });
 };
 
-/** 버전 줄은 현재 버전인데 본문이 1.0 문법일 때 backend가 다는 힌트(P1-05). */
+/** 버전 줄은 현재 버전인데 본문이 1.0 문법일 때 backend가 다는 구조 진단(P1-05). */
 const LEGACY_SHAPE = {
   ...UNSUPPORTED,
   code: "structure.legacy_shape",
@@ -86,16 +94,17 @@ describe("decideDocumentUpgrade", () => {
     });
   });
 
-  it("offers the upgrade when only the body is 1.0, not the version line", () => {
-    // P1-05: `structure.legacy_shape`도 사용자가 할 일이 업그레이드라 같은 배너를 띄운다.
+  it("does not offer the upgrade when only the body is 1.0, not the version line", () => {
+    // lang2 Phase 2 감사 NB-1: backend는 선언된 버전을 믿어 현재 버전 문서를 업그레이드하지 않는다.
+    // `structure.legacy_shape`는 제자리에서 고칠 구조 오류라 다른 구조 오류처럼 배너가 없다.
+    const current = { ...STORED, requires_upgrade: false };
     expect(
-      decideDocumentUpgrade(settled(CURRENT, [LEGACY_SHAPE]), STORED),
-    ).toEqual({ kind: "upgradeable" });
-    // 다른 구조 오류는 배너를 띄우지 않는다: 고칠 곳은 문제 목록이 가리키는 그 줄이다.
+      decideDocumentUpgrade(settled(CURRENT, [LEGACY_SHAPE]), current),
+    ).toEqual({ kind: "none" });
     expect(
       decideDocumentUpgrade(
         settled(CURRENT, [{ ...LEGACY_SHAPE, code: "structure.unknown_key" }]),
-        STORED,
+        current,
       ),
     ).toEqual({ kind: "none" });
   });
@@ -143,5 +152,48 @@ describe("decideDocumentUpgrade", () => {
     expect(decideDocumentUpgrade(settled(CURRENT), null)).toEqual({
       kind: "none",
     });
+  });
+});
+
+describe("upgradeWarningTitle (P3-01)", () => {
+  it("names every upgrade warning code the backend can send", () => {
+    // 코드 목록은 생성 타입(OpenAPI enum)이 소유한다. 번역 누락은 `Record` 타입이, 없는 코드는
+    // 아래 `satisfies` 가 typecheck 에서 막는다.
+    const codes = [
+      "strategy_document.upgrade_missing_policy_conflict",
+      "strategy_document.upgrade_weighting_rule_changed",
+      "strategy_document.upgrade_environment_unavailable",
+    ] as const satisfies readonly UpgradeWarningCode[];
+
+    expect(codes.map(upgradeWarningTitle)).toEqual([
+      "팩터마다 달랐던 결측 처리를 하나로 합쳤습니다",
+      "점수 비례 비중의 계산 규칙이 바뀌었습니다",
+      "옛 문서의 실행 설정을 옮기지 못했습니다",
+    ]);
+  });
+
+  it("covers the OpenAPI warning code enum in both locales", () => {
+    // 실행 시 계약 파일(backend `openapi.json`)과 대조한다: 생성 SDK 를 다시 만들지 않은 채 enum 이
+    // 늘어도 여기서 드러난다.
+    const openapi = JSON.parse(
+      readFileSync(backendFixturePath("../../openapi.json"), "utf8"),
+    ) as {
+      components: {
+        schemas: {
+          UpgradeWarning: { properties: { code: { enum: UpgradeWarningCode[] } } };
+        };
+      };
+    };
+    const codes = openapi.components.schemas.UpgradeWarning.properties.code.enum;
+
+    expect(codes.length).toBeGreaterThan(0);
+    const missing = codes.flatMap((code) => {
+      const key = `upgrade.warning.${code}` as keyof (typeof messages)["en"];
+      return [
+        messages.ko[key] === undefined ? `${code} ko` : null,
+        messages.en[key] === undefined ? `${code} en` : null,
+      ].filter((item): item is string => item !== null);
+    });
+    expect(missing).toEqual([]);
   });
 });

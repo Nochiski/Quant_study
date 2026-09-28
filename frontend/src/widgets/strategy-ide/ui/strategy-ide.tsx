@@ -74,6 +74,11 @@ export type StrategyIdeProps = {
   projections?: Partial<Record<SourceView, ReactNode>>;
   /** Document-level recovery or warning UI that must remain visible across every view. */
   notice?: ReactNode;
+  /**
+   * 실행 설정 요약 띠(P3-02, 시안 1). 제목 아래 모든 탭 위에 두어, 지금 실행이 어떤 환경으로 나갈지와
+   * 그 값이 전략 문서 밖이라는 것을 편집 중에 늘 보인다. 내용은 페이지가 주입한다.
+   */
+  runEnvironment?: ReactNode;
   /** Strategy document outline projection (P4-01). */
   outline?: ReactNode;
   /** P4-10 catalog UI; the P4-05 feature model owns schema projection and insertion. */
@@ -181,6 +186,7 @@ export const StrategyIde = ({
   sourceView,
   projections,
   notice,
+  runEnvironment,
   outline,
   snippets,
   editorActions,
@@ -797,6 +803,7 @@ export const StrategyIde = ({
         </dl>
       </header>
 
+      {runEnvironment ?? null}
       {notice ? <div className="ide__notice">{notice}</div> : null}
 
       <div className="ide__body">

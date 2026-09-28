@@ -83,7 +83,7 @@ describe("replace-scalar", () => {
 describe("insert-key", () => {
   it("appends `key: value` after the parent's last line with the parent's child indentation", () => {
     const source =
-      "risk:\n  max_name_weight: 0.05\n# 다음 섹션 설명\nexecution:\n  fee_bps: 15\n";
+      "risk:\n  max_name_weight: 0.05\n# 다음 섹션 설명\nportfolio:\n  selection_count: 15\n";
     const edit = ok(source, {
       kind: "insert-key",
       parentPointer: "/risk",
@@ -91,7 +91,7 @@ describe("insert-key", () => {
       value: true,
     });
     expect(edit.nextSource).toBe(
-      "risk:\n  max_name_weight: 0.05\n  sector_neutral: true\n# 다음 섹션 설명\nexecution:\n  fee_bps: 15\n",
+      "risk:\n  max_name_weight: 0.05\n  sector_neutral: true\n# 다음 섹션 설명\nportfolio:\n  selection_count: 15\n",
     );
   });
 
@@ -324,17 +324,18 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
       "a:\r\n  - y\r\n",
     );
     // 문서 첫 줄부터 시작하는 주석 블록은 파일 헤더라 첫 루트 키를 지워도 남는다(P5-01 리뷰 P2-2).
-    const header = "# 전략 문서 v1.1\n# 작성자: 팀\nschema_version: '1.1'\nname: q\n";
-    expect(ok(header, { kind: "remove", pointer: "/schema_version" }).nextSource).toBe(
-      "# 전략 문서 v1.1\n# 작성자: 팀\nname: q\n",
-    );
+    const header =
+      "# 전략 문서 v1.1\n# 작성자: 팀\nschema_version: '1.1'\nname: q\n";
+    expect(
+      ok(header, { kind: "remove", pointer: "/schema_version" }).nextSource,
+    ).toBe("# 전략 문서 v1.1\n# 작성자: 팀\nname: q\n");
   });
 
   it("empties an inner sequence whose only item is a quoted scalar containing `#` (review P2-1)", () => {
     const source = 'zq:\n  l5:\n    - - "#tag"\n';
-    expect(ok(source, { kind: "remove", pointer: "/zq/l5/0/0" }).nextSource).toBe(
-      "zq:\n  l5:\n    - []\n",
-    );
+    expect(
+      ok(source, { kind: "remove", pointer: "/zq/l5/0/0" }).nextSource,
+    ).toBe("zq:\n  l5:\n    - []\n");
   });
 
   it.each([
@@ -366,8 +367,17 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
         "          third",
         "",
       ].join(eol);
-      expect(ok(source, { kind: "remove", pointer: "/g_13/0/0" }).nextSource).toBe(
-        ['schema_version: "1.1"', "zgeu2_: -0", "g_13:", "  # c3", "  - []", ""].join(eol),
+      expect(
+        ok(source, { kind: "remove", pointer: "/g_13/0/0" }).nextSource,
+      ).toBe(
+        [
+          'schema_version: "1.1"',
+          "zgeu2_: -0",
+          "g_13:",
+          "  # c3",
+          "  - []",
+          "",
+        ].join(eol),
       );
     },
   );
@@ -380,7 +390,9 @@ describe("comments and block scalars (review P1-1·P1-2)", () => {
     (_name, eol) => {
       // `"a #b"`의 `#`은 공백 뒤라 YAML 주석 문자 규칙만으로는 걸러지지 않는다. 부모 내용(안쪽 시퀀스)이 dash
       // 줄에서 시작하므로 그 줄에 부모의 줄 끝 주석은 없다는 판정(`contentOnLaterLine`)만이 이 경우를 지킨다.
-      const source = ["g:", '  - - k: "a #b"', "      x: 1", "z: 2", ""].join(eol);
+      const source = ["g:", '  - - k: "a #b"', "      x: 1", "z: 2", ""].join(
+        eol,
+      );
       expect(ok(source, { kind: "remove", pointer: "/g/0/0" }).nextSource).toBe(
         ["g:", "  - []", "z: 2", ""].join(eol),
       );
@@ -693,7 +705,8 @@ describe("flow containers (backlog 14)", () => {
   });
 
   it("keeps a trailing comment on the container line instead of the newly inserted key (#149 P2-4)", () => {
-    const flow = 'schema_version: "1.1"\nrisk: { max_name_weight: 0.05 } # 한도\n';
+    const flow =
+      'schema_version: "1.1"\nrisk: { max_name_weight: 0.05 } # 한도\n';
     const planned = planSourceOperation(flow, "yaml", {
       kind: "insert-key",
       parentPointer: "/risk",
@@ -704,7 +717,7 @@ describe("flow containers (backlog 14)", () => {
     expect(planned.edit.nextSource).toBe(
       'schema_version: "1.1"\nrisk: # 한도\n  max_name_weight: 0.05\n  gross_exposure: 1\n',
     );
-    const item = 'l:\n  - { a: 1 } # 항목\n';
+    const item = "l:\n  - { a: 1 } # 항목\n";
     const onItem = planSourceOperation(item, "yaml", {
       kind: "insert-key",
       parentPointer: "/l/0",
@@ -742,11 +755,14 @@ describe("flow containers (backlog 14)", () => {
       value: 1,
     });
     if (added.status !== "ok") throw new Error(added.reason);
-    expect(added.edit.nextSource).toBe("risk:\n  # 사이\n  max_name_weight: 0.05\n  g: 1\n");
+    expect(added.edit.nextSource).toBe(
+      "risk:\n  # 사이\n  max_name_weight: 0.05\n  g: 1\n",
+    );
   });
 
   it("removes from a flow container by rewriting it as block, and leaves `{}`/`[]` when it empties (backlog 18)", () => {
-    const flow = 'schema_version: "1.1"\nrisk: { max_name_weight: 0.05, gross_exposure: 1 } # 한도\n';
+    const flow =
+      'schema_version: "1.1"\nrisk: { max_name_weight: 0.05, gross_exposure: 1 } # 한도\n';
     const removed = planSourceOperation(flow, "yaml", {
       kind: "remove",
       pointer: "/risk/gross_exposure",
@@ -761,10 +777,12 @@ describe("flow containers (backlog 14)", () => {
       { kind: "remove", pointer: "/risk/max_name_weight" },
     );
     if (last.status !== "ok") throw new Error(last.reason);
-    expect(last.edit.nextSource).toBe('schema_version: "1.1"\nrisk: {} # 한도\n');
+    expect(last.edit.nextSource).toBe(
+      'schema_version: "1.1"\nrisk: {} # 한도\n',
+    );
     // 시퀀스 항목 안의 중첩 flow: 노드 하나를 지우면 팩터 항목 전체가 block으로 열린다.
     const nested =
-      'factors:\n  - { factor_id: m, graph: { nodes: [{ kind: field, node_id: a }, { kind: field, node_id: b }], output_node_id: a } }\n';
+      "factors:\n  - { factor_id: m, graph: { nodes: [{ kind: field, node_id: a }, { kind: field, node_id: b }], output_node_id: a } }\n";
     const node = planSourceOperation(nested, "yaml", {
       kind: "remove",
       pointer: "/factors/0/graph/nodes/1",
@@ -773,10 +791,15 @@ describe("flow containers (backlog 14)", () => {
     const next = parseSource(node.edit.nextSource, "yaml");
     if (next.status !== "ok") throw new Error("must parse");
     expect(
-      (next.tree.factors as { graph: { nodes: { node_id: string }[] } }[])[0]!.graph.nodes.map((n) => n.node_id),
+      (
+        next.tree.factors as { graph: { nodes: { node_id: string }[] } }[]
+      )[0]!.graph.nodes.map((n) => n.node_id),
     ).toEqual(["a"]);
     expect(node.edit.nextSource).not.toContain("{");
-    const emptied = planSourceOperation("l: [x]\n", "yaml", { kind: "remove", pointer: "/l/0" });
+    const emptied = planSourceOperation("l: [x]\n", "yaml", {
+      kind: "remove",
+      pointer: "/l/0",
+    });
     if (emptied.status !== "ok") throw new Error(emptied.reason);
     expect(emptied.edit.nextSource).toBe("l: []\n");
   });
@@ -790,11 +813,14 @@ describe("flow containers (backlog 14)", () => {
       value: false,
     });
     if (planned.status !== "ok") throw new Error(planned.reason);
-    expect(planned.edit.nextSource).toBe("l:\n     -\n          - false\n     - x\n");
+    expect(planned.edit.nextSource).toBe(
+      "l:\n     -\n          - false\n     - x\n",
+    );
   });
 
   it("rewrites a non-empty flow sequence and honours the index", () => {
-    const flow = 'schema_version: "1.1"\nparameters: [{ parameter_id: a, value: 1 }, { parameter_id: c, value: 3 }]\n';
+    const flow =
+      'schema_version: "1.1"\nparameters: [{ parameter_id: a, value: 1 }, { parameter_id: c, value: 3 }]\n';
     const planned = planSourceOperation(flow, "yaml", {
       kind: "insert-item",
       parentPointer: "/parameters",
@@ -805,7 +831,9 @@ describe("flow containers (backlog 14)", () => {
     const next = parseSource(planned.edit.nextSource, "yaml");
     if (next.status !== "ok") throw new Error("must parse");
     expect(
-      (next.tree.parameters as { parameter_id: string }[]).map((p) => p.parameter_id),
+      (next.tree.parameters as { parameter_id: string }[]).map(
+        (p) => p.parameter_id,
+      ),
     ).toEqual(["a", "b", "c"]);
     expect(planned.edit.nextSource).not.toContain("[");
   });
@@ -829,7 +857,9 @@ describe("flow containers (backlog 14)", () => {
     const next = parseSource(text, "yaml");
     if (next.status !== "ok") throw new Error("must parse");
     expect(
-      ((next.tree.factors as { graph: { nodes: { node_id: string }[] } }[])[0]!.graph.nodes).map((n) => n.node_id),
+      (
+        next.tree.factors as { graph: { nodes: { node_id: string }[] } }[]
+      )[0]!.graph.nodes.map((n) => n.node_id),
     ).toEqual(["close", "u"]);
   });
 });
@@ -846,8 +876,10 @@ describe("flow values as the last content and emptied containers on a later line
       // 비워지는 부모의 내용 끝을 leaf 끝으로만 잡으면 닫는 `]`·`}`가 교체 범위 밖에 남아 preflight가 거부했다.
       const lines = (...rows: string[]) => rows.join(eol);
       expect(
-        ok(lines("g:", "  - - [a, b]", "z: 2", ""), { kind: "remove", pointer: "/g/0/0" })
-          .nextSource,
+        ok(lines("g:", "  - - [a, b]", "z: 2", ""), {
+          kind: "remove",
+          pointer: "/g/0/0",
+        }).nextSource,
       ).toBe(lines("g:", "  - []", "z: 2", ""));
       expect(
         ok(lines("g:", "  - - { k: 1 } # c", "z: 2", ""), {
@@ -856,8 +888,10 @@ describe("flow values as the last content and emptied containers on a later line
         }).nextSource,
       ).toBe(lines("g:", "  - [] # c", "z: 2", ""));
       expect(
-        ok(lines("a:", "  b: [x, y]", "z: 2", ""), { kind: "remove", pointer: "/a/b" })
-          .nextSource,
+        ok(lines("a:", "  b: [x, y]", "z: 2", ""), {
+          kind: "remove",
+          pointer: "/a/b",
+        }).nextSource,
       ).toBe(lines("a: {}", "z: 2", ""));
     },
   );
@@ -866,14 +900,24 @@ describe("flow values as the last content and emptied containers on a later line
     "removes or inserts around a flow item that spans several lines, closing bracket included (%s)",
     (_name, eol) => {
       const lines = (...rows: string[]) => rows.join(eol);
-      const source = lines("l:", "  - x", "  - [", "      a", "    ]", "z: 2", "");
+      const source = lines(
+        "l:",
+        "  - x",
+        "  - [",
+        "      a",
+        "    ]",
+        "z: 2",
+        "",
+      );
       expect(ok(source, { kind: "remove", pointer: "/l/1" }).nextSource).toBe(
         lines("l:", "  - x", "z: 2", ""),
       );
       expect(
         ok(source, { kind: "insert-item", parentPointer: "/l", value: "y" })
           .nextSource,
-      ).toBe(lines("l:", "  - x", "  - [", "      a", "    ]", "  - y", "z: 2", ""));
+      ).toBe(
+        lines("l:", "  - x", "  - [", "      a", "    ]", "  - y", "z: 2", ""),
+      );
     },
   );
 
@@ -884,20 +928,28 @@ describe("flow values as the last content and emptied containers on a later line
       // 내용 줄 들여쓰기 뒤에 ` []`를 써서 2칸 문서에서 5칸이 되었다.
       const lines = (...rows: string[]) => rows.join(eol);
       expect(
-        ok(lines("g:", "  - # c", "    - a", "z: 2", ""), { kind: "remove", pointer: "/g/0/0" })
-          .nextSource,
+        ok(lines("g:", "  - # c", "    - a", "z: 2", ""), {
+          kind: "remove",
+          pointer: "/g/0/0",
+        }).nextSource,
       ).toBe(lines("g:", "  - # c", "    []", "z: 2", ""));
       expect(
-        ok(lines("g:", "  - # c", "    k: 1", ""), { kind: "remove", pointer: "/g/0/k" })
-          .nextSource,
+        ok(lines("g:", "  - # c", "    k: 1", ""), {
+          kind: "remove",
+          pointer: "/g/0/k",
+        }).nextSource,
       ).toBe(lines("g:", "  - # c", "    {}", ""));
       expect(
-        ok(lines("g:", "  - - # c", "      - a", ""), { kind: "remove", pointer: "/g/0/0/0" })
-          .nextSource,
+        ok(lines("g:", "  - - # c", "      - a", ""), {
+          kind: "remove",
+          pointer: "/g/0/0/0",
+        }).nextSource,
       ).toBe(lines("g:", "  - - # c", "      []", ""));
       expect(
-        ok(lines("g:", "    - # c", "        - a", ""), { kind: "remove", pointer: "/g/0/0" })
-          .nextSource,
+        ok(lines("g:", "    - # c", "        - a", ""), {
+          kind: "remove",
+          pointer: "/g/0/0",
+        }).nextSource,
       ).toBe(lines("g:", "    - # c", "        []", ""));
     },
   );
@@ -908,7 +960,16 @@ describe("flow values as the last content and emptied containers on a later line
       // 항목 값이 `- # c`·`-` 다음 줄에서 시작하면 `-`를 같은 줄에서만 찾던 예전 코드는 항목 삭제와 맨 앞 삽입을
       // 거부했다. flow 항목을 block으로 열면 `-` 다음 줄에 내용이 오므로 우리 편집 결과도 이 모양이다.
       const lines = (...rows: string[]) => rows.join(eol);
-      const source = lines("g:", "  - # c", "    # d", "    k: 1", "  -", "    - a", "z: 2", "");
+      const source = lines(
+        "g:",
+        "  - # c",
+        "    # d",
+        "    k: 1",
+        "  -",
+        "    - a",
+        "z: 2",
+        "",
+      );
       expect(ok(source, { kind: "remove", pointer: "/g/0" }).nextSource).toBe(
         lines("g:", "  -", "    - a", "z: 2", ""),
       );
@@ -916,17 +977,66 @@ describe("flow values as the last content and emptied containers on a later line
         lines("g:", "  - # c", "    # d", "    k: 1", "z: 2", ""),
       );
       expect(
-        ok(source, { kind: "insert-key", parentPointer: "/g/0", key: "j", value: 0, before: "k" })
-          .nextSource,
-      ).toBe(lines("g:", "  - # c", "    j: 0", "    # d", "    k: 1", "  -", "    - a", "z: 2", ""));
+        ok(source, {
+          kind: "insert-key",
+          parentPointer: "/g/0",
+          key: "j",
+          value: 0,
+          before: "k",
+        }).nextSource,
+      ).toBe(
+        lines(
+          "g:",
+          "  - # c",
+          "    j: 0",
+          "    # d",
+          "    k: 1",
+          "  -",
+          "    - a",
+          "z: 2",
+          "",
+        ),
+      );
       expect(
-        ok(source, { kind: "insert-item", parentPointer: "/g/1", value: "b", index: 0 })
-          .nextSource,
-      ).toBe(lines("g:", "  - # c", "    # d", "    k: 1", "  -", "    - b", "    - a", "z: 2", ""));
+        ok(source, {
+          kind: "insert-item",
+          parentPointer: "/g/1",
+          value: "b",
+          index: 0,
+        }).nextSource,
+      ).toBe(
+        lines(
+          "g:",
+          "  - # c",
+          "    # d",
+          "    k: 1",
+          "  -",
+          "    - b",
+          "    - a",
+          "z: 2",
+          "",
+        ),
+      );
       expect(
-        ok(source, { kind: "insert-item", parentPointer: "/g", value: "x", index: 0 })
-          .nextSource,
-      ).toBe(lines("g:", "  - x", "  - # c", "    # d", "    k: 1", "  -", "    - a", "z: 2", ""));
+        ok(source, {
+          kind: "insert-item",
+          parentPointer: "/g",
+          value: "x",
+          index: 0,
+        }).nextSource,
+      ).toBe(
+        lines(
+          "g:",
+          "  - x",
+          "  - # c",
+          "    # d",
+          "    k: 1",
+          "  -",
+          "    - a",
+          "z: 2",
+          "",
+        ),
+      );
     },
   );
 });
@@ -962,7 +1072,11 @@ describe("planSourceOperations (backlog 13)", () => {
   it("fails as a whole when a later step fails and equals planSourceOperation for one op", () => {
     expect(
       planSourceOperations(BASE, "yaml", [
-        { kind: "replace-scalar", pointer: "/risk/max_name_weight", value: 0.1 },
+        {
+          kind: "replace-scalar",
+          pointer: "/risk/max_name_weight",
+          value: 0.1,
+        },
         { kind: "remove", pointer: "/nope" },
       ]),
     ).toEqual({ status: "error", reason: "not-found" });

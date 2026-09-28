@@ -28,6 +28,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
 )
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.factor.facade.expression import (
     FactorGraph,
     FieldNode,
@@ -36,10 +37,8 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 from strategy_workbench.domain.strategy.facade.specification import (
-    DataStep,
     FactorDirection,
     FactorSignal,
-    Market,
     RebalanceFrequency,
     StrategySpec,
 )
@@ -50,6 +49,8 @@ SPLIT_RATIO = 50.0
 # 사건 뒤 두 달 — 12-1 모멘텀(252 + 21 세션)과 60일 변동성 창이 모두 분할일을 품는다
 WINDOW = (date(2018, 7, 2), date(2018, 7, 6))
 AS_OF = WINDOW[1]
+# schema 1.2 문서는 기간·유니버스를 담지 않는다(lang2 P2-03). 실행 설정은 요청이 싣는다.
+ENVIRONMENT = RunEnvironment(start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock")
 
 # 가격 변화(수익률·모멘텀·이평·변동성·낙폭·고점 거리·베타)를 재는 레지스트리 팩터
 PRICE_CHANGE_FACTORS = (
@@ -154,13 +155,10 @@ def test_same_day_price_ratios_keep_raw_close() -> None:
 
 def _spec(signal: FactorSignal) -> StrategySpec:
     template = StrategyDesignService(
-        InMemoryStrategyRepository(), new_id=lambda: "unused", today=lambda: AS_OF
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).template()
     return replace(
         template,
-        data=DataStep(
-            market=Market.KRX, start=WINDOW[0], end=WINDOW[1], universe_id="krx.common-stock"
-        ),
         factors=(signal,),
         portfolio=replace(
             template.portfolio,
@@ -186,7 +184,7 @@ def _factor_value(graph: FactorGraph) -> float:
         weight=1.0,
         graph=graph,
     )
-    result = service.run_pipeline(PortfolioPreviewRequest(_spec(signal)))
+    result = service.run_pipeline(PortfolioPreviewRequest(_spec(signal), ENVIRONMENT))
     value = next(
         item.value
         for item in result.factor_evaluations[0].values

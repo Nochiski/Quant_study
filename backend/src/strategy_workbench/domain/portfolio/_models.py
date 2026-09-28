@@ -15,6 +15,9 @@ class ExclusionReason(StrEnum):
     FUTURE_DATA = "future_data"
     MISSING_ELIGIBILITY = "missing_eligibility"
     ELIGIBILITY_FAILED = "eligibility_failed"
+    # 값이 규칙을 어긴 것이 아니라 횡단면 순위에서 잘렸다(`top_percent`·`top_count`, spec D3 S5).
+    # `ELIGIBILITY_FAILED` 와 한 값을 쓰면 "상위 20%에 못 들었다"가 "조건을 어겼다"로 읽힌다.
+    ELIGIBILITY_RANK_CUT = "eligibility_rank_cut"
     MISSING_FACTOR = "missing_factor"
     SCORE_THRESHOLD = "score_threshold"
     REGIME_BLOCKED = "regime_blocked"

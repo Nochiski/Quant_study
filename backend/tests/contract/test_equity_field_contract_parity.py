@@ -88,7 +88,11 @@ def test_공통_필드의_단위와_값_타입이_같다(field_id: str) -> None:
 def test_resolve_factor_fields_가_두_어댑터에서_같은_계약을_낸다(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
-    """compile 이 실제로 읽는 포트 응답(`FieldMetadata`)까지 같아야 한다."""
+    """compile 이 실제로 읽는 포트 응답(`FieldMetadata`)까지 같아야 한다.
+
+    원주가 표시(`adjusted_field_id`)도 포함한다 — compile 의 원주가 warning(BACKLOG-018)이 이 값을
+    읽으므로 어댑터를 바꾸면 warning 이 켜지거나 꺼지면 안 된다.
+    """
     pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync --extra equity)")
     from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
         EquityDuckdbAdapter,
@@ -99,16 +103,34 @@ def test_resolve_factor_fields_가_두_어댑터에서_같은_계약을_낸다(
     duckdb_adapter = EquityDuckdbAdapter(build_workbench_root(root))
     shared = tuple(_shared_field_ids())
     mock_fields = {
-        item.field_id: (item.unit, item.value_type)
+        item.field_id: (item.unit, item.value_type, item.adjusted_field_id)
         for item in MockEquityDataAdapter.demo().resolve_factor_fields(shared).fields
     }
     duckdb_fields = {
-        item.field_id: (item.unit, item.value_type)
+        item.field_id: (item.unit, item.value_type, item.adjusted_field_id)
         for item in duckdb_adapter.resolve_factor_fields(shared).fields
     }
     missing = sorted(set(shared) - set(duckdb_fields))
     assert not missing, f"손 픽스처가 공통 필드를 다 내지 않는다 — missing={missing}"
     assert mock_fields == duckdb_fields
+
+
+def test_duckdb_선언표의_원주가_표시는_같은_단위의_실재하는_조정_짝을_가리킨다() -> None:
+    """compile 의 원주가 warning(BACKLOG-018)이 읽는 표시의 정본은 이 선언표다.
+
+    duckdb extra 가 없는 CI 에서도 표시 자체가 지워지는 회귀를 잡는다(리뷰 #232 DEFECT-232-06).
+    표시가 어댑터 응답까지 실리는지는 위 `resolve_factor_fields` 대조가 본다.
+    """
+    marked = {
+        field_id: spec.adjusted_field_id
+        for field_id, spec in FIELD_BY_ID.items()
+        if spec.adjusted_field_id is not None
+    }
+
+    assert marked == {"price.close": "price.adj_close"}
+    for raw, adjusted in marked.items():
+        assert FIELD_BY_ID[adjusted].unit == FIELD_BY_ID[raw].unit
+        assert FIELD_BY_ID[adjusted].adjusted_field_id is None, "조정 짝은 원주가가 아니다"
 
 
 # ── 랙·빈도·값 타입 (#230) ─────────────────────────────────────────────────────

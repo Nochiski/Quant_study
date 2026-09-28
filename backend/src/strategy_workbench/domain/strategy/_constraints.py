@@ -32,6 +32,8 @@ class ContractUnit(StrEnum):
 
 
 class AppliedStage(StrEnum):
+    # `DATA`·`EXECUTION` 은 실행 설정(`domain/backtest`)이 자기 제약 행에 붙이는 단계다.
+    # 전략 문서에는 1.2 부터 해당 행이 없다.
     DATA = "data"
     ELIGIBILITY = "eligibility"
     SIGNAL = "signal"
@@ -195,6 +197,14 @@ FIELD_APPLICABILITY: tuple[FieldApplicability, ...] = (
         (ApplicabilityCondition("/portfolio/weighting", equals="risk"),),
         "strategy.contract.applicable.risk_field_id",
     ),
+    # 적용 조건 warning 전용 행이다. `risk_field_id` 와의 배타는 별개 validator error
+    # (`strategy.risk.risk_source_conflict`)가 소유하므로 `owned_by_error` 를 붙이지 않는다 —
+    # 붙이면 `weighting: equal` 에 남겨 둔 `risk_factor_id` 가 아무 경고 없이 무시된다(spec D3 S6).
+    FieldApplicability(
+        "/risk/risk_factor_id",
+        (ApplicabilityCondition("/portfolio/weighting", equals="risk"),),
+        "strategy.contract.applicable.risk_factor_id",
+    ),
     FieldApplicability(
         "/signal/regime_minimum",
         (ApplicabilityCondition("/signal/regime_field_id", not_null=True),),
@@ -318,41 +328,6 @@ STRATEGY_SCALAR_CONSTRAINTS: tuple[ScalarConstraint, ...] = (
         description_key="strategy.contract.risk.max_sector_weight",
         message="섹터 한도는 0보다 크고 1 이하여야 합니다.",
     ),
-    ScalarConstraint(
-        pointer="/execution/participation_rate",
-        code="strategy.execution.participation",
-        stage=AppliedStage.EXECUTION,
-        unit=ContractUnit.RATIO,
-        display_unit="%",
-        minimum=0.0,
-        exclusive_minimum=True,
-        maximum=1.0,
-        example=0.1,
-        description_key="strategy.contract.execution.participation_rate",
-        message="참여율은 0보다 크고 1 이하여야 합니다.",
-    ),
-    ScalarConstraint(
-        pointer="/execution/fee_bps",
-        code="strategy.execution.cost",
-        stage=AppliedStage.EXECUTION,
-        unit=ContractUnit.BASIS_POINTS,
-        display_unit="bp",
-        minimum=0.0,
-        example=15.0,
-        description_key="strategy.contract.execution.fee_bps",
-        message="수수료는 0 이상의 숫자여야 합니다.",
-    ),
-    ScalarConstraint(
-        pointer="/execution/slippage_bps",
-        code="strategy.execution.cost",
-        stage=AppliedStage.EXECUTION,
-        unit=ContractUnit.BASIS_POINTS,
-        display_unit="bp",
-        minimum=0.0,
-        example=10.0,
-        description_key="strategy.contract.execution.slippage_bps",
-        message="슬리피지는 0 이상의 숫자여야 합니다.",
-    ),
 )
 
 # Validation codes that are cross-field, graph or parameter rules: owned by the validator only.
@@ -361,16 +336,35 @@ SEMANTIC_ONLY_CODES: frozenset[str] = frozenset(
         "strategy.schema_version.unsupported",
         "strategy.field.inapplicable",
         "strategy.title.empty",
-        "strategy.data.date_order",
-        "strategy.data.universe_empty",
         "strategy.factor.required",
+        "strategy.eligibility.rule_value",
         "strategy.factor.duplicate",
+        # 팩터 출력이 종목별 숫자 점수가 아니다(P2-07). 실행 경계의 방어 검사
+        # (`application/portfolio_design` `_reject_non_numeric_factor_outputs`)도 같은 코드를 낸다 —
+        # 한 사실에 코드 하나다.
+        "strategy.factor.output_type",
+        # 연결된 어댑터가 연산에 필요한 필드 타입을 주지 않는다(P2-07, capability 진단).
+        "strategy.operator.unsupported",
+        # 그래프 밖 필드 참조가 연결된 데이터에 없거나 숫자 필드가 아니다(P2-07).
+        "strategy.field.missing",
+        "strategy.field.value_type",
+        # 원주가 필드가 과거 세션을 읽는 연산자에 흘러든다(BACKLOG-018, warning).
+        "strategy.field.unadjusted_price",
+        # 문서가 승격 예약 접두사(`PROMOTION_NODE_PREFIX`)로 시작하는 node_id 를 쓴다
+        # (리뷰 #232 DEFECT-232-01).
+        "strategy.factor.reserved_node_id",
         "strategy.portfolio.liquidity_field",
         "strategy.risk.net_exposure",
         "strategy.risk.long_only_exposure",
         "strategy.risk.risk_field",
+        "strategy.risk.risk_source_conflict",
+        "strategy.risk.risk_factor_missing",
+        "strategy.risk.risk_factor_excluded",
         "strategy.risk.sector_neutral_side",
         "strategy.signal.regime_field",
+        "strategy.signal.no_alpha_factor",
+        # 정규화 없이 단위가 다른 알파 팩터를 더한다(P2-07, warning).
+        "strategy.signal.unit_mismatch",
         "strategy.parameter.duplicate",
         "strategy.parameter.bounds",
         "strategy.parameter.default",
@@ -404,15 +398,11 @@ EXPRESSION_CODES: frozenset[str] = frozenset(
         "strategy.expression.output_missing",
         "strategy.expression.parameter_missing",
         "strategy.expression.predicate_type",
-        "strategy.expression.saved_factor_missing",
-        "strategy.expression.saved_subgraph_missing",
         "strategy.expression.time_series_window",
         "strategy.expression.unit_mismatch",
         "strategy.expression.winsor_bounds",
         # 전략·포트폴리오 쪽에서만 나는 표현식 진단.
         "strategy.expression.parameter_type",
-        "strategy.expression.reference_unsupported",
-        "strategy.expression.output_type",
         "strategy.expression.calculation_non_finite",
     }
 )

@@ -14,6 +14,10 @@ import {
   projectLinkedTraceRows,
   type LinkedTraceRow,
 } from "../model/linked-trace";
+import {
+  exclusionReasonLabel,
+  type ExclusionReason,
+} from "../model/exclusion-reason";
 import { projectTargetTapeRows } from "../model/target-tape";
 import type {
   StrategyDebuggerContext,
@@ -160,6 +164,21 @@ const VirtualTable = <Row,>({
     </div>
   );
 };
+
+/** 탈락·보류 사유는 사람 말이 먼저고 backend 코드는 보조 표기다(P3-01). */
+const ExclusionReasons = ({
+  reasons,
+}: {
+  reasons: readonly ExclusionReason[];
+}) => (
+  <span className="strategy-debugger__inputs">
+    {reasons.map((reason) => (
+      <span key={reason}>
+        {exclusionReasonLabel(reason)} <code>{reason}</code>
+      </span>
+    ))}
+  </span>
+);
 
 const VirtualNodeChain = ({
   nodes,
@@ -426,7 +445,9 @@ const LinkedTraceResult = ({
                       {construction.side ?? t("debugger.value.none")}
                     </span>
                     {construction.exclusion_reasons.length > 0 ? (
-                      <code>{construction.exclusion_reasons.join(", ")}</code>
+                      <ExclusionReasons
+                        reasons={construction.exclusion_reasons}
+                      />
                     ) : null}
                   </li>
                   <li>
@@ -594,7 +615,7 @@ const TargetResult = ({
             {row.exclusionReasons.length === 0 ? (
               "—"
             ) : (
-              <code>{row.exclusionReasons.join(", ")}</code>
+              <ExclusionReasons reasons={row.exclusionReasons} />
             )}
           </td>
           <td className="strategy-debugger__numeric">

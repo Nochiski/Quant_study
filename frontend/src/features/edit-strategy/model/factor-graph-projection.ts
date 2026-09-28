@@ -1,5 +1,6 @@
 import type { FactorGraph, FactorValidationIssue } from "../../../shared/api";
 import {
+  compiledNodeOrigin,
   nodePointerById,
   type ExecutionPlansState,
   type PlannedFactor,
@@ -23,6 +24,12 @@ export type GraphInputProjection = {
 export type GraphNodeProjection = {
   sequence: number | null;
   planned: boolean;
+  /**
+   * `boolean-score`는 문서에 없고 compile 이 붙인 출력 노드다(참/거짓을 1/0 점수로, P2-07). 화면은
+   * node_id 대신 사람 말로 부르고 `pointer`는 원래 출력 노드를 가리킨다. 거기 딸린 상수(`support`)는
+   * 투영에 넣지 않는다(BACKLOG-014).
+   */
+  origin: "document" | "boolean-score";
   nodeId: string;
   kind: FactorNode["kind"] | "unknown";
   operation: string;
@@ -125,10 +132,6 @@ const nodeDetails = (node: FactorNode | undefined): GraphNodeDetail[] => {
       ];
     case "group":
       return [{ label: "group_field_id", value: node.group_field_id }];
-    case "saved_factor":
-      return [{ label: "factor_id", value: node.factor_id }];
-    case "saved_subgraph":
-      return [{ label: "subgraph_id", value: node.subgraph_id }];
     default:
       return [];
   }
@@ -158,35 +161,46 @@ const projectFactor = (factor: PlannedFactor): GraphFactorProjection => {
     (plan?.steps ?? []).map((step) => [step.node_id, step]),
   );
 
+  const shown = (nodeId: string): boolean =>
+    compiledNodeOrigin(factor, nodeId) !== "support";
+  const shownInputs = (node: FactorNode) =>
+    authoredInputs(node).filter((input) => shown(input.nodeId));
+
   const projectPlannedNode = (
     step: NonNullable<typeof plan>["steps"][number],
   ): GraphNodeProjection => {
     const authored = authoredById.get(step.node_id);
     const authoredInputPorts =
       authored === undefined ? [] : authoredInputs(authored);
-    const inputs = step.input_node_ids.map((nodeId, index) => {
+    const origin = compiledNodeOrigin(factor, step.node_id);
+    const inputs = step.input_node_ids.flatMap((nodeId, index) => {
+      if (!shown(nodeId)) return [];
       const inputStep = planStepById.get(nodeId);
       const inputContract = contractById.get(nodeId);
       const positionalPort = authoredInputPorts[index];
       const uniqueMatchingPorts = authoredInputPorts.filter(
         (port) => port.nodeId === nodeId,
       );
-      return {
-        nodeId,
-        role:
-          positionalPort?.nodeId === nodeId
-            ? positionalPort.role
-            : uniqueMatchingPorts.length === 1
-              ? uniqueMatchingPorts[0].role
-              : `input ${index + 1}`,
-        pointer: nodePointerById(factor, nodeId),
-        outputType: inputStep?.output_type ?? inputContract?.value_type ?? null,
-        outputUnit: inputStep?.output_unit ?? inputContract?.unit ?? null,
-      };
+      return [
+        {
+          nodeId,
+          role:
+            positionalPort?.nodeId === nodeId
+              ? positionalPort.role
+              : uniqueMatchingPorts.length === 1
+                ? uniqueMatchingPorts[0].role
+                : `input ${index + 1}`,
+          pointer: nodePointerById(factor, nodeId),
+          outputType:
+            inputStep?.output_type ?? inputContract?.value_type ?? null,
+          outputUnit: inputStep?.output_unit ?? inputContract?.unit ?? null,
+        },
+      ];
     });
     return {
       sequence: step.sequence,
       planned: true,
+      origin: origin === "boolean-score" ? "boolean-score" : "document",
       nodeId: step.node_id,
       kind: authored?.kind ?? "unknown",
       operation: step.operation,
@@ -196,25 +210,35 @@ const projectFactor = (factor: PlannedFactor): GraphFactorProjection => {
       outputUnit: step.output_unit,
       minimumHistorySessions: step.minimum_history_sessions,
       isOutput: step.node_id === graph.output_node_id,
-      details: nodeDetails(authored),
+      // 붙인 조건 노드의 파라미터는 사용자가 쓴 값이 아니다(참 1 / 거짓 0 고정).
+      details: origin === "boolean-score" ? [] : nodeDetails(authored),
       issues: issuesById.get(step.node_id) ?? [],
     };
   };
 
-  const plannedNodes = (plan?.steps ?? []).map(projectPlannedNode);
-  const plannedNodeIds = new Set(plannedNodes.map((node) => node.nodeId));
+  const plannedSteps = (plan?.steps ?? []).filter((step) =>
+    shown(step.node_id),
+  );
+  const plannedNodes = plannedSteps.map(projectPlannedNode);
+  const plannedNodeIds = new Set(
+    (plan?.steps ?? []).map((step) => step.node_id),
+  );
   const unplannedNodes = graph.nodes
-    .filter((node) => !plannedNodeIds.has(node.node_id))
+    .filter(
+      (node) => !plannedNodeIds.has(node.node_id) && shown(node.node_id),
+    )
     .map((node): GraphNodeProjection => {
       const contract = contractById.get(node.node_id);
+      const origin = compiledNodeOrigin(factor, node.node_id);
       return {
         sequence: null,
         planned: false,
+        origin: origin === "boolean-score" ? "boolean-score" : "document",
         nodeId: node.node_id,
         kind: node.kind,
         operation: authoredOperation(node),
         pointer: nodePointerById(factor, node.node_id),
-        inputs: authoredInputs(node).map((input) => {
+        inputs: shownInputs(node).map((input) => {
           const inputContract = contractById.get(input.nodeId);
           return {
             nodeId: input.nodeId,

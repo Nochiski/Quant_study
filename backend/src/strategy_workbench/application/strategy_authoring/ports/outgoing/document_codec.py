@@ -200,7 +200,7 @@ class DocumentCodecPort(Protocol):
     def parse(self, source: str, *, format: SourceFormat) -> ParsedDocument: ...
 
     def upgrade_source(self, source: str, *, format: SourceFormat) -> str:
-        """Rewrite a schema 1.0 source as 1.1 text, keeping comments and order where the format
-        allows (spec D3 source path). Precondition: `parse` accepted the source and its tree is a
-        1.0 document; the caller re-parses the result and compares it with the domain dict path."""
+        """은퇴 schema 원문을 현재 버전 텍스트로 다시 쓴다. 형식이 허락하는 한 주석·순서를 남긴다
+        (spec D3·D7 source 경로). 전제: `parse` 가 받았고 domain 이 업그레이드 가능하다고 판정했다.
+        호출자가 결과를 다시 parse 해 domain dict 경로 결과와 대조한다."""
         ...

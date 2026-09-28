@@ -31,8 +31,10 @@ const graph: FactorGraphRequest["graph"] = {
     { node_id: "close", kind: "field", field_id: "price.close" },
     {
       node_id: "neutralized_value",
-      kind: "saved_subgraph",
-      subgraph_id: "sector-neutral-v2",
+      kind: "group",
+      operator: "neutralize",
+      input_node_id: "close",
+      group_field_id: "classification.sector",
     },
     {
       node_id: "positive",
@@ -44,19 +46,19 @@ const graph: FactorGraphRequest["graph"] = {
     { node_id: "zero", kind: "constant", value: 0 },
   ],
   output_node_id: "signal",
-  missing_policy: "drop",
 };
 
 const explanation = (): FactorExplanation => ({
   registry_version: "factor-registry-v7",
   data_snapshot_id: "krx-pit-2026-09-01",
   narrative: [],
+  synthesized_nodes: [],
   validation: {
     valid: true,
     issues: [
       {
         code: "factor.graph.reference_notice",
-        message: "saved subgraph is pinned",
+        message: "sector neutralization is pinned",
         node_id: "neutralized_value",
         path: "nodes.2",
         severity: "warning",
@@ -73,6 +75,7 @@ const explanation = (): FactorExplanation => ({
     required_field_ids: ["price.close"],
   },
   plan: {
+    missing_policy: "drop",
     registry_version: "factor-registry-v7",
     graph_hash: "g".repeat(64),
     plan_hash: "p".repeat(64),
@@ -92,8 +95,8 @@ const explanation = (): FactorExplanation => ({
       [
         4,
         "neutralized_value",
-        "saved_subgraph",
-        [],
+        "group.neutralize",
+        ["close"],
         "numeric_series",
         "ratio",
         252,
@@ -127,10 +130,7 @@ const explanation = (): FactorExplanation => ({
       }),
     ),
     required_field_ids: ["price.close"],
-    referenced_factor_ids: [],
-    referenced_subgraph_ids: ["sector-neutral-v2"],
     minimum_history_sessions: 252,
-    missing_policy: "drop",
     as_of_policy: "available_date_lte_as_of",
   },
 });
@@ -145,9 +145,8 @@ const plannedFactor = (
   request: {
     graph: graphValue,
     parameter_ids: [],
-    factor_ids: ["conditional-value"],
-    subgraph_ids: ["sector-neutral-v2"],
   },
+  document: null,
   explanation: graphExplanation,
 });
 
@@ -207,7 +206,7 @@ describe("FactorGraph projection", () => {
       { nodeId: "neutralized_value", role: "false" },
     ]);
     expect(factor.nodes[3].details).toEqual([
-      { label: "subgraph_id", value: "sector-neutral-v2" },
+      { label: "group_field_id", value: "classification.sector" },
     ]);
     expect(factor.nodes[4].isOutput).toBe(true);
   });
@@ -362,7 +361,7 @@ describe("FactorGraphPanel", () => {
       tree: { factors: [{ factor_id: "f", direction: "high", graph }] },
       schema,
       transactions,
-      catalogs: { equityFields: null, factors: null },
+      catalogs: { equityFields: null },
     };
     const view = (state: ExecutionPlansState, documentKey = 1) => (
       <FactorGraphPanel
@@ -393,7 +392,7 @@ describe("FactorGraphPanel", () => {
     expect(document.querySelector('[data-node-id="signal"]')).toBeNull();
   });
 
-  it("renders conditional branches, saved references, provenance and exact selection actions", async () => {
+  it("renders conditional branches, group details, provenance and exact selection actions", async () => {
     const user = userEvent.setup();
     const onSelectPointer = vi.fn();
     const onOpenSource = vi.fn();
@@ -423,8 +422,10 @@ describe("FactorGraphPanel", () => {
     expect(
       within(signal as HTMLElement).getByText("false"),
     ).toBeInTheDocument();
-    expect(screen.getByText("sector-neutral-v2")).toBeInTheDocument();
-    expect(screen.getByText("saved subgraph is pinned")).toBeInTheDocument();
+    expect(screen.getByText("classification.sector")).toBeInTheDocument();
+    expect(
+      screen.getByText("sector neutralization is pinned"),
+    ).toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: "그래프 노드 선택: signal" }),

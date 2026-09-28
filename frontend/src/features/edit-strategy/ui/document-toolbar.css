@@ -48,22 +48,9 @@
   word-break: keep-all;
 }
 
-/* 오류 문장은 버튼 줄 아래 한 줄을 통째로 쓰고, 길면 그 안에서 줄을 바꾼다. */
+/* 오류 문장은 버튼 줄 아래 한 줄을 통째로 쓴다. 글자색·줄바꿈은 `BacktestRejection` 이 정한다. */
 .doc-toolbar__error {
   flex-basis: 100%;
-  min-width: 0;
-  color: var(--status-error);
-  font-size: var(--text-size-small);
-  overflow-wrap: anywhere;
-}
-
-.doc-toolbar__error-reason {
-  margin-top: var(--space-1);
-  color: var(--text-muted);
-}
-
-.doc-toolbar__error-reason > summary {
-  cursor: pointer;
 }
 
 .doc-toolbar__run-status {

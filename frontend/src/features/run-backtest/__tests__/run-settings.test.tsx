@@ -790,13 +790,62 @@ describe("backtest run actions", () => {
         .setup()
         .click(screen.getByRole("button", { name: "실행 취소" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        "실행 제어 요청에 실패했습니다. 상태를 새로 확인한 뒤 다시 시도하세요.",
+      );
+      expect(within(alert).getByRole("group")).toHaveTextContent(
         "run was retired",
       );
       await waitFor(() => expect(unhandled).not.toHaveBeenCalled());
     } finally {
       window.removeEventListener("unhandledrejection", unhandled);
     }
+  });
+
+  // #268 리뷰 P3-3: 결과 화면의 재실행도 편집기 툴바와 같은 경로로 시작 거절을 말한다 — 코드의 번역을
+  // 본문으로, 거절이 짚은 칸은 실행 설정 칸 이름으로, 서버 원문은 접힌 상세로.
+  it("explains a coded rerun rejection like the editor toolbar", async () => {
+    servedSchema = RUN_ENVIRONMENT_SCHEMA;
+    server.use(
+      schemaHandler,
+      http.post(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.field_invalid",
+              field: "environment.fee_bps",
+              message:
+                "Value error, run environment value is out of range — field=environment.fee_bps",
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithQuery(
+      <BacktestRunActions
+        runId="old-run"
+        status="completed"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(alert).toHaveTextContent(
+        "동일 설정으로 다시 실행하지 못했습니다: 서버가 실행 설정의 수수료 칸 값을 받지 않았습니다.",
+      ),
+    );
+    expect(alert).not.toHaveTextContent("API request failed");
+    const reason = within(alert).getByRole("group");
+    expect(reason).toHaveTextContent("서버 사유");
+    expect(reason).toHaveTextContent("field=environment.fee_bps");
+    expect(reason).not.toHaveAttribute("open");
   });
 
   it("keeps navigation unchanged when a rerun fails with a server error", async () => {
@@ -824,9 +873,15 @@ describe("backtest run actions", () => {
         .setup()
         .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(
+      // 코드에 번역이 없으면 일반 문구를 본문으로 쓰고, 서버 원문은 접힌 서버 사유에만 둔다(#268 리뷰 P3-3).
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        "동일 설정으로 다시 실행하지 못했습니다: 서버가 실행 요청을 받지 않았습니다.",
+      );
+      expect(within(alert).getByRole("group")).toHaveTextContent(
         "engine unavailable",
       );
+      expect(within(alert).getByRole("group")).not.toHaveAttribute("open");
       expect(onReplayed).not.toHaveBeenCalled();
       await waitFor(() => expect(unhandled).not.toHaveBeenCalled());
     } finally {

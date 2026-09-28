@@ -1,5 +1,11 @@
+import { useMemo } from "react";
+
 import {
+  BacktestRejection,
+  backtestStartRejectionMessage,
+  runEnvironmentFields,
   useCancelBacktest,
+  useRunEnvironmentSchema,
   useStartBacktest,
   type BacktestRunSpec,
   type BacktestRunState,
@@ -7,6 +13,7 @@ import {
 import { ApiRequestError } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import { Button } from "../../../shared/ui";
+import { runFieldLabel } from "../model/run-settings-problems";
 import "./backtest-run-actions.css";
 
 type BacktestRunActionsProps = {
@@ -41,13 +48,34 @@ export const BacktestRunActions = ({
       onSuccess: (accepted) => onReplayed(accepted.run.run_id),
     });
   };
+  const schema = useRunEnvironmentSchema();
+  const environmentFields = useMemo(
+    () =>
+      schema.data === undefined ? [] : runEnvironmentFields(schema.data.schema),
+    [schema.data],
+  );
   const actionError = cancel.error ?? replay.error;
+  // 서버 원문은 접힌 "서버 사유"로만 간다. `ApiRequestError.message`(`API request failed …`)는 개발자
+  // 진단이라 쓰지 않는다(#268 리뷰 P3-3).
   const actionErrorDetail =
     actionError instanceof ApiRequestError
-      ? (actionError.detail ?? actionError.message)
+      ? (actionError.detail ?? actionError.diagnostic ?? null)
       : actionError instanceof Error
         ? actionError.message
         : null;
+  // 재실행 거절은 시작 거절이다 — 편집기 툴바와 같은 문장 규칙(`backtestStartRejectionMessage`)을 쓴다.
+  const replayRejection =
+    replay.error === null
+      ? null
+      : backtestStartRejectionMessage(
+          replay.error instanceof ApiRequestError
+            ? (replay.error.code ?? null)
+            : null,
+          replay.error instanceof ApiRequestError &&
+            replay.error.field !== undefined
+            ? runFieldLabel(environmentFields, replay.error.field)
+            : null,
+        );
 
   return (
     <div
@@ -78,11 +106,17 @@ export const BacktestRunActions = ({
             : t("backtest.actions.rerun")}
         </Button>
       )}
-      {cancel.isError || replay.isError || requestFailed ? (
-        <span role="alert">
-          {t("backtest.actions.error")}
-          {actionErrorDetail === null ? null : `: ${actionErrorDetail}`}
-        </span>
+      {replayRejection !== null && cancel.error === null ? (
+        <BacktestRejection
+          title={t("backtest.actions.rerunFailed")}
+          message={replayRejection}
+          detail={actionErrorDetail}
+        />
+      ) : cancel.isError || replay.isError || requestFailed ? (
+        <BacktestRejection
+          message={t("backtest.actions.error")}
+          detail={actionErrorDetail}
+        />
       ) : null}
     </div>
   );

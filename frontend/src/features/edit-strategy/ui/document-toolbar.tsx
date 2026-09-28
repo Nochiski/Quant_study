@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 
-import { t, tOptional } from "../../../shared/config";
+import {
+  BacktestRejection,
+  backtestStartRejectionMessage,
+} from "../../../entities/backtest";
+import { t } from "../../../shared/config";
 import { Badge, Button, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
 import type { DocumentState } from "../model/document-state";
@@ -41,41 +45,6 @@ const decisionLabel = (decision: BacktestSourceDecision): string => {
       return t(`toolbar.run.blocked.${decision.reason}`);
   }
 };
-
-/**
- * 시작 거절 한 줄. 본문은 코드의 번역, 번역이 없으면 일반 문구다. 서버 사유는 접힌 상세로 내린다 —
- * 결과 화면의 run 실패 표시와 같은 방식이다(이슈 #260, `.claude/rules/frontend-api-state.md`). 줄은 버튼 줄
- * 아래에 따로 두어 긴 문장이 버튼 폭을 빼앗지 않게 한다.
- */
-const RunFailure = ({
-  detail,
-  code,
-  fieldLabel,
-}: {
-  detail: string | null;
-  code: string | null;
-  fieldLabel: string | null;
-}) => (
-  <div className="doc-toolbar__error" role="alert">
-    {t("toolbar.run.failed")}:{" "}
-    {/* 칸 이름을 알면 `<code>.named` 문장에 넣는다. 번역이 없는 코드는 일반 문구로 떨어진다. */}
-    {(code === null
-      ? null
-      : fieldLabel === null
-        ? tOptional(`backtest.error.${code}`)
-        : (tOptional(`backtest.error.${code}.named`)?.replace(
-            "{field}",
-            fieldLabel,
-          ) ?? tOptional(`backtest.error.${code}`))) ??
-      t("toolbar.run.failedGeneric")}
-    {detail === null ? null : (
-      <details className="doc-toolbar__error-reason">
-        <summary>{t("toolbar.run.serverReason")}</summary>
-        {detail}
-      </details>
-    )}
-  </div>
-);
 
 /**
  * Editor header actions and identity line (WORKFLOW P3-05): schema version, source hash,
@@ -175,14 +144,17 @@ export const DocumentToolbar = ({
         ) : null}
       </div>
       {runStatus.kind === "failed" ? (
-        <RunFailure
-          detail={runStatus.detail}
-          code={runStatus.code}
-          fieldLabel={
+        // 줄은 버튼 줄 아래에 따로 두어 긴 문장이 버튼 폭을 빼앗지 않게 한다(#260).
+        <BacktestRejection
+          className="doc-toolbar__error"
+          title={t("toolbar.run.failed")}
+          message={backtestStartRejectionMessage(
+            runStatus.code,
             runStatus.field === null || runFieldLabel === undefined
               ? null
-              : runFieldLabel(runStatus.field)
-          }
+              : runFieldLabel(runStatus.field),
+          )}
+          detail={runStatus.detail}
         />
       ) : null}
     </div>

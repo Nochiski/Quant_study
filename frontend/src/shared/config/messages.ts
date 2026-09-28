@@ -108,6 +108,7 @@ const ko = {
   "backtest.actions.cancelling": "취소 요청됨",
   "backtest.actions.rerun": "동일 설정 재실행",
   "backtest.actions.replaying": "재실행 중",
+  "backtest.actions.rerunFailed": "동일 설정으로 다시 실행하지 못했습니다",
   "backtest.actions.error":
     "실행 제어 요청에 실패했습니다. 상태를 새로 확인한 뒤 다시 시도하세요.",
   "backtest.result.chartEmpty": "이 구간에서 산출 가능한 값이 없습니다.",
@@ -1261,9 +1262,9 @@ const ko = {
   "toolbar.run.open": "백테스트 보기",
   "toolbar.run.accepted": "백테스트 {runId} 접수됨",
   "toolbar.run.failed": "백테스트 시작 실패",
-  "toolbar.run.failedGeneric":
+  "backtest.start.failedGeneric":
     "서버가 실행 요청을 받지 않았습니다. 실행 설정과 전략 문서를 확인한 뒤 다시 시작하세요.",
-  "toolbar.run.serverReason": "서버 사유",
+  "backtest.start.serverReason": "서버 사유",
   // 시작 거절(404·409·422)의 코드별 복구 문장. 코드 목록의 정본은 backend `startBacktest` 계약이고,
   // `backtest-error-contract.test.ts` 가 `openapi.json` 과 대조한다(이슈 #260).
   "backtest.error.backtest.run.field_invalid":
@@ -1785,6 +1786,7 @@ export const messages = {
     "backtest.actions.cancelling": "Cancellation requested",
     "backtest.actions.rerun": "Rerun same settings",
     "backtest.actions.replaying": "Starting rerun",
+    "backtest.actions.rerunFailed": "Could not rerun the same settings",
     "backtest.actions.error":
       "The run-control request failed. Refresh the status and try again.",
     "backtest.result.chartEmpty": "No value can be calculated for this range.",
@@ -2962,9 +2964,9 @@ export const messages = {
     "toolbar.run.open": "View backtest",
     "toolbar.run.accepted": "Backtest {runId} accepted",
     "toolbar.run.failed": "Backtest could not start",
-    "toolbar.run.failedGeneric":
+    "backtest.start.failedGeneric":
       "The server did not accept the run request. Check the run settings and the strategy document, then start again.",
-    "toolbar.run.serverReason": "Server reason",
+    "backtest.start.serverReason": "Server reason",
     "backtest.error.backtest.run.field_invalid":
       "The server rejected a run settings value. Fix the field named in the server reason, then start again.",
     "backtest.error.backtest.run.field_invalid.named":

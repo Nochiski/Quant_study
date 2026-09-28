@@ -26,7 +26,16 @@ main
  └─ P0-01  docs/ai-assistant-plan
      └─ A-01 ─ A-02 ─ A-03 ─ A-04 ─ A-05 ─ A-06 ─ A-07      backend
          └─ B-01 ─ B-02 ─ B-03 ─ B-04 ─ B-05                  frontend
+             └─ C-01 ─ C-02                                  Phase A·B 감사 후속
+main
+ └─ C-03                                                     C 절 backlog 2건
+main
+ └─ D-01 ─ D-02 ─ D-03                                       결과 설명(US-DM-08)
 ```
+
+위 그림의 A·B는 처음 계획한 스택이고, C·D는 뒤에 더한 줄이다. C-01·C-02는 B-05 위에 쌓았고, C-03과
+D 스택은 각각 그 시점 main을 base로 올렸다(자세한 base와 머지 순서는 [PLAN.md](./PLAN.md) 트래커와
+변경 기록). 19개 PR 모두 main에 머지됐다(2026-09-27).
 
 - 브랜치 `feat/ai-<pr-id 소문자>-<slug>`.
 - OpenAPI와 frontend generated SDK는 **A-04가 같은 PR에서** 갱신한다(12절 "API 변경은 같은 PR에서
@@ -34,6 +43,7 @@ main
   A-04부터 green이어야 한다.
 - 실제 공급자 호출은 `STRATEGY_WORKBENCH_LIVE_SMOKE=1` smoke에서만. CI는 가짜 공급자.
 - `strategy-language-2-0`(schema 1.2)이 먼저 머지되면 A-07 fixture와 B-05 e2e를 1.2 문서로 갱신한다.
+  (역사 기록 2026-09-28: 1.2는 #202로 main에 들어왔고 어시스턴트 골든은 1.2로 다시 만들어졌다.)
 
 ## 2. 공통 gate
 

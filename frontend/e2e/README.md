@@ -72,10 +72,10 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-The four Windows Chromium baselines (1440×900 and 1920×1080, light and dark) use Playwright's
-exact Chromium build and exact-version bundled Noto Sans KR/JetBrains Mono webfonts. The CI browser
-job is pinned to the Windows Server 2025 generation. Regenerate them on Windows only after an
-intentional visual change, then require a strict no-update CI pass:
+Windows Chromium 기준선은 시각 프로젝트 4종(1440×900·1920×1080 × light·dark)이 두 장씩 찍어 PNG 8장이다
+(`strategy-workbench.png`, `strategy-debugger.png`). Playwright가 고정한 Chromium 빌드와, 버전을 고정해 번들한
+Noto Sans KR/JetBrains Mono 웹폰트를 쓰고, CI browser job은 Windows Server 2025 세대에 고정돼 있다. 의도한
+화면 변경이 있을 때만 Windows에서 다시 만들고, 그다음 update 없는 엄격한 CI 통과를 요구한다:
 
 ```text
 npm run test:e2e:update
@@ -135,6 +135,10 @@ for a tool call followed by a proposal that only changes the title; 검색 shows
 three rejected proposals; 천천히 streams a long answer so a mid-turn reload exercises resume; 샤프
 explains the Sharpe ratio in plain words (US-SM-09); anything else gets a short answer.
 
+대본 키워드는 순서대로 먼저 맞는 것이 이긴다(`SCENARIO_KEYWORDS`). "검색 상한"은 "검색"보다 앞에 있어,
+검색 한도를 다 쓴 뒤 찾은 자료로 답하는 대본을 고른다(US-CS-04). 백테스트 결과 화면의 세션은 질문과
+무관하게 결과 설명 대본이 돈다. 서버가 그 턴에 `read_backtest_result` 도구를 제공했는지로 고른다(US-DM-08).
+
 Assistant history and secrets go to the same isolated runtime directory as the strategy database
 (`e2e/runtime.ts`); without that the run would write into the developer's real chat history and
 `secrets.json`.
@@ -165,9 +169,9 @@ Requirements and expectations:
 - The local copy must cover sessions from at least 2023-01 so the 252-session momentum window has
   history for the 2024 backtest window; otherwise the failure shows up as a backtest error, not as a
   data-coverage message.
-- The backend builds the TargetTape synchronously before it returns the run id, so the backtest start
-  request dominates the run: about 80 seconds of a 1.2-minute spec on the full common-stock universe
-  (measured 2026-09-19, Rust core; the engine itself finishes in about 2 seconds).
+- `POST /api/v1/backtests`는 사전 검사만 하고 run id를 바로 돌려준다. TargetTape(전 유니버스 팩터 평가)는
+  run의 `tape` 단계에서 만들어지고 실데이터에서는 수십 초가 걸린다. spec은 시작 응답이 아니라 완료
+  폴링에서 그 시간을 기다린다.
 - The run-settings benchmark defaults to empty (run without a benchmark; the ID vocabulary is
   adapter-owned, issue #154). The spec sets `005930:1` explicitly so the benchmark path is exercised
   against real data.

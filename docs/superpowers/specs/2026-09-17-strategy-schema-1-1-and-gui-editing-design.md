@@ -13,6 +13,15 @@
 > (D1 문법, D2 동결 이력, D3 업그레이더, D5 source 트랜잭션을 그 문서가 확장한다)
 >
 > PR 진행은 [docs/planning/strategy-gui-editing/PLAN.md](../../planning/strategy-gui-editing/PLAN.md)
+>
+> **현행 안내(2026-09-28)**: schema 1.2(#202, 2026-09-28 main 머지)가 이 문서의 일부를 대체했다.
+> `data`·`execution`·`graph.missing_policy`는 문서에서 빠져 실행 설정 `RunEnvironment`로 갔다.
+> 업그레이더는 `upgrade_document_1_0`이 아니라 버전 디스패치 `upgrade_document`(1.0 → 1.1 → 1.2)이고,
+> 적용 조건표 `FIELD_APPLICABILITY`는 `/risk/risk_factor_id` 행이 더해져 9행이다. 은퇴 revision
+> 실행 거부 코드는 422 `backtest.strategy.requires_upgrade`(추적은 `trace.strategy.requires_upgrade`)다.
+> 이 문서의 `strategy_revision_requires_upgrade`는 구현된 적이 없다. 현행 계약은
+> [schema 1.2 설계](./2026-09-20-strategy-language-2-0-and-pipeline-canvas-design.md)와
+> [SoT 대장](../../../.claude/rules/strategy-workbench-sot.md)이다. 아래는 2026-09-17 설계 기록이다.
 
 ## 1. 맥락
 

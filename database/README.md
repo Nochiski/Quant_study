@@ -4,14 +4,14 @@ KRX·키움·KIS·DART·WISE 원장 수집기, stage 층 빌더, 문서층(L1) �
 데이터는 카엘 서버(`~/quant-ledger`)가 정본이며 이 폴더에는 **코드와 문서만** 둔다
 (`database/data/`·`logs/`·`scratchpad/` 는 `.gitignore`).
 
-## 상태 (2026-09-09)
+## 상태 (2026-09-28)
 
 | 항목 | 값 |
 |---|---|
-| 원장 | **일일 체인 유지 중(09-10 첫 실행 통과)** — KRX·키움 09-09, KIS 신용잔고 09-07(조회일 기준 T-3 규칙), DART 09-09, WISE 09-10 |
-| stage | 66테이블 커밋(09-05), 원장 정지 날짜까지 |
-| equity | 29표(`coverage_daily` S24 추가)·규칙 **e1.15.0**(코드 반영 09-11, 서버 첫 빌드 대기 — 아래는 e1.14.0 서버 상태)·규칙 e1.14.0(09-09 전량 재빌드로 단일화)·팩터 준비도 54/54. catalog `2c38be1d58fb03be`·contract pass, baseline 락 바이트 동일(09-09 정렬) |
-| 진행 중 | **일일 증분 플랜** `docs/plans/2026-09-09-daily-incremental.md` — R1~R10 승인(09-09), **P0·P1·P2 완료(키움 갭은 09-09 저녁 즉시 실행), P3 크론 가동(09-09), 관찰 1/5 통과(09-10)** — 06:00 수집·08:10 빌드 체인, 키움 단계 포함(사용자 결정: 공유 앱키로 콜). **첫 적재분 검수**(09-10): high 5·mid 9 → `docs/reviews/2026-09-10-intake-audit-summary.md`. 수집기 핫픽스 3건(WISE 커버 판정·키움 유예·DART 분기 창) 배포 `52d0f48`, 사용자 결정 3건 반영(결정 6: 키움 머지 신규 행만·KIS 최초 관측판(P5)·G3 개정). **사용자 행동 필요: 키움 앱키 추가 발급**(DECISIONS_PENDING R5 후속) |
+| 원장 | **일일 체인 가동 중** — 2026-09-17 전체 체인 가동(저녁 슬롯·아침 슬롯). 수집 시각은 아래 "운영 (P6) → 크론 전체표" |
+| stage | 66테이블. 저녁 잠정판(`basis=evening`)·아침 확정판(`basis=krx`)을 매일 빌드한다(플랜 v2 페이즈 B) |
+| equity | 29표·코드 규칙 **e1.18.0**(`src/equity/model.py` `RULES_VERSION`, #248 fin_std 회계기간 파생). 판본을 올리는 규칙은 `EQUITY_HANDOFF.md` §6 |
+| 진행 중 | **일일 증분 플랜 v2** `docs/plans/2026-09-11-daily-incremental-v2.md`(상태 블록이 정본) — 페이즈 A 저녁 원장 슬롯·페이즈 B 잠정/확정 빌드 **가동**(09-17 전체 체인), 페이즈 C Kael-alpha 인계 완료, 페이즈 D 범위 확정. 09-19 전수 감사 수정은 `docs/plans/2026-09-19-pipeline-audit-fix.md`. v1 `docs/plans/2026-09-09-daily-incremental.md` 는 P0~P3 기록. 사용자 행동 대기: 키움 앱키 추가 발급(`DECISIONS_PENDING.md` 결정 5 R5 후속) |
 | 크론 | **18:05 `daily_evening.sh`**(당일: 키움 투자자·공매도는 21:05 원장 직행 ∥ DART ∥ WISE 스냅샷) · 21:20 `build_evening.sh`(잠정 빌드) · 06:00 `daily_ledger.sh`(키움 마스터, 대차, KIS, DART 재스윕) · 08:10 `daily_build.sh`(KRX → 외국인 보유 → 머지 → 건전성 → **확정 빌드 포함**, 09-17 `--no-build` 제거) · 워치독 21:50/23:30/10:00 · 토 03:30 백업 · 일 04:30 gc. 전체는 아래 "운영 (P6) → 크론 전체표" |
 
 ## 층 구조
@@ -32,7 +32,8 @@ equity      parquet 29표 + equity.duckdb   data/equity/                ← EQUI
 | 경로 | 내용 |
 |---|---|
 | `src/` | 수집기(`backfill_*.py`, `api.py`, `dart_universe.py`, `sweep_disclosure.py`, `master_daily.py`), stage 패키지(`src/stage/`, `python -m stage --table <t>`), equity 패키지(`src/equity/`, `python -m equity build|gate|catalog|contract`), 동기화 패키지(`src/ledger_sync/`, `python -m ledger_sync` — 협업자 로컬이 서버 equity 층을 SFTP 로 받아 증분 유지, 동사 목록은 `docs/LEDGER_SYNC.md`), 파일럿 통합층(`build_*.py`·`finalize.py`·`fin_map.py` — STAGE_DESIGN §8 이 파일럿 보존·로직 재사용으로 명시) |
-| `scripts/` | 서버 크론·러너: `daily_evening.sh`(18:05)·`daily_ledger.sh`(06:00)·`daily_build.sh`(08:10)·`watchdog.sh`·`daily_wise.sh`(마스터만), `run_stage.sh`·`run_stage_all.sh`, `run_equity.sh`·`equity_rebuild_all.sh`·`equity_gate_all.sh`, `check_baseline_lock.py`, `fetch_equity_local.sh`(운영자 rsync 용), **`ledger_sync.ps1`·`.sh`·`register_daily_sync.ps1`**(협업자 SFTP 동기화 — `LEDGER_SYNC.md`), `run_survey*.sh` |
+| `scripts/` | 서버 크론·러너: `daily_evening.sh`(18:05)·`daily_ledger.sh`(06:00)·`daily_build.sh`(08:10)·`watchdog.sh`·`daily_wise.sh`(마스터만), 빌드 체인 `build_chain.sh`·`build_evening.sh`·`build_morning.sh`, 운영 `backup_raw.sh`·`gc.sh`·`rotate_logs.sh`·`daily_report.py`·`notify.sh`·`deploy.sh`(아래 "운영 (P6)"), `doc_prepass_daily.sh`·`sync_calendar.sh`, `run_stage.sh`·`run_stage_all.sh`, `run_equity.sh`·`equity_rebuild_all.sh`·`equity_gate_all.sh`, `check_baseline_lock.py`, `fetch_equity_local.sh`(운영자 rsync 용), **`ledger_sync.ps1`·`.sh`·`register_daily_sync.ps1`**(협업자 SFTP 동기화 — `LEDGER_SYNC.md`), `run_survey*.sh` |
+| `src/daily/` | 일일 증분 러너(`kw_daily.py`·`kis_daily.py`·`dart_daily.py`)와 공용 모듈(거래일 `calendar.py`, 요청 유니버스 `universe.py`, 실행 기록 `runlog.py`, 원장 건전성 `ledger_health.py`) |
 | `tests/` | stage·equity 테스트 |
 | `survey/`, `survey_out/v2/` | 원장 전 테이블·컬럼 어휘 전수 측정과 결과. stage (p,s)·부호·결측 규칙의 실측 근거. 재생성은 서버에서 `scripts/run_survey_v2.sh` |
 | `eval/table_schema/` | 자유 서식 표 스키마 추론 골든셋 100표 (라벨링 대기) |
@@ -49,11 +50,12 @@ equity      parquet 29표 + equity.duckdb   data/equity/                ← EQUI
 | 문서 | 내용 |
 |---|---|
 | `START_HERE.md` | equity 층 입구 — 목적·지금 상태·다음 할 일 |
-| `DECISIONS_PENDING.md` | 사람이 정해야 할 것 (결정 1~5) |
+| `DECISIONS_PENDING.md` | 사람이 정해야 할 것 (결정 1~11) |
 | `TECH_DEBT.md` | 기술 부채와 우선순위 |
 | `BLOCKED_FACTORS.md` | 막힌 팩터와 원인 |
 | `plans/2026-09-11-daily-incremental-v2.md` | **일일 증분 플랜 v2** — 당일 저녁 스코어링(18:05 저녁 슬롯·잠정/확정 빌드), 페이즈 A~D. 시간표·P4 이후의 정본 |
 | `plans/2026-09-09-daily-incremental.md` | 일일 증분 플랜 v1 — P0~P3 결과·결정 R1~R10·결정 6·7 (유효), 시간표·P4~P6 은 v2 로 이관 |
+| `plans/2026-09-19-pipeline-audit-fix.md` | 09-19 일일 파이프라인 전수 감사 결함 수정 플랜 — 갈래 6개 수정·배포·실전 게이트 기록 |
 
 ### 원장 수집
 
@@ -96,6 +98,8 @@ equity      parquet 29표 + equity.duckdb   data/equity/                ← EQUI
 |---|---|
 | `2026-09-05-equity-*.md` (4건) | equity v1.1 → v1.2 제안서 |
 | `2026-09-09-daily-findings-A~E-*.md` (5건) | 일일 증분 플랜 근거: 원장 A(KRX·키움·KIS)·B(DART·문서·WISE), stage, equity, 운영·타이밍 |
+| `2026-09-09-kis-credit-balance-scope.md` | KIS 신용잔고(`daily-credit-balance`) 정체 판정 — 웹 공표치·내부 정합성 대조 |
+| `2026-09-09-p0-task0{6,8,9}-*.md` (3건) | 일일 증분 플랜 P0 조사: baseline 락 불일치(0.6), 키움·KIS 앱키 실사용량(0.8), 서버 전용 파일 처분(0.9) |
 | `2026-09-10-intake-audit-summary.md` + `-{A-krx,B-kiwoom,C-kis,D-dart-wise}.md` | 일일 증분 첫 적재분(D=09-09) 검수 — 종합 판정·조치 제안 + 소스별 검사표·재현 SQL |
 
 읽는 순서 — equity 작업: `START_HERE` → `EQUITY_HANDOFF` §0 → `EQUITY_WORKFLOW` §0~§1.
@@ -119,11 +123,13 @@ equity      parquet 29표 + equity.duckdb   data/equity/                ← EQUI
 ## 실행
 
 ```bash
-cd database
-uv run --no-project --python 3.11 --with pytest --with duckdb --with requests python -m pytest tests -q
+# 저장소 루트에서 (CI 와 같은 명령). backend 환경에 duckdb(`equity` extra)가 있어야 한다
+uv sync --project backend --extra parquet --extra equity --extra llm
+uv run --project backend pytest database/tests -q
 ```
 
-- 서버 배포: `rsync -avz --exclude='.venv' --exclude='__pycache__' database/src/ kael-server:~/quant-ledger/src/` (`scripts/` 도 동일). 서버에만 있는 파일(`src/equity_s23/`, `rebuild_share.py`)은 플랜 P0 에서 저장소로 회수 예정.
+- 테스트: backend 환경 없이(`--no-project` 등) 돌리면 워크벤치 연동 테스트(`test_equity_s21_workbench.py`)가 조용히 skip 되므로 위 명령을 쓴다.
+- 서버 배포: `database/scripts/deploy.sh`(기본 dry-run, `--apply` 만 전송 — 아래 "운영 (P6) → 배포"). `rebuild_share.py` 의 정본은 `backend/ops/` 다.
 - 키·토큰: 코드는 `QL_ENV` 또는 `~/kael-system-v3/.env` 에서만 읽는다. 레포에는 넣지 않는다.
 - 협업자 로컬 동기화(서버 equity 층 → `~/quant-ledger/data/equity`): `database\scripts\ledger_sync.ps1 sync`, 검증 `verify --offline`, 일일 등록 `register_daily_sync.ps1`. 절차·판단 기준은 `docs/LEDGER_SYNC.md`.
 

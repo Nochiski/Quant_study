@@ -10,9 +10,15 @@
 > 관련 규칙: `backend-package-boundary.md`, `frontend-fsd.md`, `strategy-workbench-sot.md`. 병행
 > initiative: schema 1.2·그래프 표현(PR #167). 어시스턴트는 전략 언어를 runtime schema에서 읽으므로
 > 스키마 버전과 무관하게 동작하지만, 그 initiative가 머지되면 시나리오 fixture(A-07)와 e2e(B-05)를
-> 1.2 문서로 갱신해야 한다.
+> 1.2 문서로 갱신해야 한다. 이 갱신은 끝났다(2026-09-28 기준): schema 1.2는 #202로 main에 머지됐고,
+> 시나리오 fixture(`backend/tests/fixtures/assistant/scenarios/`)는 1.2 문서를, e2e 대본 공급자
+> (`llm_scripted`)는 `CURRENT_SCHEMA_VERSION`을 쓴다.
 >
 > PR 진행은 [docs/planning/ai-assistant/PLAN.md](../../planning/ai-assistant/PLAN.md)
+>
+> 결과 화면 설명 모드(백테스트 실행에 붙은 세션, `read_backtest_result` 도구, 어시스턴트 DB v3)는
+> [결과 설명 spec](./2026-09-27-ai-backtest-result-explain.md)이 정한다. 아래 D3·D5·D6은 그 결과를
+> 반영한 현행 계약이다.
 
 ## 1. 맥락
 
@@ -185,15 +191,19 @@ class StrategyProposal:
 | `AssistantChatService` | 세션 생성·조회, `send(session_id, text, context, *, cancelled) -> Iterator[ChatEvent]`: 컨텍스트 조립, 공급자 `stream_turn` 호출, 도구 실행 콜백, 제안 검증, 메시지 저장 |
 | `AssistantTurnRunner` | **진행 중 턴의 owner.** `start(session_id, text, context) -> Turn`은 세션에 RUNNING 턴이 있으면 `TurnInProgressError`, 아니면 스레드에서 `send`를 돌리며 이벤트를 나오는 대로 `ChatSessionRepository.append_events`로 영속화한다. `cancel(turn_id)`는 프로세스 내 `threading.Event`를 set(이것이 `send`의 `cancelled` 콜백)하고 턴을 CANCELLED로 기록한다. `events(session_id, after_sequence)`·`state(turn_id)`는 저장소를 읽는다. backtest_run의 `BacktestRunService`와 같은 구조(스레드 + sequence + 폴링 스트림). 레지스트리는 프로세스 내(dict + RLock), 단일 워커 전제 |
 
-application이 선언하는 도구(v1). 모든 스키마는 `additionalProperties: false`와 `required`를 갖는다.
+application이 선언하는 도구는 여섯이다(이름·스키마 상수는 `domain/assistant/_tools.py`). 모든 스키마는
+`additionalProperties: false`와 `required`를 갖는다. 세션 종류마다 받는 묶음이 다르다. 전략 세션은
+`ASSISTANT_TOOLS`(앞 다섯)를, 백테스트 실행에 붙은 결과 설명 세션은 `RESULT_EXPLAIN_TOOLS`
+(`read_backtest_result` 하나)를 받는다. 두 묶음은 섞지 않는다(결과 설명 spec).
 
-| 도구 | 하는 일 | 실행 |
-|---|---|---|
-| `read_current_strategy` | 현재 문서 원문·진단·실행 설정 | 요청에 실린 컨텍스트에서 |
-| `list_equity_fields` | 데이터 필드 id·이름·단위·설명 | `EquityDataPort` 카탈로그 |
-| `list_factor_catalog` | 팩터 정의·방향·필요 필드·구현 여부 | domain factor registry |
-| `validate_strategy_yaml` | YAML을 parse·hydrate·validate해 진단 반환 | `StrategyCompilerPort` |
-| `propose_strategy` | 최종 제안 제출(제목·요약·근거·출처·YAML) | application이 `StrategyCompilerPort`로 검증 후 `Proposal` 이벤트. 실패하면 진단을 담은 도구 오류로 돌려줘 모델이 고친다 |
+| 도구 | 묶음 | 하는 일 | 실행 |
+|---|---|---|---|
+| `read_current_strategy` | 전략 | 현재 문서 원문·진단·실행 설정 | 요청에 실린 컨텍스트에서 |
+| `list_equity_fields` | 전략 | 데이터 필드 id·이름·단위·설명 | `EquityDataPort` 카탈로그 |
+| `list_factor_catalog` | 전략 | 팩터 정의·방향·필요 필드·구현 여부 | domain factor registry |
+| `validate_strategy_yaml` | 전략 | YAML을 parse·hydrate·validate해 진단 반환 | `StrategyCompilerPort` |
+| `propose_strategy` | 전략 | 최종 제안 제출(제목·요약·근거·출처·YAML) | application이 `StrategyCompilerPort`로 검증 후 `Proposal` 이벤트. 실패하면 진단을 담은 도구 오류로 돌려줘 모델이 고친다 |
+| `read_backtest_result` | 결과 설명 | 실행 하나의 결과 요약(기간·실행 설정·전략 요약·성과 지표·자산 곡선 양 끝·최대 낙폭 날짜·최근 월별 수익률·데이터 경고) | 결과 설명 spec이 정한다 |
 
 턴의 상한과 종료:
 
@@ -289,8 +299,10 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
   플랫폼별로 분기한다. env `STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH`로 경로를 바꿀 수 있고 저장소 안
   경로는 거부한다. OS 키체인 adapter는 후속.
 - 세션 저장에는 키·시스템 프롬프트 원문을 넣지 않는다(카탈로그 스냅샷 해시만).
-- 어시스턴트 DB 스키마는 v2다(C-03). v1 파일은 열 때 한 트랜잭션에서 제자리로 올린다:
-  `chat_messages.turn_id`를 "메시지 작성 시각 이전에 시작한 마지막 턴"으로 채우고(그런 턴이 없으면
+- 어시스턴트 DB 스키마는 v3이다(`adapters/outbound/assistant_sqlite/_schema.py`의 `SCHEMA_VERSION`).
+  옛 파일은 열 때 v2, v3으로 차례로 올리고, 버전마다 한 트랜잭션에서 끝낸다. v3(결과 설명 D-02)은
+  `chat_sessions.run_id`를 더하고 세션 CHECK를 "전략·초안·실행 중 정확히 하나"로 바꾼다.
+  v2(C-03)로 올릴 때는 `chat_messages.turn_id`를 "메시지 작성 시각 이전에 시작한 마지막 턴"으로 채우고(그런 턴이 없으면
   NULL), v1이 검색 상한 통지를 `search_activity`로 저장한 행(검색어가 v1 통지 문장, 출처 없음)을
   `search_budget_exhausted`로 다시 쓴다. 그래서 읽기·집계·화면에는 옛 표현을 가르는 분기가 없다.
   `turn_id`에는 외래 키를 걸지 않는다 — 러너가 사용자 메시지를 턴 행보다 먼저 쓴다(D3).
@@ -304,15 +316,19 @@ compile은 `StrategyCompilerPort`로 받으므로 `strategy_authoring`에 의존
 | POST | `/providers/{id}/test` | 연결 테스트 |
 | POST | `/providers/{id}/activate` | 활성 프로파일 전환 |
 | DELETE | `/providers/{id}` | 삭제(키 포함) |
-| POST | `/sessions` | 세션 생성 `{document_ref}` |
-| GET | `/sessions?document_ref=` | 문서의 세션 목록 |
+| POST | `/sessions` | 세션 생성 `{document_ref, title?}`. `document_ref`는 `{strategy_id, revision?}`(저장된 전략)·`{draft_id}`(초안)·`{run_id}`(백테스트 실행, 결과 설명 세션) 중 정확히 하나다 |
+| GET | `/sessions?strategy_id=&revision=&draft_id=&run_id=` | 문서(또는 실행) 하나의 세션 목록. `document_ref`를 문자열 하나로 받지 않고 필드별 쿼리로 받는다 |
 | GET | `/sessions/{id}` | 메시지·턴 이력. 메시지마다 그 메시지를 만든 턴의 `turn_id`(없으면 `null`)가 실린다 |
-| POST | `/sessions/{id}/turns` | 턴 시작 `{text, context: {source_text, source_format, environment?, diagnostics?}}` → 202 `{turn_id, accepted_sequence}`. `accepted_sequence`는 턴 시작 직전 세션의 마지막 sequence이며 클라이언트가 그대로 `after_sequence`로 쓴다. RUNNING 턴이 있으면 409 `assistant.turn_in_progress` |
+| POST | `/sessions/{id}/turns` | 턴 시작 `{text, context?: {source_text, source_format, environment?, diagnostics?}}` → 202 `{turn_id, accepted_sequence}`. wire에서 `context`는 선택이지만, 전략 세션은 반드시 싣고 결과 설명 세션은 싣지 않는다. 세션 종류와 맞지 않으면 422 `assistant.turn_context_mismatch`. `accepted_sequence`는 턴 시작 직전 세션의 마지막 sequence이며 클라이언트가 그대로 `after_sequence`로 쓴다. RUNNING 턴이 있으면 409 `assistant.turn_in_progress` |
 | GET | `/sessions/{id}/events?after_sequence=` | **SSE** `SequencedEvent` 스트림. backtest 이벤트 스트림(`/api/v1/backtests/{run_id}/events`)과 같은 프레이밍(`id`=sequence). 재개 위치는 `after_sequence` 쿼리 또는 `Last-Event-ID` 헤더(헤더가 있으면 우선). 진행 중(RUNNING) 턴이 없으면 409 `assistant.no_running_turn`으로 열지 않는다(프론트 규칙 D7의 backstop이며, 프론트는 409에 재시도하지 않고 이력으로 복구한다). 열린 동안 15초마다 `: keepalive` 주석을 보내고, 그 턴이 종료 상태가 되면 닫는다 |
 | POST | `/sessions/{id}/turns/{turn_id}/cancel` | 취소(영속 상태 CANCELLED + 프로세스 내 신호) |
 
 - 422 코드: `assistant.provider_not_installed`, `assistant.no_active_provider`,
-  `assistant.probe_failed`, `assistant.base_url_rejected`. 409: `assistant.turn_in_progress`,
+  `assistant.probe_failed`, `assistant.base_url_rejected`, `assistant.provider_secret_missing`(프로파일은
+  있는데 키 파일에 키가 없음), `assistant.document_ref_invalid`(`document_ref`가 "정확히 하나" 규칙
+  위반), `assistant.result_unavailable`(결과 설명 세션이 가리키는 실행의 결과가 없음),
+  `assistant.turn_context_mismatch`(턴 `context`가 세션 종류와 맞지 않음). 정본 목록은 HTTP 계약
+  `_assistant_contract.py`의 `AssistantUnprocessableDetail`이다. 409: `assistant.turn_in_progress`,
   `assistant.no_running_turn`. 공급자 오류는 `Failure` 이벤트로.
 - **base_url 규칙**: 없으면 공급자 기본. 있으면 `https` 스킴만, 호스트는 루프백·사설 대역·IP 리터럴
   금지. 로컬 프록시 개발용 예외는 env `STRATEGY_WORKBENCH_ASSISTANT_ALLOW_INSECURE_BASE_URL=1`일

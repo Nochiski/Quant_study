@@ -1,5 +1,10 @@
 # StrategySpec schema 1.1 · Form/Graph 편집 기획 패키지
 
+> **현행 안내(2026-09-28)**: 이 initiative는 2026-09-19에 **완료**됐다(19/19 PR과 감사 backlog 21건 main
+> 머지). 이 패키지는 역사 기록이다. 현재 전략 문서 버전은 schema 1.2이고(`CURRENT_SCHEMA_VERSION`),
+> 1.2 전환과 그 뒤 계획은 [strategy-language-2-0](../strategy-language-2-0/README.md)이 소유한다. 이 패키지가
+> 만든 Form·JSON 탭은 lang2 P4-04에서 은퇴할 예정이다. 아래 1.1 예시·절차는 당시 기준이다.
+
 전략 YAML 규칙 간소화(schema 1.1)와 Form/Graph GUI 편집을 stacked PR로 구현하는 initiative의
 기획 자료를 한곳에 보관한다.
 

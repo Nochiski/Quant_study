@@ -7,7 +7,7 @@
 | `strategy` | 전략 문서·리비전·초안 query와 mutation |
 | `factor` | 팩터 카탈로그와 그래프 설명 |
 | `dataset` | 데이터 필드·유니버스 조회 |
-| `backtest` | 실행 시작·상태·결과 query |
+| `backtest` | 실행 시작·상태·결과 query, 실행 설정 스키마의 필드 모델(`run-environment-fields.ts`, 패널과 run 상세가 함께 읽는다), 지표 쉬운 이름·사용 불가 사유 문구(`metric-copy.ts`) |
 | `assistant` | AI 공급자 프로파일, 채팅 세션·턴, SSE 리더와 이벤트 리듀서. 생성 SDK 타입과 `shared/api`의 어시스턴트 상수·오류 타입을 여기서 다시 내보내 상위 레이어의 입구를 하나로 둔다 |
 
 `assistant`의 SSE 리더는 생성 SDK의 SSE 클라이언트를 쓰고 `EventSource`를 쓰지 않는다. 리듀서는

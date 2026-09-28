@@ -30,4 +30,6 @@
 5. `APPROVED`와 전체 CI 성공 후 merge하고 체크박스와 상태를 `MERGED`로 바꾼다.
 6. PR row와 변경 기록을 수정한 뒤 `tools/update-plan-progress.ps1`을 실행해 frontmatter와 집계를 자동 갱신한다.
 
-계획 문서 생성 자체는 구현 PR 진척도에 포함하지 않는다. 최초 구현 대상은 `P0-01`이다.
+계획 문서 생성 자체는 구현 PR 진척도에 포함하지 않는다. 트래커의 52개 PR은 모두 머지돼 이 initiative는
+완료됐다(`PLAN.md` `COMPLETE`). WORKFLOW 12~14절의 실행 절차와 13.7절 tracker 규칙은 뒤 initiative들이
+계속 정본으로 참조한다.

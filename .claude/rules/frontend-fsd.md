@@ -26,13 +26,15 @@ app -> pages -> widgets -> features -> entities -> shared
 
 ## 이름과 owner
 
-- entity는 명사형: `strategy`, `factor`, `experiment`, `metric`, `dataset`.
-- feature는 동사형: `edit-strategy`, `debug-strategy`, `compare-candidates`,
-  `inspect-run`.
+- entity는 명사형: `strategy`, `factor`, `backtest`, `dataset`, `assistant`.
+- feature는 동사형: `edit-strategy`, `debug-strategy`, `run-backtest`, `assist-strategy`,
+  `configure-ai-providers`.
 - `form.ts`, `use-data.ts`, `manager.ts`처럼 slice를 떼면 의미가 사라지는 이름은 금지한다.
 - `shared`나 범용 app/widget에 특정 팩터·전략·실험 분기를 두지 않는다. 그 도메인이 사라질
   때 함께 지울 코드라면 owner slice로 내린다.
 - 복수 entity 조합은 widget/page가 한다. feature가 다른 feature를 import하지 않는다.
 
-`eslint-plugin-boundaries`가 레이어 방향, 같은 레이어 격리, public API 우회를 `npm run lint`에서
-강제한다. 린터 예외를 추가하지 말고 owner slice를 다시 설계한다.
+`@boundaries/eslint-plugin`의 `boundaries/dependencies` 규칙(`frontend/eslint.config.js`의
+`layerRules`)이 레이어 방향과 같은 레이어 slice 간 import 금지(`shared` 제외)를 `npm run lint`에서
+강제한다. slice public API(`index.ts`) 우회를 막는 린트 규칙은 없으므로 리뷰로 지킨다. 린터 예외를
+추가하지 말고 owner slice를 다시 설계한다.

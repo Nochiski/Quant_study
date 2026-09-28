@@ -67,7 +67,7 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
   규칙으로, 입력은 직전 단계로, 출력은 마지막 단계로 채운다(1.1 `addNode` 규칙 확장).
   node_id 규칙(정본, 2026-09-27 P2-08): 바탕 이름을 그대로 쓰고 같은 그래프 안에서 겹치면 `_2`·`_3` …
   을 붙인다. 접미사 규칙은 `suggestNodeId`와 같다. 바탕 이름은 단계 노드가 연산자(`mean`·`gt`), 잎
-  노드가 필드 id의 끝 조각(`price.close` → `close`)이다. 잎 바탕 이름은 지금 `addNode`(바탕 `field`)와
+  노드가 필드 id의 끝 조각(`price.adj_close` → `adj_close`)이다. 잎 바탕 이름은 지금 `addNode`(바탕 `field`)와
   달라 P5-01이 새로 구현한다. node_id·노드 순서·입력 슬롯이 모두 `spec_hash`에 들어가므로
   `ideas/*.yaml` fixture도 이 규칙으로 적는다. 부가 잎을 넣는 위치와 체인 꼬리가 들어갈 입력 슬롯의
   규칙은 P5-01이 정하고 fixture와의 일치를 테스트로 고정한다. 고급 화면의 접힌 "식별자" 영역에서만
@@ -82,11 +82,13 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
   마지막 노드이면 체인이다. 다중 입력 노드는 **한 입력이 체인 꼬리이고 나머지 입력이 전부 체인
   밖 잎일 때만** 체인으로 본다. 잎은 입력이 없는 소스 노드(`field`·`constant`·`parameter`)이고
   체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다.
-- 아이디어 3(20일 이평 돌파)의 정본 노드 형태는 노드 4개(그중 잎 2개: `close`·`close_2`)다:
-  `close`(field `price.close`) →
-  `mean`(time_series mean, window 20, input `close`) → 잎 `close_2`(field `price.close`) →
-  `gt`(comparison gt, `left_node_id: close_2`, `right_node_id: mean`, 출력). 마지막 노드가
-  다중 입력이고 한 입력(`mean`)이 체인 꼬리, 나머지(`close_2`)가 잎이므로 체인이다.
+- 아이디어 3(20일 이평 돌파)의 정본 노드 형태는 노드 4개(그중 잎 2개: `adj_close`·`adj_close_2`)다:
+  `adj_close`(field `price.adj_close`) →
+  `mean`(time_series mean, window 20, input `adj_close`) → 잎 `adj_close_2`(field `price.adj_close`) →
+  `gt`(comparison gt, `left_node_id: adj_close_2`, `right_node_id: mean`, 출력). 마지막 노드가
+  다중 입력이고 한 입력(`mean`)이 체인 꼬리, 나머지(`adj_close_2`)가 잎이므로 체인이다. 종가와
+  이평을 모두 수정주가로 재야 분할·병합 날 가짜 돌파가 없다(이슈 #214, fixture
+  `ideas/ma20_breakout.yaml`).
 
 ### D3. 기존 YAML 규칙 중 실행 환경을 UI로 편입한다 (schema 1.2)
 
@@ -121,12 +123,12 @@ factors:
     graph:
       nodes:
         - kind: field
-          node_id: close
-          field_id: price.close
+          node_id: adj_close
+          field_id: price.adj_close
         - kind: time_series
           node_id: mom_252
           operator: momentum
-          input_node_id: close
+          input_node_id: adj_close
           window: 252
       output_node_id: mom_252
 portfolio:
@@ -135,9 +137,15 @@ risk:
   max_name_weight: 0.05
 ```
 
-**S5 횡단면 eligibility의 의미(정본).** 현재 `EligibilityRule.operator`는 `domain/strategy/_models.py`의
-공유 `ComparisonOperator`이고, `domain/portfolio/_compiler.py`의 `_compare`는 마지막 줄이 catch-all
-`return value == threshold`다. `top_percent`를 공유 enum에 얹으면 예외가 아니라 조용한 오필터가 된다.
+잎은 수정주가 `price.adj_close`다. 원주가 `price.close`를 과거 세션을 읽는 연산자(`momentum`·
+`mean` 등)에 넣으면 P3-01부터 compile이 warning `strategy.field.unadjusted_price`를 낸다(연결된
+어댑터의 필드 계약이 수정주가 짝을 표시할 때, BACKLOG-018).
+
+**S5 횡단면 eligibility의 의미(정본).** 설계 당시(2026-09-20) `EligibilityRule.operator`는
+`domain/strategy/_models.py`의 공유 `ComparisonOperator`였고, `domain/portfolio/_compiler.py`의
+`_compare`는 마지막 줄이 catch-all `return value == threshold`였다. `top_percent`를 공유 enum에
+얹으면 예외가 아니라 조용한 오필터가 된다. 아래 규칙은 P2-05에서 구현됐다(전용 `EligibilityOperator`,
+exhaustive `_compare`, 2-pass).
 
 - `EligibilityRule.operator`는 **전용 `EligibilityOperator`**(`gt`·`gte`·`lt`·`lte`·`eq`·
   `top_percent`·`top_count`)다. `ComparisonOperator`와 값이 겹쳐도 타입을 공유하지 않는다.
@@ -149,8 +157,9 @@ risk:
 - **평가 지점**: 프레임 컴파일을 2-pass로 바꾼다. 1-pass가 절대 규칙으로 후보를 거르고, 2-pass가
   남은 후보의 횡단면 순위로 `top_*`를 적용한다. 절대 규칙과 횡단면 규칙은 AND다.
 
-**S6 `risk.risk_factor_id`의 의미(정본).** `_compiler.py:526-570`은 `spec.factors` 전부를 합성에
-넣고, `:838-844`의 `risk` 분기는 원시 필드만 읽는다.
+**S6 `risk.risk_factor_id`의 의미(정본).** 설계 당시(2026-09-20) `_compiler.py:526-570`은
+`spec.factors` 전부를 합성에 넣었고, `:838-844`의 `risk` 분기는 원시 필드만 읽었다(줄 번호는 그 시점
+기준). 아래 규칙은 P2-06에서 구현됐다.
 
 - 제외는 **`portfolio.weighting == "risk"`이고 `risk_factor_id`가 설정된 경우에만** 적용한다. 그
   밖의 모드에서는 `risk_factor_id`를 읽지 않고 그 팩터는 일반 알파로 남는다. `risk_field_id`와 같은
@@ -201,6 +210,10 @@ risk:
   `availability: unsupported`이고 그래프 팔레트에 나오지 않는다. 문서에 쓰면 compile이
   `strategy.operator.unsupported` error(어댑터 capability 조회).
 - 실행 차단 판정은 계속 backend compile diagnostics의 error severity 하나다.
+- 구현 뒤 추가(P3-01, #232): 승격 노드의 node_id는 예약 접두사 `PROMOTION_NODE_PREFIX`
+  (`domain/strategy/_promotion.py`)로 시작한다. 문서가 이 접두사로 시작하는 node_id를 쓰면 compile이
+  `strategy.factor.reserved_node_id` error로 거절한다. 같은 게이트에 원주가 warning
+  `strategy.field.unadjusted_price`(D3 최소 문서 아래 설명)가 들어갔다.
 
 ### D6. 실행 설정(`RunEnvironment`)
 
@@ -221,7 +234,10 @@ class RunEnvironment:
 
 - owner는 `domain/backtest/_models.py`다(전략이 아니라 실행의 사실). `BacktestRunSpec`, portfolio
   preview 요청, trace 요청이 `environment` 필드로 같은 타입을 받는다.
-- run manifest는 `spec_hash`와 별개로 `environment_hash`를 기록한다. 실행 결과 캐시 키에도 들어간다.
+- run manifest는 `spec_hash`와 별개로 `environment_hash`를 기록한다. 실행 결과 캐시 lookup은 아직
+  없다. 실행 설정은 `run_spec` 안에 통째로 실려 manifest의 `run_fingerprint`
+  (`domain/backtest/_canonical.py`의 `backtest_run_fingerprint`)를 가른다. 지문 표기 버전은 캐시
+  lookup을 도입하는 PR이 정한다(PLAN 변경 기록, Phase 2 감사 NB-4(b)).
 - **`RunEnvironment.missing`은 `build_factor_execution_plan`의 인자로 들어가 `plan_hash`에 계속
   포함된다.** 1.1에서는 `FactorGraph.missing_policy`가 plan payload에 들어가 팩터 행렬 캐시 키를
   갈랐다(`domain/factor/_planning.py:122-131`, `:153-160`). 섹션만 지우고 환경 값을 plan 빌더에
@@ -232,48 +248,66 @@ class RunEnvironment:
   schema(`strategy_document_schema()`, `domain/strategy` 소유)와는 다른 물건이다. 마지막 사용값은
   전략별 local UI state(`localStorage`). 서버는 run manifest에만 기록하고 전략 revision에는
   저장하지 않는다(hash에서 뺀 이유).
-- 전환 규칙: P2-01은 `environment`를 optional로 받고 없으면 `spec.data`·`spec.execution`·
-  `graph.missing_policy`에서 만든다. 브리지는 `RunEnvironment`의 owner인 **`domain/backtest`**가
-  소유한다(`environment_from_legacy_spec(spec) -> RunEnvironment`). `application/backtest_run`에 두면
-  `portfolio_design → backtest_run` 화살표가 생겨 기존 `backtest_run → portfolio_design`과 순환이
-  되고 `backend/tests/architecture/test_dependency_direction.py`가 실패한다. 경계 규칙은
-  application → application을 "다른 유스케이스의 outgoing port를 소비할 때만" 허용하는데 브리지는
-  port가 아니라 로직이다. P2-03이 섹션을 모델에서 지우면 `environment`가 필수가 된다.
+- 전환 규칙(설계 당시, P2-01~P2-02 동안만 유효): P2-01은 `environment`를 optional로 받고 없으면
+  `spec.data`·`spec.execution`·`graph.missing_policy`에서 만들었다. 브리지는 `RunEnvironment`의 owner인
+  **`domain/backtest`**가 소유했다(`environment_from_legacy_spec(spec) -> RunEnvironment`).
+  `application/backtest_run`에 두면 `portfolio_design → backtest_run` 화살표가 생겨 기존
+  `backtest_run → portfolio_design`과 순환이 되고 `backend/tests/architecture/test_dependency_direction.py`가
+  실패한다. 경계 규칙은 application → application을 "다른 유스케이스의 outgoing port를 소비할 때만"
+  허용하는데 브리지는 port가 아니라 로직이다. 이 브리지는 P2-03에서 삭제됐다(아래 구현 결과).
+
+**구현 결과(P2-03·P2-09).** 위 전환 규칙의 브리지는 지금 없다.
+
+- P2-03이 `data`·`execution`을 모델에서 지우면서 `environment_from_legacy_spec`를 삭제하고
+  `_bridge.py`를 `_requirement.py`로 개명했다. 남은 규칙 하나를 그 파일의 `require_environment`가 소유한다:
+  **실행 설정은 요청이 싣는다.** 요청 모델의 타입은 `RunEnvironment | None`으로 두고, 비어 있으면
+  기본값을 지어내지 않고 `run_environment.required`(`MissingRunEnvironmentError`)로 거절한다. run 경로의
+  HTTP 422 코드는 `backtest.run.environment_required`, portfolio preview는 `portfolio.strategy.invalid`
+  진단 안의 `run_environment.required`다. 타입을 필수로 바꾸지 않은 까닭은 pydantic의 영문 "Field
+  required" 대신 프론트가 번역할 코드를 주기 위해서다(PLAN P2-03 결정 5·7).
+- 은퇴 문서(1.0·1.1)의 옛 실행 설정은 업그레이드로만 들어온다. 업그레이더가 문서에서 떼어 낸 원문
+  값(`RetiredExecutionSettings`)을 `domain/backtest/_retired.py`의
+  `environment_from_retired_settings`가 `RunEnvironment`로 바꾼다. 필수 값(기간·유니버스)이 없거나
+  하나라도 읽히지 않으면 실행 설정 전체를 비우고 그 자리를 결과 값(`RetiredEnvironment.problems`)으로
+  돌려준다(PLAN P2-09 결정 5). 변환 규칙의 owner가 `domain/backtest`인 까닭은 설계 당시 브리지와
+  같다(`domain.strategy → domain.backtest`는 순환).
 
 ### D7. 1.1 → 1.2 업그레이드와 동결 이력
 
-현재 `domain/strategy/_upgrade.py`는 **단일 버전 변환기**다. `UPGRADE_STEPS`가 평탄한 step 튜플이고
-(`:99-104`), `_step_schema_version`이 곧장 `CURRENT_SCHEMA_VERSION`을 찍으며(`:58-59`),
-`is_legacy_document`가 `== "1.0"`을 단정하고(`:107-108`), `apply_upgrade_steps`가 1.0이 아니면
-`NotALegacyDocumentError`를 낸다(`:111-118`). step만 이어 붙이면 1.0 문서가 1.1 step과 1.2 step을 한
-번에 맞아 중간 상태 검증이 사라지고, 1.1 입력은 거부된다. 그래서 **버전 디스패치로 다시 쓴다.**
+설계 당시(2026-09-20) `domain/strategy/_upgrade.py`는 **단일 버전 변환기**였다. `UPGRADE_STEPS`가
+평탄한 step 튜플이었고, `_step_schema_version`이 곧장 `CURRENT_SCHEMA_VERSION`을 찍었으며,
+`is_legacy_document`가 `== "1.0"`을 단정하고, `apply_upgrade_steps`가 1.0이 아니면
+`NotALegacyDocumentError`를 냈다. step만 이어 붙이면 1.0 문서가 1.1 step과 1.2 step을 한 번에 맞아
+중간 상태 검증이 사라지고, 1.1 입력은 거부된다. 그래서 **버전 디스패치로 다시 썼다**(P2-09). 아래
+목록은 설계 결정이고, 구현이 달라진 곳은 이 절 끝 "구현 결과"가 정본이다.
 
-- `UPGRADE_STEPS: Mapping[str, tuple[UpgradeStep, ...]]` — 키는 from-version(`"1.0"`·`"1.1"`).
-- 공개 API는 `upgrade_document(tree) -> UpgradeOutcome(tree, environment, warnings)` 하나다. 문서의
-  `schema_version`에서 시작해 `CURRENT_SCHEMA_VERSION`까지 체인을 **순서대로** 적용하고, 각 중간
-  단계마다 그 버전으로 `schema_version`을 찍고 검증한다.
+- `UPGRADE_STEPS`의 키는 from-version(`"1.0"`·`"1.1"`)이다. 값의 타입은 이 절 끝 구현 결과에 적었다.
+- 문서의 `schema_version`에서 시작해 `CURRENT_SCHEMA_VERSION`까지 체인을 **순서대로** 적용하고, 각
+  중간 단계마다 그 버전으로 `schema_version`을 찍고 검증한다. 공개 API 모양도 구현 결과에 적었다.
 - 심볼 교체: `LEGACY_SCHEMA_VERSION`(단수) → `FROZEN_SCHEMA_VERSIONS`, `is_legacy_document` →
   `is_upgradeable_document`, `upgrade_document_1_0` → `upgrade_document`, `NotALegacyDocumentError` →
   `NotUpgradeableDocumentError`. `is_frozen_schema_version`은 이미 `!= CURRENT_SCHEMA_VERSION`이라
-  **변경하지 않는다**(`:27-34`).
+  **변경하지 않는다**.
 - facade `domain/strategy/facade/document.py`의 공개 심볼과 호출자 세 곳
   (`adapters/outbound/document_codec/_upgrade_source.py`,
   `adapters/outbound/strategy_sqlite/_record_codec.py`,
   `application/strategy_authoring/_service.py`)을 같은 PR에서 갱신한다.
 - dict 경로·source 경로(ruamel round-trip)는 같은 step 맵을 쓰고 drift fail-closed(1.1 spec D3 유지).
 - 변환: `schema_version` → `"1.2"`; `data`·`execution`·`graph.missing_policy` 제거 후 **응답의
-  `environment`로 반환**(팩터별 `missing_policy`가 서로 다르면 첫 팩터 값을 쓰고 warning);
+  `environment`로 반환**(팩터별 결측 정책이 서로 다르면 첫 팩터 값을 쓰고 warning. 판정 기준은
+  구현 결과에 적었다);
   `signal.normalization: none` 명시; `saved_factor`·`saved_subgraph` 노드가 있으면 업그레이드 거부
   (`strategy_document.upgrade_unsupported_node`, 실행 경로가 원래 없었으므로 잃는 것이 없다).
 - `POST /strategy-documents/upgrade` 응답에 `environment` 추가. frontend는 원문을 편집기 범위 교체
   한 번으로 적용하고 `environment`로 실행 설정 패널을 채운다.
 - 1.1 revision은 1.0과 같은 동결 이력이다. `is_frozen_schema_version`은 이미 `!= CURRENT`라 변경
-  없이 동결된다. saved-reference backtest는 `422 strategy_revision_requires_upgrade`.
-- golden 파일의 역할을 파일별로 고정한다. `quality_momentum.v1_1.commented.yaml`은 **이미
-  1.0 → 1.1 source 업그레이드의 기대 출력**이고 세 테스트가 단언한다
-  (`tests/application/test_strategy_authoring_upgrade.py:69`,
-  `tests/contract/test_document_upgrade_source.py:50`,
-  `tests/integration/test_strategy_document_upgrade_http_api.py:33`). 이름을 겹쳐 쓰지 않는다.
+  없이 동결된다. saved-reference backtest는 422 `backtest.strategy.requires_upgrade`, 추적(trace)은
+  422 `trace.strategy.requires_upgrade`다(구현 결과).
+- golden 파일의 역할을 파일별로 고정한다. 설계 당시 `quality_momentum.v1_1.commented.yaml`은 **이미
+  1.0 → 1.1 source 업그레이드의 기대 출력**이었고 세 테스트가 단언했다
+  (`tests/application/test_strategy_authoring_upgrade.py`,
+  `tests/contract/test_document_upgrade_source.py`,
+  `tests/integration/test_strategy_document_upgrade_http_api.py`). 이름을 겹쳐 쓰지 않는다.
   - `quality_momentum.v1_1.commented.yaml` — 1.0 → 1.1 **중간 단계** 고정용(현행 유지).
   - `quality_momentum.v1_2.commented.yaml` — 1.0 문서의 **최종** 기대 출력(신규). 위 세 단언이 이
     파일로 옮겨간다.
@@ -281,6 +315,41 @@ class RunEnvironment:
     업그레이드 입력).
 - golden 단언: 1.0 원본 → 1.2 원문(주석·순서 보존) → dict 경로와 tree 동일. 업그레이드된 문서의
   preview 결과가 1.1 결과와 같다(`normalization: none` 보존).
+
+**구현 결과(P2-03·P2-09).** 정본은 `domain/strategy/_upgrade.py`와 PLAN P2-09 결정이다.
+
+- `UPGRADE_STEPS: Mapping[str, tuple[tuple[str, UpgradeStep], ...]]`다. 값은 이름 붙은
+  `(이름, step)` 쌍이고(순서 고정 테스트와 단계 실패 메시지가 이름을 읽는다), `schema_version`을 찍는
+  step은 단계 밖으로 빠졌다. 디스패처(`apply_upgrade_steps`)가 단계마다 **그 단계의 목표 버전**(체인의
+  다음 키)을 찍고, 같은 키의 `_STAGE_LEFTOVERS`로 그 단계가 없애야 하는 옛 모양이 남았는지 검증한다.
+  남으면 `NotUpgradeableDocumentError`다. `FROZEN_SCHEMA_VERSIONS`와 `UPGRADE_CHAIN`은 이 맵의 키에서
+  유도한다(PLAN P2-09 결정 1).
+- 공개 API는 두 개다: 새 tree를 만드는 `upgrade_document(tree, *, until=None)`와 source 경로(ruamel
+  CST)가 쓰는 제자리 판 `apply_upgrade_steps(document, *, until=None)`. 둘 다
+  `UpgradeOutcome(tree, source_version, environment, warnings)`를 돌려준다. `source_version`은 체인을
+  시작한 버전이다. 도메인의 `environment`는 `RunEnvironment`가 아니라 `RetiredExecutionSettings | None`
+  (문서에서 떼어 낸 원문 값)이고, 1.1 → 1.2 단계를 지났을 때만 있다(`until`로 그 앞에서 멈추면 `None`).
+  `until`은 중간 golden(`quality_momentum.v1_1.commented.yaml`)을 바이트로 고정하는 데 쓴다(결정 2).
+- `RunEnvironment`로 바꾸는 일은 application이 `domain/backtest`의 `environment_from_retired_settings`를
+  불러 한다(D6 구현 결과). 그래서 `POST /api/v1/strategy-documents/upgrade` 응답의 `environment`는
+  **nullable** `RunEnvironment`다. 필수 값(기간·유니버스)이 없거나 읽히지 않는 값이 있어 옮기지
+  못했으면 `null`이고, 못 옮긴 자리는 warning `strategy_document.upgrade_environment_unavailable`이
+  pointer와 함께 짚는다. 기본값을 지어내지 않는다.
+- **선언 버전 규칙**(Phase 2 감사 NB-1, 결정 3): 체인은 문서가 선언한 은퇴 버전에서만 시작하고 그보다
+  앞선 단계는 타지 않는다. 판정의 owner는 `_chain_start` 하나이고 `is_upgradeable_document`도 같은
+  판정을 읽는다. 버전 줄이 현재 판(1.2)인데 1.0 모양이 섞인 문서는 업그레이드가 아니라 제자리에서 고칠
+  구조 오류(`structure.legacy_shape`)다. 선언된 은퇴 버전보다 앞선 모양이 섞였거나(1.1 선언 + 1.0 키),
+  버전 줄이 없거나, 모르는 버전이면 거절한다. 은퇴 버전은 닫힌 집합이라 `"0.9"`·`"draft"` 같은 값도
+  거절하고, 따옴표 없는 `1.0`(YAML float)은 문자열로 맞춘다.
+- 결측 정책 충돌 판정은 **실효 값** 기준이다. 결측 정책을 생략한 팩터는 1.1 기본값 `drop`으로 센다
+  (P2-09 리뷰 DEFECT-P1-1, 결정 6). warning 코드는 닫힌 `Literal` `UpgradeWarningCode` 세 개다:
+  `strategy_document.upgrade_missing_policy_conflict`, `strategy_document.upgrade_weighting_rule_changed`
+  (`weighting: factor_score` 문서의 비중 규칙 변화, 결정 7), `strategy_document.upgrade_environment_unavailable`.
+- saved-reference 실행 거절 코드는 run 경로 422 `backtest.strategy.requires_upgrade`
+  (`adapters/inbound/http_api/_backtest_contract.py`), 추적 경로 422 `trace.strategy.requires_upgrade`
+  (`_trace_contract.py`)다. 설계 문장의 `strategy_revision_requires_upgrade`는 구현된 적이 없다.
+- 저장 row에 `saved_*` 노드가 있으면 repository codec이 `StrategyRepositoryStorageError`로 멈추고,
+  업그레이드 API는 422 `strategy_document.upgrade_unsupported_node`를 낸다(결정 11).
 
 ### D8. 연산자 카탈로그 (backend owner)
 

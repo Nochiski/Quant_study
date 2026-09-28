@@ -12,21 +12,29 @@
 ## M5 Backtest run · professional result
 
 YAML workbench는 현재 저장 revision 또는 inline draft provenance와 별도 `BacktestRunSpec` 실행
-설정을 generated SDK로 제출한다. 사용자는 Persistent Rust core와 패리티/debug용 Python
-reference, 초기 자본, benchmark, 연환산 거래일, OOS 시작 구간을 설정할 수 있다. 실행 상태와
+설정을 generated SDK로 제출한다. 실행 설정 패널은 schema 1.2부터 전략 문서 밖에 있는 실행 환경
+(`RunEnvironment`: 시장·빈도·기간·유니버스·체결 시점·참여율·수수료·슬리피지·결측 정책)을 받는다. 칸 목록·
+기본값·범위는 `GET /api/v1/run-environments/schema`에서 읽고(`entities/backtest`의 `runEnvironmentFields`),
+화면에 손으로 적지 않는다. IDE 위쪽 요약 띠(`run-environment-summary`)는 지금 실행이 어떤 환경으로 나갈지와
+실행을 막는 이유를 보인다. 같은 패널에서 Persistent Rust core와 패리티/debug용 Python reference, 초기 자본,
+benchmark, 연환산 거래일, OOS 시작일(실행 기간 안)도 정한다. 실행 상태와
 수락된 실행 요청은 backend run lifecycle이 소유하며, 실행 화면에서 nonterminal run을 취소하거나
 서버가 돌려준 동일 요청으로 새 run을 만들 수 있다. 완료 결과는 query cache가 소유한다.
 
 결과 화면은 backend `MetricRegistry` 응답을 그대로 사용해 equity/benchmark, drawdown,
 monthly return, rolling Sharpe, gross/net exposure와 closed trade를 표시한다. raw metric table은
 Full·IS·Validation·OOS·Window scope를 보존하고 `None`은 unavailable reason이 있는 N/A로,
-실제 0은 숫자로 구분한다. manifest drawer에서 engine/data/tape hash와 데이터 경고를 확인할 수 있다.
+실제 0은 숫자로 구분한다. 사용 불가 지표는 사유 문구를 보이고, 그 사유를 적은 데이터 경고가 있으면
+그 경고로 연결된다. manifest drawer에서 engine/data/tape hash와 데이터 경고를 확인할 수 있다. 완료된
+실행의 결과 화면에서는 오른쪽 AI 사이드바를 열어 결과와 지표를 쉬운 말로 설명받을 수 있다
+([결과 설명 spec](../docs/superpowers/specs/2026-09-27-ai-backtest-result-explain.md)).
 
-## M4 Portfolio · Risk · Execution
+## M4 Portfolio · Risk
 
-YAML document의 `portfolio`·`risk`·`execution` 계약은 long/short와 N/percentile 선택,
-4가지 weighting, eligibility·threshold·regime·liquidity·turnover, gross/net/name/sector 제약과
-거래 비용을 편집한다. `debug-strategy`는 generated SDK로 backend의 실제 trace와 TargetTape를 읽어
+YAML document의 `eligibility`·`portfolio`·`risk` 계약은 long/short와 N/percentile 선택,
+4가지 weighting, eligibility·threshold·regime·liquidity·turnover, gross/net/name/sector 제약을
+편집한다. schema 1.2 문서에는 `execution`·`data`가 없고 체결·거래 비용은 위 실행 설정이 소유한다.
+`debug-strategy`는 generated SDK로 backend의 실제 trace와 TargetTape를 읽어
 세션별 score/rank/target/exclusion 이유와 engine capability를 표시한다. 화면은 target 비중을
 재계산하지 않으며 T 종가→T+1 시가 실행 계약을 그대로 보여준다.
 
@@ -52,8 +60,8 @@ graph를 typed input port, output type/unit, minimum history, inline validation�
 - `Alt+1`~`Alt+5`: 현재 route에서 제공하는 표현 탭만 연다.
 
 패널 크기와 `system`/`light`/`dark` 테마 선호만 versioned local storage에 저장한다. 선택 path와
-view는 URL이 소유하고, StrategySpec·서버 revision에는 UI 선호를 넣지 않는다. 실제 dark 색상
-token은 P6-04에서 저장된 선호에 연결한다.
+view는 URL이 소유하고, StrategySpec·서버 revision에는 UI 선호를 넣지 않는다. dark 색상 token은
+저장된 테마 선호에 연결돼 있다(P6-04).
 
 ## 테마 토큰과 UI primitive (P2-01, P6-04)
 
@@ -80,9 +88,10 @@ app -> pages -> widgets -> features -> entities -> shared
 
 - 같은 레이어의 서로 다른 slice는 직접 import하지 않는다.
 - 다른 slice가 쓰는 심볼은 해당 slice의 `index.ts` public API로만 가져온다.
-- `entities`는 명사(`strategy`, `factor`, `experiment`, `metric`, `dataset`)다.
-- `features`는 사용자 행동(`edit-strategy`, `configure-search`, `debug-strategy`,
-  `compare-candidates`, `inspect-run`)이다.
+- `entities`는 명사(`strategy`, `factor`, `dataset`, `backtest`, `assistant`)다.
+- `features`는 사용자 행동(`edit-strategy`, `debug-strategy`, `run-backtest`, `assist-strategy`,
+  `configure-ai-providers`)이다.
+- `widgets`는 `app-shell`과 `strategy-ide`다. 레이어별 slice 표는 `src/<layer>/README.md`에 있다.
 - 여러 entity/feature의 조합은 `widgets`나 `pages`가 한다.
 - 서버 데이터는 query cache가 소유하고, 저장된 응답을 client store에 복제하지 않는다.
 - frontend에서 지표·팩터·전략 의미를 다시 계산하지 않는다. 백엔드 응답을 표현한다.
@@ -109,9 +118,9 @@ npm run test:e2e
 npm run docs:capture # 실행 중인 실제 frontend/backend로 사용자 매뉴얼 스크린샷 갱신
 ```
 
-`npm run test`에는 임의 포트의 실제 FastAPI 프로세스를 띄워 UI→generated SDK→PIT mock adapter를
-검증하는 통합 테스트가 포함된다. `npm run test:e2e`는 실제 FastAPI와 production preview를 격리된
-SQLite에서 함께 띄운다. 먼저 `backend`에서 `uv sync`와
+`npm run test`는 vitest 단위·컴포넌트 테스트이며 backend 서버를 띄우지 않는다. 실제 backend와의 경계는
+`npm run test:e2e`가 본다. 이 명령은 실제 FastAPI와 production preview를 격리된 SQLite에서 함께 띄운다
+(`e2e/README.md`). 먼저 `backend`에서 `uv sync`와
 `uv run maturin develop --manifest-path rust/backtest_core/Cargo.toml --release`를 실행해야 기본 Rust
 백테스트까지 검증된다.
 

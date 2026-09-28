@@ -7,7 +7,6 @@ current_pr: none
 active_prs: []
 parallel_window: [P1-01, P1-02, P1-03, P1-04, P1-05, P2-01, P2-02, P1-06, P2-03, P3-01, P3-02, P4-01, P4-02, P4-03, P4-04, P4-05, P5-01, P5-02, P5-03]
 last_updated: 2026-09-19T11:32:10+09:00
-last_updated: 2026-09-19T11:32:10+09:00
 planned_prs: 19
 merged_prs: 19
 approved_prs: 19

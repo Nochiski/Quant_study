@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
-import { tOptional } from "../../config";
+import { messages, tOptional } from "../../config";
+import { backendFixturePath } from "../../testing/backend-fixtures";
 import type {
   BacktestRunState,
   StartBacktestErrors,
@@ -10,12 +13,12 @@ type StartBacktest422 = StartBacktestErrors[422];
 
 const classify = (response: StartBacktest422): string => {
   const { detail } = response;
-  if (Array.isArray(detail)) {
-    return `request.validation:${detail[0]?.type ?? "unknown"}`;
-  }
   switch (detail.code) {
     case "backtest.run.invalid":
       return `run:${detail.message}`;
+    // 본문 검증 실패도 코드화된 detail 로 온다(이슈 #260). FastAPI 기본 배열 형식은 이 계약에 없다.
+    case "backtest.run.field_invalid":
+      return `field:${detail.field ?? "-"}`;
     case "portfolio.strategy.invalid":
       return `strategy:${detail.validation.valid}`;
     // `portfolio.data.unavailable` · `portfolio.raw_observation.invalid` 는 시작 요청이 데이터를
@@ -44,16 +47,107 @@ const RUN_FAILURE_CODES: Record<RunFailureCode, true> = {
   "backtest.run.internal": true,
 };
 
+type Schema = {
+  $ref?: string;
+  const?: string;
+  enum?: string[];
+  properties?: Record<string, Schema>;
+  anyOf?: Schema[];
+  oneOf?: Schema[];
+  discriminator?: { mapping?: Record<string, string> };
+};
+
+type OpenApi = {
+  paths: Record<
+    string,
+    Record<
+      string,
+      {
+        responses: Record<
+          string,
+          { content?: { "application/json"?: { schema: Schema } } }
+        >;
+      }
+    >
+  >;
+  components: { schemas: Record<string, Schema> };
+};
+
+/** 응답 스키마에서 닿는 detail 의 `code` 상수를 모두 모은다. 손으로 목록을 적지 않는다. */
+const reachableCodes = (openapi: OpenApi, root: Schema): Set<string> => {
+  const codes = new Set<string>();
+  const seen = new Set<string>();
+  const visit = (schema: Schema | undefined): void => {
+    if (schema === undefined) return;
+    if (schema.$ref !== undefined) {
+      if (seen.has(schema.$ref)) return;
+      seen.add(schema.$ref);
+      visit(openapi.components.schemas[schema.$ref.split("/").at(-1)!]);
+      return;
+    }
+    const code = schema.properties?.code;
+    if (code?.const !== undefined) codes.add(code.const);
+    for (const value of code?.enum ?? []) codes.add(value);
+    for (const ref of Object.values(schema.discriminator?.mapping ?? {}))
+      visit({ $ref: ref });
+    for (const child of [
+      ...Object.values(schema.properties ?? {}),
+      ...(schema.anyOf ?? []),
+      ...(schema.oneOf ?? []),
+    ])
+      visit(child);
+  };
+  visit(root);
+  return codes;
+};
+
 describe("backtest run failure code vocabulary", () => {
   it("has a translated recovery message for every run failure code", () => {
     for (const code of Object.keys(RUN_FAILURE_CODES)) {
       expect(tOptional(`backtest.run.error.${code}`), code).not.toBeNull();
     }
   });
+
+  // 이슈 #260: 툴바는 시작 거절을 `backtest.error.<code>` 번역으로 보인다. 키가 빠지면 일반 문구로 떨어져
+  // 무엇을 고칠지 말하지 못한다. 실행 시 계약 파일(backend `openapi.json`)과 대조한다.
+  it("translates every coded startBacktest rejection in both locales", () => {
+    const openapi = JSON.parse(
+      readFileSync(backendFixturePath("../../openapi.json"), "utf8"),
+    ) as OpenApi;
+    const responses = openapi.paths["/api/v1/backtests"]!.post!.responses;
+    const codes = new Set(
+      Object.entries(responses)
+        .filter(([status]) => !status.startsWith("2"))
+        .flatMap(([, response]) => [
+          ...reachableCodes(
+            openapi,
+            response.content?.["application/json"]?.schema ?? {},
+          ),
+        ]),
+    );
+
+    expect([...codes].sort()).toEqual([
+      "backtest.run.environment_required",
+      "backtest.run.field_invalid",
+      "backtest.run.invalid",
+      "backtest.strategy.not_found",
+      "backtest.strategy.requires_upgrade",
+      "backtest.strategy.stale",
+      "portfolio.strategy.invalid",
+    ]);
+    const missing = [...codes].flatMap((code) => {
+      const key = `backtest.error.${code}` as keyof (typeof messages)["en"];
+      return [
+        messages.ko[key] === undefined ? `${code} ko` : null,
+        messages.en[key] === undefined ? `${code} en` : null,
+      ].filter((item): item is string => item !== null);
+    });
+    expect(missing).toEqual([]);
+  });
 });
 
 describe("generated startBacktest error contract", () => {
-  it("narrows malformed and coded 422 responses without a handwritten DTO", () => {
+  it("narrows every coded 422 response without a handwritten DTO", () => {
     expect(
       classify({
         detail: { code: "backtest.run.invalid", message: "missing strategy" },
@@ -61,9 +155,13 @@ describe("generated startBacktest error contract", () => {
     ).toBe("run:missing strategy");
     expect(
       classify({
-        detail: [{ loc: ["body", "core"], msg: "invalid core", type: "enum" }],
+        detail: {
+          code: "backtest.run.field_invalid",
+          field: "initial_cash",
+          message: "initial_cash must be positive",
+        },
       }),
-    ).toBe("request.validation:enum");
+    ).toBe("field:initial_cash");
     expect(
       classify({
         detail: {

@@ -25,12 +25,14 @@ import type { BacktestRunSpec, RunEnvironment } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   runEnvironmentFields,
+  validateRunEnvironment,
   type RunEnvironmentValidation,
 } from "../model/run-environment";
 import {
   buildBacktestRunOptions,
   DEFAULT_BACKTEST_RUN_SETTINGS,
 } from "../model/run-settings";
+import { runFieldLabel } from "../model/run-settings-problems";
 import {
   RUN_ENVIRONMENT_STORAGE_PREFIX,
   useBacktestRunSettings,
@@ -306,24 +308,27 @@ describe("backtest run settings", () => {
     });
   });
 
+  // 이슈 #260: 0 이하는 backend(`BacktestRunSpec.__post_init__`)가 거절한다. 패널이 먼저 막지 않으면 배지는
+  // "준비됨"인데 시작이 422 로 거절되고, 사용자는 어느 칸이 문제인지 모른다.
   it.each(["0", "-1"])(
-    "forwards safe semantic boundary %s for the backend contract to decide",
-    (annualizationDays) => {
-      const result = buildBacktestRunOptions(
-        {
-          core: "rust",
-          initialCashKrw: "0",
-          benchmarkSecurityId: "",
-          annualizationDays,
-          oosStart: "",
-        },
-        VALID,
-      );
-      expect(result.valid).toBe(true);
-      expect(result.options?.annualization_days).toBe(
-        Number(annualizationDays),
-      );
-      expect(result.options?.initial_cash).toBe(0);
+    "blocks non-positive initial cash and annualization days %s before the request",
+    (value) => {
+      expect(
+        buildBacktestRunOptions(
+          {
+            core: "rust",
+            initialCashKrw: value,
+            benchmarkSecurityId: "",
+            annualizationDays: value,
+            oosStart: "",
+          },
+          VALID,
+        ),
+      ).toEqual({
+        valid: false,
+        options: null,
+        errors: ["initial_cash", "annualization_days"],
+      });
     },
   );
 
@@ -344,6 +349,32 @@ describe("run environment panel", () => {
     servedSchema = RUN_ENVIRONMENT_SCHEMA;
     server.use(schemaHandler);
     localStorage.clear();
+  });
+
+  // #260: 서버 거절의 `field`(본문 점 경로)를 패널 칸 이름으로 바꾼다. 모르는 경로는 이름을 지어내지 않는다.
+  it("names the panel field a coded start rejection points at", () => {
+    const fields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
+    expect(runFieldLabel(fields, "initial_cash")).toBe("초기 자본");
+    expect(runFieldLabel(fields, "annualization_days")).toBe("연환산 거래일");
+    expect(runFieldLabel(fields, "environment.fee_bps")).toBe("수수료");
+    expect(runFieldLabel(fields, "environment.end")).toBe("종료일");
+    expect(runFieldLabel(fields, "metric_windows.0.start")).toBe("OOS 시작일");
+    expect(runFieldLabel(fields, "core")).toBe("실행 core");
+    expect(runFieldLabel(fields, "strategy_source")).toBeNull();
+    expect(runFieldLabel(fields, "environment.unknown")).toBeNull();
+  });
+
+  // #266 리뷰 P3-1: 덜 친 날짜 칸은 값이 빈 문자열이다. 검증이 이를 "비었다"로만 보면 칸 아래는 "끝까지
+  // 치라"고 하는데 요약 띠·차단 문장은 "채우라"고 해 같은 칸을 두고 두 원인을 말한다.
+  it("reports a half-typed date as a date error, not a missing value", () => {
+    const fields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
+    const values = { start: "", end: "", universe_id: "" };
+    expect(validateRunEnvironment(fields, values).errors.start).toBe(
+      "required",
+    );
+    expect(
+      validateRunEnvironment(fields, values, new Set(["start"])).errors,
+    ).toMatchObject({ start: "date", end: "required" });
   });
 
   it("draws every field from the run environment schema in schema order", () => {
@@ -466,18 +497,39 @@ describe("run environment panel", () => {
     expect(screen.getByLabelText(/^종료일/)).toHaveFocus();
   });
 
+  // #266 재리뷰 P3-2: OOS 오류의 "고치기" 대상은 오류 코드가 아니라 OOS 칸(`oos_start`)이다. 대응 표를
+  // 되돌리면 초점이 어디로도 가지 않는다.
+  it("moves focus to the OOS start field when it is outside the run period", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    await user.type(screen.getByLabelText(/^OOS 시작일/), "2020-12-31");
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+
+    const band = screen.getByRole("region", { name: "실행 설정 요약" });
+    expect(band).toHaveTextContent(
+      "실행 설정의 OOS 시작일 칸을 고치세요: 실행 기간 안의 날짜여야 합니다.",
+    );
+    await user.click(
+      within(band).getByRole("button", { name: "실행 설정 고치기" }),
+    );
+    expect(screen.getByLabelText(/^OOS 시작일/)).toHaveFocus();
+  });
+
   it("names a run option field when only the run options are wrong", async () => {
     renderWithQuery(<Harness />);
     const user = await openSettings();
     await fillPeriodAndUniverse(user);
-    await user.clear(
-      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
-    );
+    const cash = screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" });
+    await user.clear(cash);
+    await user.type(cash, "0");
     await user.click(screen.getByLabelText("실행 설정 열기"));
 
+    // 실행 옵션 칸도 실행 설정 칸과 같은 문장 틀로 칸 이름과 이유를 말한다(이슈 #260).
     expect(screen.getByTestId("blocked")).toHaveTextContent(
-      "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
+      "실행 설정의 초기 자본 칸을 고치세요: 0보다 큰 숫자를 입력하세요.",
     );
+    expect(requestBody()).toBeNull();
     const band = screen.getByRole("region", { name: "실행 설정 요약" });
     await user.click(
       within(band).getByRole("button", { name: "실행 설정 고치기" }),
@@ -690,8 +742,9 @@ describe("run environment panel", () => {
     await user.clear(cash);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
+      "초기 자본: 0보다 큰 숫자를 입력하세요.",
     );
+    expect(cash).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByText("입력 확인")).toBeInTheDocument();
   });
 });
@@ -756,13 +809,62 @@ describe("backtest run actions", () => {
         .setup()
         .click(screen.getByRole("button", { name: "실행 취소" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        "실행 제어 요청에 실패했습니다. 상태를 새로 확인한 뒤 다시 시도하세요.",
+      );
+      expect(within(alert).getByRole("group")).toHaveTextContent(
         "run was retired",
       );
       await waitFor(() => expect(unhandled).not.toHaveBeenCalled());
     } finally {
       window.removeEventListener("unhandledrejection", unhandled);
     }
+  });
+
+  // #268 리뷰 P3-3: 결과 화면의 재실행도 편집기 툴바와 같은 경로로 시작 거절을 말한다 — 코드의 번역을
+  // 본문으로, 거절이 짚은 칸은 실행 설정 칸 이름으로, 서버 원문은 접힌 상세로.
+  it("explains a coded rerun rejection like the editor toolbar", async () => {
+    servedSchema = RUN_ENVIRONMENT_SCHEMA;
+    server.use(
+      schemaHandler,
+      http.post(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.field_invalid",
+              field: "environment.fee_bps",
+              message:
+                "Value error, run environment value is out of range — field=environment.fee_bps",
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithQuery(
+      <BacktestRunActions
+        runId="old-run"
+        status="completed"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(alert).toHaveTextContent(
+        "동일 설정으로 다시 실행하지 못했습니다: 서버가 실행 설정의 수수료 칸 값을 받지 않았습니다.",
+      ),
+    );
+    expect(alert).not.toHaveTextContent("API request failed");
+    const reason = within(alert).getByRole("group");
+    expect(reason).toHaveTextContent("서버 사유");
+    expect(reason).toHaveTextContent("field=environment.fee_bps");
+    expect(reason).not.toHaveAttribute("open");
   });
 
   it("keeps navigation unchanged when a rerun fails with a server error", async () => {
@@ -790,9 +892,15 @@ describe("backtest run actions", () => {
         .setup()
         .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(
+      // 코드에 번역이 없으면 일반 문구를 본문으로 쓰고, 서버 원문은 접힌 서버 사유에만 둔다(#268 리뷰 P3-3).
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(
+        "동일 설정으로 다시 실행하지 못했습니다: 서버가 실행 요청을 받지 않았습니다.",
+      );
+      expect(within(alert).getByRole("group")).toHaveTextContent(
         "engine unavailable",
       );
+      expect(within(alert).getByRole("group")).not.toHaveAttribute("open");
       expect(onReplayed).not.toHaveBeenCalled();
       await waitFor(() => expect(unhandled).not.toHaveBeenCalled());
     } finally {

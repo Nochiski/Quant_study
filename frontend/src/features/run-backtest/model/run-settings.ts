@@ -63,14 +63,23 @@ export const buildBacktestRunOptions = (
   const errors: BacktestRunSettingsError[] = [];
   const initialCashText = fields.initialCashKrw.trim();
   const initialCashKrw = Number(initialCashText);
-  if (initialCashText === "" || !Number.isFinite(initialCashKrw))
+  // 0 이하는 backend `BacktestRunSpec.__post_init__` 가 거절한다(이슈 #260). 패널이 먼저 막아 배지가
+  // "준비됨"인데 시작이 거절되는 일을 없앤다. 최종 판정은 여전히 backend 다.
+  if (
+    initialCashText === "" ||
+    !Number.isFinite(initialCashKrw) ||
+    initialCashKrw <= 0
+  )
     errors.push("initial_cash");
   const annualizationText = fields.annualizationDays.trim();
   const annualizationDays = Number(annualizationText);
   // JSON numbers are JavaScript numbers at this boundary. Reject integers that cannot be
-  // represented losslessly before they can mutate accepted-request provenance. Positivity and
-  // the business range remain backend-owned semantics.
-  if (annualizationText === "" || !Number.isSafeInteger(annualizationDays))
+  // represented losslessly before they can mutate accepted-request provenance.
+  if (
+    annualizationText === "" ||
+    !Number.isSafeInteger(annualizationDays) ||
+    annualizationDays <= 0
+  )
     errors.push("annualization_days");
   if (!environment.valid) errors.push("environment");
 

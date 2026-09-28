@@ -2,20 +2,37 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias
 
+from fastapi import HTTPException, Request, Response, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from pydantic import Field
 
-from ._execution_error_contract import (
-    PortfolioStrategyInvalidDetail,
-    RequestValidationResponse,
-)
+from strategy_workbench.application.backtest_run.facade.runs import InvalidRunFieldError
+
+from ._execution_error_contract import PortfolioStrategyInvalidDetail
 
 
 @dataclass(frozen=True)
 class BacktestRunInvalidDetail:
     code: Literal["backtest.run.invalid"]
+    message: str
+
+
+@dataclass(frozen=True)
+class BacktestRunFieldInvalidDetail:
+    """요청 본문이 스키마나 칸 규칙을 어겼다(이슈 #260).
+
+    `field` 는 본문의 점 경로(`initial_cash`, `environment.fee_bps`)다. 본문이 JSON 이 아니거나
+    본문 전체가 빠져 칸을 특정할 수 없으면 null 이다. `message` 는 진단용 원문이고, 화면 문장은
+    frontend 가 `code` 로 번역한다.
+    """
+
+    code: Literal["backtest.run.field_invalid"]
+    field: str | None
     message: str
 
 
@@ -38,6 +55,7 @@ class BacktestStrategyRequiresUpgradeDetail:
 # `error` 로 전달된다.
 BacktestUnprocessableDetail: TypeAlias = Annotated[
     BacktestRunInvalidDetail
+    | BacktestRunFieldInvalidDetail
     | BacktestEnvironmentRequiredDetail
     | BacktestStrategyRequiresUpgradeDetail
     | PortfolioStrategyInvalidDetail,
@@ -50,7 +68,65 @@ class BacktestUnprocessableResponse:
     detail: BacktestUnprocessableDetail
 
 
-Backtest422Response: TypeAlias = BacktestUnprocessableResponse | RequestValidationResponse
+# 본문 검증 실패도 `backtest.run.field_invalid` 로 코드화되므로(`CodedBodyValidationRoute`)
+# FastAPI 기본 배열 형식(`RequestValidationResponse`)은 이 라우트의 422 에 없다.
+Backtest422Response: TypeAlias = BacktestUnprocessableResponse
+
+_SCALAR = (str, int, float, bool, type(None))
+
+
+def _issue_field(issue: Mapping[str, Any]) -> str | None:
+    """검증 오류 하나가 가리키는 본문 칸의 점 경로. 칸을 특정할 수 없으면 None."""
+    if issue.get("type") == "json_invalid":
+        return None
+    location = tuple(issue.get("loc", ()))
+    parts = [str(part) for part in location[1:]] if location[:1] == ("body",) else []
+    raised = issue.get("ctx", {}).get("error")
+    # `__post_init__` 오류의 `loc` 은 객체까지만 가리킨다. 도메인이 예외에 실은 칸 이름을 붙인다.
+    if isinstance(raised, InvalidRunFieldError):
+        parts.append(raised.field)
+    return ".".join(parts) or None
+
+
+def _issue_message(issue: Mapping[str, Any], field: str | None) -> str:
+    value = issue.get("input")
+    shown = f" input={value!r}" if isinstance(value, _SCALAR) else ""
+    return f"{issue.get('msg', 'invalid request')} — field={field or '-'}{shown}"
+
+
+def backtest_field_invalid_detail(issues: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """본문 검증 오류 목록 → `backtest.run.field_invalid` detail. 첫 오류의 칸을 `field` 로 쓴다."""
+    fields = [_issue_field(issue) for issue in issues]
+    return {
+        "code": "backtest.run.field_invalid",
+        "field": fields[0] if fields else None,
+        "message": "; ".join(
+            _issue_message(issue, field) for issue, field in zip(issues, fields, strict=True)
+        )
+        or f"request body failed validation — issues={len(issues)}",
+    }
+
+
+class CodedBodyValidationRoute(APIRoute):
+    """본문 검증 실패(`RequestValidationError`)를 코드화된 422 로 바꾸는 라우트(이슈 #260).
+
+    FastAPI 기본 응답은 `detail` 이 배열이고 `code` 가 없어, 프론트가 번역할 키도 고칠 칸도 얻지
+    못한다. 앱 전체 핸들러로 바꾸면 다른 라우트의 422 계약까지 바뀌므로 시작 라우트에만 건다.
+    """
+
+    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
+        handler = super().get_route_handler()
+
+        async def coded_handler(request: Request) -> Response:
+            try:
+                return await handler(request)
+            except RequestValidationError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=backtest_field_invalid_detail(error.errors()),
+                ) from error
+
+        return coded_handler
 
 
 @dataclass(frozen=True)

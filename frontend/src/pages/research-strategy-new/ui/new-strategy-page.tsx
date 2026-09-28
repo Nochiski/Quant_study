@@ -387,6 +387,7 @@ export const NewStrategyPage = () => {
                 disabled={backtest.status.kind === "starting"}
               />
             }
+            runFieldLabel={runSettings.runFieldLabel}
             decision={backtest.decision}
             runStatus={backtest.status}
           />

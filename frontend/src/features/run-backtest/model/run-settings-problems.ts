@@ -63,6 +63,49 @@ export const runEnvironmentErrorMessage = (
     .replace("{maximum}", DATE_INPUT_MAXIMUM);
 };
 
+type RunOptionError = Exclude<BacktestRunSettingsError, "environment">;
+
+/** 실행 옵션 칸의 이름(단위 없이). 요약 띠와 패널 오류 목록이 같은 이름을 쓴다. */
+export const runOptionErrorName = (error: RunOptionError): string =>
+  t(`backtest.settings.problem.name.${error}`);
+
+/**
+ * 서버 거절이 가리킨 요청 본문의 칸(`backtest.run.field_invalid` 의 `field`, 점 경로)을 패널 칸 이름으로
+ * 바꾼다. 실행 설정 칸은 `environment.<이름>`, 실행 옵션은 `BacktestRunSpec` 필드 이름이다. 모르는 경로면
+ * 이름을 지어내지 않고 null 을 준다.
+ */
+export const runFieldLabel = (
+  fields: readonly RunEnvironmentField[],
+  path: string,
+): string | null => {
+  const [head, next] = path.split(".");
+  if (head === "environment") {
+    const field = fields.find((candidate) => candidate.name === next);
+    return field === undefined ? null : runEnvironmentName(field);
+  }
+  switch (head) {
+    case "initial_cash":
+    case "annualization_days":
+      return runOptionErrorName(head);
+    case "metric_windows":
+      return runOptionErrorName("oos_out_of_range");
+    case "core":
+      return t("backtest.settings.core");
+    case "benchmark_security_id":
+      return t("backtest.settings.benchmark");
+    default:
+      return null;
+  }
+};
+
+/** 실행 옵션 칸의 오류 한 줄: "초기 자본: 0보다 큰 숫자를 입력하세요." 실행 환경 오류는 이유만. */
+export const runOptionErrorMessage = (
+  error: BacktestRunSettingsError,
+): string =>
+  error === "environment"
+    ? t("backtest.settings.error.environment")
+    : `${runOptionErrorName(error)}: ${t(`backtest.settings.error.${error}`)}`;
+
 /**
  * 실행을 막는 칸을 패널 순서대로 모은다: 실행 설정 칸(스키마 순서) 다음 실행 옵션 칸. 실행 설정 전체가
  * 무효라는 뜻의 `environment` 오류는 칸별 문제로 이미 드러나므로 따로 세지 않는다.
@@ -98,16 +141,18 @@ export const runSettingsProblems = (
     ];
   }),
   ...(result.errors as readonly BacktestRunSettingsError[])
-    .filter(
-      (error): error is Exclude<BacktestRunSettingsError, "environment"> =>
-        error !== "environment",
-    )
-    .map((error): RunSettingsProblem => ({
-      target: OPTION_FIELD[error],
-      kind: "invalid",
-      name: error,
-      sentence: t(`backtest.settings.error.${error}`),
-    })),
+    .filter((error): error is RunOptionError => error !== "environment")
+    .map((error): RunSettingsProblem => {
+      const name = runOptionErrorName(error);
+      return {
+        target: OPTION_FIELD[error],
+        kind: "invalid",
+        name,
+        sentence: t("backtest.settings.problem.invalid")
+          .replace("{field}", name)
+          .replace("{reason}", t(`backtest.settings.error.${error}`)),
+      };
+    }),
 ];
 
 /**

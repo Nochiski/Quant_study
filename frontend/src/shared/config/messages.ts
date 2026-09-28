@@ -41,9 +41,9 @@ const ko = {
   "page.backtest.runError": "실행 오류",
   "page.backtest.cancelledError": "취소 전 발생한 오류",
   "page.backtest.serverReason": "서버 사유",
-  // run 상태 `error_code` 번역 — 어휘 SoT 는 backend `RunFailureCode`(이슈 #158). 시작 422 의
-  // `backtest.error.*` 와 namespace 를 나눈 이유: 툴바(422)는 서버 detail 을 그대로 보여 주는 화면이라
-  // 같은 키를 쓰면 그 문구가 detail 을 덮어쓴다.
+  // run 상태 `error_code` 번역 — 어휘 SoT 는 backend `RunFailureCode`(이슈 #158). 시작 거절의
+  // `backtest.error.*` 와 namespace 를 나눈다: 같은 코드(`backtest.run.invalid` 등)라도 시작 거절은 실행 전에
+  // 고칠 것을, run 실패는 실행 중에 난 일을 말한다.
   "backtest.run.error.portfolio.data.unavailable":
     "데이터 소스가 이 유니버스·기간의 관측을 제공하지 못했습니다. 유니버스 ID 와 데이터 기간을 확인하세요.",
   "backtest.run.error.portfolio.raw_observation.invalid":
@@ -92,19 +92,23 @@ const ko = {
   "backtest.settings.problem.missing": "실행 설정의 {field} 칸을 채우세요.",
   "backtest.settings.problem.invalid": "실행 설정의 {field} 칸을 고치세요: {reason}",
   "backtest.settings.problem.more": "이 밖에 {count}칸이 더 맞지 않습니다.",
-  "backtest.settings.error.initial_cash":
-    "초기 자본을 숫자로 입력하세요. 허용 범위는 서버가 검증합니다.",
+  "backtest.settings.problem.name.initial_cash": "초기 자본",
+  "backtest.settings.problem.name.annualization_days": "연환산 거래일",
+  "backtest.settings.problem.name.oos_out_of_range": "OOS 시작일",
+  "backtest.settings.problem.name.oos_incomplete": "OOS 시작일",
+  "backtest.settings.error.initial_cash": "0보다 큰 숫자를 입력하세요.",
   "backtest.settings.error.annualization_days":
-    "연환산 거래일을 정확히 전송 가능한 정수로 입력하세요. 허용 범위는 서버가 검증합니다.",
+    "1 이상이고 정확히 전송 가능한 정수를 입력하세요.",
   "backtest.settings.error.environment": "실행 환경 칸을 모두 올바르게 채우세요.",
-  "backtest.settings.error.oos_out_of_range": "OOS 시작일은 실행 기간 안이어야 합니다.",
+  "backtest.settings.error.oos_out_of_range": "실행 기간 안의 날짜여야 합니다.",
   "backtest.settings.error.oos_incomplete":
-    "OOS 시작일을 연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
+    "연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
   "backtest.actions.title": "백테스트 실행 제어",
   "backtest.actions.cancel": "실행 취소",
   "backtest.actions.cancelling": "취소 요청됨",
   "backtest.actions.rerun": "동일 설정 재실행",
   "backtest.actions.replaying": "재실행 중",
+  "backtest.actions.rerunFailed": "동일 설정으로 다시 실행하지 못했습니다",
   "backtest.actions.error":
     "실행 제어 요청에 실패했습니다. 상태를 새로 확인한 뒤 다시 시도하세요.",
   "backtest.result.chartEmpty": "이 구간에서 산출 가능한 값이 없습니다.",
@@ -352,7 +356,6 @@ const ko = {
     "현재 FactorGraph 실행 계획을 확정할 수 없어 추적을 차단했습니다.",
   "debugger.unavailable.environment":
     "추적은 실행 설정 위에서 돕니다. 위 실행 설정 요약 띠가 고칠 칸을 알려 줍니다.",
-  "debugger.blocked.document": "현재 실행 가능한 문서가 없습니다.",
   "debugger.blocked.date": "유효한 기준일을 선택하세요.",
   "debugger.blocked.security": "종목 ID를 1개 이상, 최대 100개 입력하세요.",
   "debugger.blocked.factor": "추적할 팩터를 선택하세요.",
@@ -1259,6 +1262,25 @@ const ko = {
   "toolbar.run.open": "백테스트 보기",
   "toolbar.run.accepted": "백테스트 {runId} 접수됨",
   "toolbar.run.failed": "백테스트 시작 실패",
+  "backtest.start.failedGeneric":
+    "서버가 실행 요청을 받지 않았습니다. 실행 설정과 전략 문서를 확인한 뒤 다시 시작하세요.",
+  "backtest.start.serverReason": "서버 사유",
+  // 시작 거절(404·409·422)의 코드별 복구 문장. 코드 목록의 정본은 backend `startBacktest` 계약이고,
+  // `backtest-error-contract.test.ts` 가 `openapi.json` 과 대조한다(이슈 #260).
+  "backtest.error.backtest.run.field_invalid":
+    "서버가 실행 설정의 값 하나를 받지 않았습니다. 서버 사유의 field 칸을 실행 설정에서 고친 뒤 다시 시작하세요.",
+  "backtest.error.backtest.run.field_invalid.named":
+    "서버가 실행 설정의 {field} 칸 값을 받지 않았습니다. 그 칸을 고친 뒤 다시 시작하세요.",
+  "backtest.error.backtest.run.invalid":
+    "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
+  "backtest.error.backtest.run.environment_required":
+    "실행 설정이 없습니다. 실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
+  "backtest.error.portfolio.strategy.invalid":
+    "전략 문서가 실행 검증을 통과하지 못했습니다. 검증을 다시 돌려 표시된 줄을 고치세요.",
+  "backtest.error.backtest.strategy.not_found":
+    "저장된 전략 revision을 찾을 수 없습니다. 전략 목록에서 전략을 다시 여세요.",
+  "backtest.error.backtest.strategy.stale":
+    "저장된 revision이 그사이 바뀌었습니다. 전략을 다시 연 뒤 시작하세요.",
   "backtest.error.backtest.strategy.requires_upgrade": "저장된 이전 schema revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다: {detail}",
@@ -1748,19 +1770,23 @@ export const messages = {
     "backtest.settings.problem.missing": "Fill {field} in the run settings.",
     "backtest.settings.problem.invalid": "Fix {field} in the run settings: {reason}",
     "backtest.settings.problem.more": "{count} more field(s) need attention.",
-    "backtest.settings.error.initial_cash":
-      "Enter initial capital as a number; the server validates its accepted range.",
+    "backtest.settings.problem.name.initial_cash": "Initial capital",
+    "backtest.settings.problem.name.annualization_days": "Annualization sessions",
+    "backtest.settings.problem.name.oos_out_of_range": "OOS start date",
+    "backtest.settings.problem.name.oos_incomplete": "OOS start date",
+    "backtest.settings.error.initial_cash": "Enter a number greater than 0.",
     "backtest.settings.error.annualization_days":
-      "Enter annualization sessions as a losslessly representable integer; the server validates its accepted range.",
+      "Enter a losslessly representable integer of at least 1.",
     "backtest.settings.error.environment": "Fill every run environment field correctly.",
-    "backtest.settings.error.oos_out_of_range": "The OOS start date must be inside the run period.",
+    "backtest.settings.error.oos_out_of_range": "Must be a date inside the run period.",
     "backtest.settings.error.oos_incomplete":
-      "Enter the full OOS start year, month and day. Leave it empty to run without an OOS window.",
+      "Enter the full year, month and day. Leave it empty to run without an OOS window.",
     "backtest.actions.title": "Backtest run controls",
     "backtest.actions.cancel": "Cancel run",
     "backtest.actions.cancelling": "Cancellation requested",
     "backtest.actions.rerun": "Rerun same settings",
     "backtest.actions.replaying": "Starting rerun",
+    "backtest.actions.rerunFailed": "Could not rerun the same settings",
     "backtest.actions.error":
       "The run-control request failed. Refresh the status and try again.",
     "backtest.result.chartEmpty": "No value can be calculated for this range.",
@@ -2006,7 +2032,6 @@ export const messages = {
       "Trace is blocked because the current FactorGraph execution plan cannot be pinned.",
     "debugger.unavailable.environment":
       "A trace runs on the run settings. The run settings summary above names the field to fix.",
-    "debugger.blocked.document": "There is no executable current document.",
     "debugger.blocked.date": "Select a valid as-of date.",
     "debugger.blocked.security": "Enter between 1 and 100 security IDs.",
     "debugger.blocked.factor": "Select a factor to trace.",
@@ -2939,6 +2964,23 @@ export const messages = {
     "toolbar.run.open": "View backtest",
     "toolbar.run.accepted": "Backtest {runId} accepted",
     "toolbar.run.failed": "Backtest could not start",
+    "backtest.start.failedGeneric":
+      "The server did not accept the run request. Check the run settings and the strategy document, then start again.",
+    "backtest.start.serverReason": "Server reason",
+    "backtest.error.backtest.run.field_invalid":
+      "The server rejected a run settings value. Fix the field named in the server reason, then start again.",
+    "backtest.error.backtest.run.field_invalid.named":
+      "The server rejected the {field} run setting. Fix that field, then start again.",
+    "backtest.error.backtest.run.invalid":
+      "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy.",
+    "backtest.error.backtest.run.environment_required":
+      "There are no run settings. Fill the start date, end date and universe in the run settings.",
+    "backtest.error.portfolio.strategy.invalid":
+      "The strategy document did not pass run validation. Validate again and fix the marked lines.",
+    "backtest.error.backtest.strategy.not_found":
+      "The saved strategy revision was not found. Open the strategy again from the strategy list.",
+    "backtest.error.backtest.strategy.stale":
+      "The saved revision changed in the meantime. Reopen the strategy, then start again.",
     "backtest.error.backtest.strategy.requires_upgrade": "A stored older-schema revision cannot run. Upgrade it and save a new revision first.",
     "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
     "trace.error.trace.request.invalid": "The trace request is invalid: {detail}",

@@ -1,6 +1,10 @@
 import type { ReactNode } from "react";
 
-import { t, tOptional } from "../../../shared/config";
+import {
+  BacktestRejection,
+  backtestStartRejectionMessage,
+} from "../../../entities/backtest";
+import { t } from "../../../shared/config";
 import { Badge, Button, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
 import type { DocumentState } from "../model/document-state";
@@ -19,6 +23,8 @@ type DocumentToolbarProps = {
   canRun: boolean;
   runBlockedReason?: string;
   runSettings?: ReactNode;
+  /** 거절이 가리킨 요청 본문의 칸(점 경로) → 실행 설정 칸 이름. 모르면 null. */
+  runFieldLabel?: (field: string) => string | null;
   decision: BacktestSourceDecision;
   runStatus: RunBacktestStatus;
 };
@@ -57,6 +63,7 @@ export const DocumentToolbar = ({
   canRun,
   runBlockedReason,
   runSettings,
+  runFieldLabel,
   decision,
   runStatus,
 }: DocumentToolbarProps) => {
@@ -135,16 +142,21 @@ export const DocumentToolbar = ({
             {t("toolbar.run.accepted").replace("{runId}", runStatus.runId)}
           </span>
         ) : null}
-        {runStatus.kind === "failed" ? (
-          <span className="doc-toolbar__error" role="alert">
-            {t("toolbar.run.failed")}:{" "}
-            {(runStatus.code === null
-              ? null
-              : tOptional(`backtest.error.${runStatus.code}`)) ??
-              runStatus.detail}
-          </span>
-        ) : null}
       </div>
+      {runStatus.kind === "failed" ? (
+        // 줄은 버튼 줄 아래에 따로 두어 긴 문장이 버튼 폭을 빼앗지 않게 한다(#260).
+        <BacktestRejection
+          className="doc-toolbar__error"
+          title={t("toolbar.run.failed")}
+          message={backtestStartRejectionMessage(
+            runStatus.code,
+            runStatus.field === null || runFieldLabel === undefined
+              ? null
+              : runFieldLabel(runStatus.field),
+          )}
+          detail={runStatus.detail}
+        />
+      ) : null}
     </div>
   );
 };

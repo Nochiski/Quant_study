@@ -2,6 +2,7 @@
   position: relative;
 }
 
+/* 여는 단추는 낱말 안에서 꺾지 않는다. 한글은 음절마다 줄을 바꿀 수 있어, 좁아지면 "실/행/설/정"처럼 선다(이슈 #260). */
 .backtest-settings > summary {
   display: flex;
   align-items: center;
@@ -10,6 +11,7 @@
   padding: 0 var(--space-2);
   color: var(--text-muted);
   font-size: var(--text-size-small);
+  word-break: keep-all;
   cursor: pointer;
 }
 

@@ -4,6 +4,7 @@ import {
   type Browser,
   type Locator,
   type Page,
+  type Route,
 } from "@playwright/test";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
@@ -20,6 +21,7 @@ import {
   type BacktestRunSpec,
   type BacktestRunState,
   type BacktestStartResponse,
+  type StartBacktestErrors,
   type StrategyTraceRequest,
 } from "../src/shared/api/generated";
 import { runtimeDatabasePath } from "./runtime";
@@ -656,22 +658,67 @@ test.describe("professional YAML workflow", () => {
     const initialCash = workflow.getByRole("spinbutton", {
       name: "초기 자본 (KRW)",
     });
+    // 0 이하는 backend 가 거절하므로 패널이 먼저 막고, 요약 띠가 칸 이름과 이유를 말한다(이슈 #260).
     await initialCash.fill("0");
-    await expect(backtest(workflow)).toBeEnabled();
-    const rejectedRun = workflow.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname === "/api/v1/backtests" &&
-        response.status() === 422,
+    await expect(backtest(workflow)).toBeDisabled();
+    await expect(
+      workflow.getByRole("region", { name: "실행 설정 요약" }),
+    ).toContainText(
+      "실행 설정의 초기 자본 칸을 고치세요: 0보다 큰 숫자를 입력하세요.",
     );
-    await backtest(workflow).click();
-    expect((await rejectedRun).status()).toBe(422);
-    await expect(workflow.getByRole("alert")).toContainText(
-      "백테스트 시작 실패",
-    );
-    await expect(workflow.getByRole("alert")).toContainText("status=422");
-    await initialCash.fill("123456789");
+    await initialCash.fill("123456788");
     await expect(workflow.getByText("준비됨", { exact: true })).toBeVisible();
+
+    // 서버 거절은 코드의 번역 문장과 접힌 서버 사유로 보이고, 긴 문장이 버튼 글자를 꺾지 않는다(이슈 #260).
+    // 패널이 서버의 칸 규칙을 모두 먼저 막아 실제 서버에서 이 거절을 끌어낼 입력이 없으므로, 생성 계약 모양의
+    // 응답으로 시작 요청 한 번만 가로챈다.
+    const rejection: StartBacktestErrors[422] = {
+      detail: {
+        code: "backtest.run.field_invalid",
+        field: "initial_cash",
+        message:
+          "Value error, initial_cash must be positive — initial_cash=0.0 — field=initial_cash",
+      },
+    };
+    const rejectStart = async (route: Route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({ status: 422, json: rejection })
+        : route.fallback();
+    await workflow.route("**/api/v1/backtests", rejectStart);
+    await settingsToggle.click();
+    await backtest(workflow).click();
+    const failure = workflow.getByRole("alert");
+    await expect(failure).toContainText(
+      "백테스트 시작 실패: 서버가 실행 설정의 초기 자본 칸 값을 받지 않았습니다.",
+    );
+    await expect(failure).not.toContainText("API request failed");
+    await expect(failure).not.toContainText("status=422");
+    // 서버 원문은 접힌 "서버 사유"(details) 안에 있다. 펼치기 전에는 닫혀 있다.
+    const reason = failure.getByRole("group");
+    await expect(reason).toContainText("서버 사유");
+    await expect(reason).toContainText("initial_cash must be positive");
+    await expect(reason).not.toHaveAttribute("open");
+    // 한 줄짜리 버튼 높이 그대로다. 전에는 "실/행/설/정"처럼 한 음절씩 꺾여 버튼이 세로로 길어졌다.
+    for (const control of [
+      settingsToggle,
+      workflow.getByRole("button", { name: "검증", exact: true }),
+      workflow.getByRole("button", { name: "리비전 저장", exact: true }),
+      backtest(workflow),
+    ]) {
+      const box = await control.boundingBox();
+      expect(box, "툴바 버튼이 보인다").not.toBeNull();
+      expect(box!.height, "툴바 버튼이 한 줄로 보인다").toBeLessThan(44);
+      expect(
+        await control.evaluate(
+          (element) => element.scrollWidth <= element.clientWidth,
+        ),
+        "툴바 버튼 글자가 잘리지 않는다",
+      ).toBe(true);
+    }
+    await workflow.unroute("**/api/v1/backtests", rejectStart);
+    // 거절 표시는 그 요청의 실행 설정에 묶인다. 값을 바꾸면 사라진다.
+    await settingsToggle.click();
+    await initialCash.fill("123456789");
     await expect(workflow.getByRole("alert")).toHaveCount(0);
     await workflow
       .getByRole("textbox", { name: "벤치마크 종목 ID" })

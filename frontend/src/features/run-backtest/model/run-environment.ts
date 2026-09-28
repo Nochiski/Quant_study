@@ -104,6 +104,9 @@ export const runEnvironmentValuesOf = (
 export const DATE_INPUT_MINIMUM = "1900-01-01";
 export const DATE_INPUT_MAXIMUM = "9999-12-31";
 
+/** 덜 친 날짜 칸이 없다. */
+const NO_INCOMPLETE: ReadonlySet<string> = new Set();
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const validDate = (value: string): boolean => {
@@ -129,6 +132,8 @@ const numberError = (
 };
 
 /**
+ * `incomplete` 는 브라우저가 덜 친 날짜라고 알려 준 칸 이름이다(`validity.badInput`, 값은 빈 문자열).
+ *
  * 칸마다 스키마 규칙(필수·숫자·범위·날짜·enum)을 보고, 전부 맞으면 요청에 실을 `RunEnvironment` 를 만든다.
  *
  * 기간 순서(`start <= end`)는 스키마가 말하지 않는 `RunEnvironment.__post_init__` 규칙이다. 생성 타입의
@@ -137,13 +142,18 @@ const numberError = (
 export const validateRunEnvironment = (
   fields: readonly RunEnvironmentField[],
   values: RunEnvironmentValues,
+  incomplete: ReadonlySet<string> = NO_INCOMPLETE,
 ): RunEnvironmentValidation => {
   const errors: Record<string, RunEnvironmentFieldError> = {};
   const environment: Record<string, string | number> = {};
   for (const field of fields) {
     const text = (values[field.name] ?? "").trim();
     if (text === "") {
-      if (field.required || field.defaultValue !== null)
+      // 덜 친 날짜 칸도 값은 빈 문자열이다. 칸이 알려 준 덜 친 상태면 "비었다"가 아니라 날짜 오류로 본다 —
+      // 칸 아래 문장과 요약 띠·차단 문장이 같은 원인을 말하게 한다(#266 리뷰 P3-1).
+      if (field.control === "date" && incomplete.has(field.name))
+        errors[field.name] = "date";
+      else if (field.required || field.defaultValue !== null)
         errors[field.name] = "required";
       continue;
     }

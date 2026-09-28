@@ -378,6 +378,28 @@ const renderDebugger = (ui: ReactElement) => {
   });
 };
 
+// 이슈 #260 DEFECT-2: 추적할 수 없는 사유는 문장 하나로 말한다. 실행 설정만 비었는데 "현재 실행 가능한
+// 문서가 없습니다."가 함께 뜨면 문서가 문제라고 오진한다.
+describe("StrategyDebugger unavailable reasons", () => {
+  it.each([
+    ["environment", "추적은 실행 설정 위에서 돕니다."],
+    ["preparing", "현재 문서의 실행 계획과 데이터 계약을 확인하고 있습니다."],
+    ["no-factors", "추적할 팩터가 없습니다."],
+    ["execution-plan", "현재 FactorGraph 실행 계획을 확정할 수 없어"],
+  ] as const)("shows only the %s sentence", (reason, sentence) => {
+    renderDebugger(
+      <StrategyDebugger {...props(null)} unavailableReason={reason} />,
+    );
+    const notices = screen.getAllByRole("status");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toHaveTextContent(sentence);
+    expect(
+      screen.queryByText("현재 실행 가능한 문서가 없습니다."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "추적 실행" })).toBeDisabled();
+  });
+});
+
 describe("StrategyDebugger", () => {
   it("uses the generated trace contract and prioritizes exact TargetTape fields", async () => {
     const user = userEvent.setup();

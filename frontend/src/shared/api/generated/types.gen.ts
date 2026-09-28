@@ -387,6 +387,30 @@ export type BacktestResultNotReadyResponse = {
 };
 
 /**
+ * BacktestRunFieldInvalidDetail
+ *
+ * 요청 본문이 스키마나 칸 규칙을 어겼다(이슈 #260).
+ *
+ * `field` 는 본문의 점 경로(`initial_cash`, `environment.fee_bps`)다. 본문이 JSON 이 아니거나
+ * 본문 전체가 빠져 칸을 특정할 수 없으면 null 이다. `message` 는 진단용 원문이고, 화면 문장은
+ * frontend 가 `code` 로 번역한다.
+ */
+export type BacktestRunFieldInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.field_invalid";
+  /**
+   * Field
+   */
+  field: string | null;
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
  * BacktestRunInvalidDetail
  */
 export type BacktestRunInvalidDetail = {
@@ -634,6 +658,9 @@ export type BacktestUnprocessableResponse = {
     | ({
         code: "backtest.run.invalid";
       } & BacktestRunInvalidDetail)
+    | ({
+        code: "backtest.run.field_invalid";
+      } & BacktestRunFieldInvalidDetail)
     | ({
         code: "backtest.run.environment_required";
       } & BacktestEnvironmentRequiredDetail)
@@ -6128,11 +6155,9 @@ export type StartBacktestErrors = {
    */
   409: BacktestStrategyStaleResponse;
   /**
-   * Response 422 Startbacktest
-   *
-   * Malformed envelope or a coded backtest preflight diagnostic
+   * A coded backtest preflight or request-body diagnostic
    */
-  422: BacktestUnprocessableResponse | RequestValidationResponse;
+  422: BacktestUnprocessableResponse;
 };
 
 export type StartBacktestError = StartBacktestErrors[keyof StartBacktestErrors];

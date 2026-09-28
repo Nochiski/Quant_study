@@ -14,6 +14,7 @@ import {
   type RunEnvironmentValues,
 } from "./run-environment";
 import {
+  runFieldLabel,
   runSettingsBlockedReason,
   runSettingsProblems,
 } from "./run-settings-problems";
@@ -70,6 +71,9 @@ const writeStored = (key: string, values: RunEnvironmentValues): void => {
 const NO_FIELDS: readonly RunEnvironmentField[] = [];
 
 type ScopedValues = { key: string; values: RunEnvironmentValues };
+type ScopedNames = { key: string; names: ReadonlySet<string> };
+
+const NO_NAMES: ReadonlySet<string> = new Set();
 
 /**
  * 패널 열림과 "이 칸으로 가기" 요청. 요약 띠·차단 안내가 패널을 열고 첫 빈 칸에 초점을 옮기는 경로다 —
@@ -93,6 +97,11 @@ export const useBacktestRunSettings = (storageKey: string) => {
     DEFAULT_BACKTEST_RUN_SETTINGS,
   );
   const [edited, setEdited] = useState<ScopedValues | null>(null);
+  // 덜 친 날짜 칸(브라우저 `validity.badInput`). 값은 빈 문자열이라 값 state 로는 표현할 수 없다. 칸 값과
+  // 같이 전략별로 묶는다 — 다른 전략으로 옮기면 비운다.
+  const [incompleteDates, setIncompleteDates] = useState<ScopedNames | null>(
+    null,
+  );
   const [panel, setPanel] = useState<RunSettingsPanelState>({
     open: false,
     focus: null,
@@ -115,12 +124,20 @@ export const useBacktestRunSettings = (storageKey: string) => {
         : initialRunEnvironmentValues(environmentFields, stored),
     [edited, environmentFields, storageKey, stored],
   );
+  const incomplete =
+    incompleteDates !== null && incompleteDates.key === storageKey
+      ? incompleteDates.names
+      : NO_NAMES;
   const environment = useMemo<RunEnvironmentValidation>(
     () =>
       environmentFields.length === 0
         ? { valid: false, environment: null, errors: {} }
-        : validateRunEnvironment(environmentFields, environmentValues),
-    [environmentFields, environmentValues],
+        : validateRunEnvironment(
+            environmentFields,
+            environmentValues,
+            incomplete,
+          ),
+    [environmentFields, environmentValues, incomplete],
   );
   const result = useMemo(
     () => buildBacktestRunOptions(fields, environment),
@@ -148,6 +165,22 @@ export const useBacktestRunSettings = (storageKey: string) => {
     (name: string, value: string): void =>
       replaceEnvironment({ ...environmentValues, [name]: value }),
     [environmentValues, replaceEnvironment],
+  );
+  /** 날짜 칸이 덜 쳐졌는지 칸이 알려 준다. 바뀐 것이 없으면 state 를 건드리지 않는다. */
+  const setEnvironmentIncomplete = useCallback(
+    (name: string, value: boolean): void =>
+      setIncompleteDates((current) => {
+        const names =
+          current !== null && current.key === storageKey
+            ? current.names
+            : NO_NAMES;
+        if (names.has(name) === value) return current;
+        const next = new Set(names);
+        if (value) next.add(name);
+        else next.delete(name);
+        return { key: storageKey, names: next };
+      }),
+    [storageKey],
   );
   const setPanelOpen = useCallback(
     (open: boolean): void =>
@@ -180,6 +213,10 @@ export const useBacktestRunSettings = (storageKey: string) => {
         ? t("backtest.settings.environment.schemaLoading")
         : (runSettingsBlockedReason(problems) ??
           t("backtest.settings.blocked"));
+  const fieldLabel = useCallback(
+    (path: string): string | null => runFieldLabel(environmentFields, path),
+    [environmentFields],
+  );
   /** 업그레이드 응답처럼 완성된 실행 설정으로 칸 전부를 바꾼다(사용자가 누른 뒤에만 부른다). */
   const applyEnvironment = useCallback(
     (next: RunEnvironment): void =>
@@ -201,7 +238,10 @@ export const useBacktestRunSettings = (storageKey: string) => {
     environmentFields,
     environmentValues,
     setEnvironmentValue,
+    setEnvironmentIncomplete,
     applyEnvironment,
+    /** 서버 거절의 `field`(요청 본문 점 경로) → 패널 칸 이름. 모르면 null. */
+    runFieldLabel: fieldLabel,
     /** 검증을 통과한 실행 설정. 추적·실행 계획 요청이 같은 값을 싣는다. 없으면 null. */
     environment: environment.valid ? environment.environment : null,
     environmentErrors: environment.errors,

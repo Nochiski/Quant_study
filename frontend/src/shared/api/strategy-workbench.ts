@@ -97,6 +97,13 @@ export class ApiRequestError extends Error {
   readonly detail: string | undefined;
   readonly latestRevision: number | null;
   readonly currentDraft: StrategyDraft | null;
+  /** 거절이 가리킨 요청 본문의 칸(점 경로, 예 `initial_cash`). detail 에 `field` 가 없으면 undefined. */
+  readonly field: string | undefined;
+  /**
+   * 코드가 없는 FastAPI 기본 422(배열 `detail`)의 진단 요약. `detail` 과 달리 화면 본문에 쓰지 않고 접힌 진단
+   * 상세에만 쓴다 — 저장·업그레이드 배너와 추적 오류는 `detail` 을 본문으로 그린다(#268 리뷰 P3-4).
+   */
+  readonly diagnostic: string | undefined;
 
   constructor(
     context: string,
@@ -105,6 +112,8 @@ export class ApiRequestError extends Error {
     detail?: string,
     latestRevision: number | null = null,
     currentDraft: StrategyDraft | null = null,
+    field?: string,
+    diagnostic?: string,
   ) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
@@ -115,6 +124,8 @@ export class ApiRequestError extends Error {
     this.detail = detail;
     this.latestRevision = latestRevision;
     this.currentDraft = currentDraft;
+    this.field = field;
+    this.diagnostic = diagnostic;
   }
 }
 
@@ -140,6 +151,17 @@ const errorField = (
 const errorCode = (error: unknown): string | undefined =>
   errorField(error, "code");
 
+/** detail 의 `field`(문자열일 때만). `errorField` 는 null 을 "null" 문자열로 바꾸므로 따로 읽는다. */
+const detailFieldPath = (error: unknown): string | undefined => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return undefined;
+  const detail = (error as { detail: unknown }).detail;
+  if (typeof detail !== "object" || detail === null || !("field" in detail))
+    return undefined;
+  const value = (detail as { field: unknown }).field;
+  return typeof value === "string" ? value : undefined;
+};
+
 /**
  * 저장·revise·upgrade의 `strategy_document.invalid` detail에는 `message`가 없다 — 첫 error 진단(pointer + 문구)을
  * detail 문구로 쓴다(Phase 5 감사 backlog 16: 저장 실패 사유가 화면에 비어 있었다).
@@ -154,6 +176,30 @@ export const invalidDocumentSummary = (error: unknown): string | undefined => {
   const pointer = first.pointer === "" ? "/" : first.pointer;
   const rest = diagnostics.length - 1;
   return `${pointer}: ${first.message}${rest > 0 ? ` (+${rest})` : ""}`;
+};
+
+/**
+ * FastAPI 기본 422(`detail` 배열)의 진단 문장. 첫 오류의 본문 경로와 문장에 나머지 개수를 붙인다. 코드화된
+ * 계약이 없는 라우트에서도 서버 사유를 버리지 않으려는 방어다(이슈 #260: 배열 detail 에서 `code`·`message`
+ * 를 꺼내지 못해 사유가 사라졌다). `ApiRequestError.diagnostic` 에만 싣는다 — 화면 본문이 아니라 접힌 진단 상세에
+ * 쓴다.
+ */
+export const requestValidationSummary = (
+  error: unknown,
+): string | undefined => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return undefined;
+  const detail = (error as { detail: unknown }).detail;
+  if (!Array.isArray(detail) || detail.length === 0) return undefined;
+  const first = detail[0] as { loc?: unknown; msg?: unknown };
+  const location = Array.isArray(first.loc) ? first.loc.map(String) : [];
+  const path =
+    (location[0] === "body" && location.length > 1
+      ? location.slice(1)
+      : location
+    ).join(".") || "-";
+  const rest = detail.length - 1;
+  return `${path}: ${String(first.msg ?? "")}${rest > 0 ? ` (+${rest})` : ""}`;
 };
 
 /** Runtime check at the HTTP boundary for the generated structured 409 detail. */
@@ -258,9 +304,12 @@ const requestError = (
     context,
     responseStatus,
     errorCode(response.error),
-    errorField(response.error, "message") ?? invalidDocumentSummary(response.error),
+    errorField(response.error, "message") ??
+      invalidDocumentSummary(response.error),
     conflict?.latest_revision ?? null,
     draftConflict?.current ?? null,
+    detailFieldPath(response.error),
+    requestValidationSummary(response.error),
   );
 };
 

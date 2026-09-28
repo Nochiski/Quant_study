@@ -24,11 +24,22 @@ paths:
   backend가 소유한다.
 - backend가 코드로 분기하는 422(`ApiRequestError.code`)는 `upgrade.error.<code>`·
   `backtest.error.<code>`처럼 코드를 키로 하는 문구로 번역한다. 번역이 없으면 일반 문구로
-  떨어지되 원문 detail을 그대로 노출하지 않는다.
+  떨어지되 원문 detail을 그대로 노출하지 않는다. 서버 원문(`ApiRequestError.detail`)은 접힌 진단
+  상세로 내린다. `Error.message`(`API request failed: …`)는 개발자 진단이라 화면에 쓰지 않는다.
+  코드 없는 FastAPI 배열 422의 요약은 `ApiRequestError.diagnostic`에만 둔다 — `detail`은 저장·업그레이드
+  배너 본문이 읽는다.
+- 시작 거절(`startBacktest` 404·409·422)은 `backtest.error.<code>`를 본문으로 쓴다. 문장 규칙은
+  `entities/backtest`의 `backtestStartRejectionMessage`, 표시는 `BacktestRejection` 하나가 소유하고 편집기
+  툴바와 결과 화면 재실행이 함께 쓴다. 키
+  목록은 `backtest-error-contract.test.ts`가 `openapi.json`의 코드 전수와 대조한다. 요청 본문 검증
+  실패도 backend가 `backtest.run.field_invalid`(`field` = 본문 점 경로)로 코드화한다 — FastAPI 기본
+  배열 422를 새 화면 계약으로 삼지 않는다. 거절의 `field`를 실행 설정 패널이 칸 이름으로 바꿀 수 있으면
+  `backtest.error.<code>.named`(`{field}` 자리)에 넣는다 — 경로→이름 대응은 `features/run-backtest`의
+  `runFieldLabel` 하나가 소유한다.
 - 폴링 본문의 실패 코드(`BacktestRunState.error_code`, 어휘 SoT는 backend `RunFailureCode`)는
   `backtest.run.error.<code>`로 번역하고, 번역이 있으면 서버 원문(`error`)은 접힌 진단 상세로
-  내린다. 422의 `backtest.error.*`와 키를 공유하지 않는다 — 편집기 툴바는 서버 detail을 본문으로
-  쓰는 화면이라 같은 키가 있으면 detail이 덮인다.
+  내린다. 시작 거절의 `backtest.error.*`와 키를 공유하지 않는다 — 같은 코드라도 시작 거절은 실행 전에
+  고칠 것을, run 실패는 실행 중에 난 일을 말한다.
 
 ## 상태
 

@@ -79,6 +79,7 @@ export type {
   BacktestEnvironmentRequiredDetail,
   BacktestResultNotReadyDetail,
   BacktestResultNotReadyResponse,
+  BacktestRunFieldInvalidDetail,
   BacktestRunInvalidDetail,
   BacktestRunNotFoundDetail,
   BacktestRunNotFoundResponse,

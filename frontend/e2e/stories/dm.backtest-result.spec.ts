@@ -47,7 +47,34 @@ test(
     // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02). 비어 있으면
     // 백테스트가 막히고, 요약 띠가 빈 칸 이름과 "실행 설정 채우기"를 보인다.
     await expect(backtest(page)).toBeDisabled();
+    // 같은 상태에서 중간 결과도 막힌 이유를 실행 설정 한 문장으로만 말한다. 문서는 멀쩡한데 "실행 가능한
+    // 문서가 없다"가 함께 뜨면 사용자가 문서를 고치러 간다(이슈 #260).
+    const debuggerRegion = page.getByRole("region", { name: "중간 결과" });
+    await expect(debuggerRegion).toContainText(
+      "추적은 실행 설정 위에서 돕니다.",
+    );
+    await expect(
+      debuggerRegion.getByText("현재 실행 가능한 문서가 없습니다."),
+    ).toHaveCount(0);
     await fillRunEnvironment(page, { via: "band" });
+    await expect(backtest(page)).toBeEnabled();
+
+    // 서버가 거절할 초기 자본(0)은 패널이 먼저 막고, 요약 띠가 칸 이름과 이유를 말한다. "실행 설정
+    // 고치기"가 그 칸으로 초점을 옮긴다(이슈 #260).
+    const summary = page.getByRole("region", { name: "실행 설정 요약" });
+    const toggle = page.getByLabel("실행 설정 열기");
+    const cash = page.getByRole("spinbutton", { name: "초기 자본 (KRW)" });
+    await toggle.click();
+    await cash.fill("0");
+    await toggle.click();
+    await expect(summary).toContainText(
+      "실행 설정의 초기 자본 칸을 고치세요: 0보다 큰 숫자를 입력하세요.",
+    );
+    await expect(backtest(page)).toBeDisabled();
+    await summary.getByRole("button", { name: "실행 설정 고치기" }).click();
+    await expect(cash).toBeFocused();
+    await cash.fill("100000000");
+    await toggle.click();
     await expect(backtest(page)).toBeEnabled();
     await backtest(page).click();
 

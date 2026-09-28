@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
+import { useEffect, useId, useRef, type SyntheticEvent } from "react";
 
 import { t, tDescription } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
@@ -9,7 +9,10 @@ import {
   type RunEnvironmentFieldError,
 } from "../model/run-environment";
 import type { BacktestRunSettingsError } from "../model/run-settings";
-import { runEnvironmentErrorMessage } from "../model/run-settings-problems";
+import {
+  runEnvironmentErrorMessage,
+  runOptionErrorMessage,
+} from "../model/run-settings-problems";
 import type { BacktestRunSettingsController } from "../model/use-backtest-run-settings";
 import "./backtest-run-settings.css";
 import {
@@ -22,9 +25,6 @@ type BacktestRunSettingsProps = {
   disabled?: boolean;
 };
 
-const errorMessage = (error: BacktestRunSettingsError): string =>
-  t(`backtest.settings.error.${error}`);
-
 /** 날짜 칸이 덜 채워졌는지: 연도만 쳤거나 없는 날짜(2월 31일)면 값은 빈 문자열이고 `badInput` 이 선다. */
 const isIncompleteDate = (event: SyntheticEvent<HTMLInputElement>): boolean =>
   event.currentTarget.type === "date" && event.currentTarget.validity.badInput;
@@ -34,31 +34,31 @@ const EnvironmentInput = ({
   value,
   error,
   onChange,
+  onIncompleteChange,
 }: {
   field: RunEnvironmentField;
   value: string;
   error: RunEnvironmentFieldError | undefined;
   onChange: (value: string) => void;
+  onIncompleteChange: (incomplete: boolean) => void;
 }) => {
   const inputId = useId();
   const hintId = useId();
   const errorId = useId();
   const description = tDescription(field.descriptionKey);
-  // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 검증만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
-  // 안에서 자리를 옮기는 동안 이벤트를 내지 않으므로, 칸을 떠날 때와 값이 바뀔 때 `badInput` 을 읽어 "날짜를
-  // 끝까지 치라"는 문장으로 바꿔 보인다. 값이 생기면 검증 결과를 그대로 쓴다.
-  const [incomplete, setIncomplete] = useState(false);
-  const shown: RunEnvironmentFieldError | undefined =
-    incomplete && value === "" ? "date" : error;
+  // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 값만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
+  // 안에서 자리를 채우는 동안 input 이벤트를 내지 않으므로, 키를 뗄 때·값이 바뀔 때·칸을 떠날 때 `badInput` 을
+  // 읽어 컨트롤러에 알린다. 키를 뗄 때 읽지 않으면 칸을 떠나지 않고 누른 백테스트 단축키가 덜 친 칸을 보지
+  // 못한다(#266 재리뷰 P3-1). 검증이 그 칸을 날짜 오류로 보고, 칸 아래·요약 띠가 같은 문장을 쓴다.
   const describedBy =
-    [description === null ? null : hintId, shown === undefined ? null : errorId]
+    [description === null ? null : hintId, error === undefined ? null : errorId]
       .filter((id): id is string => id !== null)
       .join(" ") || undefined;
   // 한 줄 뜻·오류는 label 밖에 둔다 — label 안에 두면 접근 가능한 이름이 뜻 문장까지 늘어난다.
   const common = {
     id: inputId,
     "aria-describedby": describedBy,
-    "aria-invalid": shown === undefined ? undefined : true,
+    "aria-invalid": error === undefined ? undefined : true,
     "aria-required": field.required || undefined,
     "data-run-field": field.name,
   } as const;
@@ -107,10 +107,11 @@ const EnvironmentInput = ({
           }
           value={value}
           onChange={(event) => {
-            setIncomplete(isIncompleteDate(event));
+            onIncompleteChange(isIncompleteDate(event));
             onChange(event.target.value);
           }}
-          onBlur={(event) => setIncomplete(isIncompleteDate(event))}
+          onKeyUp={(event) => onIncompleteChange(isIncompleteDate(event))}
+          onBlur={(event) => onIncompleteChange(isIncompleteDate(event))}
         />
       )}
       {description === null ? null : (
@@ -118,9 +119,9 @@ const EnvironmentInput = ({
           {description}
         </small>
       )}
-      {shown === undefined ? null : (
+      {error === undefined ? null : (
         <small id={errorId} className="backtest-settings__field-error">
-          {runEnvironmentErrorMessage(field, shown)}
+          {runEnvironmentErrorMessage(field, error)}
         </small>
       )}
     </div>
@@ -145,13 +146,20 @@ export const BacktestRunSettings = ({
     environmentValues,
     environmentErrors,
     setEnvironmentValue,
+    setEnvironmentIncomplete,
     panel,
     setPanelOpen,
   } = controller;
   const { open, focus } = panel;
-  const oosInvalid = (
-    result.errors as readonly BacktestRunSettingsError[]
-  ).some((error) => error === "oos_out_of_range" || error === "oos_incomplete");
+  // OOS 칸의 덜 친 상태. 키를 뗄 때마다 불리므로 바뀐 때만 필드를 고친다.
+  const markOosIncomplete = (event: SyntheticEvent<HTMLInputElement>): void => {
+    const incomplete = isIncompleteDate(event);
+    if ((fields.oosStartIncomplete ?? false) !== incomplete)
+      setField("oosStartIncomplete", incomplete);
+  };
+  const optionErrors: ReadonlySet<BacktestRunSettingsError> = new Set(
+    result.errors,
+  );
   const popoverRef = useRef<HTMLDivElement>(null);
   // 요약 띠·차단 안내가 "이 칸으로 가기"를 요청하면 패널이 열린 뒤 그 칸에 초점을 옮긴다. 요청 한 번
   // (nonce)에 한 번만 움직여, 사용자가 패널을 닫았다 다시 열 때 초점을 빼앗지 않는다.
@@ -203,6 +211,9 @@ export const BacktestRunSettings = ({
                 value={environmentValues[field.name] ?? ""}
                 error={environmentErrors[field.name]}
                 onChange={(value) => setEnvironmentValue(field.name, value)}
+                onIncompleteChange={(incomplete) =>
+                  setEnvironmentIncomplete(field.name, incomplete)
+                }
               />
             ))
           ) : (
@@ -242,6 +253,7 @@ export const BacktestRunSettings = ({
               step="any"
               type="number"
               data-run-field="initial_cash"
+              aria-invalid={optionErrors.has("initial_cash") ? true : undefined}
               value={fields.initialCashKrw}
               onChange={(event) =>
                 setField("initialCashKrw", event.target.value)
@@ -269,6 +281,9 @@ export const BacktestRunSettings = ({
               step="1"
               type="number"
               data-run-field="annualization_days"
+              aria-invalid={
+                optionErrors.has("annualization_days") ? true : undefined
+              }
               value={fields.annualizationDays}
               onChange={(event) =>
                 setField("annualizationDays", event.target.value)
@@ -282,15 +297,19 @@ export const BacktestRunSettings = ({
               min={DATE_INPUT_MINIMUM}
               max={DATE_INPUT_MAXIMUM}
               data-run-field="oos_start"
-              aria-invalid={oosInvalid || undefined}
+              aria-invalid={
+                optionErrors.has("oos_out_of_range") ||
+                optionErrors.has("oos_incomplete")
+                  ? true
+                  : undefined
+              }
               value={fields.oosStart}
               onChange={(event) => {
-                setField("oosStartIncomplete", isIncompleteDate(event));
+                markOosIncomplete(event);
                 setField("oosStart", event.target.value);
               }}
-              onBlur={(event) =>
-                setField("oosStartIncomplete", isIncompleteDate(event))
-              }
+              onKeyUp={markOosIncomplete}
+              onBlur={markOosIncomplete}
             />
             <small className="backtest-settings__hint">
               {t("backtest.settings.oosStart.hint")}
@@ -300,7 +319,7 @@ export const BacktestRunSettings = ({
         {result.valid ? null : (
           <ul className="backtest-settings__errors" role="alert">
             {result.errors.map((error) => (
-              <li key={error}>{errorMessage(error)}</li>
+              <li key={error}>{runOptionErrorMessage(error)}</li>
             ))}
           </ul>
         )}

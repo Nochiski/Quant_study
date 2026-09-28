@@ -272,6 +272,21 @@ describe("backtest run settings", () => {
     ]);
   });
 
+  // #266 리뷰 P2-1: OOS 시작일을 덜 치면 칸 값은 빈 문자열이다. 비운 것과 구분하지 않으면 OOS 구간 없이
+  // 실행돼 사용자가 원한 표본 밖 측정이 아무 표시 없이 사라진다. 비운 칸은 그대로 통과한다(선택 칸).
+  it("blocks a half-typed OOS start instead of silently running without the OOS window", () => {
+    expect(
+      buildBacktestRunOptions(
+        { ...DEFAULT_BACKTEST_RUN_SETTINGS, oosStartIncomplete: true },
+        VALID,
+      ),
+    ).toEqual({ valid: false, options: null, errors: ["oos_incomplete"] });
+    expect(
+      buildBacktestRunOptions(DEFAULT_BACKTEST_RUN_SETTINGS, VALID).options
+        ?.metric_windows,
+    ).toEqual([]);
+  });
+
   it("blocks an unsafe integer before Number conversion can mutate the wire value", () => {
     expect(
       buildBacktestRunOptions(
@@ -583,6 +598,42 @@ describe("run environment panel", () => {
     await user.type(end, "2020-12-31");
     expect(
       screen.getByText("종료일은 시작일과 같거나 그 뒤여야 합니다."),
+    ).toBeInTheDocument();
+    expect(requestBody()).toBeNull();
+  });
+
+  // #264: 날짜 칸에 범위가 없으면 Chromium 이 연도를 6자리까지 받아, 이어 친 숫자가 연도로 빨려 들어가고
+  // 칸이 빈다. 범위를 주면 연도가 4자리로 묶여 4자리 뒤에 월로 넘어간다(타이핑 경로는 US-DM-05 e2e).
+  it("bounds every date field to four-digit years and names the range when a date falls outside it", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    for (const date of [
+      screen.getByLabelText(/^시작일/),
+      screen.getByLabelText(/^종료일/),
+      screen.getByLabelText(/^OOS 시작일/),
+    ]) {
+      expect(date).toHaveAttribute("min", "1900-01-01");
+      expect(date).toHaveAttribute("max", "9999-12-31");
+    }
+    await fillPeriodAndUniverse(user);
+    const start = screen.getByLabelText(/^시작일/);
+    await user.clear(start);
+    await user.type(start, "0021-01-01");
+    expect(screen.getByTestId("blocked")).toHaveTextContent(
+      "실행 설정의 시작일 칸을 고치세요: 1900-01-01부터 9999-12-31 사이의 날짜여야 합니다.",
+    );
+    expect(requestBody()).toBeNull();
+  });
+
+  it("says the date is incomplete when a remembered value is not a whole date", async () => {
+    localStorage.setItem(
+      `${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`,
+      JSON.stringify({ start: "2021-13", end: "2026-08-31" }),
+    );
+    renderWithQuery(<Harness />);
+    await openSettings();
+    expect(
+      screen.getByText("연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01"),
     ).toBeInTheDocument();
     expect(requestBody()).toBeNull();
   });

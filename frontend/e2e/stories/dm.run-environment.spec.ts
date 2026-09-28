@@ -54,6 +54,80 @@ const runAndReadPeriod = async (page: Page): Promise<string> => {
 };
 
 test(
+  "US-DM-05 날짜 칸에 숫자를 이어 치거나 대시를 넣어 쳐도 그 날짜가 들어가고, 덜 친 날짜는 칸이 알려 준다",
+  { tag: ["@story", "@US-DM-05"] },
+  async ({ page }) => {
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(
+      page,
+      mustReplace(GOLDEN, "퀄리티 모멘텀", "US-DM-05 날짜 입력"),
+    );
+    await expectPhase(page, "검증 통과");
+    const summary = page.getByRole("region", { name: "실행 설정 요약" });
+    await summary.getByRole("button", { name: "실행 설정 채우기" }).click();
+    const start = page.getByLabel("시작일", { exact: true });
+    const end = page.getByLabel("종료일", { exact: true });
+    // OOS 칸의 라벨은 칸 아래 안내 문장까지 감싸, 접근 가능한 이름이 안내로 이어진다.
+    const oos = page.getByLabel(/^OOS 시작일/u);
+    await expect(start).toBeFocused();
+
+    // 사람이 치는 경로(#264): `fill()` 이 아니라 키를 하나씩 누른다. 연도 4자리를 치면 월로 넘어가야 한다.
+    await page.keyboard.type("20210101");
+    await expect(start).toHaveValue("2021-01-01");
+    // 일 자리에서 Tab 은 칸 안의 달력 버튼(브라우저 기본)에 먼저 멈추고, 한 번 더 누르면 다음 칸이다.
+    // 매뉴얼 5절 2번이 이 순서를 안내한다.
+    await page.keyboard.press("Tab");
+    await expect(start).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(end).toBeFocused();
+
+    // 연도만 친 채 다른 칸으로 가면 칸은 비어 있고, "값을 정하세요." 대신 날짜를 끝까지 치라고 말한다.
+    const incomplete = page.getByText(
+      "연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01",
+    );
+    await end.click();
+    await page.keyboard.type("2026");
+    await oos.click();
+    await expect(end).toHaveValue("");
+    await expect(incomplete).toBeVisible();
+    await expect(end).toHaveAttribute("aria-invalid", "true");
+
+    // 칸을 다시 눌러 대시까지 넣어 쳐도 같은 날짜가 들어가고, 모자란다는 문장은 사라진다.
+    await end.click();
+    await page.keyboard.type("2026-08-31");
+    await expect(end).toHaveValue("2026-08-31");
+    await expect(incomplete).toHaveCount(0);
+
+    const universe = page.getByRole("textbox", {
+      name: "유니버스",
+      exact: true,
+    });
+    await universe.fill(RUN_ENVIRONMENT.universe_id);
+    await expect(summary).toContainText("2021-01-01");
+    await expect(summary).toContainText("2026-08-31");
+
+    // OOS 시작일은 선택 칸이지만, 덜 친 채 떠나면 OOS 없이 조용히 실행되지 않고 막힌다(#266 리뷰 P2-1).
+    await oos.click();
+    await page.keyboard.type("2024");
+    await universe.click();
+    await expect(oos).toHaveValue("");
+    await expect(oos).toHaveAttribute("aria-invalid", "true");
+    const oosIncomplete = page.getByText(
+      "OOS 시작일을 연·월·일까지 모두 올바르게 입력하세요. 비워 두면 OOS 없이 실행합니다.",
+    );
+    await expect(oosIncomplete.first()).toBeVisible();
+    await expect(backtest(page)).toBeDisabled();
+
+    await oos.click();
+    await page.keyboard.type("20240102");
+    await expect(oos).toHaveValue("2024-01-02");
+    await expect(oosIncomplete).toHaveCount(0);
+    await expect(oos).not.toHaveAttribute("aria-invalid", "true");
+    await expect(backtest(page)).toBeEnabled();
+  },
+);
+
+test(
   "US-DM-05 실행 설정에서 기간만 바꿔 다시 돌려도 전략은 그대로이고 실행 기록에 바꾼 기간이 남는다",
   { tag: ["@story", "@US-DM-05", "@US-SM-06"] },
   async ({ page }) => {
@@ -82,9 +156,9 @@ test(
     await expect(page.getByRole("combobox", { name: "시장" })).toHaveValue(
       "KRX",
     );
-    await expect(
-      page.getByRole("combobox", { name: "체결 시점" }),
-    ).toHaveValue("next_open");
+    await expect(page.getByRole("combobox", { name: "체결 시점" })).toHaveValue(
+      "next_open",
+    );
     await expect(
       page.getByRole("spinbutton", { name: "수수료 (bp)" }),
     ).toHaveValue("15");
@@ -95,9 +169,9 @@ test(
     await expect(
       page.getByRole("spinbutton", { name: "참여율 (%)" }),
     ).toHaveValue("10");
-    await expect(
-      page.getByRole("combobox", { name: "결측 처리" }),
-    ).toHaveValue("drop");
+    await expect(page.getByRole("combobox", { name: "결측 처리" })).toHaveValue(
+      "drop",
+    );
     await expect(page.getByLabel("시작일", { exact: true })).toHaveValue("");
     await toggle.click();
 

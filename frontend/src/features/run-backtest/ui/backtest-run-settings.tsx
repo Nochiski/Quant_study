@@ -1,10 +1,12 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState, type SyntheticEvent } from "react";
 
 import { t, tDescription } from "../../../shared/config";
 import { Badge } from "../../../shared/ui";
-import type {
-  RunEnvironmentField,
-  RunEnvironmentFieldError,
+import {
+  DATE_INPUT_MAXIMUM,
+  DATE_INPUT_MINIMUM,
+  type RunEnvironmentField,
+  type RunEnvironmentFieldError,
 } from "../model/run-environment";
 import type { BacktestRunSettingsError } from "../model/run-settings";
 import { runEnvironmentErrorMessage } from "../model/run-settings-problems";
@@ -23,6 +25,10 @@ type BacktestRunSettingsProps = {
 const errorMessage = (error: BacktestRunSettingsError): string =>
   t(`backtest.settings.error.${error}`);
 
+/** 날짜 칸이 덜 채워졌는지: 연도만 쳤거나 없는 날짜(2월 31일)면 값은 빈 문자열이고 `badInput` 이 선다. */
+const isIncompleteDate = (event: SyntheticEvent<HTMLInputElement>): boolean =>
+  event.currentTarget.type === "date" && event.currentTarget.validity.badInput;
+
 const EnvironmentInput = ({
   field,
   value,
@@ -38,15 +44,21 @@ const EnvironmentInput = ({
   const hintId = useId();
   const errorId = useId();
   const description = tDescription(field.descriptionKey);
+  // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 검증만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
+  // 안에서 자리를 옮기는 동안 이벤트를 내지 않으므로, 칸을 떠날 때와 값이 바뀔 때 `badInput` 을 읽어 "날짜를
+  // 끝까지 치라"는 문장으로 바꿔 보인다. 값이 생기면 검증 결과를 그대로 쓴다.
+  const [incomplete, setIncomplete] = useState(false);
+  const shown: RunEnvironmentFieldError | undefined =
+    incomplete && value === "" ? "date" : error;
   const describedBy =
-    [description === null ? null : hintId, error === undefined ? null : errorId]
+    [description === null ? null : hintId, shown === undefined ? null : errorId]
       .filter((id): id is string => id !== null)
       .join(" ") || undefined;
   // 한 줄 뜻·오류는 label 밖에 둔다 — label 안에 두면 접근 가능한 이름이 뜻 문장까지 늘어난다.
   const common = {
     id: inputId,
     "aria-describedby": describedBy,
-    "aria-invalid": error === undefined ? undefined : true,
+    "aria-invalid": shown === undefined ? undefined : true,
     "aria-required": field.required || undefined,
     "data-run-field": field.name,
   } as const;
@@ -82,15 +94,23 @@ const EnvironmentInput = ({
           min={
             field.control === "number"
               ? (field.minimum ?? field.exclusiveMinimum ?? undefined)
-              : undefined
+              : field.control === "date"
+                ? DATE_INPUT_MINIMUM
+                : undefined
           }
           max={
             field.control === "number"
               ? (field.maximum ?? field.exclusiveMaximum ?? undefined)
-              : undefined
+              : field.control === "date"
+                ? DATE_INPUT_MAXIMUM
+                : undefined
           }
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => {
+            setIncomplete(isIncompleteDate(event));
+            onChange(event.target.value);
+          }}
+          onBlur={(event) => setIncomplete(isIncompleteDate(event))}
         />
       )}
       {description === null ? null : (
@@ -98,9 +118,9 @@ const EnvironmentInput = ({
           {description}
         </small>
       )}
-      {error === undefined ? null : (
+      {shown === undefined ? null : (
         <small id={errorId} className="backtest-settings__field-error">
-          {runEnvironmentErrorMessage(field, error)}
+          {runEnvironmentErrorMessage(field, shown)}
         </small>
       )}
     </div>
@@ -256,6 +276,8 @@ export const BacktestRunSettings = ({
             <span>{t("backtest.settings.oosStart")}</span>
             <input
               type="date"
+              min={DATE_INPUT_MINIMUM}
+              max={DATE_INPUT_MAXIMUM}
               data-run-field="oos_out_of_range"
               value={fields.oosStart}
               onChange={(event) => setField("oosStart", event.target.value)}

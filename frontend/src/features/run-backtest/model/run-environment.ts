@@ -31,6 +31,7 @@ export type RunEnvironmentFieldError =
   | "maximum"
   | "exclusiveMaximum"
   | "date"
+  | "dateRange"
   | "order";
 
 export type RunEnvironmentValidation =
@@ -94,6 +95,15 @@ export const runEnvironmentValuesOf = (
   );
 };
 
+/**
+ * 날짜 칸이 받는 범위(#264). 범위를 주지 않으면 Chromium 이 `<input type="date">` 의 연도를 6자리(275760년)까지
+ * 받아, 날짜를 숫자로 이어 치면 월·일이 연도로 빨려 들어가고 칸이 빈다. 최댓값의 연도가 4자리면 4자리 뒤에 월로
+ * 넘어간다. 실행 설정 스키마에는 날짜 상·하한 어휘가 없어(JSON Schema 2020-12 에 `format: date` 범위 키워드가
+ * 없다) 여기서 정한다. 하한은 데이터가 없는 먼 과거의 오타(0021년 등)를 칸에서 잡으려는 값이다.
+ */
+export const DATE_INPUT_MINIMUM = "1900-01-01";
+export const DATE_INPUT_MAXIMUM = "9999-12-31";
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const validDate = (value: string): boolean => {
@@ -153,6 +163,13 @@ export const validateRunEnvironment = (
     }
     if (field.control === "date" && !validDate(text)) {
       errors[field.name] = "date";
+      continue;
+    }
+    if (
+      field.control === "date" &&
+      (text < DATE_INPUT_MINIMUM || text > DATE_INPUT_MAXIMUM)
+    ) {
+      errors[field.name] = "dateRange";
       continue;
     }
     if (field.control === "select" && !field.options.includes(text)) {

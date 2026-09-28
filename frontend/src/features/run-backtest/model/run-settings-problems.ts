@@ -3,7 +3,11 @@ import {
   type RunEnvironmentField,
 } from "../../../entities/backtest";
 import { t } from "../../../shared/config";
-import type { RunEnvironmentFieldError } from "./run-environment";
+import {
+  DATE_INPUT_MAXIMUM,
+  DATE_INPUT_MINIMUM,
+  type RunEnvironmentFieldError,
+} from "./run-environment";
 import type { BacktestRunSettingsResult } from "./run-settings";
 
 /**
@@ -36,10 +40,13 @@ export const runEnvironmentErrorMessage = (
   error: RunEnvironmentFieldError,
 ): string => {
   const bound = boundOf(field, error);
-  return t(`backtest.settings.environment.error.${error}`).replace(
-    "{bound}",
-    bound === null ? "" : `${bound}${field.displayUnit ?? ""}`,
-  );
+  return t(`backtest.settings.environment.error.${error}`)
+    .replace(
+      "{bound}",
+      bound === null ? "" : `${bound}${field.displayUnit ?? ""}`,
+    )
+    .replace("{minimum}", DATE_INPUT_MINIMUM)
+    .replace("{maximum}", DATE_INPUT_MAXIMUM);
 };
 
 /**

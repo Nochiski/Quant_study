@@ -311,7 +311,9 @@ try {
     ),
   ).toBeVisible();
   await expect(documentStatus).toContainText("저장됨");
-  await expect(page.getByText("전략 구조를 분석하는 중입니다.")).toHaveCount(0);
+  // 저장 직후 revision 화면이 원문을 다시 분석하는 동안(`편집 중`, 구조 트리 "분석 중")을 찍지 않는다.
+  await expectPhase(page, "저장됨");
+  await expect(page.getByText("문서 구조를 분석하는 중입니다.")).toHaveCount(0);
   const revisionOneUrl = page.url();
   const strategyId = new URL(revisionOneUrl).pathname.split("/")[3];
   if (strategyId === undefined || strategyId === "") {

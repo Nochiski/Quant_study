@@ -918,8 +918,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             f"`empty_response`(→ MISSING)로 남는다(DESIGN §9 결정 9). {_FILL_KIND_NOTE}."
         ),
         disclosure_basis=(
-            "원장 날짜(basis default) — KIS 신용잔고는 실제로 T+1 공표이나 랙 축은 "
-            "dataset_profile(S19)이 확정한다"
+            "원장 날짜(basis default) — 신용잔고는 T+2 공표이고 우리 체인은 T+3 아침에 받는다. "
+            "그래서 dataset_profile(S19)이 3 세션 뒤부터 쓰게 정한다"
+            "(EQUITY_FIELD_MAP DEFECT-E01 정정)"
         ),
         evidence="credit_daily.whol_loan_rmnd_stcn_shr ← stg_credit_daily(KIS 신용잔고) 무수정",
     ),

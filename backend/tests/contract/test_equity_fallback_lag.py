@@ -13,13 +13,15 @@ from __future__ import annotations
 
 import importlib
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import FIELD_BY_ID
-from tests.equity_fixture import WB_PROFILE_ROWS, build_workbench_root
+from strategy_workbench.domain.equity.facade.research_data import ResearchPanelQuery
+from tests.equity_fixture import WB_PROFILE_ROWS, WB_SESSIONS, build_workbench_root
 
 pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync --extra equity)")
 
@@ -74,6 +76,33 @@ def test_손_픽스처_dataset_profile_랙이_원장_선언과_같다() -> None:
     )
 
     assert not drift, f"손 픽스처 랙이 원장과 다르다 — (field_id, fixture, ledger)={drift}"
+
+
+def test_폴백_루트의_패널도_원장_랙만큼_앞선_행을_본다(tmp_path: Path) -> None:
+    """값을 실제로 자르는 패널 경로의 폴백 랙을 잠근다(#255 리뷰 P3-3).
+
+    `list_fields` 대조만으로는 패널이 다른 랙 계산을 쓰게 바뀌어도 초록이다. 폴백 루트에서
+    필드 override(시가총액 1)·원천 상수(신용잔고 3)·랙 0(종가)이 셀 시점에 그대로 드러나는지 본다.
+    """
+    root = build_workbench_root(tmp_path / "equity", profile=False)
+    as_of = date(2024, 1, 9)
+    panel = EquityDuckdbAdapter(root).load_panel(
+        ResearchPanelQuery(
+            start=as_of,
+            end=as_of,
+            security_ids=("005930:1",),
+            field_ids=("price.close", "price.market_cap", "credit.margin_balance"),
+        )
+    )
+    assert panel.ok, panel.detail
+    ledger = _ledger_lags()
+    cells = {cell.field_id: cell for cell in panel.cells if cell.as_of == as_of}
+
+    for field_id in ("price.close", "price.market_cap", "credit.margin_balance"):
+        expected = WB_SESSIONS[WB_SESSIONS.index(as_of) - ledger[field_id]]
+        assert cells[field_id].available_date == expected, field_id
+    # 신용 행(01-04, 8,359,855주)은 세 세션 뒤인 01-09 에 처음 보인다
+    assert cells["credit.margin_balance"].value == 8_359_855.0
 
 
 # ── 폴백 사용 경고 ─────────────────────────────────────────────────────────────

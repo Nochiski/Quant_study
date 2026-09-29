@@ -1433,9 +1433,11 @@ test.describe("professional YAML workflow", () => {
         "이 문서는 지원이 끝난 schema 버전입니다",
       );
       await expect(backtest(page)).toBeDisabled();
-      // 옛 문서의 수수료가 실행 설정 기본값과 같으면 채우지 않아도 칸 값이 맞는다. 칸을 먼저 다른 값으로
-      // 바꿔 두어 채운 수수료가 옛 문서에서 왔는지 본다.
+      // 채운 기간·유니버스가 옛 문서에서 왔는지 보려면 칸이 빈 채 시작해야 한다. 옛 문서의 수수료는 실행
+      // 설정 기본값과 같아 채우지 않아도 칸 값이 맞으므로, 칸을 먼저 다른 값으로 바꿔 둔다.
       await toggle.click();
+      for (const field of [start, end, universe])
+        await expect(field).toHaveValue("");
       await fee.fill("30");
       await toggle.click();
 
@@ -1443,8 +1445,9 @@ test.describe("professional YAML workflow", () => {
       if (environment === null)
         throw new Error(`upgrading ${strategyId} returned no run environment`);
       await expect(banner).toContainText("현재 버전으로 다시 썼습니다");
-      // 옛 문서의 실행 설정(`data`·`execution`)은 문서를 떠나 응답으로 왔다. 사용자가 누를 때만
-      // 실행 설정 패널에 들어간다.
+      // 옛 문서의 실행 설정(`data`·`execution`)은 문서를 떠나 응답으로 왔다. 배너가 그 값을 보이고, 사용자가
+      // 누를 때만 실행 설정 패널에 들어간다.
+      await expect(banner).toContainText(environment.universe_id);
       await banner.getByRole("button", { name: "실행 설정에 채우기" }).click();
       await expect(banner).toContainText("옛 문서의 실행 설정을 채웠습니다.");
       await toggle.click();
@@ -1496,6 +1499,9 @@ test.describe("professional YAML workflow", () => {
       await expect(
         page.getByRole("status", { name: "실행 상태" }),
       ).toContainText("completed", { timeout: 120_000 });
+      // 채운 값은 마지막 사용값으로 남아 다음 문서의 칸을 채운 채 시작하게 한다(전략별 local UI state). 지워서
+      // 다음 revision 도 첫 revision 처럼 빈 칸에서 시작한다.
+      await page.evaluate(() => localStorage.clear());
     }
 
     // legacy JSON 동결 row: generated source가 이미 현재 버전이므로 업그레이드 대신 새 revision 저장만 제안한다.

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import date, timedelta
 from itertools import product
 
 import pytest
 
+from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint
 from strategy_workbench.domain.backtest.facade.environment import RESEARCH_START
 from strategy_workbench.domain.backtest.facade.runs import RunStatus
 from strategy_workbench.domain.experiment.facade.design import (
@@ -23,6 +25,9 @@ from strategy_workbench.domain.experiment.facade.design import (
     grid_neighbors,
     neighbor_mean,
     parameter_grid_values,
+    pick_window_cell,
+    stitch_out_of_sample,
+    walk_forward_retention,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     MAX_EXPERIMENT_PRIORITY,
@@ -342,8 +347,88 @@ def test_embargo_pulls_the_train_measurement_end(embargo_sessions: int, expected
 
 def test_embargo_that_swallows_the_train_window_is_rejected() -> None:
     split = SplitSpec(mode=SplitMode.ROLLING, train_years=1, test_years=1, embargo_sessions=6)
-    with pytest.raises(ValueError, match="train_sessions=6"):
+    with pytest.raises(InvalidExperimentSpecError, match="train_sessions=6") as caught:
         split.train_measurement_end(_WINDOW, _SESSIONS)
+    assert caught.value.code == "experiment.split.invalid"
+
+
+def test_measured_windows_end_each_train_window_before_the_embargo() -> None:
+    split = SplitSpec(mode=SplitMode.ROLLING, train_years=1, test_years=1, embargo_sessions=2)
+    start, end = date(2020, 1, 2), date(2022, 6, 30)
+    weekdays = [
+        day
+        for day in (start + timedelta(days=offset) for offset in range((end - start).days + 1))
+        if day.weekday() < 5
+    ]
+    first, second = split.windows(start, end)
+
+    # 검증 시작 2021-01-02(토) 앞 세션은 …12/30(수)·12/31(목)·1/1(금). 엠바고 2세션을 빼면 12/30.
+    # 2022-01-02(일) 앞은 …12/29(수)·12/30(목)·12/31(금) → 12/29. 검증 창은 그대로다.
+    assert split.measured_windows(start, end, weekdays) == (
+        replace(first, train_end=date(2020, 12, 30)),
+        replace(second, train_end=date(2021, 12, 29)),
+    )
+
+
+def test_window_cell_is_the_best_train_score_and_ties_go_to_the_first_cell() -> None:
+    # 1차원 그리드 4칸 점수 1 3 2 3. 넣는 순서와 무관하게 좌표 순으로 동점을 가른다.
+    scores: dict[GridIndex, float] = {(3,): 3.0, (2,): 2.0, (1,): 3.0, (0,): 1.0}
+
+    assert pick_window_cell(scores, (4,), WindowSelectionRule.TRAIN_SHARPE_MAX) == (1,)
+    # 이웃 평균: (0,)=3, (1,)=(1+2)/2=1.5, (2,)=(3+3)/2=3, (3,)=2 → (0,)·(2,) 동점, 앞 칸.
+    assert pick_window_cell(scores, (4,), WindowSelectionRule.NEIGHBOR_MEAN_SHARPE_MAX) == (0,)
+
+
+def test_window_cell_without_scored_neighbors_uses_its_own_score() -> None:
+    # (2,) 는 실패해 점수가 없다: (0,)=2, (1,)=1, (3,) 는 이웃 점수가 없어 자기 점수 5.
+    scores: dict[GridIndex, float] = {(0,): 1.0, (1,): 2.0, (3,): 5.0}
+
+    assert pick_window_cell(scores, (4,), WindowSelectionRule.NEIGHBOR_MEAN_SHARPE_MAX) == (3,)
+    assert pick_window_cell({(0,): -0.5}, (1,), WindowSelectionRule.NEIGHBOR_MEAN_SHARPE_MAX) == (
+        0,
+    )
+    assert pick_window_cell({}, (4,), WindowSelectionRule.TRAIN_SHARPE_MAX) is None
+
+
+def test_out_of_sample_curve_chains_test_window_returns_from_the_initial_cash() -> None:
+    def segment(*points: tuple[date, float]) -> tuple[EquityCurvePoint, ...]:
+        return tuple(EquityCurvePoint(session, equity, None) for session, equity in points)
+
+    stitched = stitch_out_of_sample(
+        [
+            segment((date(2023, 1, 2), 110.0), (date(2023, 1, 3), 99.0)),
+            # 둘째 창도 초기 자본 100 에서 시작한다 — 첫날 수익률은 120/100 이지 120/99 가 아니다.
+            segment((date(2024, 1, 2), 120.0), (date(2024, 1, 3), 90.0)),
+        ],
+        100.0,
+    )
+
+    assert [point.session for point in stitched] == [
+        date(2023, 1, 2),
+        date(2023, 1, 3),
+        date(2024, 1, 2),
+        date(2024, 1, 3),
+    ]
+    # 1.1, 1.1×0.9, 0.99×1.2, 1.188×0.75.
+    assert [point.equity for point in stitched] == pytest.approx([1.1, 0.99, 1.188, 0.891])
+    assert stitch_out_of_sample([], 100.0) == ()
+
+
+@pytest.mark.parametrize(
+    ("out_of_sample", "train", "expected"),
+    [
+        (0.05, [0.1, 0.3], 0.25),
+        (-0.02, [0.1], -0.2),
+        (0.05, [-0.1, 0.1], None),
+        (0.05, [-0.2], None),
+        (0.05, [], None),
+        (None, [0.1], None),
+    ],
+)
+def test_retention_is_out_of_sample_over_mean_train_sharpe(
+    out_of_sample: float | None, train: list[float], expected: float | None
+) -> None:
+    assert walk_forward_retention(out_of_sample, train) == pytest.approx(expected)
 
 
 def test_terminal_statuses() -> None:

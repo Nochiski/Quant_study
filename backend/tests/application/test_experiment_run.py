@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable, Collection
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -127,6 +127,11 @@ class _FakeRuns:
         for run_id, key in zip(self.run_statuses, self.keys, strict=True):
             self.run_statuses[run_id] = RunStatus.COMPLETED
             self.ledger_entries.append(TrialLedgerEntry(run_id, key, RunStatus.COMPLETED, _AT, _AT))
+
+    def sessions(self, start: date, end: date) -> tuple[date, ...]:
+        """평일 세션."""
+        days = (start + timedelta(days=offset) for offset in range((end - start).days + 1))
+        return tuple(day for day in days if day.weekday() < 5)
 
     def states(self, run_ids: Collection[str]) -> dict[str, BacktestRunState]:
         return {

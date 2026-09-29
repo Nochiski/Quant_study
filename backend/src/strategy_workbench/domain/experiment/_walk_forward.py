@@ -1,20 +1,23 @@
 """워크포워드 분할(`SplitSpec`)과 창 목록(spec D5).
 
 학습 구간에서 파라미터를 고르고 바로 다음 구간에서만 채점한다. 창 경계는 달력 날짜다. domain 에는
-거래 세션 달력이 없으므로 엠바고(세션 수)는 창 날짜에 녹이지 않고, 실행 단계(V3-05)가 읽은 세션
-목록을 `SplitSpec.train_measurement_end` 에 넘겨 학습 측정 끝을 당긴다.
-검증 창은 서로 붙어 있어 이어 붙인 표본 밖 곡선에 빈 구간이 생기지 않는다.
+거래 세션 달력이 없으므로 엠바고(세션 수)는 실험이 읽은 세션 목록을 `SplitSpec.measured_windows` 에
+넘겨 학습 끝을 엠바고를 뺀 학습 측정 끝으로 당긴다(V3-05). 검증 창은 서로 붙어 있어 이어 붙인
+표본 밖 곡선에 빈 구간이 생기지 않는다.
 """
 
 from __future__ import annotations
 
 from bisect import bisect_left
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from enum import StrEnum
 
+from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint
+
 from ._errors import InvalidExperimentSpecError
+from ._search import GridIndex, neighbor_mean
 
 
 class SplitMode(StrEnum):
@@ -127,18 +130,79 @@ class SplitSpec:
             sessions: 오름차순 거래 세션. 학습 창을 덮어야 한다(실행 단계가 세션 달력에서 읽는다).
 
         Raises:
-            ValueError: 엠바고를 빼면 학습 창에 세션이 남지 않는다.
+            InvalidExperimentSpecError: 엠바고를 빼면 학습 창에 세션이 남지 않는다.
         """
         first = bisect_left(sessions, window.train_start)
         last = bisect_left(sessions, window.test_start) - 1 - self.embargo_sessions
         if last < first:
-            raise ValueError(
-                "엠바고를 빼면 학습 창에 세션이 남지 않는다 — "
+            raise InvalidExperimentSpecError(
+                "experiment.split.invalid",
+                "엠바고를 빼면 학습 창에 세션이 남지 않습니다: "
                 f"train_start={window.train_start} test_start={window.test_start} "
                 f"embargo_sessions={self.embargo_sessions} "
-                f"train_sessions={bisect_left(sessions, window.test_start) - first}"
+                f"train_sessions={bisect_left(sessions, window.test_start) - first}",
             )
         return sessions[last]
+
+    def measured_windows(
+        self, research_start: date, research_end: date, sessions: Sequence[date]
+    ) -> tuple[WalkForwardWindow, ...]:
+        """`windows` 의 학습 끝을 엠바고를 뺀 학습 측정 끝으로 당긴 창 — trial 이 학습하는
+        구간이다."""
+        return tuple(
+            replace(window, train_end=self.train_measurement_end(window, sessions))
+            for window in self.windows(research_start, research_end)
+        )
+
+
+def pick_window_cell(
+    scores: Mapping[GridIndex, float], shape: tuple[int, ...], rule: WindowSelectionRule
+) -> GridIndex | None:
+    """창 하나의 학습 점수(칸마다 학습 실행의 대표 샤프)로 칸을 고른다. 점수가 없으면 None.
+
+    이웃 평균 기준에서 이웃 점수가 하나도 없는 칸(칸 하나뿐인 그리드)은 자기 점수로 잰다. 값이
+    같으면 좌표가 앞선 칸이다 — 같은 점수면 늘 같은 칸을 고른다.
+    """
+
+    def value(cell: GridIndex) -> float:
+        if rule is WindowSelectionRule.TRAIN_SHARPE_MAX:
+            return scores[cell]
+        mean = neighbor_mean(scores, shape, cell)
+        return scores[cell] if mean is None else mean
+
+    return max(sorted(scores), key=value, default=None)
+
+
+def stitch_out_of_sample(
+    segments: Sequence[Sequence[EquityCurvePoint]], initial_cash: float
+) -> tuple[EquityCurvePoint, ...]:
+    """검증 창 실행들의 일별 수익률만 이어 붙인 곡선. 1.0 에서 시작한다.
+
+    창마다 첫 세션 수익률은 그 실행의 초기 자본 대비다 — 검증 실행은 창 시작일에 현금으로 시작하고,
+    앞 창의 마지막 값에서 곡선이 이어진다. 학습 구간 수익률은 들어가지 않는다.
+    """
+    value, stitched = 1.0, []
+    for segment in segments:
+        previous = initial_cash
+        for point in segment:
+            value *= point.equity / previous
+            previous = point.equity
+            stitched.append(EquityCurvePoint(point.session, value, None))
+    return tuple(stitched)
+
+
+def walk_forward_retention(
+    out_of_sample_sharpe: float | None, train_sharpes: Sequence[float]
+) -> float | None:
+    """유지율 = 이어 붙인 검증 곡선의 세션 샤프 ÷ 창마다 고른 칸의 학습 세션 샤프 평균.
+
+    학습에서 보인 위험 대비 성과가 표본 밖에서 얼마나 남았는지다. 학습 평균이 0 이하이거나 값이
+    없으면 비율이 뜻이 없어 None 이다.
+    """
+    if out_of_sample_sharpe is None or not train_sharpes:
+        return None
+    train = sum(train_sharpes) / len(train_sharpes)
+    return out_of_sample_sharpe / train if train > 0 else None
 
 
 def _add_years(day: date, years: int) -> date:

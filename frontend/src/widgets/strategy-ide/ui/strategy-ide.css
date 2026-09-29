@@ -103,7 +103,11 @@
   padding: 0 var(--space-5);
 }
 
-/* body: left · centre · right. 오른쪽 서랍(`.ide__drawer`)의 기준 상자다. */
+/*
+ * body: left · centre · right. 오른쪽 서랍(`.ide__drawer`)의 기준 상자다. 배경을 루트와 같은 색으로 불투명하게
+ * 칠한다 — 기준 상자가 된 본문은 겹침(Overlap) 때문에 따로 합성되는데, 투명한 합성 층의 글자는 LCD
+ * 안티앨리어싱을 못 써 계약·중간 결과·문제 목록 글자가 회색조로 흐려졌다(#290 리뷰 r3 P3-1).
+ */
 .ide__body {
   position: relative;
   display: flex;
@@ -111,6 +115,7 @@
   min-height: 0;
   gap: 0;
   padding: 0 var(--ide-gutter) var(--ide-gutter);
+  background: var(--surface-canvas);
 }
 
 .ide__left {

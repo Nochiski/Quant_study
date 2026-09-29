@@ -36,6 +36,8 @@ from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_SPECS,
     SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
+    SourceMode,
+    _reject_unread_declarations,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
     EquityDuckdbAdapter,
@@ -421,6 +423,26 @@ def test_field_specs_cover_every_field_map_id_exactly_once() -> None:
     assert len(declared) == 29 and len(UNSUPPORTED_FIELDS) == 13
     assert len(declared | set(UNSUPPORTED_FIELDS)) == 42
     assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
+
+
+def test_declarations_their_query_does_not_read_are_rejected() -> None:
+    """선언한 식을 그 원천의 질의가 읽지 않으면 선언 때 막는다 — 읽히지 않는 선언은 조용히 무시된다.
+
+    필드 공개일 열은 LATEST PICK 질의만 읽고(#300 리뷰 P3-3), 가림 표시는 격자 질의만 읽는다(#311
+    리뷰 P3-3). LATEST 원천의 가림 표시는 결측 정책이 가린 셀을 다시 채우게 둔다.
+    """
+    _reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)  # 지금 선언은 통과한다
+    latest = next(spec for spec in SOURCE_SPECS if spec.mode is SourceMode.LATEST)
+    with pytest.raises(ValueError, match=re.escape(f"sources=['{latest.name}']")):
+        _reject_unread_declarations(
+            (*SOURCE_SPECS, replace(latest, masked_expr="TRUE")), FIELD_SPECS
+        )
+    grid = {spec.name for spec in SOURCE_SPECS if spec.mode is SourceMode.GRID}
+    gridded = next(spec for spec in FIELD_SPECS if spec.source in grid)
+    with pytest.raises(ValueError, match=re.escape(f"fields=['{gridded.field_id}']")):
+        _reject_unread_declarations(
+            SOURCE_SPECS, (*FIELD_SPECS, replace(gridded, available_expr="available_date"))
+        )
 
 
 # ── RawObservationPort ────────────────────────────────────────────────────────

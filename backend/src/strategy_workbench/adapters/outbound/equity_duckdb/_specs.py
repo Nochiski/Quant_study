@@ -1064,13 +1064,38 @@ UNSUPPORTED_FIELDS: dict[str, str] = {
 
 SOURCE_BY_NAME: dict[str, SourceSpec] = {spec.name: spec for spec in SOURCE_SPECS}
 FIELD_BY_ID: dict[str, FieldSpec] = {spec.field_id: spec for spec in FIELD_SPECS}
-# 필드 공개일 열은 LATEST 원천의 PICK 질의(`_latest`)만 읽는다 — GRID 는 조용히 행 공개일로
-# 보이고(look-ahead) SUM 은 집계 질의가 깨진다. 그래서 선언 때 막는다(#300 리뷰 P3-3·r2 P3-1).
-if _misplaced := [
-    f.field_id
-    for f in FIELD_SPECS
-    if f.available_expr is not None
-    and (SOURCE_BY_NAME[f.source].mode, SOURCE_BY_NAME[f.source].reduce)
-    != (SourceMode.LATEST, Reduce.PICK)
-]:
-    raise ValueError(f"available_expr needs a LATEST PICK source — fields={_misplaced}")
+
+
+def _reject_unread_declarations(
+    source_specs: tuple[SourceSpec, ...], field_specs: tuple[FieldSpec, ...]
+) -> None:
+    """선언한 식을 그 원천의 질의가 읽지 않으면 모듈을 올릴 때 막는다.
+
+    선언의 모양 규칙은 여기 한 곳에 둔다. 읽히지 않는 선언은 조용히 무시되고, 계약 테스트는
+    선언만 본다.
+    - 필드 공개일 열(`FieldSpec.available_expr`)은 LATEST 원천의 PICK 질의(`_latest`)만 읽는다.
+      GRID 는 조용히 행 공개일로 보이고(look-ahead) SUM 은 집계 질의가 깨진다(#300 리뷰 P3-3·r2
+      P3-1).
+    - 가림 표시(`SourceSpec.masked_expr`)는 격자 질의(`_grid`)만 읽는다. LATEST 원천에 두면 셀이
+      MASKED 가 되지 않아 결측 정책이 가린 셀을 다시 채운다(#311 리뷰 P3-3).
+    """
+    by_name = {spec.name: spec for spec in source_specs}
+    misplaced = [
+        spec.field_id
+        for spec in field_specs
+        if spec.available_expr is not None
+        and (by_name[spec.source].mode, by_name[spec.source].reduce)
+        != (SourceMode.LATEST, Reduce.PICK)
+    ]
+    if misplaced:
+        raise ValueError(f"available_expr needs a LATEST PICK source — fields={misplaced}")
+    unread = [
+        spec.name
+        for spec in source_specs
+        if spec.masked_expr is not None and spec.mode is not SourceMode.GRID
+    ]
+    if unread:
+        raise ValueError(f"masked_expr needs a GRID source — sources={unread}")
+
+
+_reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)

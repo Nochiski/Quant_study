@@ -31,7 +31,9 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.backtest_run._gc_policy import (
+    FULL_COLLECTION_INTERVAL_SECONDS,
     SUSPENDED_FULL_COLLECTION_THRESHOLD,
+    _FullCollectionSuspension,
     full_collections_suspended,
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -81,6 +83,26 @@ def _known_threshold() -> Iterator[None]:
 
 def _suspended() -> tuple[int, int, int]:
     return (ORIGINAL_THRESHOLD[0], ORIGINAL_THRESHOLD[1], SUSPENDED_FULL_COLLECTION_THRESHOLD)
+
+
+def test_runs_that_always_overlap_still_collect_fully_once_per_interval() -> None:
+    """V3-04: 대기열이 늘 차 있어 구간이 끝나지 않아도 간격마다 전체 수집을 한 번 돈다."""
+    now = [0.0]
+    collected: list[float] = []
+    suspension = _FullCollectionSuspension(
+        clock=lambda: now[0], collect=lambda: collected.append(now[0])
+    )
+
+    suspension.enter()
+    suspension.enter()
+    suspension.exit()  # 겹친 채 끝났지만 간격 전이다
+    now[0] = FULL_COLLECTION_INTERVAL_SECONDS
+    suspension.enter()
+    suspension.exit()  # 간격이 지나 한 번 돈다
+    suspension.exit()  # 마지막 run 은 임계값을 되돌린다
+
+    assert collected == [FULL_COLLECTION_INTERVAL_SECONDS]
+    assert gc.get_threshold() == ORIGINAL_THRESHOLD
 
 
 def test_scope_defers_only_full_collections_and_restores_the_previous_threshold() -> None:

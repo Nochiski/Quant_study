@@ -48,6 +48,7 @@ class MetricUnavailableReason(StrEnum):
     NO_OBSERVATIONS_IN_SCOPE = "no_observations_in_scope"
     PERIOD_UNDER_ONE_YEAR = "period_under_one_year"
     BASE_RATE_NOT_COVERED = "base_rate_not_covered"
+    TWO_VALUED_RETURNS = "two_valued_returns"
 
 
 @dataclass(frozen=True)

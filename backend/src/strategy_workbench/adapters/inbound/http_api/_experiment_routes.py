@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+import asyncio
+import time
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import Field
 from pydantic.config import JsonDict
 
@@ -31,6 +33,11 @@ from strategy_workbench.domain.experiment.facade.design import (
     ExperimentNotFoundError,
     ExperimentStateError,
 )
+from strategy_workbench.domain.experiment.facade.trial import (
+    MAX_EXPERIMENT_PRIORITY,
+    ExperimentStatus,
+    TrialStatus,
+)
 
 from ._backtest_contract import (
     BacktestStrategyNotFoundResponse,
@@ -39,6 +46,11 @@ from ._backtest_contract import (
     CodedBodyValidationRoute,
     backtest_field_invalid_detail,
 )
+from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, sse_frame
+
+# 실험 진행 스트림이 실험 상태를 다시 읽는 간격. 한 번 읽을 때 trial 마다 실행 상태를 모으므로
+# run 스트림(`SSE_POLL_SECONDS`)보다 드물게 읽는다.
+_EXPERIMENT_POLL_SECONDS = 1.0
 
 
 def _code_enum(schema: JsonDict) -> None:
@@ -64,6 +76,23 @@ class ExperimentAdmissionErrorResponse:
     """실험 설계 거절이거나, 기반 실행 요청을 실행 접수가 거절했다(백테스트 시작과 같은 코드)."""
 
     detail: ExperimentErrorDetail | BacktestUnprocessableDetail
+
+
+@dataclass(frozen=True)
+class ExperimentControlsRequest:
+    """일시정지·우선순위(1 = 보통). 보내지 않은 칸은 그대로다. 범위 owner 는 domain
+    `MAX_EXPERIMENT_PRIORITY` 다."""
+
+    paused: bool | None = None
+    priority: Annotated[int | None, Field(ge=1, le=MAX_EXPERIMENT_PRIORITY)] = None
+
+
+@dataclass(frozen=True)
+class ExperimentProgress:
+    """실험 진행 스트림의 이벤트 — 실험 상태와 trial 상태별 수."""
+
+    status: ExperimentStatus
+    trial_counts: dict[TrialStatus, int]
 
 
 @dataclass(frozen=True)
@@ -168,6 +197,38 @@ def register_experiment_routes(
     def get_experiment(experiment_id: str) -> Experiment:
         return experiments.get(experiment_id)
 
+    def control_experiment(experiment_id: str, request: ExperimentControlsRequest) -> Experiment:
+        """일시정지·재개·우선순위. 대기 trial 에만 적용하고 도는 trial 은 끝까지 돈다(spec D6)."""
+        return experiments.control(experiment_id, paused=request.paused, priority=request.priority)
+
+    app.router.add_api_route(
+        "/api/v1/experiments/{experiment_id}/controls",
+        control_experiment,
+        methods=["PATCH"],
+        operation_id="controlExperiment",
+        route_class_override=_ExperimentBodyRoute,
+        responses={
+            404: rejected[404],
+            422: {"model": ExperimentAdmissionErrorResponse, "description": "Invalid controls"},
+        },
+    )
+
+    @app.get(
+        "/api/v1/experiments/{experiment_id}/events",
+        operation_id="streamExperimentEvents",
+        response_class=StreamingResponse,
+        responses={404: rejected[404], 200: {"content": {"text/event-stream": {}}}},
+    )
+    def stream_experiment_events(experiment_id: str) -> StreamingResponse:
+        """실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나고 도는·대기 trial 이
+        없으면 마지막 수를 보낸 뒤 닫는다."""
+        experiments.get(experiment_id)
+        return StreamingResponse(
+            _progress_stream(experiments, experiment_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.get(
         "/api/v1/experiments/{experiment_id}/trials",
         operation_id="listExperimentTrials",
@@ -204,3 +265,34 @@ def register_experiment_routes(
     ) -> ExperimentSelection:
         """완료된 trial 을 후보로 고른 기록을 남긴다(spec D9). 되돌릴 수 없다."""
         return experiments.select(experiment_id, request.trial_index, request.reason)
+
+
+async def _progress_stream(
+    experiments: ExperimentRunService,
+    experiment_id: str,
+    *,
+    poll_seconds: float = _EXPERIMENT_POLL_SECONDS,
+    keepalive_seconds: float = SSE_KEEPALIVE_SECONDS,
+) -> AsyncIterator[str]:
+    """창을 닫아도 실험은 서버에서 돈다 — 스트림은 진행을 보이기만 한다(spec D6).
+
+    상태 조회는 저장소를 읽으므로 스레드에서 한다. 조용한 동안에는 keepalive 주석을 보낸다.
+    """
+    sequence = 0
+    last: ExperimentProgress | None = None
+    last_frame_at = time.monotonic()
+    while True:
+        experiment = await asyncio.to_thread(experiments.get, experiment_id)
+        progress = ExperimentProgress(experiment.status, experiment.trial_counts)
+        if progress != last:
+            yield sse_frame(sequence=sequence, event="progress", data=progress)
+            sequence, last, last_frame_at = sequence + 1, progress, time.monotonic()
+        # 취소한 실험도 도는 trial 이 끝날 때까지는 닫지 않아 마지막 프레임이 최종 수다.
+        if experiment.status.is_terminal and not (
+            progress.trial_counts.keys() & {TrialStatus.RUNNING, TrialStatus.QUEUED}
+        ):
+            return
+        if time.monotonic() - last_frame_at >= keepalive_seconds:
+            yield SSE_KEEPALIVE_FRAME
+            last_frame_at = time.monotonic()
+        await asyncio.sleep(poll_seconds)

@@ -10,6 +10,7 @@
 | 1 | 최초(V1-03): `backtest_runs` |
 | 2 | 시도 원장(V1-05): `trial_ledger`·`lineage_merges`·`sealed_window_blocks` |
 | 3 | 실험(V3-03): `experiments`·`experiment_attempts`·`experiment_selections` |
+| 4 | 실험 대기열 조작(V3-04): `experiment_controls` |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다.
 """
@@ -27,7 +28,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -218,6 +219,23 @@ _V3_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 
 V3_SCHEMA_OBJECTS = V2_SCHEMA_OBJECTS + _V3_ADDED_OBJECTS
 
+# 실험 단위 일시정지·우선순위(spec D6). 바꾼 적 없는 실험은 행이 없고 기본값(진행·1)이다.
+_V4_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "experiment_controls",
+        """
+        CREATE TABLE experiment_controls (
+            experiment_order INTEGER PRIMARY KEY REFERENCES experiments (experiment_order),
+            paused INTEGER NOT NULL CHECK (paused IN (0, 1)),
+            priority INTEGER NOT NULL CHECK (typeof(priority) = 'integer' AND priority >= 1)
+        )
+        """,
+    ),
+)
+
+V4_SCHEMA_OBJECTS = V3_SCHEMA_OBJECTS + _V4_ADDED_OBJECTS
+
 
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
@@ -234,11 +252,12 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V3_SCHEMA_OBJECTS,
+            objects=V4_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
                 SchemaUpgrade(2, V2_SCHEMA_OBJECTS, _added(_V3_ADDED_OBJECTS)),
+                SchemaUpgrade(3, V3_SCHEMA_OBJECTS, _added(_V4_ADDED_OBJECTS)),
             ),
         ),
     )

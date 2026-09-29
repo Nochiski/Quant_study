@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -8,7 +9,7 @@ from threading import RLock, Thread
 
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
-    RunStatus,
+    BacktestRunState,
     SavedRevisionReference,
 )
 from strategy_workbench.domain.backtest.facade.trials import preview_trial
@@ -23,8 +24,10 @@ from strategy_workbench.domain.experiment.facade.design import (
     experiment_trial_key,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
+    ExperimentControls,
     ExperimentStatus,
     TrialStatus,
+    awaiting_recovery,
     experiment_status,
     trial_status,
 )
@@ -73,12 +76,16 @@ class ExperimentTrialState:
     # 최신 attempt 에서 파생한다. attempt 가 없으면 대기(실험을 취소했으면 취소)다.
     status: TrialStatus
     attempts: tuple[TrialAttempt, ...]
+    # 최신 실행이 재시작으로 중단돼 복구가 다시 넘기기를 기다린다(`awaiting_recovery`).
+    awaiting_recovery: bool
 
 
 @dataclass(frozen=True)
 class Experiment:
     record: ExperimentRecord
     status: ExperimentStatus
+    # trial 상태별 수. 대기열 화면이 셈을 다시 하지 않게 싣는다.
+    trial_counts: dict[TrialStatus, int]
     selections: tuple[ExperimentSelection, ...]
 
 
@@ -96,8 +103,8 @@ def _spawn(work: Callable[[], None]) -> None:
 class ExperimentRunService:
     """실험을 설계·저장하고 trial 을 `TrialRunPort` 로 넘긴다(spec D5·D6).
 
-    trial 은 만든 순서대로 실행 서비스에 넘기기만 하고, 슬롯·순서는 실행 서비스의 대기열이 정한다.
-    실험 사이 공정 분배·재시작 복구·일시정지는 V3-04 가 이 제출을 스케줄러로 옮기며 더한다.
+    trial 은 만든 순서대로 실행 서비스에 넘기기만 하고, 슬롯·배정 순서·일시정지·우선순위는 실행
+    서비스의 대기열이 정한다. 재시작하면 `recover` 가 끝나지 않은 실험의 남은 trial 을 다시 넘긴다.
     """
 
     def __init__(
@@ -235,16 +242,63 @@ class ExperimentRunService:
             windows=request.split.windows(environment.start, environment.end),
         )
 
+    def control(
+        self, experiment_id: str, *, paused: bool | None = None, priority: int | None = None
+    ) -> Experiment:
+        """실험을 일시정지·재개하거나 우선순위를 바꾼다. 주지 않은 칸은 그대로다. 도는 trial 은
+        끝까지 돈다."""
+        with self._lock:
+            current = self._repository.get(experiment_id).controls
+            controls = ExperimentControls(
+                current.paused if paused is None else paused,
+                current.priority if priority is None else priority,
+            )
+            self._repository.set_controls(experiment_id, controls)
+            self._runs.schedule(experiment_id, paused=controls.paused, priority=controls.priority)
+        return self.get(experiment_id)
+
+    def recover(self) -> None:
+        """재시작 뒤 취소하지 않은 실험의 대기열 조작을 되살리고 남은 trial 을 다시 넘긴다(spec D6).
+
+        남은 trial 은 넘기지 못한 trial(제출이 예상 밖 오류로 멈춘 경우 포함)과 재시작으로 중단된
+        trial 이다. 끝난 실험은 넘길 trial 이 없다.
+        """
+        after: str | None = None
+        while records := self._repository.list(after=after, limit=100):
+            for record in records:
+                if record.cancelled_at is None:
+                    controls = record.controls
+                    self._runs.schedule(
+                        record.experiment_id, paused=controls.paused, priority=controls.priority
+                    )
+                    self._spawn(lambda record=record: self._submit(record))
+            after = records[-1].experiment_id
+
     def _submit(self, record: ExperimentRecord) -> None:
+        """attempt 가 없거나 실행이 재시작으로 중단된 trial 을 전개 순서대로 넘긴다."""
         try:
+            pending = [
+                state
+                for state in self._trial_states(record)
+                if not state.attempts or state.awaiting_recovery
+            ]
+            if not pending:
+                return
             base = self._runs.admit(record.run).run
-            for trial in record.design.trials():
+            for state in pending:
                 with self._lock:
                     if record.experiment_id in self._cancelled:
                         return
-                    self._start(record, base, trial, attempt=1)
+                    # 제출하는 동안 사용자가 재시도로 새 attempt 를 넘겼으면 건너뛴다(번호가 겹치면
+                    # 고아 run 이 생긴다).
+                    attempts = sum(
+                        attempt.trial_index == state.trial.index
+                        for attempt in self._repository.attempts(record.experiment_id)
+                    )
+                    if attempts == len(state.attempts):
+                        self._start(record, base, state.trial, attempt=attempts + 1)
         except Exception:
-            # 남은 trial 은 대기로 남는다(재시작 복구와 함께 V3-04 가 다시 넘긴다).
+            # 남은 trial 은 다음 재시작의 `recover` 가 다시 넘긴다.
             logger.exception(
                 "experiment trial submission stopped — experiment_id=%s", record.experiment_id
             )
@@ -283,11 +337,16 @@ class ExperimentRunService:
 
     def _experiment(self, record: ExperimentRecord) -> Experiment:
         states = self._trial_states(record)
+        statuses = [state.status for state in states]
         return Experiment(
             record=record,
             status=experiment_status(
-                [state.status for state in states], cancelled=record.cancelled_at is not None
+                statuses,
+                cancelled=record.cancelled_at is not None,
+                paused=record.controls.paused,
+                recovering=any(state.awaiting_recovery for state in states),
             ),
+            trial_counts=dict(Counter(statuses)),
             selections=self._repository.selections(record.experiment_id),
         )
 
@@ -295,12 +354,12 @@ class ExperimentRunService:
         attempts: dict[int, list[TrialAttempt]] = {}
         for attempt in self._repository.attempts(record.experiment_id):
             attempts.setdefault(attempt.trial_index, []).append(attempt)
-        statuses = self._runs.statuses(
+        runs = self._runs.states(
             {group[-1].run_id for group in attempts.values() if group[-1].run_id is not None}
         )
         cancelled = record.cancelled_at is not None
         return tuple(
-            _state(trial, tuple(attempts.get(trial.index, ())), cancelled, statuses)
+            _state(trial, tuple(attempts.get(trial.index, ())), cancelled, runs)
             for trial in record.design.trials()
         )
 
@@ -320,12 +379,16 @@ def _state(
     trial: ExperimentTrial,
     attempts: tuple[TrialAttempt, ...],
     cancelled: bool,
-    statuses: Mapping[str, RunStatus],
+    runs: Mapping[str, BacktestRunState],
 ) -> ExperimentTrialState:
     latest = attempts[-1] if attempts else None
-    run_status = None if latest is None or latest.run_id is None else statuses[latest.run_id]
-    status = trial_status(run_status, attempted=latest is not None, experiment_cancelled=cancelled)
-    return ExperimentTrialState(trial, status, attempts)
+    run = None if latest is None or latest.run_id is None else runs[latest.run_id]
+    status = trial_status(
+        None if run is None else run.status,
+        attempted=latest is not None,
+        experiment_cancelled=cancelled,
+    )
+    return ExperimentTrialState(trial, status, attempts, awaiting_recovery(run))
 
 
 def _base_source(run: BacktestRunSpec) -> SavedRevisionReference:

@@ -153,11 +153,11 @@ def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(
     assert filtered.total == 2
     assert [state.run_id for state in reopened.unfinished()] == ["run-1", "run-2"]
     # 여러 run 의 상태를 한 번에 읽는다(V3-04). 모르는 run 은 빠진다.
-    assert reopened.statuses(["run-3", "run-1", "missing"]) == {
-        "run-3": RunStatus.COMPLETED,
-        "run-1": RunStatus.QUEUED,
+    assert reopened.states(["run-3", "run-1", "missing"]) == {
+        "run-3": completed,
+        "run-1": _summary("run-1").run,
     }
-    assert reopened.statuses([]) == {}
+    assert reopened.states([]) == {}
 
 
 def test_an_unknown_run_is_not_found(tmp_path: Path) -> None:
@@ -192,7 +192,7 @@ def test_an_empty_file_is_claimed_once(tmp_path: Path) -> None:
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA application_id").fetchone() == (0x53575253,)
-        assert connection.execute("PRAGMA user_version").fetchone() == (3,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (4,)
 
 
 @pytest.mark.parametrize(
@@ -216,9 +216,9 @@ def test_a_file_owned_by_someone_else_is_refused(prepare: str, match: str, tmp_p
 @pytest.mark.parametrize(
     ("tamper", "match"),
     [
-        ("PRAGMA user_version = 4", "newer than this server"),
-        ("CREATE TABLE stray (x)", "does not match version 3"),
-        ("DROP INDEX experiment_attempts_by_trial", "does not match version 3"),
+        ("PRAGMA user_version = 5", "newer than this server"),
+        ("CREATE TABLE stray (x)", "does not match version 4"),
+        ("DROP TABLE experiment_controls", "does not match version 4"),
     ],
 )
 def test_a_future_or_edited_schema_is_refused(tamper: str, match: str, tmp_path: Path) -> None:

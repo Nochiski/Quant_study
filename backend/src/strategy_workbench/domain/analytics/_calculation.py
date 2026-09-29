@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from itertools import pairwise
+from statistics import NormalDist
 
 from ._base_rate import BASE_RATE_CONFIRMED_ON, base_rate
 from ._models import (
@@ -86,13 +87,15 @@ def compute_analytics(
     risk_free_reason = MetricUnavailableReason.BASE_RATE_NOT_COVERED if excess is None else None
     sharpe_reason = risk_free_reason or MetricUnavailableReason.ZERO_RETURN_VARIANCE
     volatility, sharpe, sortino = _risk_adjusted(returns, excess, annualization_days)
-    # Lo(2002): 일 샤프 SR/√A 의 표준오차 √((1 + SR²/(2A)) / N)에 √A 를 곱한 연 단위 값이다.
-    # 수익률이 독립·정규라고 본 근사다. 양의 자기상관·두꺼운 꼬리면 실제 오차가 더 크고, 음의
-    # 자기상관(평균회귀)이면 더 작을 수 있다.
     sharpe_error = (
-        math.sqrt((annualization_days + sharpe**2 / 2) / len(returns))
+        _sharpe_standard_error(sharpe, *_moments(returns), len(returns), annualization_days)
         if sharpe is not None
         else None
+    )
+    # 표준오차가 0이면(두 값만 나오는 곡선) PSR 을 나누지 않고 둘 다 비운다.
+    error_reason = sharpe_reason if sharpe is None else MetricUnavailableReason.TWO_VALUED_RETURNS
+    probabilistic = (
+        probabilistic_sharpe(sharpe, sharpe_error) if sharpe is not None and sharpe_error else None
     )
     rolling_sharpe = _rolling_sharpe(anchored, returns, excess, annualization_days, rolling_window)
     drawdowns = _drawdowns(anchored)[-len(points) :]
@@ -126,7 +129,8 @@ def compute_analytics(
         value("cagr", cagr, cagr_reason),
         value("volatility", volatility),
         value("sharpe", sharpe, sharpe_reason),
-        value("sharpe_standard_error", sharpe_error, sharpe_reason),
+        value("sharpe_standard_error", sharpe_error or None, error_reason),
+        value("probabilistic_sharpe", probabilistic, error_reason),
         value(
             "sortino", sortino, risk_free_reason or MetricUnavailableReason.NO_DOWNSIDE_VARIATION
         ),
@@ -239,6 +243,43 @@ def session_sharpe(sharpe: float, annualization_days: int) -> float:
     실행마다 연환산 거래일이 달라도 같은 척도라 계열 시도의 대표 샤프로 쓴다(검증 랩 spec D2).
     """
     return sharpe / math.sqrt(annualization_days)
+
+
+def probabilistic_sharpe(sharpe: float, standard_error: float, benchmark: float = 0.0) -> float:
+    """PSR(Bailey·López de Prado 2012 식 11): 진짜 샤프가 `benchmark`보다 클 확률 Φ((SR − SR*) / σ̂).
+
+    `standard_error`는 같은 실행의 `sharpe_standard_error` 값이다. 지표의 기준은 0이다(검증 랩
+    spec D8). 세 인자는 같은 단위(연 또는 세션)여야 한다. 계열 DSR의 기대 최대 샤프는 세션 단위라,
+    샤프와 표준오차를 `session_sharpe`로 함께 세션 단위로 되돌려 넣는다(선형이라 표준오차에도 쓴다).
+    단위가 섞이면 기준이 √A 배 작게 들어가 DSR이 예외 없이 부푼다.
+    """
+    return NormalDist().cdf((sharpe - benchmark) / standard_error)
+
+
+def _moments(returns: tuple[float, ...]) -> tuple[float, float]:
+    """원수익률의 왜도와 원(비초과) 첨도. 분모 n인 표본 모멘트다(논문 구현이 쓴 scipy 기본값)."""
+    mean = sum(returns) / len(returns)
+    central = tuple(item - mean for item in returns)
+    variance = sum(item**2 for item in central) / len(central)
+    skewness = sum(item**3 for item in central) / len(central) / variance**1.5
+    kurtosis = sum(item**4 for item in central) / len(central) / variance**2
+    return skewness, kurtosis
+
+
+def _sharpe_standard_error(
+    sharpe: float, skewness: float, kurtosis: float, observations: int, annualization_days: int
+) -> float:
+    """연 샤프의 표준오차. 일 샤프 s = SR/√A 의 σ̂ = √((1 − γ₃s + (γ₄−1)s²/4) / (n−1))을 √A 배 했다.
+
+    Mertens(2002)·Bailey·López de Prado(2012) 식이라 왜도·두꺼운 꼬리는 넣지만 수익률이 날마다
+    독립이라고 본다. 양의 자기상관이면 실제 오차가 더 크고, 음의 자기상관이면 더 작을 수 있다.
+    근호 안은 (1 − γ₃s/2)² 이상이라 실수로는 음수가 아니고, 두 값만 나오는 곡선에서 s = 2/γ₃ 일 때만
+    0이다. 그 점에서 부동소수 오차로 생기는 작은 음수는 0으로 붙인다. 정규(γ₃ = 0, γ₄ = 3)면 분모만
+    n−1인 Lo(2002) 식이다.
+    """
+    s = session_sharpe(sharpe, annualization_days)
+    variance = (1 - skewness * s + (kurtosis - 1) / 4 * s**2) / (observations - 1)
+    return math.sqrt(annualization_days * max(0.0, variance))
 
 
 def _drawdowns(points: tuple[AnalysisPoint, ...]) -> tuple[DrawdownPoint, ...]:

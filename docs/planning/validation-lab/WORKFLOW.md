@@ -250,7 +250,8 @@ application 화살표 없음).
 
 **Acceptance**: #161의 `MAX_CONCURRENT_RUNS` 상수와 SoT 행을 설정 하나(기본값 = 그 상수, 환경 변수
 `STRATEGY_WORKBENCH_RUN_SLOTS`로 덮어씀)로 대체, 슬롯 2개 이상일 때만 단일 실행 전용 1개, 굶주림 없음, 공정
-분배, 같은 `run_fingerprint`는 1회 실행·결과 공유(시도 키로 결과를 공유하지 않는다), 재기동 복구, 일시정지 뒤
+분배, 같은 `run_fingerprint` 입력은 도는 run 만 잇고 끝난 결과는 재사용하지 않는다(재확인은 원장에 남는다,
+2026-09-30 리드 결정. 시도 키로 결과를 공유하지 않는다), 재기동 복구, 일시정지 뒤
 순서, 실험 SSE(keepalive), e2e가 실행을 붙잡아 둘 수 있는 테스트 훅, `_gc_policy` 주기 기반 재설계.
 `RunStatus` 값 불변.
 
@@ -332,6 +333,13 @@ Dependency 칸이 정본이다.
   `ExperimentTrialState` 에 `retryable`·`selectable` 을 싣는다.
 - V5-01 인계(V3-04, #346 리뷰 P3-4): US-SM-11(같은 계산이 겹쳐 돌지 않는다)의 스토리 e2e 를 V3-04 의 trial
   붙잡기 훅으로 붙인다(붙잡힌 trial 을 사용자가 이어 같은 실행 ID 로 가고, 취소해도 실험이 쓰는 동안 돈다).
+- V5-01 인계(V3-04 2/2, #348 리뷰 P3-6): (1) playwright 서버 환경에 `STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS`
+  를 켜 도는 trial 을 붙잡는다(켜지면 기동 경고 로그). (2) 진행 스트림(`/experiments/{id}/events`)은 실험이
+  끝나고 도는·대기 trial 이 없을 때 최종 수를 보낸 뒤 닫힌다 — 화면은 닫힌 스트림을 끝으로 본다.
+  (3) US-SM-15 의 "동시 실행 슬롯 사용량"은 V5-01 에서 기존 응답(실험 목록)에 최소 칸 하나(예: 슬롯 수·도는
+  run 수)를 더해 보인다 — 화면이 trial 수로 추정하지 않는다.
+- V5-02 인계(V4-01, #363 리뷰 P3-3): PSR(`probabilistic_sharpe`)이 1.0으로 포화되면 percent 포맷이 100.00%로
+  보인다. 검증 카드는 ">99.99%" 같은 상한 표기를 정한다.
 
 ## 9. Phase 6 — 홀드아웃 개봉
 

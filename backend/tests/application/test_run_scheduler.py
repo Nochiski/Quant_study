@@ -39,3 +39,26 @@ def test_one_slot_is_kept_for_single_runs_only_when_there_are_two_or_more(
     run_slots: int, expected: int
 ) -> None:
     assert experiment_slots(run_slots) == expected
+
+
+def test_priority_weights_take_that_many_turns_and_paused_lanes_keep_their_place() -> None:
+    queue: RunQueue[str] = RunQueue()
+    queue.configure("A", paused=False, weight=2)
+    for item in ("a1", "a2", "a3", "a4"):
+        queue.push(item, "A")
+    for item in ("b1", "b2"):
+        queue.push(item, "B")
+    queue.push("c1", "C")
+
+    first = [queue.pop(experiments=True) for _ in range(3)]
+    queue.configure("B", paused=True, weight=1)
+    while_paused = [queue.pop(experiments=True) for _ in range(3)]
+    assert queue.pop(experiments=True) is None
+    queue.configure("B", paused=False, weight=1)
+    rest = [queue.pop(experiments=True) for _ in range(2)]
+
+    # 우선순위 2 인 A 는 한 차례에 둘씩 나간다.
+    assert first == ["a1", "a2", "b1"]
+    # 멈춘 B 는 건너뛰고, 대기 run 이 없으면 None 이다.
+    assert while_paused == ["c1", "a3", "a4"]
+    assert rest == ["b2", None]

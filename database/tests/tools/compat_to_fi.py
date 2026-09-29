@@ -19,6 +19,13 @@ v3 가 읽는 방식(원본 `backend/`, 읽기 전용 사본 기준):
   - 재무   `scoring/factors/quality.py:10-19`·`valuation.py:8-14` —
            `period_type='annual' AND data_type IS NULL ORDER BY period DESC LIMIT 2(1)`.
 
+v2 가 읽는 방식(`scoring/v2_data_loader.py`, 가격·수급·시총은 위와 같은 표를 창만 달리 읽는다):
+  - 가격   `:9-23` — `trade_date BETWEEN date(D,'-200 days') AND D`, 최근 130행,
+           값은 `CAST(COALESCE(adj_close, close) AS INTEGER)`.
+  - 수급   `:98-119` — `trade_date BETWEEN date(D,'-40 days') AND D`, 최근 20행, NULL → 0.
+  - 시총   `:88-95` — `stocks.market_cap IS NOT NULL AND market_cap > 0`(= v2 유니버스).
+  - 추정·확정 `:26-59` — `consensus_annual` 의 전년·당해·차년 12월기(`period_type='annual'`).
+
 이 모듈은 테스트 도구라 duckdb 를 쓴다(엔진 본체는 표준 라이브러리만).
 """
 from __future__ import annotations
@@ -33,9 +40,10 @@ from model.contracts import FI_TABLES, FLOW_SUBJECTS, FactorInputs
 
 Row = Mapping[str, object]
 
-# compat 에서 읽는 표(골든 parquet 파일명과 같다). consensus_annual 은 v3 엔진이 읽지 않는다(v2 몫).
+# compat 에서 읽는 표(골든 parquet 파일명과 같다). consensus_annual 은 v2 만 읽는다
+# (→ fi_consensus_annual, v3 엔진은 읽지 않는다).
 COMPAT_TABLES = ("stocks", "daily_prices", "investor_detail_flows", "financial_summary",
-                 "consensus_revision_daily", "consensus_revision_compare")
+                 "consensus_revision_daily", "consensus_revision_compare", "consensus_annual")
 
 # compat revision_compare 의 기간 접미사 → fi_consensus.horizon. `1y` 는 계약 horizon 에 없어 버린다
 # (v3 엔진은 1w·1m·3m 만 읽는다 — `scoring/factors/revision.py:11-15`).
@@ -159,9 +167,43 @@ def _map_fin(fin: Sequence[Row]) -> list[dict]:
             for r in fin if r["data_type"] is None]
 
 
+# ── fi_consensus_annual ← consensus_annual (v2 원천) ─────────────────────────────────────────
+# v2 는 `consensus_annual` 의 전년·당해·차년 12월기 op·ni·per 를 읽는다(`v2_data_loader.py:26-59`,
+# `period IN (Y-1/12, Y/12, Y+1/12) AND period_type='annual'`). compat 는 이 표를 stage
+# `stg_consensus_annual`(WISE c1050001 T2Y) 종목별 최신 판 하나에서 만든다
+# (`compat/mappings.py` _CONSENSUS_ANNUAL_SQL). 행을 1:1 로 옮긴다:
+#   data_type  'estimate' → 'E' · 'actual' → 'A'(compat 는 period_kind 'E' 만 estimate, 그 밖은
+#              actual 로 쓴다). 다른 값은 compat 규약 밖이라 거절한다.
+#   period_type 은 계약에 없다 — compat 에서 결산월 12 ⇔ annual 이라 period 가 대신한다
+#              (v2 엔진이 Y/12 기만 읽으므로 quarter 행(비12월 결산, DQ-11)은 실어도 읽히지 않는다).
+#   fetched_date: consensus_annual 에 날짜 열이 없다(NULL).
+# W1-b 규약: v3 의 fi_consensus(매트릭스)·fi_fin_summary(cF3002)와 같은 기·항목이어도 **다른 값**
+# 이다(09-28 골든 당해 cur op 318 · ni 299 · per 618 종목, 전년 확정 op 564 · ni 595 종목) — 이 표는
+# c1050001 값을 그대로 싣는다. 값이 전부 NULL 인 행도 v2 에게는 "그 종목이 있다"는 뜻이라(성장 0 ·
+# 밸류 100 으로 갈린다 — 엔진 docstring) 빼지 않는다.
+_ANNUAL_DATA_TYPE = {"estimate": "E", "actual": "A"}
+_ANNUAL_VALUES = ("revenue", "op", "ni", "eps", "per")
+
+
+def _map_consensus_annual(annual: Sequence[Row]) -> list[dict]:
+    out = []
+    for r in annual:
+        dt = r["data_type"]
+        if dt not in _ANNUAL_DATA_TYPE:
+            raise ValueError(f"consensus_annual {r['stock_code']} {r['period']}: "
+                             f"data_type {dt!r} ∉ {tuple(_ANNUAL_DATA_TYPE)}")
+        out.append(_row("fi_consensus_annual", ticker=r["stock_code"], period=r["period"],
+                        data_type=_ANNUAL_DATA_TYPE[dt],
+                        **{k: _f(r[k]) for k in _ANNUAL_VALUES}))
+    return out
+
+
 def compat_to_fi(compat: Mapping[str, Sequence[Row]], score_date: str,
                  build_id: str = "compat") -> FactorInputs:
-    """compat 표(표 이름 → 행 dict 목록) → FactorInputs(아침 확정판)."""
+    """compat 표(표 이름 → 행 dict 목록) → FactorInputs(아침 확정판).
+
+    v3·v2 이식 엔진이 이 한 판을 같이 읽는다(v2 추정·확정은 fi_consensus_annual 만).
+    """
     missing = [t for t in COMPAT_TABLES if t not in compat]
     if missing:
         raise KeyError(f"compat 표 없음 {missing}")
@@ -173,6 +215,7 @@ def compat_to_fi(compat: Mapping[str, Sequence[Row]], score_date: str,
         "fi_universe": _map_universe(compat["stocks"], date.fromisoformat(score_date)),
         "fi_consensus": _map_consensus(compat["consensus_revision_daily"],
                                        compat["consensus_revision_compare"]),
+        "fi_consensus_annual": _map_consensus_annual(compat["consensus_annual"]),
         "fi_fin_summary": _map_fin(compat["financial_summary"]),
         # fi_credit: compat 에 원천이 없다(v4 전용 표) — 싣지 않는다.
     }

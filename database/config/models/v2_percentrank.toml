@@ -1,0 +1,86 @@
+# v2 4팩터 PERCENTRANK 모델 — v3 `config.yaml` 의 `scoring_v2:` 블록(가중치)과 v2 코드에 박힌
+# 창·행 수를 한곳에 옮긴 레지스트리 항목.
+# 값의 정본:
+#   - 가중치: v3 `config.yaml:57-85`(scoring_v2.factors) — `backend/config.py:173-179` 가 읽는다.
+#     골든 meta.json 에는 v2 설정이 없어 로컬 v3 사본(kael-system-v3 `config.yaml`)에서 옮겼고,
+#     골든 09-28 대조(|Δ| ≤ 1e-9)가 값·순서를 함께 검증한다.
+#   - 창·행 수: v3 `backend/scoring/v2_data_loader.py`·`v2_factors/{momentum,flow}.py` 에 하드코딩.
+# 버전 1.0 = v2 원본과 같은 정의. 정의·가중치 수정은 1.1 로 별도 등록한다.
+#
+# ⚠ 키 순서가 곧 합산 순서다. v2 는 하위 백분위를 `sub_weights` 키 순서로 더하고
+#   (`v2_factors/*.py` compute_*_scores), 종합점수를 momentum·growth·flow·value 순으로 더한다
+#   (`v2_engine.py:98`·`166`). 여기 순서를 v2 config 와 같게 둬야 비트 단위로 맞는다.
+#
+# 설정 밖에 코드로 고정한 정의(엔진 `engines/v2_percentrank.py` 가 v2 그대로 재현):
+#   - 결산기는 **12월기만**: 전년 `{Y-1}/12`·당해 `{Y}/12`·차년 `{Y+1}/12`, Y = 기준일의 연도
+#     (`v2_data_loader.py:27-36`, `v2_engine.py:140`). 비12월 결산 종목은 성장·밸류가 비어 있다.
+#   - 밸류는 역방향: 하위 점수 = w·(1 − 백분위)(`v2_factors/value.py:37`). v3 config 의
+#     `value.direction: lower_is_better` 는 v2 코드가 읽지 않는다 — 방향은 코드에 박혀 있다.
+#   - stale guard(`v2_engine.py:143-152`, D 가격 행 < 2,000 이면 중단)는 엔진 몫이 아니라
+#     판 빌드 게이트(W2 MG*) 몫이라 옮기지 않았다(v3_zscore 이식과 같은 처리).
+
+model_id = "v2_percentrank"
+version = "1.0"
+engine = "v2_percentrank"
+
+# 팩터 가중 — `v2_engine.py:166` 순서(momentum·growth·flow·value), 값은 config.yaml
+[buckets]
+momentum = 0.30
+growth = 0.35
+flow = 0.25
+value = 0.10
+
+# 유니버스 — v2 는 `stocks.market_cap IS NOT NULL AND market_cap > 0` 전부(`v2_data_loader.py:88-95`).
+# 시총 하한이 없고 D 가격 행도 요구하지 않는다(v3 와 다르다). compat 가 추정치 없는 종목의
+# market_cap 을 NULL 로 내므로 = 기본 UniverseRule 의 `fi_universe.eligible` ∧ market_cap > 0.
+[universe]
+require_estimates = true
+sec_types = ["common", "spac"]
+markets = ["KOSPI", "KOSDAQ"]
+
+# 모멘텀 — 가격 창 [D−200 달력일, D](`v2_data_loader.py:15`) 중 최근 130행(`:22-23`),
+# 값 = CAST(COALESCE(adj_close, close) AS INTEGER)(`:13`, 정수로 절사).
+# 수익률 = (종가[−1] / 종가[−(n+1)] − 1) × 100, n 은 **행(세션) 수**(`momentum.py:7-19`).
+[params.momentum]
+price_days = 200
+price_rows = 130
+
+[params.momentum.windows]
+r1m = 21
+r3m = 63
+r6m = 126
+
+[params.momentum.sub_weights]
+r1m = 0.40
+r3m = 0.35
+r6m = 0.25
+
+# 성장 — 영업이익·순이익 YoY(%): 당해/전년 · 차년/당해(`v2_data_loader.py:62-73`, `growth.py:9-17`)
+[params.growth.sub_weights]
+op_yoy_cur = 0.20
+op_yoy_next = 0.20
+ni_yoy_cur = 0.30
+ni_yoy_next = 0.30
+
+# 수급 — 순매수 창 [D−40 달력일, D](`v2_data_loader.py:104`) 중 최근 20행(`:115-118`)에서
+# 뒤쪽 n 행 합 ÷ 시총(억원) × 100(`flow.py:8-24`). 주체 열은 fi_flows 이름.
+[params.flow]
+flow_days = 40
+flow_rows = 20
+
+[params.flow.windows]
+inst_5d = { subject = "institution_total", rows = 5 }
+inst_20d = { subject = "institution_total", rows = 20 }
+frgn_5d = { subject = "foreign_investor", rows = 5 }
+frgn_20d = { subject = "foreign_investor", rows = 20 }
+
+[params.flow.sub_weights]
+inst_5d = 0.30
+inst_20d = 0.20
+frgn_5d = 0.30
+frgn_20d = 0.20
+
+# 밸류 — 당해·차년 PER(배), 0 이하는 결측(`value.py:15-23`)
+[params.value.sub_weights]
+per_cur = 0.50
+per_next = 0.50

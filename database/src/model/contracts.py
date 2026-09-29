@@ -109,6 +109,11 @@ FI_UNIVERSE = TableContract(
      _c("coverage_state", "VARCHAR", note="fresh | grace | lapsed | none (T2.11)"),
      _c("coverage_age_days", "INTEGER", "일", note="마지막 신선 수집일부터 거래일 수"),
      _c("n_analysts", "INTEGER", note="추정기관 수(리비전 커버리지 ≥3 판정)"),
+     _c("adv20", "DOUBLE", "억원", "최근 20세션 평균 거래대금(D-13 적격성 ≥ 10억)"),
+     _c("is_admin", "BOOLEAN", note="관리종목 지정 중(D 기준)"),
+     _c("is_halted", "BOOLEAN", note="매매정지 중(D 기준)"),
+     _c("audit_adverse", "BOOLEAN", note="최근 연간 감사의견 한정·부적정·의견거절"),
+     _c("filing_late", "BOOLEAN", note="정기보고서 법정기한 지연 제출(최근 1건)"),
      _c("eligible", "BOOLEAN",
         note="기본 UniverseRule()(v3 미러) 통과 여부. 규칙이 다른 spec 은 엔진이 속성 열로 재판정"),
      _c("exclude_reason", "VARCHAR", note="eligible=False 사유(표시용)")),
@@ -187,6 +192,8 @@ FI_TABLES: dict[str, TableContract] = {t.name: t for t in (
 
 # ── ② 모델 설정 ───────────────────────────────────────────────────────────────
 ROLES = ("score", "display")
+# D-13 적격성 제외 표식 — UniverseRule.exclude 의 어휘. fi_universe 의 같은 이름 BOOLEAN 열과 짝이다
+ELIGIBILITY_FLAGS = ("admin", "halted", "audit_adverse", "filing_late")
 GATE_RULES = ("exclude_bottom_pct", "exclude_top_pct", "require_value")
 SECTOR_LEVELS = ("L1", "L2")
 
@@ -217,6 +224,8 @@ class UniverseRule:
     markets: tuple[str, ...] = ("KOSPI", "KOSDAQ")
     min_market_cap: float | None = None              # 억원
     coverage_grace_days: int = 5                     # D-14 후보(유예, 거래일)
+    min_adv20: float | None = None                   # 억원. D-13 적격성(v4 = 10)
+    exclude: tuple[str, ...] = ()                    # ELIGIBILITY_FLAGS 부분집합(v3 미러 = 없음)
 
 
 @dataclass(frozen=True)
@@ -284,6 +293,11 @@ class ModelSpec:
             errs.append("output.top_n·max_per_sector 는 양수")
         if self.universe.coverage_grace_days < 0:
             errs.append("universe.coverage_grace_days 는 0 이상")
+        bad_flags = set(self.universe.exclude) - set(ELIGIBILITY_FLAGS)
+        if bad_flags:
+            errs.append(f"universe.exclude {sorted(bad_flags)} ∉ {ELIGIBILITY_FLAGS}")
+        if self.universe.min_adv20 is not None and self.universe.min_adv20 < 0:
+            errs.append("universe.min_adv20 는 0 이상")
         return errs
 
     @classmethod
@@ -398,7 +412,8 @@ def score_columns(spec: ModelSpec) -> tuple[str, ...]:
 
 
 __all__ = [
-    "ALL_ENGINES", "DTYPES", "FI_ADJ_PRICES", "FI_CONSENSUS", "FI_CONSENSUS_ANNUAL",
+    "ALL_ENGINES", "DTYPES", "ELIGIBILITY_FLAGS", "FI_ADJ_PRICES",
+    "FI_CONSENSUS", "FI_CONSENSUS_ANNUAL",
     "FI_CREDIT", "FI_FIN_SUMMARY",
     "FI_FLOWS", "FI_PRICES", "FI_TABLES", "FI_UNIVERSE", "FLOW_SUBJECTS", "GATE_RULES",
     "INDICATOR_COLUMNS", "ROLES", "SCORE_BASE_COLUMNS", "SECTOR_LEVELS", "UNITS",

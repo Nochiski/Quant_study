@@ -76,7 +76,8 @@ def _v4_dict() -> dict:
             {"key": "R12_1", "bucket": "momentum_display", "role": "display"},
             {"key": "EP_FWD", "bucket": "value", "role": "display"},
         ],
-        "universe": {"sec_types": ["common"], "coverage_grace_days": 5},
+        "universe": {"sec_types": ["common"], "coverage_grace_days": 5, "min_adv20": 10.0,
+                     "exclude": ["admin", "halted", "audit_adverse", "filing_late"]},
         "output": {"top_n": 30, "sector_level": "L1", "max_per_sector": 9},
         "sector_neutral": "L1",
         "gates": [{"key": "M_PULL_C", "rule": "exclude_bottom_pct", "value": 0.30}],
@@ -115,6 +116,7 @@ def test_v3_and_v2_use_fixed_schemas() -> None:
      "(0, 1)"),
     (lambda d: d["buckets"].update(extra=0.0), "score 지표가 없다"),
     (lambda d: d.update(sector_neutral="L3"), "sector_neutral"),
+    (lambda d: d["universe"].update(exclude=["admin", "spac"]), "universe.exclude"),
 ])
 def test_validate_reports_each_error(mutate, needle: str) -> None:
     d = _v4_dict()

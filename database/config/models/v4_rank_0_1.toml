@@ -1,0 +1,168 @@
+# v4 백분위 순위 모델 — 플랜 `docs/plans/2026-09-24-v3-merge.md` §1-2 D-13'(09-26 최종안)의 기본 가중.
+# 근거: §1-7 R-1(밸류 정의 IC) · R-2(`docs/research/2026-09-26-v4-subfactor-ic.md`) ·
+#       R-3(`docs/research/2026-09-26-momentum-pullback-ic.md`).
+# 지표 정의(창·최소 개수·부호)는 연구 패널 SQL(`build_panel.py:110-286`·`build_mom.py:96-213`)과 같다.
+# 엔진은 `src/model/engines/v4_rank.py` — 지표 계산식은 엔진에, 가중·역할·게이트는 여기에 둔다.
+# 가중치 비교판은 `v4_rank_0_2.toml`(동일가중). 이 파일과 버킷 가중만 다르다.
+
+model_id = "v4_rank"
+version = "0.1"
+engine = "v4_rank"
+# 버킷 안 백분위를 WICS 대분류 안에서 — 어느 버킷에 걸지는 params.sector_neutral_buckets
+sector_neutral = "L1"
+
+# D-13' 기본 가중(저위험 .25 · 밸류 .25 · 퀄리티 .20 · 고점근접+반전 .10 · 리비전 .10 · 보조 .10).
+# 키 순서가 종합점수 합산 순서다(비례 재정규화 Σ s·w/Σw).
+[buckets]
+low_risk = 0.25
+value = 0.25
+quality = 0.20
+pull = 0.10
+revision = 0.10
+aux = 0.10
+
+# 유니버스 — 추정치 보유 보통주(D-13 · D-10). 기본 규칙(보통주+스팩)보다 좁으므로 엔진이
+# fi_universe 속성 열로 재판정한다. 유예 G = 5 거래일(D-14 후보, T2.11).
+[universe]
+require_estimates = true
+sec_types = ["common"]
+markets = ["KOSPI", "KOSDAQ"]
+coverage_grace_days = 5
+
+# 주간 후보 30 · 대분류 상한 9(30%) — M2 W0 결정 4건 권장안
+[output]
+top_n = 30
+sector_level = "L1"
+max_per_sector = 9
+
+[params]
+# 대분류 내 백분위는 밸류·퀄리티만(D-13'). 저위험·고점근접·리비전·보조는 유니버스 백분위.
+sector_neutral_buckets = ["value", "quality"]
+# 대분류 안 값 있는 종목이 이 수 미만이면 유니버스 백분위로 되돌린다(지표 flag 에 기록)
+min_sector_size = 5
+# 버킷이 이 수 미만이거나 필수 버킷이 없으면 제외(insufficient_data) — 저위험이 전체 최강(R-2)
+min_buckets = 3
+required_buckets = ["low_risk"]
+# 리비전은 추정기관 3곳 이상일 때만(D-13' "커버리지 ≥3")
+revision_min_analysts = 3
+
+# 고점근접+반전 하위 30% 는 후보 목록에서 뺀다(R-3: 십분위 D4 이후 평평 → 제외 게이트 성격).
+# 점수는 그대로 남기고 rank 만 비운다.
+[[gates]]
+key = "M_PULL_C"
+rule = "exclude_bottom_pct"
+value = 0.30
+
+# ── 점수 지표(role = score) ─────────────────────────────────────────────────────
+# 저위험 — R_VOL60(연구 §2 정의표 115행 · §6 "넣기 — 대표, 전체 최강" IC 0.162 t 10.8).
+# 연구는 −stddev 로 부호를 붙여 저장했고, 여기는 원값(표준편차) + direction −1 로 같은 순서를 낸다.
+[[indicators]]
+key = "VOL60"
+bucket = "low_risk"
+direction = -1
+definition = "60일 변동성 = 최근 60세션 일간 수익률의 표본표준편차(수정종가, 수익률 45개 이상). 낮을수록 좋다"
+
+# 밸류 — V_EP(정의표 129행, IC 0.099 t 8.7 · R-1: 현재가 기준이 기말가 고정보다 우월)
+[[indicators]]
+key = "EP"
+bucket = "value"
+definition = "후행 E/P = 최근 연간 확정 순이익(기말이 D−730일 이내) ÷ D 시가총액"
+
+# 밸류 — V_DY0(정의표 130행, IC 0.098 t 8.6 · §6 "무배당을 0 으로")
+[[indicators]]
+key = "DY0"
+bucket = "value"
+definition = "배당수익률 = 최근 연간 보통주 DPS(기말이 D−730일 이내) ÷ D 종가. 무배당·미공시는 0"
+
+# 퀄리티 — Q_OPM_TTM(정의표 110행, §6 "넣기 — 대표" IC 0.083 t 7.9)
+[[indicators]]
+key = "OPM_TTM"
+bucket = "quality"
+definition = "영업이익률 TTM = 최근 연속 4분기 영업이익 합 ÷ 매출 합(최근 분기 기말이 D−550일 이내, 매출 합 > 0)"
+
+# 퀄리티 — Q_FCFA(정의표 113행, §6 "넣기" IC 0.060 t 6.8, OPM 과 값상관 0.498)
+[[indicators]]
+key = "FCF_A"
+bucket = "quality"
+definition = "FCF/자산 = 최근 연간 (영업현금흐름 − |capex|) ÷ 자산총계(기말이 D−730일 이내)"
+
+# 고점근접+단기반전 — M_PULL_C(모멘텀 프로브 8행, IC +0.068 t 7.3, 시총중립 t 5.2)
+[[indicators]]
+key = "M_PULL_C"
+bucket = "pull"
+definition = "고점근접+단기반전 = (52주 고점 근접도 백분위 + (−1개월 수익률) 백분위) ÷ 2. 유니버스 단면 percent_rank(0~1, 동률은 낮은 순위)"
+
+# 리비전 — D-13' "op·ni 1m·3m 변화율, 커버리지 ≥3". R-2 §3-6: 측정 불가(미검증)라 가중 .10.
+# 변화율 = (현재 − 과거) ÷ |과거| · 부호 전환 표식은 v3 규약(흑전·적전·적확·적축, MODEL_EXCEL_SPEC E)
+[[indicators]]
+key = "REV_OP_1M"
+bucket = "revision"
+definition = "영업이익 추정 1개월 변화율 = (현재 − 1개월 전) ÷ |1개월 전|. 당해 결산기 컨센서스, 추정기관 3곳 이상"
+
+[[indicators]]
+key = "REV_OP_3M"
+bucket = "revision"
+definition = "영업이익 추정 3개월 변화율 = (현재 − 3개월 전) ÷ |3개월 전|. 당해 결산기 컨센서스, 추정기관 3곳 이상"
+
+[[indicators]]
+key = "REV_NI_1M"
+bucket = "revision"
+definition = "순이익 추정 1개월 변화율 = (현재 − 1개월 전) ÷ |1개월 전|. 당해 결산기 컨센서스, 추정기관 3곳 이상"
+
+[[indicators]]
+key = "REV_NI_3M"
+bucket = "revision"
+definition = "순이익 추정 3개월 변화율 = (현재 − 3개월 전) ÷ |3개월 전|. 당해 결산기 컨센서스, 추정기관 3곳 이상"
+
+# 보조 — F_CRDT_CHG(정의표 126행, §6 수급 버킷 유일 채택 IC 0.024 t 4.2) · F_FRGN60(정의표 121행,
+# IC 0.024 t 3.9, 시총중립 t 2.4 로 보류였으나 D-13' 가 "두 독립 축"으로 채택). 신용은 원값 + direction −1.
+[[indicators]]
+key = "CRDT_CHG"
+bucket = "aux"
+direction = -1
+definition = "신용잔고 20세션 변화율 = 신용융자 잔고주수[t] ÷ [t−20세션] − 1, t = D 까지 입수된(available_date ≤ D) 최신일. 낮을수록 좋다"
+
+[[indicators]]
+key = "FRGN60"
+bucket = "aux"
+definition = "외국인 60세션 순매수 ÷ 시가총액 = 최근 60세션 외국인 순매수 합 ÷ D 시가총액(무차원, 순매수 45세션 이상)"
+
+# ── 표시 지표(role = display) — 계산·표시만, 점수 미반영(사용자 09-26) ──────────────────
+# 1개월 수익률·52주 고점 근접도는 M_PULL_C 의 재료라 bucket 을 pull 로 둔다(엑셀 묶음용).
+[[indicators]]
+key = "R1M"
+bucket = "pull"
+role = "display"
+definition = "1개월 수익률 = 수정종가[t] ÷ 수정종가[t−21세션] − 1"
+
+[[indicators]]
+key = "M_52WH"
+bucket = "pull"
+role = "display"
+definition = "52주 고점 근접도 = 수정종가 ÷ 최근 252세션 최고 수정종가(200세션 이상)"
+
+# 추세 모멘텀은 R-2 에서 반대 방향(3·6개월) 또는 무효(12-1)라 표시만 — 정의표 119·120행
+[[indicators]]
+key = "R3M"
+bucket = "momentum_display"
+role = "display"
+definition = "3개월 수익률 = 수정종가[t] ÷ 수정종가[t−63세션] − 1"
+
+[[indicators]]
+key = "R6M"
+bucket = "momentum_display"
+role = "display"
+definition = "6개월 수익률 = 수정종가[t] ÷ 수정종가[t−126세션] − 1"
+
+[[indicators]]
+key = "R12_1"
+bucket = "momentum_display"
+role = "display"
+definition = "12-1 수익률 = 수정종가[t−21세션] ÷ 수정종가[t−252세션] − 1"
+
+# 선행 E/P — R-1: 컨센서스 PIT 이력 부족(DQ-2)으로 판정 불가, 12~18개월 표시·기록 뒤 재판정
+[[indicators]]
+key = "EP_FWD"
+bucket = "value"
+role = "display"
+definition = "선행 E/P = 당해 결산기 컨센서스 순이익 ÷ D 시가총액"

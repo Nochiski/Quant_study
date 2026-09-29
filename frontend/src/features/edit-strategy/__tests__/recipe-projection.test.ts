@@ -51,6 +51,10 @@ const graphTree = (nodes: string[], output: string): unknown =>
 const CLOSE = "{ kind: field, node_id: close, field_id: price.adj_close }";
 const MEAN =
   "{ kind: time_series, node_id: mean, operator: mean, input_node_id: close, window: 20 }";
+const STD =
+  "{ kind: time_series, node_id: std, operator: std, input_node_id: mean, window: 60 }";
+/** 안 쓰인 잎. 판정 갈래 하나만 따로 고정하려고 "잎이 하나 남는다" 검사를 채워 준다. */
+const ONE = "{ kind: constant, node_id: one, value: 1 }";
 
 describe("projectRecipe", () => {
   it("다중 입력 단계는 앞 단계와 체인 밖 잎을 입력 칸 순서로 가진다", () => {
@@ -92,6 +96,7 @@ describe("projectRecipe", () => {
         [
           CLOSE,
           MEAN,
+          ONE,
           "{ kind: comparison, node_id: gt, operator: gt, left_node_id: close, right_node_id: mean }",
         ],
         "gt",
@@ -107,7 +112,7 @@ describe("projectRecipe", () => {
       ],
       [
         "안 쓰인 노드",
-        [CLOSE, MEAN, "{ kind: constant, node_id: one, value: 1 }"],
+        [CLOSE, MEAN, ONE],
         "mean",
       ],
       [
@@ -121,7 +126,59 @@ describe("projectRecipe", () => {
         ],
         "add",
       ],
-      ["없는 노드를 가리킴", [MEAN], "mean"],
+      ["머리가 잎이 아님(문서 순서가 체인과 다름)", [STD, MEAN, CLOSE], "std"],
+      [
+        "첫 노드가 제 자신을 읽음(순환)",
+        [
+          "{ kind: binary, node_id: loop, operator: add, left_node_id: loop, right_node_id: close }",
+          CLOSE,
+          ONE,
+        ],
+        "loop",
+      ],
+      [
+        "없는 잎을 가리킴",
+        [
+          CLOSE,
+          "{ kind: comparison, node_id: gt, operator: gt, left_node_id: ghost, right_node_id: close }",
+        ],
+        "gt",
+      ],
+      [
+        "같은 노드를 두 칸에서 읽음(x op x)",
+        [
+          "{ kind: field, node_id: book, field_id: financial.book_equity }",
+          "{ kind: binary, node_id: add, operator: add, left_node_id: book, right_node_id: book }",
+        ],
+        "add",
+      ],
+      [
+        "부가 잎 공유((a/b)/b)",
+        [
+          CLOSE,
+          "{ kind: field, node_id: book, field_id: financial.book_equity }",
+          "{ kind: binary, node_id: d1, operator: divide, left_node_id: close, right_node_id: book }",
+          "{ kind: binary, node_id: d2, operator: divide, left_node_id: d1, right_node_id: book }",
+        ],
+        "d2",
+      ],
+      [
+        "앞선 단계를 건너뛰어 다시 읽음",
+        [
+          CLOSE,
+          MEAN,
+          STD,
+          ONE,
+          "{ kind: binary, node_id: sub, operator: subtract, left_node_id: std, right_node_id: mean }",
+        ],
+        "sub",
+      ],
+      ["출력이 마지막 단계가 아님", [CLOSE, MEAN], "close"],
+      [
+        "모르는 kind",
+        [CLOSE, MEAN, "{ kind: mystery, node_id: m }"],
+        "mean",
+      ],
       [
         "겹친 node_id",
         [CLOSE, CLOSE.replace("price.adj_close", "price.close")],
@@ -193,5 +250,19 @@ describe("recipeSummary", () => {
         ),
       ),
     ).toBe("노드 3개 · 고급");
+    // 연산 칸이 없는 노드(조건 분기)는 노드 종류 이름으로 부른다(리뷰 돌연변이 RS05).
+    expect(
+      summary(
+        graphTree(
+          [
+            CLOSE,
+            "{ kind: constant, node_id: one, value: 1 }",
+            "{ kind: constant, node_id: minus, value: -1 }",
+            "{ kind: conditional, node_id: sign, predicate_node_id: close, true_node_id: one, false_node_id: minus }",
+          ],
+          "sign",
+        ),
+      ),
+    ).toBe("수정 종가 → 조건 분기(앞 단계, 1, -1)");
   });
 });

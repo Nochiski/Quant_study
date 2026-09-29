@@ -735,6 +735,34 @@ describe("run environment panel", () => {
     expect(oos).toHaveAttribute("aria-invalid", "true");
   });
 
+  // #297 재리뷰 P2-1: 실행 설정 날짜 칸은 필수라 빈 값 자체가 오류다. 칸 안에서 고쳐 치는 도중에도 "값을
+  // 정하세요."가 아니라 날짜 문장이 서고, 요약 띠도 같은 원인을 말한다.
+  it("names the date problem, not an empty field, while a start date is retyped in place", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const start = screen.getByLabelText(/^시작일/);
+    // Backspace 한 번으로 한 자리가 빈 날짜 칸: 값은 빈 문자열, `badInput` 은 참이다.
+    Object.defineProperty(start, "validity", {
+      configurable: true,
+      value: { badInput: true },
+    });
+    const date = "연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01";
+    const blocked = `실행 설정의 시작일 칸을 고치세요: ${date}`;
+
+    fireEvent.change(start, { target: { value: "" } });
+    fireEvent.keyUp(start);
+    expect(requestBody()).toBeNull();
+    expect(start).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(date)).toBeInTheDocument();
+    expect(screen.queryByText("값을 정하세요.")).toBeNull();
+    expect(screen.getByTestId("blocked")).toHaveTextContent(blocked);
+
+    fireEvent.blur(start);
+    expect(screen.getByText(date)).toBeInTheDocument();
+    expect(screen.getByTestId("blocked")).toHaveTextContent(blocked);
+  });
+
   it("says the date is incomplete when a remembered value is not a whole date", async () => {
     localStorage.setItem(
       `${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`,

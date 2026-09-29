@@ -73,9 +73,11 @@ const NO_FIELDS: readonly RunEnvironmentField[] = [];
 
 type ScopedValues = { key: string; values: RunEnvironmentValues };
 /**
- * 덜 친 날짜 칸(브라우저 `validity.badInput`)의 이름. `settled` 는 칸을 떠날 때 넣은 것이라 표시와 실행이
- * 모두 보고, `typing` 은 칸 안(키를 뗌·값이 바뀜)에서 읽은 것이라 실행 게이트만 본다 — 빈 칸에 치거나 다
- * 친 날짜를 고쳐 치는 도중에 칸 아래·요약 띠·오류 목록이 서지 않는다(#270 P3-R2, #297 리뷰 P3-1).
+ * 덜 친 날짜 칸(브라우저 `validity.badInput`)의 이름. `settled` 는 칸을 떠날 때, `typing` 은 칸 안(키를 뗌·값이
+ * 바뀜)에서 읽은 것이다. 실행 게이트는 둘 다 본다. 비워 둘 수 있는 OOS 칸의 표시는 `settled` 만 봐서, 빈 칸에
+ * 치거나 다 친 날짜를 고쳐 치는 도중에 칸 아래·요약 띠·오류 목록이 서지 않는다(#270 P3-R2, #297 리뷰 P3-1).
+ * 실행 설정 날짜 칸은 필수라 빈 값 자체가 오류다. 그래서 둘을 합쳐 읽어 "값을 정하세요." 대신 날짜 문장을
+ * 보인다(#297 재리뷰 P2-1).
  */
 type ScopedDates = {
   key: string;
@@ -159,9 +161,9 @@ export const useBacktestRunSettings = (storageKey: string) => {
         : validateRunEnvironment(
             environmentFields,
             environmentValues,
-            dates.settled,
+            new Set([...dates.settled, ...dates.typing]),
           ),
-    [dates.settled, environmentFields, environmentValues],
+    [dates.settled, dates.typing, environmentFields, environmentValues],
   );
   const result = useMemo(
     () =>
@@ -197,8 +199,8 @@ export const useBacktestRunSettings = (storageKey: string) => {
   );
   /**
    * 날짜 칸(실행 설정 칸과 OOS 시작일)이 덜 쳐졌는지 칸이 알려 준다. 칸 안에서 난 일(`leaving` 거짓)은
-   * 실행 게이트만 고치고 표시는 지우기만 한다 — 날짜 선택기로 고르거나 끝까지 친 날짜는 오류를 바로
-   * 지운다. 표시에 넣는 것은 칸을 떠날 때뿐이다. 바뀐 것이 없으면 state 를 건드리지 않는다.
+   * `typing` 에만 넣고 `settled` 에서는 지우기만 한다 — 날짜 선택기로 고르거나 끝까지 친 날짜는 오류를 바로
+   * 지운다. `settled` 에 넣는 것은 칸을 떠날 때뿐이다. 바뀐 것이 없으면 state 를 건드리지 않는다.
    */
   const setDateIncomplete = useCallback(
     (name: string, incomplete: boolean, leaving: boolean): void =>

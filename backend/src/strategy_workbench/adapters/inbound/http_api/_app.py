@@ -20,7 +20,6 @@ from strategy_workbench.application.assistant_chat.facade.turns import Assistant
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestArtifactUnreadableError,
     BacktestParameterValueError,
-    BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
     BacktestRunResult,
@@ -394,12 +393,11 @@ def create_app(
             if code is None:
                 raise
             detail: dict[str, object] = {"code": code, "message": str(error)}
-            if isinstance(error, BacktestResearchWindowViolationError):
-                violation = error.violation
+            if isinstance(error, ResearchWindowViolationError):
                 detail |= {
-                    "sealed_start": violation.sealed_start.isoformat(),
-                    "sealed_end": violation.sealed_end.isoformat(),
-                    "research_start": violation.research_start.isoformat(),
+                    "sealed_start": error.sealed_start.isoformat(),
+                    "sealed_end": error.sealed_end.isoformat(),
+                    "research_start": error.research_start.isoformat(),
                 }
             elif isinstance(error, BacktestParameterValueError):
                 detail["parameter_id"] = error.parameter_id

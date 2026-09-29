@@ -146,35 +146,11 @@ class InvalidBacktestRunError(ValueError):
     pass
 
 
-class MissingBacktestRunEnvironmentError(InvalidBacktestRunError):
-    """실행 요청에 실행 설정이 없다(spec D3·D6, P2-03).
-
-    `InvalidBacktestRunError` 의 하위 타입으로 두되 HTTP 코드를 따로 준다. 프론트는 이 한
-    코드를 보고 "실행 설정을 채우라"는 화면(P3-02 실행 설정 패널)으로 보내야 하고,
-    `backtest.run.invalid` 에 묻으면 문장 파싱 말고는 구분할 방법이 없다. 하위 타입이므로
-    run 스레드의 방어 분기(`_run`)와 실패 코드 분류는 기존 `backtest.run.invalid` 를 그대로
-    쓴다 — 시작 요청이 앞에서 거르므로 그 경로로는 도달하지 않는다.
-    """
-
-
-class BacktestResearchWindowViolationError(InvalidBacktestRunError):
-    """측정 시작일이 연구 구간 밖이다(spec D1, V1-01).
-
-    `MissingBacktestRunEnvironmentError` 와 같은 이유로 HTTP 코드를 따로 준다. 프론트는 이 코드를
-    보고 봉인 구간과 연구 하한을 안내해야 하고, `backtest.run.invalid` 에 묻으면 문장 파싱 말고는
-    구분할 방법이 없다. 날짜는 도메인 오류(`violation`)가 싣는다.
-    """
-
-    def __init__(self, violation: ResearchWindowViolationError) -> None:
-        super().__init__(str(violation))
-        self.violation = violation
-
-
 class BacktestParameterValueError(InvalidBacktestRunError):
     """실행 요청의 파라미터 값을 전략 문서 정의로 해소할 수 없다(spec D4, V3-02).
 
-    `BacktestResearchWindowViolationError` 와 같은 이유로 HTTP 코드를 따로 준다. 어느 파라미터인지는
-    `parameter_id` 가 싣는다.
+    `backtest.run.invalid` 에 묻으면 문장 파싱 말고는 구분할 방법이 없어 HTTP 코드를 따로 준다.
+    어느 파라미터인지는 `parameter_id` 가 싣는다.
     """
 
     def __init__(self, error: InvalidParameterValueError) -> None:
@@ -692,18 +668,18 @@ class BacktestRunService:
     ) -> RunEnvironment:
         """요청의 실행 설정을 확정한다.
 
+        없거나 연구 구간 밖이면 domain 오류(`MissingRunEnvironmentError`·
+        `ResearchWindowViolationError`)를 그대로 올리고, 접수 거절 코드는 `rejection_code` 가 준다.
         봉인 겹침 거절은 `record_blocked` 면 봉인 원장에 남긴다(spec D11).
         """
         try:
             return require_environment(
                 spec.environment, requested_by=f"backtest.run({strategy.title!r})"
             )
-        except MissingRunEnvironmentError as error:
-            raise MissingBacktestRunEnvironmentError(str(error)) from error
-        except ResearchWindowViolationError as error:
+        except ResearchWindowViolationError:
             if record_blocked and spec.environment is not None:
                 self._record_blocked(spec, strategy, spec.environment, lineage_id)
-            raise BacktestResearchWindowViolationError(error) from error
+            raise
 
     def _record_blocked(
         self,
@@ -810,7 +786,7 @@ class BacktestRunService:
             raise InvalidBacktestRunError("resolved run spec has no strategy")
         environment = spec.environment
         if environment is None:  # pragma: no cover - start() pins it before the thread starts
-            raise MissingBacktestRunEnvironmentError(
+            raise InvalidBacktestRunError(
                 f"resolved run spec has no run environment — run_id={run_id}"
             )
         try:
@@ -1052,9 +1028,10 @@ class BacktestRunService:
 
 # 실행 접수 거절과 그 안정 키. HTTP 거절(`admitted`)과 실험 trial 제출이 이 목록 하나를 쓴다. 하위
 # 타입을 먼저 둔다.
+# 실행 설정 거절은 domain 오류 그대로다 — 봉인 구간·연구 하한 날짜도 그 오류가 싣는다.
 _REJECTION_CODES: tuple[tuple[type[Exception], str], ...] = (
-    (MissingBacktestRunEnvironmentError, "backtest.run.environment_required"),
-    (BacktestResearchWindowViolationError, "backtest.run.research_window_violation"),
+    (MissingRunEnvironmentError, "backtest.run.environment_required"),
+    (ResearchWindowViolationError, "backtest.run.research_window_violation"),
     (BacktestParameterValueError, "backtest.run.parameter_invalid"),
     (InvalidBacktestRunError, "backtest.run.invalid"),
     (StrategyReferenceNotFoundError, "backtest.strategy.not_found"),

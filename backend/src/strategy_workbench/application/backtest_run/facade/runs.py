@@ -1,11 +1,9 @@
 from strategy_workbench.application.backtest_run._service import (
     DEFAULT_RUN_SLOTS,
     BacktestParameterValueError,
-    BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
     BacktestRunService,
     InvalidBacktestRunError,
-    MissingBacktestRunEnvironmentError,
     RunAdmission,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
@@ -41,7 +39,6 @@ from strategy_workbench.domain.backtest.facade.trials import TrialLedger, TrialP
 __all__ = [
     "DEFAULT_RUN_SLOTS",
     "BacktestParameterValueError",
-    "BacktestResearchWindowViolationError",
     "BacktestResultNotReadyError",
     "BacktestArtifactUnreadableError",
     "BacktestRunNotFoundError",
@@ -54,7 +51,6 @@ __all__ = [
     "InlineDraft",
     "InvalidBacktestRunError",
     "InvalidRunFieldError",
-    "MissingBacktestRunEnvironmentError",
     "RunAdmission",
     "RunProgressEvent",
     "RunStatus",

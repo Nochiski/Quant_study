@@ -44,12 +44,10 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     MarketBarRecord,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
-    BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
     BacktestRunService,
     BacktestRunSpec,
     InvalidBacktestRunError,
-    MissingBacktestRunEnvironmentError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
     InvalidPortfolioRequestError,
@@ -73,7 +71,9 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 )
 from strategy_workbench.domain.backtest.facade.environment import (
     ImpactModel,
+    MissingRunEnvironmentError,
     ParticipationBasis,
+    ResearchWindowViolationError,
     RunEnvironment,
     SellTax,
     environment_hash,
@@ -191,7 +191,7 @@ def test_trace_without_an_environment_is_refused_like_preview() -> None:
 def test_run_without_an_environment_is_refused_before_it_is_queued(tmp_path: Path) -> None:
     runs = _runs(_portfolio(), tmp_path, "no-environment-run")
 
-    with pytest.raises(MissingBacktestRunEnvironmentError, match="run_environment.required"):
+    with pytest.raises(MissingRunEnvironmentError, match="run_environment.required"):
         runs.start(BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON))
 
 
@@ -228,7 +228,7 @@ def test_run_measuring_the_sealed_window_is_refused_before_it_is_queued(tmp_path
 
     request = BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=sealed)
 
-    with pytest.raises(BacktestResearchWindowViolationError, match="research_window"):
+    with pytest.raises(ResearchWindowViolationError, match="research_window"):
         runs.start(request)
 
 

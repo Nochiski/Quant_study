@@ -65,13 +65,12 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
     returns = (-0.2, 0.125, 2 / 9)
     sample_std = statistics.stdev(returns)  # 표본 표준편차(분모 n-1)
     assert _metric(report, "volatility").value == pytest.approx(sample_std * math.sqrt(252))
-    # 샤프·소르티노는 기준금리 초과수익으로 잰다. 기준금리 2.50%(2025-05-29 변경)를 직전 세션부터
-    # 달력 일수만큼 ACT/365로 일할한다: 1/2 → 1/5 는 주말을 끼어 3일, 나머지는 1일.
-    excess = (-0.2 - 0.025 * 3 / 365, 0.125 - 0.025 / 365, 2 / 9 - 0.025 / 365)
+    # 샤프·소르티노의 분자는 기준금리 초과수익 평균이다. 기준금리 2.50%(2025-05-29 변경)를 직전
+    # 세션부터 달력 일수만큼 ACT/365로 일할한다: 1/2 → 1/5 는 주말을 끼어 3일, 나머지는 1일.
     mean = 53 / 1080 - 0.025 * 5 / 365 / 3
-    excess_std = statistics.stdev(excess)
     downside_std = math.sqrt((0.2 + 0.025 * 3 / 365) ** 2 / 3)  # 음의 초과수익 제곱합 / 전체 수
-    assert _metric(report, "sharpe").value == pytest.approx(mean / excess_std * math.sqrt(252))
+    # 샤프 분모는 원수익률 표준편차 그대로다.
+    assert _metric(report, "sharpe").value == pytest.approx(mean / sample_std * math.sqrt(252))
     assert _metric(report, "sortino").value == pytest.approx(mean / downside_std * math.sqrt(252))
     # 1/2 → 1/7 은 5일이라 1년 미만: 예전처럼 1.1^(252/3) - 1 로 부풀리지 않고 비운다.
     for metric_id in ("cagr", "calmar"):
@@ -261,11 +260,12 @@ def test_risk_free_uses_the_rate_at_interval_start_over_calendar_days() -> None:
         rolling_window=3,
     )
 
+    returns = (0.01, 100 / 101 - 1, 0.02)
     excess = (0.01 - 0.025 / 365, 100 / 101 - 1 - 0.0275 / 365, 0.02 - 0.0275 * 3 / 365)
     mean = statistics.mean(excess)
-    sharpe = mean / statistics.stdev(excess) * math.sqrt(252)
+    sharpe = mean / statistics.stdev(returns) * math.sqrt(252)
     assert _metric(report, "sharpe").value == pytest.approx(sharpe)
-    # 롤링 샤프도 같은 초과수익을 쓴다. 창이 3이라 마지막 점은 전체 샤프와 같다.
+    # 롤링 샤프도 같은 식을 쓴다. 창이 3이라 마지막 점은 전체 샤프와 같다.
     assert report.rolling_sharpe[-1].value == pytest.approx(sharpe)
     assert _metric(report, "sortino").value == pytest.approx(
         mean / math.sqrt(excess[1] ** 2 / 3) * math.sqrt(252)
@@ -298,6 +298,47 @@ def test_deposit_like_curve_earning_the_base_rate_has_sharpe_near_zero() -> None
     # 초과수익은 ±0.05%가 번갈아 400개라 평균이 0이다.
     assert _metric(report, "sharpe").value == pytest.approx(0.0, abs=1e-9)
     assert _metric(report, "sortino").value == pytest.approx(0.0, abs=1e-9)
+
+
+@pytest.mark.parametrize("noise", [0.0, 0.0001])
+def test_cash_curve_counts_only_raw_return_swings_as_sharpe_risk(noise: float) -> None:
+    # 기준금리 3.50% 고정 기간의 평일 1년. 무위험수익률은 평일 1일·월요일 3일 치라 구간마다 다르지만
+    # 구간 시작에 이미 알려진 값이라 위험이 아니다. 분모가 초과수익 표준편차였다면 현금 곡선의
+    # 샤프가 이 일할 차이만으로 -27 이 됐다.
+    days = (date(2023, 1, 16) + timedelta(days=offset) for offset in range(365))
+    sessions = tuple(day for day in days if day.weekday() < 5)
+    equity = [100.0]
+    for index in range(1, len(sessions)):
+        equity.append(equity[-1] * (1 + (noise if index % 2 else -noise)))
+    report = compute_analytics(
+        AnalyticsInput(
+            points=tuple(
+                AnalysisPoint(session, value, 0.0, 0.0)
+                for session, value in zip(sessions, equity, strict=True)
+            ),
+            traded_notional=0.0,
+        ),
+        build_default_metric_registry(),
+    )
+
+    returns = tuple(after / before - 1 for before, after in pairwise(equity))
+    excess = tuple(
+        value - 0.035 * (after - before).days / 365
+        for value, (before, after) in zip(returns, pairwise(sessions), strict=True)
+    )
+    sharpe = statistics.mean(excess) / statistics.stdev(returns) * 252**0.5 if noise else None
+    # 현금만 들면 원수익률 분산이 0이라 샤프를 비운다. ±0.01%만 흔들려도 기준금리에 꾸준히
+    # 뒤처지는 진짜 결과라 큰 음수가 나온다.
+    assert _metric(report, "sharpe").value == pytest.approx(sharpe)
+    assert _metric(report, "sharpe").unavailable_reason == (
+        None if noise else "zero_return_variance"
+    )
+    # 소르티노 목표는 무위험수익률이다. 모든 구간이 목표에 못 미치면 평균/하방편차가 -1 에 가까워
+    # -√252 근처의 큰 음수가 된다(일할이 1일·3일로 섞여 현금 곡선은 약 -13.8).
+    downside = math.sqrt(sum(min(item, 0.0) ** 2 for item in excess) / len(excess))
+    assert _metric(report, "sortino").value == pytest.approx(
+        statistics.mean(excess) / downside * 252**0.5
+    )
 
 
 def test_sessions_before_the_base_rate_history_leave_sharpe_sortino_and_rolling_empty() -> None:

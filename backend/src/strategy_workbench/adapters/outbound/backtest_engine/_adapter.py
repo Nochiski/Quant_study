@@ -10,6 +10,7 @@ from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
 from backtest_engine.engine.slippage import FixedBpsSlippage
 from backtest_engine.engine.tape import evaluate_tape
+from backtest_engine.errors import EquityWipedOut
 from backtest_engine.ports.market_data import LoadStatus
 from backtest_engine.ports.universe import Membership, UniverseResult
 from backtest_engine.types.decision import StrategyDecision
@@ -31,6 +32,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataset,
     BacktestExecutionRequest,
     CancellationCheck,
+    EquityWipedOutError,
     MarketBarRecord,
     ProgressCallback,
     RunCancelledError,
@@ -253,26 +255,30 @@ class BacktestEngineExecutorAdapter:
             max_participation=environment.participation_rate,
             core=request.spec.core.value,
         )
-        engine.run(
-            TargetTapeStrategy(
-                strategy,
-                request.target_tape,
-                self._portfolio_bridge,
-                environment=environment,
-            ),
-            _columnar_feed(
-                request.dataset.bars,
-                participation_volumes(
-                    environment,
-                    (
-                        (item.session, item.security_id, item.close, item.trading_value)
-                        for item in (*request.dataset.history_bars, *request.dataset.bars)
+        try:
+            engine.run(
+                TargetTapeStrategy(
+                    strategy,
+                    request.target_tape,
+                    self._portfolio_bridge,
+                    environment=environment,
+                ),
+                _columnar_feed(
+                    request.dataset.bars,
+                    participation_volumes(
+                        environment,
+                        (
+                            (item.session, item.security_id, item.close, item.trading_value)
+                            for item in (*request.dataset.history_bars, *request.dataset.bars)
+                        ),
                     ),
                 ),
-            ),
-            corporate_actions=corporate_actions,
-            universe=universe,
-        )
+                corporate_actions=corporate_actions,
+                universe=universe,
+            )
+        except EquityWipedOut as error:
+            # 커널 예외를 포트 어휘로 옮긴다 — application 은 커널을 import 하지 않는다(#285).
+            raise EquityWipedOutError(str(error)) from error
         self._check_cancelled(cancelled)
         progress(0.78, "analytics", "Calculating professional metrics")
         # 엔진 결과는 columnar 테이블로 받는다 — 공개 Event 객체는 여기서 곧바로 raw

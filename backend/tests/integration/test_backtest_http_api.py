@@ -608,6 +608,33 @@ def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
     assert client.get(f"/api/v1/backtests/{run_id}/result").status_code == 409
 
 
+def test_equity_wipeout_ends_the_run_with_its_own_failure_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """자본 잠식으로 멈춘 실행은 서버 오류(`backtest.run.internal`)가 아니라 전용 코드로 끝난다.
+
+    mock 데이터로 파산 경로를 만들기 어려워 커널 `run` 이 잠식 예외를 던지게 한다(#285). 여기서는
+    어댑터가 커널 예외를 포트 어휘로 옮기는지를 본다. 실제 잠식 판정은
+    `tests/test_rust_driver.py` 가 두 코어에서 지킨다.
+    """
+    from backtest_engine import BacktestEngine
+    from backtest_engine.errors import EquityWipedOut
+
+    def wiped_out(self: BacktestEngine, *args: object, **kwargs: object) -> None:
+        raise EquityWipedOut("equity fell to zero or below at session close — equity=0.0")
+
+    monkeypatch.setattr(BacktestEngine, "run", wiped_out)
+    client = TestClient(build_http_app())
+
+    accepted = client.post("/api/v1/backtests", json=_run_body(client))
+
+    assert accepted.status_code == 202, accepted.text
+    state = _wait(client, accepted.json()["run"]["run_id"])
+    assert state["status"] == "failed", state
+    assert state["error_code"] == "backtest.run.equity_wiped_out"
+    assert "equity=0.0" in state["error"]
+
+
 @pytest.mark.parametrize(
     "failure",
     [RuntimeError("can't start new thread"), MemoryError("cannot allocate thread stack")],
@@ -707,6 +734,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         InvalidBacktestRunError,
         _failure_code,
     )
+    from strategy_workbench.application.backtest_run.facade.ports import EquityWipedOutError
     from strategy_workbench.application.portfolio_design.facade.design import (
         InvalidPortfolioRequestError,
         PortfolioSnapshotMismatchError,
@@ -719,6 +747,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         _failure_code(RawObservationUnavailableError(DataLoadStatus.NO_DATA, None)),
         _failure_code(PortfolioSnapshotMismatchError(expected="a", actual="b")),
         _failure_code(InvalidBacktestRunError("x")),
+        _failure_code(EquityWipedOutError("x")),
         _failure_code(RuntimeError("x")),
     }
     assert produced == RUN_FAILURE_CODES
@@ -733,7 +762,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         contract_code(PortfolioDataUnavailableDetail),
         contract_code(PortfolioRawObservationInvalidDetail),
         contract_code(BacktestRunInvalidDetail),
-    } == RUN_FAILURE_CODES - {"backtest.run.internal"}
+    } == RUN_FAILURE_CODES - {"backtest.run.internal", "backtest.run.equity_wiped_out"}
 
 
 def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -> None:

@@ -6,7 +6,7 @@ current_phase: V0,V1,V2,V3
 current_pr: V0-01,V1-01,V2-01,V3-01
 active_prs: [V0-01, V1-01, V2-01, V3-01]
 parallel_window: [V0-01, V1-01, V2-01, V3-01]
-last_updated: 2026-09-29T15:53:39+09:00
+last_updated: 2026-09-29T15:54:53+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 0
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `V0-01, V1-01, V2-01, V3-01` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `0 / 28` |
-| Aggregated at | `2026-09-29 15:53 KST` |
+| Aggregated at | `2026-09-29 15:54 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -105,7 +105,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V3-01` | domain.experiment(SearchSpec·SplitSpec·trial 상태·이웃·파라미터 허용값 술어) | V0-01 | `IN_PROGRESS` | — |
+| [ ] | `V3-01` | domain.experiment(SearchSpec·SplitSpec·trial 상태·이웃)·파라미터 허용값 술어(domain/strategy) | V0-01 | `IN_PROGRESS` | — |
 | [ ] | `V3-02` | 파라미터 값 배선(parameter_values) | V3-01 | `PLANNED` | — |
 | [ ] | `V3-03` | 실험 저장소·experiment_run·API | V3-02, V1-05 | `PLANNED` | — |
 | [ ] | `V3-04` | 대기열 확장(슬롯·공정 분배·중복 제거·복구·일시정지) | V3-03 | `PLANNED` | — |

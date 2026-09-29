@@ -1,0 +1,181 @@
+# 모델 산출물 전달층 (`src/deliver/`)
+
+> 플랜 [`2026-09-24-v3-merge.md`](plans/2026-09-24-v3-merge.md) M2 W2 T2.5b · 결정 D-12.
+> 엑셀 규격 정본은 [`MODEL_EXCEL_SPEC.md`](MODEL_EXCEL_SPEC.md)이고, 이 문서는 **그 규격을 어떻게
+> 구현했는지 · 어떻게 돌리는지 · 무엇을 아직 못 했는지**를 적는다.
+
+## 1. 목적과 경계
+
+- model 판(`data/model/`)과 factor_inputs 판(`data/factor_inputs/`)을 **읽기만** 해서 매일 엑셀 ·
+  주간 엑셀을 만들고, 텔레그램 모델 채널(`CHAT_ID_AIPLAYGROUND`)로 보낸다.
+- 점수를 다시 계산하지 않는다. 엔진이 쓴 값(점수 표 · 지표 긴 표)을 옮기고, 표시용 가공만 한다:
+  버킷 점수의 백분위 재순위, 1/99 윈저라이즈, 부호 전환 표식, 단위 배율(비율 → %).
+- `src/model/build.py` 를 import 하지 않는다. 파일 규약(§3)만 공유한다. 백분위 공식은 엔진의
+  `pct_rank_avg` 를 import 해서 쓴다(정의가 두 곳으로 갈리지 않게).
+- 엑셀은 **값만** 쓴다(수식 없음). `=` 로 시작하는 문자열(종목명 등)도 문자열 형으로 고정한다.
+- 판단 시트는 없다(사용자 09-26).
+
+## 2. 실행
+
+```bash
+# 매일 — 그날 판(_runs/<YYYYMMDD>_<basis>.json)으로
+python -m deliver model-daily  --date 20260929 --basis morning [--send] [--dry-run]
+# 주간 — 그 ISO 주 월~금 아침 확정판으로
+python -m deliver model-weekly --week 2026-W40                [--send] [--dry-run]
+
+# 공통 선택
+#   --model-root data/model  --fi-root data/factor_inputs  --out-root data/deliver
+#   --config-dir config/models   --env-file PATH   --chat-key CHAT_ID_AIPLAYGROUND
+```
+
+| 인자 | 동작 |
+|---|---|
+| (없음) | 엑셀만 만든다. 캡션을 표준출력에 찍는다 |
+| `--send` | 엑셀을 만들고 텔레그램 `sendDocument` 로 보낸다 |
+| `--dry-run` | 엑셀을 만들고, 네트워크 없이 env 파일의 `BOT_TOKEN`·채팅 키 **존재만** 확인한다(`--send` 와 함께 줘도 보내지 않는다) |
+
+| rc | 뜻 |
+|---|---|
+| 0 | 성공 |
+| 1 | 발송 실패(텔레그램 `ok=false`·예외) · dry-run 에서 비밀 키 없음 |
+| 2 | 입력·인자 오류 — 그날 판 없음 · 실패 판(status ≠ ok) · 점수/fi 파일 없음 · 날짜·주 형식 |
+
+- 기본 루트는 `QL_HOME`(없으면 저장소 `database/`) 아래 `data/…` — factor_inputs CLI 와 같다.
+- 산출 경로: 매일 `data/deliver/daily/model_scores_<YYYYMMDD>_<basis>.xlsx`, 주간
+  `data/deliver/weekly/<YYYY-Www>/weekly_<YYYY-Www>.xlsx`. 임시 파일에 쓴 뒤 교체한다(원자적).
+- 의존성: `openpyxl`(backend `pyproject.toml` 에 추가) · `duckdb`(parquet 읽기, 이미 쓰는 것).
+  전송은 표준 라이브러리 `urllib`(curl·requests 안 씀).
+
+## 3. 입력 계약(고정)
+
+```
+data/model/latest_<basis>.json                        마지막 성공 판
+data/model/_runs/<YYYYMMDD>_<basis>.json              날짜별 판(같은 JSON) — 정본
+data/model/<spec_id>/v=<build_id>/scores.parquet      점수 표(contracts.score_columns)
+data/model/<spec_id>/v=<build_id>/indicators.parquet  지표 긴 표(contracts.INDICATOR_COLUMNS, v4 만)
+data/factor_inputs/<fi 표>/v=<fi_build_id>/*.parquet   입력 8표 — hive_partitioning=false
+data/factor_inputs/_runs/<YYYYMMDD>_<basis>.json      fi 판 manifest(equity 판 id 표기용)
+```
+
+- 판 JSON: `{"layer":"model","status":"ok","build_id","date","basis","fi_build_id","generated_at",
+  "specs":{spec_id:{"n_scores","n_ranked","n_excluded","gates":{…}}},"primary_spec":"v4_rank@0.1"}`.
+- 판 선택: `_runs/<D>_<basis>.json` 이 있으면 그것, 없으면 날짜가 같은 `latest_<basis>.json`.
+  `status ≠ ok` 면 rc 2. 전일 비교는 D 보다 앞선 가장 최근 성공 판(같은 basis).
+- 주 모델 = `primary_spec`. 나머지 spec 은 모델 비교 열이 된다(레지스트리 등록 수만큼 는다).
+- `gates` 는 dict(`{"MG0": {"status": "pass"}}` 또는 `{"MG0": "pass"}`)·list 모두 요약한다.
+
+## 4. 매일 엑셀 — 시트별 열
+
+행은 모두 **주 모델 모집단**(점수 표 전 행): 순위 종목(순위순) 뒤에 제외 종목(코드순).
+
+| 시트 | 열(그룹 · 열) |
+|---|---|
+| 점수 | 종목(코드 · 이름 · 시장 KS/KQ · 대분류 · 중분류 · 시총(억) · 거래대금 20일(억) · 주가 — 틀고정) / **종합**(순위 · 종합 점수 · 전일 순위 · Δ순위 · 제외 사유 · 커버리지 `신선`/`유예 D+n`) / 버킷 6 × (유니버스 · 업종) 백분위 / 결측(결측 축) / 다른 모델 순위(비교 spec 마다 · 최대 차이) |
+| 점수 원자료 | 종목(코드 · 이름 · 대분류) / 버킷마다 role=score 지표 × (원값 · 엔진 백분위 · 표식) / 기준(연간 기준기 · 재무 접수일 · 분기 기준 · 추정 관측일 · 애널리스트 수 · 수급 최신일). 5행 = 레지스트리 정의 문자열. 색 없음 |
+| 지표(표시용) | 종목 / 버킷마다 role=display 지표 × (값 · 표식) / 재무(최근 연간: ROE · ROA · 부채비율) / 컨센서스(당해: 선행 PER — 적자면 '적자' · 선행 PBR · 선행 EPS 1M 변화 · 표식). 숫자는 1/99 윈저라이즈한 표시값. 색은 변화 열만 |
+| 실적 | 종목 / 결산기(FY-1 확정 · FY0·FY1 추정) / 매출·영업이익·순이익 × (FY-1 · FY0 E · FY1 E) × (값 · y-y% · 표식) / 분기 영업이익(최근 분기 · Q-4…Q0 · Q0 y-y · 표식 · Q0 공시일) |
+| 업종 | WICS 대분류 행 → 중분류 행: 업종(구분 · 코드 · 업종명 · 대분류) / 규모(종목 수 · 순위 종목 수 · 시총 합 · 시총 비중) / 쏠림(상위 30 비중 · 상위 100 비중 · 후보 수) / 종합 점수 중앙값 / 축별 평균 백분위 / 업종 지표(E/P 중앙값 · 리비전 상향 비율 · 1M 수익률 시총가중) / 상위 3(순위). 헤더 진파랑 0070C0 · 굵은 테두리 · 업종명 보라 |
+| 모델 비교 | 종목 / 모델별 순위(주 모델 먼저, 순위 색 반전) / 모델별 상위 30 ● / 최대 차이 |
+| 메타 | 기준일 · basis · 주/비교 모델 · model·fi·equity 판 id · 전일 비교 판 · 유니버스 규칙 · 종목 수 · 제외 사유별 · 축별 결측 수 · 데이터 기준일(가격 · 재무 최신 접수 · 추정 관측 · 수급) · 모델 버전 · 가중치 · 제외 게이트 · 후보 규칙 · spec 별 판 게이트 · 각주 4 · **열 사전**(모든 시트 모든 열의 정의) |
+
+버킷 백분위(점수 시트): 엔진 버킷 점수(0~100, 종합의 재료)를 한 번 더 순위 매긴 **표시값**이다.
+유니버스 = 그 버킷 점수가 있는 전 종목 안, 업종 = WICS 대분류 안(값 있는 종목 < 5 면 유니버스로
+되돌린다 — 엔진 `min_sector_size` 와 같다). 공식은 엔진 `pct_rank_avg`(동률 평균순위).
+
+## 5. 주간 엑셀 — 시트별 열
+
+재료 = 그 ISO 주 월~금의 **아침 확정판**. 기준일 = 판이 있는 마지막 거래일(보통 금요일).
+**판이 없는 날(휴장·미빌드)은 ✕, 평균 순위는 순위가 있는 날만**(사용자 09-25).
+후보 = 기준일 주 모델 순위순으로 대분류당 최대 9, 30 종목(`OutputRule`). 지난주 = 직전 ISO 주의
+기준일 판(같은 주 모델).
+
+| 시트 | 열 |
+|---|---|
+| 주간 후보 | 후보(순번 · 코드 · 이름 · 시장 · 대분류 · 중분류 · 시총) / **순위**(금요일 순위(원본·상한 전) · 주간 평균 순위 · 월~금 ●○✕ 5칸 · 등장(●) · 지난주 순위 · 신규/유지(신규 = 형광) · v3 순위(참고)) / 점수(종합 점수 · 6축 유니버스 백분위) |
+| 팩터 카드 | 후보마다 세로 블록: 제목 띠 → 헤더(항목 · 구분 · 값 · 유니버스 백분위 · 업종 백분위 · 업종 중앙값 · 대비 · 표식·결측) → 축 6행(엔진 버킷 점수) → 점수 지표 12행(원값 · 엔진 백분위 — 대분류 기준 버킷은 업종 칸) → 최근 5일 순위 → 기준일(재무 · 추정 · 수급 · 커버리지) |
+| 주간 추이 | 이번 주 후보 + 지난주 후보(이탈 포함): 종목 · 구분(유지/신규/이탈) / 월~금 순위(✕ = 판 없음, 제외 = 그날 순위 없음) / 월~금 종합 점수 |
+| 이탈·진입 | 방향(진입 형광 · 이탈) · 종목 / 지난주 순위 · 이번주 순위 · Δ순위 · 이번주 상태(제외 사유 · 순위 밖 · 모집단 밖) / 가장 크게 변한 축 · 변화량(버킷 점수 차) |
+| 지난주 성적 | 지난주 후보 30: 순번 · 종목 · 지난주 순위 / 1주 수익률(지난주 기준일 → 이번 주 기준일 수정종가) · 유니버스 평균(지난주 순위 종목 전체) · 초과 · 승(●). 5행 = 평균·중앙값·유니버스·초과·승률 요약. 두 날 `adj_ok` 가 다르면 '결측(수정주가미해결)' |
+| 메타 | 주 · 기준일 · 요일별 판 id(없으면 '판 없음 — ✕') · 지난주 기준일 · 유니버스 · 후보 규칙 · 가중치 · 결측 요약 · 지난주 성적 · 표식 규칙 · 열 사전 |
+
+## 6. 표시 규칙(규격 C·D·E 구현)
+
+- Q.Pack 서식: 격자선 끔 · 맑은 고딕 8 · 기본 행 높이 11.25 · 1행 정렬 마커(BDD7EE) · 2~4행 제목 띠
+  (4F81BD, 흰 글씨: 시트명 / 모델·버전 / 기준일·Source·판 id) · 5행 각주(점수 원자료·지표는 열 정의) ·
+  6~7행 2단 헤더(그룹 파랑 · 식별 그룹 회색 · 종합/순위 그룹 금색 FFC000 · 핵심 열 보라 7030A0 · 열
+  이름 회색 7F7F7F · 얇은 테두리 상자 · 7행 높이 33.75) · 8행부터 데이터 · 그룹 사이 빈 구분 열(너비 5 ·
+  숨김 · 아웃라인 1) · 숫자 열 너비 13 · 식별 열 끝에서 틀고정 · 7행 자동필터 · 병합 없음.
+- 색 스케일: 3색 백분위 10/50/90, 초록 63BE7B → 노랑 FFEB84 → 빨강 F8696B(높음 = 빨강). 백분위 ·
+  변화(Δ순위 · y-y · 수익률 · 리비전) 열에만. 순위 열은 반전(1위 = 빨강) — 단 점수 시트의 순위 열은
+  규격대로 무색. 레벨 값 무색. 형광 노랑은 '신규 진입' 한 종류.
+- 결측 = `결측(사유)` 문자열(사유 = 엔진 flag 첫 항목 · 버킷은 `버킷결측(NN%)` 우선). 플래그 ≠ 결측.
+- 실적 y-y: 흑전(−→+) · 적전(+→−) · 적지(−→−)는 증가율 대신 표식만. 흑지는 빈칸.
+- 리비전 변화(엔진 REV_*): 흑전 · 적확 · 적축(이전값 < 0)은 값 대신 표식만, 적전은 값 + 표식.
+  선행 EPS 1M 변화도 같은 규약.
+- E/P 음수는 값 그대로 + '적자' 표식. 선행 PER 은 당해 컨센서스 순이익 < 0 이면 '적자'. 배당수익률
+  무배당은 0(엔진 '무배당' 표식 병기).
+- 윈저라이즈 1/99(선형 보간 분위수)는 **지표(표시용) 시트 숫자 열에만** — 순위·점수에는 쓰지 않는다.
+- 비율 지표는 ×100 해 % 로 보인다(라벨에 `(%)`). 고점근접+반전(M_PULL_C)은 0~100.
+
+## 7. 텔레그램
+
+- `send_document(path, caption, *, env_file=None, chat_key="CHAT_ID_AIPLAYGROUND", transport=None,
+  dry_run=False) → {"ok", "description"}`.
+- 비밀: env 파일 = 인자 → `QL_ENV` → `~/kael-system-v3/.env`(`scripts/notify.sh` 와 같다). 그 안에서
+  `BOT_TOKEN` 과 채팅 키 두 줄만 읽는다(`export `·따옴표 허용). **토큰·채팅 ID 는 반환값·로그·예외
+  문자열에 싣지 않는다** — 전송 예외·API 오류 문자열은 두 값을 `***` 로 가린다. 로그에는 키 이름만.
+- 캡션(1,024자 절단):
+
+```
+[모델 점수] 2026-09-29 morning · v4_rank@0.1
+상위5: 1.종목A · 2.종목B · 3.종목C · 4.종목D · 5.종목E
+순위 317 · 제외 286 · 모집단 603
+
+[주간 후보] 2026-W40 (기준 2026-10-02) · v4_rank@0.1
+상위5: 1.종목A · …
+후보 30 · 신규 5 · 이탈 5 · 거래일 판 5/5
+```
+
+## 8. 규격 대비 미구현(원천 없음 또는 계약 밖)
+
+| 규격 항목 | 상태 · 사유 |
+|---|---|
+| 지표(표시용): 주가 변화 1D·1W·12M·YTD · 12-7 · 6-1 · FIP · 120일 변동성 · 60일 회전율 · 수급 5/20/60일(기관·연기금·외국인) | 레지스트리 display 지표가 아니다. 이 시트는 레지스트리 `role=display` 가 열을 정하므로 엔진에 계산식 + `config/models/*.toml` 에 display 지표로 더하면 자동으로 열이 생긴다(전달층이 따로 계산하지 않는다 — 정의 중복 방지) |
+| 지표(표시용): 공매도 거래비중 · 대차잔고 · 투자의견 평균 · 외국인 지분율 · SUE · 서프라이즈 % · 발표일 · 선행 EV/EBITDA | factor_inputs 8표에 원천 열이 없다 |
+| 실적: 분기 8개(미발표는 컨센) · 어닝시즌(예정일 · 잠정치 · 컨센 · 서프라이즈) | fi_fin_summary 분기는 5기만(계약 창), 분기 컨센서스 · 잠정실적 원천 없음 → 최근 5기 · Q0 y-y · 공시일만 |
+| 메타: WICS 스냅샷 날짜 | fi_universe 에 스냅샷일 열이 없다(equity 판 id 로 대신) |
+| 주간 후보: 확신 표식(SUE × ΔP/E) | SUE 원천 없음(메타에 '미구현' 명시) |
+| 업종 시트 '업종 리비전' | REV_OP_1M > 0 비율로 구현(지표가 없는 spec 이면 빈칸) |
+
+## 9. 테스트
+
+- `tests/test_deliver_excel.py` — 합성 model 판 · fi 판을 고정 경로에 parquet 로 써서(월~금 중 수 휴장,
+  지난주 목·금) 매일·주간 엑셀을 만들고 openpyxl 로 다시 연다: 시트·헤더·행 수, 값만(`<f>` 없음,
+  `=` 문자열 보존), 업종 상한 9, ●○✕(휴장 포함) · 평균 순위, 부호 전환 표식, 윈저라이즈, 서식(글꼴 ·
+  채움 · 틀고정 · 자동필터 · 숨긴 구분 열 · 색 스케일 규칙), CLI dry-run·발송(가짜 전송)·rc 2.
+  마지막 테스트는 **실제 `model.build`** 가 40종목 합성 입력으로 쓴 판(네 spec)을 그대로 읽어 파일 계약을
+  대조한다.
+- `tests/test_deliver_telegram.py` — 가짜 전송만: 성공 · 예외/API 오류 가림 · 비밀 없음 · dry-run ·
+  env 해석 · 캡션 형식 · multipart 모양. 토큰·채팅 ID 가 반환값·로그에 없음을 매번 확인한다.
+
+```bash
+uv run --project backend pytest database/tests/test_deliver_excel.py database/tests/test_deliver_telegram.py -q
+```
+
+## 10. 서버 운영
+
+서버 venv 는 맨 pip 이고 배포(`scripts/deploy.sh`)는 패키지를 설치하지 않는다 — **처음 한 번**
+`~/quant-ledger/.venv/bin/pip install 'openpyxl>=3.1.5'` 가 필요하다.
+
+```bash
+cd ~/quant-ledger
+# dry-run(엑셀 생성 + 비밀 키 존재 확인, 발송 없음)
+QL_HOME=$PWD PYTHONPATH=src .venv/bin/python -m deliver model-daily --date 20260929 --basis morning --dry-run
+QL_HOME=$PWD PYTHONPATH=src .venv/bin/python -m deliver model-weekly --week 2026-W40 --dry-run
+# 실제 발송(CHAT_ID_AIPLAYGROUND)
+QL_HOME=$PWD PYTHONPATH=src .venv/bin/python -m deliver model-daily --date 20260929 --basis morning --send
+QL_HOME=$PWD PYTHONPATH=src .venv/bin/python -m deliver model-weekly --week 2026-W40 --send
+```
+
+D-12: 매일 v4 점수는 파일 저장이 기본이고 발송은 스위치(`--send`)다. 주간은 토요일 아침 금요일
+확정판 기준. 체인 연결(`build_chain.sh` · 크론)은 이 문서 범위 밖(T3.1).

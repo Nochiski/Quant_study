@@ -11,7 +11,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
-from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec, RunStatus
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec, BacktestRunState
 from strategy_workbench.domain.backtest.facade.trials import TrialLedger
 
 
@@ -52,8 +52,12 @@ class TrialRunPort(Protocol):
         """
         ...
 
-    def statuses(self, run_ids: Collection[str]) -> Mapping[str, RunStatus]:
+    def states(self, run_ids: Collection[str]) -> Mapping[str, BacktestRunState]:
         """여러 실행의 상태를 한 번에 읽는다."""
+        ...
+
+    def schedule(self, owner: str, *, paused: bool, priority: int) -> None:
+        """실험(`owner`)의 대기 실행을 멈추거나 풀고, 한 차례에 배정할 수를 우선순위로 정한다."""
         ...
 
     def cancel(self, run_id: str, *, owner: str) -> None:

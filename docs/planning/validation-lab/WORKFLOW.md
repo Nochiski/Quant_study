@@ -250,7 +250,8 @@ application 화살표 없음).
 
 **Acceptance**: #161의 `MAX_CONCURRENT_RUNS` 상수와 SoT 행을 설정 하나(기본값 = 그 상수, 환경 변수
 `STRATEGY_WORKBENCH_RUN_SLOTS`로 덮어씀)로 대체, 슬롯 2개 이상일 때만 단일 실행 전용 1개, 굶주림 없음, 공정
-분배, 같은 `run_fingerprint`는 1회 실행·결과 공유(시도 키로 결과를 공유하지 않는다), 재기동 복구, 일시정지 뒤
+분배, 같은 `run_fingerprint` 입력은 도는 run 만 잇고 끝난 결과는 재사용하지 않는다(재확인은 원장에 남는다,
+2026-09-30 리드 결정. 시도 키로 결과를 공유하지 않는다), 재기동 복구, 일시정지 뒤
 순서, 실험 SSE(keepalive), e2e가 실행을 붙잡아 둘 수 있는 테스트 훅, `_gc_policy` 주기 기반 재설계.
 `RunStatus` 값 불변.
 

@@ -15,7 +15,6 @@ from strategy_workbench.application.strategy_design.facade.ports import Page, Pa
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     BacktestRunState,
-    RunStatus,
     StrategyProvenance,
 )
 
@@ -68,6 +67,6 @@ class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
         """종결(`completed`·`failed`·`cancelled`)되지 않은 run 의 상태."""
         ...
 
-    def statuses(self, run_ids: Collection[str]) -> dict[str, RunStatus]:
+    def states(self, run_ids: Collection[str]) -> dict[str, BacktestRunState]:
         """저장된 run 들의 마지막 상태(한 번에 읽는다). 없는 run 은 빠진다."""
         ...

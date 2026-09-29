@@ -32,8 +32,10 @@ from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
+    BacktestRunState,
     InlineDraft,
     MetricWindow,
+    RunFailureCode,
     RunStatus,
     SavedRevisionReference,
 )
@@ -48,7 +50,11 @@ from strategy_workbench.domain.experiment.facade.design import (
     SplitMode,
     SplitSpec,
 )
-from strategy_workbench.domain.experiment.facade.trial import ExperimentStatus, TrialStatus
+from strategy_workbench.domain.experiment.facade.trial import (
+    ExperimentControls,
+    ExperimentStatus,
+    TrialStatus,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
     FloatParameter,
@@ -85,6 +91,8 @@ class _FakeRuns:
         self.run_statuses: dict[str, RunStatus] = {}
         self.cancelled: list[tuple[str, str]] = []
         self.owners: set[str] = set()
+        self.schedules: list[tuple[str, bool, int]] = []
+        self.error_codes: dict[str, RunFailureCode] = {}
         self.ledger_entries: list[TrialLedgerEntry] = []
         self.reject = False
 
@@ -114,8 +122,23 @@ class _FakeRuns:
             self.run_statuses[run_id] = RunStatus.COMPLETED
             self.ledger_entries.append(TrialLedgerEntry(run_id, key, RunStatus.COMPLETED, _AT, _AT))
 
-    def statuses(self, run_ids: Collection[str]) -> dict[str, RunStatus]:
-        return {run_id: self.run_statuses[run_id] for run_id in run_ids}
+    def states(self, run_ids: Collection[str]) -> dict[str, BacktestRunState]:
+        return {
+            run_id: BacktestRunState(
+                run_id=run_id,
+                status=self.run_statuses[run_id],
+                progress=0.0,
+                stage="",
+                message="",
+                created_at=_AT,
+                updated_at=_AT,
+                error_code=self.error_codes.get(run_id),
+            )
+            for run_id in run_ids
+        }
+
+    def schedule(self, owner: str, *, paused: bool, priority: int) -> None:
+        self.schedules.append((owner, paused, priority))
 
     def cancel(self, run_id: str, *, owner: str) -> None:
         self.cancelled.append((run_id, owner))
@@ -367,3 +390,66 @@ def test_experiments_are_listed_newest_first_a_page_at_a_time() -> None:
     assert (first.next_after, second.next_after) == (created[1], None)
     assert [item.record.experiment_id for item in second.items] == created[:1]
     assert service.list(after="missing", limit=2).items == ()
+
+
+def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
+    tmp_path: Path,
+) -> None:
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    service = _service(runs, repository=SQLiteExperimentRepository(path))
+    experiment_id = service.create(_request()).record.experiment_id
+
+    paused = service.control(experiment_id, ExperimentControls(paused=True, priority=3))
+    _service(runs, repository=SQLiteExperimentRepository(path)).recover()
+
+    assert (paused.status, paused.trial_counts) == (
+        ExperimentStatus.PAUSED,
+        {TrialStatus.QUEUED: 4},
+    )
+    assert paused.record.controls == ExperimentControls(paused=True, priority=3)
+    # 대기열에 알리고, 재시작하면 저장된 조작을 다시 알린다.
+    assert runs.schedules == [(experiment_id, True, 3), (experiment_id, True, 3)]
+
+
+def test_recover_resubmits_unsubmitted_and_interrupted_trials_only(tmp_path: Path) -> None:
+    """spec D6·V3-03 인계 (2): 재시작하면 넘기지 못한 trial 과 중단된 trial 만 다시 넘긴다."""
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    pending: list[Callable[[], None]] = []
+    before = _service(runs, repository=SQLiteExperimentRepository(path), spawn=pending.append)
+    submitted = before.create(_request()).record.experiment_id
+    pending[0]()
+    # 제출 스레드가 돌지 못한 실험(예상 밖 오류로 멈춘 경우와 같다)과 취소한 실험.
+    unsubmitted = before.create(_request()).record.experiment_id
+    cancelled = before.create(_request()).record.experiment_id
+    before.cancel(cancelled)
+    runs.run_statuses.update(
+        {
+            "run-0": RunStatus.FAILED,
+            "run-1": RunStatus.COMPLETED,
+            "run-2": RunStatus.FAILED,
+            "run-3": RunStatus.FAILED,
+        }
+    )
+    runs.error_codes.update(
+        {
+            "run-0": "backtest.run.interrupted",
+            "run-2": "backtest.run.invalid",
+            "run-3": "backtest.run.interrupted",
+        }
+    )
+
+    after = _service(runs, repository=SQLiteExperimentRepository(path))
+    after.recover()
+
+    assert [len(state.attempts) for state in after.trials(submitted)] == [2, 1, 1, 2]
+    assert [state.status for state in after.trials(submitted)] == [
+        TrialStatus.QUEUED,
+        TrialStatus.COMPLETED,
+        TrialStatus.FAILED,
+        TrialStatus.QUEUED,
+    ]
+    assert [len(state.attempts) for state in after.trials(unsubmitted)] == [1, 1, 1, 1]
+    assert [state.status for state in after.trials(cancelled)] == [TrialStatus.CANCELLED] * 4
+    assert len(runs.started) == 4 + 4 + 2

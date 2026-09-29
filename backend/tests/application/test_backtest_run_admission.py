@@ -519,3 +519,22 @@ def test_an_experiment_run_waiting_for_the_experiment_share_says_it_waits(
         "Waiting for a free run slot",
     )
     wait_for_terminal_run(runs, "e2")
+
+
+def test_a_paused_experiment_keeps_its_queued_runs_until_resumed(gated_runs: _GatedRuns) -> None:
+    """V3-04: 일시정지는 대기 run 만 붙잡는다. 도는 run 은 끝까지 돌고, 재개하면 제 순서로 뜬다."""
+    runs, port, entries = gated_runs("a1", "a2", "b1")
+    runs.start(_request(end=date(2024, 1, 12)), owner="exp-a")
+    _wait_for_entries(entries, 1)
+    runs.start(_request(end=date(2024, 1, 11)), owner="exp-a")
+    runs.start(_request(end=date(2024, 1, 10)), owner="exp-b")
+
+    runs.schedule("exp-a", paused=True, weight=1)
+    port.release.set()
+    wait_for_terminal_run(runs, "b1")
+    held = runs.state("a2").status
+    runs.schedule("exp-a", paused=False, weight=1)
+    wait_for_terminal_run(runs, "a2")
+
+    assert held is RunStatus.QUEUED
+    assert [end.day for end, _running in entries] == [12, 10, 11]

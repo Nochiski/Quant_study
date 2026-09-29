@@ -23,6 +23,7 @@ EQUITY_ADAPTER_ENV = "STRATEGY_WORKBENCH_EQUITY_ADAPTER"
 EQUITY_ROOT_ENV = "STRATEGY_WORKBENCH_EQUITY_ROOT"
 ALLOWED_ORIGINS_ENV = "STRATEGY_WORKBENCH_ALLOWED_ORIGINS"
 RUN_SLOTS_ENV = "STRATEGY_WORKBENCH_RUN_SLOTS"
+E2E_TRIAL_HOLD_SECONDS_ENV = "STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS"
 DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = ("http://localhost:5173",)
 ASSISTANT_DB_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"
 ASSISTANT_SECRETS_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"
@@ -51,6 +52,21 @@ def runtime_run_slots() -> int:
             f"run slots env var must be a positive integer — {RUN_SLOTS_ENV}={configured!r}"
         )
     return int(configured)
+
+
+def runtime_trial_hold_seconds() -> float:
+    """e2e 훅: 실험 trial run 을 붙잡아 둘 초(검증 랩 spec D6). 없거나 0 이면 붙잡지 않는다."""
+    configured = os.environ.get(E2E_TRIAL_HOLD_SECONDS_ENV, "").strip()
+    try:
+        seconds = float(configured) if configured else 0.0
+    except ValueError:
+        seconds = -1.0
+    if not 0 <= seconds < float("inf"):
+        raise ValueError(
+            "trial hold env var must be a non-negative number of seconds — "
+            f"{E2E_TRIAL_HOLD_SECONDS_ENV}={configured!r}"
+        )
+    return seconds
 
 
 def runtime_equity_selection() -> tuple[str, Path | None]:
@@ -121,6 +137,7 @@ def build_http_app(
     strategy_repository_path: str | Path | None = None,
     research_db_path: str | Path | None = None,
     run_slots: int = DEFAULT_RUN_SLOTS,
+    trial_hold_seconds: float = 0.0,
     equity_adapter: str = "mock",
     equity_root: Path | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
@@ -130,6 +147,7 @@ def build_http_app(
         strategy_repository_path=strategy_repository_path,
         research_db_path=research_db_path,
         run_slots=run_slots,
+        trial_hold_seconds=trial_hold_seconds,
         equity_adapter=equity_adapter,
         equity_root=equity_root,
         assistant=assistant,
@@ -159,6 +177,7 @@ def build_runtime_http_app():
         strategy_repository_path=runtime_strategy_repository_path(),
         research_db_path=runtime_research_db_path(),
         run_slots=runtime_run_slots(),
+        trial_hold_seconds=runtime_trial_hold_seconds(),
         equity_adapter=adapter,
         equity_root=root,
         assistant=runtime_assistant_settings(),

@@ -169,3 +169,36 @@ def test_a_frozen_revision_cannot_be_the_base(tmp_path: Path) -> None:
 
     assert response.status_code == 422, response.text
     assert response.json()["detail"]["code"] == "backtest.strategy.requires_upgrade"
+
+
+def test_a_held_experiment_can_be_paused_streamed_and_cancelled() -> None:
+    """V3-04: e2e 훅이 trial 을 붙잡은 동안 일시정지·우선순위·취소와 진행 스트림을 본다."""
+    client = TestClient(build_http_app(trial_hold_seconds=30))
+    experiment_id = client.post("/api/v1/experiments", json=_experiment(client)).json()["record"][
+        "experiment_id"
+    ]
+    base = f"/api/v1/experiments/{experiment_id}"
+
+    deadline = time.monotonic() + 30
+    while "running" not in [trial["status"] for trial in client.get(f"{base}/trials").json()]:
+        assert time.monotonic() < deadline, "no trial was held running"
+        time.sleep(0.1)
+    paused = client.put(f"{base}/controls", json={"paused": True, "priority": 2})
+    refused = client.put(f"{base}/controls", json={"paused": False, "priority": 99})
+    cancelled = client.post(f"{base}/cancel")
+    with client.stream("GET", f"{base}/events") as stream:
+        frames = [line for line in stream.iter_lines() if line.startswith("data:")]
+    missing = client.get("/api/v1/experiments/missing/events")
+
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["status"] == "paused"
+    assert paused.json()["record"]["controls"] == {"paused": True, "priority": 2}
+    assert paused.json()["trial_counts"] == {"running": 1, "queued": 5}
+    assert (refused.status_code, refused.json()["detail"]["code"]) == (
+        422,
+        "backtest.run.field_invalid",
+    )
+    assert cancelled.json()["status"] == "cancelled"
+    # 끝난 실험의 스트림은 마지막 진행 한 번을 보내고 닫힌다.
+    assert [json.loads(frame[len("data:") :])["status"] for frame in frames] == ["cancelled"]
+    assert (missing.status_code, missing.json()["detail"]["code"]) == (404, "experiment.not_found")

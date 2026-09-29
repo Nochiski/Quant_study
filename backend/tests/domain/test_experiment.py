@@ -25,6 +25,8 @@ from strategy_workbench.domain.experiment.facade.design import (
     parameter_grid_values,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
+    MAX_EXPERIMENT_PRIORITY,
+    ExperimentControls,
     ExperimentStatus,
     TrialStatus,
     experiment_status,
@@ -425,4 +427,19 @@ def test_a_trial_without_a_run_is_queued_cancelled_or_rejected(
 def test_experiment_status_follows_its_trials_unless_cancelled(
     trials: tuple[TrialStatus, ...], cancelled: bool, expected: ExperimentStatus
 ) -> None:
-    assert experiment_status(trials, cancelled=cancelled) is expected
+    assert experiment_status(trials, cancelled=cancelled, paused=False) is expected
+
+
+def test_a_paused_experiment_reads_paused_until_every_trial_ends() -> None:
+    running = (TrialStatus.COMPLETED, TrialStatus.QUEUED)
+    finished = (TrialStatus.COMPLETED, TrialStatus.FAILED)
+
+    assert experiment_status(running, cancelled=False, paused=True) is ExperimentStatus.PAUSED
+    assert experiment_status(finished, cancelled=False, paused=True) is ExperimentStatus.COMPLETED
+    assert experiment_status(running, cancelled=True, paused=True) is ExperimentStatus.CANCELLED
+
+
+@pytest.mark.parametrize("priority", [0, MAX_EXPERIMENT_PRIORITY + 1, True, 1.5])
+def test_experiment_priority_stays_inside_its_range(priority: object) -> None:
+    with pytest.raises(ValueError, match="priority"):
+        ExperimentControls(priority=priority)  # type: ignore[arg-type]  # 범위 밖 값을 일부러 넣는다

@@ -1729,11 +1729,10 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   이미 적는다.
 - **위험성**: merge gate가 간헐 적색이 되어 재실행이 습관이 되면 진짜 회귀를 흘려보낸다.
 - **담당**: `P4-04`(JSON 탭 은퇴로 "read-only view에서 YAML로 돌아가는" 이 경로를 다시 쓴다).
-- **관련 우회**: 같은 현상(탭 전환 뒤 reveal이 한 틱 늦게 와 선택을 옮김)이 main 병합 중 브라우저 e2e에서도
-  나왔다. `frontend/e2e/workbench-helpers.ts`의 `currentSource`가 전체 선택·복사를 두 번 연속 같은 값이
-  나올 때까지 되풀이하게 해 막았다(`9a3e1fd0`). P4-04가 reveal 경로를 다시 쓸 때 이 우회를 걷을 수
-  있는지 함께 본다. P4-04가 늦은 reveal을 고치면 이 우회(두 번 연속 같은 값까지 되풀이)도 함께 걷어내고
-  한 번 읽기로 되돌린다.
+- **관련 우회(걷힘)**: 같은 현상(탭 전환 뒤 reveal이 한 틱 늦게 와 선택을 옮김)이 main 병합 중 브라우저
+  e2e에서도 나왔다. e2e `currentSource`가 전체 선택·복사를 두 번 연속 같은 값이 나올 때까지 되풀이하게 해
+  막았다(`9a3e1fd0`). PR #323(리뷰 P2-1)이 `currentSource`를 선택 없이 편집기가 그린 줄에서 읽게 바꿔 이
+  우회를 걷었다(`frontend/e2e/editor-helpers.ts`). 남은 route 테스트 flake는 #324가 추적한다.
 
 ### BACKLOG-008: 충돌 표식 게이트가 일부 추적 텍스트를 건너뛰고, 주석이 검출 범위를 과장한다
 

@@ -5,6 +5,9 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// 편집기 입력·문서 검증 대기는 e2e 와 같은 helper 를 쓴다. TS 파일이라 `npm run docs:capture`가 node 에
+// `--experimental-strip-types`를 준다.
+import { editor, expectPhase, replaceSource } from "../e2e/editor-helpers.ts";
 import { backendPort, previewOrigin } from "../e2e/ports.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -39,7 +42,7 @@ const headed = process.env.WORKBENCH_MANUAL_HEADED === "1";
 // 이 파일에 직접 심는다(`frontend-testing.md`의 은퇴 row seeding 규칙).
 const databasePath = process.env.WORKBENCH_MANUAL_DB_PATH;
 
-/** e2e `workbench-helpers.ts`의 `RUN_ENVIRONMENT`와 같은 값. 이 스크립트는 node 로 바로 돌아 TS 헬퍼를 import 하지 못한다. */
+/** e2e `workbench-helpers.ts`의 `RUN_ENVIRONMENT`와 같은 값. 그 파일은 생성 SDK 를 확장자 없이 import 해 node 가 바로 부르지 못한다. */
 const RUN_ENVIRONMENT = {
   start: "2021-01-01",
   end: "2026-08-31",
@@ -180,20 +183,11 @@ const captureSpan = async (page, filename, top, bottom) => {
   }
 };
 
-/** 편집기 검증(parse·compile)이 입력을 따라잡을 때까지 기다린다 — e2e `waitForSettledDocument`와 같다(#240). */
-const expectPhase = async (page, phase) => {
-  const status = page.getByRole("status", { name: "문서 상태" });
-  await expect(status).toHaveAttribute("data-settled", "true");
-  await expect(status).toContainText(phase);
-};
-
-/** 편집기 자동완성 팝업을 닫는다. `fill` 뒤 커서 자리의 제안이 떠 있으면 편집기 본문을 가린다(02·04). */
+/** 편집기 자동완성 팝업을 닫는다. 원문을 넣은 뒤 커서 자리의 제안이 떠 있으면 편집기 본문을 가린다(02·04). */
 const closeCompletion = async (page) => {
   const popup = page.locator(".cm-tooltip-autocomplete");
   if ((await popup.count()) > 0) {
-    await page
-      .getByRole("textbox", { name: "편집기", exact: true })
-      .press("Escape");
+    await editor(page).press("Escape");
   }
   await expect(popup).toHaveCount(0);
 };
@@ -243,7 +237,6 @@ const context = await browser.newContext({
 const page = await context.newPage();
 // 저장하지 않은 초안(18)을 떠날 때 뜨는 beforeunload 확인은 받아들인다.
 page.on("dialog", (dialog) => void dialog.accept());
-const editor = page.getByRole("textbox", { name: "편집기", exact: true });
 const documentStatus = page.getByRole("status", { name: "문서 상태" });
 const saveButton = page.getByRole("button", {
   name: "리비전 저장",
@@ -272,12 +265,12 @@ page.on("request", (request) => {
 
 try {
   await page.goto(`${frontendUrl}/research/strategies/new`);
-  await expect(editor).toBeVisible();
+  await expect(editor(page)).toBeVisible();
   // 빈 템플릿의 검증이 끝나기 전에 찍으면 실행마다 배지·문제 목록이 달라진다(구문 통과 / 검증 오류).
   await expectPhase(page, "검증 오류");
   await capture(page, "01-new-strategy.png");
 
-  await editor.fill(sourceV1);
+  await replaceSource(page, sourceV1);
   await expectPhase(page, "검증 통과");
   await closeCompletion(page);
   await capture(page, "02-valid-yaml.png");
@@ -295,7 +288,7 @@ try {
   await capture(page, "03-contract-inspector.png");
 
   const invalidSource = sourceV1.replace("max_name_weight", "max_name_wieght");
-  await editor.fill(invalidSource);
+  await replaceSource(page, invalidSource);
   await expectPhase(page, "구조 오류");
   await expect(page.getByRole("region", { name: "문제" })).toContainText(
     "/risk/max_name_wieght",
@@ -303,7 +296,7 @@ try {
   await closeCompletion(page);
   await capture(page, "04-structure-error.png");
 
-  await editor.fill(sourceV1);
+  await replaceSource(page, sourceV1);
   await expectPhase(page, "검증 통과");
   await expect(saveButton).toBeEnabled();
   const createdResponse = page.waitForResponse(
@@ -333,7 +326,7 @@ try {
   }
   await capture(page, "05-saved-revision.png");
 
-  await editor.fill(sourceV2);
+  await replaceSource(page, sourceV2);
   await expectPhase(page, "검증 통과");
   const revisedResponse = page.waitForResponse(
     (response) =>
@@ -576,7 +569,7 @@ try {
   await page.goto(
     `${frontendUrl}/research/strategies/${strategyId}/revisions/2`,
   );
-  await expect(editor).toBeVisible();
+  await expect(editor(page)).toBeVisible();
   // 검증이 끝난 뒤 찍는다 — 분석 중이면 배지가 `구문 통과`로 찍힌다(#263 리뷰 P3-1).
   await expectPhase(page, "저장됨");
   await page.keyboard.press("Control+K");
@@ -611,7 +604,7 @@ try {
   await page.goto(
     `${frontendUrl}/research/strategies/${retiredStrategyId}/revisions/1`,
   );
-  await expect(editor).toBeVisible();
+  await expect(editor(page)).toBeVisible();
   const upgradeBanner = page.getByRole("region", { name: "이전 schema 문서" });
   await expect(upgradeBanner).toContainText(
     "이 문서는 지원이 끝난 schema 버전입니다",
@@ -625,8 +618,8 @@ try {
 
   // 8절 Graph: 조건형 아이디어의 비교 출력(참/거짓)에 compile 이 붙인 승격 노드.
   await page.goto(`${frontendUrl}/research/strategies/new`);
-  await expect(editor).toBeVisible();
-  await editor.fill(promotedIdea);
+  await expect(editor(page)).toBeVisible();
+  await replaceSource(page, promotedIdea);
   await expectPhase(page, "검증 통과");
   await closeCompletion(page);
   await page.getByRole("tab", { name: "Graph", exact: true }).click();

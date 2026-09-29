@@ -1,21 +1,16 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { getHealth } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
 import { backendOrigin } from "./ports.mjs";
-import { fillRunEnvironment } from "./workbench-helpers";
+import {
+  editor,
+  expectPhase,
+  fillRunEnvironment,
+  GOLDEN,
+  replaceSource,
+} from "./workbench-helpers";
 
-const ownDirectory = dirname(fileURLToPath(import.meta.url));
-const GOLDEN = readFileSync(
-  resolve(
-    ownDirectory,
-    "../../backend/tests/fixtures/strategy_documents/quality_momentum.yaml",
-  ),
-  "utf8",
-);
 const apiClient = createClient({ baseUrl: backendOrigin() });
 
 const EDITOR_CHUNK = /\/assets\/code-editor-view-[^/]+\.js(?:\?.*)?$/u;
@@ -81,7 +76,7 @@ const openWorkbench = async (page: Page) => {
 
   const navigation = await page.goto("/research/strategies/new");
   expect(navigation?.ok()).toBe(true);
-  await expect(page.getByRole("textbox", { name: "편집기" })).toBeVisible();
+  await expect(editor(page)).toBeVisible();
   await expect(
     page.getByText("서버 초안 동기화됨", { exact: true }),
   ).toBeVisible();
@@ -220,10 +215,8 @@ test("keeps a real debugger trace legible and inside the viewport", async ({
   page,
 }) => {
   await openWorkbench(page);
-  await page.getByRole("textbox", { name: "편집기" }).fill(GOLDEN);
-  await expect(page.getByRole("status", { name: "문서 상태" })).toContainText(
-    "검증 통과",
-  );
+  await replaceSource(page, GOLDEN);
+  await expectPhase(page, "검증 통과");
   await fillRunEnvironment(page);
   const resizeDebugger = page.getByRole("separator", {
     name: "중간 결과 크기 조절",

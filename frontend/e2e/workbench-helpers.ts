@@ -1,6 +1,7 @@
 /**
- * Playwright spec 들이 함께 쓰는 워크벤치 헬퍼 — 편집기·저장·백테스트 로케이터, 문서 상태 대기,
- * 클립보드로 편집기 원문 읽기, revision URL 해석. `workbench.workflow.spec.ts`(CI 가 도는 릴리스 게이트)와
+ * Playwright spec 들이 함께 쓰는 워크벤치 헬퍼 — 저장·백테스트 로케이터, revision URL 해석, 실행 설정
+ * 채우기. 편집기 로케이터·원문 읽기·바꾸기·문서 검증 대기는 매뉴얼 촬영 스크립트도 쓰므로
+ * `editor-helpers.ts`에 두고 여기서 다시 내보낸다. `workbench.workflow.spec.ts`(CI 가 도는 릴리스 게이트)와
  * `workbench.real-equity.spec.ts`(opt-in 실데이터)가 같은 접근성 이름·API path 를 보도록 한 곳에 둔다.
  * 접근성 이름이 바뀌면 CI 의 workflow spec 이 먼저 깨지고, 여기서 고치면 real-equity 도 함께 따라온다.
  */
@@ -11,7 +12,15 @@ import { fileURLToPath } from "node:url";
 
 import type { RunEnvironment } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
-import { backendOrigin, previewOrigin } from "./ports.mjs";
+import { editor, expectPhase, waitForSettledDocument } from "./editor-helpers";
+import { backendOrigin } from "./ports.mjs";
+
+export {
+  currentSource,
+  editor,
+  expectPhase,
+  replaceSource,
+} from "./editor-helpers";
 
 export const BACKEND = backendOrigin();
 export const apiClient = createClient({ baseUrl: BACKEND });
@@ -25,8 +34,6 @@ export const GOLDEN = readFileSync(
   "utf8",
 ).replace(/\r\n?/gu, "\n");
 
-export const editor = (page: Page) =>
-  page.getByRole("textbox", { name: "편집기", exact: true });
 export const save = (page: Page) =>
   page.getByRole("button", { name: "리비전 저장", exact: true });
 export const validate = (page: Page) =>
@@ -40,62 +47,12 @@ export const openEditor = async (page: Page, url: string) => {
   await expect(editor(page)).toBeVisible();
 };
 
-export const replaceSource = async (page: Page, source: string) => {
-  await editor(page).fill(source);
-};
-
-/**
- * 편집기에 넣은 텍스트의 검증(parse·compile)이 끝나기를 기다린다. 부하가 큰 러너에서 검증 결과가
- * 도착하기 전의 중간 상태를 단언이 읽는 경합을 막는다(#240 후보 (a)). 문서 상태 배지의
- * `data-settled` 는 compile 버전이 입력 버전을 따라잡았거나 구문 오류로 compile 이 시작되지 않을 때
- * 참이다(`isDocumentSettled`).
- */
-export const waitForSettledDocument = async (page: Page) => {
-  const status = page.getByRole("status", { name: "문서 상태" });
-  await expect(status, "문서 검증이 입력 버전을 따라잡는다(#240)").toHaveAttribute(
-    "data-settled",
-    "true",
-  );
-  return status;
-};
-
-export const expectPhase = async (page: Page, phase: string) => {
-  const status = await waitForSettledDocument(page);
-  await expect(status).toContainText(phase);
-};
-
 export const requireData = <Value>(
   data: Value | undefined,
   operation: string,
 ): Value => {
   if (data === undefined) throw new Error(`${operation} returned no data`);
   return data;
-};
-
-/**
- * 편집기 원문 전체를 읽는다. 전체 선택 → 복사 → 클립보드 읽기를 **연속 두 번 같은 값이 나올 때까지**
- * 되풀이한다. 탭을 YAML로 바꾸면 선택된 pointer를 편집기에 드러내는 reveal이 비동기로 한 틱 늦게
- * 도착한다(route 테스트 P6-03 주석과 같은 현상). 그 reveal이 Ctrl+A 뒤에 떨어지면 선택이 그 pointer
- * 범위로 바뀌어 원문 대신 조각이 복사된다 — 화면이 무거워진 main 반영 뒤 그래프 되돌리기 e2e가 이
- * 경로로 간헐 실패했다. reveal은 한 번 오고 끝나므로 두 번 연속 같은 값이면 그것이 전체 원문이다.
- */
-export const currentSource = async (page: Page) => {
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: previewOrigin(),
-  });
-  const copyAll = async (): Promise<string> => {
-    await editor(page).click();
-    await editor(page).press("Control+A");
-    await editor(page).press("Control+C");
-    return page.evaluate(() => navigator.clipboard.readText());
-  };
-  let previous = await copyAll();
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const next = await copyAll();
-    if (next === previous) return next;
-    previous = next;
-  }
-  throw new Error("editor source kept changing while it was being copied");
 };
 
 export const strategyIdentity = (page: Page) => {
@@ -196,8 +153,8 @@ export const fillRunEnvironment = async (
     universe_id: string;
   } = RUN_ENVIRONMENT,
 ) => {
-  // 실행 설정은 문서 밖이지만, 편집기 검증이 끝나기 전에 패널을 여닫으면 뒤이은 문서 단언이 중간
-  // 상태를 읽는다(#240). 먼저 검증을 끝낸다.
+  // 문서 검증이 끝난 뒤 실행 설정을 채운다. #240 을 좇으며 넣은 순서지만 #240 의 원인은 이 순서가 아니라
+  // `fill` 의 DOM 선택을 CodeMirror 갱신이 되쓴 것이었다(`replaceSource`).
   await waitForSettledDocument(page);
   const toggle = page.getByLabel("실행 설정 열기");
   const band = page.getByRole("region", { name: "실행 설정 요약" });

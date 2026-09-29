@@ -24,6 +24,9 @@ Shape (JSON Schema 2020-12):
   the dataclass field metadata declared next to the field (P3-03).
 - required factor authoring fields carry `x-authoring-source` or `x-authoring-default`; this lets
   clients project a catalog row without duplicating FactorSignal field names or starter values.
+- 섹션과, 섹션과 적용 단계가 다른 필드는 `x-stage`(`AppliedStage` 값)를 싣는다. 그래프 표현
+  (파이프라인)이 필드를 보이는 단계이고, 나머지 필드는 자기 `x-applied-stage` 또는 가장 가까운
+  조상의 `x-stage` 를 따른다(P4-01).
 """
 
 from __future__ import annotations
@@ -320,6 +323,7 @@ class _SchemaBuilder:
                 "authoring-default",
                 "authoring-identity",
                 "default-from",
+                "stage",
             ):
                 if marker in field.metadata:
                     schema = {**schema, f"x-{marker}": _json_value(field.metadata[marker])}

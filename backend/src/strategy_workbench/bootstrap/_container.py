@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -31,6 +31,7 @@ from strategy_workbench.application.assistant_chat.facade.chat import AssistantC
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
+    DEFAULT_RUN_SLOTS,
     BacktestRunService,
     BacktestRunSpec,
     RunStatus,
@@ -104,6 +105,7 @@ def build_container(
     equity_root: Path | None = None,
     strategy_repository_path: str | Path | None = None,
     research_db_path: str | Path | None = None,
+    run_slots: int = DEFAULT_RUN_SLOTS,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
 ) -> BackendContainer:
     """Build one explicit dependency graph; unknown adapters fail instead of falling back.
@@ -175,6 +177,7 @@ def build_container(
         LocalArtifactStore(run_artifact_root),
         run_repository=run_repository,
         new_id=lambda: str(uuid4()),
+        run_slots=run_slots,
     )
     # 결과 설명 세션이 완료된 실행을 읽으므로 실행 레지스트리를 먼저 세운다(결과 설명 spec R2).
     assistant_services = build_assistant_services(
@@ -238,20 +241,20 @@ class _RunServiceTrialRuns:
             )
         return AdmittedRun(admission.spec, self._runs.trial_ledger(admission.lineage_id))
 
-    def start(self, request: BacktestRunSpec, *, trial_key: str) -> str:
+    def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
         try:
-            return self._runs.start(request, trial_key_override=trial_key).run.run_id
+            return self._runs.start(request, owner=owner, trial_key_override=trial_key).run.run_id
         except Exception as error:
             code = rejection_code(error)
             if code is None:
                 raise
             raise TrialRunRejectedError(code, str(error)) from error
 
-    def status(self, run_id: str) -> RunStatus:
-        return self._runs.state(run_id).status
+    def statuses(self, run_ids: Collection[str]) -> Mapping[str, RunStatus]:
+        return self._runs.statuses(run_ids)
 
-    def cancel(self, run_id: str) -> None:
-        self._runs.cancel(run_id)
+    def cancel(self, run_id: str, *, owner: str) -> None:
+        self._runs.cancel(run_id, owner=owner)
 
 
 def _source_spec_hash_resolver(

@@ -2925,7 +2925,7 @@ describe("backtest from the editor (P3-05)", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(
-      "백테스트 시작 실패: 시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+      "백테스트 시작 실패: 시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
     );
     await user.click(
       within(alert).getByRole("button", { name: "시작일을 2020-01-02로" }),

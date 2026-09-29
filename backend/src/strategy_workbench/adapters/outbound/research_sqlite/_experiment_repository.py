@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeVar
@@ -22,6 +23,7 @@ from ._schema import migrate_schema
 _T = TypeVar("_T")
 # 설계 JSON 은 기록에서 칸 셋(식별·시각)을 뺀 것이다. 그 셋은 칸으로 둔다(취소 시각은 바뀐다).
 _COLUMNS = {"experiment_id", "created_at", "cancelled_at"}
+_SELECT = "experiment_id, created_at, cancelled_at, design_json"
 _RECORD = TypeAdapter(ExperimentRecord)
 _ATTEMPT = TypeAdapter(TrialAttempt)
 _SELECTION = TypeAdapter(ExperimentSelection)
@@ -56,19 +58,25 @@ class SQLiteExperimentRepository:
     def get(self, experiment_id: str) -> ExperimentRecord:
         with self._database.transaction(write=False) as connection:
             row = connection.execute(
-                """
-                SELECT experiment_id, created_at, cancelled_at, design_json FROM experiments
-                WHERE experiment_id = ?
-                """,
-                (experiment_id,),
+                f"SELECT {_SELECT} FROM experiments WHERE experiment_id = ?", (experiment_id,)
             ).fetchone()
         if row is None:
             raise _not_found(experiment_id)
-        return _decode(
-            _RECORD,
-            experiment_id,
-            {**json.loads(row["design_json"]), **{key: row[key] for key in _COLUMNS}},
-        )
+        return _record(row)
+
+    def list(self, *, after: str | None, limit: int) -> tuple[ExperimentRecord, ...]:
+        with self._database.transaction(write=False) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT {_SELECT} FROM experiments
+                WHERE ? IS NULL OR experiment_order < (
+                    SELECT experiment_order FROM experiments WHERE experiment_id = ?
+                )
+                ORDER BY experiment_order DESC LIMIT ?
+                """,
+                (after, after, limit),
+            ).fetchall()
+        return tuple(_record(row) for row in rows)
 
     def cancel(self, experiment_id: str, *, cancelled_at: datetime) -> None:
         with self._database.transaction(write=True) as connection:
@@ -140,6 +148,14 @@ class SQLiteExperimentRepository:
         return tuple(
             _decode(_SELECTION, experiment_id, json.loads(row["selection_json"])) for row in rows
         )
+
+
+def _record(row: sqlite3.Row) -> ExperimentRecord:
+    return _decode(
+        _RECORD,
+        row["experiment_id"],
+        {**json.loads(row["design_json"]), **{key: row[key] for key in _COLUMNS}},
+    )
 
 
 def _decode(adapter: TypeAdapter[_T], experiment_id: str, value: dict[str, Any]) -> _T:

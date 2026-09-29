@@ -7,6 +7,7 @@ run 의 목록·상태·요청은 이 저장소가 정본이다. 서비스는 �
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -14,6 +15,7 @@ from strategy_workbench.application.strategy_design.facade.ports import Page, Pa
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     BacktestRunState,
+    RunStatus,
     StrategyProvenance,
 )
 
@@ -64,4 +66,8 @@ class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
 
     def unfinished(self) -> tuple[BacktestRunState, ...]:
         """종결(`completed`·`failed`·`cancelled`)되지 않은 run 의 상태."""
+        ...
+
+    def statuses(self, run_ids: Collection[str]) -> dict[str, RunStatus]:
+        """저장된 run 들의 마지막 상태(한 번에 읽는다). 없는 run 은 빠진다."""
         ...

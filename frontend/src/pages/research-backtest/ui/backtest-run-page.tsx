@@ -1,19 +1,20 @@
 import { useId, useMemo, useRef, useState } from "react";
 
 import {
+  BacktestResultFailure,
   BacktestRunDetail,
+  BacktestRunFailure,
   runEnvironmentFields,
   useBacktestRequest,
   useBacktestResult,
   useBacktestStatus,
   useRunEnvironmentSchema,
-  type BacktestRunState,
 } from "../../../entities/backtest";
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import { BacktestRunActions } from "../../../features/run-backtest";
-import { t, tOptional } from "../../../shared/config";
+import { t } from "../../../shared/config";
 import { useNavigate, useParams } from "../../../shared/lib/router";
-import { Badge, Button, FailureNotice } from "../../../shared/ui";
+import { Badge, Button } from "../../../shared/ui";
 import "./backtest-run-page.css";
 
 const TONE = {
@@ -24,39 +25,6 @@ const TONE = {
   failed: "error",
   completed: "ok",
 } as const;
-
-type BacktestRunErrorProps = {
-  status: BacktestRunState["status"];
-  error: string;
-  errorCode: NonNullable<BacktestRunState["error_code"]> | null;
-};
-
-/**
- * 실패 사유 표시. "failed" 배지만으로는 원인을 알 수 없다(이슈 #154). `error_code` 번역이 있으면
- * 그 복구 문구를 본문으로 두고 서버 사유는 접힌 진단 상세로 내린다 — 원문 detail 을 그대로
- * 노출하지 않는다는 `.claude/rules/frontend-api-state.md` 를 run 쪽에서도 지킨다(이슈 #158).
- * 번역이 없을 때만 서버 사유를 본문으로 쓴다. 취소와 겹친 실패는 "실행 오류" 대신 별도 라벨.
- */
-const BacktestRunError = ({
-  status,
-  error,
-  errorCode,
-}: BacktestRunErrorProps) => {
-  const label =
-    status === "cancelled"
-      ? t("page.backtest.cancelledError")
-      : t("page.backtest.runError");
-  const translated =
-    errorCode === null ? null : tOptional(`backtest.run.error.${errorCode}`);
-  return (
-    <FailureNotice
-      className="page-state page-state--error"
-      title={label}
-      message={translated ?? error}
-      reason={translated === null ? null : error}
-    />
-  );
-};
 
 /**
  * 결과 화면 우측 AI 패널의 열림 상태(결과 설명 spec R1). 페이지의 local UI state다.
@@ -173,23 +141,19 @@ export const BacktestRunPage = () => {
         >
           {state.stage} · {Math.round(state.progress * 100)}% · {state.message}
         </p>
-        {state.error ? (
-          <BacktestRunError
-            status={state.status}
-            error={state.error}
-            errorCode={state.error_code ?? null}
-          />
-        ) : null}
+        <BacktestRunFailure
+          run={state}
+          className="page-state page-state--error"
+        />
         {completed && result.isPending ? (
           <p className="page-state" role="status">
             {t("page.loading")}
           </p>
         ) : null}
-        {result.isError ? (
-          <p className="page-state page-state--error" role="alert">
-            {t("page.backtest.resultError")}
-          </p>
-        ) : null}
+        <BacktestResultFailure
+          error={result.error}
+          className="page-state page-state--error"
+        />
         {result.data ? (
           <BacktestRunDetail
             result={result.data}

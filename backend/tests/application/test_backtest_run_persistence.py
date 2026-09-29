@@ -109,7 +109,7 @@ def _service(
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=repository,
         new_id=iter(run_ids).__next__,
-        max_concurrent_runs=1,
+        run_slots=1,
     )
 
 

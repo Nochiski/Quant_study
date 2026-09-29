@@ -58,10 +58,10 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   spec_hash 대조) 또는 inline draft를 지정하고(옛 schema revision이면 422
   `backtest.strategy.requires_upgrade`) manifest의 `strategy_provenance`에 출처를 기록 (기존 `strategy` inline도 유지). 실제
   `backtest.run.invalid`·`portfolio.*` 422와 saved-reference 404/409는 OpenAPI/generated SDK의
-  discriminated error 계약으로 함께 제공한다. 한꺼번에 계산하는 run 수의 상한은 `backtest_run`의
-  `MAX_CONCURRENT_RUNS` 하나가 정하고, 넘는 run은 `queued`(접수 문장 `Waiting for a free run slot`)로
-  접수 순서대로 기다린다. 같은 입력(실행할 spec·실행 설정·실행 옵션·provenance)으로 `queued`·`running`
-  인 run이 있으면 새 run 대신 그 run을 돌려준다(이슈 #161).
+  discriminated error 계약으로 함께 제공한다. 동시 실행 슬롯 수는 환경 변수
+  `STRATEGY_WORKBENCH_RUN_SLOTS`(기본 2)가 정하고, 넘는 run은 `queued`(접수 문장 `Waiting for a free
+  run slot`)로 기다린다. 배정 순서(단일 실행 전용 슬롯·실험 라운드로빈)와 같은 입력 잇기·공유 run 취소
+  규칙은 `.claude/rules/strategy-workbench-sot.md` 의 "백테스트 run 접수" 행이 정본이다.
 - `GET /api/v1/backtests`: 실행 이력 목록
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다

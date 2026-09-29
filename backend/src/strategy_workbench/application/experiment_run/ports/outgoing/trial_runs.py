@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -40,16 +41,21 @@ class TrialRunPort(Protocol):
         """
         ...
 
-    def start(self, request: BacktestRunSpec, *, trial_key: str) -> str:
+    def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
         """실행을 접수하고 run_id 를 돌려준다. `trial_key` 로 계열 원장에 적는다.
+
+        `owner` 는 실험 id 다. 실행 서비스가 대기 순서를 실험끼리 번갈아 정하고, 같은 입력을 이은
+        run 은 소유자가 모두 취소해야 멈춘다.
 
         Raises:
             TrialRunRejectedError: 실행 서비스가 요청을 접수하지 않았다.
         """
         ...
 
-    def status(self, run_id: str) -> RunStatus: ...
+    def statuses(self, run_ids: Collection[str]) -> Mapping[str, RunStatus]:
+        """여러 실행의 상태를 한 번에 읽는다."""
+        ...
 
-    def cancel(self, run_id: str) -> None:
-        """끝난 실행이면 아무것도 하지 않는다."""
+    def cancel(self, run_id: str, *, owner: str) -> None:
+        """`owner` 가 실행에서 빠진다. 다른 소유자가 남았거나 끝난 실행이면 멈추지 않는다."""
         ...

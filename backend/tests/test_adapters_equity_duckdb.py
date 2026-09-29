@@ -1196,7 +1196,7 @@ def degraded_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
             lambda a: a.load_panel(ResearchPanelQuery(START, END, ("036220:1",), ("price.close",))),
         ),
         ("equity tables not built", lambda a: _raw(a, fields=("flow.foreign_net_buy",))),
-        ("catalog meta missing", lambda a: _raw(a, fields=("financial.book_equity",))),
+        ("catalog_missing", lambda a: _raw(a, fields=("financial.book_equity",))),
     ],
     ids=["no-sessions", "no-members", "no-panel-cells", "table-not-built", "meta-missing"],
 )

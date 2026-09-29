@@ -185,20 +185,20 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
 
     빌드·GC 뒤 재생성되지 않은 카탈로그는 매크로 본문이 옛 `v=` 경로를 물고 있다(DESIGN §2) —
     그런 카탈로그로 조정가를 내면 조용히 옛 판본을 읽으므로 usable=False 로 막는다.
-    `reason` 은 질의 거절 상세로 사용자에게 가므로 루트 기준 파일 이름만 싣는다(#163).
+    `reason` 은 질의 거절 상세로 사용자에게 가므로 루트 기준 파일 이름만 싣는다(#163). 쓸 수 없는
+    카탈로그는 매크로를 읽는 원천이 모두 빠지므로 사유를 만든 여기서 경고도 한 번 남긴다 — 부팅
+    로그에 남아야 재생성한다(#292 리뷰 P2-2).
     """
     path = equity_root / CATALOG_NAME
     meta_path = equity_root / CATALOG_META_NAME
-    if not path.exists():
-        reason = (
-            f"catalog file missing — {CATALOG_REBUILD} (catalog_missing) — catalog={CATALOG_NAME}"
-        )
-        return CatalogState(path, False, reason, None, ())
-    if not meta_path.exists():
-        reason = (
-            f"catalog meta missing — {CATALOG_REBUILD} (catalog_missing) — meta={CATALOG_META_NAME}"
-        )
-        return CatalogState(path, False, reason, None, ())
+    for required in (path, meta_path):
+        if not required.exists():
+            reason = (
+                "카탈로그 파일이 없어 카탈로그 매크로를 읽는 원천의 필드를 뺀다 — "
+                f"{CATALOG_REBUILD} (catalog_missing) — file={required.name}"
+            )
+            logger.warning(f"{reason} path={required}")
+            return CatalogState(path, False, reason, None, ())
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         if not isinstance(meta, dict):
@@ -212,12 +212,13 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
     macros = tuple(str(item) for item in raw_macros) if isinstance(raw_macros, list) else ()
     actual = meta.get("snapshot_id")
     if actual != expected_snapshot_id:
+        reason = (
+            "카탈로그가 원장 테이블 판본과 달라(낡음) 카탈로그 매크로를 읽는 원천의 필드를 뺀다 — "
+            f"{CATALOG_REBUILD} (catalog_stale) — catalog_snapshot_id={actual!r} "
+            f"manifest_snapshot_id={expected_snapshot_id!r}"
+        )
+        logger.warning(f"{reason} path={path}")
         return CatalogState(
-            path,
-            False,
-            f"catalog is stale — {CATALOG_REBUILD} (catalog_stale) — "
-            f"catalog_snapshot_id={actual!r} manifest_snapshot_id={expected_snapshot_id!r}",
-            str(actual) if actual is not None else None,
-            macros,
+            path, False, reason, str(actual) if actual is not None else None, macros
         )
     return CatalogState(path, True, None, expected_snapshot_id, macros)

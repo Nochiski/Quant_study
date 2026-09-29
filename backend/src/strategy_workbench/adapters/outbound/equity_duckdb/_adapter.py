@@ -514,10 +514,7 @@ class EquityDuckdbAdapter:
         부팅을 멈춘다.
         """
         if not catalog.usable:
-            # 없음·meta 없음·낡음(`catalog_missing`·`catalog_stale`) — 매크로를 읽는 원천(목록은
-            # FIELD_MAP §3 「부팅 검사」)이 모두 빠진다. 부팅 로그에 남겨야 재생성한다
-            logger.warning(f"{catalog.reason} path={catalog.path}")
-            return catalog
+            return catalog  # 사유와 경고는 `read_catalog` 가 이미 냈다
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
 
         try:

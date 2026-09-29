@@ -12,7 +12,6 @@ import pytest
 
 from backtest_engine import RunConfig
 from strategy_workbench.domain.backtest.facade.environment import (
-    ADV_SESSIONS,
     RUN_ENVIRONMENT_CONSTRAINTS,
     STATUTORY_SELL_TAX_BPS,
     DataFrequency,
@@ -383,6 +382,6 @@ def test_adv20_averages_only_the_last_twenty_rows_including_warmup() -> None:
 
     volumes = participation_volumes(environment, rows)
 
-    assert participation_history_sessions(environment) == ADV_SESSIONS == 20
+    assert participation_history_sessions(environment) == 20
     assert volumes is not None
     assert (volumes[(sessions[20], "A")], volumes[(sessions[21], "A")]) == (105, 115)

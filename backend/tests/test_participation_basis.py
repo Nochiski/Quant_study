@@ -53,6 +53,16 @@ def test_without_a_liquidity_volume_the_session_volume_caps(core: str) -> None:
     assert fills == [(2, 100, 110.0), (3, 100, 130.0), (4, 100, 90.0), (5, 100, 95.0)]
 
 
+def test_bar_feed_carries_the_liquidity_column_only_when_some_bar_has_one() -> None:
+    """열이 없으면(None) 세션 거래량이다 — 기준 거래량이 하나도 없는 feed 는 거래량 사본을
+    싣지 않는다."""
+    plain = tuple(replace(bar, liquidity_volume=None) for bar in LIQUIDITY_BARS)
+    mixed = (replace(LIQUIDITY_BARS[0], liquidity_volume=None), *LIQUIDITY_BARS[1:])
+
+    assert DataFeed(plain).columns().liquidity_volumes is None
+    assert DataFeed(mixed).columns().liquidity_volumes == [1_000, 0, 3_000, 3_000, 3_000]
+
+
 def test_negative_liquidity_volume_is_rejected() -> None:
     with pytest.raises(ValueError, match="liquidity_volume must be >= 0"):
         replace(LIQUIDITY_BARS[0], liquidity_volume=-1)

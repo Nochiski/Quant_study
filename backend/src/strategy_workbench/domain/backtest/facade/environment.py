@@ -18,7 +18,6 @@ from strategy_workbench.domain.backtest._models import (
     SellTax,
 )
 from strategy_workbench.domain.backtest._participation import (
-    ADV_SESSIONS,
     participation_history_sessions,
     participation_volumes,
 )
@@ -42,7 +41,6 @@ from strategy_workbench.domain.backtest._schema import (
 )
 
 __all__ = [
-    "ADV_SESSIONS",
     "CATALOG_UNIVERSE",
     "DEFAULT_MISSING_POLICY",
     "RUN_ENVIRONMENT_CONSTRAINTS",

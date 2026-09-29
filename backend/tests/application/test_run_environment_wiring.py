@@ -473,9 +473,9 @@ def test_partial_fill_is_declared_from_the_environment_not_the_document() -> Non
     assert "partial_fill" in {item.value for item in bridge.requirements(spec, partial).features}
 
 
-class _HalvedTradingValue:
-    """mock 거래대금을 반으로 줄여 ADV 기준 캡이 세션 거래량 기준 캡의 절반쯤이 되게 한다. 받은
-    질의와 돌려준 dataset 을 남긴다."""
+class _ShrunkWarmupValue:
+    """mock 워밍업 bar 의 거래대금만 1% 로 줄인다 — 워밍업을 ADV 에 넣었는지에 따라 첫 체결 세션의
+    캡이 크게 갈린다. 받은 질의와 돌려준 dataset 을 남긴다."""
 
     def __init__(self) -> None:
         self._inner = MockEquityDataAdapter.demo()
@@ -483,27 +483,40 @@ class _HalvedTradingValue:
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
         dataset = self._inner.load_backtest_dataset(query)
-
-        def halve(bars: tuple[MarketBarRecord, ...]) -> tuple[MarketBarRecord, ...]:
-            return tuple(replace(bar, trading_value=(bar.trading_value or 0) / 2) for bar in bars)
-
         dataset = replace(
-            dataset, bars=halve(dataset.bars), history_bars=halve(dataset.history_bars)
+            dataset,
+            history_bars=tuple(
+                replace(bar, trading_value=(bar.trading_value or 0) * 0.01)
+                for bar in dataset.history_bars
+            ),
         )
         self.loads.append((query, dataset))
         return dataset
+
+
+def _adv_caps(
+    environment: RunEnvironment, bars: tuple[MarketBarRecord, ...], rate: float
+) -> dict[tuple[date, str], int]:
+    volumes = participation_volumes(
+        environment,
+        ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
+    )
+    assert volumes is not None
+    return {key: math.floor(volume * rate) for key, volume in volumes.items()}
 
 
 @pytest.mark.parametrize("core", [ExecutionCore.PYTHON, ExecutionCore.RUST])
 def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
     tmp_path: Path, core: ExecutionCore
 ) -> None:
-    """`adv20`(V2-02)이면 실행이 start 앞 20세션을 워밍업으로 읽고, 체결은 그 행까지 포함해 센 기준
-    거래량 × 참여율을 넘지 않는다. 참여율을 낮춰 캡이 실제로 걸리게 한다."""
+    """`adv20`(V2-02)이면 실행이 start 앞 20세션을 워밍업으로 읽고, 체결은 워밍업 행까지 포함해 센
+    기준 거래량 × 참여율을 넘지 않는다. 첫 체결 세션의 체결량은 워밍업을 넣은 캡과 같고 뺀 캡과
+    다르다 — 엔진 어댑터가 워밍업 bar 를 빠뜨리면 여기서 걸린다."""
+    rate = 1e-4
     environment = replace(
-        _environment(), participation_basis=ParticipationBasis.ADV20, participation_rate=1e-4
+        _environment(), participation_basis=ParticipationBasis.ADV20, participation_rate=rate
     )
-    data = _HalvedTradingValue()
+    data = _ShrunkWarmupValue()
     runs = BacktestRunService(
         _portfolio(),
         InMemoryStrategyRepository(),
@@ -518,24 +531,16 @@ def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
     ((query, dataset),) = data.loads
     assert query.history_sessions_before_start == 20
     assert len({bar.session for bar in dataset.history_bars}) == 20
-    volumes = participation_volumes(
-        environment,
-        (
-            (bar.session, bar.security_id, bar.close, bar.trading_value)
-            for bar in (*dataset.history_bars, *dataset.bars)
-        ),
-    )
-    assert volumes is not None
+    warmed = _adv_caps(environment, (*dataset.history_bars, *dataset.bars), rate)
+    cold = _adv_caps(environment, dataset.bars, rate)
     fills = runs.result("adv-run").artifacts.fills
-    session_volumes = {(bar.session, bar.security_id): bar.volume for bar in dataset.bars}
-    rows = [
-        (
-            int(fill.quantity),
-            math.floor(volumes[(fill.session, fill.security_id)] * 1e-4),
-            math.floor(session_volumes[(fill.session, fill.security_id)] * 1e-4),
-        )
-        for fill in fills
+    assert fills
+    assert all(int(fill.quantity) <= warmed[(fill.session, fill.security_id)] for fill in fills)
+    first = [fill for fill in fills if fill.session == fills[0].session]
+    assert [int(fill.quantity) for fill in first] == [
+        warmed[(fill.session, fill.security_id)] for fill in first
     ]
-    assert rows and all(quantity <= cap for quantity, cap, _session in rows)
-    # 캡이 걸린 체결이 있고, 그 캡은 세션 거래량 기준 캡보다 작다.
-    assert any(quantity == cap < session_cap for quantity, cap, session_cap in rows)
+    assert all(
+        warmed[(fill.session, fill.security_id)] != cold[(fill.session, fill.security_id)]
+        for fill in first
+    )

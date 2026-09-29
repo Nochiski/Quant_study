@@ -287,9 +287,10 @@ class DataFeed:
         lows: list[float] = []
         closes: list[float] = []
         volumes: list[int] = []
-        # 기준 거래량이 없는 bar 는 세션 거래량으로 채운다(`Bar.cap_volume`) — 열 하나로 두 경우를
-        # 같은 뜻으로 싣는다.
+        # 기준 거래량이 있는 bar 가 하나라도 있을 때만 열을 싣고, 없는 bar 는 세션 거래량으로 채운다
+        # (`Bar.cap_volume`). 하나도 없으면 열은 None 이다 — "None = 세션 거래량" 한 뜻으로 둔다.
         liquidity_volumes: list[int] = []
+        has_liquidity = False
         for index in range(len(self._sessions)):
             for bar in self.snapshot_at(index).bars:
                 instrument_id = registry.get(bar.instrument)
@@ -303,6 +304,7 @@ class DataFeed:
                 closes.append(bar.close)
                 volumes.append(bar.volume)
                 liquidity_volumes.append(bar.cap_volume)
+                has_liquidity = has_liquidity or bar.liquidity_volume is not None
             offsets.append(len(instrument_ids))
         return FeedColumns(
             instruments=tuple(registry),
@@ -313,5 +315,5 @@ class DataFeed:
             lows=lows,
             closes=closes,
             volumes=volumes,
-            liquidity_volumes=liquidity_volumes,
+            liquidity_volumes=liquidity_volumes if has_liquidity else None,
         )

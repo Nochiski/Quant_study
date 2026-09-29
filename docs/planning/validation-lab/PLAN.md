@@ -6,7 +6,7 @@ current_phase: V0,V1,V2,V3
 current_pr: V0-01,V1-01,V2-01,V3-01
 active_prs: [V0-01, V1-01, V2-01, V3-01]
 parallel_window: [V0-01, V1-01, V2-01, V3-01]
-last_updated: 2026-09-29T15:55:52+09:00
+last_updated: 2026-09-29T16:53:54+09:00
 planned_prs: 28
 merged_prs: 0
 approved_prs: 1
@@ -29,7 +29,7 @@ progress_percent: 0
 | Active PR | `V0-01, V1-01, V2-01, V3-01` |
 | Progress | `0 / 28 merged (0%)` |
 | Approved | `1 / 28` |
-| Aggregated at | `2026-09-29 15:55 KST` |
+| Aggregated at | `2026-09-29 16:53 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -68,7 +68,7 @@ progress_percent: 0
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | V0 | Planning package | 1 | 0 | `APPROVED` |
-| V1 | Research window seal, run persistence, trial ledger | 5 | 0 | `IN_PROGRESS` |
+| V1 | Research window seal, run persistence, trial ledger | 5 | 0 | `SELF_CHECK` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 0 | `IN_PROGRESS` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 0 | `IN_PROGRESS` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
@@ -87,7 +87,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V1-01` | 연구 구간 잠금(실행·미리보기·추적) | V0-01 | `IN_PROGRESS` | — |
+| [ ] | `V1-01` | 연구 구간 잠금(실행·미리보기·추적) | V0-01 | `SELF_CHECK` | — |
 | [ ] | `V1-02` | 연구 구간 잠금 확장(팩터·equity 미리보기) | V1-01 | `PLANNED` | — |
 | [ ] | `V1-03` | 실행 기록 영속화(research DB, interrupted) | V0-01, #161 머지 | `WAITING` | — |
 | [ ] | `V1-04` | 결과 재적재 | V1-03, #277 머지 | `PLANNED` | — |

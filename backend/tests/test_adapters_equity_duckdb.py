@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -25,10 +26,14 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
     _LOCK_CONFLICT_MARKERS,
+    _PARQUET_LIST,
+    EVENT_TYPE_MAP,
     _fetchall,
+    _parquet_table,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_SPECS,
+    SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
@@ -231,23 +236,134 @@ def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
     assert keys[0].fingerprint != keys[1].fingerprint
 
 
-def test_field_contract_follows_the_declaration_table(
-    root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """이슈 #235: 선언표(`FIELD_SPECS`)의 식이 바뀌면 같은 원장·카탈로그에서도 계약 판이 갈린다."""
-    before = EquityDuckdbAdapter(root).snapshot().snapshot_id
+_ADAPTER = "strategy_workbench.adapters.outbound.equity_duckdb._adapter"
+
+
+def _edit_close(monkeypatch: pytest.MonkeyPatch, **changes: object) -> None:
     edited = tuple(
-        replace(spec, expr=f"({spec.expr}) * 1") if spec.field_id == "price.close" else spec
-        for spec in FIELD_SPECS
+        replace(spec, **changes) if spec.field_id == "price.close" else spec for spec in FIELD_SPECS
     )
-    monkeypatch.setattr(
-        "strategy_workbench.adapters.outbound.equity_duckdb._adapter.FIELD_SPECS", edited
+    monkeypatch.setattr(f"{_ADAPTER}.FIELD_SPECS", edited)
+
+
+def _edit_fin(monkeypatch: pytest.MonkeyPatch, **changes: object) -> None:
+    edited = tuple(
+        replace(spec, **changes) if spec.name == "fin" else spec for spec in SOURCE_SPECS
     )
+    monkeypatch.setattr(f"{_ADAPTER}.SOURCE_SPECS", edited)
+
+
+def _edit_signature_default(root: Path) -> None:
+    meta_path = root / "_catalog_meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["macros"] = [
+        signature.replace("vintage := 'restated'", "vintage := 'pit'")
+        for signature in meta["macros"]
+    ]
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+
+def _reverse_declarations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(f"{_ADAPTER}.FIELD_SPECS", FIELD_SPECS[::-1])
+    monkeypatch.setattr(f"{_ADAPTER}.SOURCE_SPECS", SOURCE_SPECS[::-1])
+
+
+@pytest.mark.parametrize(
+    ("edit", "moves"),
+    [
+        pytest.param(lambda mp, root: _edit_close(mp, expr="(close) * 1"), True, id="field-expr"),
+        pytest.param(
+            lambda mp, root: _edit_fin(mp, row_filter="period_frontier AND TRUE"),
+            True,
+            id="source-row-filter",
+        ),
+        pytest.param(
+            lambda mp, root: _edit_signature_default(root), True, id="macro-signature-default"
+        ),
+        pytest.param(
+            lambda mp, root: mp.setattr(
+                f"{_ADAPTER}.EVENT_TYPE_MAP", {**EVENT_TYPE_MAP, "bonus": "reverse_split"}
+            ),
+            True,
+            id="code-table",
+        ),
+        pytest.param(
+            lambda mp, root: _edit_close(
+                mp, label="종가 ", description="문장만", evidence="-", verdict="-"
+            ),
+            False,
+            id="field-prose",
+        ),
+        pytest.param(lambda mp, root: _edit_fin(mp, lag_basis="문장만"), False, id="source-prose"),
+        pytest.param(lambda mp, root: _reverse_declarations(mp), False, id="declaration-order"),
+    ],
+)
+def test_the_field_contract_follows_meaning_not_prose_or_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    edit: Callable[[pytest.MonkeyPatch, Path], object],
+    moves: bool,
+) -> None:
+    """이슈 #235·#291 리뷰: 뜻 칸이 바뀌면 계약 판이 바뀌고, 문장·선언 순서만 바뀌면 그대로다.
+
+    뜻 칸은 선언표의 식·원천의 고르는 규칙(#225 의 `period_frontier` 같은)·매크로 기본값(meta
+    시그니처)·코드의 대응표다. 어느 경우든 원장 판(앞부분)은 그대로다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    before = EquityDuckdbAdapter(root).snapshot().snapshot_id
+    edit(monkeypatch, root)
     after = EquityDuckdbAdapter(root).snapshot().snapshot_id
 
-    ledger = before.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0] + SNAPSHOT_CONTRACT_SEPARATOR
-    assert after != before
-    assert after.startswith(ledger)
+    ledger = before.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
+    assert after.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0] == ledger
+    assert (after != before) is moves
+
+
+_HIVE_OFF = "(hive_partitioning = CAST('f' AS BOOLEAN))"
+
+
+@pytest.mark.parametrize(
+    ("paths", "table"),
+    [
+        pytest.param(
+            [
+                "C:\\Users\\a\\equity\\price_daily\\v=b1\\year=2020\\part0.parquet",
+                "C:\\Users\\a\\equity\\price_daily\\v=b1\\year=2021\\part0.parquet",
+            ],
+            "price_daily",
+            id="windows",
+        ),
+        pytest.param(
+            ["C:/Users/a/equity/price_daily/v=b1/year=2020/part0.parquet"],
+            "price_daily",
+            id="windows-slash",
+        ),
+        pytest.param(
+            [
+                f"/home/ledger/equity/price_daily/v=b1/year={year}/part0.parquet"
+                for year in (2019, 2020, 2021)
+            ],
+            "price_daily",
+            id="posix",
+        ),
+        pytest.param(
+            ["/srv/o''brien/equity/fin_std/v=b2/part0.parquet"], "fin_std", id="quoted-root"
+        ),
+    ],
+)
+def test_macro_bodies_fold_parquet_paths_to_the_table_name_on_any_os(
+    paths: list[str], table: str
+) -> None:
+    """이슈 #235·#291 리뷰 P3-1: 매크로 본문의 parquet 절대경로는 OS·루트·파티션 수와 무관하게
+    테이블 이름으로 접힌다. 파일 하나면 duckdb 가 목록 없이 문자열로 돌려준다. 값 필터의 문자열
+    목록은 규칙이라 그대로 둔다.
+    """
+    listed = ", ".join(f"'{path}'" for path in paths)
+    body = f"read_parquet(main.list_value({listed}), {_HIVE_OFF}) WHERE k IN ('a', 'b')"
+    folded = f"read_parquet({table}, {_HIVE_OFF}) WHERE k IN ('a', 'b')"
+    assert _PARQUET_LIST.sub(_parquet_table, body) == folded
+    single = f"read_parquet('{paths[0]}')"
+    assert _PARQUET_LIST.sub(_parquet_table, single) == f"read_parquet({table})"
 
 
 def test_list_fields_serves_every_declared_field_whose_source_is_built(

@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import re
+
 from fastapi.testclient import TestClient
 
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.environment import DEFAULT_MISSING_POLICY
-from strategy_workbench.domain.equity.facade.research_data import SNAPSHOT_CONTRACT_SEPARATOR
 
 
 def _snapshot_id(client: TestClient) -> str:
-    """어댑터가 정한 데이터 스냅샷 id. mock fixture id 뒤에 필드 계약 판이 붙는다(#235)."""
+    """어댑터가 정한 데이터 스냅샷 id — "fixture 데이터의 판:필드 계약 판"(#235)."""
     snapshot_id = client.get("/api/v1/equity/catalog").json()["snapshot"]["snapshot_id"]
-    assert snapshot_id.startswith("mock-equity-v0.2-20260903" + SNAPSHOT_CONTRACT_SEPARATOR)
+    assert re.fullmatch(r"mock-equity-v0\.2-[0-9a-f]{16}:[0-9a-f]{16}", snapshot_id)
     return snapshot_id
 
 

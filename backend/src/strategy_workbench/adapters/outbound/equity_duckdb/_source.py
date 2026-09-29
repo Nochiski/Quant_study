@@ -160,6 +160,9 @@ class CatalogState:
     reason: str | None
     snapshot_id: str | None
     macros: tuple[str, ...]
+    # 부팅 때 파일에서 읽은 (매크로 이름, 본문) — parquet 경로는 테이블 이름으로 접었다. 필드 계약
+    # 판의 입력이다(#235).
+    bodies: tuple[tuple[str, str], ...] = ()
 
     def has_macro(self, name: str) -> bool:
         return any(signature.split("(", 1)[0] == name for signature in self.macros)

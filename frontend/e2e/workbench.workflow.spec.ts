@@ -46,8 +46,8 @@ import {
 } from "./workbench-helpers";
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
-/** mock 데이터 스냅샷 id — fixture id 뒤에 필드 계약 판(16 hex)이 붙는다(#235). */
-const MOCK_SNAPSHOT_ID = /^mock-equity-v0\.2-20260903:[0-9a-f]{16}$/u;
+/** mock 데이터 스냅샷 id — fixture 데이터의 판 뒤에 필드 계약 판이 붙는다(#235, 둘 다 16 hex). */
+const MOCK_SNAPSHOT_ID = /^mock-equity-v0\.2-[0-9a-f]{16}:[0-9a-f]{16}$/u;
 
 /** golden 그래프 끝에 붙이는 노드. 오류 노드 뒤에 비교 대상이 있어야 근접성을 잴 수 있다. */
 const TRAILING_NODE = [
@@ -539,7 +539,7 @@ test.describe("professional YAML workflow", () => {
       exclusion_reasons: ["outside_selection"],
     });
 
-    await expect(provenance).toContainText("mock-equity-v0.2-20260903");
+    await expect(provenance).toContainText(trace.snapshot_id);
     await expect(provenance).toContainText("factor-registry-v1");
     await expect(provenance).toContainText("2026-07-31");
     await expect(provenance.getByTitle(trace.spec_hash)).toBeVisible();

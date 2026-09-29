@@ -11,6 +11,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     FieldCoverageCapability,
     FieldValueType,
     SecurityRef,
+    canonical_revision,
 )
 
 
@@ -494,9 +495,14 @@ def build_demo_fixture() -> MockEquityFixture:
             ),
         )
     )
+    observed = tuple(observations)
     return MockEquityFixture(
         snapshot=DataSnapshot(
-            snapshot_id="mock-equity-v0.2-20260903",
+            # 원천 판은 fixture 데이터(세션·구성·관측·분할 사건)에서 계산한다. 데이터가 바뀌면 손
+            # 상수를 올리지 않아도 id 가 바뀐다(#291 리뷰 P3-6). 가격을 만드는 식은 어댑터 코드라
+            # 판 밖이다.
+            snapshot_id="mock-equity-v0.2-"
+            + canonical_revision((sessions, memberships, observed, MOCK_SPLIT)),
             schema_version="equity-v0.2-mock",
             built_at=datetime(2026, 9, 3, tzinfo=UTC),
             source="deterministic-memory-fixture",
@@ -516,7 +522,7 @@ def build_demo_fixture() -> MockEquityFixture:
         sessions=sessions,
         profiles=profiles,
         memberships=memberships,
-        observations=tuple(observations),
+        observations=observed,
     )
 
 

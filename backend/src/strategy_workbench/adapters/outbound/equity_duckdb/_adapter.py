@@ -68,7 +68,7 @@ import logging
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -514,28 +514,21 @@ class EquityDuckdbAdapter:
     # ── 구성 ──────────────────────────────────────────────────────────────────
 
     def _field_contract(self) -> dict[str, object]:
-        """필드 계약 판의 입력 — 선언표(`SOURCE_SPECS`·`FIELD_SPECS`)와 카탈로그 매크로(#235).
+        """필드 계약 판의 입력 — 선언표·카탈로그 매크로·표 모양 코드 규칙(#235).
 
-        같은 원장 빌드에서도 선언의 식·랙이나 매크로 본문(재무 TTM 등)이 바뀌면 값이 달라진다.
-        매크로 본문은 읽는 parquet 의 절대경로를 싣고 있어, 그 자리를 테이블 이름으로 바꿔 규칙만
-        남긴다 — 어느 build 를 읽는지는 원장 판이 가르고, 경로를 남기면 같은 원장·코드인데 기계마다
-        판이 갈린다. 카탈로그를 쓸 수 없으면 매크로를 읽는 원천이 빠지므로 매크로도 싣지 않는다.
+        같은 원장 빌드에서도 선언의 식·랙·고르는 규칙, 매크로 본문(재무 TTM 등), 셀 종류·기업행위
+        대응표가 바뀌면 값이 달라진다. 선언은 id 키로 넘겨 순서에 흔들리지 않고, 사람용 문장
+        칸은 `canonical_revision` 이 뺀다. 매크로 본문은 `_checked_catalog` 가 경로를 접어 읽어
+        둔 것이고, 카탈로그를 쓸 수 없으면 매크로를 읽는 원천이 빠지므로 매크로도 싣지 않는다.
         """
-        macros: dict[str, str] = {}
-        if self._catalog.usable:
-            with _open(self._catalog.path) as con:
-                rows = con.execute(
-                    "SELECT function_name, macro_definition FROM duckdb_functions() "
-                    "WHERE NOT internal AND function_type IN ('macro', 'table_macro')"
-                ).fetchall()
-            macros = {
-                str(name): _PARQUET_LIST.sub(_parquet_table, str(body)) for name, body in rows
-            }
         return {
-            "sources": [asdict(spec) for spec in SOURCE_SPECS],
-            "fields": [asdict(spec) for spec in FIELD_SPECS],
+            "sources": {spec.name: spec for spec in SOURCE_SPECS},
+            "fields": {spec.field_id: spec for spec in FIELD_SPECS},
             "macro_signatures": sorted(self._catalog.macros) if self._catalog.usable else [],
-            "macros": macros,
+            "macros": dict(self._catalog.bodies),
+            "cell_kinds": _FILL_KIND_TO_CELL,
+            "event_types": EVENT_TYPE_MAP,
+            "ratio_directed_event_types": RATIO_DIRECTED_EVENT_TYPES,
         }
 
     def _connect(self, sources: Iterable[SourceSpec]) -> duckdb.DuckDBPyConnection:
@@ -550,22 +543,27 @@ class EquityDuckdbAdapter:
         return _open(self._catalog.path if macro else None)
 
     def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
-        """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 본다(#247).
+        """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 매크로 본문을 읽는다(#247·#235).
 
         열리지 않는 파일(손상 등)은 카탈로그가 없을 때처럼 쓸 수 없는 것으로 두고 매크로를 읽는
         원천을 모두 빼고 경고한다(`catalog_unreadable`, meta 손상과 같은 규칙). 잠김·일시 오류는
-        부팅을 멈춘다.
+        부팅을 멈춘다. 읽은 본문은 경로를 테이블 이름으로 접어 필드 계약 판에 싣는다.
         """
         if not catalog.usable:
             return catalog  # 사유와 경고는 `read_catalog` 가 이미 냈다
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
 
         try:
-            _open(catalog.path).close()
+            with _open(catalog.path) as con:
+                rows = con.execute(
+                    "SELECT function_name, macro_definition FROM duckdb_functions() "
+                    "WHERE NOT internal AND function_type IN ('macro', 'table_macro')"
+                ).fetchall()
         except module.Error as error:
             _raise_unless_persistent(error, catalog.path)
             return unreadable_catalog(catalog.path, catalog.path, error)
-        return catalog
+        bodies = ((str(name), _PARQUET_LIST.sub(_parquet_table, str(body))) for name, body in rows)
+        return replace(catalog, bodies=tuple(bodies))
 
     def _source(self, table: str) -> str:
         return self._tables[table].parquet_source()

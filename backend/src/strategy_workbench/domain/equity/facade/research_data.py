@@ -15,6 +15,7 @@ from strategy_workbench.domain.equity._models import (
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    canonical_revision,
     field_contract_snapshot_id,
 )
 
@@ -35,5 +36,6 @@ __all__ = [
     "UniverseHistoryQuery",
     "UniverseHistoryResult",
     "UniversePoint",
+    "canonical_revision",
     "field_contract_snapshot_id",
 ]

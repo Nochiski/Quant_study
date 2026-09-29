@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import date, timedelta
 
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -50,6 +50,7 @@ from ._fixture import (
     ADJUSTED_FIELD_BY_RAW,
     MOCK_SPLIT,
     Membership,
+    MockEquityFixture,
     Observation,
     adjusted_close,
     build_demo_fixture,
@@ -68,42 +69,32 @@ _MOCK_UNIVERSES: dict[tuple[str, str], str] = {("KRX", "krx.common-stock"): "XKR
 class MockEquityDataAdapter:
     """Small but adversarial Equity v0.2 fixture with vintages, lags, and gaps."""
 
-    def __init__(
-        self,
-        *,
-        snapshot: DataSnapshot,
-        sessions: tuple[date, ...],
-        profiles: tuple[DatasetFieldProfile, ...],
-        memberships: tuple[Membership, ...],
-        observations: tuple[Observation, ...],
-    ) -> None:
-        # 원천 판(fixture 가 정한 id) 뒤에 필드 선언표의 판을 붙인다 — 선언(단위·랙·값 타입·조정
-        # 짝)이 바뀌면 같은 fixture id 라도 다른 데이터 스냅샷이다(#235).
+    def __init__(self, fixture: MockEquityFixture) -> None:
+        # fixture 의 원천 판 뒤에 필드 선언표의 판을 붙인다 — 선언(단위·랙·값 타입·조정 짝)이
+        # 바뀌면 같은 fixture 라도 다른 데이터 스냅샷이다(#235). 원천 판은 fixture 가 정하므로 이미
+        # 합친 id 를 다시 받을 길이 없다.
         self._snapshot = replace(
-            snapshot,
+            fixture.snapshot,
             snapshot_id=field_contract_snapshot_id(
-                snapshot.snapshot_id,
+                fixture.snapshot.snapshot_id,
                 {
-                    "profiles": [asdict(profile) for profile in profiles],
+                    "profiles": {profile.field_id: profile for profile in fixture.profiles},
                     "adjusted_field_by_raw": ADJUSTED_FIELD_BY_RAW,
                 },
             ),
         )
-        self._sessions = sessions
-        self._profiles = profiles
-        self._memberships = memberships
-        self._observations = observations
+        self._sessions = fixture.sessions
+        self._profiles = fixture.profiles
+        self._memberships = fixture.memberships
+        self._observations = fixture.observations
 
     @classmethod
-    def demo(cls) -> MockEquityDataAdapter:
+    def demo(
+        cls, *, profiles: tuple[DatasetFieldProfile, ...] | None = None
+    ) -> MockEquityDataAdapter:
+        """결정적 데모 fixture 로 만든다. `profiles` 를 주면 선언표만 바꾼 mock 이다(테스트)."""
         fixture = build_demo_fixture()
-        return cls(
-            snapshot=fixture.snapshot,
-            sessions=fixture.sessions,
-            profiles=fixture.profiles,
-            memberships=fixture.memberships,
-            observations=fixture.observations,
-        )
+        return cls(fixture if profiles is None else replace(fixture, profiles=profiles))
 
     def snapshot(self) -> DataSnapshot:
         return self._snapshot

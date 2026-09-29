@@ -43,8 +43,11 @@ from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
     FactorSignal,
     FloatParameter,
+    PortfolioStep,
+    RiskStep,
     StrategyIdentity,
     StrategySpec,
+    WeightingMethod,
     strategy_semantic_hash,
     strategy_spec_hash,
 )
@@ -282,41 +285,51 @@ def test_the_strategy_axis_ignores_node_names_and_declaration_order_but_not_stru
     assert (trial_key(replace(_BASE, strategy=strategy)) != base) is new_trial
 
 
-def test_renaming_a_factor_and_its_risk_reference_keeps_the_strategy_axis() -> None:
-    def weighted(factor_id: str) -> StrategySpec:
-        strategy = _momentum_over_volatility()
-        risk = replace(strategy.factors[0], factor_id="risk_source", label="위험")
-        return replace(
-            strategy,
-            factors=(replace(strategy.factors[0], factor_id=factor_id), risk),
-            risk=replace(strategy.risk, risk_factor_id="risk_source"),
-        )
+def _risk_weighted(
+    alpha: str = "mom_vol", risk: str = "risk_source", *, target: str | None = None
+) -> StrategySpec:
+    """`weighting: risk` 두 팩터 전략. 알파(20일 창)에는 죽은 노드가 하나 있고, 위험 원천은
+    60일 창이다.
 
-    renamed = weighted("mom_vol")
-    renamed = replace(
-        renamed,
-        factors=(renamed.factors[0], replace(renamed.factors[1], factor_id="inverse_risk")),
-        risk=replace(renamed.risk, risk_factor_id="inverse_risk"),
+    `alpha`·`risk` 는 두 팩터 id, `target` 은 `risk_factor_id` 가 가리키는 팩터 id(기본은
+    위험 원천)다.
+    """
+    unused = FieldNode(node_id="unused", field_id="price.volume", kind="field")
+    alpha_factor = _momentum_over_volatility(extra=(unused,)).factors[0]
+    risk_factor = _momentum_over_volatility(window=60).factors[0]
+    return StrategySpec(
+        identity=StrategyIdentity(strategy_id="s", revision=1),
+        title="손 예시",
+        factors=(replace(alpha_factor, factor_id=alpha), replace(risk_factor, factor_id=risk)),
+        portfolio=PortfolioStep(weighting=WeightingMethod.RISK),
+        risk=RiskStep(risk_factor_id=risk if target is None else target),
     )
 
-    assert strategy_semantic_hash(renamed) == strategy_semantic_hash(weighted("momentum_risk"))
-    # 참조가 다른 팩터를 가리키면 다른 시도다.
-    pointed_elsewhere = replace(renamed, risk=replace(renamed.risk, risk_factor_id="mom_vol"))
-    assert strategy_semantic_hash(pointed_elsewhere) != strategy_semantic_hash(renamed)
+
+def test_renaming_factors_with_their_risk_reference_keeps_the_axis_but_retargeting_does_not() -> (
+    None
+):
+    base = strategy_semantic_hash(_risk_weighted())
+
+    assert strategy_semantic_hash(_risk_weighted("alpha", "inverse_risk")) == base
+    # 위험 원천을 60일 창 팩터에서 20일 창 알파로 바꾸면 역가중 비중과 합성 점수가 모두 달라진다.
+    assert strategy_semantic_hash(_risk_weighted(target="mom_vol")) != base
 
 
 # 의미 해시가 보는 칸이나 정규화를 바꾸는 PR 은 `STRATEGY_SEMANTIC_HASH_VERSION` 을 올리고 이 짝을
 # 함께 고친다(SoT 시도 키 행). 판본을 올리면 계열마다 다음 실행이 한 번 새 시도로 셀 수 있다.
+# 고정 예시는 이 판본의 규칙 셋을 모두 거친다: 노드 번호(팩터마다 출력 0 → 나누기 왼쪽 모멘텀 1 →
+# 종가 2 → 변동성 3), 죽은 노드 제외, 팩터 id·`risk_factor_id` 치환(팩터 0·1).
 _PINNED_SEMANTIC_HASH = (
     "strategy-semantic-v2",
-    "8831b52527272c9aac1fe18b670a1ec73d4ac5842d2a11fbead79be86708b41f",
+    "651681979b7912cd19bb3b0a1f56fb180d5fd574de055d13f777e19df44cb5a5",
 )
 
 
 def test_semantic_hash_changes_come_with_a_version_bump() -> None:
     assert (
         STRATEGY_SEMANTIC_HASH_VERSION,
-        strategy_semantic_hash(_momentum_over_volatility()),
+        strategy_semantic_hash(_risk_weighted()),
     ) == _PINNED_SEMANTIC_HASH
 
 

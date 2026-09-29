@@ -113,8 +113,9 @@ def strategy_semantic_hash(spec: StrategySpec) -> str:
     """시도 키의 전략 축.
 
     `strategy_spec_hash` 의 payload 에서 이름·설명·판본·파라미터 정의를 뺀 해시다. 제목·팩터 표시
-    이름만 바꾼 저장과 업그레이드만 한 리비전은 새로 고를 거리를 만들지 않으므로 같은 값이다. 노드
-    이름·선언 순서와 팩터 id 도 `_structural` 이 지워 계산이 같으면 같은 값이다.
+    이름만 바꾼 저장과 업그레이드만 한 리비전은 새로 고를 거리를 만들지 않으므로 같은 값이다.
+    `_structural` 이 노드 이름·선언 순서·팩터 id 와 출력에 닿지 않는 노드를 지워, 그것만 다르면 같은
+    값이다. 공유 노드와 같은 내용의 복제 노드처럼 구조가 다르면 계산이 같아도 다를 수 있다(보수 쪽).
     """
     payload = canonical_strategy_payload(_structural(spec))
     for name in _NON_SEMANTIC_FIELDS:
@@ -154,7 +155,8 @@ def _structural_graph(graph: FactorGraph) -> FactorGraph:
     입력은 `node_dependencies` 순서(왼쪽·오른쪽, 조건·참·거짓)로 따라가고 뒤바꾸지 않는다 — 빼기·
     나누기·비교·조건은 인자 순서가 결과를 바꾼다. 선언 순서는 평가에 쓰이지 않아(평가는 출력에서
     참조를 따라간다, `domain/factor/_planning.py`) 번호에 남지 않는다. 출력에 닿지 않는 노드는
-    계산되지 않아 뺀다. 없는 참조(검증 전 문서)는 이름 그대로 둔다.
+    계산되지 않아 뺀다. 없는 참조(검증 전 문서)는 이름 그대로 두어 구조 번호와 겹칠 수 있지만, 그런
+    문서는 검증 error 라 결과가 없어 N 에 들지 않는다(`_structural` 의 `risk_factor_id` 도 같다).
     """
     nodes = {node.node_id: node for node in graph.nodes}
     numbers: dict[str, str] = {}

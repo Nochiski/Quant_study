@@ -54,6 +54,7 @@ from .ports.outgoing.backtest_data import BacktestDataPort, BacktestDataQuery
 from .ports.outgoing.backtest_executor import (
     BacktestExecutionRequest,
     BacktestExecutorPort,
+    EquityWipedOutError,
     RunCancelledError,
 )
 
@@ -776,6 +777,8 @@ def _failure_code(error: BaseException) -> RunFailureCode:
         return "portfolio.raw_observation.invalid"
     if isinstance(error, (InvalidBacktestRunError, IncompatiblePortfolioRequestError)):
         return "backtest.run.invalid"
+    if isinstance(error, EquityWipedOutError):
+        return "backtest.run.equity_wiped_out"
     return "backtest.run.internal"
 
 

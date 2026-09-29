@@ -15,6 +15,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.backtest_executo
     BacktestExecutionRequest,
     BacktestExecutorPort,
     CancellationCheck,
+    EquityWipedOutError,
     ProgressCallback,
     RunCancelledError,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "BacktestExecutorPort",
     "CancellationCheck",
     "CorporateActionRecord",
+    "EquityWipedOutError",
     "InvalidBarRecord",
     "MarketBarRecord",
     "ProgressCallback",

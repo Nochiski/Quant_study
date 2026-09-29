@@ -47,6 +47,7 @@ const RUN_FAILURE_CODES: Record<RunFailureCode, true> = {
   "portfolio.data.unavailable": true,
   "portfolio.raw_observation.invalid": true,
   "backtest.run.invalid": true,
+  "backtest.run.equity_wiped_out": true,
   "backtest.run.internal": true,
 };
 

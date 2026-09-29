@@ -554,6 +554,7 @@ export type BacktestRunState = {
     | "portfolio.data.unavailable"
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
+    | "backtest.run.equity_wiped_out"
     | "backtest.run.internal"
     | null;
   /**

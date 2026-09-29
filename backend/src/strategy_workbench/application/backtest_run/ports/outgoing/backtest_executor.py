@@ -31,6 +31,10 @@ class RunCancelledError(RuntimeError):
     pass
 
 
+class EquityWipedOutError(RuntimeError):
+    """세션 종료 자산이 0 이하가 되어 실행기가 멈췄다(자본 잠식). 서버 오류가 아니라 전략 결과다."""
+
+
 class BacktestExecutorPort(Protocol):
     def execute(
         self,

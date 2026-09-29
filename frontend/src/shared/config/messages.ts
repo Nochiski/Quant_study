@@ -52,6 +52,8 @@ const ko = {
     "전략 계산이 유효하지 않습니다. 서버 사유의 노드·경로를 확인하세요.",
   "backtest.run.error.backtest.run.invalid":
     "실행 요청이 이 환경에서 처리될 수 없습니다. 실행 설정과 엔진 능력을 확인하세요.",
+  "backtest.run.error.backtest.run.equity_wiped_out":
+    "세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식). 서버 오류가 아니라 전략이 자본을 모두 잃은 결과입니다. 레버리지·공매도 비중을 줄여 보세요.",
   "backtest.run.error.backtest.run.internal":
     "서버 내부 오류로 실행이 중단되었습니다. 서버 로그를 확인하세요.",
   "backtest.settings.title": "실행 설정",
@@ -1756,6 +1758,8 @@ export const messages = {
       "The strategy calculation is invalid. Check the node and path in the server reason.",
     "backtest.run.error.backtest.run.invalid":
       "The run request cannot be processed in this environment. Check the run settings and engine capabilities.",
+    "backtest.run.error.backtest.run.equity_wiped_out":
+      "Equity fell to zero or below at a session close, so the run stopped (wiped out). This is the strategy losing all its capital, not a server error. Try lower leverage or short exposure.",
     "backtest.run.error.backtest.run.internal":
       "The run stopped because of an internal server error. Check the server logs.",
     "backtest.settings.title": "Run settings",

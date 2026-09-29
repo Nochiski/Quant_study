@@ -931,8 +931,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "넘는 원장 행은 S10 이 `_reject/balance_over_shares/` 로 격리하고 그 셀은 "
             "`empty_response`(→ MISSING)로 남는다(DESIGN §9 결정 9). **무상증자 권리락일부터 "
             "척도 창의 잔고도 결측(MISSING)이다** — 원천 잔고가 옛 단위와 새 단위로 섞여 상장"
-            "주식수와 척도가 맞지 않는다. 창 길이와 공시 전 세션을 가리지 않는 규칙은 원장 뷰 "
-            f"`v_credit_balance` 가 정한다(#249). {_FILL_KIND_NOTE}."
+            "주식수와 척도가 맞지 않는다. 권리락일 뒤에 공시된 사건(약 7%)은 공시 전 세션을 "
+            "가리지 못한다. 창 길이와 가림 규칙은 원장 뷰 `v_credit_balance` 가 정한다(#249). "
+            f"{_FILL_KIND_NOTE}."
         ),
         disclosure_basis=(
             "원장 날짜(basis default) — 신용잔고는 T+2 공표이고 우리 체인은 T+3 아침에 받는다. "

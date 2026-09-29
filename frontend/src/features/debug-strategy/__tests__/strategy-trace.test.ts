@@ -293,7 +293,7 @@ describe("strategy trace request contract", () => {
     ["universe", { universe_id: "krx.kospi200" }],
     ["period", { end: "2026-08-31" }],
     ["cost", { fee_bps: 25 }],
-    ["execution", { impact_model: "sqrt" }],
+    ["execution", { participation_rate: 0.05 }],
   ] as const)(
     "gives a request whose run settings differ only in %s its own owner",
     (_setting, change) => {

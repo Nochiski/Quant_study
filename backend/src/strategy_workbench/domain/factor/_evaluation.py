@@ -249,6 +249,9 @@ class _NodeEvaluator:
         self._checkpoint = checkpoint
         self._progress = progress
         self._computed: dict[str, list[FactorComputedValue]] = {}
+        # 노드 출력 가운데 원장이 가린 셀(MASKED)에서 온 칸의 관측 index. 가린 셀은 사건 경계라
+        # 시간을 가로지르는 연산이 건너면 결측이다(`_masked_reach`, #315). 드물어서 집합으로 든다.
+        self._masked: dict[str, frozenset[int]] = {}
         self._by_security: dict[str, list[int]] | None = None
         self._total_weight = _reachable_progress_weight(graph.output_node_id, self._nodes)
         self._completed_weight = 0
@@ -280,11 +283,19 @@ class _NodeEvaluator:
             raise ValueError(
                 f"factor evaluation references unknown node — node_id={node_id!r}"
             ) from error
-        inputs = [self.evaluate(dependency) for dependency in node_dependencies(node)]
+        dependencies = node_dependencies(node)
+        inputs = [self.evaluate(dependency) for dependency in dependencies]
+        # 같은 자리를 읽는 연산은 입력의 가린 칸을 그대로 잇는다
+        masked = frozenset[int]().union(*(self._masked[dependency] for dependency in dependencies))
         values: list[FactorComputedValue]
         if isinstance(node, FieldNode):
+            masked = _masked_cells(self._observations, node.field_id, checkpoint=self._checkpoint)
             values = _field_values(
-                self._observations, node.field_id, self._missing, checkpoint=self._checkpoint
+                self._observations,
+                node.field_id,
+                self._missing,
+                masked,
+                checkpoint=self._checkpoint,
             )
         elif isinstance(node, ConstantNode):
             values = [node.value for _ in _checkpointed(self._observations, self._checkpoint)]
@@ -319,16 +330,23 @@ class _NodeEvaluator:
                 )
             ]
         elif isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
+            masked = _masked_reach(node, masked, self._securities(), checkpoint=self._checkpoint)
             values = _lag(
-                inputs[0], self._securities(), node.periods or 0, checkpoint=self._checkpoint
+                inputs[0],
+                self._securities(),
+                node.periods or 0,
+                masked,
+                checkpoint=self._checkpoint,
             )
         elif isinstance(node, UnaryNode):
             values = _unary(node, inputs[0], checkpoint=self._checkpoint)
         elif isinstance(node, TimeSeriesNode):
+            masked = _masked_reach(node, masked, self._securities(), checkpoint=self._checkpoint)
             values = _time_series(
                 node,
                 inputs[0],
                 self._securities(),
+                masked,
                 checkpoint=self._checkpoint,
                 advance=lambda fraction: self._advance_within_node(node, fraction),
             )
@@ -344,6 +362,7 @@ class _NodeEvaluator:
             node.node_id, values, self._observations, checkpoint=self._checkpoint
         )
         self._computed[node_id] = values
+        self._masked[node_id] = masked
         self._completed_weight += _node_progress_weight(node)
         self._progress(self._completed_weight / self._total_weight)
         return values
@@ -400,30 +419,42 @@ def _require_finite_values(
             )
 
 
+def _masked_cells(
+    observations: tuple[FactorObservation, ...],
+    field_id: str,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> frozenset[int]:
+    """필드가 원장이 가린 셀(MASKED)인 관측 index(#298)."""
+    return frozenset(
+        index
+        for index, observation in _checkpointed(enumerate(observations), checkpoint)
+        if any(field.masked for field in observation.fields if field.field_id == field_id)
+    )
+
+
 def _field_values(
     observations: tuple[FactorObservation, ...],
     field_id: str,
     missing_policy: MissingPolicy,
+    masked: frozenset[int],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     raw: list[float | None] = []
-    masked: list[bool] = []
     for observation in _checkpointed(observations, checkpoint):
-        by_id = {field.field_id: field for field in observation.fields}
-        field = by_id.get(field_id)
-        value = None if field is None else field.value
+        by_id = {field.field_id: field.value for field in observation.fields}
+        value = by_id.get(field_id)
         raw.append(
             float(value)
             if isinstance(value, (int, float)) and not isinstance(value, bool)
             else None
         )
-        masked.append(field is not None and field.masked)
     # 결측 정책은 모르는 값만 채운다. 원장이 가린 셀은 비워 둔다(#298).
     if missing_policy is MissingPolicy.ZERO:
         return [
-            0.0 if value is None and not hidden else value
-            for value, hidden in zip(raw, masked, strict=True)
+            0.0 if value is None and index not in masked else value
+            for index, value in enumerate(raw)
         ]
     if missing_policy is MissingPolicy.CROSS_SECTIONAL_MEDIAN:
         by_date = _cross_section_indices(observations, checkpoint=checkpoint)
@@ -436,7 +467,7 @@ def _field_values(
             ]
             fill = median(available) if available else None
             for index in _checkpointed(indices, checkpoint):
-                if result[index] is None and not masked[index]:
+                if result[index] is None and index not in masked:
                     result[index] = fill
         return result
     return list(raw)
@@ -501,6 +532,7 @@ def _time_series(
     node: TimeSeriesNode,
     values: list[FactorComputedValue],
     by_security: dict[str, list[int]],
+    masked: frozenset[int],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
     advance: Callable[[float], None] = _noop_progress,
@@ -514,7 +546,7 @@ def _time_series(
         for position, result_index in _checkpointed(enumerate(indices), checkpoint):
             end = position - node.lag + 1
             start = end - node.window
-            if start < 0 or end <= 0:
+            if start < 0 or end <= 0 or result_index in masked:
                 continue
             window = values_from_indices(values, indices[start:end], checkpoint=checkpoint)
             if len(window) != node.window:
@@ -612,15 +644,45 @@ def _lag(
     values: list[FactorComputedValue],
     by_security: dict[str, list[int]],
     periods: int,
+    masked: frozenset[int],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
     for indices in _checkpointed(by_security.values(), checkpoint):
         for position, index in _checkpointed(enumerate(indices), checkpoint):
-            if position >= periods:
+            if position >= periods and index not in masked:
                 result[index] = values[indices[position - periods]]
     return result
+
+
+def _masked_reach(
+    node: UnaryNode | TimeSeriesNode,
+    masked: frozenset[int],
+    by_security: dict[str, list[int]],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> frozenset[int]:
+    """시간을 가로지르는 연산(`lag`·창 연산)의 출력 가운데 가린 입력 칸이 닿는 칸(#315).
+
+    원장이 가린 셀은 사건 경계다(수정주가 층 이동 등). 같은 종목 자리 p 의 출력이 쓰는 입력 구간에
+    가린 칸이 하나라도 있으면 그 출력도 가린 칸이고 값은 결측이다 — 경계를 가로지른 비교는 값이
+    없다. 구간은 `lag` 가 k칸 앞부터 오늘까지 [p - k, p](두 시점을 견주려고 쓰는 연산이다), 창
+    연산이 창 [p - lag - window + 1, p - lag] 이다. 창 연산은 창 안 값끼리만 견주므로 건너뛰는
+    세션은 보지 않는다. 가리지 않은 결측은 경계가 아니라 건너도 된다.
+    """
+    if not masked:
+        return masked
+    if isinstance(node, TimeSeriesNode):
+        first, last = node.lag, node.lag + node.window - 1
+    else:
+        first, last = 0, node.periods or 0
+    reached: set[int] = set()
+    for indices in _checkpointed(by_security.values(), checkpoint):
+        for position, index in _checkpointed(enumerate(indices), checkpoint):
+            if index in masked:
+                reached.update(indices[position + first : position + last + 1])
+    return frozenset(reached)
 
 
 def _cross_section_indices(

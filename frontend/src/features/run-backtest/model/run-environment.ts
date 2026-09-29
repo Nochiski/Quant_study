@@ -1,7 +1,6 @@
 import {
   runEnvironmentDisplayValue,
   runEnvironmentWireNumber,
-  runEnvironmentWireText,
   type RunEnvironmentField,
 } from "../../../entities/backtest";
 import { projectApplicability, type RunEnvironment } from "../../../shared/api";
@@ -42,8 +41,6 @@ export type RunEnvironmentValidation =
       errors: Readonly<Record<string, RunEnvironmentFieldError>>;
     };
 
-type Json = Record<string, unknown>;
-
 /**
  * 패널의 첫 값. 저장된 마지막 사용값이 있으면 그 필드는 그 값, 없으면 스키마 기본값, 기본값도 없으면 빈 칸.
  * 저장값은 요청 단위 문자열이라 표시 단위로 바꿔 받고, 스키마에 있는 필드만 받는다(스키마가 바뀐 뒤 남은
@@ -65,35 +62,18 @@ export const initialRunEnvironmentValues = (
     }),
   );
 
-/** 표시 단위 칸 값 → 요청 단위 문자열(마지막 사용값 저장용). */
-export const runEnvironmentWireValues = (
-  fields: readonly RunEnvironmentField[],
-  values: RunEnvironmentValues,
+/**
+ * 업그레이드 응답처럼 완성된 `RunEnvironment` 를 요청 단위 기록(저장값과 같은 모양)으로 옮긴다. 값이 없는
+ * (null) 칸은 뺀다. 스키마가 필요 없어 스키마를 읽기 전에도 값을 잃지 않는다(#352 C-P2-4).
+ */
+export const runEnvironmentWireRecord = (
+  environment: RunEnvironment,
 ): RunEnvironmentValues =>
   Object.fromEntries(
-    fields.map((field) => [
-      field.name,
-      runEnvironmentWireText(field, values[field.name] ?? ""),
-    ]),
+    Object.entries(environment).flatMap(([name, value]: [string, unknown]) =>
+      value === null || value === undefined ? [] : [[name, String(value)]],
+    ),
   );
-
-/**
- * 업그레이드 응답처럼 완성된 `RunEnvironment` 를 패널 값으로 옮긴다. 스키마에 없는 키는 버린다.
- */
-export const runEnvironmentValuesOf = (
-  fields: readonly RunEnvironmentField[],
-  environment: RunEnvironment,
-): RunEnvironmentValues => {
-  const record = environment as unknown as Json;
-  return Object.fromEntries(
-    fields.map((field) => {
-      return [
-        field.name,
-        runEnvironmentDisplayValue(field, record[field.name]),
-      ];
-    }),
-  );
-};
 
 /**
  * 날짜 칸이 받는 범위(#264). 범위를 주지 않으면 Chromium 이 `<input type="date">` 의 연도를 6자리(275760년)까지

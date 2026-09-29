@@ -654,6 +654,51 @@ describe("run environment panel", () => {
     expect(within(band).queryByText("슬리피지 (bp)")).toBeNull();
   });
 
+  // #352 C-P2-4: 스키마를 읽기 전에 업그레이드 응답의 실행 설정을 채워도 요청 단위 기록으로 남아, 스키마가
+  // 오면 그 값으로 칸이 선다. 칸 목록이 없다고 전략별 저장값·마지막 사용값을 빈 값으로 덮지 않는다.
+  it("keeps an environment applied before the schema arrives and stores it, not an empty one", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API}/api/v1/run-environments/schema`, async () => {
+        await gate;
+        return HttpResponse.json({
+          schema_hash: "h",
+          schema: RUN_ENVIRONMENT_SCHEMA,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithQuery(<Harness />);
+    await user.click(
+      screen.getByRole("button", { name: "apply upgraded environment" }),
+    );
+    const stored = (key: string): unknown =>
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`) ??
+          "null",
+      );
+    expect(stored("strategy-1")).toMatchObject({
+      start: "2021-01-01",
+      universe_id: "krx.common-stock",
+      fee_bps: "5",
+    });
+    expect(stored("last")).toEqual(stored("strategy-1"));
+    expect(requestBody()).toBeNull();
+
+    release();
+    await waitFor(() =>
+      expect(requestBody()?.environment).toEqual({
+        ...ENVIRONMENT,
+        fee_bps: 5,
+      }),
+    );
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).toHaveValue(5);
+  });
+
   // DEFECT-242-04 (a): 단위는 스키마(`x-unit`·`x-display-unit`)에서 읽는다. 참여율은 %로 보이고 비율로 보낸다.
   it("shows the participation rate in the schema display unit and sends the ratio", async () => {
     renderWithQuery(<Harness />);
@@ -678,6 +723,12 @@ describe("run environment panel", () => {
         "{}",
     ) as Record<string, string>;
     expect(stored.participation_rate).toBe("0.25");
+    // 친 문자열은 그대로 보인다 — 요청 단위(0.125)로 바꿨다 되돌려 "12.5" 로 다시 쓰지 않는다(#352 C-P2-4).
+    fireEvent.change(participation, { target: { value: "12.50" } });
+    expect((participation as HTMLInputElement).value).toBe("12.50");
+    expect(requestBody()?.environment).toMatchObject({
+      participation_rate: 0.125,
+    });
     await user.clear(participation);
     await user.type(participation, "150");
     expect(screen.getByText("100% 이하여야 합니다.")).toBeInTheDocument();

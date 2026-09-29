@@ -803,6 +803,7 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
         "backtest.run.invalid",
         "backtest.run.field_invalid",
         "backtest.run.environment_required",
+        "backtest.run.research_window_violation",
         "backtest.strategy.requires_upgrade",
         "portfolio.strategy.invalid",
     }
@@ -983,6 +984,32 @@ def test_start_without_an_environment_is_a_coded_422() -> None:
     detail = response.json()["detail"]
     assert detail["code"] == "backtest.run.environment_required"
     assert "run_environment.required" in detail["message"]
+
+
+def test_start_measuring_the_sealed_window_is_a_coded_422() -> None:
+    """spec D1: 봉인 구간(2016-01-01~2019-12-31)을 측정하는 시작 요청은 전용 코드로 거절한다.
+
+    화면 문장의 날짜 자리표시자를 채울 값(봉인 구간·연구 하한)을 detail 이 싣는다.
+    """
+    client = TestClient(build_http_app())
+    body = _run_body(client, "python")
+    body["environment"] = _environment(start="2019-12-31")
+    body["metric_windows"] = []
+
+    response = client.post("/api/v1/backtests", json=body)
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert {
+        key: detail[key] for key in ("code", "sealed_start", "sealed_end", "research_start")
+    } == {
+        "code": "backtest.run.research_window_violation",
+        "sealed_start": "2016-01-01",
+        "sealed_end": "2019-12-31",
+        "research_start": "2020-01-02",
+    }
+    assert "expected=start>=2020-01-02 got=start=2019-12-31" in detail["message"]
+    TypeAdapter(Backtest422Response).validate_python(response.json())
 
 
 def test_tape_stage_progress_advances_monotonically_within_a_bounded_event_count() -> None:

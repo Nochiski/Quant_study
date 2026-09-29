@@ -867,6 +867,45 @@ describe("backtest run actions", () => {
     expect(reason).not.toHaveAttribute("open");
   });
 
+  // 검증 랩 V1-01: 연구 구간 거절 문장의 날짜는 번역에 적지 않고 detail 값으로 채운다(날짜 owner 는 backend).
+  it("fills the research window dates from the rejection detail", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.research_window_violation",
+              message: "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
+              sealed_start: "2016-01-01",
+              sealed_end: "2019-12-31",
+              research_start: "2020-01-02",
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithQuery(
+      <BacktestRunActions
+        runId="old-run"
+        status="completed"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(alert).toHaveTextContent(
+        "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+      ),
+    );
+    expect(alert).not.toHaveTextContent("{");
+  });
+
   it("keeps navigation unchanged when a rerun fails with a server error", async () => {
     server.use(
       http.post(`${API}/api/v1/backtests`, () =>

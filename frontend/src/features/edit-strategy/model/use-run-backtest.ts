@@ -29,6 +29,8 @@ export type RunBacktestStatus =
       code: string | null;
       /** 거절이 가리킨 요청 본문의 칸(점 경로). 없으면 null. */
       field: string | null;
+      /** 거절 문장의 자리표시자를 채울 detail 값(`ApiRequestError.values`). */
+      values: Readonly<Record<string, string>>;
     };
 
 export type BacktestRunOptions = Omit<
@@ -152,6 +154,7 @@ export const useRunBacktest = (
               error instanceof ApiRequestError ? (error.code ?? null) : null,
             field:
               error instanceof ApiRequestError ? (error.field ?? null) : null,
+            values: error instanceof ApiRequestError ? error.values : {},
           },
         });
       }

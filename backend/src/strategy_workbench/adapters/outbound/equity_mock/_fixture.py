@@ -16,8 +16,9 @@ from strategy_workbench.domain.equity.facade.research_data import (
 
 # 분할 사건 하나. `security_index` 종목은 `effective` 세션부터 원주가가 `1 / ratio`로 떨어지고,
 # 전방 조정 수정주가(첫 관측 수준 고정)는 사건 뒤 원주가 × `ratio`로 이어진다. 실제 삼성전자
-# 2018-05-04 50:1 액면분할을 본떴다. fixture 달력(2024-01)은 사건 뒤라 그 안의 수정주가는 원주가
-# × `ratio`다. 가격 변화 팩터가 원주가를 읽으면 이 사건에 오염된다(이슈 #214).
+# 2018-05-04 50:1 액면분할을 본떴고, 날짜는 파이프라인이 측정할 수 있는 연구 구간(2020-01-02 이후,
+# spec D1) 안으로 옮겼다. fixture 달력(2024-01)은 사건 뒤라 그 안의 수정주가는 원주가 × `ratio`다.
+# 가격 변화 팩터가 원주가를 읽으면 이 사건에 오염된다(이슈 #214).
 @dataclass(frozen=True)
 class MockSplit:
     security_index: int
@@ -25,7 +26,7 @@ class MockSplit:
     ratio: float
 
 
-MOCK_SPLIT = MockSplit(security_index=0, effective=date(2018, 5, 4), ratio=50.0)
+MOCK_SPLIT = MockSplit(security_index=0, effective=date(2020, 5, 8), ratio=50.0)
 
 
 # 원주가 필드 → 시점 간 변화를 잴 때 쓸 조정 짝(필드 계약 `FieldMetadata.adjusted_field_id`,
@@ -112,7 +113,7 @@ def build_demo_fixture() -> MockEquityFixture:
                 "원주가 × 그날까지 적용된 분할·증자·병합 계수의 누적곱. 첫 관측 수준을 고정하고 "
                 "사건 뒤 가격을 올리므로 과거 값이 바뀌지 않는다(PIT). 실데이터에서는 확인 안 된 "
                 "사건이 조정되지 않고 남을 수 있다. 수익률·모멘텀·이평·변동성 "
-                "계산에 쓴다. mock 분할: sec-005930-1 2018-05-04 50:1."
+                "계산에 쓴다. mock 분할: sec-005930-1 2020-05-08 50:1."
             ),
             disclosure_basis="원주가 세션 확정 + 사건 계수 공개",
             evidence="KRX 일별매매정보 종가 × mock 분할 사건 계수",

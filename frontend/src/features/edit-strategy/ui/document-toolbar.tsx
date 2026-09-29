@@ -153,6 +153,7 @@ export const DocumentToolbar = ({
             runStatus.field === null || runFieldLabel === undefined
               ? null
               : runFieldLabel(runStatus.field),
+            runStatus.values,
           )}
           detail={runStatus.detail}
         />

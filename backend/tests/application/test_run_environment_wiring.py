@@ -7,6 +7,9 @@
 
 P2-02 부터 `environment.missing` 도 같은 경로를 탄다: 실행 설정의 결측 정책이 팩터 실행 plan 과
 `plan_hash` 까지 내려간다.
+
+검증 랩 V1-01 부터 연구 구간 잠금도 같은 관문을 지난다: 측정 시작일이 2020-01-02 앞이면 세 경로가
+`run_environment.research_window` 로 거절하고, 워밍업 관측 읽기는 막지 않는다(spec D1).
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
     BacktestRunService,
     BacktestRunSpec,
@@ -40,6 +44,10 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPreviewRequest,
     RawObservationUnavailableError,
+)
+from strategy_workbench.application.portfolio_design.facade.ports import (
+    RawObservationQuery,
+    RawObservationSet,
 )
 from strategy_workbench.application.portfolio_design.facade.trace import (
     InvalidStrategyTraceRequestError,
@@ -167,6 +175,98 @@ def test_run_without_an_environment_is_refused_before_it_is_queued(tmp_path: Pat
 
     with pytest.raises(MissingBacktestRunEnvironmentError, match="run_environment.required"):
         runs.start(BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON))
+
+
+SEALED_LAST_DAY = date(2019, 12, 31)
+RESEARCH_FLOOR = date(2020, 1, 2)
+
+
+def test_preview_and_trace_measuring_the_sealed_window_are_coded_request_errors() -> None:
+    """봉인 구간 마지막 날부터 측정하면 preview·trace 가 같은 issue code 로 거절한다(spec D1)."""
+    sealed = replace(_environment(), start=SEALED_LAST_DAY)
+    traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
+
+    with pytest.raises(InvalidPortfolioRequestError) as preview:
+        _portfolio().run_pipeline(PortfolioPreviewRequest(_spec(), environment=sealed))
+    with pytest.raises(InvalidPortfolioRequestError) as trace:
+        traces.trace(
+            StrategyTraceRequest(
+                strategy_source=InlineDraft(_spec(), "inline_draft", "a" * 64),
+                security_ids=("005930",),
+                factor_id="momentum_3",
+                environment=sealed,
+            )
+        )
+
+    for info in (preview, trace):
+        (issue,) = info.value.validation.issues
+        assert (issue.code, issue.path) == ("run_environment.research_window", "environment")
+        assert "got=start=2019-12-31" in issue.message
+
+
+def test_run_measuring_the_sealed_window_is_refused_before_it_is_queued(tmp_path: Path) -> None:
+    runs = _runs(_portfolio(), tmp_path, "sealed-run")
+    sealed = replace(_environment(), start=SEALED_LAST_DAY)
+
+    request = BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=sealed)
+
+    with pytest.raises(BacktestResearchWindowViolationError, match="research_window"):
+        runs.start(request)
+
+
+def test_metric_window_cannot_reach_back_into_the_sealed_window(tmp_path: Path) -> None:
+    """metric window 는 실행 기간 안에만 있을 수 있고 실행 시작일은 연구 하한 이후다. 그래서 창
+    시작일이 봉인 구간이면 실행 기간 밖이라 따로 판정하지 않아도 거절된다(spec D1 방어 검사)."""
+    runs = _runs(_portfolio(), tmp_path, "sealed-window-run")
+    window = MetricWindow(scope=MetricScope.OUT_OF_SAMPLE, start=SEALED_LAST_DAY, end=WINDOW[1])
+
+    with pytest.raises(InvalidBacktestRunError, match="metric window exceeds the run range"):
+        runs.start(
+            BacktestRunSpec(
+                strategy=_spec(),
+                core=ExecutionCore.PYTHON,
+                environment=replace(_environment(), start=RESEARCH_FLOOR),
+                metric_windows=(window,),
+            )
+        )
+
+
+class _QueryRecorded(Exception):
+    pass
+
+
+class _RecordingRawPort:
+    """파이프라인이 만든 관측 조회를 기록하고 멈춘다. 데이터 없이 잠금 통과·워밍업 요청만 본다."""
+
+    def __init__(self) -> None:
+        self.queries: list[RawObservationQuery] = []
+
+    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
+        self.queries.append(query)
+        raise _QueryRecorded
+
+
+def test_warmup_before_the_research_floor_is_read_not_measured() -> None:
+    """3세션 모멘텀은 as_of 를 포함해 3세션이 필요하므로 시작일 앞 2세션(2019-12-27·12-30, 봉인
+    구간)을 읽는다. 워밍업은 측정이 아니므로 잠금이 막지 않는다(spec D1)."""
+    source = _RecordingRawPort()
+    metadata = MockEquityDataAdapter.demo()
+    portfolio = PortfolioDesignService(
+        source,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=metadata,
+        factor_registry_version="test-registry",
+    )
+
+    with pytest.raises(_QueryRecorded):
+        portfolio.run_pipeline(
+            PortfolioPreviewRequest(
+                _spec(), environment=replace(_environment(), start=RESEARCH_FLOOR)
+            )
+        )
+
+    (query,) = source.queries
+    assert (query.start, query.history_sessions_before_start) == (RESEARCH_FLOOR, 2)
 
 
 def test_explicit_environment_narrows_the_observation_window() -> None:

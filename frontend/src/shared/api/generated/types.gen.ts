@@ -441,6 +441,27 @@ export type BacktestResultNotReadyResponse = {
 };
 
 /**
+ * BacktestResultUnreadableDetail
+ */
+export type BacktestResultUnreadableDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.result.unreadable";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestResultUnreadableResponse
+ */
+export type BacktestResultUnreadableResponse = {
+  detail: BacktestResultUnreadableDetail;
+};
+
+/**
  * BacktestRunFieldInvalidDetail
  *
  * 요청 본문이 스키마나 칸 규칙을 어겼다(이슈 #260).
@@ -6684,6 +6705,10 @@ export type GetBacktestResultErrors = {
    * The run has not completed with a result
    */
   409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
   /**
    * Validation Error
    */

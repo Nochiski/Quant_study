@@ -393,9 +393,9 @@ def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) 
     assert omitted.available_date == BACKFILL_END
 
 
-def test_247540_무상증자_척도_창의_신용잔고는_결측이다(adapter) -> None:
+def test_247540_무상증자_척도_창의_신용잔고는_원장이_가린_셀이다(adapter) -> None:
     """#249 — 어댑터는 원장 뷰 `v_credit_balance` 를 읽고, 뷰는 권리락일부터 척도 창의 잔고를
-    가린다.
+    가린다. 가린 셀은 값이 없는 MASKED 라 실행 결측 정책이 채우지 않는다(#298).
 
     절단본 원장: 247540 유무상증자(무상 1주당 3주) 공시 2022-06-14(`stg_event_pifric`), 신주배정
     기준일 06-28 → 권리락일 06-27. `stg_credit_daily` 융자잔고는 06-24 350,914주 → 06-27 451,638주
@@ -408,8 +408,8 @@ def test_247540_무상증자_척도_창의_신용잔고는_결측이다(adapter)
     assert r.ok, r.detail
     seen = {  # 보이는 세션 → (값, 원장 행 날짜 = 공개일, 셀 종류)
         date(2022, 6, 29): (350_914.0, date(2022, 6, 24), CellKind.OBSERVED),
-        date(2022, 6, 30): (None, date(2022, 6, 27), CellKind.MISSING),
-        date(2022, 8, 3): (None, date(2022, 7, 29), CellKind.MISSING),
+        date(2022, 6, 30): (None, date(2022, 6, 27), CellKind.MASKED),
+        date(2022, 8, 3): (None, date(2022, 7, 29), CellKind.MASKED),
         date(2022, 8, 4): (814_512.0, date(2022, 8, 1), CellKind.OBSERVED),
     }
     for as_of, expected in seen.items():

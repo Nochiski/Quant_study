@@ -1,7 +1,7 @@
 import type { FactorGraph, FactorValidationIssue } from "../../../shared/api";
 import { t, tName } from "../../../shared/config";
-import { nodeKinds, nodeReferenceKeys } from "./graph-transactions";
-import { resolveRef, schemaFacts, type JsonSchema } from "./schema-navigator";
+import { nodeKinds, nodeSlots, type NodeSlot } from "./graph-transactions";
+import type { JsonSchema } from "./schema-navigator";
 import {
   compiledNodeOrigin,
   nodePointerById,
@@ -70,48 +70,31 @@ export type FactorGraphProjection =
       factors: GraphFactorProjection[];
     };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** 노드 이름 칸. 노드 네임스페이스(`x-defines: node`)의 `<namespace>_id` 규칙(`referenceCandidates`)이다. */
-const NODE_NAME_KEY = "node_id";
-
-type NodeSlot = { key: string; label: string };
+type SlotLabel = { key: string; label: string };
 
 /**
- * 노드 kind → 입력 칸과 설정 칸(#354). kind·칸 표를 손으로 적지 않고 runtime schema 의 노드 분기를 읽는다(정본
- * 대장 "runtime schema 노드의 필드 표시 사실"). 입력 칸은 `x-reference: node`(`nodeReferenceKeys`), 설정 칸은
- * 종류(`const`)·이름·연산(`x-operator`)·입력을 뺀 나머지이고, 칸 이름은 `x-description-key` 다. 스키마가 모르는
- * kind 는 칸이 없다 — 그 노드는 backend 검증 진단이 먼저 알린다.
+ * 노드 kind → 입력 칸과 설정 칸의 이름(#354). 칸은 runtime schema 의 노드 분기에서 읽고(`nodeSlots`), 칸 이름은
+ * `x-description-key` 다. 스키마가 모르는 kind 는 칸이 없다 — 그 노드는 backend 검증 진단이 먼저 알린다.
  */
-const nodeSlots = (
+const slotLabels = (
   schema: JsonSchema,
   factorPointer: string,
-): ReadonlyMap<string, { inputs: NodeSlot[]; settings: NodeSlot[] }> =>
-  new Map(
+): ReadonlyMap<string, { inputs: SlotLabel[]; settings: SlotLabel[] }> => {
+  const labelled = (slots: readonly NodeSlot[]): SlotLabel[] =>
+    slots.map(({ key, facts }) => ({
+      key,
+      label: tName(facts.descriptionKey) ?? key,
+    }));
+  return new Map(
     nodeKinds(schema, undefined, factorPointer).map(([kind, branch]) => {
-      const inputKeys = new Set(nodeReferenceKeys(schema, branch));
-      const properties = isRecord(branch.properties) ? branch.properties : {};
-      const inputs: NodeSlot[] = [];
-      const settings: NodeSlot[] = [];
-      for (const [key, candidate] of Object.entries(properties)) {
-        const property = isRecord(candidate)
-          ? resolveRef(schema, candidate)
-          : null;
-        if (property === null) continue;
-        const facts = schemaFacts(property);
-        const slot = { key, label: tName(facts.descriptionKey) ?? key };
-        if (inputKeys.has(key)) inputs.push(slot);
-        else if (
-          !facts.hasConst &&
-          facts.operatorKeys === null &&
-          key !== NODE_NAME_KEY
-        )
-          settings.push(slot);
-      }
-      return [kind, { inputs, settings }] as const;
+      const { inputs, settings } = nodeSlots(schema, branch);
+      return [
+        kind,
+        { inputs: labelled(inputs), settings: labelled(settings) },
+      ] as const;
     }),
   );
+};
 
 const authoredOperation = (node: FactorNode): string =>
   "operator" in node ? `${node.kind}.${node.operator}` : node.kind;
@@ -120,7 +103,7 @@ const projectFactor = (
   factor: PlannedFactor,
   schema: JsonSchema,
 ): GraphFactorProjection => {
-  const slotsByKind = nodeSlots(schema, `/factors/${factor.factorIndex}`);
+  const slotsByKind = slotLabels(schema, `/factors/${factor.factorIndex}`);
   const valueOf = (node: FactorNode, key: string): unknown =>
     (node as unknown as Record<string, unknown>)[key];
   const authoredInputs = (

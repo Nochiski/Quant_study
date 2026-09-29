@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
 
 import pytest
 
+from strategy_workbench.adapters.outbound.equity_mock._fixture import (
+    MOCK_SPLIT,
+    build_demo_fixture,
+)
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     FieldCatalogQuery,
@@ -11,8 +18,10 @@ from strategy_workbench.application.equity_workspace.facade.workspace import (
 )
 from strategy_workbench.bootstrap.facade.container import build_container
 from strategy_workbench.domain.equity.facade.research_data import (
+    SNAPSHOT_CONTRACT_SEPARATOR,
     CellKind,
     DataLoadStatus,
+    DatasetFieldProfile,
     FieldLag,
     ResearchPanelQuery,
     ResearchPanelResult,
@@ -59,6 +68,88 @@ def test_container_uses_explicit_mock_adapter_without_silent_fallback() -> None:
         build_container(equity_adapter="nope")
     with pytest.raises(ValueError, match="requires equity_root"):
         build_container(equity_adapter="duckdb")
+
+
+_MOCK = "strategy_workbench.adapters.outbound.equity_mock"
+
+
+def _changed(
+    profiles: tuple[DatasetFieldProfile, ...], **changes: object
+) -> tuple[DatasetFieldProfile, ...]:
+    return tuple(
+        replace(profile, **changes) if profile.field_id == "price.close" else profile
+        for profile in profiles
+    )
+
+
+@pytest.mark.parametrize(
+    ("edit", "moves"),
+    [
+        pytest.param(lambda mp, p: _changed(p, unit="USD"), (False, True), id="unit"),
+        pytest.param(
+            lambda mp, p: _changed(p, recommended_lag_sessions=2), (False, True), id="lag"
+        ),
+        pytest.param(
+            lambda mp, p: mp.setattr(f"{_MOCK}._adapter.ADJUSTED_FIELD_BY_RAW", {}) or p,
+            (False, True),
+            id="adjusted-pair",
+        ),
+        pytest.param(
+            lambda mp, p: (
+                mp.setattr(
+                    f"{_MOCK}._fixture.MOCK_SPLIT",
+                    replace(MOCK_SPLIT, effective=date(2021, 5, 7)),
+                )
+                or p
+            ),
+            (True, False),
+            id="fixture-data",
+        ),
+        pytest.param(
+            lambda mp, p: (
+                mp.setattr(f"{_MOCK}._fixture.adjusted_close", lambda raw_close, **_: raw_close)
+                or p
+            ),
+            (True, False),
+            id="observations",
+        ),
+        pytest.param(
+            lambda mp, p: _changed(
+                p,
+                label="종가 ",
+                description="문장만 바꿨다",
+                evidence="-",
+                disclosure_basis="-",
+                available_date_basis="-",
+            ),
+            (False, False),
+            id="prose",
+        ),
+        pytest.param(lambda mp, p: p[::-1], (False, False), id="declaration-order"),
+    ],
+)
+def test_mock_snapshot_id_moves_with_data_and_declared_meaning_only(
+    monkeypatch: pytest.MonkeyPatch,
+    edit: Callable[[pytest.MonkeyPatch, tuple[DatasetFieldProfile, ...]], object],
+    moves: tuple[bool, bool],
+) -> None:
+    """이슈 #235·#291 리뷰: mock id 는 "fixture 데이터의 판:선언표의 판" 이다.
+
+    데이터(분할 사건·관측값 등)가 바뀌면 앞부분이, 선언의 뜻(단위·랙·조정 짝)이 바뀌면 뒷부분이
+    바뀐다.
+    문장이나 선언 순서만 바꾼 변경은 id 를 흔들지 않는다 — 흔들면 문장을 고친 PR 마다 재현 지문·캐시
+    키·시각 기준선이 헛되이 바뀐다.
+    """
+    before = MockEquityDataAdapter.demo().snapshot().snapshot_id
+    assert re.fullmatch(r"mock-equity-v0\.2-[0-9a-f]{16}:[0-9a-f]{16}", before)
+    profiles = edit(monkeypatch, MockEquityDataAdapter.demo().list_fields())
+    assert isinstance(profiles, tuple)
+    changed = MockEquityDataAdapter(replace(build_demo_fixture(), profiles=profiles))
+    after = changed.snapshot().snapshot_id
+
+    source, _, contract = before.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    after_source, _, after_contract = after.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    assert (after_source != source, after_contract != contract) == moves
 
 
 def test_panel_hides_future_consensus_revision_until_the_lagged_session() -> None:

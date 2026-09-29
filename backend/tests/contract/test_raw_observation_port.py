@@ -27,6 +27,7 @@ from typing import Protocol
 
 import pytest
 
+from strategy_workbench.adapters.outbound.equity_mock._fixture import build_demo_fixture
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
@@ -393,13 +394,7 @@ def test_mock_lag_shifts_availability_by_whole_sessions() -> None:
         else profile
         for profile in demo.list_fields()
     )
-    lagged = MockEquityDataAdapter(
-        snapshot=demo.snapshot(),
-        sessions=demo._sessions,  # pyright: ignore[reportPrivateUsage]  # reason: test fixture wiring
-        profiles=profiles,
-        memberships=demo._memberships,  # pyright: ignore[reportPrivateUsage]  # reason: test fixture wiring
-        observations=demo._observations,  # pyright: ignore[reportPrivateUsage]  # reason: test fixture wiring
-    )
+    lagged = MockEquityDataAdapter(replace(build_demo_fixture(), profiles=profiles))
     query = _query(demo, fields=("price.close",), history=1)
 
     plain = _index(demo.load_raw_observations(query))

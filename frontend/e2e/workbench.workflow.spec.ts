@@ -46,6 +46,8 @@ import {
 } from "./workbench-helpers";
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
+/** mock 데이터 스냅샷 id — fixture 데이터의 판 뒤에 필드 계약 판이 붙는다(#235, 둘 다 16 hex). */
+const MOCK_SNAPSHOT_ID = /^mock-equity-v0\.2-[0-9a-f]{16}:[0-9a-f]{16}$/u;
 
 /** golden 그래프 끝에 붙이는 노드. 오류 노드 뒤에 비교 대상이 있어야 근접성을 잴 수 있다. */
 const TRAILING_NODE = [
@@ -378,7 +380,7 @@ test.describe("professional YAML workflow", () => {
     );
     expect(trace).toMatchObject({
       spec_hash: savedV4.spec_hash,
-      snapshot_id: "mock-equity-v0.2-20260903",
+      snapshot_id: expect.stringMatching(MOCK_SNAPSHOT_ID),
       registry_version: "factor-registry-v1",
       as_of: "2026-07-31",
       factor_id: "momentum",
@@ -537,7 +539,7 @@ test.describe("professional YAML workflow", () => {
       exclusion_reasons: ["outside_selection"],
     });
 
-    await expect(provenance).toContainText("mock-equity-v0.2-20260903");
+    await expect(provenance).toContainText(trace.snapshot_id);
     await expect(provenance).toContainText("factor-registry-v1");
     await expect(provenance).toContainText("2026-07-31");
     await expect(provenance.getByTitle(trace.spec_hash)).toBeVisible();
@@ -795,7 +797,7 @@ test.describe("professional YAML workflow", () => {
     expect(result.manifest.run_spec.strategy?.title).toBe(finalTitle);
     expect(result.manifest.run_fingerprint).toHaveLength(64);
     expect(result.manifest.target_tape_hash).toHaveLength(64);
-    expect(result.manifest.data_snapshot_id).toBe("mock-equity-v0.2-20260903");
+    expect(result.manifest.data_snapshot_id).toMatch(MOCK_SNAPSHOT_ID);
     await expect(workflow.getByText(/RUST core · registry/u)).toBeVisible();
     await expect(
       workflow.getByRole("button", { name: "동일 설정 재실행" }),
@@ -815,6 +817,7 @@ test.describe("professional YAML workflow", () => {
       "out_of_sample: 2025-01-02 → 2026-08-31",
     );
     await expect(manifest).toContainText(`${strategyId} r4`);
+    await expect(manifest).toContainText(result.manifest.data_snapshot_id);
     await expect(
       manifest.getByTitle(result.manifest.run_fingerprint),
     ).toBeVisible();

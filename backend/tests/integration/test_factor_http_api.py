@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import re
+
 from fastapi.testclient import TestClient
 
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.environment import DEFAULT_MISSING_POLICY
+
+
+def _snapshot_id(client: TestClient) -> str:
+    """어댑터가 정한 데이터 스냅샷 id — "fixture 데이터의 판:필드 계약 판"(#235)."""
+    snapshot_id = client.get("/api/v1/equity/catalog").json()["snapshot"]["snapshot_id"]
+    assert re.fullmatch(r"mock-equity-v0\.2-[0-9a-f]{16}:[0-9a-f]{16}", snapshot_id)
+    return snapshot_id
 
 
 def test_factor_catalog_validate_and_explain_contract() -> None:
@@ -27,7 +36,7 @@ def test_factor_catalog_validate_and_explain_contract() -> None:
     assert validation.json()["valid"] is True
     assert explanation.status_code == 200
     assert explanation.json()["registry_version"] == catalog["registry_version"]
-    assert explanation.json()["data_snapshot_id"] == "mock-equity-v0.2-20260903"
+    assert explanation.json()["data_snapshot_id"] == _snapshot_id(client)
     assert explanation.json()["plan"]["as_of_policy"] == "available_date_lte_as_of"
     assert len(explanation.json()["plan"]["plan_hash"]) == 64
     # 팩터 연구에서 쓴 그래프에는 compile 이 붙인 노드가 없다.
@@ -150,7 +159,7 @@ def test_factor_preview_is_deterministic_and_returns_research_diagnostics() -> N
     assert first.json() == second.json()
     payload = first.json()
     # The adapter, not the client, names the snapshot; the cache key carries the same id.
-    assert payload["data_snapshot_id"] == "mock-equity-v0.2-20260903"
+    assert payload["data_snapshot_id"] == _snapshot_id(client)
     assert payload["cache_key"]["data_snapshot_id"] == payload["data_snapshot_id"]
     assert payload["analytics"]["coverage"] == 1.0
     assert payload["analytics"]["information_coefficient"] is not None
@@ -203,11 +212,11 @@ def test_factor_preview_fails_closed_when_the_expected_snapshot_differs() -> Non
     detail = response.json()["detail"]
     assert detail["code"] == "factor.snapshot_mismatch"
     assert detail["expected_data_snapshot_id"] == "stale-snapshot-from-an-old-catalog"
-    assert detail["actual_data_snapshot_id"] == "mock-equity-v0.2-20260903"
+    assert detail["actual_data_snapshot_id"] == _snapshot_id(client)
 
     matching = client.post(
         "/api/v1/factors/preview",
-        json=body | {"expected_data_snapshot_id": "mock-equity-v0.2-20260903"},
+        json=body | {"expected_data_snapshot_id": _snapshot_id(client)},
     )
     assert matching.status_code == 200
 

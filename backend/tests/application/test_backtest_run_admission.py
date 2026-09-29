@@ -22,6 +22,7 @@ from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
+from strategy_workbench.adapters.outbound.equity_mock._fixture import build_demo_fixture
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
@@ -307,6 +308,43 @@ def test_a_run_whose_cancellation_was_requested_is_not_joined(gated_runs: _Gated
     port.release.set()
     assert wait_for_terminal_run(runs, "restart-cancelled").status is RunStatus.CANCELLED
     assert wait_for_terminal_run(runs, "restart-new").status is RunStatus.COMPLETED
+
+
+def test_the_same_request_on_another_field_contract_gets_another_run_fingerprint(
+    tmp_path: Path,
+) -> None:
+    """#235·#284: 같은 입력 잇기(spec·provenance)는 프로세스 안에서 데이터 판이 고정이라는 전제를
+    쓴다. 필드 계약 판이 다른 프로세스라면 같은 요청이라도 run 지문이 갈려, 지문으로 결과를 나눌
+    쪽(검증 랩 V3-04)이 옛 뜻으로 계산한 결과를 재사용하지 않는다.
+    """
+
+    def fingerprint(adapter: MockEquityDataAdapter, run_id: str) -> str:
+        runs = BacktestRunService(
+            PortfolioDesignService(
+                adapter,
+                BacktestEnginePortfolioAdapter(),
+                factor_metadata=adapter,
+                factor_registry_version="test-registry",
+            ),
+            InMemoryStrategyRepository(),
+            adapter,
+            BacktestEngineExecutorAdapter(build_default_metric_registry()),
+            LocalArtifactStore(tmp_path / run_id),
+            run_repository=SQLiteBacktestRunRepository(),
+            new_id=lambda: run_id,
+        )
+        runs.start(_request())
+        assert wait_for_terminal_run(runs, run_id).status is RunStatus.COMPLETED
+        return runs.result(run_id).manifest.run_fingerprint
+
+    relabeled = tuple(
+        replace(profile, unit="USD") if profile.field_id == "flow.foreign_net_buy" else profile
+        for profile in MockEquityDataAdapter.demo().list_fields()
+    )
+    same = fingerprint(MockEquityDataAdapter.demo(), "contract-same")
+    assert fingerprint(MockEquityDataAdapter.demo(), "contract-again") == same
+    other = MockEquityDataAdapter(replace(build_demo_fixture(), profiles=relabeled))
+    assert fingerprint(other, "contract-other") != same
 
 
 def test_the_limit_must_allow_at_least_one_run(gated_runs: _GatedRuns) -> None:

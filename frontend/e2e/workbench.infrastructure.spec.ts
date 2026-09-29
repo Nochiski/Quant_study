@@ -239,7 +239,7 @@ test("keeps a real debugger trace legible and inside the viewport", async ({
   await page.getByRole("button", { name: "추적 실행" }).click();
   const debuggerPanel = page.getByRole("region", { name: "중간 결과" });
   const provenance = debuggerPanel.getByLabel("추적 재현 정보");
-  await expect(provenance).toContainText("mock-equity-v0.2-20260903", {
+  await expect(provenance).toContainText("mock-equity-v0.2-", {
     timeout: 60_000,
   });
   await debuggerPanel.scrollIntoViewIfNeeded();

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -24,11 +25,16 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
     BacktestEnginePortfolioAdapter,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
+    _FILL_KIND_TO_CELL,
     _LOCK_CONFLICT_MARKERS,
+    _PARQUET_LIST,
+    EVENT_TYPE_MAP,
     _fetchall,
+    _parquet_table,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_SPECS,
+    SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
@@ -40,6 +46,10 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import BacktestDataQuery
 from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
+from strategy_workbench.application.factor_research.facade.research import (
+    FactorPreviewRequest,
+    FactorResearchService,
+)
 from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPreviewRequest,
@@ -54,6 +64,7 @@ from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
+    SNAPSHOT_CONTRACT_SEPARATOR,
     CellKind,
     DataLoadStatus,
     FieldLag,
@@ -175,12 +186,204 @@ def test_snapshot_is_the_manifest_hash_and_names_every_table(
     adapter: EquityDuckdbAdapter, root: Path
 ) -> None:
     snapshot = adapter.snapshot()
-    assert snapshot.snapshot_id == snapshot_id(table_builds(root))
+    # 앞부분은 원장 스냅샷(테이블 build 해시), 뒷부분은 필드 계약 판이다(#235).
+    ledger, separator, contract = snapshot.snapshot_id.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    assert (ledger, separator) == (snapshot_id(table_builds(root)), SNAPSHOT_CONTRACT_SEPARATOR)
+    assert re.fullmatch(r"[0-9a-f]{16}", contract)
     assert snapshot.schema_version == "equity-v1.2" and snapshot.point_in_time
     # 계약 패널이 그대로 보여 주는 값이라 루트 절대 경로를 싣지 않는다(#163)
     assert snapshot.source == "equity_duckdb"
     assert {r.dataset_id for r in snapshot.dataset_revisions} == set(table_builds(root))
     assert all(r.as_of == WB_SESSIONS[-1] for r in snapshot.dataset_revisions)
+
+
+def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
+    tmp_path: Path,
+) -> None:
+    """이슈 #235: 같은 원장 빌드라도 필드를 읽는 규칙이 바뀌면 데이터 스냅샷 id 가 갈린다.
+
+    카탈로그 매크로 본문(여기서는 `period_frontier` 가 없는 옛 재무 뷰)이 바뀌면 원장 판은
+    그대로이고 필드 계약 판만 바뀐다. 매크로가 싣는 parquet 절대경로에는 흔들리지 않는다 —
+    같은 원장·코드를 다른 폴더에 두어도 같은 id 다. 팩터 행렬 캐시 키는 이 id 를 받아 옛
+    의미의 값을 새 의미로 재사용하지 않는다.
+    """
+    here = build_workbench_root(tmp_path / "here" / "equity")
+    there = build_workbench_root(tmp_path / "there" / "equity")
+    ledger = snapshot_id(table_builds(here)) + SNAPSHOT_CONTRACT_SEPARATOR
+
+    current = EquityDuckdbAdapter(here)
+    assert current.snapshot().snapshot_id.startswith(ledger)
+    assert EquityDuckdbAdapter(there).snapshot().snapshot_id == current.snapshot().snapshot_id
+
+    write_catalog(there, legacy_fin_columns=("period_frontier",))
+    older = EquityDuckdbAdapter(there)
+    assert older.snapshot().snapshot_id.startswith(ledger)
+    assert older.snapshot().snapshot_id != current.snapshot().snapshot_id
+
+    request = FactorPreviewRequest(
+        FactorGraph(nodes=(FieldNode("close", "price.close", "field"),), output_node_id="close"),
+        START,
+        END,
+    )
+    registry = build_default_factor_registry()
+    keys = [
+        FactorResearchService(registry, adapter, adapter).preview(request).cache_key
+        for adapter in (current, older)
+    ]
+    assert [key.data_snapshot_id for key in keys] == [
+        current.snapshot().snapshot_id,
+        older.snapshot().snapshot_id,
+    ]
+    assert keys[0].fingerprint != keys[1].fingerprint
+
+
+_ADAPTER = "strategy_workbench.adapters.outbound.equity_duckdb._adapter"
+
+
+def _edit_close(monkeypatch: pytest.MonkeyPatch, **changes: object) -> None:
+    edited = tuple(
+        replace(spec, **changes) if spec.field_id == "price.close" else spec for spec in FIELD_SPECS
+    )
+    monkeypatch.setattr(f"{_ADAPTER}.FIELD_SPECS", edited)
+
+
+def _edit_fin(monkeypatch: pytest.MonkeyPatch, **changes: object) -> None:
+    edited = tuple(
+        replace(spec, **changes) if spec.name == "fin" else spec for spec in SOURCE_SPECS
+    )
+    monkeypatch.setattr(f"{_ADAPTER}.SOURCE_SPECS", edited)
+
+
+def _edit_signature_default(root: Path) -> None:
+    meta_path = root / "_catalog_meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["macros"] = [
+        signature.replace("vintage := 'restated'", "vintage := 'pit'")
+        for signature in meta["macros"]
+    ]
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+
+def _reverse_declarations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(f"{_ADAPTER}.FIELD_SPECS", FIELD_SPECS[::-1])
+    monkeypatch.setattr(f"{_ADAPTER}.SOURCE_SPECS", SOURCE_SPECS[::-1])
+
+
+@pytest.mark.parametrize(
+    ("edit", "moves"),
+    [
+        pytest.param(lambda mp, root: _edit_close(mp, expr="(close) * 1"), True, id="field-expr"),
+        pytest.param(
+            lambda mp, root: _edit_fin(mp, row_filter="period_frontier AND TRUE"),
+            True,
+            id="source-row-filter",
+        ),
+        pytest.param(
+            lambda mp, root: _edit_signature_default(root), True, id="macro-signature-default"
+        ),
+        pytest.param(
+            lambda mp, root: mp.setattr(
+                f"{_ADAPTER}.EVENT_TYPE_MAP", {**EVENT_TYPE_MAP, "bonus": "reverse_split"}
+            ),
+            True,
+            id="code-table",
+        ),
+        pytest.param(
+            lambda mp, root: mp.setattr(
+                f"{_ADAPTER}._FILL_KIND_TO_CELL",
+                {**_FILL_KIND_TO_CELL, "not_collected": CellKind.MISSING},
+            ),
+            True,
+            id="cell-kinds",
+        ),
+        pytest.param(
+            lambda mp, root: mp.setattr(f"{_ADAPTER}.RATIO_DIRECTED_EVENT_TYPES", frozenset()),
+            True,
+            id="ratio-directed",
+        ),
+        pytest.param(
+            lambda mp, root: _edit_close(
+                mp,
+                label="종가 ",
+                description="문장만",
+                evidence="-",
+                verdict="-",
+                disclosure_basis="-",
+                lag_basis="-",
+            ),
+            False,
+            id="field-prose",
+        ),
+        pytest.param(lambda mp, root: _edit_fin(mp, lag_basis="문장만"), False, id="source-prose"),
+        pytest.param(lambda mp, root: _reverse_declarations(mp), False, id="declaration-order"),
+    ],
+)
+def test_the_field_contract_follows_meaning_not_prose_or_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    edit: Callable[[pytest.MonkeyPatch, Path], object],
+    moves: bool,
+) -> None:
+    """이슈 #235·#291 리뷰: 뜻 칸이 바뀌면 계약 판이 바뀌고, 문장·선언 순서만 바뀌면 그대로다.
+
+    뜻 칸은 선언표의 식·원천의 고르는 규칙(#225 의 `period_frontier` 같은)·매크로 기본값(meta
+    시그니처)·코드의 대응표다. 어느 경우든 원장 판(앞부분)은 그대로다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    before = EquityDuckdbAdapter(root).snapshot().snapshot_id
+    edit(monkeypatch, root)
+    after = EquityDuckdbAdapter(root).snapshot().snapshot_id
+
+    ledger = before.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
+    assert after.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0] == ledger
+    assert (after != before) is moves
+
+
+_HIVE_OFF = "(hive_partitioning = CAST('f' AS BOOLEAN))"
+
+
+@pytest.mark.parametrize(
+    ("paths", "table"),
+    [
+        pytest.param(
+            [
+                "C:\\Users\\a\\equity\\price_daily\\v=b1\\year=2020\\part0.parquet",
+                "C:\\Users\\a\\equity\\price_daily\\v=b1\\year=2021\\part0.parquet",
+            ],
+            "price_daily",
+            id="windows",
+        ),
+        pytest.param(
+            ["C:/Users/a/equity/price_daily/v=b1/year=2020/part0.parquet"],
+            "price_daily",
+            id="windows-slash",
+        ),
+        pytest.param(
+            [
+                f"/home/ledger/equity/price_daily/v=b1/year={year}/part0.parquet"
+                for year in (2019, 2020, 2021)
+            ],
+            "price_daily",
+            id="posix",
+        ),
+        pytest.param(
+            ["/srv/o''brien/equity/fin_std/v=b2/part0.parquet"], "fin_std", id="quoted-root"
+        ),
+    ],
+)
+def test_macro_bodies_fold_parquet_paths_to_the_table_name_on_any_os(
+    paths: list[str], table: str
+) -> None:
+    """이슈 #235·#291 리뷰 P3-1: 매크로 본문의 parquet 절대경로는 OS·루트·파티션 수와 무관하게
+    테이블 이름으로 접힌다. 파일 하나면 duckdb 가 목록 없이 문자열로 돌려준다. 값 필터의 문자열
+    목록은 규칙이라 그대로 둔다.
+    """
+    listed = ", ".join(f"'{path}'" for path in paths)
+    body = f"read_parquet(main.list_value({listed}), {_HIVE_OFF}) WHERE k IN ('a', 'b')"
+    folded = f"read_parquet({table}, {_HIVE_OFF}) WHERE k IN ('a', 'b')"
+    assert _PARQUET_LIST.sub(_parquet_table, body) == folded
+    single = f"read_parquet('{paths[0]}')"
+    assert _PARQUET_LIST.sub(_parquet_table, single) == f"read_parquet({table})"
 
 
 def test_list_fields_serves_every_declared_field_whose_source_is_built(
@@ -974,8 +1177,10 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
             code in r.getMessage() and "ledger_sync catalog" in r.getMessage()
             for r in caplog.records
         ), code
-    # snapshot_id 는 meta 가 아니라 MANIFEST 에서 온다
-    assert adapter.snapshot().snapshot_id == snapshot_id(table_builds(root))
+    # 원장 판은 meta 가 아니라 MANIFEST 에서 온다
+    assert adapter.snapshot().snapshot_id.startswith(
+        snapshot_id(table_builds(root)) + SNAPSHOT_CONTRACT_SEPARATOR
+    )
 
 
 def test_catalog_without_required_view_column_drops_only_that_source(

@@ -8,7 +8,10 @@ import {
   type RunEnvironmentField,
   type RunEnvironmentFieldError,
 } from "../model/run-environment";
-import type { BacktestRunSettingsError } from "../model/run-settings";
+import {
+  OOS_START_FIELD,
+  type BacktestRunSettingsError,
+} from "../model/run-settings";
 import {
   runEnvironmentErrorMessage,
   runOptionErrorMessage,
@@ -40,7 +43,8 @@ const EnvironmentInput = ({
   value: string;
   error: RunEnvironmentFieldError | undefined;
   onChange: (value: string) => void;
-  onIncompleteChange: (incomplete: boolean) => void;
+  /** `typing` 은 키를 뗄 때 읽은 것(실행 게이트만 본다), 아니면 값이 바뀌거나 칸을 떠날 때다. */
+  onIncompleteChange: (incomplete: boolean, typing: boolean) => void;
 }) => {
   const inputId = useId();
   const hintId = useId();
@@ -48,8 +52,9 @@ const EnvironmentInput = ({
   const description = tDescription(field.descriptionKey);
   // 날짜를 덜 친 칸은 값이 여전히 빈 문자열이라 값만 보면 "값을 정하세요."가 된다(#264). 브라우저는 칸
   // 안에서 자리를 채우는 동안 input 이벤트를 내지 않으므로, 키를 뗄 때·값이 바뀔 때·칸을 떠날 때 `badInput` 을
-  // 읽어 컨트롤러에 알린다. 키를 뗄 때 읽지 않으면 칸을 떠나지 않고 누른 백테스트 단축키가 덜 친 칸을 보지
-  // 못한다(#266 재리뷰 P3-1). 검증이 그 칸을 날짜 오류로 보고, 칸 아래·요약 띠가 같은 문장을 쓴다.
+  // 읽어 컨트롤러에 알린다. 키를 뗄 때 읽은 것은 실행 게이트만 본다 — 치는 도중에는 오류를 띄우지 않고,
+  // 칸을 떠나지 않고 누른 백테스트 단축키만 막는다(#266 재리뷰 P3-1, #270 P3-R2). 칸을 떠나면 검증이 그 칸을
+  // 날짜 오류로 보고, 칸 아래·요약 띠가 같은 문장을 쓴다.
   const describedBy =
     [description === null ? null : hintId, error === undefined ? null : errorId]
       .filter((id): id is string => id !== null)
@@ -107,11 +112,15 @@ const EnvironmentInput = ({
           }
           value={value}
           onChange={(event) => {
-            onIncompleteChange(isIncompleteDate(event));
+            onIncompleteChange(isIncompleteDate(event), false);
             onChange(event.target.value);
           }}
-          onKeyUp={(event) => onIncompleteChange(isIncompleteDate(event))}
-          onBlur={(event) => onIncompleteChange(isIncompleteDate(event))}
+          onKeyUp={(event) =>
+            onIncompleteChange(isIncompleteDate(event), true)
+          }
+          onBlur={(event) =>
+            onIncompleteChange(isIncompleteDate(event), false)
+          }
         />
       )}
       {description === null ? null : (
@@ -146,17 +155,17 @@ export const BacktestRunSettings = ({
     environmentValues,
     environmentErrors,
     setEnvironmentValue,
-    setEnvironmentIncomplete,
+    setDateIncomplete,
     panel,
     setPanelOpen,
   } = controller;
   const { open, focus } = panel;
-  // OOS 칸의 덜 친 상태. 키를 뗄 때마다 불리므로 바뀐 때만 필드를 고친다.
-  const markOosIncomplete = (event: SyntheticEvent<HTMLInputElement>): void => {
-    const incomplete = isIncompleteDate(event);
-    if ((fields.oosStartIncomplete ?? false) !== incomplete)
-      setField("oosStartIncomplete", incomplete);
-  };
+  // OOS 칸의 덜 친 상태. 실행 설정 날짜 칸과 같은 규칙이다(`setDateIncomplete`).
+  const markOosIncomplete = (
+    event: SyntheticEvent<HTMLInputElement>,
+    typing: boolean,
+  ): void =>
+    setDateIncomplete(OOS_START_FIELD, isIncompleteDate(event), typing);
   const optionErrors: ReadonlySet<BacktestRunSettingsError> = new Set(
     result.errors,
   );
@@ -211,8 +220,8 @@ export const BacktestRunSettings = ({
                 value={environmentValues[field.name] ?? ""}
                 error={environmentErrors[field.name]}
                 onChange={(value) => setEnvironmentValue(field.name, value)}
-                onIncompleteChange={(incomplete) =>
-                  setEnvironmentIncomplete(field.name, incomplete)
+                onIncompleteChange={(incomplete, typing) =>
+                  setDateIncomplete(field.name, incomplete, typing)
                 }
               />
             ))
@@ -296,7 +305,7 @@ export const BacktestRunSettings = ({
               type="date"
               min={DATE_INPUT_MINIMUM}
               max={DATE_INPUT_MAXIMUM}
-              data-run-field="oos_start"
+              data-run-field={OOS_START_FIELD}
               aria-invalid={
                 optionErrors.has("oos_out_of_range") ||
                 optionErrors.has("oos_incomplete")
@@ -305,11 +314,11 @@ export const BacktestRunSettings = ({
               }
               value={fields.oosStart}
               onChange={(event) => {
-                markOosIncomplete(event);
+                markOosIncomplete(event, false);
                 setField("oosStart", event.target.value);
               }}
-              onKeyUp={markOosIncomplete}
-              onBlur={markOosIncomplete}
+              onKeyUp={(event) => markOosIncomplete(event, true)}
+              onBlur={(event) => markOosIncomplete(event, false)}
             />
             <small className="backtest-settings__hint">
               {t("backtest.settings.oosStart.hint")}

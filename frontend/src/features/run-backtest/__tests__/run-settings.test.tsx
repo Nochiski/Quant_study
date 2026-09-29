@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -681,6 +682,33 @@ describe("run environment panel", () => {
       "실행 설정의 시작일 칸을 고치세요: 1900-01-01부터 9999-12-31 사이의 날짜여야 합니다.",
     );
     expect(requestBody()).toBeNull();
+  });
+
+  // #270 P3-R2: 치는 도중(키를 뗄 때)의 덜 친 날짜는 실행만 막고, 칸 아래·요약 띠·오류 목록은 칸을 떠날 때 보인다.
+  it("blocks the run while an OOS date is half typed but shows the error only once the field is left", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    expect(requestBody()).not.toBeNull();
+    const oos = screen.getByLabelText(/^OOS 시작일/);
+    // jsdom 은 날짜 칸을 자리별로 채우지 않는다. 브라우저가 연도만 친 칸에 세우는 `badInput` 을 흉내 낸다.
+    Object.defineProperty(oos, "validity", {
+      configurable: true,
+      value: { badInput: true },
+    });
+    const incomplete = "연·월·일까지 모두 올바르게 입력하세요.";
+
+    fireEvent.keyUp(oos);
+    expect(requestBody()).toBeNull();
+    expect(oos).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText(incomplete, { exact: false })).toBeNull();
+
+    fireEvent.blur(oos);
+    expect(requestBody()).toBeNull();
+    expect(oos).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getAllByText(incomplete, { exact: false })).not.toHaveLength(
+      0,
+    );
   });
 
   it("says the date is incomplete when a remembered value is not a whole date", async () => {

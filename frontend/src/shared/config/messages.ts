@@ -186,8 +186,8 @@ const ko = {
     "벤치마크 원장 행이 무효인 거래일은 직전 가격을 이어 썼습니다",
   "backtest.warning.analytics.base_rate_carried_forward":
     "기준금리 이력을 확인한 날 뒤 세션은 마지막 기준금리를 이어 썼습니다",
-  // 지표 칸의 사용 불가 사유. 키는 backend `MetricUnavailableReason` 값이고 목록은
-  // backend/tests/fixtures/analytics/metric_unavailable_reasons.json 이 묶는다(이슈 #241).
+  // 지표 칸의 사용 불가 사유. 키는 backend `MetricUnavailableReason` 값이고, 사유가 늘면
+  // `metricUnavailableCopy`가 typecheck에서 문구를 요구한다(이슈 #241·#293).
   "backtest.metricUnavailable.zero_return_variance":
     "수익률 변동이 없어 계산할 수 없습니다",
   "backtest.metricUnavailable.no_downside_variation":

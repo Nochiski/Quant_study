@@ -10,6 +10,9 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
+from strategy_workbench.adapters.inbound.http_api._execution_error_contract import (
+    Portfolio422Response,
+)
 from strategy_workbench.adapters.inbound.http_api._trace_contract import (
     Trace422Response,
     TraceStrategyNotFoundResponse,
@@ -767,6 +770,15 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert detail["discriminator"]["propertyName"] == "code"
     assert "trace.capability.unsupported" in detail["discriminator"]["mapping"]
     assert "portfolio.raw_observation.invalid" in detail["discriminator"]["mapping"]
+    # 실행 설정 거절·본문 검증 실패는 백테스트 시작과 같은 코드다(#351). 배열 422 는 없다.
+    assert {
+        "backtest.run.field_invalid",
+        "backtest.run.environment_required",
+        "backtest.run.research_window_violation",
+    } <= set(detail["discriminator"]["mapping"])
+    assert responses["422"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "TraceUnprocessableResponse"
+    )
     TypeAdapter(Trace422Response).validate_python(
         {
             "detail": {
@@ -778,48 +790,70 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     )
 
 
-def test_a_missing_environment_is_coded_on_trace_like_preview() -> None:
-    """P2-02 2차 리뷰 P3: trace 도 preview 와 같은 코드·details 구조로 거절한다.
+def _run_requests(client: TestClient, environment: dict[str, Any] | None) -> tuple[Any, Any, Any]:
+    """같은 실행 설정의 미리보기·추적·백테스트 시작 응답. `None` 이면 실행 설정을 싣지 않는다."""
+    spec, request = _inline_request(client)
+    request.pop("environment")
+    body = {} if environment is None else {"environment": environment}
+    return (
+        client.post("/api/v1/portfolio/preview", json={"spec": spec, **body}),
+        client.post("/api/v1/strategies/debug/trace", json={**request, **body}),
+        client.post("/api/v1/backtests", json={"strategy": spec, "core": "python", **body}),
+    )
 
-    trace 만 사유를 메시지 문자열로 납작하게 만들면 프론트가 코드로 분기하려고 본문을 파싱해야
-    한다. 1.2 에서 그 사유는 "실행 설정이 없다"다(P2-03).
+
+def test_a_missing_environment_is_coded_on_preview_and_trace_like_a_backtest_start() -> None:
+    """#351: 실행 설정이 없는 미리보기·추적은 백테스트 시작과 같은 코드·detail 로 거절한다.
+
+    추적만 `portfolio.strategy.invalid` 안에 실으면 화면이 그 거절을 "잠시 뒤 다시 추적하세요"로
+    보이고 서버 사유도 잃는다(도메인 리뷰 C C-P2-3). 1.2 에서 그 사유는 "실행 설정이 없다"다(P2-03).
     """
-    client = TestClient(build_http_app())
-    spec, request = _inline_request(client)
-    request = {key: value for key, value in request.items() if key != "environment"}
+    responses = _run_requests(TestClient(build_http_app()), None)
 
-    preview = client.post("/api/v1/portfolio/preview", json={"spec": spec})
-    trace = client.post("/api/v1/strategies/debug/trace", json=request)
-
-    assert (preview.status_code, trace.status_code) == (422, 422), (preview.text, trace.text)
-    codes = [response.json()["detail"]["code"] for response in (preview, trace)]
-    assert codes == ["portfolio.strategy.invalid", "portfolio.strategy.invalid"]
-    issue_codes = [
-        [issue["code"] for issue in response.json()["detail"]["validation"]["issues"]]
-        for response in (preview, trace)
-    ]
-    assert issue_codes == [["run_environment.required"]] * 2
-
-
-def test_measuring_the_sealed_window_is_coded_on_preview_and_trace() -> None:
-    """spec D1: 연구 하한 전날(2020-01-01)부터 측정하면 preview·trace 가 같은 issue code 로
-    거절한다."""
-    client = TestClient(build_http_app())
-    spec, request = _inline_request(client)
-    environment = _environment(start="2020-01-01")
-
-    preview = client.post(
-        "/api/v1/portfolio/preview", json={"spec": spec, "environment": environment}
-    )
-    trace = client.post(
-        "/api/v1/strategies/debug/trace", json={**request, "environment": environment}
-    )
-
-    assert (preview.status_code, trace.status_code) == (422, 422), (preview.text, trace.text)
-    for response in (preview, trace):
+    for response in responses:
+        assert response.status_code == 422, response.text
         detail = response.json()["detail"]
-        assert detail["code"] == "portfolio.strategy.invalid"
-        (issue,) = detail["validation"]["issues"]
-        assert issue["code"] == "run_environment.research_window"
-        assert "expected=start>=2020-01-02 got=start=2020-01-01" in issue["message"]
-        assert "2016-01-01~2019-12-31은 홀드아웃 봉인 구간" in issue["message"]
+        assert detail["code"] == "backtest.run.environment_required"
+        assert "run_environment.required" in detail["message"]
+    TypeAdapter(Portfolio422Response).validate_python(responses[0].json())
+    TypeAdapter(Trace422Response).validate_python(responses[1].json())
+
+
+def test_measuring_the_sealed_window_is_coded_on_preview_and_trace_like_a_backtest_start() -> None:
+    """spec D1·#351: 연구 하한 전날(2020-01-01)부터 측정하면 세 실행 경로가 같은 detail 로 거절한다.
+
+    화면 문장의 날짜 자리표시자를 채울 봉인 구간·연구 하한을 detail 이 싣는다 — 추적 화면도 백테스트
+    시작과 같은 번역을 쓴다.
+    """
+    responses = _run_requests(TestClient(build_http_app()), _environment(start="2020-01-01"))
+
+    for response in responses:
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert {
+            key: detail[key] for key in ("code", "sealed_start", "sealed_end", "research_start")
+        } == {
+            "code": "backtest.run.research_window_violation",
+            "sealed_start": "2016-01-01",
+            "sealed_end": "2019-12-31",
+            "research_start": "2020-01-02",
+        }
+        assert "expected=start>=2020-01-02 got=start=2020-01-01" in detail["message"]
+    TypeAdapter(Portfolio422Response).validate_python(responses[0].json())
+    TypeAdapter(Trace422Response).validate_python(responses[1].json())
+
+
+def test_a_run_environment_field_rule_is_coded_on_preview_and_trace_like_a_backtest_start() -> None:
+    """#351: 실행 설정 칸 규칙 위반(세율 방식 `custom` 인데 세율 없음)도 세 실행 경로가 같은
+    `backtest.run.field_invalid` 로 거절하고 칸 경로를 싣는다 — FastAPI 기본 배열 422 가 아니다."""
+    responses = _run_requests(TestClient(build_http_app()), _environment(sell_tax="custom"))
+
+    for response in responses:
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert (detail["code"], detail["field"]) == (
+            "backtest.run.field_invalid",
+            "environment.sell_tax_bps",
+        )
+    TypeAdapter(Portfolio422Response).validate_python(responses[0].json())
+    TypeAdapter(Trace422Response).validate_python(responses[1].json())

@@ -29,7 +29,6 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestParameterValueError,
-    BacktestResearchWindowViolationError,
     BacktestRunService,
     BacktestRunSpec,
     InlineDraft,
@@ -54,7 +53,10 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     MetricScope,
     build_default_metric_registry,
 )
-from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
+from strategy_workbench.domain.backtest.facade.environment import (
+    ResearchWindowViolationError,
+    RunEnvironment,
+)
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
 from strategy_workbench.domain.backtest.facade.trials import TrialRunRole, representative_sharpe
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
@@ -273,9 +275,9 @@ def test_a_sealed_window_run_is_blocked_into_the_seal_ledger_but_a_preview_is_no
     saved = lab.save(_spec())
     sealed = _saved_run(saved, start=date(2019, 6, 3))
 
-    with pytest.raises(BacktestResearchWindowViolationError):
+    with pytest.raises(ResearchWindowViolationError):
         lab.runs.preview_trial(sealed)
-    with pytest.raises(BacktestResearchWindowViolationError):
+    with pytest.raises(ResearchWindowViolationError):
         lab.runs.start(sealed)
 
     ledger = lab.service().trial_ledger("s-1")
@@ -298,7 +300,7 @@ def test_unresolvable_parameter_values_are_refused_before_any_ledger_record(
     with pytest.raises(BacktestParameterValueError, match="parameter_id=missing"):
         lab.runs.preview_trial(unknown)
     # 봉인 겹침과 해소 실패가 겹치면 봉인 겹침으로 거절하되, 전략이 확정되지 않았으니 남기지 않는다.
-    with pytest.raises(BacktestResearchWindowViolationError):
+    with pytest.raises(ResearchWindowViolationError):
         lab.runs.start(replace(unknown, environment=replace(_ENVIRONMENT, start=date(2019, 6, 3))))
 
     assert lab.runs.trial_ledger("s-1").blocked == ()

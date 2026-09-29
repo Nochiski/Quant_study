@@ -44,9 +44,10 @@
   구성 종목 이력만 보이고 성과·값을 측정하지 않으므로 뺀다.
 - 진단: 실행 경로는 422 `backtest.run.research_window_violation`이다. 이 경로의 거절 문구 owner는 기존 관례대로
   frontend i18n `backtest.error.<code>`이고, 날짜를 frontend에 복제하지 않도록 422 detail이 봉인 구간과 연구
-  하한 값을 싣고 i18n 문장은 자리표시자로 쓴다. 미리보기·추적은 `portfolio.strategy.invalid` 안의 issue code
-  `run_environment.research_window`로 싣고, 문장은 backend가 날짜를 넣어 한글로 완성한다. 두 경로 모두 날짜
-  값의 owner는 `_research_window.py` 하나다.
+  하한 값을 싣고 i18n 문장은 자리표시자로 쓴다. 미리보기·추적도 같은 422 `backtest.run.research_window_violation`
+  detail로 거절한다(#351 — 전에는 `portfolio.strategy.invalid` 안의 issue code `run_environment.research_window`로
+  실었는데, 추적 화면이 그 거절을 일시 장애 문장으로 보이고 서버 사유를 잃었다). 세 경로 모두 날짜 값의
+  owner는 `_research_window.py` 하나다.
 - 봉인 구간을 여는 유일한 길은 D11의 홀드아웃 개봉 흐름이다. #272 규칙과의 관계는 D11이 적는다.
 
 ### D2. 전략 계열과 시도 키

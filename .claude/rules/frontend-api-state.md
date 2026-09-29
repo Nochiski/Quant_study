@@ -34,7 +34,10 @@ paths:
   `backtest.error.<code>`를 본문으로 쓴다. 코드 번역은 `entities/backtest`의 `backtestErrorSentence` 하나가
   고른다. 시작 거절 문장(`backtestStartRejectionMessage`)은 편집기 툴바와 결과 화면 재실행이, 결과 조회
   실패(`BacktestResultFailure`)는 결과 화면이 쓴다(표시는 `FailureNotice`, #330). 두 경로의 키 목록은
-  `backtest-error-contract.test.ts`가 `openapi.json`의 코드 전수와 대조한다. 410(Gone)은 다시 물어도 같으므로
+  `backtest-error-contract.test.ts`가 `openapi.json`의 코드 전수와 대조한다. 추적 실패는 추적 고유
+  코드면 `trace.error.<code>`, 아니면 같은 `backtestErrorSentence`를 쓴다 — 실행 설정 거절은 추적과
+  시작이 같은 코드·detail이라 두 벌 번역하지 않는다(#351). 추적 경로 코드 전수는
+  `trace-error-message.test.ts`가 대조한다. 410(Gone)은 다시 물어도 같으므로
   조회를 재시도하지 않는다(`app/providers/query-client.ts`). 요청 본문 검증
   실패도 backend가 `backtest.run.field_invalid`(`field` = 본문 점 경로)로 코드화한다 — FastAPI 기본
   배열 422를 새 화면 계약으로 삼지 않는다. 거절의 `field`를 실행 설정 패널이 칸 이름으로 바꿀 수 있으면

@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from threading import Event
-from typing import Annotated, Any, TypeVar
+from typing import Annotated, Any, NoReturn, TypeVar
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
@@ -20,7 +20,6 @@ from strategy_workbench.application.assistant_chat.facade.turns import Assistant
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestArtifactUnreadableError,
     BacktestParameterValueError,
-    BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
     BacktestRunResult,
@@ -378,35 +377,15 @@ def create_app(
         )
 
     def admitted(call: Callable[[], _T]) -> _T:
-        """시작·미리 계산·실험 기반 검사는 같은 요청 판정을 타므로 거절도 같은 코드로 낸다.
+        """시작·미리 계산·실험 기반 검사의 거절을 실행 요청 거절 코드로 낸다.
 
-        거절 목록과 코드는 실행 유스케이스의 `rejection_code` 하나가 소유한다. 여기서는 HTTP 상태와
-        코드별 detail 칸만 붙인다.
+        시작 요청은 데이터를 읽지 않는 사전 검사만 해서(이슈 #158) 관측 데이터 부재·계약 위반을
+        여기서 옮기지 않는다 — run 스레드의 tape 단계에서 run 상태 `failed` + `error` 로 기록된다.
         """
         try:
             return call()
-        except InvalidPortfolioRequestError as error:
-            # 시작 요청은 데이터를 읽지 않는 사전 검사만 한다(이슈 #158). 관측 데이터 부재·계약
-            # 위반은 run 스레드의 tape 단계에서 run 상태 `failed` + `error` 로 기록된다.
-            raise _portfolio_http_error(error) from error
         except Exception as error:
-            code = rejection_code(error)
-            if code is None:
-                raise
-            detail: dict[str, object] = {"code": code, "message": str(error)}
-            if isinstance(error, BacktestResearchWindowViolationError):
-                violation = error.violation
-                detail |= {
-                    "sealed_start": violation.sealed_start.isoformat(),
-                    "sealed_end": violation.sealed_end.isoformat(),
-                    "research_start": violation.research_start.isoformat(),
-                }
-            elif isinstance(error, BacktestParameterValueError):
-                detail["parameter_id"] = error.parameter_id
-            raise HTTPException(
-                status_code=_ADMISSION_STATUS.get(code, status.HTTP_422_UNPROCESSABLE_CONTENT),
-                detail=detail,
-            ) from error
+            _raise_run_request_rejection(error)
 
     def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
         return admitted(lambda: backtest_runs.start(spec))
@@ -415,8 +394,9 @@ def create_app(
         """실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2)."""
         return admitted(lambda: backtest_runs.preview_trial(spec))
 
-    # 본문 검증 실패를 코드화된 422 로 내려고 이 두 라우트만 `CodedBodyValidationRoute` 로 등록한다
-    # (이슈 #260). `app.post` 데코레이터는 라우트 클래스를 받지 않는다.
+    # 실행 요청 라우트(시작·미리 계산·미리보기·추적)는 본문 검증 실패를 코드화된 422 로 내려고
+    # `CodedBodyValidationRoute` 로 등록한다(이슈 #260, #351). `app.post` 데코레이터는 라우트
+    # 클래스를 받지 않는다.
     admission_responses: dict[int | str, dict[str, Any]] = {
         404: {
             "model": BacktestStrategyNotFoundResponse,
@@ -581,48 +561,28 @@ def create_app(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    @app.post(
-        "/api/v1/portfolio/preview",
-        operation_id="previewPortfolio",
-        responses={
-            422: {
-                "model": Portfolio422Response,
-                "description": "Malformed envelope or a coded portfolio preflight diagnostic",
-            }
-        },
-    )
     def portfolio_preview(request: PortfolioPreviewRequest) -> PortfolioPreview:
         try:
             return portfolio_design.preview(request)
-        except (
-            InvalidPortfolioRequestError,
-            RawObservationUnavailableError,
-            RawObservationContractError,
-        ) as error:
+        except (RawObservationUnavailableError, RawObservationContractError) as error:
             raise _portfolio_http_error(error) from error
+        except Exception as error:
+            _raise_run_request_rejection(error)
 
-    @app.post(
-        "/api/v1/strategies/debug/trace",
-        operation_id="traceStrategy",
+    app.router.add_api_route(
+        "/api/v1/portfolio/preview",
+        portfolio_preview,
+        methods=["POST"],
+        operation_id="previewPortfolio",
+        route_class_override=CodedBodyValidationRoute,
         responses={
-            404: {
-                "model": TraceStrategyNotFoundResponse,
-                "description": "The immutable strategy revision does not exist",
-            },
-            409: {
-                "model": TraceStrategyStaleResponse,
-                "description": "The saved revision hash differs from the expected hash",
-            },
             422: {
-                "model": Trace422Response,
-                "description": "Malformed envelope or a coded trace preflight diagnostic",
-            },
-            499: {
-                "model": TraceCancelledResponse,
-                "description": "The client cancelled the trace request",
-            },
+                "model": Portfolio422Response,
+                "description": "A coded portfolio preflight or request-body diagnostic",
+            }
         },
     )
+
     async def trace_strategy(
         trace_request: StrategyTraceRequest, request: Request
     ) -> StrategyTraceResponse:
@@ -678,11 +638,7 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=asdict(detail),
             ) from error
-        except (
-            InvalidPortfolioRequestError,
-            RawObservationUnavailableError,
-            RawObservationContractError,
-        ) as error:
+        except (RawObservationUnavailableError, RawObservationContractError) as error:
             raise _portfolio_http_error(error) from error
         except StrategyTraceCancelledError as error:
             detail = TraceCancelledDetail("trace.cancelled", str(error))
@@ -690,8 +646,38 @@ def create_app(
                 status_code=499,
                 detail=asdict(detail),
             ) from error
+        except Exception as error:
+            # 문서 검증·실행 설정 거절은 실행 요청 판정이라 백테스트 시작과 같은 코드·detail
+            # 이다(#351).
+            _raise_run_request_rejection(error)
         finally:
             stop.set()
+
+    app.router.add_api_route(
+        "/api/v1/strategies/debug/trace",
+        trace_strategy,
+        methods=["POST"],
+        operation_id="traceStrategy",
+        route_class_override=CodedBodyValidationRoute,
+        responses={
+            404: {
+                "model": TraceStrategyNotFoundResponse,
+                "description": "The immutable strategy revision does not exist",
+            },
+            409: {
+                "model": TraceStrategyStaleResponse,
+                "description": "The saved revision hash differs from the expected hash",
+            },
+            422: {
+                "model": Trace422Response,
+                "description": "A coded trace preflight or request-body diagnostic",
+            },
+            499: {
+                "model": TraceCancelledResponse,
+                "description": "The client cancelled the trace request",
+            },
+        },
+    )
 
     @app.get(
         EQUITY_CATALOG_PATH,
@@ -1295,6 +1281,34 @@ def _research_window_rejection(
     둔다.
     """
     return RequestValidationError([{"type": error.code, "loc": loc, "msg": str(error)}])
+
+
+def _raise_run_request_rejection(error: Exception) -> NoReturn:
+    """실행 요청 판정의 거절이면 코드화된 HTTP 오류로, 아니면 원래 오류를 그대로 올린다.
+
+    시작·미리 계산·실험 기반 검사·미리보기·추적은 같은 요청 판정(문서 검증·실행 설정 관문)을 타므로
+    거절도 같은 코드·detail 로 낸다(#351). 거절 목록과 코드는 실행 유스케이스의 `rejection_code`
+    하나가 소유하고, 여기서는 HTTP 상태와 코드별 detail 칸만 붙인다. 관측 데이터 부재·계약 위반은
+    요청 판정이 아니라 부르는 쪽이 옮긴다.
+    """
+    if isinstance(error, InvalidPortfolioRequestError):
+        raise _portfolio_http_error(error) from error
+    code = rejection_code(error)
+    if code is None:
+        raise error
+    detail: dict[str, object] = {"code": code, "message": str(error)}
+    if isinstance(error, ResearchWindowViolationError):
+        detail |= {
+            "sealed_start": error.sealed_start.isoformat(),
+            "sealed_end": error.sealed_end.isoformat(),
+            "research_start": error.research_start.isoformat(),
+        }
+    elif isinstance(error, BacktestParameterValueError):
+        detail["parameter_id"] = error.parameter_id
+    raise HTTPException(
+        status_code=_ADMISSION_STATUS.get(code, status.HTTP_422_UNPROCESSABLE_CONTENT),
+        detail=detail,
+    ) from error
 
 
 def _portfolio_http_error(

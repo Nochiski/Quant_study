@@ -352,7 +352,7 @@ export type AssistantUnprocessableResponse = {
 /**
  * BacktestEnvironmentRequiredDetail
  *
- * 실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
+ * 실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
  */
 export type BacktestEnvironmentRequiredDetail = {
   /**
@@ -3244,7 +3244,16 @@ export type PortfolioUnprocessableResponse = {
       } & PortfolioDataUnavailableDetail)
     | ({
         code: "portfolio.raw_observation.invalid";
-      } & PortfolioRawObservationInvalidDetail);
+      } & PortfolioRawObservationInvalidDetail)
+    | ({
+        code: "backtest.run.field_invalid";
+      } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
+        code: "backtest.run.research_window_violation";
+      } & BacktestResearchWindowViolationDetail);
 };
 
 /**
@@ -5849,7 +5858,16 @@ export type TraceUnprocessableResponse = {
       } & PortfolioDataUnavailableDetail)
     | ({
         code: "portfolio.raw_observation.invalid";
-      } & PortfolioRawObservationInvalidDetail);
+      } & PortfolioRawObservationInvalidDetail)
+    | ({
+        code: "backtest.run.field_invalid";
+      } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
+        code: "backtest.run.research_window_violation";
+      } & BacktestResearchWindowViolationDetail);
 };
 
 /**
@@ -8009,11 +8027,9 @@ export type PreviewPortfolioData = {
 
 export type PreviewPortfolioErrors = {
   /**
-   * Response 422 Previewportfolio
-   *
-   * Malformed envelope or a coded portfolio preflight diagnostic
+   * A coded portfolio preflight or request-body diagnostic
    */
-  422: PortfolioUnprocessableResponse | RequestValidationResponse;
+  422: PortfolioUnprocessableResponse;
 };
 
 export type PreviewPortfolioError =
@@ -8142,11 +8158,9 @@ export type TraceStrategyErrors = {
    */
   409: TraceStrategyStaleResponse;
   /**
-   * Response 422 Tracestrategy
-   *
-   * Malformed envelope or a coded trace preflight diagnostic
+   * A coded trace preflight or request-body diagnostic
    */
-  422: TraceUnprocessableResponse | RequestValidationResponse;
+  422: TraceUnprocessableResponse;
   /**
    * The client cancelled the trace request
    */

@@ -1,16 +1,16 @@
 ---
 plan_version: 1
 project: validation-lab
-project_status: APPROVED
-current_phase: V3
-current_pr: V3-03
-active_prs: [V3-03]
-parallel_window: [V3-03]
-last_updated: 2026-09-30T04:09:28+09:00
+project_status: SELF_CHECK
+current_phase: V5
+current_pr: V5-05
+active_prs: [V5-05]
+parallel_window: []
+last_updated: 2026-09-30T04:49:41+09:00
 planned_prs: 28
-merged_prs: 11
+merged_prs: 12
 approved_prs: 12
-progress_percent: 39
+progress_percent: 43
 ---
 
 # 검증 랩 실시간 진행 계획
@@ -23,13 +23,13 @@ progress_percent: 39
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `V3` |
-| Current/next PR | `V3-03` |
-| Active PR | `V3-03` |
-| Progress | `11 / 28 merged (39%)` |
+| Project status | `SELF_CHECK` |
+| Current phase | `V5` |
+| Current/next PR | `V5-05` |
+| Active PR | `V5-05` |
+| Progress | `12 / 28 merged (43%)` |
 | Approved | `12 / 28` |
-| Aggregated at | `2026-09-30 04:09 KST` |
+| Aggregated at | `2026-09-30 04:49 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -70,11 +70,11 @@ progress_percent: 39
 | V0 | Planning package | 1 | 1 | `MERGED` |
 | V1 | Research window seal, run persistence, trial ledger | 5 | 5 | `MERGED` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 3 | `MERGED` |
-| V3 | Experiment backend, async queue, walk-forward | 5 | 2 | `APPROVED` |
+| V3 | Experiment backend, async queue, walk-forward | 5 | 3 | `WAITING` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
-| V5 | Screens (after lang2 merge signal) | 7 | 0 | `WAITING` |
+| V5 | Screens (after lang2 merge signal) | 7 | 0 | `SELF_CHECK` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
-| **Total** |  | **28** | **11** | **39%** |
+| **Total** |  | **28** | **12** | **43%** |
 <!-- PLAN:PHASES:END -->
 
 ## V0 — 기획 패키지
@@ -107,7 +107,7 @@ progress_percent: 39
 |---|---|---|---|---|---|
 | [x] | `V3-01` | domain.experiment(SearchSpec·SplitSpec·trial 상태·이웃)·파라미터 허용값 술어(domain/strategy) | V0-01 | `MERGED` | [#306](https://github.com/Nochiski/Quant_study/pull/306) · `review_vlab_v3_01` APPROVE(P2 2·P3 반영) · main 머지 `f01a9cbd`(2026-09-29) |
 | [x] | `V3-02` | 파라미터 값 배선(parameter_values) | V3-01 | `MERGED` | [#321](https://github.com/Nochiski/Quant_study/pull/321) · `review_vlab_v3_02` APPROVE(P3 반영) · main 머지 `0439c2ca`(2026-09-30) |
-| [ ] | `V3-03` | 실험 저장소·experiment_run·API | V3-02, V1-05 | `APPROVED` | [#334](https://github.com/Nochiski/Quant_study/pull/334) · 리뷰 APPROVE(P2-1·P2-2·P3-1·2·3·5·6·8·10 반영, P3-4·7·9 는 WORKFLOW 인계) |
+| [x] | `V3-03` | 실험 저장소·experiment_run·API | V3-02, V1-05 | `MERGED` | [#334](https://github.com/Nochiski/Quant_study/pull/334) · 리뷰 APPROVE(P2-1·P2-2·P3-1·2·3·5·6·8·10 반영, P3-4·7·9 는 WORKFLOW 인계) · main 머지 `61faba6a`(2026-09-30) |
 | [ ] | `V3-04` | 대기열 확장(슬롯·공정 분배·중복 제거·복구·일시정지) | V3-03 | `PLANNED` | — |
 | [ ] | `V3-05` | 워크포워드 실행·이어 붙인 OOS·유지율 | V3-04, #274 머지 | `PLANNED` | — |
 
@@ -129,7 +129,7 @@ progress_percent: 39
 | [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `PLANNED` | — |
 | [ ] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `PLANNED` | — |
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V4-03 | `PLANNED` | — |
-| [ ] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `PLANNED` | — |
+| [ ] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `SELF_CHECK` | [#345](https://github.com/Nochiski/Quant_study/pull/345) |
 | [ ] | `V5-06` | 용량 스윕·팩터 회귀 화면 | V5-02, V4-04, V4-05 | `PLANNED` | — |
 | [ ] | `V5-07` | IDE 진입점·탐색 토글 | V5-02, V5-03, lang2 P4-04 머지, lang2 P5-02 머지 | `PLANNED` | — |
 

@@ -21,11 +21,36 @@ import "./backtest-run-settings.css";
 import {
   runEnvironmentLabel,
   runEnvironmentOptionLabel,
+  useBacktestTrialPreview,
+  type BacktestRunSpec,
 } from "../../../entities/backtest";
 
 type BacktestRunSettingsProps = {
   controller: BacktestRunSettingsController;
   disabled?: boolean;
+  /** 실행 버튼이 보낼 요청. 있으면 패널 맨 아래에 이 실행의 시도 영향을 보인다(검증 랩 V5-05). */
+  request?: BacktestRunSpec | null;
+};
+
+/**
+ * 이 실행이 결과를 내면 계열 시도 수가 어떻게 되는가(spec D2). 새 시도인지 재확인인지는 backend 미리 계산이
+ * 판정하고 여기서는 그 답을 문장으로만 옮긴다. 답이 아직 없거나 요청이 거절되면(봉인 겹침 등 — 실행 버튼이
+ * 같은 거절을 이유와 함께 보인다) 아무것도 그리지 않는다.
+ */
+const TrialImpact = ({ request }: { request: BacktestRunSpec }) => {
+  const { data } = useBacktestTrialPreview(request);
+  if (data === undefined) return null;
+  return (
+    <p
+      className="backtest-settings__trial"
+      role="status"
+      aria-label={t("backtest.trial.label")}
+    >
+      {t(`backtest.trial.${data.reason}`)
+        .replace("{count}", String(data.trial_count))
+        .replace("{after}", String(data.trial_count_after))}
+    </p>
+  );
 };
 
 /** 날짜 칸이 덜 채워졌는지: 연도만 쳤거나 없는 날짜(2월 31일)면 값은 빈 문자열이고 `badInput` 이 선다. */
@@ -144,6 +169,7 @@ const EnvironmentInput = ({
 export const BacktestRunSettings = ({
   controller,
   disabled = false,
+  request = null,
 }: BacktestRunSettingsProps) => {
   const {
     fields,
@@ -331,6 +357,7 @@ export const BacktestRunSettings = ({
             ))}
           </ul>
         )}
+        {open && request !== null ? <TrialImpact request={request} /> : null}
       </div>
     </details>
   );

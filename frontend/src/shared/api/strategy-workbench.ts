@@ -20,6 +20,7 @@ import {
   listBacktests,
   listStrategies,
   listStrategyRevisions,
+  previewBacktestTrial,
   reviseStrategyDocument,
   saveStrategyDraft,
   startBacktest,
@@ -76,6 +77,7 @@ import type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TrialPreview,
   UpgradedDocument,
 } from "./generated/types.gen";
 
@@ -396,6 +398,12 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "startBacktest");
   },
 
+  /** 실행 전 미리 계산 — 같은 요청이 결과를 내면 계열 시도 수가 어떻게 되는가(검증 랩 spec D2). */
+  async previewBacktestTrial(spec: BacktestRunSpec): Promise<TrialPreview> {
+    const response = await previewBacktestTrial({ body: spec });
+    return unwrap(response, "previewBacktestTrial");
+  },
+
   async getBacktestStatus(runId: string): Promise<BacktestRunState> {
     const response = await getBacktestStatus({ path: { run_id: runId } });
     return unwrap(response, "getBacktestStatus");
@@ -652,5 +660,6 @@ export type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TrialPreview,
   UpgradedDocument,
 };

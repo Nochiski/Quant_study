@@ -5,6 +5,7 @@ export {
   useBacktestRequest,
   useBacktestResult,
   useBacktestStatus,
+  useBacktestTrialPreview,
   useCancelBacktest,
   useRunEnvironmentSchema,
   useStartBacktest,

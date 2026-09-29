@@ -2888,17 +2888,22 @@ describe("backtest from the editor (P3-05)", () => {
     await user.click(run);
 
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
       "백테스트 시작 실패: 서버가 실행 설정의 수수료 칸 값을 받지 않았습니다.",
     );
+    // 교정 버튼은 연구 구간 거절에만 있다(V5-05).
+    expect(within(alert).queryByRole("button")).toBeNull();
   }, 15_000);
 
-  // 검증 랩 V1-01: 툴바도 거절 문장의 날짜 자리표시자를 detail 값으로 채운다(날짜 owner 는 backend).
-  it("fills the research window dates into the toolbar rejection", async () => {
+  // 검증 랩 V1-01·V5-05: 툴바도 거절 문장의 날짜 자리표시자를 detail 값으로 채우고, 교정 버튼이 시작일을
+  // detail 의 연구 하한으로 옮긴다(날짜 owner 는 backend).
+  it("fills the research window dates into the toolbar rejection and moves the start date on request", async () => {
     server.use(
       ...graphHandlers(),
-      http.post(`${API}/api/v1/backtests`, () =>
-        HttpResponse.json(
+      http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+        started.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json(
           {
             detail: {
               code: "backtest.run.research_window_violation",
@@ -2909,8 +2914,8 @@ describe("backtest from the editor (P3-05)", () => {
             },
           },
           { status: 422 },
-        ),
-      ),
+        );
+      }),
     );
     const user = userEvent.setup();
     mount("/research/strategies/new");
@@ -2918,9 +2923,22 @@ describe("backtest from the editor (P3-05)", () => {
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
       "백테스트 시작 실패: 시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
     );
+    await user.click(
+      within(alert).getByRole("button", { name: "시작일을 2020-01-02로" }),
+    );
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(started[1]?.environment).toEqual({
+      ...RUN_ENVIRONMENT,
+      start: "2020-01-02",
+    });
   }, 15_000);
 
   it("falls back to a general sentence when the rejection has no translation", async () => {

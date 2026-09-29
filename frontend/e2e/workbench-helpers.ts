@@ -77,13 +77,14 @@ export const replaceSource = async (page: Page, source: string) => {
 
 /**
  * 편집기에 넣은 텍스트의 검증(parse·compile)이 끝나기를 기다린다. 부하가 큰 러너에서 검증 결과가
- * 도착하기 전의 중간 상태를 단언이 읽는 경합을 막는다(#240 후보 (a)). 문서 상태 배지의
+ * 도착하기 전의 중간 상태를 단언이 읽지 않게 한다. 문서 상태 배지의
  * `data-settled` 는 compile 버전이 입력 버전을 따라잡았거나 구문 오류로 compile 이 시작되지 않을 때
- * 참이다(`isDocumentSettled`).
+ * 참이다(`isDocumentSettled`). #240 을 좇으며 넣었지만 #240 의 원인은 이 경합이 아니라 `fill` 의 DOM
+ * 선택을 CodeMirror 갱신이 편집기 상태의 선택으로 되쓴 것이었다(`replaceSource`).
  */
 export const waitForSettledDocument = async (page: Page) => {
   const status = page.getByRole("status", { name: "문서 상태" });
-  await expect(status, "문서 검증이 입력 버전을 따라잡는다(#240)").toHaveAttribute(
+  await expect(status, "문서 검증이 입력 버전을 따라잡는다").toHaveAttribute(
     "data-settled",
     "true",
   );
@@ -201,8 +202,8 @@ export const fillRunEnvironment = async (
     universe_id: string;
   } = RUN_ENVIRONMENT,
 ) => {
-  // 실행 설정은 문서 밖이지만, 편집기 검증이 끝나기 전에 패널을 여닫으면 뒤이은 문서 단언이 중간
-  // 상태를 읽는다(#240). 먼저 검증을 끝낸다.
+  // 문서 검증이 끝난 뒤 실행 설정을 채운다. #240 을 좇으며 넣은 순서지만 #240 의 원인은 이 순서가 아니라
+  // `fill` 의 DOM 선택을 CodeMirror 갱신이 되쓴 것이었다(`replaceSource`).
   await waitForSettledDocument(page);
   const toggle = page.getByLabel("실행 설정 열기");
   const band = page.getByRole("region", { name: "실행 설정 요약" });

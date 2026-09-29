@@ -23,6 +23,7 @@ import {
   expectPhase,
   openEditor,
   replaceSource,
+  requestedEnvironment,
   requireData,
   save,
   saveAndWaitForRevision,
@@ -133,7 +134,7 @@ test(
         revision: 1,
         expected_spec_hash: saved.spec_hash,
       },
-      environment: upgraded.environment,
+      environment: requestedEnvironment(upgraded.environment!),
     });
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(

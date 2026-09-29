@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { RunEnvironment } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
 import { backendOrigin, previewOrigin } from "./ports.mjs";
 
@@ -51,10 +52,10 @@ export const replaceSource = async (page: Page, source: string) => {
  */
 export const waitForSettledDocument = async (page: Page) => {
   const status = page.getByRole("status", { name: "문서 상태" });
-  await expect(status, "문서 검증이 입력 버전을 따라잡는다(#240)").toHaveAttribute(
-    "data-settled",
-    "true",
-  );
+  await expect(
+    status,
+    "문서 검증이 입력 버전을 따라잡는다(#240)",
+  ).toHaveAttribute("data-settled", "true");
   return status;
 };
 
@@ -142,17 +143,40 @@ export const RUN_ENVIRONMENT = {
   universe_id: "krx.common-stock",
 } as const;
 
-/** 실행 설정 스키마 기본값(`GET /api/v1/run-environments/schema`)을 채운 요청 본문의 `environment`. */
-export const REQUESTED_ENVIRONMENT = {
-  market: "KRX",
-  frequency: "daily",
+/**
+ * 실행 설정 패널이 요청에 싣는 `environment`: 값이 없는(null) 선택 칸은 싣지 않는다. 업그레이드 응답의
+ * `environment` 처럼 모든 칸을 가진 값을 실행 요청과 비교할 때 쓴다.
+ */
+export const requestedEnvironment = (
+  environment: Readonly<Record<string, unknown>>,
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(environment).filter(([, value]) => value !== null),
+  );
+
+const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
+  readFileSync(
+    resolve(
+      ownDirectory,
+      "../../backend/tests/fixtures/strategy_documents/run-environment-schema.json",
+    ),
+    "utf8",
+  ),
+) as { properties: Record<string, { default?: unknown }> };
+
+/**
+ * 실행 설정 스키마 기본값(`GET /api/v1/run-environments/schema`)에 기간·유니버스를 채운 요청 본문의
+ * `environment`. 칸이 늘어도 기대값을 손으로 고치지 않게 backend 스키마 사본에서 만든다.
+ */
+export const REQUESTED_ENVIRONMENT = requestedEnvironment({
+  ...Object.fromEntries(
+    Object.entries(RUN_ENVIRONMENT_SCHEMA.properties).map(([name, node]) => [
+      name,
+      node.default ?? null,
+    ]),
+  ),
   ...RUN_ENVIRONMENT,
-  timing: "next_open",
-  participation_rate: 0.1,
-  fee_bps: 15,
-  slippage_bps: 10,
-  missing: "drop",
-} as const;
+}) as unknown as RunEnvironment;
 
 /**
  * 실행 설정 패널을 열어 기간·유니버스를 채우고 닫는다. `keyboard` 면 패널을 여닫을 때도 포인터 없이 초점과
@@ -166,7 +190,11 @@ export const fillRunEnvironment = async (
     keyboard = false,
     via = "toggle",
   }: { keyboard?: boolean; via?: "toggle" | "band" } = {},
-  environment: { start: string; end: string; universe_id: string } = RUN_ENVIRONMENT,
+  environment: {
+    start: string;
+    end: string;
+    universe_id: string;
+  } = RUN_ENVIRONMENT,
 ) => {
   // 실행 설정은 문서 밖이지만, 편집기 검증이 끝나기 전에 패널을 여닫으면 뒤이은 문서 단언이 중간
   // 상태를 읽는다(#240). 먼저 검증을 끝낸다.

@@ -683,7 +683,12 @@ class EquityDuckdbAdapter:
             logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")
             return reason
         present = {str(row[0]) for row in described}
-        missing = [column for column in spec.required_columns if column not in present]
+        # 원천이 읽는 열 — 선언한 필수 열과 그 원천 필드의 공개일 열(#238)
+        read = (
+            *spec.required_columns,
+            *(f.available_expr for f in FIELD_SPECS if f.source == spec.name),
+        )
+        missing = [column for column in dict.fromkeys(read) if column and column not in present]
         if not missing:
             return None
         reason = (

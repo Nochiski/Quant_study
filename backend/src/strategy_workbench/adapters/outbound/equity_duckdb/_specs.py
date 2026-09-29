@@ -153,7 +153,7 @@ class FieldSpec:
 
 
 # 재무 TTM 의 공개일 열(v_fin_latest, #238) — 창 안 네 분기값 공개일의 max. 흐름 필드가 행 대신
-# 이 날부터 보이고, 옛 카탈로그에 이 열이 있는지 부팅 때 확인한다.
+# 이 날부터 보인다. 옛 카탈로그에 이 열이 있는지는 어댑터가 부팅 때 이 선언에서 끌어와 확인한다.
 _TTM_INCOME_AVAILABLE = "ttm_income_available_date"
 _TTM_CF_AVAILABLE = "ttm_cf_available_date"
 
@@ -258,8 +258,8 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_basis=_DART_LAG_BASIS,
         requires=(FIN_TABLE, DISCLOSURE_TABLE, CORP_TICKER_TABLE, FIN_MACRO),
         frequency="quarterly",
-        # #225·#238 전 카탈로그의 v_fin_latest 에는 이 열들이 없다 — 재생성 전까지 재무만 뺀다.
-        required_columns=("period_frontier", _TTM_INCOME_AVAILABLE, _TTM_CF_AVAILABLE),
+        # #225 전에 만든 카탈로그의 v_fin_latest 에는 이 열이 없다 — 재생성 전까지 재무만 뺀다.
+        required_columns=("period_frontier",),
     ),
     SourceSpec(
         name="consensus_eps",
@@ -1052,3 +1052,11 @@ UNSUPPORTED_FIELDS: dict[str, str] = {
 
 SOURCE_BY_NAME: dict[str, SourceSpec] = {spec.name: spec for spec in SOURCE_SPECS}
 FIELD_BY_ID: dict[str, FieldSpec] = {spec.field_id: spec for spec in FIELD_SPECS}
+# 필드 공개일 열은 `_latest` 의 PICK 질의만 읽는다 — GRID 는 조용히 행 공개일로 보이고(look-ahead)
+# SUM 은 집계 질의가 깨진다. 그래서 선언 때 막는다(#300 리뷰 P3-3).
+if _misplaced := [
+    f.field_id
+    for f in FIELD_SPECS
+    if f.available_expr is not None and SOURCE_BY_NAME[f.source].reduce is not Reduce.PICK
+]:
+    raise ValueError(f"available_expr needs a LATEST PICK source — fields={_misplaced}")

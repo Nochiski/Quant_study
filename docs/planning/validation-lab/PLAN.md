@@ -1,15 +1,15 @@
 ---
 plan_version: 1
 project: validation-lab
-project_status: IN_PROGRESS
+project_status: SELF_CHECK
 current_phase: V2,V3
 current_pr: V2-02,V3-01
 active_prs: [V2-02, V3-01]
 parallel_window: [V2-02, V3-01]
-last_updated: 2026-09-29T20:01:02+09:00
+last_updated: 2026-09-29T23:24:50+09:00
 planned_prs: 28
 merged_prs: 3
-approved_prs: 3
+approved_prs: 4
 progress_percent: 11
 ---
 
@@ -23,13 +23,13 @@ progress_percent: 11
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `IN_PROGRESS` |
+| Project status | `SELF_CHECK` |
 | Current phase | `V2,V3` |
 | Current/next PR | `V2-02,V3-01` |
 | Active PR | `V2-02, V3-01` |
 | Progress | `3 / 28 merged (11%)` |
-| Approved | `3 / 28` |
-| Aggregated at | `2026-09-29 20:01 KST` |
+| Approved | `4 / 28` |
+| Aggregated at | `2026-09-29 23:24 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -70,7 +70,7 @@ progress_percent: 11
 | V0 | Planning package | 1 | 1 | `MERGED` |
 | V1 | Research window seal, run persistence, trial ledger | 5 | 1 | `WAITING` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 1 | `SELF_CHECK` |
-| V3 | Experiment backend, async queue, walk-forward | 5 | 0 | `IN_PROGRESS` |
+| V3 | Experiment backend, async queue, walk-forward | 5 | 0 | `APPROVED` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
 | V5 | Screens (after lang2 merge signal) | 7 | 0 | `WAITING` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
@@ -105,7 +105,7 @@ progress_percent: 11
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V3-01` | domain.experiment(SearchSpec·SplitSpec·trial 상태·이웃)·파라미터 허용값 술어(domain/strategy) | V0-01 | `IN_PROGRESS` | — |
+| [ ] | `V3-01` | domain.experiment(SearchSpec·SplitSpec·trial 상태·이웃)·파라미터 허용값 술어(domain/strategy) | V0-01 | `APPROVED` | [#306](https://github.com/Nochiski/Quant_study/pull/306) · APPROVE(blocking 없음, P2 2·P3 4 반영, P3-3→V3-02·P3-5→V3-03 인계) |
 | [ ] | `V3-02` | 파라미터 값 배선(parameter_values) | V3-01 | `PLANNED` | — |
 | [ ] | `V3-03` | 실험 저장소·experiment_run·API | V3-02, V1-05 | `PLANNED` | — |
 | [ ] | `V3-04` | 대기열 확장(슬롯·공정 분배·중복 제거·복구·일시정지) | V3-03 | `PLANNED` | — |

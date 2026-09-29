@@ -7,12 +7,15 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.strategy.facade.specification import (
+    ChoiceParameter,
     FactorGraph,
     FactorSignal,
     FloatParameter,
+    IntegerParameter,
     ParameterNode,
     SignalNormalization,
     StrategyIdentity,
+    parameter_value_allowed,
     strategy_spec_hash,
 )
 
@@ -75,6 +78,31 @@ def test_validation_reports_unknown_parameter_and_invalid_bounds() -> None:
         # 파라미터 노드 하나가 출력이라 종목을 가르지 못하는 scalar 다(P2-07 compile 게이트).
         "strategy.factor.output_type",
     }
+
+
+def test_parameter_value_allowed_checks_type_range_and_choices_but_not_step() -> None:
+    weight = FloatParameter(
+        parameter_id="weight", default=0.15, minimum=0.1, maximum=0.3, kind="float", step=0.1
+    )
+    lookback = IntegerParameter(
+        parameter_id="lookback", default=20, minimum=10, maximum=30, kind="integer", step=10
+    )
+    mode = ChoiceParameter(parameter_id="mode", default="a", choices=("a", "b"), kind="choice")
+
+    # 간격(step)은 격자를 펼치는 폭이라 간격 밖 값도 허용한다.
+    assert parameter_value_allowed(weight, 0.15)
+    assert parameter_value_allowed(lookback, 15)
+    assert not parameter_value_allowed(weight, 0.35)
+    assert not parameter_value_allowed(lookback, 20.0)
+    assert not parameter_value_allowed(lookback, True)
+    assert parameter_value_allowed(mode, "b")
+    assert not parameter_value_allowed(mode, "c")
+
+    # 검증기는 같은 술어로 기본값을 보므로 간격 밖 기본값을 가진 저장 문서가 새로 깨지지 않는다.
+    validation = StrategyDesignService(
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
+    ).validate(replace(_template(), parameters=(weight,)))
+    assert "strategy.parameter.default" not in {issue.code for issue in validation.issues}
 
 
 def test_explanation_preserves_pipeline_order() -> None:

@@ -61,6 +61,7 @@ duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from bisect import bisect_left, bisect_right
@@ -161,6 +162,11 @@ _CHECKPOINT_ROWS = 256  # 취소 체크포인트 간격(행) — 포트의 `_CHE
 # duckdb 질의 동안 감시 스레드가 checkpoint 를 부르는 간격(초). 질의 하나는 나눌 수 없어 행 단위
 # checkpoint 가 닿지 않는다(#160).
 _INTERRUPT_POLL_SECONDS = 0.1
+# 종목·법인 목록을 질의에 넘기는 자리. 짝이 되는 파라미터는 `_keys_param` 이 만든다. duckdb Python
+# 클라이언트(1.5)는 리스트 파라미터를 원소마다 변환하며 pandas 가 없으면 원소마다 import 를 다시
+# 시도해, 2천 종목 목록 하나에 약 2초를 쓴다 — 질의가 돌기 전이라 interrupt 로도 끊지 못한다(#160).
+# JSON 문자열 하나로 넘기고 SQL 안에서 푼다(같은 목록 약 0.01초).
+_KEYS_SQL = """unnest(from_json(?, '["VARCHAR"]'))"""
 # 원시 로딩 진행 구간 경계(이슈 #162). 실데이터 4년 구간 실측(질의 약 7초, 격자 행 조립 약 16초,
 # 관측 조립 약 17.5초, 생성 시 계약 검증 약 4초) 비율을 따른다.
 _GRID_FETCHED = 0.3  # 격자 안: 질의·fetchall 완료
@@ -355,6 +361,11 @@ def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     if path is None:
         return module.connect()
     return module.connect(str(path), read_only=True)
+
+
+def _keys_param(keys: Sequence[str]) -> str:
+    """`_KEYS_SQL` 자리에 넘길 파라미터 — 종목·법인 목록의 JSON 배열 문자열."""
+    return json.dumps(list(keys))
 
 
 def _fetchall(
@@ -1185,11 +1196,11 @@ class EquityDuckdbAdapter:
                 SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
                        {basis_expr} AS basis
                 FROM {self._source(PRICE_TABLE)}
-                WHERE ticker IN (SELECT unnest(?::VARCHAR[]))
+                WHERE ticker IN (SELECT {_KEYS_SQL})
                   AND date BETWEEN {_lit(query.start)} AND {_lit(query.end)}
                 ORDER BY ticker, date
                 """,
-                [list(tickers)],
+                [_keys_param(tickers)],
             ).fetchall()
             factor_columns = {
                 str(row[0])
@@ -1202,10 +1213,10 @@ class EquityDuckdbAdapter:
                 f"""
                 SELECT ticker, event_id, event_type, share_factor, {ts_column}
                 FROM {self._source(FACTOR_TABLE)}
-                WHERE factor_ok AND ticker IN (SELECT unnest(?::VARCHAR[]))
+                WHERE factor_ok AND ticker IN (SELECT {_KEYS_SQL})
                 ORDER BY ticker, {ts_column}, event_id
                 """,
-                [list(tickers)],
+                [_keys_param(tickers)],
             ).fetchall()
         finally:
             con.close()
@@ -1439,8 +1450,8 @@ class EquityDuckdbAdapter:
         try:
             rows = con.execute(
                 f"SELECT ticker, span_seq, first_date, last_date FROM {self._source(SPAN_TABLE)} "
-                "WHERE ticker IN (SELECT unnest(?::VARCHAR[])) ORDER BY ticker, span_seq",
-                [list(tickers)],
+                f"WHERE ticker IN (SELECT {_KEYS_SQL}) ORDER BY ticker, span_seq",
+                [_keys_param(tickers)],
             ).fetchall()
         finally:
             con.close()
@@ -1554,9 +1565,9 @@ class EquityDuckdbAdapter:
         selection = (
             "SELECT DISTINCT ticker FROM u WHERE member"
             if tickers is None
-            else "SELECT unnest(?::VARCHAR[]) AS ticker"
+            else f"SELECT {_KEYS_SQL} AS ticker"
         )
-        params: list[object] = [] if tickers is None else [list(tickers)]
+        params: list[object] = [] if tickers is None else [_keys_param(tickers)]
         joins: list[str] = []
         selects: list[str] = []
         layout: list[tuple[str, tuple[str, ...]]] = []
@@ -1673,8 +1684,8 @@ class EquityDuckdbAdapter:
             rows = _fetchall(
                 con,
                 f"SELECT ticker, corp_code FROM {self._source(CORP_TICKER_TABLE)} "
-                "WHERE ticker IN (SELECT unnest(?::VARCHAR[])) AND corp_code IS NOT NULL",
-                [list(tickers)],
+                f"WHERE ticker IN (SELECT {_KEYS_SQL}) AND corp_code IS NOT NULL",
+                [_keys_param(tickers)],
                 checkpoint,
             )
         finally:
@@ -1704,7 +1715,7 @@ class EquityDuckdbAdapter:
         where = [f"{source.available_expr} <= {_lit(fetch_end)}"]
         if source.row_filter:
             where.append(f"({source.row_filter})")
-        where.append(f"{source.key_column} IN (SELECT unnest(?::VARCHAR[]))")
+        where.append(f"{source.key_column} IN (SELECT {_KEYS_SQL})")
         predicate = " AND ".join(where)
         picks = ", ".join(f"c{position}" for position in range(len(fields)))
         if source.reduce is Reduce.SUM:
@@ -1725,7 +1736,7 @@ class EquityDuckdbAdapter:
             )
         con = self._connect()
         try:
-            raw_rows = _fetchall(con, sql, [list(keys)], checkpoint)
+            raw_rows = _fetchall(con, sql, [_keys_param(keys)], checkpoint)
         finally:
             con.close()
         dates: dict[str, list[date]] = {}

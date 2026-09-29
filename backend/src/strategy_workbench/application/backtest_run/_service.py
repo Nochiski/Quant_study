@@ -224,8 +224,9 @@ class _RunRecord:
     provenance: StrategyProvenance
     events: deque[RunProgressEvent]
     cancellation: Event
-    # 같은 입력 잇기의 기준(`run_input_key`).
-    input_key: str
+    # 같은 입력 잇기의 기준 — 실행 입력(`run_input_key`)·계열·시도 키. 계열이나 시도 키가 다르면
+    # 잇지 않아 run 하나가 원장 행 하나로 남는다(잇기가 N 을 빠뜨리지 않는다).
+    join_key: tuple[str, str | None, str]
     # 이 run 을 쓰는 소유자. None 은 사용자 단일 실행, 문자열은 실험 id 다. 모두 취소해야 취소된다.
     owners: set[str | None]
     # 실험 몫 슬롯을 쓰고 있는가(띄울 때 정한다).
@@ -297,16 +298,18 @@ class BacktestRunService:
         admission = self._admit(request, record_blocked=True)
         spec, provenance = admission.spec, admission.provenance
         with self._lock:
-            # 같은 입력(실행 지문의 요청 칸 `run_input_key`·provenance)으로 도는 run 이 있으면 그
-            # run 을 돌려준다. 재클릭·새로고침 뒤 재시작·프록시 재시도·실험 trial 이 같은 tape 를
-            # 겹쳐 계산하지 않게 한다(#161, spec D6). provenance 는 매니페스트가 기록하므로 같아야
-            # 한다. 데이터 snapshot·엔진 규칙·지표 레지스트리 판본은 프로세스 안에서 고정이라 같은
-            # 입력이면 결과도 같다. 취소를 요청한 run 은 곧 끝나므로 잇지 않는다.
-            input_key = run_input_key(spec)
+            # 같은 입력(실행 지문의 요청 칸 `run_input_key`·provenance)·같은 계열·같은 시도 키로
+            # 도는 run 이 있으면 그 run 을 돌려준다. 재클릭·새로고침 뒤 재시작·프록시 재시도·실험
+            # trial 이 같은 tape 를 겹쳐 계산하지 않게 한다(#161, spec D6). provenance 는
+            # 매니페스트가 기록하므로 같아야 하고, 계열·시도 키가 다르면 원장 행을 따로 적어야
+            # 하므로 잇지 않는다. 데이터 snapshot·엔진 규칙·지표 레지스트리 판본은 프로세스 안에서
+            # 고정이라 같은 입력이면 결과도 같다. 취소를 요청한 run 은 곧 끝나므로 잇지 않는다.
+            key = trial_key_override or trial_key(spec)
+            join_key = (run_input_key(spec), admission.lineage_id, key)
             for existing in self._records.values():
                 if (
                     existing.state.status in (RunStatus.QUEUED, RunStatus.RUNNING)
-                    and existing.input_key == input_key
+                    and existing.join_key == join_key
                     and existing.provenance == provenance
                 ):
                     existing.owners.add(owner)
@@ -318,9 +321,10 @@ class BacktestRunService:
                     return BacktestStartResponse(existing.state)
             run_id = self._new_id()
             created = self._now()
-            message = (
-                "Run accepted" if self._running < self._run_slots else "Waiting for a free run slot"
+            slot_free = self._running < self._run_slots and (
+                owner is None or self._running_experiments < experiment_slots(self._run_slots)
             )
+            message = "Run accepted" if slot_free else "Waiting for a free run slot"
             record = _RunRecord(
                 state=BacktestRunState(
                     run_id=run_id,
@@ -335,7 +339,7 @@ class BacktestRunService:
                 provenance=provenance,
                 events=deque(maxlen=_EVENT_RING_SIZE),
                 cancellation=Event(),
-                input_key=input_key,
+                join_key=join_key,
                 owners={owner},
             )
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
@@ -344,7 +348,7 @@ class BacktestRunService:
                 BacktestRunSummary(record.state, provenance),
                 request,
                 lineage_id=admission.lineage_id,
-                trial_key=trial_key_override or trial_key(spec),
+                trial_key=key,
             )
             self._records[run_id] = record
             # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
@@ -526,7 +530,14 @@ class BacktestRunService:
             if record is None:
                 # 이 프로세스가 돌리지 않은 run 은 재시작 때 이미 종결됐다.
                 return self.state(run_id)
+            user_leaves_shared_wait = (
+                owner is None and None in record.owners and record in self._waiting
+            )
             record.owners.discard(owner)
+            if user_leaves_shared_wait and record.owners:
+                # 사용자가 이어 단일 실행 레인에 올린 run 은 남은 실험의 레인으로 되돌린다.
+                self._waiting.remove(record)
+                self._waiting.push(record, next(iter(record.owners)))
             if record.owners or record.state.status in (
                 RunStatus.COMPLETED,
                 RunStatus.CANCELLED,

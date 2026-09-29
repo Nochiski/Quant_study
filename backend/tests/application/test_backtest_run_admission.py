@@ -59,6 +59,7 @@ _ENVIRONMENT = RunEnvironment(
 )
 
 
+_LINEAGE = "lineage-s"
 # (run 서비스, 입구 포트, 입구마다 남긴 (질의 끝 날짜, 그 순간 `running` 인 run 수))
 _Gated = tuple[BacktestRunService, RawLoadBarrier, list[tuple[date, int]]]
 _GatedRuns = Callable[..., _Gated]
@@ -82,6 +83,9 @@ def gated_runs(tmp_path: Path) -> Iterator[_GatedRuns]:
             entries.append((query.end, running))
 
         barrier = RawLoadBarrier(MockEquityDataAdapter.demo(), on_enter=enter)
+        strategies = InMemoryStrategyRepository()
+        # 인라인 초안이 실을 계열(`_LINEAGE`)은 저장된 전략이어야 한다.
+        StrategyDesignService(strategies, new_id=lambda: _LINEAGE).create(_spec())
         runs = BacktestRunService(
             PortfolioDesignService(
                 barrier,
@@ -89,7 +93,7 @@ def gated_runs(tmp_path: Path) -> Iterator[_GatedRuns]:
                 factor_metadata=MockEquityDataAdapter.demo(),
                 factor_registry_version="test-registry",
             ),
-            InMemoryStrategyRepository(),
+            strategies,
             MockEquityDataAdapter.demo(),
             BacktestEngineExecutorAdapter(build_default_metric_registry()),
             LocalArtifactStore(tmp_path),
@@ -445,4 +449,61 @@ def test_a_user_who_joins_a_waiting_experiment_run_moves_it_to_the_single_run_sl
 
     assert joined == waiting
     assert [end.day for end, _running in entries] == [12, 11]
+    wait_for_terminal_run(runs, "e2")
+
+
+def test_only_runs_of_the_same_lineage_and_trial_key_join(gated_runs: _GatedRuns) -> None:
+    """#346 리뷰 P2-1: 잇기는 원장 행을 적지 않으므로 계열·시도 키가 다르면 잇지 않는다."""
+    runs, port, _entries = gated_runs("base", "in-lineage", "other-key")
+    request = _request()
+
+    base = runs.start(request).run.run_id
+    assert port.entered.wait(timeout=30), "base run never reached the tape stage"
+    in_lineage = runs.start(replace(request, lineage_strategy_id=_LINEAGE)).run.run_id
+    other_key = runs.start(request, owner="exp", trial_key_override="f" * 64).run.run_id
+    same = runs.start(request, owner="exp").run.run_id
+    port.release.set()
+
+    assert (in_lineage, other_key, same) == ("in-lineage", "other-key", base)
+    assert [entry.run_id for entry in runs.trial_ledger(_LINEAGE).trials[0].runs] == ["in-lineage"]
+    for run_id in (base, in_lineage, other_key):
+        wait_for_terminal_run(runs, run_id)
+
+
+def test_a_user_who_withdraws_from_a_joined_experiment_run_returns_it_to_the_experiment(
+    gated_runs: _GatedRuns,
+) -> None:
+    """#346 리뷰 P3-1: 사용자가 이었다 취소한 대기 run 이 단일 실행 전용 슬롯을 쥐지 않는다."""
+    runs, port, entries = gated_runs("e1", "u1", "e2", "u2", run_slots=2)
+    runs.start(_request(end=date(2024, 1, 12)), owner="exp")
+    runs.start(_request(end=date(2024, 1, 9)))
+    _wait_for_entries(entries, 2)
+    runs.start(_request(end=date(2024, 1, 11)), owner="exp")
+    runs.start(_request(end=date(2024, 1, 11)))  # 사용자가 e2 를 잇는다
+    still_waiting = runs.cancel("e2")  # 사용자만 빠진다
+    user = runs.start(_request(end=date(2024, 1, 10)))
+    port.release.set()
+    for run_id in ("e1", "u1", "e2", "u2"):
+        wait_for_terminal_run(runs, run_id)
+
+    assert still_waiting.status is RunStatus.QUEUED
+    assert user.run.message == "Waiting for a free run slot"
+    # e2 가 단일 실행 레인에 남았다면 먼저 빈 슬롯을 잡아 u2 보다 앞선다.
+    assert [end.day for end, _running in entries] == [12, 9, 10, 11]
+
+
+def test_an_experiment_run_waiting_for_the_experiment_share_says_it_waits(
+    gated_runs: _GatedRuns,
+) -> None:
+    """#346 리뷰 P3-2: 전체 슬롯이 남아도 실험 몫이 찼으면 기다린다는 문장이다."""
+    runs, port, entries = gated_runs("e1", "e2", run_slots=2)
+    runs.start(_request(end=date(2024, 1, 12)), owner="exp")
+    _wait_for_entries(entries, 1)
+    waiting = runs.start(_request(end=date(2024, 1, 11)), owner="exp")
+    port.release.set()
+
+    assert (waiting.run.status, waiting.run.message) == (
+        RunStatus.QUEUED,
+        "Waiting for a free run slot",
+    )
     wait_for_terminal_run(runs, "e2")

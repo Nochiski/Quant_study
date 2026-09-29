@@ -22,18 +22,20 @@ from strategy_workbench.domain.backtest.facade.environment import (
     participation_volumes,
 )
 from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
-from tests.test_core_parity import ENGINE_SCENARIOS
+from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 
 _PINNED = (
     "backtest-engine-v2",
-    "c99e1b1103a1a7e968c8ce7aebd23dfdf9254d312d07d971991420d8687d3753",
+    "e647a32fbc815186d6af8037489b66065032c362afbd3eb9ab0883ceb943c43d",
 )
 
 
 def _rules_digest() -> str:
     digest = hashlib.sha256()
-    for name in sorted(ENGINE_SCENARIOS):
-        engine, _result = ENGINE_SCENARIOS[name]("python")
+    # 주문 생명주기·고정 bp 슬리피지(제품 기본 비용 경로)는 세션 시나리오에 있다.
+    scenarios = {**ENGINE_SCENARIOS, **_session_scenarios()}
+    for name in sorted(scenarios):
+        engine, _result = scenarios[name]("python")
         digest.update(name.encode())
         digest.update(engine.event_store.trace_bytes())
         digest.update(engine.event_store.decision_tape_bytes())

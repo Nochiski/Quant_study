@@ -330,6 +330,8 @@ Dependency 칸이 정본이다.
 - V5-01 인계(V3-03, #334 리뷰 P3-4): 재시도 가능(실패·취소 trial, 실험 미취소)·선택 가능(완료 trial) 조건이
   `ExperimentRunService` 에만 있다. 화면이 버튼 활성화를 위해 이 규칙을 복제하지 않도록 착수 전에
   `ExperimentTrialState` 에 `retryable`·`selectable` 을 싣는다.
+- V5-01 인계(V3-04, #346 리뷰 P3-4): US-SM-11(같은 계산이 겹쳐 돌지 않는다)의 스토리 e2e 를 V3-04 의 trial
+  붙잡기 훅으로 붙인다(붙잡힌 trial 을 사용자가 이어 같은 실행 ID 로 가고, 취소해도 실험이 쓰는 동안 돈다).
 
 ## 9. Phase 6 — 홀드아웃 개봉
 

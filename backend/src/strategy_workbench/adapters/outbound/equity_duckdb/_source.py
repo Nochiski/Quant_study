@@ -23,6 +23,12 @@ from pathlib import Path
 MANIFEST_NAME = "MANIFEST.json"
 CATALOG_NAME = "equity.duckdb"
 CATALOG_META_NAME = "_catalog_meta.json"
+# 카탈로그를 다시 만드는 조치 — 카탈로그 때문에 원천을 뺀 사유 문장(`catalog_*`, FIELD_MAP §3)이 이
+# 문구로 조치를 알린다. 원천은 부팅 때 정해지므로 다시 만든 뒤 서버도 다시 띄워야 돌아온다.
+CATALOG_REBUILD = (
+    "카탈로그를 다시 만든 뒤(`ledger_sync catalog` 또는 `python -m equity catalog`) 서버를 다시 "
+    "띄워야 한다"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,8 +151,8 @@ def resolve_table(equity_root: Path, table: str) -> TableBuild:
 @dataclass(frozen=True)
 class CatalogState:
     """`equity.duckdb` + `_catalog_meta.json` 이 가리키는 것. `usable` 이 아니면 `reason` 이 왜인지
-    말한다 — 카탈로그 없음 · meta 없음 · 파일이나 meta 손상 · 테이블 판본이 meta 와 다름(stale) ·
-    매크로 건너뜀."""
+    말한다 — 카탈로그·meta 없음(`catalog_missing`) · 파일이나 meta 손상(`catalog_unreadable`) ·
+    테이블 판본이 meta 와 다름(`catalog_stale`)."""
 
     path: Path
     usable: bool
@@ -166,9 +172,9 @@ def unreadable_catalog(path: Path, unreadable: Path, error: Exception) -> Catalo
     원문은 경고 로그에만 남긴다(#163).
     """
     reason = (
-        "카탈로그 파일을 읽을 수 없어 카탈로그 매크로를 읽는 원천의 필드를 뺀다 — 카탈로그를 다시 "
-        "만들어야 한다(`ledger_sync catalog` 또는 `python -m equity catalog`) (catalog_unreadable) "
-        f"— file={unreadable.name} error={type(error).__name__}"
+        "카탈로그 파일을 읽을 수 없어 카탈로그 매크로를 읽는 원천의 필드를 뺀다 — "
+        f"{CATALOG_REBUILD} (catalog_unreadable) — file={unreadable.name} "
+        f"error={type(error).__name__}"
     )
     logger.warning(f"{reason} path={unreadable} detail={error!r}")
     return CatalogState(path, False, reason, None, ())
@@ -179,16 +185,20 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
 
     빌드·GC 뒤 재생성되지 않은 카탈로그는 매크로 본문이 옛 `v=` 경로를 물고 있다(DESIGN §2) —
     그런 카탈로그로 조정가를 내면 조용히 옛 판본을 읽으므로 usable=False 로 막는다.
-    `reason` 은 질의 거절 상세로 사용자에게 가므로 루트 기준 파일 이름만 싣는다(#163).
+    `reason` 은 질의 거절 상세로 사용자에게 가므로 루트 기준 파일 이름만 싣는다(#163). 쓸 수 없는
+    카탈로그는 매크로를 읽는 원천이 모두 빠지므로 사유를 만든 여기서 경고도 한 번 남긴다 — 부팅
+    로그에 남아야 재생성한다(#292 리뷰 P2-2).
     """
     path = equity_root / CATALOG_NAME
     meta_path = equity_root / CATALOG_META_NAME
-    if not path.exists():
-        return CatalogState(path, False, f"catalog file missing — catalog={CATALOG_NAME}", None, ())
-    if not meta_path.exists():
-        return CatalogState(
-            path, False, f"catalog meta missing — meta={CATALOG_META_NAME}", None, ()
-        )
+    for required in (path, meta_path):
+        if not required.exists():
+            reason = (
+                "카탈로그 파일이 없어 카탈로그 매크로를 읽는 원천의 필드를 뺀다 — "
+                f"{CATALOG_REBUILD} (catalog_missing) — file={required.name}"
+            )
+            logger.warning(f"{reason} path={required}")
+            return CatalogState(path, False, reason, None, ())
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         if not isinstance(meta, dict):
@@ -202,12 +212,13 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
     macros = tuple(str(item) for item in raw_macros) if isinstance(raw_macros, list) else ()
     actual = meta.get("snapshot_id")
     if actual != expected_snapshot_id:
+        reason = (
+            "카탈로그가 원장 테이블 판본과 달라(낡음) 카탈로그 매크로를 읽는 원천의 필드를 뺀다 — "
+            f"{CATALOG_REBUILD} (catalog_stale) — catalog_snapshot_id={actual!r} "
+            f"manifest_snapshot_id={expected_snapshot_id!r}"
+        )
+        logger.warning(f"{reason} path={path}")
         return CatalogState(
-            path,
-            False,
-            "catalog is stale — rebuild it (`python -m equity catalog`): "
-            f"catalog_snapshot_id={actual!r} manifest_snapshot_id={expected_snapshot_id!r}",
-            str(actual) if actual is not None else None,
-            macros,
+            path, False, reason, str(actual) if actual is not None else None, macros
         )
     return CatalogState(path, True, None, expected_snapshot_id, macros)

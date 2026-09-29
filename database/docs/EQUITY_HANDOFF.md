@@ -53,7 +53,7 @@
 
 `data/stage/` 의 원장 parquet 을 읽어 **29개 equity 표**(팩트·차원 25 + 선언표 3 —
 `declaration_table=True` 는 `universe_policy`·`dataset_profile`·`factor_readiness`)를 짓고,
-`equity.duckdb` 카탈로그(매크로 9)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
+`equity.duckdb` 카탈로그(매크로 10)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
 백테스트 파이프라인에 point-in-time 관측을 공급한다.
 
 - 코드: `database/src/equity/`
@@ -186,7 +186,7 @@ ssh kael-server "cd ~/quant-ledger && bash scripts/equity_gate_all.sh"
 표별 게이트 `metrics` 를 통째로 뽑아 baseline 근거로 쓰려면
 `database/scripts/equity_gate_metrics.py`(서버에서 `data/equity` 를 읽어 JSON 한 덩이).
 
-### 3-4. 카탈로그(뷰 매크로 9) · 소비자 계약(EG-C 6항)
+### 3-4. 카탈로그(뷰 매크로 10) · 소비자 계약(EG-C 6항)
 
 ```bash
 export QL_HOME=$HOME/quant-ledger PYTHONPATH=$HOME/quant-ledger/src
@@ -632,7 +632,8 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
   판단이 없고 `dataset_profile` 에도 행 단위 품질 축이 없다(`requires_confirmation` 은 필드 단위).
   서버 27.44% 행이 걸리는데 절반 이상이 `unknown_price_only`(MVP 4유형 밖 기준가 변화)라
   일률적으로 거르면 유니버스가 반으로 준다. 팩터층·소비자와 함께 정할 것.
-- **`financial.*`·`consensus.*` 도 표로 내릴지** — 카탈로그가 낡으면 여전히 이 9필드가 죽는다.
+- **`financial.*`·`consensus.*` 도 표로 내릴지** — 카탈로그가 낡으면 여전히 이 9필드가 죽는다(카탈로그에
+  기대는 필드 전체는 FIELD_MAP §3 「부팅 검사」 — 신용잔고·수정주가는 가림 뷰라 일부러 기댄다, #249·#220).
   다만 두 뷰는 `as_of` 로 접는 축이 있어 (키, 날짜) 의 순수 함수가 아니다 — 조정가처럼 그냥
   옮길 수 없고, 무엇을 grain 으로 굳힐지부터 정해야 한다.
 - **조정 OHLC·거래량의 field_id** — 표에는 컬럼으로 있으나 어댑터는 내지 않는다(FIELD_MAP §2
@@ -665,7 +666,7 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 | 산출 SQL | `database/src/equity/sql/<table>.sql` |
 | 프레임(빌드·게이트·입력 고정·baseline·CLI) | `build.py`·`gates.py`·`inputs.py`·`baseline.py`·`__main__.py` |
 | 전방 조정가 표 | `rules_s23.py` · `sql/price_adj_daily.sql` — 소비 규약은 아래 「조정가 읽는 법」 |
-| 뷰 매크로 9 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`·`v_credit_balance`) |
+| 뷰 매크로 10 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`·`v_credit_balance`·`v_adj_close`) |
 | 카탈로그 publish + EG11·EG5c | `catalog.py` |
 | 소비자 계약 EG-C | `contract.py` |
 | 골든 픽스처 | `database/src/equity/fixtures/<table>.json` |
@@ -683,8 +684,9 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 질의 창·as_of 에 무관하고 `available_date` 는 언제나 `date` 다.
 
 **누가 읽는가**
-- 워크벤치 `price.adj_close` — 어댑터가 이 표를 직접 읽는다(매크로가 아니다). 카탈로그가 낡거나
-  없어도 산다.
+- 워크벤치 `price.adj_close` — 어댑터가 이 표를 카탈로그 뷰 `v_adj_close` 로 읽는다(#220). 원장이
+  그날 사건을 접지 못한 적용일 행(KRX 기준가 적용일에 늦게 공개된 ok 계수 ·
+  `krx_base_inconsistent`)은 결측이고, 카탈로그가 없거나 낡으면 조정가 원천이 빠진다(DESIGN §5).
 - parquet 을 직접 읽는 분석 — `data/equity/price_adj_daily/v=<build>/year=*/…`.
 - 카탈로그 매크로 `v_adj_price_fwd`·`v_adj_volume_fwd` — 같은 값을 내는 읽기 경로다. 표에 없는
   것(원주가 컬럼 동반·`lag_override` 로 계수 컷오프를 미는 축)이 필요할 때만 쓴다.
@@ -781,8 +783,8 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 - **`_pinned/` 은 받지 않는다** — 재빌드 시 stage 입력을 고정한 하드링크 사본이라 읽기에 불필요하고,
   rsync 하면 하드링크가 풀려 실제 크기(수 GB)로 복사된다. `_asof/`·`_tmp/`·`_failed/` 도 같다.
 - 스크립트가 `baseline.json` 을 함께 받고 **카탈로그를 다시 만든다**. 매크로 본문이 절대경로를
-  굽기 때문에(§10 P1c) 경로가 바뀌면 `financial.*`·`consensus.*` 가
-  `unavailable` 이 된다(`price.adj_close` 는 S23 부터 표를 읽으므로 무관하다) — 손으로 복사했다면 반드시 `python -m equity --root <경로> … catalog`.
+  굽기 때문에(§10 P1c) 경로가 바뀌면 카탈로그에 기대는 필드(FIELD_MAP §3 「부팅 검사」)가
+  `unavailable` 이 된다 — 손으로 복사했다면 반드시 `python -m equity --root <경로> … catalog`.
 
 **워크벤치를 duckdb 어댑터로 기동**
 ```
@@ -798,6 +800,7 @@ cd backend && uv run --extra parquet --extra equity server
 **기동 뒤 부팅 로그 경고** — duckdb 어댑터는 못 읽는 원천의 필드를 빼고 뜨며 로그에 경고를 남긴다. 코드는
 경고 문장 안 괄호에 있다. 필드를 뺀 `catalog_*` 경고는 카탈로그를 다시 만들고(`ledger_sync catalog` 또는
 `python -m equity … catalog`, 파일 손상이 의심되면 `ledger_sync verify` 먼저) 서버를 다시 띄운다.
-`profile_lag_fallback` 은 필드를 빼지 않으니 `dataset_profile` 을 받는다(`ledger_sync`). 부팅을 멈추는
-`catalog_locked`·`catalog_transient_error` 는 예외 문장의 조치를 따른다. 코드별 뜻은
+카탈로그 매크로를 더한 코드를 받은 뒤에도 그렇다(`catalog_macro_missing`). `profile_lag_fallback` 은
+필드를 빼지 않으니 `dataset_profile` 을 받는다(`ledger_sync`). 부팅을 멈추는 `catalog_locked`·
+`catalog_transient_error` 는 예외 문장의 조치를 따른다. 코드별 뜻과 카탈로그에 기대는 필드는
 `EQUITY_FIELD_MAP.md` §3 「부팅 검사」가 정본이다.

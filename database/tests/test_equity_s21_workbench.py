@@ -4,7 +4,7 @@
 체인 **26테이블 + `dataset_profile`**(S19 테스트와 같은 순서 — 워크벤치가 읽는 20테이블에
 `index_daily`·`ownership_snapshot`·`audit_opinion`·`shares_outstanding`·`treasury_stock`·
 `opinion_broker_daily` 를 더한 것은 S19 `dataset_profile` 이 전 원천의 커버율을 재기 때문이다) +
-`catalog.publish`(매크로 9)를 스크래치에 짓고, 같은 모노레포의
+`catalog.publish`(매크로 10)를 스크래치에 짓고, 같은 모노레포의
 `backend/src`(`contract.default_engine_src()`) 에서 워크벤치 어댑터를 import 한다 —
 numpy·pyarrow·duckdb 가 필요하다(`uv run --with duckdb --with pyarrow --with numpy`;
 컨테이너·백테스트 2건은 ruamel.yaml 까지 — `uv run --project backend pytest …`).
@@ -390,7 +390,8 @@ def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) 
 
 
 def test_247540_무상증자_척도_창의_신용잔고는_결측이다(adapter) -> None:
-    """#249 — 어댑터는 원장 뷰 `v_credit_balance` 를 읽고, 뷰는 권리락일부터 척도 창의 잔고를 가린다.
+    """#249 — 어댑터는 원장 뷰 `v_credit_balance` 를 읽고, 뷰는 권리락일부터 척도 창의 잔고를
+    가린다.
 
     절단본 원장: 247540 유무상증자(무상 1주당 3주) 공시 2022-06-14(`stg_event_pifric`), 신주배정
     기준일 06-28 → 권리락일 06-27. `stg_credit_daily` 융자잔고는 06-24 350,914주 → 06-27 451,638주

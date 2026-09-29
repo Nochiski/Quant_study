@@ -316,10 +316,12 @@
   벤치마크나 종료일만 바꿔 다시 돌리면 같은 시도 아래 "재확인"으로 묶이며 시도 수는 그대로다.
 - Given 시도 원장, Then 시도를 지우거나 계열을 나누는 버튼은 없고 "다른 계열과 합치기"만 있다.
 - Given 결과가 나오지 않은 실행(봉인 구간과 겹쳐 거절, 시작 전 취소), Then 원장에 "시도 수 제외"로 남는다.
-- Given 제목이나 설명만 바꿔 저장한 뒤 다시 돌린 실행, Then 새 시도가 아니라 같은 시도 아래 묶인다.
+- Given 제목이나 설명, 팩터 그래프의 노드 이름·선언 순서만 바꿔 저장한 뒤 다시 돌린 실행, Then 새 시도가 아니라
+  같은 시도 아래 묶인다.
 - 비고: 서버를 다시 시작해도 백테스트 이력과 결과(결과 화면·AI 결과 설명)가 남는지는 V1-03·V1-04의 backend
   통합 테스트(`backend/tests/integration/test_backtest_run_restart.py`)가, 원장이 남는지는 V1-05의
-  `backend/tests/application/test_trial_ledger.py`가 확인한다(브라우저 e2e로 재현하지 않는다).
+  `backend/tests/application/test_trial_ledger.py`가 확인한다(브라우저 e2e로 재현하지 않는다). 노드 이름·선언
+  순서가 시도 키를 바꾸지 않는지는 `backend/tests/domain/test_trial_key.py`가 손 예시로 고정한다(#335).
 
 ### US-SM-13 봉인 구간과 겹치는 실행이 이유와 교정 버튼과 함께 막힌다
 

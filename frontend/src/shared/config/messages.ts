@@ -1819,7 +1819,7 @@ export const messages = {
       "The run-control request failed. Refresh the status and try again.",
     "backtest.result.chartEmpty": "No value can be calculated for this range.",
     "backtest.result.chartEmpty.rollingSharpe":
-      "The run is shorter than the rolling window ({sessions} sessions), so there is no rolling Sharpe value.",
+      "The run is shorter than the rolling window ({sessions} sessions), so there are no rolling Sharpe values.",
     "backtest.result.chart": "chart",
     "backtest.result.kicker": "PROFESSIONAL RESULT",
     "backtest.result.title": "Backtest result",

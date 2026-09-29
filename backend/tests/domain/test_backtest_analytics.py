@@ -405,19 +405,23 @@ def test_rolling_sharpe_starts_once_the_126_session_window_is_full() -> None:
     # 같은 126개로 잰 전체 샤프와 같다. 21세션 창은 연 표준오차가 √(252/21) ≈ 3.5 라 잡음이었다.
     days = (date(2026, 1, 5) + timedelta(days=offset) for offset in range(200))
     sessions = tuple(day for day in days if day.weekday() < 5)[:127]
-    report = compute_analytics(
-        AnalyticsInput(
-            points=tuple(
-                AnalysisPoint(session, 100.0 + (index % 3), 0.0, 0.0)
-                for index, session in enumerate(sessions)
-            ),
-            traded_notional=0.0,
+    data = AnalyticsInput(
+        points=tuple(
+            AnalysisPoint(session, 100.0 + (index % 3), 0.0, 0.0)
+            for index, session in enumerate(sessions)
         ),
-        build_default_metric_registry(),
+        traded_notional=0.0,
     )
+    report = compute_analytics(data, build_default_metric_registry())
 
     assert [item.value for item in report.rolling_sharpe[:-1]] == [None] * 126
-    assert report.rolling_sharpe_window_sessions == 126
+    # 결과는 실제로 쓴 창 길이를 싣는다(#303). 기본값이 아닌 창으로 확인해야 하드코딩이 걸린다.
+    assert (
+        compute_analytics(
+            data, build_default_metric_registry(), rolling_window=5
+        ).rolling_sharpe_window_sessions
+        == 5
+    )
     assert report.rolling_sharpe[-1].value == pytest.approx(_metric(report, "sharpe").value)
 
 

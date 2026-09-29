@@ -214,6 +214,8 @@ const ko = {
     "기간이 1년보다 짧아 연율로 바꾸지 않습니다",
   "backtest.metricUnavailable.base_rate_not_covered":
     "기준금리 이력이 시작되기 전 세션이 있어 계산하지 않습니다",
+  "backtest.metricUnavailable.two_valued_returns":
+    "수익률이 두 가지 값만 나와 오차를 잴 수 없습니다",
   "backtest.result.metricUnavailable.explain": "데이터 경고에서 이유 보기",
   // 지표의 쉬운 이름·뜻. 키는 backend Metric Registry의 metric_id이고 문장은 여기가 owner다
   // (결과 설명 spec R4). registry id 목록은 backend/tests/fixtures/analytics/metric_ids.json.
@@ -1971,6 +1973,8 @@ export const messages = {
       "The period is shorter than a year, so it is not annualized",
     "backtest.metricUnavailable.base_rate_not_covered":
       "Some sessions predate the base rate history, so this is not computed",
+    "backtest.metricUnavailable.two_valued_returns":
+      "Returns took only two values, so the error cannot be measured",
     "backtest.result.metricUnavailable.explain": "See why in data warnings",
     "backtest.metric.total_return": "Total return",
     "backtest.metric.total_return.description":

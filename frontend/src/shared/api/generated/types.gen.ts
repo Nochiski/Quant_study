@@ -2722,7 +2722,8 @@ export type MetricUnavailableReason =
   | "no_losing_closed_trade"
   | "no_observations_in_scope"
   | "period_under_one_year"
-  | "base_rate_not_covered";
+  | "base_rate_not_covered"
+  | "two_valued_returns";
 
 /**
  * MetricUnit

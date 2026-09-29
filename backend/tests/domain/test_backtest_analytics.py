@@ -448,6 +448,45 @@ def test_psr_matches_the_validation_lab_math_note_example() -> None:
     assert probabilistic_sharpe(0.86, error) == pytest.approx(0.9445, abs=1e-4)
 
 
+def test_sharpe_error_is_exactly_zero_for_two_valued_returns_at_two_over_skewness() -> None:
+    # 두 값만 나오는 분포는 γ₄ = 1 + γ₃² 다. γ₃ = 2, γ₄ = 5, 세션 샤프 s = 2/γ₃ = 1 이면 근호 안이
+    # 1 − 2 + 4/4 = 0 이다.
+    assert _sharpe_standard_error(1.0, 2.0, 5.0, 10, 1) == 0.0
+
+
+def test_two_valued_curve_at_zero_error_empties_error_and_psr_instead_of_crashing() -> None:
+    # 리뷰 P3-1 재현: 2026-01-05~08 네 점, 수익률 (0.02, 0.02, b). b ≈ 0.035335941307026 에서 세션
+    # 샤프가 2/γ₃ 에 걸려 근호 안이 0 근처가 되고, 부동소수 오차로 음수가 나오면 math domain
+    # error 로 실행 전체가 죽었다. b 를 1e-17 씩 흔든 곡선이 모두 계산을 마치고, 표준오차가 0 으로
+    # 떨어진 곡선은 표준오차·PSR 을 같은 사유로 비운다. 몇 개가 0 에 떨어지는지는 부동소수 연산에
+    # 달려 있어 개수는 단언하지 않는다.
+    empty = 0
+    for step in range(-200, 201):
+        equity = [100.0]
+        for item in (0.02, 0.02, 0.035335941307026 + step * 1e-17):
+            equity.append(equity[-1] * (1 + item))
+        report = compute_analytics(
+            AnalyticsInput(
+                points=tuple(
+                    AnalysisPoint(date(2026, 1, 5 + index), value, 0.0, 0.0)
+                    for index, value in enumerate(equity)
+                ),
+                traded_notional=0.0,
+            ),
+            build_default_metric_registry(),
+        )
+        error = _metric(report, "sharpe_standard_error")
+        psr = _metric(report, "probabilistic_sharpe")
+        if error.value is None:
+            empty += 1
+            assert psr.value is None
+            assert error.unavailable_reason == psr.unavailable_reason == "two_valued_returns"
+        else:
+            assert error.value >= 0.0
+            assert psr.value is not None
+    assert empty > 0
+
+
 def test_psr_against_a_benchmark_sharpe_is_one_half_at_the_benchmark() -> None:
     # 계열 DSR 은 기준에 기대 최대 샤프를 넣는다. 관측 샤프가 기준과 같으면 Φ(0) = 0.5 다.
     assert probabilistic_sharpe(1.2, 0.4, benchmark=1.2) == 0.5

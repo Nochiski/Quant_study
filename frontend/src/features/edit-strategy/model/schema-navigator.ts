@@ -48,6 +48,11 @@ export type SchemaFacts = {
    */
   valueLabelKeys: Readonly<Record<string, string>> | null;
   appliedStage: string | null;
+  /**
+   * `x-stage`: 그래프 표현(파이프라인)의 단계(P4-01). 필드의 단계를 읽는 규칙은 정본 대장 "그래프 표현
+   * 투영" 행이 소유하고 `pipeline-projection.ts`가 그 규칙을 쓴다.
+   */
+  stage: string | null;
   catalog: string | null;
   reference: string | null;
   applicableWhen: ApplicableWhen | null;
@@ -531,6 +536,7 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
             ]),
           )),
     appliedStage: stringAt(node, "x-applied-stage"),
+    stage: stringAt(node, "x-stage"),
     catalog: stringAt(node, "x-catalog"),
     reference: stringAt(node, "x-reference"),
     applicableWhen: isApplicableWhen(node["x-applicable-when"])

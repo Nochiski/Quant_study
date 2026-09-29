@@ -1046,6 +1046,66 @@ const ko = {
     "종목 하나가 가질 수 있는 최대 목표 비중입니다.",
   "strategy.contract.risk.max_sector_weight.description":
     "섹터 하나가 가질 수 있는 최대 목표 비중입니다.",
+  // 그래프 1수준(파이프라인) 단계 이름과 한 문장 요약(P4-01, 리드 결정 2026-09-30). 조각 키는 backend
+  // 설명 키 아래 `.summary`(enum 은 값 이름 키 아래)이고 `{<키>}` 자리에 같은 카드 필드의 값이 들어간다
+  // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다.
+  "strategy.stage.eligibility": "유니버스",
+  "strategy.stage.eligibility.description": "어떤 종목을 후보로 둘지 정합니다.",
+  "strategy.stage.signal": "알파 팩터",
+  "strategy.stage.signal.description": "후보 종목에 점수를 매기는 방법입니다.",
+  "strategy.stage.portfolio": "포트폴리오 구성",
+  "strategy.stage.portfolio.description": "몇 종목을 어떤 비중으로 언제 다시 고를지 정합니다.",
+  "strategy.stage.risk": "리스크 제약",
+  "strategy.stage.risk.description": "한 종목·한 섹터에 비중이 몰리지 않게 막는 한도입니다.",
+  "strategy.summary.stage.eligibility": "{parts}인 종목 중에서",
+  "strategy.summary.stage.signal": "{parts}",
+  "strategy.summary.stage.portfolio": "{parts}",
+  "strategy.summary.stage.risk": "{parts} 한도 안에서",
+  "strategy.summary.sentence": "{stages} 골라 보유한다.",
+  "strategy.field.eligibility_rule.operator.value.gt.summary":
+    "{field_id} {value} 초과",
+  "strategy.field.eligibility_rule.operator.value.gte.summary":
+    "{field_id} {value} 이상",
+  "strategy.field.eligibility_rule.operator.value.lt.summary":
+    "{field_id} {value} 미만",
+  "strategy.field.eligibility_rule.operator.value.lte.summary":
+    "{field_id} {value} 이하",
+  "strategy.field.eligibility_rule.operator.value.eq.summary":
+    "{field_id} {value}",
+  "strategy.field.eligibility_rule.operator.value.top_percent.summary":
+    "{field_id} 상위 {value.percent}",
+  "strategy.field.eligibility_rule.operator.value.top_count.summary":
+    "{field_id} 상위 {value}개",
+  "strategy.contract.portfolio.minimum_liquidity.summary":
+    "{liquidity_field_id} {minimum_liquidity} 이상",
+  "strategy.section.factors.summary": "{items} 점수가 높은 순으로",
+  "strategy.field.factor_signal.label.summary": "{label}",
+  "strategy.field.factor_signal.weight.summary": "(가중치 {weight})",
+  "strategy.field.signal_step.score_threshold.summary":
+    "점수 {score_threshold} 이상만",
+  "strategy.field.signal_step.regime_minimum.summary":
+    "{regime_field_id} {regime_minimum} 이상일 때만 새로 사며",
+  "strategy.field.portfolio_step.side.value.long_short.summary": "하위 종목은 공매도하고",
+  "strategy.field.portfolio_step.weighting.value.equal.summary": "같은 비중으로",
+  "strategy.field.portfolio_step.weighting.value.factor_score.summary":
+    "점수 차이에 비례한 비중으로",
+  "strategy.field.portfolio_step.weighting.value.rank.summary": "순위에 비례한 비중으로",
+  "strategy.field.risk_step.risk_field_id.summary":
+    "{risk_field_id} 값이 낮을수록 큰 비중으로",
+  "strategy.field.risk_step.risk_factor_id.summary":
+    "{risk_factor_id} 값이 낮을수록 큰 비중으로",
+  "strategy.field.portfolio_step.rebalance.value.weekly.summary": "매주",
+  "strategy.field.portfolio_step.rebalance.value.monthly.summary": "매월",
+  "strategy.field.portfolio_step.rebalance.value.quarterly.summary": "분기마다",
+  "strategy.contract.portfolio.rebalance_every_n_sessions.summary":
+    "{rebalance_every_n_sessions}거래일마다",
+  "strategy.contract.portfolio.selection_count.summary":
+    "상위 {selection_count}종목을",
+  "strategy.contract.portfolio.selection_percentile.summary":
+    "상위 {selection_percentile}를",
+  "strategy.contract.risk.max_name_weight.summary": "종목당 최대 {max_name_weight}",
+  "strategy.contract.risk.max_sector_weight.summary":
+    "섹터당 최대 {max_sector_weight}",
   "run_environment.contract.participation_rate.description":
     "참여 기준 거래량 대비 주문이 한 세션에 차지할 수 있는 최대 비율입니다.",
   "run_environment.contract.fee_bps.description":
@@ -2818,6 +2878,73 @@ export const messages = {
       "Largest target weight a single name may take.",
     "strategy.contract.risk.max_sector_weight.description":
       "Largest target weight a single sector may take.",
+    // 그래프 1수준(파이프라인) 단계 이름과 한 문장 요약(P4-01, 리드 결정 2026-09-30). 조각 키는 backend
+    // 설명 키 아래 `.summary`(enum 은 값 이름 키 아래)이고 `{<키>}` 자리에 같은 카드 필드의 값이 들어간다
+    // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다.
+    "strategy.stage.eligibility": "Universe",
+    "strategy.stage.eligibility.description": "Which stocks are candidates.",
+    "strategy.stage.signal": "Alpha",
+    "strategy.stage.signal.description": "How candidates are scored.",
+    "strategy.stage.portfolio": "Portfolio",
+    "strategy.stage.portfolio.description":
+      "How many stocks to hold, at what weights, and how often to pick again.",
+    "strategy.stage.risk": "Risk",
+    "strategy.stage.risk.description":
+      "Limits that keep weight from piling into one stock or sector.",
+    "strategy.summary.stage.eligibility": "among stocks with {parts}",
+    "strategy.summary.stage.signal": "{parts}",
+    "strategy.summary.stage.portfolio": "{parts}",
+    "strategy.summary.stage.risk": "within limits of {parts}",
+    "strategy.summary.sentence": "Pick and hold {stages}.",
+    "strategy.field.eligibility_rule.operator.value.gt.summary":
+      "{field_id} above {value}",
+    "strategy.field.eligibility_rule.operator.value.gte.summary":
+      "{field_id} at least {value}",
+    "strategy.field.eligibility_rule.operator.value.lt.summary":
+      "{field_id} below {value}",
+    "strategy.field.eligibility_rule.operator.value.lte.summary":
+      "{field_id} at most {value}",
+    "strategy.field.eligibility_rule.operator.value.eq.summary":
+      "{field_id} equal to {value}",
+    "strategy.field.eligibility_rule.operator.value.top_percent.summary":
+      "{field_id} in the top {value.percent}",
+    "strategy.field.eligibility_rule.operator.value.top_count.summary":
+      "{field_id} in the top {value}",
+    "strategy.contract.portfolio.minimum_liquidity.summary":
+      "{liquidity_field_id} at least {minimum_liquidity}",
+    "strategy.section.factors.summary": "ranked by the {items} score",
+    "strategy.field.factor_signal.label.summary": "{label}",
+    "strategy.field.factor_signal.weight.summary": "(weight {weight})",
+    "strategy.field.signal_step.score_threshold.summary":
+      "only scores of at least {score_threshold}",
+    "strategy.field.signal_step.regime_minimum.summary":
+      "buying only while {regime_field_id} is at least {regime_minimum}",
+    "strategy.field.portfolio_step.side.value.long_short.summary":
+      "shorting the bottom stocks",
+    "strategy.field.portfolio_step.weighting.value.equal.summary":
+      "at equal weight",
+    "strategy.field.portfolio_step.weighting.value.factor_score.summary":
+      "weighted by score margin",
+    "strategy.field.portfolio_step.weighting.value.rank.summary":
+      "weighted by rank",
+    "strategy.field.risk_step.risk_field_id.summary":
+      "weighted inversely to {risk_field_id}",
+    "strategy.field.risk_step.risk_factor_id.summary":
+      "weighted inversely to {risk_factor_id}",
+    "strategy.field.portfolio_step.rebalance.value.weekly.summary": "weekly",
+    "strategy.field.portfolio_step.rebalance.value.monthly.summary": "monthly",
+    "strategy.field.portfolio_step.rebalance.value.quarterly.summary":
+      "quarterly",
+    "strategy.contract.portfolio.rebalance_every_n_sessions.summary":
+      "every {rebalance_every_n_sessions} sessions",
+    "strategy.contract.portfolio.selection_count.summary":
+      "the top {selection_count} stocks",
+    "strategy.contract.portfolio.selection_percentile.summary":
+      "the top {selection_percentile}",
+    "strategy.contract.risk.max_name_weight.summary":
+      "at most {max_name_weight} per stock",
+    "strategy.contract.risk.max_sector_weight.summary":
+      "at most {max_sector_weight} per sector",
     "run_environment.contract.participation_rate.description":
       "Largest share of the participation-basis volume an order may take in one session.",
     "run_environment.contract.fee_bps.description":

@@ -1,0 +1,246 @@
+/**
+ * 그래프 1수준(파이프라인) 투영(WORKFLOW P4-01): 입력은 backend runtime schema fixture 와 `ideas/*.yaml` 뿐이다.
+ * 단계·카드 묶음·요약 문장이 스키마 마커(`x-stage`·`x-applied-stage`·`x-applicable-when`)와 i18n 조각에서
+ * 나오는지 본다.
+ */
+import { describe, expect, it } from "vitest";
+
+import { tDescription, tName, tOptional } from "../../../shared/config";
+import { parseSource } from "../../../shared/lib/yaml12";
+import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
+import type { DocumentDiagnostic } from "../model/document-state";
+import { projectForm } from "../model/form-projection";
+import {
+  projectPipeline,
+  strategySummary,
+  type PipelineProjection,
+} from "../model/pipeline-projection";
+import type { JsonSchema } from "../model/schema-navigator";
+
+const SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/runtime-schema.json"),
+) as JsonSchema;
+const EMPTY = parseSource('schema_version: "1.2"\ntitle: ""\n', "yaml");
+const idea = (name: string) =>
+  parseSource(
+    readBackendFixture(`strategy_documents/ideas/${name}.yaml`),
+    "yaml",
+  );
+
+/** 데이터셋 카탈로그가 주는 필드 이름(`DatasetFieldProfile.label`) 자리. */
+const FIELD_NAMES: Record<string, string> = {
+  "price.adj_close": "수정 종가",
+  "price.trading_value": "거래대금",
+  "financial.book_equity": "자본총계",
+};
+const fieldNames = (_catalog: string, value: string) =>
+  FIELD_NAMES[value] ?? null;
+
+const diagnostic = (code: string, pointer: string): DocumentDiagnostic => ({
+  code,
+  kind: "semantic",
+  severity: "warning",
+  pointer,
+  message: code,
+  range: null,
+});
+
+/** 단계 → 목록 pointer 와 카드마다 행 pointer. */
+const layout = (pipeline: PipelineProjection) =>
+  pipeline.stages.map((stage) => ({
+    stage: stage.stage,
+    lists: stage.lists.map((list) => list.pointer),
+    cards: stage.cards.map((card) => card.rows.map((row) => row.field.pointer)),
+  }));
+
+describe("projectPipeline", () => {
+  it("단계는 스키마 x-stage·x-applied-stage 이고 카드는 같은 단계 안의 적용 조건이 묶는다", () => {
+    // 유동성 필터는 1단계, 역가중 원천은 3단계 비중 카드(리드 결정 2026-09-30). 섹터 중립의 조건
+    // (`portfolio.side`)은 다른 단계라 자기 카드다.
+    expect(layout(projectPipeline(SCHEMA, EMPTY, []))).toEqual([
+      {
+        stage: "eligibility",
+        lists: ["/eligibility/rules"],
+        cards: [
+          ["/portfolio/liquidity_field_id", "/portfolio/minimum_liquidity"],
+        ],
+      },
+      {
+        stage: "signal",
+        lists: ["/factors"],
+        cards: [
+          ["/signal/normalization"],
+          ["/signal/score_threshold"],
+          ["/signal/regime_field_id", "/signal/regime_minimum"],
+        ],
+      },
+      {
+        stage: "portfolio",
+        lists: [],
+        cards: [
+          ["/portfolio/side", "/portfolio/short_selection_count"],
+          [
+            "/portfolio/weighting",
+            "/risk/risk_field_id",
+            "/risk/risk_factor_id",
+          ],
+          ["/portfolio/rebalance", "/portfolio/rebalance_every_n_sessions"],
+          [
+            "/portfolio/selection_method",
+            "/portfolio/selection_count",
+            "/portfolio/selection_percentile",
+          ],
+          ["/portfolio/turnover_buffer_count"],
+          ["/portfolio/minimum_trade_weight"],
+        ],
+      },
+      {
+        stage: "risk",
+        lists: [],
+        cards: [
+          ["/risk/gross_exposure"],
+          ["/risk/net_exposure"],
+          ["/risk/max_name_weight"],
+          ["/risk/max_sector_weight"],
+          ["/risk/sector_neutral"],
+        ],
+      },
+    ]);
+  });
+
+  it("Form 행을 잃거나 겹치지 않고, 행은 미작성 필드를 열 자기 섹션을 가진다", () => {
+    const source = readBackendFixture(
+      "strategy_documents/quality_momentum.yaml",
+    );
+    const parse = parseSource(source, "yaml");
+    const pipeline = projectPipeline(SCHEMA, parse, []);
+    const formPointers = projectForm(SCHEMA, parse, []).sections.flatMap(
+      (section) =>
+        section.kind === "list"
+          ? [section.pointer]
+          : [
+              ...section.fields.map((field) => field.pointer),
+              ...section.lists.map((list) => list.pointer),
+            ],
+    );
+    const placed = [
+      ...pipeline.stages.flatMap((stage) => [
+        ...stage.cards.flatMap((card) =>
+          card.rows.map((row) => row.field.pointer),
+        ),
+        ...stage.lists.map((list) => list.pointer),
+      ]),
+      ...pipeline.unstaged.flatMap((section) =>
+        section.kind === "list"
+          ? [section.pointer]
+          : section.fields.map((field) => field.pointer),
+      ),
+    ];
+    expect([...placed].sort()).toEqual([...formPointers].sort());
+
+    const rows = pipeline.stages.flatMap((stage) =>
+      stage.cards.flatMap((card) => card.rows),
+    );
+    const sectionOf = (pointer: string) =>
+      rows.find((row) => row.field.pointer === pointer)?.section.pointer;
+    expect(sectionOf("/risk/risk_factor_id")).toBe("/risk");
+    expect(sectionOf("/portfolio/minimum_liquidity")).toBe("/portfolio");
+  });
+
+  it("단계가 없는 섹션과 진단은 제자리에 둔다", () => {
+    const pipeline = projectPipeline(SCHEMA, EMPTY, [
+      diagnostic("strategy.document", ""),
+      diagnostic("strategy.portfolio.section", "/portfolio"),
+      diagnostic("strategy.risk.risk_field", "/risk/risk_field_id"),
+    ]);
+    expect(
+      pipeline.unstaged.map((section) =>
+        section.kind === "list"
+          ? section.pointer
+          : section.fields.map((field) => field.pointer),
+      ),
+    ).toEqual([["/schema_version", "/title", "/description"], "/parameters"]);
+    expect(pipeline.unstaged[0]!.diagnostics.map((item) => item.code)).toEqual([
+      "strategy.document",
+    ]);
+    const portfolio = pipeline.stages.find(
+      (stage) => stage.stage === "portfolio",
+    )!;
+    expect(portfolio.diagnostics.map((item) => item.code)).toEqual([
+      "strategy.portfolio.section",
+    ]);
+    // 다른 섹션의 행도 자기 진단을 들고 카드에 붙는다.
+    expect(
+      portfolio.cards[1]!.rows[1]!.field.diagnostics.map((item) => item.code),
+    ).toEqual(["strategy.risk.risk_field"]);
+  });
+
+  it("스키마가 말하는 단계마다 이름·설명·요약 틀이 있다", () => {
+    const stages = projectPipeline(SCHEMA, EMPTY, []).stages.map(
+      (stage) => stage.stage,
+    );
+    const missing = stages.filter(
+      (stage) =>
+        tName(`strategy.stage.${stage}`) === null ||
+        tDescription(`strategy.stage.${stage}`) === null ||
+        tOptional(`strategy.summary.stage.${stage}`) === null,
+    );
+    expect(stages.length).toBeGreaterThan(0);
+    expect(missing).toEqual([]);
+  });
+});
+
+describe("strategySummary", () => {
+  const summary = (
+    parse: ReturnType<typeof parseSource>,
+    diagnostics: DocumentDiagnostic[] = [],
+  ) => strategySummary(projectPipeline(SCHEMA, parse, diagnostics), fieldNames);
+
+  it("아이디어 문서를 단계 순서의 한 문장으로 요약한다(백분율 몫 없음)", () => {
+    expect(summary(idea("momentum_12_1"))).toBe(
+      "12-1 모멘텀 점수가 높은 순으로, 같은 비중으로, 매월, 상위 20종목을, 종목당 최대 5%, 섹터당 최대 30% 한도 안에서 골라 보유한다.",
+    );
+    expect(summary(idea("low_pbr_high_roe"))).toBe(
+      "자본총계 0 초과인 종목 중에서, PBR, ROE 점수가 높은 순으로, 같은 비중으로, 매월, 상위 20종목을, 종목당 최대 5%, 섹터당 최대 30% 한도 안에서 골라 보유한다.",
+    );
+    expect(summary(idea("top_trading_value"))).toBe(
+      "거래대금 상위 20%인 종목 중에서, 60일 모멘텀 점수가 높은 순으로, 같은 비중으로, 매월, 상위 20종목을, 종목당 최대 5%, 섹터당 최대 30% 한도 안에서 골라 보유한다.",
+    );
+  });
+
+  it("역가중 원천 팩터는 backend 진단으로 알고 알파 목록 대신 비중 조각에 둔다", () => {
+    expect(
+      summary(idea("inverse_volatility"), [
+        diagnostic(
+          "strategy.risk.risk_factor_excluded",
+          "/risk/risk_factor_id",
+        ),
+      ]),
+    ).toBe(
+      "12-1 모멘텀 점수가 높은 순으로, 60일 변동성 값이 낮을수록 큰 비중으로, 매월, 상위 20종목을, 종목당 최대 10%, 섹터당 최대 30% 한도 안에서 골라 보유한다.",
+    );
+  });
+
+  it("가중치는 서로 다를 때만, 적용 조건이 붙은 필드는 적용될 때만 보인다", () => {
+    const source = [
+      'schema_version: "1.2"',
+      "title: 변형",
+      "factors:",
+      "  - { factor_id: momentum, label: 모멘텀, direction: high, weight: 0.6, graph: { nodes: [], output_node_id: '' } }",
+      "  - { factor_id: value, label: 가치, direction: low, weight: 0.4, graph: { nodes: [], output_node_id: '' } }",
+      "portfolio:",
+      "  side: long_short",
+      "  weighting: factor_score",
+      "  rebalance: every_n_sessions",
+      "  rebalance_every_n_sessions: 5",
+      "  selection_method: percentile",
+      "  selection_percentile: 0.1",
+      "  liquidity_field_id: price.trading_value",
+      "  minimum_liquidity: 1000000000",
+      "",
+    ].join("\n");
+    expect(summary(parseSource(source, "yaml"))).toBe(
+      "거래대금 1000000000 이상인 종목 중에서, 모멘텀 (가중치 0.6), 가치 (가중치 0.4) 점수가 높은 순으로, 하위 종목은 공매도하고, 점수 차이에 비례한 비중으로, 5거래일마다, 상위 10%를, 종목당 최대 10%, 섹터당 최대 30% 한도 안에서 골라 보유한다.",
+    );
+  });
+});

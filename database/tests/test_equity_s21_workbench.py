@@ -4,7 +4,7 @@
 체인 **26테이블 + `dataset_profile`**(S19 테스트와 같은 순서 — 워크벤치가 읽는 20테이블에
 `index_daily`·`ownership_snapshot`·`audit_opinion`·`shares_outstanding`·`treasury_stock`·
 `opinion_broker_daily` 를 더한 것은 S19 `dataset_profile` 이 전 원천의 커버율을 재기 때문이다) +
-`catalog.publish`(매크로 8)를 스크래치에 짓고, 같은 모노레포의
+`catalog.publish`(매크로 9)를 스크래치에 짓고, 같은 모노레포의
 `backend/src`(`contract.default_engine_src()`) 에서 워크벤치 어댑터를 import 한다 —
 numpy·pyarrow·duckdb 가 필요하다(`uv run --with duckdb --with pyarrow --with numpy`;
 컨테이너·백테스트 2건은 ruamel.yaml 까지 — `uv run --project backend pytest …`).

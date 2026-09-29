@@ -50,6 +50,8 @@ const result = (): BacktestRunResult => ({
       participation_basis: "adv20",
       fee_bps: 7,
       slippage_bps: 3,
+      impact_model: "sqrt",
+      impact_coefficient: 0.8,
       sell_tax: "krx_statutory",
       sell_tax_bps: null,
       missing: "zero",
@@ -106,6 +108,8 @@ describe("run 상세의 실행 설정", () => {
       "참여 기준",
       "수수료 (bp)",
       "슬리피지 (bp)",
+      "가격 충격 모델",
+      "가격 충격 계수",
       "매도 거래세",
       "매도 거래세율 (bp)",
       "결측 처리",
@@ -120,6 +124,8 @@ describe("run 상세의 실행 설정", () => {
     expect(row("참여율 (%)")).toHaveTextContent("20%");
     expect(row("참여 기준")).toHaveTextContent("20일 평균 거래대금");
     expect(row("수수료 (bp)")).toHaveTextContent("7bp");
+    expect(row("가격 충격 모델")).toHaveTextContent("√ 가격 충격(변동성·거래량 비례)");
+    expect(row("가격 충격 계수")).toHaveTextContent("0.8");
     expect(row("매도 거래세")).toHaveTextContent("법정 세율(날짜별)");
     expect(row("매도 거래세율 (bp)")).toHaveTextContent("—");
     expect(row("결측 처리")).toHaveTextContent("0으로 채우기");

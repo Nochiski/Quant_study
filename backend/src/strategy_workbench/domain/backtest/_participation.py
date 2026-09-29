@@ -41,6 +41,16 @@ def participation_volumes(
     """
     if environment.participation_basis is ParticipationBasis.SESSION_VOLUME:
         return None
+    return adv_shares(bars)
+
+
+def adv_shares(
+    bars: Iterable[tuple[date, str, float, float | None]],
+) -> dict[tuple[date, str], int]:
+    """`(세션, 종목, 종가, 거래대금)` 행마다 판단일까지 20행 평균 거래대금 ÷ 판단일 종가(주, 내림).
+
+    참여 기준 `adv20` 과 √ 충격(`_impact.py`)이 같은 ADV 를 쓴다. 앞선 행이 없으면 0주다.
+    """
     volumes: dict[tuple[date, str], int] = {}
     values: dict[str, deque[float]] = {}
     last_close: dict[str, float] = {}

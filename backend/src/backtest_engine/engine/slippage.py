@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -61,3 +62,17 @@ class VolumeShareSlippage:
         else:
             share = min(float(quantity) / bar.volume, self.volume_limit)
         return share * share * self.price_impact * base_price
+
+
+@dataclass(frozen=True)
+class SqrtImpactSlippage:
+    """√ 시장충격: 체결 가격 × `bar.impact_scale` × √수량.
+
+    척도(k × σ일 / √ADV)는 데이터 쪽이 bar 마다 정한다 — 이 모델은 σ·ADV 를 모른다. 척도가 없는
+    bar 는 충격 0 이다.
+    """
+
+    def slippage_per_share(
+        self, order: OrderEvent, bar: Bar, base_price: float, quantity: Decimal
+    ) -> float:
+        return base_price * (bar.impact_scale or 0.0) * math.sqrt(quantity)

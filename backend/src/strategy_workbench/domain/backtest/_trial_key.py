@@ -54,6 +54,8 @@ TRIAL_KEY_ROLES: dict[str, TrialKeyRole] = {
     "participation_basis": TrialKeyRole.KEY,
     "fee_bps": TrialKeyRole.LOWER_IS_FAVORABLE,
     "slippage_bps": TrialKeyRole.LOWER_IS_FAVORABLE,
+    "impact_model": TrialKeyRole.KEY,
+    "impact_coefficient": TrialKeyRole.LOWER_IS_FAVORABLE,
     "sell_tax": TrialKeyRole.KEY,
     # `custom` 일 때만 값이 있고 스키마 기본값이 없다(null). 기준은 법정 세율표 최대값이다
     # (`_baseline`).

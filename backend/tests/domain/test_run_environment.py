@@ -1,9 +1,11 @@
-"""P2-01·P2-03·V1-01·V2-01·V2-02(검증 랩): 실행 설정(`RunEnvironment`) 값 타입·canonical hash·
-필수 규칙·연구 구간 잠금·런타임 스키마·매도 거래세·참여 기준."""
+"""P2-01·P2-03·V1-01·V2-01·V2-02·V2-03(검증 랩): 실행 설정(`RunEnvironment`) 값 타입·canonical
+hash·필수 규칙·연구 구간 잠금·런타임 스키마·매도 거래세·참여 기준·√ 시장충격."""
 
 from __future__ import annotations
 
 import json
+import math
+import statistics
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
@@ -16,14 +18,16 @@ from strategy_workbench.domain.backtest.facade.environment import (
     STATUTORY_SELL_TAX_BPS,
     DataFrequency,
     ExecutionTiming,
+    ImpactModel,
     Market,
     MissingRunEnvironmentError,
     ParticipationBasis,
     ResearchWindowViolationError,
     RunEnvironment,
     SellTax,
+    cost_history_sessions,
     environment_hash,
-    participation_history_sessions,
+    impact_scales,
     participation_volumes,
     require_environment,
     run_environment_canonical_json,
@@ -47,6 +51,10 @@ def test_defaults_match_the_design_contract() -> None:
     assert environment.frequency is DataFrequency.DAILY
     assert environment.timing is ExecutionTiming.NEXT_OPEN
     assert environment.missing is MissingPolicy.DROP
+    assert (environment.impact_model, environment.impact_coefficient) == (
+        ImpactModel.FIXED_BPS,
+        1.0,
+    )
     assert (
         environment.participation_rate,
         environment.fee_bps,
@@ -62,7 +70,7 @@ def test_canonical_json_is_sorted_and_compact() -> None:
 
 
 def test_environment_hash_splits_on_every_variable_field() -> None:
-    """`market`·`frequency`·`timing` 은 값이 하나뿐이라 변주할 수 없다. 나머지 10 필드를 덮는다."""
+    """`market`·`frequency`·`timing` 은 값이 하나뿐이라 변주할 수 없다. 나머지 12 필드를 덮는다."""
     base = _environment()
     variants = (
         replace(base, start=date(2019, 1, 1)),
@@ -72,6 +80,8 @@ def test_environment_hash_splits_on_every_variable_field() -> None:
         replace(base, slippage_bps=0.0),
         replace(base, participation_rate=1.0),
         replace(base, participation_basis=ParticipationBasis.ADV20),
+        replace(base, impact_model=ImpactModel.SQRT),
+        replace(base, impact_coefficient=0.5),
         replace(base, missing=MissingPolicy.ZERO),
         replace(base, sell_tax=SellTax.NONE),
         replace(base, sell_tax=SellTax.CUSTOM, sell_tax_bps=20.0),
@@ -107,6 +117,7 @@ def test_environment_hash_ignores_int_versus_float_notation() -> None:
         ("participation_rate", 0.0),
         ("fee_bps", -1.0),
         ("slippage_bps", -0.5),
+        ("impact_coefficient", -0.1),
         ("universe_id", "   "),
     ],
 )
@@ -134,6 +145,7 @@ def test_constraint_rows_point_at_the_run_environment_document() -> None:
         "participation_rate": "/participation_rate",
         "fee_bps": "/fee_bps",
         "slippage_bps": "/slippage_bps",
+        "impact_coefficient": "/impact_coefficient",
         "sell_tax_bps": "/sell_tax_bps",
     }
     # 진단 코드는 `strategy.*` validator 레지스트리 밖이다.
@@ -229,6 +241,8 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
         "participation_basis",
         "fee_bps",
         "slippage_bps",
+        "impact_model",
+        "impact_coefficient",
         "sell_tax",
         "sell_tax_bps",
         "missing",
@@ -242,6 +256,10 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
     assert properties["sell_tax_bps"]["minimum"] == 0.0
     assert properties["participation_basis"]["enum"] == ["session_volume", "adv20"]
     assert properties["participation_basis"]["default"] == "session_volume"
+    assert properties["impact_model"]["enum"] == ["fixed_bps", "sqrt"]
+    assert properties["impact_model"]["default"] == "fixed_bps"
+    assert properties["impact_coefficient"]["default"] == 1.0
+    assert properties["impact_coefficient"]["minimum"] == 0.0
     assert properties["fee_bps"]["type"] == "number"
     assert properties["fee_bps"]["default"] == 15.0
     assert properties["start"]["format"] == "date"
@@ -336,7 +354,7 @@ def test_session_volume_basis_leaves_the_engine_on_session_volume() -> None:
     environment = _environment()
 
     assert environment.participation_basis is ParticipationBasis.SESSION_VOLUME
-    assert participation_history_sessions(environment) == 0
+    assert cost_history_sessions(environment) == 0
     assert participation_volumes(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)]) is None
 
 
@@ -382,6 +400,87 @@ def test_adv20_averages_only_the_last_twenty_rows_including_warmup() -> None:
 
     volumes = participation_volumes(environment, rows)
 
-    assert participation_history_sessions(environment) == 20
+    assert cost_history_sessions(environment) == 20
     assert volumes is not None
     assert (volumes[(sessions[20], "A")], volumes[(sessions[21], "A")]) == (105, 115)
+
+
+def test_fixed_bps_impact_leaves_the_engine_on_fixed_slippage() -> None:
+    """기본값(`fixed_bps`)은 충격 척도를 넘기지 않고 워밍업도 늘리지 않는다 — 기존 실행 그대로다."""
+    environment = _environment()
+
+    assert environment.impact_model is ImpactModel.FIXED_BPS
+    assert cost_history_sessions(environment) == 0
+    assert impact_scales(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)], set()) is None
+
+
+def test_sqrt_scale_is_k_times_prior_return_stdev_over_root_adv() -> None:
+    """척도 = k × σ일 / √ADV. σ·ADV 모두 판단일(직전 행)까지만 본다.
+
+    k = 0.5, A 의 종가 100 → 110 → 99 → 99 → 1, 거래대금 1,000 → 1,000 → 3,000 → 1 → 1.
+    - 1/2·1/3·1/4: 앞선 수익률이 2개 미만이라 0.
+    - 1/5: 수익률 +10%·−10%, 표본 표준편차 √0.02, ADV (1,000 + 1,000 + 3,000) / 3 ÷ 99 = 16주.
+      척도 0.5 × √0.02 / 4.
+    - 1/8: 수익률 +10%·−10%·0%, 표본 표준편차 0.1, ADV 5,001 / 4 ÷ 99 = 12주. 척도 0.5 × 0.1 / √12.
+      체결 세션(1/8)의 종가 1 은 쓰지 않는다.
+    B 는 A 와 섞이지 않는다(수익률이 없어 0).
+    """
+    rows = [
+        (date(2024, 1, 2), "A", 100.0, 1_000.0),
+        (date(2024, 1, 2), "B", 50.0, 9_999.0),
+        (date(2024, 1, 3), "A", 110.0, 1_000.0),
+        (date(2024, 1, 4), "A", 99.0, 3_000.0),
+        (date(2024, 1, 5), "A", 99.0, 1.0),
+        (date(2024, 1, 8), "A", 1.0, 1.0),
+    ]
+    environment = replace(_environment(), impact_model=ImpactModel.SQRT, impact_coefficient=0.5)
+
+    scales = impact_scales(environment, reversed(rows), set())
+
+    assert scales is not None
+    assert {key: scale for key, scale in scales.items() if key[0] < date(2024, 1, 5)} == {
+        (date(2024, 1, 2), "A"): 0.0,
+        (date(2024, 1, 2), "B"): 0.0,
+        (date(2024, 1, 3), "A"): 0.0,
+        (date(2024, 1, 4), "A"): 0.0,
+    }
+    assert scales[(date(2024, 1, 5), "A")] == pytest.approx(0.5 * math.sqrt(0.02) / 4)
+    assert scales[(date(2024, 1, 8), "A")] == pytest.approx(0.5 * 0.1 / math.sqrt(12))
+
+
+def test_sqrt_volatility_uses_the_last_twenty_returns_and_skips_corporate_action_sessions() -> None:
+    """σ 창은 수익률 20개다. 종가 100 → 200(분할 전 원주가 점프) 뒤 ±1% 가 번갈아 오는 행 23개.
+
+    - 23번째 행(판단일 22번째): 창은 수익률 2..21번째 20개. 첫 수익률(+100%)이 빠져 σ 가 ±1% 만의
+      표본 표준편차다 — 창이 20보다 길면 +100% 가 남아 σ 가 수십 배 커진다.
+    - 분할 세션을 자본변동으로 넘기면 +100% 는 처음부터 창에 들어가지 않는다 — 3번째 행 척도가
+      ±1% 두 개만 본 값이다.
+    """
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(23)]
+    closes = [100.0, 200.0]
+    for index in range(21):
+        closes.append(closes[-1] * (1.01 if index % 2 == 0 else 0.99))
+    rows = [
+        (session, "A", close, 1_000_000.0) for session, close in zip(sessions, closes, strict=True)
+    ]
+    environment = replace(_environment(), impact_model=ImpactModel.SQRT)
+
+    plain = impact_scales(environment, rows, set())
+    adjusted = impact_scales(environment, rows, {(sessions[1], "A")})
+
+    assert cost_history_sessions(environment) == 21
+    assert plain is not None and adjusted is not None
+
+    def expected(index: int, first_return: int) -> float:
+        returns = [closes[i] / closes[i - 1] - 1 for i in range(first_return, index)]
+        adv = math.floor(
+            sum(value for *_, value in rows[max(index - 20, 0) : index])
+            / min(index, 20)
+            / closes[index - 1]
+        )
+        return statistics.stdev(returns) / math.sqrt(adv)
+
+    assert plain[(sessions[22], "A")] == pytest.approx(expected(22, 2))
+    assert plain[(sessions[3], "A")] == pytest.approx(expected(3, 1))
+    assert adjusted[(sessions[4], "A")] == pytest.approx(expected(4, 2))
+    assert plain[(sessions[4], "A")] > 10 * adjusted[(sessions[4], "A")]

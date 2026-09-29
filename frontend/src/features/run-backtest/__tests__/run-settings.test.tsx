@@ -134,6 +134,8 @@ const ENVIRONMENT: RunEnvironment = {
   participation_basis: "session_volume",
   fee_bps: 15,
   slippage_bps: 10,
+  impact_model: "fixed_bps",
+  impact_coefficient: 1,
   sell_tax: "krx_statutory",
   missing: "drop",
 };

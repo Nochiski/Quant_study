@@ -235,6 +235,7 @@ mod tests {
                 vec![101.0, 101.0, 101.0, 101.0],
                 vec![1_000, 1_000, 1_000, 1_000],
                 None,
+                None,
             )
             .unwrap();
         runtime.configure_router(

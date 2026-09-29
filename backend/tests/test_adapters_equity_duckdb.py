@@ -1033,6 +1033,25 @@ def test_backtest_dataset_drops_reference_rows_and_carries_ok_actions_only(
     assert [w.code for w in dataset.warnings] == ["equity.reference_rows_dropped"]
 
 
+def test_backtest_dataset_answers_warmup_actions_apart_from_engine_actions(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """√ 충격 σ(검증 랩 V2-03)는 워밍업 구간 분할 날의 원주가 수익률을 빼야 한다. 워밍업 세션의
+    사건은 엔진이 적용하는 `corporate_actions` 가 아니라 `history_corporate_actions` 로 답한다 —
+    엔진 쪽에 섞이면 bar 없는 세션의 사건으로 run 이 죽는다."""
+    start = WB_SESSIONS[WB_SESSIONS.index(WB_SPLIT_DATE) + 1]
+    query = BacktestDataQuery(start, END, ("000660:1",), None)
+
+    plain = adapter.load_backtest_dataset(query)
+    warmed = adapter.load_backtest_dataset(replace(query, history_sessions_before_start=3))
+
+    assert plain.history_corporate_actions == ()
+    assert warmed.corporate_actions == plain.corporate_actions
+    assert [(a.session, a.action_type) for a in warmed.history_corporate_actions] == [
+        (WB_SPLIT_DATE, "split")
+    ]
+
+
 def test_backtest_dataset_drops_actions_after_the_last_bar_with_a_warning(
     tmp_path: Path,
 ) -> None:

@@ -656,6 +656,7 @@ class BacktestEngine:
             columns.closes,
             columns.volumes,
             columns.liquidity_volumes,
+            columns.impact_scales,
         )
         return instruments
 
@@ -796,6 +797,7 @@ class BacktestEngine:
                 bar.low,
                 bar.volume,
                 bar.cap_volume,
+                bar.impact_scale or 0.0,
             )
             for bar in snapshot.bars
         }

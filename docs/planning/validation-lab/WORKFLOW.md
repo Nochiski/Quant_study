@@ -333,6 +333,11 @@ Dependency 칸이 정본이다.
   `ExperimentTrialState` 에 `retryable`·`selectable` 을 싣는다.
 - V5-01 인계(V3-04, #346 리뷰 P3-4): US-SM-11(같은 계산이 겹쳐 돌지 않는다)의 스토리 e2e 를 V3-04 의 trial
   붙잡기 훅으로 붙인다(붙잡힌 trial 을 사용자가 이어 같은 실행 ID 로 가고, 취소해도 실험이 쓰는 동안 돈다).
+- V5-01 인계(V3-04 2/2, #348 리뷰 P3-6): (1) playwright 서버 환경에 `STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS`
+  를 켜 도는 trial 을 붙잡는다(켜지면 기동 경고 로그). (2) 진행 스트림(`/experiments/{id}/events`)은 실험이
+  끝나고 도는·대기 trial 이 없을 때 최종 수를 보낸 뒤 닫힌다 — 화면은 닫힌 스트림을 끝으로 본다.
+  (3) US-SM-15 의 "동시 실행 슬롯 사용량"은 V5-01 에서 기존 응답(실험 목록)에 최소 칸 하나(예: 슬롯 수·도는
+  run 수)를 더해 보인다 — 화면이 trial 수로 추정하지 않는다.
 
 ## 9. Phase 6 — 홀드아웃 개봉
 

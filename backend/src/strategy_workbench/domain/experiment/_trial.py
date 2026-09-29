@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from strategy_workbench.domain.backtest.facade.runs import RunStatus
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunState, RunStatus
 
 # 실험 우선순위의 상한. 대기열이 실험끼리 번갈아 배정할 때 한 차례에 꺼내는 run 수(가중치)다.
 MAX_EXPERIMENT_PRIORITY = 5
@@ -91,14 +91,27 @@ def trial_status(
     return _RUN_TRIAL_STATUSES[latest_run]
 
 
+def awaiting_recovery(latest_run: BacktestRunState | None) -> bool:
+    """최신 실행이 재시작으로 중단됐다 — 복구가 새 attempt 를 넘길 때까지 실험은 끝나지
+    않는다(spec D6).
+
+    trial 자체는 실패로 보이고(재시도할 수 있다) 실행의 오류 코드가 중단을 말한다.
+    """
+    return (
+        latest_run is not None
+        and latest_run.status is RunStatus.FAILED
+        and latest_run.error_code == "backtest.run.interrupted"
+    )
+
+
 def experiment_status(
-    trials: Sequence[TrialStatus], *, cancelled: bool, paused: bool
+    trials: Sequence[TrialStatus], *, cancelled: bool, paused: bool, recovering: bool
 ) -> ExperimentStatus:
-    """취소한 실험은 취소, trial 이 모두 끝났으면 완료, 일시정지했으면 일시정지, 하나도 시작하지
-    않았으면 대기다."""
+    """취소한 실험은 취소, trial 이 모두 끝났고 복구를 기다리는 trial 이 없으면 완료, 일시정지했으면
+    일시정지, 하나도 시작하지 않았으면 대기다."""
     if cancelled:
         return ExperimentStatus.CANCELLED
-    if all(status.is_terminal for status in trials):
+    if all(status.is_terminal for status in trials) and not recovering:
         return ExperimentStatus.COMPLETED
     if paused:
         return ExperimentStatus.PAUSED

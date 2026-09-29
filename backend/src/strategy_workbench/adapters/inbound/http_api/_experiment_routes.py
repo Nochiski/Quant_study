@@ -35,7 +35,6 @@ from strategy_workbench.domain.experiment.facade.design import (
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     MAX_EXPERIMENT_PRIORITY,
-    ExperimentControls,
     ExperimentStatus,
     TrialStatus,
 )
@@ -81,10 +80,11 @@ class ExperimentAdmissionErrorResponse:
 
 @dataclass(frozen=True)
 class ExperimentControlsRequest:
-    """일시정지·우선순위(1 = 보통). 범위 owner 는 domain `MAX_EXPERIMENT_PRIORITY` 다."""
+    """일시정지·우선순위(1 = 보통). 보내지 않은 칸은 그대로다. 범위 owner 는 domain
+    `MAX_EXPERIMENT_PRIORITY` 다."""
 
-    paused: bool
-    priority: Annotated[int, Field(ge=1, le=MAX_EXPERIMENT_PRIORITY)] = 1
+    paused: bool | None = None
+    priority: Annotated[int | None, Field(ge=1, le=MAX_EXPERIMENT_PRIORITY)] = None
 
 
 @dataclass(frozen=True)
@@ -199,14 +199,12 @@ def register_experiment_routes(
 
     def control_experiment(experiment_id: str, request: ExperimentControlsRequest) -> Experiment:
         """일시정지·재개·우선순위. 대기 trial 에만 적용하고 도는 trial 은 끝까지 돈다(spec D6)."""
-        return experiments.control(
-            experiment_id, ExperimentControls(request.paused, request.priority)
-        )
+        return experiments.control(experiment_id, paused=request.paused, priority=request.priority)
 
     app.router.add_api_route(
         "/api/v1/experiments/{experiment_id}/controls",
         control_experiment,
-        methods=["PUT"],
+        methods=["PATCH"],
         operation_id="controlExperiment",
         route_class_override=_ExperimentBodyRoute,
         responses={
@@ -222,7 +220,8 @@ def register_experiment_routes(
         responses={404: rejected[404], 200: {"content": {"text/event-stream": {}}}},
     )
     def stream_experiment_events(experiment_id: str) -> StreamingResponse:
-        """실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나면 닫는다."""
+        """실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나고 도는·대기 trial 이
+        없으면 마지막 수를 보낸 뒤 닫는다."""
         experiments.get(experiment_id)
         return StreamingResponse(
             _progress_stream(experiments, experiment_id),
@@ -288,7 +287,10 @@ async def _progress_stream(
         if progress != last:
             yield sse_frame(sequence=sequence, event="progress", data=progress)
             sequence, last, last_frame_at = sequence + 1, progress, time.monotonic()
-        if experiment.status.is_terminal:
+        # 취소한 실험도 도는 trial 이 끝날 때까지는 닫지 않아 마지막 프레임이 최종 수다.
+        if experiment.status.is_terminal and not (
+            progress.trial_counts.keys() & {TrialStatus.RUNNING, TrialStatus.QUEUED}
+        ):
             return
         if time.monotonic() - last_frame_at >= keepalive_seconds:
             yield SSE_KEEPALIVE_FRAME

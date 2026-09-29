@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
@@ -80,6 +81,8 @@ from ._assistant import (
     build_assistant_services,
 )
 from ._file_guard import restrict_to_current_user
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -181,6 +184,11 @@ def build_container(
     strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
     executor = BacktestEngineExecutorAdapter(metric_registry)
     hold = _TrialHold(executor, trial_hold_seconds) if trial_hold_seconds > 0 else None
+    if hold is not None:
+        logger.warning(
+            "e2e trial hold is on — experiment trial runs wait %.1fs before the engine stage",
+            trial_hold_seconds,
+        )
     backtest_runs = BacktestRunService(
         portfolio_design,
         strategy_repository,
@@ -284,7 +292,8 @@ class _TrialHold:
     """e2e 훅: 실험 trial run 을 엔진 단계 앞에서 `seconds` 동안 붙잡는다(취소하면 바로 풀린다).
 
     화면 e2e 가 도는 trial 을 다시 열고 실험을 일시정지하는 흐름을 재현하게 한다(spec D6). mock
-    실행은 1초 안에 끝나 붙잡지 않으면 볼 수 없다. 사용자 단일 실행은 붙잡지 않는다.
+    실행은 1초 안에 끝나 붙잡지 않으면 볼 수 없다. 사용자 단일 실행은 붙잡지 않지만, 실험 trial 이
+    이은 사용자 run 은 함께 붙잡힌다(e2e 전용 훅이라 받아들인다).
     """
 
     def __init__(self, executor: BacktestExecutorPort, seconds: float) -> None:

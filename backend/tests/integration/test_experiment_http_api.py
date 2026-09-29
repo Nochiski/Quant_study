@@ -183,8 +183,9 @@ def test_a_held_experiment_can_be_paused_streamed_and_cancelled() -> None:
     while "running" not in [trial["status"] for trial in client.get(f"{base}/trials").json()]:
         assert time.monotonic() < deadline, "no trial was held running"
         time.sleep(0.1)
-    paused = client.put(f"{base}/controls", json={"paused": True, "priority": 2})
-    refused = client.put(f"{base}/controls", json={"paused": False, "priority": 99})
+    prioritised = client.patch(f"{base}/controls", json={"priority": 2})
+    paused = client.patch(f"{base}/controls", json={"paused": True})
+    refused = client.patch(f"{base}/controls", json={"priority": 99})
     cancelled = client.post(f"{base}/cancel")
     with client.stream("GET", f"{base}/events") as stream:
         frames = [line for line in stream.iter_lines() if line.startswith("data:")]
@@ -200,5 +201,9 @@ def test_a_held_experiment_can_be_paused_streamed_and_cancelled() -> None:
     )
     assert cancelled.json()["status"] == "cancelled"
     # 끝난 실험의 스트림은 마지막 진행 한 번을 보내고 닫힌다.
-    assert [json.loads(frame[len("data:") :])["status"] for frame in frames] == ["cancelled"]
+    # 도는 trial 이 멈출 때까지 스트림은 열려 있고, 마지막 프레임이 최종 수다.
+    final = json.loads(frames[-1][len("data:") :])
+    assert final["status"] == "cancelled"
+    assert set(final["trial_counts"]) == {"cancelled"}
+    assert prioritised.json()["record"]["controls"] == {"paused": False, "priority": 2}
     assert (missing.status_code, missing.json()["detail"]["code"]) == (404, "experiment.not_found")

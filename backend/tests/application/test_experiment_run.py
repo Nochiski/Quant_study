@@ -6,6 +6,7 @@ trial 실행은 가짜 `TrialRunPort` 로 받는다 — 유스케이스가 실�
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable, Collection
 from dataclasses import replace
 from datetime import UTC, date, datetime
@@ -93,10 +94,15 @@ class _FakeRuns:
         self.owners: set[str] = set()
         self.schedules: list[tuple[str, bool, int]] = []
         self.error_codes: dict[str, RunFailureCode] = {}
+        # 다음 `admit` 앞에서 한 번 부른다(복구 제출과 겹치는 조작을 재현한다).
+        self.before_admit: Callable[[], None] | None = None
         self.ledger_entries: list[TrialLedgerEntry] = []
         self.reject = False
 
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
+        if self.before_admit is not None:
+            hook, self.before_admit = self.before_admit, None
+            hook()
         resolved = replace(
             request,
             strategy=_STRATEGY,
@@ -400,7 +406,8 @@ def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
     service = _service(runs, repository=SQLiteExperimentRepository(path))
     experiment_id = service.create(_request()).record.experiment_id
 
-    paused = service.control(experiment_id, ExperimentControls(paused=True, priority=3))
+    service.control(experiment_id, priority=3)
+    paused = service.control(experiment_id, paused=True)  # 보내지 않은 우선순위는 그대로다
     _service(runs, repository=SQLiteExperimentRepository(path)).recover()
 
     assert (paused.status, paused.trial_counts) == (
@@ -409,7 +416,11 @@ def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(
     )
     assert paused.record.controls == ExperimentControls(paused=True, priority=3)
     # 대기열에 알리고, 재시작하면 저장된 조작을 다시 알린다.
-    assert runs.schedules == [(experiment_id, True, 3), (experiment_id, True, 3)]
+    assert runs.schedules == [
+        (experiment_id, False, 3),
+        (experiment_id, True, 3),
+        (experiment_id, True, 3),
+    ]
 
 
 def test_recover_resubmits_unsubmitted_and_interrupted_trials_only(tmp_path: Path) -> None:
@@ -453,3 +464,85 @@ def test_recover_resubmits_unsubmitted_and_interrupted_trials_only(tmp_path: Pat
     assert [len(state.attempts) for state in after.trials(unsubmitted)] == [1, 1, 1, 1]
     assert [state.status for state in after.trials(cancelled)] == [TrialStatus.CANCELLED] * 4
     assert len(runs.started) == 4 + 4 + 2
+
+
+def _interrupted_restart(tmp_path: Path) -> tuple[_FakeRuns, Path, str]:
+    """trial 넷을 넘긴 뒤 재시작해 0·3 이 중단(interrupted)으로 닫힌 상태."""
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    experiment_id = (
+        _service(runs, repository=SQLiteExperimentRepository(path))
+        .create(_request())
+        .record.experiment_id
+    )
+    for run_id in ("run-0", "run-3"):
+        runs.run_statuses[run_id] = RunStatus.FAILED
+        runs.error_codes[run_id] = "backtest.run.interrupted"
+    runs.run_statuses["run-1"] = runs.run_statuses["run-2"] = RunStatus.COMPLETED
+    return runs, path, experiment_id
+
+
+def test_a_retry_while_recovery_submits_does_not_repeat_an_attempt(tmp_path: Path) -> None:
+    """#348 리뷰 P2-1: 복구가 남은 trial 을 고른 뒤 사용자가 재시도하면 그 trial 은 건너뛴다."""
+    runs, path, experiment_id = _interrupted_restart(tmp_path)
+    after = _service(runs, repository=SQLiteExperimentRepository(path))
+    runs.before_admit = lambda: after.retry(experiment_id, 0) and None
+
+    after.recover()
+
+    assert [len(state.attempts) for state in after.trials(experiment_id)] == [2, 1, 1, 2]
+    # 재시도 하나와 복구 하나 — 어떤 attempt 에도 걸리지 않은 run 이 없다.
+    assert len(runs.started) == 4 + 2
+    attempted = {a.run_id for s in after.trials(experiment_id) for a in s.attempts}
+    assert attempted == set(runs.run_statuses)
+
+
+def test_an_interrupted_experiment_is_not_completed_until_recovery_resubmits(
+    tmp_path: Path,
+) -> None:
+    """#348 리뷰 P3-2: 복구가 넘기기 전·복구 제출이 실패해도 완료로 보이지 않는다."""
+    runs, path, experiment_id = _interrupted_restart(tmp_path)
+    after = _service(runs, repository=SQLiteExperimentRepository(path))
+
+    def refused() -> None:
+        raise TrialRunRejectedError("backtest.strategy.requires_upgrade", "frozen revision")
+
+    runs.before_admit = refused
+    after.recover()  # 기반 검사가 거절돼 다시 넘기지 못한다
+    experiment = after.get(experiment_id)
+
+    assert experiment.status is ExperimentStatus.RUNNING
+    assert [state.awaiting_recovery for state in after.trials(experiment_id)] == [
+        True,
+        False,
+        False,
+        True,
+    ]
+    # 중단된 trial 은 실패로 보여 재시도할 수 있다(재시도는 막지 않는다).
+    retried = after.retry(experiment_id, 0)
+    assert (retried.status, experiment.trial_counts) == (
+        TrialStatus.QUEUED,
+        {TrialStatus.FAILED: 2, TrialStatus.COMPLETED: 2},
+    )
+
+
+def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path) -> None:
+    """#348 리뷰 P3-4: 판본 3 파일(조작 표 없음)을 열면 실험 행은 그대로이고 조작은 기본값이다."""
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    experiment_id = (
+        _service(runs, repository=SQLiteExperimentRepository(path))
+        .create(_request())
+        .record.experiment_id
+    )
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE experiment_controls")
+        connection.execute("PRAGMA user_version = 3")
+
+    reopened = _service(runs, repository=SQLiteExperimentRepository(path))
+    before = reopened.get(experiment_id)
+    after = reopened.control(experiment_id, paused=True)
+
+    assert before.record.controls == ExperimentControls()
+    assert [len(state.attempts) for state in reopened.trials(experiment_id)] == [1, 1, 1, 1]
+    assert after.record.controls == ExperimentControls(paused=True)

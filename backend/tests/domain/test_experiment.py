@@ -427,16 +427,22 @@ def test_a_trial_without_a_run_is_queued_cancelled_or_rejected(
 def test_experiment_status_follows_its_trials_unless_cancelled(
     trials: tuple[TrialStatus, ...], cancelled: bool, expected: ExperimentStatus
 ) -> None:
-    assert experiment_status(trials, cancelled=cancelled, paused=False) is expected
+    status = experiment_status(trials, cancelled=cancelled, paused=False, recovering=False)
+    assert status is expected
 
 
 def test_a_paused_experiment_reads_paused_until_every_trial_ends() -> None:
     running = (TrialStatus.COMPLETED, TrialStatus.QUEUED)
     finished = (TrialStatus.COMPLETED, TrialStatus.FAILED)
 
-    assert experiment_status(running, cancelled=False, paused=True) is ExperimentStatus.PAUSED
-    assert experiment_status(finished, cancelled=False, paused=True) is ExperimentStatus.COMPLETED
-    assert experiment_status(running, cancelled=True, paused=True) is ExperimentStatus.CANCELLED
+    def status(trials: tuple[TrialStatus, ...], **flags: bool) -> ExperimentStatus:
+        return experiment_status(trials, **{"cancelled": False, "recovering": False, **flags})
+
+    assert status(running, paused=True) is ExperimentStatus.PAUSED
+    assert status(finished, paused=True) is ExperimentStatus.COMPLETED
+    assert status(running, cancelled=True, paused=True) is ExperimentStatus.CANCELLED
+    # 재시작으로 중단된 trial 이 복구를 기다리면 모두 끝난 것처럼 보여도 완료가 아니다.
+    assert status(finished, paused=False, recovering=True) is ExperimentStatus.RUNNING
 
 
 @pytest.mark.parametrize("priority", [0, MAX_EXPERIMENT_PRIORITY + 1, True, 1.5])

@@ -23,9 +23,11 @@ from pathlib import Path
 MANIFEST_NAME = "MANIFEST.json"
 CATALOG_NAME = "equity.duckdb"
 CATALOG_META_NAME = "_catalog_meta.json"
-# 카탈로그를 다시 만드는 조치 — 카탈로그 때문에 원천을 뺀 사유 문장이 이 문구로 조치를 알린다.
+# 카탈로그를 다시 만드는 조치 — 카탈로그 때문에 원천을 뺀 사유 문장(`catalog_*`, FIELD_MAP §3)이 이
+# 문구로 조치를 알린다. 원천은 부팅 때 정해지므로 다시 만든 뒤 서버도 다시 띄워야 돌아온다.
 CATALOG_REBUILD = (
-    "카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 `python -m equity catalog`)"
+    "카탈로그를 다시 만든 뒤(`ledger_sync catalog` 또는 `python -m equity catalog`) 서버를 다시 "
+    "띄워야 한다"
 )
 
 logger = logging.getLogger(__name__)
@@ -149,8 +151,8 @@ def resolve_table(equity_root: Path, table: str) -> TableBuild:
 @dataclass(frozen=True)
 class CatalogState:
     """`equity.duckdb` + `_catalog_meta.json` 이 가리키는 것. `usable` 이 아니면 `reason` 이 왜인지
-    말한다 — 카탈로그 없음 · meta 없음 · 파일이나 meta 손상 · 테이블 판본이 meta 와 다름(stale) ·
-    매크로 건너뜀."""
+    말한다 — 카탈로그·meta 없음(`catalog_missing`) · 파일이나 meta 손상(`catalog_unreadable`) ·
+    테이블 판본이 meta 와 다름(`catalog_stale`)."""
 
     path: Path
     usable: bool
@@ -188,10 +190,14 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
     path = equity_root / CATALOG_NAME
     meta_path = equity_root / CATALOG_META_NAME
     if not path.exists():
-        reason = f"catalog file missing — {CATALOG_REBUILD} — catalog={CATALOG_NAME}"
+        reason = (
+            f"catalog file missing — {CATALOG_REBUILD} (catalog_missing) — catalog={CATALOG_NAME}"
+        )
         return CatalogState(path, False, reason, None, ())
     if not meta_path.exists():
-        reason = f"catalog meta missing — {CATALOG_REBUILD} — meta={CATALOG_META_NAME}"
+        reason = (
+            f"catalog meta missing — {CATALOG_REBUILD} (catalog_missing) — meta={CATALOG_META_NAME}"
+        )
         return CatalogState(path, False, reason, None, ())
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -209,7 +215,7 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
         return CatalogState(
             path,
             False,
-            f"catalog is stale — {CATALOG_REBUILD}: "
+            f"catalog is stale — {CATALOG_REBUILD} (catalog_stale) — "
             f"catalog_snapshot_id={actual!r} manifest_snapshot_id={expected_snapshot_id!r}",
             str(actual) if actual is not None else None,
             macros,

@@ -632,7 +632,8 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
   판단이 없고 `dataset_profile` 에도 행 단위 품질 축이 없다(`requires_confirmation` 은 필드 단위).
   서버 27.44% 행이 걸리는데 절반 이상이 `unknown_price_only`(MVP 4유형 밖 기준가 변화)라
   일률적으로 거르면 유니버스가 반으로 준다. 팩터층·소비자와 함께 정할 것.
-- **`financial.*`·`consensus.*` 도 표로 내릴지** — 카탈로그가 낡으면 여전히 이 9필드가 죽는다.
+- **`financial.*`·`consensus.*` 도 표로 내릴지** — 카탈로그가 낡으면 여전히 이 9필드가 죽는다(카탈로그에
+  기대는 필드 전체는 FIELD_MAP §3 「부팅 검사」 — 신용잔고·수정주가는 가림 뷰라 일부러 기댄다, #249·#220).
   다만 두 뷰는 `as_of` 로 접는 축이 있어 (키, 날짜) 의 순수 함수가 아니다 — 조정가처럼 그냥
   옮길 수 없고, 무엇을 grain 으로 굳힐지부터 정해야 한다.
 - **조정 OHLC·거래량의 field_id** — 표에는 컬럼으로 있으나 어댑터는 내지 않는다(FIELD_MAP §2
@@ -782,8 +783,8 @@ equity 쪽 몫은 끝났다 — `adj_factor.no_bar_after_apply`(e1.7.0)가 이 �
 - **`_pinned/` 은 받지 않는다** — 재빌드 시 stage 입력을 고정한 하드링크 사본이라 읽기에 불필요하고,
   rsync 하면 하드링크가 풀려 실제 크기(수 GB)로 복사된다. `_asof/`·`_tmp/`·`_failed/` 도 같다.
 - 스크립트가 `baseline.json` 을 함께 받고 **카탈로그를 다시 만든다**. 매크로 본문이 절대경로를
-  굽기 때문에(§10 P1c) 경로가 바뀌면 `financial.*`·`consensus.*` 가
-  `unavailable` 이 된다(`price.adj_close` 는 S23 부터 표를 읽으므로 무관하다) — 손으로 복사했다면 반드시 `python -m equity --root <경로> … catalog`.
+  굽기 때문에(§10 P1c) 경로가 바뀌면 카탈로그에 기대는 필드(FIELD_MAP §3 「부팅 검사」)가
+  `unavailable` 이 된다 — 손으로 복사했다면 반드시 `python -m equity --root <경로> … catalog`.
 
 **워크벤치를 duckdb 어댑터로 기동**
 ```
@@ -799,6 +800,7 @@ cd backend && uv run --extra parquet --extra equity server
 **기동 뒤 부팅 로그 경고** — duckdb 어댑터는 못 읽는 원천의 필드를 빼고 뜨며 로그에 경고를 남긴다. 코드는
 경고 문장 안 괄호에 있다. 필드를 뺀 `catalog_*` 경고는 카탈로그를 다시 만들고(`ledger_sync catalog` 또는
 `python -m equity … catalog`, 파일 손상이 의심되면 `ledger_sync verify` 먼저) 서버를 다시 띄운다.
-`profile_lag_fallback` 은 필드를 빼지 않으니 `dataset_profile` 을 받는다(`ledger_sync`). 부팅을 멈추는
-`catalog_locked`·`catalog_transient_error` 는 예외 문장의 조치를 따른다. 코드별 뜻은
+카탈로그 매크로를 더한 코드를 받은 뒤에도 그렇다(`catalog_macro_missing`). `profile_lag_fallback` 은
+필드를 빼지 않으니 `dataset_profile` 을 받는다(`ledger_sync`). 부팅을 멈추는 `catalog_locked`·
+`catalog_transient_error` 는 예외 문장의 조치를 따른다. 코드별 뜻과 카탈로그에 기대는 필드는
 `EQUITY_FIELD_MAP.md` §3 「부팅 검사」가 정본이다.

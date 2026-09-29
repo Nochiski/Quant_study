@@ -514,8 +514,8 @@ class EquityDuckdbAdapter:
         부팅을 멈춘다.
         """
         if not catalog.usable:
-            # 없음·meta 없음·낡음 — 매크로를 읽는 원천(재무·컨센서스·신용·조정가)이 모두
-            # 빠진다(#220)
+            # 없음·meta 없음·낡음(`catalog_missing`·`catalog_stale`) — 매크로를 읽는 원천(목록은
+            # FIELD_MAP §3 「부팅 검사」)이 모두 빠진다. 부팅 로그에 남겨야 재생성한다
             logger.warning(f"{catalog.reason} path={catalog.path}")
             return catalog
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
@@ -632,7 +632,7 @@ class EquityDuckdbAdapter:
         return {universe_id: tuple(rules) for universe_id, rules in policies.items()}
 
     def _source_unavailable_reason(self, spec: SourceSpec) -> str | None:
-        """원천을 읽을 수 없으면 왜인지 — 미빌드 테이블 · stale 카탈로그 · 건너뛴 매크로."""
+        """원천을 읽을 수 없으면 왜인지 — 미빌드 테이블 · 쓸 수 없는 카탈로그 · 없는 매크로."""
         macros = {name for name in spec.requires if name.startswith("v_")}
         tables = [name for name in spec.requires if name not in macros]
         absent = [table for table in tables if table not in self._builds]
@@ -644,11 +644,12 @@ class EquityDuckdbAdapter:
             return self._catalog.reason
         skipped = [name for name in sorted(macros) if not self._catalog.has_macro(name)]
         if skipped:
-            # 매크로를 더한 코드로 올린 직후의 옛 카탈로그가 여기 온다 — 부팅 로그에 남겨야 운영
-            # 안내(README·LEDGER_SYNC §5)대로 재생성한다(#220).
+            # 매크로를 더한 코드를 받고 카탈로그를 다시 만들지 않은 루트가 여기 온다(입력 표가 없는
+            # 경우는 위 표 검사가 먼저 거른다) — 부팅 로그에 남겨야 운영 안내대로 재생성한다
+            # (#292 리뷰 P2-2).
             reason = (
                 f"카탈로그에 원천 {spec.name} 이 읽는 매크로가 없어 이 원천의 필드를 뺀다 — "
-                f"{CATALOG_REBUILD} (macros_skipped) — missing={skipped} "
+                f"{CATALOG_REBUILD} (catalog_macro_missing) — missing={skipped} "
                 f"macros={list(self._catalog.macros)}"
             )
             logger.warning(f"{reason} catalog={self._catalog.path}")
@@ -679,8 +680,7 @@ class EquityDuckdbAdapter:
             _raise_unless_persistent(error, self._catalog.path)
             reason = (
                 f"카탈로그 매크로 {spec.relation} 를 읽을 수 없어 원천 {spec.name} 의 필드를 "
-                "뺀다 — 카탈로그를 다시 만들거나 원장 파일을 확인해야 한다"
-                "(`ledger_sync verify`·`catalog`) "
+                f"뺀다 — 원장 파일을 확인하고(`ledger_sync verify`) {CATALOG_REBUILD} "
                 f"(catalog_macro_unreadable) — error={type(error).__name__}"
             )
             logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")

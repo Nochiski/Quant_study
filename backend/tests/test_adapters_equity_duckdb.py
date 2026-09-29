@@ -847,25 +847,24 @@ def test_lag_falls_back_to_source_constants_and_says_so_when_the_profile_is_abse
 def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """카탈로그가 없거나 낡거나 매크로가 없으면 **매크로를 읽는 필드만** 빠지고, 사유 문장과 부팅
-    경고가 카탈로그 재생성을 안내한다.
+    """카탈로그가 없거나 낡거나 원천이 읽는 매크로가 없으면 **매크로를 읽는 필드만** 빠지고,
+    사유 문장과 부팅 경고가 `catalog_*` 코드와 재생성 조치(다시 만든 뒤 서버 재시작)를 싣는다.
 
-    매크로 필드는 `financial.*`(v_fin_latest)·`consensus.forward_*`·`consensus.eps_dispersion`
-    (v_consensus)·`credit.margin_balance`(v_credit_balance, #249)·`price.adj_close`(v_adj_close,
-    #220) 다. S23(2026-09-06)이 조정가를 표(`price_adj_daily`)로 옮겨 카탈로그 의존을 끊었지만, #220
-    부터 워크벤치는 조정 공백 적용일을 가린 원장 뷰를 읽는다 — 카탈로그가 없을 때 표로 돌아가 읽으면
-    가린 공백이 조용히 다시 열리므로 원천을 뺀다(fail-closed). 새 매크로를 더한 코드로 올린 직후의
-    옛 카탈로그(`macros_skipped`)도 부팅 로그에 남아야 운영 안내(README)대로 재생성할 수 있다.
+    매크로 필드 목록의 정본은 FIELD_MAP §3 「부팅 검사」다. S23(2026-09-06)이 조정가를 표로 옮겨
+    카탈로그 의존을 끊었지만, #220 부터 워크벤치는 조정 공백 적용일을 가린 원장 뷰를 읽는다 — 표로
+    돌아가 읽으면 가린 공백·창이 조용히 다시 열리므로 원천을 뺀다(fail-closed). 매크로를 더한 코드를
+    받고 카탈로그를 다시 만들지 않은 루트(`catalog_macro_missing`)는 예전에 경고 없이 신용 필드를
+    뺐다(#292 리뷰 P2-2).
     """
     macro_fields = {
         "financial.book_equity", "consensus.forward_eps", "credit.margin_balance",
         "price.adj_close",
     }
     root = build_workbench_root(tmp_path / "equity", catalog=False)
-    for phrase, prepare in (
-        ("catalog file missing", lambda: None),
-        ("catalog is stale", lambda: write_catalog(root, snapshot="deadbeefdeadbeef")),
-        ("macros_skipped", lambda: write_catalog(root, with_macros=False)),
+    for code, prepare in (
+        ("catalog_missing", lambda: None),
+        ("catalog_stale", lambda: write_catalog(root, snapshot="deadbeefdeadbeef")),
+        ("catalog_macro_missing", lambda: write_catalog(root, with_macros=False)),
     ):
         prepare()
         caplog.clear()
@@ -873,18 +872,21 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
             adapter = EquityDuckdbAdapter(root)
         served = {p.field_id for p in adapter.list_fields()}
         # 매크로가 없으면 그 매크로를 읽는 원천의 필드가 전부 빠진다 — 표 원천은 남는다
-        assert "price.close" in served and "consensus.target_price" in served, phrase
-        assert not served & macro_fields, phrase
+        assert "price.close" in served and "consensus.target_price" in served, code
+        assert not served & macro_fields, code
         assert _raw(adapter, fields=("price.close",)).ok
-        denied = _raw(adapter, fields=("price.adj_close",))
-        assert denied.status is DataLoadStatus.INVALID_QUERY
-        assert denied.detail is not None and phrase in denied.detail
-        assert "ledger_sync catalog" in denied.detail, phrase  # 조치가 사유에 실린다
-        assert str(root.resolve()) not in denied.detail  # 사유는 질의 거절로 사용자에게 간다(#163)
+        for field_id in ("credit.margin_balance", "price.adj_close"):
+            denied = _raw(adapter, fields=(field_id,))
+            assert denied.status is DataLoadStatus.INVALID_QUERY
+            assert denied.detail is not None and code in denied.detail, (code, field_id)
+            # 조치가 사유에 실린다 — 원천은 부팅 때 정해지므로 재시작까지 적는다
+            assert "ledger_sync catalog" in denied.detail and "다시 띄워" in denied.detail
+            # 사유는 질의 거절로 사용자에게 간다(#163)
+            assert str(root.resolve()) not in denied.detail
         assert any(  # 부팅 로그에도 남는다
-            phrase in r.getMessage() and "ledger_sync catalog" in r.getMessage()
+            code in r.getMessage() and "ledger_sync catalog" in r.getMessage()
             for r in caplog.records
-        ), phrase
+        ), code
     # snapshot_id 는 meta 가 아니라 MANIFEST 에서 온다
     assert adapter.snapshot().snapshot_id == snapshot_id(table_builds(root))
 

@@ -51,7 +51,7 @@ database/scripts/ledger_sync.sh verify --offline
 | `pull` | 새 빌드를 `<table>/_incoming/v=<build>/` 에 받아 크기 대조 → `v=<build>/` 로 rename → MANIFEST 원문 기록 → state 갱신 → 구판본 GC(`--keep`, 기본 2, build_id 시각순). 전송·로컬 IO 실패는 테이블 단위로 격리하고 `_incoming` 을 남겨 재개한다 | 0 · 2(전송·IO 실패) · 3(수신 중 서버 판본 변경 → 다시 pull) |
 | `verify` | `manifest`(current_build·카탈로그 snapshot) · `files`(이름·크기·MANIFEST 바이트) · `hash`(duckdb content_hash 재계산). `--level manifest files hash` 로 층위를 고른다(여럿 가능). `--offline` 은 hash 만. **검사 대상이 0건**(state 없음·`--tables` 오타)이면 통과가 아니라 4. stage 층은 파티션 content_hash 가 없어 hash 층위를 `skipped` 로 센다 | 0 · 4(불일치·검사 0건) |
 | `gc` | current 를 제외한 `v=*` 중 최신 `keep-1` 개만 남긴다. `_incoming` 잔재 정리 | 0 |
-| `catalog` | `python -m equity catalog` 위임 — `equity.duckdb` 매크로가 서버 절대경로를 굽고 있어 로컬에서 재생성해야 재무·컨센서스 필드가 산다 | 0 · 2 |
+| `catalog` | `python -m equity catalog` 위임 — `equity.duckdb` 매크로가 서버 절대경로를 굽고 있어 로컬에서 재생성해야 카탈로그에 기대는 필드(`EQUITY_FIELD_MAP.md` §3 「부팅 검사」)가 산다 | 0 · 2 |
 | `sync` | pull → catalog(전송 실패가 없을 때, `--skip-catalog` 로 건너뜀) → verify(manifest·files + 이번에 받은 표의 hash). 카탈로그를 verify 앞에서 돌려야 verify 의 「카탈로그 stale」 지적이 그 자리에서 해소된다. 판본이 안 바뀐 표의 로컬 손상은 보이지 않으므로 `--hash-all`(전 표 hash, 주 1회 권장)을 따로 돌린다. 같은 층에 pull·gc·sync 가 겹치면 `_sync/lock` 으로 거부(2). 비정상 종료가 남긴 락은 3시간이 지나면 자동 회수하고, 그 전이라도 죽은 실행이 확실하면 `--break-lock`. `status` 가 락 보유자·경과를 보여 준다. `_sync/last_run.json` 에 결과, `_sync/logs/` 에 verb 별 최근 60개 로그 | 첫 비영 코드: pull 실패 2 · drifted 3 · catalog 실패 2 · 불일치 4 |
 | `status` | 마지막 실행 결과·테이블별 로컬 빌드. `--remote` 면 서버 current_build 와 대조해 `BEHIND` 표시 | 0 |
 
@@ -98,14 +98,13 @@ project 만, 없으면 mock 릴리스 게이트만 돈다 — `frontend/e2e/READ
 `catalog` 산출물이다(서버 것으로 덮으면 워크벤치의 stale-catalog 가드가 무력화된다).
 
 워크벤치 duckdb 어댑터는 뜰 때 원천마다 카탈로그 매크로를 읽을 수 있는지 보고, 못 읽는 원천의 필드만
-빼고 뜬다. 부팅 로그에 필드를 뺀 `catalog_*`·`macros_skipped` 경고(카탈로그가 없거나 낡았다는 경고
-포함)가 남으면 로컬 카탈로그를 다시 만들고(`ledger_sync catalog`) 워크벤치를 다시 띄운다. 카탈로그
-매크로를 더한 코드를 받은 뒤에도 한 번 다시 만든다 — 그 전까지는 새 매크로를 읽는 필드가
-`macros_skipped` 로 빠진다(예: `v_credit_balance` 의 신용잔고 #249, `v_adj_close` 의 수정주가 #220 —
-수정주가가 빠지면 가격 변화 팩터가 모두 멈춘다). 일일 `sync` 도 카탈로그를 다시 만든다. 파일 손상이
-의심되면 만들기 전에 `verify --offline` 으로 파티션 해시부터 확인한다. `profile_lag_fallback` 은
-카탈로그 재생성으로 풀리지 않는다 — `sync` 로 `dataset_profile` 표를 받는다. 부팅을 멈추는
-`catalog_locked`·`catalog_transient_error` 는 예외 문장의 조치를 따른다. 코드별 뜻과 빠지는 필드는
+빼고 뜬다. 부팅 로그에 필드를 뺀 `catalog_*` 경고가 남으면 로컬 카탈로그를 다시 만들고
+(`ledger_sync catalog`) 워크벤치를 다시 띄운다. 카탈로그 매크로를 더한 코드를 받은 뒤에도 한 번 다시
+만든다 — 그 전까지는 새 매크로를 읽는 필드가 `catalog_macro_missing` 으로 빠진다(수정주가가 빠지면
+가격 변화 팩터가 모두 멈춘다). 일일 `sync` 도 카탈로그를 다시 만든다. 파일 손상이 의심되면 만들기
+전에 `verify --offline` 으로 파티션 해시부터 확인한다. `profile_lag_fallback` 은 카탈로그 재생성으로
+풀리지 않는다 — `sync` 로 `dataset_profile` 표를 받는다. 부팅을 멈추는 `catalog_locked`·
+`catalog_transient_error` 는 예외 문장의 조치를 따른다. 코드별 뜻과 카탈로그에 기대는 필드는
 `EQUITY_FIELD_MAP.md` §3 「부팅 검사」가 정본이다.
 
 ## 6. 하지 않는 것 · 서버 운영자에게 요청할 것

@@ -724,6 +724,17 @@
             "title": "Initial Cash",
             "type": "number"
           },
+          "lineage_strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Strategy Id"
+          },
           "metric_windows": {
             "default": [],
             "items": {
@@ -1105,6 +1116,49 @@
         ],
         "title": "BinaryOperator",
         "type": "string"
+      },
+      "BlockedTrialAttempt": {
+        "description": "봉인 겹침으로 거절한 실행 요청(봉인 원장의 \"차단한 시도\"). 결과가 없어 N 에 들지 않는다.",
+        "properties": {
+          "blocked_at": {
+            "format": "date-time",
+            "title": "Blocked At",
+            "type": "string"
+          },
+          "lineage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Id"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "trial_key": {
+            "title": "Trial Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blocked_at",
+          "lineage_id",
+          "trial_key",
+          "spec_hash",
+          "start"
+        ],
+        "title": "BlockedTrialAttempt",
+        "type": "object"
       },
       "CandidateDecision": {
         "properties": {
@@ -8394,6 +8448,228 @@
         "title": "TraceValueStatus",
         "type": "string"
       },
+      "TrialGroup": {
+        "description": "같은 시도 키의 실행들. 대표 실행이 없으면 이 시도는 N 에 들지 않는다.",
+        "properties": {
+          "metric_registry_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Registry Version"
+          },
+          "representative_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Representative Run Id"
+          },
+          "representative_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Representative Sharpe"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/TrialRun"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "trial_key": {
+            "title": "Trial Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trial_key",
+          "runs"
+        ],
+        "title": "TrialGroup",
+        "type": "object"
+      },
+      "TrialLedger": {
+        "description": "계열 하나의 원장.\n\n`lineage_id` 는 합친 뒤 남은 계열이고 `merged_lineage_ids` 는 거기 합쳐진 계열이다.",
+        "properties": {
+          "blocked": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedTrialAttempt"
+            },
+            "title": "Blocked",
+            "type": "array"
+          },
+          "lineage_id": {
+            "title": "Lineage Id",
+            "type": "string"
+          },
+          "merged_lineage_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Merged Lineage Ids",
+            "type": "array"
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          },
+          "trials": {
+            "items": {
+              "$ref": "#/components/schemas/TrialGroup"
+            },
+            "title": "Trials",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lineage_id",
+          "merged_lineage_ids",
+          "trial_count",
+          "trials",
+          "blocked"
+        ],
+        "title": "TrialLedger",
+        "type": "object"
+      },
+      "TrialLineageAlreadyMergedDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.lineage.already_merged",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TrialLineageAlreadyMergedDetail",
+        "type": "object"
+      },
+      "TrialLineageAlreadyMergedResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TrialLineageAlreadyMergedDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TrialLineageAlreadyMergedResponse",
+        "type": "object"
+      },
+      "TrialLineageMergeRequest": {
+        "description": "합칠 계열(`source_strategy_id`). 경로의 계열이 남는다.",
+        "properties": {
+          "source_strategy_id": {
+            "minLength": 1,
+            "title": "Source Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_strategy_id"
+        ],
+        "title": "TrialLineageMergeRequest",
+        "type": "object"
+      },
+      "TrialPreview": {
+        "description": "실행 전 미리 계산 — 이 요청이 결과를 내면 N 에 새로 드는가.\n\n계열이 없으면 N 에 들지 않는다.",
+        "properties": {
+          "lineage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Id"
+          },
+          "new_trial": {
+            "title": "New Trial",
+            "type": "boolean"
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          },
+          "trial_count_after": {
+            "title": "Trial Count After",
+            "type": "integer"
+          },
+          "trial_key": {
+            "title": "Trial Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lineage_id",
+          "trial_key",
+          "trial_count",
+          "new_trial",
+          "trial_count_after"
+        ],
+        "title": "TrialPreview",
+        "type": "object"
+      },
+      "TrialRun": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/TrialRunRole"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "created_at",
+          "role"
+        ],
+        "title": "TrialRun",
+        "type": "object"
+      },
+      "TrialRunRole": {
+        "enum": [
+          "counted",
+          "recheck",
+          "pending",
+          "no_result"
+        ],
+        "title": "TrialRunRole",
+        "type": "string"
+      },
       "TurnAcceptedView": {
         "description": "202 응답. `accepted_sequence`를 그대로 `after_sequence`로 써서 스트림을 연다.",
         "properties": {
@@ -9815,6 +10091,65 @@
         "summary": "Start Backtest"
       }
     },
+    "/api/v1/backtests/trial-preview": {
+      "post": {
+        "description": "실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).",
+        "operationId": "previewBacktestTrial",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRunSpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrialPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The immutable strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The saved revision hash differs from the expected hash"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestUnprocessableResponse"
+                }
+              }
+            },
+            "description": "A coded backtest preflight or request-body diagnostic"
+          }
+        },
+        "summary": "Preview Backtest Trial"
+      }
+    },
     "/api/v1/backtests/{run_id}": {
       "get": {
         "operationId": "getBacktestStatus",
@@ -11217,6 +11552,106 @@
           }
         },
         "summary": "Get Strategy Document"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/trials": {
+      "get": {
+        "description": "계열 시도 원장(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다.",
+        "operationId": "getTrialLedger",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrialLedger"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Trial Ledger"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/trials/merge": {
+      "post": {
+        "description": "`source_strategy_id` 계열을 이 계열에 합친다. 되돌릴 수 없다.",
+        "operationId": "mergeTrialLineage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrialLineageMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrialLedger"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrialLineageAlreadyMergedResponse"
+                }
+              }
+            },
+            "description": "The two lineages are already one"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Trial Lineage"
       }
     },
     "/api/v1/strategy-documents": {

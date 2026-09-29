@@ -85,6 +85,9 @@ import type {
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
+  GetTrialLedgerData,
+  GetTrialLedgerErrors,
+  GetTrialLedgerResponses,
   ListAssistantProvidersData,
   ListAssistantProvidersResponses,
   ListAssistantSessionsData,
@@ -99,6 +102,12 @@ import type {
   ListStrategyRevisionsData,
   ListStrategyRevisionsErrors,
   ListStrategyRevisionsResponses,
+  MergeTrialLineageData,
+  MergeTrialLineageErrors,
+  MergeTrialLineageResponses,
+  PreviewBacktestTrialData,
+  PreviewBacktestTrialErrors,
+  PreviewBacktestTrialResponses,
   PreviewEquityDataData,
   PreviewEquityDataErrors,
   PreviewEquityDataResponses,
@@ -395,6 +404,27 @@ export const startBacktest = <ThrowOnError extends boolean = false>(
     ThrowOnError
   >({
     url: "/api/v1/backtests",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Preview Backtest Trial
+ *
+ * 실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).
+ */
+export const previewBacktestTrial = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewBacktestTrialData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewBacktestTrialResponses,
+    PreviewBacktestTrialErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/backtests/trial-preview",
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -824,6 +854,41 @@ export const getStrategyDocument = <ThrowOnError extends boolean = false>(
   >({
     url: "/api/v1/strategies/{strategy_id}/revisions/{revision}/document",
     ...options,
+  });
+
+/**
+ * Get Trial Ledger
+ *
+ * 계열 시도 원장(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다.
+ */
+export const getTrialLedger = <ThrowOnError extends boolean = false>(
+  options: Options<GetTrialLedgerData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTrialLedgerResponses,
+    GetTrialLedgerErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategies/{strategy_id}/trials", ...options });
+
+/**
+ * Merge Trial Lineage
+ *
+ * `source_strategy_id` 계열을 이 계열에 합친다. 되돌릴 수 없다.
+ */
+export const mergeTrialLineage = <ThrowOnError extends boolean = false>(
+  options: Options<MergeTrialLineageData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    MergeTrialLineageResponses,
+    MergeTrialLineageErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategies/{strategy_id}/trials/merge",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
 /**

@@ -20,6 +20,8 @@ from strategy_workbench.domain.factor.facade.evaluation import (
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
     BinaryOperator,
+    ConstantNode,
+    ExpressionNode,
     FactorGraph,
     FieldNode,
     MissingPolicy,
@@ -68,7 +70,7 @@ def _missing(
     ]
 
 
-def _ratio_to(lagged_input: str, *extra: TimeSeriesNode) -> FactorGraph:
+def _ratio_to(lagged_input: str, *extra: ExpressionNode) -> FactorGraph:
     """`adj / lag(<lagged_input>, 20)` — k세션 수익률을 lag 로 짠 모양."""
     return FactorGraph(
         nodes=(
@@ -129,6 +131,22 @@ def test_chained_lags_carry_the_boundary() -> None:
     observations = _observations(MASKED=FactorFieldValue(_FIELD, None, masked=True))
 
     missing = _missing(graph, observations, "MASKED")
+
+    assert [p for p in missing if p >= 20] == list(range(_EVENT, _EVENT + 21))
+
+
+def test_a_same_position_operator_carries_the_boundary_to_lag() -> None:
+    """같은 자리 연산(이항 등)은 입력의 가린 칸을 잇는다 — `lag(adj × 1, 20)` 도 `lag(adj, 20)` 과
+    같은 30~50 이 결측이다.
+
+    곱셈 노드가 가린 칸을 놓치면 `lag` 가 적용일을 경계로 보지 못하고 층 앞 값을 층 뒤로 옮겨,
+    31~49 에서 층 배수가 정상 값으로 나온다(#311 리뷰 r2 P3-1).
+    """
+    one = ConstantNode("one", 1.0, "constant")
+    scaled = BinaryNode("scaled", BinaryOperator.MULTIPLY, "adj", "one", "binary")
+    observations = _observations(MASKED=FactorFieldValue(_FIELD, None, masked=True))
+
+    missing = _missing(_ratio_to("scaled", one, scaled), observations, "MASKED")
 
     assert [p for p in missing if p >= 20] == list(range(_EVENT, _EVENT + 21))
 

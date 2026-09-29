@@ -268,6 +268,31 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
     assert properties["universe_id"]["x-catalog"] == "universe"
 
 
+def _read_when(mode_pointer: str, mode: str, name: str) -> dict[str, object]:
+    return {
+        "all_of": [{"pointer": mode_pointer, "equals": mode, "not_null": False}],
+        "description_key": f"run_environment.contract.{name}",
+        "owned_by_error": None,
+    }
+
+
+def test_schema_publishes_the_mode_that_reads_each_mode_dependent_field() -> None:
+    """칸 적용 조건(#352): 슬리피지는 고정 bp, 가격 충격 계수는 √, 직접 입력 세율은 `custom` 에서만
+    읽힌다. 전략 문서의 `x-applicable-when` 과 같은 모양이라 패널이 같은 코드로 읽어 칸을 끄거나
+    필수로 만든다. 나머지 칸은 늘 읽힌다."""
+    properties = run_environment_schema()["properties"]
+
+    assert {
+        name: node["x-applicable-when"]
+        for name, node in properties.items()
+        if "x-applicable-when" in node
+    } == {
+        "slippage_bps": _read_when("/impact_model", "fixed_bps", "slippage_bps"),
+        "impact_coefficient": _read_when("/impact_model", "sqrt", "impact_coefficient"),
+        "sell_tax_bps": _read_when("/sell_tax", "custom", "sell_tax_bps"),
+    }
+
+
 def test_schema_hash_is_stable_and_splits_on_content() -> None:
     schema = run_environment_schema()
 

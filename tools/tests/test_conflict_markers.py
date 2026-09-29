@@ -87,7 +87,9 @@ class FindConflictMarkersTests(unittest.TestCase):
     def test_finds_markers_in_every_tracked_text_file_whatever_its_encoding_or_folder(
         self,
     ) -> None:
-        # BACKLOG-008 의 놓침 5건 — cp949·UTF-16(BOM) 텍스트, `.lock`, 소스 트리 안 `build/`·`dist/`
+        # BACKLOG-008 의 놓침 5건 — cp949·UTF-16(BOM) 텍스트, `.lock`, 소스 트리 안 `build/`·`dist/`.
+        # 뒤의 넷은 git 과 맞춘 판정이다 — NUL 은 앞 8000바이트만 보고, UTF-8 BOM 을 벗기고, UTF-16 은
+        # 두 바이트 순서의 BOM 을 다 알아보고, 한글 경로는 따옴표로 감싸지 않은 이름(`ls-files -z`)으로 연다.
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             make_repo(
@@ -99,6 +101,10 @@ class FindConflictMarkersTests(unittest.TestCase):
                     "reference/uv.lock": CONFLICT.encode(),
                     "src/build/out.js": CONFLICT.encode(),
                     "src/dist/app.js": CONFLICT.encode(),
+                    "notes/late-nul.txt": CONFLICT.encode() + b"x" * 8000 + b"\0",
+                    "notes/utf8-bom.md": f"﻿{OPEN_MARKER} HEAD\n".encode(),
+                    "notes/utf16-be.txt": b"\xfe\xff" + CONFLICT.encode("utf-16-be"),
+                    "notes/한글.md": CONFLICT.encode(),
                 },
                 untracked={},
             )
@@ -112,6 +118,10 @@ class FindConflictMarkersTests(unittest.TestCase):
                     "reference/uv.lock": [2, 4, 6],
                     "src/build/out.js": [2, 4, 6],
                     "src/dist/app.js": [2, 4, 6],
+                    "notes/late-nul.txt": [2, 4, 6],
+                    "notes/utf8-bom.md": [1],
+                    "notes/utf16-be.txt": [2, 4, 6],
+                    "notes/한글.md": [2, 4, 6],
                 },
             )
 

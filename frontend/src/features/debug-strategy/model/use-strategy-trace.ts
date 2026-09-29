@@ -196,9 +196,9 @@ export const traceErrorMessage = (error: unknown): string =>
     : null) ?? t("trace.error.request");
 
 /**
- * Observes one exact trace query. The query cache owns REST data while this hook owns only the
- * explicit cancelled UI state. Source identity, selections and backend fingerprints are all part
- * of the key, so a superseded response can populate only its old cache entry, never the current UI.
+ * 정확히 한 추적 query 를 지켜본다. REST 데이터는 query cache 가, 명시적 취소 상태만 이 hook 이 소유한다.
+ * 키는 요청에 싣는 값 전부(실행 설정 포함)와 문서 신원·backend 지문이라(`prepareStrategyTrace` 의
+ * `ownerKey`), 밀려난 응답은 자기 옛 캐시 칸만 채우고 지금 화면에는 오지 않는다(#351).
  */
 export const useStrategyTrace = (
   context: StrategyDebuggerContext | null,

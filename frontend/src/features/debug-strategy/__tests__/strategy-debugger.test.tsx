@@ -52,8 +52,6 @@ const context = (sourceVersion = 3): StrategyDebuggerContext => ({
     end: "2026-09-01",
     universe_id: "krx.common-stock",
   },
-  start: "2025-01-01",
-  end: "2026-09-01",
   factors: [
     {
       factorId: "momentum",
@@ -1004,6 +1002,65 @@ describe("StrategyDebugger", () => {
     expect(
       screen.getByText(/범위를 선택한 뒤 추적을 실행/),
     ).toBeInTheDocument();
+  });
+
+  // #351: 실행 설정만 바꿔도 앞 추적은 새 설정의 결과가 아니다 — 추적을 다시 누르기 전까지 결과를 비운다.
+  it("returns to idle when only the run settings change and traces the new settings on the next run", async () => {
+    const user = userEvent.setup();
+    const view = renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+
+    const otherUniverse = context();
+    otherUniverse.environment = {
+      ...otherUniverse.environment,
+      universe_id: "krx.kospi200",
+    };
+    view.rerender(<StrategyDebugger {...props(otherUniverse)} />);
+
+    expect(screen.queryByText("3.50%")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("범위를 선택한 뒤 추적을 실행하세요."),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    expect(await screen.findByText("3.50%")).toBeInTheDocument();
+    expect(requests.map((request) => request.environment?.universe_id)).toEqual(
+      ["krx.common-stock", "krx.kospi200"],
+    );
+  });
+
+  it("neither shows nor publishes a response that arrives after the run settings changed", async () => {
+    let resolveTrace: ((value: StrategyTraceResponse) => void) | undefined;
+    vi.spyOn(strategyWorkbenchApi, "traceStrategy").mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrace = resolve;
+      }),
+    );
+    const onSearchSelection = vi.fn();
+    const view = renderDebugger(
+      <StrategyDebugger {...props()} onSearchSelection={onSearchSelection} />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+    await waitFor(() =>
+      expect(strategyWorkbenchApi.traceStrategy).toHaveBeenCalledTimes(1),
+    );
+
+    const laterPeriod = context();
+    laterPeriod.environment = { ...laterPeriod.environment, start: "2025-06-02" };
+    view.rerender(
+      <StrategyDebugger
+        {...props(laterPeriod)}
+        onSearchSelection={onSearchSelection}
+      />,
+    );
+    await act(async () => resolveTrace?.(traceResponse()));
+
+    expect(
+      screen.getByText("범위를 선택한 뒤 추적을 실행하세요."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("3.50%")).not.toBeInTheDocument();
+    expect(onSearchSelection).not.toHaveBeenCalled();
   });
 
   it("never requests an invalid or stale document", () => {

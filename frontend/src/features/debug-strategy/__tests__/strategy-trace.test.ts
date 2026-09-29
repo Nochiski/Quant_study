@@ -32,8 +32,6 @@ const context = (): StrategyDebuggerContext => ({
     end: "2026-09-01",
     universe_id: "krx.common-stock",
   },
-  start: "2021-01-01",
-  end: "2026-09-01",
   factors: [
     {
       factorId: "momentum",
@@ -289,6 +287,37 @@ describe("strategy trace request contract", () => {
     if (inline.kind !== "ready" || saved.kind !== "ready") return;
     expect(saved.ownerKey).not.toBe(inline.ownerKey);
   });
+
+  // #351: 키가 실행 설정을 빼면 설정만 바꾼 추적이 옛 캐시 칸을 읽어 옛 결과가 새 설정의 성공으로 보인다.
+  it.each([
+    ["universe", { universe_id: "krx.kospi200" }],
+    ["period", { end: "2026-08-31" }],
+    ["cost", { fee_bps: 25 }],
+    ["execution", { impact_model: "sqrt" }],
+  ] as const)(
+    "gives a request whose run settings differ only in %s its own owner",
+    (_setting, change) => {
+      const selection = {
+        asOf: "2026-08-31",
+        security: "sec-a",
+        factorId: "momentum",
+        nodeId: "ranked",
+      };
+      const changedContext = context();
+      changedContext.environment = { ...changedContext.environment, ...change };
+      const before = prepareStrategyTrace(context(), selection);
+      const after = prepareStrategyTrace(changedContext, selection);
+
+      expect(before.kind).toBe("ready");
+      expect(after.kind).toBe("ready");
+      if (before.kind !== "ready" || after.kind !== "ready") return;
+      expect(after.request.environment).toEqual(changedContext.environment);
+      expect(after.ownerKey).not.toBe(before.ownerKey);
+      expect(prepareStrategyTrace(context(), selection)).toMatchObject({
+        ownerKey: before.ownerKey,
+      });
+    },
+  );
 
   it.each([
     [

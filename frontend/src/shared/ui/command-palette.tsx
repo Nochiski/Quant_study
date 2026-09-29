@@ -17,6 +17,8 @@ export type CommandPaletteItem = {
   disabled?: boolean;
   /** Logical focus destination after an executing command changes or hides the current UI. */
   focusAfterExecute?: () => HTMLElement | null;
+  /** 그 자리로 포커스를 옮길 때의 옵션. 창보다 긴 패널처럼 옮기며 페이지를 굴리면 안 되는 자리가 준다. */
+  focusOptions?: FocusOptions;
   execute: () => void;
 };
 
@@ -77,7 +79,7 @@ const OpenCommandPalette = ({
   const input = useRef<HTMLInputElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef<HTMLElement | null>(null);
-  const focusAfterClose = useRef<(() => HTMLElement | null) | null>(null);
+  const executed = useRef<CommandPaletteItem | null>(null);
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
@@ -96,8 +98,9 @@ const OpenCommandPalette = ({
     queueMicrotask(() => input.current?.focus());
     return () => {
       queueMicrotask(() => {
-        const requested = focusAfterClose.current?.() ?? null;
-        if (canRestoreFocus(requested)) requested.focus();
+        const requested = executed.current?.focusAfterExecute?.() ?? null;
+        if (canRestoreFocus(requested))
+          requested.focus(executed.current?.focusOptions);
         else if (canRestoreFocus(restoreFocus.current))
           restoreFocus.current.focus();
       });
@@ -117,7 +120,7 @@ const OpenCommandPalette = ({
   const execute = (index: number): void => {
     const command = filtered[index];
     if (!command || command.disabled) return;
-    focusAfterClose.current = command.focusAfterExecute ?? null;
+    executed.current = command;
     command.execute();
     closePalette();
   };

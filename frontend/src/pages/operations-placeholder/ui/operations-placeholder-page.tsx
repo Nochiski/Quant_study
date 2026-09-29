@@ -3,7 +3,7 @@ import { Badge, EmptyState } from "../../../shared/ui";
 
 /** Shown only when the operations flag is on; makes clear nothing here places orders yet. */
 export const OperationsPlaceholderPage = ({ area }: { area: string }) => (
-  <>
+  <div className="page">
     <header className="page-header">
       <h1>{area}</h1>
       <Badge tone="warn">{t("nav.operations.future")}</Badge>
@@ -12,5 +12,5 @@ export const OperationsPlaceholderPage = ({ area }: { area: string }) => (
       title={t("page.operations.placeholderTitle")}
       description={t("page.operations.placeholder")}
     />
-  </>
+  </div>
 );

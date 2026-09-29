@@ -47,6 +47,40 @@ export const openEditor = async (page: Page, url: string) => {
   await expect(editor(page)).toBeVisible();
 };
 
+/**
+ * 요소의 가운데를 찍었을 때 맞는 요소가 그 요소(또는 그 안의 글자)가 아니면 무엇인지 돌려준다. 보이는데
+ * 옆 칸·겹쳐 뜬 패널·상단 바에 깔려 눌리지도 읽히지도 않는 경우를 잡는다 — Playwright 가시성 검사는 겹침을
+ * 보지 않는다(#269). 지금 화면 그대로 찍고 굴리지 않는다. 재기 전에 굴리면 패널을 펼칠 때 포커스가 페이지를
+ * 굴려 서랍 머리 줄이 상단 바 밑에 깔린 것을 되돌려 버려 못 봤다(#290 리뷰 r3 P2-1). 창 밖이면 "화면 밖"이다
+ * — 사용자가 그 요소를 보는 자리에 페이지를 두는 것은 부르는 쪽이 정한다(`scrollPageTo`).
+ */
+export const coveringElement = (target: Locator) =>
+  target.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      box.x + box.width / 2,
+      box.y + box.height / 2,
+    );
+    if (hit !== null && element.contains(hit)) return null;
+    return hit === null
+      ? "화면 밖"
+      : `${hit.tagName.toLowerCase()} "${(hit.textContent ?? "").trim().slice(0, 40)}"`;
+  });
+
+/**
+ * 사용자가 요소를 보려고 페이지를 굴린 자리에 둔다 — 요소가 창 세로 가운데에 온다. 옆 칸·겹쳐 뜬 패널과의
+ * 겹침(`coveringElement`)을 상단 바와 무관하게 볼 때 쓴다. 굴리는 것은 페이지뿐이다. `scrollIntoView`는 안쪽
+ * 스크롤 칸(탭 목록 등)까지 굴려 그 칸 밖으로 밀려 가려진 요소를 드러내 버린다(#296).
+ */
+export const scrollPageTo = (target: Locator) =>
+  target.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    window.scrollBy({
+      top: box.y + box.height / 2 - window.innerHeight / 2,
+      behavior: "instant",
+    });
+  });
+
 export const requireData = <Value>(
   data: Value | undefined,
   operation: string,

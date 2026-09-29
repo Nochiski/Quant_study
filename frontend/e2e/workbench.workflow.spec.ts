@@ -101,6 +101,20 @@ const expectBacktestResultPresentation = async (page: Page) => {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(scenario.width + 1);
     }
+    // 셸 칸 안쪽 여백이 있다 — 제목 줄이 창 위 끝에, 카드가 사이드바 경계와 창 끝에 붙지 않는다(#261).
+    const shell = await page.getByRole("main").boundingBox();
+    const title = await page
+      .getByRole("heading", { name: "백테스트 실행", level: 1 })
+      .boundingBox();
+    expect(shell).not.toBeNull();
+    expect(title).not.toBeNull();
+    if (shell !== null && title !== null && box !== null) {
+      expect(title.y - shell.y).toBeGreaterThanOrEqual(12);
+      expect(box.x - shell.x).toBeGreaterThanOrEqual(12);
+      expect(shell.x + shell.width - (box.x + box.width)).toBeGreaterThanOrEqual(
+        12,
+      );
+    }
   }
 
   expect(backgrounds.get("1440-light")).not.toBe(backgrounds.get("1440-dark"));

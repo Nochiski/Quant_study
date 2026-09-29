@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
+from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from threading import Event
@@ -139,6 +139,7 @@ from ._execution_error_contract import (
     PortfolioRawObservationInvalidDetail,
 )
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
+from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, SSE_POLL_SECONDS, sse_frame
 from ._strategy_document_contract import (
     StrategyDocumentNotUpgradeableDetail,
     StrategyDocumentSave422Response,
@@ -215,6 +216,43 @@ def _backtest_run_not_found_responses() -> dict[int | str, dict[str, Any]]:
             "description": "The process-lifetime backtest run does not exist",
         }
     }
+
+
+async def _backtest_event_stream(
+    backtest_runs: BacktestRunService,
+    run_id: str,
+    *,
+    after_sequence: int,
+    keepalive_seconds: float = SSE_KEEPALIVE_SECONDS,
+    poll_seconds: float = SSE_POLL_SECONDS,
+) -> AsyncIterator[str]:
+    """run 진행 이벤트를 sequence 순으로 흘리고 run 이 끝나면 닫는다.
+
+    비동기 제너레이터라 기다리는 동안 스레드풀 워커를 잡지 않는다. 동기 제너레이터는 다음 이벤트가
+    올 때까지 워커 하나를 붙잡아 run 수명(실데이터 수십 초~수 분) 내내 anyio 스레드풀을
+    잠식했다(#161). 조용한 구간(자리를 기다리는 `queued`, 긴 tape)에는 keepalive 주석을 보낸다.
+
+    **종결 여부를 이벤트보다 먼저 읽는다.** 반대로 읽으면 두 조회 사이에 기록된 마지막 이벤트를
+    보내지 못하고 닫는다. 서비스는 종결 상태와 그 이벤트를 한 잠금 안에서 함께 기록한다.
+    """
+    sequence = after_sequence
+    last_frame_at = time.monotonic()
+    while True:
+        settled = backtest_runs.state(run_id).status in (
+            RunStatus.COMPLETED,
+            RunStatus.CANCELLED,
+            RunStatus.FAILED,
+        )
+        for event in backtest_runs.events(run_id, after_sequence=sequence):
+            sequence = event.sequence
+            yield sse_frame(sequence=event.sequence, event="progress", data=event)
+            last_frame_at = time.monotonic()
+        if settled:
+            return
+        if time.monotonic() - last_frame_at >= keepalive_seconds:
+            yield SSE_KEEPALIVE_FRAME
+            last_frame_at = time.monotonic()
+        await asyncio.sleep(poll_seconds)
 
 
 def _draft_conflict(error: StrategyDraftConflictError) -> HTTPException:
@@ -465,30 +503,8 @@ def create_app(
             backtest_runs.state(run_id)
         except BacktestRunNotFoundError as error:
             raise _backtest_not_found(error) from error
-
-        def event_stream():
-            sequence = after_sequence
-            while True:
-                events = backtest_runs.events(run_id, after_sequence=sequence)
-                for event in events:
-                    sequence = event.sequence
-                    payload = json.dumps(
-                        jsonable_encoder(asdict(event)),
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
-                    yield f"id: {event.sequence}\nevent: progress\ndata: {payload}\n\n"
-                state = backtest_runs.state(run_id)
-                if state.status in (
-                    RunStatus.COMPLETED,
-                    RunStatus.CANCELLED,
-                    RunStatus.FAILED,
-                ):
-                    break
-                time.sleep(0.05)
-
         return StreamingResponse(
-            event_stream(),
+            _backtest_event_stream(backtest_runs, run_id, after_sequence=after_sequence),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )

@@ -42,7 +42,7 @@
 ## M5 Single backtest + analytics
 
 `domain.analytics`의 `metric-registry-v4`가 수익률·위험·회전율 8개 성과 지표와 샤프 표준오차, MDD 기간/회복,
-benchmark/excess return, 거래·노출·비용을 합친 22개 정의와 공식을 소유한다. CAGR의 연수는 기준일부터
+benchmark/excess return, 거래·노출·비용을 합친 23개 정의와 공식을 소유한다. CAGR의 연수는 기준일부터
 마지막 세션까지의 달력 일수 / 365이고, 1년 미만인 실행은 CAGR·칼마를 비우고 사유를 붙인다. `metric_windows` 구간 지표는 구간 직전 세션의 자산을 기준값으로 쓴다.
 샤프·소르티노·롤링 샤프는 한국은행 기준금리 이력(`domain/analytics/_base_rate.py`)으로 만든 초과수익으로 잰다(#274).
 샤프 표준오차는 수익률이 독립·정규라고 본 Lo(2002) 근사라 실제보다 작게 나온다. 롤링 샤프 창은 126세션(6개월)이고 `compute_analytics`의 `rolling_window` 기본값이 정한다.

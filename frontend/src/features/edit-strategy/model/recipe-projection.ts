@@ -11,7 +11,11 @@
 import { t, tName } from "../../../shared/config";
 import { valueAtPointer } from "../../../shared/lib/yaml12";
 import { projectObjectSection } from "./form-projection";
-import { nodeSlotsByKind, type NodeSlots } from "./graph-transactions";
+import {
+  nodeSlotsByKind,
+  settingShown,
+  type NodeSlots,
+} from "./graph-transactions";
 import {
   fieldFragment,
   fieldText,
@@ -102,8 +106,9 @@ export const projectRecipe = (
 /**
  * 팩터 카드 요약 문장(WORKFLOW P4-01): 체인이면 "수정 종가 → 기간 수익률(252일, 최근 21일 제외)", 아니면
  * "노드 N개 · 고급". 단계 이름은 연산 칸 값의 이름(`x-operator` 키), 연산 칸이 없으면 노드 종류 이름이다.
- * 다중 입력 단계는 입력 칸 순서대로 앞 단계와 체인 밖 잎을 보이고, 설정 칸은 기본값과 다른 값만
- * 필드 조각(`fieldFragment`)으로 보인다. 잎은 설정 칸의 값(카탈로그 필드는 이름)이다. 노드가 없으면 null.
+ * 다중 입력 단계는 입력 칸 순서대로 앞 단계와 체인 밖 잎을 보인다. 설정 칸은 실행 계획 카드와 같은 규칙
+ * (`settingShown`: 값이 있고 기본값과 다른 것)에 맞는 값만 필드 조각(`fieldFragment`)으로 보인다. 잎은 설정 칸의
+ * 값(카탈로그 필드는 이름)이다. 노드가 없으면 null.
  */
 export const recipeSummary = (
   schema: JsonSchema,
@@ -153,7 +158,7 @@ export const recipeSummary = (
           operand === null ? t("recipe.summary.previous") : leafText(operand),
         ),
         ...settings
-          .filter((field) => field.value !== field.defaultValue)
+          .filter((field) => settingShown(field.value, field.defaultValue))
           .flatMap(
             (field) => fieldFragment(field, section.fields, names) ?? [],
           ),

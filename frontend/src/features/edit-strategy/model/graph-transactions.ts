@@ -157,6 +157,14 @@ export type NodeSlots = {
   settings: NodeSlot[];
 };
 
+/**
+ * 노드 설정 칸에 보일 값인가: 값이 있고 스키마 기본값과 다르다. 실행 계획 카드와 레시피 요약이 같이 쓴다(리드
+ * 결정 2026-09-30, #359 리뷰 P3-3) — compile 된 spec 이 dataclass 기본값을 모두 실어도(`lag: 0`, 순위 노드의
+ * 절단 분위) 화면에 뜨지 않는다.
+ */
+export const settingShown = (value: unknown, defaultValue: unknown): boolean =>
+  value !== null && value !== undefined && value !== defaultValue;
+
 /** 노드 union 이 있는 자리. 팩터 항목 스키마는 하나라 어느 팩터 index 로 읽어도 같은 union 이다. */
 const ANY_FACTOR = "/factors/0";
 

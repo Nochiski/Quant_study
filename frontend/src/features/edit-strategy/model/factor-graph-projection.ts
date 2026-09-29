@@ -1,6 +1,10 @@
 import type { FactorGraph, FactorValidationIssue } from "../../../shared/api";
 import { t, tName } from "../../../shared/config";
-import { nodeSlotsByKind, type NodeSlot } from "./graph-transactions";
+import {
+  nodeSlotsByKind,
+  settingShown,
+  type NodeSlot,
+} from "./graph-transactions";
 import type { JsonSchema } from "./schema-navigator";
 import {
   compiledNodeOrigin,
@@ -70,7 +74,7 @@ export type FactorGraphProjection =
       factors: GraphFactorProjection[];
     };
 
-type SlotLabel = { key: string; label: string };
+type SlotLabel = { key: string; label: string; defaultValue: unknown };
 type SlotLabels = ReadonlyMap<
   string,
   { inputs: SlotLabel[]; settings: SlotLabel[] }
@@ -85,6 +89,7 @@ const slotLabels = (schema: JsonSchema): SlotLabels => {
     slots.map(({ key, facts }) => ({
       key,
       label: tName(facts.descriptionKey) ?? key,
+      defaultValue: facts.defaultValue,
     }));
   return new Map(
     [...nodeSlotsByKind(schema)].map(([kind, { inputs, settings }]) => [
@@ -107,19 +112,21 @@ const authoredInputs = (
     return { nodeId: typeof nodeId === "string" ? nodeId : "", role: label };
   });
 
-/** 노드의 설정 칸. 값을 적지 않은 선택 칸(`periods: null` 등)은 보이지 않는다. */
+/** 노드의 설정 칸 중 보일 값(`settingShown`: 값이 있고 스키마 기본값과 다른 것). */
 const nodeDetails = (
   labels: SlotLabels,
   node: FactorNode | undefined,
 ): GraphNodeDetail[] =>
   node === undefined
     ? []
-    : (labels.get(node.kind)?.settings ?? []).flatMap(({ key, label }) => {
-        const value = valueOf(node, key);
-        return value === null || value === undefined
-          ? []
-          : [{ label, value: String(value) }];
-      });
+    : (labels.get(node.kind)?.settings ?? []).flatMap(
+        ({ key, label, defaultValue }) => {
+          const value = valueOf(node, key);
+          return settingShown(value, defaultValue)
+            ? [{ label, value: String(value) }]
+            : [];
+        },
+      );
 
 const authoredOperation = (node: FactorNode): string =>
   "operator" in node ? `${node.kind}.${node.operator}` : node.kind;

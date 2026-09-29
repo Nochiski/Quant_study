@@ -1,6 +1,6 @@
 /**
  * Playwright spec 들이 함께 쓰는 워크벤치 헬퍼 — 편집기·저장·백테스트 로케이터, 문서 상태 대기,
- * 클립보드로 편집기 원문 읽기, revision URL 해석. `workbench.workflow.spec.ts`(CI 가 도는 릴리스 게이트)와
+ * 편집기 원문 읽기·바꾸기, revision URL 해석. `workbench.workflow.spec.ts`(CI 가 도는 릴리스 게이트)와
  * `workbench.real-equity.spec.ts`(opt-in 실데이터)가 같은 접근성 이름·API path 를 보도록 한 곳에 둔다.
  * 접근성 이름이 바뀌면 CI 의 workflow spec 이 먼저 깨지고, 여기서 고치면 real-equity 도 함께 따라온다.
  */
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import type { RunEnvironment } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
-import { backendOrigin, previewOrigin } from "./ports.mjs";
+import { backendOrigin } from "./ports.mjs";
 
 export const BACKEND = backendOrigin();
 export const apiClient = createClient({ baseUrl: BACKEND });
@@ -41,10 +41,12 @@ export const openEditor = async (page: Page, url: string) => {
 };
 
 /**
- * 편집기가 그린 줄에서 원문을 읽는다 — 선택·포커스·URL을 건드리지 않는다. CodeMirror는 화면에서 먼
- * 줄을 그리지 않고 자리(`.cm-gap`)만 두므로, 그런 자리가 있으면 원문 전체를 읽을 수 없다고 멈춘다.
+ * 편집기 원문 전체를 편집기가 그린 줄에서 읽는다. 선택·포커스·URL을 건드리지 않으므로, 탭을 바꾼 뒤
+ * 늦게 오는 pointer reveal이 선택을 옮겨도 읽는 값이 흔들리지 않는다. 줄은 편집기처럼 `\n`으로 잇는다.
+ * CodeMirror는 화면에서 먼 줄을 그리지 않고 자리(`.cm-gap`)만 두므로, 그런 자리가 있으면 원문 전체를
+ * 읽을 수 없다고 멈춘다.
  */
-const renderedSource = (page: Page): Promise<string> =>
+export const currentSource = (page: Page): Promise<string> =>
   editor(page).evaluate((content) => {
     if (content.querySelector(".cm-gap") !== null)
       throw new Error("the editor did not render every line of the source");
@@ -66,7 +68,7 @@ export const replaceSource = async (page: Page, source: string) => {
   await editor(page).press("Control+A");
   await page.keyboard.insertText(source);
   await expect
-    .poll(() => renderedSource(page), {
+    .poll(() => currentSource(page), {
       message: "편집기 원문이 넣은 텍스트와 같다(#240)",
     })
     .toBe(source);
@@ -98,32 +100,6 @@ export const requireData = <Value>(
 ): Value => {
   if (data === undefined) throw new Error(`${operation} returned no data`);
   return data;
-};
-
-/**
- * 편집기 원문 전체를 읽는다. 전체 선택 → 복사 → 클립보드 읽기를 **연속 두 번 같은 값이 나올 때까지**
- * 되풀이한다. 탭을 YAML로 바꾸면 선택된 pointer를 편집기에 드러내는 reveal이 비동기로 한 틱 늦게
- * 도착한다(route 테스트 P6-03 주석과 같은 현상). 그 reveal이 Ctrl+A 뒤에 떨어지면 선택이 그 pointer
- * 범위로 바뀌어 원문 대신 조각이 복사된다 — 화면이 무거워진 main 반영 뒤 그래프 되돌리기 e2e가 이
- * 경로로 간헐 실패했다. reveal은 한 번 오고 끝나므로 두 번 연속 같은 값이면 그것이 전체 원문이다.
- */
-export const currentSource = async (page: Page) => {
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: previewOrigin(),
-  });
-  const copyAll = async (): Promise<string> => {
-    await editor(page).click();
-    await editor(page).press("Control+A");
-    await editor(page).press("Control+C");
-    return page.evaluate(() => navigator.clipboard.readText());
-  };
-  let previous = await copyAll();
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const next = await copyAll();
-    if (next === previous) return next;
-    previous = next;
-  }
-  throw new Error("editor source kept changing while it was being copied");
 };
 
 export const strategyIdentity = (page: Page) => {

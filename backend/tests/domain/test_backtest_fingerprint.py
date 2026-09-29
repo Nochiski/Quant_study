@@ -11,6 +11,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
+from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
     SellTax,
@@ -20,6 +21,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     ExecutionCore,
     InlineDraft,
+    MetricWindow,
     RunManifest,
     SavedRevisionReference,
     StrategyProvenance,
@@ -60,6 +62,20 @@ def test_fingerprint_ignores_how_the_strategy_was_referenced() -> None:
 
     assert len({_fingerprint(s) for s in (legacy, saved, draft, other_draft, in_lineage)}) == 1
     assert _fingerprint(replace(legacy, initial_cash=1.0)) != _fingerprint(legacy)
+
+
+def test_fingerprint_ignores_metric_window_labels_but_not_their_dates() -> None:
+    """#335 DOMAIN-V1-02: 지표 창 표시 이름은 화면이 지은 문자열이라 실행을 가르지 않는다."""
+    strategy = StrategyDesignService(
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
+    ).template()
+    oos = MetricWindow(MetricScope.OUT_OF_SAMPLE, date(2024, 1, 2), date(2024, 6, 28), "OOS 1")
+    base = BacktestRunSpec(strategy=strategy, metric_windows=(oos,))
+
+    relabelled = replace(base, metric_windows=(replace(oos, label="다른 이름"),))
+    moved = replace(base, metric_windows=(replace(oos, start=date(2024, 2, 1)),))
+
+    assert _fingerprint(relabelled) == _fingerprint(base) != _fingerprint(moved)
 
 
 def test_omitted_and_explicit_default_parameter_values_share_one_fingerprint() -> None:

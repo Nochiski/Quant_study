@@ -58,6 +58,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     sell_tax_schedule,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
+    ENGINE_RULES_VERSION,
     BacktestRunResult,
     BacktestSeries,
     DataWarning,
@@ -362,19 +363,18 @@ class BacktestEngineExecutorAdapter:
                     )
                 )
         progress(0.88, "artifacts", "Freezing raw run artifacts")
-        engine_version = "backtest-engine-v1"
         return BacktestRunResult(
             manifest=RunManifest(
                 run_id=request.run_id,
                 created_at=started_at,
                 completed_at=datetime.now(UTC),
                 engine_core=request.spec.core,
-                engine_version=engine_version,
+                engine_version=ENGINE_RULES_VERSION,
                 run_fingerprint=backtest_run_fingerprint(
                     request.spec,
                     data_snapshot_id=request.dataset.data_snapshot_id,
                     target_tape_hash=request.target_tape.tape_hash,
-                    engine_version=engine_version,
+                    engine_version=ENGINE_RULES_VERSION,
                     metric_registry_version=self._registry.version,
                 ),
                 run_spec=request.spec,

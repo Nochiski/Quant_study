@@ -105,6 +105,9 @@ import type {
   ListBacktestsData,
   ListBacktestsErrors,
   ListBacktestsResponses,
+  ListExperimentsData,
+  ListExperimentsErrors,
+  ListExperimentsResponses,
   ListExperimentTrialsData,
   ListExperimentTrialsErrors,
   ListExperimentTrialsResponses,
@@ -583,6 +586,20 @@ export const previewEquityUniverse = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * List Experiments
+ *
+ * 최근에 만든 순. 다음 쪽은 응답의 `next_after` 를 `after` 로 넘긴다.
+ */
+export const listExperiments = <ThrowOnError extends boolean = false>(
+  options?: Options<ListExperimentsData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListExperimentsResponses,
+    ListExperimentsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments", ...options });
 
 /**
  * Create Experiment

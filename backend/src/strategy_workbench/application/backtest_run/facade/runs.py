@@ -1,4 +1,5 @@
 from strategy_workbench.application.backtest_run._service import (
+    DEFAULT_RUN_SLOTS,
     BacktestParameterValueError,
     BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
@@ -38,6 +39,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
 from strategy_workbench.domain.backtest.facade.trials import TrialLedger, TrialPreview
 
 __all__ = [
+    "DEFAULT_RUN_SLOTS",
     "BacktestParameterValueError",
     "BacktestResearchWindowViolationError",
     "BacktestResultNotReadyError",

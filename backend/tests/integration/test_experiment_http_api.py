@@ -90,6 +90,11 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
     assert [trial["status"] for trial in trials.json()] == ["completed"] * 6
     assert ledger["trial_count"] == preview.json()["trial_count_after"]
     assert [len(group["runs"]) for group in ledger["trials"]] == [2, 2, 2]
+    listed = client.get("/api/v1/experiments", params={"limit": 1}).json()
+    assert [item["record"]["experiment_id"] for item in listed["items"]] == [
+        experiment["record"]["experiment_id"]
+    ]
+    assert listed["next_after"] is None
     blank = client.post(
         f"/api/v1/experiments/{experiment['record']['experiment_id']}/selections",
         json={"trial_index": 0, "reason": "   "},

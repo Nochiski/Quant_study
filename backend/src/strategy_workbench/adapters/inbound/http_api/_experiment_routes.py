@@ -11,13 +11,14 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import Field
 from pydantic.config import JsonDict
 
 from strategy_workbench.application.experiment_run.facade.experiments import (
     Experiment,
+    ExperimentPage,
     ExperimentPreview,
     ExperimentRequest,
     ExperimentRunService,
@@ -150,6 +151,14 @@ def register_experiment_routes(
             route_class_override=_ExperimentBodyRoute,
             responses=admission,
         )
+
+    @app.get("/api/v1/experiments", operation_id="listExperiments")
+    def list_experiments(
+        after: Annotated[str | None, Query(min_length=1)] = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    ) -> ExperimentPage:
+        """최근에 만든 순. 다음 쪽은 응답의 `next_after` 를 `after` 로 넘긴다."""
+        return experiments.list(after=after, limit=limit)
 
     @app.get(
         "/api/v1/experiments/{experiment_id}",

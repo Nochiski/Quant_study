@@ -152,6 +152,12 @@ def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(
     assert [item.run.run_id for item in filtered.items] == ["run-3", "run-1"]
     assert filtered.total == 2
     assert [state.run_id for state in reopened.unfinished()] == ["run-1", "run-2"]
+    # 여러 run 의 상태를 한 번에 읽는다(V3-04). 모르는 run 은 빠진다.
+    assert reopened.statuses(["run-3", "run-1", "missing"]) == {
+        "run-3": RunStatus.COMPLETED,
+        "run-1": RunStatus.QUEUED,
+    }
+    assert reopened.statuses([]) == {}
 
 
 def test_an_unknown_run_is_not_found(tmp_path: Path) -> None:

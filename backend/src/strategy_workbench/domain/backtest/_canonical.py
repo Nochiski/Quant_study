@@ -8,6 +8,12 @@ from enum import Enum
 
 from ._models import BacktestRunSpec, RunEnvironment
 
+# 엔진 체결·자본·비용 규칙의 판본. 매니페스트 `engine_version` 과 실행 지문에 실린다. 두 코어의
+# 체결 결과나 비용 규칙(법정 세율표·ADV·σ 창·충격 상한·척도 공식)을 바꾸는 PR 은 이 값을 올린다 —
+# `tests/test_engine_rules_version.py` 가 규칙 digest 와 짝으로 고정한다(#335). 올리지 않으면 같은
+# 지문으로 옛 규칙의 결과를 공유한다.
+ENGINE_RULES_VERSION = "backtest-engine-v2"
+
 
 def backtest_run_fingerprint(
     spec: BacktestRunSpec,
@@ -26,13 +32,36 @@ def backtest_run_fingerprint(
     # 접수가 해소한 파라미터 값(`run_spec.parameter_values`)도 함께 실려 값마다 지문이 갈린다
     # (spec D4).
     payload = {
-        "run_spec": asdict(replace(spec, strategy_source=None, lineage_strategy_id=None)),
+        "run_spec": asdict(fingerprint_run_spec(spec)),
         "data_snapshot_id": data_snapshot_id,
         "target_tape_hash": target_tape_hash,
         "engine_version": engine_version,
         "metric_registry_version": metric_registry_version,
     }
     return canonical_json_hash(payload)
+
+
+def fingerprint_run_spec(spec: BacktestRunSpec) -> BacktestRunSpec:
+    """실행 결과를 가르는 요청 칸만 남긴 spec — 실행 지문과 같은 입력 잇기가 이것을 비교한다.
+
+    전략 출처·계열은 출처 정보이고, 지표 창의 표시 이름(`label`)은 화면이 지은 문자열이라
+    뺀다(#335).
+    """
+    return replace(
+        spec,
+        strategy_source=None,
+        lineage_strategy_id=None,
+        metric_windows=tuple(replace(window, label=None) for window in spec.metric_windows),
+    )
+
+
+def run_input_key(spec: BacktestRunSpec) -> str:
+    """접수 때 아는 실행 입력의 해시 — 같은 입력 잇기(중복 실행 제거)의 기준.
+
+    실행 지문에서 실행 뒤에야 아는 칸(target tape 해시)과 프로세스 안에서 고정인 칸(데이터 스냅샷·
+    엔진 규칙·지표 레지스트리 판본)을 뺀 것이다. JSON 표기라 `1` 과 `True` 가 갈린다.
+    """
+    return canonical_json_hash(asdict(fingerprint_run_spec(spec)))
 
 
 def run_environment_canonical_json(environment: RunEnvironment) -> str:

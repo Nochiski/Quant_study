@@ -318,6 +318,7 @@ export type {
   GroupNode,
   GroupOperator,
   HttpValidationError,
+  ImpactModel,
   InlineDraft,
   IntegerParameter,
   ListAssistantProvidersData,

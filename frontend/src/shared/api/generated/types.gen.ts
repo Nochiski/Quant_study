@@ -2267,6 +2267,16 @@ export type HttpValidationError = {
 };
 
 /**
+ * ImpactModel
+ *
+ * 체결가에 얹는 시장충격 모델(spec D7).
+ *
+ * `fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×
+ * √(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
+ */
+export type ImpactModel = "fixed_bps" | "sqrt";
+
+/**
  * InlineDraft
  *
  * Use an unsaved typed spec while recording its authoring-source hash when known.
@@ -3772,6 +3782,11 @@ export type RunEnvironment = {
    */
   fee_bps?: number;
   frequency?: DataFrequency;
+  /**
+   * Impact Coefficient
+   */
+  impact_coefficient?: number;
+  impact_model?: ImpactModel;
   market?: Market;
   missing?: MissingPolicy;
   participation_basis?: ParticipationBasis;

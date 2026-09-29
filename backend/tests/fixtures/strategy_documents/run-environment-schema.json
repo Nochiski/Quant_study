@@ -91,6 +91,26 @@
         10.0
       ]
     },
+    "impact_model": {
+      "type": "string",
+      "enum": [
+        "fixed_bps",
+        "sqrt"
+      ],
+      "default": "fixed_bps",
+      "x-description-key": "strategy.field.run_environment.impact_model"
+    },
+    "impact_coefficient": {
+      "type": "number",
+      "default": 1.0,
+      "x-description-key": "run_environment.contract.impact_coefficient",
+      "x-unit": "ratio",
+      "x-applied-stage": "execution",
+      "minimum": 0.0,
+      "examples": [
+        1.0
+      ]
+    },
     "sell_tax": {
       "type": "string",
       "enum": [

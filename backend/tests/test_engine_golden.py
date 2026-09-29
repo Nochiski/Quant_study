@@ -168,12 +168,6 @@ class TestGoldenRun:
         assert d4.positions == ()
         assert d4.equity == pytest.approx(85_860.0)
 
-    def test_metrics_hand_computed(self) -> None:
-        _, _, result = run_golden()
-        assert result.metrics.total_return == pytest.approx(85_860.0 / 100_000.0 - 1.0)
-        # 고점 110,423 → 85,860
-        assert result.metrics.max_drawdown == pytest.approx(85_860.0 / 110_423.0 - 1.0)
-
     def test_event_store_traces_full_chain(self) -> None:
         engine, _, _ = run_golden()
         store = engine.event_store

@@ -957,7 +957,6 @@ def test_promoted_rust_makes_no_per_session_ffi(
         "current_session_count",
         "drain_payloads",
         "drive",
-        "equity_series",
         "fail_callback",
         "failure_detail",
         "finish",
@@ -972,13 +971,10 @@ def test_promoted_rust_makes_no_per_session_ffi(
         "result_tables",
         "settlement_session_index",
         "submit_decision",
-        "traded_notional",
     }
-    # 결과·지표 조회는 종료 배치와 Rust 누산값만 쓴다.
+    # 결과 조회는 종료 배치만 쓴다.
     assert len(result.fills) == 2
     assert calls["record_batch"] == 0
-    assert calls["equity_series"] == 1
-    assert calls["traded_notional"] == 1
     # fills 조회는 FILL kind 하나만 청크로 넘겨받는다 (레코드 2건 < 청크).
     # 해제하지 않는 `record_payloads`는 종료 전 partial trace 전용이라 여기서는 안 쓰인다.
     assert calls["drain_payloads"] == 1
@@ -989,8 +985,8 @@ def test_promoted_rust_makes_no_per_session_ffi(
     # 넘긴 kind를 다시 읽으면 어느 조회가 어느 레코드에서 막혔는지 알린다.
     with pytest.raises(RuntimeError, match=r"already released — operation=record_payloads seq="):
         proxies[0].inner.record_payloads(RecordKind.FILL.code)
-    with pytest.raises(RuntimeError, match=r"already released — operation=traded_notional seq="):
-        proxies[0].inner.traded_notional()
+    with pytest.raises(RuntimeError, match=r"already released — operation=result_tables seq="):
+        proxies[0].inner.result_tables()
     assert proxies[0].inner.lifecycle_state() == "finished"
 
 
@@ -1091,10 +1087,10 @@ def test_legacy_rust_core_is_explicitly_deprecated() -> None:
 
 
 @pytest.mark.parametrize("core_name", ["python", pytest.param("rust", marks=RUST_ONLY)])
-def test_empty_feed_fails_identically_after_clean_finish(core_name: str) -> None:
+def test_empty_feed_finishes_identically_with_an_empty_result(core_name: str) -> None:
     engine = BacktestEngine(RunConfig(run_id="empty-feed", initial_cash=100_000.0), core=core_name)
-    with pytest.raises(ValueError, match="cannot compute metrics from an empty run"):
-        engine.run(ScriptedStrategy(script=()), DataFeed(()))
+    result = engine.run(ScriptedStrategy(script=()), DataFeed(()))
+    assert (result.snapshots, result.orders, result.fills) == ((), (), ())
     assert engine.event_store.records == ()
 
 

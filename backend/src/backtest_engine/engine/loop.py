@@ -52,7 +52,6 @@ from backtest_engine.engine.core import (
     slippage_config,
 )
 from backtest_engine.engine.costs import session_costs
-from backtest_engine.engine.metrics import compute_metrics, compute_metrics_from_values
 from backtest_engine.engine.orders import BasketGroup, OpenOrder, OrderManager
 from backtest_engine.engine.queue import (
     EventPriority,
@@ -387,13 +386,11 @@ class BacktestEngine:
                 ),
             )
 
-        snapshots = run.store.snapshots()
         return BacktestResult(
             run_id=self._config.run_id,
-            snapshots=snapshots,
+            snapshots=run.store.snapshots(),
             orders=run.store.orders(),
             fills=run.store.fills(),
-            metrics=compute_metrics(snapshots, run.store.fills(), self._config.annualization_days),
         )
 
     @staticmethod
@@ -518,11 +515,6 @@ class BacktestEngine:
             snapshots=store.snapshots,
             orders=store.orders,
             fills=store.fills,
-            metrics=compute_metrics_from_values(
-                store.equity_values(),
-                store.traded_notional(),
-                self._config.annualization_days,
-            ),
         )
 
     @staticmethod

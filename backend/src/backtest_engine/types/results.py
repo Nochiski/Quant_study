@@ -53,25 +53,6 @@ class RunConfig:
             )
 
 
-@dataclass(frozen=True)
-class PerformanceMetrics:
-    """실행 종료 후 equity curve와 fills에서 계산하는 성과 요약.
-
-    0으로 나눌 수 없는 지표는 0으로 위장하지 않고 None으로 표현한다.
-    max_drawdown은 음수 비율로 통일한다 (예: -0.12).
-    연율화 지표는 RunConfig.annualization_days 기준이다.
-    """
-
-    total_return: float
-    cagr: float
-    volatility: float
-    sharpe: float | None
-    sortino: float | None
-    max_drawdown: float
-    calmar: float | None
-    turnover: float
-
-
 @dataclass(frozen=True, eq=False)
 class BacktestResult:
     """한 번의 실행을 재현하고 분석하는 데 필요한 최종 출력 묶음.
@@ -83,7 +64,6 @@ class BacktestResult:
     snapshots: tuple[PortfolioSnapshot, ...]
     orders: tuple[OrderEvent, ...]
     fills: tuple[FillEvent, ...]
-    metrics: PerformanceMetrics
 
     @classmethod
     def lazy(
@@ -93,10 +73,9 @@ class BacktestResult:
         snapshots: Callable[[], tuple[PortfolioSnapshot, ...]],
         orders: Callable[[], tuple[OrderEvent, ...]],
         fills: Callable[[], tuple[FillEvent, ...]],
-        metrics: PerformanceMetrics,
     ) -> BacktestResult:
         """snapshots/orders/fills tuple을 최초 접근 시에만 만드는 결과."""
-        return _LazyBacktestResult(run_id, snapshots, orders, fills, metrics)
+        return _LazyBacktestResult(run_id, snapshots, orders, fills)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, BacktestResult):
@@ -106,11 +85,10 @@ class BacktestResult:
             and self.snapshots == other.snapshots
             and self.orders == other.orders
             and self.fills == other.fills
-            and self.metrics == other.metrics
         )
 
     def __hash__(self) -> int:
-        return hash((self.run_id, self.snapshots, self.orders, self.fills, self.metrics))
+        return hash((self.run_id, self.snapshots, self.orders, self.fills))
 
 
 class _LazyBacktestResult(BacktestResult):
@@ -127,10 +105,8 @@ class _LazyBacktestResult(BacktestResult):
         snapshot_loader: Callable[[], tuple[PortfolioSnapshot, ...]],
         order_loader: Callable[[], tuple[OrderEvent, ...]],
         fill_loader: Callable[[], tuple[FillEvent, ...]],
-        metrics: PerformanceMetrics,
     ) -> None:
         object.__setattr__(self, "run_id", run_id)
-        object.__setattr__(self, "metrics", metrics)
         object.__setattr__(self, "_snapshot_loader", snapshot_loader)
         object.__setattr__(self, "_order_loader", order_loader)
         object.__setattr__(self, "_fill_loader", fill_loader)

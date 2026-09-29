@@ -52,6 +52,8 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
     assert _metric(report, "max_drawdown_recovery_sessions").value == 2.0
     assert _metric(report, "benchmark_return").value == pytest.approx(0.08)
     assert _metric(report, "excess_return").value == pytest.approx(0.02)
+    # 체결 금액 140 / 평균 equity 95
+    assert _metric(report, "turnover").value == pytest.approx(140.0 / 95.0)
     assert _metric(report, "trade_count").value == 2.0
     assert _metric(report, "win_rate").value == 0.5
     assert _metric(report, "profit_factor").value == 2.0
@@ -86,6 +88,30 @@ def test_metric_values_preserve_zero_and_explain_unavailable_values_per_scope() 
     assert sharpe.unavailable_reason == "zero_return_variance"
     assert sharpe.scope_label == "OOS 2026"
     assert sharpe.sample_count == 1
+
+
+def test_flat_equity_curve_reports_unavailable_ratios_instead_of_zero() -> None:
+    report = compute_analytics(
+        AnalyticsInput(
+            points=tuple(AnalysisPoint(date(2026, 1, day), 100.0, 0.0, 0.0) for day in (5, 6, 7)),
+            traded_notional=0.0,
+        ),
+        build_default_metric_registry(),
+    )
+
+    assert _metric(report, "volatility").value == 0.0
+    assert _metric(report, "max_drawdown").value == 0.0
+    # 변동성·하방 변동·낙폭이 0이면 비율을 0으로 위장하지 않는다.
+    assert _metric(report, "sharpe").unavailable_reason == "zero_return_variance"
+    assert _metric(report, "sortino").unavailable_reason == "no_downside_variation"
+    assert _metric(report, "calmar").unavailable_reason == "no_drawdown"
+
+
+def test_empty_equity_curve_is_rejected() -> None:
+    with pytest.raises(ValueError, match="at least one equity point"):
+        compute_analytics(
+            AnalyticsInput(points=(), traded_notional=0.0), build_default_metric_registry()
+        )
 
 
 def test_monthly_returns_include_the_previous_month_close_boundary() -> None:

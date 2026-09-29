@@ -511,23 +511,6 @@ impl RecordStore {
         Ok(self.index())
     }
 
-    /// SNAPSHOT record 순서의 equity — metrics 입력.
-    /// Python은 `finish()` 직후 SNAPSHOT을 해제하기 전에 부른다.
-    pub(crate) fn equity_series(&self) -> PyResult<Vec<f64>> {
-        self.ensure_not_drained("equity_series")?;
-        let mut series: Vec<f64> = Vec::new();
-        for (seq, record) in self.records.iter().enumerate() {
-            match &record.payload {
-                RecordPayload::Snapshot(snapshot) => series.push(snapshot.equity),
-                RecordPayload::Released { kind } if *kind == KIND_SNAPSHOT => {
-                    return Err(released_error(seq as u64, KIND_SNAPSHOT, "equity_series"));
-                }
-                _ => {}
-            }
-        }
-        Ok(series)
-    }
-
     /// 결과 집계용 테이블을 레코드 한 번 순회로 만든다.
     ///
     /// 비파괴 조회다 — 공개 Event 객체를 만들지 않으므로 payload를 해제하지 않고, 이후
@@ -626,23 +609,6 @@ impl RecordStore {
             ),
         )
     }
-
-    /// FILL record 순서로 `quantity × price`를 누산한다 (Python `traded_notional`과 같은 결합 순서).
-    /// Python은 `finish()` 직후 FILL을 해제하기 전에 부른다.
-    pub(crate) fn traded_notional(&self) -> PyResult<f64> {
-        self.ensure_not_drained("traded_notional")?;
-        let mut total = 0.0_f64;
-        for (seq, record) in self.records.iter().enumerate() {
-            match &record.payload {
-                RecordPayload::Fill(fill) => total += fill.quantity as f64 * fill.price,
-                RecordPayload::Released { kind } if *kind == KIND_FILL => {
-                    return Err(released_error(seq as u64, KIND_FILL, "traded_notional"));
-                }
-                _ => {}
-            }
-        }
-        Ok(total)
-    }
 }
 
 #[cfg(test)]
@@ -705,17 +671,6 @@ mod tests {
         assert!(store.finish().is_err());
         let kinds: Vec<u8> = store.records().iter().map(|r| r.payload.kind()).collect();
         assert_eq!(kinds, vec![KIND_MARKET, KIND_SNAPSHOT]);
-    }
-
-    #[test]
-    fn equity_series_and_traded_notional_follow_record_order() {
-        let mut store = RecordStore::default();
-        store.append(0, snapshot(1.0)).unwrap();
-        store.append(0, fill(3, 10.0)).unwrap();
-        store.append(1, fill(2, 0.1)).unwrap();
-        store.append(1, snapshot(2.0)).unwrap();
-        assert_eq!(store.equity_series().unwrap(), vec![1.0, 2.0]);
-        assert_eq!(store.traded_notional().unwrap(), 3.0 * 10.0 + 2.0 * 0.1);
     }
 
     fn filled_store() -> RecordStore {
@@ -800,16 +755,17 @@ mod tests {
         assert!(batch.contains("operation=record_payloads"), "{batch}");
         assert!(batch.contains("seq=1"), "{batch}");
         assert!(batch.contains("kind=fill(4)"), "{batch}");
-        let notional = store.traded_notional().unwrap_err().to_string();
-        assert!(notional.contains("operation=traded_notional"), "{notional}");
+        let tables = store.result_table_rows().err().unwrap().to_string();
+        assert!(tables.contains("operation=result_tables"), "{tables}");
         // 다른 kind는 그대로 읽힌다.
-        assert_eq!(store.equity_series().unwrap(), vec![2.0]);
         assert_eq!(store.live_records_of(KIND_SNAPSHOT).unwrap().len(), 1);
 
         drain_kind(&mut store, KIND_SNAPSHOT, 8);
-        let equity = store.equity_series().unwrap_err().to_string();
-        assert!(equity.contains("operation=equity_series"), "{equity}");
-        assert!(equity.contains("seq=2"), "{equity}");
+        let snapshots = store
+            .live_records_of(KIND_SNAPSHOT)
+            .unwrap_err()
+            .to_string();
+        assert!(snapshots.contains("seq=2"), "{snapshots}");
     }
 
     #[test]
@@ -826,8 +782,7 @@ mod tests {
         for message in [
             store.index_for_trace().unwrap_err().to_string(),
             store.live_records_of(KIND_FILL).unwrap_err().to_string(),
-            store.equity_series().unwrap_err().to_string(),
-            store.traded_notional().unwrap_err().to_string(),
+            store.result_table_rows().err().unwrap().to_string(),
         ] {
             assert!(message.contains("fully drained"), "{message}");
             assert!(message.contains("released=4"), "{message}");

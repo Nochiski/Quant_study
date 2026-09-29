@@ -14,7 +14,7 @@ class RunConfig:
     """한 번의 실행을 재현하는 데 필요한 엔진 설정.
 
     fee_bps: 체결 금액 대비 수수료 (basis point, 매수·매도 동일 적용).
-    annualization_days: 연율화 계수 (XKRX 거래일 기준 252). 비용 일할에도 쓴다.
+    annualization_days: 연 단위 비용(숏 차입·신용 이자)을 세션으로 나누는 연간 세션 수 (XKRX 252).
     short_borrow_bps_annual: 숏 평가액 대비 연 차입 비용 (bp). 세션마다 /annualization_days.
     margin_interest_bps_annual: 음수 현금 대비 연 이자 (bp). MARGIN 선언 전략에만 의미 있다.
     max_gross_leverage: 총노출/equity 상한. 1.0이면 현금 범위 매수(MARGIN 없음).

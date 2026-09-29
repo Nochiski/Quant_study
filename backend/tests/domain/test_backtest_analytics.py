@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+import statistics
 from datetime import date
 
 import pytest
@@ -54,6 +56,18 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
     assert _metric(report, "excess_return").value == pytest.approx(0.02)
     # 체결 금액 140 / 평균 equity 95
     assert _metric(report, "turnover").value == pytest.approx(140.0 / 95.0)
+    # 세션 수익률 80/100-1, 90/80-1, 110/90-1. 평균 53/1080, 연율화 252.
+    returns = (-0.2, 0.125, 2 / 9)
+    mean = 53 / 1080
+    sample_std = statistics.stdev(returns)  # 표본 표준편차(분모 n-1)
+    downside_std = math.sqrt(0.2**2 / 3)  # 음수 수익률 제곱합 / 전체 수익률 수
+    assert _metric(report, "volatility").value == pytest.approx(sample_std * math.sqrt(252))
+    assert _metric(report, "sharpe").value == pytest.approx(mean / sample_std * math.sqrt(252))
+    assert _metric(report, "sortino").value == pytest.approx(mean / downside_std * math.sqrt(252))
+    # 연수 = 수익률 3개 / 252, 총수익률 0.1 → CAGR = 1.1^(252/3) - 1. 칼마 = CAGR / |MDD 0.2|.
+    cagr = 1.1 ** (252 / 3) - 1
+    assert _metric(report, "cagr").value == pytest.approx(cagr)
+    assert _metric(report, "calmar").value == pytest.approx(cagr / 0.2)
     assert _metric(report, "trade_count").value == 2.0
     assert _metric(report, "win_rate").value == 0.5
     assert _metric(report, "profit_factor").value == 2.0

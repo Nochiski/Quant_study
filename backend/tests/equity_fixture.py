@@ -637,7 +637,8 @@ FROM fwd
 """
 
 # `price_adj_daily`(S23) 산출 사본 — `database/src/equity/sql/price_adj_daily.sql` 과 같은 식이다.
-# 매크로가 아니라 **표**라 카탈로그와 무관하게 산다(`price.adj_close` 가 여기서 나온다).
+# 매크로가 아니라 **표**다. 워크벤치 `price.adj_close` 는 이 표를 원장 뷰 `v_adj_close`
+# (`LEDGER_MACROS`)로 읽는다(#220).
 _PRICE_ADJ_DAILY_SQL = """
 WITH px AS (
     SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr,

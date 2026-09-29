@@ -2394,7 +2394,7 @@ EG20(원주가 불변)은 **`basis='krx'` 행만** 대조한다 — 저녁 행�
 
 ### 10-3b. S23 `price_adj_daily` — 잠정 T 행과의 정합 (최종 검수 R2-01·R2-04, 2026-09-11)
 
-- 표에 `basis`·`corp_action_pending` 두 컬럼을 더해 `price_daily` 의 표식을 **그대로 싣는다**. 워크벤치는 이 표를 직접 읽으므로(`ADJ_TABLE`) 뷰만 통과시키면 잠정치가 확정치처럼 보인다.
+- 표에 `basis`·`corp_action_pending` 두 컬럼을 더해 `price_daily` 의 표식을 **그대로 싣는다**. 워크벤치는 이 표를 직접 읽으므로(`ADJ_TABLE`) 뷰만 통과시키면 잠정치가 확정치처럼 보인다 *(2026-09-29 #220 부터 워크벤치는 이 표를 뷰 `v_adj_close` 로 읽는다. 격자가 KRX 축(`universe_daily` × `security_span`)이라 T 행은 그때도 지금도 격자 밖이다)*.
 - EG3 ⑧(캘린더 세션)은 **`basis='krx'` 행에만** 건다 — 캘린더 상한이 `max(stg_price_daily.date)` 라 저녁 T 는 캘린더 밖이 정상이다. 안 그러면 매일 18:15 저녁 체인이 S23 에서 `n_off_calendar` 로 끊긴다(절단본 전량 체인 실측). 기록형 `n_evening_rows`·`n_evening_off_calendar`.
 - 폐기형 ⑩ `n_basis_ne_price_daily`: 두 표식이 `price_daily` 와 (ticker, date) 전건 동일.
 - 전방 조정이라 T 행에도 **과거 사건의 누적 share_factor** 가 곱해진다(005930 ×50). "T 행 조정가 = 원주가" 는 후방 축 `v_adj_price` 에서만 참이다(R2-06).

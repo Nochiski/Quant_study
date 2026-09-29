@@ -483,10 +483,10 @@ def test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row(
         "price.adj_close": WB_SPLIT_DATE,
         "price.market_cap": before,
     }
-    # 원장이 그날 사건을 접지 못한 적용일 행은 결측이다(#220, 원장 뷰 `v_adj_close`). 035420 은
-    # 01-09 계수가 다음 세션에 공개돼 그날부터 접히고(× 0.5), 01-11 은 계수를 못 낸 기준가
-    # 재설정이다.
-    # 01-05 의 unknown_price_only(유상 권리락 등)는 가리지 않는다.
+    # 원장이 그날 사건을 접지 못한 적용일 행은 원장이 가린 셀(MASKED)이다(#220 원장 뷰
+    # `v_adj_close`, #298 셀 종류). 035420 은 01-09 계수가 다음 세션에 공개돼 그날부터
+    # 접히고(× 0.5), 01-11 은 계수를 못 낸 기준가 재설정이다. 01-05 의 unknown_price_only(유상
+    # 권리락 등)는 가리지 않는다.
     gaps = _raw(adapter, start=date(2024, 1, 5), end=END)
     for session, expected in (
         (date(2024, 1, 5), wb_close("035420", date(2024, 1, 5))),
@@ -496,7 +496,7 @@ def test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row(
         (END, 0.5 * wb_close("035420", END)),
     ):
         cell = _cell(gaps, session, "035420:1", "price.adj_close")
-        kind = CellKind.OBSERVED if expected is not None else CellKind.MISSING
+        kind = CellKind.OBSERVED if expected is not None else CellKind.MASKED
         assert (cell.value, cell.kind, cell.available_date) == (expected, kind, session), session
 
 

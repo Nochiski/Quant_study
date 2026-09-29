@@ -233,6 +233,28 @@ def test_공통_필드는_원장이_가리는_셀을_같게_선언한다(field_i
     )
 
 
+def test_원장_뷰의_가림_표시_열을_그_뷰를_읽는_원천이_읽는다() -> None:
+    """원장이 선언한 가림 표시 열(`views.MASK_COLUMNS`)과 duckdb 원천의 `masked_expr` 가 같다
+    (#311 리뷰 P2-1).
+
+    한쪽만 있으면 가린 셀이 MISSING 으로 나가 실행 결측 정책이 다시 채운다 — 수정주가 가림을
+    배선하지 않으면 `zero` 에서 가린 행이 끝점인 12-1 모멘텀이 −100% 가 된다(#301 실측 324셀).
+    위 테스트가 mock 선언을 이 배선에 맞추므로 원장 뷰 → duckdb → mock 이 한 줄로 묶인다.
+    """
+    from tests.equity_fixture import import_ledger_module
+
+    views: Any = import_ledger_module("equity.views")
+    wired = {
+        spec.relation: spec.masked_expr
+        for spec in SOURCE_BY_NAME.values()
+        if spec.masked_expr is not None
+    }
+    assert wired == views.MASK_COLUMNS, (
+        f"원장 뷰의 가림 표시 열과 어댑터 배선이 다르다 — ledger={views.MASK_COLUMNS} "
+        f"duckdb={wired}"
+    )
+
+
 @pytest.mark.parametrize("field_id", sorted(FIELD_BY_ID))
 def test_duckdb_선언표의_값_타입이_원장_선언과_같다(field_id: str) -> None:
     """`FIELD_SPECS` 는 원장 스키마를 옮긴 표다. 값 타입이 원장 `dataset_profile` 과 같아야 한다."""

@@ -106,7 +106,8 @@ class SourceSpec:
 
     `masked_expr` 은 원장 뷰가 값이 틀려 일부러 가린 행의 표시 식이다(참이면 셀 종류 MASKED, 값은
     NULL). 무엇을 가릴지는 뷰가 정하고 어댑터는 표시만 읽는다 — MASKED 셀은 실행 결측 정책이
-    채우지 않는다(#298).
+    채우지 않는다(#298). 뷰의 가림 표시 열 선언은 원장 `views.MASK_COLUMNS` 이고, 이 배선이 그
+    선언과 같은지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다.
     """
 
     name: str
@@ -227,8 +228,9 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         name="adj",
         dataset_id=ADJ_TABLE,
         # 조정 공백 적용일을 가린 수정주가를 원장 뷰에서 읽는다(#220). 가림 판정은 뷰 몫이라 여기
-        # 다시 적지 않는다. 카탈로그가 없거나 낡으면 이 원천도 빠진다 — 표로 돌아가 읽으면 가린
-        # 공백이 조용히 다시 열린다.
+        # 다시 적지 않고, 가린 행(`adj_gap`)은 MASKED 로 내 결측 정책이 채우지 않는다(#298).
+        # 카탈로그가 없거나 낡으면 이 원천도 빠진다 — 표로 돌아가 읽으면 가린 공백이 조용히 다시
+        # 열린다.
         relation=ADJ_MACRO,
         is_macro=True,
         mode=SourceMode.GRID,
@@ -243,6 +245,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_basis=_ADJ_LAG_BASIS,
         requires=(ADJ_TABLE, FACTOR_TABLE, ADJ_MACRO),
         frequency="daily",
+        masked_expr="adj_gap",
     ),
     SourceSpec(
         name="fin",
@@ -448,7 +451,6 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         requires=(CREDIT_TABLE, EVENT_TABLE, CREDIT_MACRO),
         frequency="daily",
         kind_expr="fill_kind['kind']",
-        required_columns=("bonus_window",),
         masked_expr="bonus_window",
     ),
     SourceSpec(
@@ -614,8 +616,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "share_factor. 첫 관측 수준 고정, 사건 뒤 가격을 올린다 — 공개 전 계수는 접지 않고 "
             "(security, date) 의 순수 함수라 창·as_of 에 무관하다. **모든 사건을 잇지는 않는다**: "
             "원장이 그날 사건을 접지 못한 적용일 행(기준가가 재설정된 날 계수가 다음 세션에야 "
-            "공개된 사건 · 기준가와 주식수가 맞지 않아 계수를 못 낸 사건)은 결측(MISSING)이고 그 "
-            "행을 품는 창 연산도 결측이 되지만, `lag` 로 두 시점을 견주는 식은 층 이동을 건너면 "
+            "공개된 사건 · 기준가와 주식수가 맞지 않아 계수를 못 낸 사건)은 원장이 가린 셀"
+            "(MASKED)이라 결측 처리(0·중앙값 채우기)가 채우지 않고(#298), 그 행을 품는 창 연산도 "
+            "결측이 되지만, `lag` 로 두 시점을 견주는 식은 층 이동을 건너면 "
             "틀린 값이 남는다 — 기간 수익률은 `time_series.momentum` 을 쓴다. 유상증자 권리락처럼 "
             "원장이 조정하지 않는 사건은 조정 없이 남는다. 가림 규칙은 원장 뷰 `v_adj_close` 가 "
             "정한다(#220). 레지스트리 가격 변화 팩터(수익률·모멘텀·이평·변동성)의 입력이다. 수준은 "

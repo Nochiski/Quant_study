@@ -116,6 +116,10 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
     "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",)}
+# 뷰가 값이 틀려 일부러 가린 행의 표시 열 — 참이면 그 행 값이 NULL 이다. 워크벤치 어댑터는 이 열을
+# 셀 종류 MASKED 로 읽고(`SourceSpec.masked_expr`), 실행 결측 정책은 그 셀을 채우지 않는다(#298).
+# 무엇을 가리나는 뷰 본문이 정하고, 이 선언과 어댑터 배선이 같은지는 backend 계약 테스트가 본다.
+MASK_COLUMNS: dict[str, str] = {"v_credit_balance": "bonus_window", "v_adj_close": "adj_gap"}
 
 # 전방 조정 공통 CTE — `v_adj_price_fwd`·`v_adj_volume_fwd` 가 같은 본문을 쓴다(매크로는 둘,
 # 정의는 하나). 계수를 (ticker, span_seq, fold_date) 로 접고(같은 날 두 이벤트 = 곱) 앞에서부터

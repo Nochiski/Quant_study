@@ -50,9 +50,11 @@ def _connect(events: list[tuple[str, str, date, date]],
 
 def _rows(con: duckdb.DuckDBPyConnection, ticker: str, as_of: date = _LAST
           ) -> dict[date, tuple[object, ...]]:
-    """date → (잔고, fill_kind.kind, fill_kind.evidence, bonus_window)."""
+    """date → (잔고, fill_kind.kind, fill_kind.evidence, bonus_window). 가림 표시 열은
+    선언(`views.MASK_COLUMNS`)으로 읽어 뷰가 그 열을 실제로 내는지도 본다."""
+    mask = views.MASK_COLUMNS["v_credit_balance"]
     return {r[0]: r[1:] for r in con.execute(
-        "SELECT date, whol_loan_rmnd_stcn_shr, fill_kind.kind, fill_kind.evidence, bonus_window "
+        f"SELECT date, whol_loan_rmnd_stcn_shr, fill_kind.kind, fill_kind.evidence, {mask} "
         "FROM v_credit_balance(?) WHERE ticker = ? ORDER BY date", [as_of, ticker]).fetchall()}
 
 

@@ -31,7 +31,8 @@ MOCK_SPLIT = MockSplit(security_index=0, effective=date(2020, 5, 8), ratio=50.0)
 
 # 원장 뷰가 값이 틀려 가린 신용잔고 셀 하나(무상증자 척도 창의 흉내, #249) — (종목 index, 원장 행
 # 날짜). 값이 없고 셀 종류가 MASKED 라 실행 결측 정책이 채우지 않는다(#298). 원장은 신용잔고와
-# 수정주가를 가리므로 mock 도 그 필드에 MASKED 를 선언한다.
+# 수정주가를 가리므로 mock 도 두 필드에 MASKED 를 선언한다(수정주가는 mock 에 공백 사건이 없어
+# 선언만 한다).
 MOCK_MASKED_CREDIT = (1, date(2024, 1, 8))
 
 
@@ -88,6 +89,9 @@ def build_demo_fixture() -> MockEquityFixture:
         supported_cell_kinds=(CellKind.OBSERVED,),
         point_in_time=True,
     )
+    masked_coverage = replace(
+        full_coverage, supported_cell_kinds=(CellKind.OBSERVED, CellKind.MASKED)
+    )
     profiles = (
         DatasetFieldProfile(
             field_id="price.close",
@@ -118,13 +122,13 @@ def build_demo_fixture() -> MockEquityFixture:
             description=(
                 "원주가 × 그날까지 적용된 분할·증자·병합 계수의 누적곱. 첫 관측 수준을 고정하고 "
                 "사건 뒤 가격을 올리므로 과거 값이 바뀌지 않는다(PIT). 실데이터에서는 원장이 그날 "
-                "사건을 접지 못한 적용일이 결측이고(#220), 원장이 조정하지 않는 사건(유상증자 "
-                "권리락 등)은 조정 없이 남는다. 수익률·모멘텀·이평·변동성 계산에 쓴다. mock 분할: "
-                "sec-005930-1 2020-05-08 50:1."
+                "사건을 접지 못한 적용일이 원장이 가린 셀(MASKED)이고(#220), 원장이 조정하지 않는 "
+                "사건(유상증자 권리락 등)은 조정 없이 남는다. 수익률·모멘텀·이평·변동성 계산에 "
+                "쓴다. mock 분할: sec-005930-1 2020-05-08 50:1."
             ),
             disclosure_basis="원주가 세션 확정 + 사건 계수 공개",
             evidence="KRX 일별매매정보 종가 × mock 분할 사건 계수",
-            coverage=full_coverage,
+            coverage=masked_coverage,
         ),
         DatasetFieldProfile(
             field_id="price.market_cap",
@@ -291,9 +295,7 @@ def build_demo_fixture() -> MockEquityFixture:
             label="Margin balance (shares)",
             unit="shares",
             value_type=FieldValueType.COUNT,
-            coverage=replace(
-                full_coverage, supported_cell_kinds=(CellKind.OBSERVED, CellKind.MASKED)
-            ),
+            coverage=masked_coverage,
             # 원장은 실입수 기준 3세션 뒤에 공개한다(EQUITY_FIELD_MAP DEFECT-E01 정정, #230).
             recommended_lag_sessions=3,
         ),

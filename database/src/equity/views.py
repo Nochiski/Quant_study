@@ -67,7 +67,9 @@ from . import inputs
 #   곱해진다(005930 이면 ×50). "T 행 조정가 = 원주가" 는 후방 축에서만 참이다(검수 R2-06 실측).
 #   소비자는 `basis = 'evening'` 과 `corp_action_pending` 두 컬럼으로 「이 값은 키움 잠정치이고,
 #   참이면 기업행위 의심이라 오늘 스코어에서 빼라」를 읽는다. 두 컬럼을 안 보고 쓰면 잠정치가
-#   확정치처럼 보인다 — 그래서 뷰에서 감추지 않는다.
+#   확정치처럼 보인다 — 그래서 뷰에서 감추지 않는다. 예외: `v_adj_close`(#220)는 워크벤치 격자(KRX
+#   축이라 T 행이 없다, GATES 10-3b)만 읽는 좁은 뷰이고 표식이 없는 옛 판 표에서도 서야 해서 두
+#   표식을 싣지 않는다 — 표식이 필요하면 표를 읽는다.
 FACTOR_LAG_SESSIONS = 0     # 계수 available_date 컷오프 기본 랙(세션). 위 docstring 근거
 PRICE_LAG_SESSIONS = 0      # 가격 행 컷오프 랙(세션) — 0 이라 `date <= as_of` 와 같다
 CONSENSUS_LAG_SESSIONS = 0  # 컨센서스 available_date 컷오프 기본 랙(세션). 아래 v_consensus 근거

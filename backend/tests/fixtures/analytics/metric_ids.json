@@ -4,6 +4,7 @@
   "volatility",
   "sharpe",
   "sharpe_standard_error",
+  "probabilistic_sharpe",
   "sortino",
   "max_drawdown",
   "calmar",

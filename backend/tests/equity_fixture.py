@@ -1279,12 +1279,14 @@ def build_workbench_root(
     evening_session: date | None = None,
     invalid_ohlc: tuple[str, date] | None = None,
     profile_rows: list[tuple[str, int, str]] | None = None,
+    extra_policy_rows: list[PolicyRow] | None = None,
 ) -> Path:
     """워크벤치 어댑터 손 픽스처 equity_root 를 만든다.
 
     `catalog=False` 면 equity.duckdb 없음, `profile=False` 면 `dataset_profile` 없음
     (어댑터가 원천 상수로 폴백하는 구판 루트). `extra_factor_rows` 는 `adj_factor` 에 덧붙일
-    사건 행(apply_date = available_date = effective_date).
+    사건 행(apply_date = available_date = effective_date). `extra_policy_rows` 는
+    `universe_policy` 에 덧붙일 정책 행(멤버가 없는 정책 등)이다.
 
     `evening_session` 을 주면 e1.15.0 저녁 잠정판 모양이 된다 — `price_daily` 에 `basis` 컬럼이
     생기고 그 세션에 005930 잠정 행 1개(키움 종가·거래량만, OHL NULL)가 붙는다. 주지 않으면
@@ -1350,6 +1352,7 @@ def build_workbench_root(
                 ("krx.all", "all", 1, "TRUE"),
                 ("krx.common-stock", "common-stock", 1, "sec_type = 'common'"),
                 ("krx.common-stock", "common-stock", 2, "status = 'listed'"),
+                *(extra_policy_rows or []),
             ]
         ),
     )

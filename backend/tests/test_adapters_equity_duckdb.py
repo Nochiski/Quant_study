@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -37,7 +38,10 @@ from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPreviewRequest,
 )
-from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
+from strategy_workbench.application.portfolio_design.facade.ports import (
+    RawObservationQuery,
+    RawObservationSet,
+)
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.bootstrap.facade.container import build_container
 from strategy_workbench.bootstrap.facade.http import build_http_app
@@ -48,6 +52,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     DataLoadStatus,
     FieldLag,
     ResearchPanelQuery,
+    ResearchPanelResult,
     UniverseHistoryQuery,
 )
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
@@ -1062,6 +1067,49 @@ def test_container_boots_with_the_duckdb_adapter(root: Path, tmp_path: Path) -> 
     assert catalog.total == len(ALL_FIELDS)
     assert {p.field_id for p in catalog.fields} <= set(ALL_FIELDS)
     assert "fin_std" in catalog.facets.dataset_ids
+
+
+@pytest.fixture(scope="module")
+def degraded_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """선택 표 하나(`flow_daily`)와 카탈로그 meta 가 빠지고, 멤버가 없는 정책이 있는 루트."""
+    root = build_workbench_root(
+        tmp_path_factory.mktemp("degraded") / "equity",
+        extra_policy_rows=[("krx.none", "none", 1, "FALSE")],
+    )
+    (root / "flow_daily" / "MANIFEST.json").unlink()
+    (root / "_catalog_meta.json").unlink()
+    return root
+
+
+@pytest.mark.parametrize(
+    ("phrase", "query"),
+    [
+        # 달력 안이지만 주말·신정뿐인 구간
+        ("no sessions in range", lambda a: _raw(a, start=date(2023, 12, 30), end=date(2024, 1, 1))),
+        ("no members in universe", lambda a: _raw(a, universe="krx.none")),
+        # 036220 의 1구간은 2023-12-29 에 끝난다
+        (
+            "no panel cells",
+            lambda a: a.load_panel(ResearchPanelQuery(START, END, ("036220:1",), ("price.close",))),
+        ),
+        ("equity tables not built", lambda a: _raw(a, fields=("flow.foreign_net_buy",))),
+        ("catalog meta missing", lambda a: _raw(a, fields=("financial.book_equity",))),
+    ],
+    ids=["no-sessions", "no-members", "no-panel-cells", "table-not-built", "meta-missing"],
+)
+def test_rejection_details_do_not_expose_the_equity_root(
+    degraded_root: Path,
+    phrase: str,
+    query: Callable[[EquityDuckdbAdapter], RawObservationSet | ResearchPanelResult],
+) -> None:
+    """질의 거절 상세는 preview·trace 422 와 패널 미리보기 200 본문으로 그대로 나간다 (#163).
+
+    루트를 다시 붙여도 테스트가 통과하던 문장들이다(#275 리뷰 P2-1). 나머지 사용자 대면 문장의
+    루트 부재는 그 문장을 만드는 테스트가 함께 본다.
+    """
+    detail = query(EquityDuckdbAdapter(degraded_root)).detail
+    assert detail is not None and phrase in detail
+    assert str(degraded_root.resolve()) not in detail and "root=" not in detail
 
 
 def test_preview_and_trace_rejections_do_not_expose_the_equity_root(root: Path) -> None:

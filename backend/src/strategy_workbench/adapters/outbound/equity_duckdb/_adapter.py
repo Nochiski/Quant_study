@@ -18,8 +18,9 @@
            이고 `available_date` 는 그 관측의 공개일이다. 관측이 없으면 셀 없음.
 값이 있으면 `CellKind.OBSERVED`, 없으면 격자 3테이블(S08~S10)의 `fill_kind.kind` 가 말하는 종류
 (`_FILL_KIND_TO_CELL`: not_collected → NOT_COLLECTED, 나머지 → MISSING)이고 `fill_kind` 축이 없는
-원천은 MISSING 이다 — `load_panel` 과 `RawObservationPort` 가 같은 `_Observed.kind` 를 쓴다
-(둘의 셀 집합·값·공개일·kind 가 계약상 같아야 한다).
+원천은 MISSING 이다. 원장 뷰가 일부러 가린 행(`SourceSpec.masked_expr`)은 MASKED 다(#298).
+`load_panel` 과 `RawObservationPort` 가 같은 `_Observed.kind` 를 쓴다(둘의 셀 집합·값·공개일·kind
+가 계약상 같아야 한다).
 
 어휘(FIELD_MAP §1): `security_id = {ticker}:{span_seq}` · `market = 'KRX'` · `venue = 'XKRX'` ·
 `universe_id` 는 `universe_policy` 의 행(`krx.` || policy)이고 술어(`predicate`)를 `universe_daily`
@@ -223,12 +224,17 @@ _FILL_KIND_TO_CELL: dict[str, CellKind] = {
 }
 
 
-def _cell_kind(value: float | None, fill_kind: object) -> CellKind:
-    """셀 종류 — 값이 있으면 OBSERVED, 없으면 `fill_kind` 가 말하는 대로(없으면 MISSING).
+def _cell_kind(value: float | None, fill_kind: object, masked: bool = False) -> CellKind:
+    """셀 종류 — 원장 뷰가 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 `fill_kind` 가
+    말하는 대로(없으면 MISSING).
 
     값이 있는 셀을 무조건 OBSERVED 로 두는 것은 계약이다(관측 셀은 값을 가져야 한다). 값이
-    없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다.
+    없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다. 가림
+    표시는 값보다 먼저 본다 — 가린 행에 값이 실려 오면 셀 계약 검사가 크게 실패하게 둔다. 결측
+    사유보다도 먼저 본다 — 가림 창 안에서 원래 값이 없던 행(not_collected·src_omitted)도 MASKED 다.
     """
+    if masked:
+        return CellKind.MASKED
     if value is not None:
         return CellKind.OBSERVED
     if fill_kind is None:
@@ -698,8 +704,8 @@ class EquityDuckdbAdapter:
         """매크로 원천을 부팅 때 한 번 읽어 보고, 못 읽거나 요구하는 열이 없으면 뺄 사유를 돌려준다.
 
         매크로가 가리키는 parquet 가 빠졌거나 손상됐으면 `catalog_macro_unreadable`, 옛 카탈로그라
-        원천이 읽는 열(`required_columns` 와 그 원천 필드의 `available_expr`)이 없으면
-        `catalog_columns_missing` 으로 경고한다.
+        원천이 읽는 열(`required_columns`·가림 표시 `masked_expr`·그 원천 필드의 `available_expr`)이
+        없으면 `catalog_columns_missing` 으로 경고한다.
         읽어 보지 않고 두면 커버율 질의가 원시 duckdb 오류를 던져 `list_fields()` 전체가 죽는다
         (#233 리뷰 P2-1, #275 리뷰 P3-5). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
         """
@@ -725,9 +731,10 @@ class EquityDuckdbAdapter:
             logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")
             return reason
         present = {str(row[0]) for row in described}
-        # 원천이 읽는 열 — 선언한 필수 열과 그 원천 필드의 공개일 열(#238)
+        # 원천이 읽는 열 — 선언한 필수 열, 가림 표시 열(#298), 그 원천 필드의 공개일 열(#238)
         read = (
             *spec.required_columns,
+            spec.masked_expr,
             *(f.available_expr for f in FIELD_SPECS if f.source == spec.name),
         )
         missing = [column for column in dict.fromkeys(read) if column and column not in present]
@@ -797,12 +804,15 @@ class EquityDuckdbAdapter:
         """이 원천이 낼 수 있는 셀 종류 — 선언(`kind_expr`)에서 곧바로 나온다.
 
         `fill_kind` 축이 없는 원천은 값 유무만 있어 OBSERVED/MISSING 이다. 격자 3테이블은
-        `not_collected` 를 더 낸다. `SOURCE_OMITTED_ZERO` 는 어느 원천도 내지 않는다 —
-        equity 가 그 셀을 NULL 로 두고 도메인은 그 종류에 값을 요구해서다(`_FILL_KIND_TO_CELL`).
-        `COVERAGE_GAP` 도 내지 않는다: 구간·백필 밖은 셀 자체가 없다(합성 금지).
+        `not_collected` 를 더 내고, 원장 뷰가 가리는 원천(`masked_expr`)은 MASKED 를 더 낸다.
+        `SOURCE_OMITTED_ZERO` 는 어느 원천도 내지 않는다 — equity 가 그 셀을 NULL 로 두고
+        도메인은 그 종류에 값을 요구해서다(`_FILL_KIND_TO_CELL`). `COVERAGE_GAP` 도 내지 않는다:
+        구간·백필 밖은 셀 자체가 없다(합성 금지).
         """
-        base = (CellKind.OBSERVED, CellKind.MISSING)
-        return base if source.kind_expr is None else (*base, CellKind.NOT_COLLECTED)
+        kinds = (CellKind.OBSERVED, CellKind.MISSING)
+        if source.kind_expr is not None:
+            kinds = (*kinds, CellKind.NOT_COLLECTED)
+        return kinds if source.masked_expr is None else (*kinds, CellKind.MASKED)
 
     def _coverage(self) -> dict[str, tuple[float, date]]:
         """필드별 (커버율 %, 시작 세션). 한 번 재고 캐시한다.
@@ -1059,7 +1069,8 @@ class EquityDuckdbAdapter:
             for field_id in query.required_field_ids:
                 found = self._cell(panel, row, field_id, lags[field_id])
                 if found is not None:
-                    fields.append(FactorFieldValue(field_id, found.value))
+                    masked = found.kind is CellKind.MASKED
+                    fields.append(FactorFieldValue(field_id, found.value, masked=masked))
             observations.append(
                 FactorObservation(
                     as_of=row.session,
@@ -1168,8 +1179,9 @@ class EquityDuckdbAdapter:
                         field_id=field_id,
                         value=found.value,
                         available_date=found.available_date,
-                        # load_panel 과 **같은 `_Observed.kind`** 를 쓴다 — 값이 있으면 OBSERVED,
-                        # 없으면 격자 테이블의 `fill_kind` 가 말하는 종류(없으면 MISSING)다.
+                        # load_panel 과 **같은 `_Observed.kind`**(`_cell_kind`)를 쓴다 — 원장 뷰가
+                        # 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 격자 테이블의
+                        # `fill_kind` 가 말하는 종류(없으면 MISSING)다.
                         # 값 있는 셀을 OBSERVED 밖으로 보내면 포트 계약이 생성 시점에 깨지고,
                         # 두 포트가 다른 규칙을 쓰면 kind 가 셀 단위로 어긋난다.
                         kind=found.kind,
@@ -1654,7 +1666,8 @@ class EquityDuckdbAdapter:
                 where.append(f"({source.row_filter})")
             picked = (
                 f"SELECT {source.key_column} AS k, date AS d, {source.available_expr} AS av, "
-                f"{source.content_expr} AS ct, {source.kind_expr or 'NULL'} AS kd, {columns} "
+                f"{source.content_expr} AS ct, {source.kind_expr or 'NULL'} AS kd, "
+                f"{source.masked_expr or 'FALSE'} AS mk, {columns} "
                 f"FROM {self._relation(source, fetch_end)} WHERE {' AND '.join(where)}"
             )
             if source.pick_order is not None:
@@ -1669,7 +1682,7 @@ class EquityDuckdbAdapter:
                 f"LEFT JOIN ({picked}) g{index} ON g{index}.k = r.ticker AND g{index}.d = r.date"
             )
             selects.append(
-                f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, "
+                f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, g{index}.mk, "
                 + ", ".join(f"g{index}.c{position}" for position in range(len(fields)))
             )
             layout.append((name, fields))
@@ -1711,17 +1724,18 @@ class EquityDuckdbAdapter:
                 available = raw[offset + 1]
                 content = raw[offset + 2]
                 fill_kind = raw[offset + 3]
+                masked = bool(raw[offset + 4])
                 if present and available is not None and content is not None:
                     source = SOURCE_BY_NAME[name]
                     for position, field_id in enumerate(fields):
-                        value = _as_float(raw[offset + 4 + position], field_id)
+                        value = _as_float(raw[offset + 5 + position], field_id)
                         cells[field_id] = _Observed(
                             value,
                             _as_date(available, f"{source.relation}.{source.available_expr}"),
                             _as_date(content, f"{source.relation}.{source.content_expr}"),
-                            _cell_kind(value, fill_kind),
+                            _cell_kind(value, fill_kind, masked),
                         )
-                offset += 4 + len(fields)
+                offset += 5 + len(fields)
             row = _Row(
                 session=session,
                 ticker=ticker,

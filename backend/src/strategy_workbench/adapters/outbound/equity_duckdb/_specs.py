@@ -103,6 +103,12 @@ class SourceSpec:
 
     `required_columns` 는 매크로 원천이 선언 밖에서(`row_filter` 등) 읽는 열이다. 매크로는 게시돼
     있어도 옛 카탈로그면 그 열이 없을 수 있어, 어댑터가 부팅 때 확인하고 없으면 이 원천만 뺀다.
+
+    `masked_expr` 은 원장 뷰가 값이 틀려 일부러 가린 행의 표시 식이다(참이면 셀 종류 MASKED, 값은
+    NULL). 무엇을 가릴지는 뷰가 정하고 어댑터는 표시만 읽는다 — MASKED 셀은 실행 결측 정책이
+    채우지 않는다(#298). 뷰의 가림 표시 열 선언은 원장 `views.MASK_COLUMNS` 이고, 이 배선이 그
+    선언과 같은지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 부팅 검사가
+    카탈로그 열과 이름으로 대조하므로 식이 아니라 열 이름을 쓴다(없으면 `catalog_columns_missing`).
     """
 
     name: str
@@ -123,6 +129,7 @@ class SourceSpec:
     frequency: str
     kind_expr: str | None = None
     required_columns: tuple[str, ...] = ()
+    masked_expr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -222,8 +229,9 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         name="adj",
         dataset_id=ADJ_TABLE,
         # 조정 공백 적용일을 가린 수정주가를 원장 뷰에서 읽는다(#220). 가림 판정은 뷰 몫이라 여기
-        # 다시 적지 않는다. 카탈로그가 없거나 낡으면 이 원천도 빠진다 — 표로 돌아가 읽으면 가린
-        # 공백이 조용히 다시 열린다.
+        # 다시 적지 않고, 가린 행(`adj_gap`)은 MASKED 로 내 결측 정책이 채우지 않는다(#298).
+        # 카탈로그가 없거나 낡으면 이 원천도 빠진다 — 표로 돌아가 읽으면 가린 공백이 조용히 다시
+        # 열린다.
         relation=ADJ_MACRO,
         is_macro=True,
         mode=SourceMode.GRID,
@@ -238,6 +246,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_basis=_ADJ_LAG_BASIS,
         requires=(ADJ_TABLE, FACTOR_TABLE, ADJ_MACRO),
         frequency="daily",
+        masked_expr="adj_gap",
     ),
     SourceSpec(
         name="fin",
@@ -443,6 +452,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         requires=(CREDIT_TABLE, EVENT_TABLE, CREDIT_MACRO),
         frequency="daily",
         kind_expr="fill_kind['kind']",
+        masked_expr="bonus_window",
     ),
     SourceSpec(
         name="insider",
@@ -607,12 +617,14 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "share_factor. 첫 관측 수준 고정, 사건 뒤 가격을 올린다 — 공개 전 계수는 접지 않고 "
             "(security, date) 의 순수 함수라 창·as_of 에 무관하다. **모든 사건을 잇지는 않는다**: "
             "원장이 그날 사건을 접지 못한 적용일 행(기준가가 재설정된 날 계수가 다음 세션에야 "
-            "공개된 사건 · 기준가와 주식수가 맞지 않아 계수를 못 낸 사건)은 결측(MISSING)이고 그 "
-            "행을 품는 창 연산도 결측이 되지만, `lag` 로 두 시점을 견주는 식은 층 이동을 건너면 "
-            "틀린 값이 남는다 — 기간 수익률은 `time_series.momentum` 을 쓴다. 유상증자 권리락처럼 "
-            "원장이 조정하지 않는 사건은 조정 없이 남는다. 가림 규칙은 원장 뷰 `v_adj_close` 가 "
-            "정한다(#220). 레지스트리 가격 변화 팩터(수익률·모멘텀·이평·변동성)의 입력이다. 수준은 "
-            "첫 관측 기준이라 종목 간 가격 비교에는 쓰지 않는다."
+            "공개된 사건 · 기준가와 주식수가 맞지 않아 계수를 못 낸 사건)은 원장이 가린 셀"
+            "(MASKED)이라 결측 처리(0·중앙값 채우기)가 채우지 않고(#298), 그 행을 품는 창 "
+            "연산과 그 행을 사이에 둔 `lag` 두 시점 비교도 결측이 된다(#315). 창 연산의 건너뛰는 "
+            "세션에 든 그 행은 보지 않아 그 창을 오늘 값과 견주는 식은 아직 가려지지 않는다"
+            "(#337). 유상증자 권리락처럼 원장이 조정하지 않는 사건은 조정 없이 남는다. 가림 "
+            "규칙은 원장 뷰 `v_adj_close` 가 정한다(#220). 레지스트리 가격 변화 팩터(수익률·"
+            "모멘텀·이평·변동성)의 입력이다. 수준은 첫 관측 기준이라 종목 간 가격 비교에는 쓰지 "
+            "않는다."
         ),
         disclosure_basis=(
             "원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date 다음 세션))"
@@ -948,9 +960,10 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "(`whol_stln_rmnd_stcn_shr`)는 별개 축이고 equity 내부 스코프다. 잔고가 상장주식수를 "
             "넘는 원장 행은 S10 이 `_reject/balance_over_shares/` 로 격리하고 그 셀은 "
             "`empty_response`(→ MISSING)로 남는다(DESIGN §9 결정 9). **무상증자 권리락일부터 "
-            "척도 창의 잔고도 결측(MISSING)이다** — 원천 잔고가 옛 단위와 새 단위로 섞여 상장"
-            "주식수와 척도가 맞지 않는다. 권리락일 뒤에 공시된 사건(약 7%)은 공시 전 세션을 "
-            "가리지 못한다. 창 길이와 가림 규칙은 원장 뷰 `v_credit_balance` 가 정한다(#249). "
+            "척도 창의 잔고는 원장이 가린 셀(MASKED)이다** — 원천 잔고가 옛 단위와 새 단위로 섞여 "
+            "상장주식수와 척도가 맞지 않는다. 가린 셀은 결측 처리(0·중앙값 채우기)가 채우지 "
+            "않는다(#298). 권리락일 뒤에 공시된 사건(약 7%)은 공시 전 세션을 가리지 못한다. 창 "
+            "길이와 가림 규칙은 원장 뷰 `v_credit_balance` 가 정한다(#249). "
             f"{_FILL_KIND_NOTE}."
         ),
         disclosure_basis=(
@@ -1053,13 +1066,38 @@ UNSUPPORTED_FIELDS: dict[str, str] = {
 
 SOURCE_BY_NAME: dict[str, SourceSpec] = {spec.name: spec for spec in SOURCE_SPECS}
 FIELD_BY_ID: dict[str, FieldSpec] = {spec.field_id: spec for spec in FIELD_SPECS}
-# 필드 공개일 열은 LATEST 원천의 PICK 질의(`_latest`)만 읽는다 — GRID 는 조용히 행 공개일로
-# 보이고(look-ahead) SUM 은 집계 질의가 깨진다. 그래서 선언 때 막는다(#300 리뷰 P3-3·r2 P3-1).
-if _misplaced := [
-    f.field_id
-    for f in FIELD_SPECS
-    if f.available_expr is not None
-    and (SOURCE_BY_NAME[f.source].mode, SOURCE_BY_NAME[f.source].reduce)
-    != (SourceMode.LATEST, Reduce.PICK)
-]:
-    raise ValueError(f"available_expr needs a LATEST PICK source — fields={_misplaced}")
+
+
+def _reject_unread_declarations(
+    source_specs: tuple[SourceSpec, ...], field_specs: tuple[FieldSpec, ...]
+) -> None:
+    """선언한 식을 그 원천의 질의가 읽지 않으면 모듈을 올릴 때 막는다.
+
+    선언의 모양 규칙은 여기 한 곳에 둔다. 읽히지 않는 선언은 조용히 무시되고, 계약 테스트는
+    선언만 본다.
+    - 필드 공개일 열(`FieldSpec.available_expr`)은 LATEST 원천의 PICK 질의(`_latest`)만 읽는다.
+      GRID 는 조용히 행 공개일로 보이고(look-ahead) SUM 은 집계 질의가 깨진다(#300 리뷰 P3-3·r2
+      P3-1).
+    - 가림 표시(`SourceSpec.masked_expr`)는 격자 질의(`_grid`)만 읽는다. LATEST 원천에 두면 셀이
+      MASKED 가 되지 않아 결측 정책이 가린 셀을 다시 채운다(#311 리뷰 P3-3).
+    """
+    by_name = {spec.name: spec for spec in source_specs}
+    misplaced = [
+        spec.field_id
+        for spec in field_specs
+        if spec.available_expr is not None
+        and (by_name[spec.source].mode, by_name[spec.source].reduce)
+        != (SourceMode.LATEST, Reduce.PICK)
+    ]
+    if misplaced:
+        raise ValueError(f"available_expr needs a LATEST PICK source — fields={misplaced}")
+    unread = [
+        spec.name
+        for spec in source_specs
+        if spec.masked_expr is not None and spec.mode is not SourceMode.GRID
+    ]
+    if unread:
+        raise ValueError(f"masked_expr needs a GRID source — sources={unread}")
+
+
+_reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)

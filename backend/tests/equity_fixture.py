@@ -1096,9 +1096,11 @@ WB_CREDIT_ROWS: list[CreditRow] = [
     ("005930", date(2024, 1, 8), None, ("not_collected", "none")),
     # 잔고 > 상장주식수로 격리된 원장 행의 자리 — 셀은 남고 종류는 empty_response 다(결정 9)
     ("005930", date(2024, 1, 9), None, ("empty_response", "unit_ok")),
-    # 000660 은 권리락일(01-04)부터 무상증자 척도 창이다 — 원장 값 1,234 는 뷰가 가린다
+    # 000660 은 권리락일(01-04)부터 무상증자 척도 창이다 — 원장 값 1,234 는 뷰가 가리고, 창 안에서
+    # 원래 값이 없던 행(01-05 not_collected)은 사유를 그대로 둔 채 가림 표시만 선다
     ("000660", date(2024, 1, 3), 1_200, ("measured", "unit_ok")),
     ("000660", WB_BONUS_EX, 1_234, ("measured", "unit_ok")),
+    ("000660", date(2024, 1, 5), None, ("not_collected", "none")),
 ]
 WB_HOLDER_ROWS: list[HolderRow] = [
     ("H1", "elestock", "홍길동", "C05930", 1_000, date(2024, 1, 9)),

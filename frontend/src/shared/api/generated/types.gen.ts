@@ -875,7 +875,8 @@ export type CellKind =
   | "source_omitted_zero"
   | "missing"
   | "not_collected"
-  | "coverage_gap";
+  | "coverage_gap"
+  | "masked";
 
 /**
  * ChatMessageView

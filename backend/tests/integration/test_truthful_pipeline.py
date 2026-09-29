@@ -83,6 +83,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     CrossSectionalOperator,
     FactorGraph,
     FieldNode,
+    MissingPolicy,
     ParameterNode,
     TimeSeriesNode,
     TimeSeriesOperator,
@@ -708,6 +709,42 @@ def test_graph_evaluation_matches_a_direct_evaluation_over_raw_pit_fields() -> N
     trace = trace_factor_graph(momentum.graph, observations=observations, missing=missing)
     traced = {(v.as_of, v.security_id): v.value for v in trace.nodes[-1].values}
     assert all(traced[(v.as_of, v.security_id)] == v.value for v in pipeline)
+
+
+def test_no_missing_policy_fills_a_cell_the_ledger_masked_through_the_pipeline() -> None:
+    """#298 — 어댑터가 낸 MASKED 셀이 관측 변환을 거쳐 평가기까지 가고, 어느 결측 정책도
+    그 셀을 채우지 않는다.
+
+    mock 의 000660 01-08 신용잔고 행은 원장이 가린 셀이다(`MOCK_MASKED_CREDIT`). 신용 랙이
+    3세션이라 01-11 에 보이고, 그 셀을 품는 2세션 창(01-11·01-12)은 결측이다. 예전에는 `zero` 가
+    그 셀을 0 으로 채워 01-11 의 변화가 잔고 전체만큼의 음수였다.
+    """
+    change = FactorSignal(
+        factor_id="credit_change_2",
+        label="신용잔고 2세션 차이",
+        direction=FactorDirection.LOW,
+        weight=1.0,
+        graph=FactorGraph(
+            nodes=(
+                FieldNode("balance", "credit.margin_balance", "field"),
+                TimeSeriesNode("change", TimeSeriesOperator.DELTA, "balance", 2, "time_series"),
+            ),
+            output_node_id="change",
+        ),
+    )
+    for policy in MissingPolicy:
+        environment = replace(_environment(), missing=policy)
+        result = _service().run_pipeline(
+            PortfolioPreviewRequest(_spec(change), environment=environment)
+        )
+        values = {
+            v.as_of: v.value
+            for v in result.factor_evaluations[0].values
+            if v.security_id == "sec-000660-1"
+        }
+        assert values[date(2024, 1, 11)] is None, policy
+        assert values[date(2024, 1, 12)] is None, policy
+        assert values[date(2024, 1, 10)] is not None, policy  # 가린 셀이 없는 창
 
 
 def test_factor_value_publication_date_is_the_latest_input_publication() -> None:

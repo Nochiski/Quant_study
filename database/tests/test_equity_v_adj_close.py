@@ -49,7 +49,8 @@ def _connect() -> duckdb.DuckDBPyConnection:
 
 
 def _gaps(con: duckdb.DuckDBPyConnection, as_of: date = _LAST) -> dict[str, list[date]]:
-    rows = con.execute("SELECT ticker, date, adj_close, adj_gap FROM v_adj_close(?) "
+    mask = views.MASK_COLUMNS["v_adj_close"]  # 선언한 가림 표시 열을 뷰가 실제로 낸다
+    rows = con.execute(f"SELECT ticker, date, adj_close, {mask} FROM v_adj_close(?) "
                        "ORDER BY ticker, date", [as_of]).fetchall()
     for ticker, d, adj, gap in rows:
         # 가린 행만 결측이고, 나머지 행은 표 값 그대로다

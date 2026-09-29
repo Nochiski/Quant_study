@@ -1295,7 +1295,8 @@
           "source_omitted_zero",
           "missing",
           "not_collected",
-          "coverage_gap"
+          "coverage_gap",
+          "masked"
         ],
         "title": "CellKind",
         "type": "string"

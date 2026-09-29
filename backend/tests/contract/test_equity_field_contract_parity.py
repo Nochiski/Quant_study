@@ -35,6 +35,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 )
 from strategy_workbench.domain.equity._models import CONTRACT_PROSE_FIELDS
 from strategy_workbench.domain.equity.facade.research_data import (
+    CellKind,
     DatasetFieldProfile,
     FieldCoverageCapability,
     SecurityRef,
@@ -214,6 +215,43 @@ def test_공통_필드의_빈도가_duckdb_어댑터와_같다(field_id: str) ->
     assert mock.frequency == expected, (
         f"mock 빈도가 duckdb 어댑터와 다르다 — field_id={field_id} "
         f"expected={expected} got={mock.frequency}"
+    )
+
+
+@pytest.mark.parametrize("field_id", _shared_field_ids())
+def test_공통_필드는_원장이_가리는_셀을_같게_선언한다(field_id: str) -> None:
+    """원장 뷰가 가리는 원천(`SourceSpec.masked_expr`)의 필드는 mock 도 MASKED 를 선언한다(#298).
+
+    MASKED 셀은 실행 결측 정책이 채우지 않는다. 한쪽만 선언하면 같은 문서·같은 결측 정책이 mock
+    과 실데이터에서 다른 셀을 채운다.
+    """
+    mock = CellKind.MASKED in _mock_profiles()[field_id].coverage.supported_cell_kinds
+    duckdb = SOURCE_BY_NAME[FIELD_BY_ID[field_id].source].masked_expr is not None
+    assert mock == duckdb, (
+        f"원장이 가리는 셀 선언이 두 어댑터에서 다르다 — field_id={field_id} "
+        f"duckdb={duckdb} mock={mock}"
+    )
+
+
+def test_원장_뷰의_가림_표시_열을_그_뷰를_읽는_원천이_읽는다() -> None:
+    """원장이 선언한 가림 표시 열(`views.MASK_COLUMNS`)과 duckdb 원천의 `masked_expr` 가 같다
+    (#311 리뷰 P2-1).
+
+    한쪽만 있으면 가린 셀이 MISSING 으로 나가 실행 결측 정책이 다시 채운다 — 수정주가 가림을
+    배선하지 않으면 `zero` 에서 가린 행이 끝점인 12-1 모멘텀이 −100% 가 된다(#301 실측 324셀).
+    위 테스트가 mock 선언을 이 배선에 맞추므로 원장 뷰 → duckdb → mock 이 한 줄로 묶인다.
+    """
+    from tests.equity_fixture import import_ledger_module
+
+    views: Any = import_ledger_module("equity.views")
+    wired = {
+        spec.relation: spec.masked_expr
+        for spec in SOURCE_BY_NAME.values()
+        if spec.masked_expr is not None
+    }
+    assert wired == views.MASK_COLUMNS, (
+        f"원장 뷰의 가림 표시 열과 어댑터 배선이 다르다 — ledger={views.MASK_COLUMNS} "
+        f"duckdb={wired}"
     )
 
 

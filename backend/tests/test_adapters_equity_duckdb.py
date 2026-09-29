@@ -36,6 +36,8 @@ from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_SPECS,
     SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
+    SourceMode,
+    _reject_unread_declarations,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
     EquityDuckdbAdapter,
@@ -423,6 +425,26 @@ def test_field_specs_cover_every_field_map_id_exactly_once() -> None:
     assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
 
 
+def test_declarations_their_query_does_not_read_are_rejected() -> None:
+    """선언한 식을 그 원천의 질의가 읽지 않으면 선언 때 막는다 — 읽히지 않는 선언은 조용히 무시된다.
+
+    필드 공개일 열은 LATEST PICK 질의만 읽고(#300 리뷰 P3-3), 가림 표시는 격자 질의만 읽는다(#311
+    리뷰 P3-3). LATEST 원천의 가림 표시는 결측 정책이 가린 셀을 다시 채우게 둔다.
+    """
+    _reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)  # 지금 선언은 통과한다
+    latest = next(spec for spec in SOURCE_SPECS if spec.mode is SourceMode.LATEST)
+    with pytest.raises(ValueError, match=re.escape(f"sources=['{latest.name}']")):
+        _reject_unread_declarations(
+            (*SOURCE_SPECS, replace(latest, masked_expr="TRUE")), FIELD_SPECS
+        )
+    grid = {spec.name for spec in SOURCE_SPECS if spec.mode is SourceMode.GRID}
+    gridded = next(spec for spec in FIELD_SPECS if spec.source in grid)
+    with pytest.raises(ValueError, match=re.escape(f"fields=['{gridded.field_id}']")):
+        _reject_unread_declarations(
+            SOURCE_SPECS, (*FIELD_SPECS, replace(gridded, available_expr="available_date"))
+        )
+
+
 # ── RawObservationPort ────────────────────────────────────────────────────────
 
 
@@ -483,10 +505,10 @@ def test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row(
         "price.adj_close": WB_SPLIT_DATE,
         "price.market_cap": before,
     }
-    # 원장이 그날 사건을 접지 못한 적용일 행은 결측이다(#220, 원장 뷰 `v_adj_close`). 035420 은
-    # 01-09 계수가 다음 세션에 공개돼 그날부터 접히고(× 0.5), 01-11 은 계수를 못 낸 기준가
-    # 재설정이다.
-    # 01-05 의 unknown_price_only(유상 권리락 등)는 가리지 않는다.
+    # 원장이 그날 사건을 접지 못한 적용일 행은 원장이 가린 셀(MASKED)이다(#220 원장 뷰
+    # `v_adj_close`, #298 셀 종류). 035420 은 01-09 계수가 다음 세션에 공개돼 그날부터
+    # 접히고(× 0.5), 01-11 은 계수를 못 낸 기준가 재설정이다. 01-05 의 unknown_price_only(유상
+    # 권리락 등)는 가리지 않는다.
     gaps = _raw(adapter, start=date(2024, 1, 5), end=END)
     for session, expected in (
         (date(2024, 1, 5), wb_close("035420", date(2024, 1, 5))),
@@ -496,7 +518,7 @@ def test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row(
         (END, 0.5 * wb_close("035420", END)),
     ):
         cell = _cell(gaps, session, "035420:1", "price.adj_close")
-        kind = CellKind.OBSERVED if expected is not None else CellKind.MISSING
+        kind = CellKind.OBSERVED if expected is not None else CellKind.MASKED
         assert (cell.value, cell.kind, cell.available_date) == (expected, kind, session), session
 
 
@@ -861,23 +883,30 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
         cell = _cell(result, seen_credit(session), "005930:1", "credit.margin_balance")
         assert (cell.value, cell.kind) == (None, kind), session
     # 000660 은 권리락일(01-04)부터 무상증자 척도 창이다(#249). 신용잔고는 원장 뷰
-    # `v_credit_balance` 가 가린 값을 읽으므로 원장 값(1,234)이 있어도 MISSING 이고, 권리락 전 행은
-    # 그대로다. 창 길이와 공시 전 세션 규칙은 뷰가 정한다
+    # `v_credit_balance` 가 가린 값을 읽으므로 원장 값(1,234)이 있어도 값이 없고, 셀 종류는 뷰의
+    # 가림 표시(`bonus_window`)를 따른 MASKED 다 — 실행 결측 정책이 채우지 않는다(#298). 권리락
+    # 전 행은 그대로다. 창 길이와 공시 전 세션 규칙은 뷰가 정한다
     # (원장 `tests/test_equity_v_credit_balance.py`).
     before = _cell(result, seen_credit(date(2024, 1, 3)), "000660:1", "credit.margin_balance")
     assert (before.value, before.kind) == (1_200.0, CellKind.OBSERVED)
     masked = _cell(result, seen_credit(WB_BONUS_EX), "000660:1", "credit.margin_balance")
     assert (masked.value, masked.kind, masked.available_date) == (
         None,
-        CellKind.MISSING,
+        CellKind.MASKED,
         WB_BONUS_EX,
     )
-    # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖는다
+    # 창 안에서 원래 값이 없던 행(not_collected)도 MASKED 다 — 가림 표시가 결측 사유보다 먼저다.
+    # 창의 값은 척도가 섞여 있어 모르는 값을 채워도 틀린다(#311 리뷰 P3-1)
+    unknown = _cell(result, seen_credit(date(2024, 1, 5)), "000660:1", "credit.margin_balance")
+    assert (unknown.value, unknown.kind) == (None, CellKind.MASKED)
+    # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖고, 원장 뷰가 가리는
+    # 원천만 MASKED 를 갖는다
     profiles = {p.field_id: p for p in adapter.list_fields()}
     assert profiles["credit.margin_balance"].coverage.supported_cell_kinds == (
         CellKind.OBSERVED,
         CellKind.MISSING,
         CellKind.NOT_COLLECTED,
+        CellKind.MASKED,
     )
     assert profiles["price.close"].coverage.supported_cell_kinds == (
         CellKind.OBSERVED,
@@ -975,6 +1004,22 @@ def test_factor_metadata_and_observations_come_from_the_same_panel(
     assert min(dates) == date(2024, 1, 5) and max(dates) == END
     assert all(o.forward_return is None for o in observations.observations)
     assert any(not o.universe_member for o in observations.observations)  # 000660 정지일
+
+
+def test_factor_observations_mark_cells_the_ledger_masked(adapter: EquityDuckdbAdapter) -> None:
+    """팩터 연구 경로도 원장이 가린 셀을 `masked` 로 싣는다 — 결측 정책이 채우지 않게(#298)."""
+    observations = adapter.load_factor_observations(
+        FactorObservationQuery(("credit.margin_balance",), START, END, minimum_history_sessions=1)
+    ).observations
+    cells = {
+        (item.as_of, item.security_id): field
+        for item in observations
+        for field in item.fields
+    }
+    # 권리락일(01-04) 행은 신용 랙 3세션 뒤(01-09)에 보인다 — 가린 셀이다
+    masked = cells[(date(2024, 1, 9), "000660:1")]
+    assert (masked.value, masked.masked) == (None, True)
+    assert not cells[(date(2024, 1, 9), "005930:1")].masked
 
 
 def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
@@ -1235,6 +1280,33 @@ def test_catalog_without_required_view_column_drops_only_that_source(
     assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
 
 
+def test_catalog_view_without_its_mask_column_drops_only_that_source(tmp_path: Path) -> None:
+    """가림 표시 열이 없는 옛 뷰는 그 원천만 뺀다 — 부팅 열 확인이 가림 표시(`masked_expr`)도
+    선언에서 끌어온다(#311 리뷰 P3-4). 표시를 못 읽은 채 두면 가린 셀이 MISSING 으로 나가 결측
+    정책이 다시 채운다."""
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    catalog = duckdb.connect(str(root / "equity.duckdb"))
+    try:
+        row = catalog.execute(
+            "SELECT macro_definition FROM duckdb_functions() WHERE function_name = 'v_adj_close'"
+        ).fetchone()
+        assert row is not None
+        catalog.execute(
+            "CREATE OR REPLACE MACRO v_adj_close(as_of) AS TABLE "
+            f"SELECT * EXCLUDE (adj_gap) FROM ({row[0]})"
+        )
+    finally:
+        catalog.close()
+    adapter = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in adapter.list_fields()}
+    assert "price.close" in served and "price.adj_close" not in served
+    denied = _raw(adapter, fields=("price.adj_close",))
+    assert denied.detail is not None and "catalog_columns_missing" in denied.detail
+    assert "missing=['adj_gap']" in denied.detail
+
+
 @pytest.mark.parametrize(
     ("table", "macro", "dropped", "kept"),
     [
@@ -1358,8 +1430,9 @@ def test_corrupt_catalog_file_or_meta_at_boot_drops_every_macro_source(
     """카탈로그 파일이나 meta 가 손상되면 카탈로그가 없을 때처럼 매크로 원천만 빠지고 뜬다.
 
     예전에는 열 확인의 연결이 `try` 밖이라 원시 `IOException`("not a valid DuckDB database
-    file")으로 부팅이 죽었고(#247 a), meta 손상은 설정 오류로 부팅을 멈췄다(#278). 열 확인이
-    없는 매크로 원천(`consensus` 의 `v_consensus`)도 같이 빠져야 첫 질의에서 다시 죽지 않는다.
+    file")으로 부팅이 죽었고(#247 a), meta 손상은 설정 오류로 부팅을 멈췄다(#278). 쓸 수 없는
+    카탈로그면 매크로 원천(재무·컨센서스·신용·수정주가)이 모두 같이 빠져야 첫 질의에서 다시 죽지
+    않는다.
     """
     root = build_workbench_root(tmp_path / "equity")
     (root / name).write_bytes(content)
@@ -1367,7 +1440,9 @@ def test_corrupt_catalog_file_or_meta_at_boot_drops_every_macro_source(
         broken = EquityDuckdbAdapter(root)
     served = {p.field_id for p in broken.list_fields()}
     assert "price.close" in served and "consensus.target_price" in served
-    assert not served & {"financial.book_equity", "consensus.forward_eps", "credit.margin_balance"}
+    assert not served & {
+        "financial.book_equity", "consensus.forward_eps", "credit.margin_balance", "price.adj_close"
+    }
     denied = _raw(broken, fields=("consensus.forward_eps",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog_unreadable" in denied.detail

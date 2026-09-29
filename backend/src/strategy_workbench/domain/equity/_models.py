@@ -22,6 +22,11 @@ class CellKind(Enum):
     MISSING = "missing"
     NOT_COLLECTED = "not_collected"
     COVERAGE_GAP = "coverage_gap"
+    # 원장 뷰가 값이 틀려 일부러 가린 셀(무상증자 척도 창의 신용잔고 #249, 수정주가 조정 공백
+    # 적용일 #220). 값은 없다. 가림 창 안이면 원래 결측 사유(not_collected 등)가 있던 행도 여기
+    # 든다 — 창의 값은 척도가 섞여 있어 모르는 값을 채워도 틀린다. 모르는 값(MISSING)과 달리 실행
+    # 결측 정책이 채우지 않는다 — 채우면 가리기 전보다 더 틀린다(#298).
+    MASKED = "masked"
 
 
 class FieldValueType(Enum):

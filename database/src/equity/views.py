@@ -116,6 +116,10 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
     "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",)}
+# 뷰가 값이 틀려 일부러 가린 행의 표시 열 — 참이면 그 행 값이 NULL 이다. 워크벤치 어댑터는 이 열을
+# 셀 종류 MASKED 로 읽고(`SourceSpec.masked_expr`), 실행 결측 정책은 그 셀을 채우지 않는다(#298).
+# 무엇을 가리나는 뷰 본문이 정하고, 이 선언과 어댑터 배선이 같은지는 backend 계약 테스트가 본다.
+MASK_COLUMNS: dict[str, str] = {"v_credit_balance": "bonus_window", "v_adj_close": "adj_gap"}
 
 # 전방 조정 공통 CTE — `v_adj_price_fwd`·`v_adj_volume_fwd` 가 같은 본문을 쓴다(매크로는 둘,
 # 정의는 하나). 계수를 (ticker, span_seq, fold_date) 로 접고(같은 날 두 이벤트 = 곱) 앞에서부터
@@ -498,10 +502,10 @@ LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
     #   ① PIT: 공시 전에는 가릴 근거가 없다 — 공시 접수일(`available_date`) **다음** 행부터만
     #      가린다(접수 시각이 없어 당일은 아직 쓸 수 없다). 판정이 그 행과 그 전 공시만 보므로
     #      as_of 에 무관하고, as_of 는 행 절단으로만 작용한다(`v_adj_price_fwd` 와 같은 규약).
-    #   ② 가린 행은 값 NULL · `fill_kind.kind` 'empty_response'(→ 엔진 MISSING)이고 evidence 는
-    #      둔다 — 잔고 이상 격리 셀(`sql/credit_daily.sql` balance_over_shares)과 같은 어휘다
-    #      (`FILL_KINDS` 를 늘리지 않는다). 값이 원래 없던 셀은 사유를 그대로 둔다. 가림 여부는
-    #      `bonus_window` 가 나른다.
+    #   ② 가린 행은 값 NULL · `fill_kind.kind` 'empty_response'(워크벤치 어댑터는 `bonus_window`
+    #      로 MASKED, #298)이고 evidence 는 둔다 — 잔고 이상 격리 셀(`sql/credit_daily.sql`
+    #      balance_over_shares)과 같은 어휘다(`FILL_KINDS` 를 늘리지 않는다). 값이 원래 없던 셀은
+    #      사유를 그대로 둔다. 가림 여부는 `bonus_window` 가 나른다.
     "v_credit_balance": """
 WITH cal AS (
     SELECT date, row_number() OVER (ORDER BY date) AS i FROM {trading_calendar}
@@ -548,7 +552,8 @@ FROM bal
     #   정보를 새지 않으므로 공개일을 기다리지 않는다. 공개 전 계수를 접는 것은 아니다(fold 규칙은
     #   S23 그대로). as_of 는 행 절단으로만 작용한다. 예외: 그날 보이는 재설정 가운데 무엇을
     #   가릴지는 다음 세션 정보(늦은 공시·주식수 랙 1)로 갈린다 — 영향은 적용일 as_of 에 랙 0 으로
-    #   그 행을 읽는 창 연산 셀뿐이다(기본 12-1 모멘텀은 랙 21 이라 무관).
+    #   그 행을 읽는 창 연산 셀과 그 자리의 `lag` 셀(가린 칸 자리의 출력도 결측이다 — #315)뿐이다
+    #   (기본 12-1 모멘텀은 랙 21 이라 무관).
     "v_adj_close": """
 WITH gap AS (
     SELECT DISTINCT ticker, apply_date

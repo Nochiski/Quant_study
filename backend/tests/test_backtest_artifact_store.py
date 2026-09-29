@@ -106,7 +106,6 @@ def test_local_artifact_store_commits_atomically_and_preserves_null_vs_zero(tmp_
     manifest_path = tmp_path / "run-safe-001" / "manifest.json"
     payload = result_path.read_bytes()
     decoded = json.loads(payload)
-    assert result_path.as_uri() == commit.uri
     assert manifest_path.exists()
     assert commit.sha256 == hashlib.sha256(payload).hexdigest()
     assert decoded["metrics"][0]["value"] == 0.0

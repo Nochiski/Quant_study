@@ -71,7 +71,8 @@ class RunSummary:
     max_drawdown: float | None
     tape_hash: str
     run_fingerprint: str | None
-    artifact_uri: str | None
+    artifact_root: Path
+    artifact_sha256: str | None
     warnings: tuple[str, ...]
     error: str | None
 
@@ -140,9 +141,10 @@ def run(root: Path, start: date, end: date, universe_id: str, *, price_field: st
 
     if price_field not in PRICE_FIELDS:
         raise ValueError(f"price_field must be one of {PRICE_FIELDS} — got={price_field!r}")
+    # run 상태는 산출물 위치를 싣지 않는다(#277) — 이 스크립트가 고른 루트를 요약에 그대로 남긴다.
+    artifact_root = artifact_root or root / "_runs" / f"mvp_{uuid4().hex[:8]}"
     container = build_container(
-        equity_adapter="duckdb", equity_root=root,
-        artifact_root=artifact_root or root / "_runs" / f"mvp_{uuid4().hex[:8]}")
+        equity_adapter="duckdb", equity_root=root, artifact_root=artifact_root)
     spec = momentum_spec(price_field, top)
     environment = run_environment(start, end, universe_id)
     pipeline = container.portfolio_design.run_pipeline(
@@ -173,7 +175,8 @@ def run(root: Path, start: date, end: date, universe_id: str, *, price_field: st
         n_rebalances_with_positions=sum(1 for f in tape.frames if f.targets),
         total_return=metrics.get("total_return"), cagr=metrics.get("cagr"),
         max_drawdown=metrics.get("max_drawdown"), tape_hash=tape.tape_hash,
-        run_fingerprint=fingerprint, artifact_uri=state.artifact_uri,
+        run_fingerprint=fingerprint, artifact_root=artifact_root,
+        artifact_sha256=state.artifact_sha256,
         warnings=pipeline.preview.warnings, error=state.error)
 
 
@@ -184,7 +187,7 @@ def print_summary(s: RunSummary) -> None:
           f"rebalances={s.n_rebalances} (with positions {s.n_rebalances_with_positions})")
     print(f"  total_return={s.total_return} cagr={s.cagr} max_drawdown={s.max_drawdown}")
     print(f"  tape_hash={s.tape_hash} run_fingerprint={s.run_fingerprint}")
-    print(f"  artifact={s.artifact_uri}")
+    print(f"  artifact_root={s.artifact_root} artifact_sha256={s.artifact_sha256}")
     for w in s.warnings:
         print(f"  warning: {w}")
     if s.error:

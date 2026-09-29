@@ -710,17 +710,6 @@
             ],
             "title": "Artifact Sha256"
           },
-          "artifact_uri": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Artifact Uri"
-          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",

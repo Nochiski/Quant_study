@@ -59,7 +59,6 @@ class LocalArtifactStore:
                 shutil.rmtree(staging)
             raise
         return ArtifactCommit(
-            uri=(target / "result.json").as_uri(),
             sha256=hashlib.sha256(payload).hexdigest(),
             size_bytes=len(payload),
         )

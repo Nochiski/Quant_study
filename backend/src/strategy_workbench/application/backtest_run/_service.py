@@ -562,11 +562,7 @@ class BacktestRunService:
                     cancelled_after_commit = True
                 else:
                     record.result = result
-                    record.state = replace(
-                        record.state,
-                        artifact_uri=commit.uri,
-                        artifact_sha256=commit.sha256,
-                    )
+                    record.state = replace(record.state, artifact_sha256=commit.sha256)
                     self._emit(
                         record,
                         RunStatus.COMPLETED,

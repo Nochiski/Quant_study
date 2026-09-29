@@ -203,7 +203,9 @@ def _execute(client: TestClient, core: str) -> dict[str, Any]:
     return response.json()
 
 
-def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts() -> None:
+def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
+    isolate_runtime_state_paths: Path,
+) -> None:
     client = TestClient(build_http_app())
     accepted = client.post("/api/v1/backtests", json=_run_body(client))
     assert accepted.status_code == 202
@@ -237,7 +239,6 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
 
     assert state["status"] == "completed", state
     assert len(state["artifact_sha256"]) == 64
-    assert state["artifact_uri"].startswith("file:///")
     result = client.get(f"/api/v1/backtests/{run_id}/result").json()
     assert result["manifest"]["engine_core"] == "rust"
     assert len(result["manifest"]["run_fingerprint"]) == 64
@@ -268,6 +269,19 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
     assert events.status_code == 200
     assert events.headers["content-type"].startswith("text/event-stream")
     assert '"status":"completed"' in events.text
+
+    # 산출물은 서버의 런타임 상태 디렉터리 아래에만 있다 — run 응답 어디에도 그 절대 경로가 없다
+    # (#277). 역슬래시·file URI·JSON 이스케이프 표기와 무관하게 그 디렉터리 이름으로 본다.
+    for response in (
+        accepted,
+        accepted_request,
+        client.get(f"/api/v1/backtests/{run_id}"),
+        client.get("/api/v1/backtests"),
+        client.get(f"/api/v1/backtests/{run_id}/result"),
+        client.post(f"/api/v1/backtests/{run_id}/cancel"),
+        events,
+    ):
+        assert isolate_runtime_state_paths.name not in response.text, response.request.url
 
 
 def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
@@ -305,7 +319,6 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
 
     state = _wait(client, first_run_id)
     assert state["status"] == "cancelled"
-    assert state["artifact_uri"] is None
     assert state["artifact_sha256"] is None
     assert barrier.discarded == [first_run_id]
     assert not (artifact_root / first_run_id).exists()
@@ -400,7 +413,7 @@ def test_cancel_during_raw_observation_loading_ends_cancelled_without_a_tape(
     assert state["status"] == "cancelled", state
     assert state["error"] is None
     assert state["error_code"] is None
-    assert state["artifact_uri"] is None
+    assert state["artifact_sha256"] is None
     # 취소는 mock 어댑터의 로딩 checkpoint 에서 관측되므로 로딩이 끝까지 가지 않는다.
     assert barrier.loaded is False
     events = client.get(f"/api/v1/backtests/{run_id}/events").text

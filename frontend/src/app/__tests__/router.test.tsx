@@ -84,7 +84,6 @@ const backtestSummary = ({
     created_at: saved ? "2026-09-05T00:00:00Z" : "2026-09-05T01:00:00Z",
     updated_at: saved ? "2026-09-05T00:01:00Z" : "2026-09-05T01:01:00Z",
     error: null,
-    artifact_uri: null,
     artifact_sha256: null,
   },
   strategy_provenance: {

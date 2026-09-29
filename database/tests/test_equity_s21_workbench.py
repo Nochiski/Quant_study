@@ -429,4 +429,4 @@ def test_MVP_B_모멘텀_월간_백테스트가_절단본에서_완주한다(bui
     assert s.n_rebalances == 11 and s.n_rebalances_with_positions >= 1
     assert s.n_securities >= 5 and s.total_return is not None
     assert s.data_snapshot_id == catalog.snapshot_id(catalog.table_builds(built))
-    assert s.artifact_uri is not None
+    assert s.artifact_sha256 is not None

@@ -22,6 +22,7 @@ from strategy_workbench.adapters.outbound.backtest_engine.facade.executor import
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
+from strategy_workbench.adapters.outbound.equity_mock._fixture import build_demo_fixture
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
@@ -342,7 +343,8 @@ def test_the_same_request_on_another_field_contract_gets_another_run_fingerprint
     )
     same = fingerprint(MockEquityDataAdapter.demo(), "contract-same")
     assert fingerprint(MockEquityDataAdapter.demo(), "contract-again") == same
-    assert fingerprint(MockEquityDataAdapter.demo(profiles=relabeled), "contract-other") != same
+    other = MockEquityDataAdapter(replace(build_demo_fixture(), profiles=relabeled))
+    assert fingerprint(other, "contract-other") != same
 
 
 def test_the_limit_must_allow_at_least_one_run(gated_runs: _GatedRuns) -> None:

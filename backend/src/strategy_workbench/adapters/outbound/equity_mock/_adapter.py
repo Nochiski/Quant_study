@@ -89,12 +89,9 @@ class MockEquityDataAdapter:
         self._observations = fixture.observations
 
     @classmethod
-    def demo(
-        cls, *, profiles: tuple[DatasetFieldProfile, ...] | None = None
-    ) -> MockEquityDataAdapter:
-        """결정적 데모 fixture 로 만든다. `profiles` 를 주면 선언표만 바꾼 mock 이다(테스트)."""
-        fixture = build_demo_fixture()
-        return cls(fixture if profiles is None else replace(fixture, profiles=profiles))
+    def demo(cls) -> MockEquityDataAdapter:
+        """결정적 데모 fixture 로 만든다."""
+        return cls(build_demo_fixture())
 
     def snapshot(self) -> DataSnapshot:
         return self._snapshot

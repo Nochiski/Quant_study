@@ -7,7 +7,10 @@ from datetime import date
 
 import pytest
 
-from strategy_workbench.adapters.outbound.equity_mock._fixture import MOCK_SPLIT
+from strategy_workbench.adapters.outbound.equity_mock._fixture import (
+    MOCK_SPLIT,
+    build_demo_fixture,
+)
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     FieldCatalogQuery,
@@ -125,7 +128,8 @@ def test_mock_snapshot_id_moves_with_data_and_declared_meaning_only(
     assert re.fullmatch(r"mock-equity-v0\.2-[0-9a-f]{16}:[0-9a-f]{16}", before)
     profiles = edit(monkeypatch, MockEquityDataAdapter.demo().list_fields())
     assert isinstance(profiles, tuple)
-    after = MockEquityDataAdapter.demo(profiles=profiles).snapshot().snapshot_id
+    changed = MockEquityDataAdapter(replace(build_demo_fixture(), profiles=profiles))
+    after = changed.snapshot().snapshot_id
 
     source, _, contract = before.partition(SNAPSHOT_CONTRACT_SEPARATOR)
     after_source, _, after_contract = after.partition(SNAPSHOT_CONTRACT_SEPARATOR)

@@ -1561,6 +1561,20 @@ export type ExperimentErrorResponse = {
 };
 
 /**
+ * ExperimentPage
+ */
+export type ExperimentPage = {
+  /**
+   * Items
+   */
+  items: Array<Experiment>;
+  /**
+   * Next After
+   */
+  next_after: string | null;
+};
+
+/**
  * ExperimentPreview
  *
  * 시작 전 미리 계산 — 무엇을 몇 번 돌리고 계열 시도 수 N 이 얼마가 되나(spec D2).
@@ -7272,6 +7286,42 @@ export type PreviewEquityUniverseResponses = {
 
 export type PreviewEquityUniverseResponse =
   PreviewEquityUniverseResponses[keyof PreviewEquityUniverseResponses];
+
+export type ListExperimentsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * After
+     */
+    after?: string | null;
+    /**
+     * Limit
+     */
+    limit?: number;
+  };
+  url: "/api/v1/experiments";
+};
+
+export type ListExperimentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListExperimentsError =
+  ListExperimentsErrors[keyof ListExperimentsErrors];
+
+export type ListExperimentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentPage;
+};
+
+export type ListExperimentsResponse =
+  ListExperimentsResponses[keyof ListExperimentsResponses];
 
 export type CreateExperimentData = {
   body: ExperimentRequest;

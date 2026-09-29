@@ -193,7 +193,8 @@ FI_TABLES: dict[str, TableContract] = {t.name: t for t in (
 # ── ② 모델 설정 ───────────────────────────────────────────────────────────────
 ROLES = ("score", "display")
 # D-13 적격성 제외 표식 — UniverseRule.exclude 의 어휘. fi_universe BOOLEAN 열과 짝:
-#   admin → is_admin · halted → is_halted · audit_adverse → audit_adverse · filing_late → filing_late
+#   admin → is_admin · halted → is_halted ·
+#   audit_adverse → audit_adverse · filing_late → filing_late
 ELIGIBILITY_FLAGS = ("admin", "halted", "audit_adverse", "filing_late")
 GATE_RULES = ("exclude_bottom_pct", "exclude_top_pct", "require_value")
 SECTOR_LEVELS = ("L1", "L2")

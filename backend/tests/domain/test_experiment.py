@@ -390,28 +390,34 @@ def test_window_cell_without_scored_neighbors_uses_its_own_score() -> None:
     assert pick_window_cell({}, (4,), WindowSelectionRule.TRAIN_SHARPE_MAX) is None
 
 
-def test_out_of_sample_curve_chains_test_window_returns_from_the_initial_cash() -> None:
+def test_out_of_sample_curve_chains_returns_from_each_window_first_snapshot() -> None:
+    """#364 리뷰 P3-1: 학습 점수(엔진 전체 구간)처럼 창마다 첫 스냅숏부터 수익률을 센다."""
+
     def segment(*points: tuple[date, float]) -> tuple[EquityCurvePoint, ...]:
         return tuple(EquityCurvePoint(session, equity, None) for session, equity in points)
 
     stitched = stitch_out_of_sample(
         [
-            segment((date(2023, 1, 2), 110.0), (date(2023, 1, 3), 99.0)),
-            # 둘째 창도 초기 자본 100 에서 시작한다 — 첫날 수익률은 120/100 이지 120/99 가 아니다.
-            segment((date(2024, 1, 2), 120.0), (date(2024, 1, 3), 90.0)),
-        ],
-        100.0,
+            # 초기 자본 100 → 첫날 110(진입) 수익률은 들지 않는다. 첫날이 기준점 1.0 이다.
+            segment((date(2023, 1, 2), 110.0), (date(2023, 1, 3), 99.0), (date(2023, 1, 4), 104.5)),
+            # 둘째 창 첫날 점은 곡선에 없고, 앞 창 마지막 값에서 90/120 으로 이어진다.
+            segment((date(2024, 1, 2), 120.0), (date(2024, 1, 3), 90.0), (date(2024, 1, 4), 99.0)),
+        ]
     )
 
     assert [point.session for point in stitched] == [
         date(2023, 1, 2),
         date(2023, 1, 3),
-        date(2024, 1, 2),
+        date(2023, 1, 4),
         date(2024, 1, 3),
+        date(2024, 1, 4),
     ]
-    # 1.1, 1.1×0.9, 0.99×1.2, 1.188×0.75.
-    assert [point.equity for point in stitched] == pytest.approx([1.1, 0.99, 1.188, 0.891])
-    assert stitch_out_of_sample([], 100.0) == ()
+    # 1, 99/110 = 0.9, 0.9 × 104.5/99 = 0.95, 0.95 × 90/120 = 0.7125, 0.7125 × 99/90 = 0.78375.
+    assert [point.equity for point in stitched] == pytest.approx([1.0, 0.9, 0.95, 0.7125, 0.78375])
+    assert stitch_out_of_sample([]) == ()
+    assert stitch_out_of_sample([(), segment((date(2024, 1, 2), 120.0))]) == (
+        EquityCurvePoint(date(2024, 1, 2), 1.0, None),
+    )
 
 
 @pytest.mark.parametrize(

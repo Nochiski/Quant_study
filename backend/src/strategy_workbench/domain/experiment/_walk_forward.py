@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from enum import StrEnum
+from itertools import pairwise
 
 from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint
 
@@ -174,20 +175,22 @@ def pick_window_cell(
 
 
 def stitch_out_of_sample(
-    segments: Sequence[Sequence[EquityCurvePoint]], initial_cash: float
+    segments: Sequence[Sequence[EquityCurvePoint]],
 ) -> tuple[EquityCurvePoint, ...]:
-    """검증 창 실행들의 일별 수익률만 이어 붙인 곡선. 1.0 에서 시작한다.
+    """검증 창 실행들의 세션 수익률만 이어 붙인 곡선. 첫 검증 창의 첫 세션이 기준점 1.0 이다.
 
-    창마다 첫 세션 수익률은 그 실행의 초기 자본 대비다 — 검증 실행은 창 시작일에 현금으로 시작하고,
-    앞 창의 마지막 값에서 곡선이 이어진다. 학습 구간 수익률은 들어가지 않는다.
+    수익률은 창마다 그 실행의 첫 스냅숏부터 센다 — 학습 점수(엔진 전체 구간 샤프)도 첫 스냅숏부터
+    세므로 초기 자본 → 첫 세션(진입 비용) 수익률은 양쪽 모두 들지 않는다. 그래서 둘째 창부터는 첫
+    세션 점이 곡선에 없고, 앞 창의 마지막 값에서 그 창 둘째 세션 수익률로 이어진다. 학습 구간
+    수익률은 들어가지 않는다.
     """
-    value, stitched = 1.0, []
+    stitched: list[EquityCurvePoint] = []
     for segment in segments:
-        previous = initial_cash
-        for point in segment:
-            value *= point.equity / previous
-            previous = point.equity
-            stitched.append(EquityCurvePoint(point.session, value, None))
+        if segment and not stitched:
+            stitched.append(EquityCurvePoint(segment[0].session, 1.0, None))
+        for before, after in pairwise(segment):
+            value = stitched[-1].equity * after.equity / before.equity
+            stitched.append(EquityCurvePoint(after.session, value, None))
     return tuple(stitched)
 
 

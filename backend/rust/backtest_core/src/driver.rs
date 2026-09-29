@@ -566,7 +566,8 @@ impl PersistentEngine {
         }
         // 자본 잠식 검사는 python과 같이 COST append 뒤다 — 잠식으로 멈춘 run의 partial trace에도
         // 그 세션 비용은 남는다.
-        if snapshot.equity < 0.0 {
+        // 자산 0도 파산이다. 0에서 이어지면 다음 세션 수익률이 0으로 나누기가 된다(#274).
+        if snapshot.equity <= 0.0 {
             let feed = self.feed_ref()?;
             let positions: Vec<String> = snapshot
                 .rows
@@ -574,7 +575,7 @@ impl PersistentEngine {
                 .map(|row| format!("('{}', '{}')", feed.symbol_of(row.0), row.1))
                 .collect();
             return Err(PyValueError::new_err(format!(
-                "equity_wiped_out: equity fell below zero at session close — ts={} equity={} \
+                "equity_wiped_out: equity fell to zero or below at session close — ts={} equity={} \
                  cash={} positions=[{}]",
                 feed.session_at(session)?,
                 py_float(snapshot.equity),

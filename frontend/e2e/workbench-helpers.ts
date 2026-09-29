@@ -40,8 +40,36 @@ export const openEditor = async (page: Page, url: string) => {
   await expect(editor(page)).toBeVisible();
 };
 
+/**
+ * 편집기가 그린 줄에서 원문을 읽는다 — 선택·포커스·URL을 건드리지 않는다. CodeMirror는 화면에서 먼
+ * 줄을 그리지 않고 자리(`.cm-gap`)만 두므로, 그런 자리가 있으면 원문 전체를 읽을 수 없다고 멈춘다.
+ */
+const renderedSource = (page: Page): Promise<string> =>
+  editor(page).evaluate((content) => {
+    if (content.querySelector(".cm-gap") !== null)
+      throw new Error("the editor did not render every line of the source");
+    return Array.from(
+      content.querySelectorAll(":scope > .cm-line"),
+      (line) => line.textContent ?? "",
+    ).join("\n");
+  });
+
+/**
+ * 편집기 원문 전체를 `source`로 바꾸고, 정확히 그 텍스트가 남았는지 확인한다(#240).
+ *
+ * 전체 선택은 편집기 자신의 명령(`Control+A`)으로 한다. Playwright `fill`은 contenteditable에서 DOM
+ * 선택으로 전체를 고르는데, CodeMirror가 그 DOM 선택을 읽기 전에 편집기 갱신(화면이 뜬 직후 파싱·
+ * compile·스키마 적재가 넣는 진단·확장)이 오면 편집기 상태의 선택(문서 처음의 커서)으로 되돌려 쓴다.
+ * 그러면 넣은 텍스트가 원래 문서 앞에 붙어 "구문 오류"가 된다(부하 속 새 전략 화면에서 재현했다).
+ */
 export const replaceSource = async (page: Page, source: string) => {
-  await editor(page).fill(source);
+  await editor(page).press("Control+A");
+  await page.keyboard.insertText(source);
+  await expect
+    .poll(() => renderedSource(page), {
+      message: "편집기 원문이 넣은 텍스트와 같다(#240)",
+    })
+    .toBe(source);
 };
 
 /**

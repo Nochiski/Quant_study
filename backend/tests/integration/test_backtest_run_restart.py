@@ -96,6 +96,8 @@ def test_runs_left_unfinished_by_the_previous_process_are_closed_as_interrupted(
                 StrategyProvenance(StrategySourceKind.SAVED_REVISION, "a" * 64, "1.2", "s-1", 1),
             ),
             request,
+            lineage_id="s-1",
+            trial_key="b" * 64,
         )
     repository.close()
 

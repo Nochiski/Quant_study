@@ -1,13 +1,16 @@
 """연구 기록 DB의 스키마 (검증 랩 spec D3).
 
 전략 revision DB와 **다른 파일**이다. 저 쪽은 revision이 immutable이라 UPDATE/DELETE를 트리거로
-막지만, 여기 run 은 상태가 바뀐다. 시도 원장·실험·봉인 원장(V1-05 이후)도 이 파일에 더한다.
+막지만, 여기 run 은 상태가 바뀐다. 실험(V3-03 이후)도 이 파일에 더한다.
 
 ## 버전
 
 | 버전 | 바뀐 것 |
 |---|---|
 | 1 | 최초(V1-03): `backtest_runs` |
+| 2 | 시도 원장(V1-05): `trial_ledger`·`lineage_merges`·`sealed_window_blocks` |
+
+v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다.
 """
 
 from __future__ import annotations
@@ -16,12 +19,13 @@ import sqlite3
 
 from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
     SchemaContract,
+    SchemaUpgrade,
     ensure_schema,
 )
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -77,6 +81,76 @@ V1_SCHEMA_OBJECTS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+# `accepted_order` 로 run 한 줄에 원장 한 줄이다(rowid 별칭이라 자동 인덱스가 없다). 계열이 없는
+# run(저장한 적 없는 초안)도 적고 N 에서 뺀다. 세션 샤프·판본은 완료 때 채운다.
+_V2_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "trial_ledger",
+        """
+        CREATE TABLE trial_ledger (
+            accepted_order INTEGER PRIMARY KEY REFERENCES backtest_runs (accepted_order),
+            lineage_id TEXT COLLATE BINARY,
+            trial_key TEXT NOT NULL CHECK (length(trial_key) = 64),
+            session_sharpe REAL,
+            metric_registry_version TEXT
+        )
+        """,
+    ),
+    (
+        "index",
+        "trial_ledger_by_lineage",
+        "CREATE INDEX trial_ledger_by_lineage ON trial_ledger (lineage_id, accepted_order)",
+    ),
+    # 계열 합치기는 되돌릴 수 없고 한 계열은 한 번만 합쳐진다(합친 쪽은 남은 계열로 따라간다).
+    (
+        "table",
+        "lineage_merges",
+        """
+        CREATE TABLE lineage_merges (
+            merge_order INTEGER PRIMARY KEY,
+            source_id TEXT NOT NULL COLLATE BINARY,
+            target_id TEXT NOT NULL COLLATE BINARY CHECK (target_id <> source_id),
+            merged_at TEXT NOT NULL
+        )
+        """,
+    ),
+    (
+        "index",
+        "lineage_merges_source",
+        "CREATE UNIQUE INDEX lineage_merges_source ON lineage_merges (source_id)",
+    ),
+    # 봉인 원장의 "차단한 시도"(spec D11). 거절된 요청이라 run 이 없다.
+    (
+        "table",
+        "sealed_window_blocks",
+        """
+        CREATE TABLE sealed_window_blocks (
+            blocked_order INTEGER PRIMARY KEY,
+            blocked_at TEXT NOT NULL,
+            lineage_id TEXT COLLATE BINARY,
+            trial_key TEXT NOT NULL CHECK (length(trial_key) = 64),
+            spec_hash TEXT NOT NULL CHECK (length(spec_hash) = 64),
+            start TEXT NOT NULL
+        )
+        """,
+    ),
+    (
+        "index",
+        "sealed_window_blocks_by_lineage",
+        "CREATE INDEX sealed_window_blocks_by_lineage "
+        "ON sealed_window_blocks (lineage_id, blocked_order)",
+    ),
+)
+
+V2_SCHEMA_OBJECTS = V1_SCHEMA_OBJECTS + _V2_ADDED_OBJECTS
+
+
+def _upgrade_v1_to_v2(connection: sqlite3.Connection) -> None:
+    for _object_type, _name, statement in _V2_ADDED_OBJECTS:
+        connection.execute(statement)
+
+
 def migrate_schema(connection: sqlite3.Connection) -> None:
     ensure_schema(
         connection,
@@ -84,7 +158,8 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V1_SCHEMA_OBJECTS,
+            objects=V2_SCHEMA_OBJECTS,
             error=ResearchStorageError,
+            upgrades=(SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _upgrade_v1_to_v2),),
         ),
     )

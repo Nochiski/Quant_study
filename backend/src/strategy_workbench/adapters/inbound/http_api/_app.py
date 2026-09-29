@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from threading import Event
-from typing import Annotated, Any
+from typing import Annotated, Any, TypeVar
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
@@ -34,6 +34,9 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
     StrategyRevisionRequiresUpgradeError,
+    TrialLedger,
+    TrialLineageAlreadyMergedError,
+    TrialPreview,
 )
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
@@ -136,6 +139,8 @@ from ._backtest_contract import (
     BacktestStrategyNotFoundResponse,
     BacktestStrategyStaleResponse,
     CodedBodyValidationRoute,
+    TrialLineageAlreadyMergedResponse,
+    TrialLineageMergeRequest,
 )
 from ._execution_error_contract import (
     Portfolio422Response,
@@ -170,6 +175,8 @@ from ._trace_contract import (
     TraceStrategyStaleResponse,
     apply_trace_openapi_contract,
 )
+
+_T = TypeVar("_T")
 
 EQUITY_CATALOG_PATH = "/api/v1/equity/catalog"
 FACTOR_CATALOG_PATH = "/api/v1/factors/catalog"
@@ -359,9 +366,10 @@ def create_app(
             strategy_id=strategy_id,
         )
 
-    def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
+    def admitted(call: Callable[[], _T]) -> _T:
+        """시작·미리 계산은 같은 요청 판정을 타므로 거절도 같은 코드로 낸다."""
         try:
-            return backtest_runs.start(spec)
+            return call()
         # 아래 세 오류는 `InvalidBacktestRunError` 의 하위 타입이므로 반드시 먼저 잡는다.
         except MissingBacktestRunEnvironmentError as error:
             raise HTTPException(
@@ -416,8 +424,29 @@ def create_app(
             # 위반은 run 스레드의 tape 단계에서 run 상태 `failed` + `error` 로 기록된다.
             raise _portfolio_http_error(error) from error
 
-    # 본문 검증 실패를 코드화된 422 로 내려고 이 라우트만 `CodedBodyValidationRoute` 로 등록한다
+    def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
+        return admitted(lambda: backtest_runs.start(spec))
+
+    def preview_backtest_trial(spec: BacktestRunSpec) -> TrialPreview:
+        """실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2)."""
+        return admitted(lambda: backtest_runs.preview_trial(spec))
+
+    # 본문 검증 실패를 코드화된 422 로 내려고 이 두 라우트만 `CodedBodyValidationRoute` 로 등록한다
     # (이슈 #260). `app.post` 데코레이터는 라우트 클래스를 받지 않는다.
+    admission_responses: dict[int | str, dict[str, Any]] = {
+        404: {
+            "model": BacktestStrategyNotFoundResponse,
+            "description": "The immutable strategy revision does not exist",
+        },
+        409: {
+            "model": BacktestStrategyStaleResponse,
+            "description": "The saved revision hash differs from the expected hash",
+        },
+        422: {
+            "model": Backtest422Response,
+            "description": "A coded backtest preflight or request-body diagnostic",
+        },
+    }
     app.router.add_api_route(
         "/api/v1/backtests",
         start_backtest,
@@ -425,21 +454,43 @@ def create_app(
         operation_id="startBacktest",
         status_code=status.HTTP_202_ACCEPTED,
         route_class_override=CodedBodyValidationRoute,
+        responses=admission_responses,
+    )
+    app.router.add_api_route(
+        "/api/v1/backtests/trial-preview",
+        preview_backtest_trial,
+        methods=["POST"],
+        operation_id="previewBacktestTrial",
+        route_class_override=CodedBodyValidationRoute,
+        responses=admission_responses,
+    )
+
+    @app.get("/api/v1/strategies/{strategy_id}/trials", operation_id="getTrialLedger")
+    def get_trial_ledger(strategy_id: str) -> TrialLedger:
+        """계열 시도 원장(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다."""
+        return backtest_runs.trial_ledger(strategy_id)
+
+    @app.post(
+        "/api/v1/strategies/{strategy_id}/trials/merge",
+        operation_id="mergeTrialLineage",
         responses={
-            404: {
-                "model": BacktestStrategyNotFoundResponse,
-                "description": "The immutable strategy revision does not exist",
-            },
             409: {
-                "model": BacktestStrategyStaleResponse,
-                "description": "The saved revision hash differs from the expected hash",
-            },
-            422: {
-                "model": Backtest422Response,
-                "description": "A coded backtest preflight or request-body diagnostic",
-            },
+                "model": TrialLineageAlreadyMergedResponse,
+                "description": "The two lineages are already one",
+            }
         },
     )
+    def merge_trial_lineage(strategy_id: str, request: TrialLineageMergeRequest) -> TrialLedger:
+        """`source_strategy_id` 계열을 이 계열에 합친다. 되돌릴 수 없다."""
+        try:
+            return backtest_runs.merge_lineages(request.source_strategy_id, strategy_id)
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+        except TrialLineageAlreadyMergedError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.lineage.already_merged", "message": str(error)},
+            ) from error
 
     @app.get(
         "/api/v1/backtests/{run_id}",

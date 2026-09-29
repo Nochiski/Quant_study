@@ -202,3 +202,21 @@ class BacktestResultNotReadyDetail:
 @dataclass(frozen=True)
 class BacktestResultNotReadyResponse:
     detail: BacktestResultNotReadyDetail
+
+
+@dataclass(frozen=True)
+class TrialLineageMergeRequest:
+    """합칠 계열(`source_strategy_id`). 경로의 계열이 남는다."""
+
+    source_strategy_id: Annotated[str, Field(min_length=1)]
+
+
+@dataclass(frozen=True)
+class TrialLineageAlreadyMergedDetail:
+    code: Literal["backtest.lineage.already_merged"]
+    message: str
+
+
+@dataclass(frozen=True)
+class TrialLineageAlreadyMergedResponse:
+    detail: TrialLineageAlreadyMergedDetail

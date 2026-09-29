@@ -20,12 +20,13 @@ def backtest_run_fingerprint(
     """Identify every semantic input needed to reproduce one engine result."""
     # How the strategy was referenced (saved revision id/hash, client source hash) is
     # provenance, recorded in RunManifest.strategy_provenance; it is not an engine input.
+    # 계열(`lineage_strategy_id`)도 출처 정보라 뺀다(검증 랩 spec D2).
     # 실행 설정(`run_spec.environment`)은 run_spec 안에 통째로 실려 지문을 가른다. 같은 전략을
     # 다른 기간·유니버스·비용으로 돌린 두 실행은 결과 캐시를 공유하지 않는다(spec D6).
     # 접수가 해소한 파라미터 값(`run_spec.parameter_values`)도 함께 실려 값마다 지문이 갈린다
     # (spec D4).
     payload = {
-        "run_spec": asdict(replace(spec, strategy_source=None)),
+        "run_spec": asdict(replace(spec, strategy_source=None, lineage_strategy_id=None)),
         "data_snapshot_id": data_snapshot_id,
         "target_tape_hash": target_tape_hash,
         "engine_version": engine_version,

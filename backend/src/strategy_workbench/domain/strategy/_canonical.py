@@ -95,3 +95,19 @@ def canonical_json_spec_hash(canonical_json: str) -> str:
 
 def strategy_spec_hash(spec: StrategySpec) -> str:
     return canonical_json_spec_hash(canonical_strategy_json(spec))
+
+
+# 전략 의미 해시가 보지 않는 칸 — 이름·설명과 파라미터 범위 정의(검증 랩 spec D2). 파라미터
+# 값은 시도 키가 해소된 값으로 따로 싣는다.
+_NON_SEMANTIC_FIELDS = ("title", "description", "parameters")
+
+
+def strategy_semantic_hash(spec: StrategySpec) -> str:
+    """시도 키의 전략 축. `strategy_spec_hash` 의 payload 에서 이름·설명·파라미터 정의를 뺀 해시다.
+
+    제목만 바꿔 저장한 리비전은 새로 고를 거리를 만들지 않으므로 같은 값이다.
+    """
+    payload = canonical_strategy_payload(spec)
+    for name in _NON_SEMANTIC_FIELDS:
+        del payload[name]
+    return canonical_json_spec_hash(canonical_payload_json(payload))

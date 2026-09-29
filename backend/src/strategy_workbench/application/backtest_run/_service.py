@@ -28,6 +28,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
 from strategy_workbench.domain.backtest.facade.environment import (
     MissingRunEnvironmentError,
     ResearchWindowViolationError,
+    RunEnvironment,
     participation_history_sessions,
     require_environment,
 )
@@ -46,8 +47,18 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategySourceKind,
     WarningSeverity,
 )
+from strategy_workbench.domain.backtest.facade.trials import (
+    BlockedTrialAttempt,
+    TrialLedger,
+    TrialPreview,
+    preview_trial,
+    representative_sharpe,
+    summarize_trial_ledger,
+    trial_key,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     InvalidParameterValueError,
+    StrategySpec,
     resolve_parameter_values,
     strategy_spec_hash,
 )
@@ -253,18 +264,12 @@ class BacktestRunService:
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - _resolve always fills it
             raise InvalidBacktestRunError("resolved run spec has no strategy")
+        lineage_id = self._lineage(request, provenance)
         # 실행 설정을 **preflight 앞에서** 한 번 확정해 run spec 에 박는다. 매니페스트·엔진·
         # tape·데이터 조회와 preflight 가 모두 같은 객체를 읽어야 명시 `environment` 가 조용히
         # 무시되지 않는다(P2-01 P0). 1.2 는 문서에서 만드는 대체 경로가 없으므로 해소 단계가
         # 사라졌고, 그래서 두 호출부가 다른 값을 볼 여지도 없다(P2-03 결정 항목).
-        try:
-            environment = require_environment(
-                spec.environment, requested_by=f"backtest.run({strategy.title!r})"
-            )
-        except MissingRunEnvironmentError as error:
-            raise MissingBacktestRunEnvironmentError(str(error)) from error
-        except ResearchWindowViolationError as error:
-            raise BacktestResearchWindowViolationError(error) from error
+        environment = self._pin_environment(spec, strategy, lineage_id, record_blocked=True)
         spec = replace(spec, environment=environment)
         # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
         engine = self._portfolio_design.preflight(
@@ -351,7 +356,12 @@ class BacktestRunService:
             )
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
             # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
-            self._repository.add(BacktestRunSummary(record.state, provenance), request)
+            self._repository.add(
+                BacktestRunSummary(record.state, provenance),
+                request,
+                lineage_id=lineage_id,
+                trial_key=trial_key(spec),
+            )
             self._records[run_id] = record
             # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
             # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
@@ -359,6 +369,44 @@ class BacktestRunService:
             self._waiting.append(record)
             self._dispatch()
         return BacktestStartResponse(accepted)
+
+    def preview_trial(self, request: BacktestRunSpec) -> TrialPreview:
+        """실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).
+
+        `start` 와 같은 해소·계열·실행 설정 판정을 타서 같은 시도 키를 낸다. 봉인 겹침은 같은 422 로
+        거절하되 실행 요청이 아니므로 봉인 원장에 남기지 않는다. 전략 검증(preflight)은 하지 않는다.
+        """
+        spec, provenance = self._resolve(request)
+        strategy = spec.strategy
+        if strategy is None:  # pragma: no cover - _resolve always fills it
+            raise InvalidBacktestRunError("resolved run spec has no strategy")
+        lineage_id = self._lineage(request, provenance)
+        environment = self._pin_environment(spec, strategy, lineage_id, record_blocked=False)
+        try:
+            key = trial_key(replace(spec, environment=environment))
+        except InvalidParameterValueError as error:
+            raise BacktestParameterValueError(error) from error
+        return preview_trial(None if lineage_id is None else self.trial_ledger(lineage_id), key)
+
+    def trial_ledger(self, lineage_id: str) -> TrialLedger:
+        """계열 원장 — 시도 묶음·재확인·N 제외 실행·차단한 시도.
+
+        합쳐진 계열을 물으면 남은 계열의 원장이다.
+        """
+        records = self._repository.trial_ledger(lineage_id)
+        return summarize_trial_ledger(
+            records.lineage_id, records.merged_lineage_ids, records.entries, records.blocked
+        )
+
+    def merge_lineages(self, source_id: str, target_id: str) -> TrialLedger:
+        """`source_id` 계열을 `target_id` 계열에 합친다. 되돌릴 수 없다(spec D2).
+
+        두 계열 모두 저장된 전략이어야 한다(없으면 `StrategyNotFoundError`).
+        """
+        for strategy_id in (source_id, target_id):
+            self._strategy_repository.get(strategy_id)
+        self._repository.merge_lineages(source_id, target_id, merged_at=self._now())
+        return self.trial_ledger(target_id)
 
     def state(self, run_id: str) -> BacktestRunState:
         """이 프로세스가 도는 run 은 메모리의 진행률까지, 나머지는 저장소의 마지막 상태."""
@@ -534,6 +582,91 @@ class BacktestRunService:
         # TargetTape 와 같은 함수라 tape 없이 확정할 수 있고(#158), tape 단계가 다시 대조한다.
         return replace(request, strategy=strategy), None
 
+    def _lineage(
+        self, request: BacktestRunSpec, provenance: StrategyProvenance | None
+    ) -> str | None:
+        """실행이 속한 계열. 저장 리비전은 그 전략, 인라인 초안은 요청이 실은 계열이다."""
+        lineage_id = request.lineage_strategy_id
+        if provenance is not None:
+            if lineage_id not in (None, provenance.strategy_id):
+                raise InvalidBacktestRunError(
+                    "lineage_strategy_id differs from the saved revision strategy — "
+                    f"lineage_strategy_id={lineage_id} strategy_id={provenance.strategy_id}"
+                )
+            return provenance.strategy_id
+        if lineage_id is not None:
+            try:
+                self._strategy_repository.get(lineage_id)
+            except StrategyNotFoundError as error:
+                raise StrategyReferenceNotFoundError(
+                    f"lineage strategy not found — lineage_strategy_id={lineage_id}"
+                ) from error
+        return lineage_id
+
+    def _pin_environment(
+        self,
+        spec: BacktestRunSpec,
+        strategy: StrategySpec,
+        lineage_id: str | None,
+        *,
+        record_blocked: bool,
+    ) -> RunEnvironment:
+        """요청의 실행 설정을 확정한다.
+
+        봉인 겹침 거절은 `record_blocked` 면 봉인 원장에 남긴다(spec D11).
+        """
+        try:
+            return require_environment(
+                spec.environment, requested_by=f"backtest.run({strategy.title!r})"
+            )
+        except MissingRunEnvironmentError as error:
+            raise MissingBacktestRunEnvironmentError(str(error)) from error
+        except ResearchWindowViolationError as error:
+            if record_blocked and spec.environment is not None:
+                self._record_blocked(spec, strategy, spec.environment, lineage_id)
+            raise BacktestResearchWindowViolationError(error) from error
+
+    def _record_blocked(
+        self,
+        spec: BacktestRunSpec,
+        strategy: StrategySpec,
+        environment: RunEnvironment,
+        lineage_id: str | None,
+    ) -> None:
+        # 기록이 실패해도 거절은 그대로 돌려준다 — 막는 것이 먼저다.
+        try:
+            key = trial_key(spec)
+        except InvalidParameterValueError:
+            # 파라미터 값을 해소할 수 없는 요청은 전략이 확정되기 전의 거절이라 남기지 않는다.
+            return
+        try:
+            self._repository.record_blocked_attempt(
+                BlockedTrialAttempt(
+                    blocked_at=self._now(),
+                    lineage_id=lineage_id,
+                    trial_key=key,
+                    spec_hash=strategy_spec_hash(strategy),
+                    start=environment.start,
+                )
+            )
+        except Exception:
+            logger.exception(
+                "sealed-window block could not be recorded — lineage_id=%s start=%s",
+                lineage_id,
+                environment.start,
+            )
+
+    def _record_trial_result(self, run_id: str, result: BacktestRunResult) -> None:
+        # 실패해도 run 은 끝까지 간다. 대표 샤프가 빈 시도로 보이고 원인은 로그에 남는다.
+        try:
+            self._repository.record_trial_result(
+                run_id,
+                session_sharpe=representative_sharpe(result),
+                metric_registry_version=result.manifest.metric_registry_version,
+            )
+        except Exception:
+            logger.exception("trial result could not be recorded — run_id=%s", run_id)
+
     def _dispatch(self) -> None:
         """자리가 비는 만큼 대기열 앞의 run 을 스레드로 띄운다. `self._lock` 안에서 부른다.
 
@@ -681,6 +814,7 @@ class BacktestRunService:
                 record, RunStatus.RUNNING, _ARTIFACT_PROGRESS, "artifact", "Committing artifacts"
             )
             commit = self._artifact_store.commit(result)
+            self._record_trial_result(run_id, result)
             cancelled_after_commit = False
             with self._lock:
                 # Completion and cancel acceptance linearize on the same lock. If cancel acquired

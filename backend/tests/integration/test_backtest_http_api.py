@@ -201,6 +201,7 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
         "strategy_source": None,
         # 원본 요청이라 파라미터 값은 해소 전(비어 있음)이다. 해소 값은 매니페스트가 싣는다.
         "parameter_values": {},
+        "lineage_strategy_id": None,
     }
 
     not_ready = client.get(f"/api/v1/backtests/{run_id}/result")

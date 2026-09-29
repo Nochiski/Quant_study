@@ -5,11 +5,17 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { tDescription, tName, tOptional } from "../../../shared/config";
+import {
+  messages,
+  tDescription,
+  tName,
+  tOptional,
+} from "../../../shared/config";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { DocumentDiagnostic } from "../model/document-state";
 import { projectForm } from "../model/form-projection";
+import { nodeSlotsByKind } from "../model/graph-transactions";
 import {
   projectPipeline,
   strategySummary,
@@ -289,5 +295,59 @@ describe("strategySummary", () => {
     expect(summary(parseSource(source, "yaml"))).toBe(
       "거래대금 1000000000 이상인 종목 중에서, 높은 모멘텀 (가중치 0.6)·낮은 가치 (가중치 0.4) 순으로, 하위 종목은 공매도하고, 점수 차이에 비례한 비중으로, 5거래일마다, 상위 10%를, 종목당 최대 10%, 섹터당 최대 30% 한도 안에서 골라 보유한다.",
     );
+  });
+});
+
+describe("요약 조각 구조", () => {
+  it("모든 조각의 자리표시가 같은 카드(노드) 필드로 풀리고, 사전의 요약 키는 모두 쓰일 자리가 있다", () => {
+    // 자리표시가 풀리지 않으면 조각이 소리 없이 빠진다(#367 리뷰 P3-4). 문장 예시 대신 조각 전체를 구조로 본다:
+    // 카드·목록 항목(규칙 하나·팩터 둘인 문서)과 노드 설정 칸에서 조각 키 → 그 카드의 필드 키를 모은다.
+    const pipeline = projectPipeline(SCHEMA, idea("low_pbr_high_roe"), []);
+    const fragments = new Map<string, readonly string[]>();
+    for (const fields of pipeline.stages.flatMap((stage) => [
+      ...stage.cards.map((card) => card.rows.map((row) => row.field)),
+      ...stage.lists.flatMap((list) => list.items.map((item) => item.fields)),
+    ]))
+      for (const field of fields)
+        for (const stem of field.control.kind === "enum"
+          ? Object.values(field.control.labelKeys ?? {})
+          : [field.descriptionKey])
+          if (stem !== null)
+            fragments.set(
+              `${stem}.summary`,
+              fields.map((item) => item.key),
+            );
+    for (const slots of nodeSlotsByKind(SCHEMA).values())
+      for (const { facts } of slots.settings)
+        if (facts.descriptionKey !== null)
+          fragments.set(
+            `${facts.descriptionKey}.summary`,
+            slots.settings.map(({ key }) => key),
+          );
+    const unresolved = [...fragments].flatMap(([key, keys]) =>
+      [...(tOptional(key) ?? "").matchAll(/\{([a-z_]+)(?:\.percent)?\}/g)]
+        .map((match) => match[1]!)
+        .filter((name) => !keys.includes(name))
+        .map((name) => `${key} {${name}}`),
+    );
+    expect(unresolved).toEqual([]);
+    const frames = new Set(
+      pipeline.stages.flatMap((stage) =>
+        stage.lists.map((list) => `${list.descriptionKey}.summary`),
+      ),
+    );
+    // 전략 문서 필드의 조각(`strategy.*.summary`)만 본다. `problems.summary` 같은 다른 화면 키는 대상이 아니다.
+    const orphans = Object.keys(messages.ko).filter(
+      (key) =>
+        key.startsWith("strategy.") &&
+        key.endsWith(".summary") &&
+        !fragments.has(key) &&
+        !frames.has(key),
+    );
+    expect(orphans).toEqual([]);
+    // 순회가 헛돌지 않는지: 번역이 있는 조각이 실제로 모였다.
+    expect(
+      [...fragments.keys()].filter((key) => tOptional(key) !== null).length,
+    ).toBeGreaterThan(30);
   });
 });

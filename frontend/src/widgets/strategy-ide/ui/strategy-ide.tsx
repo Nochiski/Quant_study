@@ -204,7 +204,7 @@ export const StrategyIde = ({
   assistant,
 }: StrategyIdeProps) => {
   const narrow = useMediaQuery(NARROW_QUERY);
-  const { layout, resize, toggle, close } = usePanelLayout(
+  const { layout, debuggerMaxHeight, resize, toggle, close } = usePanelLayout(
     narrow
       ? { ...DEFAULT_LAYOUT, inspectorOpen: false, debuggerOpen: false }
       : DEFAULT_LAYOUT,
@@ -936,7 +936,7 @@ export const StrategyIde = ({
               label={t("ide.resizeDebugger")}
               value={layout.debuggerHeight}
               min={PANEL_BOUNDS.debuggerHeight.min}
-              max={PANEL_BOUNDS.debuggerHeight.max}
+              max={debuggerMaxHeight}
               invert
               onChange={(value) => resize("debuggerHeight", value)}
               controls={ids.debugger}

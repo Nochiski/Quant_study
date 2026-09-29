@@ -183,6 +183,14 @@ const captureSpan = async (page, filename, top, bottom) => {
   }
 };
 
+/** 크기 조절 손잡이가 상한에 닿아 있는지 본다. 중간 결과의 상한은 창 높이를 따른다(#262). */
+const expectAtMaximum = async (handle) => {
+  await expect(handle).toHaveAttribute(
+    "aria-valuenow",
+    (await handle.getAttribute("aria-valuemax")) ?? "",
+  );
+};
+
 /** 편집기 자동완성 팝업을 닫는다. 원문을 넣은 뒤 커서 자리의 제안이 떠 있으면 편집기 본문을 가린다(02·04). */
 const closeCompletion = async (page) => {
   const popup = page.locator(".cm-tooltip-autocomplete");
@@ -367,7 +375,7 @@ try {
   });
   await debuggerHandle.focus();
   await debuggerHandle.press("End");
-  await expect(debuggerHandle).toHaveAttribute("aria-valuenow", "480");
+  await expectAtMaximum(debuggerHandle);
   const traceBlocked = debuggerRegion
     .getByRole("status")
     .filter({ hasText: "추적은 실행 설정 위에서 돕니다." });
@@ -430,7 +438,7 @@ try {
     name: "TargetTape 후보와 선택 노드 결과",
   });
   await expect(targetTape).toBeVisible();
-  await expect(debuggerHandle).toHaveAttribute("aria-valuenow", "480");
+  await expectAtMaximum(debuggerHandle);
   // 중간 결과 영역은 스크롤이 두 겹이다(영역 본문 안에 탭 패널). 바깥은 끝까지 내려 탭 패널에 자리를
   // 주고, 안쪽은 맨 위로 올려 표 머리 행부터 세 종목 행이 다 보이게 한다. `scrollIntoView`는 안쪽까지
   // 끝으로 내려 머리 행을 가린다.

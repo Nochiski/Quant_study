@@ -1,4 +1,6 @@
 .ide {
+  /* 본문 좌우·아래 여백. 붙은 패널의 바깥 끝이라 넓은 화면 오버레이 서랍도 이 값을 읽는다. */
+  --ide-gutter: var(--space-5);
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -101,13 +103,14 @@
   padding: 0 var(--space-5);
 }
 
-/* body: left · centre · right */
+/* body: left · centre · right. 오른쪽 서랍(`.ide__drawer`)의 기준 상자다. */
 .ide__body {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
   gap: 0;
-  padding: 0 var(--space-5) var(--space-5);
+  padding: 0 var(--ide-gutter) var(--ide-gutter);
 }
 
 .ide__left {
@@ -244,8 +247,10 @@
  * 편집기가 위아래로 뛴다.
  */
 @container (max-width: 680px) {
+  /* 탭 목록이 한 줄을 다 쓰므로 구분선도 그 줄에 긋는다 — 활성 탭 밑줄이 선에 붙는다(#290 리뷰 r2 P3-6). */
   .ide__editor-tabs .ui-tabs {
     flex-basis: 100%;
+    border-bottom: 1px solid var(--border);
   }
 }
 
@@ -483,9 +488,13 @@
   background: var(--status-warn-soft);
 }
 
-/* drawers below 1280px */
+/*
+ * 오른쪽 서랍 — 1280px 미만, 또는 편집기 최소 폭 때문에 오른쪽 패널이 붙지 못할 때 뜬다. 본문
+ * (`.ide__body`) 안에서 떠 세로 범위가 붙은 패널과 같다. 창 전체 높이로 뜨면 머리 줄이 상단 바 밑에 깔려
+ * 서랍의 접기 버튼을 누를 수 없고 실행 설정 띠도 가렸다(#325).
+ */
 .ide__drawer {
-  position: fixed;
+  position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
@@ -497,7 +506,9 @@
   overflow: auto;
 }
 
+/* 1280px 미만의 중간 결과 서랍은 창 아래 끝에 붙는다. */
 .ide__drawer--bottom {
+  position: fixed;
   top: auto;
   left: 0;
   width: auto;
@@ -521,10 +532,11 @@
 
 /*
  * 1280px 이상에서 편집기 최소 폭 때문에 뜬 서랍(B-04 오버레이)은 붙어 있는 오른쪽 패널 자리만 덮는다.
- * 폭은 그 패널의 폭(인라인)이고 오른쪽 끝도 그 패널처럼 본문 여백 안쪽이다(#290 리뷰 P2-1).
+ * 폭은 그 패널의 폭(인라인)이고 오른쪽·아래 끝도 그 패널처럼 본문 여백 안쪽이다(#290 리뷰 P2-1).
  */
 .ide__drawer--rail {
-  right: var(--space-5);
+  right: var(--ide-gutter);
+  bottom: var(--ide-gutter);
 }
 
 @media (max-width: 1279px) {

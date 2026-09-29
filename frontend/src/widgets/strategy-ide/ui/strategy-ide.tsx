@@ -282,7 +282,7 @@ export const StrategyIde = ({
   // 뒤에는 접어도 유지한다 — 진행 중 턴의 스트림이 접기로 끊기면 안 된다(B-04 리뷰 P3).
   const [assistantMounted, setAssistantMounted] = useState(layout.assistantOpen);
   /**
-   * 오른쪽 패널 토글. 좁은 화면에서는 계약·AI 서랍이 같은 자리(`position: fixed; right: 0`)에 뜨므로
+   * 오른쪽 패널 토글. 좁은 화면에서는 계약·AI 서랍이 같은 자리(본문 오른쪽 끝)에 뜨므로
    * 한 번에 하나만 연다 — 겹치면 뒤에 깔린 패널이 보이지 않은 채 탭 순서와 접근성 트리에 남는다
    * (B-04 리뷰 P1-2).
    */
@@ -991,34 +991,35 @@ export const StrategyIde = ({
           />
         ) : null}
         {assistantFloating ? null : assistantNode}
-      </div>
 
-      {inspectorFloating ? (
-        <div
-          className={drawerClass}
-          style={railDrawer}
-          hidden={!layout.inspectorOpen}
-        >
-          {inspectorNode}
-        </div>
-      ) : null}
-      {narrow ? (
-        <div
-          className="ide__drawer ide__drawer--bottom"
-          hidden={!layout.debuggerOpen}
-        >
-          {debuggerNode}
-        </div>
-      ) : null}
-      {hasAssistant && assistantFloating ? (
-        <div
-          className={drawerClass}
-          style={railDrawer}
-          hidden={!layout.assistantOpen}
-        >
-          {assistantNode}
-        </div>
-      ) : null}
+        {/* 서랍은 본문 안에 그린다 — 오른쪽 서랍의 세로 범위가 본문과 같아 상단 바 밑에 깔리지 않는다(#325). */}
+        {inspectorFloating ? (
+          <div
+            className={drawerClass}
+            style={railDrawer}
+            hidden={!layout.inspectorOpen}
+          >
+            {inspectorNode}
+          </div>
+        ) : null}
+        {narrow ? (
+          <div
+            className="ide__drawer ide__drawer--bottom"
+            hidden={!layout.debuggerOpen}
+          >
+            {debuggerNode}
+          </div>
+        ) : null}
+        {hasAssistant && assistantFloating ? (
+          <div
+            className={drawerClass}
+            style={railDrawer}
+            hidden={!layout.assistantOpen}
+          >
+            {assistantNode}
+          </div>
+        ) : null}
+      </div>
       <CommandPalette
         open={paletteOpen}
         label={t("command.palette")}

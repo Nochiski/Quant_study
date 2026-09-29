@@ -91,6 +91,10 @@ const ideLayout = (width: number, scrollbar: () => number = () => 0) => {
   };
 };
 
+/** 사이드바가 본문에 붙어 있는가(겹쳐 뜬 서랍도 본문 안에 있으므로 본문의 직접 자식인지 본다). */
+const assistantAttached = () =>
+  document.querySelector(".ide__body > .ide__assistant") !== null;
+
 const assistantFloating = () =>
   screen
     .getByRole("complementary", { name: "AI 어시스턴트" })
@@ -404,7 +408,7 @@ describe("StrategyIde assistant 슬롯", () => {
     // 창이다. 판정이 스크롤바를 뺀 폭을 읽으면 관찰 알림마다 붙었다 떴다를 되풀이했다(#290 리뷰 P1-1).
     matchMedia(false);
     const layout = ideLayout(SIDE_BY_SIDE + 7, () =>
-      document.querySelector(".ide__body .ide__assistant") === null ? 0 : 15,
+      assistantAttached() ? 15 : 0,
     );
     const user = userEvent.setup();
     mount();

@@ -87,6 +87,14 @@ test(
 
     // 사이드바를 연 1440px: 편집기가 최소 폭을 지키도록 사이드바가 계약 자리에 겹쳐 뜬다.
     await expectEditorReachable(page, "1440+AI");
+    // 겹쳐 뜬 서랍은 붙은 패널과 같은 높이에서 시작한다. 창 위 끝부터 뜨면 머리 줄이 상단 바 밑에 깔려
+    // 제목이 가리고, 나중에 연 계약 서랍이면 "계약 접기"를 누를 수 없었다(#325).
+    expect(
+      await coveringElement(
+        assistant(page).getByRole("heading", { name: "AI 어시스턴트" }),
+      ),
+      "1440+AI 서랍 제목",
+    ).toBeNull();
     // 전략 구조를 접으면 사이드바가 계약 옆에 붙는다(편집기 512px).
     await page.getByRole("button", { name: "전략 구조 접기" }).click();
     const assistantHandle = page.getByRole("separator", {
@@ -113,6 +121,19 @@ test(
       .getByRole("button", { name: "사이드바 닫기" })
       .click();
     await expectEditorReachable(page, "1280");
+    // 1200px(좁은 화면)에 들어서면 오른쪽 패널이 모두 접히고, 다시 연 계약은 서랍으로 뜬다. 서랍 머리의
+    // "계약 접기"도 상단 바 밑에 깔리지 않는다(#325).
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await page
+      .getByRole("button", { name: "계약", exact: true, expanded: false })
+      .click();
+    const collapseContract = page.getByRole("button", { name: "계약 접기" });
+    await expect(collapseContract).toBeVisible();
+    expect(
+      await coveringElement(collapseContract),
+      "1200 계약 서랍 접기",
+    ).toBeNull();
+    await collapseContract.click();
     await page.setViewportSize({ width: 1440, height: 900 });
 
     // 요약 띠의 "실행 설정 채우기"로 패널을 열어 기간·유니버스를 정한다.

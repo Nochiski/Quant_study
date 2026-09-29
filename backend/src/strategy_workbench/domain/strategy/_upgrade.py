@@ -143,14 +143,26 @@ class NotUpgradeableDocumentError(ValueError):
     저장 row 읽기(`adapters/outbound/strategy_sqlite/_record_codec.py`)가 이 예외에 기대 fail-closed
     다: 모르는 버전을 현재 모델로 해석하면 사용자가 저장한 적 없는 값이 그 revision 의 사실로
     화면에 뜬다.
+
+    `stage`·`older_shapes` 는 선언된 은퇴 버전보다 앞선 모양이 본문에 섞여 거절했을 때만 찬다(그
+    모양의 버전과 자리). compile 진단이 이 값으로 고칠 곳을 말한다(`upgrade_refusal`).
     """
 
-    def __init__(self, schema_version: object, reason: str) -> None:
+    def __init__(
+        self,
+        schema_version: object,
+        reason: str,
+        *,
+        stage: str | None = None,
+        older_shapes: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(
             f"document cannot be upgraded — {reason} — got={schema_version!r} "
             f"current={CURRENT_SCHEMA_VERSION!r} retired={sorted(FROZEN_SCHEMA_VERSIONS)}"
         )
         self.schema_version = schema_version
+        self.stage = stage
+        self.older_shapes = older_shapes
 
 
 class UpgradeUnsupportedNodeError(ValueError):
@@ -179,7 +191,7 @@ def is_frozen_schema_version(schema_version: str) -> bool:
     port의 `StrategyRevisionRecord.requires_upgrade`와 SQLite codec의 동결 읽기 분기가 같은 술어를
     쓴다(Phase 1 감사 DEFECT-P1X-003: `== "1.0"`과 `!= CURRENT`가 갈리면 1.2 도입 때 1.1 row가
     hydrate 실패로 500이 된다). 열린 집합이라 "읽어도 되는 버전"은 이 술어가 아니라
-    `is_upgradeable_document` 가 판정한다.
+    `upgrade_refusal` 이 판정한다.
     """
     return schema_version != CURRENT_SCHEMA_VERSION
 
@@ -318,6 +330,8 @@ def _chain_start(document: Mapping[str, object]) -> str:
                     raw,
                     "the body carries shapes older than the declared version — "
                     f"stage={stage} pointers={list(older)}",
+                    stage=stage,
+                    older_shapes=older,
                 )
         return version
     if version == CURRENT_SCHEMA_VERSION:
@@ -338,17 +352,21 @@ def _chain_start(document: Mapping[str, object]) -> str:
     )
 
 
-def is_upgradeable_document(document: Mapping[str, object]) -> bool:
-    """이 문서를 업그레이드 체인에 태울 수 있는가 — `_chain_start` 와 같은 판정.
+def upgrade_refusal(document: Mapping[str, object]) -> NotUpgradeableDocumentError | None:
+    """이 문서를 업그레이드 체인에 태울 수 없는 사유. 태울 수 있으면 None.
 
-    버전 줄이 은퇴 버전이고 본문에 그보다 앞선 모양이 없을 때만 참이다. 현재 판 문서의 1.0 키는
-    `structure.legacy_shape` 진단이 제자리에서 고치라고 안내한다(업그레이드를 시키지 않는다).
+    업그레이드 가능 판정의 공개 입구이고, `_chain_start` 와 같은 판정이다. compile 진단(hydrate)이
+    이 사유로 업그레이드 배너를 띄울 코드와 고칠 곳을 알리는 코드를 가른다. 업그레이더가 거절할
+    문서에 배너를 띄우면 누를 때마다 실패하는 버튼이 된다(#267 DEFECT-2).
+
+    체인을 시작할 수 있는지만 본다. 단계를 탄 뒤 검증(`apply_upgrade_steps`)에서 거절되는 드문
+    문서(세 겹 factors)는 배너가 뜬 뒤 422가 된다(알려진 한계, #322 리뷰 P3-3).
     """
     try:
         _chain_start(document)
-    except NotUpgradeableDocumentError:
-        return False
-    return True
+    except NotUpgradeableDocumentError as refusal:
+        return refusal
+    return None
 
 
 # 1.0에서만 쓰던 문법이 놓이는 JSON Pointer → 사용자가 읽을 한글 힌트(P1-05).

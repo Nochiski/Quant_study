@@ -159,6 +159,7 @@
   - `frontend/e2e/workbench.workflow.spec.ts` :: upgrades a frozen 1.0 revision to the current schema, fills its run settings, saves it and backtests it
   - `frontend/e2e/workbench.workflow.spec.ts` :: migrates a source-less legacy revision without changing meaning
   - `frontend/e2e/stories/sm.upgrade-new-strategy.spec.ts` :: US-SM-07 새 전략 화면에 옛 schema YAML을 붙여 넣으면 배너로 올리고 실행 설정을 채워 저장·백테스트한다
+  - `frontend/e2e/stories/sm.upgrade-new-strategy.spec.ts` :: US-SM-07 업그레이드할 수 없는 옛 문서에는 배너 대신 문제 목록이 고칠 곳을 말한다
 
 수용 기준
 
@@ -179,6 +180,9 @@
   영문 진단(`API request failed …`)은 보이지 않는다(#270).
 - Given 원문 없이 JSON으로만 저장된 옛 전략, Then "legacy JSON에서 생성된 문서"라는 안내와 함께
   열리고, 저장하면 의미 해시가 같은 새 버전이 된다.
+- Given 업그레이드할 수 없는 옛 문서(선언한 은퇴 버전보다 옛 문법이 섞였거나 모르는 버전을 적은 문서),
+  Then 누를 때마다 실패할 업그레이드 배너는 뜨지 않고, 문제 목록이 버전 줄과 옛 문법 자리를 어떻게
+  고칠지 말한다(#267).
 - 비고: P2-09부터 업그레이드는 1.0 → 1.1 → 1.2 전체 경로를 타고, 저장한 새 버전은 현재 schema다.
   의미 해시는 1.1 합성 방식(`signal.normalization: none`)을 명시한 golden 문서와 같다. P3-02가 배너
   문구를 버전 중립으로 바꾸고 응답 `environment`로 실행 설정 채우기와 `warnings` 표시를 더했다.

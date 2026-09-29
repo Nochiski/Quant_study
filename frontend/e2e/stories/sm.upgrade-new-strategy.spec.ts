@@ -196,3 +196,53 @@ test(
     await expect(save(page)).toBeEnabled();
   },
 );
+
+/** fixture 원문의 버전 줄. 버전 문자열은 backend fixture에서만 읽는다. */
+const versionLine = (source: string): string => {
+  const line = /^schema_version: .*$/mu.exec(source)?.[0];
+  if (line === undefined) throw new Error("fixture has no schema_version line");
+  return line;
+};
+
+test(
+  "US-SM-07 업그레이드할 수 없는 옛 문서에는 배너 대신 문제 목록이 고칠 곳을 말한다",
+  { tag: ["@story", "@US-SM-07"] },
+  async ({ page }) => {
+    const banner = upgradeBanner(page);
+    const problems = page.getByRole("region", { name: "문제" });
+    const v10 = retiredFixture("quality_momentum.v1_0.yaml");
+    const v11 = retiredFixture("quality_momentum.v1_1.yaml");
+
+    // 은퇴 버전(1.1)을 적었지만 본문은 그보다 옛(1.0) 문법이다. 업그레이더가 거절하므로 누를 때마다
+    // 실패할 배너를 띄우지 않고, 버전 줄과 옛 문법 자리를 고치라고 말한다(#267 DEFECT-2).
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(page, v10.replace(versionLine(v10), versionLine(v11)));
+    await expectPhase(page, "구조 오류");
+    // 문장과 고칠 자리(JSON Pointer)가 문제 목록의 같은 줄에 뜬다.
+    const row = (text: string) =>
+      problems.getByRole("listitem").filter({ hasText: text });
+    await expect(
+      row(
+        "선언한 schema_version보다 옛 문법이 본문에 섞여 있어 업그레이드할 수 없습니다.",
+      ),
+    ).toContainText("/schema_version");
+    await expect(
+      row("1.0 문법입니다. factors 아래에 또 factors 목록을 두던 방식"),
+    ).toContainText("/factors");
+    await expect(banner).toHaveCount(0);
+
+    // 모르는 버전도 배너 없이 버전 줄을 고치라고 말한다.
+    await replaceSource(
+      page,
+      v11.replace(versionLine(v11), 'schema_version: "9.9"'),
+    );
+    await expectPhase(page, "구조 오류");
+    await expect(
+      row(
+        "지금 버전도 지원이 끝난 버전도 아닌 schema_version이라 업그레이드할 수 없습니다.",
+      ),
+    ).toContainText("/schema_version");
+    await expect(banner).toHaveCount(0);
+    await expect(save(page)).toBeDisabled();
+  },
+);

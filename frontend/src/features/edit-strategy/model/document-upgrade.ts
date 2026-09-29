@@ -25,12 +25,15 @@ export const upgradeWarningTitle = (code: UpgradeWarningCode): string =>
 /**
  * 업그레이드를 제안해야 하는 backend 구조 진단 코드.
  *
- * - `structure.unsupported_schema_version`: 문서가 스스로 지원하지 않는 버전이라고 적었다.
+ * - `structure.unsupported_schema_version`: 버전 줄이 은퇴 버전이고 업그레이더가 받아 줄 문서다(backend
+ *   `upgrade_refusal`이 판정).
  *
- * `structure.legacy_shape`(버전 줄은 현재 버전인데 본문에 1.0 문법이 섞임)는 배너를 띄우지 않는다.
- * backend는 문서가 선언한 버전을 믿어 그런 문서를 업그레이드하지 않고(422 not_upgradeable, lang2
- * Phase 2 감사 NB-1), 진단 문장이 제자리에서 고칠 방법을 말한다. 배너를 띄우면 누를 때마다 실패하는
- * 버튼이 된다(P1-05 DEFECT-P105-001과 같은 모순).
+ * 업그레이더가 거절할 문서는 배너를 띄우지 않는다. 배너를 띄우면 누를 때마다 실패하는 버튼이
+ * 된다(P1-05 DEFECT-P105-001과 같은 모순). 진단 문장이 제자리에서 고칠 방법을 말한다.
+ * - `structure.legacy_shape`: 버전 줄은 현재 버전인데 본문에 1.0 문법이 섞였다. backend는 문서가 선언한
+ *   버전을 믿어 업그레이드하지 않는다(lang2 Phase 2 감사 NB-1).
+ * - `structure.not_upgradeable_schema_version`: 모르는 버전이거나, 선언한 은퇴 버전보다 옛 문법이
+ *   섞였다(#267 DEFECT-2).
  */
 const UPGRADE_SUGGESTING_CODES = new Set([
   "structure.unsupported_schema_version",
@@ -45,10 +48,10 @@ export type StoredRevisionMeta = Pick<
 /**
  * 업그레이드 배너가 무엇을 제안할지(WORKFLOW P2-02).
  *
- * - `upgradeable`: backend compile이 현재 텍스트의 schema 버전을 지원하지 않는다고 답했다.
- *   `POST /strategy-documents/upgrade`로 현재 버전 텍스트를 받아 편집기에 넣는다. 변환할 수 없는
- *   버전이면 backend가 `strategy_document.not_upgradeable` 422로 거부하고 배너가 그 문구를 보인다
- *   (frontend는 어떤 버전이 은퇴 버전인지 알지 않는다 — Phase 2 감사 DEFECT-P2X-002).
+ * - `upgradeable`: backend compile이 현재 텍스트를 업그레이드할 수 있는 은퇴 버전이라고 답했다.
+ *   `POST /strategy-documents/upgrade`로 현재 버전 텍스트를 받아 편집기에 넣는다. 그래도 거부되면
+ *   (`strategy_document.not_upgradeable` 등 422) 배너가 그 문구를 보인다(frontend는 어떤 버전이 은퇴
+ *   버전인지 알지 않는다 — Phase 2 감사 DEFECT-P2X-002).
  * - `frozen-generated`: legacy JSON 동결 row. generated source는 이미 현재 버전이므로 업그레이드
  *   endpoint를 부르지 않고 새 revision 저장만 제안한다(P1-03 리뷰 잔여 위험 1).
  * - `none`: 배너 없음.
@@ -64,9 +67,8 @@ const compileSuggestsUpgrade = (state: DocumentState): boolean =>
   );
 
 /**
- * 판정은 backend 진단으로만 한다(지원 버전·은퇴 버전·1.0 문법 판정 모두 backend가 소유). 현재
- * 텍스트가 무슨 버전이든 backend가 "지원하지 않음" 또는 "1.0 문법"이라 답했으면 업그레이드를
- * 제안하고, 변환 가능 여부는 업그레이드 endpoint가 판정한다.
+ * 판정은 backend 진단 코드로만 한다(지원 버전·은퇴 버전·1.0 문법·업그레이드 가능 여부 판정 모두
+ * backend가 소유). 텍스트의 버전 문자열은 보지 않는다.
  */
 export const decideDocumentUpgrade = (
   state: DocumentState,

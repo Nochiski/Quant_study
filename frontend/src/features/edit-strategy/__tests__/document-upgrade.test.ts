@@ -81,14 +81,22 @@ describe("decideDocumentUpgrade", () => {
     expect(decideDocumentUpgrade(settled(LEGACY), STORED)).toEqual({
       kind: "none",
     });
-    // backend가 거부하면 텍스트의 버전 문자열이 무엇이든 제안한다: 변환 가능 여부는 업그레이드
-    // endpoint(422 not_upgradeable)가 판정한다(Phase 2 감사 DEFECT-P2X-002: frontend 버전 리터럴 없음).
+    // 텍스트의 버전 문자열은 보지 않고 진단 코드로만 정한다(Phase 2 감사 DEFECT-P2X-002: frontend 버전
+    // 리터럴 없음). 업그레이더가 거절할 문서는 backend가 다른 코드를 내므로 배너가 없다(#267 DEFECT-2).
     expect(
       decideDocumentUpgrade(
         settled('schema_version: "2.0"\ntitle: x\n', [UNSUPPORTED]),
         STORED,
       ),
     ).toEqual({ kind: "upgradeable" });
+    expect(
+      decideDocumentUpgrade(
+        settled('schema_version: "2.0"\ntitle: x\n', [
+          { ...UNSUPPORTED, code: "structure.not_upgradeable_schema_version" },
+        ]),
+        STORED,
+      ),
+    ).toEqual({ kind: "none" });
     expect(decideDocumentUpgrade(settled(CURRENT), STORED)).toEqual({
       kind: "none",
     });

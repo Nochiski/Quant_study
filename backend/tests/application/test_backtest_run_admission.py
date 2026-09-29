@@ -154,39 +154,38 @@ def test_runs_over_the_limit_wait_queued_and_start_in_acceptance_order(
 def test_a_run_whose_thread_fails_to_start_frees_its_slot_for_the_next_queued_run(
     gated_runs: _GatedRuns, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#284 리뷰 P3-1: 스레드 기동에 실패한 run 은 `failed` 로 끝나고 자리를 쥐지 않는다.
+    """#284 리뷰 P3-1·#294 리뷰 P3-A: 스레드 기동에 실패한 run 은 `failed` 로 끝나고 자리 수를
+    바꾸지 않는다.
 
-    끝나는 run 의 스레드가 대기열을 넘길 때 기동이 실패해도 뒤의 대기 run 은 이어서 뜨고, 그 뒤에
-    낸 run 은 기다리지 않고 바로 뜬다. 자리를 세거나 넘기기를 멈추면 뒤의 run 이 오류 없이
-    `queued` 에 남는다.
+    첫 run 은 접수 스레드에서, 셋째 run 은 끝나는 run 의 스레드에서 기동에 실패한다. 실패가 자리를
+    쥐면(누수) 둘째가 기다리고, 쥐지 않은 자리를 내놓으면(과소 계산) 둘째가 도는 동안 셋째가 바로
+    뜨고, 넘기기를 멈추면 넷째가 오류 없이 `queued` 에 남는다.
     """
 
-    class _SecondRunFailsToStart(Thread):
+    class _SomeRunsFailToStart(Thread):
         def start(self) -> None:
-            if self.name == "backtest-startfail-second":
+            if self.name in ("backtest-startfail-first", "backtest-startfail-third"):
                 raise RuntimeError("can't start new thread")
             super().start()
 
     monkeypatch.setattr(
-        "strategy_workbench.application.backtest_run._service.Thread", _SecondRunFailsToStart
+        "strategy_workbench.application.backtest_run._service.Thread", _SomeRunsFailToStart
     )
     runs, port, entries = gated_runs(
         "startfail-first", "startfail-second", "startfail-third", "startfail-fourth"
     )
 
-    runs.start(_request(end=date(2024, 1, 12)))
-    assert port.entered.wait(timeout=30), "first run never reached the tape stage"
-    runs.start(_request(end=date(2024, 1, 11)))
-    runs.start(_request(end=date(2024, 1, 10)))
-    port.release.set()
+    runs.start(_request(end=date(2024, 1, 12)))  # 접수 스레드에서 기동 실패
+    assert runs.start(_request(end=date(2024, 1, 11))).run.message == "Run accepted"
+    assert port.entered.wait(timeout=30), "second run never reached the tape stage"
+    for end in (date(2024, 1, 10), date(2024, 1, 9)):
+        assert runs.start(_request(end=end)).run.message == "Waiting for a free run slot"
+    port.release.set()  # 끝나는 run 의 스레드가 셋째를 띄우다 실패하고 넷째로 넘긴다
 
-    assert wait_for_terminal_run(runs, "startfail-second").status is RunStatus.FAILED
-    assert wait_for_terminal_run(runs, "startfail-third").status is RunStatus.COMPLETED
-    join_run_thread("startfail-third")
-    fourth = runs.start(_request(end=date(2024, 1, 9)))
-    assert fourth.run.message == "Run accepted"
     assert wait_for_terminal_run(runs, "startfail-fourth").status is RunStatus.COMPLETED
-    assert entries == [(date(2024, 1, 12), 1), (date(2024, 1, 10), 1), (date(2024, 1, 9), 1)]
+    assert runs.state("startfail-first").status is RunStatus.FAILED
+    assert runs.state("startfail-third").status is RunStatus.FAILED
+    assert entries == [(date(2024, 1, 11), 1), (date(2024, 1, 9), 1)]
 
 
 def test_cancelling_a_queued_run_ends_it_at_once_without_starting_it(

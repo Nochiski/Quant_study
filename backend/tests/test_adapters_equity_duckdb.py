@@ -1475,9 +1475,8 @@ def test_every_query_of_a_raw_load_watches_the_callers_checkpoint(
         checkpoint=checkpoint,
     )
 
-    # 격자 · 법인 대응(재무는 법인 축) · 재무 LATEST
-    assert len(passed) == 3
-    assert all(given is checkpoint for given in passed)
+    # 격자 · 법인 대응(재무는 법인 축) · 재무 LATEST — 틀리면 몇 번째 질의인지 보인다
+    assert passed == [checkpoint] * 3
 
 
 def test_a_duckdb_query_cancelled_while_running_is_interrupted_into_the_callers_error() -> None:

@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { t } from "../config";
 
 type FailureNoticeProps = {
@@ -8,6 +10,8 @@ type FailureNoticeProps = {
   /** 접힌 "서버 사유"에 둘 원문(`failureReason`). 없으면 상세를 그리지 않는다. */
   reason: string | null;
   className?: string;
+  /** 본문 아래에 둘 교정 동작(예: 연구 구간 거절의 "시작일을 …로" 버튼). */
+  children?: ReactNode;
 };
 
 /**
@@ -20,6 +24,7 @@ export const FailureNotice = ({
   message,
   reason,
   className,
+  children,
 }: FailureNoticeProps) => (
   <div
     className={["ui-failure", className].filter(Boolean).join(" ")}
@@ -27,6 +32,9 @@ export const FailureNotice = ({
     aria-label={title}
   >
     {title === undefined ? message : `${title}: ${message}`}
+    {children === undefined ? null : (
+      <div className="ui-failure__actions">{children}</div>
+    )}
     {reason === null ? null : (
       <details className="ui-failure__reason">
         <summary>{t("ui.failure.serverReason")}</summary>

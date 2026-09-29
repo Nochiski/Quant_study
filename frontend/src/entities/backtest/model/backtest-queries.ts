@@ -1,5 +1,6 @@
 import {
   queryOptions,
+  skipToken,
   useMutation,
   useQuery,
   useQueryClient,
@@ -67,6 +68,20 @@ export const useStartBacktest = () => {
     onSuccess: () => retireBacktestHistoryQueries(queryClient),
   });
 };
+
+/**
+ * 실행 전 미리 계산(검증 랩 spec D2). 새 시도인지·시도 수가 얼마가 되는지는 backend 가 판정하고 화면은 응답을
+ * 보이기만 한다. 거절(봉인 겹침 등)은 같은 요청이면 늘 같으므로 다시 묻지 않는다.
+ */
+export const useBacktestTrialPreview = (spec: BacktestRunSpec | null) =>
+  useQuery({
+    queryKey: ["backtest", "trial-preview", spec],
+    queryFn:
+      spec === null
+        ? skipToken
+        : () => strategyWorkbenchApi.previewBacktestTrial(spec),
+    retry: false,
+  });
 
 export const useBacktestStatus = (runId: string | null) =>
   useQuery({

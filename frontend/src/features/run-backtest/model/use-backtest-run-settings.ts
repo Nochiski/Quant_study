@@ -71,6 +71,12 @@ const writeStored = (key: string, values: RunEnvironmentValues): void => {
 
 const NO_FIELDS: readonly RunEnvironmentField[] = [];
 
+/** 연구 구간 거절이 고치라는 칸(요청 본문의 `environment.start`). */
+const START_FIELD: keyof RunEnvironment = "start";
+
+/** 시작 거절을 한 번의 누름으로 고치는 교정(검증 랩 V5-05). */
+type RunRejectionFix = { label: string; apply: () => void };
+
 type ScopedValues = { key: string; values: RunEnvironmentValues };
 /**
  * 덜 친 날짜 칸(브라우저 `validity.badInput`)의 이름. `settled` 는 칸을 떠날 때, `typing` 은 칸 안(키를 뗌·값이
@@ -257,6 +263,31 @@ export const useBacktestRunSettings = (storageKey: string) => {
     (path: string): string | null => runFieldLabel(environmentFields, path),
     [environmentFields],
   );
+  /**
+   * 시작 거절의 교정. 연구 구간 거절이면 시작일을 거절 detail 이 실은 연구 하한으로 옮긴다 — 날짜 owner 는
+   * backend 라 화면에 적지 않는다(spec D1). 고칠 수 있는 거절이 아니면 null.
+   */
+  const rejectionFix = useCallback(
+    (
+      code: string | null,
+      values: Readonly<Record<string, string>>,
+    ): RunRejectionFix | null => {
+      const researchStart = values.research_start;
+      if (
+        code !== "backtest.run.research_window_violation" ||
+        researchStart === undefined
+      )
+        return null;
+      return {
+        label: t("runEnvironment.fix.researchStart").replace(
+          "{research_start}",
+          researchStart,
+        ),
+        apply: () => setEnvironmentValue(START_FIELD, researchStart),
+      };
+    },
+    [setEnvironmentValue],
+  );
   /** 업그레이드 응답처럼 완성된 실행 설정으로 칸 전부를 바꾼다(사용자가 누른 뒤에만 부른다). */
   const applyEnvironment = useCallback(
     (next: RunEnvironment): void =>
@@ -284,6 +315,7 @@ export const useBacktestRunSettings = (storageKey: string) => {
     applyEnvironment,
     /** 서버 거절의 `field`(요청 본문 점 경로) → 패널 칸 이름. 모르면 null. */
     runFieldLabel: fieldLabel,
+    rejectionFix,
     /** 검증을 통과한 실행 설정. 추적·실행 계획 요청이 같은 값을 싣는다. 없으면 null. */
     environment: environment.valid ? environment.environment : null,
     environmentErrors: environment.errors,

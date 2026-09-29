@@ -156,11 +156,17 @@ const schemaHandler = http.get(`${API}/api/v1/run-environments/schema`, () =>
   HttpResponse.json({ schema_hash: "h", schema: servedSchema }),
 );
 
-const Harness = ({ storageKey = "strategy-1" }: { storageKey?: string }) => {
+const Harness = ({
+  storageKey = "strategy-1",
+  request = null,
+}: {
+  storageKey?: string;
+  request?: BacktestRunSpec | null;
+}) => {
   const controller = useBacktestRunSettings(storageKey);
   return (
     <>
-      <BacktestRunSettings controller={controller} />
+      <BacktestRunSettings controller={controller} request={request} />
       <RunEnvironmentSummary controller={controller} />
       <output data-testid="request">
         {JSON.stringify(controller.requestOptions)}
@@ -817,6 +823,85 @@ describe("run environment panel", () => {
     expect(
       screen.getByText("비우면 벤치마크 없이 실행합니다.", { exact: false }),
     ).toBeInTheDocument();
+  });
+
+  // 검증 랩 V5-05: 새 시도인지는 backend 미리 계산이 판정하고, 패널은 실행 버튼이 보낼 요청 그대로 묻고 답만 옮긴다.
+  it.each([
+    [
+      "new_trial",
+      3,
+      4,
+      "결과가 나오면 새 시도로 셉니다. 계열 시도 수 3회 → 4회.",
+    ],
+    [
+      "recheck",
+      4,
+      4,
+      "이미 센 시도의 재확인이라 시도 수가 늘지 않습니다. 계열 시도 수 4회 그대로.",
+    ],
+    [
+      "no_lineage",
+      0,
+      0,
+      "저장한 적 없는 전략이라 이 실행은 시도 수에 들지 않습니다. 리비전을 저장한 뒤 실행하면 셉니다.",
+    ],
+  ] as const)(
+    "shows the backend trial verdict %s for the exact run request once the panel opens",
+    async (reason, count, after, sentence) => {
+      const asked: unknown[] = [];
+      server.use(
+        http.post(
+          `${API}/api/v1/backtests/trial-preview`,
+          async ({ request }) => {
+            asked.push(await request.json());
+            return HttpResponse.json({
+              lineage_id: reason === "no_lineage" ? null : "strategy-1",
+              trial_key: "k",
+              trial_count: count,
+              new_trial: reason === "new_trial",
+              trial_count_after: after,
+              reason,
+            });
+          },
+        ),
+      );
+      renderWithQuery(<Harness request={acceptedRequest} />);
+      // 패널을 열기 전에는 묻지 않는다.
+      expect(asked).toHaveLength(0);
+      await openSettings();
+
+      expect(
+        await screen.findByRole("status", { name: "시도 영향" }),
+      ).toHaveTextContent(sentence);
+      expect(asked).toEqual([acceptedRequest]);
+    },
+  );
+
+  // 봉인 겹침처럼 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유·교정과 함께 보인다.
+  it("draws no trial line when the preview is rejected", async () => {
+    let asked = 0;
+    server.use(
+      http.post(`${API}/api/v1/backtests/trial-preview`, () => {
+        asked += 1;
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.research_window_violation",
+              message: "측정 시작일이 연구 구간 밖이라 실행할 수 없다",
+              sealed_start: "2016-01-01",
+              sealed_end: "2019-12-31",
+              research_start: "2020-01-02",
+            },
+          },
+          { status: 422 },
+        );
+      }),
+    );
+    renderWithQuery(<Harness request={acceptedRequest} />);
+    await openSettings();
+
+    await waitFor(() => expect(asked).toBe(1));
+    expect(screen.queryByRole("status", { name: "시도 영향" })).toBeNull();
   });
 
   it("exposes every run option through accessible controls and reports invalid input", async () => {

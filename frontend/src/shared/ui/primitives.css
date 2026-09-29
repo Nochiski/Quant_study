@@ -330,6 +330,10 @@
   overflow-wrap: anywhere;
 }
 
+.ui-failure__actions {
+  margin-top: var(--space-1);
+}
+
 .ui-failure__reason {
   margin-top: var(--space-1);
   color: var(--text-muted);

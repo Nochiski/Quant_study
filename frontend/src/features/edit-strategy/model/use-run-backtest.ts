@@ -92,6 +92,24 @@ export const useRunBacktest = (
       ),
     [executionPlans, state],
   );
+  // 실행 버튼이 보낼 요청. 실행 전 시도 미리 계산(검증 랩 V5-05)도 같은 요청을 묻는다.
+  const request = useMemo<BacktestRunSpec | null>(
+    () =>
+      decision.kind === "blocked" || options === null
+        ? null
+        : decision.kind === "saved_revision"
+          ? { ...options, strategy_source: decision.reference }
+          : {
+              ...options,
+              strategy_source: decision.draft,
+              // 저장된 전략을 고친 초안도 그 전략 계열의 시도로 센다(검증 랩 spec D2). 저장 리비전은
+              // backend가 리비전에서 계열을 알아서 싣지 않는다.
+              ...(state.strategyId === null
+                ? {}
+                : { lineage_strategy_id: state.strategyId }),
+            },
+    [decision, options, state.strategyId],
+  );
   const status =
     ownedStatus !== null && sameOwner(ownedStatus, currentOwner)
       ? ownedStatus.status
@@ -107,8 +125,7 @@ export const useRunBacktest = (
       return;
     }
     if (
-      decision.kind === "blocked" ||
-      options === null ||
+      request === null ||
       status.kind === "starting" ||
       isPending ||
       activeRequest.current !== null
@@ -125,18 +142,7 @@ export const useRunBacktest = (
     setOwnedStatus({ ...snapshot, status: { kind: "starting" } });
     let runId: string;
     try {
-      const accepted = await mutateAsync({
-        ...options,
-        strategy_source:
-          decision.kind === "saved_revision"
-            ? decision.reference
-            : decision.draft,
-        // 저장된 전략을 고친 초안도 그 전략 계열의 시도로 센다(검증 랩 spec D2). 저장 리비전은
-        // backend가 리비전에서 계열을 알아서 싣지 않는다.
-        ...(decision.kind === "inline_draft" && state.strategyId !== null
-          ? { lineage_strategy_id: state.strategyId }
-          : {}),
-      });
+      const accepted = await mutateAsync(request);
       runId = accepted.run.run_id;
     } catch (error) {
       if (
@@ -179,12 +185,11 @@ export const useRunBacktest = (
       params: { runId },
     });
   }, [
-    decision,
     isPending,
     mutateAsync,
     navigate,
-    options,
     optionsKey,
+    request,
     router,
     state,
     status,
@@ -193,6 +198,8 @@ export const useRunBacktest = (
   return {
     run,
     decision,
+    /** 실행 버튼이 보낼 요청. 실행할 수 없으면 null. */
+    request,
     status,
     /** 결정이 닫혀 있지만 팩터 계획 조회가 아직 끝나지 않았다(`isBacktestSettling`). */
     settling: isBacktestSettling(decision, executionPlans),

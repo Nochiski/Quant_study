@@ -640,7 +640,11 @@ def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
 def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: BaseException
 ) -> None:
-    """스레드 기동 실패(상한 RuntimeError·메모리 압박 MemoryError)는 500 이되 run 은 `failed`."""
+    """스레드 기동 실패(상한 RuntimeError·메모리 압박 MemoryError)는 run `failed` 로 끝난다.
+
+    스레드는 대기열에서 자리가 날 때 뜨므로(#161) 기동 실패는 접수 뒤의 실행 실패다 — 시작 요청은
+    202 로 접수되고 run 이 `backtest.run.internal` 로 끝난다.
+    """
 
     class _UnstartableThread:
         def __init__(self, *args: object, **kwargs: object) -> None:
@@ -655,11 +659,12 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
     run_id = "run-thread-unstartable"
     container = build_container(artifact_root=tmp_path / "unused")
     backtests, _barrier = _backtests_with_raw_load_barrier(container, tmp_path, run_id)
-    client = TestClient(_app_with_backtests(container, backtests), raise_server_exceptions=False)
+    client = TestClient(_app_with_backtests(container, backtests))
 
     response = client.post("/api/v1/backtests", json=_run_body(client, "python"))
 
-    assert response.status_code == 500
+    assert response.status_code == 202, response.text
+    assert response.json()["run"]["status"] == "queued"
     state = client.get(f"/api/v1/backtests/{run_id}").json()
     assert state["status"] == "failed", state
     assert state["error_code"] == "backtest.run.internal"

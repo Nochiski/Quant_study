@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -68,6 +69,10 @@ _ARTIFACT_PROGRESS = 0.93
 # 팩터 평가기는 종목마다 진행을 보고한다. 같은 작업 설명 안에서 이 폭보다 작은 상승은 이벤트로
 # 남기지 않아 run 당 tape 이벤트 수를 약 100개 이하로 묶는다(SSE 재생·메모리 보호).
 _MIN_TAPE_PROGRESS_STEP = 0.01
+
+# 한꺼번에 계산하는 run 수의 상한. 실데이터 긴 구간 run 한 건이 CPU 수백 초·RSS 약 5GB 를 쓰므로
+# (#158·#161) 넘는 run 은 스레드 없이 `queued` 로 접수 순서대로 기다린다.
+MAX_CONCURRENT_RUNS = 2
 
 # run `error` 문자열에서 서버 절대 경로를 가린다. 서버 경로를 담을 수 있는 서드파티 원문(파일·DB
 # 입출력 예외)이 응답으로 나가는 곳은 run `error` 하나다 — 우리가 쓰는 문장(어댑터 detail 등)은
@@ -174,10 +179,14 @@ class BacktestRunSummary:
     strategy_provenance: StrategyProvenance
 
 
-@dataclass
+# 레코드는 정체성으로 가린다(`eq=False`) — 대기열에서 꺼내고 지울 때 같은 run 만 맞아야 한다.
+@dataclass(eq=False)
 class _RunRecord:
     state: BacktestRunState
     request: BacktestRunSpec
+    # 실행할 spec — `strategy` 를 해소하고 실행 설정을 박은 것. `request` 는 다시 제출할 수 있는
+    # 원본이라 따로 둔다.
+    spec: BacktestRunSpec
     provenance: StrategyProvenance
     accepted_sequence: int
     events: list[RunProgressEvent]
@@ -196,7 +205,13 @@ class BacktestRunService:
         *,
         new_id: Callable[[], str],
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        max_concurrent_runs: int = MAX_CONCURRENT_RUNS,
     ) -> None:
+        if max_concurrent_runs < 1:
+            raise ValueError(
+                "max_concurrent_runs must be at least 1 — "
+                f"max_concurrent_runs={max_concurrent_runs!r}"
+            )
         self._portfolio_design = portfolio_design
         self._strategy_repository = strategy_repository
         self._data_source = data_source
@@ -204,7 +219,10 @@ class BacktestRunService:
         self._artifact_store = artifact_store
         self._new_id = new_id
         self._now = now
+        self._max_concurrent_runs = max_concurrent_runs
         self._records: dict[str, _RunRecord] = {}
+        self._waiting: deque[_RunRecord] = deque()
+        self._running = 0
         self._next_accepted_sequence = 0
         self._lock = RLock()
 
@@ -214,6 +232,9 @@ class BacktestRunService:
         요청 스레드에서는 데이터를 읽지 않는 검사(스펙 해석·검증·metric window·엔진 호환성·저장
         리비전 해시)만 하고, TargetTape 계산은 run 스레드의 `tape` 단계로 넘긴다. 이전에는 tape 를
         여기서 동기로 만들어 긴 구간에서 응답이 수 분 이상 걸리고 취소 수단이 없었다(이슈 #158).
+
+        같은 입력으로 도는 run 이 있으면 새 run 을 만들지 않고 그 run 을 돌려주고, 도는 run 이
+        상한(`MAX_CONCURRENT_RUNS`)에 차 있으면 `queued` 로 기다리게 한다(이슈 #161).
         """
 
         spec, provenance = self._resolve(request)
@@ -271,21 +292,39 @@ class BacktestRunService:
                 f"strategy_id={provenance.strategy_id!r} revision={provenance.revision!r} "
                 f"stored={provenance.spec_hash!r} executed={executed_hash!r}"
             )
-        run_id = self._new_id()
-        created = self._now()
-        state = BacktestRunState(
-            run_id=run_id,
-            status=RunStatus.QUEUED,
-            progress=0.0,
-            stage="queued",
-            message="Run accepted",
-            created_at=created,
-            updated_at=created,
-        )
         with self._lock:
+            # 같은 입력(실행할 spec·실행 설정·실행 옵션·provenance)으로 도는 run 이 있으면 그 run 을
+            # 돌려준다. 재클릭·새로고침 뒤 재시작·프록시 재시도가 같은 tape 를 겹쳐 계산하지 않게
+            # 한다(#161). spec 의 `==` 는 1 과 1.0 을 같게 보지만 provenance 의 `spec_hash` 는
+            # 가르고, 매니페스트도 provenance 를 기록하므로 둘 다 같아야 한다. 데이터 snapshot·
+            # 엔진·지표 레지스트리 판본은 프로세스 안에서 고정이라 같은 입력이면 결과도 같다.
+            # 취소를 요청한 run 은 곧 끝나므로 잇지 않는다.
+            for existing in self._records.values():
+                if (
+                    existing.state.status in (RunStatus.QUEUED, RunStatus.RUNNING)
+                    and existing.spec == spec
+                    and existing.provenance == provenance
+                ):
+                    return BacktestStartResponse(existing.state)
+            run_id = self._new_id()
+            created = self._now()
+            message = (
+                "Run accepted"
+                if self._running < self._max_concurrent_runs
+                else "Waiting for a free run slot"
+            )
             record = _RunRecord(
-                state=state,
+                state=BacktestRunState(
+                    run_id=run_id,
+                    status=RunStatus.QUEUED,
+                    progress=0.0,
+                    stage="queued",
+                    message=message,
+                    created_at=created,
+                    updated_at=created,
+                ),
                 request=request,
+                spec=spec,
                 provenance=provenance,
                 accepted_sequence=self._next_accepted_sequence,
                 events=[],
@@ -293,30 +332,12 @@ class BacktestRunService:
             )
             self._next_accepted_sequence += 1
             self._records[run_id] = record
-            self._emit(record, RunStatus.QUEUED, 0.0, "queued", "Run accepted")
+            self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
             # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
             # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
             accepted = record.state
-        try:
-            Thread(
-                target=self._run,
-                args=(run_id, spec, provenance),
-                name=f"backtest-{run_id}",
-                daemon=True,
-            ).start()
-        except (RuntimeError, MemoryError) as error:
-            # 스레드 상한(RuntimeError)·메모리 압박(MemoryError)으로 기동에 실패하면 레코드가
-            # `queued` 로 영구 고착한다(관측자 없음). `failed` 로 종결해 폴링·목록·취소가 막다른
-            # 상태를 보지 않게 한다.
-            with self._lock:
-                record.state = replace(
-                    record.state,
-                    error=_describe_failure(error),
-                    error_code=_failure_code(error),
-                )
-                self._emit(record, RunStatus.FAILED, 0.0, "failed", "Run thread failed to start")
-            logger.exception("backtest run thread failed to start — run_id=%s", run_id)
-            raise
+            self._waiting.append(record)
+            self._dispatch()
         return BacktestStartResponse(accepted)
 
     def state(self, run_id: str) -> BacktestRunState:
@@ -386,6 +407,14 @@ class BacktestRunService:
             ):
                 return record.state
             record.cancellation.set()
+            if record in self._waiting:
+                # 스레드가 없는 대기 run 은 여기서 끝낸다. 자리가 날 때까지 `cancel_requested` 로
+                # 남겨 두지 않는다(#161).
+                self._waiting.remove(record)
+                self._emit(
+                    record, RunStatus.CANCELLED, record.state.progress, "cancelled", "Run cancelled"
+                )
+                return record.state
             self._emit(
                 record,
                 RunStatus.CANCEL_REQUESTED,
@@ -454,28 +483,58 @@ class BacktestRunService:
         # TargetTape 와 같은 함수라 tape 없이 확정할 수 있고(#158), tape 단계가 다시 대조한다.
         return replace(request, strategy=strategy), None
 
-    def _run(
-        self,
-        run_id: str,
-        spec: BacktestRunSpec,
-        provenance: StrategyProvenance,
-    ) -> None:
+    def _dispatch(self) -> None:
+        """자리가 비는 만큼 대기열 앞의 run 을 스레드로 띄운다. `self._lock` 안에서 부른다.
+
+        대기 run 에는 스레드가 없다 — run 마다 스레드를 먼저 띄워 두면 스레드 수가 상한 없이 는다
+        (#161).
+        """
+
+        while self._waiting and self._running < self._max_concurrent_runs:
+            record = self._waiting.popleft()
+            try:
+                Thread(
+                    target=self._run,
+                    args=(record,),
+                    name=f"backtest-{record.state.run_id}",
+                    daemon=True,
+                ).start()
+            except (RuntimeError, MemoryError) as error:
+                # 스레드 상한(RuntimeError)·메모리 압박(MemoryError)으로 기동에 실패하면 레코드가
+                # `queued` 로 영구 고착한다(관측자 없음). `failed` 로 종결해 폴링·목록·취소가 막다른
+                # 상태를 보지 않게 하고 다음 run 으로 넘어간다.
+                record.state = replace(
+                    record.state,
+                    error=_describe_failure(error),
+                    error_code=_failure_code(error),
+                )
+                self._emit(record, RunStatus.FAILED, 0.0, "failed", "Run thread failed to start")
+                logger.exception(
+                    "backtest run thread failed to start — run_id=%s", record.state.run_id
+                )
+            else:
+                self._running += 1
+
+    def _run(self, record: _RunRecord) -> None:
         """run 스레드 본문. 전체 수집(2세대)을 run 이 끝날 때까지 미룬다(이슈 #196).
 
         tape 단계가 만드는 수백만 개의 오래 사는 객체 때문에 전체 수집이 매번 수 초씩 GIL 을 쥐고
-        다른 HTTP 요청까지 세웠다. 범위와 복원 규칙은 `_gc_policy` 가 소유한다.
+        다른 HTTP 요청까지 세웠다. 범위와 복원 규칙은 `_gc_policy` 가 소유한다. 끝나면 자리를
+        내놓고 대기열의 다음 run 을 띄운다(#161).
         """
 
-        with full_collections_suspended():
-            self._execute(run_id, spec, provenance)
+        try:
+            with full_collections_suspended():
+                self._execute(record)
+        finally:
+            with self._lock:
+                self._running -= 1
+                self._dispatch()
 
-    def _execute(
-        self,
-        run_id: str,
-        spec: BacktestRunSpec,
-        provenance: StrategyProvenance,
-    ) -> None:
-        record = self._record(run_id)
+    def _execute(self, record: _RunRecord) -> None:
+        run_id = record.state.run_id
+        spec = record.spec
+        provenance = record.provenance
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - resolved before the thread starts
             raise InvalidBacktestRunError("resolved run spec has no strategy")

@@ -61,6 +61,7 @@ duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from bisect import bisect_left, bisect_right
@@ -69,6 +70,7 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
+from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -157,6 +159,14 @@ VENUE = "XKRX"
 SCHEMA_VERSION = "equity-v1.2"
 SECURITY_ID_SEP = ":"
 _CHECKPOINT_ROWS = 256  # 취소 체크포인트 간격(행) — 포트의 `_CHECKPOINT_BATCH` 와 같은 크기
+# duckdb 질의 동안 감시 스레드가 checkpoint 를 부르는 간격(초). 질의 하나는 나눌 수 없어 행 단위
+# checkpoint 가 닿지 않는다(#160).
+_INTERRUPT_POLL_SECONDS = 0.1
+# 종목·법인 목록을 질의에 넘기는 자리. 짝이 되는 파라미터는 `_keys_param` 이 만든다. duckdb Python
+# 클라이언트(1.5)는 리스트 파라미터를 원소마다 변환하며 pandas 가 없으면 원소마다 import 를 다시
+# 시도해, 2천 종목 목록 하나에 약 2초를 쓴다 — 질의가 돌기 전이라 interrupt 로도 끊지 못한다(#160).
+# JSON 문자열 하나로 넘기고 SQL 안에서 푼다(같은 목록 약 0.01초).
+_KEYS_SQL = """unnest(from_json(?, '["VARCHAR"]'))"""
 # 원시 로딩 진행 구간 경계(이슈 #162). 실데이터 4년 구간 실측(질의 약 7초, 격자 행 조립 약 16초,
 # 관측 조립 약 17.5초, 생성 시 계약 검증 약 4초) 비율을 따른다.
 _GRID_FETCHED = 0.3  # 격자 안: 질의·fetchall 완료
@@ -351,6 +361,51 @@ def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     if path is None:
         return module.connect()
     return module.connect(str(path), read_only=True)
+
+
+def _keys_param(keys: Sequence[str]) -> str:
+    """`_KEYS_SQL` 자리에 넘길 파라미터 — 종목·법인 목록의 JSON 배열 문자열."""
+    return json.dumps(list(keys))
+
+
+def _fetchall(
+    con: duckdb.DuckDBPyConnection,
+    sql: str,
+    params: list[object],
+    checkpoint: Callable[[], None],
+) -> list[tuple[object, ...]]:
+    """`con.execute(sql, params).fetchall()` 과 같되, 도는 동안 취소되면 질의를 끊는다(#160).
+
+    질의와 결과 변환은 호출 한 번이라 행 단위 checkpoint 가 닿지 않는다(실원장 6개월 구간 실측:
+    격자 약 1초). 그동안 감시 스레드가 `_INTERRUPT_POLL_SECONDS` 마다 `checkpoint` 를 부르고,
+    예외가 나면 호출이 끝날 때까지 폴링마다 `con.interrupt()` 로 끊는다 — 질의가 시작되기 전에 보낸
+    interrupt 는 duckdb 가 버리므로 한 번으로는 모자란다. 끊긴 질의는 단계에 따라
+    `InterruptException` 이나 `InvalidInputException`("INTERRUPT Error")으로 오므로 종류로 가리지
+    않는다. 감시 스레드가 끊은 뒤의 오류면 `checkpoint()` 를 다시 불러 application 의 취소 예외로
+    올린다 — 예외 정책은 application 소유다.
+    """
+    done = Event()
+    interrupted = Event()
+
+    def watch() -> None:
+        while not done.wait(_INTERRUPT_POLL_SECONDS):
+            try:
+                checkpoint()
+            except BaseException:  # 취소 신호다. 예외 종류는 application 이 정하므로 가리지 않는다
+                interrupted.set()
+                con.interrupt()
+
+    watchdog = Thread(target=watch, name="equity-duckdb-interrupt", daemon=True)
+    watchdog.start()
+    try:
+        return con.execute(sql, params).fetchall()
+    except Exception:
+        if interrupted.is_set():
+            checkpoint()
+        raise
+    finally:
+        done.set()
+        watchdog.join()
 
 
 def _as_date(value: object, label: str) -> date:
@@ -997,7 +1052,9 @@ class EquityDuckdbAdapter:
         `checkpoint` 는 (1) duckdb 로 내려가기 전 1회, (2) 행 조립 루프에서
         `_CHECKPOINT_ROWS` 행마다, (3) `RawObservationSet` 계약 검증 중
         (`validation_checkpoint`) 호출된다. 콜백이 던지는 예외는 그대로 올라간다 —
-        정책은 애플리케이션 소유다. duckdb 질의 자체는 원자적이라 그 안에서는 끊지 못한다.
+        정책은 애플리케이션 소유다. duckdb 질의 동안은 감시 스레드가 불러 취소면 질의를 끊는다
+        (`_fetchall`, #160). checkpoint 없이 가장 오래 도는 구간은 관측 정렬이다(실원장 6개월
+        구간 약 0.3초).
         """
 
         def failure(status: DataLoadStatus, detail: str) -> RawObservationSet:
@@ -1139,11 +1196,11 @@ class EquityDuckdbAdapter:
                 SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
                        {basis_expr} AS basis
                 FROM {self._source(PRICE_TABLE)}
-                WHERE ticker IN (SELECT unnest(?::VARCHAR[]))
+                WHERE ticker IN (SELECT {_KEYS_SQL})
                   AND date BETWEEN {_lit(query.start)} AND {_lit(query.end)}
                 ORDER BY ticker, date
                 """,
-                [list(tickers)],
+                [_keys_param(tickers)],
             ).fetchall()
             factor_columns = {
                 str(row[0])
@@ -1156,10 +1213,10 @@ class EquityDuckdbAdapter:
                 f"""
                 SELECT ticker, event_id, event_type, share_factor, {ts_column}
                 FROM {self._source(FACTOR_TABLE)}
-                WHERE factor_ok AND ticker IN (SELECT unnest(?::VARCHAR[]))
+                WHERE factor_ok AND ticker IN (SELECT {_KEYS_SQL})
                 ORDER BY ticker, {ts_column}, event_id
                 """,
-                [list(tickers)],
+                [_keys_param(tickers)],
             ).fetchall()
         finally:
             con.close()
@@ -1393,8 +1450,8 @@ class EquityDuckdbAdapter:
         try:
             rows = con.execute(
                 f"SELECT ticker, span_seq, first_date, last_date FROM {self._source(SPAN_TABLE)} "
-                "WHERE ticker IN (SELECT unnest(?::VARCHAR[])) ORDER BY ticker, span_seq",
-                [list(tickers)],
+                f"WHERE ticker IN (SELECT {_KEYS_SQL}) ORDER BY ticker, span_seq",
+                [_keys_param(tickers)],
             ).fetchall()
         finally:
             con.close()
@@ -1438,7 +1495,8 @@ class EquityDuckdbAdapter:
         `tickers` 가 없으면 `predicate` 가 창 안에서 한 번이라도 참인 종목 집합(정책 driven)이고,
         있으면 그 종목이다. GRID 원천은 랙만큼 앞 세션까지 더 읽고, LATEST 원천은 창 끝까지의
         관측을 전부 읽어 세션별 컷오프를 파이썬에서 bisect 한다. `progress` 는 격자(0~0.9)와
-        LATEST 원천(~1.0) 진행을, `checkpoint` 는 격자 행 조립 중 협조적 취소를 받는다.
+        LATEST 원천(~1.0) 진행을, `checkpoint` 는 duckdb 질의·격자 행·LATEST 관측 조립 중
+        협조적 취소를 받는다.
         """
         grouped = self._fields_by_source(field_ids)
         grid_sources = [name for name in grouped if SOURCE_BY_NAME[name].mode is SourceMode.GRID]
@@ -1469,7 +1527,7 @@ class EquityDuckdbAdapter:
         ]
         corp_by_ticker: dict[str, str] = {}
         if any(SOURCE_BY_NAME[name].axis is SourceAxis.CORP for name in latest_sources):
-            corp_by_ticker = self._corp_map(panel_tickers)
+            corp_by_ticker = self._corp_map(panel_tickers, checkpoint=checkpoint)
         latest: dict[str, dict[str, _LatestSeries]] = {}
         for name in latest_sources:
             source = SOURCE_BY_NAME[name]
@@ -1478,7 +1536,9 @@ class EquityDuckdbAdapter:
                 if source.axis is SourceAxis.TICKER
                 else tuple(sorted(set(corp_by_ticker.values())))
             )
-            latest[name] = self._latest(source, grouped[name], keys, fetch_end)
+            latest[name] = self._latest(
+                source, grouped[name], keys, fetch_end, checkpoint=checkpoint
+            )
         progress(1.0)
         return _Panel(rows, latest, corp_by_ticker, tuple(warnings))
 
@@ -1505,9 +1565,9 @@ class EquityDuckdbAdapter:
         selection = (
             "SELECT DISTINCT ticker FROM u WHERE member"
             if tickers is None
-            else "SELECT unnest(?::VARCHAR[]) AS ticker"
+            else f"SELECT {_KEYS_SQL} AS ticker"
         )
-        params: list[object] = [] if tickers is None else [list(tickers)]
+        params: list[object] = [] if tickers is None else [_keys_param(tickers)]
         joins: list[str] = []
         selects: list[str] = []
         layout: list[tuple[str, tuple[str, ...]]] = []
@@ -1568,7 +1628,7 @@ class EquityDuckdbAdapter:
         """
         con = self._connect()
         try:
-            raw_rows = con.execute(sql, params).fetchall()
+            raw_rows = _fetchall(con, sql, params, checkpoint)
         finally:
             con.close()
         progress(_GRID_FETCHED)
@@ -1613,17 +1673,21 @@ class EquityDuckdbAdapter:
         progress(1.0)
         return rows
 
-    def _corp_map(self, tickers: Sequence[str]) -> dict[str, str]:
+    def _corp_map(
+        self, tickers: Sequence[str], *, checkpoint: Callable[[], None]
+    ) -> dict[str, str]:
         """티커 → 법인. `corp_ticker` 는 시점축 없는 현재 스냅샷이다(DESIGN §4-5 6)."""
         if not tickers or CORP_TICKER_TABLE not in self._builds:
             return {}
         con = _open(None)
         try:
-            rows = con.execute(
+            rows = _fetchall(
+                con,
                 f"SELECT ticker, corp_code FROM {self._source(CORP_TICKER_TABLE)} "
-                "WHERE ticker IN (SELECT unnest(?::VARCHAR[])) AND corp_code IS NOT NULL",
-                [list(tickers)],
-            ).fetchall()
+                f"WHERE ticker IN (SELECT {_KEYS_SQL}) AND corp_code IS NOT NULL",
+                [_keys_param(tickers)],
+                checkpoint,
+            )
         finally:
             con.close()
         return {str(ticker): str(corp) for ticker, corp in rows}
@@ -1634,8 +1698,13 @@ class EquityDuckdbAdapter:
         fields: tuple[str, ...],
         keys: Sequence[str],
         fetch_end: date,
+        *,
+        checkpoint: Callable[[], None],
     ) -> dict[str, _LatestSeries]:
-        """축 키 → `available_date` 오름차순 관측열. `reduce` 가 grain 을 (키, 공개일)로 줄인다."""
+        """축 키 → `available_date` 오름차순 관측열. `reduce` 가 grain 을 (키, 공개일)로 줄인다.
+
+        `checkpoint` 는 질의 동안(`_fetchall`)과 관측 조립 중 `_CHECKPOINT_ROWS` 행마다 부른다.
+        """
         if not keys:
             return {}
         columns = ", ".join(
@@ -1646,7 +1715,7 @@ class EquityDuckdbAdapter:
         where = [f"{source.available_expr} <= {_lit(fetch_end)}"]
         if source.row_filter:
             where.append(f"({source.row_filter})")
-        where.append(f"{source.key_column} IN (SELECT unnest(?::VARCHAR[]))")
+        where.append(f"{source.key_column} IN (SELECT {_KEYS_SQL})")
         predicate = " AND ".join(where)
         picks = ", ".join(f"c{position}" for position in range(len(fields)))
         if source.reduce is Reduce.SUM:
@@ -1667,12 +1736,14 @@ class EquityDuckdbAdapter:
             )
         con = self._connect()
         try:
-            raw_rows = con.execute(sql, [list(keys)]).fetchall()
+            raw_rows = _fetchall(con, sql, [_keys_param(keys)], checkpoint)
         finally:
             con.close()
         dates: dict[str, list[date]] = {}
         cells: dict[str, list[dict[str, _Observed]]] = {}
-        for raw in raw_rows:
+        for index, raw in enumerate(raw_rows):
+            if index % _CHECKPOINT_ROWS == 0:
+                checkpoint()
             key = str(raw[0])
             available = _as_date(raw[1], f"{source.relation}.{source.available_expr}")
             content_raw = raw[2]

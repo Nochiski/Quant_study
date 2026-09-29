@@ -55,7 +55,7 @@ def test_a_version_1_file_is_upgraded_and_its_old_runs_stay_outside_every_lineag
     _add(repository, "run-1", "s-1")
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone() == (4,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (5,)
     assert [entry.run_id for entry in repository.trial_ledger("s-1").entries] == ["run-1"]
 
 

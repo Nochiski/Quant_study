@@ -22,6 +22,7 @@ from strategy_workbench.domain.factor.facade.expression import (
     UnaryOperator,
 )
 from strategy_workbench.domain.strategy._canonical import (
+    STRATEGY_SEMANTIC_HASH_VERSION,
     canonical_json_spec_hash,
     canonical_payload_json,
     canonical_strategy_json,
@@ -62,6 +63,7 @@ from strategy_workbench.domain.strategy._models import (
 
 __all__ = [
     "CROSS_SECTIONAL_ELIGIBILITY_OPERATORS",
+    "STRATEGY_SEMANTIC_HASH_VERSION",
     "BinaryNode",
     "BinaryOperator",
     "ChoiceParameter",

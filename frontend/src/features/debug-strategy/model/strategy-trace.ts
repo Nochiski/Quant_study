@@ -33,12 +33,10 @@ export type StrategyDebuggerContext = {
   expectedRegistryVersion: string;
   /**
    * 추적이 놓일 실행 설정(schema 1.2 부터 전략 문서 밖, P3-02). 실행 요청과 같은 값을 trace 요청에
-   * 싣는다 — 없으면 backend 가 `run_environment.required` 로 거절한다.
+   * 싣는다 — 없으면 backend 가 실행 설정이 없다고 거절한다. 응답 날짜 범위 가드와 날짜 입력 범위도 이
+   * 값의 기간(`start`·`end`)을 읽는다.
    */
   environment: RunEnvironment;
-  /** 실행 기간(= `environment.start`·`end`). 응답 날짜 범위 가드와 날짜 입력 범위가 읽는다. */
-  start: string;
-  end: string;
   factors: StrategyDebuggerFactor[];
 };
 
@@ -229,6 +227,9 @@ export const prepareStrategyTrace = (
         ];
   return {
     kind: "ready",
+    // 키는 요청에 싣는 값 전부(inline 원문은 그 신원 `sourceOwner` 로 줄인다)와 backend 지문이다. 요청
+    // 칸을 골라 다시 적으면 요청에 새 칸이 생길 때 키에서 빠진다 — 실행 설정이 그렇게 빠져, 설정을 바꿔도
+    // 옛 추적이 새 설정의 결과로 보였다(#351).
     ownerKey: JSON.stringify([
       context.documentEpoch,
       context.sourceVersion,
@@ -236,13 +237,9 @@ export const prepareStrategyTrace = (
       context.expectedSnapshotId,
       context.expectedRegistryVersion,
       factor.expectedPlanHash,
-      sourceOwner,
-      request.as_of,
-      request.security_ids,
-      request.factor_id,
+      { ...commonRequest, strategy_source: sourceOwner },
       nodeIds,
       selection.nodeId,
-      request.starting_holdings ?? null,
       STRATEGY_TRACE_CLIENT_BUDGET,
     ]),
     request,
@@ -254,8 +251,8 @@ export const prepareStrategyTrace = (
       registryVersion: context.expectedRegistryVersion,
       planHash: factor.expectedPlanHash,
       sourceVersion: context.sourceVersion,
-      start: context.start,
-      end: context.end,
+      start: context.environment.start,
+      end: context.environment.end,
     },
   };
 };

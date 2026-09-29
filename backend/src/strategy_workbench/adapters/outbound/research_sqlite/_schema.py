@@ -11,6 +11,7 @@
 | 2 | 시도 원장(V1-05): `trial_ledger`·`lineage_merges`·`sealed_window_blocks` |
 | 3 | 실험(V3-03): `experiments`·`experiment_attempts`·`experiment_selections` |
 | 4 | 실험 대기열 조작(V3-04): `experiment_controls` |
+| 5 | 워크포워드 창별 자동 선택(V3-05): `experiment_window_picks` |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다.
 """
@@ -28,7 +29,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -236,6 +237,43 @@ _V4_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 
 V4_SCHEMA_OBJECTS = V3_SCHEMA_OBJECTS + _V4_ADDED_OBJECTS
 
+# 창마다 고른 칸과 그 검증 실행. 고를 칸이 없으면 칸·점수·실행이 모두 비고, 고른 칸이면 run_id 나
+# 거절 코드·문장 하나만 싣는다(attempt 와 같은 규칙).
+_V5_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "experiment_window_picks",
+        """
+        CREATE TABLE experiment_window_picks (
+            pick_order INTEGER PRIMARY KEY,
+            experiment_order INTEGER NOT NULL REFERENCES experiments (experiment_order),
+            window_index INTEGER NOT NULL CHECK (
+                typeof(window_index) = 'integer' AND window_index >= 0
+            ),
+            attempt INTEGER NOT NULL CHECK (typeof(attempt) = 'integer' AND attempt >= 1),
+            trial_index INTEGER,
+            train_sharpe REAL,
+            created_at TEXT NOT NULL,
+            run_id TEXT COLLATE BINARY,
+            error_code TEXT,
+            error TEXT,
+            CHECK ((trial_index IS NULL) = (train_sharpe IS NULL)),
+            CHECK (trial_index IS NOT NULL OR (run_id IS NULL AND error_code IS NULL)),
+            CHECK (trial_index IS NULL OR ((run_id IS NULL) <> (error_code IS NULL))),
+            CHECK ((error_code IS NULL) = (error IS NULL))
+        )
+        """,
+    ),
+    (
+        "index",
+        "experiment_window_picks_by_window",
+        "CREATE UNIQUE INDEX experiment_window_picks_by_window "
+        "ON experiment_window_picks (experiment_order, window_index, attempt)",
+    ),
+)
+
+V5_SCHEMA_OBJECTS = V4_SCHEMA_OBJECTS + _V5_ADDED_OBJECTS
+
 
 def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
     def apply(connection: sqlite3.Connection) -> None:
@@ -252,12 +290,13 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V4_SCHEMA_OBJECTS,
+            objects=V5_SCHEMA_OBJECTS,
             error=ResearchStorageError,
             upgrades=(
                 SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
                 SchemaUpgrade(2, V2_SCHEMA_OBJECTS, _added(_V3_ADDED_OBJECTS)),
                 SchemaUpgrade(3, V3_SCHEMA_OBJECTS, _added(_V4_ADDED_OBJECTS)),
+                SchemaUpgrade(4, V4_SCHEMA_OBJECTS, _added(_V5_ADDED_OBJECTS)),
             ),
         ),
     )

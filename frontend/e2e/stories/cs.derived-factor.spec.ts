@@ -1,6 +1,7 @@
 /**
  * 김철수의 스토리 e2e — 원천 필드를 2차 가공한 파생 팩터를 정의하고 기존 팩터와 결합한다(US-CS-02),
- * 그 계산을 실행 계획과 중간값 추적으로 검증한다(US-CS-03).
+ * 그 계산을 실행 계획과 중간값 추적으로 검증하고, 실행 설정이 바뀌거나 서버가 거절한 추적이 옛 결과나 일시
+ * 장애처럼 보이지 않는지 본다(US-CS-03).
  *
  * 스토리 문구와 수용 기준의 정본은 `docs/product/user-stories/stories/cs.md`다. 김철수는 YAML로 팩터
  * 그래프를 직접 적는 사용자라 파생 팩터를 편집기에 입력하는 것부터 시작한다. 분모 필드 id 를 틀린
@@ -18,6 +19,8 @@ import {
   mustReplace,
   openEditor,
   replaceSource,
+  RUN_ENVIRONMENT,
+  runSettingsInputs,
   saveAndWaitForRevision,
 } from "../workbench-helpers";
 
@@ -173,6 +176,35 @@ test(
       planRow("btm").getByRole("button", { name: /^cap / }),
     ).toBeVisible();
     await expect(planRow("btm_z")).toContainText("cross_sectional.zscore");
+
+    // 실행 설정만 바꿔도 앞 추적은 새 설정의 결과가 아니다 — 재현 정보가 사라지고 대기 문장으로
+    // 돌아간다(#351).
+    const settings = runSettingsInputs(page);
+    const debuggerRegion = page.getByRole("region", { name: "중간 결과" });
+    await settings.toggle.click();
+    await settings.fee.fill("20");
+    await settings.toggle.click();
+    await expect(page.getByLabel("추적 재현 정보")).toBeHidden();
+    await expect(
+      debuggerRegion.getByText("범위를 선택한 뒤 추적을 실행하세요."),
+    ).toBeVisible();
+
+    // 봉인 구간 앞을 측정하는 추적은 서버가 거절한다 — 백테스트 시작과 같은 문장·날짜로 말하고 서버
+    // 원문은 접힌 사유에 둔다. 일시 장애("잠시 뒤 다시")로 보이지 않는다(#351).
+    await settings.toggle.click();
+    await settings.start.fill("2015-01-02");
+    await settings.toggle.click();
+    await page.getByRole("button", { name: "추적 실행" }).click();
+    const failure = debuggerRegion.getByRole("alert", { name: "추적 실패" });
+    await expect(failure).toContainText(
+      "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다.",
+      { timeout: 60_000 },
+    );
+    await expect(failure).not.toContainText("잠시 뒤 다시");
+    await expect(failure.getByText("서버 사유")).toBeVisible();
+    await settings.toggle.click();
+    await settings.start.fill(RUN_ENVIRONMENT.start);
+    await settings.toggle.click();
 
     // 결합한 전략이 끝까지 돈다.
     await expect(backtest(page)).toBeEnabled();

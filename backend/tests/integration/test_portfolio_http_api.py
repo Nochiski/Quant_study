@@ -77,7 +77,8 @@ def test_invalid_portfolio_configuration_returns_structured_validation() -> None
     TypeAdapter(Portfolio422Response).validate_python(response.json())
 
 
-def test_portfolio_preview_openapi_declares_coded_and_malformed_422() -> None:
+def test_portfolio_preview_openapi_declares_every_coded_422() -> None:
+    """본문 검증 실패도 백테스트 시작처럼 `backtest.run.field_invalid` 로 코드화한다(#351)."""
     client = TestClient(build_http_app())
     schema = client.get("/openapi.json").json()
     operation = schema["paths"]["/api/v1/portfolio/preview"]["post"]
@@ -85,14 +86,19 @@ def test_portfolio_preview_openapi_declares_coded_and_malformed_422() -> None:
         "detail"
     ]
 
-    assert "422" in operation["responses"]
+    assert operation["responses"]["422"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "PortfolioUnprocessableResponse"
+    )
     assert detail["discriminator"]["propertyName"] == "code"
     assert set(detail["discriminator"]["mapping"]) == {
         "portfolio.data.unavailable",
         "portfolio.raw_observation.invalid",
         "portfolio.strategy.invalid",
+        "backtest.run.field_invalid",
+        "backtest.run.environment_required",
+        "backtest.run.research_window_violation",
     }
     malformed = client.post("/api/v1/portfolio/preview", json={"spec": {}})
     assert malformed.status_code == 422
-    assert isinstance(malformed.json()["detail"], list)
+    assert malformed.json()["detail"]["code"] == "backtest.run.field_invalid"
     TypeAdapter(Portfolio422Response).validate_python(malformed.json())

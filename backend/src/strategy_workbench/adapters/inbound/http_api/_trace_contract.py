@@ -16,10 +16,12 @@ from strategy_workbench.application.portfolio_design.facade.design import Engine
 from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceRequest
 
 from ._execution_error_contract import (
+    BacktestEnvironmentRequiredDetail,
+    BacktestResearchWindowViolationDetail,
+    BacktestRunFieldInvalidDetail,
     PortfolioDataUnavailableDetail,
     PortfolioRawObservationInvalidDetail,
     PortfolioStrategyInvalidDetail,
-    RequestValidationResponse,
 )
 
 
@@ -48,6 +50,7 @@ class TraceStrategyRequiresUpgradeDetail:
     message: str
 
 
+# 실행 설정 거절·본문 검증 실패는 백테스트 시작과 같은 코드·detail 이다(#351).
 TraceUnprocessableDetail: TypeAlias = Annotated[
     TraceRequestInvalidDetail
     | TraceStrategyRequiresUpgradeDetail
@@ -55,7 +58,10 @@ TraceUnprocessableDetail: TypeAlias = Annotated[
     | TraceCapabilityUnsupportedDetail
     | PortfolioStrategyInvalidDetail
     | PortfolioDataUnavailableDetail
-    | PortfolioRawObservationInvalidDetail,
+    | PortfolioRawObservationInvalidDetail
+    | BacktestRunFieldInvalidDetail
+    | BacktestEnvironmentRequiredDetail
+    | BacktestResearchWindowViolationDetail,
     Field(discriminator="code"),
 ]
 
@@ -65,7 +71,7 @@ class TraceUnprocessableResponse:
     detail: TraceUnprocessableDetail
 
 
-Trace422Response: TypeAlias = TraceUnprocessableResponse | RequestValidationResponse
+Trace422Response: TypeAlias = TraceUnprocessableResponse
 
 
 @dataclass(frozen=True)

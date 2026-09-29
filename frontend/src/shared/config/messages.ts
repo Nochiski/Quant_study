@@ -1444,6 +1444,12 @@ const ko = {
     "편집 중인 문서가 저장본과 달라져 추적할 수 없습니다. 저장하거나 저장본을 다시 여세요.",
   "trace.error.trace.strategy.not_found": "추적할 저장 revision을 찾지 못했습니다.",
   "trace.error.trace.cancelled": "추적이 취소되었습니다.",
+  // 추적은 요청 안에서 관측을 읽으므로 데이터 실패도 거절로 온다. 실행 설정 거절처럼 백테스트 API 와 같은
+  // 코드는 `backtest.error.<code>` 를 그대로 쓴다(#351) — 코드 전수는 `trace-error-message.test.ts` 가 대조한다.
+  "trace.error.portfolio.data.unavailable":
+    "데이터 소스가 이 유니버스·기간의 관측을 주지 못해 추적할 수 없습니다. 실행 설정의 유니버스와 기간을 확인하세요.",
+  "trace.error.portfolio.raw_observation.invalid":
+    "데이터 어댑터가 계약을 어긴 관측을 돌려주어 추적을 멈췄습니다. 데이터 소스 쪽 문제이므로 운영자에게 알리세요.",
   "trace.error.request": "서버가 추적 요청을 처리하지 못했습니다. 잠시 뒤 다시 추적하세요.",
   "ide.meta.schemaVersion": "schema",
   "ide.meta.sourceHash": "source hash",
@@ -3299,6 +3305,10 @@ export const messages = {
       "The edited document no longer matches the stored revision. Save it or reopen the stored revision.",
     "trace.error.trace.strategy.not_found": "The stored revision to trace was not found.",
     "trace.error.trace.cancelled": "The trace was cancelled.",
+    "trace.error.portfolio.data.unavailable":
+      "The data source could not serve observations for this universe and period, so the trace cannot run. Check the universe and period in the run settings.",
+    "trace.error.portfolio.raw_observation.invalid":
+      "The data adapter returned observations that violate its contract, so the trace stopped. This is a data-source problem; notify the operator.",
     "trace.error.request": "The server could not process the trace request. Try again shortly.",
     "ide.meta.schemaVersion": "schema",
     "ide.meta.sourceHash": "source hash",

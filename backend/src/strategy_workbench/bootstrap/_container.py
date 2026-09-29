@@ -4,6 +4,7 @@ import logging
 import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
@@ -209,7 +210,10 @@ def build_container(
     )
     experiments = ExperimentRunService(
         SQLiteExperimentRepository(research_db_path),
-        _RunServiceTrialRuns(backtest_runs, held_run_ids=None if hold is None else hold.run_ids),
+        _RunServiceTrialRuns(
+            backtest_runs, equity_data, held_run_ids=None if hold is None else hold.run_ids
+        ),
+        metric_registry=metric_registry,
         new_id=lambda: str(uuid4()),
     )
     # 지난 프로세스가 끝내지 못한 실험의 남은 trial 을 다시 넘긴다(검증 랩 spec D6). 실행
@@ -254,8 +258,15 @@ class _RunServiceTrialRuns:
     (`rejection_code` 가 코드를 주는 오류)만 `TrialRunRejectedError` 로 옮겨 attempt 에 남기게 한다.
     """
 
-    def __init__(self, runs: BacktestRunService, *, held_run_ids: set[str] | None) -> None:
+    def __init__(
+        self,
+        runs: BacktestRunService,
+        equity_data: EquityDataPort,
+        *,
+        held_run_ids: set[str] | None,
+    ) -> None:
         self._runs = runs
+        self._equity_data = equity_data
         self._held_run_ids = held_run_ids
 
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
@@ -266,17 +277,27 @@ class _RunServiceTrialRuns:
             )
         return AdmittedRun(admission.spec, self._runs.trial_ledger(admission.lineage_id))
 
+    def rejection(self, error: Exception) -> TrialRunRejectedError | None:
+        code = rejection_code(error)
+        return None if code is None else TrialRunRejectedError(code, str(error))
+
     def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
         try:
             run_id = self._runs.start(request, owner=owner, trial_key_override=trial_key).run.run_id
         except Exception as error:
-            code = rejection_code(error)
-            if code is None:
+            rejected = self.rejection(error)
+            if rejected is None:
                 raise
-            raise TrialRunRejectedError(code, str(error)) from error
+            raise rejected from error
         if self._held_run_ids is not None:
             self._held_run_ids.add(run_id)
         return run_id
+
+    def result(self, run_id: str) -> BacktestRunResult:
+        return self._runs.result(run_id)
+
+    def sessions(self, start: date, end: date) -> tuple[date, ...]:
+        return self._equity_data.trading_sessions(start, end)
 
     def states(self, run_ids: Collection[str]) -> Mapping[str, BacktestRunState]:
         return self._runs.states(run_ids)

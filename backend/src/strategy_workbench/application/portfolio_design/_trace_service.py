@@ -9,6 +9,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyNotFoundError,
     StrategyRepositoryPort,
 )
+from strategy_workbench.domain.backtest.facade.environment import require_environment
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioConstructionTrace,
@@ -33,7 +34,6 @@ from ._service import (
     PortfolioDesignService,
     PortfolioPipelineCancelledError,
     TraceObservationCapabilityError,
-    _require_environment_or_reject,
 )
 from ._trace_models import (
     RawStrategyTraceRow,
@@ -102,9 +102,11 @@ class StrategyTraceService:
         validation = validate_strategy(spec)
         if not validation.valid:
             raise InvalidPortfolioRequestError(validation)
-        # preview·run 과 같은 헬퍼를 쓴다 — 세 경로가 같은 `portfolio.strategy.invalid` +
-        # `validation.issues` 구조로 거절해야 프론트가 코드 하나만 번역한다(P2-02 2차 리뷰 P3).
-        environment = _require_environment_or_reject(spec, request.environment)
+        # preview·run 과 같은 관문이다 — 없거나 연구 구간 밖이면 domain 오류를 그대로 올려, 세
+        # 경로가 같은 접수 거절 코드·detail 로 거절한다(#351).
+        environment = require_environment(
+            request.environment, requested_by=f"strategy.trace({spec.title!r})"
+        )
         if request.as_of is not None and not environment.start <= request.as_of <= environment.end:
             raise InvalidStrategyTraceRequestError(
                 "trace as_of is outside the run range — "

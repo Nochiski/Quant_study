@@ -352,7 +352,7 @@ export type AssistantUnprocessableResponse = {
 /**
  * BacktestEnvironmentRequiredDetail
  *
- * 실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
+ * 실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
  */
 export type BacktestEnvironmentRequiredDetail = {
   /**
@@ -1552,6 +1552,10 @@ export type ExperimentControlsRequest = {
  * ExperimentDesign
  */
 export type ExperimentDesign = {
+  /**
+   * Measured
+   */
+  measured?: boolean;
   /**
    * Parameter Values
    */
@@ -3240,7 +3244,16 @@ export type PortfolioUnprocessableResponse = {
       } & PortfolioDataUnavailableDetail)
     | ({
         code: "portfolio.raw_observation.invalid";
-      } & PortfolioRawObservationInvalidDetail);
+      } & PortfolioRawObservationInvalidDetail)
+    | ({
+        code: "backtest.run.field_invalid";
+      } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
+        code: "backtest.run.research_window_violation";
+      } & BacktestResearchWindowViolationDetail);
 };
 
 /**
@@ -5845,7 +5858,16 @@ export type TraceUnprocessableResponse = {
       } & PortfolioDataUnavailableDetail)
     | ({
         code: "portfolio.raw_observation.invalid";
-      } & PortfolioRawObservationInvalidDetail);
+      } & PortfolioRawObservationInvalidDetail)
+    | ({
+        code: "backtest.run.field_invalid";
+      } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
+        code: "backtest.run.research_window_violation";
+      } & BacktestResearchWindowViolationDetail);
 };
 
 /**
@@ -6428,6 +6450,44 @@ export type ValidationKind = "syntax" | "semantic" | "capability";
 export type ValidationSeverity = "error" | "warning";
 
 /**
+ * WalkForwardGap
+ *
+ * 이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.
+ *
+ * 값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.
+ */
+export type WalkForwardGap =
+  "legacy_design" | "test_failed" | "no_cell" | "pending";
+
+/**
+ * WalkForwardReport
+ *
+ * 워크포워드 결과(V3-05). 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율이다.
+ *
+ * 곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 완료돼야 채워지고, 아니면 비우고 `gap` 에
+ * 이유를 싣는다 — 실패한 창을 빼고 남은 창만 이으면 낙관 쪽으로 빠진다.
+ */
+export type WalkForwardReport = {
+  /**
+   * Curve
+   */
+  curve: Array<EquityCurvePoint>;
+  gap: WalkForwardGap | null;
+  /**
+   * Out Of Sample Sharpe
+   */
+  out_of_sample_sharpe: number | null;
+  /**
+   * Retention
+   */
+  retention: number | null;
+  /**
+   * Windows
+   */
+  windows: Array<WalkForwardWindowResult>;
+};
+
+/**
  * WalkForwardWindow
  *
  * 학습·검증 구간 한 쌍. 네 날짜 모두 양끝 포함이고 연구 구간 안이다.
@@ -6452,6 +6512,29 @@ export type WalkForwardWindow = {
 };
 
 /**
+ * WalkForwardWindowResult
+ *
+ * 창 하나의 자동 선택과 그 검증 실행 결과.
+ */
+export type WalkForwardWindowResult = {
+  gap: WalkForwardGap | null;
+  pick: WindowPick;
+  /**
+   * Run Error Code
+   */
+  run_error_code:
+    | "portfolio.strategy.invalid"
+    | "portfolio.data.unavailable"
+    | "portfolio.raw_observation.invalid"
+    | "backtest.run.invalid"
+    | "backtest.run.equity_wiped_out"
+    | "backtest.run.internal"
+    | "backtest.run.interrupted"
+    | null;
+  run_status: RunStatus | null;
+};
+
+/**
  * WarningSeverity
  */
 export type WarningSeverity = "info" | "warning";
@@ -6460,6 +6543,54 @@ export type WarningSeverity = "info" | "warning";
  * WeightingMethod
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
+
+/**
+ * WindowPick
+ *
+ * 워크포워드 창마다 학습 점수로 자동으로 고른 칸과 그 칸의 검증 실행(V3-05).
+ *
+ * 사용자가 이유를 적어 고르는 후보 선택(`ExperimentSelection`, spec D9)과 다르다. 고를 칸이
+ * 없으면(창에서 대표 샤프가 있는 학습 실행이 없다) `trial_index` 가 None 이고 실행도 없다.
+ * 검증 실행이 재시작으로 중단되면 같은 칸으로 다음 번호를 다시 넘긴다.
+ */
+export type WindowPick = {
+  /**
+   * Attempt
+   */
+  attempt: number;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Error Code
+   */
+  error_code?: string | null;
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Run Id
+   */
+  run_id?: string | null;
+  /**
+   * Train Sharpe
+   */
+  train_sharpe: number | null;
+  /**
+   * Trial Index
+   */
+  trial_index: number | null;
+  /**
+   * Window Index
+   */
+  window_index: number;
+};
 
 /**
  * WindowSelectionRule
@@ -7702,6 +7833,42 @@ export type RetryExperimentTrialResponses = {
 export type RetryExperimentTrialResponse =
   RetryExperimentTrialResponses[keyof RetryExperimentTrialResponses];
 
+export type GetExperimentWalkForwardData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/walk-forward";
+};
+
+export type GetExperimentWalkForwardErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentWalkForwardError =
+  GetExperimentWalkForwardErrors[keyof GetExperimentWalkForwardErrors];
+
+export type GetExperimentWalkForwardResponses = {
+  /**
+   * Successful Response
+   */
+  200: WalkForwardReport;
+};
+
+export type GetExperimentWalkForwardResponse =
+  GetExperimentWalkForwardResponses[keyof GetExperimentWalkForwardResponses];
+
 export type GetFactorCatalogData = {
   body?: never;
   path?: never;
@@ -7860,11 +8027,9 @@ export type PreviewPortfolioData = {
 
 export type PreviewPortfolioErrors = {
   /**
-   * Response 422 Previewportfolio
-   *
-   * Malformed envelope or a coded portfolio preflight diagnostic
+   * A coded portfolio preflight or request-body diagnostic
    */
-  422: PortfolioUnprocessableResponse | RequestValidationResponse;
+  422: PortfolioUnprocessableResponse;
 };
 
 export type PreviewPortfolioError =
@@ -7993,11 +8158,9 @@ export type TraceStrategyErrors = {
    */
   409: TraceStrategyStaleResponse;
   /**
-   * Response 422 Tracestrategy
-   *
-   * Malformed envelope or a coded trace preflight diagnostic
+   * A coded trace preflight or request-body diagnostic
    */
-  422: TraceUnprocessableResponse | RequestValidationResponse;
+  422: TraceUnprocessableResponse;
   /**
    * The client cancelled the trace request
    */

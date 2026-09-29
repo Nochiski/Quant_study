@@ -28,9 +28,26 @@ from strategy_workbench.domain.backtest.facade.runs import (
     MetricWindow,
 )
 from strategy_workbench.domain.backtest.facade.trials import TRIAL_KEY_ROLES, trial_key
-from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.factor.facade.expression import (
+    BinaryNode,
+    BinaryOperator,
+    ExpressionNode,
+    FactorGraph,
+    FieldNode,
+    MissingPolicy,
+    TimeSeriesNode,
+    TimeSeriesOperator,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
+    STRATEGY_SEMANTIC_HASH_VERSION,
+    FactorDirection,
+    FactorSignal,
     FloatParameter,
+    PortfolioStep,
+    RiskStep,
+    StrategyIdentity,
+    StrategySpec,
+    WeightingMethod,
     strategy_semantic_hash,
     strategy_spec_hash,
 )
@@ -188,6 +205,132 @@ def test_the_semantic_hash_ignores_the_title_that_the_spec_hash_keeps() -> None:
 
     assert strategy_spec_hash(renamed) != strategy_spec_hash(_STRATEGY)
     assert strategy_semantic_hash(renamed) == strategy_semantic_hash(_STRATEGY)
+
+
+def _momentum_over_volatility(
+    names: tuple[str, str, str, str] = ("close", "mom", "vol", "score"),
+    *,
+    order: tuple[int, ...] = (0, 1, 2, 3),
+    swap: bool = False,
+    window: int = 20,
+    extra: tuple[ExpressionNode, ...] = (),
+) -> StrategySpec:
+    """손으로 만든 전략: 팩터 하나(종가 20일 모멘텀 ÷ 종가 20일 표준편차), 나머지는 모델 기본값.
+
+    `names` 는 노드 이름, `order` 는 선언 순서, `swap` 은 나누기 인자 순서다. 템플릿에 기대지
+    않아 판본 고정 테스트가 템플릿 변경에 흔들리지 않는다.
+    """
+    close, mom, vol, score = names
+    nodes = (
+        FieldNode(node_id=close, field_id="price.close", kind="field"),
+        TimeSeriesNode(
+            node_id=mom,
+            operator=TimeSeriesOperator.MOMENTUM,
+            input_node_id=close,
+            window=window,
+            kind="time_series",
+        ),
+        TimeSeriesNode(
+            node_id=vol,
+            operator=TimeSeriesOperator.STANDARD_DEVIATION,
+            input_node_id=close,
+            window=20,
+            kind="time_series",
+        ),
+        BinaryNode(
+            node_id=score,
+            operator=BinaryOperator.DIVIDE,
+            left_node_id=vol if swap else mom,
+            right_node_id=mom if swap else vol,
+            kind="binary",
+        ),
+    )
+    graph = FactorGraph(nodes=tuple(nodes[index] for index in order) + extra, output_node_id=score)
+    factor = FactorSignal(
+        factor_id="momentum_risk",
+        label="모멘텀 대비 변동성",
+        direction=FactorDirection.HIGH,
+        graph=graph,
+    )
+    return StrategySpec(
+        identity=StrategyIdentity(strategy_id="s", revision=1), title="손 예시", factors=(factor,)
+    )
+
+
+@pytest.mark.parametrize(
+    ("strategy", "new_trial"),
+    [
+        # 노드 이름만 바꿨다(이슈 #335 DOMAIN-V1-03). 계산이 같아 같은 시도다.
+        (_momentum_over_volatility(("c", "momentum_20", "risk", "out")), False),
+        # 선언 순서만 바꿨다. 평가는 출력에서 참조를 따라가 선언 순서를 쓰지 않는다.
+        (_momentum_over_volatility(order=(3, 2, 0, 1)), False),
+        # 출력에 닿지 않는 노드는 계산되지 않는다.
+        (
+            _momentum_over_volatility(
+                extra=(FieldNode(node_id="unused", field_id="price.volume", kind="field"),)
+            ),
+            False,
+        ),
+        # 나누기 인자를 바꾸면 값이 역수가 된다. 인자 순서는 정렬하지 않는다.
+        (_momentum_over_volatility(swap=True), True),
+        # 노드 파라미터 값(모멘텀 창)을 바꾸면 계산이 달라진다.
+        (_momentum_over_volatility(window=60), True),
+    ],
+)
+def test_the_strategy_axis_ignores_node_names_and_declaration_order_but_not_structure(
+    strategy: Any, new_trial: bool
+) -> None:
+    base = trial_key(replace(_BASE, strategy=_momentum_over_volatility()))
+
+    assert (trial_key(replace(_BASE, strategy=strategy)) != base) is new_trial
+
+
+def _risk_weighted(
+    alpha: str = "mom_vol", risk: str = "risk_source", *, target: str | None = None
+) -> StrategySpec:
+    """`weighting: risk` 두 팩터 전략. 알파(20일 창)에는 죽은 노드가 하나 있고, 위험 원천은
+    60일 창이다.
+
+    `alpha`·`risk` 는 두 팩터 id, `target` 은 `risk_factor_id` 가 가리키는 팩터 id(기본은
+    위험 원천)다.
+    """
+    unused = FieldNode(node_id="unused", field_id="price.volume", kind="field")
+    alpha_factor = _momentum_over_volatility(extra=(unused,)).factors[0]
+    risk_factor = _momentum_over_volatility(window=60).factors[0]
+    return StrategySpec(
+        identity=StrategyIdentity(strategy_id="s", revision=1),
+        title="손 예시",
+        factors=(replace(alpha_factor, factor_id=alpha), replace(risk_factor, factor_id=risk)),
+        portfolio=PortfolioStep(weighting=WeightingMethod.RISK),
+        risk=RiskStep(risk_factor_id=risk if target is None else target),
+    )
+
+
+def test_renaming_factors_with_their_risk_reference_keeps_the_axis_but_retargeting_does_not() -> (
+    None
+):
+    base = strategy_semantic_hash(_risk_weighted())
+
+    assert strategy_semantic_hash(_risk_weighted("alpha", "inverse_risk")) == base
+    # 위험 원천을 60일 창 팩터에서 20일 창 알파로 바꾸면 역가중 비중과 합성 점수가 모두 달라진다.
+    assert strategy_semantic_hash(_risk_weighted(target="mom_vol")) != base
+
+
+# 의미 해시가 보는 칸이나 정규화를 바꾸는 PR 은 `STRATEGY_SEMANTIC_HASH_VERSION` 을 올리고 이 짝을
+# 함께 고친다(SoT 시도 키 행). 판본을 올리면 계열마다 다음 실행이 한 번 새 시도로 셀 수 있다.
+# 고정 예시는 이 판본의 규칙 셋을 모두 거친다: 노드 번호(팩터마다 출력 0 → 나누기 왼쪽 모멘텀 1 →
+# 종가 2 → 변동성 3), 죽은 노드 제외, 팩터 id·`risk_factor_id` 치환(팩터 0·1).
+_PINNED_SEMANTIC_HASH = (
+    "strategy-semantic-v2",
+    "651681979b7912cd19bb3b0a1f56fb180d5fd574de055d13f777e19df44cb5a5",
+)
+
+
+def test_semantic_hash_changes_come_with_a_version_bump() -> None:
+    assert (
+        STRATEGY_SEMANTIC_HASH_VERSION,
+        strategy_semantic_hash(_risk_weighted()),
+    ) == _PINNED_SEMANTIC_HASH
 
 
 # 스키마 기본값은 키 표기의 기준이라 바꾸면 기본값으로 돌던 모든 실행의 시도 키가 바뀐다. 바꾸는

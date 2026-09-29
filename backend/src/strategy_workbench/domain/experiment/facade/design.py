@@ -24,8 +24,15 @@ from strategy_workbench.domain.experiment._search import (
 from strategy_workbench.domain.experiment._walk_forward import (
     SplitMode,
     SplitSpec,
+    WalkForwardGap,
     WalkForwardWindow,
     WindowSelectionRule,
+    out_of_sample_sharpe,
+    pick_window_cell,
+    stitch_out_of_sample,
+    walk_forward_gap,
+    walk_forward_retention,
+    window_gap,
 )
 
 __all__ = [
@@ -43,11 +50,18 @@ __all__ = [
     "SearchSpec",
     "SplitMode",
     "SplitSpec",
+    "WalkForwardGap",
     "WalkForwardWindow",
     "WindowSelectionRule",
     "build_search_spec",
     "experiment_trial_key",
     "grid_neighbors",
     "neighbor_mean",
+    "out_of_sample_sharpe",
     "parameter_grid_values",
+    "pick_window_cell",
+    "stitch_out_of_sample",
+    "walk_forward_gap",
+    "walk_forward_retention",
+    "window_gap",
 ]

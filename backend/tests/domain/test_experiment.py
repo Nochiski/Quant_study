@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import date, timedelta
+from dataclasses import replace
+from datetime import UTC, date, datetime, timedelta
 from itertools import product
 
 import pytest
 
+from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint
 from strategy_workbench.domain.backtest.facade.environment import RESEARCH_START
-from strategy_workbench.domain.backtest.facade.runs import RunStatus
+from strategy_workbench.domain.backtest.facade.runs import (
+    BacktestRunState,
+    RunFailureCode,
+    RunStatus,
+)
 from strategy_workbench.domain.experiment.facade.design import (
     MAX_GRID_POINTS,
     ExperimentDesign,
@@ -17,12 +23,18 @@ from strategy_workbench.domain.experiment.facade.design import (
     InvalidExperimentSpecError,
     SplitMode,
     SplitSpec,
+    WalkForwardGap,
     WalkForwardWindow,
     WindowSelectionRule,
     build_search_spec,
     grid_neighbors,
     neighbor_mean,
     parameter_grid_values,
+    pick_window_cell,
+    stitch_out_of_sample,
+    walk_forward_gap,
+    walk_forward_retention,
+    window_gap,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     MAX_EXPERIMENT_PRIORITY,
@@ -342,8 +354,132 @@ def test_embargo_pulls_the_train_measurement_end(embargo_sessions: int, expected
 
 def test_embargo_that_swallows_the_train_window_is_rejected() -> None:
     split = SplitSpec(mode=SplitMode.ROLLING, train_years=1, test_years=1, embargo_sessions=6)
-    with pytest.raises(ValueError, match="train_sessions=6"):
+    with pytest.raises(InvalidExperimentSpecError, match="train_sessions=6") as caught:
         split.train_measurement_end(_WINDOW, _SESSIONS)
+    assert caught.value.code == "experiment.split.invalid"
+
+
+def test_measured_windows_end_each_train_window_before_the_embargo() -> None:
+    split = SplitSpec(mode=SplitMode.ROLLING, train_years=1, test_years=1, embargo_sessions=2)
+    start, end = date(2020, 1, 2), date(2022, 6, 30)
+    weekdays = [
+        day
+        for day in (start + timedelta(days=offset) for offset in range((end - start).days + 1))
+        if day.weekday() < 5
+    ]
+    first, second = split.windows(start, end)
+
+    # 검증 시작 2021-01-02(토) 앞 세션은 …12/30(수)·12/31(목)·1/1(금). 엠바고 2세션을 빼면 12/30.
+    # 2022-01-02(일) 앞은 …12/29(수)·12/30(목)·12/31(금) → 12/29. 검증 창은 그대로다.
+    assert split.measured_windows(start, end, weekdays) == (
+        replace(first, train_end=date(2020, 12, 30)),
+        replace(second, train_end=date(2021, 12, 29)),
+    )
+
+
+def test_window_cell_is_the_best_train_score_and_ties_go_to_the_first_cell() -> None:
+    # 1차원 그리드 4칸 점수 1 3 2 3. 넣는 순서와 무관하게 좌표 순으로 동점을 가른다.
+    scores: dict[GridIndex, float] = {(3,): 3.0, (2,): 2.0, (1,): 3.0, (0,): 1.0}
+
+    assert pick_window_cell(scores, (4,), WindowSelectionRule.TRAIN_SHARPE_MAX) == (1,)
+    # 이웃 평균: (0,)=3, (1,)=(1+2)/2=1.5, (2,)=(3+3)/2=3, (3,)=2 → (0,)·(2,) 동점, 앞 칸.
+    assert pick_window_cell(scores, (4,), WindowSelectionRule.NEIGHBOR_MEAN_SHARPE_MAX) == (0,)
+
+
+def test_window_cell_without_scored_neighbors_uses_its_own_score() -> None:
+    # (2,) 는 실패해 점수가 없다: (0,)=2, (1,)=1, (3,) 는 이웃 점수가 없어 자기 점수 5.
+    scores: dict[GridIndex, float] = {(0,): 1.0, (1,): 2.0, (3,): 5.0}
+
+    assert pick_window_cell(scores, (4,), WindowSelectionRule.NEIGHBOR_MEAN_SHARPE_MAX) == (3,)
+    assert pick_window_cell({(0,): -0.5}, (1,), WindowSelectionRule.NEIGHBOR_MEAN_SHARPE_MAX) == (
+        0,
+    )
+    assert pick_window_cell({}, (4,), WindowSelectionRule.TRAIN_SHARPE_MAX) is None
+
+
+def test_out_of_sample_curve_chains_returns_from_each_window_first_snapshot() -> None:
+    """#364 리뷰 P3-1: 학습 점수(엔진 전체 구간)처럼 창마다 첫 스냅숏부터 수익률을 센다."""
+
+    def segment(*points: tuple[date, float]) -> tuple[EquityCurvePoint, ...]:
+        return tuple(EquityCurvePoint(session, equity, None) for session, equity in points)
+
+    stitched = stitch_out_of_sample(
+        [
+            # 초기 자본 100 → 첫날 110(진입) 수익률은 들지 않는다. 첫날이 기준점 1.0 이다.
+            segment((date(2023, 1, 2), 110.0), (date(2023, 1, 3), 99.0), (date(2023, 1, 4), 104.5)),
+            # 둘째 창 첫날 점은 곡선에 없고, 앞 창 마지막 값에서 90/120 으로 이어진다.
+            segment((date(2024, 1, 2), 120.0), (date(2024, 1, 3), 90.0), (date(2024, 1, 4), 99.0)),
+        ]
+    )
+
+    assert [point.session for point in stitched] == [
+        date(2023, 1, 2),
+        date(2023, 1, 3),
+        date(2023, 1, 4),
+        date(2024, 1, 3),
+        date(2024, 1, 4),
+    ]
+    # 1, 99/110 = 0.9, 0.9 × 104.5/99 = 0.95, 0.95 × 90/120 = 0.7125, 0.7125 × 99/90 = 0.78375.
+    assert [point.equity for point in stitched] == pytest.approx([1.0, 0.9, 0.95, 0.7125, 0.78375])
+    assert stitch_out_of_sample([]) == ()
+    assert stitch_out_of_sample([(), segment((date(2024, 1, 2), 120.0))]) == (
+        EquityCurvePoint(date(2024, 1, 2), 1.0, None),
+    )
+
+
+def _test_run(status: RunStatus, error_code: RunFailureCode | None = None) -> BacktestRunState:
+    at = datetime(2026, 9, 30, tzinfo=UTC)
+    return BacktestRunState("run", status, 0.0, "", "", at, at, error_code=error_code)
+
+
+@pytest.mark.parametrize(
+    ("has_cell", "run", "expected"),
+    [
+        (False, None, WalkForwardGap.NO_CELL),
+        # 접수가 거절돼 실행이 없다.
+        (True, None, WalkForwardGap.TEST_FAILED),
+        (True, _test_run(RunStatus.COMPLETED), None),
+        (True, _test_run(RunStatus.RUNNING), WalkForwardGap.PENDING),
+        (True, _test_run(RunStatus.CANCEL_REQUESTED), WalkForwardGap.PENDING),
+        (
+            True,
+            _test_run(RunStatus.FAILED, "backtest.run.equity_wiped_out"),
+            WalkForwardGap.TEST_FAILED,
+        ),
+        (True, _test_run(RunStatus.CANCELLED), WalkForwardGap.TEST_FAILED),
+        # 재시작으로 중단된 실행은 복구가 같은 칸으로 다시 넘긴다.
+        (True, _test_run(RunStatus.FAILED, "backtest.run.interrupted"), WalkForwardGap.PENDING),
+    ],
+)
+def test_window_gap_says_why_a_window_stays_off_the_curve(
+    has_cell: bool, run: BacktestRunState | None, expected: WalkForwardGap | None
+) -> None:
+    assert window_gap(has_cell, run) is expected
+
+
+def test_a_finished_failure_outranks_windows_still_running() -> None:
+    gaps = [None, WalkForwardGap.PENDING, WalkForwardGap.NO_CELL, WalkForwardGap.TEST_FAILED]
+
+    assert walk_forward_gap(gaps) is WalkForwardGap.TEST_FAILED
+    assert walk_forward_gap(gaps[:3]) is WalkForwardGap.NO_CELL
+    assert walk_forward_gap([None, None]) is None
+
+
+@pytest.mark.parametrize(
+    ("out_of_sample", "train", "expected"),
+    [
+        (0.05, [0.1, 0.3], 0.25),
+        (-0.02, [0.1], -0.2),
+        (0.05, [-0.1, 0.1], None),
+        (0.05, [-0.2], None),
+        (0.05, [], None),
+        (None, [0.1], None),
+    ],
+)
+def test_retention_is_out_of_sample_over_mean_train_sharpe(
+    out_of_sample: float | None, train: list[float], expected: float | None
+) -> None:
+    assert walk_forward_retention(out_of_sample, train) == pytest.approx(expected)
 
 
 def test_terminal_statuses() -> None:
@@ -427,7 +563,7 @@ def test_a_trial_without_a_run_is_queued_cancelled_or_rejected(
 def test_experiment_status_follows_its_trials_unless_cancelled(
     trials: tuple[TrialStatus, ...], cancelled: bool, expected: ExperimentStatus
 ) -> None:
-    status = experiment_status(trials, cancelled=cancelled, paused=False, recovering=False)
+    status = experiment_status(trials, cancelled=cancelled, paused=False, pending=False)
     assert status is expected
 
 
@@ -436,13 +572,13 @@ def test_a_paused_experiment_reads_paused_until_every_trial_ends() -> None:
     finished = (TrialStatus.COMPLETED, TrialStatus.FAILED)
 
     def status(trials: tuple[TrialStatus, ...], **flags: bool) -> ExperimentStatus:
-        return experiment_status(trials, **{"cancelled": False, "recovering": False, **flags})
+        return experiment_status(trials, **{"cancelled": False, "pending": False, **flags})
 
     assert status(running, paused=True) is ExperimentStatus.PAUSED
     assert status(finished, paused=True) is ExperimentStatus.COMPLETED
     assert status(running, cancelled=True, paused=True) is ExperimentStatus.CANCELLED
     # 재시작으로 중단된 trial 이 복구를 기다리면 모두 끝난 것처럼 보여도 완료가 아니다.
-    assert status(finished, paused=False, recovering=True) is ExperimentStatus.RUNNING
+    assert status(finished, paused=False, pending=True) is ExperimentStatus.RUNNING
 
 
 @pytest.mark.parametrize("priority", [0, MAX_EXPERIMENT_PRIORITY + 1, True, 1.5])

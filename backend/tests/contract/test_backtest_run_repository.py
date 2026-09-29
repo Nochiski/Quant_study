@@ -108,7 +108,9 @@ def test_the_accepted_request_survives_reopening_the_file(kind: str, tmp_path: P
 def test_parameter_values_keep_their_types_through_the_file(tmp_path: Path) -> None:
     """`20 == 20.0 == True` 라 요청 `==` 로는 타입이 바뀐 것을 못 본다. 값마다 타입을 대조한다."""
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(_summary("run-1"), _REQUESTS["saved_revision"])
+    SQLiteBacktestRunRepository(path).add(
+        _summary("run-1"), _REQUESTS["saved_revision"], **_NO_LINEAGE
+    )
 
     restored = SQLiteBacktestRunRepository(path).request("run-1").parameter_values
     assert {key: (type(value), value) for key, value in restored.items()} == {

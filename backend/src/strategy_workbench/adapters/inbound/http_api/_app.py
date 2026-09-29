@@ -18,6 +18,7 @@ from strategy_workbench.application.assistant_chat.facade.chat import AssistantC
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestArtifactUnreadableError,
     BacktestParameterValueError,
     BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
@@ -135,6 +136,7 @@ from ._assistant_routes import register_assistant_routes
 from ._backtest_contract import (
     Backtest422Response,
     BacktestResultNotReadyResponse,
+    BacktestResultUnreadableResponse,
     BacktestRunNotFoundResponse,
     BacktestStrategyNotFoundResponse,
     BacktestStrategyStaleResponse,
@@ -525,6 +527,10 @@ def create_app(
                 "model": BacktestResultNotReadyResponse,
                 "description": "The run has not completed with a result",
             },
+            410: {
+                "model": BacktestResultUnreadableResponse,
+                "description": "The completed run's result file is missing, altered or unreadable",
+            },
         },
     )
     def get_backtest_result(run_id: str) -> BacktestRunResult:
@@ -536,6 +542,11 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "backtest.result.not_ready", "message": str(error)},
+            ) from error
+        except BacktestArtifactUnreadableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.result.unreadable", "message": str(error)},
             ) from error
 
     @app.get(

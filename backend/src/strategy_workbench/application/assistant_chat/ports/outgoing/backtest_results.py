@@ -16,8 +16,9 @@ __all__ = ["BacktestResultPort"]
 
 class BacktestResultPort(Protocol):
     def completed_result(self, run_id: str) -> BacktestRunResult | None:
-        """완료된 실행의 결과. 모르는 실행이거나 아직 끝나지 않았거나 실패했으면 None.
+        """완료된 실행의 결과. 모르는 실행이거나 아직 끝나지 않았거나 실패했거나 결과 파일을 못
+        읽으면 None.
 
-        None 하나로 묶는 이유는 어시스턴트 쪽 대응이 같기 때문이다 — 셋 다 설명할 결과가 없다.
+        None 하나로 묶는 이유는 어시스턴트 쪽 대응이 같기 때문이다 — 모두 설명할 결과가 없다.
         """
         ...

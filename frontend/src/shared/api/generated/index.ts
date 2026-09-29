@@ -84,6 +84,8 @@ export type {
   BacktestResearchWindowViolationDetail,
   BacktestResultNotReadyDetail,
   BacktestResultNotReadyResponse,
+  BacktestResultUnreadableDetail,
+  BacktestResultUnreadableResponse,
   BacktestRunFieldInvalidDetail,
   BacktestRunInvalidDetail,
   BacktestRunNotFoundDetail,

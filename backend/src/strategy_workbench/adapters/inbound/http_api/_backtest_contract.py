@@ -205,6 +205,17 @@ class BacktestResultNotReadyResponse:
 
 
 @dataclass(frozen=True)
+class BacktestResultUnreadableDetail:
+    code: Literal["backtest.result.unreadable"]
+    message: str
+
+
+@dataclass(frozen=True)
+class BacktestResultUnreadableResponse:
+    detail: BacktestResultUnreadableDetail
+
+
+@dataclass(frozen=True)
 class TrialLineageMergeRequest:
     """합칠 계열(`source_strategy_id`). 경로의 계열이 남는다."""
 

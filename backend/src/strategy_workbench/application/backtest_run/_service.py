@@ -200,9 +200,9 @@ class BacktestResultNotReadyError(RuntimeError):
     pass
 
 
-# 이 프로세스가 접수한 run 의 메모리 사본. 목록·상태·요청의 정본은 저장소이고, 이 사본은 저장하지
-# 않는 것(진행률·진행 이벤트 링·취소 신호·결과)을 든다. 정체성으로 가린다(`eq=False`) — 대기열에서
-# 꺼내고 지울 때 같은 run 만 맞아야 한다.
+# 이 프로세스가 접수한 run 의 메모리 사본. 목록·상태·요청의 정본은 저장소, 결과의 정본은 산출물
+# 저장소이고, 이 사본은 저장하지 않는 것(진행률·진행 이벤트 링·취소 신호)을 든다. 정체성으로
+# 가린다(`eq=False`) — 대기열에서 꺼내고 지울 때 같은 run 만 맞아야 한다.
 @dataclass(eq=False)
 class _RunRecord:
     state: BacktestRunState
@@ -212,7 +212,6 @@ class _RunRecord:
     provenance: StrategyProvenance
     events: deque[RunProgressEvent]
     cancellation: Event
-    result: BacktestRunResult | None = None
 
 
 class BacktestRunService:
@@ -447,19 +446,17 @@ class BacktestRunService:
             )
 
     def result(self, run_id: str) -> BacktestRunResult:
-        with self._lock:
-            record = self._records.get(run_id)
-            if (
-                record is not None
-                and record.result is not None
-                and record.state.status is RunStatus.COMPLETED
-            ):
-                return record.result
-        # 결과는 아직 이 프로세스 메모리에만 있다. 재시작 전에 끝난 run 의 결과 재적재는 V1-04 다.
-        status = record.state.status if record is not None else self.state(run_id).status
-        raise BacktestResultNotReadyError(
-            f"backtest result is not ready in this server process: run_id={run_id} status={status}"
-        )
+        """완료된 run 의 결과를 산출물 저장소에서 읽는다(V1-04).
+
+        메모리에 결과를 들지 않는다 — 이 프로세스가 끝낸 run 과 재시작 전에 끝난 run 이 같은 길로
+        읽힌다. 산출물은 `COMPLETED` 전이보다 먼저 커밋되므로 완료 상태면 파일이 있다.
+        """
+        state = self.state(run_id)
+        if state.status is not RunStatus.COMPLETED or state.artifact_sha256 is None:
+            raise BacktestResultNotReadyError(
+                f"backtest result is not ready: run_id={run_id} status={state.status}"
+            )
+        return self._artifact_store.load(run_id, sha256=state.artifact_sha256)
 
     def cancel(self, run_id: str) -> BacktestRunState:
         with self._lock:
@@ -825,7 +822,6 @@ class BacktestRunService:
                 if record.cancellation.is_set():
                     cancelled_after_commit = True
                 else:
-                    record.result = result
                     record.state = replace(record.state, artifact_sha256=commit.sha256)
                     self._emit(
                         record,

@@ -1,6 +1,7 @@
 from strategy_workbench.application.backtest_run.ports.outgoing.artifact_store import (
     ArtifactCommit,
     BacktestArtifactStorePort,
+    BacktestArtifactUnreadableError,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.backtest_data import (
     BacktestDataPort,
@@ -37,6 +38,7 @@ __all__ = [
     "BacktestDataset",
     "BacktestExecutionRequest",
     "BacktestExecutorPort",
+    "BacktestArtifactUnreadableError",
     "BacktestRunNotFoundError",
     "BacktestRunRepositoryPort",
     "BacktestRunSummary",

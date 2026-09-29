@@ -1706,7 +1706,7 @@ const ko = {
   "assistant.error.document_ref_invalid":
     "이 문서로는 대화를 만들 수 없습니다. 전략을 먼저 저장하거나 초안을 다시 여세요.",
   "assistant.error.result_unavailable":
-    "이 백테스트 결과를 더 이상 읽을 수 없습니다. 서버를 다시 시작하면 결과가 사라집니다. 백테스트를 다시 실행한 뒤 물어보세요.",
+    "이 백테스트 결과를 더 이상 읽을 수 없습니다. 결과 파일이 없어졌거나 손상됐을 수 있습니다. 백테스트를 다시 실행한 뒤 물어보세요.",
   "assistant.error.turn_context_mismatch":
     "이 화면의 대화 종류와 맞지 않아 보내지 못했습니다. 화면을 새로 고친 뒤 다시 보내세요.",
 } as const;
@@ -3449,7 +3449,7 @@ export const messages = {
     "assistant.error.document_ref_invalid":
       "A conversation cannot be created for this document. Save the strategy or reopen the draft first.",
     "assistant.error.result_unavailable":
-      "This backtest result can no longer be read. Results are lost when the server restarts. Run the backtest again and ask again.",
+      "This backtest result can no longer be read. Its result file may be missing or damaged. Run the backtest again and ask again.",
     "assistant.error.turn_context_mismatch":
       "The message does not fit the kind of conversation on this screen. Reload the screen and send it again.",
   } satisfies Record<MessageKey, string>,

@@ -11,6 +11,8 @@ paths:
   - "docs/planning/ai-assistant/**"
   - "docs/superpowers/specs/2026-09-20-ai-assistant-design.md"
   - "docs/superpowers/specs/2026-09-27-ai-backtest-result-explain.md"
+  - "docs/planning/validation-lab/**"
+  - "docs/superpowers/specs/2026-09-29-validation-lab-design.md"
   - "database/src/equity/**"
 ---
 

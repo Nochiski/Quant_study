@@ -12,6 +12,7 @@ from strategy_workbench.domain.backtest.facade.runs import RunStatus
 from strategy_workbench.domain.backtest.facade.trials import (
     BlockedTrialAttempt,
     TrialLedgerEntry,
+    TrialPreviewReason,
     TrialRunRole,
     preview_trial,
     summarize_trial_ledger,
@@ -91,11 +92,11 @@ def test_merged_lineages_share_trials_by_key_and_blocked_attempts_stay_out_of_n(
 
 
 @pytest.mark.parametrize(
-    ("key", "new_trial", "after"),
-    [(_A, False, 1), (_B, True, 2)],
+    ("key", "new_trial", "after", "reason"),
+    [(_A, False, 1, TrialPreviewReason.RECHECK), (_B, True, 2, TrialPreviewReason.NEW_TRIAL)],
 )
 def test_the_preview_says_whether_a_result_would_add_a_trial(
-    key: str, new_trial: bool, after: int
+    key: str, new_trial: bool, after: int, reason: TrialPreviewReason
 ) -> None:
     ledger = summarize_trial_ledger(
         "s-1",
@@ -106,17 +107,19 @@ def test_the_preview_says_whether_a_result_would_add_a_trial(
 
     preview = preview_trial(ledger, key)
 
-    assert (preview.trial_count, preview.new_trial, preview.trial_count_after) == (
-        1,
-        new_trial,
-        after,
-    )
+    assert (
+        preview.trial_count,
+        preview.new_trial,
+        preview.trial_count_after,
+        preview.reason,
+    ) == (1, new_trial, after, reason)
 
 
 def test_a_run_without_a_lineage_never_counts() -> None:
     preview = preview_trial(None, _A)
 
     assert (preview.lineage_id, preview.new_trial, preview.trial_count_after) == (None, False, 0)
+    assert preview.reason is TrialPreviewReason.NO_LINEAGE
 
 
 def test_the_session_sharpe_undoes_the_annualisation() -> None:

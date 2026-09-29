@@ -84,9 +84,15 @@ def test_favourable_costs_carry_their_value_and_unfavourable_ones_fold_into_the_
     assert _key(fee_bps=10.0) != _key(fee_bps=5.0)
     assert _key(fee_bps=30.0) == _key(fee_bps=60.0) == _key(fee_bps=15.0)
     assert _key(participation_rate=0.05) == _key(participation_rate=0.01) == trial_key(_BASE)
-    # 직접 입력 거래세는 견줄 스키마 기본값이 없어 값이 늘 키에 든다.
+    # 직접 입력 거래세율의 기준은 법정 세율표 최대값(30bp)이다. 그 이상은 한 시도로 묶이고 낮으면
+    # 값마다 다른 시도다. 방식(법정·직접·없음)을 바꾸는 것은 그 자체로 새 시도다.
     custom = {"sell_tax": SellTax.CUSTOM}
-    assert _key(**custom, sell_tax_bps=10.0) != _key(**custom, sell_tax_bps=40.0)
+    assert _key(**custom, sell_tax_bps=30.0) == _key(**custom, sell_tax_bps=60.0)
+    assert _key(**custom, sell_tax_bps=5.0) != _key(**custom, sell_tax_bps=30.0)
+    # 기준은 세율표의 최소(15bp)가 아니라 최대다. 20bp 는 과거 법정 세율보다 낮은 탐색이다.
+    assert _key(**custom, sell_tax_bps=20.0) != _key(**custom, sell_tax_bps=60.0)
+    assert _key(**custom, sell_tax_bps=5.0) != _key(**custom, sell_tax_bps=10.0)
+    assert _key(**custom, sell_tax_bps=30.0) != trial_key(_BASE)
 
 
 @pytest.mark.parametrize(
@@ -114,6 +120,20 @@ def test_run_options_outside_the_environment_never_make_a_new_trial(
     ("strategy", "new_trial"),
     [
         (replace(_STRATEGY, title="이름만 바꿈"), False),
+        # 팩터 표시 이름과 스키마 판본(업그레이드만 한 리비전)도 의미가 아니다.
+        (
+            replace(
+                _STRATEGY,
+                factors=(replace(_STRATEGY.factors[0], label="표시 이름"), *_STRATEGY.factors[1:]),
+            ),
+            False,
+        ),
+        (
+            replace(
+                _STRATEGY, identity=replace(_STRATEGY.identity, schema_version="9.9", revision=7)
+            ),
+            False,
+        ),
         (replace(_STRATEGY, description="설명만 바꿈"), False),
         # 범위 정의만 바꾸고 기본값이 같으면 같은 시도다.
         (

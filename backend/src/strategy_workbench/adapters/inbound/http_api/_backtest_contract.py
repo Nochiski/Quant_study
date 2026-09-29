@@ -220,3 +220,16 @@ class TrialLineageAlreadyMergedDetail:
 @dataclass(frozen=True)
 class TrialLineageAlreadyMergedResponse:
     detail: TrialLineageAlreadyMergedDetail
+
+
+@dataclass(frozen=True)
+class StrategyNotFoundDetail:
+    code: Literal["strategy.not_found"]
+    message: str
+
+
+@dataclass(frozen=True)
+class StrategyNotFoundResponse:
+    """시도 원장 경로의 계열(저장된 전략)이 없다."""
+
+    detail: StrategyNotFoundDetail

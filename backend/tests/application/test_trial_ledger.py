@@ -55,10 +55,11 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
-from strategy_workbench.domain.backtest.facade.runs import ExecutionCore
-from strategy_workbench.domain.backtest.facade.trials import TrialRunRole
+from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
+from strategy_workbench.domain.backtest.facade.trials import TrialRunRole, representative_sharpe
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.strategy.facade.specification import (
+    FloatParameter,
     RebalanceFrequency,
     StrategySpec,
 )
@@ -112,6 +113,8 @@ def _spec(*, weight: float = 1.0) -> StrategySpec:
     return replace(
         template,
         factors=tuple(replace(factor, weight=weight) for factor in template.factors),
+        # 해소된 파라미터 값이 시도 키를 가르는지 보려는 파라미터(그래프가 읽지 않아도 키에 든다).
+        parameters=(FloatParameter("tilt", 0.5, 0.0, 1.0, kind="float"),),
         # 세션마다 리밸런싱해야 짧은 구간에서도 포지션이 생긴다.
         portfolio=replace(
             template.portfolio,
@@ -182,6 +185,53 @@ def test_reruns_extensions_and_unfavourable_costs_are_one_trial_and_the_ledger_s
     assert trial.representative_sharpe == pytest.approx(full_sharpe / math.sqrt(252))
     assert trial.metric_registry_version == runs.result(first).manifest.metric_registry_version
     assert lab.service().trial_ledger("s-1") == ledger
+
+
+def test_a_different_parameter_value_is_a_new_trial_and_the_preview_names_its_key(
+    lab: _Lab,
+) -> None:
+    saved = lab.save(_spec())
+    runs = lab.runs
+    _finish(runs, _saved_run(saved))
+    tilted = replace(_saved_run(saved), parameter_values={"tilt": 0.7})
+    # 기본값을 명시한 요청은 생략한 요청과 같은 시도다.
+    explicit_default = replace(_saved_run(saved), parameter_values={"tilt": 0.5})
+
+    preview = runs.preview_trial(tilted)
+    _finish(runs, tilted)
+    _finish(runs, explicit_default)
+
+    ledger = runs.trial_ledger("s-1")
+    assert ledger.trial_count == 2
+    assert [trial.trial_key for trial in ledger.trials][1] == preview.trial_key
+    assert _roles(ledger) == [
+        [("run-1", TrialRunRole.COUNTED), ("run-3", TrialRunRole.RECHECK)],
+        [("run-2", TrialRunRole.COUNTED)],
+    ]
+
+
+def test_the_representative_sharpe_is_the_full_range_session_sharpe(lab: _Lab) -> None:
+    saved = lab.save(_spec())
+    request = replace(
+        _saved_run(saved),
+        annualization_days=250,
+        metric_windows=(
+            MetricWindow(MetricScope.OUT_OF_SAMPLE, date(2024, 1, 10), _ENVIRONMENT.end, "OOS"),
+        ),
+    )
+    run_id = _finish(lab.runs, request)
+
+    result = lab.runs.result(run_id)
+    metrics = result.metrics
+    by_scope = {metric.scope: metric.value for metric in metrics if metric.metric_id == "sharpe"}
+    full = by_scope[MetricScope.FULL]
+    assert full is not None and by_scope[MetricScope.OUT_OF_SAMPLE] != full
+    (trial,) = lab.runs.trial_ledger("s-1").trials
+    # 결과 샤프는 250일로 연율화됐다. 세션 단위로 되돌리려면 같은 250일로 나눈다.
+    assert trial.representative_sharpe == pytest.approx(full / math.sqrt(250))
+    # 지표 순서와 무관하게 전체 구간 샤프만 고른다.
+    reordered = replace(result, metrics=tuple(reversed(metrics)))
+    assert representative_sharpe(reordered) == pytest.approx(full / math.sqrt(250))
 
 
 def test_the_preview_matches_what_the_run_then_records(lab: _Lab) -> None:

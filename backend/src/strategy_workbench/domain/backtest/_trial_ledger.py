@@ -88,6 +88,15 @@ class TrialLedger:
     blocked: tuple[BlockedTrialAttempt, ...]
 
 
+class TrialPreviewReason(StrEnum):
+    # 결과가 나오면 계열에 없던 시도가 하나 는다.
+    NEW_TRIAL = "new_trial"
+    # 이미 센 시도의 재확인이라 N 이 그대로다.
+    RECHECK = "recheck"
+    # 계열이 없는 초안이라 N 에 들지 않는다.
+    NO_LINEAGE = "no_lineage"
+
+
 @dataclass(frozen=True)
 class TrialPreview:
     """실행 전 미리 계산 — 이 요청이 결과를 내면 N 에 새로 드는가.
@@ -100,6 +109,7 @@ class TrialPreview:
     trial_count: int
     new_trial: bool
     trial_count_after: int
+    reason: TrialPreviewReason
 
 
 def summarize_trial_ledger(
@@ -124,11 +134,16 @@ def summarize_trial_ledger(
 
 def preview_trial(ledger: TrialLedger | None, trial_key: str) -> TrialPreview:
     if ledger is None:
-        return TrialPreview(None, trial_key, 0, False, 0)
+        return TrialPreview(None, trial_key, 0, False, 0, TrialPreviewReason.NO_LINEAGE)
     counted = {trial.trial_key for trial in ledger.trials if trial.representative_run_id}
     new_trial = trial_key not in counted
     return TrialPreview(
-        ledger.lineage_id, trial_key, ledger.trial_count, new_trial, ledger.trial_count + new_trial
+        ledger.lineage_id,
+        trial_key,
+        ledger.trial_count,
+        new_trial,
+        ledger.trial_count + new_trial,
+        TrialPreviewReason.NEW_TRIAL if new_trial else TrialPreviewReason.RECHECK,
     )
 
 

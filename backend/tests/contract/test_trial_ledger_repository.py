@@ -77,6 +77,24 @@ def test_merges_follow_the_surviving_lineage_and_keep_every_member(tmp_path: Pat
         repository.merge_lineages("a", "c", merged_at=_AT)
 
 
+def test_merging_an_already_merged_lineage_again_links_the_surviving_lineages(
+    tmp_path: Path,
+) -> None:
+    repository = SQLiteBacktestRunRepository(tmp_path / "research.sqlite3")
+    for run_id, lineage_id in (("run-a", "a"), ("run-b", "b"), ("run-c", "c")):
+        _add(repository, run_id, lineage_id)
+
+    repository.merge_lineages("a", "b", merged_at=_AT)
+    # `a` 는 이미 `b` 에 합쳐졌다. 다시 합치면 남은 계열 `b` 가 `c` 로 이어진다(`a` 를 두 번
+    # 적지 않아 UNIQUE 위반이 없다).
+    repository.merge_lineages("a", "c", merged_at=_AT)
+
+    for asked in ("a", "b", "c"):
+        records = repository.trial_ledger(asked)
+        assert (records.lineage_id, records.merged_lineage_ids) == ("c", ("a", "b"))
+    assert [entry.run_id for entry in records.entries] == ["run-a", "run-b", "run-c"]
+
+
 def test_a_trial_result_for_an_unknown_run_is_refused(tmp_path: Path) -> None:
     repository = SQLiteBacktestRunRepository(tmp_path / "research.sqlite3")
 

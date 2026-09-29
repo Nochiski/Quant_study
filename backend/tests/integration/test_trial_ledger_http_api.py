@@ -50,8 +50,18 @@ def test_the_ledger_counts_a_run_once_and_the_preview_agrees() -> None:
 
     assert before.status_code == 200, before.text
     expected = {"lineage_id": lineage, "trial_key": ledger["trials"][0]["trial_key"]}
-    assert before.json() == expected | {"trial_count": 0, "new_trial": True, "trial_count_after": 1}
-    assert after == expected | {"trial_count": 1, "new_trial": False, "trial_count_after": 1}
+    assert before.json() == expected | {
+        "trial_count": 0,
+        "new_trial": True,
+        "trial_count_after": 1,
+        "reason": "new_trial",
+    }
+    assert after == expected | {
+        "trial_count": 1,
+        "new_trial": False,
+        "trial_count_after": 1,
+        "reason": "recheck",
+    }
     assert ledger["trial_count"] == 1
     assert ledger["trials"][0]["runs"][0] | {"created_at": None} == {
         "run_id": run["run_id"],
@@ -99,3 +109,5 @@ def test_merging_a_lineage_twice_or_an_unknown_one_is_refused() -> None:
         "backtest.lineage.already_merged",
     )
     assert (unknown.status_code, unknown.json()["detail"]["code"]) == (404, "strategy.not_found")
+    missing = client.get("/api/v1/strategies/missing/trials")
+    assert (missing.status_code, missing.json()["detail"]["code"]) == (404, "strategy.not_found")

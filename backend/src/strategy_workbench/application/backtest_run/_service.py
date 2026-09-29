@@ -391,8 +391,9 @@ class BacktestRunService:
     def trial_ledger(self, lineage_id: str) -> TrialLedger:
         """계열 원장 — 시도 묶음·재확인·N 제외 실행·차단한 시도.
 
-        합쳐진 계열을 물으면 남은 계열의 원장이다.
+        합쳐진 계열을 물으면 남은 계열의 원장이다. 저장된 전략이 아니면 `StrategyNotFoundError`.
         """
+        self._strategy_repository.get(lineage_id)
         records = self._repository.trial_ledger(lineage_id)
         return summarize_trial_ledger(
             records.lineage_id, records.merged_lineage_ids, records.entries, records.blocked

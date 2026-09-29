@@ -139,6 +139,7 @@ from ._backtest_contract import (
     BacktestStrategyNotFoundResponse,
     BacktestStrategyStaleResponse,
     CodedBodyValidationRoute,
+    StrategyNotFoundResponse,
     TrialLineageAlreadyMergedResponse,
     TrialLineageMergeRequest,
 )
@@ -465,19 +466,31 @@ def create_app(
         responses=admission_responses,
     )
 
-    @app.get("/api/v1/strategies/{strategy_id}/trials", operation_id="getTrialLedger")
+    strategy_not_found: dict[int | str, dict[str, Any]] = {
+        404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}
+    }
+
+    @app.get(
+        "/api/v1/strategies/{strategy_id}/trials",
+        operation_id="getTrialLedger",
+        responses=strategy_not_found,
+    )
     def get_trial_ledger(strategy_id: str) -> TrialLedger:
         """계열 시도 원장(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다."""
-        return backtest_runs.trial_ledger(strategy_id)
+        try:
+            return backtest_runs.trial_ledger(strategy_id)
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
 
     @app.post(
         "/api/v1/strategies/{strategy_id}/trials/merge",
         operation_id="mergeTrialLineage",
         responses={
+            **strategy_not_found,
             409: {
                 "model": TrialLineageAlreadyMergedResponse,
                 "description": "The two lineages are already one",
-            }
+            },
         },
     )
     def merge_trial_lineage(strategy_id: str, request: TrialLineageMergeRequest) -> TrialLedger:

@@ -3,6 +3,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -866,7 +867,8 @@ describe("run environment panel", () => {
         ),
       );
       renderWithQuery(<Harness request={acceptedRequest} />);
-      // 패널을 열기 전에는 묻지 않는다.
+      // 패널을 열기 전에는 묻지 않는다 — 스키마 응답이 그려질 때까지 기다린 뒤에도 0건이다.
+      await screen.findByRole("button", { name: "실행 설정 채우기" });
       expect(asked).toHaveLength(0);
       await openSettings();
 
@@ -876,6 +878,35 @@ describe("run environment panel", () => {
       expect(asked).toEqual([acceptedRequest]);
     },
   );
+
+  // 교정은 연구 구간 거절이 연구 하한을 실었을 때만 있다 — 다른 거절이나 날짜 없는 detail 에 버튼을 만들지 않는다.
+  it("offers the start date fix only for a research window rejection that carries the research start", async () => {
+    const { result } = renderHook(() => useBacktestRunSettings("strategy-1"), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={new QueryClient()}>
+          {children}
+        </QueryClientProvider>
+      ),
+    });
+    const researchStart = { research_start: "2020-01-02" };
+
+    expect(
+      result.current.rejectionFix(
+        "backtest.run.research_window_violation",
+        researchStart,
+      )?.label,
+    ).toBe("시작일을 2020-01-02로");
+    expect(
+      result.current.rejectionFix(
+        "backtest.strategy.requires_upgrade",
+        researchStart,
+      ),
+    ).toBeNull();
+    expect(
+      result.current.rejectionFix("backtest.run.research_window_violation", {}),
+    ).toBeNull();
+    expect(result.current.rejectionFix(null, researchStart)).toBeNull();
+  });
 
   // 봉인 겹침처럼 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유·교정과 함께 보인다.
   it("draws no trial line when the preview is rejected", async () => {

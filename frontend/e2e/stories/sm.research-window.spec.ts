@@ -4,20 +4,19 @@
  *
  * 스토리 문구와 수용 기준의 정본은 `docs/product/user-stories/stories/sm.md`다. 봉인 구간·연구 하한 날짜와
  * 새 시도 판정은 backend 가 소유한다(검증 랩 spec D1·D2). 여기서는 실제 backend 위에서 그 답이 화면에
- * 이유·교정 버튼·시도 영향 문장으로 보이는지를 본다.
+ * 이유·교정 버튼·시도 영향 문장으로 보이는지를 본다. 팩터 미리보기의 같은 거절은 화면이 없어 backend 통합
+ * 테스트가 지킨다(스토리 비고).
  */
 import { expect, test } from "@playwright/test";
 
 import {
   backtest,
-  BACKEND,
   expectPhase,
   fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
   replaceSource,
-  RUN_ENVIRONMENT,
   saveAndWaitForRevision,
   strategyIdentity,
 } from "../workbench-helpers";
@@ -28,7 +27,7 @@ const SEALED_START = "2018-01-02";
 test(
   "US-SM-13 봉인 구간과 겹치는 시작일은 이유와 교정 버튼과 함께 막히고, 실행 전에 시도 수 영향을 알려 준다",
   { tag: ["@story", "@US-SM-13", "@US-SM-16"] },
-  async ({ page, request }) => {
+  async ({ page }) => {
     test.setTimeout(180_000);
     await openEditor(page, "/research/strategies/new");
     await replaceSource(
@@ -92,33 +91,5 @@ test(
     await expect(impact).toHaveText(
       "이미 센 시도의 재확인이라 시도 수가 늘지 않습니다. 계열 시도 수 1회 그대로.",
     );
-
-    // 팩터 미리보기도 같은 이유로 막힌다. 이 미리보기를 부르는 화면은 아직 없어 같은 backend 에 직접
-    // 묻고, backend 가 날짜까지 넣어 완성한 문장을 본다(spec D1).
-    const preview = await request.post(`${BACKEND}/api/v1/factors/preview`, {
-      data: {
-        graph: {
-          nodes: [{ node_id: "close", field_id: "price.close", kind: "field" }],
-          output_node_id: "close",
-        },
-        as_of_start: SEALED_START,
-        as_of_end: RUN_ENVIRONMENT.end,
-      },
-    });
-    expect(preview.status()).toBe(422);
-    const { detail } = (await preview.json()) as {
-      detail: {
-        code: string;
-        validation: { issues: { code: string; message: string }[] };
-      };
-    };
-    expect(detail.code).toBe("factor.graph.invalid");
-    const issue = detail.validation.issues.find(
-      (candidate) => candidate.code === "run_environment.research_window",
-    );
-    expect(issue?.message).toContain(
-      "2016-01-01~2019-12-31은 홀드아웃 봉인 구간이고",
-    );
-    expect(issue?.message).toContain("시작일을 2020-01-02 이후로 옮겨라");
   },
 );

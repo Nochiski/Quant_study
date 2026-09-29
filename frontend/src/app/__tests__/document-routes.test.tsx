@@ -2888,9 +2888,12 @@ describe("backtest from the editor (P3-05)", () => {
     await user.click(run);
 
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
       "백테스트 시작 실패: 서버가 실행 설정의 수수료 칸 값을 받지 않았습니다.",
     );
+    // 교정 버튼은 연구 구간 거절에만 있다(V5-05).
+    expect(within(alert).queryByRole("button")).toBeNull();
   }, 15_000);
 
   // 검증 랩 V1-01·V5-05: 툴바도 거절 문장의 날짜 자리표시자를 detail 값으로 채우고, 교정 버튼이 시작일을

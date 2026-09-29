@@ -94,9 +94,11 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
         },
     }
 
+    # 끝난 run 의 요청을 다시 내면 새 run 이다. 도는 동안 다시 내면 같은 run 으로 이어진다(#161).
+    assert _wait(client, run_id)["status"] == "completed"
     replayed = client.post("/api/v1/backtests", json=accepted_request.json())
     assert replayed.status_code == 202, replayed.text
-    assert _wait(client, run_id)["status"] == "completed"
+    assert replayed.json()["run"]["run_id"] != run_id
     assert _wait(client, replayed.json()["run"]["run_id"])["status"] == "completed"
 
     manifest = client.get(f"/api/v1/backtests/{run_id}/result").json()["manifest"]

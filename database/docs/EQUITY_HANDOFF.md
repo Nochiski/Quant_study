@@ -685,8 +685,8 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 
 **누가 읽는가**
 - 워크벤치 `price.adj_close` — 어댑터가 이 표를 카탈로그 뷰 `v_adj_close` 로 읽는다(#220). 원장이
-  그날 사건을 접지 못한 적용일 행(늦게 공개된 ok 계수 · `krx_base_inconsistent`)은 결측이고,
-  카탈로그가 없거나 낡으면 조정가 원천이 빠진다(DESIGN §5).
+  그날 사건을 접지 못한 적용일 행(KRX 기준가 적용일에 늦게 공개된 ok 계수 ·
+  `krx_base_inconsistent`)은 결측이고, 카탈로그가 없거나 낡으면 조정가 원천이 빠진다(DESIGN §5).
 - parquet 을 직접 읽는 분석 — `data/equity/price_adj_daily/v=<build>/year=*/…`.
 - 카탈로그 매크로 `v_adj_price_fwd`·`v_adj_volume_fwd` — 같은 값을 내는 읽기 경로다. 표에 없는
   것(원주가 컬럼 동반·`lag_override` 로 계수 컷오프를 미는 축)이 필요할 때만 쓴다.

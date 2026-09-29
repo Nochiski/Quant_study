@@ -193,10 +193,11 @@ def factor_table(
     apply_dates: list[date | None] | None = None,
     available_dates: list[date] | None = None,
     factor_sources: list[str] | None = None,
+    apply_bases: list[str] | None = None,
 ) -> pa.Table:
     """`adj_factor` 관심 컬럼. `apply_dates` 를 주면 `apply_date`, `available_dates` 를 주면
-    `available_date`, `factor_sources` 를 주면 `factor_source` 컬럼을 붙인다(S06 — 뷰 `v_cum_adj` 는
-    앞의 둘을, `v_adj_close` 는 셋 다 읽는다)."""
+    `available_date`, `factor_sources` 를 주면 `factor_source`, `apply_bases` 를 주면 `apply_basis`
+    컬럼을 붙인다(S06 — 뷰 `v_cum_adj` 는 앞의 둘을, `v_adj_close` 는 넷 다 읽는다)."""
     columns: dict[str, pa.Array] = {
         "ticker": pa.array([r[0] for r in rows], type=pa.string()),
         "effective_date": pa.array([r[1] for r in rows], type=pa.date32()),
@@ -212,6 +213,8 @@ def factor_table(
         columns["available_date"] = pa.array(available_dates, type=pa.date32())
     if factor_sources is not None:
         columns["factor_source"] = pa.array(factor_sources, type=pa.string())
+    if apply_bases is not None:
+        columns["apply_basis"] = pa.array(apply_bases, type=pa.string())
     return pa.table(columns)
 
 
@@ -1341,8 +1344,8 @@ def build_workbench_root(
 
     `catalog=False` 면 equity.duckdb 없음, `profile=False` 면 `dataset_profile` 없음
     (어댑터가 원천 상수로 폴백하는 구판 루트). `extra_factor_rows` 는 `adj_factor` 에 덧붙일
-    사건 행(apply_date = available_date = effective_date, factor_source 는 ok 면 mktcap_neutral ·
-    아니면 no_price_match). `extra_policy_rows` 는
+    사건 행(apply_date = available_date = effective_date, factor_source·apply_basis 는 ok 면
+    mktcap_neutral·nominal, 아니면 no_price_match·unmatched). `extra_policy_rows` 는
     `universe_policy` 에 덧붙일 정책 행(멤버가 없는 정책 등)이다.
 
     `evening_session` 을 주면 e1.15.0 저녁 잠정판 모양이 된다 — `price_daily` 에 `basis` 컬럼이
@@ -1415,35 +1418,38 @@ def build_workbench_root(
             ]
         ),
     )
-    # (행, 공개일, factor_source) — 적용일은 행의 effective_date 다.
-    factors: list[tuple[FactorRow, date, str]] = [
+    # (행, 공개일, factor_source, apply_basis) — 적용일은 행의 effective_date 다.
+    factors: list[tuple[FactorRow, date, str, str]] = [
         (("000660", WB_SPLIT_DATE, "000660:split:2024-01-08", "split", 2.0, True),
-         WB_SPLIT_DATE, "mktcap_neutral"),
+         WB_SPLIT_DATE, "mktcap_neutral", "krx_base_price"),
         (("005930", date(2024, 1, 3), "005930:capred:2024-01-03", "capred", 1.0, False),
-         date(2024, 1, 3), "no_share_change"),
+         date(2024, 1, 3), "no_share_change", "nominal"),
         # S06-2 KRX 기준가 원천 행 — corp_event 에 없어 유형을 모른다. 방향은
         # share_factor 가 정한다(서버 factor_ok 55행이 이 유형이다).
         (("036220", date(2024, 1, 9), "036220:krx_base:2024-01-09", "unknown_krx", 0.5, True),
-         date(2024, 1, 9), "mktcap_neutral"),
-        # 035420 — 원장 뷰 `v_adj_close` 가 가리는 조정 공백(#220). 다음 세션에 공개된 ok 계수와
-        # 계수를 못 낸 기준가 재설정은 적용일 행이 결측이고, unknown_price_only 는 가리지 않는다.
+         date(2024, 1, 9), "mktcap_neutral", "krx_base_price"),
+        # 035420 — 원장 뷰 `v_adj_close` 가 가리는 조정 공백(#220). 기준가 재설정일에 다음 세션에야
+        # 공개된 ok 계수와 계수를 못 낸 기준가 재설정은 적용일 행이 결측이고, unknown_price_only 는
+        # 가리지 않는다.
         (("035420", date(2024, 1, 5), "035420:krx_base:2024-01-05", "unknown_price_only", 1.0,
-          False), date(2024, 1, 8), "unknown_price_only"),
+          False), date(2024, 1, 8), "unknown_price_only", "krx_base_price"),
         (("035420", WB_LATE_FACTOR, "035420:krx_base:2024-01-09", "unknown_krx", 0.5, True),
-         date(2024, 1, 10), "mktcap_neutral"),
+         date(2024, 1, 10), "mktcap_neutral", "krx_base_price"),
         (("035420", WB_INCONSISTENT, "035420:capred:2024-01-11", "capred", 1.0, False),
-         date(2024, 1, 12), "krx_base_inconsistent"),
-        *((row, row[1], "mktcap_neutral" if row[5] else "no_price_match")
+         date(2024, 1, 12), "krx_base_inconsistent", "krx_base_price"),
+        *((row, row[1], "mktcap_neutral", "nominal") if row[5]
+          else (row, row[1], "no_price_match", "unmatched")
           for row in extra_factor_rows or []),
     ]
     write_equity_table(
         root,
         "adj_factor",
         factor_table(
-            [row for row, _, _ in factors],
-            apply_dates=[row[1] for row, _, _ in factors],
-            available_dates=[available for _, available, _ in factors],
-            factor_sources=[source for _, _, source in factors],
+            [row for row, _, _, _ in factors],
+            apply_dates=[row[1] for row, _, _, _ in factors],
+            available_dates=[available for _, available, _, _ in factors],
+            factor_sources=[source for _, _, source, _ in factors],
+            apply_bases=[basis for _, _, _, basis in factors],
         ),
         year_column="effective_date",
     )

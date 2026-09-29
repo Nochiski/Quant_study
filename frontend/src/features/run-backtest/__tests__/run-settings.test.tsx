@@ -1109,10 +1109,49 @@ describe("backtest run actions", () => {
     const alert = await screen.findByRole("alert");
     await waitFor(() =>
       expect(alert).toHaveTextContent(
-        "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+        "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
       ),
     );
     expect(alert).not.toHaveTextContent("{");
+  });
+
+  // #304: 결과 화면에는 실행 설정 패널이 없다 — 칸을 짚지 않은 거절도 고칠 곳(전략 편집기)을 말한다.
+  it("tells where to fix a rerun refused as an invalid request", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.invalid",
+              message:
+                "oos start must fall inside the run window — got=2017-01-02",
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithQuery(
+      <BacktestRunActions
+        runId="old-run"
+        status="completed"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(alert).toHaveTextContent(
+        "동일 설정으로 다시 실행하지 못했습니다: 이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
+      ),
+    );
+    expect(within(alert).getByRole("group")).toHaveTextContent(
+      "oos start must fall inside the run window",
+    );
   });
 
   it("keeps navigation unchanged when a rerun fails with a server error", async () => {

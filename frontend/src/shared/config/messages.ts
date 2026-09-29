@@ -1313,11 +1313,11 @@ const ko = {
   "backtest.error.backtest.run.field_invalid.named":
     "서버가 실행 설정의 {field} 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
   "backtest.error.backtest.run.invalid":
-    "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
+    "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
   "backtest.error.backtest.run.environment_required":
     "실행 설정이 없습니다. 실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
   "backtest.error.backtest.run.research_window_violation":
-    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 시작일을 {research_start} 이후로 옮긴 뒤 다시 시작하세요.",
+    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 {research_start} 이후로 옮긴 뒤 다시 시작하세요.",
   "backtest.error.backtest.run.parameter_invalid":
     "전략 파라미터 {parameter_id}의 값을 쓸 수 없습니다. 문서에 선언된 파라미터인지, 값이 그 범위·선택지 안인지 확인한 뒤 다시 시작하세요.",
   "backtest.error.portfolio.strategy.invalid":
@@ -3082,11 +3082,11 @@ export const messages = {
     "backtest.error.backtest.run.field_invalid.named":
       "The server rejected the {field} run setting. Fix that field in the strategy editor's run settings, then start again.",
     "backtest.error.backtest.run.invalid":
-      "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy.",
+      "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy in the strategy editor.",
     "backtest.error.backtest.run.environment_required":
       "There are no run settings. Fill the start date, end date and universe in the run settings.",
     "backtest.error.backtest.run.research_window_violation":
-      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. Move the start date to {research_start} or later, then start again.",
+      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. In the strategy editor's run settings, move the start date to {research_start} or later, then start again.",
     "backtest.error.backtest.run.parameter_invalid":
       "The value for strategy parameter {parameter_id} cannot be used. Check that the document declares the parameter and that the value is within its range or choices, then start again.",
     "backtest.error.portfolio.strategy.invalid":

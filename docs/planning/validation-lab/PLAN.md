@@ -1,12 +1,12 @@
 ---
 plan_version: 1
 project: validation-lab
-project_status: APPROVED
-current_phase: V3
-current_pr: V3-02
-active_prs: [V3-02]
-parallel_window: [V3-02]
-last_updated: 2026-09-30T00:31:24+09:00
+project_status: SELF_CHECK
+current_phase: V1,V3
+current_pr: V1-02,V3-02
+active_prs: [V1-02, V3-02]
+parallel_window: [V1-02, V3-02]
+last_updated: 2026-09-30T00:57:38+09:00
 planned_prs: 28
 merged_prs: 6
 approved_prs: 7
@@ -23,13 +23,13 @@ progress_percent: 21
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `V3` |
-| Current/next PR | `V3-02` |
-| Active PR | `V3-02` |
+| Project status | `SELF_CHECK` |
+| Current phase | `V1,V3` |
+| Current/next PR | `V1-02,V3-02` |
+| Active PR | `V1-02, V3-02` |
 | Progress | `6 / 28 merged (21%)` |
 | Approved | `7 / 28` |
-| Aggregated at | `2026-09-30 00:31 KST` |
+| Aggregated at | `2026-09-30 00:57 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -68,7 +68,7 @@ progress_percent: 21
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
 | V0 | Planning package | 1 | 1 | `MERGED` |
-| V1 | Research window seal, run persistence, trial ledger | 5 | 2 | `WAITING` |
+| V1 | Research window seal, run persistence, trial ledger | 5 | 2 | `SELF_CHECK` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 2 | `WAITING` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 1 | `APPROVED` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
@@ -88,7 +88,7 @@ progress_percent: 21
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `V1-01` | 연구 구간 잠금(실행·미리보기·추적) | V0-01 | `MERGED` | [#287](https://github.com/Nochiski/Quant_study/pull/287) · review_vlab_v1_01 APPROVE(P3 3건 반영) · main 머지 `69376124`(2026-09-29) |
-| [ ] | `V1-02` | 연구 구간 잠금 확장(팩터·equity 미리보기) | V1-01 | `PLANNED` | — |
+| [ ] | `V1-02` | 연구 구간 잠금 확장(팩터·equity 미리보기) | V1-01 | `SELF_CHECK` | — |
 | [x] | `V1-03` | 실행 기록 영속화(research DB, interrupted) | V0-01, #161 머지 | `MERGED` | [#308](https://github.com/Nochiski/Quant_study/pull/308) · `review_vlab_v1_03` APPROVE(P2-1·P2-2·P3 반영, P2-3은 #313) · main 머지 `fdb32015`(2026-09-30) |
 | [ ] | `V1-04` | 결과 재적재 | V1-03, #277 머지 | `PLANNED` | — |
 | [ ] | `V1-05` | 시도 원장·시도 키 분류표·계열 합치기·봉인 원장 차단 기록 | V1-01, V1-03 | `PLANNED` | — |

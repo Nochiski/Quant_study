@@ -164,6 +164,22 @@ describe("backtest run failure code vocabulary", () => {
     expect(untranslated(codes)).toEqual([]);
   });
 
+  // 이슈 #330: 결과 화면은 결과 조회 실패(`getBacktestResult` 404·409·410)도 같은 번역 키 체계로 보인다. 결과
+  // 경로 코드가 늘면 번역 누락을 여기서 먼저 잡는다.
+  it("translates every coded getBacktestResult failure in both locales", () => {
+    const codes = rejectionCodes(
+      readOpenApi(),
+      "/api/v1/backtests/{run_id}/result",
+    );
+
+    expect([...codes].sort()).toEqual([
+      "backtest.result.not_ready",
+      "backtest.result.unreadable",
+      "backtest.run.not_found",
+    ]);
+    expect(untranslated(codes)).toEqual([]);
+  });
+
   // 실험 경로의 거절(검증 랩 V3-03)도 같은 번역 키 체계다. 코드 목록은 backend 가 스키마 enum 으로 싣는다.
   it("translates every coded experiment rejection in both locales", () => {
     const openapi = readOpenApi();

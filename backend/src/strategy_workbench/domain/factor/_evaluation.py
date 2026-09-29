@@ -67,6 +67,15 @@ class FactorFieldValue:
     # 전파로만 처리된다 — 무엇을 가리나는 원장, 무엇을 채우나는 결측 정책이다(#298).
     masked: bool = False
 
+    def __post_init__(self) -> None:
+        # 가린 셀은 값이 없다. 값이 실려 오면 결측 정책과 중앙값 모집단이 그 값을 쓰므로, raw
+        # 포트·연구 패널 셀과 같은 계약으로 만들 때 막는다(#311 리뷰 P3-2)
+        if self.masked and self.value is not None:
+            raise ValueError(
+                "masked factor input must not carry a value — "
+                f"field_id={self.field_id!r} value={self.value!r}"
+            )
+
 
 @dataclass(frozen=True)
 class FactorObservation:

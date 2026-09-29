@@ -147,6 +147,13 @@ def test_the_boundary_reaches_lag_through_a_window_operator() -> None:
     assert [p for p in missing if p >= 24] == list(range(_EVENT, _EVENT + 25))
 
 
+def test_a_masked_input_cannot_carry_a_value() -> None:
+    """가린 셀은 값이 없다 — 값이 실려 오면 결측 정책·중앙값 모집단이 그 값을 쓰므로 만들 때 막는다
+    (#311 리뷰 P3-2). raw 포트·연구 패널 셀과 같은 계약이다."""
+    with pytest.raises(ValueError, match="field_id='price.adj_close' value=1.0"):
+        FactorFieldValue(_FIELD, 1.0, masked=True)
+
+
 def test_a_window_operator_only_looks_inside_its_window() -> None:
     """창 연산은 창 안 값끼리 견준다 — 건너뛰는 세션에 가린 칸이 있어도 창 밖이면 값이 선다.
 

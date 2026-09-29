@@ -50,12 +50,17 @@ export const openEditor = async (page: Page, url: string) => {
 /**
  * 요소의 가운데를 찍었을 때 맞는 요소가 그 요소(또는 그 안의 글자)가 아니면 무엇인지 돌려준다. 보이는데
  * 옆 칸이나 겹쳐 뜬 패널에 깔려 눌리지도 읽히지도 않는 경우를 잡는다 — Playwright 가시성 검사는 겹침을
- * 보지 않는다(#269). 재기 전에 요소를 화면 가운데로 스크롤해 들인다. 고정 상단 바 밑에 걸린 채로 재면
- * 상단 바가 맞는다.
+ * 보지 않는다(#269). 재기 전에 페이지만 세로로 굴려 요소를 화면 가운데에 둔다. 고정 상단 바 밑에 걸린
+ * 채로 재면 상단 바가 맞는다. `scrollIntoView`는 안쪽 스크롤 칸(탭 목록 등)까지 굴려 그 칸 밖으로 밀려
+ * 가려진 요소를 드러내 버리므로 쓰지 않는다(#296).
  */
 export const coveringElement = (target: Locator) =>
   target.evaluate((element) => {
-    element.scrollIntoView({ block: "center", inline: "nearest" });
+    const before = element.getBoundingClientRect();
+    window.scrollBy({
+      top: before.y + before.height / 2 - window.innerHeight / 2,
+      behavior: "instant",
+    });
     const box = element.getBoundingClientRect();
     const hit = document.elementFromPoint(
       box.x + box.width / 2,

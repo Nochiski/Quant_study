@@ -232,10 +232,18 @@ def _without_months(result: BacktestRunResult) -> BacktestRunResult:
 
 def test_metric_explaining_warnings_outlast_other_warnings_window_metrics_and_factors() -> None:
     base = _without_months(sample_backtest_result())
+    strategy = base.manifest.run_spec.strategy
+    assert strategy is not None
+    # 팩터가 많아 요약이 팩터까지 덜어야 상한에 닿는다(표본은 팩터 1개라 그 전에 맞는다).
+    factors = tuple(
+        replace(strategy.factors[0], factor_id=f"factor.{index}", label="팩터 설명 " * 12)
+        for index in range(12)
+    )
     noisy = replace(
         base,
         manifest=replace(
             base.manifest,
+            run_spec=replace(base.manifest.run_spec, strategy=replace(strategy, factors=factors)),
             warnings=(
                 _EXPLAINING[0],
                 *(DataWarning(f"data.warning.{index}", "경고 문장 " * 20) for index in range(30)),
@@ -248,7 +256,7 @@ def test_metric_explaining_warnings_outlast_other_warnings_window_metrics_and_fa
             for index in range(40)
         ),
     )
-    cap = 4_500
+    cap = 5_000
 
     text = summarize_backtest_result(noisy, max_chars=cap)
     payload = json.loads(text)
@@ -258,8 +266,10 @@ def test_metric_explaining_warnings_outlast_other_warnings_window_metrics_and_fa
         "benchmark.no_bar_at_start",
         "portfolio.sector_unknown_excluded",
     ]
-    assert payload["omitted"]["warnings"] == 30
-    assert payload["omitted"]["window_metrics"] > 0
+    omitted = payload["omitted"]
+    assert omitted["warnings"] == 30
+    assert omitted["window_metrics"] == sum(m.scope is not MetricScope.FULL for m in noisy.metrics)
+    assert omitted["factors"] > 0
 
 
 def test_info_warnings_are_dropped_before_warning_severity_ones() -> None:
@@ -282,9 +292,10 @@ def test_info_warnings_are_dropped_before_warning_severity_ones() -> None:
 
     payload = json.loads(summarize_backtest_result(noisy, max_chars=cap))
 
-    kept = [item["code"] for item in payload["warnings"]]
-    assert payload["omitted"]["warnings"] >= 3
-    assert len([code for code in kept if code.startswith("data.info.")]) <= 2
-    assert [code for code in kept if code.startswith("data.warning.")] == [
-        f"data.warning.{index}" for index in range(5)
+    # info 는 뒤에서부터 빠지므로 남은 info 는 앞쪽이고, warning 등급은 모두 남는다.
+    dropped = payload["omitted"]["warnings"]
+    assert 3 <= dropped < len(info)
+    assert [item["code"] for item in payload["warnings"]] == [
+        *(f"data.info.{index}" for index in range(len(info) - dropped)),
+        *(f"data.warning.{index}" for index in range(5)),
     ]

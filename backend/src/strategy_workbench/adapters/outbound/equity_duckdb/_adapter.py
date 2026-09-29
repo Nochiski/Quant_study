@@ -1326,6 +1326,7 @@ class EquityDuckdbAdapter:
                     )
                 )
         actions: list[CorporateActionRecord] = []
+        history_actions: list[CorporateActionRecord] = []
         for ticker, event_id, event_type, share_factor, raw_ts in factor_rows:
             if raw_ts is None:
                 raise ValueError(f"{ts_column} is NULL on a factor_ok row — event_id={event_id}")
@@ -1355,8 +1356,8 @@ class EquityDuckdbAdapter:
             for security_id, key in by_ticker[str(ticker)]:
                 span = spans[key]
                 in_span = span.first_date <= session <= span.last_date
-                if in_span and query.start <= session <= query.end:
-                    actions.append(
+                if in_span and read_from <= session <= query.end:
+                    (actions if session >= query.start else history_actions).append(
                         CorporateActionRecord(
                             session=session,
                             security_id=security_id,
@@ -1446,6 +1447,7 @@ class EquityDuckdbAdapter:
             warnings=tuple(warnings),
             invalid_bars=tuple(invalid_bars),
             history_bars=tuple(history_bars),
+            history_corporate_actions=tuple(history_actions),
         )
 
     # ── 패널 코어 ─────────────────────────────────────────────────────────────

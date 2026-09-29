@@ -2,14 +2,14 @@
 plan_version: 1
 project: validation-lab
 project_status: APPROVED
-current_phase: V1
-current_pr: V1-04
-active_prs: [V1-04]
-parallel_window: [V1-04]
-last_updated: 2026-09-30T02:57:42+09:00
+current_phase: V1,V2
+current_pr: V1-04,V2-03
+active_prs: [V1-04, V2-03]
+parallel_window: [V1-04, V2-03]
+last_updated: 2026-09-30T03:33:45+09:00
 planned_prs: 28
 merged_prs: 9
-approved_prs: 10
+approved_prs: 11
 progress_percent: 32
 ---
 
@@ -24,12 +24,12 @@ progress_percent: 32
 | Field | Value |
 |---|---|
 | Project status | `APPROVED` |
-| Current phase | `V1` |
-| Current/next PR | `V1-04` |
-| Active PR | `V1-04` |
+| Current phase | `V1,V2` |
+| Current/next PR | `V1-04,V2-03` |
+| Active PR | `V1-04, V2-03` |
 | Progress | `9 / 28 merged (32%)` |
-| Approved | `10 / 28` |
-| Aggregated at | `2026-09-30 02:57 KST` |
+| Approved | `11 / 28` |
+| Aggregated at | `2026-09-30 03:33 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -69,7 +69,7 @@ progress_percent: 32
 |---|---|---:|---:|---|
 | V0 | Planning package | 1 | 1 | `MERGED` |
 | V1 | Research window seal, run persistence, trial ledger | 5 | 4 | `APPROVED` |
-| V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 2 | `WAITING` |
+| V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 2 | `APPROVED` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 2 | `WAITING` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
 | V5 | Screens (after lang2 merge signal) | 7 | 0 | `WAITING` |
@@ -99,7 +99,7 @@ progress_percent: 32
 |---|---|---|---|---|---|
 | [x] | `V2-01` | 매도 거래세(법정 세율표) | V0-01 | `MERGED` | [#286](https://github.com/Nochiski/Quant_study/pull/286) · review_vlab_v2_01 2차 APPROVE · main 머지 `a40628b4`(2026-09-29) |
 | [x] | `V2-02` | ADV 배선·참여 기준(adv20) | V2-01 | `MERGED` | [#299](https://github.com/Nochiski/Quant_study/pull/299) · `review_vlab_v2_02` APPROVE(P2-1·P3-2·P3-3 반영) · main 머지 `bf6f0d19`(2026-09-29) |
-| [ ] | `V2-03` | √ 시장충격 모델 | V2-02 | `PLANNED` | — |
+| [ ] | `V2-03` | √ 시장충격 모델 | V2-02 | `APPROVED` | [#331](https://github.com/Nochiski/Quant_study/pull/331) · `review_vlab_v2_03` APPROVE(P2-1·P2-2·P3-1·P3-2·P3-3 반영, P3-4는 V5-06, P3-5 보류) |
 
 ## V3 — 실험 backend
 

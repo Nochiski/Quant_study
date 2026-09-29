@@ -13,8 +13,8 @@ class BacktestDataQuery:
     end: date
     security_ids: tuple[str, ...]
     benchmark_security_id: str | None
-    # start 앞 거래일 수. 그 세션의 bar 는 `BacktestDataset.history_bars` 로 따로 답한다 — 참여 기준
-    # 계산용 워밍업이고 측정 구간이 아니다(`participation_history_sessions`).
+    # start 앞 거래일 수. 그 세션의 bar 는 `BacktestDataset.history_bars` 로 따로 답한다 — 비용
+    # 계산용 워밍업이고 측정 구간이 아니다(`cost_history_sessions`).
     history_sessions_before_start: int = 0
 
 
@@ -68,8 +68,10 @@ class BacktestDataset:
     warnings: tuple[DataWarning, ...] = ()
     # 무효 OHLC 행으로 뺀 (세션, 종목). 원천에 그런 행이 없으면 비어 있다.
     invalid_bars: tuple[InvalidBarRecord, ...] = ()
-    # 질의의 워밍업 세션(start 앞) bar. 엔진 세션이 아니며 참여 기준 계산에만 쓴다.
+    # 질의의 워밍업 세션(start 앞) bar. 엔진 세션이 아니며 비용 계산(참여 기준 ADV·충격 σ)에만 쓴다.
     history_bars: tuple[MarketBarRecord, ...] = ()
+    # 워밍업 세션의 자본변동. 엔진에 넘기지 않고 충격 σ 가 분할 날 수익률을 빼는 데만 쓴다.
+    history_corporate_actions: tuple[CorporateActionRecord, ...] = ()
 
 
 class BacktestDataPort(Protocol):

@@ -24,7 +24,12 @@ from backtest_engine.engine.broker import (
 from backtest_engine.engine.portfolio import Portfolio as PythonPortfolio
 from backtest_engine.engine.portfolio import scale_quantity
 from backtest_engine.engine.pricing import PriceDecision, execution_price
-from backtest_engine.engine.slippage import FixedBpsSlippage, NoSlippage, VolumeShareSlippage
+from backtest_engine.engine.slippage import (
+    FixedBpsSlippage,
+    NoSlippage,
+    SqrtImpactSlippage,
+    VolumeShareSlippage,
+)
 from backtest_engine.errors import CoreUnavailable, NegativeCashError, NegativePositionError
 from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.types.events import (
@@ -407,8 +412,11 @@ def slippage_config(model: SlippageModel) -> tuple[str, float, float]:
         return ("fixed_bps", model.bps, 0.0)
     if isinstance(model, VolumeShareSlippage):
         return ("volume_share", model.volume_limit, model.price_impact)
+    if isinstance(model, SqrtImpactSlippage):
+        return ("sqrt", model.max_fraction, 0.0)
     raise CoreUnavailable(
-        f"rust core supports built-in slippage models only — got {type(model).__name__}; "
+        "rust core supports built-in slippage models only (NoSlippage, FixedBpsSlippage, "
+        f"VolumeShareSlippage, SqrtImpactSlippage) — got {type(model).__name__}; "
         f'use core="python" for custom SlippageModel implementations'
     )
 

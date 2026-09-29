@@ -54,6 +54,10 @@ TRIAL_KEY_ROLES: dict[str, TrialKeyRole] = {
     "participation_basis": TrialKeyRole.KEY,
     "fee_bps": TrialKeyRole.LOWER_IS_FAVORABLE,
     "slippage_bps": TrialKeyRole.LOWER_IS_FAVORABLE,
+    # 고른 모델이 쓰지 않는 칸(`fixed_bps` 의 `impact_coefficient`, `sqrt` 의 `slippage_bps`)도 키에
+    # 든다. N 이 늘어나는 보수 쪽 차이라 허용한다.
+    "impact_model": TrialKeyRole.KEY,
+    "impact_coefficient": TrialKeyRole.LOWER_IS_FAVORABLE,
     "sell_tax": TrialKeyRole.KEY,
     # `custom` 일 때만 값이 있고 스키마 기본값이 없다(null). 기준은 법정 세율표 최대값이다
     # (`_baseline`).

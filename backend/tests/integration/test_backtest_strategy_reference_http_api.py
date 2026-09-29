@@ -92,6 +92,8 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
             "participation_basis": "session_volume",
             "fee_bps": 15.0,
             "slippage_bps": 10.0,
+            "impact_model": "fixed_bps",
+            "impact_coefficient": 1.0,
             "sell_tax": "krx_statutory",
             "sell_tax_bps": None,
             "missing": "drop",

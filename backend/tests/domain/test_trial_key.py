@@ -17,6 +17,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.environment import (
+    ImpactModel,
     ParticipationBasis,
     RunEnvironment,
     SellTax,
@@ -58,6 +59,9 @@ _ENVIRONMENT_VARIATIONS: tuple[tuple[str, dict[str, Any], bool], ...] = (
     ("fee_bps", {"fee_bps": 30.0}, False),
     ("slippage_bps", {"slippage_bps": 5.0}, True),
     ("slippage_bps", {"slippage_bps": 25.0}, False),
+    ("impact_model", {"impact_model": ImpactModel.SQRT}, True),
+    ("impact_coefficient", {"impact_coefficient": 0.5}, True),
+    ("impact_coefficient", {"impact_coefficient": 2.0}, False),
     ("sell_tax", {"sell_tax": SellTax.NONE}, True),
     ("sell_tax_bps", {"sell_tax": SellTax.CUSTOM, "sell_tax_bps": 40.0}, True),
     ("missing", {"missing": MissingPolicy.ZERO}, True),
@@ -199,6 +203,8 @@ _SCHEMA_DEFAULTS = {
     "participation_basis": "session_volume",
     "fee_bps": 15.0,
     "slippage_bps": 10.0,
+    "impact_model": "fixed_bps",
+    "impact_coefficient": 1.0,
     "sell_tax": "krx_statutory",
     "sell_tax_bps": None,
     "missing": "drop",
@@ -214,14 +220,14 @@ def test_adding_a_field_at_its_default_keeps_every_existing_key(
 ) -> None:
     @dataclass(frozen=True, kw_only=True)
     class _WithNewField(RunEnvironment):
-        impact_coefficient: float = 1.0
+        future_cost_bps: float = 1.0
 
-    monkeypatch.setitem(TRIAL_KEY_ROLES, "impact_coefficient", TRIAL_KEY_ROLES["fee_bps"])
+    monkeypatch.setitem(TRIAL_KEY_ROLES, "future_cost_bps", TRIAL_KEY_ROLES["fee_bps"])
     widened = _WithNewField(
         **{item.name: getattr(_ENVIRONMENT, item.name) for item in fields(_ENVIRONMENT)}
     )
 
     assert trial_key(replace(_BASE, environment=widened)) == trial_key(_BASE)
     assert trial_key(
-        replace(_BASE, environment=replace(widened, impact_coefficient=0.5))
+        replace(_BASE, environment=replace(widened, future_cost_bps=0.5))
     ) != trial_key(_BASE)

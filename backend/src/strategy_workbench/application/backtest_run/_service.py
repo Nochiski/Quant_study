@@ -29,7 +29,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     MissingRunEnvironmentError,
     ResearchWindowViolationError,
     RunEnvironment,
-    participation_history_sessions,
+    cost_history_sessions,
     require_environment,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -764,7 +764,7 @@ class BacktestRunService:
                     end=environment.end,
                     security_ids=security_ids,
                     benchmark_security_id=spec.benchmark_security_id,
-                    history_sessions_before_start=participation_history_sessions(environment),
+                    history_sessions_before_start=cost_history_sessions(environment),
                 )
             )
             # The preview's caveats travel with the data they describe, so the manifest records

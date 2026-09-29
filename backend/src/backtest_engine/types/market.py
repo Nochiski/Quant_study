@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -81,6 +82,8 @@ class Bar:
     volume: int
     # 유동성 캡(floor(기준 거래량 × 참여율))의 기준 거래량. None 이면 세션 거래량(`volume`)이다.
     liquidity_volume: int | None = None
+    # √ 시장충격 척도: 주당 충격 = 체결가 × 척도 × √체결 수량(`SqrtImpactSlippage`). None 이면 0.
+    impact_scale: float | None = None
 
     def __post_init__(self) -> None:
         validate_bar_values(
@@ -90,6 +93,11 @@ class Bar:
             raise ValueError(
                 f"liquidity_volume must be >= 0 — instrument={self.instrument.symbol} "
                 f"ts={self.ts} liquidity_volume={self.liquidity_volume}"
+            )
+        if self.impact_scale is not None and not 0 <= self.impact_scale < math.inf:
+            raise ValueError(
+                f"impact_scale must be finite and >= 0 — instrument={self.instrument.symbol} "
+                f"ts={self.ts} impact_scale={self.impact_scale}"
             )
 
     @property

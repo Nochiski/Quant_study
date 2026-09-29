@@ -2,6 +2,11 @@ from strategy_workbench.domain.backtest._canonical import (
     environment_hash,
     run_environment_canonical_json,
 )
+from strategy_workbench.domain.backtest._impact import (
+    MAX_IMPACT_FRACTION,
+    cost_history_sessions,
+    impact_scales,
+)
 from strategy_workbench.domain.backtest._krx_tax import (
     STATUTORY_SELL_TAX_BPS,
     sell_tax_schedule,
@@ -12,15 +17,13 @@ from strategy_workbench.domain.backtest._models import (
     RUN_ENVIRONMENT_CONSTRAINTS,
     DataFrequency,
     ExecutionTiming,
+    ImpactModel,
     Market,
     ParticipationBasis,
     RunEnvironment,
     SellTax,
 )
-from strategy_workbench.domain.backtest._participation import (
-    participation_history_sessions,
-    participation_volumes,
-)
+from strategy_workbench.domain.backtest._participation import participation_volumes
 from strategy_workbench.domain.backtest._requirement import (
     MissingRunEnvironmentError,
     require_environment,
@@ -43,6 +46,7 @@ from strategy_workbench.domain.backtest._schema import (
 
 __all__ = [
     "CATALOG_UNIVERSE",
+    "MAX_IMPACT_FRACTION",
     "DEFAULT_MISSING_POLICY",
     "RESEARCH_START",
     "RUN_ENVIRONMENT_CONSTRAINTS",
@@ -50,6 +54,7 @@ __all__ = [
     "STATUTORY_SELL_TAX_BPS",
     "DataFrequency",
     "ExecutionTiming",
+    "ImpactModel",
     "Market",
     "MissingRunEnvironmentError",
     "ParticipationBasis",
@@ -58,9 +63,10 @@ __all__ = [
     "RetiredEnvironmentProblem",
     "RunEnvironment",
     "SellTax",
+    "cost_history_sessions",
     "environment_from_retired_settings",
     "environment_hash",
-    "participation_history_sessions",
+    "impact_scales",
     "participation_volumes",
     "require_environment",
     "require_research_window",

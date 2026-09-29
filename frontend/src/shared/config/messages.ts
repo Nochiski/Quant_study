@@ -724,6 +724,7 @@ const ko = {
   "run_environment.contract.fee_bps": "수수료",
   "run_environment.contract.slippage_bps": "슬리피지",
   "run_environment.contract.sell_tax_bps": "매도 거래세율",
+  "run_environment.contract.impact_coefficient": "가격 충격 계수",
   "strategy.field.run_environment.market": "시장",
   "strategy.field.run_environment.market.description": "종목과 가격을 읽을 거래소입니다.",
   "strategy.field.run_environment.market.value.KRX": "한국거래소(KRX)",
@@ -743,6 +744,10 @@ const ko = {
   "strategy.field.run_environment.participation_basis.description": "참여율을 곱해 한 세션에 체결할 수 있는 주식 수 상한을 정할 거래량입니다.",
   "strategy.field.run_environment.participation_basis.value.session_volume": "체결일 거래량",
   "strategy.field.run_environment.participation_basis.value.adv20": "20일 평균 거래대금",
+  "strategy.field.run_environment.impact_model": "가격 충격 모델",
+  "strategy.field.run_environment.impact_model.description": "주문이 자기 체결 가격을 얼마나 불리하게 미는지 셀 방식입니다.",
+  "strategy.field.run_environment.impact_model.value.fixed_bps": "고정 bp(슬리피지)",
+  "strategy.field.run_environment.impact_model.value.sqrt": "√ 가격 충격(변동성·거래량 비례)",
   "strategy.field.run_environment.sell_tax": "매도 거래세",
   "strategy.field.run_environment.sell_tax.description": "주식을 팔 때 체결 금액에 붙는 세금을 어떻게 셀지 정합니다.",
   "strategy.field.run_environment.sell_tax.value.krx_statutory": "법정 세율(날짜별)",
@@ -1040,7 +1045,9 @@ const ko = {
   "run_environment.contract.fee_bps.description":
     "체결 금액에 bp 단위로 붙는 수수료 가정입니다.",
   "run_environment.contract.slippage_bps.description":
-    "체결 가격이 기준가에서 밀린다고 보는 bp 폭입니다.",
+    "가격 충격 모델이 고정 bp일 때 체결 가격이 기준가에서 밀린다고 보는 bp 폭입니다.",
+  "run_environment.contract.impact_coefficient.description":
+    "√ 가격 충격 = 계수 × 20일 변동성 × √(체결 수량 ÷ 20일 평균 거래량)의 계수입니다.",
   "run_environment.contract.sell_tax_bps.description":
     "매도 거래세를 직접 입력할 때 매도 금액에 붙일 bp입니다.",
   "strategy.operator.unary.negate": "부호 뒤집기",
@@ -2443,6 +2450,7 @@ export const messages = {
     "run_environment.contract.fee_bps": "Fee",
     "run_environment.contract.slippage_bps": "Slippage",
     "run_environment.contract.sell_tax_bps": "Sell tax rate",
+    "run_environment.contract.impact_coefficient": "Impact coefficient",
     "strategy.field.run_environment.market": "Market",
     "strategy.field.run_environment.market.description": "Exchange whose securities and prices are read.",
     "strategy.field.run_environment.market.value.KRX": "Korea Exchange (KRX)",
@@ -2462,6 +2470,10 @@ export const messages = {
     "strategy.field.run_environment.participation_basis.description": "The volume the participation rate is applied to when capping the shares filled in one session.",
     "strategy.field.run_environment.participation_basis.value.session_volume": "Session volume",
     "strategy.field.run_environment.participation_basis.value.adv20": "20-day average traded value",
+    "strategy.field.run_environment.impact_model": "Price impact model",
+    "strategy.field.run_environment.impact_model.description": "How far an order is assumed to push its own fill price.",
+    "strategy.field.run_environment.impact_model.value.fixed_bps": "Fixed bp (slippage)",
+    "strategy.field.run_environment.impact_model.value.sqrt": "Square-root price impact (volatility and volume)",
     "strategy.field.run_environment.sell_tax": "Sell tax",
     "strategy.field.run_environment.sell_tax.description": "How the tax charged on the proceeds of each sale is counted.",
     "strategy.field.run_environment.sell_tax.value.krx_statutory": "Statutory rate (by date)",
@@ -2770,7 +2782,9 @@ export const messages = {
     "run_environment.contract.fee_bps.description":
       "Fee in basis points charged on notional traded.",
     "run_environment.contract.slippage_bps.description":
-      "Basis points the fill price is assumed to move against the order.",
+      "Basis points the fill price is assumed to move against the order when the impact model is fixed bp.",
+    "run_environment.contract.impact_coefficient.description":
+      "Coefficient k of square-root impact = k × 20-day volatility × √(filled shares ÷ 20-day average volume).",
     "run_environment.contract.sell_tax_bps.description":
       "Basis points charged on sale proceeds when the sell tax is a custom rate.",
     "strategy.operator.unary.negate": "Negate",

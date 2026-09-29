@@ -98,6 +98,17 @@ class ParticipationBasis(StrEnum):
     ADV20 = "adv20"
 
 
+class ImpactModel(StrEnum):
+    """체결가에 얹는 시장충격 모델(spec D7).
+
+    `fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×
+    √(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
+    """
+
+    FIXED_BPS = "fixed_bps"
+    SQRT = "sqrt"
+
+
 # 실행 설정 수치 필드의 범위·단위·설명 키. 1.1 까지는 전략 제약 카탈로그의 `/execution/*` 행이
 # SoT 였고 여기서 필드 이름으로 다시 걸어 썼지만, 1.2 가 `execution` 섹션을 지우면서 그 행들이
 # 전략 문서 포인터를 잃었다. 그래서 owner 를 실행 설정이 있는 이 노드로 옮긴다(P2-03 결정 항목).
@@ -142,6 +153,19 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         example=10.0,
         description_key="run_environment.contract.slippage_bps",
         message="슬리피지는 0 이상의 숫자여야 합니다.",
+    ),
+    # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다. 상한 10 은 그
+    # 범위를 넉넉히 덮고 오타 입력(100·1000)을 막는다.
+    "impact_coefficient": ScalarConstraint(
+        pointer="/impact_coefficient",
+        code="run_environment.cost",
+        stage=AppliedStage.EXECUTION,
+        unit=ContractUnit.RATIO,
+        minimum=0.0,
+        maximum=10.0,
+        example=1.0,
+        description_key="run_environment.contract.impact_coefficient",
+        message="가격 충격 계수는 0 이상 10 이하의 숫자여야 합니다.",
     ),
     # `sell_tax` 가 `custom` 일 때만 값이 있다(없으면 `None`). 범위 검사는 값이 있을 때만 한다.
     "sell_tax_bps": ScalarConstraint(
@@ -216,6 +240,8 @@ class RunEnvironment:
     participation_basis: ParticipationBasis = ParticipationBasis.SESSION_VOLUME
     fee_bps: float = 15.0
     slippage_bps: float = 10.0
+    impact_model: ImpactModel = ImpactModel.FIXED_BPS
+    impact_coefficient: float = 1.0
     sell_tax: SellTax = SellTax.KRX_STATUTORY
     sell_tax_bps: float | None = None
     missing: MissingPolicy = DEFAULT_MISSING_POLICY

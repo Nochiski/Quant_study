@@ -281,7 +281,9 @@ class BacktestEngineExecutorAdapter:
             total_fees=tables.fill_totals.total_fees,
             total_taxes=sum(item.amount for item in artifacts.costs if item.kind == _SELL_TAX),
             total_slippage_cost=tables.fill_totals.total_slippage_cost,
-            total_carry_cost=sum(item.amount for item in artifacts.costs if item.kind != _SELL_TAX),
+            total_carry_cost=sum(
+                item.amount for item in artifacts.costs if item.kind in _CARRY_COSTS
+            ),
         )
         full = compute_analytics(
             full_input,
@@ -361,8 +363,10 @@ class BacktestEngineExecutorAdapter:
             raise RunCancelledError("run cancelled")
 
 
-# 매도 거래세 비용 기록의 kind. 수수료(`total_fees`)·대차 비용(`total_carry_cost`)과 나눠 센다.
+# 비용 기록의 kind 를 지표로 나눈다. 매도 거래세는 `total_taxes`, 대차 비용·신용 이자는
+# `total_carry_cost` 다.
 _SELL_TAX = CostKind.SELL_TAX.value
+_CARRY_COSTS = frozenset({CostKind.SHORT_BORROW.value, CostKind.MARGIN_INTEREST.value})
 
 # 엔진이 보유 수량에 적용하는 확인된 사건(`_apply_corporate_action`)과 같은 집합이다. 알림 전용
 # 사건(주식 수 변화만 확인)은 가격 반비례가 확인되지 않아 곡선도 조정하지 않는다.
@@ -799,7 +803,7 @@ def _slice_analytics(
         total_slippage_cost=sum(
             float(item.quantity) * abs(item.slippage_per_share) for item in fills
         ),
-        total_carry_cost=sum(item.amount for item in costs if item.kind != _SELL_TAX),
+        total_carry_cost=sum(item.amount for item in costs if item.kind in _CARRY_COSTS),
         # 구간 첫날 수익률이 빠지지 않게 직전 세션을 기준으로 넘긴다. 실행 첫날부터면 없다.
         base=next((item for item in reversed(data.points) if item.session < start), None),
     )

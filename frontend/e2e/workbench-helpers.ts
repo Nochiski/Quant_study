@@ -47,6 +47,26 @@ export const openEditor = async (page: Page, url: string) => {
   await expect(editor(page)).toBeVisible();
 };
 
+/**
+ * 요소의 가운데를 찍었을 때 맞는 요소가 그 요소(또는 그 안의 글자)가 아니면 무엇인지 돌려준다. 보이는데
+ * 옆 칸이나 겹쳐 뜬 패널에 깔려 눌리지도 읽히지도 않는 경우를 잡는다 — Playwright 가시성 검사는 겹침을
+ * 보지 않는다(#269). 재기 전에 요소를 화면 가운데로 스크롤해 들인다. 고정 상단 바 밑에 걸린 채로 재면
+ * 상단 바가 맞는다.
+ */
+export const coveringElement = (target: Locator) =>
+  target.evaluate((element) => {
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      box.x + box.width / 2,
+      box.y + box.height / 2,
+    );
+    if (hit !== null && element.contains(hit)) return null;
+    return hit === null
+      ? "화면 밖"
+      : `${hit.tagName.toLowerCase()} "${(hit.textContent ?? "").trim().slice(0, 40)}"`;
+  });
+
 export const requireData = <Value>(
   data: Value | undefined,
   operation: string,

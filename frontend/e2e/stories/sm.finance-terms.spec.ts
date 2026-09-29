@@ -10,12 +10,14 @@ import { expect, test } from "@playwright/test";
 
 import {
   ask,
+  assistant,
   ensureProvider,
   openAssistant,
   progress,
   transcript,
 } from "../assistant-helpers";
 import {
+  coveringElement,
   currentSource,
   expectPhase,
   GOLDEN,
@@ -47,6 +49,12 @@ test(
     expect(await currentSource(page)).toBe(source);
     await expectPhase(page, "검증 통과");
 
+    // 1440px에서는 편집기 최소 폭을 지키려고 사이드바가 계약 칸 위에 겹쳐 뜬다(#269). 사이드바를 닫아
+    // 계약 패널을 드러낸다.
+    await assistant(page)
+      .getByRole("button", { name: "사이드바 닫기" })
+      .click();
+
     // 문서의 금융 필드는 전략 구조에서 고르면 계약 패널이 한글 뜻을 보인다.
     await page.getByLabel("전략 구조 필터").fill("selection_count");
     await page
@@ -55,9 +63,12 @@ test(
       .click();
     const contract = page.getByRole("complementary", { name: "계약" });
     // 제목은 필드의 사람 말 이름이고 JSON Pointer는 `Path` 항목으로 내려갔다(lang2 P1-03 화면 어휘).
-    await expect(
-      contract.getByRole("heading", { name: "롱 포트폴리오에 선택할 종목 수" }),
-    ).toBeVisible();
+    const heading = contract.getByRole("heading", {
+      name: "롱 포트폴리오에 선택할 종목 수",
+    });
+    await expect(heading).toBeVisible();
+    // 겹쳐 뜬 패널에 깔리지 않고 실제로 읽힌다.
+    expect(await coveringElement(heading)).toBeNull();
     await expect(
       contract
         .getByRole("term")

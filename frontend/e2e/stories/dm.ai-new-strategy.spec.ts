@@ -17,9 +17,12 @@ import {
 } from "../assistant-helpers";
 import {
   backtest,
+  coveringElement,
   expectPhase,
   fillRunEnvironment,
   openEditor,
+  save,
+  validate,
 } from "../workbench-helpers";
 
 /** 대본이 제안하는 전략 제목(`_scenarios.py`의 `_IDEA_TITLE`). */
@@ -51,6 +54,17 @@ test(
       page.getByText(/백테스트를 시작하지 않았습니다/u),
     ).toContainText("실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.");
     await expect(backtest(page)).toBeDisabled();
+
+    // 사이드바를 연 채로도 편집기 툴바의 네 조작이 옆 칸에 깔리지 않고 제 자리에서 눌린다. 1440px에서
+    // 편집기 칸이 266px로 눌려 "검증"이 계약 칸 밑에 깔렸었다(#269).
+    for (const [name, control] of [
+      ["실행 설정", page.getByLabel("실행 설정 열기")],
+      ["검증", validate(page)],
+      ["리비전 저장", save(page)],
+      ["백테스트", backtest(page)],
+    ] as const) {
+      expect(await coveringElement(control), name).toBeNull();
+    }
 
     // 요약 띠의 "실행 설정 채우기"로 패널을 열어 기간·유니버스를 정한다.
     await fillRunEnvironment(page, { via: "band" });

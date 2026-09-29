@@ -11,7 +11,7 @@ import {
 
 import type { StrategyOutlineSymbol } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
-import { useMediaQuery } from "../../../shared/lib/media";
+import { useElementWidth, useMediaQuery } from "../../../shared/lib/media";
 import { useThemePreference } from "../../../shared/lib/theme";
 import {
   Badge,
@@ -152,7 +152,10 @@ const hasNativeUndo = (target: EventTarget | null): boolean => {
   );
 };
 
-/** 좌우 패널이 다 펼쳐졌을 때 가운데 편집기에 남겨 두는 최소 폭. 이 아래로 내려가면 오버레이로 돌린다. */
+/**
+ * 좌우 패널이 다 펼쳐졌을 때 가운데 몫(편집기와 크기 조절 손잡이)에 남겨 두는 최소 폭. 이 아래로
+ * 내려가면 오버레이로 돌린다.
+ */
 const EDITOR_MIN_WIDTH = 480;
 const VIEWS: readonly SourceView[] = ["yaml", "json", "form", "graph", "diff"];
 
@@ -208,19 +211,23 @@ export const StrategyIde = ({
   );
   // 계약과 AI 사이드바를 나란히 두면 편집기가 최소 폭 아래로 내려가는 화면인가.
   //
-  // 사이드바 폭은 **기본값 상수**로 재고 지금 폭을 쓰지 않는다. 지금 폭을 쓰면 폭 조절 드래그가 질의를
+  // 뷰포트가 아니라 좌우 패널이 실제로 나눠 갖는 폭(`.ide__body` content box)으로 잰다. 뷰포트로 재면
+  // 앱 셸 사이드바와 여백(1440px에서 약 250px)을 빼먹어, 1440px에서 AI 사이드바를 열면 편집기가 266px로
+  // 눌리고 툴바가 계약 칸 밑으로 넘쳤다(#269).
+  //
+  // 사이드바 폭은 **기본값 상수**로 재고 지금 폭을 쓰지 않는다. 지금 폭을 쓰면 폭 조절 드래그가 판정을
   // 바꿔, 임계를 넘는 순간 패널이 오버레이로 바뀌며 핸들이 사라지고(포인터 캡처가 끊긴다) 저장된 폭
   // 때문에 다음 방문에도 오버레이로 굳는다(B-04 리뷰 P1-3). 오버레이 전환은 "패널을 열었다"로만
   // 일어나야 한다. 접힌 패널은 자리를 차지하지 않으므로 더하지 않는다.
-  const squeezed = useMediaQuery(
-    `(max-width: ${
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const bodyWidth = useElementWidth(bodyRef);
+  const squeezed =
+    bodyWidth !== null &&
+    bodyWidth <
       (layout.outlineOpen ? layout.outlineWidth : 0) +
-      (layout.inspectorOpen ? layout.inspectorWidth : 0) +
-      DEFAULT_LAYOUT.assistantWidth +
-      EDITOR_MIN_WIDTH -
-      1
-    }px)`,
-  );
+        (layout.inspectorOpen ? layout.inspectorWidth : 0) +
+        DEFAULT_LAYOUT.assistantWidth +
+        EDITOR_MIN_WIDTH;
   const outlineId = useId();
   const inspectorId = useId();
   const debuggerId = useId();
@@ -806,7 +813,7 @@ export const StrategyIde = ({
       {runEnvironment ?? null}
       {notice ? <div className="ide__notice">{notice}</div> : null}
 
-      <div className="ide__body">
+      <div className="ide__body" ref={bodyRef}>
         <div
           className="ide__left"
           hidden={!layout.outlineOpen}

@@ -123,9 +123,9 @@ test(
 );
 
 /**
- * 연구 구간 규칙이 생기기 전 기간으로 돌다 자본 잠식으로 멈춘 옛 실행. 이력·결과 화면·재실행은 브라우저에서
- * 대신 응답한다 — 실패한 실행을 실제로 만들면 e2e 이력 DB에 남아 다른 스토리의 이력 단언을 흔든다. 문장은
- * frontend 번역(run 실패 코드·시작 거절 코드)이 소유한다.
+ * 연구 구간 규칙이 생기기 전 기간으로 돌다 자본 잠식으로 멈춘 옛 실행. 아래 두 테스트는 옛 실행의 이력·상태·결과·
+ * 재실행을 브라우저에서 대신 응답한다 — 그런 실행을 실제로 만들면 e2e 이력 DB에 남아 다른 스토리의 이력 단언을
+ * 흔든다. 문장은 frontend 번역(run 실패 코드·백테스트 API 코드)이 소유한다.
  */
 const WIPED_OUT: BacktestRunState = {
   run_id: "run-dm06-wiped-out",
@@ -140,7 +140,8 @@ const WIPED_OUT: BacktestRunState = {
   updated_at: "2026-09-01T00:00:05Z",
 };
 
-const WIPED_OUT_REQUEST: BacktestRunSpec = {
+/** 연구 구간 규칙이 생기기 전 기간으로 기록된 옛 실행의 요청. 재실행은 이것을 그대로 다시 보낸다. */
+const OLD_RUN_REQUEST: BacktestRunSpec = {
   environment: {
     start: "2018-01-02",
     end: "2019-12-30",
@@ -200,7 +201,7 @@ test(
     );
     await page.route(
       `**/api/v1/backtests/${WIPED_OUT.run_id}/request`,
-      (route) => route.fulfill({ json: WIPED_OUT_REQUEST }),
+      (route) => route.fulfill({ json: OLD_RUN_REQUEST }),
     );
     const sentence =
       "세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식).";
@@ -238,5 +239,65 @@ test(
     await expect(rejection).not.toContainText("got=start", {
       useInnerText: true,
     });
+  },
+);
+
+test(
+  "US-DM-06 결과 파일을 읽을 수 없는 완료 실행은 결과 화면이 다시 실행하라고 말하고 결과를 다시 묻지 않는다",
+  { tag: ["@story", "@US-DM-06"] },
+  async ({ page }) => {
+    const unreadable: BacktestRunState = {
+      run_id: "run-dm06-unreadable",
+      status: "completed",
+      progress: 1,
+      stage: "completed",
+      message: "Run completed",
+      artifact_sha256: "f".repeat(64),
+      created_at: "2026-09-02T00:00:00Z",
+      updated_at: "2026-09-02T00:00:07Z",
+    };
+    let resultReads = 0;
+    await page.route(`**/api/v1/backtests/${unreadable.run_id}`, (route) =>
+      route.fulfill({ json: unreadable }),
+    );
+    await page.route(
+      `**/api/v1/backtests/${unreadable.run_id}/request`,
+      (route) => route.fulfill({ json: OLD_RUN_REQUEST }),
+    );
+    await page.route(
+      `**/api/v1/backtests/${unreadable.run_id}/result`,
+      (route) => {
+        resultReads += 1;
+        return route.fulfill({
+          status: 410,
+          json: {
+            detail: {
+              code: "backtest.result.unreadable",
+              message: `run result file is missing — run_id=${unreadable.run_id}`,
+            },
+          },
+        });
+      },
+    );
+
+    const response = await page.goto(
+      `/research/backtests/${unreadable.run_id}`,
+    );
+    expect(response?.ok()).toBe(true);
+    // 일반 문구 대신 다시 불러와도 소용없고 같은 설정으로 다시 실행하라고 말한다. 서버 사유는 접힌 상세에만 있다.
+    const failure = page
+      .getByRole("alert")
+      .filter({ hasText: "이 실행의 결과 파일을 읽을 수 없습니다." });
+    await expect(failure).toContainText(
+      '다시 불러와도 같으니 "동일 설정 재실행"으로 다시 실행하세요.',
+    );
+    await expect(failure.getByRole("group")).toContainText(
+      "run result file is missing",
+    );
+    await expect(failure).not.toContainText("run result file", {
+      useInnerText: true,
+    });
+    // 410은 다시 물어도 같아 한 번만 묻는다. 다시 묻는다면 경고는 1초 뒤 두 번째 실패 다음에야 뜬다.
+    expect(resultReads).toBe(1);
   },
 );

@@ -1083,8 +1083,9 @@ const ko = {
     "{field_id} 상위 {value}개",
   "strategy.contract.portfolio.minimum_liquidity.summary":
     "{liquidity_field_id} {minimum_liquidity} 이상",
-  "strategy.section.factors.summary": "{items} 점수가 높은 순으로",
-  "strategy.field.factor_signal.label.summary": "{label}",
+  "strategy.section.factors.summary": "{items} 순으로",
+  "strategy.field.factor_signal.direction.value.high.summary": "높은 {label}",
+  "strategy.field.factor_signal.direction.value.low.summary": "낮은 {label}",
   "strategy.field.factor_signal.weight.summary": "(가중치 {weight})",
   "strategy.field.signal_step.score_threshold.summary":
     "점수 {score_threshold} 이상만",
@@ -2930,8 +2931,9 @@ export const messages = {
       "{field_id} in the top {value}",
     "strategy.contract.portfolio.minimum_liquidity.summary":
       "{liquidity_field_id} at least {minimum_liquidity}",
-    "strategy.section.factors.summary": "ranked by the {items} score",
-    "strategy.field.factor_signal.label.summary": "{label}",
+    "strategy.section.factors.summary": "ranked by {items}",
+    "strategy.field.factor_signal.direction.value.high.summary": "high {label}",
+    "strategy.field.factor_signal.direction.value.low.summary": "low {label}",
     "strategy.field.factor_signal.weight.summary": "(weight {weight})",
     "strategy.field.signal_step.score_threshold.summary":
       "only scores of at least {score_threshold}",

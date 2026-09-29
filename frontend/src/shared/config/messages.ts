@@ -958,7 +958,7 @@ const ko = {
     "시장 국면을 판정할 데이터 필드입니다.",
   "strategy.field.signal_step.regime_minimum": "레짐 하한",
   "strategy.field.signal_step.regime_minimum.description":
-    "이 값보다 낮으면 신규 매수를 멈춥니다.",
+    "레짐 필드 값이 이보다 낮은 종목은 후보에서 빠지고, 갖고 있던 종목도 팝니다.",
   "strategy.type.portfolio_step": "포트폴리오 구성",
   "strategy.type.portfolio_step.description":
     "후보에서 담을 종목과 비중·리밸런싱을 정합니다.",
@@ -1051,6 +1051,75 @@ const ko = {
     "종목 하나가 가질 수 있는 최대 목표 비중입니다.",
   "strategy.contract.risk.max_sector_weight.description":
     "섹터 하나가 가질 수 있는 최대 목표 비중입니다.",
+  // 그래프 1수준(파이프라인) 단계 이름과 한 문장 요약(P4-01, 리드 결정 2026-09-30). 조각 키는 backend
+  // 설명 키 아래 `.summary`(enum 은 값 이름 키 아래)이고 `{<키>}` 자리에 같은 카드 필드의 값이 들어간다
+  // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다. 노드 설정 칸 조각은 레시피 요약이 쓴다.
+  "strategy.stage.eligibility": "유니버스",
+  "strategy.stage.eligibility.description": "어떤 종목을 후보로 둘지 정합니다.",
+  "strategy.stage.signal": "알파 팩터",
+  "strategy.stage.signal.description": "후보 종목에 점수를 매기는 방법입니다.",
+  "strategy.stage.portfolio": "포트폴리오 구성",
+  "strategy.stage.portfolio.description": "몇 종목을 어떤 비중으로 언제 다시 고를지 정합니다.",
+  "strategy.stage.risk": "리스크 제약",
+  "strategy.stage.risk.description": "한 종목·한 섹터에 비중이 몰리지 않게 막는 한도입니다.",
+  "strategy.summary.stage.eligibility": "{parts}인 종목 중에서",
+  "strategy.summary.stage.signal": "{parts}",
+  "strategy.summary.stage.portfolio": "{parts}",
+  "strategy.summary.stage.risk": "{parts} 한도 안에서",
+  "strategy.summary.sentence": "{stages} 골라 보유한다.",
+  "strategy.field.eligibility_rule.operator.value.gt.summary":
+    "{field_id} {value} 초과",
+  "strategy.field.eligibility_rule.operator.value.gte.summary":
+    "{field_id} {value} 이상",
+  "strategy.field.eligibility_rule.operator.value.lt.summary":
+    "{field_id} {value} 미만",
+  "strategy.field.eligibility_rule.operator.value.lte.summary":
+    "{field_id} {value} 이하",
+  "strategy.field.eligibility_rule.operator.value.eq.summary":
+    "{field_id} {value}",
+  "strategy.field.eligibility_rule.operator.value.top_percent.summary":
+    "{field_id} 상위 {value.percent}",
+  "strategy.field.eligibility_rule.operator.value.top_count.summary":
+    "{field_id} 상위 {value}개",
+  "strategy.contract.portfolio.minimum_liquidity.summary":
+    "{liquidity_field_id} {minimum_liquidity} 이상",
+  "strategy.section.factors.summary": "{items} 순으로",
+  "strategy.field.factor_signal.direction.value.high.summary": "높은 {label}",
+  "strategy.field.factor_signal.direction.value.low.summary": "낮은 {label}",
+  "strategy.field.factor_signal.weight.summary": "(가중치 {weight})",
+  "strategy.field.signal_step.score_threshold.summary":
+    "점수 {score_threshold} 이상만",
+  "strategy.field.signal_step.regime_minimum.summary":
+    "{regime_field_id} 값이 {regime_minimum} 이상인 종목만",
+  "strategy.field.portfolio_step.side.value.long_short.summary": "하위 종목은 공매도하고",
+  "strategy.field.portfolio_step.weighting.value.equal.summary": "같은 비중으로",
+  "strategy.field.portfolio_step.weighting.value.factor_score.summary":
+    "점수 차이에 비례한 비중으로",
+  "strategy.field.portfolio_step.weighting.value.rank.summary": "순위에 비례한 비중으로",
+  "strategy.field.risk_step.risk_field_id.summary":
+    "{risk_field_id} 값이 낮을수록 큰 비중으로",
+  "strategy.field.risk_step.risk_factor_id.summary":
+    "{risk_factor_id} 값이 낮을수록 큰 비중으로",
+  "strategy.field.portfolio_step.rebalance.value.weekly.summary": "매주",
+  "strategy.field.portfolio_step.rebalance.value.monthly.summary": "매월",
+  "strategy.field.portfolio_step.rebalance.value.quarterly.summary": "분기마다",
+  "strategy.contract.portfolio.rebalance_every_n_sessions.summary":
+    "{rebalance_every_n_sessions}거래일마다",
+  "strategy.contract.portfolio.selection_count.summary":
+    "상위 {selection_count}종목을",
+  "strategy.contract.portfolio.selection_percentile.summary":
+    "상위 {selection_percentile}를",
+  "strategy.contract.risk.max_name_weight.summary": "종목당 최대 {max_name_weight}",
+  "strategy.contract.risk.max_sector_weight.summary":
+    "섹터당 최대 {max_sector_weight}",
+  "strategy.field.node.periods.summary": "{periods}일 전",
+  "strategy.field.node.window.summary": "{window}일",
+  "strategy.field.node.lag.summary": "최근 {lag}일 제외",
+  "strategy.field.node.lower_quantile.summary": "아래 {lower_quantile}",
+  "strategy.field.node.upper_quantile.summary": "위 {upper_quantile}",
+  "strategy.field.node.group_field_id.summary": "{group_field_id}별",
+  "recipe.summary.previous": "앞 단계",
+  "recipe.summary.advanced": "노드 {count}개 · 고급",
   "run_environment.contract.participation_rate.description":
     "참여 기준 거래량 대비 주문이 한 세션에 차지할 수 있는 최대 비율입니다.",
   "run_environment.contract.fee_bps.description":
@@ -2739,7 +2808,7 @@ export const messages = {
       "The data field that decides the market regime.",
     "strategy.field.signal_step.regime_minimum": "Regime floor",
     "strategy.field.signal_step.regime_minimum.description":
-      "Below this value no new buys are made.",
+      "Stocks whose regime field value is below this drop out of the candidates, and held ones are sold.",
     "strategy.type.portfolio_step": "Portfolio step",
     "strategy.type.portfolio_step.description":
       "Which candidates are held, at what weight, and how often.",
@@ -2834,6 +2903,82 @@ export const messages = {
       "Largest target weight a single name may take.",
     "strategy.contract.risk.max_sector_weight.description":
       "Largest target weight a single sector may take.",
+    // 그래프 1수준(파이프라인) 단계 이름과 한 문장 요약(P4-01, 리드 결정 2026-09-30). 조각 키는 backend
+    // 설명 키 아래 `.summary`(enum 은 값 이름 키 아래)이고 `{<키>}` 자리에 같은 카드 필드의 값이 들어간다
+    // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다. 노드 설정 칸 조각은 레시피 요약이 쓴다.
+    "strategy.stage.eligibility": "Universe",
+    "strategy.stage.eligibility.description": "Which stocks are candidates.",
+    "strategy.stage.signal": "Alpha",
+    "strategy.stage.signal.description": "How candidates are scored.",
+    "strategy.stage.portfolio": "Portfolio",
+    "strategy.stage.portfolio.description":
+      "How many stocks to hold, at what weights, and how often to pick again.",
+    "strategy.stage.risk": "Risk",
+    "strategy.stage.risk.description":
+      "Limits that keep weight from piling into one stock or sector.",
+    "strategy.summary.stage.eligibility": "among stocks with {parts}",
+    "strategy.summary.stage.signal": "{parts}",
+    "strategy.summary.stage.portfolio": "{parts}",
+    "strategy.summary.stage.risk": "within limits of {parts}",
+    "strategy.summary.sentence": "Pick and hold {stages}.",
+    "strategy.field.eligibility_rule.operator.value.gt.summary":
+      "{field_id} above {value}",
+    "strategy.field.eligibility_rule.operator.value.gte.summary":
+      "{field_id} at least {value}",
+    "strategy.field.eligibility_rule.operator.value.lt.summary":
+      "{field_id} below {value}",
+    "strategy.field.eligibility_rule.operator.value.lte.summary":
+      "{field_id} at most {value}",
+    "strategy.field.eligibility_rule.operator.value.eq.summary":
+      "{field_id} equal to {value}",
+    "strategy.field.eligibility_rule.operator.value.top_percent.summary":
+      "{field_id} in the top {value.percent}",
+    "strategy.field.eligibility_rule.operator.value.top_count.summary":
+      "{field_id} in the top {value}",
+    "strategy.contract.portfolio.minimum_liquidity.summary":
+      "{liquidity_field_id} at least {minimum_liquidity}",
+    "strategy.section.factors.summary": "ranked by {items}",
+    "strategy.field.factor_signal.direction.value.high.summary": "high {label}",
+    "strategy.field.factor_signal.direction.value.low.summary": "low {label}",
+    "strategy.field.factor_signal.weight.summary": "(weight {weight})",
+    "strategy.field.signal_step.score_threshold.summary":
+      "only scores of at least {score_threshold}",
+    "strategy.field.signal_step.regime_minimum.summary":
+      "only stocks with {regime_field_id} at least {regime_minimum}",
+    "strategy.field.portfolio_step.side.value.long_short.summary":
+      "shorting the bottom stocks",
+    "strategy.field.portfolio_step.weighting.value.equal.summary":
+      "at equal weight",
+    "strategy.field.portfolio_step.weighting.value.factor_score.summary":
+      "weighted by score margin",
+    "strategy.field.portfolio_step.weighting.value.rank.summary":
+      "weighted by rank",
+    "strategy.field.risk_step.risk_field_id.summary":
+      "weighted inversely to {risk_field_id}",
+    "strategy.field.risk_step.risk_factor_id.summary":
+      "weighted inversely to {risk_factor_id}",
+    "strategy.field.portfolio_step.rebalance.value.weekly.summary": "weekly",
+    "strategy.field.portfolio_step.rebalance.value.monthly.summary": "monthly",
+    "strategy.field.portfolio_step.rebalance.value.quarterly.summary":
+      "quarterly",
+    "strategy.contract.portfolio.rebalance_every_n_sessions.summary":
+      "every {rebalance_every_n_sessions} sessions",
+    "strategy.contract.portfolio.selection_count.summary":
+      "the top {selection_count} stocks",
+    "strategy.contract.portfolio.selection_percentile.summary":
+      "the top {selection_percentile}",
+    "strategy.contract.risk.max_name_weight.summary":
+      "at most {max_name_weight} per stock",
+    "strategy.contract.risk.max_sector_weight.summary":
+      "at most {max_sector_weight} per sector",
+    "strategy.field.node.periods.summary": "{periods} sessions back",
+    "strategy.field.node.window.summary": "{window} sessions",
+    "strategy.field.node.lag.summary": "skipping the last {lag} sessions",
+    "strategy.field.node.lower_quantile.summary": "lower {lower_quantile}",
+    "strategy.field.node.upper_quantile.summary": "upper {upper_quantile}",
+    "strategy.field.node.group_field_id.summary": "by {group_field_id}",
+    "recipe.summary.previous": "previous step",
+    "recipe.summary.advanced": "{count} nodes · advanced",
     "run_environment.contract.participation_rate.description":
       "Largest share of the participation-basis volume an order may take in one session.",
     "run_environment.contract.fee_bps.description":

@@ -826,20 +826,16 @@ PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`(#259). P3-03 에 �
 
 - 두 PR 로 나눈다. **P4-01a**: backend `x-stage` marker + 테스트(스키마·OpenAPI 영향 확인). **P4-01b**(P4-01a
   머지 뒤 main 에서): `pipeline-projection.ts`·`recipe-projection.ts` + 테스트 + i18n.
-- `x-stage` 는 `StrategySpec` 최상위 섹션 5개(`eligibility`·`factors`·`signal`·`portfolio`·`risk`)와 섹션과
-  단계가 다른 필드에만 dataclass field metadata `stage` 로 선언하고, 스키마 빌더의 marker 루프가 발행한다.
-  값은 `AppliedStage` 어휘(`eligibility`·`signal`·`portfolio`·`risk`, 5단계 실행 = `execution`)다. 필드의
-  단계는 자기 `x-stage`, 없으면 자기 제약 행의 적용 시점 `x-applied-stage`, 없으면 가장 가까운 조상의
-  `x-stage` 다 — 제약 행이 적용 시점을 이미 말하는 필드(`minimum_liquidity`)는 metadata 에 다시 적지
-  않는다(P4-01a 구현, PLAN 변경 기록).
-- 섹션과 단계가 다른 필드: 유동성 필터(`portfolio.liquidity_field_id`·`minimum_liquidity`) → 1단계
-  유니버스(적용 시점이 eligibility), 리스크 역가중 원천(`risk.risk_factor_id`·`risk_field_id`) → 3단계 비중
-  카드. 아래 "YAML 섹션과 1:1" 은 이 두 예외를 뺀 규칙이다.
+- 단계 = 적용되는 곳이다. 유동성 필터(후보를 거를 때 읽힘)는 1단계 유니버스, 리스크 역가중 원천(비중을
+  정할 때 읽힘)은 3단계 포트폴리오 구성이고, 아래 "YAML 섹션과 1:1" 은 이 두 예외를 뺀 규칙이다.
+  `x-stage` 의 선언 위치(값은 `AppliedStage`)와 필드의 단계를 읽는 규칙은 정본 대장 "그래프 표현 투영"
+  행이 소유한다(P4-01a).
 - 카드 = Form 행·목록 항목. 같은 단계 안에서 `x-applicable-when` 조건이 가리키는 필드가 있으면 그 필드의
   카드에 붙는다(조건이 둘 이상이면 같은 단계 안의 첫 조건). 묶음의 정본은 backend 적용 조건표다.
 - 요약 문장은 백분율을 쓰지 않는다(아래 예시의 "60%·40%" 포함 — 합성 분모와 역가중 제외 규칙의 복제다). 필드별
   i18n 조각(`<x-description-key>.summary`, enum 은 `<stem>.value.<값>.summary`)을 단계 틀로 잇고, 팩터는
-  이름(가중치가 서로 다를 때만 원값)으로 보인다. 역가중 제외 팩터는 compile 진단
+  선호 방향을 붙인 이름("낮은 PBR·높은 ROE", 가중치가 서로 다를 때만 원값)으로 보인다(방향은 #367 리뷰
+  P2-1 로 넓힘). 역가중 제외 팩터는 compile 진단
   `strategy.risk.risk_factor_excluded` 로 안다. 비율 표시는 `contract-inspector.ts` 의 `displayValue` 를
   공용으로 옮겨 쓴다.
 - 단계가 없는 섹션(`title`·`description`·`parameters`)은 투영이 따로 내고, 배치는 P4-02·P4-04 가 정한다.

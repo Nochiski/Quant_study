@@ -81,7 +81,9 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
 - 체인 판정 규칙(정본): 소스 노드 하나로 시작해 각 노드가 직전 노드만 참조하고 `output_node_id`가
   마지막 노드이면 체인이다. 다중 입력 노드는 **한 입력이 체인 꼬리이고 나머지 입력이 전부 체인
   밖 잎일 때만** 체인으로 본다. 잎은 입력이 없는 소스 노드(`field`·`constant`·`parameter`)이고
-  체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다.
+  체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다. 순서는 `graph.nodes`의
+  문서 순서다: 머리는 첫 노드이고, 잎이 아닌 노드가 문서 순서대로 단계다(backend fixture 검사와 같은 해석,
+  리드 결정 2026-09-30).
 - 아이디어 3(20일 이평 돌파)의 정본 노드 형태는 노드 4개(그중 잎 2개: `adj_close`·`adj_close_2`)다:
   `adj_close`(field `price.adj_close`) →
   `mean`(time_series mean, window 20, input `adj_close`) → 잎 `adj_close_2`(field `price.adj_close`) →
@@ -368,7 +370,7 @@ schema(`x-description-key`, `x-operator`)로 내려준다. **레지스트리 키
 
 | 수준 | 투영 입력 | 편집 |
 |---|---|---|
-| 파이프라인(전략 전체) | runtime schema × parse tree × compile 진단 → 통상 퀀트 프레임워크의 단계 모델(`pipeline-projection.ts`): 1 유니버스(Universe) `eligibility`, 2 알파 팩터(Alpha) `factors`+`signal`, 3 포트폴리오 구성(Portfolio) `portfolio`, 4 리스크 제약(Risk) `risk`, 5 실행(Execution) = 실행 설정 띠(문서 밖). YAML 섹션과 1:1이고, 섹션과 적용 단계가 다른 필드는 스키마 `x-stage`(없으면 그 필드 제약 행의 `x-applied-stage`, 값은 `AppliedStage`)가 단계를 말한다: 유동성 필터(`portfolio.liquidity_field_id`·`minimum_liquidity`)는 1 유니버스, 리스크 역가중 원천(`risk.risk_factor_id`·`risk_field_id`)은 3 포트폴리오 구성의 비중 카드다(P4-01 리드 결정 2026-09-30). 문서 전체를 한국어 한 문장으로 요약한 문장(`strategy-summary`)도 같은 투영이 만든다 | 카드 컨트롤은 Form 필드 컨트롤 재사용(`replaceScalar`·`insertKey`·`remove`). 팩터 추가는 빈 그래프 팩터 `insertItem` |
+| 파이프라인(전략 전체) | runtime schema × parse tree × compile 진단 → 통상 퀀트 프레임워크의 단계 모델(`pipeline-projection.ts`): 1 유니버스(Universe) `eligibility`, 2 알파 팩터(Alpha) `factors`+`signal`, 3 포트폴리오 구성(Portfolio) `portfolio`, 4 리스크 제약(Risk) `risk`, 5 실행(Execution) = 실행 설정 띠(문서 밖). YAML 섹션과 1:1이되, 단계는 적용되는 곳이라 유동성 필터는 1 유니버스, 리스크 역가중 원천은 3 포트폴리오 구성에 보인다(P4-01 리드 결정 2026-09-30). 단계의 선언(`x-stage`)과 읽는 규칙은 정본 대장 "그래프 표현 투영" 행이 소유한다. 문서 전체를 한국어 한 문장으로 요약한 문장(`strategy-summary`)도 같은 투영이 만든다 | 카드 컨트롤은 Form 필드 컨트롤 재사용(`replaceScalar`·`insertKey`·`remove`). 팩터 추가는 빈 그래프 팩터 `insertItem` |
 | 레시피(팩터 하나) | `graph.nodes`가 D2의 체인 판정 규칙을 만족하면 순서 목록(`recipe-projection.ts`). 다중 입력 노드는 부가 입력이 전부 체인 밖 잎일 때만 체인이고, 체인 머리 재참조는 비체인이다. 아니면 "고급에서 편집" 안내 | `recipe-transactions.ts`: 단계 추가 = `addNode`(kind·id·입력·출력 자동, 다중 입력 연산자는 부가 입력 잎을 새로 만든다) + 다음 노드 재배선, 삭제 = `remove` + 재배선, 이동 = `*_node_id` 재배선, 파라미터 = `replaceScalar`. 여러 연산은 `planSourceOperations`로 한 undo 단계 |
 | 고급(임의 DAG) | `graph.nodes` + backend plan | 1.1 `graph-transactions.ts` 유지. 드래그 배선은 `*_node_id` `replaceScalar`. 좌표는 local UI state |
 | 실행 설정 띠 | 실행 설정 스키마 `GET /api/v1/run-environments/schema`(전략 authoring runtime schema와 별개) | 문서 밖. `run-settings.ts` 필드 |

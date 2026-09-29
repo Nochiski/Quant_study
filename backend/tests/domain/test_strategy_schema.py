@@ -8,6 +8,7 @@ Schema itself (editor ADR D2).
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 from typing import Any
@@ -19,10 +20,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.factor.facade.expression import EXPRESSION_NODE_KINDS
-from strategy_workbench.domain.strategy.facade.constraints import (
-    STRATEGY_SCALAR_CONSTRAINTS,
-    AppliedStage,
-)
+from strategy_workbench.domain.strategy.facade.constraints import STRATEGY_SCALAR_CONSTRAINTS
 from strategy_workbench.domain.strategy.facade.schema import (
     FieldContract,
     strategy_document_schema,
@@ -334,32 +332,25 @@ def test_contract_rows_are_unique_per_pointer_and_branch() -> None:
     assert {row.branch for row in rows if row.pointer == "/risk/max_name_weight"} == {None}
 
 
-def _identifier_markers(schema: dict[str, Any]) -> tuple[dict[str, str], dict[str, str], list[str]]:
-    """(x-catalog by path, x-reference by path, unmarked `*_id` string properties)."""
-    catalogs: dict[str, str] = {}
-    references: dict[str, str] = {}
-    unmarked: list[str] = []
-
-    def walk(node: dict[str, Any], path: str) -> None:
+def _properties(schema: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """루트와 `$defs` 의 property 를 (경로, property)로(`/name`, `#/$defs/Def/name`)."""
+    definitions = [(f"#/$defs/{name}", node) for name, node in schema["$defs"].items()]
+    containers = [("", schema), *definitions]
+    for path, node in containers:
         for name, prop in node.get("properties", {}).items():
-            here = f"{path}/{name}"
-            if "x-catalog" in prop:
-                catalogs[here] = prop["x-catalog"]
-            elif "x-reference" in prop:
-                references[here] = prop["x-reference"]
-            elif name.endswith("_id"):
-                unmarked.append(here)
+            yield f"{path}/{name}", prop
 
-    walk(schema, "")
-    for name, definition in schema["$defs"].items():
-        walk(definition, f"#/$defs/{name}")
-    return catalogs, references, unmarked
+
+def _properties_with(schema: dict[str, Any], marker: str) -> dict[str, Any]:
+    """`marker` 를 가진 property 의 경로 → 마커 값."""
+    return {path: prop[marker] for path, prop in _properties(schema) if marker in prop}
 
 
 def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> None:
     """P3-03: an editor completes ids from the marker, never from a hand-written list."""
     schema = strategy_document_schema()
-    catalogs, references, unmarked = _identifier_markers(schema)
+    catalogs = _properties_with(schema, "x-catalog")
+    references = _properties_with(schema, "x-reference")
     assert catalogs == {
         "#/$defs/EligibilityRule/field_id": "equity-field",
         "#/$defs/FieldNode/field_id": "equity-field",
@@ -373,15 +364,7 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
     assert [path for path, namespace in references.items() if namespace == "factor"] == [
         "#/$defs/RiskStep/risk_factor_id"
     ]
-    defines = {
-        f"{path}/{name}": prop["x-defines"]
-        for path, node in [
-            ("", schema),
-            *[(f"#/$defs/{name}", definition) for name, definition in schema["$defs"].items()],
-        ]
-        for name, prop in node.get("properties", {}).items()
-        if "x-defines" in prop
-    }
+    defines = _properties_with(schema, "x-defines")
     assert defines == {
         "/parameters": "parameter",
         "/factors": "factor",
@@ -400,6 +383,11 @@ def test_identifier_fields_declare_their_catalog_or_reference_namespace() -> Non
     assert references["#/$defs/ParameterNode/parameter_id"] == "parameter"
     # The only unmarked ids are definitions (a node's own id, a user-named factor, a parameter
     # declaration), never lookups into a catalog or into the document.
+    unmarked = [
+        path
+        for path, prop in _properties(schema)
+        if path.endswith("_id") and "x-catalog" not in prop and "x-reference" not in prop
+    ]
     definitions = {"#/$defs/FactorSignal/factor_id"} | {
         f"#/$defs/{name}Parameter/parameter_id" for name in ("Float", "Integer", "Choice")
     }
@@ -433,11 +421,8 @@ def test_factor_authoring_mapping_is_owned_by_the_runtime_schema() -> None:
 
 
 def _stage_by_pointer(schema: dict[str, Any]) -> dict[str, str | None]:
-    """스칼라 계약 행 pointer → 그래프 표현 단계(프론트 파이프라인 투영과 같은 규칙).
-
-    필드 자신의 `x-stage`, 없으면 자기 제약 행의 적용 시점 `x-applied-stage`, 없으면 가장 가까운
-    조상 property 의 `x-stage` 다.
-    """
+    """스칼라 계약 행 pointer → 그래프 표현 단계. 규칙은 정본 대장 "그래프 표현 투영" 행이 소유하고
+    프론트 파이프라인 투영이 같은 규칙을 쓴다."""
 
     def objects(node: dict[str, Any]) -> list[dict[str, Any]]:
         node = _resolve(schema, node)
@@ -460,22 +445,13 @@ def _stage_by_pointer(schema: dict[str, Any]) -> dict[str, str | None]:
 
 
 def test_pipeline_stages_follow_where_each_field_is_applied() -> None:
-    """P4-01a: 그래프 1수준(파이프라인)이 필드를 보이는 단계 `x-stage`(리드 결정 2026-09-30).
+    """P4-01a: 그래프 1수준이 필드를 보이는 단계 `x-stage` 의 배정표(리드 결정 2026-09-30).
 
-    섹션 5개가 단계를 정하고, 섹션과 적용 단계가 다른 필드만 따로 말한다 — 유동성 필터는 후보를
-    거를 때, 리스크 역가중 원천은 비중을 줄 때 쓰인다. 제약 행이 적용 시점을 이미 말하는 필드
-    (`minimum_liquidity`)는 다시 선언하지 않는다(같은 사실을 두 곳에 두지 않는다).
+    유동성 필터는 후보를 거를 때, 리스크 역가중 원천은 비중을 정할 때 읽혀 섹션과 다른 단계다.
+    제약 행이 적용 시점을 이미 말하는 필드(`minimum_liquidity`)는 다시 선언하지 않는다.
     """
     schema = strategy_document_schema()
-    declared = {
-        f"{path}/{name}": prop["x-stage"]
-        for path, node in [
-            ("", schema),
-            *[(f"#/$defs/{name}", definition) for name, definition in schema["$defs"].items()],
-        ]
-        for name, prop in node.get("properties", {}).items()
-        if "x-stage" in prop
-    }
+    declared = _properties_with(schema, "x-stage")
     assert declared == {
         "/eligibility": "eligibility",
         "/factors": "signal",
@@ -486,8 +462,9 @@ def test_pipeline_stages_follow_where_each_field_is_applied() -> None:
         "#/$defs/RiskStep/risk_field_id": "portfolio",
         "#/$defs/RiskStep/risk_factor_id": "portfolio",
     }
+    # 한 property 에 두 마커가 함께 오지 않는다 — 함께 오면 같은 단계를 두 곳에 적었거나 모순이다.
+    assert not declared.keys() & _properties_with(schema, "x-applied-stage").keys()
     stages = _stage_by_pointer(schema)
-    assert set(stages.values()) - {None} <= {stage.value for stage in AppliedStage}
     section = {
         pointer: schema["properties"][pointer.split("/")[1]].get("x-stage") for pointer in stages
     }

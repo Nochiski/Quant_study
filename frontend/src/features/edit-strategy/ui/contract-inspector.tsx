@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 
 import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import {
-  formatContractValue,
   projectContractInspector,
   type ContractBound,
   type ContractCatalogProjection,
@@ -12,6 +11,7 @@ import {
   describeApplicabilityConditions,
   type FieldApplicability,
 } from "../model/field-applicability";
+import { formatContractValue } from "../model/schema-navigator";
 import "./contract-inspector.css";
 
 type ContractInspectorProps = {

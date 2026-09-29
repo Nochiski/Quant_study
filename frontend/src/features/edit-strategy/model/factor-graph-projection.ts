@@ -1,7 +1,11 @@
 import type { FactorGraph, FactorValidationIssue } from "../../../shared/api";
 import { t, tName } from "../../../shared/config";
-import { nodeKinds, nodeReferenceKeys } from "./graph-transactions";
-import { resolveRef, schemaFacts, type JsonSchema } from "./schema-navigator";
+import {
+  nodeSlotsByKind,
+  settingShown,
+  type NodeSlot,
+} from "./graph-transactions";
+import type { JsonSchema } from "./schema-navigator";
 import {
   compiledNodeOrigin,
   nodePointerById,
@@ -70,78 +74,67 @@ export type FactorGraphProjection =
       factors: GraphFactorProjection[];
     };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** 노드 이름 칸. 노드 네임스페이스(`x-defines: node`)의 `<namespace>_id` 규칙(`referenceCandidates`)이다. */
-const NODE_NAME_KEY = "node_id";
-
-type NodeSlot = { key: string; label: string };
+type SlotLabel = { key: string; label: string; defaultValue: unknown };
+type SlotLabels = ReadonlyMap<
+  string,
+  { inputs: SlotLabel[]; settings: SlotLabel[] }
+>;
 
 /**
- * 노드 kind → 입력 칸과 설정 칸(#354). kind·칸 표를 손으로 적지 않고 runtime schema 의 노드 분기를 읽는다(정본
- * 대장 "runtime schema 노드의 필드 표시 사실"). 입력 칸은 `x-reference: node`(`nodeReferenceKeys`), 설정 칸은
- * 종류(`const`)·이름·연산(`x-operator`)·입력을 뺀 나머지이고, 칸 이름은 `x-description-key` 다. 스키마가 모르는
- * kind 는 칸이 없다 — 그 노드는 backend 검증 진단이 먼저 알린다.
+ * 노드 kind → 입력 칸과 설정 칸의 이름(#354). 칸은 `nodeSlotsByKind`, 칸 이름은 `x-description-key` 다. 스키마가
+ * 모르는 kind 는 칸이 없다 — 그 노드는 backend 검증 진단이 먼저 알린다.
  */
-const nodeSlots = (
-  schema: JsonSchema,
-  factorPointer: string,
-): ReadonlyMap<string, { inputs: NodeSlot[]; settings: NodeSlot[] }> =>
-  new Map(
-    nodeKinds(schema, undefined, factorPointer).map(([kind, branch]) => {
-      const inputKeys = new Set(nodeReferenceKeys(schema, branch));
-      const properties = isRecord(branch.properties) ? branch.properties : {};
-      const inputs: NodeSlot[] = [];
-      const settings: NodeSlot[] = [];
-      for (const [key, candidate] of Object.entries(properties)) {
-        const property = isRecord(candidate)
-          ? resolveRef(schema, candidate)
-          : null;
-        if (property === null) continue;
-        const facts = schemaFacts(property);
-        const slot = { key, label: tName(facts.descriptionKey) ?? key };
-        if (inputKeys.has(key)) inputs.push(slot);
-        else if (
-          !facts.hasConst &&
-          facts.operatorKeys === null &&
-          key !== NODE_NAME_KEY
-        )
-          settings.push(slot);
-      }
-      return [kind, { inputs, settings }] as const;
-    }),
+const slotLabels = (schema: JsonSchema): SlotLabels => {
+  const labelled = (slots: readonly NodeSlot[]): SlotLabel[] =>
+    slots.map(({ key, facts }) => ({
+      key,
+      label: tName(facts.descriptionKey) ?? key,
+      defaultValue: facts.defaultValue,
+    }));
+  return new Map(
+    [...nodeSlotsByKind(schema)].map(([kind, { inputs, settings }]) => [
+      kind,
+      { inputs: labelled(inputs), settings: labelled(settings) },
+    ]),
   );
+};
+
+const valueOf = (node: FactorNode, key: string): unknown =>
+  (node as unknown as Record<string, unknown>)[key];
+
+/** 문서 노드의 입력 칸(칸 순서)과 그 칸이 가리키는 노드. */
+const authoredInputs = (
+  labels: SlotLabels,
+  node: FactorNode,
+): Array<{ nodeId: string; role: string }> =>
+  (labels.get(node.kind)?.inputs ?? []).map(({ key, label }) => {
+    const nodeId = valueOf(node, key);
+    return { nodeId: typeof nodeId === "string" ? nodeId : "", role: label };
+  });
+
+/** 노드의 설정 칸 중 보일 값(`settingShown`: 값이 있고 스키마 기본값과 다른 것). */
+const nodeDetails = (
+  labels: SlotLabels,
+  node: FactorNode | undefined,
+): GraphNodeDetail[] =>
+  node === undefined
+    ? []
+    : (labels.get(node.kind)?.settings ?? []).flatMap(
+        ({ key, label, defaultValue }) => {
+          const value = valueOf(node, key);
+          return settingShown(value, defaultValue)
+            ? [{ label, value: String(value) }]
+            : [];
+        },
+      );
 
 const authoredOperation = (node: FactorNode): string =>
   "operator" in node ? `${node.kind}.${node.operator}` : node.kind;
 
 const projectFactor = (
   factor: PlannedFactor,
-  schema: JsonSchema,
+  labels: SlotLabels,
 ): GraphFactorProjection => {
-  const slotsByKind = nodeSlots(schema, `/factors/${factor.factorIndex}`);
-  const valueOf = (node: FactorNode, key: string): unknown =>
-    (node as unknown as Record<string, unknown>)[key];
-  const authoredInputs = (
-    node: FactorNode,
-  ): Array<{ nodeId: string; role: string }> =>
-    (slotsByKind.get(node.kind)?.inputs ?? []).map(({ key, label }) => {
-      const nodeId = valueOf(node, key);
-      return { nodeId: typeof nodeId === "string" ? nodeId : "", role: label };
-    });
-  // 값을 적지 않은 선택 칸(`periods: null` 등)은 보이지 않는다.
-  const nodeDetails = (node: FactorNode | undefined): GraphNodeDetail[] =>
-    node === undefined
-      ? []
-      : (slotsByKind.get(node.kind)?.settings ?? []).flatMap(
-          ({ key, label }) => {
-            const value = valueOf(node, key);
-            return value === null || value === undefined
-              ? []
-              : [{ label, value: String(value) }];
-          },
-        );
   const graph = factor.request.graph;
   const authoredById = new Map(graph.nodes.map((node) => [node.node_id, node]));
   const contractById = new Map(
@@ -165,14 +158,14 @@ const projectFactor = (
   const shown = (nodeId: string): boolean =>
     compiledNodeOrigin(factor, nodeId) !== "support";
   const shownInputs = (node: FactorNode) =>
-    authoredInputs(node).filter((input) => shown(input.nodeId));
+    authoredInputs(labels, node).filter((input) => shown(input.nodeId));
 
   const projectPlannedNode = (
     step: NonNullable<typeof plan>["steps"][number],
   ): GraphNodeProjection => {
     const authored = authoredById.get(step.node_id);
     const authoredInputPorts =
-      authored === undefined ? [] : authoredInputs(authored);
+      authored === undefined ? [] : authoredInputs(labels, authored);
     const origin = compiledNodeOrigin(factor, step.node_id);
     const inputs = step.input_node_ids.flatMap((nodeId, index) => {
       if (!shown(nodeId)) return [];
@@ -212,7 +205,7 @@ const projectFactor = (
       minimumHistorySessions: step.minimum_history_sessions,
       isOutput: step.node_id === graph.output_node_id,
       // 붙인 조건 노드의 파라미터는 사용자가 쓴 값이 아니다(참 1 / 거짓 0 고정).
-      details: origin === "boolean-score" ? [] : nodeDetails(authored),
+      details: origin === "boolean-score" ? [] : nodeDetails(labels, authored),
       issues: issuesById.get(step.node_id) ?? [],
     };
   };
@@ -253,7 +246,7 @@ const projectFactor = (
         outputUnit: contract?.unit ?? null,
         minimumHistorySessions: contract?.minimum_history_sessions ?? null,
         isOutput: node.node_id === graph.output_node_id,
-        details: nodeDetails(node),
+        details: nodeDetails(labels, node),
         issues: issuesById.get(node.node_id) ?? [],
       };
     });
@@ -288,10 +281,11 @@ export const projectFactorGraphs = (
 ): FactorGraphProjection => {
   if (state.status !== "ready") return state;
   if (schema === null) return { status: "metadata-loading" };
+  const labels = slotLabels(schema);
   return {
     status: "ready",
     expectedRegistryVersion: state.expectedRegistryVersion,
     expectedDataSnapshotId: state.expectedDataSnapshotId,
-    factors: state.factors.map((factor) => projectFactor(factor, schema)),
+    factors: state.factors.map((factor) => projectFactor(factor, labels)),
   };
 };

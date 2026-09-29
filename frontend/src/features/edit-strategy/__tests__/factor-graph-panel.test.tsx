@@ -163,6 +163,24 @@ const NEGATE = {
   periods: null,
 } as const;
 
+/** compile 응답이 dataclass 기본값을 실은 노드들: 순위 노드의 절단 분위, 모멘텀의 `lag: 0`. */
+const RANKED = {
+  node_id: "ranked",
+  kind: "cross_sectional",
+  operator: "rank",
+  input_node_id: "close",
+  lower_quantile: 0.01,
+  upper_quantile: 0.99,
+} as const;
+const MOMENTUM = {
+  node_id: "mom",
+  kind: "time_series",
+  operator: "momentum",
+  input_node_id: "close",
+  window: 60,
+  lag: 0,
+} as const;
+
 const readyState = (): ExecutionPlansState => ({
   status: "ready",
   expectedRegistryVersion: "factor-registry-v7",
@@ -308,6 +326,8 @@ describe("FactorGraph projection", () => {
             : node,
         ),
         NEGATE,
+        RANKED,
+        MOMENTUM,
       ],
     } as FactorGraphRequest["graph"];
     const planless = explanation();
@@ -340,6 +360,9 @@ describe("FactorGraph projection", () => {
         ?.details;
     expect(detailsOf("neg")).toEqual([]);
     expect(detailsOf("zero")).toEqual([{ label: "값", value: "0" }]);
+    // 스키마 기본값과 같은 설정 값은 보이지 않는다 — 레시피 요약과 같은 규칙(리드 결정, #359 리뷰 P3-3).
+    expect(detailsOf("ranked")).toEqual([]);
+    expect(detailsOf("mom")).toEqual([{ label: "집계 기간", value: "60" }]);
   });
 
   it("names a plan input by its position when the authored slot cannot be told apart (#359 리뷰 P3-1)", () => {

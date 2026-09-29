@@ -48,6 +48,11 @@ export type SchemaFacts = {
    */
   valueLabelKeys: Readonly<Record<string, string>> | null;
   appliedStage: string | null;
+  /**
+   * `x-stage`: 그래프 표현(파이프라인)의 단계(P4-01). 필드의 단계를 읽는 규칙은 정본 대장 "그래프 표현
+   * 투영" 행이 소유하고 `pipeline-projection.ts`가 그 규칙을 쓴다.
+   */
+  stage: string | null;
   catalog: string | null;
   reference: string | null;
   applicableWhen: ApplicableWhen | null;
@@ -531,6 +536,7 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
             ]),
           )),
     appliedStage: stringAt(node, "x-applied-stage"),
+    stage: stringAt(node, "x-stage"),
     catalog: stringAt(node, "x-catalog"),
     reference: stringAt(node, "x-reference"),
     applicableWhen: isApplicableWhen(node["x-applicable-when"])
@@ -539,6 +545,34 @@ export const schemaFacts = (node: JsonSchema): SchemaFacts => {
     example,
     hasExample: example !== undefined,
   };
+};
+
+/** 값 하나를 화면 문자열로(문자열은 그대로, 나머지는 JSON). 값이 없으면 null. */
+export const formatContractValue = (value: unknown): string | null => {
+  if (value === undefined) return null;
+  if (typeof value === "string") return value;
+  const encoded = JSON.stringify(value);
+  return encoded === undefined ? String(value) : encoded;
+};
+
+const stableNumber = (value: number): string =>
+  Number(value.toPrecision(12)).toString();
+
+/**
+ * 값을 스키마의 표시 단위(`x-display-unit`)로: 비율(`x-unit: ratio`)을 `%` 로 보이면 100을 곱하고 유효숫자
+ * 12자리로 부동소수 꼬리를 지운다. 표시 단위가 없으면 null. Contract Inspector 와 요약 문장이 함께 쓴다.
+ */
+export const displayValue = (
+  value: unknown,
+  unit: string | null,
+  displayUnit: string | null,
+): string | null => {
+  if (displayUnit === null) return null;
+  if (typeof value === "number" && unit === "ratio" && displayUnit === "%")
+    return `${stableNumber(value * 100)}%`;
+  const formatted = formatContractValue(value);
+  if (formatted === null) return null;
+  return displayUnit === "%" ? `${formatted}%` : `${formatted} ${displayUnit}`;
 };
 
 /**

@@ -192,8 +192,8 @@ def _wait(client: TestClient, run_id: str) -> dict[str, Any]:
     return wait_for_terminal_state(client, run_id)
 
 
-def _execute(client: TestClient, core: str) -> dict[str, Any]:
-    accepted = client.post("/api/v1/backtests", json=_run_body(client, core))
+def _execute(client: TestClient, body: dict[str, Any]) -> dict[str, Any]:
+    accepted = client.post("/api/v1/backtests", json=body)
     assert accepted.status_code == 202
     run_id = accepted.json()["run"]["run_id"]
     state = _wait(client, run_id)
@@ -243,7 +243,7 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
     assert len(result["manifest"]["run_fingerprint"]) == 64
     assert result["manifest"]["run_spec"]["strategy"] == _run_body(client)["strategy"]
     assert result["manifest"]["run_spec"]["benchmark_security_id"] == "005930"
-    assert result["manifest"]["metric_registry_version"] == "metric-registry-v1"
+    assert result["manifest"]["metric_registry_version"] == "metric-registry-v2"
     assert {item["code"] for item in result["manifest"]["warnings"]} == {
         "corporate_action_feed_empty",
         "mock_equity_data",
@@ -757,14 +757,40 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
 def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -> None:
     client = TestClient(build_http_app())
 
-    rust = _execute(client, "rust")
-    python = _execute(client, "python")
+    rust = _execute(client, _run_body(client, "rust"))
+    python = _execute(client, _run_body(client, "python"))
 
     assert rust["metrics"] == python["metrics"]
     assert rust["series"] == python["series"]
     assert rust["artifacts"] == python["artifacts"]
     assert rust["manifest"]["engine_core"] == "rust"
     assert python["manifest"]["engine_core"] == "python"
+
+
+def test_adjacent_metric_windows_chain_to_the_full_run_total_return() -> None:
+    """경계에서 나눈 두 구간의 총수익률을 이어 곱하면 전체 총수익률이다(#274 DEFECT-5).
+
+    뒤 구간은 직전 세션(1/30) 자산에서 시작하므로 2/2 하루 수익률이 어느 구간에서도 빠지지 않는다.
+    앞 구간은 실행 첫날부터라 직전 세션이 없고 첫 점이 기준이다.
+    """
+    client = TestClient(build_http_app())
+    body = _run_body(client)
+    body["metric_windows"] = [
+        {"scope": "in_sample", "start": "2026-01-02", "end": "2026-01-30", "label": "IS"},
+        {"scope": "out_of_sample", "start": "2026-02-02", "end": "2026-02-20", "label": "OOS"},
+    ]
+
+    result = _execute(client, body)
+
+    total = {
+        item["scope"]: item["value"]
+        for item in result["metrics"]
+        if item["metric_id"] == "total_return"
+    }
+    assert total["full"] != 0.0
+    assert (1 + total["in_sample"]) * (1 + total["out_of_sample"]) == pytest.approx(
+        1 + total["full"], rel=1e-12
+    )
 
 
 def test_backtest_unknown_run_and_invalid_metric_window_return_structured_errors() -> None:

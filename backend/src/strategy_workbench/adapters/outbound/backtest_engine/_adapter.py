@@ -782,4 +782,6 @@ def _slice_analytics(
             float(item.quantity) * abs(item.slippage_per_share) for item in fills
         ),
         total_carry_cost=sum(item.amount for item in costs),
+        # 구간 첫날 수익률이 빠지지 않게 직전 세션을 기준으로 넘긴다. 실행 첫날부터면 없다.
+        base=next((item for item in reversed(data.points) if item.session < start), None),
     )

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from ._models import MetricCategory, MetricDefinition, MetricUnit
 
-REGISTRY_VERSION = "metric-registry-v1"
+# v2(#274): CAGR 연수를 달력 일수로 세고 1년 미만은 None으로 둔다. 구간 지표는 직전 세션이
+# 기준이다.
+REGISTRY_VERSION = "metric-registry-v2"
 
 
 class MetricRegistry:
@@ -40,7 +42,7 @@ def build_default_metric_registry() -> MetricRegistry:
         MetricDefinition(
             "total_return", "Total return", MetricCategory.RETURN, percent, True, False
         ),
-        MetricDefinition("cagr", "CAGR", MetricCategory.RETURN, percent, True, False),
+        MetricDefinition("cagr", "CAGR", MetricCategory.RETURN, percent, True, True, version=2),
         MetricDefinition("volatility", "Volatility", MetricCategory.RISK, percent, False, False),
         MetricDefinition("sharpe", "Sharpe ratio", MetricCategory.RISK_ADJUSTED, ratio, True, True),
         MetricDefinition(
@@ -49,7 +51,9 @@ def build_default_metric_registry() -> MetricRegistry:
         MetricDefinition(
             "max_drawdown", "Maximum drawdown", MetricCategory.RISK, percent, True, False
         ),
-        MetricDefinition("calmar", "Calmar ratio", MetricCategory.RISK_ADJUSTED, ratio, True, True),
+        MetricDefinition(
+            "calmar", "Calmar ratio", MetricCategory.RISK_ADJUSTED, ratio, True, True, version=2
+        ),
         MetricDefinition("turnover", "Turnover", MetricCategory.TRADE, ratio, False, False),
         MetricDefinition(
             "max_drawdown_duration_sessions",

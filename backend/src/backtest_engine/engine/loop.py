@@ -1044,9 +1044,10 @@ class BacktestEngine:
         should_dispatch = calendar.matches(run.requirements.schedule, snapshot.ts)
         for cost in costs:
             run.store.append(cost.ts, RecordKind.COST, cost)
-        if marked.equity < 0:
+        # 자산 0도 파산이다. 0에서 이어지면 다음 세션 수익률이 0으로 나누기가 된다(#274).
+        if marked.equity <= 0:
             raise EquityWipedOut(
-                f"equity fell below zero at session close — ts={snapshot.ts} "
+                f"equity fell to zero or below at session close — ts={snapshot.ts} "
                 f"equity={marked.equity} cash={marked.cash} "
                 f"positions={[(p.instrument.symbol, str(p.quantity)) for p in marked.positions]}"
             )

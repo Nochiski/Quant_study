@@ -46,6 +46,7 @@ class MetricUnavailableReason(StrEnum):
     NO_CLOSED_TRADES = "no_closed_trades"
     NO_LOSING_CLOSED_TRADE = "no_losing_closed_trade"
     NO_OBSERVATIONS_IN_SCOPE = "no_observations_in_scope"
+    PERIOD_UNDER_ONE_YEAR = "period_under_one_year"
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,9 @@ class AnalyticsInput:
     total_fees: float = 0.0
     total_slippage_cost: float = 0.0
     total_carry_cost: float = 0.0
+    # 구간 시작 직전 세션의 점. 있으면 수익률·연수·월별 수익률·벤치마크 수익률이 여기서 시작하고,
+    # 곡선·낙폭·노출에는 들어가지 않는다. 없으면 첫 점이 기준이다.
+    base: AnalysisPoint | None = None
 
 
 @dataclass(frozen=True)

@@ -6,5 +6,6 @@
   "benchmark_not_available",
   "no_closed_trades",
   "no_losing_closed_trade",
-  "no_observations_in_scope"
+  "no_observations_in_scope",
+  "period_under_one_year"
 ]

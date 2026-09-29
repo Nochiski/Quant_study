@@ -107,9 +107,15 @@
   한글 문장을 보이고, 서버 원문은 접힌 "서버 사유"에 둔다. 거절이 칸을 짚으면 "서버가 실행 설정의 초기 자본 칸
   값을 받지 않았습니다."처럼 그 칸 이름을 말한다(새 전략·저장한 전략 화면 모두). 영문 진단(`API request
   failed …`)은 보이지 않는다.
-- Given 완료된 결과, Then "핵심 성과 지표"에 Total return·Sharpe ratio·Maximum drawdown·Calmar
-  ratio·Turnover·Closed trades 여섯 개가 값과 함께 보이고, 자산 곡선(Equity curve) 차트가 보인다.
-  지표 이름 옆의 쉬운 한글 뜻은 US-DM-08이 지킨다.
+- Given 첫 세션부터 마지막 세션까지 1년 이상인 완료된 결과, Then "핵심 성과 지표"에 Total
+  return·Sharpe ratio·Maximum drawdown·Calmar ratio·Turnover·Closed trades 여섯 개가 값과 함께
+  보이고, 자산 곡선(Equity curve) 차트가 보인다. 1년 미만 실행은 Calmar ratio가 "N/A"와 "기간이
+  1년보다 짧아 연율로 바꾸지 않습니다"를 보인다. 지표 이름 옆의 쉬운 한글 뜻은 US-DM-08이 지킨다.
+- Given OOS 시작일을 종료일 1년 안쪽으로 둔 실행, Then 결과의 지표 표에서 OOS 구간의 cagr·calmar
+  칸은 값 대신 "N/A"와 "기간이 1년보다 짧아 연율로 바꾸지 않습니다"를 보이고, 총수익률은 값으로 보인다.
+  1년 미만을 연율로 부풀리면 짧은 구간의 우연한 상승이 과대평가된다(이슈 #274). 세션 종료 자산이 0
+  이하가 된 실행은 CAGR 0%(본전) 같은 결과를 내지 않고 자본 잠식으로 멈춰 실패로 끝난다. 브라우저 e2e는
+  1년 미만 경로만 밟고, 자산 0 멈춤은 backend `tests/test_rust_driver.py`가 두 코어에서 확인한다.
 - Given 완료된 결과, When 왼쪽 메뉴의 "백테스트"를 누르면, Then 백테스트 이력에 방금 실행이
   완료 상태로 있다.
 - 비고: 섹터 정보가 없는 실데이터(duckdb 원장)에서는 섹터 상한이 적용되지 않는다. 대신 섹터 상한이

@@ -8,11 +8,14 @@ equity 층 DESIGN §2 의 판본 골격(현재 빌드 포인터 `current_build` 
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
+import sys
 from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from types import ModuleType
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -504,7 +507,29 @@ def credit_table(rows: list[CreditRow]) -> pa.Table:
 # import 하지 않으므로 매크로 본문(DESIGN §5 v_cum_adj·v_adj_price·v_adj_price_fwd)과 snapshot_id
 # 규칙(전 테이블 table=build 정렬 sha256 16자리)을 여기 옮겨 적는다 — 본문이 바뀌면 여기도 같이
 # 바꾼다.
-# 예외는 원장 선언과 대조하는 계약 테스트다. 그 테스트는 import 하는 동안만 경로를 올린다(#230).
+# 예외는 원장 선언과 대조하는 계약 테스트다. 그 테스트는 `import_ledger_module` 로 import 하는
+# 동안만 경로를 올린다(#230).
+
+_EQUITY_SRC = Path(__file__).resolve().parents[2] / "database" / "src"
+
+
+def import_ledger_module(name: str) -> ModuleType:
+    """원장 모듈(`database/src` 의 `equity.rules_s19` 등)을 import 한다.
+
+    경로는 import 하는 동안만 올린다. `database/src` 최상위의 일반 이름 모듈(api·stage 등)이 이후
+    테스트의 import 를 가리지 않게 한다(저장소 관례, test_core_parity.py).
+    """
+    if not _EQUITY_SRC.is_dir():
+        raise FileNotFoundError(f"원장 선언 경로가 없다 — path={_EQUITY_SRC} module={name}")
+    added = str(_EQUITY_SRC) not in sys.path
+    if added:
+        sys.path.insert(0, str(_EQUITY_SRC))
+    try:
+        return importlib.import_module(name)
+    finally:
+        if added:
+            sys.path.remove(str(_EQUITY_SRC))
+
 
 _CUM_ADJ_SQL = """
 WITH cut AS (

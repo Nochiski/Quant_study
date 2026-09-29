@@ -12,8 +12,6 @@ field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 g
 
 from __future__ import annotations
 
-import importlib
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -139,25 +137,15 @@ def test_duckdb_선언표의_원주가_표시는_같은_단위의_실재하는_�
 # 에서 돈다.
 # 빈도는 원장 어휘(session·report)가 아니라 duckdb 어댑터가 `list_fields()` 로 내는 어휘
 # (`SourceSpec.frequency`)로 맞춘다. mock 이 대신 서는 것은 그 어댑터이기 때문이다.
-_EQUITY_SRC = Path(__file__).resolve().parents[3] / "database" / "src"
 
 
 def _ledger_profiles() -> dict[str, Any]:
     """원장 빌드가 `dataset_profile` 로 내는 필드 선언(field_id → `FieldProfile`)."""
     pytest.importorskip("duckdb", reason="원장 선언 모듈이 duckdb 를 import 한다(extra `equity`)")
-    if not _EQUITY_SRC.is_dir():
-        pytest.fail(f"원장 선언 경로가 없다 — path={_EQUITY_SRC}")
-    # 경로는 import 하는 동안만 올린다. `database/src` 최상위의 일반 이름 모듈(api·stage 등)이
-    # 이후 테스트의 import 를 가리지 않게 한다(저장소 관례, test_core_parity.py).
-    added = str(_EQUITY_SRC) not in sys.path
-    if added:
-        sys.path.insert(0, str(_EQUITY_SRC))
-    try:
-        rules_s19 = importlib.import_module("equity.rules_s19")
-        return {profile.field_id: profile for _, profile in rules_s19.owned_fields()}
-    finally:
-        if added:
-            sys.path.remove(str(_EQUITY_SRC))
+    from tests.equity_fixture import import_ledger_module
+
+    rules_s19: Any = import_ledger_module("equity.rules_s19")
+    return {profile.field_id: profile for _, profile in rules_s19.owned_fields()}
 
 
 @pytest.mark.parametrize("field_id", _shared_field_ids())

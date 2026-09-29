@@ -18,6 +18,9 @@ paths:
 - 색·간격·폰트는 `app/styles/tokens.css`의 semantic design token(CSS 변수)을 사용한다. 원시 색 값은
   `tokens.css`에만 두고 컴포넌트 CSS에 하드코딩 hex를 쓰지 않는다. `!important`는 새로 쓰지 않는다
   (지금 있는 것은 `base.css`의 `[hidden]`·reduced-motion 재정의와 `dirty-leave-guard.css` 하나다).
+- 라우트 화면(로딩·오류·없는 경로 화면 포함)의 안쪽 여백은 `shared/ui`의 `.page` 하나가 소유한다. 앱 셸
+  `<main>`은 여백을 주지 않으므로 화면 루트에 `.page`를 두고, 화면 CSS에 여백을 따로 적지 않는다. 자기
+  상단바로 칸을 끝까지 채우는 전략 편집기만 쓰지 않는다(#261).
 - 버튼·입력·표·탭은 semantic role과 accessible name을 갖는다. 키보드 조작과 focus-visible을
   완료 조건에 포함한다.
 - 사용자 문구는 `<domain>.<area>.<phrase>` i18n 키를 쓰고 ko/en을 함께 변경한다(사전은 `shared/config/messages.ts`). 컴포넌트

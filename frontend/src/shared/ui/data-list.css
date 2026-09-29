@@ -3,7 +3,6 @@
   gap: var(--space-4);
   width: min(1180px, 100%);
   margin: 0 auto;
-  padding: var(--space-5);
 }
 
 .data-list-page__header {
@@ -144,10 +143,6 @@
 }
 
 @media (max-width: 720px) {
-  .data-list-page {
-    padding: var(--space-3);
-  }
-
   .data-list-page__header {
     align-items: stretch;
     flex-direction: column;

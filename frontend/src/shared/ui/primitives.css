@@ -383,6 +383,21 @@
 }
 
 /* Page-level states shared by every page slice */
+
+/*
+ * 라우트 화면 안쪽 여백의 정본. 앱 셸 `<main>`은 여백을 주지 않는다 — 전략 편집기처럼 자기 상단바로 칸
+ * 끝까지 채우는 화면이 있어서다. 그 밖의 라우트 화면은 루트에 이 클래스를 둔다(#261).
+ */
+.page {
+  padding: var(--space-5);
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: var(--space-3);
+  }
+}
+
 .page-header {
   display: flex;
   align-items: baseline;

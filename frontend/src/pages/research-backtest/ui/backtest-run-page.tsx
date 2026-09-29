@@ -108,13 +108,19 @@ export const BacktestRunPage = () => {
   };
 
   if (status.isPending) {
-    return <p className="page-state">{t("page.loading")}</p>;
+    return (
+      <div className="page">
+        <p className="page-state">{t("page.loading")}</p>
+      </div>
+    );
   }
   if (status.isError || !status.data) {
     return (
-      <p className="page-state page-state--error" role="alert">
-        {t("page.backtest.loadError")}
-      </p>
+      <div className="page">
+        <p className="page-state page-state--error" role="alert">
+          {t("page.backtest.loadError")}
+        </p>
+      </div>
     );
   }
   const state = status.data;
@@ -125,8 +131,8 @@ export const BacktestRunPage = () => {
     <div
       className={
         assistantOpen
-          ? "backtest-run-layout backtest-run-layout--assistant"
-          : "backtest-run-layout"
+          ? "page backtest-run-layout backtest-run-layout--assistant"
+          : "page backtest-run-layout"
       }
     >
       <div className="backtest-run-layout__main">

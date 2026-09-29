@@ -174,7 +174,7 @@ export const BacktestsPage = () => {
     });
 
   return (
-    <section className="data-list-page" aria-labelledby="backtests-title">
+    <section className="page data-list-page" aria-labelledby="backtests-title">
       <header className="data-list-page__header">
         <div>
           <h1 id="backtests-title">{t("history.backtests.title")}</h1>

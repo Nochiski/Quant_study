@@ -89,7 +89,7 @@
 - e2e 담당: 없음
 - 기능 영역: 백테스트 결과 · 실행 이력
 - e2e:
-  - `frontend/e2e/stories/dm.backtest-result.spec.ts` :: US-DM-04 저장한 전략을 백테스트하면 핵심 성과 지표 여섯 개와 자산 곡선이 보인다
+  - `frontend/e2e/stories/dm.backtest-result.spec.ts` :: US-DM-04 저장한 전략을 백테스트하면 핵심 성과 지표 일곱 개와 자산 곡선이 보인다
 
 수용 기준
 
@@ -108,8 +108,10 @@
   값을 받지 않았습니다."처럼 그 칸 이름을 말한다(새 전략·저장한 전략 화면 모두). 영문 진단(`API request
   failed …`)은 보이지 않는다.
 - Given 첫 세션부터 마지막 세션까지 1년 이상인 완료된 결과, Then "핵심 성과 지표"에 Total
-  return·Sharpe ratio·Maximum drawdown·Calmar ratio·Turnover·Closed trades 여섯 개가 값과 함께
-  보이고, 자산 곡선(Equity curve) 차트가 보인다. 1년 미만 실행은 Calmar ratio가 "N/A"와 "기간이
+  return·Sharpe ratio·Sharpe standard error·Maximum drawdown·Calmar ratio·Turnover·Closed trades
+  일곱 개가 값과 함께 보이고, 자산 곡선(Equity curve) 차트가 보인다. 샤프 바로 옆의 표준오차는 샤프
+  점추정이 운만으로 얼마나 흔들릴 수 있는지 보여 준다(이슈 #274). 롤링 샤프 차트는 126세션(6개월)
+  창이라 첫 126세션에는 값이 없다. 창이 21세션이면 연 표준오차가 약 3.5라 차트가 대부분 잡음이었다. 1년 미만 실행은 Calmar ratio가 "N/A"와 "기간이
   1년보다 짧아 연율로 바꾸지 않습니다"를 보인다. 지표 이름 옆의 쉬운 한글 뜻은 US-DM-08이 지킨다.
 - Given OOS 시작일을 종료일 1년 안쪽으로 둔 실행, Then 결과의 지표 표에서 OOS 구간의 cagr·calmar
   칸은 값 대신 "N/A"와 "기간이 1년보다 짧아 연율로 바꾸지 않습니다"를 보이고, 총수익률은 값으로 보인다.
@@ -236,10 +238,12 @@
 
 수용 기준
 
-- Given 완료된 백테스트 결과 화면, Then "핵심 성과 지표" 여섯 개마다 영어 지표 이름 옆에 쉬운
+- Given 완료된 백테스트 결과 화면, Then "핵심 성과 지표" 일곱 개마다 영어 지표 이름 옆에 쉬운
   한글 이름과 한 줄 뜻이 보인다(예: Sharpe ratio 옆에 "샤프 비율 흔들림 한 단위당 한국은행
   기준금리보다 얼마나 더 벌었는지입니다."). 샤프·소르티노는 한국은행 기준금리를 넘는 수익으로 재므로
   뜻 문장이 그 기준을 말한다. 예금처럼 기준금리만큼 버는 곡선은 샤프가 0 근처다(이슈 #274).
+  Sharpe standard error 옆에는 "샤프 비율 오차"와, 샤프 ± 이 값의 2배가 대략 95% 범위이며 독립·정규
+  가정의 근사라 실제로는 이보다 크다는 뜻 문장이 보인다.
 - 실행 설정 채우기: Given 저장한 전략과 비어 있는 실행 설정, When 요약 띠의 "실행 설정 채우기"를 눌러
   기간·유니버스를 정하고 벤치마크 종목을 넣으면, Then "백테스트"가 열려 결과 화면까지 간다.
 - Given 벤치마크를 정해 돌린 완료된 결과 화면, When "AI에게 결과 묻기"를 눌러 열린 "AI 어시스턴트"

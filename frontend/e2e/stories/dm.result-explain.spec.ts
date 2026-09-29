@@ -72,6 +72,13 @@ test(
     await expect(cell("Sharpe ratio")).toContainText(
       "샤프 비율 흔들림 한 단위당 한국은행 기준금리보다 얼마나 더 벌었는지입니다.",
     );
+    // 샤프 옆의 표준오차는 95% 범위 읽는 법과 근사의 한계를 함께 말한다(이슈 #274).
+    await expect(cell("Sharpe standard error")).toContainText(
+      "샤프 비율 오차 샤프 비율이 운만으로 얼마나 달라질 수 있는지입니다.",
+    );
+    await expect(cell("Sharpe standard error")).toContainText(
+      "실제로는 이보다 큽니다.",
+    );
     await expect(cell("Maximum drawdown")).toContainText(
       "최대 낙폭 가장 높았던 때에서 가장 많이 떨어진 폭입니다.",
     );

@@ -63,8 +63,8 @@ const expectBacktestResultPresentation = async (page: Page) => {
   const highlights = result.getByRole("region", { name: "핵심 성과 지표" });
   const backgrounds = new Map<string, string>();
   const scenarios = [
-    { width: 1440, height: 900, colorScheme: "light", columns: 6 },
-    { width: 1440, height: 900, colorScheme: "dark", columns: 6 },
+    { width: 1440, height: 900, colorScheme: "light", columns: 7 },
+    { width: 1440, height: 900, colorScheme: "dark", columns: 7 },
     { width: 800, height: 900, colorScheme: "light", columns: 2 },
     { width: 800, height: 900, colorScheme: "dark", columns: 2 },
     { width: 520, height: 900, colorScheme: "light", columns: 1 },

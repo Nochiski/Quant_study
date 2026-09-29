@@ -5,7 +5,8 @@ from ._models import MetricCategory, MetricDefinition, MetricUnit
 # v2(#274): CAGR 연수를 달력 일수로 세고 1년 미만은 None으로 둔다. 구간 지표는 직전 세션이
 # 기준이다. v2 지표 집합에 total_taxes 포함(#281 V2-01).
 # v3(#274): 샤프·소르티노·롤링 샤프를 한국은행 기준금리 초과수익으로 잰다.
-REGISTRY_VERSION = "metric-registry-v3"
+# v4(#274): 샤프 표준오차 지표를 더하고 롤링 샤프 창을 21세션에서 126세션(6개월)으로 늘린다.
+REGISTRY_VERSION = "metric-registry-v4"
 
 
 class MetricRegistry:
@@ -47,6 +48,14 @@ def build_default_metric_registry() -> MetricRegistry:
         MetricDefinition("volatility", "Volatility", MetricCategory.RISK, percent, False, False),
         MetricDefinition(
             "sharpe", "Sharpe ratio", MetricCategory.RISK_ADJUSTED, ratio, True, True, version=2
+        ),
+        MetricDefinition(
+            "sharpe_standard_error",
+            "Sharpe standard error",
+            MetricCategory.RISK_ADJUSTED,
+            ratio,
+            None,
+            True,
         ),
         MetricDefinition(
             "sortino", "Sortino ratio", MetricCategory.RISK_ADJUSTED, ratio, True, True, version=2

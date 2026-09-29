@@ -207,8 +207,8 @@ test.describe("AI 어시스턴트", () => {
   );
 
   test(
-    "제안 카드를 미리 보고 적용한 뒤 적용 후 백테스트가 실행 화면까지 간다",
-    { tag: ["@story", "@US-DM-03"] },
+    "제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다",
+    { tag: ["@story", "@US-DM-03", "@US-DM-09"] },
     async ({ page }) => {
       await ensureProvider(page);
       await saveStrategyRevision(page, "B-05 제안 적용");
@@ -260,6 +260,15 @@ test.describe("AI 어시스턴트", () => {
         (line, index) => line !== beforeLines[index],
       );
       expect(changedLines).toEqual([`title: "${PROPOSED_TITLE}"`]);
+      await expectPhase(page, "검증 통과");
+
+      // 적용은 편집 이력의 격리된 한 단계다(SoT 편집 이력 행). 툴바 "실행 취소" 한 번이면 적용 전
+      // 원문 그대로라 저장된 리비전과 같아지고, "다시 실행"이 제안을 다시 넣는다(BACKLOG-009).
+      await page.getByRole("button", { name: "실행 취소" }).click();
+      expect(await currentSource(page)).toBe(before);
+      await expectPhase(page, "저장됨");
+      await page.getByRole("button", { name: "다시 실행" }).click();
+      expect(await currentSource(page)).toBe(applied);
       await expectPhase(page, "검증 통과");
 
       // "적용 후 백테스트": 문서가 제안 기준과 달라졌으므로 확인을 거쳐 덮어쓴다.

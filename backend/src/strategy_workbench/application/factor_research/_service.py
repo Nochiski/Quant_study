@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from strategy_workbench.domain.backtest.facade.environment import DEFAULT_MISSING_POLICY
+from dataclasses import replace
+
+from strategy_workbench.domain.backtest.facade.environment import (
+    DEFAULT_MISSING_POLICY,
+    ResearchWindowViolationError,
+    require_research_window,
+)
 from strategy_workbench.domain.factor.facade.analysis import analyze_factor_values
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorEvaluation,
@@ -15,6 +21,7 @@ from strategy_workbench.domain.factor.facade.planning import (
 from strategy_workbench.domain.factor.facade.registry import FactorRegistry
 from strategy_workbench.domain.factor.facade.validation import (
     FactorGraphValidation,
+    FactorValidationIssue,
     required_field_ids,
     validate_factor_graph,
 )
@@ -141,6 +148,15 @@ class FactorResearchService:
         )
         if not validation.valid:
             raise InvalidFactorRequestError(validation)
+        # 연구 구간 잠금(spec D1): 미리보기는 측정이라 봉인 구간을 읽기 전에 거절한다. 이 경로의
+        # 기존 422(`factor.graph.invalid`) 진단 안에 `run_environment.*` 코드를 그대로 싣는다.
+        try:
+            require_research_window(request.as_of_start, requested_by="factor.preview")
+        except ResearchWindowViolationError as error:
+            issue = FactorValidationIssue(error.code, None, "as_of_start", str(error))
+            raise InvalidFactorRequestError(
+                replace(validation, valid=False, issues=(*validation.issues, issue))
+            ) from error
         try:
             plan = compile_factor_plan(
                 request.graph,

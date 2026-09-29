@@ -124,8 +124,10 @@ test(
     await page.keyboard.type("2024");
     await page.keyboard.press("Control+Shift+Enter");
     await expect(oos).toBeFocused();
-    await expect(oos).toHaveAttribute("aria-invalid", "true");
+    // 치는 도중에는 오류를 띄우지 않고 실행만 막는다. 오류는 칸을 떠날 때 선다(아래, #270 P3-R2).
     await expect(backtest(page)).toBeDisabled();
+    await expect(oos).not.toHaveAttribute("aria-invalid", "true");
+    await expect(summary).not.toContainText("OOS 시작일 칸을 고치세요");
     await universe.click();
     await expect(oos).toHaveValue("");
     await expect(oos).toHaveAttribute("aria-invalid", "true");
@@ -147,6 +149,14 @@ test(
     await expect(oosIncomplete).toHaveCount(0);
     await expect(oos).not.toHaveAttribute("aria-invalid", "true");
     await expect(backtest(page)).toBeEnabled();
+    // 다 친 날짜를 고쳐 칠 때도 같다. 한 자리를 지우면 값이 빈 문자열이 되지만, 칸을 떠나기 전에는 오류를
+    // 띄우지 않고 실행만 막는다(#297 리뷰 P3-1).
+    await page.keyboard.press("Backspace");
+    await expect(oos).toHaveValue("");
+    await expect(backtest(page)).toBeDisabled();
+    await expect(oos).not.toHaveAttribute("aria-invalid", "true");
+    await universe.click();
+    await expect(oos).toHaveAttribute("aria-invalid", "true");
     // 덜 친 OOS 로는 시작 요청이 한 번도 나가지 않았다.
     expect(starts).toEqual([]);
     await expect(page).toHaveURL(/\/research\/strategies\/new/u);

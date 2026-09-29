@@ -7,7 +7,7 @@
  * 뜨고, 업그레이드 응답의 실행 설정을 사용자가 채운 뒤 저장과 백테스트까지 가는지를 본다. 변환 규칙과
  * 현재 버전 문자열은 backend 소유라 응답 값과 비교하고 frontend에 적지 않는다.
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,6 +81,32 @@ test(
     await expect(save(page)).toBeDisabled();
     await expect(backtest(page)).toBeDisabled();
 
+    // 코드 없는 실패(FastAPI 기본 배열 422)는 한글 문장과 접힌 서버 사유로만 보인다. 영문 진단(`API request
+    // failed …`)은 본문에 쓰지 않는다(#270). 실제 서버에서 이 모양을 끌어낼 입력이 없어 한 번만 가로챈다.
+    const rejectUpgrade = (route: Route) =>
+      route.fulfill({
+        status: 422,
+        json: {
+          detail: [
+            { type: "missing", loc: ["body", "source"], msg: "Field required" },
+          ],
+        },
+      });
+    await page.route("**/api/v1/strategy-documents/upgrade", rejectUpgrade);
+    await banner
+      .getByRole("button", { name: "현재 버전으로 업그레이드" })
+      .click();
+    const failure = banner.getByRole("alert");
+    await expect(failure).toContainText(
+      "업그레이드 요청이 실패했습니다. 원문은 그대로입니다.",
+    );
+    await expect(failure).not.toContainText("API request failed");
+    const reason = failure.getByRole("group");
+    await expect(reason).toContainText("서버 사유");
+    await expect(reason).toContainText("source: Field required");
+    await expect(reason).not.toHaveAttribute("open");
+    await page.unroute("**/api/v1/strategy-documents/upgrade", rejectUpgrade);
+
     const upgraded = await upgradeFromBanner(page);
     expect(upgraded.environment).not.toBeNull();
     expect(upgraded.compiled.schema_version).not.toBeNull();
@@ -99,7 +125,20 @@ test(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
     );
     await expect(backtest(page)).toBeDisabled();
-    await banner.getByRole("button", { name: "실행 설정에 채우기" }).click();
+    // 채우지 않고 저장하면 옛 값을 되찾을 길이 없다는 것을 미리 알린다(#267 DEFECT-3).
+    await expect(banner).toContainText(
+      "채우지 않고 저장하거나 이 화면을 떠나면 이 실행 설정은 다시 볼 수 없습니다.",
+    );
+    // 실행 취소로 옛 글로 돌아갔다가 다시 실행하면 채우기도 돌아온다(#267 DEFECT-1).
+    const fill = banner.getByRole("button", { name: "실행 설정에 채우기" });
+    await page.getByRole("button", { name: "실행 취소", exact: true }).click();
+    await expect(
+      banner.getByRole("button", { name: "현재 버전으로 업그레이드" }),
+    ).toBeVisible();
+    await expect(fill).toHaveCount(0);
+    await page.getByRole("button", { name: "다시 실행", exact: true }).click();
+    expect(await currentSource(page)).toBe(upgraded.source);
+    await fill.click();
     await expect(banner).toContainText("옛 문서의 실행 설정을 채웠습니다.");
     await expect(summary).toContainText(upgraded.environment!.universe_id);
 

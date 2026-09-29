@@ -2847,7 +2847,7 @@ describe("backtest from the editor (P3-05)", () => {
     const alert = await screen.findByRole("alert");
     // 거절이 가리킨 칸(`field`)을 실행 설정의 칸 이름으로 말한다.
     expect(alert).toHaveTextContent(
-      "백테스트 시작 실패: 서버가 실행 설정의 초기 자본 칸 값을 받지 않았습니다. 그 칸을 고친 뒤 다시 시작하세요.",
+      "백테스트 시작 실패: 서버가 실행 설정의 초기 자본 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
     );
     expect(alert).not.toHaveTextContent("API request failed");
     expect(alert).not.toHaveTextContent("status=422");

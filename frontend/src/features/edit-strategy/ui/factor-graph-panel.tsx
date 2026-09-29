@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { t } from "../../../shared/config";
-import { Badge } from "../../../shared/ui";
+import { Badge, FailureNotice } from "../../../shared/ui";
 import type { DocumentDiagnostic } from "../model/document-state";
 import {
   projectFactorGraphs,
@@ -59,7 +59,7 @@ const graphDiagnostics = (diagnostics: DocumentDiagnostic[]) =>
   );
 
 const stateMessage = (
-  state: Exclude<FactorGraphProjection, { status: "ready" }>,
+  state: Exclude<FactorGraphProjection, { status: "ready" | "error" }>,
 ): string => {
   if (state.status === "blocked") return t(`plan.blocked.${state.reason}`);
   if (state.status === "incompatible") {
@@ -67,7 +67,6 @@ const stateMessage = (
       .replace("{expected}", state.expected)
       .replace("{actual}", state.actual ?? "—");
   }
-  if (state.status === "error") return `${t("plan.error")} (${state.message})`;
   return t(`plan.${state.status}`);
 };
 
@@ -84,7 +83,11 @@ const GraphState = ({
   return (
     <section className="factor-graph__state" aria-label={t("graph.title")}>
       <strong>{t("graph.title")}</strong>
-      <p role="status">{stateMessage(state)}</p>
+      {state.status === "error" ? (
+        <FailureNotice message={t("plan.error")} reason={state.reason} />
+      ) : (
+        <p role="status">{stateMessage(state)}</p>
+      )}
       {relevant.length > 0 ? (
         <ul className="factor-graph__diagnostics">
           {relevant.map((diagnostic, index) => (

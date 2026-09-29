@@ -140,6 +140,42 @@ describe("run 상세의 실행 설정", () => {
       .closest("div")!;
     expect(row).toHaveTextContent("zero");
   });
+
+  it("지금 스키마에 없는 기록 키도 스키마 칸 뒤에 원문으로 보인다(#251)", async () => {
+    // 스키마가 칸을 빼거나 이름을 바꾼 뒤 연 옛 run. run 기록은 실행 설정의 유일한 사본이라 숨기면 값을 잃는다.
+    const base = result();
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          manifest: {
+            ...base.manifest,
+            environment: {
+              ...base.manifest.environment,
+              borrow_bps: 40,
+            } as typeof base.manifest.environment,
+          },
+        }}
+        environmentFields={FIELDS}
+      />,
+    );
+    const user = userEvent.setup();
+    const drawer = screen.getByRole("group", {
+      name: "Manifest · 데이터 경고 · 재현성 정보",
+    });
+    await user.click(
+      within(drawer).getByText("Manifest · 데이터 경고 · 재현성 정보"),
+    );
+    const group = within(drawer).getByRole("group", { name: "실행 설정" });
+    const labels = within(group)
+      .getAllByRole("term")
+      .map((term) => term.textContent);
+    // 스키마 칸이 먼저, 기록에만 있는 키는 그 뒤, 해시가 맨 끝이다.
+    expect(labels.slice(-2)).toEqual(["borrow_bps", "실행 설정 hash"]);
+    expect(
+      within(group).getByText("borrow_bps", { exact: true }).closest("div"),
+    ).toHaveTextContent("40");
+  });
 });
 
 describe("run 상세의 데이터 경고", () => {

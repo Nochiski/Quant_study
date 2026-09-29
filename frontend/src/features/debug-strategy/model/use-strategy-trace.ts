@@ -3,11 +3,12 @@ import { useCallback, useMemo, useState } from "react";
 
 import {
   ApiRequestError,
+  failureReason,
   strategyWorkbenchApi,
   type StrategyTraceRequest,
   type StrategyTraceResponse,
 } from "../../../shared/api";
-import { tOptional } from "../../../shared/config";
+import { t, tOptional } from "../../../shared/config";
 import {
   prepareStrategyTrace,
   responseMatchesStrategyTrace,
@@ -31,7 +32,7 @@ export type StrategyTraceState =
   | ({ kind: "loading" } & RequestOwned)
   | ({ kind: "cancelled" } & RequestOwned)
   | ({ kind: "discarded" } & RequestOwned)
-  | ({ kind: "error"; message: string } & RequestOwned)
+  | ({ kind: "error"; message: string; reason: string | null } & RequestOwned)
   | ({
       kind: "success";
       response: StrategyTraceResponse;
@@ -184,22 +185,15 @@ const fetchTraceBundle = async (
 };
 
 /**
- * 추적 요청 오류 문구: backend 422 detail의 `code`에 번역(`trace.error.<code>`)이 있으면 그것을, 없으면 detail
- * 원문(Phase 1 감사 위험 5b: `trace.strategy.requires_upgrade`가 원문으로 노출됐다 — backtest 경로의
- * `backtest.error.<code>`와 같은 규약).
+ * 추적 요청 오류의 본문: backend detail의 `code`에 번역(`trace.error.<code>`)이 있으면 그것을, 없으면 일반
+ * 문구를 쓴다(Phase 1 감사 위험 5b — backtest 경로의 `backtest.error.<code>`와 같은 규약). 서버 원문은
+ * 본문에 넣지 않고 접힌 서버 사유(`failureReason`)로만 보인다(#270). 어느 칸·어느 기능인지 알려 주던
+ * `{detail}` 자리(backlog 17)도 그래서 번역에서 뺐다.
  */
-export const traceErrorMessage = (error: unknown): string => {
-  if (!(error instanceof ApiRequestError))
-    return error instanceof Error ? error.message : String(error);
-  const translated =
-    error.code === undefined ? null : tOptional(`trace.error.${error.code}`);
-  if (translated === null) return error.detail ?? error.message;
-  // 번역이 `{detail}`을 두면 backend 원문(어느 필드·어느 기능인지)을 그 자리에 넣는다(backlog 17). 슬롯은
-  // detail이 `message`를 보장하는 코드(`trace.request.invalid`·`trace.capability.unsupported`)에만 둔다 —
-  // `trace.engine.incompatible`은 `code`+`compatibility`뿐이라 슬롯이 있으면 프론트 디버그 문자열이 들어간다
-  // (#149 리뷰 P2-1). 그래도 detail이 없으면 슬롯을 비운다.
-  return translated.replace("{detail}", error.detail ?? "").replace(/:\s*$/, ".");
-};
+export const traceErrorMessage = (error: unknown): string =>
+  (error instanceof ApiRequestError && error.code !== undefined
+    ? tOptional(`trace.error.${error.code}`)
+    : null) ?? t("trace.error.request");
 
 /**
  * Observes one exact trace query. The query cache owns REST data while this hook owns only the
@@ -266,6 +260,7 @@ export const useStrategyTrace = (
             kind: "error",
             ...requestOwner,
             message: traceErrorMessage(query.error),
+            reason: failureReason(query.error),
           };
     return query.data === undefined
       ? null

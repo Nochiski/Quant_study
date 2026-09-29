@@ -137,10 +137,6 @@
   margin: 0;
 }
 
-.strategy-debugger__state[role="alert"] {
-  color: var(--status-error);
-}
-
 .strategy-debugger__table-wrap {
   min-width: 100%;
   overflow: auto;

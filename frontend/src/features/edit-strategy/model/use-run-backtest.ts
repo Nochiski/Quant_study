@@ -4,7 +4,7 @@ import {
   useStartBacktest,
   type BacktestRunSpec,
 } from "../../../entities/backtest";
-import { ApiRequestError } from "../../../shared/api";
+import { ApiRequestError, failureReason } from "../../../shared/api";
 import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
@@ -142,14 +142,7 @@ export const useRunBacktest = (
           ...snapshot,
           status: {
             kind: "failed",
-            // `ApiRequestError.message` 는 개발자 진단(`API request failed: …`)이라 쓰지 않는다. 서버가
-            // 보낸 사유만 싣고, 응답이 없던 실패(네트워크 등)는 그 오류 문장을 진단으로 남긴다.
-            detail:
-              error instanceof ApiRequestError
-                ? (error.detail ?? error.diagnostic ?? null)
-                : error instanceof Error
-                  ? error.message
-                  : String(error),
+            detail: failureReason(error),
             code:
               error instanceof ApiRequestError ? (error.code ?? null) : null,
             field:

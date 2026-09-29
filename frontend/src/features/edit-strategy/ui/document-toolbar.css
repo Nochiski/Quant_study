@@ -48,7 +48,7 @@
   word-break: keep-all;
 }
 
-/* 오류 문장은 버튼 줄 아래 한 줄을 통째로 쓴다. 글자색·줄바꿈은 `BacktestRejection` 이 정한다. */
+/* 오류 문장은 버튼 줄 아래 한 줄을 통째로 쓴다. 글자색·줄바꿈은 `FailureNotice` 가 정한다. */
 .doc-toolbar__error {
   flex-basis: 100%;
 }

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -280,10 +281,7 @@ describe("backtest run settings", () => {
   // 실행돼 사용자가 원한 표본 밖 측정이 아무 표시 없이 사라진다. 비운 칸은 그대로 통과한다(선택 칸).
   it("blocks a half-typed OOS start instead of silently running without the OOS window", () => {
     expect(
-      buildBacktestRunOptions(
-        { ...DEFAULT_BACKTEST_RUN_SETTINGS, oosStartIncomplete: true },
-        VALID,
-      ),
+      buildBacktestRunOptions(DEFAULT_BACKTEST_RUN_SETTINGS, VALID, true),
     ).toEqual({ valid: false, options: null, errors: ["oos_incomplete"] });
     expect(
       buildBacktestRunOptions(DEFAULT_BACKTEST_RUN_SETTINGS, VALID).options
@@ -684,6 +682,88 @@ describe("run environment panel", () => {
     expect(requestBody()).toBeNull();
   });
 
+  // #270 P3-R2: 치는 도중(키를 뗄 때)의 덜 친 날짜는 실행만 막고, 칸 아래·요약 띠·오류 목록은 칸을 떠날 때 보인다.
+  it("blocks the run while an OOS date is half typed but shows the error only once the field is left", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    expect(requestBody()).not.toBeNull();
+    const oos = screen.getByLabelText(/^OOS 시작일/);
+    // jsdom 은 날짜 칸을 자리별로 채우지 않는다. 브라우저가 연도만 친 칸에 세우는 `badInput` 을 흉내 낸다.
+    Object.defineProperty(oos, "validity", {
+      configurable: true,
+      value: { badInput: true },
+    });
+    const incomplete = "연·월·일까지 모두 올바르게 입력하세요.";
+
+    fireEvent.keyUp(oos);
+    expect(requestBody()).toBeNull();
+    expect(oos).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText(incomplete, { exact: false })).toBeNull();
+
+    fireEvent.blur(oos);
+    expect(requestBody()).toBeNull();
+    expect(oos).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getAllByText(incomplete, { exact: false })).not.toHaveLength(
+      0,
+    );
+  });
+
+  // #297 리뷰 P3-1: 다 친 날짜를 고쳐 치면 값이 빈 문자열로 바뀌며 change 가 난다. 그것도 칸 안에서 난 일이라
+  // 실행만 막고, 오류는 칸을 떠날 때 선다.
+  it("keeps the error hidden while a whole OOS date is being retyped", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const oos = screen.getByLabelText(/^OOS 시작일/);
+    await user.type(oos, "2024-01-02");
+    expect(requestBody()).not.toBeNull();
+    // Backspace 한 번으로 한 자리가 빈 날짜 칸: 값은 빈 문자열, `badInput` 은 참이다.
+    Object.defineProperty(oos, "validity", {
+      configurable: true,
+      value: { badInput: true },
+    });
+    fireEvent.change(oos, { target: { value: "" } });
+    expect(requestBody()).toBeNull();
+    expect(oos).not.toHaveAttribute("aria-invalid");
+    expect(
+      screen.queryByText("연·월·일까지 모두 올바르게 입력하세요.", {
+        exact: false,
+      }),
+    ).toBeNull();
+
+    fireEvent.blur(oos);
+    expect(oos).toHaveAttribute("aria-invalid", "true");
+  });
+
+  // #297 재리뷰 P2-1: 실행 설정 날짜 칸은 필수라 빈 값 자체가 오류다. 칸 안에서 고쳐 치는 도중에도 "값을
+  // 정하세요."가 아니라 날짜 문장이 서고, 요약 띠도 같은 원인을 말한다.
+  it("names the date problem, not an empty field, while a start date is retyped in place", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const start = screen.getByLabelText(/^시작일/);
+    // Backspace 한 번으로 한 자리가 빈 날짜 칸: 값은 빈 문자열, `badInput` 은 참이다.
+    Object.defineProperty(start, "validity", {
+      configurable: true,
+      value: { badInput: true },
+    });
+    const date = "연·월·일을 모두 올바르게 입력하세요. 예: 2021-01-01";
+    const blocked = `실행 설정의 시작일 칸을 고치세요: ${date}`;
+
+    fireEvent.change(start, { target: { value: "" } });
+    fireEvent.keyUp(start);
+    expect(requestBody()).toBeNull();
+    expect(start).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText(date)).toBeInTheDocument();
+    expect(screen.queryByText("값을 정하세요.")).toBeNull();
+    expect(screen.getByTestId("blocked")).toHaveTextContent(blocked);
+
+    fireEvent.blur(start);
+    expect(screen.getByText(date)).toBeInTheDocument();
+    expect(screen.getByTestId("blocked")).toHaveTextContent(blocked);
+  });
+
   it("says the date is incomplete when a remembered value is not a whole date", async () => {
     localStorage.setItem(
       `${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`,
@@ -866,6 +946,10 @@ describe("backtest run actions", () => {
       expect(alert).toHaveTextContent(
         "동일 설정으로 다시 실행하지 못했습니다: 서버가 실행 설정의 수수료 칸 값을 받지 않았습니다.",
       ),
+    );
+    // 결과 화면에는 실행 설정 패널이 없다 — 문장이 고칠 곳을 말한다(#270 P3-R3).
+    expect(alert).toHaveTextContent(
+      "전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
     );
     expect(alert).not.toHaveTextContent("API request failed");
     const reason = within(alert).getByRole("group");

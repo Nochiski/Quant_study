@@ -162,24 +162,29 @@ const MetricCell = ({
 
 /**
  * 실행된 실행 설정의 행. 칸 목록·순서·이름·단위·enum 값 이름은 실행 설정 스키마에서 읽는다
- * (DEFECT-242-04). 스키마를 아직 못 읽었으면 기록된 키와 값을 그대로 보인다.
+ * (DEFECT-242-04). 스키마에 없는 기록 키(스키마를 아직 못 읽었거나, 그 뒤 스키마가 칸을 빼거나 이름을
+ * 바꿨다)는 그 뒤에 키와 값을 그대로 붙인다 — run 기록은 실행 설정의 유일한 사본이다(#251).
  */
 const environmentRows = (
   environment: BacktestRunResult["manifest"]["environment"],
   fields: readonly RunEnvironmentField[] | null,
 ): { key: string; label: string; value: string }[] => {
   const record = environment as unknown as Record<string, unknown>;
-  if (fields === null)
-    return Object.entries(record).map(([key, value]) => ({
-      key,
-      label: key,
-      value: value === null || value === undefined ? "—" : String(value),
-    }));
-  return fields.map((field) => ({
-    key: field.name,
-    label: runEnvironmentLabel(field),
-    value: runEnvironmentValueLabel(field, record[field.name]),
-  }));
+  const known = new Set(fields?.map((field) => field.name));
+  return [
+    ...(fields ?? []).map((field) => ({
+      key: field.name,
+      label: runEnvironmentLabel(field),
+      value: runEnvironmentValueLabel(field, record[field.name]),
+    })),
+    ...Object.entries(record)
+      .filter(([key]) => !known.has(key))
+      .map(([key, value]) => ({
+        key,
+        label: key,
+        value: value === null || value === undefined ? "—" : String(value),
+      })),
+  ];
 };
 
 export const BacktestRunDetail = ({

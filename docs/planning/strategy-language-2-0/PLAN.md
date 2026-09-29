@@ -895,8 +895,12 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
    스키마 기본값에서 시작한다 — 화면 동작은 저장값이 없을 때와 같다.
 2. **패널은 스키마를 그대로 그린다.** 필드 목록·순서·enum·기본값·범위(`minimum`·`exclusiveMinimum`·
    `maximum`)·단위(`x-unit`·`x-display-unit`)·설명 키·카탈로그를 스키마에서 읽고 필드 이름을 손으로 적지
-   않는다. `ratio`→`%` 는 표시만 백분율이고 요청·저장은 비율이다(참여율 10 ↔ 0.1). run 상세의 실행 기록도
-   같은 필드 모델(`entities/backtest` `runEnvironmentFields`)로 칸 이름·단위·enum 값 이름을 보인다
+   않는다. `ratio`→`%` 는 표시만 백분율이고 요청·저장은 비율이다(참여율 10 ↔ 0.1). 표시 단위 변환은 유효숫자
+   12자리로 반올림한다 — `0.1 × 100` 같은 부동소수 꼬리를 지우는 대신, 12자리를 넘는 옛 비율(예
+   `0.123456789012345`)은 업그레이드 채우기에서 `0.123456789012`가 되어 `environment_hash`가 옛 값과 갈린다.
+   실행 결과 차이는 무시할 만하고 채우기는 사용자가 확인하는 값이라 그대로 둔다(#251 DEFECT-242-05).
+   run 상세의 실행 기록도 같은 필드 모델(`entities/backtest` `runEnvironmentFields`)로 칸 이름·단위·enum
+   값 이름을 보인다
    (DEFECT-242-04). e2e 의 `REQUESTED_ENVIRONMENT` 는 요청 계약 단언이라 기본값을 손으로 적어 둔다. enum 은 select,
    숫자는 범위 검증이 붙은 입력, `format: date` 는 날짜 입력, `x-catalog: universe` 는 카탈로그 목록이 없어
    텍스트 입력이다(Form 의 universe 카탈로그 컨트롤과 같은 규칙).

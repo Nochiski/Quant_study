@@ -10,7 +10,12 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import fields
 from pathlib import Path
+
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec
+from strategy_workbench.domain.backtest.facade.trials import TRIAL_KEY_ROLES
 
 SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "strategy_workbench"
 
@@ -127,3 +132,28 @@ def test_nothing_reads_a_graph_missing_policy_attribute() -> None:
         "`graph.missing_policy` 속성을 읽는 코드가 있다 — "
         f"reads={offenders} (실행 설정의 missing 을 인자로 받아야 한다)"
     )
+
+
+def test_every_run_environment_field_is_classified_for_the_trial_key() -> None:
+    """검증 랩 spec D2: 칸을 더하는 PR 은 같은 PR 에서 시도 키 분류표(`_trial_key.py`)에 넣는다."""
+    assert set(TRIAL_KEY_ROLES) == {item.name for item in fields(RunEnvironment)}
+
+
+# 시도 키는 실행 요청에서 전략·실행 설정(과 해소된 파라미터 값)만 읽고 나머지 칸은 키 밖이다.
+# 요청 칸이 늘면 시도 키에 드는지 `_trial_key.py` 에서 정하고 이 목록을 고친다.
+_RUN_SPEC_FIELDS = {
+    "strategy",
+    "strategy_source",
+    "environment",
+    "core",
+    "initial_cash",
+    "benchmark_security_id",
+    "annualization_days",
+    "metric_windows",
+    "parameter_values",
+    "lineage_strategy_id",
+}
+
+
+def test_a_new_run_request_field_is_placed_inside_or_outside_the_trial_key() -> None:
+    assert {item.name for item in fields(BacktestRunSpec)} == _RUN_SPEC_FIELDS

@@ -1,7 +1,8 @@
 """run 기록 저장소 포트 (검증 랩 spec D3).
 
 run 의 목록·상태·요청은 이 저장소가 정본이다. 서비스는 상태가 바뀔 때(접수·시작·취소 요청·종결)만
-쓰고, 진행률 이벤트는 쓰지 않는다 — 진행 중 run 의 진행률은 서비스 메모리가 가진다.
+쓰고, 진행률 이벤트는 쓰지 않는다 — 진행 중 run 의 진행률은 서비스 메모리가 가진다. 같은 파일의 시도
+원장(`TrialLedgerPort`)도 이 저장소가 구현한다.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
 )
 
+from .trial_ledger import TrialLedgerPort
+
 
 class BacktestRunNotFoundError(KeyError):
     pass
@@ -29,9 +32,20 @@ class BacktestRunSummary:
     strategy_provenance: StrategyProvenance
 
 
-class BacktestRunRepositoryPort(Protocol):
-    def add(self, summary: BacktestRunSummary, request: BacktestRunSpec) -> None:
-        """접수한 run 을 접수 순서의 끝에 더한다. `request` 는 다시 제출할 수 있는 원본이다."""
+class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
+    def add(
+        self,
+        summary: BacktestRunSummary,
+        request: BacktestRunSpec,
+        *,
+        lineage_id: str | None,
+        trial_key: str,
+    ) -> None:
+        """접수한 run 을 접수 순서의 끝에 더한다. `request` 는 다시 제출할 수 있는 원본이다.
+
+        run 이 속한 계열(없으면 None)과 시도 키를 같은 트랜잭션으로 원장에 적는다 — 원장에 없는
+        run 이 생기면 N 이 조용히 줄어든다.
+        """
         ...
 
     def update(self, state: BacktestRunState) -> None:

@@ -1314,6 +1314,9 @@ const ko = {
   "backtest.error.backtest.strategy.stale":
     "저장된 revision이 그사이 바뀌었습니다. 전략을 다시 연 뒤 시작하세요.",
   "backtest.error.backtest.strategy.requires_upgrade": "저장된 이전 schema revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  // 계열 합치기 거절(검증 랩 V1-05). 화면은 V5-03 이 붙인다.
+  "backtest.error.backtest.lineage.already_merged":
+    "두 전략은 이미 같은 시도 계열입니다. 합칠 것이 없습니다.",
   "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다: {detail}",
   "trace.error.trace.engine.incompatible":
@@ -3046,6 +3049,8 @@ export const messages = {
     "backtest.error.backtest.strategy.stale":
       "The saved revision changed in the meantime. Reopen the strategy, then start again.",
     "backtest.error.backtest.strategy.requires_upgrade": "A stored older-schema revision cannot run. Upgrade it and save a new revision first.",
+    "backtest.error.backtest.lineage.already_merged":
+      "The two strategies are already one trial lineage. There is nothing to merge.",
     "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
     "trace.error.trace.request.invalid": "The trace request is invalid: {detail}",
     "trace.error.trace.engine.incompatible":

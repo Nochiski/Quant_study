@@ -299,6 +299,10 @@ class BacktestRunSpec:
     # 박으므로 실행 지문과 매니페스트는 해소된 값을 싣는다. 저장 리비전의 provenance·`spec_hash` 는
     # 그대로다.
     parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
+    # 인라인 초안이 속한 계열(편집 중인 전략의 `strategy_id`, 검증 랩 spec D2). 저장 리비전
+    # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
+    # 넣지 않는다.
+    lineage_strategy_id: str | None = None
 
     def __post_init__(self) -> None:
         # NaN 은 `<= 0` 비교를 빠져나가고 inf 는 양수라, 유한성을 따로 보지 않으면 접수된 뒤

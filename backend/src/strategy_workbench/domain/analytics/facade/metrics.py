@@ -1,6 +1,7 @@
 from strategy_workbench.domain.analytics._base_rate import BASE_RATE_CONFIRMED_ON
 from strategy_workbench.domain.analytics._calculation import (
     compute_analytics,
+    session_sharpe,
     unavailable_metric_values,
 )
 from strategy_workbench.domain.analytics._models import (
@@ -43,5 +44,6 @@ __all__ = [
     "TradeOutcome",
     "build_default_metric_registry",
     "compute_analytics",
+    "session_sharpe",
     "unavailable_metric_values",
 ]

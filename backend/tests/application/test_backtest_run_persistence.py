@@ -159,7 +159,14 @@ def test_cancel_and_failure_transitions_survive_reopening_the_file(
 
 
 class _RefusingAdd(SQLiteBacktestRunRepository):
-    def add(self, summary: BacktestRunSummary, request: BacktestRunSpec) -> None:
+    def add(
+        self,
+        summary: BacktestRunSummary,
+        request: BacktestRunSpec,
+        *,
+        lineage_id: str | None,
+        trial_key: str,
+    ) -> None:
         raise ResearchStorageError(f"disk full — run_id={summary.run.run_id}")
 
 

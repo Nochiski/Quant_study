@@ -26,6 +26,7 @@ from strategy_workbench.domain.strategy._canonical import (
     canonical_payload_json,
     canonical_strategy_json,
     canonical_strategy_payload,
+    strategy_semantic_hash,
     strategy_spec_hash,
 )
 from strategy_workbench.domain.strategy._models import (
@@ -113,5 +114,6 @@ __all__ = [
     "normalized_parameter_value",
     "parameter_value_allowed",
     "resolve_parameter_values",
+    "strategy_semantic_hash",
     "strategy_spec_hash",
 ]

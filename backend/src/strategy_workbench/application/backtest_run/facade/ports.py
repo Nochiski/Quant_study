@@ -24,6 +24,10 @@ from strategy_workbench.application.backtest_run.ports.outgoing.run_repository i
     BacktestRunRepositoryPort,
     BacktestRunSummary,
 )
+from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger import (
+    TrialLedgerRecords,
+    TrialLineageAlreadyMergedError,
+)
 
 __all__ = [
     "ArtifactCommit",
@@ -43,5 +47,7 @@ __all__ = [
     "MarketBarRecord",
     "ProgressCallback",
     "RunCancelledError",
+    "TrialLedgerRecords",
+    "TrialLineageAlreadyMergedError",
     "UniverseMembershipRecord",
 ]

@@ -55,8 +55,10 @@ def test_fingerprint_ignores_how_the_strategy_was_referenced() -> None:
     )
     draft = replace(legacy, strategy_source=InlineDraft(strategy, "inline_draft", "b" * 64))
     other_draft = replace(legacy, strategy_source=InlineDraft(strategy, "inline_draft", "c" * 64))
+    # 인라인 초안의 계열도 출처 정보다(검증 랩 spec D2).
+    in_lineage = replace(draft, lineage_strategy_id="s1")
 
-    assert len({_fingerprint(s) for s in (legacy, saved, draft, other_draft)}) == 1
+    assert len({_fingerprint(s) for s in (legacy, saved, draft, other_draft, in_lineage)}) == 1
     assert _fingerprint(replace(legacy, initial_cash=1.0)) != _fingerprint(legacy)
 
 

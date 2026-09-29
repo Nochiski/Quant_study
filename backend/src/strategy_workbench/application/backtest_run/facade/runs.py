@@ -13,6 +13,9 @@ from strategy_workbench.application.backtest_run.ports.outgoing.run_repository i
     BacktestRunNotFoundError,
     BacktestRunSummary,
 )
+from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger import (
+    TrialLineageAlreadyMergedError,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
     BacktestRunSpec,
@@ -27,6 +30,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategySource,
     StrategySourceKind,
 )
+from strategy_workbench.domain.backtest.facade.trials import TrialLedger, TrialPreview
 
 __all__ = [
     "BacktestParameterValueError",
@@ -52,4 +56,7 @@ __all__ = [
     "StrategyReferenceNotFoundError",
     "StrategySource",
     "StrategySourceKind",
+    "TrialLedger",
+    "TrialLineageAlreadyMergedError",
+    "TrialPreview",
 ]

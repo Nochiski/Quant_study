@@ -543,6 +543,10 @@ export type BacktestRunSpec = {
    */
   initial_cash?: number;
   /**
+   * Lineage Strategy Id
+   */
+  lineage_strategy_id?: string | null;
+  /**
    * Metric Windows
    */
   metric_windows?: Array<MetricWindow>;
@@ -763,6 +767,34 @@ export type BinaryNode = {
  * BinaryOperator
  */
 export type BinaryOperator = "add" | "subtract" | "multiply" | "divide";
+
+/**
+ * BlockedTrialAttempt
+ *
+ * 봉인 겹침으로 거절한 실행 요청(봉인 원장의 "차단한 시도"). 결과가 없어 N 에 들지 않는다.
+ */
+export type BlockedTrialAttempt = {
+  /**
+   * Blocked At
+   */
+  blocked_at: string;
+  /**
+   * Lineage Id
+   */
+  lineage_id: string | null;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Start
+   */
+  start: string;
+  /**
+   * Trial Key
+   */
+  trial_key: string;
+};
 
 /**
  * CandidateDecision
@@ -4604,6 +4636,29 @@ export type StrategyIdentity = {
 };
 
 /**
+ * StrategyNotFoundDetail
+ */
+export type StrategyNotFoundDetail = {
+  /**
+   * Code
+   */
+  code: "strategy.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyNotFoundResponse
+ *
+ * 시도 원장 경로의 계열(저장된 전략)이 없다.
+ */
+export type StrategyNotFoundResponse = {
+  detail: StrategyNotFoundDetail;
+};
+
+/**
  * StrategyOperatorCatalog
  *
  * 그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.
@@ -5383,6 +5438,154 @@ export type TraceUnprocessableResponse = {
  */
 export type TraceValueStatus =
   "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
+
+/**
+ * TrialGroup
+ *
+ * 같은 시도 키의 실행들. 대표 실행이 없으면 이 시도는 N 에 들지 않는다.
+ */
+export type TrialGroup = {
+  /**
+   * Metric Registry Version
+   */
+  metric_registry_version?: string | null;
+  /**
+   * Representative Run Id
+   */
+  representative_run_id?: string | null;
+  /**
+   * Representative Sharpe
+   */
+  representative_sharpe?: number | null;
+  /**
+   * Runs
+   */
+  runs: Array<TrialRun>;
+  /**
+   * Trial Key
+   */
+  trial_key: string;
+};
+
+/**
+ * TrialLedger
+ *
+ * 계열 하나의 원장.
+ *
+ * `lineage_id` 는 합친 뒤 남은 계열이고 `merged_lineage_ids` 는 거기 합쳐진 계열이다.
+ */
+export type TrialLedger = {
+  /**
+   * Blocked
+   */
+  blocked: Array<BlockedTrialAttempt>;
+  /**
+   * Lineage Id
+   */
+  lineage_id: string;
+  /**
+   * Merged Lineage Ids
+   */
+  merged_lineage_ids: Array<string>;
+  /**
+   * Trial Count
+   */
+  trial_count: number;
+  /**
+   * Trials
+   */
+  trials: Array<TrialGroup>;
+};
+
+/**
+ * TrialLineageAlreadyMergedDetail
+ */
+export type TrialLineageAlreadyMergedDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.lineage.already_merged";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TrialLineageAlreadyMergedResponse
+ */
+export type TrialLineageAlreadyMergedResponse = {
+  detail: TrialLineageAlreadyMergedDetail;
+};
+
+/**
+ * TrialLineageMergeRequest
+ *
+ * 합칠 계열(`source_strategy_id`). 경로의 계열이 남는다.
+ */
+export type TrialLineageMergeRequest = {
+  /**
+   * Source Strategy Id
+   */
+  source_strategy_id: string;
+};
+
+/**
+ * TrialPreview
+ *
+ * 실행 전 미리 계산 — 이 요청이 결과를 내면 N 에 새로 드는가.
+ *
+ * 계열이 없으면 N 에 들지 않는다.
+ */
+export type TrialPreview = {
+  /**
+   * Lineage Id
+   */
+  lineage_id: string | null;
+  /**
+   * New Trial
+   */
+  new_trial: boolean;
+  reason: TrialPreviewReason;
+  /**
+   * Trial Count
+   */
+  trial_count: number;
+  /**
+   * Trial Count After
+   */
+  trial_count_after: number;
+  /**
+   * Trial Key
+   */
+  trial_key: string;
+};
+
+/**
+ * TrialPreviewReason
+ */
+export type TrialPreviewReason = "new_trial" | "recheck" | "no_lineage";
+
+/**
+ * TrialRun
+ */
+export type TrialRun = {
+  /**
+   * Created At
+   */
+  created_at: string;
+  role: TrialRunRole;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  status: RunStatus;
+};
+
+/**
+ * TrialRunRole
+ */
+export type TrialRunRole = "counted" | "recheck" | "pending" | "no_result";
 
 /**
  * TurnAcceptedView
@@ -6278,6 +6481,41 @@ export type StartBacktestResponses = {
 
 export type StartBacktestResponse =
   StartBacktestResponses[keyof StartBacktestResponses];
+
+export type PreviewBacktestTrialData = {
+  body: BacktestRunSpec;
+  path?: never;
+  query?: never;
+  url: "/api/v1/backtests/trial-preview";
+};
+
+export type PreviewBacktestTrialErrors = {
+  /**
+   * The immutable strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The saved revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded backtest preflight or request-body diagnostic
+   */
+  422: BacktestUnprocessableResponse;
+};
+
+export type PreviewBacktestTrialError =
+  PreviewBacktestTrialErrors[keyof PreviewBacktestTrialErrors];
+
+export type PreviewBacktestTrialResponses = {
+  /**
+   * Successful Response
+   */
+  200: TrialPreview;
+};
+
+export type PreviewBacktestTrialResponse =
+  PreviewBacktestTrialResponses[keyof PreviewBacktestTrialResponses];
 
 export type GetBacktestStatusData = {
   body?: never;
@@ -7177,6 +7415,82 @@ export type GetStrategyDocumentResponses = {
 
 export type GetStrategyDocumentResponse =
   GetStrategyDocumentResponses[keyof GetStrategyDocumentResponses];
+
+export type GetTrialLedgerData = {
+  body?: never;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategies/{strategy_id}/trials";
+};
+
+export type GetTrialLedgerErrors = {
+  /**
+   * The strategy does not exist
+   */
+  404: StrategyNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetTrialLedgerError =
+  GetTrialLedgerErrors[keyof GetTrialLedgerErrors];
+
+export type GetTrialLedgerResponses = {
+  /**
+   * Successful Response
+   */
+  200: TrialLedger;
+};
+
+export type GetTrialLedgerResponse =
+  GetTrialLedgerResponses[keyof GetTrialLedgerResponses];
+
+export type MergeTrialLineageData = {
+  body: TrialLineageMergeRequest;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategies/{strategy_id}/trials/merge";
+};
+
+export type MergeTrialLineageErrors = {
+  /**
+   * The strategy does not exist
+   */
+  404: StrategyNotFoundResponse;
+  /**
+   * The two lineages are already one
+   */
+  409: TrialLineageAlreadyMergedResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type MergeTrialLineageError =
+  MergeTrialLineageErrors[keyof MergeTrialLineageErrors];
+
+export type MergeTrialLineageResponses = {
+  /**
+   * Successful Response
+   */
+  200: TrialLedger;
+};
+
+export type MergeTrialLineageResponse =
+  MergeTrialLineageResponses[keyof MergeTrialLineageResponses];
 
 export type CreateStrategyDocumentData = {
   body: SaveDocumentRequest;

@@ -233,6 +233,14 @@ def _risk_adjusted(
     return volatility, sharpe, sortino
 
 
+def session_sharpe(sharpe: float, annualization_days: int) -> float:
+    """연율화한 `sharpe` 지표를 세션 단위로 되돌린다 — `_risk_adjusted` 가 곱한 √A 를 나눈다.
+
+    실행마다 연환산 거래일이 달라도 같은 척도라 계열 시도의 대표 샤프로 쓴다(검증 랩 spec D2).
+    """
+    return sharpe / math.sqrt(annualization_days)
+
+
 def _drawdowns(points: tuple[AnalysisPoint, ...]) -> tuple[DrawdownPoint, ...]:
     peak = points[0].equity
     result: list[DrawdownPoint] = []

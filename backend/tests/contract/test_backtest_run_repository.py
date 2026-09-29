@@ -49,6 +49,10 @@ _SPEC = replace(
 )
 
 
+# 원장 행은 `test_trial_ledger_repository.py` 가 본다. 여기서는 run 기록만 본다.
+_NO_LINEAGE = {"lineage_id": None, "trial_key": "d" * 64}
+
+
 def _summary(run_id: str, *, strategy_id: str | None = None) -> BacktestRunSummary:
     return BacktestRunSummary(
         run=BacktestRunState(
@@ -96,7 +100,7 @@ _REQUESTS = {
 @pytest.mark.parametrize("kind", sorted(_REQUESTS))
 def test_the_accepted_request_survives_reopening_the_file(kind: str, tmp_path: Path) -> None:
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(_summary("run-1"), _REQUESTS[kind])
+    SQLiteBacktestRunRepository(path).add(_summary("run-1"), _REQUESTS[kind], **_NO_LINEAGE)
 
     assert SQLiteBacktestRunRepository(path).request("run-1") == _REQUESTS[kind]
 
@@ -104,7 +108,9 @@ def test_the_accepted_request_survives_reopening_the_file(kind: str, tmp_path: P
 def test_parameter_values_keep_their_types_through_the_file(tmp_path: Path) -> None:
     """`20 == 20.0 == True` 라 요청 `==` 로는 타입이 바뀐 것을 못 본다. 값마다 타입을 대조한다."""
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(_summary("run-1"), _REQUESTS["saved_revision"])
+    SQLiteBacktestRunRepository(path).add(
+        _summary("run-1"), _REQUESTS["saved_revision"], **_NO_LINEAGE
+    )
 
     restored = SQLiteBacktestRunRepository(path).request("run-1").parameter_values
     assert {key: (type(value), value) for key, value in restored.items()} == {
@@ -120,7 +126,9 @@ def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(
     path = tmp_path / "research.sqlite3"
     repository = SQLiteBacktestRunRepository(path)
     for run_id, strategy_id in (("run-1", "s-1"), ("run-2", None), ("run-3", "s-1")):
-        repository.add(_summary(run_id, strategy_id=strategy_id), _REQUESTS["saved_revision"])
+        repository.add(
+            _summary(run_id, strategy_id=strategy_id), _REQUESTS["saved_revision"], **_NO_LINEAGE
+        )
     completed = replace(
         _summary("run-3").run,
         status=RunStatus.COMPLETED,
@@ -159,7 +167,9 @@ def test_an_unknown_run_is_not_found(tmp_path: Path) -> None:
 
 def test_a_stored_failure_code_outside_the_vocabulary_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(_summary("run-1"), _REQUESTS["saved_revision"])
+    SQLiteBacktestRunRepository(path).add(
+        _summary("run-1"), _REQUESTS["saved_revision"], **_NO_LINEAGE
+    )
     with sqlite3.connect(path) as connection:
         connection.execute("UPDATE backtest_runs SET error_code = 'backtest.run.gone'")
 
@@ -176,7 +186,7 @@ def test_an_empty_file_is_claimed_once(tmp_path: Path) -> None:
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA application_id").fetchone() == (0x53575253,)
-        assert connection.execute("PRAGMA user_version").fetchone() == (1,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
 
 
 @pytest.mark.parametrize(
@@ -200,9 +210,9 @@ def test_a_file_owned_by_someone_else_is_refused(prepare: str, match: str, tmp_p
 @pytest.mark.parametrize(
     ("tamper", "match"),
     [
-        ("PRAGMA user_version = 2", "newer than this server"),
-        ("CREATE TABLE stray (x)", "does not match version 1"),
-        ("DROP INDEX backtest_runs_by_strategy", "does not match version 1"),
+        ("PRAGMA user_version = 3", "newer than this server"),
+        ("CREATE TABLE stray (x)", "does not match version 2"),
+        ("DROP INDEX trial_ledger_by_lineage", "does not match version 2"),
     ],
 )
 def test_a_future_or_edited_schema_is_refused(tamper: str, match: str, tmp_path: Path) -> None:

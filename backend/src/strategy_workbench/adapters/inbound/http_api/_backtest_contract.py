@@ -202,3 +202,34 @@ class BacktestResultNotReadyDetail:
 @dataclass(frozen=True)
 class BacktestResultNotReadyResponse:
     detail: BacktestResultNotReadyDetail
+
+
+@dataclass(frozen=True)
+class TrialLineageMergeRequest:
+    """합칠 계열(`source_strategy_id`). 경로의 계열이 남는다."""
+
+    source_strategy_id: Annotated[str, Field(min_length=1)]
+
+
+@dataclass(frozen=True)
+class TrialLineageAlreadyMergedDetail:
+    code: Literal["backtest.lineage.already_merged"]
+    message: str
+
+
+@dataclass(frozen=True)
+class TrialLineageAlreadyMergedResponse:
+    detail: TrialLineageAlreadyMergedDetail
+
+
+@dataclass(frozen=True)
+class StrategyNotFoundDetail:
+    code: Literal["strategy.not_found"]
+    message: str
+
+
+@dataclass(frozen=True)
+class StrategyNotFoundResponse:
+    """시도 원장 경로의 계열(저장된 전략)이 없다."""
+
+    detail: StrategyNotFoundDetail

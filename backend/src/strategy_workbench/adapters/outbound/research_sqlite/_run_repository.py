@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import ClassVar, cast
 
@@ -10,6 +10,8 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import d
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
+    TrialLedgerRecords,
+    TrialLineageAlreadyMergedError,
 )
 from strategy_workbench.application.strategy_design.facade.ports import Page, PageRequest
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -21,6 +23,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
     StrategySourceKind,
 )
+from strategy_workbench.domain.backtest.facade.trials import BlockedTrialAttempt, TrialLedgerEntry
 
 from ._errors import ResearchStorageError
 from ._request_codec import decode_request, encode_request
@@ -51,10 +54,17 @@ class SQLiteBacktestRunRepository:
     def close(self) -> None:
         self._database.close()
 
-    def add(self, summary: BacktestRunSummary, request: BacktestRunSpec) -> None:
+    def add(
+        self,
+        summary: BacktestRunSummary,
+        request: BacktestRunSpec,
+        *,
+        lineage_id: str | None,
+        trial_key: str,
+    ) -> None:
         run, provenance = summary.run, summary.strategy_provenance
         with self._database.transaction(write=True) as connection:
-            connection.execute(
+            inserted = connection.execute(
                 f"""
                 INSERT INTO backtest_runs ({_SUMMARY_COLUMNS}, request_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -71,6 +81,10 @@ class SQLiteBacktestRunRepository:
                     provenance.source_hash,
                     encode_request(request),
                 ),
+            )
+            connection.execute(
+                "INSERT INTO trial_ledger (accepted_order, lineage_id, trial_key) VALUES (?, ?, ?)",
+                (inserted.lastrowid, lineage_id, trial_key),
             )
 
     def update(self, state: BacktestRunState) -> None:
@@ -126,6 +140,107 @@ class SQLiteBacktestRunRepository:
             offset=page.offset,
             limit=page.limit,
         )
+
+    def record_trial_result(
+        self, run_id: str, *, session_sharpe: float | None, metric_registry_version: str
+    ) -> None:
+        with self._database.transaction(write=True) as connection:
+            updated = connection.execute(
+                """
+                UPDATE trial_ledger SET session_sharpe = ?, metric_registry_version = ?
+                WHERE accepted_order = (SELECT accepted_order FROM backtest_runs WHERE run_id = ?)
+                """,
+                (session_sharpe, metric_registry_version, run_id),
+            )
+            if updated.rowcount != 1:
+                raise BacktestRunNotFoundError(run_id)
+
+    def record_blocked_attempt(self, attempt: BlockedTrialAttempt) -> None:
+        with self._database.transaction(write=True) as connection:
+            connection.execute(
+                """
+                INSERT INTO sealed_window_blocks
+                    (blocked_at, lineage_id, trial_key, spec_hash, start)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime_text(attempt.blocked_at, field="sealed window block blocked_at"),
+                    attempt.lineage_id,
+                    attempt.trial_key,
+                    attempt.spec_hash,
+                    attempt.start.isoformat(),
+                ),
+            )
+
+    def trial_ledger(self, lineage_id: str) -> TrialLedgerRecords:
+        with self._database.transaction(write=False) as connection:
+            merges = _merges(connection)
+            root = _root(merges, lineage_id)
+            merged = tuple(source for source in merges if _root(merges, source) == root)
+            members = (root, *merged)
+            where = f"lineage_id IN ({', '.join('?' * len(members))})"
+            entries = connection.execute(
+                f"""
+                SELECT run_id, trial_key, status, created_at, updated_at, session_sharpe,
+                    metric_registry_version
+                FROM trial_ledger JOIN backtest_runs USING (accepted_order)
+                WHERE {where} ORDER BY accepted_order
+                """,
+                members,
+            ).fetchall()
+            blocked = connection.execute(
+                f"""
+                SELECT blocked_at, lineage_id, trial_key, spec_hash, start
+                FROM sealed_window_blocks WHERE {where} ORDER BY blocked_order
+                """,
+                members,
+            ).fetchall()
+        try:
+            return TrialLedgerRecords(
+                lineage_id=root,
+                merged_lineage_ids=merged,
+                entries=tuple(
+                    TrialLedgerEntry(
+                        run_id=row["run_id"],
+                        trial_key=row["trial_key"],
+                        status=RunStatus(row["status"]),
+                        created_at=datetime.fromisoformat(row["created_at"]),
+                        updated_at=datetime.fromisoformat(row["updated_at"]),
+                        session_sharpe=row["session_sharpe"],
+                        metric_registry_version=row["metric_registry_version"],
+                    )
+                    for row in entries
+                ),
+                blocked=tuple(
+                    BlockedTrialAttempt(
+                        blocked_at=datetime.fromisoformat(row["blocked_at"]),
+                        lineage_id=row["lineage_id"],
+                        trial_key=row["trial_key"],
+                        spec_hash=row["spec_hash"],
+                        start=date.fromisoformat(row["start"]),
+                    )
+                    for row in blocked
+                ),
+            )
+        except (TypeError, ValueError) as error:
+            raise ResearchStorageError(
+                f"stored trial ledger failed integrity validation — lineage_id={root}: {error}"
+            ) from error
+
+    def merge_lineages(self, source_id: str, target_id: str, *, merged_at: datetime) -> None:
+        with self._database.transaction(write=True) as connection:
+            merges = _merges(connection)
+            source_root, target_root = _root(merges, source_id), _root(merges, target_id)
+            if source_root == target_root:
+                raise TrialLineageAlreadyMergedError(
+                    "lineages are already one — "
+                    f"source_id={source_id} target_id={target_id} lineage_id={target_root}"
+                )
+            # 이미 다른 계열에 합쳐진 계열이면 남은 계열끼리 잇는다(한 계열은 한 번만 합쳐진다).
+            connection.execute(
+                "INSERT INTO lineage_merges (source_id, target_id, merged_at) VALUES (?, ?, ?)",
+                (source_root, target_root, datetime_text(merged_at, field="lineage merged_at")),
+            )
 
     def unfinished(self) -> tuple[BacktestRunState, ...]:
         with self._database.transaction(write=False) as connection:
@@ -185,6 +300,21 @@ def _summary(row: sqlite3.Row) -> BacktestRunSummary:
         raise ResearchStorageError(
             f"stored backtest run failed integrity validation — run_id={run_id}: {error}"
         ) from error
+
+
+def _merges(connection: sqlite3.Connection) -> dict[str, str]:
+    """합친 계열 → 합쳐 들어간 계열(합친 순)."""
+    rows = connection.execute(
+        "SELECT source_id, target_id FROM lineage_merges ORDER BY merge_order"
+    ).fetchall()
+    return {row["source_id"]: row["target_id"] for row in rows}
+
+
+def _root(merges: dict[str, str], lineage_id: str) -> str:
+    """합치기를 따라가 남은 계열. 합칠 때마다 남은 계열끼리 잇으므로 고리가 없다."""
+    while lineage_id in merges:
+        lineage_id = merges[lineage_id]
+    return lineage_id
 
 
 def _time_text(value: datetime, field: str, run_id: str) -> str:

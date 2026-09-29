@@ -82,6 +82,7 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
     assert accepted_request.json() == {
         **requested,
         "strategy": None,
+        "lineage_strategy_id": None,
         "environment": {
             "market": "KRX",
             "frequency": "daily",

@@ -108,11 +108,10 @@ class AppliedStage(StrEnum):
     `x-applied-stage`)과, 그래프 표현(파이프라인)이 필드를 보이는 단계(field metadata
     `stage`, runtime schema `x-stage`, P4-01)다. 필드는 적용되는 곳에 보인다: 자기
     `x-stage`, 없으면 자기 `x-applied-stage`, 없으면 가장 가까운 조상의 `x-stage` 다.
-    `DATA`·`EXECUTION` 은 실행 설정(`domain/backtest`)이 자기 제약 행에 붙이는 단계이고,
-    전략 문서에는 1.2 부터 해당 행이 없다.
+    `EXECUTION` 은 실행 설정(`domain/backtest`)이 자기 제약 행에 붙이는 단계이고, 전략
+    문서에는 1.2 부터 해당 행이 없다.
     """
 
-    DATA = "data"
     ELIGIBILITY = "eligibility"
     SIGNAL = "signal"
     PORTFOLIO = "portfolio"

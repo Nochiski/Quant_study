@@ -146,7 +146,8 @@ class FieldSpec:
     # dataset_profile 의 랙이 갈리는 경우다(price 원천의 market_cap·shares_outstanding, 이슈 #246).
     lag_sessions: int | None = None
     lag_basis: str | None = None
-    # 값이 행보다 늦게 공개되는 필드만 적는다 — 원천 relation 위의 그 공개일 식(LATEST PICK 원천).
+    # 값이 행보다 늦게 공개되는 필드만 적는다 — 원천 relation 의 공개일 열 이름(LATEST PICK 원천).
+    # 부팅 검사가 카탈로그 열과 이름으로 대조하므로 식은 쓰지 않는다.
     # 행은 원천의 `available_expr` 로 고르고, 이 날이 컷오프보다 늦으면 그 셀은 그때까지 결측이다.
     # 재무 TTM 은 창 안 분기가 정정 재제출로 행보다 늦게 접수되면 그날 완성된다(#238).
     available_expr: str | None = None
@@ -1052,11 +1053,13 @@ UNSUPPORTED_FIELDS: dict[str, str] = {
 
 SOURCE_BY_NAME: dict[str, SourceSpec] = {spec.name: spec for spec in SOURCE_SPECS}
 FIELD_BY_ID: dict[str, FieldSpec] = {spec.field_id: spec for spec in FIELD_SPECS}
-# 필드 공개일 열은 `_latest` 의 PICK 질의만 읽는다 — GRID 는 조용히 행 공개일로 보이고(look-ahead)
-# SUM 은 집계 질의가 깨진다. 그래서 선언 때 막는다(#300 리뷰 P3-3).
+# 필드 공개일 열은 LATEST 원천의 PICK 질의(`_latest`)만 읽는다 — GRID 는 조용히 행 공개일로
+# 보이고(look-ahead) SUM 은 집계 질의가 깨진다. 그래서 선언 때 막는다(#300 리뷰 P3-3·r2 P3-1).
 if _misplaced := [
     f.field_id
     for f in FIELD_SPECS
-    if f.available_expr is not None and SOURCE_BY_NAME[f.source].reduce is not Reduce.PICK
+    if f.available_expr is not None
+    and (SOURCE_BY_NAME[f.source].mode, SOURCE_BY_NAME[f.source].reduce)
+    != (SourceMode.LATEST, Reduce.PICK)
 ]:
     raise ValueError(f"available_expr needs a LATEST PICK source — fields={_misplaced}")

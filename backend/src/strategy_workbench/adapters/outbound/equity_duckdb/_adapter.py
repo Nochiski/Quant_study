@@ -657,7 +657,8 @@ class EquityDuckdbAdapter:
         """매크로 원천을 부팅 때 한 번 읽어 보고, 못 읽거나 요구하는 열이 없으면 뺄 사유를 돌려준다.
 
         매크로가 가리키는 parquet 가 빠졌거나 손상됐으면 `catalog_macro_unreadable`, 옛 카탈로그라
-        원천이 읽는 열(`required_columns`)이 없으면 `catalog_columns_missing` 으로 경고한다.
+        원천이 읽는 열(`required_columns` 와 그 원천 필드의 `available_expr`)이 없으면
+        `catalog_columns_missing` 으로 경고한다.
         읽어 보지 않고 두면 커버율 질의가 원시 duckdb 오류를 던져 `list_fields()` 전체가 죽는다
         (#233 리뷰 P2-1, #275 리뷰 P3-5). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
         """

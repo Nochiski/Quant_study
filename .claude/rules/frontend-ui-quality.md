@@ -23,6 +23,10 @@ paths:
   상단바로 칸을 끝까지 채우는 전략 편집기만 쓰지 않는다(#261).
 - 버튼·입력·표·탭은 semantic role과 accessible name을 갖는다. 키보드 조작과 focus-visible을
   완료 조건에 포함한다.
+- backend 어휘(enum) 값(노드 상태·셀 상태·지표 사용 불가 사유 등)은 원문을 그리지 않고 `shared/config`의
+  `tCode`로 `<접두>.<값>` 문구를 고른다. 키를 `MessageKey`로 넘기므로 생성 SDK 유니온에 값이 늘면
+  typecheck가 문구를 요구한다(#293·#350). 어휘마다의 함수는 그 어휘를 쓰는 slice에 둔다(필드 계약
+  `entities/dataset`, 지표 `entities/backtest`, 추적 응답 `features/debug-strategy`).
 - 사용자 문구는 `<domain>.<area>.<phrase>` i18n 키를 쓰고 ko/en을 함께 변경한다(사전은 `shared/config/messages.ts`). 컴포넌트
   이름을 최상위 namespace로 쓰지 않는다.
 - 사용자 에러는 번역된 복구 문구를, 개발 로그는 run/experiment/trial/spec 식별자와 기대/실제

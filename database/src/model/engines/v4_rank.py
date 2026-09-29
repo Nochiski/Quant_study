@@ -6,11 +6,16 @@
 `docs/research/2026-09-26-v4-subfactor-ic.md` §2 · `2026-09-26-momentum-pullback-ic.md`).
 
 흐름:
-  유니버스(fi_universe.eligible ∧ spec.universe 재판정 ∧ D 가격 행)
+  모집단(fi_universe.eligible ∧ spec.universe 재판정 ∧ D 가격 행 — 밖이면 출력하지 않는다)
+  → D-13 적격성(관리·정지·비적정 감사·지연 공시 표식 · 20세션 평균 거래대금 ≥ min_adv20).
+    탈락 종목은 점수 표에 excluded·exclude_reason 으로만 남고 백분위 단면에 들어가지 않는다.
+    표식이 NULL 이면 적격으로 두고 그 종목 지표 flag 에 `적격미확인(<표식>)` 을 남긴다.
   → 지표 원값(fi_* 만 읽는다; 결측이면 사유를 flag 에)
   → 점수 지표마다 백분위 0~100(동률 평균순위, 방향 적용; sector_neutral_buckets 는 대분류 안,
     값 있는 종목이 min_sector_size 미만인 대분류는 유니버스로 되돌리고 flag)
-  → 버킷 점수 = 있는 지표 백분위의 가중평균(비례 재정규화) → 종합 = 있는 버킷의 가중평균
+  → 버킷: 결측 비중(지표 weight 기준) ≥ bucket_missing_share 이면 버킷 결측(있던 값을 버렸으면
+    그 버킷 점수 지표 flag 에 `버킷결측(NN%)`), 아니면 있는 지표끼리 가중평균
+  → 종합 = 있는 버킷의 가중평균
   → 제외: 버킷 부족(insufficient_data) · 게이트(`<bucket>_gate`) — 점수는 남기고 rank 만 NULL
   → rank = 제외 아닌 종목의 (−종합, 종목코드) 순.
 
@@ -29,6 +34,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from model.contracts import (
+    ELIGIBILITY_FLAGS,
     INDICATOR_COLUMNS,
     EngineResult,
     FactorInputs,
@@ -61,8 +67,15 @@ NON_POSITIVE = "분모≤0"             # 분모(시총·매출·자산·과거 
 NO_DIVIDEND = "무배당"              # DY0 = 0 으로 둔 것(연구 V_DY0: 무배당·미공시 = 0)
 SECTOR_SMALL = "업종소수→전체"       # 대분류 표본 < min_sector_size → 유니버스 백분위
 SECTOR_NONE = "업종없음→전체"        # 대분류 코드가 없다 → 유니버스 백분위
+ELIG_UNKNOWN = "적격미확인"          # D-13 적격성 표식이 NULL — 적격으로 두되 표시(뒤에 (표식))
+BUCKET_MISSING = "버킷결측"          # 결측 비중 ≥ bucket_missing_share 로 버킷을 비웠다(뒤에 (NN%))
 
 REASON_INSUFFICIENT = "insufficient_data"
+REASON_ADV20 = "adv20"                      # 20세션 평균 거래대금 < min_adv20
+REASON_ADV20_UNKNOWN = "adv20_unknown"      # 거래대금을 모른다 → 적격으로 보지 않는다
+# D-13 적격성 표식(contracts.ELIGIBILITY_FLAGS) → fi_universe BOOLEAN 열. 탈락 사유 = 표식 이름
+FLAG_COLUMNS = {"admin": "is_admin", "halted": "is_halted", "audit_adverse": "audit_adverse",
+                "filing_late": "filing_late"}
 LIVE_COVERAGE = ("fresh", "grace")
 REVISIONS = {"REV_OP_1M": ("op", "1m"), "REV_OP_3M": ("op", "3m"),
              "REV_NI_1M": ("ni", "1m"), "REV_NI_3M": ("ni", "3m")}
@@ -402,6 +415,7 @@ class _Rules:
     min_buckets: int
     required_buckets: tuple[str, ...]
     revision_min_analysts: int
+    bucket_missing_share: float
 
 
 def _int_param(p: Mapping[str, object], key: str, errs: list[str]) -> int:
@@ -410,6 +424,14 @@ def _int_param(p: Mapping[str, object], key: str, errs: list[str]) -> int:
         errs.append(f"params.{key} = {v!r} — 1 이상 정수여야 한다")
         return 1
     return v
+
+
+def _share_param(p: Mapping[str, object], key: str, errs: list[str]) -> float:
+    v = p.get(key)
+    if isinstance(v, bool) or not isinstance(v, int | float) or not 0 < v <= 1:
+        errs.append(f"params.{key} = {v!r} — (0, 1] 비율이어야 한다")
+        return 1.0
+    return float(v)
 
 
 def _str_list_param(p: Mapping[str, object], key: str, buckets: Sequence[str],
@@ -445,6 +467,9 @@ def _check(spec: ModelSpec, inputs: FactorInputs) -> _Rules:
         errs.append(f"universe.markets {u.markets} ⊄ 기본 {base.markets}")
     if not u.require_estimates:
         errs.append("universe.require_estimates = false 는 eligible(추정치 보유)을 넓힌다")
+    unmapped = sorted(set(ELIGIBILITY_FLAGS) - set(FLAG_COLUMNS))
+    if unmapped:
+        errs.append(f"적격성 표식 {unmapped} 의 fi_universe 열 대응이 엔진에 없다")
     p = spec.params
     buckets = tuple(spec.buckets)
     rules = _Rules(
@@ -452,7 +477,8 @@ def _check(spec: ModelSpec, inputs: FactorInputs) -> _Rules:
         min_sector_size=_int_param(p, "min_sector_size", errs),
         min_buckets=_int_param(p, "min_buckets", errs),
         required_buckets=_str_list_param(p, "required_buckets", buckets, errs),
-        revision_min_analysts=_int_param(p, "revision_min_analysts", errs))
+        revision_min_analysts=_int_param(p, "revision_min_analysts", errs),
+        bucket_missing_share=_share_param(p, "bucket_missing_share", errs))
     if rules.neutral_buckets and spec.sector_neutral is None:
         errs.append("params.sector_neutral_buckets 가 있는데 sector_neutral 이 없다")
     errs += inputs.check(V4RankEngine.name)
@@ -462,12 +488,44 @@ def _check(spec: ModelSpec, inputs: FactorInputs) -> _Rules:
     return rules
 
 
-def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> dict[str, Row]:
-    """fi_universe.eligible(기본 규칙) ∧ spec.universe 재판정 ∧ D 가격 행 → {종목: 행}."""
+@dataclass(frozen=True)
+class _Member:
+    """모집단 종목 하나. `reason` 이 있으면 D-13 적격성 탈락(점수 표 exclude_reason),
+    `notes` = 적격으로 둔 채 남길 표시(NULL 표식)."""
+
+    row: Row
+    reason: str | None
+    notes: tuple[str, ...] = ()
+
+
+def _member(rule: UniverseRule, r: Row) -> _Member:
+    """D-13 적격성 — 표식은 ELIGIBILITY_FLAGS 순서로 먼저 걸린 것 하나, 그다음 거래대금.
+    적자는 거르지 않는다(E/P 음수는 값이다)."""
+    notes: list[str] = []
+    for flag in ELIGIBILITY_FLAGS:
+        if flag not in rule.exclude:
+            continue
+        v = r[FLAG_COLUMNS[flag]]
+        if v is None:
+            notes.append(f"{ELIG_UNKNOWN}({flag})")
+        elif v:
+            return _Member(r, flag)
+    if rule.min_adv20 is not None:
+        adv = _num(r["adv20"])
+        if adv is None:
+            return _Member(r, REASON_ADV20_UNKNOWN)
+        if adv < rule.min_adv20:
+            return _Member(r, REASON_ADV20)
+    return _Member(r, None, tuple(notes))
+
+
+def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> dict[str, _Member]:
+    """모집단 = fi_universe.eligible(기본 규칙) ∧ spec.universe 재판정 ∧ D 가격 행 → {종목: 판정}.
+    모집단 밖 종목은 모델 대상이 아니라 출력하지 않는다(추정치 보유 보통주가 아니다)."""
     on_d = {str(r["ticker"]) for r in inputs.rows("fi_prices")
             if _iso(r["date"]) == d and r["close"] is not None}
     u = spec.universe
-    out: dict[str, Row] = {}
+    out: dict[str, _Member] = {}
     for r in inputs.rows("fi_universe"):
         t = str(r["ticker"])
         if not r["eligible"] or t not in on_d:
@@ -483,7 +541,7 @@ def _universe(spec: ModelSpec, inputs: FactorInputs, d: str) -> dict[str, Row]:
                 or (state in LIVE_COVERAGE and isinstance(age, int)
                     and age <= u.coverage_grace_days)):
             continue
-        out[t] = r
+        out[t] = _member(u, r)
     return out
 
 
@@ -574,6 +632,43 @@ def _gate_hit(g: Gate, raw: Val, pct: float | None) -> bool:
     raise ValueError(f"gate {g.key}: 지원하지 않는 rule {g.rule!r}")
 
 
+@dataclass(frozen=True)
+class _Bucket:
+    """버킷 하나의 판정. `score is None` 이면 결측, `note` = 있는 값을 결측 규칙으로 버렸다는
+    표식."""
+
+    score: float | None
+    note: str | None = None
+
+
+def _bucket(inds: Sequence[Indicator], pcts: Mapping[str, Mapping[str, float]], t: str,
+            missing_share: float) -> _Bucket:
+    """결측 비중(지표 weight 기준) ≥ missing_share 이면 결측(D-13 "절반 이상 결측이면 버킷 결측"),
+    아니면 있는 지표 백분위끼리 비례 재정규화한 가중평균. 표식은 있는 값을 버렸을 때만 단다 —
+    전부 결측이면 지표마다 이미 사유가 있다."""
+    total = sum(i.weight for i in inds)
+    if total <= 0:
+        return _Bucket(None)
+    subs = {i.key: pcts[i.key][t] for i in inds if t in pcts[i.key]}
+    share = sum(i.weight for i in inds if i.key not in subs) / total
+    if round(share, 12) >= missing_share:          # 가중 합의 부동소수 끝자리를 문턱에서 뗀다
+        return _Bucket(None, f"{BUCKET_MISSING}({share:.0%})" if subs else None)
+    return _Bucket(weighted_available(subs, {i.key: i.weight for i in inds}))
+
+
+def _score_row(spec: ModelSpec, d: str, u: Row, bscores: Mapping[str, float],
+               reason: str | None) -> dict[str, object]:
+    """점수 표 한 행(`score_columns(spec)` 순서). rank 는 정렬 뒤에 채운다."""
+    row: dict[str, object] = {c: None for c in score_columns(spec)}
+    row.update(ticker=str(u["ticker"]), score_date=d, spec_id=spec.spec_id,
+               composite=weighted_available(bscores, spec.buckets),
+               excluded=reason is not None, exclude_reason=reason,
+               sector_l1=u["sector_l1"], sector_l2=u["sector_l2"],
+               coverage_state=u["coverage_state"], n_buckets_used=len(bscores),
+               **{f"{b}_score": bscores.get(b) for b in spec.buckets})
+    return row
+
+
 def _join(*flags: str | None) -> str | None:
     parts = [f for f in flags if f]
     return ";".join(parts) if parts else None
@@ -591,7 +686,8 @@ class V4RankEngine:
     def run(self, spec: ModelSpec, inputs: FactorInputs) -> EngineResult:
         rules = _check(spec, inputs)
         d = inputs.date
-        uni = _universe(spec, inputs, d)
+        members = _universe(spec, inputs, d)
+        uni = {t: m.row for t, m in members.items() if m.reason is None}
         codes = sorted(uni)
         raws = _raw_values(inputs, uni, d, rules.revision_min_analysts)
 
@@ -610,16 +706,16 @@ class V4RankEngine:
         for ind in scored:
             by_bucket[ind.bucket].append(ind)
         bucket_of = {i.key: i.bucket for i in spec.indicators}
-        cols = score_columns(spec)
+        bucket_notes: dict[tuple[str, str], str] = {}
         rows: list[dict[str, object]] = []
         for t in codes:
             bscores: dict[str, float] = {}
             for b, inds in by_bucket.items():
-                subs = {i.key: pcts[i.key][t] for i in inds if t in pcts[i.key]}
-                s = weighted_available(subs, {i.key: i.weight for i in inds})
-                if s is not None:
-                    bscores[b] = s
-            composite = weighted_available(bscores, spec.buckets)
+                res = _bucket(inds, pcts, t, rules.bucket_missing_share)
+                if res.score is not None:
+                    bscores[b] = res.score
+                if res.note is not None:
+                    bucket_notes[t, b] = res.note
             reason: str | None = None
             if (len(bscores) < rules.min_buckets
                     or any(b not in bscores for b in rules.required_buckets)):
@@ -629,14 +725,10 @@ class V4RankEngine:
                     if _gate_hit(g, raws[g.key][t], pcts.get(g.key, {}).get(t)):
                         reason = f"{bucket_of[g.key]}_gate"
                         break
-            u = uni[t]
-            row: dict[str, object] = {c: None for c in cols}
-            row.update(ticker=t, score_date=d, spec_id=spec.spec_id, composite=composite,
-                       excluded=reason is not None, exclude_reason=reason,
-                       sector_l1=u["sector_l1"], sector_l2=u["sector_l2"],
-                       coverage_state=u["coverage_state"], n_buckets_used=len(bscores),
-                       **{f"{b}_score": bscores.get(b) for b in spec.buckets})
-            rows.append(row)
+            rows.append(_score_row(spec, d, uni[t], bscores, reason))
+        # D-13 적격성 탈락 — 점수 없이 사유만(백분위 단면에 넣지 않았다)
+        rows += [_score_row(spec, d, m.row, {}, m.reason)
+                 for t, m in sorted(members.items()) if m.reason is not None]
 
         ranked = sorted((r for r in rows if not r["excluded"]),
                         key=lambda r: (-_rank_key(r["composite"]), str(r["ticker"])))
@@ -649,10 +741,13 @@ class V4RankEngine:
             for ind in spec.indicators:
                 v = raws[ind.key][t]
                 score = ind.role == "score"
+                flag = _join(v.flag,
+                             notes[ind.key].get(t) if score else None,
+                             bucket_notes.get((t, ind.bucket)) if score else None,
+                             *members[t].notes)
                 vals: tuple[object, ...] = (
                     t, d, spec.spec_id, ind.key, ind.bucket, ind.role, v.raw,
-                    pcts[ind.key].get(t) if score else None,
-                    _join(v.flag, notes[ind.key].get(t) if score else None))
+                    pcts[ind.key].get(t) if score else None, flag)
                 indicators.append(dict(zip(INDICATOR_COLUMNS, vals, strict=True)))
         return EngineResult(scores=[*ranked, *rest], indicators=indicators)
 

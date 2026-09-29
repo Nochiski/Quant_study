@@ -4,8 +4,8 @@
 (a) 레지스트리 — `v4_rank@0.1`·`@0.2` 적재·검증, 두 판은 버킷 가중만 다르다
 (b) 지표 공식 — 손으로 계산한 값(창·최소 개수·부호·수정주가 미해결 창·입수일)
 (c) 백분위 — 동률 평균순위, 대분류 내 vs 유니버스, 소수 업종 되돌림
-(d) 버킷·종합 — 비례 재정규화, 버킷 부족 제외, 게이트 제외와 NULL rank
-(e) 유니버스 재판정 · 출력 모양 · 결정성
+(d) 버킷·종합 — 결측 비중 ≥ 50% 버킷 결측, 비례 재정규화, 버킷 부족 제외, 게이트 제외와 NULL rank
+(e) 유니버스 재판정 · D-13 적격성 · 출력 모양 · 결정성
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from datetime import date, timedelta
 import pytest
 from model import registry
 from model.contracts import (
+    ELIGIBILITY_FLAGS,
     FI_TABLES,
     INDICATOR_COLUMNS,
     FactorInputs,
@@ -35,6 +36,7 @@ ENGINE = v4_rank.ENGINE
 SCORE_KEYS = ("VOL60", "EP", "DY0", "OPM_TTM", "FCF_A", "M_PULL_C", "REV_OP_1M", "REV_OP_3M",
               "REV_NI_1M", "REV_NI_3M", "CRDT_CHG", "FRGN60")
 DISPLAY_KEYS = ("R1M", "M_52WH", "R3M", "R6M", "R12_1", "EP_FWD")
+REV_KEYS = ("REV_OP_1M", "REV_OP_3M", "REV_NI_1M", "REV_NI_3M")
 
 
 @functools.cache
@@ -53,7 +55,8 @@ def _day(k: int) -> date:
 
 
 class Board:
-    """종목을 더해 가며 계약 7표를 채운다. 기본 = 적격 보통주 · 신선 · 추정기관 5 · 시총 5,000억."""
+    """종목을 더해 가며 계약 표를 채운다. 기본 = 적격 보통주 · 신선 · 추정기관 5 · 시총 5,000억 ·
+    20세션 평균 거래대금 100억 · D-13 표식 전부 False."""
 
     def __init__(self) -> None:
         self.tables: dict[str, list[dict[str, object]]] = {n: [] for n in FI_TABLES}
@@ -75,8 +78,9 @@ class Board:
             ticker=t, date=D0, name=t, market="KOSPI", sec_type="common", market_cap=5000.0,
             mktcap_basis="krx", sector_l1=sector, sector_l1_name=sector,
             sector_l2=None if sector is None else sector + "10", has_estimates=True,
-            coverage_state="fresh", coverage_age_days=0, n_analysts=5, eligible=True,
-            exclude_reason=None)
+            coverage_state="fresh", coverage_age_days=0, n_analysts=5, adv20=100.0,
+            is_admin=False, is_halted=False, audit_adverse=False, filing_late=False,
+            eligible=True, exclude_reason=None)
         row.update(uni)
         self.tables["fi_universe"].append(_r("fi_universe", **row))
         return self
@@ -136,11 +140,26 @@ def _full(b: Board, t: str, i: int, sector: str | None = "G10", **uni: object) -
     return b
 
 
+def _patch(b: Board, table: str, t: str, where: dict[str, object] | None = None,
+           **vals: object) -> None:
+    """이미 넣은 행 고치기 — 종목 t 이고 where 가 맞는 행에 vals 를 덮는다."""
+    for r in b.tables[table]:
+        if r["ticker"] == t and all(r[k] == v for k, v in (where or {}).items()):
+            r.update(vals)
+
+
 def _run(b: Board, spec: ModelSpec | None = None):
     res = ENGINE.run(spec or _spec(), b.fi())
     scores = {str(r["ticker"]): r for r in res.scores}
     inds = {(str(r["ticker"]), str(r["key"])): r for r in res.indicators}
     return scores, inds
+
+
+def _why(row: dict[str, object]) -> str | None:
+    """지표 자신의 사유·표식만 — 뒤에 붙는 업종 되돌림·버킷결측·적격미확인 표시는 뺀다."""
+    own = [x for x in str(row["flag"] or "").split(";")
+           if x and not x.startswith(("업종", "버킷결측", "적격미확인"))]
+    return own[0] if own else None
 
 
 def _pct(rank: float, n: int) -> float:
@@ -169,6 +188,8 @@ def test_registry_both_v4_specs_load_validate_and_differ_only_in_bucket_weights(
     assert s1.params["sector_neutral_buckets"] == ["value", "quality"]
     assert s1.universe.sec_types == ("common",) and s1.universe.require_estimates
     assert s1.universe.coverage_grace_days == 5 and s1.universe.min_market_cap is None
+    assert s1.universe.min_adv20 == 10.0 and s1.universe.exclude == ELIGIBILITY_FLAGS
+    assert s1.params["bucket_missing_share"] == 0.5
 
 
 def test_output_columns_are_base_plus_bucket_scores() -> None:
@@ -293,19 +314,19 @@ def test_value_and_quality_formulas() -> None:
     _, ind = _run(b)
 
     assert ind["X", "EP"]["raw"] == 100.0 / 2000.0
-    assert ind["X", "DY0"]["raw"] == 1000.0 / 50_000.0 and ind["X", "DY0"]["flag"] is None
+    assert ind["X", "DY0"]["raw"] == 1000.0 / 50_000.0 and _why(ind["X", "DY0"]) is None
     assert ind["X", "FCF_A"]["raw"] == 30.0 / 600.0
     assert ind["X", "OPM_TTM"]["raw"] == (10 + 20 + 30 + 40) / (100 + 100 + 200 + 100)
     assert ind["Y", "EP"]["raw"] == 30.0 / 1000.0
     assert ind["Y", "FCF_A"]["raw"] == 40.0 / 400.0
-    assert ind["Y", "DY0"]["raw"] == 0.0 and ind["Y", "DY0"]["flag"] == "무배당"
+    assert ind["Y", "DY0"]["raw"] == 0.0 and _why(ind["Y", "DY0"]) == "무배당"
     assert ind["Y", "OPM_TTM"]["raw"] == 20.0 / 200.0
     for key in ("EP", "FCF_A", "OPM_TTM"):
-        assert ind["Z", key]["raw"] is None and ind["Z", key]["flag"] == "원천없음", key
-    assert ind["Z", "DY0"]["raw"] == 0.0 and ind["Z", "DY0"]["flag"] == "무배당"
-    assert ind["V", "OPM_TTM"]["raw"] is None and ind["V", "OPM_TTM"]["flag"] == "원천없음"
+        assert ind["Z", key]["raw"] is None and _why(ind["Z", key]) == "원천없음", key
+    assert ind["Z", "DY0"]["raw"] == 0.0 and _why(ind["Z", "DY0"]) == "무배당"
+    assert ind["V", "OPM_TTM"]["raw"] is None and _why(ind["V", "OPM_TTM"]) == "원천없음"
     for key in ("FCF_A", "OPM_TTM"):
-        assert ind["W", key]["raw"] is None and ind["W", key]["flag"] == "분모≤0", key
+        assert ind["W", key]["raw"] is None and _why(ind["W", key]) == "분모≤0", key
 
 
 def test_foreign_60_and_credit_change_formulas() -> None:
@@ -331,12 +352,12 @@ def test_foreign_60_and_credit_change_formulas() -> None:
     _, ind = _run(b)
 
     assert ind["F", "FRGN60"]["raw"] == 60.0 / (5000.0 * 100)     # 백만원 ÷ (억원 × 100)
-    assert ind["G", "FRGN60"]["raw"] is None and ind["G", "FRGN60"]["flag"] == "이력부족"
+    assert ind["G", "FRGN60"]["raw"] is None and _why(ind["G", "FRGN60"]) == "이력부족"
     assert ind["H", "FRGN60"]["raw"] == 90.0 / (2000.0 * 100)
     assert ind["F", "CRDT_CHG"]["raw"] == 1200 / 1000 - 1.0
     assert ind["G", "CRDT_CHG"]["raw"] == 900 / 1000 - 1.0
-    assert ind["H", "CRDT_CHG"]["raw"] is None and ind["H", "CRDT_CHG"]["flag"] == "분모≤0"
-    assert ind["I", "CRDT_CHG"]["raw"] is None and ind["I", "CRDT_CHG"]["flag"] == "원천없음"
+    assert ind["H", "CRDT_CHG"]["raw"] is None and _why(ind["H", "CRDT_CHG"]) == "분모≤0"
+    assert ind["I", "CRDT_CHG"]["raw"] is None and _why(ind["I", "CRDT_CHG"]) == "원천없음"
     # 원값은 변화율 그대로, 방향 −1 → 신용이 준(G) 쪽 백분위가 높다
     assert ind["G", "CRDT_CHG"]["pct"] > ind["F", "CRDT_CHG"]["pct"]
 
@@ -357,7 +378,7 @@ def test_revision_changes_flags_period_and_coverage() -> None:
     b.stock("U", [100.0] * 30)
     _, ind = _run(b)
 
-    got = {k: (ind["R", k]["raw"], ind["R", k]["flag"])
+    got = {k: (ind["R", k]["raw"], _why(ind["R", k]))
            for k in ("REV_OP_1M", "REV_NI_1M", "REV_OP_3M", "REV_NI_3M")}
     assert got == {"REV_OP_1M": ((110 - 100) / 100, None),
                    "REV_NI_1M": ((-50 + 40) / 40, "적확"),
@@ -365,14 +386,14 @@ def test_revision_changes_flags_period_and_coverage() -> None:
                    "REV_NI_3M": ((-50 - 20) / 20, "적전")}
     assert ind["R", "EP_FWD"]["raw"] == -50.0 / 5000.0
     for k in ("REV_OP_1M", "REV_NI_1M", "REV_OP_3M", "REV_NI_3M"):
-        assert ind["S", k]["raw"] is None and ind["S", k]["flag"] == "커버리지<3", k
+        assert ind["S", k]["raw"] is None and _why(ind["S", k]) == "커버리지<3", k
     assert ind["S", "EP_FWD"]["raw"] == -50.0 / 5000.0        # 표시 지표는 커버리지와 무관
-    assert (ind["T", "REV_OP_1M"]["raw"], ind["T", "REV_OP_1M"]["flag"]) == (0.25, "적축")
-    assert ind["T", "REV_NI_1M"]["raw"] is None and ind["T", "REV_NI_1M"]["flag"] == "분모≤0"
-    assert ind["T", "REV_OP_3M"]["raw"] is None and ind["T", "REV_OP_3M"]["flag"] == "원천없음"
-    assert (ind["T", "REV_NI_3M"]["raw"], ind["T", "REV_NI_3M"]["flag"]) == (0.0, None)
+    assert (ind["T", "REV_OP_1M"]["raw"], _why(ind["T", "REV_OP_1M"])) == (0.25, "적축")
+    assert ind["T", "REV_NI_1M"]["raw"] is None and _why(ind["T", "REV_NI_1M"]) == "분모≤0"
+    assert ind["T", "REV_OP_3M"]["raw"] is None and _why(ind["T", "REV_OP_3M"]) == "원천없음"
+    assert (ind["T", "REV_NI_3M"]["raw"], _why(ind["T", "REV_NI_3M"])) == (0.0, None)
     for k in ("REV_OP_1M", "EP_FWD"):
-        assert ind["U", k]["raw"] is None and ind["U", k]["flag"] == "원천없음", k
+        assert ind["U", k]["raw"] is None and _why(ind["U", k]) == "원천없음", k
 
 
 # ── (c) 백분위 ─────────────────────────────────────────────────────────────────
@@ -422,6 +443,8 @@ def test_pull_gate_excludes_bottom_30pct_keeps_scores_and_nulls_rank() -> None:
          .stock("B", [100.0] * n)
          .stock("C", [200.0] + [100.0] * (n - 2) + [90.0])
          .stock("E", [100.0] * (n - 1) + [110.0]))
+    for t in "ABCE":
+        b.fin(t, "2025/12", ni=10.0)          # 밸류 버킷(E/P) — 저위험·밸류·고점근접 3버킷
     sc, ind = _run(b)
     # M_PULL_C: A = E = 1/3(하위 동률 → 백분위 16.7) · B = C = 1/2(83.3)
     assert ind["A", "M_PULL_C"]["pct"] == pytest.approx(100 / 6)
@@ -438,7 +461,7 @@ def test_bucket_and_composite_renormalize_over_available_parts() -> None:
     b = Board()
     for i in range(1, 7):
         _full(b, f"F{i}", i)
-    b.stock("M", _walk(99))             # 재무·컨센서스 없음 → 밸류는 DY0 만, 퀄리티·리비전 없음
+    b.stock("M", _walk(99))     # 재무·컨센서스 없음 → 밸류는 DY0 만(50% 결측) · 퀄리티·리비전 없음
     for k in range(60):
         b.flow("M", k, 1.0)
     for k in range(40):
@@ -452,10 +475,12 @@ def test_bucket_and_composite_renormalize_over_available_parts() -> None:
     assert f1["n_buckets_used"] == 6
     m = sc["M"]
     assert ind["M", "EP"]["raw"] is None
-    assert m["value_score"] == ind["M", "DY0"]["pct"] == 0.0        # 업종 안 최저(무배당 0)
+    # 2지표 버킷에서 하나 결측 = 50% → 버킷 결측. 있는 DY0 백분위는 남기고 flag 로 알린다
+    assert m["value_score"] is None and ind["M", "DY0"]["pct"] == 0.0
+    assert ind["M", "DY0"]["flag"] == "무배당;버킷결측(50%)"
     assert m["quality_score"] is None and m["revision_score"] is None
-    assert m["n_buckets_used"] == 4 and m["exclude_reason"] != "insufficient_data"
-    used = ("low_risk", "value", "pull", "aux")
+    assert m["n_buckets_used"] == 3 and m["exclude_reason"] != "insufficient_data"
+    used = ("low_risk", "pull", "aux")
     total = sum(spec.buckets[x] for x in used)
     assert m["composite"] == pytest.approx(
         sum(m[f"{x}_score"] * spec.buckets[x] for x in used) / total, abs=1e-12)
@@ -465,19 +490,55 @@ def test_insufficient_buckets_or_missing_low_risk_is_excluded() -> None:
     b = Board()
     for i in range(1, 7):
         _full(b, f"F{i}", i)
-    b.stock("I", _walk(50, 30))                       # 30행: 저위험·고점근접 없음 → 밸류만
+    b.stock("I", _walk(50, 30))           # 30행: 저위험·고점근접 없음 · 밸류는 EP 없어 결측
     _full(b, "J", 51)                                  # 저위험만 빠진 종목(40세션 전 미해결 사건)
     b.tables["fi_adj_prices"] = [
         dict(r, adj_ok=not (r["ticker"] == "J" and str(r["date"]) >= str(_day(40))))
         for r in b.tables["fi_adj_prices"]]
     sc, _ = _run(b)
-    assert sc["I"]["n_buckets_used"] == 1
+    assert sc["I"]["n_buckets_used"] == 0
     assert sc["J"]["low_risk_score"] is None and sc["J"]["n_buckets_used"] >= 3
     for t in "IJ":
         assert sc[t]["excluded"] is True and sc[t]["exclude_reason"] == "insufficient_data", t
         assert sc[t]["rank"] is None
     ranks = sorted(r["rank"] for r in sc.values() if r["rank"] is not None)
     assert ranks == list(range(1, len(ranks) + 1))
+
+
+def test_bucket_missing_when_missing_weight_share_reaches_half() -> None:
+    b = Board()
+    for i in range(1, 7):
+        _full(b, f"F{i}", i)
+    _full(b, "H2", 21)          # 리비전 4개 중 2개 결측(1개월 전 행 없음) = 정확히 50%
+    b.tables["fi_consensus"] = [r for r in b.tables["fi_consensus"]
+                                if not (r["ticker"] == "H2" and r["horizon"] == "1m")]
+    _full(b, "Q1", 22)          # 리비전 1개 결측(3개월 전 op 없음) = 25% → 남은 3개로
+    _patch(b, "fi_consensus", "Q1", {"horizon": "3m"}, op=None)
+    _full(b, "V1", 23)          # 퀄리티 2개 중 FCF/자산 결측 = 50%
+    _patch(b, "fi_fin_summary", "V1", {"period_type": "annual"}, fcf=None)
+    _full(b, "E0", 24)          # 밸류 2개 중 E/P 결측 = 50%
+    _patch(b, "fi_fin_summary", "E0", {"period_type": "annual"}, ni=None)
+    sc, ind = _run(b)
+
+    assert sc["H2"]["revision_score"] is None
+    assert ind["H2", "REV_OP_3M"]["pct"] is not None            # 있는 지표 백분위는 남는다
+    for k in REV_KEYS:
+        assert ind["H2", k]["flag"].endswith("버킷결측(50%)"), k
+    kept = [ind["Q1", k]["pct"] for k in REV_KEYS if k != "REV_OP_3M"]
+    assert sc["Q1"]["revision_score"] == pytest.approx(sum(kept) / 3, abs=1e-12)
+    assert not any("버킷결측" in (ind["Q1", k]["flag"] or "") for k in REV_KEYS)
+    assert sc["V1"]["quality_score"] is None
+    assert ind["V1", "OPM_TTM"]["flag"] == "버킷결측(50%)"       # G10 10종목 → 업종 안 백분위
+    assert _why(ind["V1", "FCF_A"]) == "원천없음"
+    assert sc["E0"]["value_score"] is None and sc["E0"]["n_buckets_used"] == 5
+    # 결측 비중은 지표 weight 로 잰다 — DY0 가중 3 이면 E/P 결측은 25% 라 버킷이 산다
+    spec = _spec()
+    heavy = replace(spec, indicators=tuple(replace(i, weight=3.0) if i.key == "DY0" else i
+                                           for i in spec.indicators))
+    sc3, ind3 = _run(b, heavy)
+    assert sc3["E0"]["value_score"] == ind3["E0", "DY0"]["pct"]
+    f1 = (ind3["F1", "EP"]["pct"] + 3 * ind3["F1", "DY0"]["pct"]) / 4
+    assert sc3["F1"]["value_score"] == pytest.approx(f1, abs=1e-12)
 
 
 # ── (e) 유니버스 · 출력 모양 · 결정성 ───────────────────────────────────────────
@@ -496,6 +557,45 @@ def test_universe_is_rechecked_against_the_spec_rule() -> None:
     assert set(sc) == {"OK", "KQ", "GR"}
     assert {t for t, _ in ind} == {"OK", "KQ", "GR"}
     assert sc["GR"]["coverage_state"] == "grace"
+
+
+def test_d13_eligibility_reasons_null_flags_and_loss_makers() -> None:
+    b = Board()
+    for i in range(1, 7):
+        _full(b, f"F{i}", i)
+    _full(b, "AD", 11, is_admin=True, adv20=3.0)        # 표식이 거래대금보다 먼저 걸린다
+    _full(b, "HT", 12, is_halted=True)
+    _full(b, "AU", 13, audit_adverse=True)
+    _full(b, "FL", 14, filing_late=True)
+    _full(b, "LO", 15, adv20=9.99)
+    _full(b, "LU", 16, adv20=None)
+    _full(b, "NA", 17, is_admin=None, filing_late=None)   # 모른다 → 적격 + 표시
+    _full(b, "LS", 18)                                      # 적자 — 적격, E/P 음수는 값이다
+    _patch(b, "fi_fin_summary", "LS", {"period_type": "annual"}, ni=-30.0)
+    sc, ind = _run(b)
+
+    want = {"AD": "admin", "HT": "halted", "AU": "audit_adverse", "FL": "filing_late",
+            "LO": "adv20", "LU": "adv20_unknown"}
+    for t, why in want.items():
+        r = sc[t]
+        assert (r["excluded"], r["exclude_reason"], r["rank"]) == (True, why, None), t
+        assert r["composite"] is None and r["n_buckets_used"] == 0, t
+        assert all(r[f"{x}_score"] is None for x in _spec().buckets), t
+    eligible = {f"F{i}" for i in range(1, 7)} | {"NA", "LS"}
+    assert {t for t, _ in ind} == eligible                   # 탈락 종목은 지표 행도 없다
+    assert set(sc) == eligible | set(want)
+    # 백분위 단면 = 적격 8종목(탈락 종목은 들어가지 않는다)
+    vols = sorted(ind[t, "VOL60"]["pct"] for t in eligible)
+    assert vols == [_pct(k, len(eligible)) for k in range(1, len(eligible) + 1)]
+    for key in (*SCORE_KEYS, *DISPLAY_KEYS):
+        assert ind["NA", key]["flag"].endswith("적격미확인(admin);적격미확인(filing_late)"), key
+    assert ind["LS", "EP"]["raw"] < 0 and ind["LS", "EP"]["pct"] == 0.0
+    assert sc["LS"]["exclude_reason"] != "insufficient_data"
+    # 규칙은 spec 에서 읽는다 — 적격성 조건을 빼면 전원 적격
+    loose = replace(_spec(), universe=replace(_spec().universe, min_adv20=None, exclude=()))
+    sc_loose, _ = _run(b, loose)
+    assert not any(r["exclude_reason"] in want.values() for r in sc_loose.values())
+    assert len(sc_loose) == len(sc)
 
 
 def test_output_shape_every_ticker_times_indicator() -> None:

@@ -28,6 +28,12 @@ require_estimates = true
 sec_types = ["common"]
 markets = ["KOSPI", "KOSDAQ"]
 coverage_grace_days = 5
+# D-13 적격성: 20세션 평균 거래대금 ≥ 10억(억원 단위) · 관리·정지·비적정 감사·지연 공시 제외.
+# 적자는 포함하고 표시한다(E/P 음수는 값이다). 표식이 NULL 이면 적격으로 두고 지표 flag 에
+# 미확인을 남긴다. 제외 종목은 점수 표에 excluded·exclude_reason(표식 이름 · adv20 ·
+# adv20_unknown)으로 남고 백분위 단면에는 들어가지 않는다.
+min_adv20 = 10.0
+exclude = ["admin", "halted", "audit_adverse", "filing_late"]
 
 # 주간 후보 30 · 대분류 상한 9(30%) — M2 W0 결정 4건 권장안
 [output]
@@ -45,6 +51,9 @@ min_buckets = 3
 required_buckets = ["low_risk"]
 # 리비전은 추정기관 3곳 이상일 때만(D-13' "커버리지 ≥3")
 revision_min_analysts = 3
+# 버킷 결측: 점수 지표의 결측 비중(지표 weight 기준)이 이 값 이상이면 버킷을 비운다(D-13 "절반
+# 이상 결측이면 버킷 결측 표시"). 살아남은 버킷은 있는 지표끼리만 재정규화한다.
+bucket_missing_share = 0.5
 
 # 고점근접+반전 하위 30% 는 후보 목록에서 뺀다(R-3: 십분위 D4 이후 평평 → 제외 게이트 성격).
 # 점수는 그대로 남기고 rank 만 비운다.
@@ -62,7 +71,9 @@ bucket = "low_risk"
 direction = -1
 definition = "60일 변동성 = 최근 60세션 일간 수익률의 표본표준편차(수정종가, 수익률 45개 이상). 낮을수록 좋다"
 
-# 밸류 — V_EP(정의표 129행, IC 0.099 t 8.7 · R-1: 현재가 기준이 기말가 고정보다 우월)
+# 밸류 — V_EP(정의표 129행, IC 0.099 t 8.7 · R-1: 현재가 기준이 기말가 고정보다 우월).
+# 분자는 fi_fin_summary 연간 ni(WISE, v3 와 같은 원천)다 — 연구 V_EP 는 DART fin_std 순이익으로
+# 쟀다(계약에 DART 순이익 열이 없어 이 차이를 수용, 09-29 오케스트레이터).
 [[indicators]]
 key = "EP"
 bucket = "value"

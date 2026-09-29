@@ -320,8 +320,12 @@ WHERE rn = 1
     #        선다. 그래서 사업보고서 행의 TTM 은 항등식으로 연간과 같다.
     #      · 현금흐름: 1분기 보고서는 누계 그대로, 나머지는 누계 − 바로 앞 분기 보고서 누계(간격
     #        QUARTER_GAP, 같은 fs_div).
-    #      · 분기값의 공개일 = 그 값을 만든 행들의 available_date max. 창 안 네 분기값의 공개일이
-    #        모두 이 행의 available_date 이하일 때만 선다 — 창 밖 행에 기대는 파생도 가드를 받는다.
+    #      · 분기값의 공개일 = 그 값을 만든 행들의 available_date max(창 밖 행에 기대는 파생 포함).
+    #        창 안 네 분기값 공개일의 max 가 TTM 의 공개일이다 — 손익 `ttm_income_available_date`,
+    #        현금흐름 `ttm_cf_available_date`(#238). 정정 재제출로 창 안 분기가 이 행보다 늦게
+    #        접수되면 이 행의 TTM 은 그날 완성된다. 다른 기간 값으로 대신하는 것이 아니라 같은 기간
+    #        TTM 이 늦게 서는 것이라 결측 정책(#212)과 맞는다. 소비자는 TTM 열을 그 공개일부터
+    #        쓴다 — 행은 여전히 `available_date`·`period_frontier` 로 고른다.
     #      · 창의 non-null 4개 · 창의 period_end 폭이 3분기(240~300일) · 창 안 fs_div 가 하나(연결과
     #        별도를 더하지 않는다, P2-1) · 매출은 창 안 revenue_basis 도 하나(P3-2).
     #      하나라도 어긋나면 NULL 이다 — 부분합을 내면 분기 하나가 빠진 채 연간처럼 읽힌다.
@@ -431,8 +435,8 @@ q AS (
 ttm AS (
     SELECT q.*,
            count(*) OVER w                                           AS ttm_n_rows,
-           max(q.q_income_available) OVER w                          AS ttm_income_available,
-           max(q.q_cf_available) OVER w                              AS ttm_cf_available,
+           max(q.q_income_available) OVER w                          AS ttm_income_available_date,
+           max(q.q_cf_available) OVER w                              AS ttm_cf_available_date,
            min(q.period_end) OVER w                                  AS ttm_first_period_end,
            min(q.fs_div) OVER w                                      AS ttm_fs_min,
            max(q.fs_div) OVER w                                      AS ttm_fs_max,
@@ -467,22 +471,19 @@ SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
        o.bsns_year, o.rcept_no, o.period_start, o.currency,
        o.revenue, o.revenue_basis, o.gross_profit, o.op_profit, o.net_income,
        o.total_asset, o.total_liab, o.total_equity, o.cf_operating_ytd, o.cf_operating_q,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_revenue = 4 AND o.ttm_basis_min = o.ttm_basis_max
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_revenue = 4
+                 AND o.ttm_basis_min = o.ttm_basis_max
             THEN o.ttm_sum_revenue END                               AS ttm_revenue,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_gross_profit = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_gross_profit = 4
             THEN o.ttm_sum_gross_profit END                          AS ttm_gross_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_op_profit = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_op_profit = 4
             THEN o.ttm_sum_op_profit END                             AS ttm_op_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_net_income = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_net_income = 4
             THEN o.ttm_sum_net_income END                            AS ttm_net_income,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cf_available <= o.available_date
-                 AND o.ttm_cnt_cf_operating = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_cf_operating = 4
             THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
        coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
+       o.ttm_income_available_date, o.ttm_cf_available_date,
        o.period_frontier, o.available_date, o.available_basis
 FROM ok o
 LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d

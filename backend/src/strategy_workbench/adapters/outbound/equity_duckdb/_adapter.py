@@ -1723,17 +1723,24 @@ class EquityDuckdbAdapter:
         """
         if not keys:
             return {}
-        columns = ", ".join(
-            f"{self._fields[field_id].expr} AS c{position}"
+        outputs = {
+            f"c{position}": self._fields[field_id].expr for position, field_id in enumerate(fields)
+        }
+        # 행보다 늦게 공개되는 필드(재무 TTM, #238)는 값 뒤에 그 공개일 열을 함께 읽는다.
+        late = {
+            position: expr
             for position, field_id in enumerate(fields)
-        )
+            if (expr := self._fields[field_id].available_expr) is not None
+        }
+        outputs |= {f"a{position}": expr for position, expr in late.items()}
+        columns = ", ".join(f"{expr} AS {name}" for name, expr in outputs.items())
         relation = self._relation(source, fetch_end)
         where = [f"{source.available_expr} <= {_lit(fetch_end)}"]
         if source.row_filter:
             where.append(f"({source.row_filter})")
         where.append(f"{source.key_column} IN (SELECT {_KEYS_SQL})")
         predicate = " AND ".join(where)
-        picks = ", ".join(f"c{position}" for position in range(len(fields)))
+        picks = ", ".join(outputs)
         if source.reduce is Reduce.SUM:
             sql = (
                 f"SELECT {source.key_column} AS k, {source.available_expr} AS av, "
@@ -1769,10 +1776,18 @@ class EquityDuckdbAdapter:
                 else _as_date(content_raw, f"{source.relation}.{source.content_expr}")
             )
             # LATEST 원천에는 `fill_kind` 축이 없다 — 셀 종류는 값 유무로만 갈린다.
+            known = dict(zip(late, raw[3 + len(fields) :], strict=True))
             entry: dict[str, _Observed] = {}
             for position, field_id in enumerate(fields):
                 value = _as_float(raw[3 + position], field_id)
-                entry[field_id] = _Observed(value, available, content, _cell_kind(value, None))
+                field_available = (
+                    _as_date(known[position], f"{source.relation}.{late[position]}")
+                    if position in known
+                    else available
+                )
+                entry[field_id] = _Observed(
+                    value, field_available, content, _cell_kind(value, None)
+                )
             dates.setdefault(key, []).append(available)
             cells.setdefault(key, []).append(entry)
         return {key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates}
@@ -1801,4 +1816,11 @@ class EquityDuckdbAdapter:
         if series is None:
             return None
         position = bisect_right(series.dates, cutoff) - 1
-        return None if position < 0 else series.cells[position][field_id]
+        if position < 0:
+            return None
+        found = series.cells[position][field_id]
+        # 행은 보이는데 이 필드 값은 더 늦게 공개된다(재무 TTM 창 안 분기의 늦은 정정본, #238).
+        # 그때까지는 다른 행 값으로 대신하지 않고 결측이다.
+        if found.available_date > cutoff:
+            return _Observed(None, series.dates[position], found.content_date, CellKind.MISSING)
+        return found

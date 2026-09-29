@@ -76,6 +76,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from tests.equity_fixture import (
     WB_BONUS_EX,
     WB_EVENING_SESSION,
+    WB_FIN_ROWS,
     WB_HALT_DATE,
     WB_INCONSISTENT,
     WB_LATE_FACTOR,
@@ -85,10 +86,12 @@ from tests.equity_fixture import (
     WB_SESSIONS,
     WB_SPLIT_DATE,
     build_workbench_root,
+    fin_std_table,
     snapshot_id,
     table_builds,
     wb_close,
     write_catalog,
+    write_equity_table,
 )
 
 pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync --extra equity)")
@@ -468,6 +471,78 @@ def test_late_old_period_correction_does_not_revert_financials_to_that_period(
     # 창 독립: 정정본 공개 뒤 세션만 좁혀 물어도 같다
     narrow = _raw(adapter, start=END, end=END, fields=("financial.book_equity",))
     assert _field(narrow, END, "000660:1", "financial.book_equity") == 1_200.0
+
+
+def test_a_late_correction_inside_the_ttm_window_completes_that_period_ttm_on_its_filing(
+    tmp_path: Path,
+) -> None:
+    """#238: 창 안 분기의 정정본이 늦게 접수되면 그 기간 TTM 은 정정 접수일부터 보인다.
+
+    000660 은 2023 반기(08-14 접수)가 공개된 가장 최근 기간이고, 그 TTM 창 [2022 3분기 ~ 2023
+    반기] 안의 2023 1분기 정정본이 2024-01-09 에 접수된다. 예전에는 창이 반기 공개일에 완성되지
+    않아 다음 정기보고서까지 결측이었다. 지금은 정정 접수일(랙 1세션이라 01-10)부터 반기 TTM 이
+    선다. 고르는 기간(반기)과 잔액 필드(자본)는 그대로다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    fiscal_2022 = [
+        {
+            "corp_code": "C00660",
+            "period_end": period_end,
+            "report_code": report,
+            "bsns_year": "2022",
+            "rcept_no": f"R00660{report}_22",
+            "available_date": available,
+            "revenue": revenue,
+            "net_income": net_income,
+            "cf_operating_ytd": cf_ytd,
+        }
+        for period_end, report, available, revenue, net_income, cf_ytd in (
+            (date(2022, 3, 31), "11013", date(2022, 5, 16), 150, 30, 20),
+            (date(2022, 6, 30), "11012", date(2022, 8, 16), 160, 32, 45),
+            (date(2022, 9, 30), "11014", date(2022, 11, 14), 170, 34, 70),
+            (date(2022, 12, 31), "11011", date(2023, 3, 14), 660, 136, 100),
+        )
+    ]
+    write_equity_table(
+        root,
+        "fin_std",
+        fin_std_table([*WB_FIN_ROWS, *fiscal_2022]),
+        build_id="b_fin_238",
+        year_column="period_end",
+    )
+    write_catalog(root)
+    fields = (
+        "financial.revenue",
+        "financial.net_income",
+        "financial.operating_cash_flow",
+        "financial.book_equity",
+    )
+    result = _raw(
+        EquityDuckdbAdapter(root),
+        start=date(2024, 1, 9),
+        end=END,
+        fields=fields,
+        universe="krx.all",
+    )
+
+    before = _cell(result, date(2024, 1, 9), "000660:1", "financial.net_income")
+    assert (before.value, before.kind, before.available_date) == (
+        None,
+        CellKind.MISSING,
+        date(2023, 8, 14),
+    )
+    for session in (date(2024, 1, 10), END):
+        cells = {field: _cell(result, session, "000660:1", field) for field in fields}
+        # 2022 3분기 · 2022 4분기(연간 − 1~3분기) · 2023 1분기(정정본) · 2023 반기
+        assert {field: cell.value for field, cell in cells.items()} == {
+            "financial.revenue": 170.0 + 180.0 + 190.0 + 200.0,
+            "financial.net_income": 34.0 + 40.0 + 38.0 + 40.0,
+            "financial.operating_cash_flow": 25.0 + 30.0 + 40.0 + 30.0,
+            "financial.book_equity": 1_200.0,
+        }, session
+        assert cells["financial.net_income"].available_date == date(2024, 1, 9)
+        assert cells["financial.operating_cash_flow"].available_date == date(2024, 1, 9)
+        assert cells["financial.book_equity"].available_date == date(2023, 8, 14)
 
 
 def test_consensus_picks_the_nearest_target_period_and_the_measured_source(

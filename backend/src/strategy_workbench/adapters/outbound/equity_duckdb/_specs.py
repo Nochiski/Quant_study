@@ -146,7 +146,16 @@ class FieldSpec:
     # dataset_profile 의 랙이 갈리는 경우다(price 원천의 market_cap·shares_outstanding, 이슈 #246).
     lag_sessions: int | None = None
     lag_basis: str | None = None
+    # 값이 행보다 늦게 공개되는 필드만 적는다 — 원천 relation 위의 그 공개일 식(LATEST PICK 원천).
+    # 행은 원천의 `available_expr` 로 고르고, 이 날이 컷오프보다 늦으면 그 셀은 그때까지 결측이다.
+    # 재무 TTM 은 창 안 분기가 정정 재제출로 행보다 늦게 접수되면 그날 완성된다(#238).
+    available_expr: str | None = None
 
+
+# 재무 TTM 의 공개일 열(v_fin_latest, #238) — 창 안 네 분기값 공개일의 max. 흐름 필드가 행 대신
+# 이 날부터 보이고, 옛 카탈로그에 이 열이 있는지 부팅 때 확인한다.
+_TTM_INCOME_AVAILABLE = "ttm_income_available_date"
+_TTM_CF_AVAILABLE = "ttm_cf_available_date"
 
 # ── 원천 (읽는 자리) ──────────────────────────────────────────────────────────
 # 폴백 랙은 원장 dataset_profile(S19) 선언과 같다. 표가 없는 루트(옛 루트·부분 동기화 루트)에서도
@@ -249,8 +258,8 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_basis=_DART_LAG_BASIS,
         requires=(FIN_TABLE, DISCLOSURE_TABLE, CORP_TICKER_TABLE, FIN_MACRO),
         frequency="quarterly",
-        # #225 전에 만든 카탈로그의 v_fin_latest 에는 이 열이 없다 — 재생성 전까지 재무만 뺀다.
-        required_columns=("period_frontier",),
+        # #225·#238 전 카탈로그의 v_fin_latest 에는 이 열들이 없다 — 재생성 전까지 재무만 뺀다.
+        required_columns=("period_frontier", _TTM_INCOME_AVAILABLE, _TTM_CF_AVAILABLE),
     ),
     SourceSpec(
         name="consensus_eps",
@@ -464,11 +473,12 @@ _FIN_TTM_NOTE = (
     "**최근 4분기 합(TTM)** 이다 — 최신 공시가 분기보고서든 사업보고서든 늘 12개월 값이다. "
     "v_fin_latest 가 회계기간 순서로 분기값(3개월)을 세워 4행을 더한다 — 사업보고서의 4분기는 "
     "연간 − 같은 회계연도 1분기·반기·3분기라 비12월 결산도 같은 규칙이다. 연속 4분기의 분기값이 "
-    "**이 행의 공시일까지 전부 알 수 있었을 때만** 선다(4분기·현금흐름 분기값이 기대는 창 밖 "
-    "보고서의 접수일까지 본다). 하나라도 비거나(분기 누락·직전 분기 미수집) 늦게 접수됐거나, 창 "
-    "안에 연결·별도가 섞였거나 매출 기준(revenue_basis)이 섞였으면 값은 결측(MISSING)이고 3개월·"
-    "연간 값으로 대신하지 않는다(부분합 금지). available_date 는 창의 마지막 분기 보고서 "
-    "접수일이고, 사업보고서 행의 TTM 은 연간 값과 같다"
+    "**전부 공개된 날부터** 보인다(4분기·현금흐름 분기값이 기대는 창 밖 보고서의 접수일까지 "
+    "본다). 창 안 분기가 정정 재제출로 늦게 접수되면 그 접수일부터다. 하나라도 비었거나(분기 "
+    "누락·직전 분기 미수집), 창 안에 연결·별도가 섞였거나 매출 기준(revenue_basis)이 섞였으면 "
+    "값은 결측(MISSING)이고 3개월·연간 값으로 대신하지 않는다(부분합 금지). 더 최근 기간이 "
+    "공개되면 그 기간의 TTM 으로 넘어가고, 그 TTM 이 아직 서지 않았으면 옛 기간 값을 두지 않고 "
+    "결측이다. available_date 는 TTM 창의 마지막 공개일이고, 사업보고서 행의 TTM 은 연간 값과 같다"
 )
 _FIN_EVIDENCE = (
     "equity.duckdb v_fin_latest(as_of) ← fin_std(vintage_kind='api_restated', CFS 우선 "
@@ -628,6 +638,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_INCOME_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.gross_profit",
@@ -643,6 +654,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_INCOME_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.operating_income",
@@ -655,6 +667,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         description=_FIN_TTM_NOTE,
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_INCOME_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.net_income",
@@ -667,6 +680,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         description=_FIN_TTM_NOTE,
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_INCOME_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.operating_cash_flow",
@@ -684,6 +698,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_CF_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.total_assets",

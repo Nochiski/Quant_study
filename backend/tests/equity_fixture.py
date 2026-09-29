@@ -510,11 +510,11 @@ def credit_table(rows: list[CreditRow]) -> pa.Table:
 
 # ── 카탈로그 (`equity.duckdb` + `_catalog_meta.json`) ────────────────────────
 # `equity.catalog`·`equity.views`(database/src/equity) 의 테스트 대역. backend 런타임은 그 패키지를
-# import 하지 않으므로 매크로 본문(DESIGN §5 v_cum_adj·v_adj_price·v_adj_price_fwd)과 snapshot_id
-# 규칙(전 테이블 table=build 정렬 sha256 16자리)을 여기 옮겨 적는다 — 본문이 바뀌면 여기도 같이
-# 바꾼다.
-# 예외는 원장 선언과 대조하는 계약 테스트다. 그 테스트는 `import_ledger_module` 로 import 하는
-# 동안만 경로를 올린다(#230).
+# import 하지 않지만, 이 대역은 `import_ledger_module` 로 원장 모듈을 불러 쓸 수 있다(경로는 import
+# 하는 동안만 올린다, #230). 매크로는 원장 템플릿을 렌더할 수 있으면 렌더한다(`LEDGER_MACROS`,
+# #249·#220) — 손 픽스처 표가 그 템플릿이 읽는 열을 다 가질 때다. 표가 좁아 렌더할 수 없는 5개
+# (`_CATALOG_BODIES`)만 본문을 여기 옮겨 적고, 원장 본문이 바뀌면 같이 바꾼다. snapshot_id 규칙(전
+# 테이블 table=build 정렬 sha256 16자리)도 옮겨 적은 사본이다.
 
 _EQUITY_SRC = Path(__file__).resolve().parents[2] / "database" / "src"
 

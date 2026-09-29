@@ -1,10 +1,11 @@
 """`v_adj_close` — 원장이 그날 사건을 접지 못한 적용일 행의 수정주가를 결측으로 낸다 (#220).
 
-수정주가(`price_adj_daily`, S23)는 공개 전 계수를 접지 않는다(fold_date = greatest(apply, available)).
-그래서 계수가 적용일 다음 세션에 공개되면 적용일 하루는 원주가가 이미 사건 뒤 척도인데 누적 계수는
-사건 전이라 스파이크가 서고, `krx_base_inconsistent`(기준가는 바뀌었는데 계수를 못 낸 사건)는 적용일에
-층이 영구히 바뀐다. 뷰는 그 적용일 행만 결측으로 내고 나머지 행은 표 값 그대로 둔다. 적용일의 가격
-불연속은 그날 가격 데이터에 이미 보이므로 공개일과 무관하게 가린다(값은 바꾸지 않는다).
+수정주가(`price_adj_daily`, S23)는 공개 전 계수를 접지 않는다(fold_date = greatest(apply,
+available)). 그래서 계수가 적용일 다음 세션에 공개되면 적용일 하루는 원주가가 이미 사건 뒤 척도인데
+누적 계수는 사건 전이라 스파이크가 서고, `krx_base_inconsistent`(기준가는 바뀌었는데 계수를 못 낸
+사건)는 적용일에 층이 영구히 바뀐다. 뷰는 그 적용일 행만 결측으로 내고 나머지 행은 표 값 그대로
+둔다. 적용일의 가격 불연속은 그날 가격 데이터에 이미 보이므로 공개일과 무관하게 가린다(값은 바꾸지
+않는다).
 """
 from __future__ import annotations
 
@@ -13,7 +14,9 @@ from datetime import date, timedelta
 import duckdb
 from equity import views
 
-_DAYS = tuple(d for d in (date(2024, 1, 1) + timedelta(days=n) for n in range(20)) if d.weekday() < 5)
+_DAYS = tuple(
+    d for d in (date(2024, 1, 1) + timedelta(days=n) for n in range(20)) if d.weekday() < 5
+)
 _LAST = _DAYS[-1]
 # (티커, 적용일 index, 공개일 index, factor_ok, factor_source)
 _EVENTS = (
@@ -56,7 +59,8 @@ def test_늦은_계수와_계수를_못_낸_기준가_재설정의_적용일_행
 
 
 def test_as_of_는_행만_자르고_가림은_공개일과_무관하다() -> None:
-    """적용일 당일 as_of 에도 가린다 — 공개일(다음 세션)을 기다리지 않는다(값을 바꾸지 않는 결측이다)."""
+    """적용일 당일 as_of 에도 가린다 — 공개일(다음 세션)을 기다리지 않는다(값을 바꾸지 않는
+    결측이다)."""
     con = _connect()
     assert _gaps(con, _DAYS[3])["LATE"] == [_DAYS[3]]
     assert max(r[0] for r in con.execute(

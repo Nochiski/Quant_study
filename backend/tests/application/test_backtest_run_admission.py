@@ -23,6 +23,9 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
     BacktestEnginePortfolioAdapter,
 )
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -84,6 +87,7 @@ def gated_runs(tmp_path: Path) -> Iterator[_GatedRuns]:
             MockEquityDataAdapter.demo(),
             BacktestEngineExecutorAdapter(build_default_metric_registry()),
             LocalArtifactStore(tmp_path),
+            run_repository=SQLiteBacktestRunRepository(),
             new_id=iter(run_ids).__next__,
             max_concurrent_runs=max_concurrent_runs,
         )

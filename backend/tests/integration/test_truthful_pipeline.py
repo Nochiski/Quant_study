@@ -30,6 +30,9 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -489,6 +492,7 @@ def test_unused_by_factor_non_finite_raw_field_fails_preview_trace_and_the_backt
         delegate,
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "raw-contract-run",
     )
     # 시작 요청은 데이터를 읽지 않으므로 접수되고, 계약 위반은 tape 단계에서 run 을 실패시킨다.
@@ -597,6 +601,7 @@ def test_legacy_raw_port_keeps_preview_and_backtest_compatible(tmp_path: Path) -
         adapter,
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "legacy-port-run",
     )
 
@@ -624,6 +629,7 @@ def test_metadata_raw_snapshot_mismatch_blocks_portfolio_and_backtest(tmp_path: 
         adapter,
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "must-not-complete",
     )
     # 스냅샷 대조는 원시 관측을 읽은 뒤에만 가능하므로 tape 단계에서 run 을 실패시킨다(#158).
@@ -1104,6 +1110,7 @@ def test_unknown_sectors_keep_the_full_book_and_warn_in_preview_trace_and_run(
         delegate,
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "unknown-sector-run",
     )
     accepted = backtests.start(

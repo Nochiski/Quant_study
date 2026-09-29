@@ -56,6 +56,8 @@ const ko = {
     "세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식). 서버 오류가 아니라 전략이 자본을 모두 잃은 결과입니다. 레버리지·공매도 비중을 줄여 보세요.",
   "backtest.run.error.backtest.run.internal":
     "서버 내부 오류로 실행이 중단되었습니다. 서버 로그를 확인하세요.",
+  "backtest.run.error.backtest.run.interrupted":
+    "실행이 끝나기 전에 서버가 다시 시작되어 중단되었습니다. 같은 설정으로 다시 실행하세요.",
   "backtest.settings.title": "실행 설정",
   "backtest.settings.open": "실행 설정 열기",
   "backtest.settings.ready": "준비됨",
@@ -1454,7 +1456,7 @@ const ko = {
   "history.revisions.close": "Revision 접기",
   "history.backtests.title": "백테스트 이력",
   "history.backtests.description":
-    "현재 서버 프로세스에서 실행한 백테스트와 정확한 전략 provenance를 탐색합니다.",
+    "지금까지 실행한 백테스트와 정확한 전략 provenance를 탐색합니다. 서버를 다시 시작해도 남습니다.",
   "history.backtests.error": "백테스트 이력을 불러올 수 없습니다.",
   "history.backtests.emptyTitle": "백테스트 실행 이력이 없습니다",
   "history.backtests.empty": "전략에서 백테스트를 실행하면 이곳에 표시됩니다.",
@@ -1762,6 +1764,8 @@ export const messages = {
       "Equity fell to zero or below at a session close, so the run stopped (wiped out). This is the strategy losing all its capital, not a server error. Try lower leverage or short exposure.",
     "backtest.run.error.backtest.run.internal":
       "The run stopped because of an internal server error. Check the server logs.",
+    "backtest.run.error.backtest.run.interrupted":
+      "The server restarted before the run finished. Run it again with the same settings.",
     "backtest.settings.title": "Run settings",
     "backtest.settings.open": "Open run settings",
     "backtest.settings.ready": "Ready",
@@ -3185,7 +3189,7 @@ export const messages = {
     "history.revisions.close": "Collapse revisions",
     "history.backtests.title": "Backtest history",
     "history.backtests.description":
-      "Browse backtests from this server process and the exact strategy provenance each run used.",
+      "Browse every backtest you have run and the exact strategy provenance each used. History survives server restarts.",
     "history.backtests.error": "Backtest history could not be loaded.",
     "history.backtests.emptyTitle": "No backtest runs yet",
     "history.backtests.empty": "Run a strategy backtest to see it here.",

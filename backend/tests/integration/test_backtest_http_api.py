@@ -24,6 +24,9 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
     BacktestDataPort,
@@ -92,6 +95,7 @@ def _backtests_with_raw_load_barrier(
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
     return backtests, barrier
@@ -263,6 +267,7 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         barrier,
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: next(run_ids),
     )
     client = TestClient(_app_with_backtests(container, backtests))
@@ -441,6 +446,7 @@ def test_cancel_first_observed_by_a_progress_callback_ends_cancelled(tmp_path: P
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
     client = TestClient(_app_with_backtests(container, backtests))
@@ -566,6 +572,7 @@ def test_engine_incompatible_strategy_is_rejected_at_start_with_the_issue_list(
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "must-not-be-accepted",
     )
     client = TestClient(_app_with_backtests(container, backtests))
@@ -719,7 +726,10 @@ def test_run_error_masks_server_paths_but_keeps_urls_and_units(raw: str, masked:
 
 
 def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() -> None:
-    """`_failure_code` 산출 집합 == `RunFailureCode` 어휘, 그중 422 코드는 계약 Literal 과 같다."""
+    """`_failure_code` 산출 집합 + `interrupted` == `RunFailureCode` 어휘.
+
+    그중 422 코드는 계약 Literal 과 같다.
+    """
     from typing import get_args, get_type_hints
 
     from strategy_workbench.adapters.inbound.http_api._backtest_contract import (
@@ -750,7 +760,8 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         _failure_code(EquityWipedOutError("x")),
         _failure_code(RuntimeError("x")),
     }
-    assert produced == RUN_FAILURE_CODES
+    # `interrupted` 는 예외가 아니라 재시작 때 서비스가 닫으며 붙인다(검증 랩 spec D3).
+    assert produced == RUN_FAILURE_CODES - {"backtest.run.interrupted"}
 
     def contract_code(detail_type: type) -> str:
         # future annotations 라 필드 타입이 문자열이다 — 평가해서 Literal 인자를 꺼낸다.
@@ -762,7 +773,11 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         contract_code(PortfolioDataUnavailableDetail),
         contract_code(PortfolioRawObservationInvalidDetail),
         contract_code(BacktestRunInvalidDetail),
-    } == RUN_FAILURE_CODES - {"backtest.run.internal", "backtest.run.equity_wiped_out"}
+    } == RUN_FAILURE_CODES - {
+        "backtest.run.internal",
+        "backtest.run.equity_wiped_out",
+        "backtest.run.interrupted",
+    }
 
 
 def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -> None:

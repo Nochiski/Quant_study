@@ -12,6 +12,7 @@ import {
   runtimeAssistantDatabasePath,
   runtimeAssistantSecretsPath,
   runtimeDatabasePath,
+  runtimeResearchDatabasePath,
 } from "./e2e/runtime";
 
 const frontendDirectory = dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,7 @@ const runtimeDatabase = runtimeDatabasePath();
 // 설정 디렉터리라, 넘기지 않으면 e2e가 개발자의 실제 대화 이력과 `secrets.json`에 쓴다.
 const runtimeAssistantDatabase = runtimeAssistantDatabasePath();
 const runtimeAssistantSecrets = runtimeAssistantSecretsPath();
+const runtimeResearchDatabase = runtimeResearchDatabasePath();
 const ci = process.env.CI !== undefined;
 // 실데이터 opt-in: `E2E_REAL_EQUITY_ROOT`(로컬 equity 루트, `ledger_sync sync` 산출)가 있으면 backend 를
 // duckdb 어댑터로 띄우고 `real-equity` project 만 수집한다. 없으면 mock 어댑터 + 릴리스 게이트 project 만.
@@ -132,6 +134,7 @@ export default defineConfig({
       env: {
         ...process.env,
         STRATEGY_WORKBENCH_DB_PATH: runtimeDatabase,
+        STRATEGY_WORKBENCH_RESEARCH_DB_PATH: runtimeResearchDatabase,
         // 포트를 옮기면 preview origin 도 바뀐다. 허용 목록에 넣지 않으면 브라우저 요청이
         // CORS 로 막혀 서버는 멀쩡한데 화면만 빈다.
         STRATEGY_WORKBENCH_ALLOWED_ORIGINS: preview,

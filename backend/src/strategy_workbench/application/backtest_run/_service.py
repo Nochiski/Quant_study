@@ -57,6 +57,7 @@ from .ports.outgoing.backtest_executor import (
     EquityWipedOutError,
     RunCancelledError,
 )
+from .ports.outgoing.run_repository import BacktestRunRepositoryPort, BacktestRunSummary
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,9 @@ _DATA_PROGRESS = 0.82
 _ENGINE_PROGRESS_START = 0.84
 _ENGINE_PROGRESS_END = 0.92
 _ARTIFACT_PROGRESS = 0.93
+# run 하나가 메모리에 들고 있는 진행 이벤트 수의 상한(검증 랩 spec D3). 이벤트는 저장하지 않으므로
+# SSE 재생이 이만큼 뒤처진 구독자는 앞 이벤트를 건너뛴다 — 상태는 폴링·목록이 저장소에서 읽는다.
+_EVENT_RING_SIZE = 256
 # 팩터 평가기는 종목마다 진행을 보고한다. 같은 작업 설명 안에서 이 폭보다 작은 상승은 이벤트로
 # 남기지 않아 run 당 tape 이벤트 수를 약 100개 이하로 묶는다(SSE 재생·메모리 보호).
 _MIN_TAPE_PROGRESS_STEP = 0.01
@@ -165,33 +169,21 @@ class StrategyRevisionRequiresUpgradeError(RuntimeError):
     """
 
 
-class BacktestRunNotFoundError(KeyError):
-    pass
-
-
 class BacktestResultNotReadyError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class BacktestRunSummary:
-    """One process-lifetime run and the strategy meaning resolved before it started."""
-
-    run: BacktestRunState
-    strategy_provenance: StrategyProvenance
-
-
-# 레코드는 정체성으로 가린다(`eq=False`) — 대기열에서 꺼내고 지울 때 같은 run 만 맞아야 한다.
+# 이 프로세스가 접수한 run 의 메모리 사본. 목록·상태·요청의 정본은 저장소이고, 이 사본은 저장하지
+# 않는 것(진행률·진행 이벤트 링·취소 신호·결과)을 든다. 정체성으로 가린다(`eq=False`) — 대기열에서
+# 꺼내고 지울 때 같은 run 만 맞아야 한다.
 @dataclass(eq=False)
 class _RunRecord:
     state: BacktestRunState
-    request: BacktestRunSpec
-    # 실행할 spec — `strategy` 를 해소하고 실행 설정을 박은 것. `request` 는 다시 제출할 수 있는
-    # 원본이라 따로 둔다.
+    # 실행할 spec — `strategy` 를 해소하고 실행 설정을 박은 것. 다시 제출할 수 있는 원본 요청은
+    # 저장소가 가진다.
     spec: BacktestRunSpec
     provenance: StrategyProvenance
-    accepted_sequence: int
-    events: list[RunProgressEvent]
+    events: deque[RunProgressEvent]
     cancellation: Event
     result: BacktestRunResult | None = None
 
@@ -205,6 +197,7 @@ class BacktestRunService:
         executor: BacktestExecutorPort,
         artifact_store: BacktestArtifactStorePort,
         *,
+        run_repository: BacktestRunRepositoryPort,
         new_id: Callable[[], str],
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
         max_concurrent_runs: int = MAX_CONCURRENT_RUNS,
@@ -219,14 +212,15 @@ class BacktestRunService:
         self._data_source = data_source
         self._executor = executor
         self._artifact_store = artifact_store
+        self._repository = run_repository
         self._new_id = new_id
         self._now = now
         self._max_concurrent_runs = max_concurrent_runs
         self._records: dict[str, _RunRecord] = {}
         self._waiting: deque[_RunRecord] = deque()
         self._running = 0
-        self._next_accepted_sequence = 0
         self._lock = RLock()
+        self._close_interrupted_runs()
 
     def start(self, request: BacktestRunSpec) -> BacktestStartResponse:
         """실행 요청을 받아 즉시 `QUEUED` 로 접수한다.
@@ -325,16 +319,15 @@ class BacktestRunService:
                     created_at=created,
                     updated_at=created,
                 ),
-                request=request,
                 spec=spec,
                 provenance=provenance,
-                accepted_sequence=self._next_accepted_sequence,
-                events=[],
+                events=deque(maxlen=_EVENT_RING_SIZE),
                 cancellation=Event(),
             )
-            self._next_accepted_sequence += 1
-            self._records[run_id] = record
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
+            # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
+            self._repository.add(BacktestRunSummary(record.state, provenance), request)
+            self._records[run_id] = record
             # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
             # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
             accepted = record.state
@@ -343,19 +336,22 @@ class BacktestRunService:
         return BacktestStartResponse(accepted)
 
     def state(self, run_id: str) -> BacktestRunState:
+        """이 프로세스가 도는 run 은 메모리의 진행률까지, 나머지는 저장소의 마지막 상태."""
         with self._lock:
-            return self._record(run_id).state
+            record = self._records.get(run_id)
+            if record is not None:
+                return record.state
+        return self._repository.get(run_id).run
 
     def request(self, run_id: str) -> BacktestRunSpec:
-        """Return the normalized request accepted for an in-process run.
+        """Return the normalized request accepted for a run.
 
         The unresolved request carries exactly one strategy source and is therefore safe to
         submit again. The resolved execution spec intentionally remains an internal detail until
         it is committed to the immutable result manifest.
         """
 
-        with self._lock:
-            return self._record(run_id).request
+        return self._repository.request(run_id)
 
     def list_runs(
         self,
@@ -363,45 +359,41 @@ class BacktestRunService:
         *,
         strategy_id: str | None = None,
     ) -> Page[BacktestRunSummary]:
-        """Return an atomic newest-accepted-first snapshot of the in-process run register."""
+        """최근 접수 순. 목록은 저장소가 정하고, 이 프로세스가 도는 run 은 메모리 상태로 덮는다."""
 
+        stored = self._repository.list(page, strategy_id=strategy_id)
         with self._lock:
-            ordered = tuple(
-                sorted(
-                    (
-                        record
-                        for record in self._records.values()
-                        if strategy_id is None or record.provenance.strategy_id == strategy_id
-                    ),
-                    key=lambda record: record.accepted_sequence,
-                    reverse=True,
-                )
-            )
-            return Page(
+            return replace(
+                stored,
                 items=tuple(
-                    BacktestRunSummary(
-                        run=record.state,
-                        strategy_provenance=record.provenance,
-                    )
-                    for record in ordered[page.offset : page.offset + page.limit]
+                    replace(item, run=self._records[item.run.run_id].state)
+                    if item.run.run_id in self._records
+                    else item
+                    for item in stored.items
                 ),
-                total=len(ordered),
-                offset=page.offset,
-                limit=page.limit,
             )
 
     def result(self, run_id: str) -> BacktestRunResult:
         with self._lock:
-            record = self._record(run_id)
-            if record.result is None or record.state.status is not RunStatus.COMPLETED:
-                raise BacktestResultNotReadyError(
-                    f"backtest result is not ready: run_id={run_id} status={record.state.status}"
-                )
-            return record.result
+            record = self._records.get(run_id)
+            if (
+                record is not None
+                and record.result is not None
+                and record.state.status is RunStatus.COMPLETED
+            ):
+                return record.result
+        # 결과는 아직 이 프로세스 메모리에만 있다. 재시작 전에 끝난 run 의 결과 재적재는 V1-04 다.
+        status = record.state.status if record is not None else self.state(run_id).status
+        raise BacktestResultNotReadyError(
+            f"backtest result is not ready in this server process: run_id={run_id} status={status}"
+        )
 
     def cancel(self, run_id: str) -> BacktestRunState:
         with self._lock:
-            record = self._record(run_id)
+            record = self._records.get(run_id)
+            if record is None:
+                # 이 프로세스가 돌리지 않은 run 은 재시작 때 이미 종결됐다.
+                return self.state(run_id)
             if record.state.status in (
                 RunStatus.COMPLETED,
                 RunStatus.CANCELLED,
@@ -427,9 +419,42 @@ class BacktestRunService:
             return record.state
 
     def events(self, run_id: str, *, after_sequence: int = -1) -> tuple[RunProgressEvent, ...]:
+        """메모리 링의 진행 이벤트. 이 프로세스가 돌리지 않은 run 은 이벤트가 없다."""
         with self._lock:
-            return tuple(
-                event for event in self._record(run_id).events if event.sequence > after_sequence
+            record = self._records.get(run_id)
+            if record is not None:
+                return tuple(event for event in record.events if event.sequence > after_sequence)
+        self._repository.get(run_id)
+        return ()
+
+    def _close_interrupted_runs(self) -> None:
+        """지난 프로세스에서 끝나지 못한 run 을 `failed` + `backtest.run.interrupted` 로 닫는다.
+
+        run 스레드는 프로세스와 함께 사라지므로 `queued`·`running` 으로 남은 기록은 다시 돌 수 없다.
+        그대로 두면 목록·폴링이 끝나지 않는 run 을 영원히 본다(검증 랩 spec D3). 저장소 파일 하나를
+        서버 프로세스 하나가 쓴다는 전제다 — 두 프로세스가 같은 파일을 열면 뒤에 뜬 쪽이 앞의 도는
+        run 을 닫는다.
+        """
+        for state in self._repository.unfinished():
+            self._repository.update(
+                replace(
+                    state,
+                    status=RunStatus.FAILED,
+                    stage="failed",
+                    message="Run interrupted by a server restart",
+                    error=(
+                        "run did not finish before the server stopped — "
+                        f"run_id={state.run_id} status={state.status} stage={state.stage}"
+                    ),
+                    error_code="backtest.run.interrupted",
+                    updated_at=self._now(),
+                )
+            )
+            logger.warning(
+                "backtest run closed as interrupted — run_id=%s status=%s stage=%s",
+                state.run_id,
+                state.status,
+                state.stage,
             )
 
     def _resolve(
@@ -734,6 +759,7 @@ class BacktestRunService:
         message: str,
     ) -> None:
         occurred_at = self._now()
+        previous = record.state.status
         record.state = replace(
             record.state,
             status=status,
@@ -744,7 +770,7 @@ class BacktestRunService:
         )
         record.events.append(
             RunProgressEvent(
-                sequence=len(record.events),
+                sequence=record.events[-1].sequence + 1 if record.events else 0,
                 run_id=record.state.run_id,
                 status=status,
                 progress=progress,
@@ -753,12 +779,25 @@ class BacktestRunService:
                 occurred_at=occurred_at,
             )
         )
+        # 상태가 바뀔 때만 저장한다(진행률은 메모리). 접수는 `start` 가 `add` 로 저장한다.
+        if status is not previous:
+            self._persist(record.state)
 
-    def _record(self, run_id: str) -> _RunRecord:
+    def _persist(self, state: BacktestRunState) -> None:
+        """상태 전이를 저장한다. 실패해도 run 수명은 멈추지 않는다.
+
+        run 스레드의 실패 분기가 다시 저장하다 터지면 레코드가 비종결로 굳는다. 이 프로세스에서는
+        메모리 상태가 계속 맞고, 저장되지 않은 전이는 재시작 때 `interrupted` 로 닫힌다.
+        """
         try:
-            return self._records[run_id]
-        except KeyError:
-            raise BacktestRunNotFoundError(run_id) from None
+            self._repository.update(state)
+        except Exception:
+            logger.exception(
+                "backtest run state could not be persisted — run_id=%s status=%s stage=%s",
+                state.run_id,
+                state.status,
+                state.stage,
+            )
 
     @staticmethod
     def _raise_if_cancelled(record: _RunRecord) -> None:

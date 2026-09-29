@@ -49,6 +49,7 @@ const RUN_FAILURE_CODES: Record<RunFailureCode, true> = {
   "backtest.run.invalid": true,
   "backtest.run.equity_wiped_out": true,
   "backtest.run.internal": true,
+  "backtest.run.interrupted": true,
 };
 
 type Schema = {

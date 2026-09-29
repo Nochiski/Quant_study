@@ -24,6 +24,9 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
     BacktestEnginePortfolioAdapter,
 )
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
@@ -202,6 +205,7 @@ def _runs(executor: _RecordingExecutor, tmp_path: Path, run_id: str) -> Backtest
         MockEquityDataAdapter.demo(),
         executor,
         LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
 

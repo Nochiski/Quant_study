@@ -1,14 +1,16 @@
 from strategy_workbench.application.backtest_run._service import (
     BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
-    BacktestRunNotFoundError,
     BacktestRunService,
-    BacktestRunSummary,
     InvalidBacktestRunError,
     MissingBacktestRunEnvironmentError,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
     StrategyRevisionRequiresUpgradeError,
+)
+from strategy_workbench.application.backtest_run.ports.outgoing.run_repository import (
+    BacktestRunNotFoundError,
+    BacktestRunSummary,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,

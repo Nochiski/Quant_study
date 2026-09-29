@@ -108,6 +108,39 @@ describe("projectPipeline", () => {
     ]);
   });
 
+  it("적용 조건이 두 단으로 이어지면 사슬 끝 행의 카드에 붙는다", () => {
+    // 지금 스키마에는 두 단 사슬이 없다. 결정 문구("조건이 가리키는 필드의 카드")대로 전이하는지 합성
+    // 스키마로 고정한다(#367 리뷰 P3-1 C02).
+    const schema = structuredClone(SCHEMA) as {
+      $defs: Record<
+        string,
+        { properties: Record<string, Record<string, unknown>> }
+      >;
+    };
+    schema.$defs.PortfolioStep.properties.turnover_buffer_count[
+      "x-applicable-when"
+    ] = {
+      all_of: [
+        {
+          pointer: "/portfolio/rebalance_every_n_sessions",
+          equals: null,
+          not_null: true,
+        },
+      ],
+      description_key:
+        "strategy.contract.applicable.rebalance_every_n_sessions",
+      owned_by_error: null,
+    };
+    const portfolio = layout(
+      projectPipeline(schema as unknown as JsonSchema, EMPTY, []),
+    ).find((stage) => stage.stage === "portfolio");
+    expect(portfolio?.cards).toContainEqual([
+      "/portfolio/rebalance",
+      "/portfolio/rebalance_every_n_sessions",
+      "/portfolio/turnover_buffer_count",
+    ]);
+  });
+
   it("Form 행을 잃거나 겹치지 않고, 행은 미작성 필드를 열 자기 섹션을 가진다", () => {
     const source = readBackendFixture(
       "strategy_documents/quality_momentum.yaml",

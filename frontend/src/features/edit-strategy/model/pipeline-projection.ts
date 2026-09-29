@@ -127,7 +127,7 @@ export const projectPipeline = (
       else entryOf(sectionStage).lists.push(section);
       continue;
     }
-    // 행·목록의 단계: 자기 `x-stage`·`x-applied-stage`, 없으면 섹션의 단계(정본 대장 "그래프 표현 투영" 행).
+    // 행의 단계: 자기 `x-stage`·`x-applied-stage`, 없으면 섹션의 단계(정본 대장 "그래프 표현 투영" 행).
     const fields = section.fields.filter((field) => {
       const facts = factsAt(field.pointer);
       const stage = facts?.stage ?? facts?.appliedStage ?? sectionStage;
@@ -140,14 +140,12 @@ export const projectPipeline = (
       });
       return false;
     });
-    const lists = section.lists.filter((list) => {
-      const facts = factsAt(list.pointer);
-      const stage = facts?.stage ?? facts?.appliedStage ?? sectionStage;
-      if (stage !== null) entryOf(stage).lists.push(list);
-      return stage === null;
-    });
-    if (sectionStage === null) unstaged.push({ ...section, fields, lists });
-    else entryOf(sectionStage).diagnostics.push(...section.diagnostics);
+    // 목록 property 는 자기 단계 마커가 없어(backend 배정표 테스트가 고정) 섹션의 단계를 따른다.
+    if (sectionStage === null) unstaged.push({ ...section, fields });
+    else {
+      entryOf(sectionStage).lists.push(...section.lists);
+      entryOf(sectionStage).diagnostics.push(...section.diagnostics);
+    }
   }
   return {
     stages: [...stages].map(([stage, entry]) => ({
@@ -209,14 +207,14 @@ const PLACEHOLDER = /\{([a-z_]+)(\.percent)?\}/g;
 
 /**
  * 필드 하나의 요약 조각: 설명 키 아래 `.summary`(enum은 고른 값의 이름 키 아래 `.summary`)에 같은 카드 필드의
- * 글자를 끼운다. 조각 키가 없거나, 적용되지 않거나, 값이 거짓이거나, 끼울 값이 없으면 null.
+ * 글자를 끼운다. 조각 키가 없거나, 적용되지 않거나, 끼울 값이 없으면 null.
  */
 export const fieldFragment = (
   field: FormField,
   card: readonly FormField[],
   names: SummaryNames,
 ): string | null => {
-  if (field.applicable === false || field.value === false) return null;
+  if (field.applicable === false) return null;
   const control = field.control;
   const key =
     control.kind !== "enum"

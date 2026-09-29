@@ -482,6 +482,9 @@ def test_a_late_correction_inside_the_ttm_window_completes_that_period_ttm_on_it
     반기] 안의 2023 1분기 정정본이 2024-01-09 에 접수된다. 예전에는 창이 반기 공개일에 완성되지
     않아 다음 정기보고서까지 결측이었다. 지금은 정정 접수일(랙 1세션이라 01-10)부터 반기 TTM 이
     선다. 고르는 기간(반기)과 잔액 필드(자본)는 그대로다.
+
+    창 밖 2022 1분기 정정본(01-10)은 사업보고서 4분기 파생에만 기대므로 손익 TTM 공개일만 늦춘다
+    — 손익은 01-11 부터, 영업현금은 01-10 부터 선다. 공개일 열이 둘인 이유다(#300 리뷰 P3-1).
     """
     root = build_workbench_root(tmp_path / "equity")
     fiscal_2022 = [
@@ -497,7 +500,7 @@ def test_a_late_correction_inside_the_ttm_window_completes_that_period_ttm_on_it
             "cf_operating_ytd": cf_ytd,
         }
         for period_end, report, available, revenue, net_income, cf_ytd in (
-            (date(2022, 3, 31), "11013", date(2022, 5, 16), 150, 30, 20),
+            (date(2022, 3, 31), "11013", date(2024, 1, 10), 150, 30, 20),
             (date(2022, 6, 30), "11012", date(2022, 8, 16), 160, 32, 45),
             (date(2022, 9, 30), "11014", date(2022, 11, 14), 170, 34, 70),
             (date(2022, 12, 31), "11011", date(2023, 3, 14), 660, 136, 100),
@@ -525,24 +528,33 @@ def test_a_late_correction_inside_the_ttm_window_completes_that_period_ttm_on_it
         universe="krx.all",
     )
 
-    before = _cell(result, date(2024, 1, 9), "000660:1", "financial.net_income")
-    assert (before.value, before.kind, before.available_date) == (
-        None,
-        CellKind.MISSING,
-        date(2023, 8, 14),
-    )
-    for session in (date(2024, 1, 10), END):
+    def seen(session: date) -> dict[str, tuple[object, date]]:
         cells = {field: _cell(result, session, "000660:1", field) for field in fields}
-        # 2022 3분기 · 2022 4분기(연간 − 1~3분기) · 2023 1분기(정정본) · 2023 반기
-        assert {field: cell.value for field, cell in cells.items()} == {
-            "financial.revenue": 170.0 + 180.0 + 190.0 + 200.0,
-            "financial.net_income": 34.0 + 40.0 + 38.0 + 40.0,
-            "financial.operating_cash_flow": 25.0 + 30.0 + 40.0 + 30.0,
-            "financial.book_equity": 1_200.0,
+        assert all((c.value is None) == (c.kind is CellKind.MISSING) for c in cells.values())
+        return {field: (cell.value, cell.available_date) for field, cell in cells.items()}
+
+    # 2022 3분기 · 2022 4분기(연간 − 1~3분기) · 2023 1분기(정정본) · 2023 반기
+    revenue, net_income = 170.0 + 180.0 + 190.0 + 200.0, 34.0 + 40.0 + 38.0 + 40.0
+    cash_flow, row = 25.0 + 30.0 + 40.0 + 30.0, date(2023, 8, 14)
+    assert seen(date(2024, 1, 9)) == {
+        "financial.revenue": (None, row),
+        "financial.net_income": (None, row),
+        "financial.operating_cash_flow": (None, row),
+        "financial.book_equity": (1_200.0, row),
+    }
+    assert seen(date(2024, 1, 10)) == {
+        "financial.revenue": (None, row),
+        "financial.net_income": (None, row),
+        "financial.operating_cash_flow": (cash_flow, date(2024, 1, 9)),
+        "financial.book_equity": (1_200.0, row),
+    }
+    for session in (date(2024, 1, 11), END):
+        assert seen(session) == {
+            "financial.revenue": (revenue, date(2024, 1, 10)),
+            "financial.net_income": (net_income, date(2024, 1, 10)),
+            "financial.operating_cash_flow": (cash_flow, date(2024, 1, 9)),
+            "financial.book_equity": (1_200.0, row),
         }, session
-        assert cells["financial.net_income"].available_date == date(2024, 1, 9)
-        assert cells["financial.operating_cash_flow"].available_date == date(2024, 1, 9)
-        assert cells["financial.book_equity"].available_date == date(2023, 8, 14)
 
 
 def test_consensus_picks_the_nearest_target_period_and_the_measured_source(

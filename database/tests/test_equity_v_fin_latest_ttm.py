@@ -208,6 +208,51 @@ def test_창_밖_반기의_늦은_정정은_현금흐름_분기_차분을_거쳐
     assert _ttm(con, "L3", date(2022, 6, 30), "ttm_cf_available_date") == late
 
 
+def test_3분기_행은_창의_가장_오래된_사업보고서_4분기가_늦게_서면_손익_공개일만_늦춘다() -> None:
+    """리뷰 #300 P2-1·P3-1 — 3분기 행의 창 [전년 사업보고서, 1분기, 반기, 3분기].
+
+    전년 1분기 정정본(2022-12-01)이 3분기 행보다 늦게 접수됐다. 전년 4분기 = 연간 − 1~3분기라
+    그날을 싣는 것은 창의 가장 오래된 행뿐이다 — 공개일 창이 그 행을 빼면 손익 TTM 이 3분기
+    공개일부터 새어 든다(실원장 순이익 628행). 영업현금 4분기는 전년 3분기 누계에만 기대므로
+    현금 공개일은 행 공개일 그대로다 — 공개일 열이 둘인 이유다.
+    """
+    late = date(2022, 12, 1)
+    con = _connect([
+        _fin("P1", date(2021, 3, 31), late, net_income=10, cf_ytd=10),
+        _fin("P1", date(2021, 6, 30), date(2021, 8, 16), net_income=11, cf_ytd=21),
+        _fin("P1", date(2021, 9, 30), date(2021, 11, 15), net_income=12, cf_ytd=33),
+        _fin("P1", date(2021, 12, 31), date(2022, 3, 21), net_income=46, cf_ytd=46),
+        _fin("P1", date(2022, 3, 31), date(2022, 5, 16), net_income=14, cf_ytd=14),
+        _fin("P1", date(2022, 6, 30), date(2022, 8, 16), net_income=15, cf_ytd=29),
+        _fin("P1", date(2022, 9, 30), date(2022, 11, 14), net_income=16, cf_ytd=45),
+    ])
+    assert _ttm(con, "P1", date(2022, 9, 30)) == 13 + 14 + 15 + 16
+    assert _ttm(con, "P1", date(2022, 9, 30), "ttm_income_available_date") == late
+    assert _ttm(con, "P1", date(2022, 9, 30), "ttm_cf_operating") == 13 + 14 + 15 + 16
+    assert _ttm(con, "P1", date(2022, 9, 30), "ttm_cf_available_date") == date(2022, 11, 14)
+
+
+def test_1분기_행은_직전_사업보고서가_늦게_정정되면_현금_공개일도_그날로_늦춘다() -> None:
+    """리뷰 #300 P2-1 — 1분기 행의 창 [전년 반기, 3분기, 사업보고서, 1분기].
+
+    전년 사업보고서 정정본(2022-06-01)이 1분기 행보다 늦게 접수됐다. 1분기 분기값은 누계
+    그대로라 사업보고서에 기대지 않는다 — 현금 공개일에 그날을 싣는 것은 직전 행(사업보고서)
+    자신뿐이다. 공개일 창이 직전 행을 빼면 영업현금 TTM 이 1분기 공개일부터 새어 든다(실원장
+    2,076행).
+    """
+    late = date(2022, 6, 1)
+    con = _connect([
+        _fin("P2", date(2021, 3, 31), date(2021, 5, 17), net_income=10, cf_ytd=10),
+        _fin("P2", date(2021, 6, 30), date(2021, 8, 16), net_income=11, cf_ytd=21),
+        _fin("P2", date(2021, 9, 30), date(2021, 11, 15), net_income=12, cf_ytd=33),
+        _fin("P2", date(2021, 12, 31), late, net_income=46, cf_ytd=46),
+        _fin("P2", date(2022, 3, 31), date(2022, 5, 16), net_income=14, cf_ytd=14),
+    ])
+    assert _ttm(con, "P2", date(2022, 3, 31), "ttm_cf_operating") == 11 + 12 + 13 + 14
+    assert _ttm(con, "P2", date(2022, 3, 31), "ttm_cf_available_date") == late
+    assert _ttm(con, "P2", date(2022, 3, 31), "ttm_income_available_date") == late
+
+
 def test_창_안에_연결과_별도가_섞이면_TTM_을_세우지_않는다() -> None:
     """리뷰 P2-1 — 연결재무제표를 중간부터 낸 법인의 창 OFS·OFS·OFS·CFS 는 범위가 다른 이익의 합이다."""
     con = _connect([

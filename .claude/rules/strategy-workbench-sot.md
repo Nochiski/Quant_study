@@ -46,7 +46,7 @@ paths:
 | revision의 동결(업그레이드 필요) 여부 | `domain/strategy/_upgrade.py`의 `is_frozen_schema_version`을 `StrategyRevisionRecord.requires_upgrade`(`application/strategy_design/ports/outgoing/strategy_repository.py`)가 적용 | 목록·history·문서 응답·saved-reference 실행 거부가 이 property를 그대로 전달한다. 저장소 row 디코딩(`strategy_sqlite/_record_codec.py`)도 은퇴 버전 복원 경로를 고를 때 같은 domain 함수를 부른다. 어댑터와 HTTP 계층이 `schema_version`을 다시 비교해 동결을 판정하지 않는다 |
 | 파라미터 공간 | `SearchSpec`(미구현, 계획 개념) | trial은 해소된 값만 참조 |
 | 주문·체결·포트폴리오 mutable state | Persistent Rust Engine | Python/API는 명령·조회 |
-| 지표 공식·방향·단위 | backend Metric Registry | UI는 raw metric 표시·포맷 |
+| 지표 공식·방향·단위 | backend Metric Registry | 실행 커널(`backtest_engine`·`backtest_core`)은 지표를 계산하지 않고 자산·체결만 낸다. UI는 raw metric 표시·포맷 |
 | 지표의 쉬운 이름·한 줄 뜻(로케일 문장) | frontend i18n `backtest.metric.<metric_id>`(이름)·`backtest.metric.<metric_id>.description`(뜻), 키는 Metric Registry의 `metric_id` 그대로(결과 설명 spec R4) | registry `label`(영어)은 backend가 그대로 소유하고 화면은 그 옆에 쉬운 이름·뜻을 붙인다(`entities/backtest`의 `metricPlainCopy`). registry에 로케일 문장을 두지 않는다. 짝은 `backend/tests/fixtures/analytics/metric_ids.json`이 묶는다 — backend 테스트가 registry와 이 골든이 같은지, frontend 테스트가 골든의 id마다 ko·en 문구가 있는지 본다. 모델이 결과 설명에서 쓰는 문장은 산출물이라 이 owner 대상이 아니다. 지표 사용 불가 사유도 같은 방식이다: 사유 값은 `domain/analytics`의 `MetricUnavailableReason`이, 로케일 문구는 frontend i18n `backtest.metricUnavailable.<reason>`이 소유하고 골든 `backend/tests/fixtures/analytics/metric_unavailable_reasons.json`이 둘을 묶는다(이슈 #241) |
 | 실행 재현성 | immutable Run Manifest | 결과 화면이 그대로 노출 |
 | 실험·trial 상태 | Experiment Repository(미구현, 계획 개념) | UI는 query cache로 구독 |

@@ -92,7 +92,6 @@ def main(argv: list[str]) -> int:
     elapsed_s = time.perf_counter() - started
 
     first, last = result.snapshots[0], result.snapshots[-1]
-    metrics = result.metrics
     print(f"source           {root}")
     print(f"core             {core} ({elapsed_s:.3f}s engine wall-clock)")
     print(f"run_id           {result.run_id}")
@@ -100,9 +99,6 @@ def main(argv: list[str]) -> int:
     print(f"initial equity   {first.equity:,.0f} KRW")
     print(f"final equity     {last.equity:,.0f} KRW")
     print(f"orders / fills   {len(result.orders)} / {len(result.fills)}")
-    print(f"total return     {metrics.total_return:+.2%}")
-    print(f"cagr             {metrics.cagr:+.2%}")
-    print(f"max drawdown     {metrics.max_drawdown:.2%}")
     return 0
 
 

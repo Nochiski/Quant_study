@@ -1071,7 +1071,10 @@ mod tests {
                 KIND_DECISION,
             ]
         );
-        assert_eq!(runtime.records.traded_notional().unwrap(), 500.0 * 110.0);
+        assert_eq!(
+            runtime.records.result_table_rows().unwrap().fill_totals.0,
+            500.0 * 110.0
+        );
         assert_eq!(runtime.portfolio.held_qty(KEY), 500);
     }
 

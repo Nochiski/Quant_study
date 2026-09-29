@@ -465,9 +465,7 @@ class PersistentEventStore(EventStore):
 
     조회는 kind 단위다. 종료된 실행이면 `drain_payloads(kind, limit)`로 그 kind의 payload를 seq
     순서로 청크씩 넘겨받고 Rust는 넘긴 자리를 바로 해제한다. 종료 전 partial trace는 해제하지
-    않는 `record_payloads(kind)`로 읽는다. 넘긴 payload는 다시 읽을 수 없으므로
-    `equity_values()`/`traded_notional()`처럼 Rust 레코드를 직접 누산하는 조회는 결과 조회보다
-    **먼저** 불러야 한다 (`loop.py`가 `finish()` 직후 metrics를 계산한다).
+    않는 `record_payloads(kind)`로 읽는다. 넘긴 payload는 다시 읽을 수 없다.
     """
 
     # `Any`: backtest_core는 pyo3 확장 모듈이라 stub이 없다 (typings/backtest_core는 레거시
@@ -910,14 +908,6 @@ class PersistentEventStore(EventStore):
             (seq, session_index, _RECORD_KIND_BY_CODE[kind_code].value)
             for seq, session_index, kind_code in self._batch()
         )
-
-    def equity_values(self) -> tuple[float, ...]:
-        """SNAPSHOT 레코드 순서의 equity — Event 객체 없이 metrics를 계산한다."""
-        return tuple(self._runtime.equity_series())
-
-    def traded_notional(self) -> float:
-        """FILL 레코드 순서로 누산한 체결 금액 (Rust가 같은 결합 순서로 계산)."""
-        return float(self._runtime.traded_notional())
 
     def result_tables(self) -> ResultTables:
         """Rust `result_tables()` 한 번으로 받는 결과 테이블.

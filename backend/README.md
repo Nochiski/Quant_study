@@ -41,7 +41,7 @@
 
 ## M5 Single backtest + analytics
 
-`domain.analytics`의 `metric-registry-v1`이 기존 8개 성과 지표와 MDD 기간/회복,
+`domain.analytics`의 `metric-registry-v1`이 수익률·위험·회전율 8개 성과 지표와 MDD 기간/회복,
 benchmark/excess return, 거래·노출·비용을 합친 21개 정의와 공식을 소유한다.
 `application.backtest_run`은 immutable `BacktestRunSpec`을 TargetTape로 컴파일하고 교체 가능한
 data/executor/artifact port만 호출한다. 기본 조립은 Equity mock → `TargetTapeStrategy` →

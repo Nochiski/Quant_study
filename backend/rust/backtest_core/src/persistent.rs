@@ -698,10 +698,8 @@ impl PersistentEngine {
 
     /// kind 하나의 payload를 `limit`개까지 넘기면서 그 자리를 해제한다. 빈 목록이면 끝이다.
     ///
-    /// 호출 순서 계약: Python은 `finish()` 직후 `equity_series`/`traded_notional`로 metrics를
-    /// 먼저 계산하고, 그 뒤 결과 조회에서만 kind를 넘겨받는다. 넘긴 payload를
-    /// `record_payloads`·`equity_series`·`traded_notional`로 다시 읽으면
-    /// 오류다. 모든 레코드를 넘기면 인덱스까지 돌려주므로 `record_batch`도 오류가 된다
+    /// 넘긴 payload를 `record_payloads`·`result_tables`로 다시 읽으면 오류다. 모든 레코드를
+    /// 넘기면 인덱스까지 돌려주므로 `record_batch`도 오류가 된다
     /// (인덱스는 `finish()`가 이미 Python에 넘겼다).
     fn drain_payloads(
         &mut self,
@@ -720,14 +718,6 @@ impl PersistentEngine {
     /// 않으므로 이후 `drain_payloads`로 같은 레코드를 공개 Event 객체로 다시 읽을 수 있다.
     fn result_tables(&self, py: Python<'_>) -> PyResult<PyObject> {
         self.records.result_tables(py)
-    }
-
-    fn equity_series(&self) -> PyResult<Vec<f64>> {
-        self.records.equity_series()
-    }
-
-    fn traded_notional(&self) -> PyResult<f64> {
-        self.records.traded_notional()
     }
 
     #[doc(hidden)]

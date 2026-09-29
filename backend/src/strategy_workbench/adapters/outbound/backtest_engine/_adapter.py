@@ -238,7 +238,7 @@ class BacktestEngineExecutorAdapter:
             max_participation=environment.participation_rate,
             core=request.spec.core.value,
         )
-        result = engine.run(
+        engine.run(
             TargetTapeStrategy(
                 strategy,
                 request.target_tape,
@@ -283,7 +283,6 @@ class BacktestEngineExecutorAdapter:
             self._registry,
             annualization_days=request.spec.annualization_days,
         )
-        _assert_legacy_metric_parity(result.metrics, full.metrics)
         metrics = list(full.metrics)
         for window in request.spec.metric_windows:
             window_input = _slice_analytics(full_input, artifacts, window.start, window.end)
@@ -784,26 +783,3 @@ def _slice_analytics(
         ),
         total_carry_cost=sum(item.amount for item in costs),
     )
-
-
-def _assert_legacy_metric_parity(legacy, metrics) -> None:
-    current = {item.metric_id: item.value for item in metrics}
-    for metric_id in (
-        "total_return",
-        "cagr",
-        "volatility",
-        "sharpe",
-        "sortino",
-        "max_drawdown",
-        "calmar",
-        "turnover",
-    ):
-        expected = getattr(legacy, metric_id)
-        actual = current[metric_id]
-        if expected is None or actual is None:
-            if expected is not actual:
-                raise RuntimeError(f"metric parity failed: {metric_id}")
-        elif abs(expected - actual) > 1e-10:
-            raise RuntimeError(
-                f"metric parity failed: {metric_id} legacy={expected} registry={actual}"
-            )

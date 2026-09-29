@@ -681,7 +681,7 @@ export const cancelExperiment = <ThrowOnError extends boolean = false>(
 export const controlExperiment = <ThrowOnError extends boolean = false>(
   options: Options<ControlExperimentData, ThrowOnError>,
 ) =>
-  (options.client ?? client).put<
+  (options.client ?? client).patch<
     ControlExperimentResponses,
     ControlExperimentErrors,
     ThrowOnError
@@ -697,7 +697,8 @@ export const controlExperiment = <ThrowOnError extends boolean = false>(
 /**
  * Stream Experiment Events
  *
- * 실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나면 닫는다.
+ * 실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나고 도는·대기 trial 이
+ * 없으면 마지막 수를 보낸 뒤 닫는다.
  */
 export const streamExperimentEvents = <ThrowOnError extends boolean = false>(
   options: Options<StreamExperimentEventsData, ThrowOnError, unknown>,

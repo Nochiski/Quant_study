@@ -2329,23 +2329,33 @@
         "type": "object"
       },
       "ExperimentControlsRequest": {
-        "description": "일시정지·우선순위(1 = 보통). 범위 owner 는 domain `MAX_EXPERIMENT_PRIORITY` 다.",
+        "description": "일시정지·우선순위(1 = 보통). 보내지 않은 칸은 그대로다. 범위 owner 는 domain\n`MAX_EXPERIMENT_PRIORITY` 다.",
         "properties": {
           "paused": {
-            "title": "Paused",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused"
           },
           "priority": {
-            "default": 1,
-            "maximum": 5.0,
-            "minimum": 1.0,
-            "title": "Priority",
-            "type": "integer"
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
           }
         },
-        "required": [
-          "paused"
-        ],
         "title": "ExperimentControlsRequest",
         "type": "object"
       },
@@ -2752,6 +2762,10 @@
             "title": "Attempts",
             "type": "array"
           },
+          "awaiting_recovery": {
+            "title": "Awaiting Recovery",
+            "type": "boolean"
+          },
           "status": {
             "$ref": "#/components/schemas/TrialStatus"
           },
@@ -2762,7 +2776,8 @@
         "required": [
           "trial",
           "status",
-          "attempts"
+          "attempts",
+          "awaiting_recovery"
         ],
         "title": "ExperimentTrialState",
         "type": "object"
@@ -11799,7 +11814,7 @@
       }
     },
     "/api/v1/experiments/{experiment_id}/controls": {
-      "put": {
+      "patch": {
         "description": "일시정지·재개·우선순위. 대기 trial 에만 적용하고 도는 trial 은 끝까지 돈다(spec D6).",
         "operationId": "controlExperiment",
         "parameters": [
@@ -11860,7 +11875,7 @@
     },
     "/api/v1/experiments/{experiment_id}/events": {
       "get": {
-        "description": "실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나면 닫는다.",
+        "description": "실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나고 도는·대기 trial 이\n없으면 마지막 수를 보낸 뒤 닫는다.",
         "operationId": "streamExperimentEvents",
         "parameters": [
           {

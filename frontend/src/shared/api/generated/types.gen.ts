@@ -1534,17 +1534,18 @@ export type ExperimentControls = {
 /**
  * ExperimentControlsRequest
  *
- * 일시정지·우선순위(1 = 보통). 범위 owner 는 domain `MAX_EXPERIMENT_PRIORITY` 다.
+ * 일시정지·우선순위(1 = 보통). 보내지 않은 칸은 그대로다. 범위 owner 는 domain
+ * `MAX_EXPERIMENT_PRIORITY` 다.
  */
 export type ExperimentControlsRequest = {
   /**
    * Paused
    */
-  paused: boolean;
+  paused?: boolean | null;
   /**
    * Priority
    */
-  priority?: number;
+  priority?: number | null;
 };
 
 /**
@@ -1775,6 +1776,10 @@ export type ExperimentTrialState = {
    * Attempts
    */
   attempts: Array<TrialAttempt>;
+  /**
+   * Awaiting Recovery
+   */
+  awaiting_recovery: boolean;
   status: TrialStatus;
   trial: ExperimentTrial;
 };

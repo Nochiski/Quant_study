@@ -14,7 +14,7 @@ const runtimeDirectory = (): string => {
 };
 
 /**
- * backend 프로세스에만 전달되는 SQLite 경로. Playwright 설정과 spec(1.0 동결 row seeding)이 같은
+ * backend 프로세스에만 전달되는 SQLite 경로. Playwright 설정과 spec(은퇴 버전 동결 row seeding)이 같은
  * 파일을 가리키도록 한 곳에서 계산한다.
  */
 export const runtimeDatabasePath = (): string =>

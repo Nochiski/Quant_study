@@ -125,13 +125,13 @@ const expectBacktestResultPresentation = async (page: Page) => {
 };
 
 /**
- * schema 1.0 동결 row 두 개(1.0 YAML 원문 문서, source 없는 legacy JSON)를 backend 테스트 헬퍼로
- * 격리 SQLite에 직접 심는다. 1.0 인코더는 더 이상 없으므로 API로는 만들 수 없다. revision은 불변이라
- * serial 그룹 재시도가 같은 DB를 다시 쓰면 지울 수 없으므로 시도마다 고유한 전략 id를 심는다
- * (`frozen-doc-<suffix>`). DB 경로와 suffix는 공백이 있어도 shell이 쪼개지 않도록 환경 변수로 넘긴다.
+ * 은퇴 버전 동결 row 를 backend 테스트 헬퍼 CLI 로 격리 SQLite에 직접 심고, 심은 전략 id 를 CLI 가 알린
+ * 순서대로 돌려준다. `1.0` 은 YAML 원문 문서와 source 없는 legacy JSON 두 row, `1.1` 은 원문 문서 한 row 다.
+ * 은퇴 버전 인코더가 없으므로 API로는 만들 수 없다. revision은 불변이라 serial 그룹 재시도가 같은 DB를
+ * 다시 쓰면 지울 수 없으므로 시도마다 고유한 전략 id를 심는다(id 뒤 suffix). DB 경로와 suffix는 공백이
+ * 있어도 shell이 쪼개지 않도록 환경 변수로 넘긴다.
  */
-const seedFrozenRevisionRows = (): { document: string; legacy: string } => {
-  const suffix = `-${Date.now().toString(36)}`;
+const seedFrozenRevisionRows = (schema: "1.0" | "1.1"): string[] => {
   const result = spawnSync(
     "uv",
     ["run", "python", "tests/frozen_revision_rows.py"],
@@ -142,16 +142,21 @@ const seedFrozenRevisionRows = (): { document: string; legacy: string } => {
       env: {
         ...process.env,
         STRATEGY_WORKBENCH_E2E_DB: runtimeDatabasePath(),
-        STRATEGY_WORKBENCH_E2E_SEED_SUFFIX: suffix,
+        STRATEGY_WORKBENCH_E2E_SEED_SUFFIX: `-${Date.now().toString(36)}`,
+        STRATEGY_WORKBENCH_E2E_SEED_SCHEMA: schema,
       },
     },
   );
   if (result.status !== 0) {
     throw new Error(
-      `frozen revision seeding failed — status=${result.status} stdout=${result.stdout} stderr=${result.stderr}`,
+      `frozen revision seeding failed — schema=${schema} status=${result.status} stdout=${result.stdout} stderr=${result.stderr}`,
     );
   }
-  return { document: `frozen-doc${suffix}`, legacy: `frozen-legacy${suffix}` };
+  // CLI 는 심은 row 를 `<전략 id>@<revision>` 으로 적어 ", " 로 잇는다(backend 계약 테스트가 고정한다).
+  return result.stdout
+    .trim()
+    .split(", ")
+    .map((row) => row.split("@")[0]);
 };
 
 const openConflictingEditor = async (browser: Browser, revisionUrl: string) => {
@@ -1383,15 +1388,18 @@ test.describe("professional YAML workflow", () => {
     });
   });
 
-  test("upgrades a frozen 1.0 revision to the current schema, fills its run settings, saves it and backtests it", { tag: ["@story", "@US-SM-07"] }, async ({
+  test("upgrades frozen 1.1 and 1.0 revisions to the current schema, fills their run settings, saves them and backtests them", { tag: ["@story", "@US-SM-07"] }, async ({
     page,
   }) => {
-    const frozen = seedFrozenRevisionRows();
+    // 실 DB 에 남은 은퇴 row 는 사실상 전부 1.1 이고, 1.0 은 1.0 → 1.1 → 1.2 체인 전체를 탄다.
+    const [retired] = seedFrozenRevisionRows("1.1");
+    const [frozen, legacy] = seedFrozenRevisionRows("1.0");
     const nextRevision = 2;
-    // 결과는 현재 버전(1.0 → 1.1 → 1.2)이다.
     const banner = upgradeBanner(page);
-    // 업그레이드는 의미를 바꾸지 않는다: 1.0 동결 문서(`quality_momentum.v1_0.yaml`)의 현재 버전
-    // 의미는 golden fixture에 1.1 합성 방식(원시값 가중 합)을 명시한 문서와 같다. 동결 문서의
+    const settings = page.getByLabel("실행 설정 열기");
+    const fee = page.getByRole("spinbutton", { name: "수수료 (bp)" });
+    // 업그레이드는 의미를 바꾸지 않는다: 두 동결 문서(`quality_momentum.v1_1.yaml`·`v1_0.yaml`)의 현재
+    // 버전 의미는 golden fixture에 1.1 합성 방식(원시값 가중 합)을 명시한 문서와 같다. 동결 문서의
     // 모멘텀은 원주가를 읽고 업그레이드는 필드를 바꾸지 않으므로, 수정주가로 옮긴 골든의 잎을
     // 원주가로 되돌려 비교한다(DEFECT-232-05). 현재 버전 문자열도 backend가 답한 값을 쓴다
     // (frontend는 schema 버전 리터럴을 갖지 않는다).
@@ -1417,73 +1425,86 @@ test.describe("professional YAML workflow", () => {
     );
     expect(expected.spec_hash).not.toBeNull();
 
-    await openEditor(
-      page,
-      `/research/strategies/${frozen.document}/revisions/1`,
-    );
-    await expectPhase(page, "구조 오류");
-    await expect(banner).toContainText(
-      "이 문서는 지원이 끝난 schema 버전입니다",
-    );
-    await expect(backtest(page)).toBeDisabled();
+    for (const strategyId of [retired, frozen]) {
+      await openEditor(page, `/research/strategies/${strategyId}/revisions/1`);
+      await expectPhase(page, "구조 오류");
+      await expect(banner).toContainText(
+        "이 문서는 지원이 끝난 schema 버전입니다",
+      );
+      await expect(backtest(page)).toBeDisabled();
+      // 옛 문서의 수수료가 실행 설정 기본값과 같으면 채우지 않아도 칸 값이 맞는다. 칸을 먼저 다른 값으로
+      // 바꿔 두어 채운 수수료가 옛 문서에서 왔는지 본다.
+      await settings.click();
+      await fee.fill("30");
+      await settings.click();
 
-    const { environment: oldEnvironment } = await upgradeFromBanner(page);
-    expect(oldEnvironment).not.toBeNull();
-    await expect(banner).toContainText("현재 버전으로 다시 썼습니다");
-    // 옛 문서의 실행 설정(`data`·`execution`)은 문서를 떠나 응답으로 왔다. 사용자가 누를 때만
-    // 실행 설정 패널에 들어간다.
-    await banner.getByRole("button", { name: "실행 설정에 채우기" }).click();
-    await expect(banner).toContainText("옛 문서의 실행 설정을 채웠습니다.");
-    await expect(
-      page.getByRole("region", { name: "실행 설정 요약" }),
-    ).toContainText("krx.common-stock");
-    const source = await currentSource(page);
-    expect(source).toContain(`schema_version: "${expected.schema_version}"`);
-    expect(source).toContain("  normalization: none\n");
-    expect(source).not.toContain("  factors:\n");
-    expect(source).not.toContain("\ndata:\n");
-    await expectPhase(page, "검증 통과");
+      const { environment } = await upgradeFromBanner(page);
+      if (environment === null)
+        throw new Error(`upgrading ${strategyId} returned no run environment`);
+      await expect(banner).toContainText("현재 버전으로 다시 썼습니다");
+      // 옛 문서의 실행 설정(`data`·`execution`)은 문서를 떠나 응답으로 왔다. 사용자가 누를 때만
+      // 실행 설정 패널에 들어간다.
+      await banner.getByRole("button", { name: "실행 설정에 채우기" }).click();
+      await expect(banner).toContainText("옛 문서의 실행 설정을 채웠습니다.");
+      await settings.click();
+      await expect(page.getByLabel("시작일", { exact: true })).toHaveValue(
+        environment.start,
+      );
+      await expect(page.getByLabel("종료일", { exact: true })).toHaveValue(
+        environment.end,
+      );
+      await expect(
+        page.getByRole("textbox", { name: "유니버스", exact: true }),
+      ).toHaveValue(environment.universe_id);
+      await expect(fee).toHaveValue(String(environment.fee_bps));
+      await settings.click();
+      const source = await currentSource(page);
+      expect(source).toContain(`schema_version: "${expected.schema_version}"`);
+      expect(source).toContain("  normalization: none\n");
+      expect(source).not.toContain("  factors:\n");
+      expect(source).not.toContain("\ndata:\n");
+      await expectPhase(page, "검증 통과");
 
-    await saveAndWaitForRevision(page, nextRevision);
-    await expect(banner).toHaveCount(0);
-    const savedV2 = requireData(
-      (
-        await getStrategyDocument({
-          client: apiClient,
-          path: { strategy_id: frozen.document, revision: nextRevision },
-        })
-      ).data,
-      "get upgraded frozen-doc revision",
-    );
-    expect(savedV2.schema_version).toBe(expected.schema_version);
-    expect(savedV2.requires_upgrade).toBe(false);
-    expect(savedV2.spec_hash).toBe(expected.spec_hash);
+      await saveAndWaitForRevision(page, nextRevision);
+      await expect(banner).toHaveCount(0);
+      const saved = requireData(
+        (
+          await getStrategyDocument({
+            client: apiClient,
+            path: { strategy_id: strategyId, revision: nextRevision },
+          })
+        ).data,
+        `get the upgraded revision of ${strategyId}`,
+      );
+      expect(saved.schema_version).toBe(expected.schema_version);
+      expect(saved.requires_upgrade).toBe(false);
+      expect(saved.spec_hash).toBe(expected.spec_hash);
 
-    await expect(backtest(page)).toBeEnabled();
-    const submittedRun = page.waitForRequest(
-      (request) =>
-        request.method() === "POST" &&
-        new URL(request.url()).pathname === "/api/v1/backtests",
-    );
-    await backtest(page).click();
-    expect((await submittedRun).postDataJSON()).toMatchObject({
-      strategy_source: {
-        kind: "saved_revision",
-        strategy_id: frozen.document,
-        revision: nextRevision,
-        expected_spec_hash: savedV2.spec_hash,
-      },
-      // 업그레이드 응답의 실행 설정이 그대로 실행 요청에 실린다(US-SM-07).
-      environment: requestedEnvironment(oldEnvironment!),
-    });
-    await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
-    await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
-      "completed",
-      { timeout: 120_000 },
-    );
+      await expect(backtest(page)).toBeEnabled();
+      const submittedRun = page.waitForRequest(
+        (request) =>
+          request.method() === "POST" &&
+          new URL(request.url()).pathname === "/api/v1/backtests",
+      );
+      await backtest(page).click();
+      expect((await submittedRun).postDataJSON()).toMatchObject({
+        strategy_source: {
+          kind: "saved_revision",
+          strategy_id: strategyId,
+          revision: nextRevision,
+          expected_spec_hash: saved.spec_hash,
+        },
+        // 채운 옛 실행 설정이 그대로 실행 요청에 실린다(US-SM-07).
+        environment: requestedEnvironment(environment),
+      });
+      await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
+      await expect(
+        page.getByRole("status", { name: "실행 상태" }),
+      ).toContainText("completed", { timeout: 120_000 });
+    }
 
     // legacy JSON 동결 row: generated source가 이미 현재 버전이므로 업그레이드 대신 새 revision 저장만 제안한다.
-    await openEditor(page, `/research/strategies/${frozen.legacy}/revisions/1`);
+    await openEditor(page, `/research/strategies/${legacy}/revisions/1`);
     await expect(banner).toContainText("이전 schema로 동결된 revision입니다");
     await expect(
       banner.getByRole("button", { name: "현재 버전으로 업그레이드" }),
@@ -1496,18 +1517,18 @@ test.describe("professional YAML workflow", () => {
     ).toBeVisible();
     const legacyRow = page
       .getByRole("row")
-      .filter({ hasText: frozen.legacy })
+      .filter({ hasText: legacy })
       .first();
     await expect(legacyRow).toContainText("이전 버전 동결");
     const docRow = page
       .getByRole("row")
-      .filter({ hasText: frozen.document })
+      .filter({ hasText: frozen })
       .first();
     await expect(docRow).toContainText(`v${nextRevision}`);
     await expect(docRow).not.toContainText("이전 버전 동결");
     await docRow.getByRole("button", { name: /Revision 펼치기/u }).click();
     const revisions = page.getByRole("region", {
-      name: new RegExp(`저장 revision 목록: .*${frozen.document}`, "u"),
+      name: new RegExp(`저장 revision 목록: .*${frozen}`, "u"),
     });
     await expect(
       revisions.getByRole("row").filter({ hasText: "v1" }),

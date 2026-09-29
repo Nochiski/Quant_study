@@ -704,8 +704,8 @@ class EquityDuckdbAdapter:
         """매크로 원천을 부팅 때 한 번 읽어 보고, 못 읽거나 요구하는 열이 없으면 뺄 사유를 돌려준다.
 
         매크로가 가리키는 parquet 가 빠졌거나 손상됐으면 `catalog_macro_unreadable`, 옛 카탈로그라
-        원천이 읽는 열(`required_columns` 와 그 원천 필드의 `available_expr`)이 없으면
-        `catalog_columns_missing` 으로 경고한다.
+        원천이 읽는 열(`required_columns`·가림 표시 `masked_expr`·그 원천 필드의 `available_expr`)이
+        없으면 `catalog_columns_missing` 으로 경고한다.
         읽어 보지 않고 두면 커버율 질의가 원시 duckdb 오류를 던져 `list_fields()` 전체가 죽는다
         (#233 리뷰 P2-1, #275 리뷰 P3-5). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
         """
@@ -731,9 +731,10 @@ class EquityDuckdbAdapter:
             logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")
             return reason
         present = {str(row[0]) for row in described}
-        # 원천이 읽는 열 — 선언한 필수 열과 그 원천 필드의 공개일 열(#238)
+        # 원천이 읽는 열 — 선언한 필수 열, 가림 표시 열(#298), 그 원천 필드의 공개일 열(#238)
         read = (
             *spec.required_columns,
+            spec.masked_expr,
             *(f.available_expr for f in FIELD_SPECS if f.source == spec.name),
         )
         missing = [column for column in dict.fromkeys(read) if column and column not in present]

@@ -1280,6 +1280,33 @@ def test_catalog_without_required_view_column_drops_only_that_source(
     assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
 
 
+def test_catalog_view_without_its_mask_column_drops_only_that_source(tmp_path: Path) -> None:
+    """가림 표시 열이 없는 옛 뷰는 그 원천만 뺀다 — 부팅 열 확인이 가림 표시(`masked_expr`)도
+    선언에서 끌어온다(#311 리뷰 P3-4). 표시를 못 읽은 채 두면 가린 셀이 MISSING 으로 나가 결측
+    정책이 다시 채운다."""
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    catalog = duckdb.connect(str(root / "equity.duckdb"))
+    try:
+        row = catalog.execute(
+            "SELECT macro_definition FROM duckdb_functions() WHERE function_name = 'v_adj_close'"
+        ).fetchone()
+        assert row is not None
+        catalog.execute(
+            "CREATE OR REPLACE MACRO v_adj_close(as_of) AS TABLE "
+            f"SELECT * EXCLUDE (adj_gap) FROM ({row[0]})"
+        )
+    finally:
+        catalog.close()
+    adapter = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in adapter.list_fields()}
+    assert "price.close" in served and "price.adj_close" not in served
+    denied = _raw(adapter, fields=("price.adj_close",))
+    assert denied.detail is not None and "catalog_columns_missing" in denied.detail
+    assert "missing=['adj_gap']" in denied.detail
+
+
 @pytest.mark.parametrize(
     ("table", "macro", "dropped", "kept"),
     [

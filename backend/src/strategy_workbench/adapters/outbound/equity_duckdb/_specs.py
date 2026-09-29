@@ -107,7 +107,8 @@ class SourceSpec:
     `masked_expr` 은 원장 뷰가 값이 틀려 일부러 가린 행의 표시 식이다(참이면 셀 종류 MASKED, 값은
     NULL). 무엇을 가릴지는 뷰가 정하고 어댑터는 표시만 읽는다 — MASKED 셀은 실행 결측 정책이
     채우지 않는다(#298). 뷰의 가림 표시 열 선언은 원장 `views.MASK_COLUMNS` 이고, 이 배선이 그
-    선언과 같은지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다.
+    선언과 같은지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 부팅 검사가
+    카탈로그 열과 이름으로 대조하므로 식이 아니라 열 이름을 쓴다(없으면 `catalog_columns_missing`).
     """
 
     name: str

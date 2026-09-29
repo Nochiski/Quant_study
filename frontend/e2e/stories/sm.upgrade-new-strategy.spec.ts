@@ -26,6 +26,7 @@ import {
   saveAndWaitForRevision,
   strategyIdentity,
   upgradeBanner,
+  upgradeButton,
   upgradeFromBanner,
 } from "../workbench-helpers";
 
@@ -72,9 +73,7 @@ test(
         },
       });
     await page.route("**/api/v1/strategy-documents/upgrade", rejectUpgrade);
-    await banner
-      .getByRole("button", { name: "현재 버전으로 업그레이드" })
-      .click();
+    await upgradeButton(page).click();
     const failure = banner.getByRole("alert");
     await expect(failure).toContainText(
       "업그레이드 요청이 실패했습니다. 원문은 그대로입니다.",
@@ -111,9 +110,7 @@ test(
     // 실행 취소로 옛 글로 돌아갔다가 다시 실행하면 채우기도 돌아온다(#267 DEFECT-1).
     const fill = banner.getByRole("button", { name: "실행 설정에 채우기" });
     await page.getByRole("button", { name: "실행 취소", exact: true }).click();
-    await expect(
-      banner.getByRole("button", { name: "현재 버전으로 업그레이드" }),
-    ).toBeVisible();
+    await expect(upgradeButton(page)).toBeVisible();
     await expect(fill).toHaveCount(0);
     await page.getByRole("button", { name: "다시 실행", exact: true }).click();
     expect(await currentSource(page)).toBe(upgraded.source);

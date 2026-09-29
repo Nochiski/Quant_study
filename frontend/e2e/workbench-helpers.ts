@@ -1,6 +1,6 @@
 /**
  * Playwright spec 들이 함께 쓰는 워크벤치 헬퍼 — 저장·백테스트 로케이터, revision URL 해석, 실행 설정
- * 채우기, 은퇴 버전 업그레이드 배너. 편집기 로케이터·원문 읽기·바꾸기·문서 검증 대기는 매뉴얼 촬영
+ * 칸과 채우기, 은퇴 버전 업그레이드 배너. 편집기 로케이터·원문 읽기·바꾸기·문서 검증 대기는 매뉴얼 촬영
  * 스크립트도 쓰므로 `editor-helpers.ts`에 두고 여기서 다시 내보낸다. `workbench.workflow.spec.ts`(CI 가 도는 릴리스 게이트)와
  * `workbench.real-equity.spec.ts`(opt-in 실데이터)가 같은 접근성 이름·API path 를 보도록 한 곳에 둔다.
  * 접근성 이름이 바뀌면 CI 의 workflow spec 이 먼저 깨지고, 여기서 고치면 real-equity 도 함께 따라온다.
@@ -117,13 +117,14 @@ export const saveAndWaitForRevision = async (page: Page, revision: number) => {
 export const upgradeBanner = (page: Page) =>
   page.getByRole("region", { name: "이전 schema 문서" });
 
+export const upgradeButton = (page: Page) =>
+  upgradeBanner(page).getByRole("button", { name: "현재 버전으로 업그레이드" });
+
 /** 배너의 업그레이드 버튼을 눌러 backend 응답을 돌려준다. */
 export const upgradeFromBanner = async (
   page: Page,
 ): Promise<UpgradedDocument> => {
-  const upgrade = upgradeBanner(page).getByRole("button", {
-    name: "현재 버전으로 업그레이드",
-  });
+  const upgrade = upgradeButton(page);
   await expect(upgrade).toBeEnabled();
   const upgraded = page.waitForResponse(
     (response) =>
@@ -196,6 +197,15 @@ export const REQUESTED_ENVIRONMENT = requestedEnvironment({
   ...RUN_ENVIRONMENT,
 }) as unknown as RunEnvironment;
 
+/** 실행 설정 패널을 여닫는 툴바 토글과 e2e 가 값을 넣고 읽는 패널 칸. */
+export const runSettingsInputs = (page: Page) => ({
+  toggle: page.getByLabel("실행 설정 열기"),
+  start: page.getByLabel("시작일", { exact: true }),
+  end: page.getByLabel("종료일", { exact: true }),
+  universe: page.getByRole("textbox", { name: "유니버스", exact: true }),
+  fee: page.getByRole("spinbutton", { name: "수수료 (bp)" }),
+});
+
 /**
  * 실행 설정 패널을 열어 기간·유니버스를 채우고 닫는다. `keyboard` 면 패널을 여닫을 때도 포인터 없이 초점과
  * Enter 만 쓴다(US-SM-04 키보드 스토리). `via: "band"` 는 사용자가 막혔을 때 밟는 길이다 — 요약 띠가
@@ -217,15 +227,12 @@ export const fillRunEnvironment = async (
   // 문서 검증이 끝난 뒤 실행 설정을 채운다. #240 을 좇으며 넣은 순서지만 #240 의 원인은 이 순서가 아니라
   // `fill` 의 DOM 선택을 CodeMirror 갱신이 되쓴 것이었다(`replaceSource`).
   await waitForSettledDocument(page);
-  const toggle = page.getByLabel("실행 설정 열기");
+  const { toggle, start, end, universe } = runSettingsInputs(page);
   const band = page.getByRole("region", { name: "실행 설정 요약" });
   const fields = [
-    [page.getByLabel("시작일", { exact: true }), environment.start],
-    [page.getByLabel("종료일", { exact: true }), environment.end],
-    [
-      page.getByRole("textbox", { name: "유니버스", exact: true }),
-      environment.universe_id,
-    ],
+    [start, environment.start],
+    [end, environment.end],
+    [universe, environment.universe_id],
   ] as const;
   const press = async (target: Locator) => {
     if (keyboard) {

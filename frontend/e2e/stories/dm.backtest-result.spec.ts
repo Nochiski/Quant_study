@@ -15,6 +15,7 @@ import {
   mustReplace,
   openEditor,
   replaceSource,
+  runSettingsInputs,
   saveAndWaitForRevision,
 } from "../workbench-helpers";
 
@@ -66,7 +67,7 @@ test(
     // 서버가 거절할 초기 자본(0)은 패널이 먼저 막고, 요약 띠가 칸 이름과 이유를 말한다. "실행 설정
     // 고치기"가 그 칸으로 초점을 옮긴다(이슈 #260).
     const summary = page.getByRole("region", { name: "실행 설정 요약" });
-    const toggle = page.getByLabel("실행 설정 열기");
+    const { toggle } = runSettingsInputs(page);
     const cash = page.getByRole("spinbutton", { name: "초기 자본 (KRW)" });
     await toggle.click();
     await cash.fill("0");

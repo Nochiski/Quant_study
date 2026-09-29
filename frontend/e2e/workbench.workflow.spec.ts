@@ -39,10 +39,12 @@ import {
   replaceSource,
   requestedEnvironment,
   requireData,
+  runSettingsInputs,
   save,
   saveAndWaitForRevision,
   strategyIdentity,
   upgradeBanner,
+  upgradeButton,
   upgradeFromBanner,
   validate,
 } from "./workbench-helpers";
@@ -673,7 +675,7 @@ test.describe("professional YAML workflow", () => {
       planPanel.getByText("price.adj_close", { exact: true }),
     ).toBeVisible();
 
-    const settingsToggle = workflow.getByLabel("실행 설정 열기");
+    const settingsToggle = runSettingsInputs(workflow).toggle;
     await settingsToggle.click();
     const core = workflow.getByRole("combobox", { name: "실행 core" });
     await core.selectOption("python");
@@ -1396,8 +1398,7 @@ test.describe("professional YAML workflow", () => {
     const [frozen, legacy] = seedFrozenRevisionRows("1.0");
     const nextRevision = 2;
     const banner = upgradeBanner(page);
-    const settings = page.getByLabel("실행 설정 열기");
-    const fee = page.getByRole("spinbutton", { name: "수수료 (bp)" });
+    const { toggle, start, end, universe, fee } = runSettingsInputs(page);
     // 업그레이드는 의미를 바꾸지 않는다: 두 동결 문서(`quality_momentum.v1_1.yaml`·`v1_0.yaml`)의 현재
     // 버전 의미는 golden fixture에 1.1 합성 방식(원시값 가중 합)을 명시한 문서와 같다. 동결 문서의
     // 모멘텀은 원주가를 읽고 업그레이드는 필드를 바꾸지 않으므로, 수정주가로 옮긴 골든의 잎을
@@ -1434,9 +1435,9 @@ test.describe("professional YAML workflow", () => {
       await expect(backtest(page)).toBeDisabled();
       // 옛 문서의 수수료가 실행 설정 기본값과 같으면 채우지 않아도 칸 값이 맞는다. 칸을 먼저 다른 값으로
       // 바꿔 두어 채운 수수료가 옛 문서에서 왔는지 본다.
-      await settings.click();
+      await toggle.click();
       await fee.fill("30");
-      await settings.click();
+      await toggle.click();
 
       const { environment } = await upgradeFromBanner(page);
       if (environment === null)
@@ -1446,18 +1447,12 @@ test.describe("professional YAML workflow", () => {
       // 실행 설정 패널에 들어간다.
       await banner.getByRole("button", { name: "실행 설정에 채우기" }).click();
       await expect(banner).toContainText("옛 문서의 실행 설정을 채웠습니다.");
-      await settings.click();
-      await expect(page.getByLabel("시작일", { exact: true })).toHaveValue(
-        environment.start,
-      );
-      await expect(page.getByLabel("종료일", { exact: true })).toHaveValue(
-        environment.end,
-      );
-      await expect(
-        page.getByRole("textbox", { name: "유니버스", exact: true }),
-      ).toHaveValue(environment.universe_id);
+      await toggle.click();
+      await expect(start).toHaveValue(environment.start);
+      await expect(end).toHaveValue(environment.end);
+      await expect(universe).toHaveValue(environment.universe_id);
       await expect(fee).toHaveValue(String(environment.fee_bps));
-      await settings.click();
+      await toggle.click();
       const source = await currentSource(page);
       expect(source).toContain(`schema_version: "${expected.schema_version}"`);
       expect(source).toContain("  normalization: none\n");
@@ -1506,9 +1501,7 @@ test.describe("professional YAML workflow", () => {
     // legacy JSON 동결 row: generated source가 이미 현재 버전이므로 업그레이드 대신 새 revision 저장만 제안한다.
     await openEditor(page, `/research/strategies/${legacy}/revisions/1`);
     await expect(banner).toContainText("이전 schema로 동결된 revision입니다");
-    await expect(
-      banner.getByRole("button", { name: "현재 버전으로 업그레이드" }),
-    ).toHaveCount(0);
+    await expect(upgradeButton(page)).toHaveCount(0);
     await expectPhase(page, "검증 통과");
 
     await page.goto("/research/strategies");

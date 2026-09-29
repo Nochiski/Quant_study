@@ -21,6 +21,7 @@ import {
   expectPhase,
   fillRunEnvironment,
   openEditor,
+  runSettingsInputs,
   save,
   scrollPageTo,
   validate,
@@ -32,7 +33,7 @@ const IDEA_TITLE = "KRX 대형 모멘텀";
 /** 편집기 툴바의 네 조작. */
 const toolbarControls = (page: Page) =>
   [
-    ["실행 설정", page.getByLabel("실행 설정 열기")],
+    ["실행 설정", runSettingsInputs(page).toggle],
     ["검증", validate(page)],
     ["리비전 저장", save(page)],
     ["백테스트", backtest(page)],

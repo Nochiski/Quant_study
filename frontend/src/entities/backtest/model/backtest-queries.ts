@@ -13,6 +13,12 @@ import {
 
 const terminal = new Set(["completed", "cancelled", "failed"]);
 
+// 실행 상태 폴링 간격(#161). 짧은 run 은 곧 끝나므로 처음 몇 번은 빠르게, 그 뒤로는 1초마다 묻는다.
+// 실데이터 tape 는 수십 초라 250ms 고정이면 run 한 건에 수백 번 GET 이 나간다.
+const STATUS_POLL_FAST_MS = 250;
+const STATUS_POLL_FAST_READS = 8;
+const STATUS_POLL_SLOW_MS = 1_000;
+
 export const backtestHistoryKey = () => ["backtests", "history"] as const;
 
 const retireBacktestHistoryQueries = async (
@@ -70,7 +76,9 @@ export const useBacktestStatus = (runId: string | null) =>
     refetchInterval: (query) =>
       query.state.data !== undefined && terminal.has(query.state.data.status)
         ? false
-        : 250,
+        : query.state.dataUpdateCount < STATUS_POLL_FAST_READS
+          ? STATUS_POLL_FAST_MS
+          : STATUS_POLL_SLOW_MS,
   });
 
 export const useBacktestRequest = (runId: string | null) =>

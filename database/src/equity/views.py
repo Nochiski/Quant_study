@@ -2,7 +2,8 @@
 
 S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속(09-05, 전방
 조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd` + S17 1개: `v_consensus` + S21 본판 1개:
-`v_fin_latest`. 본문은 하나의 템플릿이고
+`v_fin_latest` + #249 1개: `v_credit_balance`(무상증자 척도 창을 가린 신용잔고). 본문은 하나의
+템플릿이고
 읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
   카탈로그: `render_macros(equity_root)` 가 커밋된 테이블의 MANIFEST 파티션 경로(**절대경로**,
             P1c)를 `read_parquet([...])` 로 넣어 `catalog.write_catalog` 에 준다.
@@ -78,6 +79,12 @@ TTM_SPAN_MIN_DAYS, TTM_SPAN_MAX_DAYS = 240, 300
 # 인접 분기 보고서의 period_end 간격(일) — 실원장 90~92일(비분기말 결산도 분기 간격이다). 현금흐름
 # 분기값(누계 − 직전 누계)은 직전 행이 바로 앞 분기일 때만 선다.
 QUARTER_GAP_MIN_DAYS, QUARTER_GAP_MAX_DAYS = 80, 100
+# 무상증자 척도 창의 길이(세션, #249) — `v_credit_balance` 가 권리락일부터 이만큼의 신용잔고 행을
+# 가린다. 실원장(2026-09-19 판) 무상증자 631건(권리락일 2019-06 이후)의 권리락일 → 신주 상장일은
+# 중앙값 15 · p95 22 · p99 약 35 세션이고, 상장 뒤에도 옛 단위 융자가 상환되는 동안 잔고율 20세션
+# 변화가 5세션쯤 위로 튄다(상위 1% 점유 4~8%). 잔고 행 25개를 가리면 워크벤치 기본 graph(잔고 랙 3 ·
+# 20세션 창)가 권리락 3세션 뒤부터 46세션 뒤까지 결측이 되어 p95 사건의 상장 뒤 24세션까지 덮는다.
+BONUS_SCALE_WINDOW_SESSIONS = 25
 
 # 매크로 이름 → (시그니처, 읽는 테이블). 시그니처는 catalog._MACRO_NAME_RE 규약.
 SIGNATURES: dict[str, str] = {
@@ -89,6 +96,7 @@ SIGNATURES: dict[str, str] = {
     "v_adj_volume_fwd": "v_adj_volume_fwd(as_of, lag_override := NULL)",
     "v_consensus": "v_consensus(as_of, lag_override := NULL)",
     "v_fin_latest": "v_fin_latest(as_of, lag_override := NULL, vintage := 'restated')",
+    "v_credit_balance": "v_credit_balance(as_of)",
 }
 MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_cum_adj": ("price_daily", "adj_factor", "trading_calendar"),
@@ -99,6 +107,7 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_adj_volume_fwd": ("price_daily", "adj_factor", "trading_calendar", "security_span"),
     "v_consensus": ("consensus_daily", "trading_calendar"),
     "v_fin_latest": ("fin_std", "disclosure_version", "trading_calendar"),
+    "v_credit_balance": ("credit_daily", "corp_event", "trading_calendar"),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
@@ -475,6 +484,45 @@ FROM ok o
 LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
        ON d.rcept_no = o.rcept_no
 """,
+    # 신용잔고의 무상증자 척도 창(#249). 무상증자에서 원천(KIS) 잔고 주식수는 권리락일부터 옛 단위
+    # (권리락 전 융자 — 새 단위로 일부만 바뀐다, 전환 비율 중앙값 0.41)와 새 단위(권리락가로 새로 낸
+    # 융자)가 섞이고, 상장주식수는 신주 상장일에야 바뀐다. 그 사이 잔고 ÷ 상장주식수가 부풀었다가
+    # 상장일에 꺾이고 옛 단위 융자가 상환되며 되돌아온다. 척도를 되돌릴 계수가 없으므로
+    # 권리락일(`corp_event.effective_date`, 거래일)부터 `BONUS_SCALE_WINDOW_SESSIONS` 세션의 잔고를
+    # 결측으로 낸다. 분할·병합·감자는 원천이 새 단위로 바뀌어(전환 비율 중앙값 1.0) 가리지 않는다.
+    #   ① PIT: 공시 전에는 가릴 근거가 없다 — 공시 접수일(`available_date`) **다음** 행부터만
+    #      가린다(접수 시각이 없어 당일은 아직 쓸 수 없다). 판정이 그 행과 그 전 공시만 보므로 as_of 에
+    #      무관하고, as_of 는 행 절단으로만 작용한다(`v_adj_price_fwd` 와 같은 규약).
+    #   ② 가린 행은 값 NULL · `fill_kind.kind` 'empty_response'(→ 엔진 MISSING)이고 evidence 는
+    #      둔다 — 잔고 이상 격리 셀(`sql/credit_daily.sql` balance_over_shares)과 같은 어휘다
+    #      (`FILL_KINDS` 를 늘리지 않는다). 값이 원래 없던 셀은 사유를 그대로 둔다. 가림 여부는
+    #      `bonus_window` 가 나른다.
+    "v_credit_balance": """
+WITH cal AS (
+    SELECT date, row_number() OVER (ORDER BY date) AS i FROM {trading_calendar}
+),
+win AS (
+    SELECT e.ticker, c.i AS first_i, e.available_date
+    FROM {corp_event} e JOIN cal c ON c.date = e.effective_date
+    WHERE e.event_type = 'bonus'
+),
+bal AS (
+    SELECT r.ticker, r.date, r.whol_loan_rmnd_stcn_shr, r.fill_kind, r.available_date,
+           r.available_basis,
+           EXISTS (SELECT 1 FROM win w
+                   WHERE w.ticker = r.ticker AND w.available_date < r.date
+                     AND c.i BETWEEN w.first_i AND w.first_i + {bonus_window} - 1) AS bonus_window
+    FROM {credit_daily} r LEFT JOIN cal c ON c.date = r.date
+    WHERE r.date <= as_of
+)
+SELECT ticker, date,
+       CASE WHEN NOT bonus_window THEN whol_loan_rmnd_stcn_shr END  AS whol_loan_rmnd_stcn_shr,
+       CASE WHEN bonus_window AND fill_kind.kind = 'measured'
+            THEN struct_pack(kind := 'empty_response', evidence := fill_kind.evidence)
+            ELSE fill_kind END                                    AS fill_kind,
+       bonus_window, available_date, available_basis
+FROM bal
+""",
 }
 
 
@@ -487,6 +535,7 @@ def render_body(name: str, sources: dict[str, str], template: str | None = None)
                        ttm_span_min=TTM_SPAN_MIN_DAYS, ttm_span_max=TTM_SPAN_MAX_DAYS,
                        quarter_gap_min=QUARTER_GAP_MIN_DAYS,
                        quarter_gap_max=QUARTER_GAP_MAX_DAYS,
+                       bonus_window=BONUS_SCALE_WINDOW_SESSIONS,
                        **fill).strip()
 
 
@@ -545,7 +594,8 @@ def install_temp_macros(con: duckdb.DuckDBPyConnection, sources: dict[str, str],
     return made
 
 
-__all__ = ["CONSENSUS_LAG_SESSIONS", "FACTOR_LAG_SESSIONS", "FIN_LAG_SESSIONS", "MACRO_DEPENDS",
+__all__ = ["BONUS_SCALE_WINDOW_SESSIONS", "CONSENSUS_LAG_SESSIONS", "FACTOR_LAG_SESSIONS",
+           "FIN_LAG_SESSIONS", "MACRO_DEPENDS",
            "MACRO_INPUTS", "PRICE_LAG_SESSIONS", "QUARTER_GAP_MAX_DAYS",
            "QUARTER_GAP_MIN_DAYS", "SIGNATURES", "TEMPLATES", "TTM_SPAN_MAX_DAYS",
            "TTM_SPAN_MIN_DAYS", "install_temp_macros", "parquet_source", "render_body",

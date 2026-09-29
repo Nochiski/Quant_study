@@ -149,8 +149,9 @@ def _implemented_graphs() -> dict[str, FactorGraph]:
         # 두 필드는 각자 dataset_profile 랙(신용잔고 3 · 주식수 1)대로 들어온다. 기준일로 맞추려고
         # 주식수를 2세션 더 물리지 않는다 — 액면 분할·병합·감자에서 신용잔고 원천은 거래정지
         # 첫날부터 새 주식수 단위로 바뀌어(주식수 급변일보다 대개 0~2세션 앞) 랙 그대로 나눌 때
-        # 사건 구간 튐이 가장 작다. 무상증자는 원천이 새 단위로 바뀌지 않아 약 20세션 음의 편향이
-        # 남는다(#249).
+        # 사건 구간 튐이 가장 작다. 무상증자는 원천이 새 단위로 일부만 바뀌어 척도를 맞출 수 없다
+        # — 원장 뷰 `v_credit_balance` 가 그 창의 잔고를 결측으로 가리고, DELTA 는 창 안 결측이
+        # 하나라도 있으면 결측이라 그대로 따른다(#249).
         "credit.margin_balance_change_20d": FactorGraph(
             nodes=(
                 FieldNode("balance", "credit.margin_balance", "field"),

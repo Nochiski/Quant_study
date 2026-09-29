@@ -7,7 +7,8 @@
 읽는 방식은 둘뿐이다(`SourceMode`).
 
 `GRID`  (ticker, session) 격자 위의 일별 행 — `price_daily`·`price_adj_daily` · 격자 3테이블
-        `flow_daily`·`short_daily`·`credit_daily`. 랙 n 은 **정확히 n 세션 전 행**이고 그 세션에
+        `flow_daily`·`short_daily`·`credit_daily`(무상증자 척도 창을 가린 카탈로그 뷰
+        `v_credit_balance` 로 읽는다, #249). 랙 n 은 **정확히 n 세션 전 행**이고 그 세션에
         행이 없으면 셀을 내지 않는다(합성 금지 — 재상장 구간 첫날이 직전 구간 값을 물지 않는다).
         격자 3테이블은 `fill_kind`(STRUCT(kind, evidence)) 로 결측 사유를 함께 주고
         (`SourceSpec.kind_expr`), 어댑터는 그것을 `CellKind` 로 옮긴다.
@@ -63,6 +64,7 @@ CREDIT_TABLE = "credit_daily"
 ADJ_TABLE = "price_adj_daily"
 CONSENSUS_MACRO = "v_consensus"
 FIN_MACRO = "v_fin_latest"
+CREDIT_MACRO = "v_credit_balance"
 
 REQUIRED_TABLES = (CALENDAR_TABLE, SPAN_TABLE, UNIVERSE_TABLE, POLICY_TABLE, PRICE_TABLE)
 
@@ -408,8 +410,11 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
     SourceSpec(
         name="credit",
         dataset_id=CREDIT_TABLE,
-        relation=CREDIT_TABLE,
-        is_macro=False,
+        # 무상증자 척도 창을 가린 잔고를 원장 뷰에서 읽는다(#249). 창 판정은 뷰 몫이라 여기
+        # 다시 적지 않는다. 카탈로그가 없거나 낡으면 재무·컨센서스처럼 이 원천도 빠진다 — 표로
+        # 돌아가 읽으면 가린 창이 조용히 다시 열린다.
+        relation=CREDIT_MACRO,
+        is_macro=True,
         mode=SourceMode.GRID,
         axis=SourceAxis.TICKER,
         key_column="ticker",
@@ -420,7 +425,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         pick_order=None,
         lag_sessions=3,
         lag_basis=_CREDIT_LAG_BASIS,
-        requires=(CREDIT_TABLE,),
+        requires=(CREDIT_TABLE, EVENT_TABLE, CREDIT_MACRO),
         frequency="daily",
         kind_expr="fill_kind['kind']",
     ),
@@ -915,14 +920,20 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "= 'unknown', STAGE_HANDOFF §4) 이 필드로 나가지 않는다. 대주 잔고"
             "(`whol_stln_rmnd_stcn_shr`)는 별개 축이고 equity 내부 스코프다. 잔고가 상장주식수를 "
             "넘는 원장 행은 S10 이 `_reject/balance_over_shares/` 로 격리하고 그 셀은 "
-            f"`empty_response`(→ MISSING)로 남는다(DESIGN §9 결정 9). {_FILL_KIND_NOTE}."
+            "`empty_response`(→ MISSING)로 남는다(DESIGN §9 결정 9). **무상증자 권리락일부터 "
+            "척도 창의 잔고도 결측(MISSING)이다** — 원천 잔고가 옛 단위와 새 단위로 섞여 상장"
+            "주식수와 척도가 맞지 않는다. 창 길이와 공시 전 세션을 가리지 않는 규칙은 원장 뷰 "
+            f"`v_credit_balance` 가 정한다(#249). {_FILL_KIND_NOTE}."
         ),
         disclosure_basis=(
             "원장 날짜(basis default) — 신용잔고는 T+2 공표이고 우리 체인은 T+3 아침에 받는다. "
             "그래서 dataset_profile(S19)이 3 세션 뒤부터 쓰게 정한다"
             "(EQUITY_FIELD_MAP DEFECT-E01 정정)"
         ),
-        evidence="credit_daily.whol_loan_rmnd_stcn_shr ← stg_credit_daily(KIS 신용잔고) 무수정",
+        evidence=(
+            "equity.duckdb v_credit_balance(as_of) ← credit_daily.whol_loan_rmnd_stcn_shr ← "
+            "stg_credit_daily(KIS 신용잔고) 무수정, 무상증자 척도 창만 corp_event(bonus)로 가린다"
+        ),
     ),
     # ── 사건 (FIELD_MAP §2 event.*) ──────────────────────────────────────────
     FieldSpec(

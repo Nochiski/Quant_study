@@ -503,6 +503,14 @@
   display: none;
 }
 
+/*
+ * 1280px 이상에서 편집기 최소 폭 때문에 뜬 서랍(B-04 오버레이)은 붙어 있는 오른쪽 패널 자리만 덮는다.
+ * 폭은 그 패널의 폭(인라인)이고 오른쪽 끝도 그 패널처럼 본문 여백 안쪽이다(#290 리뷰 P2-1).
+ */
+.ide__drawer--rail {
+  right: var(--space-5);
+}
+
 @media (max-width: 1279px) {
   .ide__results {
     grid-template-columns: 1fr;

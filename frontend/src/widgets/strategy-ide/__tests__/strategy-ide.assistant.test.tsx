@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -17,6 +18,10 @@ import { PANEL_LAYOUT_STORAGE_KEY } from "../model/use-panel-layout";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  document.head
+    .querySelectorAll("style[data-ide-layout]")
+    .forEach((style) => style.remove());
   localStorage.clear();
 });
 
@@ -31,28 +36,65 @@ const matchMedia = (matches: boolean) =>
     })),
   );
 
+/** 1440px 창에서 전략 구조 240 + 계약 320 + 사이드바 기본 360 + 편집기 480에 손잡이 셋(18)을 더한 폭. */
+const SIDE_BY_SIDE = 1418;
+
 /**
- * 좌우 패널이 나눠 갖는 본문(`.ide__body`) 폭을 알리는 ResizeObserver. jsdom에는 배치가 없어, 편집기
- * 최소 폭 판정(#269)이 읽는 폭을 여기서 준다.
+ * 본문(`.ide__body`) 배치를 흉내 낸다. jsdom에는 배치가 없어, 편집기 최소 폭 판정(#269)이 읽는 폭을
+ * 여기서 준다. `width`는 페이지 세로 스크롤바가 없을 때 좌우 패널이 나눠 갖는 폭이고, `scrollbar`는 지금
+ * 스크롤바가 차지한 폭이다. 관찰 알림은 브라우저처럼 첫 칠 뒤에 오므로 `notify`로 따로 보낸다.
  */
-const ideBodyWidth = (width: number) =>
+const ideLayout = (width: number, scrollbar: () => number = () => 0) => {
+  const viewport = 1440;
+  const padding = 24;
+  // 여백은 스타일시트가 준다 — 테스트는 컴포넌트 CSS를 싣지 않는다.
+  const style = document.createElement("style");
+  style.dataset.ideLayout = "";
+  style.textContent = `.ide__body { padding: 0 ${padding}px; }`;
+  document.head.append(style);
+  vi.stubGlobal("innerWidth", viewport);
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
+    function (this: HTMLElement) {
+      if (this === document.documentElement) return viewport - scrollbar();
+      return this.classList.contains("ide__body")
+        ? width + 2 * padding - scrollbar()
+        : 0;
+    },
+  );
+  const observers = new Set<() => void>();
   vi.stubGlobal(
     "ResizeObserver",
     class {
-      readonly #notify: ResizeObserverCallback;
+      readonly #notify: () => void;
       constructor(notify: ResizeObserverCallback) {
-        this.#notify = notify;
+        this.#notify = () =>
+          notify(
+            [
+              {
+                contentRect: { width: width - scrollbar() },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          );
       }
-      observe(target: Element) {
-        this.#notify(
-          [{ target, contentRect: { width } } as unknown as ResizeObserverEntry],
-          this as unknown as ResizeObserver,
-        );
+      observe() {
+        observers.add(this.#notify);
       }
       unobserve() {}
-      disconnect() {}
+      disconnect() {
+        observers.delete(this.#notify);
+      }
     },
   );
+  return {
+    notify: () => act(() => observers.forEach((notify) => notify())),
+  };
+};
+
+const assistantFloating = () =>
+  screen
+    .getByRole("complementary", { name: "AI 어시스턴트" })
+    .closest(".ide__drawer") !== null;
 
 /** 제품과 같은 모양의 슬롯: 손잡이를 받아 자기 닫기를 그리는 함수. */
 const sidebarSlot = ({ close }: { close: () => void }) => (
@@ -282,11 +324,10 @@ describe("StrategyIde assistant 슬롯", () => {
   });
 
   it("편집기가 최소 폭 아래로 내려가면 나중에 연 패널을 오버레이로 돌린다", async () => {
-    // 1440px 창이라 좁은 화면 규칙은 아니지만, 셸 사이드바·여백을 뺀 본문 1204px은 전략 구조 240 +
-    // 계약 320 + 사이드바 360 + 편집기 480 = 1400px을 담지 못한다. 뷰포트로 재면 담는 것으로 보여
-    // 편집기가 266px로 눌렸다(#269).
+    // 1440px 창이라 좁은 화면 규칙은 아니지만, 셸 사이드바·여백을 뺀 본문 1204px은 패널 셋과 편집기
+    // 최소 폭을 나란히 담는 1418px보다 좁다. 뷰포트로 재면 담는 것으로 보여 편집기가 266px로 눌렸다(#269).
     matchMedia(false);
-    ideBodyWidth(1204);
+    ideLayout(1204);
     const user = userEvent.setup();
     mount();
     // 계약은 기본 펼침이고 자리에 박혀 있다.
@@ -300,7 +341,8 @@ describe("StrategyIde assistant 슬롯", () => {
     const assistant = screen.getByRole("complementary", {
       name: "AI 어시스턴트",
     });
-    expect(assistant.closest(".ide__drawer")).not.toBeNull();
+    // 서랍은 붙어 있는 계약 자리만 덮는다 — 계약 폭(기본 320)을 따른다(#290 리뷰 P2-1).
+    expect(assistant.closest(".ide__drawer")).toHaveStyle({ width: "320px" });
     expect(
       screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
     ).toBeNull();
@@ -323,18 +365,64 @@ describe("StrategyIde assistant 슬롯", () => {
     await user.click(screen.getByRole("button", { name: "계약", expanded: false }));
     expect(
       screen.getByRole("complementary", { name: "계약" }).closest(".ide__drawer"),
-    ).not.toBeNull();
-    expect(
-      screen
-        .getByRole("complementary", { name: "AI 어시스턴트" })
-        .closest(".ide__drawer"),
-    ).toBeNull();
+    ).toHaveStyle({ width: "360px" });
+    expect(assistantFloating()).toBe(false);
+  });
+
+  it("편집기 최소 폭 480px에 손잡이 폭을 넣지 않는다", async () => {
+    // 패널 셋과 편집기 480을 담고도 손잡이 몫이 1px 모자란 본문. 손잡이를 480에 넣어 재면 붙어서
+    // 편집기가 462px까지 내려갔다(#290 리뷰 P3-3).
+    matchMedia(false);
+    ideLayout(SIDE_BY_SIDE - 1);
+    const user = userEvent.setup();
+    mount();
+    await user.click(
+      screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
+    );
+    expect(assistantFloating()).toBe(true);
+  });
+
+  it("첫 칠 전에 폭을 재어, 열어 둔 사이드바가 처음부터 겹쳐 뜬다", () => {
+    // 관찰 알림은 칠한 뒤에야 온다(여기서는 `notify`를 부르지 않는다). 첫 칠 전 측정이 없으면 폭을
+    // 모르는 배치(붙은 사이드바)로 먼저 그린다(#290 리뷰 P3-2).
+    matchMedia(false);
+    localStorage.setItem(
+      PANEL_LAYOUT_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        sizes: { outlineWidth: 240, inspectorWidth: 320, debuggerHeight: 220 },
+        open: { assistant: true },
+      }),
+    );
+    ideLayout(1204);
+    mount();
+    expect(assistantFloating()).toBe(true);
+  });
+
+  it("페이지 스크롤바가 켜지고 꺼져도 사이드바 자리가 흔들리지 않는다", async () => {
+    // 사이드바를 붙이면 페이지가 길어져 세로 스크롤바(15px)가 본문 폭을 먹고, 띄우면 스크롤바가 사라지는
+    // 창이다. 판정이 스크롤바를 뺀 폭을 읽으면 관찰 알림마다 붙었다 떴다를 되풀이했다(#290 리뷰 P1-1).
+    matchMedia(false);
+    const layout = ideLayout(SIDE_BY_SIDE + 7, () =>
+      document.querySelector(".ide__body .ide__assistant") === null ? 0 : 15,
+    );
+    const user = userEvent.setup();
+    mount();
+    await user.click(
+      screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
+    );
+    const placements = [assistantFloating()];
+    for (let round = 0; round < 3; round += 1) {
+      layout.notify();
+      placements.push(assistantFloating());
+    }
+    expect(placements).toEqual([false, false, false, false]);
   });
 
   it("넓은 화면에서는 둘 다 자리에 박혀 있다", () => {
     matchMedia(false);
     // 1920px 창의 본문 폭.
-    ideBodyWidth(1684);
+    ideLayout(1684);
     mount();
     fireEvent.keyDown(window, { key: "a", altKey: true });
     expect(
@@ -387,9 +475,9 @@ describe("StrategyIde assistant 슬롯", () => {
   });
 
   it("폭 조절이 오버레이 판정을 바꾸지 않아 핸들이 남는다", async () => {
-    // 본문이 전략 구조 240 + 계약 320 + 사이드바 기본 360 + 편집기 480 = 1400px을 딱 담는다.
+    // 본문이 패널 셋과 편집기 최소 폭을 딱 담는다.
     matchMedia(false);
-    ideBodyWidth(1400);
+    ideLayout(SIDE_BY_SIDE);
     const user = userEvent.setup();
     const first = mount();
     await user.click(screen.getByRole("button", { name: "AI 어시스턴트" }));

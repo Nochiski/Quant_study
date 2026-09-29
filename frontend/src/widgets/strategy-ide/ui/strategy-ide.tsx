@@ -11,12 +11,16 @@ import {
 
 import type { StrategyOutlineSymbol } from "../../../features/edit-strategy";
 import { t } from "../../../shared/config";
-import { useElementWidth, useMediaQuery } from "../../../shared/lib/media";
+import {
+  useMediaQuery,
+  useScrollbarFreeWidth,
+} from "../../../shared/lib/media";
 import { useThemePreference } from "../../../shared/lib/theme";
 import {
   Badge,
   Button,
   CommandPalette,
+  SPLIT_HANDLE_SIZE,
   SplitHandle,
   Tabs,
   type CommandPaletteItem,
@@ -153,8 +157,8 @@ const hasNativeUndo = (target: EventTarget | null): boolean => {
 };
 
 /**
- * 좌우 패널이 다 펼쳐졌을 때 가운데 몫(편집기와 크기 조절 손잡이)에 남겨 두는 최소 폭. 이 아래로
- * 내려가면 오버레이로 돌린다.
+ * 좌우 패널이 다 펼쳐졌을 때 가운데 편집기에 남겨 두는 최소 폭(B-04 정본 480px). 이 아래로 내려가면
+ * 오버레이로 돌린다. 판정은 패널마다 손잡이 폭을 따로 더한다(#290 리뷰 P3-3).
  */
 const EDITOR_MIN_WIDTH = 480;
 const VIEWS: readonly SourceView[] = ["yaml", "json", "form", "graph", "diff"];
@@ -213,20 +217,22 @@ export const StrategyIde = ({
   //
   // 뷰포트가 아니라 좌우 패널이 실제로 나눠 갖는 폭(`.ide__body` content box)으로 잰다. 뷰포트로 재면
   // 앱 셸 사이드바와 여백(1440px에서 약 250px)을 빼먹어, 1440px에서 AI 사이드바를 열면 편집기가 266px로
-  // 눌리고 툴바가 계약 칸 밑으로 넘쳤다(#269).
+  // 눌리고 툴바가 계약 칸 밑으로 넘쳤다(#269). 페이지 세로 스크롤바는 빼지 않는다 — 판정이 페이지 높이를
+  // 바꿔 스크롤바를 켜고 끄면 판정 입력이 다시 흔들려 사이드바가 매 프레임 붙었다 떴다(#290 리뷰 P1-1).
   //
   // 사이드바 폭은 **기본값 상수**로 재고 지금 폭을 쓰지 않는다. 지금 폭을 쓰면 폭 조절 드래그가 판정을
   // 바꿔, 임계를 넘는 순간 패널이 오버레이로 바뀌며 핸들이 사라지고(포인터 캡처가 끊긴다) 저장된 폭
   // 때문에 다음 방문에도 오버레이로 굳는다(B-04 리뷰 P1-3). 오버레이 전환은 "패널을 열었다"로만
-  // 일어나야 한다. 접힌 패널은 자리를 차지하지 않으므로 더하지 않는다.
+  // 일어나야 한다. 접힌 패널은 자리를 차지하지 않으므로 더하지 않는다. 펼친 패널은 손잡이 하나를 데려온다.
   const bodyRef = useRef<HTMLDivElement>(null);
-  const bodyWidth = useElementWidth(bodyRef);
+  const bodyWidth = useScrollbarFreeWidth(bodyRef);
   const squeezed =
     bodyWidth !== null &&
     bodyWidth <
-      (layout.outlineOpen ? layout.outlineWidth : 0) +
-        (layout.inspectorOpen ? layout.inspectorWidth : 0) +
+      (layout.outlineOpen ? layout.outlineWidth + SPLIT_HANDLE_SIZE : 0) +
+        (layout.inspectorOpen ? layout.inspectorWidth + SPLIT_HANDLE_SIZE : 0) +
         DEFAULT_LAYOUT.assistantWidth +
+        SPLIT_HANDLE_SIZE +
         EDITOR_MIN_WIDTH;
   const outlineId = useId();
   const inspectorId = useId();
@@ -259,6 +265,19 @@ export const StrategyIde = ({
       : null;
   const inspectorFloating = narrow || overlayRight === "inspectorOpen";
   const assistantFloating = narrow || overlayRight === "assistantOpen";
+  // 넓은 화면의 오버레이 서랍은 붙어 있는 오른쪽 패널 자리만 덮는다 — 폭의 owner는 그 패널의 폭
+  // 상태다. 좁은 화면용 서랍 폭(420px)은 그 자리보다 넓어 편집기 오른쪽 칸을 가렸다(#290 리뷰 P2-1).
+  const railDrawer =
+    overlayRight === null
+      ? undefined
+      : {
+          width:
+            overlayRight === "assistantOpen"
+              ? layout.inspectorWidth
+              : layout.assistantWidth,
+        };
+  const drawerClass =
+    railDrawer === undefined ? "ide__drawer" : "ide__drawer ide__drawer--rail";
   // 기본이 접힘인데 내용을 미리 마운트하면 화면을 열 때마다 사이드바의 질의가 나간다. 한 번 펼친
   // 뒤에는 접어도 유지한다 — 진행 중 턴의 스트림이 접기로 끊기면 안 된다(B-04 리뷰 P3).
   const [assistantMounted, setAssistantMounted] = useState(layout.assistantOpen);
@@ -975,7 +994,11 @@ export const StrategyIde = ({
       </div>
 
       {inspectorFloating ? (
-        <div className="ide__drawer" hidden={!layout.inspectorOpen}>
+        <div
+          className={drawerClass}
+          style={railDrawer}
+          hidden={!layout.inspectorOpen}
+        >
           {inspectorNode}
         </div>
       ) : null}
@@ -988,7 +1011,11 @@ export const StrategyIde = ({
         </div>
       ) : null}
       {hasAssistant && assistantFloating ? (
-        <div className="ide__drawer" hidden={!layout.assistantOpen}>
+        <div
+          className={drawerClass}
+          style={railDrawer}
+          hidden={!layout.assistantOpen}
+        >
           {assistantNode}
         </div>
       ) : null}

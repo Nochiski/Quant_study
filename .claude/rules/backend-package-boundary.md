@@ -66,7 +66,8 @@ bootstrap ─> application + adapters
   관측 계약은 `application/portfolio_design/ports/outgoing/raw_observations.py`가 별도로
   소유하며, 두 포트는 같은 셀에 같은 값·공개일을 답해야 한다.
 - 구현은 둘이다. `adapters/outbound/equity_mock`은 테스트·e2e용 결정적 fixture이며 PIT
-  available-date, revision, recommended lag, 실제 0/결측/미수집/coverage gap을 구분한다.
+  available-date, revision, recommended lag, 실제 0/결측/미수집/coverage gap/원장이 가린 셀(masked)을
+  구분한다.
   `adapters/outbound/equity_duckdb`는 실데이터(로컬 원장)를 읽는다. 어느 쪽을 쓸지는
   composition root가 정한다: `bootstrap/_http.py`가 `STRATEGY_WORKBENCH_EQUITY_ADAPTER`(기본
   `mock`)와 `STRATEGY_WORKBENCH_EQUITY_ROOT`를 읽고, 허용 값 목록은 `bootstrap/_container.py`의

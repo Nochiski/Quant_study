@@ -1178,8 +1178,9 @@ class EquityDuckdbAdapter:
                         field_id=field_id,
                         value=found.value,
                         available_date=found.available_date,
-                        # load_panel 과 **같은 `_Observed.kind`** 를 쓴다 — 값이 있으면 OBSERVED,
-                        # 없으면 격자 테이블의 `fill_kind` 가 말하는 종류(없으면 MISSING)다.
+                        # load_panel 과 **같은 `_Observed.kind`**(`_cell_kind`)를 쓴다 — 원장 뷰가
+                        # 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 격자 테이블의
+                        # `fill_kind` 가 말하는 종류(없으면 MISSING)다.
                         # 값 있는 셀을 OBSERVED 밖으로 보내면 포트 계약이 생성 시점에 깨지고,
                         # 두 포트가 다른 규칙을 쓰면 kind 가 셀 단위로 어긋난다.
                         kind=found.kind,

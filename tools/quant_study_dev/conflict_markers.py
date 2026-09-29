@@ -13,9 +13,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# git 이 쓰는 표식 세 종류. 표식 뒤에는 공백이 오거나 줄이 끝난다. 7자가 아닌 밑줄·구분선은 잡지
-# 않는다. 정확히 7자인 단독 줄(Markdown setext 밑줄 포함)은 git 도 충돌 표식으로 본다.
-MARKER = re.compile(r"^(<<<<<<<|=======|>>>>>>>)( |$)")
+# git 이 쓰는 표식 세 종류. 표식 뒤에는 공백이 오거나 줄이 끝난다(CRLF 줄의 `\r` 까지). 7자가 아닌
+# 밑줄·구분선은 잡지 않는다. 정확히 7자인 단독 줄(Markdown setext 밑줄 포함)은 git 도 충돌 표식으로 본다.
+MARKER = re.compile(r"^(<<<<<<<|=======|>>>>>>>)( |\r?$)")
 
 # 바이너리 판정은 git 과 같다 — BOM 없는 파일의 앞 8000바이트에 NUL 이 있으면 바이너리다.
 BINARY_SNIFF_BYTES = 8000
@@ -25,9 +25,15 @@ Finding = tuple[Path, int, str]
 
 
 def tracked_files(root: Path) -> list[Path]:
-    """`root` 아래에서 git 이 추적하는 파일. 비추적 `.orig`·`.rej`·빌드 산출물은 보지 않는다."""
+    """`root` 아래에서 git 이 추적하는 파일. 비추적 `.orig`·`.rej`·빌드 산출물은 보지 않는다.
+
+    병합을 푸는 도중에는 index 가 충돌 경로를 stage 마다 싣는데, 경로는 한 번만 낸다.
+    """
     listed = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=False
+        ["git", "ls-files", "-z", "--deduplicate"],
+        cwd=root,
+        capture_output=True,
+        check=False,
     )
     if listed.returncode != 0:
         raise RuntimeError(
@@ -38,10 +44,14 @@ def tracked_files(root: Path) -> list[Path]:
 
 
 def scan_text(text: str) -> list[tuple[int, str]]:
-    """텍스트에서 (1-기반 줄 번호, 줄) 목록을 낸다."""
+    """텍스트에서 (1-기반 줄 번호, 줄) 목록을 낸다.
+
+    줄은 git 처럼 LF 에서만 나눈다. `splitlines` 는 U+0085 같은 문자에서도 나눠, cp949 바이트를 대체
+    디코딩한 텍스트에서 줄 번호가 git 과 어긋나고 줄 가운데의 표식 모양을 표식으로 본다.
+    """
     return [
         (number, line)
-        for number, line in enumerate(text.splitlines(), start=1)
+        for number, line in enumerate(text.split("\n"), start=1)
         if MARKER.match(line)
     ]
 

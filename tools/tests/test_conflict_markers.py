@@ -82,6 +82,12 @@ class ScanTextTests(unittest.TestCase):
             [number for number, _ in scan_text(f"a\n{SPLIT_MARKER}\nb")], [2]
         )
 
+    def test_splits_lines_only_at_line_feeds_like_git(self) -> None:
+        # cp949 바이트 `C2 85` 는 UTF-8 대체 디코딩에서 U+0085(NEL)가 된다. NEL 뒤의 표식 모양은 줄
+        # 가운데라 표식이 아니고, CRLF 줄 끝의 `\r` 은 줄 끝이다.
+        text = f"주석\x85{SPLIT_MARKER}\r\n{OPEN_MARKER} HEAD\r\n{SPLIT_MARKER}\r\n"
+        self.assertEqual([number for number, _ in scan_text(text)], [2, 3])
+
 
 class FindConflictMarkersTests(unittest.TestCase):
     def test_finds_markers_in_every_tracked_text_file_whatever_its_encoding_or_folder(
@@ -146,6 +152,29 @@ class FindConflictMarkersTests(unittest.TestCase):
             (root / "gone.md").unlink()
 
             self.assertEqual(reported(root), {})
+
+    def test_reports_a_path_left_unmerged_once(self) -> None:
+        # 병합·rebase 충돌을 푸는 도중의 index 는 충돌 경로를 stage(1·2·3)마다 한 번씩 싣는다.
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            make_repo(root, tracked={}, untracked={"f.md": CONFLICT.encode()})
+            blob = subprocess.run(
+                ["git", "hash-object", "-w", "f.md"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            stages = "".join(f"100644 {blob} {stage}\tf.md\n" for stage in (1, 2, 3))
+            subprocess.run(
+                ["git", "update-index", "--index-info"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                input=stages.encode(),
+            )
+
+            self.assertEqual(reported(root), {"f.md": [2, 4, 6]})
 
 
 class MainTests(unittest.TestCase):

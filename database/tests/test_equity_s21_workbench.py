@@ -417,13 +417,16 @@ def test_컨테이너가_duckdb_어댑터로_뜬다(built: Path, workbench, tmp_
 
 
 def test_MVP_B_모멘텀_월간_백테스트가_절단본에서_완주한다(built: Path, tmp_path: Path) -> None:
-    """`scripts/run_mvp_backtest.py` 를 in-process 로 — 2018 한 해(분할 포함), adj_close 축."""
+    """`scripts/run_mvp_backtest.py` 를 in-process 로 — 2020 한 해, adj_close 축.
+
+    워크벤치가 봉인 구간(2016~2019) 측정을 거절하므로(검증 랩 spec D1) 연구 구간 첫 해를 돈다. 분할
+    연속성은 위 어댑터 테스트가 2018-05-04 사건으로 본다."""
     pytest.importorskip("ruamel.yaml", reason=BACKEND_DEP_REASON)
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
     mvp = importlib.import_module("run_mvp_backtest")
     mvp.load_backend(contract.default_engine_src())
-    s = mvp.run(built, date(2018, 1, 2), date(2018, 12, 28), "krx.common-stock",
+    s = mvp.run(built, date(2020, 1, 2), date(2020, 12, 30), "krx.common-stock",
                 artifact_root=tmp_path / "runs")
     assert s.ok, s.error
     assert s.n_rebalances == 11 and s.n_rebalances_with_positions >= 1

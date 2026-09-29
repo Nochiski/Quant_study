@@ -1278,6 +1278,7 @@ def build_workbench_root(
     extra_factor_rows: list[FactorRow] | None = None,
     evening_session: date | None = None,
     invalid_ohlc: tuple[str, date] | None = None,
+    inconsistent_ohlc: tuple[str, date] | None = None,
     profile_rows: list[tuple[str, int, str]] | None = None,
     extra_policy_rows: list[PolicyRow] | None = None,
 ) -> Path:
@@ -1293,7 +1294,8 @@ def build_workbench_root(
     `basis` 컬럼 자체가 없는 옛 판 루트다.
 
     `invalid_ohlc=(ticker, session)` 을 주면 그 행이 거래 행(volume>0)인데 open 이 NULL 인 GAP-14
-    모양이 된다(어댑터가 bar 로 내지 않는 무효 행).
+    모양이 된다(어댑터가 bar 로 내지 않는 무효 행). `inconsistent_ohlc=(ticker, session)` 은 값은 다
+    있는데 high 가 종가보다 낮아 OHLC 가 서로 맞지 않는 무효 행이다(어댑터의 다른 무효 분기).
 
     `profile_rows` 를 주면 `dataset_profile` 을 그 행으로 쓴다(기본 `WB_PROFILE_ROWS`). 일부 필드의
     행만 빠진 대장을 만들 때 쓴다.
@@ -1306,12 +1308,13 @@ def build_workbench_root(
                 continue
             close = wb_close(ticker, session)
             halted = ticker == "000660" and session == WB_HALT_DATE
-            invalid = invalid_ohlc == (ticker, session)
             prices.append(
                 (ticker, session, None, None, None, close, 0)
                 if halted
                 else (ticker, session, None, close + 200, close - 200, close, 1_000)
-                if invalid
+                if invalid_ohlc == (ticker, session)
+                else (ticker, session, close - 100, close - 50, close - 200, close, 1_000)
+                if inconsistent_ohlc == (ticker, session)
                 else (ticker, session, close - 100, close + 200, close - 200, close, 1_000)
             )
             universe.append(

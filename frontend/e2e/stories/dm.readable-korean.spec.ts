@@ -8,6 +8,11 @@
  */
 import { expect, test } from "@playwright/test";
 
+import type {
+  BacktestRunSpec,
+  BacktestRunState,
+  PageBacktestRunSummary,
+} from "../../src/shared/api/generated";
 import {
   expectPhase,
   GOLDEN,
@@ -114,5 +119,124 @@ test(
     await expect(
       page.getByRole("region", { name: "이전 schema 문서" }),
     ).toHaveCount(0);
+  },
+);
+
+/**
+ * 연구 구간 규칙이 생기기 전 기간으로 돌다 자본 잠식으로 멈춘 옛 실행. 이력·결과 화면·재실행은 브라우저에서
+ * 대신 응답한다 — 실패한 실행을 실제로 만들면 e2e 이력 DB에 남아 다른 스토리의 이력 단언을 흔든다. 문장은
+ * frontend 번역(run 실패 코드·시작 거절 코드)이 소유한다.
+ */
+const WIPED_OUT: BacktestRunState = {
+  run_id: "run-dm06-wiped-out",
+  status: "failed",
+  progress: 0.6,
+  stage: "engine",
+  message: "Run failed",
+  error:
+    "EquityWipedOutError: session-end equity fell to or below zero — session=2018-03-02 equity=-1204.5",
+  error_code: "backtest.run.equity_wiped_out",
+  created_at: "2026-09-01T00:00:00Z",
+  updated_at: "2026-09-01T00:00:05Z",
+};
+
+const WIPED_OUT_REQUEST: BacktestRunSpec = {
+  environment: {
+    start: "2018-01-02",
+    end: "2019-12-30",
+    universe_id: "krx.common-stock",
+  },
+  strategy_source: {
+    kind: "saved_revision",
+    strategy_id: "strategy-dm06",
+    revision: 3,
+    expected_spec_hash: "d".repeat(64),
+  },
+};
+
+test(
+  "US-DM-06 실패한 옛 실행은 백테스트 이력과 결과 화면에서 같은 한글 문장으로 보이고 재실행 거절은 고칠 곳을 말한다",
+  { tag: ["@story", "@US-DM-06"] },
+  async ({ page }) => {
+    const history: PageBacktestRunSummary = {
+      items: [
+        {
+          run: WIPED_OUT,
+          strategy_provenance: {
+            kind: "saved_revision",
+            strategy_id: "strategy-dm06",
+            revision: 3,
+            schema_version: "1.2",
+            spec_hash: "d".repeat(64),
+            source_hash: "e".repeat(64),
+          },
+        },
+      ],
+      total: 1,
+      offset: 0,
+      limit: 25,
+    };
+    await page.route(
+      (url) => url.pathname === "/api/v1/backtests",
+      (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({ json: history })
+          : route.fulfill({
+              status: 422,
+              json: {
+                detail: {
+                  code: "backtest.run.research_window_violation",
+                  message:
+                    "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — got=start=2018-01-02",
+                  sealed_start: "2016-01-01",
+                  sealed_end: "2019-12-31",
+                  research_start: "2020-01-02",
+                },
+              },
+            }),
+    );
+    await page.route(`**/api/v1/backtests/${WIPED_OUT.run_id}`, (route) =>
+      route.fulfill({ json: WIPED_OUT }),
+    );
+    await page.route(
+      `**/api/v1/backtests/${WIPED_OUT.run_id}/request`,
+      (route) => route.fulfill({ json: WIPED_OUT_REQUEST }),
+    );
+    const sentence =
+      "세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식).";
+
+    // 이력 줄은 서버 원문 대신 결과 화면과 같은 한글 문장을 보이고, 원문은 접힌 "서버 사유"에만 둔다.
+    const response = await page.goto("/research/backtests");
+    expect(response?.ok()).toBe(true);
+    const row = page.getByRole("row").filter({ hasText: WIPED_OUT.run_id });
+    await expect(row.getByText(`실행 오류: ${sentence}`)).toBeVisible();
+    await expect(row.getByRole("group")).toContainText("EquityWipedOutError");
+    await expect(row).not.toContainText("EquityWipedOutError", {
+      useInnerText: true,
+    });
+    // 지난 실행이라 줄마다 경고(alert)로 읽히지 않는다.
+    await expect(row.getByRole("alert")).toHaveCount(0);
+
+    // 결과 화면도 같은 문장이다.
+    await row.getByRole("link", { name: "실행 열기" }).click();
+    await expect(page).toHaveURL(`/research/backtests/${WIPED_OUT.run_id}`);
+    await expect(page.getByRole("alert", { name: "실행 오류" })).toContainText(
+      sentence,
+    );
+
+    // 결과 화면에는 실행 설정 패널이 없다 — 재실행 거절이 어디서 무엇을 고칠지 말한다.
+    await page.getByRole("button", { name: "동일 설정 재실행" }).click();
+    const rejection = page.getByRole("alert", {
+      name: "동일 설정으로 다시 실행하지 못했습니다",
+    });
+    await expect(rejection).toContainText(
+      "전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+    );
+    await expect(rejection.getByRole("group")).toContainText(
+      "got=start=2018-01-02",
+    );
+    await expect(rejection).not.toContainText("got=start", {
+      useInnerText: true,
+    });
   },
 );

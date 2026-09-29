@@ -2,8 +2,8 @@
 
 S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속(09-05, 전방
 조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd` + S17 1개: `v_consensus` + S21 본판 1개:
-`v_fin_latest` + #249 1개: `v_credit_balance`(무상증자 척도 창을 가린 신용잔고). 본문은 하나의
-템플릿이고
+`v_fin_latest` + #249 1개: `v_credit_balance`(무상증자 척도 창을 가린 신용잔고) + #220 1개:
+`v_adj_close`(조정 공백 적용일을 가린 수정주가). 본문은 하나의 템플릿이고
 읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
   카탈로그: `render_macros(equity_root)` 가 커밋된 테이블의 MANIFEST 파티션 경로(**절대경로**,
             P1c)를 `read_parquet([...])` 로 넣어 `catalog.write_catalog` 에 준다.
@@ -97,6 +97,7 @@ SIGNATURES: dict[str, str] = {
     "v_consensus": "v_consensus(as_of, lag_override := NULL)",
     "v_fin_latest": "v_fin_latest(as_of, lag_override := NULL, vintage := 'restated')",
     "v_credit_balance": "v_credit_balance(as_of)",
+    "v_adj_close": "v_adj_close(as_of)",
 }
 MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_cum_adj": ("price_daily", "adj_factor", "trading_calendar"),
@@ -108,6 +109,7 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_consensus": ("consensus_daily", "trading_calendar"),
     "v_fin_latest": ("fin_std", "disclosure_version", "trading_calendar"),
     "v_credit_balance": ("credit_daily", "corp_event", "trading_calendar"),
+    "v_adj_close": ("price_adj_daily", "adj_factor"),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
@@ -522,6 +524,36 @@ SELECT ticker, date,
             ELSE fill_kind END                                    AS fill_kind,
        bonus_window, available_date, available_basis
 FROM bal
+""",
+    # 수정주가의 조정 공백(#220). S23 표 `price_adj_daily` 의 adj_close 를 그대로 내되, 원장이 그날
+    # 사건을 접지 못한 **적용일 행**만 결측으로 낸다 — 그 행의 원주가는 이미 사건 뒤 척도인데 누적 계수는
+    # 사건 전이라 값이 틀린다. 표는 parquet 소비자와 조정 규칙의 저장본이라 그대로 두고, 가림은 이
+    # 뷰(작은 사건 집합과의 조인)가 한다.
+    #   ① 늦게 공개된 ok 계수(`available_date > apply_date`) — fold_date 가 적용일 다음 세션이라 적용일
+    #      하루에 스파이크가 선다(실원장 2020-03-19 이후 75건, 최대 38배). 다음 행부터는 접혀 있다.
+    #   ② `krx_base_inconsistent` — KRX 기준가는 바뀌었는데 주식수 비와 곱이 안 맞아 계수를 못 낸 사건.
+    #      적용일에 층이 영구히 바뀐다(295건, 적용일 점프 중앙값 약 2.9배).
+    #   창 연산은 창 안에 결측이 하나라도 있으면 결측이라, 가린 행을 품는 창이 모두 결측이 된다(틀린 값
+    #   대신 결측). `unknown_price_only`(유상 권리락 등 MVP 밖 기준가 변화, 적용일 점프 중앙값 약 6%)와
+    #   명목일 사건(no_price_match·ratio_null 등 — 적용일에 점프가 거의 없다)은 가리지 않는다.
+    #   PIT: 공백 사건 대부분은 원장상 적용일 다음 세션에 공개되지만, 적용일의 가격 불연속(KRX 기준가
+    #   재설정·원주가 점프)은 그날 가격 데이터(랙 0)에 이미 보인다. 가림은 값을 바꾸지 않고 결측만
+    #   만들어 그날 모르는 정보를 새지 않으므로 공개일을 기다리지 않는다. 공개 전 계수를 접는 것은
+    #   아니다(fold 규칙은 S23 그대로). as_of 는 행 절단으로만 작용한다.
+    "v_adj_close": """
+WITH gap AS (
+    SELECT DISTINCT ticker, apply_date
+    FROM {adj_factor}
+    WHERE (factor_ok AND available_date > apply_date)
+       OR (NOT factor_ok AND factor_source = 'krx_base_inconsistent')
+)
+SELECT a.ticker, a.date,
+       CASE WHEN g.ticker IS NULL THEN a.adj_close END AS adj_close,
+       g.ticker IS NOT NULL                             AS adj_gap,
+       a.available_date
+FROM {price_adj_daily} a
+LEFT JOIN gap g ON g.ticker = a.ticker AND g.apply_date = a.date
+WHERE a.date <= as_of
 """,
 }
 

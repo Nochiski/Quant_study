@@ -68,9 +68,9 @@ def test_카탈로그는_매크로_6개이고_뷰_게이트를_통과한다(
     root, p = published
     assert len(p.macros) == 6
     # S17 `v_consensus`(consensus_daily) · S21 `v_fin_latest`(fin_std·disclosure_version) ·
-    # #249 `v_credit_balance`(credit_daily) 는 입력이 이 체인에 없어 렌더되지 않는다(깨진 매크로를
-    # 카탈로그에 싣지 않는다 — views.render_macros).
-    absent = {"v_consensus", "v_fin_latest", "v_credit_balance"}
+    # #249 `v_credit_balance`(credit_daily) · #220 `v_adj_close`(price_adj_daily) 는 입력이 이 체인에
+    # 없어 렌더되지 않는다(깨진 매크로를 카탈로그에 싣지 않는다 — views.render_macros).
+    absent = {"v_consensus", "v_fin_latest", "v_credit_balance", "v_adj_close"}
     assert sorted(p.macros) == sorted(v for k, v in views.SIGNATURES.items() if k not in absent)
     assert sorted(p.skipped) == sorted(absent)
     assert [g.name for g in p.gates] == ["EG11", "EG5c", "EG3_firm_mktcap"]

@@ -53,7 +53,7 @@
 
 `data/stage/` 의 원장 parquet 을 읽어 **29개 equity 표**(팩트·차원 25 + 선언표 3 —
 `declaration_table=True` 는 `universe_policy`·`dataset_profile`·`factor_readiness`)를 짓고,
-`equity.duckdb` 카탈로그(매크로 9)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
+`equity.duckdb` 카탈로그(매크로 10)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
 백테스트 파이프라인에 point-in-time 관측을 공급한다.
 
 - 코드: `database/src/equity/`
@@ -186,7 +186,7 @@ ssh kael-server "cd ~/quant-ledger && bash scripts/equity_gate_all.sh"
 표별 게이트 `metrics` 를 통째로 뽑아 baseline 근거로 쓰려면
 `database/scripts/equity_gate_metrics.py`(서버에서 `data/equity` 를 읽어 JSON 한 덩이).
 
-### 3-4. 카탈로그(뷰 매크로 9) · 소비자 계약(EG-C 6항)
+### 3-4. 카탈로그(뷰 매크로 10) · 소비자 계약(EG-C 6항)
 
 ```bash
 export QL_HOME=$HOME/quant-ledger PYTHONPATH=$HOME/quant-ledger/src
@@ -665,7 +665,7 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 | 산출 SQL | `database/src/equity/sql/<table>.sql` |
 | 프레임(빌드·게이트·입력 고정·baseline·CLI) | `build.py`·`gates.py`·`inputs.py`·`baseline.py`·`__main__.py` |
 | 전방 조정가 표 | `rules_s23.py` · `sql/price_adj_daily.sql` — 소비 규약은 아래 「조정가 읽는 법」 |
-| 뷰 매크로 9 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`·`v_credit_balance`) |
+| 뷰 매크로 10 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`·`v_credit_balance`·`v_adj_close`) |
 | 카탈로그 publish + EG11·EG5c | `catalog.py` |
 | 소비자 계약 EG-C | `contract.py` |
 | 골든 픽스처 | `database/src/equity/fixtures/<table>.json` |

@@ -3612,7 +3612,7 @@
         "type": "string"
       },
       "MetricUnavailableReason": {
-        "description": "지표 값이 없을 때(`MetricValue.value is None`) 그 이유. 값은 wire 계약이다.\n\n화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유하고, 목록은 골든\n`tests/fixtures/analytics/metric_unavailable_reasons.json` 이 두 쪽을 묶는다(이슈 #241).",
+        "description": "지표 값이 없을 때(`MetricValue.value is None`) 그 이유. 값은 wire 계약이다.\n\n화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유한다. 목록은 OpenAPI 생성\nSDK의 같은 이름 유니온으로 가고, 문구가 빠지면 frontend typecheck가 깨진다(이슈 #241·#293).",
         "enum": [
           "zero_return_variance",
           "no_downside_variation",

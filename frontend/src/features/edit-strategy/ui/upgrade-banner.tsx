@@ -69,24 +69,28 @@ const AppliedUpgrade = ({
           {t("upgrade.environment.applied")}
         </p>
       ) : (
-        <div className="upgrade__actions">
-          <span>
-            {t("upgrade.environment.found").replace(
-              "{summary}",
-              environmentSummary(environment),
-            )}
-          </span>
-          <Button
-            size="small"
-            tone="primary"
-            onClick={() => {
-              onApplyEnvironment(environment);
-              setFilled(environment);
-            }}
-          >
-            {t("upgrade.environment.apply")}
-          </Button>
-        </div>
+        <>
+          <div className="upgrade__actions">
+            <span>
+              {t("upgrade.environment.found").replace(
+                "{summary}",
+                environmentSummary(environment),
+              )}
+            </span>
+            <Button
+              size="small"
+              tone="primary"
+              onClick={() => {
+                onApplyEnvironment(environment);
+                setFilled(environment);
+              }}
+            >
+              {t("upgrade.environment.apply")}
+            </Button>
+          </div>
+          {/* 저장은 막지 않는다. 저장하면 이 안내가 닫혀 옛 값을 되찾을 길이 없으므로 미리 알린다(#267 DEFECT-3). */}
+          <p className="upgrade__note">{t("upgrade.environment.unfilled")}</p>
+        </>
       )}
     </>
   );

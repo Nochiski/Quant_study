@@ -99,7 +99,20 @@ test(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
     );
     await expect(backtest(page)).toBeDisabled();
-    await banner.getByRole("button", { name: "실행 설정에 채우기" }).click();
+    // 채우지 않고 저장하면 옛 값을 되찾을 길이 없다는 것을 미리 알린다(#267 DEFECT-3).
+    await expect(banner).toContainText(
+      "채우지 않고 저장하거나 이 화면을 떠나면 이 실행 설정은 다시 볼 수 없습니다.",
+    );
+    // 실행 취소로 옛 글로 돌아갔다가 다시 실행하면 채우기도 돌아온다(#267 DEFECT-1).
+    const fill = banner.getByRole("button", { name: "실행 설정에 채우기" });
+    await page.getByRole("button", { name: "실행 취소", exact: true }).click();
+    await expect(
+      banner.getByRole("button", { name: "현재 버전으로 업그레이드" }),
+    ).toBeVisible();
+    await expect(fill).toHaveCount(0);
+    await page.getByRole("button", { name: "다시 실행", exact: true }).click();
+    expect(await currentSource(page)).toBe(upgraded.source);
+    await fill.click();
     await expect(banner).toContainText("옛 문서의 실행 설정을 채웠습니다.");
     await expect(summary).toContainText(upgraded.environment!.universe_id);
 

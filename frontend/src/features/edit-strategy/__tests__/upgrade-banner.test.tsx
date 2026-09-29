@@ -1,4 +1,4 @@
-import { undo } from "@codemirror/commands";
+import { redo, undo } from "@codemirror/commands";
 import { EditorView } from "@codemirror/view";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -263,6 +263,32 @@ describe("retired schema upgrade banner", () => {
     expect(view.state.doc.toString()).toBe(LEGACY);
   });
 
+  it("brings the run-settings fill back when an undone upgrade is redone", async () => {
+    // #267 DEFECT-1: 상태가 버전 번호에 묶이면 다시 실행한 글이 새 버전이라 채우기가 사라졌다.
+    const view = await mount();
+    const fill = () =>
+      screen.queryByRole("button", { name: "실행 설정에 채우기" });
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(view.state.doc.toString()).toBe(UPGRADED));
+    await waitFor(() => expect(fill()).not.toBeNull());
+
+    act(() => {
+      undo(view);
+    });
+    expect(view.state.doc.toString()).toBe(LEGACY);
+    await waitFor(() => expect(fill()).toBeNull());
+    // 되돌린 옛 글에는 업그레이드 제안이 다시 뜬다.
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+
+    act(() => {
+      redo(view);
+    });
+    expect(view.state.doc.toString()).toBe(UPGRADED);
+    await waitFor(() => expect(fill()).not.toBeNull());
+    expect(upgradeRequests).toHaveLength(1);
+  });
+
   it("drops the applied notice once the text is saved as a new revision", async () => {
     // P2-02 리뷰 P2-003: 상태는 savedVersion에도 묶인다.
     const view = await mount();
@@ -341,12 +367,17 @@ describe("retired schema upgrade banner", () => {
     expect(banner).toHaveTextContent(
       "옛 문서에 있던 실행 설정: 2021-01-01 → 2026-08-31 · krx.common-stock",
     );
+    // 채우기 전에 저장하면 옛 값을 되찾을 길이 없다는 것을 미리 알린다(#267 DEFECT-3).
+    const unfilled =
+      "채우지 않고 저장하거나 이 화면을 떠나면 이 실행 설정은 다시 볼 수 없습니다.";
+    expect(banner).toHaveTextContent(unfilled);
     expect(appliedEnvironments).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: "실행 설정에 채우기" }));
 
     expect(appliedEnvironments).toEqual([OLD_ENVIRONMENT]);
     expect(banner).toHaveTextContent("옛 문서의 실행 설정을 채웠습니다.");
+    expect(banner).not.toHaveTextContent(unfilled);
     expect(
       screen.queryByRole("button", { name: "실행 설정에 채우기" }),
     ).toBeNull();

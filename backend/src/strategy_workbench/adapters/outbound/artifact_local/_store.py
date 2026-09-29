@@ -33,10 +33,15 @@ class LocalArtifactStore:
         self._root = root.resolve()
         self._root.mkdir(parents=True, exist_ok=True)
         # 커밋 도중 프로세스가 죽으면 staging 이 남는다. 부팅 때 여기서 한 번 치운다 — 루트 하나를
-        # 서버 프로세스 하나가 쓴다는 전제다(연구 기록 DB 와 같다).
+        # 서버 프로세스 하나가 쓴다는 전제다(연구 기록 DB 와 같다). 못 지워도(Windows 잠금 등)
+        # 부팅은 막지 않는다 — 남은 staging 은 run 이 읽지 않는다.
         for staging in self._root.glob(".*.tmp"):
-            shutil.rmtree(staging)
-            logger.warning("orphan run artifact staging removed — name=%s", staging.name)
+            try:
+                shutil.rmtree(staging)
+            except OSError:
+                logger.exception("orphan run artifact staging not removed — name=%s", staging.name)
+            else:
+                logger.warning("orphan run artifact staging removed — name=%s", staging.name)
 
     def commit(self, result: BacktestRunResult) -> ArtifactCommit:
         target = self._run_dir(result.manifest.run_id)
@@ -89,7 +94,8 @@ class LocalArtifactStore:
         try:
             return _RESULT.validate_json(payload)
         except ValidationError as error:
-            # 해시가 맞는데 못 읽으면 결과 모델이 파일을 쓴 뒤 바뀐 것이다. 입력 값은 싣지 않는다.
+            # 해시가 맞는데 못 읽으면 결과 모델이 파일을 쓴 뒤 바뀐 것이다. 서버 경로·파일 원문은
+            # 싣지 않는다.
             first = error.errors()[0]
             raise BacktestArtifactUnreadableError(
                 f"run result file does not decode — run_id={run_id} "

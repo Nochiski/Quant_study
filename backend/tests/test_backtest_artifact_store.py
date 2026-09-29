@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shutil
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -274,3 +275,19 @@ def test_opening_the_store_removes_staging_left_by_a_killed_commit(
     assert "orphan run artifact staging removed — name=.run-killed.0123abcd.tmp" in caplog.text
     # 커밋을 마친 run 은 그대로다.
     assert store.load("run-safe-001", sha256=commit.sha256) == _result()
+
+
+def test_staging_that_cannot_be_removed_does_not_block_opening_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    orphan = tmp_path / ".run-locked.0123abcd.tmp"
+    orphan.mkdir()
+
+    def locked(path: Path) -> None:
+        raise PermissionError(f"locked: {path}")
+
+    monkeypatch.setattr(shutil, "rmtree", locked)
+    LocalArtifactStore(tmp_path)
+
+    assert orphan.exists()
+    assert "orphan run artifact staging not removed — name=.run-locked.0123abcd.tmp" in caplog.text

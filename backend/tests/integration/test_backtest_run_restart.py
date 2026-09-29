@@ -103,17 +103,27 @@ def test_completed_runs_keep_their_list_status_request_and_result_after_a_restar
 
 
 def test_a_damaged_or_missing_result_file_is_answered_with_a_code(tmp_path: Path) -> None:
-    run_id = _completed_run(_client(tmp_path))
+    before = _client(tmp_path)
+    run_id = _completed_run(before)
+    assert before.get(f"/api/v1/backtests/{run_id}/result").status_code == 200
     result_path = _container.DEFAULT_RUN_ARTIFACT_ROOT / run_id / "result.json"
-    result_path.write_bytes(result_path.read_bytes().replace(b'"core":"python"', b'"core":"rust"'))
+    payload = result_path.read_bytes()
+    # run 을 끝낸 프로세스도 결과를 메모리에 들지 않고 파일에서 읽는다.
+    result_path.unlink()
+    assert before.get(f"/api/v1/backtests/{run_id}/result").status_code == 410
+    result_path.write_bytes(payload.replace(b'"core":"python"', b'"core":"rust"'))
 
     client = _client(tmp_path)
 
     damaged = client.get(f"/api/v1/backtests/{run_id}/result")
     assert damaged.status_code == 410, damaged.text
     assert damaged.json()["detail"]["code"] == "backtest.result.unreadable"
-    assert "sha256" in damaged.json()["detail"]["message"]
-    assert str(tmp_path) not in damaged.text
+    message = damaged.json()["detail"]["message"]
+    assert "sha256" in message
+    # 서버 경로(실제 산출물 루트)는 싣지 않는다. JSON 본문은 Windows `\` 를 이스케이프하므로
+    # 해석한 메시지와 대조한다.
+    root = _container.DEFAULT_RUN_ARTIFACT_ROOT.resolve()
+    assert str(root) not in message and root.as_posix() not in message
     # AI 결과 설명은 "설명할 결과가 없다"로 접는다.
     session = _result_session(client, run_id)
     assert session.status_code == 422, session.text

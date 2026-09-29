@@ -77,6 +77,8 @@ from tests.equity_fixture import (
     WB_BONUS_EX,
     WB_EVENING_SESSION,
     WB_HALT_DATE,
+    WB_INCONSISTENT,
+    WB_LATE_FACTOR,
     WB_PROFILE_LAG_THREE,
     WB_PROFILE_LAG_ZERO,
     WB_PROFILE_ROWS,
@@ -275,6 +277,21 @@ def test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row(
         "price.adj_close": WB_SPLIT_DATE,
         "price.market_cap": before,
     }
+    # 원장이 그날 사건을 접지 못한 적용일 행은 결측이다(#220, 원장 뷰 `v_adj_close`). 035420 은
+    # 01-09 계수가 다음 세션에 공개돼 그날부터 접히고(× 0.5), 01-11 은 계수를 못 낸 기준가
+    # 재설정이다.
+    # 01-05 의 unknown_price_only(유상 권리락 등)는 가리지 않는다.
+    gaps = _raw(adapter, start=date(2024, 1, 5), end=END)
+    for session, expected in (
+        (date(2024, 1, 5), wb_close("035420", date(2024, 1, 5))),
+        (WB_LATE_FACTOR, None),
+        (WB_HALT_DATE, 0.5 * wb_close("035420", WB_HALT_DATE)),
+        (WB_INCONSISTENT, None),
+        (END, 0.5 * wb_close("035420", END)),
+    ):
+        cell = _cell(gaps, session, "035420:1", "price.adj_close")
+        kind = CellKind.OBSERVED if expected is not None else CellKind.MISSING
+        assert (cell.value, cell.kind, cell.available_date) == (expected, kind, session), session
 
 
 def test_missing_market_cap_is_a_none_value_not_an_omission(adapter: EquityDuckdbAdapter) -> None:
@@ -827,46 +844,49 @@ def test_lag_falls_back_to_source_constants_and_says_so_when_the_profile_is_abse
 # ── 카탈로그·환경 실패 ────────────────────────────────────────────────────────
 
 
-def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path) -> None:
-    """카탈로그가 없거나 낡으면 **매크로를 읽는 필드만** 빠진다.
+def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """카탈로그가 없거나 낡거나 매크로가 없으면 **매크로를 읽는 필드만** 빠지고, 사유 문장과 부팅
+    경고가 카탈로그 재생성을 안내한다.
 
-    S23(2026-09-06) 전에는 `price.adj_close` 가 여기 끼어 있었다 — 매크로 `v_adj_price_fwd` 를
-    읽었기 때문이다. 조정가가 표(`price_adj_daily`)가 되면서 그 의존이 끊겼고, 이제 카탈로그가
-    통째로 없어도 조정가는 답한다. 남은 매크로 필드는 `financial.*`(v_fin_latest)·
-    `consensus.forward_*`·`consensus.eps_dispersion`(v_consensus)·`credit.margin_balance`
-    (v_credit_balance, #249) 다. 신용잔고가 표로 돌아가면 무상증자 척도 창이 조용히 다시 열린다.
+    매크로 필드는 `financial.*`(v_fin_latest)·`consensus.forward_*`·`consensus.eps_dispersion`
+    (v_consensus)·`credit.margin_balance`(v_credit_balance, #249)·`price.adj_close`(v_adj_close,
+    #220) 다. S23(2026-09-06)이 조정가를 표(`price_adj_daily`)로 옮겨 카탈로그 의존을 끊었지만, #220
+    부터 워크벤치는 조정 공백 적용일을 가린 원장 뷰를 읽는다 — 카탈로그가 없을 때 표로 돌아가 읽으면
+    가린 공백이 조용히 다시 열리므로 원천을 뺀다(fail-closed). 새 매크로를 더한 코드로 올린 직후의
+    옛 카탈로그(`macros_skipped`)도 부팅 로그에 남아야 운영 안내(README)대로 재생성할 수 있다.
     """
+    macro_fields = {
+        "financial.book_equity", "consensus.forward_eps", "credit.margin_balance",
+        "price.adj_close",
+    }
     root = build_workbench_root(tmp_path / "equity", catalog=False)
-    without = EquityDuckdbAdapter(root)
-    # 매크로가 없으면 그 매크로를 읽는 원천의 필드가 전부 빠진다 — 테이블 원천은 남는다
-    served = {p.field_id for p in without.list_fields()}
-    assert "price.close" in served and "consensus.target_price" in served
-    assert "price.adj_close" in served  # 표를 읽는다 — 카탈로그와 무관
-    assert not served & {"financial.book_equity", "consensus.forward_eps", "credit.margin_balance"}
-    denied = _raw(without, fields=("financial.book_equity",))
-    assert denied.status is DataLoadStatus.INVALID_QUERY
-    assert denied.detail is not None and "catalog file missing" in denied.detail
-    assert str(root.resolve()) not in denied.detail  # 사유는 질의 거절로 사용자에게 간다(#163)
-    # 조정가는 카탈로그 없이도 답하고 값도 같다(전방 조정은 (security, date) 의 순수 함수)
-    served_adj = _raw(without, fields=("price.adj_close",))
-    assert served_adj.ok
-    assert _field(served_adj, WB_SPLIT_DATE, "000660:1", "price.adj_close") == 104_000.0
-    assert _raw(without, fields=("price.close",)).ok  # 나머지 필드는 카탈로그 없이도 답한다
-
-    write_catalog(root, snapshot="deadbeefdeadbeef")
-    stale = EquityDuckdbAdapter(root)
-    result = _raw(stale, fields=("financial.book_equity",))
-    assert result.status is DataLoadStatus.INVALID_QUERY
-    assert result.detail is not None and "catalog is stale" in result.detail
-    assert _raw(stale, fields=("price.adj_close",)).ok
+    for phrase, prepare in (
+        ("catalog file missing", lambda: None),
+        ("catalog is stale", lambda: write_catalog(root, snapshot="deadbeefdeadbeef")),
+        ("macros_skipped", lambda: write_catalog(root, with_macros=False)),
+    ):
+        prepare()
+        caplog.clear()
+        with caplog.at_level("WARNING"):
+            adapter = EquityDuckdbAdapter(root)
+        served = {p.field_id for p in adapter.list_fields()}
+        # 매크로가 없으면 그 매크로를 읽는 원천의 필드가 전부 빠진다 — 표 원천은 남는다
+        assert "price.close" in served and "consensus.target_price" in served, phrase
+        assert not served & macro_fields, phrase
+        assert _raw(adapter, fields=("price.close",)).ok
+        denied = _raw(adapter, fields=("price.adj_close",))
+        assert denied.status is DataLoadStatus.INVALID_QUERY
+        assert denied.detail is not None and phrase in denied.detail
+        assert "ledger_sync catalog" in denied.detail, phrase  # 조치가 사유에 실린다
+        assert str(root.resolve()) not in denied.detail  # 사유는 질의 거절로 사용자에게 간다(#163)
+        assert any(  # 부팅 로그에도 남는다
+            phrase in r.getMessage() and "ledger_sync catalog" in r.getMessage()
+            for r in caplog.records
+        ), phrase
     # snapshot_id 는 meta 가 아니라 MANIFEST 에서 온다
-    assert stale.snapshot().snapshot_id == snapshot_id(table_builds(root))
-
-    write_catalog(root, with_macros=False)
-    skipped = EquityDuckdbAdapter(root)
-    result = _raw(skipped, fields=("financial.book_equity",))
-    assert result.detail is not None and "macros_skipped" in result.detail
-    assert str(root.resolve()) not in result.detail
+    assert adapter.snapshot().snapshot_id == snapshot_id(table_builds(root))
 
 
 def test_catalog_without_required_view_column_drops_only_that_source(
@@ -1159,9 +1179,15 @@ def degraded_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.mark.parametrize(
     ("phrase", "query"),
     [
-        # 달력 안이지만 주말·신정뿐인 구간
-        ("no sessions in range", lambda a: _raw(a, start=date(2023, 12, 30), end=date(2024, 1, 1))),
-        ("no members in universe", lambda a: _raw(a, universe="krx.none")),
+        # 달력 안이지만 주말·신정뿐인 구간. 이 루트는 카탈로그 meta 가 없어 매크로 필드(조정가 등)가
+        # 빠지므로 표 필드로 묻는다
+        (
+            "no sessions in range",
+            lambda a: _raw(
+                a, start=date(2023, 12, 30), end=date(2024, 1, 1), fields=("price.close",)
+            ),
+        ),
+        ("no members in universe", lambda a: _raw(a, universe="krx.none", fields=("price.close",))),
         # 036220 의 1구간은 2023-12-29 에 끝난다
         (
             "no panel cells",

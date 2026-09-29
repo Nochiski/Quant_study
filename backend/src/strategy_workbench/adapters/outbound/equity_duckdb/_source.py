@@ -188,11 +188,11 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
     path = equity_root / CATALOG_NAME
     meta_path = equity_root / CATALOG_META_NAME
     if not path.exists():
-        return CatalogState(path, False, f"catalog file missing — catalog={CATALOG_NAME}", None, ())
+        reason = f"catalog file missing — {CATALOG_REBUILD} — catalog={CATALOG_NAME}"
+        return CatalogState(path, False, reason, None, ())
     if not meta_path.exists():
-        return CatalogState(
-            path, False, f"catalog meta missing — meta={CATALOG_META_NAME}", None, ()
-        )
+        reason = f"catalog meta missing — {CATALOG_REBUILD} — meta={CATALOG_META_NAME}"
+        return CatalogState(path, False, reason, None, ())
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         if not isinstance(meta, dict):
@@ -209,7 +209,7 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
         return CatalogState(
             path,
             False,
-            "catalog is stale — rebuild it (`python -m equity catalog`): "
+            f"catalog is stale — {CATALOG_REBUILD}: "
             f"catalog_snapshot_id={actual!r} manifest_snapshot_id={expected_snapshot_id!r}",
             str(actual) if actual is not None else None,
             macros,

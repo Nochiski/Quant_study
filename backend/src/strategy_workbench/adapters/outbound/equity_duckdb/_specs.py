@@ -6,7 +6,8 @@
 
 읽는 방식은 둘뿐이다(`SourceMode`).
 
-`GRID`  (ticker, session) 격자 위의 일별 행 — `price_daily`·`price_adj_daily` · 격자 3테이블
+`GRID`  (ticker, session) 격자 위의 일별 행 — `price_daily`·`price_adj_daily`(조정 공백 적용일을
+        가린 카탈로그 뷰 `v_adj_close` 로 읽는다, #220) · 격자 3테이블
         `flow_daily`·`short_daily`·`credit_daily`(무상증자 척도 창을 가린 카탈로그 뷰
         `v_credit_balance` 로 읽는다, #249). 랙 n 은 **정확히 n 세션 전 행**이고 그 세션에
         행이 없으면 셀을 내지 않는다(합성 금지 — 재상장 구간 첫날이 직전 구간 값을 물지 않는다).
@@ -65,6 +66,7 @@ ADJ_TABLE = "price_adj_daily"
 CONSENSUS_MACRO = "v_consensus"
 FIN_MACRO = "v_fin_latest"
 CREDIT_MACRO = "v_credit_balance"
+ADJ_MACRO = "v_adj_close"
 
 REQUIRED_TABLES = (CALENDAR_TABLE, SPAN_TABLE, UNIVERSE_TABLE, POLICY_TABLE, PRICE_TABLE)
 
@@ -209,8 +211,11 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
     SourceSpec(
         name="adj",
         dataset_id=ADJ_TABLE,
-        relation=ADJ_TABLE,
-        is_macro=False,
+        # 조정 공백 적용일을 가린 수정주가를 원장 뷰에서 읽는다(#220). 가림 판정은 뷰 몫이라 여기
+        # 다시 적지 않는다. 카탈로그가 없거나 낡으면 이 원천도 빠진다 — 표로 돌아가 읽으면 가린
+        # 공백이 조용히 다시 열린다.
+        relation=ADJ_MACRO,
+        is_macro=True,
         mode=SourceMode.GRID,
         axis=SourceAxis.TICKER,
         key_column="ticker",
@@ -221,7 +226,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         pick_order=None,
         lag_sessions=0,
         lag_basis=_ADJ_LAG_BASIS,
-        requires=(ADJ_TABLE,),
+        requires=(ADJ_TABLE, FACTOR_TABLE, ADJ_MACRO),
         frequency="daily",
     ),
     SourceSpec(
@@ -588,17 +593,21 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         verdict="equity 내부 스코프",
         description=(
             "원주가 × 그날까지 공개·적용된 계수(adj_factor factor_ok 행, apply_date 축)의 누적 "
-            "share_factor. 첫 관측 수준 고정, 사건 뒤 가격을 올린다 — (security, date) 의 순수 "
-            "함수라 창·as_of 에 무관(완전 PIT). 레지스트리 가격 변화 팩터(수익률·모멘텀·이평·"
-            "변동성)의 입력이다. 수준은 첫 관측 기준이라 종목 간 가격 비교에는 쓰지 않는다."
+            "share_factor. 첫 관측 수준 고정, 사건 뒤 가격을 올린다 — 공개 전 계수는 접지 않고 "
+            "(security, date) 의 순수 함수라 창·as_of 에 무관하다. **모든 사건을 잇지는 않는다**: "
+            "원장이 그날 사건을 접지 못한 적용일 행(계수가 다음 세션에 공개된 사건 · 기준가와 "
+            "주식수가 맞지 않아 계수를 못 낸 사건)은 결측(MISSING)이고 그 행을 품는 창 연산도 "
+            "결측이 된다. 유상증자 권리락처럼 원장이 조정하지 않는 사건은 조정 없이 남는다. 가림 "
+            "규칙은 원장 뷰 `v_adj_close` 가 정한다(#220). 레지스트리 가격 변화 팩터(수익률·모멘텀·"
+            "이평·변동성)의 입력이다. 수준은 첫 관측 기준이라 종목 간 가격 비교에는 쓰지 않는다."
         ),
         disclosure_basis=(
             "원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date 다음 세션))"
         ),
         evidence=(
-            "price_adj_daily.adj_close ← price_daily × adj_factor × security_span (S23 표). "
-            "카탈로그 매크로 v_adj_price_fwd 는 같은 값을 내는 읽기 경로일 뿐이고, 이 필드는 "
-            "표를 직접 읽으므로 카탈로그가 낡거나 없어도 살아 있다"
+            "equity.duckdb v_adj_close(as_of) ← price_adj_daily.adj_close(S23 표 = price_daily × "
+            "adj_factor × security_span) — 조정 공백 적용일 행만 adj_factor 로 가린다. "
+            "카탈로그 매크로 v_adj_price_fwd 는 표와 같은 값을 내는 읽기 경로다"
         ),
     ),
     # ── fin_std (FIELD_MAP §2 financial.*) ───────────────────────────────────

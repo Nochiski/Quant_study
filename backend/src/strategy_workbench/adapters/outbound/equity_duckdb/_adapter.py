@@ -29,13 +29,15 @@ PIT: 모든 셀은 `available_date ≤ as_of` 다. 랙은 컬럼군별 상수(`S
 `lag_basis`)이고 `dataset_profile`(S19)이 오면 프로필 값으로 바꾼다. 창 독립: `GRID` 는 (security,
 date) 의 값, `LATEST` 는 (security, cutoff) 의 값이라 질의 창을 바꿔도 같은 셀은 같다.
 
-`price.adj_close` = **전방 조정**(결정 09-05): **`price_adj_daily` 표를 직접 읽는다**(S23,
-2026-09-06). 원주가 × 그날까지 공개·적용된 계수의 누적 share_factor 이고, 종목의 첫 관측 수준을
-고정하고 사건마다 이후 가격을 올린다(삼성전자 2018-05-03 2,650,000 그대로, 05-04 51,900 × 50 =
-2,595,000). 값은 (security, date) 의 순수 함수라 창·as_of 에 무관하다. 예전에는 카탈로그 매크로
-`v_adj_price_fwd` 를 불렀는데, 그러면 카탈로그가 낡거나(snapshot 불일치) 없으면 조정가가 통째로
-unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로는 같은 값을 내는 읽기 경로로 남고,
-동일성은 equity `EG3_price_adj_daily` 가 매 빌드 증명한다).
+`price.adj_close` = **전방 조정**(결정 09-05): S23 표 `price_adj_daily` 의 값이다. 원주가 × 그날까지
+공개·적용된 계수의 누적 share_factor 이고, 종목의 첫 관측 수준을 고정하고 사건마다 이후 가격을
+올린다(삼성전자 2018-05-03 2,650,000 그대로, 05-04 51,900 × 50 = 2,595,000). 값은 (security, date)
+의 순수 함수라 창·as_of 에 무관하다. 워크벤치는 그 표를 **조정 공백 적용일 행만 가린 원장 뷰
+`v_adj_close`** 로 읽는다(#220) — 원장이 그날 사건을 접지 못한 행(늦게 공개된 계수·계수를 못
+낸 기준가 재설정)은 결측이다. S23 은 카탈로그가 낡으면 조정가가 통째로 unavailable 이 되는 것을
+피하려고 표를 만들었지만, 가림 규칙을 뷰가 소유하므로 워크벤치는 다시 카탈로그에 기댄다. 낡으면
+원천을 뺀다(fail-closed) — 표로 돌아가 읽으면 가린 공백이 조용히 다시 열린다. 표 자체는 parquet
+소비자를 위해 그대로 있다.
 
 법인 축 테이블(`fin_std`·`dividend_event`·`holder_daily`)은 티커 컬럼이 없어 `corp_ticker` 로
 전개하고 **한 법인의 종류주 티커 전부가 같은 값**을 받는다(`_specs` 모듈 docstring). `corp_ticker`
@@ -512,6 +514,9 @@ class EquityDuckdbAdapter:
         부팅을 멈춘다.
         """
         if not catalog.usable:
+            # 없음·meta 없음·낡음 — 매크로를 읽는 원천(재무·컨센서스·신용·조정가)이 모두
+            # 빠진다(#220)
+            logger.warning(f"{catalog.reason} path={catalog.path}")
             return catalog
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
 
@@ -639,10 +644,15 @@ class EquityDuckdbAdapter:
             return self._catalog.reason
         skipped = [name for name in sorted(macros) if not self._catalog.has_macro(name)]
         if skipped:
-            return (
-                f"catalog macros not published (macros_skipped) — missing={skipped} "
+            # 매크로를 더한 코드로 올린 직후의 옛 카탈로그가 여기 온다 — 부팅 로그에 남겨야 운영
+            # 안내(README·LEDGER_SYNC §5)대로 재생성한다(#220).
+            reason = (
+                f"카탈로그에 원천 {spec.name} 이 읽는 매크로가 없어 이 원천의 필드를 뺀다 — "
+                f"{CATALOG_REBUILD} (macros_skipped) — missing={skipped} "
                 f"macros={list(self._catalog.macros)}"
             )
+            logger.warning(f"{reason} catalog={self._catalog.path}")
+            return reason
         return self._macro_unavailable_reason(spec)
 
     def _macro_unavailable_reason(self, spec: SourceSpec) -> str | None:

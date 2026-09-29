@@ -192,9 +192,11 @@ def factor_table(
     rows: list[FactorRow],
     apply_dates: list[date | None] | None = None,
     available_dates: list[date] | None = None,
+    factor_sources: list[str] | None = None,
 ) -> pa.Table:
     """`adj_factor` 관심 컬럼. `apply_dates` 를 주면 `apply_date`, `available_dates` 를 주면
-    `available_date` 컬럼을 붙인다(S06 — 뷰 `v_cum_adj` 는 둘 다 읽는다)."""
+    `available_date`, `factor_sources` 를 주면 `factor_source` 컬럼을 붙인다(S06 — 뷰 `v_cum_adj` 는
+    앞의 둘을, `v_adj_close` 는 셋 다 읽는다)."""
     columns: dict[str, pa.Array] = {
         "ticker": pa.array([r[0] for r in rows], type=pa.string()),
         "effective_date": pa.array([r[1] for r in rows], type=pa.date32()),
@@ -208,6 +210,8 @@ def factor_table(
         columns["apply_date"] = pa.array(apply_dates, type=pa.date32())
     if available_dates is not None:
         columns["available_date"] = pa.array(available_dates, type=pa.date32())
+    if factor_sources is not None:
+        columns["factor_source"] = pa.array(factor_sources, type=pa.string())
     return pa.table(columns)
 
 
@@ -914,7 +918,7 @@ _CATALOG_BODIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 # 원장 템플릿(`equity.views`)을 그대로 렌더하는 매크로 — 본문을 여기 옮겨 적지 않는다(#249).
 # 손 픽스처 표가 그 매크로가 읽는 열을 다 가질 때만 이렇게 쓸 수 있다(duckdb 는 매크로를 만들 때
 # 바인딩한다).
-LEDGER_MACROS = ("v_credit_balance",)
+LEDGER_MACROS = ("v_credit_balance", "v_adj_close")
 
 
 def table_builds(root: Path) -> dict[str, str]:
@@ -1039,7 +1043,9 @@ def write_catalog(
 #   01-10 정지(reference 행, status suspended) · 035420 common 01-04 상장, 주식수 미상(mktcap
 #   NULL) · 036220 common 재상장 2구간([12-26, 12-29]·[01-08, 01-12]) · 005935 preferred ·
 #   069500 etf.
-#   adj_factor 에 005930 not-ok 행 1(계수 1) — 사건·조정에 나오면 안 된다.
+#   adj_factor 에 005930 not-ok 행 1(계수 1) — 사건·조정에 나오면 안 된다. 035420 에는 조정 공백
+#   사건 셋(01-05 unknown_price_only · 01-09 다음 세션에 공개된 ok 계수 · 01-11
+#   krx_base_inconsistent)이 있다 — 원장 뷰 `v_adj_close` 는 뒤 둘의 적용일 행을 가린다(#220).
 # 정책: krx.all(TRUE) · krx.common-stock(sec_type='common' ∧ status='listed').
 
 WB_SESSIONS: tuple[date, ...] = (
@@ -1049,6 +1055,8 @@ WB_SESSIONS: tuple[date, ...] = (
 )
 WB_SPLIT_DATE = date(2024, 1, 8)
 WB_HALT_DATE = date(2024, 1, 10)
+# 035420 의 조정 공백 적용일(#220) — 다음 세션에 공개된 ok 계수 · krx_base_inconsistent
+WB_LATE_FACTOR, WB_INCONSISTENT = date(2024, 1, 9), date(2024, 1, 11)
 # 저녁 잠정판(e1.15.0)의 T 세션 — 캘린더·격자·`security_span` 밖이다(그 셋은 KRX 축이라 저녁
 # 빌드에서도 D 에 멈춘다). `price_daily` 에만 `basis='evening'` 행으로 얹힌다.
 WB_EVENING_SESSION = date(2024, 1, 15)
@@ -1332,7 +1340,8 @@ def build_workbench_root(
 
     `catalog=False` 면 equity.duckdb 없음, `profile=False` 면 `dataset_profile` 없음
     (어댑터가 원천 상수로 폴백하는 구판 루트). `extra_factor_rows` 는 `adj_factor` 에 덧붙일
-    사건 행(apply_date = available_date = effective_date). `extra_policy_rows` 는
+    사건 행(apply_date = available_date = effective_date, factor_source 는 ok 면 mktcap_neutral ·
+    아니면 no_price_match). `extra_policy_rows` 는
     `universe_policy` 에 덧붙일 정책 행(멤버가 없는 정책 등)이다.
 
     `evening_session` 을 주면 e1.15.0 저녁 잠정판 모양이 된다 — `price_daily` 에 `basis` 컬럼이
@@ -1405,25 +1414,35 @@ def build_workbench_root(
             ]
         ),
     )
-    factor_dates: list[date | None] = [
-        WB_SPLIT_DATE, date(2024, 1, 3), date(2024, 1, 9),
-        *(r[1] for r in extra_factor_rows or []),
+    # (행, 공개일, factor_source) — 적용일은 행의 effective_date 다.
+    factors: list[tuple[FactorRow, date, str]] = [
+        (("000660", WB_SPLIT_DATE, "000660:split:2024-01-08", "split", 2.0, True),
+         WB_SPLIT_DATE, "mktcap_neutral"),
+        (("005930", date(2024, 1, 3), "005930:capred:2024-01-03", "capred", 1.0, False),
+         date(2024, 1, 3), "no_share_change"),
+        # S06-2 KRX 기준가 원천 행 — corp_event 에 없어 유형을 모른다. 방향은
+        # share_factor 가 정한다(서버 factor_ok 55행이 이 유형이다).
+        (("036220", date(2024, 1, 9), "036220:krx_base:2024-01-09", "unknown_krx", 0.5, True),
+         date(2024, 1, 9), "mktcap_neutral"),
+        # 035420 — 원장 뷰 `v_adj_close` 가 가리는 조정 공백(#220). 다음 세션에 공개된 ok 계수와
+        # 계수를 못 낸 기준가 재설정은 적용일 행이 결측이고, unknown_price_only 는 가리지 않는다.
+        (("035420", date(2024, 1, 5), "035420:krx_base:2024-01-05", "unknown_price_only", 1.0,
+          False), date(2024, 1, 8), "unknown_price_only"),
+        (("035420", WB_LATE_FACTOR, "035420:krx_base:2024-01-09", "unknown_krx", 0.5, True),
+         date(2024, 1, 10), "mktcap_neutral"),
+        (("035420", WB_INCONSISTENT, "035420:capred:2024-01-11", "capred", 1.0, False),
+         date(2024, 1, 12), "krx_base_inconsistent"),
+        *((row, row[1], "mktcap_neutral" if row[5] else "no_price_match")
+          for row in extra_factor_rows or []),
     ]
     write_equity_table(
         root,
         "adj_factor",
         factor_table(
-            [
-                ("000660", WB_SPLIT_DATE, "000660:split:2024-01-08", "split", 2.0, True),
-                ("005930", date(2024, 1, 3), "005930:capred:2024-01-03", "capred", 1.0, False),
-                # S06-2 KRX 기준가 원천 행 — corp_event 에 없어 유형을 모른다. 방향은
-                # share_factor 가 정한다(서버 factor_ok 55행이 이 유형이다).
-                ("036220", date(2024, 1, 9), "036220:krx_base:2024-01-09",
-                 "unknown_krx", 0.5, True),
-                *(extra_factor_rows or []),
-            ],
-            apply_dates=factor_dates,
-            available_dates=[d for d in factor_dates if d is not None],
+            [row for row, _, _ in factors],
+            apply_dates=[row[1] for row, _, _ in factors],
+            available_dates=[available for _, available, _ in factors],
+            factor_sources=[source for _, _, source in factors],
         ),
         year_column="effective_date",
     )

@@ -25,6 +25,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
     ExperimentRequest,
     ExperimentRunService,
     ExperimentTrialState,
+    WalkForwardReport,
 )
 from strategy_workbench.application.experiment_run.facade.ports import ExperimentSelection
 from strategy_workbench.domain.experiment.facade.design import (
@@ -237,6 +238,16 @@ def register_experiment_routes(
     def list_experiment_trials(experiment_id: str) -> tuple[ExperimentTrialState, ...]:
         """trial 전개 순. 상태는 최신 attempt 의 실행 상태에서 파생한다."""
         return experiments.trials(experiment_id)
+
+    @app.get(
+        "/api/v1/experiments/{experiment_id}/walk-forward",
+        operation_id="getExperimentWalkForward",
+        responses={404: rejected[404]},
+    )
+    def get_experiment_walk_forward(experiment_id: str) -> WalkForwardReport:
+        """창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율(V3-05). 사용자 후보 선택
+        (`selections`)과 다르다."""
+        return experiments.walk_forward(experiment_id)
 
     @app.post(
         "/api/v1/experiments/{experiment_id}/cancel",

@@ -3,6 +3,7 @@ from strategy_workbench.application.experiment_run.ports.outgoing.experiment_rep
     ExperimentRepositoryPort,
     ExperimentSelection,
     TrialAttempt,
+    WindowPick,
 )
 from strategy_workbench.application.experiment_run.ports.outgoing.trial_runs import (
     AdmittedRun,
@@ -18,4 +19,5 @@ __all__ = [
     "TrialAttempt",
     "TrialRunPort",
     "TrialRunRejectedError",
+    "WindowPick",
 ]

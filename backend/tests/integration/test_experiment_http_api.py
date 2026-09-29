@@ -1,4 +1,5 @@
-"""실험 HTTP(V3-03) — 미리 계산과 실제 원장 증가, 기반 리비전 제약, 코드화된 거절(spec D2·D5)."""
+"""실험 HTTP(V3-03·V3-05) — 미리 계산과 실제 원장 증가, 워크포워드, 기반 리비전 제약, 코드화된
+거절(spec D2·D5)."""
 
 from __future__ import annotations
 
@@ -24,6 +25,22 @@ def _experiment(client: TestClient, **environment: str) -> dict[str, Any]:
     template = client.get("/api/v1/strategies/template").json()
     template.pop("identity")
     template["schema_version"] = "1.2"
+    # 20세션 모멘텀으로 매 세션 고른다 — 검증 실행 첫 세션의 결정은 검증 창 앞 워밍업 관측으로만
+    # 채워진다(V3-05). 워밍업을 읽지 않으면 첫 주문이 20세션 뒤로 밀린다.
+    template["portfolio"] |= {"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1}
+    template["factors"][0]["graph"] = {
+        "nodes": [
+            {"node_id": "close", "field_id": "price.close", "kind": "field"},
+            {
+                "node_id": "momentum",
+                "operator": "momentum",
+                "input_node_id": "close",
+                "window": 20,
+                "kind": "time_series",
+            },
+        ],
+        "output_node_id": "momentum",
+    }
     template["parameters"] = [
         {
             "parameter_id": "scale",
@@ -89,7 +106,8 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
     assert experiment["status"] == "completed"
     assert [trial["status"] for trial in trials.json()] == ["completed"] * 6
     assert ledger["trial_count"] == preview.json()["trial_count_after"]
-    assert [len(group["runs"]) for group in ledger["trials"]] == [2, 2, 2]
+    # 칸마다 학습 두 번 + 창마다 고른 칸의 검증 실행 한 번(같은 시도 키라 재확인이다).
+    assert sum(len(group["runs"]) for group in ledger["trials"]) == 6 + 2
     listed = client.get("/api/v1/experiments", params={"limit": 1}).json()
     assert [item["record"]["experiment_id"] for item in listed["items"]] == [
         experiment["record"]["experiment_id"]
@@ -100,9 +118,29 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
         json={"trial_index": 0, "reason": "   "},
     )
     assert blank.status_code == 422, blank.text
+    walk_forward = client.get(
+        f"/api/v1/experiments/{experiment['record']['experiment_id']}/walk-forward"
+    ).json()
+    picks = [window["pick"] for window in walk_forward["windows"]]
     assert {run["run_id"] for group in ledger["trials"] for run in group["runs"]} == {
         trial["attempts"][0]["run_id"] for trial in trials.json()
-    }
+    } | {pick["run_id"] for pick in picks}
+    assert [pick["window_index"] for pick in picks] == [0, 1]
+    assert [window["run_status"] for window in walk_forward["windows"]] == ["completed"] * 2
+    # 곡선은 검증 창(2022-01-04 ~ 2023-01-03, 2023-01-04 ~ 2023-06-30) 세션만 잇는다. 학습 점수처럼
+    # 창마다 첫 스냅숏부터 세므로 둘째 창 첫 세션 2023-01-04 점은 없고 학습 구간 세션도 없다.
+    sessions = [point["session"] for point in walk_forward["curve"]]
+    assert (sessions[0], sessions[-1]) == ("2022-01-04", "2023-06-30")
+    boundary = sessions.index("2023-01-03")
+    assert sessions[boundary + 1] == "2023-01-05"
+    assert sessions == sorted(set(sessions))
+    assert walk_forward["gap"] is None
+    assert walk_forward["out_of_sample_sharpe"] is not None
+    # 워밍업은 검증 창 앞에서 읽고 성과에서는 뺀다: 첫 검증 실행의 곡선은 검증 시작일부터지만, 그날
+    # 이미 20세션 모멘텀으로 종목을 골라 주문을 낸다.
+    tested = client.get(f"/api/v1/backtests/{picks[0]['run_id']}/result").json()
+    assert tested["series"]["equity"][0]["session"] == "2022-01-04"
+    assert tested["artifacts"]["orders"][0]["session"] == "2022-01-04"
 
 
 def test_design_and_lookup_rejections_are_coded() -> None:

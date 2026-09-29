@@ -57,6 +57,27 @@ class TrialAttempt:
 
 
 @dataclass(frozen=True)
+class WindowPick:
+    """워크포워드 창마다 학습 점수로 자동으로 고른 칸과 그 칸의 검증 실행(V3-05).
+
+    사용자가 이유를 적어 고르는 후보 선택(`ExperimentSelection`, spec D9)과 다르다. 고를 칸이
+    없으면(창에서 대표 샤프가 있는 학습 실행이 없다) `trial_index` 가 None 이고 실행도 없다.
+    검증 실행이 재시작으로 중단되면 같은 칸으로 다음 번호를 다시 넘긴다.
+    """
+
+    experiment_id: str
+    window_index: int
+    attempt: int
+    # 고른 칸의 그 창 학습 trial 과 그 대표 샤프(세션 단위, spec D2).
+    trial_index: int | None
+    train_sharpe: float | None
+    created_at: datetime
+    run_id: str | None = None
+    error_code: str | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class ExperimentSelection:
     """사용자가 고른 후보 기록(spec D9). 되돌릴 수 없다."""
 
@@ -88,6 +109,12 @@ class ExperimentRepositoryPort(Protocol):
 
     def attempts(self, experiment_id: str) -> tuple[TrialAttempt, ...]:
         """trial 순, 같은 trial 안에서는 attempt 순."""
+        ...
+
+    def add_pick(self, pick: WindowPick) -> None: ...
+
+    def picks(self, experiment_id: str) -> tuple[WindowPick, ...]:
+        """창 순, 같은 창 안에서는 attempt 순."""
         ...
 
     def add_selection(self, selection: ExperimentSelection) -> None: ...

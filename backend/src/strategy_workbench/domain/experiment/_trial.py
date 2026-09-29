@@ -105,13 +105,18 @@ def awaiting_recovery(latest_run: BacktestRunState | None) -> bool:
 
 
 def experiment_status(
-    trials: Sequence[TrialStatus], *, cancelled: bool, paused: bool, recovering: bool
+    trials: Sequence[TrialStatus], *, cancelled: bool, paused: bool, pending: bool
 ) -> ExperimentStatus:
-    """취소한 실험은 취소, trial 이 모두 끝났고 복구를 기다리는 trial 이 없으면 완료, 일시정지했으면
-    일시정지, 하나도 시작하지 않았으면 대기다."""
+    """취소한 실험은 취소, trial 이 모두 끝났고 넘길 실행이 남지 않았으면 완료, 일시정지했으면
+    일시정지, 하나도 시작하지 않았으면 대기다.
+
+    Args:
+        pending: 복구를 기다리는 trial 이나 아직 넘기지 않았거나 끝나지 않은 검증 실행(워크포워드)이
+            남았다.
+    """
     if cancelled:
         return ExperimentStatus.CANCELLED
-    if all(status.is_terminal for status in trials) and not recovering:
+    if all(status.is_terminal for status in trials) and not pending:
         return ExperimentStatus.COMPLETED
     if paused:
         return ExperimentStatus.PAUSED

@@ -14,6 +14,7 @@ from strategy_workbench.application.experiment_run.facade.ports import (
     ExperimentRecord,
     ExperimentSelection,
     TrialAttempt,
+    WindowPick,
 )
 from strategy_workbench.domain.experiment.facade.design import ExperimentNotFoundError
 from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
@@ -28,6 +29,7 @@ _SELECT = "experiment_id, created_at, cancelled_at, design_json, paused, priorit
 _FROM = "experiments LEFT JOIN experiment_controls USING (experiment_order)"
 _RECORD = TypeAdapter(ExperimentRecord)
 _ATTEMPT = TypeAdapter(TrialAttempt)
+_PICK = TypeAdapter(WindowPick)
 _SELECTION = TypeAdapter(ExperimentSelection)
 
 
@@ -136,6 +138,48 @@ class SQLiteExperimentRepository:
             ).fetchall()
         return tuple(
             _decode(_ATTEMPT, experiment_id, {**dict(row), "experiment_id": experiment_id})
+            for row in rows
+        )
+
+    def add_pick(self, pick: WindowPick) -> None:
+        with self._database.transaction(write=True) as connection:
+            inserted = connection.execute(
+                """
+                INSERT INTO experiment_window_picks (
+                    experiment_order, window_index, attempt, trial_index, train_sharpe,
+                    created_at, run_id, error_code, error
+                )
+                SELECT experiment_order, ?, ?, ?, ?, ?, ?, ?, ? FROM experiments
+                WHERE experiment_id = ?
+                """,
+                (
+                    pick.window_index,
+                    pick.attempt,
+                    pick.trial_index,
+                    pick.train_sharpe,
+                    _time_text(pick.created_at, "pick created_at", pick.experiment_id),
+                    pick.run_id,
+                    pick.error_code,
+                    pick.error,
+                    pick.experiment_id,
+                ),
+            )
+            if inserted.rowcount != 1:
+                raise _not_found(pick.experiment_id)
+
+    def picks(self, experiment_id: str) -> tuple[WindowPick, ...]:
+        with self._database.transaction(write=False) as connection:
+            rows = connection.execute(
+                """
+                SELECT p.window_index, p.attempt, p.trial_index, p.train_sharpe, p.created_at,
+                    p.run_id, p.error_code, p.error
+                FROM experiment_window_picks AS p JOIN experiments USING (experiment_order)
+                WHERE experiment_id = ? ORDER BY p.window_index, p.attempt
+                """,
+                (experiment_id,),
+            ).fetchall()
+        return tuple(
+            _decode(_PICK, experiment_id, {**dict(row), "experiment_id": experiment_id})
             for row in rows
         )
 

@@ -4,14 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from itertools import product
 
 import pytest
 
 from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint
 from strategy_workbench.domain.backtest.facade.environment import RESEARCH_START
-from strategy_workbench.domain.backtest.facade.runs import RunStatus
+from strategy_workbench.domain.backtest.facade.runs import (
+    BacktestRunState,
+    RunFailureCode,
+    RunStatus,
+)
 from strategy_workbench.domain.experiment.facade.design import (
     MAX_GRID_POINTS,
     ExperimentDesign,
@@ -19,6 +23,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     InvalidExperimentSpecError,
     SplitMode,
     SplitSpec,
+    WalkForwardGap,
     WalkForwardWindow,
     WindowSelectionRule,
     build_search_spec,
@@ -27,7 +32,9 @@ from strategy_workbench.domain.experiment.facade.design import (
     parameter_grid_values,
     pick_window_cell,
     stitch_out_of_sample,
+    walk_forward_gap,
     walk_forward_retention,
+    window_gap,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     MAX_EXPERIMENT_PRIORITY,
@@ -420,6 +427,44 @@ def test_out_of_sample_curve_chains_returns_from_each_window_first_snapshot() ->
     )
 
 
+def _test_run(status: RunStatus, error_code: RunFailureCode | None = None) -> BacktestRunState:
+    at = datetime(2026, 9, 30, tzinfo=UTC)
+    return BacktestRunState("run", status, 0.0, "", "", at, at, error_code=error_code)
+
+
+@pytest.mark.parametrize(
+    ("has_cell", "run", "expected"),
+    [
+        (False, None, WalkForwardGap.NO_CELL),
+        # 접수가 거절돼 실행이 없다.
+        (True, None, WalkForwardGap.TEST_FAILED),
+        (True, _test_run(RunStatus.COMPLETED), None),
+        (True, _test_run(RunStatus.RUNNING), WalkForwardGap.PENDING),
+        (True, _test_run(RunStatus.CANCEL_REQUESTED), WalkForwardGap.PENDING),
+        (
+            True,
+            _test_run(RunStatus.FAILED, "backtest.run.equity_wiped_out"),
+            WalkForwardGap.TEST_FAILED,
+        ),
+        (True, _test_run(RunStatus.CANCELLED), WalkForwardGap.TEST_FAILED),
+        # 재시작으로 중단된 실행은 복구가 같은 칸으로 다시 넘긴다.
+        (True, _test_run(RunStatus.FAILED, "backtest.run.interrupted"), WalkForwardGap.PENDING),
+    ],
+)
+def test_window_gap_says_why_a_window_stays_off_the_curve(
+    has_cell: bool, run: BacktestRunState | None, expected: WalkForwardGap | None
+) -> None:
+    assert window_gap(has_cell, run) is expected
+
+
+def test_a_finished_failure_outranks_windows_still_running() -> None:
+    gaps = [None, WalkForwardGap.PENDING, WalkForwardGap.NO_CELL, WalkForwardGap.TEST_FAILED]
+
+    assert walk_forward_gap(gaps) is WalkForwardGap.TEST_FAILED
+    assert walk_forward_gap(gaps[:3]) is WalkForwardGap.NO_CELL
+    assert walk_forward_gap([None, None]) is None
+
+
 @pytest.mark.parametrize(
     ("out_of_sample", "train", "expected"),
     [
@@ -518,7 +563,7 @@ def test_a_trial_without_a_run_is_queued_cancelled_or_rejected(
 def test_experiment_status_follows_its_trials_unless_cancelled(
     trials: tuple[TrialStatus, ...], cancelled: bool, expected: ExperimentStatus
 ) -> None:
-    status = experiment_status(trials, cancelled=cancelled, paused=False, recovering=False)
+    status = experiment_status(trials, cancelled=cancelled, paused=False, pending=False)
     assert status is expected
 
 
@@ -527,13 +572,13 @@ def test_a_paused_experiment_reads_paused_until_every_trial_ends() -> None:
     finished = (TrialStatus.COMPLETED, TrialStatus.FAILED)
 
     def status(trials: tuple[TrialStatus, ...], **flags: bool) -> ExperimentStatus:
-        return experiment_status(trials, **{"cancelled": False, "recovering": False, **flags})
+        return experiment_status(trials, **{"cancelled": False, "pending": False, **flags})
 
     assert status(running, paused=True) is ExperimentStatus.PAUSED
     assert status(finished, paused=True) is ExperimentStatus.COMPLETED
     assert status(running, cancelled=True, paused=True) is ExperimentStatus.CANCELLED
     # 재시작으로 중단된 trial 이 복구를 기다리면 모두 끝난 것처럼 보여도 완료가 아니다.
-    assert status(finished, paused=False, recovering=True) is ExperimentStatus.RUNNING
+    assert status(finished, paused=False, pending=True) is ExperimentStatus.RUNNING
 
 
 @pytest.mark.parametrize("priority", [0, MAX_EXPERIMENT_PRIORITY + 1, True, 1.5])

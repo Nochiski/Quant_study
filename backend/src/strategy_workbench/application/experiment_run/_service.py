@@ -239,7 +239,11 @@ class ExperimentRunService:
         return admitted, ExperimentDesign(
             search=build_search_spec(strategy.parameters, request.search),
             parameter_values=admitted.run.parameter_values,
-            windows=request.split.windows(environment.start, environment.end),
+            windows=request.split.measured_windows(
+                environment.start,
+                environment.end,
+                self._runs.sessions(environment.start, environment.end),
+            ),
         )
 
     def control(
@@ -408,9 +412,8 @@ def _base_source(run: BacktestRunSpec) -> SavedRevisionReference:
 
 
 def _trial_run(base: BacktestRunSpec, trial: ExperimentTrial) -> BacktestRunSpec:
-    """trial 의 실행 요청 — 창의 학습 구간을 해소된 파라미터 값으로 돌린다.
-
-    엠바고를 뺀 학습 측정 끝과 검증 창 실행은 워크포워드 실행(V3-05)이 붙인다.
+    """trial 의 실행 요청 — 창의 학습 구간(엠바고를 뺀 학습 측정 끝까지)을 해소된 파라미터 값으로
+    돌린다. 검증 창 실행은 워크포워드 실행(V3-05 2/2)이 붙인다.
     """
     environment = base.environment
     if environment is None:  # pragma: no cover - `_design` 이 검사한 요청만 저장한다

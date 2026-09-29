@@ -574,6 +574,10 @@ class EquityDuckdbAdapter:
     def _source(self, table: str) -> str:
         return self._tables[table].parquet_source()
 
+    def trading_sessions(self, start: date, end: date) -> tuple[date, ...]:
+        sessions = self._sessions
+        return sessions[bisect_left(sessions, start) : bisect_right(sessions, end)]
+
     def _load_sessions(self) -> tuple[date, ...]:
         con = _open(None)
         try:

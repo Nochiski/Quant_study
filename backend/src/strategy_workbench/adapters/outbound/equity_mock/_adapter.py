@@ -93,6 +93,9 @@ class MockEquityDataAdapter:
         """결정적 데모 fixture 로 만든다."""
         return cls(build_demo_fixture())
 
+    def trading_sessions(self, start: date, end: date) -> tuple[date, ...]:
+        return _business_sessions(start, end)
+
     def snapshot(self) -> DataSnapshot:
         return self._snapshot
 

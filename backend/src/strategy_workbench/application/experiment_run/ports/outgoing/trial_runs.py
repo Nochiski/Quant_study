@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec, BacktestRunState
@@ -50,6 +51,10 @@ class TrialRunPort(Protocol):
         Raises:
             TrialRunRejectedError: 실행 서비스가 요청을 접수하지 않았다.
         """
+        ...
+
+    def sessions(self, start: date, end: date) -> tuple[date, ...]:
+        """양끝을 포함한 거래 세션(워크포워드 엠바고)."""
         ...
 
     def states(self, run_ids: Collection[str]) -> Mapping[str, BacktestRunState]:

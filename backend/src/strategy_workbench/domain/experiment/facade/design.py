@@ -26,6 +26,9 @@ from strategy_workbench.domain.experiment._walk_forward import (
     SplitSpec,
     WalkForwardWindow,
     WindowSelectionRule,
+    pick_window_cell,
+    stitch_out_of_sample,
+    walk_forward_retention,
 )
 
 __all__ = [
@@ -50,4 +53,7 @@ __all__ = [
     "grid_neighbors",
     "neighbor_mean",
     "parameter_grid_values",
+    "pick_window_cell",
+    "stitch_out_of_sample",
+    "walk_forward_retention",
 ]

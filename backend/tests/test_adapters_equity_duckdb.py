@@ -1277,6 +1277,47 @@ def test_cancellation_while_reading_latest_sources_stops_before_the_panel_is_bui
     assert reported[-1] == pytest.approx(0.9 * 0.52)
 
 
+def test_every_query_of_a_raw_load_watches_the_callers_checkpoint(
+    adapter: EquityDuckdbAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#284 리뷰 P3-4: 격자·법인 대응·LATEST 질의가 모두 호출자의 checkpoint 를 보며 돈다.
+
+    픽스처 질의는 감시 간격(0.1초)보다 빨리 끝나 실제로 끊기지 않는다. 그래서 질의마다
+    `_fetchall` 에 넘어간 checkpoint 를 직접 대조한다. 하나라도 no-op 으로 바뀌면 실원장에서 그
+    질의(6개월 약 0.6초) 동안 취소가 늦어진다.
+    """
+    import duckdb
+
+    passed: list[Callable[[], None]] = []
+
+    def recording(
+        con: duckdb.DuckDBPyConnection,
+        sql: str,
+        params: list[object],
+        checkpoint: Callable[[], None],
+    ) -> list[tuple[object, ...]]:
+        passed.append(checkpoint)
+        return _fetchall(con, sql, params, checkpoint)
+
+    monkeypatch.setattr(
+        "strategy_workbench.adapters.outbound.equity_duckdb._adapter._fetchall", recording
+    )
+
+    def checkpoint() -> None:
+        pass
+
+    adapter.load_raw_observations_cancellable(
+        RawObservationQuery(
+            "KRX", "krx.common-stock", START, END, ("price.close", "financial.book_equity"), 0
+        ),
+        checkpoint=checkpoint,
+    )
+
+    # 격자 · 법인 대응(재무는 법인 축) · 재무 LATEST
+    assert len(passed) == 3
+    assert all(given is checkpoint for given in passed)
+
+
 def test_a_duckdb_query_cancelled_while_running_is_interrupted_into_the_callers_error() -> None:
     """이슈 #160: 질의 하나는 나눌 수 없어 행 단위 checkpoint 가 닿지 않는다. 도는 동안 취소되면
     감시 스레드가 `interrupt()` 로 끊고, duckdb 오류 대신 호출자의 취소 예외가 올라간다 — duckdb

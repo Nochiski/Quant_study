@@ -1,12 +1,12 @@
 ---
 plan_version: 1
 project: validation-lab
-project_status: APPROVED
-current_phase: V3
-current_pr: V3-03
-active_prs: [V3-03]
-parallel_window: [V3-03]
-last_updated: 2026-09-30T04:09:28+09:00
+project_status: SELF_CHECK
+current_phase: V3,V5
+current_pr: V3-03,V5-05
+active_prs: [V3-03, V5-05]
+parallel_window: [V3-03, V5-05]
+last_updated: 2026-09-30T04:25:12+09:00
 planned_prs: 28
 merged_prs: 11
 approved_prs: 12
@@ -23,13 +23,13 @@ progress_percent: 39
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `APPROVED` |
-| Current phase | `V3` |
-| Current/next PR | `V3-03` |
-| Active PR | `V3-03` |
+| Project status | `SELF_CHECK` |
+| Current phase | `V3,V5` |
+| Current/next PR | `V3-03,V5-05` |
+| Active PR | `V3-03, V5-05` |
 | Progress | `11 / 28 merged (39%)` |
 | Approved | `12 / 28` |
-| Aggregated at | `2026-09-30 04:09 KST` |
+| Aggregated at | `2026-09-30 04:25 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -72,7 +72,7 @@ progress_percent: 39
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 3 | `MERGED` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 2 | `APPROVED` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
-| V5 | Screens (after lang2 merge signal) | 7 | 0 | `WAITING` |
+| V5 | Screens (after lang2 merge signal) | 7 | 0 | `SELF_CHECK` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
 | **Total** |  | **28** | **11** | **39%** |
 <!-- PLAN:PHASES:END -->
@@ -129,7 +129,7 @@ progress_percent: 39
 | [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `PLANNED` | — |
 | [ ] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `PLANNED` | — |
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V4-03 | `PLANNED` | — |
-| [ ] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `PLANNED` | — |
+| [ ] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `SELF_CHECK` | — |
 | [ ] | `V5-06` | 용량 스윕·팩터 회귀 화면 | V5-02, V4-04, V4-05 | `PLANNED` | — |
 | [ ] | `V5-07` | IDE 진입점·탐색 토글 | V5-02, V5-03, lang2 P4-04 머지, lang2 P5-02 머지 | `PLANNED` | — |
 

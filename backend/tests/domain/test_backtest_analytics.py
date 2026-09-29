@@ -7,9 +7,9 @@ from itertools import pairwise
 
 import pytest
 
-from strategy_workbench.adapters.outbound.backtest_engine._adapter import _base_rate_warnings
 from strategy_workbench.domain.analytics._base_rate import base_rate
 from strategy_workbench.domain.analytics.facade.metrics import (
+    BASE_RATE_CONFIRMED_ON,
     AnalysisPoint,
     AnalyticsInput,
     MetricScope,
@@ -238,23 +238,25 @@ def test_non_positive_equity_breaks_the_engine_contract(
         (date(1999, 5, 6), 0.0475),
         (date(2026, 7, 15), 0.025),  # 변경 전날은 옛 금리
         (date(2026, 7, 16), 0.0275),  # 변경일 당일은 새 금리
-        (date(2030, 1, 2), 0.03),  # 마지막 변경 뒤로는 바뀔 때까지 이어 쓴다
     ],
 )
 def test_base_rate_is_effective_from_its_change_date(day: date, rate: float | None) -> None:
     assert base_rate(day) == pytest.approx(rate)
 
 
-def test_risk_free_uses_the_rate_at_interval_start_over_calendar_days() -> None:
+@pytest.mark.parametrize("with_base", [False, True])
+def test_risk_free_uses_the_rate_at_interval_start_over_calendar_days(with_base: bool) -> None:
     # 7/16 에 2.50% → 2.75%. 7/15 → 7/16 구간은 시작일 금리 2.50%를 쓰고, 7/17 → 7/20 은
-    # 주말을 끼어 3일이다.
+    # 주말을 끼어 3일이다. 7/15 를 구간 기준점(base)으로 넘겨도 첫 구간은 base 날짜 금리를 쓴다.
+    points = tuple(
+        AnalysisPoint(date(2026, 7, day), value, 0.0, 0.0)
+        for day, value in ((15, 100.0), (16, 101.0), (17, 100.0), (20, 102.0))
+    )
     report = compute_analytics(
         AnalyticsInput(
-            points=tuple(
-                AnalysisPoint(date(2026, 7, day), value, 0.0, 0.0)
-                for day, value in ((15, 100.0), (16, 101.0), (17, 100.0), (20, 102.0))
-            ),
+            points=points[1:] if with_base else points,
             traded_notional=0.0,
+            base=points[0] if with_base else None,
         ),
         build_default_metric_registry(),
         rolling_window=3,
@@ -362,24 +364,22 @@ def test_sessions_before_the_base_rate_history_leave_sharpe_sortino_and_rolling_
     assert [item.value for item in report.rolling_sharpe] == [None] * 4
 
 
-def test_sessions_after_the_confirmed_date_carry_the_last_rate_and_warn() -> None:
-    # 이력 확인일은 2026-09-29. 9/30 에 시작하는 구간은 확인하지 않은 금리를 이어 쓴다.
+def test_sessions_after_the_confirmed_date_carry_the_last_rate() -> None:
+    # 확인일 뒤로는 마지막 변경 금리를 바뀔 때까지 이어 쓰고, 그 금리로 시작한 구간을 따로 적는다.
+    # 이력을 갱신해도 이 테스트는 그대로다.
+    confirmed = BASE_RATE_CONFIRMED_ON
+    assert base_rate(confirmed) is not None
+    assert base_rate(confirmed + timedelta(days=1000)) == base_rate(confirmed)
+    sessions = tuple(confirmed + timedelta(days=offset) for offset in (-1, 0, 1, 2))
     report = compute_analytics(
         AnalyticsInput(
-            points=tuple(
-                AnalysisPoint(date(2026, month, day), 100.0, 0.0, 0.0)
-                for month, day in ((9, 28), (9, 29), (9, 30), (10, 1))
-            ),
+            points=tuple(AnalysisPoint(session, 100.0, 0.0, 0.0) for session in sessions),
             traded_notional=0.0,
         ),
         build_default_metric_registry(),
     )
 
-    assert report.base_rate_carried_sessions == (date(2026, 9, 30),)
-    (warning,) = _base_rate_warnings(report.base_rate_carried_sessions)
-    assert warning.code == "analytics.base_rate_carried_forward"
-    assert "confirmed_on=2026-09-29 carried_sessions=1 sessions=2026-09-30" in warning.message
-    assert _base_rate_warnings(()) == ()
+    assert report.base_rate_carried_sessions == (sessions[2],)
 
 
 def test_window_base_starts_returns_drawdown_and_years_but_stays_off_the_curve() -> None:

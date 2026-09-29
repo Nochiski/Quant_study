@@ -218,11 +218,13 @@ def test_an_oversized_description_is_cut_before_it_reaches_the_model() -> None:
 
 
 # 이슈 #241 P3-5: 요약이 상한을 넘을 때 경고를 덜어 내는 순서. 결과 숫자를 해석하는 경고
-# (`benchmark.*`, `portfolio.sector_unknown_excluded`)는 full 지표 옆에서 사용 불가 이유·초과수익
-# 해석을 알려 주므로 가장 늦게 덜고, 나머지 중에서는 info 를 warning 보다 먼저 던다.
+# (`benchmark.*`, `portfolio.sector_unknown_excluded`, `analytics.base_rate_carried_forward`)는
+# full 지표 옆에서 사용 불가 이유·초과수익·샤프 해석을 알려 주므로 가장 늦게 덜고, 나머지
+# 중에서는 info 를 warning 보다 먼저 던다.
 _EXPLAINING = (
     DataWarning("benchmark.no_bar_at_start", "벤치마크 첫 bar 전 세션 " * 10),
     DataWarning("portfolio.sector_unknown_excluded", "섹터 제약 제외 " * 10),
+    DataWarning("analytics.base_rate_carried_forward", "기준금리 이어 쓰기 " * 10),
 )
 
 
@@ -247,7 +249,7 @@ def test_metric_explaining_warnings_outlast_other_warnings_window_metrics_and_fa
             warnings=(
                 _EXPLAINING[0],
                 *(DataWarning(f"data.warning.{index}", "경고 문장 " * 20) for index in range(30)),
-                _EXPLAINING[1],
+                *_EXPLAINING[1:],
             ),
         ),
         metrics=base.metrics
@@ -265,6 +267,7 @@ def test_metric_explaining_warnings_outlast_other_warnings_window_metrics_and_fa
     assert [item["code"] for item in payload["warnings"]] == [
         "benchmark.no_bar_at_start",
         "portfolio.sector_unknown_excluded",
+        "analytics.base_rate_carried_forward",
     ]
     omitted = payload["omitted"]
     assert omitted["warnings"] == 30

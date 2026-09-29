@@ -6,7 +6,8 @@ from ._models import MetricCategory, MetricDefinition, MetricUnit
 # 기준이다. v2 지표 집합에 total_taxes 포함(#281 V2-01).
 # v3(#274): 샤프·소르티노·롤링 샤프를 한국은행 기준금리 초과수익으로 잰다.
 # v4(#274): 샤프 표준오차 지표를 더하고 롤링 샤프 창을 21세션에서 126세션(6개월)으로 늘린다.
-REGISTRY_VERSION = "metric-registry-v4"
+# v5(#281 V4-01): 샤프 표준오차에 왜도·첨도를 넣고 분모를 n−1로 두며, PSR(기준 0)을 더한다.
+REGISTRY_VERSION = "metric-registry-v5"
 
 
 class MetricRegistry:
@@ -55,6 +56,14 @@ def build_default_metric_registry() -> MetricRegistry:
             MetricCategory.RISK_ADJUSTED,
             ratio,
             None,
+            True,
+        ),
+        MetricDefinition(
+            "probabilistic_sharpe",
+            "Probabilistic Sharpe ratio",
+            MetricCategory.RISK_ADJUSTED,
+            percent,
+            True,
             True,
         ),
         MetricDefinition(

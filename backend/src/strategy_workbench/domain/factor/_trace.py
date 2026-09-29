@@ -300,8 +300,11 @@ def _status(
     if isinstance(node, FieldNode):
         return TraceValueStatus.MISSING_INPUT
     if isinstance(node, BinaryNode):
-        if node.operator is BinaryOperator.DIVIDE and all(
-            _as_number(item) is not None for item in inputs
+        # 두 입력이 값인데 None 이면 0 으로 나눴거나, 두 입력 사이에 원장이 가린 칸이 들었다(#337)
+        if (
+            node.operator is BinaryOperator.DIVIDE
+            and _as_number(inputs[0]) is not None
+            and _as_number(inputs[1]) == 0
         ):
             return TraceValueStatus.DIVIDE_BY_ZERO
         return TraceValueStatus.MISSING_INPUT
@@ -320,7 +323,7 @@ def _status(
     if isinstance(node, UnaryNode):
         if node.operator is UnaryOperator.LAG:
             history = _history_status(index, observations, by_security, node.periods or 0, 1)
-            # 이력은 충분한데 None: 읽은 입력이 없었거나 그 사이 가린 칸을 건넜다(#315)
+            # 이력은 충분한데 None: k칸 앞 입력(가린 칸 포함)이 없었다(#337)
             return TraceValueStatus.MISSING_INPUT if history is TraceValueStatus.OK else history
         return TraceValueStatus.MISSING_INPUT
     if isinstance(node, TimeSeriesNode):

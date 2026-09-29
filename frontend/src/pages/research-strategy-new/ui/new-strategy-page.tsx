@@ -416,12 +416,12 @@ export const NewStrategyPage = () => {
           graph: (
             <FactorGraphPanel
               state={executionPlans}
+              schema={assist.schema}
               diagnostics={currentDiagnostics(document)}
               selectedPointer={search.path}
               revealSignal={problems.revealSignal}
               editing={{
                 tree: form.tree,
-                schema: assist.schema,
                 transactions,
                 catalogs: {
                   equityFields:

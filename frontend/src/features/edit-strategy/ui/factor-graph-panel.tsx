@@ -27,7 +27,6 @@ import "./factor-graph-panel.css";
 /** 편집 입력(P5-02). 없으면 읽기 전용 투영만 그린다(테스트·backend plan 뷰어). */
 export type FactorGraphEditing = {
   tree: unknown;
-  schema: JsonSchema | null;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   /** 연산자 카탈로그(P1-03). 팔레트가 읽는다 — 없으면 노드 kind만 보인다. */
@@ -40,6 +39,8 @@ export type FactorGraphEditing = {
 
 type FactorGraphPanelProps = {
   state: ExecutionPlansState;
+  /** runtime schema. 투영의 입력·설정 칸 이름(#354)과 편집기가 함께 읽는다. 없으면 메타데이터를 기다린다. */
+  schema: JsonSchema | null;
   diagnostics: DocumentDiagnostic[];
   selectedPointer?: string;
   /**
@@ -220,7 +221,9 @@ const GraphNode = ({
             <code>{node.operation}</code>
           )}
         </button>
-        {node.isOutput ? <Badge tone="accent">OUTPUT</Badge> : null}
+        {node.isOutput ? (
+          <Badge tone="accent">{t("graph.outputReference")}</Badge>
+        ) : null}
         {!node.planned ? (
           <Badge tone="warn">{t("graph.notExecuted")}</Badge>
         ) : null}
@@ -248,8 +251,7 @@ const GraphNode = ({
                   <span>{input.role}</span>
                   <code>{input.nodeId}</code>
                   <small>
-                    {input.outputType ?? "unknown"} ·{" "}
-                    {input.outputUnit ?? "unknown"}
+                    {input.outputType ?? "—"} · {input.outputUnit ?? "—"}
                   </small>
                 </button>
                 {input.pointer === null ? (
@@ -278,8 +280,8 @@ const GraphNode = ({
 
       <footer>
         <div className="factor-graph__contract">
-          <code>{node.outputType ?? "unknown"}</code>
-          <span>{node.outputUnit ?? "unknown"}</span>
+          <code>{node.outputType ?? "—"}</code>
+          <span>{node.outputUnit ?? "—"}</span>
           <span>
             H {node.minimumHistorySessions ?? "—"} {t("plan.sessions")}
           </span>
@@ -311,6 +313,7 @@ const GraphNode = ({
 
 export const FactorGraphPanel = ({
   state,
+  schema,
   diagnostics,
   selectedPointer,
   revealSignal,
@@ -323,7 +326,7 @@ export const FactorGraphPanel = ({
     selectedPointer,
     revealSignal,
   );
-  const projected = projectFactorGraphs(state);
+  const projected = projectFactorGraphs(state, schema);
   // 편집 확정 뒤 backend plan을 다시 받는 동안(loading) 직전 ready 투영을 "재계산 중" 배지와 함께 유지한다 —
   // DAG가 사라졌다 돌아오며 편집기가 점프하지 않도록(P5-02 acceptance, 리뷰 OBS-132-05). 렌더 중 파생 상태.
   const documentKey = editing?.documentKey;
@@ -351,7 +354,7 @@ export const FactorGraphPanel = ({
   const routeFactor = factorIndexAtPointer(selectedPointer);
   // 편집 표면은 backend plan이 없어도(빈 그래프·compile error·대기) 문서의 팩터로 그린다(Phase 4 감사 R4).
   const editor = (factorCount: number, factorSelect: boolean) => {
-    if (editing === undefined || editing.schema === null) return null;
+    if (editing === undefined || schema === null) return null;
     const index =
       routeFactor !== null && routeFactor < factorCount
         ? routeFactor
@@ -361,7 +364,7 @@ export const FactorGraphPanel = ({
     return (
       <FactorGraphEditor
         tree={editing.tree}
-        schema={editing.schema}
+        schema={schema}
         transactions={editing.transactions}
         catalogs={editing.catalogs}
         diagnostics={diagnostics}

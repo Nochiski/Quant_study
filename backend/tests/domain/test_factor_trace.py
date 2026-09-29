@@ -182,6 +182,36 @@ def test_division_by_zero_is_distinguished_from_missing_input() -> None:
     assert _rows(trace, "div")[(DAYS[0], "a")].status is TraceValueStatus.DIVIDE_BY_ZERO
 
 
+def test_a_division_across_a_masked_cell_is_not_reported_as_division_by_zero() -> None:
+    """두 입력이 값이어도 그 사이에 원장이 가린 칸이 들면 결측이다(#337) — 0 으로 나눈 칸이
+    아니다."""
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("close", "price.close", "field"),
+            UnaryNode("lagged", UnaryOperator.LAG, "close", "unary", periods=2),
+            BinaryNode("div", BinaryOperator.DIVIDE, "close", "lagged", "binary"),
+        ),
+        output_node_id="div",
+    )
+    panel = tuple(
+        FactorObservation(
+            day,
+            "a",
+            (
+                FactorFieldValue("price.close", None, masked=True)
+                if position == 1
+                else FactorFieldValue("price.close", 10.0 + position),
+            ),
+        )
+        for position, day in enumerate(DAYS[:3])
+    )
+    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    row = _rows(trace, "div")[(DAYS[2], "a")]
+
+    assert (row.value, row.inputs) == (None, (12.0, 10.0))
+    assert row.status is TraceValueStatus.MISSING_INPUT
+
+
 @pytest.mark.parametrize(
     ("operator", "right"),
     ((BinaryOperator.MULTIPLY, 1e308), (BinaryOperator.DIVIDE, 1e-308)),

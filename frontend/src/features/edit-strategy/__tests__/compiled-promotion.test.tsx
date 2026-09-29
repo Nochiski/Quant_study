@@ -29,10 +29,15 @@ import {
   type FactorPlanRequest,
   type PlannedFactor,
 } from "../model/use-execution-plans";
+import type { JsonSchema } from "../model/schema-navigator";
 import { ExecutionPlanPanel } from "../ui/execution-plan-panel";
 import { FactorGraphPanel } from "../ui/factor-graph-panel";
 
 afterEach(cleanup);
+
+const SCHEMA = JSON.parse(
+  readBackendFixture("strategy_documents/runtime-schema.json"),
+) as JsonSchema;
 
 const SOURCE = readBackendFixture(
   "strategy_documents/ideas/ma20_breakout.yaml",
@@ -291,6 +296,7 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
     render(
       <FactorGraphPanel
         state={readyState()}
+        schema={SCHEMA}
         diagnostics={[]}
         onSelectPointer={vi.fn()}
         onOpenSource={onOpenSource}
@@ -304,7 +310,7 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
     const card = screen
       .getByRole("button", { name: "그래프 노드 선택: 참/거짓을 1/0으로" })
       .closest("li") as HTMLElement;
-    expect(within(card).getByText("OUTPUT")).toBeInTheDocument();
+    expect(within(card).getByText("그래프 출력")).toBeInTheDocument();
     await user.click(
       within(card).getByRole("button", { name: "소스에서 열기" }),
     );
@@ -319,6 +325,7 @@ describe("compile 이 붙인 승격 노드 (BACKLOG-014)", () => {
       <>
         <FactorGraphPanel
           state={readyState()}
+          schema={SCHEMA}
           diagnostics={[]}
           selectedPointer={selectedPointer}
           onSelectPointer={vi.fn()}

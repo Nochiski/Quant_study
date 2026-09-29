@@ -214,6 +214,8 @@ const ko = {
     "기간이 1년보다 짧아 연율로 바꾸지 않습니다",
   "backtest.metricUnavailable.base_rate_not_covered":
     "기준금리 이력이 시작되기 전 세션이 있어 계산하지 않습니다",
+  "backtest.metricUnavailable.two_valued_returns":
+    "수익률이 두 가지 값만 나와 오차를 잴 수 없습니다",
   "backtest.result.metricUnavailable.explain": "데이터 경고에서 이유 보기",
   // 지표의 쉬운 이름·뜻. 키는 backend Metric Registry의 metric_id이고 문장은 여기가 owner다
   // (결과 설명 spec R4). registry id 목록은 backend/tests/fixtures/analytics/metric_ids.json.
@@ -231,7 +233,10 @@ const ko = {
     "흔들림 한 단위당 한국은행 기준금리보다 얼마나 더 벌었는지입니다. 클수록 덜 흔들리며 더 벌었습니다.",
   "backtest.metric.sharpe_standard_error": "샤프 비율 오차",
   "backtest.metric.sharpe_standard_error.description":
-    "샤프 비율이 운만으로 얼마나 달라질 수 있는지입니다. 샤프 ± 이 값의 2배가 대략 95% 범위이고, 독립·정규 근사라 실제로는 더 클 수 있습니다.",
+    "샤프 비율이 운만으로 얼마나 달라질 수 있는지입니다. 샤프 ± 이 값의 2배가 대략 95% 범위이고, 날마다 독립이라고 본 근사라 실제로는 더 클 수 있습니다.",
+  "backtest.metric.probabilistic_sharpe": "기준금리를 넘을 확률",
+  "backtest.metric.probabilistic_sharpe.description":
+    "운을 걷어 낸 실력으로도 한국은행 기준금리보다 더 벌 확률입니다. 이 결과 하나로 잰 값이라, 여러 설정을 시도해 고른 결과면 실제로는 더 낮습니다.",
   "backtest.metric.sortino": "소르티노 비율",
   "backtest.metric.sortino.description":
     "기준금리에 못 미친 흔들림만 위험으로 보고 잰 샤프 비율입니다.",
@@ -607,7 +612,8 @@ const ko = {
   "graph.incoming": "입력 연결",
   "graph.sourceNode": "소스 노드 · 입력 없음",
   "graph.selectNode": "그래프 노드 선택: {node}",
-  "graph.selectInput": "{role} 입력 노드 선택: {node}",
+  "graph.selectInput": "{role} 선택: {node}",
+  "graph.inputOrdinal": "{index}번째 입력",
   "graph.missingInput": "입력 누락",
   "graph.notExecuted": "미실행",
   "graph.unplannedTitle": "실행 계획에 포함되지 않은 정의",
@@ -860,7 +866,7 @@ const ko = {
     "그래프 안에서 이 노드를 가리키는 이름입니다.",
   "strategy.field.node.field_id": "데이터 필드",
   "strategy.field.node.field_id.description":
-    "값을 읽어 올 원천 데이터 필드입니다. 수익률·모멘텀·이평·변동성처럼 가격 변화를 잴 때는 수정주가 price.adj_close를, 그날의 절대 가격이 필요한 가격 필터에는 원주가 price.close를 씁니다. 수정주가는 대부분의 분할·증자·병합을 반영하지만 모든 사건을 잇지는 않습니다. 원장이 그날 사건을 반영하지 못한 날은 값이 비고, 그날을 품는 집계 기간과 그날을 사이에 둔 '며칠 전 값' 비교도 빕니다. 집계의 '건너뛰는 세션'에 든 그날은 보지 않아, 그 집계를 오늘 값과 견주면 사건 직후 틀린 값이 남을 수 있습니다. 유상증자 권리락처럼 원장이 조정하지 않는 사건은 가격 변화가 그대로 남습니다.",
+    "값을 읽어 올 원천 데이터 필드입니다. 수익률·모멘텀·이평·변동성처럼 가격 변화를 잴 때는 수정주가 price.adj_close를, 그날의 절대 가격이 필요한 가격 필터에는 원주가 price.close를 씁니다. 수정주가는 대부분의 분할·증자·병합을 반영하지만 모든 사건을 잇지는 않습니다. 원장이 그날 사건을 반영하지 못한 날은 값이 비고, 그날을 품는 집계 기간과 그날을 사이에 두고 두 시점을 견주는 계산('며칠 전 값', 건너뛰는 세션을 둔 집계와 오늘 값의 비교)도 빕니다. 유상증자 권리락처럼 원장이 조정하지 않는 사건은 가격 변화가 그대로 남습니다.",
   "strategy.field.node.value": "값",
   "strategy.field.node.value.description": "이 노드가 내보낼 고정 숫자입니다.",
   "strategy.field.node.parameter_id": "파라미터 이름",
@@ -1968,6 +1974,8 @@ export const messages = {
       "The period is shorter than a year, so it is not annualized",
     "backtest.metricUnavailable.base_rate_not_covered":
       "Some sessions predate the base rate history, so this is not computed",
+    "backtest.metricUnavailable.two_valued_returns":
+      "Returns took only two values, so the error cannot be measured",
     "backtest.result.metricUnavailable.explain": "See why in data warnings",
     "backtest.metric.total_return": "Total return",
     "backtest.metric.total_return.description":
@@ -1983,7 +1991,10 @@ export const messages = {
       "Return above the Bank of Korea base rate per unit of swing. Higher means a smoother gain.",
     "backtest.metric.sharpe_standard_error": "Sharpe uncertainty",
     "backtest.metric.sharpe_standard_error.description":
-      "How much the Sharpe ratio could differ by luck alone. Sharpe ± twice this covers about 95%; it is an independent-normal approximation, so the real error can be larger.",
+      "How much the Sharpe ratio could differ by luck alone. Sharpe ± twice this covers about 95%; it assumes each day is independent, so the real error can be larger.",
+    "backtest.metric.probabilistic_sharpe": "Chance of beating the base rate",
+    "backtest.metric.probabilistic_sharpe.description":
+      "The probability that, with luck set aside, the strategy truly earns more than the Bank of Korea base rate. It is measured from this one result, so it is lower in reality if the result was picked from many tried settings.",
     "backtest.metric.sortino": "Sortino ratio",
     "backtest.metric.sortino.description":
       "A Sharpe ratio that counts only swings below the base rate as risk.",
@@ -2365,7 +2376,8 @@ export const messages = {
     "graph.incoming": "Incoming edges",
     "graph.sourceNode": "Source node · no inputs",
     "graph.selectNode": "Select graph node: {node}",
-    "graph.selectInput": "Select {role} input node: {node}",
+    "graph.selectInput": "Select {role}: {node}",
+    "graph.inputOrdinal": "Input {index}",
     "graph.missingInput": "Missing input",
     "graph.notExecuted": "NOT EXECUTED",
     "graph.unplannedTitle": "Definitions outside the execution plan",
@@ -2624,7 +2636,7 @@ export const messages = {
       "The name other nodes use to refer to this one.",
     "strategy.field.node.field_id": "Data field",
     "strategy.field.node.field_id.description":
-      "The source field the value is read from. Use the adjusted close price.adj_close for returns, momentum, moving averages and volatility, and the raw close price.close only where the day's absolute price matters, such as a price filter. The adjusted close reflects most splits, bonus issues and reverse splits but does not bridge every event: on a day the ledger could not fold an event the value is missing, and so is any window holding that day or Lag comparison spanning it. The sessions a Window lag skips are not checked yet, so comparing such a window with today's value can still carry a wrong value right after the event. Events the ledger does not adjust, such as rights-offering ex-dates, keep their price change.",
+      "The source field the value is read from. Use the adjusted close price.adj_close for returns, momentum, moving averages and volatility, and the raw close price.close only where the day's absolute price matters, such as a price filter. The adjusted close reflects most splits, bonus issues and reverse splits but does not bridge every event: on a day the ledger could not fold an event the value is missing, and so is any window holding that day or any comparison of two points in time that spans it (Lag, or a window with Window lag against today's value). Events the ledger does not adjust, such as rights-offering ex-dates, keep their price change.",
     "strategy.field.node.value": "Value",
     "strategy.field.node.value.description":
       "The fixed number this node emits.",

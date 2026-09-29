@@ -41,11 +41,11 @@
 
 ## M5 Single backtest + analytics
 
-`domain.analytics`의 `metric-registry-v4`가 수익률·위험·회전율 8개 성과 지표와 샤프 표준오차, MDD 기간/회복,
-benchmark/excess return, 거래·노출·비용을 합친 23개 정의와 공식을 소유한다. CAGR의 연수는 기준일부터
+`domain.analytics`의 `metric-registry-v5`가 수익률·위험·회전율 8개 성과 지표와 샤프 표준오차·PSR, MDD 기간/회복,
+benchmark/excess return, 거래·노출·비용을 합친 24개 정의와 공식을 소유한다. CAGR의 연수는 기준일부터
 마지막 세션까지의 달력 일수 / 365이고, 1년 미만인 실행은 CAGR·칼마를 비우고 사유를 붙인다. `metric_windows` 구간 지표는 구간 직전 세션의 자산을 기준값으로 쓴다.
 샤프·소르티노·롤링 샤프는 한국은행 기준금리 이력(`domain/analytics/_base_rate.py`)으로 만든 초과수익으로 잰다(#274).
-샤프 표준오차는 수익률이 독립·정규라고 본 Lo(2002) 근사라 자기상관·두꺼운 꼬리가 있으면 실제 오차와 다를 수 있다(양의 자기상관이면 더 크다). 롤링 샤프 창은 126세션(6개월)이고 `compute_analytics`의 `rolling_window` 기본값이 정한다.
+샤프 표준오차는 왜도·첨도를 넣은 Mertens(2002)·Bailey·López de Prado(2012) 식(분모 n−1)이고, 수익률이 날마다 독립이라고 본 근사라 자기상관이 있으면 실제 오차와 다를 수 있다(양의 자기상관이면 더 크다). PSR(`probabilistic_sharpe`)은 Φ(샤프 / 표준오차), 곧 진짜 샤프가 0보다 클 확률이다. 계열 DSR은 같은 `probabilistic_sharpe` 함수에 기준 샤프만 바꿔 넣는다. 롤링 샤프 창은 126세션(6개월)이고 `compute_analytics`의 `rolling_window` 기본값이 정한다.
 `application.backtest_run`은 immutable `BacktestRunSpec`을 TargetTape로 컴파일하고 교체 가능한
 data/executor/artifact port만 호출한다. 기본 조립은 Equity mock → `TargetTapeStrategy` →
 Persistent Rust Engine → atomic local JSON artifact이며 Python reference core도 같은 계약으로 남긴다.

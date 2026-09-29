@@ -26,6 +26,7 @@ from strategy_workbench.domain.backtest._requirement import (
     require_environment,
 )
 from strategy_workbench.domain.backtest._research_window import (
+    RESEARCH_START,
     ResearchWindowViolationError,
     require_research_window,
 )
@@ -43,6 +44,7 @@ from strategy_workbench.domain.backtest._schema import (
 __all__ = [
     "CATALOG_UNIVERSE",
     "DEFAULT_MISSING_POLICY",
+    "RESEARCH_START",
     "RUN_ENVIRONMENT_CONSTRAINTS",
     "RUN_ENVIRONMENT_SCHEMA_ID",
     "STATUTORY_SELL_TAX_BPS",

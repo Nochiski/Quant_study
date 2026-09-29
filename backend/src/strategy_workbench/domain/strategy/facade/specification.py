@@ -52,6 +52,7 @@ from strategy_workbench.domain.strategy._models import (
     WeightingMethod,
     composite_factors,
     inverse_risk_factor_id,
+    parameter_value_allowed,
 )
 
 __all__ = [
@@ -103,5 +104,6 @@ __all__ = [
     "canonical_strategy_payload",
     "composite_factors",
     "inverse_risk_factor_id",
+    "parameter_value_allowed",
     "strategy_spec_hash",
 ]

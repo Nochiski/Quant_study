@@ -201,6 +201,21 @@ class ChoiceParameter:
 ParameterDefinition: TypeAlias = FloatParameter | IntegerParameter | ChoiceParameter
 
 
+def parameter_value_allowed(parameter: ParameterDefinition, value: ParameterValue) -> bool:
+    """값이 파라미터 정의의 타입·범위·선택지 안인가.
+
+    검증기의 기본값 판정, 실험 탐색 값, 실행 요청의 해소 값(검증 랩 V3-02)이 이 술어 하나를 쓴다.
+    `step` 은 보지 않는다. 간격은 탐색 격자를 펼치는 폭일 뿐이고, 여기서 간격 정렬을 요구하면
+    간격에 맞지 않는 기본값을 가진 저장 리비전이 새로 검증 오류가 된다.
+    """
+    if isinstance(parameter, ChoiceParameter):
+        return value in parameter.choices
+    numeric_types = (int,) if isinstance(parameter, IntegerParameter) else (int, float)
+    if isinstance(value, bool) or not isinstance(value, numeric_types):
+        return False
+    return parameter.minimum <= value <= parameter.maximum
+
+
 @dataclass(frozen=True, kw_only=True)
 class StrategySpec:
     identity: StrategyIdentity

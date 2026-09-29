@@ -176,6 +176,7 @@ backend/
    ├─ domain/analytics/                    # 21개 versioned metric 정의·공식
    ├─ domain/backtest/                     # RunEnvironment, run/manifest/raw artifact 계약
    ├─ domain/assistant/                    # 어시스턴트 순수 값 타입(메시지·이벤트·도구·제안 검증 결과)
+   ├─ domain/experiment/                   # 탐색 그리드·워크포워드 창·trial 상태 전이(검증 랩)
    ├─ application/equity_workspace/        # 검색 catalog·universe/panel PIT preview
    │  ├─ ports/outgoing/equity_data.py     # EquityDataPort
    │  └─ facade/{ports,workspace}.py

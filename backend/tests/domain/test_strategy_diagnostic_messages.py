@@ -41,12 +41,16 @@ from strategy_workbench.domain.factor.facade.validation import validate_factor_g
 from strategy_workbench.domain.strategy._hydrate import _hydrate
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
+    FROZEN_SCHEMA_VERSIONS,
     STRUCTURE_CODES,
+    UPGRADE_CHAIN,
     hydrate_strategy_document,
 )
 from strategy_workbench.domain.strategy.facade.specification import StrategyIdentity
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "strategy_documents"
+# 가장 최근 은퇴 버전과 가장 옛 버전. 버전 문자열은 domain 상수에서만 읽는다.
+RETIRED, OLDEST = UPGRADE_CHAIN[-2], UPGRADE_CHAIN[0]
 DRAFT = StrategyIdentity("draft", 0)
 
 # 문장과 기계 디테일을 가르는 구분자. 디테일이 없는 문장은 이 파일에 없다.
@@ -119,6 +123,12 @@ def _set(document: dict[str, Any], path: str, value: object) -> None:
         target[leaf] = value
 
 
+def _retired_with_nested_factors(document: dict[str, Any]) -> None:
+    """은퇴 버전을 선언했지만 본문에 그보다 옛 문법(1.0 의 factors 두 겹)이 섞인 문서."""
+    _set(document, "schema_version", RETIRED)
+    _set(document, "factors", {"factors": document["factors"]})
+
+
 # (이름, 문서를 망가뜨리는 함수, 기대 code, 기대 message) — message는 전문 golden이다.
 HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
     (
@@ -129,11 +139,11 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         f"supported=('{CURRENT_SCHEMA_VERSION}',)",
     ),
     (
-        "지원하지 않는 버전",
-        lambda d: _set(d, "schema_version", "9.9"),
+        "지원이 끝난 버전",
+        lambda d: _set(d, "schema_version", RETIRED),
         "structure.unsupported_schema_version",
         "지원하지 않는 schema_version입니다. 업그레이드하면 지금 버전으로 바꿔 줍니다 — "
-        f"got='9.9' supported=('{CURRENT_SCHEMA_VERSION}',)",
+        f"got='{RETIRED}' supported=('{CURRENT_SCHEMA_VERSION}',)",
     ),
     (
         "모르는 키(오타)",
@@ -234,6 +244,24 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         "1.0 문법입니다. unary rank는 지금 버전에서 cross_sectional의 rank로 옮겨졌습니다. "
         "kind와 operator를 함께 바꾸세요 — "
         "got=unary/rank expected=cross_sectional/rank",
+    ),
+    # 업그레이더가 거절할 버전 줄은 업그레이드를 시키지 않고 고칠 곳을 말한다(#267 DEFECT-2).
+    (
+        "업그레이드할 수 없는 버전 — 모르는 버전",
+        lambda d: _set(d, "schema_version", "9.9"),
+        "structure.not_upgradeable_schema_version",
+        "지금 버전도 지원이 끝난 버전도 아닌 schema_version이라 업그레이드할 수 없습니다. "
+        "supported나 retired에 있는 버전을 따옴표로 감싸 적어 주세요 — "
+        f"got='9.9' supported=('{CURRENT_SCHEMA_VERSION}',) "
+        f"retired={sorted(FROZEN_SCHEMA_VERSIONS)}",
+    ),
+    (
+        "업그레이드할 수 없는 버전 — 선언보다 옛 문법",
+        _retired_with_nested_factors,
+        "structure.not_upgradeable_schema_version",
+        "선언한 schema_version보다 옛 문법이 본문에 섞여 있어 업그레이드할 수 없습니다. 옛 문법 "
+        "자리를 선언한 버전의 문법으로 고치거나, 문서 전체가 stage 버전이면 버전 줄을 그 버전으로 "
+        f"고쳐 주세요 — got='{RETIRED}' stage='{OLDEST}' pointers=['/factors']",
     ),
     (
         "identity는 봉투 소유",

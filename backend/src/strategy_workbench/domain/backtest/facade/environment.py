@@ -2,6 +2,10 @@ from strategy_workbench.domain.backtest._canonical import (
     environment_hash,
     run_environment_canonical_json,
 )
+from strategy_workbench.domain.backtest._krx_tax import (
+    STATUTORY_SELL_TAX_BPS,
+    sell_tax_schedule,
+)
 from strategy_workbench.domain.backtest._models import (
     CATALOG_UNIVERSE,
     DEFAULT_MISSING_POLICY,
@@ -10,6 +14,7 @@ from strategy_workbench.domain.backtest._models import (
     ExecutionTiming,
     Market,
     RunEnvironment,
+    SellTax,
 )
 from strategy_workbench.domain.backtest._requirement import (
     MissingRunEnvironmentError,
@@ -35,6 +40,7 @@ __all__ = [
     "DEFAULT_MISSING_POLICY",
     "RUN_ENVIRONMENT_CONSTRAINTS",
     "RUN_ENVIRONMENT_SCHEMA_ID",
+    "STATUTORY_SELL_TAX_BPS",
     "DataFrequency",
     "ExecutionTiming",
     "Market",
@@ -43,6 +49,7 @@ __all__ = [
     "RetiredEnvironment",
     "RetiredEnvironmentProblem",
     "RunEnvironment",
+    "SellTax",
     "environment_from_retired_settings",
     "environment_hash",
     "require_environment",
@@ -50,4 +57,5 @@ __all__ = [
     "run_environment_canonical_json",
     "run_environment_schema",
     "run_environment_schema_hash",
+    "sell_tax_schedule",
 ]

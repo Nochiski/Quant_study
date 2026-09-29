@@ -48,9 +48,17 @@ const numberOrNull = (value: unknown): number | null =>
 const stringOrNull = (value: unknown): string | null =>
   typeof value === "string" ? value : null;
 
+/** 스키마 칸의 JSON 타입. 선택 칸(`anyOf: [{type}, {type: "null"}]`)은 null 아닌 쪽 타입이다. */
+const typeOf = (node: Json): unknown =>
+  Array.isArray(node.anyOf)
+    ? node.anyOf.find((member) => isRecord(member) && member.type !== "null")
+        ?.type
+    : node.type;
+
 const controlOf = (node: Json): RunEnvironmentControl => {
   if (Array.isArray(node.enum)) return "select";
-  if (node.type === "number" || node.type === "integer") return "number";
+  const type = typeOf(node);
+  if (type === "number" || type === "integer") return "number";
   if (node.format === "date") return "date";
   return "text";
 };

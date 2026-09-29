@@ -223,6 +223,7 @@ const RUN_ENVIRONMENT = {
   participation_rate: 0.1,
   fee_bps: 15,
   slippage_bps: 10,
+  sell_tax: "krx_statutory",
   missing: "drop",
 } as const;
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(

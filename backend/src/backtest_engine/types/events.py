@@ -198,6 +198,7 @@ class FillEvent:
 class CostKind(Enum):
     SHORT_BORROW = "short_borrow"  # 숏 포지션 차입 비용 (세션 종료 평가액 기준)
     MARGIN_INTEREST = "margin_interest"  # 음수 현금 이자 (세션 종료 잔액 기준)
+    SELL_TAX = "sell_tax"  # 매도 거래세 (매도 체결 금액 기준, 체결 직후)
 
 
 @dataclass(frozen=True)

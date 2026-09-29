@@ -260,6 +260,9 @@ const ko = {
   "backtest.metric.total_fees": "총수수료",
   "backtest.metric.total_fees.description":
     "거래하며 낸 수수료 합계입니다.",
+  "backtest.metric.total_taxes": "매도 거래세",
+  "backtest.metric.total_taxes.description":
+    "주식을 팔 때 낸 증권거래세·농어촌특별세 합계입니다.",
   "backtest.metric.total_slippage_cost": "슬리피지 비용",
   "backtest.metric.total_slippage_cost.description":
     "원하던 가격과 실제 체결 가격의 차이로 잃은 금액입니다.",
@@ -709,6 +712,7 @@ const ko = {
   "run_environment.contract.participation_rate": "참여율",
   "run_environment.contract.fee_bps": "수수료",
   "run_environment.contract.slippage_bps": "슬리피지",
+  "run_environment.contract.sell_tax_bps": "매도 거래세율",
   "strategy.field.run_environment.market": "시장",
   "strategy.field.run_environment.market.description": "종목과 가격을 읽을 거래소입니다.",
   "strategy.field.run_environment.market.value.KRX": "한국거래소(KRX)",
@@ -724,6 +728,11 @@ const ko = {
   "strategy.field.run_environment.timing": "체결 시점",
   "strategy.field.run_environment.timing.description": "신호가 나온 뒤 주문이 체결되는 시점입니다.",
   "strategy.field.run_environment.timing.value.next_open": "다음 거래일 시가",
+  "strategy.field.run_environment.sell_tax": "매도 거래세",
+  "strategy.field.run_environment.sell_tax.description": "주식을 팔 때 체결 금액에 붙는 세금을 어떻게 셀지 정합니다.",
+  "strategy.field.run_environment.sell_tax.value.krx_statutory": "법정 세율(날짜별)",
+  "strategy.field.run_environment.sell_tax.value.custom": "직접 입력",
+  "strategy.field.run_environment.sell_tax.value.none": "세금 없음",
   "strategy.field.run_environment.missing": "결측 처리",
   "strategy.field.run_environment.missing.description": "팩터 입력값이 비었을 때 계산을 어떻게 이어 갈지 정합니다.",
   "strategy.field.run_environment.missing.value.drop": "그 종목을 빼기",
@@ -1017,6 +1026,8 @@ const ko = {
     "체결 금액에 bp 단위로 붙는 수수료 가정입니다.",
   "run_environment.contract.slippage_bps.description":
     "체결 가격이 기준가에서 밀린다고 보는 bp 폭입니다.",
+  "run_environment.contract.sell_tax_bps.description":
+    "매도 거래세를 직접 입력할 때 매도 금액에 붙일 bp입니다.",
   "strategy.operator.unary.negate": "부호 뒤집기",
   "strategy.operator.unary.negate.description":
     "값의 부호를 뒤집습니다. 작을수록 좋은 지표를 클수록 좋게 바꿀 때 씁니다.",
@@ -1939,6 +1950,9 @@ export const messages = {
     "backtest.metric.total_fees": "Total fees",
     "backtest.metric.total_fees.description":
       "All commissions paid for trading.",
+    "backtest.metric.total_taxes": "Sell taxes",
+    "backtest.metric.total_taxes.description":
+      "Securities transaction and rural development taxes paid on sales.",
     "backtest.metric.total_slippage_cost": "Slippage cost",
     "backtest.metric.total_slippage_cost.description":
       "Money lost to the gap between the intended and the filled price.",
@@ -2396,6 +2410,7 @@ export const messages = {
     "run_environment.contract.participation_rate": "Participation",
     "run_environment.contract.fee_bps": "Fee",
     "run_environment.contract.slippage_bps": "Slippage",
+    "run_environment.contract.sell_tax_bps": "Sell tax rate",
     "strategy.field.run_environment.market": "Market",
     "strategy.field.run_environment.market.description": "Exchange whose securities and prices are read.",
     "strategy.field.run_environment.market.value.KRX": "Korea Exchange (KRX)",
@@ -2411,6 +2426,11 @@ export const messages = {
     "strategy.field.run_environment.timing": "Execution timing",
     "strategy.field.run_environment.timing.description": "When an order fills after its signal.",
     "strategy.field.run_environment.timing.value.next_open": "Next session open",
+    "strategy.field.run_environment.sell_tax": "Sell tax",
+    "strategy.field.run_environment.sell_tax.description": "How the tax charged on the proceeds of each sale is counted.",
+    "strategy.field.run_environment.sell_tax.value.krx_statutory": "Statutory rate (by date)",
+    "strategy.field.run_environment.sell_tax.value.custom": "Custom rate",
+    "strategy.field.run_environment.sell_tax.value.none": "No tax",
     "strategy.field.run_environment.missing": "Missing values",
     "strategy.field.run_environment.missing.description": "How the calculation continues when a factor input is empty.",
     "strategy.field.run_environment.missing.value.drop": "Drop the security",
@@ -2715,6 +2735,8 @@ export const messages = {
       "Fee in basis points charged on notional traded.",
     "run_environment.contract.slippage_bps.description":
       "Basis points the fill price is assumed to move against the order.",
+    "run_environment.contract.sell_tax_bps.description":
+      "Basis points charged on sale proceeds when the sell tax is a custom rate.",
     "strategy.operator.unary.negate": "Negate",
     "strategy.operator.unary.negate.description":
       "Flips the sign, turning a lower-is-better measure into a higher-is-better one.",

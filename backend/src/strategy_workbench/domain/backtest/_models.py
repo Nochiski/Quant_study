@@ -75,6 +75,18 @@ class ExecutionTiming(StrEnum):
     NEXT_OPEN = "next_open"
 
 
+class SellTax(StrEnum):
+    """매도 체결에 붙는 거래세 방식(spec D7).
+
+    `krx_statutory` 는 시장·날짜별 법정 세율표(`_krx_tax.py`)를, `custom` 은 `sell_tax_bps` 하나를,
+    `none` 은 세금 없음을 뜻한다.
+    """
+
+    KRX_STATUTORY = "krx_statutory"
+    CUSTOM = "custom"
+    NONE = "none"
+
+
 # 실행 설정 수치 필드의 범위·단위·설명 키. 1.1 까지는 전략 제약 카탈로그의 `/execution/*` 행이
 # SoT 였고 여기서 필드 이름으로 다시 걸어 썼지만, 1.2 가 `execution` 섹션을 지우면서 그 행들이
 # 전략 문서 포인터를 잃었다. 그래서 owner 를 실행 설정이 있는 이 노드로 옮긴다(P2-03 결정 항목).
@@ -120,11 +132,31 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         description_key="run_environment.contract.slippage_bps",
         message="슬리피지는 0 이상의 숫자여야 합니다.",
     ),
+    # `sell_tax` 가 `custom` 일 때만 값이 있다(없으면 `None`). 범위 검사는 값이 있을 때만 한다.
+    "sell_tax_bps": ScalarConstraint(
+        pointer="/sell_tax_bps",
+        code="run_environment.cost",
+        stage=AppliedStage.EXECUTION,
+        unit=ContractUnit.BASIS_POINTS,
+        display_unit="bp",
+        minimum=0.0,
+        example=20.0,
+        description_key="run_environment.contract.sell_tax_bps",
+        message="매도 거래세는 0 이상의 숫자여야 합니다.",
+    ),
 }
 
 # canonical JSON 이 `15` 와 `15.0` 으로 갈리지 않게 float 으로 정규화할 필드. 제약 행과 같은
 # 집합이므로 이름을 다시 적지 않는다.
 NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = tuple(RUN_ENVIRONMENT_CONSTRAINTS)
+
+# `RunManifest` 가 평면 필드로도 싣는 비용·참여율. 제약 행이 늘어도 매니페스트 평면 필드는 늘지
+# 않으므로 제약 행과 따로 고정한다 — 제약 행을 그대로 읽으면 새 행마다 `AttributeError` 가 난다.
+MANIFEST_FLAT_ENVIRONMENT_FIELDS: tuple[str, ...] = (
+    "participation_rate",
+    "fee_bps",
+    "slippage_bps",
+)
 
 
 class InvalidRunFieldError(ValueError):
@@ -172,13 +204,17 @@ class RunEnvironment:
     participation_rate: float = 0.1
     fee_bps: float = 15.0
     slippage_bps: float = 10.0
+    sell_tax: SellTax = SellTax.KRX_STATUTORY
+    sell_tax_bps: float | None = None
     missing: MissingPolicy = DEFAULT_MISSING_POLICY
 
     def __post_init__(self) -> None:
         # 수치는 float 으로 정규화한다. `fee_bps=15` 와 `fee_bps=15.0` 은 같은 실행 설정인데
         # canonical JSON 이 `15` 와 `15.0` 으로 갈려 `environment_hash` 가 달라진다.
         for name in NUMERIC_ENVIRONMENT_FIELDS:
-            object.__setattr__(self, name, float(getattr(self, name)))
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, float(value))
         if self.start > self.end:
             raise InvalidRunFieldError(
                 "end",
@@ -191,9 +227,17 @@ class RunEnvironment:
                 "run environment requires a universe id — "
                 f"universe_id={self.universe_id!r} range={self.start}..{self.end}",
             )
+        # 세율 칸은 `custom` 에서만 읽힌다. 다른 방식에 값이 오면 무엇이 적용됐는지 매니페스트만
+        # 보고 알 수 없으므로 받지 않는다.
+        if (self.sell_tax is SellTax.CUSTOM) != (self.sell_tax_bps is not None):
+            raise InvalidRunFieldError(
+                "sell_tax_bps",
+                "sell_tax_bps is required when sell_tax is custom and must be absent otherwise — "
+                f"sell_tax={self.sell_tax.value} sell_tax_bps={self.sell_tax_bps!r}",
+            )
         for name, constraint in RUN_ENVIRONMENT_CONSTRAINTS.items():
             value = getattr(self, name)
-            if not constraint.satisfied_by(value):
+            if value is not None and not constraint.satisfied_by(value):
                 raise InvalidRunFieldError(
                     name,
                     "run environment value is out of range — "
@@ -314,7 +358,7 @@ class RunManifest:
         # 달라진다. 평면 필드 제거는 소비자(프론트 실행 결과 화면) 정리와 같이 간다.
         divergent = {
             name: (getattr(self, name), getattr(self.environment, name))
-            for name in NUMERIC_ENVIRONMENT_FIELDS
+            for name in MANIFEST_FLAT_ENVIRONMENT_FIELDS
             if getattr(self, name) != getattr(self.environment, name)
         }
         if divergent:

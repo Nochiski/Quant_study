@@ -18,6 +18,7 @@
   "maximum_gross_exposure",
   "average_net_exposure",
   "total_fees",
+  "total_taxes",
   "total_slippage_cost",
   "total_carry_cost"
 ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
@@ -15,6 +16,7 @@ from backtest_engine.types.decision import StrategyDecision
 from backtest_engine.types.events import (
     CorporateActionEvent,
     CorporateActionType,
+    CostKind,
     StrategyEvent,
 )
 from backtest_engine.types.instruments import AssetClass, InstrumentId
@@ -46,6 +48,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
     environment_hash,
+    sell_tax_schedule,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
@@ -233,6 +236,7 @@ class BacktestEngineExecutorAdapter:
                 fee_bps=environment.fee_bps,
                 annualization_days=request.spec.annualization_days,
                 max_gross_leverage=max(1.0, strategy.risk.gross_exposure),
+                sell_tax_schedule=sell_tax_schedule(environment),
             ),
             slippage=FixedBpsSlippage(environment.slippage_bps),
             max_participation=environment.participation_rate,
@@ -275,8 +279,9 @@ class BacktestEngineExecutorAdapter:
             traded_notional=tables.fill_totals.traded_notional,
             trades=outcomes,
             total_fees=tables.fill_totals.total_fees,
+            total_taxes=sum(item.amount for item in artifacts.costs if item.kind == _SELL_TAX),
             total_slippage_cost=tables.fill_totals.total_slippage_cost,
-            total_carry_cost=sum(amount for _session, _kind, _security, amount in tables.costs),
+            total_carry_cost=sum(item.amount for item in artifacts.costs if item.kind != _SELL_TAX),
         )
         full = compute_analytics(
             full_input,
@@ -355,6 +360,9 @@ class BacktestEngineExecutorAdapter:
         if cancelled():
             raise RunCancelledError("run cancelled")
 
+
+# 매도 거래세 비용 기록의 kind. 수수료(`total_fees`)·대차 비용(`total_carry_cost`)과 나눠 센다.
+_SELL_TAX = CostKind.SELL_TAX.value
 
 # 엔진이 보유 수량에 적용하는 확인된 사건(`_apply_corporate_action`)과 같은 집합이다. 알림 전용
 # 사건(주식 수 변화만 확인)은 가격 반비례가 확인되지 않아 곡선도 조정하지 않는다.
@@ -680,6 +688,12 @@ def _closed_trades(
     sessions = tables.sessions
     states: dict[str, _OpenTrade] = {}
     trades: list[RawTrade] = []
+    # 거래 단위 비용(`fees`)은 매도 거래세를 포함한다. 엔진은 매도 체결마다 거래세 기록을 그 체결
+    # 바로 뒤에 하나씩 남기므로, 같은 세션·종목의 기록을 체결 순서대로 짝짓는다.
+    taxes: dict[tuple[int, int], deque[float]] = {}
+    for session_index, kind, instrument_index, amount in tables.costs:
+        if kind == _SELL_TAX and instrument_index is not None:
+            taxes.setdefault((session_index, instrument_index), deque()).append(amount)
     # `(세션 ts, fill_id)` 순서 — 세션 index는 feed 정렬 순서라 ts 정렬과 결과가 같다.
     for row in sorted(tables.fills, key=lambda item: (sessions[item[2]], item[0])):
         (
@@ -695,6 +709,9 @@ def _closed_trades(
         ) = row
         security_id = security_ids[instrument_index]
         session = session_dates[session_index]
+        pending_taxes = taxes.get((session_index, instrument_index))
+        if side == "sell" and pending_taxes:
+            fee += pending_taxes.popleft()
         delta = float(quantity) * (1 if side == "buy" else -1)
         slip = float(quantity) * abs(slippage_per_share)
         state = states.get(security_id)
@@ -778,10 +795,11 @@ def _slice_analytics(
         traded_notional=sum(float(item.quantity) * item.price for item in fills),
         trades=trades,
         total_fees=sum(item.fee for item in fills),
+        total_taxes=sum(item.amount for item in costs if item.kind == _SELL_TAX),
         total_slippage_cost=sum(
             float(item.quantity) * abs(item.slippage_per_share) for item in fills
         ),
-        total_carry_cost=sum(item.amount for item in costs),
+        total_carry_cost=sum(item.amount for item in costs if item.kind != _SELL_TAX),
         # 구간 첫날 수익률이 빠지지 않게 직전 세션을 기준으로 넘긴다. 실행 첫날부터면 없다.
         base=next((item for item in reversed(data.points) if item.session < start), None),
     )

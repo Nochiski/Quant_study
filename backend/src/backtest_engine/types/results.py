@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date
 
 from backtest_engine.types.events import FillEvent, OrderEvent
 from backtest_engine.types.portfolio import PortfolioSnapshot
@@ -18,6 +20,9 @@ class RunConfig:
     short_borrow_bps_annual: 숏 평가액 대비 연 차입 비용 (bp). 세션마다 /annualization_days.
     margin_interest_bps_annual: 음수 현금 대비 연 이자 (bp). MARGIN 선언 전략에만 의미 있다.
     max_gross_leverage: 총노출/equity 상한. 1.0이면 현금 범위 매수(MARGIN 없음).
+    sell_tax_schedule: 매도 체결 금액 대비 거래세 일정 `(시작일, bp)`, 시작일 오름차순. 체결 세션
+        날짜 이하인 마지막 행의 세율을 쓰고, 그런 행이 없으면 세금이 없다. 세율의 출처(법정 세율표
+        등)는 호출자가 정한다.
     """
 
     run_id: str
@@ -27,6 +32,7 @@ class RunConfig:
     short_borrow_bps_annual: float = 0.0
     margin_interest_bps_annual: float = 0.0
     max_gross_leverage: float = 1.0
+    sell_tax_schedule: tuple[tuple[date, float], ...] = ()
 
     def __post_init__(self) -> None:
         if self.initial_cash <= 0:
@@ -51,6 +57,23 @@ class RunConfig:
                 f"annualization_days must be > 0 — run_id={self.run_id} "
                 f"annualization_days={self.annualization_days}"
             )
+        starts = [start for start, _bps in self.sell_tax_schedule]
+        if starts != sorted(set(starts)) or any(
+            not math.isfinite(bps) or bps < 0 for _start, bps in self.sell_tax_schedule
+        ):
+            raise ValueError(
+                "sell_tax_schedule must have strictly increasing start dates and finite bps >= 0 — "
+                f"run_id={self.run_id} sell_tax_schedule={self.sell_tax_schedule}"
+            )
+
+    def sell_tax_rate(self, on: date) -> float:
+        """`on` 에 체결된 매도에 매길 거래세율(금액 대비 비율)."""
+        rate_bps = 0.0
+        for start, bps in self.sell_tax_schedule:
+            if start > on:
+                break
+            rate_bps = bps
+        return rate_bps / 10_000.0
 
 
 @dataclass(frozen=True, eq=False)

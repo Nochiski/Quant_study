@@ -10,19 +10,23 @@ from pathlib import Path
 
 import pytest
 
+from backtest_engine import RunConfig
 from strategy_workbench.domain.backtest.facade.environment import (
     RUN_ENVIRONMENT_CONSTRAINTS,
+    STATUTORY_SELL_TAX_BPS,
     DataFrequency,
     ExecutionTiming,
     Market,
     MissingRunEnvironmentError,
     ResearchWindowViolationError,
     RunEnvironment,
+    SellTax,
     environment_hash,
     require_environment,
     run_environment_canonical_json,
     run_environment_schema,
     run_environment_schema_hash,
+    sell_tax_schedule,
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
 
@@ -55,7 +59,7 @@ def test_canonical_json_is_sorted_and_compact() -> None:
 
 
 def test_environment_hash_splits_on_every_variable_field() -> None:
-    """`market`·`frequency`·`timing` 은 값이 하나뿐이라 변주할 수 없다. 나머지 7 필드를 덮는다."""
+    """`market`·`frequency`·`timing` 은 값이 하나뿐이라 변주할 수 없다. 나머지 9 필드를 덮는다."""
     base = _environment()
     variants = (
         replace(base, start=date(2019, 1, 1)),
@@ -65,6 +69,8 @@ def test_environment_hash_splits_on_every_variable_field() -> None:
         replace(base, slippage_bps=0.0),
         replace(base, participation_rate=1.0),
         replace(base, missing=MissingPolicy.ZERO),
+        replace(base, sell_tax=SellTax.NONE),
+        replace(base, sell_tax=SellTax.CUSTOM, sell_tax_bps=20.0),
     )
 
     hashes = {environment_hash(item) for item in (base, *variants)}
@@ -124,6 +130,7 @@ def test_constraint_rows_point_at_the_run_environment_document() -> None:
         "participation_rate": "/participation_rate",
         "fee_bps": "/fee_bps",
         "slippage_bps": "/slippage_bps",
+        "sell_tax_bps": "/sell_tax_bps",
     }
     # 진단 코드는 `strategy.*` validator 레지스트리 밖이다.
     assert all(
@@ -217,11 +224,17 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
         "participation_rate",
         "fee_bps",
         "slippage_bps",
+        "sell_tax",
+        "sell_tax_bps",
         "missing",
     }
     assert schema["required"] == ["start", "end", "universe_id"]
     assert properties["market"]["enum"] == ["KRX"]
     assert properties["missing"]["enum"] == [member.value for member in MissingPolicy]
+    assert properties["sell_tax"]["enum"] == [member.value for member in SellTax]
+    assert properties["sell_tax"]["default"] == "krx_statutory"
+    assert properties["sell_tax_bps"]["default"] is None
+    assert properties["sell_tax_bps"]["minimum"] == 0.0
     assert properties["fee_bps"]["type"] == "number"
     assert properties["fee_bps"]["default"] == 15.0
     assert properties["start"]["format"] == "date"
@@ -246,3 +259,59 @@ def test_run_environment_schema_fixture_is_current() -> None:
         "run-environment-schema.json is stale; regenerate with: "
         "uv run python tools/export_runtime_schema.py"
     )
+
+
+def test_sell_tax_defaults_to_the_statutory_table() -> None:
+    environment = _environment()
+
+    assert (environment.sell_tax, environment.sell_tax_bps) == (SellTax.KRX_STATUTORY, None)
+    assert sell_tax_schedule(environment) == STATUTORY_SELL_TAX_BPS[Market.KRX]
+    assert sell_tax_schedule(replace(environment, sell_tax=SellTax.NONE)) == ()
+    custom = replace(environment, sell_tax=SellTax.CUSTOM, sell_tax_bps=12)
+    assert custom.sell_tax_bps == 12.0
+    assert sell_tax_schedule(custom) == ((date.min, 12.0),)
+
+
+@pytest.mark.parametrize(
+    ("sell_tax", "sell_tax_bps"),
+    [
+        (SellTax.CUSTOM, None),
+        (SellTax.KRX_STATUTORY, 20.0),
+        (SellTax.NONE, 0.0),
+        (SellTax.CUSTOM, -1.0),
+    ],
+)
+def test_sell_tax_rate_is_only_and_always_given_for_custom(
+    sell_tax: SellTax, sell_tax_bps: float | None
+) -> None:
+    """세율 칸은 `custom` 에서만 읽힌다. 다른 방식에 값이 있으면 매니페스트만 보고 무엇이 적용됐는지
+    알 수 없다."""
+    with pytest.raises(ValueError, match="sell_tax_bps") as error:
+        replace(_environment(), sell_tax=sell_tax, sell_tax_bps=sell_tax_bps)
+
+    assert getattr(error.value, "field", None) == "sell_tax_bps"
+
+
+@pytest.mark.parametrize(
+    ("session", "rate"),
+    [
+        # 합계 세율(증권거래세 + 코스피 농어촌특별세)이 시행일에 바뀐다. 손으로 옮긴 법정 값이다.
+        (date(2019, 6, 2), 0.0030),
+        (date(2019, 6, 3), 0.0025),
+        (date(2020, 12, 31), 0.0025),
+        (date(2021, 1, 1), 0.0023),
+        (date(2023, 1, 2), 0.0020),
+        (date(2024, 1, 2), 0.0018),
+        (date(2025, 12, 30), 0.0015),
+        (date(2026, 1, 2), 0.0020),
+    ],
+)
+def test_statutory_rate_changes_on_each_effective_date(session: date, rate: float) -> None:
+    config = RunConfig(
+        run_id="tax",
+        initial_cash=1.0,
+        sell_tax_schedule=sell_tax_schedule(_environment()),
+    )
+
+    assert config.sell_tax_rate(session) == pytest.approx(rate)
+

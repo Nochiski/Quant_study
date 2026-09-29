@@ -95,6 +95,7 @@ class AnalyticsInput:
     traded_notional: float
     trades: tuple[TradeOutcome, ...] = ()
     total_fees: float = 0.0
+    total_taxes: float = 0.0
     total_slippage_cost: float = 0.0
     total_carry_cost: float = 0.0
     # 구간 시작 직전 세션의 점. 있으면 수익률·연수·월별 수익률·벤치마크 수익률이 여기서 시작하고,

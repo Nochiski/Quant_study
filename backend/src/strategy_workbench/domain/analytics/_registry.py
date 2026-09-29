@@ -112,6 +112,9 @@ def build_default_metric_registry() -> MetricRegistry:
             "total_fees", "Total fees", MetricCategory.COST, currency, False, False, precision=2
         ),
         MetricDefinition(
+            "total_taxes", "Sell taxes", MetricCategory.COST, currency, False, False, precision=2
+        ),
+        MetricDefinition(
             "total_slippage_cost",
             "Slippage cost",
             MetricCategory.COST,

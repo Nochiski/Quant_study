@@ -49,6 +49,8 @@ const result = (): BacktestRunResult => ({
       participation_rate: 0.2,
       fee_bps: 7,
       slippage_bps: 3,
+      sell_tax: "krx_statutory",
+      sell_tax_bps: null,
       missing: "zero",
     },
     environment_hash: "e".repeat(64),
@@ -102,6 +104,8 @@ describe("run 상세의 실행 설정", () => {
       "참여율 (%)",
       "수수료 (bp)",
       "슬리피지 (bp)",
+      "매도 거래세",
+      "매도 거래세율 (bp)",
       "결측 처리",
       "실행 설정 hash",
     ]);
@@ -113,6 +117,8 @@ describe("run 상세의 실행 설정", () => {
     // 평면 비용 필드(15bp)가 아니라 실행 설정이 실제로 쓴 값을 보인다(P3-02 결정 4).
     expect(row("참여율 (%)")).toHaveTextContent("20%");
     expect(row("수수료 (bp)")).toHaveTextContent("7bp");
+    expect(row("매도 거래세")).toHaveTextContent("법정 세율(날짜별)");
+    expect(row("매도 거래세율 (bp)")).toHaveTextContent("—");
     expect(row("결측 처리")).toHaveTextContent("0으로 채우기");
     expect(row("실행 설정 hash")).toHaveTextContent(`${"e".repeat(16)}…`);
   });

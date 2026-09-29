@@ -132,6 +132,7 @@ const ENVIRONMENT: RunEnvironment = {
   participation_rate: 0.1,
   fee_bps: 15,
   slippage_bps: 10,
+  sell_tax: "krx_statutory",
   missing: "drop",
 };
 
@@ -388,12 +389,17 @@ describe("run environment panel", () => {
     expect(
       fields.filter((field) => field.required).map((field) => field.name),
     ).toEqual(RUN_ENVIRONMENT_SCHEMA.required);
-    // 기간·유니버스는 스키마에 기본값이 없다 — 패널도 지어내지 않는다(P3-02 결정 1).
+    // 기간·유니버스는 스키마에 기본값이 없다 — 패널도 지어내지 않는다(P3-02 결정 1). 스키마 기본값이
+    // null 인 선택 칸(직접 입력 거래세율)도 빈 칸으로 시작한다.
     expect(
       fields
         .filter((field) => field.defaultValue === null)
         .map((field) => field.name),
-    ).toEqual(RUN_ENVIRONMENT_SCHEMA.required);
+    ).toEqual(
+      Object.entries(properties)
+        .filter(([, node]) => (node as Record<string, unknown>).default == null)
+        .map(([name]) => name),
+    );
   });
 
   it("starts from schema defaults, leaves period and universe empty and blocks the run", async () => {

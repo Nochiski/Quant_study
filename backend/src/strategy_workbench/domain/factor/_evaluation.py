@@ -249,12 +249,21 @@ class _NodeEvaluator:
         self._checkpoint = checkpoint
         self._progress = progress
         self._computed: dict[str, list[FactorComputedValue]] = {}
+        self._by_security: dict[str, list[int]] | None = None
         self._total_weight = _reachable_progress_weight(graph.output_node_id, self._nodes)
         self._completed_weight = 0
 
     @property
     def computed(self) -> dict[str, list[FactorComputedValue]]:
         return self._computed
+
+    def _securities(self) -> dict[str, list[int]]:
+        """종목별 관측 index(날짜 순). 관측에만 달려 있어 시간 연산 노드들이 나눠 쓴다."""
+        if self._by_security is None:
+            self._by_security = _indices_by_security(
+                self._observations, checkpoint=self._checkpoint
+            )
+        return self._by_security
 
     def _advance_within_node(self, node: ExpressionNode, fraction: float) -> None:
         self._progress(
@@ -309,13 +318,17 @@ class _NodeEvaluator:
                     zip(*inputs, strict=True), self._checkpoint
                 )
             ]
+        elif isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
+            values = _lag(
+                inputs[0], self._securities(), node.periods or 0, checkpoint=self._checkpoint
+            )
         elif isinstance(node, UnaryNode):
-            values = _unary(node, inputs[0], self._observations, checkpoint=self._checkpoint)
+            values = _unary(node, inputs[0], checkpoint=self._checkpoint)
         elif isinstance(node, TimeSeriesNode):
             values = _time_series(
                 node,
                 inputs[0],
-                self._observations,
+                self._securities(),
                 checkpoint=self._checkpoint,
                 advance=lambda fraction: self._advance_within_node(node, fraction),
             )
@@ -470,7 +483,6 @@ def _compare(
 def _unary(
     node: UnaryNode,
     values: list[FactorComputedValue],
-    observations: tuple[FactorObservation, ...],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
@@ -479,9 +491,8 @@ def _unary(
             -value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
             for value in _checkpointed(values, checkpoint)
         ]
-    if node.operator is UnaryOperator.LAG:
-        return _lag(values, observations, node.periods or 0, checkpoint=checkpoint)
-    raise ValueError(  # pragma: no cover - enum은 두 멤버뿐, 새 멤버는 여기서 즉시 드러난다
+    # LAG 는 평가기가 시간 연산으로 `_lag` 를 부른다. 새 멤버는 여기서 즉시 드러난다
+    raise ValueError(  # pragma: no cover - enum은 두 멤버뿐
         f"unary operator has no evaluation — operator={node.operator!r} node_id={node.node_id!r}"
     )
 
@@ -489,13 +500,12 @@ def _unary(
 def _time_series(
     node: TimeSeriesNode,
     values: list[FactorComputedValue],
-    observations: tuple[FactorObservation, ...],
+    by_security: dict[str, list[int]],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
     advance: Callable[[float], None] = _noop_progress,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
-    by_security = _indices_by_security(observations, checkpoint=checkpoint)
     # 종목마다 관측 수가 달라 종목 수로 세면 이력이 긴 종목 구간에서 느려진다.
     # 처리한 관측 수로 센다.
     observation_count = max(len(values), 1)
@@ -600,13 +610,12 @@ def _group_transform(
 
 def _lag(
     values: list[FactorComputedValue],
-    observations: tuple[FactorObservation, ...],
+    by_security: dict[str, list[int]],
     periods: int,
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
-    by_security = _indices_by_security(observations, checkpoint=checkpoint)
     for indices in _checkpointed(by_security.values(), checkpoint):
         for position, index in _checkpointed(enumerate(indices), checkpoint):
             if position >= periods:

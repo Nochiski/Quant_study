@@ -2,11 +2,11 @@
 plan_version: 1
 project: validation-lab
 project_status: SELF_CHECK
-current_phase: V3
-current_pr: V3-04
-active_prs: [V3-04]
-parallel_window: [V3-04]
-last_updated: 2026-09-30T05:58:38+09:00
+current_phase: V3,V4
+current_pr: V3-04,V4-01
+active_prs: [V3-04, V4-01]
+parallel_window: [V3-04, V4-01]
+last_updated: 2026-09-30T06:20:56+09:00
 planned_prs: 28
 merged_prs: 13
 approved_prs: 13
@@ -24,12 +24,12 @@ progress_percent: 46
 | Field | Value |
 |---|---|
 | Project status | `SELF_CHECK` |
-| Current phase | `V3` |
-| Current/next PR | `V3-04` |
-| Active PR | `V3-04` |
+| Current phase | `V3,V4` |
+| Current/next PR | `V3-04,V4-01` |
+| Active PR | `V3-04, V4-01` |
 | Progress | `13 / 28 merged (46%)` |
 | Approved | `13 / 28` |
-| Aggregated at | `2026-09-30 05:58 KST` |
+| Aggregated at | `2026-09-30 06:20 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -71,7 +71,7 @@ progress_percent: 46
 | V1 | Research window seal, run persistence, trial ledger | 5 | 5 | `MERGED` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 3 | `MERGED` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 3 | `SELF_CHECK` |
-| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
+| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `SELF_CHECK` |
 | V5 | Screens (after lang2 merge signal) | 7 | 1 | `WAITING` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
 | **Total** |  | **28** | **13** | **46%** |
@@ -115,7 +115,7 @@ progress_percent: 46
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V4-01` | PSR 지표 | V0-01, #274 머지 | `WAITING` | — |
+| [ ] | `V4-01` | PSR 지표 | V0-01, #274 머지 | `SELF_CHECK` | — |
 | [ ] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `PLANNED` | — |
 | [ ] | `V4-03` | 고원·민감도 | V4-02 | `PLANNED` | — |
 | [ ] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `PLANNED` | — |

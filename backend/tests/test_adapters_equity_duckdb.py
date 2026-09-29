@@ -13,6 +13,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
@@ -37,6 +38,7 @@ from strategy_workbench.application.portfolio_design.facade.design import (
 from strategy_workbench.application.portfolio_design.facade.ports import RawObservationQuery
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.bootstrap.facade.container import build_container
+from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
@@ -156,7 +158,8 @@ def test_snapshot_is_the_manifest_hash_and_names_every_table(
     snapshot = adapter.snapshot()
     assert snapshot.snapshot_id == snapshot_id(table_builds(root))
     assert snapshot.schema_version == "equity-v1.2" and snapshot.point_in_time
-    assert snapshot.source == f"equity_duckdb:{root.resolve()}"
+    # 계약 패널이 그대로 보여 주는 값이라 루트 절대 경로를 싣지 않는다(#163)
+    assert snapshot.source == "equity_duckdb"
     assert {r.dataset_id for r in snapshot.dataset_revisions} == set(table_builds(root))
     assert all(r.as_of == WB_SESSIONS[-1] for r in snapshot.dataset_revisions)
 
@@ -288,10 +291,13 @@ def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
     assert ratio.detail is not None and "셀 하나로 굽지 않는다" in ratio.detail
 
 
-def test_queries_outside_calendar_coverage_are_no_data(adapter: EquityDuckdbAdapter) -> None:
+def test_queries_outside_calendar_coverage_are_no_data(
+    adapter: EquityDuckdbAdapter, root: Path
+) -> None:
     beyond = _raw(adapter, start=START, end=date(2024, 1, 15))
     assert beyond.status is DataLoadStatus.NO_DATA
     assert beyond.detail is not None and "outside coverage" in beyond.detail
+    assert str(root.resolve()) not in beyond.detail  # 422·run `error` 로 나가는 문장이다(#163)
     before = _raw(adapter, start=date(2023, 12, 1), end=START)
     assert before.status is DataLoadStatus.NO_DATA
 
@@ -598,10 +604,13 @@ def test_panel_lag_override_shifts_the_row_and_its_available_date(
     assert (START, "036220:2", "price.adj_close") in cells
 
 
-def test_panel_rejects_unknown_or_malformed_security_ids(adapter: EquityDuckdbAdapter) -> None:
+def test_panel_rejects_unknown_or_malformed_security_ids(
+    adapter: EquityDuckdbAdapter, root: Path
+) -> None:
     unknown = adapter.load_panel(ResearchPanelQuery(START, END, ("000660:9",), ("price.close",)))
     assert unknown.status is DataLoadStatus.INVALID_QUERY
     assert unknown.detail is not None and "000660:9" in unknown.detail
+    assert str(root.resolve()) not in unknown.detail  # 패널 미리보기 응답에 그대로 실린다(#163)
     malformed = adapter.load_panel(ResearchPanelQuery(START, END, ("000660",), ("price.close",)))
     assert malformed.status is DataLoadStatus.INVALID_QUERY
 
@@ -753,9 +762,12 @@ def test_backtest_dataset_reads_roots_without_the_basis_column(
     assert [w.code for w in dataset.warnings] == ["equity.reference_rows_dropped"]
 
 
-def test_backtest_dataset_refuses_unknown_and_index_ids(adapter: EquityDuckdbAdapter) -> None:
-    with pytest.raises(ValueError, match="unknown security_id"):
+def test_backtest_dataset_refuses_unknown_and_index_ids(
+    adapter: EquityDuckdbAdapter, root: Path
+) -> None:
+    with pytest.raises(ValueError, match="unknown security_id") as unknown:
         adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("000660:9",), None))
+    assert str(root.resolve()) not in str(unknown.value)  # run `error` 로 나간다(#163)
     with pytest.raises(ValueError, match="malformed security_id"):
         adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("000660:1",), "idx:코스피"))
 
@@ -807,6 +819,7 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path)
     denied = _raw(without, fields=("financial.book_equity",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog file missing" in denied.detail
+    assert str(root.resolve()) not in denied.detail  # 사유는 질의 거절로 사용자에게 간다(#163)
     # 조정가는 카탈로그 없이도 답하고 값도 같다(전방 조정은 (security, date) 의 순수 함수)
     served_adj = _raw(without, fields=("price.adj_close",))
     assert served_adj.ok
@@ -826,6 +839,7 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path)
     skipped = EquityDuckdbAdapter(root)
     result = _raw(skipped, fields=("financial.book_equity",))
     assert result.detail is not None and "macros_skipped" in result.detail
+    assert str(root.resolve()) not in result.detail
 
 
 def test_catalog_without_required_view_column_drops_only_that_source(
@@ -851,6 +865,8 @@ def test_catalog_without_required_view_column_drops_only_that_source(
     assert _raw(legacy, fields=("price.close",)).ok
     warned = [r.getMessage() for r in caplog.records if "catalog_columns_missing" in r.getMessage()]
     assert warned and "v_fin_latest" in warned[0] and "카탈로그" in warned[0]
+    # 카탈로그 경로는 운영자 로그에만 남고 질의 거절 상세(API 응답)에는 없다(#163 댓글)
+    assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
 
 
 def test_unreadable_catalog_macro_at_boot_drops_only_that_source(
@@ -881,6 +897,8 @@ def test_unreadable_catalog_macro_at_boot_drops_only_that_source(
         r.getMessage() for r in caplog.records if "catalog_macro_unreadable" in r.getMessage()
     ]
     assert warned and "v_fin_latest" in warned[0]
+    # duckdb 원문은 빠진 parquet 경로를 담는다 — 원문과 카탈로그 경로는 로그에만 싣는다(#163 댓글)
+    assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
 
 
 @pytest.mark.parametrize("payload", [b"garbage" * 50, b""], ids=["garbage", "empty"])
@@ -978,6 +996,36 @@ def test_container_boots_with_the_duckdb_adapter(root: Path, tmp_path: Path) -> 
     assert catalog.total == len(ALL_FIELDS)
     assert {p.field_id for p in catalog.fields} <= set(ALL_FIELDS)
     assert "fin_std" in catalog.facets.dataset_ids
+
+
+def test_preview_and_trace_rejections_do_not_expose_the_equity_root(root: Path) -> None:
+    """preview·trace 의 422 `portfolio.data.unavailable` 상세에 서버 절대 경로가 없다 (#163).
+
+    예전에는 어댑터 detail 의 `root=<절대 경로>` 가 그대로 나가 사용자가 서버 디렉터리·계정명을
+    봤다. 가리는 것은 run `error` 뿐이었다 — 이제 어댑터가 처음부터 경로 없이 쓴다.
+    """
+    client = TestClient(build_http_app(equity_adapter="duckdb", equity_root=root))
+    spec = client.get("/api/v1/strategies/template").json()
+    # 픽스처 달력(2023-12-26..2024-01-12) 밖 — 어댑터가 커버리지 밖 NO_DATA 로 답한다
+    environment = {"start": "2024-02-01", "end": "2024-02-29", "universe_id": "krx.common-stock"}
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": spec, "environment": environment}
+    )
+    trace = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={
+            "strategy_source": {"kind": "inline_draft", "spec": spec},
+            "environment": environment,
+            "security_ids": ["005930:1"],
+            "factor_id": spec["factors"][0]["factor_id"],
+        },
+    )
+    for response in (preview, trace):
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert (detail["code"], detail["status"]) == ("portfolio.data.unavailable", "no_data")
+        assert "outside coverage" in detail["detail"]
+        assert str(root.resolve()) not in detail["detail"] and "root=" not in detail["detail"]
 
 
 def _environment() -> RunEnvironment:

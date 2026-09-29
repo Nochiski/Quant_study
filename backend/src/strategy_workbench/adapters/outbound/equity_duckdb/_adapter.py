@@ -53,6 +53,10 @@ unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로
 
 duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑터 생성 시 지연 import
 하고 없으면 `EquityDuckdbSetupError` 로 알린다.
+
+사용자에게 가는 문장(포트 결과 `detail`, 원천을 뺀 사유, `snapshot().source`, 질의 중 예외)에는 서버
+경로를 싣지 않는다 — preview·trace 422 와 run `error` 로 그대로 나간다. 루트·카탈로그 경로는 운영자
+채널인 부팅 예외와 경고 로그에만 남긴다(#163).
 """
 
 from __future__ import annotations
@@ -513,7 +517,7 @@ class EquityDuckdbAdapter:
         tables = [name for name in spec.requires if name not in macros]
         absent = [table for table in tables if table not in self._builds]
         if absent:
-            return f"equity tables not built — missing={absent} root={self._root}"
+            return f"equity tables not built — missing={absent}"
         if not macros:
             return None
         if not self._catalog.usable:
@@ -522,7 +526,7 @@ class EquityDuckdbAdapter:
         if skipped:
             return (
                 f"catalog macros not published (macros_skipped) — missing={skipped} "
-                f"catalog={self._catalog.path} macros={list(self._catalog.macros)}"
+                f"macros={list(self._catalog.macros)}"
             )
         return self._missing_columns_reason(spec)
 
@@ -548,10 +552,9 @@ class EquityDuckdbAdapter:
                 f"카탈로그 매크로 {spec.relation} 를 읽을 수 없어 원천 {spec.name} 의 필드를 "
                 "뺀다 — 카탈로그를 다시 만들거나 원장 파일을 확인해야 한다"
                 "(`ledger_sync verify`·`catalog`) "
-                f"(catalog_macro_unreadable) — error={type(error).__name__}: {error} "
-                f"catalog={self._catalog.path}"
+                f"(catalog_macro_unreadable) — error={type(error).__name__}"
             )
-            logger.warning(reason)
+            logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")
             return reason
         finally:
             con.close()
@@ -562,10 +565,9 @@ class EquityDuckdbAdapter:
         reason = (
             f"카탈로그 매크로 {spec.relation} 에 원천 {spec.name} 이 읽는 열이 없어 이 원천의 "
             "필드를 뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
-            f"`python -m equity catalog`) (catalog_columns_missing) — missing={missing} "
-            f"catalog={self._catalog.path}"
+            f"`python -m equity catalog`) (catalog_columns_missing) — missing={missing}"
         )
-        logger.warning(reason)
+        logger.warning(f"{reason} catalog={self._catalog.path}")
         return reason
 
     @property
@@ -579,7 +581,7 @@ class EquityDuckdbAdapter:
             snapshot_id=self._snapshot_id,
             schema_version=SCHEMA_VERSION,
             built_at=max(build.built_at for build in self._tables.values()),
-            source=f"equity_duckdb:{self._root}",
+            source="equity_duckdb",
             point_in_time=True,
             dataset_revisions=tuple(
                 DatasetRevision(table, build.build_id, self.backfill_end)
@@ -794,7 +796,7 @@ class EquityDuckdbAdapter:
                 DataLoadStatus.INVALID_QUERY,
                 self._snapshot_id,
                 (),
-                f"unknown security_id — not in {SPAN_TABLE}: {unknown_ids} root={self._root}",
+                f"unknown security_id — not in {SPAN_TABLE}: {unknown_ids}",
             )
         lags = self._lags(query.field_ids, tuple(query.lag_overrides))
         window = self._window(query.start, query.end, 0)
@@ -832,7 +834,7 @@ class EquityDuckdbAdapter:
             status=DataLoadStatus.OK if cells else DataLoadStatus.NO_DATA,
             snapshot_id=self._snapshot_id,
             warnings=panel.warnings,
-            detail=None if cells else f"no panel cells — query={query} root={self._root}",
+            detail=None if cells else f"no panel cells — query={query}",
         )
 
     # ── FactorMetadataPort · FactorObservationPort ────────────────────────────
@@ -1022,7 +1024,7 @@ class EquityDuckdbAdapter:
                 None
                 if observations
                 else f"no members in universe — universe_id={query.universe_id} "
-                f"start={query.start} end={query.end} root={self._root}"
+                f"start={query.start} end={query.end}"
             ),
             warnings=tuple(sorted({*window.warnings, *panel.warnings})),
             validation_checkpoint=checkpoint,
@@ -1055,13 +1057,11 @@ class EquityDuckdbAdapter:
         }
         unknown = sorted(sid for sid, key in parsed.items() if key not in spans)
         if unknown:
-            raise ValueError(
-                f"unknown security_id — not in {SPAN_TABLE}: {unknown} root={self._root}"
-            )
+            raise ValueError(f"unknown security_id — not in {SPAN_TABLE}: {unknown}")
         if FACTOR_TABLE not in self._builds:
             raise EquityDuckdbSetupError(
                 f"{FACTOR_TABLE} not built — a backtest without the corporate-action feed is "
-                f"silently wrong across splits; root={self._root}"
+                "silently wrong across splits"
             )
         tickers = tuple(sorted({ticker for ticker, _ in parsed.values()}))
         con = self._connect()
@@ -1149,10 +1149,7 @@ class EquityDuckdbAdapter:
         actions: list[CorporateActionRecord] = []
         for ticker, event_id, event_type, share_factor, raw_ts in factor_rows:
             if raw_ts is None:
-                raise ValueError(
-                    f"{ts_column} is NULL on a factor_ok row — event_id={event_id} "
-                    f"root={self._root}"
-                )
+                raise ValueError(f"{ts_column} is NULL on a factor_ok row — event_id={event_id}")
             session = _as_date(raw_ts, ts_column)
             ratio = _as_float(share_factor, "share_factor")
             if str(event_type) in RATIO_DIRECTED_EVENT_TYPES:
@@ -1307,12 +1304,12 @@ class EquityDuckdbAdapter:
         if start < self._sessions[0] or end > self.backfill_end:
             return (
                 f"query outside coverage — start={start} end={end} "
-                f"calendar={self._sessions[0]}..{self.backfill_end} root={self._root}"
+                f"calendar={self._sessions[0]}..{self.backfill_end}"
             )
         first = bisect_left(self._sessions, start)
         last = bisect_right(self._sessions, end)
         if first >= last:
-            return f"no sessions in range — start={start} end={end} root={self._root}"
+            return f"no sessions in range — start={start} end={end}"
         history_first = first - history
         warnings: tuple[str, ...] = ()
         if history_first < 0:
@@ -1549,8 +1546,7 @@ class EquityDuckdbAdapter:
             key = (ticker, session)
             if key in rows:
                 raise EquityDuckdbSetupError(
-                    f"duplicate (ticker, date) in {UNIVERSE_TABLE}×{SPAN_TABLE} — key={key} "
-                    f"root={self._root}"
+                    f"duplicate (ticker, date) in {UNIVERSE_TABLE}×{SPAN_TABLE} — key={key}"
                 )
             rows[key] = row
         progress(1.0)

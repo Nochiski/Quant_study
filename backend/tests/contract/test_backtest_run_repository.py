@@ -82,6 +82,8 @@ _REQUESTS = {
         metric_windows=(
             MetricWindow(MetricScope.OUT_OF_SAMPLE, date(2021, 3, 2), date(2021, 6, 30), "OOS"),
         ),
+        # 원본 요청의 파라미터 값(검증 랩 V3-02). int·float·bool 이 섞여 있다.
+        parameter_values={"n": 20, "w": 1.0, "flag": True},
     ),
     "inline_draft": BacktestRunSpec(
         strategy_source=InlineDraft(_SPEC, "inline_draft", source_hash="b" * 64),
@@ -97,6 +99,19 @@ def test_the_accepted_request_survives_reopening_the_file(kind: str, tmp_path: P
     SQLiteBacktestRunRepository(path).add(_summary("run-1"), _REQUESTS[kind])
 
     assert SQLiteBacktestRunRepository(path).request("run-1") == _REQUESTS[kind]
+
+
+def test_parameter_values_keep_their_types_through_the_file(tmp_path: Path) -> None:
+    """`20 == 20.0 == True` 라 요청 `==` 로는 타입이 바뀐 것을 못 본다. 값마다 타입을 대조한다."""
+    path = tmp_path / "research.sqlite3"
+    SQLiteBacktestRunRepository(path).add(_summary("run-1"), _REQUESTS["saved_revision"])
+
+    restored = SQLiteBacktestRunRepository(path).request("run-1").parameter_values
+    assert {key: (type(value), value) for key, value in restored.items()} == {
+        "n": (int, 20),
+        "w": (float, 1.0),
+        "flag": (bool, True),
+    }
 
 
 def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(

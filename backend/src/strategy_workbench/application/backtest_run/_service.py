@@ -317,7 +317,9 @@ class BacktestRunService:
             # 한다(#161). spec 의 `==` 는 1 과 1.0 을 같게 보지만 provenance 의 `spec_hash` 는
             # 가르고, 매니페스트도 provenance 를 기록하므로 둘 다 같아야 한다. 데이터 snapshot·
             # 엔진·지표 레지스트리 판본은 프로세스 안에서 고정이라 같은 입력이면 결과도 같다.
-            # 취소를 요청한 run 은 곧 끝나므로 잇지 않는다.
+            # 취소를 요청한 run 은 곧 끝나므로 잇지 않는다. `parameter_values` 는 정규화로 1 과
+            # 1.0 을 같은 값으로 맞춘다. bool·숫자 혼합 선택지((1, True))는 `==` 로 갈리지 않는
+            # 한계가 있고 V3-04 지문 기반 중복 제거에서 닫는다.
             for existing in self._records.values():
                 if (
                     existing.state.status in (RunStatus.QUEUED, RunStatus.RUNNING)

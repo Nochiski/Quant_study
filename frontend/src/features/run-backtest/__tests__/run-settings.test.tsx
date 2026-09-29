@@ -130,6 +130,7 @@ const ENVIRONMENT: RunEnvironment = {
   universe_id: "krx.common-stock",
   timing: "next_open",
   participation_rate: 0.1,
+  participation_basis: "session_volume",
   fee_bps: 15,
   slippage_bps: 10,
   sell_tax: "krx_statutory",

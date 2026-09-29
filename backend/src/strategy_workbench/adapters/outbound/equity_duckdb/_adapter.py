@@ -1182,6 +1182,10 @@ class EquityDuckdbAdapter:
                 "silently wrong across splits"
             )
         tickers = tuple(sorted({ticker for ticker, _ in parsed.values()}))
+        # 워밍업은 start 앞 거래일 달력으로 센다(`_window` 와 같은 달력). 모자라면 있는 만큼 읽는다.
+        warmup = query.history_sessions_before_start
+        first = max(bisect_left(self._sessions, query.start) - warmup, 0)
+        read_from = min(query.start, self._sessions[first]) if warmup else query.start
         con = self._connect()
         try:
             price_columns = {
@@ -1193,11 +1197,11 @@ class EquityDuckdbAdapter:
             basis_expr = BASIS_COLUMN if BASIS_COLUMN in price_columns else f"'{CONFIRMED_BASIS}'"
             price_rows = con.execute(
                 f"""
-                SELECT ticker, date, open, high, low, close, volume_shr, price_kind,
+                SELECT ticker, date, open, high, low, close, volume_shr, value_krw, price_kind,
                        {basis_expr} AS basis
                 FROM {self._source(PRICE_TABLE)}
                 WHERE ticker IN (SELECT {_KEYS_SQL})
-                  AND date BETWEEN {_lit(query.start)} AND {_lit(query.end)}
+                  AND date BETWEEN {_lit(read_from)} AND {_lit(query.end)}
                 ORDER BY ticker, date
                 """,
                 [_keys_param(tickers)],
@@ -1224,10 +1228,11 @@ class EquityDuckdbAdapter:
         for security_id, key in parsed.items():
             by_ticker.setdefault(key[0], []).append((security_id, key))
         bars: list[MarketBarRecord] = []
+        history_bars: list[MarketBarRecord] = []
         n_reference = 0
         invalid_bars: list[InvalidBarRecord] = []
         n_provisional = 0
-        for ticker, raw_date, open_, high, low, close, volume, kind, basis in price_rows:
+        for ticker, raw_date, open_, high, low, close, volume, value, kind, basis in price_rows:
             session = _as_date(raw_date, "price_daily.date")
             if basis is not None and str(basis) != CONFIRMED_BASIS:
                 # 저녁 잠정 행 — 확정 전 키움 종가라 bar 로 내보내지 않는다(엔진 어댑터
@@ -1236,24 +1241,24 @@ class EquityDuckdbAdapter:
                 # 멈춰 T 행이 아래 구간 필터에 조용히 걸린다 — 안에서 세면 건수가 0 이 된다.
                 n_provisional += 1
                 continue
+            # 워밍업 행은 bar 와 같은 규칙으로 거르되 측정 구간 경고(버린 행 수)에는 세지 않는다.
+            measured = session >= query.start
             for security_id, key in by_ticker[str(ticker)]:
                 span = spans[key]
                 if not span.first_date <= session <= span.last_date:
                     continue
                 if kind == REFERENCE_KIND:
-                    n_reference += 1  # 기준가·정지일 — 커널 규약: 방출하지 않는다
+                    n_reference += int(measured)  # 기준가·정지일 — 커널 규약: 방출하지 않는다
                     continue
                 prices = [_as_float(v, "price") for v in (open_, high, low, close)]
-                if any(p is None or p <= 0 for p in prices):
+                o, h, lo, c = (0.0 if p is None else float(p) for p in prices)
+                if min(o, h, lo, c) <= 0 or h < max(o, c) or lo > min(o, c):
                     # GAP-14(open NULL ∧ volume>0) 류 — Bar 가 거절하는 행. 거래된 날이라 정지와
                     # 가를 수 있게 세션을 넘긴다(이슈 #241).
-                    invalid_bars.append(InvalidBarRecord(session, security_id))
+                    if measured:
+                        invalid_bars.append(InvalidBarRecord(session, security_id))
                     continue
-                o, h, lo, c = (float(p) for p in prices if p is not None)
-                if h < max(o, c) or lo > min(o, c):
-                    invalid_bars.append(InvalidBarRecord(session, security_id))
-                    continue
-                bars.append(
+                (bars if measured else history_bars).append(
                     MarketBarRecord(
                         session=session,
                         security_id=security_id,
@@ -1262,6 +1267,7 @@ class EquityDuckdbAdapter:
                         low=lo,
                         close=c,
                         volume=_as_int(volume, "volume_shr"),
+                        trading_value=_as_float(value, "value_krw"),
                     )
                 )
         actions: list[CorporateActionRecord] = []
@@ -1304,7 +1310,8 @@ class EquityDuckdbAdapter:
                             detail=str(event_id),
                         )
                     )
-        bars.sort(key=lambda bar: (bar.session, bar.security_id))
+        for records in (bars, history_bars):
+            records.sort(key=lambda bar: (bar.session, bar.security_id))
         actions.sort(key=lambda action: (action.session, action.security_id, action.detail))
         # 창 안 마지막 bar 뒤에 오는 사건(정지 중 감자·병합 뒤 상폐)은 엔진이 정산할 세션이 없어
         # run 전체를 죽인다(`CorporateActionWithoutBar`, engine/loop.py). 그 포지션은 이미 마지막
@@ -1383,6 +1390,7 @@ class EquityDuckdbAdapter:
             benchmark_security_id=query.benchmark_security_id,
             warnings=tuple(warnings),
             invalid_bars=tuple(invalid_bars),
+            history_bars=tuple(history_bars),
         )
 
     # ── 패널 코어 ─────────────────────────────────────────────────────────────

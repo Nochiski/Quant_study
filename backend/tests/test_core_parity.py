@@ -10,6 +10,7 @@ import importlib
 import random
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -398,6 +399,24 @@ def _delisted_replace_scenario(core: str) -> tuple[BacktestEngine, BacktestResul
 # 매도 거래세 일정: 8/1 부터 20bp, 8/4 부터 25bp. 체결 세션마다 다른 세율이 붙는 경계를 덮는다.
 _SELL_TAX_SCHEDULE = ((date(2026, 8, 1), 20.0), (date(2026, 8, 4), 25.0))
 
+# 유동성 캡 기준 거래량(V2-02): 세션 거래량(1,000주)과 따로 싣는다. 8/2 는 0주라 체결 없이 넘어간다.
+LIQUIDITY_BARS = tuple(
+    replace(make_bar(day(session), INSTRUMENT, price, price), liquidity_volume=liquidity)
+    for session, price, liquidity in (
+        (1, 100.0, 3_000),
+        (2, 110.0, 0),
+        (3, 130.0, 3_000),
+        (4, 90.0, 3_000),
+        (5, 95.0, 3_000),
+    )
+)
+# 잔량이 다음 세션으로 넘어가는 GTC 70% 목표.
+GTC_TARGET_70PCT = SetPortfolioTarget(
+    targets=(WeightTarget(INSTRUMENT, 0.7),),
+    scope=TargetScope.PATCH,
+    execution=replace(ExecutionPolicy.market_next_open(), time_in_force=TimeInForce.GTC),
+)
+
 ENGINE_SCENARIOS = {
     "golden": lambda core: _engine_scenario(
         core,
@@ -468,6 +487,14 @@ ENGINE_SCENARIOS = {
             (test_basket.hold_b(10), test_basket.pair(test_basket.GroupPolicy.PROPORTIONAL))
         ),
         DataFeed(test_basket.BARS),
+        max_participation=0.1,
+    ),
+    # 참여 기준(V2-02): 캡은 기준 거래량 × 참여율, 0주 세션은 체결 없이 잔량 이월.
+    "liquidity_volume": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="lv", initial_cash=100_000.0),
+        ScriptedStrategy(script=(GTC_TARGET_70PCT,)),
+        DataFeed(LIQUIDITY_BARS),
         max_participation=0.1,
     ),
     "split": lambda core: _engine_scenario(

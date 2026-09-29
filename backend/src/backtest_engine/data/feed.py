@@ -30,6 +30,8 @@ class FeedColumns:
     lows: Sequence[float]
     closes: Sequence[float]
     volumes: Sequence[int]
+    # 행별 유동성 캡 기준 거래량(`Bar.liquidity_volume`). None 이면 모든 행이 세션 거래량을 쓴다.
+    liquidity_volumes: Sequence[int] | None = None
 
 
 class DataFeed:
@@ -78,6 +80,7 @@ class DataFeed:
         lows: Sequence[float],
         closes: Sequence[float],
         volumes: Sequence[int],
+        liquidity_volumes: Sequence[int] | None = None,
     ) -> DataFeed:
         """이미 세션순으로 묶인 열에서 feed를 만든다 (`Bar` 객체 생성 없음).
 
@@ -91,6 +94,7 @@ class DataFeed:
             offsets: 세션별 행 구간 경계. 길이는 `len(sessions) + 1`, 첫 값은 0.
             instrument_ids: 행별 `instruments` 인덱스.
             opens/highs/lows/closes/volumes: 행별 시가·고가·저가·종가·거래량.
+            liquidity_volumes: 행별 유동성 캡 기준 거래량(0 이상). None 이면 세션 거래량을 쓴다.
 
         Returns:
             열을 그대로 보관하고 스냅샷을 요청 시 만드는 DataFeed.
@@ -107,6 +111,13 @@ class DataFeed:
                 "feed column lengths must match — "
                 f"instrument_ids={rows} opens={lengths[0]} highs={lengths[1]} "
                 f"lows={lengths[2]} closes={lengths[3]} volumes={lengths[4]}"
+            )
+        if liquidity_volumes is not None and (
+            len(liquidity_volumes) != rows or min(liquidity_volumes, default=0) < 0
+        ):
+            raise ValueError(
+                "feed liquidity volumes must be one non-negative value per row — "
+                f"rows={rows} liquidity_volumes={len(liquidity_volumes)}"
             )
         if len(offsets) != len(sessions) + 1:
             raise ValueError(
@@ -184,6 +195,7 @@ class DataFeed:
             lows=lows,
             closes=closes,
             volumes=volumes,
+            liquidity_volumes=liquidity_volumes,
         )
         feed._snapshots = [None] * len(sessions)
         return feed
@@ -247,6 +259,7 @@ class DataFeed:
         lows = columns.lows
         closes = columns.closes
         volumes = columns.volumes
+        liquidity_volumes = columns.liquidity_volumes
         return MarketSnapshot(
             ts=ts,
             bars=tuple(
@@ -258,6 +271,7 @@ class DataFeed:
                     low=lows[row],
                     close=closes[row],
                     volume=volumes[row],
+                    liquidity_volume=None if liquidity_volumes is None else liquidity_volumes[row],
                 )
                 for row in range(columns.offsets[index], columns.offsets[index + 1])
             ),
@@ -273,6 +287,9 @@ class DataFeed:
         lows: list[float] = []
         closes: list[float] = []
         volumes: list[int] = []
+        # 기준 거래량이 없는 bar 는 세션 거래량으로 채운다(`Bar.cap_volume`) — 열 하나로 두 경우를
+        # 같은 뜻으로 싣는다.
+        liquidity_volumes: list[int] = []
         for index in range(len(self._sessions)):
             for bar in self.snapshot_at(index).bars:
                 instrument_id = registry.get(bar.instrument)
@@ -285,6 +302,7 @@ class DataFeed:
                 lows.append(bar.low)
                 closes.append(bar.close)
                 volumes.append(bar.volume)
+                liquidity_volumes.append(bar.cap_volume)
             offsets.append(len(instrument_ids))
         return FeedColumns(
             instruments=tuple(registry),
@@ -295,4 +313,5 @@ class DataFeed:
             lows=lows,
             closes=closes,
             volumes=volumes,
+            liquidity_volumes=liquidity_volumes,
         )

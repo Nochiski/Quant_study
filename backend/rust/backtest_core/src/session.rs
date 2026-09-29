@@ -69,8 +69,9 @@ impl EntryIn {
     }
 }
 
-/// bar: `(open, high, low, volume)`.
-pub(crate) type BarTuple = (f64, f64, f64, i64);
+/// bar: `(open, high, low, volume, liquidity_volume)`. `liquidity_volume`은 유동성 캡의 기준
+/// 거래량이다 — 참여 기준이 따로 없으면 `volume`과 같다 (Python `Bar.liquidity_volume`).
+pub(crate) type BarTuple = (f64, f64, f64, i64, i64);
 
 /// 슬리피지 설정: `("none", 0, 0)` | `("fixed_bps", bps, 0)` | `("volume_share", volume_limit, price_impact)`.
 fn slippage_per_share(
@@ -205,7 +206,7 @@ impl<'a> Session<'a> {
         let participation = e.participation.as_deref().or(self.default_participation);
         let mut capped = e.remaining;
         if let Some(text) = participation {
-            capped = capped.min(liquidity_cap(bar.3, text)?.max(0));
+            capped = capped.min(liquidity_cap(bar.4, text)?.max(0));
         }
         let slip = slippage_per_share(self.slippage, base_price, capped, bar.3)?;
         let held = self.power.quantity_of(&e.key);
@@ -213,7 +214,7 @@ impl<'a> Session<'a> {
             &e.side,
             base_price,
             e.remaining,
-            bar.3,
+            bar.4,
             participation,
             slip,
             e.limit_price,
@@ -236,16 +237,16 @@ impl<'a> Session<'a> {
             .bars
             .get(e.key.as_str())
             .copied()
-            .unwrap_or((0.0, 0.0, 0.0, 0));
+            .unwrap_or((0.0, 0.0, 0.0, 0, 0));
         let power = self.power.available();
         match q.status.as_str() {
             "not_filled" => Some(format!(
                 "no liquidity in session — order_id={} instrument={} volume={} ts={}",
-                e.order_id, e.symbol, bar.3, self.ts
+                e.order_id, e.symbol, bar.4, self.ts
             )),
             "liquidity_limited" => Some(format!(
                 "fill capped by volume participation — order_id={} instrument={} remaining={} cap={} volume={}",
-                e.order_id, e.symbol, e.remaining, q.quantity, bar.3
+                e.order_id, e.symbol, e.remaining, q.quantity, bar.4
             )),
             "rejected_no_cash" => Some(format!(
                 "cannot afford a single share — order_id={} instrument={} price={} buying_power={}",

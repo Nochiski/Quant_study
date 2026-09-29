@@ -9,11 +9,13 @@ P2-02 부터 `environment.missing` 도 같은 경로를 탄다: 실행 설정의
 `plan_hash` 까지 내려간다.
 
 검증 랩 V1-01 부터 연구 구간 잠금도 같은 관문을 지난다: 측정 시작일이 2020-01-02 앞이면 세 경로가
-`run_environment.research_window` 로 거절하고, 워밍업 관측 읽기는 막지 않는다(spec D1).
+`run_environment.research_window` 로 거절하고, 워밍업 관측 읽기는 막지 않는다(spec D1). V2-02 의
+참여 기준(`participation_basis`)도 데이터 질의의 워밍업과 엔진 캡까지 같은 축으로 내려간다.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -30,6 +32,11 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
+)
+from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataQuery,
+    BacktestDataset,
+    MarketBarRecord,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestResearchWindowViolationError,
@@ -60,9 +67,11 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
+    ParticipationBasis,
     RunEnvironment,
     SellTax,
     environment_hash,
+    participation_volumes,
 )
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
 from strategy_workbench.domain.factor.facade.expression import (
@@ -462,3 +471,71 @@ def test_partial_fill_is_declared_from_the_environment_not_the_document() -> Non
 
     assert "partial_fill" not in {item.value for item in bridge.requirements(spec, full).features}
     assert "partial_fill" in {item.value for item in bridge.requirements(spec, partial).features}
+
+
+class _HalvedTradingValue:
+    """mock 거래대금을 반으로 줄여 ADV 기준 캡이 세션 거래량 기준 캡의 절반쯤이 되게 한다. 받은
+    질의와 돌려준 dataset 을 남긴다."""
+
+    def __init__(self) -> None:
+        self._inner = MockEquityDataAdapter.demo()
+        self.loads: list[tuple[BacktestDataQuery, BacktestDataset]] = []
+
+    def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
+        dataset = self._inner.load_backtest_dataset(query)
+
+        def halve(bars: tuple[MarketBarRecord, ...]) -> tuple[MarketBarRecord, ...]:
+            return tuple(replace(bar, trading_value=(bar.trading_value or 0) / 2) for bar in bars)
+
+        dataset = replace(
+            dataset, bars=halve(dataset.bars), history_bars=halve(dataset.history_bars)
+        )
+        self.loads.append((query, dataset))
+        return dataset
+
+
+@pytest.mark.parametrize("core", [ExecutionCore.PYTHON, ExecutionCore.RUST])
+def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
+    tmp_path: Path, core: ExecutionCore
+) -> None:
+    """`adv20`(V2-02)이면 실행이 start 앞 20세션을 워밍업으로 읽고, 체결은 그 행까지 포함해 센 기준
+    거래량 × 참여율을 넘지 않는다. 참여율을 낮춰 캡이 실제로 걸리게 한다."""
+    environment = replace(
+        _environment(), participation_basis=ParticipationBasis.ADV20, participation_rate=1e-4
+    )
+    data = _HalvedTradingValue()
+    runs = BacktestRunService(
+        _portfolio(),
+        InMemoryStrategyRepository(),
+        data,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        new_id=lambda: "adv-run",
+    )
+    runs.start(BacktestRunSpec(strategy=_spec(), core=core, environment=environment))
+    assert wait_for_terminal_run(runs, "adv-run").status.value == "completed"
+
+    ((query, dataset),) = data.loads
+    assert query.history_sessions_before_start == 20
+    assert len({bar.session for bar in dataset.history_bars}) == 20
+    volumes = participation_volumes(
+        environment,
+        (
+            (bar.session, bar.security_id, bar.close, bar.trading_value)
+            for bar in (*dataset.history_bars, *dataset.bars)
+        ),
+    )
+    assert volumes is not None
+    fills = runs.result("adv-run").artifacts.fills
+    session_volumes = {(bar.session, bar.security_id): bar.volume for bar in dataset.bars}
+    rows = [
+        (
+            int(fill.quantity),
+            math.floor(volumes[(fill.session, fill.security_id)] * 1e-4),
+            math.floor(session_volumes[(fill.session, fill.security_id)] * 1e-4),
+        )
+        for fill in fills
+    ]
+    assert rows and all(quantity <= cap for quantity, cap, _session in rows)
+    # 캡이 걸린 체결이 있고, 그 캡은 세션 거래량 기준 캡보다 작다.
+    assert any(quantity == cap < session_cap for quantity, cap, session_cap in rows)

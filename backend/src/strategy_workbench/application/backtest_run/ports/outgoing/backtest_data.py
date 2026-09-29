@@ -13,6 +13,9 @@ class BacktestDataQuery:
     end: date
     security_ids: tuple[str, ...]
     benchmark_security_id: str | None
+    # start 앞 거래일 수. 그 세션의 bar 는 `BacktestDataset.history_bars` 로 따로 답한다 — 참여 기준
+    # 계산용 워밍업이고 측정 구간이 아니다(`participation_history_sessions`).
+    history_sessions_before_start: int = 0
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,8 @@ class MarketBarRecord:
     low: float
     close: float
     volume: int
+    # 원화 거래대금(`price.trading_value` 와 같은 원천·단위). 원천에 값이 없으면 None.
+    trading_value: float | None = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,8 @@ class BacktestDataset:
     warnings: tuple[DataWarning, ...] = ()
     # 무효 OHLC 행으로 뺀 (세션, 종목). 원천에 그런 행이 없으면 비어 있다.
     invalid_bars: tuple[InvalidBarRecord, ...] = ()
+    # 질의의 워밍업 세션(start 앞) bar. 엔진 세션이 아니며 참여 기준 계산에만 쓴다.
+    history_bars: tuple[MarketBarRecord, ...] = ()
 
 
 class BacktestDataPort(Protocol):

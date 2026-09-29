@@ -13,8 +13,14 @@ from strategy_workbench.domain.backtest._models import (
     DataFrequency,
     ExecutionTiming,
     Market,
+    ParticipationBasis,
     RunEnvironment,
     SellTax,
+)
+from strategy_workbench.domain.backtest._participation import (
+    ADV_SESSIONS,
+    participation_history_sessions,
+    participation_volumes,
 )
 from strategy_workbench.domain.backtest._requirement import (
     MissingRunEnvironmentError,
@@ -36,6 +42,7 @@ from strategy_workbench.domain.backtest._schema import (
 )
 
 __all__ = [
+    "ADV_SESSIONS",
     "CATALOG_UNIVERSE",
     "DEFAULT_MISSING_POLICY",
     "RUN_ENVIRONMENT_CONSTRAINTS",
@@ -45,6 +52,7 @@ __all__ = [
     "ExecutionTiming",
     "Market",
     "MissingRunEnvironmentError",
+    "ParticipationBasis",
     "ResearchWindowViolationError",
     "RetiredEnvironment",
     "RetiredEnvironmentProblem",
@@ -52,6 +60,8 @@ __all__ = [
     "SellTax",
     "environment_from_retired_settings",
     "environment_hash",
+    "participation_history_sessions",
+    "participation_volumes",
     "require_environment",
     "require_research_window",
     "run_environment_canonical_json",

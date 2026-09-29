@@ -760,7 +760,9 @@ impl PersistentEngine {
         self.debug_panic_on_market = true;
     }
 
+    /// `liquidity_volumes`는 행별 유동성 캡 기준 거래량이다. 없으면 세션 거래량을 쓴다.
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (keys, symbols, sessions, offsets, instrument_ids, opens, highs, lows, closes, volumes, liquidity_volumes=None))]
     pub(crate) fn load_feed(
         &mut self,
         keys: Vec<String>,
@@ -773,19 +775,23 @@ impl PersistentEngine {
         lows: Vec<f64>,
         closes: Vec<f64>,
         volumes: Vec<i64>,
+        liquidity_volumes: Option<Vec<i64>>,
     ) -> PyResult<()> {
-        self.feed = Some(PersistentFeed::new(
-            keys,
-            symbols,
-            sessions,
-            offsets,
-            instrument_ids,
-            opens,
-            highs,
-            lows,
-            closes,
-            volumes,
-        )?);
+        self.feed = Some(
+            PersistentFeed::new(
+                keys,
+                symbols,
+                sessions,
+                offsets,
+                instrument_ids,
+                opens,
+                highs,
+                lows,
+                closes,
+                volumes,
+            )?
+            .with_liquidity_volumes(liquidity_volumes)?,
+        );
         Ok(())
     }
 
@@ -909,7 +915,7 @@ mod tests {
     fn market_processing_mutates_persistent_order_state() {
         let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
         runtime.orders.push(market_order("O-000001"));
-        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000))]);
+        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000, 1_000))]);
 
         let mut ops = runtime
             .plan_market_ops(

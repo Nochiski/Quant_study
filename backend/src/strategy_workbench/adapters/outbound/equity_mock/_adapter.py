@@ -389,7 +389,9 @@ class MockEquityDataAdapter:
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
         """Generate deterministic OHLCV until the real Equity DB adapter is selected."""
-        sessions = _business_sessions(query.start, query.end)
+        history, sessions = _sessions_with_history(
+            query.start, query.end, query.history_sessions_before_start
+        )
         if not sessions:
             raise ValueError("mock backtest dataset requires at least one business session")
         requested_ids = list(query.security_ids)
@@ -398,16 +400,20 @@ class MockEquityDataAdapter:
             requested_ids.append(benchmark_id)
         security_ids = tuple(dict.fromkeys(requested_ids))
         bars: list[MarketBarRecord] = []
+        history_bars: list[MarketBarRecord] = []
         for security_index, security_id in enumerate(security_ids):
             stable = int.from_bytes(hashlib.sha256(security_id.encode("utf-8")).digest()[:2], "big")
             base = 40_000.0 + security_index * 25_000.0 + stable % 5_000
             previous_close = base
-            for session_index, session in enumerate(sessions):
+            # 워밍업 세션은 음수 번호다. 가격 사슬은 start 에서 시작하므로 워밍업을 요청해도 측정
+            # 구간 bar 는 그대로다.
+            for session_index, session in enumerate((*history, *sessions), -len(history)):
                 cycle = ((session_index + stable) % 17 - 8) * 0.0008
                 trend = (security_index - 0.5) * 0.00015
                 open_price = previous_close * (1 + cycle * 0.35)
                 close_price = open_price * (1 + cycle + trend)
-                bars.append(
+                volume = 1_000_000 + security_index * 250_000 + session_index * 100
+                (history_bars if session_index < 0 else bars).append(
                     MarketBarRecord(
                         session=session,
                         security_id=security_id,
@@ -415,13 +421,16 @@ class MockEquityDataAdapter:
                         high=max(open_price, close_price) * 1.004,
                         low=min(open_price, close_price) * 0.996,
                         close=close_price,
-                        volume=1_000_000 + security_index * 250_000 + session_index * 100,
+                        volume=volume,
+                        trading_value=close_price * volume,
                     )
                 )
-                previous_close = close_price
+                if session_index >= 0:
+                    previous_close = close_price
         return BacktestDataset(
             data_snapshot_id=self._snapshot.snapshot_id,
             bars=tuple(bars),
+            history_bars=tuple(history_bars),
             memberships=tuple(
                 UniverseMembershipRecord(
                     security_id=security_id,

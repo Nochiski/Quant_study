@@ -28,9 +28,23 @@ from strategy_workbench.domain.backtest.facade.runs import (
     MetricWindow,
 )
 from strategy_workbench.domain.backtest.facade.trials import TRIAL_KEY_ROLES, trial_key
-from strategy_workbench.domain.factor.facade.expression import MissingPolicy
+from strategy_workbench.domain.factor.facade.expression import (
+    BinaryNode,
+    BinaryOperator,
+    ExpressionNode,
+    FactorGraph,
+    FieldNode,
+    MissingPolicy,
+    TimeSeriesNode,
+    TimeSeriesOperator,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
+    STRATEGY_SEMANTIC_HASH_VERSION,
+    FactorDirection,
+    FactorSignal,
     FloatParameter,
+    StrategyIdentity,
+    StrategySpec,
     strategy_semantic_hash,
     strategy_spec_hash,
 )
@@ -188,6 +202,122 @@ def test_the_semantic_hash_ignores_the_title_that_the_spec_hash_keeps() -> None:
 
     assert strategy_spec_hash(renamed) != strategy_spec_hash(_STRATEGY)
     assert strategy_semantic_hash(renamed) == strategy_semantic_hash(_STRATEGY)
+
+
+def _momentum_over_volatility(
+    names: tuple[str, str, str, str] = ("close", "mom", "vol", "score"),
+    *,
+    order: tuple[int, ...] = (0, 1, 2, 3),
+    swap: bool = False,
+    window: int = 20,
+    extra: tuple[ExpressionNode, ...] = (),
+) -> StrategySpec:
+    """손으로 만든 전략: 팩터 하나(종가 20일 모멘텀 ÷ 종가 20일 표준편차), 나머지는 모델 기본값.
+
+    `names` 는 노드 이름, `order` 는 선언 순서, `swap` 은 나누기 인자 순서다. 템플릿에 기대지
+    않아 판본 고정 테스트가 템플릿 변경에 흔들리지 않는다.
+    """
+    close, mom, vol, score = names
+    nodes = (
+        FieldNode(node_id=close, field_id="price.close", kind="field"),
+        TimeSeriesNode(
+            node_id=mom,
+            operator=TimeSeriesOperator.MOMENTUM,
+            input_node_id=close,
+            window=window,
+            kind="time_series",
+        ),
+        TimeSeriesNode(
+            node_id=vol,
+            operator=TimeSeriesOperator.STANDARD_DEVIATION,
+            input_node_id=close,
+            window=20,
+            kind="time_series",
+        ),
+        BinaryNode(
+            node_id=score,
+            operator=BinaryOperator.DIVIDE,
+            left_node_id=vol if swap else mom,
+            right_node_id=mom if swap else vol,
+            kind="binary",
+        ),
+    )
+    graph = FactorGraph(nodes=tuple(nodes[index] for index in order) + extra, output_node_id=score)
+    factor = FactorSignal(
+        factor_id="momentum_risk",
+        label="모멘텀 대비 변동성",
+        direction=FactorDirection.HIGH,
+        graph=graph,
+    )
+    return StrategySpec(
+        identity=StrategyIdentity(strategy_id="s", revision=1), title="손 예시", factors=(factor,)
+    )
+
+
+@pytest.mark.parametrize(
+    ("strategy", "new_trial"),
+    [
+        # 노드 이름만 바꿨다(이슈 #335 DOMAIN-V1-03). 계산이 같아 같은 시도다.
+        (_momentum_over_volatility(("c", "momentum_20", "risk", "out")), False),
+        # 선언 순서만 바꿨다. 평가는 출력에서 참조를 따라가 선언 순서를 쓰지 않는다.
+        (_momentum_over_volatility(order=(3, 2, 0, 1)), False),
+        # 출력에 닿지 않는 노드는 계산되지 않는다.
+        (
+            _momentum_over_volatility(
+                extra=(FieldNode(node_id="unused", field_id="price.volume", kind="field"),)
+            ),
+            False,
+        ),
+        # 나누기 인자를 바꾸면 값이 역수가 된다. 인자 순서는 정렬하지 않는다.
+        (_momentum_over_volatility(swap=True), True),
+        # 노드 파라미터 값(모멘텀 창)을 바꾸면 계산이 달라진다.
+        (_momentum_over_volatility(window=60), True),
+    ],
+)
+def test_the_strategy_axis_ignores_node_names_and_declaration_order_but_not_structure(
+    strategy: Any, new_trial: bool
+) -> None:
+    base = trial_key(replace(_BASE, strategy=_momentum_over_volatility()))
+
+    assert (trial_key(replace(_BASE, strategy=strategy)) != base) is new_trial
+
+
+def test_renaming_a_factor_and_its_risk_reference_keeps_the_strategy_axis() -> None:
+    def weighted(factor_id: str) -> StrategySpec:
+        strategy = _momentum_over_volatility()
+        risk = replace(strategy.factors[0], factor_id="risk_source", label="위험")
+        return replace(
+            strategy,
+            factors=(replace(strategy.factors[0], factor_id=factor_id), risk),
+            risk=replace(strategy.risk, risk_factor_id="risk_source"),
+        )
+
+    renamed = weighted("mom_vol")
+    renamed = replace(
+        renamed,
+        factors=(renamed.factors[0], replace(renamed.factors[1], factor_id="inverse_risk")),
+        risk=replace(renamed.risk, risk_factor_id="inverse_risk"),
+    )
+
+    assert strategy_semantic_hash(renamed) == strategy_semantic_hash(weighted("momentum_risk"))
+    # 참조가 다른 팩터를 가리키면 다른 시도다.
+    pointed_elsewhere = replace(renamed, risk=replace(renamed.risk, risk_factor_id="mom_vol"))
+    assert strategy_semantic_hash(pointed_elsewhere) != strategy_semantic_hash(renamed)
+
+
+# 의미 해시가 보는 칸이나 정규화를 바꾸는 PR 은 `STRATEGY_SEMANTIC_HASH_VERSION` 을 올리고 이 짝을
+# 함께 고친다(SoT 시도 키 행). 판본을 올리면 계열마다 다음 실행이 한 번 새 시도로 셀 수 있다.
+_PINNED_SEMANTIC_HASH = (
+    "strategy-semantic-v2",
+    "8831b52527272c9aac1fe18b670a1ec73d4ac5842d2a11fbead79be86708b41f",
+)
+
+
+def test_semantic_hash_changes_come_with_a_version_bump() -> None:
+    assert (
+        STRATEGY_SEMANTIC_HASH_VERSION,
+        strategy_semantic_hash(_momentum_over_volatility()),
+    ) == _PINNED_SEMANTIC_HASH
 
 
 # 스키마 기본값은 키 표기의 기준이라 바꾸면 기본값으로 돌던 모든 실행의 시도 키가 바뀐다. 바꾸는

@@ -42,7 +42,8 @@ const SIDE_BY_SIDE = 1418;
 /**
  * 본문(`.ide__body`) 배치를 흉내 낸다. jsdom에는 배치가 없어, 편집기 최소 폭 판정(#269)이 읽는 폭을
  * 여기서 준다. `width`는 페이지 세로 스크롤바가 없을 때 좌우 패널이 나눠 갖는 폭이고, `scrollbar`는 지금
- * 스크롤바가 차지한 폭이다. 관찰 알림은 브라우저처럼 첫 칠 뒤에 오므로 `notify`로 따로 보낸다.
+ * 스크롤바가 차지한 폭(브라우저 확대에서는 소수)이다. 관찰 알림은 브라우저처럼 첫 칠 뒤에 오므로
+ * `notify`로 따로 보낸다.
  */
 const ideLayout = (width: number, scrollbar: () => number = () => 0) => {
   const viewport = 1440;
@@ -53,12 +54,24 @@ const ideLayout = (width: number, scrollbar: () => number = () => 0) => {
   style.textContent = `.ide__body { padding: 0 ${padding}px; }`;
   document.head.append(style);
   vi.stubGlobal("innerWidth", viewport);
-  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
-    function (this: HTMLElement) {
-      if (this === document.documentElement) return viewport - scrollbar();
-      return this.classList.contains("ide__body")
+  const boxWidth = (element: Element) =>
+    element === document.documentElement
+      ? viewport - scrollbar()
+      : element.classList.contains("ide__body")
         ? width + 2 * padding - scrollbar()
         : 0;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: Element) {
+      return DOMRect.fromRect({ width: boxWidth(this) });
+    },
+  );
+  // 정수 폭은 요소마다 따로 반올림된다. 스크롤바가 소수 폭이면 본문과 루트가 서로 다른 쪽으로 반올림돼
+  // 합이 1px 어긋난다(80% 확대 실측: 스크롤바가 생기면 본문은 19px, 루트는 18px 준다).
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(
+    function (this: HTMLElement) {
+      return this === document.documentElement
+        ? Math.ceil(boxWidth(this))
+        : Math.floor(boxWidth(this));
     },
   );
   const observers = new Set<() => void>();
@@ -409,6 +422,26 @@ describe("StrategyIde assistant 슬롯", () => {
     matchMedia(false);
     const layout = ideLayout(SIDE_BY_SIDE + 7, () =>
       assistantAttached() ? 15 : 0,
+    );
+    const user = userEvent.setup();
+    mount();
+    await user.click(
+      screen.getByRole("button", { name: "AI 어시스턴트", expanded: false }),
+    );
+    const placements = [assistantFloating()];
+    for (let round = 0; round < 3; round += 1) {
+      layout.notify();
+      placements.push(assistantFloating());
+    }
+    expect(placements).toEqual([false, false, false, false]);
+  });
+
+  it("브라우저 확대로 스크롤바가 소수 폭이어도 사이드바 자리가 흔들리지 않는다", async () => {
+    // 80% 확대의 스크롤바는 18.75 CSS px다. 요소마다 따로 반올림한 정수 폭을 더하면 판정 폭이 임계에서
+    // 1px 모자라, 붙이면 떠 버리고 띄우면 다시 붙었다(#290 리뷰 r2 P1-1).
+    matchMedia(false);
+    const layout = ideLayout(SIDE_BY_SIDE, () =>
+      assistantAttached() ? 18.75 : 0,
     );
     const user = userEvent.setup();
     mount();

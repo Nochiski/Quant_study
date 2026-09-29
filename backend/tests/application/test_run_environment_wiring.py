@@ -50,7 +50,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     InvalidBacktestRunError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
-    InvalidPortfolioRequestError,
     PortfolioDesignService,
     PortfolioPreviewRequest,
     RawObservationUnavailableError,
@@ -156,27 +155,23 @@ def _runs(portfolio: PortfolioDesignService, tmp_path: Path, run_id: str) -> Bac
 
 def test_preview_without_an_environment_is_a_coded_request_error() -> None:
     """P2-03: 문서에 기간·유니버스가 없으므로 되돌아갈 기본값이 없다."""
-    with pytest.raises(InvalidPortfolioRequestError) as info:
+    with pytest.raises(MissingRunEnvironmentError) as info:
         _portfolio().run_pipeline(PortfolioPreviewRequest(_spec()))
 
-    issues = info.value.validation.issues
-    assert [issue.code for issue in issues] == ["run_environment.required"]
-    assert issues[0].path == "environment"
+    assert info.value.code == "run_environment.required"
 
 
 def test_preflight_without_an_environment_is_refused_too() -> None:
     """엔진 능력 판정이 참여율을 읽으므로 preflight 도 문서만으로는 끝나지 않는다."""
-    with pytest.raises(InvalidPortfolioRequestError) as info:
+    with pytest.raises(MissingRunEnvironmentError):
         _portfolio().preflight(PortfolioPreviewRequest(_spec()))
-
-    assert [issue.code for issue in info.value.validation.issues] == ["run_environment.required"]
 
 
 def test_trace_without_an_environment_is_refused_like_preview() -> None:
-    """세 경로가 같은 코드·같은 `validation.issues` 구조로 거절한다(P2-02 2차 리뷰 P3)."""
+    """세 경로가 같은 domain 오류로 거절하고, inbound 가 같은 접수 거절 코드로 낸다(#351)."""
     traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
 
-    with pytest.raises(InvalidPortfolioRequestError) as info:
+    with pytest.raises(MissingRunEnvironmentError, match="requested_by=strategy.trace"):
         traces.trace(
             StrategyTraceRequest(
                 strategy_source=InlineDraft(_spec(), "inline_draft", "a" * 64),
@@ -184,8 +179,6 @@ def test_trace_without_an_environment_is_refused_like_preview() -> None:
                 factor_id="momentum_3",
             )
         )
-
-    assert [issue.code for issue in info.value.validation.issues] == ["run_environment.required"]
 
 
 def test_run_without_an_environment_is_refused_before_it_is_queued(tmp_path: Path) -> None:
@@ -200,13 +193,13 @@ RESEARCH_FLOOR = date(2020, 1, 2)
 
 
 def test_preview_and_trace_measuring_the_sealed_window_are_coded_request_errors() -> None:
-    """봉인 구간 마지막 날부터 측정하면 preview·trace 가 같은 issue code 로 거절한다(spec D1)."""
+    """봉인 구간 마지막 날부터 측정하면 preview·trace 가 같은 domain 오류로 거절한다(spec D1)."""
     sealed = replace(_environment(), start=SEALED_LAST_DAY)
     traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
 
-    with pytest.raises(InvalidPortfolioRequestError) as preview:
+    with pytest.raises(ResearchWindowViolationError) as preview:
         _portfolio().run_pipeline(PortfolioPreviewRequest(_spec(), environment=sealed))
-    with pytest.raises(InvalidPortfolioRequestError) as trace:
+    with pytest.raises(ResearchWindowViolationError) as trace:
         traces.trace(
             StrategyTraceRequest(
                 strategy_source=InlineDraft(_spec(), "inline_draft", "a" * 64),
@@ -217,9 +210,8 @@ def test_preview_and_trace_measuring_the_sealed_window_are_coded_request_errors(
         )
 
     for info in (preview, trace):
-        (issue,) = info.value.validation.issues
-        assert (issue.code, issue.path) == ("run_environment.research_window", "environment")
-        assert "got=start=2019-12-31" in issue.message
+        assert info.value.code == "run_environment.research_window"
+        assert "got=start=2019-12-31" in str(info.value)
 
 
 def test_run_measuring_the_sealed_window_is_refused_before_it_is_queued(tmp_path: Path) -> None:

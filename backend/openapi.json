@@ -455,7 +455,7 @@
         "type": "object"
       },
       "BacktestEnvironmentRequiredDetail": {
-        "description": "실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.",
+        "description": "실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.",
         "properties": {
           "code": {
             "const": "backtest.run.environment_required",
@@ -5141,6 +5141,9 @@
           "detail": {
             "discriminator": {
               "mapping": {
+                "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
+                "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
+                "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
@@ -5156,6 +5159,15 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
               }
             ],
             "title": "Detail"
@@ -9130,6 +9142,9 @@
           "detail": {
             "discriminator": {
               "mapping": {
+                "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
+                "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
+                "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail",
@@ -9161,6 +9176,15 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
               }
             ],
             "title": "Detail"
@@ -12385,19 +12409,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/PortfolioUnprocessableResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RequestValidationResponse"
-                    }
-                  ],
-                  "title": "Response 422 Previewportfolio"
+                  "$ref": "#/components/schemas/PortfolioUnprocessableResponse"
                 }
               }
             },
-            "description": "Malformed envelope or a coded portfolio preflight diagnostic"
+            "description": "A coded portfolio preflight or request-body diagnostic"
           }
         },
         "summary": "Portfolio Preview"
@@ -12593,19 +12609,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/TraceUnprocessableResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RequestValidationResponse"
-                    }
-                  ],
-                  "title": "Response 422 Tracestrategy"
+                  "$ref": "#/components/schemas/TraceUnprocessableResponse"
                 }
               }
             },
-            "description": "Malformed envelope or a coded trace preflight diagnostic"
+            "description": "A coded trace preflight or request-body diagnostic"
           },
           "499": {
             "content": {

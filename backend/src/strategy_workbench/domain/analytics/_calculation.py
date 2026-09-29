@@ -38,7 +38,7 @@ def unavailable_metric_values(
             scope=scope,
             scope_label=scope_label,
             sample_count=0,
-            unavailable_reason=reason.value,
+            unavailable_reason=reason,
         )
         for definition in registry.definitions()
     )
@@ -101,7 +101,7 @@ def compute_analytics(
             scope=scope,
             scope_label=scope_label,
             sample_count=sample_count,
-            unavailable_reason=reason.value if number is None and reason is not None else None,
+            unavailable_reason=reason if number is None else None,
         )
 
     metrics = (

@@ -153,7 +153,7 @@
       "scope": "full",
       "value": null,
       "sample_count": 820,
-      "unavailable_reason": "drawdown_not_recovered"
+      "unavailable_reason": "maximum_drawdown_not_recovered"
     },
     {
       "metric_id": "benchmark_return",

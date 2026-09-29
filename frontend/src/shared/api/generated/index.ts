@@ -335,6 +335,7 @@ export type {
   MetricCategory,
   MetricDefinition,
   MetricScope,
+  MetricUnavailableReason,
   MetricUnit,
   MetricValue,
   MetricWindow,

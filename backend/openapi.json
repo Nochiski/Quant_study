@@ -3611,6 +3611,22 @@
         "title": "MetricScope",
         "type": "string"
       },
+      "MetricUnavailableReason": {
+        "description": "지표 값이 없을 때(`MetricValue.value is None`) 그 이유. 값은 wire 계약이다.\n\n화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유하고, 목록은 골든\n`tests/fixtures/analytics/metric_unavailable_reasons.json` 이 두 쪽을 묶는다(이슈 #241).",
+        "enum": [
+          "zero_return_variance",
+          "no_downside_variation",
+          "no_drawdown",
+          "maximum_drawdown_not_recovered",
+          "benchmark_not_available",
+          "no_closed_trades",
+          "no_losing_closed_trade",
+          "no_observations_in_scope",
+          "period_under_one_year"
+        ],
+        "title": "MetricUnavailableReason",
+        "type": "string"
+      },
       "MetricUnit": {
         "enum": [
           "percent",
@@ -3649,13 +3665,12 @@
           "unavailable_reason": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/MetricUnavailableReason"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Unavailable Reason"
+            ]
           },
           "value": {
             "anyOf": [

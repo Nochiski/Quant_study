@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,8 @@ from pathlib import Path
 MANIFEST_NAME = "MANIFEST.json"
 CATALOG_NAME = "equity.duckdb"
 CATALOG_META_NAME = "_catalog_meta.json"
+
+logger = logging.getLogger(__name__)
 
 
 class EquityDuckdbSetupError(RuntimeError):
@@ -142,7 +145,8 @@ def resolve_table(equity_root: Path, table: str) -> TableBuild:
 @dataclass(frozen=True)
 class CatalogState:
     """`equity.duckdb` + `_catalog_meta.json` 이 가리키는 것. `usable` 이 아니면 `reason` 이 왜인지
-    말한다 — 카탈로그 없음 · meta 없음 · 테이블 판본이 meta 와 다름(stale) · 매크로 건너뜀."""
+    말한다 — 카탈로그 없음 · meta 없음 · 파일이나 meta 손상 · 테이블 판본이 meta 와 다름(stale) ·
+    매크로 건너뜀."""
 
     path: Path
     usable: bool
@@ -152,6 +156,22 @@ class CatalogState:
 
     def has_macro(self, name: str) -> bool:
         return any(signature.split("(", 1)[0] == name for signature in self.macros)
+
+
+def unreadable_catalog(path: Path, unreadable: Path, error: Exception) -> CatalogState:
+    """카탈로그 파일이나 meta(`unreadable`)를 못 읽어 쓸 수 없는 카탈로그(`catalog_unreadable`).
+
+    다시 만들어야 풀리는 손상이라 카탈로그가 없을 때처럼 매크로를 읽는 원천을 모두 빼고 경고한다
+    (#247·#278). 사유는 질의 거절 상세로 사용자에게 가므로 파일 이름과 오류 종류만 싣고, 경로와
+    원문은 경고 로그에만 남긴다(#163).
+    """
+    reason = (
+        "카탈로그 파일을 읽을 수 없어 카탈로그 매크로를 읽는 원천의 필드를 뺀다 — 카탈로그를 다시 "
+        "만들어야 한다(`ledger_sync catalog` 또는 `python -m equity catalog`) (catalog_unreadable) "
+        f"— file={unreadable.name} error={type(error).__name__}"
+    )
+    logger.warning(f"{reason} path={unreadable} detail={error!r}")
+    return CatalogState(path, False, reason, None, ())
 
 
 def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
@@ -171,14 +191,13 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
         )
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if not isinstance(meta, dict):
+            raise ValueError(f"catalog meta must be a JSON object — got {type(meta).__name__}")
     except (OSError, ValueError) as error:
-        raise EquityDuckdbSetupError(
-            f"unreadable catalog meta — path={meta_path} error={error!r}"
-        ) from error
-    if not isinstance(meta, dict):
-        raise EquityDuckdbSetupError(
-            f"catalog meta must be a JSON object — path={meta_path} got={type(meta).__name__}"
-        )
+        # meta 는 카탈로그가 어느 판으로 만들어졌는지(`snapshot_id`) 대조하는 근거일 뿐이고
+        # 워크벤치 스냅샷 id 는 MANIFEST 에서 센다. 그래서 못 읽으면 meta 가 없을 때처럼 카탈로그만
+        # 쓸 수 없는 것으로 두면 된다(#278).
+        return unreadable_catalog(path, meta_path, error)
     raw_macros = meta.get("macros")
     macros = tuple(str(item) for item in raw_macros) if isinstance(raw_macros, list) else ()
     actual = meta.get("snapshot_id")

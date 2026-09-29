@@ -66,7 +66,7 @@ import logging
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -118,7 +118,6 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 
 from ._source import (
-    CATALOG_NAME,
     CatalogState,
     EquityDuckdbSetupError,
     TableBuild,
@@ -126,6 +125,7 @@ from ._source import (
     resolve_table,
     snapshot_id,
     table_builds,
+    unreadable_catalog,
 )
 from ._specs import (
     CALENDAR_TABLE,
@@ -455,7 +455,7 @@ class EquityDuckdbAdapter:
             (`load_backtest_dataset` 만은 `adj_factor` 를 요구해 예외를 던진다).
 
     Raises:
-        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST/카탈로그 meta 손상 ·
+        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST 손상 ·
             카탈로그 파일 잠김(`catalog_locked`)·일시 오류(`catalog_transient_error`).
     """
 
@@ -507,7 +507,8 @@ class EquityDuckdbAdapter:
         """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 본다(#247).
 
         열리지 않는 파일(손상 등)은 카탈로그가 없을 때처럼 쓸 수 없는 것으로 두고 매크로를 읽는
-        원천을 모두 빼고 경고한다(`catalog_unreadable`). 잠김·일시 오류는 부팅을 멈춘다.
+        원천을 모두 빼고 경고한다(`catalog_unreadable`, meta 손상과 같은 규칙). 잠김·일시 오류는
+        부팅을 멈춘다.
         """
         if not catalog.usable:
             return catalog
@@ -517,13 +518,7 @@ class EquityDuckdbAdapter:
             _open(catalog.path).close()
         except module.Error as error:
             _raise_unless_persistent(error, catalog.path)
-            reason = (
-                f"카탈로그 파일 {CATALOG_NAME} 를 열 수 없어 카탈로그 매크로를 읽는 원천의 필드를 "
-                "뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
-                f"`python -m equity catalog`) (catalog_unreadable) — error={type(error).__name__}"
-            )
-            logger.warning(f"{reason} catalog={catalog.path} detail={error!r}")
-            return replace(catalog, usable=False, reason=reason)
+            return unreadable_catalog(catalog.path, catalog.path, error)
         return catalog
 
     def _source(self, table: str) -> str:

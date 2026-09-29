@@ -1004,29 +1004,38 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
     assert "다시 띄우면 다시 확인한다" in str(raised.value)
 
 
-def test_corrupt_catalog_file_at_boot_drops_every_macro_source(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize(
+    ("name", "content", "detail"),
+    [
+        ("equity.duckdb", b"garbage" * 50, "not a valid DuckDB database file"),
+        ("_catalog_meta.json", b'{"snapshot_id": ', "JSONDecodeError"),
+        ("_catalog_meta.json", b"[]", "JSON object"),
+    ],
+    ids=["catalog-file", "meta-json", "meta-not-object"],
+)
+def test_corrupt_catalog_file_or_meta_at_boot_drops_every_macro_source(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, name: str, content: bytes, detail: str
 ) -> None:
-    """`equity.duckdb` 자체가 손상되면 카탈로그가 없을 때처럼 매크로 원천만 빠지고 뜬다 (#247 a).
+    """카탈로그 파일이나 meta 가 손상되면 카탈로그가 없을 때처럼 매크로 원천만 빠지고 뜬다.
 
     예전에는 열 확인의 연결이 `try` 밖이라 원시 `IOException`("not a valid DuckDB database
-    file")으로 부팅이 죽었다. 열 확인이 없는 매크로 원천(`consensus` 의 `v_consensus`)도 같이
-    빠져야 첫 질의에서 다시 죽지 않는다.
+    file")으로 부팅이 죽었고(#247 a), meta 손상은 설정 오류로 부팅을 멈췄다(#278). 열 확인이
+    없는 매크로 원천(`consensus` 의 `v_consensus`)도 같이 빠져야 첫 질의에서 다시 죽지 않는다.
     """
     root = build_workbench_root(tmp_path / "equity")
-    (root / "equity.duckdb").write_bytes(b"garbage" * 50)
+    (root / name).write_bytes(content)
     with caplog.at_level("WARNING"):
         broken = EquityDuckdbAdapter(root)
     served = {p.field_id for p in broken.list_fields()}
     assert "price.close" in served and "consensus.target_price" in served
-    assert not served & {"financial.book_equity", "consensus.forward_eps"}
+    assert not served & {"financial.book_equity", "consensus.forward_eps", "credit.margin_balance"}
     denied = _raw(broken, fields=("consensus.forward_eps",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog_unreadable" in denied.detail
-    assert "ledger_sync catalog" in denied.detail  # 조치 안내
+    assert f"file={name}" in denied.detail and "ledger_sync catalog" in denied.detail  # 조치 안내
     assert _raw(broken, fields=("price.close",)).ok
     warned = [r.getMessage() for r in caplog.records if "catalog_unreadable" in r.getMessage()]
-    assert len(warned) == 1 and "not a valid DuckDB database file" in warned[0]
+    assert len(warned) == 1 and detail in warned[0]
     assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
 
 

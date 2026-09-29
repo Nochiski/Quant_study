@@ -46,7 +46,7 @@ from strategy_workbench.domain.analytics.facade.metrics import build_default_met
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
-from tests.backtest_run_wait import wait_for_terminal_state
+from tests.backtest_run_wait import RawLoadBarrier, wait_for_terminal_state
 
 
 class _CommitBarrierStore:
@@ -71,54 +71,15 @@ class _CommitBarrierStore:
         self._delegate.discard(run_id)
 
 
-class _RawLoadBarrierPort:
-    """tape 단계의 원시 관측 로딩 안에서 멈추는 테스트용 관측 포트.
-
-    실제 mock 어댑터에 위임하되, 로딩 진입 시점에 `entered` 를 올리고 `release` 까지 기다린다.
-    해제 뒤 어댑터의 checkpoint 가 취소 플래그를 보므로 "로딩 도중 취소" 경로를 그대로 탄다.
-    `failure` 가 있으면 로딩 대신 그 예외를 던진다(데이터 부재 경로).
-    """
-
-    def __init__(
-        self,
-        delegate: MockEquityDataAdapter,
-        *,
-        failure: Exception | None = None,
-    ) -> None:
-        self._delegate = delegate
-        self._failure = failure
-        self.entered = Event()
-        self.release = Event()
-        self.loaded = False
-
-    def load_raw_observations(self, query: RawObservationQuery) -> RawObservationSet:
-        return self.load_raw_observations_cancellable(query, checkpoint=lambda: None)
-
-    def load_raw_observations_cancellable(
-        self,
-        query: RawObservationQuery,
-        *,
-        checkpoint: Callable[[], None],
-    ) -> RawObservationSet:
-        self.entered.set()
-        if not self.release.wait(timeout=30):
-            raise TimeoutError("raw observation test barrier was not released")
-        if self._failure is not None:
-            raise self._failure
-        result = self._delegate.load_raw_observations_cancellable(query, checkpoint=checkpoint)
-        self.loaded = True
-        return result
-
-
 def _backtests_with_raw_load_barrier(
     container: BackendContainer,
     tmp_path: Path,
     run_id: str,
     *,
     failure: Exception | None = None,
-) -> tuple[BacktestRunService, _RawLoadBarrierPort]:
+) -> tuple[BacktestRunService, RawLoadBarrier]:
     adapter = cast(MockEquityDataAdapter, container.equity_data)
-    barrier = _RawLoadBarrierPort(adapter, failure=failure)
+    barrier = RawLoadBarrier(adapter, failure=failure)
     portfolio_design = PortfolioDesignService(
         barrier,
         BacktestEnginePortfolioAdapter(),

@@ -1324,6 +1324,27 @@ const ko = {
   // 계열 합치기 거절(검증 랩 V1-05). 화면은 V5-03 이 붙인다.
   "backtest.error.backtest.lineage.already_merged":
     "두 전략은 이미 같은 시도 계열입니다. 합칠 것이 없습니다.",
+  // 실험 거절(검증 랩 V3-03). 코드 목록의 정본은 backend `domain/experiment/_errors.py` 이고 화면은 V5-01 이 붙인다.
+  "backtest.error.experiment.base.unsaved":
+    "실험은 저장한 전략 리비전으로만 만들 수 있습니다. 전략을 저장한 뒤 그 리비전으로 실험을 만드세요.",
+  "backtest.error.experiment.base.invalid":
+    "기반 실행 요청을 실험에 쓸 수 없습니다. 측정 창은 분할 규칙이 정하므로 실행 요청에서 지표 창을 빼세요.",
+  "backtest.error.experiment.search.unknown_parameter":
+    "전략 문서에 없는 파라미터는 탐색할 수 없습니다. 문서에 선언된 파라미터만 고르세요.",
+  "backtest.error.experiment.search.invalid_values":
+    "탐색 값을 쓸 수 없습니다. 값이 파라미터의 범위·선택지 안에 있고 겹치지 않는지 확인하세요.",
+  "backtest.error.experiment.search.too_many_points":
+    "탐색 조합이 너무 많습니다. 값 수를 줄이거나 간격을 넓히세요.",
+  "backtest.error.experiment.split.invalid":
+    "분할 설정이 허용 범위를 벗어났습니다. 학습·검증 연수는 1 이상, 엠바고는 0 이상으로 두세요.",
+  "backtest.error.experiment.split.no_window":
+    "실행 기간이 학습 기간보다 짧아 검증할 창이 없습니다. 기간을 늘리거나 학습 연수를 줄이세요.",
+  "backtest.error.experiment.not_found": "실험을 찾을 수 없습니다. 실험 목록에서 다시 여세요.",
+  "backtest.error.experiment.trial.not_found": "실험에 그 trial이 없습니다. 실험을 다시 여세요.",
+  "backtest.error.experiment.trial.not_retryable":
+    "실패하거나 취소된 trial만 다시 실행할 수 있고, 취소한 실험은 다시 실행하지 않습니다.",
+  "backtest.error.experiment.selection.not_completed":
+    "완료된 trial만 후보로 고를 수 있습니다. trial이 끝난 뒤 고르세요.",
   "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다. 어느 칸이 틀렸는지는 서버 사유를 보세요.",
   "trace.error.trace.engine.incompatible":
@@ -3066,6 +3087,26 @@ export const messages = {
     "backtest.error.backtest.strategy.requires_upgrade": "A stored older-schema revision cannot run. Upgrade it and save a new revision first.",
     "backtest.error.backtest.lineage.already_merged":
       "The two strategies are already one trial lineage. There is nothing to merge.",
+    "backtest.error.experiment.base.unsaved":
+      "An experiment can only start from a saved strategy revision. Save the strategy, then create the experiment from that revision.",
+    "backtest.error.experiment.base.invalid":
+      "The base run request cannot be used for an experiment. The split decides the measurement windows, so remove the metric windows from the run request.",
+    "backtest.error.experiment.search.unknown_parameter":
+      "A parameter the strategy document does not declare cannot be searched. Choose declared parameters only.",
+    "backtest.error.experiment.search.invalid_values":
+      "The search values cannot be used. Check that every value is within the parameter's range or choices and appears once.",
+    "backtest.error.experiment.search.too_many_points":
+      "The search has too many combinations. Use fewer values or a wider step.",
+    "backtest.error.experiment.split.invalid":
+      "The split settings are out of range. Use at least 1 training year and 1 test year and a non-negative embargo.",
+    "backtest.error.experiment.split.no_window":
+      "The run period is shorter than the training period, so there is no window to test. Lengthen the period or shorten the training years.",
+    "backtest.error.experiment.not_found": "The experiment was not found. Open it again from the experiment list.",
+    "backtest.error.experiment.trial.not_found": "The experiment has no such trial. Open the experiment again.",
+    "backtest.error.experiment.trial.not_retryable":
+      "Only a failed or cancelled trial can run again, and a cancelled experiment does not run again.",
+    "backtest.error.experiment.selection.not_completed":
+      "Only a completed trial can be chosen as a candidate. Choose it after the trial finishes.",
     "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
     "trace.error.trace.request.invalid": "The trace request is invalid. See the server reason for the field.",
     "trace.error.trace.engine.incompatible":

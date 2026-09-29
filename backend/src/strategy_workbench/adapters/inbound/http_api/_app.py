@@ -48,6 +48,9 @@ from strategy_workbench.application.equity_workspace.facade.workspace import (
     ResearchPreview,
     UniversePreview,
 )
+from strategy_workbench.application.experiment_run.facade.experiments import (
+    ExperimentRunService,
+)
 from strategy_workbench.application.factor_research.facade.research import (
     FactorAvailability,
     FactorCatalog,
@@ -149,6 +152,7 @@ from ._execution_error_contract import (
     Portfolio422Response,
     PortfolioRawObservationInvalidDetail,
 )
+from ._experiment_routes import register_experiment_routes
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
 from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, SSE_POLL_SECONDS, sse_frame
 from ._strategy_document_contract import (
@@ -311,6 +315,7 @@ def create_app(
     portfolio_design: PortfolioDesignService,
     strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
+    experiments: ExperimentRunService | None = None,
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
@@ -467,6 +472,10 @@ def create_app(
         route_class_override=CodedBodyValidationRoute,
         responses=admission_responses,
     )
+
+    # 실험 라우트도 어시스턴트처럼 서비스가 올 때만 생긴다. 기반 실행 요청은 시작과 같은 판정이다.
+    if experiments is not None:
+        register_experiment_routes(app, experiments, admitted=admitted)
 
     strategy_not_found: dict[int | str, dict[str, Any]] = {
         404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}

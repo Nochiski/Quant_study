@@ -128,6 +128,7 @@ def build_http_app(
         portfolio_design=container.portfolio_design,
         strategy_traces=container.strategy_traces,
         backtest_runs=container.backtest_runs,
+        experiments=container.experiments,
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,

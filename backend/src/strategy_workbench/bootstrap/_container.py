@@ -21,6 +21,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 )
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
+    SQLiteExperimentRepository,
 )
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteStrategyDraftRepository,
@@ -29,15 +30,32 @@ from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository impo
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
-from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
+from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestRunService,
+    BacktestRunSpec,
+    InvalidBacktestRunError,
+    RunStatus,
+    SavedRevisionReference,
+    StaleStrategyReferenceError,
+    StrategyReferenceNotFoundError,
+    StrategyRevisionRequiresUpgradeError,
+    TrialLedger,
+)
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
 )
+from strategy_workbench.application.experiment_run.facade.experiments import (
+    ExperimentRunService,
+)
+from strategy_workbench.application.experiment_run.facade.ports import TrialRunRejectedError
 from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
 )
-from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
+from strategy_workbench.application.portfolio_design.facade.design import (
+    InvalidPortfolioRequestError,
+    PortfolioDesignService,
+)
 from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
@@ -50,6 +68,7 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
+from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 
 from ._assistant import (
     DEFAULT_ASSISTANT_SETTINGS,
@@ -72,6 +91,7 @@ class BackendContainer:
     portfolio_design: PortfolioDesignService
     strategy_traces: StrategyTraceService
     backtest_runs: BacktestRunService
+    experiments: ExperimentRunService
     assistant_profiles: ProviderProfileService
     assistant_chat: AssistantChatService
     assistant_turns: AssistantTurnRunner
@@ -194,10 +214,57 @@ def build_container(
         portfolio_design=portfolio_design,
         strategy_traces=strategy_traces,
         backtest_runs=backtest_runs,
+        experiments=ExperimentRunService(
+            SQLiteExperimentRepository(research_db_path),
+            _RunServiceTrialRuns(backtest_runs, strategy_repository),
+            new_id=lambda: str(uuid4()),
+        ),
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,
         assistant_turns=assistant_services.turns,
     )
+
+
+class _RunServiceTrialRuns:
+    """`TrialRunPort` 구현: 실행 서비스와 전략 저장소를 감싼다(검증 랩 spec D6).
+
+    어시스턴트의 `_RunServiceBacktestResults` 와 같은 모양이다. 실험이 `backtest_run` 유스케이스를
+    import 하지 않도록 bootstrap 이 감싼다. trial 제출은 요청 스레드 밖에서 돌므로 접수 거절만
+    `TrialRunRejectedError` 로 옮겨 attempt 에 남기게 한다.
+    """
+
+    _REJECTIONS = (
+        InvalidBacktestRunError,
+        InvalidPortfolioRequestError,
+        StaleStrategyReferenceError,
+        StrategyReferenceNotFoundError,
+        StrategyRevisionRequiresUpgradeError,
+    )
+
+    def __init__(self, runs: BacktestRunService, strategies: StrategyRepositoryPort) -> None:
+        self._runs = runs
+        self._strategies = strategies
+
+    def validate(self, request: BacktestRunSpec) -> None:
+        self._runs.preview_trial(request)
+
+    def strategy(self, source: SavedRevisionReference) -> StrategySpec:
+        return self._strategies.get(source.strategy_id, source.revision).spec
+
+    def trial_ledger(self, lineage_id: str) -> TrialLedger:
+        return self._runs.trial_ledger(lineage_id)
+
+    def start(self, request: BacktestRunSpec) -> str:
+        try:
+            return self._runs.start(request).run.run_id
+        except self._REJECTIONS as error:
+            raise TrialRunRejectedError(str(error)) from error
+
+    def status(self, run_id: str) -> RunStatus:
+        return self._runs.state(run_id).status
+
+    def cancel(self, run_id: str) -> None:
+        self._runs.cancel(run_id)
 
 
 def _source_spec_hash_resolver(

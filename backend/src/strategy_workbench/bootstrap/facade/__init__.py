@@ -4,6 +4,7 @@ DEPENDS_ON: tuple[str, ...] = (
     "application.assistant_chat",
     "application.equity_workspace",
     "application.backtest_run",
+    "application.experiment_run",
     "application.factor_research",
     "application.portfolio_design",
     "application.strategy_authoring",
@@ -25,4 +26,5 @@ DEPENDS_ON: tuple[str, ...] = (
     "domain.assistant",
     "domain.factor",
     "domain.analytics",
+    "domain.strategy",
 )

@@ -1,5 +1,10 @@
+from strategy_workbench.domain.experiment._design import ExperimentDesign, ExperimentTrial
 from strategy_workbench.domain.experiment._errors import (
+    EXPERIMENT_CODES,
     EXPERIMENT_SPEC_CODES,
+    ExperimentError,
+    ExperimentNotFoundError,
+    ExperimentStateError,
     InvalidExperimentSpecError,
 )
 from strategy_workbench.domain.experiment._search import (
@@ -20,8 +25,14 @@ from strategy_workbench.domain.experiment._walk_forward import (
 )
 
 __all__ = [
+    "EXPERIMENT_CODES",
     "EXPERIMENT_SPEC_CODES",
     "MAX_GRID_POINTS",
+    "ExperimentDesign",
+    "ExperimentError",
+    "ExperimentNotFoundError",
+    "ExperimentStateError",
+    "ExperimentTrial",
     "GridIndex",
     "InvalidExperimentSpecError",
     "SearchAxis",

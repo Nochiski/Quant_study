@@ -1,7 +1,7 @@
 """연구 기록 DB의 스키마 (검증 랩 spec D3).
 
 전략 revision DB와 **다른 파일**이다. 저 쪽은 revision이 immutable이라 UPDATE/DELETE를 트리거로
-막지만, 여기 run 은 상태가 바뀐다. 실험(V3-03 이후)도 이 파일에 더한다.
+막지만, 여기 run 은 상태가 바뀐다. 실험도 이 파일에 둔다.
 
 ## 버전
 
@@ -9,6 +9,7 @@
 |---|---|
 | 1 | 최초(V1-03): `backtest_runs` |
 | 2 | 시도 원장(V1-05): `trial_ledger`·`lineage_merges`·`sealed_window_blocks` |
+| 3 | 실험(V3-03): `experiments`·`experiment_attempts`·`experiment_selections` |
 
 v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 시도로도 세지 않는다.
 """
@@ -16,6 +17,7 @@ v1 에서 올린 파일의 기존 run 은 원장 행이 없어 어느 계열의 
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 
 from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
     SchemaContract,
@@ -25,7 +27,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.schema import (
 
 from ._errors import ResearchStorageError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # ASCII-ish "SWRS". 전략 DB("SWRK")·어시스턴트 DB("SWAI")와 달라야 세 파일을 서로 열지 않는다.
 _APPLICATION_ID = 0x53575253
@@ -145,10 +147,82 @@ _V2_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
 
 V2_SCHEMA_OBJECTS = V1_SCHEMA_OBJECTS + _V2_ADDED_OBJECTS
 
+# 실험 설계(기반 요청·분할·해소된 그리드·창)는 만든 뒤 바뀌지 않아 JSON 한 칸에 둔다.
+# trial 은 설계에서 다시 펴므로 행이 없다. attempt 는 실행에 배정되면 run_id, 접수가 거절되면
+# error 하나만 싣고, 실행 상태는 적지 않는다(실행 기록에서 파생). run_id 는 같은 파일의
+# `backtest_runs` 를 가리키지만 외래 키로 묶지 않는다 — 실행 기록은 실행 유스케이스의 저장소다.
+_V3_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "table",
+        "experiments",
+        """
+        CREATE TABLE experiments (
+            experiment_order INTEGER PRIMARY KEY,
+            experiment_id TEXT NOT NULL COLLATE BINARY CHECK (length(trim(experiment_id)) >= 1),
+            created_at TEXT NOT NULL,
+            cancelled_at TEXT,
+            design_json TEXT NOT NULL
+        )
+        """,
+    ),
+    (
+        "index",
+        "experiments_experiment_id",
+        "CREATE UNIQUE INDEX experiments_experiment_id ON experiments (experiment_id)",
+    ),
+    (
+        "table",
+        "experiment_attempts",
+        """
+        CREATE TABLE experiment_attempts (
+            attempt_order INTEGER PRIMARY KEY,
+            experiment_order INTEGER NOT NULL REFERENCES experiments (experiment_order),
+            trial_index INTEGER NOT NULL CHECK (
+                typeof(trial_index) = 'integer' AND trial_index >= 0
+            ),
+            attempt INTEGER NOT NULL CHECK (typeof(attempt) = 'integer' AND attempt >= 1),
+            created_at TEXT NOT NULL,
+            run_id TEXT COLLATE BINARY,
+            error TEXT,
+            CHECK ((run_id IS NULL) <> (error IS NULL))
+        )
+        """,
+    ),
+    (
+        "index",
+        "experiment_attempts_by_trial",
+        "CREATE UNIQUE INDEX experiment_attempts_by_trial "
+        "ON experiment_attempts (experiment_order, trial_index, attempt)",
+    ),
+    # 후보 선택 기록(spec D9)은 되돌릴 수 없고 쌓이기만 한다.
+    (
+        "table",
+        "experiment_selections",
+        """
+        CREATE TABLE experiment_selections (
+            selection_order INTEGER PRIMARY KEY,
+            experiment_order INTEGER NOT NULL REFERENCES experiments (experiment_order),
+            selection_json TEXT NOT NULL
+        )
+        """,
+    ),
+    (
+        "index",
+        "experiment_selections_by_experiment",
+        "CREATE INDEX experiment_selections_by_experiment "
+        "ON experiment_selections (experiment_order, selection_order)",
+    ),
+)
 
-def _upgrade_v1_to_v2(connection: sqlite3.Connection) -> None:
-    for _object_type, _name, statement in _V2_ADDED_OBJECTS:
-        connection.execute(statement)
+V3_SCHEMA_OBJECTS = V2_SCHEMA_OBJECTS + _V3_ADDED_OBJECTS
+
+
+def _added(objects: tuple[tuple[str, str, str], ...]) -> Callable[[sqlite3.Connection], None]:
+    def apply(connection: sqlite3.Connection) -> None:
+        for _object_type, _name, statement in objects:
+            connection.execute(statement)
+
+    return apply
 
 
 def migrate_schema(connection: sqlite3.Connection) -> None:
@@ -158,8 +232,11 @@ def migrate_schema(connection: sqlite3.Connection) -> None:
             label="research",
             application_id=_APPLICATION_ID,
             version=SCHEMA_VERSION,
-            objects=V2_SCHEMA_OBJECTS,
+            objects=V3_SCHEMA_OBJECTS,
             error=ResearchStorageError,
-            upgrades=(SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _upgrade_v1_to_v2),),
+            upgrades=(
+                SchemaUpgrade(1, V1_SCHEMA_OBJECTS, _added(_V2_ADDED_OBJECTS)),
+                SchemaUpgrade(2, V2_SCHEMA_OBJECTS, _added(_V3_ADDED_OBJECTS)),
+            ),
         ),
     )

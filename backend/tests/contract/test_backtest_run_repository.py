@@ -186,7 +186,7 @@ def test_an_empty_file_is_claimed_once(tmp_path: Path) -> None:
 
     with sqlite3.connect(path) as connection:
         assert connection.execute("PRAGMA application_id").fetchone() == (0x53575253,)
-        assert connection.execute("PRAGMA user_version").fetchone() == (2,)
+        assert connection.execute("PRAGMA user_version").fetchone() == (3,)
 
 
 @pytest.mark.parametrize(
@@ -210,9 +210,9 @@ def test_a_file_owned_by_someone_else_is_refused(prepare: str, match: str, tmp_p
 @pytest.mark.parametrize(
     ("tamper", "match"),
     [
-        ("PRAGMA user_version = 3", "newer than this server"),
-        ("CREATE TABLE stray (x)", "does not match version 2"),
-        ("DROP INDEX trial_ledger_by_lineage", "does not match version 2"),
+        ("PRAGMA user_version = 4", "newer than this server"),
+        ("CREATE TABLE stray (x)", "does not match version 3"),
+        ("DROP INDEX experiment_attempts_by_trial", "does not match version 3"),
     ],
 )
 def test_a_future_or_edited_schema_is_refused(tamper: str, match: str, tmp_path: Path) -> None:

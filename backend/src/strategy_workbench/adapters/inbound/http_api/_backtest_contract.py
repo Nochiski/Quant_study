@@ -145,6 +145,10 @@ class CodedBodyValidationRoute(APIRoute):
     못한다. 앱 전체 핸들러로 바꾸면 다른 라우트의 422 계약까지 바뀌므로 시작 라우트에만 건다.
     """
 
+    @staticmethod
+    def coded_detail(issues: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        return backtest_field_invalid_detail(issues)
+
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         handler = super().get_route_handler()
 
@@ -154,7 +158,7 @@ class CodedBodyValidationRoute(APIRoute):
             except RequestValidationError as error:
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail=backtest_field_invalid_detail(error.errors()),
+                    detail=self.coded_detail(error.errors()),
                 ) from error
 
         return coded_handler

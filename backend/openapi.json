@@ -773,7 +773,8 @@
                   "portfolio.raw_observation.invalid",
                   "backtest.run.invalid",
                   "backtest.run.equity_wiped_out",
-                  "backtest.run.internal"
+                  "backtest.run.internal",
+                  "backtest.run.interrupted"
                 ],
                 "type": "string"
               },
@@ -821,7 +822,7 @@
         "type": "object"
       },
       "BacktestRunSummary": {
-        "description": "One process-lifetime run and the strategy meaning resolved before it started.",
+        "description": "One accepted run and the strategy meaning resolved before it started.",
         "properties": {
           "run": {
             "$ref": "#/components/schemas/BacktestRunState"
@@ -9798,7 +9799,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "422": {
             "content": {
@@ -9847,7 +9848,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "422": {
             "content": {
@@ -9903,7 +9904,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "422": {
             "content": {
@@ -9953,7 +9954,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "422": {
             "content": {
@@ -10002,7 +10003,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "409": {
             "content": {

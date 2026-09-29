@@ -159,13 +159,16 @@ def read_catalog(equity_root: Path, expected_snapshot_id: str) -> CatalogState:
 
     빌드·GC 뒤 재생성되지 않은 카탈로그는 매크로 본문이 옛 `v=` 경로를 물고 있다(DESIGN §2) —
     그런 카탈로그로 조정가를 내면 조용히 옛 판본을 읽으므로 usable=False 로 막는다.
+    `reason` 은 질의 거절 상세로 사용자에게 가므로 루트 기준 파일 이름만 싣는다(#163).
     """
     path = equity_root / CATALOG_NAME
     meta_path = equity_root / CATALOG_META_NAME
     if not path.exists():
-        return CatalogState(path, False, f"catalog file missing — path={path}", None, ())
+        return CatalogState(path, False, f"catalog file missing — catalog={CATALOG_NAME}", None, ())
     if not meta_path.exists():
-        return CatalogState(path, False, f"catalog meta missing — path={meta_path}", None, ())
+        return CatalogState(
+            path, False, f"catalog meta missing — meta={CATALOG_META_NAME}", None, ()
+        )
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:

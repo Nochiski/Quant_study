@@ -795,11 +795,8 @@ cd backend && uv run --extra parquet --extra equity server
 `backend/src/strategy_workbench/bootstrap/_http.py` 의 `runtime_equity_selection()`,
 회귀 테스트는 `backend/tests/test_http_equity_env.py`.
 
-**기동 뒤 부팅 로그 경고** — duckdb 어댑터는 아래 경우에 뜨기는 하되 로그에 경고를 남긴다. 코드는 경고
-문장 안 괄호에 있다.
-- `catalog_columns_missing` — 옛 카탈로그라 매크로에 원천이 읽는 열이 없다(#233). 그 원천의 필드를
-  뺀다. 카탈로그를 다시 만든다(`ledger_sync catalog` 또는 `python -m equity … catalog`).
-- `catalog_macro_unreadable` — 매크로가 가리키는 parquet 가 빠졌거나 손상됐다(#245). 그 원천의 필드를
-  뺀다. `ledger_sync verify` 로 파일을 확인하고 카탈로그를 다시 만든다.
-- `profile_lag_fallback` — `dataset_profile` 에 랙 행이 없는 필드를 폴백 랙으로 읽는다(#255). 필드는
-  빠지지 않는다. `dataset_profile` 을 받는다(`ledger_sync`).
+**기동 뒤 부팅 로그 경고** — duckdb 어댑터는 못 읽는 원천의 필드를 빼고 뜨며 로그에 경고를 남긴다. 코드는
+경고 문장 안 괄호에 있다. `catalog_*` 경고는 카탈로그를 다시 만들고(`ledger_sync catalog` 또는
+`python -m equity … catalog`, 파일 손상이 의심되면 `ledger_sync verify` 먼저), `profile_lag_fallback` 은
+필드를 빼지 않으니 `dataset_profile` 을 받는다(`ledger_sync`). 코드별 뜻은 `EQUITY_FIELD_MAP.md` §3
+「부팅 검사」가 정본이다.

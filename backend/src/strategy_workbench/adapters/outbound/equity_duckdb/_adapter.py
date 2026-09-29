@@ -53,6 +53,10 @@ unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로
 
 duckdb 는 backend optional extra `equity` 다(`uv sync --extra equity`). 어댑터 생성 시 지연 import
 하고 없으면 `EquityDuckdbSetupError` 로 알린다.
+
+사용자에게 가는 문장(포트 결과 `detail`, 원천을 뺀 사유, `snapshot().source`, 질의 중 예외)에는 서버
+경로를 싣지 않는다 — preview·trace 422 와 run `error` 로 그대로 나간다. 루트·카탈로그 경로는 운영자
+채널인 부팅 예외와 경고 로그에만 남긴다(#163).
 """
 
 from __future__ import annotations
@@ -61,7 +65,7 @@ import logging
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -112,6 +116,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 
 from ._source import (
+    CATALOG_NAME,
     CatalogState,
     EquityDuckdbSetupError,
     TableBuild,
@@ -304,6 +309,34 @@ def _catalog_error_types() -> tuple[type[Exception], ...]:
     )
 
 
+# 잠금 충돌도 손상과 같은 `IOException` 이라 duckdb 가 붙이는 자기 문장(OS 로캘과 무관한 영문)으로만
+# 가른다. Windows 는 Restart Manager 가 찾은 점유 프로세스를 "File is already open in",
+# POSIX 는 fcntl 잠금 실패를 "Could not set lock on file" 로 적는다(duckdb 1.5.5 실측, #247).
+_LOCK_CONFLICT_MARKERS = ("File is already open in", "Could not set lock on file")
+
+
+def _raise_unless_persistent(error: Exception, catalog: Path) -> None:
+    """부팅 때 카탈로그를 열거나 읽다 난 duckdb 오류 중 원천을 빼도 되는 것만 돌려보낸다(#245·#247).
+
+    원천을 뺀 사유는 재시작 전까지 캐시되므로, 뺄 수 있는 오류는 손상·누락처럼 재시작해도 그대로인
+    카탈로그·파일 성격의 것(`_catalog_error_types`)뿐이다. 잠김과 일시 오류는 풀리면 원천이 돌아와야
+    하므로 빼지 않고 코드화된 `EquityDuckdbSetupError` 로 부팅을 멈춘다. 부팅 예외는 운영자 채널이라
+    경로와 duckdb 원문을 싣는다.
+    """
+    if any(marker in str(error) for marker in _LOCK_CONFLICT_MARKERS):
+        raise EquityDuckdbSetupError(
+            "다른 프로세스가 카탈로그 파일을 쓰기 모드로 열고 있어 부팅을 멈춘다 — 그 프로세스"
+            "(DuckDB CLI·DB 도구·카탈로그를 여는 스크립트)를 닫은 뒤 다시 띄워야 한다 "
+            f"(catalog_locked) — catalog={catalog} error={error!r}"
+        ) from error
+    if not isinstance(error, _catalog_error_types()):
+        raise EquityDuckdbSetupError(
+            "카탈로그를 확인하다 일시적인 duckdb 오류가 나서 부팅을 멈춘다 — 원천을 빼지 "
+            "않았으므로 다시 띄우면 다시 확인한다 (catalog_transient_error) — "
+            f"catalog={catalog} error={error!r}"
+        ) from error
+
+
 def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     """duckdb 연결 — 지연 import(optional extra `equity`). `path` 는 read_only 로 여는 카탈로그."""
     try:
@@ -365,7 +398,8 @@ class EquityDuckdbAdapter:
             (`load_backtest_dataset` 만은 `adj_factor` 를 요구해 예외를 던진다).
 
     Raises:
-        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST/카탈로그 meta 손상.
+        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST/카탈로그 meta 손상 ·
+            카탈로그 파일 잠김(`catalog_locked`)·일시 오류(`catalog_transient_error`).
     """
 
     def __init__(self, equity_root: Path) -> None:
@@ -383,7 +417,9 @@ class EquityDuckdbAdapter:
         self._tables: dict[str, TableBuild] = {
             table: resolve_table(self._root, table) for table in builds
         }
-        self._catalog: CatalogState = read_catalog(self._root, self._snapshot_id)
+        self._catalog: CatalogState = self._checked_catalog(
+            read_catalog(self._root, self._snapshot_id)
+        )
         self._sessions: tuple[date, ...] = self._load_sessions()
         self._session_index = {session: index for index, session in enumerate(self._sessions)}
         self._policies: dict[str, tuple[str, ...]] = self._load_policies()
@@ -402,6 +438,30 @@ class EquityDuckdbAdapter:
     def _connect(self) -> duckdb.DuckDBPyConnection:
         """카탈로그가 쓸 만하면 그것을 read_only 로 연다(매크로 호출용), 아니면 메모리 연결."""
         return _open(self._catalog.path if self._catalog.usable else None)
+
+    def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
+        """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 본다(#247).
+
+        열리지 않는 파일(손상 등)은 카탈로그가 없을 때처럼 매크로를 읽는 원천을 모두 빼고
+        경고한다(`catalog_unreadable`). 열어 보지 않으면 열 확인(`_missing_columns_reason`)이 없는
+        매크로 원천이 목록에 남아 첫 질의에서 죽는다. 잠김·일시 오류는 부팅을 멈춘다.
+        """
+        if not catalog.usable:
+            return catalog
+        import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
+
+        try:
+            _open(catalog.path).close()
+        except module.Error as error:
+            _raise_unless_persistent(error, catalog.path)
+            reason = (
+                f"카탈로그 파일 {CATALOG_NAME} 를 열 수 없어 카탈로그 매크로를 읽는 원천의 필드를 "
+                "뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
+                f"`python -m equity catalog`) (catalog_unreadable) — error={type(error).__name__}"
+            )
+            logger.warning(f"{reason} catalog={catalog.path} detail={error!r}")
+            return replace(catalog, usable=False, reason=reason)
+        return catalog
 
     def _source(self, table: str) -> str:
         return self._tables[table].parquet_source()
@@ -513,7 +573,7 @@ class EquityDuckdbAdapter:
         tables = [name for name in spec.requires if name not in macros]
         absent = [table for table in tables if table not in self._builds]
         if absent:
-            return f"equity tables not built — missing={absent} root={self._root}"
+            return f"equity tables not built — missing={absent}"
         if not macros:
             return None
         if not self._catalog.usable:
@@ -522,7 +582,7 @@ class EquityDuckdbAdapter:
         if skipped:
             return (
                 f"catalog macros not published (macros_skipped) — missing={skipped} "
-                f"catalog={self._catalog.path} macros={list(self._catalog.macros)}"
+                f"macros={list(self._catalog.macros)}"
             )
         return self._missing_columns_reason(spec)
 
@@ -534,27 +594,26 @@ class EquityDuckdbAdapter:
         """
         if not spec.required_columns or not spec.is_macro:
             return None
-        con = self._connect()
+        import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
+
         try:
-            described = con.execute(
-                f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
-            ).fetchall()
-        except _catalog_error_types() as error:
+            with self._connect() as con:
+                described = con.execute(
+                    f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
+                ).fetchall()
+        except module.Error as error:
             # 스냅샷은 맞는데 매크로가 가리키는 parquet 가 빠졌거나 손상된 카탈로그 등 — 생성자
             # 밖으로 던지면 어댑터 전체가 뜨지 못한다(#233 리뷰 후속). 이 원천만 빼고 사유를 남긴다.
-            # 사유는 재시작 전까지 캐시되므로 카탈로그·파일 성격의 오류만 잡고, 중단·메모리 부족
-            # 같은 일시적 오류는 그대로 올린다(#245 리뷰 P3-1·P3-4).
+            # 연결도 같은 판정을 받는다 — 잠김·일시 오류는 빼지 않고 부팅을 멈춘다(#245·#247).
+            _raise_unless_persistent(error, self._catalog.path)
             reason = (
                 f"카탈로그 매크로 {spec.relation} 를 읽을 수 없어 원천 {spec.name} 의 필드를 "
                 "뺀다 — 카탈로그를 다시 만들거나 원장 파일을 확인해야 한다"
                 "(`ledger_sync verify`·`catalog`) "
-                f"(catalog_macro_unreadable) — error={type(error).__name__}: {error} "
-                f"catalog={self._catalog.path}"
+                f"(catalog_macro_unreadable) — error={type(error).__name__}"
             )
-            logger.warning(reason)
+            logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")
             return reason
-        finally:
-            con.close()
         present = {str(row[0]) for row in described}
         missing = [column for column in spec.required_columns if column not in present]
         if not missing:
@@ -562,10 +621,9 @@ class EquityDuckdbAdapter:
         reason = (
             f"카탈로그 매크로 {spec.relation} 에 원천 {spec.name} 이 읽는 열이 없어 이 원천의 "
             "필드를 뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
-            f"`python -m equity catalog`) (catalog_columns_missing) — missing={missing} "
-            f"catalog={self._catalog.path}"
+            f"`python -m equity catalog`) (catalog_columns_missing) — missing={missing}"
         )
-        logger.warning(reason)
+        logger.warning(f"{reason} catalog={self._catalog.path}")
         return reason
 
     @property
@@ -579,7 +637,7 @@ class EquityDuckdbAdapter:
             snapshot_id=self._snapshot_id,
             schema_version=SCHEMA_VERSION,
             built_at=max(build.built_at for build in self._tables.values()),
-            source=f"equity_duckdb:{self._root}",
+            source="equity_duckdb",
             point_in_time=True,
             dataset_revisions=tuple(
                 DatasetRevision(table, build.build_id, self.backfill_end)
@@ -794,7 +852,7 @@ class EquityDuckdbAdapter:
                 DataLoadStatus.INVALID_QUERY,
                 self._snapshot_id,
                 (),
-                f"unknown security_id — not in {SPAN_TABLE}: {unknown_ids} root={self._root}",
+                f"unknown security_id — not in {SPAN_TABLE}: {unknown_ids}",
             )
         lags = self._lags(query.field_ids, tuple(query.lag_overrides))
         window = self._window(query.start, query.end, 0)
@@ -832,7 +890,7 @@ class EquityDuckdbAdapter:
             status=DataLoadStatus.OK if cells else DataLoadStatus.NO_DATA,
             snapshot_id=self._snapshot_id,
             warnings=panel.warnings,
-            detail=None if cells else f"no panel cells — query={query} root={self._root}",
+            detail=None if cells else f"no panel cells — query={query}",
         )
 
     # ── FactorMetadataPort · FactorObservationPort ────────────────────────────
@@ -1022,7 +1080,7 @@ class EquityDuckdbAdapter:
                 None
                 if observations
                 else f"no members in universe — universe_id={query.universe_id} "
-                f"start={query.start} end={query.end} root={self._root}"
+                f"start={query.start} end={query.end}"
             ),
             warnings=tuple(sorted({*window.warnings, *panel.warnings})),
             validation_checkpoint=checkpoint,
@@ -1055,13 +1113,11 @@ class EquityDuckdbAdapter:
         }
         unknown = sorted(sid for sid, key in parsed.items() if key not in spans)
         if unknown:
-            raise ValueError(
-                f"unknown security_id — not in {SPAN_TABLE}: {unknown} root={self._root}"
-            )
+            raise ValueError(f"unknown security_id — not in {SPAN_TABLE}: {unknown}")
         if FACTOR_TABLE not in self._builds:
             raise EquityDuckdbSetupError(
                 f"{FACTOR_TABLE} not built — a backtest without the corporate-action feed is "
-                f"silently wrong across splits; root={self._root}"
+                "silently wrong across splits"
             )
         tickers = tuple(sorted({ticker for ticker, _ in parsed.values()}))
         con = self._connect()
@@ -1149,10 +1205,7 @@ class EquityDuckdbAdapter:
         actions: list[CorporateActionRecord] = []
         for ticker, event_id, event_type, share_factor, raw_ts in factor_rows:
             if raw_ts is None:
-                raise ValueError(
-                    f"{ts_column} is NULL on a factor_ok row — event_id={event_id} "
-                    f"root={self._root}"
-                )
+                raise ValueError(f"{ts_column} is NULL on a factor_ok row — event_id={event_id}")
             session = _as_date(raw_ts, ts_column)
             ratio = _as_float(share_factor, "share_factor")
             if str(event_type) in RATIO_DIRECTED_EVENT_TYPES:
@@ -1307,12 +1360,12 @@ class EquityDuckdbAdapter:
         if start < self._sessions[0] or end > self.backfill_end:
             return (
                 f"query outside coverage — start={start} end={end} "
-                f"calendar={self._sessions[0]}..{self.backfill_end} root={self._root}"
+                f"calendar={self._sessions[0]}..{self.backfill_end}"
             )
         first = bisect_left(self._sessions, start)
         last = bisect_right(self._sessions, end)
         if first >= last:
-            return f"no sessions in range — start={start} end={end} root={self._root}"
+            return f"no sessions in range — start={start} end={end}"
         history_first = first - history
         warnings: tuple[str, ...] = ()
         if history_first < 0:
@@ -1549,8 +1602,7 @@ class EquityDuckdbAdapter:
             key = (ticker, session)
             if key in rows:
                 raise EquityDuckdbSetupError(
-                    f"duplicate (ticker, date) in {UNIVERSE_TABLE}×{SPAN_TABLE} — key={key} "
-                    f"root={self._root}"
+                    f"duplicate (ticker, date) in {UNIVERSE_TABLE}×{SPAN_TABLE} — key={key}"
                 )
             rows[key] = row
         progress(1.0)

@@ -2583,7 +2583,7 @@
       "ExperimentSelectionRequest": {
         "properties": {
           "reason": {
-            "minLength": 1,
+            "pattern": "\\S",
             "title": "Reason",
             "type": "string"
           },
@@ -9082,7 +9082,7 @@
         "type": "string"
       },
       "TrialAttempt": {
-        "description": "trial 의 실행 시도 하나. 실행에 배정되면 `run_id`, 접수가 거절되면 `error` 만 있다.",
+        "description": "trial 의 실행 시도 하나. 배정되면 `run_id`, 접수가 거절되면 거절 코드와 문장이 있다.",
         "properties": {
           "attempt": {
             "title": "Attempt",
@@ -9103,6 +9103,17 @@
               }
             ],
             "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
           },
           "experiment_id": {
             "title": "Experiment Id",

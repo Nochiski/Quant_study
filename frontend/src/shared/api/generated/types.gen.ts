@@ -5795,7 +5795,7 @@ export type TraceValueStatus =
 /**
  * TrialAttempt
  *
- * trial 의 실행 시도 하나. 실행에 배정되면 `run_id`, 접수가 거절되면 `error` 만 있다.
+ * trial 의 실행 시도 하나. 배정되면 `run_id`, 접수가 거절되면 거절 코드와 문장이 있다.
  */
 export type TrialAttempt = {
   /**
@@ -5810,6 +5810,10 @@ export type TrialAttempt = {
    * Error
    */
   error?: string | null;
+  /**
+   * Error Code
+   */
+  error_code?: string | null;
   /**
    * Experiment Id
    */

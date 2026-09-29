@@ -894,6 +894,10 @@ describe("backtest run actions", () => {
         "동일 설정으로 다시 실행하지 못했습니다: 서버가 실행 설정의 수수료 칸 값을 받지 않았습니다.",
       ),
     );
+    // 결과 화면에는 실행 설정 패널이 없다 — 문장이 고칠 곳을 말한다(#270 P3-R3).
+    expect(alert).toHaveTextContent(
+      "전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
+    );
     expect(alert).not.toHaveTextContent("API request failed");
     const reason = within(alert).getByRole("group");
     expect(reason).toHaveTextContent("서버 사유");

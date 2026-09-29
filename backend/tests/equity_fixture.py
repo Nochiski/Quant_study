@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import re
 import sys
 from collections.abc import Callable, Sequence
 from datetime import date
@@ -515,7 +516,7 @@ def credit_table(rows: list[CreditRow]) -> pa.Table:
 # `equity.catalog`·`equity.views`(database/src/equity) 의 테스트 대역. backend 런타임은 그 패키지를
 # import 하지 않지만, 이 대역은 `import_ledger_module` 로 원장 모듈을 불러 쓸 수 있다(경로는 import
 # 하는 동안만 올린다, #230). 매크로는 원장 템플릿을 렌더할 수 있으면 렌더한다(`LEDGER_MACROS`,
-# #249·#220) — 손 픽스처 표가 그 템플릿이 읽는 열을 다 가질 때다. 표가 좁아 렌더할 수 없는 5개
+# #249·#220·#300) — 손 픽스처 표가 그 템플릿이 읽는 열을 다 가질 때다. 표가 좁아 렌더할 수 없는 4개
 # (`_CATALOG_BODIES`)만 본문을 여기 옮겨 적고, 원장 본문이 바뀌면 같이 바꾼다. snapshot_id 규칙(전
 # 테이블 table=build 정렬 sha256 16자리)도 옮겨 적은 사본이다.
 
@@ -745,161 +746,6 @@ SELECT ticker, obs_month, target_period, metric, src, obs_date,
 FROM vis
 WHERE rn = 1
 """
-# 재무 판본 뷰(S21 본판) — `equity.views.TEMPLATES['v_fin_latest']` 본문 사본. 판본(vintage)과
-# 재무제표 구분(CFS 우선)만 접고 기간 축은 남긴다. TTM 은 4분기가 전부 보일 때만 선다.
-_FIN_LATEST_SQL = """
-WITH cut AS (
-    SELECT k.date AS cutoff
-    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
-          FROM {trading_calendar} WHERE date <= as_of) k
-    WHERE k.n = coalesce(lag_override, 0)
-),
-vis AS (
-    SELECT f.*
-    FROM {fin_std} f
-    WHERE f.available_date <= (SELECT cutoff FROM cut)
-      AND CASE WHEN vintage = 'restated' THEN f.vintage_kind = 'api_restated'
-               WHEN vintage = 'pit'      THEN f.vintage_kind IN ('original', 'corrected')
-               ELSE f.vintage_kind = vintage END
-),
-pick AS (
-    SELECT * FROM (
-        SELECT v.*, row_number() OVER (
-                   PARTITION BY v.corp_code, v.period_end, v.report_code
-                   ORDER BY CASE WHEN v.fs_div = 'CFS' THEN 0 ELSE 1 END, v.fs_div,
-                            v.available_date DESC, v.rcept_no DESC) AS rn
-        FROM vis v)
-    WHERE rn = 1
-),
-prev AS (
-    SELECT p.*,
-           count(*) OVER w3                                          AS p_n,
-           min(p.period_end) OVER w3                                 AS p_first_end,
-           max(p.available_date) OVER w3                             AS p_max_available,
-           min(p.fs_div) OVER w3                                     AS p_fs_min,
-           max(p.fs_div) OVER w3                                     AS p_fs_max,
-           min(p.revenue_basis) OVER w3                              AS p_basis_min,
-           max(p.revenue_basis) OVER w3                              AS p_basis_max,
-           sum(p.revenue) OVER w3                                    AS p_sum_revenue,
-           count(p.revenue) OVER w3                                  AS p_cnt_revenue,
-           sum(p.gross_profit) OVER w3                               AS p_sum_gross_profit,
-           count(p.gross_profit) OVER w3                             AS p_cnt_gross_profit,
-           sum(p.op_profit) OVER w3                                  AS p_sum_op_profit,
-           count(p.op_profit) OVER w3                                AS p_cnt_op_profit,
-           sum(p.net_income) OVER w3                                 AS p_sum_net_income,
-           count(p.net_income) OVER w3                               AS p_cnt_net_income,
-           (lag(p.report_code, 3) OVER s = '11013' AND lag(p.report_code, 2) OVER s = '11012'
-            AND lag(p.report_code, 1) OVER s = '11014')              AS p_fiscal_chain,
-           lag(p.report_code, 1) OVER s                              AS p1_report_code,
-           lag(p.period_end, 1) OVER s                               AS p1_period_end,
-           lag(p.fs_div, 1) OVER s                                   AS p1_fs_div,
-           lag(p.available_date, 1) OVER s                           AS p1_available,
-           lag(p.cf_operating_ytd, 1) OVER s                         AS p1_cf_operating_ytd
-    FROM pick p
-    WINDOW s AS (PARTITION BY p.corp_code ORDER BY p.period_end, p.report_code),
-           w3 AS (PARTITION BY p.corp_code ORDER BY p.period_end, p.report_code
-                  ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING)
-),
-chain AS (
-    SELECT r.*,
-           (r.report_code = '11011' AND r.p_n = 3 AND coalesce(r.p_fiscal_chain, FALSE)
-            AND date_diff('day', r.p_first_end, r.period_end)
-                BETWEEN 240 AND 300
-            AND r.p_fs_min = r.fs_div AND r.p_fs_max = r.fs_div)    AS annual_ok,
-           (r.p1_report_code = CASE r.report_code WHEN '11012' THEN '11013'
-                                                  WHEN '11014' THEN '11012'
-                                                  WHEN '11011' THEN '11014' END
-            AND r.p1_fs_div = r.fs_div
-            AND date_diff('day', r.p1_period_end, r.period_end)
-                BETWEEN 80 AND 100)     AS cf_prev_ok
-    FROM prev r
-),
-q AS (
-    SELECT c.*,
-           CASE WHEN c.report_code <> '11011' THEN c.revenue
-                WHEN c.annual_ok AND c.p_cnt_revenue = 3
-                     AND c.p_basis_min = c.revenue_basis AND c.p_basis_max = c.revenue_basis
-                THEN c.revenue - c.p_sum_revenue END                 AS q_revenue,
-           CASE WHEN c.report_code <> '11011' THEN c.gross_profit
-                WHEN c.annual_ok AND c.p_cnt_gross_profit = 3
-                THEN c.gross_profit - c.p_sum_gross_profit END       AS q_gross_profit,
-           CASE WHEN c.report_code <> '11011' THEN c.op_profit
-                WHEN c.annual_ok AND c.p_cnt_op_profit = 3
-                THEN c.op_profit - c.p_sum_op_profit END             AS q_op_profit,
-           CASE WHEN c.report_code <> '11011' THEN c.net_income
-                WHEN c.annual_ok AND c.p_cnt_net_income = 3
-                THEN c.net_income - c.p_sum_net_income END           AS q_net_income,
-           CASE WHEN c.report_code = '11013' THEN c.cf_operating_ytd
-                WHEN c.cf_prev_ok
-                THEN c.cf_operating_ytd - c.p1_cf_operating_ytd END  AS q_cf_operating,
-           CASE WHEN c.report_code = '11011'
-                THEN greatest(c.available_date, c.p_max_available)
-                ELSE c.available_date END                            AS q_income_available,
-           CASE WHEN c.report_code = '11013' THEN c.available_date
-                ELSE greatest(c.available_date, coalesce(c.p1_available, c.available_date))
-                END                                                  AS q_cf_available
-    FROM chain c
-),
-ttm AS (
-    SELECT q.*,
-           count(*) OVER w                                           AS ttm_n_rows,
-           max(q.q_income_available) OVER w                          AS ttm_income_available,
-           max(q.q_cf_available) OVER w                              AS ttm_cf_available,
-           min(q.period_end) OVER w                                  AS ttm_first_period_end,
-           min(q.fs_div) OVER w                                      AS ttm_fs_min,
-           max(q.fs_div) OVER w                                      AS ttm_fs_max,
-           min(q.revenue_basis) OVER w                               AS ttm_basis_min,
-           max(q.revenue_basis) OVER w                               AS ttm_basis_max,
-           sum(q.q_revenue) OVER w                                   AS ttm_sum_revenue,
-           count(q.q_revenue) OVER w                                 AS ttm_cnt_revenue,
-           sum(q.q_gross_profit) OVER w                              AS ttm_sum_gross_profit,
-           count(q.q_gross_profit) OVER w                            AS ttm_cnt_gross_profit,
-           sum(q.q_op_profit) OVER w                                 AS ttm_sum_op_profit,
-           count(q.q_op_profit) OVER w                               AS ttm_cnt_op_profit,
-           sum(q.q_net_income) OVER w                                AS ttm_sum_net_income,
-           count(q.q_net_income) OVER w                              AS ttm_cnt_net_income,
-           sum(q.q_cf_operating) OVER w                              AS ttm_sum_cf_operating,
-           count(q.q_cf_operating) OVER w                            AS ttm_cnt_cf_operating
-    FROM q
-    WINDOW w AS (PARTITION BY q.corp_code ORDER BY q.period_end, q.report_code
-                 ROWS BETWEEN 3 PRECEDING AND CURRENT ROW)
-),
-ok AS (
-    SELECT t.*,
-           (t.ttm_n_rows = 4 AND t.ttm_fs_min = t.ttm_fs_max
-            AND date_diff('day', t.ttm_first_period_end, t.period_end)
-                BETWEEN 240 AND 300)           AS ttm_window_ok,
-           (strftime(t.period_end, '%Y%m%d') || t.report_code) = max(
-               strftime(t.period_end, '%Y%m%d') || t.report_code) OVER (
-               PARTITION BY t.corp_code ORDER BY t.available_date
-               RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)    AS period_frontier
-    FROM ttm t
-)
-SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
-       o.bsns_year, o.rcept_no, o.period_start, o.currency,
-       o.revenue, o.revenue_basis, o.gross_profit, o.op_profit, o.net_income,
-       o.total_asset, o.total_liab, o.total_equity, o.cf_operating_ytd, o.cf_operating_q,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_revenue = 4 AND o.ttm_basis_min = o.ttm_basis_max
-            THEN o.ttm_sum_revenue END                               AS ttm_revenue,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_gross_profit = 4
-            THEN o.ttm_sum_gross_profit END                          AS ttm_gross_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_op_profit = 4
-            THEN o.ttm_sum_op_profit END                             AS ttm_op_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_net_income = 4
-            THEN o.ttm_sum_net_income END                            AS ttm_net_income,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cf_available <= o.available_date
-                 AND o.ttm_cnt_cf_operating = 4
-            THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
-       coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
-       o.period_frontier, o.available_date, o.available_basis
-FROM ok o
-LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
-       ON d.rcept_no = o.rcept_no
-"""
 
 # 시그니처 → (본문, 읽는 테이블). `equity.views.SIGNATURES`·`MACRO_INPUTS` 의 사본이다.
 _PRICE_INPUTS = ("price_daily", "adj_factor", "trading_calendar")
@@ -913,16 +759,11 @@ _CATALOG_BODIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         _CONSENSUS_SQL,
         ("consensus_daily", "trading_calendar"),
     ),
-    (
-        "v_fin_latest(as_of, lag_override := NULL, vintage := 'restated')",
-        _FIN_LATEST_SQL,
-        ("fin_std", "disclosure_version", "trading_calendar"),
-    ),
 )
 # 원장 템플릿(`equity.views`)을 그대로 렌더하는 매크로 — 본문을 여기 옮겨 적지 않는다(#249).
 # 손 픽스처 표가 그 매크로가 읽는 열을 다 가질 때만 이렇게 쓸 수 있다(duckdb 는 매크로를 만들 때
 # 바인딩한다).
-LEDGER_MACROS = ("v_credit_balance", "v_adj_close")
+LEDGER_MACROS = ("v_fin_latest", "v_credit_balance", "v_adj_close")
 
 
 def table_builds(root: Path) -> dict[str, str]:
@@ -980,14 +821,14 @@ def write_catalog(
     *,
     snapshot: str | None = None,
     with_macros: bool = True,
-    legacy_fin_view: bool = False,
+    legacy_fin_columns: tuple[str, ...] = (),
 ) -> Path:
     """`equity.duckdb`(입력이 갖춰진 매크로 전부) + `_catalog_meta.json` 을 쓴다.
 
     `snapshot` 을 주면 meta 의 snapshot_id 를 그 값으로 둔다(stale 카탈로그 부정 픽스처).
     `with_macros=False` 면 매크로 없이 `macros_skipped` 만 남긴다.
-    `legacy_fin_view=True` 면 `v_fin_latest` 가 `period_frontier` 열 없이 구워진다 — #225 전에
-    만든 카탈로그(재생성 전 로컬·서버 판) 부정 픽스처.
+    `legacy_fin_columns` 에 준 출력 열은 `v_fin_latest` 에서 빼고 굽는다 — 그 열이 없던 옛
+    카탈로그(#225 전 `period_frontier`, #238 전 TTM 공개일 열, 재생성 전 로컬·서버 판) 부정 픽스처.
     """
     import duckdb  # 테스트 전용 — backend optional extra `equity`
 
@@ -1016,8 +857,8 @@ def write_catalog(
                 skipped[name] = f"not_built: inputs={absent or list(inputs)}"
                 continue
             body = render({t: _partition_source(root, t, builds[t]) for t in inputs})
-            if legacy_fin_view and name == "v_fin_latest":
-                body = body.replace("o.period_frontier, ", "")
+            for column in legacy_fin_columns if name == "v_fin_latest" else ():
+                body = re.sub(rf"\bo\.{column},\s*", "", body)
             con.execute(f"CREATE MACRO {signature} AS TABLE {body}")
             macros.append(signature)
     finally:

@@ -657,7 +657,8 @@ class EquityDuckdbAdapter:
         """매크로 원천을 부팅 때 한 번 읽어 보고, 못 읽거나 요구하는 열이 없으면 뺄 사유를 돌려준다.
 
         매크로가 가리키는 parquet 가 빠졌거나 손상됐으면 `catalog_macro_unreadable`, 옛 카탈로그라
-        원천이 읽는 열(`required_columns`)이 없으면 `catalog_columns_missing` 으로 경고한다.
+        원천이 읽는 열(`required_columns` 와 그 원천 필드의 `available_expr`)이 없으면
+        `catalog_columns_missing` 으로 경고한다.
         읽어 보지 않고 두면 커버율 질의가 원시 duckdb 오류를 던져 `list_fields()` 전체가 죽는다
         (#233 리뷰 P2-1, #275 리뷰 P3-5). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
         """
@@ -683,7 +684,12 @@ class EquityDuckdbAdapter:
             logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")
             return reason
         present = {str(row[0]) for row in described}
-        missing = [column for column in spec.required_columns if column not in present]
+        # 원천이 읽는 열 — 선언한 필수 열과 그 원천 필드의 공개일 열(#238)
+        read = (
+            *spec.required_columns,
+            *(f.available_expr for f in FIELD_SPECS if f.source == spec.name),
+        )
+        missing = [column for column in dict.fromkeys(read) if column and column not in present]
         if not missing:
             return None
         reason = (
@@ -1723,17 +1729,24 @@ class EquityDuckdbAdapter:
         """
         if not keys:
             return {}
-        columns = ", ".join(
-            f"{self._fields[field_id].expr} AS c{position}"
+        outputs = {
+            f"c{position}": self._fields[field_id].expr for position, field_id in enumerate(fields)
+        }
+        # 행보다 늦게 공개되는 필드(재무 TTM, #238)는 값 뒤에 그 공개일 열을 함께 읽는다.
+        late = {
+            position: expr
             for position, field_id in enumerate(fields)
-        )
+            if (expr := self._fields[field_id].available_expr) is not None
+        }
+        outputs |= {f"a{position}": expr for position, expr in late.items()}
+        columns = ", ".join(f"{expr} AS {name}" for name, expr in outputs.items())
         relation = self._relation(source, fetch_end)
         where = [f"{source.available_expr} <= {_lit(fetch_end)}"]
         if source.row_filter:
             where.append(f"({source.row_filter})")
         where.append(f"{source.key_column} IN (SELECT {_KEYS_SQL})")
         predicate = " AND ".join(where)
-        picks = ", ".join(f"c{position}" for position in range(len(fields)))
+        picks = ", ".join(outputs)
         if source.reduce is Reduce.SUM:
             sql = (
                 f"SELECT {source.key_column} AS k, {source.available_expr} AS av, "
@@ -1769,10 +1782,18 @@ class EquityDuckdbAdapter:
                 else _as_date(content_raw, f"{source.relation}.{source.content_expr}")
             )
             # LATEST 원천에는 `fill_kind` 축이 없다 — 셀 종류는 값 유무로만 갈린다.
+            known = dict(zip(late, raw[3 + len(fields) :], strict=True))
             entry: dict[str, _Observed] = {}
             for position, field_id in enumerate(fields):
                 value = _as_float(raw[3 + position], field_id)
-                entry[field_id] = _Observed(value, available, content, _cell_kind(value, None))
+                field_available = (
+                    _as_date(known[position], f"{source.relation}.{late[position]}")
+                    if position in known
+                    else available
+                )
+                entry[field_id] = _Observed(
+                    value, field_available, content, _cell_kind(value, None)
+                )
             dates.setdefault(key, []).append(available)
             cells.setdefault(key, []).append(entry)
         return {key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates}
@@ -1801,4 +1822,11 @@ class EquityDuckdbAdapter:
         if series is None:
             return None
         position = bisect_right(series.dates, cutoff) - 1
-        return None if position < 0 else series.cells[position][field_id]
+        if position < 0:
+            return None
+        found = series.cells[position][field_id]
+        # 행은 보이는데 이 필드 값은 더 늦게 공개된다(재무 TTM 창 안 분기의 늦은 정정본, #238).
+        # 그때까지는 다른 행 값으로 대신하지 않고 결측이다.
+        if found.available_date > cutoff:
+            return _Observed(None, series.dates[position], found.content_date, CellKind.MISSING)
+        return found

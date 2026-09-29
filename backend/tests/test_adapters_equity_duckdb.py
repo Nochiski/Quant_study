@@ -76,6 +76,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from tests.equity_fixture import (
     WB_BONUS_EX,
     WB_EVENING_SESSION,
+    WB_FIN_ROWS,
     WB_HALT_DATE,
     WB_INCONSISTENT,
     WB_LATE_FACTOR,
@@ -85,10 +86,12 @@ from tests.equity_fixture import (
     WB_SESSIONS,
     WB_SPLIT_DATE,
     build_workbench_root,
+    fin_std_table,
     snapshot_id,
     table_builds,
     wb_close,
     write_catalog,
+    write_equity_table,
 )
 
 pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync --extra equity)")
@@ -468,6 +471,90 @@ def test_late_old_period_correction_does_not_revert_financials_to_that_period(
     # 창 독립: 정정본 공개 뒤 세션만 좁혀 물어도 같다
     narrow = _raw(adapter, start=END, end=END, fields=("financial.book_equity",))
     assert _field(narrow, END, "000660:1", "financial.book_equity") == 1_200.0
+
+
+def test_a_late_correction_inside_the_ttm_window_completes_that_period_ttm_on_its_filing(
+    tmp_path: Path,
+) -> None:
+    """#238: 창 안 분기의 정정본이 늦게 접수되면 그 기간 TTM 은 정정 접수일부터 보인다.
+
+    000660 은 2023 반기(08-14 접수)가 공개된 가장 최근 기간이고, 그 TTM 창 [2022 3분기 ~ 2023
+    반기] 안의 2023 1분기 정정본이 2024-01-09 에 접수된다. 예전에는 창이 반기 공개일에 완성되지
+    않아 다음 정기보고서까지 결측이었다. 지금은 정정 접수일(랙 1세션이라 01-10)부터 반기 TTM 이
+    선다. 고르는 기간(반기)과 잔액 필드(자본)는 그대로다.
+
+    창 밖 2022 1분기 정정본(01-10)은 사업보고서 4분기 파생에만 기대므로 손익 TTM 공개일만 늦춘다
+    — 손익은 01-11 부터, 영업현금은 01-10 부터 선다. 공개일 열이 둘인 이유다(#300 리뷰 P3-1).
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    fiscal_2022 = [
+        {
+            "corp_code": "C00660",
+            "period_end": period_end,
+            "report_code": report,
+            "bsns_year": "2022",
+            "rcept_no": f"R00660{report}_22",
+            "available_date": available,
+            "revenue": revenue,
+            "net_income": net_income,
+            "cf_operating_ytd": cf_ytd,
+        }
+        for period_end, report, available, revenue, net_income, cf_ytd in (
+            (date(2022, 3, 31), "11013", date(2024, 1, 10), 150, 30, 20),
+            (date(2022, 6, 30), "11012", date(2022, 8, 16), 160, 32, 45),
+            (date(2022, 9, 30), "11014", date(2022, 11, 14), 170, 34, 70),
+            (date(2022, 12, 31), "11011", date(2023, 3, 14), 660, 136, 100),
+        )
+    ]
+    write_equity_table(
+        root,
+        "fin_std",
+        fin_std_table([*WB_FIN_ROWS, *fiscal_2022]),
+        build_id="b_fin_238",
+        year_column="period_end",
+    )
+    write_catalog(root)
+    fields = (
+        "financial.revenue",
+        "financial.net_income",
+        "financial.operating_cash_flow",
+        "financial.book_equity",
+    )
+    result = _raw(
+        EquityDuckdbAdapter(root),
+        start=date(2024, 1, 9),
+        end=END,
+        fields=fields,
+        universe="krx.all",
+    )
+
+    def seen(session: date) -> dict[str, tuple[object, date]]:
+        cells = {field: _cell(result, session, "000660:1", field) for field in fields}
+        assert all((c.value is None) == (c.kind is CellKind.MISSING) for c in cells.values())
+        return {field: (cell.value, cell.available_date) for field, cell in cells.items()}
+
+    # 2022 3분기 · 2022 4분기(연간 − 1~3분기) · 2023 1분기(정정본) · 2023 반기
+    revenue, net_income = 170.0 + 180.0 + 190.0 + 200.0, 34.0 + 40.0 + 38.0 + 40.0
+    cash_flow, row = 25.0 + 30.0 + 40.0 + 30.0, date(2023, 8, 14)
+    assert seen(date(2024, 1, 9)) == {
+        "financial.revenue": (None, row),
+        "financial.net_income": (None, row),
+        "financial.operating_cash_flow": (None, row),
+        "financial.book_equity": (1_200.0, row),
+    }
+    assert seen(date(2024, 1, 10)) == {
+        "financial.revenue": (None, row),
+        "financial.net_income": (None, row),
+        "financial.operating_cash_flow": (cash_flow, date(2024, 1, 9)),
+        "financial.book_equity": (1_200.0, row),
+    }
+    for session in (date(2024, 1, 11), END):
+        assert seen(session) == {
+            "financial.revenue": (revenue, date(2024, 1, 10)),
+            "financial.net_income": (net_income, date(2024, 1, 10)),
+            "financial.operating_cash_flow": (cash_flow, date(2024, 1, 9)),
+            "financial.book_equity": (1_200.0, row),
+        }, session
 
 
 def test_consensus_picks_the_nearest_target_period_and_the_measured_source(
@@ -894,15 +981,20 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
 def test_catalog_without_required_view_column_drops_only_that_source(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """옛 카탈로그(`v_fin_latest` 에 `period_frontier` 가 없다)는 재무 원천만 뺀다 (#233 리뷰 P2-1).
+    """옛 카탈로그(`v_fin_latest` 에 원천이 읽는 열이 없다)는 재무 원천만 뺀다 (#233 리뷰 P2-1).
+
+    읽는 열은 원천이 선언한 `period_frontier`(#225, `row_filter`)와 흐름 필드의 공개일 열(#238,
+    `FieldSpec.available_expr`)이다. #225 전 판은 셋 다, 머지 직후 로컬·서버 판(#238 전)은 공개일
+    두 열이 없다 — 가장 옛 판으로 셋을 모두 이름으로 알리는지 본다(#300 리뷰 P3-2).
 
     매크로는 게시돼 있어 `catalog_macro_missing` 가드는 통과한다. 예전에는 fin 원천의
     `row_filter` 가 커버율 질의에서 BinderException 을 던져 `list_fields()` 전체가 죽었다 — 필드
     목록을 쓰는 화면과 AI 컨텍스트가 모두 막혔다. 지금은 부팅 때 열을 확인해 재무 필드만 빠지고
     경고를 남긴다.
     """
+    absent = ("period_frontier", "ttm_income_available_date", "ttm_cf_available_date")
     root = build_workbench_root(tmp_path / "equity", catalog=False)
-    write_catalog(root, legacy_fin_view=True)
+    write_catalog(root, legacy_fin_columns=absent)
     with caplog.at_level("WARNING"):
         legacy = EquityDuckdbAdapter(root)
     served = {p.field_id for p in legacy.list_fields()}
@@ -911,7 +1003,7 @@ def test_catalog_without_required_view_column_drops_only_that_source(
     denied = _raw(legacy, fields=("financial.book_equity",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog_columns_missing" in denied.detail
-    assert "period_frontier" in denied.detail
+    assert f"missing={list(absent)}" in denied.detail
     assert _raw(legacy, fields=("price.close",)).ok
     warned = [r.getMessage() for r in caplog.records if "catalog_columns_missing" in r.getMessage()]
     assert warned and "v_fin_latest" in warned[0] and "카탈로그" in warned[0]
@@ -1400,9 +1492,8 @@ def test_every_query_of_a_raw_load_watches_the_callers_checkpoint(
         checkpoint=checkpoint,
     )
 
-    # 격자 · 법인 대응(재무는 법인 축) · 재무 LATEST
-    assert len(passed) == 3
-    assert all(given is checkpoint for given in passed)
+    # 격자 · 법인 대응(재무는 법인 축) · 재무 LATEST — 틀리면 몇 번째 질의인지 보인다
+    assert passed == [checkpoint] * 3
 
 
 def test_a_duckdb_query_cancelled_while_running_is_interrupted_into_the_callers_error() -> None:

@@ -855,7 +855,7 @@ const ko = {
     "그래프 안에서 이 노드를 가리키는 이름입니다.",
   "strategy.field.node.field_id": "데이터 필드",
   "strategy.field.node.field_id.description":
-    "값을 읽어 올 원천 데이터 필드입니다. 수익률·모멘텀·이평·변동성처럼 가격 변화를 잴 때는 수정주가 price.adj_close를, 그날의 절대 가격이 필요한 가격 필터에는 원주가 price.close를 씁니다. 수정주가는 대부분의 분할·증자·병합을 반영하지만 모든 사건을 잇지는 않습니다. 원장이 그날 사건을 반영하지 못한 날은 값이 비고, 그날을 품는 집계 기간과 그날을 사이에 둔 '며칠 전 값' 비교도 빕니다. 집계의 '건너뛰는 세션'에 든 그날은 보지 않아, 그 집계를 오늘 값과 견주면 사건 직후 틀린 값이 남을 수 있습니다. 유상증자 권리락처럼 원장이 조정하지 않는 사건은 가격 변화가 그대로 남습니다.",
+    "값을 읽어 올 원천 데이터 필드입니다. 수익률·모멘텀·이평·변동성처럼 가격 변화를 잴 때는 수정주가 price.adj_close를, 그날의 절대 가격이 필요한 가격 필터에는 원주가 price.close를 씁니다. 수정주가는 대부분의 분할·증자·병합을 반영하지만 모든 사건을 잇지는 않습니다. 원장이 그날 사건을 반영하지 못한 날은 값이 비고, 그날을 품는 집계 기간과 그날을 사이에 두고 두 시점을 견주는 계산('며칠 전 값', 건너뛰는 세션을 둔 집계와 오늘 값의 비교)도 빕니다. 유상증자 권리락처럼 원장이 조정하지 않는 사건은 가격 변화가 그대로 남습니다.",
   "strategy.field.node.value": "값",
   "strategy.field.node.value.description": "이 노드가 내보낼 고정 숫자입니다.",
   "strategy.field.node.parameter_id": "파라미터 이름",
@@ -2606,7 +2606,7 @@ export const messages = {
       "The name other nodes use to refer to this one.",
     "strategy.field.node.field_id": "Data field",
     "strategy.field.node.field_id.description":
-      "The source field the value is read from. Use the adjusted close price.adj_close for returns, momentum, moving averages and volatility, and the raw close price.close only where the day's absolute price matters, such as a price filter. The adjusted close reflects most splits, bonus issues and reverse splits but does not bridge every event: on a day the ledger could not fold an event the value is missing, and so is any window holding that day or Lag comparison spanning it. The sessions a Window lag skips are not checked yet, so comparing such a window with today's value can still carry a wrong value right after the event. Events the ledger does not adjust, such as rights-offering ex-dates, keep their price change.",
+      "The source field the value is read from. Use the adjusted close price.adj_close for returns, momentum, moving averages and volatility, and the raw close price.close only where the day's absolute price matters, such as a price filter. The adjusted close reflects most splits, bonus issues and reverse splits but does not bridge every event: on a day the ledger could not fold an event the value is missing, and so is any window holding that day or any comparison of two points in time that spans it (Lag, or a window with Window lag against today's value). Events the ledger does not adjust, such as rights-offering ex-dates, keep their price change.",
     "strategy.field.node.value": "Value",
     "strategy.field.node.value.description":
       "The fixed number this node emits.",

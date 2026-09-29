@@ -453,6 +453,7 @@ export type {
   SearchBudgetExhaustedView,
   SecurityRef,
   SelectionMethod,
+  SellTax,
   SessionHistoryView,
   SessionUsageView,
   SessionView,

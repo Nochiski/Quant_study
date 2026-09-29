@@ -5808,6 +5808,21 @@
             "title": "Participation Rate",
             "type": "number"
           },
+          "sell_tax": {
+            "$ref": "#/components/schemas/SellTax",
+            "default": "krx_statutory"
+          },
+          "sell_tax_bps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sell Tax Bps"
+          },
           "slippage_bps": {
             "default": 10.0,
             "title": "Slippage Bps",
@@ -6188,6 +6203,16 @@
           "percentile"
         ],
         "title": "SelectionMethod",
+        "type": "string"
+      },
+      "SellTax": {
+        "description": "매도 체결에 붙는 거래세 방식(spec D7).\n\n`krx_statutory` 는 시장·날짜별 법정 세율표(`_krx_tax.py`)를, `custom` 은 `sell_tax_bps` 하나를,\n`none` 은 세금 없음을 뜻한다.",
+        "enum": [
+          "krx_statutory",
+          "custom",
+          "none"
+        ],
+        "title": "SellTax",
         "type": "string"
       },
       "SessionHistoryView": {

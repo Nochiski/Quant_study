@@ -82,6 +82,35 @@
         10.0
       ]
     },
+    "sell_tax": {
+      "type": "string",
+      "enum": [
+        "krx_statutory",
+        "custom",
+        "none"
+      ],
+      "default": "krx_statutory",
+      "x-description-key": "strategy.field.run_environment.sell_tax"
+    },
+    "sell_tax_bps": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "x-description-key": "run_environment.contract.sell_tax_bps",
+      "x-unit": "bps",
+      "x-applied-stage": "execution",
+      "minimum": 0.0,
+      "x-display-unit": "bp",
+      "examples": [
+        20.0
+      ]
+    },
     "missing": {
       "type": "string",
       "enum": [

@@ -37,6 +37,7 @@ import {
   openEditor,
   REQUESTED_ENVIRONMENT,
   replaceSource,
+  requestedEnvironment,
   requireData,
   save,
   saveAndWaitForRevision,
@@ -1470,7 +1471,9 @@ test.describe("professional YAML workflow", () => {
         expected_spec_hash: savedV2.spec_hash,
       },
       // 업그레이드 응답의 실행 설정이 그대로 실행 요청에 실린다(US-SM-07).
-      environment: oldEnvironment,
+      environment: requestedEnvironment(
+        oldEnvironment as Record<string, unknown>,
+      ),
     });
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(

@@ -10,6 +10,7 @@ import importlib
 import random
 import sys
 from collections.abc import Callable
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -394,6 +395,9 @@ def _delisted_replace_scenario(core: str) -> tuple[BacktestEngine, BacktestResul
     )
 
 
+# 매도 거래세 일정: 8/1 부터 20bp, 8/4 부터 25bp. 체결 세션마다 다른 세율이 붙는 경계를 덮는다.
+_SELL_TAX_SCHEDULE = ((date(2026, 8, 1), 20.0), (date(2026, 8, 4), 25.0))
+
 ENGINE_SCENARIOS = {
     "golden": lambda core: _engine_scenario(
         core,
@@ -435,6 +439,37 @@ ENGINE_SCENARIOS = {
         max_participation=0.1,
     ),
     "delisted_replace": _delisted_replace_scenario,
+    # 매도 거래세(V2-01): 롱 청산 매도, 숏 진입·청산, 같은 세션 매도 대금으로 매수하는 바스켓.
+    "golden_sell_tax": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="gt", initial_cash=100_000.0, fee_bps=10.0, sell_tax_schedule=_SELL_TAX_SCHEDULE
+        ),
+        ScriptedStrategy(script=(target_70pct(), None, liquidate(), None)),
+        DataFeed(GOLDEN_BARS),
+    ),
+    "short_sell_tax": lambda core: _engine_scenario(
+        core,
+        RunConfig(
+            run_id="st",
+            initial_cash=10_000.0,
+            short_borrow_bps_annual=252.0,
+            sell_tax_schedule=_SELL_TAX_SCHEDULE,
+        ),
+        test_short_selling.ShortStrategy(
+            (test_short_selling.target(-10), test_short_selling.target(0))
+        ),
+        DataFeed(test_short_selling.BARS),
+    ),
+    "basket_sell_tax": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="bt", initial_cash=100_000.0, sell_tax_schedule=_SELL_TAX_SCHEDULE),
+        test_basket.BasketStrategy(
+            (test_basket.hold_b(10), test_basket.pair(test_basket.GroupPolicy.PROPORTIONAL))
+        ),
+        DataFeed(test_basket.BARS),
+        max_participation=0.1,
+    ),
     "split": lambda core: _engine_scenario(
         core,
         RunConfig(run_id="c", initial_cash=10_000.0, fee_bps=0.0),

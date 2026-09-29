@@ -49,6 +49,8 @@ const result = (): BacktestRunResult => ({
       participation_rate: 0.2,
       fee_bps: 7,
       slippage_bps: 3,
+      sell_tax: "krx_statutory",
+      sell_tax_bps: null,
       missing: "zero",
     },
     environment_hash: "e".repeat(64),
@@ -102,6 +104,8 @@ describe("run 상세의 실행 설정", () => {
       "참여율 (%)",
       "수수료 (bp)",
       "슬리피지 (bp)",
+      "매도 거래세",
+      "매도 거래세율 (bp)",
       "결측 처리",
       "실행 설정 hash",
     ]);
@@ -113,6 +117,8 @@ describe("run 상세의 실행 설정", () => {
     // 평면 비용 필드(15bp)가 아니라 실행 설정이 실제로 쓴 값을 보인다(P3-02 결정 4).
     expect(row("참여율 (%)")).toHaveTextContent("20%");
     expect(row("수수료 (bp)")).toHaveTextContent("7bp");
+    expect(row("매도 거래세")).toHaveTextContent("법정 세율(날짜별)");
+    expect(row("매도 거래세율 (bp)")).toHaveTextContent("—");
     expect(row("결측 처리")).toHaveTextContent("0으로 채우기");
     expect(row("실행 설정 hash")).toHaveTextContent(`${"e".repeat(16)}…`);
   });
@@ -288,5 +294,41 @@ describe("사용 불가 지표의 이유", () => {
       .querySelector("tbody tr") as HTMLElement;
     expect(row).toHaveTextContent("벤치마크 값이 비어 계산할 수 없습니다");
     expect(within(row).queryByRole("link")).toBeNull();
+  });
+});
+
+describe("청산 거래 표", () => {
+  it("거래 비용 열은 수수료와 매도 거래세를 함께 담는다고 이름에 밝힌다", () => {
+    const base = result();
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          artifacts: {
+            ...base.artifacts,
+            trades: [
+              {
+                security_id: "005930",
+                side: "long",
+                opened_on: "2026-01-05",
+                closed_on: "2026-01-06",
+                quantity: "10",
+                entry_price: 100,
+                exit_price: 110,
+                // 수수료 1 + 매도 거래세 2.2(backend `_closed_trades` 가 합친다).
+                fees: 3.2,
+                pnl: 96.8,
+                slippage_cost: 0,
+              },
+            ],
+          },
+        }}
+        environmentFields={FIELDS}
+      />,
+    );
+
+    expect(
+      screen.getByRole("columnheader", { name: "비용(수수료·세금)" }),
+    ).toBeInTheDocument();
   });
 });

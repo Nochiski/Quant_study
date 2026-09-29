@@ -140,6 +140,7 @@ def compute_analytics(
             sum(item.net_exposure for item in points) / len(points),
         ),
         value("total_fees", data.total_fees),
+        value("total_taxes", data.total_taxes),
         value("total_slippage_cost", data.total_slippage_cost),
         value("total_carry_cost", data.total_carry_cost),
     )

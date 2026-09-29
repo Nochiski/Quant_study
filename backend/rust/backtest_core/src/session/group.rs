@@ -1,4 +1,4 @@
-use super::{py_list, EntryIn, QuoteOut, Session};
+use super::{py_list, sell_tax, EntryIn, QuoteOut, Session};
 use pyo3::prelude::*;
 
 impl<'a> Session<'a> {
@@ -94,7 +94,8 @@ impl<'a> Session<'a> {
                     &e.side,
                     q.quantity,
                     q.price,
-                    notional * self.fee_rate,
+                    notional * self.fee_rate
+                        + sell_tax(&e.side, q.quantity, q.price, self.sell_tax_rate),
                 )?;
             }
             quotes.push(q);

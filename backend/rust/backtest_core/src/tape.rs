@@ -252,6 +252,7 @@ mod tests {
             notify_fill: false,
             notify_order_update: false,
             notify_corporate_action: false,
+            sell_tax_rates: Vec::new(),
         }));
         runtime
     }

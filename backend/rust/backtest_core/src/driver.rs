@@ -49,6 +49,14 @@ pub(crate) struct RunSettings {
     pub(crate) notify_fill: bool,
     pub(crate) notify_order_update: bool,
     pub(crate) notify_corporate_action: bool,
+    /// 세션 index마다의 매도 거래세율. 비었으면 세금이 없다.
+    pub(crate) sell_tax_rates: Vec<f64>,
+}
+
+impl RunSettings {
+    fn sell_tax_rate(&self, session: usize) -> f64 {
+        self.sell_tax_rates.get(session).copied().unwrap_or(0.0)
+    }
 }
 
 /// 정산 세션이 확정된 자본변동 사건. index는 Python side table의 위치다.
@@ -344,7 +352,22 @@ impl PersistentEngine {
             match event {
                 Queued::Market => self.on_market(session)?,
                 Queued::Fill(fill) => {
+                    // 매도 거래세 레코드는 그 FILL 바로 뒤다 — Python 루프의 FILL 처리 순서와 같다.
+                    // 금액은 MARKET 적용(`apply_market_ops`)이 청구한 것과 같은 식이다.
+                    let rate = self.settings()?.sell_tax_rate(session);
+                    let tax = crate::session::sell_tax(&fill.side, fill.quantity, fill.price, rate);
+                    let instrument_id = fill.instrument_id;
                     self.record(session, RecordPayload::Fill(fill))?;
+                    if tax > 0.0 {
+                        self.record(
+                            session,
+                            RecordPayload::Cost {
+                                kind: "sell_tax".to_string(),
+                                instrument_id: Some(instrument_id),
+                                amount: tax,
+                            },
+                        )?;
+                    }
                 }
                 Queued::Notify(payload) => {
                     // 큐 엔트리의 세션이 곧 피드 커서(`current_session_count()` − 1)다.
@@ -419,6 +442,7 @@ impl PersistentEngine {
             settings.fee_rate,
             settings.default_participation.as_deref(),
             &settings.slippage,
+            settings.sell_tax_rate(session),
         )?;
         for (kind, order_id, quantity, price, slip, fee, payload) in ops {
             match kind.as_str() {
@@ -800,6 +824,7 @@ mod tests {
             notify_fill: false,
             notify_order_update: false,
             notify_corporate_action: false,
+            sell_tax_rates: Vec::new(),
         }
     }
 

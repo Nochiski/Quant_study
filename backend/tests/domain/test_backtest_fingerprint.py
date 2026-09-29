@@ -13,6 +13,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
+    SellTax,
     environment_hash,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -110,6 +111,17 @@ def test_manifest_rejects_a_cost_model_that_diverges_from_its_environment() -> N
     assert "run_id=run-001" in message
     assert "participation_rate: manifest=0.5" in message
     assert f"environment={base.environment.participation_rate!r}" in message
+
+
+def test_manifest_flat_cost_check_ignores_environment_only_cost_fields() -> None:
+    """매니페스트 평면 필드는 수수료·슬리피지·참여율 셋뿐이다. 실행 설정에만 있는 거래세 칸이
+    대조 집합에 들어가면 `AttributeError` 가 난다(spec D7)."""
+    manifest = _manifest("a" * 64, "a" * 64)
+    taxed = replace(manifest.environment, sell_tax=SellTax.CUSTOM, sell_tax_bps=20.0)
+
+    rebuilt = replace(manifest, environment=taxed, environment_hash=environment_hash(taxed))
+
+    assert rebuilt.environment.sell_tax_bps == 20.0
 
 
 def test_the_mismatch_message_names_both_producers_and_the_revision() -> None:

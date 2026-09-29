@@ -141,11 +141,21 @@ fn py_list(items: &[String]) -> String {
 /// `("trigger", order_id, ...)`, `("remove", order_id, ...)`, `("drop_group", group_id, ...)`
 pub(crate) type Op = (String, String, i64, f64, f64, f64, String);
 
+/// 매도 체결 금액 × 거래세율. 매수는 0이다. 연산 순서는 Python `costs.sell_tax_amount`와 같다.
+pub(crate) fn sell_tax(side: &str, quantity: i64, price: f64, rate: f64) -> f64 {
+    if side == "sell" {
+        quantity as f64 * price * rate
+    } else {
+        0.0
+    }
+}
+
 struct Session<'a> {
     ts: &'a str,
     bars: &'a HashMap<&'a str, BarTuple>,
     power: &'a mut BuyingPower,
     fee_rate: f64,
+    sell_tax_rate: f64,
     default_participation: Option<&'a str>,
     slippage: &'a (String, f64, f64),
     ops: Vec<Op>,
@@ -283,8 +293,11 @@ impl<'a> Session<'a> {
         let detail_before = self.detail(q, e);
         let notional = quantity as f64 * q.price;
         let fee = notional * self.fee_rate;
+        // 매도 거래세는 체결 기록이 아니라 비용 기록이지만, 같은 세션 뒤 매수가 그 돈을 쓰지 않도록
+        // 여력에서는 수수료와 함께 뺀다.
+        let tax = sell_tax(&e.side, quantity, q.price, self.sell_tax_rate);
         self.power
-            .consume(&e.key, &e.side, quantity, q.price, fee)?;
+            .consume(&e.key, &e.side, quantity, q.price, fee + tax)?;
         self.ops.push((
             "fill".into(),
             e.order_id.clone(),
@@ -375,6 +388,7 @@ pub(crate) fn process_market_impl(
     fee_rate: f64,
     default_participation: Option<&str>,
     slippage: &(String, f64, f64),
+    sell_tax_rate: f64,
 ) -> PyResult<Vec<Op>> {
     let mut entries: Vec<EntryIn> = entries.into_iter().map(EntryIn::from_tuple).collect();
     let mut session = Session {
@@ -382,6 +396,7 @@ pub(crate) fn process_market_impl(
         bars,
         power,
         fee_rate,
+        sell_tax_rate,
         default_participation,
         slippage,
         ops: Vec::new(),
@@ -435,7 +450,7 @@ pub(crate) fn process_market_impl(
 }
 
 #[pyfunction]
-#[pyo3(signature = (ts, entries, groups, bars, power, fee_rate, default_participation, slippage))]
+#[pyo3(signature = (ts, entries, groups, bars, power, fee_rate, default_participation, slippage, sell_tax_rate=0.0))]
 #[allow(clippy::too_many_arguments)]
 fn process_market(
     py: Python<'_>,
@@ -447,6 +462,7 @@ fn process_market(
     fee_rate: f64,
     default_participation: Option<&str>,
     slippage: (String, f64, f64),
+    sell_tax_rate: f64,
 ) -> PyResult<Vec<Op>> {
     PyErr::warn(
         py,
@@ -466,6 +482,7 @@ fn process_market(
         fee_rate,
         default_participation,
         &slippage,
+        sell_tax_rate,
     )
 }
 

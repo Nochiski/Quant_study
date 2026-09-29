@@ -276,8 +276,6 @@ class BuyingPowerTracker(Protocol):
 
     def quantity_of(self, instrument: InstrumentId) -> Decimal: ...
 
-    def consume(self, fill: FillEvent) -> None: ...
-
     def consume_quantity(
         self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float
     ) -> None: ...
@@ -304,9 +302,6 @@ class PythonBuyingPower:
 
     def quantity_of(self, instrument: InstrumentId) -> Decimal:
         return self._quantities.get(instrument, Decimal(0))
-
-    def consume(self, fill: FillEvent) -> None:
-        self.consume_quantity(fill.instrument, fill.side, fill.quantity, fill.price, fill.fee)
 
     def consume_quantity(
         self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float
@@ -351,9 +346,6 @@ class RustBuyingPower:
 
     def quantity_of(self, instrument: InstrumentId) -> Decimal:
         return Decimal(self._inner.quantity_of(instrument_key(instrument)))
-
-    def consume(self, fill: FillEvent) -> None:
-        self.consume_quantity(fill.instrument, fill.side, fill.quantity, fill.price, fill.fee)
 
     def consume_quantity(
         self, instrument: InstrumentId, side: Side, quantity: Decimal, price: float, fee: float

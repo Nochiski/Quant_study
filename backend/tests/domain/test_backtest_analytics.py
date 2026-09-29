@@ -40,6 +40,7 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
                 TradeOutcome("000660", date(2026, 1, 7), -5.0, 2.0, 0.7),
             ),
             total_fees=3.0,
+            total_taxes=0.6,
             total_slippage_cost=1.2,
             total_carry_cost=0.4,
         ),
@@ -47,7 +48,8 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
     )
 
     assert registry.version == "metric-registry-v2"
-    assert len(registry.definitions()) == 21
+    assert len(registry.definitions()) == 22
+    assert _metric(report, "total_taxes").value == pytest.approx(0.6)
     assert _metric(report, "total_return").value == pytest.approx(0.1)
     assert _metric(report, "max_drawdown").value == pytest.approx(-0.2)
     assert _metric(report, "max_drawdown_duration_sessions").value == 2.0
@@ -277,7 +279,7 @@ def test_requested_empty_scope_is_serialized_as_unavailable_instead_of_disappear
         reason=MetricUnavailableReason.NO_OBSERVATIONS_IN_SCOPE,
     )
 
-    assert len(values) == 21
+    assert len(values) == 22
     assert all(item.value is None for item in values)
     assert all(item.sample_count == 0 for item in values)
     assert {item.scope for item in values} == {MetricScope.VALIDATION}

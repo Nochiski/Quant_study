@@ -61,6 +61,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 )
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
+    SellTax,
     environment_hash,
 )
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
@@ -335,6 +336,35 @@ def test_explicit_costs_reach_the_engine_and_the_run_fingerprint(tmp_path: Path)
     # 같은 전략을 다른 실행 설정으로 돌렸다: 전략 hash 는 그대로, 실행 설정 hash 만 갈린다.
     assert dear_manifest.strategy_hash == cheap_manifest.strategy_hash
     assert dear_manifest.environment_hash != cheap_manifest.environment_hash
+
+
+@pytest.mark.parametrize("core", [ExecutionCore.PYTHON, ExecutionCore.RUST])
+def test_sell_tax_reaches_the_engine_and_is_reported_apart_from_fees(
+    tmp_path: Path, core: ExecutionCore
+) -> None:
+    """실행 설정의 거래세(V2-01)가 엔진까지 내려가 매도 체결마다 비용 기록을 남기고, 지표는 수수료·
+    대차 비용과 따로 센다. 매 세션 리밸런싱이고 1월 한 달이면 창 안에 매도가 있다."""
+    environment = replace(
+        _environment(), end=date(2024, 1, 31), sell_tax=SellTax.CUSTOM, sell_tax_bps=50.0
+    )
+    runs = _runs(_portfolio(), tmp_path, "taxed-run")
+    runs.start(BacktestRunSpec(strategy=_spec(), core=core, environment=environment))
+    assert wait_for_terminal_run(runs, "taxed-run").status.value == "completed"
+
+    result = runs.result("taxed-run")
+    sells = [fill for fill in result.artifacts.fills if fill.side == "sell"]
+    taxes = [cost for cost in result.artifacts.costs if cost.kind == "sell_tax"]
+    assert sells
+    assert [(cost.session, cost.security_id) for cost in taxes] == [
+        (fill.session, fill.security_id) for fill in sells
+    ]
+    assert [cost.amount for cost in taxes] == pytest.approx(
+        [float(fill.quantity) * fill.price * 0.005 for fill in sells]
+    )
+    full = {m.metric_id: m.value for m in result.metrics if m.scope is MetricScope.FULL}
+    assert full["total_taxes"] == pytest.approx(sum(cost.amount for cost in taxes))
+    assert full["total_fees"] == pytest.approx(sum(fill.fee for fill in result.artifacts.fills))
+    assert full["total_carry_cost"] == 0.0
 
 
 def test_metric_window_is_checked_against_the_explicit_environment(tmp_path: Path) -> None:

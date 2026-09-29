@@ -224,6 +224,8 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
             "participation_rate": 0.1,
             "fee_bps": 15.0,
             "slippage_bps": 10.0,
+            "sell_tax": "krx_statutory",
+            "sell_tax_bps": None,
             "missing": "drop",
         },
         "annualization_days": 252,
@@ -250,8 +252,8 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts()
     }
     # 경고 문장은 backend가 한글로 완성한다(SoT 경고 문장 행, 이슈 #229).
     assert all(re.search("[가-힣]", item["message"]) for item in result["manifest"]["warnings"])
-    assert len(result["metric_definitions"]) == 21
-    assert len(result["metrics"]) == 42
+    assert len(result["metric_definitions"]) == 22
+    assert len(result["metrics"]) == 44
     assert {item["scope"] for item in result["metrics"]} == {
         "full",
         "out_of_sample",
@@ -903,6 +905,8 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
         "participation_rate": 0.1,
         "fee_bps": 15.0,
         "slippage_bps": 10.0,
+        "sell_tax": "krx_statutory",
+        "sell_tax_bps": None,
         "missing": "drop",
     }
     body = _run_body(client, "python")

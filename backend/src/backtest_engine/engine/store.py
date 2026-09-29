@@ -85,7 +85,7 @@ class RecordKind(Enum):
     SNAPSHOT = ("snapshot", 5)
     CORPORATE_ACTION = ("corporate_action", 6)  # 사건 도착 (적용 여부와 무관)
     CORPORATE_ACTION_APPLIED = ("corporate_action_applied", 7)  # 포지션에 실제 적용된 기록
-    COST = ("cost", 8)  # 차입·이자 등 Fill 없는 현금 차감
+    COST = ("cost", 8)  # 차입·이자·매도 거래세 등 Fill 밖의 현금 차감
 
 
 _RECORD_KIND_BY_CODE: dict[int, RecordKind] = {kind.code: kind for kind in RecordKind}

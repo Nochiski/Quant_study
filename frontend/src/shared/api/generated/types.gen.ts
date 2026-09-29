@@ -3668,6 +3668,11 @@ export type RunEnvironment = {
    * Participation Rate
    */
   participation_rate?: number;
+  sell_tax?: SellTax;
+  /**
+   * Sell Tax Bps
+   */
+  sell_tax_bps?: number | null;
   /**
    * Slippage Bps
    */
@@ -3944,6 +3949,16 @@ export type SecurityRef = {
  * SelectionMethod
  */
 export type SelectionMethod = "top_n" | "percentile";
+
+/**
+ * SellTax
+ *
+ * 매도 체결에 붙는 거래세 방식(spec D7).
+ *
+ * `krx_statutory` 는 시장·날짜별 법정 세율표(`_krx_tax.py`)를, `custom` 은 `sell_tax_bps` 하나를,
+ * `none` 은 세금 없음을 뜻한다.
+ */
+export type SellTax = "krx_statutory" | "custom" | "none";
 
 /**
  * SessionHistoryView

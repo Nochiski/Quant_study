@@ -3,7 +3,7 @@ from __future__ import annotations
 from ._models import MetricCategory, MetricDefinition, MetricUnit
 
 # v2(#274): CAGR 연수를 달력 일수로 세고 1년 미만은 None으로 둔다. 구간 지표는 직전 세션이
-# 기준이다.
+# 기준이다. v2 지표 집합에 total_taxes 포함(#281 V2-01).
 REGISTRY_VERSION = "metric-registry-v2"
 
 
@@ -110,6 +110,9 @@ def build_default_metric_registry() -> MetricRegistry:
         ),
         MetricDefinition(
             "total_fees", "Total fees", MetricCategory.COST, currency, False, False, precision=2
+        ),
+        MetricDefinition(
+            "total_taxes", "Sell taxes", MetricCategory.COST, currency, False, False, precision=2
         ),
         MetricDefinition(
             "total_slippage_cost",

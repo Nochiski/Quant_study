@@ -1,5 +1,5 @@
 import type { StrategyTraceResponse } from "../../../shared/api";
-import type { ExclusionReason } from "./trace-copy";
+import type { ExclusionReason, TraceStatus } from "./trace-copy";
 
 export type TargetTapeProjectionRow = {
   securityId: string;
@@ -9,7 +9,7 @@ export type TargetTapeProjectionRow = {
   exclusionReasons: ExclusionReason[];
   targetWeight: number | null;
   nodeValue: number | boolean | null;
-  nodeStatus: string | null;
+  nodeStatus: TraceStatus | null;
 };
 
 /** Join only server-returned TargetTape/trace fields; no portfolio value is recomputed here. */

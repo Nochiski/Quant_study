@@ -1,38 +1,62 @@
-import { readFileSync } from "node:fs";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { describe, expect, it } from "vitest";
-
-import { messages } from "../../../shared/config";
-import { backendFixturePath } from "../../../shared/testing/backend-fixtures";
+import type { MessageKey } from "../../../shared/config";
+import { readOpenApi } from "../../../shared/testing/openapi-codes";
 import {
+  constraintEffectCopy,
+  contributionStatusCopy,
   exclusionReasonLabel,
+  traceStatusCopy,
+  type ConstraintEffect,
+  type ContributionStatus,
   type ExclusionReason,
+  type TraceStatus,
 } from "../model/trace-copy";
-
-/** backend OpenAPI 의 `ExclusionReason` enum. 값 목록의 owner 는 backend 다(여기 손으로 적지 않는다). */
-const OPENAPI_EXCLUSION_REASONS = (
-  JSON.parse(
-    readFileSync(backendFixturePath("../../openapi.json"), "utf8"),
-  ) as {
-    components: { schemas: { ExclusionReason: { enum: ExclusionReason[] } } };
-  }
-).components.schemas.ExclusionReason.enum;
 
 const HANGUL = /[가-힣]/;
 
-describe("exclusionReasonLabel (P3-01)", () => {
-  it("names every exclusion reason the backend can send, in both locales", () => {
-    // `tCode` 가 생성 enum 누락을 typecheck 에서 막고, 이 테스트는 실행 시 계약 파일과 대조한다.
-    expect(OPENAPI_EXCLUSION_REASONS.length).toBeGreaterThanOrEqual(13);
-    const missing = OPENAPI_EXCLUSION_REASONS.flatMap((reason) => {
-      const key = `debugger.exclusion.${reason}` as keyof (typeof messages)["en"];
-      return [
-        HANGUL.test(exclusionReasonLabel(reason)) ? null : `${reason} ko`,
-        messages.en[key] === undefined ? `${reason} en` : null,
-      ].filter((item): item is string => item !== null);
-    });
+describe("trace vocabulary copy (P3-01, #350)", () => {
+  // `tCode` 가 생성 enum 누락을 typecheck 에서 막고(en 은 `Record<MessageKey, string>`), 이 테스트는
+  // 실행 시 계약 파일과 대조한다. 값 목록의 owner 는 backend 다(여기 손으로 적지 않는다).
+  it.each([
+    ["ExclusionReason", exclusionReasonLabel],
+    ["TraceValueStatus", traceStatusCopy],
+    ["FactorContributionStatus", contributionStatusCopy],
+    ["PortfolioConstraintEffect", constraintEffectCopy],
+  ] as const)("names every %s value the backend can send", (schema, copy) => {
+    const values = readOpenApi().components.schemas[schema]?.enum ?? [];
+    expect(values.length).toBeGreaterThan(0);
+    const untranslated = values.filter(
+      (value) => !HANGUL.test((copy as (code: string) => string)(value)),
+    );
+    expect(untranslated).toEqual([]);
+  });
 
-    expect(missing).toEqual([]);
+  it("keeps no copy for a value the generated SDK no longer has", () => {
+    expectTypeOf<
+      Exclude<
+        Extract<MessageKey, `debugger.exclusion.${string}`>,
+        `debugger.exclusion.${ExclusionReason}`
+      >
+    >().toBeNever();
+    expectTypeOf<
+      Exclude<
+        Extract<MessageKey, `debugger.status.${string}`>,
+        `debugger.status.${TraceStatus}`
+      >
+    >().toBeNever();
+    expectTypeOf<
+      Exclude<
+        Extract<MessageKey, `debugger.contributionStatus.${string}`>,
+        `debugger.contributionStatus.${ContributionStatus}`
+      >
+    >().toBeNever();
+    expectTypeOf<
+      Exclude<
+        Extract<MessageKey, `debugger.constraintEffect.${string}`>,
+        `debugger.constraintEffect.${ConstraintEffect}`
+      >
+    >().toBeNever();
   });
 
   it("reads a cross-sectional rank cut differently from a broken eligibility rule", () => {
@@ -44,5 +68,16 @@ describe("exclusionReasonLabel (P3-01)", () => {
     expect(exclusionReasonLabel("eligibility_failed")).toBe(
       "거르기 조건 불통과",
     );
+  });
+
+  it("tells a cell the ledger masked apart from a missing input", () => {
+    // 두 입력이 모두 값인데 사이에 가린 칸이 든 칸이 "입력 없음"으로 보이면 원인을 알 수 없다(#350).
+    expect(traceStatusCopy("masked")).toBe("원장이 가림");
+    expect(traceStatusCopy("missing_input")).toBe("입력 없음");
+  });
+
+  it("reads a value newer than the generated SDK without inventing copy", () => {
+    // @ts-expect-error 생성 SDK에 없는 상태가 실려 온 경우를 흉내 낸다.
+    expect(traceStatusCopy("future_status")).toBe("future status");
   });
 });

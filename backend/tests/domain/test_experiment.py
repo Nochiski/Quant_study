@@ -71,6 +71,12 @@ def test_axis_values_are_normalized() -> None:
     # 선택지는 문서 선언 순서로 놓여 이웃 관계가 요청 순서에 흔들리지 않는다.
     assert spec.axes[1].values == ("a", "c")
 
+    # 정수 칸의 20.0 은 20 이다. 선택지 `1` 과 `True` 는 `==` 로 같지만 서로 다른 값이다.
+    mixed = ChoiceParameter(parameter_id="mixed", default=1, choices=(1, True), kind="choice")
+    typed = build_search_spec((LOOKBACK, mixed), {"lookback": [20.0], "mixed": [True]})
+    assert typed.axes[0].values == (20,) and type(typed.axes[0].values[0]) is int
+    assert typed.axes[1].values == (True,) and type(typed.axes[1].values[0]) is bool
+
 
 def test_invalid_values_message_carries_the_allowed_range() -> None:
     with pytest.raises(InvalidExperimentSpecError) as caught:
@@ -88,7 +94,9 @@ def test_invalid_values_message_carries_the_allowed_range() -> None:
     [
         ({"missing": [1]}, "experiment.search.unknown_parameter"),
         ({"lookback": [40]}, "experiment.search.invalid_values"),
-        ({"lookback": [20.0]}, "experiment.search.invalid_values"),
+        ({"lookback": [20.5]}, "experiment.search.invalid_values"),
+        # 20.0 은 정수 칸에서 20 으로 맞춰지므로 20 과 겹친다.
+        ({"lookback": [20, 20.0]}, "experiment.search.invalid_values"),
         ({"lookback": [True]}, "experiment.search.invalid_values"),
         ({"threshold": [1.5]}, "experiment.search.invalid_values"),
         ({"mode": ["d"]}, "experiment.search.invalid_values"),

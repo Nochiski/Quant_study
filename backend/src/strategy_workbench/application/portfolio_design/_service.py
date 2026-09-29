@@ -71,7 +71,10 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     compile_target_tape_with_trace,
 )
 from strategy_workbench.domain.strategy.facade.constraints import expression_code
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import (
+    StrategySpec,
+    resolve_parameter_values,
+)
 from strategy_workbench.domain.strategy.facade.validation import (
     StrategyValidation,
     ValidationSeverity,
@@ -358,8 +361,10 @@ class PortfolioDesignService:
             )
         )
         parameters = tuple(
-            ResolvedFactorParameter(parameter.parameter_id, parameter.default)
-            for parameter in spec.parameters
+            ResolvedFactorParameter(parameter_id, value)
+            for parameter_id, value in resolve_parameter_values(
+                spec.parameters, pipeline_options.parameter_values
+            ).items()
         )
         evaluations: list[FactorEvaluationRecord] = []
         factor_count = max(len(spec.factors), 1)

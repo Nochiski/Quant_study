@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import math
 from dataclasses import replace
+
+import pytest
 
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
@@ -12,10 +15,13 @@ from strategy_workbench.domain.strategy.facade.specification import (
     FactorSignal,
     FloatParameter,
     IntegerParameter,
+    InvalidParameterValueError,
     ParameterNode,
     SignalNormalization,
     StrategyIdentity,
+    normalized_parameter_value,
     parameter_value_allowed,
+    resolve_parameter_values,
     strategy_spec_hash,
 )
 
@@ -93,7 +99,7 @@ def test_parameter_value_allowed_checks_type_range_and_choices_but_not_step() ->
     assert parameter_value_allowed(weight, 0.15)
     assert parameter_value_allowed(lookback, 15)
     assert not parameter_value_allowed(weight, 0.35)
-    assert not parameter_value_allowed(lookback, 20.0)
+    assert not parameter_value_allowed(lookback, 20.5)
     assert not parameter_value_allowed(lookback, True)
     assert parameter_value_allowed(mode, "b")
     assert not parameter_value_allowed(mode, "c")
@@ -103,6 +109,60 @@ def test_parameter_value_allowed_checks_type_range_and_choices_but_not_step() ->
         InMemoryStrategyRepository(), new_id=lambda: "unused"
     ).validate(replace(_template(), parameters=(weight,)))
     assert "strategy.parameter.default" not in {issue.code for issue in validation.issues}
+
+
+def test_values_are_normalized_to_the_declared_type_without_bool_leaking() -> None:
+    lookback = IntegerParameter(
+        parameter_id="lookback", default=20, minimum=10, maximum=30, kind="integer"
+    )
+    weight = FloatParameter(
+        parameter_id="weight", default=0.5, minimum=0.0, maximum=2.0, kind="float"
+    )
+    numeric = ChoiceParameter(parameter_id="n", default=1, choices=(1, 2.5), kind="choice")
+    switch = ChoiceParameter(parameter_id="s", default=True, choices=(True, False), kind="choice")
+
+    # 문서 hydrate 와 같은 규칙: 정수 칸 20.0 → 20, 실수 칸 1 → 1.0, 선택지는 문서의 선택지 값.
+    for parameter, value, expected in (
+        (lookback, 20.0, 20),
+        (weight, 1, 1.0),
+        (numeric, 1.0, 1),
+        (numeric, 2.5, 2.5),
+        (switch, False, False),
+    ):
+        normalized = normalized_parameter_value(parameter, value)
+        assert normalized == expected and type(normalized) is type(expected), (parameter, value)
+    # `True == 1`·`1 == True` 이지만 bool 과 숫자는 서로의 값이 아니다.
+    assert normalized_parameter_value(numeric, True) is None
+    assert normalized_parameter_value(switch, 1) is None
+    assert normalized_parameter_value(lookback, True) is None
+    assert normalized_parameter_value(weight, False) is None
+    assert normalized_parameter_value(weight, math.nan) is None
+    assert normalized_parameter_value(lookback, math.inf) is None
+
+
+def test_resolved_values_fill_defaults_and_name_the_unresolvable_parameter() -> None:
+    parameters = (
+        IntegerParameter(
+            parameter_id="lookback", default=20, minimum=10, maximum=30, kind="integer"
+        ),
+        FloatParameter(parameter_id="weight", default=0.5, minimum=0.0, maximum=2.0, kind="float"),
+    )
+
+    assert resolve_parameter_values(parameters, {"weight": 1}) == {"lookback": 20, "weight": 1.0}
+    # 생략과 기본값 명시는 같은 해소 결과다 — 실행 지문도 같다.
+    assert resolve_parameter_values(parameters, {}) == resolve_parameter_values(
+        parameters, {"lookback": 20.0, "weight": 0.5}
+    )
+
+    with pytest.raises(InvalidParameterValueError) as unknown:
+        resolve_parameter_values(parameters, {"weight": 1.0, "missing": 1, "absent": 2})
+    assert unknown.value.parameter_id == "absent"
+    assert "unknown=['absent', 'missing'] declared=['lookback', 'weight']" in str(unknown.value)
+
+    with pytest.raises(InvalidParameterValueError) as outside:
+        resolve_parameter_values(parameters, {"lookback": 31})
+    assert outside.value.parameter_id == "lookback"
+    assert "value=31 kind=integer minimum=10 maximum=30" in str(outside.value)
 
 
 def test_explanation_preserves_pipeline_order() -> None:

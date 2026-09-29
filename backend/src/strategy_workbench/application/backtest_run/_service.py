@@ -46,7 +46,11 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategySourceKind,
     WarningSeverity,
 )
-from strategy_workbench.domain.strategy.facade.specification import strategy_spec_hash
+from strategy_workbench.domain.strategy.facade.specification import (
+    InvalidParameterValueError,
+    resolve_parameter_values,
+    strategy_spec_hash,
+)
 
 from ._gc_policy import full_collections_suspended
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
@@ -150,6 +154,18 @@ class BacktestResearchWindowViolationError(InvalidBacktestRunError):
     def __init__(self, violation: ResearchWindowViolationError) -> None:
         super().__init__(str(violation))
         self.violation = violation
+
+
+class BacktestParameterValueError(InvalidBacktestRunError):
+    """실행 요청의 파라미터 값을 전략 문서 정의로 해소할 수 없다(spec D4, V3-02).
+
+    `BacktestResearchWindowViolationError` 와 같은 이유로 HTTP 코드를 따로 준다. 어느 파라미터인지는
+    `parameter_id` 가 싣는다.
+    """
+
+    def __init__(self, error: InvalidParameterValueError) -> None:
+        super().__init__(str(error))
+        self.parameter_id = error.parameter_id
 
 
 class StrategyReferenceNotFoundError(LookupError):
@@ -258,6 +274,13 @@ class BacktestRunService:
             raise InvalidBacktestRunError(
                 "strategy exceeds engine capabilities — " + _describe_engine_issues(engine)
             )
+        # 파라미터 값은 문서 검증(preflight) 뒤에 해소한다. 해소 결과가 실행 spec 에 박혀 지문·같은
+        # 입력 잇기·매니페스트·tape 가 모두 같은 값을 본다(spec D4).
+        try:
+            parameter_values = resolve_parameter_values(strategy.parameters, spec.parameter_values)
+        except InvalidParameterValueError as error:
+            raise BacktestParameterValueError(error) from error
+        spec = replace(spec, parameter_values=parameter_values)
         for window in spec.metric_windows:
             if window.start < environment.start or window.end > environment.end:
                 raise InvalidBacktestRunError(
@@ -580,7 +603,9 @@ class BacktestRunService:
                 # 같은 순수 판정이라 정상 경로에서는 발동하지 않는다.
                 preview = self._portfolio_design.run_pipeline(
                     PortfolioPreviewRequest(strategy, environment=environment),
-                    options=PortfolioPipelineOptions(require_engine_compatible=True),
+                    options=PortfolioPipelineOptions(
+                        require_engine_compatible=True, parameter_values=spec.parameter_values
+                    ),
                     cancelled=record.cancellation.is_set,
                     progress=self._tape_progress(record),
                 ).preview

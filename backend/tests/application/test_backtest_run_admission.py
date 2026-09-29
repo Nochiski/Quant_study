@@ -43,6 +43,7 @@ from strategy_workbench.domain.analytics.facade.metrics import build_default_met
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore
 from strategy_workbench.domain.strategy.facade.specification import (
+    FloatParameter,
     RebalanceFrequency,
     StrategySpec,
 )
@@ -268,6 +269,29 @@ def test_a_request_that_differs_in_any_input_starts_its_own_run(
     assert other.run.run_id == "variant-other"
     port.release.set()
     for run_id in ("variant-base", "variant-other"):
+        assert wait_for_terminal_run(runs, run_id).status is RunStatus.COMPLETED
+
+
+def test_parameter_values_split_runs_and_an_explicit_default_joins(
+    gated_runs: _GatedRuns,
+) -> None:
+    """검증 랩 V3-02: 해소된 파라미터 값이 실행 spec 에 박혀 같은 입력 판정을 가른다(spec D4)."""
+    runs, port, _entries = gated_runs("parameter-base", "parameter-other", max_concurrent_runs=2)
+    request = replace(
+        _request(),
+        strategy=replace(_spec(), parameters=(FloatParameter("scale", 1.0, -1.0, 1.0, "float"),)),
+    )
+
+    runs.start(request)
+    assert port.entered.wait(timeout=30), "first run never reached the tape stage"
+    # 기본값을 적은 요청은 생략한 요청과 해소 결과가 같아 도는 run 에 잇는다.
+    joined = runs.start(replace(request, parameter_values={"scale": 1}))
+    other = runs.start(replace(request, parameter_values={"scale": -1.0}))
+
+    assert joined.run.run_id == "parameter-base"
+    assert other.run.run_id == "parameter-other"
+    port.release.set()
+    for run_id in ("parameter-base", "parameter-other"):
         assert wait_for_terminal_run(runs, run_id).status is RunStatus.COMPLETED
 
 

@@ -1,8 +1,8 @@
 """탐색 그리드(`SearchSpec`)와 그리드 이웃 — v1 파라미터 탐색은 그리드만 쓴다(spec D5).
 
-탐색 값의 허용 판정은 전략 도메인의 `parameter_value_allowed`(타입·범위·선택지) 하나다. 간격(step)은
-격자를 펼치는 폭으로만 쓰고, `Decimal` 로 셈해 `0.1 + 0.2` 같은 이진 부동소수 오차가 격자 값을
-흔들지 않게 한다.
+탐색 값의 허용 판정과 선언 타입 정규화는 전략 도메인의 `normalized_parameter_value`(타입·범위·
+선택지) 하나다. 간격(step)은 격자를 펼치는 폭으로만 쓰고, `Decimal` 로 셈해 `0.1 + 0.2` 같은 이진
+부동소수 오차가 격자 값을 흔들지 않게 한다.
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ from typing import TypeAlias
 
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
-    FloatParameter,
     IntegerParameter,
     ParameterDefinition,
     ParameterValue,
-    parameter_value_allowed,
+    describe_allowed_parameter_values,
+    normalized_parameter_value,
 )
 
 from ._errors import InvalidExperimentSpecError
@@ -156,11 +156,18 @@ def neighbor_mean(
 def _checked_axis_values(
     parameter: ParameterDefinition, values: tuple[ParameterValue, ...]
 ) -> tuple[ParameterValue, ...]:
-    rejected = [value for value in values if not parameter_value_allowed(parameter, value)]
-    problems = [f"정의 밖 값 values={rejected} {_allowed_range(parameter)}"] if rejected else []
+    normalized = [normalized_parameter_value(parameter, value) for value in values]
+    rejected = [value for value, kept in zip(values, normalized, strict=True) if kept is None]
+    # `True == 1` 이라 값 자체로 겹침을 보면 선택지 `1` 과 `True` 가 한 값이 된다. 타입과 함께 본다.
+    keys = {(type(value), value) for value in normalized if value is not None}
+    problems = (
+        [f"정의 밖 값 values={rejected} {describe_allowed_parameter_values(parameter)}"]
+        if rejected
+        else []
+    )
     if not values:
         problems.append("탐색 값이 비었습니다")
-    elif len(set(values)) != len(values):
+    elif len(keys) != len(values) - len(rejected):
         problems.append("같은 값이 두 번 있습니다")
     if problems:
         raise InvalidExperimentSpecError(
@@ -169,10 +176,8 @@ def _checked_axis_values(
             + "; ".join(problems),
         )
     if isinstance(parameter, ChoiceParameter):
-        return tuple(choice for choice in parameter.choices if choice in values)
-    if isinstance(parameter, FloatParameter):
-        return tuple(sorted(float(value) for value in values))
-    return tuple(sorted(values))
+        return tuple(choice for choice in parameter.choices if (type(choice), choice) in keys)
+    return tuple(sorted(value for _, value in keys))
 
 
 def _too_many_points(points: int) -> InvalidExperimentSpecError:
@@ -186,10 +191,3 @@ def _inside(shape: tuple[int, ...], cell: GridIndex) -> bool:
     return len(cell) == len(shape) and all(
         0 <= i < size for i, size in zip(cell, shape, strict=True)
     )
-
-
-def _allowed_range(parameter: ParameterDefinition) -> str:
-    """진단 문장에 싣는 허용 범위(`key=value`)."""
-    if isinstance(parameter, ChoiceParameter):
-        return f"choices={list(parameter.choices)}"
-    return f"kind={parameter.kind} minimum={parameter.minimum} maximum={parameter.maximum}"

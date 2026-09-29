@@ -199,6 +199,8 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
         "annualization_days": 252,
         "initial_cash": 100_000_000.0,
         "strategy_source": None,
+        # 원본 요청이라 파라미터 값은 해소 전(비어 있음)이다. 해소 값은 매니페스트가 싣는다.
+        "parameter_values": {},
     }
 
     not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
@@ -856,6 +858,7 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
         "backtest.run.field_invalid",
         "backtest.run.environment_required",
         "backtest.run.research_window_violation",
+        "backtest.run.parameter_invalid",
         "backtest.strategy.requires_upgrade",
         "portfolio.strategy.invalid",
     }
@@ -867,6 +870,15 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
     assert missing_environment.status_code == 422, missing_environment.text
     assert missing_environment.json()["detail"]["code"] == "backtest.run.environment_required"
     TypeAdapter(Backtest422Response).validate_python(missing_environment.json())
+
+    # 문서에 없는 파라미터 값은 어느 파라미터인지 싣고 거절한다(검증 랩 spec D4).
+    unknown_parameter = _run_body(client, "python")
+    unknown_parameter["parameter_values"] = {"missing": 1}
+    parameter_response = client.post("/api/v1/backtests", json=unknown_parameter)
+    assert parameter_response.status_code == 422, parameter_response.text
+    assert parameter_response.json()["detail"]["code"] == "backtest.run.parameter_invalid"
+    assert parameter_response.json()["detail"]["parameter_id"] == "missing"
+    TypeAdapter(Backtest422Response).validate_python(parameter_response.json())
 
     semantic = _run_body(client, "python")
     semantic["strategy"]["portfolio"]["weighting"] = "risk"

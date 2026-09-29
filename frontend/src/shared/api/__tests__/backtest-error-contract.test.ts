@@ -31,6 +31,9 @@ const classify = (response: StartBacktest422): string => {
     // 봉인 구간을 측정하는 요청은 서버가 거절한다(검증 랩 spec D1).
     case "backtest.run.research_window_violation":
       return `research_window:${detail.message}`;
+    // 문서에 없는 파라미터·허용 밖 값은 어느 파라미터인지 싣는다(검증 랩 spec D4).
+    case "backtest.run.parameter_invalid":
+      return `parameter:${detail.parameter_id}`;
     default: {
       const exhaustive: never = detail;
       return exhaustive;
@@ -135,6 +138,7 @@ describe("backtest run failure code vocabulary", () => {
       "backtest.run.environment_required",
       "backtest.run.field_invalid",
       "backtest.run.invalid",
+      "backtest.run.parameter_invalid",
       "backtest.run.research_window_violation",
       "backtest.strategy.not_found",
       "backtest.strategy.requires_upgrade",

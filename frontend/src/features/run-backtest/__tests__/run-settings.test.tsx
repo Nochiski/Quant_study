@@ -280,10 +280,7 @@ describe("backtest run settings", () => {
   // 실행돼 사용자가 원한 표본 밖 측정이 아무 표시 없이 사라진다. 비운 칸은 그대로 통과한다(선택 칸).
   it("blocks a half-typed OOS start instead of silently running without the OOS window", () => {
     expect(
-      buildBacktestRunOptions(
-        { ...DEFAULT_BACKTEST_RUN_SETTINGS, oosStartIncomplete: true },
-        VALID,
-      ),
+      buildBacktestRunOptions(DEFAULT_BACKTEST_RUN_SETTINGS, VALID, true),
     ).toEqual({ valid: false, options: null, errors: ["oos_incomplete"] });
     expect(
       buildBacktestRunOptions(DEFAULT_BACKTEST_RUN_SETTINGS, VALID).options
@@ -709,6 +706,33 @@ describe("run environment panel", () => {
     expect(screen.getAllByText(incomplete, { exact: false })).not.toHaveLength(
       0,
     );
+  });
+
+  // #297 리뷰 P3-1: 다 친 날짜를 고쳐 치면 값이 빈 문자열로 바뀌며 change 가 난다. 그것도 칸 안에서 난 일이라
+  // 실행만 막고, 오류는 칸을 떠날 때 선다.
+  it("keeps the error hidden while a whole OOS date is being retyped", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const oos = screen.getByLabelText(/^OOS 시작일/);
+    await user.type(oos, "2024-01-02");
+    expect(requestBody()).not.toBeNull();
+    // Backspace 한 번으로 한 자리가 빈 날짜 칸: 값은 빈 문자열, `badInput` 은 참이다.
+    Object.defineProperty(oos, "validity", {
+      configurable: true,
+      value: { badInput: true },
+    });
+    fireEvent.change(oos, { target: { value: "" } });
+    expect(requestBody()).toBeNull();
+    expect(oos).not.toHaveAttribute("aria-invalid");
+    expect(
+      screen.queryByText("연·월·일까지 모두 올바르게 입력하세요.", {
+        exact: false,
+      }),
+    ).toBeNull();
+
+    fireEvent.blur(oos);
+    expect(oos).toHaveAttribute("aria-invalid", "true");
   });
 
   it("says the date is incomplete when a remembered value is not a whole date", async () => {

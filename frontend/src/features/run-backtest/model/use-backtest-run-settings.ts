@@ -73,9 +73,9 @@ const NO_FIELDS: readonly RunEnvironmentField[] = [];
 
 type ScopedValues = { key: string; values: RunEnvironmentValues };
 /**
- * 덜 친 날짜 칸(브라우저 `validity.badInput`)의 이름. `settled` 는 값이 바뀌거나 칸을 떠날 때 읽은 것이라
- * 표시와 실행이 모두 보고, `typing` 은 키를 뗄 때 읽은 것이라 실행 게이트만 본다 — 치는 도중에 칸 아래·요약
- * 띠·오류 목록이 서지 않는다(#270 P3-R2).
+ * 덜 친 날짜 칸(브라우저 `validity.badInput`)의 이름. `settled` 는 칸을 떠날 때 넣은 것이라 표시와 실행이
+ * 모두 보고, `typing` 은 칸 안(키를 뗌·값이 바뀜)에서 읽은 것이라 실행 게이트만 본다 — 빈 칸에 치거나 다
+ * 친 날짜를 고쳐 치는 도중에 칸 아래·요약 띠·오류 목록이 서지 않는다(#270 P3-R2, #297 리뷰 P3-1).
  */
 type ScopedDates = {
   key: string;
@@ -166,8 +166,9 @@ export const useBacktestRunSettings = (storageKey: string) => {
   const result = useMemo(
     () =>
       buildBacktestRunOptions(
-        { ...fields, oosStartIncomplete: dates.settled.has(OOS_START_FIELD) },
+        fields,
         environment,
+        dates.settled.has(OOS_START_FIELD),
       ),
     [dates.settled, environment, fields],
   );
@@ -195,18 +196,24 @@ export const useBacktestRunSettings = (storageKey: string) => {
     [environmentValues, replaceEnvironment],
   );
   /**
-   * 날짜 칸(실행 설정 칸과 OOS 시작일)이 덜 쳐졌는지 칸이 알려 준다. `typing` 이면 키를 뗄 때 읽은 것이라
-   * 실행 게이트만 고치고, 아니면(값이 바뀜·칸을 떠남) 표시까지 고친다. 바뀐 것이 없으면 state 를 건드리지 않는다.
+   * 날짜 칸(실행 설정 칸과 OOS 시작일)이 덜 쳐졌는지 칸이 알려 준다. 칸 안에서 난 일(`leaving` 거짓)은
+   * 실행 게이트만 고치고 표시는 지우기만 한다 — 날짜 선택기로 고르거나 끝까지 친 날짜는 오류를 바로
+   * 지운다. 표시에 넣는 것은 칸을 떠날 때뿐이다. 바뀐 것이 없으면 state 를 건드리지 않는다.
    */
   const setDateIncomplete = useCallback(
-    (name: string, incomplete: boolean, typing: boolean): void =>
+    (name: string, incomplete: boolean, leaving: boolean): void =>
       setIncompleteDates((current) => {
         const scoped =
           current !== null && current.key === storageKey ? current : NO_DATES;
-        const settled = typing
-          ? scoped.settled
-          : withName(scoped.settled, name, incomplete);
-        const nextTyping = withName(scoped.typing, name, typing && incomplete);
+        const settled =
+          leaving || !incomplete
+            ? withName(scoped.settled, name, incomplete)
+            : scoped.settled;
+        const nextTyping = withName(
+          scoped.typing,
+          name,
+          !leaving && incomplete,
+        );
         return settled === scoped.settled && nextTyping === scoped.typing
           ? current
           : { key: storageKey, settled, typing: nextTyping };

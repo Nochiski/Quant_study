@@ -149,6 +149,14 @@ test(
     await expect(oosIncomplete).toHaveCount(0);
     await expect(oos).not.toHaveAttribute("aria-invalid", "true");
     await expect(backtest(page)).toBeEnabled();
+    // 다 친 날짜를 고쳐 칠 때도 같다. 한 자리를 지우면 값이 빈 문자열이 되지만, 칸을 떠나기 전에는 오류를
+    // 띄우지 않고 실행만 막는다(#297 리뷰 P3-1).
+    await page.keyboard.press("Backspace");
+    await expect(oos).toHaveValue("");
+    await expect(backtest(page)).toBeDisabled();
+    await expect(oos).not.toHaveAttribute("aria-invalid", "true");
+    await universe.click();
+    await expect(oos).toHaveAttribute("aria-invalid", "true");
     // 덜 친 OOS 로는 시작 요청이 한 번도 나가지 않았다.
     expect(starts).toEqual([]);
     await expect(page).toHaveURL(/\/research\/strategies\/new/u);

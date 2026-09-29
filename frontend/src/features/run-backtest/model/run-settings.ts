@@ -7,11 +7,6 @@ export type BacktestRunSettingsFields = {
   benchmarkSecurityId: string;
   annualizationDays: string;
   oosStart: string;
-  /**
-   * OOS 시작일 칸을 덜 쳤는지(브라우저 `validity.badInput`). 덜 친 날짜 칸의 값은 빈 문자열이라 이 표시가
-   * 없으면 비운 칸과 구분할 수 없다(#266 리뷰 P2-1). 컨트롤러가 칸이 알려 준 덜 친 날짜로 채운다.
-   */
-  oosStartIncomplete?: boolean;
 };
 
 /** OOS 시작일 칸의 이름(`data-run-field`). 덜 친 날짜 표시와 오류 → 칸 초점이 같은 이름을 쓴다. */
@@ -57,11 +52,14 @@ export const DEFAULT_BACKTEST_RUN_SETTINGS: BacktestRunSettingsFields = {
 /**
  * Parse UI representation only. The backend remains the owner of accepted execution semantics,
  * defaults and final validation; successful fields are sent explicitly for a reproducible run.
- * 실행 설정(`environment`)은 패널이 스키마로 검증한 값을 그대로 싣는다(P3-02).
+ * 실행 설정(`environment`)은 패널이 스키마로 검증한 값을 그대로 싣는다(P3-02). `oosIncomplete` 는 OOS
+ * 시작일 칸을 덜 쳤는지다(브라우저 `validity.badInput`, 컨트롤러의 덜 친 날짜). 덜 친 날짜 칸의 값은 빈
+ * 문자열이라 이것이 없으면 비운 칸과 구분할 수 없다(#266 리뷰 P2-1).
  */
 export const buildBacktestRunOptions = (
   fields: BacktestRunSettingsFields,
   environment: RunEnvironmentValidation,
+  oosIncomplete = false,
 ): BacktestRunSettingsResult => {
   const errors: BacktestRunSettingsError[] = [];
   const initialCashText = fields.initialCashKrw.trim();
@@ -87,8 +85,7 @@ export const buildBacktestRunOptions = (
   if (!environment.valid) errors.push("environment");
 
   const oosStart = fields.oosStart.trim();
-  if (oosStart === "" && fields.oosStartIncomplete === true)
-    errors.push("oos_incomplete");
+  if (oosStart === "" && oosIncomplete) errors.push("oos_incomplete");
   const range = environment.valid ? environment.environment : null;
   if (
     oosStart !== "" &&

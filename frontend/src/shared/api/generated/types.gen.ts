@@ -1462,6 +1462,268 @@ export type ExecutionCore = "rust" | "python";
 export type ExecutionTiming = "next_open";
 
 /**
+ * Experiment
+ */
+export type Experiment = {
+  record: ExperimentRecord;
+  /**
+   * Selections
+   */
+  selections: Array<ExperimentSelection>;
+  status: ExperimentStatus;
+};
+
+/**
+ * ExperimentAdmissionErrorResponse
+ *
+ * 실험 설계 거절이거나, 기반 실행 요청을 실행 접수가 거절했다(백테스트 시작과 같은 코드).
+ */
+export type ExperimentAdmissionErrorResponse = {
+  /**
+   * Detail
+   */
+  detail:
+    | ExperimentErrorDetail
+    | ({
+        code: "backtest.run.invalid";
+      } & BacktestRunInvalidDetail)
+    | ({
+        code: "backtest.run.field_invalid";
+      } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
+        code: "backtest.run.research_window_violation";
+      } & BacktestResearchWindowViolationDetail)
+    | ({
+        code: "backtest.run.parameter_invalid";
+      } & BacktestParameterInvalidDetail)
+    | ({
+        code: "backtest.strategy.requires_upgrade";
+      } & BacktestStrategyRequiresUpgradeDetail)
+    | ({
+        code: "portfolio.strategy.invalid";
+      } & PortfolioStrategyInvalidDetail);
+};
+
+/**
+ * ExperimentDesign
+ */
+export type ExperimentDesign = {
+  /**
+   * Parameter Values
+   */
+  parameter_values: {
+    [key: string]: number | number | string | boolean;
+  };
+  search: SearchSpec;
+  /**
+   * Windows
+   */
+  windows: Array<WalkForwardWindow>;
+};
+
+/**
+ * ExperimentErrorDetail
+ *
+ * 실험 거절. 코드 목록 owner 는 `domain/experiment/_errors.py` 이고, 화면 문장은 frontend 가
+ * `code` 로 번역한다.
+ */
+export type ExperimentErrorDetail = {
+  /**
+   * Code
+   */
+  code:
+    | "experiment.base.invalid"
+    | "experiment.base.unsaved"
+    | "experiment.not_found"
+    | "experiment.search.invalid_values"
+    | "experiment.search.too_many_points"
+    | "experiment.search.unknown_parameter"
+    | "experiment.selection.not_completed"
+    | "experiment.split.invalid"
+    | "experiment.split.no_window"
+    | "experiment.trial.not_found"
+    | "experiment.trial.not_retryable";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * ExperimentErrorResponse
+ */
+export type ExperimentErrorResponse = {
+  detail: ExperimentErrorDetail;
+};
+
+/**
+ * ExperimentPreview
+ *
+ * 시작 전 미리 계산 — 무엇을 몇 번 돌리고 계열 시도 수 N 이 얼마가 되나(spec D2).
+ */
+export type ExperimentPreview = {
+  /**
+   * Combination Count
+   */
+  combination_count: number;
+  design: ExperimentDesign;
+  /**
+   * Lineage Id
+   */
+  lineage_id: string;
+  /**
+   * New Trial Count
+   */
+  new_trial_count: number;
+  /**
+   * Run Count
+   */
+  run_count: number;
+  /**
+   * Trial Count
+   */
+  trial_count: number;
+  /**
+   * Trial Count After
+   */
+  trial_count_after: number;
+};
+
+/**
+ * ExperimentRecord
+ *
+ * 만든 실험. 취소 시각 말고는 바뀌지 않는다.
+ */
+export type ExperimentRecord = {
+  /**
+   * Cancelled At
+   */
+  cancelled_at?: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  design: ExperimentDesign;
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  run: BacktestRunSpec;
+  split: SplitSpec;
+};
+
+/**
+ * ExperimentRequest
+ *
+ * 실험 만들기·미리 계산 요청.
+ */
+export type ExperimentRequest = {
+  run: BacktestRunSpec;
+  /**
+   * Search
+   */
+  search: {
+    [key: string]: Array<number | number | string | boolean> | null;
+  };
+  split: SplitSpec;
+};
+
+/**
+ * ExperimentSelection
+ *
+ * 사용자가 고른 후보 기록(spec D9). 되돌릴 수 없다.
+ */
+export type ExperimentSelection = {
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Parameter Values
+   */
+  parameter_values: {
+    [key: string]: number | number | string | boolean;
+  };
+  /**
+   * Reason
+   */
+  reason: string;
+  /**
+   * Revision
+   */
+  revision: number;
+  /**
+   * Selected At
+   */
+  selected_at: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+};
+
+/**
+ * ExperimentSelectionRequest
+ */
+export type ExperimentSelectionRequest = {
+  /**
+   * Reason
+   */
+  reason: string;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+};
+
+/**
+ * ExperimentStatus
+ *
+ * 실험 단위 상태. trial 상태와 실험 취소에서 파생하고 따로 저장하지 않는다(spec D6).
+ */
+export type ExperimentStatus = "queued" | "running" | "completed" | "cancelled";
+
+/**
+ * ExperimentTrial
+ */
+export type ExperimentTrial = {
+  /**
+   * Grid Index
+   */
+  grid_index: Array<number>;
+  /**
+   * Index
+   */
+  index: number;
+  /**
+   * Parameter Values
+   */
+  parameter_values: {
+    [key: string]: number | number | string | boolean;
+  };
+  window: WalkForwardWindow;
+};
+
+/**
+ * ExperimentTrialState
+ */
+export type ExperimentTrialState = {
+  /**
+   * Attempts
+   */
+  attempts: Array<TrialAttempt>;
+  status: TrialStatus;
+  trial: ExperimentTrial;
+};
+
+/**
  * FactorAnalytics
  */
 export type FactorAnalytics = {
@@ -4035,6 +4297,22 @@ export type SearchActivityView = {
 };
 
 /**
+ * SearchAxis
+ *
+ * 탐색할 파라미터 하나와 그 값 목록. 숫자는 오름차순, 선택지는 문서 선언 순서다.
+ */
+export type SearchAxis = {
+  /**
+   * Parameter Id
+   */
+  parameter_id: string;
+  /**
+   * Values
+   */
+  values: Array<number | number | string | boolean>;
+};
+
+/**
  * SearchBudgetExhaustedView
  *
  * 검색 횟수 상한에 닿아 이 턴의 남은 호출에서 검색을 뺐다는 통지. 검색 활동이 아니다.
@@ -4047,6 +4325,20 @@ export type SearchBudgetExhaustedView = {
    * Type
    */
   type: "search_budget_exhausted";
+};
+
+/**
+ * SearchSpec
+ *
+ * 탐색 축들의 곱집합이 그리드다. 축 순서는 전략 문서의 파라미터 선언 순서다.
+ *
+ * 축이 없으면 문서 기본값 한 칸(좌표 `()`)이다.
+ */
+export type SearchSpec = {
+  /**
+   * Axes
+   */
+  axes: Array<SearchAxis>;
 };
 
 /**
@@ -4266,6 +4558,31 @@ export type SourceView = {
    * Url
    */
   url: string;
+};
+
+/**
+ * SplitMode
+ */
+export type SplitMode = "rolling" | "anchored";
+
+/**
+ * SplitSpec
+ */
+export type SplitSpec = {
+  /**
+   * Embargo Sessions
+   */
+  embargo_sessions: number;
+  mode: SplitMode;
+  selection_rule?: WindowSelectionRule;
+  /**
+   * Test Years
+   */
+  test_years: number;
+  /**
+   * Train Years
+   */
+  train_years: number;
 };
 
 /**
@@ -5476,6 +5793,38 @@ export type TraceValueStatus =
   "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
 
 /**
+ * TrialAttempt
+ *
+ * trial 의 실행 시도 하나. 실행에 배정되면 `run_id`, 접수가 거절되면 `error` 만 있다.
+ */
+export type TrialAttempt = {
+  /**
+   * Attempt
+   */
+  attempt: number;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Run Id
+   */
+  run_id?: string | null;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+};
+
+/**
  * TrialGroup
  *
  * 같은 시도 키의 실행들. 대표 실행이 없으면 이 시도는 N 에 들지 않는다.
@@ -5622,6 +5971,12 @@ export type TrialRun = {
  * TrialRunRole
  */
 export type TrialRunRole = "counted" | "recheck" | "pending" | "no_result";
+
+/**
+ * TrialStatus
+ */
+export type TrialStatus =
+  "queued" | "running" | "completed" | "failed" | "cancelled";
 
 /**
  * TurnAcceptedView
@@ -6007,6 +6362,30 @@ export type ValidationKind = "syntax" | "semantic" | "capability";
 export type ValidationSeverity = "error" | "warning";
 
 /**
+ * WalkForwardWindow
+ *
+ * 학습·검증 구간 한 쌍. 네 날짜 모두 양끝 포함이고 연구 구간 안이다.
+ */
+export type WalkForwardWindow = {
+  /**
+   * Test End
+   */
+  test_end: string;
+  /**
+   * Test Start
+   */
+  test_start: string;
+  /**
+   * Train End
+   */
+  train_end: string;
+  /**
+   * Train Start
+   */
+  train_start: string;
+};
+
+/**
  * WarningSeverity
  */
 export type WarningSeverity = "info" | "warning";
@@ -6015,6 +6394,14 @@ export type WarningSeverity = "info" | "warning";
  * WeightingMethod
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
+
+/**
+ * WindowSelectionRule
+ *
+ * 창마다 학습 구간 성과로 파라미터 칸 하나를 고르는 기준.
+ */
+export type WindowSelectionRule =
+  "train_sharpe_max" | "neighbor_mean_sharpe_max";
 
 /**
  * CreateProviderProfileRequest
@@ -6880,6 +7267,269 @@ export type PreviewEquityUniverseResponses = {
 
 export type PreviewEquityUniverseResponse =
   PreviewEquityUniverseResponses[keyof PreviewEquityUniverseResponses];
+
+export type CreateExperimentData = {
+  body: ExperimentRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/experiments";
+};
+
+export type CreateExperimentErrors = {
+  /**
+   * The base strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The base revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type CreateExperimentError =
+  CreateExperimentErrors[keyof CreateExperimentErrors];
+
+export type CreateExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  202: Experiment;
+};
+
+export type CreateExperimentResponse =
+  CreateExperimentResponses[keyof CreateExperimentResponses];
+
+export type PreviewExperimentData = {
+  body: ExperimentRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/experiments/preview";
+};
+
+export type PreviewExperimentErrors = {
+  /**
+   * The base strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The base revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type PreviewExperimentError =
+  PreviewExperimentErrors[keyof PreviewExperimentErrors];
+
+export type PreviewExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentPreview;
+};
+
+export type PreviewExperimentResponse =
+  PreviewExperimentResponses[keyof PreviewExperimentResponses];
+
+export type GetExperimentData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}";
+};
+
+export type GetExperimentErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentError = GetExperimentErrors[keyof GetExperimentErrors];
+
+export type GetExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  200: Experiment;
+};
+
+export type GetExperimentResponse =
+  GetExperimentResponses[keyof GetExperimentResponses];
+
+export type CancelExperimentData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/cancel";
+};
+
+export type CancelExperimentErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CancelExperimentError =
+  CancelExperimentErrors[keyof CancelExperimentErrors];
+
+export type CancelExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  200: Experiment;
+};
+
+export type CancelExperimentResponse =
+  CancelExperimentResponses[keyof CancelExperimentResponses];
+
+export type SelectExperimentTrialData = {
+  body: ExperimentSelectionRequest;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/selections";
+};
+
+export type SelectExperimentTrialErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SelectExperimentTrialError =
+  SelectExperimentTrialErrors[keyof SelectExperimentTrialErrors];
+
+export type SelectExperimentTrialResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentSelection;
+};
+
+export type SelectExperimentTrialResponse =
+  SelectExperimentTrialResponses[keyof SelectExperimentTrialResponses];
+
+export type ListExperimentTrialsData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/trials";
+};
+
+export type ListExperimentTrialsErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListExperimentTrialsError =
+  ListExperimentTrialsErrors[keyof ListExperimentTrialsErrors];
+
+export type ListExperimentTrialsResponses = {
+  /**
+   * Response Listexperimenttrials
+   *
+   * Successful Response
+   */
+  200: Array<ExperimentTrialState>;
+};
+
+export type ListExperimentTrialsResponse =
+  ListExperimentTrialsResponses[keyof ListExperimentTrialsResponses];
+
+export type RetryExperimentTrialData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+    /**
+     * Trial Index
+     */
+    trial_index: number;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry";
+};
+
+export type RetryExperimentTrialErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type RetryExperimentTrialError =
+  RetryExperimentTrialErrors[keyof RetryExperimentTrialErrors];
+
+export type RetryExperimentTrialResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentTrialState;
+};
+
+export type RetryExperimentTrialResponse =
+  RetryExperimentTrialResponses[keyof RetryExperimentTrialResponses];
 
 export type GetFactorCatalogData = {
   body?: never;

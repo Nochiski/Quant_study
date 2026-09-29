@@ -207,7 +207,7 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
     assert len(result["manifest"]["run_fingerprint"]) == 64
     assert result["manifest"]["run_spec"]["strategy"] == _run_body(client)["strategy"]
     assert result["manifest"]["run_spec"]["benchmark_security_id"] == "005930"
-    assert result["manifest"]["metric_registry_version"] == "metric-registry-v2"
+    assert result["manifest"]["metric_registry_version"] == "metric-registry-v3"
     assert {item["code"] for item in result["manifest"]["warnings"]} == {
         "corporate_action_feed_empty",
         "mock_equity_data",

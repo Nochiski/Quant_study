@@ -147,6 +147,7 @@ describe("run 상세의 데이터 경고", () => {
     "benchmark.delisted_sessions_frozen",
     "benchmark.invalid_bar_sessions_carried",
     "portfolio.sector_unknown_excluded",
+    "analytics.base_rate_carried_forward",
   ])("%s 에 제목이 있다", async (code) => {
     const base = result();
     render(

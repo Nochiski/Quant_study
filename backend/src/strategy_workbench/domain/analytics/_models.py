@@ -47,6 +47,7 @@ class MetricUnavailableReason(StrEnum):
     NO_LOSING_CLOSED_TRADE = "no_losing_closed_trade"
     NO_OBSERVATIONS_IN_SCOPE = "no_observations_in_scope"
     PERIOD_UNDER_ONE_YEAR = "period_under_one_year"
+    BASE_RATE_NOT_COVERED = "base_rate_not_covered"
 
 
 @dataclass(frozen=True)
@@ -137,3 +138,5 @@ class AnalyticsReport:
     drawdown_curve: tuple[DrawdownPoint, ...]
     monthly_returns: tuple[MonthlyReturnPoint, ...]
     rolling_sharpe: tuple[RollingMetricPoint, ...]
+    # 기준금리 이력 확인일 뒤라 마지막 확인 금리를 이어 쓴 수익률 구간의 시작 세션.
+    base_rate_carried_sessions: tuple[date, ...]

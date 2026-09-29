@@ -36,6 +36,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     RunCancelledError,
 )
 from strategy_workbench.domain.analytics.facade.metrics import (
+    BASE_RATE_CONFIRMED_ON,
     AnalysisPoint,
     AnalyticsInput,
     MetricRegistry,
@@ -344,6 +345,7 @@ class BacktestEngineExecutorAdapter:
                 warnings=(
                     *request.dataset.warnings,
                     *_benchmark_warnings(request.dataset, run_sessions, benchmark, carried),
+                    *_base_rate_warnings(full.base_rate_carried_sessions),
                 ),
             ),
             metric_definitions=self._registry.definitions(),
@@ -563,6 +565,24 @@ def _benchmark_warnings(
             )
         )
     return tuple(warnings)
+
+
+def _base_rate_warnings(carried: Sequence[date]) -> tuple[DataWarning, ...]:
+    """기준금리 이력 확인일 뒤 세션에 마지막 금리를 이어 썼다고 알린다(#274)."""
+    if not carried:
+        return ()
+    return (
+        DataWarning(
+            code="analytics.base_rate_carried_forward",
+            message=(
+                "한국은행 기준금리 이력을 확인한 날 뒤의 세션은 마지막 기준금리를 이어 써서 "
+                "샤프·소르티노·롤링 샤프의 무위험수익률을 계산했다. 그 뒤 금리가 바뀌었다면 이 "
+                "지표들이 틀린다. "
+                f"confirmed_on={BASE_RATE_CONFIRMED_ON.isoformat()} "
+                f"carried_sessions={len(carried)} sessions={_listed_sessions(carried)}"
+            ),
+        ),
+    )
 
 
 def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutcome, ...]]:

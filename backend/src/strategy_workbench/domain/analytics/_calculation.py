@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from itertools import pairwise
 
+from ._base_rate import BASE_RATE_CONFIRMED_ON, base_rate
 from ._models import (
     AnalysisPoint,
     AnalyticsInput,
@@ -19,7 +21,8 @@ from ._registry import MetricRegistry
 
 # 연수는 기준일부터 마지막 세션까지의 달력 일수 / 365(ACT/365)다. 원화 금리의 일할 관행과 같고,
 # 달력 1년이 윤년과 무관하게 1년 이상으로 세어져 "1년 미만은 연율화하지 않는다"(GIPS) 경계가
-# 달력과 맞는다. `annualization_days`는 변동성·샤프·소르티노 연율화에만 쓴다.
+# 달력과 맞는다. `annualization_days`는 변동성·샤프·소르티노 연율화에만 쓴다. 기준금리 일할도 같은
+# ACT/365다.
 _DAYS_PER_YEAR = 365
 
 
@@ -77,7 +80,12 @@ def compute_analytics(
     # 1년 미만은 연율화하지 않는다(GIPS). 칼마도 같은 사유로 빈다.
     cagr_reason = MetricUnavailableReason.PERIOD_UNDER_ONE_YEAR if years < 1.0 else None
     cagr = (1.0 + total_return) ** (1.0 / years) - 1.0 if cagr_reason is None else None
-    volatility, sharpe, sortino = _risk_adjusted(returns, annualization_days)
+    # 기준금리 이력보다 앞선 세션이 있으면 무위험수익률을 지어내지 않고 샤프·소르티노·롤링 샤프를
+    # 비운다.
+    excess = _excess_returns(anchored, returns)
+    risk_free_reason = MetricUnavailableReason.BASE_RATE_NOT_COVERED if excess is None else None
+    volatility, sharpe, sortino = _risk_adjusted(returns, excess, annualization_days)
+    rolling_sharpe = _rolling_sharpe(anchored, returns, excess, annualization_days, rolling_window)
     drawdowns = _drawdowns(anchored)[-len(points) :]
     max_drawdown = min(item.drawdown for item in drawdowns)
     max_duration, recovery = _drawdown_timing(anchored_equity)
@@ -108,8 +116,10 @@ def compute_analytics(
         value("total_return", total_return),
         value("cagr", cagr, cagr_reason),
         value("volatility", volatility),
-        value("sharpe", sharpe, MetricUnavailableReason.ZERO_RETURN_VARIANCE),
-        value("sortino", sortino, MetricUnavailableReason.NO_DOWNSIDE_VARIATION),
+        value("sharpe", sharpe, risk_free_reason or MetricUnavailableReason.ZERO_RETURN_VARIANCE),
+        value(
+            "sortino", sortino, risk_free_reason or MetricUnavailableReason.NO_DOWNSIDE_VARIATION
+        ),
         value("max_drawdown", max_drawdown),
         value("calmar", calmar, cagr_reason or MetricUnavailableReason.NO_DRAWDOWN),
         value("turnover", turnover),
@@ -152,7 +162,10 @@ def compute_analytics(
         ),
         drawdown_curve=drawdowns,
         monthly_returns=_monthly_returns(points, anchored_equity[0]),
-        rolling_sharpe=_rolling_sharpe(points, annualization_days, rolling_window),
+        rolling_sharpe=rolling_sharpe[-len(points) :],
+        base_rate_carried_sessions=tuple(
+            item.session for item in anchored[:-1] if item.session > BASE_RATE_CONFIRMED_ON
+        ),
     )
 
 
@@ -160,26 +173,50 @@ def _returns(equity: tuple[float, ...]) -> tuple[float, ...]:
     return tuple(equity[index] / equity[index - 1] - 1.0 for index in range(1, len(equity)))
 
 
+def _excess_returns(
+    points: tuple[AnalysisPoint, ...], returns: tuple[float, ...]
+) -> tuple[float, ...] | None:
+    """세션 수익률에서 그 구간의 무위험수익률을 뺀다. 기준금리 이력보다 앞선 구간이 있으면 None이다.
+
+    구간(직전 세션 → 세션)의 무위험수익률은 직전 세션에 유효한 한국은행 기준금리를 두 세션 사이
+    달력 일수만큼 ACT/365로 일할한 값이다. 구간 중간에 금리가 바뀌어도 구간 시작일 금리를 쓴다.
+    """
+    excess: list[float] = []
+    for (before, after), value in zip(pairwise(points), returns, strict=True):
+        rate = base_rate(before.session)
+        if rate is None:
+            return None
+        excess.append(value - rate * (after.session - before.session).days / _DAYS_PER_YEAR)
+    return tuple(excess)
+
+
 def _risk_adjusted(
-    returns: tuple[float, ...], annualization_days: int
+    returns: tuple[float, ...], excess: tuple[float, ...] | None, annualization_days: int
 ) -> tuple[float, float | None, float | None]:
+    """샤프 분모는 원수익률 표준편차다. 무위험수익률은 구간 시작에 이미 알려져 위험이 아니다.
+
+    소르티노 목표는 무위험수익률이다. `excess`가 None이면(기준금리 이력 이전) 둘 다 비운다.
+    """
     if len(returns) <= 1:
         return 0.0, None, None
     mean = sum(returns) / len(returns)
     variance = sum((item - mean) ** 2 for item in returns) / (len(returns) - 1)
     standard_deviation = math.sqrt(variance)
     volatility = standard_deviation * math.sqrt(annualization_days)
+    if excess is None:
+        return volatility, None, None
+    excess_mean = sum(excess) / len(excess)
     sharpe = (
-        mean / standard_deviation * math.sqrt(annualization_days)
+        excess_mean / standard_deviation * math.sqrt(annualization_days)
         if standard_deviation > 0
         else None
     )
-    downside = tuple(item for item in returns if item < 0)
+    downside = tuple(item for item in excess if item < 0)
     downside_deviation = (
-        math.sqrt(sum(item**2 for item in downside) / len(returns)) if downside else 0.0
+        math.sqrt(sum(item**2 for item in downside) / len(excess)) if downside else 0.0
     )
     sortino = (
-        mean / downside_deviation * math.sqrt(annualization_days)
+        excess_mean / downside_deviation * math.sqrt(annualization_days)
         if downside_deviation > 0
         else None
     )
@@ -252,16 +289,19 @@ def _monthly_returns(
 
 def _rolling_sharpe(
     points: tuple[AnalysisPoint, ...],
+    returns: tuple[float, ...],
+    excess: tuple[float, ...] | None,
     annualization_days: int,
     window: int,
 ) -> tuple[RollingMetricPoint, ...]:
-    returns = _returns(tuple(item.equity for item in points))
     result: list[RollingMetricPoint] = []
     for index, point in enumerate(points):
         if index < window:
             result.append(RollingMetricPoint(point.session, None))
             continue
-        segment = returns[index - window : index]
-        _, sharpe, _ = _risk_adjusted(segment, annualization_days)
+        segment = slice(index - window, index)
+        _, sharpe, _ = _risk_adjusted(
+            returns[segment], None if excess is None else excess[segment], annualization_days
+        )
         result.append(RollingMetricPoint(point.session, sharpe))
     return tuple(result)

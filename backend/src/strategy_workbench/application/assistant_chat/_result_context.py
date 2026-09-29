@@ -49,8 +49,13 @@ MAX_SUMMARY_MONTHS = 36
 
 # 결과 숫자(full 지표)를 해석하는 경고의 code 접두어. 요약이 상한을 넘을 때 가장 늦게 던다
 # (모듈 docstring 3, 이슈 #241). 벤치마크 경고는 benchmark_return·excess_return이 사용 불가인 이유와
-# 동결 구간의 초과수익 해석을, 섹터 제외 경고는 섹터 상한이 왜 적용되지 않았는지를 알려 준다.
-_METRIC_EXPLAINING_WARNING_PREFIXES = ("benchmark.", "portfolio.sector_unknown_excluded")
+# 동결 구간의 초과수익 해석을, 섹터 제외 경고는 섹터 상한이 왜 적용되지 않았는지를, 기준금리 경고는
+# 샤프·소르티노의 무위험수익률이 확인일 뒤 금리를 이어 썼는지를 알려 준다.
+_METRIC_EXPLAINING_WARNING_PREFIXES = (
+    "benchmark.",
+    "portfolio.sector_unknown_excluded",
+    "analytics.base_rate_carried_forward",
+)
 
 # 사용자가 쓴 자유 문장의 길이 상한. 제목·설명 하나가 상한을 혼자 다 먹지 못하게 한다.
 _MAX_TITLE_CHARS = 200

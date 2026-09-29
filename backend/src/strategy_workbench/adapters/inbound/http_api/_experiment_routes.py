@@ -68,7 +68,8 @@ class ExperimentAdmissionErrorResponse:
 @dataclass(frozen=True)
 class ExperimentSelectionRequest:
     trial_index: Annotated[int, Field(ge=0)]
-    reason: Annotated[str, Field(min_length=1)]
+    # 공백만 있는 이유는 기록이 아니다.
+    reason: Annotated[str, Field(pattern=r"\S")]
 
 
 class _ExperimentBodyRoute(CodedBodyValidationRoute):

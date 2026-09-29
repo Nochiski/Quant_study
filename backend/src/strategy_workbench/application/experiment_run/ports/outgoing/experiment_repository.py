@@ -31,7 +31,7 @@ class ExperimentRecord:
 
 @dataclass(frozen=True)
 class TrialAttempt:
-    """trial 의 실행 시도 하나. 실행에 배정되면 `run_id`, 접수가 거절되면 `error` 만 있다."""
+    """trial 의 실행 시도 하나. 배정되면 `run_id`, 접수가 거절되면 거절 코드와 문장이 있다."""
 
     experiment_id: str
     trial_index: int
@@ -39,14 +39,18 @@ class TrialAttempt:
     attempt: int
     created_at: datetime
     run_id: str | None = None
+    # 실행 접수 거절 코드(화면 번역 키 `backtest.error.<code>`)와 실행 서비스의 거절 문장.
+    error_code: str | None = None
     error: str | None = None
 
     def __post_init__(self) -> None:
-        if (self.run_id is None) == (self.error is None):
+        if (self.run_id is None) == (self.error_code is None) or (self.error_code is None) != (
+            self.error is None
+        ):
             raise ValueError(
-                "attempt carries exactly one of run_id and error — "
+                "attempt carries a run_id or a rejection (code and message), not both — "
                 f"experiment_id={self.experiment_id} trial_index={self.trial_index} "
-                f"attempt={self.attempt} run_id={self.run_id!r} error={self.error!r}"
+                f"attempt={self.attempt} run_id={self.run_id!r} error_code={self.error_code!r}"
             )
 
 

@@ -10,7 +10,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     SavedRevisionReference,
 )
-from strategy_workbench.domain.backtest.facade.trials import preview_trial, trial_key
+from strategy_workbench.domain.backtest.facade.trials import preview_trial
 from strategy_workbench.domain.experiment.facade.design import (
     ExperimentDesign,
     ExperimentNotFoundError,
@@ -19,18 +19,15 @@ from strategy_workbench.domain.experiment.facade.design import (
     InvalidExperimentSpecError,
     SplitSpec,
     build_search_spec,
+    experiment_trial_key,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentStatus,
     TrialStatus,
     experiment_status,
-    trial_status_of_run,
+    trial_status,
 )
-from strategy_workbench.domain.strategy.facade.specification import (
-    ParameterValue,
-    StrategySpec,
-    resolve_parameter_values,
-)
+from strategy_workbench.domain.strategy.facade.specification import ParameterValue
 
 from .ports.outgoing.experiment_repository import (
     ExperimentRecord,
@@ -38,7 +35,7 @@ from .ports.outgoing.experiment_repository import (
     ExperimentSelection,
     TrialAttempt,
 )
-from .ports.outgoing.trial_runs import TrialRunPort, TrialRunRejectedError
+from .ports.outgoing.trial_runs import AdmittedRun, TrialRunPort, TrialRunRejectedError
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +60,8 @@ class ExperimentPreview:
     run_count: int
     lineage_id: str
     trial_count: int
-    # 결과가 나오면 계열에 새로 드는 시도 수. 시도 키가 같은 trial 은 한 번 센다.
+    # 결과가 나오면 계열에 새로 드는 시도 수. 한 칸의 창들은 한 시도라 새 칸 수다
+    # (`experiment_trial_key`).
     new_trial_count: int
     trial_count_after: int
 
@@ -113,14 +111,11 @@ class ExperimentRunService:
         self._cancelled: set[str] = set()
 
     def preview(self, request: ExperimentRequest) -> ExperimentPreview:
-        """시도 키와 N 규칙은 원장 도메인(`trial_key`·`preview_trial`)을 trial 마다 그대로 쓴다."""
-        strategy, design = self._design(request)
-        ledger = self._runs.trial_ledger(_base_source(request.run).strategy_id)
+        """제출과 같은 시도 키(`experiment_trial_key`)에 원장 규칙(`preview_trial`)을 쓴다."""
+        admitted, design = self._design(request)
+        ledger = admitted.ledger
         trials = design.trials()
-        keys = {
-            trial_key(replace(_trial_run(request.run, trial), strategy=strategy))
-            for trial in trials
-        }
+        keys = {experiment_trial_key(admitted.run, trial) for trial in trials}
         new_trials = sum(preview_trial(ledger, key).new_trial for key in keys)
         return ExperimentPreview(
             design=design,
@@ -186,7 +181,8 @@ class ExperimentRunService:
                     f"않습니다: experiment_id={experiment_id} trial_index={trial_index} "
                     f"status={state.status} experiment_cancelled={record.cancelled_at is not None}",
                 )
-            self._start(record, state.trial, attempt=len(state.attempts) + 1)
+            base = self._runs.admit(record.run).run
+            self._start(record, base, state.trial, attempt=len(state.attempts) + 1)
             return self._trial_state(record, trial_index)
 
     def select(self, experiment_id: str, trial_index: int, reason: str) -> ExperimentSelection:
@@ -212,7 +208,7 @@ class ExperimentRunService:
         self._repository.add_selection(selection)
         return selection
 
-    def _design(self, request: ExperimentRequest) -> tuple[StrategySpec, ExperimentDesign]:
+    def _design(self, request: ExperimentRequest) -> tuple[AdmittedRun, ExperimentDesign]:
         run = request.run
         source = _base_source(run)
         if run.metric_windows:
@@ -221,37 +217,48 @@ class ExperimentRunService:
                 "실험의 측정 창은 분할 규칙이 정합니다. 기반 실행 요청에서 지표 창을 빼세요: "
                 f"metric_windows={len(run.metric_windows)}",
             )
-        self._runs.validate(run)
-        environment = run.environment
-        if environment is None:  # pragma: no cover - `validate` 가 실행 설정 없는 요청을 거절한다
-            raise RuntimeError("validated experiment base run has no run environment")
-        strategy = self._runs.strategy(source)
-        return strategy, ExperimentDesign(
+        admitted = self._runs.admit(run)
+        strategy, environment = admitted.run.strategy, admitted.run.environment
+        if strategy is None or environment is None:  # pragma: no cover - 접수 판정이 채운다
+            raise RuntimeError(f"admitted experiment base run is unresolved — source={source}")
+        return admitted, ExperimentDesign(
             search=build_search_spec(strategy.parameters, request.search),
-            parameter_values=resolve_parameter_values(strategy.parameters, run.parameter_values),
+            parameter_values=admitted.run.parameter_values,
             windows=request.split.windows(environment.start, environment.end),
         )
 
     def _submit(self, record: ExperimentRecord) -> None:
         try:
+            base = self._runs.admit(record.run).run
             for trial in record.design.trials():
                 with self._lock:
                     if record.experiment_id in self._cancelled:
                         return
-                    self._start(record, trial, attempt=1)
+                    self._start(record, base, trial, attempt=1)
         except Exception:
             # 남은 trial 은 대기로 남는다(재시작 복구와 함께 V3-04 가 다시 넘긴다).
             logger.exception(
                 "experiment trial submission stopped — experiment_id=%s", record.experiment_id
             )
 
-    def _start(self, record: ExperimentRecord, trial: ExperimentTrial, *, attempt: int) -> None:
+    def _start(
+        self,
+        record: ExperimentRecord,
+        base: BacktestRunSpec,
+        trial: ExperimentTrial,
+        *,
+        attempt: int,
+    ) -> None:
+        """`base` 는 실행 서비스가 해소한 기반 실행 spec 이다(시도 키를 낸다)."""
         run_id: str | None = None
+        error_code: str | None = None
         error: str | None = None
         try:
-            run_id = self._runs.start(_trial_run(record.run, trial))
+            run_id = self._runs.start(
+                _trial_run(record.run, trial), trial_key=experiment_trial_key(base, trial)
+            )
         except TrialRunRejectedError as rejected:
-            error = str(rejected)
+            error_code, error = rejected.code, str(rejected)
         self._repository.add_attempt(
             TrialAttempt(
                 experiment_id=record.experiment_id,
@@ -259,6 +266,7 @@ class ExperimentRunService:
                 attempt=attempt,
                 created_at=self._now(),
                 run_id=run_id,
+                error_code=error_code,
                 error=error,
             )
         )
@@ -288,12 +296,9 @@ class ExperimentRunService:
 def _state(
     trial: ExperimentTrial, attempts: tuple[TrialAttempt, ...], cancelled: bool, runs: TrialRunPort
 ) -> ExperimentTrialState:
-    if not attempts:
-        status = TrialStatus.CANCELLED if cancelled else TrialStatus.QUEUED
-    elif attempts[-1].run_id is None:
-        status = TrialStatus.FAILED
-    else:
-        status = trial_status_of_run(runs.status(attempts[-1].run_id))
+    latest = attempts[-1] if attempts else None
+    run_status = None if latest is None or latest.run_id is None else runs.status(latest.run_id)
+    status = trial_status(run_status, attempted=latest is not None, experiment_cancelled=cancelled)
     return ExperimentTrialState(trial, status, attempts)
 
 

@@ -5,9 +5,11 @@ from strategy_workbench.application.backtest_run._service import (
     BacktestRunService,
     InvalidBacktestRunError,
     MissingBacktestRunEnvironmentError,
+    RunAdmission,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
     StrategyRevisionRequiresUpgradeError,
+    rejection_code,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.artifact_store import (
     BacktestArtifactUnreadableError,
@@ -51,6 +53,7 @@ __all__ = [
     "InvalidBacktestRunError",
     "InvalidRunFieldError",
     "MissingBacktestRunEnvironmentError",
+    "RunAdmission",
     "RunProgressEvent",
     "RunStatus",
     "SavedRevisionReference",
@@ -63,4 +66,5 @@ __all__ = [
     "TrialLedger",
     "TrialLineageAlreadyMergedError",
     "TrialPreview",
+    "rejection_code",
 ]

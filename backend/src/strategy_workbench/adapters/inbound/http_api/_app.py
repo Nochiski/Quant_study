@@ -29,15 +29,11 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunState,
     BacktestRunSummary,
     BacktestStartResponse,
-    InvalidBacktestRunError,
-    MissingBacktestRunEnvironmentError,
     RunStatus,
-    StaleStrategyReferenceError,
-    StrategyReferenceNotFoundError,
-    StrategyRevisionRequiresUpgradeError,
     TrialLedger,
     TrialLineageAlreadyMergedError,
     TrialPreview,
+    rejection_code,
 )
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
@@ -219,6 +215,13 @@ def _revision_conflict(error: StrategyRevisionConflictError) -> HTTPException:
     )
 
 
+# 422 가 아닌 실행 접수 거절. 저장 리비전이 없거나(404) 그사이 바뀌었다(409).
+_ADMISSION_STATUS: dict[str, int] = {
+    "backtest.strategy.not_found": status.HTTP_404_NOT_FOUND,
+    "backtest.strategy.stale": status.HTTP_409_CONFLICT,
+}
+
+
 def _backtest_not_found(error: BacktestRunNotFoundError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -375,62 +378,35 @@ def create_app(
         )
 
     def admitted(call: Callable[[], _T]) -> _T:
-        """시작·미리 계산은 같은 요청 판정을 타므로 거절도 같은 코드로 낸다."""
+        """시작·미리 계산·실험 기반 검사는 같은 요청 판정을 타므로 거절도 같은 코드로 낸다.
+
+        거절 목록과 코드는 실행 유스케이스의 `rejection_code` 하나가 소유한다. 여기서는 HTTP 상태와
+        코드별 detail 칸만 붙인다.
+        """
         try:
             return call()
-        # 아래 세 오류는 `InvalidBacktestRunError` 의 하위 타입이므로 반드시 먼저 잡는다.
-        except MissingBacktestRunEnvironmentError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "backtest.run.environment_required", "message": str(error)},
-            ) from error
-        except BacktestResearchWindowViolationError as error:
-            violation = error.violation
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "backtest.run.research_window_violation",
-                    "message": str(error),
-                    "sealed_start": violation.sealed_start.isoformat(),
-                    "sealed_end": violation.sealed_end.isoformat(),
-                    "research_start": violation.research_start.isoformat(),
-                },
-            ) from error
-        except BacktestParameterValueError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "backtest.run.parameter_invalid",
-                    "message": str(error),
-                    "parameter_id": error.parameter_id,
-                },
-            ) from error
-        except InvalidBacktestRunError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "backtest.run.invalid", "message": str(error)},
-            ) from error
-
-        except StrategyReferenceNotFoundError as error:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "backtest.strategy.not_found", "message": str(error)},
-            ) from error
-        except StaleStrategyReferenceError as error:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "backtest.strategy.stale", "message": str(error)},
-            ) from error
-        except StrategyRevisionRequiresUpgradeError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "backtest.strategy.requires_upgrade", "message": str(error)},
-            ) from error
-
         except InvalidPortfolioRequestError as error:
             # 시작 요청은 데이터를 읽지 않는 사전 검사만 한다(이슈 #158). 관측 데이터 부재·계약
             # 위반은 run 스레드의 tape 단계에서 run 상태 `failed` + `error` 로 기록된다.
             raise _portfolio_http_error(error) from error
+        except Exception as error:
+            code = rejection_code(error)
+            if code is None:
+                raise
+            detail: dict[str, object] = {"code": code, "message": str(error)}
+            if isinstance(error, BacktestResearchWindowViolationError):
+                violation = error.violation
+                detail |= {
+                    "sealed_start": violation.sealed_start.isoformat(),
+                    "sealed_end": violation.sealed_end.isoformat(),
+                    "research_start": violation.research_start.isoformat(),
+                }
+            elif isinstance(error, BacktestParameterValueError):
+                detail["parameter_id"] = error.parameter_id
+            raise HTTPException(
+                status_code=_ADMISSION_STATUS.get(code, status.HTTP_422_UNPROCESSABLE_CONTENT),
+                detail=detail,
+            ) from error
 
     def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
         return admitted(lambda: backtest_runs.start(spec))

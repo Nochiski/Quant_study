@@ -1,4 +1,8 @@
-from strategy_workbench.domain.experiment._design import ExperimentDesign, ExperimentTrial
+from strategy_workbench.domain.experiment._design import (
+    ExperimentDesign,
+    ExperimentTrial,
+    experiment_trial_key,
+)
 from strategy_workbench.domain.experiment._errors import (
     EXPERIMENT_CODES,
     EXPERIMENT_SPEC_CODES,
@@ -42,6 +46,7 @@ __all__ = [
     "WalkForwardWindow",
     "WindowSelectionRule",
     "build_search_spec",
+    "experiment_trial_key",
     "grid_neighbors",
     "neighbor_mean",
     "parameter_grid_values",

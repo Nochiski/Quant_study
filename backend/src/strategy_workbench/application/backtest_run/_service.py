@@ -196,6 +196,15 @@ class StrategyRevisionRequiresUpgradeError(RuntimeError):
     """
 
 
+@dataclass(frozen=True)
+class RunAdmission:
+    """접수 판정을 통과한 요청. `spec` 은 전략·실행 설정·파라미터 값을 해소한 실행 spec 이다."""
+
+    spec: BacktestRunSpec
+    provenance: StrategyProvenance
+    lineage_id: str | None
+
+
 class BacktestResultNotReadyError(RuntimeError):
     pass
 
@@ -248,8 +257,21 @@ class BacktestRunService:
         self._lock = RLock()
         self._close_interrupted_runs()
 
-    def start(self, request: BacktestRunSpec) -> BacktestStartResponse:
+    def admit(self, request: BacktestRunSpec) -> RunAdmission:
+        """시작과 같은 판정(preflight·엔진 호환성 포함)을 타되 접수하지 않는다.
+
+        실험 기반 요청 검사(검증 랩 V3-03)가 쓴다. 봉인 겹침 거절은 실행 요청이 아니므로 봉인 원장에
+        남기지 않는다.
+        """
+        return self._admit(request, record_blocked=False)
+
+    def start(
+        self, request: BacktestRunSpec, *, trial_key_override: str | None = None
+    ) -> BacktestStartResponse:
         """실행 요청을 받아 즉시 `QUEUED` 로 접수한다.
+
+        `trial_key_override` 는 실험 유스케이스가 정한 시도 키다(창 날짜 대신 실험 기반 실행
+        설정으로 낸다, V3-03). 없으면 이 실행 spec 의 시도 키를 원장에 적는다.
 
         요청 스레드에서는 데이터를 읽지 않는 검사(스펙 해석·검증·metric window·엔진 호환성·저장
         리비전 해시)만 하고, TargetTape 계산은 run 스레드의 `tape` 단계로 넘긴다. 이전에는 tape 를
@@ -258,7 +280,64 @@ class BacktestRunService:
         같은 입력으로 도는 run 이 있으면 새 run 을 만들지 않고 그 run 을 돌려주고, 도는 run 이
         상한(`MAX_CONCURRENT_RUNS`)에 차 있으면 `queued` 로 기다리게 한다(이슈 #161).
         """
+        admission = self._admit(request, record_blocked=True)
+        spec, provenance = admission.spec, admission.provenance
+        with self._lock:
+            # 같은 입력(실행할 spec·실행 설정·실행 옵션·provenance)으로 도는 run 이 있으면 그 run 을
+            # 돌려준다. 재클릭·새로고침 뒤 재시작·프록시 재시도가 같은 tape 를 겹쳐 계산하지 않게
+            # 한다(#161). spec 의 `==` 는 1 과 1.0 을 같게 보지만 provenance 의 `spec_hash` 는
+            # 가르고, 매니페스트도 provenance 를 기록하므로 둘 다 같아야 한다. 데이터 snapshot·
+            # 엔진·지표 레지스트리 판본은 프로세스 안에서 고정이라 같은 입력이면 결과도 같다.
+            # 취소를 요청한 run 은 곧 끝나므로 잇지 않는다. `parameter_values` 는 정규화로 1 과
+            # 1.0 을 같은 값으로 맞춘다. bool·숫자 혼합 선택지((1, True))는 `==` 로 갈리지 않는
+            # 한계가 있고 V3-04 지문 기반 중복 제거에서 닫는다.
+            for existing in self._records.values():
+                if (
+                    existing.state.status in (RunStatus.QUEUED, RunStatus.RUNNING)
+                    and existing.spec == spec
+                    and existing.provenance == provenance
+                ):
+                    return BacktestStartResponse(existing.state)
+            run_id = self._new_id()
+            created = self._now()
+            message = (
+                "Run accepted"
+                if self._running < self._max_concurrent_runs
+                else "Waiting for a free run slot"
+            )
+            record = _RunRecord(
+                state=BacktestRunState(
+                    run_id=run_id,
+                    status=RunStatus.QUEUED,
+                    progress=0.0,
+                    stage="queued",
+                    message=message,
+                    created_at=created,
+                    updated_at=created,
+                ),
+                spec=spec,
+                provenance=provenance,
+                events=deque(maxlen=_EVENT_RING_SIZE),
+                cancellation=Event(),
+            )
+            self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
+            # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
+            self._repository.add(
+                BacktestRunSummary(record.state, provenance),
+                request,
+                lineage_id=admission.lineage_id,
+                trial_key=trial_key_override or trial_key(spec),
+            )
+            self._records[run_id] = record
+            # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
+            # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
+            accepted = record.state
+            self._waiting.append(record)
+            self._dispatch()
+        return BacktestStartResponse(accepted)
 
+    def _admit(self, request: BacktestRunSpec, *, record_blocked: bool) -> RunAdmission:
+        """요청을 실행할 spec 으로 해소하고 접수 판정을 모두 한다. 데이터는 읽지 않는다."""
         spec, provenance = self._resolve(request)
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - _resolve always fills it
@@ -268,7 +347,9 @@ class BacktestRunService:
         # tape·데이터 조회와 preflight 가 모두 같은 객체를 읽어야 명시 `environment` 가 조용히
         # 무시되지 않는다(P2-01 P0). 1.2 는 문서에서 만드는 대체 경로가 없으므로 해소 단계가
         # 사라졌고, 그래서 두 호출부가 다른 값을 볼 여지도 없다(P2-03 결정 항목).
-        environment = self._pin_environment(spec, strategy, lineage_id, record_blocked=True)
+        environment = self._pin_environment(
+            spec, strategy, lineage_id, record_blocked=record_blocked
+        )
         spec = replace(spec, environment=environment)
         # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
         engine = self._portfolio_design.preflight(
@@ -315,59 +396,7 @@ class BacktestRunService:
                 f"strategy_id={provenance.strategy_id!r} revision={provenance.revision!r} "
                 f"stored={provenance.spec_hash!r} executed={executed_hash!r}"
             )
-        with self._lock:
-            # 같은 입력(실행할 spec·실행 설정·실행 옵션·provenance)으로 도는 run 이 있으면 그 run 을
-            # 돌려준다. 재클릭·새로고침 뒤 재시작·프록시 재시도가 같은 tape 를 겹쳐 계산하지 않게
-            # 한다(#161). spec 의 `==` 는 1 과 1.0 을 같게 보지만 provenance 의 `spec_hash` 는
-            # 가르고, 매니페스트도 provenance 를 기록하므로 둘 다 같아야 한다. 데이터 snapshot·
-            # 엔진·지표 레지스트리 판본은 프로세스 안에서 고정이라 같은 입력이면 결과도 같다.
-            # 취소를 요청한 run 은 곧 끝나므로 잇지 않는다. `parameter_values` 는 정규화로 1 과
-            # 1.0 을 같은 값으로 맞춘다. bool·숫자 혼합 선택지((1, True))는 `==` 로 갈리지 않는
-            # 한계가 있고 V3-04 지문 기반 중복 제거에서 닫는다.
-            for existing in self._records.values():
-                if (
-                    existing.state.status in (RunStatus.QUEUED, RunStatus.RUNNING)
-                    and existing.spec == spec
-                    and existing.provenance == provenance
-                ):
-                    return BacktestStartResponse(existing.state)
-            run_id = self._new_id()
-            created = self._now()
-            message = (
-                "Run accepted"
-                if self._running < self._max_concurrent_runs
-                else "Waiting for a free run slot"
-            )
-            record = _RunRecord(
-                state=BacktestRunState(
-                    run_id=run_id,
-                    status=RunStatus.QUEUED,
-                    progress=0.0,
-                    stage="queued",
-                    message=message,
-                    created_at=created,
-                    updated_at=created,
-                ),
-                spec=spec,
-                provenance=provenance,
-                events=deque(maxlen=_EVENT_RING_SIZE),
-                cancellation=Event(),
-            )
-            self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
-            # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
-            self._repository.add(
-                BacktestRunSummary(record.state, provenance),
-                request,
-                lineage_id=lineage_id,
-                trial_key=trial_key(spec),
-            )
-            self._records[run_id] = record
-            # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
-            # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
-            accepted = record.state
-            self._waiting.append(record)
-            self._dispatch()
-        return BacktestStartResponse(accepted)
+        return RunAdmission(spec, provenance, lineage_id)
 
     def preview_trial(self, request: BacktestRunSpec) -> TrialPreview:
         """실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).
@@ -960,6 +989,25 @@ class BacktestRunService:
     def _raise_if_cancelled(record: _RunRecord) -> None:
         if record.cancellation.is_set():
             raise RunCancelledError("run cancelled")
+
+
+# 실행 접수 거절과 그 안정 키. HTTP 거절(`admitted`)과 실험 trial 제출이 이 목록 하나를 쓴다. 하위
+# 타입을 먼저 둔다.
+_REJECTION_CODES: tuple[tuple[type[Exception], str], ...] = (
+    (MissingBacktestRunEnvironmentError, "backtest.run.environment_required"),
+    (BacktestResearchWindowViolationError, "backtest.run.research_window_violation"),
+    (BacktestParameterValueError, "backtest.run.parameter_invalid"),
+    (InvalidBacktestRunError, "backtest.run.invalid"),
+    (StrategyReferenceNotFoundError, "backtest.strategy.not_found"),
+    (StaleStrategyReferenceError, "backtest.strategy.stale"),
+    (StrategyRevisionRequiresUpgradeError, "backtest.strategy.requires_upgrade"),
+    (InvalidPortfolioRequestError, "portfolio.strategy.invalid"),
+)
+
+
+def rejection_code(error: BaseException) -> str | None:
+    """실행 접수 거절이면 그 코드, 아니면 None(예상 밖 오류)."""
+    return next((code for kind, code in _REJECTION_CODES if isinstance(error, kind)), None)
 
 
 def _failure_code(error: BaseException) -> RunFailureCode:

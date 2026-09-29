@@ -23,7 +23,10 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
     ExperimentRequest,
     ExperimentRunService,
 )
-from strategy_workbench.application.experiment_run.facade.ports import TrialRunRejectedError
+from strategy_workbench.application.experiment_run.facade.ports import (
+    AdmittedRun,
+    TrialRunRejectedError,
+)
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.analytics.facade.metrics import MetricScope
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
@@ -35,10 +38,8 @@ from strategy_workbench.domain.backtest.facade.runs import (
     SavedRevisionReference,
 )
 from strategy_workbench.domain.backtest.facade.trials import (
-    TrialLedger,
     TrialLedgerEntry,
     summarize_trial_ledger,
-    trial_key,
 )
 from strategy_workbench.domain.experiment.facade.design import (
     ExperimentNotFoundError,
@@ -52,7 +53,6 @@ from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
     FloatParameter,
     ParameterValue,
-    StrategySpec,
 )
 
 _AT = datetime(2026, 9, 30, tzinfo=UTC)
@@ -74,32 +74,43 @@ _ROLLING = SplitSpec(mode=SplitMode.ROLLING, train_years=1, test_years=1, embarg
 
 
 class _FakeRuns:
-    """`TrialRunPort` 가짜. 접수한 요청을 순서대로 적고 실행 상태는 테스트가 정한다."""
+    """`TrialRunPort` 가짜. 접수한 요청과 시도 키를 순서대로 적고 실행 상태는 테스트가 정한다.
+
+    `admit` 은 실행 서비스처럼 전략과 파라미터 값을 해소한 기반 spec 을 돌려준다.
+    """
 
     def __init__(self) -> None:
         self.started: list[BacktestRunSpec] = []
+        self.keys: list[str] = []
         self.statuses: dict[str, RunStatus] = {}
         self.cancelled: list[str] = []
         self.ledger_entries: list[TrialLedgerEntry] = []
         self.reject = False
 
-    def validate(self, request: BacktestRunSpec) -> None:
-        if request.environment is None:
-            raise AssertionError("base run without environment reached the port")
+    def admit(self, request: BacktestRunSpec) -> AdmittedRun:
+        resolved = replace(
+            request,
+            strategy=_STRATEGY,
+            parameter_values={"scale": 1.0, "mode": "a", **request.parameter_values},
+        )
+        return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries, ()))
 
-    def strategy(self, source: SavedRevisionReference) -> StrategySpec:
-        return _STRATEGY
-
-    def trial_ledger(self, lineage_id: str) -> TrialLedger:
-        return summarize_trial_ledger(lineage_id, (), self.ledger_entries, ())
-
-    def start(self, request: BacktestRunSpec) -> str:
+    def start(self, request: BacktestRunSpec, *, trial_key: str) -> str:
         if self.reject:
-            raise TrialRunRejectedError("strategy exceeds engine capabilities — core=rust")
+            raise TrialRunRejectedError(
+                "backtest.run.invalid", "strategy exceeds engine capabilities — core=rust"
+            )
         run_id = f"run-{len(self.started)}"
         self.started.append(request)
+        self.keys.append(trial_key)
         self.statuses[run_id] = RunStatus.QUEUED
         return run_id
+
+    def complete_all(self) -> None:
+        """접수한 실행이 모두 결과를 냈다고 원장에 적는다(실행 서비스가 하는 일)."""
+        for run_id, key in zip(self.statuses, self.keys, strict=True):
+            self.statuses[run_id] = RunStatus.COMPLETED
+            self.ledger_entries.append(TrialLedgerEntry(run_id, key, RunStatus.COMPLETED, _AT, _AT))
 
     def status(self, run_id: str) -> RunStatus:
         return self.statuses[run_id]
@@ -241,7 +252,11 @@ def test_a_rejected_submission_is_a_failed_attempt_with_the_reason() -> None:
     retried = service.retry(experiment_id, 0)
 
     first = retried.attempts[0]
-    assert (first.run_id, first.error) == (None, "strategy exceeds engine capabilities — core=rust")
+    assert (first.run_id, first.error_code, first.error) == (
+        None,
+        "backtest.run.invalid",
+        "strategy exceeds engine capabilities — core=rust",
+    )
     assert (retried.attempts[1].run_id, retried.status) == ("run-0", TrialStatus.QUEUED)
     assert [state.status for state in service.trials(experiment_id)][1:] == [TrialStatus.FAILED] * 3
 
@@ -294,31 +309,26 @@ def test_only_a_completed_trial_can_be_selected_and_the_record_stays() -> None:
     assert service.get(experiment_id).selections == (selection,)
 
 
-def test_the_preview_counts_new_trial_keys_once_against_the_ledger() -> None:
+def test_the_preview_counts_each_grid_cell_once_whatever_the_windows() -> None:
     runs = _FakeRuns()
     service = _service(runs)
-    anchored = replace(_ROLLING, mode=SplitMode.ANCHORED)
+    rolling = _request(scale=None)
 
-    before = service.preview(_request(split=anchored))
-    service.create(_request(split=anchored))
-    runs.ledger_entries = [
-        TrialLedgerEntry(
-            run_id,
-            trial_key(replace(request, strategy=_STRATEGY)),
-            RunStatus.COMPLETED,
-            _AT,
-            _AT,
-        )
-        for run_id, request in zip(runs.statuses, runs.started, strict=True)
-    ]
-    after = service.preview(_request(split=anchored))
+    before = service.preview(rolling)
+    service.create(rolling)
+    runs.complete_all()
+    after = service.preview(rolling)
+    anchored = service.preview(
+        _request(split=replace(_ROLLING, mode=SplitMode.ANCHORED), scale=None)
+    )
 
-    # 앵커드 창은 시작일이 같아 한 칸의 두 창이 한 시도다(종료일은 시도 키 밖). 4 실행 → 2 시도.
-    assert (before.combination_count, before.run_count) == (2, 4)
-    assert (before.trial_count, before.new_trial_count, before.trial_count_after) == (0, 2, 2)
-    assert (after.trial_count, after.new_trial_count, after.trial_count_after) == (2, 0, 2)
-    rolling = service.preview(_request())
-    assert (rolling.new_trial_count, rolling.trial_count_after) == (2, 4)
+    # scale 격자 -1, 0, 1 × 롤링 창 둘 = 실행 6. 창은 분할 설계가 정한 평가 구간이라 한 칸의 두 창이
+    # 한 시도다 → N 0 → 3. 제출이 원장에 적은 키로 다시 물으면 셋 다 이미 센 시도다.
+    assert (before.combination_count, before.run_count) == (3, 6)
+    assert (before.trial_count, before.new_trial_count, before.trial_count_after) == (0, 3, 3)
+    assert len(set(runs.keys)) == 3
+    assert (after.trial_count, after.new_trial_count, after.trial_count_after) == (3, 0, 3)
+    assert (anchored.new_trial_count, anchored.trial_count_after) == (0, 3)
 
 
 def test_an_experiment_survives_reopening_the_research_database(tmp_path: Path) -> None:

@@ -26,5 +26,4 @@ DEPENDS_ON: tuple[str, ...] = (
     "domain.assistant",
     "domain.factor",
     "domain.analytics",
-    "domain.strategy",
 )

@@ -27,9 +27,8 @@ from strategy_workbench.domain.experiment.facade.design import (
 from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentStatus,
     TrialStatus,
-    advance_trial_status,
     experiment_status,
-    trial_status_of_run,
+    trial_status,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     ChoiceParameter,
@@ -345,24 +344,6 @@ def test_embargo_that_swallows_the_train_window_is_rejected() -> None:
         split.train_measurement_end(_WINDOW, _SESSIONS)
 
 
-_FORWARD = {
-    (TrialStatus.QUEUED, TrialStatus.RUNNING),
-    (TrialStatus.QUEUED, TrialStatus.CANCELLED),
-    (TrialStatus.RUNNING, TrialStatus.COMPLETED),
-    (TrialStatus.RUNNING, TrialStatus.FAILED),
-    (TrialStatus.RUNNING, TrialStatus.CANCELLED),
-}
-
-
-@pytest.mark.parametrize(("current", "target"), sorted(product(TrialStatus, repeat=2)))
-def test_trial_status_only_moves_forward(current: TrialStatus, target: TrialStatus) -> None:
-    if (current, target) in _FORWARD:
-        assert advance_trial_status(current, target) is target
-    else:
-        with pytest.raises(ValueError):
-            advance_trial_status(current, target)
-
-
 def test_terminal_statuses() -> None:
     assert {status for status in TrialStatus if status.is_terminal} == {
         TrialStatus.COMPLETED,
@@ -414,7 +395,22 @@ def test_trials_are_grid_cells_times_windows_in_a_fixed_order() -> None:
     ],
 )
 def test_an_assigned_trial_takes_the_status_of_its_run(run: RunStatus, trial: TrialStatus) -> None:
-    assert trial_status_of_run(run) is trial
+    assert trial_status(run, attempted=True, experiment_cancelled=True) is trial
+
+
+@pytest.mark.parametrize(
+    ("attempted", "cancelled", "expected"),
+    [
+        (False, False, TrialStatus.QUEUED),
+        (False, True, TrialStatus.CANCELLED),
+        # 접수가 거절돼 실행이 없는 attempt 는 실패다.
+        (True, False, TrialStatus.FAILED),
+    ],
+)
+def test_a_trial_without_a_run_is_queued_cancelled_or_rejected(
+    attempted: bool, cancelled: bool, expected: TrialStatus
+) -> None:
+    assert trial_status(None, attempted=attempted, experiment_cancelled=cancelled) is expected
 
 
 @pytest.mark.parametrize(

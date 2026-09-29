@@ -79,15 +79,22 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
 
     assert preview.status_code == 200, preview.text
     assert created.status_code == 202, created.text
-    # scale 격자 -1, 0, 1 × 롤링 창 둘 = 실행 6. 창마다 시작일이 달라 여섯 모두 새 시도다.
+    # scale 격자 -1, 0, 1 × 롤링 창 둘 = 실행 6. 창은 분할 설계가 정한 평가 구간이라 시도 키는 실험
+    # 기반 실행 설정으로 낸다 — 한 칸의 두 창이 한 시도이고 N 은 0 → 3 이다.
     assert {key: preview.json()[key] for key in ("combination_count", "run_count")} == {
         "combination_count": 3,
         "run_count": 6,
     }
-    assert (preview.json()["trial_count"], preview.json()["trial_count_after"]) == (0, 6)
+    assert (preview.json()["trial_count"], preview.json()["trial_count_after"]) == (0, 3)
     assert experiment["status"] == "completed"
     assert [trial["status"] for trial in trials.json()] == ["completed"] * 6
     assert ledger["trial_count"] == preview.json()["trial_count_after"]
+    assert [len(group["runs"]) for group in ledger["trials"]] == [2, 2, 2]
+    blank = client.post(
+        f"/api/v1/experiments/{experiment['record']['experiment_id']}/selections",
+        json={"trial_index": 0, "reason": "   "},
+    )
+    assert blank.status_code == 422, blank.text
     assert {run["run_id"] for group in ledger["trials"] for run in group["runs"]} == {
         trial["attempts"][0]["run_id"] for trial in trials.json()
     }

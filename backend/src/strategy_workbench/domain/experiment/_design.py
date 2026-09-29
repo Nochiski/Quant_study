@@ -6,9 +6,11 @@ trial = (실험, 해소된 파라미터, 창)이다. 설계는 실험을 만들 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import product
 
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec
+from strategy_workbench.domain.backtest.facade.trials import trial_key
 from strategy_workbench.domain.strategy.facade.specification import ParameterValue
 
 from ._search import GridIndex, SearchSpec
@@ -44,3 +46,16 @@ class ExperimentDesign:
                 product(self.search.indices(), self.windows)
             )
         )
+
+
+def experiment_trial_key(base: BacktestRunSpec, trial: ExperimentTrial) -> str:
+    """실험 trial 의 시도 키 — 창 날짜가 아니라 실험 기반 실행 설정으로 낸다(spec D2).
+
+    창의 학습 구간은 분할 설계가 정한 평가 구간이지 연구자가 고른 선택지가 아니다. 그래서 한 칸의
+    창들은 분할 방식과 상관없이 한 시도이고, 실험 하나가 계열 N 에 더하는 수는 새 칸 수다. 분할
+    설계(`SplitSpec`)를 바꿔 다시 돌려도 키가 같다(알려진 한계).
+
+    Args:
+        base: 실행 서비스가 해소한 기반 실행 spec(전략·실행 설정·파라미터 값).
+    """
+    return trial_key(replace(base, parameter_values=trial.parameter_values))

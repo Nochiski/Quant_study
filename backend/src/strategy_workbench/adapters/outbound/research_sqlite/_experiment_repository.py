@@ -84,14 +84,15 @@ class SQLiteExperimentRepository:
             inserted = connection.execute(
                 """
                 INSERT INTO experiment_attempts
-                    (experiment_order, trial_index, attempt, created_at, run_id, error)
-                SELECT experiment_order, ?, ?, ?, ?, ? FROM experiments WHERE experiment_id = ?
+                    (experiment_order, trial_index, attempt, created_at, run_id, error_code, error)
+                SELECT experiment_order, ?, ?, ?, ?, ?, ? FROM experiments WHERE experiment_id = ?
                 """,
                 (
                     attempt.trial_index,
                     attempt.attempt,
                     _time_text(attempt.created_at, "attempt created_at", attempt.experiment_id),
                     attempt.run_id,
+                    attempt.error_code,
                     attempt.error,
                     attempt.experiment_id,
                 ),
@@ -103,7 +104,7 @@ class SQLiteExperimentRepository:
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(
                 """
-                SELECT a.trial_index, a.attempt, a.created_at, a.run_id, a.error
+                SELECT a.trial_index, a.attempt, a.created_at, a.run_id, a.error_code, a.error
                 FROM experiment_attempts AS a JOIN experiments USING (experiment_order)
                 WHERE experiment_id = ? ORDER BY a.trial_index, a.attempt
                 """,

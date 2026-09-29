@@ -33,13 +33,8 @@ from strategy_workbench.application.assistant_chat.facade.turns import Assistant
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
-    InvalidBacktestRunError,
     RunStatus,
-    SavedRevisionReference,
-    StaleStrategyReferenceError,
-    StrategyReferenceNotFoundError,
-    StrategyRevisionRequiresUpgradeError,
-    TrialLedger,
+    rejection_code,
 )
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
 from strategy_workbench.application.equity_workspace.facade.workspace import (
@@ -48,14 +43,14 @@ from strategy_workbench.application.equity_workspace.facade.workspace import (
 from strategy_workbench.application.experiment_run.facade.experiments import (
     ExperimentRunService,
 )
-from strategy_workbench.application.experiment_run.facade.ports import TrialRunRejectedError
+from strategy_workbench.application.experiment_run.facade.ports import (
+    AdmittedRun,
+    TrialRunRejectedError,
+)
 from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
 )
-from strategy_workbench.application.portfolio_design.facade.design import (
-    InvalidPortfolioRequestError,
-    PortfolioDesignService,
-)
+from strategy_workbench.application.portfolio_design.facade.design import PortfolioDesignService
 from strategy_workbench.application.portfolio_design.facade.trace import StrategyTraceService
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
     CompileRequest,
@@ -68,7 +63,6 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.application.strategy_design.facade.ports import StrategyRepositoryPort
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 
 from ._assistant import (
     DEFAULT_ASSISTANT_SETTINGS,
@@ -216,7 +210,7 @@ def build_container(
         backtest_runs=backtest_runs,
         experiments=ExperimentRunService(
             SQLiteExperimentRepository(research_db_path),
-            _RunServiceTrialRuns(backtest_runs, strategy_repository),
+            _RunServiceTrialRuns(backtest_runs),
             new_id=lambda: str(uuid4()),
         ),
         assistant_profiles=assistant_services.profiles,
@@ -226,39 +220,32 @@ def build_container(
 
 
 class _RunServiceTrialRuns:
-    """`TrialRunPort` 구현: 실행 서비스와 전략 저장소를 감싼다(검증 랩 spec D6).
+    """`TrialRunPort` 구현: 실행 서비스를 감싼다(검증 랩 spec D6).
 
     어시스턴트의 `_RunServiceBacktestResults` 와 같은 모양이다. 실험이 `backtest_run` 유스케이스를
-    import 하지 않도록 bootstrap 이 감싼다. trial 제출은 요청 스레드 밖에서 돌므로 접수 거절만
-    `TrialRunRejectedError` 로 옮겨 attempt 에 남기게 한다.
+    import 하지 않도록 bootstrap 이 감싼다. trial 제출은 요청 스레드 밖에서 돌므로 접수 거절
+    (`rejection_code` 가 코드를 주는 오류)만 `TrialRunRejectedError` 로 옮겨 attempt 에 남기게 한다.
     """
 
-    _REJECTIONS = (
-        InvalidBacktestRunError,
-        InvalidPortfolioRequestError,
-        StaleStrategyReferenceError,
-        StrategyReferenceNotFoundError,
-        StrategyRevisionRequiresUpgradeError,
-    )
-
-    def __init__(self, runs: BacktestRunService, strategies: StrategyRepositoryPort) -> None:
+    def __init__(self, runs: BacktestRunService) -> None:
         self._runs = runs
-        self._strategies = strategies
 
-    def validate(self, request: BacktestRunSpec) -> None:
-        self._runs.preview_trial(request)
+    def admit(self, request: BacktestRunSpec) -> AdmittedRun:
+        admission = self._runs.admit(request)
+        if admission.lineage_id is None:  # pragma: no cover - 실험은 저장 리비전으로만 만든다
+            raise RuntimeError(
+                f"experiment base run has no lineage — spec_hash={admission.provenance.spec_hash}"
+            )
+        return AdmittedRun(admission.spec, self._runs.trial_ledger(admission.lineage_id))
 
-    def strategy(self, source: SavedRevisionReference) -> StrategySpec:
-        return self._strategies.get(source.strategy_id, source.revision).spec
-
-    def trial_ledger(self, lineage_id: str) -> TrialLedger:
-        return self._runs.trial_ledger(lineage_id)
-
-    def start(self, request: BacktestRunSpec) -> str:
+    def start(self, request: BacktestRunSpec, *, trial_key: str) -> str:
         try:
-            return self._runs.start(request).run.run_id
-        except self._REJECTIONS as error:
-            raise TrialRunRejectedError(str(error)) from error
+            return self._runs.start(request, trial_key_override=trial_key).run.run_id
+        except Exception as error:
+            code = rejection_code(error)
+            if code is None:
+                raise
+            raise TrialRunRejectedError(code, str(error)) from error
 
     def status(self, run_id: str) -> RunStatus:
         return self._runs.state(run_id).status

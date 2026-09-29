@@ -149,7 +149,7 @@ V2_SCHEMA_OBJECTS = V1_SCHEMA_OBJECTS + _V2_ADDED_OBJECTS
 
 # 실험 설계(기반 요청·분할·해소된 그리드·창)는 만든 뒤 바뀌지 않아 JSON 한 칸에 둔다.
 # trial 은 설계에서 다시 펴므로 행이 없다. attempt 는 실행에 배정되면 run_id, 접수가 거절되면
-# error 하나만 싣고, 실행 상태는 적지 않는다(실행 기록에서 파생). run_id 는 같은 파일의
+# 거절 코드와 문장만 싣고, 실행 상태는 적지 않는다(실행 기록에서 파생). run_id 는 같은 파일의
 # `backtest_runs` 를 가리키지만 외래 키로 묶지 않는다 — 실행 기록은 실행 유스케이스의 저장소다.
 _V3_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
     (
@@ -183,8 +183,10 @@ _V3_ADDED_OBJECTS: tuple[tuple[str, str, str], ...] = (
             attempt INTEGER NOT NULL CHECK (typeof(attempt) = 'integer' AND attempt >= 1),
             created_at TEXT NOT NULL,
             run_id TEXT COLLATE BINARY,
+            error_code TEXT,
             error TEXT,
-            CHECK ((run_id IS NULL) <> (error IS NULL))
+            CHECK ((run_id IS NULL) <> (error_code IS NULL)),
+            CHECK ((error_code IS NULL) = (error IS NULL))
         )
         """,
     ),

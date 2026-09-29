@@ -154,6 +154,15 @@ const plannedFactor = (
   explanation: graphExplanation,
 });
 
+/** 값 없는 선택 칸(`periods: null`)을 가진 노드. compile 응답 spec 은 dataclass 전 필드를 싣는다. */
+const NEGATE = {
+  node_id: "neg",
+  kind: "unary",
+  operator: "negate",
+  input_node_id: "close",
+  periods: null,
+} as const;
+
 const readyState = (): ExecutionPlansState => ({
   status: "ready",
   expectedRegistryVersion: "factor-registry-v7",
@@ -292,11 +301,14 @@ describe("FactorGraph projection", () => {
     });
     const extended = {
       ...graph,
-      nodes: graph.nodes.map((node) =>
-        node.node_id === "neutralized_value"
-          ? { ...node, weight_node_id: "zero", bucket_count: 5 }
-          : node,
-      ),
+      nodes: [
+        ...graph.nodes.map((node) =>
+          node.node_id === "neutralized_value"
+            ? { ...node, weight_node_id: "zero", bucket_count: 5 }
+            : node,
+        ),
+        NEGATE,
+      ],
     } as FactorGraphRequest["graph"];
     const planless = explanation();
     planless.plan = null;
@@ -322,6 +334,41 @@ describe("FactorGraph projection", () => {
       { label: "그룹 필드", value: "classification.sector" },
       { label: "집계 기간", value: "5" },
     ]);
+    // 값이 없는 선택 칸(`null`)은 숨고, 0 은 값이라 보인다(#359 리뷰 P2-1).
+    const detailsOf = (nodeId: string) =>
+      projection.factors[0].nodes.find((item) => item.nodeId === nodeId)
+        ?.details;
+    expect(detailsOf("neg")).toEqual([]);
+    expect(detailsOf("zero")).toEqual([{ label: "값", value: "0" }]);
+  });
+
+  it("names a plan input by its position when the authored slot cannot be told apart (#359 리뷰 P3-1)", () => {
+    // 같은 노드가 참·거짓 두 칸에 있고 계획의 입력 순서가 문서 칸과 다르면 칸 이름을 고를 수 없다.
+    const reordered = explanation();
+    const step = reordered.plan!.steps.find(
+      (item) => item.node_id === "signal",
+    )!;
+    step.input_node_ids = [
+      "neutralized_value",
+      "positive",
+      "neutralized_value",
+    ];
+    const projection = projectFactorGraphs(
+      {
+        status: "ready",
+        expectedRegistryVersion: "factor-registry-v7",
+        expectedDataSnapshotId: "krx-pit-2026-09-01",
+        factors: [plannedFactor(graph, reordered)],
+      },
+      SCHEMA,
+    );
+    if (projection.status !== "ready") throw new Error("fixture must be ready");
+
+    expect(
+      projection.factors[0].nodes
+        .find((node) => node.nodeId === "signal")
+        ?.inputs.map((input) => input.role),
+    ).toEqual(["1번째 입력", "조건 노드", "거짓일 때 값"]);
   });
 
   it("waits for the runtime schema before projecting a ready plan", () => {
@@ -504,6 +551,36 @@ describe("FactorGraphPanel", () => {
     );
     await user.click(within(signal as HTMLElement).getByText("소스에서 열기"));
     expect(onOpenSource).toHaveBeenLastCalledWith("/factors/0/graph/nodes/0");
+  });
+
+  it("shows a dash, not an English placeholder, for a node without a backend contract (#359 리뷰 P3-1)", () => {
+    const planless = explanation();
+    planless.plan = null;
+    render(
+      <FactorGraphPanel
+        state={{
+          status: "ready",
+          expectedRegistryVersion: "factor-registry-v7",
+          expectedDataSnapshotId: "krx-pit-2026-09-01",
+          factors: [
+            plannedFactor(
+              { ...graph, nodes: [...graph.nodes, NEGATE] },
+              planless,
+            ),
+          ],
+        }}
+        schema={SCHEMA}
+        diagnostics={[]}
+        onSelectPointer={vi.fn()}
+        onOpenSource={vi.fn()}
+      />,
+    );
+
+    const contract = document.querySelector(
+      '[data-node-id="neg"] .factor-graph__contract',
+    ) as HTMLElement;
+    expect(contract.querySelector("code")).toHaveTextContent("—");
+    expect(contract).not.toHaveTextContent("unknown");
   });
 
   it("hides stale graph data and exposes current backend graph diagnostics", async () => {

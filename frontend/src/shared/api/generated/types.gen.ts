@@ -366,6 +366,29 @@ export type BacktestEnvironmentRequiredDetail = {
 };
 
 /**
+ * BacktestParameterInvalidDetail
+ *
+ * 요청의 파라미터 값이 문서에 없는 파라미터이거나 허용 밖이다(spec D4).
+ *
+ * 허용 판정 owner 는 `domain/strategy/_models.py` 의 `normalized_parameter_value` 다. 화면 문장은
+ * frontend 가 `code` 로 번역하고 `parameter_id` 를 자리표시자로 채운다.
+ */
+export type BacktestParameterInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.parameter_invalid";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Parameter Id
+   */
+  parameter_id: string;
+};
+
+/**
  * BacktestResearchWindowViolationDetail
  *
  * 측정 시작일이 연구 구간 밖이다(spec D1).
@@ -523,6 +546,12 @@ export type BacktestRunSpec = {
    * Metric Windows
    */
   metric_windows?: Array<MetricWindow>;
+  /**
+   * Parameter Values
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
   strategy?: StrategySpec | null;
   /**
    * Strategy Source
@@ -696,6 +725,9 @@ export type BacktestUnprocessableResponse = {
     | ({
         code: "backtest.run.research_window_violation";
       } & BacktestResearchWindowViolationDetail)
+    | ({
+        code: "backtest.run.parameter_invalid";
+      } & BacktestParameterInvalidDetail)
     | ({
         code: "backtest.strategy.requires_upgrade";
       } & BacktestStrategyRequiresUpgradeDetail)

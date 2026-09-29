@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal, TypeAlias
@@ -201,19 +202,92 @@ class ChoiceParameter:
 ParameterDefinition: TypeAlias = FloatParameter | IntegerParameter | ChoiceParameter
 
 
+def normalized_parameter_value(
+    parameter: ParameterDefinition, value: ParameterValue
+) -> ParameterValue | None:
+    """값을 파라미터 선언 타입으로 맞춘 값. 타입·범위·선택지 밖이면 `None`.
+
+    문서 hydrate 가 같은 칸에 하는 정규화와 같다: 정수 칸은 정수로 떨어지는 float 을 int 로
+    (`20.0` → `20`), 실수 칸은 int 를 float 으로 바꾼다. bool 은 숫자 칸 값이 아니고, 선택지는
+    `True == 1` 로 맞추지 않고 bool 끼리만 맞춘다. 선택지는 문서의 그 선택지 값을 돌려준다
+    (hydrate 가 정수로 떨어지는 float 선택지를 이미 int 로 접었다).
+    """
+    if isinstance(parameter, ChoiceParameter):
+        return next(
+            (
+                choice
+                for choice in parameter.choices
+                if choice == value and isinstance(choice, bool) is isinstance(value, bool)
+            ),
+            None,
+        )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(parameter, IntegerParameter):
+        if isinstance(value, float) and not value.is_integer():
+            return None
+        number: int | float = int(value)
+    else:
+        number = float(value)
+    return number if parameter.minimum <= number <= parameter.maximum else None
+
+
 def parameter_value_allowed(parameter: ParameterDefinition, value: ParameterValue) -> bool:
-    """값이 파라미터 정의의 타입·범위·선택지 안인가.
+    """값이 파라미터 정의의 타입·범위·선택지 안인가(`normalized_parameter_value` 가 값을 내는가).
 
     검증기의 기본값 판정, 실험 탐색 값, 실행 요청의 해소 값(검증 랩 V3-02)이 이 술어 하나를 쓴다.
     `step` 은 보지 않는다. 간격은 탐색 격자를 펼치는 폭일 뿐이고, 여기서 간격 정렬을 요구하면
     간격에 맞지 않는 기본값을 가진 저장 리비전이 새로 검증 오류가 된다.
     """
+    return normalized_parameter_value(parameter, value) is not None
+
+
+def describe_allowed_parameter_values(parameter: ParameterDefinition) -> str:
+    """진단 문장에 싣는 허용 범위(`key=value`)."""
     if isinstance(parameter, ChoiceParameter):
-        return value in parameter.choices
-    numeric_types = (int,) if isinstance(parameter, IntegerParameter) else (int, float)
-    if isinstance(value, bool) or not isinstance(value, numeric_types):
-        return False
-    return parameter.minimum <= value <= parameter.maximum
+        return f"choices={list(parameter.choices)}"
+    return f"kind={parameter.kind} minimum={parameter.minimum} maximum={parameter.maximum}"
+
+
+class InvalidParameterValueError(ValueError):
+    """실행에 넘긴 파라미터 값을 문서 정의로 해소할 수 없다(검증 랩 spec D4)."""
+
+    def __init__(self, parameter_id: str, message: str) -> None:
+        super().__init__(message)
+        self.parameter_id = parameter_id
+
+
+def resolve_parameter_values(
+    parameters: tuple[ParameterDefinition, ...], requested: Mapping[str, ParameterValue]
+) -> dict[str, ParameterValue]:
+    """문서 파라미터마다 실행에 쓸 값. 요청 값은 선언 타입으로 맞추고, 없으면 문서 기본값이다.
+
+    선언된 파라미터를 전부 담아 돌려준다. 값을 생략한 요청과 기본값을 명시한 요청이 같은 해소
+    결과가 되어 실행 지문도 같다.
+
+    Raises:
+        InvalidParameterValueError: 문서에 없는 `parameter_id` 이거나 허용 밖 값이다.
+    """
+    declared = [parameter.parameter_id for parameter in parameters]
+    unknown = sorted(set(requested) - set(declared))
+    if unknown:
+        raise InvalidParameterValueError(
+            unknown[0],
+            f"전략 문서에 없는 파라미터입니다 — parameter_id={unknown[0]} unknown={unknown} "
+            f"declared={declared}",
+        )
+    resolved: dict[str, ParameterValue] = {}
+    for parameter in parameters:
+        value = requested.get(parameter.parameter_id, parameter.default)
+        normalized = normalized_parameter_value(parameter, value)
+        if normalized is None:
+            raise InvalidParameterValueError(
+                parameter.parameter_id,
+                f"파라미터 값이 정의 밖입니다 — parameter_id={parameter.parameter_id} "
+                f"value={value!r} {describe_allowed_parameter_values(parameter)}",
+            )
+        resolved[parameter.parameter_id] = normalized
+    return resolved
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -474,6 +474,31 @@
         "title": "BacktestEnvironmentRequiredDetail",
         "type": "object"
       },
+      "BacktestParameterInvalidDetail": {
+        "description": "요청의 파라미터 값이 문서에 없는 파라미터이거나 허용 밖이다(spec D4).\n\n허용 판정 owner 는 `domain/strategy/_models.py` 의 `normalized_parameter_value` 다. 화면 문장은\nfrontend 가 `code` 로 번역하고 `parameter_id` 를 자리표시자로 채운다.",
+        "properties": {
+          "code": {
+            "const": "backtest.run.parameter_invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "parameter_id"
+        ],
+        "title": "BacktestParameterInvalidDetail",
+        "type": "object"
+      },
       "BacktestResearchWindowViolationDetail": {
         "description": "측정 시작일이 연구 구간 밖이다(spec D1).\n\n화면 문장은 frontend 가 `code` 로 번역하되 날짜는 자리표시자로 두고 이 detail 의 값으로 채운다 —\n날짜 owner 는 `domain/backtest/_research_window.py` 하나다.",
         "properties": {
@@ -706,6 +731,26 @@
             },
             "title": "Metric Windows",
             "type": "array"
+          },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameter Values",
+            "type": "object"
           },
           "strategy": {
             "anyOf": [
@@ -979,6 +1024,7 @@
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
+                "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
                 "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
@@ -997,6 +1043,9 @@
               },
               {
                 "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestParameterInvalidDetail"
               },
               {
                 "$ref": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail"

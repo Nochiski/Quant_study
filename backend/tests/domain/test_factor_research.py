@@ -238,6 +238,16 @@ def test_plan_and_cache_fingerprints_cover_all_reproducibility_inputs() -> None:
     assert plan == repeated
     assert tuple(step.node_id for step in plan.steps) == ("source", "mean")
     assert key.fingerprint != changed.fingerprint
+    # 해소된 파라미터 값도 키에 든다 — 값만 다른 두 평가가 캐시를 나누지 않는다(검증 랩 spec D4).
+    other_value = build_factor_matrix_cache_key(
+        data_snapshot_id="snapshot-a",
+        plan_hash=plan.plan_hash,
+        registry_version="registry-v1",
+        parameters=(ResolvedFactorParameter("window", 6),),
+        as_of_start=date(2024, 1, 1),
+        as_of_end=date(2024, 12, 31),
+    )
+    assert key.fingerprint != other_value.fingerprint
 
 
 def test_factor_analytics_exposes_professional_diagnostics_explicitly() -> None:

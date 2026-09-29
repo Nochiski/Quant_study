@@ -25,7 +25,7 @@ from strategy_workbench.domain.strategy.facade.provenance import (
     StrategyProvenance,
     StrategySource,
 )
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import ParameterValue, StrategySpec
 
 
 class ExecutionCore(StrEnum):
@@ -294,6 +294,11 @@ class BacktestRunSpec:
     benchmark_security_id: str | None = None
     annualization_days: int = 252
     metric_windows: tuple[MetricWindow, ...] = ()
+    # 전략 파라미터 값(parameter_id → 값, 검증 랩 spec D4). 빠진 파라미터는 문서 기본값이다.
+    # 접수가 `resolve_parameter_values` 로 선언된 파라미터 전부를 선언 타입 값으로 채워 실행 spec 에
+    # 박으므로 실행 지문과 매니페스트는 해소된 값을 싣는다. 저장 리비전의 provenance·`spec_hash` 는
+    # 그대로다.
+    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # NaN 은 `<= 0` 비교를 빠져나가고 inf 는 양수라, 유한성을 따로 보지 않으면 접수된 뒤

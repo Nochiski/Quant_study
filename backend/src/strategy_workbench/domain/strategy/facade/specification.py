@@ -38,6 +38,7 @@ from strategy_workbench.domain.strategy._models import (
     FactorSignal,
     FloatParameter,
     IntegerParameter,
+    InvalidParameterValueError,
     ParameterDefinition,
     ParameterValue,
     PortfolioSide,
@@ -51,8 +52,11 @@ from strategy_workbench.domain.strategy._models import (
     StrategySpec,
     WeightingMethod,
     composite_factors,
+    describe_allowed_parameter_values,
     inverse_risk_factor_id,
+    normalized_parameter_value,
     parameter_value_allowed,
+    resolve_parameter_values,
 )
 
 __all__ = [
@@ -79,6 +83,7 @@ __all__ = [
     "GroupNode",
     "GroupOperator",
     "IntegerParameter",
+    "InvalidParameterValueError",
     "MissingPolicy",
     "NodeValueType",
     "ParameterDefinition",
@@ -103,7 +108,10 @@ __all__ = [
     "canonical_strategy_json",
     "canonical_strategy_payload",
     "composite_factors",
+    "describe_allowed_parameter_values",
     "inverse_risk_factor_id",
+    "normalized_parameter_value",
     "parameter_value_allowed",
+    "resolve_parameter_values",
     "strategy_spec_hash",
 ]

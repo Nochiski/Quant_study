@@ -17,6 +17,7 @@ from strategy_workbench.application.assistant_chat.facade.chat import AssistantC
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestParameterValueError,
     BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
@@ -359,7 +360,7 @@ def create_app(
     def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
         try:
             return backtest_runs.start(spec)
-        # 아래 두 오류는 `InvalidBacktestRunError` 의 하위 타입이므로 반드시 먼저 잡는다.
+        # 아래 세 오류는 `InvalidBacktestRunError` 의 하위 타입이므로 반드시 먼저 잡는다.
         except MissingBacktestRunEnvironmentError as error:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -375,6 +376,15 @@ def create_app(
                     "sealed_start": violation.sealed_start.isoformat(),
                     "sealed_end": violation.sealed_end.isoformat(),
                     "research_start": violation.research_start.isoformat(),
+                },
+            ) from error
+        except BacktestParameterValueError as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "backtest.run.parameter_invalid",
+                    "message": str(error),
+                    "parameter_id": error.parameter_id,
                 },
             ) from error
         except InvalidBacktestRunError as error:

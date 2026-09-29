@@ -1,4 +1,5 @@
 from strategy_workbench.application.backtest_run._service import (
+    BacktestParameterValueError,
     BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
     BacktestRunService,
@@ -28,6 +29,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
 )
 
 __all__ = [
+    "BacktestParameterValueError",
     "BacktestResearchWindowViolationError",
     "BacktestResultNotReadyError",
     "BacktestRunNotFoundError",

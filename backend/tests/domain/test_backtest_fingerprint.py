@@ -26,6 +26,12 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategySourceKind,
     backtest_run_fingerprint,
 )
+from strategy_workbench.domain.strategy.facade.specification import (
+    FloatParameter,
+    IntegerParameter,
+    ParameterValue,
+    resolve_parameter_values,
+)
 
 
 def _fingerprint(spec: BacktestRunSpec) -> str:
@@ -52,6 +58,34 @@ def test_fingerprint_ignores_how_the_strategy_was_referenced() -> None:
 
     assert len({_fingerprint(s) for s in (legacy, saved, draft, other_draft)}) == 1
     assert _fingerprint(replace(legacy, initial_cash=1.0)) != _fingerprint(legacy)
+
+
+def test_omitted_and_explicit_default_parameter_values_share_one_fingerprint() -> None:
+    """검증 랩 V3-02: 접수가 해소한 값(`resolve_parameter_values`)이 지문에 든다.
+
+    생략한 요청과 기본값을 다른 표기(20.0)로 적은 요청은 같은 실행이고, 기본값이 아닌 값만 지문을
+    가른다.
+    """
+    parameters = (
+        IntegerParameter("lookback", 20, 10, 30, "integer"),
+        FloatParameter("weight", 0.5, 0.0, 2.0, "float"),
+    )
+    template = StrategyDesignService(
+        InMemoryStrategyRepository(), new_id=lambda: "unused"
+    ).template()
+    base = BacktestRunSpec(strategy=replace(template, parameters=parameters))
+
+    def resolved(requested: dict[str, ParameterValue]) -> str:
+        values = resolve_parameter_values(parameters, requested)
+        return _fingerprint(replace(base, parameter_values=values))
+
+    omitted = resolved({})
+    assert resolved({"lookback": 20.0, "weight": 0.5}) == omitted
+    assert resolved({"lookback": 21}) != omitted
+    # 정규화가 빠지면 20.0 과 20 이 canonical JSON 에서 다른 표기가 되어 지문이 갈린다.
+    assert (
+        _fingerprint(replace(base, parameter_values={"lookback": 20.0, "weight": 0.5})) != omitted
+    )
 
 
 def _manifest(strategy_hash: str, spec_hash: str) -> RunManifest:

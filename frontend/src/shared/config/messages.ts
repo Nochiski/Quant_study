@@ -1334,7 +1334,7 @@ const ko = {
   "backtest.error.backtest.result.not_ready":
     "이 실행은 아직 결과가 없습니다. 실행이 끝난 뒤 다시 여세요.",
   "backtest.error.backtest.result.unreadable":
-    "이 실행의 결과 파일을 읽을 수 없습니다. 파일이 없어졌거나 손상됐거나, 결과 형식이 바뀌기 전의 옛 결과일 수 있습니다. 다시 불러와도 같으니 \"동일 설정 재실행\"으로 다시 실행하세요.",
+    "이 실행의 결과 파일을 읽을 수 없습니다. 파일이 없어졌거나 손상됐거나, 결과 형식이 바뀌기 전의 옛 결과일 수 있습니다. 다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
   // 계열 합치기 거절(검증 랩 V1-05). 화면은 V5-03 이 붙인다.
   "backtest.error.backtest.lineage.already_merged":
     "두 전략은 이미 같은 시도 계열입니다. 합칠 것이 없습니다.",
@@ -3109,7 +3109,7 @@ export const messages = {
     "backtest.error.backtest.result.not_ready":
       "This run has no result yet. Open it again after the run finishes.",
     "backtest.error.backtest.result.unreadable":
-      "This run's result file cannot be read. The file may be missing or damaged, or it is an old result saved before the result format changed. Loading it again will not help; use \"Rerun same settings\" to run it again.",
+      "This run's result file cannot be read. The file may be missing or damaged, or it is an old result saved before the result format changed. Loading it again will not help; run it again with the same settings.",
     "backtest.error.backtest.lineage.already_merged":
       "The two strategies are already one trial lineage. There is nothing to merge.",
     "backtest.error.experiment.base.unsaved":

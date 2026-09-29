@@ -997,7 +997,7 @@ describe("App Shell routes", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("이 실행의 결과 파일을 읽을 수 없습니다.");
     expect(alert).toHaveTextContent(
-      '다시 불러와도 같으니 "동일 설정 재실행"으로 다시 실행하세요.',
+      "다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
     );
     expect(within(alert).getByRole("group")).toHaveTextContent(
       "run result file is missing — run_id=run-unreadable",

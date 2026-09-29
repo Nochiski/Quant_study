@@ -6,7 +6,7 @@ current_phase: V1,V2,V3
 current_pr: V1-01,V2-01,V3-01
 active_prs: [V1-01, V2-01, V3-01]
 parallel_window: [V1-01, V2-01, V3-01]
-last_updated: 2026-09-29T17:28:15+09:00
+last_updated: 2026-09-29T18:07:29+09:00
 planned_prs: 28
 merged_prs: 1
 approved_prs: 1
@@ -29,7 +29,7 @@ progress_percent: 4
 | Active PR | `V1-01, V2-01, V3-01` |
 | Progress | `1 / 28 merged (4%)` |
 | Approved | `1 / 28` |
-| Aggregated at | `2026-09-29 17:28 KST` |
+| Aggregated at | `2026-09-29 18:07 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -69,7 +69,7 @@ progress_percent: 4
 |---|---|---:|---:|---|
 | V0 | Planning package | 1 | 1 | `MERGED` |
 | V1 | Research window seal, run persistence, trial ledger | 5 | 0 | `SELF_CHECK` |
-| V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 0 | `IN_PROGRESS` |
+| V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 0 | `SELF_CHECK` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 0 | `IN_PROGRESS` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
 | V5 | Screens (after lang2 merge signal) | 7 | 0 | `WAITING` |
@@ -97,7 +97,7 @@ progress_percent: 4
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V2-01` | 매도 거래세(법정 세율표) | V0-01 | `IN_PROGRESS` | — |
+| [ ] | `V2-01` | 매도 거래세(법정 세율표) | V0-01 | `SELF_CHECK` | — |
 | [ ] | `V2-02` | ADV 배선·참여 기준(adv20) | V2-01 | `PLANNED` | — |
 | [ ] | `V2-03` | √ 시장충격 모델 | V2-02 | `PLANNED` | — |
 

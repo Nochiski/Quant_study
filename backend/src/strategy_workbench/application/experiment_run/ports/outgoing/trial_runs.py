@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
 
-from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec, BacktestRunState
+from strategy_workbench.domain.backtest.facade.runs import (
+    BacktestRunResult,
+    BacktestRunSpec,
+    BacktestRunState,
+)
 from strategy_workbench.domain.backtest.facade.trials import TrialLedger
 
 
@@ -53,8 +57,12 @@ class TrialRunPort(Protocol):
         """
         ...
 
+    def result(self, run_id: str) -> BacktestRunResult:
+        """완료된 실행의 결과(창별 선택의 학습 점수·이어 붙인 검증 곡선)."""
+        ...
+
     def sessions(self, start: date, end: date) -> tuple[date, ...]:
-        """양끝을 포함한 거래 세션(워크포워드 엠바고)."""
+        """양끝을 포함한 거래 세션(워크포워드 엠바고·검증 곡선 기준점)."""
         ...
 
     def states(self, run_ids: Collection[str]) -> Mapping[str, BacktestRunState]:

@@ -10082,6 +10082,55 @@
         "title": "ValidationSeverity",
         "type": "string"
       },
+      "WalkForwardReport": {
+        "description": "워크포워드 결과(V3-05). 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율이다.\n\n곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 끝나야 채워진다.",
+        "properties": {
+          "curve": {
+            "items": {
+              "$ref": "#/components/schemas/EquityCurvePoint"
+            },
+            "title": "Curve",
+            "type": "array"
+          },
+          "out_of_sample_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Out Of Sample Sharpe"
+          },
+          "picks": {
+            "items": {
+              "$ref": "#/components/schemas/WindowPick"
+            },
+            "title": "Picks",
+            "type": "array"
+          },
+          "retention": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention"
+          }
+        },
+        "required": [
+          "picks",
+          "curve",
+          "out_of_sample_sharpe",
+          "retention"
+        ],
+        "title": "WalkForwardReport",
+        "type": "object"
+      },
       "WalkForwardWindow": {
         "description": "학습·검증 구간 한 쌍. 네 날짜 모두 양끝 포함이고 연구 구간 안이다.",
         "properties": {
@@ -10132,6 +10181,93 @@
         ],
         "title": "WeightingMethod",
         "type": "string"
+      },
+      "WindowPick": {
+        "description": "워크포워드 창마다 학습 점수로 자동으로 고른 칸과 그 칸의 검증 실행(V3-05).\n\n사용자가 이유를 적어 고르는 후보 선택(`ExperimentSelection`, spec D9)과 다르다. 고를 칸이\n없으면(창에서 대표 샤프가 있는 학습 실행이 없다) `trial_index` 가 None 이고 실행도 없다.\n검증 실행이 재시작으로 중단되면 같은 칸으로 다음 번호를 다시 넘긴다.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "train_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Train Sharpe"
+          },
+          "trial_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Index"
+          },
+          "window_index": {
+            "title": "Window Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "window_index",
+          "attempt",
+          "trial_index",
+          "train_sharpe",
+          "created_at"
+        ],
+        "title": "WindowPick",
+        "type": "object"
       },
       "WindowSelectionRule": {
         "description": "창마다 학습 구간 성과로 파라미터 칸 하나를 고르는 기준.",
@@ -12111,6 +12247,56 @@
           }
         },
         "summary": "Retry Experiment Trial"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/walk-forward": {
+      "get": {
+        "description": "창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율(V3-05). 사용자 후보 선택\n(`selections`)과 다르다.",
+        "operationId": "getExperimentWalkForward",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalkForwardReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Experiment Walk Forward"
       }
     },
     "/api/v1/factors/catalog": {

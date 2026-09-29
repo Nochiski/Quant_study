@@ -69,6 +69,9 @@ import type {
   GetExperimentData,
   GetExperimentErrors,
   GetExperimentResponses,
+  GetExperimentWalkForwardData,
+  GetExperimentWalkForwardErrors,
+  GetExperimentWalkForwardResponses,
   GetFactorCatalogData,
   GetFactorCatalogErrors,
   GetFactorCatalogResponses,
@@ -760,6 +763,21 @@ export const retryExperimentTrial = <ThrowOnError extends boolean = false>(
     url: "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry",
     ...options,
   });
+
+/**
+ * Get Experiment Walk Forward
+ *
+ * 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율(V3-05). 사용자 후보 선택
+ * (`selections`)과 다르다.
+ */
+export const getExperimentWalkForward = <ThrowOnError extends boolean = false>(
+  options: Options<GetExperimentWalkForwardData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentWalkForwardResponses,
+    GetExperimentWalkForwardErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/walk-forward", ...options });
 
 /**
  * Factor Catalog

@@ -213,6 +213,7 @@ def build_container(
         _RunServiceTrialRuns(
             backtest_runs, equity_data, held_run_ids=None if hold is None else hold.run_ids
         ),
+        metric_registry=metric_registry,
         new_id=lambda: str(uuid4()),
     )
     # 지난 프로세스가 끝내지 못한 실험의 남은 trial 을 다시 넘긴다(검증 랩 spec D6). 실행
@@ -287,6 +288,9 @@ class _RunServiceTrialRuns:
         if self._held_run_ids is not None:
             self._held_run_ids.add(run_id)
         return run_id
+
+    def result(self, run_id: str) -> BacktestRunResult:
+        return self._runs.result(run_id)
 
     def sessions(self, start: date, end: date) -> tuple[date, ...]:
         return self._equity_data.trading_sessions(start, end)

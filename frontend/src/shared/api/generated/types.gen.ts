@@ -6428,6 +6428,32 @@ export type ValidationKind = "syntax" | "semantic" | "capability";
 export type ValidationSeverity = "error" | "warning";
 
 /**
+ * WalkForwardReport
+ *
+ * 워크포워드 결과(V3-05). 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율이다.
+ *
+ * 곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 끝나야 채워진다.
+ */
+export type WalkForwardReport = {
+  /**
+   * Curve
+   */
+  curve: Array<EquityCurvePoint>;
+  /**
+   * Out Of Sample Sharpe
+   */
+  out_of_sample_sharpe: number | null;
+  /**
+   * Picks
+   */
+  picks: Array<WindowPick>;
+  /**
+   * Retention
+   */
+  retention: number | null;
+};
+
+/**
  * WalkForwardWindow
  *
  * 학습·검증 구간 한 쌍. 네 날짜 모두 양끝 포함이고 연구 구간 안이다.
@@ -6460,6 +6486,54 @@ export type WarningSeverity = "info" | "warning";
  * WeightingMethod
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
+
+/**
+ * WindowPick
+ *
+ * 워크포워드 창마다 학습 점수로 자동으로 고른 칸과 그 칸의 검증 실행(V3-05).
+ *
+ * 사용자가 이유를 적어 고르는 후보 선택(`ExperimentSelection`, spec D9)과 다르다. 고를 칸이
+ * 없으면(창에서 대표 샤프가 있는 학습 실행이 없다) `trial_index` 가 None 이고 실행도 없다.
+ * 검증 실행이 재시작으로 중단되면 같은 칸으로 다음 번호를 다시 넘긴다.
+ */
+export type WindowPick = {
+  /**
+   * Attempt
+   */
+  attempt: number;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Error Code
+   */
+  error_code?: string | null;
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Run Id
+   */
+  run_id?: string | null;
+  /**
+   * Train Sharpe
+   */
+  train_sharpe: number | null;
+  /**
+   * Trial Index
+   */
+  trial_index: number | null;
+  /**
+   * Window Index
+   */
+  window_index: number;
+};
 
 /**
  * WindowSelectionRule
@@ -7701,6 +7775,42 @@ export type RetryExperimentTrialResponses = {
 
 export type RetryExperimentTrialResponse =
   RetryExperimentTrialResponses[keyof RetryExperimentTrialResponses];
+
+export type GetExperimentWalkForwardData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/walk-forward";
+};
+
+export type GetExperimentWalkForwardErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentWalkForwardError =
+  GetExperimentWalkForwardErrors[keyof GetExperimentWalkForwardErrors];
+
+export type GetExperimentWalkForwardResponses = {
+  /**
+   * Successful Response
+   */
+  200: WalkForwardReport;
+};
+
+export type GetExperimentWalkForwardResponse =
+  GetExperimentWalkForwardResponses[keyof GetExperimentWalkForwardResponses];
 
 export type GetFactorCatalogData = {
   body?: never;

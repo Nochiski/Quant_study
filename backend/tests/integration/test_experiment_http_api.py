@@ -1,4 +1,5 @@
-"""실험 HTTP(V3-03) — 미리 계산과 실제 원장 증가, 기반 리비전 제약, 코드화된 거절(spec D2·D5)."""
+"""실험 HTTP(V3-03·V3-05) — 미리 계산과 실제 원장 증가, 워크포워드, 기반 리비전 제약, 코드화된
+거절(spec D2·D5)."""
 
 from __future__ import annotations
 
@@ -89,7 +90,8 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
     assert experiment["status"] == "completed"
     assert [trial["status"] for trial in trials.json()] == ["completed"] * 6
     assert ledger["trial_count"] == preview.json()["trial_count_after"]
-    assert [len(group["runs"]) for group in ledger["trials"]] == [2, 2, 2]
+    # 칸마다 학습 두 번 + 창마다 고른 칸의 검증 실행 한 번(같은 시도 키라 재확인이다).
+    assert sum(len(group["runs"]) for group in ledger["trials"]) == 6 + 2
     listed = client.get("/api/v1/experiments", params={"limit": 1}).json()
     assert [item["record"]["experiment_id"] for item in listed["items"]] == [
         experiment["record"]["experiment_id"]
@@ -100,9 +102,21 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
         json={"trial_index": 0, "reason": "   "},
     )
     assert blank.status_code == 422, blank.text
+    walk_forward = client.get(
+        f"/api/v1/experiments/{experiment['record']['experiment_id']}/walk-forward"
+    ).json()
     assert {run["run_id"] for group in ledger["trials"] for run in group["runs"]} == {
         trial["attempts"][0]["run_id"] for trial in trials.json()
-    }
+    } | {pick["run_id"] for pick in walk_forward["picks"]}
+    assert [pick["window_index"] for pick in walk_forward["picks"]] == [0, 1]
+    # 곡선은 검증 창(2022-01-04 ~ 2023-01-03, 2023-01-04 ~ 2023-06-30) 세션만 잇는다. 창 경계의 두
+    # 세션이 붙어 있고 학습 구간 세션은 없다.
+    sessions = [point["session"] for point in walk_forward["curve"]]
+    assert (sessions[0], sessions[-1]) == ("2022-01-04", "2023-06-30")
+    boundary = sessions.index("2023-01-03")
+    assert sessions[boundary + 1] == "2023-01-04"
+    assert sessions == sorted(set(sessions))
+    assert walk_forward["out_of_sample_sharpe"] is not None
 
 
 def test_design_and_lookup_rejections_are_coded() -> None:

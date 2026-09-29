@@ -1048,7 +1048,7 @@ const ko = {
     "섹터 하나가 가질 수 있는 최대 목표 비중입니다.",
   // 그래프 1수준(파이프라인) 단계 이름과 한 문장 요약(P4-01, 리드 결정 2026-09-30). 조각 키는 backend
   // 설명 키 아래 `.summary`(enum 은 값 이름 키 아래)이고 `{<키>}` 자리에 같은 카드 필드의 값이 들어간다
-  // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다.
+  // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다. 노드 설정 칸 조각은 레시피 요약이 쓴다.
   "strategy.stage.eligibility": "유니버스",
   "strategy.stage.eligibility.description": "어떤 종목을 후보로 둘지 정합니다.",
   "strategy.stage.signal": "알파 팩터",
@@ -1106,6 +1106,14 @@ const ko = {
   "strategy.contract.risk.max_name_weight.summary": "종목당 최대 {max_name_weight}",
   "strategy.contract.risk.max_sector_weight.summary":
     "섹터당 최대 {max_sector_weight}",
+  "strategy.field.node.periods.summary": "{periods}일 전",
+  "strategy.field.node.window.summary": "{window}일",
+  "strategy.field.node.lag.summary": "최근 {lag}일 제외",
+  "strategy.field.node.lower_quantile.summary": "아래 {lower_quantile}",
+  "strategy.field.node.upper_quantile.summary": "위 {upper_quantile}",
+  "strategy.field.node.group_field_id.summary": "{group_field_id}별",
+  "recipe.summary.previous": "앞 단계",
+  "recipe.summary.advanced": "노드 {count}개 · 고급",
   "run_environment.contract.participation_rate.description":
     "참여 기준 거래량 대비 주문이 한 세션에 차지할 수 있는 최대 비율입니다.",
   "run_environment.contract.fee_bps.description":
@@ -2880,7 +2888,7 @@ export const messages = {
       "Largest target weight a single sector may take.",
     // 그래프 1수준(파이프라인) 단계 이름과 한 문장 요약(P4-01, 리드 결정 2026-09-30). 조각 키는 backend
     // 설명 키 아래 `.summary`(enum 은 값 이름 키 아래)이고 `{<키>}` 자리에 같은 카드 필드의 값이 들어간다
-    // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다.
+    // (`pipeline-projection.ts`). 조각이 없는 필드는 요약에 나오지 않는다. 노드 설정 칸 조각은 레시피 요약이 쓴다.
     "strategy.stage.eligibility": "Universe",
     "strategy.stage.eligibility.description": "Which stocks are candidates.",
     "strategy.stage.signal": "Alpha",
@@ -2945,6 +2953,14 @@ export const messages = {
       "at most {max_name_weight} per stock",
     "strategy.contract.risk.max_sector_weight.summary":
       "at most {max_sector_weight} per sector",
+    "strategy.field.node.periods.summary": "{periods} sessions back",
+    "strategy.field.node.window.summary": "{window} sessions",
+    "strategy.field.node.lag.summary": "skipping the last {lag} sessions",
+    "strategy.field.node.lower_quantile.summary": "lower {lower_quantile}",
+    "strategy.field.node.upper_quantile.summary": "upper {upper_quantile}",
+    "strategy.field.node.group_field_id.summary": "by {group_field_id}",
+    "recipe.summary.previous": "previous step",
+    "recipe.summary.advanced": "{count} nodes · advanced",
     "run_environment.contract.participation_rate.description":
       "Largest share of the participation-basis volume an order may take in one session.",
     "run_environment.contract.fee_bps.description":

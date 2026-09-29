@@ -151,31 +151,28 @@ const NODE_NAME_KEY = "node_id";
 export type NodeSlot = { key: string; facts: SchemaFacts };
 
 /**
- * 노드 분기 스키마의 입력 칸과 설정 칸(#354). 입력 칸은 `x-reference: node`(`nodeReferenceKeys`), 설정 칸은
- * 종류(`const`)·이름·연산(`x-operator`)·입력을 뺀 나머지다. kind·칸 표를 손으로 적지 않는다(정본 대장
+ * 노드 분기 스키마의 칸(#354). 연산 칸은 `x-operator`, 입력 칸은 `x-reference: node`(`nodeReferenceKeys`),
+ * 설정 칸은 종류(`const`)·이름·연산·입력을 뺀 나머지다. kind·칸 표를 손으로 적지 않는다(정본 대장
  * "runtime schema 노드의 필드 표시 사실") — 실행 계획 투영과 레시피 투영이 같은 칸을 읽는다.
  */
 export const nodeSlots = (
   schema: JsonSchema,
   branch: JsonSchema,
-): { inputs: NodeSlot[]; settings: NodeSlot[] } => {
+): { operator: string | null; inputs: NodeSlot[]; settings: NodeSlot[] } => {
   const inputKeys = new Set(nodeReferenceKeys(schema, branch));
   const properties = isRecord(branch.properties) ? branch.properties : {};
   const inputs: NodeSlot[] = [];
   const settings: NodeSlot[] = [];
+  let operator: string | null = null;
   for (const [key, candidate] of Object.entries(properties)) {
     const property = isRecord(candidate) ? resolveRef(schema, candidate) : null;
     if (property === null) continue;
     const slot = { key, facts: schemaFacts(property) };
     if (inputKeys.has(key)) inputs.push(slot);
-    else if (
-      !slot.facts.hasConst &&
-      slot.facts.operatorKeys === null &&
-      key !== NODE_NAME_KEY
-    )
-      settings.push(slot);
+    else if (slot.facts.operatorKeys !== null) operator = key;
+    else if (!slot.facts.hasConst && key !== NODE_NAME_KEY) settings.push(slot);
   }
-  return { inputs, settings };
+  return { operator, inputs, settings };
 };
 
 /** `base`, `base_2`, `base_3` … 중 그래프에 없는 첫 id. */

@@ -79,9 +79,10 @@ class SplitSpec:
         자른다(부분 검증 창).
 
         Args:
-            research_start: 연구 구간 시작일. 호출부가 `domain/backtest` 의 `RESEARCH_START`(봉인
-                판정 owner)를 넘기고 여기서 다시 적지 않는다.
-            research_end: 실험의 측정 종료일.
+            research_start: 실험의 측정 시작일. 실험 유스케이스는 봉인 판정(`domain/backtest` 의
+                `require_environment`)을 통과한 실행 설정의 시작일을 넘기고, 연구 하한은 여기서
+                다시 적지 않는다.
+            research_end: 실험의 측정 종료일(실행 설정의 종료일).
 
         Raises:
             InvalidExperimentSpecError: 첫 학습 창 뒤에 검증할 날이 없다.

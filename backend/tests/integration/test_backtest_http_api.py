@@ -31,7 +31,12 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
     BacktestDataPort,
 )
-from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
+from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestRunService,
+    BacktestRunSpec,
+    InvalidBacktestRunError,
+    rejection_code,
+)
 from strategy_workbench.application.portfolio_design.facade.design import (
     EngineCapabilityIssue,
     EngineCompatibility,
@@ -585,11 +590,15 @@ def test_engine_incompatible_strategy_is_rejected_at_start_with_the_issue_list(
     )
     client = TestClient(_app_with_backtests(container, backtests))
 
-    response = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    body = _run_body(client, "python")
+    response = client.post("/api/v1/backtests", json=body)
+    # 실험 기반 검사(`admit`)도 시작과 같은 preflight 판정·코드로 거절하고 접수하지 않는다(V3-03).
+    with pytest.raises(InvalidBacktestRunError) as admitted:
+        backtests.admit(TypeAdapter(BacktestRunSpec).validate_python(body))
 
     assert response.status_code == 422, response.text
     detail = response.json()["detail"]
-    assert detail["code"] == "backtest.run.invalid"
+    assert detail["code"] == rejection_code(admitted.value) == "backtest.run.invalid"
     assert "feature.unsupported=not_implemented (no kernel)" in detail["message"]
     assert client.get("/api/v1/backtests/must-not-be-accepted").status_code == 404
 

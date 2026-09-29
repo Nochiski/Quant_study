@@ -1,5 +1,14 @@
+from strategy_workbench.domain.experiment._design import (
+    ExperimentDesign,
+    ExperimentTrial,
+    experiment_trial_key,
+)
 from strategy_workbench.domain.experiment._errors import (
+    EXPERIMENT_CODES,
     EXPERIMENT_SPEC_CODES,
+    ExperimentError,
+    ExperimentNotFoundError,
+    ExperimentStateError,
     InvalidExperimentSpecError,
 )
 from strategy_workbench.domain.experiment._search import (
@@ -20,8 +29,14 @@ from strategy_workbench.domain.experiment._walk_forward import (
 )
 
 __all__ = [
+    "EXPERIMENT_CODES",
     "EXPERIMENT_SPEC_CODES",
     "MAX_GRID_POINTS",
+    "ExperimentDesign",
+    "ExperimentError",
+    "ExperimentNotFoundError",
+    "ExperimentStateError",
+    "ExperimentTrial",
     "GridIndex",
     "InvalidExperimentSpecError",
     "SearchAxis",
@@ -31,6 +46,7 @@ __all__ = [
     "WalkForwardWindow",
     "WindowSelectionRule",
     "build_search_spec",
+    "experiment_trial_key",
     "grid_neighbors",
     "neighbor_mean",
     "parameter_grid_values",

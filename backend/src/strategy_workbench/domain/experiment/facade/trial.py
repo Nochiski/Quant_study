@@ -1,3 +1,8 @@
-from strategy_workbench.domain.experiment._trial import TrialStatus, advance_trial_status
+from strategy_workbench.domain.experiment._trial import (
+    ExperimentStatus,
+    TrialStatus,
+    experiment_status,
+    trial_status,
+)
 
-__all__ = ["TrialStatus", "advance_trial_status"]
+__all__ = ["ExperimentStatus", "TrialStatus", "experiment_status", "trial_status"]

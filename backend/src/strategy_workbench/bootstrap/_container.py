@@ -21,6 +21,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 )
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
+    SQLiteExperimentRepository,
 )
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteStrategyDraftRepository,
@@ -29,10 +30,22 @@ from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository impo
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
-from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
+from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestRunService,
+    BacktestRunSpec,
+    RunStatus,
+    rejection_code,
+)
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
+)
+from strategy_workbench.application.experiment_run.facade.experiments import (
+    ExperimentRunService,
+)
+from strategy_workbench.application.experiment_run.facade.ports import (
+    AdmittedRun,
+    TrialRunRejectedError,
 )
 from strategy_workbench.application.factor_research.facade.research import (
     FactorResearchService,
@@ -72,6 +85,7 @@ class BackendContainer:
     portfolio_design: PortfolioDesignService
     strategy_traces: StrategyTraceService
     backtest_runs: BacktestRunService
+    experiments: ExperimentRunService
     assistant_profiles: ProviderProfileService
     assistant_chat: AssistantChatService
     assistant_turns: AssistantTurnRunner
@@ -194,10 +208,50 @@ def build_container(
         portfolio_design=portfolio_design,
         strategy_traces=strategy_traces,
         backtest_runs=backtest_runs,
+        experiments=ExperimentRunService(
+            SQLiteExperimentRepository(research_db_path),
+            _RunServiceTrialRuns(backtest_runs),
+            new_id=lambda: str(uuid4()),
+        ),
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,
         assistant_turns=assistant_services.turns,
     )
+
+
+class _RunServiceTrialRuns:
+    """`TrialRunPort` 구현: 실행 서비스를 감싼다(검증 랩 spec D6).
+
+    어시스턴트의 `_RunServiceBacktestResults` 와 같은 모양이다. 실험이 `backtest_run` 유스케이스를
+    import 하지 않도록 bootstrap 이 감싼다. trial 제출은 요청 스레드 밖에서 돌므로 접수 거절
+    (`rejection_code` 가 코드를 주는 오류)만 `TrialRunRejectedError` 로 옮겨 attempt 에 남기게 한다.
+    """
+
+    def __init__(self, runs: BacktestRunService) -> None:
+        self._runs = runs
+
+    def admit(self, request: BacktestRunSpec) -> AdmittedRun:
+        admission = self._runs.admit(request)
+        if admission.lineage_id is None:  # pragma: no cover - 실험은 저장 리비전으로만 만든다
+            raise RuntimeError(
+                f"experiment base run has no lineage — spec_hash={admission.provenance.spec_hash}"
+            )
+        return AdmittedRun(admission.spec, self._runs.trial_ledger(admission.lineage_id))
+
+    def start(self, request: BacktestRunSpec, *, trial_key: str) -> str:
+        try:
+            return self._runs.start(request, trial_key_override=trial_key).run.run_id
+        except Exception as error:
+            code = rejection_code(error)
+            if code is None:
+                raise
+            raise TrialRunRejectedError(code, str(error)) from error
+
+    def status(self, run_id: str) -> RunStatus:
+        return self._runs.state(run_id).status
+
+    def cancel(self, run_id: str) -> None:
+        self._runs.cancel(run_id)
 
 
 def _source_spec_hash_resolver(

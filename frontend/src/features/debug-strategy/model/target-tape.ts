@@ -1,5 +1,5 @@
 import type { StrategyTraceResponse } from "../../../shared/api";
-import type { ExclusionReason } from "./exclusion-reason";
+import type { ExclusionReason } from "./trace-copy";
 
 export type TargetTapeProjectionRow = {
   securityId: string;

@@ -24,7 +24,7 @@ import {
 import {
   exclusionReasonLabel,
   type ExclusionReason,
-} from "../model/exclusion-reason";
+} from "../model/trace-copy";
 import { projectTargetTapeRows } from "../model/target-tape";
 import type {
   StrategyDebuggerContext,

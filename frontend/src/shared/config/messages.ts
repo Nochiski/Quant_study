@@ -3711,6 +3711,14 @@ export const tOptional = (key: string): string | null =>
     : null;
 
 /**
+ * backend 어휘(enum) 값 하나의 로케일 문구. 부르는 쪽이 키를 `<접두>.${값}` 으로 만들어 `MessageKey` 로
+ * 넘기므로, 생성 SDK 유니온에 값이 늘었는데 문구가 없으면 typecheck 가 깨진다(#293·#350). 생성 SDK 보다
+ * 새 값이 실려 오면 원문의 밑줄만 공백으로 바꿔 보인다 — 칸이 비지 않게 한다.
+ */
+export const tCode = (key: MessageKey, code: string): string =>
+  tOptional(key) ?? code.replaceAll("_", " ");
+
+/**
  * backend가 발행하는 설명 키(`x-description-key`, 연산자 카탈로그의 `description_key`)는 **stem**
  * 이다(P1-03, spec D8): `<stem>`이 화면에 보일 이름, `<stem>.description`이 한 줄 설명이다.
  * 호출부가 접미사를 조립하지 않도록 두 함수로 감싼다 — 키가 없으면 null이고, 화면은 그 자리에

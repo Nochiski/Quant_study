@@ -39,8 +39,9 @@ const ko = {
   "page.backtest.loadError": "백테스트 상태를 불러올 수 없습니다.",
   "page.backtest.status": "실행 상태",
   "page.backtest.progress": "실행 진행",
-  "page.backtest.runError": "실행 오류",
-  "page.backtest.cancelledError": "취소 전 발생한 오류",
+  // run 실패 한 줄(`entities/backtest` 의 `BacktestRunFailure`)의 제목. 결과 화면과 백테스트 이력이 함께 쓴다(#304).
+  "backtest.run.failed": "실행 오류",
+  "backtest.run.failedBeforeCancel": "취소 전 발생한 오류",
   // run 상태 `error_code` 번역 — 어휘 SoT 는 backend `RunFailureCode`(이슈 #158). 시작 거절의
   // `backtest.error.*` 와 namespace 를 나눈다: 같은 코드(`backtest.run.invalid` 등)라도 시작 거절은 실행 전에
   // 고칠 것을, run 실패는 실행 중에 난 일을 말한다.
@@ -1789,8 +1790,8 @@ export const messages = {
     "page.backtest.loadError": "The backtest status could not be loaded.",
     "page.backtest.status": "Run status",
     "page.backtest.progress": "Run progress",
-    "page.backtest.runError": "Run error",
-    "page.backtest.cancelledError": "Error before cancellation",
+    "backtest.run.failed": "Run error",
+    "backtest.run.failedBeforeCancel": "Error before cancellation",
     "backtest.run.error.portfolio.data.unavailable":
       "The data source could not serve observations for this universe and period. Check the universe id and data range.",
     "backtest.run.error.portfolio.raw_observation.invalid":

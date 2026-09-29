@@ -925,6 +925,47 @@ describe("App Shell routes", () => {
     );
   });
 
+  it("shows a failed run in the backtest history with the result screen's sentence", async () => {
+    // #304: 목록은 서버 원문(`error`)을 본문에 그대로 보였다. 결과 화면과 같은 규칙으로 번역을 본문에 두고
+    // 원문은 접힌 "서버 사유"에 둔다. 지난 실행이라 줄마다 경고로 읽히지 않는다.
+    const summary = backtestSummary({
+      runId: "run-wiped-out",
+      status: "failed",
+    });
+    server.use(
+      http.get(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              ...summary,
+              run: {
+                ...summary.run,
+                error:
+                  "EquityWipedOutError: session-end equity fell to or below zero — session=2021-03-02 equity=-1204.5",
+                error_code: "backtest.run.equity_wiped_out",
+              },
+            },
+          ],
+          total: 1,
+          offset: 0,
+          limit: 25,
+        }),
+      ),
+    );
+    mount("/research/backtests");
+    const row = (await screen.findByText("run-wiped-out")).closest("tr")!;
+    expect(row).toHaveTextContent(
+      "실행 오류: 세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식).",
+    );
+    const reason = within(row).getByRole("group");
+    expect(reason).toHaveTextContent("서버 사유");
+    expect(reason).not.toHaveAttribute("open");
+    expect(
+      row.textContent?.replace(reason.textContent ?? "", ""),
+    ).not.toContain("EquityWipedOutError");
+    expect(within(row).queryByRole("alert")).toBeNull();
+  });
+
   it("opens the settings route with the AI provider section from the shell", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests");

@@ -42,7 +42,9 @@ paths:
 - 폴링 본문의 실패 코드(`BacktestRunState.error_code`, 어휘 SoT는 backend `RunFailureCode`)는
   `backtest.run.error.<code>`로 번역하고, 번역이 있으면 서버 원문(`error`)은 접힌 진단 상세로
   내린다. 시작 거절의 `backtest.error.*`와 키를 공유하지 않는다 — 같은 코드라도 시작 거절은 실행 전에
-  고칠 것을, run 실패는 실행 중에 난 일을 말한다.
+  고칠 것을, run 실패는 실행 중에 난 일을 말한다. 이 문장 규칙은 `entities/backtest`의
+  `BacktestRunFailure`가 소유하고 결과 화면과 백테스트 이력이 함께 쓴다(#304). 목록의 지난 실행처럼 화면을
+  열 때 이미 있던 실패는 `FailureNotice`의 `announce={false}`로 경고 알림 없이 보인다.
 
 ## 상태
 

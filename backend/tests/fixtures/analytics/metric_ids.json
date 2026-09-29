@@ -3,6 +3,7 @@
   "cagr",
   "volatility",
   "sharpe",
+  "sharpe_standard_error",
   "sortino",
   "max_drawdown",
   "calmar",

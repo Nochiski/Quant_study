@@ -50,8 +50,8 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
         registry,
     )
 
-    assert registry.version == "metric-registry-v3"
-    assert len(registry.definitions()) == 22
+    assert registry.version == "metric-registry-v4"
+    assert len(registry.definitions()) == 23
     assert _metric(report, "total_taxes").value == pytest.approx(0.6)
     assert _metric(report, "total_return").value == pytest.approx(0.1)
     assert _metric(report, "max_drawdown").value == pytest.approx(-0.2)
@@ -72,6 +72,11 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
     # 샤프 분모는 원수익률 표준편차 그대로다.
     assert _metric(report, "sharpe").value == pytest.approx(mean / sample_std * math.sqrt(252))
     assert _metric(report, "sortino").value == pytest.approx(mean / downside_std * math.sqrt(252))
+    # Lo(2002): 일 샤프의 표준오차 √((1 + SR_일²/2) / N)을 √252 배 해 연 단위로 옮긴다. N = 3.
+    daily_sharpe = mean / sample_std
+    assert _metric(report, "sharpe_standard_error").value == pytest.approx(
+        math.sqrt((1 + daily_sharpe**2 / 2) / 3) * math.sqrt(252)
+    )
     # 1/2 → 1/7 은 5일이라 1년 미만: 예전처럼 1.1^(252/3) - 1 로 부풀리지 않고 비운다.
     for metric_id in ("cagr", "calmar"):
         assert _metric(report, metric_id).value is None
@@ -108,6 +113,9 @@ def test_metric_values_preserve_zero_and_explain_unavailable_values_per_scope() 
     assert fees.value == 0.0
     assert sharpe.value is None
     assert sharpe.unavailable_reason == "zero_return_variance"
+    sharpe_error = _metric(report, "sharpe_standard_error", MetricScope.OUT_OF_SAMPLE)
+    assert sharpe_error.value is None
+    assert sharpe_error.unavailable_reason == "zero_return_variance"
     assert sharpe.scope_label == "OOS 2026"
     assert sharpe.sample_count == 1
 
@@ -358,10 +366,58 @@ def test_sessions_before_the_base_rate_history_leave_sharpe_sortino_and_rolling_
     )
 
     assert _metric(report, "volatility").value is not None
-    for metric_id in ("sharpe", "sortino"):
+    for metric_id in ("sharpe", "sharpe_standard_error", "sortino"):
         assert _metric(report, metric_id).value is None
         assert _metric(report, metric_id).unavailable_reason == "base_rate_not_covered"
     assert [item.value for item in report.rolling_sharpe] == [None] * 4
+
+
+def test_sharpe_standard_error_of_six_and_a_half_years_is_about_0_39() -> None:
+    # 6.5년(1638세션) 동안 초과수익이 기준금리 위 0.01/√252 ± 1% 로 번갈아 나오는 곡선. 연 샤프는
+    # 1.0 근처이고 Lo(2002) 연 표준오차는 √((1 + (1/√252)²/2) / 1638) · √252 ≈ 0.392 다. 연 단위
+    # 관측용 식 √((1 + SR²/2) / 6.5)를 잘못 쓰면 0.48 이 나온다.
+    days = (date(2019, 1, 2) + timedelta(days=offset) for offset in range(2400))
+    sessions = tuple(day for day in days if day.weekday() < 5)[:1639]
+    equity = [100.0]
+    for index, (before, after) in enumerate(pairwise(sessions)):
+        rate = base_rate(before) or 0.0
+        noise = 0.01 if index % 2 == 0 else -0.01
+        risk_free = rate * (after - before).days / 365
+        equity.append(equity[-1] * (1 + risk_free + 0.01 / math.sqrt(252) + noise))
+    report = compute_analytics(
+        AnalyticsInput(
+            points=tuple(
+                AnalysisPoint(session, value, 0.0, 0.0)
+                for session, value in zip(sessions, equity, strict=True)
+            ),
+            traded_notional=0.0,
+        ),
+        build_default_metric_registry(),
+    )
+
+    sharpe = _metric(report, "sharpe").value
+    assert sharpe == pytest.approx(1.0, abs=0.01)
+    assert _metric(report, "sharpe_standard_error").value == pytest.approx(0.392, abs=1e-3)
+
+
+def test_rolling_sharpe_starts_once_the_126_session_window_is_full() -> None:
+    # 기본 창은 126세션(6개월)이다. 수익률 126개가 모이는 127번째 점에서 첫 값이 나오고, 그 값은
+    # 같은 126개로 잰 전체 샤프와 같다. 21세션 창은 연 표준오차가 √(252/21) ≈ 3.5 라 잡음이었다.
+    days = (date(2026, 1, 5) + timedelta(days=offset) for offset in range(200))
+    sessions = tuple(day for day in days if day.weekday() < 5)[:127]
+    report = compute_analytics(
+        AnalyticsInput(
+            points=tuple(
+                AnalysisPoint(session, 100.0 + (index % 3), 0.0, 0.0)
+                for index, session in enumerate(sessions)
+            ),
+            traded_notional=0.0,
+        ),
+        build_default_metric_registry(),
+    )
+
+    assert [item.value for item in report.rolling_sharpe[:-1]] == [None] * 126
+    assert report.rolling_sharpe[-1].value == pytest.approx(_metric(report, "sharpe").value)
 
 
 def test_sessions_after_the_confirmed_date_carry_the_last_rate() -> None:
@@ -453,7 +509,7 @@ def test_requested_empty_scope_is_serialized_as_unavailable_instead_of_disappear
         reason=MetricUnavailableReason.NO_OBSERVATIONS_IN_SCOPE,
     )
 
-    assert len(values) == 22
+    assert len(values) == 23
     assert all(item.value is None for item in values)
     assert all(item.sample_count == 0 for item in values)
     assert {item.scope for item in values} == {MetricScope.VALIDATION}

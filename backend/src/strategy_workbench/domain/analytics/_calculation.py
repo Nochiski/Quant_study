@@ -54,7 +54,7 @@ def compute_analytics(
     annualization_days: int = 252,
     scope: MetricScope = MetricScope.FULL,
     scope_label: str | None = None,
-    rolling_window: int = 21,
+    rolling_window: int = 126,
 ) -> AnalyticsReport:
     if not data.points:
         raise ValueError("analytics requires at least one equity point")
@@ -84,7 +84,16 @@ def compute_analytics(
     # 비운다.
     excess = _excess_returns(anchored, returns)
     risk_free_reason = MetricUnavailableReason.BASE_RATE_NOT_COVERED if excess is None else None
+    sharpe_reason = risk_free_reason or MetricUnavailableReason.ZERO_RETURN_VARIANCE
     volatility, sharpe, sortino = _risk_adjusted(returns, excess, annualization_days)
+    # Lo(2002): 일 샤프 SR/√A 의 표준오차 √((1 + SR²/(2A)) / N)에 √A 를 곱한 연 단위 값이다.
+    # 수익률이 독립·정규라고 본 근사다. 양의 자기상관·두꺼운 꼬리면 실제 오차가 더 크고, 음의
+    # 자기상관(평균회귀)이면 더 작을 수 있다.
+    sharpe_error = (
+        math.sqrt((annualization_days + sharpe**2 / 2) / len(returns))
+        if sharpe is not None
+        else None
+    )
     rolling_sharpe = _rolling_sharpe(anchored, returns, excess, annualization_days, rolling_window)
     drawdowns = _drawdowns(anchored)[-len(points) :]
     max_drawdown = min(item.drawdown for item in drawdowns)
@@ -116,7 +125,8 @@ def compute_analytics(
         value("total_return", total_return),
         value("cagr", cagr, cagr_reason),
         value("volatility", volatility),
-        value("sharpe", sharpe, risk_free_reason or MetricUnavailableReason.ZERO_RETURN_VARIANCE),
+        value("sharpe", sharpe, sharpe_reason),
+        value("sharpe_standard_error", sharpe_error, sharpe_reason),
         value(
             "sortino", sortino, risk_free_reason or MetricUnavailableReason.NO_DOWNSIDE_VARIATION
         ),

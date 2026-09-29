@@ -218,6 +218,7 @@ export const BacktestRunDetail = ({
   const highlights = [
     "total_return",
     "sharpe",
+    "sharpe_standard_error",
     "max_drawdown",
     "calmar",
     "turnover",

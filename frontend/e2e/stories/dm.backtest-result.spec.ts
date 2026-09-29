@@ -19,12 +19,13 @@ import {
 } from "../workbench-helpers";
 
 /**
- * 결과 상단에 고정으로 보이는 여섯 지표의 이름. 이름은 backend Metric Registry가 소유하고 화면은
+ * 결과 상단에 고정으로 보이는 일곱 지표의 이름. 이름은 backend Metric Registry가 소유하고 화면은
  * 그대로 옮긴다(SoT 규칙). 이름이 바뀌면 스토리 수용 기준도 함께 고친다.
  */
 const HIGHLIGHT_LABELS = [
   "Total return",
   "Sharpe ratio",
+  "Sharpe standard error",
   "Maximum drawdown",
   "Calmar ratio",
   "Turnover",
@@ -35,7 +36,7 @@ const HIGHLIGHT_LABELS = [
 const SHORT_OOS_START = "2026-03-02";
 
 test(
-  "US-DM-04 저장한 전략을 백테스트하면 핵심 성과 지표 여섯 개와 자산 곡선이 보인다",
+  "US-DM-04 저장한 전략을 백테스트하면 핵심 성과 지표 일곱 개와 자산 곡선이 보인다",
   { tag: ["@story", "@US-DM-04"] },
   async ({ page }) => {
     test.setTimeout(180_000);

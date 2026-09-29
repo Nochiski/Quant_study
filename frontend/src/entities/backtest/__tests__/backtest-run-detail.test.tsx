@@ -296,3 +296,39 @@ describe("사용 불가 지표의 이유", () => {
     expect(within(row).queryByRole("link")).toBeNull();
   });
 });
+
+describe("청산 거래 표", () => {
+  it("거래 비용 열은 수수료와 매도 거래세를 함께 담는다고 이름에 밝힌다", () => {
+    const base = result();
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          artifacts: {
+            ...base.artifacts,
+            trades: [
+              {
+                security_id: "005930",
+                side: "long",
+                opened_on: "2026-01-05",
+                closed_on: "2026-01-06",
+                quantity: "10",
+                entry_price: 100,
+                exit_price: 110,
+                // 수수료 1 + 매도 거래세 2.2(backend `_closed_trades` 가 합친다).
+                fees: 3.2,
+                pnl: 96.8,
+                slippage_cost: 0,
+              },
+            ],
+          },
+        }}
+        environmentFields={FIELDS}
+      />,
+    );
+
+    expect(
+      screen.getByRole("columnheader", { name: "비용(수수료·세금)" }),
+    ).toBeInTheDocument();
+  });
+});

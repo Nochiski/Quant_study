@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,11 +32,19 @@ from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository impo
 from strategy_workbench.application.assistant_chat.facade.chat import AssistantChatService
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
+from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestExecutionRequest,
+    BacktestExecutorPort,
+    CancellationCheck,
+    ProgressCallback,
+    RunCancelledError,
+)
 from strategy_workbench.application.backtest_run.facade.runs import (
     DEFAULT_RUN_SLOTS,
+    BacktestRunResult,
     BacktestRunService,
     BacktestRunSpec,
-    RunStatus,
+    BacktestRunState,
     rejection_code,
 )
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
@@ -72,6 +82,8 @@ from ._assistant import (
 )
 from ._file_guard import restrict_to_current_user
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class BackendContainer:
@@ -106,6 +118,7 @@ def build_container(
     strategy_repository_path: str | Path | None = None,
     research_db_path: str | Path | None = None,
     run_slots: int = DEFAULT_RUN_SLOTS,
+    trial_hold_seconds: float = 0.0,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
 ) -> BackendContainer:
     """Build one explicit dependency graph; unknown adapters fail instead of falling back.
@@ -169,11 +182,18 @@ def build_container(
     if run_repository.database_path is not None:
         restrict_to_current_user(run_repository.database_path)
     strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
+    executor = BacktestEngineExecutorAdapter(metric_registry)
+    hold = _TrialHold(executor, trial_hold_seconds) if trial_hold_seconds > 0 else None
+    if hold is not None:
+        logger.warning(
+            "e2e trial hold is on — experiment trial runs wait %.1fs before the engine stage",
+            trial_hold_seconds,
+        )
     backtest_runs = BacktestRunService(
         portfolio_design,
         strategy_repository,
         equity_data,
-        BacktestEngineExecutorAdapter(metric_registry),
+        hold or executor,
         LocalArtifactStore(run_artifact_root),
         run_repository=run_repository,
         new_id=lambda: str(uuid4()),
@@ -187,6 +207,14 @@ def build_container(
         strategy_authoring=strategy_authoring,
         backtest_runs=backtest_runs,
     )
+    experiments = ExperimentRunService(
+        SQLiteExperimentRepository(research_db_path),
+        _RunServiceTrialRuns(backtest_runs, held_run_ids=None if hold is None else hold.run_ids),
+        new_id=lambda: str(uuid4()),
+    )
+    # 지난 프로세스가 끝내지 못한 실험의 남은 trial 을 다시 넘긴다(검증 랩 spec D6). 실행
+    # 레지스트리가 중단된 run 을 먼저 닫은 뒤라야 한다.
+    experiments.recover()
     return BackendContainer(
         equity_data=equity_data,
         equity_workspace=EquityWorkspaceService(equity_data),
@@ -211,11 +239,7 @@ def build_container(
         portfolio_design=portfolio_design,
         strategy_traces=strategy_traces,
         backtest_runs=backtest_runs,
-        experiments=ExperimentRunService(
-            SQLiteExperimentRepository(research_db_path),
-            _RunServiceTrialRuns(backtest_runs),
-            new_id=lambda: str(uuid4()),
-        ),
+        experiments=experiments,
         assistant_profiles=assistant_services.profiles,
         assistant_chat=assistant_services.chat,
         assistant_turns=assistant_services.turns,
@@ -230,8 +254,9 @@ class _RunServiceTrialRuns:
     (`rejection_code` 가 코드를 주는 오류)만 `TrialRunRejectedError` 로 옮겨 attempt 에 남기게 한다.
     """
 
-    def __init__(self, runs: BacktestRunService) -> None:
+    def __init__(self, runs: BacktestRunService, *, held_run_ids: set[str] | None) -> None:
         self._runs = runs
+        self._held_run_ids = held_run_ids
 
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
         admission = self._runs.admit(request)
@@ -243,18 +268,54 @@ class _RunServiceTrialRuns:
 
     def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
         try:
-            return self._runs.start(request, owner=owner, trial_key_override=trial_key).run.run_id
+            run_id = self._runs.start(request, owner=owner, trial_key_override=trial_key).run.run_id
         except Exception as error:
             code = rejection_code(error)
             if code is None:
                 raise
             raise TrialRunRejectedError(code, str(error)) from error
+        if self._held_run_ids is not None:
+            self._held_run_ids.add(run_id)
+        return run_id
 
-    def statuses(self, run_ids: Collection[str]) -> Mapping[str, RunStatus]:
-        return self._runs.statuses(run_ids)
+    def states(self, run_ids: Collection[str]) -> Mapping[str, BacktestRunState]:
+        return self._runs.states(run_ids)
+
+    def schedule(self, owner: str, *, paused: bool, priority: int) -> None:
+        self._runs.schedule(owner, paused=paused, weight=priority)
 
     def cancel(self, run_id: str, *, owner: str) -> None:
         self._runs.cancel(run_id, owner=owner)
+
+
+class _TrialHold:
+    """e2e 훅: 실험 trial run 을 엔진 단계 앞에서 `seconds` 동안 붙잡는다(취소하면 바로 풀린다).
+
+    화면 e2e 가 도는 trial 을 다시 열고 실험을 일시정지하는 흐름을 재현하게 한다(spec D6). mock
+    실행은 1초 안에 끝나 붙잡지 않으면 볼 수 없다. 사용자 단일 실행은 붙잡지 않지만, 실험 trial 이
+    이은 사용자 run 은 함께 붙잡힌다(e2e 전용 훅이라 받아들인다).
+    """
+
+    def __init__(self, executor: BacktestExecutorPort, seconds: float) -> None:
+        self._executor = executor
+        self._seconds = seconds
+        self.run_ids: set[str] = set()
+
+    def execute(
+        self,
+        request: BacktestExecutionRequest,
+        *,
+        progress: ProgressCallback,
+        cancelled: CancellationCheck,
+    ) -> BacktestRunResult:
+        deadline = time.monotonic() + self._seconds
+        while request.run_id in self.run_ids and time.monotonic() < deadline:
+            if cancelled():
+                raise RunCancelledError(
+                    f"held experiment trial cancelled — run_id={request.run_id}"
+                )
+            time.sleep(0.05)
+        return self._executor.execute(request, progress=progress, cancelled=cancelled)
 
 
 def _source_spec_hash_resolver(

@@ -13,12 +13,13 @@ from typing import Protocol
 
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec
 from strategy_workbench.domain.experiment.facade.design import ExperimentDesign, SplitSpec
+from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
 from strategy_workbench.domain.strategy.facade.specification import ParameterValue
 
 
 @dataclass(frozen=True)
 class ExperimentRecord:
-    """만든 실험. 취소 시각 말고는 바뀌지 않는다."""
+    """만든 실험. 취소 시각과 대기열 조작 말고는 바뀌지 않는다."""
 
     experiment_id: str
     created_at: datetime
@@ -27,6 +28,7 @@ class ExperimentRecord:
     split: SplitSpec
     design: ExperimentDesign
     cancelled_at: datetime | None = None
+    controls: ExperimentControls = ExperimentControls()
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,8 @@ class ExperimentRepositoryPort(Protocol):
         ...
 
     def cancel(self, experiment_id: str, *, cancelled_at: datetime) -> None: ...
+
+    def set_controls(self, experiment_id: str, controls: ExperimentControls) -> None: ...
 
     def add_attempt(self, attempt: TrialAttempt) -> None: ...
 

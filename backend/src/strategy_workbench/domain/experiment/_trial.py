@@ -8,9 +8,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 
-from strategy_workbench.domain.backtest.facade.runs import RunStatus
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunState, RunStatus
+
+# 실험 우선순위의 상한. 대기열이 실험끼리 번갈아 배정할 때 한 차례에 꺼내는 run 수(가중치)다.
+MAX_EXPERIMENT_PRIORITY = 5
 
 
 class TrialStatus(StrEnum):
@@ -41,8 +45,34 @@ class ExperimentStatus(StrEnum):
 
     QUEUED = "queued"
     RUNNING = "running"
+    PAUSED = "paused"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in (ExperimentStatus.COMPLETED, ExperimentStatus.CANCELLED)
+
+
+@dataclass(frozen=True)
+class ExperimentControls:
+    """실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은
+    끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다."""
+
+    paused: bool = False
+    priority: int = 1
+
+    def __post_init__(self) -> None:
+        priority: object = self.priority
+        if (
+            isinstance(priority, bool)
+            or not isinstance(priority, int)
+            or not 1 <= priority <= MAX_EXPERIMENT_PRIORITY
+        ):
+            raise ValueError(
+                "experiment priority must be an integer from 1 to the maximum — "
+                f"priority={priority!r} maximum={MAX_EXPERIMENT_PRIORITY}"
+            )
 
 
 def trial_status(
@@ -61,12 +91,30 @@ def trial_status(
     return _RUN_TRIAL_STATUSES[latest_run]
 
 
-def experiment_status(trials: Sequence[TrialStatus], *, cancelled: bool) -> ExperimentStatus:
-    """취소한 실험은 취소, trial 이 모두 끝났으면 완료, 하나도 시작하지 않았으면 대기다."""
+def awaiting_recovery(latest_run: BacktestRunState | None) -> bool:
+    """최신 실행이 재시작으로 중단됐다 — 복구가 새 attempt 를 넘길 때까지 실험은 끝나지
+    않는다(spec D6).
+
+    trial 자체는 실패로 보이고(재시도할 수 있다) 실행의 오류 코드가 중단을 말한다.
+    """
+    return (
+        latest_run is not None
+        and latest_run.status is RunStatus.FAILED
+        and latest_run.error_code == "backtest.run.interrupted"
+    )
+
+
+def experiment_status(
+    trials: Sequence[TrialStatus], *, cancelled: bool, paused: bool, recovering: bool
+) -> ExperimentStatus:
+    """취소한 실험은 취소, trial 이 모두 끝났고 복구를 기다리는 trial 이 없으면 완료, 일시정지했으면
+    일시정지, 하나도 시작하지 않았으면 대기다."""
     if cancelled:
         return ExperimentStatus.CANCELLED
-    if all(status.is_terminal for status in trials):
+    if all(status.is_terminal for status in trials) and not recovering:
         return ExperimentStatus.COMPLETED
+    if paused:
+        return ExperimentStatus.PAUSED
     if all(status is TrialStatus.QUEUED for status in trials):
         return ExperimentStatus.QUEUED
     return ExperimentStatus.RUNNING

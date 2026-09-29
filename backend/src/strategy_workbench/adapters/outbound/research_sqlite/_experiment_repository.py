@@ -16,14 +16,16 @@ from strategy_workbench.application.experiment_run.facade.ports import (
     TrialAttempt,
 )
 from strategy_workbench.domain.experiment.facade.design import ExperimentNotFoundError
+from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
 
 from ._errors import ResearchStorageError
 from ._schema import migrate_schema
 
 _T = TypeVar("_T")
-# 설계 JSON 은 기록에서 칸 셋(식별·시각)을 뺀 것이다. 그 셋은 칸으로 둔다(취소 시각은 바뀐다).
+# 설계 JSON 은 기록에서 바뀌는 칸(취소 시각·대기열 조작)과 식별·만든 시각을 뺀 것이다.
 _COLUMNS = {"experiment_id", "created_at", "cancelled_at"}
-_SELECT = "experiment_id, created_at, cancelled_at, design_json"
+_SELECT = "experiment_id, created_at, cancelled_at, design_json, paused, priority"
+_FROM = "experiments LEFT JOIN experiment_controls USING (experiment_order)"
 _RECORD = TypeAdapter(ExperimentRecord)
 _ATTEMPT = TypeAdapter(TrialAttempt)
 _SELECTION = TypeAdapter(ExperimentSelection)
@@ -51,14 +53,14 @@ class SQLiteExperimentRepository:
                 (
                     record.experiment_id,
                     _time_text(record.created_at, "created_at", record.experiment_id),
-                    _RECORD.dump_json(record, exclude=_COLUMNS).decode(),
+                    _RECORD.dump_json(record, exclude=_COLUMNS | {"controls"}).decode(),
                 ),
             )
 
     def get(self, experiment_id: str) -> ExperimentRecord:
         with self._database.transaction(write=False) as connection:
             row = connection.execute(
-                f"SELECT {_SELECT} FROM experiments WHERE experiment_id = ?", (experiment_id,)
+                f"SELECT {_SELECT} FROM {_FROM} WHERE experiment_id = ?", (experiment_id,)
             ).fetchone()
         if row is None:
             raise _not_found(experiment_id)
@@ -68,7 +70,7 @@ class SQLiteExperimentRepository:
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(
                 f"""
-                SELECT {_SELECT} FROM experiments
+                SELECT {_SELECT} FROM {_FROM}
                 WHERE ? IS NULL OR experiment_order < (
                     SELECT experiment_order FROM experiments WHERE experiment_id = ?
                 )
@@ -85,6 +87,20 @@ class SQLiteExperimentRepository:
                 (_time_text(cancelled_at, "cancelled_at", experiment_id), experiment_id),
             )
             if updated.rowcount != 1:
+                raise _not_found(experiment_id)
+
+    def set_controls(self, experiment_id: str, controls: ExperimentControls) -> None:
+        with self._database.transaction(write=True) as connection:
+            written = connection.execute(
+                """
+                INSERT INTO experiment_controls (experiment_order, paused, priority)
+                SELECT experiment_order, ?, ? FROM experiments WHERE experiment_id = ?
+                ON CONFLICT (experiment_order) DO UPDATE
+                SET paused = excluded.paused, priority = excluded.priority
+                """,
+                (int(controls.paused), controls.priority, experiment_id),
+            )
+            if written.rowcount != 1:
                 raise _not_found(experiment_id)
 
     def add_attempt(self, attempt: TrialAttempt) -> None:
@@ -151,10 +167,17 @@ class SQLiteExperimentRepository:
 
 
 def _record(row: sqlite3.Row) -> ExperimentRecord:
+    controls = (
+        {} if row["paused"] is None else {"paused": row["paused"], "priority": row["priority"]}
+    )
     return _decode(
         _RECORD,
         row["experiment_id"],
-        {**json.loads(row["design_json"]), **{key: row[key] for key in _COLUMNS}},
+        {
+            **json.loads(row["design_json"]),
+            **{key: row[key] for key in _COLUMNS},
+            "controls": controls,
+        },
     )
 
 

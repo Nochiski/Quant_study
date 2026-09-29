@@ -459,15 +459,22 @@ class BacktestRunService:
         self._repository.merge_lineages(source_id, target_id, merged_at=self._now())
         return self.trial_ledger(target_id)
 
-    def statuses(self, run_ids: Collection[str]) -> dict[str, RunStatus]:
+    def schedule(self, owner: str, *, paused: bool, weight: int) -> None:
+        """실험(`owner`)의 대기 run 을 멈추거나 풀고, 한 차례에 배정할 수(우선순위)를 정한다.
+
+        도는 run 은 끝까지 돈다. `RunStatus` 는 바뀌지 않고 멈춘 run 은 `queued` 로 남는다(spec D6).
+        """
+        with self._lock:
+            self._waiting.configure(owner, paused=paused, weight=weight)
+            self._dispatch()
+
+    def states(self, run_ids: Collection[str]) -> dict[str, BacktestRunState]:
         """여러 run 의 상태를 한 번에 — 이 프로세스가 도는 run 은 메모리, 나머지는 저장소 한 번."""
         with self._lock:
             known = {
-                run_id: self._records[run_id].state.status
-                for run_id in run_ids
-                if run_id in self._records
+                run_id: self._records[run_id].state for run_id in run_ids if run_id in self._records
             }
-        stored = self._repository.statuses([run_id for run_id in run_ids if run_id not in known])
+        stored = self._repository.states([run_id for run_id in run_ids if run_id not in known])
         return known | stored
 
     def state(self, run_id: str) -> BacktestRunState:

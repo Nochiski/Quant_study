@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import type { UpgradedDocument } from "../../../shared/api";
 import { t, tOptional } from "../../../shared/config";
 import { Badge, Button, FailureNotice } from "../../../shared/ui";
@@ -39,13 +37,13 @@ const environmentSummary = (environment: UpgradeEnvironment): string =>
 const AppliedUpgrade = ({
   status,
   onApplyEnvironment,
+  onEnvironmentFilled,
 }: {
   status: Extract<UpgradeStatus, { kind: "applied" }>;
   onApplyEnvironment?: (environment: UpgradeEnvironment) => void;
+  onEnvironmentFilled: () => void;
 }) => {
-  // 적용 결과 하나마다 한 번 채운다: 같은 응답 객체를 채웠는지 기억한다(다음 업그레이드는 새 객체다).
-  const [filled, setFilled] = useState<UpgradeEnvironment | null>(null);
-  const { environment, warnings } = status;
+  const { environment, warnings, environmentFilled } = status;
   return (
     <>
       {warnings.length > 0 ? (
@@ -63,7 +61,7 @@ const AppliedUpgrade = ({
       ) : null}
       {onApplyEnvironment === undefined ? null : environment === null ? (
         <p className="upgrade__note">{t("upgrade.environment.unavailable")}</p>
-      ) : filled === environment ? (
+      ) : environmentFilled ? (
         <p className="upgrade__note" role="status">
           {t("upgrade.environment.applied")}
         </p>
@@ -81,7 +79,7 @@ const AppliedUpgrade = ({
               tone="primary"
               onClick={() => {
                 onApplyEnvironment(environment);
-                setFilled(environment);
+                onEnvironmentFilled();
               }}
             >
               {t("upgrade.environment.apply")}
@@ -152,6 +150,7 @@ export const UpgradeBanner = ({
         <AppliedUpgrade
           status={status}
           onApplyEnvironment={onApplyEnvironment}
+          onEnvironmentFilled={upgrade.markEnvironmentFilled}
         />
       ) : null}
     </section>

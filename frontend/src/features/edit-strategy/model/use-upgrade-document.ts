@@ -30,11 +30,14 @@ export type UpgradeStatus =
   /**
    * 적용됐다. `environment` 는 옛 문서가 들고 있던 실행 설정(옮기지 못했으면 null)이고, `warnings` 는
    * 사용자가 알아야 할 동작 변화다(P2-09). 실행 설정은 사용자가 배너에서 누를 때만 패널에 들어간다.
+   * `environmentFilled` 는 그렇게 채웠는지다 — 적용 결과와 같은 글에 묶여 실행 취소 → 다시 실행 뒤에도
+   * 남는다(#297 리뷰 P3-3).
    */
   | {
       kind: "applied";
       environment: UpgradedDocument["environment"];
       warnings: UpgradedDocument["warnings"];
+      environmentFilled: boolean;
     }
   | ({ kind: "failed" } & UpgradeFailure);
 
@@ -44,6 +47,8 @@ export type DocumentUpgrade = {
   canUpgrade: boolean;
   onEditorReady: (editor: CodeEditorHandle | null) => void;
   upgrade: () => void;
+  /** 적용 결과의 옛 실행 설정을 실행 설정 패널에 채웠다고 적는다(배너의 "실행 설정에 채우기"). */
+  markEnvironmentFilled: () => void;
 };
 
 /**
@@ -114,8 +119,13 @@ export const useUpgradeDocument = (
     setOwned({ owner, value: { kind: "pending" } });
     void mutateAsync({ source, format }).then(
       (upgraded: UpgradedDocument) => {
-        // 응답이 도착하기 전에 편집됐으면 그 텍스트를 덮어쓰지 않는다.
-        if (editor.current !== current || current.getText() !== source) return;
+        // 응답이 도착하기 전에 편집됐으면 그 텍스트를 덮어쓰지 않고 대기 상태도 지운다. 대기는 요청한 글에
+        // 묶여 있어, 남겨 두면 실행 취소로 그 글에 돌아왔을 때 "업그레이드 중…"이 되살아나 버튼이 멈춘다
+        // (#297 리뷰 P2-1). 대기 중에는 `isPending` 이 다른 요청을 막으므로 지우는 것은 이 요청의 대기뿐이다.
+        if (editor.current !== current || current.getText() !== source) {
+          setOwned(null);
+          return;
+        }
         // `replaceRange`는 history를 앞뒤로 격리한다(`isolateHistory`) — 직후에 친 글자와 업그레이드가
         // 한 undo로 묶이지 않는다. 같은 문서 안의 전체 교체는 모두 이 경로다.
         current.replaceRange(0, current.getText().length, upgraded.source);
@@ -128,6 +138,7 @@ export const useUpgradeDocument = (
             kind: "applied",
             environment: upgraded.environment,
             warnings: upgraded.warnings,
+            environmentFilled: false,
           },
         });
       },
@@ -155,6 +166,14 @@ export const useUpgradeDocument = (
     source,
   ]);
 
+  const markEnvironmentFilled = useCallback((): void => {
+    setOwned((current) =>
+      current?.value.kind === "applied"
+        ? { ...current, value: { ...current.value, environmentFilled: true } }
+        : current,
+    );
+  }, []);
+
   const status =
     owned !== null && owns(owned.owner, state) ? owned.value : IDLE;
 
@@ -168,5 +187,6 @@ export const useUpgradeDocument = (
       !composing,
     onEditorReady,
     upgrade,
+    markEnvironmentFilled,
   };
 };

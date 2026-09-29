@@ -47,6 +47,8 @@ const WARNING = {
     "점수 비례 비중은 이제 기준점 위의 몫으로 나눕니다: weighting='factor_score'",
 } as const;
 const appliedEnvironments: unknown[] = [];
+/** 있으면 업그레이드 응답을 이것이 풀릴 때까지 붙잡는다(대기 중 편집을 흉내 낸다). */
+let upgradeGate: Promise<void> | null = null;
 
 const compiledResponse = (source: string) => {
   const legacy = source.includes('schema_version: "1.0"');
@@ -82,6 +84,7 @@ const server = setupServer(
   http.post(`${API}/api/v1/strategy-documents/upgrade`, async ({ request }) => {
     const body = (await request.json()) as { source: string; format: string };
     upgradeRequests.push(body);
+    if (upgradeGate !== null) await upgradeGate;
     if (upgradeMode === "network") return HttpResponse.error();
     if (upgradeMode === "array-422") {
       // 코드 없는 FastAPI 기본 422(배열 detail).
@@ -132,6 +135,7 @@ afterEach(() => {
   upgradeRequests.length = 0;
   appliedEnvironments.length = 0;
   upgradeMode = "ok";
+  upgradeGate = null;
 });
 afterAll(() => server.close());
 
@@ -300,6 +304,64 @@ describe("retired schema upgrade banner", () => {
     expect(view.state.doc.toString()).toBe(UPGRADED);
     await waitFor(() => expect(fill()).not.toBeNull());
     expect(upgradeRequests).toHaveLength(1);
+  });
+
+  it("remembers the filled run settings through undo and redo", async () => {
+    // #297 리뷰 P3-3: 채웠는지를 배너 지역 state 로 두면 다시 실행 뒤 채우기 버튼과 "채우지 않고 저장하면"
+    // 안내가 다시 떠, 채운 뒤에 고친 값을 옛 값으로 덮게 이끈다.
+    const view = await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+    fireEvent.click(
+      await screen.findByRole("button", { name: "실행 설정에 채우기" }),
+    );
+    expect(appliedEnvironments).toEqual([OLD_ENVIRONMENT]);
+
+    act(() => {
+      undo(view);
+    });
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    act(() => {
+      redo(view);
+    });
+    expect(
+      await screen.findByText("옛 문서의 실행 설정을 채웠습니다.", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "실행 설정에 채우기" }),
+    ).toBeNull();
+  });
+
+  it("lets the user upgrade again after a response for edited text is dropped and the edit undone", async () => {
+    // #297 리뷰 P2-1: 버린 응답이 요청한 글의 대기 상태를 남기면, 실행 취소로 그 글에 돌아왔을 때
+    // "업그레이드 중…"이 되살아나 버튼이 멈췄다.
+    let release = () => {};
+    upgradeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const view = await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    fireEvent.click(upgradeButton());
+    await waitFor(() => expect(upgradeRequests).toHaveLength(1));
+    act(() => {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: "# z" },
+        userEvent: "input.type",
+      });
+    });
+    release();
+    // 응답은 편집된 글에 적용되지 않는다.
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    expect(view.state.doc.toString()).toBe(`${LEGACY}# z`);
+
+    act(() => {
+      undo(view);
+    });
+    expect(view.state.doc.toString()).toBe(LEGACY);
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+    expect(upgradeButton()).toHaveTextContent("현재 버전으로 업그레이드");
   });
 
   it("drops the applied notice once the text is saved as a new revision", async () => {

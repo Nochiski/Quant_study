@@ -180,47 +180,30 @@ def test_cagr_and_calmar_are_not_annualized_under_one_calendar_year(
 
 
 @pytest.mark.parametrize(
-    ("last_session", "last_equity", "cagr", "calmar", "reason"),
+    ("points", "base"),
     [
-        # 정확히 0: (1 - 1) ** (1 / 연수) - 1 = -100%, 칼마 = -1 / |MDD -1| = -1.
-        # 예전엔 0%(본전)로 보였다.
-        (date(2026, 6, 1), 0.0, -1.0, -1.0, None),
-        # 음수(신용·숏): 음수의 거듭제곱근은 실수가 아니라 비운다.
-        (date(2026, 6, 1), -10.0, None, None, "negative_equity"),
-        # 1년 미만 규칙이 먼저다.
-        (date(2025, 12, 1), -10.0, None, None, "period_under_one_year"),
+        # 곡선 중간에 자산이 0이면 다음 수익률이 0으로 나누기다.
+        ((100.0, 0.0, 0.0), None),
+        # 구간 기준 자산이 0이면 총수익률이 0으로 나누기다.
+        ((90.0,), 0.0),
     ],
 )
-def test_total_loss_is_minus_100_percent_and_negative_equity_is_unavailable(
-    last_session: date,
-    last_equity: float,
-    cagr: float | None,
-    calmar: float | None,
-    reason: str | None,
+def test_non_positive_equity_breaks_the_engine_contract(
+    points: tuple[float, ...], base: float | None
 ) -> None:
-    report = compute_analytics(
-        AnalyticsInput(
-            points=(
-                AnalysisPoint(date(2025, 1, 2), 100.0, 0.0, 0.0),
-                AnalysisPoint(date(2025, 6, 2), 50.0, 0.0, 0.0),
-                AnalysisPoint(last_session, last_equity, 0.0, 0.0),
+    # 엔진은 자산 0 이하에서 EquityWipedOut 으로 멈추므로 이런 곡선은 오지 않는다.
+    with pytest.raises(ValueError, match="positive equity — session=.* equity=0.0"):
+        compute_analytics(
+            AnalyticsInput(
+                points=tuple(
+                    AnalysisPoint(date(2025, 1, 2 + index), equity, 0.0, 0.0)
+                    for index, equity in enumerate(points)
+                ),
+                traded_notional=0.0,
+                base=None if base is None else AnalysisPoint(date(2024, 12, 30), base, 0.0, 0.0),
             ),
-            traded_notional=0.0,
-        ),
-        build_default_metric_registry(),
-    )
-
-    assert _metric(report, "total_return").value == pytest.approx(last_equity / 100.0 - 1.0)
-    assert _metric(report, "cagr").value == pytest.approx(cagr)
-    assert _metric(report, "calmar").value == pytest.approx(calmar)
-    assert _metric(report, "cagr").unavailable_reason == reason
-    assert _metric(report, "calmar").unavailable_reason == reason
-    # 다른 지표는 그대로 계산된다. 수익률 -0.5, r 의 평균 (-0.5 + r) / 2,
-    # 표본 표준편차 |r + 0.5| / sqrt(2)
-    last_return = last_equity / 50.0 - 1.0
-    assert _metric(report, "sharpe").value == pytest.approx(
-        (-0.5 + last_return) / 2 / (abs(last_return + 0.5) / 2**0.5) * 252**0.5
-    )
+            build_default_metric_registry(),
+        )
 
 
 def test_window_base_starts_returns_drawdown_and_years_but_stays_off_the_curve() -> None:

@@ -63,20 +63,19 @@ def compute_analytics(
     # 수익률·연수·낙폭·월별·벤치마크는 기준점(구간 직전 세션, 없으면 첫 점)에서 시작한다. 기준점은
     # 곡선 점이 아니라서 곡선·노출·평균 자산에는 들어가지 않는다.
     anchored = points if data.base is None else (data.base, *points)
+    # 엔진은 세션 종료 자산이 0 이하이면 실행을 멈춘다(EquityWipedOut). 그런 곡선은 계약 위반이다.
+    for item in anchored:
+        if item.equity <= 0:
+            raise ValueError(
+                f"analytics requires positive equity — session={item.session} equity={item.equity}"
+            )
     anchored_equity = tuple(item.equity for item in anchored)
     equity = tuple(item.equity for item in points)
     returns = _returns(anchored_equity)
     total_return = equity[-1] / anchored_equity[0] - 1.0
     years = (points[-1].session - anchored[0].session).days / _DAYS_PER_YEAR
-    # 1년 미만은 연율화하지 않는다(GIPS). 자산이 음수로 끝나면 음수의 거듭제곱근이라 CAGR 이 없다.
-    # 정확히 0 으로 끝나면 CAGR 은 -100% 다. 칼마도 같은 사유로 빈다.
-    cagr_reason = (
-        MetricUnavailableReason.PERIOD_UNDER_ONE_YEAR
-        if years < 1.0
-        else MetricUnavailableReason.NEGATIVE_EQUITY
-        if total_return < -1.0
-        else None
-    )
+    # 1년 미만은 연율화하지 않는다(GIPS). 칼마도 같은 사유로 빈다.
+    cagr_reason = MetricUnavailableReason.PERIOD_UNDER_ONE_YEAR if years < 1.0 else None
     cagr = (1.0 + total_return) ** (1.0 / years) - 1.0 if cagr_reason is None else None
     volatility, sharpe, sortino = _risk_adjusted(returns, annualization_days)
     drawdowns = _drawdowns(anchored)[-len(points) :]

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from ._models import MetricCategory, MetricDefinition, MetricUnit
 
-# v2(#274): CAGR 연수를 달력 일수로 세고 1년 미만·음수 자산은 None으로 둔다. 구간 지표는 직전
-# 세션이 기준이다.
+# v2(#274): CAGR 연수를 달력 일수로 세고 1년 미만은 None으로 둔다. 구간 지표는 직전 세션이
+# 기준이다.
 REGISTRY_VERSION = "metric-registry-v2"
 
 

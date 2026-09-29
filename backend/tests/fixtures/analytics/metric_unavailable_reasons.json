@@ -7,6 +7,5 @@
   "no_closed_trades",
   "no_losing_closed_trade",
   "no_observations_in_scope",
-  "negative_equity",
   "period_under_one_year"
 ]

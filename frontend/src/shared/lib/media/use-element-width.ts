@@ -12,6 +12,14 @@ export const useElementWidth = (
   useLayoutEffect(() => {
     const element = ref.current;
     if (element === null || typeof ResizeObserver === "undefined") return;
+    // 첫 칠 전에 한 번 잰다. 관찰 결과는 칠한 뒤에야 반영되므로, 그것만 기다리면 폭을 모르는 배치로
+    // 한 프레임을 그렸다가 바꾼다(열어 둔 AI 사이드바가 붙었다가 오버레이로 옮겨 두 번 마운트된다).
+    const style = getComputedStyle(element);
+    setWidth(
+      element.clientWidth -
+        parseFloat(style.paddingLeft) -
+        parseFloat(style.paddingRight),
+    );
     const observer = new ResizeObserver(([entry]) => {
       if (entry !== undefined) setWidth(entry.contentRect.width);
     });

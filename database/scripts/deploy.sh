@@ -104,9 +104,11 @@ plan_of() {   # 항목별 dry-run 계획을 $PLAN 에 모으고 변경 파일 �
 }
 N_SRC=$(plan_of "src/" "${COMMON[@]}" "${SRC_KEEP[@]}" --delete "$REPO/src/" "$REMOTE:$ROOT/src/")
 N_SCRIPTS=$(plan_of "scripts/" "${COMMON[@]}" --delete "$REPO/scripts/" "$REMOTE:$ROOT/scripts/")
+# 모델 레지스트리(config/models/*.toml, M2) — 코드와 같은 rev 로 나가야 판의 spec_id 가 코드와 맞는다
+N_CONFIG=$(plan_of "config/" "${COMMON[@]}" --delete "$REPO/config/" "$REMOTE:$ROOT/config/")
 N_ENGINE=$(plan_of "_engine/backtest_engine/" "${COMMON[@]}" --delete "$ENGINE_SRC/" "$REMOTE:$ROOT/_engine/backtest_engine/")
 N_SHARE=$(plan_of "src/rebuild_share.py" "$WORKTREE/backend/ops/rebuild_share.py" "$REMOTE:$ROOT/src/rebuild_share.py")
-echo "════ 내용이 바뀔 파일 $((N_SRC + N_SCRIPTS + N_ENGINE + N_SHARE))개 (src $N_SRC · scripts $N_SCRIPTS · _engine $N_ENGINE · rebuild_share $N_SHARE) — $BRANCH $REV tests=$TESTS ════"
+echo "════ 내용이 바뀔 파일 $((N_SRC + N_SCRIPTS + N_CONFIG + N_ENGINE + N_SHARE))개 (src $N_SRC · scripts $N_SCRIPTS · config $N_CONFIG · _engine $N_ENGINE · rebuild_share $N_SHARE) — $BRANCH $REV tests=$TESTS ════"
 cat "$PLAN"
 
 echo "== src/  ($REPO/src/ → $REMOTE:~/$ROOT/src/)"
@@ -116,6 +118,10 @@ rsync -avz $DRY --delete "${COMMON[@]}" "${SRC_KEEP[@]}" \
 echo "== scripts/  ($REPO/scripts/ → $REMOTE:~/$ROOT/scripts/)"
 rsync -avz $DRY --delete "${COMMON[@]}" \
       "$REPO/scripts/" "$REMOTE:$ROOT/scripts/"
+
+echo "== config/  ($REPO/config/ → $REMOTE:~/$ROOT/config/)"
+rsync -avz $DRY --delete "${COMMON[@]}" \
+      "$REPO/config/" "$REMOTE:$ROOT/config/"
 
 # equity contract 대조 대상. 서버 경로는 `equity contract --engine-src ~/quant-ledger/_engine` 이 읽는다.
 echo "== _engine/backtest_engine/  (backend/src/backtest_engine/ → $REMOTE:~/$ROOT/_engine/backtest_engine/)"

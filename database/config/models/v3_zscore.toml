@@ -1,0 +1,67 @@
+# v3 5팩터 z-score 모델 — v3 `config.yaml` 의 `scoring:` 블록을 그대로 옮긴 레지스트리 항목.
+# 값의 정본: v3 `backend/config.py:124-205`(load_config().scoring) — 골든 픽스처
+# `tests/fixtures/model_golden/2026-09-28/meta.json` 의 `v3_scoring_config` 가 09-28 서버 원본 덤프다.
+# 버전 1.0 = v3 원본과 같은 입력 정의(D-5). 정의·가중치 수정은 1.1 로 별도 등록한다.
+#
+# ⚠ 키 순서가 곧 합산 순서다. 엔진은 비례 재정규화 합(Σ z·w/Σw)을 여기 적힌 순서로 더하므로
+#   v3 config 와 같은 순서로 둬야 v3 원본과 비트 단위로 맞는다(테스트가 순서까지 대조한다).
+
+model_id = "v3_zscore"
+version = "1.0"
+engine = "v3_zscore"
+
+# 팩터 가중 — v3 `scoring/engine.py:222-229`(_factor_weights) 순서
+[buckets]
+momentum = 0.30
+revision = 0.30
+flow = 0.20
+quality = 0.10
+valuation = 0.10
+
+# 유니버스 — 기본 UniverseRule(D-10 추정치 보유 · D-11 보통주+스팩 · KOSPI/KOSDAQ)에
+# v3 시총 하한만 더한다: `market_cap >= min_market_cap`(억원, v3 `scoring/engine.py:71-76`).
+# 나머지 조건은 factor_inputs 의 `fi_universe.eligible` 이 이미 판정한다.
+[universe]
+require_estimates = true
+sec_types = ["common", "spac"]
+markets = ["KOSPI", "KOSDAQ"]
+min_market_cap = 1000.0
+
+# 하위 가중 — v3 `config.yaml` `scoring.factors.<팩터>` 의 하위 키 그대로
+[params.momentum.sub_weights]      # 수익률 r1m…r12m = 20·60·120·180·240 세션(momentum.py:8)
+r1m = 0.35
+r3m = 0.25
+r6m = 0.20
+r9m = 0.12
+r12m = 0.08
+
+[params.revision.metrics]          # 영업이익·순이익 변화율 가중(revision.py:23-24, 48)
+operating_profit = 0.4
+net_income = 0.6
+
+[params.revision.periods]          # 비교 시점(1주·1개월·3개월 전 컨센서스)
+"1w" = 0.25
+"1m" = 0.45
+"3m" = 0.30
+
+[params.flow.sub_weights]          # 기관·외국인·사모 순매수 / 시총, 최근 5·20 행(flow.py:6-16)
+inst_5d = 0.25
+inst_20d = 0.15
+for_5d = 0.25
+for_20d = 0.15
+pe_5d = 0.10
+pe_20d = 0.10
+
+[params.quality.sub_weights]       # debt_ratio·std_20d 는 낮을수록 좋다(quality.py:21)
+gpa = 0.20
+roa = 0.15
+fcf_assets = 0.15
+debt_ratio = 0.15
+gpa_change = 0.15
+std_20d = 0.20
+
+[params.valuation.sub_weights]     # per·pbr·ev_ebitda 는 낮을수록 좋다(valuation.py:17)
+per = 0.30
+pbr = 0.30
+ev_ebitda = 0.25
+dividend_yield = 0.15

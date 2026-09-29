@@ -79,7 +79,8 @@ FI_ADJ_PRICES = TableContract(
      _c("adj_close", "DOUBLE", "원", "수정종가 — 모멘텀·변동성·52주 고점은 이것만"),
      _c("adj_factor", "DOUBLE", note="누적 수정계수(원가 × 계수 = 수정가)"),
      _c("adj_ok", "BOOLEAN",
-        note="False = 미해결 기업행위 사건 구간(DQ-1). 엔진은 해당 창을 결측 처리")),
+        note="False = 미해결 기업행위 사건 구간(DQ-1). v3@1.0 은 무시(원본 동등성), "
+             "v4 계열은 해당 창을 결측 처리")),
     window="fi_prices 와 같다",
     source="equity price_adj_daily · adj_factor",
     readers=ALL_ENGINES)
@@ -142,8 +143,9 @@ FI_FIN_SUMMARY = TableContract(
      _c("gross_profit", "DOUBLE", "억원"), _c("total_assets", "DOUBLE", "억원"),
      _c("fs_basis", "VARCHAR", note="연결 | 별도 | GAAP개별(DQ-5·DQ-10)"),
      _c("capex_basis", "VARCHAR", note="fin_std capex_basis 그대로(DQ-8)"),
-     _c("available_date", "DATE", note="공시·수집으로 알 수 있게 된 날(PIT)")),
-    window="연간 2기(v3 LIMIT 2) + 분기 5기(v4 TTM)",
+     _c("available_date", "DATE",
+        note="공시·수집으로 알 수 있게 된 날. PIT(≤ D)는 굽는 단계가 적용하고 엔진은 읽지 않는다")),
+    window="확정치만(추정치는 fi_consensus). 연간 2기(v3 LIMIT 2) + 분기 5기(v4 TTM)",
     source=("stg_fin_wise(손익·지표) + equity fin_std(자산·현금흐름) — "
             "compat T1.5 SQL 을 이 층으로 옮긴다"),
     readers=ALL_ENGINES)

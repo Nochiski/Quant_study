@@ -23,7 +23,10 @@ from fastapi.testclient import TestClient
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
-from strategy_workbench.adapters.outbound.equity_duckdb._adapter import _fetchall
+from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
+    _LOCK_CONFLICT_MARKERS,
+    _fetchall,
+)
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_SPECS,
     UNSUPPORTED_FIELDS,
@@ -993,7 +996,7 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
     monkeypatch.setattr(
         EquityDuckdbAdapter,
         "_connect",
-        lambda self: _Interrupting(real_connect(self)),
+        lambda self, sources: _Interrupting(real_connect(self, sources)),
     )
     with pytest.raises(EquityDuckdbSetupError, match="catalog_transient_error") as raised:
         EquityDuckdbAdapter(root)
@@ -1058,6 +1061,38 @@ def test_catalog_locked_by_another_process_stops_boot_with_a_coded_error(tmp_pat
     assert isinstance(raised.value.__cause__, duckdb.IOException)
     assert "닫은 뒤 다시 띄워야 한다" in str(raised.value)
     assert EquityDuckdbAdapter(root).list_fields()  # 잠금이 풀리면 그대로 뜬다
+
+
+def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) -> None:
+    """부팅 뒤 카탈로그가 잠겨도 매크로를 안 읽는 질의(원주가·유니버스·백테스트 bar)는 돈다 (#278).
+
+    예전에는 질의마다 카탈로그를 열어, 잠긴 동안 가격 질의까지 원시 `IOException` 으로 죽었다.
+    매크로 원천(재무) 질의는 잠금이 풀릴 때까지 실패한다 — 빈 결과로 넘어가지 않는다.
+    """
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    booted = EquityDuckdbAdapter(root)
+    fin = ("financial.book_equity",)
+    with subprocess.Popen(
+        [sys.executable, "-c", _HOLD_CATALOG_FOR_WRITE, str(root / "equity.duckdb")],
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as holder:
+        try:
+            assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
+            assert _raw(booted, fields=("price.close",)).ok  # 표 원천만 읽는 격자
+            assert booted.load_universe(UniverseHistoryQuery("XKRX", START, END)).ok
+            dataset = booted.load_backtest_dataset(
+                BacktestDataQuery(START, END, ("005930:1",), None)
+            )
+            assert dataset.bars
+            locked = "|".join(re.escape(marker) for marker in _LOCK_CONFLICT_MARKERS)
+            with pytest.raises(duckdb.IOException, match=locked):
+                _raw(booted, fields=fin)
+        finally:
+            holder.kill()  # 나가면서 `Popen` 이 파이프를 닫고 종료를 기다린다
+    assert _raw(booted, fields=fin).ok  # 잠금이 풀리면 다시 읽는다
 
 
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:

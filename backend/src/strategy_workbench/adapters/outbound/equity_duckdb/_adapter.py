@@ -65,7 +65,7 @@ import json
 import logging
 import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
@@ -492,17 +492,22 @@ class EquityDuckdbAdapter:
 
     # ── 구성 ──────────────────────────────────────────────────────────────────
 
-    def _connect(self) -> duckdb.DuckDBPyConnection:
-        """카탈로그가 쓸 만하면 그것을 read_only 로 연다(매크로 호출용), 아니면 메모리 연결."""
-        return _open(self._catalog.path if self._catalog.usable else None)
+    def _connect(self, sources: Iterable[SourceSpec]) -> duckdb.DuckDBPyConnection:
+        """`sources` 를 읽을 연결 — 매크로 원천이 있으면 카탈로그를 read_only 로 연다(#278).
+
+        표 원천은 parquet 를 절대 경로로 읽어(`TableBuild.parquet_source`) 메모리 연결로 충분하다.
+        매크로를 읽지 않는 질의(유니버스·표 원천 격자·백테스트 bar)까지 카탈로그를 열면, 부팅 뒤
+        다른 프로세스가 카탈로그를 쓰기 모드로 잡은 동안 그 질의도 실패한다. 쓸 수 없는
+        카탈로그(stale 등)는 열지 않는다 — 옛 판본을 가리키는 매크로를 조용히 읽지 않게 한다.
+        """
+        macro = self._catalog.usable and any(source.is_macro for source in sources)
+        return _open(self._catalog.path if macro else None)
 
     def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
         """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 본다(#247).
 
         열리지 않는 파일(손상 등)은 카탈로그가 없을 때처럼 쓸 수 없는 것으로 두고 매크로를 읽는
-        원천을 모두 빼고 경고한다(`catalog_unreadable`). 쓸 수 있는 것으로 남기면 `_connect()` 가
-        질의마다 그 파일을 열어 매크로와 무관한 질의(필드 목록·유니버스·price)까지 죽는다.
-        잠김·일시 오류는 부팅을 멈춘다.
+        원천을 모두 빼고 경고한다(`catalog_unreadable`). 잠김·일시 오류는 부팅을 멈춘다.
         """
         if not catalog.usable:
             return catalog
@@ -657,7 +662,7 @@ class EquityDuckdbAdapter:
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
 
         try:
-            with self._connect() as con:
+            with self._connect([spec]) as con:
                 described = con.execute(
                     f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
                 ).fetchall()
@@ -759,7 +764,8 @@ class EquityDuckdbAdapter:
         """
         if self._coverage_cache is not None:
             return self._coverage_cache
-        con = self._connect()
+        grouped = self._fields_by_source(tuple(self._fields))
+        con = self._connect(SOURCE_BY_NAME[name] for name in grouped)
         try:
             grid = con.execute(f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}").fetchone()
             n_grid = max(_as_int((grid or (0,))[0], "universe_daily rows"), 1)
@@ -786,7 +792,7 @@ class EquityDuckdbAdapter:
                     "universe corps",
                 )
             out: dict[str, tuple[float, date]] = {}
-            for name, fields in self._fields_by_source(tuple(self._fields)).items():
+            for name, fields in grouped.items():
                 source = SOURCE_BY_NAME[name]
                 relation = self._relation(source, self.backfill_end)
                 where = f"WHERE {source.row_filter}" if source.row_filter else ""
@@ -843,7 +849,7 @@ class EquityDuckdbAdapter:
             else ""
         )
         name_expr = "sec.name_current" if SECURITY_TABLE in self._tables else "NULL"
-        con = self._connect()
+        con = _open(None)
         try:
             rows = con.execute(
                 f"""
@@ -1186,7 +1192,7 @@ class EquityDuckdbAdapter:
         warmup = query.history_sessions_before_start
         first = max(bisect_left(self._sessions, query.start) - warmup, 0)
         read_from = min(query.start, self._sessions[first]) if warmup else query.start
-        con = self._connect()
+        con = _open(None)
         try:
             price_columns = {
                 str(row[0])
@@ -1634,7 +1640,7 @@ class EquityDuckdbAdapter:
             {" ".join(joins)}
             ORDER BY r.date, r.ticker, r.span_seq
         """
-        con = self._connect()
+        con = self._connect(SOURCE_BY_NAME[name] for name in grid_sources)
         try:
             raw_rows = _fetchall(con, sql, params, checkpoint)
         finally:
@@ -1742,7 +1748,7 @@ class EquityDuckdbAdapter:
                 f"ORDER BY {source.pick_order}) AS rn "
                 f"FROM {relation} WHERE {predicate}) WHERE rn = 1 ORDER BY k, av"
             )
-        con = self._connect()
+        con = self._connect([source])
         try:
             raw_rows = _fetchall(con, sql, [_keys_param(keys)], checkpoint)
         finally:

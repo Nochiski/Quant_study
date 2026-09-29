@@ -2235,11 +2235,22 @@
           },
           "status": {
             "$ref": "#/components/schemas/ExperimentStatus"
+          },
+          "trial_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/TrialStatus"
+            },
+            "title": "Trial Counts",
+            "type": "object"
           }
         },
         "required": [
           "record",
           "status",
+          "trial_counts",
           "selections"
         ],
         "title": "Experiment",
@@ -2298,6 +2309,44 @@
           "detail"
         ],
         "title": "ExperimentAdmissionErrorResponse",
+        "type": "object"
+      },
+      "ExperimentControls": {
+        "description": "실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은\n끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.",
+        "properties": {
+          "paused": {
+            "default": false,
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "priority": {
+            "default": 1,
+            "title": "Priority",
+            "type": "integer"
+          }
+        },
+        "title": "ExperimentControls",
+        "type": "object"
+      },
+      "ExperimentControlsRequest": {
+        "description": "일시정지·우선순위(1 = 보통). 범위 owner 는 domain `MAX_EXPERIMENT_PRIORITY` 다.",
+        "properties": {
+          "paused": {
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "priority": {
+            "default": 1,
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Priority",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "paused"
+        ],
+        "title": "ExperimentControlsRequest",
         "type": "object"
       },
       "ExperimentDesign": {
@@ -2457,7 +2506,7 @@
         "type": "object"
       },
       "ExperimentRecord": {
-        "description": "만든 실험. 취소 시각 말고는 바뀌지 않는다.",
+        "description": "만든 실험. 취소 시각과 대기열 조작 말고는 바뀌지 않는다.",
         "properties": {
           "cancelled_at": {
             "anyOf": [
@@ -2470,6 +2519,13 @@
               }
             ],
             "title": "Cancelled At"
+          },
+          "controls": {
+            "$ref": "#/components/schemas/ExperimentControls",
+            "default": {
+              "paused": false,
+              "priority": 1
+            }
           },
           "created_at": {
             "format": "date-time",
@@ -2634,6 +2690,7 @@
         "enum": [
           "queued",
           "running",
+          "paused",
           "completed",
           "cancelled"
         ],
@@ -11739,6 +11796,112 @@
           }
         },
         "summary": "Cancel Experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/controls": {
+      "put": {
+        "description": "일시정지·재개·우선순위. 대기 trial 에만 적용하고 도는 trial 은 끝까지 돈다(spec D6).",
+        "operationId": "controlExperiment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentControlsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Experiment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid controls"
+          }
+        },
+        "summary": "Control Experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/events": {
+      "get": {
+        "description": "실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나면 닫는다.",
+        "operationId": "streamExperimentEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {}
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Experiment Events"
       }
     },
     "/api/v1/experiments/{experiment_id}/selections": {

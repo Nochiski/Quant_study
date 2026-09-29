@@ -1472,6 +1472,12 @@ export type Experiment = {
    */
   selections: Array<ExperimentSelection>;
   status: ExperimentStatus;
+  /**
+   * Trial Counts
+   */
+  trial_counts: {
+    [key in TrialStatus]?: number;
+  };
 };
 
 /**
@@ -1506,6 +1512,39 @@ export type ExperimentAdmissionErrorResponse = {
     | ({
         code: "portfolio.strategy.invalid";
       } & PortfolioStrategyInvalidDetail);
+};
+
+/**
+ * ExperimentControls
+ *
+ * 실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은
+ * 끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.
+ */
+export type ExperimentControls = {
+  /**
+   * Paused
+   */
+  paused?: boolean;
+  /**
+   * Priority
+   */
+  priority?: number;
+};
+
+/**
+ * ExperimentControlsRequest
+ *
+ * 일시정지·우선순위(1 = 보통). 범위 owner 는 domain `MAX_EXPERIMENT_PRIORITY` 다.
+ */
+export type ExperimentControlsRequest = {
+  /**
+   * Paused
+   */
+  paused: boolean;
+  /**
+   * Priority
+   */
+  priority?: number;
 };
 
 /**
@@ -1610,13 +1649,14 @@ export type ExperimentPreview = {
 /**
  * ExperimentRecord
  *
- * 만든 실험. 취소 시각 말고는 바뀌지 않는다.
+ * 만든 실험. 취소 시각과 대기열 조작 말고는 바뀌지 않는다.
  */
 export type ExperimentRecord = {
   /**
    * Cancelled At
    */
   cancelled_at?: string | null;
+  controls?: ExperimentControls;
   /**
    * Created At
    */
@@ -1703,7 +1743,8 @@ export type ExperimentSelectionRequest = {
  *
  * 실험 단위 상태. trial 상태와 실험 취소에서 파생하고 따로 저장하지 않는다(spec D6).
  */
-export type ExperimentStatus = "queued" | "running" | "completed" | "cancelled";
+export type ExperimentStatus =
+  "queued" | "running" | "paused" | "completed" | "cancelled";
 
 /**
  * ExperimentTrial
@@ -7463,6 +7504,75 @@ export type CancelExperimentResponses = {
 
 export type CancelExperimentResponse =
   CancelExperimentResponses[keyof CancelExperimentResponses];
+
+export type ControlExperimentData = {
+  body: ExperimentControlsRequest;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/controls";
+};
+
+export type ControlExperimentErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Invalid controls
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type ControlExperimentError =
+  ControlExperimentErrors[keyof ControlExperimentErrors];
+
+export type ControlExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  200: Experiment;
+};
+
+export type ControlExperimentResponse =
+  ControlExperimentResponses[keyof ControlExperimentResponses];
+
+export type StreamExperimentEventsData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/events";
+};
+
+export type StreamExperimentEventsErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type StreamExperimentEventsError =
+  StreamExperimentEventsErrors[keyof StreamExperimentEventsErrors];
+
+export type StreamExperimentEventsResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
 
 export type SelectExperimentTrialData = {
   body: ExperimentSelectionRequest;

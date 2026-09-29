@@ -18,6 +18,9 @@ import type {
   CompileStrategyDocumentData,
   CompileStrategyDocumentErrors,
   CompileStrategyDocumentResponses,
+  ControlExperimentData,
+  ControlExperimentErrors,
+  ControlExperimentResponses,
   CreateAssistantProviderData,
   CreateAssistantProviderErrors,
   CreateAssistantProviderResponses,
@@ -169,6 +172,9 @@ import type {
   StreamBacktestEventsData,
   StreamBacktestEventsErrors,
   StreamBacktestEventsResponses,
+  StreamExperimentEventsData,
+  StreamExperimentEventsErrors,
+  StreamExperimentEventsResponses,
   TestAssistantProviderData,
   TestAssistantProviderErrors,
   TestAssistantProviderResponses,
@@ -666,6 +672,41 @@ export const cancelExperiment = <ThrowOnError extends boolean = false>(
     CancelExperimentErrors,
     ThrowOnError
   >({ url: "/api/v1/experiments/{experiment_id}/cancel", ...options });
+
+/**
+ * Control Experiment
+ *
+ * 일시정지·재개·우선순위. 대기 trial 에만 적용하고 도는 trial 은 끝까지 돈다(spec D6).
+ */
+export const controlExperiment = <ThrowOnError extends boolean = false>(
+  options: Options<ControlExperimentData, ThrowOnError>,
+) =>
+  (options.client ?? client).put<
+    ControlExperimentResponses,
+    ControlExperimentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/{experiment_id}/controls",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Stream Experiment Events
+ *
+ * 실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나면 닫는다.
+ */
+export const streamExperimentEvents = <ThrowOnError extends boolean = false>(
+  options: Options<StreamExperimentEventsData, ThrowOnError, unknown>,
+) =>
+  (options.client ?? client).sse.get<
+    StreamExperimentEventsResponses,
+    StreamExperimentEventsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/events", ...options });
 
 /**
  * Select Experiment Trial

@@ -68,6 +68,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     TimeSeriesOperator,
 )
 from tests.equity_fixture import (
+    WB_BONUS_EX,
     WB_EVENING_SESSION,
     WB_HALT_DATE,
     WB_PROFILE_LAG_THREE,
@@ -546,6 +547,18 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
     ):
         cell = _cell(result, seen_credit(session), "005930:1", "credit.margin_balance")
         assert (cell.value, cell.kind) == (None, kind), session
+    # 000660 은 권리락일(01-04)부터 무상증자 척도 창이다(#249). 신용잔고는 원장 뷰
+    # `v_credit_balance` 가 가린 값을 읽으므로 원장 값(1,234)이 있어도 MISSING 이고, 권리락 전 행은
+    # 그대로다. 창 길이와 공시 전 세션 규칙은 뷰가 정한다
+    # (원장 `tests/test_equity_v_credit_balance.py`).
+    before = _cell(result, seen_credit(date(2024, 1, 3)), "000660:1", "credit.margin_balance")
+    assert (before.value, before.kind) == (1_200.0, CellKind.OBSERVED)
+    masked = _cell(result, seen_credit(WB_BONUS_EX), "000660:1", "credit.margin_balance")
+    assert (masked.value, masked.kind, masked.available_date) == (
+        None,
+        CellKind.MISSING,
+        WB_BONUS_EX,
+    )
     # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖는다
     profiles = {p.field_id: p for p in adapter.list_fields()}
     assert profiles["credit.margin_balance"].coverage.supported_cell_kinds == (
@@ -814,7 +827,8 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path)
     S23(2026-09-06) 전에는 `price.adj_close` 가 여기 끼어 있었다 — 매크로 `v_adj_price_fwd` 를
     읽었기 때문이다. 조정가가 표(`price_adj_daily`)가 되면서 그 의존이 끊겼고, 이제 카탈로그가
     통째로 없어도 조정가는 답한다. 남은 매크로 필드는 `financial.*`(v_fin_latest)·
-    `consensus.forward_*`·`consensus.eps_dispersion`(v_consensus) 다.
+    `consensus.forward_*`·`consensus.eps_dispersion`(v_consensus)·`credit.margin_balance`
+    (v_credit_balance, #249) 다. 신용잔고가 표로 돌아가면 무상증자 척도 창이 조용히 다시 열린다.
     """
     root = build_workbench_root(tmp_path / "equity", catalog=False)
     without = EquityDuckdbAdapter(root)
@@ -822,7 +836,7 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path)
     served = {p.field_id for p in without.list_fields()}
     assert "price.close" in served and "consensus.target_price" in served
     assert "price.adj_close" in served  # 표를 읽는다 — 카탈로그와 무관
-    assert not served & {"financial.book_equity", "consensus.forward_eps"}
+    assert not served & {"financial.book_equity", "consensus.forward_eps", "credit.margin_balance"}
     denied = _raw(without, fields=("financial.book_equity",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog file missing" in denied.detail

@@ -11,9 +11,10 @@ import hashlib
 import importlib
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import date
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 from types import ModuleType
 
@@ -382,8 +383,8 @@ def dividend_table(rows: list[DividendRow]) -> pa.Table:
     )
 
 
-CorpEventRow = tuple[str, str, str, date, float | None]
-"""event_id, ticker, event_type, announce_date, amount_krw."""
+CorpEventRow = tuple[str, str, str, date, date, float | None]
+"""event_id, ticker, event_type, announce_date, effective_date, amount_krw."""
 
 
 def corp_event_table(rows: list[CorpEventRow]) -> pa.Table:
@@ -393,7 +394,8 @@ def corp_event_table(rows: list[CorpEventRow]) -> pa.Table:
             "ticker": pa.array([r[1] for r in rows], type=pa.string()),
             "event_type": pa.array([r[2] for r in rows], type=pa.string()),
             "announce_date": pa.array([r[3] for r in rows], type=pa.date32()),
-            "amount_krw": pa.array([r[4] for r in rows], type=pa.int64()),
+            "effective_date": pa.array([r[4] for r in rows], type=pa.date32()),
+            "amount_krw": pa.array([r[5] for r in rows], type=pa.int64()),
             "available_date": pa.array([r[3] for r in rows], type=pa.date32()),
             "available_basis": pa.array(["derived"] * len(rows), type=pa.string()),
         }
@@ -909,7 +911,10 @@ _CATALOG_BODIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         ("fin_std", "disclosure_version", "trading_calendar"),
     ),
 )
-CATALOG_MACROS = tuple(signature for signature, _, _ in _CATALOG_BODIES)
+# 원장 템플릿(`equity.views`)을 그대로 렌더하는 매크로 — 본문을 여기 옮겨 적지 않는다(#249).
+# 손 픽스처 표가 그 매크로가 읽는 열을 다 가질 때만 이렇게 쓸 수 있다(duckdb 는 매크로를 만들 때
+# 바인딩한다).
+LEDGER_MACROS = ("v_credit_balance",)
 
 
 def table_builds(root: Path) -> dict[str, str]:
@@ -978,6 +983,17 @@ def write_catalog(
     """
     import duckdb  # 테스트 전용 — backend optional extra `equity`
 
+    views = import_ledger_module("equity.views")
+    # (이름, 시그니처, 읽는 테이블, 읽는 자리 → 본문) — 사본은 `str.format_map`, 원장 매크로는
+    # 원장의 `render_body` 가 본문을 채운다.
+    renders: list[tuple[str, str, tuple[str, ...], Callable[[dict[str, str]], str]]] = [
+        (signature.split("(", 1)[0], signature, inputs, body.format_map)
+        for signature, body, inputs in _CATALOG_BODIES
+    ]
+    renders += [
+        (name, views.SIGNATURES[name], views.MACRO_INPUTS[name], partial(views.render_body, name))
+        for name in LEDGER_MACROS
+    ]
     builds = table_builds(root)
     path = root / "equity.duckdb"
     if path.exists():
@@ -986,16 +1002,15 @@ def write_catalog(
     skipped: dict[str, str] = {}
     con = duckdb.connect(str(path))
     try:
-        for signature, body, inputs in _CATALOG_BODIES:
-            name = signature.split("(", 1)[0]
+        for name, signature, inputs, render in renders:
             absent = [table for table in inputs if table not in builds]
             if not with_macros or absent:
                 skipped[name] = f"not_built: inputs={absent or list(inputs)}"
                 continue
-            sources = {t: _partition_source(root, t, builds[t]) for t in inputs}
+            body = render({t: _partition_source(root, t, builds[t]) for t in inputs})
             if legacy_fin_view and name == "v_fin_latest":
                 body = body.replace("o.period_frontier, ", "")
-            con.execute(f"CREATE MACRO {signature} AS TABLE " + body.format(**sources))
+            con.execute(f"CREATE MACRO {signature} AS TABLE {body}")
             macros.append(signature)
     finally:
         con.close()
@@ -1181,13 +1196,17 @@ WB_DIVIDEND_ROWS: list[DividendRow] = [
     ("C05930", "2023", "11011", "보통주", 400, date(2023, 12, 31), date(2024, 1, 9)),
     ("C00660", "2022", "11011", "보통주", 1_200, date(2022, 12, 31), date(2023, 3, 8)),
 ]
+# 000660 무상증자 — 01-02 공시, 권리락일 01-04. 원장 뷰 `v_credit_balance` 가 권리락일부터
+# 신용잔고를 가린다(#249).
+WB_BONUS_EX = date(2024, 1, 4)
 WB_EVENT_ROWS: list[CorpEventRow] = [
     # 같은 공시일 2건 → 합 1,500,000
-    ("E1", "005930", "tsstk_aq", date(2024, 1, 5), 1_000_000),
-    ("E2", "005930", "tsstk_aq", date(2024, 1, 5), 500_000),
+    ("E1", "005930", "tsstk_aq", date(2024, 1, 5), date(2024, 1, 5), 1_000_000),
+    ("E2", "005930", "tsstk_aq", date(2024, 1, 5), date(2024, 1, 5), 500_000),
     # 유형이 다른 행은 event.buyback_amount 에 섞이지 않는다
-    ("E3", "005930", "split", date(2024, 1, 8), None),
-    ("E4", "000660", "tsstk_aq", date(2023, 12, 27), 2_000_000),
+    ("E3", "005930", "split", date(2024, 1, 8), date(2024, 1, 8), None),
+    ("E4", "000660", "tsstk_aq", date(2023, 12, 27), date(2023, 12, 27), 2_000_000),
+    ("E5", "000660", "bonus", date(2024, 1, 2), WB_BONUS_EX, None),
 ]
 # 격자 3테이블(S08~S10) — 셀 종류 4갈래를 한 창 안에서 다 낸다.
 #   measured + 값       → OBSERVED      · measured + 0      → OBSERVED(진짜 0)
@@ -1224,7 +1243,9 @@ WB_CREDIT_ROWS: list[CreditRow] = [
     ("005930", date(2024, 1, 8), None, ("not_collected", "none")),
     # 잔고 > 상장주식수로 격리된 원장 행의 자리 — 셀은 남고 종류는 empty_response 다(결정 9)
     ("005930", date(2024, 1, 9), None, ("empty_response", "unit_ok")),
-    ("000660", date(2024, 1, 4), 1_234, ("measured", "unit_ok")),
+    # 000660 은 권리락일(01-04)부터 무상증자 척도 창이다 — 원장 값 1,234 는 뷰가 가린다
+    ("000660", date(2024, 1, 3), 1_200, ("measured", "unit_ok")),
+    ("000660", WB_BONUS_EX, 1_234, ("measured", "unit_ok")),
 ]
 WB_HOLDER_ROWS: list[HolderRow] = [
     ("H1", "elestock", "홍길동", "C05930", 1_000, date(2024, 1, 9)),

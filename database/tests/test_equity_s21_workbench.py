@@ -389,6 +389,29 @@ def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) 
     assert omitted.available_date == BACKFILL_END
 
 
+def test_247540_무상증자_척도_창의_신용잔고는_결측이다(adapter) -> None:
+    """#249 — 어댑터는 원장 뷰 `v_credit_balance` 를 읽고, 뷰는 권리락일부터 척도 창의 잔고를 가린다.
+
+    절단본 원장: 247540 유무상증자(무상 1주당 3주) 공시 2022-06-14(`stg_event_pifric`), 신주배정
+    기준일 06-28 → 권리락일 06-27. `stg_credit_daily` 융자잔고는 06-24 350,914주 → 06-27 451,638주
+    (권리락가로 새로 낸 융자가 새 단위로 더해졌다)이고 신주 상장(07-15) 뒤에도 옛 단위가 섞여 있다.
+    창은 권리락일부터 `views.BONUS_SCALE_WINDOW_SESSIONS`(25) 세션 = 06-27 ~ 07-29 행이고 08-01 행
+    (814,512주)부터 값이 다시 선다. 신용 랙 3이라 각 행은 세 세션 뒤에 보인다.
+    """
+    from strategy_workbench.domain.equity.facade.research_data import CellKind
+    r = _raw(adapter, date(2022, 6, 20), date(2022, 8, 10), fields=("credit.margin_balance",))
+    assert r.ok, r.detail
+    seen = {  # 보이는 세션 → (값, 원장 행 날짜 = 공개일, 셀 종류)
+        date(2022, 6, 29): (350_914.0, date(2022, 6, 24), CellKind.OBSERVED),
+        date(2022, 6, 30): (None, date(2022, 6, 27), CellKind.MISSING),
+        date(2022, 8, 3): (None, date(2022, 7, 29), CellKind.MISSING),
+        date(2022, 8, 4): (814_512.0, date(2022, 8, 1), CellKind.OBSERVED),
+    }
+    for as_of, expected in seen.items():
+        cell = _cell(r, as_of, "247540:1", "credit.margin_balance")
+        assert (cell.value, cell.available_date, cell.kind) == expected, as_of
+
+
 def test_모든_셀이_공개일_이후에만_보인다(adapter) -> None:
     """PIT 전수 — 30필드 × 절단본 두 창에서 available_date ≤ as_of 위반 0."""
     for start, end in ((date(2018, 4, 2), date(2018, 5, 31)),

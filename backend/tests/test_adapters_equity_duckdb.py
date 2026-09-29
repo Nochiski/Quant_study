@@ -861,23 +861,26 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
         cell = _cell(result, seen_credit(session), "005930:1", "credit.margin_balance")
         assert (cell.value, cell.kind) == (None, kind), session
     # 000660 은 권리락일(01-04)부터 무상증자 척도 창이다(#249). 신용잔고는 원장 뷰
-    # `v_credit_balance` 가 가린 값을 읽으므로 원장 값(1,234)이 있어도 MISSING 이고, 권리락 전 행은
-    # 그대로다. 창 길이와 공시 전 세션 규칙은 뷰가 정한다
+    # `v_credit_balance` 가 가린 값을 읽으므로 원장 값(1,234)이 있어도 값이 없고, 셀 종류는 뷰의
+    # 가림 표시(`bonus_window`)를 따른 MASKED 다 — 실행 결측 정책이 채우지 않는다(#298). 권리락
+    # 전 행은 그대로다. 창 길이와 공시 전 세션 규칙은 뷰가 정한다
     # (원장 `tests/test_equity_v_credit_balance.py`).
     before = _cell(result, seen_credit(date(2024, 1, 3)), "000660:1", "credit.margin_balance")
     assert (before.value, before.kind) == (1_200.0, CellKind.OBSERVED)
     masked = _cell(result, seen_credit(WB_BONUS_EX), "000660:1", "credit.margin_balance")
     assert (masked.value, masked.kind, masked.available_date) == (
         None,
-        CellKind.MISSING,
+        CellKind.MASKED,
         WB_BONUS_EX,
     )
-    # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖는다
+    # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖고, 원장 뷰가 가리는
+    # 원천만 MASKED 를 갖는다
     profiles = {p.field_id: p for p in adapter.list_fields()}
     assert profiles["credit.margin_balance"].coverage.supported_cell_kinds == (
         CellKind.OBSERVED,
         CellKind.MISSING,
         CellKind.NOT_COLLECTED,
+        CellKind.MASKED,
     )
     assert profiles["price.close"].coverage.supported_cell_kinds == (
         CellKind.OBSERVED,
@@ -975,6 +978,22 @@ def test_factor_metadata_and_observations_come_from_the_same_panel(
     assert min(dates) == date(2024, 1, 5) and max(dates) == END
     assert all(o.forward_return is None for o in observations.observations)
     assert any(not o.universe_member for o in observations.observations)  # 000660 정지일
+
+
+def test_factor_observations_mark_cells_the_ledger_masked(adapter: EquityDuckdbAdapter) -> None:
+    """팩터 연구 경로도 원장이 가린 셀을 `masked` 로 싣는다 — 결측 정책이 채우지 않게(#298)."""
+    observations = adapter.load_factor_observations(
+        FactorObservationQuery(("credit.margin_balance",), START, END, minimum_history_sessions=1)
+    ).observations
+    cells = {
+        (item.as_of, item.security_id): field
+        for item in observations
+        for field in item.fields
+    }
+    # 권리락일(01-04) 행은 신용 랙 3세션 뒤(01-09)에 보인다 — 가린 셀이다
+    masked = cells[(date(2024, 1, 9), "000660:1")]
+    assert (masked.value, masked.masked) == (None, True)
+    assert not cells[(date(2024, 1, 9), "005930:1")].masked
 
 
 def test_factor_field_catalog_lists_every_field_as_a_numeric_series(

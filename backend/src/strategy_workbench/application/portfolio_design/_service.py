@@ -34,7 +34,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
     require_environment,
 )
-from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
+from strategy_workbench.domain.equity.facade.research_data import CellKind, DataLoadStatus
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
@@ -884,7 +884,7 @@ def _to_factor_observation(
         as_of=item.as_of,
         security_id=item.security_id,
         fields=tuple(
-            FactorFieldValue(field.field_id, field.value)
+            FactorFieldValue(field.field_id, field.value, masked=field.kind is CellKind.MASKED)
             for field in _checkpointed(item.fields, checkpoint)
         ),
         # Membership travels with the row so cross-sectional operators score members against

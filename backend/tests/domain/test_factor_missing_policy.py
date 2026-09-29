@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import fields
 from datetime import date
 
+import pytest
+
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
     FactorObservation,
@@ -103,6 +105,56 @@ def test_evaluation_fills_by_the_argument() -> None:
 
     assert [value.value for value in dropped.values] == [100.0, None]
     assert [value.value for value in zeroed.values] == [100.0, 0.0]
+
+
+def _masked_cross_section() -> tuple[FactorObservation, ...]:
+    """한 날짜의 세 종목 — 값 · 모르는 결측 · 원장이 가린 결측(#298)."""
+    day = date(2024, 1, 8)
+    return (
+        FactorObservation(day, "A", (FactorFieldValue("price.close", 100.0),)),
+        FactorObservation(day, "B", (FactorFieldValue("price.close", None),)),
+        FactorObservation(day, "C", (FactorFieldValue("price.close", None, masked=True),)),
+    )
+
+
+def test_no_missing_policy_fills_a_cell_the_ledger_masked() -> None:
+    """결측 정책은 모르는 값만 채운다. 원장이 틀린 값이라 가린 셀은 어느 정책에서도 결측이다(#298).
+
+    채우면 가리기 전보다 더 틀린다 — 잔고 0·가격 0 이 모멘텀·변화를 −100% 쪽으로 끌어간다.
+    """
+    expected = {
+        MissingPolicy.DROP: [100.0, None, None],
+        MissingPolicy.KEEP: [100.0, None, None],
+        MissingPolicy.ZERO: [100.0, 0.0, None],
+        MissingPolicy.CROSS_SECTIONAL_MEDIAN: [100.0, 100.0, None],
+    }
+    for policy, values in expected.items():
+        evaluation = evaluate_factor_graph(
+            _field_graph(), observations=_masked_cross_section(), missing=policy
+        )
+        assert [value.value for value in evaluation.values] == values, policy
+
+
+def test_a_masked_cell_leaves_every_window_over_it_missing_under_zero() -> None:
+    """가린 셀은 창 결측 전파로만 처리된다 — 창 가운데에 있어도 창 값이 결측이다.
+
+    같은 자리의 모르는 결측은 `zero` 가 0 으로 채워 창이 선다(값은 끝점 비라 그대로다).
+    """
+    days = [date(2024, 1, day) for day in (8, 9, 10)]
+
+    def momentum(middle: FactorFieldValue) -> float | None:
+        closes = (FactorFieldValue("price.close", 100.0), middle,
+                  FactorFieldValue("price.close", 110.0))
+        observations = tuple(
+            FactorObservation(day, "A", (close,)) for day, close in zip(days, closes, strict=True)
+        )
+        evaluation = evaluate_factor_graph(
+            _graph(), observations=observations, missing=MissingPolicy.ZERO
+        )
+        return evaluation.values[-1].value
+
+    assert momentum(FactorFieldValue("price.close", None)) == pytest.approx(0.1)
+    assert momentum(FactorFieldValue("price.close", None, masked=True)) is None
 
 
 def test_trace_evaluation_reads_the_same_argument() -> None:

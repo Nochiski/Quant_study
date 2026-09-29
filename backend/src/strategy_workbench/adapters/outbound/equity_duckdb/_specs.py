@@ -103,6 +103,10 @@ class SourceSpec:
 
     `required_columns` 는 매크로 원천이 선언 밖에서(`row_filter` 등) 읽는 열이다. 매크로는 게시돼
     있어도 옛 카탈로그면 그 열이 없을 수 있어, 어댑터가 부팅 때 확인하고 없으면 이 원천만 뺀다.
+
+    `masked_expr` 은 원장 뷰가 값이 틀려 일부러 가린 행의 표시 식이다(참이면 셀 종류 MASKED, 값은
+    NULL). 무엇을 가릴지는 뷰가 정하고 어댑터는 표시만 읽는다 — MASKED 셀은 실행 결측 정책이
+    채우지 않는다(#298).
     """
 
     name: str
@@ -123,6 +127,7 @@ class SourceSpec:
     frequency: str
     kind_expr: str | None = None
     required_columns: tuple[str, ...] = ()
+    masked_expr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -443,6 +448,8 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         requires=(CREDIT_TABLE, EVENT_TABLE, CREDIT_MACRO),
         frequency="daily",
         kind_expr="fill_kind['kind']",
+        required_columns=("bonus_window",),
+        masked_expr="bonus_window",
     ),
     SourceSpec(
         name="insider",

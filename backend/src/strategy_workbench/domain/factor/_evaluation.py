@@ -63,6 +63,9 @@ def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterat
 class FactorFieldValue:
     field_id: str
     value: FactorInputValue
+    # 원장이 무효라고 가린 셀(값 None, 원천 셀 종류 MASKED). 실행 결측 정책이 채우지 않아 창 결측
+    # 전파로만 처리된다 — 무엇을 가리나는 원장, 무엇을 채우나는 결측 정책이다(#298).
+    masked: bool = False
 
 
 @dataclass(frozen=True)
@@ -392,16 +395,23 @@ def _field_values(
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     raw: list[float | None] = []
+    masked: list[bool] = []
     for observation in _checkpointed(observations, checkpoint):
-        by_id = {field.field_id: field.value for field in observation.fields}
-        value = by_id.get(field_id)
+        by_id = {field.field_id: field for field in observation.fields}
+        field = by_id.get(field_id)
+        value = None if field is None else field.value
         raw.append(
             float(value)
             if isinstance(value, (int, float)) and not isinstance(value, bool)
             else None
         )
+        masked.append(field is not None and field.masked)
+    # 결측 정책은 모르는 값만 채운다. 원장이 가린 셀은 비워 둔다(#298).
     if missing_policy is MissingPolicy.ZERO:
-        return [0.0 if value is None else value for value in raw]
+        return [
+            0.0 if value is None and not hidden else value
+            for value, hidden in zip(raw, masked, strict=True)
+        ]
     if missing_policy is MissingPolicy.CROSS_SECTIONAL_MEDIAN:
         by_date = _cross_section_indices(observations, checkpoint=checkpoint)
         result = list(raw)
@@ -413,7 +423,7 @@ def _field_values(
             ]
             fill = median(available) if available else None
             for index in _checkpointed(indices, checkpoint):
-                if result[index] is None:
+                if result[index] is None and not masked[index]:
                     result[index] = fill
         return result
     return list(raw)

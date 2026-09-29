@@ -304,6 +304,25 @@ def test_raw_port_and_research_panel_agree_cell_by_cell(adapter: ContractAdapter
         assert field.kind is cells[key].kind, key
 
 
+@pytest.mark.parametrize("adapter", ADAPTERS, indirect=True)
+def test_cells_the_ledger_masked_are_masked_and_carry_no_value(adapter: ContractAdapter) -> None:
+    """원장이 값이 틀려 가린 셀(무상증자 척도 창의 신용잔고, #249)은 어느 어댑터에서나 값 없는
+    MASKED 다. 모르는 값(MISSING)과 종류가 달라야 실행 결측 정책이 채우지 않는다(#298).
+    """
+    field_id = "credit.margin_balance"
+    profile = next(p for p in adapter.list_fields() if p.field_id == field_id)
+    assert CellKind.MASKED in profile.coverage.supported_cell_kinds
+    raw = adapter.load_raw_observations(_query(adapter, fields=(field_id,)))
+    masked = [
+        (item.security_id, field)
+        for item in raw.observations
+        for field in item.fields
+        if field.kind is CellKind.MASKED
+    ]
+    assert masked, "창 안에 원장이 가린 셀이 하나는 있어야 한다(두 픽스처 모두 000660)"
+    assert all("000660" in security_id and field.value is None for security_id, field in masked)
+
+
 def test_raw_port_preserves_every_equity_cell_kind_without_collapsing_zero_and_missing() -> None:
     adapter = MockEquityDataAdapter.demo()
     raw = adapter.load_raw_observations(

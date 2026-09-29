@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 
 from strategy_workbench.domain.equity.facade.research_data import (
@@ -28,6 +28,11 @@ class MockSplit:
 
 
 MOCK_SPLIT = MockSplit(security_index=0, effective=date(2020, 5, 8), ratio=50.0)
+
+# 원장 뷰가 값이 틀려 가린 신용잔고 셀 하나(무상증자 척도 창의 흉내, #249) — (종목 index, 원장 행
+# 날짜). 값이 없고 셀 종류가 MASKED 라 실행 결측 정책이 채우지 않는다(#298). 원장은 신용잔고와
+# 수정주가를 가리므로 mock 도 그 필드에 MASKED 를 선언한다.
+MOCK_MASKED_CREDIT = (1, date(2024, 1, 8))
 
 
 # 원주가 필드 → 시점 간 변화를 잴 때 쓸 조정 짝(필드 계약 `FieldMetadata.adjusted_field_id`,
@@ -252,7 +257,10 @@ def build_demo_fixture() -> MockEquityFixture:
                 ends_on=sessions[-1],
                 venues=("XKRX",),
                 estimated_coverage_pct=91.0,
-                supported_cell_kinds=tuple(CellKind),
+                # 원장이 가리는 셀(MASKED)은 수급 축에 없다 — 원장 뷰가 가리는 필드만 선언한다(#298)
+                supported_cell_kinds=tuple(
+                    kind for kind in CellKind if kind is not CellKind.MASKED
+                ),
                 point_in_time=True,
                 requires_confirmation=True,
             ),
@@ -283,7 +291,9 @@ def build_demo_fixture() -> MockEquityFixture:
             label="Margin balance (shares)",
             unit="shares",
             value_type=FieldValueType.COUNT,
-            coverage=full_coverage,
+            coverage=replace(
+                full_coverage, supported_cell_kinds=(CellKind.OBSERVED, CellKind.MASKED)
+            ),
             # 원장은 실입수 기준 3세션 뒤에 공개한다(EQUITY_FIELD_MAP DEFECT-E01 정정, #230).
             recommended_lag_sessions=3,
         ),
@@ -317,6 +327,7 @@ def build_demo_fixture() -> MockEquityFixture:
         for security_index, security in enumerate(securities):
             if security_index == 2 and session < sessions[2]:
                 continue
+            credit_masked = (security_index, session) == MOCK_MASKED_CREDIT
             observations.extend(
                 (
                     Observation(
@@ -370,8 +381,10 @@ def build_demo_fixture() -> MockEquityFixture:
                         "credit.margin_balance",
                         session,
                         session,
-                        8_000_000.0 + security_index * 1_000_000.0 + index * 10_000,
-                        CellKind.OBSERVED,
+                        None
+                        if credit_masked
+                        else 8_000_000.0 + security_index * 1_000_000.0 + index * 10_000,
+                        CellKind.MASKED if credit_masked else CellKind.OBSERVED,
                     ),
                     Observation(
                         security.security_id,

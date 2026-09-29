@@ -14,6 +14,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from threading import Condition, Event
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +23,7 @@ from fastapi.testclient import TestClient
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
+from strategy_workbench.adapters.outbound.equity_duckdb._adapter import _fetchall
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_SPECS,
     UNSUPPORTED_FIELDS,
@@ -1239,3 +1242,146 @@ def test_raw_load_reports_monotonic_progress_ending_at_one(adapter: EquityDuckdb
     assert any(0.0 < fraction < 0.52 for fraction in reported)
     assert any(0.91 < fraction < 1.0 for fraction in reported)
     assert reported[-1] == 1.0
+
+
+class _Cancelled(Exception):
+    """테스트의 취소 예외 — 어댑터는 checkpoint 가 던진 예외를 종류와 무관하게 그대로 올린다."""
+
+
+def test_cancellation_while_reading_latest_sources_stops_before_the_panel_is_built(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """이슈 #160: 격자를 다 읽은 뒤 법인 대응·LATEST 원천(재무)을 읽는 동안 취소하면 패널 구체화가
+    끝나기 전에 멈춘다. 예전에는 이 구간에 checkpoint 가 없어 패널을 다 만든 뒤에야 취소를 봤다.
+
+    구간은 진행 보고로 가른다 — 격자가 끝나면 0.9 × 0.52, 패널 구체화가 끝나면 0.52 를 보고한다.
+    """
+    query = RawObservationQuery(
+        "KRX", "krx.common-stock", START, END, ("price.close", "financial.book_equity"), 0
+    )
+    cancelled = Event()
+    reported: list[float] = []
+
+    def progress(fraction: float) -> None:
+        reported.append(fraction)
+        if fraction >= 0.45:  # 격자 끝(0.468). 격자 안 보고는 이보다 작다
+            cancelled.set()
+
+    def checkpoint() -> None:
+        if cancelled.is_set():
+            raise _Cancelled
+
+    with pytest.raises(_Cancelled):
+        adapter.load_raw_observations_reporting(query, checkpoint=checkpoint, progress=progress)
+
+    assert reported[-1] == pytest.approx(0.9 * 0.52)
+
+
+def test_a_duckdb_query_cancelled_while_running_is_interrupted_into_the_callers_error() -> None:
+    """이슈 #160: 질의 하나는 나눌 수 없어 행 단위 checkpoint 가 닿지 않는다. 도는 동안 취소되면
+    감시 스레드가 `interrupt()` 로 끊고, duckdb 오류 대신 호출자의 취소 예외가 올라간다 — duckdb
+    오류가 그대로 새면 취소한 run 이 내부 오류(`backtest.run.internal`)를 달고 끝나고, trace 요청은
+    499 대신 500 이 된다.
+    """
+    import duckdb
+
+    cancelled = Event()
+
+    def checkpoint() -> None:
+        if cancelled.is_set():
+            raise _Cancelled
+
+    con = duckdb.connect()
+    # 질의를 시작할 때 이미 취소돼 있다. 호출 스레드는 질의 안에서 checkpoint 를 부르지 못하므로
+    # 감시 스레드의 첫 폴링이 본다.
+    cancelled.set()
+    try:
+        with pytest.raises(_Cancelled) as info:
+            # 이 기계에서 끊지 않으면 약 30초 걸리는 질의다. 폴링 간격(0.1초)보다 훨씬 길다.
+            _fetchall(
+                con,
+                "SELECT sum(a.range * b.range) FROM range(0, 60000) a CROSS JOIN range(0, 60000) b",
+                [],
+                checkpoint,
+            )
+    finally:
+        con.close()
+
+    assert isinstance(info.value.__context__, duckdb.Error)
+
+
+class _PendingConnection:
+    """질의가 `interrupt()` 를 받을 때까지 돌다가 주어진 duckdb 오류로 끝나는 연결 대역.
+
+    `lost` 는 질의가 시작되기 전에 와서 사라지는 interrupt 수다 — duckdb 는 시작 전 interrupt 를
+    버리고 질의를 끝까지 돌린다.
+    """
+
+    def __init__(self, error: Exception, *, lost: int = 0) -> None:
+        self._error = error
+        self._needed = lost + 1
+        self._calls = 0
+        self._interrupts = Condition()
+
+    def execute(self, sql: str, params: list[object]) -> None:
+        with self._interrupts:
+            if not self._interrupts.wait_for(lambda: self._calls >= self._needed, timeout=30):
+                raise TimeoutError(
+                    f"query was never interrupted after it started — sql={sql!r} "
+                    f"interrupts={self._calls} needed={self._needed}"
+                )
+        raise self._error
+
+    def interrupt(self) -> None:
+        with self._interrupts:
+            self._calls += 1
+            self._interrupts.notify_all()
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    ["InterruptException", "InvalidInputException"],
+)
+def test_an_interrupted_query_becomes_the_callers_error_whatever_duckdb_raises(
+    error_type: str,
+) -> None:
+    """이슈 #160: 끊긴 질의는 끊긴 단계에 따라 `InterruptException` 이나 `InvalidInputException`
+    ("Attempting to execute an unsuccessful or closed pending query result" + "INTERRUPT Error")으로
+    온다(실원장 격자 질의에서 뒤의 것을 봤다). 어느 쪽이든 호출자의 취소 예외가 올라간다.
+    """
+    import duckdb
+
+    error = getattr(duckdb, error_type)("INTERRUPT Error: Interrupted!")
+
+    def checkpoint() -> None:
+        raise _Cancelled
+
+    with pytest.raises(_Cancelled) as info:
+        _fetchall(
+            cast("duckdb.DuckDBPyConnection", _PendingConnection(error)), "SELECT 1", [], checkpoint
+        )
+
+    assert info.value.__context__ is error
+
+
+def test_an_interrupt_lost_before_the_query_starts_is_sent_again() -> None:
+    """이슈 #160: duckdb 는 질의가 시작되기 전에 온 `interrupt()` 를 버리고 질의를 끝까지 돌린다.
+    감시 스레드가 한 번 끊고 멈추면 그 사이에 시작한 질의는 끊기지 않으므로, 호출이 끝날 때까지 다시
+    끊는다.
+    """
+    import duckdb
+
+    error = duckdb.InterruptException("INTERRUPT Error: Interrupted!")
+
+    def checkpoint() -> None:
+        raise _Cancelled
+
+    with pytest.raises(_Cancelled) as info:
+        _fetchall(
+            cast("duckdb.DuckDBPyConnection", _PendingConnection(error, lost=1)),
+            "SELECT 1",
+            [],
+            checkpoint,
+        )
+
+    assert info.value.__context__ is error

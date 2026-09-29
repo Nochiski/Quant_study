@@ -65,7 +65,7 @@ import logging
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -116,6 +116,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 
 from ._source import (
+    CATALOG_NAME,
     CatalogState,
     EquityDuckdbSetupError,
     TableBuild,
@@ -308,6 +309,34 @@ def _catalog_error_types() -> tuple[type[Exception], ...]:
     )
 
 
+# 잠금 충돌도 손상과 같은 `IOException` 이라 duckdb 가 붙이는 자기 문장(OS 로캘과 무관한 영문)으로만
+# 가른다. Windows 는 Restart Manager 가 찾은 점유 프로세스를 "File is already open in",
+# POSIX 는 fcntl 잠금 실패를 "Could not set lock on file" 로 적는다(duckdb 1.5.5 실측, #247).
+_LOCK_CONFLICT_MARKERS = ("File is already open in", "Could not set lock on file")
+
+
+def _raise_unless_persistent(error: Exception, catalog: Path) -> None:
+    """부팅 때 카탈로그를 열거나 읽다 난 duckdb 오류 중 원천을 빼도 되는 것만 돌려보낸다(#245·#247).
+
+    원천을 뺀 사유는 재시작 전까지 캐시되므로, 뺄 수 있는 오류는 손상·누락처럼 재시작해도 그대로인
+    카탈로그·파일 성격의 것(`_catalog_error_types`)뿐이다. 잠김과 일시 오류는 풀리면 원천이 돌아와야
+    하므로 빼지 않고 코드화된 `EquityDuckdbSetupError` 로 부팅을 멈춘다. 부팅 예외는 운영자 채널이라
+    경로와 duckdb 원문을 싣는다.
+    """
+    if any(marker in str(error) for marker in _LOCK_CONFLICT_MARKERS):
+        raise EquityDuckdbSetupError(
+            "다른 프로세스가 카탈로그 파일을 쓰기 모드로 열고 있어 부팅을 멈춘다 — 그 프로세스"
+            "(DuckDB CLI·DB 도구·카탈로그를 여는 스크립트)를 닫은 뒤 다시 띄워야 한다 "
+            f"(catalog_locked) — catalog={catalog} error={error!r}"
+        ) from error
+    if not isinstance(error, _catalog_error_types()):
+        raise EquityDuckdbSetupError(
+            "카탈로그를 확인하다 일시적인 duckdb 오류가 나서 부팅을 멈춘다 — 원천을 빼지 "
+            "않았으므로 다시 띄우면 다시 확인한다 (catalog_transient_error) — "
+            f"catalog={catalog} error={error!r}"
+        ) from error
+
+
 def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     """duckdb 연결 — 지연 import(optional extra `equity`). `path` 는 read_only 로 여는 카탈로그."""
     try:
@@ -369,7 +398,8 @@ class EquityDuckdbAdapter:
             (`load_backtest_dataset` 만은 `adj_factor` 를 요구해 예외를 던진다).
 
     Raises:
-        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST/카탈로그 meta 손상.
+        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST/카탈로그 meta 손상 ·
+            카탈로그 파일 잠김(`catalog_locked`)·일시 오류(`catalog_transient_error`).
     """
 
     def __init__(self, equity_root: Path) -> None:
@@ -387,7 +417,9 @@ class EquityDuckdbAdapter:
         self._tables: dict[str, TableBuild] = {
             table: resolve_table(self._root, table) for table in builds
         }
-        self._catalog: CatalogState = read_catalog(self._root, self._snapshot_id)
+        self._catalog: CatalogState = self._checked_catalog(
+            read_catalog(self._root, self._snapshot_id)
+        )
         self._sessions: tuple[date, ...] = self._load_sessions()
         self._session_index = {session: index for index, session in enumerate(self._sessions)}
         self._policies: dict[str, tuple[str, ...]] = self._load_policies()
@@ -406,6 +438,30 @@ class EquityDuckdbAdapter:
     def _connect(self) -> duckdb.DuckDBPyConnection:
         """카탈로그가 쓸 만하면 그것을 read_only 로 연다(매크로 호출용), 아니면 메모리 연결."""
         return _open(self._catalog.path if self._catalog.usable else None)
+
+    def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
+        """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 본다(#247).
+
+        열리지 않는 파일(손상 등)은 카탈로그가 없을 때처럼 매크로를 읽는 원천을 모두 빼고
+        경고한다(`catalog_unreadable`). 열어 보지 않으면 열 확인(`_missing_columns_reason`)이 없는
+        매크로 원천이 목록에 남아 첫 질의에서 죽는다. 잠김·일시 오류는 부팅을 멈춘다.
+        """
+        if not catalog.usable:
+            return catalog
+        import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
+
+        try:
+            _open(catalog.path).close()
+        except module.Error as error:
+            _raise_unless_persistent(error, catalog.path)
+            reason = (
+                f"카탈로그 파일 {CATALOG_NAME} 를 열 수 없어 카탈로그 매크로를 읽는 원천의 필드를 "
+                "뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
+                f"`python -m equity catalog`) (catalog_unreadable) — error={type(error).__name__}"
+            )
+            logger.warning(f"{reason} catalog={catalog.path} detail={error!r}")
+            return replace(catalog, usable=False, reason=reason)
+        return catalog
 
     def _source(self, table: str) -> str:
         return self._tables[table].parquet_source()
@@ -538,16 +594,18 @@ class EquityDuckdbAdapter:
         """
         if not spec.required_columns or not spec.is_macro:
             return None
-        con = self._connect()
+        import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
+
         try:
-            described = con.execute(
-                f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
-            ).fetchall()
-        except _catalog_error_types() as error:
+            with self._connect() as con:
+                described = con.execute(
+                    f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
+                ).fetchall()
+        except module.Error as error:
             # 스냅샷은 맞는데 매크로가 가리키는 parquet 가 빠졌거나 손상된 카탈로그 등 — 생성자
             # 밖으로 던지면 어댑터 전체가 뜨지 못한다(#233 리뷰 후속). 이 원천만 빼고 사유를 남긴다.
-            # 사유는 재시작 전까지 캐시되므로 카탈로그·파일 성격의 오류만 잡고, 중단·메모리 부족
-            # 같은 일시적 오류는 그대로 올린다(#245 리뷰 P3-1·P3-4).
+            # 연결도 같은 판정을 받는다 — 잠김·일시 오류는 빼지 않고 부팅을 멈춘다(#245·#247).
+            _raise_unless_persistent(error, self._catalog.path)
             reason = (
                 f"카탈로그 매크로 {spec.relation} 를 읽을 수 없어 원천 {spec.name} 의 필드를 "
                 "뺀다 — 카탈로그를 다시 만들거나 원장 파일을 확인해야 한다"
@@ -556,8 +614,6 @@ class EquityDuckdbAdapter:
             )
             logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")
             return reason
-        finally:
-            con.close()
         present = {str(row[0]) for row in described}
         missing = [column for column in spec.required_columns if column not in present]
         if not missing:

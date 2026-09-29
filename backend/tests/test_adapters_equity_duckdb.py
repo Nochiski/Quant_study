@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -929,8 +931,8 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
     """일시적 duckdb 오류(중단·메모리 부족)는 원천을 빼는 사유가 아니다 (#245 리뷰 P3-1).
 
     부팅 때 뺀 원천은 `_source_reason` 에 캐시돼 재시작할 때까지 돌아오지 않는다. 그래서 잡는 것은
-    카탈로그 성격의 오류(파일 누락·매크로 누락·스키마 드리프트)뿐이고, 나머지는 그대로 올려 부팅을
-    다시 시도하게 한다.
+    카탈로그 성격의 오류(파일 누락·매크로 누락·스키마 드리프트)뿐이고, 나머지는 부팅을 멈춰 다시
+    시도하게 한다. 멈출 때는 원시 duckdb 예외가 아니라 원인 코드와 조치를 담은 설정 오류다(#247).
     """
     import duckdb
 
@@ -941,21 +943,85 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
         def __init__(self, inner: duckdb.DuckDBPyConnection) -> None:
             self._inner = inner
 
+        def __enter__(self) -> _Interrupting:
+            return self
+
+        def __exit__(self, *exc_info: object) -> None:
+            self._inner.close()
+
         def execute(self, sql: str, *args: object) -> duckdb.DuckDBPyConnection:
             if sql.startswith("DESCRIBE"):
                 raise duckdb.InterruptException("simulated interrupt during DESCRIBE")
             return self._inner.execute(sql, *args)
-
-        def close(self) -> None:
-            self._inner.close()
 
     monkeypatch.setattr(
         EquityDuckdbAdapter,
         "_connect",
         lambda self: _Interrupting(real_connect(self)),
     )
-    with pytest.raises(duckdb.InterruptException, match="simulated interrupt"):
+    with pytest.raises(EquityDuckdbSetupError, match="catalog_transient_error") as raised:
         EquityDuckdbAdapter(root)
+    assert isinstance(raised.value.__cause__, duckdb.InterruptException)
+    assert "다시 띄우면 다시 확인한다" in str(raised.value)
+
+
+def test_corrupt_catalog_file_at_boot_drops_every_macro_source(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`equity.duckdb` 자체가 손상되면 카탈로그가 없을 때처럼 매크로 원천만 빠지고 뜬다 (#247 a).
+
+    예전에는 열 확인의 연결이 `try` 밖이라 원시 `IOException`("not a valid DuckDB database
+    file")으로 부팅이 죽었다. 열 확인이 없는 매크로 원천(`consensus` 의 `v_consensus`)도 같이
+    빠져야 첫 질의에서 다시 죽지 않는다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    (root / "equity.duckdb").write_bytes(b"garbage" * 50)
+    with caplog.at_level("WARNING"):
+        broken = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in broken.list_fields()}
+    assert "price.close" in served and "consensus.target_price" in served
+    assert not served & {"financial.book_equity", "consensus.forward_eps"}
+    denied = _raw(broken, fields=("consensus.forward_eps",))
+    assert denied.status is DataLoadStatus.INVALID_QUERY
+    assert denied.detail is not None and "catalog_unreadable" in denied.detail
+    assert "ledger_sync catalog" in denied.detail  # 조치 안내
+    assert _raw(broken, fields=("price.close",)).ok
+    warned = [r.getMessage() for r in caplog.records if "catalog_unreadable" in r.getMessage()]
+    assert len(warned) == 1 and "not a valid DuckDB database file" in warned[0]
+    assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
+
+
+# 하위 프로세스가 카탈로그를 쓰기 모드로 잡는다. Windows 는 공유 위반, POSIX 는 fcntl 로 막히는
+# 진짜 잠금이다.
+_HOLD_CATALOG_FOR_WRITE = (
+    "import sys, time, duckdb; con = duckdb.connect(sys.argv[1]); print('held', flush=True); "
+    "time.sleep(120)"
+)
+
+
+def test_catalog_locked_by_another_process_stops_boot_with_a_coded_error(tmp_path: Path) -> None:
+    """카탈로그가 잠겨 있으면 원시 `IOException` 대신 원인 코드와 조치를 담은 설정 오류다 (#247 b).
+
+    잠김은 풀리면 원천이 돌아와야 하는 상태라 손상처럼 원천을 빼고 뜨지 않는다 — 뺀 사유는 재시작
+    전까지 캐시된다(#245 의 일시 오류와 같은 규칙).
+    """
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    with subprocess.Popen(
+        [sys.executable, "-c", _HOLD_CATALOG_FOR_WRITE, str(root / "equity.duckdb")],
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as holder:
+        try:
+            assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
+            with pytest.raises(EquityDuckdbSetupError, match="catalog_locked") as raised:
+                EquityDuckdbAdapter(root)
+        finally:
+            holder.kill()  # 나가면서 `Popen` 이 파이프를 닫고 종료를 기다린다
+    assert isinstance(raised.value.__cause__, duckdb.IOException)
+    assert "닫은 뒤 다시 띄워야 한다" in str(raised.value)
+    assert EquityDuckdbAdapter(root).list_fields()  # 잠금이 풀리면 그대로 뜬다
 
 
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:

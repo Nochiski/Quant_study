@@ -312,6 +312,8 @@ def _catalog_error_types() -> tuple[type[Exception], ...]:
 # 잠금 충돌도 손상과 같은 `IOException` 이라 duckdb 가 붙이는 자기 문장(OS 로캘과 무관한 영문)으로만
 # 가른다. Windows 는 Restart Manager 가 찾은 점유 프로세스를 "File is already open in",
 # POSIX 는 fcntl 잠금 실패를 "Could not set lock on file" 로 적는다(duckdb 1.5.5 실측, #247).
+# Windows 표식은 Restart Manager 가 점유 프로세스를 찾았을 때만 붙는다. 못 찾으면(다른 사용자·서비스
+# 등) 잠김이 손상으로 분류돼 원천이 빠지고, 사유는 카탈로그 재생성을 안내한다(#275 리뷰 P3-3).
 _LOCK_CONFLICT_MARKERS = ("File is already open in", "Could not set lock on file")
 
 

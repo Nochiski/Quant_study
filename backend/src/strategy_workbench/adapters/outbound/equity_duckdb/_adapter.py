@@ -1307,19 +1307,12 @@ class EquityDuckdbAdapter:
                 """,
                 [_keys_param(tickers)],
             ).fetchall()
-            factor_columns = {
-                str(row[0])
-                for row in con.execute(
-                    f"DESCRIBE SELECT * FROM {self._source(FACTOR_TABLE)}"
-                ).fetchall()
-            }
-            ts_column = "apply_date" if "apply_date" in factor_columns else "effective_date"
             factor_rows = con.execute(
                 f"""
-                SELECT ticker, event_id, event_type, share_factor, {ts_column}
+                SELECT ticker, event_id, event_type, share_factor, apply_date
                 FROM {self._source(FACTOR_TABLE)}
                 WHERE factor_ok AND ticker IN (SELECT {_KEYS_SQL})
-                ORDER BY ticker, {ts_column}, event_id
+                ORDER BY ticker, apply_date, event_id
                 """,
                 [_keys_param(tickers)],
             ).fetchall()
@@ -1417,8 +1410,8 @@ class EquityDuckdbAdapter:
 
         for ticker, event_id, event_type, share_factor, raw_ts in factor_rows:
             if raw_ts is None:
-                raise ValueError(f"{ts_column} is NULL on a factor_ok row — event_id={event_id}")
-            session = _as_date(raw_ts, ts_column)
+                raise ValueError(f"apply_date is NULL on a factor_ok row — event_id={event_id}")
+            session = _as_date(raw_ts, "apply_date")
             ratio = _as_float(share_factor, "share_factor")
             if str(event_type) in RATIO_DIRECTED_EVENT_TYPES:
                 if ratio is None or ratio == 1:

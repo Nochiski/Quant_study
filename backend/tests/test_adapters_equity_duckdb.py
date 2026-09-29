@@ -876,34 +876,48 @@ def test_catalog_without_required_view_column_drops_only_that_source(
     assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
 
 
+@pytest.mark.parametrize(
+    ("table", "macro", "dropped", "kept"),
+    [
+        ("fin_std", "v_fin_latest", "financial.book_equity", "consensus.forward_eps"),
+        ("consensus_daily", "v_consensus", "consensus.forward_eps", "financial.book_equity"),
+    ],
+    ids=["fin", "consensus"],
+)
 def test_unreadable_catalog_macro_at_boot_drops_only_that_source(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    table: str,
+    macro: str,
+    dropped: str,
+    kept: str,
 ) -> None:
-    """부팅 때 열 확인(DESCRIBE)이 duckdb 오류를 내도 어댑터는 뜨고 그 원천만 빠진다.
+    """부팅 때 매크로 읽기(DESCRIBE)가 duckdb 오류를 내도 어댑터는 뜨고 그 원천만 빠진다.
 
     #233 리뷰 후속.
 
     스냅샷은 맞는데 매크로가 가리키는 parquet 파일이 빠진 카탈로그다. #233 전에는 재무 질의만
     실패했는데, #233 의 부팅 DESCRIBE 가 IOException 을 생성자 밖으로 던져 어댑터 전체가 죽었다.
+    확인할 열이 없는 `v_consensus` 원천은 부팅 때 읽지 않아 `list_fields()` 가 원시 IOException
+    으로 죽었다(#275 리뷰 P3-5).
     """
     root = build_workbench_root(tmp_path / "equity")
-    removed = sorted((root / "fin_std").rglob("*.parquet"))
-    assert removed, f"fin_std 파티션 파일이 없다 — root={root}"
+    removed = sorted((root / table).rglob("*.parquet"))
+    assert removed, f"{table} 파티션 파일이 없다 — root={root}"
     for path in removed:
         path.unlink()
     with caplog.at_level("WARNING"):
         broken = EquityDuckdbAdapter(root)
     served = {p.field_id for p in broken.list_fields()}
-    assert "price.close" in served and "consensus.forward_eps" in served
-    assert not served & {"financial.book_equity", "financial.net_income"}
-    denied = _raw(broken, fields=("financial.book_equity",))
+    assert {"price.close", kept} <= served and dropped not in served
+    denied = _raw(broken, fields=(dropped,))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog_macro_unreadable" in denied.detail
     assert _raw(broken, fields=("price.close",)).ok
     warned = [
         r.getMessage() for r in caplog.records if "catalog_macro_unreadable" in r.getMessage()
     ]
-    assert warned and "v_fin_latest" in warned[0]
+    assert warned and macro in warned[0]
     # duckdb 원문은 빠진 parquet 경로를 담는다 — 원문과 카탈로그 경로는 로그에만 싣는다(#163 댓글)
     assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
 

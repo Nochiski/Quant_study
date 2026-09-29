@@ -442,9 +442,10 @@ class EquityDuckdbAdapter:
     def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
         """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 본다(#247).
 
-        열리지 않는 파일(손상 등)은 카탈로그가 없을 때처럼 매크로를 읽는 원천을 모두 빼고
-        경고한다(`catalog_unreadable`). 열어 보지 않으면 열 확인(`_missing_columns_reason`)이 없는
-        매크로 원천이 목록에 남아 첫 질의에서 죽는다. 잠김·일시 오류는 부팅을 멈춘다.
+        열리지 않는 파일(손상 등)은 카탈로그가 없을 때처럼 쓸 수 없는 것으로 두고 매크로를 읽는
+        원천을 모두 빼고 경고한다(`catalog_unreadable`). 쓸 수 있는 것으로 남기면 `_connect()` 가
+        질의마다 그 파일을 열어 매크로와 무관한 질의(필드 목록·유니버스·price)까지 죽는다.
+        잠김·일시 오류는 부팅을 멈춘다.
         """
         if not catalog.usable:
             return catalog
@@ -587,12 +588,14 @@ class EquityDuckdbAdapter:
         return self._missing_columns_reason(spec)
 
     def _missing_columns_reason(self, spec: SourceSpec) -> str | None:
-        """매크로가 있어도 옛 카탈로그면 원천이 요구하는 열이 없다 — 그 원천만 빼고 경고한다.
+        """매크로 원천을 부팅 때 한 번 읽어 보고, 못 읽거나 요구하는 열이 없으면 그 원천만 뺀다.
 
-        열 확인 없이 두면 `row_filter` 가 커버율 질의에서 BinderException 을 던져 `list_fields()`
-        전체가 죽는다(#233 리뷰 P2-1). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
+        매크로가 가리키는 parquet 가 빠졌거나 손상됐으면 `catalog_macro_unreadable`, 옛 카탈로그라
+        원천이 읽는 열(`required_columns`)이 없으면 `catalog_columns_missing` 으로 경고한다.
+        읽어 보지 않고 두면 커버율 질의가 원시 duckdb 오류를 던져 `list_fields()` 전체가 죽는다
+        (#233 리뷰 P2-1, #275 리뷰 P3-5). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
         """
-        if not spec.required_columns or not spec.is_macro:
+        if not spec.is_macro:
             return None
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
 

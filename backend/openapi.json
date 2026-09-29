@@ -7210,6 +7210,38 @@
         "title": "StrategyIdentity",
         "type": "object"
       },
+      "StrategyNotFoundDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "StrategyNotFoundDetail",
+        "type": "object"
+      },
+      "StrategyNotFoundResponse": {
+        "description": "시도 원장 경로의 계열(저장된 전략)이 없다.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyNotFoundDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyNotFoundResponse",
+        "type": "object"
+      },
       "StrategyOperatorCatalog": {
         "description": "그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.\n\n문장은 담지 않는다. 소비자는 `description_key`·`formula_key`를 자기 로케일 사전에서 찾고,\n연산자 목록·arity·가용성을 손으로 적지 않는다. `availability` 는 연결된 어댑터 capability 로\n판정하므로(P2-07) 해시도 어댑터에 따라 다르다 — 어댑터를 바꾸면 ETag 가 바뀐다.",
         "properties": {
@@ -8610,6 +8642,9 @@
             "title": "New Trial",
             "type": "boolean"
           },
+          "reason": {
+            "$ref": "#/components/schemas/TrialPreviewReason"
+          },
           "trial_count": {
             "title": "Trial Count",
             "type": "integer"
@@ -8628,10 +8663,20 @@
           "trial_key",
           "trial_count",
           "new_trial",
-          "trial_count_after"
+          "trial_count_after",
+          "reason"
         ],
         "title": "TrialPreview",
         "type": "object"
+      },
+      "TrialPreviewReason": {
+        "enum": [
+          "new_trial",
+          "recheck",
+          "no_lineage"
+        ],
+        "title": "TrialPreviewReason",
+        "type": "string"
       },
       "TrialRun": {
         "properties": {
@@ -11580,6 +11625,16 @@
             },
             "description": "Successful Response"
           },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The strategy does not exist"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -11629,6 +11684,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The strategy does not exist"
           },
           "409": {
             "content": {

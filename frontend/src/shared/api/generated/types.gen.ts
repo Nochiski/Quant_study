@@ -4636,6 +4636,29 @@ export type StrategyIdentity = {
 };
 
 /**
+ * StrategyNotFoundDetail
+ */
+export type StrategyNotFoundDetail = {
+  /**
+   * Code
+   */
+  code: "strategy.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyNotFoundResponse
+ *
+ * 시도 원장 경로의 계열(저장된 전략)이 없다.
+ */
+export type StrategyNotFoundResponse = {
+  detail: StrategyNotFoundDetail;
+};
+
+/**
  * StrategyOperatorCatalog
  *
  * 그래프 노드 연산자 정의 전부 (P1-03, spec D8). `catalog_hash`가 ETag다.
@@ -5523,6 +5546,7 @@ export type TrialPreview = {
    * New Trial
    */
   new_trial: boolean;
+  reason: TrialPreviewReason;
   /**
    * Trial Count
    */
@@ -5536,6 +5560,11 @@ export type TrialPreview = {
    */
   trial_key: string;
 };
+
+/**
+ * TrialPreviewReason
+ */
+export type TrialPreviewReason = "new_trial" | "recheck" | "no_lineage";
 
 /**
  * TrialRun
@@ -7401,6 +7430,10 @@ export type GetTrialLedgerData = {
 
 export type GetTrialLedgerErrors = {
   /**
+   * The strategy does not exist
+   */
+  404: StrategyNotFoundResponse;
+  /**
    * Validation Error
    */
   422: HttpValidationError;
@@ -7432,6 +7465,10 @@ export type MergeTrialLineageData = {
 };
 
 export type MergeTrialLineageErrors = {
+  /**
+   * The strategy does not exist
+   */
+  404: StrategyNotFoundResponse;
   /**
    * The two lineages are already one
    */

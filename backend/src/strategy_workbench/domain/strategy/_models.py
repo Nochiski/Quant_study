@@ -101,8 +101,17 @@ class RebalanceFrequency(StrEnum):
 
 
 class AppliedStage(StrEnum):
-    # `DATA`·`EXECUTION` 은 실행 설정(`domain/backtest`)이 자기 제약 행에 붙이는 단계다.
-    # 전략 문서에는 1.2 부터 해당 행이 없다.
+    """전략 파이프라인의 단계 어휘 — 유니버스(`ELIGIBILITY`) → 알파(`SIGNAL`) → 포트폴리오
+    구성 → 리스크 → 실행.
+
+    두 사실이 같은 값을 쓴다. 제약 행이 적용되는 시점(`_constraints.py`, runtime schema
+    `x-applied-stage`)과, 그래프 표현(파이프라인)이 필드를 보이는 단계(field metadata
+    `stage`, runtime schema `x-stage`, P4-01)다. 필드는 적용되는 곳에 보인다: 자기
+    `x-stage`, 없으면 자기 `x-applied-stage`, 없으면 가장 가까운 조상의 `x-stage` 다.
+    `DATA`·`EXECUTION` 은 실행 설정(`domain/backtest`)이 자기 제약 행에 붙이는 단계이고,
+    전략 문서에는 1.2 부터 해당 행이 없다.
+    """
+
     DATA = "data"
     ELIGIBILITY = "eligibility"
     SIGNAL = "signal"
@@ -161,7 +170,11 @@ class PortfolioStep:
     rebalance_every_n_sessions: int = 21
     turnover_buffer_count: int = 0
     minimum_trade_weight: float = 0.0
-    liquidity_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
+    # 유동성 필터는 후보를 거를 때 적용돼 그래프 표현의 1단계 유니버스에 보인다(P4-01 리드 결정).
+    # `minimum_liquidity` 는 제약 행의 적용 시점이 같은 단계를 말한다.
+    liquidity_field_id: str | None = field(
+        default=None, metadata={**CATALOG_EQUITY_FIELD, "stage": AppliedStage.ELIGIBILITY}
+    )
     minimum_liquidity: float | None = None
 
 
@@ -172,11 +185,16 @@ class RiskStep:
     max_name_weight: float = 0.1
     max_sector_weight: float = 0.3
     sector_neutral: bool = False
-    risk_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
+    # 역가중 원천(필드·팩터)은 비중을 줄 때 쓰여 그래프 표현의 3단계 비중 카드가 편집한다(P4-01).
+    risk_field_id: str | None = field(
+        default=None, metadata={**CATALOG_EQUITY_FIELD, "stage": AppliedStage.PORTFOLIO}
+    )
     # 역가중 원천을 데이터 필드 대신 문서의 팩터 출력으로 쓴다(schema 1.2, spec D3 S6).
     # `weighting: risk` 에서만 읽히고, 그때 참조 팩터는 합성 점수에서 빠진다
     # (`inverse_risk_factor_id`). `risk_field_id` 와 함께 쓰면 검증 error 다.
-    risk_factor_id: str | None = field(default=None, metadata=REFERENCE_FACTOR)
+    risk_factor_id: str | None = field(
+        default=None, metadata={**REFERENCE_FACTOR, "stage": AppliedStage.PORTFOLIO}
+    )
 
 
 ParameterValue: TypeAlias = float | int | str | bool
@@ -306,14 +324,22 @@ class StrategySpec:
     identity: StrategyIdentity
     title: str
     description: str = ""
-    eligibility: EligibilityStep = EligibilityStep()
+    # 섹션마다 그래프 표현(파이프라인)의 단계가 있고(`x-stage`, P4-01), 섹션 안 필드는 섹션을
+    # 따른다. 문서 머리와 탐색 파라미터는 단계가 없다.
+    eligibility: EligibilityStep = field(
+        default=EligibilityStep(), metadata={"stage": AppliedStage.ELIGIBILITY}
+    )
     # 생략해도 빈 배열이어도 구조 오류가 아니다(spec D3). 두 경우 모두 semantic
     # `strategy.factor.required`가 나서, 새 전략이 "구조 오류"가 아니라 "팩터를 추가하세요"로
     # 시작한다 — 실행 설정이 빠진 1.2 최상위 필수 키는 `schema_version`·`title` 둘뿐이다.
-    factors: tuple[FactorSignal, ...] = field(default=(), metadata=DEFINES_FACTOR)
-    signal: SignalStep = SignalStep()
-    portfolio: PortfolioStep = PortfolioStep()
-    risk: RiskStep = RiskStep()
+    factors: tuple[FactorSignal, ...] = field(
+        default=(), metadata={**DEFINES_FACTOR, "stage": AppliedStage.SIGNAL}
+    )
+    signal: SignalStep = field(default=SignalStep(), metadata={"stage": AppliedStage.SIGNAL})
+    portfolio: PortfolioStep = field(
+        default=PortfolioStep(), metadata={"stage": AppliedStage.PORTFOLIO}
+    )
+    risk: RiskStep = field(default=RiskStep(), metadata={"stage": AppliedStage.RISK})
     parameters: tuple[ParameterDefinition, ...] = field(default=(), metadata=DEFINES_PARAMETER)
 
 

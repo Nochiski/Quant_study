@@ -1,4 +1,4 @@
-"""병합 충돌 표식이 커밋되지 않았는지 저장소 전체에서 검사한다.
+"""병합 충돌 표식이 커밋되지 않았는지 git 이 추적하는 파일 전체에서 검사한다.
 
 P1-02 rebase에서 `.claude/rules/strategy-workbench-sot.md`의 충돌 표식이 해소되지 않은 채
 커밋되어 SoT 대장 5행이 두 벌로 남은 사고(Phase 1 감사 BLOCKING)의 재발 방지 게이트다.
@@ -9,72 +9,32 @@ P1-02 rebase에서 `.claude/rules/strategy-workbench-sot.md`의 충돌 표식이
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 
-# git이 쓰는 표식 세 종류. 뒤에 공백이 오거나 줄이 끝나야 한다 — `=======`만 쓰는 구분선이나
-# Markdown setext 밑줄과 달리 표식은 정확히 7자다.
+# git 이 쓰는 표식 세 종류. 표식 뒤에는 공백이 오거나 줄이 끝난다. 7자가 아닌 밑줄·구분선은 잡지
+# 않는다. 정확히 7자인 단독 줄(Markdown setext 밑줄 포함)은 git 도 충돌 표식으로 본다.
 MARKER = re.compile(r"^(<<<<<<<|=======|>>>>>>>)( |$)")
 
-# 생성물·의존성·작업 산출물. 저장소가 소유하지 않는 파일에서 표식을 찾을 이유가 없다.
-SKIP_DIRECTORIES = frozenset(
-    {
-        ".git",
-        ".venv",
-        ".mypy_cache",
-        ".pytest_cache",
-        ".ruff_cache",
-        "__pycache__",
-        "node_modules",
-        "dist",
-        "build",
-        "target",
-        "coverage",
-        "playwright-report",
-        "test-results",
-    }
-)
-
-BINARY_SUFFIXES = frozenset(
-    {
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".ico",
-        ".webp",
-        ".pdf",
-        ".zip",
-        ".gz",
-        ".woff",
-        ".woff2",
-        ".ttf",
-        ".otf",
-        ".duckdb",
-        ".parquet",
-        ".sqlite",
-        ".so",
-        ".dll",
-        ".pyd",
-        ".exe",
-        ".lock",
-    }
-)
+# 바이너리 판정은 git 과 같다 — BOM 없는 파일의 앞 8000바이트에 NUL 이 있으면 바이너리다.
+BINARY_SNIFF_BYTES = 8000
+UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
 
 Finding = tuple[Path, int, str]
 
 
-def iter_candidate_files(root: Path) -> Iterator[Path]:
-    """검사 대상 파일. 생성물 디렉터리와 알려진 바이너리 확장자는 건너뛴다."""
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        if any(part in SKIP_DIRECTORIES for part in path.relative_to(root).parts):
-            continue
-        if path.suffix.lower() in BINARY_SUFFIXES:
-            continue
-        yield path
+def tracked_files(root: Path) -> list[Path]:
+    """`root` 아래에서 git 이 추적하는 파일. 비추적 `.orig`·`.rej`·빌드 산출물은 보지 않는다."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=False
+    )
+    if listed.returncode != 0:
+        raise RuntimeError(
+            f"git ls-files failed — root={root} returncode={listed.returncode} "
+            f"stderr={listed.stderr.decode(errors='replace').strip()}"
+        )
+    return [root / name for name in listed.stdout.decode("utf-8").split("\0") if name]
 
 
 def scan_text(text: str) -> list[tuple[int, str]]:
@@ -87,24 +47,26 @@ def scan_text(text: str) -> list[tuple[int, str]]:
 
 
 def scan_file(path: Path) -> list[tuple[int, str]]:
-    """파일 하나를 검사한다. 디코딩되지 않으면 바이너리로 보고 건너뛴다."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
+    """파일 하나를 검사한다. BOM 이 있으면 UTF-16, 아니면 UTF-8 로 읽는다.
+
+    깨진 바이트는 대체 문자로 두므로 cp949 같은 비 UTF-8 텍스트에서도 ASCII 표식은 그대로 잡힌다.
+    """
+    data = path.read_bytes()
+    if data.startswith(UTF16_BOMS):
+        return scan_text(data.decode("utf-16", errors="replace"))
+    if b"\0" in data[:BINARY_SNIFF_BYTES]:
         return []
-    if "\x00" in text:
-        return []
-    return scan_text(text)
+    return scan_text(data.decode("utf-8-sig", errors="replace"))
 
 
 def find_conflict_markers(root: Path) -> list[Finding]:
-    """`root` 아래 전체에서 표식을 찾는다."""
-    findings: list[Finding] = []
-    for path in iter_candidate_files(root):
-        findings.extend(
-            (path, number, line) for number, line in scan_file(path)
-        )
-    return findings
+    """`root` 아래 추적 파일에서 표식을 찾는다. 작업 트리에서 지운 추적 파일은 건너뛴다."""
+    return [
+        (path, number, line)
+        for path in tracked_files(root)
+        if path.is_file()
+        for number, line in scan_file(path)
+    ]
 
 
 def repo_root(start: Path | None = None) -> Path:

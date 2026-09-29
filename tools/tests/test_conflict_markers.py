@@ -2,13 +2,15 @@
 
 표식이 있는 파일을 실제로 만들어 검출되는지, 표식을 닮은 정상 문서(Markdown setext 밑줄,
 구분선)를 오검출하지 않는지 본다. 이 파일 자신이 검출되지 않도록 표식 문자열은 모두
-런타임에 조립한다.
+런타임에 조립한다. 게이트는 git 이 추적하는 파일만 보므로 파일 단위 테스트는 임시 git 저장소의
+index 에 파일을 올려 쓴다(커밋은 필요 없다).
 """
 
 from __future__ import annotations
 
 import contextlib
 import io
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +24,33 @@ from quant_study_dev.conflict_markers import (
 OPEN_MARKER = "<" * 7
 SPLIT_MARKER = "=" * 7
 CLOSE_MARKER = ">" * 7
+CONFLICT = (
+    f"| 행 |\n{OPEN_MARKER} HEAD\n| A |\n{SPLIT_MARKER}\n| B |\n{CLOSE_MARKER} x\n"
+)
+
+
+def make_repo(
+    root: Path, tracked: dict[str, bytes], untracked: dict[str, bytes]
+) -> None:
+    """`root` 를 git 저장소로 만들고 `tracked` 만 index 에 올린다.
+
+    전역 ignore 설정이 `build/`·`*.lock` 등을 가려도 올라가게 `-f` 로 더한다.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
+    for name, data in {**tracked, **untracked}.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(data)
+    subprocess.run(
+        ["git", "add", "-f", "--", *tracked], cwd=root, check=True, capture_output=True
+    )
+
+
+def reported(root: Path) -> dict[str, list[int]]:
+    """게이트가 찾은 표식 줄 번호를 파일별로."""
+    found: dict[str, list[int]] = {}
+    for path, number, _ in find_conflict_markers(root):
+        found.setdefault(path.relative_to(root).as_posix(), []).append(number)
+    return found
 
 
 class ScanTextTests(unittest.TestCase):
@@ -49,47 +78,75 @@ class ScanTextTests(unittest.TestCase):
         self.assertEqual(scan_text(text), [])
 
     def test_flags_a_bare_seven_character_split_marker(self) -> None:
-        self.assertEqual([number for number, _ in scan_text(f"a\n{SPLIT_MARKER}\nb")], [2])
+        self.assertEqual(
+            [number for number, _ in scan_text(f"a\n{SPLIT_MARKER}\nb")], [2]
+        )
 
 
 class FindConflictMarkersTests(unittest.TestCase):
-    def test_reports_path_and_skips_generated_directories_and_binaries(self) -> None:
+    def test_finds_markers_in_every_tracked_text_file_whatever_its_encoding_or_folder(
+        self,
+    ) -> None:
+        # BACKLOG-008 의 놓침 5건 — cp949·UTF-16(BOM) 텍스트, `.lock`, 소스 트리 안 `build/`·`dist/`
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
-            (root / "rules").mkdir()
-            (root / "rules" / "sot.md").write_text(
-                f"| 행 |\n{OPEN_MARKER} HEAD\n| A |\n{SPLIT_MARKER}\n| B |\n{CLOSE_MARKER} x\n",
-                encoding="utf-8",
+            make_repo(
+                root,
+                tracked={
+                    "rules/sot.md": CONFLICT.encode(),
+                    "notes/cp949.txt": ("제목\n" + CONFLICT).encode("cp949"),
+                    "notes/utf16.txt": ("제목\n" + CONFLICT).encode("utf-16"),
+                    "reference/uv.lock": CONFLICT.encode(),
+                    "src/build/out.js": CONFLICT.encode(),
+                    "src/dist/app.js": CONFLICT.encode(),
+                },
+                untracked={},
             )
-            (root / "node_modules").mkdir()
-            (root / "node_modules" / "pkg.js").write_text(
-                f"{OPEN_MARKER} HEAD\n", encoding="utf-8"
-            )
-            (root / "shot.png").write_bytes(f"{OPEN_MARKER} HEAD\n".encode())
-            (root / "clean.md").write_text("제목\n" + "=" * 4 + "\n", encoding="utf-8")
-
-            findings = find_conflict_markers(root)
 
             self.assertEqual(
-                sorted({path.relative_to(root).as_posix() for path, _, _ in findings}),
-                ["rules/sot.md"],
+                reported(root),
+                {
+                    "rules/sot.md": [2, 4, 6],
+                    "notes/cp949.txt": [3, 5, 7],
+                    "notes/utf16.txt": [3, 5, 7],
+                    "reference/uv.lock": [2, 4, 6],
+                    "src/build/out.js": [2, 4, 6],
+                    "src/dist/app.js": [2, 4, 6],
+                },
             )
-            self.assertEqual([number for _, number, _ in findings], [2, 4, 6])
 
-    def test_clean_tree_reports_nothing(self) -> None:
+    def test_ignores_untracked_files_binaries_and_tracked_files_deleted_from_the_tree(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
-            (root / "a.md").write_text("본문\n", encoding="utf-8")
-            self.assertEqual(find_conflict_markers(root), [])
+            make_repo(
+                root,
+                tracked={
+                    "shot.png": b"\x89PNG\r\n\x1a\n\x00\x00\n" + CONFLICT.encode(),
+                    "clean.md": ("제목\n" + "=" * 4 + "\n").encode(),
+                    "gone.md": CONFLICT.encode(),
+                },
+                untracked={
+                    "rules/sot.md.orig": CONFLICT.encode(),
+                    "rules/sot.md.rej": CONFLICT.encode(),
+                    "node_modules/pkg.js": CONFLICT.encode(),
+                },
+            )
+            (root / "gone.md").unlink()
+
+            self.assertEqual(reported(root), {})
 
 
 class MainTests(unittest.TestCase):
     def test_exit_code_signals_whether_markers_were_found(self) -> None:
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
-            (root / "a.md").write_text("본문\n", encoding="utf-8")
+            make_repo(root, tracked={"a.md": "본문\n".encode()}, untracked={})
             self.assertEqual(self._run(root), 0)
-            (root / "b.md").write_text(f"{OPEN_MARKER} HEAD\n", encoding="utf-8")
+            make_repo(
+                root, tracked={"b.md": f"{OPEN_MARKER} HEAD\n".encode()}, untracked={}
+            )
             self.assertEqual(self._run(root), 1)
 
     @staticmethod

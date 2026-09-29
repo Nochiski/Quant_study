@@ -270,3 +270,21 @@ GT-F(2) 의 "2024 이전 행 불변" 은 `filed_date`·`target_raw` 기준이다
 주의: stage 규칙 버전 인상 → 배포 뒤 **첫 판에서 stage health C4 가 전 표를 `rules_changed` 로 비교 생략**(두 번째 판부터 복귀). equity EG5a 는 매일 `skip(inputs_changed)` 이므로 값 불변 확인은 T-G diff 로 한다.
 
 **09-29 실행 순서**(`logs/tuesday_runbook.sh <step>`): `gb3` → `shadow5` → 배포(`deploy.sh --apply --allow-branch feat/v3-merge`) → `stage_fin`(T-E) → `tf`(T-F 재파싱·문서층 4표) → `fin_std`(T-E·T-H 재빌드 + diff 게이트 + 2회 빌드 결정성) → `s11`(T-F, disclosure_version 재빌드 + diff) → `report`. 그 뒤 M1 종결 판정 → M2 W0 착수.
+
+---
+
+## 12. 09-29(화) 서버 실행 결과 — 배포 rev 593c6e9c (스테이지 2.4.0 · equity e1.21.0 · 파서 p1.5)
+
+| 단계 | 결과 | 게이트 |
+|---|---|---|
+| 아침 확정 빌드(09-28) | 09:25 완료. 원장 건전성 26/26(WISE 항등식 source=call_log 19,261 일치), 스테이지 6/6 | **GB3 PASS** |
+| 5일째 그림자(09-28) | composite 0.992 · 상위50 48 · momentum 0.997 · revision 0.987 · flow 0.995 · quality 0.985 · valuation 0.987 · v2 0.980 | G-M2 5/5 → **M1 완료** |
+| 배포 | 테스트 1,447 통과, 바뀐 파일 12(src 8·scripts 4) | — |
+| T-E `stg_fin` 재빌드(m_20260929T003116) | 15,387,792행 · 격리 0 · 규칙 2.4.0 · `account_nm_norm` 전 행 채움 · 고유명 72,489 → 55,490 · 21분 | PASS |
+| T-F 재파싱(17,628건, p1.5) + 문서층 4표 | 캐시 ok(D0 0). 최초제출일 파싱 2023 99.6% · 2024 99.5% · **2025 99.8% · 2026 99.9%**(종전 3.4% · 0.9%). 2025 이전 행: 채움만(최초제출일 96 · 정정대상 134 · 정정사유 13,139), 소실 0, **정정대상 값 변경 4**(아래) | **GT-F(2) PASS** |
+| T-E·T-H `fin_std` 재빌드(m_20260929T012907) | diff 게이트 rc 0: 변경은 basis 라벨 재명명 1,419건뿐(revenue_basis 717 · revenue_basis_prev 464 · capex_basis 238, 전부 설명됨), 숫자 컬럼 변경 0, 행 증감 0. 2회 빌드 해시 동일. EG8 첫 판 = 기록만 | **GT-G · GT-H PASS** |
+| T-F `disclosure_version` 재빌드(b_20260929T013042) | diff 게이트 rc 0: 최초제출일 NULL→값 2,319 · date_check unparsed→판정 2,319 · 정정사유 NULL→값 15,369. 정확 일치(ZIP 있는 정정 대비) 2025 44 → 1,251(96.9%) · 2026 8 → 954(96.6%), 2024 96.5% 와 같은 수준. candidate_status 불변(unique 23,124 · none 94). 최근 90일 파싱률 363/364 = 99.7% | **GT-F(3) PASS** |
+
+**작은 부작용 1건(후속, T-I 와 함께)**: 콜론이 다음 줄로 떨어진 옛 서식 4건(2013~2016)의 `target_raw` 가 `: 분기보고서` 처럼 콜론을 달고 나온다. `target_raw` 는 equity·모델 어디서도 안 쓴다(`disclosure_version.sql:14` 는 report_nm 을 쓴다). 수정 = `_next_value_line` 결과의 앞 콜론 제거 + 그 4건 `--repair`.
+
+**운영 메모**: ① 확인 스크립트가 판을 이름순으로 고르면 `b_`(수동) < `m_`(아침) 이라 옛 판을 읽는다 — MANIFEST `current_build` 로 골라야 한다(오늘 1회 오판독, 재확인으로 정정). ② 오늘 저녁 빌드가 스테이지 2.4.0 첫 정규 판이라 C4 는 `rules_changed` 로 한 번 비교를 건너뛴다(예정된 비용). EG8_fin_std 는 오늘 판에 기록이 생겼으므로 저녁 판부터 판정한다.

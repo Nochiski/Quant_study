@@ -42,6 +42,8 @@ import {
   save,
   saveAndWaitForRevision,
   strategyIdentity,
+  upgradeBanner,
+  upgradeFromBanner,
   validate,
 } from "./workbench-helpers";
 
@@ -1386,12 +1388,8 @@ test.describe("professional YAML workflow", () => {
   }) => {
     const frozen = seedFrozenRevisionRows();
     const nextRevision = 2;
-    // 배너 문구는 버전 중립이다(P3-02) — 어느 버전이 은퇴했는지는 backend 가 판정하고, 결과는 현재
-    // 버전(1.0 → 1.1 → 1.2)이다.
-    const banner = page.getByRole("region", { name: "이전 schema 문서" });
-    const upgrade = banner.getByRole("button", {
-      name: "현재 버전으로 업그레이드",
-    });
+    // 결과는 현재 버전(1.0 → 1.1 → 1.2)이다.
+    const banner = upgradeBanner(page);
     // 업그레이드는 의미를 바꾸지 않는다: 1.0 동결 문서(`quality_momentum.v1_0.yaml`)의 현재 버전
     // 의미는 golden fixture에 1.1 합성 방식(원시값 가중 합)을 명시한 문서와 같다. 동결 문서의
     // 모멘텀은 원주가를 읽고 업그레이드는 필드를 바꾸지 않으므로, 수정주가로 옮긴 골든의 잎을
@@ -1428,20 +1426,8 @@ test.describe("professional YAML workflow", () => {
       "이 문서는 지원이 끝난 schema 버전입니다",
     );
     await expect(backtest(page)).toBeDisabled();
-    await expect(upgrade).toBeEnabled();
 
-    const upgraded = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        new URL(response.url()).pathname ===
-          "/api/v1/strategy-documents/upgrade",
-    );
-    await upgrade.click();
-    const upgradedResponse = await upgraded;
-    expect(upgradedResponse.status()).toBe(200);
-    const oldEnvironment = (
-      (await upgradedResponse.json()) as { environment: unknown }
-    ).environment;
+    const { environment: oldEnvironment } = await upgradeFromBanner(page);
     expect(oldEnvironment).not.toBeNull();
     await expect(banner).toContainText("현재 버전으로 다시 썼습니다");
     // 옛 문서의 실행 설정(`data`·`execution`)은 문서를 떠나 응답으로 왔다. 사용자가 누를 때만
@@ -1488,9 +1474,7 @@ test.describe("professional YAML workflow", () => {
         expected_spec_hash: savedV2.spec_hash,
       },
       // 업그레이드 응답의 실행 설정이 그대로 실행 요청에 실린다(US-SM-07).
-      environment: requestedEnvironment(
-        oldEnvironment as Record<string, unknown>,
-      ),
+      environment: requestedEnvironment(oldEnvironment!),
     });
     await expect(page).toHaveURL(/\/research\/backtests\/[^/?]+$/u);
     await expect(page.getByRole("status", { name: "실행 상태" })).toContainText(
@@ -1501,7 +1485,9 @@ test.describe("professional YAML workflow", () => {
     // legacy JSON 동결 row: generated source가 이미 현재 버전이므로 업그레이드 대신 새 revision 저장만 제안한다.
     await openEditor(page, `/research/strategies/${frozen.legacy}/revisions/1`);
     await expect(banner).toContainText("이전 schema로 동결된 revision입니다");
-    await expect(upgrade).toHaveCount(0);
+    await expect(
+      banner.getByRole("button", { name: "현재 버전으로 업그레이드" }),
+    ).toHaveCount(0);
     await expectPhase(page, "검증 통과");
 
     await page.goto("/research/strategies");

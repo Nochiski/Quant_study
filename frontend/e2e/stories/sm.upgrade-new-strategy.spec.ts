@@ -7,15 +7,12 @@
  * 뜨고, 업그레이드 응답의 실행 설정을 사용자가 채운 뒤 저장과 백테스트까지 가는지를 본다. 변환 규칙과
  * 현재 버전 문자열은 backend 소유라 응답 값과 비교하고 frontend에 적지 않는다.
  */
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  getStrategyDocument,
-  type UpgradedDocument,
-} from "../../src/shared/api/generated";
+import { getStrategyDocument } from "../../src/shared/api/generated";
 import {
   apiClient,
   backtest,
@@ -28,6 +25,8 @@ import {
   save,
   saveAndWaitForRevision,
   strategyIdentity,
+  upgradeBanner,
+  upgradeFromBanner,
 } from "../workbench-helpers";
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
@@ -42,26 +41,6 @@ const retiredFixture = (name: string): string =>
     ),
     "utf8",
   ).replace(/\r\n?/gu, "\n");
-
-const upgradeBanner = (page: Page) =>
-  page.getByRole("region", { name: "이전 schema 문서" });
-
-/** 배너의 업그레이드 버튼을 눌러 backend 응답을 돌려준다. */
-const upgradeFromBanner = async (page: Page): Promise<UpgradedDocument> => {
-  const upgrade = upgradeBanner(page).getByRole("button", {
-    name: "현재 버전으로 업그레이드",
-  });
-  await expect(upgrade).toBeEnabled();
-  const upgraded = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      new URL(response.url()).pathname === "/api/v1/strategy-documents/upgrade",
-  );
-  await upgrade.click();
-  const response = await upgraded;
-  expect(response.status()).toBe(200);
-  return (await response.json()) as UpgradedDocument;
-};
 
 test(
   "US-SM-07 새 전략 화면에 옛 schema YAML을 붙여 넣으면 배너로 올리고 실행 설정을 채워 저장·백테스트한다",

@@ -1,7 +1,7 @@
 /**
  * Playwright spec 들이 함께 쓰는 워크벤치 헬퍼 — 저장·백테스트 로케이터, revision URL 해석, 실행 설정
- * 채우기. 편집기 로케이터·원문 읽기·바꾸기·문서 검증 대기는 매뉴얼 촬영 스크립트도 쓰므로
- * `editor-helpers.ts`에 두고 여기서 다시 내보낸다. `workbench.workflow.spec.ts`(CI 가 도는 릴리스 게이트)와
+ * 채우기, 은퇴 버전 업그레이드 배너. 편집기 로케이터·원문 읽기·바꾸기·문서 검증 대기는 매뉴얼 촬영
+ * 스크립트도 쓰므로 `editor-helpers.ts`에 두고 여기서 다시 내보낸다. `workbench.workflow.spec.ts`(CI 가 도는 릴리스 게이트)와
  * `workbench.real-equity.spec.ts`(opt-in 실데이터)가 같은 접근성 이름·API path 를 보도록 한 곳에 둔다.
  * 접근성 이름이 바뀌면 CI 의 workflow spec 이 먼저 깨지고, 여기서 고치면 real-equity 도 함께 따라온다.
  */
@@ -10,7 +10,10 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { RunEnvironment } from "../src/shared/api/generated";
+import type {
+  RunEnvironment,
+  UpgradedDocument,
+} from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
 import { editor, expectPhase, waitForSettledDocument } from "./editor-helpers";
 import { backendOrigin } from "./ports.mjs";
@@ -108,6 +111,29 @@ export const saveAndWaitForRevision = async (page: Page, revision: number) => {
     ),
   );
   await expectPhase(page, "저장됨");
+};
+
+/** 은퇴 버전 문서의 안내 배너. 문구는 버전 중립이다 — 어느 버전이 은퇴했는지는 backend 가 판정한다. */
+export const upgradeBanner = (page: Page) =>
+  page.getByRole("region", { name: "이전 schema 문서" });
+
+/** 배너의 업그레이드 버튼을 눌러 backend 응답을 돌려준다. */
+export const upgradeFromBanner = async (
+  page: Page,
+): Promise<UpgradedDocument> => {
+  const upgrade = upgradeBanner(page).getByRole("button", {
+    name: "현재 버전으로 업그레이드",
+  });
+  await expect(upgrade).toBeEnabled();
+  const upgraded = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/strategy-documents/upgrade",
+  );
+  await upgrade.click();
+  const response = await upgraded;
+  expect(response.status()).toBe(200);
+  return (await response.json()) as UpgradedDocument;
 };
 
 /**

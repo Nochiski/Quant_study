@@ -115,12 +115,8 @@ const EnvironmentInput = ({
             onIncompleteChange(isIncompleteDate(event), false);
             onChange(event.target.value);
           }}
-          onKeyUp={(event) =>
-            onIncompleteChange(isIncompleteDate(event), true)
-          }
-          onBlur={(event) =>
-            onIncompleteChange(isIncompleteDate(event), false)
-          }
+          onKeyUp={(event) => onIncompleteChange(isIncompleteDate(event), true)}
+          onBlur={(event) => onIncompleteChange(isIncompleteDate(event), false)}
         />
       )}
       {description === null ? null : (

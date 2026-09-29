@@ -27,9 +27,8 @@ const failureText = (status: Extract<UpgradeStatus, { kind: "failed" }>) => {
   if (status.reason === "editor-unavailable") return t("upgrade.error.editor");
   if (status.reason === "composing") return t("upgrade.error.composing");
   return (
-    (status.code === null
-      ? null
-      : tOptional(`upgrade.error.${status.code}`)) ?? t("upgrade.error.request")
+    (status.code === null ? null : tOptional(`upgrade.error.${status.code}`)) ??
+    t("upgrade.error.request")
   );
 };
 

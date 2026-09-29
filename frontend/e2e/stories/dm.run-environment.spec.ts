@@ -21,6 +21,7 @@ import {
   replaceSource,
   requireData,
   RUN_ENVIRONMENT,
+  runSettingsInputs,
   saveAndWaitForRevision,
   strategyIdentity,
 } from "../workbench-helpers";
@@ -65,8 +66,7 @@ test(
     await expectPhase(page, "검증 통과");
     const summary = page.getByRole("region", { name: "실행 설정 요약" });
     await summary.getByRole("button", { name: "실행 설정 채우기" }).click();
-    const start = page.getByLabel("시작일", { exact: true });
-    const end = page.getByLabel("종료일", { exact: true });
+    const { start, end, universe } = runSettingsInputs(page);
     // OOS 칸의 라벨은 칸 아래 안내 문장까지 감싸, 접근 가능한 이름이 안내로 이어진다.
     const oos = page.getByLabel(/^OOS 시작일/u);
     await expect(start).toBeFocused();
@@ -101,10 +101,6 @@ test(
     await expect(end).toHaveValue("2026-08-31");
     await expect(page.getByText(incomplete)).toHaveCount(0);
 
-    const universe = page.getByRole("textbox", {
-      name: "유니버스",
-      exact: true,
-    });
     await universe.fill(RUN_ENVIRONMENT.universe_id);
     await expect(summary).toContainText("2021-01-01");
     await expect(summary).toContainText("2026-08-31");
@@ -187,7 +183,7 @@ test(
     await expect(backtest(page)).toBeDisabled();
 
     // 실행 설정: 나머지 칸은 서버(실행 설정 스키마)가 준 기본값으로 채워져 있다.
-    const toggle = page.getByLabel("실행 설정 열기");
+    const { toggle, start, fee } = runSettingsInputs(page);
     await toggle.click();
     await expect(page.getByRole("combobox", { name: "시장" })).toHaveValue(
       "KRX",
@@ -195,9 +191,7 @@ test(
     await expect(page.getByRole("combobox", { name: "체결 시점" })).toHaveValue(
       "next_open",
     );
-    await expect(
-      page.getByRole("spinbutton", { name: "수수료 (bp)" }),
-    ).toHaveValue("15");
+    await expect(fee).toHaveValue("15");
     await expect(
       page.getByRole("spinbutton", { name: "슬리피지 (bp)" }),
     ).toHaveValue("10");
@@ -208,7 +202,7 @@ test(
     await expect(page.getByRole("combobox", { name: "결측 처리" })).toHaveValue(
       "drop",
     );
-    await expect(page.getByLabel("시작일", { exact: true })).toHaveValue("");
+    await expect(start).toHaveValue("");
     await toggle.click();
 
     await fillRunEnvironment(page);
@@ -217,7 +211,6 @@ test(
     // 기간·유니버스를 정한 뒤 다른 칸이 틀리면 띠가 그 칸 이름과 이유를 말하고, 버튼이 그 칸으로
     // 초점을 옮긴다(DEFECT-242-01).
     await toggle.click();
-    const fee = page.getByRole("spinbutton", { name: "수수료 (bp)" });
     await fee.fill("-1");
     await toggle.click();
     await expect(summary).toContainText(
@@ -249,7 +242,7 @@ test(
     await openEditor(page, strategyUrl);
     await expect(summary).toContainText(RUN_ENVIRONMENT.universe_id);
     await toggle.click();
-    await page.getByLabel("시작일", { exact: true }).fill(LATER_START);
+    await start.fill(LATER_START);
     await toggle.click();
     await expect(summary).toContainText(LATER_START);
     await expectPhase(page, "저장됨");

@@ -1,16 +1,16 @@
 ---
 plan_version: 2
 project: strategy-language-2-0
-project_status: READY
+project_status: APPROVED
 current_phase: P3
 current_pr: P3-03
-active_prs: []
+active_prs: [P3-03]
 parallel_window: []
-last_updated: 2026-09-28T12:22:43+09:00
+last_updated: 2026-09-30T04:32:03+09:00
 planned_prs: 30
 merged_prs: 19
 integrated_prs: 0
-approved_prs: 19
+approved_prs: 20
 progress_percent: 63
 ---
 
@@ -24,13 +24,13 @@ progress_percent: 63
 <!-- PLAN:SUMMARY:START -->
 | Field | Value |
 |---|---|
-| Project status | `READY` |
+| Project status | `APPROVED` |
 | Current phase | `P3` |
 | Current/next PR | `P3-03` |
-| Active PR | none |
+| Active PR | `P3-03` |
 | Progress | `19 / 30 done (63%), main 19, integration 0` |
-| Approved | `19 / 30` |
-| Aggregated at | `2026-09-28 12:22 KST` |
+| Approved | `20 / 30` |
+| Aggregated at | `2026-09-30 04:32 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -125,7 +125,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | P0 | Planning package and contract docs | 1 | 1 | 0 | `MERGED` |
 | P1 | In-screen friction removal on 1.1 | 6 | 6 | 0 | `MERGED` |
 | P2 | Backend schema 1.2 (environment split, 10 PRs) | 10 | 10 | 0 | `MERGED` |
-| P3 | Frontend 1.2 adaptation | 3 | 2 | 0 | `READY` |
+| P3 | Frontend 1.2 adaptation | 3 | 2 | 0 | `APPROVED` |
 | P4 | Graph level 1: pipeline | 4 | 0 | 0 | `WAITING` |
 | P5 | Graph level 2: recipe | 3 | 0 | 0 | `WAITING` |
 | P6 | Graph level 3: node canvas | 3 | 0 | 0 | `WAITING` |
@@ -134,7 +134,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 
 ## 현재 작업 Packet
 
-다음 PR 은 `P3-03`(`READY`, 열린 PR 없음, 2026-09-28 기준)이다. 아래 P1-05 이하 절은 지난 PR 의 패킷 기록이다.
+현재 PR 은 `P3-03`(`APPROVED`, [#320](https://github.com/Nochiski/Quant_study/pull/320), 2026-09-30 착수, 리뷰 r1 APPROVE 뒤 P3 6건 반영)이다. 아래 P1-05 이하 절은 지난 PR 의 패킷 기록이다.
 
 | 항목 | 값 |
 |---|---|
@@ -142,8 +142,9 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Intent | e2e 를 schema 1.2 문서로 옮기고 CI 전체 job 을 green 으로 만들어 Phase 3 을 닫는다 |
 | Acceptance | WORKFLOW P3-03 중 P3-03 담당 항목: e2e fixture 1.2·"1.1 revision 열기 → 업그레이드 → 실행 설정 채워짐 → 저장 → 백테스트" 시나리오, BACKLOG-008, BACKLOG-009, CI 전체 green |
 | Non-goals | 범위 조정(변경 기록 2026-09-28)으로 넘긴 항목 — README·frontend README·`backend/FACTORS.md`·spec D6·D7·SoT 단위 문장(문서 갱신 PR A), 매뉴얼 1.2·BACKLOG-002(매뉴얼 PR), 골든 `adj_close` 이관·우회 필터 제거(선행 코드 PR `impl-prep`) |
-| Branch/worktree | 착수 시 정한다 |
-| Base SHA | 착수 시점 main(통합 브랜치는 은퇴·삭제됨, 현재 결정 2026-09-28 규칙 2) |
+| Branch/worktree | `feat/lang2-p3-03-e2e-1-2` / `wt-run-concurrency`(재사용) |
+| Base SHA | `2ef86159`(2026-09-30 #290·#331·#338 머지 뒤 main 으로 다시 rebase. 앞 base 는 `1d9fc43d`(선행 #297·#322·#323 머지 뒤), 착수 시점 main 은 `f01a9cbd`. 통합 브랜치는 은퇴·삭제됨, 현재 결정 2026-09-28 규칙 2) |
+| Steps | 겹침 때문에 순서를 정했다(리드 지시 2026-09-30). SHA 는 main `2ef86159` 위 값이고, 앞 rebase 의 SHA 는 변경 기록에 있다. ① BACKLOG-008: 놓침 5건(cp949·UTF-16·`.lock`·`build/`·`dist/`) 실패 테스트 → `git ls-files` 열거·NUL 바이너리 판정 → tools 테스트·게이트(`0521d580`). ② BACKLOG-009: US-DM-03 적용 흐름에 툴바 실행 취소·다시 실행 단언과 `@US-DM-09` → 대상 e2e(`a9f2043b`). ③ 업그레이드 배너 helper 를 두 업그레이드 spec 이 함께 쓰게 옮김(`86910ede`) → 동결 revision 시나리오(US-SM-07)가 1.0 row 와 함께 원문 있는 1.1 row 를 CLI 로 심고 두 revision 에 같은 단계(열기 → 업그레이드 → 채우기 → 패널의 시작일·종료일·유니버스·수수료 단언 → 저장 → 백테스트 요청 `environment` 단언)를 밟음. 수수료는 옛 문서 값이 기본값과 같아 채우기 전에 칸을 바꿔 둔다(`1ef3b646`) → e2e 골든 주석 "(schema 1.1)"·추적 provenance 의 `"1.2"` 리터럴 정리(`a797a600`) → 전체 게이트. ④ 리뷰 r1(APPROVE, P3 6건) 반영: 게이트 판정 넷 테스트 고정(`f265c5d5`, P3-1), LF 로만 줄 나누기·`--deduplicate`(`05f9d90e`, P3-2·P3-3), 실행 설정 칸·업그레이드 버튼 로케이터를 helper 한 곳에(`419ea024`, P3-5), 두 번째 반복도 빈 칸에서 시작(`606a09ad`, P3-4), BACKLOG 닫힘 기록(이 문서 커밋, P3-6) |
 | Full gate | CI 전체 job green(현재 결정 2026-09-28 규칙 3) |
 
 ### P1-05
@@ -1000,7 +1001,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P3-01` | SDK 1.2, pointer 헬퍼·outline·snippet·Form projection·plan·debugger 적응, 새 필드 i18n | P2-09, P1-06 | `MERGED` | [#232](https://github.com/Nochiski/Quant_study/pull/232) · `review_p3_01` 1차 조건부 APPROVE(`2fde473e`) → 2차 APPROVE(`6e5e71da`, 재리뷰 P2 2·P3 1 반영 `08451303`) · 통합 머지 `c4d0f481`(#232, `lang2/integration`, 2026-09-27) · main 머지 `a4be517a`(#202, 2026-09-28) |
 | [x] | `P3-02` | 실행 설정 패널 확장, 1.1 업그레이드 배너(`environment` prefill), 실행 설정 띠 | P3-01 | `MERGED` | [#242](https://github.com/Nochiski/Quant_study/pull/242) · `review_pr242` 1차 REQUEST_CHANGES(`7ba3005e`, P1 1·P2 2·P3 1) → 2차 APPROVE(`dc02417a`, 재리뷰 P3 2 → 이슈 #251) · 통합 브랜치 `6ffab152`·`cb9b1b3f`(main #227·#237·#233·#239) 병합 · 통합 머지 `59d94f8d`(#242, `lang2/integration`, 2026-09-28) · main 머지 `a4be517a`(#202, 2026-09-28) |
-| [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `READY` | — · base 는 통합 브랜치 main 머지 규칙(현재 결정 2026-09-28)을 따른다 · **범위 조정(리드 결정 2026-09-28, 변경 기록)**: README·frontend README·`backend/FACTORS.md` 1.2 정리, spec D6·D7 구현 결과 단락(NB-3), SoT 연산자 행 단위 규칙 문장(NB-6)은 문서 갱신 PR A가, 매뉴얼 1.2 전환·실행 설정 절·BACKLOG-002 는 매뉴얼 PR(선행 코드 PR 머지 뒤)이, 골든 `adj_close` 이관·우회 필터 제거는 선행 코드 PR `impl-prep` 이 가져간다. P3-03 에 남는 것: e2e fixture 1.2·"1.1 revision 업그레이드" 시나리오, BACKLOG-008, BACKLOG-009, CI green |
+| [ ] | `P3-03` | e2e fixture 1.2, 매뉴얼·README·FACTORS 1.2, CI green | P3-02 | `APPROVED` | [#320](https://github.com/Nochiski/Quant_study/pull/320)(`feat/lang2-p3-03-e2e-1-2`, main `2ef86159` 위로 rebase) · ① BACKLOG-008 `0521d580` · ② BACKLOG-009 `a9f2043b` · ③ 1.1 revision 업그레이드 시나리오 `1ef3b646`(helper 공용화 `86910ede`, e2e 1.2 주석·버전 리터럴 정리 `a797a600`) · `review_pr320` r1 APPROVE(`5d63794a`, P3 6) → P3 6건 반영 `f265c5d5`·`05f9d90e`·`419ea024`·`606a09ad`(리뷰 뒤 추가분) · 게이트는 검증 기록 · **범위 조정(리드 결정 2026-09-28, 변경 기록)**: README·frontend README·`backend/FACTORS.md` 1.2 정리, spec D6·D7 구현 결과 단락(NB-3), SoT 연산자 행 단위 규칙 문장(NB-6)은 문서 갱신 PR A가, 매뉴얼 1.2 전환·실행 설정 절·BACKLOG-002 는 매뉴얼 PR(선행 코드 PR 머지 뒤)이, 골든 `adj_close` 이관·우회 필터 제거는 선행 코드 PR `impl-prep` 이 가져간다. P3-03 에 남는 것: e2e fixture 1.2·"1.1 revision 업그레이드" 시나리오, BACKLOG-008, BACKLOG-009, CI green |
 
 Phase exit:
 
@@ -1106,6 +1107,7 @@ Phase exit:
 | `P3-01` | `review_p3_01` | 2 | `APPROVE` | `review_pr232.md` 재리뷰 절, tip `6e5e71da`. blocking 0 · P2 2 · P3 1. 1차 결함 4건 해소 확인. **DEFECT-232-05(P2)**: 골든 `adj_close` 이관이 P3-03 에 예약되지 않음 → WORKFLOW P3-03 acceptance 에 한 줄(우회 필터 제거 포함). **DEFECT-232-06(P2)**: duckdb 원주가 표시·전달 삭제 돌연변이가 살아남음 → 통합 merge 뒤 계약 대조(`63392554`)와 선언표 단위 테스트로 둘 다 red. **DEFECT-232-07(P3)**: 한 단계 상류 탐색 돌연변이가 살아남음 → 중첩 경로 테스트 2건으로 red |
 | `P3-02` | `review_pr242` | 1 | `REQUEST_CHANGES` | `review_pr242.md`, tip `7ba3005e`. blocking 1. **DEFECT-242-01(P1)**: 기간·유니버스를 정한 뒤 수수료만 -1 이어도 "기간과 유니버스를 정하세요" 고정 문장, 칸으로 가는 경로 없음 → 칸별 차단 문장(첫 칸 이름·이유·나머지 개수)과 요약 띠 초점 경로(`4d9989ca`). DEFECT-242-02(P2) AI 적용 뒤 차단 사유 안내·DEFECT-242-03(P2) #240 검증 완료 대기 helper → `304fd221`·`7e36416b`. DEFECT-242-04(P3) 스키마 단위·run 상세 스키마 기반 칸·enum 값 이름 → `4d9989ca`. (c) e2e `REQUESTED_ENVIRONMENT` 는 요청 계약 단언이라 유지(결정 2) |
 | `P3-02` | `review_pr242` | 2 | `APPROVE` | `review_pr242.md` 재리뷰 절, tip `dc02417a`(통합 `cb9b1b3f` 병합 뒤). blocking 0. 1차 4건 해소 확인. 재리뷰 P3 2건(업그레이드 채우기의 12자리 초과 비율 반올림, run 상세의 스키마 밖 기록 키 숨김)은 이슈 #251 로 넘겼다 |
+| `P3-03` | `review_pr320` | 1 | `APPROVE` | `review_pr320_r1.md`, tip `5d63794a`(main `1d9fc43d` 위). blocking 0 · P3 6. P3-1 게이트 판정 넷(앞 8000바이트 NUL·UTF-8 BOM·UTF-16 BE·`ls-files -z`)을 테스트가 고정하지 않음(돌연변이 M7~M10 생존), P3-2 `splitlines` 가 U+0085 에서 줄을 나눠 줄 번호가 git 과 어긋남, P3-3 병합 중 같은 표식 반복, P3-4 두 번째(1.0) 반복의 기간·유니버스 단언이 채우기를 판별하지 못함, P3-5 실행 설정 칸·업그레이드 버튼 로케이터 사본, P3-6 BACKLOG-008·009 닫힘 기록. main `2ef86159` 로 rebase 한 뒤 6건 모두 반영(`f265c5d5`·`05f9d90e`·`419ea024`·`606a09ad`·PLAN 커밋) |
 | `P2-09` | `review_lang2_p2_09` | 1 | `REQUEST_CHANGES` | tip `e064d2af`. P1 1: 결측 정책을 생략한 팩터를 충돌 판정에서 빼서 1.1 의 팩터별 결측 처리가 경고 없이 바뀐다. 비차단 관찰 2. 반영 `a32ed9d7`(실효 값 판정, 관찰 1 float 1.1 테스트). 같은 시점 Phase 2 감사 NB-1 은 `17c68261` 이 고쳤다 |
 | `P2-09` | `review_lang2_p2_09` | 2 | `APPROVE` | #217 리뷰 12절(최종 재확인, `review_lang2_p2_09.md`), tip `a32ed9d7`(#217 머지 head). blocking 0. P1-1·NB-1 닫힘, 돌연변이 13건 전부 red, backend 2529 passed. 남은 비차단: 머지 전 `a32ed9d7` CI 실패 집합 확인, 은퇴 `saved_*` row 실 DB 확인. 2026-09-28 문서 최신화 감사가 누락된 이 행을 더했다 |
 | `P2-10` | 기록 없음 | — | — | 별도 PR 리뷰 기록이 없다(#222 리뷰·댓글 0건). Phase 2 재감사(#222 재감사 10절(`audit_lang2_phase_2.md`), tip `c8e1e37a` = #222 머지 head)가 이 PR 의 기록 정정·`INTEGRATED` 도구 diff·8절 17행 예약을 대조해 PASS 했다 |
@@ -1117,6 +1119,8 @@ Phase exit:
 | `P1-04` | cascade tip `e6fb10b0`, 위와 같은 게이트 | pytest 1611 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 704/704 | 2026-09-26 |
 | `P1-05` | cascade tip `45f1c4a3`, 위와 같은 게이트 + `npm run test:e2e`(머신 잠금 아래) | pytest 1695 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 733/733 · e2e 25/25 | 2026-09-26 |
 | `P1-06` | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` | `PLAN.md is consistent: 0/29 merged, 6 approved`(P1-02 5차 APPROVE 반영 뒤. 1차 리뷰 반영 시점에는 P1-02가 `ac3a3d0e` 리뷰 대기라 5) · 충돌 표식 0 | 2026-09-26 |
+| `P3-03` | main `2ef86159` rebase·리뷰 r1 P3 반영 뒤 코드 tip `606a09ad`: 루트 `uv lock --check`·tools unittest·`ruff check tools`·`pyright tools`·`conflict_markers`·`user_story_trace`·`git grep` 표식, frontend `typecheck:e2e`·`lint`, `node e2e/run-playwright.mjs`(포트 8235/5235, 빌드의 `typecheck`·`vite build` 포함), Playwright 목록 스토리 대조, 돌연변이(tools 7종 메모리 치환, e2e 는 `localStorage.clear()` 한 줄 뺌) | tools 43 OK · ruff·pyright 0 · 표식 0 · 스토리 39·태그 e2e 27 · e2e 46/46(3.7분) · 목록 대조 통과 · 돌연변이 M7~M10·`splitlines`·`\r?`·`--deduplicate` 모두 red, e2e 는 두 번째 반복 시작일 칸 `"2021-01-01"` 로 red. backend·`database/tests`·Vitest 는 이 판에서 돌리지 않았다(`backend/src`·`frontend/src` 변경 없음, CI 가 돈다) | 2026-09-30 |
+| `P3-03` | tip `14e82efa`: frontend `typecheck`·`lint`·`test`·`build`·`typecheck:e2e`, `api:generate` 뒤 생성물 diff, `npm run test:e2e`(포트 8235/5235), Playwright 목록 스토리 대조, backend `pytest -q`·`ruff check src tests examples scripts tools`·`pyright`, `database/tests`, 루트 `uv lock --check`·tools unittest·`ruff`·`pyright tools`, `conflict_markers`, `check_field_map`, `user_story_trace` | Vitest 1088/1088 · SDK diff 0 · e2e 44/44 · pytest 3172 passed·4 skipped · ruff·pyright 0 · database/tests 41F/1325P/33E(`database`·`backend/src`·lock 이 main 과 diff 0 이고 바뀐 경로를 읽지 않아 브랜치 전용 실패 0, 74건은 같은 기계 main `823ffef2` 기준선 수와 같다) · tools 41 OK · 표식 0 · 스토리 39·태그 e2e 25 | 2026-09-30 |
 | `P2-10` | `update-plan-progress.ps1 -Check`, `user_story_trace`, `conflict_markers` | PR 본문 참조 | 2026-09-27 |
 | `P2-09` | push tip 게이트 전체 — PR [#217](https://github.com/Nochiski/Quant_study/pull/217) 본문 "테스트 계획" | 결과·실패 원인 대조는 PR 본문(US-SM-07 은 업그레이드·저장·hash 단언을 모두 지나 원인 (2) 해소, 남은 실패는 원인 (1) 실행 요청 environment 미배선 하나) | 2026-09-27 |
 | `P2-01` | `uv run pytest -q` (backend) | 1480 passed, 13 skipped | 2026-09-20 |
@@ -1126,6 +1130,9 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-30 — **P3-03 리뷰 r1 반영·main 재rebase**. #290(`workbench-helpers.ts` 의 `coveringElement`·`scrollPageTo`)·#331·#338 이 머지돼 main `2ef86159` 위로 다시 rebase 했다. 충돌은 스토리 `dm.md` e2e 목록과 `traceability.md` 둘이고, 목록은 두 쪽 줄을 모두 살리고 표는 `user_story_trace --write` 로 다시 만들었다. 앞 rebase 의 SHA 는 `bc1f8b27`(①)·`d8b84431`(②)·`e60c1ced`(착수)·`d5c5c53c`·`942d8097`·`14e82efa`(③)·`5d63794a`(SELF_CHECK)이다. `review_pr320` r1 APPROVE 의 P3 6건을 반영했다: 게이트 판정 넷 테스트 고정(P3-1), LF 로만 줄 나누기와 `--deduplicate`(P3-2·P3-3), 실행 설정 칸·업그레이드 버튼 로케이터를 `workbench-helpers.ts` 한 곳에(P3-5, 매뉴얼 촬영 스크립트는 그 파일을 부르지 못해 그대로), 두 번째 반복 전에 마지막 사용값을 지우고 채우기 전 빈 칸 단언(P3-4, 배너가 옛 실행 설정을 보이는 단언도 더함), BACKLOG-008·009 닫힘 기록(P3-6). P3-03 상태 `APPROVED`(리뷰 뒤 추가분은 Review 열).
+- 2026-09-30 — **P3-03 SELF_CHECK**. 선행 #297·#322·#323 이 머지돼 main `1d9fc43d` 위로 rebase 하고 ③ 을 얹었다. 저장된 revision 경로의 US-SM-07 e2e(`workbench.workflow.spec.ts`)가 1.0 row 와 함께 원문 있는 1.1 row 를 CLI(`STRATEGY_WORKBENCH_E2E_SEED_SCHEMA=1.1`)로 심고, 두 revision 에 같은 단계(업그레이드 → 실행 설정 채움 → 패널 값 → 저장 → 백테스트 요청 `environment`)를 밟는다. 흐름을 새 파일로 복제하지 않았다(하네스 규칙). 옛 문서 수수료가 실행 설정 기본값과 같아 채우기 전에 칸을 바꿔 두고 본다. e2e 골든 주석과 추적 provenance 의 버전 리터럴을 정리했다. 게이트는 검증 기록. draft 를 해제했다. P3-03 상태 `SELF_CHECK`.
+- 2026-09-30 — **P3-03 착수**(리드 배정). `wt-run-concurrency` 를 재사용해 main `f01a9cbd` 에서 `feat/lang2-p3-03-e2e-1-2` 를 만들고 draft [#320](https://github.com/Nochiski/Quant_study/pull/320) 를 열었다. 범위 조정(2026-09-28)으로 넘긴 문서 항목은 #258·#259·#263 이 머지했음을 확인했다. 순서는 ① BACKLOG-008(독립) → ② BACKLOG-009 → ③ 1.1 업그레이드 시나리오이고, ③ 은 #297·#267 후속 PR ②·#240 머지 뒤에 얹는다(현재 작업 Packet `Steps`). P3-03 상태 `IN_PROGRESS`.
 - 2026-09-28 — **매뉴얼 PR(범위 조정 (2) 이행)**. 매뉴얼을 schema 1.2 화면으로 고쳤다: 실행 설정(시작일·종료일·
   유니버스 필수) 안내를 빠른 순서·5·6절·요약 띠·"막혔을 때" 표에, 옛 1.0·1.1 문서는 저장된 revision 화면에서
   업그레이드한다는 소절(새 전략 화면 배너 부재는 이슈 #257), 결과 N/A 사유·데이터 경고 읽는 법, 8절
@@ -1760,6 +1767,9 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
 - **담당**: `P3-03`(CI 전체 green을 exit로 가진 PR). `git ls-files -z`로 추적 파일만 열거하고 디렉터리
   제외를 걷으며, `.lock`을 제외에서 빼고, `errors="replace"`로 읽으며, 주석을 "7자가 아닌 밑줄은
   잡지 않는다. 정확히 7자인 단독 줄은 git도 충돌 표식으로 본다"로 좁힌다.
+- **닫힘**: #320 `0521d580`(rebase 전 `bc1f8b27`). 재현 test는 `tools/tests/test_conflict_markers.py`의 파일
+  단위 테스트(놓침 5건)다. 리뷰 r1 P3-1~P3-3 반영(`f265c5d5`·`05f9d90e`)으로 git과 맞춘 판정 넷, LF로만
+  줄 나누기, 병합 중 경로 한 번만 보기도 테스트가 고정한다.
 
 ### BACKLOG-009: AI 제안을 적용한 뒤 툴바 "실행 취소"로 되돌리는 브라우저 e2e가 없다
 
@@ -1772,9 +1782,11 @@ WORKFLOW acceptance에도 같은 BACKLOG 번호로 한 줄을 예약한다(착�
   — 적용까지만 보고 버튼 되돌리기를 누르지 않는다.
 - **위험성**: 버튼·단축키 배선(`useDocumentHistory` ↔ 제안 적용 훅)이 page에서 끊겨도 단위 테스트는
   편집기를 직접 부르므로 초록이다. 사용자는 적용을 한 번에 되돌리지 못한다(silent 회귀).
-- **스토리**: US-DM-09(`예정`, e2e 담당 P3-03)에 수용 기준으로 잇는다.
+- **스토리**: US-DM-09 수용 기준으로 잇는다(지금 `구현됨-e2e`).
 - **담당**: `P3-03`(e2e fixture를 1.2로 바꾸며 어시스턴트 e2e도 다시 도는 PR). 스토리 e2e를 더하고
   US-DM-09를 `구현됨-e2e`로 올린다.
+- **닫힘**: #320 `a9f2043b`(rebase 전 `d8b84431`). US-DM-03 적용 흐름(`frontend/e2e/assistant.workflow.spec.ts`)에
+  툴바 실행 취소·다시 실행 단언과 `@US-DM-09`를 더했고, US-DM-09는 `구현됨-e2e`다.
 
 ### BACKLOG-010: `is_upgradeable_document` docstring 이 이미 지난 조건을 들어 상한 추가를 미룬다
 

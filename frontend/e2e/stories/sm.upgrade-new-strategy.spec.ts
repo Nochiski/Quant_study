@@ -7,15 +7,12 @@
  * 뜨고, 업그레이드 응답의 실행 설정을 사용자가 채운 뒤 저장과 백테스트까지 가는지를 본다. 변환 규칙과
  * 현재 버전 문자열은 backend 소유라 응답 값과 비교하고 frontend에 적지 않는다.
  */
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  getStrategyDocument,
-  type UpgradedDocument,
-} from "../../src/shared/api/generated";
+import { getStrategyDocument } from "../../src/shared/api/generated";
 import {
   apiClient,
   backtest,
@@ -28,6 +25,9 @@ import {
   save,
   saveAndWaitForRevision,
   strategyIdentity,
+  upgradeBanner,
+  upgradeButton,
+  upgradeFromBanner,
 } from "../workbench-helpers";
 
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
@@ -42,26 +42,6 @@ const retiredFixture = (name: string): string =>
     ),
     "utf8",
   ).replace(/\r\n?/gu, "\n");
-
-const upgradeBanner = (page: Page) =>
-  page.getByRole("region", { name: "이전 schema 문서" });
-
-/** 배너의 업그레이드 버튼을 눌러 backend 응답을 돌려준다. */
-const upgradeFromBanner = async (page: Page): Promise<UpgradedDocument> => {
-  const upgrade = upgradeBanner(page).getByRole("button", {
-    name: "현재 버전으로 업그레이드",
-  });
-  await expect(upgrade).toBeEnabled();
-  const upgraded = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      new URL(response.url()).pathname === "/api/v1/strategy-documents/upgrade",
-  );
-  await upgrade.click();
-  const response = await upgraded;
-  expect(response.status()).toBe(200);
-  return (await response.json()) as UpgradedDocument;
-};
 
 test(
   "US-SM-07 새 전략 화면에 옛 schema YAML을 붙여 넣으면 배너로 올리고 실행 설정을 채워 저장·백테스트한다",
@@ -93,9 +73,7 @@ test(
         },
       });
     await page.route("**/api/v1/strategy-documents/upgrade", rejectUpgrade);
-    await banner
-      .getByRole("button", { name: "현재 버전으로 업그레이드" })
-      .click();
+    await upgradeButton(page).click();
     const failure = banner.getByRole("alert");
     await expect(failure).toContainText(
       "업그레이드 요청이 실패했습니다. 원문은 그대로입니다.",
@@ -132,9 +110,7 @@ test(
     // 실행 취소로 옛 글로 돌아갔다가 다시 실행하면 채우기도 돌아온다(#267 DEFECT-1).
     const fill = banner.getByRole("button", { name: "실행 설정에 채우기" });
     await page.getByRole("button", { name: "실행 취소", exact: true }).click();
-    await expect(
-      banner.getByRole("button", { name: "현재 버전으로 업그레이드" }),
-    ).toBeVisible();
+    await expect(upgradeButton(page)).toBeVisible();
     await expect(fill).toHaveCount(0);
     await page.getByRole("button", { name: "다시 실행", exact: true }).click();
     expect(await currentSource(page)).toBe(upgraded.source);

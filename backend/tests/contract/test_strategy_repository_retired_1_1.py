@@ -168,7 +168,7 @@ def _run_seed_cli(path: Path, schema: str) -> subprocess.CompletedProcess[str]:
 def test_the_seed_cli_picks_the_retired_version_from_its_environment(
     tmp_path: Path, schema: str, expected: list[str]
 ) -> None:
-    """e2e 는 기본값(1.0 row 둘)을, 매뉴얼 촬영은 `1.1`(원문 있는 row 하나)을 CLI 로 심는다.
+    """e2e 는 1.0 row 둘과 1.1 row 하나를, 매뉴얼 촬영은 `1.1`(원문 있는 row 하나)을 CLI 로 심는다.
 
     환경 변수 분기가 함수 계약과 따로 놀지 않게 CLI 를 직접 돌린다(#263 리뷰 P3-5).
     """

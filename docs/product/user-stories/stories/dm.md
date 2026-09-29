@@ -57,7 +57,7 @@
   - `frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 빈 새 전략에서 AI에게 아이디어를 말해 받은 전략을 적용하고 백테스트한다
   - `frontend/e2e/stories/dm.ai-new-strategy.spec.ts` :: US-DM-03 사이드바와 계약 서랍을 어느 입구로 펼쳐도 머리 줄이 펼친 자리에서 눌린다
   - `frontend/e2e/stories/dm.sidebar-scrollbar.spec.ts` :: US-DM-03 스크롤바가 폭을 차지하는 창에서도 사이드바가 붙었다 떴다 하지 않는다
-  - `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용한 뒤 적용 후 백테스트가 실행 화면까지 간다
+  - `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다
 
 수용 기준
 
@@ -284,20 +284,20 @@
 > 정동민으로서 AI 제안을 문서에 적용해 보고 마음에 들지 않으면 버튼 한 번으로 원래대로 돌리고 싶다.
 > 그래야 제안을 부담 없이 시험해 볼 수 있다.
 
-- 상태: `구현됨-e2e없음`
-- 담당 PR: P3-03
-- e2e 담당: P3-03
+- 상태: `구현됨-e2e`
+- 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: AI 어시스턴트 · 제안 적용 · 편집 이력(되돌리기)
-- e2e: 없음
+- e2e:
+  - `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다
 
 수용 기준
 
 - Given 사이드바 제안 카드를 "문서에 적용"한 문서, When 툴바의 "실행 취소"를 한 번 누르면, Then 문서가
   적용 전 원문으로 정확히 돌아가고 "다시 실행"을 누르면 제안이 다시 들어온다.
-- 비고: 동작은 AI B-04(격리된 전체 교체)와 lang2 P1-02(탭 밖 되돌리기 버튼)가 이미 만들었고, frontend
-  `apply-assistant-proposal.test.tsx`가 편집기 되돌리기 한 번으로 적용 전 문서가 돌아오는지 본다. 제안을
-  적용한 뒤 툴바 버튼을 누르는 브라우저 e2e가 없어 `구현됨-e2e없음`이다. P3-03이 스토리 e2e를 더하고
-  `구현됨-e2e`로 올린다(lang2 PLAN BACKLOG-009).
+- 비고: 동작은 AI B-04(격리된 전체 교체)와 lang2 P1-02(탭 밖 되돌리기 버튼)가 만들었다. frontend
+  `apply-assistant-proposal.test.tsx`가 편집기 되돌리기 한 번으로 적용 전 문서가 돌아오는지 보고, 브라우저
+  e2e는 US-DM-03의 제안 적용 흐름 안에서 툴바 버튼으로 되돌리고 다시 넣는다(lang2 P3-03, BACKLOG-009).
 
 ### US-DM-10 결과가 운으로 설명되는지 쉬운 말로 본다
 

@@ -29,6 +29,7 @@ import {
   openEditor,
   replaceSource,
   requireData,
+  runSettingsInputs,
   saveAndWaitForRevision,
   strategyIdentity,
 } from "./workbench-helpers";
@@ -144,7 +145,7 @@ test.describe("real equity data", () => {
     // 백테스트: 실데이터 duckdb 어댑터 + Rust core. 저장된 revision 을 그대로 실행한다. 기간·유니버스는
     // 실행 설정 패널에서 정한다.
     await fillRunEnvironment(page, {}, REAL_RUN_ENVIRONMENT);
-    const settingsToggle = page.getByLabel("실행 설정 열기");
+    const settingsToggle = runSettingsInputs(page).toggle;
     await settingsToggle.click();
     await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue("rust");
     await page

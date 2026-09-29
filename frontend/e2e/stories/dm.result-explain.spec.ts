@@ -23,6 +23,7 @@ import {
   mustReplace,
   openEditor,
   replaceSource,
+  runSettingsInputs,
   saveAndWaitForRevision,
 } from "../workbench-helpers";
 
@@ -48,7 +49,7 @@ test(
 
     // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02).
     await fillRunEnvironment(page, { via: "band" });
-    const settingsToggle = page.getByLabel("실행 설정 열기");
+    const settingsToggle = runSettingsInputs(page).toggle;
     await settingsToggle.click();
     await page
       .getByRole("textbox", { name: /^벤치마크 종목 ID/ })

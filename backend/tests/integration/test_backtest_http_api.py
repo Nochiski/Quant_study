@@ -69,6 +69,9 @@ class _CommitBarrierStore:
                 raise TimeoutError("artifact commit test barrier was not released")
         return self._delegate.commit(result)
 
+    def load(self, run_id: str, *, sha256: str) -> BacktestRunResult:
+        return self._delegate.load(run_id, sha256=sha256)
+
     def discard(self, run_id: str) -> None:
         self.discarded.append(run_id)
         self._delegate.discard(run_id)

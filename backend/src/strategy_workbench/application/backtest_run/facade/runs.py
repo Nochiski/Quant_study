@@ -9,6 +9,9 @@ from strategy_workbench.application.backtest_run._service import (
     StrategyReferenceNotFoundError,
     StrategyRevisionRequiresUpgradeError,
 )
+from strategy_workbench.application.backtest_run.ports.outgoing.artifact_store import (
+    BacktestArtifactUnreadableError,
+)
 from strategy_workbench.application.backtest_run.ports.outgoing.run_repository import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
@@ -36,6 +39,7 @@ __all__ = [
     "BacktestParameterValueError",
     "BacktestResearchWindowViolationError",
     "BacktestResultNotReadyError",
+    "BacktestArtifactUnreadableError",
     "BacktestRunNotFoundError",
     "BacktestRunResult",
     "BacktestRunService",

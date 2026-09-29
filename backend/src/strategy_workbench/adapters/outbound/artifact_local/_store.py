@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import shutil
 from dataclasses import fields, is_dataclass
@@ -12,19 +13,33 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from strategy_workbench.application.backtest_run.facade.ports import ArtifactCommit
+from pydantic import TypeAdapter, ValidationError
+
+from strategy_workbench.application.backtest_run.facade.ports import (
+    ArtifactCommit,
+    BacktestArtifactUnreadableError,
+)
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
+
+logger = logging.getLogger(__name__)
+
+# `_json_value` 가 쓴 `result.json` 을 되읽는 디코더. HTTP 가 요청 본문을 읽을 때와 같은 dataclass
+# 검증(pydantic)이라 `__post_init__` 불변식을 다시 탄다.
+_RESULT = TypeAdapter(BacktestRunResult)
 
 
 class LocalArtifactStore:
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
         self._root.mkdir(parents=True, exist_ok=True)
+        # 커밋 도중 프로세스가 죽으면 staging 이 남는다. 부팅 때 여기서 한 번 치운다 — 루트 하나를
+        # 서버 프로세스 하나가 쓴다는 전제다(연구 기록 DB 와 같다).
+        for staging in self._root.glob(".*.tmp"):
+            shutil.rmtree(staging)
+            logger.warning("orphan run artifact staging removed — name=%s", staging.name)
 
     def commit(self, result: BacktestRunResult) -> ArtifactCommit:
-        target = (self._root / result.manifest.run_id).resolve()
-        if target.parent != self._root:
-            raise ValueError("run id escapes artifact root")
+        target = self._run_dir(result.manifest.run_id)
         if target.exists():
             raise FileExistsError(f"run artifact already exists: {result.manifest.run_id}")
         staging = (self._root / f".{result.manifest.run_id}.{uuid4().hex}.tmp").resolve()
@@ -60,14 +75,39 @@ class LocalArtifactStore:
             raise
         return ArtifactCommit(sha256=hashlib.sha256(payload).hexdigest())
 
+    def load(self, run_id: str, *, sha256: str) -> BacktestRunResult:
+        try:
+            payload = (self._run_dir(run_id) / "result.json").read_bytes()
+        except FileNotFoundError as error:
+            raise BacktestArtifactUnreadableError(
+                f"run result file is missing — run_id={run_id}"
+            ) from error
+        if hashlib.sha256(payload).hexdigest() != sha256:
+            raise BacktestArtifactUnreadableError(
+                f"run result file does not match its recorded sha256 — run_id={run_id}"
+            )
+        try:
+            return _RESULT.validate_json(payload)
+        except ValidationError as error:
+            # 해시가 맞는데 못 읽으면 결과 모델이 파일을 쓴 뒤 바뀐 것이다. 입력 값은 싣지 않는다.
+            first = error.errors()[0]
+            raise BacktestArtifactUnreadableError(
+                f"run result file does not decode — run_id={run_id} "
+                f"errors={error.error_count()} first={first['loc']}: {first['msg']}"
+            ) from error
+
     def discard(self, run_id: str) -> None:
         """Delete one exact committed run after application-level cancellation wins."""
 
+        target = self._run_dir(run_id)
+        if target.exists():
+            shutil.rmtree(target)
+
+    def _run_dir(self, run_id: str) -> Path:
         target = (self._root / run_id).resolve()
         if target.parent != self._root:
             raise ValueError("run id escapes artifact root")
-        if target.exists():
-            shutil.rmtree(target)
+        return target
 
 
 def _json_value(value: Any) -> Any:

@@ -72,6 +72,17 @@ def test_axis_values_are_normalized() -> None:
     assert spec.axes[1].values == ("a", "c")
 
 
+def test_invalid_values_message_carries_the_allowed_range() -> None:
+    with pytest.raises(InvalidExperimentSpecError) as caught:
+        build_search_spec(PARAMETERS, {"lookback": [40], "mode": ["d"]})
+    # 문서 선언 순서상 lookback 이 먼저 거절된다.
+    assert "values=[40] kind=integer minimum=10 maximum=30" in str(caught.value)
+
+    with pytest.raises(InvalidExperimentSpecError) as choice_caught:
+        build_search_spec(PARAMETERS, {"mode": ["d"]})
+    assert "values=['d'] choices=['a', 'b', 'c']" in str(choice_caught.value)
+
+
 @pytest.mark.parametrize(
     ("axes", "code"),
     [
@@ -102,12 +113,18 @@ def test_explicit_values_may_leave_the_step_grid() -> None:
 
 
 def test_search_rejects_more_points_than_the_limit() -> None:
-    wide = IntegerParameter(
-        parameter_id="wide", default=1, minimum=1, maximum=MAX_GRID_POINTS + 1, kind="integer"
-    )
-    with pytest.raises(InvalidExperimentSpecError) as axis_caught:
-        build_search_spec((wide,), {"wide": None})
-    assert axis_caught.value.code == "experiment.search.too_many_points"
+    def axis(maximum: int) -> IntegerParameter:
+        return IntegerParameter(
+            parameter_id="wide", default=1, minimum=1, maximum=maximum, kind="integer"
+        )
+
+    # 정확히 상한이면 통과하고 한 칸 넘으면 거절한다.
+    assert build_search_spec((axis(MAX_GRID_POINTS),), {"wide": None}).shape == (MAX_GRID_POINTS,)
+    for maximum in (MAX_GRID_POINTS + 1, 10**9):
+        # 거대한 축은 값을 펼치기 전에 개수로 거절한다.
+        with pytest.raises(InvalidExperimentSpecError) as axis_caught:
+            build_search_spec((axis(maximum),), {"wide": None})
+        assert axis_caught.value.code == "experiment.search.too_many_points"
 
     # 축 하나는 상한 안이어도 곱이 상한을 넘으면 거절한다: 21 × 21 = 441.
     square = tuple(
@@ -248,6 +265,35 @@ def test_split_rejects_invalid_lengths(
 
 def test_neighbor_mean_is_the_default_selection_rule() -> None:
     assert _rolling().selection_rule is WindowSelectionRule.NEIGHBOR_MEAN_SHARPE_MAX
+
+
+def test_split_normalizes_string_enums_so_anchored_is_not_rolling() -> None:
+    split = SplitSpec(
+        mode="anchored",  # pyright: ignore[reportArgumentType]  # reason: 요청 본문 문자열을 흉내 낸다
+        train_years=3,
+        test_years=1,
+        embargo_sessions=0,
+        selection_rule="train_sharpe_max",  # pyright: ignore[reportArgumentType]  # reason: 위와 같다
+    )
+
+    assert split.mode is SplitMode.ANCHORED
+    assert split.selection_rule is WindowSelectionRule.TRAIN_SHARPE_MAX
+    assert split.windows(RESEARCH_START, date(2026, 9, 29))[-1].train_start == RESEARCH_START
+
+
+@pytest.mark.parametrize("field", ["mode", "selection_rule"])
+def test_split_rejects_unknown_enum_values(field: str) -> None:
+    arguments: dict[str, object] = {
+        "mode": "rolling",
+        "train_years": 3,
+        "test_years": 1,
+        "embargo_sessions": 0,
+        field: "sideways",
+    }
+    with pytest.raises(InvalidExperimentSpecError) as caught:
+        SplitSpec(**arguments)  # pyright: ignore[reportArgumentType]  # reason: 잘못된 값 주입
+    assert caught.value.code == "experiment.split.invalid"
+    assert f"{field}='sideways'" in str(caught.value)
 
 
 # 2020-01-02(목)부터 평일 세션. 학습 창 앞 워밍업 세션 2019-12-31 을 섞어 둔다.

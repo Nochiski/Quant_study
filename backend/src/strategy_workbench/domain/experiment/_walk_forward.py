@@ -57,10 +57,18 @@ class SplitSpec:
             value: object = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
                 problems.append(f"{name}={value!r}(최소 {minimum})")
+        # 문자열로 들어온 값을 enum 으로 맞춘다. 맞추지 않으면 `is` 비교가 "anchored" 를
+        # 롤링으로 본다.
+        for name, kind in (("mode", SplitMode), ("selection_rule", WindowSelectionRule)):
+            value = getattr(self, name)
+            try:
+                object.__setattr__(self, name, kind(value))
+            except ValueError:
+                problems.append(f"{name}={value!r}(허용 {[member.value for member in kind]})")
         if problems:
             raise InvalidExperimentSpecError(
                 "experiment.split.invalid",
-                "분할 설정은 정수여야 하고 최솟값 이상이어야 합니다: " + ", ".join(problems),
+                "분할 설정이 허용 범위를 벗어났습니다: " + ", ".join(problems),
             )
 
     def windows(self, research_start: date, research_end: date) -> tuple[WalkForwardWindow, ...]:

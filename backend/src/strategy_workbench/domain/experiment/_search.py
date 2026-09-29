@@ -157,7 +157,7 @@ def _checked_axis_values(
     parameter: ParameterDefinition, values: tuple[ParameterValue, ...]
 ) -> tuple[ParameterValue, ...]:
     rejected = [value for value in values if not parameter_value_allowed(parameter, value)]
-    problems = [f"정의 밖 값 values={rejected} definition={parameter!r}"] if rejected else []
+    problems = [f"정의 밖 값 values={rejected} {_allowed_range(parameter)}"] if rejected else []
     if not values:
         problems.append("탐색 값이 비었습니다")
     elif len(set(values)) != len(values):
@@ -165,7 +165,7 @@ def _checked_axis_values(
     if problems:
         raise InvalidExperimentSpecError(
             "experiment.search.invalid_values",
-            f"탐색 값이 파라미터 정의를 벗어납니다: parameter_id={parameter.parameter_id} "
+            f"탐색 값을 쓸 수 없습니다: parameter_id={parameter.parameter_id} "
             + "; ".join(problems),
         )
     if isinstance(parameter, ChoiceParameter):
@@ -186,3 +186,10 @@ def _inside(shape: tuple[int, ...], cell: GridIndex) -> bool:
     return len(cell) == len(shape) and all(
         0 <= i < size for i, size in zip(cell, shape, strict=True)
     )
+
+
+def _allowed_range(parameter: ParameterDefinition) -> str:
+    """진단 문장에 싣는 허용 범위(`key=value`)."""
+    if isinstance(parameter, ChoiceParameter):
+        return f"choices={list(parameter.choices)}"
+    return f"kind={parameter.kind} minimum={parameter.minimum} maximum={parameter.maximum}"

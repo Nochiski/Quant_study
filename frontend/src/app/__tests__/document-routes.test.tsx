@@ -209,7 +209,8 @@ let assistantStream: {
 
 /**
  * 실행 설정 패널의 마지막 사용값(P3-02). 화면 흐름 테스트는 사용자가 이미 기간·유니버스를 정해 둔
- * 상태에서 시작한다 — 패널 자체의 동작은 `features/run-backtest` 테스트가 본다.
+ * 상태에서 시작한다 — 패널 자체의 동작은 `features/run-backtest` 테스트가 본다. 요청에 실리는 모양 그대로라
+ * 고정 bp 에서 읽히지 않는 가격 충격 계수는 없다(#352).
  */
 const RUN_ENVIRONMENT = {
   market: "KRX",
@@ -225,7 +226,6 @@ const RUN_ENVIRONMENT = {
   fee_bps: 15,
   slippage_bps: 10,
   impact_model: "fixed_bps",
-  impact_coefficient: 1,
   sell_tax: "krx_statutory",
   missing: "drop",
 } as const;

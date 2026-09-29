@@ -208,6 +208,39 @@ test(
     await fillRunEnvironment(page);
     await expect(summary).toContainText(RUN_ENVIRONMENT.start);
 
+    // 모드에 따라 읽히는 칸(#352): 매도 거래세율은 "직접 입력"에서만, 가격 충격 계수는 √ 에서만, 슬리피지는
+    // 고정 bp 에서만 켜진다. 켜진 세율 칸이 비면 띠가 그 칸을 채우라고 막고, 방식을 되돌리면 꺼진 칸은 실행을
+    // 막지 않는다.
+    await toggle.click();
+    const taxMethod = page.getByRole("combobox", { name: "매도 거래세" });
+    const taxRate = page.getByRole("spinbutton", {
+      name: "매도 거래세율 (bp)",
+    });
+    const impactModel = page.getByRole("combobox", { name: "가격 충격 모델" });
+    const slippage = page.getByRole("spinbutton", { name: "슬리피지 (bp)" });
+    const coefficient = page.getByRole("spinbutton", {
+      name: "가격 충격 계수",
+    });
+    await expect(taxRate).toBeDisabled();
+    await expect(coefficient).toBeDisabled();
+    await taxMethod.selectOption("custom");
+    await expect(taxRate).toBeEnabled();
+    await impactModel.selectOption("sqrt");
+    await expect(coefficient).toBeEnabled();
+    await expect(slippage).toBeDisabled();
+    await toggle.click();
+    await expect(summary).toContainText(
+      "실행 설정에서 매도 거래세율 칸을 채우세요.",
+    );
+    await expect(backtest(page)).toBeDisabled();
+    await toggle.click();
+    await taxMethod.selectOption("krx_statutory");
+    await impactModel.selectOption("fixed_bps");
+    await expect(taxRate).toBeDisabled();
+    await expect(slippage).toBeEnabled();
+    await toggle.click();
+    await expect(backtest(page)).toBeEnabled();
+
     // 기간·유니버스를 정한 뒤 다른 칸이 틀리면 띠가 그 칸 이름과 이유를 말하고, 버튼이 그 칸으로
     // 초점을 옮긴다(DEFECT-242-01).
     await toggle.click();

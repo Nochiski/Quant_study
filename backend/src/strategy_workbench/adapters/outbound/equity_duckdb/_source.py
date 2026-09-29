@@ -23,6 +23,10 @@ from pathlib import Path
 MANIFEST_NAME = "MANIFEST.json"
 CATALOG_NAME = "equity.duckdb"
 CATALOG_META_NAME = "_catalog_meta.json"
+# 카탈로그를 다시 만드는 조치 — 카탈로그 때문에 원천을 뺀 사유 문장이 이 문구로 조치를 알린다.
+CATALOG_REBUILD = (
+    "카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 `python -m equity catalog`)"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -166,9 +170,9 @@ def unreadable_catalog(path: Path, unreadable: Path, error: Exception) -> Catalo
     원문은 경고 로그에만 남긴다(#163).
     """
     reason = (
-        "카탈로그 파일을 읽을 수 없어 카탈로그 매크로를 읽는 원천의 필드를 뺀다 — 카탈로그를 다시 "
-        "만들어야 한다(`ledger_sync catalog` 또는 `python -m equity catalog`) (catalog_unreadable) "
-        f"— file={unreadable.name} error={type(error).__name__}"
+        "카탈로그 파일을 읽을 수 없어 카탈로그 매크로를 읽는 원천의 필드를 뺀다 — "
+        f"{CATALOG_REBUILD} (catalog_unreadable) — file={unreadable.name} "
+        f"error={type(error).__name__}"
     )
     logger.warning(f"{reason} path={unreadable} detail={error!r}")
     return CatalogState(path, False, reason, None, ())

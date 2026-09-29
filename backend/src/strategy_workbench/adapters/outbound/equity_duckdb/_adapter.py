@@ -118,6 +118,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 
 from ._source import (
+    CATALOG_REBUILD,
     CatalogState,
     EquityDuckdbSetupError,
     TableBuild,
@@ -680,8 +681,7 @@ class EquityDuckdbAdapter:
             return None
         reason = (
             f"카탈로그 매크로 {spec.relation} 에 원천 {spec.name} 이 읽는 열이 없어 이 원천의 "
-            "필드를 뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
-            f"`python -m equity catalog`) (catalog_columns_missing) — missing={missing}"
+            f"필드를 뺀다 — {CATALOG_REBUILD} (catalog_columns_missing) — missing={missing}"
         )
         logger.warning(f"{reason} catalog={self._catalog.path}")
         return reason

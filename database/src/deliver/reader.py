@@ -161,7 +161,25 @@ def read_fi(fi_root: Path, table: str, build_id: str, *, columns: Sequence[str] 
     cols = select or (", ".join(f'"{c}"' for c in columns) if columns else "*")
     src = f"read_parquet({_lit(part / '*.parquet')}, hive_partitioning=false)"
     sql = f"SELECT {cols} FROM {src}" + (f" WHERE {where}" if where else "")
-    return _query(sql + (f" {tail}" if tail else ""))
+    rows = _query(sql + (f" {tail}" if tail else ""))
+    return display_names(rows) if table == "fi_universe" else rows
+
+
+def display_names(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """엑셀·캡션 표시용 이름 정리 — 원장 이름은 그대로 두고 여기서만 다듬는다.
+
+    KRX 종목명은 종류를 꼬리에 붙이고("오리온홀딩스보통주"), WICS 라벨은 머리에 "WICS " 를 붙인다
+    (09-29 첫 실판 확인). 보통주 꼬리만 뗀다 — 우선주 등 다른 종류 이름은 구분이 필요해 그대로 둔다.
+    """
+    for r in rows:
+        name = r.get("name")
+        if isinstance(name, str) and name.endswith("보통주") and len(name) > len("보통주"):
+            r["name"] = name[: -len("보통주")]
+        for k in ("sector_l1_name", "sector_l2_name"):
+            v = r.get(k)
+            if isinstance(v, str) and v.startswith("WICS "):
+                r[k] = v[len("WICS "):]
+    return rows
 
 
 def fi_run_meta(fi_root: Path, d: str | date, basis: str, build_id: str) -> dict[str, object]:

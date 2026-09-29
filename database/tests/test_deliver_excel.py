@@ -782,3 +782,17 @@ def test_real_model_build_feeds_deliver(tmp_path: Path) -> None:
         for ws in book.worksheets:
             for row in ws.iter_rows():
                 assert all(c.data_type != "f" for c in row)
+
+
+def test_display_names_strip_common_suffix_and_wics_prefix() -> None:
+    from deliver.reader import display_names
+    rows = display_names([
+        {"name": "오리온홀딩스보통주", "sector_l1_name": "필수소비재",
+         "sector_l2_name": "WICS 식품,음료,담배"},
+        {"name": "현대차우", "sector_l1_name": "WICS 경기관련소비재", "sector_l2_name": None},
+        {"name": "보통주", "sector_l1_name": None, "sector_l2_name": "WICS 자본재"},
+    ])
+    assert [r["name"] for r in rows] == ["오리온홀딩스", "현대차우", "보통주"]
+    assert rows[0]["sector_l2_name"] == "식품,음료,담배"
+    assert rows[1]["sector_l1_name"] == "경기관련소비재"
+    assert rows[1]["sector_l2_name"] is None and rows[2]["sector_l2_name"] == "자본재"

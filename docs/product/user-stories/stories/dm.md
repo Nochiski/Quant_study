@@ -107,9 +107,10 @@
   한글 문장을 보이고, 서버 원문은 접힌 "서버 사유"에 둔다. 거절이 칸을 짚으면 "서버가 실행 설정의 초기 자본 칸
   값을 받지 않았습니다."처럼 그 칸 이름을 말한다(새 전략·저장한 전략 화면 모두). 영문 진단(`API request
   failed …`)은 보이지 않는다.
-- Given 완료된 결과, Then "핵심 성과 지표"에 Total return·Sharpe ratio·Maximum drawdown·Calmar
-  ratio·Turnover·Closed trades 여섯 개가 값과 함께 보이고, 자산 곡선(Equity curve) 차트가 보인다.
-  지표 이름 옆의 쉬운 한글 뜻은 US-DM-08이 지킨다.
+- Given 첫 세션부터 마지막 세션까지 1년 이상인 완료된 결과, Then "핵심 성과 지표"에 Total
+  return·Sharpe ratio·Maximum drawdown·Calmar ratio·Turnover·Closed trades 여섯 개가 값과 함께
+  보이고, 자산 곡선(Equity curve) 차트가 보인다. 1년 미만 실행은 Calmar ratio가 "N/A"와 "기간이
+  1년보다 짧아 연율로 바꾸지 않습니다"를 보인다. 지표 이름 옆의 쉬운 한글 뜻은 US-DM-08이 지킨다.
 - Given OOS 시작일을 종료일 1년 안쪽으로 둔 실행, Then 결과의 지표 표에서 OOS 구간의 cagr·calmar
   칸은 값 대신 "N/A"와 "기간이 1년보다 짧아 연율로 바꾸지 않습니다"를 보이고, 총수익률은 값으로 보인다.
   1년 미만을 연율로 부풀리면 짧은 구간의 우연한 상승이 과대평가된다(이슈 #274). 자산을 모두 잃은

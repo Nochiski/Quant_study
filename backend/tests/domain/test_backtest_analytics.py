@@ -126,16 +126,16 @@ def test_flat_equity_curve_reports_unavailable_ratios_instead_of_zero() -> None:
 
 
 def test_cagr_counts_calendar_days_from_the_base_session_not_sessions() -> None:
-    # 2025-01-02 → 2027-01-02 는 730일 = 2년. 세션은 셋뿐이라 예전 `세션 수 / 252` 로는 연수가
-    # 2/252 년이 되어 CAGR 이 터무니없이 커졌다.
+    # 기준일 2025-01-02 → 2027-01-02 는 730일 = 2년. 연수를 첫 곡선 점(6/30)부터 세면 551/365 년이라
+    # CAGR 이 0.135 가 된다. 세션은 둘뿐이라 예전 `세션 수 / 252` 로는 CAGR 이 터무니없이 커졌다.
     report = compute_analytics(
         AnalyticsInput(
             points=(
-                AnalysisPoint(date(2025, 1, 2), 100.0, 0.0, 0.0),
                 AnalysisPoint(date(2025, 6, 30), 90.0, 0.0, 0.0),
                 AnalysisPoint(date(2027, 1, 2), 121.0, 0.0, 0.0),
             ),
             traded_notional=0.0,
+            base=AnalysisPoint(date(2025, 1, 2), 100.0, 0.0, 0.0),
         ),
         build_default_metric_registry(),
     )
@@ -146,22 +146,24 @@ def test_cagr_counts_calendar_days_from_the_base_session_not_sessions() -> None:
 
 
 @pytest.mark.parametrize(
-    ("last_session", "cagr", "reason"),
+    ("first_session", "last_session", "cagr", "reason"),
     [
         # 364일: 1년 미만이라 연율화하지 않는다(GIPS). 총수익률은 그대로 보인다.
-        (date(2026, 1, 1), None, "period_under_one_year"),
+        (date(2025, 1, 2), date(2026, 1, 1), None, "period_under_one_year"),
         # 365일 = 1년: 연율화한 값이 총수익률과 같다.
-        (date(2026, 1, 2), 0.05, None),
+        (date(2025, 1, 2), date(2026, 1, 2), 0.05, None),
+        # 윤년이 낀 달력 1년 366일: 연율화하고, 연수가 366/365 라 총수익률보다 조금 낮다.
+        (date(2028, 1, 2), date(2029, 1, 2), 1.05 ** (365 / 366) - 1, None),
     ],
 )
 def test_cagr_and_calmar_are_not_annualized_under_one_calendar_year(
-    last_session: date, cagr: float | None, reason: str | None
+    first_session: date, last_session: date, cagr: float | None, reason: str | None
 ) -> None:
     report = compute_analytics(
         AnalyticsInput(
             points=(
-                AnalysisPoint(date(2025, 1, 2), 100.0, 0.0, 0.0),
-                AnalysisPoint(date(2025, 6, 2), 95.0, 0.0, 0.0),
+                AnalysisPoint(first_session, 100.0, 0.0, 0.0),
+                AnalysisPoint(date(first_session.year, 6, 2), 95.0, 0.0, 0.0),
                 AnalysisPoint(last_session, 105.0, 0.0, 0.0),
             ),
             traded_notional=0.0,
@@ -172,8 +174,8 @@ def test_cagr_and_calmar_are_not_annualized_under_one_calendar_year(
     assert _metric(report, "total_return").value == pytest.approx(0.05)
     assert _metric(report, "cagr").value == pytest.approx(cagr)
     assert _metric(report, "cagr").unavailable_reason == reason
-    # 칼마의 분자가 CAGR 이라 같은 사유로 빈다. 값이 있으면 0.05 / |95 / 100 - 1| = 1.0
-    assert _metric(report, "calmar").value == pytest.approx(None if cagr is None else 1.0)
+    # 칼마의 분자가 CAGR 이라 같은 사유로 빈다. 값이 있으면 CAGR / |95 / 100 - 1|
+    assert _metric(report, "calmar").value == pytest.approx(None if cagr is None else cagr / 0.05)
     assert _metric(report, "calmar").unavailable_reason == reason
 
 

@@ -15,10 +15,19 @@ from datetime import date, timedelta
 from enum import StrEnum
 from itertools import pairwise
 
-from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint
+from strategy_workbench.domain.analytics.facade.metrics import (
+    AnalysisPoint,
+    AnalyticsInput,
+    EquityCurvePoint,
+    MetricRegistry,
+    compute_analytics,
+    session_sharpe,
+)
+from strategy_workbench.domain.backtest.facade.runs import BacktestRunState, RunStatus
 
 from ._errors import InvalidExperimentSpecError
 from ._search import GridIndex, neighbor_mean
+from ._trial import awaiting_recovery
 
 
 class SplitMode(StrEnum):
@@ -192,6 +201,69 @@ def stitch_out_of_sample(
             value = stitched[-1].equity * after.equity / before.equity
             stitched.append(EquityCurvePoint(after.session, value, None))
     return tuple(stitched)
+
+
+def out_of_sample_sharpe(
+    curve: Sequence[EquityCurvePoint], registry: MetricRegistry, annualization_days: int
+) -> float | None:
+    """이어 붙인 곡선의 세션 샤프(연율화 전). 곡선이 비면 None.
+
+    학습 점수(`representative_sharpe`)와 같은 정의다 — 곡선 첫 점부터 수익률을 세어 지표
+    레지스트리의 `sharpe` 를 재고 `session_sharpe` 로 세션 단위로 바꾼다.
+    """
+    if not curve:
+        return None
+    report = compute_analytics(
+        AnalyticsInput(
+            points=tuple(AnalysisPoint(p.session, p.equity, 0.0, 0.0) for p in curve),
+            traded_notional=0.0,
+        ),
+        registry,
+        annualization_days=annualization_days,
+    )
+    sharpe = next(metric.value for metric in report.metrics if metric.metric_id == "sharpe")
+    return None if sharpe is None else session_sharpe(sharpe, annualization_days)
+
+
+class WalkForwardGap(StrEnum):
+    """이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.
+
+    값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.
+    """
+
+    # 창이 엠바고를 뺀 측정 창이 아닌 V3-05 이전 실험이라 워크포워드 검증을 돌리지 않는다.
+    LEGACY_DESIGN = "legacy_design"
+    # 검증 실행이 실패·취소로 끝났거나 접수가 거절된 창이 있다. 남은 창만 이으면 낙관 쪽 누락이다.
+    TEST_FAILED = "test_failed"
+    # 학습에서 대표 샤프가 난 칸이 없는 창이 있다.
+    NO_CELL = "no_cell"
+    # 아직 고르지 않았거나 검증 실행이 끝나지 않은(재시작 복구 대기 포함) 창이 있다.
+    PENDING = "pending"
+
+
+def window_gap(has_cell: bool, test_run: BacktestRunState | None) -> WalkForwardGap | None:
+    """칸을 고른 창 하나가 곡선에 들지 못하는 이유. 검증 실행이 완료됐으면 None.
+
+    Args:
+        has_cell: 창에서 고를 칸이 있었다.
+        test_run: 검증 실행 상태. 접수가 거절돼 실행이 없으면 None.
+    """
+    if not has_cell:
+        return WalkForwardGap.NO_CELL
+    if test_run is None:
+        return WalkForwardGap.TEST_FAILED
+    if test_run.status is RunStatus.COMPLETED:
+        return None
+    if test_run.status in (RunStatus.FAILED, RunStatus.CANCELLED) and not awaiting_recovery(
+        test_run
+    ):
+        return WalkForwardGap.TEST_FAILED
+    return WalkForwardGap.PENDING
+
+
+def walk_forward_gap(gaps: Sequence[WalkForwardGap | None]) -> WalkForwardGap | None:
+    """창별 이유 가운데 우선순위가 가장 높은 것. 모두 None 이면 None(요약 지표를 낸다)."""
+    return next((gap for gap in WalkForwardGap if gap in gaps), None)
 
 
 def walk_forward_retention(

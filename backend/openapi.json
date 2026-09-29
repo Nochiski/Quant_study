@@ -2361,6 +2361,11 @@
       },
       "ExperimentDesign": {
         "properties": {
+          "measured": {
+            "default": false,
+            "title": "Measured",
+            "type": "boolean"
+          },
           "parameter_values": {
             "additionalProperties": {
               "anyOf": [
@@ -10082,8 +10087,19 @@
         "title": "ValidationSeverity",
         "type": "string"
       },
+      "WalkForwardGap": {
+        "description": "이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.\n\n값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.",
+        "enum": [
+          "legacy_design",
+          "test_failed",
+          "no_cell",
+          "pending"
+        ],
+        "title": "WalkForwardGap",
+        "type": "string"
+      },
       "WalkForwardReport": {
-        "description": "워크포워드 결과(V3-05). 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율이다.\n\n곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 끝나야 채워진다.",
+        "description": "워크포워드 결과(V3-05). 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율이다.\n\n곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 완료돼야 채워지고, 아니면 비우고 `gap` 에\n이유를 싣는다 — 실패한 창을 빼고 남은 창만 이으면 낙관 쪽으로 빠진다.",
         "properties": {
           "curve": {
             "items": {
@@ -10091,6 +10107,16 @@
             },
             "title": "Curve",
             "type": "array"
+          },
+          "gap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WalkForwardGap"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "out_of_sample_sharpe": {
             "anyOf": [
@@ -10103,13 +10129,6 @@
             ],
             "title": "Out Of Sample Sharpe"
           },
-          "picks": {
-            "items": {
-              "$ref": "#/components/schemas/WindowPick"
-            },
-            "title": "Picks",
-            "type": "array"
-          },
           "retention": {
             "anyOf": [
               {
@@ -10120,13 +10139,21 @@
               }
             ],
             "title": "Retention"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/WalkForwardWindowResult"
+            },
+            "title": "Windows",
+            "type": "array"
           }
         },
         "required": [
-          "picks",
+          "windows",
           "curve",
           "out_of_sample_sharpe",
-          "retention"
+          "retention",
+          "gap"
         ],
         "title": "WalkForwardReport",
         "type": "object"
@@ -10162,6 +10189,62 @@
           "test_end"
         ],
         "title": "WalkForwardWindow",
+        "type": "object"
+      },
+      "WalkForwardWindowResult": {
+        "description": "창 하나의 자동 선택과 그 검증 실행 결과.",
+        "properties": {
+          "gap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WalkForwardGap"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pick": {
+            "$ref": "#/components/schemas/WindowPick"
+          },
+          "run_error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "portfolio.strategy.invalid",
+                  "portfolio.data.unavailable",
+                  "portfolio.raw_observation.invalid",
+                  "backtest.run.invalid",
+                  "backtest.run.equity_wiped_out",
+                  "backtest.run.internal",
+                  "backtest.run.interrupted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Error Code"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pick",
+          "run_status",
+          "run_error_code",
+          "gap"
+        ],
+        "title": "WalkForwardWindowResult",
         "type": "object"
       },
       "WarningSeverity": {

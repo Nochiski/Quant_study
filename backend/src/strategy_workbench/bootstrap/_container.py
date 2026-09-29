@@ -277,14 +277,18 @@ class _RunServiceTrialRuns:
             )
         return AdmittedRun(admission.spec, self._runs.trial_ledger(admission.lineage_id))
 
+    def rejection(self, error: Exception) -> TrialRunRejectedError | None:
+        code = rejection_code(error)
+        return None if code is None else TrialRunRejectedError(code, str(error))
+
     def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
         try:
             run_id = self._runs.start(request, owner=owner, trial_key_override=trial_key).run.run_id
         except Exception as error:
-            code = rejection_code(error)
-            if code is None:
+            rejected = self.rejection(error)
+            if rejected is None:
                 raise
-            raise TrialRunRejectedError(code, str(error)) from error
+            raise rejected from error
         if self._held_run_ids is not None:
             self._held_run_ids.add(run_id)
         return run_id

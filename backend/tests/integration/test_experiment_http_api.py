@@ -25,6 +25,22 @@ def _experiment(client: TestClient, **environment: str) -> dict[str, Any]:
     template = client.get("/api/v1/strategies/template").json()
     template.pop("identity")
     template["schema_version"] = "1.2"
+    # 20세션 모멘텀으로 매 세션 고른다 — 검증 실행 첫 세션의 결정은 검증 창 앞 워밍업 관측으로만
+    # 채워진다(V3-05). 워밍업을 읽지 않으면 첫 주문이 20세션 뒤로 밀린다.
+    template["portfolio"] |= {"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1}
+    template["factors"][0]["graph"] = {
+        "nodes": [
+            {"node_id": "close", "field_id": "price.close", "kind": "field"},
+            {
+                "node_id": "momentum",
+                "operator": "momentum",
+                "input_node_id": "close",
+                "window": 20,
+                "kind": "time_series",
+            },
+        ],
+        "output_node_id": "momentum",
+    }
     template["parameters"] = [
         {
             "parameter_id": "scale",
@@ -105,18 +121,26 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
     walk_forward = client.get(
         f"/api/v1/experiments/{experiment['record']['experiment_id']}/walk-forward"
     ).json()
+    picks = [window["pick"] for window in walk_forward["windows"]]
     assert {run["run_id"] for group in ledger["trials"] for run in group["runs"]} == {
         trial["attempts"][0]["run_id"] for trial in trials.json()
-    } | {pick["run_id"] for pick in walk_forward["picks"]}
-    assert [pick["window_index"] for pick in walk_forward["picks"]] == [0, 1]
-    # 곡선은 검증 창(2022-01-04 ~ 2023-01-03, 2023-01-04 ~ 2023-06-30) 세션만 잇는다. 창 경계의 두
-    # 세션이 붙어 있고 학습 구간 세션은 없다.
+    } | {pick["run_id"] for pick in picks}
+    assert [pick["window_index"] for pick in picks] == [0, 1]
+    assert [window["run_status"] for window in walk_forward["windows"]] == ["completed"] * 2
+    # 곡선은 검증 창(2022-01-04 ~ 2023-01-03, 2023-01-04 ~ 2023-06-30) 세션만 잇는다. 학습 점수처럼
+    # 창마다 첫 스냅숏부터 세므로 둘째 창 첫 세션 2023-01-04 점은 없고 학습 구간 세션도 없다.
     sessions = [point["session"] for point in walk_forward["curve"]]
     assert (sessions[0], sessions[-1]) == ("2022-01-04", "2023-06-30")
     boundary = sessions.index("2023-01-03")
-    assert sessions[boundary + 1] == "2023-01-04"
+    assert sessions[boundary + 1] == "2023-01-05"
     assert sessions == sorted(set(sessions))
+    assert walk_forward["gap"] is None
     assert walk_forward["out_of_sample_sharpe"] is not None
+    # 워밍업은 검증 창 앞에서 읽고 성과에서는 뺀다: 첫 검증 실행의 곡선은 검증 시작일부터지만, 그날
+    # 이미 20세션 모멘텀으로 종목을 골라 주문을 낸다.
+    tested = client.get(f"/api/v1/backtests/{picks[0]['run_id']}/result").json()
+    assert tested["series"]["equity"][0]["session"] == "2022-01-04"
+    assert tested["artifacts"]["orders"][0]["session"] == "2022-01-04"
 
 
 def test_design_and_lookup_rejections_are_coded() -> None:

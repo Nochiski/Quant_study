@@ -32,6 +32,9 @@ class ExperimentDesign:
     # 기반 실행 요청을 해소한 값(문서 파라미터 전부). 탐색 축의 칸 값이 그 위를 덮는다.
     parameter_values: dict[str, ParameterValue]
     windows: tuple[WalkForwardWindow, ...]
+    # 창의 학습 끝이 엠바고를 뺀 측정 끝이다(`SplitSpec.measured_windows`, V3-05). 그 전에 만든
+    # 실험은 거짓으로 읽히고 워크포워드 검증을 돌리지 않는다 — 이전 의미 그대로 둔다.
+    measured: bool = False
 
     def trials(self) -> tuple[ExperimentTrial, ...]:
         """칸(행 우선) × 창 순서로 편다. 한 칸의 창들이 붙어 있다."""

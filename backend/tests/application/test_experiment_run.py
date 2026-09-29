@@ -6,8 +6,10 @@ trial 실행은 가짜 `TrialRunPort` 로 받는다 — 유스케이스가 실�
 
 from __future__ import annotations
 
+import json
 import math
 import sqlite3
+import threading
 from collections.abc import Callable, Collection
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -57,6 +59,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     InvalidExperimentSpecError,
     SplitMode,
     SplitSpec,
+    WalkForwardGap,
     WindowSelectionRule,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
@@ -129,6 +132,8 @@ class _FakeRuns:
         self.ledger_entries: list[TrialLedgerEntry] = []
         self.reject = False
         self.results: dict[str, BacktestRunResult] = {}
+        # `result` 를 읽을 때마다 부른다(락 밖에서 읽는지 본다).
+        self.on_result: Callable[[], None] | None = None
 
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
         if self.before_admit is not None:
@@ -160,7 +165,12 @@ class _FakeRuns:
             self.ledger_entries.append(TrialLedgerEntry(run_id, key, RunStatus.COMPLETED, _AT, _AT))
 
     def result(self, run_id: str) -> BacktestRunResult:
+        if self.on_result is not None:
+            self.on_result()
         return self.results[run_id]
+
+    def rejection(self, error: Exception) -> TrialRunRejectedError | None:
+        return error if isinstance(error, TrialRunRejectedError) else None
 
     def sessions(self, start: date, end: date) -> tuple[date, ...]:
         """평일 세션."""
@@ -630,11 +640,13 @@ def test_each_window_runs_its_best_train_cell_on_the_test_window_as_a_recheck() 
     # 검증 실행은 고른 칸의 시도 키로 적혀 원장에서 재확인이다 — 창이 N 을 늘리지 않는다.
     assert runs.keys[4:] == [runs.keys[0], runs.keys[3]]
     assert runs.owners == {experiment_id}
-    picks = service.walk_forward(experiment_id).picks
+    report = service.walk_forward(experiment_id)
+    picks = [window.pick for window in report.windows]
     assert [(p.window_index, p.attempt, p.trial_index, p.run_id) for p in picks] == [
         (0, 1, 0, "run-4"),
         (1, 1, 3, "run-5"),
     ]
+    assert report.gap is WalkForwardGap.PENDING
     assert [p.train_sharpe for p in picks] == pytest.approx([0.2, 0.3])
     # 학습 trial 은 모두 끝났지만 검증 실행이 남아 완료가 아니다.
     assert service.get(experiment_id).status is ExperimentStatus.RUNNING
@@ -662,11 +674,18 @@ def test_the_stitched_curve_chains_only_test_window_returns() -> None:
         runs,
         {
             "run-4": _result(
-                equity=((date(2022, 1, 4), cash * 1.01), (date(2022, 1, 5), cash * 1.00))
+                equity=(
+                    (date(2022, 1, 4), cash * 1.01),
+                    (date(2022, 1, 5), cash * 1.00),
+                    (date(2022, 1, 6), cash * 1.02),
+                )
             ),
-            # 창 1 검증 실행도 초기 자본에서 시작한다.
             "run-5": _result(
-                equity=((date(2023, 1, 4), cash * 1.02), (date(2023, 1, 5), cash * 1.0302))
+                equity=(
+                    (date(2023, 1, 4), cash * 1.02),
+                    (date(2023, 1, 5), cash * 1.0302),
+                    (date(2023, 1, 6), cash * 1.0302 * 0.99),
+                )
             ),
         },
     )
@@ -674,16 +693,18 @@ def test_the_stitched_curve_chains_only_test_window_returns() -> None:
     assert service.advance(experiment_id) is True
     report = service.walk_forward(experiment_id)
 
+    # 학습 점수처럼 창마다 첫 스냅숏부터 센다 — 진입일(초기 자본 → 첫 세션) 수익률은 빠지고, 창 1
+    # 첫 세션 2023-01-04 점은 없이 1.02/1.01 에서 1.0302/1.02 로 이어진다.
     assert [(point.session, point.equity) for point in report.curve] == [
-        (date(2022, 1, 4), pytest.approx(1.01)),
-        (date(2022, 1, 5), pytest.approx(1.00)),
-        (date(2023, 1, 4), pytest.approx(1.02)),
-        (date(2023, 1, 5), pytest.approx(1.0302)),
+        (date(2022, 1, 4), pytest.approx(1.0)),
+        (date(2022, 1, 5), pytest.approx(1 / 1.01)),
+        (date(2022, 1, 6), pytest.approx(1.02 / 1.01)),
+        (date(2023, 1, 5), pytest.approx(1.02)),
+        (date(2023, 1, 6), pytest.approx(1.0098)),
     ]
-    # 기준점은 첫 검증 창 앞 세션 2022-01-03(1.0). 세션 샤프 = 초과 수익률 평균 ÷ 세션 수익률 표본
-    # 표준편차. 초과 수익률 = 세션 수익률 − 직전 세션 기준금리 × 달력 일수 / 365 (2022-01-03·05 는
-    # 1.00%, 2023-01-04 는 3.25%).
-    returns = [0.01, 1.00 / 1.01 - 1, 0.02, 0.01]
+    # 세션 샤프 = 초과 수익률 평균 ÷ 세션 수익률 표본 표준편차. 초과 수익률 = 세션 수익률 − 직전
+    # 세션 기준금리 × 달력 일수 / 365 (2022-01-04·05·06 은 1.00%, 2023-01-05 는 3.25%).
+    returns = [1 / 1.01 - 1, 0.02, 0.01, -0.01]
     rates = [0.01 * 1 / 365, 0.01 * 1 / 365, 0.01 * 364 / 365, 0.0325 * 1 / 365]
     mean = sum(r - rate for r, rate in zip(returns, rates, strict=True)) / 4
     average = sum(returns) / 4
@@ -691,7 +712,109 @@ def test_the_stitched_curve_chains_only_test_window_returns() -> None:
     assert report.out_of_sample_sharpe == pytest.approx(mean / deviation)
     # 유지율 = 표본 밖 세션 샤프 ÷ 고른 칸 학습 샤프 평균 (0.2 + 0.3) / 2.
     assert report.retention == pytest.approx(mean / deviation / 0.25)
+    assert report.gap is None
     assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_a_failed_test_window_empties_the_summary_with_its_reason() -> None:
+    """#365 리뷰 P2-1: 파산한 검증 창을 빼고 남은 창만으로 표본 밖 샤프를 내지 않는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    _finish(
+        runs,
+        {
+            "run-0": _result(0.2),
+            "run-1": _result(0.05),
+            "run-2": _result(0.1),
+            "run-3": _result(0.3),
+        },
+    )
+    service.advance(experiment_id)
+    cash = _BASE.initial_cash
+    _finish(runs, {"run-4": _result(equity=((date(2022, 1, 4), cash), (date(2022, 1, 5), cash)))})
+    runs.run_statuses["run-5"] = RunStatus.FAILED
+    runs.error_codes["run-5"] = "backtest.run.equity_wiped_out"
+
+    assert service.advance(experiment_id) is True
+    report = service.walk_forward(experiment_id)
+
+    assert [
+        (window.run_status, window.run_error_code, window.gap) for window in report.windows
+    ] == [
+        (RunStatus.COMPLETED, None, None),
+        (RunStatus.FAILED, "backtest.run.equity_wiped_out", WalkForwardGap.TEST_FAILED),
+    ]
+    assert (report.curve, report.out_of_sample_sharpe, report.retention, report.gap) == (
+        (),
+        None,
+        None,
+        WalkForwardGap.TEST_FAILED,
+    )
+    assert len(runs.started) == 6  # 실패한 검증 창은 다시 넘기지 않는다
+    assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_a_rejected_base_recheck_records_the_windows_instead_of_hanging() -> None:
+    """#365 리뷰 P3-2: 검증 실행 전 기반 재검사가 거절되면 창 선택에 거절 코드를 남기고 끝낸다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    _finish(
+        runs,
+        {
+            "run-0": _result(0.2),
+            "run-1": _result(0.05),
+            "run-2": _result(0.1),
+            "run-3": _result(0.3),
+        },
+    )
+
+    def refused() -> None:
+        raise TrialRunRejectedError("backtest.strategy.requires_upgrade", "frozen revision")
+
+    runs.before_admit = refused
+
+    assert service.advance(experiment_id) is True
+    report = service.walk_forward(experiment_id)
+
+    assert len(runs.started) == 4
+    assert [
+        (window.pick.trial_index, window.pick.run_id, window.pick.error_code, window.gap)
+        for window in report.windows
+    ] == [
+        (0, None, "backtest.strategy.requires_upgrade", WalkForwardGap.TEST_FAILED),
+        (3, None, "backtest.strategy.requires_upgrade", WalkForwardGap.TEST_FAILED),
+    ]
+    assert report.gap is WalkForwardGap.TEST_FAILED
+    assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_train_artifacts_are_read_outside_the_service_lock() -> None:
+    """#365 리뷰 P3-1: 학습 산출물을 읽는 동안 다른 실험의 조작이 서비스 락을 잡을 수 있다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    _finish(runs, {"run-0": _result(0.2), "run-2": _result(0.1)})
+    free: list[bool] = []
+
+    def probe() -> None:
+        lock = service._lock  # pyright: ignore[reportPrivateUsage]  # reason: 락 점유 확인
+
+        def other() -> None:
+            if acquired := lock.acquire(blocking=False):
+                lock.release()
+            free.append(acquired)
+
+        thread = threading.Thread(target=other)
+        thread.start()
+        thread.join()
+
+    runs.on_result = probe
+    service.advance(experiment_id)
+
+    assert free == [True, True]
+    assert len(runs.started) == 5
 
 
 def test_an_interrupted_test_run_is_resubmitted_with_the_same_cell() -> None:
@@ -709,9 +832,11 @@ def test_an_interrupted_test_run_is_resubmitted_with_the_same_cell() -> None:
 
     assert runs.started[5] == runs.started[4]
     assert runs.keys[5] == runs.keys[4]
-    picks = service.walk_forward(experiment_id).picks
-    assert [(p.window_index, p.attempt, p.trial_index, p.run_id) for p in picks] == [
-        (0, 2, 0, "run-5"),
+    windows = service.walk_forward(experiment_id).windows
+    assert [
+        (w.pick.window_index, w.pick.attempt, w.pick.trial_index, w.run_status) for w in windows
+    ] == [
+        (0, 2, 0, RunStatus.QUEUED),
     ]
 
 
@@ -729,11 +854,19 @@ def test_a_window_without_a_scored_train_cell_is_recorded_without_a_test_run() -
     report = service.walk_forward(experiment_id)
 
     assert len(runs.started) == 4
-    assert [(p.window_index, p.trial_index, p.train_sharpe, p.run_id) for p in report.picks] == [
-        (0, None, None, None),
-        (1, None, None, None),
+    assert [
+        (w.pick.window_index, w.pick.trial_index, w.pick.train_sharpe, w.pick.run_id, w.gap)
+        for w in report.windows
+    ] == [
+        (0, None, None, None, WalkForwardGap.NO_CELL),
+        (1, None, None, None, WalkForwardGap.NO_CELL),
     ]
-    assert (report.curve, report.out_of_sample_sharpe, report.retention) == ((), None, None)
+    assert (report.curve, report.out_of_sample_sharpe, report.retention, report.gap) == (
+        (),
+        None,
+        None,
+        WalkForwardGap.NO_CELL,
+    )
     assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
 
 
@@ -752,7 +885,9 @@ def test_cancel_also_cancels_test_runs_and_stops_picking() -> None:
     assert len(runs.started) == 5
 
 
-def test_a_version_4_research_file_upgrades_without_window_picks(tmp_path: Path) -> None:
+def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Path) -> None:
+    """#365 리뷰 P3-4: V3-05 이전 실험(엠바고를 적용하지 않은 창)은 판본 5 로 올린 뒤 재시작해도
+    검증 실행을 시작하지 않고 학습 trial 이 끝나면 완료다."""
     runs = _FakeRuns()
     path = tmp_path / "research.sqlite3"
     experiment_id = (
@@ -761,13 +896,20 @@ def test_a_version_4_research_file_upgrades_without_window_picks(tmp_path: Path)
         .record.experiment_id
     )
     with sqlite3.connect(path) as connection:
+        # 판본 4 서버가 쓴 행에는 `measured` 가 없다.
+        (stored,) = connection.execute("SELECT design_json FROM experiments").fetchone()
+        document = json.loads(stored)
+        del document["design"]["measured"]
+        connection.execute("UPDATE experiments SET design_json = ?", (json.dumps(document),))
         connection.execute("DROP TABLE experiment_window_picks")
         connection.execute("PRAGMA user_version = 4")
-    _finish(runs, {"run-0": _result(0.2), "run-2": _result(0.1)})
+    runs.complete_all()
 
     reopened = _service(runs, repository=SQLiteExperimentRepository(path))
-    before = reopened.walk_forward(experiment_id).picks
-    reopened.advance(experiment_id)
+    reopened.recover()
 
-    assert before == ()
-    assert [p.run_id for p in reopened.walk_forward(experiment_id).picks] == ["run-4"]
+    assert reopened.advance(experiment_id) is True
+    assert len(runs.started) == 4
+    assert reopened.get(experiment_id).status is ExperimentStatus.COMPLETED
+    report = reopened.walk_forward(experiment_id)
+    assert (report.windows, report.gap) == ((), WalkForwardGap.LEGACY_DESIGN)

@@ -6,6 +6,7 @@ from strategy_workbench.application.experiment_run._service import (
     ExperimentRunService,
     ExperimentTrialState,
     WalkForwardReport,
+    WalkForwardWindowResult,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "ExperimentRunService",
     "ExperimentTrialState",
     "WalkForwardReport",
+    "WalkForwardWindowResult",
 ]

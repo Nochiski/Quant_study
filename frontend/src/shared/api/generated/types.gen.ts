@@ -1553,6 +1553,10 @@ export type ExperimentControlsRequest = {
  */
 export type ExperimentDesign = {
   /**
+   * Measured
+   */
+  measured?: boolean;
+  /**
    * Parameter Values
    */
   parameter_values: {
@@ -6428,29 +6432,41 @@ export type ValidationKind = "syntax" | "semantic" | "capability";
 export type ValidationSeverity = "error" | "warning";
 
 /**
+ * WalkForwardGap
+ *
+ * 이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.
+ *
+ * 값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.
+ */
+export type WalkForwardGap =
+  "legacy_design" | "test_failed" | "no_cell" | "pending";
+
+/**
  * WalkForwardReport
  *
  * 워크포워드 결과(V3-05). 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율이다.
  *
- * 곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 끝나야 채워진다.
+ * 곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 완료돼야 채워지고, 아니면 비우고 `gap` 에
+ * 이유를 싣는다 — 실패한 창을 빼고 남은 창만 이으면 낙관 쪽으로 빠진다.
  */
 export type WalkForwardReport = {
   /**
    * Curve
    */
   curve: Array<EquityCurvePoint>;
+  gap: WalkForwardGap | null;
   /**
    * Out Of Sample Sharpe
    */
   out_of_sample_sharpe: number | null;
   /**
-   * Picks
-   */
-  picks: Array<WindowPick>;
-  /**
    * Retention
    */
   retention: number | null;
+  /**
+   * Windows
+   */
+  windows: Array<WalkForwardWindowResult>;
 };
 
 /**
@@ -6475,6 +6491,29 @@ export type WalkForwardWindow = {
    * Train Start
    */
   train_start: string;
+};
+
+/**
+ * WalkForwardWindowResult
+ *
+ * 창 하나의 자동 선택과 그 검증 실행 결과.
+ */
+export type WalkForwardWindowResult = {
+  gap: WalkForwardGap | null;
+  pick: WindowPick;
+  /**
+   * Run Error Code
+   */
+  run_error_code:
+    | "portfolio.strategy.invalid"
+    | "portfolio.data.unavailable"
+    | "portfolio.raw_observation.invalid"
+    | "backtest.run.invalid"
+    | "backtest.run.equity_wiped_out"
+    | "backtest.run.internal"
+    | "backtest.run.interrupted"
+    | null;
+  run_status: RunStatus | null;
 };
 
 /**

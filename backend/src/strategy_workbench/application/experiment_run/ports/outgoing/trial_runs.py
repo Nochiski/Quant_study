@@ -46,6 +46,14 @@ class TrialRunPort(Protocol):
         """
         ...
 
+    def rejection(self, error: Exception) -> TrialRunRejectedError | None:
+        """`admit` 이 올린 오류가 접수 거절이면 코드를 실은 오류, 아니면 None(예상 밖 오류).
+
+        실험을 만들 때는 거절을 그대로 올려 inbound 가 옮기고, 워크포워드 검증 실행처럼 요청
+        스레드 밖에서 다시 검사할 때는 이것으로 코드를 받아 기록한다.
+        """
+        ...
+
     def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
         """실행을 접수하고 run_id 를 돌려준다. `trial_key` 로 계열 원장에 적는다.
 

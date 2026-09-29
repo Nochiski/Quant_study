@@ -5,20 +5,14 @@ import time
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from threading import RLock, Thread
 
-from strategy_workbench.domain.analytics.facade.metrics import (
-    AnalysisPoint,
-    AnalyticsInput,
-    EquityCurvePoint,
-    MetricRegistry,
-    compute_analytics,
-    session_sharpe,
-)
+from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint, MetricRegistry
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
     BacktestRunState,
+    RunFailureCode,
     RunStatus,
     SavedRevisionReference,
 )
@@ -31,11 +25,15 @@ from strategy_workbench.domain.experiment.facade.design import (
     GridIndex,
     InvalidExperimentSpecError,
     SplitSpec,
+    WalkForwardGap,
     build_search_spec,
     experiment_trial_key,
+    out_of_sample_sharpe,
     pick_window_cell,
     stitch_out_of_sample,
+    walk_forward_gap,
     walk_forward_retention,
+    window_gap,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentControls,
@@ -110,17 +108,32 @@ class Experiment:
 
 
 @dataclass(frozen=True)
+class WalkForwardWindowResult:
+    """창 하나의 자동 선택과 그 검증 실행 결과."""
+
+    pick: WindowPick
+    # 검증 실행 상태·실패 코드. 실행이 없으면(고를 칸 없음, 접수 거절 — 거절 코드는
+    # `pick.error_code`) None 이다.
+    run_status: RunStatus | None
+    run_error_code: RunFailureCode | None
+    # 이 창이 곡선에 들지 못하는 이유. 검증 실행이 완료됐으면 None.
+    gap: WalkForwardGap | None
+
+
+@dataclass(frozen=True)
 class WalkForwardReport:
     """워크포워드 결과(V3-05). 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율이다.
 
-    곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 끝나야 채워진다.
+    곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 완료돼야 채워지고, 아니면 비우고 `gap` 에
+    이유를 싣는다 — 실패한 창을 빼고 남은 창만 이으면 낙관 쪽으로 빠진다.
     """
 
-    picks: tuple[WindowPick, ...]
+    windows: tuple[WalkForwardWindowResult, ...]
     curve: tuple[EquityCurvePoint, ...]
     # 이어 붙인 곡선의 세션 단위(연율화 전) 샤프 — 학습 점수(대표 샤프)와 같은 단위다.
     out_of_sample_sharpe: float | None
     retention: float | None
+    gap: WalkForwardGap | None
 
 
 @dataclass(frozen=True)
@@ -287,6 +300,7 @@ class ExperimentRunService:
                 environment.end,
                 self._runs.sessions(environment.start, environment.end),
             ),
+            measured=True,
         )
 
     def control(
@@ -355,60 +369,54 @@ class ExperimentRunService:
         그 뒤 검증 실행이 중단되는 경우는 재시작뿐이라 `recover` 의 제출이 다시 민다.
 
         고른 칸의 검증 실행은 그 칸의 시도 키로 원장에 적어 재확인이 된다 — 창은 N 을 늘리지
-        않는다(V3-03 P2-1). 재시작으로 중단된 검증 실행은 같은 칸으로 다시 넘긴다.
-        """
-        with self._lock:
-            record = self._repository.get(experiment_id)
-            if record.cancelled_at is not None:
-                return True
-            states = self._trial_states(record)
-            open_windows, _ = self._open_windows(record, states)
-            base = self._runs.admit(record.run).run if open_windows else None
-            for index, window_states, pick in open_windows:
-                if pick is None:
-                    trial_index, sharpe = self._choose(record, window_states)
-                else:
-                    trial_index, sharpe = pick.trial_index, pick.train_sharpe
-                self._pick(record, base, index, trial_index, sharpe, pick)
-            return all(state.status.is_terminal and not state.awaiting_recovery for state in states)
-
-    def walk_forward(self, experiment_id: str) -> WalkForwardReport:
-        """창별 선택과, 모든 창의 검증 실행이 끝났으면 이어 붙인 곡선·표본 밖 샤프·유지율.
-
-        표본 밖 샤프는 곡선을 지표 레지스트리(`compute_analytics`)로 잰 샤프를 세션 단위로 바꾼
-        값이다.
+        않는다(V3-03 P2-1). 재시작으로 중단된 검증 실행은 같은 칸으로 다시 넘긴다. 기반 요청
+        재검사가 거절되면 그 창들의 선택에 거절 코드를 남긴다. V3-05 이전 설계의 실험은 돌리지
+        않는다(`ExperimentDesign.measured`).
         """
         record = self._repository.get(experiment_id)
+        if record.cancelled_at is not None or not record.design.measured:
+            return True
+        states = self._trial_states(record)
+        open_windows, _ = self._open_windows(record, states)
+        # 학습 산출물 읽기는 락 밖에서 한다 — 락은 모든 실험의 취소·재시도·조작이 함께 쓴다.
+        chosen = [
+            (index, pick, self._choose(record, window_states) if pick is None else pick)
+            for index, window_states, pick in open_windows
+        ]
+        with self._lock:
+            if chosen and self._repository.get(experiment_id).cancelled_at is None:
+                latest = _latest_by_window(self._repository.picks(experiment_id))
+                try:
+                    base: BacktestRunSpec | TrialRunRejectedError = self._runs.admit(record.run).run
+                except Exception as error:
+                    rejected = self._runs.rejection(error)
+                    if rejected is None:
+                        raise
+                    base = rejected
+                for index, pick, choice in chosen:
+                    if latest.get(index) == pick:  # 다른 제출이 그사이 고르지 않았다
+                        self._pick(record, base, index, choice, pick)
+        return all(state.status.is_terminal and not state.awaiting_recovery for state in states)
+
+    def walk_forward(self, experiment_id: str) -> WalkForwardReport:
+        """창별 선택·검증 실행 결과와, 모든 창의 검증 실행이 완료됐으면 이어 붙인 곡선·표본 밖
+        샤프·유지율(규칙은 `domain/experiment/_walk_forward.py`)."""
+        record = self._repository.get(experiment_id)
+        if not record.design.measured:
+            return WalkForwardReport((), (), None, None, WalkForwardGap.LEGACY_DESIGN)
         picks = tuple(_latest_by_window(self._repository.picks(experiment_id)).values())
         runs = self._runs.states({pick.run_id for pick in picks if pick.run_id is not None})
-        if len(picks) < len(record.design.windows) or not all(
-            pick.run_id is not None and runs[pick.run_id].status is RunStatus.COMPLETED
-            for pick in picks
-        ):
-            return WalkForwardReport(picks, (), None, None)
+        windows = tuple(_window_result(pick, runs) for pick in picks)
+        missing = [WalkForwardGap.PENDING] * (len(record.design.windows) - len(picks))
+        gap = walk_forward_gap([window.gap for window in windows] + missing)
+        if gap is not None:
+            return WalkForwardReport(windows, (), None, None, gap)
         curve = stitch_out_of_sample(
-            [self._runs.result(pick.run_id or "").series.equity for pick in picks],
-            record.run.initial_cash,
+            [self._runs.result(pick.run_id or "").series.equity for pick in picks]
         )
-        environment = record.run.environment
-        if environment is None:  # pragma: no cover - `_design` 이 검사한 요청만 저장한다
-            raise RuntimeError(f"experiment base run has no run environment — id={experiment_id}")
-        # 곡선의 기준점은 첫 검증 창 바로 앞 세션이다(구간 지표의 경계일 규칙, #274).
-        first_test = record.design.windows[0].test_start
-        base = self._runs.sessions(environment.start, first_test - timedelta(days=1))[-1]
-        report = compute_analytics(
-            AnalyticsInput(
-                points=tuple(AnalysisPoint(p.session, p.equity, 0.0, 0.0) for p in curve),
-                traded_notional=0.0,
-                base=AnalysisPoint(base, 1.0, 0.0, 0.0),
-            ),
-            self._registry,
-            annualization_days=record.run.annualization_days,
-        )
-        sharpe = next(m.value for m in report.metrics if m.metric_id == "sharpe")
-        oos = None if sharpe is None else session_sharpe(sharpe, record.run.annualization_days)
+        oos = out_of_sample_sharpe(curve, self._registry, record.run.annualization_days)
         train = [pick.train_sharpe for pick in picks if pick.train_sharpe is not None]
-        return WalkForwardReport(picks, curve, oos, walk_forward_retention(oos, train))
+        return WalkForwardReport(windows, curve, oos, walk_forward_retention(oos, train), None)
 
     def _open_windows(
         self, record: ExperimentRecord, states: tuple[ExperimentTrialState, ...]
@@ -434,7 +442,7 @@ class ExperimentRunService:
 
     def _choose(
         self, record: ExperimentRecord, window_states: list[ExperimentTrialState]
-    ) -> tuple[int | None, float | None]:
+    ) -> _Choice:
         """창의 학습 trial 가운데 대표 샤프로 칸을 고른다(`pick_window_cell`)."""
         scores: dict[GridIndex, float] = {}
         for state in window_states:
@@ -445,26 +453,29 @@ class ExperimentRunService:
                     scores[state.trial.grid_index] = sharpe
         cell = pick_window_cell(scores, record.design.search.shape, record.split.selection_rule)
         if cell is None:
-            return None, None
+            return _Choice(None, None)
         chosen = next(state for state in window_states if state.trial.grid_index == cell)
-        return chosen.trial.index, scores[cell]
+        return _Choice(chosen.trial.index, scores[cell])
 
     def _pick(
         self,
         record: ExperimentRecord,
-        base: BacktestRunSpec | None,
+        base: BacktestRunSpec | TrialRunRejectedError,
         window_index: int,
-        trial_index: int | None,
-        train_sharpe: float | None,
+        choice: _Choice | WindowPick,
         previous: WindowPick | None,
     ) -> None:
+        """`choice` 는 이번에 고른 칸이거나 검증 실행이 중단된 앞 선택이다(같은 칸으로 다시)."""
+        trial_index = choice.trial_index
         run_id: str | None = None
         error_code: str | None = None
         error: str | None = None
-        if trial_index is not None and base is not None:
+        if trial_index is not None:
             trial = record.design.trials()[trial_index]
             window = trial.window
             try:
+                if isinstance(base, TrialRunRejectedError):
+                    raise base
                 run_id = self._runs.start(
                     _run_request(record.run, trial, window.test_start, window.test_end),
                     trial_key=experiment_trial_key(base, trial),
@@ -478,7 +489,7 @@ class ExperimentRunService:
                 window_index=window_index,
                 attempt=1 if previous is None else previous.attempt + 1,
                 trial_index=trial_index,
-                train_sharpe=train_sharpe,
+                train_sharpe=choice.train_sharpe,
                 created_at=self._now(),
                 run_id=run_id,
                 error_code=error_code,
@@ -538,6 +549,8 @@ class ExperimentRunService:
         self, record: ExperimentRecord, states: tuple[ExperimentTrialState, ...]
     ) -> bool:
         """학습이 끝난 창의 검증 실행을 아직 넘기지 않았거나 그 실행이 끝나지 않았다."""
+        if not record.design.measured:
+            return False
         open_windows, waiting = self._open_windows(record, states)
         return waiting or any(
             pick is not None or any(s.status is TrialStatus.COMPLETED for s in window_states)
@@ -614,6 +627,26 @@ def _run_request(
         base,
         environment=replace(environment, start=start, end=end),
         parameter_values=trial.parameter_values,
+    )
+
+
+@dataclass(frozen=True)
+class _Choice:
+    """창에서 고른 칸의 학습 trial 과 그 대표 샤프. 고를 칸이 없으면 둘 다 None."""
+
+    trial_index: int | None
+    train_sharpe: float | None
+
+
+def _window_result(
+    pick: WindowPick, runs: Mapping[str, BacktestRunState]
+) -> WalkForwardWindowResult:
+    run = runs.get(pick.run_id) if pick.run_id is not None else None
+    return WalkForwardWindowResult(
+        pick=pick,
+        run_status=None if run is None else run.status,
+        run_error_code=None if run is None else run.error_code,
+        gap=window_gap(pick.trial_index is not None, run),
     )
 
 

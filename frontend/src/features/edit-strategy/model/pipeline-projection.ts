@@ -8,14 +8,13 @@
  * 스키마 설명 키 아래 i18n 조각이 정한다(리드 결정 2026-09-30).
  */
 import { t, tName, tOptional } from "../../../shared/config";
-import type { ParsedSource } from "../../../shared/lib/yaml12";
 import type { DocumentDiagnostic } from "./document-state";
-import {
-  projectForm,
-  type FormField,
-  type FormListItem,
-  type FormListSection,
-  type FormSection,
+import type {
+  FormField,
+  FormListItem,
+  FormListSection,
+  FormProjection,
+  FormSection,
 } from "./form-projection";
 import type { ObjectSection } from "./form-transactions";
 import {
@@ -88,13 +87,15 @@ const cardsOf = (staged: readonly StagedRow[]): PipelineCard[] => {
   return [...cards.values()];
 };
 
+/**
+ * Form 투영(`useFormProjection` 이 stale parse·진단 규칙을 한 번 판정한 결과)을 단계와 카드로 다시 묶는다.
+ * `tree` 는 그 투영을 만든 parse tree 다(union 분기를 스키마에서 고른다).
+ */
 export const projectPipeline = (
   schema: JsonSchema,
-  parse: ParsedSource | null,
-  diagnostics: readonly DocumentDiagnostic[],
+  form: FormProjection,
+  tree: unknown,
 ): PipelineProjection => {
-  const tree: unknown =
-    parse !== null && parse.status === "ok" ? parse.tree : {};
   const rootProperties = isRecord(schema.properties) ? schema.properties : {};
   type Entry = {
     lists: FormListSection[];
@@ -116,7 +117,7 @@ export const projectPipeline = (
     return node === undefined ? null : schemaFacts(node);
   };
   const unstaged: FormSection[] = [];
-  for (const section of projectForm(schema, parse, diagnostics).sections) {
+  for (const section of form.sections) {
     // 섹션의 `x-stage`는 `$ref`를 풀기 전의 최상위 property에 있다(Form 섹션 이름과 같은 자리).
     const property = rootProperties[section.key];
     const sectionStage = isRecord(property)

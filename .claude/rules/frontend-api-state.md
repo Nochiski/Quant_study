@@ -35,7 +35,8 @@ paths:
   실패도 backend가 `backtest.run.field_invalid`(`field` = 본문 점 경로)로 코드화한다 — FastAPI 기본
   배열 422를 새 화면 계약으로 삼지 않는다. 거절의 `field`를 실행 설정 패널이 칸 이름으로 바꿀 수 있으면
   `backtest.error.<code>.named`(`{field}` 자리)에 넣는다 — 경로→이름 대응은 `features/run-backtest`의
-  `runFieldLabel` 하나가 소유한다.
+  `runFieldLabel` 하나가 소유한다. detail의 문자열 값은 `{이름}` 자리표시자로 채운다(예: 연구 구간 날짜,
+  `ApiRequestError.values`). `message`는 싣지 않는다.
 - 폴링 본문의 실패 코드(`BacktestRunState.error_code`, 어휘 SoT는 backend `RunFailureCode`)는
   `backtest.run.error.<code>`로 번역하고, 번역이 있으면 서버 원문(`error`)은 접힌 진단 상세로
   내린다. 시작 거절의 `backtest.error.*`와 키를 공유하지 않는다 — 같은 코드라도 시작 거절은 실행 전에

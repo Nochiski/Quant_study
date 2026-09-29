@@ -366,6 +366,37 @@ export type BacktestEnvironmentRequiredDetail = {
 };
 
 /**
+ * BacktestResearchWindowViolationDetail
+ *
+ * 측정 시작일이 연구 구간 밖이다(spec D1).
+ *
+ * 화면 문장은 frontend 가 `code` 로 번역하되 날짜는 자리표시자로 두고 이 detail 의 값으로 채운다 —
+ * 날짜 owner 는 `domain/backtest/_research_window.py` 하나다.
+ */
+export type BacktestResearchWindowViolationDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.research_window_violation";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Research Start
+   */
+  research_start: string;
+  /**
+   * Sealed End
+   */
+  sealed_end: string;
+  /**
+   * Sealed Start
+   */
+  sealed_start: string;
+};
+
+/**
  * BacktestResultNotReadyDetail
  */
 export type BacktestResultNotReadyDetail = {
@@ -664,6 +695,9 @@ export type BacktestUnprocessableResponse = {
     | ({
         code: "backtest.run.environment_required";
       } & BacktestEnvironmentRequiredDetail)
+    | ({
+        code: "backtest.run.research_window_violation";
+      } & BacktestResearchWindowViolationDetail)
     | ({
         code: "backtest.strategy.requires_upgrade";
       } & BacktestStrategyRequiresUpgradeDetail)

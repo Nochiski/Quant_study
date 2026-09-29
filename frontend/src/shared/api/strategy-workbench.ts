@@ -104,6 +104,8 @@ export class ApiRequestError extends Error {
    * 상세에만 쓴다 — 저장·업그레이드 배너와 추적 오류는 `detail` 을 본문으로 그린다(#268 리뷰 P3-4).
    */
   readonly diagnostic: string | undefined;
+  /** detail 의 문자열 칸(`message` 제외). 거절 문장의 `{이름}` 자리표시자를 채운다(예: 연구 구간 날짜). */
+  readonly values: Readonly<Record<string, string>>;
 
   constructor(
     context: string,
@@ -114,6 +116,7 @@ export class ApiRequestError extends Error {
     currentDraft: StrategyDraft | null = null,
     field?: string,
     diagnostic?: string,
+    values: Readonly<Record<string, string>> = {},
   ) {
     super(
       `API request failed: ${context} status=${status} code=${code ?? "-"}`,
@@ -126,6 +129,7 @@ export class ApiRequestError extends Error {
     this.currentDraft = currentDraft;
     this.field = field;
     this.diagnostic = diagnostic;
+    this.values = values;
   }
 }
 
@@ -160,6 +164,20 @@ const detailFieldPath = (error: unknown): string | undefined => {
     return undefined;
   const value = (detail as { field: unknown }).field;
   return typeof value === "string" ? value : undefined;
+};
+
+const detailValues = (error: unknown): Record<string, string> => {
+  if (typeof error !== "object" || error === null || !("detail" in error))
+    return {};
+  const detail = (error as { detail: unknown }).detail;
+  if (typeof detail !== "object" || detail === null) return {};
+  return Object.fromEntries(
+    // 서버 원문 `message` 는 번역 문장에 새지 않게 뺀다 — 접힌 진단 상세로만 간다.
+    Object.entries(detail).filter(
+      (entry): entry is [string, string] =>
+        entry[0] !== "message" && typeof entry[1] === "string",
+    ),
+  );
 };
 
 /**
@@ -310,6 +328,7 @@ const requestError = (
     draftConflict?.current ?? null,
     detailFieldPath(response.error),
     requestValidationSummary(response.error),
+    detailValues(response.error),
   );
 };
 

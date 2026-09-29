@@ -1,4 +1,5 @@
-"""P2-01·P2-03: 실행 설정(`RunEnvironment`) 값 타입·canonical hash·필수 규칙·런타임 스키마."""
+"""P2-01·P2-03·V1-01(검증 랩): 실행 설정(`RunEnvironment`) 값 타입·canonical hash·필수 규칙·
+연구 구간 잠금·런타임 스키마."""
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     ExecutionTiming,
     Market,
     MissingRunEnvironmentError,
+    ResearchWindowViolationError,
     RunEnvironment,
     environment_hash,
     require_environment,
@@ -147,10 +149,43 @@ def test_schema_bounds_come_from_the_same_rows_the_model_validates_with() -> Non
     )
 
 
-def test_explicit_environment_is_returned_unchanged() -> None:
-    explicit = _environment()
+def test_environment_measured_from_the_research_floor_is_returned_unchanged() -> None:
+    """연구 하한 2020-01-02 당일부터 측정하는 실행 설정은 그대로 통과한다(spec D1)."""
+    explicit = replace(_environment(), start=date(2020, 1, 2))
 
     assert require_environment(explicit, requested_by="test") is explicit
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        date(2020, 1, 1),  # 하한 전날(신정 휴장일)
+        date(2019, 12, 31),  # 봉인 구간 마지막 날
+        date(2015, 12, 31),  # 봉인 앞 구간도 측정하지 않는다
+    ],
+)
+def test_measurement_before_the_research_floor_is_refused(start: date) -> None:
+    """spec D1: 판정은 "측정 시작일 ≥ 2020-01-02" 하나다. 봉인 구간을 한 세션이라도 측정하면
+    홀드아웃이 이미 열람된 것과 같다."""
+    with pytest.raises(ResearchWindowViolationError) as info:
+        require_environment(
+            replace(_environment(), start=start),
+            requested_by="backtest.run('퀄리티 모멘텀')",
+        )
+
+    message = str(info.value)
+    assert info.value.code == "run_environment.research_window"
+    assert "requested_by=backtest.run('퀄리티 모멘텀')" in message
+    assert f"expected=start>=2020-01-02 got=start={start}" in message
+    assert "2016-01-01~2019-12-31은 홀드아웃 봉인 구간" in message
+
+
+def test_pre_research_environment_is_still_a_constructible_value() -> None:
+    """잠금은 실행 관문의 판정이지 값 규칙이 아니다. 엔진 직접 테스트·벤치 스크립트·은퇴 문서
+    업그레이드 응답이 봉인 구간 환경을 값으로 만들 수 있어야 한다(spec D1)."""
+    sealed = RunEnvironment(start=date(2016, 1, 1), end=date(2019, 12, 31), universe_id="KOSPI200")
+
+    assert (sealed.start, sealed.end) == (date(2016, 1, 1), date(2019, 12, 31))
 
 
 def test_missing_environment_is_refused_with_a_coded_diagnostic() -> None:

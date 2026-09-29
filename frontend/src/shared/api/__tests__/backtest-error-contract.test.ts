@@ -28,6 +28,9 @@ const classify = (response: StartBacktest422): string => {
     // schema 1.2 문서는 실행 설정을 담지 않으므로 시작 요청이 반드시 실어야 한다(P2-03).
     case "backtest.run.environment_required":
       return `environment:${detail.message}`;
+    // 봉인 구간을 측정하는 요청은 서버가 거절한다(검증 랩 spec D1).
+    case "backtest.run.research_window_violation":
+      return `research_window:${detail.message}`;
     default: {
       const exhaustive: never = detail;
       return exhaustive;
@@ -130,6 +133,7 @@ describe("backtest run failure code vocabulary", () => {
       "backtest.run.environment_required",
       "backtest.run.field_invalid",
       "backtest.run.invalid",
+      "backtest.run.research_window_violation",
       "backtest.strategy.not_found",
       "backtest.strategy.requires_upgrade",
       "backtest.strategy.stale",

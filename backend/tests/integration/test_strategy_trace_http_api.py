@@ -799,3 +799,27 @@ def test_a_missing_environment_is_coded_on_trace_like_preview() -> None:
         for response in (preview, trace)
     ]
     assert issue_codes == [["run_environment.required"]] * 2
+
+
+def test_measuring_the_sealed_window_is_coded_on_preview_and_trace() -> None:
+    """spec D1: 연구 하한 전날(2020-01-01)부터 측정하면 preview·trace 가 같은 issue code 로
+    거절한다."""
+    client = TestClient(build_http_app())
+    spec, request = _inline_request(client)
+    environment = _environment(start="2020-01-01")
+
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": spec, "environment": environment}
+    )
+    trace = client.post(
+        "/api/v1/strategies/debug/trace", json={**request, "environment": environment}
+    )
+
+    assert (preview.status_code, trace.status_code) == (422, 422), (preview.text, trace.text)
+    for response in (preview, trace):
+        detail = response.json()["detail"]
+        assert detail["code"] == "portfolio.strategy.invalid"
+        (issue,) = detail["validation"]["issues"]
+        assert issue["code"] == "run_environment.research_window"
+        assert "expected=start>=2020-01-02 got=start=2020-01-01" in issue["message"]
+        assert "2016-01-01~2019-12-31은 홀드아웃 봉인 구간" in issue["message"]

@@ -30,6 +30,7 @@ from strategy_workbench.application.factor_research.facade.ports import (
 )
 from strategy_workbench.domain.backtest.facade.environment import (
     MissingRunEnvironmentError,
+    ResearchWindowViolationError,
     RunEnvironment,
     require_environment,
 )
@@ -598,15 +599,15 @@ class PortfolioDesignService:
 def _require_environment_or_reject(
     spec: StrategySpec, environment: RunEnvironment | None
 ) -> RunEnvironment:
-    """요청이 실은 실행 설정을 확정하고, 없으면 요청 거부로 바꾼다.
+    """요청이 실은 실행 설정을 확정하고, 없거나 연구 구간 밖이면 요청 거부로 바꾼다.
 
-    실행 설정 부재는 서버 오류가 아니라 요청 문제라 `portfolio.strategy.invalid` 진단으로
-    나간다. `run_environment.*` 코드는 `strategy.*` 레지스트리 밖이라 그대로 전달된다.
+    실행 설정 부재·연구 구간 위반은 서버 오류가 아니라 요청 문제라 `portfolio.strategy.invalid`
+    진단으로 나간다. `run_environment.*` 코드는 `strategy.*` 레지스트리 밖이라 그대로 전달된다.
     `spec` 은 진단 문장에 실을 호출 맥락(전략 이름)을 주기 위해서만 읽는다.
     """
     try:
         return require_environment(environment, requested_by=f"portfolio.preview({spec.title!r})")
-    except MissingRunEnvironmentError as error:
+    except (MissingRunEnvironmentError, ResearchWindowViolationError) as error:
         issue = semantic_issue(error.code, "environment", str(error))
         raise InvalidPortfolioRequestError(
             StrategyValidation(valid=False, issues=(issue,))

@@ -2,15 +2,15 @@
 plan_version: 1
 project: validation-lab
 project_status: IN_PROGRESS
-current_phase: V0,V1,V2,V3
-current_pr: V0-01,V1-01,V2-01,V3-01
-active_prs: [V0-01, V1-01, V2-01, V3-01]
-parallel_window: [V0-01, V1-01, V2-01, V3-01]
-last_updated: 2026-09-29T15:55:52+09:00
+current_phase: V1,V2,V3
+current_pr: V1-01,V2-01,V3-01
+active_prs: [V1-01, V2-01, V3-01]
+parallel_window: [V1-01, V2-01, V3-01]
+last_updated: 2026-09-29T17:28:15+09:00
 planned_prs: 28
-merged_prs: 0
+merged_prs: 1
 approved_prs: 1
-progress_percent: 0
+progress_percent: 4
 ---
 
 # 검증 랩 실시간 진행 계획
@@ -24,12 +24,12 @@ progress_percent: 0
 | Field | Value |
 |---|---|
 | Project status | `IN_PROGRESS` |
-| Current phase | `V0,V1,V2,V3` |
-| Current/next PR | `V0-01,V1-01,V2-01,V3-01` |
-| Active PR | `V0-01, V1-01, V2-01, V3-01` |
-| Progress | `0 / 28 merged (0%)` |
+| Current phase | `V1,V2,V3` |
+| Current/next PR | `V1-01,V2-01,V3-01` |
+| Active PR | `V1-01, V2-01, V3-01` |
+| Progress | `1 / 28 merged (4%)` |
 | Approved | `1 / 28` |
-| Aggregated at | `2026-09-29 15:55 KST` |
+| Aggregated at | `2026-09-29 17:28 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -67,27 +67,27 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| V0 | Planning package | 1 | 0 | `APPROVED` |
-| V1 | Research window seal, run persistence, trial ledger | 5 | 0 | `IN_PROGRESS` |
+| V0 | Planning package | 1 | 1 | `MERGED` |
+| V1 | Research window seal, run persistence, trial ledger | 5 | 0 | `SELF_CHECK` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 0 | `IN_PROGRESS` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 0 | `IN_PROGRESS` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
 | V5 | Screens (after lang2 merge signal) | 7 | 0 | `WAITING` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
-| **Total** |  | **28** | **0** | **0%** |
+| **Total** |  | **28** | **1** | **4%** |
 <!-- PLAN:PHASES:END -->
 
 ## V0 — 기획 패키지
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V0-01` | 기획 패키지·설계 spec·유저 스토리 등록 | 없음 | `APPROVED` | [#282](https://github.com/Nochiski/Quant_study/pull/282) · `review_vlab_p0_01` 3차 APPROVE(1차 REQUEST_CHANGES P1 5건 해소, 비blocking 전부 반영) |
+| [x] | `V0-01` | 기획 패키지·설계 spec·유저 스토리 등록 | 없음 | `MERGED` | [#282](https://github.com/Nochiski/Quant_study/pull/282) · `review_vlab_p0_01` 3차 APPROVE(1차 REQUEST_CHANGES P1 5건 해소, 비blocking 전부 반영) · main 머지 `2178f73b`(2026-09-29) |
 
 ## V1 — 봉인과 기록
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V1-01` | 연구 구간 잠금(실행·미리보기·추적) | V0-01 | `IN_PROGRESS` | — |
+| [ ] | `V1-01` | 연구 구간 잠금(실행·미리보기·추적) | V0-01 | `SELF_CHECK` | — |
 | [ ] | `V1-02` | 연구 구간 잠금 확장(팩터·equity 미리보기) | V1-01 | `PLANNED` | — |
 | [ ] | `V1-03` | 실행 기록 영속화(research DB, interrupted) | V0-01, #161 머지 | `WAITING` | — |
 | [ ] | `V1-04` | 결과 재적재 | V1-03, #277 머지 | `PLANNED` | — |

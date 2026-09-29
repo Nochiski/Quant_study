@@ -474,6 +474,44 @@
         "title": "BacktestEnvironmentRequiredDetail",
         "type": "object"
       },
+      "BacktestResearchWindowViolationDetail": {
+        "description": "측정 시작일이 연구 구간 밖이다(spec D1).\n\n화면 문장은 frontend 가 `code` 로 번역하되 날짜는 자리표시자로 두고 이 detail 의 값으로 채운다 —\n날짜 owner 는 `domain/backtest/_research_window.py` 하나다.",
+        "properties": {
+          "code": {
+            "const": "backtest.run.research_window_violation",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "research_start": {
+            "format": "date",
+            "title": "Research Start",
+            "type": "string"
+          },
+          "sealed_end": {
+            "format": "date",
+            "title": "Sealed End",
+            "type": "string"
+          },
+          "sealed_start": {
+            "format": "date",
+            "title": "Sealed Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "sealed_start",
+          "sealed_end",
+          "research_start"
+        ],
+        "title": "BacktestResearchWindowViolationDetail",
+        "type": "object"
+      },
       "BacktestResultNotReadyDetail": {
         "properties": {
           "code": {
@@ -950,6 +988,7 @@
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
+                "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
               },
@@ -964,6 +1003,9 @@
               },
               {
                 "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
               },
               {
                 "$ref": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail"

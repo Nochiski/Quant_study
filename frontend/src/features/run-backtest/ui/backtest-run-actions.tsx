@@ -75,6 +75,7 @@ export const BacktestRunActions = ({
             replay.error.field !== undefined
             ? runFieldLabel(environmentFields, replay.error.field)
             : null,
+          replay.error instanceof ApiRequestError ? replay.error.values : {},
         );
 
   return (

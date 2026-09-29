@@ -26,6 +26,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
 )
 from strategy_workbench.domain.backtest.facade.environment import (
     MissingRunEnvironmentError,
+    ResearchWindowViolationError,
     require_environment,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -127,6 +128,19 @@ class MissingBacktestRunEnvironmentError(InvalidBacktestRunError):
     """
 
 
+class BacktestResearchWindowViolationError(InvalidBacktestRunError):
+    """측정 시작일이 연구 구간 밖이다(spec D1, V1-01).
+
+    `MissingBacktestRunEnvironmentError` 와 같은 이유로 HTTP 코드를 따로 준다. 프론트는 이 코드를
+    보고 봉인 구간과 연구 하한을 안내해야 하고, `backtest.run.invalid` 에 묻으면 문장 파싱 말고는
+    구분할 방법이 없다. 날짜는 도메인 오류(`violation`)가 싣는다.
+    """
+
+    def __init__(self, violation: ResearchWindowViolationError) -> None:
+        super().__init__(str(violation))
+        self.violation = violation
+
+
 class StrategyReferenceNotFoundError(LookupError):
     """The saved revision a run refers to does not exist."""
 
@@ -216,6 +230,8 @@ class BacktestRunService:
             )
         except MissingRunEnvironmentError as error:
             raise MissingBacktestRunEnvironmentError(str(error)) from error
+        except ResearchWindowViolationError as error:
+            raise BacktestResearchWindowViolationError(error) from error
         spec = replace(spec, environment=environment)
         # preflight 가 스펙 검증(InvalidPortfolioRequestError)·플랜 컴파일까지 대신한다.
         engine = self._portfolio_design.preflight(

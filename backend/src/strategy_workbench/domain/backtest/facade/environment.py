@@ -15,6 +15,10 @@ from strategy_workbench.domain.backtest._requirement import (
     MissingRunEnvironmentError,
     require_environment,
 )
+from strategy_workbench.domain.backtest._research_window import (
+    ResearchWindowViolationError,
+    require_research_window,
+)
 from strategy_workbench.domain.backtest._retired import (
     RetiredEnvironment,
     RetiredEnvironmentProblem,
@@ -35,12 +39,14 @@ __all__ = [
     "ExecutionTiming",
     "Market",
     "MissingRunEnvironmentError",
+    "ResearchWindowViolationError",
     "RetiredEnvironment",
     "RetiredEnvironmentProblem",
     "RunEnvironment",
     "environment_from_retired_settings",
     "environment_hash",
     "require_environment",
+    "require_research_window",
     "run_environment_canonical_json",
     "run_environment_schema",
     "run_environment_schema_hash",

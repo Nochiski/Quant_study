@@ -77,6 +77,7 @@ export type {
   AssistantTurnInProgressDetail,
   AssistantUnprocessableResponse,
   BacktestEnvironmentRequiredDetail,
+  BacktestResearchWindowViolationDetail,
   BacktestResultNotReadyDetail,
   BacktestResultNotReadyResponse,
   BacktestRunFieldInvalidDetail,

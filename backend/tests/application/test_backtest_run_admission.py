@@ -471,9 +471,21 @@ def test_only_runs_of_the_same_lineage_and_trial_key_join(gated_runs: _GatedRuns
 
 
 def test_a_user_who_withdraws_from_a_joined_experiment_run_returns_it_to_the_experiment(
-    gated_runs: _GatedRuns,
+    gated_runs: _GatedRuns, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """#346 리뷰 P3-1: 사용자가 이었다 취소한 대기 run 이 단일 실행 전용 슬롯을 쥐지 않는다."""
+    """#346 리뷰 P3-1: 사용자가 이었다 취소한 대기 run 이 단일 실행 전용 슬롯을 쥐지 않는다.
+
+    풀린 뒤 두 run 이 입구에 닿는 순서는 스레드 경합이라, 잠금 안에서 정해지는 배정(스레드 기동)
+    순서를 본다.
+    """
+    dispatched: list[str] = []
+
+    class _Recording(Thread):
+        def start(self) -> None:
+            dispatched.append(self.name.removeprefix("backtest-"))
+            super().start()
+
+    monkeypatch.setattr("strategy_workbench.application.backtest_run._service.Thread", _Recording)
     runs, port, entries = gated_runs("e1", "u1", "e2", "u2", run_slots=2)
     runs.start(_request(end=date(2024, 1, 12)), owner="exp")
     runs.start(_request(end=date(2024, 1, 9)))
@@ -489,7 +501,7 @@ def test_a_user_who_withdraws_from_a_joined_experiment_run_returns_it_to_the_exp
     assert still_waiting.status is RunStatus.QUEUED
     assert user.run.message == "Waiting for a free run slot"
     # e2 가 단일 실행 레인에 남았다면 먼저 빈 슬롯을 잡아 u2 보다 앞선다.
-    assert [end.day for end, _running in entries] == [12, 9, 10, 11]
+    assert dispatched == ["e1", "u1", "u2", "e2"]
 
 
 def test_an_experiment_run_waiting_for_the_experiment_share_says_it_waits(

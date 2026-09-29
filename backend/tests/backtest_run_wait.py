@@ -1,4 +1,4 @@
-"""백테스트 run 이 종결 상태에 이를 때까지 기다리는 테스트 헬퍼.
+"""백테스트 run 이 종결 상태에 이를 때까지(필요하면 run 스레드가 끝날 때까지) 기다리는 테스트 헬퍼.
 
 시작 요청이 즉시 202 를 돌려주고 TargetTape 까지 run 스레드에서 만들어지므로(#158) 모든 실행
 테스트가 종결 대기를 필요로 한다. 예산·폴링 간격·타임아웃 메시지를 한 곳에 둔다.
@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -50,3 +51,19 @@ def wait_for_terminal_run(
         time.sleep(_POLL_INTERVAL_S)
         state = backtests.state(run_id)
     return state
+
+
+def join_run_thread(run_id: str, *, timeout_s: float = 10.0) -> None:
+    """run 스레드(`backtest-{run_id}`)가 끝날 때까지 기다린다.
+
+    종결 상태는 run 스레드가 GC 범위를 나오고 자리를 내놓기 전에 기록된다. 그 뒤의 일(GC 임계값
+    복원·대기열의 다음 run 띄우기)을 단언하려면 상태가 아니라 스레드를 기다려야 한다.
+    """
+
+    for thread in threading.enumerate():
+        if thread.name == f"backtest-{run_id}":
+            thread.join(timeout=timeout_s)
+            if thread.is_alive():
+                raise AssertionError(
+                    f"run thread did not exit within {timeout_s}s — run_id={run_id}"
+                )

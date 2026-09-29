@@ -8,7 +8,6 @@ GC 임계값은 프로세스 전역이라 HTTP 요청과 공유된다. 그래서
 from __future__ import annotations
 
 import gc
-import threading
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import date
@@ -59,7 +58,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
     RebalanceFrequency,
     StrategySpec,
 )
-from tests.backtest_run_wait import wait_for_terminal_run
+from tests.backtest_run_wait import join_run_thread, wait_for_terminal_run
 
 # 기본값(700, 10, 10)과 다른 값으로 시작해, 복원이 "기본값으로 되돌리기"가 아니라 "들어가기 전
 # 값으로 되돌리기"임을 구분한다.
@@ -215,10 +214,7 @@ def _finish(runs: BacktestRunService, run_id: str) -> str:
     """
 
     state = wait_for_terminal_run(runs, run_id)
-    for thread in threading.enumerate():
-        if thread.name == f"backtest-{run_id}":
-            thread.join(timeout=10)
-            assert not thread.is_alive(), f"run thread did not exit — run_id={run_id}"
+    join_run_thread(run_id)
     return state.status.value
 
 

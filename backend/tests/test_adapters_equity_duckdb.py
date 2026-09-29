@@ -40,6 +40,10 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import BacktestDataQuery
 from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
+from strategy_workbench.application.factor_research.facade.research import (
+    FactorPreviewRequest,
+    FactorResearchService,
+)
 from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPreviewRequest,
@@ -54,6 +58,7 @@ from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
+    SNAPSHOT_CONTRACT_SEPARATOR,
     CellKind,
     DataLoadStatus,
     FieldLag,
@@ -175,12 +180,74 @@ def test_snapshot_is_the_manifest_hash_and_names_every_table(
     adapter: EquityDuckdbAdapter, root: Path
 ) -> None:
     snapshot = adapter.snapshot()
-    assert snapshot.snapshot_id == snapshot_id(table_builds(root))
+    # 앞부분은 원장 스냅샷(테이블 build 해시), 뒷부분은 필드 계약 판이다(#235).
+    ledger, separator, contract = snapshot.snapshot_id.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    assert (ledger, separator) == (snapshot_id(table_builds(root)), SNAPSHOT_CONTRACT_SEPARATOR)
+    assert re.fullmatch(r"[0-9a-f]{16}", contract)
     assert snapshot.schema_version == "equity-v1.2" and snapshot.point_in_time
     # 계약 패널이 그대로 보여 주는 값이라 루트 절대 경로를 싣지 않는다(#163)
     assert snapshot.source == "equity_duckdb"
     assert {r.dataset_id for r in snapshot.dataset_revisions} == set(table_builds(root))
     assert all(r.as_of == WB_SESSIONS[-1] for r in snapshot.dataset_revisions)
+
+
+def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
+    tmp_path: Path,
+) -> None:
+    """이슈 #235: 같은 원장 빌드라도 필드를 읽는 규칙이 바뀌면 데이터 스냅샷 id 가 갈린다.
+
+    카탈로그 매크로 본문(여기서는 `period_frontier` 가 없는 옛 재무 뷰)이 바뀌면 원장 판은
+    그대로이고 필드 계약 판만 바뀐다. 매크로가 싣는 parquet 절대경로에는 흔들리지 않는다 —
+    같은 원장·코드를 다른 폴더에 두어도 같은 id 다. 팩터 행렬 캐시 키는 이 id 를 받아 옛
+    의미의 값을 새 의미로 재사용하지 않는다.
+    """
+    here = build_workbench_root(tmp_path / "here" / "equity")
+    there = build_workbench_root(tmp_path / "there" / "equity")
+    ledger = snapshot_id(table_builds(here)) + SNAPSHOT_CONTRACT_SEPARATOR
+
+    current = EquityDuckdbAdapter(here)
+    assert current.snapshot().snapshot_id.startswith(ledger)
+    assert EquityDuckdbAdapter(there).snapshot().snapshot_id == current.snapshot().snapshot_id
+
+    write_catalog(there, legacy_fin_columns=("period_frontier",))
+    older = EquityDuckdbAdapter(there)
+    assert older.snapshot().snapshot_id.startswith(ledger)
+    assert older.snapshot().snapshot_id != current.snapshot().snapshot_id
+
+    request = FactorPreviewRequest(
+        FactorGraph(nodes=(FieldNode("close", "price.close", "field"),), output_node_id="close"),
+        START,
+        END,
+    )
+    registry = build_default_factor_registry()
+    keys = [
+        FactorResearchService(registry, adapter, adapter).preview(request).cache_key
+        for adapter in (current, older)
+    ]
+    assert [key.data_snapshot_id for key in keys] == [
+        current.snapshot().snapshot_id,
+        older.snapshot().snapshot_id,
+    ]
+    assert keys[0].fingerprint != keys[1].fingerprint
+
+
+def test_field_contract_follows_the_declaration_table(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """이슈 #235: 선언표(`FIELD_SPECS`)의 식이 바뀌면 같은 원장·카탈로그에서도 계약 판이 갈린다."""
+    before = EquityDuckdbAdapter(root).snapshot().snapshot_id
+    edited = tuple(
+        replace(spec, expr=f"({spec.expr}) * 1") if spec.field_id == "price.close" else spec
+        for spec in FIELD_SPECS
+    )
+    monkeypatch.setattr(
+        "strategy_workbench.adapters.outbound.equity_duckdb._adapter.FIELD_SPECS", edited
+    )
+    after = EquityDuckdbAdapter(root).snapshot().snapshot_id
+
+    ledger = before.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0] + SNAPSHOT_CONTRACT_SEPARATOR
+    assert after != before
+    assert after.startswith(ledger)
 
 
 def test_list_fields_serves_every_declared_field_whose_source_is_built(
@@ -974,8 +1041,10 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
             code in r.getMessage() and "ledger_sync catalog" in r.getMessage()
             for r in caplog.records
         ), code
-    # snapshot_id 는 meta 가 아니라 MANIFEST 에서 온다
-    assert adapter.snapshot().snapshot_id == snapshot_id(table_builds(root))
+    # 원장 판은 meta 가 아니라 MANIFEST 에서 온다
+    assert adapter.snapshot().snapshot_id.startswith(
+        snapshot_id(table_builds(root)) + SNAPSHOT_CONTRACT_SEPARATOR
+    )
 
 
 def test_catalog_without_required_view_column_drops_only_that_source(

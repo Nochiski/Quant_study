@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Callable
+from dataclasses import asdict, replace
 from datetime import date, timedelta
 
 from strategy_workbench.application.backtest_run.facade.ports import (
@@ -34,6 +35,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    field_contract_snapshot_id,
 )
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -75,7 +77,18 @@ class MockEquityDataAdapter:
         memberships: tuple[Membership, ...],
         observations: tuple[Observation, ...],
     ) -> None:
-        self._snapshot = snapshot
+        # 원천 판(fixture 가 정한 id) 뒤에 필드 선언표의 판을 붙인다 — 선언(단위·랙·값 타입·조정
+        # 짝)이 바뀌면 같은 fixture id 라도 다른 데이터 스냅샷이다(#235).
+        self._snapshot = replace(
+            snapshot,
+            snapshot_id=field_contract_snapshot_id(
+                snapshot.snapshot_id,
+                {
+                    "profiles": [asdict(profile) for profile in profiles],
+                    "adjusted_field_by_raw": ADJUSTED_FIELD_BY_RAW,
+                },
+            ),
+        )
         self._sessions = sessions
         self._profiles = profiles
         self._memberships = memberships

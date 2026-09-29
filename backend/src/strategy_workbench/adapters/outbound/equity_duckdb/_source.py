@@ -5,7 +5,8 @@ DESIGN §2 판본 규약: `<equity_root>/<table>/MANIFEST.json` 의 `current_bui
 커널 어댑터 `backtest_engine.adapters.equity_duckdb.resolve_table` 과 같은 규약이지만 패키지 경계
 (`.claude/rules/backend-package-boundary.md`: 커널 접근은 `adapters/outbound/backtest_engine` 만)
 때문에 import 하지 않고 여기서 다시 쓴다. `snapshot_id` 규칙은 `equity.catalog.snapshot_id`
-(전 테이블 `table=build` 정렬 해시 16자리)와 같아야 카탈로그 meta 와 대조할 수 있다.
+(전 테이블 `table=build` 정렬 해시 16자리)와 같아야 카탈로그 meta 와 대조할 수 있다. 이 값은
+원장 판이고, 어댑터가 뒤에 필드 계약 판을 붙여 워크벤치 데이터 스냅샷 id 를 만든다(#235).
 
 여기서 나는 예외는 전부 환경·설정 오류(빌드 안 된 테이블, 깨진 MANIFEST)다 — 질의 시점의 도메인
 실패(데이터 없음 등)는 어댑터가 포트 결과 값으로 돌려준다.

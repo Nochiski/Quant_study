@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -11,6 +13,7 @@ from strategy_workbench.application.equity_workspace.facade.workspace import (
 )
 from strategy_workbench.bootstrap.facade.container import build_container
 from strategy_workbench.domain.equity.facade.research_data import (
+    SNAPSHOT_CONTRACT_SEPARATOR,
     CellKind,
     DataLoadStatus,
     FieldLag,
@@ -59,6 +62,38 @@ def test_container_uses_explicit_mock_adapter_without_silent_fallback() -> None:
         build_container(equity_adapter="nope")
     with pytest.raises(ValueError, match="requires equity_root"):
         build_container(equity_adapter="duckdb")
+
+
+def test_mock_snapshot_id_carries_its_field_declaration_revision() -> None:
+    """이슈 #235: mock 도 fixture id 뒤에 자기 선언표의 판을 붙인다. 선언이 바뀌면 id 가 갈린다."""
+    demo = MockEquityDataAdapter.demo()
+    fixture_id, separator, revision = demo.snapshot().snapshot_id.partition(
+        SNAPSHOT_CONTRACT_SEPARATOR
+    )
+    assert (fixture_id, separator) == ("mock-equity-v0.2-20260903", SNAPSHOT_CONTRACT_SEPARATOR)
+    assert re.fullmatch(r"[0-9a-f]{16}", revision)
+
+    def snapshot_id_with(unit: str) -> str:
+        profiles = tuple(
+            replace(profile, unit=unit) if profile.field_id == "price.close" else profile
+            for profile in demo.list_fields()
+        )
+        return (
+            MockEquityDataAdapter(
+                snapshot=replace(demo.snapshot(), snapshot_id=fixture_id),
+                sessions=demo._sessions,  # pyright: ignore[reportPrivateUsage]  # reason: 선언표만 바꾼 mock 을 만들 공개 창구가 없다
+                profiles=profiles,
+                memberships=demo._memberships,  # pyright: ignore[reportPrivateUsage]  # reason: 위와 같음
+                observations=demo._observations,  # pyright: ignore[reportPrivateUsage]  # reason: 위와 같음
+            )
+            .snapshot()
+            .snapshot_id
+        )
+
+    assert snapshot_id_with("KRW") == demo.snapshot().snapshot_id
+    relabeled = snapshot_id_with("USD")
+    assert relabeled != demo.snapshot().snapshot_id
+    assert relabeled.startswith(fixture_id + SNAPSHOT_CONTRACT_SEPARATOR)
 
 
 def test_panel_hides_future_consensus_revision_until_the_lagged_session() -> None:

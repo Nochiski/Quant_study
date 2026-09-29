@@ -1,4 +1,5 @@
 from strategy_workbench.domain.equity._models import (
+    SNAPSHOT_CONTRACT_SEPARATOR,
     CellKind,
     DataLoadStatus,
     DatasetFieldProfile,
@@ -14,9 +15,11 @@ from strategy_workbench.domain.equity._models import (
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    field_contract_snapshot_id,
 )
 
 __all__ = [
+    "SNAPSHOT_CONTRACT_SEPARATOR",
     "CellKind",
     "DataLoadStatus",
     "DataSnapshot",
@@ -32,4 +35,5 @@ __all__ = [
     "UniverseHistoryQuery",
     "UniverseHistoryResult",
     "UniversePoint",
+    "field_contract_snapshot_id",
 ]

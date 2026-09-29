@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
@@ -70,6 +72,40 @@ class DataSnapshot:
     source: str
     point_in_time: bool
     dataset_revisions: tuple[DatasetRevision, ...]
+
+
+# 워크벤치 데이터 스냅샷 id 는 "원천 판:필드 계약 판" 이다(#235). 같은 원장 빌드라도 필드를 읽는
+# 규칙(어댑터 선언표·카탈로그 매크로 본문)이 바뀌면 값이 달라지는데, 원천 판만으로는 재현 지문·팩터
+# 행렬 캐시 키·run manifest 가 옛 의미와 새 의미를 같은 데이터로 기록했다.
+SNAPSHOT_CONTRACT_SEPARATOR = ":"
+
+
+def field_contract_snapshot_id(source_snapshot_id: str, field_contract: object) -> str:
+    """원천 판 id 뒤에 필드 계약 판(선언의 canonical JSON sha256 앞 16자리)을 붙인다.
+
+    앞부분은 원천이 정한 id(원장 테이블 build 해시·mock 고정 id) 그대로라 `_catalog_meta.json`·
+    `ledger_sync` 와 눈으로 대조된다. `field_contract` 는 어댑터가 자기 선언을 JSON 으로 옮길 수
+    있는 값으로 넘긴다. 소비자는 이 id 를 따로 조립하지 않고 포트가 돌려주는 `data_snapshot_id` 로
+    받는다.
+    """
+    material = json.dumps(
+        field_contract,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=_contract_json_default,
+    )
+    revision = hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
+    return f"{source_snapshot_id}{SNAPSHOT_CONTRACT_SEPARATOR}{revision}"
+
+
+def _contract_json_default(value: object) -> str:
+    if isinstance(value, Enum):
+        return str(value.value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    raise TypeError(f"unsupported field contract value — type={type(value).__name__}")
 
 
 @dataclass(frozen=True)

@@ -68,7 +68,7 @@ import logging
 import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -109,6 +109,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    field_contract_snapshot_id,
 )
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -142,6 +143,7 @@ from ._specs import (
     REQUIRED_TABLES,
     SECURITY_TABLE,
     SOURCE_BY_NAME,
+    SOURCE_SPECS,
     SPAN_TABLE,
     UNIVERSE_TABLE,
     UNSUPPORTED_FIELDS,
@@ -197,6 +199,15 @@ EVENT_TYPE_MAP: dict[str, str] = {
 # `unknown_price_only`(기준가만 변화)는 항상 factor_ok=false 라 여기 오지 않고, ok 로 실려 오면
 # 어휘 밖이 맞다 — 시총 불변이 아닌 사건을 분할로 적용하면 안 된다.
 RATIO_DIRECTED_EVENT_TYPES: frozenset[str] = frozenset({"unknown_krx"})
+# 카탈로그 매크로 본문이 읽는 parquet 목록. duckdb 는 본문을 정규화해 목록은
+# `read_parquet(main.list_value('<절대경로>', ...), ...)`, 파일 하나는 문자열 그대로 돌려준다. 필드
+# 계약 판은 이 자리를 테이블 이름으로 바꿔, 기계마다 다른 경로와 파티션 수를 빼고 규칙만 해시한다
+# (#235). parquet 경로가 아닌 문자열 목록(값 필터 등)은 규칙이라 그대로 둔다.
+_PARQUET_PATH = r"'(?:[^']|'')*\.parquet'"
+_PARQUET_LIST = re.compile(
+    rf"main\.list_value\(\s*{_PARQUET_PATH}(?:\s*,\s*{_PARQUET_PATH})*\s*\)|{_PARQUET_PATH}"
+)
+_PARQUET_TABLE = re.compile(r"[\\/]([^\\/]+)[\\/]v=[^\\/]+[\\/]")
 _TICKER_RE = re.compile(r"^[0-9A-Za-z]{1,12}$")
 # equity 격자 3테이블(S08~S10)의 `fill_kind.kind` → 워크벤치 `CellKind`. 정본 어휘는
 # `database/src/equity/model.py::FILL_KINDS` 이고 대응 원칙은 FIELD_MAP §1 「결측 어휘」다.
@@ -223,6 +234,12 @@ def _cell_kind(value: float | None, fill_kind: object) -> CellKind:
     if fill_kind is None:
         return CellKind.MISSING
     return _FILL_KIND_TO_CELL.get(str(fill_kind), CellKind.MISSING)
+
+
+def _parquet_table(match: re.Match[str]) -> str:
+    """parquet 경로 목록 하나를 테이블 이름으로(`<table>/v=<build>/…` 규약). 못 찾으면 자리표시."""
+    found = _PARQUET_TABLE.search(match.group(0))
+    return found.group(1) if found is not None else "<parquet>"
 
 
 def _noop_checkpoint() -> None:
@@ -473,12 +490,12 @@ class EquityDuckdbAdapter:
                 f"built={sorted(builds)}"
             )
         self._builds = builds
-        self._snapshot_id = snapshot_id(builds)
+        ledger_snapshot_id = snapshot_id(builds)
         self._tables: dict[str, TableBuild] = {
             table: resolve_table(self._root, table) for table in builds
         }
         self._catalog: CatalogState = self._checked_catalog(
-            read_catalog(self._root, self._snapshot_id)
+            read_catalog(self._root, ledger_snapshot_id)
         )
         self._sessions: tuple[date, ...] = self._load_sessions()
         self._session_index = {session: index for index, session in enumerate(self._sessions)}
@@ -492,8 +509,34 @@ class EquityDuckdbAdapter:
         self._profile: dict[str, tuple[int, str]] = self._load_profile()
         self._warn_lag_fallback()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
+        self._snapshot_id = field_contract_snapshot_id(ledger_snapshot_id, self._field_contract())
 
     # ── 구성 ──────────────────────────────────────────────────────────────────
+
+    def _field_contract(self) -> dict[str, object]:
+        """필드 계약 판의 입력 — 선언표(`SOURCE_SPECS`·`FIELD_SPECS`)와 카탈로그 매크로(#235).
+
+        같은 원장 빌드에서도 선언의 식·랙이나 매크로 본문(재무 TTM 등)이 바뀌면 값이 달라진다.
+        매크로 본문은 읽는 parquet 의 절대경로를 싣고 있어, 그 자리를 테이블 이름으로 바꿔 규칙만
+        남긴다 — 어느 build 를 읽는지는 원장 판이 가르고, 경로를 남기면 같은 원장·코드인데 기계마다
+        판이 갈린다. 카탈로그를 쓸 수 없으면 매크로를 읽는 원천이 빠지므로 매크로도 싣지 않는다.
+        """
+        macros: dict[str, str] = {}
+        if self._catalog.usable:
+            with _open(self._catalog.path) as con:
+                rows = con.execute(
+                    "SELECT function_name, macro_definition FROM duckdb_functions() "
+                    "WHERE NOT internal AND function_type IN ('macro', 'table_macro')"
+                ).fetchall()
+            macros = {
+                str(name): _PARQUET_LIST.sub(_parquet_table, str(body)) for name, body in rows
+            }
+        return {
+            "sources": [asdict(spec) for spec in SOURCE_SPECS],
+            "fields": [asdict(spec) for spec in FIELD_SPECS],
+            "macro_signatures": sorted(self._catalog.macros) if self._catalog.usable else [],
+            "macros": macros,
+        }
 
     def _connect(self, sources: Iterable[SourceSpec]) -> duckdb.DuckDBPyConnection:
         """`sources` 를 읽을 연결 — 매크로 원천이 있으면 카탈로그를 read_only 로 연다(#278).

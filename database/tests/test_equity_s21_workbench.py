@@ -163,10 +163,14 @@ def _value(result, as_of: date, security_id: str, field_id: str) -> object:
 
 # ── 어댑터 ────────────────────────────────────────────────────────────────────
 
-def test_snapshot_id_는_카탈로그_meta_와_같다(adapter, built: Path) -> None:
+def test_snapshot_id_앞부분은_카탈로그_meta_와_같다(adapter, built: Path) -> None:
     import json
+
+    from strategy_workbench.domain.equity.facade.research_data import SNAPSHOT_CONTRACT_SEPARATOR
     meta = json.loads((built / catalog.META_NAME).read_text(encoding="utf-8"))
-    assert adapter.snapshot().snapshot_id == meta["snapshot_id"]
+    # 워크벤치 id 는 "원장 판:필드 계약 판"이다(#235) — 앞부분이 meta·ledger_sync 의 원장 판이다
+    ledger, separator, _ = adapter.snapshot().snapshot_id.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    assert (ledger, separator) == (meta["snapshot_id"], SNAPSHOT_CONTRACT_SEPARATOR)
     assert {p.field_id for p in adapter.list_fields()} == set(ALL_FIELDS)
     # 체인이 `dataset_profile` 까지 지어 어댑터가 대장 경로를 밟는다 — 폴백 랙은 쓰지 않는다(#246)
     assert not [p.field_id for p in adapter.list_fields() if "fallback" in p.available_date_basis]
@@ -455,5 +459,7 @@ def test_MVP_B_모멘텀_월간_백테스트가_절단본에서_완주한다(bui
     assert s.ok, s.error
     assert s.n_rebalances == 11 and s.n_rebalances_with_positions >= 1
     assert s.n_securities >= 5 and s.total_return is not None
-    assert s.data_snapshot_id == catalog.snapshot_id(catalog.table_builds(built))
+    from strategy_workbench.domain.equity.facade.research_data import SNAPSHOT_CONTRACT_SEPARATOR
+    ledger = catalog.snapshot_id(catalog.table_builds(built))
+    assert s.data_snapshot_id.startswith(ledger + SNAPSHOT_CONTRACT_SEPARATOR)
     assert s.artifact_sha256 is not None

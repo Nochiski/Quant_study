@@ -27,7 +27,7 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $original = [System.IO.File]::ReadAllText($resolvedPlanPath, $utf8NoBom)
 $lineEnding = if ($original.Contains("`r`n")) { "`r`n" } else { "`n" }
 
-$prIdPattern = '(?:P\d+(?:\.\d+)?|[A-Z])-\d{2}'
+$prIdPattern = 'V\d+-\d{2}'
 $rowPattern = "(?m)^\| \[(?<checked>[ xX])\] \| ``(?<id>$prIdPattern)`` \| (?<title>.*?) \| (?<dependency>.*?) \| ``(?<status>[A-Z_]+)`` \| (?<review>.*?) \|[ \t\r]*$"
 $rowMatches = [regex]::Matches($original, $rowPattern)
 
@@ -135,13 +135,13 @@ if ($activeRows.Count -gt 1) {
 }
 
 $phaseGoals = [ordered]@{
-    "P0" = "Planning package"
-    "P1" = "Research window seal, run persistence, trial ledger"
-    "P2" = "Cost realism: sell tax, ADV participation, sqrt impact"
-    "P3" = "Experiment backend, async queue, walk-forward"
-    "P4" = "Validation statistics: PSR, DSR, plateau, capacity, factor regression"
-    "P5" = "Screens (after lang2 merge signal)"
-    "P6" = "Holdout one-time opening"
+    "V0" = "Planning package"
+    "V1" = "Research window seal, run persistence, trial ledger"
+    "V2" = "Cost realism: sell tax, ADV participation, sqrt impact"
+    "V3" = "Experiment backend, async queue, walk-forward"
+    "V4" = "Validation statistics: PSR, DSR, plateau, capacity, factor regression"
+    "V5" = "Screens (after lang2 merge signal)"
+    "V6" = "Holdout one-time opening"
 }
 
 $unknownPhases = @($rows | Where-Object Phase -notin $phaseGoals.Keys)

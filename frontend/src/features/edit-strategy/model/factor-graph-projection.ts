@@ -1,6 +1,6 @@
 import type { FactorGraph, FactorValidationIssue } from "../../../shared/api";
 import { t, tName } from "../../../shared/config";
-import { nodeKinds, nodeSlots, type NodeSlot } from "./graph-transactions";
+import { nodeSlotsByKind, type NodeSlot } from "./graph-transactions";
 import type { JsonSchema } from "./schema-navigator";
 import {
   compiledNodeOrigin,
@@ -71,60 +71,63 @@ export type FactorGraphProjection =
     };
 
 type SlotLabel = { key: string; label: string };
+type SlotLabels = ReadonlyMap<
+  string,
+  { inputs: SlotLabel[]; settings: SlotLabel[] }
+>;
 
 /**
- * 노드 kind → 입력 칸과 설정 칸의 이름(#354). 칸은 runtime schema 의 노드 분기에서 읽고(`nodeSlots`), 칸 이름은
- * `x-description-key` 다. 스키마가 모르는 kind 는 칸이 없다 — 그 노드는 backend 검증 진단이 먼저 알린다.
+ * 노드 kind → 입력 칸과 설정 칸의 이름(#354). 칸은 `nodeSlotsByKind`, 칸 이름은 `x-description-key` 다. 스키마가
+ * 모르는 kind 는 칸이 없다 — 그 노드는 backend 검증 진단이 먼저 알린다.
  */
-const slotLabels = (
-  schema: JsonSchema,
-  factorPointer: string,
-): ReadonlyMap<string, { inputs: SlotLabel[]; settings: SlotLabel[] }> => {
+const slotLabels = (schema: JsonSchema): SlotLabels => {
   const labelled = (slots: readonly NodeSlot[]): SlotLabel[] =>
     slots.map(({ key, facts }) => ({
       key,
       label: tName(facts.descriptionKey) ?? key,
     }));
   return new Map(
-    nodeKinds(schema, undefined, factorPointer).map(([kind, branch]) => {
-      const { inputs, settings } = nodeSlots(schema, branch);
-      return [
-        kind,
-        { inputs: labelled(inputs), settings: labelled(settings) },
-      ] as const;
-    }),
+    [...nodeSlotsByKind(schema)].map(([kind, { inputs, settings }]) => [
+      kind,
+      { inputs: labelled(inputs), settings: labelled(settings) },
+    ]),
   );
 };
+
+const valueOf = (node: FactorNode, key: string): unknown =>
+  (node as unknown as Record<string, unknown>)[key];
+
+/** 문서 노드의 입력 칸(칸 순서)과 그 칸이 가리키는 노드. */
+const authoredInputs = (
+  labels: SlotLabels,
+  node: FactorNode,
+): Array<{ nodeId: string; role: string }> =>
+  (labels.get(node.kind)?.inputs ?? []).map(({ key, label }) => {
+    const nodeId = valueOf(node, key);
+    return { nodeId: typeof nodeId === "string" ? nodeId : "", role: label };
+  });
+
+/** 노드의 설정 칸. 값을 적지 않은 선택 칸(`periods: null` 등)은 보이지 않는다. */
+const nodeDetails = (
+  labels: SlotLabels,
+  node: FactorNode | undefined,
+): GraphNodeDetail[] =>
+  node === undefined
+    ? []
+    : (labels.get(node.kind)?.settings ?? []).flatMap(({ key, label }) => {
+        const value = valueOf(node, key);
+        return value === null || value === undefined
+          ? []
+          : [{ label, value: String(value) }];
+      });
 
 const authoredOperation = (node: FactorNode): string =>
   "operator" in node ? `${node.kind}.${node.operator}` : node.kind;
 
 const projectFactor = (
   factor: PlannedFactor,
-  schema: JsonSchema,
+  labels: SlotLabels,
 ): GraphFactorProjection => {
-  const slotsByKind = slotLabels(schema, `/factors/${factor.factorIndex}`);
-  const valueOf = (node: FactorNode, key: string): unknown =>
-    (node as unknown as Record<string, unknown>)[key];
-  const authoredInputs = (
-    node: FactorNode,
-  ): Array<{ nodeId: string; role: string }> =>
-    (slotsByKind.get(node.kind)?.inputs ?? []).map(({ key, label }) => {
-      const nodeId = valueOf(node, key);
-      return { nodeId: typeof nodeId === "string" ? nodeId : "", role: label };
-    });
-  // 값을 적지 않은 선택 칸(`periods: null` 등)은 보이지 않는다.
-  const nodeDetails = (node: FactorNode | undefined): GraphNodeDetail[] =>
-    node === undefined
-      ? []
-      : (slotsByKind.get(node.kind)?.settings ?? []).flatMap(
-          ({ key, label }) => {
-            const value = valueOf(node, key);
-            return value === null || value === undefined
-              ? []
-              : [{ label, value: String(value) }];
-          },
-        );
   const graph = factor.request.graph;
   const authoredById = new Map(graph.nodes.map((node) => [node.node_id, node]));
   const contractById = new Map(
@@ -148,14 +151,14 @@ const projectFactor = (
   const shown = (nodeId: string): boolean =>
     compiledNodeOrigin(factor, nodeId) !== "support";
   const shownInputs = (node: FactorNode) =>
-    authoredInputs(node).filter((input) => shown(input.nodeId));
+    authoredInputs(labels, node).filter((input) => shown(input.nodeId));
 
   const projectPlannedNode = (
     step: NonNullable<typeof plan>["steps"][number],
   ): GraphNodeProjection => {
     const authored = authoredById.get(step.node_id);
     const authoredInputPorts =
-      authored === undefined ? [] : authoredInputs(authored);
+      authored === undefined ? [] : authoredInputs(labels, authored);
     const origin = compiledNodeOrigin(factor, step.node_id);
     const inputs = step.input_node_ids.flatMap((nodeId, index) => {
       if (!shown(nodeId)) return [];
@@ -195,7 +198,7 @@ const projectFactor = (
       minimumHistorySessions: step.minimum_history_sessions,
       isOutput: step.node_id === graph.output_node_id,
       // 붙인 조건 노드의 파라미터는 사용자가 쓴 값이 아니다(참 1 / 거짓 0 고정).
-      details: origin === "boolean-score" ? [] : nodeDetails(authored),
+      details: origin === "boolean-score" ? [] : nodeDetails(labels, authored),
       issues: issuesById.get(step.node_id) ?? [],
     };
   };
@@ -236,7 +239,7 @@ const projectFactor = (
         outputUnit: contract?.unit ?? null,
         minimumHistorySessions: contract?.minimum_history_sessions ?? null,
         isOutput: node.node_id === graph.output_node_id,
-        details: nodeDetails(node),
+        details: nodeDetails(labels, node),
         issues: issuesById.get(node.node_id) ?? [],
       };
     });
@@ -271,10 +274,11 @@ export const projectFactorGraphs = (
 ): FactorGraphProjection => {
   if (state.status !== "ready") return state;
   if (schema === null) return { status: "metadata-loading" };
+  const labels = slotLabels(schema);
   return {
     status: "ready",
     expectedRegistryVersion: state.expectedRegistryVersion,
     expectedDataSnapshotId: state.expectedDataSnapshotId,
-    factors: state.factors.map((factor) => projectFactor(factor, schema)),
+    factors: state.factors.map((factor) => projectFactor(factor, labels)),
   };
 };

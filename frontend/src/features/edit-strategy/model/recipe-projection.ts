@@ -2,7 +2,7 @@
  * 레시피(그래프 2수준) 투영(WORKFLOW P4-01·P5-01, spec D2·D9): 팩터 하나의 `graph.nodes`가 체인이면 순서
  * 목록, 아니면 고급이다. P4-01은 체인 판정과 팩터 카드 요약 문장이고, P5-01이 같은 파일에 편집 연산을 더한다.
  *
- * 체인 판정의 정본은 spec D2다. 입력 칸은 스키마 `x-reference: node`(`nodeSlots`)이고 잎은 입력 칸이 없는
+ * 체인 판정의 정본은 spec D2다. 입력 칸은 스키마 `x-reference: node`(`nodeSlotsByKind`)이고 잎은 입력 칸이 없는
  * 노드(`field`·`constant`·`parameter`)다. 출력 노드에서 거꾸로 걸어, 단계마다 잎이 아닌 입력이 하나면 그것이
  * 앞 단계이고(나머지 입력은 체인 밖 잎) 없으면 문서 순서 첫 잎이 머리다. 모든 노드가 한 번씩 쓰이고 출력
  * 말고는 정확히 한 번 참조될 때만 체인이다 — 분기·머리 재참조·안 쓰인 노드는 고급이다.
@@ -10,14 +10,14 @@
 import { t, tName } from "../../../shared/config";
 import { valueAtPointer } from "../../../shared/lib/yaml12";
 import { projectObjectSection } from "./form-projection";
-import { nodeKinds, nodeSlots } from "./graph-transactions";
+import { nodeSlotsByKind } from "./graph-transactions";
 import {
   fieldFragment,
   fieldText,
   type CatalogNames,
   type SummaryNames,
 } from "./pipeline-projection";
-import { schemaAt, type JsonSchema } from "./schema-navigator";
+import type { JsonSchema } from "./schema-navigator";
 
 export type RecipeLink = {
   /** 노드 pointer(`/factors/N/graph/nodes/M`). */
@@ -54,19 +54,14 @@ export const projectRecipe = (
     if (typeof id !== "string" || indexById.has(id)) return advanced;
     indexById.set(id, index);
   }
-  const inputKeys = new Map(
-    nodeKinds(schema, tree, factorPointer).map(([kind, branch]) => [
-      kind,
-      nodeSlots(schema, branch).inputs.map(({ key }) => key),
-    ]),
-  );
+  const slotsByKind = nodeSlotsByKind(schema);
   // 노드마다 입력 칸 순서대로 가리키는 노드의 index. 모르는 kind·없는 노드를 가리키면 고급이다.
   const inputs: number[][] = [];
   for (const node of nodes) {
     if (!isRecord(node)) return advanced;
-    const refs = inputKeys
+    const refs = slotsByKind
       .get(String(node.kind))
-      ?.map((key) => indexById.get(String(node[key])));
+      ?.inputs.map(({ key }) => indexById.get(String(node[key])));
     if (refs === undefined || refs.includes(undefined)) return advanced;
     inputs.push(refs as number[]);
   }
@@ -124,11 +119,12 @@ export const recipeSummary = (
     );
   if (recipe.links.length === 0) return null;
   const names: SummaryNames = { catalog, reference: () => null };
+  const slotsByKind = nodeSlotsByKind(schema);
   // 체인의 노드는 스키마가 아는 kind 다(`projectRecipe`가 확인했다).
   const describe = (pointer: string) => {
-    const branch = schemaAt(schema, pointer, tree)!.node;
     const section = projectObjectSection(schema, tree, [], pointer, "")!;
-    const slots = nodeSlots(schema, branch);
+    const kind = valueAtPointer(tree, `${pointer}/kind`).value;
+    const slots = slotsByKind.get(String(kind))!;
     const settings = section.fields.filter((field) =>
       slots.settings.some(({ key }) => key === field.key),
     );

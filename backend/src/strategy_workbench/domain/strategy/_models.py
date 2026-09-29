@@ -102,14 +102,11 @@ class RebalanceFrequency(StrEnum):
 
 class AppliedStage(StrEnum):
     """전략 파이프라인의 단계 어휘 — 유니버스(`ELIGIBILITY`) → 알파(`SIGNAL`) → 포트폴리오
-    구성 → 리스크 → 실행.
+    구성 → 리스크 → 실행(`EXECUTION`, 실행 설정 `domain/backtest` 의 제약 행).
 
-    두 사실이 같은 값을 쓴다. 제약 행이 적용되는 시점(`_constraints.py`, runtime schema
-    `x-applied-stage`)과, 그래프 표현(파이프라인)이 필드를 보이는 단계(field metadata
-    `stage`, runtime schema `x-stage`, P4-01)다. 필드는 적용되는 곳에 보인다: 자기
-    `x-stage`, 없으면 자기 `x-applied-stage`, 없으면 가장 가까운 조상의 `x-stage` 다.
-    `EXECUTION` 은 실행 설정(`domain/backtest`)이 자기 제약 행에 붙이는 단계이고, 전략
-    문서에는 1.2 부터 해당 행이 없다.
+    제약 행의 적용 시점(runtime schema `x-applied-stage`)과 그래프 표현의 단계(field
+    metadata `stage` → `x-stage`, P4-01)가 이 어휘를 쓴다. 필드의 단계를 읽는 규칙은
+    정본 대장 "그래프 표현 투영" 행이 소유한다.
     """
 
     ELIGIBILITY = "eligibility"
@@ -169,8 +166,8 @@ class PortfolioStep:
     rebalance_every_n_sessions: int = 21
     turnover_buffer_count: int = 0
     minimum_trade_weight: float = 0.0
-    # 유동성 필터는 후보를 거를 때 적용돼 그래프 표현의 1단계 유니버스에 보인다(P4-01 리드 결정).
-    # `minimum_liquidity` 는 제약 행의 적용 시점이 같은 단계를 말한다.
+    # 유동성 필터는 후보를 거를 때 읽힌다(유니버스 단계). `minimum_liquidity` 는 제약 행이
+    # 같은 단계를 말한다.
     liquidity_field_id: str | None = field(
         default=None, metadata={**CATALOG_EQUITY_FIELD, "stage": AppliedStage.ELIGIBILITY}
     )
@@ -184,7 +181,7 @@ class RiskStep:
     max_name_weight: float = 0.1
     max_sector_weight: float = 0.3
     sector_neutral: bool = False
-    # 역가중 원천(필드·팩터)은 비중을 줄 때 쓰여 그래프 표현의 3단계 비중 카드가 편집한다(P4-01).
+    # 역가중 원천(필드·팩터)은 비중을 정할 때 읽힌다(포트폴리오 구성 단계).
     risk_field_id: str | None = field(
         default=None, metadata={**CATALOG_EQUITY_FIELD, "stage": AppliedStage.PORTFOLIO}
     )
@@ -323,8 +320,8 @@ class StrategySpec:
     identity: StrategyIdentity
     title: str
     description: str = ""
-    # 섹션마다 그래프 표현(파이프라인)의 단계가 있고(`x-stage`, P4-01), 섹션 안 필드는 섹션을
-    # 따른다. 문서 머리와 탐색 파라미터는 단계가 없다.
+    # 섹션마다 그래프 표현의 단계(`x-stage`)가 있고 문서 머리와 탐색 파라미터는 단계가 없다.
+    # 필드의 단계를 읽는 규칙은 정본 대장 "그래프 표현 투영" 행.
     eligibility: EligibilityStep = field(
         default=EligibilityStep(), metadata={"stage": AppliedStage.ELIGIBILITY}
     )

@@ -65,8 +65,9 @@ def _checkpointed(items: Iterable[_T], checkpoint: Callable[[], None]) -> Iterat
 class FactorFieldValue:
     field_id: str
     value: FactorInputValue
-    # 원장이 무효라고 가린 셀(값 None, 원천 셀 종류 MASKED). 실행 결측 정책이 채우지 않아 창 결측
-    # 전파로만 처리된다 — 무엇을 가리나는 원장, 무엇을 채우나는 결측 정책이다(#298).
+    # 원장이 무효라고 가린 셀(값 None, 원천 셀 종류 MASKED). 실행 결측 정책이 채우지 않고, 값 구간
+    # 규칙(`_value_spans`)이 사건 경계로 다룬다 — 무엇을 가리나는 원장, 무엇을 채우나는 결측
+    # 정책이다(#298·#337).
     masked: bool = False
 
     def __post_init__(self) -> None:

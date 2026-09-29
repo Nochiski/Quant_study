@@ -323,7 +323,7 @@ def _status(
     if isinstance(node, UnaryNode):
         if node.operator is UnaryOperator.LAG:
             history = _history_status(index, observations, by_security, node.periods or 0, 1)
-            # Enough history but still None: the lagged input itself was missing.
+            # 이력은 충분한데 None: k칸 앞 입력(가린 칸 포함)이 없었다(#337)
             return TraceValueStatus.MISSING_INPUT if history is TraceValueStatus.OK else history
         return TraceValueStatus.MISSING_INPUT
     if isinstance(node, TimeSeriesNode):

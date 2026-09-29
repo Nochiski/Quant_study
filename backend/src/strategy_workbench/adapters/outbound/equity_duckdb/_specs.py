@@ -109,6 +109,9 @@ class SourceSpec:
     채우지 않는다(#298). 뷰의 가림 표시 열 선언은 원장 `views.MASK_COLUMNS` 이고, 이 배선이 그
     선언과 같은지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 부팅 검사가
     카탈로그 열과 이름으로 대조하므로 식이 아니라 열 이름을 쓴다(없으면 `catalog_columns_missing`).
+    가림 표시를 둔 원천은 필드를 하나만 낸다 — 팩터 평가기(`_value_spans`)가 가린 칸 경계를 필드마다
+    따로 이어, 한 원천의 두 필드를 시점을 달리해 섞는 식은 같은 행의 층 이동을 건너도 결측이 되지
+    않는다(필드를 더하려면 평가기를 먼저 원천 단위로 바꾼다, #349 리뷰 P3-3).
     """
 
     name: str

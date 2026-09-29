@@ -23,10 +23,17 @@ from strategy_workbench.domain.factor.facade.evaluation import (
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
     BinaryOperator,
+    ComparisonNode,
+    ConditionalNode,
     ConstantNode,
+    CrossSectionalNode,
+    CrossSectionalOperator,
     ExpressionNode,
+    FactorComparisonOperator,
     FactorGraph,
     FieldNode,
+    GroupNode,
+    GroupOperator,
     MissingPolicy,
     TimeSeriesNode,
     TimeSeriesOperator,
@@ -36,6 +43,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 
 _FIELD = "price.adj_close"
 _SHARES = "price.shares_outstanding"
+_SECTOR = "classification.sector"
 _DAYS = tuple(date(2024, 10, 1) + timedelta(days=n) for n in range(61))
 _EVENT = 30  # 층 이동 적용일 자리(원장이 가린 행)
 _SHIFT = 4.26  # 025440 2024-11-19 의 층 배수
@@ -147,18 +155,39 @@ def test_chained_lags_carry_the_boundary() -> None:
     assert [p for p in missing if p >= 20] == list(range(_EVENT, _EVENT + 21))
 
 
-def test_a_same_position_operator_carries_the_boundary_to_lag() -> None:
-    """같은 자리 연산(이항 등)은 입력의 가린 칸을 잇는다 — `lag(adj × 1, 20)` 도 `lag(adj, 20)` 과
-    같은 30~50 이 결측이다.
+@pytest.mark.parametrize(
+    "nodes",
+    (
+        (
+            ConstantNode("one", 1.0, "constant"),
+            BinaryNode("x", BinaryOperator.MULTIPLY, "adj", "one", "binary"),
+        ),
+        (UnaryNode("x", UnaryOperator.NEGATE, "adj", "unary"),),
+        (CrossSectionalNode("x", CrossSectionalOperator.RANK, "adj", "cross_sectional"),),
+        (GroupNode("x", GroupOperator.RANK, "adj", _SECTOR, "group"),),
+    ),
+    ids=("multiply", "negate", "cross_sectional", "group"),
+)
+def test_a_same_position_operator_carries_the_boundary_to_lag(
+    nodes: tuple[ExpressionNode, ...],
+) -> None:
+    """같은 자리의 값 하나를 바꾸는 연산은 입력 구간을 그대로 잇는다 — x 가 `adj × 1`·부정·횡단면
+    순위·섹터 안 순위여도 `adj / lag(x, 20)` 은 `adj / lag(adj, 20)` 과 같은 30~50 이 결측이다.
 
-    곱셈 노드가 가린 칸을 놓치면 `lag` 가 적용일을 경계로 보지 못하고 층 앞 값을 층 뒤로 옮겨,
-    31~49 에서 층 배수가 정상 값으로 나온다(#311 리뷰 r2 P3-1).
+    x 가 가린 칸의 구간을 놓치면 `lag` 가 적용일을 경계로 보지 못하고 층 앞 값을 층 뒤로 옮겨,
+    31~49 에서 층 배수가 정상 값으로 나온다(#311 리뷰 r2 P3-1 · #349 리뷰 P3-1). 횡단면·그룹
+    모집단은 적용일 칸이 값인 비교 종목 PEER 가 채운다 — 두 종목 값이 같아 순위는 0.5 라 0 으로
+    나누는 칸이 없다.
     """
-    one = ConstantNode("one", 1.0, "constant")
-    scaled = BinaryNode("scaled", BinaryOperator.MULTIPLY, "adj", "one", "binary")
-    observations = _observations(MASKED=FactorFieldValue(_FIELD, None, masked=True))
+    observations = tuple(
+        replace(observation, fields=(*observation.fields, FactorFieldValue(_SECTOR, "A")))
+        for observation in _observations(
+            MASKED=FactorFieldValue(_FIELD, None, masked=True),
+            PEER=FactorFieldValue(_FIELD, 100.0 + _EVENT),
+        )
+    )
 
-    missing = _missing(_ratio_to("scaled", one, scaled), observations, "MASKED")
+    missing = _missing(_ratio_to("x", *nodes), observations, "MASKED")
 
     assert [p for p in missing if p >= 20] == list(range(_EVENT, _EVENT + 21))
 
@@ -221,6 +250,32 @@ def test_a_window_with_skipped_sessions_is_missing_when_mixed_with_today() -> No
     for graph in (_today_over("mean", skipped), _today_over("mean", *lagged)):
         missing = _missing(graph, observations, "MASKED")
         assert [p for p in missing if p >= 7] == list(range(_EVENT, _EVENT + 8))
+
+
+def test_a_comparison_and_a_conditional_cover_both_spans() -> None:
+    """비교·조건도 두 값을 섞는 연산이라 두 구간을 덮는다 — `if(adj > mean(adj, 5, lag=3), adj, 0)`
+    은 조건식이 오늘 값과 [p-7, p-3] 창을 견주어 구간이 [p-7, p] 라 30~37 이 결측이다.
+
+    비교가 첫 입력(오늘 값) 구간만 이으면 적용일 뒤 31·32 에서 층 뒤 오늘 값과 층 앞 평균을 견준
+    판단이 값으로 남는다. 층이 ×0.25 처럼 아래로 가면 그 판단이 뒤집힌다(#349 리뷰 P3-1).
+    """
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("adj", _FIELD, "field"),
+            TimeSeriesNode("mean", TimeSeriesOperator.MEAN, "adj", 5, "time_series", 3),
+            ComparisonNode(
+                "up", FactorComparisonOperator.GREATER_THAN, "adj", "mean", "comparison"
+            ),
+            ConstantNode("zero", 0.0, "constant"),
+            ConditionalNode("out", "up", "adj", "zero", "conditional"),
+        ),
+        output_node_id="out",
+    )
+    observations = _observations(MASKED=FactorFieldValue(_FIELD, None, masked=True))
+
+    missing = _missing(graph, observations, "MASKED")
+
+    assert [p for p in missing if p >= 7] == list(range(_EVENT, _EVENT + 8))
 
 
 def test_each_field_keeps_its_own_span() -> None:

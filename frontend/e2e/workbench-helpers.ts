@@ -28,7 +28,7 @@ export {
 export const BACKEND = backendOrigin();
 export const apiClient = createClient({ baseUrl: BACKEND });
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
-/** backend 소유 골든 fixture(schema 1.1). frontend 는 읽기만 한다(`frontend-testing.md`). */
+/** backend 소유 골든 fixture(현재 schema 버전). frontend 는 읽기만 한다(`frontend-testing.md`). */
 export const GOLDEN = readFileSync(
   resolve(
     ownDirectory,
@@ -152,7 +152,8 @@ export const mustReplace = (text: string, from: string, to: string): string => {
 /**
  * e2e 가 실행 설정 패널에 넣는 기간·유니버스(P3-02). schema 1.2 부터 이 값은 전략 문서 밖에 있고, 실행
  * 설정 스키마가 기본값을 주지 않아 사용자가 정해야 백테스트·추적이 열린다. mock 어댑터는 fixture 달력 밖
- * 세션을 (종목, 날짜)의 함수로 합성하므로 옛 골든(1.1)의 기간을 그대로 쓴다.
+ * 세션을 (종목, 날짜)의 함수로 합성하므로 은퇴한 1.1 골든(`quality_momentum.v1_1.yaml`)의 `data` 기간·
+ * 유니버스를 그대로 쓴다.
  */
 export const RUN_ENVIRONMENT = {
   start: "2021-01-01",

@@ -409,7 +409,7 @@ test.describe("professional YAML workflow", () => {
       provenance: {
         kind: "saved_revision",
         spec_hash: savedV4.spec_hash,
-        schema_version: "1.2",
+        schema_version: savedV4.schema_version,
         strategy_id: strategyId,
         revision: 4,
         source_hash: savedV4.source_hash,

@@ -414,10 +414,11 @@ LIQUIDITY_BARS = tuple(
         (5, 95.0, 3_000),
     )
 )
-# √ 시장충격 척도(V2-03): 세션마다 다르고 8/3 은 척도가 없다(충격 0).
+# √ 시장충격 척도(V2-03): 세션마다 다르고 8/3 은 척도가 없다(충격 0). 8/5 청산 매도(300주)는
+# 0.06 × √300 ≈ 1.04 라 상한 0.99 에서 잘린다.
 IMPACT_BARS = tuple(
     replace(bar, impact_scale=scale)
-    for bar, scale in zip(LIQUIDITY_BARS, (0.002, 0.001, None, 0.0005, 0.003), strict=True)
+    for bar, scale in zip(LIQUIDITY_BARS, (0.002, 0.001, None, 0.0005, 0.06), strict=True)
 )
 # 잔량이 다음 세션으로 넘어가는 GTC 70% 목표.
 GTC_TARGET_70PCT = SetPortfolioTarget(
@@ -506,14 +507,15 @@ ENGINE_SCENARIOS = {
         DataFeed(LIQUIDITY_BARS),
         max_participation=0.1,
     ),
-    # √ 충격(V2-03): 캡으로 체결 수량이 세션마다 달라 √수량이 갈리고, 청산 매도는 아래로 민다.
+    # √ 충격(V2-03): 캡으로 체결 수량이 세션마다 달라 √수량이 갈리고, 청산 매도는 아래로 밀되
+    # 상한에서 잘린다.
     "sqrt_impact": lambda core: _engine_scenario(
         core,
         RunConfig(run_id="si", initial_cash=100_000.0, fee_bps=10.0),
         ScriptedStrategy(script=(GTC_TARGET_70PCT, None, None, liquidate())),
         DataFeed(IMPACT_BARS),
         max_participation=0.1,
-        slippage=SqrtImpactSlippage(),
+        slippage=SqrtImpactSlippage(0.99),
     ),
     "split": lambda core: _engine_scenario(
         core,

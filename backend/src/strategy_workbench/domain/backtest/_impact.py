@@ -8,9 +8,11 @@
   0.84(Sato·Kanazawa 2024)를 보수적으로 올린 값이다.
 - σ일은 판단일(그 종목의 t 직전 행)까지 최근 20개 종가 대 종가 수익률의 표본 표준편차다. 가격이
   원주가라 자본변동 세션에서 끝나는 수익률은 변동성이 아니므로 뺀다.
-- ADV 는 참여 기준 `adv20` 과 같은 주식 수(`adv_shares`)다. 참여 기준과 무관하게 늘 ADV 를 쓴다 —
-  문헌의 V 는 일평균 거래량이고, 체결 세션 거래량은 체결 시점에 모르는 값이다.
-- 수익률이 2개 미만이거나 ADV 가 0주면(측정 구간 안 신규 상장의 첫 세션들) 척도는 0 이다.
+- ADV 는 참여 기준 `adv20` 과 같은 주식 수(`adv_shares`, 내림하지 않음)다. 참여 기준과 무관하게 늘
+  ADV 를 쓴다 — 문헌의 V 는 일평균 거래량이고, 체결 세션 거래량은 체결 시점에 모르는 값이다.
+- 수익률이 2개 미만이면(측정 구간 안 신규 상장의 첫 세션들) 척도는 0 이다. ADV 가 0 인 경우(앞선
+  행이 없거나 20행 거래대금이 모두 없거나 0)도 척도 0 이다. 둘 다 충격 없이 체결되는 낙관 쪽이다.
+- 체결 한 건의 충격은 체결가의 `MAX_IMPACT_FRACTION` 에서 자른다(엔진이 √Q 를 곱한 뒤 적용).
 """
 
 from __future__ import annotations
@@ -22,18 +24,24 @@ from collections.abc import Iterable, Sequence, Set
 from datetime import date
 
 from ._models import ImpactModel, RunEnvironment
-from ._participation import adv_shares, participation_history_sessions
+from ._participation import ADV_SESSIONS, adv_shares, participation_history_sessions
 
 VOLATILITY_SESSIONS = 20
+# 체결 한 건의 충격 상한(체결가 대비 비율). √ 법칙은 Q/ADV 가 작은 영역의 경험칙이다. 조용하던
+# 종목의 체결 세션 거래량이 ADV 의 수백 배가 되는 `session_volume` 참여나 큰 k 에서는 충격이
+# 체결가를 넘어 매도 체결가가 0 이하가 된다(run 이 죽는다). 상한은 1 미만이어야 매도가가 양수로
+# 남는다. 충격을 깎는 쪽은 낙관 편향이므로 매도가가 양수로 남는 선까지만 자르도록 크게 잡는다.
+MAX_IMPACT_FRACTION = 0.99
 
 
 def cost_history_sessions(environment: RunEnvironment) -> int:
     """비용 계산(참여 기준 ADV·√ 충격 σ)에 필요한 측정 구간 앞 워밍업 세션 수.
 
-    수익률 20개에는 종가 21개가 필요하다.
+    `sqrt` 는 ADV(20행)와 σ(수익률 20개 = 종가 21개)를 함께 쓴다. 참여 기준이 요구하는 수는
+    `ADV_SESSIONS` 이하라 이 식에 포함된다.
     """
     if environment.impact_model is ImpactModel.SQRT:
-        return VOLATILITY_SESSIONS + 1
+        return max(ADV_SESSIONS, VOLATILITY_SESSIONS + 1)
     return participation_history_sessions(environment)
 
 

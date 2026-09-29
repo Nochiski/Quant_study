@@ -66,13 +66,22 @@ class VolumeShareSlippage:
 
 @dataclass(frozen=True)
 class SqrtImpactSlippage:
-    """√ 시장충격: 체결 가격 × `bar.impact_scale` × √수량.
+    """√ 시장충격: 체결 가격 × min(`bar.impact_scale` × √수량, `max_fraction`).
 
-    척도(k × σ일 / √ADV)는 데이터 쪽이 bar 마다 정한다 — 이 모델은 σ·ADV 를 모른다. 척도가 없는
-    bar 는 충격 0 이다.
+    척도(k × σ일 / √ADV)와 상한은 데이터 쪽이 정한다 — 이 모델은 σ·ADV 를 모른다. 척도가 없는
+    bar 는 충격 0 이다. 상한은 (0, 1) 이어야 매도 체결가가 양수로 남는다.
     """
+
+    max_fraction: float
+
+    def __post_init__(self) -> None:
+        if not 0 < self.max_fraction < 1:
+            raise ValueError(
+                f"impact max_fraction must be in (0, 1) — max_fraction={self.max_fraction}"
+            )
 
     def slippage_per_share(
         self, order: OrderEvent, bar: Bar, base_price: float, quantity: Decimal
     ) -> float:
-        return base_price * (bar.impact_scale or 0.0) * math.sqrt(quantity)
+        fraction = (bar.impact_scale or 0.0) * math.sqrt(quantity)
+        return base_price * min(fraction, self.max_fraction)

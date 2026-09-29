@@ -75,7 +75,8 @@ impl EntryIn {
 pub(crate) type BarTuple = (f64, f64, f64, i64, i64, f64);
 
 /// 슬리피지 설정: `("none", 0, 0)` | `("fixed_bps", bps, 0)` | `("volume_share", volume_limit, price_impact)`
-/// | `("sqrt", 0, 0)`. `sqrt`는 체결가 × bar 척도 × √수량이다 (Python `SqrtImpactSlippage`).
+/// | `("sqrt", max_fraction, 0)`. `sqrt`는 체결가 × min(bar 척도 × √수량, max_fraction)이다
+/// (Python `SqrtImpactSlippage`).
 fn slippage_per_share(
     model: &(String, f64, f64),
     base_price: f64,
@@ -86,7 +87,7 @@ fn slippage_per_share(
     match model.0.as_str() {
         "none" => Ok(0.0),
         "fixed_bps" => Ok(base_price * model.1 / 10_000.0),
-        "sqrt" => Ok(base_price * impact_scale * (quantity as f64).sqrt()),
+        "sqrt" => Ok(base_price * (impact_scale * (quantity as f64).sqrt()).min(model.1)),
         "volume_share" => {
             let share = if volume <= 0 {
                 model.1

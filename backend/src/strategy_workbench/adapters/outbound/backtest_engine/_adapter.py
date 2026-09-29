@@ -49,6 +49,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     unavailable_metric_values,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
+    MAX_IMPACT_FRACTION,
     ImpactModel,
     RunEnvironment,
     environment_hash,
@@ -265,7 +266,7 @@ class BacktestEngineExecutorAdapter:
                 sell_tax_schedule=sell_tax_schedule(environment),
             ),
             slippage=(
-                SqrtImpactSlippage()
+                SqrtImpactSlippage(MAX_IMPACT_FRACTION)
                 if environment.impact_model is ImpactModel.SQRT
                 else FixedBpsSlippage(environment.slippage_bps)
             ),

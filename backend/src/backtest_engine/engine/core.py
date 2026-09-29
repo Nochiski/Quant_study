@@ -413,7 +413,7 @@ def slippage_config(model: SlippageModel) -> tuple[str, float, float]:
     if isinstance(model, VolumeShareSlippage):
         return ("volume_share", model.volume_limit, model.price_impact)
     if isinstance(model, SqrtImpactSlippage):
-        return ("sqrt", 0.0, 0.0)
+        return ("sqrt", model.max_fraction, 0.0)
     raise CoreUnavailable(
         "rust core supports built-in slippage models only (NoSlippage, FixedBpsSlippage, "
         f"VolumeShareSlippage, SqrtImpactSlippage) — got {type(model).__name__}; "

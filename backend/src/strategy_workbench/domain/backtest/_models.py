@@ -154,16 +154,18 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         description_key="run_environment.contract.slippage_bps",
         message="슬리피지는 0 이상의 숫자여야 합니다.",
     ),
-    # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다.
+    # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다. 상한 10 은 그
+    # 범위를 넉넉히 덮고 오타 입력(100·1000)을 막는다.
     "impact_coefficient": ScalarConstraint(
         pointer="/impact_coefficient",
         code="run_environment.cost",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.RATIO,
         minimum=0.0,
+        maximum=10.0,
         example=1.0,
         description_key="run_environment.contract.impact_coefficient",
-        message="시장충격 계수는 0 이상의 숫자여야 합니다.",
+        message="가격 충격 계수는 0 이상 10 이하의 숫자여야 합니다.",
     ),
     # `sell_tax` 가 `custom` 일 때만 값이 있다(없으면 `None`). 범위 검사는 값이 있을 때만 한다.
     "sell_tax_bps": ScalarConstraint(

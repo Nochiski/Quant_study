@@ -41,26 +41,26 @@ def participation_volumes(
     """
     if environment.participation_basis is ParticipationBasis.SESSION_VOLUME:
         return None
-    return adv_shares(bars)
+    return {key: math.floor(shares) for key, shares in adv_shares(bars).items()}
 
 
 def adv_shares(
     bars: Iterable[tuple[date, str, float, float | None]],
-) -> dict[tuple[date, str], int]:
-    """`(세션, 종목, 종가, 거래대금)` 행마다 판단일까지 20행 평균 거래대금 ÷ 판단일 종가(주, 내림).
+) -> dict[tuple[date, str], float]:
+    """`(세션, 종목, 종가, 거래대금)` 행마다 판단일까지 20행 평균 거래대금 ÷ 판단일 종가(주).
 
-    참여 기준 `adv20` 과 √ 충격(`_impact.py`)이 같은 ADV 를 쓴다. 앞선 행이 없으면 0주다.
+    참여 기준 `adv20` 과 √ 충격(`_impact.py`)이 같은 ADV 를 쓴다. 내림하지 않는다 — 참여 한도는
+    `participation_volumes` 가 내림하고, √ 안의 분모는 1주 미만도 그대로 쓴다. 앞선 행이 없거나 창의
+    거래대금이 모두 없으면(None) 0주다.
     """
-    volumes: dict[tuple[date, str], int] = {}
+    volumes: dict[tuple[date, str], float] = {}
     values: dict[str, deque[float]] = {}
     last_close: dict[str, float] = {}
     for session, security_id, close, trading_value in sorted(bars, key=lambda row: row[0]):
         window = values.setdefault(security_id, deque(maxlen=ADV_SESSIONS))
         previous_close = last_close.get(security_id)
         volumes[(session, security_id)] = (
-            math.floor(sum(window) / len(window) / previous_close)
-            if window and previous_close
-            else 0
+            sum(window) / len(window) / previous_close if window and previous_close else 0.0
         )
         if trading_value is not None:
             window.append(trading_value)

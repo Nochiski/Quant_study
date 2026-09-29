@@ -118,6 +118,7 @@ def test_environment_hash_ignores_int_versus_float_notation() -> None:
         ("fee_bps", -1.0),
         ("slippage_bps", -0.5),
         ("impact_coefficient", -0.1),
+        ("impact_coefficient", 10.5),
         ("universe_id", "   "),
     ],
 )
@@ -260,6 +261,7 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
     assert properties["impact_model"]["default"] == "fixed_bps"
     assert properties["impact_coefficient"]["default"] == 1.0
     assert properties["impact_coefficient"]["minimum"] == 0.0
+    assert properties["impact_coefficient"]["maximum"] == 10.0
     assert properties["fee_bps"]["type"] == "number"
     assert properties["fee_bps"]["default"] == 15.0
     assert properties["start"]["format"] == "date"
@@ -419,10 +421,10 @@ def test_sqrt_scale_is_k_times_prior_return_stdev_over_root_adv() -> None:
 
     k = 0.5, A 의 종가 100 → 110 → 99 → 99 → 1, 거래대금 1,000 → 1,000 → 3,000 → 1 → 1.
     - 1/2·1/3·1/4: 앞선 수익률이 2개 미만이라 0.
-    - 1/5: 수익률 +10%·−10%, 표본 표준편차 √0.02, ADV (1,000 + 1,000 + 3,000) / 3 ÷ 99 = 16주.
-      척도 0.5 × √0.02 / 4.
-    - 1/8: 수익률 +10%·−10%·0%, 표본 표준편차 0.1, ADV 5,001 / 4 ÷ 99 = 12주. 척도 0.5 × 0.1 / √12.
-      체결 세션(1/8)의 종가 1 은 쓰지 않는다.
+    - 1/5: 수익률 +10%·−10%, 표본 표준편차 √0.02, ADV (1,000 + 1,000 + 3,000) / 3 ÷ 99 ≈ 16.84주
+      (내림하지 않는다). 척도 0.5 × √0.02 / √16.84.
+    - 1/8: 수익률 +10%·−10%·0%, 표본 표준편차 0.1, ADV 5,001 / 4 ÷ 99 ≈ 12.63주. 척도 0.5 × 0.1 /
+      √12.63. 체결 세션(1/8)의 종가 1 은 쓰지 않는다.
     B 는 A 와 섞이지 않는다(수익률이 없어 0).
     """
     rows = [
@@ -444,8 +446,27 @@ def test_sqrt_scale_is_k_times_prior_return_stdev_over_root_adv() -> None:
         (date(2024, 1, 3), "A"): 0.0,
         (date(2024, 1, 4), "A"): 0.0,
     }
-    assert scales[(date(2024, 1, 5), "A")] == pytest.approx(0.5 * math.sqrt(0.02) / 4)
-    assert scales[(date(2024, 1, 8), "A")] == pytest.approx(0.5 * 0.1 / math.sqrt(12))
+    assert scales[(date(2024, 1, 5), "A")] == pytest.approx(
+        0.5 * math.sqrt(0.02) / math.sqrt(5_000 / 3 / 99)
+    )
+    assert scales[(date(2024, 1, 8), "A")] == pytest.approx(0.5 * 0.1 / math.sqrt(5_001 / 4 / 99))
+
+
+def test_sqrt_adv_below_one_share_still_prices_impact() -> None:
+    """ADV 는 √ 안에서 내림하지 않는다. 평균 거래대금 50 ÷ 판단일 종가 99 ≈ 0.505주라도 척도는
+    √0.02 / √0.505 다 — 내림하면 0주가 되어 가장 비유동적인 종목이 충격 없이 체결된다."""
+    rows = [
+        (date(2024, 1, 2), "A", 100.0, 50.0),
+        (date(2024, 1, 3), "A", 110.0, 50.0),
+        (date(2024, 1, 4), "A", 99.0, 50.0),
+        (date(2024, 1, 5), "A", 99.0, 50.0),
+    ]
+    environment = replace(_environment(), impact_model=ImpactModel.SQRT)
+
+    scales = impact_scales(environment, rows, set())
+
+    assert scales is not None
+    assert scales[(date(2024, 1, 5), "A")] == pytest.approx(math.sqrt(0.02) / math.sqrt(50 / 99))
 
 
 def test_sqrt_volatility_uses_the_last_twenty_returns_and_skips_corporate_action_sessions() -> None:
@@ -473,7 +494,7 @@ def test_sqrt_volatility_uses_the_last_twenty_returns_and_skips_corporate_action
 
     def expected(index: int, first_return: int) -> float:
         returns = [closes[i] / closes[i - 1] - 1 for i in range(first_return, index)]
-        adv = math.floor(
+        adv = (
             sum(value for *_, value in rows[max(index - 20, 0) : index])
             / min(index, 20)
             / closes[index - 1]

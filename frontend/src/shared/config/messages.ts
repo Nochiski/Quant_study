@@ -958,7 +958,7 @@ const ko = {
     "시장 국면을 판정할 데이터 필드입니다.",
   "strategy.field.signal_step.regime_minimum": "레짐 하한",
   "strategy.field.signal_step.regime_minimum.description":
-    "이 값보다 낮으면 신규 매수를 멈춥니다.",
+    "레짐 필드 값이 이보다 낮은 종목은 후보에서 빠지고, 갖고 있던 종목도 팝니다.",
   "strategy.type.portfolio_step": "포트폴리오 구성",
   "strategy.type.portfolio_step.description":
     "후보에서 담을 종목과 비중·리밸런싱을 정합니다.",
@@ -1090,7 +1090,7 @@ const ko = {
   "strategy.field.signal_step.score_threshold.summary":
     "점수 {score_threshold} 이상만",
   "strategy.field.signal_step.regime_minimum.summary":
-    "{regime_field_id} {regime_minimum} 이상일 때만 새로 사며",
+    "{regime_field_id} 값이 {regime_minimum} 이상인 종목만",
   "strategy.field.portfolio_step.side.value.long_short.summary": "하위 종목은 공매도하고",
   "strategy.field.portfolio_step.weighting.value.equal.summary": "같은 비중으로",
   "strategy.field.portfolio_step.weighting.value.factor_score.summary":
@@ -2802,7 +2802,7 @@ export const messages = {
       "The data field that decides the market regime.",
     "strategy.field.signal_step.regime_minimum": "Regime floor",
     "strategy.field.signal_step.regime_minimum.description":
-      "Below this value no new buys are made.",
+      "Stocks whose regime field value is below this drop out of the candidates, and held ones are sold.",
     "strategy.type.portfolio_step": "Portfolio step",
     "strategy.type.portfolio_step.description":
       "Which candidates are held, at what weight, and how often.",
@@ -2938,7 +2938,7 @@ export const messages = {
     "strategy.field.signal_step.score_threshold.summary":
       "only scores of at least {score_threshold}",
     "strategy.field.signal_step.regime_minimum.summary":
-      "buying only while {regime_field_id} is at least {regime_minimum}",
+      "only stocks with {regime_field_id} at least {regime_minimum}",
     "strategy.field.portfolio_step.side.value.long_short.summary":
       "shorting the bottom stocks",
     "strategy.field.portfolio_step.weighting.value.equal.summary":

@@ -11,6 +11,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import d
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
+    RunKind,
     TrialLedgerRecords,
     TrialLineageAlreadyMergedError,
 )
@@ -31,11 +32,17 @@ from ._request_codec import decode_request, encode_request
 from ._schema import SCHEMA_VERSION, migrate_schema
 
 _TERMINAL = (RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value)
+# 실행 종류: 실험 attempt 가 가리키는 run 이면 실험 시도다(같은 파일의 `experiment_attempts`).
+_FROM_EXPERIMENT = (
+    "EXISTS (SELECT 1 FROM experiment_attempts WHERE experiment_attempts.run_id = "
+    "backtest_runs.run_id)"
+)
 # 앞 둘(run_id·created_at)은 접수 때만 쓰는 식별 칸이다. 상태 전이(`update`)는 그 뒤만 바꾼다.
 _SUMMARY_COLUMNS = """
     run_id, created_at, status, progress, stage, message, updated_at, error, error_code,
     artifact_sha256, strategy_kind, spec_hash, schema_version, strategy_id, revision, source_hash
 """
+_READ_COLUMNS = f"{_SUMMARY_COLUMNS}, {_FROM_EXPERIMENT} AS from_experiment"
 
 
 class SQLiteBacktestRunRepository:
@@ -105,7 +112,7 @@ class SQLiteBacktestRunRepository:
     def get(self, run_id: str) -> BacktestRunSummary:
         with self._database.transaction(write=False) as connection:
             row = connection.execute(
-                f"SELECT {_SUMMARY_COLUMNS} FROM backtest_runs WHERE run_id = ?", (run_id,)
+                f"SELECT {_READ_COLUMNS} FROM backtest_runs WHERE run_id = ?", (run_id,)
             ).fetchone()
         if row is None:
             raise BacktestRunNotFoundError(run_id)
@@ -121,19 +128,21 @@ class SQLiteBacktestRunRepository:
         return decode_request(row["request_json"], run_id=run_id)
 
     def list(
-        self, page: PageRequest, *, strategy_id: str | None = None
+        self, page: PageRequest, *, strategy_id: str | None = None, kind: RunKind | None = None
     ) -> Page[BacktestRunSummary]:
-        where = "WHERE ? IS NULL OR strategy_id = ?"
+        where = f"WHERE (? IS NULL OR strategy_id = ?) AND (? IS NULL OR {_FROM_EXPERIMENT} = ?)"
+        experiment = None if kind is None else kind is RunKind.EXPERIMENT
+        filters = (strategy_id, strategy_id, experiment, experiment)
         with self._database.transaction(write=False) as connection:
             (total,) = connection.execute(
-                f"SELECT COUNT(*) FROM backtest_runs {where}", (strategy_id, strategy_id)
+                f"SELECT COUNT(*) FROM backtest_runs {where}", filters
             ).fetchone()
             rows = connection.execute(
                 f"""
-                SELECT {_SUMMARY_COLUMNS} FROM backtest_runs {where}
+                SELECT {_READ_COLUMNS} FROM backtest_runs {where}
                 ORDER BY accepted_order DESC LIMIT ? OFFSET ?
                 """,
-                (strategy_id, strategy_id, page.limit, page.offset),
+                (*filters, page.limit, page.offset),
             ).fetchall()
         return Page(
             items=tuple(_summary(row) for row in rows),
@@ -247,7 +256,7 @@ class SQLiteBacktestRunRepository:
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(
                 f"""
-                SELECT {_SUMMARY_COLUMNS} FROM backtest_runs
+                SELECT {_READ_COLUMNS} FROM backtest_runs
                 WHERE status NOT IN (?, ?, ?) ORDER BY accepted_order
                 """,
                 _TERMINAL,
@@ -260,7 +269,7 @@ class SQLiteBacktestRunRepository:
             return {}
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(
-                f"SELECT {_SUMMARY_COLUMNS} FROM backtest_runs "
+                f"SELECT {_READ_COLUMNS} FROM backtest_runs "
                 f"WHERE run_id IN ({', '.join('?' * len(ids))})",
                 ids,
             ).fetchall()
@@ -308,6 +317,7 @@ def _summary(row: sqlite3.Row) -> BacktestRunSummary:
                 revision=row["revision"],
                 source_hash=row["source_hash"],
             ),
+            kind=RunKind.EXPERIMENT if row["from_experiment"] else RunKind.SINGLE,
         )
     except (TypeError, ValueError) as error:
         raise ResearchStorageError(

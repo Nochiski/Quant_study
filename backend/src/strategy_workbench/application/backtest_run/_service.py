@@ -74,7 +74,7 @@ from .ports.outgoing.backtest_executor import (
     EquityWipedOutError,
     RunCancelledError,
 )
-from .ports.outgoing.run_repository import BacktestRunRepositoryPort, BacktestRunSummary
+from .ports.outgoing.run_repository import BacktestRunRepositoryPort, BacktestRunSummary, RunKind
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +321,11 @@ class BacktestRunService:
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
             # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
             self._repository.add(
-                BacktestRunSummary(record.state, provenance),
+                BacktestRunSummary(
+                    record.state,
+                    provenance,
+                    RunKind.SINGLE if owner is None else RunKind.EXPERIMENT,
+                ),
                 request,
                 lineage_id=admission.lineage_id,
                 trial_key=key,
@@ -475,10 +479,11 @@ class BacktestRunService:
         page: PageRequest,
         *,
         strategy_id: str | None = None,
+        kind: RunKind | None = None,
     ) -> Page[BacktestRunSummary]:
         """최근 접수 순. 목록은 저장소가 정하고, 이 프로세스가 도는 run 은 메모리 상태로 덮는다."""
 
-        stored = self._repository.list(page, strategy_id=strategy_id)
+        stored = self._repository.list(page, strategy_id=strategy_id, kind=kind)
         with self._lock:
             return replace(
                 stored,

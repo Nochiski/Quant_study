@@ -875,7 +875,7 @@ test.describe("professional YAML workflow", () => {
       })
       .click();
     const revisions = workflow.getByRole("region", {
-      name: `저장 revision 목록: ${finalTitle} (${strategyId})`,
+      name: `전략 이력: ${finalTitle} (${strategyId})`,
     });
     await expect(revisions).toContainText("v1");
     await expect(revisions).toContainText("v4");
@@ -1527,7 +1527,7 @@ test.describe("professional YAML workflow", () => {
     await expect(docRow).not.toContainText("이전 버전 동결");
     await docRow.getByRole("button", { name: /Revision 펼치기/u }).click();
     const revisions = page.getByRole("region", {
-      name: new RegExp(`저장 revision 목록: .*${frozen}`, "u"),
+      name: new RegExp(`전략 이력: .*${frozen}`, "u"),
     });
     await expect(
       revisions.getByRole("row").filter({ hasText: "v1" }),

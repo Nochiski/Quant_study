@@ -641,6 +641,7 @@ export type BacktestRunState = {
  * One accepted run and the strategy meaning resolved before it started.
  */
 export type BacktestRunSummary = {
+  kind: RunKind;
   run: BacktestRunState;
   strategy_provenance: StrategyProvenance;
 };
@@ -4174,6 +4175,13 @@ export type RunEnvironmentSchema = {
 };
 
 /**
+ * RunKind
+ *
+ * 백테스트 이력의 실행 종류(검증 랩 V5-03). 실험이 쓴 run 이면 실험 시도다.
+ */
+export type RunKind = "single" | "experiment";
+
+/**
  * RunManifest
  *
  * What a finished run was made of.
@@ -7045,6 +7053,10 @@ export type ListBacktestsData = {
      * Strategy Id
      */
     strategy_id?: string | null;
+    /**
+     * Kind
+     */
+    kind?: RunKind | null;
   };
   url: "/api/v1/backtests";
 };

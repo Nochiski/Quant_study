@@ -23,6 +23,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
+    RunKind,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import PageRequest
@@ -75,6 +76,7 @@ def _summary(run_id: str, *, strategy_id: str | None = None) -> BacktestRunSumma
             strategy_id=strategy_id,
             revision=None if strategy_id is None else 1,
         ),
+        kind=RunKind.SINGLE,
     )
 
 
@@ -158,6 +160,33 @@ def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(
         "run-1": _summary("run-1").run,
     }
     assert reopened.states([]) == {}
+
+
+def test_a_run_an_experiment_attempt_points_at_is_an_experiment_trial(tmp_path: Path) -> None:
+    # 실행 종류(검증 랩 V5-03)는 같은 파일의 실험 attempt 가 run 을 가리키는지로 정한다.
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteBacktestRunRepository(path)
+    for run_id in ("run-1", "run-2"):
+        repository.add(_summary(run_id), _REQUESTS["saved_revision"], **_NO_LINEAGE)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "INSERT INTO experiments (experiment_id, created_at, design_json) VALUES (?, ?, ?)",
+            ("e-1", _AT.isoformat(), "{}"),
+        )
+        connection.execute(
+            "INSERT INTO experiment_attempts "
+            "(experiment_order, trial_index, attempt, created_at, run_id) VALUES (1, 0, 1, ?, ?)",
+            (_AT.isoformat(), "run-2"),
+        )
+
+    assert [(item.run.run_id, item.kind) for item in repository.list(PageRequest()).items] == [
+        ("run-2", RunKind.EXPERIMENT),
+        ("run-1", RunKind.SINGLE),
+    ]
+    for kind, run_ids in ((RunKind.EXPERIMENT, ["run-2"]), (RunKind.SINGLE, ["run-1"])):
+        page = repository.list(PageRequest(), kind=kind)
+        assert ([item.run.run_id for item in page.items], page.total) == (run_ids, 1)
+    assert repository.get("run-2").kind is RunKind.EXPERIMENT
 
 
 def test_an_unknown_run_is_not_found(tmp_path: Path) -> None:

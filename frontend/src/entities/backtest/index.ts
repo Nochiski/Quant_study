@@ -2,14 +2,17 @@ export {
   backtestHistoryKey,
   backtestHistoryQuery,
   runEnvironmentSchemaQuery,
+  trialLedgerQuery,
   useBacktestRequest,
   useBacktestResult,
   useBacktestStatus,
   useBacktestTrialPreview,
   useCancelBacktest,
+  useMergeTrialLineage,
   useRunEnvironmentSchema,
   useStartBacktest,
 } from "./model/backtest-queries";
+export { RUN_KINDS, isRunKind, runKindLabel } from "./model/run-kind";
 export {
   runEnvironmentDisplayValue,
   runEnvironmentFields,
@@ -39,4 +42,6 @@ export type {
   PageBacktestRunSummary,
   RunEnvironment,
   RunEnvironmentSchema,
+  RunKind,
+  TrialLedger,
 } from "../../shared/api";

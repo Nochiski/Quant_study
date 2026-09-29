@@ -911,6 +911,9 @@
       "BacktestRunSummary": {
         "description": "One accepted run and the strategy meaning resolved before it started.",
         "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/RunKind"
+          },
           "run": {
             "$ref": "#/components/schemas/BacktestRunState"
           },
@@ -920,7 +923,8 @@
         },
         "required": [
           "run",
-          "strategy_provenance"
+          "strategy_provenance",
+          "kind"
         ],
         "title": "BacktestRunSummary",
         "type": "object"
@@ -6622,6 +6626,15 @@
         "title": "RunEnvironmentSchema",
         "type": "object"
       },
+      "RunKind": {
+        "description": "백테스트 이력의 실행 종류(검증 랩 V5-03). 실험이 쓴 run 이면 실험 시도다.",
+        "enum": [
+          "single",
+          "experiment"
+        ],
+        "title": "RunKind",
+        "type": "string"
+      },
       "RunManifest": {
         "description": "What a finished run was made of.\n\n`strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run\nexecuted one strategy.",
         "properties": {
@@ -11114,6 +11127,22 @@
                 }
               ],
               "title": "Strategy Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
             }
           }
         ],

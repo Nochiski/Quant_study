@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
 from strategy_workbench.application.strategy_design.facade.ports import Page, PageRequest
@@ -25,12 +26,21 @@ class BacktestRunNotFoundError(KeyError):
     pass
 
 
+class RunKind(StrEnum):
+    """백테스트 이력의 실행 종류(검증 랩 V5-03). 실험이 쓴 run 이면 실험 시도다."""
+
+    SINGLE = "single"
+    EXPERIMENT = "experiment"
+
+
 @dataclass(frozen=True)
 class BacktestRunSummary:
     """One accepted run and the strategy meaning resolved before it started."""
 
     run: BacktestRunState
     strategy_provenance: StrategyProvenance
+    # 저장소가 읽을 때 정한다. 사용자가 시작한 run 을 실험이 이어 쓰면(같은 입력 잇기) 실험 시도다.
+    kind: RunKind
 
 
 class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
@@ -58,9 +68,9 @@ class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
     def request(self, run_id: str) -> BacktestRunSpec: ...
 
     def list(
-        self, page: PageRequest, *, strategy_id: str | None = None
+        self, page: PageRequest, *, strategy_id: str | None = None, kind: RunKind | None = None
     ) -> Page[BacktestRunSummary]:
-        """최근 접수 순. `strategy_id` 는 저장 리비전 provenance 로 거른다."""
+        """최근 접수 순. `strategy_id`(저장 리비전 provenance)와 `kind`(실행 종류)로 거른다."""
         ...
 
     def unfinished(self) -> tuple[BacktestRunState, ...]:

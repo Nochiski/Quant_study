@@ -177,6 +177,7 @@ test(
       items: [
         {
           run: WIPED_OUT,
+          kind: "single",
           strategy_provenance: {
             kind: "saved_revision",
             strategy_id: "strategy-dm06",

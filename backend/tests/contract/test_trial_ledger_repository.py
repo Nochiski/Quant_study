@@ -20,6 +20,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunSpec,
     BacktestRunState,
     BacktestRunSummary,
+    RunKind,
     RunStatus,
     StrategyProvenance,
     StrategySourceKind,
@@ -34,6 +35,7 @@ def _add(repository: SQLiteBacktestRunRepository, run_id: str, lineage_id: str |
         BacktestRunSummary(
             BacktestRunState(run_id, RunStatus.QUEUED, 0.0, "queued", "Run accepted", _AT, _AT),
             StrategyProvenance(StrategySourceKind.INLINE_DRAFT, "a" * 64, "1.2"),
+            RunKind.SINGLE,
         ),
         BacktestRunSpec(),
         lineage_id=lineage_id,

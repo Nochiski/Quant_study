@@ -491,10 +491,10 @@ class RunProgressEvent:
 
 
 # run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이고,
-# `equity_wiped_out` 은 전략이 자본을 다 잃어 엔진이 멈춘 실행, 마지막은 분류되지 않은 내부
-# 오류다. 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다 (시작 422 의
-# `backtest.error.*` 와 namespace 가 다르다 — 툴바는 서버 detail 을 그대로 쓰는 화면이라 키를
-# 합치면 detail 이 덮인다).
+# `equity_wiped_out` 은 전략이 자본을 다 잃어 엔진이 멈춘 실행, `internal` 은 분류되지 않은 내부
+# 오류, `interrupted` 는 서버가 다시 시작돼 끝나지 못한 run 이다(검증 랩 spec D3). 프론트는 이
+# 어휘를 `backtest.run.error.<code>` 로 번역한다 (시작 422 의 `backtest.error.*` 와 namespace 가
+# 다르다 — 툴바는 서버 detail 을 그대로 쓰는 화면이라 키를 합치면 detail 이 덮인다).
 RunFailureCode = Literal[
     "portfolio.strategy.invalid",
     "portfolio.data.unavailable",
@@ -502,6 +502,7 @@ RunFailureCode = Literal[
     "backtest.run.invalid",
     "backtest.run.equity_wiped_out",
     "backtest.run.internal",
+    "backtest.run.interrupted",
 ]
 RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
 

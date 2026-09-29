@@ -556,6 +556,7 @@ export type BacktestRunState = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.internal"
+    | "backtest.run.interrupted"
     | null;
   /**
    * Message
@@ -583,7 +584,7 @@ export type BacktestRunState = {
 /**
  * BacktestRunSummary
  *
- * One process-lifetime run and the strategy meaning resolved before it started.
+ * One accepted run and the strategy meaning resolved before it started.
  */
 export type BacktestRunSummary = {
   run: BacktestRunState;
@@ -6260,7 +6261,7 @@ export type GetBacktestStatusData = {
 
 export type GetBacktestStatusErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**
@@ -6296,7 +6297,7 @@ export type CancelBacktestData = {
 
 export type CancelBacktestErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**
@@ -6337,7 +6338,7 @@ export type StreamBacktestEventsData = {
 
 export type StreamBacktestEventsErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**
@@ -6370,7 +6371,7 @@ export type GetBacktestRequestData = {
 
 export type GetBacktestRequestErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**
@@ -6406,7 +6407,7 @@ export type GetBacktestResultData = {
 
 export type GetBacktestResultErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**

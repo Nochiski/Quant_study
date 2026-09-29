@@ -15,7 +15,9 @@ DEFAULT_STRATEGY_REPOSITORY_PATH = (
     Path(__file__).resolve().parents[3] / ".local" / "strategy-revisions.sqlite3"
 )
 DEFAULT_ASSISTANT_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "assistant.sqlite3"
+DEFAULT_RESEARCH_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "research.sqlite3"
 STRATEGY_REPOSITORY_PATH_ENV = "STRATEGY_WORKBENCH_DB_PATH"
+RESEARCH_DB_PATH_ENV = "STRATEGY_WORKBENCH_RESEARCH_DB_PATH"
 EQUITY_ADAPTER_ENV = "STRATEGY_WORKBENCH_EQUITY_ADAPTER"
 EQUITY_ROOT_ENV = "STRATEGY_WORKBENCH_EQUITY_ROOT"
 ALLOWED_ORIGINS_ENV = "STRATEGY_WORKBENCH_ALLOWED_ORIGINS"
@@ -29,6 +31,12 @@ ASSISTANT_FAKE_PROVIDER_ENV = "STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER"
 def runtime_strategy_repository_path() -> Path:
     configured = os.environ.get(STRATEGY_REPOSITORY_PATH_ENV)
     return Path(configured).expanduser() if configured else DEFAULT_STRATEGY_REPOSITORY_PATH
+
+
+def runtime_research_db_path() -> Path:
+    """실행 기록 DB(검증 랩 spec D3). 전략 DB 의 불변 트리거와 섞지 않으려고 파일을 나눈다."""
+    configured = os.environ.get(RESEARCH_DB_PATH_ENV)
+    return Path(configured).expanduser() if configured else DEFAULT_RESEARCH_DB_PATH
 
 
 def runtime_equity_selection() -> tuple[str, Path | None]:
@@ -97,6 +105,7 @@ def runtime_assistant_settings() -> AssistantSettings:
 def build_http_app(
     *,
     strategy_repository_path: str | Path | None = None,
+    research_db_path: str | Path | None = None,
     equity_adapter: str = "mock",
     equity_root: Path | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
@@ -104,6 +113,7 @@ def build_http_app(
 ):  # return type is inferred from the FastAPI factory at this composition root
     container = build_container(
         strategy_repository_path=strategy_repository_path,
+        research_db_path=research_db_path,
         equity_adapter=equity_adapter,
         equity_root=equity_root,
         assistant=assistant,
@@ -130,6 +140,7 @@ def build_runtime_http_app():
     adapter, root = runtime_equity_selection()
     return build_http_app(
         strategy_repository_path=runtime_strategy_repository_path(),
+        research_db_path=runtime_research_db_path(),
         equity_adapter=adapter,
         equity_root=root,
         assistant=runtime_assistant_settings(),

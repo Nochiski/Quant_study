@@ -213,7 +213,7 @@ def _backtest_run_not_found_responses() -> dict[int | str, dict[str, Any]]:
     return {
         404: {
             "model": BacktestRunNotFoundResponse,
-            "description": "The process-lifetime backtest run does not exist",
+            "description": "The backtest run does not exist",
         }
     }
 

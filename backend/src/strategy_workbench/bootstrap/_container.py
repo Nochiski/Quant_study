@@ -19,6 +19,9 @@ from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository import (
     SQLiteStrategyDraftRepository,
     SQLiteStrategyRepository,
@@ -53,6 +56,7 @@ from ._assistant import (
     AssistantSettings,
     build_assistant_services,
 )
+from ._file_guard import restrict_to_current_user
 
 
 @dataclass(frozen=True)
@@ -85,6 +89,7 @@ def build_container(
     artifact_root: Path | None = None,
     equity_root: Path | None = None,
     strategy_repository_path: str | Path | None = None,
+    research_db_path: str | Path | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
 ) -> BackendContainer:
     """Build one explicit dependency graph; unknown adapters fail instead of falling back.
@@ -93,6 +98,8 @@ def build_container(
     `equity` optional extra (duckdb) and fails loudly when the root or the extra is missing.
     `strategy_repository_path=None` selects isolated in-memory SQLite for tests; the HTTP
     runtime supplies a durable file path explicitly so both exercise the same adapter contract.
+    `research_db_path`(실행 기록)도 같은 규칙이다. 파일이면 현재 사용자 전용으로 잠근다 — 요청에
+    인라인 초안 전략 원문이 그대로 담긴다(`_file_guard`).
     `assistant`는 어시스턴트 DB에 같은 규칙을 적용하고, 공급자 adapter 레지스트리를 같이
     나른다. 레지스트리는 A-05·A-06이 자기 항목을 등록할 때까지 비어 있고, 팩토리는 시작할 때가
     아니라 처음 필요할 때 불린다(미설치 SDK가 서버 시작을 막지 않는다).
@@ -142,6 +149,9 @@ def build_container(
     )
     strategy_draft_repository = SQLiteStrategyDraftRepository(strategy_repository_path)
     run_artifact_root = artifact_root or DEFAULT_RUN_ARTIFACT_ROOT
+    run_repository = SQLiteBacktestRunRepository(research_db_path)
+    if run_repository.database_path is not None:
+        restrict_to_current_user(run_repository.database_path)
     strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
     backtest_runs = BacktestRunService(
         portfolio_design,
@@ -149,6 +159,7 @@ def build_container(
         equity_data,
         BacktestEngineExecutorAdapter(metric_registry),
         LocalArtifactStore(run_artifact_root),
+        run_repository=run_repository,
         new_id=lambda: str(uuid4()),
     )
     # 결과 설명 세션이 완료된 실행을 읽으므로 실행 레지스트리를 먼저 세운다(결과 설명 spec R2).

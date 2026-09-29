@@ -7,6 +7,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
+from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import datetime_text
 from strategy_workbench.application.strategy_design.facade.ports import (
     RevisionOrigin,
     RevisionProvenance,
@@ -28,7 +29,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 from ._errors import StrategyRepositoryStorageError
-from ._values import datetime_text, optional_text, required_int, required_text
+from ._values import optional_text, required_int, required_text
 
 SourceSpecHashResolver = Callable[[str, SourceFormat], str]
 
@@ -55,7 +56,7 @@ def encode_record(
             source.text if source else None,
             source.source_hash if source else None,
             record.provenance.origin.value,
-            datetime_text(record.provenance.created_at),
+            datetime_text(record.provenance.created_at, field="revision created_at"),
             record.provenance.change_note,
         )
     except (TypeError, ValueError) as error:
@@ -117,7 +118,7 @@ def decode_record(
 
         created_at_text = required_text(row, "created_at")
         created_at = datetime.fromisoformat(created_at_text)
-        if datetime_text(created_at) != created_at_text:
+        if datetime_text(created_at, field="revision created_at") != created_at_text:
             raise ValueError("created_at is not canonical timezone-aware UTC text")
         record = StrategyRevisionRecord(
             spec=spec,

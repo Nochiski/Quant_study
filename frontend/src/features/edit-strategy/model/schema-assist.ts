@@ -27,12 +27,12 @@ import type {
 } from "../../../shared/ui/code-editor";
 import type { DocumentState } from "./document-state";
 import {
-  formatContractValue,
   isSchemaContractCompatible,
   projectContractField,
 } from "./contract-inspector";
 import { describeApplicabilityConditions } from "./field-applicability";
 import {
+  formatContractValue,
   referenceCandidates,
   schemaFacts,
   propertyOptions,

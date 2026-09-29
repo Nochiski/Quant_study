@@ -30,9 +30,9 @@ from strategy_workbench.domain.strategy._upgrade import (
     UpgradeWarning,
     apply_upgrade_steps,
     is_frozen_schema_version,
-    is_upgradeable_document,
     legacy_shape_hints,
     upgrade_document,
+    upgrade_refusal,
 )
 
 __all__ = [
@@ -62,9 +62,9 @@ __all__ = [
     "apply_upgrade_steps",
     "hydrate_strategy_document",
     "is_frozen_schema_version",
-    "is_upgradeable_document",
     "legacy_shape_hints",
     "promotion_node_ids",
     "source_hash_of",
     "upgrade_document",
+    "upgrade_refusal",
 ]

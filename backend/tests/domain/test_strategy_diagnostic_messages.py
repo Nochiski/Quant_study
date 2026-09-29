@@ -251,7 +251,9 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         lambda d: _set(d, "schema_version", "9.9"),
         "structure.not_upgradeable_schema_version",
         "지금 버전도 지원이 끝난 버전도 아닌 schema_version이라 업그레이드할 수 없습니다. "
-        "supported나 retired에 있는 버전을 따옴표로 감싸 적어 주세요 — "
+        "버전 줄에는 본문을 쓴 버전을 따옴표로 감싸 적어 주세요. 지금 문법이면 "
+        f'schema_version: "{CURRENT_SCHEMA_VERSION}"입니다. 지원이 끝난 옛 문법'
+        f'("{OLDEST}"·"{RETIRED}")이면 그 버전을 적은 뒤 업그레이드하세요 — '
         f"got='9.9' supported=('{CURRENT_SCHEMA_VERSION}',) "
         f"retired={sorted(FROZEN_SCHEMA_VERSIONS)}",
     ),
@@ -260,8 +262,9 @@ HYDRATE_GOLDEN: tuple[tuple[str, Any, str, str], ...] = (
         _retired_with_nested_factors,
         "structure.not_upgradeable_schema_version",
         "선언한 schema_version보다 옛 문법이 본문에 섞여 있어 업그레이드할 수 없습니다. 옛 문법 "
-        "자리를 선언한 버전의 문법으로 고치거나, 문서 전체가 stage 버전이면 버전 줄을 그 버전으로 "
-        f"고쳐 주세요 — got='{RETIRED}' stage='{OLDEST}' pointers=['/factors']",
+        f"자리를 선언한 버전의 문법으로 고치거나, 문서 전체가 {OLDEST} 문법이면 버전 줄을 그 버전"
+        f'(schema_version: "{OLDEST}")으로 고쳐 주세요 — '
+        f"got='{RETIRED}' stage='{OLDEST}' pointers=['/factors']",
     ),
     (
         "identity는 봉투 소유",

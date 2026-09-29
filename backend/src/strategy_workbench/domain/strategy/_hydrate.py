@@ -202,8 +202,10 @@ def _version_issues(
                 NOT_UPGRADEABLE_CODE,
                 "/schema_version",
                 "선언한 schema_version보다 옛 문법이 본문에 섞여 있어 업그레이드할 수 없습니다. 옛 "
-                "문법 자리를 선언한 버전의 문법으로 고치거나, 문서 전체가 stage 버전이면 버전 줄을 "
-                f"그 버전으로 고쳐 주세요 — got={schema_version!r} stage={refusal.stage!r} "
+                "문법 자리를 선언한 버전의 문법으로 고치거나, 문서 전체가 "
+                f"{refusal.stage} 문법이면 버전 줄을 그 버전"
+                f'(schema_version: "{refusal.stage}")으로 고쳐 주세요 — '
+                f"got={schema_version!r} stage={refusal.stage!r} "
                 f"pointers={list(refusal.older_shapes)}",
             ),
             *(
@@ -211,14 +213,17 @@ def _version_issues(
                 for pointer, hint in legacy_shape_hints(document).items()
             ),
         ]
+    retired = sorted(FROZEN_SCHEMA_VERSIONS)
+    quoted_retired = "·".join(f'"{version}"' for version in retired)
     return [
         StructuralIssue(
             NOT_UPGRADEABLE_CODE,
             "/schema_version",
             "지금 버전도 지원이 끝난 버전도 아닌 schema_version이라 업그레이드할 수 없습니다. "
-            "supported나 retired에 있는 버전을 따옴표로 감싸 적어 주세요 — "
-            f"got={schema_version!r} supported={SUPPORTED_SCHEMA_VERSIONS} "
-            f"retired={sorted(FROZEN_SCHEMA_VERSIONS)}",
+            "버전 줄에는 본문을 쓴 버전을 따옴표로 감싸 적어 주세요. 지금 문법이면 "
+            f'schema_version: "{CURRENT_SCHEMA_VERSION}"입니다. 지원이 끝난 옛 문법'
+            f"({quoted_retired})이면 그 버전을 적은 뒤 업그레이드하세요 — "
+            f"got={schema_version!r} supported={SUPPORTED_SCHEMA_VERSIONS} retired={retired}",
         )
     ]
 

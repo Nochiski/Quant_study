@@ -46,7 +46,7 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
         registry,
     )
 
-    assert registry.version == "metric-registry-v1"
+    assert registry.version == "metric-registry-v2"
     assert len(registry.definitions()) == 21
     assert _metric(report, "total_return").value == pytest.approx(0.1)
     assert _metric(report, "max_drawdown").value == pytest.approx(-0.2)
@@ -64,10 +64,10 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
     assert _metric(report, "volatility").value == pytest.approx(sample_std * math.sqrt(252))
     assert _metric(report, "sharpe").value == pytest.approx(mean / sample_std * math.sqrt(252))
     assert _metric(report, "sortino").value == pytest.approx(mean / downside_std * math.sqrt(252))
-    # 연수 = 수익률 3개 / 252, 총수익률 0.1 → CAGR = 1.1^(252/3) - 1. 칼마 = CAGR / |MDD 0.2|.
-    cagr = 1.1 ** (252 / 3) - 1
-    assert _metric(report, "cagr").value == pytest.approx(cagr)
-    assert _metric(report, "calmar").value == pytest.approx(cagr / 0.2)
+    # 1/2 → 1/7 은 5일이라 1년 미만: 예전처럼 1.1^(252/3) - 1 로 부풀리지 않고 비운다.
+    for metric_id in ("cagr", "calmar"):
+        assert _metric(report, metric_id).value is None
+        assert _metric(report, metric_id).unavailable_reason == "period_under_one_year"
     assert _metric(report, "trade_count").value == 2.0
     assert _metric(report, "win_rate").value == 0.5
     assert _metric(report, "profit_factor").value == 2.0
@@ -107,7 +107,11 @@ def test_metric_values_preserve_zero_and_explain_unavailable_values_per_scope() 
 def test_flat_equity_curve_reports_unavailable_ratios_instead_of_zero() -> None:
     report = compute_analytics(
         AnalyticsInput(
-            points=tuple(AnalysisPoint(date(2026, 1, day), 100.0, 0.0, 0.0) for day in (5, 6, 7)),
+            # 1년이 넘어야 칼마 사유가 기간이 아니라 낙폭에서 나온다.
+            points=tuple(
+                AnalysisPoint(session, 100.0, 0.0, 0.0)
+                for session in (date(2025, 1, 2), date(2025, 7, 1), date(2026, 1, 5))
+            ),
             traded_notional=0.0,
         ),
         build_default_metric_registry(),
@@ -119,6 +123,120 @@ def test_flat_equity_curve_reports_unavailable_ratios_instead_of_zero() -> None:
     assert _metric(report, "sharpe").unavailable_reason == "zero_return_variance"
     assert _metric(report, "sortino").unavailable_reason == "no_downside_variation"
     assert _metric(report, "calmar").unavailable_reason == "no_drawdown"
+
+
+def test_cagr_counts_calendar_days_from_the_base_session_not_sessions() -> None:
+    # 2025-01-02 → 2027-01-02 는 730일 = 2년. 세션은 셋뿐이라 예전 `세션 수 / 252` 로는 연수가
+    # 2/252 년이 되어 CAGR 이 터무니없이 커졌다.
+    report = compute_analytics(
+        AnalyticsInput(
+            points=(
+                AnalysisPoint(date(2025, 1, 2), 100.0, 0.0, 0.0),
+                AnalysisPoint(date(2025, 6, 30), 90.0, 0.0, 0.0),
+                AnalysisPoint(date(2027, 1, 2), 121.0, 0.0, 0.0),
+            ),
+            traded_notional=0.0,
+        ),
+        build_default_metric_registry(),
+    )
+
+    # 1.21 ** (1 / 2) - 1 = 0.1, 칼마 = 0.1 / |90 / 100 - 1| = 1.0
+    assert _metric(report, "cagr").value == pytest.approx(0.1)
+    assert _metric(report, "calmar").value == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    ("last_session", "cagr", "reason"),
+    [
+        # 364일: 1년 미만이라 연율화하지 않는다(GIPS). 총수익률은 그대로 보인다.
+        (date(2026, 1, 1), None, "period_under_one_year"),
+        # 365일 = 1년: 연율화한 값이 총수익률과 같다.
+        (date(2026, 1, 2), 0.05, None),
+    ],
+)
+def test_cagr_and_calmar_are_not_annualized_under_one_calendar_year(
+    last_session: date, cagr: float | None, reason: str | None
+) -> None:
+    report = compute_analytics(
+        AnalyticsInput(
+            points=(
+                AnalysisPoint(date(2025, 1, 2), 100.0, 0.0, 0.0),
+                AnalysisPoint(date(2025, 6, 2), 95.0, 0.0, 0.0),
+                AnalysisPoint(last_session, 105.0, 0.0, 0.0),
+            ),
+            traded_notional=0.0,
+        ),
+        build_default_metric_registry(),
+    )
+
+    assert _metric(report, "total_return").value == pytest.approx(0.05)
+    assert _metric(report, "cagr").value == pytest.approx(cagr)
+    assert _metric(report, "cagr").unavailable_reason == reason
+    # 칼마의 분자가 CAGR 이라 같은 사유로 빈다. 값이 있으면 0.05 / |95 / 100 - 1| = 1.0
+    assert _metric(report, "calmar").value == pytest.approx(None if cagr is None else 1.0)
+    assert _metric(report, "calmar").unavailable_reason == reason
+
+
+def test_total_loss_leaves_cagr_and_calmar_unavailable_but_keeps_sharpe() -> None:
+    report = compute_analytics(
+        AnalyticsInput(
+            points=(
+                AnalysisPoint(date(2025, 1, 2), 100.0, 0.0, 0.0),
+                AnalysisPoint(date(2025, 6, 2), 50.0, 0.0, 0.0),
+                AnalysisPoint(date(2026, 6, 1), 0.0, 0.0, 0.0),
+            ),
+            traded_notional=0.0,
+        ),
+        build_default_metric_registry(),
+    )
+
+    # 파산을 CAGR 0%(본전)로 보이지 않는다.
+    assert _metric(report, "total_return").value == pytest.approx(-1.0)
+    for metric_id in ("cagr", "calmar"):
+        assert _metric(report, metric_id).value is None
+        assert _metric(report, metric_id).unavailable_reason == "equity_depleted"
+    # 수익률 -0.5, -1.0: 평균 -0.75, 표본 표준편차 0.25 * sqrt(2)
+    assert _metric(report, "sharpe").value == pytest.approx(-0.75 / (0.25 * 2**0.5) * 252**0.5)
+
+
+def test_window_base_starts_returns_drawdown_and_years_but_stays_off_the_curve() -> None:
+    # 구간 직전 세션(1/30, 120)이 기준이다. 구간 첫날 120 → 110 하락이 수익률·낙폭에 들어간다.
+    report = compute_analytics(
+        AnalyticsInput(
+            points=(
+                AnalysisPoint(date(2026, 2, 2), 110.0, 0.2, 0.2, 210.0),
+                AnalysisPoint(date(2026, 2, 3), 99.0, 0.4, 0.0, 231.0),
+            ),
+            traded_notional=0.0,
+            base=AnalysisPoint(date(2026, 1, 30), 120.0, 1.0, 1.0, 200.0),
+        ),
+        build_default_metric_registry(),
+        scope=MetricScope.OUT_OF_SAMPLE,
+    )
+
+    def metric(metric_id: str):
+        return _metric(report, metric_id, MetricScope.OUT_OF_SAMPLE)
+
+    assert metric("total_return").value == pytest.approx(99.0 / 120.0 - 1.0)
+    assert metric("total_return").sample_count == 2
+    assert metric("max_drawdown").value == pytest.approx(99.0 / 120.0 - 1.0)
+    assert metric("max_drawdown_duration_sessions").value == 2.0
+    assert metric("benchmark_return").value == pytest.approx(0.155)
+    # 기준점은 곡선·노출에 들어가지 않는다.
+    assert metric("average_gross_exposure").value == pytest.approx(0.3)
+    assert metric("turnover").value == 0.0
+    assert [item.session for item in report.equity_curve] == [date(2026, 2, 2), date(2026, 2, 3)]
+    assert [item.session for item in report.drawdown_curve] == [date(2026, 2, 2), date(2026, 2, 3)]
+    assert [item.value for item in report.monthly_returns] == pytest.approx([99.0 / 120.0 - 1.0])
+
+
+def test_window_base_must_precede_the_window() -> None:
+    point = AnalysisPoint(date(2026, 2, 2), 100.0, 0.0, 0.0)
+    with pytest.raises(ValueError, match="base must precede"):
+        compute_analytics(
+            AnalyticsInput(points=(point,), traded_notional=0.0, base=point),
+            build_default_metric_registry(),
+        )
 
 
 def test_empty_equity_curve_is_rejected() -> None:

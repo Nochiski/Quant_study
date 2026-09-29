@@ -110,6 +110,11 @@
 - Given 완료된 결과, Then "핵심 성과 지표"에 Total return·Sharpe ratio·Maximum drawdown·Calmar
   ratio·Turnover·Closed trades 여섯 개가 값과 함께 보이고, 자산 곡선(Equity curve) 차트가 보인다.
   지표 이름 옆의 쉬운 한글 뜻은 US-DM-08이 지킨다.
+- Given OOS 시작일을 종료일 1년 안쪽으로 둔 실행, Then 결과의 지표 표에서 OOS 구간의 cagr·calmar
+  칸은 값 대신 "N/A"와 "기간이 1년보다 짧아 연율로 바꾸지 않습니다"를 보이고, 총수익률은 값으로 보인다.
+  1년 미만을 연율로 부풀리면 짧은 구간의 우연한 상승이 과대평가된다(이슈 #274). 자산을 모두 잃은
+  실행의 CAGR·칼마는 0%가 아니라 "자산을 모두 잃어 계산할 수 없습니다"다. 브라우저 e2e는 1년 미만
+  경로만 밟고, 전액 손실은 backend `tests/domain/test_backtest_analytics.py`가 확인한다.
 - Given 완료된 결과, When 왼쪽 메뉴의 "백테스트"를 누르면, Then 백테스트 이력에 방금 실행이
   완료 상태로 있다.
 - 비고: 섹터 정보가 없는 실데이터(duckdb 원장)에서는 섹터 상한이 적용되지 않는다. 대신 섹터 상한이

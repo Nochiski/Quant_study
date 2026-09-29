@@ -17,6 +17,11 @@ from ._models import (
 )
 from ._registry import MetricRegistry
 
+# 연수는 기준일부터 마지막 세션까지의 달력 일수 / 365(ACT/365)다. 원화 금리의 일할 관행과 같고,
+# 달력 1년이 윤년과 무관하게 1년 이상으로 세어져 "1년 미만은 연율화하지 않는다"(GIPS) 경계가
+# 달력과 맞는다. `annualization_days`는 변동성·샤프·소르티노 연율화에만 쓴다.
+_DAYS_PER_YEAR = 365
+
 
 def unavailable_metric_values(
     registry: MetricRegistry,
@@ -53,19 +58,33 @@ def compute_analytics(
     if annualization_days <= 0 or rolling_window <= 1:
         raise ValueError("annualization_days and rolling_window must be positive")
     points = tuple(sorted(data.points, key=lambda item: item.session))
+    if data.base is not None and data.base.session >= points[0].session:
+        raise ValueError("analytics base must precede the first equity point")
+    # 수익률·연수·낙폭·월별·벤치마크는 기준점(구간 직전 세션, 없으면 첫 점)에서 시작한다. 기준점은
+    # 곡선 점이 아니라서 곡선·노출·평균 자산에는 들어가지 않는다.
+    anchored = points if data.base is None else (data.base, *points)
+    anchored_equity = tuple(item.equity for item in anchored)
     equity = tuple(item.equity for item in points)
-    returns = _returns(equity)
-    total_return = equity[-1] / equity[0] - 1.0
-    years = len(returns) / annualization_days
-    cagr = (1.0 + total_return) ** (1.0 / years) - 1.0 if years > 0 and total_return > -1.0 else 0.0
+    returns = _returns(anchored_equity)
+    total_return = equity[-1] / anchored_equity[0] - 1.0
+    years = (points[-1].session - anchored[0].session).days / _DAYS_PER_YEAR
+    # 전액 손실은 연율로 바꿀 수 없고 1년 미만은 연율화하지 않는다(GIPS). 칼마도 같은 사유로 빈다.
+    cagr_reason = (
+        MetricUnavailableReason.EQUITY_DEPLETED
+        if total_return <= -1.0
+        else MetricUnavailableReason.PERIOD_UNDER_ONE_YEAR
+        if years < 1.0
+        else None
+    )
+    cagr = (1.0 + total_return) ** (1.0 / years) - 1.0 if cagr_reason is None else None
     volatility, sharpe, sortino = _risk_adjusted(returns, annualization_days)
-    drawdowns = _drawdowns(points)
+    drawdowns = _drawdowns(anchored)[-len(points) :]
     max_drawdown = min(item.drawdown for item in drawdowns)
-    max_duration, recovery = _drawdown_timing(equity)
-    calmar = cagr / abs(max_drawdown) if max_drawdown < 0 else None
+    max_duration, recovery = _drawdown_timing(anchored_equity)
+    calmar = cagr / abs(max_drawdown) if cagr is not None and max_drawdown < 0 else None
     average_equity = sum(equity) / len(equity)
     turnover = data.traded_notional / average_equity if average_equity > 0 else 0.0
-    benchmark_return = _benchmark_return(points)
+    benchmark_return = _benchmark_return(anchored)
     winning = tuple(trade.pnl for trade in data.trades if trade.pnl > 0)
     losing = tuple(trade.pnl for trade in data.trades if trade.pnl < 0)
     win_rate = len(winning) / len(data.trades) if data.trades else None
@@ -87,12 +106,12 @@ def compute_analytics(
 
     metrics = (
         value("total_return", total_return),
-        value("cagr", cagr),
+        value("cagr", cagr, cagr_reason),
         value("volatility", volatility),
         value("sharpe", sharpe, MetricUnavailableReason.ZERO_RETURN_VARIANCE),
         value("sortino", sortino, MetricUnavailableReason.NO_DOWNSIDE_VARIATION),
         value("max_drawdown", max_drawdown),
-        value("calmar", calmar, MetricUnavailableReason.NO_DRAWDOWN),
+        value("calmar", calmar, cagr_reason or MetricUnavailableReason.NO_DRAWDOWN),
         value("turnover", turnover),
         value("max_drawdown_duration_sessions", float(max_duration)),
         value(
@@ -131,7 +150,7 @@ def compute_analytics(
             EquityCurvePoint(item.session, item.equity, item.benchmark_equity) for item in points
         ),
         drawdown_curve=drawdowns,
-        monthly_returns=_monthly_returns(points),
+        monthly_returns=_monthly_returns(points, anchored_equity[0]),
         rolling_sharpe=_rolling_sharpe(points, annualization_days, rolling_window),
     )
 
@@ -217,11 +236,12 @@ def _benchmark_return(points: tuple[AnalysisPoint, ...]) -> float | None:
     return values[-1] / values[0] - 1.0
 
 
-def _monthly_returns(points: tuple[AnalysisPoint, ...]) -> tuple[MonthlyReturnPoint, ...]:
+def _monthly_returns(
+    points: tuple[AnalysisPoint, ...], previous_close: float
+) -> tuple[MonthlyReturnPoint, ...]:
     grouped: dict[tuple[int, int], list[float]] = defaultdict(list)
     for point in points:
         grouped[(point.session.year, point.session.month)].append(point.equity)
-    previous_close = points[0].equity
     result: list[MonthlyReturnPoint] = []
     for (year, month), values in sorted(grouped.items()):
         result.append(MonthlyReturnPoint(year, month, values[-1] / previous_close - 1.0))

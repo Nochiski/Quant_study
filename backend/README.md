@@ -56,7 +56,10 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   spec_hash 대조) 또는 inline draft를 지정하고(옛 schema revision이면 422
   `backtest.strategy.requires_upgrade`) manifest의 `strategy_provenance`에 출처를 기록 (기존 `strategy` inline도 유지). 실제
   `backtest.run.invalid`·`portfolio.*` 422와 saved-reference 404/409는 OpenAPI/generated SDK의
-  discriminated error 계약으로 함께 제공한다.
+  discriminated error 계약으로 함께 제공한다. 한꺼번에 계산하는 run 수의 상한은 `backtest_run`의
+  `MAX_CONCURRENT_RUNS` 하나가 정하고, 넘는 run은 `queued`(접수 문장 `Waiting for a free run slot`)로
+  접수 순서대로 기다린다. 같은 입력(실행할 spec·실행 설정·실행 옵션·provenance)으로 `queued`·`running`
+  인 run이 있으면 새 run 대신 그 run을 돌려준다(이슈 #161).
 - `GET /api/v1/backtests`: 실행 이력 목록
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다
@@ -65,9 +68,13 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   능력 `ProgressReportingRawObservationPort`(duckdb 구현)의 로딩 진행, 계약 검증·팩터 입력 변환·
   포트폴리오 관측 변환 루프, 팩터 평가기(노드 종류별 가중치, 시계열은 관측 단위), TargetTape 컴파일
   진행이 1% 이상 오를 때마다 이벤트가 된다. 구간 폭은 실데이터 4년 구간 실측 시간 비율을 따른다
-  (이슈 #162).
+  (이슈 #162). 스트림은 비동기라 스레드풀 워커를 잡지 않고, 조용한 구간에는 keepalive 주석을
+  보낸다(간격은 어시스턴트 스트림과 같은 `http_api/_sse.py`, 이슈 #161).
 - `GET /api/v1/backtests/{run_id}/result`: versioned metrics, 차트 series, raw artifact, manifest 조회
-- `POST /api/v1/backtests/{run_id}/cancel`: 협력적 취소 요청
+- `POST /api/v1/backtests/{run_id}/cancel`: 협력적 취소 요청. 자리를 기다리는(`queued`) run은 바로
+  `cancelled`다. duckdb 어댑터는 tape 단계의 격자·법인 대응·LATEST 질의를 `interrupt()`로 끊는다(이슈
+  #160, 실원장 6개월 구간 실측에서 tape 단계 도중 취소는 0.2초 안에 `cancelled`가 됐다). data 단계
+  질의(`load_backtest_dataset`)는 포트에 취소가 없어 끊지 않는다
 
 실데이터는 `BacktestDataPort` 구현만 바꿔 붙인다(`equity_duckdb`, 아래 의존성 방향 절). domain/application과 engine executor는
 OHLCV·universe membership·corporate action의 중립 계약을 유지한다. 로컬 실행 artifact는

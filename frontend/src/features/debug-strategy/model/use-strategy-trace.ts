@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 
+import { backtestErrorSentence } from "../../../entities/backtest";
 import {
   ApiRequestError,
   failureReason,
@@ -185,14 +186,15 @@ const fetchTraceBundle = async (
 };
 
 /**
- * 추적 요청 오류의 본문: backend detail의 `code`에 번역(`trace.error.<code>`)이 있으면 그것을, 없으면 일반
- * 문구를 쓴다(Phase 1 감사 위험 5b — backtest 경로의 `backtest.error.<code>`와 같은 규약). 서버 원문은
- * 본문에 넣지 않고 접힌 서버 사유(`failureReason`)로만 보인다(#270). 어느 칸·어느 기능인지 알려 주던
- * `{detail}` 자리(backlog 17)도 그래서 번역에서 뺐다.
+ * 추적 요청 오류의 본문. 추적 고유 코드는 `trace.error.<code>`가, 실행 요청과 같은 코드(실행 설정 거절·문서
+ * 실행 검증)는 백테스트와 같은 번역 `backtestErrorSentence`가 detail 값(연구 구간 날짜 등)을 채워 고른다 — 같은
+ * 거절을 두 벌 번역하지 않는다(#351). 둘 다 없으면 일반 문구다. 서버 원문은 본문에 넣지 않고 접힌 서버
+ * 사유(`failureReason`)로만 보인다(#270).
  */
 export const traceErrorMessage = (error: unknown): string =>
   (error instanceof ApiRequestError && error.code !== undefined
-    ? tOptional(`trace.error.${error.code}`)
+    ? (tOptional(`trace.error.${error.code}`) ??
+      backtestErrorSentence(error.code, null, error.values))
     : null) ?? t("trace.error.request");
 
 /**

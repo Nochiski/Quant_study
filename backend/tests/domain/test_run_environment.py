@@ -295,18 +295,25 @@ def test_sell_tax_rate_is_only_and_always_given_for_custom(
 @pytest.mark.parametrize(
     ("session", "rate"),
     [
-        # 합계 세율(증권거래세 + 코스피 농어촌특별세)이 시행일에 바뀐다. 손으로 옮긴 법정 값이다.
-        (date(2019, 6, 2), 0.0030),
-        (date(2019, 6, 3), 0.0025),
-        (date(2020, 12, 31), 0.0025),
-        (date(2021, 1, 1), 0.0023),
-        (date(2023, 1, 2), 0.0020),
-        (date(2024, 1, 2), 0.0018),
-        (date(2025, 12, 30), 0.0015),
-        (date(2026, 1, 2), 0.0020),
+        # 합계 세율(증권거래세 + 코스피 농어촌특별세)은 결제일(체결일 + 2거래일)이 시행일에 닿는 첫
+        # 체결일에 바뀐다. 경계 전날과 당일을 손으로 옮긴 법정 값이다.
+        (date(2019, 5, 29), 0.0030),
+        (date(2019, 5, 30), 0.0025),
+        (date(2020, 12, 28), 0.0025),
+        (date(2020, 12, 29), 0.0023),
+        (date(2022, 12, 27), 0.0023),
+        (date(2022, 12, 28), 0.0020),
+        (date(2023, 12, 26), 0.0020),
+        (date(2023, 12, 27), 0.0018),
+        (date(2024, 12, 26), 0.0018),
+        (date(2024, 12, 27), 0.0015),
+        (date(2025, 12, 26), 0.0015),
+        (date(2025, 12, 29), 0.0020),
     ],
 )
-def test_statutory_rate_changes_on_each_effective_date(session: date, rate: float) -> None:
+def test_statutory_rate_changes_on_the_first_trade_date_that_settles_after_enactment(
+    session: date, rate: float
+) -> None:
     config = RunConfig(
         run_id="tax",
         initial_cash=1.0,
@@ -314,4 +321,3 @@ def test_statutory_rate_changes_on_each_effective_date(session: date, rate: floa
     )
 
     assert config.sell_tax_rate(session) == pytest.approx(rate)
-

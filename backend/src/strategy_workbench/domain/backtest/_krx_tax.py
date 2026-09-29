@@ -9,8 +9,9 @@
 (`database/src/equity/rules_s03.py` 의 `MARKET_VOCAB`)이고, 합계가 다른 코넥스(0.10%)는 없다. 합계가
 갈리는 시장이 유니버스에 들어오면 종목별 시장 구분을 엔진까지 배선해야 한다.
 
-세법은 양도 시점(결제일, T+2)에 세율을 정하지만 엔진은 체결 세션 날짜로 찾는다. 그래서 시행일 직전
-2거래일에 판 체결은 실제로는 새 세율을 냈는데 여기서는 옛 세율이 붙는다.
+엔진은 체결 세션 날짜로 세율을 찾는다. 세법은 양도 시점(결제일, 체결일 + 2거래일)으로 세율을
+정하므로, 행의 시작일은 법정 시행일이 아니라 "결제일이 시행일 이후가 되는 첫 체결일"이다. 연말
+휴장(12-31, 해에 따라 12-30)이 결제일을 다음 해로 밀어서 시행일보다 2~3 체결일 앞선다.
 """
 
 from __future__ import annotations
@@ -19,23 +20,32 @@ from datetime import date
 
 from ._models import Market, RunEnvironment, SellTax
 
-# 시장별 `(시행일, 증권거래세 + 농어촌특별세 bp)`. 시행일 오름차순이고 첫 행은 원장 시작 이전부터다.
+# 시장별 `(첫 적용 체결일, 증권거래세 + 농어촌특별세 bp)`. 시작일 오름차순이고 첫 행은 원장 시작
+# 이전부터다. 주석은 법정 시행일·근거 법령과 체결일 환산의 출처다.
 STATUTORY_SELL_TAX_BPS: dict[Market, tuple[tuple[date, float], ...]] = {
     Market.KRX: (
-        # 2019-06-02 까지: 코스피 0.15% + 농특세 0.15%, 코스닥 0.30%.
+        # 그 전: 코스피 0.15% + 농특세 0.15%, 코스닥 0.30%.
         (date.min, 30.0),
-        # 증권거래세법 시행령 제5조(대통령령 제29788호, 2019-05-28 공포):
+        # 시행 2019-06-03, 증권거래세법 시행령 제5조(대통령령 제29788호):
         # 코스피 0.10%, 코스닥 0.25%.
-        (date(2019, 6, 3), 25.0),
-        # 같은 조(대통령령 제31290호, 2020-12-29 공포): 코스피 0.08%, 코스닥 0.23%.
-        (date(2021, 1, 1), 23.0),
-        # 같은 조(대통령령 제33209호, 2022-12-31 공포)의 단계 인하:
-        # 2023년 코스피 0.05%·코스닥 0.20%, 2024년 0.03%·0.18%, 2025년 0%·0.15%.
-        (date(2023, 1, 1), 20.0),
-        (date(2024, 1, 1), 18.0),
-        (date(2025, 1, 1), 15.0),
-        # 같은 조(대통령령 제36001호, 2025-12-31 공포, 2026-01-01 시행): 코스피 0.05%, 코스닥 0.20%.
-        (date(2026, 1, 1), 20.0),
+        # 5-30 체결분부터(결제 6-03) — 증권유관기관 공동보도자료(금융투자협회, 2019-05-30).
+        (date(2019, 5, 30), 25.0),
+        # 시행 2021-01-01(대통령령 제31290호): 코스피 0.08%, 코스닥 0.23%.
+        # 12-29 체결분부터(12-31 휴장으로 결제 2021-01-04) — 이데일리 보도(2020-12-29).
+        (date(2020, 12, 29), 23.0),
+        # 시행 2023-01-01(대통령령 제33209호 단계 인하): 코스피 0.05%, 코스닥 0.20%.
+        # 12-28 체결분부터 — 공지는 확인하지 못했고 결제 규칙으로 추론했다
+        # (12-30 휴장, 결제 2023-01-02).
+        (date(2022, 12, 28), 20.0),
+        # 시행 2024-01-01(같은 개정령): 코스피 0.03%, 코스닥 0.18%.
+        # 12-27 체결분부터 — 삼성증권·DS투자증권 공지.
+        (date(2023, 12, 27), 18.0),
+        # 시행 2025-01-01(같은 개정령): 코스피 0%, 코스닥 0.15%.
+        # 12-27 체결분부터 — KB증권 공지(2024-12-23).
+        (date(2024, 12, 27), 15.0),
+        # 시행 2026-01-01(대통령령 제36001호, 2025-12-31 공포): 코스피 0.05%, 코스닥 0.20%.
+        # 12-29 체결분부터(12-31 휴장으로 결제 2026-01-02) — 결제 규칙으로 추론했다.
+        (date(2025, 12, 29), 20.0),
     ),
 }
 
@@ -45,15 +55,8 @@ def sell_tax_schedule(environment: RunEnvironment) -> tuple[tuple[date, float], 
 
     `none` 은 빈 일정이다. 엔진은 일정이 비었거나 체결일보다 앞선 행이 없으면 세금을 매기지 않는다.
     """
-    match environment.sell_tax:
-        case SellTax.KRX_STATUTORY:
-            return STATUTORY_SELL_TAX_BPS[environment.market]
-        case SellTax.CUSTOM:
-            if environment.sell_tax_bps is None:
-                raise ValueError(
-                    "custom sell tax without a rate — "
-                    f"sell_tax={environment.sell_tax.value} universe_id={environment.universe_id!r}"
-                )
-            return ((date.min, environment.sell_tax_bps),)
-        case SellTax.NONE:
-            return ()
+    if environment.sell_tax is SellTax.KRX_STATUTORY:
+        return STATUTORY_SELL_TAX_BPS[environment.market]
+    # 세율 칸은 `custom` 이면 있고 `none` 이면 없다(`RunEnvironment.__post_init__`).
+    bps = environment.sell_tax_bps
+    return () if bps is None else ((date.min, bps),)

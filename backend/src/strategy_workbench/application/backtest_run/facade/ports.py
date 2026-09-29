@@ -20,7 +20,9 @@ from strategy_workbench.application.backtest_run.ports.outgoing.backtest_executo
     RunCancelledError,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.run_repository import (
+    BacktestRunNotFoundError,
     BacktestRunRepositoryPort,
+    BacktestRunSummary,
 )
 
 __all__ = [
@@ -31,7 +33,9 @@ __all__ = [
     "BacktestDataset",
     "BacktestExecutionRequest",
     "BacktestExecutorPort",
+    "BacktestRunNotFoundError",
     "BacktestRunRepositoryPort",
+    "BacktestRunSummary",
     "CancellationCheck",
     "CorporateActionRecord",
     "EquityWipedOutError",

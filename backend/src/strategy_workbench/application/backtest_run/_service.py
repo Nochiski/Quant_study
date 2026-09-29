@@ -344,11 +344,10 @@ class BacktestRunService:
         return self._repository.get(run_id).run
 
     def request(self, run_id: str) -> BacktestRunSpec:
-        """Return the normalized request accepted for a run.
+        """접수한 원본 요청을 돌려준다(저장소가 정본).
 
-        The unresolved request carries exactly one strategy source and is therefore safe to
-        submit again. The resolved execution spec intentionally remains an internal detail until
-        it is committed to the immutable result manifest.
+        해소하지 않은 요청은 전략 출처를 정확히 하나 실으므로 그대로 다시 제출해도 된다. 해소한
+        실행 spec 은 불변 결과 매니페스트에 기록될 때까지 내부 사항으로 둔다.
         """
 
         return self._repository.request(run_id)

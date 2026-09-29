@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import ClassVar, cast
 
 from strategy_workbench.adapters.outbound.sqlite_store.facade.database import SqliteDatabase
-from strategy_workbench.application.backtest_run.facade.runs import (
+from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import datetime_text
+from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
 )
@@ -26,8 +27,9 @@ from ._request_codec import decode_request, encode_request
 from ._schema import SCHEMA_VERSION, migrate_schema
 
 _TERMINAL = (RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value)
+# 앞 둘(run_id·created_at)은 접수 때만 쓰는 식별 칸이다. 상태 전이(`update`)는 그 뒤만 바꾼다.
 _SUMMARY_COLUMNS = """
-    run_id, status, progress, stage, message, created_at, updated_at, error, error_code,
+    run_id, created_at, status, progress, stage, message, updated_at, error, error_code,
     artifact_sha256, strategy_kind, spec_hash, schema_version, strategy_id, revision, source_hash
 """
 
@@ -58,6 +60,8 @@ class SQLiteBacktestRunRepository:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    run.run_id,
+                    _time_text(run.created_at, "created_at", run.run_id),
                     *_state_values(run),
                     provenance.kind.value,
                     provenance.spec_hash,
@@ -74,8 +78,8 @@ class SQLiteBacktestRunRepository:
             updated = connection.execute(
                 """
                 UPDATE backtest_runs
-                SET run_id = ?, status = ?, progress = ?, stage = ?, message = ?,
-                    created_at = ?, updated_at = ?, error = ?, error_code = ?, artifact_sha256 = ?
+                SET status = ?, progress = ?, stage = ?, message = ?, updated_at = ?,
+                    error = ?, error_code = ?, artifact_sha256 = ?
                 WHERE run_id = ?
                 """,
                 (*_state_values(state), state.run_id),
@@ -136,14 +140,13 @@ class SQLiteBacktestRunRepository:
 
 
 def _state_values(state: BacktestRunState) -> tuple[object, ...]:
+    """상태 전이가 바꾸는 칸. 순서는 `_SUMMARY_COLUMNS` 의 `status` 부터 `artifact_sha256` 까지."""
     return (
-        state.run_id,
         state.status.value,
         float(state.progress),
         state.stage,
         state.message,
-        _time_text(state.created_at, field="created_at", run_id=state.run_id),
-        _time_text(state.updated_at, field="updated_at", run_id=state.run_id),
+        _time_text(state.updated_at, "updated_at", state.run_id),
         state.error,
         state.error_code,
         state.artifact_sha256,
@@ -184,8 +187,5 @@ def _summary(row: sqlite3.Row) -> BacktestRunSummary:
         ) from error
 
 
-def _time_text(value: datetime, *, field: str, run_id: str) -> str:
-    # naive 값을 그대로 적으면 재시작 뒤 로컬 시간대가 섞인다. aware 값은 UTC 로 옮겨 적는다.
-    if value.utcoffset() is None:
-        raise ValueError(f"{field} must be timezone-aware — run_id={run_id} got={value!r}")
-    return value.astimezone(UTC).isoformat(timespec="microseconds")
+def _time_text(value: datetime, field: str, run_id: str) -> str:
+    return datetime_text(value, field=f"backtest run {field} (run_id={run_id})")

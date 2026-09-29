@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from strategy_workbench.adapters.outbound.sqlite_store.facade.database import SqliteDatabase
+from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import datetime_text
 from strategy_workbench.application.strategy_authoring.facade.authoring import StrategyDraft
 from strategy_workbench.application.strategy_authoring.facade.ports import (
     SourceFormat,
@@ -14,7 +15,7 @@ from strategy_workbench.application.strategy_authoring.facade.ports import (
 
 from ._errors import StrategyRepositoryStorageError
 from ._schema import migrate_schema
-from ._values import datetime_text, optional_text, required_int, required_text
+from ._values import optional_text, required_int, required_text
 
 
 class SQLiteStrategyDraftRepository:
@@ -96,7 +97,7 @@ class SQLiteStrategyDraftRepository:
                     draft.strategy_id,
                     draft.base_revision,
                     draft.base_spec_hash,
-                    datetime_text(draft.updated_at),
+                    datetime_text(draft.updated_at, field="draft updated_at"),
                     draft.draft_id,
                     expected_version,
                 ),
@@ -143,7 +144,7 @@ class SQLiteStrategyDraftRepository:
             draft.strategy_id,
             draft.base_revision,
             draft.base_spec_hash,
-            datetime_text(draft.updated_at),
+            datetime_text(draft.updated_at, field="draft updated_at"),
         )
 
     @staticmethod
@@ -156,7 +157,7 @@ class SQLiteStrategyDraftRepository:
         try:
             updated_at_text = required_text(row, "updated_at")
             updated_at = datetime.fromisoformat(updated_at_text)
-            if datetime_text(updated_at) != updated_at_text:
+            if datetime_text(updated_at, field="draft updated_at") != updated_at_text:
                 raise ValueError("updated_at is not canonical timezone-aware UTC text")
             return StrategyDraft(
                 draft_id=required_text(row, "draft_id"),

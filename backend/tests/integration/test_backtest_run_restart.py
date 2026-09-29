@@ -10,12 +10,15 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
 from strategy_workbench.application.backtest_run.facade.runs import BacktestRunSummary
+from strategy_workbench.bootstrap import _container
+from strategy_workbench.bootstrap.facade.container import build_container
 from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -106,3 +109,17 @@ def test_runs_left_unfinished_by_the_previous_process_are_closed_as_interrupted(
         # 취소도 이미 닫힌 상태를 그대로 돌려준다.
         assert client.post(f"/api/v1/backtests/{run_id}/cancel").json() == state
     assert client.get("/api/v1/backtests/completed").json()["status"] == "completed"
+
+
+def test_building_the_container_locks_the_research_database_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """요청에 인라인 초안 전략 원문이 담기므로 파일을 현재 사용자 전용으로 잠근다(`_file_guard`)."""
+    locked: list[Path] = []
+    monkeypatch.setattr(_container, "restrict_to_current_user", locked.append)
+
+    build_container(research_db_path=tmp_path / "nested" / "research.sqlite3")
+    build_container()
+
+    # in-memory(경로 없음)는 잠글 파일이 없다.
+    assert locked == [(tmp_path / "nested" / "research.sqlite3").resolve()]

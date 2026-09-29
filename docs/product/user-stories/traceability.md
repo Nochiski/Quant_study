@@ -63,7 +63,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-SM-08 | 한상목 | Form·Graph로 고쳐도 YAML 원문은 그 줄만 바뀐다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: adds a node in the Graph editor, rewires an input, refreshes the plan and saves<br>`frontend/e2e/workbench.workflow.spec.ts` :: edits through the Form with the same hash as a YAML edit and adds a catalog factor that reaches the plan |
 | US-SM-09 | 한상목 | 모르는 금융 개념을 편집 흐름 안에서 설명받는다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.finance-terms.spec.ts` :: US-SM-09 편집 중에 AI와 계약 패널로 금융 개념의 뜻을 확인한다 |
 | US-SM-10 | 한상목 | 실행 설정 항목 옆에서 용어 뜻을 바로 본다 | `미계획` | — | — | — |
-| US-SM-11 | 한상목 | 백테스트를 다시 눌러도 같은 계산이 겹쳐 돌지 않는다 | `구현됨-e2e없음` | — | — | — |
+| US-SM-11 | 한상목 | 백테스트를 다시 눌러도 같은 계산이 겹쳐 돌지 않는다 | `구현됨-e2e없음` | V3-04 | V3-04 | — |
 | US-SM-12 | 한상목 | 시도 수가 자동으로 쌓이고 지울 수 없다 | `예정` | V1-03, V1-05, V5-03, V5-07 | V5-03 | — |
 | US-SM-13 | 한상목 | 봉인 구간과 겹치는 실행이 이유와 교정 버튼과 함께 막힌다 | `예정` | V1-01, V1-02, V5-05 | V5-05 | — |
 | US-SM-14 | 한상목 | 실험 설정을 표로 보고 같은 실험을 다시 만든다 | `예정` | V3-03, V5-01 | V5-01 | — |

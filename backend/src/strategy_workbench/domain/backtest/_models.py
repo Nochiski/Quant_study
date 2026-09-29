@@ -506,7 +506,8 @@ class BacktestRunState:
     # 보존을 위해 실린다). 시작 요청이 데이터를 읽지 않게 되면서(#158) 데이터 의존 실패가 422
     # 코드 대신 이 필드로 온다 — 어휘 SoT 는 `RunFailureCode`.
     error_code: RunFailureCode | None = None
-    artifact_uri: str | None = None
+    # 산출물의 위치(서버 경로)는 싣지 않는다 — run 상태는 그대로 API 응답이고, 산출물은 저장소가
+    # run_id 로 찾는다(#277).
     artifact_sha256: str | None = None
 
 

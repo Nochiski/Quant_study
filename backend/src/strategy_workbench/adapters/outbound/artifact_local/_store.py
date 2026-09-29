@@ -58,11 +58,7 @@ class LocalArtifactStore:
             if staging.exists() and staging.parent == self._root:
                 shutil.rmtree(staging)
             raise
-        return ArtifactCommit(
-            uri=(target / "result.json").as_uri(),
-            sha256=hashlib.sha256(payload).hexdigest(),
-            size_bytes=len(payload),
-        )
+        return ArtifactCommit(sha256=hashlib.sha256(payload).hexdigest())
 
     def discard(self, run_id: str) -> None:
         """Delete one exact committed run after application-level cancellation wins."""

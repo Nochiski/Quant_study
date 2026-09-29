@@ -8,9 +8,7 @@ from strategy_workbench.domain.backtest.facade.runs import BacktestRunResult
 
 @dataclass(frozen=True)
 class ArtifactCommit:
-    uri: str
     sha256: str
-    size_bytes: int
 
 
 class BacktestArtifactStorePort(Protocol):

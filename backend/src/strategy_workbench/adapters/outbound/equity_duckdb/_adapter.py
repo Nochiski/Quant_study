@@ -642,10 +642,10 @@ class EquityDuckdbAdapter:
                 f"catalog macros not published (macros_skipped) — missing={skipped} "
                 f"macros={list(self._catalog.macros)}"
             )
-        return self._missing_columns_reason(spec)
+        return self._macro_unavailable_reason(spec)
 
-    def _missing_columns_reason(self, spec: SourceSpec) -> str | None:
-        """매크로 원천을 부팅 때 한 번 읽어 보고, 못 읽거나 요구하는 열이 없으면 그 원천만 뺀다.
+    def _macro_unavailable_reason(self, spec: SourceSpec) -> str | None:
+        """매크로 원천을 부팅 때 한 번 읽어 보고, 못 읽거나 요구하는 열이 없으면 뺄 사유를 돌려준다.
 
         매크로가 가리키는 parquet 가 빠졌거나 손상됐으면 `catalog_macro_unreadable`, 옛 카탈로그라
         원천이 읽는 열(`required_columns`)이 없으면 `catalog_columns_missing` 으로 경고한다.

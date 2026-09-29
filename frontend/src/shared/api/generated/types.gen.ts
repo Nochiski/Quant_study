@@ -539,10 +539,6 @@ export type BacktestRunState = {
    */
   artifact_sha256?: string | null;
   /**
-   * Artifact Uri
-   */
-  artifact_uri?: string | null;
-  /**
    * Created At
    */
   created_at: string;

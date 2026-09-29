@@ -149,14 +149,7 @@ export {
   type DraftDiffProjection,
   type DraftSemanticDiff,
 } from "./model/diff-projection";
-export {
-  describeApplicabilityConditions,
-  isApplicableWhen,
-  projectApplicability,
-  type ApplicabilityCondition,
-  type DefaultResolver,
-  type FieldApplicability,
-} from "./model/field-applicability";
+export { describeApplicabilityConditions } from "./model/field-applicability";
 export {
   projectContractField,
   projectContractInspector,

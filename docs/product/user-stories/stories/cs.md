@@ -80,6 +80,7 @@
 - e2e:
   - `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests
   - `frontend/e2e/stories/cs.derived-factor.spec.ts` :: US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다
+  - `frontend/e2e/stories/cs.masked-trace.spec.ts` :: US-CS-03 원장이 가린 신용잔고 칸을 건넌 노드 값과 그 원시 셀을 원장이 가림으로 본다
 
 수용 기준
 
@@ -87,6 +88,11 @@
   "추적 실행"을 누르면, Then 추적 재현 정보(전략 해시·데이터 스냅샷·기준일)가 보이고, 원천 값은 모두
   기준일 이전에 공개된 값이다.
 - Given 같은 추적, Then 종목마다 순위·선택 여부·제외 사유·목표 비중이 보인다.
+- Given 같은 추적, Then 노드 값 상태·원시 셀 상태·팩터 기여 상태·제약 결과가 영문 코드가 아니라 한글
+  문구("계산됨"·"관측값"·"반영됨"·"제약으로 조정됨" 등)로 보인다(이슈 #350).
+- Given 원장이 가린 셀(예: 무상증자 척도 창의 신용잔고)이 값의 시점 구간에 드는 노드, When 그 기준일을
+  추적하면, Then 입력이 값으로 보여도 그 노드의 상태가 "입력 없음"이 아니라 "원장이 가림"이고, 원시
+  데이터의 가린 셀도 "원장이 가림"으로 보인다(이슈 #350).
 - Given 실행 계획 탭, Then 노드마다 연산과 필요한 과거 세션 수(예: "252 세션"), 공개 시점 정책
   `available_date_lte_as_of`, 결측 정책이 보인다.
 - Given 추적 결과가 보이는 상태, When 실행 설정의 칸 하나(기간·유니버스·수수료·체결 등)를 바꾸면, Then

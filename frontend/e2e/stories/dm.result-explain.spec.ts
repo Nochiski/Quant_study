@@ -70,7 +70,7 @@ test(
     const cell = (label: string) =>
       highlights.getByText(label, { exact: true }).locator("xpath=..");
     await expect(cell("Sharpe ratio")).toContainText(
-      "샤프 비율 흔들림 한 단위당 얼마나 벌었는지입니다.",
+      "샤프 비율 흔들림 한 단위당 한국은행 기준금리보다 얼마나 더 벌었는지입니다.",
     );
     await expect(cell("Maximum drawdown")).toContainText(
       "최대 낙폭 가장 높았던 때에서 가장 많이 떨어진 폭입니다.",

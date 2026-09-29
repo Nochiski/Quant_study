@@ -7,5 +7,6 @@
   "no_closed_trades",
   "no_losing_closed_trade",
   "no_observations_in_scope",
-  "period_under_one_year"
+  "period_under_one_year",
+  "base_rate_not_covered"
 ]

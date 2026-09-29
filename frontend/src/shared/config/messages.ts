@@ -180,6 +180,8 @@ const ko = {
     "벤치마크 상장이 끝난 뒤 세션은 마지막 값으로 멈췄습니다",
   "backtest.warning.benchmark.invalid_bar_sessions_carried":
     "벤치마크 원장 행이 무효인 거래일은 직전 가격을 이어 썼습니다",
+  "backtest.warning.analytics.base_rate_carried_forward":
+    "기준금리 이력을 확인한 날 뒤 세션은 마지막 기준금리를 이어 썼습니다",
   // 지표 칸의 사용 불가 사유. 키는 backend `MetricUnavailableReason` 값이고 목록은
   // backend/tests/fixtures/analytics/metric_unavailable_reasons.json 이 묶는다(이슈 #241).
   "backtest.metricUnavailable.zero_return_variance":
@@ -200,6 +202,8 @@ const ko = {
     "이 구간에 관측이 없어 계산할 수 없습니다",
   "backtest.metricUnavailable.period_under_one_year":
     "기간이 1년보다 짧아 연율로 바꾸지 않습니다",
+  "backtest.metricUnavailable.base_rate_not_covered":
+    "기준금리 이력이 시작되기 전 세션이 있어 계산하지 않습니다",
   "backtest.result.metricUnavailable.explain": "데이터 경고에서 이유 보기",
   // 지표의 쉬운 이름·뜻. 키는 backend Metric Registry의 metric_id이고 문장은 여기가 owner다
   // (결과 설명 spec R4). registry id 목록은 backend/tests/fixtures/analytics/metric_ids.json.
@@ -214,10 +218,10 @@ const ko = {
     "수익률이 얼마나 크게 오르내렸는지입니다. 클수록 불안정합니다.",
   "backtest.metric.sharpe": "샤프 비율",
   "backtest.metric.sharpe.description":
-    "흔들림 한 단위당 얼마나 벌었는지입니다. 클수록 덜 흔들리며 벌었습니다.",
+    "흔들림 한 단위당 한국은행 기준금리보다 얼마나 더 벌었는지입니다. 클수록 덜 흔들리며 더 벌었습니다.",
   "backtest.metric.sortino": "소르티노 비율",
   "backtest.metric.sortino.description":
-    "떨어질 때의 흔들림만 위험으로 보고 잰 샤프 비율입니다.",
+    "기준금리에 못 미친 흔들림만 위험으로 보고 잰 샤프 비율입니다.",
   "backtest.metric.max_drawdown": "최대 낙폭",
   "backtest.metric.max_drawdown.description":
     "가장 높았던 때에서 가장 많이 떨어진 폭입니다.",
@@ -1874,6 +1878,8 @@ export const messages = {
       "Benchmark sessions after its listing ended were frozen at the last value",
     "backtest.warning.benchmark.invalid_bar_sessions_carried":
       "Benchmark trading days with an invalid ledger row carried the previous price",
+    "backtest.warning.analytics.base_rate_carried_forward":
+      "Sessions after the base rate history was last checked carried the last base rate",
     "backtest.metricUnavailable.zero_return_variance":
       "Returns never varied, so this cannot be computed",
     "backtest.metricUnavailable.no_downside_variation":
@@ -1892,6 +1898,8 @@ export const messages = {
       "This window has no observations, so this cannot be computed",
     "backtest.metricUnavailable.period_under_one_year":
       "The period is shorter than a year, so it is not annualized",
+    "backtest.metricUnavailable.base_rate_not_covered":
+      "Some sessions predate the base rate history, so this is not computed",
     "backtest.result.metricUnavailable.explain": "See why in data warnings",
     "backtest.metric.total_return": "Total return",
     "backtest.metric.total_return.description":
@@ -1904,10 +1912,10 @@ export const messages = {
       "How much returns swung up and down. Higher means bumpier.",
     "backtest.metric.sharpe": "Sharpe ratio",
     "backtest.metric.sharpe.description":
-      "Return earned per unit of swing. Higher means a smoother gain.",
+      "Return above the Bank of Korea base rate per unit of swing. Higher means a smoother gain.",
     "backtest.metric.sortino": "Sortino ratio",
     "backtest.metric.sortino.description":
-      "A Sharpe ratio that counts only downward swings as risk.",
+      "A Sharpe ratio that counts only swings below the base rate as risk.",
     "backtest.metric.max_drawdown": "Maximum drawdown",
     "backtest.metric.max_drawdown.description":
       "The deepest fall from a previous peak.",

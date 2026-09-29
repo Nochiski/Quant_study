@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from itertools import pairwise
 
+from ._base_rate import BASE_RATE_CONFIRMED_ON, base_rate
 from ._models import (
     AnalysisPoint,
     AnalyticsInput,
@@ -19,7 +21,8 @@ from ._registry import MetricRegistry
 
 # 연수는 기준일부터 마지막 세션까지의 달력 일수 / 365(ACT/365)다. 원화 금리의 일할 관행과 같고,
 # 달력 1년이 윤년과 무관하게 1년 이상으로 세어져 "1년 미만은 연율화하지 않는다"(GIPS) 경계가
-# 달력과 맞는다. `annualization_days`는 변동성·샤프·소르티노 연율화에만 쓴다.
+# 달력과 맞는다. `annualization_days`는 변동성·샤프·소르티노 연율화에만 쓴다. 기준금리 일할도 같은
+# ACT/365다.
 _DAYS_PER_YEAR = 365
 
 
@@ -77,7 +80,13 @@ def compute_analytics(
     # 1년 미만은 연율화하지 않는다(GIPS). 칼마도 같은 사유로 빈다.
     cagr_reason = MetricUnavailableReason.PERIOD_UNDER_ONE_YEAR if years < 1.0 else None
     cagr = (1.0 + total_return) ** (1.0 / years) - 1.0 if cagr_reason is None else None
-    volatility, sharpe, sortino = _risk_adjusted(returns, annualization_days)
+    # 샤프·소르티노·롤링 샤프는 기준금리 초과수익으로, 변동성은 원수익률로 잰다. 기준금리 이력보다
+    # 앞선 세션이 있으면 무위험수익률을 지어내지 않고 셋을 비운다.
+    excess = _excess_returns(anchored, returns)
+    risk_free_reason = MetricUnavailableReason.BASE_RATE_NOT_COVERED if excess is None else None
+    volatility, _, _ = _risk_adjusted(returns, annualization_days)
+    _, sharpe, sortino = _risk_adjusted(excess or (), annualization_days)
+    rolling_sharpe = _rolling_sharpe(anchored, excess or (), annualization_days, rolling_window)
     drawdowns = _drawdowns(anchored)[-len(points) :]
     max_drawdown = min(item.drawdown for item in drawdowns)
     max_duration, recovery = _drawdown_timing(anchored_equity)
@@ -108,8 +117,10 @@ def compute_analytics(
         value("total_return", total_return),
         value("cagr", cagr, cagr_reason),
         value("volatility", volatility),
-        value("sharpe", sharpe, MetricUnavailableReason.ZERO_RETURN_VARIANCE),
-        value("sortino", sortino, MetricUnavailableReason.NO_DOWNSIDE_VARIATION),
+        value("sharpe", sharpe, risk_free_reason or MetricUnavailableReason.ZERO_RETURN_VARIANCE),
+        value(
+            "sortino", sortino, risk_free_reason or MetricUnavailableReason.NO_DOWNSIDE_VARIATION
+        ),
         value("max_drawdown", max_drawdown),
         value("calmar", calmar, cagr_reason or MetricUnavailableReason.NO_DRAWDOWN),
         value("turnover", turnover),
@@ -152,12 +163,32 @@ def compute_analytics(
         ),
         drawdown_curve=drawdowns,
         monthly_returns=_monthly_returns(points, anchored_equity[0]),
-        rolling_sharpe=_rolling_sharpe(points, annualization_days, rolling_window),
+        rolling_sharpe=rolling_sharpe[-len(points) :],
+        base_rate_carried_sessions=tuple(
+            item.session for item in anchored[:-1] if item.session > BASE_RATE_CONFIRMED_ON
+        ),
     )
 
 
 def _returns(equity: tuple[float, ...]) -> tuple[float, ...]:
     return tuple(equity[index] / equity[index - 1] - 1.0 for index in range(1, len(equity)))
+
+
+def _excess_returns(
+    points: tuple[AnalysisPoint, ...], returns: tuple[float, ...]
+) -> tuple[float, ...] | None:
+    """세션 수익률에서 그 구간의 무위험수익률을 뺀다. 기준금리 이력보다 앞선 구간이 있으면 None이다.
+
+    구간(직전 세션 → 세션)의 무위험수익률은 직전 세션에 유효한 한국은행 기준금리를 두 세션 사이
+    달력 일수만큼 ACT/365로 일할한 값이다. 구간 중간에 금리가 바뀌어도 구간 시작일 금리를 쓴다.
+    """
+    excess: list[float] = []
+    for (before, after), value in zip(pairwise(points), returns, strict=True):
+        rate = base_rate(before.session)
+        if rate is None:
+            return None
+        excess.append(value - rate * (after.session - before.session).days / _DAYS_PER_YEAR)
+    return tuple(excess)
 
 
 def _risk_adjusted(
@@ -252,10 +283,10 @@ def _monthly_returns(
 
 def _rolling_sharpe(
     points: tuple[AnalysisPoint, ...],
+    returns: tuple[float, ...],
     annualization_days: int,
     window: int,
 ) -> tuple[RollingMetricPoint, ...]:
-    returns = _returns(tuple(item.equity for item in points))
     result: list[RollingMetricPoint] = []
     for index, point in enumerate(points):
         if index < window:

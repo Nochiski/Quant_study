@@ -52,10 +52,10 @@ export const replaceSource = async (page: Page, source: string) => {
  */
 export const waitForSettledDocument = async (page: Page) => {
   const status = page.getByRole("status", { name: "문서 상태" });
-  await expect(
-    status,
-    "문서 검증이 입력 버전을 따라잡는다(#240)",
-  ).toHaveAttribute("data-settled", "true");
+  await expect(status, "문서 검증이 입력 버전을 따라잡는다(#240)").toHaveAttribute(
+    "data-settled",
+    "true",
+  );
   return status;
 };
 

@@ -131,6 +131,11 @@ export const useRunBacktest = (
           decision.kind === "saved_revision"
             ? decision.reference
             : decision.draft,
+        // 저장된 전략을 고친 초안도 그 전략 계열의 시도로 센다(검증 랩 spec D2). 저장 리비전은
+        // backend가 리비전에서 계열을 알아서 싣지 않는다.
+        ...(decision.kind === "inline_draft" && state.strategyId !== null
+          ? { lineage_strategy_id: state.strategyId }
+          : {}),
       });
       runId = accepted.run.run_id;
     } catch (error) {

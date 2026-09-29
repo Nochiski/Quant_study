@@ -115,7 +115,7 @@ progress_percent: 46
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V4-01` | PSR 지표 | V0-01, #274 머지 | `SELF_CHECK` | — |
+| [ ] | `V4-01` | PSR 지표 | V0-01, #274 머지 | `SELF_CHECK` | [#363](https://github.com/Nochiski/Quant_study/pull/363) |
 | [ ] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `PLANNED` | — |
 | [ ] | `V4-03` | 고원·민감도 | V4-02 | `PLANNED` | — |
 | [ ] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `PLANNED` | — |

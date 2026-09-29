@@ -178,6 +178,9 @@ class BacktestRunSummary:
 class _RunRecord:
     state: BacktestRunState
     request: BacktestRunSpec
+    # 실행할 spec — `strategy` 를 해소하고 실행 설정을 박은 것. `request` 는 다시 제출할 수 있는
+    # 원본이라 따로 둔다.
+    spec: BacktestRunSpec
     provenance: StrategyProvenance
     accepted_sequence: int
     events: list[RunProgressEvent]
@@ -286,6 +289,7 @@ class BacktestRunService:
             record = _RunRecord(
                 state=state,
                 request=request,
+                spec=spec,
                 provenance=provenance,
                 accepted_sequence=self._next_accepted_sequence,
                 events=[],
@@ -300,7 +304,7 @@ class BacktestRunService:
         try:
             Thread(
                 target=self._run,
-                args=(run_id, spec, provenance),
+                args=(record,),
                 name=f"backtest-{run_id}",
                 daemon=True,
             ).start()
@@ -454,12 +458,7 @@ class BacktestRunService:
         # TargetTape 와 같은 함수라 tape 없이 확정할 수 있고(#158), tape 단계가 다시 대조한다.
         return replace(request, strategy=strategy), None
 
-    def _run(
-        self,
-        run_id: str,
-        spec: BacktestRunSpec,
-        provenance: StrategyProvenance,
-    ) -> None:
+    def _run(self, record: _RunRecord) -> None:
         """run 스레드 본문. 전체 수집(2세대)을 run 이 끝날 때까지 미룬다(이슈 #196).
 
         tape 단계가 만드는 수백만 개의 오래 사는 객체 때문에 전체 수집이 매번 수 초씩 GIL 을 쥐고
@@ -467,15 +466,12 @@ class BacktestRunService:
         """
 
         with full_collections_suspended():
-            self._execute(run_id, spec, provenance)
+            self._execute(record)
 
-    def _execute(
-        self,
-        run_id: str,
-        spec: BacktestRunSpec,
-        provenance: StrategyProvenance,
-    ) -> None:
-        record = self._record(run_id)
+    def _execute(self, record: _RunRecord) -> None:
+        run_id = record.state.run_id
+        spec = record.spec
+        provenance = record.provenance
         strategy = spec.strategy
         if strategy is None:  # pragma: no cover - resolved before the thread starts
             raise InvalidBacktestRunError("resolved run spec has no strategy")

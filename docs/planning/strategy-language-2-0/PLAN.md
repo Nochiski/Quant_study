@@ -6,7 +6,7 @@ current_phase: P4
 current_pr: P4-01
 active_prs: [P4-01]
 parallel_window: []
-last_updated: 2026-09-30T07:21:54+09:00
+last_updated: 2026-09-30T07:38:26+09:00
 planned_prs: 30
 merged_prs: 20
 integrated_prs: 0
@@ -30,7 +30,7 @@ progress_percent: 67
 | Active PR | `P4-01` |
 | Progress | `20 / 30 done (67%), main 20, integration 0` |
 | Approved | `20 / 30` |
-| Aggregated at | `2026-09-30 07:21 KST` |
+| Aggregated at | `2026-09-30 07:38 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -142,10 +142,10 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Intent | 프론트가 runtime schema × parse tree × compile 진단을 4단계 카드 모델·한 문장 요약·레시피 체인 요약으로 투영한다. 단계는 backend 의 `x-stage`(P4-01a)를 읽는다 |
 | Acceptance | WORKFLOW P4-01(리드 결정 2026-09-30) 중 P4-01b 몫: `pipeline-projection.ts`(4단계 카드 모델, 단계 규칙, 같은 단계 안 적용 조건 묶음, 단계 없는 섹션, 한 문장 요약), `recipe-projection.ts`(spec D2 체인 판정, 요약 문장), i18n, 스키마 fixture 로 유도한 단위 테스트. #347 리뷰 P3 4건(별도 커밋, 리드 지시) |
 | Non-goals | 카드 UI·실행 설정 띠(P4-02), 팩터 카드·미리보기(P4-03), 탭 개편·Form 은퇴(P4-04), 레시피 트랜잭션(P5-01) |
-| Branch/worktree | `feat/lang2-p4-01b-pipeline-projection` / `wt-run-concurrency`(재사용). [#359](https://github.com/Nochiski/Quant_study/pull/359)(#354) 위 스택 PR(base 는 그 브랜치) |
-| Base SHA | `fix/graph-projection-schema` `0d0046ee`(#359 두 커밋 + main `35fd3ae6` merge `4d6e30e0` + #359 리뷰 P2-1·P3-1 테스트). 착수는 `4d6e30e0` 위였고 #359 테스트 커밋 뒤 `--onto` 로 옮겼다 |
+| Branch/worktree | `feat/lang2-p4-01b-pipeline-projection` / `wt-run-concurrency`(재사용). [#359](https://github.com/Nochiski/Quant_study/pull/359)(#354) 위 스택으로 열었고, #359 머지(`7e7b2da9`) 뒤 리드가 base 를 main 으로 바꿨다 |
+| Base SHA | main `7e7b2da9`(#359 머지)를 merge 했다(`4d0bc601`, 현재 결정 2026-09-28 규칙 3). 그 전 base 는 `fix/graph-projection-schema` `0d0046ee`(#359 두 커밋 + main `35fd3ae6` merge `4d6e30e0` + #359 리뷰 P2-1·P3-1 테스트)였고, 착수는 `4d6e30e0` 위에서 해 #359 테스트 커밋 뒤 `--onto` 로 옮겼다 |
 | Steps | ① #347 리뷰 P3-2: 쓰는 곳 없는 `AppliedStage.DATA` 삭제(`0f47b560`) → ② P3-1·P3-3·P3-4: 단계 규칙 문장의 정본을 정본 대장 "그래프 표현 투영" 행 한 곳에 두고 `_models.py`·`_schema.py`·WORKFLOW·spec D9 는 그 행을 가리킴, 스키마 테스트의 property 순회를 헬퍼 하나로·부분집합 단언 제거, `x-stage` ∩ `x-applied-stage` = ∅ 단언(`e70055af`) → ③ `displayValue` 를 필드 표시 사실 owner `schema-navigator.ts` 로(`16d6073e`) → ③' 노드 칸 규칙을 `graph-transactions.ts` `nodeSlots` 로 올림(`857d3068`, #359 리뷰 4항·P3-2 제안, 착수 때 없던 단계) → ④ `schemaFacts.stage` + `pipeline-projection.ts`(단계·카드·`unstaged`·`strategySummary`) + 테스트 + i18n(단계 이름·틀·필드 조각)(`d8dc459e`) → ⑤ `recipe-projection.ts`(체인 판정·팩터 카드 요약) + 테스트 + i18n(`481637ac`) — ⑥ 요약·i18n 은 ④·⑤ 에 나눠 넣었다 → ⑦ 정본 대장 두 행(`f531ff13`) → ⑧ 변경 범위 vitest(검증 기록) → ⑨ #359 리뷰 P3-2(리드가 P4-01b 로 넘김): 노드 칸 표를 `nodeSlotsByKind` 로 한 번 읽어 실행 계획·레시피 투영에 넘김(`ed738f48`). 전체 게이트는 #359 머지·main rebase 뒤 한 번(리드 지시, 자원) |
-| Head SHA | 코드 tip `ed738f48`(변경 범위 게이트 실측 SHA, 뒤의 문서 커밋은 PLAN 만 바꾼다) |
+| Head SHA | 코드 tip `4d0bc601`(main merge, 전체 게이트 실측 SHA — 검증 기록). 그 전 변경 범위 게이트는 `ed738f48` 에서 돌았다. 뒤의 문서 커밋은 PLAN 만 바꾼다 |
 | Full gate | CI 전체 job green |
 
 ### P1-05
@@ -1040,7 +1040,7 @@ Phase exit:
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `P4-01` | `pipeline-projection.ts` (4단계 모델, `x-stage`, 팩터 요약 문장) | P3-03 | `SELF_CHECK` | 두 PR(리드 결정 2026-09-30): P4-01a [#347](https://github.com/Nochiski/Quant_study/pull/347)(`3b16345f` refactor·`50830b7e` `x-stage`·`398a14e2` 인프라 기준선) · `review_pr347` r1 APPROVE(`8af5f1b7`, P3 4 → P4-01b) · main 머지 `92bf38ee`(#347, 2026-09-30) → P4-01b [#367](https://github.com/Nochiski/Quant_study/pull/367)(`feat/lang2-p4-01b-pipeline-projection`, [#359](https://github.com/Nochiski/Quant_study/pull/359) 위 스택, 리뷰 대기) |
+| [ ] | `P4-01` | `pipeline-projection.ts` (4단계 모델, `x-stage`, 팩터 요약 문장) | P3-03 | `SELF_CHECK` | 두 PR(리드 결정 2026-09-30): P4-01a [#347](https://github.com/Nochiski/Quant_study/pull/347)(`3b16345f` refactor·`50830b7e` `x-stage`·`398a14e2` 인프라 기준선) · `review_pr347` r1 APPROVE(`8af5f1b7`, P3 4 → P4-01b) · main 머지 `92bf38ee`(#347, 2026-09-30) → P4-01b [#367](https://github.com/Nochiski/Quant_study/pull/367)(`feat/lang2-p4-01b-pipeline-projection`, [#359](https://github.com/Nochiski/Quant_study/pull/359) 위 스택 → #359 머지 `7e7b2da9` 뒤 base main, 리뷰 대기) |
 | [ ] | `P4-02` | 단계 카드 UI(거른다·합쳐서 고른다·비중을 준다), 실행 설정 띠 | P4-01 | `WAITING` | — |
 | [ ] | `P4-03` | 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널 | P4-02 | `WAITING` | — |
 | [ ] | `P4-04` | 탭을 그래프·YAML 둘로, 기본 탭 그래프, Form·JSON 은퇴, 빈 화면 e2e, 식별자 0개 단언 | P4-03 | `WAITING` | — |
@@ -1147,6 +1147,7 @@ Phase exit:
 | `P1-04` | cascade tip `e6fb10b0`, 위와 같은 게이트 | pytest 1611 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 704/704 | 2026-09-26 |
 | `P1-05` | cascade tip `45f1c4a3`, 위와 같은 게이트 + `npm run test:e2e`(머신 잠금 아래) | pytest 1695 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 733/733 · e2e 25/25 | 2026-09-26 |
 | `P1-06` | `tools/update-plan-progress.ps1 -Check`, `uv run --locked python -m quant_study_dev.conflict_markers` | `PLAN.md is consistent: 0/29 merged, 6 approved`(P1-02 5차 APPROVE 반영 뒤. 1차 리뷰 반영 시점에는 P1-02가 `ac3a3d0e` 리뷰 대기라 5) · 충돌 표식 0 | 2026-09-26 |
+| `P4-01` | P4-01b main merge tip `4d0bc601`(main `7e7b2da9` 위): frontend `typecheck`·`lint`(전체)·`test`(전체)·`typecheck:e2e`, `api:generate` 뒤 `backend/openapi.json`·생성 SDK 내용 diff, `node e2e/run-playwright.mjs`(포트 8235/5235, 빌드의 `typecheck`·`vite build`·`check:editor-bundle` 포함, 전 spec), backend 스키마·계약 테스트(`tests/domain/test_strategy_schema.py`·`tests/integration/test_strategy_document_schema_http_api.py`·`tests/integration/test_run_environment_schema_http_api.py`·`tests/contract`)·`ruff check src tests examples scripts tools`·`pyright`, `database/tests/test_equity_s21_workbench.py`, 루트 `user_story_trace`·`conflict_markers`, PLAN `-Check` | Vitest 89 files·1122/1122 · lint·typecheck·typecheck:e2e 0 · OpenAPI·SDK 내용 diff 0(줄 끝만 달라 되돌림) · e2e 49/49(4.2분, 우리 backend 8235·preview 5235 확인) · pytest 410 passed · ruff·pyright 0 · database 15 passed · 스토리 40·태그 e2e 30 · 표식 0 · PLAN 일치. 남은 프로세스 0 | 2026-09-30 |
 | `P4-01` | P4-01b 코드 tip `ed738f48`(#359 `0d0046ee` 위): frontend `typecheck`, 변경 파일 `eslint --max-warnings 0`, 변경 범위 vitest 15파일(document-history 포함, pipeline-projection·recipe-projection·screen-vocabulary·messages·schema-navigator·form-projection·graph-transactions·factor-graph-panel·factor-graph-editor·execution-plan·contract-inspector·schema-assist·operator-palette·compiled-promotion), backend `pytest tests/domain/test_strategy_schema.py`·변경 파일 `ruff check`·`ruff format --check`·`pyright`. 전체 vitest·build·e2e 는 #359 머지·main rebase 뒤(리드 지시) | tsc 0 · eslint 0 · Vitest 166/166 · pytest 20 passed · ruff·pyright 0 | 2026-09-30 |
 | `P4-01` | P4-01a 코드 tip `398a14e2`(main `f8f5ac16` 위): backend `pytest -q`·`ruff check src tests examples scripts tools`·`pyright`, `database/tests/test_equity_s21_workbench.py`(`strategy_workbench` 를 import 하는 유일한 파일), 루트 `uv lock --check`·tools unittest·`ruff`·`pyright tools`·`conflict_markers`·`check_field_map`·`user_story_trace`, `export_openapi.py`·`api:generate` 내용 diff, frontend `typecheck`·`lint`·`test`·`typecheck:e2e`, `node e2e/run-playwright.mjs`(포트 8235/5235, 빌드 포함) → 기준선 갱신 → 인프라 spec 엄격 재실행, Playwright 목록 스토리 대조 | pytest 3254 passed·4 skipped · ruff·pyright 0 · database 15 passed(나머지 파일은 바뀐 모듈에 닿지 않아 브랜치 전용 실패 0) · tools 43 OK · 표식 0 · 스토리 39·태그 e2e 27 · OpenAPI·SDK 내용 diff 0 · Vitest 1094/1094 · e2e 42 passed + 인프라 기준선 4 failed(해시 두 줄) → 갱신 뒤 인프라 16/16 · 목록 대조 통과 | 2026-09-30 |
 | `P3-03` | main `2ef86159` rebase·리뷰 r1 P3 반영 뒤 코드 tip `606a09ad`: 루트 `uv lock --check`·tools unittest·`ruff check tools`·`pyright tools`·`conflict_markers`·`user_story_trace`·`git grep` 표식, frontend `typecheck:e2e`·`lint`, `node e2e/run-playwright.mjs`(포트 8235/5235, 빌드의 `typecheck`·`vite build` 포함), Playwright 목록 스토리 대조, 돌연변이(tools 7종 메모리 치환, e2e 는 `localStorage.clear()` 한 줄 뺌) | tools 43 OK · ruff·pyright 0 · 표식 0 · 스토리 39·태그 e2e 27 · e2e 46/46(3.7분) · 목록 대조 통과 · 돌연변이 M7~M10·`splitlines`·`\r?`·`--deduplicate` 모두 red, e2e 는 두 번째 반복 시작일 칸 `"2021-01-01"` 로 red. backend·`database/tests`·Vitest 는 이 판에서 돌리지 않았다(`backend/src`·`frontend/src` 변경 없음, CI 가 돈다) | 2026-09-30 |
@@ -1160,6 +1161,7 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-30 — **P4-01b main 반영·전체 게이트**([#367](https://github.com/Nochiski/Quant_study/pull/367)). [#359](https://github.com/Nochiski/Quant_study/pull/359) 가 main 에 머지돼(`7e7b2da9`, #354 CLOSED) 리드가 #367 base 를 main 으로 바꾸고 `fix/graph-projection-schema` 를 지웠다. origin/main 을 merge 했다(`4d0bc601`, 충돌 없음, force push 없음 — 현재 결정 2026-09-28 규칙 3). 전체 게이트를 그 SHA 에서 한 번 돌렸다(리드 지시): Vitest 1122/1122, e2e 49/49, OpenAPI·SDK drift 0, backend 스키마·계약 410 passed·ruff·pyright 0(검증 기록).
 - 2026-09-30 — **P4-01b 리드 후속**([#367](https://github.com/Nochiski/Quant_study/pull/367)). #359 r1 APPROVE 의 P3-2(실행 계획 투영이 노드 칸을 팩터마다 다시 계산하고 결과와 무관한 팩터 pointer 를 받음)를 리드가 P4-01b 로 넘겨, kind → 칸 표를 `graph-transactions.ts` `nodeSlotsByKind` 로 한 번 읽어 두 투영에 넘겼다(`ed738f48`, 동작 불변). P3-3 은 PR 설계 결정 5 와 정본 대장 문장으로 답했고(레시피 요약은 적은 값 중 기본값과 다른 설정만, 실행 계획 카드는 값 있는 칸 전부), P3-4(실행 계획 카드 머리가 영어 연산 코드뿐)는 리드가 이슈 #366 으로 뺐다(범위 밖). **리드 결정 (3) 문구 정리**: 결정 (1)·(3) 의 "섹션과 단계가 다른 필드는 field metadata `stage`" 는 제약 행이 단계를 이미 말하는 필드(`minimum_liquidity`)를 빼고 읽는다 — 그 필드는 `x-applied-stage` 를 따르고 metadata 에 두 번 적지 않는다(리드 수용 2026-09-30, `review_pr347` 같은 판단). WORKFLOW P4-01 결정 절은 `e70055af` 에서 이 규칙을 정본 대장으로 넘겨 이미 맞다.
 - 2026-09-30 — **P4-01b SELF_CHECK**([#367](https://github.com/Nochiski/Quant_study/pull/367), base [#359](https://github.com/Nochiski/Quant_study/pull/359)). 프론트가 `x-stage` 를 읽어 그래프 1수준 투영을 만든다. `pipeline-projection.ts` 는 Form 투영의 행·목록을 단계와 카드로 다시 묶는다: 행의 단계는 자기 `x-stage`·`x-applied-stage`, 없으면 섹션의 `x-stage` 이고, 같은 단계 안에서 자기 `x-applicable-when` 첫 조건이 가리키는 행의 카드에 붙는다. 행은 자기 섹션을 들고 있어 비중 카드의 `/risk/*` 행도 제 부모 아래에서 열린다. `strategySummary` 는 필드 설명 키 아래 i18n 조각 `.summary`(enum 은 값 이름 키 아래)를 단계 틀·문장 틀로 잇는다 — 조각이 없는 필드는 요약에 없고, 목록 항목의 숫자 조각(팩터 가중치)은 항목끼리 다를 때만, 역가중 제외 팩터는 `strategy.risk.risk_factor_excluded` 진단으로 알아 알파 목록에서 뺀다(리드 결정 4). `recipe-projection.ts` 는 spec D2 체인 판정과 팩터 카드 요약이고, 레시피의 설정 값은 연산자 카탈로그 `params` 가 아니라 스키마 설정 칸 중 문서에 적었고 기본값과 다른 값이다(착수 보고의 참고안에서 바꿈 — 카탈로그는 비동기이고 잎 kind 에 행이 없다, #359 리뷰 1항). 실행 계획 카드와 표시 규칙이 다르다는 것을 정본 대장에 적었다(#359 리뷰 P3-3). 노드 칸 규칙은 `graph-transactions.ts` `nodeSlots` 로 올려 두 투영이 공유한다. #347 리뷰 P3 4건은 별도 커밋 둘로 넣었다(리드 지시). #359 리뷰(APPROVE)의 P2-1·P3-1 테스트는 #359 에 먼저 넣고(`0d0046ee`) P4-01b 를 그 위로 옮겼다. 12절 상한을 넘는다(비테스트 src 11파일 +753/−79, 테스트 +474, PR 제약사항). 전체 게이트는 #359 머지·main rebase 뒤 한 번 돈다(리드 지시). P4-01 상태 `SELF_CHECK`.
 - 2026-09-30 — **P4-01b 착수**. P4-01a [#347](https://github.com/Nochiski/Quant_study/pull/347) 가 main 에 머지됐다(`92bf38ee`, `review_pr347` r1 APPROVE, P3 4건은 리드 지시로 P4-01b 에 별도 커밋). P4-01b 는 #354 수정 [#359](https://github.com/Nochiski/Quant_study/pull/359) 위 스택 PR 이다 — 그래프 실행 계획 투영이 노드 칸을 스키마에서 읽게 된 뒤에 파이프라인·레시피 투영이 같은 길을 쓴다. #359 브랜치에는 #347 이 들어간 main(`35fd3ae6`)을 merge 해 두었다(`4d6e30e0`, 현재 결정 2026-09-28 규칙 3의 main 반영 방식). 자원 때문에 개발 중에는 변경 범위 vitest 만 돌리고, 전체 vitest·build·e2e 는 #359 머지 뒤 main 으로 rebase 한 다음 한 번 돌린다(리드 지시). P4-01 상태 `IN_PROGRESS`.

@@ -17,7 +17,8 @@ W1 갈래 넷(equity 분리 · factor_inputs 층 · v3 이식 · v2 이식)과 v
 
 입력 표 8개 중 6개는 플랜 원안이고 `fi_credit` 은 v4 설계(D-13': 보조 버킷의 신용잔고 변화)가
 플랜 뒤에 정해져 더한 것이다. `fi_consensus_annual` 은 v2 원천(c1050001)이 v3 원천과 값이 달라
-(W1-d 실측) 두 원본을 동시에 맞추려고 나눈 v2 전용 표다. `fi_fin_summary` 에 분기 행(`period_type='quarter'`)을 둔 것도 v4
+(W1-d 실측) 두 원본을 동시에 맞추려고 나눈 v2 전용 표다.
+`fi_fin_summary` 에 분기 행(`period_type='quarter'`)을 둔 것도 v4
 영업이익률 TTM 때문이다 — v3·v2 는 연간 행만 읽는다.
 """
 from __future__ import annotations
@@ -133,13 +134,15 @@ FI_CONSENSUS = TableContract(
 FI_CONSENSUS_ANNUAL = TableContract(
     "fi_consensus_annual", ("ticker", "period", "data_type"),
     (_c("ticker", "VARCHAR"), _c("period", "VARCHAR", note="YYYY/MM"),
-     _c("data_type", "VARCHAR", note="E(추정) | A(확정) — 같은 기에 둘 다 올 수 있다(v2 는 E 우선)"),
+     _c("data_type", "VARCHAR",
+        note="E(추정) | A(확정) — 같은 기에 둘 다 올 수 있다(v2 는 E 우선)"),
      _c("revenue", "DOUBLE", "억원"), _c("op", "DOUBLE", "억원"), _c("ni", "DOUBLE", "억원"),
      _c("eps", "DOUBLE", "원"), _c("per", "DOUBLE", "배"),
      _c("fetched_date", "DATE", note="수집일(최신 ≤ D 한 판)")),
     window="판 기준일 연도 Y 의 Y−1/12 · Y/12 · Y+1/12 (v2 결산기 고정)",
     source=("stg_consensus_annual(WISE c1050001 T2Y) — v2 원천. v3 가 읽는 fi_consensus(매트릭스)·"
-            "fi_fin_summary(cF3002)와 같은 기·같은 항목이어도 값이 다르다(09-29 실측: 당해 op 318종목) "
+            "fi_fin_summary(cF3002)와 같은 기·같은 항목이어도 값이 다르다"
+            "(09-29 실측: 당해 op 318종목) "
             "— 두 원본을 동시에 맞추려고 표를 나눴다"),
     readers=("v2_percentrank",))
 

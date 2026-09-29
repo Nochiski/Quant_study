@@ -298,13 +298,8 @@ class _NodeEvaluator:
         masked = frozenset[int]().union(*(self._masked[dependency] for dependency in dependencies))
         values: list[FactorComputedValue]
         if isinstance(node, FieldNode):
-            masked = _masked_cells(self._observations, node.field_id, checkpoint=self._checkpoint)
-            values = _field_values(
-                self._observations,
-                node.field_id,
-                self._missing,
-                masked,
-                checkpoint=self._checkpoint,
+            values, masked = _field_values(
+                self._observations, node.field_id, self._missing, checkpoint=self._checkpoint
             )
         elif isinstance(node, ConstantNode):
             values = [node.value for _ in _checkpointed(self._observations, self._checkpoint)]
@@ -428,46 +423,35 @@ def _require_finite_values(
             )
 
 
-def _masked_cells(
-    observations: tuple[FactorObservation, ...],
-    field_id: str,
-    *,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> frozenset[int]:
-    """필드가 원장이 가린 셀(MASKED)인 관측 index(#298)."""
-    return frozenset(
-        index
-        for index, observation in _checkpointed(enumerate(observations), checkpoint)
-        if any(field.masked for field in observation.fields if field.field_id == field_id)
-    )
-
-
 def _field_values(
     observations: tuple[FactorObservation, ...],
     field_id: str,
     missing_policy: MissingPolicy,
-    masked: frozenset[int],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> list[FactorComputedValue]:
+) -> tuple[list[FactorComputedValue], frozenset[int]]:
+    """필드 값과, 그 가운데 원장이 가린 셀(MASKED)의 관측 index 를 관측을 한 번 훑어 낸다(#298)."""
     raw: list[float | None] = []
-    for observation in _checkpointed(observations, checkpoint):
-        by_id = {field.field_id: field.value for field in observation.fields}
-        value = by_id.get(field_id)
+    masked: set[int] = set()
+    for index, observation in _checkpointed(enumerate(observations), checkpoint):
+        cell = {field.field_id: field for field in observation.fields}.get(field_id)
+        if cell is not None and cell.masked:
+            masked.add(index)
+        value = None if cell is None else cell.value
         raw.append(
             float(value)
             if isinstance(value, (int, float)) and not isinstance(value, bool)
             else None
         )
     # 결측 정책은 모르는 값만 채운다. 원장이 가린 셀은 비워 둔다(#298).
+    values: list[FactorComputedValue] = list(raw)
     if missing_policy is MissingPolicy.ZERO:
-        return [
+        values = [
             0.0 if value is None and index not in masked else value
             for index, value in enumerate(raw)
         ]
-    if missing_policy is MissingPolicy.CROSS_SECTIONAL_MEDIAN:
+    elif missing_policy is MissingPolicy.CROSS_SECTIONAL_MEDIAN:
         by_date = _cross_section_indices(observations, checkpoint=checkpoint)
-        result = list(raw)
         for indices in _checkpointed(by_date.values(), checkpoint):
             available = [
                 value
@@ -476,10 +460,9 @@ def _field_values(
             ]
             fill = median(available) if available else None
             for index in _checkpointed(indices, checkpoint):
-                if result[index] is None and index not in masked:
-                    result[index] = fill
-        return result
-    return list(raw)
+                if values[index] is None and index not in masked:
+                    values[index] = fill
+    return values, frozenset(masked)
 
 
 def _binary(

@@ -24,6 +24,7 @@ import {
   mustReplace,
   openEditor,
   replaceSource,
+  scrollPageTo,
 } from "../workbench-helpers";
 
 test(
@@ -67,7 +68,9 @@ test(
       name: "롱 포트폴리오에 선택할 종목 수",
     });
     await expect(heading).toBeVisible();
-    // 겹쳐 뜬 패널에 깔리지 않고 실제로 읽힌다.
+    // 겹쳐 뜬 패널에 깔리지 않고 실제로 읽힌다. 필드를 고르면 포커스가 편집기의 그 줄로 가며 페이지가
+    // 내려가므로, 사용자처럼 제목까지 굴려 올려 읽는다.
+    await scrollPageTo(heading);
     expect(await coveringElement(heading)).toBeNull();
     await expect(
       contract

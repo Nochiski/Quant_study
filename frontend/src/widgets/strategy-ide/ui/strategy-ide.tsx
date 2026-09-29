@@ -161,6 +161,13 @@ const hasNativeUndo = (target: EventTarget | null): boolean => {
  * 오버레이로 돌린다. 판정은 패널마다 손잡이 폭을 따로 더한다(#290 리뷰 P3-3).
  */
 const EDITOR_MIN_WIDTH = 480;
+/**
+ * 펼친 AI 사이드바로 포커스를 옮기는 방법 — 페이지를 굴리지 않는다. 제품 슬롯은 접기 버튼을 그리지 않아
+ * 창보다 긴 패널 자신이 포커스를 받는데, 그냥 옮기면 브라우저가 패널 아래 끝을 창 아래 끝에 맞추려 페이지를
+ * 굴려 서랍 머리 줄이 상단 바 밑에 깔렸다(#325, #290 리뷰 r3 P2-1). 여는 세 입구(상단 바 토글·Alt+A·명령
+ * 팔레트)가 이 값 하나로 옮긴다.
+ */
+const ASSISTANT_FOCUS: FocusOptions = { preventScroll: true };
 const VIEWS: readonly SourceView[] = ["yaml", "json", "form", "graph", "diff"];
 
 /**
@@ -411,6 +418,7 @@ export const StrategyIde = ({
                 layout.assistantOpen
                   ? assistantRestore.current
                   : assistantFocusTarget(),
+              focusOptions: ASSISTANT_FOCUS,
               execute: () => toggleRight("assistantOpen"),
             },
           ]
@@ -534,7 +542,9 @@ export const StrategyIde = ({
         const opening = !layout.assistantOpen;
         toggleRight("assistantOpen");
         queueMicrotask(() =>
-          (opening ? assistantFocusTarget() : assistantRestore.current)?.focus(),
+          (opening ? assistantFocusTarget() : assistantRestore.current)?.focus(
+            ASSISTANT_FOCUS,
+          ),
         );
       } else if (event.altKey && !modifier && /^[1-5]$/.test(event.key)) {
         const next = VIEWS[Number(event.key) - 1];
@@ -756,7 +766,9 @@ export const StrategyIde = ({
               size="small"
               onClick={() => {
                 toggleRight("assistantOpen");
-                queueMicrotask(() => assistantFocusTarget()?.focus());
+                queueMicrotask(() =>
+                  assistantFocusTarget()?.focus(ASSISTANT_FOCUS),
+                );
               }}
               aria-controls={ids.assistant}
               aria-expanded={layout.assistantOpen}

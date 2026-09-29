@@ -25,6 +25,7 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
     BacktestEnginePortfolioAdapter,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
+    _FILL_KIND_TO_CELL,
     _LOCK_CONFLICT_MARKERS,
     _PARQUET_LIST,
     EVENT_TYPE_MAP,
@@ -288,8 +289,27 @@ def _reverse_declarations(monkeypatch: pytest.MonkeyPatch) -> None:
             id="code-table",
         ),
         pytest.param(
+            lambda mp, root: mp.setattr(
+                f"{_ADAPTER}._FILL_KIND_TO_CELL",
+                {**_FILL_KIND_TO_CELL, "not_collected": CellKind.MISSING},
+            ),
+            True,
+            id="cell-kinds",
+        ),
+        pytest.param(
+            lambda mp, root: mp.setattr(f"{_ADAPTER}.RATIO_DIRECTED_EVENT_TYPES", frozenset()),
+            True,
+            id="ratio-directed",
+        ),
+        pytest.param(
             lambda mp, root: _edit_close(
-                mp, label="종가 ", description="문장만", evidence="-", verdict="-"
+                mp,
+                label="종가 ",
+                description="문장만",
+                evidence="-",
+                verdict="-",
+                disclosure_basis="-",
+                lag_basis="-",
             ),
             False,
             id="field-prose",

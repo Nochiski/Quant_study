@@ -106,7 +106,22 @@ def _changed(
             id="fixture-data",
         ),
         pytest.param(
-            lambda mp, p: _changed(p, label="종가 ", description="문장만 바꿨다", evidence="-"),
+            lambda mp, p: (
+                mp.setattr(f"{_MOCK}._fixture.adjusted_close", lambda raw_close, **_: raw_close)
+                or p
+            ),
+            (True, False),
+            id="observations",
+        ),
+        pytest.param(
+            lambda mp, p: _changed(
+                p,
+                label="종가 ",
+                description="문장만 바꿨다",
+                evidence="-",
+                disclosure_basis="-",
+                available_date_basis="-",
+            ),
             (False, False),
             id="prose",
         ),
@@ -120,7 +135,8 @@ def test_mock_snapshot_id_moves_with_data_and_declared_meaning_only(
 ) -> None:
     """이슈 #235·#291 리뷰: mock id 는 "fixture 데이터의 판:선언표의 판" 이다.
 
-    데이터(분할 사건 등)가 바뀌면 앞부분이, 선언의 뜻(단위·랙·조정 짝)이 바뀌면 뒷부분이 바뀐다.
+    데이터(분할 사건·관측값 등)가 바뀌면 앞부분이, 선언의 뜻(단위·랙·조정 짝)이 바뀌면 뒷부분이
+    바뀐다.
     문장이나 선언 순서만 바꾼 변경은 id 를 흔들지 않는다 — 흔들면 문장을 고친 PR 마다 재현 지문·캐시
     키·시각 기준선이 헛되이 바뀐다.
     """

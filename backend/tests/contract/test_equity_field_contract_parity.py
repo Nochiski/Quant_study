@@ -12,6 +12,7 @@ field_id 의 단위나 값 타입이 두 어댑터에서 다르면 mock 으로 g
 
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
@@ -21,11 +22,23 @@ from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_BY_ID,
     SOURCE_BY_NAME,
     UNSUPPORTED_FIELDS,
+    FieldSpec,
+    SourceSpec,
+)
+from strategy_workbench.adapters.outbound.equity_mock._fixture import (
+    Membership,
+    MockSplit,
+    Observation,
 )
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
-from strategy_workbench.domain.equity.facade.research_data import DatasetFieldProfile
+from strategy_workbench.domain.equity._models import CONTRACT_PROSE_FIELDS
+from strategy_workbench.domain.equity.facade.research_data import (
+    DatasetFieldProfile,
+    FieldCoverageCapability,
+    SecurityRef,
+)
 
 # 두 어댑터가 함께 내는 필드 — 대조가 빈 교집합으로 공허하게 통과하지 않게 최소 집합을 못박는다.
 EXPECTED_SHARED = frozenset(
@@ -40,6 +53,41 @@ EXPECTED_SHARED = frozenset(
         "credit.margin_balance",
     }
 )
+
+
+# 필드 계약 판에 닿는 dataclass 와 그 판에서 빠지는 문장 칸.
+_PROSE_BY_TYPE: dict[type, set[str]] = {
+    FieldSpec: {"label", "verdict", "description", "disclosure_basis", "evidence", "lag_basis"},
+    SourceSpec: {"lag_basis"},
+    DatasetFieldProfile: {
+        "label",
+        "available_date_basis",
+        "description",
+        "disclosure_basis",
+        "evidence",
+    },
+    **{
+        data: set()
+        for data in (FieldCoverageCapability, SecurityRef, Membership, Observation, MockSplit)
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("declaration", "prose"),
+    list(_PROSE_BY_TYPE.items()),
+    ids=[declaration.__name__ for declaration in _PROSE_BY_TYPE],
+)
+def test_only_prose_is_left_out_of_the_field_contract_revision(
+    declaration: type, prose: set[str]
+) -> None:
+    """#291 리뷰 r2 P3-1: 판에서 빠지는 칸은 타입마다 이 문장 칸뿐이다.
+
+    `CONTRACT_PROSE_FIELDS` 는 이름으로 거르므로 판에 닿는 dataclass(선언표·프로필·mock fixture
+    데이터) 모두에 적용된다. 뜻 칸 이름이 목록에 들거나, 데이터 타입에 목록과 같은 이름의 뜻 칸이
+    생기면 그 변화가 스냅샷 id·재현 지문·캐시 키에서 조용히 빠진다(#235 재발).
+    """
+    assert {item.name for item in fields(declaration)} & CONTRACT_PROSE_FIELDS == prose
 
 
 def _mock_profiles() -> dict[str, DatasetFieldProfile]:

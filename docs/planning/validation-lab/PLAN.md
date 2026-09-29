@@ -6,10 +6,10 @@ current_phase: V0,V1,V2,V3
 current_pr: V0-01,V1-01,V2-01,V3-01
 active_prs: [V0-01, V1-01, V2-01, V3-01]
 parallel_window: [V0-01, V1-01, V2-01, V3-01]
-last_updated: 2026-09-29T15:54:53+09:00
+last_updated: 2026-09-29T15:55:52+09:00
 planned_prs: 28
 merged_prs: 0
-approved_prs: 0
+approved_prs: 1
 progress_percent: 0
 ---
 
@@ -28,8 +28,8 @@ progress_percent: 0
 | Current/next PR | `V0-01,V1-01,V2-01,V3-01` |
 | Active PR | `V0-01, V1-01, V2-01, V3-01` |
 | Progress | `0 / 28 merged (0%)` |
-| Approved | `0 / 28` |
-| Aggregated at | `2026-09-29 15:54 KST` |
+| Approved | `1 / 28` |
+| Aggregated at | `2026-09-29 15:55 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -67,7 +67,7 @@ progress_percent: 0
 <!-- PLAN:PHASES:START -->
 | Phase | Goal | PR | Merged | Status |
 |---|---|---:|---:|---|
-| V0 | Planning package | 1 | 0 | `IN_PROGRESS` |
+| V0 | Planning package | 1 | 0 | `APPROVED` |
 | V1 | Research window seal, run persistence, trial ledger | 5 | 0 | `IN_PROGRESS` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 0 | `IN_PROGRESS` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 0 | `IN_PROGRESS` |
@@ -81,7 +81,7 @@ progress_percent: 0
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V0-01` | 기획 패키지·설계 spec·유저 스토리 등록 | 없음 | `IN_PROGRESS` | — |
+| [ ] | `V0-01` | 기획 패키지·설계 spec·유저 스토리 등록 | 없음 | `APPROVED` | [#282](https://github.com/Nochiski/Quant_study/pull/282) · `review_vlab_p0_01` 3차 APPROVE(1차 REQUEST_CHANGES P1 5건 해소, 비blocking 전부 반영) |
 
 ## V1 — 봉인과 기록
 
@@ -126,12 +126,12 @@ progress_percent: 0
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [ ] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04 | `PLANNED` | — |
-| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02 | `PLANNED` | — |
+| [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `PLANNED` | — |
 | [ ] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `PLANNED` | — |
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V4-03 | `PLANNED` | — |
-| [ ] | `V5-05` | 실행 설정 잠금 UX·비용 어휘·시도 영향 알림 | V1-01, V1-05 | `PLANNED` | — |
+| [ ] | `V5-05` | 실행 설정 잠금 UX·시도 영향 알림 | V1-01, V1-05 | `PLANNED` | — |
 | [ ] | `V5-06` | 용량 스윕·팩터 회귀 화면 | V5-02, V4-04, V4-05 | `PLANNED` | — |
-| [ ] | `V5-07` | IDE 진입점·탐색 토글(lang2 P4-04·P5-02 뒤) | V5-02, V5-03 | `PLANNED` | — |
+| [ ] | `V5-07` | IDE 진입점·탐색 토글 | V5-02, V5-03, lang2 P4-04 머지, lang2 P5-02 머지 | `PLANNED` | — |
 
 ## V6 — 홀드아웃 개봉
 
@@ -146,7 +146,9 @@ progress_percent: 0
 
 ## Review 기록
 
-아직 없다.
+- V0-01 `review_vlab_p0_01`: 1차 REQUEST_CHANGES(P1 5건: ID 충돌·스토리 번호 충돌·결과 공유 키·포트 방향·시도 키
+  안정성) → 58875491 반영 → 2차 APPROVE(P2 1·P3 6) → 1a1f7aca 반영 → 2de1f968(화면 선행 개정) 3차 APPROVE(P2 1·P3 2)
+  → 머지 전 반영.
 
 ## 변경 기록
 

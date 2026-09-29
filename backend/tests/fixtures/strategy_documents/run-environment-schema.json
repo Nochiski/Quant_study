@@ -107,6 +107,7 @@
       "x-unit": "ratio",
       "x-applied-stage": "execution",
       "minimum": 0.0,
+      "maximum": 10.0,
       "examples": [
         1.0
       ]

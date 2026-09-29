@@ -221,7 +221,7 @@ const ko = {
     "흔들림 한 단위당 한국은행 기준금리보다 얼마나 더 벌었는지입니다. 클수록 덜 흔들리며 더 벌었습니다.",
   "backtest.metric.sharpe_standard_error": "샤프 비율 오차",
   "backtest.metric.sharpe_standard_error.description":
-    "샤프 비율이 운만으로 얼마나 달라질 수 있는지입니다. 샤프 ± 이 값의 2배가 대략 95% 범위입니다. 날마다 수익률이 서로 독립이고 정규분포라고 본 근사라 실제로는 이보다 큽니다.",
+    "샤프 비율이 운만으로 얼마나 달라질 수 있는지입니다. 샤프 ± 이 값의 2배가 대략 95% 범위이고, 독립·정규 근사라 실제로는 더 클 수 있습니다.",
   "backtest.metric.sortino": "소르티노 비율",
   "backtest.metric.sortino.description":
     "기준금리에 못 미친 흔들림만 위험으로 보고 잰 샤프 비율입니다.",
@@ -1916,9 +1916,9 @@ export const messages = {
     "backtest.metric.sharpe": "Sharpe ratio",
     "backtest.metric.sharpe.description":
       "Return above the Bank of Korea base rate per unit of swing. Higher means a smoother gain.",
-    "backtest.metric.sharpe_standard_error": "Sharpe ratio error",
+    "backtest.metric.sharpe_standard_error": "Sharpe uncertainty",
     "backtest.metric.sharpe_standard_error.description":
-      "How much the Sharpe ratio could differ by luck alone. Sharpe ± twice this covers about 95%. It assumes independent, normally distributed daily returns, so the real error is larger.",
+      "How much the Sharpe ratio could differ by luck alone. Sharpe ± twice this covers about 95%; it is an independent-normal approximation, so the real error can be larger.",
     "backtest.metric.sortino": "Sortino ratio",
     "backtest.metric.sortino.description":
       "A Sharpe ratio that counts only swings below the base rate as risk.",

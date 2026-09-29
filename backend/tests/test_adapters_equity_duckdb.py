@@ -895,6 +895,10 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
         CellKind.MASKED,
         WB_BONUS_EX,
     )
+    # 창 안에서 원래 값이 없던 행(not_collected)도 MASKED 다 — 가림 표시가 결측 사유보다 먼저다.
+    # 창의 값은 척도가 섞여 있어 모르는 값을 채워도 틀린다(#311 리뷰 P3-1)
+    unknown = _cell(result, seen_credit(date(2024, 1, 5)), "000660:1", "credit.margin_balance")
+    assert (unknown.value, unknown.kind) == (None, CellKind.MASKED)
     # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖고, 원장 뷰가 가리는
     # 원천만 MASKED 를 갖는다
     profiles = {p.field_id: p for p in adapter.list_fields()}

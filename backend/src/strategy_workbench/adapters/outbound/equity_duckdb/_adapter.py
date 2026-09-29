@@ -230,7 +230,8 @@ def _cell_kind(value: float | None, fill_kind: object, masked: bool = False) -> 
 
     값이 있는 셀을 무조건 OBSERVED 로 두는 것은 계약이다(관측 셀은 값을 가져야 한다). 값이
     없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다. 가림
-    표시는 값보다 먼저 본다 — 가린 행에 값이 실려 오면 셀 계약 검사가 크게 실패하게 둔다.
+    표시는 값보다 먼저 본다 — 가린 행에 값이 실려 오면 셀 계약 검사가 크게 실패하게 둔다. 결측
+    사유보다도 먼저 본다 — 가림 창 안에서 원래 값이 없던 행(not_collected·src_omitted)도 MASKED 다.
     """
     if masked:
         return CellKind.MASKED

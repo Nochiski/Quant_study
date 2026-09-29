@@ -64,7 +64,13 @@ const result = (): BacktestRunResult => ({
   },
   metric_definitions: [],
   metrics: [],
-  series: { equity: [], drawdown: [], monthly_returns: [], rolling_sharpe: [] },
+  series: {
+    equity: [],
+    drawdown: [],
+    monthly_returns: [],
+    rolling_sharpe: [],
+    rolling_sharpe_window_sessions: 126,
+  },
   artifacts: {
     snapshots: [],
     positions: [],
@@ -333,6 +339,41 @@ describe("청산 거래 표", () => {
 
     expect(
       screen.getByRole("columnheader", { name: "비용(수수료·세금)" }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("롤링 샤프 차트", () => {
+  it("값이 모두 비면 결과가 알려 준 창 길이로 이유를 말한다", () => {
+    const base = result();
+    const sessions = ["2026-01-05", "2026-01-06", "2026-01-07"];
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          series: {
+            ...base.series,
+            equity: sessions.map((session, index) => ({
+              session,
+              equity: 100 + index,
+              benchmark_equity: null,
+            })),
+            rolling_sharpe: sessions.map((session) => ({
+              session,
+              value: null,
+            })),
+            // 창 길이는 backend 가 정한다(#303). 화면 문구에 숫자를 적지 않고 이 값을 읽는다.
+            rolling_sharpe_window_sessions: 63,
+          },
+        }}
+        environmentFields={FIELDS}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "실행이 롤링 창(63세션)보다 짧아 롤링 샤프 값이 없습니다.",
+      ),
     ).toBeInTheDocument();
   });
 });

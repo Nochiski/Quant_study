@@ -46,9 +46,11 @@ const chartPath = (
 const LineChart = ({
   title,
   series,
+  emptyText = t("backtest.result.chartEmpty"),
 }: {
   title: string;
   series: ChartSeries[];
+  emptyText?: string;
 }) => {
   const finite = series.flatMap((item) =>
     item.values.filter((value): value is number => value !== null),
@@ -59,7 +61,7 @@ const LineChart = ({
         <header>
           <h4>{title}</h4>
         </header>
-        <p className="inline-state">{t("backtest.result.chartEmpty")}</p>
+        <p className="inline-state">{emptyText}</p>
       </section>
     );
   }
@@ -302,6 +304,10 @@ export const BacktestRunDetail = ({
             },
           ]}
           title={t("backtest.result.chart.rollingSharpe")}
+          emptyText={t("backtest.result.chartEmpty.rollingSharpe").replace(
+            "{sessions}",
+            String(result.series.rolling_sharpe_window_sessions),
+          )}
         />
         <LineChart
           series={[

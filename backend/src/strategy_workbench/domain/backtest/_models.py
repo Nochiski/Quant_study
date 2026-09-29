@@ -468,6 +468,7 @@ class BacktestSeries:
     drawdown: tuple[DrawdownPoint, ...]
     monthly_returns: tuple[MonthlyReturnPoint, ...]
     rolling_sharpe: tuple[RollingMetricPoint, ...]
+    rolling_sharpe_window_sessions: int
 
 
 @dataclass(frozen=True)

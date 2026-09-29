@@ -86,6 +86,7 @@ def _result() -> BacktestRunResult:
             drawdown=(),
             monthly_returns=(),
             rolling_sharpe=(),
+            rolling_sharpe_window_sessions=126,
         ),
         artifacts=RawArtifactBundle(
             snapshots=(RawSnapshot(date(2026, 1, 2), 100.0, 100.0, 0.0, 0.0),),

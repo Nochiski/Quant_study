@@ -417,6 +417,7 @@ def test_rolling_sharpe_starts_once_the_126_session_window_is_full() -> None:
     )
 
     assert [item.value for item in report.rolling_sharpe[:-1]] == [None] * 126
+    assert report.rolling_sharpe_window_sessions == 126
     assert report.rolling_sharpe[-1].value == pytest.approx(_metric(report, "sharpe").value)
 
 

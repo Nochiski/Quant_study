@@ -138,5 +138,7 @@ class AnalyticsReport:
     drawdown_curve: tuple[DrawdownPoint, ...]
     monthly_returns: tuple[MonthlyReturnPoint, ...]
     rolling_sharpe: tuple[RollingMetricPoint, ...]
+    # 롤링 샤프 창의 수익률 개수. 값이 모두 비어도 화면이 이유를 말할 수 있게 싣는다(#303).
+    rolling_sharpe_window_sessions: int
     # 기준금리 이력 확인일 뒤라 마지막 확인 금리를 이어 쓴 수익률 구간의 시작 세션.
     base_rate_carried_sessions: tuple[date, ...]

@@ -865,13 +865,18 @@
             },
             "title": "Rolling Sharpe",
             "type": "array"
+          },
+          "rolling_sharpe_window_sessions": {
+            "title": "Rolling Sharpe Window Sessions",
+            "type": "integer"
           }
         },
         "required": [
           "equity",
           "drawdown",
           "monthly_returns",
-          "rolling_sharpe"
+          "rolling_sharpe",
+          "rolling_sharpe_window_sessions"
         ],
         "title": "BacktestSeries",
         "type": "object"

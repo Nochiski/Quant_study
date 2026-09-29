@@ -3,7 +3,7 @@
 W1 갈래 넷(equity 분리 · factor_inputs 층 · v3 이식 · v2 이식)과 v4 엔진이 서로 엇나가지 않게
 **모양만 먼저 고정**한다. 여기에는 계산이 없다.
 
-  ① 입력 — `factor_inputs` 층이 판마다 굽는 표 7개(`FI_TABLES`). 엔진은 이것만 읽는다.
+  ① 입력 — `factor_inputs` 층이 판마다 굽는 표 8개(`FI_TABLES`). 엔진은 이것만 읽는다.
      단위는 compat(v3 미러)와 같다: 가격 원 · 재무·시총 억원 · 수급 백만원 · 주식수 주.
      그래야 v3 이식 엔진이 v3 원본과 |Δ| ≤ 1e-9 로 맞는다(G-M3 ①).
   ② 모델 설정 — `ModelSpec`(레지스트리 YAML 한 개 = 하나). 가중치·유니버스·제외 게이트·
@@ -15,8 +15,9 @@ W1 갈래 넷(equity 분리 · factor_inputs 층 · v3 이식 · v2 이식)과 v
   ④ 출력 — v3 48열·v2 21열은 v3 `score_history`·`score_history_v2` 그대로(compat 로 되쓴다).
      v4 계열은 기본 열 + 버킷마다 `<bucket>_score` 열(`score_columns(spec)`).
 
-입력 표 7개 중 6개는 플랜 원안이고 `fi_credit` 은 v4 설계(D-13': 보조 버킷의 신용잔고 변화)가
-플랜 뒤에 정해져 더한 것이다. `fi_fin_summary` 에 분기 행(`period_type='quarter'`)을 둔 것도 v4
+입력 표 8개 중 6개는 플랜 원안이고 `fi_credit` 은 v4 설계(D-13': 보조 버킷의 신용잔고 변화)가
+플랜 뒤에 정해져 더한 것이다. `fi_consensus_annual` 은 v2 원천(c1050001)이 v3 원천과 값이 달라
+(W1-d 실측) 두 원본을 동시에 맞추려고 나눈 v2 전용 표다. `fi_fin_summary` 에 분기 행(`period_type='quarter'`)을 둔 것도 v4
 영업이익률 TTM 때문이다 — v3·v2 는 연간 행만 읽는다.
 """
 from __future__ import annotations
@@ -129,6 +130,19 @@ FI_CONSENSUS = TableContract(
             "v3 revision_daily(cur)/compare(1w…3m) 대응"),
     readers=ALL_ENGINES)
 
+FI_CONSENSUS_ANNUAL = TableContract(
+    "fi_consensus_annual", ("ticker", "period", "data_type"),
+    (_c("ticker", "VARCHAR"), _c("period", "VARCHAR", note="YYYY/MM"),
+     _c("data_type", "VARCHAR", note="E(추정) | A(확정) — 같은 기에 둘 다 올 수 있다(v2 는 E 우선)"),
+     _c("revenue", "DOUBLE", "억원"), _c("op", "DOUBLE", "억원"), _c("ni", "DOUBLE", "억원"),
+     _c("eps", "DOUBLE", "원"), _c("per", "DOUBLE", "배"),
+     _c("fetched_date", "DATE", note="수집일(최신 ≤ D 한 판)")),
+    window="판 기준일 연도 Y 의 Y−1/12 · Y/12 · Y+1/12 (v2 결산기 고정)",
+    source=("stg_consensus_annual(WISE c1050001 T2Y) — v2 원천. v3 가 읽는 fi_consensus(매트릭스)·"
+            "fi_fin_summary(cF3002)와 같은 기·같은 항목이어도 값이 다르다(09-29 실측: 당해 op 318종목) "
+            "— 두 원본을 동시에 맞추려고 표를 나눴다"),
+    readers=("v2_percentrank",))
+
 FI_FIN_SUMMARY = TableContract(
     "fi_fin_summary", ("ticker", "period", "period_type"),
     (_c("ticker", "VARCHAR"), _c("period", "VARCHAR", note="YYYY/MM"),
@@ -164,7 +178,8 @@ FI_CREDIT = TableContract(
     readers=("v4_rank",))
 
 FI_TABLES: dict[str, TableContract] = {t.name: t for t in (
-    FI_PRICES, FI_ADJ_PRICES, FI_FLOWS, FI_UNIVERSE, FI_CONSENSUS, FI_FIN_SUMMARY, FI_CREDIT)}
+    FI_PRICES, FI_ADJ_PRICES, FI_FLOWS, FI_UNIVERSE, FI_CONSENSUS, FI_CONSENSUS_ANNUAL,
+    FI_FIN_SUMMARY, FI_CREDIT)}
 
 
 # ── ② 모델 설정 ───────────────────────────────────────────────────────────────
@@ -380,7 +395,8 @@ def score_columns(spec: ModelSpec) -> tuple[str, ...]:
 
 
 __all__ = [
-    "ALL_ENGINES", "DTYPES", "FI_ADJ_PRICES", "FI_CONSENSUS", "FI_CREDIT", "FI_FIN_SUMMARY",
+    "ALL_ENGINES", "DTYPES", "FI_ADJ_PRICES", "FI_CONSENSUS", "FI_CONSENSUS_ANNUAL",
+    "FI_CREDIT", "FI_FIN_SUMMARY",
     "FI_FLOWS", "FI_PRICES", "FI_TABLES", "FI_UNIVERSE", "FLOW_SUBJECTS", "GATE_RULES",
     "INDICATOR_COLUMNS", "ROLES", "SCORE_BASE_COLUMNS", "SECTOR_LEVELS", "UNITS",
     "V2_SCORE_COLUMNS", "V3_SCORE_COLUMNS", "Col", "Engine", "EngineResult", "FactorInputs",

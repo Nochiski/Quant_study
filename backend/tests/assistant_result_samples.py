@@ -21,6 +21,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     DrawdownPoint,
     EquityCurvePoint,
     MetricScope,
+    MetricUnavailableReason,
     MetricValue,
     MonthlyReturnPoint,
     build_default_metric_registry,
@@ -102,7 +103,9 @@ def sample_backtest_result() -> BacktestRunResult:
             value,
             MetricScope.FULL,
             820,
-            unavailable_reason="drawdown_not_recovered" if value is None else None,
+            unavailable_reason=(
+                MetricUnavailableReason.MAXIMUM_DRAWDOWN_NOT_RECOVERED if value is None else None
+            ),
         )
         for metric_id, value in _FULL_VALUES.items()
     ) + (

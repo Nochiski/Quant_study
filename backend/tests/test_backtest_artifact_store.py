@@ -14,6 +14,7 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.domain.analytics.facade.metrics import (
     EquityCurvePoint,
     MetricScope,
+    MetricUnavailableReason,
     MetricValue,
     build_default_metric_registry,
 )
@@ -77,7 +78,7 @@ def _result() -> BacktestRunResult:
                 None,
                 MetricScope.FULL,
                 1,
-                unavailable_reason="zero_return_variance",
+                unavailable_reason=MetricUnavailableReason.ZERO_RETURN_VARIANCE,
             ),
         ),
         series=BacktestSeries(

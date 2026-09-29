@@ -68,7 +68,7 @@ class MetricValue:
     scope: MetricScope
     sample_count: int
     scope_label: str | None = None
-    unavailable_reason: str | None = None
+    unavailable_reason: MetricUnavailableReason | None = None
 
 
 @dataclass(frozen=True)

@@ -76,7 +76,7 @@ def test_metrics_carry_the_registry_meaning_next_to_the_value() -> None:
     }
     unrecovered = _metric(payload, "max_drawdown_recovery_sessions")
     assert unrecovered["value"] is None
-    assert unrecovered["unavailable_reason"] == "drawdown_not_recovered"
+    assert unrecovered["unavailable_reason"] == "maximum_drawdown_not_recovered"
     assert _metric(payload, "sharpe", "out_of_sample")["scope_label"] == "OOS 2026-03-02"
 
 

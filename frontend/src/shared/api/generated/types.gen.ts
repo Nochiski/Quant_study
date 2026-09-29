@@ -2255,6 +2255,25 @@ export type MetricScope =
   "full" | "in_sample" | "validation" | "out_of_sample" | "window";
 
 /**
+ * MetricUnavailableReason
+ *
+ * 지표 값이 없을 때(`MetricValue.value is None`) 그 이유. 값은 wire 계약이다.
+ *
+ * 화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유하고, 목록은 골든
+ * `tests/fixtures/analytics/metric_unavailable_reasons.json` 이 두 쪽을 묶는다(이슈 #241).
+ */
+export type MetricUnavailableReason =
+  | "zero_return_variance"
+  | "no_downside_variation"
+  | "no_drawdown"
+  | "maximum_drawdown_not_recovered"
+  | "benchmark_not_available"
+  | "no_closed_trades"
+  | "no_losing_closed_trade"
+  | "no_observations_in_scope"
+  | "period_under_one_year";
+
+/**
  * MetricUnit
  */
 export type MetricUnit =
@@ -2277,10 +2296,7 @@ export type MetricValue = {
    * Scope Label
    */
   scope_label?: string | null;
-  /**
-   * Unavailable Reason
-   */
-  unavailable_reason?: string | null;
+  unavailable_reason?: MetricUnavailableReason | null;
   /**
    * Value
    */

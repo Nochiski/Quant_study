@@ -2601,6 +2601,16 @@ export type ParameterNode = {
 };
 
 /**
+ * ParticipationBasis
+ *
+ * 참여율을 곱할 기준 거래량(spec D7).
+ *
+ * `session_volume` 은 체결 세션의 거래량을, `adv20` 은 판단일까지 20세션 평균 거래대금을 판단일
+ * 종가로 나눈 주식 수(`_participation.py`)를 뜻한다.
+ */
+export type ParticipationBasis = "session_volume" | "adv20";
+
+/**
  * PortfolioCandidateTrace
  *
  * The linked score -> selection -> constrained target path for one security.
@@ -3677,6 +3687,7 @@ export type RunEnvironment = {
   frequency?: DataFrequency;
   market?: Market;
   missing?: MissingPolicy;
+  participation_basis?: ParticipationBasis;
   /**
    * Participation Rate
    */

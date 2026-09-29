@@ -58,6 +58,15 @@
         0.1
       ]
     },
+    "participation_basis": {
+      "type": "string",
+      "enum": [
+        "session_volume",
+        "adv20"
+      ],
+      "default": "session_volume",
+      "x-description-key": "strategy.field.run_environment.participation_basis"
+    },
     "fee_bps": {
       "type": "number",
       "default": 15.0,

@@ -352,6 +352,7 @@ export type {
   PageStrategySummary,
   PanelPreviewCostEstimate,
   ParameterNode,
+  ParticipationBasis,
   PortfolioCandidateTrace,
   PortfolioConstraintEffect,
   PortfolioDataUnavailableDetail,

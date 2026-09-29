@@ -101,7 +101,7 @@ export class ApiRequestError extends Error {
   readonly field: string | undefined;
   /**
    * 코드가 없는 FastAPI 기본 422(배열 `detail`)의 진단 요약. `detail` 과 달리 화면 본문에 쓰지 않고 접힌 진단
-   * 상세에만 쓴다 — 저장·업그레이드 배너와 추적 오류는 `detail` 을 본문으로 그린다(#268 리뷰 P3-4).
+   * 상세에만 쓴다 — 저장 상태 줄(409·422)은 `detail` 을 본문으로 그린다(#268 리뷰 P3-4).
    */
   readonly diagnostic: string | undefined;
   /** detail 의 문자열 칸(`message` 제외). 거절 문장의 `{이름}` 자리표시자를 채운다(예: 연구 구간 날짜). */
@@ -132,6 +132,19 @@ export class ApiRequestError extends Error {
     this.values = values;
   }
 }
+
+/**
+ * 실패한 요청의 서버 사유 — 화면이 접힌 진단 상세("서버 사유")에 두는 원문의 유일한 출처다. backend가 보낸
+ * 문장(`detail`)이나 코드 없는 422 요약(`diagnostic`)만 싣고, `ApiRequestError.message`(`API request
+ * failed: …`)는 개발자 진단이라 싣지 않는다. 응답 없이 난 오류(네트워크 등)는 그 오류 문장을 남긴다. 화면
+ * 본문은 코드 번역이 맡는다(`.claude/rules/frontend-api-state.md`, #270).
+ */
+export const failureReason = (error: unknown): string | null =>
+  error instanceof ApiRequestError
+    ? (error.detail ?? error.diagnostic ?? null)
+    : error instanceof Error
+      ? error.message
+      : null;
 
 const requireData = <T>(data: T | undefined, context: string): T => {
   if (data === undefined) {

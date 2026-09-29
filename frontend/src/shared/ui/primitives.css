@@ -322,6 +322,23 @@
   max-width: 44ch;
 }
 
+/* 실패 한 줄(`FailureNotice`): 번역된 본문과 접힌 서버 사유 */
+.ui-failure {
+  min-width: 0;
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+  overflow-wrap: anywhere;
+}
+
+.ui-failure__reason {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+}
+
+.ui-failure__reason > summary {
+  cursor: pointer;
+}
+
 /* Split handle: a keyboard-operable separator between two resizable panes */
 .ui-split-handle {
   position: relative;

@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
@@ -24,7 +25,8 @@ const LEGACY =
   'schema_version: "1.0"\ntitle: 옛 문서\nfactors:\n  factors: []\n';
 const UPGRADED = 'schema_version: "1.1"\ntitle: 옛 문서\nfactors: []\n';
 const upgradeRequests: { source: string; format: string }[] = [];
-let upgradeMode: "ok" | "drift" | "network" | "no-environment" = "ok";
+let upgradeMode: "ok" | "drift" | "network" | "array-422" | "no-environment" =
+  "ok";
 /** 업그레이드 응답의 옛 문서 실행 설정(P2-09 `environment`). */
 const OLD_ENVIRONMENT = {
   market: "KRX",
@@ -81,6 +83,17 @@ const server = setupServer(
     const body = (await request.json()) as { source: string; format: string };
     upgradeRequests.push(body);
     if (upgradeMode === "network") return HttpResponse.error();
+    if (upgradeMode === "array-422") {
+      // 코드 없는 FastAPI 기본 422(배열 detail).
+      return HttpResponse.json(
+        {
+          detail: [
+            { type: "missing", loc: ["body", "format"], msg: "Field required" },
+          ],
+        },
+        { status: 422 },
+      );
+    }
     if (upgradeMode === "drift") {
       return HttpResponse.json(
         {
@@ -334,8 +347,27 @@ describe("retired schema upgrade banner", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("업그레이드 요청이 실패했습니다");
+    expect(alert).not.toHaveTextContent("API request failed");
     expect(view.state.doc.toString()).toBe(LEGACY);
     expect(upgradeRequests).toHaveLength(1);
+  });
+
+  it("keeps a code-less refusal out of the body and folds the server reason away (#270)", async () => {
+    upgradeMode = "array-422";
+    await mount();
+    await waitFor(() => expect(upgradeButton()).toBeEnabled());
+
+    fireEvent.click(upgradeButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "업그레이드 요청이 실패했습니다. 원문은 그대로입니다.",
+    );
+    expect(alert).not.toHaveTextContent("API request failed");
+    // 서버 원문은 접힌 "서버 사유" 안에만 있다.
+    const reason = within(alert).getByText("서버 사유").closest("details");
+    expect(reason).not.toBeNull();
+    expect(reason).toHaveTextContent("format: Field required");
   });
 
   it("only suggests saving a new revision for a generated frozen row", async () => {

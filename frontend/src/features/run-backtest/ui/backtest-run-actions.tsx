@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 
 import {
-  BacktestRejection,
   backtestStartRejectionMessage,
   runEnvironmentFields,
   useCancelBacktest,
@@ -10,9 +9,9 @@ import {
   type BacktestRunSpec,
   type BacktestRunState,
 } from "../../../entities/backtest";
-import { ApiRequestError } from "../../../shared/api";
+import { ApiRequestError, failureReason } from "../../../shared/api";
 import { t } from "../../../shared/config";
-import { Button } from "../../../shared/ui";
+import { Button, FailureNotice } from "../../../shared/ui";
 import { runFieldLabel } from "../model/run-settings-problems";
 import "./backtest-run-actions.css";
 
@@ -54,15 +53,7 @@ export const BacktestRunActions = ({
       schema.data === undefined ? [] : runEnvironmentFields(schema.data.schema),
     [schema.data],
   );
-  const actionError = cancel.error ?? replay.error;
-  // 서버 원문은 접힌 "서버 사유"로만 간다. `ApiRequestError.message`(`API request failed …`)는 개발자
-  // 진단이라 쓰지 않는다(#268 리뷰 P3-3).
-  const actionErrorDetail =
-    actionError instanceof ApiRequestError
-      ? (actionError.detail ?? actionError.diagnostic ?? null)
-      : actionError instanceof Error
-        ? actionError.message
-        : null;
+  const actionErrorDetail = failureReason(cancel.error ?? replay.error);
   // 재실행 거절은 시작 거절이다 — 편집기 툴바와 같은 문장 규칙(`backtestStartRejectionMessage`)을 쓴다.
   const replayRejection =
     replay.error === null
@@ -108,15 +99,15 @@ export const BacktestRunActions = ({
         </Button>
       )}
       {replayRejection !== null && cancel.error === null ? (
-        <BacktestRejection
+        <FailureNotice
           title={t("backtest.actions.rerunFailed")}
           message={replayRejection}
-          detail={actionErrorDetail}
+          reason={actionErrorDetail}
         />
       ) : cancel.isError || replay.isError || requestFailed ? (
-        <BacktestRejection
+        <FailureNotice
           message={t("backtest.actions.error")}
-          detail={actionErrorDetail}
+          reason={actionErrorDetail}
         />
       ) : null}
     </div>

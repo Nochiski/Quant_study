@@ -1,11 +1,8 @@
 import type { ReactNode } from "react";
 
-import {
-  BacktestRejection,
-  backtestStartRejectionMessage,
-} from "../../../entities/backtest";
+import { backtestStartRejectionMessage } from "../../../entities/backtest";
 import { t } from "../../../shared/config";
-import { Badge, Button, Tooltip } from "../../../shared/ui";
+import { Badge, Button, FailureNotice, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
 import type { DocumentState } from "../model/document-state";
 import type { RunBacktestStatus } from "../model/use-run-backtest";
@@ -145,7 +142,7 @@ export const DocumentToolbar = ({
       </div>
       {runStatus.kind === "failed" ? (
         // 줄은 버튼 줄 아래에 따로 두어 긴 문장이 버튼 폭을 빼앗지 않게 한다(#260).
-        <BacktestRejection
+        <FailureNotice
           className="doc-toolbar__error"
           title={t("toolbar.run.failed")}
           message={backtestStartRejectionMessage(
@@ -155,7 +152,7 @@ export const DocumentToolbar = ({
               : runFieldLabel(runStatus.field),
             runStatus.values,
           )}
-          detail={runStatus.detail}
+          reason={runStatus.detail}
         />
       ) : null}
     </div>

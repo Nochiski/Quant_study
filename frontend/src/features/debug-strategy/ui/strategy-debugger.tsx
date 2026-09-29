@@ -9,7 +9,14 @@ import {
 
 import { t } from "../../../shared/config";
 import { useVirtualWindow } from "../../../shared/lib/virtual-window";
-import { Badge, Button, Tabs, panelId, tabId } from "../../../shared/ui";
+import {
+  Badge,
+  Button,
+  FailureNotice,
+  Tabs,
+  panelId,
+  tabId,
+} from "../../../shared/ui";
 import {
   projectLinkedTraceRows,
   type LinkedTraceRow,
@@ -273,9 +280,12 @@ const STATE_MESSAGES = {
 const StateNotice = ({ state }: { state: StrategyTraceState }) => {
   if (state.kind === "error")
     return (
-      <div className="strategy-debugger__state" role="alert">
-        <strong>{t("debugger.state.error")}</strong>
-        <p>{state.message}</p>
+      <div className="strategy-debugger__state">
+        <FailureNotice
+          title={t("debugger.state.error")}
+          message={state.message}
+          reason={state.reason}
+        />
       </div>
     );
   if (state.kind === "success") return null;

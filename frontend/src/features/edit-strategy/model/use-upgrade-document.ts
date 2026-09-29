@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 
 import {
   ApiRequestError,
+  failureReason,
   strategyWorkbenchApi,
   type UpgradedDocument,
 } from "../../../shared/api";
@@ -14,11 +15,14 @@ import {
   type UpgradeAvailability,
 } from "./document-upgrade";
 
-/** 업그레이드 실패 사유. backend 422 코드는 그대로 통과시키고 나머지는 두 가지로 묶는다. */
+/**
+ * 업그레이드 실패 사유. backend 422 코드는 그대로 통과시키고 나머지는 두 가지로 묶는다. `detail` 은 접힌
+ * 서버 사유에 둘 원문(`failureReason`)이다.
+ */
 export type UpgradeFailure =
   | { reason: "editor-unavailable" }
   | { reason: "composing" }
-  | { reason: "request"; code: string | null; detail: string };
+  | { reason: "request"; code: string | null; detail: string | null };
 
 export type UpgradeStatus =
   | { kind: "idle" }
@@ -135,12 +139,7 @@ export const useUpgradeDocument = (
             reason: "request",
             code:
               error instanceof ApiRequestError ? (error.code ?? null) : null,
-            detail:
-              error instanceof ApiRequestError
-                ? (error.detail ?? error.message)
-                : error instanceof Error
-                  ? error.message
-                  : String(error),
+            detail: failureReason(error),
           },
         });
       },

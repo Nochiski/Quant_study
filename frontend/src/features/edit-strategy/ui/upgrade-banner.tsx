@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import type { UpgradedDocument } from "../../../shared/api";
 import { t, tOptional } from "../../../shared/config";
-import { Badge, Button } from "../../../shared/ui";
+import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import { upgradeWarningTitle } from "../model/document-upgrade";
 import type {
   DocumentUpgrade,
@@ -26,11 +26,11 @@ type UpgradeBannerProps = {
 const failureText = (status: Extract<UpgradeStatus, { kind: "failed" }>) => {
   if (status.reason === "editor-unavailable") return t("upgrade.error.editor");
   if (status.reason === "composing") return t("upgrade.error.composing");
-  const known =
-    status.code === null
-      ? undefined
-      : tOptional(`upgrade.error.${status.code}`);
-  return known ?? t("upgrade.error.request").replace("{detail}", status.detail);
+  return (
+    (status.code === null
+      ? null
+      : tOptional(`upgrade.error.${status.code}`)) ?? t("upgrade.error.request")
+  );
 };
 
 /** 옛 문서 실행 설정의 한 줄 요약. 무엇을 채울지 누르기 전에 보이려는 것이라 기간·유니버스만 적는다. */
@@ -142,9 +142,10 @@ export const UpgradeBanner = ({
               : t("upgrade.action")}
           </Button>
           {status.kind === "failed" ? (
-            <span className="upgrade__error" role="alert">
-              {failureText(status)}
-            </span>
+            <FailureNotice
+              message={failureText(status)}
+              reason={status.reason === "request" ? status.detail : null}
+            />
           ) : null}
         </div>
       ) : null}

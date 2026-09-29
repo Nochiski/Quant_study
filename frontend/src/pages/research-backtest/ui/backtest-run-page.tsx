@@ -13,7 +13,7 @@ import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import { BacktestRunActions } from "../../../features/run-backtest";
 import { t, tOptional } from "../../../shared/config";
 import { useNavigate, useParams } from "../../../shared/lib/router";
-import { Badge, Button } from "../../../shared/ui";
+import { Badge, Button, FailureNotice } from "../../../shared/ui";
 import "./backtest-run-page.css";
 
 const TONE = {
@@ -49,19 +49,12 @@ const BacktestRunError = ({
   const translated =
     errorCode === null ? null : tOptional(`backtest.run.error.${errorCode}`);
   return (
-    <div
-      className="page-state page-state--error backtest-run-error"
-      role="alert"
-      aria-label={label}
-    >
-      {label}: {translated ?? error}
-      {translated === null ? null : (
-        <details className="backtest-run-error__reason">
-          <summary>{t("page.backtest.serverReason")}</summary>
-          {error}
-        </details>
-      )}
-    </div>
+    <FailureNotice
+      className="page-state page-state--error"
+      title={label}
+      message={translated ?? error}
+      reason={translated === null ? null : error}
+    />
   );
 };
 

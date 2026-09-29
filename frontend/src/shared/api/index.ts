@@ -46,6 +46,7 @@ export type {
 export {
   ApiRequestError,
   configureStrategyWorkbenchApi,
+  failureReason,
   strategyWorkbenchApi,
   type ApplicableWhen,
   type BacktestRunResult,

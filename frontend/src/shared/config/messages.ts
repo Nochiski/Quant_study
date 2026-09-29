@@ -7,6 +7,7 @@ const ko = {
   "ui.tabs.view": "표현 전환",
   "ui.splitHandle.resize": "패널 크기 조절",
   "ui.emptyState.noStrategies": "저장된 전략이 없습니다",
+  "ui.failure.serverReason": "서버 사유",
   "ui.status.ok": "정상",
   "ui.status.warn": "주의",
   "ui.status.error": "오류",
@@ -40,7 +41,6 @@ const ko = {
   "page.backtest.progress": "실행 진행",
   "page.backtest.runError": "실행 오류",
   "page.backtest.cancelledError": "취소 전 발생한 오류",
-  "page.backtest.serverReason": "서버 사유",
   // run 상태 `error_code` 번역 — 어휘 SoT 는 backend `RunFailureCode`(이슈 #158). 시작 거절의
   // `backtest.error.*` 와 namespace 를 나눈다: 같은 코드(`backtest.run.invalid` 등)라도 시작 거절은 실행 전에
   // 고칠 것을, run 실패는 실행 중에 난 일을 말한다.
@@ -372,7 +372,7 @@ const ko = {
   "debugger.state.cancelled": "추적 요청을 취소했습니다.",
   "debugger.state.discarded":
     "현재 문서·요청과 fingerprint가 다른 응답을 폐기했습니다.",
-  "debugger.state.error": "추적에 실패했습니다.",
+  "debugger.state.error": "추적 실패",
   "debugger.target.empty": "선택한 기준일에는 TargetTape frame이 없습니다.",
   "debugger.target.unavailable": "TargetTape 없음",
   "debugger.target.partial":
@@ -1162,7 +1162,7 @@ const ko = {
   "upgrade.error.editor": "편집기가 준비되지 않아 업그레이드하지 못했습니다.",
   "upgrade.error.composing": "입력 중에는 업그레이드할 수 없습니다.",
   "upgrade.error.request":
-    "업그레이드 요청이 실패했습니다. 원문은 그대로입니다. ({detail})",
+    "업그레이드 요청이 실패했습니다. 원문은 그대로입니다.",
   "upgrade.error.strategy_document.upgrade_drift":
     "업그레이드 결과가 변환 규칙과 어긋나 중단했습니다. 원문은 그대로입니다.",
   "upgrade.error.strategy_document.not_upgradeable": "지원이 끝난 schema 버전의 문서만 업그레이드할 수 있습니다.",
@@ -1278,7 +1278,6 @@ const ko = {
   "toolbar.run.failed": "백테스트 시작 실패",
   "backtest.start.failedGeneric":
     "서버가 실행 요청을 받지 않았습니다. 실행 설정과 전략 문서를 확인한 뒤 다시 시작하세요.",
-  "backtest.start.serverReason": "서버 사유",
   // 시작 거절(404·409·422)의 코드별 복구 문장. 코드 목록의 정본은 backend `startBacktest` 계약이고,
   // `backtest-error-contract.test.ts` 가 `openapi.json` 과 대조한다(이슈 #260).
   "backtest.error.backtest.run.field_invalid":
@@ -1299,15 +1298,16 @@ const ko = {
     "저장된 revision이 그사이 바뀌었습니다. 전략을 다시 연 뒤 시작하세요.",
   "backtest.error.backtest.strategy.requires_upgrade": "저장된 이전 schema revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
-  "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다: {detail}",
+  "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다. 어느 칸이 틀렸는지는 서버 사유를 보세요.",
   "trace.error.trace.engine.incompatible":
     "선택한 실행 엔진이 이 전략을 추적할 수 없습니다. 다른 실행 core를 고르세요.",
   "trace.error.trace.capability.unsupported":
-    "이 전략은 추적이 아직 지원하지 않는 기능을 씁니다: {detail}",
+    "이 전략은 추적이 아직 지원하지 않는 기능을 씁니다. 어떤 기능인지는 서버 사유를 보세요.",
   "trace.error.trace.strategy.stale":
     "편집 중인 문서가 저장본과 달라져 추적할 수 없습니다. 저장하거나 저장본을 다시 여세요.",
   "trace.error.trace.strategy.not_found": "추적할 저장 revision을 찾지 못했습니다.",
   "trace.error.trace.cancelled": "추적이 취소되었습니다.",
+  "trace.error.request": "서버가 추적 요청을 처리하지 못했습니다. 잠시 뒤 다시 추적하세요.",
   "ide.meta.schemaVersion": "schema",
   "ide.meta.sourceHash": "source hash",
   "ide.meta.specHash": "spec hash",
@@ -1467,7 +1467,7 @@ const ko = {
   "history.backtests.updated": "최근 상태",
   "history.backtests.open": "실행 열기",
   "problems.compileUnavailable":
-    "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요. ({detail})",
+    "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요.",
   "form.panel.label": "Form 편집",
   "form.panel.notice": "YAML source에 바로 반영 · undo 가능",
   "form.panel.enabled": "편집 가능",
@@ -1704,6 +1704,7 @@ export const messages = {
     "ui.tabs.view": "Switch view",
     "ui.splitHandle.resize": "Resize panel",
     "ui.emptyState.noStrategies": "No saved strategies",
+    "ui.failure.serverReason": "Server reason",
     "ui.status.ok": "OK",
     "ui.status.warn": "Warning",
     "ui.status.error": "Error",
@@ -1737,7 +1738,6 @@ export const messages = {
     "page.backtest.progress": "Run progress",
     "page.backtest.runError": "Run error",
     "page.backtest.cancelledError": "Error before cancellation",
-    "page.backtest.serverReason": "Server reason",
     "backtest.run.error.portfolio.data.unavailable":
       "The data source could not serve observations for this universe and period. Check the universe id and data range.",
     "backtest.run.error.portfolio.raw_observation.invalid":
@@ -2064,7 +2064,7 @@ export const messages = {
     "debugger.state.cancelled": "The trace request was cancelled.",
     "debugger.state.discarded":
       "A response with a different document, request or fingerprint was discarded.",
-    "debugger.state.error": "Trace failed.",
+    "debugger.state.error": "Trace failed",
     "debugger.target.empty": "There is no TargetTape frame for this date.",
     "debugger.target.unavailable": "TargetTape unavailable",
     "debugger.target.partial":
@@ -2878,7 +2878,7 @@ export const messages = {
     "upgrade.error.editor": "The editor is not ready, so nothing was upgraded.",
     "upgrade.error.composing": "Cannot upgrade while composing input.",
     "upgrade.error.request":
-      "The upgrade request failed. The text is unchanged. ({detail})",
+      "The upgrade request failed. The text is unchanged.",
     "upgrade.error.strategy_document.upgrade_drift":
       "The rewritten text disagreed with the upgrade rules, so it was rejected. The text is unchanged.",
     "upgrade.error.strategy_document.not_upgradeable": "Only documents on a retired schema version can be upgraded.",
@@ -2996,7 +2996,6 @@ export const messages = {
     "toolbar.run.failed": "Backtest could not start",
     "backtest.start.failedGeneric":
       "The server did not accept the run request. Check the run settings and the strategy document, then start again.",
-    "backtest.start.serverReason": "Server reason",
     "backtest.error.backtest.run.field_invalid":
       "The server rejected a run settings value. Fix the field named in the server reason, then start again.",
     "backtest.error.backtest.run.field_invalid.named":
@@ -3015,15 +3014,16 @@ export const messages = {
       "The saved revision changed in the meantime. Reopen the strategy, then start again.",
     "backtest.error.backtest.strategy.requires_upgrade": "A stored older-schema revision cannot run. Upgrade it and save a new revision first.",
     "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
-    "trace.error.trace.request.invalid": "The trace request is invalid: {detail}",
+    "trace.error.trace.request.invalid": "The trace request is invalid. See the server reason for the field.",
     "trace.error.trace.engine.incompatible":
       "The selected engine cannot trace this strategy. Choose another execution core.",
     "trace.error.trace.capability.unsupported":
-      "This strategy uses a capability tracing does not support yet: {detail}",
+      "This strategy uses a capability tracing does not support yet. See the server reason for which one.",
     "trace.error.trace.strategy.stale":
       "The edited document no longer matches the stored revision. Save it or reopen the stored revision.",
     "trace.error.trace.strategy.not_found": "The stored revision to trace was not found.",
     "trace.error.trace.cancelled": "The trace was cancelled.",
+    "trace.error.request": "The server could not process the trace request. Try again shortly.",
     "ide.meta.schemaVersion": "schema",
     "ide.meta.sourceHash": "source hash",
     "ide.meta.specHash": "spec hash",
@@ -3186,7 +3186,7 @@ export const messages = {
     "history.backtests.updated": "Last status",
     "history.backtests.open": "Open run",
     "problems.compileUnavailable":
-      "The validation server could not be reached, so this text is unverified. Try again shortly. ({detail})",
+      "The validation server could not be reached, so this text is unverified. Try again shortly.",
     "form.panel.label": "Form editing",
     "form.panel.notice": "Applied to the YAML source directly · undoable",
     "form.panel.enabled": "Editable",

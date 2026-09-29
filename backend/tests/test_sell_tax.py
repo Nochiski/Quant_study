@@ -12,9 +12,17 @@ import pytest
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
+from backtest_engine.types.actions import (
+    ExecutionPolicy,
+    SetPortfolioTarget,
+    TargetScope,
+    WeightTarget,
+)
 from backtest_engine.types.events import CostKind
+from backtest_engine.types.instruments import InstrumentId
 from backtest_engine.types.orders import Side
-from tests.test_core_parity import CORES
+from tests.conftest import day, make_instrument, make_ohlc
+from tests.test_core_parity import CORES, _TwoNameReplaceStrategy
 from tests.test_engine_golden import GOLDEN_BARS, ScriptedStrategy, liquidate, target_70pct
 
 
@@ -78,3 +86,53 @@ def test_unordered_or_negative_schedule_is_rejected(
 ) -> None:
     with pytest.raises(ValueError, match="sell_tax_schedule"):
         RunConfig(run_id="bad", initial_cash=1.0, sell_tax_schedule=schedule)
+
+
+_A, _B = make_instrument("005930"), make_instrument("000660")
+
+
+def _all_in(instrument: InstrumentId) -> SetPortfolioTarget:
+    return SetPortfolioTarget(
+        targets=(WeightTarget(instrument, 1.0),),
+        scope=TargetScope.REPLACE,
+        execution=ExecutionPolicy.market_next_open(),
+    )
+
+
+@pytest.mark.parametrize("core", CORES)
+def test_same_session_switch_buys_only_what_is_left_after_the_sell_tax(core: str) -> None:
+    """매도 대금으로 같은 세션에 100% 갈아타면, 매수는 세금을 뺀 여력만큼만 산다.
+
+    8/2 A 1000주 @100 매수(현금 0) → 8/3 A 1000주 @100 매도(대금 100,000, 세금 20bp = 200) →
+    같은 세션 B @50 매수. 여력 99,800 / 50 = 1996주. 세금을 여력에서 빼지 않으면 2000주를 사고
+    현금이 −200 이 된다.
+    """
+    bars = tuple(
+        bar
+        for session in (1, 2, 3, 4)
+        for bar in (
+            make_ohlc(day(session), _A, 100.0, 100.0, 100.0, 100.0, volume=100_000),
+            make_ohlc(day(session), _B, 50.0, 50.0, 50.0, 50.0, volume=100_000),
+        )
+    )
+    engine = BacktestEngine(
+        RunConfig(
+            run_id="switch",
+            initial_cash=100_000.0,
+            sell_tax_schedule=((date(2026, 8, 1), 20.0),),
+        ),
+        core=core,
+    )
+    engine.run(_TwoNameReplaceStrategy((_all_in(_A), _all_in(_B), None, None)), DataFeed(bars))
+    store = engine.event_store
+
+    assert [
+        (fill.instrument.symbol, fill.side, int(fill.quantity), fill.price)
+        for fill in store.fills()
+    ] == [
+        ("005930", Side.BUY, 1000, 100.0),
+        ("005930", Side.SELL, 1000, 100.0),
+        ("000660", Side.BUY, 1996, 50.0),
+    ]
+    assert [(cost.kind, cost.amount) for cost in store.costs()] == [(CostKind.SELL_TAX, 200.0)]
+    assert [snapshot.cash for snapshot in store.snapshots()][-1] == 0.0

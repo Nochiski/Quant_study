@@ -3,6 +3,7 @@ import {
   cleanup,
   fireEvent,
   render,
+  renderHook,
   screen,
   waitFor,
   within,
@@ -156,11 +157,17 @@ const schemaHandler = http.get(`${API}/api/v1/run-environments/schema`, () =>
   HttpResponse.json({ schema_hash: "h", schema: servedSchema }),
 );
 
-const Harness = ({ storageKey = "strategy-1" }: { storageKey?: string }) => {
+const Harness = ({
+  storageKey = "strategy-1",
+  request = null,
+}: {
+  storageKey?: string;
+  request?: BacktestRunSpec | null;
+}) => {
   const controller = useBacktestRunSettings(storageKey);
   return (
     <>
-      <BacktestRunSettings controller={controller} />
+      <BacktestRunSettings controller={controller} request={request} />
       <RunEnvironmentSummary controller={controller} />
       <output data-testid="request">
         {JSON.stringify(controller.requestOptions)}
@@ -819,6 +826,115 @@ describe("run environment panel", () => {
     ).toBeInTheDocument();
   });
 
+  // 검증 랩 V5-05: 새 시도인지는 backend 미리 계산이 판정하고, 패널은 실행 버튼이 보낼 요청 그대로 묻고 답만 옮긴다.
+  it.each([
+    [
+      "new_trial",
+      3,
+      4,
+      "결과가 나오면 새 시도로 셉니다. 계열 시도 수 3회 → 4회.",
+    ],
+    [
+      "recheck",
+      4,
+      4,
+      "이미 센 시도의 재확인이라 시도 수가 늘지 않습니다. 계열 시도 수 4회 그대로.",
+    ],
+    [
+      "no_lineage",
+      0,
+      0,
+      "저장한 적 없는 전략이라 이 실행은 시도 수에 들지 않습니다. 리비전을 저장한 뒤 실행하면 셉니다.",
+    ],
+  ] as const)(
+    "shows the backend trial verdict %s for the exact run request once the panel opens",
+    async (reason, count, after, sentence) => {
+      const asked: unknown[] = [];
+      server.use(
+        http.post(
+          `${API}/api/v1/backtests/trial-preview`,
+          async ({ request }) => {
+            asked.push(await request.json());
+            return HttpResponse.json({
+              lineage_id: reason === "no_lineage" ? null : "strategy-1",
+              trial_key: "k",
+              trial_count: count,
+              new_trial: reason === "new_trial",
+              trial_count_after: after,
+              reason,
+            });
+          },
+        ),
+      );
+      renderWithQuery(<Harness request={acceptedRequest} />);
+      // 패널을 열기 전에는 묻지 않는다 — 스키마 응답이 그려질 때까지 기다린 뒤에도 0건이다.
+      await screen.findByRole("button", { name: "실행 설정 채우기" });
+      expect(asked).toHaveLength(0);
+      await openSettings();
+
+      expect(
+        await screen.findByRole("status", { name: "시도 영향" }),
+      ).toHaveTextContent(sentence);
+      expect(asked).toEqual([acceptedRequest]);
+    },
+  );
+
+  // 교정은 연구 구간 거절이 연구 하한을 실었을 때만 있다 — 다른 거절이나 날짜 없는 detail 에 버튼을 만들지 않는다.
+  it("offers the start date fix only for a research window rejection that carries the research start", async () => {
+    const { result } = renderHook(() => useBacktestRunSettings("strategy-1"), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={new QueryClient()}>
+          {children}
+        </QueryClientProvider>
+      ),
+    });
+    const researchStart = { research_start: "2020-01-02" };
+
+    expect(
+      result.current.rejectionFix(
+        "backtest.run.research_window_violation",
+        researchStart,
+      )?.label,
+    ).toBe("시작일을 2020-01-02로");
+    expect(
+      result.current.rejectionFix(
+        "backtest.strategy.requires_upgrade",
+        researchStart,
+      ),
+    ).toBeNull();
+    expect(
+      result.current.rejectionFix("backtest.run.research_window_violation", {}),
+    ).toBeNull();
+    expect(result.current.rejectionFix(null, researchStart)).toBeNull();
+  });
+
+  // 봉인 겹침처럼 미리 계산이 거절되면 줄을 그리지 않는다 — 같은 거절은 실행 버튼이 이유·교정과 함께 보인다.
+  it("draws no trial line when the preview is rejected", async () => {
+    let asked = 0;
+    server.use(
+      http.post(`${API}/api/v1/backtests/trial-preview`, () => {
+        asked += 1;
+        return HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.research_window_violation",
+              message: "측정 시작일이 연구 구간 밖이라 실행할 수 없다",
+              sealed_start: "2016-01-01",
+              sealed_end: "2019-12-31",
+              research_start: "2020-01-02",
+            },
+          },
+          { status: 422 },
+        );
+      }),
+    );
+    renderWithQuery(<Harness request={acceptedRequest} />);
+    await openSettings();
+
+    await waitFor(() => expect(asked).toBe(1));
+    expect(screen.queryByRole("status", { name: "시도 영향" })).toBeNull();
+  });
+
   it("exposes every run option through accessible controls and reports invalid input", async () => {
     renderWithQuery(<Harness />);
     const user = await openSettings();
@@ -993,10 +1109,49 @@ describe("backtest run actions", () => {
     const alert = await screen.findByRole("alert");
     await waitFor(() =>
       expect(alert).toHaveTextContent(
-        "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+        "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
       ),
     );
     expect(alert).not.toHaveTextContent("{");
+  });
+
+  // #304: 결과 화면에는 실행 설정 패널이 없다 — 칸을 짚지 않은 거절도 고칠 곳(전략 편집기)을 말한다.
+  it("tells where to fix a rerun refused as an invalid request", async () => {
+    server.use(
+      http.post(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.invalid",
+              message:
+                "oos start must fall inside the run window — got=2017-01-02",
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderWithQuery(
+      <BacktestRunActions
+        runId="old-run"
+        status="completed"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "동일 설정 재실행" }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(alert).toHaveTextContent(
+        "동일 설정으로 다시 실행하지 못했습니다: 이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
+      ),
+    );
+    expect(within(alert).getByRole("group")).toHaveTextContent(
+      "oos start must fall inside the run window",
+    );
   });
 
   it("keeps navigation unchanged when a rerun fails with a server error", async () => {

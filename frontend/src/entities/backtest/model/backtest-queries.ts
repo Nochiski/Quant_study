@@ -1,5 +1,6 @@
 import {
   queryOptions,
+  skipToken,
   useMutation,
   useQuery,
   useQueryClient,
@@ -59,14 +60,34 @@ export const runEnvironmentSchemaQuery = () =>
 export const useRunEnvironmentSchema = () =>
   useQuery(runEnvironmentSchemaQuery());
 
+const trialPreviewKey = () => ["backtest", "trial-preview"] as const;
+
 export const useStartBacktest = () => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (spec: BacktestRunSpec) =>
       strategyWorkbenchApi.startBacktest(spec),
-    onSuccess: () => retireBacktestHistoryQueries(queryClient),
+    onSuccess: () => {
+      // 접수한 실행이 원장을 바꾸므로 캐시한 시도 판정은 옛 값이다 — 돌아와 패널을 열면 다시 묻는다.
+      queryClient.removeQueries({ queryKey: trialPreviewKey() });
+      return retireBacktestHistoryQueries(queryClient);
+    },
   });
 };
+
+/**
+ * 실행 전 미리 계산(검증 랩 spec D2). 새 시도인지·시도 수가 얼마가 되는지는 backend 가 판정하고 화면은 응답을
+ * 보이기만 한다. 거절(봉인 겹침 등)은 같은 요청이면 늘 같으므로 자동 재시도는 하지 않는다.
+ */
+export const useBacktestTrialPreview = (spec: BacktestRunSpec | null) =>
+  useQuery({
+    queryKey: [...trialPreviewKey(), spec],
+    queryFn:
+      spec === null
+        ? skipToken
+        : () => strategyWorkbenchApi.previewBacktestTrial(spec),
+    retry: false,
+  });
 
 export const useBacktestStatus = (runId: string | null) =>
   useQuery({

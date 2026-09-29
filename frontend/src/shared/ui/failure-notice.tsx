@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { t } from "../config";
 
 type FailureNoticeProps = {
@@ -8,6 +10,13 @@ type FailureNoticeProps = {
   /** 접힌 "서버 사유"에 둘 원문(`failureReason`). 없으면 상세를 그리지 않는다. */
   reason: string | null;
   className?: string;
+  /** 본문 아래에 둘 교정 동작(예: 연구 구간 거절의 "시작일을 …로" 버튼). */
+  children?: ReactNode;
+  /**
+   * 경고 알림(`role="alert"`)으로 읽힌다(기본). 목록 줄마다 붙은 지난 실패처럼 화면을 열 때 이미 있던 실패는
+   * `false` — 줄마다 경고로 읽히지 않는다(#304).
+   */
+  announce?: boolean;
 };
 
 /**
@@ -20,13 +29,18 @@ export const FailureNotice = ({
   message,
   reason,
   className,
+  children,
+  announce = true,
 }: FailureNoticeProps) => (
   <div
     className={["ui-failure", className].filter(Boolean).join(" ")}
-    role="alert"
-    aria-label={title}
+    role={announce ? "alert" : undefined}
+    aria-label={announce ? title : undefined}
   >
     {title === undefined ? message : `${title}: ${message}`}
+    {children === undefined ? null : (
+      <div className="ui-failure__actions">{children}</div>
+    )}
     {reason === null ? null : (
       <details className="ui-failure__reason">
         <summary>{t("ui.failure.serverReason")}</summary>

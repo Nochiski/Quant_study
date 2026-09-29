@@ -19,7 +19,10 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.domain.factor.facade.expression import EXPRESSION_NODE_KINDS
-from strategy_workbench.domain.strategy.facade.constraints import STRATEGY_SCALAR_CONSTRAINTS
+from strategy_workbench.domain.strategy.facade.constraints import (
+    STRATEGY_SCALAR_CONSTRAINTS,
+    AppliedStage,
+)
 from strategy_workbench.domain.strategy.facade.schema import (
     FieldContract,
     strategy_document_schema,
@@ -426,6 +429,80 @@ def test_factor_authoring_mapping_is_owned_by_the_runtime_schema() -> None:
         "direction": {"x-authoring-source": "preference"},
         "weight": {"x-authoring-default": 1.0},
         "graph": {"x-authoring-source": "default_graph"},
+    }
+
+
+def _stage_by_pointer(schema: dict[str, Any]) -> dict[str, str | None]:
+    """스칼라 계약 행 pointer → 그래프 표현 단계(프론트 파이프라인 투영과 같은 규칙).
+
+    필드 자신의 `x-stage`, 없으면 자기 제약 행의 적용 시점 `x-applied-stage`, 없으면 가장 가까운
+    조상 property 의 `x-stage` 다.
+    """
+
+    def objects(node: dict[str, Any]) -> list[dict[str, Any]]:
+        node = _resolve(schema, node)
+        options = node.get("anyOf", node.get("oneOf"))
+        return [node] if options is None else [o for option in options for o in objects(option)]
+
+    stages: dict[str, str | None] = {}
+    for row in strategy_field_contracts():
+        nodes, inherited, prop = [schema], None, {}
+        for segment in row.pointer.strip("/").split("/"):
+            expanded = [found for node in nodes for found in objects(node)]
+            if segment == "*":
+                nodes = [node["items"] for node in expanded if "items" in node]
+                continue
+            prop = next(n["properties"][segment] for n in expanded if segment in n["properties"])
+            inherited = prop.get("x-stage", inherited)
+            nodes = [prop]
+        stages[row.pointer] = prop.get("x-stage") or prop.get("x-applied-stage") or inherited
+    return stages
+
+
+def test_pipeline_stages_follow_where_each_field_is_applied() -> None:
+    """P4-01a: 그래프 1수준(파이프라인)이 필드를 보이는 단계 `x-stage`(리드 결정 2026-09-30).
+
+    섹션 5개가 단계를 정하고, 섹션과 적용 단계가 다른 필드만 따로 말한다 — 유동성 필터는 후보를
+    거를 때, 리스크 역가중 원천은 비중을 줄 때 쓰인다. 제약 행이 적용 시점을 이미 말하는 필드
+    (`minimum_liquidity`)는 다시 선언하지 않는다(같은 사실을 두 곳에 두지 않는다).
+    """
+    schema = strategy_document_schema()
+    declared = {
+        f"{path}/{name}": prop["x-stage"]
+        for path, node in [
+            ("", schema),
+            *[(f"#/$defs/{name}", definition) for name, definition in schema["$defs"].items()],
+        ]
+        for name, prop in node.get("properties", {}).items()
+        if "x-stage" in prop
+    }
+    assert declared == {
+        "/eligibility": "eligibility",
+        "/factors": "signal",
+        "/signal": "signal",
+        "/portfolio": "portfolio",
+        "/risk": "risk",
+        "#/$defs/PortfolioStep/liquidity_field_id": "eligibility",
+        "#/$defs/RiskStep/risk_field_id": "portfolio",
+        "#/$defs/RiskStep/risk_factor_id": "portfolio",
+    }
+    stages = _stage_by_pointer(schema)
+    assert set(stages.values()) - {None} <= {stage.value for stage in AppliedStage}
+    section = {
+        pointer: schema["properties"][pointer.split("/")[1]].get("x-stage") for pointer in stages
+    }
+    assert {pointer: stage for pointer, stage in stages.items() if stage != section[pointer]} == {
+        "/portfolio/liquidity_field_id": "eligibility",
+        "/portfolio/minimum_liquidity": "eligibility",
+        "/risk/risk_field_id": "portfolio",
+        "/risk/risk_factor_id": "portfolio",
+    }
+    # 문서 머리(버전·이름·설명)와 탐색 파라미터는 단계가 없다 — 배치는 P4-02·P4-04 가 정한다.
+    assert {pointer.split("/")[1] for pointer, stage in stages.items() if stage is None} == {
+        "schema_version",
+        "title",
+        "description",
+        "parameters",
     }
 
 

@@ -925,6 +925,86 @@ describe("App Shell routes", () => {
     );
   });
 
+  it("shows a failed run in the backtest history with the result screen's sentence", async () => {
+    // #304: 목록은 서버 원문(`error`)을 본문에 그대로 보였다. 결과 화면과 같은 규칙으로 번역을 본문에 두고
+    // 원문은 접힌 "서버 사유"에 둔다. 지난 실행이라 줄마다 경고로 읽히지 않는다.
+    const summary = backtestSummary({
+      runId: "run-wiped-out",
+      status: "failed",
+    });
+    server.use(
+      http.get(`${API}/api/v1/backtests`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              ...summary,
+              run: {
+                ...summary.run,
+                error:
+                  "EquityWipedOutError: session-end equity fell to or below zero — session=2021-03-02 equity=-1204.5",
+                error_code: "backtest.run.equity_wiped_out",
+              },
+            },
+          ],
+          total: 1,
+          offset: 0,
+          limit: 25,
+        }),
+      ),
+    );
+    mount("/research/backtests");
+    const row = (await screen.findByText("run-wiped-out")).closest("tr")!;
+    expect(row).toHaveTextContent(
+      "실행 오류: 세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식).",
+    );
+    const reason = within(row).getByRole("group");
+    expect(reason).toHaveTextContent("서버 사유");
+    expect(reason).not.toHaveAttribute("open");
+    expect(
+      row.textContent?.replace(reason.textContent ?? "", ""),
+    ).not.toContain("EquityWipedOutError");
+    expect(within(row).queryByRole("alert")).toBeNull();
+  });
+
+  it("tells to rerun when a completed run's result file cannot be read", async () => {
+    // #330: 결과 파일이 없거나 손상된 완료 run은 410 `backtest.result.unreadable`로 온다. 일반 문구 대신 다시
+    // 불러와도 소용없고 같은 설정으로 다시 실행하라고 말하며, 서버 사유는 접힌 상세에 둔다.
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "completed",
+          progress: 1,
+          stage: "completed",
+          message: "Run completed",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:01Z",
+        }),
+      ),
+      http.get(`${API}/api/v1/backtests/:runId/result`, ({ params }) =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.result.unreadable",
+              message: `run result file is missing — run_id=${String(params.runId)}`,
+            },
+          },
+          { status: 410 },
+        ),
+      ),
+    );
+    mount("/research/backtests/run-unreadable");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("이 실행의 결과 파일을 읽을 수 없습니다.");
+    expect(alert).toHaveTextContent(
+      "다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
+    );
+    expect(within(alert).getByRole("group")).toHaveTextContent(
+      "run result file is missing — run_id=run-unreadable",
+    );
+    expect(alert).not.toHaveTextContent("백테스트 결과를 불러올 수 없습니다");
+  });
+
   it("opens the settings route with the AI provider section from the shell", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests");

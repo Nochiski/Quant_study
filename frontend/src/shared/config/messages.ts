@@ -39,8 +39,9 @@ const ko = {
   "page.backtest.loadError": "백테스트 상태를 불러올 수 없습니다.",
   "page.backtest.status": "실행 상태",
   "page.backtest.progress": "실행 진행",
-  "page.backtest.runError": "실행 오류",
-  "page.backtest.cancelledError": "취소 전 발생한 오류",
+  // run 실패 한 줄(`entities/backtest` 의 `BacktestRunFailure`)의 제목. 결과 화면과 백테스트 이력이 함께 쓴다(#304).
+  "backtest.run.failed": "실행 오류",
+  "backtest.run.failedBeforeCancel": "취소 전 발생한 오류",
   // run 상태 `error_code` 번역 — 어휘 SoT 는 backend `RunFailureCode`(이슈 #158). 시작 거절의
   // `backtest.error.*` 와 namespace 를 나눈다: 같은 코드(`backtest.run.invalid` 등)라도 시작 거절은 실행 전에
   // 고칠 것을, run 실패는 실행 중에 난 일을 말한다.
@@ -81,6 +82,11 @@ const ko = {
   "runEnvironment.summary.fill": "실행 설정 채우기",
   "runEnvironment.summary.fix": "실행 설정 고치기",
   "runEnvironment.summary.outside": "전략 문서 밖의 값입니다. 바꿔도 전략 버전은 그대로입니다.",
+  "runEnvironment.fix.researchStart": "시작일을 {research_start}로",
+  "backtest.trial.label": "시도 영향",
+  "backtest.trial.new_trial": "결과가 나오면 새 시도로 셉니다. 계열 시도 수 {count}회 → {after}회.",
+  "backtest.trial.recheck": "이미 센 시도의 재확인이라 시도 수가 늘지 않습니다. 계열 시도 수 {count}회 그대로.",
+  "backtest.trial.no_lineage": "저장한 적 없는 전략이라 이 실행은 시도 수에 들지 않습니다. 리비전을 저장한 뒤 실행하면 셉니다.",
   "backtest.settings.core": "실행 core",
   "backtest.settings.core.rust": "Persistent Rust",
   "backtest.settings.core.python": "Python reference",
@@ -470,7 +476,6 @@ const ko = {
   "page.error.retry": "다시 시도",
   "page.revision.viewPending":
     "이 표현은 아직 제공되지 않아 소스 편집기를 표시합니다",
-  "page.backtest.resultError": "백테스트 결과를 불러올 수 없습니다.",
   "nav.backtests": "백테스트",
   "nav.experiments": "실험",
   "nav.realtime": "실시간",
@@ -1307,11 +1312,11 @@ const ko = {
   "backtest.error.backtest.run.field_invalid.named":
     "서버가 실행 설정의 {field} 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
   "backtest.error.backtest.run.invalid":
-    "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
+    "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
   "backtest.error.backtest.run.environment_required":
     "실행 설정이 없습니다. 실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
   "backtest.error.backtest.run.research_window_violation":
-    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 시작일을 {research_start} 이후로 옮긴 뒤 다시 시작하세요.",
+    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 {research_start} 이후로 옮긴 뒤 다시 시작하세요.",
   "backtest.error.backtest.run.parameter_invalid":
     "전략 파라미터 {parameter_id}의 값을 쓸 수 없습니다. 문서에 선언된 파라미터인지, 값이 그 범위·선택지 안인지 확인한 뒤 다시 시작하세요.",
   "backtest.error.portfolio.strategy.invalid":
@@ -1321,6 +1326,15 @@ const ko = {
   "backtest.error.backtest.strategy.stale":
     "저장된 revision이 그사이 바뀌었습니다. 전략을 다시 연 뒤 시작하세요.",
   "backtest.error.backtest.strategy.requires_upgrade": "저장된 이전 schema revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  // 결과 조회 실패(`getBacktestResult` 404·409·410)의 코드별 문장. 결과 화면이 보이고, 코드 목록은 같은 계약
+  // 테스트가 `openapi.json` 과 대조한다(#330). 코드가 없거나 번역이 없으면 일반 문장이다.
+  "backtest.result.failedGeneric": "백테스트 결과를 불러올 수 없습니다.",
+  "backtest.error.backtest.run.not_found":
+    "이 실행을 찾을 수 없습니다. 백테스트 이력에서 다시 여세요.",
+  "backtest.error.backtest.result.not_ready":
+    "이 실행은 아직 결과가 없습니다. 실행이 끝난 뒤 다시 여세요.",
+  "backtest.error.backtest.result.unreadable":
+    "이 실행의 결과 파일을 읽을 수 없습니다. 파일이 없어졌거나 손상됐거나, 결과 형식이 바뀌기 전의 옛 결과일 수 있습니다. 다시 불러와도 같으니 같은 설정으로 다시 실행하세요.",
   // 계열 합치기 거절(검증 랩 V1-05). 화면은 V5-03 이 붙인다.
   "backtest.error.backtest.lineage.already_merged":
     "두 전략은 이미 같은 시도 계열입니다. 합칠 것이 없습니다.",
@@ -1784,8 +1798,8 @@ export const messages = {
     "page.backtest.loadError": "The backtest status could not be loaded.",
     "page.backtest.status": "Run status",
     "page.backtest.progress": "Run progress",
-    "page.backtest.runError": "Run error",
-    "page.backtest.cancelledError": "Error before cancellation",
+    "backtest.run.failed": "Run error",
+    "backtest.run.failedBeforeCancel": "Error before cancellation",
     "backtest.run.error.portfolio.data.unavailable":
       "The data source could not serve observations for this universe and period. Check the universe id and data range.",
     "backtest.run.error.portfolio.raw_observation.invalid":
@@ -1823,6 +1837,11 @@ export const messages = {
     "runEnvironment.summary.fill": "Fill the run settings",
     "runEnvironment.summary.fix": "Fix the run settings",
     "runEnvironment.summary.outside": "These values live outside the strategy document; changing them keeps the strategy version.",
+    "runEnvironment.fix.researchStart": "Move the start date to {research_start}",
+    "backtest.trial.label": "Trial impact",
+    "backtest.trial.new_trial": "If this run produces a result it counts as a new trial. Lineage trials {count} → {after}.",
+    "backtest.trial.recheck": "This rechecks a trial already counted, so the count does not grow. Lineage trials stay at {count}.",
+    "backtest.trial.no_lineage": "This strategy has never been saved, so this run does not count as a trial. Save a revision and run it to count.",
     "backtest.settings.core": "Execution core",
     "backtest.settings.core.rust": "Persistent Rust",
     "backtest.settings.core.python": "Python reference",
@@ -2213,7 +2232,6 @@ export const messages = {
     "page.error.retry": "Retry",
     "page.revision.viewPending":
       "This view is not available yet; showing the source editor",
-    "page.backtest.resultError": "The backtest result could not be loaded.",
     "nav.backtests": "Backtests",
     "nav.experiments": "Experiments",
     "nav.realtime": "Live",
@@ -3071,11 +3089,11 @@ export const messages = {
     "backtest.error.backtest.run.field_invalid.named":
       "The server rejected the {field} run setting. Fix that field in the strategy editor's run settings, then start again.",
     "backtest.error.backtest.run.invalid":
-      "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy.",
+      "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy in the strategy editor.",
     "backtest.error.backtest.run.environment_required":
       "There are no run settings. Fill the start date, end date and universe in the run settings.",
     "backtest.error.backtest.run.research_window_violation":
-      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. Move the start date to {research_start} or later, then start again.",
+      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. In the strategy editor's run settings, move the start date to {research_start} or later, then start again.",
     "backtest.error.backtest.run.parameter_invalid":
       "The value for strategy parameter {parameter_id} cannot be used. Check that the document declares the parameter and that the value is within its range or choices, then start again.",
     "backtest.error.portfolio.strategy.invalid":
@@ -3085,6 +3103,13 @@ export const messages = {
     "backtest.error.backtest.strategy.stale":
       "The saved revision changed in the meantime. Reopen the strategy, then start again.",
     "backtest.error.backtest.strategy.requires_upgrade": "A stored older-schema revision cannot run. Upgrade it and save a new revision first.",
+    "backtest.result.failedGeneric": "The backtest result could not be loaded.",
+    "backtest.error.backtest.run.not_found":
+      "This run was not found. Open it again from the backtest history.",
+    "backtest.error.backtest.result.not_ready":
+      "This run has no result yet. Open it again after the run finishes.",
+    "backtest.error.backtest.result.unreadable":
+      "This run's result file cannot be read. The file may be missing or damaged, or it is an old result saved before the result format changed. Loading it again will not help; run it again with the same settings.",
     "backtest.error.backtest.lineage.already_merged":
       "The two strategies are already one trial lineage. There is nothing to merge.",
     "backtest.error.experiment.base.unsaved":

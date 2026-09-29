@@ -405,9 +405,11 @@ export const StrategyRevisionPage = () => {
               <BacktestRunSettings
                 controller={runSettings}
                 disabled={backtest.status.kind === "starting"}
+                request={backtest.request}
               />
             }
             runFieldLabel={runSettings.runFieldLabel}
+            runRejectionFix={runSettings.rejectionFix}
             decision={backtest.decision}
             runStatus={backtest.status}
           />

@@ -46,7 +46,7 @@ class MetricUnavailableReason(StrEnum):
     NO_CLOSED_TRADES = "no_closed_trades"
     NO_LOSING_CLOSED_TRADE = "no_losing_closed_trade"
     NO_OBSERVATIONS_IN_SCOPE = "no_observations_in_scope"
-    EQUITY_DEPLETED = "equity_depleted"
+    NEGATIVE_EQUITY = "negative_equity"
     PERIOD_UNDER_ONE_YEAR = "period_under_one_year"
 
 

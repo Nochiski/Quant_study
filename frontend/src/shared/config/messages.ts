@@ -198,8 +198,8 @@ const ko = {
     "손실로 청산된 거래가 없어 계산할 수 없습니다",
   "backtest.metricUnavailable.no_observations_in_scope":
     "이 구간에 관측이 없어 계산할 수 없습니다",
-  "backtest.metricUnavailable.equity_depleted":
-    "자산을 모두 잃어 계산할 수 없습니다",
+  "backtest.metricUnavailable.negative_equity":
+    "자산이 0보다 작아져 계산할 수 없습니다",
   "backtest.metricUnavailable.period_under_one_year":
     "기간이 1년보다 짧아 연율로 바꾸지 않습니다",
   "backtest.result.metricUnavailable.explain": "데이터 경고에서 이유 보기",
@@ -1879,8 +1879,8 @@ export const messages = {
       "No trade closed at a loss, so this cannot be computed",
     "backtest.metricUnavailable.no_observations_in_scope":
       "This window has no observations, so this cannot be computed",
-    "backtest.metricUnavailable.equity_depleted":
-      "All equity was lost, so this cannot be computed",
+    "backtest.metricUnavailable.negative_equity":
+      "Equity fell below zero, so this cannot be computed",
     "backtest.metricUnavailable.period_under_one_year":
       "The period is shorter than a year, so it is not annualized",
     "backtest.result.metricUnavailable.explain": "See why in data warnings",

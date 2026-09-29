@@ -68,12 +68,13 @@ def compute_analytics(
     returns = _returns(anchored_equity)
     total_return = equity[-1] / anchored_equity[0] - 1.0
     years = (points[-1].session - anchored[0].session).days / _DAYS_PER_YEAR
-    # 전액 손실은 연율로 바꿀 수 없고 1년 미만은 연율화하지 않는다(GIPS). 칼마도 같은 사유로 빈다.
+    # 1년 미만은 연율화하지 않는다(GIPS). 자산이 음수로 끝나면 음수의 거듭제곱근이라 CAGR 이 없다.
+    # 정확히 0 으로 끝나면 CAGR 은 -100% 다. 칼마도 같은 사유로 빈다.
     cagr_reason = (
-        MetricUnavailableReason.EQUITY_DEPLETED
-        if total_return <= -1.0
-        else MetricUnavailableReason.PERIOD_UNDER_ONE_YEAR
+        MetricUnavailableReason.PERIOD_UNDER_ONE_YEAR
         if years < 1.0
+        else MetricUnavailableReason.NEGATIVE_EQUITY
+        if total_return < -1.0
         else None
     )
     cagr = (1.0 + total_return) ** (1.0 / years) - 1.0 if cagr_reason is None else None

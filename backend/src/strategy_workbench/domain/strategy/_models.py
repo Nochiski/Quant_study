@@ -100,6 +100,17 @@ class RebalanceFrequency(StrEnum):
     QUARTERLY = "quarterly"
 
 
+class AppliedStage(StrEnum):
+    # `DATA`·`EXECUTION` 은 실행 설정(`domain/backtest`)이 자기 제약 행에 붙이는 단계다.
+    # 전략 문서에는 1.2 부터 해당 행이 없다.
+    DATA = "data"
+    ELIGIBILITY = "eligibility"
+    SIGNAL = "signal"
+    PORTFOLIO = "portfolio"
+    RISK = "risk"
+    EXECUTION = "execution"
+
+
 @dataclass(frozen=True)
 class StrategyIdentity:
     strategy_id: str

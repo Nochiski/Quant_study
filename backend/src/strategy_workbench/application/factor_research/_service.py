@@ -150,6 +150,8 @@ class FactorResearchService:
             raise InvalidFactorRequestError(validation)
         # 연구 구간 잠금(spec D1): 미리보기는 측정이라 봉인 구간을 읽기 전에 거절한다. 이 경로의
         # 기존 422(`factor.graph.invalid`) 진단 안에 `run_environment.*` 코드를 그대로 싣는다.
+        # 이 코드는 그래프 진단 게이트(`FACTOR_GRAPH_CODES`) 밖의 요청 진단이라 그래프는 유효해도
+        # `valid=False`가 된다.
         try:
             require_research_window(request.as_of_start, requested_by="factor.preview")
         except ResearchWindowViolationError as error:

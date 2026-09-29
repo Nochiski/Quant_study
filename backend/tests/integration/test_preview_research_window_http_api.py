@@ -17,9 +17,20 @@ from strategy_workbench.bootstrap.facade.http import build_http_app
 
 _END = "2024-01-04"
 _QUERY = {"end": _END, "security_ids": ["sec-005930-1"], "field_ids": ["price.close"]}
+# 창 연산(window 3)을 둬 워밍업 세션이 있는 그래프로 잰다: 허용 케이스가 연구 하한 직전 관측을
+# 워밍업으로 읽어도 막히지 않는지(spec D1 "워밍업 읽기는 측정 아님")를 함께 고정한다.
 _GRAPH = {
-    "nodes": [{"node_id": "close", "field_id": "price.close", "kind": "field"}],
-    "output_node_id": "close",
+    "nodes": [
+        {"node_id": "close", "field_id": "price.close", "kind": "field"},
+        {
+            "node_id": "mom",
+            "operator": "momentum",
+            "input_node_id": "close",
+            "window": 3,
+            "kind": "time_series",
+        },
+    ],
+    "output_node_id": "mom",
 }
 
 

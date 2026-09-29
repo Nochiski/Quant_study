@@ -834,7 +834,8 @@ PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`(#259). P3-03 에 �
   카드에 붙는다(조건이 둘 이상이면 같은 단계 안의 첫 조건). 묶음의 정본은 backend 적용 조건표다.
 - 요약 문장은 백분율을 쓰지 않는다(아래 예시의 "60%·40%" 포함 — 합성 분모와 역가중 제외 규칙의 복제다). 필드별
   i18n 조각(`<x-description-key>.summary`, enum 은 `<stem>.value.<값>.summary`)을 단계 틀로 잇고, 팩터는
-  이름(가중치가 서로 다를 때만 원값)으로 보인다. 역가중 제외 팩터는 compile 진단
+  선호 방향을 붙인 이름("낮은 PBR·높은 ROE", 가중치가 서로 다를 때만 원값)으로 보인다(방향은 #367 리뷰
+  P2-1 로 넓힘). 역가중 제외 팩터는 compile 진단
   `strategy.risk.risk_factor_excluded` 로 안다. 비율 표시는 `contract-inspector.ts` 의 `displayValue` 를
   공용으로 옮겨 쓴다.
 - 단계가 없는 섹션(`title`·`description`·`parameters`)은 투영이 따로 내고, 배치는 P4-02·P4-04 가 정한다.

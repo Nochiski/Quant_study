@@ -81,7 +81,9 @@ ADR D8은 완료 정의를 "전략 정의는 문서로 작성하되 … 대상 �
 - 체인 판정 규칙(정본): 소스 노드 하나로 시작해 각 노드가 직전 노드만 참조하고 `output_node_id`가
   마지막 노드이면 체인이다. 다중 입력 노드는 **한 입력이 체인 꼬리이고 나머지 입력이 전부 체인
   밖 잎일 때만** 체인으로 본다. 잎은 입력이 없는 소스 노드(`field`·`constant`·`parameter`)이고
-  체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다.
+  체인 단계로 세지 않는다. `conditional`처럼 입력이 셋인 노드도 같은 규칙을 쓴다. 순서는 `graph.nodes`의
+  문서 순서다: 머리는 첫 노드이고, 잎이 아닌 노드가 문서 순서대로 단계다(backend fixture 검사와 같은 해석,
+  리드 결정 2026-09-30).
 - 아이디어 3(20일 이평 돌파)의 정본 노드 형태는 노드 4개(그중 잎 2개: `adj_close`·`adj_close_2`)다:
   `adj_close`(field `price.adj_close`) →
   `mean`(time_series mean, window 20, input `adj_close`) → 잎 `adj_close_2`(field `price.adj_close`) →

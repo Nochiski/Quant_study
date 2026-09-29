@@ -1047,7 +1047,10 @@ describe("StrategyDebugger", () => {
     );
 
     const laterPeriod = context();
-    laterPeriod.environment = { ...laterPeriod.environment, start: "2025-06-02" };
+    laterPeriod.environment = {
+      ...laterPeriod.environment,
+      start: "2025-06-02",
+    };
     view.rerender(
       <StrategyDebugger
         {...props(laterPeriod)}

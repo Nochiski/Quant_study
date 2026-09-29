@@ -1,0 +1,102 @@
+{
+ "score_date": "2026-09-28",
+ "source_db": "data/compat/quant_20260928.db",
+ "universe_rule": "stocks.market_cap IS NOT NULL (compat --model-universe estimates)",
+ "n_universe": 619,
+ "tables": {
+  "stocks": {
+   "rows": 619,
+   "bytes": 14199
+  },
+  "daily_prices": {
+   "rows": 222758,
+   "bytes": 3731821
+  },
+  "investor_detail_flows": {
+   "rows": 24141,
+   "bytes": 445271
+  },
+  "financial_summary": {
+   "rows": 6220,
+   "bytes": 329912
+  },
+  "consensus_annual": {
+   "rows": 4326,
+   "bytes": 133344
+  },
+  "consensus_revision_daily": {
+   "rows": 619,
+   "bytes": 24843
+  },
+  "consensus_revision_compare": {
+   "rows": 619,
+   "bytes": 84977
+  },
+  "score_history": {
+   "rows": 579,
+   "bytes": 140787
+  },
+  "score_history_v2": {
+   "rows": 619,
+   "bytes": 81826
+  }
+ },
+ "v3_scoring_config": {
+  "min_market_cap": 1000,
+  "factors": {
+   "momentum": {
+    "weight": 0.3,
+    "sub_weights": {
+     "r1m": 0.35,
+     "r3m": 0.25,
+     "r6m": 0.2,
+     "r9m": 0.12,
+     "r12m": 0.08
+    }
+   },
+   "revision": {
+    "weight": 0.3,
+    "metrics": {
+     "operating_profit": 0.4,
+     "net_income": 0.6
+    },
+    "periods": {
+     "1w": 0.25,
+     "1m": 0.45,
+     "3m": 0.3
+    }
+   },
+   "flow": {
+    "weight": 0.2,
+    "sub_weights": {
+     "inst_5d": 0.25,
+     "inst_20d": 0.15,
+     "for_5d": 0.25,
+     "for_20d": 0.15,
+     "pe_5d": 0.1,
+     "pe_20d": 0.1
+    }
+   },
+   "quality": {
+    "weight": 0.1,
+    "sub_weights": {
+     "gpa": 0.2,
+     "roa": 0.15,
+     "fcf_assets": 0.15,
+     "debt_ratio": 0.15,
+     "gpa_change": 0.15,
+     "std_20d": 0.2
+    }
+   },
+   "valuation": {
+    "weight": 0.1,
+    "sub_weights": {
+     "per": 0.3,
+     "pbr": 0.3,
+     "ev_ebitda": 0.25,
+     "dividend_yield": 0.15
+    }
+   }
+  }
+ }
+}

@@ -143,6 +143,12 @@
   30%)으로 줄어 핵심 숫자가 틀렸다. mock 데이터는 종목마다 섹터가 있어 브라우저 e2e는 이 경로를
   밟지 않는다. 경고와 비중은 backend 통합 테스트
   (`test_unknown_sectors_keep_the_full_book_and_warn_in_preview_trace_and_run`)가 확인한다.
+- 비고: 실데이터에서 원장이 계수를 내지 못한 층 이동(감자 등 `krx_base_inconsistent`)이 있는 종목을
+  들고 있으면, 적용일 KRX 기준가 비로 보유 수량을 조정하고 "Manifest · 데이터 경고 · 재현성 정보"에
+  사건마다 `equity.unfolded_level_shift` 경고가 뜬다(이슈 #369). 전에는 사건 없이 원주가만 나가 그 종목
+  손익이 층 배수만큼(실원장 최대 ×46.8) 튀었다. mock 데이터에는 층 이동이 없어 브라우저 e2e는 이 경로를
+  밟지 않는다. backend `tests/test_adapters_equity_duckdb.py`·`tests/contract/test_backtest_data_port.py`가
+  확인한다.
 - 비고: 백테스트·추적 전에 실행 설정 패널에서 기간과 유니버스를 정한다(US-DM-05).
 
 ### US-DM-05 기간·유니버스·수수료·슬리피지를 전략 밖 실행 설정에서 정한다

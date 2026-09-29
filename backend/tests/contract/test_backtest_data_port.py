@@ -4,12 +4,17 @@
 green 인 실행이 실데이터에서만 다르게 돌지 않도록, 두 어댑터가 (1) 워밍업을 요청하지 않으면 워밍업
 bar 가 없고 (2) 요청하면 start 앞 거래일의 bar 만 따로 답하며 측정 구간 bar·경고는 그대로이고
 (3) 모든 bar 에 원화 거래대금을 싣는지 대조한다.
+
+#369: 엔진은 원주가 × 보유 수량으로 평가하므로 bar 사이 원주가 층 배수는 수량을 바꾸는 사건이
+설명해야 한다. 원장이 계수를 못 낸 층 이동도 그렇다(mock 에는 층 이동이 없다).
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from datetime import date
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -82,3 +87,38 @@ def test_warmup_bars_are_answered_apart_and_leave_the_window_unchanged(
         bar.trading_value is not None and bar.trading_value > 0
         for bar in (*warmed.history_bars, *warmed.bars)
     )
+
+
+# duckdb 픽스처의 035420 은 01-11 에 원장이 계수를 못 낸 ×10 층 이동
+# (`krx_base_inconsistent`)이 있다.
+LEVEL_CASES = [
+    CASES[0],
+    pytest.param(
+        "equity_duckdb", date(2024, 1, 10), date(2024, 1, 12), ("035420:1",), id="equity_duckdb"
+    ),
+]
+
+
+@pytest.mark.parametrize(("name", "start", "end", "security_ids"), LEVEL_CASES)
+def test_level_shifts_between_bars_are_carried_by_share_actions(
+    request: pytest.FixtureRequest,
+    name: str,
+    start: date,
+    end: date,
+    security_ids: tuple[str, ...],
+) -> None:
+    dataset = _adapter(request, name).load_backtest_dataset(
+        BacktestDataQuery(start, end, security_ids, None)
+    )
+    for security_id in security_ids:
+        bars = [bar for bar in dataset.bars if bar.security_id == security_id]
+        assert len(bars) > 1
+        for before, after in pairwise(bars):
+            shares = math.prod(
+                float(action.ratio)
+                for action in dataset.corporate_actions
+                if action.security_id == security_id
+                and before.session < action.session <= after.session
+            )
+            # 픽스처 bar 는 이웃 세션이라 KRX 가격제한폭(±30%) 밖 배수는 층 이동뿐이다
+            assert 0.7 < after.close * shares / before.close < 1.3, (security_id, after.session)

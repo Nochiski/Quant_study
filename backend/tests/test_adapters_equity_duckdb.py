@@ -1126,6 +1126,64 @@ def test_backtest_dataset_drops_actions_after_the_last_bar_with_a_warning(
     assert all(_HANGUL.search(item.message) for item in dataset.warnings)
 
 
+def test_backtest_dataset_adjusts_an_unfolded_level_shift_by_the_base_price_ratio(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """원장이 계수를 못 낸 층 이동(`krx_base_inconsistent`)은 적용일 KRX 기준가 비로 수량을
+    바꾼다(#369).
+
+    엔진은 원주가 × 보유 수량으로 평가해, 사건 없이 bar 만 내면 층 배수가 곧 손익이다(실원장
+    025560 2020-06-11 종가 79 → 07-02 종가 3,700, ×46.8). 035420 은 01-11 기준가가 앞 종가의
+    10배다. 손계산: 01-10 종가 205,000 에 100주(2,050만 원) → 비 205,000 ÷ 2,050,000 = 0.1 로
+    10주 → 01-11 종가 2,055,000 에 2,055만 원(+0.24%). 조정이 없으면 100주 × 2,055,000 =
+    2억 550만 원(×10.02)이다.
+    """
+    before_shift = date(2024, 1, 10)
+    dataset = adapter.load_backtest_dataset(
+        BacktestDataQuery(before_shift, END, ("035420:1",), None)
+    )
+    shift = replace(
+        dataset.corporate_actions[0],
+        session=WB_INCONSISTENT,
+        security_id="035420:1",
+        action_type="reverse_split",
+        ratio="0.1",
+        detail="원장 미접힘·기준가 비 prev_close=205000 base=2050000",
+    )
+    assert dataset.corporate_actions == (shift,)
+    closes = {bar.session: bar.close for bar in dataset.bars}
+    held = 100 * float(shift.ratio)
+    assert held == 10
+    assert held * closes[WB_INCONSISTENT] / (100 * closes[before_shift]) - 1 == pytest.approx(
+        50_000 / 20_500_000
+    )
+    [warning] = [w for w in dataset.warnings if w.code == "equity.unfolded_level_shift"]
+    assert warning.severity is WarningSeverity.WARNING
+    assert "035420:1@2024-01-11 ratio=0.1 prev_close=205000 base=2050000" in warning.message
+    assert _HANGUL.search(warning.message)
+    # 워밍업 창의 층 이동은 충격 σ 만 읽는 사건이다 — 엔진 사건도 경고도 아니다
+    warmed = adapter.load_backtest_dataset(
+        BacktestDataQuery(END, END, ("035420:1",), None, history_sessions_before_start=2)
+    )
+    assert (warmed.corporate_actions, warmed.history_corporate_actions) == ((), (shift,))
+    assert "equity.unfolded_level_shift" not in {w.code for w in warmed.warnings}
+
+
+def test_backtest_dataset_warns_without_adjusting_when_the_base_price_is_missing(
+    tmp_path: Path,
+) -> None:
+    """기준가가 비어 비를 세울 수 없는 층 이동은 수량을 조정하지 않고 경고만 남긴다(#369) — 비를
+    지어내지 않는다. 실원장 2020-03-19 이후에는 이런 사건이 없다."""
+    root = build_workbench_root(tmp_path / "equity", level_shift_base=False)
+    dataset = EquityDuckdbAdapter(root).load_backtest_dataset(
+        BacktestDataQuery(date(2024, 1, 10), END, ("035420:1",), None)
+    )
+    assert dataset.corporate_actions == ()
+    [warning] = [w for w in dataset.warnings if w.code == "equity.unfolded_level_shift"]
+    assert "조정하지 않았다" in warning.message
+    assert "035420:1@2024-01-11 prev_close=205000 base=None" in warning.message
+
+
 def test_backtest_dataset_counts_provisional_evening_rows_apart_from_invalid_ones(
     tmp_path: Path,
 ) -> None:
@@ -1241,6 +1299,11 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
             code in r.getMessage() and "ledger_sync catalog" in r.getMessage()
             for r in caplog.records
         ), code
+        # 백테스트는 원장이 접지 못한 층 이동을 카탈로그 뷰로만 읽는다 — 표로 돌아가 술어를 다시
+        # 적지 않고 멈춘다(#369)
+        with pytest.raises(EquityDuckdbSetupError, match=code) as stopped:
+            adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("005930:1",), None))
+        assert str(root.resolve()) not in str(stopped.value)
     # 원장 판은 meta 가 아니라 MANIFEST 에서 온다
     assert adapter.snapshot().snapshot_id.startswith(
         snapshot_id(table_builds(root)) + SNAPSHOT_CONTRACT_SEPARATOR
@@ -1487,16 +1550,19 @@ def test_catalog_locked_by_another_process_stops_boot_with_a_coded_error(tmp_pat
 
 
 def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) -> None:
-    """부팅 뒤 카탈로그가 잠겨도 매크로를 안 읽는 질의(원주가·유니버스·백테스트 bar)는 돈다 (#278).
+    """부팅 뒤 카탈로그가 잠겨도 매크로를 안 읽는 질의(원주가·유니버스)는 돈다 (#278).
 
     예전에는 질의마다 카탈로그를 열어, 잠긴 동안 가격 질의까지 원시 `IOException` 으로 죽었다.
-    매크로 원천(재무) 질의는 잠금이 풀릴 때까지 실패한다 — 빈 결과로 넘어가지 않는다.
+    매크로 원천(재무) 질의는 잠금이 풀릴 때까지 실패한다 — 빈 결과로 넘어가지 않는다. 백테스트
+    데이터도 원장이 접지 못한 층 이동을 카탈로그 뷰로 읽어(#369) 같이 실패한다 — 사건 없이 bar 만
+    내면 그 종목 손익이 층 배수만큼 튄다.
     """
     import duckdb
 
     root = build_workbench_root(tmp_path / "equity")
     booted = EquityDuckdbAdapter(root)
     fin = ("financial.book_equity",)
+    backtest = BacktestDataQuery(START, END, ("005930:1",), None)
     with subprocess.Popen(
         [sys.executable, "-c", _HOLD_CATALOG_FOR_WRITE, str(root / "equity.duckdb")],
         stdout=subprocess.PIPE,
@@ -1506,16 +1572,15 @@ def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) 
             assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
             assert _raw(booted, fields=("price.close",)).ok  # 표 원천만 읽는 격자
             assert booted.load_universe(UniverseHistoryQuery("XKRX", START, END)).ok
-            dataset = booted.load_backtest_dataset(
-                BacktestDataQuery(START, END, ("005930:1",), None)
-            )
-            assert dataset.bars
             locked = "|".join(re.escape(marker) for marker in _LOCK_CONFLICT_MARKERS)
             with pytest.raises(duckdb.IOException, match=locked):
                 _raw(booted, fields=fin)
+            with pytest.raises(duckdb.IOException, match=locked):
+                booted.load_backtest_dataset(backtest)
         finally:
             holder.kill()  # 나가면서 `Popen` 이 파이프를 닫고 종료를 기다린다
     assert _raw(booted, fields=fin).ok  # 잠금이 풀리면 다시 읽는다
+    assert booted.load_backtest_dataset(backtest).bars
 
 
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:

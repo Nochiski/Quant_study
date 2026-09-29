@@ -3,7 +3,7 @@
 > 작성: 2026-09-03
 >
 > 상태(2026-09-28): M0~M5 완료, M6·M7·M10 미착수, M8·M9는 일부 항목만 완료. 이 로드맵의
-> 하위 initiative 네 개 중 셋이 끝났고 schema 1.2·그래프 표현이 진행 중이다(P3-03 차례).
+> 하위 initiative 다섯 개 중 셋이 끝났고 schema 1.2·그래프 표현(P3-03 차례)과 검증 랩이 진행 중이다.
 >
 > 체크리스트: 150개 중 83개 완료, 67개 남음
 >
@@ -19,6 +19,8 @@
 >   [ai-assistant/PLAN.md](../../planning/ai-assistant/PLAN.md)
 > - schema 1.2·그래프 표현(진행 중, 30 PR 중 19 머지):
 >   [strategy-language-2-0/PLAN.md](../../planning/strategy-language-2-0/PLAN.md)
+> - 검증 랩(M6·M7 구체화, 시작 2026-09-29, 28 PR):
+>   [validation-lab/PLAN.md](../../planning/validation-lab/PLAN.md) · [설계 spec](./2026-09-29-validation-lab-design.md)
 >
 > 진행 규칙: 구현·테스트·문서가 모두 끝난 항목만 `[x]`. 각 M 완료 시 이 머리말과 완료 기록을 갱신한다.
 

@@ -1,4 +1,8 @@
-from strategy_workbench.domain.backtest._canonical import backtest_run_fingerprint
+from strategy_workbench.domain.backtest._canonical import (
+    ENGINE_RULES_VERSION,
+    backtest_run_fingerprint,
+    run_input_key,
+)
 from strategy_workbench.domain.backtest._models import (
     RUN_FAILURE_CODES,
     BacktestRunResult,
@@ -32,6 +36,7 @@ from strategy_workbench.domain.strategy.facade.provenance import (
 )
 
 __all__ = [
+    "ENGINE_RULES_VERSION",
     "BacktestRunResult",
     "BacktestRunSpec",
     "RUN_FAILURE_CODES",
@@ -60,4 +65,5 @@ __all__ = [
     "RunStatus",
     "WarningSeverity",
     "backtest_run_fingerprint",
+    "run_input_key",
 ]

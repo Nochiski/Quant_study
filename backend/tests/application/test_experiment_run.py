@@ -6,7 +6,7 @@ trial 실행은 가짜 `TrialRunPort` 로 받는다 — 유스케이스가 실�
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -82,8 +82,9 @@ class _FakeRuns:
     def __init__(self) -> None:
         self.started: list[BacktestRunSpec] = []
         self.keys: list[str] = []
-        self.statuses: dict[str, RunStatus] = {}
-        self.cancelled: list[str] = []
+        self.run_statuses: dict[str, RunStatus] = {}
+        self.cancelled: list[tuple[str, str]] = []
+        self.owners: set[str] = set()
         self.ledger_entries: list[TrialLedgerEntry] = []
         self.reject = False
 
@@ -95,7 +96,8 @@ class _FakeRuns:
         )
         return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries, ()))
 
-    def start(self, request: BacktestRunSpec, *, trial_key: str) -> str:
+    def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
+        self.owners.add(owner)
         if self.reject:
             raise TrialRunRejectedError(
                 "backtest.run.invalid", "strategy exceeds engine capabilities — core=rust"
@@ -103,20 +105,20 @@ class _FakeRuns:
         run_id = f"run-{len(self.started)}"
         self.started.append(request)
         self.keys.append(trial_key)
-        self.statuses[run_id] = RunStatus.QUEUED
+        self.run_statuses[run_id] = RunStatus.QUEUED
         return run_id
 
     def complete_all(self) -> None:
         """접수한 실행이 모두 결과를 냈다고 원장에 적는다(실행 서비스가 하는 일)."""
-        for run_id, key in zip(self.statuses, self.keys, strict=True):
-            self.statuses[run_id] = RunStatus.COMPLETED
+        for run_id, key in zip(self.run_statuses, self.keys, strict=True):
+            self.run_statuses[run_id] = RunStatus.COMPLETED
             self.ledger_entries.append(TrialLedgerEntry(run_id, key, RunStatus.COMPLETED, _AT, _AT))
 
-    def status(self, run_id: str) -> RunStatus:
-        return self.statuses[run_id]
+    def statuses(self, run_ids: Collection[str]) -> dict[str, RunStatus]:
+        return {run_id: self.run_statuses[run_id] for run_id in run_ids}
 
-    def cancel(self, run_id: str) -> None:
-        self.cancelled.append(run_id)
+    def cancel(self, run_id: str, *, owner: str) -> None:
+        self.cancelled.append((run_id, owner))
 
 
 def _service(
@@ -203,7 +205,7 @@ def test_trial_status_is_derived_from_the_latest_attempt_run() -> None:
     service = _service(runs)
     experiment_id = service.create(_request()).record.experiment_id
 
-    runs.statuses.update(
+    runs.run_statuses.update(
         {
             "run-0": RunStatus.COMPLETED,
             "run-1": RunStatus.CANCEL_REQUESTED,
@@ -224,7 +226,7 @@ def test_a_failed_trial_is_kept_and_a_retry_is_a_new_attempt() -> None:
     runs = _FakeRuns()
     service = _service(runs)
     experiment_id = service.create(_request()).record.experiment_id
-    runs.statuses["run-1"] = RunStatus.FAILED
+    runs.run_statuses["run-1"] = RunStatus.FAILED
 
     retried = service.retry(experiment_id, 1)
 
@@ -284,7 +286,9 @@ def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
     first = service.cancel(experiment_id)
     second = service.cancel(experiment_id)
 
-    assert runs.cancelled == ["run-0", "run-1", "run-2", "run-3"]
+    # 실행 서비스에 이 실험이 빠진다고 알린다 — 다른 소유자가 남은 run 은 멈추지 않는다.
+    assert runs.cancelled == [(f"run-{index}", experiment_id) for index in range(4)]
+    assert runs.owners == {experiment_id}
     assert first.record.cancelled_at == second.record.cancelled_at == _AT
     with pytest.raises(ExperimentStateError):
         service.retry(experiment_id, 0)
@@ -297,7 +301,7 @@ def test_only_a_completed_trial_can_be_selected_and_the_record_stays() -> None:
 
     with pytest.raises(ExperimentStateError) as raised:
         service.select(experiment_id, 2, "이웃 평균 샤프가 가장 높다")
-    runs.statuses["run-2"] = RunStatus.COMPLETED
+    runs.run_statuses["run-2"] = RunStatus.COMPLETED
     selection = service.select(experiment_id, 2, "이웃 평균 샤프가 가장 높다")
 
     assert raised.value.code == "experiment.selection.not_completed"
@@ -335,7 +339,7 @@ def test_an_experiment_survives_reopening_the_research_database(tmp_path: Path) 
     runs = _FakeRuns()
     path = tmp_path / "research.sqlite3"
     created = _service(runs, repository=SQLiteExperimentRepository(path)).create(_request())
-    runs.statuses["run-0"] = RunStatus.FAILED
+    runs.run_statuses["run-0"] = RunStatus.FAILED
 
     reopened = _service(runs, repository=SQLiteExperimentRepository(path))
 
@@ -349,3 +353,17 @@ def test_an_experiment_survives_reopening_the_research_database(tmp_path: Path) 
     with pytest.raises(ExperimentNotFoundError) as missing:
         reopened.get("missing")
     assert missing.value.code == "experiment.not_found"
+
+
+def test_experiments_are_listed_newest_first_a_page_at_a_time() -> None:
+    runs = _FakeRuns()
+    service = _service(runs)
+    created = [service.create(_request()).record.experiment_id for _ in range(3)]
+
+    first = service.list(after=None, limit=2)
+    second = service.list(after=first.next_after, limit=2)
+
+    assert [item.record.experiment_id for item in first.items] == created[:0:-1]
+    assert (first.next_after, second.next_after) == (created[1], None)
+    assert [item.record.experiment_id for item in second.items] == created[:1]
+    assert service.list(after="missing", limit=2).items == ()

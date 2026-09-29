@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock, Thread
 
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunSpec,
+    RunStatus,
     SavedRevisionReference,
 )
 from strategy_workbench.domain.backtest.facade.trials import preview_trial
@@ -81,6 +82,13 @@ class Experiment:
     selections: tuple[ExperimentSelection, ...]
 
 
+@dataclass(frozen=True)
+class ExperimentPage:
+    items: tuple[Experiment, ...]
+    # 다음 쪽을 물을 때 `after` 로 넘길 값. 마지막 쪽이면 None.
+    next_after: str | None
+
+
 def _spawn(work: Callable[[], None]) -> None:
     Thread(target=work, name="experiment-submit", daemon=True).start()
 
@@ -141,14 +149,14 @@ class ExperimentRunService:
         return self.get(record.experiment_id)
 
     def get(self, experiment_id: str) -> Experiment:
-        record = self._repository.get(experiment_id)
-        states = self._trial_states(record)
-        return Experiment(
-            record=record,
-            status=experiment_status(
-                [state.status for state in states], cancelled=record.cancelled_at is not None
-            ),
-            selections=self._repository.selections(experiment_id),
+        return self._experiment(self._repository.get(experiment_id))
+
+    def list(self, *, after: str | None, limit: int) -> ExperimentPage:
+        """최근에 만든 순. `after` 는 앞 쪽의 `next_after` 다."""
+        records = self._repository.list(after=after, limit=limit + 1)
+        return ExperimentPage(
+            items=tuple(self._experiment(record) for record in records[:limit]),
+            next_after=records[limit - 1].experiment_id if len(records) > limit else None,
         )
 
     def trials(self, experiment_id: str) -> tuple[ExperimentTrialState, ...]:
@@ -163,7 +171,7 @@ class ExperimentRunService:
                 self._cancelled.add(experiment_id)
                 for attempt in self._repository.attempts(experiment_id):
                     if attempt.run_id is not None:
-                        self._runs.cancel(attempt.run_id)
+                        self._runs.cancel(attempt.run_id, owner=experiment_id)
         return self.get(experiment_id)
 
     def retry(self, experiment_id: str, trial_index: int) -> ExperimentTrialState:
@@ -255,7 +263,9 @@ class ExperimentRunService:
         error: str | None = None
         try:
             run_id = self._runs.start(
-                _trial_run(record.run, trial), trial_key=experiment_trial_key(base, trial)
+                _trial_run(record.run, trial),
+                trial_key=experiment_trial_key(base, trial),
+                owner=record.experiment_id,
             )
         except TrialRunRejectedError as rejected:
             error_code, error = rejected.code, str(rejected)
@@ -271,13 +281,26 @@ class ExperimentRunService:
             )
         )
 
+    def _experiment(self, record: ExperimentRecord) -> Experiment:
+        states = self._trial_states(record)
+        return Experiment(
+            record=record,
+            status=experiment_status(
+                [state.status for state in states], cancelled=record.cancelled_at is not None
+            ),
+            selections=self._repository.selections(record.experiment_id),
+        )
+
     def _trial_states(self, record: ExperimentRecord) -> tuple[ExperimentTrialState, ...]:
         attempts: dict[int, list[TrialAttempt]] = {}
         for attempt in self._repository.attempts(record.experiment_id):
             attempts.setdefault(attempt.trial_index, []).append(attempt)
+        statuses = self._runs.statuses(
+            {group[-1].run_id for group in attempts.values() if group[-1].run_id is not None}
+        )
         cancelled = record.cancelled_at is not None
         return tuple(
-            _state(trial, tuple(attempts.get(trial.index, ())), cancelled, self._runs)
+            _state(trial, tuple(attempts.get(trial.index, ())), cancelled, statuses)
             for trial in record.design.trials()
         )
 
@@ -294,10 +317,13 @@ class ExperimentRunService:
 
 
 def _state(
-    trial: ExperimentTrial, attempts: tuple[TrialAttempt, ...], cancelled: bool, runs: TrialRunPort
+    trial: ExperimentTrial,
+    attempts: tuple[TrialAttempt, ...],
+    cancelled: bool,
+    statuses: Mapping[str, RunStatus],
 ) -> ExperimentTrialState:
     latest = attempts[-1] if attempts else None
-    run_status = None if latest is None or latest.run_id is None else runs.status(latest.run_id)
+    run_status = None if latest is None or latest.run_id is None else statuses[latest.run_id]
     status = trial_status(run_status, attempted=latest is not None, experiment_cancelled=cancelled)
     return ExperimentTrialState(trial, status, attempts)
 

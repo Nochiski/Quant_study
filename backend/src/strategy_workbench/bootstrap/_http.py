@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from strategy_workbench.adapters.inbound.http_api.facade.api import create_app
+from strategy_workbench.application.backtest_run.facade.runs import DEFAULT_RUN_SLOTS
 
 from ._assistant import (
     DEFAULT_ASSISTANT_SETTINGS,
@@ -21,6 +22,7 @@ RESEARCH_DB_PATH_ENV = "STRATEGY_WORKBENCH_RESEARCH_DB_PATH"
 EQUITY_ADAPTER_ENV = "STRATEGY_WORKBENCH_EQUITY_ADAPTER"
 EQUITY_ROOT_ENV = "STRATEGY_WORKBENCH_EQUITY_ROOT"
 ALLOWED_ORIGINS_ENV = "STRATEGY_WORKBENCH_ALLOWED_ORIGINS"
+RUN_SLOTS_ENV = "STRATEGY_WORKBENCH_RUN_SLOTS"
 DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = ("http://localhost:5173",)
 ASSISTANT_DB_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"
 ASSISTANT_SECRETS_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"
@@ -37,6 +39,18 @@ def runtime_research_db_path() -> Path:
     """실행 기록 DB(검증 랩 spec D3). 전략 DB 의 불변 트리거와 섞지 않으려고 파일을 나눈다."""
     configured = os.environ.get(RESEARCH_DB_PATH_ENV)
     return Path(configured).expanduser() if configured else DEFAULT_RESEARCH_DB_PATH
+
+
+def runtime_run_slots() -> int:
+    """동시 실행 슬롯 수(검증 랩 spec D6). 없으면 실행 유스케이스의 기본값이다."""
+    configured = os.environ.get(RUN_SLOTS_ENV, "").strip()
+    if not configured:
+        return DEFAULT_RUN_SLOTS
+    if not configured.isdigit() or int(configured) < 1:
+        raise ValueError(
+            f"run slots env var must be a positive integer — {RUN_SLOTS_ENV}={configured!r}"
+        )
+    return int(configured)
 
 
 def runtime_equity_selection() -> tuple[str, Path | None]:
@@ -106,6 +120,7 @@ def build_http_app(
     *,
     strategy_repository_path: str | Path | None = None,
     research_db_path: str | Path | None = None,
+    run_slots: int = DEFAULT_RUN_SLOTS,
     equity_adapter: str = "mock",
     equity_root: Path | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
@@ -114,6 +129,7 @@ def build_http_app(
     container = build_container(
         strategy_repository_path=strategy_repository_path,
         research_db_path=research_db_path,
+        run_slots=run_slots,
         equity_adapter=equity_adapter,
         equity_root=equity_root,
         assistant=assistant,
@@ -142,6 +158,7 @@ def build_runtime_http_app():
     return build_http_app(
         strategy_repository_path=runtime_strategy_repository_path(),
         research_db_path=runtime_research_db_path(),
+        run_slots=runtime_run_slots(),
         equity_adapter=adapter,
         equity_root=root,
         assistant=runtime_assistant_settings(),

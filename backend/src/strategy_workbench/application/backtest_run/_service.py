@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from threading import Event, RLock, Thread
@@ -46,6 +46,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategyProvenance,
     StrategySourceKind,
     WarningSeverity,
+    run_input_key,
 )
 from strategy_workbench.domain.backtest.facade.trials import (
     BlockedTrialAttempt,
@@ -64,6 +65,7 @@ from strategy_workbench.domain.strategy.facade.specification import (
 )
 
 from ._gc_policy import full_collections_suspended
+from ._scheduler import RunQueue, experiment_slots
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
 from .ports.outgoing.backtest_data import BacktestDataPort, BacktestDataQuery
 from .ports.outgoing.backtest_executor import (
@@ -91,9 +93,10 @@ _EVENT_RING_SIZE = 256
 # 남기지 않아 run 당 tape 이벤트 수를 약 100개 이하로 묶는다(SSE 재생·메모리 보호).
 _MIN_TAPE_PROGRESS_STEP = 0.01
 
-# 한꺼번에 계산하는 run 수의 상한. 실데이터 긴 구간 run 한 건이 CPU 수백 초·RSS 약 5GB 를 쓰므로
-# (#158·#161) 넘는 run 은 스레드 없이 `queued` 로 접수 순서대로 기다린다.
-MAX_CONCURRENT_RUNS = 2
+# 동시 실행 슬롯 수의 기본값(설정 `run_slots`, 환경 변수 `STRATEGY_WORKBENCH_RUN_SLOTS` 가
+# 덮어쓴다). 실데이터 긴 구간 run 한 건이 CPU 수백 초·RSS 약 5GB 를 쓰므로(#158·#161) 넘는 run 은
+# 스레드 없이 `queued` 로 기다린다. 배정 순서는 `_scheduler.py` 가 정한다.
+DEFAULT_RUN_SLOTS = 2
 
 # run `error` 문자열에서 서버 절대 경로를 가린다. 서버 경로를 담을 수 있는 서드파티 원문(파일·DB
 # 입출력 예외)이 응답으로 나가는 곳은 run `error` 하나다 — 우리가 쓰는 문장(어댑터 detail 등)은
@@ -221,6 +224,12 @@ class _RunRecord:
     provenance: StrategyProvenance
     events: deque[RunProgressEvent]
     cancellation: Event
+    # 같은 입력 잇기의 기준(`run_input_key`).
+    input_key: str
+    # 이 run 을 쓰는 소유자. None 은 사용자 단일 실행, 문자열은 실험 id 다. 모두 취소해야 취소된다.
+    owners: set[str | None]
+    # 실험 몫 슬롯을 쓰고 있는가(띄울 때 정한다).
+    experiment_slot: bool = False
 
 
 class BacktestRunService:
@@ -235,13 +244,10 @@ class BacktestRunService:
         run_repository: BacktestRunRepositoryPort,
         new_id: Callable[[], str],
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
-        max_concurrent_runs: int = MAX_CONCURRENT_RUNS,
+        run_slots: int = DEFAULT_RUN_SLOTS,
     ) -> None:
-        if max_concurrent_runs < 1:
-            raise ValueError(
-                "max_concurrent_runs must be at least 1 — "
-                f"max_concurrent_runs={max_concurrent_runs!r}"
-            )
+        if run_slots < 1:
+            raise ValueError(f"run_slots must be at least 1 — run_slots={run_slots!r}")
         self._portfolio_design = portfolio_design
         self._strategy_repository = strategy_repository
         self._data_source = data_source
@@ -250,10 +256,11 @@ class BacktestRunService:
         self._repository = run_repository
         self._new_id = new_id
         self._now = now
-        self._max_concurrent_runs = max_concurrent_runs
+        self._run_slots = run_slots
         self._records: dict[str, _RunRecord] = {}
-        self._waiting: deque[_RunRecord] = deque()
+        self._waiting: RunQueue[_RunRecord] = RunQueue()
         self._running = 0
+        self._running_experiments = 0
         self._lock = RLock()
         self._close_interrupted_runs()
 
@@ -266,9 +273,16 @@ class BacktestRunService:
         return self._admit(request, record_blocked=False)
 
     def start(
-        self, request: BacktestRunSpec, *, trial_key_override: str | None = None
+        self,
+        request: BacktestRunSpec,
+        *,
+        owner: str | None = None,
+        trial_key_override: str | None = None,
     ) -> BacktestStartResponse:
         """실행 요청을 받아 즉시 `QUEUED` 로 접수한다.
+
+        `owner` 는 실험 id 다(없으면 사용자 단일 실행). 대기 순서의 레인이고, 같은 입력을 이은
+        소유자가 모두 취소해야 run 이 취소된다(검증 랩 spec D6).
 
         `trial_key_override` 는 실험 유스케이스가 정한 시도 키다(창 날짜 대신 실험 기반 실행
         설정으로 낸다, V3-03). 없으면 이 실행 spec 의 시도 키를 원장에 적는다.
@@ -277,33 +291,35 @@ class BacktestRunService:
         리비전 해시)만 하고, TargetTape 계산은 run 스레드의 `tape` 단계로 넘긴다. 이전에는 tape 를
         여기서 동기로 만들어 긴 구간에서 응답이 수 분 이상 걸리고 취소 수단이 없었다(이슈 #158).
 
-        같은 입력으로 도는 run 이 있으면 새 run 을 만들지 않고 그 run 을 돌려주고, 도는 run 이
-        상한(`MAX_CONCURRENT_RUNS`)에 차 있으면 `queued` 로 기다리게 한다(이슈 #161).
+        같은 입력으로 도는 run 이 있으면 새 run 을 만들지 않고 그 run 을 돌려주고, 슬롯이 차 있으면
+        `queued` 로 기다리게 한다(이슈 #161).
         """
         admission = self._admit(request, record_blocked=True)
         spec, provenance = admission.spec, admission.provenance
         with self._lock:
-            # 같은 입력(실행할 spec·실행 설정·실행 옵션·provenance)으로 도는 run 이 있으면 그 run 을
-            # 돌려준다. 재클릭·새로고침 뒤 재시작·프록시 재시도가 같은 tape 를 겹쳐 계산하지 않게
-            # 한다(#161). spec 의 `==` 는 1 과 1.0 을 같게 보지만 provenance 의 `spec_hash` 는
-            # 가르고, 매니페스트도 provenance 를 기록하므로 둘 다 같아야 한다. 데이터 snapshot·
-            # 엔진·지표 레지스트리 판본은 프로세스 안에서 고정이라 같은 입력이면 결과도 같다.
-            # 취소를 요청한 run 은 곧 끝나므로 잇지 않는다. `parameter_values` 는 정규화로 1 과
-            # 1.0 을 같은 값으로 맞춘다. bool·숫자 혼합 선택지((1, True))는 `==` 로 갈리지 않는
-            # 한계가 있고 V3-04 지문 기반 중복 제거에서 닫는다.
+            # 같은 입력(실행 지문의 요청 칸 `run_input_key`·provenance)으로 도는 run 이 있으면 그
+            # run 을 돌려준다. 재클릭·새로고침 뒤 재시작·프록시 재시도·실험 trial 이 같은 tape 를
+            # 겹쳐 계산하지 않게 한다(#161, spec D6). provenance 는 매니페스트가 기록하므로 같아야
+            # 한다. 데이터 snapshot·엔진 규칙·지표 레지스트리 판본은 프로세스 안에서 고정이라 같은
+            # 입력이면 결과도 같다. 취소를 요청한 run 은 곧 끝나므로 잇지 않는다.
+            input_key = run_input_key(spec)
             for existing in self._records.values():
                 if (
                     existing.state.status in (RunStatus.QUEUED, RunStatus.RUNNING)
-                    and existing.spec == spec
+                    and existing.input_key == input_key
                     and existing.provenance == provenance
                 ):
+                    existing.owners.add(owner)
+                    if owner is None and existing in self._waiting:
+                        # 사용자가 이은 대기 run 은 단일 실행 레인으로 옮긴다.
+                        self._waiting.remove(existing)
+                        self._waiting.push(existing, None)
+                        self._dispatch()
                     return BacktestStartResponse(existing.state)
             run_id = self._new_id()
             created = self._now()
             message = (
-                "Run accepted"
-                if self._running < self._max_concurrent_runs
-                else "Waiting for a free run slot"
+                "Run accepted" if self._running < self._run_slots else "Waiting for a free run slot"
             )
             record = _RunRecord(
                 state=BacktestRunState(
@@ -319,6 +335,8 @@ class BacktestRunService:
                 provenance=provenance,
                 events=deque(maxlen=_EVENT_RING_SIZE),
                 cancellation=Event(),
+                input_key=input_key,
+                owners={owner},
             )
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
             # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
@@ -332,7 +350,7 @@ class BacktestRunService:
             # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
             # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
             accepted = record.state
-            self._waiting.append(record)
+            self._waiting.push(record, owner)
             self._dispatch()
         return BacktestStartResponse(accepted)
 
@@ -437,6 +455,17 @@ class BacktestRunService:
         self._repository.merge_lineages(source_id, target_id, merged_at=self._now())
         return self.trial_ledger(target_id)
 
+    def statuses(self, run_ids: Collection[str]) -> dict[str, RunStatus]:
+        """여러 run 의 상태를 한 번에 — 이 프로세스가 도는 run 은 메모리, 나머지는 저장소 한 번."""
+        with self._lock:
+            known = {
+                run_id: self._records[run_id].state.status
+                for run_id in run_ids
+                if run_id in self._records
+            }
+        stored = self._repository.statuses([run_id for run_id in run_ids if run_id not in known])
+        return known | stored
+
     def state(self, run_id: str) -> BacktestRunState:
         """이 프로세스가 도는 run 은 메모리의 진행률까지, 나머지는 저장소의 마지막 상태."""
         with self._lock:
@@ -487,13 +516,18 @@ class BacktestRunService:
             )
         return self._artifact_store.load(run_id, sha256=state.artifact_sha256)
 
-    def cancel(self, run_id: str) -> BacktestRunState:
+    def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestRunState:
+        """`owner`(없으면 사용자)가 이 run 에서 빠진다. 남은 소유자가 없을 때만 run 을 취소한다.
+
+        실험만 쓰는 run 은 사용자가 취소해도 돌고, 그 실험을 취소하면 멈춘다.
+        """
         with self._lock:
             record = self._records.get(run_id)
             if record is None:
                 # 이 프로세스가 돌리지 않은 run 은 재시작 때 이미 종결됐다.
                 return self.state(run_id)
-            if record.state.status in (
+            record.owners.discard(owner)
+            if record.owners or record.state.status in (
                 RunStatus.COMPLETED,
                 RunStatus.CANCELLED,
                 RunStatus.FAILED,
@@ -701,8 +735,12 @@ class BacktestRunService:
         (#161).
         """
 
-        while self._waiting and self._running < self._max_concurrent_runs:
-            record = self._waiting.popleft()
+        while self._running < self._run_slots:
+            record = self._waiting.pop(
+                experiments=self._running_experiments < experiment_slots(self._run_slots)
+            )
+            if record is None:
+                return
             try:
                 Thread(
                     target=self._run,
@@ -724,7 +762,9 @@ class BacktestRunService:
                     "backtest run thread failed to start — run_id=%s", record.state.run_id
                 )
             else:
+                record.experiment_slot = None not in record.owners
                 self._running += 1
+                self._running_experiments += record.experiment_slot
 
     def _run(self, record: _RunRecord) -> None:
         """run 스레드 본문. 전체 수집(2세대)을 run 이 끝날 때까지 미룬다(이슈 #196).
@@ -740,6 +780,7 @@ class BacktestRunService:
         finally:
             with self._lock:
                 self._running -= 1
+                self._running_experiments -= record.experiment_slot
                 self._dispatch()
 
     def _execute(self, record: _RunRecord) -> None:

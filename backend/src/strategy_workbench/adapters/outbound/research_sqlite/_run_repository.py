@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Collection
 from datetime import date, datetime
 from pathlib import Path
 from typing import ClassVar, cast
@@ -252,6 +253,23 @@ class SQLiteBacktestRunRepository:
                 _TERMINAL,
             ).fetchall()
         return tuple(_summary(row).run for row in rows)
+
+    def statuses(self, run_ids: Collection[str]) -> dict[str, RunStatus]:
+        ids = list(run_ids)
+        if not ids:
+            return {}
+        with self._database.transaction(write=False) as connection:
+            rows = connection.execute(
+                "SELECT run_id, status FROM backtest_runs "
+                f"WHERE run_id IN ({', '.join('?' * len(ids))})",
+                ids,
+            ).fetchall()
+        try:
+            return {row["run_id"]: RunStatus(row["status"]) for row in rows}
+        except ValueError as error:
+            raise ResearchStorageError(
+                f"stored backtest run status failed integrity validation — {error}"
+            ) from error
 
 
 def _state_values(state: BacktestRunState) -> tuple[object, ...]:

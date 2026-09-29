@@ -104,12 +104,14 @@ test(
       toolbarControls(page),
     );
     await page.keyboard.press("Home");
-    // 1280px 기본 배치(사이드바 닫힘, 편집기 472px). 탭 줄이 다음 줄로 내려간다.
+    // 1280px(편집기 472px): 사이드바를 연 채로는 계약 자리에 겹쳐 뜨고, 닫으면 기본 배치다. 탭 줄이 다음
+    // 줄로 내려간다.
     await page.getByRole("button", { name: "전략 구조", exact: true }).click();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expectEditorReachable(page, "1280+AI");
     await assistant(page)
       .getByRole("button", { name: "사이드바 닫기" })
       .click();
-    await page.setViewportSize({ width: 1280, height: 800 });
     await expectEditorReachable(page, "1280");
     await page.setViewportSize({ width: 1440, height: 900 });
 

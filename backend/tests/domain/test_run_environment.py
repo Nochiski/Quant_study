@@ -1,11 +1,11 @@
-"""P2-01·P2-03·V1-01(검증 랩): 실행 설정(`RunEnvironment`) 값 타입·canonical hash·필수 규칙·
-연구 구간 잠금·런타임 스키마."""
+"""P2-01·P2-03·V1-01·V2-01·V2-02(검증 랩): 실행 설정(`RunEnvironment`) 값 타입·canonical hash·
+필수 규칙·연구 구간 잠금·런타임 스키마·매도 거래세·참여 기준."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -18,10 +18,13 @@ from strategy_workbench.domain.backtest.facade.environment import (
     ExecutionTiming,
     Market,
     MissingRunEnvironmentError,
+    ParticipationBasis,
     ResearchWindowViolationError,
     RunEnvironment,
     SellTax,
     environment_hash,
+    participation_history_sessions,
+    participation_volumes,
     require_environment,
     run_environment_canonical_json,
     run_environment_schema,
@@ -59,7 +62,7 @@ def test_canonical_json_is_sorted_and_compact() -> None:
 
 
 def test_environment_hash_splits_on_every_variable_field() -> None:
-    """`market`·`frequency`·`timing` 은 값이 하나뿐이라 변주할 수 없다. 나머지 9 필드를 덮는다."""
+    """`market`·`frequency`·`timing` 은 값이 하나뿐이라 변주할 수 없다. 나머지 10 필드를 덮는다."""
     base = _environment()
     variants = (
         replace(base, start=date(2019, 1, 1)),
@@ -68,6 +71,7 @@ def test_environment_hash_splits_on_every_variable_field() -> None:
         replace(base, fee_bps=30.0),
         replace(base, slippage_bps=0.0),
         replace(base, participation_rate=1.0),
+        replace(base, participation_basis=ParticipationBasis.ADV20),
         replace(base, missing=MissingPolicy.ZERO),
         replace(base, sell_tax=SellTax.NONE),
         replace(base, sell_tax=SellTax.CUSTOM, sell_tax_bps=20.0),
@@ -222,6 +226,7 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
         "universe_id",
         "timing",
         "participation_rate",
+        "participation_basis",
         "fee_bps",
         "slippage_bps",
         "sell_tax",
@@ -235,6 +240,8 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
     assert properties["sell_tax"]["default"] == "krx_statutory"
     assert properties["sell_tax_bps"]["default"] is None
     assert properties["sell_tax_bps"]["minimum"] == 0.0
+    assert properties["participation_basis"]["enum"] == ["session_volume", "adv20"]
+    assert properties["participation_basis"]["default"] == "session_volume"
     assert properties["fee_bps"]["type"] == "number"
     assert properties["fee_bps"]["default"] == 15.0
     assert properties["start"]["format"] == "date"
@@ -321,3 +328,60 @@ def test_statutory_rate_changes_on_the_first_trade_date_that_settles_after_enact
     )
 
     assert config.sell_tax_rate(session) == pytest.approx(rate)
+
+
+def test_session_volume_basis_leaves_the_engine_on_session_volume() -> None:
+    """기본값(`session_volume`)은 워밍업을 읽지 않고 기준 거래량도 넘기지 않는다 — 기존 실행
+    그대로다."""
+    environment = _environment()
+
+    assert environment.participation_basis is ParticipationBasis.SESSION_VOLUME
+    assert participation_history_sessions(environment) == 0
+    assert participation_volumes(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)]) is None
+
+
+def test_adv20_volume_is_the_prior_rows_average_value_over_the_decision_close() -> None:
+    """판단일(직전 행)까지의 거래대금 평균 ÷ 판단일 종가, 내림. 종목마다 따로 센다.
+
+    A: 첫 행은 앞선 행이 없어 0주. 1/3 은 1,000 ÷ 100 = 10주. 1/4 는 (1,000 + 3,000) / 2 ÷ 200 =
+    10주. 1/5 는 1/4 거래대금이 없어 평균에서 빠지므로 2,000 ÷ 50 = 40주. B 는 A 와 섞이지 않는다:
+    1/3 은 7,000 ÷ 70 = 100주.
+    """
+    rows = [
+        (date(2024, 1, 2), "A", 100.0, 1_000.0),
+        (date(2024, 1, 2), "B", 70.0, 7_000.0),
+        (date(2024, 1, 3), "A", 200.0, 3_000.0),
+        (date(2024, 1, 3), "B", 10.0, 9_999.0),
+        (date(2024, 1, 4), "A", 50.0, None),
+        (date(2024, 1, 5), "A", 40.0, 8_000.0),
+    ]
+
+    volumes = participation_volumes(
+        replace(_environment(), participation_basis=ParticipationBasis.ADV20), reversed(rows)
+    )
+
+    assert volumes == {
+        (date(2024, 1, 2), "A"): 0,
+        (date(2024, 1, 2), "B"): 0,
+        (date(2024, 1, 3), "A"): 10,
+        (date(2024, 1, 3), "B"): 100,
+        (date(2024, 1, 4), "A"): 10,
+        (date(2024, 1, 5), "A"): 40,
+    }
+
+
+def test_adv20_averages_only_the_last_twenty_rows_including_warmup() -> None:
+    """첫 측정 세션의 평균은 워밍업 행에서 20행을 채운다. 거래대금 100 × k(k = 1..22), 종가 10.
+
+    21번째 행: k = 1..20 평균 1,050 ÷ 10 = 105주. 22번째 행: k = 2..21 평균 1,150 ÷ 10 = 115주 —
+    가장 오래된 행이 창에서 빠진다.
+    """
+    environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(22)]
+    rows = [(session, "A", 10.0, 100.0 * k) for k, session in enumerate(sessions, 1)]
+
+    volumes = participation_volumes(environment, rows)
+
+    assert participation_history_sessions(environment) == 20
+    assert volumes is not None
+    assert (volumes[(sessions[20], "A")], volumes[(sessions[21], "A")]) == (105, 115)

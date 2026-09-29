@@ -221,7 +221,8 @@ class BacktestEngine:
             config: 재현에 필요한 실행 설정 (초기 현금, 수수료 등).
             capabilities: 엔진 구현 상태 표. 기본은 reference 엔진.
             slippage: 체결가 슬리피지 모델. 기본 NoSlippage.
-            max_participation: 세션 거래량 대비 체결 상한 (0, 1]. None이면 무제한.
+            max_participation: 기준 거래량(`Bar.liquidity_volume`, 없으면 세션 거래량) 대비 체결
+                상한 (0, 1]. None이면 무제한.
                 Action의 ExecutionPolicy.max_participation이 있으면 그 값이 우선한다.
             core: "python"(기본) 또는 persistent 엔진인 "rust". 전환 호환 alias는
                 "rust_persistent", 구 세션 코어는 deprecated "rust_legacy"다.
@@ -654,6 +655,7 @@ class BacktestEngine:
             columns.lows,
             columns.closes,
             columns.volumes,
+            columns.liquidity_volumes,
         )
         return instruments
 
@@ -788,7 +790,13 @@ class BacktestEngine:
             (g.group_id, g.policy.value, list(g.order_ids)) for g in order_manager.open_groups()
         ]
         bars = {
-            instrument_key(bar.instrument): (bar.open, bar.high, bar.low, bar.volume)
+            instrument_key(bar.instrument): (
+                bar.open,
+                bar.high,
+                bar.low,
+                bar.volume,
+                bar.cap_volume,
+            )
             for bar in snapshot.bars
         }
         default = None if run.max_participation is None else str(run.max_participation)

@@ -79,11 +79,23 @@ class Bar:
     low: float
     close: float
     volume: int
+    # 유동성 캡(floor(기준 거래량 × 참여율))의 기준 거래량. None 이면 세션 거래량(`volume`)이다.
+    liquidity_volume: int | None = None
 
     def __post_init__(self) -> None:
         validate_bar_values(
             self.instrument.symbol, self.ts, self.open, self.high, self.low, self.close, self.volume
         )
+        if self.liquidity_volume is not None and self.liquidity_volume < 0:
+            raise ValueError(
+                f"liquidity_volume must be >= 0 — instrument={self.instrument.symbol} "
+                f"ts={self.ts} liquidity_volume={self.liquidity_volume}"
+            )
+
+    @property
+    def cap_volume(self) -> int:
+        """유동성 캡을 곱할 거래량: `liquidity_volume`, 없으면 세션 거래량."""
+        return self.volume if self.liquidity_volume is None else self.liquidity_volume
 
 
 @dataclass(frozen=True)

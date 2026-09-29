@@ -49,6 +49,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
     environment_hash,
+    participation_volumes,
     sell_tax_schedule,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
@@ -69,7 +70,10 @@ from strategy_workbench.domain.portfolio.facade.construction import TargetTape
 from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 
 
-def _columnar_feed(rows: Sequence[MarketBarRecord]) -> DataFeed:
+def _columnar_feed(
+    rows: Sequence[MarketBarRecord],
+    liquidity: Mapping[tuple[date, str], int] | None = None,
+) -> DataFeed:
     """dataset 행을 열로 펴 DataFeed를 만든다 — 중간에 `Bar` 객체를 만들지 않는다.
 
     세션은 오름차순, 한 세션 안 종목은 dataset 입력 순서다. 같은 행 묶음을 `Bar`로 만들어
@@ -78,6 +82,8 @@ def _columnar_feed(rows: Sequence[MarketBarRecord]) -> DataFeed:
 
     Args:
         rows: dataset이 답한 시장 bar 행. 순서는 세션 기준으로만 쓰인다.
+        liquidity: `(세션, 종목)` → 유동성 캡 기준 거래량(`participation_volumes`). 없으면 엔진이
+            세션 거래량을 쓴다.
 
     Returns:
         열을 그대로 보관하는 DataFeed. persistent Rust 경로는 이 열을 바로 FFI로 넘긴다.
@@ -96,6 +102,7 @@ def _columnar_feed(rows: Sequence[MarketBarRecord]) -> DataFeed:
     lows: list[float] = []
     closes: list[float] = []
     volumes: list[int] = []
+    liquidity_volumes: list[int] = []
     for session in sorted(rows_by_session):
         sessions.append(datetime.combine(session, time(15, 30)))
         for row in rows_by_session[session]:
@@ -112,6 +119,8 @@ def _columnar_feed(rows: Sequence[MarketBarRecord]) -> DataFeed:
             lows.append(row.low)
             closes.append(row.close)
             volumes.append(row.volume)
+            if liquidity is not None:
+                liquidity_volumes.append(liquidity[(row.session, row.security_id)])
         offsets.append(len(instrument_ids))
     return DataFeed.from_columns(
         sessions=sessions,
@@ -123,6 +132,7 @@ def _columnar_feed(rows: Sequence[MarketBarRecord]) -> DataFeed:
         lows=lows,
         closes=closes,
         volumes=volumes,
+        liquidity_volumes=None if liquidity is None else liquidity_volumes,
     )
 
 
@@ -250,7 +260,16 @@ class BacktestEngineExecutorAdapter:
                 self._portfolio_bridge,
                 environment=environment,
             ),
-            _columnar_feed(request.dataset.bars),
+            _columnar_feed(
+                request.dataset.bars,
+                participation_volumes(
+                    environment,
+                    (
+                        (item.session, item.security_id, item.close, item.trading_value)
+                        for item in (*request.dataset.history_bars, *request.dataset.bars)
+                    ),
+                ),
+            ),
             corporate_actions=corporate_actions,
             universe=universe,
         )

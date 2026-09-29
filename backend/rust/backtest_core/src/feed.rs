@@ -57,6 +57,8 @@ pub(crate) struct PersistentFeed {
     lows: Vec<f64>,
     closes: Vec<f64>,
     volumes: Vec<i64>,
+    /// 행별 유동성 캡 기준 거래량 (Python `FeedColumns.liquidity_volumes`). 없으면 세션 거래량이다.
+    liquidity_volumes: Option<Vec<i64>>,
     current_session: Option<usize>,
     /// key → instrument id. 세션 루프가 주문·포지션 key를 wire의 정수 id로 바꿀 때 쓴다.
     key_index: HashMap<String, u32>,
@@ -202,11 +204,30 @@ impl PersistentFeed {
             lows,
             closes,
             volumes,
+            liquidity_volumes: None,
             current_session: None,
             key_index,
             symbol_by_key,
             row_index,
         })
+    }
+
+    /// 유동성 캡 기준 거래량 열을 붙인다. 행마다 하나씩, 0 이상이어야 한다.
+    pub(crate) fn with_liquidity_volumes(
+        mut self,
+        liquidity_volumes: Option<Vec<i64>>,
+    ) -> PyResult<Self> {
+        if let Some(values) = &liquidity_volumes {
+            if values.len() != self.volumes.len() || values.iter().any(|value| *value < 0) {
+                return Err(PyValueError::new_err(format!(
+                    "feed liquidity volumes must be one non-negative value per row — rows={} liquidity_volumes={}",
+                    self.volumes.len(),
+                    values.len()
+                )));
+            }
+        }
+        self.liquidity_volumes = liquidity_volumes;
+        Ok(self)
     }
 
     pub(crate) fn session_len(&self) -> usize {
@@ -288,6 +309,9 @@ impl PersistentFeed {
                         self.highs[row],
                         self.lows[row],
                         self.volumes[row],
+                        self.liquidity_volumes
+                            .as_ref()
+                            .map_or(self.volumes[row], |values| values[row]),
                     ),
                 )
             })
@@ -487,6 +511,34 @@ mod tests {
         assert_eq!(feed.open_at(1, "B"), Some(21.0));
         assert_eq!(feed.symbol_of(0), "AAA");
         assert_eq!(feed.session_len(), 2);
+        // 기준 거래량 열이 없으면 bar의 다섯째 값은 세션 거래량이다.
+        assert_eq!(feed.session_market(0).1["B"].4, 200);
+    }
+
+    #[test]
+    fn liquidity_volumes_replace_the_cap_volume_only() {
+        let build = || {
+            PersistentFeed::new(
+                vec!["A".into()],
+                vec!["AAA".into()],
+                vec!["D1".into(), "D2".into()],
+                vec![0, 1, 2],
+                vec![0, 0],
+                vec![10.0, 20.0],
+                vec![11.0, 21.0],
+                vec![9.0, 19.0],
+                vec![10.5, 20.5],
+                vec![100, 200],
+            )
+            .unwrap()
+        };
+        let feed = build().with_liquidity_volumes(Some(vec![7, 0])).unwrap();
+        assert_eq!(feed.session_market(0).1["A"], (10.0, 11.0, 9.0, 100, 7));
+        assert_eq!(feed.session_market(1).1["A"].4, 0);
+        for bad in [vec![7], vec![7, -1]] {
+            let error = build().with_liquidity_volumes(Some(bad)).err().unwrap();
+            assert!(error.to_string().contains("liquidity volumes"));
+        }
     }
 
     /// bar가 빠진 세션이 섞인 피드에서 `row_index`가 "그날 행 없음"을 정확히 표시하는지.

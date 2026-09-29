@@ -3,14 +3,14 @@ plan_version: 1
 project: validation-lab
 project_status: IN_PROGRESS
 current_phase: V2,V3
-current_pr: V2-01,V3-01
-active_prs: [V2-01, V3-01]
-parallel_window: [V2-01, V3-01]
-last_updated: 2026-09-29T18:44:17+09:00
+current_pr: V2-02,V3-01
+active_prs: [V2-02, V3-01]
+parallel_window: [V2-02, V3-01]
+last_updated: 2026-09-29T20:01:02+09:00
 planned_prs: 28
-merged_prs: 2
-approved_prs: 2
-progress_percent: 7
+merged_prs: 3
+approved_prs: 3
+progress_percent: 11
 ---
 
 # 검증 랩 실시간 진행 계획
@@ -25,11 +25,11 @@ progress_percent: 7
 |---|---|
 | Project status | `IN_PROGRESS` |
 | Current phase | `V2,V3` |
-| Current/next PR | `V2-01,V3-01` |
-| Active PR | `V2-01, V3-01` |
-| Progress | `2 / 28 merged (7%)` |
-| Approved | `2 / 28` |
-| Aggregated at | `2026-09-29 18:44 KST` |
+| Current/next PR | `V2-02,V3-01` |
+| Active PR | `V2-02, V3-01` |
+| Progress | `3 / 28 merged (11%)` |
+| Approved | `3 / 28` |
+| Aggregated at | `2026-09-29 20:01 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -69,12 +69,12 @@ progress_percent: 7
 |---|---|---:|---:|---|
 | V0 | Planning package | 1 | 1 | `MERGED` |
 | V1 | Research window seal, run persistence, trial ledger | 5 | 1 | `WAITING` |
-| V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 0 | `SELF_CHECK` |
+| V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 1 | `SELF_CHECK` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 0 | `IN_PROGRESS` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 0 | `WAITING` |
 | V5 | Screens (after lang2 merge signal) | 7 | 0 | `WAITING` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
-| **Total** |  | **28** | **2** | **7%** |
+| **Total** |  | **28** | **3** | **11%** |
 <!-- PLAN:PHASES:END -->
 
 ## V0 — 기획 패키지
@@ -97,8 +97,8 @@ progress_percent: 7
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V2-01` | 매도 거래세(법정 세율표) | V0-01 | `SELF_CHECK` | — |
-| [ ] | `V2-02` | ADV 배선·참여 기준(adv20) | V2-01 | `PLANNED` | — |
+| [x] | `V2-01` | 매도 거래세(법정 세율표) | V0-01 | `MERGED` | [#286](https://github.com/Nochiski/Quant_study/pull/286) · review_vlab_v2_01 2차 APPROVE · main 머지 `a40628b4`(2026-09-29) |
+| [ ] | `V2-02` | ADV 배선·참여 기준(adv20) | V2-01 | `SELF_CHECK` | — |
 | [ ] | `V2-03` | √ 시장충격 모델 | V2-02 | `PLANNED` | — |
 
 ## V3 — 실험 backend

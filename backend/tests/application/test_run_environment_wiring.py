@@ -9,11 +9,13 @@ P2-02 부터 `environment.missing` 도 같은 경로를 탄다: 실행 설정의
 `plan_hash` 까지 내려간다.
 
 검증 랩 V1-01 부터 연구 구간 잠금도 같은 관문을 지난다: 측정 시작일이 2020-01-02 앞이면 세 경로가
-`run_environment.research_window` 로 거절하고, 워밍업 관측 읽기는 막지 않는다(spec D1).
+`run_environment.research_window` 로 거절하고, 워밍업 관측 읽기는 막지 않는다(spec D1). V2-02 의
+참여 기준(`participation_basis`)도 데이터 질의의 워밍업과 엔진 캡까지 같은 축으로 내려간다.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -30,6 +32,11 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
+)
+from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataQuery,
+    BacktestDataset,
+    MarketBarRecord,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestResearchWindowViolationError,
@@ -60,9 +67,11 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
+    ParticipationBasis,
     RunEnvironment,
     SellTax,
     environment_hash,
+    participation_volumes,
 )
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
 from strategy_workbench.domain.factor.facade.expression import (
@@ -462,3 +471,76 @@ def test_partial_fill_is_declared_from_the_environment_not_the_document() -> Non
 
     assert "partial_fill" not in {item.value for item in bridge.requirements(spec, full).features}
     assert "partial_fill" in {item.value for item in bridge.requirements(spec, partial).features}
+
+
+class _ShrunkWarmupValue:
+    """mock 워밍업 bar 의 거래대금만 1% 로 줄인다 — 워밍업을 ADV 에 넣었는지에 따라 첫 체결 세션의
+    캡이 크게 갈린다. 받은 질의와 돌려준 dataset 을 남긴다."""
+
+    def __init__(self) -> None:
+        self._inner = MockEquityDataAdapter.demo()
+        self.loads: list[tuple[BacktestDataQuery, BacktestDataset]] = []
+
+    def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
+        dataset = self._inner.load_backtest_dataset(query)
+        dataset = replace(
+            dataset,
+            history_bars=tuple(
+                replace(bar, trading_value=(bar.trading_value or 0) * 0.01)
+                for bar in dataset.history_bars
+            ),
+        )
+        self.loads.append((query, dataset))
+        return dataset
+
+
+def _adv_caps(
+    environment: RunEnvironment, bars: tuple[MarketBarRecord, ...], rate: float
+) -> dict[tuple[date, str], int]:
+    volumes = participation_volumes(
+        environment,
+        ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
+    )
+    assert volumes is not None
+    return {key: math.floor(volume * rate) for key, volume in volumes.items()}
+
+
+@pytest.mark.parametrize("core", [ExecutionCore.PYTHON, ExecutionCore.RUST])
+def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
+    tmp_path: Path, core: ExecutionCore
+) -> None:
+    """`adv20`(V2-02)이면 실행이 start 앞 20세션을 워밍업으로 읽고, 체결은 워밍업 행까지 포함해 센
+    기준 거래량 × 참여율을 넘지 않는다. 첫 체결 세션의 체결량은 워밍업을 넣은 캡과 같고 뺀 캡과
+    다르다 — 엔진 어댑터가 워밍업 bar 를 빠뜨리면 여기서 걸린다."""
+    rate = 1e-4
+    environment = replace(
+        _environment(), participation_basis=ParticipationBasis.ADV20, participation_rate=rate
+    )
+    data = _ShrunkWarmupValue()
+    runs = BacktestRunService(
+        _portfolio(),
+        InMemoryStrategyRepository(),
+        data,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        new_id=lambda: "adv-run",
+    )
+    runs.start(BacktestRunSpec(strategy=_spec(), core=core, environment=environment))
+    assert wait_for_terminal_run(runs, "adv-run").status.value == "completed"
+
+    ((query, dataset),) = data.loads
+    assert query.history_sessions_before_start == 20
+    assert len({bar.session for bar in dataset.history_bars}) == 20
+    warmed = _adv_caps(environment, (*dataset.history_bars, *dataset.bars), rate)
+    cold = _adv_caps(environment, dataset.bars, rate)
+    fills = runs.result("adv-run").artifacts.fills
+    assert fills
+    assert all(int(fill.quantity) <= warmed[(fill.session, fill.security_id)] for fill in fills)
+    first = [fill for fill in fills if fill.session == fills[0].session]
+    assert [int(fill.quantity) for fill in first] == [
+        warmed[(fill.session, fill.security_id)] for fill in first
+    ]
+    assert all(
+        warmed[(fill.session, fill.security_id)] != cold[(fill.session, fill.security_id)]
+        for fill in first
+    )

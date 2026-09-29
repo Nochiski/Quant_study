@@ -848,6 +848,7 @@ mod tests {
                 vec![100.0, 110.0],
                 vec![100.0, 120.0],
                 vec![1_000, 1_000],
+                None,
             )
             .unwrap();
         runtime.configure_router(
@@ -884,6 +885,7 @@ mod tests {
                 closes.clone(),
                 closes,
                 vec![1_000_000; sessions],
+                None,
             )
             .unwrap();
         runtime.configure_router(
@@ -1177,6 +1179,7 @@ mod tests {
                 vec![100.0, 110.0, 120.0],
                 vec![100.0, 110.0, 120.0],
                 vec![1_000, 1_000, 1_000],
+                None,
             )
             .unwrap();
         runtime.configure_router(vec!["no_action".into()], vec![]);

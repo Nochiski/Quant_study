@@ -87,6 +87,17 @@ class SellTax(StrEnum):
     NONE = "none"
 
 
+class ParticipationBasis(StrEnum):
+    """참여율을 곱할 기준 거래량(spec D7).
+
+    `session_volume` 은 체결 세션의 거래량을, `adv20` 은 판단일까지 20세션 평균 거래대금을 판단일
+    종가로 나눈 주식 수(`_participation.py`)를 뜻한다.
+    """
+
+    SESSION_VOLUME = "session_volume"
+    ADV20 = "adv20"
+
+
 # 실행 설정 수치 필드의 범위·단위·설명 키. 1.1 까지는 전략 제약 카탈로그의 `/execution/*` 행이
 # SoT 였고 여기서 필드 이름으로 다시 걸어 썼지만, 1.2 가 `execution` 섹션을 지우면서 그 행들이
 # 전략 문서 포인터를 잃었다. 그래서 owner 를 실행 설정이 있는 이 노드로 옮긴다(P2-03 결정 항목).
@@ -202,6 +213,7 @@ class RunEnvironment:
     universe_id: str = field(metadata=CATALOG_UNIVERSE)
     timing: ExecutionTiming = ExecutionTiming.NEXT_OPEN
     participation_rate: float = 0.1
+    participation_basis: ParticipationBasis = ParticipationBasis.SESSION_VOLUME
     fee_bps: float = 15.0
     slippage_bps: float = 10.0
     sell_tax: SellTax = SellTax.KRX_STATUTORY

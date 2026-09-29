@@ -732,6 +732,10 @@ const ko = {
   "strategy.field.run_environment.timing": "체결 시점",
   "strategy.field.run_environment.timing.description": "신호가 나온 뒤 주문이 체결되는 시점입니다.",
   "strategy.field.run_environment.timing.value.next_open": "다음 거래일 시가",
+  "strategy.field.run_environment.participation_basis": "참여 기준",
+  "strategy.field.run_environment.participation_basis.description": "참여율을 곱해 한 세션에 체결할 수 있는 주식 수 상한을 정할 거래량입니다.",
+  "strategy.field.run_environment.participation_basis.value.session_volume": "체결일 거래량",
+  "strategy.field.run_environment.participation_basis.value.adv20": "20일 평균 거래대금",
   "strategy.field.run_environment.sell_tax": "매도 거래세",
   "strategy.field.run_environment.sell_tax.description": "주식을 팔 때 체결 금액에 붙는 세금을 어떻게 셀지 정합니다.",
   "strategy.field.run_environment.sell_tax.value.krx_statutory": "법정 세율(날짜별)",
@@ -1025,7 +1029,7 @@ const ko = {
   "strategy.contract.risk.max_sector_weight.description":
     "섹터 하나가 가질 수 있는 최대 목표 비중입니다.",
   "run_environment.contract.participation_rate.description":
-    "같은 세션 거래량 대비 주문이 차지할 수 있는 최대 비율입니다.",
+    "참여 기준 거래량 대비 주문이 한 세션에 차지할 수 있는 최대 비율입니다.",
   "run_environment.contract.fee_bps.description":
     "체결 금액에 bp 단위로 붙는 수수료 가정입니다.",
   "run_environment.contract.slippage_bps.description":
@@ -2434,6 +2438,10 @@ export const messages = {
     "strategy.field.run_environment.timing": "Execution timing",
     "strategy.field.run_environment.timing.description": "When an order fills after its signal.",
     "strategy.field.run_environment.timing.value.next_open": "Next session open",
+    "strategy.field.run_environment.participation_basis": "Participation basis",
+    "strategy.field.run_environment.participation_basis.description": "The volume the participation rate is applied to when capping the shares filled in one session.",
+    "strategy.field.run_environment.participation_basis.value.session_volume": "Session volume",
+    "strategy.field.run_environment.participation_basis.value.adv20": "20-day average traded value",
     "strategy.field.run_environment.sell_tax": "Sell tax",
     "strategy.field.run_environment.sell_tax.description": "How the tax charged on the proceeds of each sale is counted.",
     "strategy.field.run_environment.sell_tax.value.krx_statutory": "Statutory rate (by date)",
@@ -2738,7 +2746,7 @@ export const messages = {
     "strategy.contract.risk.max_sector_weight.description":
       "Largest target weight a single sector may take.",
     "run_environment.contract.participation_rate.description":
-      "Largest share of the session's volume an order may take.",
+      "Largest share of the participation-basis volume an order may take in one session.",
     "run_environment.contract.fee_bps.description":
       "Fee in basis points charged on notional traded.",
     "run_environment.contract.slippage_bps.description":

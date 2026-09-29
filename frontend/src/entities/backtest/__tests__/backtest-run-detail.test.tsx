@@ -47,6 +47,7 @@ const result = (): BacktestRunResult => ({
       universe_id: "krx.common-stock",
       timing: "next_open",
       participation_rate: 0.2,
+      participation_basis: "adv20",
       fee_bps: 7,
       slippage_bps: 3,
       sell_tax: "krx_statutory",
@@ -102,6 +103,7 @@ describe("run 상세의 실행 설정", () => {
       "유니버스",
       "체결 시점",
       "참여율 (%)",
+      "참여 기준",
       "수수료 (bp)",
       "슬리피지 (bp)",
       "매도 거래세",
@@ -116,6 +118,7 @@ describe("run 상세의 실행 설정", () => {
     expect(row("체결 시점")).toHaveTextContent("다음 거래일 시가");
     // 평면 비용 필드(15bp)가 아니라 실행 설정이 실제로 쓴 값을 보인다(P3-02 결정 4).
     expect(row("참여율 (%)")).toHaveTextContent("20%");
+    expect(row("참여 기준")).toHaveTextContent("20일 평균 거래대금");
     expect(row("수수료 (bp)")).toHaveTextContent("7bp");
     expect(row("매도 거래세")).toHaveTextContent("법정 세율(날짜별)");
     expect(row("매도 거래세율 (bp)")).toHaveTextContent("—");

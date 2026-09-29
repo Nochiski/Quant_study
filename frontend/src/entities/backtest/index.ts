@@ -22,9 +22,12 @@ export {
   type RunEnvironmentControl,
   type RunEnvironmentField,
 } from "./model/run-environment-fields";
-export { backtestStartRejectionMessage } from "./model/start-rejection";
+export { backtestStartRejectionMessage } from "./model/backtest-error";
 export { BacktestRunDetail } from "./ui/backtest-run-detail";
-export { BacktestRunFailure } from "./ui/backtest-run-failure";
+export {
+  BacktestResultFailure,
+  BacktestRunFailure,
+} from "./ui/backtest-run-failure";
 export type {
   BacktestRunResult,
   BacktestRunSpec,

@@ -30,10 +30,12 @@ paths:
   (409·422)이 본문으로 읽는다. 접힌 상세에 둘 원문은 `shared/api`의 `failureReason` 하나가 고르고, 번역
   본문과 접힌 서버 사유는 `shared/ui`의 `FailureNotice` 하나가 그린다 — 시작·재실행 거절, run 실패,
   업그레이드·추적·실행 계획·서버 초안 실패가 함께 쓴다(#270).
-- 시작 거절(`startBacktest` 404·409·422)은 `backtest.error.<code>`를 본문으로 쓴다. 문장 규칙은
-  `entities/backtest`의 `backtestStartRejectionMessage`가 소유하고 편집기 툴바와 결과 화면 재실행이 함께
-  쓴다(표시는 `FailureNotice`). 키
-  목록은 `backtest-error-contract.test.ts`가 `openapi.json`의 코드 전수와 대조한다. 요청 본문 검증
+- 시작 거절(`startBacktest` 404·409·422)과 결과 조회 실패(`getBacktestResult` 404·409·410)는
+  `backtest.error.<code>`를 본문으로 쓴다. 코드 번역은 `entities/backtest`의 `backtestErrorSentence` 하나가
+  고른다. 시작 거절 문장(`backtestStartRejectionMessage`)은 편집기 툴바와 결과 화면 재실행이, 결과 조회
+  실패(`BacktestResultFailure`)는 결과 화면이 쓴다(표시는 `FailureNotice`, #330). 두 경로의 키 목록은
+  `backtest-error-contract.test.ts`가 `openapi.json`의 코드 전수와 대조한다. 410(Gone)은 다시 물어도 같으므로
+  조회를 재시도하지 않는다(`app/providers/query-client.ts`). 요청 본문 검증
   실패도 backend가 `backtest.run.field_invalid`(`field` = 본문 점 경로)로 코드화한다 — FastAPI 기본
   배열 422를 새 화면 계약으로 삼지 않는다. 거절의 `field`를 실행 설정 패널이 칸 이름으로 바꿀 수 있으면
   `backtest.error.<code>.named`(`{field}` 자리)에 넣는다 — 경로→이름 대응은 `features/run-backtest`의

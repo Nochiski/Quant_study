@@ -476,7 +476,6 @@ const ko = {
   "page.error.retry": "다시 시도",
   "page.revision.viewPending":
     "이 표현은 아직 제공되지 않아 소스 편집기를 표시합니다",
-  "page.backtest.resultError": "백테스트 결과를 불러올 수 없습니다.",
   "nav.backtests": "백테스트",
   "nav.experiments": "실험",
   "nav.realtime": "실시간",
@@ -1327,6 +1326,15 @@ const ko = {
   "backtest.error.backtest.strategy.stale":
     "저장된 revision이 그사이 바뀌었습니다. 전략을 다시 연 뒤 시작하세요.",
   "backtest.error.backtest.strategy.requires_upgrade": "저장된 이전 schema revision은 실행할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
+  // 결과 조회 실패(`getBacktestResult` 404·409·410)의 코드별 문장. 결과 화면이 보이고, 코드 목록은 같은 계약
+  // 테스트가 `openapi.json` 과 대조한다(#330). 코드가 없거나 번역이 없으면 일반 문장이다.
+  "backtest.result.failedGeneric": "백테스트 결과를 불러올 수 없습니다.",
+  "backtest.error.backtest.run.not_found":
+    "이 실행을 찾을 수 없습니다. 백테스트 이력에서 다시 여세요.",
+  "backtest.error.backtest.result.not_ready":
+    "이 실행은 아직 결과가 없습니다. 실행이 끝난 뒤 다시 여세요.",
+  "backtest.error.backtest.result.unreadable":
+    "이 실행의 결과 파일을 읽을 수 없습니다. 파일이 없어졌거나 손상됐거나, 결과 형식이 바뀌기 전의 옛 결과일 수 있습니다. 다시 불러와도 같으니 \"동일 설정 재실행\"으로 다시 실행하세요.",
   // 계열 합치기 거절(검증 랩 V1-05). 화면은 V5-03 이 붙인다.
   "backtest.error.backtest.lineage.already_merged":
     "두 전략은 이미 같은 시도 계열입니다. 합칠 것이 없습니다.",
@@ -2224,7 +2232,6 @@ export const messages = {
     "page.error.retry": "Retry",
     "page.revision.viewPending":
       "This view is not available yet; showing the source editor",
-    "page.backtest.resultError": "The backtest result could not be loaded.",
     "nav.backtests": "Backtests",
     "nav.experiments": "Experiments",
     "nav.realtime": "Live",
@@ -3096,6 +3103,13 @@ export const messages = {
     "backtest.error.backtest.strategy.stale":
       "The saved revision changed in the meantime. Reopen the strategy, then start again.",
     "backtest.error.backtest.strategy.requires_upgrade": "A stored older-schema revision cannot run. Upgrade it and save a new revision first.",
+    "backtest.result.failedGeneric": "The backtest result could not be loaded.",
+    "backtest.error.backtest.run.not_found":
+      "This run was not found. Open it again from the backtest history.",
+    "backtest.error.backtest.result.not_ready":
+      "This run has no result yet. Open it again after the run finishes.",
+    "backtest.error.backtest.result.unreadable":
+      "This run's result file cannot be read. The file may be missing or damaged, or it is an old result saved before the result format changed. Loading it again will not help; use \"Rerun same settings\" to run it again.",
     "backtest.error.backtest.lineage.already_merged":
       "The two strategies are already one trial lineage. There is nothing to merge.",
     "backtest.error.experiment.base.unsaved":

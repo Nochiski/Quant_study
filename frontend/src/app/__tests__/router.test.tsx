@@ -966,6 +966,45 @@ describe("App Shell routes", () => {
     expect(within(row).queryByRole("alert")).toBeNull();
   });
 
+  it("tells to rerun when a completed run's result file cannot be read", async () => {
+    // #330: 결과 파일이 없거나 손상된 완료 run은 410 `backtest.result.unreadable`로 온다. 일반 문구 대신 다시
+    // 불러와도 소용없고 같은 설정으로 다시 실행하라고 말하며, 서버 사유는 접힌 상세에 둔다.
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "completed",
+          progress: 1,
+          stage: "completed",
+          message: "Run completed",
+          created_at: "2026-09-04T00:00:00Z",
+          updated_at: "2026-09-04T00:00:01Z",
+        }),
+      ),
+      http.get(`${API}/api/v1/backtests/:runId/result`, ({ params }) =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.result.unreadable",
+              message: `run result file is missing — run_id=${String(params.runId)}`,
+            },
+          },
+          { status: 410 },
+        ),
+      ),
+    );
+    mount("/research/backtests/run-unreadable");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("이 실행의 결과 파일을 읽을 수 없습니다.");
+    expect(alert).toHaveTextContent(
+      '다시 불러와도 같으니 "동일 설정 재실행"으로 다시 실행하세요.',
+    );
+    expect(within(alert).getByRole("group")).toHaveTextContent(
+      "run result file is missing — run_id=run-unreadable",
+    );
+    expect(alert).not.toHaveTextContent("백테스트 결과를 불러올 수 없습니다");
+  });
+
   it("opens the settings route with the AI provider section from the shell", async () => {
     const user = userEvent.setup();
     const history = mount("/research/backtests");

@@ -1,6 +1,7 @@
 import { useId, useMemo, useRef, useState } from "react";
 
 import {
+  BacktestResultFailure,
   BacktestRunDetail,
   BacktestRunFailure,
   runEnvironmentFields,
@@ -149,11 +150,10 @@ export const BacktestRunPage = () => {
             {t("page.loading")}
           </p>
         ) : null}
-        {result.isError ? (
-          <p className="page-state page-state--error" role="alert">
-            {t("page.backtest.resultError")}
-          </p>
-        ) : null}
+        <BacktestResultFailure
+          error={result.error}
+          className="page-state page-state--error"
+        />
         {result.data ? (
           <BacktestRunDetail
             result={result.data}

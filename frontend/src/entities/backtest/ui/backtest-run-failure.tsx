@@ -1,6 +1,11 @@
-import type { BacktestRunState } from "../../../shared/api";
+import {
+  ApiRequestError,
+  failureReason,
+  type BacktestRunState,
+} from "../../../shared/api";
 import { t, tOptional } from "../../../shared/config";
 import { FailureNotice } from "../../../shared/ui";
+import { backtestErrorSentence } from "../model/backtest-error";
 
 type BacktestRunFailureProps = {
   run: Pick<BacktestRunState, "status" | "error" | "error_code">;
@@ -39,3 +44,27 @@ export const BacktestRunFailure = ({
     />
   );
 };
+
+/**
+ * 완료된 run의 결과 조회 실패 한 줄(#330). 결과 경로의 코드(결과 파일을 읽을 수 없는 410
+ * `backtest.result.unreadable` 등)는 시작 거절과 같은 `backtest.error.<code>` 번역을 본문으로 쓰고, 서버 사유는
+ * 접힌 상세로 내린다. 코드가 없거나 번역이 없으면 일반 문장이다. 실패가 없으면 그리지 않는다.
+ */
+export const BacktestResultFailure = ({
+  error,
+  className,
+}: {
+  error: unknown;
+  className?: string;
+}) =>
+  error === null ? null : (
+    <FailureNotice
+      className={className}
+      message={
+        backtestErrorSentence(
+          error instanceof ApiRequestError ? (error.code ?? null) : null,
+        ) ?? t("backtest.result.failedGeneric")
+      }
+      reason={failureReason(error)}
+    />
+  );

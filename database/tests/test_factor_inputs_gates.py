@@ -1,0 +1,197 @@
+"""factor_inputs 게이트 FG0~FG4 · FG-fresh — 손으로 만든 `g_<표>` 위에서 판정만 본다.
+
+빌드 왕복(`test_factor_inputs.py`)은 통과 경로를 보고, 여기서는 **각 게이트가 무엇에 FAIL 하는지**를
+한 가지씩 망가뜨려 확인한다. 기준 상태 = 계약 스키마의 빈 표 7개 + eligible 종목 1개(가격·cur
+컨센서스·연간 재무 보유)라 `run_all` 이 전부 통과한다.
+"""
+from __future__ import annotations
+
+import datetime as dt
+from collections.abc import Iterator
+from dataclasses import replace
+
+import duckdb
+import pytest
+from factor_inputs import gates
+from model.contracts import FI_TABLES, UniverseRule
+from stage.gates import GateResult, GateStatus
+
+D = "2026-09-28"
+PRICE_FROM, FLOW_FROM = "2025-03-27", "2026-06-30"
+
+
+def _insert(con: duckdb.DuckDBPyConnection, table: str, **values: object) -> None:
+    cols = FI_TABLES[table].column_names
+    extra = set(values) - set(cols)
+    assert not extra, extra
+    row = [values.get(c) for c in cols]
+    con.execute(f"INSERT INTO g_{table} VALUES ({', '.join('?' * len(cols))})", row)
+
+
+@pytest.fixture
+def con() -> Iterator[duckdb.DuckDBPyConnection]:
+    c = duckdb.connect()
+    for name, t in FI_TABLES.items():
+        cols = ", ".join(f'"{col.name}" {col.dtype}' for col in t.columns)
+        c.execute(f"CREATE TABLE g_{name} ({cols})")
+    c.execute("CREATE TABLE price_daily (ticker VARCHAR, date DATE, basis VARCHAR, "
+              "mktcap_krw DECIMAL(18, 0))")
+    d = dt.date.fromisoformat(D)
+    _insert(c, "fi_universe", ticker="000001", date=d, market="KOSPI", sec_type="common",
+            shares=1_000_000, market_cap=100.0, mktcap_basis="krx", has_estimates=True,
+            coverage_state="fresh", coverage_age_days=0, eligible=True)
+    _insert(c, "fi_prices", ticker="000001", date=d, close=10_000, price_source="krx")
+    _insert(c, "fi_consensus", ticker="000001", target_period="2026/12", horizon="cur", op=1.0)
+    _insert(c, "fi_fin_summary", ticker="000001", period="2025/12", period_type="annual",
+            per=10.0, available_date=d)
+    c.execute(f"INSERT INTO price_daily VALUES ('000001', DATE '{D}', 'krx', 10000000000)")
+    yield c
+    c.close()
+
+
+def _ctx(con: duckdb.DuckDBPyConnection, **over: object) -> gates.GateContext:
+    base = gates.GateContext(con=con, date=D, basis="morning", price_from=PRICE_FROM,
+                             flow_from=FLOW_FROM, rule=UniverseRule(), min_eligible=1,
+                             dstar=D, collection_lag_sessions=0)
+    return replace(base, **over)
+
+
+def _by_name(results: list[GateResult]) -> dict[str, GateResult]:
+    return {g.name: g for g in results}
+
+
+def test_baseline_passes_every_gate(con) -> None:
+    got = {g.name: g.status for g in gates.run_all(_ctx(con))}
+    assert got == {"FG0": GateStatus.PASS, "FG1": GateStatus.PASS, "FG2": GateStatus.PASS,
+                   "FG3": GateStatus.PASS, "FG4": GateStatus.SKIP, "FG-fresh": GateStatus.PASS}
+
+
+def test_fg0_dtype_drift_fails_and_skips_the_rest(con) -> None:
+    con.execute("ALTER TABLE g_fi_prices ALTER close TYPE DOUBLE")
+    res = _by_name(gates.run_all(_ctx(con)))
+    assert res["FG0"].status is GateStatus.FAIL and "fi_prices" in res["FG0"].detail
+    assert all(res[n].status is GateStatus.SKIP for n in gates.GATE_ORDER[1:])
+
+
+def test_fg0_column_order_matters(con) -> None:
+    con.execute("CREATE OR REPLACE TABLE g_fi_credit AS SELECT date, ticker, credit_balance, "
+                "credit_ratio, available_date FROM g_fi_credit")
+    assert gates.fg0_schema(_ctx(con)).status is GateStatus.FAIL
+
+
+@pytest.mark.parametrize("breaker, key", [
+    ("INSERT INTO g_fi_flows (ticker, date) VALUES ('999999', DATE '2026-09-28')",
+     "fi_flows.ticker_outside_universe"),
+    ("DELETE FROM g_fi_prices", "eligible_without_price_on_d"),
+    ("DELETE FROM g_fi_consensus", "eligible_without_cur_consensus"),
+    ("INSERT INTO g_fi_flows (ticker, date) VALUES ('000001', DATE '2026-06-29')",
+     "fi_flows.date_outside_window"),
+    ("INSERT INTO g_fi_prices (ticker, date) VALUES ('000001', DATE '2025-03-26')",
+     "fi_prices.date_outside_window"),
+    ("INSERT INTO g_fi_credit (ticker, date, available_date) VALUES "
+     "('000001', DATE '2026-09-25', DATE '2026-09-29')", "fi_credit.available_after_d"),
+    ("INSERT INTO g_fi_fin_summary (ticker, period, period_type) VALUES "
+     "('000001', '2024/12', 'annual'), ('000001', '2023/12', 'annual')",
+     "fi_fin_summary.annual_over_2"),
+    ("UPDATE g_fi_fin_summary SET per = NULL", "eligible_wise_fin_ratio_below_min"),
+    ("UPDATE g_fi_consensus SET horizon = '1y'", "fi_consensus.horizon_outside_vocab"),
+    ("INSERT INTO g_fi_universe (ticker, date) VALUES ('000001', DATE '2026-09-28')",
+     "fi_universe.duplicate_ticker"),
+    ("INSERT INTO g_fi_consensus_annual (ticker, period, data_type) VALUES "
+     "('000001', '2024/12', 'A')", "fi_consensus_annual.outside_window_or_vocab"),
+    ("INSERT INTO g_fi_consensus_annual (ticker, period, data_type) VALUES "
+     "('000001', '2026/12', 'estimate')", "fi_consensus_annual.outside_window_or_vocab"),
+])
+def test_fg1_fails_on_each_breach(con, breaker: str, key: str) -> None:
+    con.execute(breaker)
+    r = gates.fg1_rows(_ctx(con))
+    assert r.status is GateStatus.FAIL and r.metrics[key], (key, r.detail)
+
+
+def test_fg1_min_eligible(con) -> None:
+    r = gates.fg1_rows(_ctx(con, min_eligible=2))
+    assert r.status is GateStatus.FAIL and r.metrics["eligible_below_min"] == 1
+    assert r.metrics["n_eligible"] == 1
+
+
+def test_fg2_non_krx_rows_fail(con) -> None:
+    con.execute("UPDATE g_fi_prices SET price_source = 'evening_snapshot'")
+    assert gates.fg2_overlay(_ctx(con)).status is GateStatus.FAIL
+
+
+def test_fg3_market_cap_rule_is_rounded_eok(con) -> None:
+    # 1,000,000주 × 10,000원 = 100억 — 반올림 규칙값과 1e-6 넘게 다르면 FAIL
+    con.execute("UPDATE g_fi_universe SET market_cap = 100.5")
+    r = gates.fg3_mktcap(_ctx(con))
+    assert r.status is GateStatus.FAIL and r.metrics["market_cap_rule"] == 1
+
+
+def test_fg3_krx_mktcap_difference_is_record_only(con) -> None:
+    con.execute("UPDATE price_daily SET mktcap_krw = 20000000000")
+    r = gates.fg3_mktcap(_ctx(con))
+    assert r.status is GateStatus.PASS and r.metrics["n_krx_mktcap_diff"] == 1
+
+
+def test_fg3_missing_market_cap_fails(con) -> None:
+    con.execute("UPDATE g_fi_universe SET market_cap = NULL")
+    assert gates.fg3_mktcap(_ctx(con)).metrics["market_cap_missing"] == 1
+
+
+def _fx(**over: object) -> dict[str, object]:
+    fx: dict[str, object] = {"case": "t", "table": "fi_prices",
+                             "key": {"ticker": "000001", "date": D}, "column": "close",
+                             "expect": 10000}
+    fx.update(over)
+    return fx
+
+
+def test_fg4_golden_pass_mismatch_and_window(con) -> None:
+    assert gates.fg4_golden(_ctx(con, golden=[_fx()])).status is GateStatus.PASS
+    bad = gates.fg4_golden(_ctx(con, golden=[_fx(expect=10001)]))
+    assert bad.status is GateStatus.FAIL and bad.metrics["n_mismatch"] == 1
+    missing = gates.fg4_golden(_ctx(con, golden=[_fx(key={"ticker": "000001",
+                                                          "date": "2026-09-25"})]))
+    assert missing.status is GateStatus.FAIL          # 창 안인데 행이 없다
+    out = gates.fg4_golden(_ctx(con, golden=[_fx(key={"ticker": "000001",
+                                                      "date": "2025-01-02"})]))
+    assert out.status is GateStatus.SKIP and out.metrics["n_out_of_window"] == 1
+    other = gates.fg4_golden(_ctx(con, golden=[_fx(key={"ticker": "005930", "date": D})]))
+    assert other.status is GateStatus.SKIP            # 유니버스 밖 종목은 세지 않는다
+    assert gates.fg4_golden(_ctx(con)).status is GateStatus.SKIP
+
+
+def test_fg_fresh_records_counts(con) -> None:
+    _insert(con, "fi_universe", ticker="000002", date=dt.date.fromisoformat(D),
+            coverage_state="lapsed", coverage_age_days=6, has_estimates=False, eligible=False,
+            exclude_reason="estimates_lapsed", mktcap_basis="krx")
+    r = gates.fg_fresh(_ctx(con))
+    assert r.status is GateStatus.PASS
+    assert r.metrics["counts"] == {"fresh": 1, "lapsed": 1}
+    assert r.metrics["n_lapsed_dropped"] == 1
+
+
+@pytest.mark.parametrize("breaker, key", [
+    ("UPDATE g_fi_universe SET coverage_state = 'lapsed', coverage_age_days = 6, "
+     "has_estimates = false", "eligible_without_estimates"),
+    ("UPDATE g_fi_universe SET coverage_state = 'grace', coverage_age_days = 6",
+     "grace_age_over_limit"),
+    ("UPDATE g_fi_universe SET coverage_age_days = 2", "fresh_age_not_zero"),
+    ("UPDATE g_fi_universe SET has_estimates = false", "has_estimates_mismatch"),
+])
+def test_fg_fresh_fails_on_each_breach(con, breaker: str, key: str) -> None:
+    con.execute(breaker)
+    r = gates.fg_fresh(_ctx(con))
+    assert r.status is GateStatus.FAIL and r.metrics[key], (key, r.detail)
+
+
+def test_fg_fresh_collection_lag(con) -> None:
+    assert gates.fg_fresh(_ctx(con, collection_lag_sessions=5)).status is GateStatus.PASS
+    r = gates.fg_fresh(_ctx(con, collection_lag_sessions=6))
+    assert r.status is GateStatus.FAIL and r.metrics["collection_lag_over_grace"] == 1
+
+
+def test_fg_fresh_without_collection_is_skip(con) -> None:
+    con.execute("UPDATE g_fi_universe SET coverage_state = 'none', coverage_age_days = NULL, "
+                "has_estimates = false, eligible = false, exclude_reason = 'estimates_none'")
+    r = gates.fg_fresh(_ctx(con, dstar=None, collection_lag_sessions=None))
+    assert r.status is GateStatus.SKIP

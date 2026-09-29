@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
+import type { MetricValue } from "../../../shared/api";
 import { messages, type MessageKey } from "../../../shared/config";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { metricPlainCopy, metricUnavailableCopy } from "../model/metric-copy";
@@ -55,11 +56,21 @@ describe("지표 쉬운 이름·뜻", () => {
 describe("지표 사용 불가 사유 문구", () => {
   // 사유마다 ko·en 문구가 있는지는 타입이 강제한다(이슈 #293) — `metricUnavailableCopy`가 키를
   // `MessageKey`로 받고, en 표는 `satisfies Record<MessageKey, string>`이다. 빈 문장은 메시지 표
-  // 테스트가 본다.
+  // 테스트가 본다. 반대로 SDK에 없는 사유의 문구가 남으면 아래 타입 검사가 typecheck에서 막는다.
   it("사유 문구를 ko 표에서 찾는다", () => {
     expect(metricUnavailableCopy("benchmark_not_available")).toBe(
       messages.ko["backtest.metricUnavailable.benchmark_not_available"],
     );
+  });
+
+  it("SDK에 없는 사유의 문구를 남겨 두지 않는다", () => {
+    type Reason = NonNullable<MetricValue["unavailable_reason"]>;
+    expectTypeOf<
+      Exclude<
+        Extract<MessageKey, `backtest.metricUnavailable.${string}`>,
+        `backtest.metricUnavailable.${Reason}`
+      >
+    >().toBeNever();
   });
 
   it("생성 SDK보다 새 사유는 원문을 읽기 쉽게만 바꿔 보인다", () => {

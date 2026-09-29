@@ -3026,6 +3026,7 @@ describe("backtest from the editor (P3-05)", () => {
         spec: expect.objectContaining({ title: "퀄리티 모멘텀" }),
         source_hash: "b".repeat(64),
       },
+      lineage_strategy_id: "s1",
     });
     const firstPrompt = await screen.findByRole("alertdialog");
     await user.click(
@@ -3946,6 +3947,8 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
         environment: OLD_ENVIRONMENT,
         strategy_source: { kind: "inline_draft" },
       });
+      // 저장된 적 없는 새 전략의 초안은 계열이 없다(검증 랩 spec D2).
+      expect(started[0]).not.toHaveProperty("lineage_strategy_id");
       await user.click(
         within(await screen.findByRole("alertdialog")).getByRole("button", {
           name: "머무르기",

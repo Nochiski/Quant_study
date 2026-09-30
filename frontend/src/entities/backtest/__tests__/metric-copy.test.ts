@@ -55,8 +55,8 @@ describe("지표 쉬운 이름·뜻", () => {
 
 describe("지표 사용 불가 사유 문구", () => {
   // 사유마다 ko·en 문구가 있는지는 타입이 강제한다(이슈 #293) — `metricUnavailableCopy`가 키를
-  // `MessageKey`로 받고, en 표는 `satisfies Record<MessageKey, string>`이다. 빈 문장은 메시지 표
-  // 테스트가 본다. 반대로 SDK에 없는 사유의 문구가 남으면 아래 타입 검사가 typecheck에서 막는다.
+  // `tCode`에 `MessageKey`로 넘기고, en 표는 `satisfies Record<MessageKey, string>`이다. 빈 문장은
+  // 메시지 표 테스트가 본다. 반대로 SDK에 없는 사유의 문구가 남으면 아래 타입 검사가 typecheck에서 막는다.
   it("사유 문구를 ko 표에서 찾는다", () => {
     expect(metricUnavailableCopy("benchmark_not_available")).toBe(
       messages.ko["backtest.metricUnavailable.benchmark_not_available"],

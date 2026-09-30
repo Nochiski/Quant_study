@@ -5,6 +5,7 @@
  * `x-catalog` / `x-reference`. No allowed-value list lives in the frontend, and nothing here
  * marks errors: required/type/unknown-key diagnostics are the backend's (P3-04).
  */
+import { fieldFrequencyCopy } from "../../../entities/dataset";
 import type {
   DatasetFieldProfile,
   FactorCatalog,
@@ -155,7 +156,7 @@ const identifierOptions = (
       return catalogs.equityFields.map((field) => ({
         label: field.field_id,
         detail: field.label,
-        info: `${field.description} (${field.unit}, ${field.frequency})`,
+        info: `${field.description} (${field.unit}, ${fieldFrequencyCopy(field.frequency)})`,
         type: "value",
       }));
     }

@@ -372,6 +372,58 @@ def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() ->
     ) == (None, "coverage_gap")
 
 
+def test_trace_reports_cells_across_a_ledger_masked_cell_as_masked() -> None:
+    """#350: mock 의 000660 01-08 신용잔고는 원장이 가린 셀이다(`MOCK_MASKED_CREDIT`). 신용 랙이
+    3세션이라 01-11 에 보이고, 그 셀을 품는 2세션 차이 창(01-11·01-12)도 가린 칸을 건넌다. 추적은
+    이 칸들을 입력 결측이 아니라 `masked` 로 싣는다 — 판정은 평가기가 한다."""
+    client = TestClient(build_http_app())
+    spec = client.get("/api/v1/strategies/template").json()
+    spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
+    factor = spec["factors"][0]
+    factor["graph"] = {
+        "nodes": [
+            {"node_id": "balance", "field_id": "credit.margin_balance", "kind": "field"},
+            {
+                "node_id": "change",
+                "operator": "delta",
+                "input_node_id": "balance",
+                "window": 2,
+                "kind": "time_series",
+            },
+        ],
+        "output_node_id": "change",
+    }
+    base = {
+        "strategy_source": {"kind": "inline_draft", "spec": spec},
+        "environment": _environment(start="2024-01-03", end="2024-01-12"),
+        "factor_id": factor["factor_id"],
+        "security_ids": ["sec-000660-1"],
+        "node_ids": ["balance", "change"],
+        "include_raw": True,
+    }
+    statuses: dict[tuple[str, str], str] = {}
+    raw_kinds: dict[str, str] = {}
+    for as_of in ("2024-01-10", "2024-01-11", "2024-01-12"):
+        response = client.post("/api/v1/strategies/debug/trace", json={**base, "as_of": as_of})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        for row in body["trace"]["rows"]:
+            statuses[(row["node_id"], as_of)] = row["status"]
+        raw_kinds[as_of] = next(
+            row["kind"] for row in body["raw"] if row["field_id"] == "credit.margin_balance"
+        )
+
+    assert statuses == {
+        ("balance", "2024-01-10"): "ok",
+        ("change", "2024-01-10"): "ok",
+        ("balance", "2024-01-11"): "masked",
+        ("change", "2024-01-11"): "masked",
+        ("balance", "2024-01-12"): "ok",
+        ("change", "2024-01-12"): "masked",
+    }
+    assert raw_kinds == {"2024-01-10": "observed", "2024-01-11": "masked", "2024-01-12": "observed"}
+
+
 def test_saved_revision_trace_is_hash_guarded_and_errors_are_structured() -> None:
     client = TestClient(build_http_app())
     spec, inline = _inline_request(client)

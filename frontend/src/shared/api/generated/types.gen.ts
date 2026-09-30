@@ -1261,10 +1261,7 @@ export type DatasetFieldProfile = {
    * Field Id
    */
   field_id: string;
-  /**
-   * Frequency
-   */
-  frequency: string;
+  frequency: FieldFrequency;
   /**
    * Label
    */
@@ -2420,7 +2417,7 @@ export type FieldCatalogFacets = {
   /**
    * Frequencies
    */
-  frequencies: Array<string>;
+  frequencies: Array<FieldFrequency>;
   /**
    * Units
    */
@@ -2563,6 +2560,18 @@ export type FieldCoverageCapability = {
    */
   venues: Array<string>;
 };
+
+/**
+ * FieldFrequency
+ *
+ * 필드 값이 새로 나오는 주기. 워크벤치 어댑터가 `list_fields()` 로 내는 어휘다.
+ *
+ * 원장 `dataset_profile` 의 빈도(session·report 등)와는 다른 어휘다 — 두 어댑터가 같은 필드에
+ * 같은 빈도를 답하는지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 화면은
+ * 이 값마다 문구를 두므로(#350) 목록을 늘리면 frontend typecheck 가 문구를 요구한다.
+ */
+export type FieldFrequency =
+  "daily" | "monthly" | "quarterly" | "annual" | "event";
 
 /**
  * FieldLag
@@ -5958,7 +5967,12 @@ export type TraceUnprocessableResponse = {
  * TraceValueStatus
  */
 export type TraceValueStatus =
-  "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
+  | "ok"
+  | "missing_input"
+  | "warm_up"
+  | "divide_by_zero"
+  | "group_missing"
+  | "masked";
 
 /**
  * TrialAttempt

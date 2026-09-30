@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -182,9 +182,9 @@ def test_division_by_zero_is_distinguished_from_missing_input() -> None:
     assert _rows(trace, "div")[(DAYS[0], "a")].status is TraceValueStatus.DIVIDE_BY_ZERO
 
 
-def test_a_division_across_a_masked_cell_is_not_reported_as_division_by_zero() -> None:
-    """두 입력이 값이어도 그 사이에 원장이 가린 칸이 들면 결측이다(#337) — 0 으로 나눈 칸이
-    아니다."""
+def test_a_division_across_a_masked_cell_is_reported_as_masked() -> None:
+    """두 입력이 값이어도 그 사이에 원장이 가린 칸이 들면 결측이다(#337). 추적은 그 사유를 0 으로
+    나눈 칸이나 입력 결측이 아니라 `masked` 로 싣는다(#350)."""
     graph = FactorGraph(
         nodes=(
             FieldNode("close", "price.close", "field"),
@@ -209,7 +209,94 @@ def test_a_division_across_a_masked_cell_is_not_reported_as_division_by_zero() -
     row = _rows(trace, "div")[(DAYS[2], "a")]
 
     assert (row.value, row.inputs) == (None, (12.0, 10.0))
-    assert row.status is TraceValueStatus.MISSING_INPUT
+    assert row.status is TraceValueStatus.MASKED
+
+
+def test_masked_status_covers_exactly_the_cells_the_evaluator_masked() -> None:
+    """#350: 원장이 가린 칸(자리 30)이 값의 시점 구간에 드는 칸만 `masked` 다(손계산 정답).
+
+    `adj / lag(adj, 20)` 의 구간은 [p-20, p] 라 30~50 이 가려진다. `lag(adj, 20)` 은 [p-20, p-20]
+    이라 50 하나, 5일 평균은 [p-4, p] 라 30~34 다. 필드 노드는 가린 칸 자체(30)다. `lag` 앞 20칸은
+    이력이 모자라 가림보다 이력 부족이 먼저다. 판정은 평가기의 값 구간 규칙이 하고 추적은 읽기만
+    한다.
+    """
+    days = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(60)]
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("adj", "price.adj_close", "field"),
+            UnaryNode("lagged", UnaryOperator.LAG, "adj", "unary", periods=20),
+            BinaryNode("ratio", BinaryOperator.DIVIDE, "adj", "lagged", "binary"),
+            TimeSeriesNode("mean5", TimeSeriesOperator.MEAN, "adj", 5, "time_series"),
+            BinaryNode("out", BinaryOperator.ADD, "ratio", "mean5", "binary"),
+        ),
+        output_node_id="out",
+    )
+    panel = tuple(
+        FactorObservation(
+            day,
+            "a",
+            (
+                FactorFieldValue("price.adj_close", None, masked=True)
+                if position == 30
+                else FactorFieldValue("price.adj_close", 100.0 + position),
+            ),
+        )
+        for position, day in enumerate(days)
+    )
+    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+
+    def positions(node_id: str, status: TraceValueStatus) -> list[int]:
+        rows = _rows(trace, node_id)
+        return [p for p, day in enumerate(days) if rows[(day, "a")].status is status]
+
+    assert positions("adj", TraceValueStatus.MASKED) == [30]
+    assert positions("lagged", TraceValueStatus.MASKED) == [50]
+    assert positions("lagged", TraceValueStatus.WARM_UP) == list(range(20))
+    assert positions("ratio", TraceValueStatus.MASKED) == list(range(30, 51))
+    assert positions("mean5", TraceValueStatus.MASKED) == list(range(30, 35))
+    assert positions("out", TraceValueStatus.MASKED) == list(range(30, 51))
+    ratio = _rows(trace, "ratio")
+    # 두 입력이 모두 값인데 가려진 칸 — 예전에는 "입력 결측"으로 보였다
+    assert (ratio[(days[40], "a")].value, ratio[(days[40], "a")].inputs) == (None, (140.0, 120.0))
+    assert ratio[(days[51], "a")].value == 151.0 / 131.0
+
+
+def test_warm_up_is_reported_before_masked_where_both_apply() -> None:
+    """#350(#389 리뷰 P3-2): 창이 첫 관측 앞으로 넘어가는 칸은 가린 칸이 창에 들어도 이력 부족이다.
+
+    자리 2 를 가린 패널에서 5일 평균의 구간은 [p-4, p] 라 2~6 이 가린 칸을 품고, 0~3 은 이력이
+    모자란다(손계산 정답). 두 사유가 겹치는 2·3 은 이력 부족이다 — 가림이 없어도 값이 없을 구조적
+    사유라 먼저 말한다. 실원장 `momentum(adj, 252, lag=21)` 에서 이렇게 겹치는 칸이 428칸이다.
+    """
+    days = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(10)]
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("adj", "price.adj_close", "field"),
+            TimeSeriesNode("mean5", TimeSeriesOperator.MEAN, "adj", 5, "time_series"),
+        ),
+        output_node_id="mean5",
+    )
+    panel = tuple(
+        FactorObservation(
+            day,
+            "a",
+            (
+                FactorFieldValue("price.adj_close", None, masked=True)
+                if position == 2
+                else FactorFieldValue("price.adj_close", 100.0 + position),
+            ),
+        )
+        for position, day in enumerate(days)
+    )
+    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    rows = _rows(trace, "mean5")
+
+    assert [rows[(day, "a")].status for day in days] == [
+        *[TraceValueStatus.WARM_UP] * 4,
+        *[TraceValueStatus.MASKED] * 3,
+        *[TraceValueStatus.OK] * 3,
+    ]
+    assert rows[(days[7], "a")].value == 105.0  # (103 + 104 + 105 + 106 + 107) / 5
 
 
 @pytest.mark.parametrize(

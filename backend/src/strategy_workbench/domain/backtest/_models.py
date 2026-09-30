@@ -486,6 +486,9 @@ class RawFill:
     price: float
     fee: float
     slippage_per_share: float
+    # 체결 세션의 유동성 캡 기준 거래량 — 엔진이 참여 한도를 곱한 값이다(V4-04 2/2). 그 전에 쓴
+    # `result.json`(`backtest-artifacts-v1`)에는 없어 None 으로 읽힌다.
+    cap_volume: int | None = None
 
 
 @dataclass(frozen=True)
@@ -518,7 +521,8 @@ class RawArtifactBundle:
     fills: tuple[RawFill, ...]
     costs: tuple[RawCost, ...]
     trades: tuple[RawTrade, ...]
-    schema_version: str = "backtest-artifacts-v1"
+    # v2: 체결에 `cap_volume` 을 싣는다. v1 파일도 같은 모델로 읽는다(빈 칸은 None).
+    schema_version: str = "backtest-artifacts-v2"
 
 
 @dataclass(frozen=True)

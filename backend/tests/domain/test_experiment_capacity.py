@@ -26,10 +26,24 @@ def _order(order_id: str, quantity: str, session: date = _DAY) -> RawOrder:
 
 
 def _fill(
-    order_id: str, quantity: str, price: float, slippage: float, session: date = _DAY
+    order_id: str,
+    quantity: str,
+    price: float,
+    slippage: float,
+    session: date = _DAY,
+    cap_volume: int | None = 1_000,
 ) -> RawFill:
     return RawFill(
-        f"f-{order_id}", order_id, session, "KRX:005930", "buy", quantity, price, 0.0, slippage
+        f"f-{order_id}",
+        order_id,
+        session,
+        "KRX:005930",
+        "buy",
+        quantity,
+        price,
+        0.0,
+        slippage,
+        cap_volume,
     )
 
 
@@ -45,23 +59,38 @@ def test_execution_costs_weigh_impact_by_traded_value_and_count_each_session_ord
         (
             _fill("a", "100", 1000.0, 2.0),
             _fill("b", "50", 2000.0, 4.0),
-            _fill("c", "30", 1000.0, 2.0, _NEXT),
+            _fill("c", "30", 1000.0, 2.0, _NEXT, cap_volume=600),
         ),
     )
 
     # 충격 (2×100 + 4×50 + 2×30) / (1000×100 + 2000×50 + 1000×30) = 460 / 230000 = 20bp.
     # 세션 미체결 1 − 180/240 = 0.25 — 같은 부족분이 다음 세션 주문에서 다시 세어진다.
+    # 참여율 180 / (첫날 기준 거래량 1,000 + 다음 날 600) = 0.1125 — 첫날 두 체결은 한 거래량을
+    # 쓴다.
     costs = execution_costs(bundle)
-    assert (costs.impact_cost_bps, costs.session_unfilled_ratio) == (
+    assert (costs.impact_cost_bps, costs.session_unfilled_ratio, costs.participation_rate) == (
         pytest.approx(20.0),
         pytest.approx(0.25),
+        pytest.approx(0.1125),
     )
 
 
 def test_execution_costs_are_empty_without_orders_or_fills() -> None:
-    assert execution_costs(_bundle((), ())) == ExecutionCosts(None, None)
+    assert execution_costs(_bundle((), ())) == ExecutionCosts(None, None, None)
     # 주문은 냈지만 하나도 체결되지 않았다(참여 한도 0주 등).
-    assert execution_costs(_bundle((_order("a", "10"),), ())) == ExecutionCosts(None, 1.0)
+    assert execution_costs(_bundle((_order("a", "10"),), ())) == ExecutionCosts(None, 1.0, None)
+
+
+def test_participation_is_empty_for_a_result_written_before_cap_volume() -> None:
+    """`backtest-artifacts-v1` 결과는 체결에 기준 거래량이 없다 — 참여율을 지어내지 않는다."""
+    bundle = _bundle(
+        (_order("a", "100"), _order("b", "50", _NEXT)),
+        (_fill("a", "100", 1000.0, 2.0), _fill("b", "50", 1000.0, 2.0, _NEXT, cap_volume=None)),
+    )
+
+    costs = execution_costs(bundle)
+
+    assert (costs.session_unfilled_ratio, costs.participation_rate) == (0.0, None)
 
 
 def _limit(amount: float, best: float, threshold: float, gap: CapacityGap | None = None):

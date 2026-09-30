@@ -831,6 +831,7 @@ class BacktestEngine:
                         price=price,
                         fee=fee,
                         slippage_per_share=slip,
+                        cap_volume=snapshot.bar(entry.order.instrument).cap_volume,
                     )
                     queue.push(fill.ts, EventPriority.FILL, FillOccurred(fill, snapshot))
                     if run.wants(EventKind.FILL):

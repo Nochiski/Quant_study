@@ -421,6 +421,7 @@ class EventStore:
                         payload.price,
                         payload.fee,
                         payload.slippage_per_share,
+                        payload.cap_volume,
                     )
                 )
                 traded_notional += quantity * payload.price
@@ -683,7 +684,17 @@ class PersistentEventStore(EventStore):
         )
 
     def fill_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> FillEvent:
-        fill_id, order_id, instrument_id, quantity, side, price, fee, slippage_per_share = wire
+        (
+            fill_id,
+            order_id,
+            instrument_id,
+            quantity,
+            side,
+            price,
+            fee,
+            slippage_per_share,
+            cap_volume,
+        ) = wire
         try:
             side_value = _SIDE_BY_WIRE[side]
         except KeyError as unknown:
@@ -701,6 +712,7 @@ class PersistentEventStore(EventStore):
             price=price,
             fee=fee,
             slippage_per_share=slippage_per_share,
+            cap_volume=cap_volume,
         )
 
     def order_update_from_wire(self, ts: datetime, wire: tuple[Any, ...]) -> OrderUpdateEvent:

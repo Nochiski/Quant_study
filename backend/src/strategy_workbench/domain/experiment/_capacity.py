@@ -38,6 +38,9 @@ class ExecutionCosts:
     # 그래서 같은 부족분이 세션마다 다시 세어진다 — "끝내 못 채운 비율"이 아니다(목표 대비 달성은
     # V4-04 2/2 의 달성 비중 차이가 잰다).
     session_unfilled_ratio: float | None
+    # 체결 수량 합 ÷ 체결한 (세션, 종목) 의 유동성 캡 기준 거래량 합 — 거래량 가중 평균 참여율.
+    # 기준 거래량이 없는 옛 결과(`backtest-artifacts-v1`)거나 체결이 없으면 None.
+    participation_rate: float | None
 
 
 class CapacityGap(StrEnum):
@@ -95,14 +98,22 @@ def capacity_amounts(values: Iterable[float]) -> tuple[float, ...]:
 
 
 def execution_costs(artifacts: RawArtifactBundle) -> ExecutionCosts:
-    """체결·주문 artifact 에서 가격 충격 비용과 세션 미체결 비율을 낸다(주문은 모두 DAY 주문)."""
+    """체결·주문 artifact 에서 가격 충격 비용·세션 미체결 비율·참여율을 낸다(주문은 모두 DAY 주문).
+
+    기준 거래량은 (세션, 종목) 마다 한 번 센다 — 같은 날 한 종목의 여러 체결은 한 거래량을 나눠
+    쓴다.
+    """
     traded = sum(fill.price * float(fill.quantity) for fill in artifacts.fills)
     impact = sum(fill.slippage_per_share * float(fill.quantity) for fill in artifacts.fills)
     ordered = sum(Decimal(order.quantity) for order in artifacts.orders)
     filled = sum(Decimal(fill.quantity) for fill in artifacts.fills)
+    volumes = {(fill.session, fill.security_id): fill.cap_volume for fill in artifacts.fills}
+    known = None not in volumes.values()
+    volume = sum(value for value in volumes.values() if value is not None)
     return ExecutionCosts(
         impact_cost_bps=impact / traded * _BPS if traded else None,
         session_unfilled_ratio=float(1 - filled / ordered) if ordered else None,
+        participation_rate=float(filled / volume) if known and volume else None,
     )
 
 

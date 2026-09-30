@@ -453,6 +453,14 @@ impl PersistentEngine {
                                 "rust core filled an order that is not open — order_id={order_id}"
                             ))
                         })?;
+                    let cap_volume = self
+                        .feed_ref()?
+                        .cap_volume(session, instrument_id)
+                        .ok_or_else(|| {
+                            PyValueError::new_err(format!(
+                                "rust core filled an order without a bar — order_id={order_id} instrument_id={instrument_id}"
+                            ))
+                        })?;
                     let fill = FillWire {
                         fill_id: payload,
                         order_id,
@@ -462,6 +470,7 @@ impl PersistentEngine {
                         price,
                         fee,
                         slippage_per_share: slip,
+                        cap_volume,
                     };
                     let fill = Box::new(fill);
                     self.push(session, PRIORITY_FILL, Queued::Fill(fill.clone()))?;

@@ -180,8 +180,16 @@ class FillEvent:
     price: float
     fee: float
     slippage_per_share: float
+    # 체결 세션 bar 의 유동성 캡 기준 거래량(`Bar.cap_volume`) — 브로커가 참여 한도를 곱한 그
+    # 값이다. 참여율(체결 수량 ÷ 기준 거래량)을 결과만으로 다시 잴 수 있게 남긴다(검증 랩 V4-04).
+    cap_volume: int
 
     def __post_init__(self) -> None:
+        if self.cap_volume < 0:
+            raise ValueError(
+                f"fill cap_volume must be >= 0 — fill_id={self.fill_id} "
+                f"order_id={self.order_id} cap_volume={self.cap_volume}"
+            )
         if self.quantity <= 0:
             raise ValueError(
                 f"fill quantity must be > 0 — fill_id={self.fill_id} "

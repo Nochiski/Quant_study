@@ -121,6 +121,8 @@ pub(crate) struct FillWire {
     pub(crate) price: f64,
     pub(crate) fee: f64,
     pub(crate) slippage_per_share: f64,
+    /// 체결 세션 bar 의 유동성 캡 기준 거래량(Python `FillEvent.cap_volume`).
+    pub(crate) cap_volume: i64,
 }
 
 impl FillWire {
@@ -136,6 +138,7 @@ impl FillWire {
                 self.price,
                 self.fee,
                 self.slippage_per_share,
+                self.cap_volume,
             ),
         )
     }
@@ -327,7 +330,18 @@ pub(crate) struct ResultTableRows<'a> {
     pub(crate) snapshots: Vec<(usize, f64, f64, f64, f64)>,
     pub(crate) positions: Vec<(usize, u32, i64, f64, f64, f64, f64)>,
     pub(crate) orders: Vec<(&'a str, &'a str, usize, u32, &'a str, i64, &'a str, &'a str)>,
-    pub(crate) fills: Vec<(&'a str, &'a str, usize, u32, &'a str, i64, f64, f64, f64)>,
+    pub(crate) fills: Vec<(
+        &'a str,
+        &'a str,
+        usize,
+        u32,
+        &'a str,
+        i64,
+        f64,
+        f64,
+        f64,
+        i64,
+    )>,
     pub(crate) costs: Vec<(usize, &'a str, Option<u32>, f64)>,
     /// `(traded_notional, total_fees, total_slippage_cost)` — FILL 레코드 순서 누산.
     pub(crate) fill_totals: (f64, f64, f64),
@@ -566,6 +580,7 @@ impl RecordStore {
                         fill.price,
                         fill.fee,
                         fill.slippage_per_share,
+                        fill.cap_volume,
                     ));
                     traded_notional += fill.quantity as f64 * fill.price;
                     total_fees += fill.fee;
@@ -625,6 +640,7 @@ mod tests {
             price,
             fee: 0.0,
             slippage_per_share: 0.0,
+            cap_volume: 100,
         }))
     }
 
@@ -853,7 +869,7 @@ mod tests {
         );
         assert_eq!(
             tables.fills,
-            vec![("F-000001", "O-000001", 1, 0, "buy", 3, 10.0, 0.0, 0.0)]
+            vec![("F-000001", "O-000001", 1, 0, "buy", 3, 10.0, 0.0, 0.0, 100)]
         );
         assert_eq!(tables.costs, vec![(1, "margin_interest", None, 1.5)]);
         assert_eq!(tables.fill_totals, (30.0, 0.0, 0.0));

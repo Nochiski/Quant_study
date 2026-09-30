@@ -223,6 +223,8 @@ def test_a_capacity_sweep_from_a_finished_run_leaves_the_trial_count_as_it_was()
     assert all(point["sharpe"] is not None for point in points)
     assert [point["impact_cost_bps"] for point in points] == pytest.approx([10.0] * 3, rel=1e-3)
     assert all(0 <= point["session_unfilled_ratio"] <= 1 for point in points)
+    # 참여율은 엔진이 체결마다 남긴 기준 거래량으로 잰다(V4-04 2/2).
+    assert all(0 < point["participation_rate"] <= 1 for point in points)
     # 모든 금액이 끝났으니 확정됐다(곡선 모양에 따라 한계 금액이나 "양수 샤프 없음").
     assert capacity["limit"]["gap"] not in ("pending", "cancelled")
     # 스윕 실행 셋은 모두 기반 실행의 시도 키로 원장에 적힌 재확인이라 N 이 그대로다.

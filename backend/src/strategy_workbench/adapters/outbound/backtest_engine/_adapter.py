@@ -733,6 +733,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             price=price,
             fee=fee,
             slippage_per_share=slippage_per_share,
+            cap_volume=cap_volume,
         )
         for (
             fill_id,
@@ -744,6 +745,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             price,
             fee,
             slippage_per_share,
+            cap_volume,
         ) in tables.fills
     )
     raw_costs = tuple(
@@ -807,6 +809,7 @@ def _closed_trades(
             price,
             fee,
             slippage_per_share,
+            _cap_volume,
         ) = row
         security_id = security_ids[instrument_index]
         session = session_dates[session_index]

@@ -53,9 +53,9 @@ time_in_force)`.
 쓴다.
 """
 
-FillRow: TypeAlias = tuple[str, str, int, int, str, int, float, float, float]
+FillRow: TypeAlias = tuple[str, str, int, int, str, int, float, float, float, int]
 """`(fill_id, order_id, session_index, instrument_index, side, quantity, price, fee,
-slippage_per_share)`."""
+slippage_per_share, cap_volume)`. `cap_volume` 은 체결 세션 bar 의 유동성 캡 기준 거래량이다."""
 
 CostRow: TypeAlias = tuple[int, str, int | None, float]
 """`(session_index, kind, instrument_index, amount)`. 종목 없는 비용(margin interest)은

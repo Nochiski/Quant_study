@@ -1445,6 +1445,8 @@ const ko = {
     "실패하거나 취소된 trial만 다시 실행할 수 있고, 취소한 실험은 다시 실행하지 않습니다.",
   "backtest.error.experiment.selection.not_completed":
     "완료된 trial만 후보로 고를 수 있습니다. trial이 끝난 뒤 고르세요.",
+  "backtest.error.experiment.selection.not_finished":
+    "실험의 trial이 모두 끝난 뒤에 후보를 고를 수 있습니다. 실험이 끝나기를 기다리거나 실험을 취소하세요.",
   "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다. 어느 칸이 틀렸는지는 서버 사유를 보세요.",
   "trace.error.trace.engine.incompatible":
@@ -3350,6 +3352,8 @@ export const messages = {
       "Only a failed or cancelled trial can run again, and a cancelled experiment does not run again.",
     "backtest.error.experiment.selection.not_completed":
       "Only a completed trial can be chosen as a candidate. Choose it after the trial finishes.",
+    "backtest.error.experiment.selection.not_finished":
+      "A candidate can be chosen only after every trial of the experiment has finished. Wait for the experiment to finish or cancel it.",
     "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
     "trace.error.trace.request.invalid": "The trace request is invalid. See the server reason for the field.",
     "trace.error.trace.engine.incompatible":

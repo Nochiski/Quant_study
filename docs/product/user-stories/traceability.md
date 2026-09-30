@@ -51,7 +51,7 @@ PR은 GitHub 번호(`#123`)로 적는다.
 | US-DM-07 | 정동민 | 빈 문서에서 그래프 화면만으로 전략을 만들어 백테스트한다 | `예정` | P4-04, P5-03 | P4-04, P5-03 | — |
 | US-DM-08 | 정동민 | 백테스트 결과를 AI에게 쉬운 말로 풀어 달라고 한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/dm.result-explain.spec.ts` :: US-DM-08 완료된 백테스트 결과에서 AI에게 좋은 결과인지 물으면 지표 뜻과 벤치마크 비교를 쉬운 말로 답한다 |
 | US-DM-09 | 정동민 | AI 제안을 적용한 뒤 버튼 한 번으로 되돌린다 | `구현됨-e2e` | — | — | `frontend/e2e/assistant.workflow.spec.ts` :: 제안 카드를 미리 보고 적용하고 실행 취소·다시 실행한 뒤 적용 후 백테스트가 실행 화면까지 간다 |
-| US-DM-10 | 정동민 | 결과가 운으로 설명되는지 쉬운 말로 본다 | `예정` | V4-02, V5-02 | V5-02 | — |
+| US-DM-10 | 정동민 | 결과가 운으로 설명되는지 쉬운 말로 본다 | `예정` | V5-02 | V5-02 | — |
 | US-DM-11 | 정동민 | 버튼 하나로 지금 설정이 튼튼한지 확인한다 | `예정` | V3-05, V5-02 | V5-02 | — |
 | US-SM-01 | 한상목 | YAML을 붙여 넣고 오타를 필드 경로로 찾아 고친다 | `구현됨-e2e` | — | — | `frontend/e2e/workbench.workflow.spec.ts` :: creates, recovers, validates, versions, traces and backtests |
 | US-SM-02 | 한상목 | 필드의 단위·범위·기본값을 계약 패널에서 확인한다 | `구현됨-e2e` | — | — | `frontend/e2e/stories/sm.field-contract.spec.ts` :: US-SM-02 전략 구조에서 필드를 고르면 계약 패널이 단위·범위·표시 값을 알려 준다 |

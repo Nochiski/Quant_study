@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 from strategy_workbench.domain.analytics.facade.metrics import session_sharpe
-from strategy_workbench.domain.backtest.facade.runs import RunStatus
+from strategy_workbench.domain.backtest.facade.runs import RunFailureCode, RunStatus
 from strategy_workbench.domain.backtest.facade.trials import (
     BlockedTrialAttempt,
     TrialLedgerEntry,
@@ -29,6 +29,7 @@ def _entry(
     *,
     done_after_minutes: int = 0,
     sharpe: float | None = None,
+    error_code: RunFailureCode | None = None,
 ) -> TrialLedgerEntry:
     return TrialLedgerEntry(
         run_id=run_id,
@@ -38,6 +39,7 @@ def _entry(
         updated_at=_AT + timedelta(minutes=done_after_minutes),
         session_sharpe=sharpe,
         metric_registry_version=None if sharpe is None else "metric-registry-v4",
+        error_code=error_code,
     )
 
 
@@ -130,3 +132,29 @@ def test_the_session_sharpe_undoes_the_annualisation() -> None:
     assert session_sharpe(1.5 * math.sqrt(250 / 252), 250) == pytest.approx(
         session_sharpe(1.5, 252)
     )
+
+
+def test_a_wiped_out_run_is_a_result_that_counts_without_a_sharpe() -> None:
+    """#383: 파산은 연구자가 보고 버린 선택지라 N 에 든다. 대표 샤프가 없고, 나중 완료는 재확인이다.
+    파산 아닌 실패는 여전히 N 에서 빠진다."""
+    wiped = "backtest.run.equity_wiped_out"
+    ledger = summarize_trial_ledger(
+        "s-1",
+        (),
+        (
+            # 파산 실행에 값이 적혀 있어도 샤프는 없다(#390 리뷰 P3-1 과 같은 규칙).
+            _entry("r1", _A, RunStatus.FAILED, done_after_minutes=1, sharpe=0.3, error_code=wiped),
+            _entry("r2", _A, RunStatus.COMPLETED, done_after_minutes=5, sharpe=0.07),
+            _entry("r3", _B, RunStatus.FAILED, error_code="backtest.run.internal"),
+        ),
+        (),
+    )
+
+    first, second = ledger.trials
+    assert ledger.trial_count == 1
+    assert (first.representative_run_id, first.representative_sharpe) == ("r1", None)
+    assert [(run.role, run.session_sharpe) for run in first.runs] == [
+        (TrialRunRole.COUNTED, None),
+        (TrialRunRole.RECHECK, 0.07),
+    ]
+    assert [run.role for run in second.runs] == [TrialRunRole.NO_RESULT]

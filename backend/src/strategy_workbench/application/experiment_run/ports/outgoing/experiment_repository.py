@@ -7,7 +7,7 @@ trial 도 원장에 남는다).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
@@ -88,6 +88,26 @@ class ExperimentSelection:
     parameter_values: dict[str, ParameterValue]
     reason: str
     selected_at: datetime
+    # 고를 때의 계열 스냅숏(V4-02) — 나중에 N 이 늘어도 고를 때 본 값이 남는다. V4-02 이전 기록은
+    # None. 설명은 OpenAPI description 으로 실린다(화면이 뜻을 추정하지 않게).
+    trial_count: int | None = field(
+        default=None, metadata={"description": "고를 때의 계열 시도 수 N(계열 원장)."}
+    )
+    ledger_representative_sharpe: float | None = field(
+        default=None,
+        metadata={
+            "description": "고른 trial 이 속한 시도의 계열 원장 대표 샤프. 세션 단위(연율화 "
+            "전)이고 그 시도에서 처음 결과가 난 실행의 값이라 고른 trial 실행의 샤프(DSR 분자)가 "
+            "아닐 수 있다."
+        },
+    )
+    deflated_sharpe: float | None = field(
+        default=None,
+        metadata={
+            "description": "고른 trial 실행의 샤프를 고를 때의 계열 N·시도 대표 샤프 분산으로 깎은 "
+            "DSR(0~1). 지표가 비었거나 분산을 낼 수 없으면 비어 있다."
+        },
+    )
 
 
 class ExperimentRepositoryPort(Protocol):

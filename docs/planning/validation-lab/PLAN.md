@@ -116,7 +116,7 @@ progress_percent: 54
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `V4-01` | PSR 지표 | V0-01, #274 머지 | `MERGED` | [#363](https://github.com/Nochiski/Quant_study/pull/363) · `review_vlab_v4_01` APPROVE(P2-1·P3-1~3 반영) · main 머지 `838fd24d`(2026-09-30) |
-| [ ] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `PLANNED` | — |
+| [ ] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `SELF_CHECK` | [#385](https://github.com/Nochiski/Quant_study/pull/385) |
 | [ ] | `V4-03` | 고원·민감도 | V4-02 | `PLANNED` | — |
 | [ ] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `PLANNED` | — |
 | [ ] | `V4-05` | 팩터 회귀(시장·규모·가치·모멘텀, HAC) | V4-04 | `PLANNED` | — |

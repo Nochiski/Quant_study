@@ -34,6 +34,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     run_environment_schema,
     run_environment_schema_hash,
     sell_tax_schedule,
+    settlement_multipliers,
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
 
@@ -438,7 +439,7 @@ def test_fixed_bps_impact_leaves_the_engine_on_fixed_slippage() -> None:
 
     assert environment.impact_model is ImpactModel.FIXED_BPS
     assert cost_history_sessions(environment) == 0
-    assert impact_scales(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)], set()) is None
+    assert impact_scales(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)], {}) is None
 
 
 def test_sqrt_scale_is_k_times_prior_return_stdev_over_root_adv() -> None:
@@ -462,7 +463,7 @@ def test_sqrt_scale_is_k_times_prior_return_stdev_over_root_adv() -> None:
     ]
     environment = replace(_environment(), impact_model=ImpactModel.SQRT, impact_coefficient=0.5)
 
-    scales = impact_scales(environment, reversed(rows), set())
+    scales = impact_scales(environment, reversed(rows), {})
 
     assert scales is not None
     assert {key: scale for key, scale in scales.items() if key[0] < date(2024, 1, 5)} == {
@@ -488,7 +489,7 @@ def test_sqrt_adv_below_one_share_still_prices_impact() -> None:
     ]
     environment = replace(_environment(), impact_model=ImpactModel.SQRT)
 
-    scales = impact_scales(environment, rows, set())
+    scales = impact_scales(environment, rows, {})
 
     assert scales is not None
     assert scales[(date(2024, 1, 5), "A")] == pytest.approx(math.sqrt(0.02) / math.sqrt(50 / 99))
@@ -511,8 +512,9 @@ def test_sqrt_volatility_uses_the_last_twenty_returns_and_skips_corporate_action
     ]
     environment = replace(_environment(), impact_model=ImpactModel.SQRT)
 
-    plain = impact_scales(environment, rows, set())
-    adjusted = impact_scales(environment, rows, {(sessions[1], "A")})
+    plain = impact_scales(environment, rows, {})
+    # 100 → 200 은 2주를 1주로 합친 병합(구주 1주당 신주 0.5주)이다.
+    adjusted = impact_scales(environment, rows, {(sessions[1], "A"): 0.5})
 
     assert cost_history_sessions(environment) == 21
     assert plain is not None and adjusted is not None
@@ -530,3 +532,80 @@ def test_sqrt_volatility_uses_the_last_twenty_returns_and_skips_corporate_action
     assert plain[(sessions[3], "A")] == pytest.approx(expected(3, 1))
     assert adjusted[(sessions[4], "A")] == pytest.approx(expected(4, 2))
     assert plain[(sessions[4], "A")] > 10 * adjusted[(sessions[4], "A")]
+
+
+def test_a_corporate_action_settles_on_the_first_row_at_or_after_its_session() -> None:
+    """#339: 엔진 `_settlement_session` 과 같은 규칙 — 사건 세션에 bar 가 없으면(거래정지) 그 종목의
+    다음 행에서 정산하고, 같은 행에 정산되는 사건은 곱하며, 뒤에 행이 없는 사건은 빠진다."""
+    rows = [
+        (date(2024, 1, 2), "A", 100.0, 1.0),
+        (date(2024, 1, 5), "A", 50.0, 1.0),
+        (date(2024, 1, 3), "B", 10.0, 1.0),
+    ]
+
+    settled = settlement_multipliers(
+        rows,
+        [
+            (date(2024, 1, 3), "A", 2.0),  # 1/3·1/4 정지 → 1/5 에서 정산
+            (date(2024, 1, 4), "A", 1.5),  # 같은 1/5 에 정산 → 2 × 1.5
+            (date(2024, 1, 3), "B", 0.1),  # 사건 세션에 bar 가 있다
+            (date(2024, 1, 9), "B", 2.0),  # 뒤에 행이 없다
+        ],
+    )
+
+    assert settled == {(date(2024, 1, 5), "A"): 3.0, (date(2024, 1, 3), "B"): 0.1}
+
+
+def test_a_split_on_a_halted_session_stays_out_of_the_sqrt_volatility() -> None:
+    """#339 DEFECT-V2A-1: 분할 세션(1/5)이 거래정지라 bar 가 없어도, 정지 뒤 첫 행(1/8)에서 끝나는
+    분할 전 원주가 수익률(51/102 − 1 = −50%)은 σ 창에 들지 않는다.
+
+    종가 100 → 101 → 102 → (1/5 정지·1:2 분할) → 51 → 51.51 → 52.0251, 거래대금은 행마다 1,000.
+    - 1/8(정산 행): 판단일 종가 102 를 정산 뒤 단위 51 로 바꿔 ADV = 1,000 ÷ 51 주. σ 는 +1%·
+      +0.990% 두 수익률.
+    - 1/10: 판단일(1/9)까지 +1%·+0.990%·+1% 세 수익률(−50% 없음). ADV = 1,000 ÷ 51.51 주.
+    """
+    sessions = [
+        date(2024, 1, 2),
+        date(2024, 1, 3),
+        date(2024, 1, 4),
+        date(2024, 1, 8),
+        date(2024, 1, 9),
+        date(2024, 1, 10),
+    ]
+    closes = [100.0, 101.0, 102.0, 51.0, 51.51, 52.0251]
+    rows = [(session, "A", close, 1_000.0) for session, close in zip(sessions, closes, strict=True)]
+    environment = replace(_environment(), impact_model=ImpactModel.SQRT)
+
+    settled = settlement_multipliers(rows, [(date(2024, 1, 5), "A", 2.0)])
+    scales = impact_scales(environment, rows, settled)
+
+    assert settled == {(date(2024, 1, 8), "A"): 2.0}
+    assert scales is not None
+    early = [101 / 100 - 1, 102 / 101 - 1]
+    assert scales[(date(2024, 1, 8), "A")] == pytest.approx(
+        statistics.stdev(early) / math.sqrt(1_000 / 51)
+    )
+    assert scales[(date(2024, 1, 10), "A")] == pytest.approx(
+        statistics.stdev([*early, 51.51 / 51 - 1]) / math.sqrt(1_000 / 51.51)
+    )
+
+
+def test_the_adv_on_a_settlement_row_is_counted_in_post_action_shares() -> None:
+    """#339 DEFECT-V2A-2: 10주를 1주로 합친 병합(구주 1주당 0.1주)이 1/4 에 정산된다. 그 행의 주문·
+    체결·거래량은 병합 뒤 단위라, 판단일 종가 10 을 100 으로 바꿔 ADV = 1,000 ÷ 100 = 10주다 — 병합
+    전 종가로 나누면 100주로 한도가 10배 느슨해진다(낙관)."""
+    rows = [
+        (date(2024, 1, 2), "A", 10.0, 1_000.0),
+        (date(2024, 1, 3), "A", 10.0, 1_000.0),
+        (date(2024, 1, 4), "A", 100.0, 1_000.0),
+        (date(2024, 1, 5), "A", 100.0, 1_000.0),
+    ]
+    environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
+
+    volumes = participation_volumes(
+        environment, rows, settlement_multipliers(rows, [(date(2024, 1, 4), "A", 0.1)])
+    )
+
+    assert volumes is not None
+    assert (volumes[(date(2024, 1, 4), "A")], volumes[(date(2024, 1, 5), "A")]) == (10, 10)

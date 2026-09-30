@@ -2,15 +2,15 @@
 plan_version: 1
 project: validation-lab
 project_status: SELF_CHECK
-current_phase: V3,V5
-current_pr: V3-05,V5-03
-active_prs: [V3-05, V5-03]
-parallel_window: [V3-05, V5-03]
-last_updated: 2026-09-30T08:23:24+09:00
+current_phase: V4,V5
+current_pr: V4-02,V5-03
+active_prs: [V4-02, V5-03]
+parallel_window: [V4-02, V5-03]
+last_updated: 2026-09-30T11:23:52+09:00
 planned_prs: 28
-merged_prs: 15
-approved_prs: 15
-progress_percent: 54
+merged_prs: 16
+approved_prs: 16
+progress_percent: 57
 ---
 
 # 검증 랩 실시간 진행 계획
@@ -24,12 +24,12 @@ progress_percent: 54
 | Field | Value |
 |---|---|
 | Project status | `SELF_CHECK` |
-| Current phase | `V3,V5` |
-| Current/next PR | `V3-05,V5-03` |
-| Active PR | `V3-05, V5-03` |
-| Progress | `15 / 28 merged (54%)` |
-| Approved | `15 / 28` |
-| Aggregated at | `2026-09-30 08:23 KST` |
+| Current phase | `V4,V5` |
+| Current/next PR | `V4-02,V5-03` |
+| Active PR | `V4-02, V5-03` |
+| Progress | `16 / 28 merged (57%)` |
+| Approved | `16 / 28` |
+| Aggregated at | `2026-09-30 11:23 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -70,11 +70,11 @@ progress_percent: 54
 | V0 | Planning package | 1 | 1 | `MERGED` |
 | V1 | Research window seal, run persistence, trial ledger | 5 | 5 | `MERGED` |
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 3 | `MERGED` |
-| V3 | Experiment backend, async queue, walk-forward | 5 | 4 | `SELF_CHECK` |
-| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 1 | `WAITING` |
+| V3 | Experiment backend, async queue, walk-forward | 5 | 5 | `MERGED` |
+| V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 1 | `SELF_CHECK` |
 | V5 | Screens (after lang2 merge signal) | 7 | 1 | `SELF_CHECK` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
-| **Total** |  | **28** | **15** | **54%** |
+| **Total** |  | **28** | **16** | **57%** |
 <!-- PLAN:PHASES:END -->
 
 ## V0 — 기획 패키지
@@ -109,7 +109,7 @@ progress_percent: 54
 | [x] | `V3-02` | 파라미터 값 배선(parameter_values) | V3-01 | `MERGED` | [#321](https://github.com/Nochiski/Quant_study/pull/321) · `review_vlab_v3_02` APPROVE(P3 반영) · main 머지 `0439c2ca`(2026-09-30) |
 | [x] | `V3-03` | 실험 저장소·experiment_run·API | V3-02, V1-05 | `MERGED` | [#334](https://github.com/Nochiski/Quant_study/pull/334) · 리뷰 APPROVE(P2-1·P2-2·P3-1·2·3·5·6·8·10 반영, P3-4·7·9 는 WORKFLOW 인계) · main 머지 `61faba6a`(2026-09-30) |
 | [x] | `V3-04` | 대기열 확장(슬롯·공정 분배·중복 제거·복구·일시정지) | V3-03 | `MERGED` | [#346](https://github.com/Nochiski/Quant_study/pull/346) 스택 1/2(규칙 판본·슬롯·공정 분배·공유 취소·일괄 상태·목록 API) · [#348](https://github.com/Nochiski/Quant_study/pull/348) 2/2(재시작 복구·일시정지·SSE·e2e 훅·GC) · main 머지 `7bd0bd5c`(2026-09-30) |
-| [ ] | `V3-05` | 워크포워드 실행·이어 붙인 OOS·유지율 | V3-04, #274 머지 | `SELF_CHECK` | [#364](https://github.com/Nochiski/Quant_study/pull/364) 스택 1/2(엠바고·창 규칙) · [#365](https://github.com/Nochiski/Quant_study/pull/365) 2/2(advance·창별 선택·walk-forward API) |
+| [x] | `V3-05` | 워크포워드 실행·이어 붙인 OOS·유지율 | V3-04, #274 머지 | `MERGED` | [#364](https://github.com/Nochiski/Quant_study/pull/364) 스택 1/2(엠바고·창 규칙) · [#365](https://github.com/Nochiski/Quant_study/pull/365) 2/2(advance·창별 선택·walk-forward API) · main 머지 `ee20159d`(2026-09-30) |
 
 ## V4 — 검증 통계
 

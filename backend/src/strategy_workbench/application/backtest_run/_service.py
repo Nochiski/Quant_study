@@ -262,6 +262,11 @@ class BacktestRunService:
         self._lock = RLock()
         self._close_interrupted_runs()
 
+    def slot_usage(self) -> tuple[int, int]:
+        """(슬롯 수, 지금 도는 run 수)."""
+        with self._lock:
+            return self._run_slots, self._running
+
     def admit(self, request: BacktestRunSpec) -> RunAdmission:
         """시작과 같은 판정(preflight·엔진 호환성 포함)을 타되 접수하지 않는다.
 

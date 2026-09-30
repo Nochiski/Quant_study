@@ -1825,9 +1825,14 @@ export type ExperimentPage = {
    */
   items: Array<Experiment>;
   /**
+   * Max Priority
+   */
+  max_priority: number;
+  /**
    * Next After
    */
   next_after: string | null;
+  slots: RunSlotUsage;
 };
 
 /**
@@ -2022,6 +2027,14 @@ export type ExperimentTrialState = {
    * Bankrupt
    */
   bankrupt?: boolean;
+  /**
+   * Retryable
+   */
+  retryable: boolean;
+  /**
+   * Selectable
+   */
+  selectable: boolean;
   status: TrialStatus;
   trial: ExperimentTrial;
 };
@@ -4525,6 +4538,22 @@ export type RunManifest = {
    * Warnings
    */
   warnings?: Array<DataWarning>;
+};
+
+/**
+ * RunSlotUsage
+ *
+ * 동시 실행 슬롯 사용량(spec D6). 실험 목록 화면이 trial 수로 추정하지 않게 싣는다.
+ */
+export type RunSlotUsage = {
+  /**
+   * Running
+   */
+  running: number;
+  /**
+   * Total
+   */
+  total: number;
 };
 
 /**

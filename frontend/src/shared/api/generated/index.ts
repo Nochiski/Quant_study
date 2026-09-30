@@ -572,6 +572,7 @@ export type {
   RunEnvironmentSchema,
   RunKind,
   RunManifest,
+  RunSlotUsage,
   RunStatus,
   SaveDocumentRequest,
   SavedRevisionReference,

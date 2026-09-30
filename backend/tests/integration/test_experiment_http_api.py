@@ -134,6 +134,12 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
         experiment["record"]["experiment_id"]
     ]
     assert listed["next_after"] is None
+    # 대기열 화면의 표면(V5-01): 끝난 뒤라 도는 실행이 없고, 끝난 trial 은 고를 수 있다.
+    assert (listed["slots"]["running"], listed["max_priority"]) == (0, 5)
+    assert listed["slots"]["total"] >= 1
+    assert [(trial["selectable"], trial["retryable"]) for trial in trials.json()] == [
+        (True, False)
+    ] * 6
     blank = client.post(
         f"/api/v1/experiments/{experiment['record']['experiment_id']}/selections",
         json={"trial_index": 0, "reason": "   "},

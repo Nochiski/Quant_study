@@ -87,6 +87,14 @@ const BacktestsPage = lazyRouteComponent(
   () => import("../../pages/research-backtests"),
   "BacktestsPage",
 );
+const ExperimentsPage = lazyRouteComponent(
+  () => import("../../pages/research-experiments"),
+  "ExperimentsPage",
+);
+const NewExperimentPage = lazyRouteComponent(
+  () => import("../../pages/research-experiment-new"),
+  "NewExperimentPage",
+);
 const SettingsPage = lazyRouteComponent(
   () => import("../../pages/settings"),
   "SettingsPage",
@@ -118,6 +126,17 @@ const backtestHistorySearch = (
       ? search.strategy.trim()
       : undefined,
   kind: isRunKind(search.kind) ? search.kind : undefined,
+});
+
+const textOf = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+
+/** 새 실험의 기반: 백테스트 실행(`run`) 또는 같은 설정으로 다시 만들 실험(`from`). */
+const newExperimentSearch = (
+  search: Record<string, unknown>,
+): { run?: string; from?: string } => ({
+  run: textOf(search.run),
+  from: textOf(search.from),
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -212,6 +231,19 @@ const backtestRunRoute = createRoute({
   component: BacktestRunPage,
 });
 
+const experimentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/experiments",
+  component: ExperimentsPage,
+});
+
+const newExperimentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/experiments/new",
+  validateSearch: newExperimentSearch,
+  component: NewExperimentPage,
+});
+
 const operationsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/operations",
@@ -255,6 +287,8 @@ const routeTree = rootRoute.addChildren([
   strategyRevisionRoute,
   backtestsRoute,
   backtestRunRoute,
+  experimentsRoute,
+  newExperimentRoute,
   settingsRoute,
   operationsRoute.addChildren([
     deploymentsRoute,

@@ -13,7 +13,7 @@ import {
 import { AssistStrategySidebar } from "../../../features/assist-strategy";
 import { BacktestRunActions } from "../../../features/run-backtest";
 import { t } from "../../../shared/config";
-import { useNavigate, useParams } from "../../../shared/lib/router";
+import { Link, useNavigate, useParams } from "../../../shared/lib/router";
 import { Badge, Button } from "../../../shared/ui";
 import "./backtest-run-page.css";
 
@@ -122,6 +122,14 @@ export const BacktestRunPage = () => {
               })
             }
           />
+          {/* 새 실험 화면이 이 실행의 요청을 기반으로 읽는다. 저장 리비전만 기반이 되는지는 backend 가 판정한다. */}
+          <Link
+            className="ui-button ui-button--secondary ui-button--small"
+            to="/research/experiments/new"
+            search={{ run: runId }}
+          >
+            {t("backtest.actions.experiment")}
+          </Link>
           {assistantAvailable ? (
             <Button
               ref={toggleRef}

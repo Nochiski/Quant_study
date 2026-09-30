@@ -30,6 +30,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
 )
 from strategy_workbench.application.experiment_run.facade.ports import (
     AdmittedRun,
+    RunSlotUsage,
     TrialResultUnreadableError,
     TrialRunRejectedError,
 )
@@ -209,6 +210,9 @@ class _FakeRuns:
             for run_id in run_ids
         }
 
+    def slot_usage(self) -> RunSlotUsage:
+        return RunSlotUsage(total=3, running=2)
+
     def schedule(self, owner: str, *, paused: bool, priority: int) -> None:
         self.schedules.append((owner, paused, priority))
 
@@ -326,6 +330,13 @@ def test_a_failed_trial_is_kept_and_a_retry_is_a_new_attempt() -> None:
     experiment_id = service.create(_request()).record.experiment_id
     runs.run_statuses["run-1"] = RunStatus.FAILED
 
+    # 재시도·선택 가능 여부는 trial 상태에 실려 화면이 규칙을 다시 세지 않는다(V5-01).
+    assert [(state.retryable, state.selectable) for state in service.trials(experiment_id)] == [
+        (False, False),
+        (True, False),
+        (False, False),
+        (False, False),
+    ]
     retried = service.retry(experiment_id, 1)
 
     assert [(attempt.attempt, attempt.run_id) for attempt in retried.attempts] == [
@@ -374,6 +385,8 @@ def test_cancel_stops_submission_and_cancels_submitted_runs() -> None:
     assert runs.started == []
     assert cancelled.status is ExperimentStatus.CANCELLED
     assert [state.status for state in service.trials(experiment_id)] == [TrialStatus.CANCELLED] * 4
+    # 취소한 실험의 trial 은 다시 실행할 수 없다.
+    assert not any(state.retryable for state in service.trials(experiment_id))
 
 
 def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
@@ -400,6 +413,7 @@ def test_only_a_completed_trial_can_be_selected_and_the_record_stays() -> None:
     with pytest.raises(ExperimentStateError) as raised:
         service.select(experiment_id, 2, "이웃 평균 샤프가 가장 높다")
     _finish(runs, {f"run-{index}": _result() for index in range(4)})
+    assert service.trials(experiment_id)[2].selectable
     selection = service.select(experiment_id, 2, "이웃 평균 샤프가 가장 높다")
 
     assert raised.value.code == "experiment.selection.not_completed"
@@ -546,6 +560,8 @@ def test_experiments_are_listed_newest_first_a_page_at_a_time() -> None:
     assert (first.next_after, second.next_after) == (created[1], None)
     assert [item.record.experiment_id for item in second.items] == created[:1]
     assert service.list(after="missing", limit=2).items == ()
+    # 대기열 화면의 슬롯 사용량과 우선순위 상한은 목록 응답이 싣는다(V5-01).
+    assert (first.slots, first.max_priority) == (RunSlotUsage(total=3, running=2), 5)
 
 
 def test_controls_pause_the_experiment_lane_and_come_back_after_a_restart(

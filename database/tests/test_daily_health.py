@@ -376,6 +376,35 @@ def test_kis_credit_fresh_fails_when_two_sessions_behind(tmp_path):
     assert not rep.ok
 
 
+# ── KIS 신용잔고 행수 — 수집기와 같은 기대 집합 판정 (플랜 2026-09-30 T-K2) ──────
+def _kis_hist(tmp_path, n_got, n_expected=2500):
+    """D-2(20260904) 직전 5세션에 `n_expected` 종목, D-2 당일엔 앞 `n_got` 종목."""
+    con = sqlite3.connect(tmp_path / "kis.db")
+    con.execute("CREATE TABLE kis_credit_balance (row_hash TEXT, req_ticker TEXT, deal_date TEXT, "
+                "dup_seq TEXT, collected_at TEXT)")
+    hist = ("20260828", "20260831", "20260901", "20260902", "20260903")
+    con.executemany("INSERT INTO kis_credit_balance VALUES (?,?,?,?,?)",
+                    [(f"h{d}{i}", f"{i:06d}", d, "0", "t") for d in hist for i in range(n_expected)]
+                    + [(f"g{i}", f"{i:06d}", "20260904", "0", "t") for i in range(n_got)])
+    con.commit(); con.close()
+    return str(tmp_path / "kis.db")
+
+
+def test_kis_credit_rows_ignore_requested_tickers_that_never_have_credit(tmp_path):
+    # 요청 2,563 중 신용잔고가 있는 2,500 이 전부 왔다 — 옛 판정(행/요청)은 0.9754 였다
+    rep = lh.run(D, _paths(tmp_path, kis=_kis_hist(tmp_path, 2500)))
+    c = _by(rep)["kis.credit.rows"]
+    assert c.status is lh.Status.PASS
+    assert c.value == {"expected": 2500, "got": 2500, "ratio": 1.0, "distinct_ok": True, "requested": 2563}
+
+
+def test_kis_credit_rows_warn_when_three_percent_of_expected_is_missing(tmp_path):
+    rep = lh.run(D, _paths(tmp_path, kis=_kis_hist(tmp_path, 2425)))
+    c = _by(rep)["kis.credit.rows"]
+    assert c.level is lh.Level.WARN and c.status is lh.Status.FAIL
+    assert "판정일 행 부족" in c.detail and rep.ok
+
+
 # ── WICS 주간 원장 (플랜 wics-weekly T1) ────────────────────────────────────
 
 

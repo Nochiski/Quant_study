@@ -2,7 +2,9 @@
 # 06:00 KST 수집 체인 — KRX 를 뺀 전 소스. 플랜 P1 Task 1.8 / 결정 R1.
 #   순서: 캘린더 동기화 → D(직전 거래일) 판정 → 키움 마스터(daily_wise.sh, 매일) →
 #         [D 미수집이면] 키움 대차 1 TR fetch → KIS credit → DART 스윕·상세·문서 → 신규 corp 회사정보 공백 메우기 → 수집 요약 알림
-#   어느 단계든 rc≠0 이면 그 단계에서 멈추고 crit. 07:00(v3 토큰 재발급) 전에 끝나야 한다(예산 36분).
+#   소스별 단계는 서로 막지 않는다 — 한 단계가 rc≠0 이어도 다음 소스는 받고, 실패한 단계를 모두 모아 crit
+#   (플랜 2026-09-30 T-K3: 신용잔고 판정 실패가 DART 를 막던 결함). `dart company gap` 만 `dart` 성공에 묶는다.
+#   KIS 는 07:00(v3 토큰 재발급) 전에 끝나야 해서 순서는 키움 → KIS → DART 그대로다.
 #   사용: daily_ledger.sh [--date YYYYMMDD] [--dry-run] [--limit N]
 #   환경: QL_KW_NOT_BEFORE=HH:MM (키움 fetch 하한 시각, P0 프로브 판독값. 기본 06:00)
 #         QL_SKIP_KW=1 이면 키움 시계열 단계를 건너뛴다(앱키 분리 전 임시)
@@ -10,8 +12,9 @@
 #         daily_evening.sh 가 당일 저녁에 원장 직행으로 받고(결정 V2-1·V2-3), 외국인 보유(ka10008)는
 #         T-1 행이 07시 전후에 정정되므로(프로브 실측 09-10) daily_build.sh(08:10) 가 받는다.
 set -uo pipefail
-cd /home/kael/quant-ledger
-export QL_HOME=/home/kael/quant-ledger PYTHONPATH=/home/kael/quant-ledger/src
+ROOT="${QL_LEDGER_ROOT:-/home/kael/quant-ledger}"   # 테스트가 임시 루트를 쓰게 할 때만 바꾼다
+cd "$ROOT"
+export QL_HOME="$ROOT" PYTHONPATH="$ROOT/src"
 PY=.venv/bin/python
 LOCK=/tmp/quant_ledger_raw.lock
 if [ -z "${QL_RAW_LOCK_HELD:-}" ]; then
@@ -36,12 +39,12 @@ LOG="logs/daily_ledger_$(TZ=Asia/Seoul date +%Y%m%d).log"
 RUN=$(mktemp)
 FAILED=""
 SKIPPED=""   # 건너뜀 사유 — 비어 있지 않으면 완료 알림 제목을 바꾼다(V2-7: 건너뜀도 보고)
-step() {  # step <이름> <명령...> — rc≠0 이면 FAILED 에 이름을 적고 1 반환
+step() {  # step <이름> <명령...> — rc≠0 이면 FAILED 에 이름을 덧붙이고 1 반환
   local name="$1"; shift
   echo "──── $name 시작 $(kst) ────"
   "$@"; local rc=$?
   echo "──── $name 종료 rc=$rc $(kst) ────"
-  if [ "$rc" -ne 0 ]; then FAILED="$name(rc=$rc)"; return 1; fi
+  if [ "$rc" -ne 0 ]; then FAILED="${FAILED:+$FAILED, }$name(rc=$rc)"; return 1; fi
   return 0
 }
 {
@@ -67,19 +70,16 @@ sys.exit(0 if rows else 1)' "$D"; then
 else
   RID=""
   [ -z "$DRY" ] && RID=$($PY -c 'import sys; from daily import runlog; print(runlog.start("data/raw/daily_run.db", date=sys.argv[1], source="ledger_chain"))' "$D")
-  # ② 키움 대차 1 TR fetch(대기 테이블) → ③ KIS credit → ④ DART
+  # ② 키움 대차 1 TR fetch(대기 테이블) → ③ KIS credit → ④ DART — 소스끼리는 서로 막지 않는다(T-K3)
   if [ -n "${QL_SKIP_KW:-}" ]; then
     echo "  QL_SKIP_KW=1 — 키움 시계열 fetch 건너뜀(앱키 분리 전, DECISIONS_PENDING 결정 5 R5 후속)"
-    step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT \
-    && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT \
-    && step "dart company gap" bash scripts/dart_company_gap.sh ${DRY:+--dry-run}
   else
-    step "kiwoom fetch" $PY -m daily.kw_daily --date "$D" --fetch --tr ka20068 --not-before "${QL_KW_NOT_BEFORE:-06:00}" $DRY $LIMIT \
-    && step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT \
-    && step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT \
-    && step "dart company gap" bash scripts/dart_company_gap.sh ${DRY:+--dry-run}
+    step "kiwoom fetch" $PY -m daily.kw_daily --date "$D" --fetch --tr ka20068 --not-before "${QL_KW_NOT_BEFORE:-06:00}" $DRY $LIMIT || true
   fi
-  RC=$?
+  step "kis credit" $PY -m daily.kis_daily --date "$D" $DRY $LIMIT || true
+  step "dart" $PY -m daily.dart_daily --date "$D" $DRY $LIMIT \
+    && step "dart company gap" bash scripts/dart_company_gap.sh ${DRY:+--dry-run}
+  RC=0; [ -n "$FAILED" ] && RC=1
   # `RC` 는 수집 체인의 rc 라 `|| true` 로 흘려보낸 daily_wise 실패를 모른다 — 런로그가 ok 인데 알림은
   # crit 이던 관측 불일치(DEFECT-A10). 런로그도 FAILED 를 함께 본다.
   if [ -n "$RID" ]; then

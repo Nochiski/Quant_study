@@ -320,6 +320,82 @@ def test_isolated_failures_stay_partial(api_mod, monkeypatch, tmp_path):
     assert res.status is kis_daily.Status.PARTIAL and res.rc == 0
 
 
+# ── 완료 판정 재정의 (플랜 2026-09-30 T-K1 · DEFECT-K1·K3) ─────────────────────
+_HISTORY = ("20260831", "20260901", "20260902", "20260903", "20260904")   # 판정일 직전 5세션
+
+
+def _seed_history(con: sqlite3.Connection, tickers: tuple[str, ...]) -> None:
+    """판정일(20260907) 직전 5세션 신용잔고 — 기대 집합의 근거가 되는 옛 수집분."""
+    for t in tickers:
+        kis_daily.store_new_facts(con, t, "20260726", "20260905", [_fact(d) for d in _HISTORY])
+    con.execute("UPDATE kis_credit_balance SET collected_at='2026-09-05T21:00:00'")
+    con.commit()
+
+
+def test_rerun_of_an_already_collected_day_passes(api_mod, monkeypatch, tmp_path):
+    """연휴 뒤 같은 D 재실행 — 응답은 전부 이미 원장에 있는 사실이라 새로 적재되는 행이 0 이다.
+    콜이 살아서 판정일 행을 돌려줬으므로 통과여야 한다(09-25~28 거짓 실패 재현)."""
+    tickers = ("000660", "005930", "035420", "051910")
+    con = _con(tmp_path)
+    for t in tickers:
+        kis_daily.store_new_facts(con, t, "20260726", "20260905", [_fact("20260907")])
+    con.execute("UPDATE kis_credit_balance SET collected_at='2026-09-07T21:00:00'")
+    con.commit()
+    monkeypatch.setattr(api_mod, "kis", _fake_kis({t: [_fact("20260907")] for t in tickers}))
+    res = kis_daily.run(con, date="20260908", gate_date="20260907", d1="20260730", d2="20260909",
+                        tickers=tickers, run_db=tmp_path / "daily_run.db")
+    assert res.n_new_rows == 0 and res.n_dup_skipped == 4
+    assert res.status is kis_daily.Status.OK, res.detail
+
+
+def test_tickers_without_any_credit_history_do_not_count_against_the_gate(api_mod, monkeypatch,
+                                                                           tmp_path):
+    """신용잔고가 원래 없는 종목(신규 상장 등)은 빈 응답이다 — 분모에 넣으면 비율이 구조적으로 내려간다."""
+    tickers = tuple(f"{i:06d}" for i in range(100))
+    with_credit = tickers[:90]
+    con = _con(tmp_path)
+    _seed_history(con, with_credit)
+    monkeypatch.setattr(api_mod, "kis", _fake_kis({t: [_fact("20260907")] for t in with_credit}))
+    res = kis_daily.run(con, date="20260908", gate_date="20260907", d1="20260730", d2="20260909",
+                        tickers=tickers, run_db=tmp_path / "daily_run.db")
+    assert res.status is kis_daily.Status.OK, res.detail
+    assert "expected=90" in res.detail and "hit=90" in res.detail and "ratio=1.0000" in res.detail
+
+
+def test_missing_target_day_for_three_percent_of_expected_fails(api_mod, monkeypatch, tmp_path):
+    """이력 있는 100종목 중 3종목이 판정일 행 없이 옛 행만 돌려준다 → 0.97 < 0.98."""
+    tickers = tuple(f"{i:06d}" for i in range(100))
+    con = _con(tmp_path)
+    _seed_history(con, tickers)
+    rows = {t: [_fact("20260907")] for t in tickers[3:]} | {t: [_fact("20260904")] for t in tickers[:3]}
+    monkeypatch.setattr(api_mod, "kis", _fake_kis(rows))
+    res = kis_daily.run(con, date="20260908", gate_date="20260907", d1="20260730", d2="20260909",
+                        tickers=tickers, run_db=tmp_path / "daily_run.db")
+    assert res.status is kis_daily.Status.GATE_FAILED and res.rc == 2
+    assert "ratio=0.9700" in res.detail and "000000" in res.detail
+
+
+def test_expected_set_is_tickers_seen_in_the_last_five_sessions(api_mod, tmp_path):
+    con = _con(tmp_path)
+    kis_daily.store_new_facts(con, "000001", "20260701", "20260905", [_fact("20260828")])  # 6세션 전
+    _seed_history(con, ("000002",))
+    kis_daily.store_new_facts(con, "000003", "20260701", "20260910", [_fact("20260907")])  # 판정일 당일만
+    assert kis_daily.expected_tickers(con, "20260907") == {"000002"}
+    assert kis_daily.expected_tickers(con, "20260907", n_sessions=6) == {"000001", "000002"}
+
+
+def test_gate_on_the_ledger_uses_the_expected_set(api_mod, tmp_path):
+    """사후 점검(원장 건전성) 경로 — 이번 런 응답 없이 원장의 판정일 행으로 판정한다."""
+    tickers = tuple(f"{i:06d}" for i in range(100))
+    con = _con(tmp_path)
+    _seed_history(con, tickers)
+    for t in tickers[:98]:
+        kis_daily.store_new_facts(con, t, "20260730", "20260909", [_fact("20260907")])
+    g = kis_daily.gate(con, "20260907", 130)
+    assert g.ok and (g.n_expected, g.n_hit) == (100, 98)
+    assert "ratio=0.9800" in g.detail
+
+
 # ── 토큰 캐시 권한 (DEFECT-A12·D11) ─────────────────────────────────────────
 def test_token_cache_is_written_owner_only(api_mod, tmp_path):
     path = tmp_path / "tok.json"

@@ -327,18 +327,22 @@ def check_kis(con: sqlite3.Connection, d_prev: str, d_prev3: str, d_minus40: str
         out.append(Check("kis.credit.fresh", Level.REQUIRED, Status.FAIL, max_deal or None, expected,
                          f"신용잔고 수집이 멈춰 있다 — max(deal_date)={max_deal or '없음'}, "
                          f"두 세션 이상 뒤처졌다(kis_daily 의 status·rc 를 확인한다)"))
-    row = con.execute("SELECT COUNT(*), COUNT(DISTINCT req_ticker) FROM kis_credit_balance WHERE deal_date=?", (d_prev,)).fetchone()
-    n, tk = (int(row[0]), int(row[1])) if row else (0, 0)
-    if n_req <= 0:
-        out.append(Check("kis.credit.rows", Level.WARN, Status.SKIP, n, "요청 유니버스 크기 미상"))
-    else:
-        ratio = n / n_req
-        out.append(Check("kis.credit.rows", Level.WARN, Status.PASS if (ratio >= 0.95 and tk == n) else Status.FAIL,
-                         {"n": n, "distinct": tk, "requested": n_req, "ratio": round(ratio, 4)},
-                         f"deal_date={d_prev} rows/requested >= 0.95 and distinct = rows (D-2, 실측: 조회일 기준 T-3 까지 온다)"))
     from daily import (
-        kis_daily,  # payload 동일 중복만 센다(정정은 제외) — 정의를 한 곳에 둔다
+        kis_daily,  # 완료 판정·payload 동일 중복의 정의를 수집기와 한 곳에 둔다
     )
+    if n_req <= 0:
+        out.append(Check("kis.credit.rows", Level.WARN, Status.SKIP, None, "요청 유니버스 크기 미상"))
+    else:
+        # 수집기와 같은 판정(플랜 2026-09-30 T-K2). 사후 점검이라 "이번 런 응답" 이 없어 원장의 판정일 행으로
+        # 세고, 요청 종목 목록이 상태 파일에 없어 기대 집합을 요청 유니버스로 좁히지 않는다.
+        g = kis_daily.gate(con, d_prev, n_req)
+        out.append(Check("kis.credit.rows", Level.WARN, Status.PASS if g.ok else Status.FAIL,
+                         {"expected": g.n_expected, "got": g.n_hit, "ratio": round(g.ratio, 4),
+                          "distinct_ok": g.n_distinct_tickers == g.n_rows, "requested": n_req},
+                         f"deal_date={d_prev}(D-2) 받은 종목 / 직전 {kis_daily.EXPECTED_SESSIONS}세션 신용잔고 종목 "
+                         f">= {kis_daily.GATE_MIN_RATIO} · 종목당 1행 (이력이 없으면 요청 유니버스 대비 "
+                         f">= {kis_daily.BOOTSTRAP_MIN_RATIO})",
+                         "" if g.ok else g.detail))
     pairs = kis_daily.dup_pairs(con, d_minus40)
     if prev_pairs is None:
         out.append(Check("kis.credit.dup_growth", Level.HALT, Status.SKIP, pairs, "전날 리포트 없음 — 기준선 기록"))

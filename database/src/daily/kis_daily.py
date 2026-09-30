@@ -32,7 +32,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import cast
@@ -45,7 +45,9 @@ DATE_COL = "deal_date"
 REQ_NAME = "credit"                       # `req_name` — 백필이 남긴 값과 같아야 한다
 META_COLS = frozenset({"row_hash", "dup_seq", "collected_at"})
 WINDOW_DAYS = 40                          # 응답 30행(30영업일) 을 덮는 캘린더 폭
-GATE_MIN_RATIO = 0.95                     # A §6-3 A · 플랜 Task 1.7 Step 2
+GATE_MIN_RATIO = 0.98                     # 기대 집합 대비(플랜 2026-09-30 T-K1 — 08-10~09-23 재계산 최저 0.9968)
+BOOTSTRAP_MIN_RATIO = 0.95                # 기대 집합이 빌 때(첫 수집) 요청 유니버스 대비 — 옛 판정(A §6-3 A)
+EXPECTED_SESSIONS = 5                     # 기대 집합 = 판정일 직전 이만큼의 deal_date 에 행이 있던 종목
 FAILURE_RATIO_MAX = 0.02                  # 이 비율을 넘는 종목 실패는 PARTIAL(rc 0)로 넘기지 않는다(A06)
 KST = dt.timezone(dt.timedelta(hours=9))
 
@@ -101,7 +103,7 @@ class StoreOutcome:
 
 @dataclass(frozen=True)
 class GateResult:
-    """A §6-3 A — `deal_date = D−1` 행수 / 요청 유니버스 ≥ 0.95 이고 종목당 1행."""
+    """판정일 행을 받은 종목 / 기대 집합 ≥ 0.98 이고 종목당 1행(플랜 2026-09-30 T-K1)."""
 
     ok: bool
     n_rows: int
@@ -109,6 +111,8 @@ class GateResult:
     n_requested: int
     ratio: float
     detail: str
+    n_expected: int = 0
+    n_hit: int = 0
 
 
 def window(today: dt.date, days: int = WINDOW_DAYS) -> tuple[str, str]:
@@ -315,41 +319,88 @@ def dup_pairs(con: sqlite3.Connection, since: str) -> int:
     return 0 if row is None else int(row[0])
 
 
-def gate(con: sqlite3.Connection, gate_date: str, n_requested: int,
-         min_ratio: float = GATE_MIN_RATIO, since: str | None = None) -> GateResult:
-    """완료 판정. `gate_date`(= D−2, 실측) 행수 / 요청 유니버스 ≥ min_ratio 이고 종목당 1행.
+def expected_tickers(con: sqlite3.Connection, gate_date: str,
+                     n_sessions: int = EXPECTED_SESSIONS) -> set[str]:
+    """기대 집합 — 원장에서 `gate_date` 직전 `n_sessions` 개 deal_date 에 한 번이라도 행이 있던 종목.
 
-    `since`(= 이번 런 시작 UTC)를 주면 **그 시각 이후에 적재된 행만** 센다(DEFECT-A06). 그러지 않으면
-    전날 런이 넣어 둔 같은 날짜 행으로 오늘의 전멸이 통과한다 — 창(`d1=T−40일`)이 매일 같은 구간을
-    다시 덮기 때문이다. DART 쪽은 같은 함정을 `dart_call_log` 로 피했다(`dart_daily.py:432-435`).
+    신용잔고가 원래 없는 종목(신규 상장·신용 비대상)은 응답이 비어 여기에 들지 않고, 신용 대상에서
+    빠진 종목은 n 세션 뒤 저절로 빠진다(DEFECT-K3 — 요청 유니버스를 분모로 쓰면 신규 상장만큼 비율이
+    구조적으로 내려간다). 거래일 달력이 아니라 원장의 deal_date 를 쓴다 — 기준이 "직전까지 실제로
+    받던 종목" 이기 때문이다.
+    """
+    if not _table_exists(con):
+        return set()
+    dates = [str(r[0]) for r in con.execute(
+        f"SELECT DISTINCT {DATE_COL} FROM {TABLE} WHERE {DATE_COL} < ? ORDER BY 1 DESC LIMIT ?",
+        (gate_date, n_sessions))]
+    if not dates:
+        return set()
+    return {str(r[0]) for r in con.execute(
+        f"SELECT DISTINCT req_ticker FROM {TABLE} WHERE {DATE_COL} IN ({','.join('?' * len(dates))})",
+        dates)}
+
+
+def gate(con: sqlite3.Connection, gate_date: str, n_requested: int,
+         min_ratio: float = GATE_MIN_RATIO, since: str | None = None, *,
+         hit: Collection[str] | None = None, requested: Collection[str] | None = None,
+         bootstrap_min_ratio: float = BOOTSTRAP_MIN_RATIO) -> GateResult:
+    """완료 판정(플랜 2026-09-30 T-K1). 판정일(`gate_date` = D−2, 실측) 행을 받은 종목 / 기대 집합
+    ≥ `min_ratio` 이고 종목당 1행.
+
+    - 기대 집합 = `expected_tickers`(`requested` 가 있으면 그 안으로 좁힌다). 비면(첫 수집) 옛 판정 —
+      받은 종목 / 요청 유니버스(`n_requested`) ≥ `bootstrap_min_ratio`.
+    - 받은 종목 = `hit`(이번 런 **응답**에 판정일 행이 있던 종목). 오늘 콜이 전멸해도 어제 넣어 둔 행으로
+      통과하던 무음 정지(DEFECT-A06)는 이것으로 막는다. 적재 여부로 세지 않는 이유: 이미 원장에 있는
+      사실은 적재를 건너뛰므로 연휴 뒤 같은 D 재실행이 새 행 0 으로 거짓 실패한다(DEFECT-K1, 09-25~28).
+      `hit` 이 없으면(사후 점검 — 원장 건전성) 원장의 판정일 행으로 센다.
+    - 종목당 1행은 `since`(이번 런 시작 UTC) 이후 적재분으로, 없으면 원장의 판정일 행 전체로 본다.
     """
     n_rows = n_tk = n_ledger = 0
+    ledger_tk: set[str] = set()
     if _table_exists(con):
-        row = con.execute(
-            f"SELECT COUNT(*), COUNT(DISTINCT req_ticker) FROM {TABLE} WHERE {DATE_COL} = ?",
-            (gate_date,)).fetchone()
-        if row is not None:
-            n_ledger, n_rows, n_tk = int(row[0]), int(row[0]), int(row[1])
+        row = con.execute(f"SELECT COUNT(*) FROM {TABLE} WHERE {DATE_COL} = ?", (gate_date,)).fetchone()
+        n_ledger = int(row[0]) if row is not None else 0
+        ledger_tk = {str(r[0]) for r in con.execute(
+            f"SELECT DISTINCT req_ticker FROM {TABLE} WHERE {DATE_COL} = ?", (gate_date,))}
+        n_rows, n_tk = n_ledger, len(ledger_tk)
         if since is not None:
             row = con.execute(
                 f"SELECT COUNT(*), COUNT(DISTINCT req_ticker) FROM {TABLE} "
                 f"WHERE {DATE_COL} = ? AND collected_at >= ?", (gate_date, since)).fetchone()
             n_rows, n_tk = (int(row[0]), int(row[1])) if row is not None else (0, 0)
-    ratio = (n_rows / n_requested) if n_requested else 0.0
-    ok = n_requested > 0 and ratio >= min_ratio and n_tk == n_rows
+    got = set(hit) if hit is not None else ledger_tk
+    expected = expected_tickers(con, gate_date)
+    if requested is not None:
+        expected &= set(requested)
     label = "n_rows(this run)" if since is not None else "n_rows"
-    detail = (f"deal_date={gate_date} {label}={n_rows} n_tickers={n_tk} "
-              f"requested={n_requested} ratio={ratio:.4f} min_ratio={min_ratio:.2f}"
-              + (f" ledger_rows={n_ledger} since={since}" if since is not None else ""))
+    rows_part = (f"{label}={n_rows} n_tickers={n_tk} requested={n_requested}"
+                 + (f" ledger_rows={n_ledger} since={since}" if since is not None else ""))
+    if expected:
+        n_hit = len(got & expected)
+        ratio = n_hit / len(expected)
+        need = min_ratio
+        detail = (f"deal_date={gate_date} expected={len(expected)} hit={n_hit} ratio={ratio:.4f} "
+                  f"min_ratio={need:.2f} new={len(got - expected)} | {rows_part}")
+    else:
+        n_hit = len(got)
+        ratio = (n_hit / n_requested) if n_requested else 0.0
+        need = bootstrap_min_ratio
+        detail = (f"deal_date={gate_date} basis=requested(기대 집합 없음 — 첫 수집) hit={n_hit} "
+                  f"ratio={ratio:.4f} min_ratio={need:.2f} | {rows_part}")
+    ok = (bool(expected) or n_requested > 0) and ratio >= need and n_tk == n_rows
     if not ok:
-        if n_requested == 0:
+        if not expected and n_requested == 0:
             detail += " — 요청 유니버스가 비었다(키움 마스터 스냅샷 확인)"
-        elif ratio < min_ratio:
-            detail += (f" — 행수 부족(기대 >= {math.ceil(min_ratio * n_requested)}, "
-                       f"실제 {n_rows})")
+        elif ratio < need and expected:
+            missing = sorted(expected - got)
+            detail += (f" — 판정일 행 부족(기대 >= {math.ceil(need * len(expected))}, 실제 {n_hit}, "
+                       f"빠진 종목 {len(missing)}개 앞 5개 {missing[:5]})")
+        elif ratio < need:
+            detail += (f" — 행수 부족(기대 >= {math.ceil(need * n_requested)}, "
+                       f"실제 {n_hit})")
         else:
             detail += f" — 종목당 1행 위반(기대 n_tickers == n_rows, 실제 {n_tk} != {n_rows})"
-    return GateResult(ok, n_rows, n_tk, n_requested, ratio, detail)
+    return GateResult(ok, n_rows, n_tk, n_requested, ratio, detail, len(expected), n_hit)
 
 
 def run(con: sqlite3.Connection, *, date: str, gate_date: str, d1: str, d2: str,
@@ -373,6 +424,7 @@ def run(con: sqlite3.Connection, *, date: str, gate_date: str, d1: str, d2: str,
 
     n_calls = n_new = n_dup = 0
     failures: list[str] = []
+    hit: set[str] = set()                  # 이번 런 응답에 판정일 행이 있던 종목(적재 여부 무관)
     aborted: Status | None = None
     qstreak = 0
     for i, tk in enumerate(targets, 1):
@@ -397,12 +449,15 @@ def run(con: sqlite3.Connection, *, date: str, gate_date: str, d1: str, d2: str,
         if out.verdict in ("error", "retry"):
             failures.append(f"{tk}:{out.code}")
             continue
+        if any(r.get(DATE_COL) == gate_date for r in out.rows):
+            hit.add(tk)
         if out.rows and not dry_run:
             st = store_new_facts(con, tk, d1, d2, out.rows)
             n_new += st.n_new
             n_dup += st.n_dup_skipped
 
-    g = gate(con, gate_date, len(tickers), min_ratio, since=run_started_at)
+    g = gate(con, gate_date, len(tickers), min_ratio, since=run_started_at, hit=hit,
+             requested=targets)
     dup_after = dup_pairs(con, d1)
     detail = (f"{g.detail} | calls={n_calls} new_rows={n_new} dup_skipped={n_dup} "
               f"tickers={len(targets)}/{len(tickers)} window={d1}~{d2} "

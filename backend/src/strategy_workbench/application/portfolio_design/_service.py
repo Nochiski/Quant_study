@@ -886,7 +886,7 @@ def _to_portfolio_observations(
 ) -> tuple[PortfolioObservation, ...]:
     """`progress` 는 팩터 값 색인(0~0.3)과 관측 조립(0.3~1.0) 진행을 받는다."""
     in_range = set(_checkpointed(raw.sessions, checkpoint))
-    values_by_key: dict[tuple[str, date, str], float | None] = {}
+    values_by_key: dict[tuple[str, date, str], FactorValue] = {}
     record_count = max(len(evaluations), 1)
     for record_index, record in enumerate(_checkpointed(evaluations, checkpoint)):
 
@@ -894,7 +894,7 @@ def _to_portfolio_observations(
             progress(0.3 * (index + fraction) / record_count)
 
         for value in _reported(record.values, checkpoint, report_record):
-            values_by_key[(record.factor_id, value.as_of, value.security_id)] = value.value
+            values_by_key[(record.factor_id, value.as_of, value.security_id)] = value
     opening_weights = (
         None
         if starting_holdings is None
@@ -909,17 +909,20 @@ def _to_portfolio_observations(
             security_id=item.security_id,
             universe_member=item.universe_member,
             factor_values=tuple(
-                PortfolioFactorValue(
-                    factor_id=record.factor_id,
-                    value=values_by_key.get((record.factor_id, item.as_of, item.security_id)),
-                    available_date=_latest_input_publication(
-                        item, record.plan, checkpoint=checkpoint
-                    ),
+                _portfolio_factor_value(
+                    record.factor_id,
+                    values_by_key.get((record.factor_id, item.as_of, item.security_id)),
+                    _latest_input_publication(item, record.plan, checkpoint=checkpoint),
                 )
                 for record in _checkpointed(evaluations, checkpoint)
             ),
             fields=tuple(
-                PortfolioFieldValue(field.field_id, field.value, field.available_date)
+                PortfolioFieldValue(
+                    field.field_id,
+                    field.value,
+                    field.available_date,
+                    masked=field.kind is CellKind.MASKED,
+                )
                 for field in _checkpointed(item.fields, checkpoint)
             ),
             sector_id=item.sector_id,
@@ -933,6 +936,17 @@ def _to_portfolio_observations(
             raw.observations, checkpoint, lambda fraction: progress(0.3 + 0.7 * fraction)
         )
         if item.as_of in in_range
+    )
+
+
+def _portfolio_factor_value(
+    factor_id: str, value: FactorValue | None, available_date: date
+) -> PortfolioFactorValue:
+    return PortfolioFactorValue(
+        factor_id=factor_id,
+        value=value.value if value is not None else None,
+        available_date=available_date,
+        masked=value is not None and value.masked,
     )
 
 

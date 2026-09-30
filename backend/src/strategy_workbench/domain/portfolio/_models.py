@@ -54,6 +54,8 @@ class PortfolioFieldValue:
     field_id: str
     value: PortfolioInputValue
     available_date: date
+    # 원장이 가린 셀이라 값이 없다(#350). 결측 탈락 중 원장이 가린 몫을 기준일 요약이 센다.
+    masked: bool = False
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,8 @@ class PortfolioFactorValue:
     factor_id: str
     value: float | None
     available_date: date
+    # 원장이 가린 칸 때문에 팩터 값이 없다(평가기 판정 `FactorValue.masked`, #350).
+    masked: bool = False
 
 
 @dataclass(frozen=True)

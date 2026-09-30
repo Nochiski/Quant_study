@@ -29,6 +29,7 @@ from strategy_workbench.domain.portfolio.facade.construction import (
     ExclusionReason,
     PortfolioFactorValue,
     PortfolioFieldValue,
+    PortfolioFrameSummary,
     PortfolioObservation,
     PortfolioTraceSelection,
     compile_target_tape,
@@ -344,6 +345,68 @@ def test_the_rank_cut_reason_reaches_the_construction_trace() -> None:
     traced = {item.security_id: item for item in result.trace.candidates}
     assert traced["s000"].exclusion_reasons == ()
     assert traced["s003"].exclusion_reasons == (ExclusionReason.ELIGIBILITY_RANK_CUT,)
+
+
+def test_the_frame_summary_counts_members_by_final_reason_and_masked_missing() -> None:
+    """기준일 요약(lang2 P4-03)은 컴파일러가 최종 사유로 센 수다. 종목을 고르지 않아도 나온다.
+
+    유니버스 밖(`z`)은 세지 않는다. 결측 제외 중 원장이 가린 입력 때문인 종목(#350)은 결측을 판정한
+    세 자리 — 절대 규칙 필드(`e`), 횡단면 필드(`f`), 팩터 값(`g`) — 에서 모두 센다. `g` 는 순위
+    탈락이면서 팩터 값도 없어 사유별 수를 더해도 유니버스가 되지 않는다. 그래서 순위에 든 수를
+    따로 싣는다.
+    """
+    market_cap = "price.market_cap"
+
+    def member(
+        security_id: str, liquidity: PortfolioFieldValue | None, cap: PortfolioFieldValue
+    ) -> PortfolioObservation:
+        fields = (cap,) if liquidity is None else (liquidity, cap)
+        return replace(_observation(security_id), fields=fields)
+
+    def value(field_id: str, amount: float | None) -> PortfolioFieldValue:
+        return PortfolioFieldValue(field_id, amount, _DAY, masked=amount is None)
+
+    observations = (
+        member("a", value(_LIQUIDITY, 10.0), value(market_cap, 100.0)),
+        member("b", value(_LIQUIDITY, 9.0), value(market_cap, 90.0)),
+        member("c", value(_LIQUIDITY, 8.0), value(market_cap, 80.0)),
+        member("d", value(_LIQUIDITY, 0.1), value(market_cap, 75.0)),
+        member("e", value(_LIQUIDITY, None), value(market_cap, 60.0)),
+        member("f", value(_LIQUIDITY, 7.0), value(market_cap, None)),
+        replace(
+            member("g", value(_LIQUIDITY, 6.0), value(market_cap, 70.0)),
+            factor_values=(PortfolioFactorValue("price.close", None, _DAY, masked=True),),
+        ),
+        member("h", None, value(market_cap, 50.0)),
+        replace(
+            member("z", value(_LIQUIDITY, None), value(market_cap, 99.0)),
+            universe_member=False,
+        ),
+    )
+    spec = _spec(
+        EligibilityRule(_LIQUIDITY, EligibilityOperator.GREATER_THAN, 0.5),
+        EligibilityRule(market_cap, EligibilityOperator.TOP_COUNT, 2),
+    )
+
+    result = compile_target_tape_with_trace(
+        spec,
+        environment=_environment(),
+        data_snapshot_id="snapshot-1",
+        sessions=(_DAY, _DAY + timedelta(days=1)),
+        observations=observations,
+        trace_selection=PortfolioTraceSelection(as_of=_DAY, security_ids=()),
+    )
+
+    assert result.trace is not None
+    assert result.trace.candidates == ()
+    assert result.trace.summary == PortfolioFrameSummary(
+        universe=8,
+        eligible=2,
+        eligibility_failed=1,
+        eligibility_rank_cut=2,
+        missing=4,
+        masked=3,
+    )
 
 
 def test_compare_refuses_an_operator_it_cannot_decide_alone() -> None:

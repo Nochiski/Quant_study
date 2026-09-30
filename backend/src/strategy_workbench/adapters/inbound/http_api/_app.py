@@ -28,6 +28,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunState,
     BacktestRunSummary,
     BacktestStartResponse,
+    RunKind,
     RunStatus,
     TrialLedger,
     TrialLineageAlreadyMergedError,
@@ -370,10 +371,12 @@ def create_app(
             CANONICAL_PAGE_INTEGER_VALIDATOR,
         ] = 50,
         strategy_id: str | None = Query(default=None, min_length=1),
+        kind: RunKind | None = None,
     ) -> Page[BacktestRunSummary]:
         return backtest_runs.list_runs(
             PageRequest(offset=offset, limit=limit),
             strategy_id=strategy_id,
+            kind=kind,
         )
 
     def admitted(call: Callable[[], _T]) -> _T:

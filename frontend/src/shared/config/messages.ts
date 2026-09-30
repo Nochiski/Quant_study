@@ -1415,6 +1415,15 @@ const ko = {
   // 계열 합치기 거절(검증 랩 V1-05). 화면은 V5-03 이 붙인다.
   "backtest.error.backtest.lineage.already_merged":
     "두 전략은 이미 같은 시도 계열입니다. 합칠 것이 없습니다.",
+  "backtest.error.strategy.not_found":
+    "고른 전략을 찾을 수 없습니다. 전략 목록을 새로 고친 뒤 다시 고르세요.",
+  // 실행 종류(검증 랩 V5-03). 종류는 backend `RunKind` 가 정한다.
+  "backtest.runKind.single": "단일 실행",
+  "backtest.runKind.experiment_trial": "실험 시도",
+  "backtest.runKind.walk_forward_validation": "워크포워드 검증",
+  // 실험 run 이 쓰는 실험. 실험 화면(V5-01)이 생기기 전이라 id 만 보인다.
+  "history.backtests.experiment": "실험 {experiment}",
+  "history.backtests.experimentPaused": "실험 일시정지",
   // 실험 거절(검증 랩 V3-03). 코드 목록의 정본은 backend `domain/experiment/_errors.py` 이고 화면은 V5-01 이 붙인다.
   "backtest.error.experiment.base.unsaved":
     "실험은 저장한 전략 리비전으로만 만들 수 있습니다. 전략을 저장한 뒤 그 리비전으로 실험을 만드세요.",
@@ -1572,6 +1581,38 @@ const ko = {
   "history.strategies.latest": "최신 revision",
   "history.strategies.updated": "최근 저장",
   "history.strategies.hash": "Spec hash",
+  "history.strategies.history": "전략 이력",
+  "history.revisions.tab": "리비전",
+  // 계열 시도 원장(검증 랩 V5-03, US-SM-12). 역할·N 은 backend 원장 집계가 정한다.
+  "history.trials.tab": "시도 원장",
+  "history.trials.loading": "시도 원장을 불러오는 중입니다.",
+  "history.trials.error": "시도 원장을 불러올 수 없습니다.",
+  "history.trials.empty": "아직 이 계열에서 실행한 백테스트가 없습니다.",
+  "history.trials.count": "계열 시도 수 {count}회",
+  "history.trials.mergedInto":
+    "이 전략의 시도는 {lineage} 계열에 합쳐져 있어 그 계열의 원장을 보입니다.",
+  "history.trials.caption": "시도 원장",
+  "history.trials.trial": "시도",
+  "history.trials.runs": "실행",
+  "history.trials.role.counted": "시도로 셈",
+  "history.trials.role.recheck": "재확인",
+  "history.trials.role.pending": "결과 대기",
+  "history.trials.role.no_result": "시도 수 제외",
+  "history.trials.blocked": "봉인 구간과 겹쳐 거절된 요청 · 시작일 {start}",
+  "history.trials.merge": "다른 계열과 합치기",
+  "history.trials.merge.title": "다른 계열과 합치기",
+  "history.trials.merge.description":
+    "같은 아이디어를 이어서 연구했다면 합쳐야 시도 수가 정직해집니다. 고른 전략의 시도가 {target} 계열로 들어와 함께 셉니다.",
+  "history.trials.merge.warning":
+    "합치기는 되돌릴 수 없습니다. 계열을 다시 나누거나 시도를 지우는 기능은 없습니다.",
+  "history.trials.merge.source": "합칠 전략",
+  "history.trials.merge.choose": "전략을 고르세요",
+  "history.trials.merge.noCandidates": "합칠 다른 저장 전략이 없습니다.",
+  "history.trials.merge.partial":
+    "저장 전략 {total}개 가운데 {shown}개만 고를 수 있습니다.",
+  "history.trials.merge.cancel": "취소",
+  "history.trials.merge.confirm": "합치기",
+  "history.trials.merge.failed": "계열을 합치지 못했습니다.",
   "history.revisions.loading": "Revision 이력을 불러오는 중입니다.",
   "history.revisions.error": "Revision 이력을 불러올 수 없습니다.",
   "history.revisions.empty": "저장된 revision이 없습니다.",
@@ -1592,6 +1633,9 @@ const ko = {
   "history.backtests.emptyTitle": "백테스트 실행 이력이 없습니다",
   "history.backtests.empty": "전략에서 백테스트를 실행하면 이곳에 표시됩니다.",
   "history.backtests.filteredEmpty": "이 전략으로 실행한 백테스트가 없습니다.",
+  "history.backtests.kindEmpty": "이 종류의 백테스트가 없습니다.",
+  "history.backtests.kind": "종류",
+  "history.backtests.kindAll": "전체",
   "history.backtests.caption": "백테스트 실행 이력",
   "history.backtests.pagination": "백테스트 이력 페이지",
   "history.backtests.filter": "Strategy ID",
@@ -3279,6 +3323,13 @@ export const messages = {
       "This run's result file cannot be read. The file may be missing or damaged, or it is an old result saved before the result format changed. Loading it again will not help; run it again with the same settings.",
     "backtest.error.backtest.lineage.already_merged":
       "The two strategies are already one trial lineage. There is nothing to merge.",
+    "backtest.error.strategy.not_found":
+      "The chosen strategy was not found. Refresh the strategy list and choose again.",
+    "backtest.runKind.single": "Single run",
+    "backtest.runKind.experiment_trial": "Experiment trial",
+    "backtest.runKind.walk_forward_validation": "Walk-forward validation",
+    "history.backtests.experiment": "Experiment {experiment}",
+    "history.backtests.experimentPaused": "Experiment paused",
     "backtest.error.experiment.base.unsaved":
       "An experiment can only start from a saved strategy revision. Save the strategy, then create the experiment from that revision.",
     "backtest.error.experiment.base.invalid":
@@ -3436,6 +3487,37 @@ export const messages = {
     "history.strategies.latest": "Latest revision",
     "history.strategies.updated": "Last saved",
     "history.strategies.hash": "Spec hash",
+    "history.strategies.history": "Strategy history",
+    "history.revisions.tab": "Revisions",
+    "history.trials.tab": "Trial ledger",
+    "history.trials.loading": "Loading the trial ledger.",
+    "history.trials.error": "The trial ledger could not be loaded.",
+    "history.trials.empty": "No backtest has run in this lineage yet.",
+    "history.trials.count": "Lineage trial count: {count}",
+    "history.trials.mergedInto":
+      "This strategy's trials were merged into the {lineage} lineage, so that lineage's ledger is shown.",
+    "history.trials.caption": "Trial ledger",
+    "history.trials.trial": "Trial",
+    "history.trials.runs": "Runs",
+    "history.trials.role.counted": "Counted",
+    "history.trials.role.recheck": "Recheck",
+    "history.trials.role.pending": "Waiting for result",
+    "history.trials.role.no_result": "Not counted",
+    "history.trials.blocked": "Request refused for overlapping the sealed window · start {start}",
+    "history.trials.merge": "Merge another lineage",
+    "history.trials.merge.title": "Merge another lineage",
+    "history.trials.merge.description":
+      "If you kept researching the same idea, merge so the trial count stays honest. The chosen strategy's trials join the {target} lineage and are counted together.",
+    "history.trials.merge.warning":
+      "Merging cannot be undone. There is no way to split a lineage or delete trials.",
+    "history.trials.merge.source": "Strategy to merge",
+    "history.trials.merge.choose": "Choose a strategy",
+    "history.trials.merge.noCandidates": "There is no other saved strategy to merge.",
+    "history.trials.merge.partial":
+      "Only {shown} of {total} saved strategies can be chosen.",
+    "history.trials.merge.cancel": "Cancel",
+    "history.trials.merge.confirm": "Merge",
+    "history.trials.merge.failed": "The lineages could not be merged.",
     "history.revisions.loading": "Loading revision history.",
     "history.revisions.error": "Revision history could not be loaded.",
     "history.revisions.empty": "There are no saved revisions.",
@@ -3456,6 +3538,9 @@ export const messages = {
     "history.backtests.emptyTitle": "No backtest runs yet",
     "history.backtests.empty": "Run a strategy backtest to see it here.",
     "history.backtests.filteredEmpty": "No backtest used this strategy.",
+    "history.backtests.kindEmpty": "No backtest of this kind.",
+    "history.backtests.kind": "Kind",
+    "history.backtests.kindAll": "All",
     "history.backtests.caption": "Backtest run history",
     "history.backtests.pagination": "Backtest history pages",
     "history.backtests.filter": "Strategy ID",

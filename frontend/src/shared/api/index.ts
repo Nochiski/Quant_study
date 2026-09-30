@@ -81,6 +81,7 @@ export {
   type RevisionSummary,
   type RunEnvironment,
   type RunEnvironmentSchema,
+  type RunKind,
   type SaveDocumentRequest,
   type SaveStrategyDraftRequest,
   type SavedRevisionReference,
@@ -94,6 +95,7 @@ export {
   type StrategySummary,
   type StrategyTraceRequest,
   type StrategyTraceResponse,
+  type TrialLedger,
   type TrialPreview,
   type UpgradedDocument,
 } from "./strategy-workbench";

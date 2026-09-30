@@ -909,8 +909,26 @@
         "type": "object"
       },
       "BacktestRunSummary": {
-        "description": "One accepted run and the strategy meaning resolved before it started.",
+        "description": "One accepted run and the strategy meaning resolved before it started.\n\n종류와 쓰는 실험은 저장소가 읽을 때 정한다. 사용자가 시작한 run 을 실험이 이어 쓰면(같은 입력\n잇기) 실험 run 이다. `experiment_paused` 는 그 실험이 일시정지돼 대기 run 이 배정되지 않는다는\n뜻이다.",
         "properties": {
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "experiment_paused": {
+            "title": "Experiment Paused",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RunKind"
+          },
           "run": {
             "$ref": "#/components/schemas/BacktestRunState"
           },
@@ -920,7 +938,10 @@
         },
         "required": [
           "run",
-          "strategy_provenance"
+          "strategy_provenance",
+          "kind",
+          "experiment_id",
+          "experiment_paused"
         ],
         "title": "BacktestRunSummary",
         "type": "object"
@@ -6633,6 +6654,16 @@
         "title": "RunEnvironmentSchema",
         "type": "object"
       },
+      "RunKind": {
+        "description": "백테스트 이력의 실행 종류(검증 랩 V5-03, #382). 실험이 쓴 run 이면 그 쓰임새다.",
+        "enum": [
+          "single",
+          "experiment_trial",
+          "walk_forward_validation"
+        ],
+        "title": "RunKind",
+        "type": "string"
+      },
       "RunManifest": {
         "description": "What a finished run was made of.\n\n`strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run\nexecuted one strategy.",
         "properties": {
@@ -11125,6 +11156,22 @@
                 }
               ],
               "title": "Strategy Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
             }
           }
         ],

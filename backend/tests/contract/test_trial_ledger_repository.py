@@ -19,7 +19,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunNotFoundError,
     BacktestRunSpec,
     BacktestRunState,
-    BacktestRunSummary,
     RunStatus,
     StrategyProvenance,
     StrategySourceKind,
@@ -31,10 +30,8 @@ _AT = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
 
 def _add(repository: SQLiteBacktestRunRepository, run_id: str, lineage_id: str | None) -> None:
     repository.add(
-        BacktestRunSummary(
-            BacktestRunState(run_id, RunStatus.QUEUED, 0.0, "queued", "Run accepted", _AT, _AT),
-            StrategyProvenance(StrategySourceKind.INLINE_DRAFT, "a" * 64, "1.2"),
-        ),
+        BacktestRunState(run_id, RunStatus.QUEUED, 0.0, "queued", "Run accepted", _AT, _AT),
+        StrategyProvenance(StrategySourceKind.INLINE_DRAFT, "a" * 64, "1.2"),
         BacktestRunSpec(),
         lineage_id=lineage_id,
         trial_key=run_id[-1] * 64,

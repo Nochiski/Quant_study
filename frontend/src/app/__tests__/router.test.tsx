@@ -70,11 +70,20 @@ const backtestSummary = ({
   runId,
   status = "completed",
   saved = false,
+  kind = "single",
+  experimentId = null,
+  paused = false,
 }: {
   runId: string;
   status?: "queued" | "running" | "completed" | "failed";
   saved?: boolean;
+  kind?: "single" | "experiment_trial" | "walk_forward_validation";
+  experimentId?: string | null;
+  paused?: boolean;
 }) => ({
+  kind,
+  experiment_id: experimentId,
+  experiment_paused: paused,
   run: {
     run_id: runId,
     status,
@@ -95,6 +104,64 @@ const backtestSummary = ({
     source_hash: saved ? "b".repeat(64) : "c".repeat(64),
   },
 });
+
+const trialLedger = (trialCount: number) => ({
+  lineage_id: "s1",
+  merged_lineage_ids: [],
+  trial_count: trialCount,
+  trials: [
+    {
+      trial_key: "a".repeat(64),
+      runs: [
+        {
+          run_id: "run-first",
+          status: "completed",
+          created_at: "2026-09-05T00:00:00Z",
+          role: "counted",
+        },
+        {
+          run_id: "run-again",
+          status: "completed",
+          created_at: "2026-09-05T01:00:00Z",
+          role: "recheck",
+        },
+      ],
+      representative_run_id: "run-first",
+      representative_sharpe: 0.05,
+      metric_registry_version: "metric-registry-v5",
+    },
+    {
+      trial_key: "c".repeat(64),
+      runs: [
+        {
+          run_id: "run-cancelled",
+          status: "cancelled",
+          created_at: "2026-09-05T02:00:00Z",
+          role: "no_result",
+        },
+      ],
+    },
+  ],
+  blocked: [
+    {
+      blocked_at: "2026-09-05T03:00:00Z",
+      lineage_id: "s1",
+      trial_key: "d".repeat(64),
+      spec_hash: "e".repeat(64),
+      start: "2018-01-02",
+    },
+  ],
+});
+
+const openTrialLedger = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(
+    await screen.findByRole("button", {
+      name: "Revision 펼치기: Alpha strategy (s1)",
+    }),
+  );
+  await user.click(await screen.findByRole("tab", { name: "시도 원장 1" }));
+  return screen.getByRole("tabpanel");
+};
 
 const server = setupServer(
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
@@ -168,16 +235,23 @@ const server = setupServer(
     const offset = Number(url.searchParams.get("offset") ?? 0);
     const limit = Number(url.searchParams.get("limit") ?? 25);
     const strategyId = url.searchParams.get("strategy_id");
+    const kind = url.searchParams.get("kind");
     const all = [
       backtestSummary({ runId: "run-inline" }),
-      backtestSummary({ runId: "run-saved", saved: true }),
+      backtestSummary({
+        runId: "run-saved",
+        saved: true,
+        kind: "experiment_trial",
+        experimentId: "exp-7",
+        paused: true,
+      }),
     ];
-    const filtered =
-      strategyId === null
-        ? all
-        : all.filter(
-            (item) => item.strategy_provenance.strategy_id === strategyId,
-          );
+    const filtered = all.filter(
+      (item) =>
+        (strategyId === null ||
+          item.strategy_provenance.strategy_id === strategyId) &&
+        (kind === null || item.kind === kind),
+    );
     return HttpResponse.json({
       items: filtered.slice(offset, offset + limit),
       total: filtered.length,
@@ -509,7 +583,7 @@ describe("App Shell routes", () => {
       }),
     );
     const revisions = await screen.findByRole("region", {
-      name: "저장 revision 목록: Alpha strategy (s1)",
+      name: "전략 이력: Alpha strategy (s1)",
     });
     expect(within(revisions).getByText("bbbbbbbbbbbb")).toBeInTheDocument();
     expect(within(revisions).getByText("원문 hash 없음")).toBeInTheDocument();
@@ -570,7 +644,7 @@ describe("App Shell routes", () => {
       }),
     );
     const revisions = await screen.findByRole("region", {
-      name: "저장 revision 목록: Frozen strategy (frozen-legacy)",
+      name: "전략 이력: Frozen strategy (frozen-legacy)",
     });
     const rows = within(revisions).getAllByRole("row").slice(1);
     expect(within(rows[0]!).getByText("이전 버전 동결")).toBeInTheDocument();
@@ -648,11 +722,11 @@ describe("App Shell routes", () => {
     await user.click(firstToggle);
     await user.click(secondToggle);
     const firstHistory = await screen.findByRole("region", {
-      name: "저장 revision 목록: Duplicate title (s01)",
+      name: "전략 이력: Duplicate title (s01)",
     });
     expect(
       screen.getByRole("region", {
-        name: "저장 revision 목록: Duplicate title (s02)",
+        name: "전략 이력: Duplicate title (s02)",
       }),
     ).toBeInTheDocument();
     expect(firstHistory.id).toBe(firstToggle.getAttribute("aria-controls"));
@@ -675,6 +749,142 @@ describe("App Shell routes", () => {
     expect(await screen.findByText("Strategy 21")).toBeInTheDocument();
     await waitFor(() => expect(history.location.search).toContain("offset=20"));
     expect(strategyOffsets).toContain(20);
+  });
+
+  it("shows the lineage trial ledger with rechecks and uncounted runs and only a merge action", async () => {
+    // 검증 랩 V5-03(US-SM-12): 역할·N 은 backend 원장 응답 그대로다. 지우기·나누기 버튼은 없다.
+    server.use(
+      http.get(`${API}/api/v1/strategies/:strategyId/trials`, () =>
+        HttpResponse.json(trialLedger(1)),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies");
+    const ledger = await openTrialLedger(user);
+
+    expect(ledger).toHaveTextContent("계열 시도 수 1회");
+    const row = (runId: string) =>
+      within(ledger).getByRole("link", { name: runId.slice(0, 12) })
+        .parentElement!;
+    expect(row("run-first")).toHaveTextContent("시도로 셈");
+    expect(row("run-again")).toHaveTextContent("재확인");
+    expect(row("run-cancelled")).toHaveTextContent("시도 수 제외");
+    expect(
+      within(ledger).getByText(
+        /봉인 구간과 겹쳐 거절된 요청 · 시작일 2018-01-02/u,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(ledger)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["다른 계열과 합치기"]);
+  });
+
+  it("merges another lineage after confirmation and translates a refusal", async () => {
+    let merged: { strategyId: unknown; body: unknown } | null = null;
+    let refuse = false;
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              strategy_id: "s1",
+              latest_revision: 2,
+              requires_upgrade: false,
+              title: "Alpha strategy",
+              spec_hash: "a".repeat(64),
+              updated_at: "2026-09-05T00:00:00Z",
+            },
+            {
+              strategy_id: "s2",
+              latest_revision: 1,
+              requires_upgrade: false,
+              title: "Beta strategy",
+              spec_hash: "b".repeat(64),
+              updated_at: "2026-09-04T00:00:00Z",
+            },
+          ],
+          total: 2,
+          offset: 0,
+          limit: 20,
+        }),
+      ),
+      http.get(`${API}/api/v1/strategies/:strategyId/trials`, () =>
+        HttpResponse.json(trialLedger(merged === null ? 1 : 3)),
+      ),
+      http.post(
+        `${API}/api/v1/strategies/:strategyId/trials/merge`,
+        async ({ params, request }) => {
+          if (refuse)
+            return HttpResponse.json(
+              {
+                detail: {
+                  code: "backtest.lineage.already_merged",
+                  message: "lineages are already one — source_id=s2",
+                },
+              },
+              { status: 409 },
+            );
+          merged = {
+            strategyId: params.strategyId,
+            body: await request.json(),
+          };
+          return HttpResponse.json(trialLedger(3));
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies");
+    const ledger = await openTrialLedger(user);
+
+    await user.click(
+      within(ledger).getByRole("button", { name: "다른 계열과 합치기" }),
+    );
+    const dialog = within(ledger).getByRole("dialog", {
+      name: "다른 계열과 합치기",
+    });
+    // 되돌릴 수 없다는 경고가 창의 설명이고, 포커스는 창 안 첫 조작(취소)에 있다.
+    expect(dialog).toHaveAccessibleDescription(
+      "합치기는 되돌릴 수 없습니다. 계열을 다시 나누거나 시도를 지우는 기능은 없습니다.",
+    );
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "취소" }),
+      ).toHaveFocus(),
+    );
+    const confirm = within(dialog).getByRole("button", { name: "합치기" });
+    expect(confirm).toBeDisabled();
+    await user.selectOptions(
+      await within(dialog).findByRole("combobox", { name: "합칠 전략" }),
+      "s2",
+    );
+    await user.click(confirm);
+
+    await waitFor(() =>
+      expect(merged).toEqual({
+        strategyId: "s1",
+        body: { source_strategy_id: "s2" },
+      }),
+    );
+    expect(
+      await within(ledger).findByText("계열 시도 수 3회"),
+    ).toBeInTheDocument();
+    expect(within(ledger).queryByRole("dialog")).not.toBeInTheDocument();
+
+    refuse = true;
+    await user.click(
+      within(ledger).getByRole("button", { name: "다른 계열과 합치기" }),
+    );
+    const again = within(ledger).getByRole("dialog");
+    await user.selectOptions(
+      await within(again).findByRole("combobox", { name: "합칠 전략" }),
+      "s2",
+    );
+    await user.click(within(again).getByRole("button", { name: "합치기" }));
+    expect(await within(again).findByRole("alert")).toHaveTextContent(
+      "두 전략은 이미 같은 시도 계열입니다.",
+    );
   });
 
   it("canonicalizes malformed and out-of-range strategy list offsets", async () => {
@@ -747,6 +957,118 @@ describe("App Shell routes", () => {
     );
     expect(await screen.findByText("run-saved")).toBeInTheDocument();
     expect(screen.queryByText("run-inline")).not.toBeInTheDocument();
+  });
+
+  it("closes the merge dialog on Escape, returns focus, and says when candidates are cut", async () => {
+    // #386 리뷰 P3-2·P3-5: 닫으면 연 자리로 포커스가 돌아오고, 후보가 한 쪽을 넘으면 잘렸다고 말한다.
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              strategy_id: "s1",
+              latest_revision: 2,
+              requires_upgrade: false,
+              title: "Alpha strategy",
+              spec_hash: "a".repeat(64),
+              updated_at: "2026-09-05T00:00:00Z",
+            },
+            {
+              strategy_id: "s2",
+              latest_revision: 1,
+              requires_upgrade: false,
+              title: "Beta strategy",
+              spec_hash: "b".repeat(64),
+              updated_at: "2026-09-04T00:00:00Z",
+            },
+          ],
+          total: 600,
+          offset: 0,
+          limit: 500,
+        }),
+      ),
+      http.get(`${API}/api/v1/strategies/:strategyId/trials`, () =>
+        HttpResponse.json(trialLedger(1)),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies");
+    const ledger = await openTrialLedger(user);
+    const opener = within(ledger).getByRole("button", {
+      name: "다른 계열과 합치기",
+    });
+    await user.click(opener);
+    const dialog = within(ledger).getByRole("dialog");
+    expect(
+      await within(dialog).findByText(
+        "저장 전략 600개 가운데 2개만 고를 수 있습니다.",
+      ),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "취소" }),
+      ).toHaveFocus(),
+    );
+
+    await user.keyboard("{Escape}");
+    expect(within(ledger).queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  it("ignores an unknown kind in the URL and shows every run", async () => {
+    // #386 리뷰 P3-4: 모르는 종류는 버리고 거르지 않은 목록을 보인다(서버에 싣지 않는다).
+    const kinds: (string | null)[] = [];
+    server.use(
+      http.get(`${API}/api/v1/backtests`, ({ request }) => {
+        kinds.push(new URL(request.url).searchParams.get("kind"));
+        return HttpResponse.json({
+          items: [
+            backtestSummary({ runId: "run-inline" }),
+            backtestSummary({ runId: "run-saved", kind: "experiment_trial" }),
+          ],
+          total: 2,
+          offset: 0,
+          limit: 25,
+        });
+      }),
+    );
+    mount("/research/backtests?kind=bogus");
+    expect(await screen.findByText("run-inline")).toBeInTheDocument();
+    expect(screen.getByText("run-saved")).toBeInTheDocument();
+    expect(kinds).toEqual([null]);
+    expect(
+      within(screen.getByRole("group", { name: "종류" })).getByRole("button", {
+        name: "전체",
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("labels each run's kind and filters the history by kind", async () => {
+    // 검증 랩 V5-03: 종류는 backend 가 정하고 화면은 이름을 붙여 고른 값을 목록 질의에 싣는다.
+    const user = userEvent.setup();
+    const history = mount("/research/backtests");
+    const kindOf = async (runId: string) =>
+      (await screen.findByText(runId)).closest("tr")!;
+    expect(await kindOf("run-inline")).toHaveTextContent("단일 실행");
+    // 실험 run 은 쓰는 실험과 일시정지 여부를 함께 보인다(#382). 실험 화면이 없어 링크는 아직 없다.
+    const experimentRun = await kindOf("run-saved");
+    expect(experimentRun).toHaveTextContent("실험 시도");
+    expect(experimentRun).toHaveTextContent("실험 exp-7");
+    expect(experimentRun).toHaveTextContent("실험 일시정지");
+    expect(await kindOf("run-inline")).not.toHaveTextContent("실험 일시정지");
+
+    const kinds = screen.getByRole("group", { name: "종류" });
+    await user.click(within(kinds).getByRole("button", { name: "실험 시도" }));
+    await waitFor(() =>
+      expect(history.location.search).toContain("kind=experiment_trial"),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("run-inline")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("run-saved")).toBeInTheDocument();
+    expect(
+      within(kinds).getByRole("button", { name: "실험 시도" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("paginates and canonicalizes out-of-range backtest history URLs", async () => {

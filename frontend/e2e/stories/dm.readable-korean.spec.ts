@@ -177,6 +177,9 @@ test(
       items: [
         {
           run: WIPED_OUT,
+          kind: "single",
+          experiment_id: null,
+          experiment_paused: false,
           strategy_provenance: {
             kind: "saved_revision",
             strategy_id: "strategy-dm06",

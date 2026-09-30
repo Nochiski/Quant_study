@@ -121,7 +121,11 @@ export const PipelinePanel = ({
         <p className="pipeline__summary">
           <strong>{t("graph.pipeline.summary")}</strong>{" "}
           {pipeline === null
-            ? t("form.panel.loading")
+            ? t(
+                form.firstParsePending
+                  ? "form.panel.firstParsePending"
+                  : "form.panel.loading",
+              )
             : strategySummary(pipeline, catalogName)}
         </p>
         {form.stale ? (

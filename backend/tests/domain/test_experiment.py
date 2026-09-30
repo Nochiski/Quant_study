@@ -601,7 +601,7 @@ def test_a_paused_experiment_reads_paused_until_every_trial_ends() -> None:
 @pytest.mark.parametrize("priority", [0, MAX_EXPERIMENT_PRIORITY + 1, True, 1.5])
 def test_experiment_priority_stays_inside_its_range(priority: object) -> None:
     with pytest.raises(ValueError, match="priority"):
-        ExperimentControls(priority=priority)  # type: ignore[arg-type]  # 범위 밖 값을 일부러 넣는다
+        ExperimentControls(paused=False, priority=priority)  # type: ignore[arg-type]  # 범위 밖 값을 일부러 넣는다
 
 
 def test_only_a_measured_parameter_search_walks_forward() -> None:

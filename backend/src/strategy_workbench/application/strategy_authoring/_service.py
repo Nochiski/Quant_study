@@ -382,7 +382,15 @@ class StrategyAuthoringService:
         spec = hydration.spec
         # 문서에 명시된 pointer만 넘긴다: 적용 불가 경고는 작성된 값에만 해당한다 (spec D4).
         validation = validate_strategy(
-            spec, written_pointers=parsed.key_ranges.keys(), fields=self._fields_or_none()
+            spec,
+            written_pointers=parsed.key_ranges.keys(),
+            fields=self._fields_or_none(),
+            # 없는 필드가 어댑터가 뺀 필드면 진단이 그 사유(카탈로그 재생성 등)를 싣는다(#316)
+            unavailable_fields=(
+                None
+                if self._field_catalog is None
+                else self._field_catalog.unavailable_factor_fields()
+            ),
         )
         diagnostics = tuple(
             SourceDiagnostic(

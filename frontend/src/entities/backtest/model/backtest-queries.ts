@@ -138,6 +138,14 @@ export const useBacktestStatus = (runId: string | null) =>
           : STATUS_POLL_SLOW_MS,
   });
 
+/** 실행 한 행(종류·소유 실험). 종류는 바뀌지 않는다. */
+export const useBacktestSummary = (runId: string) =>
+  useQuery({
+    queryKey: ["backtest", runId, "summary"],
+    queryFn: () => strategyWorkbenchApi.getBacktestSummary(runId),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+
 export const useBacktestRequest = (runId: string | null) =>
   useQuery({
     queryKey: ["backtest", runId, "request"],

@@ -1042,8 +1042,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     ),
 )
 
-# FIELD_MAP §2 의 42 중 어댑터가 내지 않는 13 — field_id → 사유. `list_fields()` 밖이고 질의하면
-# `INVALID_QUERY` 의 detail 에 이 문장이 붙는다(mock 폴백 금지, DESIGN §7).
+# 아래 필드의 사용자 대면 사유 한 문장 — compile 진단과 질의 거절이 싣는다(#316).
+FIELD_NOT_IN_LEDGER = "원장이 이 필드를 싣지 않는다"
+
+# FIELD_MAP §2 의 42 중 어댑터가 내지 않는 13 — field_id → 사유 메모. `list_fields()` 밖이고(mock
+# 폴백 금지, DESIGN §7) 메모는 원장 작업 기록이라 사용자에게 싣지 않는다.
 UNSUPPORTED_FIELDS: dict[str, str] = {
     "benchmark.close": (
         "미지원(현 설계) — index_daily 는 security 축이 아니다. 벤치마크는 예약 접두 `idx:` 로 "

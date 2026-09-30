@@ -50,6 +50,10 @@
   overflow: auto;
 }
 @media (max-width: 640px) {
+  /* IDE 탭 패널이 이미 바깥 여백을 갖는다. 작은 화면에서는 두 겹으로 소비하지 않는다. */
+  .recipe {
+    padding-inline: 0;
+  }
   .recipe .strategy-form__field {
     display: flex;
     flex-direction: column;

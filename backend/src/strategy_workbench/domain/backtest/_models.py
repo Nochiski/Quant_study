@@ -566,6 +566,20 @@ RunFailureCode = Literal[
 ]
 RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
 
+# 실행 접수 거절 코드 어휘의 단일 정본. 시작 요청 422·404·409 detail 과 실험 attempt·창 선택의
+# `error_code` 가 같은 문자열이고, 프론트는 `backtest.error.<code>` 로 번역한다. 어떤 오류가 어느
+# 코드인지는 실행 유스케이스의 `rejection_code` 가 정한다.
+AdmissionRejectionCode = Literal[
+    "backtest.run.environment_required",
+    "backtest.run.research_window_violation",
+    "backtest.run.parameter_invalid",
+    "backtest.run.invalid",
+    "backtest.strategy.not_found",
+    "backtest.strategy.stale",
+    "backtest.strategy.requires_upgrade",
+    "portfolio.strategy.invalid",
+]
+
 
 @dataclass(frozen=True)
 class BacktestRunState:
@@ -584,6 +598,14 @@ class BacktestRunState:
     # 산출물의 위치(서버 경로)는 싣지 않는다 — run 상태는 그대로 API 응답이고, 산출물은 저장소가
     # run_id 로 찾는다(#277).
     artifact_sha256: str | None = None
+
+
+@dataclass(frozen=True)
+class BacktestCancelResult(BacktestRunState):
+    """취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면
+    `kept_by_owners` 가 참이다 — 화면은 이 칸으로 "실험이 쓰는 실행" 을 알린다(#382)."""
+
+    kept_by_owners: bool = False
 
 
 @dataclass(frozen=True)

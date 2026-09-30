@@ -454,6 +454,98 @@
         "title": "AssistantUnprocessableResponse",
         "type": "object"
       },
+      "BacktestCancelResult": {
+        "description": "취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면\n`kept_by_owners` 가 참이다 — 화면은 이 칸으로 \"실험이 쓰는 실행\" 을 알린다(#382).",
+        "properties": {
+          "artifact_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Sha256"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "portfolio.strategy.invalid",
+                  "portfolio.data.unavailable",
+                  "portfolio.raw_observation.invalid",
+                  "backtest.run.invalid",
+                  "backtest.run.equity_wiped_out",
+                  "backtest.run.internal",
+                  "backtest.run.interrupted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "kept_by_owners": {
+            "default": false,
+            "title": "Kept By Owners",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "progress",
+          "stage",
+          "message",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BacktestCancelResult",
+        "type": "object"
+      },
       "BacktestEnvironmentRequiredDetail": {
         "description": "실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.",
         "properties": {
@@ -9280,6 +9372,16 @@
           "error_code": {
             "anyOf": [
               {
+                "enum": [
+                  "backtest.run.environment_required",
+                  "backtest.run.research_window_violation",
+                  "backtest.run.parameter_invalid",
+                  "backtest.run.invalid",
+                  "backtest.strategy.not_found",
+                  "backtest.strategy.stale",
+                  "backtest.strategy.requires_upgrade",
+                  "portfolio.strategy.invalid"
+                ],
                 "type": "string"
               },
               {
@@ -9528,6 +9630,17 @@
           "run_id": {
             "title": "Run Id",
             "type": "string"
+          },
+          "session_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Sharpe"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
@@ -10157,6 +10270,8 @@
         "description": "이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.\n\n값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.",
         "enum": [
           "legacy_design",
+          "cancelled",
+          "result_unreadable",
           "test_failed",
           "no_cell",
           "pending"
@@ -10357,6 +10472,16 @@
           "error_code": {
             "anyOf": [
               {
+                "enum": [
+                  "backtest.run.environment_required",
+                  "backtest.run.research_window_violation",
+                  "backtest.run.parameter_invalid",
+                  "backtest.run.invalid",
+                  "backtest.strategy.not_found",
+                  "backtest.strategy.stale",
+                  "backtest.strategy.requires_upgrade",
+                  "portfolio.strategy.invalid"
+                ],
                 "type": "string"
               },
               {
@@ -11366,6 +11491,7 @@
     },
     "/api/v1/backtests/{run_id}/cancel": {
       "post": {
+        "description": "사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다.",
         "operationId": "cancelBacktest",
         "parameters": [
           {
@@ -11383,7 +11509,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BacktestRunState"
+                  "$ref": "#/components/schemas/BacktestCancelResult"
                 }
               }
             },
@@ -12347,7 +12473,7 @@
     },
     "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry": {
       "post": {
-        "description": "실패·취소된 trial 을 새 attempt 로 다시 넘긴다.",
+        "description": "실패·취소된 trial 을 새 attempt 로 다시 넘긴다. 기반 요청이 이제 접수되지 않으면 백테스트\n시작과 같은 코드로 거절한다.",
         "operationId": "retryExperimentTrial",
         "parameters": [
           {
@@ -12384,31 +12510,47 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                    }
+                  ],
+                  "title": "Response 404 Retryexperimenttrial"
                 }
               }
             },
-            "description": "The experiment or trial is missing"
+            "description": "The trial or its base strategy revision is missing"
           },
           "409": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                    }
+                  ],
+                  "title": "Response 409 Retryexperimenttrial"
                 }
               }
             },
-            "description": "The experiment state refuses it"
+            "description": "The trial is not retryable or the base revision changed"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "A coded experiment design or base run diagnostic"
           }
         },
         "summary": "Retry Experiment Trial"

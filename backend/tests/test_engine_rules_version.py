@@ -25,12 +25,12 @@ from strategy_workbench.domain.backtest.facade.environment import (
 from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
 from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 
-# 체결 행에 기록 칸(`cap_volume`, V4-04 2/2)만 더한 변경은 trace 가 바뀌어 digest 가 달라지지만
-# 체결·비용 규칙은 그대로라 판본을 올리지 않고 digest 만 고쳤다(리드 결정). 지문은 결과 공유 캐시
-# 키가 아니라 옛 결과가 새 칸 없이 재사용되지 않는다.
+# 기록만 더한 변경(V4-04 2/2: 체결 행의 `cap_volume`, 목표 금액 → 수량 변환의 ROUNDING 레코드)은
+# trace 가 바뀌어 digest 가 달라지지만 체결·비용 규칙은 그대로라 판본을 올리지 않고 digest 만
+# 고쳤다(리드 결정). 지문은 결과 공유 캐시 키가 아니라 옛 결과가 새 기록 없이 재사용되지 않는다.
 _PINNED = (
     "backtest-engine-v4",
-    "3590842330f865449f1d0ce0c996a0f9f1292f6e3ab685878ee4db0f9f3b40fa",
+    "0abfca4d023ddc55162f0ede02bc7654cd8becd375369e9f8fd6adc0de27ac0f",
 )
 
 

@@ -530,6 +530,7 @@ export type {
   RawFill,
   RawOrder,
   RawPosition,
+  RawRounding,
   RawSnapshot,
   RawStrategyTraceRow,
   RawTrade,

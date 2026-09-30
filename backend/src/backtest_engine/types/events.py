@@ -227,4 +227,20 @@ class CostAccrued:
             )
 
 
+@dataclass(frozen=True)
+class TargetRounding:
+    """목표 금액 Δ 를 1주 단위 수량으로 내린 기록 — 반올림 오차를 결과만으로 재기 위한 것(V4-04).
+
+    라우터가 비중·금액 목표를 주문 수량으로 바꾸는 곳에서 목표마다 하나씩 남긴다. 1주 미만이라
+    주문이 나가지 않은 목표도 남는다. 두 금액 모두 부호가 있고 판단 세션 종가 기준이다.
+    """
+
+    ts: datetime
+    instrument: InstrumentId
+    # 목표 금액 − 현재 평가액.
+    target_notional: float
+    # 내린 수량 × 판단 세션 종가.
+    rounded_notional: float
+
+
 StrategyEvent = MarketSnapshot | TimerEvent | FillEvent | OrderUpdateEvent | CorporateActionEvent

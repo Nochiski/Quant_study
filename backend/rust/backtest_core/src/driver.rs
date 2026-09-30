@@ -10,7 +10,7 @@ use crate::persistent::{Lifecycle, PersistentEngine, StoredGroup, StoredOrder};
 use crate::persistent_router::{self, DecisionWire, RouteError};
 use crate::records::{
     to_object, CorporateActionAppliedWire, FillWire, NativeDecision, OrderUpdateWire, OrderWire,
-    RecordPayload, SnapshotWire,
+    RecordPayload, RoundingWire, SnapshotWire,
 };
 use crate::session::py_float;
 use pyo3::exceptions::PyValueError;
@@ -666,7 +666,8 @@ impl PersistentEngine {
                 native: native.map(Box::new),
             },
         )?;
-        let (orders, updates, error) = match self.route_with_id(&decision_id, &decision) {
+        let (orders, updates, roundings, error) = match self.route_with_id(&decision_id, &decision)
+        {
             Ok(routed) => routed,
             Err(error) => {
                 self.lifecycle = Lifecycle::Failed;
@@ -678,6 +679,10 @@ impl PersistentEngine {
             self.lifecycle = Lifecycle::Failed;
             self.failure_message = Some(error.1.clone());
             return Ok((decision_id, Some(error)));
+        }
+        // Python `_dispatch` 처럼 라우팅 직후, 주문 상태 변경보다 먼저 남긴다.
+        for rounding in roundings {
+            self.record(session, RecordPayload::Rounding(Box::new(rounding)))?;
         }
         for (order_id, status, detail) in updates {
             self.record_update(session, order_id, status, Some(detail))?;
@@ -698,6 +703,7 @@ impl PersistentEngine {
     ) -> PyResult<(
         Vec<OrderWire>,
         Vec<(String, String, String)>,
+        Vec<RoundingWire>,
         Option<RouteError>,
     )> {
         // `feed_ref()`(=`&self`) 대신 필드를 직접 빌린다 — 종가 표가 피드를 빌린 채
@@ -707,7 +713,7 @@ impl PersistentEngine {
             .as_ref()
             .ok_or_else(|| PyValueError::new_err("persistent feed is not loaded"))?;
         let bars = feed.current_closes()?;
-        let (orders, updates, groups, error) = persistent_router::route_basic_decision(
+        let (orders, updates, groups, roundings, error) = persistent_router::route_basic_decision(
             &self.portfolio,
             &mut self.orders,
             &self.router_config,
@@ -719,8 +725,22 @@ impl PersistentEngine {
             bars,
         )?;
         if error.is_some() {
-            return Ok((Vec::new(), updates, error));
+            return Ok((Vec::new(), updates, Vec::new(), error));
         }
+        let roundings = roundings
+            .into_iter()
+            .map(|(key, target_notional, rounded_notional)| {
+                Ok(RoundingWire {
+                    instrument_id: feed.instrument_id(&key).ok_or_else(|| {
+                        PyValueError::new_err(format!(
+                            "rounded instrument is not in the loaded feed registry — key={key}"
+                        ))
+                    })?,
+                    target_notional,
+                    rounded_notional,
+                })
+            })
+            .collect::<PyResult<Vec<_>>>()?;
         // 심볼 폴백은 그날 바가 아니라 피드 등록부 전체에서 찾는다 — 바가 끊긴 보유 종목(정지·상폐)의
         // REPLACE 청산 주문이 "instrument metadata is missing" 으로 run 을 죽이지 않도록.
         // 등록부 표는 적재 시 한 번 만들어 두므로 결정마다 재조립하지 않는다.
@@ -750,7 +770,7 @@ impl PersistentEngine {
             .collect();
         self.pending_orders.extend(staged_orders);
         self.pending_groups.extend(staged_groups);
-        Ok((wires, updates, None))
+        Ok((wires, updates, roundings, None))
     }
 
     /// `loop._execute` 종료부: 잔여 주문을 취소 레코드로 남기고 스토어를 닫는다.
@@ -815,7 +835,8 @@ mod tests {
     use super::*;
     use crate::persistent_router::{ExecutionWire, TargetWire};
     use crate::records::{
-        KIND_DECISION, KIND_FILL, KIND_MARKET, KIND_ORDER, KIND_ORDER_UPDATE, KIND_SNAPSHOT,
+        KIND_DECISION, KIND_FILL, KIND_MARKET, KIND_ORDER, KIND_ORDER_UPDATE, KIND_ROUNDING,
+        KIND_SNAPSHOT,
     };
 
     const KEY: &str = "XKRX:005930:equity:KRW";
@@ -1102,6 +1123,7 @@ mod tests {
                 KIND_MARKET,
                 KIND_SNAPSHOT,
                 KIND_DECISION,
+                KIND_ROUNDING,
                 KIND_ORDER,
                 KIND_MARKET,
                 KIND_ORDER_UPDATE,
@@ -1109,6 +1131,11 @@ mod tests {
                 KIND_SNAPSHOT,
                 KIND_DECISION,
             ]
+        );
+        // 비중 0.5 × 자본 100,000 = 목표 Δ 50,000 → 종가 100 에 500주라 내린 금액도 50,000 이다.
+        assert_eq!(
+            runtime.records.result_table_rows().unwrap().roundings,
+            vec![(0, 0, 50_000.0, 50_000.0)]
         );
         assert_eq!(
             runtime.records.result_table_rows().unwrap().fill_totals.0,

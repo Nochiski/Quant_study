@@ -41,6 +41,10 @@ class ExecutionCosts:
     # 체결 수량 합 ÷ 체결한 (세션, 종목) 의 유동성 캡 기준 거래량 합 — 거래량 가중 평균 참여율.
     # 기준 거래량이 없는 옛 결과(`backtest-artifacts-v1`)거나 체결이 없으면 None.
     participation_rate: float | None
+    # 반올림 오차 = Σ|목표 금액 Δ − 1주 단위로 내린 금액| ÷ Σ|목표 금액 Δ| — 라우터가 리밸런스마다
+    # 남긴 기록으로 잰다. 1주 미만이라 주문이 없는 목표도 든다(소액의 반올림 손해). 기록이 없는 옛
+    # 결과(`backtest-artifacts-v1`)거나 목표 Δ 가 모두 0 이면 None.
+    rounding_error: float | None
 
 
 class CapacityGap(StrEnum):
@@ -98,7 +102,8 @@ def capacity_amounts(values: Iterable[float]) -> tuple[float, ...]:
 
 
 def execution_costs(artifacts: RawArtifactBundle) -> ExecutionCosts:
-    """체결·주문 artifact 에서 가격 충격 비용·세션 미체결 비율·참여율을 낸다(주문은 모두 DAY 주문).
+    """체결·주문·반올림 artifact 에서 가격 충격 비용·세션 미체결 비율·참여율·반올림 오차를 낸다
+    (주문은 모두 DAY 주문).
 
     기준 거래량은 (세션, 종목) 마다 한 번 센다 — 같은 날 한 종목의 여러 체결은 한 거래량을 나눠
     쓴다.
@@ -110,10 +115,13 @@ def execution_costs(artifacts: RawArtifactBundle) -> ExecutionCosts:
     volumes = {(fill.session, fill.security_id): fill.cap_volume for fill in artifacts.fills}
     known = None not in volumes.values()
     volume = sum(value for value in volumes.values() if value is not None)
+    wanted = sum(abs(row.target_notional) for row in artifacts.roundings)
+    missed = sum(abs(row.target_notional - row.rounded_notional) for row in artifacts.roundings)
     return ExecutionCosts(
         impact_cost_bps=impact / traded * _BPS if traded else None,
         session_unfilled_ratio=float(1 - filled / ordered) if ordered else None,
         participation_rate=float(filled / volume) if known and volume else None,
+        rounding_error=missed / wanted if wanted else None,
     )
 
 

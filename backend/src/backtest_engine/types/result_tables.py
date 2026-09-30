@@ -31,6 +31,7 @@ __all__ = [
     "OrderRow",
     "PositionRow",
     "ResultTables",
+    "RoundingRow",
     "SnapshotRow",
 ]
 
@@ -56,6 +57,11 @@ time_in_force)`.
 FillRow: TypeAlias = tuple[str, str, int, int, str, int, float, float, float, int]
 """`(fill_id, order_id, session_index, instrument_index, side, quantity, price, fee,
 slippage_per_share, cap_volume)`. `cap_volume` 은 체결 세션 bar 의 유동성 캡 기준 거래량이다."""
+
+RoundingRow: TypeAlias = tuple[int, int, float, float]
+"""`(session_index, instrument_index, target_notional, rounded_notional)`. 라우터가 목표 금액 Δ
+(목표 − 현재 평가액)를 1주 단위 수량 × 판단 세션 종가로 내린 기록이다(부호 있음). 1주 미만이라
+주문이 없는 목표도 남는다."""
 
 CostRow: TypeAlias = tuple[int, str, int | None, float]
 """`(session_index, kind, instrument_index, amount)`. 종목 없는 비용(margin interest)은
@@ -113,5 +119,8 @@ class ResultTables:
 
     costs: tuple[CostRow, ...]
     """COST 레코드 순서."""
+
+    roundings: tuple[RoundingRow, ...]
+    """ROUNDING 레코드 순서."""
 
     fill_totals: FillTotals

@@ -988,6 +988,14 @@ export type CapacityPoint = {
    */
   initial_cash: number;
   /**
+   * Participation Rate
+   */
+  participation_rate: number | null;
+  /**
+   * Rounding Error
+   */
+  rounding_error: number | null;
+  /**
    * Session Unfilled Ratio
    */
   session_unfilled_ratio: number | null;
@@ -3720,6 +3728,10 @@ export type RawArtifactBundle = {
    */
   positions: Array<RawPosition>;
   /**
+   * Roundings
+   */
+  roundings?: Array<RawRounding>;
+  /**
    * Schema Version
    */
   schema_version?: string;
@@ -3759,6 +3771,10 @@ export type RawCost = {
  * RawFill
  */
 export type RawFill = {
+  /**
+   * Cap Volume
+   */
+  cap_volume?: number | null;
   /**
    * Fee
    */
@@ -3867,6 +3883,31 @@ export type RawPosition = {
    * Unrealized Pnl
    */
   unrealized_pnl: number;
+};
+
+/**
+ * RawRounding
+ *
+ * 라우터가 목표 금액 Δ(목표 − 현재 평가액)를 1주 단위 수량 × 판단 세션 종가로 내린 기록
+ * (V4-04 2/2). 부호가 있고, 1주 미만이라 주문이 나가지 않은 목표도 남는다.
+ */
+export type RawRounding = {
+  /**
+   * Rounded Notional
+   */
+  rounded_notional: number;
+  /**
+   * Security Id
+   */
+  security_id: string;
+  /**
+   * Session
+   */
+  session: string;
+  /**
+   * Target Notional
+   */
+  target_notional: number;
 };
 
 /**

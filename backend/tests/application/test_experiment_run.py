@@ -50,6 +50,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RawArtifactBundle,
     RawFill,
     RawOrder,
+    RawRounding,
     RunFailureCode,
     RunStatus,
     SavedRevisionReference,
@@ -1183,7 +1184,10 @@ def _capacity_result(sharpe: float, ordered: str, filled: str) -> BacktestRunRes
     """1000원에 `filled` 주 체결(주당 슬리피지 1원, 기준 거래량 1,000주), DAY 주문 `ordered` 주."""
     order = RawOrder("o", "d", date(2021, 1, 5), "KRX:005930", "buy", ordered, "market", "day")
     fill = RawFill("f", "o", date(2021, 1, 5), "KRX:005930", "buy", filled, 1000.0, 0.0, 1.0, 1_000)
-    return replace(_result(sharpe), artifacts=RawArtifactBundle((), (), (order,), (fill,), (), ()))
+    # 목표 Δ 100,000 원을 1주 단위로 99,000 원까지만 샀다.
+    rounding = RawRounding(date(2021, 1, 4), "KRX:005930", 100_000.0, 99_000.0)
+    artifacts = RawArtifactBundle((), (), (order,), (fill,), (), (), (rounding,))
+    return replace(_result(sharpe), artifacts=artifacts)
 
 
 def test_a_capacity_sweep_needs_a_counted_base_trial_and_never_adds_to_n() -> None:
@@ -1243,8 +1247,13 @@ def test_the_capacity_report_settles_the_limit_only_when_every_amount_ran() -> N
         (3e8, TrialStatus.QUEUED, None, None, None),
     ]
     assert pending.limit == CapacityLimit(None, None, None, CapacityGap.PENDING)
-    # 참여율 = 체결 100·80주 ÷ 기준 거래량 1,000주.
+    # 참여율 = 체결 100·80주 ÷ 기준 거래량 1,000주, 반올림 오차 = 1,000 / 100,000.
     assert [p.participation_rate for p in pending.points] == [0.1, 0.08, None]
+    assert [p.rounding_error for p in pending.points] == [
+        pytest.approx(0.01),
+        pytest.approx(0.01),
+        None,
+    ]
     # 재시작으로 중단돼 복구를 기다리는 금액도 아직 돈다.
     runs.run_statuses["run-2"] = RunStatus.FAILED
     runs.error_codes["run-2"] = "backtest.run.interrupted"

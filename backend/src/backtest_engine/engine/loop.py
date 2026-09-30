@@ -1117,6 +1117,8 @@ class BacktestEngine:
         if run.router is None:
             raise RuntimeError("python session loop requires the Python DecisionRouter")
         routing = run.router.route(decision, decision_id, portfolio_snapshot, market)
+        for rounding in routing.roundings:
+            run.store.append(rounding.ts, RecordKind.ROUNDING, rounding)
         for update in routing.updates:
             self._record_update(run, update, market)
         for group in routing.groups:

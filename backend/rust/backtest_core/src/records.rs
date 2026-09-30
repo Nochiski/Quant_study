@@ -19,10 +19,11 @@ pub(crate) const KIND_SNAPSHOT: u8 = 5;
 pub(crate) const KIND_CORPORATE_ACTION: u8 = 6;
 pub(crate) const KIND_CORPORATE_ACTION_APPLIED: u8 = 7;
 pub(crate) const KIND_COST: u8 = 8;
+pub(crate) const KIND_ROUNDING: u8 = 9;
 
 /// wire 상수 대조용 (name, code) 목록. name은 Python `RecordKind`의 value 문자열이다.
 /// `lib.rs`가 모듈 상수로 노출하고 `tests/test_core_parity.py`가 Python 정본과 대조한다.
-pub(crate) const RECORD_KIND_NAMES: [(&str, u8); 9] = [
+pub(crate) const RECORD_KIND_NAMES: [(&str, u8); 10] = [
     ("market", KIND_MARKET),
     ("decision", KIND_DECISION),
     ("order", KIND_ORDER),
@@ -32,6 +33,7 @@ pub(crate) const RECORD_KIND_NAMES: [(&str, u8); 9] = [
     ("corporate_action", KIND_CORPORATE_ACTION),
     ("corporate_action_applied", KIND_CORPORATE_ACTION_APPLIED),
     ("cost", KIND_COST),
+    ("rounding", KIND_ROUNDING),
 ];
 
 /// 오류 메시지용 kind wire 이름. 코드만으로는 어떤 레코드인지 읽히지 않는다.
@@ -142,6 +144,14 @@ impl FillWire {
             ),
         )
     }
+}
+
+/// 목표 금액 Δ → 1주 단위 수량 변환 wire. Python `TargetRounding`의 원시 필드.
+#[derive(Clone, Debug)]
+pub(crate) struct RoundingWire {
+    pub(crate) instrument_id: u32,
+    pub(crate) target_notional: f64,
+    pub(crate) rounded_notional: f64,
 }
 
 /// 주문 상태 변경 wire. Python `OrderUpdateEvent`의 원시 필드.
@@ -266,6 +276,7 @@ pub(crate) enum RecordPayload {
         instrument_id: Option<u32>,
         amount: f64,
     },
+    Rounding(Box<RoundingWire>),
     /// Python이 이미 공개 객체로 바꾼 뒤 힙을 돌려준 자리. 원래 kind를 그대로 들고 있어
     /// `index()`가 해제 전후로 같은 `(seq, session_index, kind)`를 답한다.
     Released {
@@ -285,6 +296,7 @@ impl RecordPayload {
             RecordPayload::CorporateAction(_) => KIND_CORPORATE_ACTION,
             RecordPayload::CorporateActionApplied(_) => KIND_CORPORATE_ACTION_APPLIED,
             RecordPayload::Cost { .. } => KIND_COST,
+            RecordPayload::Rounding(_) => KIND_ROUNDING,
             RecordPayload::Released { kind } => *kind,
         }
     }
@@ -314,6 +326,14 @@ impl RecordPayload {
                 instrument_id,
                 amount,
             } => to_object(py, (kind.as_str(), *instrument_id, *amount)),
+            RecordPayload::Rounding(rounding) => to_object(
+                py,
+                (
+                    rounding.instrument_id,
+                    rounding.target_notional,
+                    rounding.rounded_notional,
+                ),
+            ),
             RecordPayload::Released { kind } => Err(released_error(seq, *kind, "record_payloads")),
         }
     }
@@ -343,6 +363,7 @@ pub(crate) struct ResultTableRows<'a> {
         i64,
     )>,
     pub(crate) costs: Vec<(usize, &'a str, Option<u32>, f64)>,
+    pub(crate) roundings: Vec<(usize, u32, f64, f64)>,
     /// `(traded_notional, total_fees, total_slippage_cost)` — FILL 레코드 순서 누산.
     pub(crate) fill_totals: (f64, f64, f64),
 }
@@ -537,6 +558,7 @@ impl RecordStore {
         let mut orders = Vec::new();
         let mut fills = Vec::new();
         let mut costs = Vec::new();
+        let mut roundings = Vec::new();
         let mut traded_notional = 0.0_f64;
         let mut total_fees = 0.0_f64;
         let mut total_slippage_cost = 0.0_f64;
@@ -591,8 +613,17 @@ impl RecordStore {
                     instrument_id,
                     amount,
                 } => costs.push((session, kind.as_str(), *instrument_id, *amount)),
+                RecordPayload::Rounding(rounding) => roundings.push((
+                    session,
+                    rounding.instrument_id,
+                    rounding.target_notional,
+                    rounding.rounded_notional,
+                )),
                 RecordPayload::Released { kind }
-                    if matches!(*kind, KIND_SNAPSHOT | KIND_ORDER | KIND_FILL | KIND_COST) =>
+                    if matches!(
+                        *kind,
+                        KIND_SNAPSHOT | KIND_ORDER | KIND_FILL | KIND_COST | KIND_ROUNDING
+                    ) =>
                 {
                     return Err(released_error(seq as u64, *kind, "result_tables"));
                 }
@@ -605,6 +636,7 @@ impl RecordStore {
             orders,
             fills,
             costs,
+            roundings,
             fill_totals: (traded_notional, total_fees, total_slippage_cost),
         })
     }
@@ -620,6 +652,7 @@ impl RecordStore {
                 rows.orders,
                 rows.fills,
                 rows.costs,
+                rows.roundings,
                 rows.fill_totals,
             ),
         )

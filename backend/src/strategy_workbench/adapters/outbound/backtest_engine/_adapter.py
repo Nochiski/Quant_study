@@ -69,6 +69,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RawFill,
     RawOrder,
     RawPosition,
+    RawRounding,
     RawSnapshot,
     RawTrade,
     RunManifest,
@@ -757,6 +758,15 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
         )
         for session_index, kind, instrument_index, amount in tables.costs
     )
+    roundings = tuple(
+        RawRounding(
+            session=session_dates[session_index],
+            security_id=security_ids[instrument_index],
+            target_notional=target_notional,
+            rounded_notional=rounded_notional,
+        )
+        for session_index, instrument_index, target_notional, rounded_notional in tables.roundings
+    )
     trades = _closed_trades(tables, session_dates, security_ids)
     outcomes = tuple(
         TradeOutcome(
@@ -769,7 +779,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
         for item in trades
     )
     return (
-        RawArtifactBundle(snapshots, positions, orders, fills, raw_costs, trades),
+        RawArtifactBundle(snapshots, positions, orders, fills, raw_costs, trades, roundings),
         outcomes,
     )
 

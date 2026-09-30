@@ -30,6 +30,7 @@ def _tables(
         orders=(),
         fills=fills,
         costs=costs,
+        roundings=(),
         fill_totals=FillTotals(traded_notional=0.0, total_fees=0.0, total_slippage_cost=0.0),
     )
 

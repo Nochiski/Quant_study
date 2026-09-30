@@ -255,20 +255,25 @@ def test_a_result_file_written_before_the_rolling_window_field_still_loads(tmp_p
 
 
 def test_a_result_file_written_before_fill_cap_volume_still_loads(tmp_path: Path) -> None:
-    """V4-04 2/2 전에 쓴 `result.json`(`backtest-artifacts-v1`)에는 체결 기준 거래량이 없다."""
+    """V4-04 2/2 전에 쓴 `result.json`(`backtest-artifacts-v1`)에는 체결 기준 거래량과 반올림 기록이
+    없다."""
     store = LocalArtifactStore(tmp_path)
     store.commit(_result())
     result_path = tmp_path / "run-safe-001" / "result.json"
     payload = result_path.read_bytes()
-    old = payload.replace(b'"cap_volume":700,', b"").replace(
-        b"backtest-artifacts-v2", b"backtest-artifacts-v1"
+    old = (
+        payload.replace(b'"cap_volume":700,', b"")
+        .replace(b'"roundings":[],', b"")
+        .replace(b"backtest-artifacts-v2", b"backtest-artifacts-v1")
     )
-    assert old.count(b"cap_volume") == 0 and b"backtest-artifacts-v1" in old
+    assert b"cap_volume" not in old and b"roundings" not in old
+    assert b"backtest-artifacts-v1" in old
     result_path.write_bytes(old)
 
     loaded = store.load("run-safe-001", sha256=hashlib.sha256(old).hexdigest())
 
     assert [fill.cap_volume for fill in loaded.artifacts.fills] == [None]
+    assert loaded.artifacts.roundings == ()
     assert loaded.artifacts.schema_version == "backtest-artifacts-v1"
 
 

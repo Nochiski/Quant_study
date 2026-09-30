@@ -6,7 +6,12 @@ from datetime import date, timedelta
 
 import pytest
 
-from strategy_workbench.domain.backtest.facade.runs import RawArtifactBundle, RawFill, RawOrder
+from strategy_workbench.domain.backtest.facade.runs import (
+    RawArtifactBundle,
+    RawFill,
+    RawOrder,
+    RawRounding,
+)
 from strategy_workbench.domain.experiment.facade.statistics import (
     CAPACITY_SHARPE_RATIO,
     CapacityGap,
@@ -47,8 +52,12 @@ def _fill(
     )
 
 
-def _bundle(orders: tuple[RawOrder, ...], fills: tuple[RawFill, ...]) -> RawArtifactBundle:
-    return RawArtifactBundle((), (), orders, fills, (), ())
+def _bundle(
+    orders: tuple[RawOrder, ...],
+    fills: tuple[RawFill, ...],
+    roundings: tuple[RawRounding, ...] = (),
+) -> RawArtifactBundle:
+    return RawArtifactBundle((), (), orders, fills, (), (), roundings)
 
 
 def test_execution_costs_weigh_impact_by_traded_value_and_count_each_session_order() -> None:
@@ -76,9 +85,11 @@ def test_execution_costs_weigh_impact_by_traded_value_and_count_each_session_ord
 
 
 def test_execution_costs_are_empty_without_orders_or_fills() -> None:
-    assert execution_costs(_bundle((), ())) == ExecutionCosts(None, None, None)
+    assert execution_costs(_bundle((), ())) == ExecutionCosts(None, None, None, None)
     # 주문은 냈지만 하나도 체결되지 않았다(참여 한도 0주 등).
-    assert execution_costs(_bundle((_order("a", "10"),), ())) == ExecutionCosts(None, 1.0, None)
+    assert execution_costs(_bundle((_order("a", "10"),), ())) == ExecutionCosts(
+        None, 1.0, None, None
+    )
 
 
 def test_participation_is_empty_for_a_result_written_before_cap_volume() -> None:
@@ -91,6 +102,28 @@ def test_participation_is_empty_for_a_result_written_before_cap_volume() -> None
     costs = execution_costs(bundle)
 
     assert (costs.session_unfilled_ratio, costs.participation_rate) == (0.0, None)
+
+
+def test_rounding_error_weighs_what_whole_shares_left_out_of_each_target() -> None:
+    """V4-04 2/2: 라우터가 남긴 목표 Δ 와 1주 단위로 내린 금액의 차이 — 1주 미만이라 주문이 없는
+    목표(400원 → 0)도 든다."""
+    bundle = _bundle(
+        (),
+        (),
+        (
+            RawRounding(_DAY, "KRX:005930", 1_000.0, 900.0),
+            # 매도 쪽은 1주 단위로 덜 판다 — 차이는 절대값으로 센다.
+            RawRounding(_DAY, "KRX:000660", -600.0, -500.0),
+            RawRounding(_NEXT, "KRX:005930", 400.0, 0.0),
+        ),
+    )
+
+    # (100 + 100 + 400) / (1,000 + 600 + 400) = 0.3.
+    assert execution_costs(bundle).rounding_error == pytest.approx(0.3)
+    # 기록이 없는 옛 결과거나 목표 Δ 가 모두 0 이면 없다.
+    assert execution_costs(_bundle((), ())).rounding_error is None
+    zero = _bundle((), (), (RawRounding(_DAY, "KRX:005930", 0.0, 0.0),))
+    assert execution_costs(zero).rounding_error is None
 
 
 def _limit(amount: float, best: float, threshold: float, gap: CapacityGap | None = None):

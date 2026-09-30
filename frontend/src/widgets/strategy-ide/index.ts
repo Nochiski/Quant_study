@@ -4,3 +4,5 @@ export {
   buildStrategyDebuggerAvailability,
   type StrategyDebuggerAvailability,
 } from "./model/strategy-debugger-context";
+
+export { StrategyPreviewPanel } from "./ui/strategy-preview-panel";

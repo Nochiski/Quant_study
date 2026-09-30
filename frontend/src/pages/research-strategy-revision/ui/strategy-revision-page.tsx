@@ -61,6 +61,7 @@ import { useNavigate, useParams, useSearch } from "../../../shared/lib/router";
 import { Badge, type CodeEditorHandle } from "../../../shared/ui";
 import {
   StrategyDebuggerPanel,
+  StrategyPreviewPanel,
   StrategyIde,
 } from "../../../widgets/strategy-ide";
 
@@ -447,6 +448,7 @@ export const StrategyRevisionPage = () => {
                 selectedPointer={search.path}
                 revealSignal={problems.revealSignal}
               />
+              <StrategyPreviewPanel document={document} executionPlans={executionPlans} environment={runSettings.environment} />
               <FactorGraphPanel
                 state={executionPlans}
                 schema={assist.schema}

@@ -1,4 +1,27 @@
 const ko = {
+  "strategy.preview.title": "선정 미리보기",
+  "strategy.preview.stale": "이전 요청 · 새로고침 필요",
+  "strategy.preview.date": "기준일 (선택)",
+  "strategy.preview.refresh": "미리보기 새로고침",
+  "strategy.preview.description":
+    "현재 실행 가능한 문서를 명시적으로 조회합니다. 기준일을 비우면 서버가 마지막 리밸런싱 기준일을 선택합니다.",
+  "strategy.preview.loading": "미리보기를 불러오는 중입니다.",
+  "strategy.preview.discarded":
+    "문서 또는 실행 설정과 맞지 않는 응답입니다. 다시 조회하세요.",
+  "strategy.preview.resolvedDate": "조회 기준일",
+  "strategy.preview.noFrame": "이 기준일에는 리밸런싱 프레임이 없습니다.",
+  "strategy.preview.count.universe": "전체 종목",
+  "strategy.preview.count.eligible": "적격 종목",
+  "strategy.preview.count.eligibility_failed": "조건 탈락",
+  "strategy.preview.count.eligibility_rank_cut": "순위 탈락",
+  "strategy.preview.count.missing": "결측 종목",
+  "strategy.preview.targets": "선정 종목",
+  "strategy.preview.rank": "순위",
+  "strategy.preview.name": "종목명",
+  "strategy.preview.score": "종합 점수",
+  "strategy.preview.unknownName": "이름 미제공",
+  "strategy.preview.empty": "선정된 종목이 없습니다.",
+
   "dataset.catalog.dataset": "데이터셋",
   "dataset.field.availability": "사용 가능 시점",
   "dataset.field.disclosure": "공개 기준",
@@ -2090,6 +2113,29 @@ export type MessageKey = keyof typeof ko;
 export const messages = {
   ko,
   en: {
+    "strategy.preview.title": "Selection preview",
+    "strategy.preview.stale": "Outdated request · refresh needed",
+    "strategy.preview.date": "As-of date (optional)",
+    "strategy.preview.refresh": "Refresh preview",
+    "strategy.preview.description":
+      "Refresh the current executable document explicitly. Leave the date blank for the server to choose the last rebalance frame.",
+    "strategy.preview.loading": "Loading preview.",
+    "strategy.preview.discarded":
+      "The response does not match the document or run settings. Refresh again.",
+    "strategy.preview.resolvedDate": "Resolved as-of date",
+    "strategy.preview.noFrame": "No rebalance frame exists on this date.",
+    "strategy.preview.count.universe": "Universe",
+    "strategy.preview.count.eligible": "Eligible",
+    "strategy.preview.count.eligibility_failed": "Eligibility failed",
+    "strategy.preview.count.eligibility_rank_cut": "Eligibility rank cut",
+    "strategy.preview.count.missing": "Missing",
+    "strategy.preview.targets": "Selected targets",
+    "strategy.preview.rank": "Rank",
+    "strategy.preview.name": "Name",
+    "strategy.preview.score": "Composite score",
+    "strategy.preview.unknownName": "Name unavailable",
+    "strategy.preview.empty": "No targets selected.",
+
     "dataset.catalog.dataset": "Dataset",
     "dataset.field.availability": "Availability",
     "dataset.field.disclosure": "Disclosure basis",

@@ -70,6 +70,7 @@ const sameCalculation = (
   anchor.as_of === candidate.as_of &&
   sameWireValue(anchor.provenance, candidate.provenance) &&
   sameWireValue(anchor.target, candidate.target) &&
+  sameWireValue(anchor.summary, candidate.summary) &&
   sameWireValue(anchor.warnings ?? [], candidate.warnings ?? []);
 
 const rowIdentity = (row: TraceRow): string =>
@@ -105,10 +106,17 @@ const selectedRowsAreComplete = (
 };
 
 /** Page/chunk server rows by identity only; no factor or portfolio value is calculated here. */
-const fetchTraceBundle = async (
-  prepared: ReadyTrace,
-  signal: AbortSignal,
-) => {
+const fetchTraceBundle = async (prepared: ReadyTrace, signal: AbortSignal) => {
+  if (prepared.request.security_ids.length === 0) {
+    const anchor = await requestTrace(prepared, prepared.request, signal);
+    if (
+      anchor.trace.has_more ||
+      anchor.raw_truncated ||
+      (anchor.target !== null && anchor.summary == null)
+    )
+      throw new DiscardedStrategyTraceResponse();
+    return { anchor, linkedRows: [], selectedRows: [], linkedTruncated: false };
+  }
   let anchor: StrategyTraceResponse | null = null;
   let remainingBudget: number = STRATEGY_TRACE_CLIENT_BUDGET.totalRows;
   let linkedTruncated = false;
@@ -139,7 +147,10 @@ const fetchTraceBundle = async (
       if (anchor === null) anchor = page;
       else if (!sameCalculation(anchor, page))
         throw new DiscardedStrategyTraceResponse();
-      if (!pageRequest.include_raw && (page.raw.length > 0 || page.raw_truncated))
+      if (
+        !pageRequest.include_raw &&
+        (page.raw.length > 0 || page.raw_truncated)
+      )
         throw new DiscardedStrategyTraceResponse();
       if (page.trace.returned !== limit)
         throw new DiscardedStrategyTraceResponse();
@@ -152,8 +163,7 @@ const fetchTraceBundle = async (
       offset += page.trace.returned;
       remainingBudget -= page.trace.returned;
       if (!page.trace.has_more) {
-        if (offset !== expectedRows)
-          throw new DiscardedStrategyTraceResponse();
+        if (offset !== expectedRows) throw new DiscardedStrategyTraceResponse();
         break;
       }
     }

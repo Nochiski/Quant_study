@@ -29,6 +29,7 @@ import {
 } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { StrategyDebuggerContext } from "../model/strategy-trace";
+import { StrategyPreview } from "../ui/strategy-preview";
 import { StrategyDebugger } from "../ui/strategy-debugger";
 
 const API = "http://localhost:8000";
@@ -1284,5 +1285,135 @@ describe("StrategyDebugger", () => {
     expect(screen.getByText("추적 요청을 취소했습니다.")).toBeInTheDocument();
     expect(screen.getByText("backend execution plan")).toBeInTheDocument();
     expect(screen.queryByText("25.00%")).not.toBeInTheDocument();
+  });
+});
+
+describe("선정 미리보기의 요청·응답 소유권", () => {
+  const summaryResponse = (
+    request: StrategyTraceRequest,
+  ): StrategyTraceResponse => ({
+    ...pagedTraceResponse(request),
+    summary: {
+      signal_as_of: "2026-08-31",
+      execution_on: "2026-09-01",
+      counts: {
+        universe: 93,
+        eligible: 41,
+        eligibility_failed: 17,
+        eligibility_rank_cut: 23,
+        missing: 12,
+      },
+      targets: [
+        {
+          position: {
+            security_id: "sec-x",
+            rank: 7,
+            composite_score: 0.123456,
+            weight: 0.1,
+            side: "long",
+          },
+          security: {
+            security_id: "sec-x",
+            name: "서버 종목명",
+            ticker: "123456",
+            venue: "XKRX",
+          },
+        },
+      ],
+    },
+  });
+
+  it("명시적 새로고침만 빈 종목·첫 팩터로 요청하고 서버의 날짜·순위·이름·점수를 그대로 표시한다", async () => {
+    const requests: StrategyTraceRequest[] = [];
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        requests.push(body);
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    const user = userEvent.setup();
+    const view = renderDebugger(
+      <StrategyPreview context={context()} unavailableReason={null} />,
+    );
+    expect(requests).toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    expect(await screen.findByText("서버 종목명")).toBeInTheDocument();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      security_ids: [],
+      node_ids: [],
+      factor_id: "momentum",
+      include_raw: false,
+    });
+    expect(requests[0]).not.toHaveProperty("as_of");
+    expect(screen.getByText("2026-08-31")).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "7" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "0.123456" })).toBeInTheDocument();
+    for (const count of [93, 41, 17, 23, 12])
+      expect(screen.getByText(String(count))).toBeInTheDocument();
+    view.rerender(
+      <StrategyPreview context={context(4)} unavailableReason={null} />,
+    );
+    expect(screen.getByText("이전 요청 · 새로고침 필요")).toBeInTheDocument();
+    expect(screen.queryByText("서버 종목명")).not.toBeInTheDocument();
+    expect(requests).toHaveLength(1);
+    view.rerender(
+      <StrategyPreview context={null} unavailableReason="document" />,
+    );
+    expect(
+      screen.getByRole("button", { name: "미리보기 새로고침" }),
+    ).toBeDisabled();
+  });
+
+  it("이전 문서의 지연 응답은 현재 미리보기를 채우지 않는다", async () => {
+    let finish: (() => void) | undefined;
+    const wait = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const body = (await request.json()) as StrategyTraceRequest;
+        await wait;
+        return HttpResponse.json(summaryResponse(body));
+      }),
+    );
+    const user = userEvent.setup();
+    const view = renderDebugger(
+      <StrategyPreview context={context()} unavailableReason={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    await screen.findByRole("status");
+    view.rerender(
+      <StrategyPreview context={context(4)} unavailableReason={null} />,
+    );
+    await act(async () => {
+      finish?.();
+      await wait;
+    });
+    expect(screen.queryByText("서버 종목명")).not.toBeInTheDocument();
+    expect(screen.getByText("이전 요청 · 새로고침 필요")).toBeInTheDocument();
+  });
+
+  it("요약 날짜가 추적의 날짜와 다르면 응답을 버린다", async () => {
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        const response = summaryResponse(
+          (await request.json()) as StrategyTraceRequest,
+        );
+        response.summary!.signal_as_of = "2026-08-30";
+        return HttpResponse.json(response);
+      }),
+    );
+    renderDebugger(
+      <StrategyPreview context={context()} unavailableReason={null} />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "미리보기 새로고침" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "문서 또는 실행 설정과 맞지 않는 응답",
+    );
+    expect(screen.queryByText("서버 종목명")).not.toBeInTheDocument();
   });
 });

@@ -1,0 +1,31 @@
+.strategy-preview {
+  padding: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+.strategy-preview__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.strategy-preview__controls label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.strategy-preview__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+.strategy-preview__counts dd {
+  margin: 0;
+}
+.strategy-preview__table {
+  overflow-x: auto;
+}
+.strategy-preview__table table {
+  width: 100%;
+  text-align: left;
+}

@@ -118,3 +118,7 @@ paths:
   AI 어시스턴트의 전략 제안도 같은 방식(편집기 전체 범위 교체 한 번, 문서가 바뀌었으면 적용 전 확인)으로만 적용한다.
 
 같은 사실이 두 위치에서 변경되어야 한다면 구현을 멈추고 owner를 한 곳으로 합친다.   
+
+## LANG2 선정 미리보기 (P4-03c)
+
+캔버스 아래 미리보기는 `StrategyPreviewPanel`이 기존 `buildStrategyDebuggerAvailability`로 현재 문서·실행 계획·환경을 조합하고, `useStrategyTrace`의 명시적 요청과 query cache를 공유한다. 빈 `security_ids`와 첫 팩터를 사용하며 날짜가 비면 backend가 마지막 프레임을 고른다. 날짜·전체/적격/조건 탈락/순위 탈락/결측 수·선정 순위·이름·종합 점수는 `StrategyTraceResponse.summary`의 backend 사실이다. 화면은 합산·선정·이름 추론을 하지 않고 마지막 요청 신원만 보관해 변경 후 새로고침을 요구한다.

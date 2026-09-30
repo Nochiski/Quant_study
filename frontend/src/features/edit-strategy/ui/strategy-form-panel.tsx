@@ -23,6 +23,7 @@ import {
   type FormSection,
 } from "../model/form-projection";
 import type { CanonicalSnippet } from "../model/canonical-snippets";
+import type { SummaryNames } from "../model/pipeline-projection";
 import type { DocumentDiagnostic } from "../model/document-state";
 import {
   addPresetItemOperation,
@@ -922,6 +923,11 @@ type ControlProps = {
   labelId: string;
   /** `<label htmlFor>` 가 없는 자리(파이프라인 카드 문장)의 이름. 있으면 컨트롤이 `aria-label` 로 단다. */
   ariaLabel?: string;
+  /**
+   * 선택지 이름 풀이(파이프라인 캔버스, `pipelineNames`). 있으면 카탈로그·참조 선택지가 식별자 대신 이름만
+   * 보인다. 없으면(Form) 카탈로그는 "id · 이름", 참조는 id 그대로다.
+   */
+  names?: SummaryNames;
   /** 이 필드의 오류 본문 id(있으면). 컨트롤이 `aria-describedby`로 가리킨다(P1-04). */
   describedBy: string | undefined;
   field: FormField;
@@ -980,8 +986,11 @@ export const FieldControl = (props: ControlProps) => {
             label: tName(control.labelKeys?.[value]) ?? value,
           }))
         : control.kind === "reference"
-          ? control.candidates.map((value) => ({ value, label: value }))
-          : catalogOptions(control.catalog, catalogs);
+          ? control.candidates.map((value) => ({
+              value,
+              label: props.names?.reference(value) ?? value,
+            }))
+          : catalogOptions(control.catalog, catalogs, props.names);
     if (options === null) return <TextualControl {...props} />;
     const known = options.some((option) => option.value === current);
     return (
@@ -1030,10 +1039,13 @@ export const FieldControl = (props: ControlProps) => {
 const catalogOptions = (
   catalog: Extract<FormControl, { kind: "catalog" }>["catalog"],
   catalogs: FormCatalogs,
+  names: SummaryNames | undefined,
 ): { value: string; label: string }[] | null =>
   catalogProfiles(catalogs, catalog)?.map((profile) => ({
     value: profile.field_id,
-    label: `${profile.field_id} · ${profile.label}`,
+    label:
+      names?.catalog(catalog, profile.field_id) ??
+      `${profile.field_id} · ${profile.label}`,
   })) ?? null;
 
 const TextualControl = ({

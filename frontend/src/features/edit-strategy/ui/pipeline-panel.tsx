@@ -2,7 +2,8 @@
  * 그래프 1수준(파이프라인) 캔버스(WORKFLOW P4-02, spec D9). `pipeline-projection.ts` 의 카드 모델을 그대로
  * 그린다: 맨 위 한 문장 요약, 단계 열, 카드 문장 안의 컨트롤. 컨트롤·확정·되돌리기는 Form 필드 행과 한
  * 경로다(`FieldControl`·`useFieldCommit`·`FieldActions`, 연산은 `form-transactions.ts`). 어느 필드를 어떤
- * 문장에 넣을지는 i18n 카드 틀(`cardTemplate`)이 정하고, 카드는 YAML 식별자(스키마 키·pointer)를 보이지 않는다.
+ * 문장에 넣을지는 i18n 카드 틀(`cardTemplate`)이 정하고, 카드는 YAML 식별자(스키마 키·pointer)를 보이지 않는다
+ * — 카탈로그·참조 선택지도 요약과 같은 이름 풀이(`pipelineNames`)로 이름만 보인다.
  */
 import { useId, useMemo } from "react";
 
@@ -17,11 +18,14 @@ import { itemSection, placeholderOf } from "../model/form-transactions";
 import {
   cardTemplate,
   itemName,
+  pipelineNames,
   projectPipeline,
   sentencePieces,
   strategySummary,
+  type CatalogNames,
   type PipelineRow,
   type PipelineStage,
+  type SummaryNames,
 } from "../model/pipeline-projection";
 import type { JsonSchema } from "../model/schema-navigator";
 import { useFieldCommit } from "../model/use-field-editing";
@@ -41,6 +45,8 @@ import "./pipeline-panel.css";
 const PIPELINE_OWNER = "pipeline";
 
 type CardContext = {
+  /** 카탈로그·참조 선택지의 이름 풀이(요약 띠와 같은 것). */
+  names: SummaryNames;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   selectedPointer: string | undefined;
@@ -82,13 +88,21 @@ export const PipelinePanel = ({
         : projectPipeline(schema, form.projection, form.tree),
     [schema, form],
   );
+  const catalogName: CatalogNames = (catalog, value) =>
+    catalogProfiles(catalogs, catalog)?.find(
+      (profile) => profile.field_id === value,
+    )?.label ?? null;
   const disabled = transactions.disabled;
-  const context: CardContext = {
-    transactions,
-    catalogs,
-    selectedPointer,
-    onOpenGraph,
-  };
+  const context: CardContext | null =
+    pipeline === null
+      ? null
+      : {
+          names: pipelineNames(pipeline, catalogName),
+          transactions,
+          catalogs,
+          selectedPointer,
+          onOpenGraph,
+        };
   return (
     <section
       ref={container}
@@ -100,13 +114,7 @@ export const PipelinePanel = ({
           <strong>{t("graph.pipeline.summary")}</strong>{" "}
           {pipeline === null
             ? t("form.panel.loading")
-            : strategySummary(
-                pipeline,
-                (catalog, value) =>
-                  catalogProfiles(catalogs, catalog)?.find(
-                    (profile) => profile.field_id === value,
-                  )?.label ?? null,
-              )}
+            : strategySummary(pipeline, catalogName)}
         </p>
         {form.stale ? (
           <Badge tone="warn">{t("form.panel.staleBadge")}</Badge>
@@ -119,7 +127,7 @@ export const PipelinePanel = ({
         feedback={transactions.feedbackFor(PIPELINE_OWNER)}
         owner={PIPELINE_OWNER}
       />
-      {pipeline === null ? null : (
+      {pipeline === null || context === null ? null : (
         <fieldset
           className="pipeline__canvas"
           disabled={disabled !== null}
@@ -266,11 +274,14 @@ const NamedItem = ({
           {t("form.field.openGraph")}
         </Button>
       ) : null}
+      {/* 그래프 안의 진단은 같은 탭 아래 고급 편집기가 노드 카드에 붙인다 — 여기서 다시 쓰지 않는다. */}
       <DiagnosticNotes
         id={notesId}
         diagnostics={[
           ...item.diagnostics,
-          ...item.fields.flatMap((field) => field.diagnostics),
+          ...item.fields
+            .filter((field) => field !== graph)
+            .flatMap((field) => field.diagnostics),
         ]}
       />
     </div>
@@ -420,6 +431,7 @@ const InlineField = ({
         }
         field={field}
         catalogs={context.catalogs}
+        names={context.names}
         placeholderValue={placeholderOf(section, field)}
         onCommit={editing.commit}
         onValid={editing.onValid}

@@ -6,8 +6,10 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { DatasetFieldProfile } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
+import type { DocumentDiagnostic } from "../model/document-state";
 import { projectForm, type FormSection } from "../model/form-projection";
 import { fieldOperation, type ObjectSection } from "../model/form-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
@@ -21,10 +23,13 @@ const SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/runtime-schema.json"),
 ) as JsonSchema;
 
-const formOf = (source: string): FormProjectionState => {
+const formOf = (
+  source: string,
+  diagnostics: DocumentDiagnostic[] = [],
+): FormProjectionState => {
   const parse = parseSource(source, "yaml");
   return {
-    projection: projectForm(SCHEMA, parse, []),
+    projection: projectForm(SCHEMA, parse, diagnostics),
     stale: false,
     tree: parse.status === "ok" ? parse.tree : {},
   };
@@ -47,20 +52,36 @@ const transactionsStub = (): SourceTransactions => ({
 
 const renderPanel = (
   source: string,
-  transactions = transactionsStub(),
-  onOpenGraph = vi.fn(),
+  {
+    equityFields = null,
+    diagnostics = [],
+  }: {
+    equityFields?: readonly DatasetFieldProfile[] | null;
+    diagnostics?: DocumentDiagnostic[];
+  } = {},
 ) => {
+  const transactions = transactionsStub();
+  const onOpenGraph = vi.fn();
   const view = render(
     <PipelinePanel
-      form={formOf(source)}
+      form={formOf(source, diagnostics)}
       schema={SCHEMA}
       transactions={transactions}
-      catalogs={{ equityFields: null }}
+      catalogs={{ equityFields }}
       onOpenGraph={onOpenGraph}
     />,
   );
   return { ...view, transactions, onOpenGraph };
 };
+
+const diagnostic = (pointer: string, message: string): DocumentDiagnostic => ({
+  code: "strategy.test",
+  kind: "semantic",
+  severity: "error",
+  pointer,
+  message,
+  range: null,
+});
 
 const objectSection = (sections: FormSection[], key: string): ObjectSection => {
   const found = sections.find((section) => section.key === key);
@@ -147,5 +168,43 @@ describe("PipelinePanel", () => {
 
     // P4-04 의 "파이프라인 수준 DOM 에 식별자 0개" e2e 단언의 선행 가드.
     expect(container.textContent).not.toMatch(/_id|_node|kind:/);
+  });
+
+  it("카탈로그·참조 선택지는 식별자 대신 요약과 같은 이름을 보인다", () => {
+    renderPanel(idea("low_pbr_high_roe"), {
+      equityFields: [
+        { field_id: "financial.book_equity", label: "자본총계" },
+        { field_id: "price.trading_value", label: "거래대금" },
+      ] as DatasetFieldProfile[],
+    });
+    const rule = within(
+      screen.getByRole("group", { name: "거르기 규칙 목록" }),
+    ).getByRole("group", { name: "1번째 항목" });
+    const field = within(rule).getByRole("combobox", { name: "데이터 필드" });
+    expect(field).toHaveDisplayValue("자본총계");
+    expect(field).not.toHaveTextContent(/financial\.|price\./);
+    cleanup();
+
+    renderPanel(idea("inverse_volatility"));
+    const source = within(
+      screen.getByRole("group", { name: "비중 산정" }),
+    ).getByRole("combobox", { name: "위험 팩터" });
+    expect(source).toHaveDisplayValue("60일 변동성");
+    expect(source).toHaveTextContent("12-1 모멘텀");
+    expect(source).not.toHaveTextContent(/momentum_12_1|volatility_60/);
+  });
+
+  it("팩터 이름 카드는 자기 필드의 진단만 보이고 그래프 안 진단은 아래 고급 편집기에 맡긴다", () => {
+    renderPanel(idea("low_pbr_high_roe"), {
+      diagnostics: [
+        diagnostic("/factors/0/graph/nodes/0", "노드 문장"),
+        diagnostic("/factors/0/weight", "가중치 문장"),
+      ],
+    });
+    const factor = within(
+      screen.getByRole("group", { name: "알파 팩터" }),
+    ).getByRole("group", { name: "PBR" });
+    expect(factor).toHaveTextContent("가중치 문장");
+    expect(factor).not.toHaveTextContent("노드 문장");
   });
 });

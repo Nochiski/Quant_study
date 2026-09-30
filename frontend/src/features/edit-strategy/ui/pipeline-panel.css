@@ -1,5 +1,6 @@
 /* Graph 탭 패널이 안쪽 여백을 가진다 — 캔버스는 아래 고급 편집기와의 간격만 둔다. */
 .pipeline {
+  container: pipeline / inline-size;
   display: grid;
   flex-shrink: 0;
   gap: var(--space-3);
@@ -31,26 +32,34 @@
   border: 0;
 }
 
-/* 4단계 열. 좁은 폭에서는 두 열, 한 열로 쌓는다. */
+/*
+ * 단계 열 수는 뷰포트가 아니라 캔버스 폭을 따른다 — 캔버스는 좌우 패널 사이 편집 칸에 있어 1440 화면에서도
+ * 600px 남짓이다. 한 열 → 두 열 → 네 열.
+ */
 .pipeline__stages {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-@media (max-width: 1100px) {
+@container pipeline (min-width: 34rem) {
   .pipeline__stages {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 640px) {
+@container pipeline (min-width: 64rem) {
   .pipeline__stages {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+}
+
+/* 열 폭보다 긴 컨트롤이 옆 열 밑으로 넘치지 않게 한다(grid 항목의 기본 최소 폭은 내용 폭이다). */
+.pipeline__stage {
+  min-width: 0;
 }
 
 .pipeline__stage > [role="group"] {
@@ -112,7 +121,7 @@
 
 .pipeline__field input,
 .pipeline__field select {
-  max-width: 14rem;
+  max-width: min(14rem, 100%);
   padding: 0 var(--space-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-small);

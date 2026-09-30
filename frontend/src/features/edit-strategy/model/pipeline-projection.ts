@@ -294,6 +294,29 @@ export const fieldFragment = (
 /** 합성 점수에서 빠진 팩터(역가중 원천, P2-06)를 알리는 backend 진단. 제외 규칙을 여기서 다시 판정하지 않는다. */
 const EXCLUDED_FACTOR = "strategy.risk.risk_factor_excluded";
 
+const identity = (item: FormListItem): unknown =>
+  item.fields.find((field) => field.key === item.identityKey)?.value;
+
+/**
+ * 값 대신 보일 이름: 카탈로그 값은 카탈로그 항목 이름, 참조 id 는 그 id 의 목록 항목 이름(`itemName`). 요약
+ * 문장과 캔버스 컨트롤의 선택지가 같은 풀이를 쓴다 — 캔버스는 YAML 식별자 대신 이름을 보인다(P4-02).
+ */
+export const pipelineNames = (
+  pipeline: PipelineProjection,
+  catalog: CatalogNames,
+): SummaryNames => {
+  const items = pipeline.stages.flatMap((stage) =>
+    stage.lists.flatMap((list) => list.items),
+  );
+  return {
+    catalog,
+    reference: (id) => {
+      const item = items.find((candidate) => identity(candidate) === id);
+      return item === undefined ? null : itemName(item);
+    },
+  };
+};
+
 /**
  * 전략 한 문장 요약(spec D9, 리드 결정 2026-09-30). 단계 순서대로 카드·목록 항목의 조각(`fieldFragment`)을
  * 이어 단계 틀 `strategy.summary.stage.<단계>`에 넣고 문장 틀 `strategy.summary.sentence`로 닫는다. 목록은
@@ -304,19 +327,7 @@ export const strategySummary = (
   pipeline: PipelineProjection,
   catalog: CatalogNames,
 ): string => {
-  const items = pipeline.stages.flatMap((stage) =>
-    stage.lists.flatMap((list) => list.items),
-  );
-  const identity = (item: FormListItem): unknown =>
-    item.fields.find((field) => field.key === item.identityKey)?.value;
-  const names: SummaryNames = {
-    catalog,
-    // 참조가 가리키는 항목의 이름(`itemName`).
-    reference: (id) => {
-      const item = items.find((candidate) => identity(candidate) === id);
-      return item === undefined ? null : itemName(item);
-    },
-  };
+  const names = pipelineNames(pipeline, catalog);
   const cardPart = (
     card: readonly FormField[],
     shown: (field: FormField) => boolean = () => true,

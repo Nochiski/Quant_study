@@ -8,6 +8,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DatasetFieldProfile } from "../../../shared/api";
+import { t } from "../../../shared/config";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { DocumentDiagnostic } from "../model/document-state";
@@ -52,7 +53,7 @@ const EMPTY = 'schema_version: "1.2"\ntitle: ""\n';
 const idea = (name: string) =>
   readBackendFixture(`strategy_documents/ideas/${name}.yaml`);
 
-const transactionsStub = (): SourceTransactions => ({
+const transactionsStub = (settling = false): SourceTransactions => ({
   apply: vi.fn(() => true),
   run: vi.fn(() => true),
   feedback: { status: "idle" },
@@ -60,7 +61,7 @@ const transactionsStub = (): SourceTransactions => ({
   onEditorReady: vi.fn(),
   enabled: true,
   disabled: null,
-  settling: false,
+  settling,
 });
 
 const renderPanel = (
@@ -68,12 +69,14 @@ const renderPanel = (
   {
     equityFields = null,
     diagnostics = [],
+    settling = false,
   }: {
     equityFields?: readonly DatasetFieldProfile[] | null;
     diagnostics?: DocumentDiagnostic[];
+    settling?: boolean;
   } = {},
 ) => {
-  const transactions = transactionsStub();
+  const transactions = transactionsStub(settling);
   const onOpenGraph = vi.fn();
   const view = render(
     <PipelinePanel
@@ -332,6 +335,20 @@ describe("PipelinePanel", () => {
       "pipeline",
       NO_FOCUS,
     );
+  });
+
+  it("직전 편집이 반영되는 중에는 규칙 추가·삭제를 잠그고 추가 버튼이 이유를 말한다", () => {
+    // Form 목록의 P1-04 잠금과 같다. P4-04 가 Form 목록을 걷어도 캔버스에 남는다(#395 리뷰 P3-3).
+    renderPanel(idea("low_pbr_high_roe"), { settling: true });
+    const rules = screen.getByRole("group", { name: "거르기 규칙 목록" });
+    const add = within(rules).getByRole("button", {
+      name: "거르기 규칙 목록 · 항목 추가",
+    });
+    expect(add).toBeDisabled();
+    expect(add).toHaveAccessibleDescription(t("form.list.addSettling"));
+    expect(
+      within(rules).getByRole("button", { name: "1번째 항목 · 삭제" }),
+    ).toBeDisabled();
   });
 
   it("5 실행 안내는 실행 설정 자리와 캔버스 밖에 남는 것을 스키마대로 말한다", () => {

@@ -26,6 +26,9 @@ export type DraftParse =
   | { status: "ok"; value: Scalar }
   | { status: "invalid"; reason: "number" | "integer" | "range" | "date" };
 
+/** 입력 텍스트가 컨트롤 규칙에 맞지 않는 사유(`form.invalid.<사유>`). */
+export type InvalidDraft = Extract<DraftParse, { status: "invalid" }>["reason"];
+
 /** 입력 텍스트를 컨트롤 규칙(스키마 type·범위·format)으로 읽는다. 빈 텍스트는 빈 문자열/무효다. */
 export const parseDraft = (control: FormControl, draft: string): DraftParse => {
   if (control.kind === "number") {
@@ -289,3 +292,26 @@ export const removeItemOperation = (item: FormListItem): SourceOperation => ({
   kind: "remove",
   pointer: item.pointer,
 });
+
+/**
+ * `x-default-from` 형제 필드 값(P4-01 DEFECT-121-06): 생략하면 backend 가 이 값으로 채운다. 없으면 undefined.
+ * Form placeholder 와 파이프라인 요약(`valueOf`)이 같은 조회를 쓴다.
+ */
+export const defaultFromValueOf = (
+  siblings: readonly FormField[],
+  field: FormField,
+): unknown =>
+  field.defaultFrom === null
+    ? undefined
+    : siblings.find((sibling) => sibling.key === field.defaultFrom)?.value;
+
+/** 컨트롤 placeholder: 작성된 필드는 없음, 아니면 스키마 기본값, 없으면 `x-default-from` 형제 값. */
+export const placeholderOf = (
+  section: ObjectSection,
+  field: FormField,
+): unknown =>
+  field.written
+    ? undefined
+    : field.hasDefault
+      ? field.defaultValue
+      : defaultFromValueOf(section.fields, field);

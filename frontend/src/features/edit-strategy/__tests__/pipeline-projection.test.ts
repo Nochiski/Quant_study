@@ -14,10 +14,12 @@ import {
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { DocumentDiagnostic } from "../model/document-state";
-import { projectForm } from "../model/form-projection";
+import { projectForm, type FormField } from "../model/form-projection";
 import { nodeSlotsByKind } from "../model/graph-transactions";
 import {
+  cardTemplate,
   projectPipeline,
+  sentencePieces,
   strategySummary,
   type PipelineProjection,
 } from "../model/pipeline-projection";
@@ -27,6 +29,17 @@ const SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/runtime-schema.json"),
 ) as JsonSchema;
 const EMPTY = parseSource('schema_version: "1.2"\ntitle: ""\n', "yaml");
+/** 화면과 같은 길: Form 투영을 만들고 그것을 단계로 묶는다(`useFormProjection` → `projectPipeline`). */
+const pipelineOf = (
+  parse: ReturnType<typeof parseSource>,
+  diagnostics: DocumentDiagnostic[] = [],
+  schema: JsonSchema = SCHEMA,
+) =>
+  projectPipeline(
+    schema,
+    projectForm(schema, parse, diagnostics),
+    parse.status === "ok" ? parse.tree : {},
+  );
 const idea = (name: string) =>
   parseSource(
     readBackendFixture(`strategy_documents/ideas/${name}.yaml`),
@@ -63,7 +76,7 @@ describe("projectPipeline", () => {
   it("단계는 스키마 x-stage·x-applied-stage 이고 카드는 같은 단계 안의 적용 조건이 묶는다", () => {
     // 유동성 필터는 1단계, 역가중 원천은 3단계 비중 카드(리드 결정 2026-09-30). 섹터 중립의 조건
     // (`portfolio.side`)은 다른 단계라 자기 카드다.
-    expect(layout(projectPipeline(SCHEMA, EMPTY, []))).toEqual([
+    expect(layout(pipelineOf(EMPTY))).toEqual([
       {
         stage: "eligibility",
         lists: ["/eligibility/rules"],
@@ -138,7 +151,7 @@ describe("projectPipeline", () => {
       owned_by_error: null,
     };
     const portfolio = layout(
-      projectPipeline(schema as unknown as JsonSchema, EMPTY, []),
+      pipelineOf(EMPTY, [], schema as unknown as JsonSchema),
     ).find((stage) => stage.stage === "portfolio");
     expect(portfolio?.cards).toContainEqual([
       "/portfolio/rebalance",
@@ -152,7 +165,7 @@ describe("projectPipeline", () => {
       "strategy_documents/quality_momentum.yaml",
     );
     const parse = parseSource(source, "yaml");
-    const pipeline = projectPipeline(SCHEMA, parse, []);
+    const pipeline = pipelineOf(parse);
     const formPointers = projectForm(SCHEMA, parse, []).sections.flatMap(
       (section) =>
         section.kind === "list"
@@ -187,7 +200,7 @@ describe("projectPipeline", () => {
   });
 
   it("단계가 없는 섹션과 진단은 제자리에 둔다", () => {
-    const pipeline = projectPipeline(SCHEMA, EMPTY, [
+    const pipeline = pipelineOf(EMPTY, [
       diagnostic("strategy.document", ""),
       diagnostic("strategy.portfolio.section", "/portfolio"),
       diagnostic("strategy.risk.risk_field", "/risk/risk_field_id"),
@@ -215,9 +228,7 @@ describe("projectPipeline", () => {
   });
 
   it("스키마가 말하는 단계마다 이름·설명·요약 틀이 있다", () => {
-    const stages = projectPipeline(SCHEMA, EMPTY, []).stages.map(
-      (stage) => stage.stage,
-    );
+    const stages = pipelineOf(EMPTY).stages.map((stage) => stage.stage);
     const missing = stages.filter(
       (stage) =>
         tName(`strategy.stage.${stage}`) === null ||
@@ -233,7 +244,7 @@ describe("strategySummary", () => {
   const summary = (
     parse: ReturnType<typeof parseSource>,
     diagnostics: DocumentDiagnostic[] = [],
-  ) => strategySummary(projectPipeline(SCHEMA, parse, diagnostics), fieldNames);
+  ) => strategySummary(pipelineOf(parse, diagnostics), fieldNames);
 
   it("아이디어 문서를 단계 순서의 한 문장으로 요약한다(백분율 몫 없음)", () => {
     expect(summary(idea("momentum_12_1"))).toBe(
@@ -302,7 +313,7 @@ describe("요약 조각 구조", () => {
   it("모든 조각의 자리표시가 같은 카드(노드) 필드로 풀리고, 사전의 요약 키는 모두 쓰일 자리가 있다", () => {
     // 자리표시가 풀리지 않으면 조각이 소리 없이 빠진다(#367 리뷰 P3-4). 문장 예시 대신 조각 전체를 구조로 본다:
     // 카드·목록 항목(규칙 하나·팩터 둘인 문서)과 노드 설정 칸에서 조각 키 → 그 카드의 필드 키를 모은다.
-    const pipeline = projectPipeline(SCHEMA, idea("low_pbr_high_roe"), []);
+    const pipeline = pipelineOf(idea("low_pbr_high_roe"));
     const fragments = new Map<string, readonly string[]>();
     for (const fields of pipeline.stages.flatMap((stage) => [
       ...stage.cards.map((card) => card.rows.map((row) => row.field)),
@@ -349,5 +360,93 @@ describe("요약 조각 구조", () => {
     expect(
       [...fragments.keys()].filter((key) => tOptional(key) !== null).length,
     ).toBeGreaterThan(30);
+  });
+});
+
+describe("카드 문장 틀", () => {
+  const templateOf = (source: string, anchor: string) => {
+    const card = pipelineOf(parseSource(source, "yaml"))
+      .stages.flatMap((stage) => stage.cards)
+      .find((item) => item.pointer === anchor)!;
+    const fields = card.rows.map((row) => row.field);
+    return cardTemplate(fields, fields[0]!.descriptionKey);
+  };
+
+  it("틀을 글자와 같은 카드 필드의 자리로 나눈다", () => {
+    expect(sentencePieces("{field_id} 값이 {value.percent} 이상")).toEqual([
+      { key: "field_id" },
+      { text: " 값이 " },
+      { key: "value" },
+      { text: " 이상" },
+    ]);
+  });
+
+  it("enum 이 고른 값의 틀을 먼저 찾고, 없으면 앵커 설명 키의 틀이다", () => {
+    const source = (rebalance: string) =>
+      `schema_version: "1.2"\ntitle: ""\nportfolio:\n  rebalance: ${rebalance}\n`;
+    const stem = "strategy.field.portfolio_step.rebalance";
+    expect(
+      templateOf(source("every_n_sessions"), "/portfolio/rebalance"),
+    ).toBe(tOptional(`${stem}.value.every_n_sessions.card`));
+    expect(templateOf(source("monthly"), "/portfolio/rebalance")).toBe(
+      tOptional(`${stem}.card`),
+    );
+  });
+
+  it("지금 스키마의 카드는 모두 틀을 가지고, 틀의 자리는 그 카드 필드로 풀리며, 사전의 틀은 모두 붙을 카드가 있다", () => {
+    // 자리가 풀리지 않으면 그 컨트롤이 문장에서 빠진다. 요약 조각 구조 테스트와 같은 방식으로, 카드·목록
+    // 항목(규칙 하나·팩터 둘인 문서)에서 틀 후보 키 → 그 카드의 필드 키를 모은다.
+    const pipeline = pipelineOf(idea("low_pbr_high_roe"));
+    const candidates = new Map<string, readonly string[]>();
+    const collect = (fields: readonly FormField[], fallback: string | null) => {
+      for (const stem of [
+        ...fields.flatMap((field) =>
+          field.control.kind === "enum"
+            ? Object.values(field.control.labelKeys ?? {})
+            : [],
+        ),
+        fallback,
+      ])
+        if (stem !== null)
+          candidates.set(
+            `${stem}.card`,
+            fields.map((field) => field.key),
+          );
+    };
+    const untemplated: string[] = [];
+    for (const stage of pipeline.stages) {
+      for (const card of stage.cards) {
+        const fields = card.rows.map((row) => row.field);
+        collect(fields, fields[0]!.descriptionKey);
+        if (cardTemplate(fields, fields[0]!.descriptionKey) === null)
+          untemplated.push(card.pointer);
+      }
+      for (const list of stage.lists)
+        for (const item of list.items)
+          collect(item.fields, list.descriptionKey);
+    }
+    expect(untemplated).toEqual([]);
+    const unresolved = [...candidates].flatMap(([key, keys]) =>
+      sentencePieces(tOptional(key) ?? "").flatMap((piece) =>
+        "key" in piece && !keys.includes(piece.key)
+          ? [`${key} {${piece.key}}`]
+          : [],
+      ),
+    );
+    expect(unresolved).toEqual([]);
+    const orphans = Object.keys(messages.ko).filter(
+      (key) =>
+        key.startsWith("strategy.") &&
+        key.endsWith(".card") &&
+        !candidates.has(key),
+    );
+    expect(orphans).toEqual([]);
+    // 순회가 헛돌지 않는지: 규칙 목록 틀을 포함해 번역이 있는 틀이 실제로 모였다.
+    expect(
+      tOptional("strategy.field.eligibility_step.rules.card"),
+    ).not.toBeNull();
+    expect(
+      [...candidates.keys()].filter((key) => tOptional(key) !== null).length,
+    ).toBeGreaterThan(20);
   });
 });

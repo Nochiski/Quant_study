@@ -28,6 +28,7 @@ from ._evaluation import (
     _NodeEvaluator,
     _noop_checkpoint,
     _noop_progress,
+    _warming_up,
     values_from_indices,
 )
 from ._nodes import (
@@ -41,8 +42,6 @@ from ._nodes import (
     ParameterNode,
     TimeSeriesNode,
     TimeSeriesOperator,
-    UnaryNode,
-    UnaryOperator,
 )
 from ._planning import ResolvedFactorParameter, _operation, _topological_order
 from ._validation import node_dependencies
@@ -151,7 +150,7 @@ def evaluate_factor_graph_with_trace(
         progress=progress,
     )
     return (
-        _evaluation_from_computed(graph, observations, evaluator.computed, checkpoint=checkpoint),
+        _evaluation_from_computed(graph, observations, evaluator, checkpoint=checkpoint),
         _project_trace(graph, observations, bounds, nodes, order, evaluator, checkpoint=checkpoint),
     )
 
@@ -336,21 +335,3 @@ def _status(
         if len(window) == node.window and window[0] == 0:
             return TraceValueStatus.DIVIDE_BY_ZERO
     return TraceValueStatus.MISSING_INPUT
-
-
-def _warming_up(
-    node: ExpressionNode,
-    index: int,
-    observations: tuple[FactorObservation, ...],
-    by_security: dict[str, list[int]],
-) -> bool:
-    """시간 연산(`lag`·창 연산)이 읽을 칸이 그 종목의 첫 관측보다 앞이다."""
-    if isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
-        lag, window = node.periods or 0, 1
-    elif isinstance(node, TimeSeriesNode):
-        lag, window = node.lag, node.window
-    else:
-        return False
-    indices = by_security[observations[index].security_id]
-    end = indices.index(index) - lag + 1
-    return end - window < 0 or end <= 0

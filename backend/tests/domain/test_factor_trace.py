@@ -267,6 +267,9 @@ def test_warm_up_is_reported_before_masked_where_both_apply() -> None:
     자리 2 를 가린 패널에서 5일 평균의 구간은 [p-4, p] 라 2~6 이 가린 칸을 품고, 0~3 은 이력이
     모자란다(손계산 정답). 두 사유가 겹치는 2·3 은 이력 부족이다 — 가림이 없어도 값이 없을 구조적
     사유라 먼저 말한다. 실원장 `momentum(adj, 252, lag=21)` 에서 이렇게 겹치는 칸이 428칸이다.
+
+    평가 값의 `masked` 표시도 같은 칸(4~6)이다. 기준일 요약이 결측 탈락 중 원장이 가린 몫을 이
+    표시로 세므로, 추적 화면과 요약이 다른 칸을 가렸다고 말하지 않는다(lang2 P4-03).
     """
     days = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(10)]
     graph = FactorGraph(
@@ -297,6 +300,10 @@ def test_warm_up_is_reported_before_masked_where_both_apply() -> None:
         *[TraceValueStatus.OK] * 3,
     ]
     assert rows[(days[7], "a")].value == 105.0  # (103 + 104 + 105 + 106 + 107) / 5
+    evaluation = evaluate_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    assert [value.masked for value in evaluation.values] == [
+        rows[(day, "a")].status is TraceValueStatus.MASKED for day in days
+    ]
 
 
 @pytest.mark.parametrize(

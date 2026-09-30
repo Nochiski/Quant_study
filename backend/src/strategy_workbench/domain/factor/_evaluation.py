@@ -104,6 +104,9 @@ class FactorValue:
     as_of: date
     security_id: str
     value: float | None
+    # 원장이 가린 칸 때문에 값이 없다. 출력 노드 추적 상태 `masked` 와 같은 판정이고, 결측 탈락 중
+    # 원장이 가린 몫을 기준일 요약이 센다(lang2 P4-03, #350)
+    masked: bool = False
 
 
 @dataclass(frozen=True)
@@ -149,18 +152,18 @@ def evaluate_factor_graph(
     (P2-02 에서 인자로, P2-03 에서 필드 삭제).
     """
 
-    computed = _compute_nodes(
+    evaluator = _compute_nodes(
         graph,
         observations=observations,
         missing=missing,
         parameters=parameters,
         checkpoint=checkpoint,
         progress=lambda fraction: progress(fraction * _NODES_PROGRESS_SHARE),
-    ).computed
+    )
     return _evaluation_from_computed(
         graph,
         observations,
-        computed,
+        evaluator,
         checkpoint=checkpoint,
         progress=lambda fraction: progress(
             _NODES_PROGRESS_SHARE + (1.0 - _NODES_PROGRESS_SHARE) * fraction
@@ -171,7 +174,7 @@ def evaluate_factor_graph(
 def _evaluation_from_computed(
     graph: FactorGraph,
     observations: tuple[FactorObservation, ...],
-    computed: dict[str, list[FactorComputedValue]],
+    evaluator: _NodeEvaluator,
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
     progress: Callable[[float], None] = _noop_progress,
@@ -181,7 +184,8 @@ def _evaluation_from_computed(
     The trace use case calls this helper so its output values and per-node rows are projections
     of one `_compute_nodes` invocation, rather than two calculations that merely ought to agree.
     """
-    raw_output = computed[graph.output_node_id]
+    raw_output = evaluator.computed[graph.output_node_id]
+    masked = evaluator.masked_output(graph.output_node_id)
     total = max(len(observations), 1)
     output: list[FactorValue] = []
     for index, (observation, value) in enumerate(
@@ -196,6 +200,7 @@ def _evaluation_from_computed(
                 value=float(value)
                 if isinstance(value, (int, float)) and not isinstance(value, bool)
                 else None,
+                masked=index in masked,
             )
         )
     progress(1.0)
@@ -283,6 +288,21 @@ class _NodeEvaluator:
         """노드마다 원장이 가린 칸 때문에 결측이 된 출력 칸. 판정은 값 구간 규칙(`_value_spans`)
         이다."""
         return self._masked
+
+    def masked_output(self, node_id: str) -> frozenset[int]:
+        """추적 상태가 `masked` 인 칸 — 가린 칸이 구간에 들어도 이력이 모자란 칸은 뺀다.
+
+        그런 칸은 가림이 없어도 값이 없어서, 추적도 이력 부족을 먼저 말한다(#389 리뷰 P3-2).
+        """
+        cells = self._masked[node_id]
+        if not cells:
+            return cells
+        node, by_security = self._nodes[node_id], self._securities()
+        return frozenset(
+            index
+            for index in _checkpointed(cells, self._checkpoint)
+            if not _warming_up(node, index, self._observations, by_security)
+        )
 
     def _securities(self) -> dict[str, list[int]]:
         """종목별 관측 index(날짜 순). 관측에만 달려 있어 시간 연산 노드들이 나눠 쓴다."""
@@ -747,6 +767,24 @@ def _indices_by_security(
     for indices in _checkpointed(grouped.values(), checkpoint):
         indices.sort(key=lambda index: observations[index].as_of)
     return grouped
+
+
+def _warming_up(
+    node: ExpressionNode,
+    index: int,
+    observations: tuple[FactorObservation, ...],
+    by_security: dict[str, list[int]],
+) -> bool:
+    """시간 연산(`lag`·창 연산)이 읽을 칸이 그 종목의 첫 관측보다 앞이다."""
+    if isinstance(node, UnaryNode) and node.operator is UnaryOperator.LAG:
+        lag, window = node.periods or 0, 1
+    elif isinstance(node, TimeSeriesNode):
+        lag, window = node.lag, node.window
+    else:
+        return False
+    indices = by_security[observations[index].security_id]
+    end = indices.index(index) - lag + 1
+    return end - window < 0 or end <= 0
 
 
 def values_from_indices(

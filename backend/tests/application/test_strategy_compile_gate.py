@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -106,13 +107,19 @@ _GROUP_FACTOR = """  - factor_id: sector_neutral
 class _Catalog:
     """`FieldCatalogPort` 가짜 — 주어진 계약을 그대로 답하고 호출 수를 센다."""
 
-    def __init__(self, *fields: FieldMetadata) -> None:
+    def __init__(
+        self, *fields: FieldMetadata, unavailable: Mapping[str, str] | None = None
+    ) -> None:
         self._fields = fields
+        self._unavailable = unavailable or {}
         self.calls = 0
 
     def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
         self.calls += 1
         return self._fields
+
+    def unavailable_factor_fields(self) -> Mapping[str, str]:
+        return self._unavailable
 
 
 def _service(catalog: FieldCatalogPort | None) -> StrategyAuthoringService:
@@ -171,6 +178,28 @@ def test_an_unknown_field_is_a_compile_error_once_an_adapter_is_connected() -> N
     # frontend 는 진단 코드를 번역하지 않는다(SoT 진단 코드 행).
     assert _HANGUL.search(diagnostic.message.split("field_id=")[0]), diagnostic.message
     assert diagnostic.range is not None, "편집기가 그 노드 줄을 짚을 수 있다"
+
+
+# 어댑터가 뺀 필드의 사유 — 실데이터 어댑터가 부팅 때 정한 원천 사유 모양(`catalog_*` + 조치)
+_DROPPED = (
+    "카탈로그가 원장 판과 달라 매크로 원천을 쓸 수 없다 — 카탈로그를 다시 만든 뒤 서버를 다시 "
+    "띄워야 한다 (catalog_stale)"
+)
+
+
+def test_a_field_the_adapter_dropped_says_why_instead_of_asking_to_check_the_id() -> None:
+    """#316: 카탈로그가 낡아 원천이 빠진 필드는 id 가 맞다. 진단은 "계약을 찾을 수 없다" 대신
+    어댑터가 뺀 사유(조치 포함)를 그대로 싣는다 — 기본 모멘텀의 `price.adj_close` 가 그 모양이다."""
+    compiled = _compile(GOLDEN, _Catalog(unavailable={"price.adj_close": _DROPPED}))
+
+    assert _errors(compiled) == [
+        ("strategy.expression.field_missing", "/factors/0/graph/nodes/0"),
+    ]
+    [diagnostic] = [
+        item for item in compiled.diagnostics if item.code == "strategy.expression.field_missing"
+    ]
+    assert _DROPPED in diagnostic.message and "field_id='price.adj_close'" in diagnostic.message
+    assert "계약을 찾을 수 없습니다" not in diagnostic.message
 
 
 def test_without_an_adapter_an_unknown_field_still_compiles() -> None:
@@ -370,6 +399,18 @@ def test_an_unknown_field_outside_the_graph_is_a_compile_error(slot: str) -> Non
     assert "price.closex" in diagnostic.message
     assert _HANGUL.search(diagnostic.message.split("field_id=")[0]), diagnostic.message
     assert diagnostic.range is not None, "편집기가 그 필드 줄을 짚을 수 있다"
+
+
+@pytest.mark.parametrize("slot", sorted(_OUTSIDE_GRAPH_REFERENCES))
+def test_a_dropped_field_outside_the_graph_says_why_too(slot: str) -> None:
+    """#316: 그래프 밖 참조도 어댑터가 뺀 필드면 id 확인 대신 그 사유를 싣는다(같은 문장)."""
+    catalog = _Catalog(_ADJ_CLOSE, unavailable={"credit.margin_balance": _DROPPED})
+
+    compiled = _compile(_outside_graph_source(slot, "credit.margin_balance"), catalog)
+
+    assert _errors(compiled) == [("strategy.field.missing", _OUTSIDE_GRAPH_REFERENCES[slot][1])]
+    [diagnostic] = [item for item in compiled.diagnostics if item.code == "strategy.field.missing"]
+    assert _DROPPED in diagnostic.message and "필드 id 를 확인하세요" not in diagnostic.message
 
 
 @pytest.mark.parametrize("slot", sorted(_OUTSIDE_GRAPH_REFERENCES))

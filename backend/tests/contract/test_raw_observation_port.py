@@ -323,7 +323,7 @@ def test_cells_the_ledger_masked_are_masked_and_carry_no_value(adapter: Contract
     assert all("000660" in security_id and field.value is None for security_id, field in masked)
 
 
-def test_raw_port_preserves_every_equity_cell_kind_without_collapsing_zero_and_missing() -> None:
+def test_raw_port_keeps_zero_missing_collection_and_coverage_kinds_apart() -> None:
     adapter = MockEquityDataAdapter.demo()
     raw = adapter.load_raw_observations(
         _query(
@@ -339,14 +339,9 @@ def test_raw_port_preserves_every_equity_cell_kind_without_collapsing_zero_and_m
 
     actual_zero = cells[(date(2024, 1, 3), "sec-005930-1")]
     missing = cells[(date(2024, 1, 3), "sec-000660-1")]
-    omitted_zero = cells[(date(2024, 1, 4), "sec-005930-1")]
     not_collected = cells[(date(2024, 1, 4), "sec-000660-1")]
     coverage_gap = cells[(date(2024, 1, 8), "sec-035420-1")]
     assert (actual_zero.value, actual_zero.kind) == (0.0, CellKind.OBSERVED)
-    assert (omitted_zero.value, omitted_zero.kind) == (
-        0.0,
-        CellKind.SOURCE_OMITTED_ZERO,
-    )
     assert (missing.value, missing.kind) == (None, CellKind.MISSING)
     assert (not_collected.value, not_collected.kind) == (None, CellKind.NOT_COLLECTED)
     assert (coverage_gap.value, coverage_gap.kind) == (None, CellKind.COVERAGE_GAP)

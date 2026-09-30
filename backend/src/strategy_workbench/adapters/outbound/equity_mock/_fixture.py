@@ -254,7 +254,7 @@ def build_demo_fixture() -> MockEquityFixture:
             frequency=FieldFrequency.DAILY,
             available_date_basis="session",
             recommended_lag_sessions=1,
-            description="실제 0, 원천 생략 0, 미수집을 CellKind로 구분한다.",
+            description="실제 0, 결측, 미수집을 CellKind로 구분한다.",
             disclosure_basis="거래일별 투자자 매매 집계",
             evidence="KRX 투자자별 거래실적",
             coverage=FieldCoverageCapability(
@@ -263,8 +263,11 @@ def build_demo_fixture() -> MockEquityFixture:
                 venues=("XKRX",),
                 estimated_coverage_pct=91.0,
                 # 원장이 가리는 셀(MASKED)은 수급 축에 없다 — 원장 뷰가 가리는 필드만 선언한다(#298)
+                # 원천 생략 0(SOURCE_OMITTED_ZERO)도 없다 — 수급의 원천 생략은 MISSING 이다(#371)
                 supported_cell_kinds=tuple(
-                    kind for kind in CellKind if kind is not CellKind.MASKED
+                    kind
+                    for kind in CellKind
+                    if kind not in (CellKind.MASKED, CellKind.SOURCE_OMITTED_ZERO)
                 ),
                 point_in_time=True,
                 requires_confirmation=True,
@@ -484,14 +487,6 @@ def build_demo_fixture() -> MockEquityFixture:
                 sessions[0],
                 None,
                 CellKind.MISSING,
-            ),
-            Observation(
-                securities[0].security_id,
-                "flow.foreign_net_buy",
-                sessions[1],
-                sessions[1],
-                0.0,
-                CellKind.SOURCE_OMITTED_ZERO,
             ),
             Observation(
                 securities[1].security_id,

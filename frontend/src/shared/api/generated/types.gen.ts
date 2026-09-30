@@ -378,6 +378,8 @@ export type BacktestCancelResult = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -669,6 +671,8 @@ export type BacktestRunState = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -954,6 +958,41 @@ export type CellKind =
   | "not_collected"
   | "coverage_gap"
   | "masked";
+
+/**
+ * CellPlateau
+ */
+export type CellPlateau = {
+  /**
+   * Grid Index
+   */
+  grid_index: Array<number>;
+  /**
+   * Plateau Score
+   */
+  plateau_score: number | null;
+  /**
+   * Score
+   */
+  score: number | null;
+  /**
+   * Sensitivity
+   */
+  sensitivity: number | null;
+  /**
+   * Sensitivity Cell
+   */
+  sensitivity_cell: Array<number> | null;
+  verdict: CellVerdict;
+};
+
+/**
+ * CellVerdict
+ *
+ * 칸 판정. 화면은 번역만 한다.
+ */
+export type CellVerdict =
+  "recommended" | "peak" | "failed" | "unscored" | "scored";
 
 /**
  * ChatMessageView
@@ -1877,6 +1916,10 @@ export type ExperimentTrialState = {
    * Awaiting Recovery
    */
   awaiting_recovery: boolean;
+  /**
+   * Bankrupt
+   */
+  bankrupt?: boolean;
   status: TrialStatus;
   trial: ExperimentTrial;
 };
@@ -3110,6 +3153,18 @@ export type PanelPreviewCostEstimate = {
    * Session Count
    */
   session_count: number;
+};
+
+/**
+ * ParameterMap
+ *
+ * 파라미터 지도(V4-03). 칸 판정 규칙은 `domain/experiment/_plateau.py` 다.
+ */
+export type ParameterMap = {
+  /**
+   * Cells
+   */
+  cells: Array<CellPlateau>;
 };
 
 /**
@@ -4793,8 +4848,9 @@ export type StartTurnRequest = {
  *
  * A stored revision as an editor sees it: exact source plus what it compiles to.
  *
- * `generated` is True when the revision predates document authoring (legacy JSON API) and the
- * source shown is a canonical JSON projection of the stored spec, not text an author wrote.
+ * `generated` 는 revision 이 문서 저작 이전(legacy JSON API)이라 보이는 원문이 작성자가 쓴 글이
+ * 아니라 저장된 spec 에서 만든 문서일 때 참이다 — 승격을 걷은 현재 판 문서
+ * (`authoring_document`)다.
  */
 export type StrategyDocument = {
   /**
@@ -6664,6 +6720,8 @@ export type WalkForwardWindowResult = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -7859,6 +7917,42 @@ export type StreamExperimentEventsResponses = {
    */
   200: unknown;
 };
+
+export type GetExperimentParameterMapData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/parameter-map";
+};
+
+export type GetExperimentParameterMapErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentParameterMapError =
+  GetExperimentParameterMapErrors[keyof GetExperimentParameterMapErrors];
+
+export type GetExperimentParameterMapResponses = {
+  /**
+   * Successful Response
+   */
+  200: ParameterMap;
+};
+
+export type GetExperimentParameterMapResponse =
+  GetExperimentParameterMapResponses[keyof GetExperimentParameterMapResponses];
 
 export type SelectExperimentTrialData = {
   body: ExperimentSelectionRequest;

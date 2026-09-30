@@ -1,0 +1,160 @@
+/* Graph 탭 패널이 안쪽 여백을 가진다 — 캔버스는 아래 고급 편집기와의 간격만 둔다. */
+.pipeline {
+  container: pipeline / inline-size;
+  display: grid;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+}
+
+.pipeline__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* 캔버스 맨 위 한 문장 요약 띠(spec D9). */
+.pipeline__summary {
+  flex: 1 1 24rem;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-medium);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.pipeline__canvas {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/*
+ * 단계 열 수는 뷰포트가 아니라 캔버스 폭을 따른다 — 캔버스는 좌우 패널 사이 편집 칸에 있어 1440 화면에서도
+ * 600px 남짓이다. 한 열 → 두 열 → 네 열.
+ */
+.pipeline__stages {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@container pipeline (min-width: 34rem) {
+  .pipeline__stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container pipeline (min-width: 64rem) {
+  .pipeline__stages {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* 열 폭보다 긴 컨트롤이 옆 열 밑으로 넘치지 않게 한다(grid 항목의 기본 최소 폭은 내용 폭이다). */
+.pipeline__stage {
+  min-width: 0;
+}
+
+.pipeline__stage > [role="group"] {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  height: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  box-sizing: border-box;
+}
+
+/* "5 실행" 안내는 좁은 다섯째 열 대신 네 단계 아래 한 줄을 다 쓴다. */
+.pipeline__stage--guide {
+  grid-column: 1 / -1;
+}
+
+.pipeline__guide {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.pipeline__stage-title {
+  margin: 0;
+  font-size: var(--text-size-body);
+}
+
+.pipeline__stage-number {
+  color: var(--accent);
+}
+
+.pipeline__stage-term,
+.pipeline__stage-description,
+.pipeline__list-title,
+.pipeline__hint,
+.pipeline__row-name,
+.pipeline__action-name {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.pipeline__list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.pipeline__card {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+}
+
+.pipeline__card[aria-current="true"] {
+  border-color: var(--accent);
+}
+
+/* 컨트롤이 한국어 문장 안에 들어간다(spec D9). */
+.pipeline__sentence,
+.pipeline__row {
+  margin: 0;
+  line-height: 2;
+}
+
+/* 선언은 Form 컨트롤 규칙(`strategy-form-panel.css`)과 같고, 문장 안이라 크기만 줄인다. */
+.pipeline__field input,
+.pipeline__field select {
+  min-width: 0;
+  max-width: min(14rem, 100%);
+  padding: 0 var(--space-1);
+}
+
+.pipeline__field input[type="number"] {
+  width: 6rem;
+}
+
+/* 지금 설정으로는 쓰이지 않는 칸은 카드 안에서 흐리게(WORKFLOW P4-02). */
+.pipeline__field[data-applicable="false"] {
+  opacity: 0.55;
+}
+
+.pipeline__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.pipeline__actions:empty {
+  display: none;
+}

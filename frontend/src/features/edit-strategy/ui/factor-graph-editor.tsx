@@ -25,16 +25,14 @@ import { schemaFacts, type JsonSchema } from "../model/schema-navigator";
 import { factorGraphPointer } from "../model/use-execution-plans";
 import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
+import { NO_FOCUS, type CommitPlanner } from "../model/use-field-editing";
 import {
   DiagnosticNotes,
   FormFieldsEditor,
-  type CommitPlanner,
   type FormCatalogs,
 } from "./strategy-form-panel";
 import { OperatorPalette } from "./operator-palette";
 import { TransactionFeedbackNote } from "./transaction-feedback";
-
-const NO_FOCUS = { focusEditor: false } as const;
 
 /** 삭제 거부 안내의 참조 pointer가 이 팩터의 몇 번째 노드를 가리키는가. 그래프 출력이면 매치가 없다. */
 const NODE_INDEX = /\/graph\/nodes\/(\d+)(?:\/|$)/u;

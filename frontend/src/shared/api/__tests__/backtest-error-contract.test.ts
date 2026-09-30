@@ -52,6 +52,8 @@ const RUN_FAILURE_CODES: Record<RunFailureCode, true> = {
   "backtest.run.invalid": true,
   "backtest.run.equity_wiped_out": true,
   "backtest.run.data_not_ready": true,
+  "backtest.run.no_positions": true,
+  "backtest.run.benchmark_unknown": true,
   "backtest.run.internal": true,
   "backtest.run.interrupted": true,
 };

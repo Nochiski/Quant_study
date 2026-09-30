@@ -14,36 +14,41 @@ import type {
 } from "../../../shared/api";
 import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
-import type {
-  FormControl,
-  FormField,
-  FormListItem,
-  FormProjection,
-  FormSection,
+import {
+  catalogProfiles,
+  type FormControl,
+  type FormField,
+  type FormListItem,
+  type FormProjection,
+  type FormSection,
 } from "../model/form-projection";
 import type { CanonicalSnippet } from "../model/canonical-snippets";
-import type { DocumentReference } from "../model/document-references";
+import { coversPointer } from "../model/diagnostic-navigation";
+import type { SummaryNames } from "../model/pipeline-projection";
 import type { DocumentDiagnostic } from "../model/document-state";
 import {
-  addItemOperation,
   addPresetItemOperation,
+  defaultFromValueOf,
   draftOf,
-  fieldOperation,
   itemKinds,
   itemSection,
+  listAddition,
   parseDraft,
-  removalBlockers,
-  removeItemOperation,
   resetOperation,
   unsetOperation,
+  type InvalidDraft,
   type ListSection,
   type ObjectSection,
 } from "../model/form-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
-import type {
-  Scalar,
-  SourceOperation,
-} from "../model/source-transactions";
+import type { Scalar } from "../model/source-transactions";
+import {
+  FORM_OWNER,
+  NO_FOCUS,
+  useFieldCommit,
+  useItemRemoval,
+  type CommitPlanner,
+} from "../model/use-field-editing";
 import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { TransactionFeedbackNote } from "./transaction-feedback";
@@ -78,10 +83,6 @@ type StrategyFormPanelProps = {
 };
 
 const UNSET = "__unset__";
-
-const FORM_OWNER = "form";
-/** Form 컨트롤이 포커스를 가진 채 적용한다: 편집기로 포커스를 옮기면 컨트롤 blur가 같은 값을 다시 확정한다. */
-const NO_FOCUS = { focusEditor: false } as const;
 
 /**
  * 편집 가능한 Form 패널(WORKFLOW P4-02). 모든 변경은 `SourceTransactions.apply` 한 번이고 YAML source에
@@ -338,8 +339,12 @@ const FormListSectionView = ({
   const kinds = schema === null ? null : itemKinds(schema, section);
   const [kind, setKind] = useState<string>("");
   const chosenKind = kinds === null ? null : kind || (kinds[0] ?? "");
-  const addOperation =
-    schema === null ? null : addItemOperation(schema, section, chosenKind);
+  const addition = listAddition(
+    schema,
+    section,
+    chosenKind,
+    transactions.settling,
+  );
   const presets = catalogSnippets.filter(
     (snippet) =>
       snippet.kind === "factor" && snippet.sectionKey === section.key,
@@ -359,17 +364,8 @@ const FormListSectionView = ({
     selectedPointer,
     revealSignal,
   );
-  // 추가·preset·삭제(위치 pointer 연산)만 직전 편집의 parse가 따라올 때까지 잠근다(P5-03 리뷰 DEFECT-133-01;
-  // 항목 필드·Graph 열기는 열어 둔다 — 3차 P2). 구조 변경 직후의 스칼라 확정은 훅이 pending으로 보류한다.
   const settling = transactions.settling;
-  const addBlocked =
-    schema === null
-      ? t("form.list.addNoSchema")
-      : addOperation === null
-        ? t("form.list.addBlocked")
-        : settling
-          ? t("form.list.addSettling")
-          : null;
+  const addBlocked = addition.blocked;
   return (
     <fieldset className="strategy-form__section" disabled={disabled}>
       <legend>
@@ -405,9 +401,9 @@ const FormListSectionView = ({
             disabled={addBlocked !== null}
             aria-describedby={addBlocked === null ? undefined : addReasonId}
             onClick={() => {
-              if (addOperation !== null)
+              if (addition.operation !== null)
                 transactions.apply(
-                  addOperation,
+                  addition.operation,
                   section.key,
                   FORM_OWNER,
                   NO_FOCUS,
@@ -493,36 +489,13 @@ const FormListItemView = ({
   onOpenGraph: ((pointer: string) => void) | undefined;
   selectedPointer: string | undefined;
 }) => {
-  // 삭제 거부 안내는 그 판정을 낸 문서(tree)에만 붙는다. 문서가 바뀌면(재색인 포함) 렌더 중 파생으로
-  // 사라진다 — React key가 pointer(인덱스)라 인스턴스가 다른 항목에 재사용될 수 있다(리뷰 P2-2).
   const notesId = useId();
-  const [blockers, setBlockers] = useState<{
-    tree: unknown;
-    references: DocumentReference[];
-  } | null>(null);
-  const blocked = blockers !== null && blockers.tree === tree ? blockers.references : null;
+  const { blocked, remove } = useItemRemoval(item, tree, transactions);
   const asSection = itemSection(section, item);
   const graphField = item.fields.find(
     (field) => field.control.kind === "graph-link",
   );
-  const remove = (): void => {
-    const references = removalBlockers(tree, item);
-    if (references.length > 0) {
-      setBlockers({ tree, references });
-      return;
-    }
-    setBlockers(null);
-    transactions.apply(
-      removeItemOperation(item),
-      item.summary,
-      FORM_OWNER,
-      NO_FOCUS,
-    );
-  };
-  const selected =
-    selectedPointer !== undefined &&
-    (selectedPointer === item.pointer ||
-      selectedPointer.startsWith(`${item.pointer}/`));
+  const selected = coversPointer(item.pointer, selectedPointer);
   return (
     <section
       className="strategy-form__item"
@@ -562,18 +535,10 @@ const FormListItemView = ({
           {t("form.list.remove")}
         </Button>
       </header>
-      {/*
-        Graph 노드 삭제 거부는 노드 표시 이름으로 말하지만(P1-04) 여기는 pointer 그대로다.
-        목록 항목을 붙잡는 참조는 문서 전역이라(`/portfolio/signal_factor_id` 같은 자리) 이름보다
-        위치가 더 정확하고, pointer를 표시 이름으로 옮기는 규칙은 아직 owner가 없는 새 사실이다.
-        의도적 제외이며 PLAN P1-04 Non-goals에 적었다.
-      */}
+      {/* Graph 노드 삭제 거부는 노드 표시 이름으로 말하지만(P1-04) 여기는 pointer 그대로다(`useItemRemoval`). */}
       {blocked !== null ? (
         <p className="strategy-form__invalid" role="alert">
-          {t("form.list.blocked").replace(
-            "{pointers}",
-            blocked.map((reference) => reference.pointer).join(", "),
-          )}
+          {blocked}
         </p>
       ) : null}
       <DiagnosticNotes id={notesId} diagnostics={item.diagnostics} />
@@ -696,23 +661,6 @@ const isPassiveControl = (control: FormControl): boolean =>
  * object 섹션의 필드 행 묶음. Graph 편집기(P5-02)가 노드 속성·그래프 설정에 같은 컨트롤을 쓴다 —
  * `owner`로 feedback 슬롯을 나눈다.
  */
-/**
- * 필드 확정을 가로채는 계획(Graph의 `node_id` rename처럼 한 필드가 여러 위치를 바꿀 때). null이면 기본
- * `fieldOperation`, `invalid`면 그 사유(`form.invalid.<사유>`)를 안내하고 적용하지 않는다.
- */
-export type CommitInvalidReason =
-  | "duplicateNodeId"
-  | "emptyNodeId"
-  | "missingNode";
-export type CommitPlanner = (
-  field: FormField,
-  value: Scalar,
-) =>
-  | SourceOperation
-  | readonly SourceOperation[]
-  | { invalid: CommitInvalidReason }
-  | null;
-
 export const FormFieldsEditor = ({
   section,
   transactions,
@@ -756,6 +704,59 @@ export const FormFieldsEditor = ({
   </>
 );
 
+/**
+ * "기본값으로"(작성된 선택 필드의 키를 지운다)·"설정 안 함"(nullable 필드를 null 로). Form 행과 파이프라인 카드가
+ * 같이 쓴다. `label` 은 버튼 이름의 앞머리이자 feedback 문구다(Form 은 스키마 키, 카드는 필드 이름).
+ */
+export const FieldActions = ({
+  section,
+  field,
+  transactions,
+  owner = FORM_OWNER,
+  label = field.key,
+  prefix,
+}: {
+  section: ObjectSection;
+  field: FormField;
+  transactions: SourceTransactions;
+  owner?: string;
+  label?: string;
+  /** 버튼이 하나라도 있을 때만 앞에 붙는 표시(카드는 행 이름을 보인다). */
+  prefix?: ReactNode;
+}) => {
+  if (isPassiveControl(field.control)) return null;
+  const reset = field.written && !field.required;
+  const unset = field.value === null ? null : unsetOperation(section, field);
+  if (!reset && unset === null) return null;
+  return (
+    <>
+      {prefix}
+      {reset ? (
+        <Button
+          size="small"
+          tone="ghost"
+          onClick={() =>
+            transactions.apply(resetOperation(field), label, owner, NO_FOCUS)
+          }
+          aria-label={`${label} · ${t("form.field.reset")}`}
+        >
+          {t("form.field.reset")}
+        </Button>
+      ) : null}
+      {unset !== null ? (
+        <Button
+          size="small"
+          tone="ghost"
+          onClick={() => transactions.apply(unset, label, owner, NO_FOCUS)}
+          aria-label={`${label} · ${t("form.field.unset")}`}
+        >
+          {t("form.field.unset")}
+        </Button>
+      ) : null}
+    </>
+  );
+};
+
 const FormFieldRow = ({
   section,
   field,
@@ -777,30 +778,16 @@ const FormFieldRow = ({
   const labelId = `${id}-label`;
   const notesId = `${id}-notes`;
   const invalidId = `${id}-invalid`;
-  const [invalid, setInvalid] = useState<string | null>(null);
+  const editing = useFieldCommit({
+    section,
+    field,
+    transactions,
+    owner,
+    planCommit,
+  });
+  const invalid = editing.invalid;
   const passive = isPassiveControl(field.control);
-  // `x-default-from`: 생략하면 backend가 형제 키의 값으로 채운다 → placeholder도 그 값(P4-01 DEFECT-121-06).
-  const defaultFromValue =
-    field.defaultFrom === null
-      ? undefined
-      : section.fields.find((sibling) => sibling.key === field.defaultFrom)
-          ?.value;
-  // 적용 여부를 컨트롤에 돌려준다: 실패한 확정의 재시도 판정은 컨트롤 로컬이다(P4-02 리뷰 009/012 —
-  // 공유 feedback 슬롯은 다른 필드가 덮고, label은 목록 항목끼리 겹친다).
-  const commit = (value: Scalar): boolean => {
-    setInvalid(null);
-    const planned = planCommit?.(field, value) ?? null;
-    if (planned !== null && "invalid" in planned) {
-      setInvalid(t(`form.invalid.${planned.invalid}`));
-      return false;
-    }
-    return transactions.apply(
-      planned ?? fieldOperation(section, field, value),
-      field.key,
-      owner,
-      NO_FOCUS,
-    );
-  };
+  const defaultFromValue = defaultFromValueOf(section.fields, field);
   // 라벨은 이름을 보이고 스키마 키는 보조 `<code>`다(P1-03). 설명은 `<stem>.description`.
   const name = tName(field.descriptionKey);
   // enum 필드는 고른 값의 설명·계산식이 있으면 그것을 보인다: "이 노드가 수행할 연산"보다 화면에서
@@ -826,19 +813,9 @@ const FormFieldRow = ({
       describedBy={describedBy.length === 0 ? undefined : describedBy.join(" ")}
       field={field}
       catalogs={catalogs}
-      placeholderValue={
-        field.written
-          ? undefined
-          : field.hasDefault
-            ? field.defaultValue
-            : defaultFromValue
-      }
-      onCommit={commit}
-      onValid={() => setInvalid(null)}
-      onInvalid={(reason) => setInvalid(t(`form.invalid.${reason}`))}
+      {...editing.control}
     />
   );
-  const unset = unsetOperation(section, field);
   // 라벨 내용은 passive 행(링크·const)도 같다: 필수 별표·단위(P4-02 리뷰 010).
   const labelBody = (
     <>
@@ -886,35 +863,12 @@ const FormFieldRow = ({
       )}
       <div className="strategy-form__control">
         {control}
-        {!passive && field.written && !field.required ? (
-          <Button
-            size="small"
-            tone="ghost"
-            onClick={() =>
-              transactions.apply(
-                resetOperation(field),
-                field.key,
-                owner,
-                NO_FOCUS,
-              )
-            }
-            aria-label={`${field.key} · ${t("form.field.reset")}`}
-          >
-            {t("form.field.reset")}
-          </Button>
-        ) : null}
-        {!passive && unset !== null && field.value !== null ? (
-          <Button
-            size="small"
-            tone="ghost"
-            onClick={() =>
-              transactions.apply(unset, field.key, owner, NO_FOCUS)
-            }
-            aria-label={`${field.key} · ${t("form.field.unset")}`}
-          >
-            {t("form.field.unset")}
-          </Button>
-        ) : null}
+        <FieldActions
+          section={section}
+          field={field}
+          transactions={transactions}
+          owner={owner}
+        />
         {severityBadge(field)}
       </div>
       {invalid !== null ? (
@@ -958,6 +912,13 @@ const FormFieldRow = ({
 type ControlProps = {
   id: string;
   labelId: string;
+  /** `<label htmlFor>` 가 없는 자리(파이프라인 카드 문장)의 이름. 있으면 컨트롤이 `aria-label` 로 단다. */
+  ariaLabel?: string;
+  /**
+   * 선택지 이름 풀이(파이프라인 캔버스, `pipelineNames`). 있으면 카탈로그·참조 선택지가 식별자 대신 이름만
+   * 보인다. 없으면(Form) 카탈로그는 "id · 이름", 참조는 id 그대로다.
+   */
+  names?: SummaryNames;
   /** 이 필드의 오류 본문 id(있으면). 컨트롤이 `aria-describedby`로 가리킨다(P1-04). */
   describedBy: string | undefined;
   field: FormField;
@@ -967,12 +928,13 @@ type ControlProps = {
   /** 값을 트랜잭션으로 넘긴다. 적용됐으면 true(`SourceTransactions.apply`와 같다). */
   onCommit: (value: Scalar) => boolean;
   onValid: () => void;
-  onInvalid: (reason: "number" | "integer" | "range" | "date") => void;
+  onInvalid: (reason: InvalidDraft) => void;
 };
 
 /** 컨트롤별 커밋 규칙: 텍스트류는 blur/Enter에서 바뀐 값만, 선택류는 변경 즉시. Escape는 입력 취소. */
-const FieldControl = (props: ControlProps) => {
-  const { id, labelId, describedBy, field, catalogs, onCommit } = props;
+export const FieldControl = (props: ControlProps) => {
+  const { id, labelId, ariaLabel, describedBy, field, catalogs, onCommit } =
+    props;
   const { control } = field;
   if (control.kind === "const")
     return (
@@ -990,6 +952,7 @@ const FieldControl = (props: ControlProps) => {
       <input
         id={id}
         type="checkbox"
+        aria-label={ariaLabel}
         aria-describedby={describedBy}
         checked={field.value === true}
         onChange={(event) => onCommit(event.target.checked)}
@@ -1014,13 +977,17 @@ const FieldControl = (props: ControlProps) => {
             label: tName(control.labelKeys?.[value]) ?? value,
           }))
         : control.kind === "reference"
-          ? control.candidates.map((value) => ({ value, label: value }))
-          : catalogOptions(control.catalog, catalogs);
+          ? control.candidates.map((value) => ({
+              value,
+              label: props.names?.reference(value) ?? value,
+            }))
+          : catalogOptions(control.catalog, catalogs, props.names);
     if (options === null) return <TextualControl {...props} />;
     const known = options.some((option) => option.value === current);
     return (
       <select
         id={id}
+        aria-label={ariaLabel}
         aria-describedby={describedBy}
         value={current}
         onChange={(event: ChangeEvent<HTMLSelectElement>) =>
@@ -1063,17 +1030,18 @@ const FieldControl = (props: ControlProps) => {
 const catalogOptions = (
   catalog: Extract<FormControl, { kind: "catalog" }>["catalog"],
   catalogs: FormCatalogs,
-): { value: string; label: string }[] | null => {
-  if (catalog === "equity-field" && catalogs.equityFields !== null)
-    return catalogs.equityFields.map((profile) => ({
-      value: profile.field_id,
-      label: `${profile.field_id} · ${profile.label}`,
-    }));
-  return null;
-};
+  names: SummaryNames | undefined,
+): { value: string; label: string }[] | null =>
+  catalogProfiles(catalogs, catalog)?.map((profile) => ({
+    value: profile.field_id,
+    label:
+      names?.catalog(catalog, profile.field_id) ??
+      `${profile.field_id} · ${profile.label}`,
+  })) ?? null;
 
 const TextualControl = ({
   id,
+  ariaLabel,
   describedBy,
   field,
   placeholderValue,
@@ -1147,6 +1115,7 @@ const TextualControl = ({
   return (
     <input
       id={id}
+      aria-label={ariaLabel}
       aria-describedby={describedBy}
       type={control.kind === "date" ? "date" : numeric ? "number" : "text"}
       inputMode={numeric ? "decimal" : undefined}

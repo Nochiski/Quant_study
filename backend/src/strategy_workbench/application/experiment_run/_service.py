@@ -20,8 +20,9 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RunStatus,
     SavedRevisionReference,
 )
-from strategy_workbench.domain.backtest.facade.trials import preview_trial
+from strategy_workbench.domain.backtest.facade.trials import bankrupt, preview_trial
 from strategy_workbench.domain.experiment.facade.design import (
+    CellPlateau,
     ExperimentDesign,
     ExperimentNotFoundError,
     ExperimentStateError,
@@ -31,9 +32,11 @@ from strategy_workbench.domain.experiment.facade.design import (
     SplitSpec,
     WalkForwardGap,
     build_search_spec,
+    cell_outcomes,
     experiment_trial_key,
     out_of_sample_sharpe,
     pick_window_cell,
+    plateau_map,
     stitch_out_of_sample,
     walk_forward_gap,
     walk_forward_retention,
@@ -106,6 +109,8 @@ class ExperimentTrialState:
     attempts: tuple[TrialAttempt, ...]
     # 최신 실행이 재시작으로 중단돼 복구가 다시 넘기기를 기다린다(`awaiting_recovery`).
     awaiting_recovery: bool
+    # 최신 실행이 파산으로 끝났다(`bankrupt`) — 비전략 실패와 달리 전략의 결과다.
+    bankrupt: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,6 +149,14 @@ class WalkForwardReport:
     out_of_sample_sharpe: float | None
     retention: float | None
     gap: WalkForwardGap | None
+
+
+@dataclass(frozen=True)
+class ParameterMap:
+    """파라미터 지도(V4-03). 칸 판정 규칙은 `domain/experiment/_plateau.py` 다."""
+
+    # 그리드 칸 좌표 순.
+    cells: tuple[CellPlateau, ...]
 
 
 @dataclass(frozen=True)
@@ -462,6 +475,25 @@ class ExperimentRunService:
         train = [pick.train_sharpe for pick in picks if pick.train_sharpe is not None]
         return WalkForwardReport(windows, curve, oos, walk_forward_retention(oos, train), None)
 
+    def parameter_map(self, experiment_id: str) -> ParameterMap:
+        """그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03, 규칙은
+        `domain/experiment/_plateau.py`). 칸 점수는 창별 학습 점수(원장 세션 샤프)의 평균이고,
+        끝나지 않은 칸은 점수 없음이다 — 도는 실험도 그때까지의 지도를 준다."""
+        record = self._repository.get(experiment_id)
+        states = self._trial_states(record)
+        scores = self._train_scores(record)
+        trials = (
+            (
+                state.trial.grid_index,
+                state.status,
+                state.awaiting_recovery,
+                state.bankrupt,
+                scores.get(state.attempts[-1].run_id or "") if state.attempts else None,
+            )
+            for state in states
+        )
+        return ParameterMap(plateau_map(record.design.search, cell_outcomes(trials)))
+
     def _open_windows(
         self, record: ExperimentRecord, states: tuple[ExperimentTrialState, ...]
     ) -> tuple[list[tuple[int, list[ExperimentTrialState], WindowPick | None]], bool]:
@@ -657,7 +689,13 @@ def _state(
         attempted=latest is not None,
         experiment_cancelled=cancelled,
     )
-    return ExperimentTrialState(trial, status, attempts, awaiting_recovery(run))
+    return ExperimentTrialState(
+        trial,
+        status,
+        attempts,
+        awaiting_recovery(run),
+        run is not None and bankrupt(run.status, run.error_code),
+    )
 
 
 def _base_source(run: BacktestRunSpec) -> SavedRevisionReference:

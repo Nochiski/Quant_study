@@ -7,11 +7,15 @@ bar 가 없고 (2) 요청하면 start 앞 거래일의 bar 만 따로 답하며 
 
 #369: 엔진은 원주가 × 보유 수량으로 평가하므로 bar 사이 원주가 층 배수는 수량을 바꾸는 사건이
 설명해야 한다. 원장이 계수를 못 낸 층 이동도 그렇다(mock 에는 층 이동이 없다).
+
+#361: 벤치마크는 요청했을 때만 답하고, 모르거나 형식이 틀린 id 는 두 어댑터가 같은 예외로 거절한다
+— 지어낸 bar 로 초과수익을 계산하지 않는다.
 """
 
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import replace
 from datetime import date
 from itertools import pairwise
@@ -25,6 +29,7 @@ from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataPort,
     BacktestDataQuery,
+    BacktestDataUnavailableError,
 )
 
 HISTORY = 3
@@ -122,3 +127,50 @@ def test_level_shifts_between_bars_are_carried_by_share_actions(
             )
             # 픽스처 bar 는 이웃 세션이라 KRX 가격제한폭(±30%) 밖 배수는 층 이동뿐이다
             assert 0.7 < after.close * shares / before.close < 1.3, (security_id, after.session)
+
+
+@pytest.mark.parametrize(("name", "start", "end", "security_ids"), CASES)
+def test_the_benchmark_is_answered_only_when_requested(
+    request: pytest.FixtureRequest,
+    name: str,
+    start: date,
+    end: date,
+    security_ids: tuple[str, ...],
+) -> None:
+    dataset = _adapter(request, name).load_backtest_dataset(
+        BacktestDataQuery(start, end, security_ids, None)
+    )
+
+    assert dataset.benchmark_security_id is None
+    assert {bar.security_id for bar in dataset.bars} == set(security_ids)
+
+
+@pytest.mark.parametrize(("name", "start", "end", "security_ids"), CASES)
+@pytest.mark.parametrize("benchmark", ["KOSPI", "999999:1"])
+def test_unknown_benchmark_ids_are_refused_not_invented(
+    request: pytest.FixtureRequest,
+    name: str,
+    start: date,
+    end: date,
+    security_ids: tuple[str, ...],
+    benchmark: str,
+) -> None:
+    with pytest.raises(BacktestDataUnavailableError, match=re.escape(benchmark)):
+        _adapter(request, name).load_backtest_dataset(
+            BacktestDataQuery(start, end, security_ids, benchmark)
+        )
+
+
+@pytest.mark.parametrize(
+    ("name", "security_id"), [("mock", "sec-005930-1"), ("equity_duckdb", "005930:1")]
+)
+def test_a_window_without_sessions_is_answered_without_bars(
+    request: pytest.FixtureRequest, name: str, security_id: str
+) -> None:
+    """2024-01-06~07 은 토·일이다. 세션이 없는 창도 두 어댑터가 예외 없이 bar 없이 답한다 — 한쪽만
+    던지면 벤치마크를 둔 실행이 tape 앞 확인에서 서버 오류로 끝난다."""
+    dataset = _adapter(request, name).load_backtest_dataset(
+        BacktestDataQuery(date(2024, 1, 6), date(2024, 1, 7), (security_id,), security_id)
+    )
+
+    assert (dataset.bars, dataset.history_bars) == ((), ())

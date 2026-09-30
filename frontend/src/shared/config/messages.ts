@@ -1172,6 +1172,8 @@ const ko = {
   "strategy.stage.risk.term": "Risk",
   "strategy.field.eligibility_step.rules.card":
     "{field_id} 값이 {operator} 종목만 — 기준값 {value}",
+  "strategy.section.factors.card":
+    "{label} — {direction}, 가중치 {weight.slider}",
   "strategy.field.eligibility_rule.operator.value.top_percent.card":
     "{field_id} {operator} 종목만 — 상위 비율 {value}(0.2가 20%)",
   "strategy.field.eligibility_rule.operator.value.top_count.card":
@@ -1212,7 +1214,9 @@ const ko = {
   "graph.pipeline.summary": "요약",
   "graph.pipeline.stages": "전략 단계",
   "graph.pipeline.item": "{index}번째 항목",
-  "graph.pipeline.unnamed": "이름 없는 항목",
+  "graph.pipeline.openRecipe": "레시피 열기",
+  "graph.pipeline.removeBlocked":
+    "다른 곳에서 쓰고 있어 지우지 않았습니다: {places}",
   "graph.pipeline.execution": "실행",
   "graph.pipeline.execution.term": "Execution",
   "graph.pipeline.execution.description":
@@ -1906,6 +1910,8 @@ const ko = {
   "form.invalid.duplicateNodeId": "같은 그래프에 이미 있는 node_id입니다",
   "form.invalid.emptyNodeId": "node_id는 비울 수 없습니다",
   "form.invalid.missingNode": "노드를 문서에서 찾지 못했습니다",
+  "form.invalid.duplicateIdentity": "같은 목록에 이미 있는 이름입니다",
+  "form.invalid.emptyIdentity": "이름은 비울 수 없습니다",
   "form.feedback.applied": "{label} 반영됨",
   "form.feedback.failed": "{label} 반영 실패",
   "form.feedback.parse":
@@ -3272,6 +3278,8 @@ export const messages = {
     "strategy.stage.risk.term": "Risk",
     "strategy.field.eligibility_step.rules.card":
       "Only stocks whose {field_id} is {operator} — threshold {value}",
+    "strategy.section.factors.card":
+      "{label} — {direction}, weight {weight.slider}",
     "strategy.field.eligibility_rule.operator.value.top_percent.card":
       "Only stocks {operator} of {field_id} — top fraction {value} (0.2 means 20%)",
     "strategy.field.eligibility_rule.operator.value.top_count.card":
@@ -3313,7 +3321,8 @@ export const messages = {
     "graph.pipeline.summary": "Summary",
     "graph.pipeline.stages": "Strategy stages",
     "graph.pipeline.item": "Item {index}",
-    "graph.pipeline.unnamed": "Unnamed item",
+    "graph.pipeline.openRecipe": "Open recipe",
+    "graph.pipeline.removeBlocked": "Not removed: still used by {places}",
     "graph.pipeline.execution": "Execution",
     "graph.pipeline.execution.term": "Execution",
     "graph.pipeline.execution.description":
@@ -4007,6 +4016,8 @@ export const messages = {
     "form.invalid.duplicateNodeId": "This node_id already exists in the graph",
     "form.invalid.emptyNodeId": "node_id cannot be empty",
     "form.invalid.missingNode": "The node was not found in the document",
+    "form.invalid.duplicateIdentity": "This name is already used in the list",
+    "form.invalid.emptyIdentity": "The name cannot be empty",
     "form.feedback.applied": "{label} applied",
     "form.feedback.failed": "{label} not applied",
     "form.feedback.parse":

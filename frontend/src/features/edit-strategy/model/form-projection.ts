@@ -329,7 +329,10 @@ const projectFields = (
 };
 
 /** 항목 스키마에서 `x-authoring-identity: true`인 속성 키(`$ref` 해소). 없으면 null. */
-const identityKeyOf = (root: JsonSchema, itemNode: JsonSchema): string | null => {
+export const identityKeyOf = (
+  root: JsonSchema,
+  itemNode: JsonSchema,
+): string | null => {
   const properties = isRecord(itemNode.properties) ? itemNode.properties : {};
   for (const [key, property] of Object.entries(properties)) {
     const node = isRecord(property) ? resolveRef(root, property) : null;

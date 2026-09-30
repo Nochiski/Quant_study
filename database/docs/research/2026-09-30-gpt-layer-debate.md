@@ -89,3 +89,16 @@ GPT 주장 중 코드 인용은 Claude 가 직접 열어 확인했다(아래 "�
 - **아침 stage 시간 3,594s 중 폐포 안 3,298s(92%) · 밖 296s(8%)** — 폐포 밖을 떼는 것은 실패 격리 효과가 주이고 속도는 5분뿐.
 - **fi_fin_summary 가 fin_std 를 안 읽으면 폐포에서 `fin_std`·`stg_fin` 이 빠진다** — stg_fin 1,535s(26분)가 아침 경로에서 사라진다.
   WISE 분기(+연간 재무상태·현금흐름, 플랜 D-Q2) 전환이 곧 최대 병목 제거다.
+
+## 조치 ③-1 — 재무표 무관 정정의 원본 공시일 승계 (e1.22.0, 커밋 effa1c1d, 배포 20:30 KST)
+
+- 규칙: 원본부터 API 가 준 판까지 **모든 정정**이 `corr_has_fin_item = false`(키워드에 '재무에 관한' 추가) · 그 판의 첫 장 원본 제출일이
+  연결 원본 접수일과 1일 안(`date_check` exact·off_1d) → `available_date` = 원본 접수일. `rcept_dt`·값·basis 어휘 불변.
+  파생 공개일(q4·cf_q)도 같은 축. EG3_fin_std 가 승계 행을 disclosure_version 에서 다시 증언(`n_orig_filing_unwitnessed` = 0).
+- 서버 수동 재빌드 + 전 컬럼 diff(`scripts/equity_diff.py --gate`, expect `docs/equity_diff/expect_e1_22_*.json`):
+  - disclosure_version m_20260930T003644 → m_20260930T113054: `corr_has_fin_item` false→true **634** 건만, 미설명 0.
+  - fin_std m_20260930T003652 → m_20260930T113110: `available_date` **3,756** · `q4_derived_available_date` 2,550 ·
+    `cf_q_available_date` 3,841 행이 전부 앞당겨짐(설명 100%), 값 56열·행 수 94,017·격리 1,221 불변, 전 게이트 pass(EG5a rules_changed skip).
+- 효과(2016~): 법정 기한 초과로 찍힌 행 **4,657 → 2,469**, 사업보고서 **13.9% → 7.1%**.
+- 남은 것(재무표를 고친 정정 1,758행 등): 원본 공시 문서 ZIP 이 **1,758/1,758 캐시돼 있다** → DART 재호출 없이 원본 수치를 뽑아
+  정정본과 비교하는 소규모 4C 실험이 가능하다.

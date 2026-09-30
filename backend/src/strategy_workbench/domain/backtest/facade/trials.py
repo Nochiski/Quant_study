@@ -1,4 +1,8 @@
-from strategy_workbench.domain.backtest._trial_key import TRIAL_KEY_ROLES, trial_key
+from strategy_workbench.domain.backtest._trial_key import (
+    TRIAL_KEY_DEFAULTS_VERSION,
+    TRIAL_KEY_ROLES,
+    trial_key,
+)
 from strategy_workbench.domain.backtest._trial_ledger import (
     BlockedTrialAttempt,
     TrialLedger,
@@ -13,6 +17,7 @@ from strategy_workbench.domain.backtest._trial_ledger import (
 )
 
 __all__ = [
+    "TRIAL_KEY_DEFAULTS_VERSION",
     "TRIAL_KEY_ROLES",
     "BlockedTrialAttempt",
     "TrialLedger",

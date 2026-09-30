@@ -50,7 +50,7 @@ def test_upgrade_returns_current_source_its_environment_and_a_savable_compile() 
         "universe_id": "krx.common-stock",
         "timing": "next_open",
         "participation_rate": 0.1,
-        "participation_basis": "session_volume",
+        "participation_basis": "adv20",
         "fee_bps": 15.0,
         "slippage_bps": 10.0,
         "impact_model": "fixed_bps",

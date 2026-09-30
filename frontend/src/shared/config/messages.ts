@@ -218,6 +218,8 @@ const ko = {
     "벤치마크 원장 행이 무효인 거래일은 직전 가격을 이어 썼습니다",
   "backtest.warning.analytics.base_rate_carried_forward":
     "기준금리 이력을 확인한 날 뒤 세션은 마지막 기준금리를 이어 썼습니다",
+  "backtest.warning.participation.session_volume":
+    "체결일 거래량으로 체결 한도를 정해 결과가 낙관 쪽입니다",
   // 지표 칸의 사용 불가 사유. 키는 backend `MetricUnavailableReason` 값이고, 사유가 늘면
   // `metricUnavailableCopy`가 typecheck에서 문구를 요구한다(이슈 #241·#293).
   "backtest.metricUnavailable.zero_return_variance":
@@ -793,7 +795,7 @@ const ko = {
   "strategy.field.run_environment.timing.description": "신호가 나온 뒤 주문이 체결되는 시점입니다.",
   "strategy.field.run_environment.timing.value.next_open": "다음 거래일 시가",
   "strategy.field.run_environment.participation_basis": "참여 기준",
-  "strategy.field.run_environment.participation_basis.description": "참여율을 곱해 한 세션에 체결할 수 있는 주식 수 상한을 정할 거래량입니다.",
+  "strategy.field.run_environment.participation_basis.description": "참여율을 곱해 한 세션에 체결할 수 있는 주식 수 상한을 정할 거래량입니다. 체결일 거래량은 체결 시점에 모르는 그날 전체 거래량을 써서 결과가 낙관 쪽으로 나옵니다.",
   "strategy.field.run_environment.participation_basis.value.session_volume": "체결일 거래량",
   "strategy.field.run_environment.participation_basis.value.adv20": "20일 평균 거래대금",
   "strategy.field.run_environment.impact_model": "가격 충격 모델",
@@ -2205,6 +2207,8 @@ export const messages = {
       "Benchmark trading days with an invalid ledger row carried the previous price",
     "backtest.warning.analytics.base_rate_carried_forward":
       "Sessions after the base rate history was last checked carried the last base rate",
+    "backtest.warning.participation.session_volume":
+      "Fill limits used the fill day's own volume, so results lean optimistic",
     "backtest.metricUnavailable.zero_return_variance":
       "Returns never varied, so this cannot be computed",
     "backtest.metricUnavailable.no_downside_variation":
@@ -2782,7 +2786,7 @@ export const messages = {
     "strategy.field.run_environment.timing.description": "When an order fills after its signal.",
     "strategy.field.run_environment.timing.value.next_open": "Next session open",
     "strategy.field.run_environment.participation_basis": "Participation basis",
-    "strategy.field.run_environment.participation_basis.description": "The volume the participation rate is applied to when capping the shares filled in one session.",
+    "strategy.field.run_environment.participation_basis.description": "The volume the participation rate is applied to when capping the shares filled in one session. Session volume uses the whole day's volume, which is not known at fill time, so results come out optimistic.",
     "strategy.field.run_environment.participation_basis.value.session_volume": "Session volume",
     "strategy.field.run_environment.participation_basis.value.adv20": "20-day average traded value",
     "strategy.field.run_environment.impact_model": "Price impact model",

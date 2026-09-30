@@ -219,16 +219,20 @@ def test_공통_필드의_빈도가_duckdb_어댑터와_같다(field_id: str) ->
 
 
 @pytest.mark.parametrize("field_id", _shared_field_ids())
-def test_공통_필드는_원장이_가리는_셀을_같게_선언한다(field_id: str) -> None:
+def test_공통_필드는_가린_셀과_원천_생략_0_을_같게_선언한다(field_id: str) -> None:
     """원장 뷰가 가리는 원천(`SourceSpec.masked_expr`)의 필드는 mock 도 MASKED 를 선언한다(#298).
+    원천이 행을 뺀 칸이 그날 0 인 원천(`SourceSpec.omitted_is_zero`)의 SOURCE_OMITTED_ZERO 도 같다
+    (#371).
 
     MASKED 셀은 실행 결측 정책이 채우지 않는다. 한쪽만 선언하면 같은 문서·같은 결측 정책이 mock
-    과 실데이터에서 다른 셀을 채운다.
+    과 실데이터에서 다른 셀을 채운다. 원천 생략 0 을 한쪽만 내면 같은 창 연산의 커버가 갈린다.
     """
-    mock = CellKind.MASKED in _mock_profiles()[field_id].coverage.supported_cell_kinds
-    duckdb = SOURCE_BY_NAME[FIELD_BY_ID[field_id].source].masked_expr is not None
+    kinds = _mock_profiles()[field_id].coverage.supported_cell_kinds
+    source = SOURCE_BY_NAME[FIELD_BY_ID[field_id].source]
+    mock = (CellKind.MASKED in kinds, CellKind.SOURCE_OMITTED_ZERO in kinds)
+    duckdb = (source.masked_expr is not None, source.omitted_is_zero)
     assert mock == duckdb, (
-        f"원장이 가리는 셀 선언이 두 어댑터에서 다르다 — field_id={field_id} "
+        f"(MASKED, SOURCE_OMITTED_ZERO) 선언이 두 어댑터에서 다르다 — field_id={field_id} "
         f"duckdb={duckdb} mock={mock}"
     )
 

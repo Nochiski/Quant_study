@@ -27,7 +27,11 @@ from strategy_workbench.domain.backtest.facade.runs import (
     ExecutionCore,
     MetricWindow,
 )
-from strategy_workbench.domain.backtest.facade.trials import TRIAL_KEY_ROLES, trial_key
+from strategy_workbench.domain.backtest.facade.trials import (
+    TRIAL_KEY_DEFAULTS_VERSION,
+    TRIAL_KEY_ROLES,
+    trial_key,
+)
 from strategy_workbench.domain.factor.facade.expression import (
     BinaryNode,
     BinaryOperator,
@@ -71,7 +75,7 @@ _ENVIRONMENT_VARIATIONS: tuple[tuple[str, dict[str, Any], bool], ...] = (
     ("universe_id", {"universe_id": "other"}, True),
     ("participation_rate", {"participation_rate": 0.2}, True),
     ("participation_rate", {"participation_rate": 0.05}, False),
-    ("participation_basis", {"participation_basis": ParticipationBasis.ADV20}, True),
+    ("participation_basis", {"participation_basis": ParticipationBasis.SESSION_VOLUME}, True),
     ("fee_bps", {"fee_bps": 10.0}, True),
     ("fee_bps", {"fee_bps": 30.0}, False),
     ("slippage_bps", {"slippage_bps": 5.0}, True),
@@ -333,8 +337,10 @@ def test_semantic_hash_changes_come_with_a_version_bump() -> None:
     ) == _PINNED_SEMANTIC_HASH
 
 
-# 스키마 기본값은 키 표기의 기준이라 바꾸면 기본값으로 돌던 모든 실행의 시도 키가 바뀐다. 바꾸는
-# PR 은 이 스냅샷을 고치면서 그 변경을 명시한다(spec D2). 기본값이 없는 칸은 늘 키에 든다.
+# 스키마 기본값은 키 표기의 기준이다. 기본값은 표기에서 빠지므로 기본값만 바꾸면 옛 기본값 실행과 새
+# 기본값 실행이 같은 키를 받는다 — 바꾸는 PR 은 `TRIAL_KEY_DEFAULTS_VERSION` 을 올리고 이 짝을 함께
+# 고친다(SoT 시도 키 행, #342). 기본값이 없는 칸은 늘 키에 든다.
+_SCHEMA_DEFAULTS_VERSION = "trial-key-defaults-v2"
 _SCHEMA_DEFAULTS = {
     "market": "KRX",
     "frequency": "daily",
@@ -343,7 +349,7 @@ _SCHEMA_DEFAULTS = {
     "universe_id": MISSING,
     "timing": "next_open",
     "participation_rate": 0.1,
-    "participation_basis": "session_volume",
+    "participation_basis": "adv20",
     "fee_bps": 15.0,
     "slippage_bps": 10.0,
     "impact_model": "fixed_bps",
@@ -355,7 +361,16 @@ _SCHEMA_DEFAULTS = {
 
 
 def test_schema_defaults_match_the_snapshot_that_the_trial_key_was_built_on() -> None:
-    assert {item.name: item.default for item in fields(RunEnvironment)} == _SCHEMA_DEFAULTS
+    assert (
+        TRIAL_KEY_DEFAULTS_VERSION,
+        {item.name: item.default for item in fields(RunEnvironment)},
+    ) == (_SCHEMA_DEFAULTS_VERSION, _SCHEMA_DEFAULTS)
+
+
+def test_the_old_default_and_the_new_default_are_different_trials() -> None:
+    # 옛 기본값(`session_volume`)으로 돈 실행은 이제 값이 키에 들고, 새 기본값(`adv20`) 실행은
+    # 빠진다. 판본이 키에 들어 판본을 올리기 전 키와도 갈린다(#342).
+    assert _key(participation_basis=ParticipationBasis.SESSION_VOLUME) != trial_key(_BASE)
 
 
 def test_adding_a_field_at_its_default_keeps_every_existing_key(

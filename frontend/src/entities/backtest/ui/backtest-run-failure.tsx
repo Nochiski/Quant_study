@@ -3,7 +3,7 @@ import {
   failureReason,
   type BacktestRunState,
 } from "../../../shared/api";
-import { t, tOptional } from "../../../shared/config";
+import { t, tOptional, type MessageKey } from "../../../shared/config";
 import { FailureNotice } from "../../../shared/ui";
 import { backtestErrorSentence } from "../model/backtest-error";
 
@@ -27,9 +27,12 @@ export const BacktestRunFailure = ({
   announce,
 }: BacktestRunFailureProps) => {
   if (!run.error) return null;
-  const translated = run.error_code
-    ? tOptional(`backtest.run.error.${run.error_code}`)
+  // 키를 `MessageKey` 로 만들어 backend 실패 코드(생성 SDK 유니온)마다 문구가 있음을 typecheck 가
+  // 막는다(#362 DR-B-08). 생성 SDK 보다 새 코드가 오면 문구가 없어 서버 원문을 본문으로 쓴다.
+  const key: MessageKey | null = run.error_code
+    ? `backtest.run.error.${run.error_code}`
     : null;
+  const translated = key === null ? null : tOptional(key);
   return (
     <FailureNotice
       className={className}

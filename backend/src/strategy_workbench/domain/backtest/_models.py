@@ -541,13 +541,31 @@ class BacktestRunResult:
     artifacts: RawArtifactBundle
 
 
+# run 진행 단계 어휘의 단일 정본(도메인 리뷰 B DR-B-03). 실행 유스케이스만 단계를 정하고, 실행기는
+# 자기 작업 안의 비율과 설명만 보고한다 — engine 구간 동안 단계는 `engine` 하나다. 프론트가 단계를
+# 번역하면 이 어휘가 키 목록이다(#336 V1-07). run 기록은 상태가 바뀔 때만 단계를 저장해 저장된 값도
+# 이 어휘 안이고, 저장소는 읽을 때 거르지 않는다 — 값의 이름을 바꾸거나 지우면 옛 기록(특히 종결
+# `completed`·`cancelled`·`failed`)이 OpenAPI enum 밖 값을 싣는다.
+RunStage = Literal[
+    "queued",
+    "tape",
+    "data",
+    "engine",
+    "artifact",
+    "cancellation",
+    "completed",
+    "cancelled",
+    "failed",
+]
+
+
 @dataclass(frozen=True)
 class RunProgressEvent:
     sequence: int
     run_id: str
     status: RunStatus
     progress: float
-    stage: str
+    stage: RunStage
     message: str
     occurred_at: datetime
 
@@ -558,9 +576,9 @@ class RunProgressEvent:
 # `data_not_ready` 는 데이터 원천이 백테스트 데이터를 낼 준비가 안 된 실행이다(원장 표·카탈로그 뷰가
 # 없거나 낡음, 조치는 서버 사유 문장, #369). `no_positions` 는 tape 가 한 번도 종목을 고르지 않은
 # 실행(기간 안 리밸런싱일이 없거나 선정이 빔, #360), `benchmark_unknown` 은 데이터 원천이 모르는
-# 벤치마크 id 다(#361). 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다 (시작 422 의
-# `backtest.error.*` 와 namespace 가 다르다 — 툴바는 서버 detail 을 그대로 쓰는 화면이라 키를 합치면
-# detail 이 덮인다).
+# 벤치마크 id 다(#361). 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다. 시작 422 의
+# `backtest.error.*` 와 키를 나누는 까닭은 같은 코드라도 시작 거절은 실행 전에 고칠 것을, run 실패는
+# 실행 중에 난 일을 말하기 때문이다(`frontend-api-state.md`).
 RunFailureCode = Literal[
     "portfolio.strategy.invalid",
     "portfolio.data.unavailable",
@@ -595,7 +613,7 @@ class BacktestRunState:
     run_id: str
     status: RunStatus
     progress: float
-    stage: str
+    stage: RunStage
     message: str
     created_at: datetime
     updated_at: datetime

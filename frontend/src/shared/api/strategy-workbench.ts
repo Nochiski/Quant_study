@@ -11,6 +11,7 @@ import {
   explainFactorGraph,
   getEquityCatalog,
   getExperiment,
+  getExperimentWalkForward,
   getFactorCatalog,
   getBacktestRequest,
   getBacktestSummary,
@@ -24,15 +25,18 @@ import {
   getRunEnvironmentSchema,
   getTrialLedger,
   listBacktests,
+  listExperimentTrials,
   listExperiments,
   listStrategies,
   listStrategyRevisions,
   mergeTrialLineage,
   previewBacktestTrial,
   previewExperiment,
+  retryExperimentTrial,
   reviseStrategyDocument,
   saveStrategyDraft,
   startBacktest,
+  streamExperimentEvents,
   traceStrategy as postStrategyTrace,
   upgradeStrategyDocument,
 } from "./generated/sdk.gen";
@@ -40,6 +44,7 @@ import type {
   ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
+  BacktestCancelResult,
   BacktestRunState,
   BacktestRunSummary,
   BacktestStartResponse,
@@ -50,6 +55,7 @@ import type {
   Experiment,
   ExperimentControlsRequest,
   ExperimentPage,
+  ExperimentTrialState,
   ExperimentPreview,
   ExperimentRequest,
   FactorCatalog,
@@ -95,6 +101,7 @@ import type {
   TrialLedger,
   TrialPreview,
   UpgradedDocument,
+  WalkForwardReport,
 } from "./generated/types.gen";
 
 export const configureStrategyWorkbenchApi = (baseUrl: string): void => {
@@ -477,6 +484,48 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "controlExperiment");
   },
 
+  /** trial 전개 순 상태. 재시도·선택 가능 여부는 backend 가 싣는다. */
+  async listExperimentTrials(
+    experimentId: string,
+  ): Promise<ExperimentTrialState[]> {
+    const response = await listExperimentTrials({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "listExperimentTrials");
+  },
+
+  async retryExperimentTrial(
+    experimentId: string,
+    trialIndex: number,
+  ): Promise<ExperimentTrialState> {
+    const response = await retryExperimentTrial({
+      path: { experiment_id: experimentId, trial_index: trialIndex },
+    });
+    return unwrap(response, "retryExperimentTrial");
+  },
+
+  /** 워크포워드 결과(창별 자동 선택·검증 실행·유지율, 검증 랩 V3-05). */
+  async getExperimentWalkForward(
+    experimentId: string,
+  ): Promise<WalkForwardReport> {
+    const response = await getExperimentWalkForward({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperimentWalkForward");
+  },
+
+  /**
+   * 실험 진행 스트림(SSE, spec D6). 프레임은 진행이 바뀌었다는 신호로만 쓰고, 서버는 실험이 끝나면 마지막 수를
+   * 보낸 뒤 닫는다. 생성 SSE 클라이언트를 그대로 쓰는 typed wrapper 다.
+   */
+  openExperimentProgress(experimentId: string, signal: AbortSignal) {
+    return streamExperimentEvents({
+      path: { experiment_id: experimentId },
+      signal,
+      sseMaxRetryAttempts: 3,
+    });
+  },
+
   async cancelExperiment(experimentId: string): Promise<Experiment> {
     const response = await cancelExperiment({
       path: { experiment_id: experimentId },
@@ -516,7 +565,8 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "getBacktestResult");
   },
 
-  async cancelBacktest(runId: string): Promise<BacktestRunState> {
+  /** 취소 요청. 다른 소유자(실험)가 써서 계속 돌면 `kept_by_owners` 가 참이다(#382). */
+  async cancelBacktest(runId: string): Promise<BacktestCancelResult> {
     const response = await cancelBacktest({ path: { run_id: runId } });
     return unwrap(response, "cancelBacktest");
   },
@@ -716,6 +766,7 @@ export type {
   ApplicableWhen,
   BacktestRunResult,
   BacktestRunSpec,
+  BacktestCancelResult,
   BacktestRunState,
   BacktestRunSummary,
   BacktestStartResponse,
@@ -726,6 +777,7 @@ export type {
   Experiment,
   ExperimentControlsRequest,
   ExperimentPage,
+  ExperimentTrialState,
   ExperimentPreview,
   ExperimentRequest,
   FactorCatalog,
@@ -766,4 +818,5 @@ export type {
   TrialLedger,
   TrialPreview,
   UpgradedDocument,
+  WalkForwardReport,
 };

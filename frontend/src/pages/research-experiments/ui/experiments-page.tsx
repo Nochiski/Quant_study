@@ -174,7 +174,14 @@ export const ExperimentsPage = () => {
                     return (
                       <tr key={item.record.experiment_id}>
                         <td>
-                          <code>{item.record.experiment_id}</code>
+                          <Link
+                            to="/research/experiments/$experimentId"
+                            params={{
+                              experimentId: item.record.experiment_id,
+                            }}
+                          >
+                            <code>{item.record.experiment_id}</code>
+                          </Link>
                         </td>
                         <td>
                           {source?.kind === "saved_revision"

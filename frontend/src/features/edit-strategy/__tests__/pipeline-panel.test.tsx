@@ -1,6 +1,7 @@
 /**
  * 그래프 1수준 캔버스(WORKFLOW P4-02): 단계 열·요약 띠·문장 안 컨트롤. 입력은 backend runtime schema fixture 와
- * `ideas/*.yaml` 이고, 컨트롤이 내는 연산은 Form 필드 행과 같은 `fieldOperation` 이어야 한다.
+ * `ideas/*.yaml` 이고, 캔버스가 내는 연산은 Form 필드 행과 같은 것(`fieldOperation`·`resetOperation`·
+ * `unsetOperation`)이어야 한다.
  */
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,8 +12,14 @@ import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { DocumentDiagnostic } from "../model/document-state";
 import { projectForm, type FormSection } from "../model/form-projection";
-import { fieldOperation, type ObjectSection } from "../model/form-transactions";
+import {
+  fieldOperation,
+  resetOperation,
+  unsetOperation,
+  type ObjectSection,
+} from "../model/form-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
+import { NO_FOCUS } from "../model/use-field-editing";
 import type { FormProjectionState } from "../model/use-form-projection";
 import type { SourceTransactions } from "../model/use-source-transactions";
 import { PipelinePanel } from "../ui/pipeline-panel";
@@ -131,7 +138,7 @@ describe("PipelinePanel", () => {
     );
   });
 
-  it("지금 쓰이지 않는 칸은 문서에 없으면 숨고, 적혀 있으면 흐린 채 그 이유를 말한다", () => {
+  it("틀 밖의 지금 쓰이지 않는 칸은 문서에 없으면 숨고, 적혀 있으면 흐리게 보이며 이유를 설명으로 단다", () => {
     renderPanel(EMPTY);
     const weighting = screen.getByRole("group", { name: "비중 산정" });
     expect(
@@ -206,5 +213,80 @@ describe("PipelinePanel", () => {
     ).getByRole("group", { name: "PBR" });
     expect(factor).toHaveTextContent("가중치 문장");
     expect(factor).not.toHaveTextContent("노드 문장");
+  });
+
+  it("비중 카드의 위험 필드는 카드 앵커(portfolio)가 아니라 자기 섹션(risk)으로 확정한다", async () => {
+    // 앵커 섹션으로 확정하면 `risk_field_id` 가 `portfolio:` 아래 적혀 구조 오류가 난다(#392 리뷰 P3-1 B).
+    const user = userEvent.setup();
+    const source = `${EMPTY}portfolio:\n  weighting: risk\n`;
+    const { transactions } = renderPanel(source);
+    await user.type(
+      within(screen.getByRole("group", { name: "비중 산정" })).getByRole(
+        "textbox",
+        { name: "위험 필드" },
+      ),
+      "price.trading_value{Enter}",
+    );
+
+    const risk = objectSection(
+      projectForm(SCHEMA, parseSource(source, "yaml"), []).sections,
+      "risk",
+    );
+    const field = risk.fields.find((item) => item.key === "risk_field_id")!;
+    expect(transactions.apply).toHaveBeenCalledWith(
+      fieldOperation(risk, field, "price.trading_value"),
+      "위험 필드",
+      "pipeline",
+      NO_FOCUS,
+    );
+  });
+
+  it("카드의 기본값으로·설정 안 함은 Form 행과 같은 연산을 필드 이름으로 낸다", async () => {
+    // nullable 칸은 빈 입력이 무효라 캔버스에서 값을 지우는 길은 "설정 안 함"뿐이다(#392 리뷰 P3-1 C).
+    const user = userEvent.setup();
+    const source = `${EMPTY}signal:\n  score_threshold: 0.5\n`;
+    const { transactions } = renderPanel(source);
+    const card = screen.getByRole("group", { name: "점수 하한" });
+    await user.click(
+      within(card).getByRole("button", { name: "점수 하한 · 기본값으로" }),
+    );
+    await user.click(
+      within(card).getByRole("button", { name: "점수 하한 · 설정 안 함" }),
+    );
+
+    const signal = objectSection(
+      projectForm(SCHEMA, parseSource(source, "yaml"), []).sections,
+      "signal",
+    );
+    const field = signal.fields.find((item) => item.key === "score_threshold")!;
+    expect(transactions.apply).toHaveBeenNthCalledWith(
+      1,
+      resetOperation(field),
+      "점수 하한",
+      "pipeline",
+      NO_FOCUS,
+    );
+    expect(transactions.apply).toHaveBeenNthCalledWith(
+      2,
+      unsetOperation(signal, field),
+      "점수 하한",
+      "pipeline",
+      NO_FOCUS,
+    );
+  });
+
+  it("정규화 단위 경고는 정규화 카드 안에 본문으로 보인다", () => {
+    // backend 는 단위 경고를 `/signal/normalization` 에 낸다 — 행 진단으로 카드에 붙는다(acceptance).
+    renderPanel(idea("momentum_12_1"), {
+      diagnostics: [
+        diagnostic(
+          "/signal/normalization",
+          "단위가 다른 팩터를 원값 그대로 더합니다",
+        ),
+      ],
+    });
+    expect(
+      screen.getByRole("group", { name: "점수 정규화" }),
+    ).toHaveTextContent("단위가 다른 팩터를 원값 그대로 더합니다");
   });
 });

@@ -293,6 +293,23 @@ def test_saved_reference_nodes_refuse_the_upgrade(kind: str) -> None:
     assert version_issues[0].message == str(info.value)
 
 
+def test_a_1_0_document_names_the_retired_node_where_its_author_wrote_it() -> None:
+    """1.0 의 두 겹 factors 문서도 거절 자리가 원문 pointer 다(#418 리뷰 P3-4).
+
+    평탄화 뒤 자리(`/factors/0/…`)를 말하면 1.0 작성자는 문서에 없는 자리를 찾게 된다. 1.0 → 1.1 만
+    올리는 호출은 `saved_*` 를 받아 주던 버전에서 멈추므로 거절하지 않는다.
+    """
+    document = _yaml("quality_momentum.v1_0.yaml")
+    nodes = document["factors"]["factors"][0]["graph"]["nodes"]
+    nodes.append({"kind": "saved_factor", "node_id": "ref"})
+
+    refusal = upgrade_refusal(document)
+
+    assert isinstance(refusal, UpgradeUnsupportedNodeError)
+    assert refusal.pointer == f"/factors/factors/0/graph/nodes/{len(nodes) - 1}/kind"
+    assert upgrade_document(document, until=V1_1).source_version == V1_0
+
+
 def test_upgrade_does_not_mutate_its_input() -> None:
     document = _yaml("quality_momentum.v1_0.yaml")
     snapshot = copy.deepcopy(document)
@@ -574,7 +591,7 @@ def test_stage_step_order_is_declared_and_flattening_precedes_node_rules() -> No
     names = {version: [name for name, _ in steps] for version, steps in UPGRADE_STEPS.items()}
     assert names == {
         V1_0: ["flatten_factors", "remove_dead_fields", "unary_aliases"],
-        V1_1: ["reject_saved_nodes", "strip_execution_settings", "explicit_normalization"],
+        V1_1: ["strip_execution_settings", "explicit_normalization"],
     }
 
 

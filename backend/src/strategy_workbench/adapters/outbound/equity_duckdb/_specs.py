@@ -157,7 +157,6 @@ class FieldSpec:
     label: str
     unit: str
     value_type: FieldValueType
-    verdict: str  # FIELD_MAP §2 판정 — 지원 / 부분 / (equity 내부 스코프)
     description: str
     disclosure_basis: str
     evidence: str
@@ -493,20 +492,13 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
 
 # ── 필드 ──────────────────────────────────────────────────────────────────────
 
-# 흐름 계정(손익·현금흐름)은 v_fin_latest 의 ttm_* 를 낸다(#212). 원 계정은 보고서 종류가
-# 기간을 정해(11011 12개월 · 11012~14 3개월 손익, 현금흐름은 연초누계 — DEFECT-C02) as-of 최신
-# 관측을 그대로 내면 같은 날 종목마다 기간이 섞였다. TTM 은 뷰가 PIT 로 세운다 — 판단은
-# 뷰(equity 층) 몫이고 어댑터는 컬럼만 고른다.
-_FIN_TTM_NOTE = (
-    "**최근 4분기 합(TTM)** 이다 — 최신 공시가 분기보고서든 사업보고서든 늘 12개월 값이다. "
-    "v_fin_latest 가 회계기간 순서로 분기값(3개월)을 세워 4행을 더한다 — 사업보고서의 4분기는 "
-    "연간 − 같은 회계연도 1분기·반기·3분기라 비12월 결산도 같은 규칙이다. 연속 4분기의 분기값이 "
-    "**전부 공개된 날부터** 보인다(4분기·현금흐름 분기값이 기대는 창 밖 보고서의 접수일까지 "
-    "본다). 창 안 분기가 정정 재제출로 늦게 접수되면 그 접수일부터다. 하나라도 비었거나(분기 "
-    "누락·직전 분기 미수집), 창 안에 연결·별도가 섞였거나 매출 기준(revenue_basis)이 섞였으면 "
-    "값은 결측(MISSING)이고 3개월·연간 값으로 대신하지 않는다(부분합 금지). 더 최근 기간이 "
-    "공개되면 그 기간의 TTM 으로 넘어가고, 그 TTM 이 아직 서지 않았으면 옛 기간 값을 두지 않고 "
-    "결측이다. available_date 는 TTM 창의 마지막 공개일이고, 사업보고서 행의 TTM 은 연간 값과 같다"
+# 흐름 계정(손익·현금흐름)은 v_fin_latest 의 ttm_* 를 낸다(#212). 원 계정은 보고서 종류가 기간을
+# 정해 as-of 최신 관측을 그대로 내면 종목마다 기간이 섞였다. TTM 규칙(연속 4분기가 다 공개된 날
+# 부터, 하나라도 비거나 연결·별도·매출 기준이 섞이면 결측, 3개월·연간 값으로 대신하지 않는다)의
+# 정본은 원장 뷰 v_fin_latest 이고 어댑터는 컬럼만 고른다.
+_FIN_TTM_DESCRIPTION = (
+    "최근 4분기 합(TTM)입니다. 네 분기 값이 모두 공개된 날부터 보이고, 한 분기라도 비었거나 "
+    "연결·별도 기준이 섞이면 빈 값입니다."
 )
 _FIN_EVIDENCE = (
     "equity.duckdb v_fin_latest(as_of) ← fin_std(vintage_kind='api_restated', CFS 우선 "
@@ -514,15 +506,9 @@ _FIN_EVIDENCE = (
 )
 _FIN_DISCLOSURE = "DART 정기보고서 접수일(rcept_no 의 rcept_dt) — 정정본 접수번호를 API 가 돌려준다"
 
-# 격자 3테이블(S08~S10)의 결측 어휘가 셀 종류로 옮겨지는 규칙 — 프로필 description 에 실어 소비자가
-# 카탈로그에서 읽게 한다. 원천별 대응의 정본은 FIELD_MAP §1 「결측 어휘」다.
-_FILL_KIND_NOTE = (
-    "원장은 값 없는 셀을 **0 이 아니라 NULL** 로 두고 이유를 `fill_kind` 로 나른다(DESIGN §9 "
-    "결정 8). 셀 종류는 measured→OBSERVED · not_collected→NOT_COLLECTED · "
-    "empty_response→MISSING 이다. 원천이 행을 뺀 칸(src_omitted)은 원장 규약상 그날 0 인 원천"
-    "(키움 공매도)만 값 0 의 SOURCE_OMITTED_ZERO 이고, 나머지 원천은 0 으로 단정할 근거가 없어 "
-    "MISSING 이다"
-)
+# 격자 3테이블(S08~S10) 필드의 빈 셀 문장. 결측 어휘가 셀 종류로 옮겨지는 규칙은
+# `SourceSpec.omitted_is_zero` 와 FIELD_MAP §1 「결측 어휘」가 정본이다.
+_BLANK_NOT_ZERO = "값이 없는 날은 0 이 아니라 빈 값입니다."
 
 FIELD_SPECS: tuple[FieldSpec, ...] = (
     # ── price_daily (FIELD_MAP §2 price.*) ──────────────────────────────────
@@ -533,16 +519,16 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="종가(원주가)",
         unit="KRW",
         value_type=FieldValueType.PRICE,
-        verdict="부분",
         description=(
-            "KRX 원주가 — 분할·증자 조정 없음(원칙 ②). 사건일에 끊기므로 수익률·모멘텀·이평·"
-            "변동성은 price.adj_close 로 잰다. 원주가는 가격 필터·거래대금처럼 그날의 절대 "
-            "가격이 필요한 곳에 쓴다."
+            "KRX 종가(원주가)입니다. 분할·증자·병합을 반영하지 않아 사건일에 값이 끊기므로, "
+            "수익률·모멘텀·이평·변동성은 수정주가(price.adj_close)로 잽니다. 가격 필터처럼 그날의 "
+            "절대 가격이 필요할 때 씁니다."
         ),
         disclosure_basis="정규장 종가 확정 시점",
         evidence="price_daily.close ← stg_price_daily ∪ stg_etf_price_daily (EG20 원주가 불변)",
         adjusted_field_id="price.adj_close",
     ),
+    # stage 가 '0' 을 NULL 로 둔 행은 그대로 NULL 이다(원칙 ④, GAP-14).
     FieldSpec(
         field_id="price.open",
         source="price",
@@ -550,14 +536,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="시가(원주가)",
         unit="KRW",
         value_type=FieldValueType.PRICE,
-        verdict="부분",
-        description=(
-            "KRX 원주가 시가. stage 가 '0' 을 NULL 로 둔 행은 그대로 NULL 이다(원칙 ④) — 값이 "
-            "없는 것과 0 을 섞지 않는다(GAP-14)."
-        ),
+        description="KRX 시가(원주가)입니다. 원천이 시가를 주지 않은 날은 0 이 아니라 빈 값입니다.",
         disclosure_basis="정규장 종가 확정 시점",
         evidence="price_daily.open ← stg_price_daily ∪ stg_etf_price_daily (원주가 무수정)",
     ),
+    # 분할 구간을 잇는 거래량 시계열은 원장 매크로 v_adj_volume_fwd 축이다(내부 스코프).
     FieldSpec(
         field_id="price.volume",
         source="price",
@@ -565,14 +548,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="거래량(원거래량)",
         unit="shares",
         value_type=FieldValueType.COUNT,
-        verdict="지원",
-        description=(
-            "KRX 원거래량 — **조정하지 않는다**. 분할 구간 시계열이 필요하면 팩터층이 "
-            "v_adj_volume_fwd 축으로 바꾼다(equity 내부 스코프)."
-        ),
+        description="KRX 거래량(주)입니다. 분할·병합을 반영하지 않은 원거래량입니다.",
         disclosure_basis="정규장 종가 확정 시점",
         evidence="price_daily.volume_shr ← stage 값 무수정 (price_kind='reference' 행은 0)",
     ),
+    # 우선주를 합친 법인 시총은 원장 v_firm_mktcap 이 따로 낸다.
     FieldSpec(
         field_id="price.market_cap",
         source="price",
@@ -580,15 +560,17 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="시가총액",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
         description=(
-            "원주가 × KRX 상장주식수(같은 날 listing). 우선주 합산 아님(v_firm_mktcap 별도)."
+            "종가 × 그날 KRX 상장주식수입니다. 종목별 값이라 같은 회사 우선주의 시가총액은 더하지 "
+            "않습니다."
         ),
         disclosure_basis="정규장 종가 확정 시점 · KRX 상장주식수",
         evidence="price_daily.mktcap_krw = close × shares_out (stage MKTCAP 대조 불일치 0)",
         lag_sessions=1,
         lag_basis=_SHARES_LAG_BASIS,
     ),
+    # 정본은 KRX 상장주식수(stg_listing_daily.list_shrs)다. DART 발행주식총수
+    # (shares_outstanding.issued_shr)는 검산용이라 이 필드로 내지 않는다(DESIGN §4-5 6).
     FieldSpec(
         field_id="price.shares_outstanding",
         source="price",
@@ -596,11 +578,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="상장주식수",
         unit="shares",
         value_type=FieldValueType.COUNT,
-        verdict="지원",
         description=(
-            "정본은 KRX 상장주식수다(stg_listing_daily.list_shrs · ETF 는 상장좌수). DART "
-            "발행주식총수(shares_outstanding.issued_shr)는 검산·보조이고 이 필드로 나가지 "
-            "않는다 — 비상장 종류주·신주 상장 전 구간에서 둘은 갈린다(DESIGN §4-5 6)."
+            "KRX 상장주식수(ETF 는 상장좌수)입니다. 비상장 종류주나 상장 전 신주가 빠져 DART "
+            "발행주식총수와 다를 수 있습니다."
         ),
         disclosure_basis="KRX 일별 상장주식수(그날 원장)",
         evidence="price_daily.shares_out ← stg_listing_daily.list_shrs (listing 행 없으면 NULL)",
@@ -614,12 +594,13 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="거래대금",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
-        description="KRX 거래대금 — stage 값 무수정.",
+        description="KRX 거래대금(원)입니다.",
         disclosure_basis="정규장 종가 확정 시점",
         evidence="price_daily.value_krw ← stg_price_daily ∪ stg_etf_price_daily",
     ),
     # ── 카탈로그 매크로 (e1.19.0 부터 FIELD_MAP §2 지원 — 원장 field_scope=field_map) ──
+    # 가림 규칙(원장이 접지 못한 적용일 = MASKED)의 정본은 원장 뷰 v_adj_close 다(#220·#298).
+    # 가린 칸을 건너는 창·시점 비교가 결측이 되는 규칙은 팩터 평가기가 소유한다(#315·#337).
     FieldSpec(
         field_id="price.adj_close",
         source="adj",
@@ -627,19 +608,12 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="조정 종가(전방 조정)",
         unit="KRW",
         value_type=FieldValueType.PRICE,
-        verdict="equity 내부 스코프",
         description=(
-            "원주가 × 그날까지 공개·적용된 계수(adj_factor factor_ok 행, apply_date 축)의 누적 "
-            "share_factor. 첫 관측 수준 고정, 사건 뒤 가격을 올린다 — 공개 전 계수는 접지 않고 "
-            "(security, date) 의 순수 함수라 창·as_of 에 무관하다. **모든 사건을 잇지는 않는다**: "
-            "원장이 그날 사건을 접지 못한 적용일 행(기준가가 재설정된 날 계수가 다음 세션에야 "
-            "공개된 사건 · 기준가와 주식수가 맞지 않아 계수를 못 낸 사건)은 원장이 가린 셀"
-            "(MASKED)이라 결측 처리(0·중앙값 채우기)가 채우지 않고(#298), 그 행을 품는 창 "
-            "연산과 그 행을 사이에 두고 두 시점을 견주는 식(`lag`, 건너뛰는 세션을 둔 창과 오늘 "
-            "값)도 결측이 된다(#315·#337). 유상증자 권리락처럼 원장이 조정하지 않는 사건은 조정 "
-            "없이 남는다. 가림 규칙은 원장 뷰 `v_adj_close` 가 정한다(#220). 레지스트리 가격 변화 "
-            "팩터(수익률·모멘텀·이평·변동성)의 입력이다. 수준은 첫 관측 기준이라 종목 간 가격 "
-            "비교에는 쓰지 않는다."
+            "분할·무상증자·병합을 반영한 수정 종가입니다. 수익률·모멘텀·이평·변동성처럼 가격 "
+            "변화를 잴 때 씁니다. 원장이 그날 사건을 반영하지 못한 날은 빈 값이고 결측 처리로도 "
+            "채우지 않으며, 그날을 품는 집계와 그날을 사이에 둔 두 시점 비교도 빕니다. 유상증자 "
+            "권리락처럼 조정하지 않는 사건은 가격 변화가 그대로 남습니다. 수준은 첫 관측 기준이라 "
+            "종목 간 가격 비교에는 쓰지 않습니다."
         ),
         disclosure_basis=(
             "원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date 다음 세션))"
@@ -651,6 +625,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
     ),
     # ── fin_std (FIELD_MAP §2 financial.*) ───────────────────────────────────
+    # 금융업은 표준계정 매출이 없어 원장이 대체 축(revenue_basis)을 쓴다(GAP-01). 이 필드는
+    # 값만 내고 기준은 내지 않는다.
     FieldSpec(
         field_id="financial.revenue",
         source="fin",
@@ -658,11 +634,10 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="매출액(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="부분",
         description=(
-            f"{_FIN_TTM_NOTE}. 금융업 470사는 표준계정 매출이 없어 대체 축을 쓴다"
-            "(revenue_basis ∈ standard·banking_gross·insurance_gross·consensus·unavailable, "
-            "GAP-01) — 이 필드는 값만 내고 basis 는 내지 않는다."
+            _FIN_TTM_DESCRIPTION
+            + " 금융업은 표준 매출 계정이 없어 영업수익 같은 다른 기준의 값이 들어오고, 어느 "
+            "기준인지는 싣지 않습니다."
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
@@ -675,11 +650,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="매출총이익(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
-        description=(
-            f"{_FIN_TTM_NOTE}. 절단본 커버율 0.945, 삼성전자 2018 111,377,004백만원 = "
-            "매출 − 매출원가 원 단위 일치(DESIGN §10 P30)."
-        ),
+        description=_FIN_TTM_DESCRIPTION,
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
         available_expr=_TTM_INCOME_AVAILABLE,
@@ -691,8 +662,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="영업이익(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
-        description=_FIN_TTM_NOTE,
+        description=_FIN_TTM_DESCRIPTION,
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
         available_expr=_TTM_INCOME_AVAILABLE,
@@ -704,12 +674,13 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="당기순이익(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
-        description=_FIN_TTM_NOTE,
+        description=_FIN_TTM_DESCRIPTION,
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
         available_expr=_TTM_INCOME_AVAILABLE,
     ),
+    # 원장 현금흐름은 보고서 종류와 무관하게 연초누계라(DEFECT-C02) 뷰가 누계 차로 분기값을
+    # 만든다. 연초누계 원값은 이 필드로 내지 않는다.
     FieldSpec(
         field_id="financial.operating_cash_flow",
         source="fin",
@@ -717,12 +688,10 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="영업활동현금흐름(TTM)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="부분",
         description=(
-            f"{_FIN_TTM_NOTE}. 원장 현금흐름은 보고서 종류와 무관하게 연초누계라(DEFECT-C02) 1분기 "
-            "3개월 · 반기 6개월 · 3분기 9개월 · 사업보고서 12개월이 섞였다. TTM 의 분기값"
-            "(자기 누계 − 바로 앞 분기 보고서 누계, 1분기는 누계 그대로)은 직전 보고서가 없으면 "
-            "NULL 이라 손익 TTM 보다 결측이 많을 수 있다. 연초누계 원값은 이 필드로 나가지 않는다."
+            _FIN_TTM_DESCRIPTION
+            + " 분기값을 누계 차로 만들어 직전 분기 보고서가 없으면 비므로, 손익 항목보다 빈 값이 "
+            "많을 수 있습니다."
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
@@ -735,8 +704,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="자산총계",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
-        description="재무상태표 시점 값 — 기간 어휘가 없다(period_end 시점의 잔액).",
+        description="재무상태표의 자산총계(보고 기간 말 잔액)입니다.",
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
     ),
@@ -747,11 +715,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="부채총계",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
-        description="재무상태표 시점 값 — 기간 어휘가 없다(period_end 시점의 잔액).",
+        description="재무상태표의 부채총계(보고 기간 말 잔액)입니다.",
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
     ),
+    # 지배주주분(equity_owners)은 내부 스코프다.
     FieldSpec(
         field_id="financial.book_equity",
         source="fin",
@@ -759,15 +727,13 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="자본총계",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
-        description=(
-            "재무상태표 시점 값(지배·비지배 합계 — 지배주주분 equity_owners 는 equity 내부 "
-            "스코프다)."
-        ),
+        description="재무상태표의 자본총계(보고 기간 말 잔액, 지배·비지배 합계)입니다.",
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
     ),
     # ── consensus_daily · opinion_daily (FIELD_MAP §2 consensus.*) ───────────
+    # 12M 선행 합성은 팩터층 몫이다(FIELD_MAP §2). v_consensus 가 관측 달 이후로 끝나는
+    # 회계기간 중 가장 가까운 것(FY1)을 고르고, 단위의 정본은 행의 unit 열이다.
     FieldSpec(
         field_id="consensus.forward_eps",
         source="consensus_eps",
@@ -776,11 +742,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         unit="KRW",
         # 주당 금액이다. 원장 dataset_profile 의 value_type='amount' 와 같다(#230).
         value_type=FieldValueType.AMOUNT,
-        verdict="부분",
         description=(
-            "**12개월 선행이 아니다** — equity 는 target_period 별 값만 주고 12M 합성은 팩터층 "
-            "몫이다(FIELD_MAP §2). 어댑터는 관측 달 이후로 끝나는 회계기간 중 가장 가까운 것"
-            "(FY1)을 고른다. 단위는 행의 unit 컬럼이 정본이고 eps 는 원이다."
+            "가장 가까운 다음 회계연도(FY1)의 EPS 컨센서스 평균(원)입니다. 12개월 선행 값이 "
+            "아닙니다."
         ),
         disclosure_basis="WISE fetched_date(measured) / v3 collected_date(measured)",
         evidence=(
@@ -788,6 +752,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "알 수 있던 한 행으로 접힌다"
         ),
     ),
+    # 스케일 변환은 소비자 몫이다(FIELD_MAP §2 S17 표). FY1 선택은 forward_eps 와 같다.
     FieldSpec(
         field_id="consensus.forward_sales",
         source="consensus_revenue",
@@ -795,14 +760,15 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="선행 매출액(FY1 컨센서스 평균)",
         unit="억원",
         value_type=FieldValueType.AMOUNT,
-        verdict="부분",
         description=(
-            "**단위가 억원이다**(원 아님 — FIELD_MAP §2 S17 표). 스케일 변환은 소비자 몫이고 "
-            "행의 unit 컬럼이 정본이다. target_period 선택 규칙은 consensus.forward_eps 와 같다."
+            "가장 가까운 다음 회계연도(FY1)의 매출액 컨센서스 평균입니다. 단위가 원이 아니라 "
+            "억원입니다."
         ),
         disclosure_basis="WISE fetched_date(measured) / v3 collected_date(measured)",
         evidence="equity.duckdb v_consensus(as_of) ← consensus_daily(metric='revenue')",
     ),
+    # 원장이 min·max 만 준다. wise 구간에만 있고 겹치는 달에 v_consensus 가 v3 를 고르면
+    # 결측이다.
     FieldSpec(
         field_id="consensus.eps_dispersion",
         source="consensus_eps",
@@ -810,14 +776,15 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="EPS 추정치 범위(max − min)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="부분",
         description=(
-            "**표준편차가 아니라 범위**다 — 원장이 min·max 만 준다(FIELD_MAP §2). wise 구간에만 "
-            "있고 v3 행은 min/max 가 NULL 이라, 겹치는 달에 v_consensus 가 v3 를 고르면 결측이다."
+            "FY1 EPS 추정치의 범위(최댓값 − 최솟값, 원)입니다. 표준편차가 아니고, 한 원천 "
+            "구간에는 값이 없어 빌 수 있습니다."
         ),
         disclosure_basis="WISE fetched_date(measured)",
         evidence="equity.duckdb v_consensus(as_of).est_max − .est_min (metric='eps')",
     ),
+    # 같은 (ticker, obs_date) 의 두 원천 중 잰 판본(wise)을 먼저 고르고, 없는 날은 v3
+    # (coverage_degraded — 수집 시각을 원장이 주지 않는다)를 쓴다.
     FieldSpec(
         field_id="consensus.target_price",
         source="opinion",
@@ -825,15 +792,13 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="목표주가(컨센서스)",
         unit="KRW",
         value_type=FieldValueType.PRICE,
-        verdict="부분",
         description=(
-            "커버는 보통주에만 있다(WISE 804 / v3 810 — 우선주·ETF·외국주 0). 어댑터는 같은 "
-            "(ticker, obs_date) 의 두 원천 중 잰 판본(wise)을 먼저 고르고, wise 가 없는 날은 "
-            "v3(coverage_degraded=true — 수집 시각을 원장이 주지 않는다)를 쓴다."
+            "애널리스트 목표주가 컨센서스(원)입니다. 보통주에만 있고 우선주·ETF 에는 없습니다."
         ),
         disclosure_basis="WISE 화면 수집일(measured) / v3 관측일(default, degraded)",
         evidence="opinion_daily.target_price_krw ← stg_analyst_summary ∪ stg_v3_analyst_opinions",
     ),
+    # WISE 가 이미 접은 점수다 — 원장은 임계로 등급을 굽지 않는다(원칙 ①).
     FieldSpec(
         field_id="consensus.recommendation",
         source="opinion",
@@ -841,14 +806,14 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="투자의견 점수(컨센서스)",
         unit="score",
         value_type=FieldValueType.RATIO,
-        verdict="부분",
         description=(
-            "WISE 가 이미 접은 컨센서스 의견 점수 그대로다 — equity 는 임계로 등급을 굽지 "
-            "않는다(원칙 ①). 원천 선택 규칙은 consensus.target_price 와 같다."
+            "애널리스트 투자의견 컨센서스 점수입니다. 원천이 매긴 점수 그대로이고 보통주에만 "
+            "있습니다."
         ),
         disclosure_basis="WISE 화면 수집일(measured) / v3 관측일(default, degraded)",
         evidence="opinion_daily.opinion_score ← stg_analyst_summary ∪ stg_v3_analyst_opinions",
     ),
+    # consensus_daily 에는 n_analyst 가 없어 애널리스트 수 축은 opinion_daily 뿐이다(DESIGN §4-6).
     FieldSpec(
         field_id="consensus.analyst_count",
         source="opinion",
@@ -856,11 +821,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="추정기관 수",
         unit="count",
         value_type=FieldValueType.COUNT,
-        verdict="부분",
-        description=(
-            "consensus_daily 에는 n_analyst 가 없다 — 애널리스트 수 축은 이 테이블뿐이다"
-            "(DESIGN §4-6). 원천 선택 규칙은 consensus.target_price 와 같다."
-        ),
+        description="컨센서스에 참여한 추정기관 수입니다. 보통주에만 있습니다.",
         disclosure_basis="WISE 화면 수집일(measured) / v3 관측일(default, degraded)",
         evidence="opinion_daily.analyst_count ← stg_analyst_summary ∪ stg_v3_analyst_opinions",
     ),
@@ -872,17 +833,15 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="외국인 순매수(대금)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
-        description=(
-            "**원 단위**다 — stage 가 백만원 ×1e6 환산을 마친 값을 equity 도 어댑터도 다시 "
-            f"곱하지 않는다(STAGE_HANDOFF §2 · EG3_flow_daily 단위 대조). {_FILL_KIND_NOTE}."
-        ),
+        description=("외국인 순매수 대금(원)입니다. " + _BLANK_NOT_ZERO),
         disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
         evidence=(
             "flow_daily.frgnr_invsr_krw ← stg_flow_daily_kiwoom(ka10060) ∪ "
             "stg_flow_split_daily(KIS frgn_ntby_tr_pbmn_krw), 같은 셀에 둘 다 있으면 키움"
         ),
     ),
+    # GAP-03 — `orgn` 은 원장의 합계 컬럼이라 기관 7주체 합과 다르고 12주체 항등식
+    # (EG3-P06)에서도 빠진다.
     FieldSpec(
         field_id="flow.institution_net_buy",
         source="flow",
@@ -890,11 +849,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="기관 순매수(대금)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="부분",
         description=(
-            "GAP-03 — `orgn` 은 원장의 **합계 컬럼**이고 기관 7주체 합과 다르다(절단본 18,581행 "
-            "중 10,783행 불일치, 편차 최대 2,834억원). 그래서 12주체 항등식(EG3-P06)에서도 "
-            f"빠진다. {_FILL_KIND_NOTE}."
+            "기관 순매수 대금(원)입니다. 원장의 기관 합계 값이라 기관 세부 주체를 더한 값과 다를 "
+            "수 있습니다. " + _BLANK_NOT_ZERO
         ),
         disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
         evidence="flow_daily.orgn_krw ← 키움 orgn_krw ∪ KIS orgn_ntby_tr_pbmn_krw",
@@ -906,12 +863,13 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="개인 순매수(대금)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
-        description=f"원 단위(stage ×1e6 완료 — 재환산 금지). {_FILL_KIND_NOTE}.",
+        description=("개인 순매수 대금(원)입니다. " + _BLANK_NOT_ZERO),
         disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
         evidence="flow_daily.ind_invsr_krw ← 키움 ind_invsr_krw ∪ KIS prsn_ntby_tr_pbmn_krw",
     ),
     # ── short_daily (FIELD_MAP §2 short.*) ───────────────────────────────────
+    # 원천은 키움(ka10014) 하나로 고정한다 — 표는 두 원천을 나란히 두고, 키움이 커버가
+    # 넓다(절단본 18,265 대 KIS 3,891). 폴백 병합은 원천을 섞으므로 하지 않는다(DESIGN §4-3).
     FieldSpec(
         field_id="short.short_sale_value",
         source="short_kiwoom",
@@ -919,15 +877,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="공매도 거래대금(키움)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
         description=(
-            "**원천은 키움(ka10014) 하나로 고정**한다 — `short_daily` 는 두 원천을 합치지 않고 "
-            "접미사 컬럼으로 나란히 두므로(사용자 확정 09-06, DESIGN §4-3) 어댑터가 하나를 "
-            "고른다. 키움인 근거: KRX 정본이 없는 축이고 커버가 훨씬 넓다(절단본 measured "
-            "키움 18,265 vs KIS 3,891). **폴백 병합은 하지 않는다** — 키움이 없는 날 KIS 로 "
-            "갈아타면 시계열이 원천을 섞고 단위·정의 차가 조용히 들어온다. KIS 축 "
-            "(`short_value_kis_krw`)이 필요하면 S19 dataset_profile 이 별도 field_id 로 "
-            f"낸다. 원 단위(stage 가 천원 ×1e3 환산 완료). {_FILL_KIND_NOTE}."
+            "공매도 거래대금(원)입니다. 한 원천(키움)만 써서 시계열에 원천이 섞이지 않습니다. "
+            "원천이 뺀 날은 공매도가 없던 날이라 0 이고, 수집하지 못한 날은 빈 값입니다."
         ),
         disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
         evidence=(
@@ -935,6 +887,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "(unit_scale=1e3), 결측 사유는 fill_kind_short_kiwoom"
         ),
     ),
+    # GAP-04 종결(S09-2)로 원천이 키움(ka20068)이다. 단위는 원장 항등식으로 주 단위를
+    # 확정했고(금액축 ÷ 잔고 = 종가), 폴백 병합은 하지 않는다. KIS 축은 별도 열이다.
     FieldSpec(
         field_id="short.borrowed_quantity",
         source="lending_kiwoom",
@@ -942,17 +896,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="대차잔고(주식수, 키움)",
         unit="shares",
         value_type=FieldValueType.COUNT,
-        verdict="지원",
         description=(
-            "**GAP-04 종결(S09-2, 2026-09-08)로 원천이 KIS → 키움(ka20068)으로 옮겼다.** "
-            "고른 근거는 공매도 축과 같다 — 커버가 넓은 쪽이다(격자 measured 6,988,296 대 "
-            "493,445, 2,602종목 대 287종목). `rmnd` 는 stage 가 단위를 못 잰 축이었는데 equity 가 "
-            "원장 안 항등식으로 재서 **주 단위 확정**했다(같은 원장의 금액축 ÷ 잔고 = KRX 종가, "
-            "서버 6,414,854셀 중앙값 1.000000). **폴백 병합은 하지 않는다** — 두 대차 원장은 "
-            "겹치는 셀이 0건(공유 티커도 0)이라 KIS 축은 폐지 종목만 덮는데, 없는 날 갈아타면 "
-            "시계열이 원천을 섞는다. KIS 축(`lending_balance_kis_shr`)이 필요하면 그 컬럼을 직접 "
-            "읽는다. 원장이 주는 **음수 잔고는 그대로 보존**한다 — equity 도 어댑터도 자르지 "
-            f"않는다(원칙 ④). {_FILL_KIND_NOTE}."
+            "대차잔고(주)입니다. 한 원천(키움)만 쓰고, 원천이 준 음수 잔고도 그대로 둡니다. "
+            + _BLANK_NOT_ZERO
         ),
         disclosure_basis="원장 날짜(공표 시각 미제공, basis default)",
         evidence=(
@@ -961,6 +907,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
     ),
     # ── credit_daily (FIELD_MAP §2 credit.*) ─────────────────────────────────
+    # 주식수 축만 낸다 — 금액축은 단위 미상이다(amt_basis='unknown'). 척도 창 가림은 원장 뷰
+    # v_credit_balance(#249), 상장주식수를 넘는 행은 S10 이 격리해 MISSING 이다(DESIGN §9 결정 9).
     FieldSpec(
         field_id="credit.margin_balance",
         source="credit",
@@ -968,18 +916,10 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="신용융자 잔고(주식수)",
         unit="shares",
         value_type=FieldValueType.COUNT,
-        verdict="부분",
         description=(
-            "**주식수 축**이다 — 금액축 `*_amt` 6컬럼은 단위 미상이라(`credit_daily.amt_basis` "
-            "= 'unknown', STAGE_HANDOFF §4) 이 필드로 나가지 않는다. 대주 잔고"
-            "(`whol_stln_rmnd_stcn_shr`)는 별개 축이고 equity 내부 스코프다. 잔고가 상장주식수를 "
-            "넘는 원장 행은 S10 이 `_reject/balance_over_shares/` 로 격리하고 그 셀은 "
-            "`empty_response`(→ MISSING)로 남는다(DESIGN §9 결정 9). **무상증자 권리락일부터 "
-            "척도 창의 잔고는 원장이 가린 셀(MASKED)이다** — 원천 잔고가 옛 단위와 새 단위로 섞여 "
-            "상장주식수와 척도가 맞지 않는다. 가린 셀은 결측 처리(0·중앙값 채우기)가 채우지 "
-            "않는다(#298). 권리락일 뒤에 공시된 사건(약 7%)은 공시 전 세션을 가리지 못한다. 창 "
-            "길이와 가림 규칙은 원장 뷰 `v_credit_balance` 가 정한다(#249). "
-            f"{_FILL_KIND_NOTE}."
+            "신용융자 잔고(주)입니다. 무상증자 권리락 뒤 한동안은 잔고 단위가 섞여 빈 값이고 결측 "
+            "처리로도 채우지 않습니다(공시가 늦은 일부 사건은 가리지 못합니다). 잔고가 "
+            "상장주식수를 넘는 이상 행도 빈 값입니다. " + _BLANK_NOT_ZERO
         ),
         disclosure_basis=(
             "원장 날짜(basis default) — 신용잔고는 T+2 공표이고 우리 체인은 T+3 아침에 받는다. "
@@ -992,6 +932,8 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
     ),
     # ── 사건 (FIELD_MAP §2 event.*) ──────────────────────────────────────────
+    # 연 1회(reprt_code='11011') 값이고 종류(stock_knd) 축을 접는다. 락일이 없어 TR·배당
+    # 재투자 팩터의 재료가 아니다(DESIGN §4-5 5·§11).
     FieldSpec(
         field_id="event.dividend_per_share",
         source="dividend",
@@ -1000,15 +942,15 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         unit="KRW",
         # 주당 금액이다. 원장 dataset_profile 의 value_type='amount' 와 같다(#230).
         value_type=FieldValueType.AMOUNT,
-        verdict="부분",
         description=(
-            "**락일·기준일이 없다** — 값이 서는 시점은 사업보고서 접수일뿐이라 TR·배당 재투자 "
-            "팩터는 이 필드로 만들 수 없다(DESIGN §4-5 5 · §11). 연 1회(reprt_code='11011') 값이고 "
-            "종류(stock_knd) 축을 접으므로 우선주 티커도 보통주 DPS 를 받는다."
+            "최근 사업보고서의 주당 현금배당금(원)입니다. 배당락일·기준일이 없어 보고서 "
+            "접수일부터 보이므로 배당 재투자 계산에는 쓸 수 없습니다. 우선주도 보통주 배당금을 "
+            "받습니다."
         ),
         disclosure_basis="DART 사업보고서 접수일(결산일 + 3~8개월)",
         evidence="dividend_event.dps_krw ← stg_dividend(se wide 전개), 법인→티커는 corp_ticker",
     ),
+    # 사업보고서 확정치(treasury_stock)와는 축도 시점도 다르다. 창·감쇠는 팩터층 몫이다.
     FieldSpec(
         field_id="event.buyback_amount",
         source="buyback",
@@ -1016,15 +958,14 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="자기주식 취득 결정 금액(최근 공시)",
         unit="KRW",
         value_type=FieldValueType.AMOUNT,
-        verdict="지원",
         description=(
-            "자기주식 취득 결정공시(tsstk_aq) 금액이고 같은 공시일의 여러 건은 합한다. "
-            "**최근 공시 값이 그대로 이어진다** — 창·감쇠는 팩터층 몫이고 available_date 가 언제 "
-            "공시된 값인지 말한다. 사업보고서 확정치(treasury_stock)와는 축도 시점도 다르다."
+            "최근 자기주식 취득 결정 공시 금액(원)이고 같은 날 공시는 합합니다. 다음 공시 전까지 "
+            "같은 값이 이어집니다."
         ),
         disclosure_basis="DART 주요사항보고 접수일(announce_date)",
         evidence="corp_event.amount_krw (event_type='tsstk_aq', 서버 1,951건)",
     ),
+    # DART 소유보고 API 가 롤링 2년 창만 주고 재수집이 불가능하다(DART_DESIGN P3e).
     FieldSpec(
         field_id="event.insider_net_buy",
         source="insider",
@@ -1032,12 +973,9 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         label="임원·주요주주 지분 증감(최근 보고, 주식수)",
         unit="shares",
         value_type=FieldValueType.COUNT,
-        verdict="부분",
         description=(
-            "**커버 구간이 롤링 2년이다** — DART 임원·주요주주 소유보고 API 가 그 창만 주고 "
-            "재수집이 불가능하다(DART_DESIGN P3e). 절단본 실측 창 2024-08-26~2026-08-26. 같은 "
-            "접수일의 보고자 여러 명은 합하고(값이 NULL 인 보고자는 빠진다), 최근 보고 값이 "
-            "그대로 이어진다 — 창·감쇠는 팩터층 몫이다."
+            "임원·주요주주 지분 증감(주, 최근 보고)입니다. 원천이 최근 2년치만 줘서 그 전 기간은 "
+            "비어 있습니다. 같은 날 여러 보고는 합하고 다음 보고 전까지 값이 이어집니다."
         ),
         disclosure_basis="DART 소유보고 접수일(rcept_dt)",
         evidence="holder_daily.qty_change_shr (src='elestock'), 법인→티커는 corp_ticker",

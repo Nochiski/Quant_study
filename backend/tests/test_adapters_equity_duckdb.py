@@ -325,7 +325,6 @@ def _reverse_declarations(monkeypatch: pytest.MonkeyPatch) -> None:
                 label="종가 ",
                 description="문장만",
                 evidence="-",
-                verdict="-",
                 disclosure_basis="-",
                 lag_basis="-",
             ),
@@ -427,9 +426,10 @@ def test_list_fields_serves_every_declared_field_whose_source_is_built(
     # LATEST 원천의 커버 시작은 첫 공개일이고, 그 전 세션에는 셀이 없다
     assert profiles["financial.book_equity"].coverage.starts_on == WB_SESSIONS[0]
     assert profiles["event.buyback_amount"].coverage.starts_on == date(2023, 12, 27)
-    # 판정(지원/부분)은 프로필 설명 앞에 붙어 소비자에게 그대로 보인다
-    assert profiles["financial.revenue"].description.startswith("[부분]")
-    assert profiles["financial.net_income"].description.startswith("[지원]")
+    # 설명은 선언표 문장 그대로 소비자에게 간다 — 판정 접두를 붙이지 않는다(#373)
+    assert {f: p.description for f, p in profiles.items()} == {
+        spec.field_id: spec.description for spec in FIELD_SPECS
+    }
 
 
 def test_declarations_their_query_does_not_read_are_rejected() -> None:
@@ -953,7 +953,6 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
         100 * 3 / 68
     )
     assert profiles["short.short_sale_value"].dataset_id == "short_daily"
-    assert profiles["flow.institution_net_buy"].description.startswith("[부분]")
 
 
 def test_latest_fields_never_show_a_filing_before_its_available_date(

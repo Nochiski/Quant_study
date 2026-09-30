@@ -860,7 +860,7 @@ class EquityDuckdbAdapter:
                     frequency=source.frequency,
                     available_date_basis=lag_basis,
                     recommended_lag_sessions=lag_sessions,
-                    description=f"[{spec.verdict}] {spec.description}",
+                    description=spec.description,
                     disclosure_basis=spec.disclosure_basis,
                     evidence=spec.evidence,
                     coverage=FieldCoverageCapability(

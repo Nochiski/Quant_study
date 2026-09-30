@@ -556,9 +556,7 @@ class BacktestRunService:
 
     def _relane(self, record: _RunRecord) -> None:
         """소유자나 일시정지가 바뀐 대기 run 을 맞는 레인으로 옮긴다. `self._lock` 안에서 부른다."""
-        if record in self._waiting:
-            self._waiting.remove(record)
-            self._waiting.push(record, self._lane(record))
+        self._waiting.move(record, self._lane(record))
 
     def events(self, run_id: str, *, after_sequence: int = -1) -> tuple[RunProgressEvent, ...]:
         """메모리 링의 진행 이벤트. 이 프로세스가 돌리지 않은 run 은 이벤트가 없다."""
@@ -1031,9 +1029,12 @@ class BacktestRunService:
             )
         )
         # 상태가 바뀔 때만 저장한다(진행률은 메모리). 접수는 `start` 가 `add` 로 저장한다.
+        saved = durable
         if status is not previous and not durable:
-            self._persist(record.state)
-        if status in _SETTLED:
+            saved = self._persist(record.state)
+        # 종결이 저장된 run 만 사본을 버린다 — 저장하지 못한 run 의 사본을 버리면 저장소의 옛
+        # 상태(`queued`·`running`)로 되돌아가 끝난 run 이 다시 도는 것처럼 보인다.
+        if status in _SETTLED and saved:
             self._retire(record)
 
     def _retire(self, record: _RunRecord) -> None:
@@ -1042,12 +1043,12 @@ class BacktestRunService:
         while len(self._finished) > _FINISHED_RECORDS_KEPT:
             self._records.pop(self._finished.popleft(), None)
 
-    def _persist(self, state: BacktestRunState) -> None:
-        """상태 전이를 저장한다. 실패해도 run 수명은 멈추지 않는다.
+    def _persist(self, state: BacktestRunState) -> bool:
+        """상태 전이를 저장하고 저장했는지 돌려준다. 실패해도 run 수명은 멈추지 않는다.
 
         run 스레드의 실패 분기가 다시 저장하다 터지면 레코드가 비종결로 굳는다. 이 프로세스에서는
-        메모리 상태가 계속 맞고, 저장되지 않은 전이는 재시작 때 `interrupted` 로 닫힌다. 완료는
-        여기로 오지 않는다(`_emit(durable=True)`).
+        메모리 상태가 계속 맞고(저장하지 못한 종결 run 은 사본을 버리지 않는다), 저장되지 않은
+        전이는 재시작 때 `interrupted` 로 닫힌다. 완료는 여기로 오지 않는다(`_emit(durable=True)`).
         """
         try:
             self._repository.update(state)
@@ -1058,6 +1059,8 @@ class BacktestRunService:
                 state.status,
                 state.stage,
             )
+            return False
+        return True
 
     @staticmethod
     def _raise_if_cancelled(record: _RunRecord) -> None:

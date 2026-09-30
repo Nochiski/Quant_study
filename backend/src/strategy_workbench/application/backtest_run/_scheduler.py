@@ -12,6 +12,8 @@ from collections import deque
 from typing import Generic, TypeVar
 
 _T = TypeVar("_T")
+# `RunQueue.move` 가 대기 중이 아닌 run 을 가르는 표식(레인 이름 None 은 단일 실행 레인이다).
+_ABSENT = object()
 
 
 def experiment_slots(run_slots: int) -> int:
@@ -55,6 +57,14 @@ class RunQueue(Generic[_T]):
     def push(self, item: _T, lane: str | None) -> None:
         """`lane` 은 실험 id, 단일 실행이면 None."""
         self._lanes.setdefault(lane, deque()).append(item)
+
+    def move(self, item: _T, lane: str | None) -> None:
+        """대기 중인 `item` 을 `lane` 으로 옮긴다. 이미 그 레인이면 자리를 그대로 두고, 대기 중이
+        아니면 아무것도 하지 않는다."""
+        current = next((name for name, queue in self._lanes.items() if item in queue), _ABSENT)
+        if current is not _ABSENT and current != lane:
+            self.remove(item)
+            self.push(item, lane)
 
     def remove(self, item: _T) -> None:
         for lane, queue in self._lanes.items():

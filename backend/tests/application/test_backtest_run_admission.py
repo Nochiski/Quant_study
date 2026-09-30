@@ -556,6 +556,26 @@ def test_a_paused_experiment_does_not_hold_a_run_another_experiment_joined(
     assert runs.cancel(joined, owner="exp-a").kept_by_owners is False  # 이미 끝났다
 
 
+def test_cancelling_the_paused_first_owner_hands_the_run_to_the_remaining_one(
+    gated_runs: _GatedRuns,
+) -> None:
+    """#380 DEFECT-V3D-01(이슈 재현): 두 실험이 모두 멈춘 채 A 를 취소하고 B 를 풀면 run 이 뜬다."""
+    runs, port, entries = gated_runs("a1", "a2")
+    runs.start(_request(end=date(2024, 1, 12)), owner="exp-a")
+    _wait_for_entries(entries, 1)
+    runs.start(_request(end=date(2024, 1, 11)), owner="exp-a")
+    runs.schedule("exp-a", paused=True, weight=1)
+    runs.start(_request(end=date(2024, 1, 11)), owner="exp-b")
+    runs.schedule("exp-b", paused=True, weight=1)
+
+    withdrawn = runs.cancel("a2", owner="exp-a")
+    runs.schedule("exp-b", paused=False, weight=1)
+    port.release.set()
+
+    assert (withdrawn.status, withdrawn.kept_by_owners) == (RunStatus.QUEUED, True)
+    assert wait_for_terminal_run(runs, "a2").status is RunStatus.COMPLETED
+
+
 def test_a_paused_experiment_keeps_its_queued_runs_until_resumed(gated_runs: _GatedRuns) -> None:
     """V3-04: 일시정지는 대기 run 만 붙잡는다. 도는 run 은 끝까지 돌고, 재개하면 제 순서로 뜬다."""
     runs, port, entries = gated_runs("a1", "a2", "b1")

@@ -260,3 +260,24 @@ def test_the_list_shows_the_in_process_state_of_a_running_run(
     assert item.run == runs.state("run-1")
     assert (item.run.status, item.run.stage) == (RunStatus.RUNNING, "tape")
     assert item.run.progress > 0
+
+
+def test_a_finished_run_whose_final_state_was_not_saved_keeps_its_copy(
+    tmp_path: Path, barriers: list[RawLoadBarrier], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#391 리뷰 P2-1: 종결 저장에 실패한 run 의 사본을 버리면 저장소의 옛 상태(`queued`)로
+    되돌아가 끝난 run 이 다시 도는 것처럼 보인다. 그런 run 은 사본을 남긴다."""
+    monkeypatch.setattr(
+        "strategy_workbench.application.backtest_run._service._FINISHED_RECORDS_KEPT", 1
+    )
+    free = _open_barrier(barriers)
+    free.release.set()
+    runs = _service(tmp_path, _RefusingUpdate(), free, "run-1", "run-2")
+
+    runs.start(_request())
+    assert wait_for_terminal_run(runs, "run-1").status is RunStatus.FAILED
+    runs.start(_request(end=date(2024, 1, 11)))
+    wait_for_terminal_run(runs, "run-2")
+
+    assert runs.state("run-1").status is RunStatus.FAILED
+    assert runs.events("run-1")[-1].status is RunStatus.FAILED

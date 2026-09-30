@@ -81,3 +81,17 @@ def test_a_lane_paused_mid_turn_gets_a_full_turn_when_resumed() -> None:
 
     # 남은 수(1)가 새면 a2 하나만 나가고 b2 로 넘어간다.
     assert (first, while_paused, resumed) == ("a1", "b1", ["a2", "a3", "b2"])
+
+
+def test_moving_a_run_to_its_own_lane_keeps_its_place() -> None:
+    """#391 리뷰 P3-2: 레인이 그대로면 run 을 레인 맨 뒤로 보내지 않는다."""
+    queue: RunQueue[str] = RunQueue()
+    for item in ("a1", "a2"):
+        queue.push(item, "A")
+
+    queue.move("a1", "A")
+    queue.move("missing", "B")
+    kept = queue.pop(experiments=True)
+    queue.move("a2", "B")
+
+    assert (kept, queue.pop(experiments=True), queue.pop(experiments=True)) == ("a1", "a2", None)

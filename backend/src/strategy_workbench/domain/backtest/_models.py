@@ -554,9 +554,11 @@ class RunProgressEvent:
 # `equity_wiped_out` 은 전략이 자본을 다 잃어 엔진이 멈춘 실행, `internal` 은 분류되지 않은 내부
 # 오류, `interrupted` 는 서버가 다시 시작돼 끝나지 못한 run 이다(검증 랩 spec D3).
 # `data_not_ready` 는 데이터 원천이 백테스트 데이터를 낼 준비가 안 된 실행이다(원장 표·카탈로그 뷰가
-# 없거나 낡음, 조치는 서버 사유 문장, #369). 프론트는 이 어휘를 `backtest.run.error.<code>` 로
-# 번역한다 (시작 422 의 `backtest.error.*` 와 namespace 가 다르다 — 툴바는 서버 detail 을 그대로
-# 쓰는 화면이라 키를 합치면 detail 이 덮인다).
+# 없거나 낡음, 조치는 서버 사유 문장, #369). `no_positions` 는 tape 가 한 번도 종목을 고르지 않은
+# 실행(기간 안 리밸런싱일이 없거나 선정이 빔, #360), `benchmark_unknown` 은 데이터 원천이 모르는
+# 벤치마크 id 다(#361). 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다 (시작 422 의
+# `backtest.error.*` 와 namespace 가 다르다 — 툴바는 서버 detail 을 그대로 쓰는 화면이라 키를 합치면
+# detail 이 덮인다).
 RunFailureCode = Literal[
     "portfolio.strategy.invalid",
     "portfolio.data.unavailable",
@@ -564,6 +566,8 @@ RunFailureCode = Literal[
     "backtest.run.invalid",
     "backtest.run.equity_wiped_out",
     "backtest.run.data_not_ready",
+    "backtest.run.no_positions",
+    "backtest.run.benchmark_unknown",
     "backtest.run.internal",
     "backtest.run.interrupted",
 ]

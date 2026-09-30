@@ -103,7 +103,7 @@ def _completed_run(client: TestClient) -> str:
             "strategy": spec,
             "environment": environment,
             "core": "python",
-            "benchmark_security_id": "005930",
+            "benchmark_security_id": "sec-005930-1",
         },
     )
     assert accepted.status_code == 202, accepted.text
@@ -150,7 +150,7 @@ def test_a_completed_run_is_explained_from_the_server_summary(
     assert provider.requests[0].research == frozenset()
     summary = json.loads(provider.tool_results[0].content)
     assert summary["run"]["run_id"] == run_id
-    assert summary["capital"]["benchmark_security_id"] == "005930"
+    assert summary["capital"]["benchmark_security_id"] == "sec-005930-1"
     assert {metric["metric_id"] for metric in summary["metrics"]} >= {"total_return", "sharpe"}
     assert [message["text"] for message in history["messages"]] == [
         "이 결과 좋은 거야?",

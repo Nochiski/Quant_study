@@ -73,6 +73,7 @@ from .ports.outgoing.backtest_data import (
     BacktestDataNotReadyError,
     BacktestDataPort,
     BacktestDataQuery,
+    BacktestDataUnavailableError,
 )
 from .ports.outgoing.backtest_executor import (
     BacktestExecutionRequest,
@@ -150,6 +151,13 @@ def _mask_paths(text: str) -> str:
 
 class InvalidBacktestRunError(ValueError):
     pass
+
+
+class NoPositionsError(RuntimeError):
+    """tape 가 한 번도 종목을 고르지 않았다 — 기간 안에 리밸런싱일이 없거나 선정이 비었다(#360).
+
+    요청이 틀린 것도 서버 오류도 아니라 이 설정의 결과라 전용 실패 코드로 끝난다.
+    """
 
 
 class BacktestParameterValueError(InvalidBacktestRunError):
@@ -818,6 +826,14 @@ class BacktestRunService:
             self._update(
                 record, RunStatus.RUNNING, _TAPE_PROGRESS_START, "tape", "Compiling target tape"
             )
+            # 데이터 포트의 준비(원장 카탈로그 등, #369)와 벤치마크 id(#361)는 tape 앞에서 한 번의
+            # 조회로 확인한다 — tape 계산을 다 쓴 뒤 알리지 않는다. 벤치마크가 없으면 종목 없는
+            # 질의다. 접수는 여전히 데이터를 읽지 않는다(#158).
+            self._data_source.load_backtest_dataset(
+                BacktestDataQuery(
+                    environment.start, environment.end, (), spec.benchmark_security_id
+                )
+            )
             try:
                 # require_engine_compatible 은 start() 의 preflight 판정을 되풀이하는 심층 방어다 —
                 # 같은 순수 판정이라 정상 경로에서는 발동하지 않는다.
@@ -844,7 +860,11 @@ class BacktestRunService:
                 sorted({target.security_id for frame in tape.frames for target in frame.targets})
             )
             if not security_ids:
-                raise InvalidBacktestRunError("target tape does not contain any positions")
+                raise NoPositionsError(
+                    "target tape selected no position in any rebalance frame — "
+                    f"frames={len(tape.frames)} start={environment.start} "
+                    f"end={environment.end} rebalance={strategy.portfolio.rebalance.value}"
+                )
             dataset = self._data_source.load_backtest_dataset(
                 BacktestDataQuery(
                     start=environment.start,
@@ -1126,6 +1146,10 @@ def _failure_code(error: BaseException) -> RunFailureCode:
         return "backtest.run.equity_wiped_out"
     if isinstance(error, BacktestDataNotReadyError):
         return "backtest.run.data_not_ready"
+    if isinstance(error, NoPositionsError):
+        return "backtest.run.no_positions"
+    if isinstance(error, BacktestDataUnavailableError):
+        return "backtest.run.benchmark_unknown"
     return "backtest.run.internal"
 
 

@@ -2,6 +2,7 @@ import {
   runEnvironmentName,
   type RunEnvironmentField,
 } from "../../../entities/backtest";
+import type { BacktestRunSpec } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import {
   DATE_INPUT_MAXIMUM,
@@ -84,10 +85,13 @@ export const runFieldLabel = (
     const field = fields.find((candidate) => candidate.name === next);
     return field === undefined ? null : runEnvironmentName(field);
   }
-  switch (head) {
+  // 칸 이름을 요청 계약 타입으로 좁혀, 계약의 칸 이름이 바뀌면 typecheck 가 case 를 잡게 한다
+  // (#357 C-P3-14). 계약 밖 이름은 그대로 default 로 간다.
+  const option = head as keyof BacktestRunSpec;
+  switch (option) {
     case "initial_cash":
     case "annualization_days":
-      return runOptionErrorName(head);
+      return runOptionErrorName(option);
     case "metric_windows":
       return runOptionErrorName("oos_out_of_range");
     case "core":

@@ -6,7 +6,7 @@ current_phase: P4
 current_pr: P4-02
 active_prs: [P4-02]
 parallel_window: []
-last_updated: 2026-09-30T11:04:21+09:00
+last_updated: 2026-09-30T13:53:08+09:00
 planned_prs: 30
 merged_prs: 21
 integrated_prs: 0
@@ -30,7 +30,7 @@ progress_percent: 70
 | Active PR | `P4-02` |
 | Progress | `21 / 30 done (70%), main 21, integration 0` |
 | Approved | `21 / 30` |
-| Aggregated at | `2026-09-30 11:04 KST` |
+| Aggregated at | `2026-09-30 13:53 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -1167,6 +1167,7 @@ Phase exit:
 
 | PR | 명령 | 결과 | 일시 |
 |---|---|---|---|
+| `P4-02` | P4-02a main `227a655a` 병합(`b9e4b915`) 뒤: frontend `typecheck`·`lint`(전체)·`typecheck:e2e`, `test`(전체), Graph 관련 e2e(workflow·story 3). CI R2 실패 뒤 `e2f9e47a`: `PARSE_DELAY_MS` 4000 재현 조건에서 R1·R2, 평소 조건 반복 3회, route 파일 전체 | 병합 뒤 Vitest 91 files 1180/1180 · e2e 16/16 · CI R2 가 두 run 모두 "마지막 compile = 편집 전 원문"으로 실패 → 재현 조건에서 같은 실패 재현, 고친 뒤 재현 조건 2/2·반복 3/3·route 83/83 | 2026-09-30 |
 | `P4-02` | P4-02a r1 반영 코드 tip `20153652`: frontend `typecheck`·변경 파일 `eslint`, 변경 범위 vitest(edit-strategy·shared/config·pages·`document-routes`·`stylesheets`), `node e2e/run-playwright.mjs`(포트 8235/5235) — workflow spec, Graph 탭 story spec 3개, 캔버스 캡처 임시 spec(매수·공매도 + 상위 비율 문서, 커밋 안 함), 리뷰 돌연변이 B·C 재현 | tsc·eslint 0 · Vitest 49 files 605/605 · e2e 17/17(workflow 9·story 7·캡처 1, 기준선 그대로) · 돌연변이 B·C 모두 새 단언이 잡음 · 비테스트 src main 대비 14파일 순증 +908(`859ff479` 순증 967 → −59, 리뷰 기준 `3ebbae7c` 923) | 2026-09-30 |
 | `P4-02` | P4-02a 시각 점검 수정 tip `64ecd05c`: frontend `typecheck`·변경 파일 `eslint`, 변경 범위 vitest(edit-strategy·shared/config·`document-routes`·`stylesheets`), `node e2e/run-playwright.mjs e2e/workbench.workflow.spec.ts`, Graph 탭을 쓰는 story spec 3개(`cs.derived-factor`·`dm.ai-new-strategy`·`dm.readable-korean`), 1440·1920·다크 캔버스 캡처(임시 spec, 커밋 안 함) | tsc·eslint 0 · Vitest 48 files 601/601 · workflow 9/9(기준선 그대로 통과) · story 7/7 | 2026-09-30 |
 | `P4-02` | P4-02a tip `3ebbae7c`(main `09aaf755` 위): frontend `typecheck`·`lint`(전체)·`test`(전체)·`typecheck:e2e`, `node e2e/run-playwright.mjs`(포트 8235/5235, 빌드의 `typecheck`·`vite build`·`check:editor-bundle` 포함, 전 spec), 기준선 갱신 뒤 `e2e/workbench.workflow.spec.ts` 재실행(update 없이), 루트 `user_story_trace`·`conflict_markers`. backend 변경 없음 | tsc·lint 0 · Vitest 90 files 1144/1144 · e2e 전체 1회 47 passed + 1 failed(`graph-node-diagnostic.png` — 캔버스 아래로 내려가 노드 목록 글자의 안티앨리어싱이 바뀜) + 1 did not run → 기준선 갱신 `3ebbae7c` 뒤 workflow spec 9/9(합 49/49) · 스토리 40·태그 e2e 30 · 표식 0 · R1·R2 반복 4회 통과 | 2026-09-30 |
@@ -1189,6 +1190,7 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-30 — **P4-02a main 병합과 CI R2 타이밍 수정**([#392](https://github.com/Nochiski/Quant_study/pull/392)). 리드 머지 순서(#387 → #389 → #392)대로 main `227a655a` 를 merge 했다(`b9e4b915`, force push 없음, 충돌은 정본 대장 한 곳 — 검증 랩 두 행은 main, "그래프 표현 투영" 행은 `.card` 문장). 그 뒤 CI 두 run 에서 route R2 가 "마지막 compile 이 편집 전 원문"으로 실패했다. 원인은 테스트 타이밍이다: 빠른 러너에서 문서를 연 지 약 60ms 만에(첫 parse 150ms 전) 카드에 입력해, 빈 parse 로 그려진 캔버스가 적힌 칸을 미작성으로 보였고 확정이 insert-key 가 되어 parse 대기 중 구조 연산 보류(`pending`, 설계대로)로 버려졌다. `PARSE_DELAY_MS` 4000 으로 같은 실패를 재현했다. 테스트가 문서 상태 배지 `data-settled`(e2e `waitForSettledDocument` 와 같은 신호)를 기다린 뒤 편집하고, "마지막 compile" 대신 원문 일치 + 정착 + 그 원문의 compile 요청을 보게 고쳤다(`e2f9e47a`, 단언은 그대로). 관찰(후속 후보): 문서를 연 직후 첫 parse 전 약 150ms 동안 Form·캔버스가 스키마 기본값으로 그려진다 — 그 사이 편집은 보류 안내와 함께 버려진다. Form 부터 있던 동작이다.
 - 2026-09-30 — **P4-02a 리뷰 r1 반영**([#392](https://github.com/Nochiski/Quant_study/pull/392), `review_pr392` r1 APPROVE, 리드 지시로 머지 전 반영). (1) P2-1: long_short 값 틀("공매도는 하위 {short_selection_count}종목")은 상위 비율 문서에서 적용되지 않는 칸을 사실처럼 보였다 — ko·en 틀을 지워 카드가 `side.card` 로 떨어지고 그 칸은 틀 밖 행(적용될 때만 보임)이 된다. (2) P3-1: 살아남은 돌연변이 B(앵커 섹션 확정)·C(카드 되돌리기 제거)를 잡는 단언과 정규화 단위 경고 인라인 단언을 더했다. (3) P3-2: `useRevealSelection` 의 숨은 탭 분기는 브라우저 동작을 바꾸지 않는다(`[hidden]` 은 display:none) — 운영 코드를 main 그대로 되돌리고 route 단언이 숨은 탭 안 호출을 걸러 본다(위 P4-02a PR 기록의 분기 서술은 이것으로 대체). (4) P3-3: 페이지 catalogs 한 벌, `coversPointer` 한 곳, `defaultFromValueOf` 형제 목록 조회 한 벌, `useFieldCommit` 의 컨트롤 묶음, 컨트롤 CSS 한 규칙. a 에서 Form 만 쓰던 `listAddition`·`useItemRemoval` 추출은 되돌려 b 로 넘겼다. (5) P3-4: 정본 대장 "그래프 표현 투영"·"필드 표시 사실" 행에 `.card` 틀과 조회 순서, PLAN ③ 서술(`FieldEditor` 는 없다), 기준선 설명(노드 목록 글자 안티앨리어싱)을 실제대로 고쳤다. 캔버스만 선택지 이름을 보이고 Form 은 "id · 이름"인 차이는 P4-04 가 Form 을 걷을 때 정리한다. P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395) 는 #392 머지 뒤 main 위로 옮긴다.
 - 2026-09-30 — **P4-02a 시각 점검 수정**([#392](https://github.com/Nochiski/Quant_study/pull/392), `64ecd05c`). 실제 브라우저로 캔버스를 찍어 보니 1440 화면에서 캔버스가 좌우 패널 사이 600px 남짓인데 뷰포트 media query 로 4열을 잡아 열이 140px 로 좁아지고 컨트롤이 옆 열 밑으로 넘쳤다. 열 수를 캔버스 폭 container query 로 바꿨다(한 열 → 34rem 두 열 → 64rem 네 열, grid 항목 `min-width: 0`). 카탈로그 선택지가 "financial.book_equity · 자본총계"처럼 YAML 식별자를 보여, 요약과 같은 이름 풀이(`pipelineNames`, `strategySummary` 에서 뗐다)를 `FieldControl` 의 선택 prop `names` 로 캔버스만 넘긴다(Form 은 그대로). 팩터 이름 카드는 그래프 안 진단을 다시 쓰지 않는다(같은 탭 아래 고급 편집기가 노드 카드에 붙인다 — b 에서 하려던 것을 a 로 당겼다).
 - 2026-09-30 — **P4-02a PR [#392](https://github.com/Nochiski/Quant_study/pull/392)**. a(①~⑤)를 마친 시점의 비테스트 src 가 13파일 +1136/−213 으로 리드 결정 6 의 기준(600줄·10파일)을 넘어 a 만 먼저 열었다(base main, 머지 전 리뷰). 캔버스 `PipelinePanel` 을 Graph 탭 맨 위에 두고 고급 편집기는 그 아래에 둔다. 카드 문장은 i18n `.card` 틀(enum 값 이름 키 → 앵커·목록 설명 키), 컨트롤은 Form 행에서 뗀 `FieldControl`·`useFieldCommit`·`FieldActions`(owner `pipeline`)다. PLAN 단계 순서(⑩ 은 b 뒤)와 달리 route 테스트 R1·R2 를 a 에 넣었다 — 둘이 고정하는 것(문장 안 컨트롤 → YAML 그 줄만·compile, Form 행과 바이트 단위로 같은 연산)이 a 의 동작이다. 넣으면서 공용 `useRevealSelection` 이 숨은 탭 패널(`hidden`) 안에서는 스크롤하지 않게 했다: 탭 패널이 모두 마운트돼 Form 탭에서 고른 pointer 를 숨은 Graph 탭 카드도 표시해, 기존 route 테스트가 캔버스 카드로 간 스크롤을 잡았다. e2e 기준선 `graph-node-diagnostic.png` 는 노드 목록이 캔버스 아래로 내려가며 글자의 세로 서브픽셀 위치가 바뀌어 안티앨리어싱이 달라져 다시 찍었다(배치 불변, #392 리뷰 6절 픽셀 대조). P4-02b(⑥ 규칙 추가·삭제 → ⑦ 5 실행 안내 → ⑧ 문제 행 이동 → ⑨ US-DM-07 비고 → 전체 게이트)는 #392 위 스택. P4-02 상태 `IN_PROGRESS` 유지.

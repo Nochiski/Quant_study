@@ -896,6 +896,8 @@ PR(선행 코드 PR 머지 뒤), 선행 코드 PR `impl-prep`(#259). P3-03 에 �
 
 - 팩터 카드: 이름(`factor_id` 편집 = 참조 갱신 rename), 방향, 비중 슬라이더(blur 커밋), 요약 문장,
   "레시피 열기"(P5 전까지 기존 Graph 편집기로), 카드 위 진단.
+- 팩터 카드의 삭제 거부 문장은 참조 자리를 pointer 대신 이름으로 말한다(spec D9 "카드는 YAML 식별자를
+  보이지 않는다", P4-04 식별자 0개 단언 — Graph 노드 삭제 거부 P1-04 처럼, #395 리뷰 P3-4).
 - "+ 팩터 추가"가 `{ factor_id: factor_<n>, direction: high, graph: { nodes: [], output_node_id: "" } }`를
   `insertItem`. 빈 그래프는 semantic error "첫 단계를 추가하세요"로 카드에 표시(backend 메시지).
 - 미리보기 패널: 기준일 입력, 기존 trace API로 유니버스·필터 통과·결측 제외 수와 상위 N 종목·

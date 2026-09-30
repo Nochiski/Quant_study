@@ -6,7 +6,7 @@ current_phase: P4
 current_pr: P4-02
 active_prs: [P4-02]
 parallel_window: []
-last_updated: 2026-09-30T09:54:48+09:00
+last_updated: 2026-09-30T10:30:12+09:00
 planned_prs: 30
 merged_prs: 21
 integrated_prs: 0
@@ -30,7 +30,7 @@ progress_percent: 70
 | Active PR | `P4-02` |
 | Progress | `21 / 30 done (70%), main 21, integration 0` |
 | Approved | `21 / 30` |
-| Aggregated at | `2026-09-30 09:54 KST` |
+| Aggregated at | `2026-09-30 10:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -146,7 +146,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Branch/worktree | `feat/lang2-p4-02-stage-cards` / `wt-run-concurrency`(재사용) |
 | Base SHA | main `09aaf755`(#367 머지) |
 | Steps | ① PLAN·WORKFLOW 착수(리드 결정) → a: ② `projectPipeline` 입력을 `FormProjection` 으로(refactor) → ③ Form 필드 행에서 `FieldEditor`·`FieldActions`·목록 편집 상태를 뗀다(refactor, 동작 불변) → ④ 틀 분해 함수 → ⑤ 캔버스 골격·필드 카드·요약 띠·Graph 탭 배선·i18n(단계 소제목·카드 틀) → a 끝에서 비테스트 src 크기 확인(600줄·10파일을 넘으면 a 만 먼저 PR) → b: ⑥ 규칙 목록·항목 문장 → ⑦ 5 실행 안내 카드 → ⑧ 문제 행 이동(Graph 탭 카드) → ⑨ US-DM-07 비고 → ⑩ route 테스트 R1(카드 문장 컨트롤 → YAML 그 줄만·compile) · R2(Form 행과 같은 SourceOperation) → ⑪ 전체 게이트 한 번. 개발 중에는 변경 범위 vitest 만(리드 지시, 자원). **진행**: ①~⑤ 완료, a 끝 크기 13파일 +1136/−213 → P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392) 로 먼저 열었다. ⑩ R1·R2 는 a 의 동작을 고정하므로 a 에 넣었고 ⑪ 은 a tip 에서 한 번 돌았다(검증 기록). P4-02b 는 ⑥~⑨ 와 b tip 전체 게이트 |
-| Head SHA | P4-02a `3ebbae7c`(`24b0b13f` refactor 입력 · `29ae9b89` refactor 컨트롤 추출 · `fea12044` 캔버스 · `e1eed337` route R1·R2 · `3ebbae7c` e2e 기준선) |
+| Head SHA | P4-02a `3ebbae7c`(`24b0b13f` refactor 입력 · `29ae9b89` refactor 컨트롤 추출 · `fea12044` 캔버스 · `e1eed337` route R1·R2 · `3ebbae7c` e2e 기준선 · `64ecd05c` 시각 점검 수정 — 열 수·선택지 이름·팩터 카드 진단) |
 | Diff stat | P4-02a main `09aaf755` 대비 20파일 +1561/−248(PLAN·WORKFLOW·기준선 1장 포함). 비테스트 src 13파일 +1136/−213 |
 | Full gate | CI 전체 job green |
 
@@ -1158,6 +1158,7 @@ Phase exit:
 
 | PR | 명령 | 결과 | 일시 |
 |---|---|---|---|
+| `P4-02` | P4-02a 시각 점검 수정 tip `64ecd05c`: frontend `typecheck`·변경 파일 `eslint`, 변경 범위 vitest(edit-strategy·shared/config·`document-routes`·`stylesheets`), `node e2e/run-playwright.mjs e2e/workbench.workflow.spec.ts`, Graph 탭을 쓰는 story spec 3개(`cs.derived-factor`·`dm.ai-new-strategy`·`dm.readable-korean`), 1440·1920·다크 캔버스 캡처(임시 spec, 커밋 안 함) | tsc·eslint 0 · Vitest 48 files 601/601 · workflow 9/9(기준선 그대로 통과) · story 7/7 | 2026-09-30 |
 | `P4-02` | P4-02a tip `3ebbae7c`(main `09aaf755` 위): frontend `typecheck`·`lint`(전체)·`test`(전체)·`typecheck:e2e`, `node e2e/run-playwright.mjs`(포트 8235/5235, 빌드의 `typecheck`·`vite build`·`check:editor-bundle` 포함, 전 spec), 기준선 갱신 뒤 `e2e/workbench.workflow.spec.ts` 재실행(update 없이), 루트 `user_story_trace`·`conflict_markers`. backend 변경 없음 | tsc·lint 0 · Vitest 90 files 1144/1144 · e2e 전체 1회 47 passed + 1 failed(`graph-node-diagnostic.png` 50px, 캔버스 아래로 내려간 노드 이름 안티앨리어싱) + 1 did not run → 기준선 갱신 `3ebbae7c` 뒤 workflow spec 9/9(합 49/49) · 스토리 40·태그 e2e 30 · 표식 0 · R1·R2 반복 4회 통과 | 2026-09-30 |
 | `P1-03` | cascade tip `748bc62f`: backend `pytest -q`·`ruff check src tests examples scripts`·`pyright`, 루트 tools unittest·ruff·pyright, 충돌 표식 검사, frontend `api:generate` 후 생성물 diff·`typecheck`·`typecheck:e2e`·`lint`·`npm test` | pytest 1579 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 674/674 | 2026-09-26 |
 | `P1-04` | cascade tip `e6fb10b0`, 위와 같은 게이트 | pytest 1611 passed · ruff·pyright 0 · tools 13 OK · 표식 0 · SDK diff 0 · Vitest 704/704 | 2026-09-26 |
@@ -1178,6 +1179,7 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-30 — **P4-02a 시각 점검 수정**([#392](https://github.com/Nochiski/Quant_study/pull/392), `64ecd05c`). 실제 브라우저로 캔버스를 찍어 보니 1440 화면에서 캔버스가 좌우 패널 사이 600px 남짓인데 뷰포트 media query 로 4열을 잡아 열이 140px 로 좁아지고 컨트롤이 옆 열 밑으로 넘쳤다. 열 수를 캔버스 폭 container query 로 바꿨다(한 열 → 34rem 두 열 → 64rem 네 열, grid 항목 `min-width: 0`). 카탈로그 선택지가 "financial.book_equity · 자본총계"처럼 YAML 식별자를 보여, 요약과 같은 이름 풀이(`pipelineNames`, `strategySummary` 에서 뗐다)를 `FieldControl` 의 선택 prop `names` 로 캔버스만 넘긴다(Form 은 그대로). 팩터 이름 카드는 그래프 안 진단을 다시 쓰지 않는다(같은 탭 아래 고급 편집기가 노드 카드에 붙인다 — b 에서 하려던 것을 a 로 당겼다).
 - 2026-09-30 — **P4-02a PR [#392](https://github.com/Nochiski/Quant_study/pull/392)**. a(①~⑤)를 마친 시점의 비테스트 src 가 13파일 +1136/−213 으로 리드 결정 6 의 기준(600줄·10파일)을 넘어 a 만 먼저 열었다(base main, 머지 전 리뷰). 캔버스 `PipelinePanel` 을 Graph 탭 맨 위에 두고 고급 편집기는 그 아래에 둔다. 카드 문장은 i18n `.card` 틀(enum 값 이름 키 → 앵커·목록 설명 키), 컨트롤은 Form 행에서 뗀 `FieldControl`·`useFieldCommit`·`FieldActions`(owner `pipeline`)다. PLAN 단계 순서(⑩ 은 b 뒤)와 달리 route 테스트 R1·R2 를 a 에 넣었다 — 둘이 고정하는 것(문장 안 컨트롤 → YAML 그 줄만·compile, Form 행과 바이트 단위로 같은 연산)이 a 의 동작이다. 넣으면서 공용 `useRevealSelection` 이 숨은 탭 패널(`hidden`) 안에서는 스크롤하지 않게 했다: 탭 패널이 모두 마운트돼 Form 탭에서 고른 pointer 를 숨은 Graph 탭 카드도 표시해, 기존 route 테스트가 캔버스 카드로 간 스크롤을 잡았다. e2e 기준선 `graph-node-diagnostic.png` 는 노드 목록이 캔버스 아래로 내려가며 굵은 노드 이름 글자가 50px 달라져 다시 찍었다(배치 불변). P4-02b(⑥ 규칙 추가·삭제 → ⑦ 5 실행 안내 → ⑧ 문제 행 이동 → ⑨ US-DM-07 비고 → 전체 게이트)는 #392 위 스택. P4-02 상태 `IN_PROGRESS` 유지.
 - 2026-09-30 — **P4-01 MERGED, P4-02 착수·설계 결정(리드)**. P4-01b [#367](https://github.com/Nochiski/Quant_study/pull/367) 가 main 에 머지돼(`09aaf755`) P4-01 행을 `MERGED` 로 바꾸고 P4-01b 패킷을 P4 스택 절로 옮겼다. P4-02 는 main `09aaf755` 에서 `feat/lang2-p4-02-stage-cards` 로 시작한다. 구현자 설계 메모의 여섯 선택지에 리드가 답했다(WORKFLOW P4-02 결정 블록). (1) 단계 없는 섹션(전략 이름·설명·파라미터)은 캔버스 밖, 자리는 P4-04. (2) 알파 열은 팩터 이름과 "그래프에서 열기"만, 카드는 P4-03. (3) 비율 칸은 입력 단위를 바꾸지 않고 카드 틀 문구가 비개발자 말로 단위를 말한다(예 "상위 {selection_percentile}(0.1이 10%)를") — % 입출력은 연산자마다 단위가 달라 한 경로로 못 푼다. (4) 스토리는 US-DM-07 비고만, e2e 는 P4-04. 대신 route 테스트 둘(카드 문장 컨트롤 → YAML 그 줄만·compile, Form 행과 같은 SourceOperation). (5) 영문 소제목 키 `strategy.stage.<v>.term` 신설. (6) 한 PR, 커밋은 a → b, 비테스트 src 가 600줄이나 10파일을 넘으면 a/b 경계에서 두 PR. 첫 refactor 는 `projectPipeline` 입력을 `FormProjection` 으로 바꾸는 것이다. #352(실행 설정 적용 조건)와 겹치는 파일은 `document-routes.test.tsx`·`edit-strategy/index.ts` 정도이고 뒤에 머지되는 쪽이 main merge 로 푼다. P4-02 상태 `IN_PROGRESS`.
 - 2026-09-30 — **P4-01b 리뷰 r1 반영**([#367](https://github.com/Nochiski/Quant_study/pull/367), `review_pr367` r1 APPROVE, 리드 지시로 머지 전 반영). (1) P2-1: 요약이 `direction: low` 팩터를 거꾸로 읽혔다("PBR, ROE 점수가 높은 순으로"). 방향 enum 값 조각("높은|낮은 {label}")이 이름 조각을 대신하고 목록 틀은 "{items} 순으로", 항목은 "·"로 잇는다 — **리드 결정 4 를 방향까지 넓혔다**(WORKFLOW P4-01 결정 절). (2) P3-2: 레짐 하한 요약 조각과 원래 필드 설명을 실제 동작(하한 아래 종목은 후보에서 빠지고 보유분도 판다) 하나로 맞췄다. (3) P3-3: **체인 순서의 정본은 `graph.nodes` 문서 순서다**(리드 결정, backend fixture 검사와 같은 해석). spec D2 에 한 줄로 적고 `projectRecipe` 를 문서 순서 판정으로 바꿨다(코드는 늘지 않아 P5-01 로 미루지 않았다). P2-2·P3-1(레시피): 판정 갈래마다 고급 표 한 줄을 두어 `x op x`·부가 잎 공유를 포함한 검사 9개가 각각 고정되고, 겹친 id·두 꼬리·루프 가드 같은 중복 검사가 사라졌다. (4) **리드 결정: 노드 설정 칸 표시 규칙 하나** — 실행 계획 카드도 레시피 요약과 같은 `settingShown`(값이 있고 스키마 기본값과 다름)을 쓴다. 정본 대장의 "소비자마다 다르다" 문장을 지우고 #359 P3-3(순위 카드의 0.01/0.99)이 닫혔다. (5) P3-1(파이프라인): 목록의 자기 단계 마커 읽기와 거짓 값 검사를 걷고, 적용 조건 사슬의 전이는 결정 문구대로 두고 합성 스키마 테스트로 고정했다. (6) P3-4: 요약 조각 전체를 구조 테스트 하나로 고정했다(자리표시가 같은 카드 필드로 풀림, 고아 조각 없음). 게이트는 검증 기록.

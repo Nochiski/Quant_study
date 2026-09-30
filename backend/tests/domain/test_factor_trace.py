@@ -261,6 +261,44 @@ def test_masked_status_covers_exactly_the_cells_the_evaluator_masked() -> None:
     assert ratio[(days[51], "a")].value == 151.0 / 131.0
 
 
+def test_warm_up_is_reported_before_masked_where_both_apply() -> None:
+    """#350(#389 리뷰 P3-2): 창이 첫 관측 앞으로 넘어가는 칸은 가린 칸이 창에 들어도 이력 부족이다.
+
+    자리 2 를 가린 패널에서 5일 평균의 구간은 [p-4, p] 라 2~6 이 가린 칸을 품고, 0~3 은 이력이
+    모자란다(손계산 정답). 두 사유가 겹치는 2·3 은 이력 부족이다 — 가림이 없어도 값이 없을 구조적
+    사유라 먼저 말한다. 실원장 `momentum(adj, 252, lag=21)` 에서 이렇게 겹치는 칸이 428칸이다.
+    """
+    days = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(10)]
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("adj", "price.adj_close", "field"),
+            TimeSeriesNode("mean5", TimeSeriesOperator.MEAN, "adj", 5, "time_series"),
+        ),
+        output_node_id="mean5",
+    )
+    panel = tuple(
+        FactorObservation(
+            day,
+            "a",
+            (
+                FactorFieldValue("price.adj_close", None, masked=True)
+                if position == 2
+                else FactorFieldValue("price.adj_close", 100.0 + position),
+            ),
+        )
+        for position, day in enumerate(days)
+    )
+    trace = trace_factor_graph(graph, observations=panel, missing=MissingPolicy.DROP)
+    rows = _rows(trace, "mean5")
+
+    assert [rows[(day, "a")].status for day in days] == [
+        *[TraceValueStatus.WARM_UP] * 4,
+        *[TraceValueStatus.MASKED] * 3,
+        *[TraceValueStatus.OK] * 3,
+    ]
+    assert rows[(days[7], "a")].value == 105.0  # (103 + 104 + 105 + 106 + 107) / 5
+
+
 @pytest.mark.parametrize(
     ("operator", "right"),
     ((BinaryOperator.MULTIPLY, 1e308), (BinaryOperator.DIVIDE, 1e-308)),

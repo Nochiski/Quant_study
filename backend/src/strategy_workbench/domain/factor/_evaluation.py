@@ -234,7 +234,8 @@ def _compute_nodes(
 
 
 class _NodeEvaluator:
-    """노드 캐시를 채우는 재귀 평가기. `_compute_nodes` 한 번의 호출 동안만 산다.
+    """노드 캐시를 채우는 재귀 평가기. `_compute_nodes` 가 만들어 돌려주고, 그 결과를 읽는
+    호출자(평가·추적 투영)가 쥐는 동안만 산다(#350).
 
     예전에는 재귀를 클로저(`evaluate` 가 자기 이름을 부르는 내부 함수)로 했는데, 그 함수는 자기
     cell 로 자신을 참조하는 순환(함수 → cell → 함수)을 남긴다. cell 들이 `observations` 를 쥐어

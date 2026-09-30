@@ -634,13 +634,20 @@ def render_macros(equity_root: Path) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def install_temp_macros(con: duckdb.DuckDBPyConnection, sources: dict[str, str],
-                        overrides: dict[str, str] | None = None) -> list[str]:
+                        overrides: dict[str, str] | None = None,
+                        names: tuple[str, ...] | None = None) -> list[str]:
     """`sources` 로 채울 수 있는 매크로를 TEMP MACRO 로 세션에 올린다. 만든 이름을 돌려준다.
 
+    `names` 를 주면 그 매크로와 그것이 부르는 매크로만 올린다 — 입력 열을 좁혀 읽는 빌드
+    세션(`input_columns`)에서 쓰지 않는 매크로가 없는 열에 바인딩하다 멈추지 않게 한다.
     `overrides[name]` 은 그 매크로의 템플릿을 바꿔 끼운다 — 부정 픽스처(FX-N-006 나눗셈)용.
     """
+    wanted = (None if names is None
+              else {*names, *(d for n in names for d in MACRO_DEPENDS.get(n, ()))})
     made: list[str] = []
     for name, sig in SIGNATURES.items():
+        if wanted is not None and name not in wanted:
+            continue
         if any(t not in sources for t in MACRO_INPUTS[name]):
             continue
         if any(d not in made for d in MACRO_DEPENDS.get(name, ())):

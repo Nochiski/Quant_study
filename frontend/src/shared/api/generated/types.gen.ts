@@ -3293,7 +3293,9 @@ export type ParameterNode = {
  * 참여율을 곱할 기준 거래량(spec D7).
  *
  * `session_volume` 은 체결 세션의 거래량을, `adv20` 은 판단일까지 20세션 평균 거래대금을 판단일
- * 종가로 나눈 주식 수(`_participation.py`)를 뜻한다.
+ * 종가로 나눈 주식 수(`_participation.py`)를 뜻한다. 기본은 `adv20` 이다(#342 DOMAIN-V2-02) —
+ * `session_volume` 은 체결 시점에 모르는 그날 전체 거래량으로 시가 체결 수량을 정해 결과가 낙관
+ * 쪽이라, 옛 실행 설정과 견주는 선택지로만 남기고 결과에 경고를 붙인다.
  */
 export type ParticipationBasis = "session_volume" | "adv20";
 

@@ -515,12 +515,13 @@ def _adv_caps(
 
 
 @pytest.mark.parametrize("core", [ExecutionCore.PYTHON, ExecutionCore.RUST])
-def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
+def test_adv20_reads_forty_warmup_sessions_and_caps_fills_by_them(
     tmp_path: Path, core: ExecutionCore
 ) -> None:
-    """`adv20`(V2-02)이면 실행이 start 앞 20세션을 워밍업으로 읽고, 체결은 워밍업 행까지 포함해 센
-    기준 거래량 × 참여율을 넘지 않는다. 첫 체결 세션의 체결량은 워밍업을 넣은 캡과 같고 뺀 캡과
-    다르다 — 엔진 어댑터가 워밍업 bar 를 빠뜨리면 여기서 걸린다."""
+    """`adv20`(V2-02)이면 실행이 start 앞 40세션(ADV 창의 두 배, #396 리뷰 P2-2)을 워밍업으로
+    읽고, 체결은 워밍업 행까지 포함해 센 기준 거래량 × 참여율을 넘지 않는다. 첫 체결 세션의
+    체결량은 워밍업을 넣은 캡과 같고 뺀 캡과 다르다 — 엔진 어댑터가 워밍업 bar 를 빠뜨리면 여기서
+    걸린다."""
     rate = 1e-4
     environment = replace(
         _environment(), participation_basis=ParticipationBasis.ADV20, participation_rate=rate
@@ -539,8 +540,8 @@ def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
     assert wait_for_terminal_run(runs, "adv-run").status.value == "completed"
 
     ((query, dataset),) = data.loads
-    assert query.history_sessions_before_start == 20
-    assert len({bar.session for bar in dataset.history_bars}) == 20
+    assert query.history_sessions_before_start == 40
+    assert len({bar.session for bar in dataset.history_bars}) == 40
     warmed = _adv_caps(environment, (*dataset.history_bars, *dataset.bars), rate)
     cold = _adv_caps(environment, dataset.bars, rate)
     fills = runs.result("adv-run").artifacts.fills
@@ -557,10 +558,11 @@ def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
 
 
 class _WarmupSplit(_ShrunkWarmupValue):
-    """워밍업 가운데 세션에 종목마다 자본변동을 하나 싣는다 — σ 가 그 수익률을 빼는지 본다."""
+    """워밍업 끝에서 10번째 세션(σ 창 20세션 안)에 종목마다 자본변동을 하나 싣는다 — σ 가 그
+    수익률을 빼는지 본다."""
 
     def _shape(self, dataset: BacktestDataset) -> BacktestDataset:
-        middle = sorted({bar.session for bar in dataset.history_bars})[10]
+        middle = sorted({bar.session for bar in dataset.history_bars})[-10]
         return replace(
             dataset,
             history_corporate_actions=tuple(
@@ -619,7 +621,8 @@ def test_sqrt_impact_reads_warmup_and_prices_fills_with_the_domain_scale(
     assert wait_for_terminal_run(runs, "impact-run").status.value == "completed"
 
     ((query, dataset),) = data.loads
-    assert query.history_sessions_before_start == 21
+    # σ 창(종가 21개) × 워밍업 여유 2.
+    assert query.history_sessions_before_start == 42
     history = (*dataset.history_bars, *dataset.bars)
     warmed = _impact(environment, history, dataset.history_corporate_actions)
     unsplit = _impact(environment, history)

@@ -59,7 +59,7 @@ export type FormCatalogs = {
 };
 
 type StrategyFormPanelProps = {
-  /** null이면 runtime schema를 아직 못 받았다. */
+  /** null이면 runtime schema를 아직 못 받았거나 첫 parse 전이다(`parsing`). */
   projection: FormProjection | null;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
@@ -73,6 +73,8 @@ type StrategyFormPanelProps = {
   onOpenGraph?: (pointer: string) => void;
   /** 현재 텍스트가 parse되지 않아 마지막 유효 parse로 그렸다(P4-04). */
   stale?: boolean;
+  /** 이 문서의 첫 parse 가 아직 오지 않았다 — 컨트롤 대신 "문서를 읽는 중"을 보인다(#413). */
+  parsing?: boolean;
   /** URL `path`(Graph "Form에서 열기" 등). 그 pointer 아래의 목록 항목을 `aria-current`로 강조한다(P5-03). */
   selectedPointer?: string;
   /**
@@ -100,6 +102,7 @@ export const StrategyFormPanel = ({
   selectedPointer,
   revealSignal,
   stale = false,
+  parsing = false,
 }: StrategyFormPanelProps) => {
   const disabled = transactions.disabled;
   const container = useRevealSelection<HTMLElement>(
@@ -143,7 +146,7 @@ export const StrategyFormPanel = ({
       />
       {projection === null ? (
         <p className="strategy-form__state" role="status">
-          {t("form.panel.loading")}
+          {t(parsing ? "form.panel.parsing" : "form.panel.loading")}
         </p>
       ) : (
         projection.sections.map((section) => (

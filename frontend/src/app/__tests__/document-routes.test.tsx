@@ -32,7 +32,7 @@ import {
 
 import { backtestHistoryQuery } from "../../entities/backtest";
 import { RUN_ENVIRONMENT_STORAGE_PREFIX } from "../../features/run-backtest";
-import { strategiesQuery } from "../../entities/strategy";
+import { strategiesQuery, strategySchemaQuery } from "../../entities/strategy";
 import {
   strategyWorkbenchApi,
   type StrategyTraceRequest,
@@ -576,11 +576,15 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-const mountWithClient = (initial: string) => {
+const mountWithClient = (
+  initial: string,
+  prime: (client: QueryClient) => void = () => undefined,
+) => {
   const history = createMemoryHistory({ initialEntries: [initial] });
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: 0 } },
   });
+  prime(queryClient);
   render(
     <App
       history={history}
@@ -1871,6 +1875,48 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       await settled(view, text);
       expect(compiledSources.slice(before)).toContain(text);
     };
+
+    it("첫 parse 전에는 Form·캔버스가 컨트롤 없이 문서를 읽는 중이라 말하고, parse 뒤에 적힌 값을 보인다 (#413)", async () => {
+      // 스키마를 query cache 에 먼저 넣는다: 문서가 오는 순간 Form·캔버스를 막는 것은 첫 parse 하나뿐이라
+      // "첫 parse 전"(150ms)이 스키마 대기(로딩)와 섞이지 않는다.
+      server.use(
+        http.get(
+          `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+          () => HttpResponse.json(document("s1", 2, COMMENTED)),
+        ),
+      );
+      mountWithClient("/research/strategies/s1/revisions/2?view=form", (client) =>
+        client.setQueryData(strategySchemaQuery().queryKey, {
+          schema: RUNTIME_SCHEMA,
+          schema_hash: "h".repeat(64),
+          schema_version: "1.2",
+        }),
+      );
+
+      const form = await screen.findByLabelText("Form 편집");
+      await within(form).findByText("문서를 읽는 중입니다.");
+      // 첫 parse 전: 적힌 칸을 기본값으로 그리지 않는다 — 편집 컨트롤 자체가 없다(숨은 Graph 탭 캔버스도).
+      expect(within(form).queryByRole("spinbutton")).toBeNull();
+      const canvas = screen.getByRole("region", {
+        name: "전략 파이프라인",
+        hidden: true,
+      });
+      expect(within(canvas).queryByRole("spinbutton", { hidden: true })).toBeNull();
+      expect(canvas).toHaveTextContent("문서를 읽는 중입니다.");
+
+      // parse 뒤: 적힌 값(0.05)이 두 화면에 보인다.
+      await waitFor(() =>
+        expect(
+          screen.getByRole("status", { name: "문서 상태" }),
+        ).toHaveAttribute("data-settled", "true"),
+      );
+      expect(
+        within(form).getByRole("spinbutton", { name: /\bmax_name_weight/ }),
+      ).toHaveValue(0.05);
+      expect(
+        within(canvas).getByRole("spinbutton", { name: WEIGHT, hidden: true }),
+      ).toHaveValue(0.05);
+    });
 
     it("카드 문장 안의 컨트롤로 값을 바꾸면 YAML 그 줄만 바뀌고 compile 된다", async () => {
       const user = userEvent.setup();

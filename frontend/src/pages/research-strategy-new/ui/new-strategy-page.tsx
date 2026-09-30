@@ -404,6 +404,7 @@ export const NewStrategyPage = () => {
             <StrategyFormPanel
               projection={form.projection}
               stale={form.stale}
+              parsing={form.parsing}
               tree={form.tree}
               schema={assist.schema}
               transactions={transactions}

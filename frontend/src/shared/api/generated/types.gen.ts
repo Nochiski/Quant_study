@@ -377,6 +377,7 @@ export type BacktestCancelResult = {
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;

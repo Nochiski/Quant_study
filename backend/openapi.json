@@ -1418,6 +1418,173 @@
         "title": "CandidateSide",
         "type": "string"
       },
+      "CapacityGap": {
+        "description": "한계 금액을 확정하지 못했거나 시험 범위 끝에 걸린 이유. 화면은 번역만 한다.",
+        "enum": [
+          "pending",
+          "cancelled",
+          "no_positive_sharpe",
+          "beyond_tested"
+        ],
+        "title": "CapacityGap",
+        "type": "string"
+      },
+      "CapacityLimit": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "best_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Amount"
+          },
+          "gap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CapacityGap"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "threshold_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold Sharpe"
+          }
+        },
+        "required": [
+          "amount",
+          "best_amount",
+          "threshold_sharpe",
+          "gap"
+        ],
+        "title": "CapacityLimit",
+        "type": "object"
+      },
+      "CapacityPoint": {
+        "description": "용량 스윕 금액 하나의 결과.",
+        "properties": {
+          "impact_cost_bps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact Cost Bps"
+          },
+          "initial_cash": {
+            "title": "Initial Cash",
+            "type": "number"
+          },
+          "session_unfilled_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Unfilled Ratio"
+          },
+          "sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TrialStatus"
+          },
+          "trial_index": {
+            "title": "Trial Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "trial_index",
+          "initial_cash",
+          "status",
+          "sharpe",
+          "impact_cost_bps",
+          "session_unfilled_ratio"
+        ],
+        "title": "CapacityPoint",
+        "type": "object"
+      },
+      "CapacityReport": {
+        "description": "용량 스윕 결과(V4-04). 한계 금액 규칙은 `domain/experiment/_capacity.py` 다.",
+        "properties": {
+          "limit": {
+            "$ref": "#/components/schemas/CapacityLimit"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/CapacityPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "points",
+          "limit"
+        ],
+        "title": "CapacityReport",
+        "type": "object"
+      },
+      "CapacitySweepRequest": {
+        "description": "용량 스윕 만들기·미리 계산 요청(V4-04). 기반 요청을 초기 자본만 바꿔 전체 구간으로 돌린다.",
+        "properties": {
+          "initial_cash": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Initial Cash",
+            "type": "array"
+          },
+          "run": {
+            "$ref": "#/components/schemas/BacktestRunSpec"
+          }
+        },
+        "required": [
+          "run",
+          "initial_cash"
+        ],
+        "title": "CapacitySweepRequest",
+        "type": "object"
+      },
       "CellKind": {
         "description": "A numeric zero and unavailable data must never collapse into one value.",
         "enum": [
@@ -2582,6 +2749,18 @@
       },
       "ExperimentDesign": {
         "properties": {
+          "initial_cash": {
+            "default": [],
+            "items": {
+              "type": "number"
+            },
+            "title": "Initial Cash",
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ExperimentKind",
+            "default": "parameter_search"
+          },
           "measured": {
             "default": false,
             "title": "Measured",
@@ -2633,6 +2812,9 @@
             "enum": [
               "experiment.base.invalid",
               "experiment.base.unsaved",
+              "experiment.capacity.base_not_run",
+              "experiment.capacity.invalid_amounts",
+              "experiment.kind.mismatch",
               "experiment.not_found",
               "experiment.search.invalid_values",
               "experiment.search.too_many_points",
@@ -2670,6 +2852,15 @@
         ],
         "title": "ExperimentErrorResponse",
         "type": "object"
+      },
+      "ExperimentKind": {
+        "description": "실험 종류(spec D5). 용량 스윕은 초기 자본만 바꾼다 — 초기 자본은 시도 키 밖이라 금액들이 한\n시도다.",
+        "enum": [
+          "parameter_search",
+          "capacity_sweep"
+        ],
+        "title": "ExperimentKind",
+        "type": "string"
       },
       "ExperimentPage": {
         "properties": {
@@ -2780,7 +2971,14 @@
             "$ref": "#/components/schemas/BacktestRunSpec"
           },
           "split": {
-            "$ref": "#/components/schemas/SplitSpec"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SplitSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -2983,6 +3181,17 @@
             "title": "Index",
             "type": "integer"
           },
+          "initial_cash": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Cash"
+          },
           "parameter_values": {
             "additionalProperties": {
               "anyOf": [
@@ -3004,7 +3213,14 @@
             "type": "object"
           },
           "window": {
-            "$ref": "#/components/schemas/WalkForwardWindow"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WalkForwardWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5074,7 +5290,7 @@
         "type": "object"
       },
       "ParticipationBasis": {
-        "description": "참여율을 곱할 기준 거래량(spec D7).\n\n`session_volume` 은 체결 세션의 거래량을, `adv20` 은 판단일까지 20세션 평균 거래대금을 판단일\n종가로 나눈 주식 수(`_participation.py`)를 뜻한다.",
+        "description": "참여율을 곱할 기준 거래량(spec D7).\n\n`session_volume` 은 체결 세션의 거래량을, `adv20` 은 판단일까지 20세션 평균 거래대금을 판단일\n종가로 나눈 주식 수(`_participation.py`)를 뜻한다. 기본은 `adv20` 이다(#342 DOMAIN-V2-02) —\n`session_volume` 은 체결 시점에 모르는 그날 전체 거래량으로 시가 체결 수량을 정해 결과가 낙관\n쪽이라, 옛 실행 설정과 견주는 선택지로만 남기고 결과에 경고를 붙인다.",
         "enum": [
           "session_volume",
           "adv20"
@@ -6846,7 +7062,7 @@
           },
           "participation_basis": {
             "$ref": "#/components/schemas/ParticipationBasis",
-            "default": "session_volume"
+            "default": "adv20"
           },
           "participation_rate": {
             "default": 0.1,
@@ -9898,14 +10114,12 @@
           "environment": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/RunEnvironment"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Environment"
+            ]
           },
           "source_format": {
             "default": "yaml",
@@ -12261,6 +12475,124 @@
         "summary": "Create Experiment"
       }
     },
+    "/api/v1/experiments/capacity": {
+      "post": {
+        "description": "용량 스윕(초기 자본만 바꾼 실행들, V4-04)을 만들고 금액마다 실행 대기열에 넘긴다.",
+        "operationId": "createCapacitySweep",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapacitySweepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Experiment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The base strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The base revision hash differs from the expected hash"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "A coded experiment design or base run diagnostic"
+          }
+        },
+        "summary": "Create Capacity Sweep"
+      }
+    },
+    "/api/v1/experiments/capacity/preview": {
+      "post": {
+        "description": "용량 스윕 시작 전 미리 계산. 금액만 다른 실행은 한 시도라 N 은 많아야 1 늘어난다.",
+        "operationId": "previewCapacitySweep",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapacitySweepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The base strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The base revision hash differs from the expected hash"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "A coded experiment design or base run diagnostic"
+          }
+        },
+        "summary": "Preview Capacity Sweep"
+      }
+    },
     "/api/v1/experiments/preview": {
       "post": {
         "description": "시작 전 미리 계산 — 조합·창·실행 수와 계열 시도 수 N 의 변화(spec D2).",
@@ -12418,6 +12750,66 @@
         "summary": "Cancel Experiment"
       }
     },
+    "/api/v1/experiments/{experiment_id}/capacity": {
+      "get": {
+        "description": "용량 스윕 금액별 비용 후 샤프·가격 충격·미체결 비율과 한계 금액(V4-04). 화면은\nV5-06 이다.",
+        "operationId": "getExperimentCapacity",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapacityReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment state refuses it"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Experiment Capacity"
+      }
+    },
     "/api/v1/experiments/{experiment_id}/controls": {
       "patch": {
         "description": "일시정지·재개·우선순위. 대기 trial 에만 적용하고 도는 trial 은 끝까지 돈다(spec D6).",
@@ -12559,6 +12951,16 @@
               }
             },
             "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment state refuses it"
           },
           "422": {
             "content": {
@@ -12818,6 +13220,16 @@
               }
             },
             "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment state refuses it"
           },
           "422": {
             "content": {

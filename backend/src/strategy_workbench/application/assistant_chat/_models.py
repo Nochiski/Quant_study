@@ -7,11 +7,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
 from strategy_workbench.domain.assistant.facade.models import ProposalCompileResult
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 
 __all__ = [
     "BacktestResultUnavailableError",
@@ -82,7 +82,7 @@ class TurnContext:
 
     source_text: str
     source_format: str
-    environment: Mapping[str, object] | None  # reason: 실행 설정은 1.2에서 타입이 정해진다
+    environment: RunEnvironment | None
     diagnostics: tuple[str, ...]
 
 

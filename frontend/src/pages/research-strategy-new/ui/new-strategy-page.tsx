@@ -257,7 +257,7 @@ export const NewStrategyPage = () => {
   // 같은 훅을 써서 한쪽만 콜백을 잃지 않는다(Phase B 감사 NB-8).
   const strategyAssistant = useStrategyAssistant(proposalApply, document, {
     draftId: serverDraftId,
-    environment: runSettings.requestOptions,
+    environment: runSettings.environment,
     backtest: {
       canRun: backtest.canRun,
       settling: backtest.settling,

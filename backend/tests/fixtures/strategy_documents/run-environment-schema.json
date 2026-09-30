@@ -64,7 +64,7 @@
         "session_volume",
         "adv20"
       ],
-      "default": "session_volume",
+      "default": "adv20",
       "x-description-key": "run_environment.field.participation_basis"
     },
     "fee_bps": {

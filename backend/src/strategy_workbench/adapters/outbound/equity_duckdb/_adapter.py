@@ -1025,6 +1025,19 @@ class EquityDuckdbAdapter:
             )
         return UniverseHistoryResult(points, DataLoadStatus.OK, self._snapshot_id)
 
+    def universe_securities(
+        self, market: str, universe_id: str, as_of: date
+    ) -> tuple[SecurityRef, ...]:
+        """관측 질의와 같은 시장·유니버스로 그날 종목의 이름·티커를 준다(lang2 P4-03 기준일 요약).
+
+        이름은 `load_universe` 가 종목 마스터에서 붙인 것이다. 모르는 시장·유니버스·날짜면 빈
+        튜플이다.
+        """
+        if market != MARKET or universe_id not in self._policies:
+            return ()
+        result = self.load_universe(UniverseHistoryQuery(venue=VENUE, start=as_of, end=as_of))
+        return next((point.members for point in result.points if point.session == as_of), ())
+
     def load_panel(self, query: ResearchPanelQuery) -> ResearchPanelResult:
         unknown = self._unknown_fields(query.field_ids)
         if unknown:

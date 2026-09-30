@@ -185,7 +185,7 @@ def build_container(
     run_repository = SQLiteBacktestRunRepository(research_db_path)
     if run_repository.database_path is not None:
         restrict_to_current_user(run_repository.database_path)
-    strategy_traces = StrategyTraceService(portfolio_design, strategy_repository)
+    strategy_traces = StrategyTraceService(portfolio_design, strategy_repository, equity_data)
     executor = BacktestEngineExecutorAdapter(metric_registry)
     hold = _TrialHold(executor, trial_hold_seconds) if trial_hold_seconds > 0 else None
     if hold is not None:

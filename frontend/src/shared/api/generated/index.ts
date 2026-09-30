@@ -657,6 +657,7 @@ export type {
   StrategyTraceResponse,
   StrategyTraceRow,
   StrategyTraceSummary,
+  StrategyTraceSummaryTarget,
   StrategyValidation,
   StreamAssistantEventsData,
   StreamAssistantEventsError,

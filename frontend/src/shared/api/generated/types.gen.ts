@@ -2524,10 +2524,6 @@ export type FactorValue = {
    */
   as_of: string;
   /**
-   * Masked
-   */
-  masked?: boolean;
-  /**
    * Security Id
    */
   security_id: string;
@@ -3404,10 +3400,6 @@ export type PortfolioFrameSummary = {
    * Eligible
    */
   eligible: number;
-  /**
-   * Masked
-   */
-  masked: number;
   /**
    * Missing
    */
@@ -5781,7 +5773,17 @@ export type StrategyTraceSummary = {
   /**
    * Targets
    */
-  targets: Array<TargetPosition>;
+  targets: Array<StrategyTraceSummaryTarget>;
+};
+
+/**
+ * StrategyTraceSummaryTarget
+ *
+ * 선정 종목 한 줄. 이름·티커는 실행 설정의 유니버스에서 찾고, 모르면 `security` 가 None.
+ */
+export type StrategyTraceSummaryTarget = {
+  position: TargetPosition;
+  security: SecurityRef | null;
 };
 
 /**

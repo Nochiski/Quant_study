@@ -4125,11 +4125,6 @@
             "title": "As Of",
             "type": "string"
           },
-          "masked": {
-            "default": false,
-            "title": "Masked",
-            "type": "boolean"
-          },
           "security_id": {
             "title": "Security Id",
             "type": "string"
@@ -5475,10 +5470,6 @@
             "title": "Eligible",
             "type": "integer"
           },
-          "masked": {
-            "title": "Masked",
-            "type": "integer"
-          },
           "missing": {
             "title": "Missing",
             "type": "integer"
@@ -5493,8 +5484,7 @@
           "eligible",
           "eligibility_failed",
           "eligibility_rank_cut",
-          "missing",
-          "masked"
+          "missing"
         ],
         "title": "PortfolioFrameSummary",
         "type": "object"
@@ -9200,7 +9190,7 @@
           },
           "targets": {
             "items": {
-              "$ref": "#/components/schemas/TargetPosition"
+              "$ref": "#/components/schemas/StrategyTraceSummaryTarget"
             },
             "title": "Targets",
             "type": "array"
@@ -9213,6 +9203,30 @@
           "targets"
         ],
         "title": "StrategyTraceSummary",
+        "type": "object"
+      },
+      "StrategyTraceSummaryTarget": {
+        "description": "선정 종목 한 줄. 이름·티커는 실행 설정의 유니버스에서 찾고, 모르면 `security` 가 None.",
+        "properties": {
+          "position": {
+            "$ref": "#/components/schemas/TargetPosition"
+          },
+          "security": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecurityRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "position",
+          "security"
+        ],
+        "title": "StrategyTraceSummaryTarget",
         "type": "object"
       },
       "StrategyValidation": {

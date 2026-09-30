@@ -347,41 +347,38 @@ def test_the_rank_cut_reason_reaches_the_construction_trace() -> None:
     assert traced["s003"].exclusion_reasons == (ExclusionReason.ELIGIBILITY_RANK_CUT,)
 
 
-def test_the_frame_summary_counts_members_by_final_reason_and_masked_missing() -> None:
+def test_the_frame_summary_counts_members_by_final_reason() -> None:
     """기준일 요약(lang2 P4-03)은 컴파일러가 최종 사유로 센 수다. 종목을 고르지 않아도 나온다.
 
-    유니버스 밖(`z`)은 세지 않는다. 결측 제외 중 원장이 가린 입력 때문인 종목(#350)은 결측을 판정한
-    세 자리 — 절대 규칙 필드(`e`), 횡단면 필드(`f`), 팩터 값(`g`) — 에서 모두 센다. `g` 는 순위
-    탈락이면서 팩터 값도 없어 사유별 수를 더해도 유니버스가 되지 않는다. 그래서 순위에 든 수를
-    따로 싣는다.
+    유니버스 밖(`z`)은 세지 않는다. 결측 제외는 절대 규칙 필드(`e`)·횡단면 필드(`f`)·팩터 값(`g`)
+    어디서 빠져도 센다. `g` 는 순위 탈락이면서 팩터 값도 없어 사유별 수를 더해도 유니버스가 되지
+    않는다. 그래서 순위에 든 수를 따로 싣는다.
     """
     market_cap = "price.market_cap"
 
     def member(
-        security_id: str, liquidity: PortfolioFieldValue | None, cap: PortfolioFieldValue
+        security_id: str, liquidity: float | None, cap: float | None
     ) -> PortfolioObservation:
-        fields = (cap,) if liquidity is None else (liquidity, cap)
-        return replace(_observation(security_id), fields=fields)
-
-    def value(field_id: str, amount: float | None) -> PortfolioFieldValue:
-        return PortfolioFieldValue(field_id, amount, _DAY, masked=amount is None)
+        return replace(
+            _observation(security_id),
+            fields=(
+                PortfolioFieldValue(_LIQUIDITY, liquidity, _DAY),
+                PortfolioFieldValue(market_cap, cap, _DAY),
+            ),
+        )
 
     observations = (
-        member("a", value(_LIQUIDITY, 10.0), value(market_cap, 100.0)),
-        member("b", value(_LIQUIDITY, 9.0), value(market_cap, 90.0)),
-        member("c", value(_LIQUIDITY, 8.0), value(market_cap, 80.0)),
-        member("d", value(_LIQUIDITY, 0.1), value(market_cap, 75.0)),
-        member("e", value(_LIQUIDITY, None), value(market_cap, 60.0)),
-        member("f", value(_LIQUIDITY, 7.0), value(market_cap, None)),
+        member("a", 10.0, 100.0),
+        member("b", 9.0, 90.0),
+        member("c", 8.0, 80.0),
+        member("d", 0.1, 75.0),
+        member("e", None, 60.0),
+        member("f", 7.0, None),
         replace(
-            member("g", value(_LIQUIDITY, 6.0), value(market_cap, 70.0)),
-            factor_values=(PortfolioFactorValue("price.close", None, _DAY, masked=True),),
+            member("g", 6.0, 70.0),
+            factor_values=(PortfolioFactorValue("price.close", None, _DAY),),
         ),
-        member("h", None, value(market_cap, 50.0)),
-        replace(
-            member("z", value(_LIQUIDITY, None), value(market_cap, 99.0)),
-            universe_member=False,
-        ),
+        replace(member("z", 11.0, 99.0), universe_member=False),
     )
     spec = _spec(
         EligibilityRule(_LIQUIDITY, EligibilityOperator.GREATER_THAN, 0.5),
@@ -400,12 +397,7 @@ def test_the_frame_summary_counts_members_by_final_reason_and_masked_missing() -
     assert result.trace is not None
     assert result.trace.candidates == ()
     assert result.trace.summary == PortfolioFrameSummary(
-        universe=8,
-        eligible=2,
-        eligibility_failed=1,
-        eligibility_rank_cut=2,
-        missing=4,
-        masked=3,
+        universe=7, eligible=2, eligibility_failed=1, eligibility_rank_cut=2, missing=3
     )
 
 

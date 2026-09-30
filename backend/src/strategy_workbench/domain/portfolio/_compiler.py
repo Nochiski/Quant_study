@@ -303,9 +303,7 @@ def _compile_target_tape(
                 signal_as_of=signal_as_of,
                 execution_on=execution_on,
                 candidates=frame_result.trace_candidates,
-                summary=_frame_summary(
-                    frame.candidates, frame_result.missing_masked, checkpoint=checkpoint
-                ),
+                summary=_frame_summary(frame.candidates, checkpoint=checkpoint),
             )
             _require_finite_tree(
                 construction_trace,
@@ -419,9 +417,6 @@ class _ScoredCandidate:
     # `decision.eligible`(유동성·레짐·팩터 결측·점수 문턱까지 반영)과 다르다 — 유동성 필터에
     # 걸린 종목까지 분모에서 빼면 "상위 20%"의 모집단이 단계마다 달라진다(spec D3 S5).
     passes_absolute_eligibility: bool
-    # 결측 사유를 낸 입력에 원장이 가린 칸이 있다(#350). 결측을 판정한 자리에서 같이 정해서 프레임
-    # 요약이 입력을 다시 뒤지지 않는다.
-    missing_masked: bool = False
 
 
 @dataclass(frozen=True)
@@ -438,8 +433,6 @@ class _FrameCompilation:
     trace_candidates: tuple[PortfolioCandidateTrace, ...] = ()
     # 섹터 제약에서 뺀 종목(이슈 #203). tape 단위 경고로 모은다.
     unknown_sector_ids: tuple[str, ...] = ()
-    # 원장이 가린 입력 때문에 결측으로 빠진 종목. trace 하는 프레임의 요약이 센다.
-    missing_masked: frozenset[str] = frozenset()
 
 
 def _compile_frame(
@@ -470,9 +463,8 @@ def _compile_frame(
     contributions_by_id = {
         item.decision.security_id: item.contributions for item in _checkpointed(scored, checkpoint)
     }
-    missing_masked = {item.decision.security_id for item in scored if item.missing_masked}
     decisions = _apply_cross_sectional_eligibility(
-        spec, observations, scored, missing_masked, checkpoint=checkpoint
+        spec, observations, scored, checkpoint=checkpoint
     )
     ranked = sorted(
         (decision for decision in _checkpointed(decisions, checkpoint) if decision.eligible),
@@ -565,13 +557,11 @@ def _compile_frame(
         ),
         trace_candidates=trace_candidates,
         unknown_sector_ids=weight_result.unknown_sector_ids,
-        missing_masked=frozenset(missing_masked),
     )
 
 
 def _frame_summary(
     candidates: tuple[CandidateDecision, ...],
-    missing_masked: frozenset[str],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> PortfolioFrameSummary:
@@ -580,11 +570,6 @@ def _frame_summary(
         item
         for item in _checkpointed(candidates, checkpoint)
         if ExclusionReason.NOT_IN_UNIVERSE not in item.exclusion_reasons
-    ]
-    missing = [
-        item.security_id
-        for item in members
-        if _MISSING_VALUE_EXCLUSIONS.intersection(item.exclusion_reasons)
     ]
     return PortfolioFrameSummary(
         universe=len(members),
@@ -595,8 +580,9 @@ def _frame_summary(
         eligibility_rank_cut=sum(
             ExclusionReason.ELIGIBILITY_RANK_CUT in item.exclusion_reasons for item in members
         ),
-        missing=len(missing),
-        masked=len(missing_masked.intersection(missing)),
+        missing=sum(
+            not _MISSING_VALUE_EXCLUSIONS.isdisjoint(item.exclusion_reasons) for item in members
+        ),
     )
 
 
@@ -632,13 +618,10 @@ def _apply_cross_sectional_eligibility(
     spec: StrategySpec,
     observations: tuple[PortfolioObservation, ...],
     scored: list[_ScoredCandidate],
-    missing_masked: set[str],
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[CandidateDecision]:
     """2-pass: 프레임 모집단의 순위로 `top_*` 규칙을 적용해 탈락 사유를 덧붙인다 (spec D3 S5).
-
-    원장이 가린 필드 때문에 `MISSING_ELIGIBILITY` 를 붙인 종목은 `missing_masked` 에 더한다(#350).
 
     **모집단**은 규칙마다 따로 센다 — 유니버스 멤버 중 절대 규칙(`gt`~`eq`)을 전부 통과했고 그
     규칙의 `field_id` 값이 기준일까지 공개된 종목이다. 결측·공개일 초과 종목은 탈락시키면서
@@ -687,8 +670,6 @@ def _apply_cross_sectional_eligibility(
                 added.setdefault(observation.security_id, []).append(
                     ExclusionReason.MISSING_ELIGIBILITY
                 )
-                if field is not None and field.masked:
-                    missing_masked.add(observation.security_id)
                 continue
             if field.available_date > observation.as_of:
                 added.setdefault(observation.security_id, []).append(ExclusionReason.FUTURE_DATA)
@@ -802,14 +783,12 @@ def _score_candidate(
     # 1-pass: 절대 규칙만 본다. `top_*` 는 프레임 전체 모집단이 있어야 판정되므로
     # `_apply_cross_sectional_eligibility` 가 2-pass 로 붙인다(spec D3 S5).
     passes_absolute_eligibility = True
-    missing_masked = False
     for rule in spec.eligibility.rules:
         if rule.operator in CROSS_SECTIONAL_ELIGIBILITY_OPERATORS:
             continue
         field = fields.get(rule.field_id)
         if field is None or not _number(field.value):
             reasons.append(ExclusionReason.MISSING_ELIGIBILITY)
-            missing_masked = missing_masked or (field is not None and field.masked)
             passes_absolute_eligibility = False
         elif field.available_date > observation.as_of:
             reasons.append(ExclusionReason.FUTURE_DATA)
@@ -846,7 +825,6 @@ def _score_candidate(
         value = factors.get(factor.factor_id)
         if value is None or value.value is None:
             reasons.append(ExclusionReason.MISSING_FACTOR)
-            missing_masked = missing_masked or (value is not None and value.masked)
             if include_trace:
                 contributions.append(
                     FactorContributionTrace(
@@ -973,7 +951,6 @@ def _score_candidate(
             exclusion_reasons=tuple(dict.fromkeys(reasons)),
         ),
         contributions=normalized,
-        missing_masked=missing_masked,
     )
 
 

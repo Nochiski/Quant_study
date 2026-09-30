@@ -7,7 +7,7 @@ from datetime import date
 from typing import ClassVar, TypeAlias
 
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
-from strategy_workbench.domain.equity.facade.research_data import CellKind
+from strategy_workbench.domain.equity.facade.research_data import CellKind, SecurityRef
 from strategy_workbench.domain.factor.facade.trace import TraceValueStatus
 from strategy_workbench.domain.portfolio.facade.construction import (
     CandidateDecision,
@@ -131,6 +131,14 @@ class StrategyTargetTrace:
 
 
 @dataclass(frozen=True)
+class StrategyTraceSummaryTarget:
+    """선정 종목 한 줄. 이름·티커는 실행 설정의 유니버스에서 찾고, 모르면 `security` 가 None."""
+
+    position: TargetPosition
+    security: SecurityRef | None
+
+
+@dataclass(frozen=True)
 class StrategyTraceSummary:
     """기준일 미리보기가 그리는 수와 그날의 선정(lang2 P4-03). 수는 컴파일러가 센 그대로다."""
 
@@ -138,7 +146,7 @@ class StrategyTraceSummary:
     execution_on: date
     counts: PortfolioFrameSummary
     # N = 전략이 그 기준일에 고른 종목 전부, 순위 순
-    targets: tuple[TargetPosition, ...]
+    targets: tuple[StrategyTraceSummaryTarget, ...]
 
 
 @dataclass(frozen=True)

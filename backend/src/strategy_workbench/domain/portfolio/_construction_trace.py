@@ -75,9 +75,8 @@ class PortfolioFrameSummary:
     eligible: int
     eligibility_failed: int
     eligibility_rank_cut: int
-    # 값이 없어 뺀 종목(거르기 필드·팩터 값 없음)과 그중 원장이 가린 입력 때문인 종목(#350)
+    # 값이 없어 뺀 종목(거르기 필드·팩터 값 없음)
     missing: int
-    masked: int
 
 
 @dataclass(frozen=True)

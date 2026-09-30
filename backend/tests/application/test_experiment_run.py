@@ -98,13 +98,15 @@ _SAMPLE = sample_backtest_result()
 
 
 def _result(
-    sharpe: float | None = None, equity: tuple[tuple[date, float], ...] = ()
+    sharpe: float | None = None,
+    equity: tuple[tuple[date, float], ...] = (),
+    standard_error: float | None = None,
 ) -> BacktestRunResult:
-    """완료 결과. `sharpe` 는 대표 샤프(세션 단위)라 연율화(√252)해 싣는다."""
-    metrics = (
-        ()
-        if sharpe is None
-        else (MetricValue("sharpe", sharpe * math.sqrt(252), MetricScope.FULL, 10),)
+    """완료 결과. `sharpe`·`standard_error` 는 세션 단위라 실행 지표처럼 연율화(√252)해 싣는다."""
+    metrics = tuple(
+        MetricValue(metric_id, value * math.sqrt(252), MetricScope.FULL, 10)
+        for metric_id, value in (("sharpe", sharpe), ("sharpe_standard_error", standard_error))
+        if value is not None
     )
     return replace(
         _SAMPLE,
@@ -151,10 +153,10 @@ class _FakeRuns:
         )
         return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries, ()))
 
-    def trial_ledger(self, lineage_id: str) -> TrialLedger:
+    def trial_ledger(self, request: BacktestRunSpec) -> TrialLedger:
         if self.on_ledger is not None:
             self.on_ledger()
-        return summarize_trial_ledger(lineage_id, (), self.ledger_entries, ())
+        return summarize_trial_ledger("s-1", (), self.ledger_entries, ())
 
     def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
         self.owners.add(owner)
@@ -389,7 +391,7 @@ def test_only_a_completed_trial_can_be_selected_and_the_record_stays() -> None:
 
     with pytest.raises(ExperimentStateError) as raised:
         service.select(experiment_id, 2, "이웃 평균 샤프가 가장 높다")
-    runs.run_statuses["run-2"] = RunStatus.COMPLETED
+    _finish(runs, {f"run-{index}": _result() for index in range(4)})
     selection = service.select(experiment_id, 2, "이웃 평균 샤프가 가장 높다")
 
     assert raised.value.code == "experiment.selection.not_completed"
@@ -399,6 +401,87 @@ def test_only_a_completed_trial_can_be_selected_and_the_record_stays() -> None:
         {"scale": 1.0, "mode": "b"},
     )
     assert service.get(experiment_id).selections == (selection,)
+
+
+def test_a_selection_keeps_the_lineage_snapshot_it_was_made_with() -> None:
+    """V4-02: 고를 때의 N·대표 샤프·DSR 을 남기고, 나중에 N 이 늘어도 기록은 그대로다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    keys = runs.keys
+    _finish(
+        runs,
+        {f"run-{index}": _result() for index in range(4)}
+        | {"run-2": _result(0.06, standard_error=0.03)},
+    )
+    # 실행 서비스가 원장에 적은 행 대신, 완료 순서를 정한 원장을 둔다.
+    # 칸 (0,) 의 두 창(run-0 먼저 완료, run-1 재확인)과 칸 (1,) 의 두 창(run-3 이 먼저 완료돼 대표).
+    runs.ledger_entries = [
+        TrialLedgerEntry("run-0", keys[0], RunStatus.COMPLETED, _AT, _AT + timedelta(1), 0.02),
+        TrialLedgerEntry("run-1", keys[1], RunStatus.COMPLETED, _AT, _AT + timedelta(3), 0.09),
+        TrialLedgerEntry("run-2", keys[2], RunStatus.COMPLETED, _AT, _AT + timedelta(2), 0.06),
+        TrialLedgerEntry("run-3", keys[3], RunStatus.COMPLETED, _AT, _AT + timedelta(1), 0.04),
+    ]
+
+    selection = service.select(experiment_id, 2, "학습 샤프가 가장 높다")
+    runs.ledger_entries.append(
+        TrialLedgerEntry("run-9", "other", RunStatus.COMPLETED, _AT, _AT + timedelta(4), 0.5)
+    )
+
+    # N = 2(재확인 run-1 은 세지 않는다). 고른 trial 의 시도 대표는 먼저 완료된 run-3 의 0.04 다.
+    # V = 표본분산(0.02, 0.04) = 0.0002, SR₀ = √V × γΦ⁻¹(1 − 1/(2e)) = 0.014142 × 0.51976
+    # = 0.0073505.
+    # DSR = Φ((0.06 − 0.0073505)/0.03) = Φ(1.7550) = 0.96037 — 고른 run-2 의 샤프로 잰다.
+    assert (selection.trial_count, selection.ledger_representative_sharpe) == (2, 0.04)
+    assert selection.deflated_sharpe == pytest.approx(0.96037, abs=1e-5)
+    assert service.get(experiment_id).selections == (selection,)
+
+
+def test_a_selection_recorded_before_the_snapshot_reads_without_one(tmp_path: Path) -> None:
+    """V4-02 이전 서버가 쓴 선택 기록(스냅숏 칸 없음)은 칸이 비어 읽힌다."""
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    service = _service(runs, repository=SQLiteExperimentRepository(path))
+    experiment_id = service.create(_request()).record.experiment_id
+    _finish(runs, {f"run-{index}": _result() for index in range(4)})
+    service.select(experiment_id, 2, "이유")
+    with sqlite3.connect(path) as connection:
+        (stored,) = connection.execute(
+            "SELECT selection_json FROM experiment_selections"
+        ).fetchone()
+        document = json.loads(stored)
+        for field in ("trial_count", "ledger_representative_sharpe", "deflated_sharpe"):
+            del document[field]
+        connection.execute(
+            "UPDATE experiment_selections SET selection_json = ?", (json.dumps(document),)
+        )
+
+    reopened = _service(runs, repository=SQLiteExperimentRepository(path))
+    (selection,) = reopened.get(experiment_id).selections
+
+    assert (
+        selection.trial_count,
+        selection.ledger_representative_sharpe,
+        selection.deflated_sharpe,
+    ) == (None, None, None)
+
+
+def test_a_candidate_is_chosen_only_after_the_experiment_has_finished() -> None:
+    """V4-02 리뷰 P3-5: 대기·도는 trial 이 남으면 설계한 조합이 다 돌기 전의 N 으로 스냅숏이 굳지
+    않게 거절한다. 취소한 실험은 끝났다(돌지 않은 조합은 시도가 아니다)."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    _finish(runs, {"run-2": _result()})
+
+    with pytest.raises(ExperimentStateError) as raised:
+        service.select(experiment_id, 2, "학습 샤프가 가장 높다")
+    service.cancel(experiment_id)
+    selection = service.select(experiment_id, 2, "학습 샤프가 가장 높다")
+
+    assert raised.value.code == "experiment.selection.not_finished"
+    assert "unfinished_trials=3" in str(raised.value)
+    assert selection.trial_index == 2
 
 
 def test_the_preview_counts_each_grid_cell_once_whatever_the_windows() -> None:

@@ -156,7 +156,7 @@ def evaluate_factor_graph(
         parameters=parameters,
         checkpoint=checkpoint,
         progress=lambda fraction: progress(fraction * _NODES_PROGRESS_SHARE),
-    )
+    ).computed
     return _evaluation_from_computed(
         graph,
         observations,
@@ -210,11 +210,12 @@ def _compute_nodes(
     parameters: tuple[ResolvedFactorParameter, ...] = (),
     checkpoint: Callable[[], None] = _noop_checkpoint,
     progress: Callable[[float], None] = _noop_progress,
-) -> dict[str, list[FactorComputedValue]]:
-    """Evaluate every node reachable from the output once; the cache is the single value source.
+) -> _NodeEvaluator:
+    """출력에서 닿는 노드를 한 번씩 평가한 평가기. 그 노드 캐시가 값의 유일한 출처다.
 
-    `evaluate_factor_graph` returns the output node; `_trace.trace_factor_graph` projects the whole
-    cache. Both read the same lists so trace values equal evaluation values by construction.
+    `evaluate_factor_graph` 는 출력 노드만, `_trace` 는 캐시 전체(`computed`)와 원장이 가린
+    칸 때문에 결측으로 둔 칸(`masked`)을 읽는다. 같은 목록을 읽으므로 추적 값과 평가 값은 만들
+    때부터 같다.
 
     진행은 도달 가능한 노드마다 종류별 가중치(`_node_progress_weight`)로 몫을 나눠 노드 완료 때
     올리고, 창 연산이라 가장 오래 걸리는 시계열 노드는 종목 하나를 끝낼 때마다 그 몫 안에서 올린다
@@ -229,11 +230,12 @@ def _compute_nodes(
         progress=progress,
     )
     evaluator.evaluate(graph.output_node_id)
-    return evaluator.computed
+    return evaluator
 
 
 class _NodeEvaluator:
-    """노드 캐시를 채우는 재귀 평가기. `_compute_nodes` 한 번의 호출 동안만 산다.
+    """노드 캐시를 채우는 재귀 평가기. `_compute_nodes` 가 만들어 돌려주고, 그 결과를 읽는
+    호출자(평가·추적 투영)가 쥐는 동안만 산다(#350).
 
     예전에는 재귀를 클로저(`evaluate` 가 자기 이름을 부르는 내부 함수)로 했는데, 그 함수는 자기
     cell 로 자신을 참조하는 순환(함수 → cell → 함수)을 남긴다. cell 들이 `observations` 를 쥐어
@@ -265,6 +267,9 @@ class _NodeEvaluator:
         # 순 관측 index, 그 안의 순번). 가린 셀은 사건 경계라 값의 구간에 들면 결측이다(#315·#337).
         self._spans: dict[str, _Spans] = {}
         self._boundaries: dict[str, list[tuple[list[int], int]]] = {}
+        # 노드마다 그 규칙으로 결측이 된 출력 칸(필드 노드는 가린 셀 자체). 추적이 사유로
+        # 싣는다(#350)
+        self._masked: dict[str, frozenset[int]] = {}
         self._by_security: dict[str, list[int]] | None = None
         self._total_weight = _reachable_progress_weight(graph.output_node_id, self._nodes)
         self._completed_weight = 0
@@ -272,6 +277,12 @@ class _NodeEvaluator:
     @property
     def computed(self) -> dict[str, list[FactorComputedValue]]:
         return self._computed
+
+    @property
+    def masked(self) -> dict[str, frozenset[int]]:
+        """노드마다 원장이 가린 칸 때문에 결측이 된 출력 칸. 판정은 값 구간 규칙(`_value_spans`)
+        이다."""
+        return self._masked
 
     def _securities(self) -> dict[str, list[int]]:
         """종목별 관측 index(날짜 순). 관측에만 달려 있어 시간 연산 노드들이 나눠 쓴다."""
@@ -323,15 +334,15 @@ class _NodeEvaluator:
         dependencies = node_dependencies(node)
         inputs = [self.evaluate(dependency) for dependency in dependencies]
         spans = _value_spans(node, [self._spans[dependency] for dependency in dependencies])
-        # 필드 노드의 가린 칸은 이미 값이 없다. 나머지 노드는 구간에 가린 칸이 드는 칸을 먼저 구해
-        # 창 연산이 그 칸의 창을 읽지 않게 한다
+        # 필드 노드의 가린 칸은 원장이 가린 셀 자체라 이미 값이 없다. 나머지 노드는 구간에 가린 칸이
+        # 드는 칸을 먼저 구해 창 연산이 그 칸의 창을 읽지 않게 한다
         masked = frozenset[int]() if isinstance(node, FieldNode) else self._masked_in(spans)
         values: list[FactorComputedValue]
         if isinstance(node, FieldNode):
-            values, cells = _field_values(
+            values, masked = _field_values(
                 self._observations, node.field_id, self._missing, checkpoint=self._checkpoint
             )
-            self._boundaries[node.field_id] = self._located(cells)
+            self._boundaries[node.field_id] = self._located(masked)
         elif isinstance(node, ConstantNode):
             values = [node.value for _ in _checkpointed(self._observations, self._checkpoint)]
         elif isinstance(node, ParameterNode):
@@ -396,6 +407,7 @@ class _NodeEvaluator:
         )
         self._computed[node_id] = values
         self._spans[node_id] = spans
+        self._masked[node_id] = masked
         self._completed_weight += _node_progress_weight(node)
         self._progress(self._completed_weight / self._total_weight)
         return values

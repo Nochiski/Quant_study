@@ -304,8 +304,11 @@ class _RunServiceTrialRuns:
         except BacktestArtifactUnreadableError as error:
             raise TrialResultUnreadableError(str(error)) from error
 
-    def trial_ledger(self, lineage_id: str) -> TrialLedger:
-        return self._runs.trial_ledger(lineage_id)
+    def trial_ledger(self, request: BacktestRunSpec) -> TrialLedger:
+        ledger = self._runs.request_ledger(request)
+        if ledger is None:  # pragma: no cover - 실험은 저장 리비전으로만 만든다
+            raise RuntimeError("experiment base run has no lineage")
+        return ledger
 
     def sessions(self, start: date, end: date) -> tuple[date, ...]:
         return self._equity_data.trading_sessions(start, end)

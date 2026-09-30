@@ -278,6 +278,7 @@ export type {
   FieldCatalogFacets,
   FieldContract,
   FieldCoverageCapability,
+  FieldFrequency,
   FieldLag,
   FieldNode,
   FieldValueType,

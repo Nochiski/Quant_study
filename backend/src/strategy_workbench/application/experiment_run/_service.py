@@ -8,7 +8,10 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from threading import RLock, Thread
 
-from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint, MetricRegistry
+from strategy_workbench.domain.analytics.facade.metrics import (
+    EquityCurvePoint,
+    MetricRegistry,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
     AdmissionRejectionCode,
     BacktestRunSpec,
@@ -36,6 +39,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     walk_forward_retention,
     window_gap,
 )
+from strategy_workbench.domain.experiment.facade.statistics import run_deflated_sharpe
 from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentControls,
     ExperimentStatus,
@@ -267,7 +271,12 @@ class ExperimentRunService:
             return self._trial_state(record, trial_index)
 
     def select(self, experiment_id: str, trial_index: int, reason: str) -> ExperimentSelection:
-        """끝난 trial 을 후보로 고른 기록을 남긴다(spec D9)."""
+        """끝난 trial 을 후보로 고른 기록을 남긴다(spec D9).
+
+        고를 때의 계열 N·원장 대표 샤프·DSR 을 함께 적는다(V4-02, `run_deflated_sharpe`). 실험이
+        끝나기 전(대기·도는 trial 이 있다)에는 거절한다 — 설계한 조합이 다 돌기 전의 N 으로 스냅숏이
+        굳지 않게 한다. 취소한 실험은 끝났다(돌지 않은 조합은 시도가 아니다).
+        """
         record = self._repository.get(experiment_id)
         state = self._trial_state(record, trial_index)
         if state.status is not TrialStatus.COMPLETED:
@@ -276,7 +285,20 @@ class ExperimentRunService:
                 "완료된 trial 만 후보로 고를 수 있습니다: "
                 f"experiment_id={experiment_id} trial_index={trial_index} status={state.status}",
             )
+        unfinished = sum(
+            not (other.status.is_terminal and not other.awaiting_recovery)
+            for other in self._trial_states(record)
+        )
+        if unfinished and record.cancelled_at is None:
+            raise ExperimentStateError(
+                "experiment.selection.not_finished",
+                "실험의 trial 이 모두 끝난 뒤에 후보를 고를 수 있습니다: "
+                f"experiment_id={experiment_id} unfinished_trials={unfinished}",
+            )
         source = _base_source(record.run)
+        run_id = state.attempts[-1].run_id or ""
+        ledger = self._runs.trial_ledger(record.run)
+        trial = next((t for t in ledger.trials if any(r.run_id == run_id for r in t.runs)), None)
         selection = ExperimentSelection(
             experiment_id=experiment_id,
             trial_index=trial_index,
@@ -285,6 +307,9 @@ class ExperimentRunService:
             parameter_values=state.trial.parameter_values,
             reason=reason,
             selected_at=self._now(),
+            trial_count=ledger.trial_count,
+            ledger_representative_sharpe=None if trial is None else trial.representative_sharpe,
+            deflated_sharpe=run_deflated_sharpe(self._runs.result(run_id), ledger),
         )
         self._repository.add_selection(selection)
         return selection
@@ -460,9 +485,9 @@ class ExperimentRunService:
         return open_windows, waiting
 
     def _train_scores(self, record: ExperimentRecord) -> dict[str, float | None]:
-        """실행마다 원장에 적힌 전체 구간 세션 샤프(학습 점수). 실험 기반은 저장 리비전이라 계열은
-        그 전략이다(spec D2)."""
-        ledger = self._runs.trial_ledger(_base_source(record.run).strategy_id)
+        """실행마다 원장에 적힌 전체 구간 세션 샤프(학습 점수). 파산한 실행은 값이 없어 점수 없는
+        칸이다."""
+        ledger = self._runs.trial_ledger(record.run)
         return {run.run_id: run.session_sharpe for trial in ledger.trials for run in trial.runs}
 
     def _choose(

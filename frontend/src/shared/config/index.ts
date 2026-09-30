@@ -1,6 +1,7 @@
 export {
   messages,
   t,
+  tCode,
   tDescription,
   tName,
   tOptional,

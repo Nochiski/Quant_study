@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -13,6 +14,7 @@ from ._nodes import (
     TimeSeriesNode,
     TimeSeriesOperator,
 )
+from ._validation import required_field_ids
 
 
 class FactorCategory(StrEnum):
@@ -33,6 +35,9 @@ class FactorPreference(StrEnum):
 class FactorAvailability(StrEnum):
     IMPLEMENTED = "implemented"
     CATALOG_ONLY = "catalog_only"
+    # 기본 graph 는 있지만 연결된 어댑터가 그 graph 의 필드를 주지 않는다. 레지스트리 정의에는
+    # 없고 `factor_availability` 만 낸다(#370)
+    UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,23 @@ class FactorDefinition:
     availability: FactorAvailability
     default_graph: FactorGraph | None
     tags: tuple[str, ...] = ()
+
+
+def factor_availability(
+    definition: FactorDefinition, provided_field_ids: Collection[str]
+) -> FactorAvailability:
+    """연결된 어댑터가 주는 필드 id 집합에서 이 팩터의 가용성을 판정한다(#370).
+
+    `operator_availability` 와 같은 모양이다. 기본 graph 가 읽는 필드를 어댑터가 하나라도 주지
+    않으면 그 graph 는 compile 에서 필드 누락으로 막히므로 `unavailable` 이다. 기본 graph 가 없는
+    카탈로그 팩터는 정의 값 그대로다.
+    """
+    graph = definition.default_graph
+    if graph is None or all(
+        field_id in provided_field_ids for field_id in required_field_ids(graph)
+    ):
+        return definition.availability
+    return FactorAvailability.UNAVAILABLE
 
 
 class FactorRegistry:

@@ -263,9 +263,9 @@ class RunEnvironment:
 - P2-03이 `data`·`execution`을 모델에서 지우면서 `environment_from_legacy_spec`를 삭제하고
   `_bridge.py`를 `_requirement.py`로 개명했다. 남은 규칙 하나를 그 파일의 `require_environment`가 소유한다:
   **실행 설정은 요청이 싣는다.** 요청 모델의 타입은 `RunEnvironment | None`으로 두고, 비어 있으면
-  기본값을 지어내지 않고 `run_environment.required`(`MissingRunEnvironmentError`)로 거절한다. run 경로의
-  HTTP 422 코드는 `backtest.run.environment_required`, portfolio preview는 `portfolio.strategy.invalid`
-  진단 안의 `run_environment.required`다. 타입을 필수로 바꾸지 않은 까닭은 pydantic의 영문 "Field
+  기본값을 지어내지 않고 `run_environment.required`(`MissingRunEnvironmentError`)로 거절한다. #351부터 세
+  실행 경로(백테스트 실행·portfolio preview·추적) 모두 HTTP 422 코드는 `backtest.run.environment_required`다.
+  타입을 필수로 바꾸지 않은 까닭은 pydantic의 영문 "Field
   required" 대신 프론트가 번역할 코드를 주기 위해서다(PLAN P2-03 결정 5·7).
 - 은퇴 문서(1.0·1.1)의 옛 실행 설정은 업그레이드로만 들어온다. 업그레이더가 문서에서 떼어 낸 원문
   값(`RetiredExecutionSettings`)을 `domain/backtest/_retired.py`의

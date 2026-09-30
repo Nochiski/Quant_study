@@ -233,7 +233,7 @@ def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
     )
     registry = build_default_factor_registry()
     keys = [
-        FactorResearchService(registry, adapter, adapter, adapter).preview(request).cache_key
+        FactorResearchService(registry, adapter, adapter).preview(request).cache_key
         for adapter in (current, older)
     ]
     assert [key.data_snapshot_id for key in keys] == [
@@ -1038,6 +1038,9 @@ def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
 
     field_ids = tuple(profile.field_id for profile in adapter.list_fields())
     assert catalog == adapter.resolve_factor_fields(field_ids).fields
+    # `resolve_factor_fields` 는 모르는 id 를 버리므로 위 등식은 한 방향뿐이다. AI 팩터 도구가
+    # `list_fields` 로 가용성을 판정하므로 두 목록이 같은 집합임을 양방향으로 묶는다(#370)
+    assert {field.field_id for field in catalog} == set(field_ids)
     assert catalog, "필드가 하나도 없으면 compile 이 모든 필드를 없다고 본다"
     assert {field.value_type for field in catalog} == {NodeValueType.NUMERIC_SERIES}
 
@@ -1047,9 +1050,11 @@ def test_factor_catalog_does_not_offer_a_factor_whose_field_the_ledger_lacks(
 ) -> None:
     """#370(도메인 리뷰 A DR-A-02): 원장에 없는 필드(`UNSUPPORTED_FIELDS`)를 읽는 기본 graph 는
     `implemented` 가 아니다. 편집기 예시 조각과 AI 도구가 실데이터에서 바로 compile 오류가 나는
-    팩터를 권하지 않는다. 가용성은 compile 이 읽는 필드 계약(`factor_field_catalog`)으로 판정한다.
+    팩터를 권하지 않는다. 가용성은 validate·preview 와 같은 필드 계약 port
+    (`resolve_factor_fields`)로 판정하고, compile 목록(`factor_field_catalog`)도 같은 메서드를
+    부른다.
     """
-    service = FactorResearchService(build_default_factor_registry(), adapter, adapter, adapter)
+    service = FactorResearchService(build_default_factor_registry(), adapter, adapter)
 
     def catalog(availability: FactorAvailability) -> set[str]:
         query = FactorCatalogQuery(availability=(availability,), page_size=100)

@@ -53,9 +53,6 @@ class _SparseSource:
             ),
         )
 
-    def factor_field_catalog(self) -> tuple[FieldMetadata, ...]:
-        return self.resolve_factor_fields((FIELD,)).fields
-
     def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         return FactorObservationSet(
             data_snapshot_id=SNAPSHOT,
@@ -80,7 +77,7 @@ def _graph() -> FactorGraph:
 
 def _preview(missing: MissingPolicy | None) -> tuple[str, list[float | None]]:
     source = _SparseSource()
-    service = FactorResearchService(build_default_factor_registry(), source, source, source)
+    service = FactorResearchService(build_default_factor_registry(), source, source)
     request = FactorPreviewRequest(
         graph=_graph(),
         as_of_start=date(2024, 1, 8),

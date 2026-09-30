@@ -110,6 +110,7 @@ def price_table(
     rows: list[PriceRow],
     shares_out: dict[str, int] | None = None,
     basis: list[str] | None = None,
+    base_prices: dict[tuple[str, date], float] | None = None,
 ) -> pa.Table:
     """`price_daily` 관심 컬럼. `price_kind` 는 S04 규칙대로 volume>0 → trade, =0 → reference.
 
@@ -119,6 +120,9 @@ def price_table(
 
     `basis` 를 주면 e1.15.0 이 추가한 행 단위 판 컬럼을 붙인다(`'krx'` 확정 / `'evening'` 저녁
     잠정). 주지 않으면 그 컬럼이 아예 없는 옛 판 루트(e1.5.0 등) 모양 그대로다.
+
+    `base_prices` 를 주면 S06-2 의 KRX 기준가 컬럼 `base_price_krw` 를 붙인다. 평소처럼 같은 티커
+    앞 행 종가이고, 준 (ticker, date) 만 그 값이다. 행은 티커마다 날짜 순이어야 한다.
     """
     volumes = [r[6] for r in rows]
     columns: dict[str, pa.Array] = {
@@ -151,6 +155,13 @@ def price_table(
         )
     if basis is not None:
         columns["basis"] = pa.array(basis, type=pa.string())
+    if base_prices is not None:
+        previous: dict[str, float | None] = {}
+        bases: list[float | None] = []
+        for row in rows:
+            bases.append(base_prices.get((row[0], row[1]), previous.get(row[0])))
+            previous[row[0]] = row[5]
+        columns["base_price_krw"] = _decimal(bases, pa.decimal128(10, 0))
     return pa.table(columns)
 
 
@@ -762,8 +773,8 @@ _CATALOG_BODIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 )
 # 원장 템플릿(`equity.views`)을 그대로 렌더하는 매크로 — 본문을 여기 옮겨 적지 않는다(#249).
 # 손 픽스처 표가 그 매크로가 읽는 열을 다 가질 때만 이렇게 쓸 수 있다(duckdb 는 매크로를 만들 때
-# 바인딩한다).
-LEDGER_MACROS = ("v_fin_latest", "v_credit_balance", "v_adj_close")
+# 바인딩한다). 다른 매크로를 부르는 매크로는 그 뒤에 둔다(`v_adj_close` → `v_unfolded_event`).
+LEDGER_MACROS = ("v_fin_latest", "v_credit_balance", "v_unfolded_event", "v_adj_close")
 
 
 def table_builds(root: Path) -> dict[str, str]:
@@ -886,11 +897,14 @@ def write_catalog(
 # 캘린더 13세션(2023-12-26 ~ 2024-01-12, backfill_end = 01-12). 종목:
 #   005930 common 전 구간 · 000660 common 전 구간, 2024-01-08 2:1 분할(apply=available=01-08) +
 #   01-10 정지(reference 행, status suspended) · 035420 common 01-04 상장, 주식수 미상(mktcap
-#   NULL) · 036220 common 재상장 2구간([12-26, 12-29]·[01-08, 01-12]) · 005935 preferred ·
-#   069500 etf.
+#   NULL), 01-10 정지 · 036220 common 재상장 2구간([12-26, 12-29]·[01-08, 01-12]) · 005935
+#   preferred · 069500 etf.
 #   adj_factor 에 005930 not-ok 행 1(계수 1) — 사건·조정에 나오면 안 된다. 035420 에는 조정 공백
 #   사건 셋(01-05 unknown_price_only · 01-09 다음 세션에 공개된 ok 계수 · 01-11
 #   krx_base_inconsistent)이 있다 — 원장 뷰 `v_adj_close` 는 뒤 둘의 적용일 행을 가린다(#220).
+#   01-11 은 KRX 기준가가 앞 행(01-10 정지일 기준가 행) 종가의 `WB_LEVEL_SHIFT` 배로 재설정돼
+#   원주가 층이 바뀐 날이다 — 원장은 계수를 못 냈고 백테스트 데이터 포트가 기준가 비로 수량을
+#   조정한다(#369). 정지일 종가는 직전 거래 종가(01-09)와 달라 비의 분모를 가른다.
 # 정책: krx.all(TRUE) · krx.common-stock(sec_type='common' ∧ status='listed').
 
 WB_SESSIONS: tuple[date, ...] = (
@@ -902,6 +916,7 @@ WB_SPLIT_DATE = date(2024, 1, 8)
 WB_HALT_DATE = date(2024, 1, 10)
 # 035420 의 조정 공백 적용일(#220) — 다음 세션에 공개된 ok 계수 · krx_base_inconsistent
 WB_LATE_FACTOR, WB_INCONSISTENT = date(2024, 1, 9), date(2024, 1, 11)
+WB_LEVEL_SHIFT = 10  # 035420 의 01-11 기준가 ÷ 앞 종가 — 그날부터 원주가가 이 배수 층에 있다
 # 저녁 잠정판(e1.15.0)의 T 세션 — 캘린더·격자·`security_span` 밖이다(그 셋은 KRX 축이라 저녁
 # 빌드에서도 D 에 멈춘다). `price_daily` 에만 `basis='evening'` 행으로 얹힌다.
 WB_EVENING_SESSION = date(2024, 1, 15)
@@ -1113,12 +1128,20 @@ WB_HOLDER_ROWS: list[HolderRow] = [
 
 
 def wb_close(ticker: str, session: date) -> float:
-    """손계산 가능한 종가: base + 500 × 세션 index, 000660 은 분할일부터 절반."""
+    """손계산 가능한 종가: base + 500 × 세션 index, 000660 은 분할일부터 절반, 035420 은 층 이동
+    (`WB_INCONSISTENT`)부터 `WB_LEVEL_SHIFT` 배."""
     index = WB_SESSIONS.index(session)
     close = WB_BASE_CLOSE[ticker] + 500 * index
     if ticker == "000660" and session >= WB_SPLIT_DATE:
         close = close // 2
+    if ticker == "035420" and session >= WB_INCONSISTENT:
+        close *= WB_LEVEL_SHIFT
     return float(close)
+
+
+# 035420 층 이동일의 KRX 기준가 — 앞 행(01-10 정지일) 종가 205,000 의 `WB_LEVEL_SHIFT` 배.
+# 직전 거래 종가(01-09) 204,500 이 분모면 비가 0.1 이 아니라 0.09976 이다
+WB_LEVEL_SHIFT_BASE = WB_LEVEL_SHIFT * wb_close("035420", WB_HALT_DATE)
 
 
 # `dataset_profile`(S19) 이 확정한 필드별 공개시차 — 서버 실측 모양 그대로다(랙 0 은 장중 가격
@@ -1209,7 +1232,7 @@ def build_workbench_root(
             if not first <= session <= last:
                 continue
             close = wb_close(ticker, session)
-            halted = ticker == "000660" and session == WB_HALT_DATE
+            halted = ticker in ("000660", "035420") and session == WB_HALT_DATE
             prices.append(
                 (ticker, session, None, None, None, close, 0)
                 if halted
@@ -1245,7 +1268,12 @@ def build_workbench_root(
     write_equity_table(
         root,
         "price_daily",
-        price_table(prices, shares_out=WB_SHARES, basis=price_basis),
+        price_table(
+            prices,
+            shares_out=WB_SHARES,
+            basis=price_basis,
+            base_prices={("035420", WB_INCONSISTENT): WB_LEVEL_SHIFT_BASE},
+        ),
         year_column="date",
     )
     write_equity_table(root, "universe_daily", universe_table(universe), year_column="date")

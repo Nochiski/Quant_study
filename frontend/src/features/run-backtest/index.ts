@@ -9,7 +9,6 @@ export {
 export {
   initialRunEnvironmentValues,
   runEnvironmentFields,
-  runEnvironmentValuesOf,
   validateRunEnvironment,
   type RunEnvironmentField,
   type RunEnvironmentFieldError,

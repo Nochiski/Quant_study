@@ -26,6 +26,7 @@ import {
 import type { BacktestRunSpec, RunEnvironment } from "../../../shared/api";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
+  initialRunEnvironmentValues,
   runEnvironmentFields,
   validateRunEnvironment,
   type RunEnvironmentValidation,
@@ -124,6 +125,10 @@ const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),
 ) as Record<string, unknown>;
 
+/**
+ * 기본값에 기간·유니버스를 채운 패널이 싣는 실행 설정. 가격 충격 계수·직접 입력 세율은 고정 bp·법정 세율에서
+ * 읽히지 않아(스키마 `x-applicable-when`, #352) 싣지 않는다.
+ */
 const ENVIRONMENT: RunEnvironment = {
   market: "KRX",
   frequency: "daily",
@@ -136,7 +141,6 @@ const ENVIRONMENT: RunEnvironment = {
   fee_bps: 15,
   slippage_bps: 10,
   impact_model: "fixed_bps",
-  impact_coefficient: 1,
   sell_tax: "krx_statutory",
   missing: "drop",
 };
@@ -386,6 +390,43 @@ describe("run environment panel", () => {
     ).toMatchObject({ start: "date", end: "required" });
   });
 
+  // #352 C-P2-2(#343 V2-07): 모드에 따라 읽히는 칸은 스키마 `x-applicable-when` 에서 읽는다. 읽히는 칸을
+  // 비우면 세 조건 모두 "준비됨"이 아니라 그 칸 오류이고, 읽히지 않는 칸은 값이 남아도 막지도 싣지도 않는다.
+  it("requires a mode-dependent field only in the mode that reads it and leaves it out otherwise", () => {
+    const fields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
+    const filled = initialRunEnvironmentValues(fields, {
+      start: "2021-01-01",
+      end: "2026-08-31",
+      universe_id: "krx.common-stock",
+    });
+    const check = (values: Record<string, string>) =>
+      validateRunEnvironment(fields, { ...filled, ...values });
+
+    expect(check({ sell_tax: "custom", sell_tax_bps: "" }).errors).toEqual({
+      sell_tax_bps: "required",
+    });
+    expect(
+      check({ impact_model: "sqrt", impact_coefficient: "" }).errors,
+    ).toEqual({ impact_coefficient: "required" });
+    expect(
+      check({ impact_model: "fixed_bps", slippage_bps: "" }).errors,
+    ).toEqual({ slippage_bps: "required" });
+
+    // 법정 세율에 남은 세율 값(마지막 사용값 등)은 읽히지 않아 싣지 않는다 — 서버도 그대로 받는다.
+    const statutory = check({ sell_tax: "krx_statutory", sell_tax_bps: "12" });
+    expect(statutory.valid).toBe(true);
+    expect(statutory.environment).not.toHaveProperty("sell_tax_bps");
+    expect(
+      check({ sell_tax: "custom", sell_tax_bps: "12" }).environment,
+    ).toMatchObject({ sell_tax: "custom", sell_tax_bps: 12 });
+    const sqrt = check({ impact_model: "sqrt", slippage_bps: "" });
+    expect(sqrt.environment).toMatchObject({
+      impact_model: "sqrt",
+      impact_coefficient: 1,
+    });
+    expect(sqrt.environment).not.toHaveProperty("slippage_bps");
+  });
+
   it("draws every field from the run environment schema in schema order", () => {
     const fields = runEnvironmentFields(RUN_ENVIRONMENT_SCHEMA);
     const properties = RUN_ENVIRONMENT_SCHEMA.properties as Record<
@@ -553,6 +594,111 @@ describe("run environment panel", () => {
     ).toHaveFocus();
   });
 
+  // #352 C-P2-2: 패널은 지금 모드에서 읽히지 않는 칸을 끄고, 읽히는 칸이 비면 그 칸 이름으로 막는다.
+  it("turns the sell tax rate on only for a custom rate and requires it there", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const rate = screen.getByRole("spinbutton", { name: "매도 거래세율 (bp)" });
+    const method = screen.getByRole("combobox", { name: "매도 거래세" });
+    expect(rate).toBeDisabled();
+    expect(requestBody()?.environment).toEqual(ENVIRONMENT);
+
+    await user.selectOptions(method, "custom");
+    expect(rate).toBeEnabled();
+    expect(screen.getByText("입력 확인")).toBeInTheDocument();
+    expect(screen.getByTestId("blocked")).toHaveTextContent(
+      "실행 설정에서 매도 거래세율 칸을 채우세요.",
+    );
+    expect(requestBody()).toBeNull();
+    await user.type(rate, "12");
+    expect(requestBody()?.environment).toEqual({
+      ...ENVIRONMENT,
+      sell_tax: "custom",
+      sell_tax_bps: 12,
+    });
+
+    // 방식만 되돌리면 세율 칸이 꺼지고 남은 12 는 싣지 않는다 — "준비됨"이면 서버도 받는다(#343 V2-07 경우 3).
+    await user.selectOptions(method, "krx_statutory");
+    expect(rate).toBeDisabled();
+    expect(rate).toHaveValue(12);
+    expect(screen.getByText("준비됨")).toBeInTheDocument();
+    expect(requestBody()?.environment).toEqual(ENVIRONMENT);
+  });
+
+  it("reads the slippage only for fixed bp impact and the coefficient only for square-root impact", async () => {
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const slippage = screen.getByRole("spinbutton", { name: "슬리피지 (bp)" });
+    const coefficient = screen.getByRole("spinbutton", {
+      name: "가격 충격 계수",
+    });
+    expect(slippage).toBeEnabled();
+    expect(coefficient).toBeDisabled();
+
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "가격 충격 모델" }),
+      "sqrt",
+    );
+    expect(coefficient).toBeEnabled();
+    expect(slippage).toBeDisabled();
+    expect(requestBody()?.environment).toMatchObject({
+      impact_model: "sqrt",
+      impact_coefficient: 1,
+    });
+    expect(requestBody()?.environment).not.toHaveProperty("slippage_bps");
+    // 요약 띠도 요청에 실리는 칸만 보인다.
+    const band = screen.getByRole("region", { name: "실행 설정 요약" });
+    expect(within(band).getByText("가격 충격 계수")).toBeInTheDocument();
+    expect(within(band).queryByText("슬리피지 (bp)")).toBeNull();
+  });
+
+  // #352 C-P2-4: 스키마를 읽기 전에 업그레이드 응답의 실행 설정을 채워도 요청 단위 기록으로 남아, 스키마가
+  // 오면 그 값으로 칸이 선다. 칸 목록이 없다고 전략별 저장값·마지막 사용값을 빈 값으로 덮지 않는다.
+  it("keeps an environment applied before the schema arrives and stores it, not an empty one", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API}/api/v1/run-environments/schema`, async () => {
+        await gate;
+        return HttpResponse.json({
+          schema_hash: "h",
+          schema: RUN_ENVIRONMENT_SCHEMA,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithQuery(<Harness />);
+    await user.click(
+      screen.getByRole("button", { name: "apply upgraded environment" }),
+    );
+    const stored = (key: string): unknown =>
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`) ??
+          "null",
+      );
+    expect(stored("strategy-1")).toMatchObject({
+      start: "2021-01-01",
+      universe_id: "krx.common-stock",
+      fee_bps: "5",
+    });
+    expect(stored("last")).toEqual(stored("strategy-1"));
+    expect(requestBody()).toBeNull();
+
+    release();
+    await waitFor(() =>
+      expect(requestBody()?.environment).toEqual({
+        ...ENVIRONMENT,
+        fee_bps: 5,
+      }),
+    );
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    expect(screen.getByRole("spinbutton", { name: /수수료/ })).toHaveValue(5);
+  });
+
   // DEFECT-242-04 (a): 단위는 스키마(`x-unit`·`x-display-unit`)에서 읽는다. 참여율은 %로 보이고 비율로 보낸다.
   it("shows the participation rate in the schema display unit and sends the ratio", async () => {
     renderWithQuery(<Harness />);
@@ -577,6 +723,12 @@ describe("run environment panel", () => {
         "{}",
     ) as Record<string, string>;
     expect(stored.participation_rate).toBe("0.25");
+    // 친 문자열은 그대로 보인다 — 요청 단위(0.125)로 바꿨다 되돌려 "12.5" 로 다시 쓰지 않는다(#352 C-P2-4).
+    fireEvent.change(participation, { target: { value: "12.50" } });
+    expect((participation as HTMLInputElement).value).toBe("12.50");
+    expect(requestBody()?.environment).toMatchObject({
+      participation_rate: 0.125,
+    });
     await user.clear(participation);
     await user.type(participation, "150");
     expect(screen.getByText("100% 이하여야 합니다.")).toBeInTheDocument();
@@ -803,6 +955,40 @@ describe("run environment panel", () => {
     renderWithQuery(<Harness storageKey="strategy-2" />);
     await openSettings();
     expect(screen.getByLabelText(/^시작일/)).toHaveValue("2021-01-01");
+  });
+
+  // #387 리뷰 P3-2: 아직 고치지 않은 패널의 첫 편집은 저장값 위에서 한다. 한 칸만 고쳐도 나머지 저장값이
+  // 칸·요청·저장(전략별·마지막 사용값)에 남는다 — 빈 기록에서 시작하면 한 칸짜리 기록이 저장값을 덮는다.
+  it("edits one field on top of the remembered environment and keeps the rest", async () => {
+    const remembered = {
+      start: "2021-01-01",
+      end: "2026-08-31",
+      universe_id: "krx.common-stock",
+      participation_rate: "0.2",
+    };
+    localStorage.setItem(
+      `${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`,
+      JSON.stringify(remembered),
+    );
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+
+    const fee = screen.getByRole("spinbutton", { name: /수수료/ });
+    await user.clear(fee);
+    await user.type(fee, "7");
+
+    expect(requestBody()?.environment).toEqual({
+      ...ENVIRONMENT,
+      participation_rate: 0.2,
+      fee_bps: 7,
+    });
+    const stored = (key: string): unknown =>
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`) ??
+          "null",
+      );
+    expect(stored("strategy-1")).toEqual({ ...remembered, fee_bps: "7" });
+    expect(stored("last")).toEqual({ ...remembered, fee_bps: "7" });
   });
 
   it("replaces every field when an upgraded document's environment is applied", async () => {

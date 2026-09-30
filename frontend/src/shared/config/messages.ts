@@ -909,7 +909,7 @@ const ko = {
     "그래프 안에서 이 노드를 가리키는 이름입니다.",
   "strategy.field.node.field_id": "데이터 필드",
   "strategy.field.node.field_id.description":
-    "값을 읽어 올 원천 데이터 필드입니다. 수익률·모멘텀·이평·변동성처럼 가격 변화를 잴 때는 수정주가 price.adj_close를, 그날의 절대 가격이 필요한 가격 필터에는 원주가 price.close를 씁니다. 수정주가는 대부분의 분할·증자·병합을 반영하지만 모든 사건을 잇지는 않습니다. 원장이 그날 사건을 반영하지 못한 날은 값이 비고, 그날을 품는 집계 기간과 그날을 사이에 두고 두 시점을 견주는 계산('며칠 전 값', 건너뛰는 세션을 둔 집계와 오늘 값의 비교)도 빕니다. 유상증자 권리락처럼 원장이 조정하지 않는 사건은 가격 변화가 그대로 남습니다.",
+    "값을 읽어 올 원천 데이터 필드입니다. 필드마다의 뜻·한계는 필드 설명을 따릅니다.",
   "strategy.field.node.value": "값",
   "strategy.field.node.value.description": "이 노드가 내보낼 고정 숫자입니다.",
   "strategy.field.node.parameter_id": "파라미터 이름",
@@ -1262,7 +1262,7 @@ const ko = {
     "stdev(x[t-lag-window+1 … t-lag])",
   "strategy.operator.time_series.momentum": "기간 수익률",
   "strategy.operator.time_series.momentum.description":
-    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 첫 값 대비 마지막 값 변화율입니다. 집계 기간 252, 건너뛰는 세션 21이 12-1 모멘텀입니다. 가격에 쓸 때는 수정주가 price.adj_close를 입력으로 둡니다. 원주가 price.close는 분할·병합 날 가짜 급등락을 만듭니다.",
+    "건너뛰는 세션(lag)만큼 물린 집계 기간(window)의 첫 값 대비 마지막 값 변화율입니다. 집계 기간 252, 건너뛰는 세션 21이 12-1 모멘텀입니다.",
   "strategy.operator.time_series.momentum.formula":
     "x[t-lag] / x[t-lag-window+1] - 1",
   "strategy.operator.time_series.delta": "기간 변화량",
@@ -2995,7 +2995,7 @@ export const messages = {
       "The name other nodes use to refer to this one.",
     "strategy.field.node.field_id": "Data field",
     "strategy.field.node.field_id.description":
-      "The source field the value is read from. Use the adjusted close price.adj_close for returns, momentum, moving averages and volatility, and the raw close price.close only where the day's absolute price matters, such as a price filter. The adjusted close reflects most splits, bonus issues and reverse splits but does not bridge every event: on a day the ledger could not fold an event the value is missing, and so is any window holding that day or any comparison of two points in time that spans it (Lag, or a window with Window lag against today's value). Events the ledger does not adjust, such as rights-offering ex-dates, keep their price change.",
+      "The source field the value is read from. Each field's meaning and limits are in its field description.",
     "strategy.field.node.value": "Value",
     "strategy.field.node.value.description":
       "The fixed number this node emits.",
@@ -3368,7 +3368,7 @@ export const messages = {
       "stdev(x[t-lag-window+1 … t-lag])",
     "strategy.operator.time_series.momentum": "Momentum",
     "strategy.operator.time_series.momentum.description":
-      "Change across the window sessions ending lag sessions back; window 252 with lag 21 is 12-1 momentum. For prices, feed the adjusted close price.adj_close; the raw close price.close jumps on splits and reverse splits.",
+      "Change across the window sessions ending lag sessions back; window 252 with lag 21 is 12-1 momentum.",
     "strategy.operator.time_series.momentum.formula":
       "x[t-lag] / x[t-lag-window+1] - 1",
     "strategy.operator.time_series.delta": "Delta",

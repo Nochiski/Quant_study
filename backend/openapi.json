@@ -2998,7 +2998,8 @@
       "FactorAvailability": {
         "enum": [
           "implemented",
-          "catalog_only"
+          "catalog_only",
+          "unavailable"
         ],
         "title": "FactorAvailability",
         "type": "string"

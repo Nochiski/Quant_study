@@ -9,6 +9,7 @@ import { t } from "../../../shared/config";
 import {
   initialRunEnvironmentValues,
   runEnvironmentFields,
+  runEnvironmentStoredValues,
   runEnvironmentWireRecord,
   validateRunEnvironment,
   type RunEnvironmentField,
@@ -33,8 +34,18 @@ import {
  * 유니버스가 이어진다. 저장소를 쓸 수 없으면(사생활 모드 등) 조용히 스키마 기본값으로 시작한다.
  */
 export const RUN_ENVIRONMENT_STORAGE_PREFIX =
-  "quant-workbench.run-environment.v1";
+  "quant-workbench.run-environment.v2";
 const LAST_USED = "last";
+/**
+ * 1회성 이관(v1 → v2, #396 리뷰 P2-1). v1 은 건드리지 않은 칸까지 모두 저장해서, 참여 기준 기본값이
+ * `session_volume` 이던 때 저장한 값이 새 기본값 `adv20` 을 덮는다. v2 값이 없을 때만 v1 을 읽고, 참여
+ * 기준이 옛 기본값 `session_volume` 이면 그 칸을 버린다. v2 부터는 기본값과 다른 칸만 저장하므로
+ * (`runEnvironmentStoredValues`) 옛 기본값을 코드에 적는 것은 이 이관뿐이다.
+ */
+const LEGACY_STORAGE_PREFIX = "quant-workbench.run-environment.v1";
+const LEGACY_DEFAULTS: Readonly<Record<string, string>> = {
+  participation_basis: "session_volume",
+};
 
 const storage = (): Storage | null => {
   try {
@@ -44,9 +55,9 @@ const storage = (): Storage | null => {
   }
 };
 
-const readStored = (key: string): RunEnvironmentValues | null => {
+const readRecord = (storageKey: string): RunEnvironmentValues | null => {
   try {
-    const text = storage()?.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`);
+    const text = storage()?.getItem(storageKey);
     if (text === null || text === undefined) return null;
     const parsed: unknown = JSON.parse(text);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
@@ -59,6 +70,19 @@ const readStored = (key: string): RunEnvironmentValues | null => {
   } catch {
     return null;
   }
+};
+
+const readStored = (key: string): RunEnvironmentValues | null => {
+  const current = readRecord(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`);
+  if (current !== null) return current;
+  const legacy = readRecord(`${LEGACY_STORAGE_PREFIX}:${key}`);
+  return legacy === null
+    ? null
+    : Object.fromEntries(
+        Object.entries(legacy).filter(
+          ([name, value]) => LEGACY_DEFAULTS[name] !== value,
+        ),
+      );
 };
 
 const writeStored = (key: string, values: RunEnvironmentValues): void => {
@@ -206,10 +230,14 @@ export const useBacktestRunSettings = (storageKey: string) => {
   const edit = useCallback(
     (wire: RunEnvironmentValues, typed: RunEnvironmentValues): void => {
       setEdited({ key: storageKey, wire, typed });
-      // 저장은 요청 단위로 한다 — 표시 단위(참여율 %)가 바뀌어도 저장값의 뜻은 그대로다.
-      writeStored(storageKey, wire);
+      // 저장은 요청 단위로 한다 — 표시 단위(참여율 %)가 바뀌어도 저장값의 뜻은 그대로다. 기본값과 같은
+      // 칸은 저장하지 않아 기본값이 바뀌면 새 기본값을 따른다.
+      writeStored(
+        storageKey,
+        runEnvironmentStoredValues(environmentFields, wire),
+      );
     },
-    [storageKey],
+    [environmentFields, storageKey],
   );
   const setEnvironmentValue = useCallback(
     (name: string, value: string): void => {

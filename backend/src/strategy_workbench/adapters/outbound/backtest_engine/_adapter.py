@@ -51,6 +51,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 from strategy_workbench.domain.backtest.facade.environment import (
     MAX_IMPACT_FRACTION,
     ImpactModel,
+    ParticipationBasis,
     RunEnvironment,
     environment_hash,
     impact_scales,
@@ -401,6 +402,7 @@ class BacktestEngineExecutorAdapter:
                     *request.dataset.warnings,
                     *_benchmark_warnings(request.dataset, run_sessions, benchmark, carried),
                     *_base_rate_warnings(full.base_rate_carried_sessions),
+                    *_participation_warnings(environment),
                 ),
             ),
             metric_definitions=self._registry.definitions(),
@@ -621,6 +623,25 @@ def _benchmark_warnings(
             )
         )
     return tuple(warnings)
+
+
+def _participation_warnings(environment: RunEnvironment) -> tuple[DataWarning, ...]:
+    """참여 기준이 체결일 거래량이면 체결 수량 한도가 낙관 쪽이라고 알린다(#342 DOMAIN-V2-02)."""
+    if environment.participation_basis is not ParticipationBasis.SESSION_VOLUME:
+        return ()
+    return (
+        DataWarning(
+            code="participation.session_volume",
+            message=(
+                "참여 기준이 체결일 거래량이라 한 세션 체결 수량의 한도를 체결 시점에 모르는 "
+                "그날 전체 거래량으로 정했다. 거래량이 몰린 날일수록 더 많이 체결되고 시가 체결 "
+                "가능량보다 크게 잡혀 결과가 낙관 쪽으로 나온다. 기본값인 20일 평균 거래대금"
+                "(adv20)과 견주어 본다. "
+                f"participation_basis={environment.participation_basis.value} "
+                f"participation_rate={environment.participation_rate}"
+            ),
+        ),
+    )
 
 
 def _base_rate_warnings(carried: Sequence[date]) -> tuple[DataWarning, ...]:

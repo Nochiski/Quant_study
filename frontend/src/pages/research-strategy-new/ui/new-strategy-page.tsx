@@ -10,6 +10,7 @@ import {
   DocumentStatus,
   DocumentToolbar,
   FactorGraphPanel,
+  PipelinePanel,
   RecoveryBanner,
   ServerDraftBanner,
   SnippetCatalog,
@@ -176,6 +177,9 @@ export const NewStrategyPage = () => {
     transactions,
   );
   const form = useFormProjection(document, assist.schema);
+  const catalogs = {
+    equityFields: assist.inspectorSource.equityCatalog?.fields ?? null,
+  };
   const openGraph = useCallback(
     (pointer: string): void => {
       void navigate({
@@ -213,7 +217,7 @@ export const NewStrategyPage = () => {
     sourceView: document.format,
     form: form.projection,
     tree: form.tree,
-    schemaLoaded: assist.schema !== null,
+    schema: assist.schema,
     onSelectPointer: (pointer) => selectPointer(pointer, "graph"),
     onOpenSource: openSourceAt,
   });
@@ -252,7 +256,7 @@ export const NewStrategyPage = () => {
   // 같은 훅을 써서 한쪽만 콜백을 잃지 않는다(Phase B 감사 NB-8).
   const strategyAssistant = useStrategyAssistant(proposalApply, document, {
     draftId: serverDraftId,
-    environment: runSettings.requestOptions,
+    environment: runSettings.environment,
     backtest: {
       canRun: backtest.canRun,
       settling: backtest.settling,
@@ -403,10 +407,7 @@ export const NewStrategyPage = () => {
               tree={form.tree}
               schema={assist.schema}
               transactions={transactions}
-              catalogs={{
-                equityFields:
-                  assist.inspectorSource.equityCatalog?.fields ?? null,
-              }}
+              catalogs={catalogs}
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
               selectedPointer={search.path}
@@ -414,29 +415,38 @@ export const NewStrategyPage = () => {
             />
           ),
           graph: (
-            <FactorGraphPanel
-              state={executionPlans}
-              schema={assist.schema}
-              diagnostics={currentDiagnostics(document)}
-              selectedPointer={search.path}
-              revealSignal={problems.revealSignal}
-              editing={{
-                tree: form.tree,
-                transactions,
-                catalogs: {
-                  equityFields:
-                    assist.inspectorSource.equityCatalog?.fields ?? null,
-                },
-                operators: assist.operators,
-                onOpenForm: openForm,
-                documentKey: document.documentEpoch,
-              }}
-              onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
-              onOpenSource={(pointer) => {
-                outline.requestSourceReveal(pointer);
-                selectPointer(pointer, "outline");
-              }}
-            />
+            <>
+              {/* 그래프 1수준(파이프라인) 캔버스 위, 고급 수준(노드 편집·실행 계획) 아래(P4-02). */}
+              <PipelinePanel
+                form={form}
+                schema={assist.schema}
+                transactions={transactions}
+                catalogs={catalogs}
+                onOpenGraph={openGraph}
+                selectedPointer={search.path}
+                revealSignal={problems.revealSignal}
+              />
+              <FactorGraphPanel
+                state={executionPlans}
+                schema={assist.schema}
+                diagnostics={currentDiagnostics(document)}
+                selectedPointer={search.path}
+                revealSignal={problems.revealSignal}
+                editing={{
+                  tree: form.tree,
+                  transactions,
+                  catalogs,
+                  operators: assist.operators,
+                  onOpenForm: openForm,
+                  documentKey: document.documentEpoch,
+                }}
+                onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+                onOpenSource={(pointer) => {
+                  outline.requestSourceReveal(pointer);
+                  selectPointer(pointer, "outline");
+                }}
+              />
+            </>
           ),
           diff: <StrategyDiffPanel state={document} active={view === "diff"} />,
         }}

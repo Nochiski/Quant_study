@@ -200,14 +200,16 @@ describe("화면 어휘 커버리지", () => {
       for (const stem of descriptionStems(schema, new Set())) {
         published.add(stem);
         published.add(`${stem}.description`);
-        // 한 문장 요약 조각(P4-01)도 선택 항목이다 — 요약에 나올 필드만 가진다.
+        // 한 문장 요약 조각(P4-01)과 카드 문장 틀(P4-02)도 선택 항목이다 — 쓰는 필드만 가진다.
         published.add(`${stem}.summary`);
+        published.add(`${stem}.card`);
       }
       // 값 설명(`.value.<값>.description`)은 뜻이 이름만으로 드러나지 않는 값에만 있는 선택 항목이다.
       for (const key of enumValueKeys(schema, [])) {
         published.add(key);
         published.add(`${key}.description`);
         published.add(`${key}.summary`);
+        published.add(`${key}.card`);
       }
     }
     for (const definition of CATALOG.operators) {

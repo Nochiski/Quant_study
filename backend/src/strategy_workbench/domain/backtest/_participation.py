@@ -5,9 +5,11 @@ ADV 계산과 원화 → 주식 수 환산 규칙의 owner 는 이 파일 하나
 
 `adv20` 에서 세션 t 에 체결되는 주문의 기준 거래량은, 판단일(그 종목의 t 직전 거래 행)까지
 거래대금이 있는 최근 20개 행의 평균을 판단일 종가로 나눈 주식 수(내림)다. 체결 세션의 값을 쓰지
-않으므로 체결 시점에 모르는 정보가 들어가지 않는다. 앞선 행이 없으면(측정 구간 안 신규 상장 등)
-0주라 그 세션은 체결하지 않고 잔량을 넘긴다. 첫 세션들의 20행은 측정 구간 앞 워밍업 bar 가
-채운다(`participation_history_sessions`). 워밍업은 측정이 아니라 연구 구간 판정을 받지 않는다.
+않으므로 체결 시점에 모르는 정보가 들어가지 않는다. 거래대금이 있는 앞선 행이 20개가 안 되면(측정
+구간 안 신규 상장 등) 0주라 그 세션은 체결하지 않고 잔량을 넘긴다 — 상장 초기 며칠의 큰 거래대금으로
+한도를 부풀리지 않는 보수 쪽이다(#342). 첫 세션들의 20행은 측정 구간 앞 워밍업 bar 가
+채운다(`participation_history_sessions` 이 필요한 행 수, 읽을 세션 수는 여유를 더한
+`_impact.py` 의 `cost_history_sessions`). 워밍업은 측정이 아니라 연구 구간 판정을 받지 않는다.
 
 한도는 floor(floor(ADV / 종가) × 참여율)로 두 번 내림한다. 한 번만 내림한 floor(ADV × 참여율 / 종가)
 보다 많아야 1주 적고, 대신 두 엔진 코어가 세션 거래량과 같은 정수 산술을 그대로 쓴다.
@@ -32,7 +34,8 @@ ADV_SESSIONS = 20
 
 
 def participation_history_sessions(environment: RunEnvironment) -> int:
-    """참여 기준 계산에 필요한 측정 구간 앞 워밍업 세션 수."""
+    """참여 기준 계산에 필요한 측정 구간 앞 행 수. 읽을 세션 수(여유 포함)는
+    `cost_history_sessions` 가 정한다."""
     return ADV_SESSIONS if environment.participation_basis is ParticipationBasis.ADV20 else 0
 
 
@@ -48,7 +51,10 @@ def participation_volumes(
     """
     if environment.participation_basis is ParticipationBasis.SESSION_VOLUME:
         return None
-    return {key: math.floor(shares) for key, shares in adv_shares(bars, settled).items()}
+    return {
+        key: math.floor(shares)
+        for key, shares in adv_shares(bars, settled, minimum_rows=ADV_SESSIONS).items()
+    }
 
 
 def settlement_multipliers(
@@ -79,13 +85,18 @@ def settlement_multipliers(
 def adv_shares(
     bars: Iterable[tuple[date, str, float, float | None]],
     settled: Mapping[tuple[date, str], float] | None = None,
+    *,
+    minimum_rows: int,
 ) -> dict[tuple[date, str], float]:
     """`(세션, 종목, 종가, 거래대금)` 행마다 판단일까지 20행 평균 거래대금 ÷ 판단일 종가(주).
 
     참여 기준 `adv20` 과 √ 충격(`_impact.py`)이 같은 ADV 를 쓴다. 내림하지 않는다 — 참여 한도는
-    `participation_volumes` 가 내림하고, √ 안의 분모는 1주 미만도 그대로 쓴다. 앞선 행이 없거나 창의
-    거래대금이 모두 없으면(None) 0주다. 자본변동 정산 행(`settled`)에서는 판단일 종가를 가격 배수로
-    나눠 정산 뒤 주식 단위로 센다 — 그 행의 주문·체결·거래량이 정산 뒤 단위다.
+    `participation_volumes` 가 내림하고, √ 안의 분모는 1주 미만도 그대로 쓴다. 거래대금이 있는
+    앞선 행이 `minimum_rows` 개보다 적으면 0주다. 참여 한도는 20행이 다 차야 한도를 주고(보수
+    쪽), √ 충격은 있는 행만으로 잰다(1) — 0주면 충격이 0 이 되어 오히려 낙관 쪽이라서다. 두
+    규칙이 결과를 가르는 것은 `session_volume` 참여 + `sqrt` 충격 조합뿐이다(`adv20` 이면 20행
+    전에는 체결이 없다). 자본변동 정산 행(`settled`)에서는 판단일 종가를 가격 배수로 나눠 정산 뒤
+    주식 단위로 센다 — 그 행의 주문·체결·거래량이 정산 뒤 단위다.
     """
     multipliers = settled or {}
     volumes: dict[tuple[date, str], float] = {}
@@ -97,7 +108,7 @@ def adv_shares(
         previous_close = last_close.get(security_id)
         volumes[key] = (
             sum(window) / len(window) / (previous_close / multipliers.get(key, 1.0))
-            if window and previous_close
+            if len(window) >= minimum_rows and previous_close
             else 0.0
         )
         if trading_value is not None:

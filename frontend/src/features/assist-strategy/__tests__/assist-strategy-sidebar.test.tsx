@@ -278,7 +278,11 @@ const context = (): TurnContextPayload => ({
   source_text: SOURCE,
   source_format: "yaml",
   diagnostics: ["strategy.universe.missing"],
-  environment: { initial_cash: 10_000_000 },
+  environment: {
+    start: "2021-01-04",
+    end: "2021-12-30",
+    universe_id: "krx.common-stock",
+  },
 });
 
 const mount = ({ result, ...options }: MountOptions = {}) => {

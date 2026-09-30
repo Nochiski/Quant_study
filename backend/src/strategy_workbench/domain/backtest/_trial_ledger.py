@@ -165,11 +165,14 @@ def representative_sharpe(result: BacktestRunResult) -> float | None:
     return None if sharpe is None else session_sharpe(sharpe, result.manifest.annualization_days)
 
 
+def bankrupt(status: RunStatus, error_code: str | None) -> bool:
+    """파산(전략이 자본을 다 잃어 엔진이 멈춤)으로 끝난 실행 — 실패지만 전략의 결과다(#383)."""
+    return status is RunStatus.FAILED and error_code == "backtest.run.equity_wiped_out"
+
+
 def _has_result(entry: TrialLedgerEntry) -> bool:
     """완료됐거나 파산으로 끝난 실행 — 연구자가 결과를 본 실행이다."""
-    return entry.status is RunStatus.COMPLETED or (
-        entry.status is RunStatus.FAILED and entry.error_code == "backtest.run.equity_wiped_out"
-    )
+    return entry.status is RunStatus.COMPLETED or bankrupt(entry.status, entry.error_code)
 
 
 def _score(entry: TrialLedgerEntry) -> float | None:

@@ -1822,6 +1822,127 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     for (const run of screen.getAllByRole("button", { name: /백테스트 실행/ }))
       expect(run).toBeDisabled();
   });
+
+  // 그래프 1수준 캔버스(lang2 P4-02, 리드 결정 4): 카드 문장 안의 컨트롤은 Form 행과 한 경로다.
+  describe("그래프 1수준 캔버스 (lang2 P4-02)", () => {
+    const COMMENTED =
+      '# 문서 머리말\nschema_version: "1.2"\ntitle: 퀄리티 모멘텀 # 제목 메모\nrisk:\n  # 집중도 상한\n  max_name_weight: 0.05\n';
+    const WEIGHT = "종목별 최대 목표 비중 한도";
+    const SIDE = "매매 방향";
+    const EDITED = COMMENTED.replace(
+      "max_name_weight: 0.05",
+      "max_name_weight: 0.1",
+    );
+    const canvas = () =>
+      screen.findByRole("region", { name: "전략 파이프라인" });
+    const canvasCard = async (name: string) =>
+      within(await within(await canvas()).findByRole("group", { name }));
+    const openCommented = async () => {
+      server.use(
+        http.get(
+          `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+          () => HttpResponse.json(document("s1", 2, COMMENTED)),
+        ),
+      );
+      mount("/research/strategies/s1/revisions/2");
+      const view = await editor();
+      await settled(view, COMMENTED);
+      return view;
+    };
+    /**
+     * 편집기 원문이 `text` 이고 그 원문의 parse·compile 이 끝났다(문서 상태 배지 `data-settled` — compile 버전이
+     * 원문 버전을 따라잡았다. e2e `waitForSettledDocument` 와 같은 신호). 그 전에는 캔버스·Form 이 직전 parse 로
+     * 그려져 있다: 문서를 연 직후 첫 parse 전에는 적힌 칸도 미작성으로 보여 확정이 insert-key 가 되고, parse 가
+     * 따라오기 전의 구조 연산은 `pending` 으로 보류된다(#392 CI — 빠른 러너에서 첫 parse 전에 입력해 편집이
+     * 버려졌다).
+     */
+    const settled = (view: EditorView, text: string) =>
+      waitFor(() => {
+        expect(view.state.doc.toString()).toBe(text);
+        expect(
+          screen.getByRole("status", { name: "문서 상태" }),
+        ).toHaveAttribute("data-settled", "true");
+      });
+    /**
+     * `settled` 에 더해 그 원문으로 compile 요청이 나갔다. 마지막 요청일 필요는 없다 — 저장본 기준 compile
+     * (`savedCanonicalJson`)은 parse 를 기다리지 않고 저장 원문으로 따로 나간다.
+     */
+    const compiled = async (view: EditorView, text: string, before: number) => {
+      await settled(view, text);
+      expect(compiledSources.slice(before)).toContain(text);
+    };
+
+    it("카드 문장 안의 컨트롤로 값을 바꾸면 YAML 그 줄만 바뀌고 compile 된다", async () => {
+      const user = userEvent.setup();
+      const view = await openCommented();
+      const before = compiledSources.length;
+
+      await user.click(screen.getByRole("tab", { name: "Graph" }));
+      const weight = (await canvasCard(WEIGHT)).getByRole("spinbutton", {
+        name: WEIGHT,
+      });
+      expect(weight).toHaveValue(0.05);
+      await user.clear(weight);
+      await user.type(weight, "0.1{Enter}");
+
+      // 주석·다른 줄은 그대로, 그 값 한 줄만 바뀐다.
+      await waitFor(() => expect(view.state.doc.toString()).toBe(EDITED));
+      expect(within(await canvas()).getByRole("status")).toHaveTextContent(
+        `${WEIGHT} 반영됨`,
+      );
+      await compiled(view, EDITED, before);
+    });
+
+    it("카드와 Form 행은 같은 편집을 같은 SourceOperation 으로 낸다(두 번째 경로 없음)", async () => {
+      // 적힌 값 바꾸기(replace)와 없는 섹션에 키 넣기(insert-key)를 카드로 한 결과가 Form 행으로 한 결과와
+      // 바이트 단위로 같고, 편집마다 실행 취소 한 번이다.
+      const user = userEvent.setup();
+      const view = await openCommented();
+
+      await user.click(screen.getByRole("tab", { name: "Graph" }));
+      const weight = (await canvasCard(WEIGHT)).getByRole("spinbutton", {
+        name: WEIGHT,
+      });
+      let before = compiledSources.length;
+      await user.clear(weight);
+      await user.type(weight, "0.1{Enter}");
+      await compiled(view, EDITED, before);
+      await user.selectOptions(
+        (await canvasCard(SIDE)).getByRole("combobox", { name: SIDE }),
+        "long_short",
+      );
+      await waitFor(() =>
+        expect(view.state.doc.toString()).toBe(
+          `${EDITED}portfolio:\n  side: long_short\n`,
+        ),
+      );
+      const byCard = view.state.doc.toString();
+
+      await user.click(screen.getByRole("tab", { name: "YAML" }));
+      before = compiledSources.length;
+      act(() => expect(undo(view)).toBe(true));
+      act(() => expect(undo(view)).toBe(true));
+      expect(view.state.doc.toString()).toBe(COMMENTED);
+      await compiled(view, COMMENTED, before);
+
+      await user.click(screen.getByRole("tab", { name: "Form" }));
+      const risk = await formSection("risk");
+      const formWeight = risk.getByRole("spinbutton", {
+        name: /\bmax_name_weight/,
+      });
+      before = compiledSources.length;
+      await user.clear(formWeight);
+      await user.type(formWeight, "0.1{Enter}");
+      await compiled(view, EDITED, before);
+      await user.selectOptions(
+        (await formSection("portfolio")).getByRole("combobox", {
+          name: /\bside/,
+        }),
+        "long_short",
+      );
+      await waitFor(() => expect(view.state.doc.toString()).toBe(byCard));
+    });
+  });
 });
 
 /** 같은 그래프 문서를 compile하되 진단만 바꿔 답한다. */
@@ -3485,6 +3606,15 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
       delete (HTMLElement.prototype as { scrollIntoView?: unknown })
         .scrollIntoView;
   });
+  /**
+   * 보이는 탭이 마지막으로 끌어온 요소. 탭 패널은 모두 마운트돼 숨은 탭(`hidden`)의 reveal 도 mock 에
+   * 기록되지만, 브라우저는 박스 없는 요소의 스크롤을 무시한다(`[hidden]` 은 display:none) — 화면에서
+   * 일어나는 스크롤만 본다(#392 리뷰 P3-2).
+   */
+  const lastVisibleScroll = () =>
+    scrollIntoView.mock.contexts
+      .filter((element) => (element as Element).closest("[hidden]") === null)
+      .at(-1);
 
   it("shows the badge and the problem list while the Graph tab is selected", async () => {
     server.use(
@@ -3557,7 +3687,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     const editorRow = screen
       .getByRole("button", { name: "노드 편집: mom_252" })
       .closest("li");
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    expect(lastVisibleScroll()).toBe(editorRow);
     // 원인 문장이 그 노드 카드 안에 본문으로 붙는다(리뷰 차단 2). 선택한 노드 패널은 같은
     // 문장을 다시 그리지 않는다(2차 리뷰 P3).
     expect(editorRow).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
@@ -3568,6 +3698,81 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
       "aria-selected",
       "true",
     );
+  }, 15_000);
+
+  it("keeps the Graph tab and reveals the pipeline card a stage problem points at (lang2 P4-02)", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.risk.max_name_weight",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/risk/max_name_weight",
+          message: "종목 한도는 0보다 크고 1 이하여야 합니다.",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+
+    const canvas = await screen.findByRole("region", {
+      name: "전략 파이프라인",
+    });
+    await user.click(await problemRow(/종목 한도는 0보다 크고 1 이하여야/));
+
+    // 단계 카드 행은 Graph 탭 맨 위 캔버스가 그린다 — 원문 탭으로 가지 않고 그 카드로 간다.
+    await waitFor(() => {
+      expect(history.location.search).toContain("view=graph");
+      expect(history.location.search).toContain(
+        "path=%2Frisk%2Fmax_name_weight",
+      );
+    });
+    const card = within(canvas).getByRole("group", {
+      name: "종목별 최대 목표 비중 한도",
+    });
+    await waitFor(() => expect(card).toHaveAttribute("aria-current", "true"));
+    expect(card).toHaveTextContent("종목 한도는 0보다 크고 1 이하여야 합니다.");
+    expect(lastVisibleScroll()).toBe(card);
+    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  }, 15_000);
+
+  it("keeps the Graph tab and marks the canvas list a list-level problem points at (lang2 P4-02)", async () => {
+    // 빈 문서의 첫 문제(`strategy.factor.required`)는 목록 자체(`/factors`)를 가리킨다. 캔버스에서 이
+    // pointer 를 표시하는 것은 목록 group 의 `aria-current` 하나다(#395 리뷰 P3-1).
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.factor.required",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/factors",
+          message: "팩터를 하나 이상 추가하세요.",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler('schema_version: "1.2"\ntitle: 빈 전략\n'),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+
+    const canvas = await screen.findByRole("region", {
+      name: "전략 파이프라인",
+    });
+    await user.click(await problemRow(/팩터를 하나 이상 추가하세요/));
+
+    await waitFor(() => {
+      expect(history.location.search).toContain("view=graph");
+      expect(history.location.search).toContain("path=%2Ffactors");
+    });
+    const list = within(canvas).getByRole("group", { name: "알파 팩터" });
+    await waitFor(() => expect(list).toHaveAttribute("aria-current", "true"));
+    expect(list).toHaveTextContent("팩터를 하나 이상 추가하세요.");
+    expect(lastVisibleScroll()).toBe(list);
   }, 15_000);
 
   // plan이 ready면 읽기 전용 DAG 노드와 그 아래 편집기 행에 같은 pointer로 `aria-current`가
@@ -3604,7 +3809,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
       expect(editorRow).toHaveAttribute("aria-current", "true"),
     );
     expect(planNode).toHaveAttribute("aria-current", "true");
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    expect(lastVisibleScroll()).toBe(editorRow);
     // 경고도 같은 자리에 본문으로 붙는다(alert이 아니라 본문이다 — 리뷰 P3).
     expect(editorRow).toHaveTextContent("window가 깁니다");
   }, 15_000);
@@ -3690,7 +3895,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     const row = card.querySelector('.strategy-form__field[aria-current="true"]');
     expect(row).not.toBeNull();
     expect(row).toHaveTextContent("weight must be positive");
-    await waitFor(() => expect(scrollIntoView.mock.contexts.at(-1)).toBe(row));
+    await waitFor(() => expect(lastVisibleScroll()).toBe(row));
 
     // 같은 행을 다시 눌렀을 때도 끌어온다 — URL은 그대로라 reveal 신호가 대신 올라간다(2차 리뷰 R2-2).
     const before = scrollIntoView.mock.calls.length;
@@ -3698,7 +3903,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     await waitFor(() =>
       expect(scrollIntoView.mock.calls.length).toBeGreaterThan(before),
     );
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(row);
+    expect(lastVisibleScroll()).toBe(row);
   }, 15_000);
 });
 
@@ -3731,11 +3936,19 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     mount("/research/strategies/new");
     const view = await editor();
     const before = view.state.doc.toString();
+    // 실행 옵션 칸이 틀려도 턴은 실행 설정을 싣는다(#355 위험성의 두 번째 경우).
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+      { target: { value: "0" } },
+    );
     const stream = await askAssistant(user);
 
     // 턴에는 지금 편집기 텍스트가 실린다(서버가 문서를 따로 들지 않는다).
     expect(assistantTurns[0].context.source_text).toBe(before);
     expect(assistantTurns[0].context.source_format).toBe("yaml");
+    // 실행 설정은 패널이 검증한 값만 싣는다. 실행 옵션 전체가 아니다(#355).
+    expect(assistantTurns[0].context.environment).toEqual(RUN_ENVIRONMENT);
 
     const proposed = 'schema_version: "1.2"\ntitle: "저변동 모멘텀"\n';
     act(() =>

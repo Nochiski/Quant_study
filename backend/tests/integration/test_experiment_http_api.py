@@ -1,5 +1,5 @@
-"""실험 HTTP(V3-03·V3-05) — 미리 계산과 실제 원장 증가, 워크포워드, 기반 리비전 제약, 코드화된
-거절(spec D2·D5)."""
+"""실험 HTTP(V3-03·V3-05·V4-03·V4-04) — 미리 계산과 실제 원장 증가, 워크포워드, 파라미터 지도,
+용량 스윕, 기반 리비전 제약, 코드화된 거절(spec D2·D5)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
@@ -35,6 +36,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     SplitSpec,
     build_search_spec,
 )
+from tests.backtest_run_wait import wait_for_terminal_state
 from tests.frozen_revision_rows import FROZEN_SPEC_HASH, seed_frozen_rows
 
 _SPLIT = {"mode": "rolling", "train_years": 1, "test_years": 1, "embargo_sessions": 0}
@@ -168,6 +170,73 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
     tested = client.get(f"/api/v1/backtests/{picks[0]['run_id']}/result").json()
     assert tested["series"]["equity"][0]["session"] == "2022-01-04"
     assert tested["artifacts"]["orders"][0]["session"] == "2022-01-04"
+    # 파라미터 지도(V4-03): 칸 점수는 그 칸 두 학습 실행의 원장 세션 샤프 평균이다.
+    parameter_map = client.get(
+        f"/api/v1/experiments/{experiment['record']['experiment_id']}/parameter-map"
+    )
+    sharpes = {
+        run["run_id"]: run["session_sharpe"] for group in ledger["trials"] for run in group["runs"]
+    }
+    expected: dict[int, list[float]] = {}
+    for trial in trials.json():
+        expected.setdefault(trial["trial"]["grid_index"][0], []).append(
+            sharpes[trial["attempts"][0]["run_id"]]
+        )
+    assert parameter_map.status_code == 200, parameter_map.text
+    assert [cell["grid_index"] for cell in parameter_map.json()["cells"]] == [[0], [1], [2]]
+    assert [cell["score"] for cell in parameter_map.json()["cells"]] == pytest.approx(
+        [sum(values) / 2 for values in expected.values()]
+    )
+    assert [cell["verdict"] for cell in parameter_map.json()["cells"]].count("recommended") == 1
+
+
+def test_a_capacity_sweep_from_a_finished_run_leaves_the_trial_count_as_it_was() -> None:
+    """V4-04: 결과를 본 실행에서 연 용량 스윕은 초기 자본만 다른 실행이라 같은 시도의 재확인이다."""
+    client = TestClient(build_http_app())
+    run = _experiment(client)["run"]
+    lineage = run["strategy_source"]["strategy_id"]
+    base = client.post("/api/v1/backtests", json=run)
+    assert base.status_code == 202, base.text
+    assert wait_for_terminal_state(client, base.json()["run"]["run_id"])["status"] == "completed"
+    before = client.get(f"/api/v1/strategies/{lineage}/trials").json()["trial_count"]
+    request = {"run": run, "initial_cash": [1e10, 1e8, 1e9]}
+
+    preview = client.post("/api/v1/experiments/capacity/preview", json=request)
+    created = client.post("/api/v1/experiments/capacity", json=request)
+    experiment_id = created.json()["record"]["experiment_id"]
+    experiment = _wait_until_finished(client, experiment_id)
+    capacity = client.get(f"/api/v1/experiments/{experiment_id}/capacity").json()
+    walk_forward = client.get(f"/api/v1/experiments/{experiment_id}/walk-forward")
+    ledger = client.get(f"/api/v1/strategies/{lineage}/trials").json()
+
+    assert preview.status_code == 200, preview.text
+    assert (preview.json()["run_count"], preview.json()["new_trial_count"]) == (3, 0)
+    assert created.status_code == 202, created.text
+    assert experiment["status"] == "completed"
+    assert experiment["record"]["design"]["kind"] == "capacity_sweep"
+    assert experiment["record"]["split"] is None
+    # 금액 순으로 편다. 고정 슬리피지(기본 10bp)는 규칙 가격 기준이라 체결 금액(슬리피지를 더하거나
+    # 뺀 가격) 대비로는 매수 10/1.001·매도 10/0.999bp 사이다.
+    points = capacity["points"]
+    assert [point["initial_cash"] for point in points] == [1e8, 1e9, 1e10]
+    assert all(point["status"] == "completed" for point in points)
+    assert all(point["sharpe"] is not None for point in points)
+    assert [point["impact_cost_bps"] for point in points] == pytest.approx([10.0] * 3, rel=1e-3)
+    assert all(0 <= point["session_unfilled_ratio"] <= 1 for point in points)
+    # 모든 금액이 끝났으니 확정됐다(곡선 모양에 따라 한계 금액이나 "양수 샤프 없음").
+    assert capacity["limit"]["gap"] not in ("pending", "cancelled")
+    # 스윕 실행 셋은 모두 기반 실행의 시도 키로 원장에 적힌 재확인이라 N 이 그대로다.
+    assert ledger["trial_count"] == before
+    (group,) = [
+        g
+        for g in ledger["trials"]
+        if any(r["run_id"] == base.json()["run"]["run_id"] for r in g["runs"])
+    ]
+    assert [r["role"] for r in group["runs"]] == ["counted", "recheck", "recheck", "recheck"]
+    assert (walk_forward.status_code, walk_forward.json()["detail"]["code"]) == (
+        409,
+        "experiment.kind.mismatch",
+    )
 
 
 def test_design_and_lookup_rejections_are_coded() -> None:
@@ -192,8 +261,18 @@ def test_design_and_lookup_rejections_are_coded() -> None:
             json=request | {"run": request["run"] | {"initial_cash": -1}},
         ),
         "sealed": client.post("/api/v1/experiments", json=sealed),
+        "capacity": client.post(
+            "/api/v1/experiments/capacity/preview",
+            json={"run": request["run"], "initial_cash": [1e8, 1e8, 2e8]},
+        ),
+        # 이 설정으로 돌린 백테스트가 아직 없다.
+        "capacity_base": client.post(
+            "/api/v1/experiments/capacity",
+            json={"run": request["run"], "initial_cash": [1e8, 1e9, 1e10]},
+        ),
     }
     missing = client.get("/api/v1/experiments/missing")
+    missing_map = client.get("/api/v1/experiments/missing/parameter-map")
 
     assert {name: response.json()["detail"]["code"] for name, response in responses.items()} == {
         "inline": "experiment.base.unsaved",
@@ -201,12 +280,18 @@ def test_design_and_lookup_rejections_are_coded() -> None:
         "search": "experiment.search.unknown_parameter",
         "field": "backtest.run.field_invalid",
         "sealed": "backtest.run.research_window_violation",
+        "capacity": "experiment.capacity.invalid_amounts",
+        "capacity_base": "experiment.capacity.base_not_run",
     }
     for response in responses.values():
         assert response.status_code == 422, response.text
         TypeAdapter(ExperimentAdmissionErrorResponse).validate_python(response.json())
     assert (missing.status_code, missing.json()["detail"]["code"]) == (404, "experiment.not_found")
     TypeAdapter(ExperimentErrorResponse).validate_python(missing.json())
+    assert (missing_map.status_code, missing_map.json()["detail"]["code"]) == (
+        404,
+        "experiment.not_found",
+    )
     # 실험 기반 검사는 실행 요청이 아니므로 봉인 원장에 차단 기록을 남기지 않는다.
     sealed_lineage = sealed["run"]["strategy_source"]["strategy_id"]
     assert client.get(f"/api/v1/strategies/{sealed_lineage}/trials").json()["blocked"] == []

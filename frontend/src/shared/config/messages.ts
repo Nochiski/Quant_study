@@ -218,6 +218,8 @@ const ko = {
     "벤치마크 원장 행이 무효인 거래일은 직전 가격을 이어 썼습니다",
   "backtest.warning.analytics.base_rate_carried_forward":
     "기준금리 이력을 확인한 날 뒤 세션은 마지막 기준금리를 이어 썼습니다",
+  "backtest.warning.participation.session_volume":
+    "체결일 거래량으로 체결 한도를 정해 결과가 낙관 쪽입니다",
   // 지표 칸의 사용 불가 사유. 키는 backend `MetricUnavailableReason` 값이고, 사유가 늘면
   // `metricUnavailableCopy`가 typecheck에서 문구를 요구한다(이슈 #241·#293).
   "backtest.metricUnavailable.zero_return_variance":
@@ -793,7 +795,7 @@ const ko = {
   "strategy.field.run_environment.timing.description": "신호가 나온 뒤 주문이 체결되는 시점입니다.",
   "strategy.field.run_environment.timing.value.next_open": "다음 거래일 시가",
   "strategy.field.run_environment.participation_basis": "참여 기준",
-  "strategy.field.run_environment.participation_basis.description": "참여율을 곱해 한 세션에 체결할 수 있는 주식 수 상한을 정할 거래량입니다.",
+  "strategy.field.run_environment.participation_basis.description": "참여율을 곱해 한 세션에 체결할 수 있는 주식 수 상한을 정할 거래량입니다. 체결일 거래량은 체결 시점에 모르는 그날 전체 거래량을 써서 결과가 낙관 쪽으로 나옵니다.",
   "strategy.field.run_environment.participation_basis.value.session_volume": "체결일 거래량",
   "strategy.field.run_environment.participation_basis.value.adv20": "20일 평균 거래대금",
   "strategy.field.run_environment.impact_model": "가격 충격 모델",
@@ -1161,6 +1163,63 @@ const ko = {
   "strategy.field.node.group_field_id.summary": "{group_field_id}별",
   "recipe.summary.previous": "앞 단계",
   "recipe.summary.advanced": "노드 {count}개 · 고급",
+  // 그래프 1수준 캔버스(P4-02, 리드 결정 2026-09-30). 단계 영문 소제목, 카드 문장 틀 `.card`(enum 값 이름 키 →
+  // 앵커·목록 설명 키 순으로 찾고, `{<키>}` 자리에 같은 카드 필드의 컨트롤이 들어간다), 캔버스 chrome.
+  // 비율 칸은 입력 단위를 바꾸지 않고 틀이 예시로 단위를 말한다("0.1이 10%").
+  "strategy.stage.eligibility.term": "Universe",
+  "strategy.stage.signal.term": "Alpha",
+  "strategy.stage.portfolio.term": "Portfolio",
+  "strategy.stage.risk.term": "Risk",
+  "strategy.field.eligibility_step.rules.card":
+    "{field_id} 값이 {operator} 종목만 — 기준값 {value}",
+  "strategy.field.eligibility_rule.operator.value.top_percent.card":
+    "{field_id} {operator} 종목만 — 상위 비율 {value}(0.2가 20%)",
+  "strategy.field.eligibility_rule.operator.value.top_count.card":
+    "{field_id} {operator} 종목만 — 상위 {value}개",
+  "strategy.field.portfolio_step.liquidity_field_id.card":
+    "{liquidity_field_id} 값이 {minimum_liquidity} 이상인 종목만",
+  "strategy.field.signal_step.normalization.card": "팩터 점수는 {normalization}",
+  "strategy.field.signal_step.score_threshold.card":
+    "합산 점수가 {score_threshold}보다 낮은 종목은 뺀다",
+  "strategy.field.signal_step.regime_field_id.card":
+    "{regime_field_id} 값이 {regime_minimum} 이상인 종목만 담는다",
+  "strategy.field.portfolio_step.side.card": "매매 방향은 {side}",
+  "strategy.field.portfolio_step.weighting.card": "비중은 {weighting}",
+  "strategy.field.portfolio_step.weighting.value.risk.card":
+    "비중은 {weighting} — 위험 팩터 {risk_factor_id} 또는 위험 필드 {risk_field_id} 기준",
+  "strategy.field.portfolio_step.rebalance.card": "{rebalance} 다시 고른다",
+  "strategy.field.portfolio_step.rebalance.value.every_n_sessions.card":
+    "{rebalance}: {rebalance_every_n_sessions}거래일마다 다시 고른다",
+  "strategy.field.portfolio_step.selection_method.value.top_n.card":
+    "합산 점수 {selection_method} {selection_count}종목을 고른다",
+  "strategy.field.portfolio_step.selection_method.value.percentile.card":
+    "합산 점수 {selection_method} {selection_percentile}(0.1이 10%)를 고른다",
+  "strategy.contract.portfolio.turnover_buffer_count.card":
+    "갖고 있던 종목은 순위가 {turnover_buffer_count}칸 더 밀려도 계속 갖고 있는다",
+  "strategy.contract.portfolio.minimum_trade_weight.card":
+    "비중 변화가 {minimum_trade_weight}(0.01이 1%)보다 작으면 주문하지 않는다",
+  "strategy.contract.risk.gross_exposure.card":
+    "매수와 공매도를 더한 전체 비중은 {gross_exposure}(1이 100%)",
+  "strategy.field.risk_step.net_exposure.card":
+    "매수에서 공매도를 뺀 비중은 {net_exposure}(1이 100%)",
+  "strategy.contract.risk.max_name_weight.card":
+    "한 종목은 최대 {max_name_weight}(0.05가 5%)까지",
+  "strategy.contract.risk.max_sector_weight.card":
+    "한 섹터는 최대 {max_sector_weight}(0.3이 30%)까지",
+  "strategy.field.risk_step.sector_neutral.card":
+    "{sector_neutral} 섹터마다 매수·공매도 비중을 맞춘다",
+  "graph.pipeline.label": "전략 파이프라인",
+  "graph.pipeline.summary": "요약",
+  "graph.pipeline.stages": "전략 단계",
+  "graph.pipeline.item": "{index}번째 항목",
+  "graph.pipeline.unnamed": "이름 없는 항목",
+  "graph.pipeline.execution": "실행",
+  "graph.pipeline.execution.term": "Execution",
+  "graph.pipeline.execution.description":
+    "시장·기간·유니버스·수수료는 전략 문서 밖의 실행 설정입니다. 화면 위 실행 설정에서 고릅니다.",
+  "graph.pipeline.notHere": "이 캔버스에 없는 것",
+  "graph.pipeline.notHere.document": "{names}: YAML·Form 탭에서 고칩니다.",
+  "graph.pipeline.notHere.formula": "팩터 계산식: 아래 고급 편집기에서 고칩니다.",
   "run_environment.contract.participation_rate.description":
     "참여 기준 거래량 대비 주문이 한 세션에 차지할 수 있는 최대 비율입니다.",
   "run_environment.contract.fee_bps.description":
@@ -1480,6 +1539,10 @@ const ko = {
     "분할 설정이 허용 범위를 벗어났습니다. 학습·검증 연수는 1 이상, 엠바고는 0 이상으로 두세요.",
   "backtest.error.experiment.split.no_window":
     "실행 기간이 학습 기간보다 짧아 검증할 창이 없습니다. 기간을 늘리거나 학습 연수를 줄이세요.",
+  "backtest.error.experiment.capacity.invalid_amounts":
+    "용량 확인 금액은 서로 다른 양수 3~12개여야 합니다. 겹치거나 0 이하인 금액을 빼세요.",
+  "backtest.error.experiment.capacity.base_not_run":
+    "용량 확인은 이 설정으로 돌린 백테스트 결과가 있어야 합니다. 먼저 이 설정으로 백테스트를 한 번 실행하세요.",
   "backtest.error.experiment.not_found": "실험을 찾을 수 없습니다. 실험 목록에서 다시 여세요.",
   "backtest.error.experiment.trial.not_found": "실험에 그 trial이 없습니다. 실험을 다시 여세요.",
   "backtest.error.experiment.trial.not_retryable":
@@ -1488,6 +1551,8 @@ const ko = {
     "완료된 trial만 후보로 고를 수 있습니다. trial이 끝난 뒤 고르세요.",
   "backtest.error.experiment.selection.not_finished":
     "실험의 trial이 모두 끝난 뒤에 후보를 고를 수 있습니다. 실험이 끝나기를 기다리거나 실험을 취소하세요.",
+  "backtest.error.experiment.kind.mismatch":
+    "이 실험 종류에서는 볼 수 없는 결과입니다. 워크포워드·후보 선택은 파라미터 탐색에서, 용량 결과는 용량 확인에서 보세요.",
   "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다. 어느 칸이 틀렸는지는 서버 사유를 보세요.",
   "trace.error.trace.engine.incompatible":
@@ -2142,6 +2207,8 @@ export const messages = {
       "Benchmark trading days with an invalid ledger row carried the previous price",
     "backtest.warning.analytics.base_rate_carried_forward":
       "Sessions after the base rate history was last checked carried the last base rate",
+    "backtest.warning.participation.session_volume":
+      "Fill limits used the fill day's own volume, so results lean optimistic",
     "backtest.metricUnavailable.zero_return_variance":
       "Returns never varied, so this cannot be computed",
     "backtest.metricUnavailable.no_downside_variation":
@@ -2719,7 +2786,7 @@ export const messages = {
     "strategy.field.run_environment.timing.description": "When an order fills after its signal.",
     "strategy.field.run_environment.timing.value.next_open": "Next session open",
     "strategy.field.run_environment.participation_basis": "Participation basis",
-    "strategy.field.run_environment.participation_basis.description": "The volume the participation rate is applied to when capping the shares filled in one session.",
+    "strategy.field.run_environment.participation_basis.description": "The volume the participation rate is applied to when capping the shares filled in one session. Session volume uses the whole day's volume, which is not known at fill time, so results come out optimistic.",
     "strategy.field.run_environment.participation_basis.value.session_volume": "Session volume",
     "strategy.field.run_environment.participation_basis.value.adv20": "20-day average traded value",
     "strategy.field.run_environment.impact_model": "Price impact model",
@@ -3105,6 +3172,66 @@ export const messages = {
     "strategy.field.node.group_field_id.summary": "by {group_field_id}",
     "recipe.summary.previous": "previous step",
     "recipe.summary.advanced": "{count} nodes · advanced",
+    // 그래프 1수준 캔버스(P4-02, 리드 결정 2026-09-30). 단계 영문 소제목, 카드 문장 틀 `.card`(enum 값 이름 키 →
+    // 앵커·목록 설명 키 순으로 찾고, `{<키>}` 자리에 같은 카드 필드의 컨트롤이 들어간다), 캔버스 chrome.
+    // 비율 칸은 입력 단위를 바꾸지 않고 틀이 예시로 단위를 말한다("0.1이 10%").
+    "strategy.stage.eligibility.term": "Universe",
+    "strategy.stage.signal.term": "Alpha",
+    "strategy.stage.portfolio.term": "Portfolio",
+    "strategy.stage.risk.term": "Risk",
+    "strategy.field.eligibility_step.rules.card":
+      "Only stocks whose {field_id} is {operator} — threshold {value}",
+    "strategy.field.eligibility_rule.operator.value.top_percent.card":
+      "Only stocks {operator} of {field_id} — top fraction {value} (0.2 means 20%)",
+    "strategy.field.eligibility_rule.operator.value.top_count.card":
+      "Only stocks {operator} of {field_id} — top {value}",
+    "strategy.field.portfolio_step.liquidity_field_id.card":
+      "Only stocks whose {liquidity_field_id} is at least {minimum_liquidity}",
+    "strategy.field.signal_step.normalization.card":
+      "Factor scores: {normalization}",
+    "strategy.field.signal_step.score_threshold.card":
+      "Drop stocks whose combined score is below {score_threshold}",
+    "strategy.field.signal_step.regime_field_id.card":
+      "Hold only stocks whose {regime_field_id} is at least {regime_minimum}",
+    "strategy.field.portfolio_step.side.card": "Direction: {side}",
+    "strategy.field.portfolio_step.weighting.card": "Weights: {weighting}",
+    "strategy.field.portfolio_step.weighting.value.risk.card":
+      "Weights: {weighting} — by risk factor {risk_factor_id} or risk field {risk_field_id}",
+    "strategy.field.portfolio_step.rebalance.card": "Re-pick {rebalance}",
+    "strategy.field.portfolio_step.rebalance.value.every_n_sessions.card":
+      "Re-pick {rebalance}: every {rebalance_every_n_sessions} sessions",
+    "strategy.field.portfolio_step.selection_method.value.top_n.card":
+      "Pick the {selection_method} {selection_count} stocks by combined score",
+    "strategy.field.portfolio_step.selection_method.value.percentile.card":
+      "Pick the {selection_method} {selection_percentile} (0.1 means 10%) by combined score",
+    "strategy.contract.portfolio.turnover_buffer_count.card":
+      "Keep a held stock until it falls {turnover_buffer_count} more places",
+    "strategy.contract.portfolio.minimum_trade_weight.card":
+      "Skip orders when the weight change is below {minimum_trade_weight} (0.01 means 1%)",
+    "strategy.contract.risk.gross_exposure.card":
+      "Total long plus short weight: {gross_exposure} (1 means 100%)",
+    "strategy.field.risk_step.net_exposure.card":
+      "Long minus short weight: {net_exposure} (1 means 100%)",
+    "strategy.contract.risk.max_name_weight.card":
+      "At most {max_name_weight} per stock (0.05 means 5%)",
+    "strategy.contract.risk.max_sector_weight.card":
+      "At most {max_sector_weight} per sector (0.3 means 30%)",
+    "strategy.field.risk_step.sector_neutral.card":
+      "{sector_neutral} Balance long and short weight within each sector",
+    "graph.pipeline.label": "Strategy pipeline",
+    "graph.pipeline.summary": "Summary",
+    "graph.pipeline.stages": "Strategy stages",
+    "graph.pipeline.item": "Item {index}",
+    "graph.pipeline.unnamed": "Unnamed item",
+    "graph.pipeline.execution": "Execution",
+    "graph.pipeline.execution.term": "Execution",
+    "graph.pipeline.execution.description":
+      "Market, period, universe and costs are run settings outside the strategy document. Choose them in the run settings above.",
+    "graph.pipeline.notHere": "Not on this canvas",
+    "graph.pipeline.notHere.document":
+      "{names}: edit them in the YAML or Form tab.",
+    "graph.pipeline.notHere.formula":
+      "Factor formulas: edit them in the advanced editor below.",
     "run_environment.contract.participation_rate.description":
       "Largest share of the participation-basis volume an order may take in one session.",
     "run_environment.contract.fee_bps.description":
@@ -3422,6 +3549,10 @@ export const messages = {
       "The split settings are out of range. Use at least 1 training year and 1 test year and a non-negative embargo.",
     "backtest.error.experiment.split.no_window":
       "The run period is shorter than the training period, so there is no window to test. Lengthen the period or shorten the training years.",
+    "backtest.error.experiment.capacity.invalid_amounts":
+      "A capacity check needs 3 to 12 distinct positive amounts. Remove duplicate amounts and amounts of zero or less.",
+    "backtest.error.experiment.capacity.base_not_run":
+      "A capacity check needs a backtest result with these settings. Run one backtest with these settings first.",
     "backtest.error.experiment.not_found": "The experiment was not found. Open it again from the experiment list.",
     "backtest.error.experiment.trial.not_found": "The experiment has no such trial. Open the experiment again.",
     "backtest.error.experiment.trial.not_retryable":
@@ -3430,6 +3561,8 @@ export const messages = {
       "Only a completed trial can be chosen as a candidate. Choose it after the trial finishes.",
     "backtest.error.experiment.selection.not_finished":
       "A candidate can be chosen only after every trial of the experiment has finished. Wait for the experiment to finish or cancel it.",
+    "backtest.error.experiment.kind.mismatch":
+      "This result does not exist for this kind of experiment. Walk-forward and candidate selection belong to a parameter search, capacity results to a capacity check.",
     "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
     "trace.error.trace.request.invalid": "The trace request is invalid. See the server reason for the field.",
     "trace.error.trace.engine.incompatible":

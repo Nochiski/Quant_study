@@ -110,8 +110,11 @@
   align-items: center;
 }
 
+/* 파이프라인 캔버스(`pipeline-panel.css`)의 문장 안 컨트롤도 같은 선언이고 크기만 덮는다. */
 .strategy-form__control input,
-.strategy-form__control select {
+.strategy-form__control select,
+.pipeline__field input,
+.pipeline__field select {
   min-width: 12rem;
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--border);
@@ -127,7 +130,9 @@
 
 /* 미작성 필드: 기본값이 회색 placeholder로 보인다(spec D6). */
 .strategy-form__field[data-written="false"] .strategy-form__control input,
-.strategy-form__field[data-written="false"] .strategy-form__control select {
+.strategy-form__field[data-written="false"] .strategy-form__control select,
+.pipeline__field[data-written="false"] input,
+.pipeline__field[data-written="false"] select {
   color: var(--text-muted);
   border-style: dashed;
 }

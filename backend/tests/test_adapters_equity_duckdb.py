@@ -30,6 +30,7 @@ from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
     _PARQUET_LIST,
     EVENT_TYPE_MAP,
     _fetchall,
+    _open,
     _parquet_table,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
@@ -438,7 +439,8 @@ def test_declarations_their_query_does_not_read_are_rejected() -> None:
     """선언한 식을 그 원천의 질의가 읽지 않으면 선언 때 막는다 — 읽히지 않는 선언은 조용히 무시된다.
 
     필드 공개일 열은 LATEST PICK 질의만 읽고(#300 리뷰 P3-3), 가림 표시는 격자 질의만 읽는다(#311
-    리뷰 P3-3). LATEST 원천의 가림 표시는 결측 정책이 가린 셀을 다시 채우게 둔다.
+    리뷰 P3-3). LATEST 원천의 가림 표시는 결측 정책이 가린 셀을 다시 채우게 둔다. 원천 생략 0 은
+    결측 사유 축(`kind_expr`)이 있어야 읽힌다(#371).
     """
     _reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)  # 지금 선언은 통과한다
     latest = next(spec for spec in SOURCE_SPECS if spec.mode is SourceMode.LATEST)
@@ -451,6 +453,11 @@ def test_declarations_their_query_does_not_read_are_rejected() -> None:
     with pytest.raises(ValueError, match=re.escape(f"fields=['{gridded.field_id}']")):
         _reject_unread_declarations(
             SOURCE_SPECS, (*FIELD_SPECS, replace(gridded, available_expr="available_date"))
+        )
+    plain = next(spec for spec in SOURCE_SPECS if spec.kind_expr is None)
+    with pytest.raises(ValueError, match=re.escape(f"sources=['{plain.name}']")):
+        _reject_unread_declarations(
+            (*SOURCE_SPECS, replace(plain, omitted_is_zero=True)), FIELD_SPECS
         )
 
 
@@ -855,7 +862,7 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
     # ② 진짜 0 은 OBSERVED 다 — 결측과 섞이지 않는다
     zero = _cell(result, seen(date(2024, 1, 11)), "005930:1", "flow.foreign_net_buy")
     assert (zero.value, zero.kind) == (0.0, CellKind.OBSERVED)
-    # ③ src_omitted 는 값이 NULL 이라 MISSING 으로 접힌다(SOURCE_OMITTED_ZERO 는 값을 요구한다)
+    # ③ 수급의 src_omitted 는 0 으로 단정할 근거가 없어 MISSING 이다(FIELD_MAP §1, #371)
     omitted = _cell(result, seen(date(2024, 1, 9)), "005930:1", "flow.foreign_net_buy")
     assert (omitted.value, omitted.kind) == (None, CellKind.MISSING)
     # ④ not_collected 는 라벨이 살아 남는다 — '안 물어봤다' 와 '물었는데 없다' 는 다르다
@@ -867,9 +874,13 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
     assert _field(result, seen(START), "005930:1", "short.short_sale_value") == 70_000_000.0
     loan = _cell(result, seen(START), "005930:1", "short.borrowed_quantity")
     assert (loan.value, loan.kind) == (None, CellKind.NOT_COLLECTED)
+    # 키움 공매도의 src_omitted 는 그날 공매도 0 이라 값 0 의 SOURCE_OMITTED_ZERO 다(#371)
     sale = _cell(result, seen(date(2024, 1, 9)), "005930:1", "short.short_sale_value")
-    assert (sale.value, sale.kind) == (None, CellKind.MISSING)  # src_omitted
+    assert (sale.value, sale.kind) == (0.0, CellKind.SOURCE_OMITTED_ZERO)
     assert _field(result, seen(date(2024, 1, 9)), "005930:1", "short.borrowed_quantity") == 12_345.0
+    # 대차의 src_omitted 는 잔고라 0 이 아니다 — 원천 생략 0 은 공매도 축만이다(#371 리뷰 P3-1)
+    lent = _cell(result, seen(date(2024, 1, 9)), "000660:1", "short.borrowed_quantity")
+    assert (lent.value, lent.kind) == (None, CellKind.MISSING)
     assert (
         _field(  # 음수 보존
             result, seen(WB_HALT_DATE), "005930:1", "short.borrowed_quantity"
@@ -908,8 +919,8 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
     # 창의 값은 척도가 섞여 있어 모르는 값을 채워도 틀린다(#311 리뷰 P3-1)
     unknown = _cell(result, seen_credit(date(2024, 1, 5)), "000660:1", "credit.margin_balance")
     assert (unknown.value, unknown.kind) == (None, CellKind.MASKED)
-    # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖고, 원장 뷰가 가리는
-    # 원천만 MASKED 를 갖는다
+    # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖고, 원천 생략이 0 인
+    # 원천만 SOURCE_OMITTED_ZERO 를, 원장 뷰가 가리는 원천만 MASKED 를 갖는다
     profiles = {p.field_id: p for p in adapter.list_fields()}
     assert profiles["credit.margin_balance"].coverage.supported_cell_kinds == (
         CellKind.OBSERVED,
@@ -920,6 +931,16 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
     assert profiles["price.close"].coverage.supported_cell_kinds == (
         CellKind.OBSERVED,
         CellKind.MISSING,
+    )
+    assert profiles["short.short_sale_value"].coverage.supported_cell_kinds == (
+        CellKind.OBSERVED,
+        CellKind.MISSING,
+        CellKind.NOT_COLLECTED,
+        CellKind.SOURCE_OMITTED_ZERO,
+    )
+    # 커버율은 값이 나가는 칸을 센다 — 격자 68행 중 공매도 measured 2 + 원천 생략(값 0) 1
+    assert profiles["short.short_sale_value"].coverage.estimated_coverage_pct == pytest.approx(
+        100 * 3 / 68
     )
     assert profiles["short.short_sale_value"].dataset_id == "short_daily"
     assert profiles["flow.institution_net_buy"].description.startswith("[부분]")
@@ -1481,7 +1502,7 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
     import duckdb
 
     root = build_workbench_root(tmp_path / "equity")
-    real_connect = EquityDuckdbAdapter._connect
+    real_open = _open
 
     class _Interrupting:
         def __init__(self, inner: duckdb.DuckDBPyConnection) -> None:
@@ -1498,10 +1519,11 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
                 raise duckdb.InterruptException("simulated interrupt during DESCRIBE")
             return self._inner.execute(sql, *args)
 
+    # 부팅의 매크로 확인은 카탈로그를 직접 연다(질의용 `_connect` 는 잠김을 run 실패로 코드화한다,
+    # #318). 카탈로그 연결만 감싸 그 DESCRIBE 에서 일시 오류를 낸다 — 앞선 파일 확인은 SELECT 다.
     monkeypatch.setattr(
-        EquityDuckdbAdapter,
-        "_connect",
-        lambda self, sources: _Interrupting(real_connect(self, sources)),
+        f"{_ADAPTER}._open",
+        lambda path: real_open(path) if path is None else _Interrupting(real_open(path)),
     )
     with pytest.raises(EquityDuckdbSetupError, match="catalog_transient_error") as raised:
         EquityDuckdbAdapter(root)
@@ -1586,7 +1608,8 @@ def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) 
     예전에는 질의마다 카탈로그를 열어, 잠긴 동안 가격 질의까지 원시 `IOException` 으로 죽었다.
     매크로 원천(재무) 질의는 잠금이 풀릴 때까지 실패한다 — 빈 결과로 넘어가지 않는다. 백테스트
     데이터도 원장이 접지 못한 층 이동을 카탈로그 뷰로 읽어(#369) 같이 실패한다 — 사건 없이 bar 만
-    내면 그 종목 손익이 층 배수만큼 튄다.
+    내면 그 종목 손익이 층 배수만큼 튄다. 실패는 duckdb 원문(점유 프로세스 경로·PID·POSIX 계정명)
+    대신 조치만 담은 `catalog_locked` 사유다 — run 실패 사유로 화면에 나가기 때문이다(#318).
     """
     import duckdb
 
@@ -1603,15 +1626,48 @@ def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) 
             assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
             assert _raw(booted, fields=("price.close",)).ok  # 표 원천만 읽는 격자
             assert booted.load_universe(UniverseHistoryQuery("XKRX", START, END)).ok
-            locked = "|".join(re.escape(marker) for marker in _LOCK_CONFLICT_MARKERS)
-            with pytest.raises(duckdb.IOException, match=locked):
+            with pytest.raises(BacktestDataNotReadyError, match="catalog_locked") as macro:
                 _raw(booted, fields=fin)
-            with pytest.raises(duckdb.IOException, match=locked):
+            with pytest.raises(BacktestDataNotReadyError, match="catalog_locked") as dataset:
                 booted.load_backtest_dataset(backtest)
         finally:
             holder.kill()  # 나가면서 `Popen` 이 파이프를 닫고 종료를 기다린다
+    locked = "|".join(re.escape(marker) for marker in _LOCK_CONFLICT_MARKERS)
+    for stopped in (macro.value, dataset.value):
+        # 사유에는 원문이 없고, 원문은 예외 사슬로 서버 로그에 남는다
+        assert re.search(locked, str(stopped)) is None
+        assert str(root) not in str(stopped) and "PID" not in str(stopped)
+        assert isinstance(stopped.__cause__, duckdb.IOException)
+        assert re.search(locked, str(stopped.__cause__))
     assert _raw(booted, fields=fin).ok  # 잠금이 풀리면 다시 읽는다
     assert booted.load_backtest_dataset(backtest).bars
+
+
+def test_a_non_lock_catalog_error_after_boot_is_not_reported_as_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """질의 중 잠김이 아닌 카탈로그 오류(손상 등)는 `catalog_locked` 로 삼키지 않는다
+    (#406 리뷰 P3-1).
+
+    삼키면 손상된 카탈로그에 "그 작업이 끝난 뒤 다시 실행한다"를 안내해, 운영자가 기다리기만 하고
+    검증·재생성을 하지 않는다. 원래 duckdb 예외가 그대로 올라간다.
+    """
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    booted = EquityDuckdbAdapter(root)
+    corrupt = "IO Error: The file exists, but it is not a valid DuckDB database file!"
+
+    def open_corrupt(path: Path | None) -> duckdb.DuckDBPyConnection:
+        if path is None:
+            return _open(path)
+        raise duckdb.IOException(corrupt)
+
+    monkeypatch.setattr(f"{_ADAPTER}._open", open_corrupt)
+    with pytest.raises(duckdb.IOException, match="not a valid DuckDB database file"):
+        _raw(booted, fields=("financial.book_equity",))
+    with pytest.raises(duckdb.IOException, match="not a valid DuckDB database file"):
+        booted.load_backtest_dataset(BacktestDataQuery(START, END, ("005930:1",), None))
 
 
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:
@@ -1794,6 +1850,43 @@ def test_truthful_pipeline_momentum_across_a_split_is_continuous_on_adj_close(
 
     assert momentum("price.adj_close") == pytest.approx(104_000 / 103_000 - 1)  # 전방 조정
     assert momentum("price.close") == pytest.approx(52_000 / 103_000 - 1)
+
+
+def test_source_omitted_zero_enters_factor_windows_on_both_paths(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """키움 공매도의 원천 생략 0 은 팩터 연구·실행 두 경로에서 값으로 창에 든다(#371 리뷰 P3-2).
+
+    005930 공매도 대금은 01-08 measured 70,000,000 · 01-09 src_omitted 이고 랙 1 이라 01-09·01-10
+    에 보인다. 01-10 의 2세션 평균은 기본 결측 정책(drop)에서 (70,000,000 + 0) / 2 다 — 0 을
+    모르는 결측으로 접으면 창이 서지 않는다. 연구 경로는 `load_factor_observations`, 실행 경로는
+    원시 관측을 팩터 관측으로 옮기는 파이프라인을 지난다.
+    """
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("sv", "short.short_sale_value", "field"),
+            TimeSeriesNode("avg", TimeSeriesOperator.MEAN, "sv", 2, "time_series"),
+        ),
+        output_node_id="avg",
+    )
+    registry = build_default_factor_registry()
+    research = FactorResearchService(registry, adapter, adapter).preview(
+        FactorPreviewRequest(graph, START, END)
+    )
+    spec = _momentum_spec("short.short_sale_value")
+    spec = replace(spec, factors=(replace(spec.factors[0], graph=graph),))
+    pipeline = PortfolioDesignService(
+        adapter,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=adapter,
+        factor_registry_version=registry.version,
+    ).run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
+    key = (date(2024, 1, 10), "005930:1")
+    values = [
+        {(v.as_of, v.security_id): v.value for v in evaluated}
+        for evaluated in (research.evaluation.values, pipeline.factor_evaluations[0].values)
+    ]
+    assert [found[key] for found in values] == [pytest.approx(35_000_000)] * 2
 
 
 def test_raw_load_reports_monotonic_progress_ending_at_one(adapter: EquityDuckdbAdapter) -> None:

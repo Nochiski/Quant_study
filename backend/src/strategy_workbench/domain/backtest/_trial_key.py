@@ -6,7 +6,13 @@
 - 전략 의미 해시(`strategy_semantic_hash`): 제목·설명·파라미터 범위 정의를 뺀 전략.
 - 해소된 파라미터 값: 파라미터마다 실행이 쓴 값(`resolve_parameter_values`).
 - 실행 설정: `TRIAL_KEY_ROLES` 분류표대로 고른 칸. 칸 값이 스키마 기본값이면 표기에서 빠지므로 칸을
-  더해도 기존 설정의 키가 바뀌지 않는다. 스키마 기본값을 바꾸면 키가 바뀐다.
+  더해도 기존 설정의 키가 바뀌지 않는다.
+
+기본값이 표기에서 빠지므로 스키마 기본값만 바꾸면 옛 기본값으로 돈 실행과 새 기본값으로 돈
+실행이 같은 키를 받아 N 이 과소하게 센다. 그래서 스키마 기본값을 바꾸는 PR 은
+`TRIAL_KEY_DEFAULTS_VERSION` 을 올린다 — 판본이 키에 들어 기존 키와 모두 갈리므로 계열마다 다음
+실행이 한 번 새 시도로 셀 수 있다(보수 쪽, 원장은 다시 쓰지 않는다).
+`tests/domain/test_trial_key.py` 의 기본값 스냅숏이 판본과 짝이다.
 
 실행 요청의 나머지 칸(초기 자본·벤치마크·연환산 거래일·지표 창·실행 core)과 데이터 스냅샷·엔진·지표
 레지스트리 판본은 이 함수가 읽지 않으므로 키 밖이다.
@@ -26,6 +32,10 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from ._canonical import canonical_json_hash
 from ._krx_tax import STATUTORY_SELL_TAX_BPS
 from ._models import BacktestRunSpec, RunEnvironment
+
+# 키 표기의 기준인 스키마 기본값의 판본. v2(#342 DOMAIN-V2-02): 참여 기준 기본값 `session_volume` →
+# `adv20`.
+TRIAL_KEY_DEFAULTS_VERSION = "trial-key-defaults-v2"
 
 
 class TrialKeyRole(StrEnum):
@@ -86,6 +96,7 @@ def trial_key(spec: BacktestRunSpec) -> str:
             "strategy": strategy_semantic_hash(strategy),
             "parameters": resolve_parameter_values(strategy.parameters, spec.parameter_values),
             "environment": _environment_key(environment),
+            "defaults_version": TRIAL_KEY_DEFAULTS_VERSION,
         }
     )
 

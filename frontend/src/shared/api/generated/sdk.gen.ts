@@ -27,6 +27,9 @@ import type {
   CreateAssistantSessionData,
   CreateAssistantSessionErrors,
   CreateAssistantSessionResponses,
+  CreateCapacitySweepData,
+  CreateCapacitySweepErrors,
+  CreateCapacitySweepResponses,
   CreateExperimentData,
   CreateExperimentErrors,
   CreateExperimentResponses,
@@ -66,8 +69,14 @@ import type {
   GetEquityCatalogData,
   GetEquityCatalogErrors,
   GetEquityCatalogResponses,
+  GetExperimentCapacityData,
+  GetExperimentCapacityErrors,
+  GetExperimentCapacityResponses,
   GetExperimentData,
   GetExperimentErrors,
+  GetExperimentParameterMapData,
+  GetExperimentParameterMapErrors,
+  GetExperimentParameterMapResponses,
   GetExperimentResponses,
   GetExperimentWalkForwardData,
   GetExperimentWalkForwardErrors,
@@ -129,6 +138,9 @@ import type {
   PreviewBacktestTrialData,
   PreviewBacktestTrialErrors,
   PreviewBacktestTrialResponses,
+  PreviewCapacitySweepData,
+  PreviewCapacitySweepErrors,
+  PreviewCapacitySweepResponses,
   PreviewEquityDataData,
   PreviewEquityDataErrors,
   PreviewEquityDataResponses,
@@ -634,6 +646,48 @@ export const createExperiment = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Create Capacity Sweep
+ *
+ * 용량 스윕(초기 자본만 바꾼 실행들, V4-04)을 만들고 금액마다 실행 대기열에 넘긴다.
+ */
+export const createCapacitySweep = <ThrowOnError extends boolean = false>(
+  options: Options<CreateCapacitySweepData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateCapacitySweepResponses,
+    CreateCapacitySweepErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/capacity",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Preview Capacity Sweep
+ *
+ * 용량 스윕 시작 전 미리 계산. 금액만 다른 실행은 한 시도라 N 은 많아야 1 늘어난다.
+ */
+export const previewCapacitySweep = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewCapacitySweepData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewCapacitySweepResponses,
+    PreviewCapacitySweepErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/capacity/preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
  * Preview Experiment
  *
  * 시작 전 미리 계산 — 조합·창·실행 수와 계열 시도 수 N 의 변화(spec D2).
@@ -679,6 +733,21 @@ export const cancelExperiment = <ThrowOnError extends boolean = false>(
   >({ url: "/api/v1/experiments/{experiment_id}/cancel", ...options });
 
 /**
+ * Get Experiment Capacity
+ *
+ * 용량 스윕 금액별 비용 후 샤프·가격 충격·미체결 비율과 한계 금액(V4-04). 화면은
+ * V5-06 이다.
+ */
+export const getExperimentCapacity = <ThrowOnError extends boolean = false>(
+  options: Options<GetExperimentCapacityData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentCapacityResponses,
+    GetExperimentCapacityErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/capacity", ...options });
+
+/**
  * Control Experiment
  *
  * 일시정지·재개·우선순위. 대기 trial 에만 적용하고 도는 trial 은 끝까지 돈다(spec D6).
@@ -713,6 +782,21 @@ export const streamExperimentEvents = <ThrowOnError extends boolean = false>(
     StreamExperimentEventsErrors,
     ThrowOnError
   >({ url: "/api/v1/experiments/{experiment_id}/events", ...options });
+
+/**
+ * Get Experiment Parameter Map
+ *
+ * 그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03). 판정 기준은 domain
+ * 상수이고 화면은 판정을 번역·칠하기만 한다(V5-04).
+ */
+export const getExperimentParameterMap = <ThrowOnError extends boolean = false>(
+  options: Options<GetExperimentParameterMapData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentParameterMapResponses,
+    GetExperimentParameterMapErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/parameter-map", ...options });
 
 /**
  * Select Experiment Trial

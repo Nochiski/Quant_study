@@ -24,6 +24,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.experiment_run.facade.experiments import (
+    CapacitySweepRequest,
     ExperimentRequest,
     ExperimentRunService,
 )
@@ -46,6 +47,9 @@ from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunState,
     InlineDraft,
     MetricWindow,
+    RawArtifactBundle,
+    RawFill,
+    RawOrder,
     RunFailureCode,
     RunStatus,
     SavedRevisionReference,
@@ -55,8 +59,11 @@ from strategy_workbench.domain.backtest.facade.trials import (
     TrialLedgerEntry,
     representative_sharpe,
     summarize_trial_ledger,
+    trial_key,
 )
 from strategy_workbench.domain.experiment.facade.design import (
+    CellVerdict,
+    ExperimentKind,
     ExperimentNotFoundError,
     ExperimentStateError,
     InvalidExperimentSpecError,
@@ -65,6 +72,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     WalkForwardGap,
     WindowSelectionRule,
 )
+from strategy_workbench.domain.experiment.facade.statistics import CapacityGap, CapacityLimit
 from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentControls,
     ExperimentStatus,
@@ -1108,3 +1116,218 @@ def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Pat
     assert reopened.get(experiment_id).status is ExperimentStatus.COMPLETED
     report = reopened.walk_forward(experiment_id)
     assert (report.windows, report.gap) == ((), WalkForwardGap.LEGACY_DESIGN)
+
+
+def test_the_parameter_map_averages_ledger_train_scores_and_floors_a_bankrupt_cell() -> None:
+    """V4-03: 칸 점수는 창별 원장 학습 점수의 평균이고, 파산한 칸은 최하 점수로 이웃에 든다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    # scale 격자 -1, 0, 1 × 롤링 창 둘. trial 2k·2k+1 이 칸 (k,) 의 두 창이다.
+    experiment_id = service.create(_request(scale=None)).record.experiment_id
+    _finish(
+        runs,
+        {
+            "run-0": _result(0.2),
+            "run-1": _result(0.4),
+            "run-3": _result(0.6),
+            "run-4": _result(0.15),
+            "run-5": _result(0.25),
+        },
+    )
+    runs.run_statuses["run-2"] = RunStatus.FAILED
+    runs.error_codes["run-2"] = "backtest.run.equity_wiped_out"
+
+    cells = service.parameter_map(experiment_id).cells
+
+    # 칸 점수 (0,)=0.3, (2,)=0.2. 파산 칸 (1,) 은 최하 점수 min(0.2, 0) = 0 이라 두 칸의 이웃 평균이
+    # 모두 0 — 동점이면 좌표가 앞선 칸이 추천이다. 민감도: -1×0.8=-0.8 쪽 가장 가까운 격자값 0 은
+    # 파산이라 하락 1.0, 1×0.8=0.8 쪽도 0 이라 1.0. -1×1.2·1×1.2 쪽은 축 끝이다.
+    assert [
+        (cell.grid_index, cell.verdict, cell.score, cell.plateau_score, cell.sensitivity)
+        for cell in cells
+    ] == [
+        ((0,), CellVerdict.RECOMMENDED, pytest.approx(0.3), 0.0, pytest.approx(1.0)),
+        ((1,), CellVerdict.FAILED, None, None, None),
+        ((2,), CellVerdict.SCORED, pytest.approx(0.2), 0.0, pytest.approx(1.0)),
+    ]
+    # 비전략 실패(엔진 내부 오류)는 실패로 보이기만 하고 이웃 평균에서 빠진다.
+    runs.error_codes["run-2"] = "backtest.run.internal"
+    assert [
+        (cell.verdict, cell.plateau_score) for cell in service.parameter_map(experiment_id).cells
+    ] == [
+        (CellVerdict.RECOMMENDED, None),
+        (CellVerdict.FAILED, None),
+        (CellVerdict.SCORED, None),
+    ]
+
+
+# 용량 스윕(V4-04). 금액 1억·2억·3억 → trial 0·1·2, run-0·1·2.
+_AMOUNTS = [3e8, 1e8, 2e8]
+
+
+def _counted_base(runs: _FakeRuns) -> None:
+    """기반 설정으로 돌린 백테스트가 계열 원장에 결과를 냈다(결과 화면에서 연 스윕)."""
+    key = trial_key(runs.admit(_BASE).run)
+    runs.ledger_entries.append(
+        TrialLedgerEntry("run-base", key, RunStatus.COMPLETED, _AT, _AT, 0.03)
+    )
+
+
+def _sweep(runs: _FakeRuns, service: ExperimentRunService) -> str:
+    _counted_base(runs)
+    request = CapacitySweepRequest(run=_BASE, initial_cash=_AMOUNTS)
+    return service.create_capacity(request).record.experiment_id
+
+
+def _capacity_result(sharpe: float, ordered: str, filled: str) -> BacktestRunResult:
+    """1000원에 `filled` 주 체결(주당 슬리피지 1원), DAY 주문 `ordered` 주."""
+    order = RawOrder("o", "d", date(2021, 1, 5), "KRX:005930", "buy", ordered, "market", "day")
+    fill = RawFill("f", "o", date(2021, 1, 5), "KRX:005930", "buy", filled, 1000.0, 0.0, 1.0)
+    return replace(_result(sharpe), artifacts=RawArtifactBundle((), (), (order,), (fill,), (), ()))
+
+
+def test_a_capacity_sweep_needs_a_counted_base_trial_and_never_adds_to_n() -> None:
+    """#410 리뷰 P2-3: 기반 시도가 원장에 결과를 냈어야 한다 — 스윕은 늘 그 시도의 재확인이다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    request = CapacitySweepRequest(run=_BASE, initial_cash=_AMOUNTS)
+
+    for call in (service.preview_capacity, service.create_capacity):
+        with pytest.raises(InvalidExperimentSpecError) as refused:
+            call(request)
+        assert refused.value.code == "experiment.capacity.base_not_run"
+    assert runs.started == []
+    _counted_base(runs)
+    preview = service.preview_capacity(request)
+    experiment = service.create_capacity(request)
+
+    assert (preview.run_count, preview.new_trial_count, preview.trial_count_after) == (3, 0, 1)
+    assert experiment.record.design.kind is ExperimentKind.CAPACITY_SWEEP
+    assert experiment.record.split is None
+    # 금액 순으로 기반 실행 구간 전체를 돈다. 초기 자본은 시도 키 밖이라 세 실행이 기반과 한 시도다.
+    assert [(r.initial_cash, r.environment and r.environment.start) for r in runs.started] == [
+        (1e8, date(2021, 1, 4)),
+        (2e8, date(2021, 1, 4)),
+        (3e8, date(2021, 1, 4)),
+    ]
+    assert {r.environment and r.environment.end for r in runs.started} == {date(2023, 6, 30)}
+    assert [r.parameter_values for r in runs.started] == [{"scale": 1.0, "mode": "b"}] * 3
+    assert set(runs.keys) == {runs.ledger_entries[0].trial_key}
+    runs.complete_all()
+    assert runs.trial_ledger(_BASE).trial_count == 1
+    assert service.advance(experiment.record.experiment_id) is True
+    assert service.get(experiment.record.experiment_id).status is ExperimentStatus.COMPLETED
+
+
+def test_the_capacity_report_settles_the_limit_only_when_every_amount_ran() -> None:
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = _sweep(runs, service)
+    _finish(
+        runs,
+        {
+            "run-0": _capacity_result(0.04, "100", "100"),
+            "run-1": _capacity_result(0.05, "100", "80"),
+        },
+    )
+
+    pending = service.capacity(experiment_id)
+
+    # 3억은 아직 돈다 — 한계 금액을 확정하지 않는다. 충격 1원/1000원 = 10bp, 세션 미체결 1 − 80/100.
+    assert [
+        (p.initial_cash, p.status, p.sharpe, p.impact_cost_bps, p.session_unfilled_ratio)
+        for p in pending.points
+    ] == [
+        (1e8, TrialStatus.COMPLETED, pytest.approx(0.04), pytest.approx(10.0), 0.0),
+        (2e8, TrialStatus.COMPLETED, pytest.approx(0.05), pytest.approx(10.0), pytest.approx(0.2)),
+        (3e8, TrialStatus.QUEUED, None, None, None),
+    ]
+    assert pending.limit == CapacityLimit(None, None, None, CapacityGap.PENDING)
+    # 재시작으로 중단돼 복구를 기다리는 금액도 아직 돈다.
+    runs.run_statuses["run-2"] = RunStatus.FAILED
+    runs.error_codes["run-2"] = "backtest.run.interrupted"
+    assert service.capacity(experiment_id).limit.gap is CapacityGap.PENDING
+    # 3억은 파산했다 — 기준 밑이라 한계는 2억이다. 결과 파일을 못 읽는 금액은 비용만 빈다(샤프는
+    # 원장에서 읽는다).
+    runs.run_statuses["run-2"] = RunStatus.FAILED
+    runs.error_codes["run-2"] = "backtest.run.equity_wiped_out"
+    runs.unreadable.add("run-0")
+    finished = service.capacity(experiment_id)
+    assert finished.limit == CapacityLimit(2e8, 2e8, pytest.approx(0.025), None)  # pyright: ignore[reportArgumentType]  # reason: 기준선은 부동소수 곱이다
+    assert (finished.points[0].sharpe, finished.points[0].impact_cost_bps) == (
+        pytest.approx(0.04),
+        None,
+    )
+    assert finished.points[2].status is TrialStatus.FAILED
+
+
+def test_a_cancelled_amount_leaves_the_capacity_limit_unsettled() -> None:
+    """#410 리뷰 P2-2: 돌지 않은 금액에서 곡선이 꺾였다고 하지 않는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = _sweep(runs, service)
+    _finish(
+        runs,
+        {
+            "run-0": _capacity_result(0.05, "100", "100"),
+            "run-1": _capacity_result(0.049, "100", "100"),
+        },
+    )
+    service.cancel(experiment_id)
+    runs.run_statuses["run-2"] = RunStatus.CANCELLED
+
+    report = service.capacity(experiment_id)
+
+    assert report.points[2].status is TrialStatus.CANCELLED
+    assert report.limit == CapacityLimit(None, None, None, CapacityGap.CANCELLED)
+
+
+def test_kind_specific_results_are_refused_for_the_other_kind() -> None:
+    runs = _FakeRuns()
+    service = _service(runs)
+    sweep_id = _sweep(runs, service)
+    search = service.create(_request())
+    runs.complete_all()
+
+    calls = {
+        "walk_forward": lambda: service.walk_forward(sweep_id),
+        "select": lambda: service.select(sweep_id, 0, "이유"),
+        "parameter_map": lambda: service.parameter_map(sweep_id),
+        "capacity": lambda: service.capacity(search.record.experiment_id),
+    }
+    for name, call in calls.items():
+        with pytest.raises(ExperimentStateError) as refused:
+            call()
+        assert refused.value.code == "experiment.kind.mismatch", name
+
+
+@pytest.mark.parametrize(
+    "amounts",
+    [
+        [1e8, 2e8],
+        [1e8, 1e8, 2e8],
+        [1e8, 2e8, -1.0],
+        [1e8, 2e8, math.inf],
+        [1e8 * n for n in range(1, 14)],
+    ],
+)
+def test_capacity_amounts_outside_the_rule_are_refused(amounts: list[float]) -> None:
+    with pytest.raises(InvalidExperimentSpecError) as refused:
+        _service(_FakeRuns()).preview_capacity(
+            CapacitySweepRequest(run=_BASE, initial_cash=amounts)
+        )
+    assert refused.value.code == "experiment.capacity.invalid_amounts"
+
+
+def test_a_capacity_sweep_survives_reopening_the_research_database(tmp_path: Path) -> None:
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    _counted_base(runs)
+    created = _service(runs, repository=SQLiteExperimentRepository(path)).create_capacity(
+        CapacitySweepRequest(run=_BASE, initial_cash=_AMOUNTS)
+    )
+
+    reopened = _service(runs, repository=SQLiteExperimentRepository(path))
+
+    assert reopened.get(created.record.experiment_id).record == created.record
+    assert [t.initial_cash for t in created.record.design.trials()] == [1e8, 2e8, 3e8]

@@ -18,7 +18,9 @@
            이고 `available_date` 는 그 관측의 공개일이다. 관측이 없으면 셀 없음.
 값이 있으면 `CellKind.OBSERVED`, 없으면 격자 3테이블(S08~S10)의 `fill_kind.kind` 가 말하는 종류
 (`_FILL_KIND_TO_CELL`: not_collected → NOT_COLLECTED, 나머지 → MISSING)이고 `fill_kind` 축이 없는
-원천은 MISSING 이다. 원장 뷰가 일부러 가린 행(`SourceSpec.masked_expr`)은 MASKED 다(#298).
+원천은 MISSING 이다. 원천이 행을 뺀 칸(`src_omitted`)이 그날 0 인 원천
+(`SourceSpec.omitted_is_zero`)은 그 칸을 값 0 의 SOURCE_OMITTED_ZERO 로 낸다(#371). 원장 뷰가 일부러
+가린 행(`SourceSpec.masked_expr`)은 MASKED 다(#298).
 `load_panel` 과 `RawObservationPort` 가 같은 `_Observed.kind` 를 쓴다(둘의 셀 집합·값·공개일·kind
 가 계약상 같아야 한다).
 
@@ -216,11 +218,10 @@ _PARQUET_LIST = re.compile(
 _PARQUET_TABLE = re.compile(r"[\\/]([^\\/]+)[\\/]v=[^\\/]+[\\/]")
 _TICKER_RE = re.compile(r"^[0-9A-Za-z]{1,12}$")
 # equity 격자 3테이블(S08~S10)의 `fill_kind.kind` → 워크벤치 `CellKind`. 정본 어휘는
-# `database/src/equity/model.py::FILL_KINDS` 이고 대응 원칙은 FIELD_MAP §1 「결측 어휘」다.
-# `src_omitted` 만 그 표와 다르게 접힌다 — 도메인이 `SOURCE_OMITTED_ZERO` 셀에 값을 요구하는데
-# (`RawFieldValue.__post_init__`·`ResearchPanelCell.__post_init__`) equity 는 그 자리를 NULL 로
-# 두기로 못박았다(DESIGN §9 결정 8 「격자 빈칸에 0 을 굽지 않는다」). 도메인을 고치지 않는 쪽을
-# 골랐으므로 라벨을 잃고 MISSING 으로 접는다 — 사유는 필드 프로필 description 이 문장으로 남긴다.
+# `database/src/equity/model.py::FILL_KINDS` 이고 원천별 대응은 FIELD_MAP §1 「결측 어휘」다.
+# `src_omitted` 는 여기서 MISSING 이다 — 그 칸이 그날 0 인 원천(`SourceSpec.omitted_is_zero`)만
+# `_cell_kind` 가 SOURCE_OMITTED_ZERO 로 낸다(#371). 원장은 그 칸을 NULL 로 두고(DESIGN §9 결정 8)
+# 도메인은 그 종류에 값을 요구하므로(`RawFieldValue.__post_init__`) 값 0 은 어댑터가 싣는다.
 _FILL_KIND_TO_CELL: dict[str, CellKind] = {
     "measured": CellKind.OBSERVED,
     "src_omitted": CellKind.MISSING,
@@ -229,22 +230,28 @@ _FILL_KIND_TO_CELL: dict[str, CellKind] = {
 }
 
 
-def _cell_kind(value: float | None, fill_kind: object, masked: bool = False) -> CellKind:
-    """셀 종류 — 원장 뷰가 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 `fill_kind` 가
+def _cell_kind(
+    value: float | None, fill_kind: object, masked: bool = False, omitted_is_zero: bool = False
+) -> tuple[float | None, CellKind]:
+    """셀 (값, 종류) — 원장 뷰가 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 `fill_kind` 가
     말하는 대로(없으면 MISSING).
 
     값이 있는 셀을 무조건 OBSERVED 로 두는 것은 계약이다(관측 셀은 값을 가져야 한다). 값이
-    없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다. 가림
-    표시는 값보다 먼저 본다 — 가린 행에 값이 실려 오면 셀 계약 검사가 크게 실패하게 둔다. 결측
-    사유보다도 먼저 본다 — 가림 창 안에서 원래 값이 없던 행(not_collected·src_omitted)도 MASKED 다.
+    없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다. 원천이
+    행을 뺀 칸이 그날 0 인 원천(`omitted_is_zero`)의 `src_omitted` 만 값 0 의 SOURCE_OMITTED_ZERO
+    다(#371). 가림 표시는 값보다 먼저 본다 — 가린 행에 값이 실려 오면 셀 계약 검사가 크게 실패하게
+    둔다. 결측 사유보다도 먼저 본다 — 가림 창 안에서 원래 값이 없던 행(not_collected·src_omitted)도
+    MASKED 다.
     """
     if masked:
-        return CellKind.MASKED
+        return value, CellKind.MASKED
     if value is not None:
-        return CellKind.OBSERVED
+        return value, CellKind.OBSERVED
+    if omitted_is_zero and fill_kind == "src_omitted":
+        return 0.0, CellKind.SOURCE_OMITTED_ZERO
     if fill_kind is None:
-        return CellKind.MISSING
-    return _FILL_KIND_TO_CELL.get(str(fill_kind), CellKind.MISSING)
+        return None, CellKind.MISSING
+    return None, _FILL_KIND_TO_CELL.get(str(fill_kind), CellKind.MISSING)
 
 
 def _parquet_table(match: re.Match[str]) -> str:
@@ -358,6 +365,11 @@ def _catalog_error_types() -> tuple[type[Exception], ...]:
 _LOCK_CONFLICT_MARKERS = ("File is already open in", "Could not set lock on file")
 
 
+def _is_lock_conflict(error: Exception) -> bool:
+    """다른 프로세스가 카탈로그를 쓰기 모드로 잡아 열지 못했는가(`_LOCK_CONFLICT_MARKERS`)."""
+    return any(marker in str(error) for marker in _LOCK_CONFLICT_MARKERS)
+
+
 def _raise_unless_persistent(error: Exception, catalog: Path) -> None:
     """부팅 때 카탈로그를 열거나 읽다 난 duckdb 오류 중 원천을 빼도 되는 것만 돌려보낸다(#245·#247).
 
@@ -366,7 +378,7 @@ def _raise_unless_persistent(error: Exception, catalog: Path) -> None:
     하므로 빼지 않고 코드화된 `EquityDuckdbSetupError` 로 부팅을 멈춘다. 부팅 예외는 운영자 채널이라
     경로와 duckdb 원문을 싣는다.
     """
-    if any(marker in str(error) for marker in _LOCK_CONFLICT_MARKERS):
+    if _is_lock_conflict(error):
         raise EquityDuckdbSetupError(
             "다른 프로세스가 카탈로그 파일을 쓰기 모드로 열고 있어 부팅을 멈춘다 — 그 프로세스"
             "(DuckDB CLI·DB 도구·카탈로그를 여는 스크립트)를 닫은 뒤 다시 띄워야 한다 "
@@ -392,6 +404,27 @@ def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     if path is None:
         return module.connect()
     return module.connect(str(path), read_only=True)
+
+
+def _open_catalog(path: Path) -> duckdb.DuckDBPyConnection:
+    """부팅 뒤 질의가 카탈로그를 연다. 다른 프로세스가 쓰기 모드로 잡은 잠김은 코드화된
+    실패다(#318).
+
+    duckdb 잠금 원문은 점유 프로세스 경로·PID·POSIX 계정명을 싣는데, 사유가 사용자에게 보이는
+    곳(run 실패 사유)으로 가면 안 된다. 사유 문장이 조치만 싣고 원문은 예외 사슬로 서버 로그에
+    남는다. 사유가 화면에 나가는 곳이 run 실패뿐이라 그 코드(`backtest.run.data_not_ready`)의
+    예외로 올린다 — 미리보기·추적은 예전처럼 서버 오류로 멈춘다. 부팅 검사는 잠김을 부팅 문장으로
+    분류하므로(`_raise_unless_persistent`) 이 함수를 쓰지 않는다.
+    """
+    try:
+        return _open(path)
+    except Exception as error:
+        if not _is_lock_conflict(error):
+            raise
+        raise BacktestDataNotReadyError(
+            "다른 프로세스가 카탈로그 파일을 쓰기 모드로 열고 있어 원장을 읽지 못했다 — 그 작업"
+            "(카탈로그 재생성·원장 동기화·DB 도구)이 끝난 뒤 다시 실행한다 (catalog_locked)"
+        ) from error
 
 
 def _keys_param(keys: Sequence[str]) -> str:
@@ -551,10 +584,11 @@ class EquityDuckdbAdapter:
         매크로를 읽지 않는 질의(유니버스·표 원천 격자)까지 카탈로그를 열면, 부팅 뒤 다른 프로세스가
         카탈로그를 쓰기 모드로 잡은 동안 그 질의도 실패한다. 백테스트 데이터는 층 이동 사건을
         카탈로그 뷰로 읽어 카탈로그를 연다(#369). 쓸 수 없는 카탈로그(stale 등)는 열지 않는다 —
-        옛 판본을 가리키는 매크로를 조용히 읽지 않게 한다.
+        옛 판본을 가리키는 매크로를 조용히 읽지 않게 한다. 잠김은 `_open_catalog` 가
+        코드화한다(#318).
         """
         macro = self._catalog.usable and any(source.is_macro for source in sources)
-        return _open(self._catalog.path if macro else None)
+        return _open_catalog(self._catalog.path) if macro else _open(None)
 
     def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
         """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 매크로 본문을 읽는다(#247·#235).
@@ -726,7 +760,10 @@ class EquityDuckdbAdapter:
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
 
         try:
-            with self._connect([spec]) as con:
+            # 부팅 검사라 질의용 `_connect`(잠김을 run 실패로 코드화) 대신 카탈로그를 직접 연다 —
+            # 잠김은 아래 분류기가 부팅 문장으로 올린다. 여기 오는 원천은 카탈로그를 쓸 수 있을
+            # 때뿐이다
+            with _open(self._catalog.path) as con:
                 described = con.execute(
                     f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
                 ).fetchall()
@@ -834,14 +871,15 @@ class EquityDuckdbAdapter:
         """이 원천이 낼 수 있는 셀 종류 — 선언(`kind_expr`)에서 곧바로 나온다.
 
         `fill_kind` 축이 없는 원천은 값 유무만 있어 OBSERVED/MISSING 이다. 격자 3테이블은
-        `not_collected` 를 더 내고, 원장 뷰가 가리는 원천(`masked_expr`)은 MASKED 를 더 낸다.
-        `SOURCE_OMITTED_ZERO` 는 어느 원천도 내지 않는다 — equity 가 그 셀을 NULL 로 두고
-        도메인은 그 종류에 값을 요구해서다(`_FILL_KIND_TO_CELL`). `COVERAGE_GAP` 도 내지 않는다:
-        구간·백필 밖은 셀 자체가 없다(합성 금지).
+        `not_collected` 를 더 내고, 원천 생략이 0 인 원천(`omitted_is_zero`)은 SOURCE_OMITTED_ZERO
+        를, 원장 뷰가 가리는 원천(`masked_expr`)은 MASKED 를 더 낸다. `COVERAGE_GAP` 은 내지
+        않는다: 구간·백필 밖은 셀 자체가 없다(합성 금지).
         """
         kinds = (CellKind.OBSERVED, CellKind.MISSING)
         if source.kind_expr is not None:
             kinds = (*kinds, CellKind.NOT_COLLECTED)
+        if source.omitted_is_zero:
+            kinds = (*kinds, CellKind.SOURCE_OMITTED_ZERO)
         return kinds if source.masked_expr is None else (*kinds, CellKind.MASKED)
 
     def _coverage(self) -> dict[str, tuple[float, date]]:
@@ -894,7 +932,14 @@ class EquityDuckdbAdapter:
                 for field_id in fields:
                     expr = self._fields[field_id].expr
                     if source.mode is SourceMode.GRID:
-                        sql = f"SELECT count({expr}) FROM {relation} {where}"
+                        # 원천 생략이 0 인 원천은 그 칸도 값 0 으로 나간다(`_cell_kind`, #371)
+                        omitted = (
+                            f" + count(*) FILTER (WHERE {expr} IS NULL "
+                            f"AND {source.kind_expr} = 'src_omitted')"
+                            if source.omitted_is_zero
+                            else ""
+                        )
+                        sql = f"SELECT count({expr}){omitted} FROM {relation} {where}"
                     else:
                         sql = (
                             f"SELECT count(DISTINCT k) FROM (SELECT {source.key_column} AS k, "
@@ -1292,7 +1337,7 @@ class EquityDuckdbAdapter:
         warmup = query.history_sessions_before_start
         first = max(bisect_left(self._sessions, query.start) - warmup, 0)
         read_from = min(query.start, self._sessions[first]) if warmup else query.start
-        con = _open(self._catalog.path)  # 층 이동 사건을 카탈로그 뷰로 읽는다(#369)
+        con = _open_catalog(self._catalog.path)  # 층 이동 사건을 카탈로그 뷰로 읽는다(#369)
         try:
             price_columns = {
                 str(row[0])
@@ -1823,12 +1868,17 @@ class EquityDuckdbAdapter:
                 if present and available is not None and content is not None:
                     source = SOURCE_BY_NAME[name]
                     for position, field_id in enumerate(fields):
-                        value = _as_float(raw[offset + 5 + position], field_id)
+                        value, kind = _cell_kind(
+                            _as_float(raw[offset + 5 + position], field_id),
+                            fill_kind,
+                            masked,
+                            source.omitted_is_zero,
+                        )
                         cells[field_id] = _Observed(
                             value,
                             _as_date(available, f"{source.relation}.{source.available_expr}"),
                             _as_date(content, f"{source.relation}.{source.content_expr}"),
-                            _cell_kind(value, fill_kind, masked),
+                            kind,
                         )
                 offset += 5 + len(fields)
             row = _Row(
@@ -1937,15 +1987,13 @@ class EquityDuckdbAdapter:
             known = dict(zip(late, raw[3 + len(fields) :], strict=True))
             entry: dict[str, _Observed] = {}
             for position, field_id in enumerate(fields):
-                value = _as_float(raw[3 + position], field_id)
+                value, kind = _cell_kind(_as_float(raw[3 + position], field_id), None)
                 field_available = (
                     _as_date(known[position], f"{source.relation}.{late[position]}")
                     if position in known
                     else available
                 )
-                entry[field_id] = _Observed(
-                    value, field_available, content, _cell_kind(value, None)
-                )
+                entry[field_id] = _Observed(value, field_available, content, kind)
             dates.setdefault(key, []).append(available)
             cells.setdefault(key, []).append(entry)
         return {key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates}

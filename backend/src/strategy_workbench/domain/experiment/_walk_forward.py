@@ -26,7 +26,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunState, RunStatus
 
 from ._errors import InvalidExperimentSpecError
-from ._search import GridIndex, neighbor_mean
+from ._search import GridIndex, neighbor_rank
 from ._trial import awaiting_recovery
 
 
@@ -170,15 +170,15 @@ def pick_window_cell(
 ) -> GridIndex | None:
     """창 하나의 학습 점수(칸마다 학습 실행의 대표 샤프)로 칸을 고른다. 점수가 없으면 None.
 
-    이웃 평균 기준에서 이웃 점수가 하나도 없는 칸(칸 하나뿐인 그리드)은 자기 점수로 잰다. 값이
-    같으면 좌표가 앞선 칸이다 — 같은 점수면 늘 같은 칸을 고른다.
+    이웃 평균 기준에서 이웃 점수가 하나도 없는 칸은 자기 점수로 잰다(`neighbor_rank`) — 실패 칸은
+    빼고 외톨이 칸도 후보다. 파라미터 지도(`plateau_map`)는 파산 칸을 최하 점수로 넣고 외톨이 칸을
+    추천에서 빼므로 둘이 다를 수 있다(의도, V4-03). 값이 같으면 좌표가 앞선 칸이다.
     """
 
     def value(cell: GridIndex) -> float:
         if rule is WindowSelectionRule.TRAIN_SHARPE_MAX:
             return scores[cell]
-        mean = neighbor_mean(scores, shape, cell)
-        return scores[cell] if mean is None else mean
+        return neighbor_rank(scores, shape, cell)
 
     return max(sorted(scores), key=value, default=None)
 

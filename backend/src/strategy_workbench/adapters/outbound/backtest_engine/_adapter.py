@@ -8,8 +8,9 @@ from decimal import Decimal
 
 from backtest_engine import BacktestEngine, RunConfig
 from backtest_engine.data.feed import DataFeed
-from backtest_engine.engine.slippage import FixedBpsSlippage
+from backtest_engine.engine.slippage import FixedBpsSlippage, SqrtImpactSlippage
 from backtest_engine.engine.tape import evaluate_tape
+from backtest_engine.errors import EquityWipedOut
 from backtest_engine.ports.market_data import LoadStatus
 from backtest_engine.ports.universe import Membership, UniverseResult
 from backtest_engine.types.decision import StrategyDecision
@@ -31,6 +32,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataset,
     BacktestExecutionRequest,
     CancellationCheck,
+    EquityWipedOutError,
     MarketBarRecord,
     ProgressCallback,
     RunCancelledError,
@@ -47,12 +49,16 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     unavailable_metric_values,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
+    MAX_IMPACT_FRACTION,
+    ImpactModel,
     RunEnvironment,
     environment_hash,
+    impact_scales,
     participation_volumes,
     sell_tax_schedule,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
+    ENGINE_RULES_VERSION,
     BacktestRunResult,
     BacktestSeries,
     DataWarning,
@@ -73,6 +79,7 @@ from strategy_workbench.domain.strategy.facade.specification import StrategySpec
 def _columnar_feed(
     rows: Sequence[MarketBarRecord],
     liquidity: Mapping[tuple[date, str], int] | None = None,
+    impact: Mapping[tuple[date, str], float] | None = None,
 ) -> DataFeed:
     """dataset 행을 열로 펴 DataFeed를 만든다 — 중간에 `Bar` 객체를 만들지 않는다.
 
@@ -84,6 +91,7 @@ def _columnar_feed(
         rows: dataset이 답한 시장 bar 행. 순서는 세션 기준으로만 쓰인다.
         liquidity: `(세션, 종목)` → 유동성 캡 기준 거래량(`participation_volumes`). 없으면 엔진이
             세션 거래량을 쓴다.
+        impact: `(세션, 종목)` → √ 충격 척도(`impact_scales`). 없으면 충격 0 이다.
 
     Returns:
         열을 그대로 보관하는 DataFeed. persistent Rust 경로는 이 열을 바로 FFI로 넘긴다.
@@ -103,6 +111,7 @@ def _columnar_feed(
     closes: list[float] = []
     volumes: list[int] = []
     liquidity_volumes: list[int] = []
+    impact_scales: list[float] = []
     for session in sorted(rows_by_session):
         sessions.append(datetime.combine(session, time(15, 30)))
         for row in rows_by_session[session]:
@@ -121,6 +130,8 @@ def _columnar_feed(
             volumes.append(row.volume)
             if liquidity is not None:
                 liquidity_volumes.append(liquidity[(row.session, row.security_id)])
+            if impact is not None:
+                impact_scales.append(impact[(row.session, row.security_id)])
         offsets.append(len(instrument_ids))
     return DataFeed.from_columns(
         sessions=sessions,
@@ -133,6 +144,7 @@ def _columnar_feed(
         closes=closes,
         volumes=volumes,
         liquidity_volumes=None if liquidity is None else liquidity_volumes,
+        impact_scales=None if impact is None else impact_scales,
     )
 
 
@@ -240,6 +252,11 @@ class BacktestEngineExecutorAdapter:
             )
             for item in request.dataset.corporate_actions
         )
+        # 비용 계산(참여 기준 ADV·충격 σ)은 워밍업 행까지 판단일 순서로 읽는다.
+        cost_rows = [
+            (item.session, item.security_id, item.close, item.trading_value)
+            for item in (*request.dataset.history_bars, *request.dataset.bars)
+        ]
         engine = BacktestEngine(
             RunConfig(
                 run_id=request.run_id,
@@ -249,30 +266,43 @@ class BacktestEngineExecutorAdapter:
                 max_gross_leverage=max(1.0, strategy.risk.gross_exposure),
                 sell_tax_schedule=sell_tax_schedule(environment),
             ),
-            slippage=FixedBpsSlippage(environment.slippage_bps),
+            slippage=(
+                SqrtImpactSlippage(MAX_IMPACT_FRACTION)
+                if environment.impact_model is ImpactModel.SQRT
+                else FixedBpsSlippage(environment.slippage_bps)
+            ),
             max_participation=environment.participation_rate,
             core=request.spec.core.value,
         )
-        engine.run(
-            TargetTapeStrategy(
-                strategy,
-                request.target_tape,
-                self._portfolio_bridge,
-                environment=environment,
-            ),
-            _columnar_feed(
-                request.dataset.bars,
-                participation_volumes(
-                    environment,
-                    (
-                        (item.session, item.security_id, item.close, item.trading_value)
-                        for item in (*request.dataset.history_bars, *request.dataset.bars)
+        try:
+            engine.run(
+                TargetTapeStrategy(
+                    strategy,
+                    request.target_tape,
+                    self._portfolio_bridge,
+                    environment=environment,
+                ),
+                _columnar_feed(
+                    request.dataset.bars,
+                    participation_volumes(environment, cost_rows),
+                    impact_scales(
+                        environment,
+                        cost_rows,
+                        {
+                            (item.session, item.security_id)
+                            for item in (
+                                *request.dataset.history_corporate_actions,
+                                *request.dataset.corporate_actions,
+                            )
+                        },
                     ),
                 ),
-            ),
-            corporate_actions=corporate_actions,
-            universe=universe,
-        )
+                corporate_actions=corporate_actions,
+                universe=universe,
+            )
+        except EquityWipedOut as error:
+            # 커널 예외를 포트 어휘로 옮긴다 — application 은 커널을 import 하지 않는다(#285).
+            raise EquityWipedOutError(str(error)) from error
         self._check_cancelled(cancelled)
         progress(0.78, "analytics", "Calculating professional metrics")
         # 엔진 결과는 columnar 테이블로 받는다 — 공개 Event 객체는 여기서 곧바로 raw
@@ -333,19 +363,18 @@ class BacktestEngineExecutorAdapter:
                     )
                 )
         progress(0.88, "artifacts", "Freezing raw run artifacts")
-        engine_version = "backtest-engine-v1"
         return BacktestRunResult(
             manifest=RunManifest(
                 run_id=request.run_id,
                 created_at=started_at,
                 completed_at=datetime.now(UTC),
                 engine_core=request.spec.core,
-                engine_version=engine_version,
+                engine_version=ENGINE_RULES_VERSION,
                 run_fingerprint=backtest_run_fingerprint(
                     request.spec,
                     data_snapshot_id=request.dataset.data_snapshot_id,
                     target_tape_hash=request.target_tape.tape_hash,
-                    engine_version=engine_version,
+                    engine_version=ENGINE_RULES_VERSION,
                     metric_registry_version=self._registry.version,
                 ),
                 run_spec=request.spec,

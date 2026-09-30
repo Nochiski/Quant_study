@@ -29,9 +29,9 @@ from strategy_workbench.domain.strategy.facade.document import (
     apply_upgrade_steps,
     hydrate_strategy_document,
     is_frozen_schema_version,
-    is_upgradeable_document,
     legacy_shape_hints,
     upgrade_document,
+    upgrade_refusal,
 )
 from strategy_workbench.domain.strategy.facade.specification import (
     SignalNormalization,
@@ -297,7 +297,7 @@ def test_the_output_is_not_upgradeable_again() -> None:
     """멱등: 업그레이드 결과는 현재 버전이고 옛 모양이 없어서 다시 올릴 것이 없다."""
     upgraded = _tree(_yaml("quality_momentum.v1_0.yaml"))
 
-    assert not is_upgradeable_document(upgraded)
+    assert upgrade_refusal(upgraded) is not None
     with pytest.raises(NotUpgradeableDocumentError, match="already current"):
         upgrade_document(upgraded)
 
@@ -384,7 +384,7 @@ def test_a_current_document_with_any_mix_of_1_0_shapes_is_a_structure_error_not_
         document = _with_shapes(base, shapes)
         assert legacy_shape_hints(document), shapes
 
-        assert not is_upgradeable_document(document), shapes
+        assert upgrade_refusal(document) is not None, shapes
         with pytest.raises(NotUpgradeableDocumentError, match="already current") as info:
             upgrade_document(document)
         assert "fix them in place" in str(info.value), shapes
@@ -410,7 +410,7 @@ def test_an_older_shape_than_the_declared_version_refuses_the_upgrade(version: o
     else:
         document["schema_version"] = version
 
-    assert not is_upgradeable_document(document)
+    assert upgrade_refusal(document) is not None
     expected = "older than the declared version" if version is not None else "missing"
     with pytest.raises(NotUpgradeableDocumentError, match=expected):
         upgrade_document(document)
@@ -424,9 +424,56 @@ def test_an_unknown_version_line_is_never_downgraded_even_with_a_1_0_body(versio
     document["schema_version"] = version
 
     assert legacy_shape_hints(document) != {}
-    assert not is_upgradeable_document(document)
+    assert upgrade_refusal(document) is not None
     with pytest.raises(NotUpgradeableDocumentError, match="neither current nor a known retired"):
         upgrade_document(document)
+
+
+@pytest.mark.parametrize(
+    ("base", "version", "shapes", "upgradeable"),
+    [
+        pytest.param("quality_momentum.v1_0.yaml", V1_0, (), True, id="1.0"),
+        pytest.param("quality_momentum.v1_1.yaml", V1_1, (), True, id="1.1"),
+        pytest.param("quality_momentum.v1_1.yaml", V1_1, ("nested-factors",), False, id="1.1+1.0"),
+        pytest.param(
+            "quality_momentum.v1_1.yaml",
+            V1_1,
+            ("signal-method", "unary-alias"),
+            False,
+            id="1.1+1.0-두곳",
+        ),
+        pytest.param("quality_momentum.v1_0.yaml", "9.9", (), False, id="모르는-버전"),
+        pytest.param(
+            "quality_momentum.yaml", float(CURRENT_SCHEMA_VERSION), (), False, id="따옴표-없는-현재"
+        ),
+        pytest.param("quality_momentum.v1_0.yaml", None, (), False, id="null"),
+    ],
+)
+def test_compile_offers_the_upgrade_exactly_when_the_upgrader_accepts(
+    base: str, version: object, shapes: tuple[str, ...], upgradeable: bool
+) -> None:
+    """compile 의 `structure.unsupported_schema_version` 이 업그레이드 배너를 띄운다(frontend
+    `decideDocumentUpgrade`). 두 판정은 같은 함수(`upgrade_refusal`)에서 나와 어긋나지 않는다 —
+    어긋나면 업그레이더가 거절할 문서에 누를 때마다 실패하는 버튼이 뜬다(#267 DEFECT-2).
+
+    거절할 문서는 `structure.not_upgradeable_schema_version` 이 버전 줄을 짚고, 업그레이드를 시키지
+    않는다. 선언한 버전보다 옛 문법이 섞였으면 그 자리마다 1.0 문법 힌트가 붙는다.
+    """
+    # `_with_shapes` 는 평탄한 factors 목록을 가정한다. 1.0 fixture 는 모양을 더하지 않고
+    # 그대로 쓴다.
+    document = _with_shapes(base, shapes) if shapes else _yaml(base)
+    document["schema_version"] = version
+
+    assert (upgrade_refusal(document) is None) is upgradeable
+    issues = hydrate_strategy_document(document, identity=DRAFT).issues
+    version_codes = [issue.code for issue in issues if issue.pointer == "/schema_version"]
+    if upgradeable:
+        assert version_codes == ["structure.unsupported_schema_version"]
+        return
+    assert version_codes == ["structure.not_upgradeable_schema_version"]
+    assert all("업그레이드하면" not in issue.message for issue in issues)
+    hinted = {issue.pointer for issue in issues if issue.code == "structure.legacy_shape"}
+    assert hinted == (set(legacy_shape_hints(document)) if shapes else set())
 
 
 def test_a_valid_current_document_is_never_mistaken_for_an_old_one() -> None:
@@ -434,7 +481,7 @@ def test_a_valid_current_document_is_never_mistaken_for_an_old_one() -> None:
     document = _yaml("quality_momentum.yaml")
 
     assert legacy_shape_hints(document) == {}
-    assert not is_upgradeable_document(document)
+    assert upgrade_refusal(document) is not None
 
 
 def test_a_stage_that_leaves_its_old_shape_behind_is_refused() -> None:

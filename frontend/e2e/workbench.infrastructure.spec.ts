@@ -1,21 +1,16 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { getHealth } from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
 import { backendOrigin } from "./ports.mjs";
-import { fillRunEnvironment } from "./workbench-helpers";
+import {
+  editor,
+  expectPhase,
+  fillRunEnvironment,
+  GOLDEN,
+  replaceSource,
+} from "./workbench-helpers";
 
-const ownDirectory = dirname(fileURLToPath(import.meta.url));
-const GOLDEN = readFileSync(
-  resolve(
-    ownDirectory,
-    "../../backend/tests/fixtures/strategy_documents/quality_momentum.yaml",
-  ),
-  "utf8",
-);
 const apiClient = createClient({ baseUrl: backendOrigin() });
 
 const EDITOR_CHUNK = /\/assets\/code-editor-view-[^/]+\.js(?:\?.*)?$/u;
@@ -81,7 +76,7 @@ const openWorkbench = async (page: Page) => {
 
   const navigation = await page.goto("/research/strategies/new");
   expect(navigation?.ok()).toBe(true);
-  await expect(page.getByRole("textbox", { name: "편집기" })).toBeVisible();
+  await expect(editor(page)).toBeVisible();
   await expect(
     page.getByText("서버 초안 동기화됨", { exact: true }),
   ).toBeVisible();
@@ -220,10 +215,8 @@ test("keeps a real debugger trace legible and inside the viewport", async ({
   page,
 }) => {
   await openWorkbench(page);
-  await page.getByRole("textbox", { name: "편집기" }).fill(GOLDEN);
-  await expect(page.getByRole("status", { name: "문서 상태" })).toContainText(
-    "검증 통과",
-  );
+  await replaceSource(page, GOLDEN);
+  await expectPhase(page, "검증 통과");
   await fillRunEnvironment(page);
   const resizeDebugger = page.getByRole("separator", {
     name: "중간 결과 크기 조절",
@@ -239,7 +232,7 @@ test("keeps a real debugger trace legible and inside the viewport", async ({
   await page.getByRole("button", { name: "추적 실행" }).click();
   const debuggerPanel = page.getByRole("region", { name: "중간 결과" });
   const provenance = debuggerPanel.getByLabel("추적 재현 정보");
-  await expect(provenance).toContainText("mock-equity-v0.2-20260903", {
+  await expect(provenance).toContainText("mock-equity-v0.2-", {
     timeout: 60_000,
   });
   await debuggerPanel.scrollIntoViewIfNeeded();
@@ -256,12 +249,20 @@ test("keeps a real debugger trace legible and inside the viewport", async ({
     debuggerPanel.getByRole("tablist", { name: "추적 결과" }),
     viewport,
   );
-  // 연결 추적은 중간 결과 패널 안에서 스크롤된다(1920 에서 패널보다 22px 길다). 패널이 페이지 맨 아래에
-  // 붙으면 넘친 몫이 viewport 밖 좌표가 되므로, 사용자가 하듯 추적을 스크롤해 들인 뒤 한 화면에 들어오는지
-  // 본다. 전에는 골든의 원주가 warning 이 페이지를 130px 늘여 패널이 위로 올라가 있어 우연히 통과했다.
+  // 최대 높이가 창 높이를 따르므로(#262) 추적 범위 폼부터 연결 추적까지 패널 안에서 스크롤하지 않고 다
+  // 보인다. 연결 추적 탭 패널이 중간 결과 패널 안에서 끝나는지 본다 — 본문이 넘치면 그 아래로 삐져나간다.
+  // 480px 상한일 때는 1440 에서 99px, 1920 에서 24px 넘쳐, 추적을 스크롤해 들인 상태를 기준선으로 찍었고
+  // 그래서 폼 쪽 회귀를 기준선이 잡지 못했다.
   const tracePanel = debuggerPanel.getByRole("tabpanel", { name: "연결 추적" });
-  await tracePanel.scrollIntoViewIfNeeded();
   await expectWithinViewport(tracePanel, viewport);
+  const panelBox = await debuggerPanel.boundingBox();
+  const traceBox = await tracePanel.boundingBox();
+  expect(panelBox).not.toBeNull();
+  expect(traceBox).not.toBeNull();
+  if (panelBox === null || traceBox === null) return;
+  expect(traceBox.y + traceBox.height).toBeLessThanOrEqual(
+    panelBox.y + panelBox.height + 1,
+  );
   await page.mouse.move(0, 0);
   await expect(debuggerPanel).toHaveScreenshot("strategy-debugger.png");
 });

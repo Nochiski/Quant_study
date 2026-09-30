@@ -1,14 +1,24 @@
 from strategy_workbench.application.backtest_run._service import (
-    BacktestResearchWindowViolationError,
+    DEFAULT_RUN_SLOTS,
+    BacktestParameterValueError,
     BacktestResultNotReadyError,
-    BacktestRunNotFoundError,
     BacktestRunService,
-    BacktestRunSummary,
     InvalidBacktestRunError,
-    MissingBacktestRunEnvironmentError,
+    RunAdmission,
     StaleStrategyReferenceError,
     StrategyReferenceNotFoundError,
     StrategyRevisionRequiresUpgradeError,
+    rejection_code,
+)
+from strategy_workbench.application.backtest_run.ports.outgoing.artifact_store import (
+    BacktestArtifactUnreadableError,
+)
+from strategy_workbench.application.backtest_run.ports.outgoing.run_repository import (
+    BacktestRunNotFoundError,
+    BacktestRunSummary,
+)
+from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger import (
+    TrialLineageAlreadyMergedError,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     BacktestRunResult,
@@ -24,10 +34,13 @@ from strategy_workbench.domain.backtest.facade.runs import (
     StrategySource,
     StrategySourceKind,
 )
+from strategy_workbench.domain.backtest.facade.trials import TrialLedger, TrialPreview
 
 __all__ = [
-    "BacktestResearchWindowViolationError",
+    "DEFAULT_RUN_SLOTS",
+    "BacktestParameterValueError",
     "BacktestResultNotReadyError",
+    "BacktestArtifactUnreadableError",
     "BacktestRunNotFoundError",
     "BacktestRunResult",
     "BacktestRunService",
@@ -38,7 +51,7 @@ __all__ = [
     "InlineDraft",
     "InvalidBacktestRunError",
     "InvalidRunFieldError",
-    "MissingBacktestRunEnvironmentError",
+    "RunAdmission",
     "RunProgressEvent",
     "RunStatus",
     "SavedRevisionReference",
@@ -48,4 +61,8 @@ __all__ = [
     "StrategyReferenceNotFoundError",
     "StrategySource",
     "StrategySourceKind",
+    "TrialLedger",
+    "TrialLineageAlreadyMergedError",
+    "TrialPreview",
+    "rejection_code",
 ]

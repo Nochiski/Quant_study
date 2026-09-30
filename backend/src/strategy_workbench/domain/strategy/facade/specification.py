@@ -22,10 +22,12 @@ from strategy_workbench.domain.factor.facade.expression import (
     UnaryOperator,
 )
 from strategy_workbench.domain.strategy._canonical import (
+    STRATEGY_SEMANTIC_HASH_VERSION,
     canonical_json_spec_hash,
     canonical_payload_json,
     canonical_strategy_json,
     canonical_strategy_payload,
+    strategy_semantic_hash,
     strategy_spec_hash,
 )
 from strategy_workbench.domain.strategy._models import (
@@ -38,6 +40,7 @@ from strategy_workbench.domain.strategy._models import (
     FactorSignal,
     FloatParameter,
     IntegerParameter,
+    InvalidParameterValueError,
     ParameterDefinition,
     ParameterValue,
     PortfolioSide,
@@ -51,11 +54,16 @@ from strategy_workbench.domain.strategy._models import (
     StrategySpec,
     WeightingMethod,
     composite_factors,
+    describe_allowed_parameter_values,
     inverse_risk_factor_id,
+    normalized_parameter_value,
+    parameter_value_allowed,
+    resolve_parameter_values,
 )
 
 __all__ = [
     "CROSS_SECTIONAL_ELIGIBILITY_OPERATORS",
+    "STRATEGY_SEMANTIC_HASH_VERSION",
     "BinaryNode",
     "BinaryOperator",
     "ChoiceParameter",
@@ -78,6 +86,7 @@ __all__ = [
     "GroupNode",
     "GroupOperator",
     "IntegerParameter",
+    "InvalidParameterValueError",
     "MissingPolicy",
     "NodeValueType",
     "ParameterDefinition",
@@ -102,6 +111,11 @@ __all__ = [
     "canonical_strategy_json",
     "canonical_strategy_payload",
     "composite_factors",
+    "describe_allowed_parameter_values",
     "inverse_risk_factor_id",
+    "normalized_parameter_value",
+    "parameter_value_allowed",
+    "resolve_parameter_values",
+    "strategy_semantic_hash",
     "strategy_spec_hash",
 ]

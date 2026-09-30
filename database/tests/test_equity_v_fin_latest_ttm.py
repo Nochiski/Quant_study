@@ -1,7 +1,8 @@
-"""`v_fin_latest` 의 TTM 창 규칙 — 연속 4분기가 공개일 기준으로 다 보일 때만 선다 (#212).
+"""`v_fin_latest` 의 TTM 창 규칙 — 연속 4분기가 다 공개된 날부터 선다 (#212·#238).
 
-워크벤치 `financial.net_income` 등 흐름 계정 필드는 이 뷰의 `ttm_*` 를 그대로 낸다. 그래서 TTM 을
-세우는 조건(창 4행 · 창 폭 3분기 · 창 안 모든 공개일 ≤ 이 행 공개일)이 곧 필드 값의 PIT 계약이다.
+워크벤치 `financial.net_income` 등 흐름 계정 필드는 이 뷰의 `ttm_*` 를 낸다. 그래서 TTM 을 세우는
+조건(창 4행 · 창 폭 3분기)과 TTM 의 공개일(창 안 분기값 공개일의 max —
+`ttm_income_available_date`·`ttm_cf_available_date`)이 곧 필드 값의 PIT 계약이다.
 여기서는 절단본 체인 없이 손으로 만든 `fin_std` 몇 행으로 그 조건만 잰다.
 
 창 폭: 연속 4분기의 첫·끝 `period_end` 간격은 273~276일이다(분기 말일 차이). 분기 하나가 빠지면
@@ -76,7 +77,7 @@ def _connect(rows: list[tuple[object, ...]]) -> duckdb.DuckDBPyConnection:
 
 
 def _ttm(con: duckdb.DuckDBPyConnection, corp: str, period_end: date,
-         column: str = "ttm_net_income") -> Decimal | None:
+         column: str = "ttm_net_income") -> Decimal | date | None:
     row = con.execute(
         f"SELECT {column} FROM v_fin_latest(DATE '2023-12-29') "
         "WHERE corp_code = ? AND period_end = ?", [corp, period_end]).fetchone()
@@ -94,6 +95,8 @@ def test_연속_4분기가_다_보이면_TTM_은_분기_합이고_연간_행은_
     ])
     assert _ttm(con, "C1", date(2022, 12, 31)) == 46          # 10 + 11 + 12 + 13 = 연간
     assert _ttm(con, "C1", date(2023, 3, 31)) == 50           # 11 + 12 + 13 + 14
+    # 창이 행 공개일에 완성됐으면 TTM 공개일은 행 공개일과 같다
+    assert _ttm(con, "C1", date(2023, 3, 31), "ttm_income_available_date") == date(2023, 5, 15)
     assert _ttm(con, "C1", date(2022, 9, 30)) is None         # 앞 분기가 셋뿐 — 부분합 금지
 
 
@@ -108,8 +111,12 @@ def test_분기_하나가_빠진_창은_TTM_을_세우지_않는다() -> None:
     assert _ttm(con, "C2", date(2023, 6, 30)) is None
 
 
-def test_창_안_분기가_이_행보다_늦게_공개되면_TTM_을_세우지_않는다() -> None:
-    """정정 재제출로 옛 분기가 나중에 접수되면 그 전 행의 TTM 은 PIT 로 설 수 없다."""
+def test_창_안_분기가_이_행보다_늦게_공개되면_TTM_은_그_공개일에_선다() -> None:
+    """정정 재제출로 옛 분기가 나중에 접수되면 그 전 행의 TTM 은 그 접수일에 완성된다(#238).
+
+    행 공개일에는 알 수 없었으므로 공개일 열이 정정 접수일을 가리킨다 — 소비자는 그날부터 쓴다.
+    다른 기간 값으로 대신하는 것이 아니라 같은 기간 TTM 이 늦게 서는 것이다.
+    """
     con = _connect([
         _row("C3", date(2022, 3, 31), date(2022, 5, 16), 10),    # 2022 4분기 = 46 − (10+11+12)
         _row("C3", date(2022, 6, 30), date(2022, 8, 16), 11),
@@ -118,7 +125,8 @@ def test_창_안_분기가_이_행보다_늦게_공개되면_TTM_을_세우지_�
         _row("C3", date(2023, 3, 31), date(2023, 9, 1), 14),   # 1분기 정정본이 반기보다 늦다
         _row("C3", date(2023, 6, 30), date(2023, 8, 14), 15),
     ])
-    assert _ttm(con, "C3", date(2023, 6, 30)) is None
+    assert _ttm(con, "C3", date(2023, 6, 30)) == 54           # 12 + 13 + 14 + 15
+    assert _ttm(con, "C3", date(2023, 6, 30), "ttm_income_available_date") == date(2023, 9, 1)
     assert _ttm(con, "C3", date(2023, 3, 31)) == 50           # 정정 접수일 기준으로는 선다
 
 
@@ -163,12 +171,13 @@ def test_비12월_결산은_같은_회계연도_분기로_4분기를_세워_연�
     assert _ttm(con, "M3", date(2022, 12, 31), "ttm_cf_operating") == 6 + 8 + 7 + 8
 
 
-def test_창_밖_분기의_늦은_정정은_4분기_파생을_거쳐_새어_들지_못한다() -> None:
+def test_창_밖_분기의_늦은_정정은_4분기_파생을_거쳐_TTM_공개일을_늦춘다() -> None:
     """12월 결산 — 전년 1·2분기 정정본이 당해 반기보다 늦게 접수됐다(리뷰 P1-2, 091970).
 
     2022 반기 행의 창 [2021 3분기, 2021 사업보고서, 2022 1분기, 2022 반기]는 행 공개일이 다
     2022-08-16 이하다. 그러나 2021 4분기 = 연간 − (1·2·3분기)라 창 밖 1·2분기의 값(2023-11-17
-    접수)에 기댄다. 그 창의 TTM 은 반기 공개일에 알 수 없었으므로 NULL 이어야 한다.
+    접수)에 기댄다. 그 창의 TTM 은 반기 공개일에 알 수 없었다 — 값은 서지만 공개일 열이 정정
+    접수일을 가리켜 그 전에는 새어 들지 못한다(#238).
     """
     late = date(2023, 11, 17)
     con = _connect([
@@ -180,10 +189,11 @@ def test_창_밖_분기의_늦은_정정은_4분기_파생을_거쳐_새어_들�
         _fin("L2", date(2022, 3, 31), date(2022, 5, 16), net_income=14),
         _fin("L2", date(2022, 6, 30), date(2022, 8, 16), net_income=15),
     ])
-    assert _ttm(con, "L2", date(2022, 6, 30)) is None
+    assert _ttm(con, "L2", date(2022, 6, 30)) == 12 + 13 + 14 + 15
+    assert _ttm(con, "L2", date(2022, 6, 30), "ttm_income_available_date") == late
 
 
-def test_창_밖_반기의_늦은_정정은_현금흐름_분기_차분을_거쳐_새어_들지_못한다() -> None:
+def test_창_밖_반기의_늦은_정정은_현금흐름_분기_차분을_거쳐_TTM_공개일을_늦춘다() -> None:
     """3분기 영업현금 분기값 = 3분기 누계 − 반기 누계. 반기가 늦게 접수되면 그 분기값도 그때 선다."""
     late = date(2023, 11, 17)
     con = _connect([
@@ -194,7 +204,55 @@ def test_창_밖_반기의_늦은_정정은_현금흐름_분기_차분을_거쳐
         _fin("L3", date(2022, 3, 31), date(2022, 5, 16), cf_ytd=16, cf_q=16),
         _fin("L3", date(2022, 6, 30), date(2022, 8, 16), cf_ytd=34, cf_q=18),
     ])
-    assert _ttm(con, "L3", date(2022, 6, 30), "ttm_cf_operating") is None
+    assert _ttm(con, "L3", date(2022, 6, 30), "ttm_cf_operating") == 15 + 15 + 16 + 18
+    assert _ttm(con, "L3", date(2022, 6, 30), "ttm_cf_available_date") == late
+
+
+def test_3분기_행은_창의_가장_오래된_사업보고서_4분기가_늦게_서면_손익_공개일만_늦춘다() -> None:
+    """리뷰 #300 P2-1·P3-1 — 3분기 행의 창 [전년 사업보고서, 1분기, 반기, 3분기].
+
+    전년 1분기 정정본(2022-12-01)이 3분기 행보다 늦게 접수됐다. 전년 4분기 = 연간 − 1~3분기라
+    그날을 싣는 것은 창의 가장 오래된 행뿐이다 — 공개일 창이 그 행을 빼면 손익 TTM 이 3분기
+    공개일부터 새어 든다(실원장 순이익 628행). 영업현금 4분기는 전년 3분기 누계에만 기대므로
+    현금 공개일은 행 공개일 그대로다 — 공개일 열이 둘인 이유다.
+    """
+    late = date(2022, 12, 1)
+    con = _connect([
+        _fin("P1", date(2021, 3, 31), late, net_income=10, cf_ytd=10),
+        _fin("P1", date(2021, 6, 30), date(2021, 8, 16), net_income=11, cf_ytd=21),
+        _fin("P1", date(2021, 9, 30), date(2021, 11, 15), net_income=12, cf_ytd=33),
+        _fin("P1", date(2021, 12, 31), date(2022, 3, 21), net_income=46, cf_ytd=46),
+        _fin("P1", date(2022, 3, 31), date(2022, 5, 16), net_income=14, cf_ytd=14),
+        _fin("P1", date(2022, 6, 30), date(2022, 8, 16), net_income=15, cf_ytd=29),
+        _fin("P1", date(2022, 9, 30), date(2022, 11, 14), net_income=16, cf_ytd=45),
+    ])
+    assert _ttm(con, "P1", date(2022, 9, 30)) == 13 + 14 + 15 + 16
+    assert _ttm(con, "P1", date(2022, 9, 30), "ttm_income_available_date") == late
+    assert _ttm(con, "P1", date(2022, 9, 30), "ttm_cf_operating") == 13 + 14 + 15 + 16
+    assert _ttm(con, "P1", date(2022, 9, 30), "ttm_cf_available_date") == date(2022, 11, 14)
+
+
+def test_1분기와_반기_행은_전년_사업보고서가_늦게_정정되면_현금_공개일도_그날로_늦춘다() -> None:
+    """리뷰 #300 P2-1·r2 P2-1 — 전년 사업보고서 정정본(2022-09-01)이 1분기·반기 행보다 늦게 접수됐다.
+
+    1분기 분기값은 누계 그대로라 사업보고서에 기대지 않는다. 그래서 현금 공개일에 그날을 싣는 것은
+    1분기 행의 창 [전년 반기, 3분기, 사업보고서, 1분기]에서는 직전 행(r-1), 반기 행의 창 [전년
+    3분기, 사업보고서, 1분기, 반기]에서는 r-2 하나뿐이다. 공개일 창이 그 자리를 빼면 영업현금 TTM 이
+    행 공개일부터 새어 든다(실원장 1분기 행 2,076행, 반기 행 814행).
+    """
+    late = date(2022, 9, 1)
+    con = _connect([
+        _fin("P2", date(2021, 3, 31), date(2021, 5, 17), net_income=10, cf_ytd=10),
+        _fin("P2", date(2021, 6, 30), date(2021, 8, 16), net_income=11, cf_ytd=21),
+        _fin("P2", date(2021, 9, 30), date(2021, 11, 15), net_income=12, cf_ytd=33),
+        _fin("P2", date(2021, 12, 31), late, net_income=46, cf_ytd=46),
+        _fin("P2", date(2022, 3, 31), date(2022, 5, 16), net_income=14, cf_ytd=14),
+        _fin("P2", date(2022, 6, 30), date(2022, 8, 16), net_income=15, cf_ytd=29),
+    ])
+    assert _ttm(con, "P2", date(2022, 3, 31), "ttm_cf_operating") == 11 + 12 + 13 + 14
+    assert _ttm(con, "P2", date(2022, 3, 31), "ttm_cf_available_date") == late
+    assert _ttm(con, "P2", date(2022, 3, 31), "ttm_income_available_date") == late
+    assert _ttm(con, "P2", date(2022, 6, 30), "ttm_cf_available_date") == late
 
 
 def test_창_안에_연결과_별도가_섞이면_TTM_을_세우지_않는다() -> None:

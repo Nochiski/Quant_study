@@ -116,13 +116,13 @@ const renderEditor = (
   render(
     <FactorGraphPanel
       state={{ status: "blocked", reason: "invalid" }}
+      schema={SCHEMA}
       diagnostics={[]}
       selectedPointer={selectedPointer}
       onSelectPointer={onSelectPointer}
       onOpenSource={vi.fn()}
       editing={{
         tree: treeOf(source),
-        schema: SCHEMA,
         transactions,
         catalogs: { equityFields: null },
         operators,
@@ -452,12 +452,12 @@ describe("연산자 팔레트와 조용하지 않은 실패 (P1-04)", () => {
     render(
       <FactorGraphPanel
         state={{ status: "blocked", reason: "invalid" }}
+        schema={RECURSIVE_SCHEMA}
         diagnostics={[]}
         onSelectPointer={vi.fn()}
         onOpenSource={vi.fn()}
         editing={{
           tree: treeOf(RECURSIVE_SOURCE),
-          schema: RECURSIVE_SCHEMA,
           transactions,
           catalogs: { equityFields: null },
           operators: { status: "ready", definitions: [] },
@@ -489,13 +489,13 @@ describe("노드 pointer 진단이 붙는 자리 (P1-04 리뷰 차단 2)", () =>
     render(
       <FactorGraphPanel
         state={{ status: "blocked", reason: "invalid" }}
+        schema={SCHEMA}
         diagnostics={[NODE_DIAGNOSTIC]}
         selectedPointer="/factors/0/graph/nodes/1"
         onSelectPointer={vi.fn()}
         onOpenSource={vi.fn()}
         editing={{
           tree: treeOf(VERBOSE),
-          schema: SCHEMA,
           transactions: stub(),
           catalogs: { equityFields: null },
           operators: CATALOG,

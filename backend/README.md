@@ -41,11 +41,11 @@
 
 ## M5 Single backtest + analytics
 
-`domain.analytics`의 `metric-registry-v4`가 수익률·위험·회전율 8개 성과 지표와 샤프 표준오차, MDD 기간/회복,
-benchmark/excess return, 거래·노출·비용을 합친 23개 정의와 공식을 소유한다. CAGR의 연수는 기준일부터
+`domain.analytics`의 `metric-registry-v5`가 수익률·위험·회전율 8개 성과 지표와 샤프 표준오차·PSR, MDD 기간/회복,
+benchmark/excess return, 거래·노출·비용을 합친 24개 정의와 공식을 소유한다. CAGR의 연수는 기준일부터
 마지막 세션까지의 달력 일수 / 365이고, 1년 미만인 실행은 CAGR·칼마를 비우고 사유를 붙인다. `metric_windows` 구간 지표는 구간 직전 세션의 자산을 기준값으로 쓴다.
 샤프·소르티노·롤링 샤프는 한국은행 기준금리 이력(`domain/analytics/_base_rate.py`)으로 만든 초과수익으로 잰다(#274).
-샤프 표준오차는 수익률이 독립·정규라고 본 Lo(2002) 근사라 자기상관·두꺼운 꼬리가 있으면 실제 오차와 다를 수 있다(양의 자기상관이면 더 크다). 롤링 샤프 창은 126세션(6개월)이고 `compute_analytics`의 `rolling_window` 기본값이 정한다.
+샤프 표준오차는 왜도·첨도를 넣은 Mertens(2002)·Bailey·López de Prado(2012) 식(분모 n−1)이고, 수익률이 날마다 독립이라고 본 근사라 자기상관이 있으면 실제 오차와 다를 수 있다(양의 자기상관이면 더 크다). PSR(`probabilistic_sharpe`)은 Φ(샤프 / 표준오차), 곧 진짜 샤프가 0보다 클 확률이다. 계열 DSR은 같은 `probabilistic_sharpe` 함수에 기준 샤프만 바꿔 넣는다. 롤링 샤프 창은 126세션(6개월)이고 `compute_analytics`의 `rolling_window` 기본값이 정한다.
 `application.backtest_run`은 immutable `BacktestRunSpec`을 TargetTape로 컴파일하고 교체 가능한
 data/executor/artifact port만 호출한다. 기본 조립은 Equity mock → `TargetTapeStrategy` →
 Persistent Rust Engine → atomic local JSON artifact이며 Python reference core도 같은 계약으로 남긴다.
@@ -58,10 +58,10 @@ Persistent Rust Engine → atomic local JSON artifact이며 Python reference cor
   spec_hash 대조) 또는 inline draft를 지정하고(옛 schema revision이면 422
   `backtest.strategy.requires_upgrade`) manifest의 `strategy_provenance`에 출처를 기록 (기존 `strategy` inline도 유지). 실제
   `backtest.run.invalid`·`portfolio.*` 422와 saved-reference 404/409는 OpenAPI/generated SDK의
-  discriminated error 계약으로 함께 제공한다. 한꺼번에 계산하는 run 수의 상한은 `backtest_run`의
-  `MAX_CONCURRENT_RUNS` 하나가 정하고, 넘는 run은 `queued`(접수 문장 `Waiting for a free run slot`)로
-  접수 순서대로 기다린다. 같은 입력(실행할 spec·실행 설정·실행 옵션·provenance)으로 `queued`·`running`
-  인 run이 있으면 새 run 대신 그 run을 돌려준다(이슈 #161).
+  discriminated error 계약으로 함께 제공한다. 동시 실행 슬롯 수는 환경 변수
+  `STRATEGY_WORKBENCH_RUN_SLOTS`(기본 2)가 정하고, 넘는 run은 `queued`(접수 문장 `Waiting for a free
+  run slot`)로 기다린다. 배정 순서(단일 실행 전용 슬롯·실험 라운드로빈)와 같은 입력 잇기·공유 run 취소
+  규칙은 `.claude/rules/strategy-workbench-sot.md` 의 "백테스트 run 접수" 행이 정본이다.
 - `GET /api/v1/backtests`: 실행 이력 목록
 - `GET /api/v1/backtests/{run_id}`: 상태·진행률·artifact hash 조회
 - `GET /api/v1/backtests/{run_id}/request`: 서버가 수락한 실행 요청. 감사와 같은 조건 재실행에 쓴다
@@ -176,6 +176,7 @@ backend/
    ├─ domain/analytics/                    # 21개 versioned metric 정의·공식
    ├─ domain/backtest/                     # RunEnvironment, run/manifest/raw artifact 계약
    ├─ domain/assistant/                    # 어시스턴트 순수 값 타입(메시지·이벤트·도구·제안 검증 결과)
+   ├─ domain/experiment/                   # 탐색 그리드·워크포워드 창·trial 상태 전이(검증 랩)
    ├─ application/equity_workspace/        # 검색 catalog·universe/panel PIT preview
    │  ├─ ports/outgoing/equity_data.py     # EquityDataPort
    │  └─ facade/{ports,workspace}.py
@@ -238,6 +239,7 @@ extra 없이 어시스턴트 계약 테스트와 architecture 테스트를 따�
 | 변수 | 기본값 | 뜻 |
 |---|---|---|
 | `STRATEGY_WORKBENCH_DB_PATH` | `.local/strategy-revisions.sqlite3` | 전략 revision·초안 저장소 |
+| `STRATEGY_WORKBENCH_RESEARCH_DB_PATH` | `.local/research.sqlite3` | 백테스트 실행 기록(목록·상태·요청). 재시작 때 끝나지 않은 run 은 `backtest.run.interrupted` 로 닫는다 |
 | `STRATEGY_WORKBENCH_ALLOWED_ORIGINS` | `http://localhost:5173` | CORS 허용 origin(쉼표로 구분) |
 | `STRATEGY_WORKBENCH_EQUITY_ADAPTER` | `mock` | `mock` 또는 `duckdb` |
 | `STRATEGY_WORKBENCH_EQUITY_ROOT` | 없음 | duckdb adapter가 읽을 equity 층 루트. `duckdb`면 필수 |

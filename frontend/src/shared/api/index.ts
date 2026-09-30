@@ -46,6 +46,7 @@ export type {
 export {
   ApiRequestError,
   configureStrategyWorkbenchApi,
+  failureReason,
   strategyWorkbenchApi,
   type ApplicableWhen,
   type BacktestRunResult,
@@ -93,5 +94,6 @@ export {
   type StrategySummary,
   type StrategyTraceRequest,
   type StrategyTraceResponse,
+  type TrialPreview,
   type UpgradedDocument,
 } from "./strategy-workbench";

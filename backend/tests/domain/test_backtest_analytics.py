@@ -8,6 +8,7 @@ from itertools import pairwise
 import pytest
 
 from strategy_workbench.domain.analytics._base_rate import base_rate
+from strategy_workbench.domain.analytics._calculation import _sharpe_standard_error
 from strategy_workbench.domain.analytics.facade.metrics import (
     BASE_RATE_CONFIRMED_ON,
     AnalysisPoint,
@@ -17,6 +18,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     TradeOutcome,
     build_default_metric_registry,
     compute_analytics,
+    probabilistic_sharpe,
     unavailable_metric_values,
 )
 
@@ -50,8 +52,8 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
         registry,
     )
 
-    assert registry.version == "metric-registry-v4"
-    assert len(registry.definitions()) == 23
+    assert registry.version == "metric-registry-v5"
+    assert len(registry.definitions()) == 24
     assert _metric(report, "total_taxes").value == pytest.approx(0.6)
     assert _metric(report, "total_return").value == pytest.approx(0.1)
     assert _metric(report, "max_drawdown").value == pytest.approx(-0.2)
@@ -72,11 +74,23 @@ def test_versioned_registry_calculates_risk_benchmark_trade_exposure_and_cost_me
     # 샤프 분모는 원수익률 표준편차 그대로다.
     assert _metric(report, "sharpe").value == pytest.approx(mean / sample_std * math.sqrt(252))
     assert _metric(report, "sortino").value == pytest.approx(mean / downside_std * math.sqrt(252))
-    # Lo(2002): 일 샤프의 표준오차 √((1 + SR_일²/2) / N)을 √252 배 해 연 단위로 옮긴다. N = 3.
+    # 일 샤프 s의 표준오차 √((1 − γ₃s + (γ₄−1)s²/4) / (n−1))을 √252 배 해 연 단위로 옮긴다. n = 3.
+    # 손계산: 편차 (-0.2491, 0.0759, 0.1731)의 분모 n 모멘트로 왜도 γ₃ ≈ -0.5564, 원 첨도 γ₄ = 1.5,
+    # s ≈ 0.2214 → 일 σ̂ ≈ 0.7514, 연 ≈ 11.93. PSR = Φ(0.2214 / 0.7514) ≈ 0.6159.
     daily_sharpe = mean / sample_std
-    assert _metric(report, "sharpe_standard_error").value == pytest.approx(
-        math.sqrt((1 + daily_sharpe**2 / 2) / 3) * math.sqrt(252)
+    deviations = tuple(item - 53 / 1080 for item in returns)
+    second = sum(item**2 for item in deviations) / 3
+    skewness = sum(item**3 for item in deviations) / 3 / second**1.5
+    kurtosis = sum(item**4 for item in deviations) / 3 / second**2
+    assert (skewness, kurtosis) == pytest.approx((-0.5564, 1.5), abs=1e-4)
+    daily_error = math.sqrt(
+        (1 - skewness * daily_sharpe + (kurtosis - 1) * daily_sharpe**2 / 4) / (3 - 1)
     )
+    assert _metric(report, "sharpe_standard_error").value == pytest.approx(
+        daily_error * math.sqrt(252)
+    )
+    assert _metric(report, "sharpe_standard_error").value == pytest.approx(11.93, abs=1e-2)
+    assert _metric(report, "probabilistic_sharpe").value == pytest.approx(0.6159, abs=1e-4)
     # 1/2 → 1/7 은 5일이라 1년 미만: 예전처럼 1.1^(252/3) - 1 로 부풀리지 않고 비운다.
     for metric_id in ("cagr", "calmar"):
         assert _metric(report, metric_id).value is None
@@ -113,9 +127,10 @@ def test_metric_values_preserve_zero_and_explain_unavailable_values_per_scope() 
     assert fees.value == 0.0
     assert sharpe.value is None
     assert sharpe.unavailable_reason == "zero_return_variance"
-    sharpe_error = _metric(report, "sharpe_standard_error", MetricScope.OUT_OF_SAMPLE)
-    assert sharpe_error.value is None
-    assert sharpe_error.unavailable_reason == "zero_return_variance"
+    for metric_id in ("sharpe_standard_error", "probabilistic_sharpe"):
+        empty = _metric(report, metric_id, MetricScope.OUT_OF_SAMPLE)
+        assert empty.value is None
+        assert empty.unavailable_reason == "zero_return_variance"
     assert sharpe.scope_label == "OOS 2026"
     assert sharpe.sample_count == 1
 
@@ -366,7 +381,7 @@ def test_sessions_before_the_base_rate_history_leave_sharpe_sortino_and_rolling_
     )
 
     assert _metric(report, "volatility").value is not None
-    for metric_id in ("sharpe", "sharpe_standard_error", "sortino"):
+    for metric_id in ("sharpe", "sharpe_standard_error", "probabilistic_sharpe", "sortino"):
         assert _metric(report, metric_id).value is None
         assert _metric(report, metric_id).unavailable_reason == "base_rate_not_covered"
     assert [item.value for item in report.rolling_sharpe] == [None] * 4
@@ -374,8 +389,9 @@ def test_sessions_before_the_base_rate_history_leave_sharpe_sortino_and_rolling_
 
 def test_sharpe_standard_error_of_six_and_a_half_years_is_about_0_39() -> None:
     # 6.5년(1638세션) 동안 초과수익이 기준금리 위 0.01/√252 ± 1% 로 번갈아 나오는 곡선. 연 샤프는
-    # 1.0 근처이고 Lo(2002) 연 표준오차는 √((1 + (1/√252)²/2) / 1638) · √252 ≈ 0.392 다. 연 단위
-    # 관측용 식 √((1 + SR²/2) / 6.5)를 잘못 쓰면 0.48 이 나온다.
+    # 1.0 근처다. ±1% 가 번갈아 나와 왜도 0·원 첨도 1 이므로 연 표준오차는 √(252 / 1637) ≈ 0.392 다
+    # (정규라고 본 Lo(2002) 식도 0.393). 연 단위 관측용 식 √((1 + SR²/2) / 6.5)를 잘못 쓰면 0.48 이
+    # 나온다.
     days = (date(2019, 1, 2) + timedelta(days=offset) for offset in range(2400))
     sessions = tuple(day for day in days if day.weekday() < 5)[:1639]
     equity = [100.0]
@@ -398,6 +414,83 @@ def test_sharpe_standard_error_of_six_and_a_half_years_is_about_0_39() -> None:
     sharpe = _metric(report, "sharpe").value
     assert sharpe == pytest.approx(1.0, abs=0.01)
     assert _metric(report, "sharpe_standard_error").value == pytest.approx(0.392, abs=1e-3)
+
+
+@pytest.mark.parametrize(
+    ("observations", "skewness", "kurtosis", "expected"),
+    [
+        (24, 0.0, 3.0, 0.982),  # 정규라고 보면 안심되는 값
+        (24, -2.448, 10.164, 0.913),  # 왜도·첨도를 넣으면 95% 신뢰로 실력이라 못 한다
+        (36, -2.448, 10.164, 0.953),  # 3년이면 다시 95%를 넘는다
+    ],
+)
+def test_psr_matches_the_bailey_lopez_de_prado_hedge_fund_example(
+    observations: int, skewness: float, kurtosis: float, expected: float
+) -> None:
+    # Bailey·López de Prado(2012) "The Sharpe Ratio Efficient Frontier" 3절, Figure 6 의 헤지펀드
+    # 월간 실적: 월 샤프 0.458(연 1.59), 왜도 -2.448, 원 첨도 10.164, 기준 0. 논문 본문의
+    # PSR(0) 값(소수 셋째 자리)과 부록 A.3 구현(분모 n−1)을 손으로 대조했다. 입력 0.458 이 반올림한
+    # 값이라 허용 오차는 1e-3 이다.
+    # https://www.davidhbailey.com/dhbpapers/sharpe-frontier.pdf
+    annual = 0.458 * math.sqrt(12)
+    error = _sharpe_standard_error(annual, skewness, kurtosis, observations, 12)
+
+    assert probabilistic_sharpe(annual, error) == pytest.approx(expected, abs=1e-3)
+
+
+def test_psr_matches_the_validation_lab_math_note_example() -> None:
+    # 검증 랩 수학 노트 3절(spec 머리의 링크) 예시 전략: 연 샤프 0.86, 889세션(3.53년), 왜도 -0.41,
+    # 원 첨도 5.8, 252일 기준 → PSR(기준 0) 0.94. 같은 입력의 DSR 0.61 은 V4-02 가 검증한다.
+    # 손계산: s = 0.86/√252 = 0.05418, 분모 √(1 + 0.41·s + 4.8/4·s²) = 1.01279,
+    # z = 0.05418·√888 / 1.01279 = 1.5940 → Φ(z) = 0.9445.
+    error = _sharpe_standard_error(0.86, -0.41, 5.8, 889, 252)
+
+    assert probabilistic_sharpe(0.86, error) == pytest.approx(0.9445, abs=1e-4)
+
+
+def test_sharpe_error_is_exactly_zero_for_two_valued_returns_at_two_over_skewness() -> None:
+    # 두 값만 나오는 분포는 γ₄ = 1 + γ₃² 다. γ₃ = 2, γ₄ = 5, 세션 샤프 s = 2/γ₃ = 1 이면 근호 안이
+    # 1 − 2 + 4/4 = 0 이다.
+    assert _sharpe_standard_error(1.0, 2.0, 5.0, 10, 1) == 0.0
+
+
+def test_two_valued_curve_at_zero_error_empties_error_and_psr_instead_of_crashing() -> None:
+    # 리뷰 P3-1 재현: 2026-01-05~08 네 점, 수익률 (0.02, 0.02, b). b ≈ 0.035335941307026 에서 세션
+    # 샤프가 2/γ₃ 에 걸려 근호 안이 0 근처가 되고, 부동소수 오차로 음수가 나오면 math domain
+    # error 로 실행 전체가 죽었다. b 를 1e-17 씩 흔든 곡선이 모두 계산을 마치고, 표준오차가 0 으로
+    # 떨어진 곡선은 표준오차·PSR 을 같은 사유로 비운다. 몇 개가 0 에 떨어지는지는 부동소수 연산에
+    # 달려 있어 개수는 단언하지 않는다.
+    empty = 0
+    for step in range(-200, 201):
+        equity = [100.0]
+        for item in (0.02, 0.02, 0.035335941307026 + step * 1e-17):
+            equity.append(equity[-1] * (1 + item))
+        report = compute_analytics(
+            AnalyticsInput(
+                points=tuple(
+                    AnalysisPoint(date(2026, 1, 5 + index), value, 0.0, 0.0)
+                    for index, value in enumerate(equity)
+                ),
+                traded_notional=0.0,
+            ),
+            build_default_metric_registry(),
+        )
+        error = _metric(report, "sharpe_standard_error")
+        psr = _metric(report, "probabilistic_sharpe")
+        if error.value is None:
+            empty += 1
+            assert psr.value is None
+            assert error.unavailable_reason == psr.unavailable_reason == "two_valued_returns"
+        else:
+            assert error.value >= 0.0
+            assert psr.value is not None
+    assert empty > 0
+
+
+def test_psr_against_a_benchmark_sharpe_is_one_half_at_the_benchmark() -> None:
+    # 계열 DSR 은 기준에 기대 최대 샤프를 넣는다. 관측 샤프가 기준과 같으면 Φ(0) = 0.5 다.
+    assert probabilistic_sharpe(1.2, 0.4, benchmark=1.2) == 0.5
+    assert probabilistic_sharpe(1.2, 0.4, benchmark=0.4) == pytest.approx(0.97725, abs=1e-5)
 
 
 def test_rolling_sharpe_starts_once_the_126_session_window_is_full() -> None:
@@ -514,7 +607,7 @@ def test_requested_empty_scope_is_serialized_as_unavailable_instead_of_disappear
         reason=MetricUnavailableReason.NO_OBSERVATIONS_IN_SCOPE,
     )
 
-    assert len(values) == 23
+    assert len(values) == 24
     assert all(item.value is None for item in values)
     assert all(item.sample_count == 0 for item in values)
     assert {item.scope for item in values} == {MetricScope.VALIDATION}

@@ -10,7 +10,8 @@ P2-02 부터 `environment.missing` 도 같은 경로를 탄다: 실행 설정의
 
 검증 랩 V1-01 부터 연구 구간 잠금도 같은 관문을 지난다: 측정 시작일이 2020-01-02 앞이면 세 경로가
 `run_environment.research_window` 로 거절하고, 워밍업 관측 읽기는 막지 않는다(spec D1). V2-02 의
-참여 기준(`participation_basis`)도 데이터 질의의 워밍업과 엔진 캡까지 같은 축으로 내려간다.
+참여 기준(`participation_basis`)도 데이터 질의의 워밍업과 엔진 캡까지 같은 축으로 내려간다. V2-03 의
+√ 시장충격(`impact_model`)도 워밍업과 엔진 체결가까지 같은 축이다.
 """
 
 from __future__ import annotations
@@ -30,24 +31,25 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
     BacktestEnginePortfolioAdapter,
 )
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import MockEquityDataAdapter
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataQuery,
     BacktestDataset,
+    CorporateActionRecord,
     MarketBarRecord,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
-    BacktestResearchWindowViolationError,
     BacktestResultNotReadyError,
     BacktestRunService,
     BacktestRunSpec,
     InvalidBacktestRunError,
-    MissingBacktestRunEnvironmentError,
 )
 from strategy_workbench.application.portfolio_design.facade.design import (
-    InvalidPortfolioRequestError,
     PortfolioDesignService,
     PortfolioPreviewRequest,
     RawObservationUnavailableError,
@@ -67,10 +69,14 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     build_default_metric_registry,
 )
 from strategy_workbench.domain.backtest.facade.environment import (
+    ImpactModel,
+    MissingRunEnvironmentError,
     ParticipationBasis,
+    ResearchWindowViolationError,
     RunEnvironment,
     SellTax,
     environment_hash,
+    impact_scales,
     participation_volumes,
 )
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
@@ -142,33 +148,30 @@ def _runs(portfolio: PortfolioDesignService, tmp_path: Path, run_id: str) -> Bac
         MockEquityDataAdapter.demo(),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
 
 
 def test_preview_without_an_environment_is_a_coded_request_error() -> None:
     """P2-03: 문서에 기간·유니버스가 없으므로 되돌아갈 기본값이 없다."""
-    with pytest.raises(InvalidPortfolioRequestError) as info:
+    with pytest.raises(MissingRunEnvironmentError) as info:
         _portfolio().run_pipeline(PortfolioPreviewRequest(_spec()))
 
-    issues = info.value.validation.issues
-    assert [issue.code for issue in issues] == ["run_environment.required"]
-    assert issues[0].path == "environment"
+    assert info.value.code == "run_environment.required"
 
 
 def test_preflight_without_an_environment_is_refused_too() -> None:
     """엔진 능력 판정이 참여율을 읽으므로 preflight 도 문서만으로는 끝나지 않는다."""
-    with pytest.raises(InvalidPortfolioRequestError) as info:
+    with pytest.raises(MissingRunEnvironmentError):
         _portfolio().preflight(PortfolioPreviewRequest(_spec()))
-
-    assert [issue.code for issue in info.value.validation.issues] == ["run_environment.required"]
 
 
 def test_trace_without_an_environment_is_refused_like_preview() -> None:
-    """세 경로가 같은 코드·같은 `validation.issues` 구조로 거절한다(P2-02 2차 리뷰 P3)."""
+    """세 경로가 같은 domain 오류로 거절하고, inbound 가 같은 접수 거절 코드로 낸다(#351)."""
     traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
 
-    with pytest.raises(InvalidPortfolioRequestError) as info:
+    with pytest.raises(MissingRunEnvironmentError, match="requested_by=strategy.trace"):
         traces.trace(
             StrategyTraceRequest(
                 strategy_source=InlineDraft(_spec(), "inline_draft", "a" * 64),
@@ -177,13 +180,11 @@ def test_trace_without_an_environment_is_refused_like_preview() -> None:
             )
         )
 
-    assert [issue.code for issue in info.value.validation.issues] == ["run_environment.required"]
-
 
 def test_run_without_an_environment_is_refused_before_it_is_queued(tmp_path: Path) -> None:
     runs = _runs(_portfolio(), tmp_path, "no-environment-run")
 
-    with pytest.raises(MissingBacktestRunEnvironmentError, match="run_environment.required"):
+    with pytest.raises(MissingRunEnvironmentError, match="run_environment.required"):
         runs.start(BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON))
 
 
@@ -192,13 +193,13 @@ RESEARCH_FLOOR = date(2020, 1, 2)
 
 
 def test_preview_and_trace_measuring_the_sealed_window_are_coded_request_errors() -> None:
-    """봉인 구간 마지막 날부터 측정하면 preview·trace 가 같은 issue code 로 거절한다(spec D1)."""
+    """봉인 구간 마지막 날부터 측정하면 preview·trace 가 같은 domain 오류로 거절한다(spec D1)."""
     sealed = replace(_environment(), start=SEALED_LAST_DAY)
     traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
 
-    with pytest.raises(InvalidPortfolioRequestError) as preview:
+    with pytest.raises(ResearchWindowViolationError) as preview:
         _portfolio().run_pipeline(PortfolioPreviewRequest(_spec(), environment=sealed))
-    with pytest.raises(InvalidPortfolioRequestError) as trace:
+    with pytest.raises(ResearchWindowViolationError) as trace:
         traces.trace(
             StrategyTraceRequest(
                 strategy_source=InlineDraft(_spec(), "inline_draft", "a" * 64),
@@ -209,9 +210,8 @@ def test_preview_and_trace_measuring_the_sealed_window_are_coded_request_errors(
         )
 
     for info in (preview, trace):
-        (issue,) = info.value.validation.issues
-        assert (issue.code, issue.path) == ("run_environment.research_window", "environment")
-        assert "got=start=2019-12-31" in issue.message
+        assert info.value.code == "run_environment.research_window"
+        assert "got=start=2019-12-31" in str(info.value)
 
 
 def test_run_measuring_the_sealed_window_is_refused_before_it_is_queued(tmp_path: Path) -> None:
@@ -220,7 +220,7 @@ def test_run_measuring_the_sealed_window_is_refused_before_it_is_queued(tmp_path
 
     request = BacktestRunSpec(strategy=_spec(), core=ExecutionCore.PYTHON, environment=sealed)
 
-    with pytest.raises(BacktestResearchWindowViolationError, match="research_window"):
+    with pytest.raises(ResearchWindowViolationError, match="research_window"):
         runs.start(request)
 
 
@@ -523,6 +523,7 @@ def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
         data,
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "adv-run",
     )
     runs.start(BacktestRunSpec(strategy=_spec(), core=core, environment=environment))
@@ -544,3 +545,76 @@ def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
         warmed[(fill.session, fill.security_id)] != cold[(fill.session, fill.security_id)]
         for fill in first
     )
+
+
+class _WarmupSplit(_ShrunkWarmupValue):
+    """워밍업 가운데 세션에 종목마다 자본변동을 하나 싣는다 — σ 가 그 수익률을 빼는지 본다."""
+
+    def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
+        dataset = super().load_backtest_dataset(query)
+        middle = sorted({bar.session for bar in dataset.history_bars})[10]
+        dataset = replace(
+            dataset,
+            history_corporate_actions=tuple(
+                CorporateActionRecord(middle, security_id, "split", "2.0", f"{security_id}:split")
+                for security_id in sorted({bar.security_id for bar in dataset.history_bars})
+            ),
+        )
+        self.loads[-1] = (query, dataset)
+        return dataset
+
+
+def _impact(
+    environment: RunEnvironment,
+    bars: tuple[MarketBarRecord, ...],
+    actions: tuple[CorporateActionRecord, ...] = (),
+) -> dict[tuple[date, str], float]:
+    scales = impact_scales(
+        environment,
+        ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
+        {(action.session, action.security_id) for action in actions},
+    )
+    assert scales is not None
+    return scales
+
+
+@pytest.mark.parametrize("core", [ExecutionCore.PYTHON, ExecutionCore.RUST])
+def test_sqrt_impact_reads_warmup_and_prices_fills_with_the_domain_scale(
+    tmp_path: Path, core: ExecutionCore
+) -> None:
+    """`sqrt`(V2-03)이면 실행이 start 앞 21세션을 워밍업으로 읽고, 체결가는 시가에서 시가 × 척도 ×
+    √수량만큼 밀린다(이 창은 매수뿐이고 방향은 `test_sqrt_impact.py` 가 덮는다). `slippage_bps` 는
+    쓰지 않는다. 척도는 워밍업 행까지 포함해 domain 이 센 값이고, 워밍업 bar 나 워밍업 자본변동을 뺀
+    척도와 첫 체결 세션에서 다르다 — 엔진 어댑터가 둘 중 하나라도 빠뜨리면 여기서 걸린다."""
+    environment = replace(_environment(), impact_model=ImpactModel.SQRT, slippage_bps=500.0)
+    data = _WarmupSplit()
+    runs = BacktestRunService(
+        _portfolio(),
+        InMemoryStrategyRepository(),
+        data,
+        BacktestEngineExecutorAdapter(build_default_metric_registry()),
+        LocalArtifactStore(tmp_path),
+        run_repository=SQLiteBacktestRunRepository(),
+        new_id=lambda: "impact-run",
+    )
+    runs.start(BacktestRunSpec(strategy=_spec(), core=core, environment=environment))
+    assert wait_for_terminal_run(runs, "impact-run").status.value == "completed"
+
+    ((query, dataset),) = data.loads
+    assert query.history_sessions_before_start == 21
+    history = (*dataset.history_bars, *dataset.bars)
+    warmed = _impact(environment, history, dataset.history_corporate_actions)
+    unsplit = _impact(environment, history)
+    cold = _impact(environment, dataset.bars)
+    opens = {(bar.session, bar.security_id): bar.open for bar in dataset.bars}
+    fills = runs.result("impact-run").artifacts.fills
+    assert fills
+    for fill in fills:
+        key = (fill.session, fill.security_id)
+        slip = opens[key] * warmed[key] * math.sqrt(float(fill.quantity))
+        assert slip > 0
+        assert fill.slippage_per_share == pytest.approx(slip)
+        assert fill.price == pytest.approx(opens[key] + (slip if fill.side == "buy" else -slip))
+    first = (fills[0].session, fills[0].security_id)
+    assert warmed[first] != cold[first]
+    assert warmed[first] != unsplit[first]

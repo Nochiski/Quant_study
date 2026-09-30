@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Literal, TypeAlias
@@ -99,6 +100,22 @@ class RebalanceFrequency(StrEnum):
     QUARTERLY = "quarterly"
 
 
+class AppliedStage(StrEnum):
+    """전략 파이프라인의 단계 어휘 — 유니버스(`ELIGIBILITY`) → 알파(`SIGNAL`) → 포트폴리오
+    구성 → 리스크 → 실행(`EXECUTION`, 실행 설정 `domain/backtest` 의 제약 행).
+
+    제약 행의 적용 시점(runtime schema `x-applied-stage`)과 그래프 표현의 단계(field
+    metadata `stage` → `x-stage`, P4-01)가 이 어휘를 쓴다. 필드의 단계를 읽는 규칙은
+    정본 대장 "그래프 표현 투영" 행이 소유한다.
+    """
+
+    ELIGIBILITY = "eligibility"
+    SIGNAL = "signal"
+    PORTFOLIO = "portfolio"
+    RISK = "risk"
+    EXECUTION = "execution"
+
+
 @dataclass(frozen=True)
 class StrategyIdentity:
     strategy_id: str
@@ -149,7 +166,11 @@ class PortfolioStep:
     rebalance_every_n_sessions: int = 21
     turnover_buffer_count: int = 0
     minimum_trade_weight: float = 0.0
-    liquidity_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
+    # 유동성 필터는 후보를 거를 때 읽힌다(유니버스 단계). `minimum_liquidity` 는 제약 행이
+    # 같은 단계를 말한다.
+    liquidity_field_id: str | None = field(
+        default=None, metadata={**CATALOG_EQUITY_FIELD, "stage": AppliedStage.ELIGIBILITY}
+    )
     minimum_liquidity: float | None = None
 
 
@@ -160,11 +181,16 @@ class RiskStep:
     max_name_weight: float = 0.1
     max_sector_weight: float = 0.3
     sector_neutral: bool = False
-    risk_field_id: str | None = field(default=None, metadata=CATALOG_EQUITY_FIELD)
+    # 역가중 원천(필드·팩터)은 비중을 정할 때 읽힌다(포트폴리오 구성 단계).
+    risk_field_id: str | None = field(
+        default=None, metadata={**CATALOG_EQUITY_FIELD, "stage": AppliedStage.PORTFOLIO}
+    )
     # 역가중 원천을 데이터 필드 대신 문서의 팩터 출력으로 쓴다(schema 1.2, spec D3 S6).
     # `weighting: risk` 에서만 읽히고, 그때 참조 팩터는 합성 점수에서 빠진다
     # (`inverse_risk_factor_id`). `risk_field_id` 와 함께 쓰면 검증 error 다.
-    risk_factor_id: str | None = field(default=None, metadata=REFERENCE_FACTOR)
+    risk_factor_id: str | None = field(
+        default=None, metadata={**REFERENCE_FACTOR, "stage": AppliedStage.PORTFOLIO}
+    )
 
 
 ParameterValue: TypeAlias = float | int | str | bool
@@ -201,19 +227,115 @@ class ChoiceParameter:
 ParameterDefinition: TypeAlias = FloatParameter | IntegerParameter | ChoiceParameter
 
 
+def normalized_parameter_value(
+    parameter: ParameterDefinition, value: ParameterValue
+) -> ParameterValue | None:
+    """값을 파라미터 선언 타입으로 맞춘 값. 타입·범위·선택지 밖이면 `None`.
+
+    문서 hydrate 가 같은 칸에 하는 정규화와 같다: 정수 칸은 정수로 떨어지는 float 을 int 로
+    (`20.0` → `20`), 실수 칸은 int 를 float 으로 바꾼다. bool 은 숫자 칸 값이 아니고, 선택지는
+    `True == 1` 로 맞추지 않고 bool 끼리만 맞춘다. 선택지는 문서의 그 선택지 값을 돌려준다
+    (hydrate 가 정수로 떨어지는 float 선택지를 이미 int 로 접었다).
+    """
+    if isinstance(parameter, ChoiceParameter):
+        return next(
+            (
+                choice
+                for choice in parameter.choices
+                if choice == value and isinstance(choice, bool) is isinstance(value, bool)
+            ),
+            None,
+        )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(parameter, IntegerParameter):
+        if isinstance(value, float) and not value.is_integer():
+            return None
+        number: int | float = int(value)
+    else:
+        number = float(value)
+    return number if parameter.minimum <= number <= parameter.maximum else None
+
+
+def parameter_value_allowed(parameter: ParameterDefinition, value: ParameterValue) -> bool:
+    """값이 파라미터 정의의 타입·범위·선택지 안인가(`normalized_parameter_value` 가 값을 내는가).
+
+    검증기의 기본값 판정, 실험 탐색 값, 실행 요청의 해소 값(검증 랩 V3-02)이 이 술어 하나를 쓴다.
+    `step` 은 보지 않는다. 간격은 탐색 격자를 펼치는 폭일 뿐이고, 여기서 간격 정렬을 요구하면
+    간격에 맞지 않는 기본값을 가진 저장 리비전이 새로 검증 오류가 된다.
+    """
+    return normalized_parameter_value(parameter, value) is not None
+
+
+def describe_allowed_parameter_values(parameter: ParameterDefinition) -> str:
+    """진단 문장에 싣는 허용 범위(`key=value`)."""
+    if isinstance(parameter, ChoiceParameter):
+        return f"choices={list(parameter.choices)}"
+    return f"kind={parameter.kind} minimum={parameter.minimum} maximum={parameter.maximum}"
+
+
+class InvalidParameterValueError(ValueError):
+    """실행에 넘긴 파라미터 값을 문서 정의로 해소할 수 없다(검증 랩 spec D4)."""
+
+    def __init__(self, parameter_id: str, message: str) -> None:
+        super().__init__(message)
+        self.parameter_id = parameter_id
+
+
+def resolve_parameter_values(
+    parameters: tuple[ParameterDefinition, ...], requested: Mapping[str, ParameterValue]
+) -> dict[str, ParameterValue]:
+    """문서 파라미터마다 실행에 쓸 값. 요청 값은 선언 타입으로 맞추고, 없으면 문서 기본값이다.
+
+    선언된 파라미터를 전부 담아 돌려준다. 값을 생략한 요청과 기본값을 명시한 요청이 같은 해소
+    결과가 되어 실행 지문도 같다.
+
+    Raises:
+        InvalidParameterValueError: 문서에 없는 `parameter_id` 이거나 허용 밖 값이다.
+    """
+    declared = [parameter.parameter_id for parameter in parameters]
+    unknown = sorted(set(requested) - set(declared))
+    if unknown:
+        raise InvalidParameterValueError(
+            unknown[0],
+            f"전략 문서에 없는 파라미터입니다 — parameter_id={unknown[0]} unknown={unknown} "
+            f"declared={declared}",
+        )
+    resolved: dict[str, ParameterValue] = {}
+    for parameter in parameters:
+        value = requested.get(parameter.parameter_id, parameter.default)
+        normalized = normalized_parameter_value(parameter, value)
+        if normalized is None:
+            raise InvalidParameterValueError(
+                parameter.parameter_id,
+                f"파라미터 값이 정의 밖입니다 — parameter_id={parameter.parameter_id} "
+                f"value={value!r} {describe_allowed_parameter_values(parameter)}",
+            )
+        resolved[parameter.parameter_id] = normalized
+    return resolved
+
+
 @dataclass(frozen=True, kw_only=True)
 class StrategySpec:
     identity: StrategyIdentity
     title: str
     description: str = ""
-    eligibility: EligibilityStep = EligibilityStep()
+    # 섹션마다 그래프 표현의 단계(`x-stage`)가 있고 문서 머리와 탐색 파라미터는 단계가 없다.
+    # 필드의 단계를 읽는 규칙은 정본 대장 "그래프 표현 투영" 행.
+    eligibility: EligibilityStep = field(
+        default=EligibilityStep(), metadata={"stage": AppliedStage.ELIGIBILITY}
+    )
     # 생략해도 빈 배열이어도 구조 오류가 아니다(spec D3). 두 경우 모두 semantic
     # `strategy.factor.required`가 나서, 새 전략이 "구조 오류"가 아니라 "팩터를 추가하세요"로
     # 시작한다 — 실행 설정이 빠진 1.2 최상위 필수 키는 `schema_version`·`title` 둘뿐이다.
-    factors: tuple[FactorSignal, ...] = field(default=(), metadata=DEFINES_FACTOR)
-    signal: SignalStep = SignalStep()
-    portfolio: PortfolioStep = PortfolioStep()
-    risk: RiskStep = RiskStep()
+    factors: tuple[FactorSignal, ...] = field(
+        default=(), metadata={**DEFINES_FACTOR, "stage": AppliedStage.SIGNAL}
+    )
+    signal: SignalStep = field(default=SignalStep(), metadata={"stage": AppliedStage.SIGNAL})
+    portfolio: PortfolioStep = field(
+        default=PortfolioStep(), metadata={"stage": AppliedStage.PORTFOLIO}
+    )
+    risk: RiskStep = field(default=RiskStep(), metadata={"stage": AppliedStage.RISK})
     parameters: tuple[ParameterDefinition, ...] = field(default=(), metadata=DEFINES_PARAMETER)
 
 

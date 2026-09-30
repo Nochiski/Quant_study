@@ -22,8 +22,8 @@ _LAST = _SESSIONS[-1]
 
 def _connect(events: list[tuple[str, str, date, date]],
              cells: dict[tuple[str, date], tuple[int | None, str]]) -> duckdb.DuckDBPyConnection:
-    """`events` 는 (ticker, event_type, 권리락일, 공시일). 잔고는 전 세션 measured 1,000 + index 이고
-    `cells` 가 (ticker, date) 별로 (값, fill_kind.kind) 를 덮는다."""
+    """`events` 는 (ticker, event_type, 권리락일, 공시일). 잔고는 전 세션 measured 1,000 + index
+    이고 `cells` 가 (ticker, date) 별로 (값, fill_kind.kind) 를 덮는다."""
     con = duckdb.connect()
     con.execute("CREATE TEMP TABLE trading_calendar (date DATE)")
     con.executemany("INSERT INTO trading_calendar VALUES (?)", [(d,) for d in _SESSIONS])
@@ -50,9 +50,11 @@ def _connect(events: list[tuple[str, str, date, date]],
 
 def _rows(con: duckdb.DuckDBPyConnection, ticker: str, as_of: date = _LAST
           ) -> dict[date, tuple[object, ...]]:
-    """date → (잔고, fill_kind.kind, fill_kind.evidence, bonus_window)."""
+    """date → (잔고, fill_kind.kind, fill_kind.evidence, bonus_window). 가림 표시 열은
+    선언(`views.MASK_COLUMNS`)으로 읽어 뷰가 그 열을 실제로 내는지도 본다."""
+    mask = views.MASK_COLUMNS["v_credit_balance"]
     return {r[0]: r[1:] for r in con.execute(
-        "SELECT date, whol_loan_rmnd_stcn_shr, fill_kind.kind, fill_kind.evidence, bonus_window "
+        f"SELECT date, whol_loan_rmnd_stcn_shr, fill_kind.kind, fill_kind.evidence, {mask} "
         "FROM v_credit_balance(?) WHERE ticker = ? ORDER BY date", [as_of, ticker]).fetchall()}
 
 
@@ -88,7 +90,8 @@ def test_무상증자가_아닌_사건과_원래_값이_없던_셀은_그대로�
                     ("D", "bonus", _SESSIONS[_EX], _SESSIONS[0])],
                    {("D", inside): (None, "not_collected")})
     assert _masked(_rows(con, "C")) == []
-    # 값이 원래 없던 셀은 결측 사유를 바꾸지 않는다 — '안 물어봤다' 를 '물었는데 없다' 로 덮지 않는다
+    # 값이 원래 없던 셀은 결측 사유를 바꾸지 않는다 — '안 물어봤다' 를 '물었는데 없다' 로 덮지
+    # 않는다
     assert _rows(con, "D")[inside] == (None, "not_collected", "unit_ok", True)
 
 

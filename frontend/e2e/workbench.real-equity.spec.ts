@@ -29,6 +29,7 @@ import {
   openEditor,
   replaceSource,
   requireData,
+  runSettingsInputs,
   saveAndWaitForRevision,
   strategyIdentity,
 } from "./workbench-helpers";
@@ -144,7 +145,7 @@ test.describe("real equity data", () => {
     // 백테스트: 실데이터 duckdb 어댑터 + Rust core. 저장된 revision 을 그대로 실행한다. 기간·유니버스는
     // 실행 설정 패널에서 정한다.
     await fillRunEnvironment(page, {}, REAL_RUN_ENVIRONMENT);
-    const settingsToggle = page.getByLabel("실행 설정 열기");
+    const settingsToggle = runSettingsInputs(page).toggle;
     await settingsToggle.click();
     await expect(page.getByRole("combobox", { name: "실행 core" })).toHaveValue("rust");
     await page
@@ -232,9 +233,9 @@ test.describe("real equity data", () => {
         spec_hash: saved.spec_hash,
       },
     });
-    // 실데이터 스냅샷 id = equity 루트의 전 테이블 build_id 정렬 sha256 앞 16자리. mock id 는 hex 가
-    // 아니므로 이 정규식이 mock 어댑터를 배제한다.
-    expect(result.manifest.data_snapshot_id).toMatch(/^[0-9a-f]{16}$/u);
+    // 실데이터 스냅샷 id = 원장 판(전 테이블 build_id 정렬 sha256 앞 16자리):필드 계약 판(16자리,
+    // #235). mock id 는 앞부분이 hex 가 아니므로 이 정규식이 mock 어댑터를 배제한다.
+    expect(result.manifest.data_snapshot_id).toMatch(/^[0-9a-f]{16}:[0-9a-f]{16}$/u);
     expect(result.manifest.run_spec.strategy?.title).toBe(title);
     // 실제로 거래가 일어났다: 체결·스냅샷·자본 곡선이 비어 있지 않다.
     expect(result.artifacts.fills.length).toBeGreaterThan(0);

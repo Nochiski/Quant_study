@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import hashlib
+import json
+from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime
 from enum import Enum
 
@@ -20,6 +22,11 @@ class CellKind(Enum):
     MISSING = "missing"
     NOT_COLLECTED = "not_collected"
     COVERAGE_GAP = "coverage_gap"
+    # 원장 뷰가 값이 틀려 일부러 가린 셀(무상증자 척도 창의 신용잔고 #249, 수정주가 조정 공백
+    # 적용일 #220). 값은 없다. 가림 창 안이면 원래 결측 사유(not_collected 등)가 있던 행도 여기
+    # 든다 — 창의 값은 척도가 섞여 있어 모르는 값을 채워도 틀린다. 모르는 값(MISSING)과 달리 실행
+    # 결측 정책이 채우지 않는다 — 채우면 가리기 전보다 더 틀린다(#298).
+    MASKED = "masked"
 
 
 class FieldValueType(Enum):
@@ -70,6 +77,70 @@ class DataSnapshot:
     source: str
     point_in_time: bool
     dataset_revisions: tuple[DatasetRevision, ...]
+
+
+# 워크벤치 데이터 스냅샷 id 는 "원천 판:필드 계약 판" 이다(#235). 같은 원장 빌드라도 필드를 읽는
+# 규칙(어댑터 선언표·카탈로그 매크로 본문)이 바뀌면 값이 달라지는데, 원천 판만으로는 재현 지문·팩터
+# 행렬 캐시 키·run manifest 가 옛 의미와 새 의미를 같은 데이터로 기록했다.
+SNAPSHOT_CONTRACT_SEPARATOR = ":"
+# 판에 싣지 않는 사람용 문장 칸. 선언의 뜻(식·단위·랙·값 타입·고르는 규칙)을 바꾸지 않으므로
+# 문장만 고친 변경이 스냅샷 id·재현 지문·캐시 키를 흔들면 안 된다(#291 리뷰 P2-1). 새 문장 칸을
+# 여기 빠뜨려도 판이 헛되이 바뀔 뿐 뜻의 변화를 놓치지는 않는다.
+CONTRACT_PROSE_FIELDS = frozenset(
+    {
+        "label",
+        "description",
+        "evidence",
+        "disclosure_basis",
+        "verdict",
+        "lag_basis",
+        "available_date_basis",
+    }
+)
+
+
+def canonical_revision(material: object) -> str:
+    """선언이나 fixture 데이터의 판 — canonical JSON 의 sha256 앞 16자리.
+
+    dataclass 는 사람용 문장 칸(`CONTRACT_PROSE_FIELDS`)을 빼고 싣는다. 목록은 순서까지 판에
+    들어가므로 선언은 id 를 키로 한 dict 로 넘긴다 — 그래야 선언 순서만 바꾼 변경이 판을 흔들지
+    않는다.
+    """
+    text = json.dumps(
+        material,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=_contract_json_default,
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def field_contract_snapshot_id(source_snapshot_id: str, field_contract: object) -> str:
+    """원천 판 id 뒤에 필드 계약 판(`canonical_revision`)을 붙인다.
+
+    앞부분은 원천이 정한 id(원장 테이블 build 해시·mock fixture 데이터의 판) 그대로라
+    `_catalog_meta.json`·`ledger_sync` 와 눈으로 대조된다. 소비자는 이 id 를 따로 조립하지 않고
+    포트가 돌려주는 `data_snapshot_id` 로 받는다.
+    """
+    return f"{source_snapshot_id}{SNAPSHOT_CONTRACT_SEPARATOR}{canonical_revision(field_contract)}"
+
+
+def _contract_json_default(value: object) -> object:
+    if is_dataclass(value) and not isinstance(value, type):
+        return {
+            item.name: getattr(value, item.name)
+            for item in fields(value)
+            if item.name not in CONTRACT_PROSE_FIELDS
+        }
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, (set, frozenset)):
+        return sorted(value)
+    raise TypeError(f"unsupported field contract value — type={type(value).__name__}")
 
 
 @dataclass(frozen=True)

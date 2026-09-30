@@ -2,8 +2,8 @@
 
 S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속(09-05, 전방
 조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd` + S17 1개: `v_consensus` + S21 본판 1개:
-`v_fin_latest` + #249 1개: `v_credit_balance`(무상증자 척도 창을 가린 신용잔고). 본문은 하나의
-템플릿이고
+`v_fin_latest` + #249 1개: `v_credit_balance`(무상증자 척도 창을 가린 신용잔고) + #220 1개:
+`v_adj_close`(조정 공백 적용일을 가린 수정주가). 본문은 하나의 템플릿이고
 읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
   카탈로그: `render_macros(equity_root)` 가 커밋된 테이블의 MANIFEST 파티션 경로(**절대경로**,
             P1c)를 `read_parquet([...])` 로 넣어 `catalog.write_catalog` 에 준다.
@@ -67,7 +67,9 @@ from . import inputs
 #   곱해진다(005930 이면 ×50). "T 행 조정가 = 원주가" 는 후방 축에서만 참이다(검수 R2-06 실측).
 #   소비자는 `basis = 'evening'` 과 `corp_action_pending` 두 컬럼으로 「이 값은 키움 잠정치이고,
 #   참이면 기업행위 의심이라 오늘 스코어에서 빼라」를 읽는다. 두 컬럼을 안 보고 쓰면 잠정치가
-#   확정치처럼 보인다 — 그래서 뷰에서 감추지 않는다.
+#   확정치처럼 보인다 — 그래서 뷰에서 감추지 않는다. 예외: `v_adj_close`(#220)는 워크벤치 격자(KRX
+#   축이라 T 행이 없다, GATES 10-3b)만 읽는 좁은 뷰이고 표식이 없는 옛 판 표에서도 서야 해서 두
+#   표식을 싣지 않는다 — 표식이 필요하면 표를 읽는다.
 FACTOR_LAG_SESSIONS = 0     # 계수 available_date 컷오프 기본 랙(세션). 위 docstring 근거
 PRICE_LAG_SESSIONS = 0      # 가격 행 컷오프 랙(세션) — 0 이라 `date <= as_of` 와 같다
 CONSENSUS_LAG_SESSIONS = 0  # 컨센서스 available_date 컷오프 기본 랙(세션). 아래 v_consensus 근거
@@ -97,6 +99,7 @@ SIGNATURES: dict[str, str] = {
     "v_consensus": "v_consensus(as_of, lag_override := NULL)",
     "v_fin_latest": "v_fin_latest(as_of, lag_override := NULL, vintage := 'restated')",
     "v_credit_balance": "v_credit_balance(as_of)",
+    "v_adj_close": "v_adj_close(as_of)",
 }
 MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_cum_adj": ("price_daily", "adj_factor", "trading_calendar"),
@@ -108,10 +111,15 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_consensus": ("consensus_daily", "trading_calendar"),
     "v_fin_latest": ("fin_std", "disclosure_version", "trading_calendar"),
     "v_credit_balance": ("credit_daily", "corp_event", "trading_calendar"),
+    "v_adj_close": ("price_adj_daily", "adj_factor"),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
     "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",)}
+# 뷰가 값이 틀려 일부러 가린 행의 표시 열 — 참이면 그 행 값이 NULL 이다. 워크벤치 어댑터는 이 열을
+# 셀 종류 MASKED 로 읽고(`SourceSpec.masked_expr`), 실행 결측 정책은 그 셀을 채우지 않는다(#298).
+# 무엇을 가리나는 뷰 본문이 정하고, 이 선언과 어댑터 배선이 같은지는 backend 계약 테스트가 본다.
+MASK_COLUMNS: dict[str, str] = {"v_credit_balance": "bonus_window", "v_adj_close": "adj_gap"}
 
 # 전방 조정 공통 CTE — `v_adj_price_fwd`·`v_adj_volume_fwd` 가 같은 본문을 쓴다(매크로는 둘,
 # 정의는 하나). 계수를 (ticker, span_seq, fold_date) 로 접고(같은 날 두 이벤트 = 곱) 앞에서부터
@@ -316,8 +324,12 @@ WHERE rn = 1
     #        선다. 그래서 사업보고서 행의 TTM 은 항등식으로 연간과 같다.
     #      · 현금흐름: 1분기 보고서는 누계 그대로, 나머지는 누계 − 바로 앞 분기 보고서 누계(간격
     #        QUARTER_GAP, 같은 fs_div).
-    #      · 분기값의 공개일 = 그 값을 만든 행들의 available_date max. 창 안 네 분기값의 공개일이
-    #        모두 이 행의 available_date 이하일 때만 선다 — 창 밖 행에 기대는 파생도 가드를 받는다.
+    #      · 분기값의 공개일 = 그 값을 만든 행들의 available_date max(창 밖 행에 기대는 파생 포함).
+    #        창 안 네 분기값 공개일의 max 가 TTM 의 공개일이다 — 손익 `ttm_income_available_date`,
+    #        현금흐름 `ttm_cf_available_date`(#238). 정정 재제출로 창 안 분기가 이 행보다 늦게
+    #        접수되면 이 행의 TTM 은 그날 완성된다. 다른 기간 값으로 대신하는 것이 아니라 같은 기간
+    #        TTM 이 늦게 서는 것이라 결측 정책(#212)과 맞는다. 소비자는 TTM 열을 그 공개일부터
+    #        쓴다 — 행은 여전히 `available_date`·`period_frontier` 로 고른다.
     #      · 창의 non-null 4개 · 창의 period_end 폭이 3분기(240~300일) · 창 안 fs_div 가 하나(연결과
     #        별도를 더하지 않는다, P2-1) · 매출은 창 안 revenue_basis 도 하나(P3-2).
     #      하나라도 어긋나면 NULL 이다 — 부분합을 내면 분기 하나가 빠진 채 연간처럼 읽힌다.
@@ -427,8 +439,8 @@ q AS (
 ttm AS (
     SELECT q.*,
            count(*) OVER w                                           AS ttm_n_rows,
-           max(q.q_income_available) OVER w                          AS ttm_income_available,
-           max(q.q_cf_available) OVER w                              AS ttm_cf_available,
+           max(q.q_income_available) OVER w                          AS ttm_income_available_date,
+           max(q.q_cf_available) OVER w                              AS ttm_cf_available_date,
            min(q.period_end) OVER w                                  AS ttm_first_period_end,
            min(q.fs_div) OVER w                                      AS ttm_fs_min,
            max(q.fs_div) OVER w                                      AS ttm_fs_max,
@@ -463,22 +475,19 @@ SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
        o.bsns_year, o.rcept_no, o.period_start, o.currency,
        o.revenue, o.revenue_basis, o.gross_profit, o.op_profit, o.net_income,
        o.total_asset, o.total_liab, o.total_equity, o.cf_operating_ytd, o.cf_operating_q,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_revenue = 4 AND o.ttm_basis_min = o.ttm_basis_max
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_revenue = 4
+                 AND o.ttm_basis_min = o.ttm_basis_max
             THEN o.ttm_sum_revenue END                               AS ttm_revenue,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_gross_profit = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_gross_profit = 4
             THEN o.ttm_sum_gross_profit END                          AS ttm_gross_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_op_profit = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_op_profit = 4
             THEN o.ttm_sum_op_profit END                             AS ttm_op_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_net_income = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_net_income = 4
             THEN o.ttm_sum_net_income END                            AS ttm_net_income,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cf_available <= o.available_date
-                 AND o.ttm_cnt_cf_operating = 4
+       CASE WHEN o.ttm_window_ok AND o.ttm_cnt_cf_operating = 4
             THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
        coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
+       o.ttm_income_available_date, o.ttm_cf_available_date,
        o.period_frontier, o.available_date, o.available_basis
 FROM ok o
 LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
@@ -491,12 +500,12 @@ LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
     # 권리락일(`corp_event.effective_date`, 거래일)부터 `BONUS_SCALE_WINDOW_SESSIONS` 세션의 잔고를
     # 결측으로 낸다. 분할·병합·감자는 원천이 새 단위로 바뀌어(전환 비율 중앙값 1.0) 가리지 않는다.
     #   ① PIT: 공시 전에는 가릴 근거가 없다 — 공시 접수일(`available_date`) **다음** 행부터만
-    #      가린다(접수 시각이 없어 당일은 아직 쓸 수 없다). 판정이 그 행과 그 전 공시만 보므로 as_of 에
-    #      무관하고, as_of 는 행 절단으로만 작용한다(`v_adj_price_fwd` 와 같은 규약).
-    #   ② 가린 행은 값 NULL · `fill_kind.kind` 'empty_response'(→ 엔진 MISSING)이고 evidence 는
-    #      둔다 — 잔고 이상 격리 셀(`sql/credit_daily.sql` balance_over_shares)과 같은 어휘다
-    #      (`FILL_KINDS` 를 늘리지 않는다). 값이 원래 없던 셀은 사유를 그대로 둔다. 가림 여부는
-    #      `bonus_window` 가 나른다.
+    #      가린다(접수 시각이 없어 당일은 아직 쓸 수 없다). 판정이 그 행과 그 전 공시만 보므로
+    #      as_of 에 무관하고, as_of 는 행 절단으로만 작용한다(`v_adj_price_fwd` 와 같은 규약).
+    #   ② 가린 행은 값 NULL · `fill_kind.kind` 'empty_response'(워크벤치 어댑터는 `bonus_window`
+    #      로 MASKED, #298)이고 evidence 는 둔다 — 잔고 이상 격리 셀(`sql/credit_daily.sql`
+    #      balance_over_shares)과 같은 어휘다(`FILL_KINDS` 를 늘리지 않는다). 값이 원래 없던 셀은
+    #      사유를 그대로 둔다. 가림 여부는 `bonus_window` 가 나른다.
     "v_credit_balance": """
 WITH cal AS (
     SELECT date, row_number() OVER (ORDER BY date) AS i FROM {trading_calendar}
@@ -522,6 +531,42 @@ SELECT ticker, date,
             ELSE fill_kind END                                    AS fill_kind,
        bonus_window, available_date, available_basis
 FROM bal
+""",
+    # 수정주가의 조정 공백(#220). S23 표 `price_adj_daily` 의 adj_close 를 그대로 내되, 원장이
+    # 그날 사건을 접지 못한 **적용일 행**만 결측으로 낸다 — 그 행의 원주가는 이미 사건 뒤 척도인데
+    # 누적 계수는 사건 전이라 값이 틀린다. 표는 parquet 소비자와 조정 규칙의 저장본이라 그대로
+    # 두고, 가림은 이 뷰(작은 사건 집합과의 조인)가 한다.
+    #   ① KRX 기준가로 적용일을 정한(`apply_basis = 'krx_base_price'`) ok 계수가 늦게 공개된
+    #      사건(`available_date > apply_date`) — fold_date 가 적용일 다음 세션이라 적용일 하루에
+    #      스파이크가 선다(실원장 2020-03-19 이후 57건, 최대 38배). 다음 행부터는 접혀 있다.
+    #   ② `krx_base_inconsistent` — KRX 기준가는 바뀌었는데 주식수 비와 곱이 안 맞아 계수를 못
+    #      낸 사건. 적용일에 층이 영구히 바뀐다(295건, 적용일 점프 중앙값 약 2.9배).
+    #   창 연산은 창 안에 결측이 하나라도 있으면 결측이라, 가린 행을 품는 창이 모두 결측이 된다
+    #   (틀린 값 대신 결측). `unknown_price_only`(유상 권리락 등 MVP 밖 기준가 변화, 적용일 점프
+    #   중앙값 약 6%)와 명목일 사건(no_price_match·ratio_null 등 — 적용일에 점프가 거의 없다)은
+    #   가리지 않는다. 명목일·가격 매칭으로 적용일을 정한 늦은 ok 계수도 가리지 않는다 — 그날
+    #   기준가 재설정이 없어 아래 PIT 근거가 서지 않는다(2020-03-19 이후 17행, 그날 값 오차
+    #   −12%~+10%).
+    #   PIT: 공백 사건 대부분은 원장상 적용일 다음 세션에 공개되지만, 적용일의 KRX 기준가 재설정은
+    #   그날 가격 데이터(랙 0)에 이미 보인다. 가림은 값을 바꾸지 않고 결측만 만들어 그날 모르는
+    #   정보를 새지 않으므로 공개일을 기다리지 않는다. 공개 전 계수를 접는 것은 아니다(fold 규칙은
+    #   S23 그대로). as_of 는 행 절단으로만 작용한다. 예외: 그날 보이는 재설정 가운데 무엇을
+    #   가릴지는 다음 세션 정보(늦은 공시·주식수 랙 1)로 갈린다 — 영향은 적용일 as_of 에 랙 0 으로
+    #   그 행을 읽는 셀뿐이다(기본 12-1 모멘텀은 랙 21 이라 무관).
+    "v_adj_close": """
+WITH gap AS (
+    SELECT DISTINCT ticker, apply_date
+    FROM {adj_factor}
+    WHERE (factor_ok AND available_date > apply_date AND apply_basis = 'krx_base_price')
+       OR (NOT factor_ok AND factor_source = 'krx_base_inconsistent')
+)
+SELECT a.ticker, a.date,
+       CASE WHEN g.ticker IS NULL THEN a.adj_close END AS adj_close,
+       g.ticker IS NOT NULL                             AS adj_gap,
+       a.available_date
+FROM {price_adj_daily} a
+LEFT JOIN gap g ON g.ticker = a.ticker AND g.apply_date = a.date
+WHERE a.date <= as_of
 """,
 }
 

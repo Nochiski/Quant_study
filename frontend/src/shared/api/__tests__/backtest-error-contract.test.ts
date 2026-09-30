@@ -1,9 +1,7 @@
-import { readFileSync } from "node:fs";
-
 import { describe, expect, it } from "vitest";
 
 import { messages, tOptional } from "../../config";
-import { backendFixturePath } from "../../testing/backend-fixtures";
+import { readOpenApi, rejectionCodes } from "../../testing/openapi-codes";
 import type {
   BacktestRunState,
   StartBacktestErrors,
@@ -31,6 +29,9 @@ const classify = (response: StartBacktest422): string => {
     // 봉인 구간을 측정하는 요청은 서버가 거절한다(검증 랩 spec D1).
     case "backtest.run.research_window_violation":
       return `research_window:${detail.message}`;
+    // 문서에 없는 파라미터·허용 밖 값은 어느 파라미터인지 싣는다(검증 랩 spec D4).
+    case "backtest.run.parameter_invalid":
+      return `parameter:${detail.parameter_id}`;
     default: {
       const exhaustive: never = detail;
       return exhaustive;
@@ -47,62 +48,19 @@ const RUN_FAILURE_CODES: Record<RunFailureCode, true> = {
   "portfolio.data.unavailable": true,
   "portfolio.raw_observation.invalid": true,
   "backtest.run.invalid": true,
+  "backtest.run.equity_wiped_out": true,
   "backtest.run.internal": true,
+  "backtest.run.interrupted": true,
 };
 
-type Schema = {
-  $ref?: string;
-  const?: string;
-  enum?: string[];
-  properties?: Record<string, Schema>;
-  anyOf?: Schema[];
-  oneOf?: Schema[];
-  discriminator?: { mapping?: Record<string, string> };
-};
-
-type OpenApi = {
-  paths: Record<
-    string,
-    Record<
-      string,
-      {
-        responses: Record<
-          string,
-          { content?: { "application/json"?: { schema: Schema } } }
-        >;
-      }
-    >
-  >;
-  components: { schemas: Record<string, Schema> };
-};
-
-/** 응답 스키마에서 닿는 detail 의 `code` 상수를 모두 모은다. 손으로 목록을 적지 않는다. */
-const reachableCodes = (openapi: OpenApi, root: Schema): Set<string> => {
-  const codes = new Set<string>();
-  const seen = new Set<string>();
-  const visit = (schema: Schema | undefined): void => {
-    if (schema === undefined) return;
-    if (schema.$ref !== undefined) {
-      if (seen.has(schema.$ref)) return;
-      seen.add(schema.$ref);
-      visit(openapi.components.schemas[schema.$ref.split("/").at(-1)!]);
-      return;
-    }
-    const code = schema.properties?.code;
-    if (code?.const !== undefined) codes.add(code.const);
-    for (const value of code?.enum ?? []) codes.add(value);
-    for (const ref of Object.values(schema.discriminator?.mapping ?? {}))
-      visit({ $ref: ref });
-    for (const child of [
-      ...Object.values(schema.properties ?? {}),
-      ...(schema.anyOf ?? []),
-      ...(schema.oneOf ?? []),
-    ])
-      visit(child);
-  };
-  visit(root);
-  return codes;
-};
+const untranslated = (codes: Iterable<string>): string[] =>
+  [...codes].flatMap((code) => {
+    const key = `backtest.error.${code}` as keyof (typeof messages)["en"];
+    return [
+      messages.ko[key] === undefined ? `${code} ko` : null,
+      messages.en[key] === undefined ? `${code} en` : null,
+    ].filter((item): item is string => item !== null);
+  });
 
 describe("backtest run failure code vocabulary", () => {
   it("has a translated recovery message for every run failure code", () => {
@@ -114,39 +72,48 @@ describe("backtest run failure code vocabulary", () => {
   // 이슈 #260: 툴바는 시작 거절을 `backtest.error.<code>` 번역으로 보인다. 키가 빠지면 일반 문구로 떨어져
   // 무엇을 고칠지 말하지 못한다. 실행 시 계약 파일(backend `openapi.json`)과 대조한다.
   it("translates every coded startBacktest rejection in both locales", () => {
-    const openapi = JSON.parse(
-      readFileSync(backendFixturePath("../../openapi.json"), "utf8"),
-    ) as OpenApi;
-    const responses = openapi.paths["/api/v1/backtests"]!.post!.responses;
-    const codes = new Set(
-      Object.entries(responses)
-        .filter(([status]) => !status.startsWith("2"))
-        .flatMap(([, response]) => [
-          ...reachableCodes(
-            openapi,
-            response.content?.["application/json"]?.schema ?? {},
-          ),
-        ]),
-    );
+    const codes = rejectionCodes(readOpenApi(), "/api/v1/backtests");
 
     expect([...codes].sort()).toEqual([
       "backtest.run.environment_required",
       "backtest.run.field_invalid",
       "backtest.run.invalid",
+      "backtest.run.parameter_invalid",
       "backtest.run.research_window_violation",
       "backtest.strategy.not_found",
       "backtest.strategy.requires_upgrade",
       "backtest.strategy.stale",
       "portfolio.strategy.invalid",
     ]);
-    const missing = [...codes].flatMap((code) => {
-      const key = `backtest.error.${code}` as keyof (typeof messages)["en"];
-      return [
-        messages.ko[key] === undefined ? `${code} ko` : null,
-        messages.en[key] === undefined ? `${code} en` : null,
-      ].filter((item): item is string => item !== null);
-    });
-    expect(missing).toEqual([]);
+    expect(untranslated(codes)).toEqual([]);
+  });
+
+  // 이슈 #330: 결과 화면은 결과 조회 실패(`getBacktestResult` 404·409·410)도 같은 번역 키 체계로 보인다. 결과
+  // 경로 코드가 늘면 번역 누락을 여기서 먼저 잡는다.
+  it("translates every coded getBacktestResult failure in both locales", () => {
+    const codes = rejectionCodes(
+      readOpenApi(),
+      "/api/v1/backtests/{run_id}/result",
+    );
+
+    expect([...codes].sort()).toEqual([
+      "backtest.result.not_ready",
+      "backtest.result.unreadable",
+      "backtest.run.not_found",
+    ]);
+    expect(untranslated(codes)).toEqual([]);
+  });
+
+  // 실험 경로의 거절(검증 랩 V3-03)도 같은 번역 키 체계다. 코드 목록은 backend 가 스키마 enum 으로 싣는다.
+  it("translates every coded experiment rejection in both locales", () => {
+    const openapi = readOpenApi();
+    const codes = Object.keys(openapi.paths)
+      .filter((path) => path.startsWith("/api/v1/experiments"))
+      .flatMap((path) => [...rejectionCodes(openapi, path)]);
+
+    expect(codes).toContain("experiment.base.unsaved");
+    expect(codes).toContain("experiment.trial.not_retryable");
+    expect(untranslated(new Set(codes))).toEqual([]);
   });
 });
 

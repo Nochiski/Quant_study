@@ -322,6 +322,27 @@
   max-width: 44ch;
 }
 
+/* 실패 한 줄(`FailureNotice`): 번역된 본문과 접힌 서버 사유 */
+.ui-failure {
+  min-width: 0;
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+  overflow-wrap: anywhere;
+}
+
+.ui-failure__actions {
+  margin-top: var(--space-1);
+}
+
+.ui-failure__reason {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+}
+
+.ui-failure__reason > summary {
+  cursor: pointer;
+}
+
 /* Split handle: a keyboard-operable separator between two resizable panes */
 .ui-split-handle {
   position: relative;
@@ -336,13 +357,12 @@
   touch-action: none;
 }
 
+/* 두께는 `SPLIT_HANDLE_SIZE`(split-handle.tsx)가 인라인으로 준다. */
 .ui-split-handle--vertical {
-  width: 6px;
   min-height: 100%;
 }
 
 .ui-split-handle--horizontal {
-  height: 6px;
   width: 100%;
   cursor: row-resize;
 }
@@ -366,6 +386,21 @@
 }
 
 /* Page-level states shared by every page slice */
+
+/*
+ * 라우트 화면 안쪽 여백의 정본. 앱 셸 `<main>`은 여백을 주지 않는다 — 전략 편집기처럼 자기 상단바로 칸
+ * 끝까지 채우는 화면이 있어서다. 그 밖의 라우트 화면은 루트에 이 클래스를 둔다(#261).
+ */
+.page {
+  padding: var(--space-5);
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: var(--space-3);
+  }
+}
+
 .page-header {
   display: flex;
   align-items: baseline;

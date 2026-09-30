@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from threading import Event
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn, TypeVar
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -17,7 +18,8 @@ from strategy_workbench.application.assistant_chat.facade.chat import AssistantC
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
-    BacktestResearchWindowViolationError,
+    BacktestArtifactUnreadableError,
+    BacktestParameterValueError,
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
     BacktestRunResult,
@@ -26,12 +28,11 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunState,
     BacktestRunSummary,
     BacktestStartResponse,
-    InvalidBacktestRunError,
-    MissingBacktestRunEnvironmentError,
     RunStatus,
-    StaleStrategyReferenceError,
-    StrategyReferenceNotFoundError,
-    StrategyRevisionRequiresUpgradeError,
+    TrialLedger,
+    TrialLineageAlreadyMergedError,
+    TrialPreview,
+    rejection_code,
 )
 from strategy_workbench.application.equity_workspace.facade.workspace import (
     EquityWorkspaceService,
@@ -41,6 +42,9 @@ from strategy_workbench.application.equity_workspace.facade.workspace import (
     ResearchPanelPreviewRequest,
     ResearchPreview,
     UniversePreview,
+)
+from strategy_workbench.application.experiment_run.facade.experiments import (
+    ExperimentRunService,
 )
 from strategy_workbench.application.factor_research.facade.research import (
     FactorAvailability,
@@ -117,6 +121,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyRevisionConflictError,
     StrategySummary,
 )
+from strategy_workbench.domain.backtest.facade.environment import ResearchWindowViolationError
 from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelQuery,
     UniverseHistoryQuery,
@@ -129,15 +134,20 @@ from ._assistant_routes import register_assistant_routes
 from ._backtest_contract import (
     Backtest422Response,
     BacktestResultNotReadyResponse,
+    BacktestResultUnreadableResponse,
     BacktestRunNotFoundResponse,
     BacktestStrategyNotFoundResponse,
     BacktestStrategyStaleResponse,
     CodedBodyValidationRoute,
+    StrategyNotFoundResponse,
+    TrialLineageAlreadyMergedResponse,
+    TrialLineageMergeRequest,
 )
 from ._execution_error_contract import (
     Portfolio422Response,
     PortfolioRawObservationInvalidDetail,
 )
+from ._experiment_routes import register_experiment_routes
 from ._pagination import CANONICAL_PAGE_INTEGER_VALIDATOR
 from ._sse import SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_SECONDS, SSE_POLL_SECONDS, sse_frame
 from ._strategy_document_contract import (
@@ -167,6 +177,8 @@ from ._trace_contract import (
     TraceStrategyStaleResponse,
     apply_trace_openapi_contract,
 )
+
+_T = TypeVar("_T")
 
 EQUITY_CATALOG_PATH = "/api/v1/equity/catalog"
 FACTOR_CATALOG_PATH = "/api/v1/factors/catalog"
@@ -202,6 +214,13 @@ def _revision_conflict(error: StrategyRevisionConflictError) -> HTTPException:
     )
 
 
+# 422 가 아닌 실행 접수 거절. 저장 리비전이 없거나(404) 그사이 바뀌었다(409).
+_ADMISSION_STATUS: dict[str, int] = {
+    "backtest.strategy.not_found": status.HTTP_404_NOT_FOUND,
+    "backtest.strategy.stale": status.HTTP_409_CONFLICT,
+}
+
+
 def _backtest_not_found(error: BacktestRunNotFoundError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND,
@@ -213,7 +232,7 @@ def _backtest_run_not_found_responses() -> dict[int | str, dict[str, Any]]:
     return {
         404: {
             "model": BacktestRunNotFoundResponse,
-            "description": "The process-lifetime backtest run does not exist",
+            "description": "The backtest run does not exist",
         }
     }
 
@@ -298,6 +317,7 @@ def create_app(
     portfolio_design: PortfolioDesignService,
     strategy_traces: StrategyTraceService,
     backtest_runs: BacktestRunService,
+    experiments: ExperimentRunService | None = None,
     assistant_profiles: ProviderProfileService | None = None,
     assistant_chat: AssistantChatService | None = None,
     assistant_turns: AssistantTurnRunner | None = None,
@@ -356,56 +376,41 @@ def create_app(
             strategy_id=strategy_id,
         )
 
-    def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
+    def admitted(call: Callable[[], _T]) -> _T:
+        """시작·미리 계산·실험 기반 검사의 거절을 실행 요청 거절 코드로 낸다.
+
+        시작 요청은 데이터를 읽지 않는 사전 검사만 해서(이슈 #158) 관측 데이터 부재·계약 위반을
+        여기서 옮기지 않는다 — run 스레드의 tape 단계에서 run 상태 `failed` + `error` 로 기록된다.
+        """
         try:
-            return backtest_runs.start(spec)
-        # 아래 두 오류는 `InvalidBacktestRunError` 의 하위 타입이므로 반드시 먼저 잡는다.
-        except MissingBacktestRunEnvironmentError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "backtest.run.environment_required", "message": str(error)},
-            ) from error
-        except BacktestResearchWindowViolationError as error:
-            violation = error.violation
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "backtest.run.research_window_violation",
-                    "message": str(error),
-                    "sealed_start": violation.sealed_start.isoformat(),
-                    "sealed_end": violation.sealed_end.isoformat(),
-                    "research_start": violation.research_start.isoformat(),
-                },
-            ) from error
-        except InvalidBacktestRunError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "backtest.run.invalid", "message": str(error)},
-            ) from error
+            return call()
+        except Exception as error:
+            _raise_run_request_rejection(error)
 
-        except StrategyReferenceNotFoundError as error:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "backtest.strategy.not_found", "message": str(error)},
-            ) from error
-        except StaleStrategyReferenceError as error:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={"code": "backtest.strategy.stale", "message": str(error)},
-            ) from error
-        except StrategyRevisionRequiresUpgradeError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "backtest.strategy.requires_upgrade", "message": str(error)},
-            ) from error
+    def start_backtest(spec: BacktestRunSpec) -> BacktestStartResponse:
+        return admitted(lambda: backtest_runs.start(spec))
 
-        except InvalidPortfolioRequestError as error:
-            # 시작 요청은 데이터를 읽지 않는 사전 검사만 한다(이슈 #158). 관측 데이터 부재·계약
-            # 위반은 run 스레드의 tape 단계에서 run 상태 `failed` + `error` 로 기록된다.
-            raise _portfolio_http_error(error) from error
+    def preview_backtest_trial(spec: BacktestRunSpec) -> TrialPreview:
+        """실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2)."""
+        return admitted(lambda: backtest_runs.preview_trial(spec))
 
-    # 본문 검증 실패를 코드화된 422 로 내려고 이 라우트만 `CodedBodyValidationRoute` 로 등록한다
-    # (이슈 #260). `app.post` 데코레이터는 라우트 클래스를 받지 않는다.
+    # 실행 요청 라우트(시작·미리 계산·미리보기·추적)는 본문 검증 실패를 코드화된 422 로 내려고
+    # `CodedBodyValidationRoute` 로 등록한다(이슈 #260, #351). `app.post` 데코레이터는 라우트
+    # 클래스를 받지 않는다.
+    admission_responses: dict[int | str, dict[str, Any]] = {
+        404: {
+            "model": BacktestStrategyNotFoundResponse,
+            "description": "The immutable strategy revision does not exist",
+        },
+        409: {
+            "model": BacktestStrategyStaleResponse,
+            "description": "The saved revision hash differs from the expected hash",
+        },
+        422: {
+            "model": Backtest422Response,
+            "description": "A coded backtest preflight or request-body diagnostic",
+        },
+    }
     app.router.add_api_route(
         "/api/v1/backtests",
         start_backtest,
@@ -413,21 +418,59 @@ def create_app(
         operation_id="startBacktest",
         status_code=status.HTTP_202_ACCEPTED,
         route_class_override=CodedBodyValidationRoute,
+        responses=admission_responses,
+    )
+    app.router.add_api_route(
+        "/api/v1/backtests/trial-preview",
+        preview_backtest_trial,
+        methods=["POST"],
+        operation_id="previewBacktestTrial",
+        route_class_override=CodedBodyValidationRoute,
+        responses=admission_responses,
+    )
+
+    # 실험 라우트도 어시스턴트처럼 서비스가 올 때만 생긴다. 기반 실행 요청은 시작과 같은 판정이다.
+    if experiments is not None:
+        register_experiment_routes(app, experiments, admitted=admitted)
+
+    strategy_not_found: dict[int | str, dict[str, Any]] = {
+        404: {"model": StrategyNotFoundResponse, "description": "The strategy does not exist"}
+    }
+
+    @app.get(
+        "/api/v1/strategies/{strategy_id}/trials",
+        operation_id="getTrialLedger",
+        responses=strategy_not_found,
+    )
+    def get_trial_ledger(strategy_id: str) -> TrialLedger:
+        """계열 시도 원장(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다."""
+        try:
+            return backtest_runs.trial_ledger(strategy_id)
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+
+    @app.post(
+        "/api/v1/strategies/{strategy_id}/trials/merge",
+        operation_id="mergeTrialLineage",
         responses={
-            404: {
-                "model": BacktestStrategyNotFoundResponse,
-                "description": "The immutable strategy revision does not exist",
-            },
+            **strategy_not_found,
             409: {
-                "model": BacktestStrategyStaleResponse,
-                "description": "The saved revision hash differs from the expected hash",
-            },
-            422: {
-                "model": Backtest422Response,
-                "description": "A coded backtest preflight or request-body diagnostic",
+                "model": TrialLineageAlreadyMergedResponse,
+                "description": "The two lineages are already one",
             },
         },
     )
+    def merge_trial_lineage(strategy_id: str, request: TrialLineageMergeRequest) -> TrialLedger:
+        """`source_strategy_id` 계열을 이 계열에 합친다. 되돌릴 수 없다."""
+        try:
+            return backtest_runs.merge_lineages(request.source_strategy_id, strategy_id)
+        except StrategyNotFoundError as error:
+            raise _strategy_not_found(error) from error
+        except TrialLineageAlreadyMergedError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "backtest.lineage.already_merged", "message": str(error)},
+            ) from error
 
     @app.get(
         "/api/v1/backtests/{run_id}",
@@ -449,6 +492,10 @@ def create_app(
                 "model": BacktestResultNotReadyResponse,
                 "description": "The run has not completed with a result",
             },
+            410: {
+                "model": BacktestResultUnreadableResponse,
+                "description": "The completed run's result file is missing, altered or unreadable",
+            },
         },
     )
     def get_backtest_result(run_id: str) -> BacktestRunResult:
@@ -460,6 +507,11 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={"code": "backtest.result.not_ready", "message": str(error)},
+            ) from error
+        except BacktestArtifactUnreadableError as error:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail={"code": "backtest.result.unreadable", "message": str(error)},
             ) from error
 
     @app.get(
@@ -509,48 +561,28 @@ def create_app(
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    @app.post(
-        "/api/v1/portfolio/preview",
-        operation_id="previewPortfolio",
-        responses={
-            422: {
-                "model": Portfolio422Response,
-                "description": "Malformed envelope or a coded portfolio preflight diagnostic",
-            }
-        },
-    )
     def portfolio_preview(request: PortfolioPreviewRequest) -> PortfolioPreview:
         try:
             return portfolio_design.preview(request)
-        except (
-            InvalidPortfolioRequestError,
-            RawObservationUnavailableError,
-            RawObservationContractError,
-        ) as error:
+        except (RawObservationUnavailableError, RawObservationContractError) as error:
             raise _portfolio_http_error(error) from error
+        except Exception as error:
+            _raise_run_request_rejection(error)
 
-    @app.post(
-        "/api/v1/strategies/debug/trace",
-        operation_id="traceStrategy",
+    app.router.add_api_route(
+        "/api/v1/portfolio/preview",
+        portfolio_preview,
+        methods=["POST"],
+        operation_id="previewPortfolio",
+        route_class_override=CodedBodyValidationRoute,
         responses={
-            404: {
-                "model": TraceStrategyNotFoundResponse,
-                "description": "The immutable strategy revision does not exist",
-            },
-            409: {
-                "model": TraceStrategyStaleResponse,
-                "description": "The saved revision hash differs from the expected hash",
-            },
             422: {
-                "model": Trace422Response,
-                "description": "Malformed envelope or a coded trace preflight diagnostic",
-            },
-            499: {
-                "model": TraceCancelledResponse,
-                "description": "The client cancelled the trace request",
-            },
+                "model": Portfolio422Response,
+                "description": "A coded portfolio preflight or request-body diagnostic",
+            }
         },
     )
+
     async def trace_strategy(
         trace_request: StrategyTraceRequest, request: Request
     ) -> StrategyTraceResponse:
@@ -606,11 +638,7 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=asdict(detail),
             ) from error
-        except (
-            InvalidPortfolioRequestError,
-            RawObservationUnavailableError,
-            RawObservationContractError,
-        ) as error:
+        except (RawObservationUnavailableError, RawObservationContractError) as error:
             raise _portfolio_http_error(error) from error
         except StrategyTraceCancelledError as error:
             detail = TraceCancelledDetail("trace.cancelled", str(error))
@@ -618,8 +646,38 @@ def create_app(
                 status_code=499,
                 detail=asdict(detail),
             ) from error
+        except Exception as error:
+            # 문서 검증·실행 설정 거절은 실행 요청 판정이라 백테스트 시작과 같은 코드·detail
+            # 이다(#351).
+            _raise_run_request_rejection(error)
         finally:
             stop.set()
+
+    app.router.add_api_route(
+        "/api/v1/strategies/debug/trace",
+        trace_strategy,
+        methods=["POST"],
+        operation_id="traceStrategy",
+        route_class_override=CodedBodyValidationRoute,
+        responses={
+            404: {
+                "model": TraceStrategyNotFoundResponse,
+                "description": "The immutable strategy revision does not exist",
+            },
+            409: {
+                "model": TraceStrategyStaleResponse,
+                "description": "The saved revision hash differs from the expected hash",
+            },
+            422: {
+                "model": Trace422Response,
+                "description": "A coded trace preflight or request-body diagnostic",
+            },
+            499: {
+                "model": TraceCancelledResponse,
+                "description": "The client cancelled the trace request",
+            },
+        },
+    )
 
     @app.get(
         EQUITY_CATALOG_PATH,
@@ -656,14 +714,20 @@ def create_app(
         operation_id="previewEquityPanel",
     )
     def equity_panel_preview(request: ResearchPanelPreviewRequest) -> ResearchPanelPreview:
-        return equity_workspace.preview_panel(request)
+        try:
+            return equity_workspace.preview_panel(request)
+        except ResearchWindowViolationError as error:
+            raise _research_window_rejection(error, ("body", "query", "start")) from error
 
     @app.post(
         "/api/v1/equity/preview",
         operation_id="previewEquityData",
     )
     def equity_preview(query: ResearchPanelQuery, venue: str = "XKRX") -> ResearchPreview:
-        return equity_workspace.preview(query, venue=venue)
+        try:
+            return equity_workspace.preview(query, venue=venue)
+        except ResearchWindowViolationError as error:
+            raise _research_window_rejection(error, ("body", "start")) from error
 
     @app.get(
         FACTOR_CATALOG_PATH,
@@ -1205,6 +1269,46 @@ def _invalid_document_compiled(compiled: CompiledDocument) -> HTTPException:
             "diagnostics": jsonable_encoder([asdict(d) for d in compiled.diagnostics]),
         },
     )
+
+
+def _research_window_rejection(
+    error: ResearchWindowViolationError, loc: tuple[str, ...]
+) -> RequestValidationError:
+    """equity 미리보기의 연구 구간 거절을 이 경로의 기존 422(본문 검증 실패 목록)로 싣는다(spec D1).
+
+    두 경로는 코드화된 422 detail 이 없고 본문 검증 실패 `HTTPValidationError` 만 선언한다. 같은
+    모양의 항목 하나로 싣고 `type` 에 진단 코드, `msg` 에 backend 가 날짜까지 넣어 완성한 문장을
+    둔다.
+    """
+    return RequestValidationError([{"type": error.code, "loc": loc, "msg": str(error)}])
+
+
+def _raise_run_request_rejection(error: Exception) -> NoReturn:
+    """실행 요청 판정의 거절이면 코드화된 HTTP 오류로, 아니면 원래 오류를 그대로 올린다.
+
+    시작·미리 계산·실험 기반 검사·미리보기·추적은 같은 요청 판정(문서 검증·실행 설정 관문)을 타므로
+    거절도 같은 코드·detail 로 낸다(#351). 거절 목록과 코드는 실행 유스케이스의 `rejection_code`
+    하나가 소유하고, 여기서는 HTTP 상태와 코드별 detail 칸만 붙인다. 관측 데이터 부재·계약 위반은
+    요청 판정이 아니라 부르는 쪽이 옮긴다.
+    """
+    if isinstance(error, InvalidPortfolioRequestError):
+        raise _portfolio_http_error(error) from error
+    code = rejection_code(error)
+    if code is None:
+        raise error
+    detail: dict[str, object] = {"code": code, "message": str(error)}
+    if isinstance(error, ResearchWindowViolationError):
+        detail |= {
+            "sealed_start": error.sealed_start.isoformat(),
+            "sealed_end": error.sealed_end.isoformat(),
+            "research_start": error.research_start.isoformat(),
+        }
+    elif isinstance(error, BacktestParameterValueError):
+        detail["parameter_id"] = error.parameter_id
+    raise HTTPException(
+        status_code=_ADMISSION_STATUS.get(code, status.HTTP_422_UNPROCESSABLE_CONTENT),
+        detail=detail,
+    ) from error
 
 
 def _portfolio_http_error(

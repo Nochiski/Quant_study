@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { t } from "../../../shared/config";
-import { Badge } from "../../../shared/ui";
+import { Badge, FailureNotice } from "../../../shared/ui";
 import {
   factorGraphPointer,
   factorIndexAtPointer,
@@ -30,6 +30,13 @@ const PlanState = ({
 }: {
   state: Exclude<ExecutionPlansState, { status: "ready" }>;
 }) => {
+  if (state.status === "error")
+    return (
+      <div className="execution-plan__state">
+        <strong>{t("plan.title")}</strong>
+        <FailureNotice message={t("plan.error")} reason={state.reason} />
+      </div>
+    );
   const message =
     state.status === "blocked"
       ? blockedMessage(state.reason)
@@ -37,9 +44,7 @@ const PlanState = ({
         ? t("plan.incompatible")
             .replace("{expected}", state.expected)
             .replace("{actual}", state.actual ?? "—")
-        : state.status === "error"
-          ? `${t("plan.error")} (${state.message})`
-          : t(`plan.${state.status}`);
+        : t(`plan.${state.status}`);
   return (
     <div className="execution-plan__state" role="status">
       <strong>{t("plan.title")}</strong>

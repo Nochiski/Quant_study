@@ -4,7 +4,7 @@
 체인 **26테이블 + `dataset_profile`**(S19 테스트와 같은 순서 — 워크벤치가 읽는 20테이블에
 `index_daily`·`ownership_snapshot`·`audit_opinion`·`shares_outstanding`·`treasury_stock`·
 `opinion_broker_daily` 를 더한 것은 S19 `dataset_profile` 이 전 원천의 커버율을 재기 때문이다) +
-`catalog.publish`(매크로 9)를 스크래치에 짓고, 같은 모노레포의
+`catalog.publish`(매크로 10)를 스크래치에 짓고, 같은 모노레포의
 `backend/src`(`contract.default_engine_src()`) 에서 워크벤치 어댑터를 import 한다 —
 numpy·pyarrow·duckdb 가 필요하다(`uv run --with duckdb --with pyarrow --with numpy`;
 컨테이너·백테스트 2건은 ruamel.yaml 까지 — `uv run --project backend pytest …`).
@@ -163,10 +163,14 @@ def _value(result, as_of: date, security_id: str, field_id: str) -> object:
 
 # ── 어댑터 ────────────────────────────────────────────────────────────────────
 
-def test_snapshot_id_는_카탈로그_meta_와_같다(adapter, built: Path) -> None:
+def test_snapshot_id_앞부분은_카탈로그_meta_와_같다(adapter, built: Path) -> None:
     import json
+
+    from strategy_workbench.domain.equity.facade.research_data import SNAPSHOT_CONTRACT_SEPARATOR
     meta = json.loads((built / catalog.META_NAME).read_text(encoding="utf-8"))
-    assert adapter.snapshot().snapshot_id == meta["snapshot_id"]
+    # 워크벤치 id 는 "원장 판:필드 계약 판"이다(#235) — 앞부분이 meta·ledger_sync 의 원장 판이다
+    ledger, separator, _ = adapter.snapshot().snapshot_id.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    assert (ledger, separator) == (meta["snapshot_id"], SNAPSHOT_CONTRACT_SEPARATOR)
     assert {p.field_id for p in adapter.list_fields()} == set(ALL_FIELDS)
     # 체인이 `dataset_profile` 까지 지어 어댑터가 대장 경로를 밟는다 — 폴백 랙은 쓰지 않는다(#246)
     assert not [p.field_id for p in adapter.list_fields() if "fallback" in p.available_date_basis]
@@ -389,8 +393,9 @@ def test_2018_05_04_격자_3테이블은_stage_원장_값_그대로다(adapter) 
     assert omitted.available_date == BACKFILL_END
 
 
-def test_247540_무상증자_척도_창의_신용잔고는_결측이다(adapter) -> None:
-    """#249 — 어댑터는 원장 뷰 `v_credit_balance` 를 읽고, 뷰는 권리락일부터 척도 창의 잔고를 가린다.
+def test_247540_무상증자_척도_창의_신용잔고는_원장이_가린_셀이다(adapter) -> None:
+    """#249 — 어댑터는 원장 뷰 `v_credit_balance` 를 읽고, 뷰는 권리락일부터 척도 창의 잔고를
+    가린다. 가린 셀은 값이 없는 MASKED 라 실행 결측 정책이 채우지 않는다(#298).
 
     절단본 원장: 247540 유무상증자(무상 1주당 3주) 공시 2022-06-14(`stg_event_pifric`), 신주배정
     기준일 06-28 → 권리락일 06-27. `stg_credit_daily` 융자잔고는 06-24 350,914주 → 06-27 451,638주
@@ -403,8 +408,8 @@ def test_247540_무상증자_척도_창의_신용잔고는_결측이다(adapter)
     assert r.ok, r.detail
     seen = {  # 보이는 세션 → (값, 원장 행 날짜 = 공개일, 셀 종류)
         date(2022, 6, 29): (350_914.0, date(2022, 6, 24), CellKind.OBSERVED),
-        date(2022, 6, 30): (None, date(2022, 6, 27), CellKind.MISSING),
-        date(2022, 8, 3): (None, date(2022, 7, 29), CellKind.MISSING),
+        date(2022, 6, 30): (None, date(2022, 6, 27), CellKind.MASKED),
+        date(2022, 8, 3): (None, date(2022, 7, 29), CellKind.MASKED),
         date(2022, 8, 4): (814_512.0, date(2022, 8, 1), CellKind.OBSERVED),
     }
     for as_of, expected in seen.items():
@@ -454,5 +459,7 @@ def test_MVP_B_모멘텀_월간_백테스트가_절단본에서_완주한다(bui
     assert s.ok, s.error
     assert s.n_rebalances == 11 and s.n_rebalances_with_positions >= 1
     assert s.n_securities >= 5 and s.total_return is not None
-    assert s.data_snapshot_id == catalog.snapshot_id(catalog.table_builds(built))
+    from strategy_workbench.domain.equity.facade.research_data import SNAPSHOT_CONTRACT_SEPARATOR
+    ledger = catalog.snapshot_id(catalog.table_builds(built))
+    assert s.data_snapshot_id.startswith(ledger + SNAPSHOT_CONTRACT_SEPARATOR)
     assert s.artifact_sha256 is not None

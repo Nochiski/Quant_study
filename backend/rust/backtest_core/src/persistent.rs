@@ -761,8 +761,9 @@ impl PersistentEngine {
     }
 
     /// `liquidity_volumes`는 행별 유동성 캡 기준 거래량이다. 없으면 세션 거래량을 쓴다.
+    /// `impact_scales`는 행별 √ 충격 척도다. 없으면 0이다.
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (keys, symbols, sessions, offsets, instrument_ids, opens, highs, lows, closes, volumes, liquidity_volumes=None))]
+    #[pyo3(signature = (keys, symbols, sessions, offsets, instrument_ids, opens, highs, lows, closes, volumes, liquidity_volumes=None, impact_scales=None))]
     pub(crate) fn load_feed(
         &mut self,
         keys: Vec<String>,
@@ -776,6 +777,7 @@ impl PersistentEngine {
         closes: Vec<f64>,
         volumes: Vec<i64>,
         liquidity_volumes: Option<Vec<i64>>,
+        impact_scales: Option<Vec<f64>>,
     ) -> PyResult<()> {
         self.feed = Some(
             PersistentFeed::new(
@@ -790,7 +792,8 @@ impl PersistentEngine {
                 closes,
                 volumes,
             )?
-            .with_liquidity_volumes(liquidity_volumes)?,
+            .with_liquidity_volumes(liquidity_volumes)?
+            .with_impact_scales(impact_scales)?,
         );
         Ok(())
     }
@@ -915,7 +918,7 @@ mod tests {
     fn market_processing_mutates_persistent_order_state() {
         let mut runtime = PersistentEngine::new(10_000.0, false, false, 1.0).unwrap();
         runtime.orders.push(market_order("O-000001"));
-        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000, 1_000))]);
+        let bars = HashMap::from([("X:ONE:equity:KRW", (100.0, 110.0, 90.0, 1_000, 1_000, 0.0))]);
 
         let mut ops = runtime
             .plan_market_ops(

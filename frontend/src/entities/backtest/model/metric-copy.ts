@@ -1,4 +1,10 @@
-import { tDescription, tName, tOptional } from "../../../shared/config";
+import type { MetricValue } from "../../../shared/api";
+import {
+  tDescription,
+  tName,
+  tOptional,
+  type MessageKey,
+} from "../../../shared/config";
 
 /** 지표 하나의 쉬운 이름과 한 줄 뜻. */
 export type MetricPlainCopy = { name: string; description: string };
@@ -20,12 +26,17 @@ export const metricPlainCopy = (metricId: string): MetricPlainCopy | null => {
 /**
  * 지표 사용 불가 사유(`MetricValue.unavailable_reason`)의 로케일 문구(이슈 #241).
  *
- * 키는 `backtest.metricUnavailable.<reason>`이고 사유 목록은 backend `MetricUnavailableReason`이
- * 소유한다. 문구가 없는 새 사유는 원문의 밑줄만 공백으로 바꿔 보인다 — 칸이 비지 않게 한다.
+ * 사유 목록은 backend `MetricUnavailableReason`이 소유하고 생성 SDK의 유니온으로 온다. 키
+ * `backtest.metricUnavailable.<reason>`을 `MessageKey`로 받으므로 사유가 늘었는데 문구가 없으면
+ * typecheck가 깨진다(#293). 생성 SDK보다 새 사유가 실려 오면 원문의 밑줄만 공백으로 바꿔 보인다 —
+ * 칸이 비지 않게 한다.
  */
-export const metricUnavailableCopy = (reason: string): string =>
-  tOptional(`backtest.metricUnavailable.${reason}`) ??
-  reason.replaceAll("_", " ");
+export const metricUnavailableCopy = (
+  reason: NonNullable<MetricValue["unavailable_reason"]>,
+): string => {
+  const key: MessageKey = `backtest.metricUnavailable.${reason}`;
+  return tOptional(key) ?? reason.replaceAll("_", " ");
+};
 
 /**
  * 사용 불가 사유마다 그 이유를 적는 데이터 경고 코드. 실행에 이 경고가 있으면 지표 칸에서 그

@@ -34,8 +34,8 @@ class MetricScope(StrEnum):
 class MetricUnavailableReason(StrEnum):
     """지표 값이 없을 때(`MetricValue.value is None`) 그 이유. 값은 wire 계약이다.
 
-    화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유하고, 목록은 골든
-    `tests/fixtures/analytics/metric_unavailable_reasons.json` 이 두 쪽을 묶는다(이슈 #241).
+    화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유한다. 목록은 OpenAPI 생성
+    SDK의 같은 이름 유니온으로 가고, 문구가 빠지면 frontend typecheck가 깨진다(이슈 #241·#293).
     """
 
     ZERO_RETURN_VARIANCE = "zero_return_variance"
@@ -48,6 +48,7 @@ class MetricUnavailableReason(StrEnum):
     NO_OBSERVATIONS_IN_SCOPE = "no_observations_in_scope"
     PERIOD_UNDER_ONE_YEAR = "period_under_one_year"
     BASE_RATE_NOT_COVERED = "base_rate_not_covered"
+    TWO_VALUED_RETURNS = "two_valued_returns"
 
 
 @dataclass(frozen=True)

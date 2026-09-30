@@ -24,6 +24,8 @@ import {
 } from "./field-applicability";
 import {
   discriminatorAt,
+  displayValue,
+  formatContractValue,
   schemaAt,
   schemaFacts,
   type Bound,
@@ -171,29 +173,6 @@ export const contractFor = (
   return (
     rows.find((row) => row.branch === branch) ?? rows.find((row) => !row.branch)
   );
-};
-
-export const formatContractValue = (value: unknown): string | null => {
-  if (value === undefined) return null;
-  if (typeof value === "string") return value;
-  const encoded = JSON.stringify(value);
-  return encoded === undefined ? String(value) : encoded;
-};
-
-const stableNumber = (value: number): string =>
-  Number(value.toPrecision(12)).toString();
-
-const displayValue = (
-  value: unknown,
-  unit: string | null,
-  displayUnit: string | null,
-): string | null => {
-  if (displayUnit === null) return null;
-  if (typeof value === "number" && unit === "ratio" && displayUnit === "%")
-    return `${stableNumber(value * 100)}%`;
-  const formatted = formatContractValue(value);
-  if (formatted === null) return null;
-  return displayUnit === "%" ? `${formatted}%` : `${formatted} ${displayUnit}`;
 };
 
 /** typed contract 행이 우선하고, 같은 사실의 runtime schema 값은 그 다음이다. */

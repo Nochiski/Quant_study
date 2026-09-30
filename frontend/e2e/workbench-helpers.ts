@@ -1,6 +1,7 @@
 /**
- * Playwright spec 들이 함께 쓰는 워크벤치 헬퍼 — 편집기·저장·백테스트 로케이터, 문서 상태 대기,
- * 클립보드로 편집기 원문 읽기, revision URL 해석. `workbench.workflow.spec.ts`(CI 가 도는 릴리스 게이트)와
+ * Playwright spec 들이 함께 쓰는 워크벤치 헬퍼 — 저장·백테스트 로케이터, revision URL 해석, 실행 설정
+ * 칸과 채우기, 은퇴 버전 업그레이드 배너. 편집기 로케이터·원문 읽기·바꾸기·문서 검증 대기는 매뉴얼 촬영
+ * 스크립트도 쓰므로 `editor-helpers.ts`에 두고 여기서 다시 내보낸다. `workbench.workflow.spec.ts`(CI 가 도는 릴리스 게이트)와
  * `workbench.real-equity.spec.ts`(opt-in 실데이터)가 같은 접근성 이름·API path 를 보도록 한 곳에 둔다.
  * 접근성 이름이 바뀌면 CI 의 workflow spec 이 먼저 깨지고, 여기서 고치면 real-equity 도 함께 따라온다.
  */
@@ -9,14 +10,25 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { RunEnvironment } from "../src/shared/api/generated";
+import type {
+  RunEnvironment,
+  UpgradedDocument,
+} from "../src/shared/api/generated";
 import { createClient } from "../src/shared/api/generated/client";
-import { backendOrigin, previewOrigin } from "./ports.mjs";
+import { editor, expectPhase, waitForSettledDocument } from "./editor-helpers";
+import { backendOrigin } from "./ports.mjs";
+
+export {
+  currentSource,
+  editor,
+  expectPhase,
+  replaceSource,
+} from "./editor-helpers";
 
 export const BACKEND = backendOrigin();
 export const apiClient = createClient({ baseUrl: BACKEND });
 const ownDirectory = dirname(fileURLToPath(import.meta.url));
-/** backend 소유 골든 fixture(schema 1.1). frontend 는 읽기만 한다(`frontend-testing.md`). */
+/** backend 소유 골든 fixture(현재 schema 버전). frontend 는 읽기만 한다(`frontend-testing.md`). */
 export const GOLDEN = readFileSync(
   resolve(
     ownDirectory,
@@ -25,8 +37,6 @@ export const GOLDEN = readFileSync(
   "utf8",
 ).replace(/\r\n?/gu, "\n");
 
-export const editor = (page: Page) =>
-  page.getByRole("textbox", { name: "편집기", exact: true });
 export const save = (page: Page) =>
   page.getByRole("button", { name: "리비전 저장", exact: true });
 export const validate = (page: Page) =>
@@ -40,29 +50,39 @@ export const openEditor = async (page: Page, url: string) => {
   await expect(editor(page)).toBeVisible();
 };
 
-export const replaceSource = async (page: Page, source: string) => {
-  await editor(page).fill(source);
-};
+/**
+ * 요소의 가운데를 찍었을 때 맞는 요소가 그 요소(또는 그 안의 글자)가 아니면 무엇인지 돌려준다. 보이는데
+ * 옆 칸·겹쳐 뜬 패널·상단 바에 깔려 눌리지도 읽히지도 않는 경우를 잡는다 — Playwright 가시성 검사는 겹침을
+ * 보지 않는다(#269). 지금 화면 그대로 찍고 굴리지 않는다. 재기 전에 굴리면 패널을 펼칠 때 포커스가 페이지를
+ * 굴려 서랍 머리 줄이 상단 바 밑에 깔린 것을 되돌려 버려 못 봤다(#290 리뷰 r3 P2-1). 창 밖이면 "화면 밖"이다
+ * — 사용자가 그 요소를 보는 자리에 페이지를 두는 것은 부르는 쪽이 정한다(`scrollPageTo`).
+ */
+export const coveringElement = (target: Locator) =>
+  target.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      box.x + box.width / 2,
+      box.y + box.height / 2,
+    );
+    if (hit !== null && element.contains(hit)) return null;
+    return hit === null
+      ? "화면 밖"
+      : `${hit.tagName.toLowerCase()} "${(hit.textContent ?? "").trim().slice(0, 40)}"`;
+  });
 
 /**
- * 편집기에 넣은 텍스트의 검증(parse·compile)이 끝나기를 기다린다. 부하가 큰 러너에서 검증 결과가
- * 도착하기 전의 중간 상태를 단언이 읽는 경합을 막는다(#240 후보 (a)). 문서 상태 배지의
- * `data-settled` 는 compile 버전이 입력 버전을 따라잡았거나 구문 오류로 compile 이 시작되지 않을 때
- * 참이다(`isDocumentSettled`).
+ * 사용자가 요소를 보려고 페이지를 굴린 자리에 둔다 — 요소가 창 세로 가운데에 온다. 옆 칸·겹쳐 뜬 패널과의
+ * 겹침(`coveringElement`)을 상단 바와 무관하게 볼 때 쓴다. 굴리는 것은 페이지뿐이다. `scrollIntoView`는 안쪽
+ * 스크롤 칸(탭 목록 등)까지 굴려 그 칸 밖으로 밀려 가려진 요소를 드러내 버린다(#296).
  */
-export const waitForSettledDocument = async (page: Page) => {
-  const status = page.getByRole("status", { name: "문서 상태" });
-  await expect(status, "문서 검증이 입력 버전을 따라잡는다(#240)").toHaveAttribute(
-    "data-settled",
-    "true",
-  );
-  return status;
-};
-
-export const expectPhase = async (page: Page, phase: string) => {
-  const status = await waitForSettledDocument(page);
-  await expect(status).toContainText(phase);
-};
+export const scrollPageTo = (target: Locator) =>
+  target.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    window.scrollBy({
+      top: box.y + box.height / 2 - window.innerHeight / 2,
+      behavior: "instant",
+    });
+  });
 
 export const requireData = <Value>(
   data: Value | undefined,
@@ -70,32 +90,6 @@ export const requireData = <Value>(
 ): Value => {
   if (data === undefined) throw new Error(`${operation} returned no data`);
   return data;
-};
-
-/**
- * 편집기 원문 전체를 읽는다. 전체 선택 → 복사 → 클립보드 읽기를 **연속 두 번 같은 값이 나올 때까지**
- * 되풀이한다. 탭을 YAML로 바꾸면 선택된 pointer를 편집기에 드러내는 reveal이 비동기로 한 틱 늦게
- * 도착한다(route 테스트 P6-03 주석과 같은 현상). 그 reveal이 Ctrl+A 뒤에 떨어지면 선택이 그 pointer
- * 범위로 바뀌어 원문 대신 조각이 복사된다 — 화면이 무거워진 main 반영 뒤 그래프 되돌리기 e2e가 이
- * 경로로 간헐 실패했다. reveal은 한 번 오고 끝나므로 두 번 연속 같은 값이면 그것이 전체 원문이다.
- */
-export const currentSource = async (page: Page) => {
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-    origin: previewOrigin(),
-  });
-  const copyAll = async (): Promise<string> => {
-    await editor(page).click();
-    await editor(page).press("Control+A");
-    await editor(page).press("Control+C");
-    return page.evaluate(() => navigator.clipboard.readText());
-  };
-  let previous = await copyAll();
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const next = await copyAll();
-    if (next === previous) return next;
-    previous = next;
-  }
-  throw new Error("editor source kept changing while it was being copied");
 };
 
 export const strategyIdentity = (page: Page) => {
@@ -119,6 +113,30 @@ export const saveAndWaitForRevision = async (page: Page, revision: number) => {
   await expectPhase(page, "저장됨");
 };
 
+/** 은퇴 버전 문서의 안내 배너. 문구는 버전 중립이다 — 어느 버전이 은퇴했는지는 backend 가 판정한다. */
+export const upgradeBanner = (page: Page) =>
+  page.getByRole("region", { name: "이전 schema 문서" });
+
+export const upgradeButton = (page: Page) =>
+  upgradeBanner(page).getByRole("button", { name: "현재 버전으로 업그레이드" });
+
+/** 배너의 업그레이드 버튼을 눌러 backend 응답을 돌려준다. */
+export const upgradeFromBanner = async (
+  page: Page,
+): Promise<UpgradedDocument> => {
+  const upgrade = upgradeButton(page);
+  await expect(upgrade).toBeEnabled();
+  const upgraded = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/strategy-documents/upgrade",
+  );
+  await upgrade.click();
+  const response = await upgraded;
+  expect(response.status()).toBe(200);
+  return (await response.json()) as UpgradedDocument;
+};
+
 /**
  * 골든 fixture 문자열 치환 — 없는 문자열이면 조용히 원문을 돌려주는 `String.replace` 대신 즉시 실패해,
  * fixture(backend 소유)가 바뀌었을 때 15분짜리 실데이터 실행 끝에서가 아니라 첫 줄에서 알린다.
@@ -135,7 +153,8 @@ export const mustReplace = (text: string, from: string, to: string): string => {
 /**
  * e2e 가 실행 설정 패널에 넣는 기간·유니버스(P3-02). schema 1.2 부터 이 값은 전략 문서 밖에 있고, 실행
  * 설정 스키마가 기본값을 주지 않아 사용자가 정해야 백테스트·추적이 열린다. mock 어댑터는 fixture 달력 밖
- * 세션을 (종목, 날짜)의 함수로 합성하므로 옛 골든(1.1)의 기간을 그대로 쓴다.
+ * 세션을 (종목, 날짜)의 함수로 합성하므로 은퇴한 1.1 골든(`quality_momentum.v1_1.yaml`)의 `data` 기간·
+ * 유니버스를 그대로 쓴다.
  */
 export const RUN_ENVIRONMENT = {
   start: "2021-01-01",
@@ -178,6 +197,15 @@ export const REQUESTED_ENVIRONMENT = requestedEnvironment({
   ...RUN_ENVIRONMENT,
 }) as unknown as RunEnvironment;
 
+/** 실행 설정 패널을 여닫는 툴바 토글과 e2e 가 값을 넣고 읽는 패널 칸. */
+export const runSettingsInputs = (page: Page) => ({
+  toggle: page.getByLabel("실행 설정 열기"),
+  start: page.getByLabel("시작일", { exact: true }),
+  end: page.getByLabel("종료일", { exact: true }),
+  universe: page.getByRole("textbox", { name: "유니버스", exact: true }),
+  fee: page.getByRole("spinbutton", { name: "수수료 (bp)" }),
+});
+
 /**
  * 실행 설정 패널을 열어 기간·유니버스를 채우고 닫는다. `keyboard` 면 패널을 여닫을 때도 포인터 없이 초점과
  * Enter 만 쓴다(US-SM-04 키보드 스토리). `via: "band"` 는 사용자가 막혔을 때 밟는 길이다 — 요약 띠가
@@ -196,18 +224,15 @@ export const fillRunEnvironment = async (
     universe_id: string;
   } = RUN_ENVIRONMENT,
 ) => {
-  // 실행 설정은 문서 밖이지만, 편집기 검증이 끝나기 전에 패널을 여닫으면 뒤이은 문서 단언이 중간
-  // 상태를 읽는다(#240). 먼저 검증을 끝낸다.
+  // 문서 검증이 끝난 뒤 실행 설정을 채운다. #240 을 좇으며 넣은 순서지만 #240 의 원인은 이 순서가 아니라
+  // `fill` 의 DOM 선택을 CodeMirror 갱신이 되쓴 것이었다(`replaceSource`).
   await waitForSettledDocument(page);
-  const toggle = page.getByLabel("실행 설정 열기");
+  const { toggle, start, end, universe } = runSettingsInputs(page);
   const band = page.getByRole("region", { name: "실행 설정 요약" });
   const fields = [
-    [page.getByLabel("시작일", { exact: true }), environment.start],
-    [page.getByLabel("종료일", { exact: true }), environment.end],
-    [
-      page.getByRole("textbox", { name: "유니버스", exact: true }),
-      environment.universe_id,
-    ],
+    [start, environment.start],
+    [end, environment.end],
+    [universe, environment.universe_id],
   ] as const;
   const press = async (target: Locator) => {
     if (keyboard) {

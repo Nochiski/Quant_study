@@ -455,7 +455,7 @@
         "type": "object"
       },
       "BacktestEnvironmentRequiredDetail": {
-        "description": "실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.",
+        "description": "실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.",
         "properties": {
           "code": {
             "const": "backtest.run.environment_required",
@@ -472,6 +472,31 @@
           "message"
         ],
         "title": "BacktestEnvironmentRequiredDetail",
+        "type": "object"
+      },
+      "BacktestParameterInvalidDetail": {
+        "description": "요청의 파라미터 값이 문서에 없는 파라미터이거나 허용 밖이다(spec D4).\n\n허용 판정 owner 는 `domain/strategy/_models.py` 의 `normalized_parameter_value` 다. 화면 문장은\nfrontend 가 `code` 로 번역하고 `parameter_id` 를 자리표시자로 채운다.",
+        "properties": {
+          "code": {
+            "const": "backtest.run.parameter_invalid",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "parameter_id"
+        ],
+        "title": "BacktestParameterInvalidDetail",
         "type": "object"
       },
       "BacktestResearchWindowViolationDetail": {
@@ -541,6 +566,37 @@
           "detail"
         ],
         "title": "BacktestResultNotReadyResponse",
+        "type": "object"
+      },
+      "BacktestResultUnreadableDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.result.unreadable",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "BacktestResultUnreadableDetail",
+        "type": "object"
+      },
+      "BacktestResultUnreadableResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/BacktestResultUnreadableDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "BacktestResultUnreadableResponse",
         "type": "object"
       },
       "BacktestRunFieldInvalidDetail": {
@@ -699,6 +755,17 @@
             "title": "Initial Cash",
             "type": "number"
           },
+          "lineage_strategy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Strategy Id"
+          },
           "metric_windows": {
             "default": [],
             "items": {
@@ -706,6 +773,26 @@
             },
             "title": "Metric Windows",
             "type": "array"
+          },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameter Values",
+            "type": "object"
           },
           "strategy": {
             "anyOf": [
@@ -772,7 +859,9 @@
                   "portfolio.data.unavailable",
                   "portfolio.raw_observation.invalid",
                   "backtest.run.invalid",
-                  "backtest.run.internal"
+                  "backtest.run.equity_wiped_out",
+                  "backtest.run.internal",
+                  "backtest.run.interrupted"
                 ],
                 "type": "string"
               },
@@ -820,7 +909,7 @@
         "type": "object"
       },
       "BacktestRunSummary": {
-        "description": "One process-lifetime run and the strategy meaning resolved before it started.",
+        "description": "One accepted run and the strategy meaning resolved before it started.",
         "properties": {
           "run": {
             "$ref": "#/components/schemas/BacktestRunState"
@@ -982,6 +1071,7 @@
                 "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
                 "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
                 "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
+                "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
                 "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
@@ -1000,6 +1090,9 @@
               },
               {
                 "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestParameterInvalidDetail"
               },
               {
                 "$ref": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail"
@@ -1059,6 +1152,49 @@
         ],
         "title": "BinaryOperator",
         "type": "string"
+      },
+      "BlockedTrialAttempt": {
+        "description": "봉인 겹침으로 거절한 실행 요청(봉인 원장의 \"차단한 시도\"). 결과가 없어 N 에 들지 않는다.",
+        "properties": {
+          "blocked_at": {
+            "format": "date-time",
+            "title": "Blocked At",
+            "type": "string"
+          },
+          "lineage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Id"
+          },
+          "spec_hash": {
+            "title": "Spec Hash",
+            "type": "string"
+          },
+          "start": {
+            "format": "date",
+            "title": "Start",
+            "type": "string"
+          },
+          "trial_key": {
+            "title": "Trial Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blocked_at",
+          "lineage_id",
+          "trial_key",
+          "spec_hash",
+          "start"
+        ],
+        "title": "BlockedTrialAttempt",
+        "type": "object"
       },
       "CandidateDecision": {
         "properties": {
@@ -1164,7 +1300,8 @@
           "source_omitted_zero",
           "missing",
           "not_collected",
-          "coverage_gap"
+          "coverage_gap",
+          "masked"
         ],
         "title": "CellKind",
         "type": "string"
@@ -2088,6 +2225,572 @@
         ],
         "title": "ExecutionTiming",
         "type": "string"
+      },
+      "Experiment": {
+        "properties": {
+          "record": {
+            "$ref": "#/components/schemas/ExperimentRecord"
+          },
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/ExperimentSelection"
+            },
+            "title": "Selections",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExperimentStatus"
+          },
+          "trial_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/TrialStatus"
+            },
+            "title": "Trial Counts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "record",
+          "status",
+          "trial_counts",
+          "selections"
+        ],
+        "title": "Experiment",
+        "type": "object"
+      },
+      "ExperimentAdmissionErrorResponse": {
+        "description": "실험 설계 거절이거나, 기반 실행 요청을 실행 접수가 거절했다(백테스트 시작과 같은 코드).",
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExperimentErrorDetail"
+              },
+              {
+                "discriminator": {
+                  "mapping": {
+                    "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
+                    "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
+                    "backtest.run.invalid": "#/components/schemas/BacktestRunInvalidDetail",
+                    "backtest.run.parameter_invalid": "#/components/schemas/BacktestParameterInvalidDetail",
+                    "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
+                    "backtest.strategy.requires_upgrade": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail",
+                    "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
+                  },
+                  "propertyName": "code"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/BacktestRunInvalidDetail"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BacktestParameterInvalidDetail"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BacktestStrategyRequiresUpgradeDetail"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PortfolioStrategyInvalidDetail"
+                  }
+                ]
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ExperimentAdmissionErrorResponse",
+        "type": "object"
+      },
+      "ExperimentControls": {
+        "description": "실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은\n끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.",
+        "properties": {
+          "paused": {
+            "default": false,
+            "title": "Paused",
+            "type": "boolean"
+          },
+          "priority": {
+            "default": 1,
+            "title": "Priority",
+            "type": "integer"
+          }
+        },
+        "title": "ExperimentControls",
+        "type": "object"
+      },
+      "ExperimentControlsRequest": {
+        "description": "일시정지·우선순위(1 = 보통). 보내지 않은 칸은 그대로다. 범위 owner 는 domain\n`MAX_EXPERIMENT_PRIORITY` 다.",
+        "properties": {
+          "paused": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          }
+        },
+        "title": "ExperimentControlsRequest",
+        "type": "object"
+      },
+      "ExperimentDesign": {
+        "properties": {
+          "measured": {
+            "default": false,
+            "title": "Measured",
+            "type": "boolean"
+          },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameter Values",
+            "type": "object"
+          },
+          "search": {
+            "$ref": "#/components/schemas/SearchSpec"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/WalkForwardWindow"
+            },
+            "title": "Windows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "search",
+          "parameter_values",
+          "windows"
+        ],
+        "title": "ExperimentDesign",
+        "type": "object"
+      },
+      "ExperimentErrorDetail": {
+        "description": "실험 거절. 코드 목록 owner 는 `domain/experiment/_errors.py` 이고, 화면 문장은 frontend 가\n`code` 로 번역한다.",
+        "properties": {
+          "code": {
+            "enum": [
+              "experiment.base.invalid",
+              "experiment.base.unsaved",
+              "experiment.not_found",
+              "experiment.search.invalid_values",
+              "experiment.search.too_many_points",
+              "experiment.search.unknown_parameter",
+              "experiment.selection.not_completed",
+              "experiment.split.invalid",
+              "experiment.split.no_window",
+              "experiment.trial.not_found",
+              "experiment.trial.not_retryable"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ExperimentErrorDetail",
+        "type": "object"
+      },
+      "ExperimentErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/ExperimentErrorDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ExperimentErrorResponse",
+        "type": "object"
+      },
+      "ExperimentPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/Experiment"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After"
+          }
+        },
+        "required": [
+          "items",
+          "next_after"
+        ],
+        "title": "ExperimentPage",
+        "type": "object"
+      },
+      "ExperimentPreview": {
+        "description": "시작 전 미리 계산 — 무엇을 몇 번 돌리고 계열 시도 수 N 이 얼마가 되나(spec D2).",
+        "properties": {
+          "combination_count": {
+            "title": "Combination Count",
+            "type": "integer"
+          },
+          "design": {
+            "$ref": "#/components/schemas/ExperimentDesign"
+          },
+          "lineage_id": {
+            "title": "Lineage Id",
+            "type": "string"
+          },
+          "new_trial_count": {
+            "title": "New Trial Count",
+            "type": "integer"
+          },
+          "run_count": {
+            "title": "Run Count",
+            "type": "integer"
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          },
+          "trial_count_after": {
+            "title": "Trial Count After",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "design",
+          "combination_count",
+          "run_count",
+          "lineage_id",
+          "trial_count",
+          "new_trial_count",
+          "trial_count_after"
+        ],
+        "title": "ExperimentPreview",
+        "type": "object"
+      },
+      "ExperimentRecord": {
+        "description": "만든 실험. 취소 시각과 대기열 조작 말고는 바뀌지 않는다.",
+        "properties": {
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "controls": {
+            "$ref": "#/components/schemas/ExperimentControls",
+            "default": {
+              "paused": false,
+              "priority": 1
+            }
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "design": {
+            "$ref": "#/components/schemas/ExperimentDesign"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "run": {
+            "$ref": "#/components/schemas/BacktestRunSpec"
+          },
+          "split": {
+            "$ref": "#/components/schemas/SplitSpec"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "created_at",
+          "run",
+          "split",
+          "design"
+        ],
+        "title": "ExperimentRecord",
+        "type": "object"
+      },
+      "ExperimentRequest": {
+        "description": "실험 만들기·미리 계산 요청.",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/BacktestRunSpec"
+          },
+          "search": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "boolean"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Search",
+            "type": "object"
+          },
+          "split": {
+            "$ref": "#/components/schemas/SplitSpec"
+          }
+        },
+        "required": [
+          "run",
+          "search",
+          "split"
+        ],
+        "title": "ExperimentRequest",
+        "type": "object"
+      },
+      "ExperimentSelection": {
+        "description": "사용자가 고른 후보 기록(spec D9). 되돌릴 수 없다.",
+        "properties": {
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameter Values",
+            "type": "object"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "selected_at": {
+            "format": "date-time",
+            "title": "Selected At",
+            "type": "string"
+          },
+          "strategy_id": {
+            "title": "Strategy Id",
+            "type": "string"
+          },
+          "trial_index": {
+            "title": "Trial Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "trial_index",
+          "strategy_id",
+          "revision",
+          "parameter_values",
+          "reason",
+          "selected_at"
+        ],
+        "title": "ExperimentSelection",
+        "type": "object"
+      },
+      "ExperimentSelectionRequest": {
+        "properties": {
+          "reason": {
+            "pattern": "\\S",
+            "title": "Reason",
+            "type": "string"
+          },
+          "trial_index": {
+            "minimum": 0.0,
+            "title": "Trial Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "trial_index",
+          "reason"
+        ],
+        "title": "ExperimentSelectionRequest",
+        "type": "object"
+      },
+      "ExperimentStatus": {
+        "description": "실험 단위 상태. trial 상태와 실험 취소에서 파생하고 따로 저장하지 않는다(spec D6).",
+        "enum": [
+          "queued",
+          "running",
+          "paused",
+          "completed",
+          "cancelled"
+        ],
+        "title": "ExperimentStatus",
+        "type": "string"
+      },
+      "ExperimentTrial": {
+        "properties": {
+          "grid_index": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Grid Index",
+            "type": "array"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "parameter_values": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Parameter Values",
+            "type": "object"
+          },
+          "window": {
+            "$ref": "#/components/schemas/WalkForwardWindow"
+          }
+        },
+        "required": [
+          "index",
+          "grid_index",
+          "parameter_values",
+          "window"
+        ],
+        "title": "ExperimentTrial",
+        "type": "object"
+      },
+      "ExperimentTrialState": {
+        "properties": {
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/TrialAttempt"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "awaiting_recovery": {
+            "title": "Awaiting Recovery",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TrialStatus"
+          },
+          "trial": {
+            "$ref": "#/components/schemas/ExperimentTrial"
+          }
+        },
+        "required": [
+          "trial",
+          "status",
+          "attempts",
+          "awaiting_recovery"
+        ],
+        "title": "ExperimentTrialState",
+        "type": "object"
       },
       "FactorAnalytics": {
         "properties": {
@@ -3463,6 +4166,15 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ImpactModel": {
+        "description": "체결가에 얹는 시장충격 모델(spec D7).\n\n`fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×\n√(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.",
+        "enum": [
+          "fixed_bps",
+          "sqrt"
+        ],
+        "title": "ImpactModel",
+        "type": "string"
+      },
       "InlineDraft": {
         "description": "Use an unsaved typed spec while recording its authoring-source hash when known.\n\nAn inline draft can be researched or backtested, but it is never a deployment source.\n`source_hash` is client-asserted provenance: the server cannot verify it without the text.",
         "properties": {
@@ -3617,7 +4329,7 @@
         "type": "string"
       },
       "MetricUnavailableReason": {
-        "description": "지표 값이 없을 때(`MetricValue.value is None`) 그 이유. 값은 wire 계약이다.\n\n화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유하고, 목록은 골든\n`tests/fixtures/analytics/metric_unavailable_reasons.json` 이 두 쪽을 묶는다(이슈 #241).",
+        "description": "지표 값이 없을 때(`MetricValue.value is None`) 그 이유. 값은 wire 계약이다.\n\n화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유한다. 목록은 OpenAPI 생성\nSDK의 같은 이름 유니온으로 가고, 문구가 빠지면 frontend typecheck가 깨진다(이슈 #241·#293).",
         "enum": [
           "zero_return_variance",
           "no_downside_variation",
@@ -3628,7 +4340,8 @@
           "no_losing_closed_trade",
           "no_observations_in_scope",
           "period_under_one_year",
-          "base_rate_not_covered"
+          "base_rate_not_covered",
+          "two_valued_returns"
         ],
         "title": "MetricUnavailableReason",
         "type": "string"
@@ -4438,6 +5151,9 @@
           "detail": {
             "discriminator": {
               "mapping": {
+                "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
+                "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
+                "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail"
@@ -4453,6 +5169,15 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
               }
             ],
             "title": "Detail"
@@ -5814,6 +6539,15 @@
             "$ref": "#/components/schemas/DataFrequency",
             "default": "daily"
           },
+          "impact_coefficient": {
+            "default": 1.0,
+            "title": "Impact Coefficient",
+            "type": "number"
+          },
+          "impact_model": {
+            "$ref": "#/components/schemas/ImpactModel",
+            "default": "fixed_bps"
+          },
           "market": {
             "$ref": "#/components/schemas/Market",
             "default": "KRX"
@@ -6177,6 +6911,41 @@
         "title": "SearchActivityView",
         "type": "object"
       },
+      "SearchAxis": {
+        "description": "탐색할 파라미터 하나와 그 값 목록. 숫자는 오름차순, 선택지는 문서 선언 순서다.",
+        "properties": {
+          "parameter_id": {
+            "title": "Parameter Id",
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "parameter_id",
+          "values"
+        ],
+        "title": "SearchAxis",
+        "type": "object"
+      },
       "SearchBudgetExhaustedView": {
         "description": "검색 횟수 상한에 닿아 이 턴의 남은 호출에서 검색을 뺐다는 통지. 검색 활동이 아니다.\n\n본문 필드가 없다. 화면 문구는 frontend가 로케일별로 소유하고, 모델에게 보낸 지시문은 wire에\n싣지 않는다(C-03).",
         "properties": {
@@ -6190,6 +6959,23 @@
           "type"
         ],
         "title": "SearchBudgetExhaustedView",
+        "type": "object"
+      },
+      "SearchSpec": {
+        "description": "탐색 축들의 곱집합이 그리드다. 축 순서는 전략 문서의 파라미터 선언 순서다.\n\n축이 없으면 문서 기본값 한 칸(좌표 `()`)이다.",
+        "properties": {
+          "axes": {
+            "items": {
+              "$ref": "#/components/schemas/SearchAxis"
+            },
+            "title": "Axes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "axes"
+        ],
+        "title": "SearchSpec",
         "type": "object"
       },
       "SecurityRef": {
@@ -6513,6 +7299,45 @@
           "url"
         ],
         "title": "SourceView",
+        "type": "object"
+      },
+      "SplitMode": {
+        "enum": [
+          "rolling",
+          "anchored"
+        ],
+        "title": "SplitMode",
+        "type": "string"
+      },
+      "SplitSpec": {
+        "properties": {
+          "embargo_sessions": {
+            "title": "Embargo Sessions",
+            "type": "integer"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/SplitMode"
+          },
+          "selection_rule": {
+            "$ref": "#/components/schemas/WindowSelectionRule",
+            "default": "neighbor_mean_sharpe_max"
+          },
+          "test_years": {
+            "title": "Test Years",
+            "type": "integer"
+          },
+          "train_years": {
+            "title": "Train Years",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mode",
+          "train_years",
+          "test_years",
+          "embargo_sessions"
+        ],
+        "title": "SplitSpec",
         "type": "object"
       },
       "StartTurnRequest": {
@@ -7108,6 +7933,38 @@
           "revision"
         ],
         "title": "StrategyIdentity",
+        "type": "object"
+      },
+      "StrategyNotFoundDetail": {
+        "properties": {
+          "code": {
+            "const": "strategy.not_found",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "StrategyNotFoundDetail",
+        "type": "object"
+      },
+      "StrategyNotFoundResponse": {
+        "description": "시도 원장 경로의 계열(저장된 전략)이 없다.",
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/StrategyNotFoundDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "StrategyNotFoundResponse",
         "type": "object"
       },
       "StrategyOperatorCatalog": {
@@ -8295,6 +9152,9 @@
           "detail": {
             "discriminator": {
               "mapping": {
+                "backtest.run.environment_required": "#/components/schemas/BacktestEnvironmentRequiredDetail",
+                "backtest.run.field_invalid": "#/components/schemas/BacktestRunFieldInvalidDetail",
+                "backtest.run.research_window_violation": "#/components/schemas/BacktestResearchWindowViolationDetail",
                 "portfolio.data.unavailable": "#/components/schemas/PortfolioDataUnavailableDetail",
                 "portfolio.raw_observation.invalid": "#/components/schemas/PortfolioRawObservationInvalidDetail",
                 "portfolio.strategy.invalid": "#/components/schemas/PortfolioStrategyInvalidDetail",
@@ -8326,6 +9186,15 @@
               },
               {
                 "$ref": "#/components/schemas/PortfolioRawObservationInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestRunFieldInvalidDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestEnvironmentRequiredDetail"
+              },
+              {
+                "$ref": "#/components/schemas/BacktestResearchWindowViolationDetail"
               }
             ],
             "title": "Detail"
@@ -8346,6 +9215,315 @@
           "group_missing"
         ],
         "title": "TraceValueStatus",
+        "type": "string"
+      },
+      "TrialAttempt": {
+        "description": "trial 의 실행 시도 하나. 배정되면 `run_id`, 접수가 거절되면 거절 코드와 문장이 있다.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "trial_index": {
+            "title": "Trial Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "trial_index",
+          "attempt",
+          "created_at"
+        ],
+        "title": "TrialAttempt",
+        "type": "object"
+      },
+      "TrialGroup": {
+        "description": "같은 시도 키의 실행들. 대표 실행이 없으면 이 시도는 N 에 들지 않는다.",
+        "properties": {
+          "metric_registry_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Registry Version"
+          },
+          "representative_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Representative Run Id"
+          },
+          "representative_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Representative Sharpe"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/TrialRun"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
+          "trial_key": {
+            "title": "Trial Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trial_key",
+          "runs"
+        ],
+        "title": "TrialGroup",
+        "type": "object"
+      },
+      "TrialLedger": {
+        "description": "계열 하나의 원장.\n\n`lineage_id` 는 합친 뒤 남은 계열이고 `merged_lineage_ids` 는 거기 합쳐진 계열이다.",
+        "properties": {
+          "blocked": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedTrialAttempt"
+            },
+            "title": "Blocked",
+            "type": "array"
+          },
+          "lineage_id": {
+            "title": "Lineage Id",
+            "type": "string"
+          },
+          "merged_lineage_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Merged Lineage Ids",
+            "type": "array"
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          },
+          "trials": {
+            "items": {
+              "$ref": "#/components/schemas/TrialGroup"
+            },
+            "title": "Trials",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lineage_id",
+          "merged_lineage_ids",
+          "trial_count",
+          "trials",
+          "blocked"
+        ],
+        "title": "TrialLedger",
+        "type": "object"
+      },
+      "TrialLineageAlreadyMergedDetail": {
+        "properties": {
+          "code": {
+            "const": "backtest.lineage.already_merged",
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "TrialLineageAlreadyMergedDetail",
+        "type": "object"
+      },
+      "TrialLineageAlreadyMergedResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/TrialLineageAlreadyMergedDetail"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "TrialLineageAlreadyMergedResponse",
+        "type": "object"
+      },
+      "TrialLineageMergeRequest": {
+        "description": "합칠 계열(`source_strategy_id`). 경로의 계열이 남는다.",
+        "properties": {
+          "source_strategy_id": {
+            "minLength": 1,
+            "title": "Source Strategy Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_strategy_id"
+        ],
+        "title": "TrialLineageMergeRequest",
+        "type": "object"
+      },
+      "TrialPreview": {
+        "description": "실행 전 미리 계산 — 이 요청이 결과를 내면 N 에 새로 드는가.\n\n계열이 없으면 N 에 들지 않는다.",
+        "properties": {
+          "lineage_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Id"
+          },
+          "new_trial": {
+            "title": "New Trial",
+            "type": "boolean"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/TrialPreviewReason"
+          },
+          "trial_count": {
+            "title": "Trial Count",
+            "type": "integer"
+          },
+          "trial_count_after": {
+            "title": "Trial Count After",
+            "type": "integer"
+          },
+          "trial_key": {
+            "title": "Trial Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lineage_id",
+          "trial_key",
+          "trial_count",
+          "new_trial",
+          "trial_count_after",
+          "reason"
+        ],
+        "title": "TrialPreview",
+        "type": "object"
+      },
+      "TrialPreviewReason": {
+        "enum": [
+          "new_trial",
+          "recheck",
+          "no_lineage"
+        ],
+        "title": "TrialPreviewReason",
+        "type": "string"
+      },
+      "TrialRun": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/TrialRunRole"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "created_at",
+          "role"
+        ],
+        "title": "TrialRun",
+        "type": "object"
+      },
+      "TrialRunRole": {
+        "enum": [
+          "counted",
+          "recheck",
+          "pending",
+          "no_result"
+        ],
+        "title": "TrialRunRole",
+        "type": "string"
+      },
+      "TrialStatus": {
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "TrialStatus",
         "type": "string"
       },
       "TurnAcceptedView": {
@@ -8938,6 +10116,166 @@
         "title": "ValidationSeverity",
         "type": "string"
       },
+      "WalkForwardGap": {
+        "description": "이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.\n\n값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.",
+        "enum": [
+          "legacy_design",
+          "test_failed",
+          "no_cell",
+          "pending"
+        ],
+        "title": "WalkForwardGap",
+        "type": "string"
+      },
+      "WalkForwardReport": {
+        "description": "워크포워드 결과(V3-05). 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율이다.\n\n곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 완료돼야 채워지고, 아니면 비우고 `gap` 에\n이유를 싣는다 — 실패한 창을 빼고 남은 창만 이으면 낙관 쪽으로 빠진다.",
+        "properties": {
+          "curve": {
+            "items": {
+              "$ref": "#/components/schemas/EquityCurvePoint"
+            },
+            "title": "Curve",
+            "type": "array"
+          },
+          "gap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WalkForwardGap"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "out_of_sample_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Out Of Sample Sharpe"
+          },
+          "retention": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/WalkForwardWindowResult"
+            },
+            "title": "Windows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "windows",
+          "curve",
+          "out_of_sample_sharpe",
+          "retention",
+          "gap"
+        ],
+        "title": "WalkForwardReport",
+        "type": "object"
+      },
+      "WalkForwardWindow": {
+        "description": "학습·검증 구간 한 쌍. 네 날짜 모두 양끝 포함이고 연구 구간 안이다.",
+        "properties": {
+          "test_end": {
+            "format": "date",
+            "title": "Test End",
+            "type": "string"
+          },
+          "test_start": {
+            "format": "date",
+            "title": "Test Start",
+            "type": "string"
+          },
+          "train_end": {
+            "format": "date",
+            "title": "Train End",
+            "type": "string"
+          },
+          "train_start": {
+            "format": "date",
+            "title": "Train Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "train_start",
+          "train_end",
+          "test_start",
+          "test_end"
+        ],
+        "title": "WalkForwardWindow",
+        "type": "object"
+      },
+      "WalkForwardWindowResult": {
+        "description": "창 하나의 자동 선택과 그 검증 실행 결과.",
+        "properties": {
+          "gap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WalkForwardGap"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pick": {
+            "$ref": "#/components/schemas/WindowPick"
+          },
+          "run_error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "portfolio.strategy.invalid",
+                  "portfolio.data.unavailable",
+                  "portfolio.raw_observation.invalid",
+                  "backtest.run.invalid",
+                  "backtest.run.equity_wiped_out",
+                  "backtest.run.internal",
+                  "backtest.run.interrupted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Error Code"
+          },
+          "run_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pick",
+          "run_status",
+          "run_error_code",
+          "gap"
+        ],
+        "title": "WalkForwardWindowResult",
+        "type": "object"
+      },
       "WarningSeverity": {
         "enum": [
           "info",
@@ -8954,6 +10292,102 @@
           "risk"
         ],
         "title": "WeightingMethod",
+        "type": "string"
+      },
+      "WindowPick": {
+        "description": "워크포워드 창마다 학습 점수로 자동으로 고른 칸과 그 칸의 검증 실행(V3-05).\n\n사용자가 이유를 적어 고르는 후보 선택(`ExperimentSelection`, spec D9)과 다르다. 고를 칸이\n없으면(창에서 대표 샤프가 있는 학습 실행이 없다) `trial_index` 가 None 이고 실행도 없다.\n검증 실행이 재시작으로 중단되면 같은 칸으로 다음 번호를 다시 넘긴다.",
+        "properties": {
+          "attempt": {
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "train_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Train Sharpe"
+          },
+          "trial_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trial Index"
+          },
+          "window_index": {
+            "title": "Window Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "window_index",
+          "attempt",
+          "trial_index",
+          "train_sharpe",
+          "created_at"
+        ],
+        "title": "WindowPick",
+        "type": "object"
+      },
+      "WindowSelectionRule": {
+        "description": "창마다 학습 구간 성과로 파라미터 칸 하나를 고르는 기준.",
+        "enum": [
+          "train_sharpe_max",
+          "neighbor_mean_sharpe_max"
+        ],
+        "title": "WindowSelectionRule",
         "type": "string"
       }
     }
@@ -9769,6 +11203,65 @@
         "summary": "Start Backtest"
       }
     },
+    "/api/v1/backtests/trial-preview": {
+      "post": {
+        "description": "실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).",
+        "operationId": "previewBacktestTrial",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestRunSpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrialPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The immutable strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The saved revision hash differs from the expected hash"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestUnprocessableResponse"
+                }
+              }
+            },
+            "description": "A coded backtest preflight or request-body diagnostic"
+          }
+        },
+        "summary": "Preview Backtest Trial"
+      }
+    },
     "/api/v1/backtests/{run_id}": {
       "get": {
         "operationId": "getBacktestStatus",
@@ -9802,7 +11295,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "422": {
             "content": {
@@ -9851,7 +11344,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "422": {
             "content": {
@@ -9907,7 +11400,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "422": {
             "content": {
@@ -9957,7 +11450,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "422": {
             "content": {
@@ -10006,7 +11499,7 @@
                 }
               }
             },
-            "description": "The process-lifetime backtest run does not exist"
+            "description": "The backtest run does not exist"
           },
           "409": {
             "content": {
@@ -10017,6 +11510,16 @@
               }
             },
             "description": "The run has not completed with a result"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestResultUnreadableResponse"
+                }
+              }
+            },
+            "description": "The completed run's result file is missing, altered or unreadable"
           },
           "422": {
             "content": {
@@ -10283,6 +11786,629 @@
           }
         },
         "summary": "Equity Universe Preview"
+      }
+    },
+    "/api/v1/experiments": {
+      "get": {
+        "description": "최근에 만든 순. 다음 쪽은 응답의 `next_after` 를 `after` 로 넘긴다.",
+        "operationId": "listExperiments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Experiments"
+      },
+      "post": {
+        "description": "실험을 만들고 trial 을 실행 대기열에 넘긴다. 기반은 저장한 리비전뿐이다.",
+        "operationId": "createExperiment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Experiment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The base strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The base revision hash differs from the expected hash"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "A coded experiment design or base run diagnostic"
+          }
+        },
+        "summary": "Create Experiment"
+      }
+    },
+    "/api/v1/experiments/preview": {
+      "post": {
+        "description": "시작 전 미리 계산 — 조합·창·실행 수와 계열 시도 수 N 의 변화(spec D2).",
+        "operationId": "previewExperiment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The base strategy revision does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                }
+              }
+            },
+            "description": "The base revision hash differs from the expected hash"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "A coded experiment design or base run diagnostic"
+          }
+        },
+        "summary": "Preview Experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}": {
+      "get": {
+        "operationId": "getExperiment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Experiment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/cancel": {
+      "post": {
+        "operationId": "cancelExperiment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Experiment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/controls": {
+      "patch": {
+        "description": "일시정지·재개·우선순위. 대기 trial 에만 적용하고 도는 trial 은 끝까지 돈다(spec D6).",
+        "operationId": "controlExperiment",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentControlsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Experiment"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid controls"
+          }
+        },
+        "summary": "Control Experiment"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/events": {
+      "get": {
+        "description": "실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나고 도는·대기 trial 이\n없으면 마지막 수를 보낸 뒤 닫는다.",
+        "operationId": "streamExperimentEvents",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {}
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Experiment Events"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/selections": {
+      "post": {
+        "description": "완료된 trial 을 후보로 고른 기록을 남긴다(spec D9). 되돌릴 수 없다.",
+        "operationId": "selectExperimentTrial",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentSelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentSelection"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment state refuses it"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Select Experiment Trial"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/trials": {
+      "get": {
+        "description": "trial 전개 순. 상태는 최신 attempt 의 실행 상태에서 파생한다.",
+        "operationId": "listExperimentTrials",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExperimentTrialState"
+                  },
+                  "title": "Response Listexperimenttrials",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Experiment Trials"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry": {
+      "post": {
+        "description": "실패·취소된 trial 을 새 attempt 로 다시 넘긴다.",
+        "operationId": "retryExperimentTrial",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "trial_index",
+            "required": true,
+            "schema": {
+              "title": "Trial Index",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentTrialState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment state refuses it"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Experiment Trial"
+      }
+    },
+    "/api/v1/experiments/{experiment_id}/walk-forward": {
+      "get": {
+        "description": "창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율(V3-05). 사용자 후보 선택\n(`selections`)과 다르다.",
+        "operationId": "getExperimentWalkForward",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalkForwardReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment or trial is missing"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Experiment Walk Forward"
       }
     },
     "/api/v1/factors/catalog": {
@@ -10557,19 +12683,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/PortfolioUnprocessableResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RequestValidationResponse"
-                    }
-                  ],
-                  "title": "Response 422 Previewportfolio"
+                  "$ref": "#/components/schemas/PortfolioUnprocessableResponse"
                 }
               }
             },
-            "description": "Malformed envelope or a coded portfolio preflight diagnostic"
+            "description": "A coded portfolio preflight or request-body diagnostic"
           }
         },
         "summary": "Portfolio Preview"
@@ -10765,19 +12883,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/TraceUnprocessableResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/RequestValidationResponse"
-                    }
-                  ],
-                  "title": "Response 422 Tracestrategy"
+                  "$ref": "#/components/schemas/TraceUnprocessableResponse"
                 }
               }
             },
-            "description": "Malformed envelope or a coded trace preflight diagnostic"
+            "description": "A coded trace preflight or request-body diagnostic"
           },
           "499": {
             "content": {
@@ -11171,6 +13281,126 @@
           }
         },
         "summary": "Get Strategy Document"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/trials": {
+      "get": {
+        "description": "계열 시도 원장(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다.",
+        "operationId": "getTrialLedger",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrialLedger"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The strategy does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Trial Ledger"
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/trials/merge": {
+      "post": {
+        "description": "`source_strategy_id` 계열을 이 계열에 합친다. 되돌릴 수 없다.",
+        "operationId": "mergeTrialLineage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrialLineageMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrialLedger"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyNotFoundResponse"
+                }
+              }
+            },
+            "description": "The strategy does not exist"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrialLineageAlreadyMergedResponse"
+                }
+              }
+            },
+            "description": "The two lineages are already one"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Trial Lineage"
       }
     },
     "/api/v1/strategy-documents": {

@@ -1,11 +1,8 @@
 import type { ReactNode } from "react";
 
-import {
-  BacktestRejection,
-  backtestStartRejectionMessage,
-} from "../../../entities/backtest";
+import { backtestStartRejectionMessage } from "../../../entities/backtest";
 import { t } from "../../../shared/config";
-import { Badge, Button, Tooltip } from "../../../shared/ui";
+import { Badge, Button, FailureNotice, Tooltip } from "../../../shared/ui";
 import type { BacktestSourceDecision } from "../model/backtest-source";
 import type { DocumentState } from "../model/document-state";
 import type { RunBacktestStatus } from "../model/use-run-backtest";
@@ -25,6 +22,11 @@ type DocumentToolbarProps = {
   runSettings?: ReactNode;
   /** 거절이 가리킨 요청 본문의 칸(점 경로) → 실행 설정 칸 이름. 모르면 null. */
   runFieldLabel?: (field: string) => string | null;
+  /** 시작 거절을 한 번에 고치는 교정(예: 연구 구간 거절의 시작일 옮기기). 없으면 null. */
+  runRejectionFix?: (
+    code: string | null,
+    values: Readonly<Record<string, string>>,
+  ) => { label: string; apply: () => void } | null;
   decision: BacktestSourceDecision;
   runStatus: RunBacktestStatus;
 };
@@ -64,9 +66,14 @@ export const DocumentToolbar = ({
   runBlockedReason,
   runSettings,
   runFieldLabel,
+  runRejectionFix,
   decision,
   runStatus,
 }: DocumentToolbarProps) => {
+  const fix =
+    runStatus.kind === "failed" && runRejectionFix !== undefined
+      ? runRejectionFix(runStatus.code, runStatus.values)
+      : null;
   const current =
     state.compiled !== null && state.compiledVersion === state.sourceVersion
       ? state.compiled
@@ -145,7 +152,7 @@ export const DocumentToolbar = ({
       </div>
       {runStatus.kind === "failed" ? (
         // 줄은 버튼 줄 아래에 따로 두어 긴 문장이 버튼 폭을 빼앗지 않게 한다(#260).
-        <BacktestRejection
+        <FailureNotice
           className="doc-toolbar__error"
           title={t("toolbar.run.failed")}
           message={backtestStartRejectionMessage(
@@ -155,8 +162,14 @@ export const DocumentToolbar = ({
               : runFieldLabel(runStatus.field),
             runStatus.values,
           )}
-          detail={runStatus.detail}
-        />
+          reason={runStatus.detail}
+        >
+          {fix === null ? undefined : (
+            <Button size="small" tone="primary" onClick={fix.apply}>
+              {fix.label}
+            </Button>
+          )}
+        </FailureNotice>
       ) : null}
     </div>
   );

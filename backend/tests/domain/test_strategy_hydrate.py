@@ -66,12 +66,25 @@ def test_document_carrying_identity_is_rejected() -> None:
     assert _issue_codes(document) == [("structure.unknown_key", "/identity")]
 
 
-@pytest.mark.parametrize("version", ["0.9", "1.1", "2", 1.0, None])
-def test_unsupported_schema_version_fails_closed(version: object) -> None:
+@pytest.mark.parametrize(
+    ("version", "code"),
+    [
+        ("0.9", "structure.not_upgradeable_schema_version"),
+        ("1.1", "structure.unsupported_schema_version"),
+        ("2", "structure.not_upgradeable_schema_version"),
+        (1.0, "structure.unsupported_schema_version"),
+        (1.2, "structure.not_upgradeable_schema_version"),
+        (None, "structure.not_upgradeable_schema_version"),
+    ],
+)
+def test_unsupported_schema_version_fails_closed(version: object, code: str) -> None:
     document = _document()
     document["schema_version"] = version
 
-    assert _issue_codes(document) == [("structure.unsupported_schema_version", "/schema_version")]
+    # 업그레이드 배너 코드(`unsupported_schema_version`)는 업그레이더가 받아 줄 은퇴 버전에만
+    # 붙는다. 모르는 버전·따옴표 없이 쓴 현재 버전(1.2)·null 은 업그레이드로 풀리지 않는다
+    # (#267 DEFECT-2).
+    assert _issue_codes(document) == [(code, "/schema_version")]
     # 1.1 은 은퇴 버전이다 — 업그레이더(P2-09)를 거쳐서만 들어온다.
     assert "1.2" in SUPPORTED_SCHEMA_VERSIONS and "1.1" not in SUPPORTED_SCHEMA_VERSIONS
 

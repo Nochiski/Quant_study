@@ -12,15 +12,24 @@ import type {
   CancelBacktestData,
   CancelBacktestErrors,
   CancelBacktestResponses,
+  CancelExperimentData,
+  CancelExperimentErrors,
+  CancelExperimentResponses,
   CompileStrategyDocumentData,
   CompileStrategyDocumentErrors,
   CompileStrategyDocumentResponses,
+  ControlExperimentData,
+  ControlExperimentErrors,
+  ControlExperimentResponses,
   CreateAssistantProviderData,
   CreateAssistantProviderErrors,
   CreateAssistantProviderResponses,
   CreateAssistantSessionData,
   CreateAssistantSessionErrors,
   CreateAssistantSessionResponses,
+  CreateExperimentData,
+  CreateExperimentErrors,
+  CreateExperimentResponses,
   CreateStrategyData,
   CreateStrategyDocumentData,
   CreateStrategyDocumentErrors,
@@ -57,6 +66,12 @@ import type {
   GetEquityCatalogData,
   GetEquityCatalogErrors,
   GetEquityCatalogResponses,
+  GetExperimentData,
+  GetExperimentErrors,
+  GetExperimentResponses,
+  GetExperimentWalkForwardData,
+  GetExperimentWalkForwardErrors,
+  GetExperimentWalkForwardResponses,
   GetFactorCatalogData,
   GetFactorCatalogErrors,
   GetFactorCatalogResponses,
@@ -85,6 +100,9 @@ import type {
   GetStrategyResponses,
   GetStrategyTemplateData,
   GetStrategyTemplateResponses,
+  GetTrialLedgerData,
+  GetTrialLedgerErrors,
+  GetTrialLedgerResponses,
   ListAssistantProvidersData,
   ListAssistantProvidersResponses,
   ListAssistantSessionsData,
@@ -93,12 +111,24 @@ import type {
   ListBacktestsData,
   ListBacktestsErrors,
   ListBacktestsResponses,
+  ListExperimentsData,
+  ListExperimentsErrors,
+  ListExperimentsResponses,
+  ListExperimentTrialsData,
+  ListExperimentTrialsErrors,
+  ListExperimentTrialsResponses,
   ListStrategiesData,
   ListStrategiesErrors,
   ListStrategiesResponses,
   ListStrategyRevisionsData,
   ListStrategyRevisionsErrors,
   ListStrategyRevisionsResponses,
+  MergeTrialLineageData,
+  MergeTrialLineageErrors,
+  MergeTrialLineageResponses,
+  PreviewBacktestTrialData,
+  PreviewBacktestTrialErrors,
+  PreviewBacktestTrialResponses,
   PreviewEquityDataData,
   PreviewEquityDataErrors,
   PreviewEquityDataResponses,
@@ -108,12 +138,18 @@ import type {
   PreviewEquityUniverseData,
   PreviewEquityUniverseErrors,
   PreviewEquityUniverseResponses,
+  PreviewExperimentData,
+  PreviewExperimentErrors,
+  PreviewExperimentResponses,
   PreviewFactorGraphData,
   PreviewFactorGraphErrors,
   PreviewFactorGraphResponses,
   PreviewPortfolioData,
   PreviewPortfolioErrors,
   PreviewPortfolioResponses,
+  RetryExperimentTrialData,
+  RetryExperimentTrialErrors,
+  RetryExperimentTrialResponses,
   ReviseStrategyData,
   ReviseStrategyDocumentData,
   ReviseStrategyDocumentErrors,
@@ -123,6 +159,9 @@ import type {
   SaveStrategyDraftData,
   SaveStrategyDraftErrors,
   SaveStrategyDraftResponses,
+  SelectExperimentTrialData,
+  SelectExperimentTrialErrors,
+  SelectExperimentTrialResponses,
   StartAssistantTurnData,
   StartAssistantTurnErrors,
   StartAssistantTurnResponses,
@@ -136,6 +175,9 @@ import type {
   StreamBacktestEventsData,
   StreamBacktestEventsErrors,
   StreamBacktestEventsResponses,
+  StreamExperimentEventsData,
+  StreamExperimentEventsErrors,
+  StreamExperimentEventsResponses,
   TestAssistantProviderData,
   TestAssistantProviderErrors,
   TestAssistantProviderResponses,
@@ -403,6 +445,27 @@ export const startBacktest = <ThrowOnError extends boolean = false>(
   });
 
 /**
+ * Preview Backtest Trial
+ *
+ * 실행 전 미리 계산 — 이 요청이 결과를 내면 계열 N 에 새로 드는가(검증 랩 spec D2).
+ */
+export const previewBacktestTrial = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewBacktestTrialData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewBacktestTrialResponses,
+    PreviewBacktestTrialErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/backtests/trial-preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
  * Get Backtest Status
  */
 export const getBacktestStatus = <ThrowOnError extends boolean = false>(
@@ -532,6 +595,189 @@ export const previewEquityUniverse = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   });
+
+/**
+ * List Experiments
+ *
+ * 최근에 만든 순. 다음 쪽은 응답의 `next_after` 를 `after` 로 넘긴다.
+ */
+export const listExperiments = <ThrowOnError extends boolean = false>(
+  options?: Options<ListExperimentsData, ThrowOnError>,
+) =>
+  (options?.client ?? client).get<
+    ListExperimentsResponses,
+    ListExperimentsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments", ...options });
+
+/**
+ * Create Experiment
+ *
+ * 실험을 만들고 trial 을 실행 대기열에 넘긴다. 기반은 저장한 리비전뿐이다.
+ */
+export const createExperiment = <ThrowOnError extends boolean = false>(
+  options: Options<CreateExperimentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CreateExperimentResponses,
+    CreateExperimentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Preview Experiment
+ *
+ * 시작 전 미리 계산 — 조합·창·실행 수와 계열 시도 수 N 의 변화(spec D2).
+ */
+export const previewExperiment = <ThrowOnError extends boolean = false>(
+  options: Options<PreviewExperimentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    PreviewExperimentResponses,
+    PreviewExperimentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/preview",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Get Experiment
+ */
+export const getExperiment = <ThrowOnError extends boolean = false>(
+  options: Options<GetExperimentData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentResponses,
+    GetExperimentErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}", ...options });
+
+/**
+ * Cancel Experiment
+ */
+export const cancelExperiment = <ThrowOnError extends boolean = false>(
+  options: Options<CancelExperimentData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    CancelExperimentResponses,
+    CancelExperimentErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/cancel", ...options });
+
+/**
+ * Control Experiment
+ *
+ * 일시정지·재개·우선순위. 대기 trial 에만 적용하고 도는 trial 은 끝까지 돈다(spec D6).
+ */
+export const controlExperiment = <ThrowOnError extends boolean = false>(
+  options: Options<ControlExperimentData, ThrowOnError>,
+) =>
+  (options.client ?? client).patch<
+    ControlExperimentResponses,
+    ControlExperimentErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/{experiment_id}/controls",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * Stream Experiment Events
+ *
+ * 실험 진행(상태·trial 상태별 수)이 바뀔 때마다 흘리고, 실험이 끝나고 도는·대기 trial 이
+ * 없으면 마지막 수를 보낸 뒤 닫는다.
+ */
+export const streamExperimentEvents = <ThrowOnError extends boolean = false>(
+  options: Options<StreamExperimentEventsData, ThrowOnError, unknown>,
+) =>
+  (options.client ?? client).sse.get<
+    StreamExperimentEventsResponses,
+    StreamExperimentEventsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/events", ...options });
+
+/**
+ * Select Experiment Trial
+ *
+ * 완료된 trial 을 후보로 고른 기록을 남긴다(spec D9). 되돌릴 수 없다.
+ */
+export const selectExperimentTrial = <ThrowOnError extends boolean = false>(
+  options: Options<SelectExperimentTrialData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    SelectExperimentTrialResponses,
+    SelectExperimentTrialErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/{experiment_id}/selections",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+/**
+ * List Experiment Trials
+ *
+ * trial 전개 순. 상태는 최신 attempt 의 실행 상태에서 파생한다.
+ */
+export const listExperimentTrials = <ThrowOnError extends boolean = false>(
+  options: Options<ListExperimentTrialsData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    ListExperimentTrialsResponses,
+    ListExperimentTrialsErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/trials", ...options });
+
+/**
+ * Retry Experiment Trial
+ *
+ * 실패·취소된 trial 을 새 attempt 로 다시 넘긴다.
+ */
+export const retryExperimentTrial = <ThrowOnError extends boolean = false>(
+  options: Options<RetryExperimentTrialData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    RetryExperimentTrialResponses,
+    RetryExperimentTrialErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry",
+    ...options,
+  });
+
+/**
+ * Get Experiment Walk Forward
+ *
+ * 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율(V3-05). 사용자 후보 선택
+ * (`selections`)과 다르다.
+ */
+export const getExperimentWalkForward = <ThrowOnError extends boolean = false>(
+  options: Options<GetExperimentWalkForwardData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentWalkForwardResponses,
+    GetExperimentWalkForwardErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/walk-forward", ...options });
 
 /**
  * Factor Catalog
@@ -824,6 +1070,41 @@ export const getStrategyDocument = <ThrowOnError extends boolean = false>(
   >({
     url: "/api/v1/strategies/{strategy_id}/revisions/{revision}/document",
     ...options,
+  });
+
+/**
+ * Get Trial Ledger
+ *
+ * 계열 시도 원장(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다.
+ */
+export const getTrialLedger = <ThrowOnError extends boolean = false>(
+  options: Options<GetTrialLedgerData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetTrialLedgerResponses,
+    GetTrialLedgerErrors,
+    ThrowOnError
+  >({ url: "/api/v1/strategies/{strategy_id}/trials", ...options });
+
+/**
+ * Merge Trial Lineage
+ *
+ * `source_strategy_id` 계열을 이 계열에 합친다. 되돌릴 수 없다.
+ */
+export const mergeTrialLineage = <ThrowOnError extends boolean = false>(
+  options: Options<MergeTrialLineageData, ThrowOnError>,
+) =>
+  (options.client ?? client).post<
+    MergeTrialLineageResponses,
+    MergeTrialLineageErrors,
+    ThrowOnError
+  >({
+    url: "/api/v1/strategies/{strategy_id}/trials/merge",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   });
 
 /**

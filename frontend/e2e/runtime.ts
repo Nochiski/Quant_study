@@ -14,7 +14,7 @@ const runtimeDirectory = (): string => {
 };
 
 /**
- * backend 프로세스에만 전달되는 SQLite 경로. Playwright 설정과 spec(1.0 동결 row seeding)이 같은
+ * backend 프로세스에만 전달되는 SQLite 경로. Playwright 설정과 spec(은퇴 버전 동결 row seeding)이 같은
  * 파일을 가리키도록 한 곳에서 계산한다.
  */
 export const runtimeDatabasePath = (): string =>
@@ -34,3 +34,10 @@ export const runtimeAssistantDatabasePath = (): string =>
  */
 export const runtimeAssistantSecretsPath = (): string =>
   join(runtimeDirectory(), "assistant-secrets.json");
+
+/**
+ * 백테스트 실행 기록 DB. 기본 경로는 저장소 `.local/`이라, 넘기지 않으면 e2e 실행이 개발자의 실제 이력에
+ * 쌓이고 개발 서버가 도는 run 을 재시작 때 `interrupted`로 닫는다.
+ */
+export const runtimeResearchDatabasePath = (): string =>
+  join(runtimeDirectory(), "research.sqlite3");

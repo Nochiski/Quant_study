@@ -21,6 +21,7 @@ import {
 import {
   buildBacktestRunOptions,
   DEFAULT_BACKTEST_RUN_SETTINGS,
+  OOS_START_FIELD,
   type BacktestRunSettingsFields,
 } from "./run-settings";
 
@@ -70,10 +71,41 @@ const writeStored = (key: string, values: RunEnvironmentValues): void => {
 
 const NO_FIELDS: readonly RunEnvironmentField[] = [];
 
+/** 연구 구간 거절이 고치라는 칸(요청 본문의 `environment.start`). */
+const START_FIELD: keyof RunEnvironment = "start";
+
+/** 시작 거절을 한 번의 누름으로 고치는 교정(검증 랩 V5-05). */
+type RunRejectionFix = { label: string; apply: () => void };
+
 type ScopedValues = { key: string; values: RunEnvironmentValues };
-type ScopedNames = { key: string; names: ReadonlySet<string> };
+/**
+ * 덜 친 날짜 칸(브라우저 `validity.badInput`)의 이름. `settled` 는 칸을 떠날 때, `typing` 은 칸 안(키를 뗌·값이
+ * 바뀜)에서 읽은 것이다. 실행 게이트는 둘 다 본다. 비워 둘 수 있는 OOS 칸의 표시는 `settled` 만 봐서, 빈 칸에
+ * 치거나 다 친 날짜를 고쳐 치는 도중에 칸 아래·요약 띠·오류 목록이 서지 않는다(#270 P3-R2, #297 리뷰 P3-1).
+ * 실행 설정 날짜 칸은 필수라 빈 값 자체가 오류다. 그래서 둘을 합쳐 읽어 "값을 정하세요." 대신 날짜 문장을
+ * 보인다(#297 재리뷰 P2-1).
+ */
+type ScopedDates = {
+  key: string;
+  settled: ReadonlySet<string>;
+  typing: ReadonlySet<string>;
+};
 
 const NO_NAMES: ReadonlySet<string> = new Set();
+const NO_DATES: ScopedDates = { key: "", settled: NO_NAMES, typing: NO_NAMES };
+
+/** `name` 이 들었는지를 `present` 에 맞춘 집합. 이미 맞으면 같은 집합을 돌려준다. */
+const withName = (
+  names: ReadonlySet<string>,
+  name: string,
+  present: boolean,
+): ReadonlySet<string> => {
+  if (names.has(name) === present) return names;
+  const next = new Set(names);
+  if (present) next.add(name);
+  else next.delete(name);
+  return next;
+};
 
 /**
  * 패널 열림과 "이 칸으로 가기" 요청. 요약 띠·차단 안내가 패널을 열고 첫 빈 칸에 초점을 옮기는 경로다 —
@@ -99,7 +131,7 @@ export const useBacktestRunSettings = (storageKey: string) => {
   const [edited, setEdited] = useState<ScopedValues | null>(null);
   // 덜 친 날짜 칸(브라우저 `validity.badInput`). 값은 빈 문자열이라 값 state 로는 표현할 수 없다. 칸 값과
   // 같이 전략별로 묶는다 — 다른 전략으로 옮기면 비운다.
-  const [incompleteDates, setIncompleteDates] = useState<ScopedNames | null>(
+  const [incompleteDates, setIncompleteDates] = useState<ScopedDates | null>(
     null,
   );
   const [panel, setPanel] = useState<RunSettingsPanelState>({
@@ -124,10 +156,10 @@ export const useBacktestRunSettings = (storageKey: string) => {
         : initialRunEnvironmentValues(environmentFields, stored),
     [edited, environmentFields, storageKey, stored],
   );
-  const incomplete =
+  const dates =
     incompleteDates !== null && incompleteDates.key === storageKey
-      ? incompleteDates.names
-      : NO_NAMES;
+      ? incompleteDates
+      : NO_DATES;
   const environment = useMemo<RunEnvironmentValidation>(
     () =>
       environmentFields.length === 0
@@ -135,13 +167,18 @@ export const useBacktestRunSettings = (storageKey: string) => {
         : validateRunEnvironment(
             environmentFields,
             environmentValues,
-            incomplete,
+            new Set([...dates.settled, ...dates.typing]),
           ),
-    [environmentFields, environmentValues, incomplete],
+    [dates.settled, dates.typing, environmentFields, environmentValues],
   );
   const result = useMemo(
-    () => buildBacktestRunOptions(fields, environment),
-    [environment, fields],
+    () =>
+      buildBacktestRunOptions(
+        fields,
+        environment,
+        dates.settled.has(OOS_START_FIELD),
+      ),
+    [dates.settled, environment, fields],
   );
   const setField = useCallback(
     <Key extends keyof BacktestRunSettingsFields>(
@@ -166,19 +203,28 @@ export const useBacktestRunSettings = (storageKey: string) => {
       replaceEnvironment({ ...environmentValues, [name]: value }),
     [environmentValues, replaceEnvironment],
   );
-  /** 날짜 칸이 덜 쳐졌는지 칸이 알려 준다. 바뀐 것이 없으면 state 를 건드리지 않는다. */
-  const setEnvironmentIncomplete = useCallback(
-    (name: string, value: boolean): void =>
+  /**
+   * 날짜 칸(실행 설정 칸과 OOS 시작일)이 덜 쳐졌는지 칸이 알려 준다. 칸 안에서 난 일(`leaving` 거짓)은
+   * `typing` 에만 넣고 `settled` 에서는 지우기만 한다 — 날짜 선택기로 고르거나 끝까지 친 날짜는 오류를 바로
+   * 지운다. `settled` 에 넣는 것은 칸을 떠날 때뿐이다. 바뀐 것이 없으면 state 를 건드리지 않는다.
+   */
+  const setDateIncomplete = useCallback(
+    (name: string, incomplete: boolean, leaving: boolean): void =>
       setIncompleteDates((current) => {
-        const names =
-          current !== null && current.key === storageKey
-            ? current.names
-            : NO_NAMES;
-        if (names.has(name) === value) return current;
-        const next = new Set(names);
-        if (value) next.add(name);
-        else next.delete(name);
-        return { key: storageKey, names: next };
+        const scoped =
+          current !== null && current.key === storageKey ? current : NO_DATES;
+        const settled =
+          leaving || !incomplete
+            ? withName(scoped.settled, name, incomplete)
+            : scoped.settled;
+        const nextTyping = withName(
+          scoped.typing,
+          name,
+          !leaving && incomplete,
+        );
+        return settled === scoped.settled && nextTyping === scoped.typing
+          ? current
+          : { key: storageKey, settled, typing: nextTyping };
       }),
     [storageKey],
   );
@@ -217,6 +263,31 @@ export const useBacktestRunSettings = (storageKey: string) => {
     (path: string): string | null => runFieldLabel(environmentFields, path),
     [environmentFields],
   );
+  /**
+   * 시작 거절의 교정. 연구 구간 거절이면 시작일을 거절 detail 이 실은 연구 하한으로 옮긴다 — 날짜 owner 는
+   * backend 라 화면에 적지 않는다(spec D1). 고칠 수 있는 거절이 아니면 null.
+   */
+  const rejectionFix = useCallback(
+    (
+      code: string | null,
+      values: Readonly<Record<string, string>>,
+    ): RunRejectionFix | null => {
+      const researchStart = values.research_start;
+      if (
+        code !== "backtest.run.research_window_violation" ||
+        researchStart === undefined
+      )
+        return null;
+      return {
+        label: t("runEnvironment.fix.researchStart").replace(
+          "{research_start}",
+          researchStart,
+        ),
+        apply: () => setEnvironmentValue(START_FIELD, researchStart),
+      };
+    },
+    [setEnvironmentValue],
+  );
   /** 업그레이드 응답처럼 완성된 실행 설정으로 칸 전부를 바꾼다(사용자가 누른 뒤에만 부른다). */
   const applyEnvironment = useCallback(
     (next: RunEnvironment): void =>
@@ -228,7 +299,9 @@ export const useBacktestRunSettings = (storageKey: string) => {
     fields,
     setField,
     result,
-    requestOptions: result.options,
+    // 치는 중인 덜 친 날짜는 표시하지 않지만 실행은 막는다 — 칸을 떠나지 않고 누른 단축키가 덜 친 OOS 를
+    // 빈 칸처럼 보내지 않게 한다(#266 재리뷰 P3-1).
+    requestOptions: dates.typing.size > 0 ? null : result.options,
     schemaStatus: schema.isError
       ? ("error" as const)
       : schema.data === undefined
@@ -238,10 +311,11 @@ export const useBacktestRunSettings = (storageKey: string) => {
     environmentFields,
     environmentValues,
     setEnvironmentValue,
-    setEnvironmentIncomplete,
+    setDateIncomplete,
     applyEnvironment,
     /** 서버 거절의 `field`(요청 본문 점 경로) → 패널 칸 이름. 모르면 null. */
     runFieldLabel: fieldLabel,
+    rejectionFix,
     /** 검증을 통과한 실행 설정. 추적·실행 계획 요청이 같은 값을 싣는다. 없으면 null. */
     environment: environment.valid ? environment.environment : null,
     environmentErrors: environment.errors,

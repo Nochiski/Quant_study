@@ -4,7 +4,8 @@
 frontend 테스트는 backend를 부르지 못하므로 이 골든(`tests/fixtures/analytics/metric_ids.json`)을
 읽어 id마다 ko·en 문구가 있는지 본다. 이 테스트는 골든이 registry와 같은지를 지킨다. 지표를 더하면
 여기서 먼저 깨지고, 골든을 고치면 frontend 테스트가 문구를 쓰라고 깨진다 — 두 단계가 이어져야 새
-지표가 뜻 없이 화면에 나가지 않는다.
+지표가 뜻 없이 화면에 나가지 않는다. 지표 id는 wire에서 문자열이라 OpenAPI 생성 SDK가 목록을 주지
+않아 골든이 필요하다. 사용 불가 사유는 enum이라 SDK의 유니온이 그 목록이다(#293).
 """
 
 from __future__ import annotations
@@ -12,10 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from strategy_workbench.domain.analytics.facade.metrics import (
-    MetricUnavailableReason,
-    build_default_metric_registry,
-)
+from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
 
 _FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "analytics" / "metric_ids.json"
 
@@ -28,21 +26,4 @@ def test_the_metric_id_golden_lists_every_registry_metric_in_order() -> None:
 
     assert stored == expected, (
         f"{_FIXTURE.name} is stale; write the registry ids in registry order: {expected}"
-    )
-
-
-_REASON_FIXTURE = _FIXTURE.with_name("metric_unavailable_reasons.json")
-
-
-def test_the_unavailable_reason_golden_lists_every_reason_in_order() -> None:
-    """지표 사용 불가 사유도 frontend i18n(`backtest.metricUnavailable.<reason>`)이 문구를 소유한다.
-
-    사유가 늘면 여기서 먼저 깨지고, 골든을 고치면 frontend 테스트가 문구를 쓰라고 깨진다(이슈 #241).
-    """
-    expected = [reason.value for reason in MetricUnavailableReason]
-
-    stored = json.loads(_REASON_FIXTURE.read_text(encoding="utf-8"))
-
-    assert stored == expected, (
-        f"{_REASON_FIXTURE.name} is stale; write the reasons in enum order: {expected}"
     )

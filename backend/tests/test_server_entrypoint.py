@@ -76,6 +76,36 @@ def test_http_runtime_owns_the_browser_origin_allowlist(monkeypatch) -> None:
         _http.runtime_allowed_origins()
 
 
+@pytest.mark.parametrize("configured", ["0", "-1", "two", "1.5"])
+def test_run_slots_come_from_the_environment_or_the_run_use_case_default(
+    monkeypatch, configured: str
+) -> None:
+    """검증 랩 V3-04: 동시 실행 슬롯 수는 설정 하나(기본값은 실행 유스케이스의 상수)."""
+    monkeypatch.delenv(_http.RUN_SLOTS_ENV, raising=False)
+    assert _http.runtime_run_slots() == _http.DEFAULT_RUN_SLOTS
+    monkeypatch.setenv(_http.RUN_SLOTS_ENV, " 4 ")
+    assert _http.runtime_run_slots() == 4
+
+    monkeypatch.setenv(_http.RUN_SLOTS_ENV, configured)
+    with pytest.raises(ValueError, match="positive integer"):
+        _http.runtime_run_slots()
+
+
+@pytest.mark.parametrize("configured", ["-1", "soon", "inf", "nan"])
+def test_the_e2e_trial_hold_is_off_unless_a_non_negative_number_is_set(
+    monkeypatch, configured: str
+) -> None:
+    """V3-04 e2e 훅: 실험 trial 을 붙잡아 둘 초. 없으면 붙잡지 않는다."""
+    monkeypatch.delenv(_http.E2E_TRIAL_HOLD_SECONDS_ENV, raising=False)
+    assert _http.runtime_trial_hold_seconds() == 0.0
+    monkeypatch.setenv(_http.E2E_TRIAL_HOLD_SECONDS_ENV, "2.5")
+    assert _http.runtime_trial_hold_seconds() == 2.5
+
+    monkeypatch.setenv(_http.E2E_TRIAL_HOLD_SECONDS_ENV, configured)
+    with pytest.raises(ValueError, match="non-negative number"):
+        _http.runtime_trial_hold_seconds()
+
+
 def test_importing_and_building_test_app_never_opens_the_runtime_database(
     monkeypatch, tmp_path: Path
 ) -> None:

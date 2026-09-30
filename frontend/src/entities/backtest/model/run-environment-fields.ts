@@ -63,7 +63,10 @@ const controlOf = (node: Json): RunEnvironmentControl => {
   return "text";
 };
 
-/** 부동소수 곱셈 꼬리(0.1 × 100 = 10.000000000000002)를 지운 숫자. */
+/**
+ * 부동소수 곱셈 꼬리(0.1 × 100 = 10.000000000000002)를 지운 숫자. 유효숫자 12자리로 자르므로 그보다 긴
+ * 값은 반올림된다(lang2 PLAN P3-02 결정 2, #251).
+ */
 const tidy = (value: number): number => Number(value.toPrecision(12));
 
 const scaleOf = (node: Json): number =>

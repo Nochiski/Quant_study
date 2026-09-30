@@ -6,7 +6,8 @@
 
 읽는 방식은 둘뿐이다(`SourceMode`).
 
-`GRID`  (ticker, session) 격자 위의 일별 행 — `price_daily`·`price_adj_daily` · 격자 3테이블
+`GRID`  (ticker, session) 격자 위의 일별 행 — `price_daily`·`price_adj_daily`(조정 공백 적용일을
+        가린 카탈로그 뷰 `v_adj_close` 로 읽는다, #220) · 격자 3테이블
         `flow_daily`·`short_daily`·`credit_daily`(무상증자 척도 창을 가린 카탈로그 뷰
         `v_credit_balance` 로 읽는다, #249). 랙 n 은 **정확히 n 세션 전 행**이고 그 세션에
         행이 없으면 셀을 내지 않는다(합성 금지 — 재상장 구간 첫날이 직전 구간 값을 물지 않는다).
@@ -65,6 +66,7 @@ ADJ_TABLE = "price_adj_daily"
 CONSENSUS_MACRO = "v_consensus"
 FIN_MACRO = "v_fin_latest"
 CREDIT_MACRO = "v_credit_balance"
+ADJ_MACRO = "v_adj_close"
 
 REQUIRED_TABLES = (CALENDAR_TABLE, SPAN_TABLE, UNIVERSE_TABLE, POLICY_TABLE, PRICE_TABLE)
 
@@ -101,6 +103,15 @@ class SourceSpec:
 
     `required_columns` 는 매크로 원천이 선언 밖에서(`row_filter` 등) 읽는 열이다. 매크로는 게시돼
     있어도 옛 카탈로그면 그 열이 없을 수 있어, 어댑터가 부팅 때 확인하고 없으면 이 원천만 뺀다.
+
+    `masked_expr` 은 원장 뷰가 값이 틀려 일부러 가린 행의 표시 식이다(참이면 셀 종류 MASKED, 값은
+    NULL). 무엇을 가릴지는 뷰가 정하고 어댑터는 표시만 읽는다 — MASKED 셀은 실행 결측 정책이
+    채우지 않는다(#298). 뷰의 가림 표시 열 선언은 원장 `views.MASK_COLUMNS` 이고, 이 배선이 그
+    선언과 같은지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 부팅 검사가
+    카탈로그 열과 이름으로 대조하므로 식이 아니라 열 이름을 쓴다(없으면 `catalog_columns_missing`).
+    가림 표시를 둔 원천은 필드를 하나만 낸다 — 팩터 평가기(`_value_spans`)가 가린 칸 경계를 필드마다
+    따로 이어, 한 원천의 두 필드를 시점을 달리해 섞는 식은 같은 행의 층 이동을 건너도 결측이 되지
+    않는다(필드를 더하려면 평가기를 먼저 원천 단위로 바꾼다, #349 리뷰 P3-3).
     """
 
     name: str
@@ -121,6 +132,7 @@ class SourceSpec:
     frequency: str
     kind_expr: str | None = None
     required_columns: tuple[str, ...] = ()
+    masked_expr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -144,7 +156,17 @@ class FieldSpec:
     # dataset_profile 의 랙이 갈리는 경우다(price 원천의 market_cap·shares_outstanding, 이슈 #246).
     lag_sessions: int | None = None
     lag_basis: str | None = None
+    # 값이 행보다 늦게 공개되는 필드만 적는다 — 원천 relation 의 공개일 열 이름(LATEST PICK 원천).
+    # 부팅 검사가 카탈로그 열과 이름으로 대조하므로 식은 쓰지 않는다.
+    # 행은 원천의 `available_expr` 로 고르고, 이 날이 컷오프보다 늦으면 그 셀은 그때까지 결측이다.
+    # 재무 TTM 은 창 안 분기가 정정 재제출로 행보다 늦게 접수되면 그날 완성된다(#238).
+    available_expr: str | None = None
 
+
+# 재무 TTM 의 공개일 열(v_fin_latest, #238) — 창 안 네 분기값 공개일의 max. 흐름 필드가 행 대신
+# 이 날부터 보인다. 옛 카탈로그에 이 열이 있는지는 어댑터가 부팅 때 이 선언에서 끌어와 확인한다.
+_TTM_INCOME_AVAILABLE = "ttm_income_available_date"
+_TTM_CF_AVAILABLE = "ttm_cf_available_date"
 
 # ── 원천 (읽는 자리) ──────────────────────────────────────────────────────────
 # 폴백 랙은 원장 dataset_profile(S19) 선언과 같다. 표가 없는 루트(옛 루트·부분 동기화 루트)에서도
@@ -209,8 +231,12 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
     SourceSpec(
         name="adj",
         dataset_id=ADJ_TABLE,
-        relation=ADJ_TABLE,
-        is_macro=False,
+        # 조정 공백 적용일을 가린 수정주가를 원장 뷰에서 읽는다(#220). 가림 판정은 뷰 몫이라 여기
+        # 다시 적지 않고, 가린 행(`adj_gap`)은 MASKED 로 내 결측 정책이 채우지 않는다(#298).
+        # 카탈로그가 없거나 낡으면 이 원천도 빠진다 — 표로 돌아가 읽으면 가린 공백이 조용히 다시
+        # 열린다.
+        relation=ADJ_MACRO,
+        is_macro=True,
         mode=SourceMode.GRID,
         axis=SourceAxis.TICKER,
         key_column="ticker",
@@ -221,8 +247,9 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         pick_order=None,
         lag_sessions=0,
         lag_basis=_ADJ_LAG_BASIS,
-        requires=(ADJ_TABLE,),
+        requires=(ADJ_TABLE, FACTOR_TABLE, ADJ_MACRO),
         frequency="daily",
+        masked_expr="adj_gap",
     ),
     SourceSpec(
         name="fin",
@@ -428,6 +455,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         requires=(CREDIT_TABLE, EVENT_TABLE, CREDIT_MACRO),
         frequency="daily",
         kind_expr="fill_kind['kind']",
+        masked_expr="bonus_window",
     ),
     SourceSpec(
         name="insider",
@@ -459,11 +487,12 @@ _FIN_TTM_NOTE = (
     "**최근 4분기 합(TTM)** 이다 — 최신 공시가 분기보고서든 사업보고서든 늘 12개월 값이다. "
     "v_fin_latest 가 회계기간 순서로 분기값(3개월)을 세워 4행을 더한다 — 사업보고서의 4분기는 "
     "연간 − 같은 회계연도 1분기·반기·3분기라 비12월 결산도 같은 규칙이다. 연속 4분기의 분기값이 "
-    "**이 행의 공시일까지 전부 알 수 있었을 때만** 선다(4분기·현금흐름 분기값이 기대는 창 밖 "
-    "보고서의 접수일까지 본다). 하나라도 비거나(분기 누락·직전 분기 미수집) 늦게 접수됐거나, 창 "
-    "안에 연결·별도가 섞였거나 매출 기준(revenue_basis)이 섞였으면 값은 결측(MISSING)이고 3개월·"
-    "연간 값으로 대신하지 않는다(부분합 금지). available_date 는 창의 마지막 분기 보고서 "
-    "접수일이고, 사업보고서 행의 TTM 은 연간 값과 같다"
+    "**전부 공개된 날부터** 보인다(4분기·현금흐름 분기값이 기대는 창 밖 보고서의 접수일까지 "
+    "본다). 창 안 분기가 정정 재제출로 늦게 접수되면 그 접수일부터다. 하나라도 비었거나(분기 "
+    "누락·직전 분기 미수집), 창 안에 연결·별도가 섞였거나 매출 기준(revenue_basis)이 섞였으면 "
+    "값은 결측(MISSING)이고 3개월·연간 값으로 대신하지 않는다(부분합 금지). 더 최근 기간이 "
+    "공개되면 그 기간의 TTM 으로 넘어가고, 그 TTM 이 아직 서지 않았으면 옛 기간 값을 두지 않고 "
+    "결측이다. available_date 는 TTM 창의 마지막 공개일이고, 사업보고서 행의 TTM 은 연간 값과 같다"
 )
 _FIN_EVIDENCE = (
     "equity.duckdb v_fin_latest(as_of) ← fin_std(vintage_kind='api_restated', CFS 우선 "
@@ -588,17 +617,24 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         verdict="equity 내부 스코프",
         description=(
             "원주가 × 그날까지 공개·적용된 계수(adj_factor factor_ok 행, apply_date 축)의 누적 "
-            "share_factor. 첫 관측 수준 고정, 사건 뒤 가격을 올린다 — (security, date) 의 순수 "
-            "함수라 창·as_of 에 무관(완전 PIT). 레지스트리 가격 변화 팩터(수익률·모멘텀·이평·"
-            "변동성)의 입력이다. 수준은 첫 관측 기준이라 종목 간 가격 비교에는 쓰지 않는다."
+            "share_factor. 첫 관측 수준 고정, 사건 뒤 가격을 올린다 — 공개 전 계수는 접지 않고 "
+            "(security, date) 의 순수 함수라 창·as_of 에 무관하다. **모든 사건을 잇지는 않는다**: "
+            "원장이 그날 사건을 접지 못한 적용일 행(기준가가 재설정된 날 계수가 다음 세션에야 "
+            "공개된 사건 · 기준가와 주식수가 맞지 않아 계수를 못 낸 사건)은 원장이 가린 셀"
+            "(MASKED)이라 결측 처리(0·중앙값 채우기)가 채우지 않고(#298), 그 행을 품는 창 "
+            "연산과 그 행을 사이에 두고 두 시점을 견주는 식(`lag`, 건너뛰는 세션을 둔 창과 오늘 "
+            "값)도 결측이 된다(#315·#337). 유상증자 권리락처럼 원장이 조정하지 않는 사건은 조정 "
+            "없이 남는다. 가림 규칙은 원장 뷰 `v_adj_close` 가 정한다(#220). 레지스트리 가격 변화 "
+            "팩터(수익률·모멘텀·이평·변동성)의 입력이다. 수준은 첫 관측 기준이라 종목 간 가격 "
+            "비교에는 쓰지 않는다."
         ),
         disclosure_basis=(
             "원주가 세션 확정 + 계수 available_date(min(공시 접수일, apply_date 다음 세션))"
         ),
         evidence=(
-            "price_adj_daily.adj_close ← price_daily × adj_factor × security_span (S23 표). "
-            "카탈로그 매크로 v_adj_price_fwd 는 같은 값을 내는 읽기 경로일 뿐이고, 이 필드는 "
-            "표를 직접 읽으므로 카탈로그가 낡거나 없어도 살아 있다"
+            "equity.duckdb v_adj_close(as_of) ← price_adj_daily.adj_close(S23 표 = price_daily × "
+            "adj_factor × security_span) — 조정 공백 적용일 행만 adj_factor 로 가린다. "
+            "카탈로그 매크로 v_adj_price_fwd 는 표와 같은 값을 내는 읽기 경로다"
         ),
     ),
     # ── fin_std (FIELD_MAP §2 financial.*) ───────────────────────────────────
@@ -617,6 +653,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_INCOME_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.gross_profit",
@@ -632,6 +669,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_INCOME_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.operating_income",
@@ -644,6 +682,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         description=_FIN_TTM_NOTE,
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_INCOME_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.net_income",
@@ -656,6 +695,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         description=_FIN_TTM_NOTE,
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_INCOME_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.operating_cash_flow",
@@ -673,6 +713,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         ),
         disclosure_basis=_FIN_DISCLOSURE,
         evidence=_FIN_EVIDENCE,
+        available_expr=_TTM_CF_AVAILABLE,
     ),
     FieldSpec(
         field_id="financial.total_assets",
@@ -921,9 +962,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
             "(`whol_stln_rmnd_stcn_shr`)는 별개 축이고 equity 내부 스코프다. 잔고가 상장주식수를 "
             "넘는 원장 행은 S10 이 `_reject/balance_over_shares/` 로 격리하고 그 셀은 "
             "`empty_response`(→ MISSING)로 남는다(DESIGN §9 결정 9). **무상증자 권리락일부터 "
-            "척도 창의 잔고도 결측(MISSING)이다** — 원천 잔고가 옛 단위와 새 단위로 섞여 상장"
-            "주식수와 척도가 맞지 않는다. 창 길이와 공시 전 세션을 가리지 않는 규칙은 원장 뷰 "
-            f"`v_credit_balance` 가 정한다(#249). {_FILL_KIND_NOTE}."
+            "척도 창의 잔고는 원장이 가린 셀(MASKED)이다** — 원천 잔고가 옛 단위와 새 단위로 섞여 "
+            "상장주식수와 척도가 맞지 않는다. 가린 셀은 결측 처리(0·중앙값 채우기)가 채우지 "
+            "않는다(#298). 권리락일 뒤에 공시된 사건(약 7%)은 공시 전 세션을 가리지 못한다. 창 "
+            "길이와 가림 규칙은 원장 뷰 `v_credit_balance` 가 정한다(#249). "
+            f"{_FILL_KIND_NOTE}."
         ),
         disclosure_basis=(
             "원장 날짜(basis default) — 신용잔고는 T+2 공표이고 우리 체인은 T+3 아침에 받는다. "
@@ -1025,3 +1068,38 @@ UNSUPPORTED_FIELDS: dict[str, str] = {
 
 SOURCE_BY_NAME: dict[str, SourceSpec] = {spec.name: spec for spec in SOURCE_SPECS}
 FIELD_BY_ID: dict[str, FieldSpec] = {spec.field_id: spec for spec in FIELD_SPECS}
+
+
+def _reject_unread_declarations(
+    source_specs: tuple[SourceSpec, ...], field_specs: tuple[FieldSpec, ...]
+) -> None:
+    """선언한 식을 그 원천의 질의가 읽지 않으면 모듈을 올릴 때 막는다.
+
+    선언의 모양 규칙은 여기 한 곳에 둔다. 읽히지 않는 선언은 조용히 무시되고, 계약 테스트는
+    선언만 본다.
+    - 필드 공개일 열(`FieldSpec.available_expr`)은 LATEST 원천의 PICK 질의(`_latest`)만 읽는다.
+      GRID 는 조용히 행 공개일로 보이고(look-ahead) SUM 은 집계 질의가 깨진다(#300 리뷰 P3-3·r2
+      P3-1).
+    - 가림 표시(`SourceSpec.masked_expr`)는 격자 질의(`_grid`)만 읽는다. LATEST 원천에 두면 셀이
+      MASKED 가 되지 않아 결측 정책이 가린 셀을 다시 채운다(#311 리뷰 P3-3).
+    """
+    by_name = {spec.name: spec for spec in source_specs}
+    misplaced = [
+        spec.field_id
+        for spec in field_specs
+        if spec.available_expr is not None
+        and (by_name[spec.source].mode, by_name[spec.source].reduce)
+        != (SourceMode.LATEST, Reduce.PICK)
+    ]
+    if misplaced:
+        raise ValueError(f"available_expr needs a LATEST PICK source — fields={misplaced}")
+    unread = [
+        spec.name
+        for spec in source_specs
+        if spec.masked_expr is not None and spec.mode is not SourceMode.GRID
+    ]
+    if unread:
+        raise ValueError(f"masked_expr needs a GRID source — sources={unread}")
+
+
+_reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)

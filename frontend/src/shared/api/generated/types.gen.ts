@@ -352,7 +352,7 @@ export type AssistantUnprocessableResponse = {
 /**
  * BacktestEnvironmentRequiredDetail
  *
- * 실행 설정 없이 들어온 시작 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
+ * 실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
  */
 export type BacktestEnvironmentRequiredDetail = {
   /**
@@ -363,6 +363,29 @@ export type BacktestEnvironmentRequiredDetail = {
    * Message
    */
   message: string;
+};
+
+/**
+ * BacktestParameterInvalidDetail
+ *
+ * 요청의 파라미터 값이 문서에 없는 파라미터이거나 허용 밖이다(spec D4).
+ *
+ * 허용 판정 owner 는 `domain/strategy/_models.py` 의 `normalized_parameter_value` 다. 화면 문장은
+ * frontend 가 `code` 로 번역하고 `parameter_id` 를 자리표시자로 채운다.
+ */
+export type BacktestParameterInvalidDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.run.parameter_invalid";
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Parameter Id
+   */
+  parameter_id: string;
 };
 
 /**
@@ -415,6 +438,27 @@ export type BacktestResultNotReadyDetail = {
  */
 export type BacktestResultNotReadyResponse = {
   detail: BacktestResultNotReadyDetail;
+};
+
+/**
+ * BacktestResultUnreadableDetail
+ */
+export type BacktestResultUnreadableDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.result.unreadable";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * BacktestResultUnreadableResponse
+ */
+export type BacktestResultUnreadableResponse = {
+  detail: BacktestResultUnreadableDetail;
 };
 
 /**
@@ -520,9 +564,19 @@ export type BacktestRunSpec = {
    */
   initial_cash?: number;
   /**
+   * Lineage Strategy Id
+   */
+  lineage_strategy_id?: string | null;
+  /**
    * Metric Windows
    */
   metric_windows?: Array<MetricWindow>;
+  /**
+   * Parameter Values
+   */
+  parameter_values?: {
+    [key: string]: number | number | string | boolean;
+  };
   strategy?: StrategySpec | null;
   /**
    * Strategy Source
@@ -554,7 +608,9 @@ export type BacktestRunState = {
     | "portfolio.data.unavailable"
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
+    | "backtest.run.equity_wiped_out"
     | "backtest.run.internal"
+    | "backtest.run.interrupted"
     | null;
   /**
    * Message
@@ -582,7 +638,7 @@ export type BacktestRunState = {
 /**
  * BacktestRunSummary
  *
- * One process-lifetime run and the strategy meaning resolved before it started.
+ * One accepted run and the strategy meaning resolved before it started.
  */
 export type BacktestRunSummary = {
   run: BacktestRunState;
@@ -699,6 +755,9 @@ export type BacktestUnprocessableResponse = {
         code: "backtest.run.research_window_violation";
       } & BacktestResearchWindowViolationDetail)
     | ({
+        code: "backtest.run.parameter_invalid";
+      } & BacktestParameterInvalidDetail)
+    | ({
         code: "backtest.strategy.requires_upgrade";
       } & BacktestStrategyRequiresUpgradeDetail)
     | ({
@@ -733,6 +792,34 @@ export type BinaryNode = {
  * BinaryOperator
  */
 export type BinaryOperator = "add" | "subtract" | "multiply" | "divide";
+
+/**
+ * BlockedTrialAttempt
+ *
+ * 봉인 겹침으로 거절한 실행 요청(봉인 원장의 "차단한 시도"). 결과가 없어 N 에 들지 않는다.
+ */
+export type BlockedTrialAttempt = {
+  /**
+   * Blocked At
+   */
+  blocked_at: string;
+  /**
+   * Lineage Id
+   */
+  lineage_id: string | null;
+  /**
+   * Spec Hash
+   */
+  spec_hash: string;
+  /**
+   * Start
+   */
+  start: string;
+  /**
+   * Trial Key
+   */
+  trial_key: string;
+};
 
 /**
  * CandidateDecision
@@ -792,7 +879,8 @@ export type CellKind =
   | "source_omitted_zero"
   | "missing"
   | "not_collected"
-  | "coverage_gap";
+  | "coverage_gap"
+  | "masked";
 
 /**
  * ChatMessageView
@@ -1377,6 +1465,332 @@ export type ExecutionCore = "rust" | "python";
  * ExecutionTiming
  */
 export type ExecutionTiming = "next_open";
+
+/**
+ * Experiment
+ */
+export type Experiment = {
+  record: ExperimentRecord;
+  /**
+   * Selections
+   */
+  selections: Array<ExperimentSelection>;
+  status: ExperimentStatus;
+  /**
+   * Trial Counts
+   */
+  trial_counts: {
+    [key in TrialStatus]?: number;
+  };
+};
+
+/**
+ * ExperimentAdmissionErrorResponse
+ *
+ * 실험 설계 거절이거나, 기반 실행 요청을 실행 접수가 거절했다(백테스트 시작과 같은 코드).
+ */
+export type ExperimentAdmissionErrorResponse = {
+  /**
+   * Detail
+   */
+  detail:
+    | ExperimentErrorDetail
+    | ({
+        code: "backtest.run.invalid";
+      } & BacktestRunInvalidDetail)
+    | ({
+        code: "backtest.run.field_invalid";
+      } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
+        code: "backtest.run.research_window_violation";
+      } & BacktestResearchWindowViolationDetail)
+    | ({
+        code: "backtest.run.parameter_invalid";
+      } & BacktestParameterInvalidDetail)
+    | ({
+        code: "backtest.strategy.requires_upgrade";
+      } & BacktestStrategyRequiresUpgradeDetail)
+    | ({
+        code: "portfolio.strategy.invalid";
+      } & PortfolioStrategyInvalidDetail);
+};
+
+/**
+ * ExperimentControls
+ *
+ * 실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은
+ * 끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.
+ */
+export type ExperimentControls = {
+  /**
+   * Paused
+   */
+  paused?: boolean;
+  /**
+   * Priority
+   */
+  priority?: number;
+};
+
+/**
+ * ExperimentControlsRequest
+ *
+ * 일시정지·우선순위(1 = 보통). 보내지 않은 칸은 그대로다. 범위 owner 는 domain
+ * `MAX_EXPERIMENT_PRIORITY` 다.
+ */
+export type ExperimentControlsRequest = {
+  /**
+   * Paused
+   */
+  paused?: boolean | null;
+  /**
+   * Priority
+   */
+  priority?: number | null;
+};
+
+/**
+ * ExperimentDesign
+ */
+export type ExperimentDesign = {
+  /**
+   * Measured
+   */
+  measured?: boolean;
+  /**
+   * Parameter Values
+   */
+  parameter_values: {
+    [key: string]: number | number | string | boolean;
+  };
+  search: SearchSpec;
+  /**
+   * Windows
+   */
+  windows: Array<WalkForwardWindow>;
+};
+
+/**
+ * ExperimentErrorDetail
+ *
+ * 실험 거절. 코드 목록 owner 는 `domain/experiment/_errors.py` 이고, 화면 문장은 frontend 가
+ * `code` 로 번역한다.
+ */
+export type ExperimentErrorDetail = {
+  /**
+   * Code
+   */
+  code:
+    | "experiment.base.invalid"
+    | "experiment.base.unsaved"
+    | "experiment.not_found"
+    | "experiment.search.invalid_values"
+    | "experiment.search.too_many_points"
+    | "experiment.search.unknown_parameter"
+    | "experiment.selection.not_completed"
+    | "experiment.split.invalid"
+    | "experiment.split.no_window"
+    | "experiment.trial.not_found"
+    | "experiment.trial.not_retryable";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * ExperimentErrorResponse
+ */
+export type ExperimentErrorResponse = {
+  detail: ExperimentErrorDetail;
+};
+
+/**
+ * ExperimentPage
+ */
+export type ExperimentPage = {
+  /**
+   * Items
+   */
+  items: Array<Experiment>;
+  /**
+   * Next After
+   */
+  next_after: string | null;
+};
+
+/**
+ * ExperimentPreview
+ *
+ * 시작 전 미리 계산 — 무엇을 몇 번 돌리고 계열 시도 수 N 이 얼마가 되나(spec D2).
+ */
+export type ExperimentPreview = {
+  /**
+   * Combination Count
+   */
+  combination_count: number;
+  design: ExperimentDesign;
+  /**
+   * Lineage Id
+   */
+  lineage_id: string;
+  /**
+   * New Trial Count
+   */
+  new_trial_count: number;
+  /**
+   * Run Count
+   */
+  run_count: number;
+  /**
+   * Trial Count
+   */
+  trial_count: number;
+  /**
+   * Trial Count After
+   */
+  trial_count_after: number;
+};
+
+/**
+ * ExperimentRecord
+ *
+ * 만든 실험. 취소 시각과 대기열 조작 말고는 바뀌지 않는다.
+ */
+export type ExperimentRecord = {
+  /**
+   * Cancelled At
+   */
+  cancelled_at?: string | null;
+  controls?: ExperimentControls;
+  /**
+   * Created At
+   */
+  created_at: string;
+  design: ExperimentDesign;
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  run: BacktestRunSpec;
+  split: SplitSpec;
+};
+
+/**
+ * ExperimentRequest
+ *
+ * 실험 만들기·미리 계산 요청.
+ */
+export type ExperimentRequest = {
+  run: BacktestRunSpec;
+  /**
+   * Search
+   */
+  search: {
+    [key: string]: Array<number | number | string | boolean> | null;
+  };
+  split: SplitSpec;
+};
+
+/**
+ * ExperimentSelection
+ *
+ * 사용자가 고른 후보 기록(spec D9). 되돌릴 수 없다.
+ */
+export type ExperimentSelection = {
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Parameter Values
+   */
+  parameter_values: {
+    [key: string]: number | number | string | boolean;
+  };
+  /**
+   * Reason
+   */
+  reason: string;
+  /**
+   * Revision
+   */
+  revision: number;
+  /**
+   * Selected At
+   */
+  selected_at: string;
+  /**
+   * Strategy Id
+   */
+  strategy_id: string;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+};
+
+/**
+ * ExperimentSelectionRequest
+ */
+export type ExperimentSelectionRequest = {
+  /**
+   * Reason
+   */
+  reason: string;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+};
+
+/**
+ * ExperimentStatus
+ *
+ * 실험 단위 상태. trial 상태와 실험 취소에서 파생하고 따로 저장하지 않는다(spec D6).
+ */
+export type ExperimentStatus =
+  "queued" | "running" | "paused" | "completed" | "cancelled";
+
+/**
+ * ExperimentTrial
+ */
+export type ExperimentTrial = {
+  /**
+   * Grid Index
+   */
+  grid_index: Array<number>;
+  /**
+   * Index
+   */
+  index: number;
+  /**
+   * Parameter Values
+   */
+  parameter_values: {
+    [key: string]: number | number | string | boolean;
+  };
+  window: WalkForwardWindow;
+};
+
+/**
+ * ExperimentTrialState
+ */
+export type ExperimentTrialState = {
+  /**
+   * Attempts
+   */
+  attempts: Array<TrialAttempt>;
+  /**
+   * Awaiting Recovery
+   */
+  awaiting_recovery: boolean;
+  status: TrialStatus;
+  trial: ExperimentTrial;
+};
 
 /**
  * FactorAnalytics
@@ -2184,6 +2598,16 @@ export type HttpValidationError = {
 };
 
 /**
+ * ImpactModel
+ *
+ * 체결가에 얹는 시장충격 모델(spec D7).
+ *
+ * `fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×
+ * √(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
+ */
+export type ImpactModel = "fixed_bps" | "sqrt";
+
+/**
  * InlineDraft
  *
  * Use an unsaved typed spec while recording its authoring-source hash when known.
@@ -2293,8 +2717,8 @@ export type MetricScope =
  *
  * 지표 값이 없을 때(`MetricValue.value is None`) 그 이유. 값은 wire 계약이다.
  *
- * 화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유하고, 목록은 골든
- * `tests/fixtures/analytics/metric_unavailable_reasons.json` 이 두 쪽을 묶는다(이슈 #241).
+ * 화면 문구는 frontend i18n(`backtest.metricUnavailable.<값>`)이 소유한다. 목록은 OpenAPI 생성
+ * SDK의 같은 이름 유니온으로 가고, 문구가 빠지면 frontend typecheck가 깨진다(이슈 #241·#293).
  */
 export type MetricUnavailableReason =
   | "zero_return_variance"
@@ -2306,7 +2730,8 @@ export type MetricUnavailableReason =
   | "no_losing_closed_trade"
   | "no_observations_in_scope"
   | "period_under_one_year"
-  | "base_rate_not_covered";
+  | "base_rate_not_covered"
+  | "two_valued_returns";
 
 /**
  * MetricUnit
@@ -2823,7 +3248,16 @@ export type PortfolioUnprocessableResponse = {
       } & PortfolioDataUnavailableDetail)
     | ({
         code: "portfolio.raw_observation.invalid";
-      } & PortfolioRawObservationInvalidDetail);
+      } & PortfolioRawObservationInvalidDetail)
+    | ({
+        code: "backtest.run.field_invalid";
+      } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
+        code: "backtest.run.research_window_violation";
+      } & BacktestResearchWindowViolationDetail);
 };
 
 /**
@@ -3689,6 +4123,11 @@ export type RunEnvironment = {
    */
   fee_bps?: number;
   frequency?: DataFrequency;
+  /**
+   * Impact Coefficient
+   */
+  impact_coefficient?: number;
+  impact_model?: ImpactModel;
   market?: Market;
   missing?: MissingPolicy;
   participation_basis?: ParticipationBasis;
@@ -3937,6 +4376,22 @@ export type SearchActivityView = {
 };
 
 /**
+ * SearchAxis
+ *
+ * 탐색할 파라미터 하나와 그 값 목록. 숫자는 오름차순, 선택지는 문서 선언 순서다.
+ */
+export type SearchAxis = {
+  /**
+   * Parameter Id
+   */
+  parameter_id: string;
+  /**
+   * Values
+   */
+  values: Array<number | number | string | boolean>;
+};
+
+/**
  * SearchBudgetExhaustedView
  *
  * 검색 횟수 상한에 닿아 이 턴의 남은 호출에서 검색을 뺐다는 통지. 검색 활동이 아니다.
@@ -3949,6 +4404,20 @@ export type SearchBudgetExhaustedView = {
    * Type
    */
   type: "search_budget_exhausted";
+};
+
+/**
+ * SearchSpec
+ *
+ * 탐색 축들의 곱집합이 그리드다. 축 순서는 전략 문서의 파라미터 선언 순서다.
+ *
+ * 축이 없으면 문서 기본값 한 칸(좌표 `()`)이다.
+ */
+export type SearchSpec = {
+  /**
+   * Axes
+   */
+  axes: Array<SearchAxis>;
 };
 
 /**
@@ -4168,6 +4637,31 @@ export type SourceView = {
    * Url
    */
   url: string;
+};
+
+/**
+ * SplitMode
+ */
+export type SplitMode = "rolling" | "anchored";
+
+/**
+ * SplitSpec
+ */
+export type SplitSpec = {
+  /**
+   * Embargo Sessions
+   */
+  embargo_sessions: number;
+  mode: SplitMode;
+  selection_rule?: WindowSelectionRule;
+  /**
+   * Test Years
+   */
+  test_years: number;
+  /**
+   * Train Years
+   */
+  train_years: number;
 };
 
 /**
@@ -4571,6 +5065,29 @@ export type StrategyIdentity = {
    * Strategy Id
    */
   strategy_id: string;
+};
+
+/**
+ * StrategyNotFoundDetail
+ */
+export type StrategyNotFoundDetail = {
+  /**
+   * Code
+   */
+  code: "strategy.not_found";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * StrategyNotFoundResponse
+ *
+ * 시도 원장 경로의 계열(저장된 전략)이 없다.
+ */
+export type StrategyNotFoundResponse = {
+  detail: StrategyNotFoundDetail;
 };
 
 /**
@@ -5345,7 +5862,16 @@ export type TraceUnprocessableResponse = {
       } & PortfolioDataUnavailableDetail)
     | ({
         code: "portfolio.raw_observation.invalid";
-      } & PortfolioRawObservationInvalidDetail);
+      } & PortfolioRawObservationInvalidDetail)
+    | ({
+        code: "backtest.run.field_invalid";
+      } & BacktestRunFieldInvalidDetail)
+    | ({
+        code: "backtest.run.environment_required";
+      } & BacktestEnvironmentRequiredDetail)
+    | ({
+        code: "backtest.run.research_window_violation";
+      } & BacktestResearchWindowViolationDetail);
 };
 
 /**
@@ -5353,6 +5879,196 @@ export type TraceUnprocessableResponse = {
  */
 export type TraceValueStatus =
   "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
+
+/**
+ * TrialAttempt
+ *
+ * trial 의 실행 시도 하나. 배정되면 `run_id`, 접수가 거절되면 거절 코드와 문장이 있다.
+ */
+export type TrialAttempt = {
+  /**
+   * Attempt
+   */
+  attempt: number;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Error Code
+   */
+  error_code?: string | null;
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Run Id
+   */
+  run_id?: string | null;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+};
+
+/**
+ * TrialGroup
+ *
+ * 같은 시도 키의 실행들. 대표 실행이 없으면 이 시도는 N 에 들지 않는다.
+ */
+export type TrialGroup = {
+  /**
+   * Metric Registry Version
+   */
+  metric_registry_version?: string | null;
+  /**
+   * Representative Run Id
+   */
+  representative_run_id?: string | null;
+  /**
+   * Representative Sharpe
+   */
+  representative_sharpe?: number | null;
+  /**
+   * Runs
+   */
+  runs: Array<TrialRun>;
+  /**
+   * Trial Key
+   */
+  trial_key: string;
+};
+
+/**
+ * TrialLedger
+ *
+ * 계열 하나의 원장.
+ *
+ * `lineage_id` 는 합친 뒤 남은 계열이고 `merged_lineage_ids` 는 거기 합쳐진 계열이다.
+ */
+export type TrialLedger = {
+  /**
+   * Blocked
+   */
+  blocked: Array<BlockedTrialAttempt>;
+  /**
+   * Lineage Id
+   */
+  lineage_id: string;
+  /**
+   * Merged Lineage Ids
+   */
+  merged_lineage_ids: Array<string>;
+  /**
+   * Trial Count
+   */
+  trial_count: number;
+  /**
+   * Trials
+   */
+  trials: Array<TrialGroup>;
+};
+
+/**
+ * TrialLineageAlreadyMergedDetail
+ */
+export type TrialLineageAlreadyMergedDetail = {
+  /**
+   * Code
+   */
+  code: "backtest.lineage.already_merged";
+  /**
+   * Message
+   */
+  message: string;
+};
+
+/**
+ * TrialLineageAlreadyMergedResponse
+ */
+export type TrialLineageAlreadyMergedResponse = {
+  detail: TrialLineageAlreadyMergedDetail;
+};
+
+/**
+ * TrialLineageMergeRequest
+ *
+ * 합칠 계열(`source_strategy_id`). 경로의 계열이 남는다.
+ */
+export type TrialLineageMergeRequest = {
+  /**
+   * Source Strategy Id
+   */
+  source_strategy_id: string;
+};
+
+/**
+ * TrialPreview
+ *
+ * 실행 전 미리 계산 — 이 요청이 결과를 내면 N 에 새로 드는가.
+ *
+ * 계열이 없으면 N 에 들지 않는다.
+ */
+export type TrialPreview = {
+  /**
+   * Lineage Id
+   */
+  lineage_id: string | null;
+  /**
+   * New Trial
+   */
+  new_trial: boolean;
+  reason: TrialPreviewReason;
+  /**
+   * Trial Count
+   */
+  trial_count: number;
+  /**
+   * Trial Count After
+   */
+  trial_count_after: number;
+  /**
+   * Trial Key
+   */
+  trial_key: string;
+};
+
+/**
+ * TrialPreviewReason
+ */
+export type TrialPreviewReason = "new_trial" | "recheck" | "no_lineage";
+
+/**
+ * TrialRun
+ */
+export type TrialRun = {
+  /**
+   * Created At
+   */
+  created_at: string;
+  role: TrialRunRole;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  status: RunStatus;
+};
+
+/**
+ * TrialRunRole
+ */
+export type TrialRunRole = "counted" | "recheck" | "pending" | "no_result";
+
+/**
+ * TrialStatus
+ */
+export type TrialStatus =
+  "queued" | "running" | "completed" | "failed" | "cancelled";
 
 /**
  * TurnAcceptedView
@@ -5738,6 +6454,91 @@ export type ValidationKind = "syntax" | "semantic" | "capability";
 export type ValidationSeverity = "error" | "warning";
 
 /**
+ * WalkForwardGap
+ *
+ * 이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.
+ *
+ * 값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.
+ */
+export type WalkForwardGap =
+  "legacy_design" | "test_failed" | "no_cell" | "pending";
+
+/**
+ * WalkForwardReport
+ *
+ * 워크포워드 결과(V3-05). 창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율이다.
+ *
+ * 곡선·표본 밖 샤프·유지율은 모든 창의 검증 실행이 완료돼야 채워지고, 아니면 비우고 `gap` 에
+ * 이유를 싣는다 — 실패한 창을 빼고 남은 창만 이으면 낙관 쪽으로 빠진다.
+ */
+export type WalkForwardReport = {
+  /**
+   * Curve
+   */
+  curve: Array<EquityCurvePoint>;
+  gap: WalkForwardGap | null;
+  /**
+   * Out Of Sample Sharpe
+   */
+  out_of_sample_sharpe: number | null;
+  /**
+   * Retention
+   */
+  retention: number | null;
+  /**
+   * Windows
+   */
+  windows: Array<WalkForwardWindowResult>;
+};
+
+/**
+ * WalkForwardWindow
+ *
+ * 학습·검증 구간 한 쌍. 네 날짜 모두 양끝 포함이고 연구 구간 안이다.
+ */
+export type WalkForwardWindow = {
+  /**
+   * Test End
+   */
+  test_end: string;
+  /**
+   * Test Start
+   */
+  test_start: string;
+  /**
+   * Train End
+   */
+  train_end: string;
+  /**
+   * Train Start
+   */
+  train_start: string;
+};
+
+/**
+ * WalkForwardWindowResult
+ *
+ * 창 하나의 자동 선택과 그 검증 실행 결과.
+ */
+export type WalkForwardWindowResult = {
+  gap: WalkForwardGap | null;
+  pick: WindowPick;
+  /**
+   * Run Error Code
+   */
+  run_error_code:
+    | "portfolio.strategy.invalid"
+    | "portfolio.data.unavailable"
+    | "portfolio.raw_observation.invalid"
+    | "backtest.run.invalid"
+    | "backtest.run.equity_wiped_out"
+    | "backtest.run.internal"
+    | "backtest.run.interrupted"
+    | null;
+  run_status: RunStatus | null;
+};
+
+/**
  * WarningSeverity
  */
 export type WarningSeverity = "info" | "warning";
@@ -5746,6 +6547,62 @@ export type WarningSeverity = "info" | "warning";
  * WeightingMethod
  */
 export type WeightingMethod = "equal" | "factor_score" | "rank" | "risk";
+
+/**
+ * WindowPick
+ *
+ * 워크포워드 창마다 학습 점수로 자동으로 고른 칸과 그 칸의 검증 실행(V3-05).
+ *
+ * 사용자가 이유를 적어 고르는 후보 선택(`ExperimentSelection`, spec D9)과 다르다. 고를 칸이
+ * 없으면(창에서 대표 샤프가 있는 학습 실행이 없다) `trial_index` 가 None 이고 실행도 없다.
+ * 검증 실행이 재시작으로 중단되면 같은 칸으로 다음 번호를 다시 넘긴다.
+ */
+export type WindowPick = {
+  /**
+   * Attempt
+   */
+  attempt: number;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Error Code
+   */
+  error_code?: string | null;
+  /**
+   * Experiment Id
+   */
+  experiment_id: string;
+  /**
+   * Run Id
+   */
+  run_id?: string | null;
+  /**
+   * Train Sharpe
+   */
+  train_sharpe: number | null;
+  /**
+   * Trial Index
+   */
+  trial_index: number | null;
+  /**
+   * Window Index
+   */
+  window_index: number;
+};
+
+/**
+ * WindowSelectionRule
+ *
+ * 창마다 학습 구간 성과로 파라미터 칸 하나를 고르는 기준.
+ */
+export type WindowSelectionRule =
+  "train_sharpe_max" | "neighbor_mean_sharpe_max";
 
 /**
  * CreateProviderProfileRequest
@@ -6249,6 +7106,41 @@ export type StartBacktestResponses = {
 export type StartBacktestResponse =
   StartBacktestResponses[keyof StartBacktestResponses];
 
+export type PreviewBacktestTrialData = {
+  body: BacktestRunSpec;
+  path?: never;
+  query?: never;
+  url: "/api/v1/backtests/trial-preview";
+};
+
+export type PreviewBacktestTrialErrors = {
+  /**
+   * The immutable strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The saved revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded backtest preflight or request-body diagnostic
+   */
+  422: BacktestUnprocessableResponse;
+};
+
+export type PreviewBacktestTrialError =
+  PreviewBacktestTrialErrors[keyof PreviewBacktestTrialErrors];
+
+export type PreviewBacktestTrialResponses = {
+  /**
+   * Successful Response
+   */
+  200: TrialPreview;
+};
+
+export type PreviewBacktestTrialResponse =
+  PreviewBacktestTrialResponses[keyof PreviewBacktestTrialResponses];
+
 export type GetBacktestStatusData = {
   body?: never;
   path: {
@@ -6263,7 +7155,7 @@ export type GetBacktestStatusData = {
 
 export type GetBacktestStatusErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**
@@ -6299,7 +7191,7 @@ export type CancelBacktestData = {
 
 export type CancelBacktestErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**
@@ -6340,7 +7232,7 @@ export type StreamBacktestEventsData = {
 
 export type StreamBacktestEventsErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**
@@ -6373,7 +7265,7 @@ export type GetBacktestRequestData = {
 
 export type GetBacktestRequestErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**
@@ -6409,13 +7301,17 @@ export type GetBacktestResultData = {
 
 export type GetBacktestResultErrors = {
   /**
-   * The process-lifetime backtest run does not exist
+   * The backtest run does not exist
    */
   404: BacktestRunNotFoundResponse;
   /**
    * The run has not completed with a result
    */
   409: BacktestResultNotReadyResponse;
+  /**
+   * The completed run's result file is missing, altered or unreadable
+   */
+  410: BacktestResultUnreadableResponse;
   /**
    * Validation Error
    */
@@ -6572,6 +7468,410 @@ export type PreviewEquityUniverseResponses = {
 
 export type PreviewEquityUniverseResponse =
   PreviewEquityUniverseResponses[keyof PreviewEquityUniverseResponses];
+
+export type ListExperimentsData = {
+  body?: never;
+  path?: never;
+  query?: {
+    /**
+     * After
+     */
+    after?: string | null;
+    /**
+     * Limit
+     */
+    limit?: number;
+  };
+  url: "/api/v1/experiments";
+};
+
+export type ListExperimentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListExperimentsError =
+  ListExperimentsErrors[keyof ListExperimentsErrors];
+
+export type ListExperimentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentPage;
+};
+
+export type ListExperimentsResponse =
+  ListExperimentsResponses[keyof ListExperimentsResponses];
+
+export type CreateExperimentData = {
+  body: ExperimentRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/experiments";
+};
+
+export type CreateExperimentErrors = {
+  /**
+   * The base strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The base revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type CreateExperimentError =
+  CreateExperimentErrors[keyof CreateExperimentErrors];
+
+export type CreateExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  202: Experiment;
+};
+
+export type CreateExperimentResponse =
+  CreateExperimentResponses[keyof CreateExperimentResponses];
+
+export type PreviewExperimentData = {
+  body: ExperimentRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/experiments/preview";
+};
+
+export type PreviewExperimentErrors = {
+  /**
+   * The base strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The base revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type PreviewExperimentError =
+  PreviewExperimentErrors[keyof PreviewExperimentErrors];
+
+export type PreviewExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentPreview;
+};
+
+export type PreviewExperimentResponse =
+  PreviewExperimentResponses[keyof PreviewExperimentResponses];
+
+export type GetExperimentData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}";
+};
+
+export type GetExperimentErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentError = GetExperimentErrors[keyof GetExperimentErrors];
+
+export type GetExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  200: Experiment;
+};
+
+export type GetExperimentResponse =
+  GetExperimentResponses[keyof GetExperimentResponses];
+
+export type CancelExperimentData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/cancel";
+};
+
+export type CancelExperimentErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type CancelExperimentError =
+  CancelExperimentErrors[keyof CancelExperimentErrors];
+
+export type CancelExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  200: Experiment;
+};
+
+export type CancelExperimentResponse =
+  CancelExperimentResponses[keyof CancelExperimentResponses];
+
+export type ControlExperimentData = {
+  body: ExperimentControlsRequest;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/controls";
+};
+
+export type ControlExperimentErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Invalid controls
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type ControlExperimentError =
+  ControlExperimentErrors[keyof ControlExperimentErrors];
+
+export type ControlExperimentResponses = {
+  /**
+   * Successful Response
+   */
+  200: Experiment;
+};
+
+export type ControlExperimentResponse =
+  ControlExperimentResponses[keyof ControlExperimentResponses];
+
+export type StreamExperimentEventsData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/events";
+};
+
+export type StreamExperimentEventsErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type StreamExperimentEventsError =
+  StreamExperimentEventsErrors[keyof StreamExperimentEventsErrors];
+
+export type StreamExperimentEventsResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown;
+};
+
+export type SelectExperimentTrialData = {
+  body: ExperimentSelectionRequest;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/selections";
+};
+
+export type SelectExperimentTrialErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type SelectExperimentTrialError =
+  SelectExperimentTrialErrors[keyof SelectExperimentTrialErrors];
+
+export type SelectExperimentTrialResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentSelection;
+};
+
+export type SelectExperimentTrialResponse =
+  SelectExperimentTrialResponses[keyof SelectExperimentTrialResponses];
+
+export type ListExperimentTrialsData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/trials";
+};
+
+export type ListExperimentTrialsErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type ListExperimentTrialsError =
+  ListExperimentTrialsErrors[keyof ListExperimentTrialsErrors];
+
+export type ListExperimentTrialsResponses = {
+  /**
+   * Response Listexperimenttrials
+   *
+   * Successful Response
+   */
+  200: Array<ExperimentTrialState>;
+};
+
+export type ListExperimentTrialsResponse =
+  ListExperimentTrialsResponses[keyof ListExperimentTrialsResponses];
+
+export type RetryExperimentTrialData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+    /**
+     * Trial Index
+     */
+    trial_index: number;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry";
+};
+
+export type RetryExperimentTrialErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type RetryExperimentTrialError =
+  RetryExperimentTrialErrors[keyof RetryExperimentTrialErrors];
+
+export type RetryExperimentTrialResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentTrialState;
+};
+
+export type RetryExperimentTrialResponse =
+  RetryExperimentTrialResponses[keyof RetryExperimentTrialResponses];
+
+export type GetExperimentWalkForwardData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/walk-forward";
+};
+
+export type GetExperimentWalkForwardErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentWalkForwardError =
+  GetExperimentWalkForwardErrors[keyof GetExperimentWalkForwardErrors];
+
+export type GetExperimentWalkForwardResponses = {
+  /**
+   * Successful Response
+   */
+  200: WalkForwardReport;
+};
+
+export type GetExperimentWalkForwardResponse =
+  GetExperimentWalkForwardResponses[keyof GetExperimentWalkForwardResponses];
 
 export type GetFactorCatalogData = {
   body?: never;
@@ -6731,11 +8031,9 @@ export type PreviewPortfolioData = {
 
 export type PreviewPortfolioErrors = {
   /**
-   * Response 422 Previewportfolio
-   *
-   * Malformed envelope or a coded portfolio preflight diagnostic
+   * A coded portfolio preflight or request-body diagnostic
    */
-  422: PortfolioUnprocessableResponse | RequestValidationResponse;
+  422: PortfolioUnprocessableResponse;
 };
 
 export type PreviewPortfolioError =
@@ -6864,11 +8162,9 @@ export type TraceStrategyErrors = {
    */
   409: TraceStrategyStaleResponse;
   /**
-   * Response 422 Tracestrategy
-   *
-   * Malformed envelope or a coded trace preflight diagnostic
+   * A coded trace preflight or request-body diagnostic
    */
-  422: TraceUnprocessableResponse | RequestValidationResponse;
+  422: TraceUnprocessableResponse;
   /**
    * The client cancelled the trace request
    */
@@ -7147,6 +8443,82 @@ export type GetStrategyDocumentResponses = {
 
 export type GetStrategyDocumentResponse =
   GetStrategyDocumentResponses[keyof GetStrategyDocumentResponses];
+
+export type GetTrialLedgerData = {
+  body?: never;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategies/{strategy_id}/trials";
+};
+
+export type GetTrialLedgerErrors = {
+  /**
+   * The strategy does not exist
+   */
+  404: StrategyNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetTrialLedgerError =
+  GetTrialLedgerErrors[keyof GetTrialLedgerErrors];
+
+export type GetTrialLedgerResponses = {
+  /**
+   * Successful Response
+   */
+  200: TrialLedger;
+};
+
+export type GetTrialLedgerResponse =
+  GetTrialLedgerResponses[keyof GetTrialLedgerResponses];
+
+export type MergeTrialLineageData = {
+  body: TrialLineageMergeRequest;
+  path: {
+    /**
+     * Strategy Id
+     */
+    strategy_id: string;
+  };
+  query?: never;
+  url: "/api/v1/strategies/{strategy_id}/trials/merge";
+};
+
+export type MergeTrialLineageErrors = {
+  /**
+   * The strategy does not exist
+   */
+  404: StrategyNotFoundResponse;
+  /**
+   * The two lineages are already one
+   */
+  409: TrialLineageAlreadyMergedResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type MergeTrialLineageError =
+  MergeTrialLineageErrors[keyof MergeTrialLineageErrors];
+
+export type MergeTrialLineageResponses = {
+  /**
+   * Successful Response
+   */
+  200: TrialLedger;
+};
+
+export type MergeTrialLineageResponse =
+  MergeTrialLineageResponses[keyof MergeTrialLineageResponses];
 
 export type CreateStrategyDocumentData = {
   body: SaveDocumentRequest;

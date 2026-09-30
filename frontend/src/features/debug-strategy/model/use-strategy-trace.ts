@@ -1,13 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 
+import { backtestErrorSentence } from "../../../entities/backtest";
 import {
   ApiRequestError,
+  failureReason,
   strategyWorkbenchApi,
   type StrategyTraceRequest,
   type StrategyTraceResponse,
 } from "../../../shared/api";
-import { tOptional } from "../../../shared/config";
+import { t, tOptional } from "../../../shared/config";
 import {
   prepareStrategyTrace,
   responseMatchesStrategyTrace,
@@ -31,7 +33,7 @@ export type StrategyTraceState =
   | ({ kind: "loading" } & RequestOwned)
   | ({ kind: "cancelled" } & RequestOwned)
   | ({ kind: "discarded" } & RequestOwned)
-  | ({ kind: "error"; message: string } & RequestOwned)
+  | ({ kind: "error"; message: string; reason: string | null } & RequestOwned)
   | ({
       kind: "success";
       response: StrategyTraceResponse;
@@ -184,27 +186,21 @@ const fetchTraceBundle = async (
 };
 
 /**
- * 추적 요청 오류 문구: backend 422 detail의 `code`에 번역(`trace.error.<code>`)이 있으면 그것을, 없으면 detail
- * 원문(Phase 1 감사 위험 5b: `trace.strategy.requires_upgrade`가 원문으로 노출됐다 — backtest 경로의
- * `backtest.error.<code>`와 같은 규약).
+ * 추적 요청 오류의 본문. 추적 고유 코드는 `trace.error.<code>`가, 실행 요청과 같은 코드(실행 설정 거절·문서
+ * 실행 검증)는 백테스트와 같은 번역 `backtestErrorSentence`가 detail 값(연구 구간 날짜 등)을 채워 고른다 — 같은
+ * 거절을 두 벌 번역하지 않는다(#351). 둘 다 없으면 일반 문구다. 서버 원문은 본문에 넣지 않고 접힌 서버
+ * 사유(`failureReason`)로만 보인다(#270).
  */
-export const traceErrorMessage = (error: unknown): string => {
-  if (!(error instanceof ApiRequestError))
-    return error instanceof Error ? error.message : String(error);
-  const translated =
-    error.code === undefined ? null : tOptional(`trace.error.${error.code}`);
-  if (translated === null) return error.detail ?? error.message;
-  // 번역이 `{detail}`을 두면 backend 원문(어느 필드·어느 기능인지)을 그 자리에 넣는다(backlog 17). 슬롯은
-  // detail이 `message`를 보장하는 코드(`trace.request.invalid`·`trace.capability.unsupported`)에만 둔다 —
-  // `trace.engine.incompatible`은 `code`+`compatibility`뿐이라 슬롯이 있으면 프론트 디버그 문자열이 들어간다
-  // (#149 리뷰 P2-1). 그래도 detail이 없으면 슬롯을 비운다.
-  return translated.replace("{detail}", error.detail ?? "").replace(/:\s*$/, ".");
-};
+export const traceErrorMessage = (error: unknown): string =>
+  (error instanceof ApiRequestError && error.code !== undefined
+    ? (tOptional(`trace.error.${error.code}`) ??
+      backtestErrorSentence(error.code, null, error.values))
+    : null) ?? t("trace.error.request");
 
 /**
- * Observes one exact trace query. The query cache owns REST data while this hook owns only the
- * explicit cancelled UI state. Source identity, selections and backend fingerprints are all part
- * of the key, so a superseded response can populate only its old cache entry, never the current UI.
+ * 정확히 한 추적 query 를 지켜본다. REST 데이터는 query cache 가, 명시적 취소 상태만 이 hook 이 소유한다.
+ * 키는 요청에 싣는 값 전부(실행 설정 포함)와 문서 신원·backend 지문이라(`prepareStrategyTrace` 의
+ * `ownerKey`), 밀려난 응답은 자기 옛 캐시 칸만 채우고 지금 화면에는 오지 않는다(#351).
  */
 export const useStrategyTrace = (
   context: StrategyDebuggerContext | null,
@@ -266,6 +262,7 @@ export const useStrategyTrace = (
             kind: "error",
             ...requestOwner,
             message: traceErrorMessage(query.error),
+            reason: failureReason(query.error),
           };
     return query.data === undefined
       ? null

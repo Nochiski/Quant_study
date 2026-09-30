@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -23,10 +24,20 @@ from fastapi.testclient import TestClient
 from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import (
     BacktestEnginePortfolioAdapter,
 )
-from strategy_workbench.adapters.outbound.equity_duckdb._adapter import _fetchall
+from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
+    _FILL_KIND_TO_CELL,
+    _LOCK_CONFLICT_MARKERS,
+    _PARQUET_LIST,
+    EVENT_TYPE_MAP,
+    _fetchall,
+    _parquet_table,
+)
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_SPECS,
+    SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
+    SourceMode,
+    _reject_unread_declarations,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
     EquityDuckdbAdapter,
@@ -37,6 +48,10 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import BacktestDataQuery
 from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
+from strategy_workbench.application.factor_research.facade.research import (
+    FactorPreviewRequest,
+    FactorResearchService,
+)
 from strategy_workbench.application.portfolio_design.facade.design import (
     PortfolioDesignService,
     PortfolioPreviewRequest,
@@ -51,6 +66,7 @@ from strategy_workbench.bootstrap.facade.http import build_http_app
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import WarningSeverity
 from strategy_workbench.domain.equity.facade.research_data import (
+    SNAPSHOT_CONTRACT_SEPARATOR,
     CellKind,
     DataLoadStatus,
     FieldLag,
@@ -73,17 +89,22 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from tests.equity_fixture import (
     WB_BONUS_EX,
     WB_EVENING_SESSION,
+    WB_FIN_ROWS,
     WB_HALT_DATE,
+    WB_INCONSISTENT,
+    WB_LATE_FACTOR,
     WB_PROFILE_LAG_THREE,
     WB_PROFILE_LAG_ZERO,
     WB_PROFILE_ROWS,
     WB_SESSIONS,
     WB_SPLIT_DATE,
     build_workbench_root,
+    fin_std_table,
     snapshot_id,
     table_builds,
     wb_close,
     write_catalog,
+    write_equity_table,
 )
 
 pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync --extra equity)")
@@ -167,12 +188,204 @@ def test_snapshot_is_the_manifest_hash_and_names_every_table(
     adapter: EquityDuckdbAdapter, root: Path
 ) -> None:
     snapshot = adapter.snapshot()
-    assert snapshot.snapshot_id == snapshot_id(table_builds(root))
+    # 앞부분은 원장 스냅샷(테이블 build 해시), 뒷부분은 필드 계약 판이다(#235).
+    ledger, separator, contract = snapshot.snapshot_id.partition(SNAPSHOT_CONTRACT_SEPARATOR)
+    assert (ledger, separator) == (snapshot_id(table_builds(root)), SNAPSHOT_CONTRACT_SEPARATOR)
+    assert re.fullmatch(r"[0-9a-f]{16}", contract)
     assert snapshot.schema_version == "equity-v1.2" and snapshot.point_in_time
     # 계약 패널이 그대로 보여 주는 값이라 루트 절대 경로를 싣지 않는다(#163)
     assert snapshot.source == "equity_duckdb"
     assert {r.dataset_id for r in snapshot.dataset_revisions} == set(table_builds(root))
     assert all(r.as_of == WB_SESSIONS[-1] for r in snapshot.dataset_revisions)
+
+
+def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
+    tmp_path: Path,
+) -> None:
+    """이슈 #235: 같은 원장 빌드라도 필드를 읽는 규칙이 바뀌면 데이터 스냅샷 id 가 갈린다.
+
+    카탈로그 매크로 본문(여기서는 `period_frontier` 가 없는 옛 재무 뷰)이 바뀌면 원장 판은
+    그대로이고 필드 계약 판만 바뀐다. 매크로가 싣는 parquet 절대경로에는 흔들리지 않는다 —
+    같은 원장·코드를 다른 폴더에 두어도 같은 id 다. 팩터 행렬 캐시 키는 이 id 를 받아 옛
+    의미의 값을 새 의미로 재사용하지 않는다.
+    """
+    here = build_workbench_root(tmp_path / "here" / "equity")
+    there = build_workbench_root(tmp_path / "there" / "equity")
+    ledger = snapshot_id(table_builds(here)) + SNAPSHOT_CONTRACT_SEPARATOR
+
+    current = EquityDuckdbAdapter(here)
+    assert current.snapshot().snapshot_id.startswith(ledger)
+    assert EquityDuckdbAdapter(there).snapshot().snapshot_id == current.snapshot().snapshot_id
+
+    write_catalog(there, legacy_fin_columns=("period_frontier",))
+    older = EquityDuckdbAdapter(there)
+    assert older.snapshot().snapshot_id.startswith(ledger)
+    assert older.snapshot().snapshot_id != current.snapshot().snapshot_id
+
+    request = FactorPreviewRequest(
+        FactorGraph(nodes=(FieldNode("close", "price.close", "field"),), output_node_id="close"),
+        START,
+        END,
+    )
+    registry = build_default_factor_registry()
+    keys = [
+        FactorResearchService(registry, adapter, adapter).preview(request).cache_key
+        for adapter in (current, older)
+    ]
+    assert [key.data_snapshot_id for key in keys] == [
+        current.snapshot().snapshot_id,
+        older.snapshot().snapshot_id,
+    ]
+    assert keys[0].fingerprint != keys[1].fingerprint
+
+
+_ADAPTER = "strategy_workbench.adapters.outbound.equity_duckdb._adapter"
+
+
+def _edit_close(monkeypatch: pytest.MonkeyPatch, **changes: object) -> None:
+    edited = tuple(
+        replace(spec, **changes) if spec.field_id == "price.close" else spec for spec in FIELD_SPECS
+    )
+    monkeypatch.setattr(f"{_ADAPTER}.FIELD_SPECS", edited)
+
+
+def _edit_fin(monkeypatch: pytest.MonkeyPatch, **changes: object) -> None:
+    edited = tuple(
+        replace(spec, **changes) if spec.name == "fin" else spec for spec in SOURCE_SPECS
+    )
+    monkeypatch.setattr(f"{_ADAPTER}.SOURCE_SPECS", edited)
+
+
+def _edit_signature_default(root: Path) -> None:
+    meta_path = root / "_catalog_meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["macros"] = [
+        signature.replace("vintage := 'restated'", "vintage := 'pit'")
+        for signature in meta["macros"]
+    ]
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+
+def _reverse_declarations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(f"{_ADAPTER}.FIELD_SPECS", FIELD_SPECS[::-1])
+    monkeypatch.setattr(f"{_ADAPTER}.SOURCE_SPECS", SOURCE_SPECS[::-1])
+
+
+@pytest.mark.parametrize(
+    ("edit", "moves"),
+    [
+        pytest.param(lambda mp, root: _edit_close(mp, expr="(close) * 1"), True, id="field-expr"),
+        pytest.param(
+            lambda mp, root: _edit_fin(mp, row_filter="period_frontier AND TRUE"),
+            True,
+            id="source-row-filter",
+        ),
+        pytest.param(
+            lambda mp, root: _edit_signature_default(root), True, id="macro-signature-default"
+        ),
+        pytest.param(
+            lambda mp, root: mp.setattr(
+                f"{_ADAPTER}.EVENT_TYPE_MAP", {**EVENT_TYPE_MAP, "bonus": "reverse_split"}
+            ),
+            True,
+            id="code-table",
+        ),
+        pytest.param(
+            lambda mp, root: mp.setattr(
+                f"{_ADAPTER}._FILL_KIND_TO_CELL",
+                {**_FILL_KIND_TO_CELL, "not_collected": CellKind.MISSING},
+            ),
+            True,
+            id="cell-kinds",
+        ),
+        pytest.param(
+            lambda mp, root: mp.setattr(f"{_ADAPTER}.RATIO_DIRECTED_EVENT_TYPES", frozenset()),
+            True,
+            id="ratio-directed",
+        ),
+        pytest.param(
+            lambda mp, root: _edit_close(
+                mp,
+                label="종가 ",
+                description="문장만",
+                evidence="-",
+                verdict="-",
+                disclosure_basis="-",
+                lag_basis="-",
+            ),
+            False,
+            id="field-prose",
+        ),
+        pytest.param(lambda mp, root: _edit_fin(mp, lag_basis="문장만"), False, id="source-prose"),
+        pytest.param(lambda mp, root: _reverse_declarations(mp), False, id="declaration-order"),
+    ],
+)
+def test_the_field_contract_follows_meaning_not_prose_or_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    edit: Callable[[pytest.MonkeyPatch, Path], object],
+    moves: bool,
+) -> None:
+    """이슈 #235·#291 리뷰: 뜻 칸이 바뀌면 계약 판이 바뀌고, 문장·선언 순서만 바뀌면 그대로다.
+
+    뜻 칸은 선언표의 식·원천의 고르는 규칙(#225 의 `period_frontier` 같은)·매크로 기본값(meta
+    시그니처)·코드의 대응표다. 어느 경우든 원장 판(앞부분)은 그대로다.
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    before = EquityDuckdbAdapter(root).snapshot().snapshot_id
+    edit(monkeypatch, root)
+    after = EquityDuckdbAdapter(root).snapshot().snapshot_id
+
+    ledger = before.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0]
+    assert after.partition(SNAPSHOT_CONTRACT_SEPARATOR)[0] == ledger
+    assert (after != before) is moves
+
+
+_HIVE_OFF = "(hive_partitioning = CAST('f' AS BOOLEAN))"
+
+
+@pytest.mark.parametrize(
+    ("paths", "table"),
+    [
+        pytest.param(
+            [
+                "C:\\Users\\a\\equity\\price_daily\\v=b1\\year=2020\\part0.parquet",
+                "C:\\Users\\a\\equity\\price_daily\\v=b1\\year=2021\\part0.parquet",
+            ],
+            "price_daily",
+            id="windows",
+        ),
+        pytest.param(
+            ["C:/Users/a/equity/price_daily/v=b1/year=2020/part0.parquet"],
+            "price_daily",
+            id="windows-slash",
+        ),
+        pytest.param(
+            [
+                f"/home/ledger/equity/price_daily/v=b1/year={year}/part0.parquet"
+                for year in (2019, 2020, 2021)
+            ],
+            "price_daily",
+            id="posix",
+        ),
+        pytest.param(
+            ["/srv/o''brien/equity/fin_std/v=b2/part0.parquet"], "fin_std", id="quoted-root"
+        ),
+    ],
+)
+def test_macro_bodies_fold_parquet_paths_to_the_table_name_on_any_os(
+    paths: list[str], table: str
+) -> None:
+    """이슈 #235·#291 리뷰 P3-1: 매크로 본문의 parquet 절대경로는 OS·루트·파티션 수와 무관하게
+    테이블 이름으로 접힌다. 파일 하나면 duckdb 가 목록 없이 문자열로 돌려준다. 값 필터의 문자열
+    목록은 규칙이라 그대로 둔다.
+    """
+    listed = ", ".join(f"'{path}'" for path in paths)
+    body = f"read_parquet(main.list_value({listed}), {_HIVE_OFF}) WHERE k IN ('a', 'b')"
+    folded = f"read_parquet({table}, {_HIVE_OFF}) WHERE k IN ('a', 'b')"
+    assert _PARQUET_LIST.sub(_parquet_table, body) == folded
+    single = f"read_parquet('{paths[0]}')"
+    assert _PARQUET_LIST.sub(_parquet_table, single) == f"read_parquet({table})"
 
 
 def test_list_fields_serves_every_declared_field_whose_source_is_built(
@@ -210,6 +423,26 @@ def test_field_specs_cover_every_field_map_id_exactly_once() -> None:
     assert len(declared) == 29 and len(UNSUPPORTED_FIELDS) == 13
     assert len(declared | set(UNSUPPORTED_FIELDS)) == 42
     assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
+
+
+def test_declarations_their_query_does_not_read_are_rejected() -> None:
+    """선언한 식을 그 원천의 질의가 읽지 않으면 선언 때 막는다 — 읽히지 않는 선언은 조용히 무시된다.
+
+    필드 공개일 열은 LATEST PICK 질의만 읽고(#300 리뷰 P3-3), 가림 표시는 격자 질의만 읽는다(#311
+    리뷰 P3-3). LATEST 원천의 가림 표시는 결측 정책이 가린 셀을 다시 채우게 둔다.
+    """
+    _reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)  # 지금 선언은 통과한다
+    latest = next(spec for spec in SOURCE_SPECS if spec.mode is SourceMode.LATEST)
+    with pytest.raises(ValueError, match=re.escape(f"sources=['{latest.name}']")):
+        _reject_unread_declarations(
+            (*SOURCE_SPECS, replace(latest, masked_expr="TRUE")), FIELD_SPECS
+        )
+    grid = {spec.name for spec in SOURCE_SPECS if spec.mode is SourceMode.GRID}
+    gridded = next(spec for spec in FIELD_SPECS if spec.source in grid)
+    with pytest.raises(ValueError, match=re.escape(f"fields=['{gridded.field_id}']")):
+        _reject_unread_declarations(
+            SOURCE_SPECS, (*FIELD_SPECS, replace(gridded, available_expr="available_date"))
+        )
 
 
 # ── RawObservationPort ────────────────────────────────────────────────────────
@@ -272,6 +505,21 @@ def test_adj_close_is_raw_close_scaled_by_factors_applied_on_or_before_the_row(
         "price.adj_close": WB_SPLIT_DATE,
         "price.market_cap": before,
     }
+    # 원장이 그날 사건을 접지 못한 적용일 행은 원장이 가린 셀(MASKED)이다(#220 원장 뷰
+    # `v_adj_close`, #298 셀 종류). 035420 은 01-09 계수가 다음 세션에 공개돼 그날부터
+    # 접히고(× 0.5), 01-11 은 계수를 못 낸 기준가 재설정이다. 01-05 의 unknown_price_only(유상
+    # 권리락 등)는 가리지 않는다.
+    gaps = _raw(adapter, start=date(2024, 1, 5), end=END)
+    for session, expected in (
+        (date(2024, 1, 5), wb_close("035420", date(2024, 1, 5))),
+        (WB_LATE_FACTOR, None),
+        (WB_HALT_DATE, 0.5 * wb_close("035420", WB_HALT_DATE)),
+        (WB_INCONSISTENT, None),
+        (END, 0.5 * wb_close("035420", END)),
+    ):
+        cell = _cell(gaps, session, "035420:1", "price.adj_close")
+        kind = CellKind.OBSERVED if expected is not None else CellKind.MASKED
+        assert (cell.value, cell.kind, cell.available_date) == (expected, kind, session), session
 
 
 def test_missing_market_cap_is_a_none_value_not_an_omission(adapter: EquityDuckdbAdapter) -> None:
@@ -450,6 +698,90 @@ def test_late_old_period_correction_does_not_revert_financials_to_that_period(
     assert _field(narrow, END, "000660:1", "financial.book_equity") == 1_200.0
 
 
+def test_a_late_correction_inside_the_ttm_window_completes_that_period_ttm_on_its_filing(
+    tmp_path: Path,
+) -> None:
+    """#238: 창 안 분기의 정정본이 늦게 접수되면 그 기간 TTM 은 정정 접수일부터 보인다.
+
+    000660 은 2023 반기(08-14 접수)가 공개된 가장 최근 기간이고, 그 TTM 창 [2022 3분기 ~ 2023
+    반기] 안의 2023 1분기 정정본이 2024-01-09 에 접수된다. 예전에는 창이 반기 공개일에 완성되지
+    않아 다음 정기보고서까지 결측이었다. 지금은 정정 접수일(랙 1세션이라 01-10)부터 반기 TTM 이
+    선다. 고르는 기간(반기)과 잔액 필드(자본)는 그대로다.
+
+    창 밖 2022 1분기 정정본(01-10)은 사업보고서 4분기 파생에만 기대므로 손익 TTM 공개일만 늦춘다
+    — 손익은 01-11 부터, 영업현금은 01-10 부터 선다. 공개일 열이 둘인 이유다(#300 리뷰 P3-1).
+    """
+    root = build_workbench_root(tmp_path / "equity")
+    fiscal_2022 = [
+        {
+            "corp_code": "C00660",
+            "period_end": period_end,
+            "report_code": report,
+            "bsns_year": "2022",
+            "rcept_no": f"R00660{report}_22",
+            "available_date": available,
+            "revenue": revenue,
+            "net_income": net_income,
+            "cf_operating_ytd": cf_ytd,
+        }
+        for period_end, report, available, revenue, net_income, cf_ytd in (
+            (date(2022, 3, 31), "11013", date(2024, 1, 10), 150, 30, 20),
+            (date(2022, 6, 30), "11012", date(2022, 8, 16), 160, 32, 45),
+            (date(2022, 9, 30), "11014", date(2022, 11, 14), 170, 34, 70),
+            (date(2022, 12, 31), "11011", date(2023, 3, 14), 660, 136, 100),
+        )
+    ]
+    write_equity_table(
+        root,
+        "fin_std",
+        fin_std_table([*WB_FIN_ROWS, *fiscal_2022]),
+        build_id="b_fin_238",
+        year_column="period_end",
+    )
+    write_catalog(root)
+    fields = (
+        "financial.revenue",
+        "financial.net_income",
+        "financial.operating_cash_flow",
+        "financial.book_equity",
+    )
+    result = _raw(
+        EquityDuckdbAdapter(root),
+        start=date(2024, 1, 9),
+        end=END,
+        fields=fields,
+        universe="krx.all",
+    )
+
+    def seen(session: date) -> dict[str, tuple[object, date]]:
+        cells = {field: _cell(result, session, "000660:1", field) for field in fields}
+        assert all((c.value is None) == (c.kind is CellKind.MISSING) for c in cells.values())
+        return {field: (cell.value, cell.available_date) for field, cell in cells.items()}
+
+    # 2022 3분기 · 2022 4분기(연간 − 1~3분기) · 2023 1분기(정정본) · 2023 반기
+    revenue, net_income = 170.0 + 180.0 + 190.0 + 200.0, 34.0 + 40.0 + 38.0 + 40.0
+    cash_flow, row = 25.0 + 30.0 + 40.0 + 30.0, date(2023, 8, 14)
+    assert seen(date(2024, 1, 9)) == {
+        "financial.revenue": (None, row),
+        "financial.net_income": (None, row),
+        "financial.operating_cash_flow": (None, row),
+        "financial.book_equity": (1_200.0, row),
+    }
+    assert seen(date(2024, 1, 10)) == {
+        "financial.revenue": (None, row),
+        "financial.net_income": (None, row),
+        "financial.operating_cash_flow": (cash_flow, date(2024, 1, 9)),
+        "financial.book_equity": (1_200.0, row),
+    }
+    for session in (date(2024, 1, 11), END):
+        assert seen(session) == {
+            "financial.revenue": (revenue, date(2024, 1, 10)),
+            "financial.net_income": (net_income, date(2024, 1, 10)),
+            "financial.operating_cash_flow": (cash_flow, date(2024, 1, 9)),
+            "financial.book_equity": (1_200.0, row),
+        }, session
+
+
 def test_consensus_picks_the_nearest_target_period_and_the_measured_source(
     adapter: EquityDuckdbAdapter,
 ) -> None:
@@ -551,23 +883,30 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
         cell = _cell(result, seen_credit(session), "005930:1", "credit.margin_balance")
         assert (cell.value, cell.kind) == (None, kind), session
     # 000660 은 권리락일(01-04)부터 무상증자 척도 창이다(#249). 신용잔고는 원장 뷰
-    # `v_credit_balance` 가 가린 값을 읽으므로 원장 값(1,234)이 있어도 MISSING 이고, 권리락 전 행은
-    # 그대로다. 창 길이와 공시 전 세션 규칙은 뷰가 정한다
+    # `v_credit_balance` 가 가린 값을 읽으므로 원장 값(1,234)이 있어도 값이 없고, 셀 종류는 뷰의
+    # 가림 표시(`bonus_window`)를 따른 MASKED 다 — 실행 결측 정책이 채우지 않는다(#298). 권리락
+    # 전 행은 그대로다. 창 길이와 공시 전 세션 규칙은 뷰가 정한다
     # (원장 `tests/test_equity_v_credit_balance.py`).
     before = _cell(result, seen_credit(date(2024, 1, 3)), "000660:1", "credit.margin_balance")
     assert (before.value, before.kind) == (1_200.0, CellKind.OBSERVED)
     masked = _cell(result, seen_credit(WB_BONUS_EX), "000660:1", "credit.margin_balance")
     assert (masked.value, masked.kind, masked.available_date) == (
         None,
-        CellKind.MISSING,
+        CellKind.MASKED,
         WB_BONUS_EX,
     )
-    # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖는다
+    # 창 안에서 원래 값이 없던 행(not_collected)도 MASKED 다 — 가림 표시가 결측 사유보다 먼저다.
+    # 창의 값은 척도가 섞여 있어 모르는 값을 채워도 틀린다(#311 리뷰 P3-1)
+    unknown = _cell(result, seen_credit(date(2024, 1, 5)), "000660:1", "credit.margin_balance")
+    assert (unknown.value, unknown.kind) == (None, CellKind.MASKED)
+    # ⑧ 프로필이 낼 수 있는 셀 종류를 선언한다 — 격자만 NOT_COLLECTED 를 갖고, 원장 뷰가 가리는
+    # 원천만 MASKED 를 갖는다
     profiles = {p.field_id: p for p in adapter.list_fields()}
     assert profiles["credit.margin_balance"].coverage.supported_cell_kinds == (
         CellKind.OBSERVED,
         CellKind.MISSING,
         CellKind.NOT_COLLECTED,
+        CellKind.MASKED,
     )
     assert profiles["price.close"].coverage.supported_cell_kinds == (
         CellKind.OBSERVED,
@@ -667,6 +1006,22 @@ def test_factor_metadata_and_observations_come_from_the_same_panel(
     assert any(not o.universe_member for o in observations.observations)  # 000660 정지일
 
 
+def test_factor_observations_mark_cells_the_ledger_masked(adapter: EquityDuckdbAdapter) -> None:
+    """팩터 연구 경로도 원장이 가린 셀을 `masked` 로 싣는다 — 결측 정책이 채우지 않게(#298)."""
+    observations = adapter.load_factor_observations(
+        FactorObservationQuery(("credit.margin_balance",), START, END, minimum_history_sessions=1)
+    ).observations
+    cells = {
+        (item.as_of, item.security_id): field
+        for item in observations
+        for field in item.fields
+    }
+    # 권리락일(01-04) 행은 신용 랙 3세션 뒤(01-09)에 보인다 — 가린 셀이다
+    masked = cells[(date(2024, 1, 9), "000660:1")]
+    assert (masked.value, masked.masked) == (None, True)
+    assert not cells[(date(2024, 1, 9), "005930:1")].masked
+
+
 def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
     adapter: EquityDuckdbAdapter,
 ) -> None:
@@ -721,6 +1076,25 @@ def test_backtest_dataset_drops_reference_rows_and_carries_ok_actions_only(
         "036220:2"
     ] == (WB_SPLIT_DATE, END)
     assert [w.code for w in dataset.warnings] == ["equity.reference_rows_dropped"]
+
+
+def test_backtest_dataset_answers_warmup_actions_apart_from_engine_actions(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """√ 충격 σ(검증 랩 V2-03)는 워밍업 구간 분할 날의 원주가 수익률을 빼야 한다. 워밍업 세션의
+    사건은 엔진이 적용하는 `corporate_actions` 가 아니라 `history_corporate_actions` 로 답한다 —
+    엔진 쪽에 섞이면 bar 없는 세션의 사건으로 run 이 죽는다."""
+    start = WB_SESSIONS[WB_SESSIONS.index(WB_SPLIT_DATE) + 1]
+    query = BacktestDataQuery(start, END, ("000660:1",), None)
+
+    plain = adapter.load_backtest_dataset(query)
+    warmed = adapter.load_backtest_dataset(replace(query, history_sessions_before_start=3))
+
+    assert plain.history_corporate_actions == ()
+    assert warmed.corporate_actions == plain.corporate_actions
+    assert [(a.session, a.action_type) for a in warmed.history_corporate_actions] == [
+        (WB_SPLIT_DATE, "split")
+    ]
 
 
 def test_backtest_dataset_drops_actions_after_the_last_bar_with_a_warning(
@@ -824,59 +1198,72 @@ def test_lag_falls_back_to_source_constants_and_says_so_when_the_profile_is_abse
 # ── 카탈로그·환경 실패 ────────────────────────────────────────────────────────
 
 
-def test_missing_or_stale_catalog_makes_macro_fields_unavailable(tmp_path: Path) -> None:
-    """카탈로그가 없거나 낡으면 **매크로를 읽는 필드만** 빠진다.
+def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """카탈로그가 없거나 낡거나 원천이 읽는 매크로가 없으면 **매크로를 읽는 필드만** 빠지고,
+    사유 문장과 부팅 경고가 `catalog_*` 코드와 재생성 조치(다시 만든 뒤 서버 재시작)를 싣는다.
 
-    S23(2026-09-06) 전에는 `price.adj_close` 가 여기 끼어 있었다 — 매크로 `v_adj_price_fwd` 를
-    읽었기 때문이다. 조정가가 표(`price_adj_daily`)가 되면서 그 의존이 끊겼고, 이제 카탈로그가
-    통째로 없어도 조정가는 답한다. 남은 매크로 필드는 `financial.*`(v_fin_latest)·
-    `consensus.forward_*`·`consensus.eps_dispersion`(v_consensus)·`credit.margin_balance`
-    (v_credit_balance, #249) 다. 신용잔고가 표로 돌아가면 무상증자 척도 창이 조용히 다시 열린다.
+    매크로 필드 목록의 정본은 FIELD_MAP §3 「부팅 검사」다. S23(2026-09-06)이 조정가를 표로 옮겨
+    카탈로그 의존을 끊었지만, #220 부터 워크벤치는 조정 공백 적용일을 가린 원장 뷰를 읽는다 — 표로
+    돌아가 읽으면 가린 공백·창이 조용히 다시 열리므로 원천을 뺀다(fail-closed). 매크로를 더한 코드를
+    받고 카탈로그를 다시 만들지 않은 루트(`catalog_macro_missing`)는 예전에 경고 없이 신용 필드를
+    뺐다(#292 리뷰 P2-2).
     """
+    macro_fields = {
+        "financial.book_equity", "consensus.forward_eps", "credit.margin_balance",
+        "price.adj_close",
+    }
     root = build_workbench_root(tmp_path / "equity", catalog=False)
-    without = EquityDuckdbAdapter(root)
-    # 매크로가 없으면 그 매크로를 읽는 원천의 필드가 전부 빠진다 — 테이블 원천은 남는다
-    served = {p.field_id for p in without.list_fields()}
-    assert "price.close" in served and "consensus.target_price" in served
-    assert "price.adj_close" in served  # 표를 읽는다 — 카탈로그와 무관
-    assert not served & {"financial.book_equity", "consensus.forward_eps", "credit.margin_balance"}
-    denied = _raw(without, fields=("financial.book_equity",))
-    assert denied.status is DataLoadStatus.INVALID_QUERY
-    assert denied.detail is not None and "catalog file missing" in denied.detail
-    assert str(root.resolve()) not in denied.detail  # 사유는 질의 거절로 사용자에게 간다(#163)
-    # 조정가는 카탈로그 없이도 답하고 값도 같다(전방 조정은 (security, date) 의 순수 함수)
-    served_adj = _raw(without, fields=("price.adj_close",))
-    assert served_adj.ok
-    assert _field(served_adj, WB_SPLIT_DATE, "000660:1", "price.adj_close") == 104_000.0
-    assert _raw(without, fields=("price.close",)).ok  # 나머지 필드는 카탈로그 없이도 답한다
-
-    write_catalog(root, snapshot="deadbeefdeadbeef")
-    stale = EquityDuckdbAdapter(root)
-    result = _raw(stale, fields=("financial.book_equity",))
-    assert result.status is DataLoadStatus.INVALID_QUERY
-    assert result.detail is not None and "catalog is stale" in result.detail
-    assert _raw(stale, fields=("price.adj_close",)).ok
-    # snapshot_id 는 meta 가 아니라 MANIFEST 에서 온다
-    assert stale.snapshot().snapshot_id == snapshot_id(table_builds(root))
-
-    write_catalog(root, with_macros=False)
-    skipped = EquityDuckdbAdapter(root)
-    result = _raw(skipped, fields=("financial.book_equity",))
-    assert result.detail is not None and "macros_skipped" in result.detail
-    assert str(root.resolve()) not in result.detail
+    for code, prepare in (
+        ("catalog_missing", lambda: None),
+        ("catalog_stale", lambda: write_catalog(root, snapshot="deadbeefdeadbeef")),
+        ("catalog_macro_missing", lambda: write_catalog(root, with_macros=False)),
+    ):
+        prepare()
+        caplog.clear()
+        with caplog.at_level("WARNING"):
+            adapter = EquityDuckdbAdapter(root)
+        served = {p.field_id for p in adapter.list_fields()}
+        # 매크로가 없으면 그 매크로를 읽는 원천의 필드가 전부 빠진다 — 표 원천은 남는다
+        assert "price.close" in served and "consensus.target_price" in served, code
+        assert not served & macro_fields, code
+        assert _raw(adapter, fields=("price.close",)).ok
+        for field_id in ("credit.margin_balance", "price.adj_close"):
+            denied = _raw(adapter, fields=(field_id,))
+            assert denied.status is DataLoadStatus.INVALID_QUERY
+            assert denied.detail is not None and code in denied.detail, (code, field_id)
+            # 조치가 사유에 실린다 — 원천은 부팅 때 정해지므로 재시작까지 적는다
+            assert "ledger_sync catalog" in denied.detail and "다시 띄워" in denied.detail
+            # 사유는 질의 거절로 사용자에게 간다(#163)
+            assert str(root.resolve()) not in denied.detail
+        assert any(  # 부팅 로그에도 남는다
+            code in r.getMessage() and "ledger_sync catalog" in r.getMessage()
+            for r in caplog.records
+        ), code
+    # 원장 판은 meta 가 아니라 MANIFEST 에서 온다
+    assert adapter.snapshot().snapshot_id.startswith(
+        snapshot_id(table_builds(root)) + SNAPSHOT_CONTRACT_SEPARATOR
+    )
 
 
 def test_catalog_without_required_view_column_drops_only_that_source(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """옛 카탈로그(`v_fin_latest` 에 `period_frontier` 가 없다)는 재무 원천만 뺀다 (#233 리뷰 P2-1).
+    """옛 카탈로그(`v_fin_latest` 에 원천이 읽는 열이 없다)는 재무 원천만 뺀다 (#233 리뷰 P2-1).
 
-    매크로는 게시돼 있어 `macros_skipped` 가드는 통과한다. 예전에는 fin 원천의 `row_filter` 가
-    커버율 질의에서 BinderException 을 던져 `list_fields()` 전체가 죽었다 — 필드 목록을 쓰는 화면과
-    AI 컨텍스트가 모두 막혔다. 지금은 부팅 때 열을 확인해 재무 필드만 빠지고 경고를 남긴다.
+    읽는 열은 원천이 선언한 `period_frontier`(#225, `row_filter`)와 흐름 필드의 공개일 열(#238,
+    `FieldSpec.available_expr`)이다. #225 전 판은 셋 다, 머지 직후 로컬·서버 판(#238 전)은 공개일
+    두 열이 없다 — 가장 옛 판으로 셋을 모두 이름으로 알리는지 본다(#300 리뷰 P3-2).
+
+    매크로는 게시돼 있어 `catalog_macro_missing` 가드는 통과한다. 예전에는 fin 원천의
+    `row_filter` 가 커버율 질의에서 BinderException 을 던져 `list_fields()` 전체가 죽었다 — 필드
+    목록을 쓰는 화면과 AI 컨텍스트가 모두 막혔다. 지금은 부팅 때 열을 확인해 재무 필드만 빠지고
+    경고를 남긴다.
     """
+    absent = ("period_frontier", "ttm_income_available_date", "ttm_cf_available_date")
     root = build_workbench_root(tmp_path / "equity", catalog=False)
-    write_catalog(root, legacy_fin_view=True)
+    write_catalog(root, legacy_fin_columns=absent)
     with caplog.at_level("WARNING"):
         legacy = EquityDuckdbAdapter(root)
     served = {p.field_id for p in legacy.list_fields()}
@@ -885,12 +1272,39 @@ def test_catalog_without_required_view_column_drops_only_that_source(
     denied = _raw(legacy, fields=("financial.book_equity",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog_columns_missing" in denied.detail
-    assert "period_frontier" in denied.detail
+    assert f"missing={list(absent)}" in denied.detail
     assert _raw(legacy, fields=("price.close",)).ok
     warned = [r.getMessage() for r in caplog.records if "catalog_columns_missing" in r.getMessage()]
     assert warned and "v_fin_latest" in warned[0] and "카탈로그" in warned[0]
     # 카탈로그 경로는 운영자 로그에만 남고 질의 거절 상세(API 응답)에는 없다(#163 댓글)
     assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
+
+
+def test_catalog_view_without_its_mask_column_drops_only_that_source(tmp_path: Path) -> None:
+    """가림 표시 열이 없는 옛 뷰는 그 원천만 뺀다 — 부팅 열 확인이 가림 표시(`masked_expr`)도
+    선언에서 끌어온다(#311 리뷰 P3-4). 표시를 못 읽은 채 두면 가린 셀이 MISSING 으로 나가 결측
+    정책이 다시 채운다."""
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    catalog = duckdb.connect(str(root / "equity.duckdb"))
+    try:
+        row = catalog.execute(
+            "SELECT macro_definition FROM duckdb_functions() WHERE function_name = 'v_adj_close'"
+        ).fetchone()
+        assert row is not None
+        catalog.execute(
+            "CREATE OR REPLACE MACRO v_adj_close(as_of) AS TABLE "
+            f"SELECT * EXCLUDE (adj_gap) FROM ({row[0]})"
+        )
+    finally:
+        catalog.close()
+    adapter = EquityDuckdbAdapter(root)
+    served = {p.field_id for p in adapter.list_fields()}
+    assert "price.close" in served and "price.adj_close" not in served
+    denied = _raw(adapter, fields=("price.adj_close",))
+    assert denied.detail is not None and "catalog_columns_missing" in denied.detail
+    assert "missing=['adj_gap']" in denied.detail
 
 
 @pytest.mark.parametrize(
@@ -993,7 +1407,7 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
     monkeypatch.setattr(
         EquityDuckdbAdapter,
         "_connect",
-        lambda self: _Interrupting(real_connect(self)),
+        lambda self, sources: _Interrupting(real_connect(self, sources)),
     )
     with pytest.raises(EquityDuckdbSetupError, match="catalog_transient_error") as raised:
         EquityDuckdbAdapter(root)
@@ -1001,29 +1415,41 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
     assert "다시 띄우면 다시 확인한다" in str(raised.value)
 
 
-def test_corrupt_catalog_file_at_boot_drops_every_macro_source(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize(
+    ("name", "content", "detail"),
+    [
+        ("equity.duckdb", b"garbage" * 50, "not a valid DuckDB database file"),
+        ("_catalog_meta.json", b'{"snapshot_id": ', "JSONDecodeError"),
+        ("_catalog_meta.json", b"[]", "JSON object"),
+    ],
+    ids=["catalog-file", "meta-json", "meta-not-object"],
+)
+def test_corrupt_catalog_file_or_meta_at_boot_drops_every_macro_source(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, name: str, content: bytes, detail: str
 ) -> None:
-    """`equity.duckdb` 자체가 손상되면 카탈로그가 없을 때처럼 매크로 원천만 빠지고 뜬다 (#247 a).
+    """카탈로그 파일이나 meta 가 손상되면 카탈로그가 없을 때처럼 매크로 원천만 빠지고 뜬다.
 
     예전에는 열 확인의 연결이 `try` 밖이라 원시 `IOException`("not a valid DuckDB database
-    file")으로 부팅이 죽었다. 열 확인이 없는 매크로 원천(`consensus` 의 `v_consensus`)도 같이
-    빠져야 첫 질의에서 다시 죽지 않는다.
+    file")으로 부팅이 죽었고(#247 a), meta 손상은 설정 오류로 부팅을 멈췄다(#278). 쓸 수 없는
+    카탈로그면 매크로 원천(재무·컨센서스·신용·수정주가)이 모두 같이 빠져야 첫 질의에서 다시 죽지
+    않는다.
     """
     root = build_workbench_root(tmp_path / "equity")
-    (root / "equity.duckdb").write_bytes(b"garbage" * 50)
+    (root / name).write_bytes(content)
     with caplog.at_level("WARNING"):
         broken = EquityDuckdbAdapter(root)
     served = {p.field_id for p in broken.list_fields()}
     assert "price.close" in served and "consensus.target_price" in served
-    assert not served & {"financial.book_equity", "consensus.forward_eps"}
+    assert not served & {
+        "financial.book_equity", "consensus.forward_eps", "credit.margin_balance", "price.adj_close"
+    }
     denied = _raw(broken, fields=("consensus.forward_eps",))
     assert denied.status is DataLoadStatus.INVALID_QUERY
     assert denied.detail is not None and "catalog_unreadable" in denied.detail
-    assert "ledger_sync catalog" in denied.detail  # 조치 안내
+    assert f"file={name}" in denied.detail and "ledger_sync catalog" in denied.detail  # 조치 안내
     assert _raw(broken, fields=("price.close",)).ok
     warned = [r.getMessage() for r in caplog.records if "catalog_unreadable" in r.getMessage()]
-    assert len(warned) == 1 and "not a valid DuckDB database file" in warned[0]
+    assert len(warned) == 1 and detail in warned[0]
     assert str(root.resolve()) in warned[0] and str(root.resolve()) not in denied.detail
 
 
@@ -1058,6 +1484,38 @@ def test_catalog_locked_by_another_process_stops_boot_with_a_coded_error(tmp_pat
     assert isinstance(raised.value.__cause__, duckdb.IOException)
     assert "닫은 뒤 다시 띄워야 한다" in str(raised.value)
     assert EquityDuckdbAdapter(root).list_fields()  # 잠금이 풀리면 그대로 뜬다
+
+
+def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) -> None:
+    """부팅 뒤 카탈로그가 잠겨도 매크로를 안 읽는 질의(원주가·유니버스·백테스트 bar)는 돈다 (#278).
+
+    예전에는 질의마다 카탈로그를 열어, 잠긴 동안 가격 질의까지 원시 `IOException` 으로 죽었다.
+    매크로 원천(재무) 질의는 잠금이 풀릴 때까지 실패한다 — 빈 결과로 넘어가지 않는다.
+    """
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    booted = EquityDuckdbAdapter(root)
+    fin = ("financial.book_equity",)
+    with subprocess.Popen(
+        [sys.executable, "-c", _HOLD_CATALOG_FOR_WRITE, str(root / "equity.duckdb")],
+        stdout=subprocess.PIPE,
+        text=True,
+    ) as holder:
+        try:
+            assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
+            assert _raw(booted, fields=("price.close",)).ok  # 표 원천만 읽는 격자
+            assert booted.load_universe(UniverseHistoryQuery("XKRX", START, END)).ok
+            dataset = booted.load_backtest_dataset(
+                BacktestDataQuery(START, END, ("005930:1",), None)
+            )
+            assert dataset.bars
+            locked = "|".join(re.escape(marker) for marker in _LOCK_CONFLICT_MARKERS)
+            with pytest.raises(duckdb.IOException, match=locked):
+                _raw(booted, fields=fin)
+        finally:
+            holder.kill()  # 나가면서 `Popen` 이 파이프를 닫고 종료를 기다린다
+    assert _raw(booted, fields=fin).ok  # 잠금이 풀리면 다시 읽는다
 
 
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:
@@ -1115,16 +1573,22 @@ def degraded_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.mark.parametrize(
     ("phrase", "query"),
     [
-        # 달력 안이지만 주말·신정뿐인 구간
-        ("no sessions in range", lambda a: _raw(a, start=date(2023, 12, 30), end=date(2024, 1, 1))),
-        ("no members in universe", lambda a: _raw(a, universe="krx.none")),
+        # 달력 안이지만 주말·신정뿐인 구간. 이 루트는 카탈로그 meta 가 없어 매크로 필드(조정가 등)가
+        # 빠지므로 표 필드로 묻는다
+        (
+            "no sessions in range",
+            lambda a: _raw(
+                a, start=date(2023, 12, 30), end=date(2024, 1, 1), fields=("price.close",)
+            ),
+        ),
+        ("no members in universe", lambda a: _raw(a, universe="krx.none", fields=("price.close",))),
         # 036220 의 1구간은 2023-12-29 에 끝난다
         (
             "no panel cells",
             lambda a: a.load_panel(ResearchPanelQuery(START, END, ("036220:1",), ("price.close",))),
         ),
         ("equity tables not built", lambda a: _raw(a, fields=("flow.foreign_net_buy",))),
-        ("catalog meta missing", lambda a: _raw(a, fields=("financial.book_equity",))),
+        ("catalog_missing", lambda a: _raw(a, fields=("financial.book_equity",))),
     ],
     ids=["no-sessions", "no-members", "no-panel-cells", "table-not-built", "meta-missing"],
 )
@@ -1327,9 +1791,8 @@ def test_every_query_of_a_raw_load_watches_the_callers_checkpoint(
         checkpoint=checkpoint,
     )
 
-    # 격자 · 법인 대응(재무는 법인 축) · 재무 LATEST
-    assert len(passed) == 3
-    assert all(given is checkpoint for given in passed)
+    # 격자 · 법인 대응(재무는 법인 축) · 재무 LATEST — 틀리면 몇 번째 질의인지 보인다
+    assert passed == [checkpoint] * 3
 
 
 def test_a_duckdb_query_cancelled_while_running_is_interrupted_into_the_callers_error() -> None:

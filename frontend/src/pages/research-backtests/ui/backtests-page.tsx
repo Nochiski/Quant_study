@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useRef, type FormEvent } from "react";
 
 import {
+  BacktestRunFailure,
   backtestHistoryQuery,
   type BacktestRunSummary,
 } from "../../../entities/backtest";
@@ -174,7 +175,7 @@ export const BacktestsPage = () => {
     });
 
   return (
-    <section className="data-list-page" aria-labelledby="backtests-title">
+    <section className="page data-list-page" aria-labelledby="backtests-title">
       <header className="data-list-page__header">
         <div>
           <h1 id="backtests-title">{t("history.backtests.title")}</h1>
@@ -244,11 +245,11 @@ export const BacktestsPage = () => {
                         </Badge>
                         <br />
                         {Math.round(item.run.progress * 100)}%
-                        {item.run.error ? (
-                          <span className="data-list-page__error">
-                            {item.run.error}
-                          </span>
-                        ) : null}
+                        <BacktestRunFailure
+                          run={item.run}
+                          className="data-list-page__error"
+                          announce={false}
+                        />
                       </td>
                       <td>
                         <StrategySource summary={item} />

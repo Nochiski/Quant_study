@@ -18,8 +18,9 @@
            이고 `available_date` 는 그 관측의 공개일이다. 관측이 없으면 셀 없음.
 값이 있으면 `CellKind.OBSERVED`, 없으면 격자 3테이블(S08~S10)의 `fill_kind.kind` 가 말하는 종류
 (`_FILL_KIND_TO_CELL`: not_collected → NOT_COLLECTED, 나머지 → MISSING)이고 `fill_kind` 축이 없는
-원천은 MISSING 이다 — `load_panel` 과 `RawObservationPort` 가 같은 `_Observed.kind` 를 쓴다
-(둘의 셀 집합·값·공개일·kind 가 계약상 같아야 한다).
+원천은 MISSING 이다. 원장 뷰가 일부러 가린 행(`SourceSpec.masked_expr`)은 MASKED 다(#298).
+`load_panel` 과 `RawObservationPort` 가 같은 `_Observed.kind` 를 쓴다(둘의 셀 집합·값·공개일·kind
+가 계약상 같아야 한다).
 
 어휘(FIELD_MAP §1): `security_id = {ticker}:{span_seq}` · `market = 'KRX'` · `venue = 'XKRX'` ·
 `universe_id` 는 `universe_policy` 의 행(`krx.` || policy)이고 술어(`predicate`)를 `universe_daily`
@@ -29,13 +30,15 @@ PIT: 모든 셀은 `available_date ≤ as_of` 다. 랙은 컬럼군별 상수(`S
 `lag_basis`)이고 `dataset_profile`(S19)이 오면 프로필 값으로 바꾼다. 창 독립: `GRID` 는 (security,
 date) 의 값, `LATEST` 는 (security, cutoff) 의 값이라 질의 창을 바꿔도 같은 셀은 같다.
 
-`price.adj_close` = **전방 조정**(결정 09-05): **`price_adj_daily` 표를 직접 읽는다**(S23,
-2026-09-06). 원주가 × 그날까지 공개·적용된 계수의 누적 share_factor 이고, 종목의 첫 관측 수준을
-고정하고 사건마다 이후 가격을 올린다(삼성전자 2018-05-03 2,650,000 그대로, 05-04 51,900 × 50 =
-2,595,000). 값은 (security, date) 의 순수 함수라 창·as_of 에 무관하다. 예전에는 카탈로그 매크로
-`v_adj_price_fwd` 를 불렀는데, 그러면 카탈로그가 낡거나(snapshot 불일치) 없으면 조정가가 통째로
-unavailable 이 됐다 — 표를 읽으면서 그 의존이 끊겼다(매크로는 같은 값을 내는 읽기 경로로 남고,
-동일성은 equity `EG3_price_adj_daily` 가 매 빌드 증명한다).
+`price.adj_close` = **전방 조정**(결정 09-05): S23 표 `price_adj_daily` 의 값이다. 원주가 × 그날까지
+공개·적용된 계수의 누적 share_factor 이고, 종목의 첫 관측 수준을 고정하고 사건마다 이후 가격을
+올린다(삼성전자 2018-05-03 2,650,000 그대로, 05-04 51,900 × 50 = 2,595,000). 값은 (security, date)
+의 순수 함수라 창·as_of 에 무관하다. 워크벤치는 그 표를 **조정 공백 적용일 행만 가린 원장 뷰
+`v_adj_close`** 로 읽는다(#220) — 원장이 그날 사건을 접지 못한 행(기준가 재설정일에 늦게 공개된
+계수·계수를 못 낸 기준가 재설정)은 결측이다. S23 은 카탈로그가 낡으면 조정가가 통째로 unavailable
+이 되는 것을 피하려고 표를 만들었지만, 가림 규칙을 뷰가 소유하므로 워크벤치는 다시 카탈로그에
+기댄다. 낡으면 원천을 뺀다(fail-closed) — 표로 돌아가 읽으면 가린 공백이 조용히 다시 열린다. 표
+자체는 parquet 소비자를 위해 그대로 있다.
 
 법인 축 테이블(`fin_std`·`dividend_event`·`holder_daily`)은 티커 컬럼이 없어 `corp_ticker` 로
 전개하고 **한 법인의 종류주 티커 전부가 같은 값**을 받는다(`_specs` 모듈 docstring). `corp_ticker`
@@ -65,7 +68,7 @@ import json
 import logging
 import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
@@ -107,6 +110,7 @@ from strategy_workbench.domain.equity.facade.research_data import (
     UniverseHistoryQuery,
     UniverseHistoryResult,
     UniversePoint,
+    field_contract_snapshot_id,
 )
 from strategy_workbench.domain.factor.facade.evaluation import (
     FactorFieldValue,
@@ -118,7 +122,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 
 from ._source import (
-    CATALOG_NAME,
+    CATALOG_REBUILD,
     CatalogState,
     EquityDuckdbSetupError,
     TableBuild,
@@ -126,6 +130,7 @@ from ._source import (
     resolve_table,
     snapshot_id,
     table_builds,
+    unreadable_catalog,
 )
 from ._specs import (
     CALENDAR_TABLE,
@@ -139,6 +144,7 @@ from ._specs import (
     REQUIRED_TABLES,
     SECURITY_TABLE,
     SOURCE_BY_NAME,
+    SOURCE_SPECS,
     SPAN_TABLE,
     UNIVERSE_TABLE,
     UNSUPPORTED_FIELDS,
@@ -194,6 +200,15 @@ EVENT_TYPE_MAP: dict[str, str] = {
 # `unknown_price_only`(기준가만 변화)는 항상 factor_ok=false 라 여기 오지 않고, ok 로 실려 오면
 # 어휘 밖이 맞다 — 시총 불변이 아닌 사건을 분할로 적용하면 안 된다.
 RATIO_DIRECTED_EVENT_TYPES: frozenset[str] = frozenset({"unknown_krx"})
+# 카탈로그 매크로 본문이 읽는 parquet 목록. duckdb 는 본문을 정규화해 목록은
+# `read_parquet(main.list_value('<절대경로>', ...), ...)`, 파일 하나는 문자열 그대로 돌려준다. 필드
+# 계약 판은 이 자리를 테이블 이름으로 바꿔, 기계마다 다른 경로와 파티션 수를 빼고 규칙만 해시한다
+# (#235). parquet 경로가 아닌 문자열 목록(값 필터 등)은 규칙이라 그대로 둔다.
+_PARQUET_PATH = r"'(?:[^']|'')*\.parquet'"
+_PARQUET_LIST = re.compile(
+    rf"main\.list_value\(\s*{_PARQUET_PATH}(?:\s*,\s*{_PARQUET_PATH})*\s*\)|{_PARQUET_PATH}"
+)
+_PARQUET_TABLE = re.compile(r"[\\/]([^\\/]+)[\\/]v=[^\\/]+[\\/]")
 _TICKER_RE = re.compile(r"^[0-9A-Za-z]{1,12}$")
 # equity 격자 3테이블(S08~S10)의 `fill_kind.kind` → 워크벤치 `CellKind`. 정본 어휘는
 # `database/src/equity/model.py::FILL_KINDS` 이고 대응 원칙은 FIELD_MAP §1 「결측 어휘」다.
@@ -209,17 +224,28 @@ _FILL_KIND_TO_CELL: dict[str, CellKind] = {
 }
 
 
-def _cell_kind(value: float | None, fill_kind: object) -> CellKind:
-    """셀 종류 — 값이 있으면 OBSERVED, 없으면 `fill_kind` 가 말하는 대로(없으면 MISSING).
+def _cell_kind(value: float | None, fill_kind: object, masked: bool = False) -> CellKind:
+    """셀 종류 — 원장 뷰가 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 `fill_kind` 가
+    말하는 대로(없으면 MISSING).
 
     값이 있는 셀을 무조건 OBSERVED 로 두는 것은 계약이다(관측 셀은 값을 가져야 한다). 값이
-    없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다.
+    없는 셀만 격자 테이블의 결측 어휘를 읽고, 어휘 밖 문자열·NULL 은 MISSING 으로 접는다. 가림
+    표시는 값보다 먼저 본다 — 가린 행에 값이 실려 오면 셀 계약 검사가 크게 실패하게 둔다. 결측
+    사유보다도 먼저 본다 — 가림 창 안에서 원래 값이 없던 행(not_collected·src_omitted)도 MASKED 다.
     """
+    if masked:
+        return CellKind.MASKED
     if value is not None:
         return CellKind.OBSERVED
     if fill_kind is None:
         return CellKind.MISSING
     return _FILL_KIND_TO_CELL.get(str(fill_kind), CellKind.MISSING)
+
+
+def _parquet_table(match: re.Match[str]) -> str:
+    """parquet 경로 목록 하나를 테이블 이름으로(`<table>/v=<build>/…` 규약). 못 찾으면 자리표시."""
+    found = _PARQUET_TABLE.search(match.group(0))
+    return found.group(1) if found is not None else "<parquet>"
 
 
 def _noop_checkpoint() -> None:
@@ -455,7 +481,7 @@ class EquityDuckdbAdapter:
             (`load_backtest_dataset` 만은 `adj_factor` 를 요구해 예외를 던진다).
 
     Raises:
-        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST/카탈로그 meta 손상 ·
+        EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST 손상 ·
             카탈로그 파일 잠김(`catalog_locked`)·일시 오류(`catalog_transient_error`).
     """
 
@@ -470,12 +496,12 @@ class EquityDuckdbAdapter:
                 f"built={sorted(builds)}"
             )
         self._builds = builds
-        self._snapshot_id = snapshot_id(builds)
+        ledger_snapshot_id = snapshot_id(builds)
         self._tables: dict[str, TableBuild] = {
             table: resolve_table(self._root, table) for table in builds
         }
         self._catalog: CatalogState = self._checked_catalog(
-            read_catalog(self._root, self._snapshot_id)
+            read_catalog(self._root, ledger_snapshot_id)
         )
         self._sessions: tuple[date, ...] = self._load_sessions()
         self._session_index = {session: index for index, session in enumerate(self._sessions)}
@@ -489,40 +515,68 @@ class EquityDuckdbAdapter:
         self._profile: dict[str, tuple[int, str]] = self._load_profile()
         self._warn_lag_fallback()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
+        self._snapshot_id = field_contract_snapshot_id(ledger_snapshot_id, self._field_contract())
 
     # ── 구성 ──────────────────────────────────────────────────────────────────
 
-    def _connect(self) -> duckdb.DuckDBPyConnection:
-        """카탈로그가 쓸 만하면 그것을 read_only 로 연다(매크로 호출용), 아니면 메모리 연결."""
-        return _open(self._catalog.path if self._catalog.usable else None)
+    def _field_contract(self) -> dict[str, object]:
+        """필드 계약 판의 입력 — 선언표·카탈로그 매크로·표 모양 코드 규칙(#235).
+
+        같은 원장 빌드에서도 선언의 식·랙·고르는 규칙, 매크로 본문(재무 TTM 등), 셀 종류·기업행위
+        대응표가 바뀌면 값이 달라진다. 선언은 id 키로 넘겨 순서에 흔들리지 않고, 사람용 문장
+        칸은 `canonical_revision` 이 뺀다. 매크로 본문은 `_checked_catalog` 가 경로를 접어 읽어
+        둔 것이고, 카탈로그를 쓸 수 없으면 매크로를 읽는 원천이 빠지므로 매크로도 싣지 않는다.
+        """
+        return {
+            "sources": {spec.name: spec for spec in SOURCE_SPECS},
+            "fields": {spec.field_id: spec for spec in FIELD_SPECS},
+            "macro_signatures": sorted(self._catalog.macros) if self._catalog.usable else [],
+            "macros": dict(self._catalog.bodies),
+            "cell_kinds": _FILL_KIND_TO_CELL,
+            "event_types": EVENT_TYPE_MAP,
+            "ratio_directed_event_types": RATIO_DIRECTED_EVENT_TYPES,
+        }
+
+    def _connect(self, sources: Iterable[SourceSpec]) -> duckdb.DuckDBPyConnection:
+        """`sources` 를 읽을 연결 — 매크로 원천이 있으면 카탈로그를 read_only 로 연다(#278).
+
+        표 원천은 parquet 를 절대 경로로 읽어(`TableBuild.parquet_source`) 메모리 연결로 충분하다.
+        매크로를 읽지 않는 질의(유니버스·표 원천 격자·백테스트 bar)까지 카탈로그를 열면, 부팅 뒤
+        다른 프로세스가 카탈로그를 쓰기 모드로 잡은 동안 그 질의도 실패한다. 쓸 수 없는
+        카탈로그(stale 등)는 열지 않는다 — 옛 판본을 가리키는 매크로를 조용히 읽지 않게 한다.
+        """
+        macro = self._catalog.usable and any(source.is_macro for source in sources)
+        return _open(self._catalog.path if macro else None)
 
     def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
-        """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 본다(#247).
+        """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 매크로 본문을 읽는다(#247·#235).
 
         열리지 않는 파일(손상 등)은 카탈로그가 없을 때처럼 쓸 수 없는 것으로 두고 매크로를 읽는
-        원천을 모두 빼고 경고한다(`catalog_unreadable`). 쓸 수 있는 것으로 남기면 `_connect()` 가
-        질의마다 그 파일을 열어 매크로와 무관한 질의(필드 목록·유니버스·price)까지 죽는다.
-        잠김·일시 오류는 부팅을 멈춘다.
+        원천을 모두 빼고 경고한다(`catalog_unreadable`, meta 손상과 같은 규칙). 잠김·일시 오류는
+        부팅을 멈춘다. 읽은 본문은 경로를 테이블 이름으로 접어 필드 계약 판에 싣는다.
         """
         if not catalog.usable:
-            return catalog
+            return catalog  # 사유와 경고는 `read_catalog` 가 이미 냈다
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
 
         try:
-            _open(catalog.path).close()
+            with _open(catalog.path) as con:
+                rows = con.execute(
+                    "SELECT function_name, macro_definition FROM duckdb_functions() "
+                    "WHERE NOT internal AND function_type IN ('macro', 'table_macro')"
+                ).fetchall()
         except module.Error as error:
             _raise_unless_persistent(error, catalog.path)
-            reason = (
-                f"카탈로그 파일 {CATALOG_NAME} 를 열 수 없어 카탈로그 매크로를 읽는 원천의 필드를 "
-                "뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
-                f"`python -m equity catalog`) (catalog_unreadable) — error={type(error).__name__}"
-            )
-            logger.warning(f"{reason} catalog={catalog.path} detail={error!r}")
-            return replace(catalog, usable=False, reason=reason)
-        return catalog
+            return unreadable_catalog(catalog.path, catalog.path, error)
+        bodies = ((str(name), _PARQUET_LIST.sub(_parquet_table, str(body))) for name, body in rows)
+        return replace(catalog, bodies=tuple(bodies))
 
     def _source(self, table: str) -> str:
         return self._tables[table].parquet_source()
+
+    def trading_sessions(self, start: date, end: date) -> tuple[date, ...]:
+        sessions = self._sessions
+        return sessions[bisect_left(sessions, start) : bisect_right(sessions, end)]
 
     def _load_sessions(self) -> tuple[date, ...]:
         con = _open(None)
@@ -626,7 +680,7 @@ class EquityDuckdbAdapter:
         return {universe_id: tuple(rules) for universe_id, rules in policies.items()}
 
     def _source_unavailable_reason(self, spec: SourceSpec) -> str | None:
-        """원천을 읽을 수 없으면 왜인지 — 미빌드 테이블 · stale 카탈로그 · 건너뛴 매크로."""
+        """원천을 읽을 수 없으면 왜인지 — 미빌드 테이블 · 쓸 수 없는 카탈로그 · 없는 매크로."""
         macros = {name for name in spec.requires if name.startswith("v_")}
         tables = [name for name in spec.requires if name not in macros]
         absent = [table for table in tables if table not in self._builds]
@@ -638,17 +692,24 @@ class EquityDuckdbAdapter:
             return self._catalog.reason
         skipped = [name for name in sorted(macros) if not self._catalog.has_macro(name)]
         if skipped:
-            return (
-                f"catalog macros not published (macros_skipped) — missing={skipped} "
+            # 매크로를 더한 코드를 받고 카탈로그를 다시 만들지 않은 루트가 여기 온다(입력 표가 없는
+            # 경우는 위 표 검사가 먼저 거른다) — 부팅 로그에 남겨야 운영 안내대로 재생성한다
+            # (#292 리뷰 P2-2).
+            reason = (
+                f"카탈로그에 원천 {spec.name} 이 읽는 매크로가 없어 이 원천의 필드를 뺀다 — "
+                f"{CATALOG_REBUILD} (catalog_macro_missing) — missing={skipped} "
                 f"macros={list(self._catalog.macros)}"
             )
+            logger.warning(f"{reason} catalog={self._catalog.path}")
+            return reason
         return self._macro_unavailable_reason(spec)
 
     def _macro_unavailable_reason(self, spec: SourceSpec) -> str | None:
         """매크로 원천을 부팅 때 한 번 읽어 보고, 못 읽거나 요구하는 열이 없으면 뺄 사유를 돌려준다.
 
         매크로가 가리키는 parquet 가 빠졌거나 손상됐으면 `catalog_macro_unreadable`, 옛 카탈로그라
-        원천이 읽는 열(`required_columns`)이 없으면 `catalog_columns_missing` 으로 경고한다.
+        원천이 읽는 열(`required_columns`·가림 표시 `masked_expr`·그 원천 필드의 `available_expr`)이
+        없으면 `catalog_columns_missing` 으로 경고한다.
         읽어 보지 않고 두면 커버율 질의가 원시 duckdb 오류를 던져 `list_fields()` 전체가 죽는다
         (#233 리뷰 P2-1, #275 리뷰 P3-5). DESCRIBE 는 바인딩만 하므로 매크로 본문을 실행하지 않는다.
         """
@@ -657,7 +718,7 @@ class EquityDuckdbAdapter:
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
 
         try:
-            with self._connect() as con:
+            with self._connect([spec]) as con:
                 described = con.execute(
                     f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
                 ).fetchall()
@@ -668,20 +729,24 @@ class EquityDuckdbAdapter:
             _raise_unless_persistent(error, self._catalog.path)
             reason = (
                 f"카탈로그 매크로 {spec.relation} 를 읽을 수 없어 원천 {spec.name} 의 필드를 "
-                "뺀다 — 카탈로그를 다시 만들거나 원장 파일을 확인해야 한다"
-                "(`ledger_sync verify`·`catalog`) "
+                f"뺀다 — 원장 파일을 확인하고(`ledger_sync verify`) {CATALOG_REBUILD} "
                 f"(catalog_macro_unreadable) — error={type(error).__name__}"
             )
             logger.warning(f"{reason} catalog={self._catalog.path} detail={error!r}")
             return reason
         present = {str(row[0]) for row in described}
-        missing = [column for column in spec.required_columns if column not in present]
+        # 원천이 읽는 열 — 선언한 필수 열, 가림 표시 열(#298), 그 원천 필드의 공개일 열(#238)
+        read = (
+            *spec.required_columns,
+            spec.masked_expr,
+            *(f.available_expr for f in FIELD_SPECS if f.source == spec.name),
+        )
+        missing = [column for column in dict.fromkeys(read) if column and column not in present]
         if not missing:
             return None
         reason = (
             f"카탈로그 매크로 {spec.relation} 에 원천 {spec.name} 이 읽는 열이 없어 이 원천의 "
-            "필드를 뺀다 — 카탈로그를 다시 만들어야 한다(`ledger_sync catalog` 또는 "
-            f"`python -m equity catalog`) (catalog_columns_missing) — missing={missing}"
+            f"필드를 뺀다 — {CATALOG_REBUILD} (catalog_columns_missing) — missing={missing}"
         )
         logger.warning(f"{reason} catalog={self._catalog.path}")
         return reason
@@ -743,12 +808,15 @@ class EquityDuckdbAdapter:
         """이 원천이 낼 수 있는 셀 종류 — 선언(`kind_expr`)에서 곧바로 나온다.
 
         `fill_kind` 축이 없는 원천은 값 유무만 있어 OBSERVED/MISSING 이다. 격자 3테이블은
-        `not_collected` 를 더 낸다. `SOURCE_OMITTED_ZERO` 는 어느 원천도 내지 않는다 —
-        equity 가 그 셀을 NULL 로 두고 도메인은 그 종류에 값을 요구해서다(`_FILL_KIND_TO_CELL`).
-        `COVERAGE_GAP` 도 내지 않는다: 구간·백필 밖은 셀 자체가 없다(합성 금지).
+        `not_collected` 를 더 내고, 원장 뷰가 가리는 원천(`masked_expr`)은 MASKED 를 더 낸다.
+        `SOURCE_OMITTED_ZERO` 는 어느 원천도 내지 않는다 — equity 가 그 셀을 NULL 로 두고
+        도메인은 그 종류에 값을 요구해서다(`_FILL_KIND_TO_CELL`). `COVERAGE_GAP` 도 내지 않는다:
+        구간·백필 밖은 셀 자체가 없다(합성 금지).
         """
-        base = (CellKind.OBSERVED, CellKind.MISSING)
-        return base if source.kind_expr is None else (*base, CellKind.NOT_COLLECTED)
+        kinds = (CellKind.OBSERVED, CellKind.MISSING)
+        if source.kind_expr is not None:
+            kinds = (*kinds, CellKind.NOT_COLLECTED)
+        return kinds if source.masked_expr is None else (*kinds, CellKind.MASKED)
 
     def _coverage(self) -> dict[str, tuple[float, date]]:
         """필드별 (커버율 %, 시작 세션). 한 번 재고 캐시한다.
@@ -759,7 +827,8 @@ class EquityDuckdbAdapter:
         """
         if self._coverage_cache is not None:
             return self._coverage_cache
-        con = self._connect()
+        grouped = self._fields_by_source(tuple(self._fields))
+        con = self._connect(SOURCE_BY_NAME[name] for name in grouped)
         try:
             grid = con.execute(f"SELECT count(*) FROM {self._source(UNIVERSE_TABLE)}").fetchone()
             n_grid = max(_as_int((grid or (0,))[0], "universe_daily rows"), 1)
@@ -786,7 +855,7 @@ class EquityDuckdbAdapter:
                     "universe corps",
                 )
             out: dict[str, tuple[float, date]] = {}
-            for name, fields in self._fields_by_source(tuple(self._fields)).items():
+            for name, fields in grouped.items():
                 source = SOURCE_BY_NAME[name]
                 relation = self._relation(source, self.backfill_end)
                 where = f"WHERE {source.row_filter}" if source.row_filter else ""
@@ -843,7 +912,7 @@ class EquityDuckdbAdapter:
             else ""
         )
         name_expr = "sec.name_current" if SECURITY_TABLE in self._tables else "NULL"
-        con = self._connect()
+        con = _open(None)
         try:
             rows = con.execute(
                 f"""
@@ -1004,7 +1073,8 @@ class EquityDuckdbAdapter:
             for field_id in query.required_field_ids:
                 found = self._cell(panel, row, field_id, lags[field_id])
                 if found is not None:
-                    fields.append(FactorFieldValue(field_id, found.value))
+                    masked = found.kind is CellKind.MASKED
+                    fields.append(FactorFieldValue(field_id, found.value, masked=masked))
             observations.append(
                 FactorObservation(
                     as_of=row.session,
@@ -1113,8 +1183,9 @@ class EquityDuckdbAdapter:
                         field_id=field_id,
                         value=found.value,
                         available_date=found.available_date,
-                        # load_panel 과 **같은 `_Observed.kind`** 를 쓴다 — 값이 있으면 OBSERVED,
-                        # 없으면 격자 테이블의 `fill_kind` 가 말하는 종류(없으면 MISSING)다.
+                        # load_panel 과 **같은 `_Observed.kind`**(`_cell_kind`)를 쓴다 — 원장 뷰가
+                        # 가린 행이면 MASKED, 값이 있으면 OBSERVED, 없으면 격자 테이블의
+                        # `fill_kind` 가 말하는 종류(없으면 MISSING)다.
                         # 값 있는 셀을 OBSERVED 밖으로 보내면 포트 계약이 생성 시점에 깨지고,
                         # 두 포트가 다른 규칙을 쓰면 kind 가 셀 단위로 어긋난다.
                         kind=found.kind,
@@ -1186,7 +1257,7 @@ class EquityDuckdbAdapter:
         warmup = query.history_sessions_before_start
         first = max(bisect_left(self._sessions, query.start) - warmup, 0)
         read_from = min(query.start, self._sessions[first]) if warmup else query.start
-        con = self._connect()
+        con = _open(None)
         try:
             price_columns = {
                 str(row[0])
@@ -1271,6 +1342,7 @@ class EquityDuckdbAdapter:
                     )
                 )
         actions: list[CorporateActionRecord] = []
+        history_actions: list[CorporateActionRecord] = []
         for ticker, event_id, event_type, share_factor, raw_ts in factor_rows:
             if raw_ts is None:
                 raise ValueError(f"{ts_column} is NULL on a factor_ok row — event_id={event_id}")
@@ -1300,8 +1372,8 @@ class EquityDuckdbAdapter:
             for security_id, key in by_ticker[str(ticker)]:
                 span = spans[key]
                 in_span = span.first_date <= session <= span.last_date
-                if in_span and query.start <= session <= query.end:
-                    actions.append(
+                if in_span and read_from <= session <= query.end:
+                    (actions if session >= query.start else history_actions).append(
                         CorporateActionRecord(
                             session=session,
                             security_id=security_id,
@@ -1391,6 +1463,7 @@ class EquityDuckdbAdapter:
             warnings=tuple(warnings),
             invalid_bars=tuple(invalid_bars),
             history_bars=tuple(history_bars),
+            history_corporate_actions=tuple(history_actions),
         )
 
     # ── 패널 코어 ─────────────────────────────────────────────────────────────
@@ -1597,7 +1670,8 @@ class EquityDuckdbAdapter:
                 where.append(f"({source.row_filter})")
             picked = (
                 f"SELECT {source.key_column} AS k, date AS d, {source.available_expr} AS av, "
-                f"{source.content_expr} AS ct, {source.kind_expr or 'NULL'} AS kd, {columns} "
+                f"{source.content_expr} AS ct, {source.kind_expr or 'NULL'} AS kd, "
+                f"{source.masked_expr or 'FALSE'} AS mk, {columns} "
                 f"FROM {self._relation(source, fetch_end)} WHERE {' AND '.join(where)}"
             )
             if source.pick_order is not None:
@@ -1612,7 +1686,7 @@ class EquityDuckdbAdapter:
                 f"LEFT JOIN ({picked}) g{index} ON g{index}.k = r.ticker AND g{index}.d = r.date"
             )
             selects.append(
-                f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, "
+                f"g{index}.k IS NOT NULL, g{index}.av, g{index}.ct, g{index}.kd, g{index}.mk, "
                 + ", ".join(f"g{index}.c{position}" for position in range(len(fields)))
             )
             layout.append((name, fields))
@@ -1634,7 +1708,7 @@ class EquityDuckdbAdapter:
             {" ".join(joins)}
             ORDER BY r.date, r.ticker, r.span_seq
         """
-        con = self._connect()
+        con = self._connect(SOURCE_BY_NAME[name] for name in grid_sources)
         try:
             raw_rows = _fetchall(con, sql, params, checkpoint)
         finally:
@@ -1654,17 +1728,18 @@ class EquityDuckdbAdapter:
                 available = raw[offset + 1]
                 content = raw[offset + 2]
                 fill_kind = raw[offset + 3]
+                masked = bool(raw[offset + 4])
                 if present and available is not None and content is not None:
                     source = SOURCE_BY_NAME[name]
                     for position, field_id in enumerate(fields):
-                        value = _as_float(raw[offset + 4 + position], field_id)
+                        value = _as_float(raw[offset + 5 + position], field_id)
                         cells[field_id] = _Observed(
                             value,
                             _as_date(available, f"{source.relation}.{source.available_expr}"),
                             _as_date(content, f"{source.relation}.{source.content_expr}"),
-                            _cell_kind(value, fill_kind),
+                            _cell_kind(value, fill_kind, masked),
                         )
-                offset += 4 + len(fields)
+                offset += 5 + len(fields)
             row = _Row(
                 session=session,
                 ticker=ticker,
@@ -1715,17 +1790,24 @@ class EquityDuckdbAdapter:
         """
         if not keys:
             return {}
-        columns = ", ".join(
-            f"{self._fields[field_id].expr} AS c{position}"
+        outputs = {
+            f"c{position}": self._fields[field_id].expr for position, field_id in enumerate(fields)
+        }
+        # 행보다 늦게 공개되는 필드(재무 TTM, #238)는 값 뒤에 그 공개일 열을 함께 읽는다.
+        late = {
+            position: expr
             for position, field_id in enumerate(fields)
-        )
+            if (expr := self._fields[field_id].available_expr) is not None
+        }
+        outputs |= {f"a{position}": expr for position, expr in late.items()}
+        columns = ", ".join(f"{expr} AS {name}" for name, expr in outputs.items())
         relation = self._relation(source, fetch_end)
         where = [f"{source.available_expr} <= {_lit(fetch_end)}"]
         if source.row_filter:
             where.append(f"({source.row_filter})")
         where.append(f"{source.key_column} IN (SELECT {_KEYS_SQL})")
         predicate = " AND ".join(where)
-        picks = ", ".join(f"c{position}" for position in range(len(fields)))
+        picks = ", ".join(outputs)
         if source.reduce is Reduce.SUM:
             sql = (
                 f"SELECT {source.key_column} AS k, {source.available_expr} AS av, "
@@ -1742,7 +1824,7 @@ class EquityDuckdbAdapter:
                 f"ORDER BY {source.pick_order}) AS rn "
                 f"FROM {relation} WHERE {predicate}) WHERE rn = 1 ORDER BY k, av"
             )
-        con = self._connect()
+        con = self._connect([source])
         try:
             raw_rows = _fetchall(con, sql, [_keys_param(keys)], checkpoint)
         finally:
@@ -1761,10 +1843,18 @@ class EquityDuckdbAdapter:
                 else _as_date(content_raw, f"{source.relation}.{source.content_expr}")
             )
             # LATEST 원천에는 `fill_kind` 축이 없다 — 셀 종류는 값 유무로만 갈린다.
+            known = dict(zip(late, raw[3 + len(fields) :], strict=True))
             entry: dict[str, _Observed] = {}
             for position, field_id in enumerate(fields):
                 value = _as_float(raw[3 + position], field_id)
-                entry[field_id] = _Observed(value, available, content, _cell_kind(value, None))
+                field_available = (
+                    _as_date(known[position], f"{source.relation}.{late[position]}")
+                    if position in known
+                    else available
+                )
+                entry[field_id] = _Observed(
+                    value, field_available, content, _cell_kind(value, None)
+                )
             dates.setdefault(key, []).append(available)
             cells.setdefault(key, []).append(entry)
         return {key: _LatestSeries(tuple(dates[key]), tuple(cells[key])) for key in dates}
@@ -1793,4 +1883,11 @@ class EquityDuckdbAdapter:
         if series is None:
             return None
         position = bisect_right(series.dates, cutoff) - 1
-        return None if position < 0 else series.cells[position][field_id]
+        if position < 0:
+            return None
+        found = series.cells[position][field_id]
+        # 행은 보이는데 이 필드 값은 더 늦게 공개된다(재무 TTM 창 안 분기의 늦은 정정본, #238).
+        # 그때까지는 다른 행 값으로 대신하지 않고 결측이다.
+        if found.available_date > cutoff:
+            return _Observed(None, series.dates[position], found.content_date, CellKind.MISSING)
+        return found

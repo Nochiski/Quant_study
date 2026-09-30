@@ -28,7 +28,7 @@ from backtest_engine.engine.core import (
     make_pricing,
 )
 from backtest_engine.engine.router import DecisionRouter
-from backtest_engine.engine.slippage import FixedBpsSlippage
+from backtest_engine.engine.slippage import FixedBpsSlippage, SqrtImpactSlippage
 from backtest_engine.errors import (
     CapabilityNotImplemented,
     CoreUnavailable,
@@ -40,6 +40,7 @@ from backtest_engine.errors import (
     UnknownOrderId,
     UnsupportedActionValue,
 )
+from backtest_engine.ports.execution import SlippageModel
 from backtest_engine.sizing import floor_delta_shares
 from backtest_engine.types.actions import (
     ActionKind,
@@ -321,8 +322,11 @@ def _engine_scenario(
     *,
     max_participation: float | None = None,
     corporate_actions: tuple[CorporateActionEvent, ...] | None = None,
+    slippage: SlippageModel | None = None,
 ) -> tuple[BacktestEngine, BacktestResult]:
-    engine = BacktestEngine(config, core=core, max_participation=max_participation)
+    engine = BacktestEngine(
+        config, core=core, max_participation=max_participation, slippage=slippage
+    )
     result = (
         engine.run(strategy, feed)
         if corporate_actions is None
@@ -410,6 +414,12 @@ LIQUIDITY_BARS = tuple(
         (5, 95.0, 3_000),
     )
 )
+# √ 시장충격 척도(V2-03): 세션마다 다르고 8/3 은 척도가 없다(충격 0). 8/5 청산 매도(300주)는
+# 0.06 × √300 ≈ 1.04 라 상한 0.99 에서 잘린다.
+IMPACT_BARS = tuple(
+    replace(bar, impact_scale=scale)
+    for bar, scale in zip(LIQUIDITY_BARS, (0.002, 0.001, None, 0.0005, 0.06), strict=True)
+)
 # 잔량이 다음 세션으로 넘어가는 GTC 70% 목표.
 GTC_TARGET_70PCT = SetPortfolioTarget(
     targets=(WeightTarget(INSTRUMENT, 0.7),),
@@ -496,6 +506,16 @@ ENGINE_SCENARIOS = {
         ScriptedStrategy(script=(GTC_TARGET_70PCT,)),
         DataFeed(LIQUIDITY_BARS),
         max_participation=0.1,
+    ),
+    # √ 충격(V2-03): 캡으로 체결 수량이 세션마다 달라 √수량이 갈리고, 청산 매도는 아래로 밀되
+    # 상한에서 잘린다.
+    "sqrt_impact": lambda core: _engine_scenario(
+        core,
+        RunConfig(run_id="si", initial_cash=100_000.0, fee_bps=10.0),
+        ScriptedStrategy(script=(GTC_TARGET_70PCT, None, None, liquidate())),
+        DataFeed(IMPACT_BARS),
+        max_participation=0.1,
+        slippage=SqrtImpactSlippage(0.99),
     ),
     "split": lambda core: _engine_scenario(
         core,

@@ -166,6 +166,32 @@ describe("StrategyIde", () => {
     expect(debuggerHandle).toHaveAttribute("aria-valuenow", "190"); // 220 - 30, linear
   });
 
+  it("lets the debugger grow with the window height and keeps the chosen height through a shorter window", async () => {
+    // 상한이 창 높이를 따른다 — 고정 480px이면 큰 창에서도 연결 추적 아래쪽이 가려졌다(#262).
+    matchMedia(false);
+    vi.stubGlobal("innerHeight", 900);
+    const user = userEvent.setup();
+    mount();
+    const handle = screen.getByRole("separator", {
+      name: "중간 결과 크기 조절",
+    });
+    handle.focus();
+    await user.keyboard("{End}");
+    expect(handle).toHaveAttribute("aria-valuemax", "630");
+    expect(handle).toHaveAttribute("aria-valuenow", "630");
+
+    const resizeWindow = (height: number) =>
+      act(() => {
+        vi.stubGlobal("innerHeight", height);
+        window.dispatchEvent(new Event("resize"));
+      });
+    // 창이 줄면 그 창의 상한으로 그리고, 다시 늘면 고른 높이로 돌아온다.
+    resizeWindow(700);
+    expect(handle).toHaveAttribute("aria-valuenow", "490");
+    resizeWindow(900);
+    expect(handle).toHaveAttribute("aria-valuenow", "630");
+  });
+
   it("collapses and restores panels with resolvable controls and distinct names", async () => {
     matchMedia(false);
     const user = userEvent.setup();

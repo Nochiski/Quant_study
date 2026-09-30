@@ -405,9 +405,11 @@ export const StrategyRevisionPage = () => {
               <BacktestRunSettings
                 controller={runSettings}
                 disabled={backtest.status.kind === "starting"}
+                request={backtest.request}
               />
             }
             runFieldLabel={runSettings.runFieldLabel}
+            runRejectionFix={runSettings.rejectionFix}
             decision={backtest.decision}
             runStatus={backtest.status}
           />
@@ -437,12 +439,12 @@ export const StrategyRevisionPage = () => {
           graph: (
             <FactorGraphPanel
               state={executionPlans}
+              schema={assist.schema}
               diagnostics={currentDiagnostics(document)}
               selectedPointer={search.path}
               revealSignal={problems.revealSignal}
               editing={{
                 tree: form.tree,
-                schema: assist.schema,
                 transactions,
                 catalogs: {
                   equityFields:

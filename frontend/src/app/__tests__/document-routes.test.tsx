@@ -224,6 +224,8 @@ const RUN_ENVIRONMENT = {
   participation_basis: "session_volume",
   fee_bps: 15,
   slippage_bps: 10,
+  impact_model: "fixed_bps",
+  impact_coefficient: 1,
   sell_tax: "krx_statutory",
   missing: "drop",
 } as const;
@@ -2185,6 +2187,44 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     expect(screen.getByText("2026-09-01")).toBeInTheDocument();
   }, 15_000);
 
+  // #351: 추적의 실행 설정 거절은 백테스트 시작과 같은 코드라 같은 문장·날짜로 보이고, 서버 원문은 접힌 사유로
+  // 간다. 전에는 봉인 구간 같은 영구 조건이 "잠시 뒤 다시 추적하세요"로 떨어지고 사유도 비었다.
+  it("says a research window trace rejection with its dates and folds the server reason", async () => {
+    server.use(
+      ...graphHandlers(),
+      http.post(`${API}/api/v1/strategies/debug/trace`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "backtest.run.research_window_violation",
+              message:
+                "측정 시작일이 연구 구간 밖이라 실행할 수 없다 — requested_by=strategy.trace('그래프 전략')",
+              sealed_start: "2016-01-01",
+              sealed_end: "2019-12-31",
+              research_start: "2020-01-02",
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies/new");
+    const security = await screen.findByRole("textbox", { name: "종목 ID" });
+    await waitFor(() => expect(security).toBeEnabled());
+    await user.type(security, "sec-a");
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+
+    const alert = await screen.findByRole("alert", { name: "추적 실패" });
+    expect(alert).toHaveTextContent(
+      "추적 실패: 시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤",
+    );
+    expect(alert).not.toHaveTextContent("잠시 뒤 다시");
+    expect(
+      within(alert).getByText("서버 사유").closest("details"),
+    ).toHaveTextContent("requested_by=strategy.trace");
+  }, 15_000);
+
   it("restores revision trace scope from history and sends the saved revision source", async () => {
     const specHash = "7".repeat(64);
     server.use(
@@ -2847,7 +2887,7 @@ describe("backtest from the editor (P3-05)", () => {
     const alert = await screen.findByRole("alert");
     // 거절이 가리킨 칸(`field`)을 실행 설정의 칸 이름으로 말한다.
     expect(alert).toHaveTextContent(
-      "백테스트 시작 실패: 서버가 실행 설정의 초기 자본 칸 값을 받지 않았습니다. 그 칸을 고친 뒤 다시 시작하세요.",
+      "백테스트 시작 실패: 서버가 실행 설정의 초기 자본 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
     );
     expect(alert).not.toHaveTextContent("API request failed");
     expect(alert).not.toHaveTextContent("status=422");
@@ -2886,17 +2926,22 @@ describe("backtest from the editor (P3-05)", () => {
     await user.click(run);
 
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
       "백테스트 시작 실패: 서버가 실행 설정의 수수료 칸 값을 받지 않았습니다.",
     );
+    // 교정 버튼은 연구 구간 거절에만 있다(V5-05).
+    expect(within(alert).queryByRole("button")).toBeNull();
   }, 15_000);
 
-  // 검증 랩 V1-01: 툴바도 거절 문장의 날짜 자리표시자를 detail 값으로 채운다(날짜 owner 는 backend).
-  it("fills the research window dates into the toolbar rejection", async () => {
+  // 검증 랩 V1-01·V5-05: 툴바도 거절 문장의 날짜 자리표시자를 detail 값으로 채우고, 교정 버튼이 시작일을
+  // detail 의 연구 하한으로 옮긴다(날짜 owner 는 backend).
+  it("fills the research window dates into the toolbar rejection and moves the start date on request", async () => {
     server.use(
       ...graphHandlers(),
-      http.post(`${API}/api/v1/backtests`, () =>
-        HttpResponse.json(
+      http.post(`${API}/api/v1/backtests`, async ({ request }) => {
+        started.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json(
           {
             detail: {
               code: "backtest.run.research_window_violation",
@@ -2907,8 +2952,8 @@ describe("backtest from the editor (P3-05)", () => {
             },
           },
           { status: 422 },
-        ),
-      ),
+        );
+      }),
     );
     const user = userEvent.setup();
     mount("/research/strategies/new");
@@ -2916,9 +2961,22 @@ describe("backtest from the editor (P3-05)", () => {
     await waitFor(() => expect(run).toBeEnabled());
     await user.click(run);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "백테스트 시작 실패: 시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "백테스트 시작 실패: 시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
     );
+    await user.click(
+      within(alert).getByRole("button", { name: "시작일을 2020-01-02로" }),
+    );
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    await waitFor(() => expect(started).toHaveLength(2));
+    expect(started[1]?.environment).toEqual({
+      ...RUN_ENVIRONMENT,
+      start: "2020-01-02",
+    });
   }, 15_000);
 
   it("falls back to a general sentence when the rejection has no translation", async () => {
@@ -3024,6 +3082,7 @@ describe("backtest from the editor (P3-05)", () => {
         spec: expect.objectContaining({ title: "퀄리티 모멘텀" }),
         source_hash: "b".repeat(64),
       },
+      lineage_strategy_id: "s1",
     });
     const firstPrompt = await screen.findByRole("alertdialog");
     await user.click(
@@ -3944,6 +4003,8 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
         environment: OLD_ENVIRONMENT,
         strategy_source: { kind: "inline_draft" },
       });
+      // 저장된 적 없는 새 전략의 초안은 계열이 없다(검증 랩 spec D2).
+      expect(started[0]).not.toHaveProperty("lineage_strategy_id");
       await user.click(
         within(await screen.findByRole("alertdialog")).getByRole("button", {
           name: "머무르기",

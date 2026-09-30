@@ -262,8 +262,9 @@ def utc_now_text() -> str:
 
 E2E_DB_ENV = "STRATEGY_WORKBENCH_E2E_DB"
 E2E_SUFFIX_ENV = "STRATEGY_WORKBENCH_E2E_SEED_SUFFIX"
-# 심을 은퇴 버전. 비우면 1.0 row 두 개(e2e 기본), `1.1` 이면 원문이 있는 1.1 문서 row 하나
-# (`retired-1-1<suffix>`, 사용자 매뉴얼 캡처 스크립트가 업그레이드 배너를 찍을 때 쓴다).
+# 심을 은퇴 버전. 비우면 1.0 row 두 개, `1.1` 이면 원문이 있는 1.1 문서 row 하나
+# (`retired-1-1<suffix>`)다. e2e 동결 revision 시나리오는 둘 다 심고, 사용자 매뉴얼 캡처
+# 스크립트는 `1.1` 로 업그레이드 배너를 찍는다.
 E2E_SCHEMA_ENV = "STRATEGY_WORKBENCH_E2E_SEED_SCHEMA"
 
 

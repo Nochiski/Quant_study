@@ -53,6 +53,8 @@ def test_upgrade_returns_current_source_its_environment_and_a_savable_compile() 
         "participation_basis": "session_volume",
         "fee_bps": 15.0,
         "slippage_bps": 10.0,
+        "impact_model": "fixed_bps",
+        "impact_coefficient": 1.0,
         "sell_tax": "krx_statutory",
         "sell_tax_bps": None,
         "missing": "drop",

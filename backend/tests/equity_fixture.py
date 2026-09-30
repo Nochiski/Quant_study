@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import re
 import sys
 from collections.abc import Callable, Sequence
 from datetime import date
@@ -192,9 +193,12 @@ def factor_table(
     rows: list[FactorRow],
     apply_dates: list[date | None] | None = None,
     available_dates: list[date] | None = None,
+    factor_sources: list[str] | None = None,
+    apply_bases: list[str] | None = None,
 ) -> pa.Table:
     """`adj_factor` 관심 컬럼. `apply_dates` 를 주면 `apply_date`, `available_dates` 를 주면
-    `available_date` 컬럼을 붙인다(S06 — 뷰 `v_cum_adj` 는 둘 다 읽는다)."""
+    `available_date`, `factor_sources` 를 주면 `factor_source`, `apply_bases` 를 주면 `apply_basis`
+    컬럼을 붙인다(S06 — 뷰 `v_cum_adj` 는 앞의 둘을, `v_adj_close` 는 넷 다 읽는다)."""
     columns: dict[str, pa.Array] = {
         "ticker": pa.array([r[0] for r in rows], type=pa.string()),
         "effective_date": pa.array([r[1] for r in rows], type=pa.date32()),
@@ -208,6 +212,10 @@ def factor_table(
         columns["apply_date"] = pa.array(apply_dates, type=pa.date32())
     if available_dates is not None:
         columns["available_date"] = pa.array(available_dates, type=pa.date32())
+    if factor_sources is not None:
+        columns["factor_source"] = pa.array(factor_sources, type=pa.string())
+    if apply_bases is not None:
+        columns["apply_basis"] = pa.array(apply_bases, type=pa.string())
     return pa.table(columns)
 
 
@@ -506,11 +514,11 @@ def credit_table(rows: list[CreditRow]) -> pa.Table:
 
 # ── 카탈로그 (`equity.duckdb` + `_catalog_meta.json`) ────────────────────────
 # `equity.catalog`·`equity.views`(database/src/equity) 의 테스트 대역. backend 런타임은 그 패키지를
-# import 하지 않으므로 매크로 본문(DESIGN §5 v_cum_adj·v_adj_price·v_adj_price_fwd)과 snapshot_id
-# 규칙(전 테이블 table=build 정렬 sha256 16자리)을 여기 옮겨 적는다 — 본문이 바뀌면 여기도 같이
-# 바꾼다.
-# 예외는 원장 선언과 대조하는 계약 테스트다. 그 테스트는 `import_ledger_module` 로 import 하는
-# 동안만 경로를 올린다(#230).
+# import 하지 않지만, 이 대역은 `import_ledger_module` 로 원장 모듈을 불러 쓸 수 있다(경로는 import
+# 하는 동안만 올린다, #230). 매크로는 원장 템플릿을 렌더할 수 있으면 렌더한다(`LEDGER_MACROS`,
+# #249·#220·#300) — 손 픽스처 표가 그 템플릿이 읽는 열을 다 가질 때다. 표가 좁아 렌더할 수 없는 4개
+# (`_CATALOG_BODIES`)만 본문을 여기 옮겨 적고, 원장 본문이 바뀌면 같이 바꾼다. snapshot_id 규칙(전
+# 테이블 table=build 정렬 sha256 16자리)도 옮겨 적은 사본이다.
 
 _EQUITY_SRC = Path(__file__).resolve().parents[2] / "database" / "src"
 
@@ -633,7 +641,8 @@ FROM fwd
 """
 
 # `price_adj_daily`(S23) 산출 사본 — `database/src/equity/sql/price_adj_daily.sql` 과 같은 식이다.
-# 매크로가 아니라 **표**라 카탈로그와 무관하게 산다(`price.adj_close` 가 여기서 나온다).
+# 매크로가 아니라 **표**다. 워크벤치 `price.adj_close` 는 이 표를 원장 뷰 `v_adj_close`
+# (`LEDGER_MACROS`)로 읽는다(#220).
 _PRICE_ADJ_DAILY_SQL = """
 WITH px AS (
     SELECT p.ticker, p.date, p.open, p.high, p.low, p.close, p.volume_shr,
@@ -737,161 +746,6 @@ SELECT ticker, obs_month, target_period, metric, src, obs_date,
 FROM vis
 WHERE rn = 1
 """
-# 재무 판본 뷰(S21 본판) — `equity.views.TEMPLATES['v_fin_latest']` 본문 사본. 판본(vintage)과
-# 재무제표 구분(CFS 우선)만 접고 기간 축은 남긴다. TTM 은 4분기가 전부 보일 때만 선다.
-_FIN_LATEST_SQL = """
-WITH cut AS (
-    SELECT k.date AS cutoff
-    FROM (SELECT date, row_number() OVER (ORDER BY date DESC) - 1 AS n
-          FROM {trading_calendar} WHERE date <= as_of) k
-    WHERE k.n = coalesce(lag_override, 0)
-),
-vis AS (
-    SELECT f.*
-    FROM {fin_std} f
-    WHERE f.available_date <= (SELECT cutoff FROM cut)
-      AND CASE WHEN vintage = 'restated' THEN f.vintage_kind = 'api_restated'
-               WHEN vintage = 'pit'      THEN f.vintage_kind IN ('original', 'corrected')
-               ELSE f.vintage_kind = vintage END
-),
-pick AS (
-    SELECT * FROM (
-        SELECT v.*, row_number() OVER (
-                   PARTITION BY v.corp_code, v.period_end, v.report_code
-                   ORDER BY CASE WHEN v.fs_div = 'CFS' THEN 0 ELSE 1 END, v.fs_div,
-                            v.available_date DESC, v.rcept_no DESC) AS rn
-        FROM vis v)
-    WHERE rn = 1
-),
-prev AS (
-    SELECT p.*,
-           count(*) OVER w3                                          AS p_n,
-           min(p.period_end) OVER w3                                 AS p_first_end,
-           max(p.available_date) OVER w3                             AS p_max_available,
-           min(p.fs_div) OVER w3                                     AS p_fs_min,
-           max(p.fs_div) OVER w3                                     AS p_fs_max,
-           min(p.revenue_basis) OVER w3                              AS p_basis_min,
-           max(p.revenue_basis) OVER w3                              AS p_basis_max,
-           sum(p.revenue) OVER w3                                    AS p_sum_revenue,
-           count(p.revenue) OVER w3                                  AS p_cnt_revenue,
-           sum(p.gross_profit) OVER w3                               AS p_sum_gross_profit,
-           count(p.gross_profit) OVER w3                             AS p_cnt_gross_profit,
-           sum(p.op_profit) OVER w3                                  AS p_sum_op_profit,
-           count(p.op_profit) OVER w3                                AS p_cnt_op_profit,
-           sum(p.net_income) OVER w3                                 AS p_sum_net_income,
-           count(p.net_income) OVER w3                               AS p_cnt_net_income,
-           (lag(p.report_code, 3) OVER s = '11013' AND lag(p.report_code, 2) OVER s = '11012'
-            AND lag(p.report_code, 1) OVER s = '11014')              AS p_fiscal_chain,
-           lag(p.report_code, 1) OVER s                              AS p1_report_code,
-           lag(p.period_end, 1) OVER s                               AS p1_period_end,
-           lag(p.fs_div, 1) OVER s                                   AS p1_fs_div,
-           lag(p.available_date, 1) OVER s                           AS p1_available,
-           lag(p.cf_operating_ytd, 1) OVER s                         AS p1_cf_operating_ytd
-    FROM pick p
-    WINDOW s AS (PARTITION BY p.corp_code ORDER BY p.period_end, p.report_code),
-           w3 AS (PARTITION BY p.corp_code ORDER BY p.period_end, p.report_code
-                  ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING)
-),
-chain AS (
-    SELECT r.*,
-           (r.report_code = '11011' AND r.p_n = 3 AND coalesce(r.p_fiscal_chain, FALSE)
-            AND date_diff('day', r.p_first_end, r.period_end)
-                BETWEEN 240 AND 300
-            AND r.p_fs_min = r.fs_div AND r.p_fs_max = r.fs_div)    AS annual_ok,
-           (r.p1_report_code = CASE r.report_code WHEN '11012' THEN '11013'
-                                                  WHEN '11014' THEN '11012'
-                                                  WHEN '11011' THEN '11014' END
-            AND r.p1_fs_div = r.fs_div
-            AND date_diff('day', r.p1_period_end, r.period_end)
-                BETWEEN 80 AND 100)     AS cf_prev_ok
-    FROM prev r
-),
-q AS (
-    SELECT c.*,
-           CASE WHEN c.report_code <> '11011' THEN c.revenue
-                WHEN c.annual_ok AND c.p_cnt_revenue = 3
-                     AND c.p_basis_min = c.revenue_basis AND c.p_basis_max = c.revenue_basis
-                THEN c.revenue - c.p_sum_revenue END                 AS q_revenue,
-           CASE WHEN c.report_code <> '11011' THEN c.gross_profit
-                WHEN c.annual_ok AND c.p_cnt_gross_profit = 3
-                THEN c.gross_profit - c.p_sum_gross_profit END       AS q_gross_profit,
-           CASE WHEN c.report_code <> '11011' THEN c.op_profit
-                WHEN c.annual_ok AND c.p_cnt_op_profit = 3
-                THEN c.op_profit - c.p_sum_op_profit END             AS q_op_profit,
-           CASE WHEN c.report_code <> '11011' THEN c.net_income
-                WHEN c.annual_ok AND c.p_cnt_net_income = 3
-                THEN c.net_income - c.p_sum_net_income END           AS q_net_income,
-           CASE WHEN c.report_code = '11013' THEN c.cf_operating_ytd
-                WHEN c.cf_prev_ok
-                THEN c.cf_operating_ytd - c.p1_cf_operating_ytd END  AS q_cf_operating,
-           CASE WHEN c.report_code = '11011'
-                THEN greatest(c.available_date, c.p_max_available)
-                ELSE c.available_date END                            AS q_income_available,
-           CASE WHEN c.report_code = '11013' THEN c.available_date
-                ELSE greatest(c.available_date, coalesce(c.p1_available, c.available_date))
-                END                                                  AS q_cf_available
-    FROM chain c
-),
-ttm AS (
-    SELECT q.*,
-           count(*) OVER w                                           AS ttm_n_rows,
-           max(q.q_income_available) OVER w                          AS ttm_income_available,
-           max(q.q_cf_available) OVER w                              AS ttm_cf_available,
-           min(q.period_end) OVER w                                  AS ttm_first_period_end,
-           min(q.fs_div) OVER w                                      AS ttm_fs_min,
-           max(q.fs_div) OVER w                                      AS ttm_fs_max,
-           min(q.revenue_basis) OVER w                               AS ttm_basis_min,
-           max(q.revenue_basis) OVER w                               AS ttm_basis_max,
-           sum(q.q_revenue) OVER w                                   AS ttm_sum_revenue,
-           count(q.q_revenue) OVER w                                 AS ttm_cnt_revenue,
-           sum(q.q_gross_profit) OVER w                              AS ttm_sum_gross_profit,
-           count(q.q_gross_profit) OVER w                            AS ttm_cnt_gross_profit,
-           sum(q.q_op_profit) OVER w                                 AS ttm_sum_op_profit,
-           count(q.q_op_profit) OVER w                               AS ttm_cnt_op_profit,
-           sum(q.q_net_income) OVER w                                AS ttm_sum_net_income,
-           count(q.q_net_income) OVER w                              AS ttm_cnt_net_income,
-           sum(q.q_cf_operating) OVER w                              AS ttm_sum_cf_operating,
-           count(q.q_cf_operating) OVER w                            AS ttm_cnt_cf_operating
-    FROM q
-    WINDOW w AS (PARTITION BY q.corp_code ORDER BY q.period_end, q.report_code
-                 ROWS BETWEEN 3 PRECEDING AND CURRENT ROW)
-),
-ok AS (
-    SELECT t.*,
-           (t.ttm_n_rows = 4 AND t.ttm_fs_min = t.ttm_fs_max
-            AND date_diff('day', t.ttm_first_period_end, t.period_end)
-                BETWEEN 240 AND 300)           AS ttm_window_ok,
-           (strftime(t.period_end, '%Y%m%d') || t.report_code) = max(
-               strftime(t.period_end, '%Y%m%d') || t.report_code) OVER (
-               PARTITION BY t.corp_code ORDER BY t.available_date
-               RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)    AS period_frontier
-    FROM ttm t
-)
-SELECT o.corp_code, o.period_end, o.report_code, o.fs_div AS fs_div_used,
-       o.bsns_year, o.rcept_no, o.period_start, o.currency,
-       o.revenue, o.revenue_basis, o.gross_profit, o.op_profit, o.net_income,
-       o.total_asset, o.total_liab, o.total_equity, o.cf_operating_ytd, o.cf_operating_q,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_revenue = 4 AND o.ttm_basis_min = o.ttm_basis_max
-            THEN o.ttm_sum_revenue END                               AS ttm_revenue,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_gross_profit = 4
-            THEN o.ttm_sum_gross_profit END                          AS ttm_gross_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_op_profit = 4
-            THEN o.ttm_sum_op_profit END                             AS ttm_op_profit,
-       CASE WHEN o.ttm_window_ok AND o.ttm_income_available <= o.available_date
-                 AND o.ttm_cnt_net_income = 4
-            THEN o.ttm_sum_net_income END                            AS ttm_net_income,
-       CASE WHEN o.ttm_window_ok AND o.ttm_cf_available <= o.available_date
-                 AND o.ttm_cnt_cf_operating = 4
-            THEN o.ttm_sum_cf_operating END                          AS ttm_cf_operating,
-       coalesce(d.first_correction_dt <= (SELECT cutoff FROM cut), FALSE) AS has_correction,
-       o.period_frontier, o.available_date, o.available_basis
-FROM ok o
-LEFT JOIN (SELECT rcept_no, first_correction_dt FROM {disclosure_version}) d
-       ON d.rcept_no = o.rcept_no
-"""
 
 # 시그니처 → (본문, 읽는 테이블). `equity.views.SIGNATURES`·`MACRO_INPUTS` 의 사본이다.
 _PRICE_INPUTS = ("price_daily", "adj_factor", "trading_calendar")
@@ -905,16 +759,11 @@ _CATALOG_BODIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         _CONSENSUS_SQL,
         ("consensus_daily", "trading_calendar"),
     ),
-    (
-        "v_fin_latest(as_of, lag_override := NULL, vintage := 'restated')",
-        _FIN_LATEST_SQL,
-        ("fin_std", "disclosure_version", "trading_calendar"),
-    ),
 )
 # 원장 템플릿(`equity.views`)을 그대로 렌더하는 매크로 — 본문을 여기 옮겨 적지 않는다(#249).
 # 손 픽스처 표가 그 매크로가 읽는 열을 다 가질 때만 이렇게 쓸 수 있다(duckdb 는 매크로를 만들 때
 # 바인딩한다).
-LEDGER_MACROS = ("v_credit_balance",)
+LEDGER_MACROS = ("v_fin_latest", "v_credit_balance", "v_adj_close")
 
 
 def table_builds(root: Path) -> dict[str, str]:
@@ -972,14 +821,14 @@ def write_catalog(
     *,
     snapshot: str | None = None,
     with_macros: bool = True,
-    legacy_fin_view: bool = False,
+    legacy_fin_columns: tuple[str, ...] = (),
 ) -> Path:
     """`equity.duckdb`(입력이 갖춰진 매크로 전부) + `_catalog_meta.json` 을 쓴다.
 
     `snapshot` 을 주면 meta 의 snapshot_id 를 그 값으로 둔다(stale 카탈로그 부정 픽스처).
     `with_macros=False` 면 매크로 없이 `macros_skipped` 만 남긴다.
-    `legacy_fin_view=True` 면 `v_fin_latest` 가 `period_frontier` 열 없이 구워진다 — #225 전에
-    만든 카탈로그(재생성 전 로컬·서버 판) 부정 픽스처.
+    `legacy_fin_columns` 에 준 출력 열은 `v_fin_latest` 에서 빼고 굽는다 — 그 열이 없던 옛
+    카탈로그(#225 전 `period_frontier`, #238 전 TTM 공개일 열, 재생성 전 로컬·서버 판) 부정 픽스처.
     """
     import duckdb  # 테스트 전용 — backend optional extra `equity`
 
@@ -1008,8 +857,8 @@ def write_catalog(
                 skipped[name] = f"not_built: inputs={absent or list(inputs)}"
                 continue
             body = render({t: _partition_source(root, t, builds[t]) for t in inputs})
-            if legacy_fin_view and name == "v_fin_latest":
-                body = body.replace("o.period_frontier, ", "")
+            for column in legacy_fin_columns if name == "v_fin_latest" else ():
+                body = re.sub(rf"\bo\.{column},\s*", "", body)
             con.execute(f"CREATE MACRO {signature} AS TABLE {body}")
             macros.append(signature)
     finally:
@@ -1039,7 +888,9 @@ def write_catalog(
 #   01-10 정지(reference 행, status suspended) · 035420 common 01-04 상장, 주식수 미상(mktcap
 #   NULL) · 036220 common 재상장 2구간([12-26, 12-29]·[01-08, 01-12]) · 005935 preferred ·
 #   069500 etf.
-#   adj_factor 에 005930 not-ok 행 1(계수 1) — 사건·조정에 나오면 안 된다.
+#   adj_factor 에 005930 not-ok 행 1(계수 1) — 사건·조정에 나오면 안 된다. 035420 에는 조정 공백
+#   사건 셋(01-05 unknown_price_only · 01-09 다음 세션에 공개된 ok 계수 · 01-11
+#   krx_base_inconsistent)이 있다 — 원장 뷰 `v_adj_close` 는 뒤 둘의 적용일 행을 가린다(#220).
 # 정책: krx.all(TRUE) · krx.common-stock(sec_type='common' ∧ status='listed').
 
 WB_SESSIONS: tuple[date, ...] = (
@@ -1049,6 +900,8 @@ WB_SESSIONS: tuple[date, ...] = (
 )
 WB_SPLIT_DATE = date(2024, 1, 8)
 WB_HALT_DATE = date(2024, 1, 10)
+# 035420 의 조정 공백 적용일(#220) — 다음 세션에 공개된 ok 계수 · krx_base_inconsistent
+WB_LATE_FACTOR, WB_INCONSISTENT = date(2024, 1, 9), date(2024, 1, 11)
 # 저녁 잠정판(e1.15.0)의 T 세션 — 캘린더·격자·`security_span` 밖이다(그 셋은 KRX 축이라 저녁
 # 빌드에서도 D 에 멈춘다). `price_daily` 에만 `basis='evening'` 행으로 얹힌다.
 WB_EVENING_SESSION = date(2024, 1, 15)
@@ -1243,9 +1096,11 @@ WB_CREDIT_ROWS: list[CreditRow] = [
     ("005930", date(2024, 1, 8), None, ("not_collected", "none")),
     # 잔고 > 상장주식수로 격리된 원장 행의 자리 — 셀은 남고 종류는 empty_response 다(결정 9)
     ("005930", date(2024, 1, 9), None, ("empty_response", "unit_ok")),
-    # 000660 은 권리락일(01-04)부터 무상증자 척도 창이다 — 원장 값 1,234 는 뷰가 가린다
+    # 000660 은 권리락일(01-04)부터 무상증자 척도 창이다 — 원장 값 1,234 는 뷰가 가리고, 창 안에서
+    # 원래 값이 없던 행(01-05 not_collected)은 사유를 그대로 둔 채 가림 표시만 선다
     ("000660", date(2024, 1, 3), 1_200, ("measured", "unit_ok")),
     ("000660", WB_BONUS_EX, 1_234, ("measured", "unit_ok")),
+    ("000660", date(2024, 1, 5), None, ("not_collected", "none")),
 ]
 WB_HOLDER_ROWS: list[HolderRow] = [
     ("H1", "elestock", "홍길동", "C05930", 1_000, date(2024, 1, 9)),
@@ -1332,7 +1187,8 @@ def build_workbench_root(
 
     `catalog=False` 면 equity.duckdb 없음, `profile=False` 면 `dataset_profile` 없음
     (어댑터가 원천 상수로 폴백하는 구판 루트). `extra_factor_rows` 는 `adj_factor` 에 덧붙일
-    사건 행(apply_date = available_date = effective_date). `extra_policy_rows` 는
+    사건 행(apply_date = available_date = effective_date, factor_source·apply_basis 는 ok 면
+    mktcap_neutral·nominal, 아니면 no_price_match·unmatched). `extra_policy_rows` 는
     `universe_policy` 에 덧붙일 정책 행(멤버가 없는 정책 등)이다.
 
     `evening_session` 을 주면 e1.15.0 저녁 잠정판 모양이 된다 — `price_daily` 에 `basis` 컬럼이
@@ -1405,25 +1261,38 @@ def build_workbench_root(
             ]
         ),
     )
-    factor_dates: list[date | None] = [
-        WB_SPLIT_DATE, date(2024, 1, 3), date(2024, 1, 9),
-        *(r[1] for r in extra_factor_rows or []),
+    # (행, 공개일, factor_source, apply_basis) — 적용일은 행의 effective_date 다.
+    factors: list[tuple[FactorRow, date, str, str]] = [
+        (("000660", WB_SPLIT_DATE, "000660:split:2024-01-08", "split", 2.0, True),
+         WB_SPLIT_DATE, "mktcap_neutral", "krx_base_price"),
+        (("005930", date(2024, 1, 3), "005930:capred:2024-01-03", "capred", 1.0, False),
+         date(2024, 1, 3), "no_share_change", "nominal"),
+        # S06-2 KRX 기준가 원천 행 — corp_event 에 없어 유형을 모른다. 방향은
+        # share_factor 가 정한다(서버 factor_ok 55행이 이 유형이다).
+        (("036220", date(2024, 1, 9), "036220:krx_base:2024-01-09", "unknown_krx", 0.5, True),
+         date(2024, 1, 9), "mktcap_neutral", "krx_base_price"),
+        # 035420 — 원장 뷰 `v_adj_close` 가 가리는 조정 공백(#220). 기준가 재설정일에 다음 세션에야
+        # 공개된 ok 계수와 계수를 못 낸 기준가 재설정은 적용일 행이 결측이고, unknown_price_only 는
+        # 가리지 않는다.
+        (("035420", date(2024, 1, 5), "035420:krx_base:2024-01-05", "unknown_price_only", 1.0,
+          False), date(2024, 1, 8), "unknown_price_only", "krx_base_price"),
+        (("035420", WB_LATE_FACTOR, "035420:krx_base:2024-01-09", "unknown_krx", 0.5, True),
+         date(2024, 1, 10), "mktcap_neutral", "krx_base_price"),
+        (("035420", WB_INCONSISTENT, "035420:capred:2024-01-11", "capred", 1.0, False),
+         date(2024, 1, 12), "krx_base_inconsistent", "krx_base_price"),
+        *((row, row[1], "mktcap_neutral", "nominal") if row[5]
+          else (row, row[1], "no_price_match", "unmatched")
+          for row in extra_factor_rows or []),
     ]
     write_equity_table(
         root,
         "adj_factor",
         factor_table(
-            [
-                ("000660", WB_SPLIT_DATE, "000660:split:2024-01-08", "split", 2.0, True),
-                ("005930", date(2024, 1, 3), "005930:capred:2024-01-03", "capred", 1.0, False),
-                # S06-2 KRX 기준가 원천 행 — corp_event 에 없어 유형을 모른다. 방향은
-                # share_factor 가 정한다(서버 factor_ok 55행이 이 유형이다).
-                ("036220", date(2024, 1, 9), "036220:krx_base:2024-01-09",
-                 "unknown_krx", 0.5, True),
-                *(extra_factor_rows or []),
-            ],
-            apply_dates=factor_dates,
-            available_dates=[d for d in factor_dates if d is not None],
+            [row for row, _, _, _ in factors],
+            apply_dates=[row[1] for row, _, _, _ in factors],
+            available_dates=[available for _, available, _, _ in factors],
+            factor_sources=[source for _, _, source, _ in factors],
+            apply_bases=[basis for _, _, _, basis in factors],
         ),
         year_column="effective_date",
     )

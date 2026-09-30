@@ -8,9 +8,10 @@ import {
   DATE_INPUT_MINIMUM,
   type RunEnvironmentFieldError,
 } from "./run-environment";
-import type {
-  BacktestRunSettingsError,
-  BacktestRunSettingsResult,
+import {
+  OOS_START_FIELD,
+  type BacktestRunSettingsError,
+  type BacktestRunSettingsResult,
 } from "./run-settings";
 
 /**
@@ -44,8 +45,8 @@ const OPTION_FIELD: Record<
 > = {
   initial_cash: "initial_cash",
   annualization_days: "annualization_days",
-  oos_out_of_range: "oos_start",
-  oos_incomplete: "oos_start",
+  oos_out_of_range: OOS_START_FIELD,
+  oos_incomplete: OOS_START_FIELD,
 };
 
 /** 칸 옆 오류 문장. 범위에는 스키마의 표시 단위를 붙인다(예: "0bp 이상이어야 합니다."). */

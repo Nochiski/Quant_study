@@ -4,7 +4,7 @@ import {
   useStartBacktest,
   type BacktestRunSpec,
 } from "../../../entities/backtest";
-import { ApiRequestError } from "../../../shared/api";
+import { ApiRequestError, failureReason } from "../../../shared/api";
 import { useNavigate, useRouter } from "../../../shared/lib/router";
 import {
   decideBacktestSource,
@@ -92,6 +92,24 @@ export const useRunBacktest = (
       ),
     [executionPlans, state],
   );
+  // 실행 버튼이 보낼 요청. 실행 전 시도 미리 계산(검증 랩 V5-05)도 같은 요청을 묻는다.
+  const request = useMemo<BacktestRunSpec | null>(
+    () =>
+      decision.kind === "blocked" || options === null
+        ? null
+        : decision.kind === "saved_revision"
+          ? { ...options, strategy_source: decision.reference }
+          : {
+              ...options,
+              strategy_source: decision.draft,
+              // 저장된 전략을 고친 초안도 그 전략 계열의 시도로 센다(검증 랩 spec D2). 저장 리비전은
+              // backend가 리비전에서 계열을 알아서 싣지 않는다.
+              ...(state.strategyId === null
+                ? {}
+                : { lineage_strategy_id: state.strategyId }),
+            },
+    [decision, options, state.strategyId],
+  );
   const status =
     ownedStatus !== null && sameOwner(ownedStatus, currentOwner)
       ? ownedStatus.status
@@ -107,8 +125,7 @@ export const useRunBacktest = (
       return;
     }
     if (
-      decision.kind === "blocked" ||
-      options === null ||
+      request === null ||
       status.kind === "starting" ||
       isPending ||
       activeRequest.current !== null
@@ -125,13 +142,7 @@ export const useRunBacktest = (
     setOwnedStatus({ ...snapshot, status: { kind: "starting" } });
     let runId: string;
     try {
-      const accepted = await mutateAsync({
-        ...options,
-        strategy_source:
-          decision.kind === "saved_revision"
-            ? decision.reference
-            : decision.draft,
-      });
+      const accepted = await mutateAsync(request);
       runId = accepted.run.run_id;
     } catch (error) {
       if (
@@ -142,14 +153,7 @@ export const useRunBacktest = (
           ...snapshot,
           status: {
             kind: "failed",
-            // `ApiRequestError.message` 는 개발자 진단(`API request failed: …`)이라 쓰지 않는다. 서버가
-            // 보낸 사유만 싣고, 응답이 없던 실패(네트워크 등)는 그 오류 문장을 진단으로 남긴다.
-            detail:
-              error instanceof ApiRequestError
-                ? (error.detail ?? error.diagnostic ?? null)
-                : error instanceof Error
-                  ? error.message
-                  : String(error),
+            detail: failureReason(error),
             code:
               error instanceof ApiRequestError ? (error.code ?? null) : null,
             field:
@@ -181,12 +185,11 @@ export const useRunBacktest = (
       params: { runId },
     });
   }, [
-    decision,
     isPending,
     mutateAsync,
     navigate,
-    options,
     optionsKey,
+    request,
     router,
     state,
     status,
@@ -195,6 +198,8 @@ export const useRunBacktest = (
   return {
     run,
     decision,
+    /** 실행 버튼이 보낼 요청. 실행할 수 없으면 null. */
+    request,
     status,
     /** 결정이 닫혀 있지만 팩터 계획 조회가 아직 끝나지 않았다(`isBacktestSettling`). */
     settling: isBacktestSettling(decision, executionPlans),

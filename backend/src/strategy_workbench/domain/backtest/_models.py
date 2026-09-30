@@ -25,7 +25,7 @@ from strategy_workbench.domain.strategy.facade.provenance import (
     StrategyProvenance,
     StrategySource,
 )
-from strategy_workbench.domain.strategy.facade.specification import StrategySpec
+from strategy_workbench.domain.strategy.facade.specification import ParameterValue, StrategySpec
 
 
 class ExecutionCore(StrEnum):
@@ -98,6 +98,17 @@ class ParticipationBasis(StrEnum):
     ADV20 = "adv20"
 
 
+class ImpactModel(StrEnum):
+    """체결가에 얹는 시장충격 모델(spec D7).
+
+    `fixed_bps` 는 체결가의 `slippage_bps` 를, `sqrt` 는 `impact_coefficient` × 일간 변동성 ×
+    √(체결 수량 / ADV)(`_impact.py`)를 뜻한다. `sqrt` 에서는 `slippage_bps` 를 쓰지 않는다.
+    """
+
+    FIXED_BPS = "fixed_bps"
+    SQRT = "sqrt"
+
+
 # 실행 설정 수치 필드의 범위·단위·설명 키. 1.1 까지는 전략 제약 카탈로그의 `/execution/*` 행이
 # SoT 였고 여기서 필드 이름으로 다시 걸어 썼지만, 1.2 가 `execution` 섹션을 지우면서 그 행들이
 # 전략 문서 포인터를 잃었다. 그래서 owner 를 실행 설정이 있는 이 노드로 옮긴다(P2-03 결정 항목).
@@ -142,6 +153,19 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         example=10.0,
         description_key="run_environment.contract.slippage_bps",
         message="슬리피지는 0 이상의 숫자여야 합니다.",
+    ),
+    # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다. 상한 10 은 그
+    # 범위를 넉넉히 덮고 오타 입력(100·1000)을 막는다.
+    "impact_coefficient": ScalarConstraint(
+        pointer="/impact_coefficient",
+        code="run_environment.cost",
+        stage=AppliedStage.EXECUTION,
+        unit=ContractUnit.RATIO,
+        minimum=0.0,
+        maximum=10.0,
+        example=1.0,
+        description_key="run_environment.contract.impact_coefficient",
+        message="가격 충격 계수는 0 이상 10 이하의 숫자여야 합니다.",
     ),
     # `sell_tax` 가 `custom` 일 때만 값이 있다(없으면 `None`). 범위 검사는 값이 있을 때만 한다.
     "sell_tax_bps": ScalarConstraint(
@@ -216,6 +240,8 @@ class RunEnvironment:
     participation_basis: ParticipationBasis = ParticipationBasis.SESSION_VOLUME
     fee_bps: float = 15.0
     slippage_bps: float = 10.0
+    impact_model: ImpactModel = ImpactModel.FIXED_BPS
+    impact_coefficient: float = 1.0
     sell_tax: SellTax = SellTax.KRX_STATUTORY
     sell_tax_bps: float | None = None
     missing: MissingPolicy = DEFAULT_MISSING_POLICY
@@ -294,6 +320,15 @@ class BacktestRunSpec:
     benchmark_security_id: str | None = None
     annualization_days: int = 252
     metric_windows: tuple[MetricWindow, ...] = ()
+    # 전략 파라미터 값(parameter_id → 값, 검증 랩 spec D4). 빠진 파라미터는 문서 기본값이다.
+    # 접수가 `resolve_parameter_values` 로 선언된 파라미터 전부를 선언 타입 값으로 채워 실행 spec 에
+    # 박으므로 실행 지문과 매니페스트는 해소된 값을 싣는다. 저장 리비전의 provenance·`spec_hash` 는
+    # 그대로다.
+    parameter_values: dict[str, ParameterValue] = field(default_factory=dict)
+    # 인라인 초안이 속한 계열(편집 중인 전략의 `strategy_id`, 검증 랩 spec D2). 저장 리비전
+    # 실행은 리비전의 전략이 계열이라 비워 둔다. 출처 정보라 `strategy_source` 처럼 실행 지문에
+    # 넣지 않는다.
+    lineage_strategy_id: str | None = None
 
     def __post_init__(self) -> None:
         # NaN 은 `<= 0` 비교를 빠져나가고 inf 는 양수라, 유한성을 따로 보지 않으면 접수된 뒤
@@ -492,15 +527,18 @@ class RunProgressEvent:
 
 
 # run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이고,
-# 마지막은 분류되지 않은 내부 오류다. 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다
-# (시작 422 의 `backtest.error.*` 와 namespace 가 다르다 — 툴바는 서버 detail 을 그대로 쓰는
-# 화면이라 키를 합치면 detail 이 덮인다).
+# `equity_wiped_out` 은 전략이 자본을 다 잃어 엔진이 멈춘 실행, `internal` 은 분류되지 않은 내부
+# 오류, `interrupted` 는 서버가 다시 시작돼 끝나지 못한 run 이다(검증 랩 spec D3). 프론트는 이
+# 어휘를 `backtest.run.error.<code>` 로 번역한다 (시작 422 의 `backtest.error.*` 와 namespace 가
+# 다르다 — 툴바는 서버 detail 을 그대로 쓰는 화면이라 키를 합치면 detail 이 덮인다).
 RunFailureCode = Literal[
     "portfolio.strategy.invalid",
     "portfolio.data.unavailable",
     "portfolio.raw_observation.invalid",
     "backtest.run.invalid",
+    "backtest.run.equity_wiped_out",
     "backtest.run.internal",
+    "backtest.run.interrupted",
 ]
 RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
 

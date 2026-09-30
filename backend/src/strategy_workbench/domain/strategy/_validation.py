@@ -50,6 +50,7 @@ from ._models import (
     WeightingMethod,
     composite_factors,
     inverse_risk_factor_id,
+    parameter_value_allowed,
 )
 from ._promotion import PROMOTION_NODE_PREFIX, is_reserved_node_id, promotion_node_ids
 
@@ -669,7 +670,7 @@ def validate_strategy(
                         "strategy.parameter.bounds", path, "최솟값은 최댓값 이하여야 합니다."
                     )
                 )
-            if not parameter.minimum <= parameter.default <= parameter.maximum:
+            if not parameter_value_allowed(parameter, parameter.default):
                 issues.append(
                     semantic_issue(
                         "strategy.parameter.default", path, "기본값은 탐색 범위 안에 있어야 합니다."
@@ -682,7 +683,7 @@ def validate_strategy(
                     )
                 )
         elif isinstance(parameter, ChoiceParameter):
-            if not parameter.choices or parameter.default not in parameter.choices:
+            if not parameter_value_allowed(parameter, parameter.default):
                 issues.append(
                     semantic_issue(
                         "strategy.parameter.choice",

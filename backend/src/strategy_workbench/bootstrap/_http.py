@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 from strategy_workbench.adapters.inbound.http_api.facade.api import create_app
+from strategy_workbench.application.backtest_run.facade.runs import DEFAULT_RUN_SLOTS
 
 from ._assistant import (
     DEFAULT_ASSISTANT_SETTINGS,
@@ -15,10 +16,14 @@ DEFAULT_STRATEGY_REPOSITORY_PATH = (
     Path(__file__).resolve().parents[3] / ".local" / "strategy-revisions.sqlite3"
 )
 DEFAULT_ASSISTANT_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "assistant.sqlite3"
+DEFAULT_RESEARCH_DB_PATH = Path(__file__).resolve().parents[3] / ".local" / "research.sqlite3"
 STRATEGY_REPOSITORY_PATH_ENV = "STRATEGY_WORKBENCH_DB_PATH"
+RESEARCH_DB_PATH_ENV = "STRATEGY_WORKBENCH_RESEARCH_DB_PATH"
 EQUITY_ADAPTER_ENV = "STRATEGY_WORKBENCH_EQUITY_ADAPTER"
 EQUITY_ROOT_ENV = "STRATEGY_WORKBENCH_EQUITY_ROOT"
 ALLOWED_ORIGINS_ENV = "STRATEGY_WORKBENCH_ALLOWED_ORIGINS"
+RUN_SLOTS_ENV = "STRATEGY_WORKBENCH_RUN_SLOTS"
+E2E_TRIAL_HOLD_SECONDS_ENV = "STRATEGY_WORKBENCH_E2E_TRIAL_HOLD_SECONDS"
 DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = ("http://localhost:5173",)
 ASSISTANT_DB_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_DB_PATH"
 ASSISTANT_SECRETS_PATH_ENV = "STRATEGY_WORKBENCH_ASSISTANT_SECRETS_PATH"
@@ -29,6 +34,39 @@ ASSISTANT_FAKE_PROVIDER_ENV = "STRATEGY_WORKBENCH_ASSISTANT_FAKE_PROVIDER"
 def runtime_strategy_repository_path() -> Path:
     configured = os.environ.get(STRATEGY_REPOSITORY_PATH_ENV)
     return Path(configured).expanduser() if configured else DEFAULT_STRATEGY_REPOSITORY_PATH
+
+
+def runtime_research_db_path() -> Path:
+    """실행 기록 DB(검증 랩 spec D3). 전략 DB 의 불변 트리거와 섞지 않으려고 파일을 나눈다."""
+    configured = os.environ.get(RESEARCH_DB_PATH_ENV)
+    return Path(configured).expanduser() if configured else DEFAULT_RESEARCH_DB_PATH
+
+
+def runtime_run_slots() -> int:
+    """동시 실행 슬롯 수(검증 랩 spec D6). 없으면 실행 유스케이스의 기본값이다."""
+    configured = os.environ.get(RUN_SLOTS_ENV, "").strip()
+    if not configured:
+        return DEFAULT_RUN_SLOTS
+    if not configured.isdigit() or int(configured) < 1:
+        raise ValueError(
+            f"run slots env var must be a positive integer — {RUN_SLOTS_ENV}={configured!r}"
+        )
+    return int(configured)
+
+
+def runtime_trial_hold_seconds() -> float:
+    """e2e 훅: 실험 trial run 을 붙잡아 둘 초(검증 랩 spec D6). 없거나 0 이면 붙잡지 않는다."""
+    configured = os.environ.get(E2E_TRIAL_HOLD_SECONDS_ENV, "").strip()
+    try:
+        seconds = float(configured) if configured else 0.0
+    except ValueError:
+        seconds = -1.0
+    if not 0 <= seconds < float("inf"):
+        raise ValueError(
+            "trial hold env var must be a non-negative number of seconds — "
+            f"{E2E_TRIAL_HOLD_SECONDS_ENV}={configured!r}"
+        )
+    return seconds
 
 
 def runtime_equity_selection() -> tuple[str, Path | None]:
@@ -97,6 +135,9 @@ def runtime_assistant_settings() -> AssistantSettings:
 def build_http_app(
     *,
     strategy_repository_path: str | Path | None = None,
+    research_db_path: str | Path | None = None,
+    run_slots: int = DEFAULT_RUN_SLOTS,
+    trial_hold_seconds: float = 0.0,
     equity_adapter: str = "mock",
     equity_root: Path | None = None,
     assistant: AssistantSettings = DEFAULT_ASSISTANT_SETTINGS,
@@ -104,6 +145,9 @@ def build_http_app(
 ):  # return type is inferred from the FastAPI factory at this composition root
     container = build_container(
         strategy_repository_path=strategy_repository_path,
+        research_db_path=research_db_path,
+        run_slots=run_slots,
+        trial_hold_seconds=trial_hold_seconds,
         equity_adapter=equity_adapter,
         equity_root=equity_root,
         assistant=assistant,
@@ -118,6 +162,7 @@ def build_http_app(
         portfolio_design=container.portfolio_design,
         strategy_traces=container.strategy_traces,
         backtest_runs=container.backtest_runs,
+        experiments=container.experiments,
         assistant_profiles=container.assistant_profiles,
         assistant_chat=container.assistant_chat,
         assistant_turns=container.assistant_turns,
@@ -130,6 +175,9 @@ def build_runtime_http_app():
     adapter, root = runtime_equity_selection()
     return build_http_app(
         strategy_repository_path=runtime_strategy_repository_path(),
+        research_db_path=runtime_research_db_path(),
+        run_slots=runtime_run_slots(),
+        trial_hold_seconds=runtime_trial_hold_seconds(),
         equity_adapter=adapter,
         equity_root=root,
         assistant=runtime_assistant_settings(),

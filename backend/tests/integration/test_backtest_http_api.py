@@ -24,11 +24,19 @@ from strategy_workbench.adapters.outbound.engine_portfolio.facade.bridge import 
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteBacktestRunRepository,
+)
 from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
     BacktestDataPort,
 )
-from strategy_workbench.application.backtest_run.facade.runs import BacktestRunService
+from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestRunService,
+    BacktestRunSpec,
+    InvalidBacktestRunError,
+    rejection_code,
+)
 from strategy_workbench.application.portfolio_design.facade.design import (
     EngineCapabilityIssue,
     EngineCompatibility,
@@ -66,6 +74,9 @@ class _CommitBarrierStore:
                 raise TimeoutError("artifact commit test barrier was not released")
         return self._delegate.commit(result)
 
+    def load(self, run_id: str, *, sha256: str) -> BacktestRunResult:
+        return self._delegate.load(run_id, sha256=sha256)
+
     def discard(self, run_id: str) -> None:
         self.discarded.append(run_id)
         self._delegate.discard(run_id)
@@ -92,6 +103,7 @@ def _backtests_with_raw_load_barrier(
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
     return backtests, barrier
@@ -188,6 +200,8 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
             "participation_basis": "session_volume",
             "fee_bps": 15.0,
             "slippage_bps": 10.0,
+            "impact_model": "fixed_bps",
+            "impact_coefficient": 1.0,
             "sell_tax": "krx_statutory",
             "sell_tax_bps": None,
             "missing": "drop",
@@ -195,6 +209,9 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
         "annualization_days": 252,
         "initial_cash": 100_000_000.0,
         "strategy_source": None,
+        # 원본 요청이라 파라미터 값은 해소 전(비어 있음)이다. 해소 값은 매니페스트가 싣는다.
+        "parameter_values": {},
+        "lineage_strategy_id": None,
     }
 
     not_ready = client.get(f"/api/v1/backtests/{run_id}/result")
@@ -208,15 +225,15 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
     assert len(result["manifest"]["run_fingerprint"]) == 64
     assert result["manifest"]["run_spec"]["strategy"] == _run_body(client)["strategy"]
     assert result["manifest"]["run_spec"]["benchmark_security_id"] == "005930"
-    assert result["manifest"]["metric_registry_version"] == "metric-registry-v4"
+    assert result["manifest"]["metric_registry_version"] == "metric-registry-v5"
     assert {item["code"] for item in result["manifest"]["warnings"]} == {
         "corporate_action_feed_empty",
         "mock_equity_data",
     }
     # 경고 문장은 backend가 한글로 완성한다(SoT 경고 문장 행, 이슈 #229).
     assert all(re.search("[가-힣]", item["message"]) for item in result["manifest"]["warnings"])
-    assert len(result["metric_definitions"]) == 23
-    assert len(result["metrics"]) == 46
+    assert len(result["metric_definitions"]) == 24
+    assert len(result["metrics"]) == 48
     assert {item["scope"] for item in result["metrics"]} == {
         "full",
         "out_of_sample",
@@ -263,6 +280,7 @@ def test_cancel_accepted_during_artifact_commit_wins_and_exact_request_replays(
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         barrier,
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: next(run_ids),
     )
     client = TestClient(_app_with_backtests(container, backtests))
@@ -441,6 +459,7 @@ def test_cancel_first_observed_by_a_progress_callback_ends_cancelled(tmp_path: P
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: run_id,
     )
     client = TestClient(_app_with_backtests(container, backtests))
@@ -566,15 +585,20 @@ def test_engine_incompatible_strategy_is_rejected_at_start_with_the_issue_list(
         cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
+        run_repository=SQLiteBacktestRunRepository(),
         new_id=lambda: "must-not-be-accepted",
     )
     client = TestClient(_app_with_backtests(container, backtests))
 
-    response = client.post("/api/v1/backtests", json=_run_body(client, "python"))
+    body = _run_body(client, "python")
+    response = client.post("/api/v1/backtests", json=body)
+    # 실험 기반 검사(`admit`)도 시작과 같은 preflight 판정·코드로 거절하고 접수하지 않는다(V3-03).
+    with pytest.raises(InvalidBacktestRunError) as admitted:
+        backtests.admit(TypeAdapter(BacktestRunSpec).validate_python(body))
 
     assert response.status_code == 422, response.text
     detail = response.json()["detail"]
-    assert detail["code"] == "backtest.run.invalid"
+    assert detail["code"] == rejection_code(admitted.value) == "backtest.run.invalid"
     assert "feature.unsupported=not_implemented (no kernel)" in detail["message"]
     assert client.get("/api/v1/backtests/must-not-be-accepted").status_code == 404
 
@@ -606,6 +630,33 @@ def test_tape_hash_that_differs_from_the_accepted_provenance_fails_the_run(
     assert "differs from the accepted strategy provenance" in state["error"]
     assert "provenance='" + "0" * 64 + "'" in state["error"]
     assert client.get(f"/api/v1/backtests/{run_id}/result").status_code == 409
+
+
+def test_equity_wipeout_ends_the_run_with_its_own_failure_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """자본 잠식으로 멈춘 실행은 서버 오류(`backtest.run.internal`)가 아니라 전용 코드로 끝난다.
+
+    mock 데이터로 파산 경로를 만들기 어려워 커널 `run` 이 잠식 예외를 던지게 한다(#285). 여기서는
+    어댑터가 커널 예외를 포트 어휘로 옮기는지를 본다. 실제 잠식 판정은
+    `tests/test_rust_driver.py` 가 두 코어에서 지킨다.
+    """
+    from backtest_engine import BacktestEngine
+    from backtest_engine.errors import EquityWipedOut
+
+    def wiped_out(self: BacktestEngine, *args: object, **kwargs: object) -> None:
+        raise EquityWipedOut("equity fell to zero or below at session close — equity=0.0")
+
+    monkeypatch.setattr(BacktestEngine, "run", wiped_out)
+    client = TestClient(build_http_app())
+
+    accepted = client.post("/api/v1/backtests", json=_run_body(client))
+
+    assert accepted.status_code == 202, accepted.text
+    state = _wait(client, accepted.json()["run"]["run_id"])
+    assert state["status"] == "failed", state
+    assert state["error_code"] == "backtest.run.equity_wiped_out"
+    assert "equity=0.0" in state["error"]
 
 
 @pytest.mark.parametrize(
@@ -692,7 +743,10 @@ def test_run_error_masks_server_paths_but_keeps_urls_and_units(raw: str, masked:
 
 
 def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() -> None:
-    """`_failure_code` 산출 집합 == `RunFailureCode` 어휘, 그중 422 코드는 계약 Literal 과 같다."""
+    """`_failure_code` 산출 집합 + `interrupted` == `RunFailureCode` 어휘.
+
+    그중 422 코드는 계약 Literal 과 같다.
+    """
     from typing import get_args, get_type_hints
 
     from strategy_workbench.adapters.inbound.http_api._backtest_contract import (
@@ -707,6 +761,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         InvalidBacktestRunError,
         _failure_code,
     )
+    from strategy_workbench.application.backtest_run.facade.ports import EquityWipedOutError
     from strategy_workbench.application.portfolio_design.facade.design import (
         InvalidPortfolioRequestError,
         PortfolioSnapshotMismatchError,
@@ -719,9 +774,11 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         _failure_code(RawObservationUnavailableError(DataLoadStatus.NO_DATA, None)),
         _failure_code(PortfolioSnapshotMismatchError(expected="a", actual="b")),
         _failure_code(InvalidBacktestRunError("x")),
+        _failure_code(EquityWipedOutError("x")),
         _failure_code(RuntimeError("x")),
     }
-    assert produced == RUN_FAILURE_CODES
+    # `interrupted` 는 예외가 아니라 재시작 때 서비스가 닫으며 붙인다(검증 랩 spec D3).
+    assert produced == RUN_FAILURE_CODES - {"backtest.run.interrupted"}
 
     def contract_code(detail_type: type) -> str:
         # future annotations 라 필드 타입이 문자열이다 — 평가해서 Literal 인자를 꺼낸다.
@@ -733,7 +790,11 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         contract_code(PortfolioDataUnavailableDetail),
         contract_code(PortfolioRawObservationInvalidDetail),
         contract_code(BacktestRunInvalidDetail),
-    } == RUN_FAILURE_CODES - {"backtest.run.internal"}
+    } == RUN_FAILURE_CODES - {
+        "backtest.run.internal",
+        "backtest.run.equity_wiped_out",
+        "backtest.run.interrupted",
+    }
 
 
 def test_python_reference_and_rust_core_have_golden_result_and_metric_parity() -> None:
@@ -812,6 +873,7 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
         "backtest.run.field_invalid",
         "backtest.run.environment_required",
         "backtest.run.research_window_violation",
+        "backtest.run.parameter_invalid",
         "backtest.strategy.requires_upgrade",
         "portfolio.strategy.invalid",
     }
@@ -823,6 +885,15 @@ def test_start_backtest_openapi_declares_every_actual_preflight_error() -> None:
     assert missing_environment.status_code == 422, missing_environment.text
     assert missing_environment.json()["detail"]["code"] == "backtest.run.environment_required"
     TypeAdapter(Backtest422Response).validate_python(missing_environment.json())
+
+    # 문서에 없는 파라미터 값은 어느 파라미터인지 싣고 거절한다(검증 랩 spec D4).
+    unknown_parameter = _run_body(client, "python")
+    unknown_parameter["parameter_values"] = {"missing": 1}
+    parameter_response = client.post("/api/v1/backtests", json=unknown_parameter)
+    assert parameter_response.status_code == 422, parameter_response.text
+    assert parameter_response.json()["detail"]["code"] == "backtest.run.parameter_invalid"
+    assert parameter_response.json()["detail"]["parameter_id"] == "missing"
+    TypeAdapter(Backtest422Response).validate_python(parameter_response.json())
 
     semantic = _run_body(client, "python")
     semantic["strategy"]["portfolio"]["weighting"] = "risk"
@@ -886,6 +957,8 @@ def test_out_of_range_run_environment_is_rejected_at_accept_time() -> None:
         "participation_basis": "session_volume",
         "fee_bps": 15.0,
         "slippage_bps": 10.0,
+        "impact_model": "fixed_bps",
+        "impact_coefficient": 1.0,
         "sell_tax": "krx_statutory",
         "sell_tax_bps": None,
         "missing": "drop",

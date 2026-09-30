@@ -288,7 +288,7 @@ export const StrategiesPage = () => {
     });
 
   return (
-    <section className="data-list-page" aria-labelledby="strategies-title">
+    <section className="page data-list-page" aria-labelledby="strategies-title">
       <header className="data-list-page__header">
         <div>
           <h1 id="strategies-title">{t("history.strategies.title")}</h1>

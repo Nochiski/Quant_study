@@ -185,7 +185,7 @@ export const useCompileDocument = (
           dispatch({ type: "compiled", version, outcome });
           if (forcedNow) setForced(null); // the forced compile is consumed by its reply
         })
-        .catch((error: unknown) => {
+        .catch(() => {
           if (controller.signal.aborted) return;
           if (forcedNow) setForced(null);
           // Transport failure: the text stays "structurally-valid" and is retried on the next
@@ -205,10 +205,8 @@ export const useCompileDocument = (
                   kind: "capability",
                   severity: "error",
                   pointer: "",
-                  message: t("problems.compileUnavailable").replace(
-                    "{detail}",
-                    error instanceof Error ? error.message : String(error),
-                  ),
+                  // 개발자 진단(`API request failed: …`)을 문제 목록에 싣지 않는다(#270).
+                  message: t("problems.compileUnavailable"),
                   range: null,
                 },
               ],

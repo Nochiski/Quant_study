@@ -23,6 +23,7 @@ import {
   mustReplace,
   openEditor,
   replaceSource,
+  runSettingsInputs,
   saveAndWaitForRevision,
 } from "../workbench-helpers";
 
@@ -48,7 +49,7 @@ test(
 
     // 실행 설정(기간·유니버스)은 전략 문서 밖에 있고 사용자가 정해야 실행이 열린다(P3-02).
     await fillRunEnvironment(page, { via: "band" });
-    const settingsToggle = page.getByLabel("실행 설정 열기");
+    const settingsToggle = runSettingsInputs(page).toggle;
     await settingsToggle.click();
     await page
       .getByRole("textbox", { name: /^벤치마크 종목 ID/ })
@@ -77,7 +78,7 @@ test(
       "샤프 비율 오차 샤프 비율이 운만으로 얼마나 달라질 수 있는지입니다.",
     );
     await expect(cell("Sharpe standard error")).toContainText(
-      "샤프 ± 이 값의 2배가 대략 95% 범위이고, 독립·정규 근사라 실제로는 더 클 수 있습니다.",
+      "샤프 ± 이 값의 2배가 대략 95% 범위이고, 날마다 독립이라고 본 근사라 실제로는 더 클 수 있습니다.",
     );
     await expect(cell("Maximum drawdown")).toContainText(
       "최대 낙폭 가장 높았던 때에서 가장 많이 떨어진 폭입니다.",

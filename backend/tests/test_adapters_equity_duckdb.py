@@ -49,6 +49,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.backtest_run.facade.ports import BacktestDataQuery
 from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
 from strategy_workbench.application.factor_research.facade.research import (
+    FactorCatalogQuery,
     FactorPreviewRequest,
     FactorResearchService,
 )
@@ -74,7 +75,10 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelResult,
     UniverseHistoryQuery,
 )
-from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
+from strategy_workbench.domain.factor.facade.registry import (
+    FactorAvailability,
+    build_default_factor_registry,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
     FactorGraph,
@@ -229,7 +233,7 @@ def test_field_contract_splits_the_snapshot_but_not_the_ledger_or_the_root_path(
     )
     registry = build_default_factor_registry()
     keys = [
-        FactorResearchService(registry, adapter, adapter).preview(request).cache_key
+        FactorResearchService(registry, adapter, adapter, adapter).preview(request).cache_key
         for adapter in (current, older)
     ]
     assert [key.data_snapshot_id for key in keys] == [
@@ -1036,6 +1040,26 @@ def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
     assert catalog == adapter.resolve_factor_fields(field_ids).fields
     assert catalog, "필드가 하나도 없으면 compile 이 모든 필드를 없다고 본다"
     assert {field.value_type for field in catalog} == {NodeValueType.NUMERIC_SERIES}
+
+
+def test_factor_catalog_does_not_offer_a_factor_whose_field_the_ledger_lacks(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """#370(도메인 리뷰 A DR-A-02): 원장에 없는 필드(`UNSUPPORTED_FIELDS`)를 읽는 기본 graph 는
+    `implemented` 가 아니다. 편집기 예시 조각과 AI 도구가 실데이터에서 바로 compile 오류가 나는
+    팩터를 권하지 않는다. 가용성은 compile 이 읽는 필드 계약(`factor_field_catalog`)으로 판정한다.
+    """
+    service = FactorResearchService(build_default_factor_registry(), adapter, adapter, adapter)
+
+    def catalog(availability: FactorAvailability) -> set[str]:
+        query = FactorCatalogQuery(availability=(availability,), page_size=100)
+        return {definition.factor_id for definition in service.catalog(query).factors}
+
+    assert catalog(FactorAvailability.UNAVAILABLE) == {
+        "short.short_balance_ratio",
+        "event.earnings_surprise",
+    }
+    assert len(catalog(FactorAvailability.IMPLEMENTED)) == 5
 
 
 # ── BacktestDataPort ──────────────────────────────────────────────────────────

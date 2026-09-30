@@ -5,4 +5,11 @@
 # 적지 않게 한다.
 # domain.strategy: 실행 계획 설명이 compile 이 붙인 승격 노드를 표식으로 내보낸다(P3-01, Phase 2
 # 감사 #13). 승격 노드 이름 규칙의 owner 는 `domain/strategy/_promotion.py` 하나다.
-DEPENDS_ON: tuple[str, ...] = ("domain.backtest", "domain.factor", "domain.strategy")
+# application.strategy_authoring: 카탈로그 가용성을 compile 과 같은 필드 계약 port
+# (`FieldCatalogPort`)로 판정한다(#370). port 만 쓰고 서비스는 쓰지 않는다.
+DEPENDS_ON: tuple[str, ...] = (
+    "application.strategy_authoring",
+    "domain.backtest",
+    "domain.factor",
+    "domain.strategy",
+)

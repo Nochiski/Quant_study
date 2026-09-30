@@ -40,6 +40,7 @@ from strategy_workbench.domain.factor.facade.registry import (
     FactorAvailability,
     FactorCategory,
     build_default_factor_registry,
+    factor_availability,
 )
 from strategy_workbench.domain.factor.facade.validation import (
     FACTOR_GRAPH_CODES,
@@ -88,6 +89,26 @@ def test_catalog_history_of_every_implemented_factor_is_its_graph_minimum() -> N
 
     assert len(implemented) == 7
     assert mismatched == {}
+
+
+def test_an_implemented_factor_is_unavailable_without_every_field_its_graph_reads() -> None:
+    """#370: 가용성은 연결된 어댑터가 기본 graph 의 필드를 주는지로 판정한다.
+
+    신용잔고 변화 팩터의 기본 graph 는 신용잔고와 상장주식수 두 필드를 읽는다. 하나라도 없으면
+    compile 이 필드 누락으로 막으므로 편집기·AI 가 예시로 권하면 안 된다.
+    """
+    registry = build_default_factor_registry()
+    credit = registry.get("credit.margin_balance_change_20d")
+    both = {"credit.margin_balance", "price.shares_outstanding"}
+
+    assert factor_availability(credit, both) is FactorAvailability.IMPLEMENTED
+    assert factor_availability(credit, {"credit.margin_balance"}) is FactorAvailability.UNAVAILABLE
+    assert factor_availability(credit, ()) is FactorAvailability.UNAVAILABLE
+    # 기본 graph 가 없는 카탈로그 팩터는 어댑터와 무관하게 정의 값 그대로다.
+    catalog_only = registry.get("price.momentum_6_1")
+    assert factor_availability(catalog_only, ()) is FactorAvailability.CATALOG_ONLY
+    # 정의는 정적 값만 갖는다 — `unavailable` 은 어댑터를 본 판정만 낸다.
+    assert FactorAvailability.UNAVAILABLE not in {item.availability for item in registry.all()}
 
 
 def test_factor_catalog_document_tracks_every_registry_identifier() -> None:

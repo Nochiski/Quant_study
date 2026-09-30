@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from strategy_workbench.application.strategy_authoring.facade.ports import FieldCatalogPort
 from strategy_workbench.domain.backtest.facade.environment import (
     DEFAULT_MISSING_POLICY,
     ResearchWindowViolationError,
@@ -80,13 +81,17 @@ class FactorResearchService:
         registry: FactorRegistry,
         metadata_source: FactorMetadataPort,
         observation_source: FactorObservationPort,
+        field_catalog: FieldCatalogPort,
     ) -> None:
         self._registry = registry
         self._metadata_source = metadata_source
         self._observation_source = observation_source
+        # 연결된 어댑터의 필드 계약. compile 이 필드 누락을 판정하는 목록과 같다 — 매 호출 읽는다.
+        self._field_catalog = field_catalog
 
     def catalog(self, query: FactorCatalogQuery | None = None) -> FactorCatalog:
-        return build_factor_catalog(self._registry, query or FactorCatalogQuery())
+        provided = {field.field_id for field in self._field_catalog.factor_field_catalog()}
+        return build_factor_catalog(self._registry, query or FactorCatalogQuery(), provided)
 
     def validate(self, request: FactorGraphRequest) -> FactorGraphValidation:
         validation, _fields = self._validate_request(request)

@@ -87,5 +87,14 @@ test(
       .filter({ hasText: "credit.margin_balance" });
     // 열: 종목 · 필드 · 값 · 공개일 · 상태
     await expect(credit.getByRole("cell").nth(4)).toHaveText(/원장이 가림$/u);
+
+    // 다음 날(01-12): 잔고 입력은 값으로 보이지만 2세션 차이 창이 01-11 의 가린 칸을 건너므로 여전히
+    // "원장이 가림"이다. 옛 화면이 "입력 없음"으로 보이던 바로 그 칸이다(#337·#350, #389 리뷰 P3-3).
+    await page.getByLabel("기준일").fill("2024-01-12");
+    await page.getByRole("button", { name: "추적 실행" }).click();
+    await page.getByRole("tab", { name: "선택 노드" }).click();
+    await expect(change.getByRole("cell").nth(3)).toHaveText(/^balance=\d/u);
+    await expect(change.getByRole("cell").nth(4)).toHaveText("—");
+    await expect(change.getByRole("cell").nth(5)).toHaveText(/원장이 가림$/u);
   },
 );

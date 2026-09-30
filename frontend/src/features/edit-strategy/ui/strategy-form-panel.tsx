@@ -23,17 +23,20 @@ import {
   type FormSection,
 } from "../model/form-projection";
 import type { CanonicalSnippet } from "../model/canonical-snippets";
+import { coversPointer } from "../model/diagnostic-navigation";
+import type { DocumentReference } from "../model/document-references";
 import type { SummaryNames } from "../model/pipeline-projection";
 import type { DocumentDiagnostic } from "../model/document-state";
 import {
+  addItemOperation,
   addPresetItemOperation,
   defaultFromValueOf,
   draftOf,
   itemKinds,
   itemSection,
-  listAddition,
   parseDraft,
-  placeholderOf,
+  removalBlockers,
+  removeItemOperation,
   resetOperation,
   unsetOperation,
   type InvalidDraft,
@@ -46,7 +49,6 @@ import {
   FORM_OWNER,
   NO_FOCUS,
   useFieldCommit,
-  useItemRemoval,
   type CommitPlanner,
 } from "../model/use-field-editing";
 import { useRevealSelection } from "../model/use-reveal-selection";
@@ -339,7 +341,8 @@ const FormListSectionView = ({
   const kinds = schema === null ? null : itemKinds(schema, section);
   const [kind, setKind] = useState<string>("");
   const chosenKind = kinds === null ? null : kind || (kinds[0] ?? "");
-  const addition = listAddition(schema, section, chosenKind, transactions.settling);
+  const addOperation =
+    schema === null ? null : addItemOperation(schema, section, chosenKind);
   const presets = catalogSnippets.filter(
     (snippet) =>
       snippet.kind === "factor" && snippet.sectionKey === section.key,
@@ -359,8 +362,17 @@ const FormListSectionView = ({
     selectedPointer,
     revealSignal,
   );
+  // 추가·preset·삭제(위치 pointer 연산)만 직전 편집의 parse가 따라올 때까지 잠근다(P5-03 리뷰 DEFECT-133-01;
+  // 항목 필드·Graph 열기는 열어 둔다 — 3차 P2). 구조 변경 직후의 스칼라 확정은 훅이 pending으로 보류한다.
   const settling = transactions.settling;
-  const addBlocked = addition.blocked;
+  const addBlocked =
+    schema === null
+      ? t("form.list.addNoSchema")
+      : addOperation === null
+        ? t("form.list.addBlocked")
+        : settling
+          ? t("form.list.addSettling")
+          : null;
   return (
     <fieldset className="strategy-form__section" disabled={disabled}>
       <legend>
@@ -396,9 +408,9 @@ const FormListSectionView = ({
             disabled={addBlocked !== null}
             aria-describedby={addBlocked === null ? undefined : addReasonId}
             onClick={() => {
-              if (addition.operation !== null)
+              if (addOperation !== null)
                 transactions.apply(
-                  addition.operation,
+                  addOperation,
                   section.key,
                   FORM_OWNER,
                   NO_FOCUS,
@@ -484,16 +496,33 @@ const FormListItemView = ({
   onOpenGraph: ((pointer: string) => void) | undefined;
   selectedPointer: string | undefined;
 }) => {
+  // 삭제 거부 안내는 그 판정을 낸 문서(tree)에만 붙는다. 문서가 바뀌면(재색인 포함) 렌더 중 파생으로
+  // 사라진다 — React key가 pointer(인덱스)라 인스턴스가 다른 항목에 재사용될 수 있다(리뷰 P2-2).
   const notesId = useId();
-  const { blocked, remove } = useItemRemoval(item, tree, transactions);
+  const [blockers, setBlockers] = useState<{
+    tree: unknown;
+    references: DocumentReference[];
+  } | null>(null);
+  const blocked = blockers !== null && blockers.tree === tree ? blockers.references : null;
   const asSection = itemSection(section, item);
   const graphField = item.fields.find(
     (field) => field.control.kind === "graph-link",
   );
-  const selected =
-    selectedPointer !== undefined &&
-    (selectedPointer === item.pointer ||
-      selectedPointer.startsWith(`${item.pointer}/`));
+  const remove = (): void => {
+    const references = removalBlockers(tree, item);
+    if (references.length > 0) {
+      setBlockers({ tree, references });
+      return;
+    }
+    setBlockers(null);
+    transactions.apply(
+      removeItemOperation(item),
+      item.summary,
+      FORM_OWNER,
+      NO_FOCUS,
+    );
+  };
+  const selected = coversPointer(item.pointer, selectedPointer);
   return (
     <section
       className="strategy-form__item"
@@ -793,7 +822,7 @@ const FormFieldRow = ({
   });
   const invalid = editing.invalid;
   const passive = isPassiveControl(field.control);
-  const defaultFromValue = defaultFromValueOf(section, field);
+  const defaultFromValue = defaultFromValueOf(section.fields, field);
   // 라벨은 이름을 보이고 스키마 키는 보조 `<code>`다(P1-03). 설명은 `<stem>.description`.
   const name = tName(field.descriptionKey);
   // enum 필드는 고른 값의 설명·계산식이 있으면 그것을 보인다: "이 노드가 수행할 연산"보다 화면에서
@@ -819,10 +848,7 @@ const FormFieldRow = ({
       describedBy={describedBy.length === 0 ? undefined : describedBy.join(" ")}
       field={field}
       catalogs={catalogs}
-      placeholderValue={placeholderOf(section, field)}
-      onCommit={editing.commit}
-      onValid={editing.onValid}
-      onInvalid={editing.onInvalid}
+      {...editing.control}
     />
   );
   // 라벨 내용은 passive 행(링크·const)도 같다: 필수 별표·단위(P4-02 리뷰 010).

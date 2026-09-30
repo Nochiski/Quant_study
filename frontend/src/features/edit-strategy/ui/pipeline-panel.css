@@ -119,37 +119,21 @@
   line-height: 2;
 }
 
+/* 선언은 Form 컨트롤 규칙(`strategy-form-panel.css`)과 같고, 문장 안이라 크기만 줄인다. */
 .pipeline__field input,
 .pipeline__field select {
+  min-width: 0;
   max-width: min(14rem, 100%);
   padding: 0 var(--space-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-small);
-  background: var(--surface-panel);
-  color: var(--text);
-  font: inherit;
 }
 
 .pipeline__field input[type="number"] {
   width: 6rem;
 }
 
-/* 미작성 필드는 기본값이 흐린 placeholder 로 보인다(Form 과 같은 표시). */
-.pipeline__field[data-written="false"] input,
-.pipeline__field[data-written="false"] select {
-  border-style: dashed;
-  color: var(--text-muted);
-}
-
 /* 지금 설정으로는 쓰이지 않는 칸은 카드 안에서 흐리게(WORKFLOW P4-02). */
 .pipeline__field[data-applicable="false"] {
   opacity: 0.55;
-}
-
-.pipeline__invalid {
-  margin-left: var(--space-1);
-  color: var(--status-error);
-  font-size: var(--text-size-small);
 }
 
 .pipeline__actions {

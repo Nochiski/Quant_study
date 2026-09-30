@@ -17,9 +17,17 @@ export type DiagnosticDestination =
   /** 지금 탭이 그리지 못한다 — 원문 탭(YAML·JSON)에서 그 줄로 간다. */
   | "source";
 
-/** `owner`가 `pointer` 자신이거나 그 조상인가. 루트(`""`)는 문서 전체라 아무것도 소유하지 않는다. */
-const covers = (owner: string, pointer: string): boolean =>
-  owner !== "" && (pointer === owner || pointer.startsWith(`${owner}/`));
+/**
+ * `owner`가 `pointer` 자신이거나 그 조상인가. 루트(`""`)는 문서 전체라 아무것도 소유하지 않는다. 문제 행
+ * 목적지 판정과 Form 항목·파이프라인 카드의 선택 강조가 같은 규칙을 쓴다.
+ */
+export const coversPointer = (
+  owner: string,
+  pointer: string | undefined,
+): boolean =>
+  pointer !== undefined &&
+  owner !== "" &&
+  (pointer === owner || pointer.startsWith(`${owner}/`));
 
 const listOwners = (section: FormListSection): string[] => [
   section.pointer,
@@ -48,7 +56,7 @@ export const formCoversPointer = (
 ): boolean =>
   projection !== null &&
   projection.sections.some((section) =>
-    sectionOwners(section).some((owner) => covers(owner, pointer)),
+    sectionOwners(section).some((owner) => coversPointer(owner, pointer)),
   );
 
 /**
@@ -59,7 +67,7 @@ export const formCoversPointer = (
 export const graphCoversPointer = (tree: unknown, pointer: string): boolean => {
   const index = factorIndexAtPointer(pointer);
   if (index === null) return false;
-  if (!covers(factorGraphPointer(index), pointer)) return false;
+  if (!coversPointer(factorGraphPointer(index), pointer)) return false;
   return index < authoredFactors(tree).length;
 };
 

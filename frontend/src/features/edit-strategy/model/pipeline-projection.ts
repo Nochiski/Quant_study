@@ -16,7 +16,7 @@ import type {
   FormProjection,
   FormSection,
 } from "./form-projection";
-import type { ObjectSection } from "./form-transactions";
+import { defaultFromValueOf, type ObjectSection } from "./form-transactions";
 import {
   displayValue,
   formatContractValue,
@@ -170,10 +170,7 @@ export type SummaryNames = {
 
 /** 필드의 값. 생략했고 `x-default-from`이 있으면 backend가 채우는 형제 필드 값이다(`label` ← `factor_id`). */
 const valueOf = (field: FormField, card: readonly FormField[]): unknown =>
-  field.value ??
-  (field.defaultFrom === null
-    ? undefined
-    : card.find((sibling) => sibling.key === field.defaultFrom)?.value);
+  field.value ?? defaultFromValueOf(card, field);
 
 /**
  * 필드 값을 문장에 넣을 글자로: enum은 값 이름, 카탈로그·참조는 이름, 비율은 표시 단위(`displayValue`),

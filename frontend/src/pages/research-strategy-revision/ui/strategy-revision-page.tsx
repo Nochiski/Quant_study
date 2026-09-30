@@ -205,6 +205,9 @@ export const StrategyRevisionPage = () => {
     transactions,
   );
   const form = useFormProjection(document, assist.schema);
+  const catalogs = {
+    equityFields: assist.inspectorSource.equityCatalog?.fields ?? null,
+  };
   const openGraph = useCallback(
     (pointer: string): void => {
       void navigate({
@@ -427,10 +430,7 @@ export const StrategyRevisionPage = () => {
               tree={form.tree}
               schema={assist.schema}
               transactions={transactions}
-              catalogs={{
-                equityFields:
-                  assist.inspectorSource.equityCatalog?.fields ?? null,
-              }}
+              catalogs={catalogs}
               catalogSnippets={snippets.snippets}
               onOpenGraph={openGraph}
               selectedPointer={search.path}
@@ -444,10 +444,7 @@ export const StrategyRevisionPage = () => {
                 form={form}
                 schema={assist.schema}
                 transactions={transactions}
-                catalogs={{
-                  equityFields:
-                    assist.inspectorSource.equityCatalog?.fields ?? null,
-                }}
+                catalogs={catalogs}
                 onOpenGraph={openGraph}
                 selectedPointer={search.path}
                 revealSignal={problems.revealSignal}
@@ -461,10 +458,7 @@ export const StrategyRevisionPage = () => {
                 editing={{
                   tree: form.tree,
                   transactions,
-                  catalogs: {
-                    equityFields:
-                      assist.inspectorSource.equityCatalog?.fields ?? null,
-                  },
+                  catalogs,
                   operators: assist.operators,
                   onOpenForm: openForm,
                   documentKey: document.documentEpoch,

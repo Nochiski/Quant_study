@@ -14,7 +14,8 @@ import {
   type FormListItem,
   type FormListSection,
 } from "../model/form-projection";
-import { itemSection, placeholderOf } from "../model/form-transactions";
+import { coversPointer } from "../model/diagnostic-navigation";
+import { itemSection } from "../model/form-transactions";
 import {
   cardTemplate,
   itemName,
@@ -52,10 +53,6 @@ type CardContext = {
   selectedPointer: string | undefined;
   onOpenGraph: ((pointer: string) => void) | undefined;
 };
-
-const covers = (owner: string, pointer: string | undefined): boolean =>
-  pointer !== undefined &&
-  (pointer === owner || pointer.startsWith(`${owner}/`));
 
 export const PipelinePanel = ({
   form,
@@ -258,7 +255,9 @@ const NamedItem = ({
       aria-label={name}
       className="pipeline__card"
       aria-current={
-        covers(item.pointer, context.selectedPointer) ? "true" : undefined
+        coversPointer(item.pointer, context.selectedPointer)
+          ? "true"
+          : undefined
       }
     >
       <p className="pipeline__sentence">
@@ -325,7 +324,7 @@ const SentenceCard = ({
   const notesIdOf = (row: PipelineRow) => `${cardId}-${row.field.key}-notes`;
   const selected =
     owner !== undefined
-      ? covers(owner, context.selectedPointer)
+      ? coversPointer(owner, context.selectedPointer)
       : rows.some((row) => row.field.pointer === context.selectedPointer);
   return (
     <div
@@ -432,10 +431,7 @@ const InlineField = ({
         field={field}
         catalogs={context.catalogs}
         names={context.names}
-        placeholderValue={placeholderOf(section, field)}
-        onCommit={editing.commit}
-        onValid={editing.onValid}
-        onInvalid={editing.onInvalid}
+        {...editing.control}
       />
       {field.applicable === false ? (
         <span id={hintId} className="sr-only">
@@ -443,7 +439,7 @@ const InlineField = ({
         </span>
       ) : null}
       {editing.invalid === null ? null : (
-        <span id={invalidId} className="pipeline__invalid" role="alert">
+        <span id={invalidId} className="strategy-form__invalid" role="alert">
           {editing.invalid}
         </span>
       )}

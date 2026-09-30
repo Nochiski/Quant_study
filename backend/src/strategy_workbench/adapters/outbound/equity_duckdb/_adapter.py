@@ -357,6 +357,11 @@ def _catalog_error_types() -> tuple[type[Exception], ...]:
 _LOCK_CONFLICT_MARKERS = ("File is already open in", "Could not set lock on file")
 
 
+def _is_lock_conflict(error: Exception) -> bool:
+    """다른 프로세스가 카탈로그를 쓰기 모드로 잡아 열지 못했는가(`_LOCK_CONFLICT_MARKERS`)."""
+    return any(marker in str(error) for marker in _LOCK_CONFLICT_MARKERS)
+
+
 def _raise_unless_persistent(error: Exception, catalog: Path) -> None:
     """부팅 때 카탈로그를 열거나 읽다 난 duckdb 오류 중 원천을 빼도 되는 것만 돌려보낸다(#245·#247).
 
@@ -365,7 +370,7 @@ def _raise_unless_persistent(error: Exception, catalog: Path) -> None:
     하므로 빼지 않고 코드화된 `EquityDuckdbSetupError` 로 부팅을 멈춘다. 부팅 예외는 운영자 채널이라
     경로와 duckdb 원문을 싣는다.
     """
-    if any(marker in str(error) for marker in _LOCK_CONFLICT_MARKERS):
+    if _is_lock_conflict(error):
         raise EquityDuckdbSetupError(
             "다른 프로세스가 카탈로그 파일을 쓰기 모드로 열고 있어 부팅을 멈춘다 — 그 프로세스"
             "(DuckDB CLI·DB 도구·카탈로그를 여는 스크립트)를 닫은 뒤 다시 띄워야 한다 "

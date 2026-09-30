@@ -358,6 +358,11 @@ def _catalog_error_types() -> tuple[type[Exception], ...]:
 _LOCK_CONFLICT_MARKERS = ("File is already open in", "Could not set lock on file")
 
 
+def _is_lock_conflict(error: Exception) -> bool:
+    """다른 프로세스가 카탈로그를 쓰기 모드로 잡아 열지 못했는가(`_LOCK_CONFLICT_MARKERS`)."""
+    return any(marker in str(error) for marker in _LOCK_CONFLICT_MARKERS)
+
+
 def _raise_unless_persistent(error: Exception, catalog: Path) -> None:
     """부팅 때 카탈로그를 열거나 읽다 난 duckdb 오류 중 원천을 빼도 되는 것만 돌려보낸다(#245·#247).
 
@@ -366,7 +371,7 @@ def _raise_unless_persistent(error: Exception, catalog: Path) -> None:
     하므로 빼지 않고 코드화된 `EquityDuckdbSetupError` 로 부팅을 멈춘다. 부팅 예외는 운영자 채널이라
     경로와 duckdb 원문을 싣는다.
     """
-    if any(marker in str(error) for marker in _LOCK_CONFLICT_MARKERS):
+    if _is_lock_conflict(error):
         raise EquityDuckdbSetupError(
             "다른 프로세스가 카탈로그 파일을 쓰기 모드로 열고 있어 부팅을 멈춘다 — 그 프로세스"
             "(DuckDB CLI·DB 도구·카탈로그를 여는 스크립트)를 닫은 뒤 다시 띄워야 한다 "
@@ -392,6 +397,27 @@ def _open(path: Path | None) -> duckdb.DuckDBPyConnection:
     if path is None:
         return module.connect()
     return module.connect(str(path), read_only=True)
+
+
+def _open_catalog(path: Path) -> duckdb.DuckDBPyConnection:
+    """부팅 뒤 질의가 카탈로그를 연다. 다른 프로세스가 쓰기 모드로 잡은 잠김은 코드화된
+    실패다(#318).
+
+    duckdb 잠금 원문은 점유 프로세스 경로·PID·POSIX 계정명을 싣는데, 사유가 사용자에게 보이는
+    곳(run 실패 사유)으로 가면 안 된다. 사유 문장이 조치만 싣고 원문은 예외 사슬로 서버 로그에
+    남는다. 사유가 화면에 나가는 곳이 run 실패뿐이라 그 코드(`backtest.run.data_not_ready`)의
+    예외로 올린다 — 미리보기·추적은 예전처럼 서버 오류로 멈춘다. 부팅 검사는 잠김을 부팅 문장으로
+    분류하므로(`_raise_unless_persistent`) 이 함수를 쓰지 않는다.
+    """
+    try:
+        return _open(path)
+    except Exception as error:
+        if not _is_lock_conflict(error):
+            raise
+        raise BacktestDataNotReadyError(
+            "다른 프로세스가 카탈로그 파일을 쓰기 모드로 열고 있어 원장을 읽지 못했다 — 그 작업"
+            "(카탈로그 재생성·원장 동기화·DB 도구)이 끝난 뒤 다시 실행한다 (catalog_locked)"
+        ) from error
 
 
 def _keys_param(keys: Sequence[str]) -> str:
@@ -551,10 +577,11 @@ class EquityDuckdbAdapter:
         매크로를 읽지 않는 질의(유니버스·표 원천 격자)까지 카탈로그를 열면, 부팅 뒤 다른 프로세스가
         카탈로그를 쓰기 모드로 잡은 동안 그 질의도 실패한다. 백테스트 데이터는 층 이동 사건을
         카탈로그 뷰로 읽어 카탈로그를 연다(#369). 쓸 수 없는 카탈로그(stale 등)는 열지 않는다 —
-        옛 판본을 가리키는 매크로를 조용히 읽지 않게 한다.
+        옛 판본을 가리키는 매크로를 조용히 읽지 않게 한다. 잠김은 `_open_catalog` 가
+        코드화한다(#318).
         """
         macro = self._catalog.usable and any(source.is_macro for source in sources)
-        return _open(self._catalog.path if macro else None)
+        return _open_catalog(self._catalog.path) if macro else _open(None)
 
     def _checked_catalog(self, catalog: CatalogState) -> CatalogState:
         """원천을 판정하기 전에 카탈로그 파일을 한 번 열어 매크로 본문을 읽는다(#247·#235).
@@ -726,7 +753,10 @@ class EquityDuckdbAdapter:
         import duckdb as module  # 지연 import — `_open` 과 같은 이유(optional extra `equity`)
 
         try:
-            with self._connect([spec]) as con:
+            # 부팅 검사라 질의용 `_connect`(잠김을 run 실패로 코드화) 대신 카탈로그를 직접 연다 —
+            # 잠김은 아래 분류기가 부팅 문장으로 올린다. 여기 오는 원천은 카탈로그를 쓸 수 있을
+            # 때뿐이다
+            with _open(self._catalog.path) as con:
                 described = con.execute(
                     f"DESCRIBE SELECT * FROM {self._relation(spec, self.backfill_end)}"
                 ).fetchall()
@@ -1292,7 +1322,7 @@ class EquityDuckdbAdapter:
         warmup = query.history_sessions_before_start
         first = max(bisect_left(self._sessions, query.start) - warmup, 0)
         read_from = min(query.start, self._sessions[first]) if warmup else query.start
-        con = _open(self._catalog.path)  # 층 이동 사건을 카탈로그 뷰로 읽는다(#369)
+        con = _open_catalog(self._catalog.path)  # 층 이동 사건을 카탈로그 뷰로 읽는다(#369)
         try:
             price_columns = {
                 str(row[0])

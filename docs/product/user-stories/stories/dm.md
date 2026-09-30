@@ -152,7 +152,10 @@
   사건마다 `equity.unfolded_level_shift` 경고가 뜬다(이슈 #369). 전에는 사건 없이 원주가만 나가 그 종목
   손익이 층 배수만큼(실원장 최대 ×46.8) 튀었다. 원장 카탈로그가 그 사건을 읽을 뷰를 아직 싣지 않았으면
   실행은 "데이터 원장이 백테스트에 쓸 준비가 되지 않아…"로 멈추고, 접힌 "서버 사유"가 카탈로그를 다시
-  만들라고 말한다. mock 데이터에는 층 이동이 없어 브라우저 e2e는 이 경로를 밟지 않는다. backend `tests/test_adapters_equity_duckdb.py`·`tests/contract/test_backtest_data_port.py`가
+  만들라고 말한다. 원장 카탈로그를 다른 프로세스가 쓰기 모드로 잡은 동안이면 같은 문장으로 멈추고, 접힌
+  서버 사유가 그 작업이 끝난 뒤 다시 실행하라고 말한다. 원문(경로·PID·계정명)은 서버 로그에만 있다(이슈
+  #318, `test_catalog_locked_after_boot_fails_only_the_macro_queries`). mock 데이터에는 층 이동이 없어
+  브라우저 e2e는 이 경로를 밟지 않는다. backend `tests/test_adapters_equity_duckdb.py`·`tests/contract/test_backtest_data_port.py`가
   확인한다.
 - 비고: 백테스트·추적 전에 실행 설정 패널에서 기간과 유니버스를 정한다(US-DM-05).
 

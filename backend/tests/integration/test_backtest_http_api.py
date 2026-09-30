@@ -801,6 +801,23 @@ def test_run_thread_start_failure_ends_the_run_failed_instead_of_stuck_queued(
             "OSError: [Errno 13] Permission denied: '<path>'",
         ),
         ("cannot open /Users/sangmok/Library/x", "cannot open <path>"),
+        # 따옴표로 감싼 드라이브·UNC 경로는 공백이 들어도 닫는 따옴표까지 가린다(#318).
+        (
+            r'IO Error: Cannot open file "C:\Users\John Smith\ledger\equity.duckdb": in use',
+            'IO Error: Cannot open file "<path>": in use',
+        ),
+        (
+            r"OSError: [Errno 2] No such file: 'C:\\Users\\John Smith\\x.parquet'",
+            "OSError: [Errno 2] No such file: '<path>'",
+        ),
+        (r'share "\\file server\quant share\x" gone', 'share "<path>" gone'),
+        # 여는 따옴표와 같은 종류에서만 끊는다 — 다른 따옴표가 든 계정명도 끝까지 가린다
+        # (#406 리뷰 P3-2)
+        (
+            r"""IO Error: Cannot open file "C:\Users\O'Brien\ledger\equity.duckdb": in use""",
+            'IO Error: Cannot open file "<path>": in use',
+        ),
+        (r'"C:\Users\홍길동\원장\equity.duckdb" busy', '"<path>" busy'),
         # 가리지 않아야 하는 것: 다른 URL·단위 표기·비율·JSON Pointer 진단 경로·흔한 영단어 루트.
         ("see https://example.com/docs for detail", "see https://example.com/docs for detail"),
         ("units 10 m/s and 3 /s", "units 10 m/s and 3 /s"),

@@ -379,6 +379,9 @@ def test_experiments_share_all_but_one_slot_and_take_turns(gated_runs: _GatedRun
         (date(2024, 1, 9), "exp-b"),
     ):
         runs.start(_request(end=end), owner=owner)
+    # 슬롯 배정과 관측 입장 사이에는 스레드 경합이 있다. 첫 실험의 입장을 고정한 뒤
+    # 단일 실행을 시작해야 두 독립 슬롯의 입장 순서를 라운드로빈 순서로 오해하지 않는다.
+    _wait_for_entries(entries, 1)
     # 실험 몫(1개)이 찼어도 단일 실행은 비워 둔 슬롯에서 바로 뜬다.
     user = runs.start(_request(end=date(2024, 1, 8)))
     _wait_for_entries(entries, 2)

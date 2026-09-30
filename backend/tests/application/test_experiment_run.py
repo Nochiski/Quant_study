@@ -549,7 +549,8 @@ def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> No
     _service(runs, repository=SQLiteExperimentRepository(path), spawn=pending.append).recover()
 
     assert service.get(finished).status is ExperimentStatus.COMPLETED
-    assert [owner for owner, _paused, _priority in runs.schedules] == [waiting]
+    # 끝난 실험도 조작은 되살린다(#390 리뷰 P3-3) — 제출 스레드만 없다.
+    assert [owner for owner, _paused, _priority in runs.schedules] == [finished, waiting]
     assert len(pending) == 1
 
 

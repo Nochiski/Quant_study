@@ -49,7 +49,8 @@ def test_a_trial_counts_once_and_its_first_completed_run_is_the_representative()
         (
             _entry("r1", _A, RunStatus.COMPLETED, done_after_minutes=9, sharpe=0.05),
             _entry("r2", _A, RunStatus.COMPLETED, done_after_minutes=3, sharpe=0.07),
-            _entry("r3", _A, RunStatus.FAILED),
+            # 커밋 뒤 취소·완료 저장 실패처럼 결과 없이 끝났는데 샤프가 적힌 실행(#390 리뷰 P3-1).
+            _entry("r3", _A, RunStatus.FAILED, sharpe=0.2),
             _entry("r4", _A, RunStatus.RUNNING),
             _entry("r5", _B, RunStatus.CANCELLED),
         ),

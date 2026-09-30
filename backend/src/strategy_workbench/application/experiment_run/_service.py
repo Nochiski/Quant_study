@@ -332,19 +332,22 @@ class ExperimentRunService:
         """재시작 뒤 취소하지 않은 실험의 대기열 조작을 되살리고 남은 trial 을 다시 넘긴다(spec D6).
 
         남은 trial 은 넘기지 못한 trial(제출이 예상 밖 오류로 멈춘 경우 포함)과 재시작으로 중단된
-        trial 이다. 끝난 실험은 건너뛴다. 저장된 실험 하나를 읽지 못하면(지금 모델로 디코드되지
-        않는다) 그 실험만 로그로 건너뛰고 부팅은 이어 간다.
+        trial 이다. 끝난 실험은 조작만 되살리고(뒤의 재시도가 따른다) 제출 스레드는 띄우지 않는다.
+        저장된 실험 하나를 읽지 못하면(지금 모델로 디코드되지 않는다) 그 실험만 로그로 건너뛰고
+        부팅은 이어 간다.
         """
         for experiment_id in self._repository.open_ids():
             try:
                 record = self._repository.get(experiment_id)
+                controls = record.controls
+                self._runs.schedule(
+                    experiment_id, paused=controls.paused, priority=controls.priority
+                )
                 if self._experiment(record).status is ExperimentStatus.COMPLETED:
                     continue
             except Exception:
                 logger.exception("experiment skipped on recovery — experiment_id=%s", experiment_id)
                 continue
-            controls = record.controls
-            self._runs.schedule(experiment_id, paused=controls.paused, priority=controls.priority)
             self._spawn(lambda record=record: self._submit(record))
 
     def _submit(self, record: ExperimentRecord) -> None:
@@ -551,9 +554,9 @@ class ExperimentRunService:
         end: date,
     ) -> tuple[str | None, AdmissionRejectionCode | None, str | None]:
         """칸의 한 구간 실행을 넘긴다. (run_id, 거절 코드, 거절 문장) 가운데 run_id 나 거절 하나."""
+        if isinstance(base, TrialRunRejectedError):
+            return None, base.code, str(base)
         try:
-            if isinstance(base, TrialRunRejectedError):
-                raise base
             run_id = self._runs.start(
                 _run_request(record.run, trial, start, end),
                 trial_key=experiment_trial_key(base, trial),

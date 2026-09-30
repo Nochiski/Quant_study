@@ -276,7 +276,10 @@ class _RunServiceTrialRuns:
         try:
             admission = self._runs.admit(request)
         except Exception as error:
-            raise _rejected(error) from error
+            rejected = _rejected(error)
+            if rejected is None:
+                raise
+            raise rejected from error
         if admission.lineage_id is None:  # pragma: no cover - 실험은 저장 리비전으로만 만든다
             raise RuntimeError(
                 f"experiment base run has no lineage — spec_hash={admission.provenance.spec_hash}"
@@ -287,7 +290,10 @@ class _RunServiceTrialRuns:
         try:
             run_id = self._runs.start(request, owner=owner, trial_key_override=trial_key).run.run_id
         except Exception as error:
-            raise _rejected(error) from error
+            rejected = _rejected(error)
+            if rejected is None:
+                raise
+            raise rejected from error
         if self._held_run_ids is not None:
             self._held_run_ids.add(run_id)
         return run_id
@@ -314,10 +320,10 @@ class _RunServiceTrialRuns:
         self._runs.cancel(run_id, owner=owner)
 
 
-def _rejected(error: Exception) -> Exception:
-    """접수 거절이면 코드를 실은 `TrialRunRejectedError`, 아니면 원래 오류(예상 밖 오류)."""
+def _rejected(error: Exception) -> TrialRunRejectedError | None:
+    """접수 거절이면 코드를 실은 `TrialRunRejectedError`, 아니면 None(예상 밖 오류)."""
     code = rejection_code(error)
-    return error if code is None else TrialRunRejectedError(code, str(error))
+    return None if code is None else TrialRunRejectedError(code, str(error))
 
 
 class _TrialHold:

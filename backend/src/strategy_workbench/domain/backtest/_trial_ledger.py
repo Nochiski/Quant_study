@@ -177,7 +177,8 @@ def _group(trial_key: str, entries: list[TrialLedgerEntry]) -> TrialGroup:
                 entry.status,
                 entry.created_at,
                 _role(entry, first),
-                entry.session_sharpe,
+                # 결과가 나온 실행만 점수가 있다(커밋 뒤 취소·완료 저장 실패의 값은 뺀다).
+                entry.session_sharpe if entry.status is RunStatus.COMPLETED else None,
             )
             for entry in entries
         ),

@@ -470,14 +470,14 @@ export const strategyWorkbenchApi = {
     query: EquityCatalogQuery = {},
   ): Promise<ResearchCatalog> {
     const response = await getEquityCatalog({ query });
-    return requireData(response.data, "getEquityCatalog");
+    return unwrap(response, "getEquityCatalog");
   },
 
   async getFactorCatalog(
     query: FactorCatalogQuery = {},
   ): Promise<FactorCatalog> {
     const response = await getFactorCatalog({ query });
-    return requireData(response.data, "getFactorCatalog");
+    return unwrap(response, "getFactorCatalog");
   },
 
   async explainFactorGraph(
@@ -485,7 +485,7 @@ export const strategyWorkbenchApi = {
     signal?: AbortSignal,
   ): Promise<FactorExplanation> {
     const response = await explainFactorGraph({ body: request, signal });
-    return requireData(response.data, "explainFactorGraph");
+    return unwrap(response, "explainFactorGraph");
   },
 
   async listStrategies(

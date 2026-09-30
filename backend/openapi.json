@@ -454,6 +454,101 @@
         "title": "AssistantUnprocessableResponse",
         "type": "object"
       },
+      "BacktestCancelResult": {
+        "description": "취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면\n`kept_by_owners` 가 참이다 — 화면은 이 칸으로 \"실험이 쓰는 실행\" 을 알린다(#382).",
+        "properties": {
+          "artifact_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Sha256"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "portfolio.strategy.invalid",
+                  "portfolio.data.unavailable",
+                  "portfolio.raw_observation.invalid",
+                  "backtest.run.invalid",
+                  "backtest.run.equity_wiped_out",
+                  "backtest.run.data_not_ready",
+                  "backtest.run.no_positions",
+                  "backtest.run.benchmark_unknown",
+                  "backtest.run.internal",
+                  "backtest.run.interrupted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "kept_by_owners": {
+            "default": false,
+            "title": "Kept By Owners",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "progress",
+          "stage",
+          "message",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BacktestCancelResult",
+        "type": "object"
+      },
       "BacktestEnvironmentRequiredDetail": {
         "description": "실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.",
         "properties": {
@@ -860,6 +955,9 @@
                   "portfolio.raw_observation.invalid",
                   "backtest.run.invalid",
                   "backtest.run.equity_wiped_out",
+                  "backtest.run.data_not_ready",
+                  "backtest.run.no_positions",
+                  "backtest.run.benchmark_unknown",
                   "backtest.run.internal",
                   "backtest.run.interrupted"
                 ],
@@ -909,8 +1007,26 @@
         "type": "object"
       },
       "BacktestRunSummary": {
-        "description": "One accepted run and the strategy meaning resolved before it started.",
+        "description": "One accepted run and the strategy meaning resolved before it started.\n\n종류와 쓰는 실험은 저장소가 읽을 때 정한다. 사용자가 시작한 run 을 실험이 이어 쓰면(같은 입력\n잇기) 실험 run 이다. `experiment_paused` 는 그 실험이 일시정지돼 대기 run 이 배정되지 않는다는\n뜻이다.",
         "properties": {
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "experiment_paused": {
+            "title": "Experiment Paused",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RunKind"
+          },
           "run": {
             "$ref": "#/components/schemas/BacktestRunState"
           },
@@ -920,7 +1036,10 @@
         },
         "required": [
           "run",
-          "strategy_provenance"
+          "strategy_provenance",
+          "kind",
+          "experiment_id",
+          "experiment_paused"
         ],
         "title": "BacktestRunSummary",
         "type": "object"
@@ -954,6 +1073,17 @@
             },
             "title": "Rolling Sharpe",
             "type": "array"
+          },
+          "rolling_sharpe_window_sessions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rolling Sharpe Window Sessions"
           }
         },
         "required": [
@@ -1807,8 +1937,7 @@
             "type": "string"
           },
           "frequency": {
-            "title": "Frequency",
-            "type": "string"
+            "$ref": "#/components/schemas/FieldFrequency"
           },
           "label": {
             "title": "Label",
@@ -2417,6 +2546,7 @@
               "experiment.search.too_many_points",
               "experiment.search.unknown_parameter",
               "experiment.selection.not_completed",
+              "experiment.selection.not_finished",
               "experiment.split.invalid",
               "experiment.split.no_window",
               "experiment.trial.not_found",
@@ -2622,9 +2752,33 @@
       "ExperimentSelection": {
         "description": "사용자가 고른 후보 기록(spec D9). 되돌릴 수 없다.",
         "properties": {
+          "deflated_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "고른 trial 실행의 샤프를 고를 때의 계열 N·시도 대표 샤프 분산으로 깎은 DSR(0~1). 지표가 비었거나 분산을 낼 수 없으면 비어 있다.",
+            "title": "Deflated Sharpe"
+          },
           "experiment_id": {
             "title": "Experiment Id",
             "type": "string"
+          },
+          "ledger_representative_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "고른 trial 이 속한 시도의 계열 원장 대표 샤프. 세션 단위(연율화 전)이고 그 시도에서 처음 결과가 난 실행의 값이라 고른 trial 실행의 샤프(DSR 분자)가 아닐 수 있다.",
+            "title": "Ledger Representative Sharpe"
           },
           "parameter_values": {
             "additionalProperties": {
@@ -2662,6 +2816,18 @@
           "strategy_id": {
             "title": "Strategy Id",
             "type": "string"
+          },
+          "trial_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "고를 때의 계열 시도 수 N(계열 원장).",
+            "title": "Trial Count"
           },
           "trial_index": {
             "title": "Trial Index",
@@ -2873,7 +3039,8 @@
       "FactorAvailability": {
         "enum": [
           "implemented",
-          "catalog_only"
+          "catalog_only",
+          "unavailable"
         ],
         "title": "FactorAvailability",
         "type": "string"
@@ -3731,7 +3898,7 @@
           },
           "frequencies": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/FieldFrequency"
             },
             "title": "Frequencies",
             "type": "array"
@@ -4008,6 +4175,18 @@
         ],
         "title": "FieldCoverageCapability",
         "type": "object"
+      },
+      "FieldFrequency": {
+        "description": "필드 값이 새로 나오는 주기. 워크벤치 어댑터가 `list_fields()` 로 내는 어휘다.\n\n원장 `dataset_profile` 의 빈도(session·report 등)와는 다른 어휘다 — 두 어댑터가 같은 필드에\n같은 빈도를 답하는지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 화면은\n이 값마다 문구를 두므로(#350) 목록을 늘리면 frontend typecheck 가 문구를 요구한다.",
+        "enum": [
+          "daily",
+          "monthly",
+          "quarterly",
+          "annual",
+          "event"
+        ],
+        "title": "FieldFrequency",
+        "type": "string"
       },
       "FieldLag": {
         "properties": {
@@ -6622,6 +6801,16 @@
         "title": "RunEnvironmentSchema",
         "type": "object"
       },
+      "RunKind": {
+        "description": "백테스트 이력의 실행 종류(검증 랩 V5-03, #382). 실험이 쓴 run 이면 그 쓰임새다.",
+        "enum": [
+          "single",
+          "experiment_trial",
+          "walk_forward_validation"
+        ],
+        "title": "RunKind",
+        "type": "string"
+      },
       "RunManifest": {
         "description": "What a finished run was made of.\n\n`strategy_hash` and `strategy_provenance.spec_hash` always carry the same value: one run\nexecuted one strategy.",
         "properties": {
@@ -7361,7 +7550,7 @@
         "type": "object"
       },
       "StrategyDocument": {
-        "description": "A stored revision as an editor sees it: exact source plus what it compiles to.\n\n`generated` is True when the revision predates document authoring (legacy JSON API) and the\nsource shown is a canonical JSON projection of the stored spec, not text an author wrote.",
+        "description": "A stored revision as an editor sees it: exact source plus what it compiles to.\n\n`generated` 는 revision 이 문서 저작 이전(legacy JSON API)이라 보이는 원문이 작성자가 쓴 글이\n아니라 저장된 spec 에서 만든 문서일 때 참이다 — 승격을 걷은 현재 판 문서\n(`authoring_document`)다.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -9207,7 +9396,8 @@
           "missing_input",
           "warm_up",
           "divide_by_zero",
-          "group_missing"
+          "group_missing",
+          "masked"
         ],
         "title": "TraceValueStatus",
         "type": "string"
@@ -9238,6 +9428,16 @@
           "error_code": {
             "anyOf": [
               {
+                "enum": [
+                  "backtest.run.environment_required",
+                  "backtest.run.research_window_violation",
+                  "backtest.run.parameter_invalid",
+                  "backtest.run.invalid",
+                  "backtest.strategy.not_found",
+                  "backtest.strategy.stale",
+                  "backtest.strategy.requires_upgrade",
+                  "portfolio.strategy.invalid"
+                ],
                 "type": "string"
               },
               {
@@ -9486,6 +9686,17 @@
           "run_id": {
             "title": "Run Id",
             "type": "string"
+          },
+          "session_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Sharpe"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
@@ -10115,6 +10326,8 @@
         "description": "이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.\n\n값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.",
         "enum": [
           "legacy_design",
+          "cancelled",
+          "result_unreadable",
           "test_failed",
           "no_cell",
           "pending"
@@ -10240,6 +10453,9 @@
                   "portfolio.raw_observation.invalid",
                   "backtest.run.invalid",
                   "backtest.run.equity_wiped_out",
+                  "backtest.run.data_not_ready",
+                  "backtest.run.no_positions",
+                  "backtest.run.benchmark_unknown",
                   "backtest.run.internal",
                   "backtest.run.interrupted"
                 ],
@@ -10315,6 +10531,16 @@
           "error_code": {
             "anyOf": [
               {
+                "enum": [
+                  "backtest.run.environment_required",
+                  "backtest.run.research_window_violation",
+                  "backtest.run.parameter_invalid",
+                  "backtest.run.invalid",
+                  "backtest.strategy.not_found",
+                  "backtest.strategy.stale",
+                  "backtest.strategy.requires_upgrade",
+                  "portfolio.strategy.invalid"
+                ],
                 "type": "string"
               },
               {
@@ -11115,6 +11341,22 @@
               ],
               "title": "Strategy Id"
             }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/RunKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
           }
         ],
         "responses": {
@@ -11308,6 +11550,7 @@
     },
     "/api/v1/backtests/{run_id}/cancel": {
       "post": {
+        "description": "사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다.",
         "operationId": "cancelBacktest",
         "parameters": [
           {
@@ -11325,7 +11568,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BacktestRunState"
+                  "$ref": "#/components/schemas/BacktestCancelResult"
                 }
               }
             },
@@ -12289,7 +12532,7 @@
     },
     "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry": {
       "post": {
-        "description": "실패·취소된 trial 을 새 attempt 로 다시 넘긴다.",
+        "description": "실패·취소된 trial 을 새 attempt 로 다시 넘긴다. 기반 요청이 이제 접수되지 않으면 백테스트\n시작과 같은 코드로 거절한다.",
         "operationId": "retryExperimentTrial",
         "parameters": [
           {
@@ -12326,31 +12569,47 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                    }
+                  ],
+                  "title": "Response 404 Retryexperimenttrial"
                 }
               }
             },
-            "description": "The experiment or trial is missing"
+            "description": "The trial or its base strategy revision is missing"
           },
           "409": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                    }
+                  ],
+                  "title": "Response 409 Retryexperimenttrial"
                 }
               }
             },
-            "description": "The experiment state refuses it"
+            "description": "The trial is not retryable or the base revision changed"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "A coded experiment design or base run diagnostic"
           }
         },
         "summary": "Retry Experiment Trial"

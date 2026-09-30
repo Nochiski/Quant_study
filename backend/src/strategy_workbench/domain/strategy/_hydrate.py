@@ -30,8 +30,9 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
+from ._canonical import canonical_payload_json, canonical_strategy_payload
 from ._models import CURRENT_SCHEMA_VERSION, StrategyIdentity, StrategySpec
-from ._promotion import promote_boolean_factor_outputs
+from ._promotion import demote_boolean_factor_outputs, promote_boolean_factor_outputs
 from ._upgrade import FROZEN_SCHEMA_VERSIONS, legacy_shape_hints, upgrade_refusal
 
 # 새 문서로 받는 버전 집합. 현재 버전 상수의 owner는 `_models.py`다(모델 기본값과 같은 값).
@@ -147,6 +148,19 @@ def hydrate_strategy_document(
     # boolean 팩터 출력은 canonical 그래프 끝에서 0/1 로 올린다(P2-07, spec D5). 문서 tree 는
     # 그대로이고 spec 에만 노드가 붙는다.
     return StrategyHydration(HydrationStatus.OK, promote_boolean_factor_outputs(spec), ())
+
+
+def authoring_document(spec: StrategySpec) -> str:
+    """compile 결과(`StrategySpec`)를 사용자가 쓰는 현재 판 JSON 문서로 —
+    `hydrate_strategy_document` 의 역이다. 원문 없는 legacy revision 의 생성 원문이 이것이다(#353).
+
+    hydrate 가 붙인 boolean 출력 승격 노드를 걷는다(`demote_boolean_factor_outputs`) — 문서에 두면
+    그 원문을 다시 compile 할 때 예약 node_id(`strategy.factor.reserved_node_id`)로 거절된다. 은퇴
+    판 row 라도 잃을 주석이 없으므로 판 표시만 현재 판으로 바꾼다(spec D2).
+    """
+    payload = canonical_strategy_payload(demote_boolean_factor_outputs(spec))
+    document = {**payload, "schema_version": CURRENT_SCHEMA_VERSION}
+    return canonical_payload_json(document, indent=2) + "\n"
 
 
 def hydrate_saved_strategy(document: Mapping[str, object]) -> StrategyHydration:

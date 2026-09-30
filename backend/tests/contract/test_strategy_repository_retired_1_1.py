@@ -22,13 +22,16 @@ from strategy_workbench.adapters.outbound.strategy_sqlite.facade.repository impo
     StrategyRepositoryStorageError,
 )
 from strategy_workbench.application.strategy_authoring.facade.authoring import (
+    CompileRequest,
     StrategyAuthoringService,
     StrategyDocumentService,
 )
 from strategy_workbench.application.strategy_design.facade.ports import PageRequest
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
+    PROMOTION_NODE_PREFIX,
     SourceFormat,
+    promotion_node_ids,
 )
 from strategy_workbench.domain.strategy.facade.specification import SignalNormalization
 from tests import frozen_revision_rows
@@ -123,6 +126,44 @@ def test_list_history_and_document_views_stay_green_on_a_retired_1_1_row(tmp_pat
     # generated source 는 그대로 컴파일된다 — hash 는 저장된 1.1 hash 와 다르다(문서가 달라졌다).
     recompiled = source_spec_hash(document.source, SourceFormat.JSON)
     assert recompiled != row.spec_hash
+
+
+def test_generated_source_of_a_boolean_output_row_is_the_authored_graph(tmp_path: Path) -> None:
+    """#353: 원문 없는 은퇴 row 의 팩터 출력이 boolean 이면(1.1 에는 출력 타입 검사가 없었다) 복원한
+    spec 에는 compile 이 0/1 승격 노드 셋을 붙인다. 생성 원문은 사용자 문서라 그 노드가 없어야
+    한다 — 붙여 내면 그 원문을 다시 compile 할 때 예약 node_id 로 거절돼, 그 revision 을 현재
+    버전으로 새로 저장하는 유일한 길이 막힌다.
+    """
+    document = yaml.safe_load((FIXTURES / "quality_momentum.v1_1.yaml").read_text(encoding="utf-8"))
+    graph = document["factors"][0]["graph"]
+    graph["nodes"] += [
+        {"kind": "constant", "node_id": "zero", "value": 0.0},
+        {
+            "kind": "comparison",
+            "node_id": "rising",
+            "operator": "gt",
+            "left_node_id": "mom_252",
+            "right_node_id": "zero",
+        },
+    ]
+    graph["output_node_id"] = "rising"
+    path = tmp_path / "boolean.sqlite3"
+    row = seed_retired_1_1_row(path, strategy_id="boolean-output", document=document)
+    authoring = _authoring()
+
+    with open_repository(path) as repository:
+        record = repository.get(row.strategy_id, 1)
+        documents = StrategyDocumentService(authoring, repository, new_id=lambda: "unused")
+        generated = documents.get(row.strategy_id, 1)
+
+    # 실행·해시 쪽 spec 에는 승격 노드가 붙는다(의도된 동작).
+    promoted = record.spec.factors[0].graph
+    assert promoted.output_node_id == promotion_node_ids("momentum")[0]
+    # 생성 원문에는 없고, 쓴 그래프 그대로라 다시 compile 하면 같은 승격 spec 이 된다.
+    assert generated.generated and PROMOTION_NODE_PREFIX not in generated.source
+    compiled = authoring.compile(CompileRequest(generated.source, SourceFormat.JSON))
+    assert compiled.ok and compiled.spec is not None, compiled.diagnostics
+    assert compiled.spec.factors[0].graph == promoted
 
 
 def test_a_retired_1_1_document_row_serves_its_saved_yaml_for_upgrade(tmp_path: Path) -> None:

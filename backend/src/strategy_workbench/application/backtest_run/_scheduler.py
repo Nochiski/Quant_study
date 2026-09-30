@@ -12,6 +12,8 @@ from collections import deque
 from typing import Generic, TypeVar
 
 _T = TypeVar("_T")
+# `RunQueue.move` 가 대기 중이 아닌 run 을 가르는 표식(레인 이름 None 은 단일 실행 레인이다).
+_ABSENT = object()
 
 
 def experiment_slots(run_slots: int) -> int:
@@ -26,10 +28,10 @@ class RunQueue(Generic[_T]):
     def __init__(self) -> None:
         # 삽입 순서가 라운드로빈 순서다. 빈 레인은 두지 않는다.
         self._lanes: dict[str | None, deque[_T]] = {}
-        # 레인 설정은 대기 run 이 없는 동안에도 남는다.
+        # 레인 설정은 대기 run 이 없는 동안에도 남는다. 기본값(진행·가중치 1)은 적지 않는다.
         self._paused: set[str] = set()
         self._weights: dict[str, int] = {}
-        # 줄 맨 앞 레인이 이번 차례에 꺼낸 수.
+        # 이번 차례를 받는 레인과 꺼낸 수. 한 레인만 차례 중이다.
         self._served: dict[str | None, int] = {}
 
     def __bool__(self) -> bool:
@@ -44,11 +46,25 @@ class RunQueue(Generic[_T]):
             self._paused.add(lane)
         else:
             self._paused.discard(lane)
-        self._weights[lane] = weight
+        if weight == 1:
+            self._weights.pop(lane, None)
+        else:
+            self._weights[lane] = weight
+
+    def is_paused(self, lane: str) -> bool:
+        return lane in self._paused
 
     def push(self, item: _T, lane: str | None) -> None:
         """`lane` 은 실험 id, 단일 실행이면 None."""
         self._lanes.setdefault(lane, deque()).append(item)
+
+    def move(self, item: _T, lane: str | None) -> None:
+        """대기 중인 `item` 을 `lane` 으로 옮긴다. 이미 그 레인이면 자리를 그대로 두고, 대기 중이
+        아니면 아무것도 하지 않는다."""
+        current = next((name for name, queue in self._lanes.items() if item in queue), _ABSENT)
+        if current is not _ABSENT and current != lane:
+            self.remove(item)
+            self.push(item, lane)
 
     def remove(self, item: _T) -> None:
         for lane, queue in self._lanes.items():
@@ -56,6 +72,7 @@ class RunQueue(Generic[_T]):
                 queue.remove(item)
                 if not queue:
                     del self._lanes[lane]
+                    self._served.pop(lane, None)
                 return
 
     def pop(self, *, experiments: bool) -> _T | None:
@@ -71,7 +88,11 @@ class RunQueue(Generic[_T]):
             return None
         queue = self._lanes[lane]
         item = queue.popleft()
-        served = self._served.pop(lane, 0) + 1
+        # 차례 중이던 실험 레인이 멈춰 다른 실험 레인이 꺼내면 그 차례는 끝난다(단일 실행은 끼어들
+        # 뿐 차례를 끊지 않는다).
+        served = self._served.get(lane, 0) + 1
+        if lane is not None:
+            self._served.clear()
         if not queue:
             del self._lanes[lane]
         elif lane is not None and served < self._weights.get(lane, 1):

@@ -78,6 +78,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     environment_hash,
     impact_scales,
     participation_volumes,
+    settlement_multipliers,
 )
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
 from strategy_workbench.domain.factor.facade.expression import (
@@ -475,7 +476,8 @@ def test_partial_fill_is_declared_from_the_environment_not_the_document() -> Non
 
 class _ShrunkWarmupValue:
     """mock 워밍업 bar 의 거래대금만 1% 로 줄인다 — 워밍업을 ADV 에 넣었는지에 따라 첫 체결 세션의
-    캡이 크게 갈린다. 받은 질의와 돌려준 dataset 을 남긴다."""
+    캡이 크게 갈린다. 실행 데이터로 받은 질의와 돌려준 dataset 을 남긴다(종목 없는 tape 앞 확인은
+    그대로 답하고 남기지 않는다)."""
 
     def __init__(self) -> None:
         self._inner = MockEquityDataAdapter.demo()
@@ -483,14 +485,21 @@ class _ShrunkWarmupValue:
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
         dataset = self._inner.load_backtest_dataset(query)
-        dataset = replace(
-            dataset,
-            history_bars=tuple(
-                replace(bar, trading_value=(bar.trading_value or 0) * 0.01)
-                for bar in dataset.history_bars
-            ),
+        if not query.security_ids:
+            return dataset
+        dataset = self._shape(
+            replace(
+                dataset,
+                history_bars=tuple(
+                    replace(bar, trading_value=(bar.trading_value or 0) * 0.01)
+                    for bar in dataset.history_bars
+                ),
+            )
         )
         self.loads.append((query, dataset))
+        return dataset
+
+    def _shape(self, dataset: BacktestDataset) -> BacktestDataset:
         return dataset
 
 
@@ -550,18 +559,15 @@ def test_adv20_reads_twenty_warmup_sessions_and_caps_fills_by_them(
 class _WarmupSplit(_ShrunkWarmupValue):
     """워밍업 가운데 세션에 종목마다 자본변동을 하나 싣는다 — σ 가 그 수익률을 빼는지 본다."""
 
-    def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
-        dataset = super().load_backtest_dataset(query)
+    def _shape(self, dataset: BacktestDataset) -> BacktestDataset:
         middle = sorted({bar.session for bar in dataset.history_bars})[10]
-        dataset = replace(
+        return replace(
             dataset,
             history_corporate_actions=tuple(
                 CorporateActionRecord(middle, security_id, "split", "2.0", f"{security_id}:split")
                 for security_id in sorted({bar.security_id for bar in dataset.history_bars})
             ),
         )
-        self.loads[-1] = (query, dataset)
-        return dataset
 
 
 def _impact(
@@ -569,10 +575,22 @@ def _impact(
     bars: tuple[MarketBarRecord, ...],
     actions: tuple[CorporateActionRecord, ...] = (),
 ) -> dict[tuple[date, str], float]:
+    rows = [(bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars]
+    confirmed = ("split", "reverse_split")
     scales = impact_scales(
         environment,
-        ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
-        {(action.session, action.security_id) for action in actions},
+        rows,
+        settlement_multipliers(
+            rows,
+            (
+                (
+                    action.session,
+                    action.security_id,
+                    float(action.ratio) if action.action_type in confirmed else 1.0,
+                )
+                for action in actions
+            ),
+        ),
     )
     assert scales is not None
     return scales

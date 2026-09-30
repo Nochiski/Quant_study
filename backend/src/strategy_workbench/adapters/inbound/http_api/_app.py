@@ -19,6 +19,7 @@ from strategy_workbench.application.assistant_chat.facade.profiles import Provid
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestArtifactUnreadableError,
+    BacktestCancelResult,
     BacktestParameterValueError,
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
@@ -28,6 +29,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunState,
     BacktestRunSummary,
     BacktestStartResponse,
+    RunKind,
     RunStatus,
     TrialLedger,
     TrialLineageAlreadyMergedError,
@@ -46,6 +48,7 @@ from strategy_workbench.application.equity_workspace.facade.workspace import (
 from strategy_workbench.application.experiment_run.facade.experiments import (
     ExperimentRunService,
 )
+from strategy_workbench.application.experiment_run.facade.ports import TrialRunRejectedError
 from strategy_workbench.application.factor_research.facade.research import (
     FactorAvailability,
     FactorCatalog,
@@ -370,10 +373,12 @@ def create_app(
             CANONICAL_PAGE_INTEGER_VALIDATOR,
         ] = 50,
         strategy_id: str | None = Query(default=None, min_length=1),
+        kind: RunKind | None = None,
     ) -> Page[BacktestRunSummary]:
         return backtest_runs.list_runs(
             PageRequest(offset=offset, limit=limit),
             strategy_id=strategy_id,
+            kind=kind,
         )
 
     def admitted(call: Callable[[], _T]) -> _T:
@@ -532,7 +537,8 @@ def create_app(
         operation_id="cancelBacktest",
         responses=_backtest_run_not_found_responses(),
     )
-    def cancel_backtest(run_id: str) -> BacktestRunState:
+    def cancel_backtest(run_id: str) -> BacktestCancelResult:
+        """사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다."""
         try:
             return backtest_runs.cancel(run_id)
         except BacktestRunNotFoundError as error:
@@ -1289,8 +1295,11 @@ def _raise_run_request_rejection(error: Exception) -> NoReturn:
     시작·미리 계산·실험 기반 검사·미리보기·추적은 같은 요청 판정(문서 검증·실행 설정 관문)을 타므로
     거절도 같은 코드·detail 로 낸다(#351). 거절 목록과 코드는 실행 유스케이스의 `rejection_code`
     하나가 소유하고, 여기서는 HTTP 상태와 코드별 detail 칸만 붙인다. 관측 데이터 부재·계약 위반은
-    요청 판정이 아니라 부르는 쪽이 옮긴다.
+    요청 판정이 아니라 부르는 쪽이 옮긴다. 실험 포트가 코드를 실어 감싼 거절
+    (`TrialRunRejectedError`)은 감싼 원래 거절로 옮긴다.
     """
+    if isinstance(error, TrialRunRejectedError) and isinstance(error.__cause__, Exception):
+        error = error.__cause__
     if isinstance(error, InvalidPortfolioRequestError):
         raise _portfolio_http_error(error) from error
     code = rejection_code(error)

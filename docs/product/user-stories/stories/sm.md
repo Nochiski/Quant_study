@@ -304,11 +304,12 @@
 > 한상목으로서 설정을 바꿔 돌릴 때마다 시도가 빠짐없이 기록되고, 같은 시도를 다시 본 것은 따로 세지 않기를
 > 바란다. 그래야 몇 번 만에 이 결과를 골랐는지 정직하게 안다.
 
-- 상태: `예정`
-- 담당 PR: V1-03, V1-04, V1-05, V5-03, V5-07
-- e2e 담당: V5-03
+- 상태: `구현됨-e2e`
+- 담당 PR: 없음
+- e2e 담당: 없음
 - 기능 영역: 시도 원장 · 백테스트 이력 · 전략 이력
-- e2e: 없음
+- e2e:
+  - `frontend/e2e/stories/sm.trial-ledger.spec.ts` :: US-SM-12 시도 원장은 설정을 바꾼 실행만 새 시도로 세고 재확인·결과 없는 요청을 따로 보이며 합치기만 있다
 
 수용 기준
 
@@ -322,6 +323,9 @@
   통합 테스트(`backend/tests/integration/test_backtest_run_restart.py`)가, 원장이 남는지는 V1-05의
   `backend/tests/application/test_trial_ledger.py`가 확인한다(브라우저 e2e로 재현하지 않는다). 노드 이름·선언
   순서가 시도 키를 바꾸지 않는지는 `backend/tests/domain/test_trial_key.py`가 손 예시로 고정한다(#335).
+  V5-03이 전략 이력의 "시도 원장" 탭과 백테스트 이력의 종류 칸·필터를 붙였다. 시작 전 취소는 브라우저 e2e로
+  재현하지 않고 원장 집계 테스트(`backend/tests/domain/test_trial_ledger.py`)가 "시도 수 제외" 역할을 지킨다. IDE 제목
+  옆 계열 시도 배지는 V5-07이 붙인다.
 
 ### US-SM-13 봉인 구간과 겹치는 실행이 이유와 교정 버튼과 함께 막힌다
 

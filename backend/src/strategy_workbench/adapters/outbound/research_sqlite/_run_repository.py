@@ -11,6 +11,7 @@ from strategy_workbench.adapters.outbound.sqlite_store.facade.timestamp import d
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
+    RunKind,
     TrialLedgerRecords,
     TrialLineageAlreadyMergedError,
 )
@@ -36,6 +37,34 @@ _SUMMARY_COLUMNS = """
     run_id, created_at, status, progress, stage, message, updated_at, error, error_code,
     artifact_sha256, strategy_kind, spec_hash, schema_version, strategy_id, revision, source_hash
 """
+# 실행 종류와 쓰는 실험(검증 랩 V5-03, #382)은 저장하지 않고 같은 파일에서 읽는다. 실험 attempt 가
+# 가리키면 실험 trial, 워크포워드 창 선택이 가리키면 검증 창 실행이다(둘 다면 attempt 가 먼저).
+# 역조회는 비상관 집계라 문장당 한 번 만들어진다(run_id 에 인덱스가 없어 상관 서브쿼리면 run 수 ×
+# attempt 수로 커진다, #386 리뷰 P2-1). 거절된 attempt·고를 칸 없는 창은 run_id 가 NULL 이라 뺀다.
+_RUNS = f"""(
+    SELECT backtest_runs.*,
+        CASE
+            WHEN trials.owner IS NOT NULL THEN '{RunKind.EXPERIMENT_TRIAL.value}'
+            WHEN picks.owner IS NOT NULL THEN '{RunKind.WALK_FORWARD_VALIDATION.value}'
+            ELSE '{RunKind.SINGLE.value}'
+        END AS kind,
+        experiments.experiment_id AS experiment_id,
+        COALESCE(experiment_controls.paused, 0) AS experiment_paused
+    FROM backtest_runs
+    LEFT JOIN (
+        SELECT run_id, MIN(experiment_order) AS owner FROM experiment_attempts
+        WHERE run_id IS NOT NULL GROUP BY run_id
+    ) AS trials USING (run_id)
+    LEFT JOIN (
+        SELECT run_id, MIN(experiment_order) AS owner FROM experiment_window_picks
+        WHERE run_id IS NOT NULL GROUP BY run_id
+    ) AS picks USING (run_id)
+    LEFT JOIN experiments
+        ON experiments.experiment_order = COALESCE(trials.owner, picks.owner)
+    LEFT JOIN experiment_controls
+        ON experiment_controls.experiment_order = experiments.experiment_order
+)"""
+_READ_COLUMNS = f"{_SUMMARY_COLUMNS}, kind, experiment_id, experiment_paused"
 
 
 class SQLiteBacktestRunRepository:
@@ -57,13 +86,13 @@ class SQLiteBacktestRunRepository:
 
     def add(
         self,
-        summary: BacktestRunSummary,
+        run: BacktestRunState,
+        provenance: StrategyProvenance,
         request: BacktestRunSpec,
         *,
         lineage_id: str | None,
         trial_key: str,
     ) -> None:
-        run, provenance = summary.run, summary.strategy_provenance
         with self._database.transaction(write=True) as connection:
             inserted = connection.execute(
                 f"""
@@ -105,7 +134,7 @@ class SQLiteBacktestRunRepository:
     def get(self, run_id: str) -> BacktestRunSummary:
         with self._database.transaction(write=False) as connection:
             row = connection.execute(
-                f"SELECT {_SUMMARY_COLUMNS} FROM backtest_runs WHERE run_id = ?", (run_id,)
+                f"SELECT {_READ_COLUMNS} FROM {_RUNS} WHERE run_id = ?", (run_id,)
             ).fetchone()
         if row is None:
             raise BacktestRunNotFoundError(run_id)
@@ -121,19 +150,19 @@ class SQLiteBacktestRunRepository:
         return decode_request(row["request_json"], run_id=run_id)
 
     def list(
-        self, page: PageRequest, *, strategy_id: str | None = None
+        self, page: PageRequest, *, strategy_id: str | None = None, kind: RunKind | None = None
     ) -> Page[BacktestRunSummary]:
-        where = "WHERE ? IS NULL OR strategy_id = ?"
+        where = "WHERE (? IS NULL OR strategy_id = ?) AND (? IS NULL OR kind = ?)"
+        filters = (strategy_id, strategy_id, kind, kind)
         with self._database.transaction(write=False) as connection:
-            (total,) = connection.execute(
-                f"SELECT COUNT(*) FROM backtest_runs {where}", (strategy_id, strategy_id)
-            ).fetchone()
+            count = connection.execute(f"SELECT COUNT(*) FROM {_RUNS} {where}", filters)
+            (total,) = count.fetchone()
             rows = connection.execute(
                 f"""
-                SELECT {_SUMMARY_COLUMNS} FROM backtest_runs {where}
+                SELECT {_READ_COLUMNS} FROM {_RUNS} {where}
                 ORDER BY accepted_order DESC LIMIT ? OFFSET ?
                 """,
-                (strategy_id, strategy_id, page.limit, page.offset),
+                (*filters, page.limit, page.offset),
             ).fetchall()
         return Page(
             items=tuple(_summary(row) for row in rows),
@@ -183,7 +212,7 @@ class SQLiteBacktestRunRepository:
             entries = connection.execute(
                 f"""
                 SELECT run_id, trial_key, status, created_at, updated_at, session_sharpe,
-                    metric_registry_version
+                    metric_registry_version, error_code
                 FROM trial_ledger JOIN backtest_runs USING (accepted_order)
                 WHERE {where} ORDER BY accepted_order
                 """,
@@ -209,6 +238,7 @@ class SQLiteBacktestRunRepository:
                         updated_at=datetime.fromisoformat(row["updated_at"]),
                         session_sharpe=row["session_sharpe"],
                         metric_registry_version=row["metric_registry_version"],
+                        error_code=row["error_code"],
                     )
                     for row in entries
                 ),
@@ -252,7 +282,7 @@ class SQLiteBacktestRunRepository:
                 """,
                 _TERMINAL,
             ).fetchall()
-        return tuple(_summary(row).run for row in rows)
+        return tuple(_state(row) for row in rows)
 
     def states(self, run_ids: Collection[str]) -> dict[str, BacktestRunState]:
         ids = list(run_ids)
@@ -264,7 +294,7 @@ class SQLiteBacktestRunRepository:
                 f"WHERE run_id IN ({', '.join('?' * len(ids))})",
                 ids,
             ).fetchall()
-        return {row["run_id"]: _summary(row).run for row in rows}
+        return {row["run_id"]: _state(row) for row in rows}
 
 
 def _state_values(state: BacktestRunState) -> tuple[object, ...]:
@@ -281,25 +311,35 @@ def _state_values(state: BacktestRunState) -> tuple[object, ...]:
     )
 
 
-def _summary(row: sqlite3.Row) -> BacktestRunSummary:
+def _state(row: sqlite3.Row) -> BacktestRunState:
     run_id = row["run_id"]
     try:
         error_code = row["error_code"]
         if error_code is not None and error_code not in RUN_FAILURE_CODES:
             raise ValueError(f"unknown error_code={error_code!r}")
+        return BacktestRunState(
+            run_id=run_id,
+            status=RunStatus(row["status"]),
+            progress=row["progress"],
+            stage=row["stage"],
+            message=row["message"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            error=row["error"],
+            error_code=cast(RunFailureCode | None, error_code),
+            artifact_sha256=row["artifact_sha256"],
+        )
+    except (TypeError, ValueError) as error:
+        raise ResearchStorageError(
+            f"stored backtest run failed integrity validation — run_id={run_id}: {error}"
+        ) from error
+
+
+def _summary(row: sqlite3.Row) -> BacktestRunSummary:
+    run = _state(row)
+    try:
         return BacktestRunSummary(
-            run=BacktestRunState(
-                run_id=run_id,
-                status=RunStatus(row["status"]),
-                progress=row["progress"],
-                stage=row["stage"],
-                message=row["message"],
-                created_at=datetime.fromisoformat(row["created_at"]),
-                updated_at=datetime.fromisoformat(row["updated_at"]),
-                error=row["error"],
-                error_code=cast(RunFailureCode | None, error_code),
-                artifact_sha256=row["artifact_sha256"],
-            ),
+            run=run,
             strategy_provenance=StrategyProvenance(
                 kind=StrategySourceKind(row["strategy_kind"]),
                 spec_hash=row["spec_hash"],
@@ -308,10 +348,13 @@ def _summary(row: sqlite3.Row) -> BacktestRunSummary:
                 revision=row["revision"],
                 source_hash=row["source_hash"],
             ),
+            kind=RunKind(row["kind"]),
+            experiment_id=row["experiment_id"],
+            experiment_paused=bool(row["experiment_paused"]),
         )
     except (TypeError, ValueError) as error:
         raise ResearchStorageError(
-            f"stored backtest run failed integrity validation — run_id={run_id}: {error}"
+            f"stored backtest run failed integrity validation — run_id={run.run_id}: {error}"
         ) from error
 
 

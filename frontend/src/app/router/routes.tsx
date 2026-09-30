@@ -10,6 +10,7 @@ import {
   type RouterHistory,
 } from "@tanstack/react-router";
 
+import { isRunKind, type RunKind } from "../../entities/backtest";
 import { strategyDocumentQuery } from "../../entities/strategy";
 import {
   STRATEGY_VIEWS,
@@ -45,7 +46,11 @@ type StrategyDocumentSearch = {
   security?: string;
   draft?: string;
 };
-type BacktestHistorySearch = { offset?: number; strategy?: string };
+type BacktestHistorySearch = {
+  offset?: number;
+  strategy?: string;
+  kind?: RunKind;
+};
 
 /** Selection/projection state for every StrategySpec authoring route. */
 const strategyDocumentSearch = (
@@ -112,6 +117,7 @@ const backtestHistorySearch = (
     typeof search.strategy === "string" && search.strategy.trim() !== ""
       ? search.strategy.trim()
       : undefined,
+  kind: isRunKind(search.kind) ? search.kind : undefined,
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({

@@ -350,6 +350,67 @@ export type AssistantUnprocessableResponse = {
 };
 
 /**
+ * BacktestCancelResult
+ *
+ * 취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면
+ * `kept_by_owners` 가 참이다 — 화면은 이 칸으로 "실험이 쓰는 실행" 을 알린다(#382).
+ */
+export type BacktestCancelResult = {
+  /**
+   * Artifact Sha256
+   */
+  artifact_sha256?: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Error Code
+   */
+  error_code?:
+    | "portfolio.strategy.invalid"
+    | "portfolio.data.unavailable"
+    | "portfolio.raw_observation.invalid"
+    | "backtest.run.invalid"
+    | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
+    | "backtest.run.internal"
+    | "backtest.run.interrupted"
+    | null;
+  /**
+   * Kept By Owners
+   */
+  kept_by_owners?: boolean;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Progress
+   */
+  progress: number;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Stage
+   */
+  stage: string;
+  status: RunStatus;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+};
+
+/**
  * BacktestEnvironmentRequiredDetail
  *
  * 실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
@@ -609,6 +670,9 @@ export type BacktestRunState = {
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -639,8 +703,21 @@ export type BacktestRunState = {
  * BacktestRunSummary
  *
  * One accepted run and the strategy meaning resolved before it started.
+ *
+ * 종류와 쓰는 실험은 저장소가 읽을 때 정한다. 사용자가 시작한 run 을 실험이 이어 쓰면(같은 입력
+ * 잇기) 실험 run 이다. `experiment_paused` 는 그 실험이 일시정지돼 대기 run 이 배정되지 않는다는
+ * 뜻이다.
  */
 export type BacktestRunSummary = {
+  /**
+   * Experiment Id
+   */
+  experiment_id: string | null;
+  /**
+   * Experiment Paused
+   */
+  experiment_paused: boolean;
+  kind: RunKind;
   run: BacktestRunState;
   strategy_provenance: StrategyProvenance;
 };
@@ -665,6 +742,10 @@ export type BacktestSeries = {
    * Rolling Sharpe
    */
   rolling_sharpe: Array<RollingMetricPoint>;
+  /**
+   * Rolling Sharpe Window Sessions
+   */
+  rolling_sharpe_window_sessions?: number | null;
 };
 
 /**
@@ -1184,10 +1265,7 @@ export type DatasetFieldProfile = {
    * Field Id
    */
   field_id: string;
-  /**
-   * Frequency
-   */
-  frequency: string;
+  frequency: FieldFrequency;
   /**
    * Label
    */
@@ -1587,6 +1665,7 @@ export type ExperimentErrorDetail = {
     | "experiment.search.too_many_points"
     | "experiment.search.unknown_parameter"
     | "experiment.selection.not_completed"
+    | "experiment.selection.not_finished"
     | "experiment.split.invalid"
     | "experiment.split.no_window"
     | "experiment.trial.not_found"
@@ -1698,9 +1777,21 @@ export type ExperimentRequest = {
  */
 export type ExperimentSelection = {
   /**
+   * Deflated Sharpe
+   *
+   * 고른 trial 실행의 샤프를 고를 때의 계열 N·시도 대표 샤프 분산으로 깎은 DSR(0~1). 지표가 비었거나 분산을 낼 수 없으면 비어 있다.
+   */
+  deflated_sharpe?: number | null;
+  /**
    * Experiment Id
    */
   experiment_id: string;
+  /**
+   * Ledger Representative Sharpe
+   *
+   * 고른 trial 이 속한 시도의 계열 원장 대표 샤프. 세션 단위(연율화 전)이고 그 시도에서 처음 결과가 난 실행의 값이라 고른 trial 실행의 샤프(DSR 분자)가 아닐 수 있다.
+   */
+  ledger_representative_sharpe?: number | null;
   /**
    * Parameter Values
    */
@@ -1723,6 +1814,12 @@ export type ExperimentSelection = {
    * Strategy Id
    */
   strategy_id: string;
+  /**
+   * Trial Count
+   *
+   * 고를 때의 계열 시도 수 N(계열 원장).
+   */
+  trial_count?: number | null;
   /**
    * Trial Index
    */
@@ -1829,7 +1926,7 @@ export type FactorAnalytics = {
 /**
  * FactorAvailability
  */
-export type FactorAvailability = "implemented" | "catalog_only";
+export type FactorAvailability = "implemented" | "catalog_only" | "unavailable";
 
 /**
  * FactorCatalog
@@ -2343,7 +2440,7 @@ export type FieldCatalogFacets = {
   /**
    * Frequencies
    */
-  frequencies: Array<string>;
+  frequencies: Array<FieldFrequency>;
   /**
    * Units
    */
@@ -2486,6 +2583,18 @@ export type FieldCoverageCapability = {
    */
   venues: Array<string>;
 };
+
+/**
+ * FieldFrequency
+ *
+ * 필드 값이 새로 나오는 주기. 워크벤치 어댑터가 `list_fields()` 로 내는 어휘다.
+ *
+ * 원장 `dataset_profile` 의 빈도(session·report 등)와는 다른 어휘다 — 두 어댑터가 같은 필드에
+ * 같은 빈도를 답하는지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 화면은
+ * 이 값마다 문구를 두므로(#350) 목록을 늘리면 frontend typecheck 가 문구를 요구한다.
+ */
+export type FieldFrequency =
+  "daily" | "monthly" | "quarterly" | "annual" | "event";
 
 /**
  * FieldLag
@@ -4174,6 +4283,13 @@ export type RunEnvironmentSchema = {
 };
 
 /**
+ * RunKind
+ *
+ * 백테스트 이력의 실행 종류(검증 랩 V5-03, #382). 실험이 쓴 run 이면 그 쓰임새다.
+ */
+export type RunKind = "single" | "experiment_trial" | "walk_forward_validation";
+
+/**
  * RunManifest
  *
  * What a finished run was made of.
@@ -4681,8 +4797,9 @@ export type StartTurnRequest = {
  *
  * A stored revision as an editor sees it: exact source plus what it compiles to.
  *
- * `generated` is True when the revision predates document authoring (legacy JSON API) and the
- * source shown is a canonical JSON projection of the stored spec, not text an author wrote.
+ * `generated` 는 revision 이 문서 저작 이전(legacy JSON API)이라 보이는 원문이 작성자가 쓴 글이
+ * 아니라 저장된 spec 에서 만든 문서일 때 참이다 — 승격을 걷은 현재 판 문서
+ * (`authoring_document`)다.
  */
 export type StrategyDocument = {
   /**
@@ -5874,7 +5991,12 @@ export type TraceUnprocessableResponse = {
  * TraceValueStatus
  */
 export type TraceValueStatus =
-  "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
+  | "ok"
+  | "missing_input"
+  | "warm_up"
+  | "divide_by_zero"
+  | "group_missing"
+  | "masked";
 
 /**
  * TrialAttempt
@@ -5897,7 +6019,16 @@ export type TrialAttempt = {
   /**
    * Error Code
    */
-  error_code?: string | null;
+  error_code?:
+    | "backtest.run.environment_required"
+    | "backtest.run.research_window_violation"
+    | "backtest.run.parameter_invalid"
+    | "backtest.run.invalid"
+    | "backtest.strategy.not_found"
+    | "backtest.strategy.stale"
+    | "backtest.strategy.requires_upgrade"
+    | "portfolio.strategy.invalid"
+    | null;
   /**
    * Experiment Id
    */
@@ -6052,6 +6183,10 @@ export type TrialRun = {
    * Run Id
    */
   run_id: string;
+  /**
+   * Session Sharpe
+   */
+  session_sharpe?: number | null;
   status: RunStatus;
 };
 
@@ -6457,7 +6592,12 @@ export type ValidationSeverity = "error" | "warning";
  * 값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.
  */
 export type WalkForwardGap =
-  "legacy_design" | "test_failed" | "no_cell" | "pending";
+  | "legacy_design"
+  | "cancelled"
+  | "result_unreadable"
+  | "test_failed"
+  | "no_cell"
+  | "pending";
 
 /**
  * WalkForwardReport
@@ -6528,6 +6668,9 @@ export type WalkForwardWindowResult = {
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -6569,7 +6712,16 @@ export type WindowPick = {
   /**
    * Error Code
    */
-  error_code?: string | null;
+  error_code?:
+    | "backtest.run.environment_required"
+    | "backtest.run.research_window_violation"
+    | "backtest.run.parameter_invalid"
+    | "backtest.run.invalid"
+    | "backtest.strategy.not_found"
+    | "backtest.strategy.stale"
+    | "backtest.strategy.requires_upgrade"
+    | "portfolio.strategy.invalid"
+    | null;
   /**
    * Experiment Id
    */
@@ -7045,6 +7197,10 @@ export type ListBacktestsData = {
      * Strategy Id
      */
     strategy_id?: string | null;
+    /**
+     * Kind
+     */
+    kind?: RunKind | null;
   };
   url: "/api/v1/backtests";
 };
@@ -7203,7 +7359,7 @@ export type CancelBacktestResponses = {
   /**
    * Successful Response
    */
-  200: BacktestRunState;
+  200: BacktestCancelResult;
 };
 
 export type CancelBacktestResponse =
@@ -7807,17 +7963,21 @@ export type RetryExperimentTrialData = {
 
 export type RetryExperimentTrialErrors = {
   /**
-   * The experiment or trial is missing
+   * Response 404 Retryexperimenttrial
+   *
+   * The trial or its base strategy revision is missing
    */
-  404: ExperimentErrorResponse;
+  404: ExperimentErrorResponse | BacktestStrategyNotFoundResponse;
   /**
-   * The experiment state refuses it
+   * Response 409 Retryexperimenttrial
+   *
+   * The trial is not retryable or the base revision changed
    */
-  409: ExperimentErrorResponse;
+  409: ExperimentErrorResponse | BacktestStrategyStaleResponse;
   /**
-   * Validation Error
+   * A coded experiment design or base run diagnostic
    */
-  422: HttpValidationError;
+  422: ExperimentAdmissionErrorResponse;
 };
 
 export type RetryExperimentTrialError =

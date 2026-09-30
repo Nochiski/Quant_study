@@ -266,12 +266,8 @@ uv run server
 `frontend/e2e/README.md`). 실데이터 security_id는 `{ticker}:{span_seq}`(예: `005930:1`)이며 실행 설정의
 벤치마크는 비우면 벤치마크 없이 실행한다.
 
-기동 뒤에는 서버 로그의 부팅 경고를 한 번 본다. 필드를 뺀 `catalog_*` 경고가 보이면 카탈로그를 다시
-만들고(`ledger_sync catalog`) 서버를 다시 띄운다. 카탈로그 매크로를 더한 코드를 받은 뒤에도 그렇다
-(LEDGER_SYNC §5). `profile_lag_fallback`은
-`dataset_profile`이 없거나 행이 빠져 폴백 랙으로 읽는다는 뜻이라 `sync`로 그 표를 받는다(LEDGER_SYNC §5).
-부팅을 멈추는 `catalog_locked`·`catalog_transient_error`는 예외 문장의 조치를 따른다. 코드별 뜻과
-카탈로그에 기대는 필드는 `database/docs/EQUITY_FIELD_MAP.md` §3 「부팅 검사」가 정본이다.
+기동 뒤에는 서버 로그의 부팅 경고를 한 번 본다. 경고 코드별 조치는 `database/docs/LEDGER_SYNC.md` §5,
+코드별 뜻과 카탈로그에 기대는 필드는 `database/docs/EQUITY_FIELD_MAP.md` §3 「부팅 검사」가 정본이다.
 
 ## 검증: Zipline 대조
 

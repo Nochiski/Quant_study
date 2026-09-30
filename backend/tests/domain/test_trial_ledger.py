@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 from strategy_workbench.domain.analytics.facade.metrics import session_sharpe
-from strategy_workbench.domain.backtest.facade.runs import RunStatus
+from strategy_workbench.domain.backtest.facade.runs import RunFailureCode, RunStatus
 from strategy_workbench.domain.backtest.facade.trials import (
     BlockedTrialAttempt,
     TrialLedgerEntry,
@@ -29,6 +29,7 @@ def _entry(
     *,
     done_after_minutes: int = 0,
     sharpe: float | None = None,
+    error_code: RunFailureCode | None = None,
 ) -> TrialLedgerEntry:
     return TrialLedgerEntry(
         run_id=run_id,
@@ -38,6 +39,7 @@ def _entry(
         updated_at=_AT + timedelta(minutes=done_after_minutes),
         session_sharpe=sharpe,
         metric_registry_version=None if sharpe is None else "metric-registry-v4",
+        error_code=error_code,
     )
 
 
@@ -49,7 +51,8 @@ def test_a_trial_counts_once_and_its_first_completed_run_is_the_representative()
         (
             _entry("r1", _A, RunStatus.COMPLETED, done_after_minutes=9, sharpe=0.05),
             _entry("r2", _A, RunStatus.COMPLETED, done_after_minutes=3, sharpe=0.07),
-            _entry("r3", _A, RunStatus.FAILED),
+            # 커밋 뒤 취소·완료 저장 실패처럼 결과 없이 끝났는데 샤프가 적힌 실행(#390 리뷰 P3-1).
+            _entry("r3", _A, RunStatus.FAILED, sharpe=0.2),
             _entry("r4", _A, RunStatus.RUNNING),
             _entry("r5", _B, RunStatus.CANCELLED),
         ),
@@ -63,11 +66,12 @@ def test_a_trial_counts_once_and_its_first_completed_run_is_the_representative()
         "r2",
         0.07,
     )
-    assert [(run.run_id, run.role) for run in first.runs] == [
-        ("r1", TrialRunRole.RECHECK),
-        ("r2", TrialRunRole.COUNTED),
-        ("r3", TrialRunRole.NO_RESULT),
-        ("r4", TrialRunRole.PENDING),
+    # 재확인 실행도 자기 세션 샤프를 싣는다(워크포워드 창 고르기의 학습 점수).
+    assert [(run.run_id, run.role, run.session_sharpe) for run in first.runs] == [
+        ("r1", TrialRunRole.RECHECK, 0.05),
+        ("r2", TrialRunRole.COUNTED, 0.07),
+        ("r3", TrialRunRole.NO_RESULT, None),
+        ("r4", TrialRunRole.PENDING, None),
     ]
     assert second.representative_run_id is None
     assert [run.role for run in second.runs] == [TrialRunRole.NO_RESULT]
@@ -128,3 +132,29 @@ def test_the_session_sharpe_undoes_the_annualisation() -> None:
     assert session_sharpe(1.5 * math.sqrt(250 / 252), 250) == pytest.approx(
         session_sharpe(1.5, 252)
     )
+
+
+def test_a_wiped_out_run_is_a_result_that_counts_without_a_sharpe() -> None:
+    """#383: 파산은 연구자가 보고 버린 선택지라 N 에 든다. 대표 샤프가 없고, 나중 완료는 재확인이다.
+    파산 아닌 실패는 여전히 N 에서 빠진다."""
+    wiped = "backtest.run.equity_wiped_out"
+    ledger = summarize_trial_ledger(
+        "s-1",
+        (),
+        (
+            # 파산 실행에 값이 적혀 있어도 샤프는 없다(#390 리뷰 P3-1 과 같은 규칙).
+            _entry("r1", _A, RunStatus.FAILED, done_after_minutes=1, sharpe=0.3, error_code=wiped),
+            _entry("r2", _A, RunStatus.COMPLETED, done_after_minutes=5, sharpe=0.07),
+            _entry("r3", _B, RunStatus.FAILED, error_code="backtest.run.internal"),
+        ),
+        (),
+    )
+
+    first, second = ledger.trials
+    assert ledger.trial_count == 1
+    assert (first.representative_run_id, first.representative_sharpe) == ("r1", None)
+    assert [(run.role, run.session_sharpe) for run in first.runs] == [
+        (TrialRunRole.COUNTED, None),
+        (TrialRunRole.RECHECK, 0.07),
+    ]
+    assert [run.role for run in second.runs] == [TrialRunRole.NO_RESULT]

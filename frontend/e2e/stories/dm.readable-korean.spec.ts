@@ -14,12 +14,17 @@ import type {
   PageBacktestRunSummary,
 } from "../../src/shared/api/generated";
 import {
+  backtest,
   expectPhase,
+  fillRunEnvironment,
   GOLDEN,
   mustReplace,
   openEditor,
   replaceSource,
+  RUN_ENVIRONMENT,
+  runSettingsInputs,
   saveAndWaitForRevision,
+  strategyIdentity,
 } from "../workbench-helpers";
 
 test(
@@ -177,6 +182,9 @@ test(
       items: [
         {
           run: WIPED_OUT,
+          kind: "single",
+          experiment_id: null,
+          experiment_paused: false,
           strategy_provenance: {
             kind: "saved_revision",
             strategy_id: "strategy-dm06",
@@ -245,7 +253,7 @@ test(
       name: "동일 설정으로 다시 실행하지 못했습니다",
     });
     await expect(rejection).toContainText(
-      "전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+      "전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 실행하세요.",
     );
     await expect(rejection.getByRole("group")).toContainText(
       "got=start=2018-01-02",
@@ -253,6 +261,57 @@ test(
     await expect(rejection).not.toContainText("got=start", {
       useInnerText: true,
     });
+  },
+);
+
+// 실제 backend 로 두 실패를 만든다. 이력 단언은 다른 스토리가 run id 로 거르므로 이 실행들이 흔들지 않는다.
+test(
+  "US-DM-06 한 번도 사지 않은 실행과 데이터가 모르는 벤치마크는 실패 문장이 고칠 곳을 말한다",
+  { tag: ["@story", "@US-DM-06"] },
+  async ({ page }) => {
+    test.setTimeout(240_000);
+    await openEditor(page, "/research/strategies/new");
+    await replaceSource(
+      page,
+      mustReplace(GOLDEN, "퀄리티 모멘텀", "US-DM-06 실패 문장"),
+    );
+    await expectPhase(page, "검증 통과");
+    await saveAndWaitForRevision(page, 1);
+    const { strategyId } = strategyIdentity(page);
+    const failure = page.getByRole("alert", { name: "실행 오류" });
+
+    // 월별 리밸런싱은 달의 마지막 거래일에 정해 다음 거래일에 산다. 1월 둘째 주만 돌리면 판단일(01-12)이
+    // 기간의 끝이라 살 날이 없다 — "실행 설정과 엔진 능력"이 아니라 기간·리밸런싱을 고치라고 말한다(#360).
+    await fillRunEnvironment(
+      page,
+      {},
+      { ...RUN_ENVIRONMENT, start: "2024-01-08", end: "2024-01-12" },
+    );
+    await expect(backtest(page)).toBeEnabled();
+    await backtest(page).click();
+    await expect(failure).toContainText(
+      "기간 안에 리밸런싱일이 없거나 조건을 통과한 종목이 없어 한 번도 사지 않았습니다.",
+      { timeout: 120_000 },
+    );
+    await expect(failure).not.toContainText("엔진 능력");
+
+    // 데이터가 모르는 벤치마크 ID 는 tape 계산 전에 실패하고 벤치마크 칸을 고치라고 말한다(#361).
+    await openEditor(page, `/research/strategies/${strategyId}/revisions/1`);
+    const { toggle, start, end } = runSettingsInputs(page);
+    await toggle.click();
+    await start.fill(RUN_ENVIRONMENT.start);
+    await end.fill(RUN_ENVIRONMENT.end);
+    await page
+      .getByRole("textbox", { name: /^벤치마크 종목 ID/ })
+      .fill("KOSPI");
+    await toggle.click();
+    await expect(backtest(page)).toBeEnabled();
+    await backtest(page).click();
+    await expect(failure).toContainText(
+      "데이터 소스에 없는 벤치마크 종목 ID입니다.",
+      { timeout: 60_000 },
+    );
+    await expect(failure.getByRole("group")).toContainText("got=['KOSPI']");
   },
 );
 

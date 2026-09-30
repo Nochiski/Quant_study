@@ -177,6 +177,7 @@ def compute_analytics(
         drawdown_curve=drawdowns,
         monthly_returns=_monthly_returns(points, anchored_equity[0]),
         rolling_sharpe=rolling_sharpe[-len(points) :],
+        rolling_sharpe_window_sessions=rolling_window,
         base_rate_carried_sessions=tuple(
             item.session for item in anchored[:-1] if item.session > BASE_RATE_CONFIRMED_ON
         ),

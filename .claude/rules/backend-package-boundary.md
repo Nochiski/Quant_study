@@ -84,7 +84,8 @@ bootstrap ─> application + adapters
 - mock의 raw PIT port(`load_raw_observations`)는 fixture 달력 안에서는 `load_panel`과 같은
   Observation 행·PIT cut-off를 읽고, 달력 밖에서는 절대 영업일 index 기반 synthetic 시계열을
   만든다. 두 경우 모두 (security, date)만의 함수이며 query window에 의존하지 않는다. 실패는
-  `status`/`detail` 값으로 돌려주고 미지 field·universe를 합성하지 않는다.
+  `status`/`detail` 값으로 돌려주고 미지 field·universe를 합성하지 않는다. 백테스트 데이터
+  포트(`load_backtest_dataset`)도 fixture 밖 종목·벤치마크를 합성하지 않고 duckdb처럼 거절한다(#361).
 
 ## 강제 게이트
 

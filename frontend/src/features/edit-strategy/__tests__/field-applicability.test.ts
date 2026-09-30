@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { ApplicableWhen } from "../../../shared/api";
-import { tOptional } from "../../../shared/config";
-import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import {
   isApplicableWhen,
   projectApplicability,
+  type ApplicableWhen,
   type DefaultResolver,
-} from "../model/field-applicability";
+} from "../../../shared/api";
+import { tOptional } from "../../../shared/config";
+import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { JsonSchema } from "../model/schema-navigator";
 
 const SCHEMA = JSON.parse(

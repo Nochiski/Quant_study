@@ -269,6 +269,8 @@ def test_the_mock_adapter_answers_every_field_contract_and_provides_group_series
 
     field_ids = tuple(profile.field_id for profile in adapter.list_fields())
     assert catalog == adapter.resolve_factor_fields(field_ids).fields
+    # 위 등식은 모르는 id 를 버려 한 방향뿐이다. AI 팩터 도구의 `list_fields` 와 같은 집합(#370)
+    assert {field.field_id for field in catalog} == set(field_ids)
     assert NodeValueType.GROUP_SERIES in {field.value_type for field in catalog}
 
 

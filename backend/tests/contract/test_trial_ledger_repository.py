@@ -19,7 +19,6 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunNotFoundError,
     BacktestRunSpec,
     BacktestRunState,
-    BacktestRunSummary,
     RunStatus,
     StrategyProvenance,
     StrategySourceKind,
@@ -31,10 +30,8 @@ _AT = datetime(2026, 9, 30, 9, 0, tzinfo=UTC)
 
 def _add(repository: SQLiteBacktestRunRepository, run_id: str, lineage_id: str | None) -> None:
     repository.add(
-        BacktestRunSummary(
-            BacktestRunState(run_id, RunStatus.QUEUED, 0.0, "queued", "Run accepted", _AT, _AT),
-            StrategyProvenance(StrategySourceKind.INLINE_DRAFT, "a" * 64, "1.2"),
-        ),
+        BacktestRunState(run_id, RunStatus.QUEUED, 0.0, "queued", "Run accepted", _AT, _AT),
+        StrategyProvenance(StrategySourceKind.INLINE_DRAFT, "a" * 64, "1.2"),
         BacktestRunSpec(),
         lineage_id=lineage_id,
         trial_key=run_id[-1] * 64,
@@ -102,3 +99,29 @@ def test_a_trial_result_for_an_unknown_run_is_refused(tmp_path: Path) -> None:
         repository.record_trial_result(
             "missing", session_sharpe=0.1, metric_registry_version="metric-registry-v4"
         )
+
+
+def test_a_failed_run_carries_its_failure_code_into_the_ledger(tmp_path: Path) -> None:
+    """#383: 파산 여부를 원장이 가를 수 있게 실패 분류를 싣는다."""
+    repository = SQLiteBacktestRunRepository(tmp_path / "research.sqlite3")
+    _add(repository, "run-1", "s-1")
+    repository.update(
+        BacktestRunState(
+            "run-1",
+            RunStatus.FAILED,
+            0.5,
+            "failed",
+            "Run failed",
+            _AT,
+            _AT,
+            error="equity wiped out",
+            error_code="backtest.run.equity_wiped_out",
+        )
+    )
+
+    (entry,) = repository.trial_ledger("s-1").entries
+
+    assert (entry.status, entry.error_code) == (
+        RunStatus.FAILED,
+        "backtest.run.equity_wiped_out",
+    )

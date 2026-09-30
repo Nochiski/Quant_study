@@ -10,6 +10,7 @@ import sqlite3
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -23,6 +24,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
+    RunKind,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
 from strategy_workbench.application.strategy_design.facade.ports import PageRequest
@@ -75,7 +77,19 @@ def _summary(run_id: str, *, strategy_id: str | None = None) -> BacktestRunSumma
             strategy_id=strategy_id,
             revision=None if strategy_id is None else 1,
         ),
+        kind=RunKind.SINGLE,
+        experiment_id=None,
+        experiment_paused=False,
     )
+
+
+def _add(
+    repository: SQLiteBacktestRunRepository,
+    summary: BacktestRunSummary,
+    request: BacktestRunSpec,
+    **ledger: Any,
+) -> None:
+    repository.add(summary.run, summary.strategy_provenance, request, **ledger)
 
 
 _REQUESTS = {
@@ -100,7 +114,7 @@ _REQUESTS = {
 @pytest.mark.parametrize("kind", sorted(_REQUESTS))
 def test_the_accepted_request_survives_reopening_the_file(kind: str, tmp_path: Path) -> None:
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(_summary("run-1"), _REQUESTS[kind], **_NO_LINEAGE)
+    _add(SQLiteBacktestRunRepository(path), _summary("run-1"), _REQUESTS[kind], **_NO_LINEAGE)
 
     assert SQLiteBacktestRunRepository(path).request("run-1") == _REQUESTS[kind]
 
@@ -108,8 +122,11 @@ def test_the_accepted_request_survives_reopening_the_file(kind: str, tmp_path: P
 def test_parameter_values_keep_their_types_through_the_file(tmp_path: Path) -> None:
     """`20 == 20.0 == True` 라 요청 `==` 로는 타입이 바뀐 것을 못 본다. 값마다 타입을 대조한다."""
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(
-        _summary("run-1"), _REQUESTS["saved_revision"], **_NO_LINEAGE
+    _add(
+        SQLiteBacktestRunRepository(path),
+        _summary("run-1"),
+        _REQUESTS["saved_revision"],
+        **_NO_LINEAGE,
     )
 
     restored = SQLiteBacktestRunRepository(path).request("run-1").parameter_values
@@ -126,8 +143,11 @@ def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(
     path = tmp_path / "research.sqlite3"
     repository = SQLiteBacktestRunRepository(path)
     for run_id, strategy_id in (("run-1", "s-1"), ("run-2", None), ("run-3", "s-1")):
-        repository.add(
-            _summary(run_id, strategy_id=strategy_id), _REQUESTS["saved_revision"], **_NO_LINEAGE
+        _add(
+            repository,
+            _summary(run_id, strategy_id=strategy_id),
+            _REQUESTS["saved_revision"],
+            **_NO_LINEAGE,
         )
     completed = replace(
         _summary("run-3").run,
@@ -160,6 +180,98 @@ def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(
     assert reopened.states([]) == {}
 
 
+def test_the_kind_and_owning_experiment_come_from_the_experiment_rows(tmp_path: Path) -> None:
+    # 실행 종류·쓰는 실험(검증 랩 V5-03, #382)은 같은 파일의 실험 attempt·워크포워드 창 선택이
+    # run 을 가리키는지로 정한다. 일시정지는 그 실험의 조작 행에서 읽는다.
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteBacktestRunRepository(path)
+    for run_id in ("run-1", "run-2", "run-3"):
+        _add(repository, _summary(run_id), _REQUESTS["saved_revision"], **_NO_LINEAGE)
+    with sqlite3.connect(path) as connection:
+        for experiment_id in ("e-1", "e-2"):
+            connection.execute(
+                "INSERT INTO experiments (experiment_id, created_at, design_json) VALUES (?, ?, ?)",
+                (experiment_id, _AT.isoformat(), "{}"),
+            )
+        connection.execute(
+            "INSERT INTO experiment_attempts "
+            "(experiment_order, trial_index, attempt, created_at, run_id) VALUES (1, 0, 1, ?, ?)",
+            (_AT.isoformat(), "run-2"),
+        )
+        connection.execute(
+            "INSERT INTO experiment_window_picks (experiment_order, window_index, attempt, "
+            "trial_index, train_sharpe, created_at, run_id) VALUES (2, 0, 1, 0, 0.1, ?, ?)",
+            (_AT.isoformat(), "run-3"),
+        )
+        connection.execute(
+            "INSERT INTO experiment_controls (experiment_order, paused, priority) VALUES (2, 1, 1)"
+        )
+
+    owners = [
+        (item.run.run_id, item.kind, item.experiment_id, item.experiment_paused)
+        for item in repository.list(PageRequest()).items
+    ]
+    assert owners == [
+        ("run-3", RunKind.WALK_FORWARD_VALIDATION, "e-2", True),
+        ("run-2", RunKind.EXPERIMENT_TRIAL, "e-1", False),
+        ("run-1", RunKind.SINGLE, None, False),
+    ]
+    for kind, run_id in (
+        (RunKind.SINGLE, "run-1"),
+        (RunKind.EXPERIMENT_TRIAL, "run-2"),
+        (RunKind.WALK_FORWARD_VALIDATION, "run-3"),
+    ):
+        page = repository.list(PageRequest(), kind=kind)
+        assert ([item.run.run_id for item in page.items], page.total) == ([run_id], 1)
+    assert repository.get("run-3").experiment_id == "e-2"
+
+
+def test_kind_filters_stay_exact_with_rejected_attempts_among_many_runs(tmp_path: Path) -> None:
+    # #386 리뷰 P2-1: 역조회를 비상관 집계로 바꿨다. 거절된 attempt(run_id NULL)가 섞여도 단일 실행
+    # 필터가 비지 않아야 한다. 규모별 시간은 PR 본문에 쟀고 여기서는 결과만 본다.
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteBacktestRunRepository(path)
+    runs, at = 2_000, _AT.isoformat()
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            "INSERT INTO backtest_runs (run_id, status, progress, stage, message, created_at, "
+            "updated_at, strategy_kind, spec_hash, schema_version, request_json) "
+            "VALUES (?, 'completed', 1.0, 'completed', 'done', ?, ?, 'inline_draft', ?, '1.2', "
+            "'{}')",
+            [(f"run-{index}", at, at, "a" * 64) for index in range(runs)],
+        )
+        connection.execute(
+            "INSERT INTO experiments (experiment_id, created_at, design_json) "
+            "VALUES ('e-1', ?, '{}')",
+            (at,),
+        )
+        # 짝수 run 은 attempt 가 가리키고 홀수 자리 attempt 는 거절돼 run 이 없다. 4 로 나눠 1 남는
+        # run 은 창 선택이 가리킨다.
+        connection.executemany(
+            "INSERT INTO experiment_attempts (experiment_order, trial_index, attempt, created_at, "
+            "run_id, error_code, error) VALUES (1, ?, 1, ?, ?, ?, ?)",
+            [
+                (index, at, f"run-{index}", None, None)
+                if index % 2 == 0
+                else (index, at, None, "backtest.run.invalid", "rejected")
+                for index in range(runs)
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO experiment_window_picks (experiment_order, window_index, attempt, "
+            "trial_index, train_sharpe, created_at, run_id) VALUES (1, ?, 1, 0, 0.1, ?, ?)",
+            [(index, at, f"run-{index}") for index in range(1, runs, 4)],
+        )
+
+    totals = {kind: repository.list(PageRequest(limit=1), kind=kind).total for kind in RunKind}
+    assert totals == {
+        RunKind.SINGLE: 500,
+        RunKind.EXPERIMENT_TRIAL: 1_000,
+        RunKind.WALK_FORWARD_VALIDATION: 500,
+    }
+    assert len(repository.states([f"run-{index}" for index in range(runs)])) == runs
+
+
 def test_an_unknown_run_is_not_found(tmp_path: Path) -> None:
     repository = SQLiteBacktestRunRepository(tmp_path / "research.sqlite3")
 
@@ -173,8 +285,11 @@ def test_an_unknown_run_is_not_found(tmp_path: Path) -> None:
 
 def test_a_stored_failure_code_outside_the_vocabulary_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(
-        _summary("run-1"), _REQUESTS["saved_revision"], **_NO_LINEAGE
+    _add(
+        SQLiteBacktestRunRepository(path),
+        _summary("run-1"),
+        _REQUESTS["saved_revision"],
+        **_NO_LINEAGE,
     )
     with sqlite3.connect(path) as connection:
         connection.execute("UPDATE backtest_runs SET error_code = 'backtest.run.gone'")

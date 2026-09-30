@@ -6,7 +6,7 @@ current_phase: P4
 current_pr: P4-02
 active_prs: [P4-02]
 parallel_window: []
-last_updated: 2026-09-30T11:30:03+09:00
+last_updated: 2026-09-30T13:53:08+09:00
 planned_prs: 30
 merged_prs: 21
 integrated_prs: 0
@@ -30,7 +30,7 @@ progress_percent: 70
 | Active PR | `P4-02` |
 | Progress | `21 / 30 done (70%), main 21, integration 0` |
 | Approved | `21 / 30` |
-| Aggregated at | `2026-09-30 11:30 KST` |
+| Aggregated at | `2026-09-30 13:53 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -908,11 +908,20 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
    (DEFECT-242-04). e2e 의 `REQUESTED_ENVIRONMENT` 는 요청 계약 단언이라 기본값을 손으로 적어 둔다. enum 은 select,
    숫자는 범위 검증이 붙은 입력, `format: date` 는 날짜 입력, `x-catalog: universe` 는 카탈로그 목록이 없어
    텍스트 입력이다(Form 의 universe 카탈로그 컨트롤과 같은 규칙).
-3. **명시 `environment` 의 422 는 필드 단위 구조로 바꾸지 않는다(결정 항목).** 패널이 같은 스키마의 범위·필수와
-   기간 순서(`start <= end`)를 빠른 피드백으로 먼저 막아, 필드 옆 오류는 패널이 스스로 낸다. 그래도 서버가
-   거절하면(스키마 밖 규칙) 기존 툴바 실패 문구가 backend detail 을 보인다. inbound 에서 `RunEnvironment` 를
-   다시 구성해 코드화된 detail 로 바꾸는 대안은 pydantic 메시지 문자열을 파싱하지 않고도 필드를 알 수 있게
-   하지만, 패널 검증이 같은 SoT 를 읽는 동안에는 도달 경로가 없어 계약만 넓힌다.
+3. **패널은 스키마가 말하는 규칙을 먼저 막고, 스키마 밖 규칙은 서버의 코드화된 거절로 고친다.** 패널이 같은
+   스키마의 범위·필수·enum 과 칸 적용 조건(`x-applicable-when` — 지금 모드에서 읽히지 않는 칸은 끄고 요청에
+   싣지 않으며 읽히는 칸은 비울 수 없다, #352)을 빠른 피드백으로 먼저 막아, 필드 옆 오류는 패널이 스스로
+   낸다. 스키마 밖 규칙은 둘이다. 기간 순서(`start <= end`)는 스키마에 두 칸을 견주는 표기가 없어 패널이 같은
+   규칙을 옮겨 적는다(`validateRunEnvironment`). 연구 하한(측정 시작일 ≥ 2020-01-02, V1-01)은
+   `RunEnvironment` 가 아니라 실행 관문(`require_research_window`)의 규칙이라 스키마에 없다 — 서버가
+   `backtest.run.research_window_violation`(detail 에 `research_start`)으로 거절하면 툴바가 그 날짜로
+   시작일을 옮기는 교정 버튼을 보인다(V5-05). 날짜 칸의 1900-01-01 ~ 9999-12-31 은 backend 규칙이 아니라
+   브라우저 날짜 입력의 연도를 4자리로 묶는 화면 범위다(#264). 그 밖의 요청 본문 검증 실패는
+   `backtest.run.field_invalid`(`field` = 본문 점 경로)로 코드화돼 툴바가 패널 칸 이름으로 말한다(#260,
+   추적·미리보기도 같은 코드 #351).
+   처음 결정(명시 `environment` 의 422 를 필드 단위 구조로 바꾸지 않는다 — 패널 검증이 같은 SoT 를 읽는
+   동안에는 도달 경로가 없다)은 매도 거래세 칸 사이 규칙(V2-01)과 연구 하한(V1-01)이 스키마 밖에 생기며
+   전제가 깨져 #260·#352 로 위와 같이 바뀌었다.
 4. **매니페스트 평면 비용 필드는 유지한다(NB-4(a)).** `RunManifest.fee_bps`·`slippage_bps`·
    `participation_rate` 는 `environment` 와 같은 값이지만, 이미 저장된 run 과 결과 설명 도구가 읽는
    필드라 지우면 OpenAPI·저장소 호환이 함께 움직인다. 화면(run 상세)은 `environment` 만 읽는다.
@@ -1158,6 +1167,7 @@ Phase exit:
 
 | PR | 명령 | 결과 | 일시 |
 |---|---|---|---|
+| `P4-02` | P4-02a main `227a655a` 병합(`b9e4b915`) 뒤: frontend `typecheck`·`lint`(전체)·`typecheck:e2e`, `test`(전체), Graph 관련 e2e(workflow·story 3). CI R2 실패 뒤 `e2f9e47a`: `PARSE_DELAY_MS` 4000 재현 조건에서 R1·R2, 평소 조건 반복 3회, route 파일 전체 | 병합 뒤 Vitest 91 files 1180/1180 · e2e 16/16 · CI R2 가 두 run 모두 "마지막 compile = 편집 전 원문"으로 실패 → 재현 조건에서 같은 실패 재현, 고친 뒤 재현 조건 2/2·반복 3/3·route 83/83 | 2026-09-30 |
 | `P4-02` | P4-02b r1 반영(테스트·문서만, 코드 tip `ce7c9cea` 그대로): frontend `typecheck`·변경 파일 `eslint`, 변경 범위 vitest(edit-strategy·shared/config·pages·`document-routes`·`stylesheets`), 리뷰 돌연변이 M5(목록 `aria-current` 제거)·M3(캔버스 밖 이름 손 목록)·M8(`const` 필터 제거)·M4c(캔버스 추가 버튼 disabled 무시) 재현 | tsc·eslint 0 · Vitest 49 files 611/611 · 네 돌연변이 모두 새 테스트가 잡음 | 2026-09-30 |
 | `P4-02` | P4-02b rebase 뒤 코드 tip `ce7c9cea`(#392 r1 `4d658d75` 위): frontend `typecheck`·`lint`(전체), 변경 범위 vitest(edit-strategy·shared/config·pages·`document-routes`·`stylesheets`), `node e2e/run-playwright.mjs`(포트 8235/5235) — workflow spec, Graph 탭 story spec 3개, rebase 중 커밋마다 `tsc --noEmit`(`git rebase --exec`) | tsc·lint 0 · Vitest 49 files 608/608 · e2e 16/16(기준선 그대로) · 커밋 넷 모두 타입 통과 | 2026-09-30 |
 | `P4-02` | P4-02b rebase 전 tip `c3517998`(#392 `859ff479` 위): frontend `typecheck`·`lint`(전체)·`test`(전체)·`typecheck:e2e`, `node e2e/run-playwright.mjs`(포트 8235/5235, 빌드 포함, 전 spec), 루트 `user_story_trace`·`conflict_markers`, 1440 캔버스 캡처(임시 spec, 커밋 안 함 — 규칙 추가 뒤 항목 카드·5 실행 안내) | tsc·lint 0 · Vitest 90 files 1149/1149 · e2e 49/49 · 스토리 40·태그 e2e 30 · 표식 0 · 문제 행 route 테스트 돌연변이(캔버스 판정 끔) 실패 확인 · 남은 프로세스 0 | 2026-09-30 |
@@ -1183,6 +1193,7 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-30 — **P4-02a main 병합과 CI R2 타이밍 수정**([#392](https://github.com/Nochiski/Quant_study/pull/392)). 리드 머지 순서(#387 → #389 → #392)대로 main `227a655a` 를 merge 했다(`b9e4b915`, force push 없음, 충돌은 정본 대장 한 곳 — 검증 랩 두 행은 main, "그래프 표현 투영" 행은 `.card` 문장). 그 뒤 CI 두 run 에서 route R2 가 "마지막 compile 이 편집 전 원문"으로 실패했다. 원인은 테스트 타이밍이다: 빠른 러너에서 문서를 연 지 약 60ms 만에(첫 parse 150ms 전) 카드에 입력해, 빈 parse 로 그려진 캔버스가 적힌 칸을 미작성으로 보였고 확정이 insert-key 가 되어 parse 대기 중 구조 연산 보류(`pending`, 설계대로)로 버려졌다. `PARSE_DELAY_MS` 4000 으로 같은 실패를 재현했다. 테스트가 문서 상태 배지 `data-settled`(e2e `waitForSettledDocument` 와 같은 신호)를 기다린 뒤 편집하고, "마지막 compile" 대신 원문 일치 + 정착 + 그 원문의 compile 요청을 보게 고쳤다(`e2f9e47a`, 단언은 그대로). 관찰(후속 후보): 문서를 연 직후 첫 parse 전 약 150ms 동안 Form·캔버스가 스키마 기본값으로 그려진다 — 그 사이 편집은 보류 안내와 함께 버려진다. Form 부터 있던 동작이다.
 - 2026-09-30 — **P4-02b 리뷰 r1 반영**([#395](https://github.com/Nochiski/Quant_study/pull/395), `review_pr395` r1 APPROVE, 리드 지시). 코드는 그대로 두고 테스트·문서만 더했다. (1) P3-1: 빈 문서의 첫 문제(`/factors` "팩터를 하나 이상 추가하세요")를 Graph 탭에서 누르면 캔버스 알파 팩터 목록 group 이 `aria-current` 와 마지막 스크롤을 받는 route 테스트. (2) P3-2: `unstagedNames` 가 정확히 [전략 이름·전략 설명·탐색 파라미터]이고, 스키마 사본에서 `parameters` 에 단계를 주면 빠진다 — 손 목록·`const` 필터 제거를 구별한다. (3) P3-3: 캔버스 규칙 추가 버튼이 settling 이면 잠기고 사유를 설명으로 단다(P4-04 가 Form 목록을 걷어도 남는다). (4) P3-4: 캔버스 규칙은 참조되지 않아 삭제 거부가 일어나지 않는다(PR 본문 정정). 팩터 카드가 같은 거부를 쓸 때 이름으로 말하라는 한 줄을 WORKFLOW P4-03 acceptance 에 적었다. (5) P3-5: R2-1 주석을 제 테스트("scrolls to the editor row…") 앞으로 옮겼다. US-DM-07 비고 보강은 하지 않는다(리드).
 - 2026-09-30 — **P4-02b PR [#395](https://github.com/Nochiski/Quant_study/pull/395)**(base `feat/lang2-p4-02-stage-cards`). (1) 문제 행 이동: 캔버스가 그리는 카드 행·목록·항목 pointer(`pipelineCoversPointer`, 포함 규칙은 `coversPointer`)는 Graph 탭에 머문 채 그 카드로 간다. 캔버스의 단계는 schema 가 정하므로 `resolveDiagnosticDestination` 입력 `schemaLoaded` 를 `schema` 로 바꿨다. (2) 규칙 추가·삭제는 Form 목록과 같은 `listAddition`·`useItemRemoval` — a 에서 되돌린 두 추출을 쓰는 곳이 생긴 여기서 다시 뗐고, 삭제 거부 문장도 훅이 만든다. (3) "5 실행" 안내는 네 단계 아래 한 줄이다. "이 캔버스에 없는 것"은 단계 없는 섹션 이름을 스키마에서 뽑는다(`unstagedNames`). (4) US-DM-07 비고 한 줄, 상태 `예정` 유지. 리드 지시로 r1 반영된 #392 위로 rebase 했다(새 route 단언도 `lastVisibleScroll`). P4-02 상태 `IN_REVIEW`(a 는 r1 APPROVE 반영·머지 대기, b 는 `review_pr395` 리뷰 중).
 - 2026-09-30 — **P4-02a 리뷰 r1 반영**([#392](https://github.com/Nochiski/Quant_study/pull/392), `review_pr392` r1 APPROVE, 리드 지시로 머지 전 반영). (1) P2-1: long_short 값 틀("공매도는 하위 {short_selection_count}종목")은 상위 비율 문서에서 적용되지 않는 칸을 사실처럼 보였다 — ko·en 틀을 지워 카드가 `side.card` 로 떨어지고 그 칸은 틀 밖 행(적용될 때만 보임)이 된다. (2) P3-1: 살아남은 돌연변이 B(앵커 섹션 확정)·C(카드 되돌리기 제거)를 잡는 단언과 정규화 단위 경고 인라인 단언을 더했다. (3) P3-2: `useRevealSelection` 의 숨은 탭 분기는 브라우저 동작을 바꾸지 않는다(`[hidden]` 은 display:none) — 운영 코드를 main 그대로 되돌리고 route 단언이 숨은 탭 안 호출을 걸러 본다(위 P4-02a PR 기록의 분기 서술은 이것으로 대체). (4) P3-3: 페이지 catalogs 한 벌, `coversPointer` 한 곳, `defaultFromValueOf` 형제 목록 조회 한 벌, `useFieldCommit` 의 컨트롤 묶음, 컨트롤 CSS 한 규칙. a 에서 Form 만 쓰던 `listAddition`·`useItemRemoval` 추출은 되돌려 b 로 넘겼다. (5) P3-4: 정본 대장 "그래프 표현 투영"·"필드 표시 사실" 행에 `.card` 틀과 조회 순서, PLAN ③ 서술(`FieldEditor` 는 없다), 기준선 설명(노드 목록 글자 안티앨리어싱)을 실제대로 고쳤다. 캔버스만 선택지 이름을 보이고 Form 은 "id · 이름"인 차이는 P4-04 가 Form 을 걷을 때 정리한다. P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395) 는 #392 머지 뒤 main 위로 옮긴다.

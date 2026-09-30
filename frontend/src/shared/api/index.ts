@@ -44,6 +44,13 @@ export type {
   UsageView,
 } from "./generated/types.gen";
 export {
+  isApplicableWhen,
+  projectApplicability,
+  type ApplicabilityCondition,
+  type DefaultResolver,
+  type FieldApplicability,
+} from "./field-applicability";
+export {
   ApiRequestError,
   configureStrategyWorkbenchApi,
   failureReason,
@@ -81,6 +88,7 @@ export {
   type RevisionSummary,
   type RunEnvironment,
   type RunEnvironmentSchema,
+  type RunKind,
   type SaveDocumentRequest,
   type SaveStrategyDraftRequest,
   type SavedRevisionReference,
@@ -94,6 +102,7 @@ export {
   type StrategySummary,
   type StrategyTraceRequest,
   type StrategyTraceResponse,
+  type TrialLedger,
   type TrialPreview,
   type UpgradedDocument,
 } from "./strategy-workbench";

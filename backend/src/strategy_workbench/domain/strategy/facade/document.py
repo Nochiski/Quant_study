@@ -6,6 +6,7 @@ from strategy_workbench.domain.strategy._hydrate import (
     HydrationStatus,
     StrategyHydration,
     StructuralIssue,
+    authoring_document,
     hydrate_saved_strategy,
     hydrate_strategy_document,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "UpgradeWarning",
     "hydrate_saved_strategy",
     "apply_upgrade_steps",
+    "authoring_document",
     "hydrate_strategy_document",
     "is_frozen_schema_version",
     "legacy_shape_hints",

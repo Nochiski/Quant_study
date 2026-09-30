@@ -8,15 +8,19 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from threading import RLock, Thread
 
-from strategy_workbench.domain.analytics.facade.metrics import EquityCurvePoint, MetricRegistry
+from strategy_workbench.domain.analytics.facade.metrics import (
+    EquityCurvePoint,
+    MetricRegistry,
+)
 from strategy_workbench.domain.backtest.facade.runs import (
+    AdmissionRejectionCode,
     BacktestRunSpec,
     BacktestRunState,
     RunFailureCode,
     RunStatus,
     SavedRevisionReference,
 )
-from strategy_workbench.domain.backtest.facade.trials import preview_trial, representative_sharpe
+from strategy_workbench.domain.backtest.facade.trials import preview_trial
 from strategy_workbench.domain.experiment.facade.design import (
     ExperimentDesign,
     ExperimentNotFoundError,
@@ -35,6 +39,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     walk_forward_retention,
     window_gap,
 )
+from strategy_workbench.domain.experiment.facade.statistics import run_deflated_sharpe
 from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentControls,
     ExperimentStatus,
@@ -52,7 +57,12 @@ from .ports.outgoing.experiment_repository import (
     TrialAttempt,
     WindowPick,
 )
-from .ports.outgoing.trial_runs import AdmittedRun, TrialRunPort, TrialRunRejectedError
+from .ports.outgoing.trial_runs import (
+    AdmittedRun,
+    TrialResultUnreadableError,
+    TrialRunPort,
+    TrialRunRejectedError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +248,11 @@ class ExperimentRunService:
         return self.get(experiment_id)
 
     def retry(self, experiment_id: str, trial_index: int) -> ExperimentTrialState:
-        """실패·취소로 끝난 trial 을 새 attempt 로 다시 넘긴다. 앞 attempt 는 그대로 남는다."""
+        """실패·취소로 끝난 trial 을 새 attempt 로 다시 넘긴다. 앞 attempt 는 그대로 남는다.
+
+        Raises:
+            TrialRunRejectedError: 기반 요청이 이제 접수되지 않는다(attempt 를 남기지 않는다).
+        """
         with self._lock:
             record = self._repository.get(experiment_id)
             state = self._trial_state(record, trial_index)
@@ -257,7 +271,12 @@ class ExperimentRunService:
             return self._trial_state(record, trial_index)
 
     def select(self, experiment_id: str, trial_index: int, reason: str) -> ExperimentSelection:
-        """끝난 trial 을 후보로 고른 기록을 남긴다(spec D9)."""
+        """끝난 trial 을 후보로 고른 기록을 남긴다(spec D9).
+
+        고를 때의 계열 N·원장 대표 샤프·DSR 을 함께 적는다(V4-02, `run_deflated_sharpe`). 실험이
+        끝나기 전(대기·도는 trial 이 있다)에는 거절한다 — 설계한 조합이 다 돌기 전의 N 으로 스냅숏이
+        굳지 않게 한다. 취소한 실험은 끝났다(돌지 않은 조합은 시도가 아니다).
+        """
         record = self._repository.get(experiment_id)
         state = self._trial_state(record, trial_index)
         if state.status is not TrialStatus.COMPLETED:
@@ -266,7 +285,20 @@ class ExperimentRunService:
                 "완료된 trial 만 후보로 고를 수 있습니다: "
                 f"experiment_id={experiment_id} trial_index={trial_index} status={state.status}",
             )
+        unfinished = sum(
+            not (other.status.is_terminal and not other.awaiting_recovery)
+            for other in self._trial_states(record)
+        )
+        if unfinished and record.cancelled_at is None:
+            raise ExperimentStateError(
+                "experiment.selection.not_finished",
+                "실험의 trial 이 모두 끝난 뒤에 후보를 고를 수 있습니다: "
+                f"experiment_id={experiment_id} unfinished_trials={unfinished}",
+            )
         source = _base_source(record.run)
+        run_id = state.attempts[-1].run_id or ""
+        ledger = self._runs.trial_ledger(record.run)
+        trial = next((t for t in ledger.trials if any(r.run_id == run_id for r in t.runs)), None)
         selection = ExperimentSelection(
             experiment_id=experiment_id,
             trial_index=trial_index,
@@ -275,6 +307,9 @@ class ExperimentRunService:
             parameter_values=state.trial.parameter_values,
             reason=reason,
             selected_at=self._now(),
+            trial_count=ledger.trial_count,
+            ledger_representative_sharpe=None if trial is None else trial.representative_sharpe,
+            deflated_sharpe=run_deflated_sharpe(self._runs.result(run_id), ledger),
         )
         self._repository.add_selection(selection)
         return selection
@@ -322,28 +357,37 @@ class ExperimentRunService:
         """재시작 뒤 취소하지 않은 실험의 대기열 조작을 되살리고 남은 trial 을 다시 넘긴다(spec D6).
 
         남은 trial 은 넘기지 못한 trial(제출이 예상 밖 오류로 멈춘 경우 포함)과 재시작으로 중단된
-        trial 이다. 끝난 실험은 넘길 trial 이 없다.
+        trial 이다. 끝난 실험은 조작만 되살리고(뒤의 재시도가 따른다) 제출 스레드는 띄우지 않는다.
+        저장된 실험 하나를 읽지 못하면(지금 모델로 디코드되지 않는다) 그 실험만 로그로 건너뛰고
+        부팅은 이어 간다.
         """
-        after: str | None = None
-        while records := self._repository.list(after=after, limit=100):
-            for record in records:
-                if record.cancelled_at is None:
-                    controls = record.controls
-                    self._runs.schedule(
-                        record.experiment_id, paused=controls.paused, priority=controls.priority
-                    )
-                    self._spawn(lambda record=record: self._submit(record))
-            after = records[-1].experiment_id
+        for experiment_id in self._repository.open_ids():
+            try:
+                record = self._repository.get(experiment_id)
+                controls = record.controls
+                self._runs.schedule(
+                    experiment_id, paused=controls.paused, priority=controls.priority
+                )
+                if self._experiment(record).status is ExperimentStatus.COMPLETED:
+                    continue
+            except Exception:
+                logger.exception("experiment skipped on recovery — experiment_id=%s", experiment_id)
+                continue
+            self._spawn(lambda record=record: self._submit(record))
 
     def _submit(self, record: ExperimentRecord) -> None:
-        """attempt 가 없거나 실행이 재시작으로 중단된 trial 을 전개 순서대로 넘긴다."""
+        """attempt 가 없거나 실행이 재시작으로 중단된 trial 을 전개 순서대로 넘긴다.
+
+        기반 요청 재검사가 거절되면 남은 trial 마다 거절 attempt(코드·문장)를 남긴다 — trial 은
+        실패로 보이고 실험은 끝난다.
+        """
         try:
             pending = [
                 state
                 for state in self._trial_states(record)
                 if not state.attempts or state.awaiting_recovery
             ]
-            base = self._runs.admit(record.run).run if pending else None
+            base = self._admitted(record) if pending else None
             for state in pending:
                 with self._lock:
                     if record.experiment_id in self._cancelled:
@@ -378,21 +422,16 @@ class ExperimentRunService:
             return True
         states = self._trial_states(record)
         open_windows, _ = self._open_windows(record, states)
-        # 학습 산출물 읽기는 락 밖에서 한다 — 락은 모든 실험의 취소·재시도·조작이 함께 쓴다.
+        # 원장 읽기는 락 밖에서 한다 — 락은 모든 실험의 취소·재시도·조작이 함께 쓴다.
+        scores = self._train_scores(record) if any(p is None for _i, _s, p in open_windows) else {}
         chosen = [
-            (index, pick, self._choose(record, window_states) if pick is None else pick)
+            (index, pick, self._choose(record, window_states, scores) if pick is None else pick)
             for index, window_states, pick in open_windows
         ]
         with self._lock:
             if chosen and self._repository.get(experiment_id).cancelled_at is None:
                 latest = _latest_by_window(self._repository.picks(experiment_id))
-                try:
-                    base: BacktestRunSpec | TrialRunRejectedError = self._runs.admit(record.run).run
-                except Exception as error:
-                    rejected = self._runs.rejection(error)
-                    if rejected is None:
-                        raise
-                    base = rejected
+                base = self._admitted(record)
                 for index, pick, choice in chosen:
                     if latest.get(index) == pick:  # 다른 제출이 그사이 고르지 않았다
                         self._pick(record, base, index, choice, pick)
@@ -408,12 +447,17 @@ class ExperimentRunService:
         runs = self._runs.states({pick.run_id for pick in picks if pick.run_id is not None})
         windows = tuple(_window_result(pick, runs) for pick in picks)
         missing = [WalkForwardGap.PENDING] * (len(record.design.windows) - len(picks))
-        gap = walk_forward_gap([window.gap for window in windows] + missing)
+        gap = walk_forward_gap(
+            [window.gap for window in windows] + missing, cancelled=record.cancelled_at is not None
+        )
         if gap is not None:
             return WalkForwardReport(windows, (), None, None, gap)
-        curve = stitch_out_of_sample(
-            [self._runs.result(pick.run_id or "").series.equity for pick in picks]
-        )
+        try:
+            segments = [self._runs.result(pick.run_id or "").series.equity for pick in picks]
+        except TrialResultUnreadableError:
+            logger.exception("walk-forward result unreadable — experiment_id=%s", experiment_id)
+            return WalkForwardReport(windows, (), None, None, WalkForwardGap.RESULT_UNREADABLE)
+        curve = stitch_out_of_sample(segments)
         oos = out_of_sample_sharpe(curve, self._registry, record.run.annualization_days)
         train = [pick.train_sharpe for pick in picks if pick.train_sharpe is not None]
         return WalkForwardReport(windows, curve, oos, walk_forward_retention(oos, train), None)
@@ -440,22 +484,31 @@ class ExperimentRunService:
                 waiting = True
         return open_windows, waiting
 
+    def _train_scores(self, record: ExperimentRecord) -> dict[str, float | None]:
+        """실행마다 원장에 적힌 전체 구간 세션 샤프(학습 점수). 파산한 실행은 값이 없어 점수 없는
+        칸이다."""
+        ledger = self._runs.trial_ledger(record.run)
+        return {run.run_id: run.session_sharpe for trial in ledger.trials for run in trial.runs}
+
     def _choose(
-        self, record: ExperimentRecord, window_states: list[ExperimentTrialState]
+        self,
+        record: ExperimentRecord,
+        window_states: list[ExperimentTrialState],
+        scores: Mapping[str, float | None],
     ) -> _Choice:
-        """창의 학습 trial 가운데 대표 샤프로 칸을 고른다(`pick_window_cell`)."""
-        scores: dict[GridIndex, float] = {}
+        """창의 학습 trial 가운데 학습 점수로 칸을 고른다(`pick_window_cell`). 원장에 점수가 없는
+        실행(샤프가 비었거나 원장 기록이 실패했다)은 점수 없는 칸이다."""
+        cells: dict[GridIndex, float] = {}
         for state in window_states:
             run_id = state.attempts[-1].run_id if state.attempts else None
-            if state.status is TrialStatus.COMPLETED and run_id is not None:
-                sharpe = representative_sharpe(self._runs.result(run_id))
-                if sharpe is not None:
-                    scores[state.trial.grid_index] = sharpe
-        cell = pick_window_cell(scores, record.design.search.shape, record.split.selection_rule)
+            sharpe = None if run_id is None else scores.get(run_id)
+            if state.status is TrialStatus.COMPLETED and sharpe is not None:
+                cells[state.trial.grid_index] = sharpe
+        cell = pick_window_cell(cells, record.design.search.shape, record.split.selection_rule)
         if cell is None:
             return _Choice(None, None)
         chosen = next(state for state in window_states if state.trial.grid_index == cell)
-        return _Choice(chosen.trial.index, scores[cell])
+        return _Choice(chosen.trial.index, cells[cell])
 
     def _pick(
         self,
@@ -466,29 +519,19 @@ class ExperimentRunService:
         previous: WindowPick | None,
     ) -> None:
         """`choice` 는 이번에 고른 칸이거나 검증 실행이 중단된 앞 선택이다(같은 칸으로 다시)."""
-        trial_index = choice.trial_index
-        run_id: str | None = None
-        error_code: str | None = None
-        error: str | None = None
-        if trial_index is not None:
-            trial = record.design.trials()[trial_index]
+        run_id = error_code = error = None
+        if choice.trial_index is not None:
+            trial = record.design.trials()[choice.trial_index]
             window = trial.window
-            try:
-                if isinstance(base, TrialRunRejectedError):
-                    raise base
-                run_id = self._runs.start(
-                    _run_request(record.run, trial, window.test_start, window.test_end),
-                    trial_key=experiment_trial_key(base, trial),
-                    owner=record.experiment_id,
-                )
-            except TrialRunRejectedError as rejected:
-                error_code, error = rejected.code, str(rejected)
+            run_id, error_code, error = self._started(
+                record, base, trial, window.test_start, window.test_end
+            )
         self._repository.add_pick(
             WindowPick(
                 experiment_id=record.experiment_id,
                 window_index=window_index,
                 attempt=1 if previous is None else previous.attempt + 1,
-                trial_index=trial_index,
+                trial_index=choice.trial_index,
                 train_sharpe=choice.train_sharpe,
                 created_at=self._now(),
                 run_id=run_id,
@@ -500,23 +543,14 @@ class ExperimentRunService:
     def _start(
         self,
         record: ExperimentRecord,
-        base: BacktestRunSpec,
+        base: BacktestRunSpec | TrialRunRejectedError,
         trial: ExperimentTrial,
         *,
         attempt: int,
     ) -> None:
-        """`base` 는 실행 서비스가 해소한 기반 실행 spec 이다(시도 키를 낸다)."""
-        run_id: str | None = None
-        error_code: str | None = None
-        error: str | None = None
-        try:
-            run_id = self._runs.start(
-                _run_request(record.run, trial, trial.window.train_start, trial.window.train_end),
-                trial_key=experiment_trial_key(base, trial),
-                owner=record.experiment_id,
-            )
-        except TrialRunRejectedError as rejected:
-            error_code, error = rejected.code, str(rejected)
+        run_id, error_code, error = self._started(
+            record, base, trial, trial.window.train_start, trial.window.train_end
+        )
         self._repository.add_attempt(
             TrialAttempt(
                 experiment_id=record.experiment_id,
@@ -528,6 +562,34 @@ class ExperimentRunService:
                 error=error,
             )
         )
+
+    def _admitted(self, record: ExperimentRecord) -> BacktestRunSpec | TrialRunRejectedError:
+        """실행 서비스가 해소한 기반 실행 spec(시도 키를 낸다). 이제 접수되지 않으면 그 거절."""
+        try:
+            return self._runs.admit(record.run).run
+        except TrialRunRejectedError as rejected:
+            return rejected
+
+    def _started(
+        self,
+        record: ExperimentRecord,
+        base: BacktestRunSpec | TrialRunRejectedError,
+        trial: ExperimentTrial,
+        start: date,
+        end: date,
+    ) -> tuple[str | None, AdmissionRejectionCode | None, str | None]:
+        """칸의 한 구간 실행을 넘긴다. (run_id, 거절 코드, 거절 문장) 가운데 run_id 나 거절 하나."""
+        if isinstance(base, TrialRunRejectedError):
+            return None, base.code, str(base)
+        try:
+            run_id = self._runs.start(
+                _run_request(record.run, trial, start, end),
+                trial_key=experiment_trial_key(base, trial),
+                owner=record.experiment_id,
+            )
+        except TrialRunRejectedError as rejected:
+            return None, rejected.code, str(rejected)
+        return run_id, None, None
 
     def _experiment(self, record: ExperimentRecord) -> Experiment:
         states = self._trial_states(record)
@@ -601,7 +663,7 @@ def _state(
 def _base_source(run: BacktestRunSpec) -> SavedRevisionReference:
     """실험 기반은 저장한 리비전뿐이다(spec D5). 인라인 초안·요청 안 전략은 거절한다.
 
-    출처를 둘 다 실은 요청은 실행 접수 검사(`TrialRunPort.validate`)가 거절한다.
+    출처를 둘 다 실은 요청은 실행 접수 검사(`TrialRunPort.admit`)가 거절한다.
     """
     source = run.strategy_source
     if not isinstance(source, SavedRevisionReference):

@@ -5,6 +5,7 @@ import { Badge } from "../../../shared/ui";
 import {
   DATE_INPUT_MAXIMUM,
   DATE_INPUT_MINIMUM,
+  runEnvironmentApplies,
   type RunEnvironmentField,
   type RunEnvironmentFieldError,
 } from "../model/run-environment";
@@ -60,12 +61,15 @@ const isIncompleteDate = (event: SyntheticEvent<HTMLInputElement>): boolean =>
 const EnvironmentInput = ({
   field,
   value,
+  applies,
   error,
   onChange,
   onIncompleteChange,
 }: {
   field: RunEnvironmentField;
   value: string;
+  /** 지금 모드에서 읽히는 칸인가(스키마 `x-applicable-when`). 아니면 칸을 끈다 — 요청에도 실리지 않는다. */
+  applies: boolean;
   error: RunEnvironmentFieldError | undefined;
   onChange: (value: string) => void;
   /** `leaving` 은 칸을 떠날 때다. 칸 안에서 난 일(키를 뗌·값이 바뀜)은 실행 게이트만 고친다. */
@@ -92,6 +96,7 @@ const EnvironmentInput = ({
     "aria-invalid": error === undefined ? undefined : true,
     "aria-required": field.required || undefined,
     "data-run-field": field.name,
+    disabled: !applies,
   } as const;
   return (
     <div className="backtest-settings__field">
@@ -243,6 +248,7 @@ export const BacktestRunSettings = ({
                 key={field.name}
                 field={field}
                 value={environmentValues[field.name] ?? ""}
+                applies={runEnvironmentApplies(field, environmentValues)}
                 error={environmentErrors[field.name]}
                 onChange={(value) => setEnvironmentValue(field.name, value)}
                 onIncompleteChange={(incomplete, leaving) =>

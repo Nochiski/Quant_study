@@ -7,11 +7,11 @@ trial 도 원장에 남는다).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
-from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec
+from strategy_workbench.domain.backtest.facade.runs import AdmissionRejectionCode, BacktestRunSpec
 from strategy_workbench.domain.experiment.facade.design import ExperimentDesign, SplitSpec
 from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
 from strategy_workbench.domain.strategy.facade.specification import ParameterValue
@@ -42,7 +42,7 @@ class TrialAttempt:
     created_at: datetime
     run_id: str | None = None
     # 실행 접수 거절 코드(화면 번역 키 `backtest.error.<code>`)와 실행 서비스의 거절 문장.
-    error_code: str | None = None
+    error_code: AdmissionRejectionCode | None = None
     error: str | None = None
 
     def __post_init__(self) -> None:
@@ -73,7 +73,7 @@ class WindowPick:
     train_sharpe: float | None
     created_at: datetime
     run_id: str | None = None
-    error_code: str | None = None
+    error_code: AdmissionRejectionCode | None = None
     error: str | None = None
 
 
@@ -88,6 +88,26 @@ class ExperimentSelection:
     parameter_values: dict[str, ParameterValue]
     reason: str
     selected_at: datetime
+    # 고를 때의 계열 스냅숏(V4-02) — 나중에 N 이 늘어도 고를 때 본 값이 남는다. V4-02 이전 기록은
+    # None. 설명은 OpenAPI description 으로 실린다(화면이 뜻을 추정하지 않게).
+    trial_count: int | None = field(
+        default=None, metadata={"description": "고를 때의 계열 시도 수 N(계열 원장)."}
+    )
+    ledger_representative_sharpe: float | None = field(
+        default=None,
+        metadata={
+            "description": "고른 trial 이 속한 시도의 계열 원장 대표 샤프. 세션 단위(연율화 "
+            "전)이고 그 시도에서 처음 결과가 난 실행의 값이라 고른 trial 실행의 샤프(DSR 분자)가 "
+            "아닐 수 있다."
+        },
+    )
+    deflated_sharpe: float | None = field(
+        default=None,
+        metadata={
+            "description": "고른 trial 실행의 샤프를 고를 때의 계열 N·시도 대표 샤프 분산으로 깎은 "
+            "DSR(0~1). 지표가 비었거나 분산을 낼 수 없으면 비어 있다."
+        },
+    )
 
 
 class ExperimentRepositoryPort(Protocol):
@@ -95,6 +115,10 @@ class ExperimentRepositoryPort(Protocol):
 
     def get(self, experiment_id: str) -> ExperimentRecord:
         """없으면 `ExperimentNotFoundError`(`experiment.not_found`)."""
+        ...
+
+    def open_ids(self) -> tuple[str, ...]:
+        """취소하지 않은 실험 id(만든 순). 기록을 디코드하지 않는다(재시작 복구가 하나씩 읽는다)."""
         ...
 
     def list(self, *, after: str | None, limit: int) -> tuple[ExperimentRecord, ...]:

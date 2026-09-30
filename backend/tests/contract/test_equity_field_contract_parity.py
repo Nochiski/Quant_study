@@ -107,6 +107,22 @@ def test_공통_필드_집합이_비어_있지_않다() -> None:
     )
 
 
+def test_원장_field_map_필드는_선언표나_미지원표_정확히_한쪽에_있다() -> None:
+    """원장이 field_map 으로 선언한 필드마다 어댑터가 내주거나, 내주지 않는 사유를 적는다(#373).
+
+    선언표 → 원장 방향만 보면 원장에 있는데 배선도 사유도 없는 필드가 조용히 남는다(도메인 리뷰 A
+    DR-A-07 의 세 필드).
+    """
+    ledger = {
+        profile.field_id for profile in _ledger_profiles().values() if profile.scope == "field_map"
+    }
+    declared, unsupported = set(FIELD_BY_ID), set(UNSUPPORTED_FIELDS)
+
+    assert sorted(ledger - declared - unsupported) == []
+    assert sorted(declared & unsupported) == []
+    assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
+
+
 def test_mock_필드는_원장이_아는_id_만_쓴다() -> None:
     """mock 전용 필드는 duckdb 가 미지원 사유를 적어 둔 id 여야 한다.
 

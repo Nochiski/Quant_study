@@ -93,8 +93,8 @@ CHAIN_NAMES = (
 CHAIN = (*(RULES[name] for name in CHAIN_NAMES), rules_s19.DATASET_PROFILE)
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 FIELDS = ("price.close", "price.adj_close", "price.market_cap")
-# 체인이 다 서면 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 29 + 내부 스코프 price.adj_close.
-# 남는 13 은 원천·컬럼이 없거나(11) 굽지 않기로 한 것(2)이라 여기서도 unavailable 이다.
+# 체인이 다 서면 어댑터가 내는 field_id — 어댑터 선언표 전부다. 선언표 밖 필드는 여기서도
+# unavailable 이다(원장 field_map 과의 대조는 backend 계약 테스트, #373).
 ALL_FIELDS = (
     "price.close", "price.open", "price.volume", "price.market_cap",
     "price.shares_outstanding", "price.trading_value", "price.adj_close",
@@ -250,12 +250,14 @@ def test_krx_liquid_은_정책표대로_같은날_상위_비율만_남긴다(ada
 def test_미지원_필드는_unavailable_이고_mock_대체가_없다(adapter) -> None:
     from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
     reasons = adapter.unavailable_factor_fields()  # compile 진단과 같은 사유 표(#316)
-    # 격자 3테이블이 다 서도 남는 미지원 — 사유는 한 문장이고, 컬럼 부재(S08-2)·원천 축 부재(S10
-    # 판정) 같은 구분은 어댑터 `_specs.UNSUPPORTED_FIELDS` 의 메모에만 남는다(#316 리뷰 P3-1)
+    # 격자 3테이블이 다 서도 남는 미지원 — 사유는 한 문장이고, 필드별 구분은 어댑터
+    # `_specs.UNSUPPORTED_FIELDS` 의 메모에만 남는다(#316 리뷰 P3-1)
+    from strategy_workbench.adapters.outbound.equity_duckdb._specs import UNSUPPORTED_FIELDS
     for field_id in ("classification.sector", "flow.foreign_ownership", "credit.net_buy"):
         r = _raw(adapter, date(2018, 5, 1), date(2018, 5, 31), fields=(field_id,))
         assert r.status is DataLoadStatus.INVALID_QUERY and "unavailable" in str(r.detail)
-        assert reasons[field_id] in str(r.detail) and "S08-2" not in str(r.detail)
+        assert reasons[field_id] in str(r.detail)
+        assert UNSUPPORTED_FIELDS[field_id] not in str(r.detail)
 
 
 # ── S21 본판: 필드별 1셀 손검산 ───────────────────────────────────────────────

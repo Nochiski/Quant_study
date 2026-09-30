@@ -31,8 +31,10 @@ DESIGN §4-4·§4-5) 어댑터가 `corp_ticker` 로 전개하며, **한 법인�
 에 그 사실이 드러난다. 두 값이 갈리면 대장이 이긴다 — 어댑터가 자기 상수로 PIT 를 우기면
 공개 전 값을 내주게 된다(TECH_DEBT §4). 소비자는 질의의 `lag_overrides` 로 필드마다 늘릴 수 있다.
 
-여기 없는 field_id(FIELD_MAP 42 중 13)는 `list_fields()` 밖이고 질의하면 `INVALID_QUERY` 다
-(mock 폴백 없음) — 사유는 `UNSUPPORTED_FIELDS` 가 field_id 마다 적어 둔다.
+여기 없는 field_id 는 `list_fields()` 밖이고 질의하면 `INVALID_QUERY` 다(mock 폴백 없음). 사용자
+사유는 `FIELD_NOT_IN_LEDGER`·`FIELD_NOT_PROVIDED` 한 문장이고, `UNSUPPORTED_FIELDS` 는 field_id
+마다 원장 작업 메모를 둔다. 원장이 field_map 으로 선언한 필드는 이 표나 미지원표 중 정확히 한쪽에
+있다(`tests/contract/test_equity_field_contract_parity.py`).
 """
 
 from __future__ import annotations
@@ -617,7 +619,7 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
         disclosure_basis="정규장 종가 확정 시점",
         evidence="price_daily.value_krw ← stg_price_daily ∪ stg_etf_price_daily",
     ),
-    # ── 카탈로그 매크로 (equity 내부 스코프 — FIELD_MAP 42 밖) ────────────────
+    # ── 카탈로그 매크로 (e1.19.0 부터 FIELD_MAP §2 지원 — 원장 field_scope=field_map) ──
     FieldSpec(
         field_id="price.adj_close",
         source="adj",
@@ -1048,20 +1050,28 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
 FIELD_NOT_IN_LEDGER = "원장이 이 필드를 싣지 않는다"
 FIELD_NOT_PROVIDED = "원장에는 있지만 이 연결은 이 필드를 내주지 않는다"
 
-# FIELD_MAP §2 의 42 중 어댑터가 내지 않는 13 — field_id → 사유 메모. `list_fields()` 밖이고(mock
-# 폴백 금지, DESIGN §7) 메모는 원장 작업 기록이라 사용자에게 싣지 않는다.
+# 어댑터가 내지 않는 FIELD_MAP §2 필드 — field_id → 사유 메모. `list_fields()` 밖이고(mock 폴백
+# 금지, DESIGN §7) 메모는 원장 작업 기록이라 사용자에게 싣지 않는다. "미배선"은 원장에는 있는데
+# 선언표에 아직 없는 필드다(#421).
 UNSUPPORTED_FIELDS: dict[str, str] = {
     "benchmark.close": (
         "미지원(현 설계) — index_daily 는 security 축이 아니다. 벤치마크는 예약 접두 `idx:` 로 "
         "받되 S21 은 내지 않는다(GAP-09, FIELD_MAP §2)"
     ),
     "flow.foreign_ownership": (
-        "미확인 — flow_daily 에 컬럼이 없다. 원천이 stg_flow_daily_kiwoom(ka10060)이 아니라 "
-        "stg_foreign_daily(ka10008)인데 절단본에 없어 S08 이 컬럼을 만들지 않았다(만들고 NULL 로 "
-        "두면 '있는데 비어 있는' 컬럼이 된다). 선행 조건은 절단본 절단 → S08-2"
+        "미배선 — 원장 flow_daily.foreign_wght_pct(퍼센트, 키움 ka10008)로 있다(#421)"
+    ),
+    "flow.foreign_limit_exhaustion": (
+        "미배선 — 원장 flow_daily.foreign_limit_exh_pct(퍼센트, 키움 ka10008)로 있다(#421)"
+    ),
+    "flow.pension_net_buy": (
+        "미배선 — 원장 flow_daily.pension_net_buy_kiwoom_krw(원, 키움만)로 있다(#421)"
     ),
     "flow.block_buy": "미지원 — 대량매매 미수집(FACTORS.md §9)",
     "flow.block_sell": "미지원 — 대량매매 미수집(FACTORS.md §9)",
+    "short.short_sale_volume": (
+        "미배선 — 원장 short_daily.short_volume_kiwoom_shr(주, 키움)로 있다(#421)"
+    ),
     "short.short_balance_ratio": (
         "미지원 — 분모가 다른 테이블(price_daily.shares_out)이라 셀 하나로 굽지 않는다. "
         "게다가 short_daily 가 주는 것은 잔고가 아니라 거래량이다(F45 취득 불가, 라벨 정정 필요)"

@@ -127,8 +127,8 @@ pytest.importorskip("duckdb", reason="backend optional extra `equity` (uv sync -
 
 START, END = date(2024, 1, 8), date(2024, 1, 12)
 PRICE_FIELDS = ("price.close", "price.adj_close", "price.market_cap")
-# 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id — FIELD_MAP §2 의 42 중 29 +
-# equity 내부 스코프 `price.adj_close`. 나머지 13 의 사유는 `_specs.UNSUPPORTED_FIELDS` 다.
+# 손 픽스처가 원천을 다 갖췄을 때 어댑터가 내는 field_id — 선언표 전부다. 원장 field_map 과의
+# 대조는 `tests/contract/test_equity_field_contract_parity.py` 가 한다.
 ALL_FIELDS = (
     "price.close",
     "price.open",
@@ -430,15 +430,6 @@ def test_list_fields_serves_every_declared_field_whose_source_is_built(
     # 판정(지원/부분)은 프로필 설명 앞에 붙어 소비자에게 그대로 보인다
     assert profiles["financial.revenue"].description.startswith("[부분]")
     assert profiles["financial.net_income"].description.startswith("[지원]")
-
-
-def test_field_specs_cover_every_field_map_id_exactly_once() -> None:
-    """FIELD_MAP §2 의 42 = 어댑터가 내는 29 + 사유가 적힌 13. 겹치거나 빠지면 안 된다."""
-    declared = {spec.field_id for spec in FIELD_SPECS} - {"price.adj_close"}
-    assert declared & set(UNSUPPORTED_FIELDS) == set()
-    assert len(declared) == 29 and len(UNSUPPORTED_FIELDS) == 13
-    assert len(declared | set(UNSUPPORTED_FIELDS)) == 42
-    assert all(reason.strip() for reason in UNSUPPORTED_FIELDS.values())
 
 
 def test_declarations_their_query_does_not_read_are_rejected() -> None:

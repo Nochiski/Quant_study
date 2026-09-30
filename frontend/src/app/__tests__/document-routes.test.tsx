@@ -2126,6 +2126,32 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     15_000,
   );
 
+  // #357 C-P3-16: 유니버스가 비어 실행 설정 전체가 무효여도 실행 계획 설명은 고른 결측 정책을 싣는다.
+  it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
+    "sends the chosen missing policy to the plan explanation on %s before the settings are complete",
+    async (route) => {
+      localStorage.setItem(
+        `${RUN_ENVIRONMENT_STORAGE_PREFIX}:last`,
+        JSON.stringify({
+          ...Object.fromEntries(
+            Object.entries(RUN_ENVIRONMENT).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+          universe_id: "",
+          missing: "zero",
+        }),
+      );
+      server.use(...graphHandlers());
+      mount(`${route}?view=graph`);
+
+      await waitFor(() => expect(explainedGraphs).toHaveLength(1));
+      expect(explainedGraphs[0]).toMatchObject({ missing: "zero" });
+    },
+    15_000,
+  );
+
   it("keeps graph selection in the URL, then opens the exact YAML node", async () => {
     server.use(
       ...graphHandlers(),

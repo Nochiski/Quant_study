@@ -49,6 +49,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataNotReadyError,
     BacktestDataQuery,
+    BacktestDataUnavailableError,
     CorporateActionRecord,
 )
 from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
@@ -1215,11 +1216,15 @@ def test_backtest_dataset_reads_roots_without_the_basis_column(
 def test_backtest_dataset_refuses_unknown_and_index_ids(
     adapter: EquityDuckdbAdapter, root: Path
 ) -> None:
-    with pytest.raises(ValueError, match="unknown security_id") as unknown:
+    with pytest.raises(BacktestDataUnavailableError, match="unknown security_id") as unknown:
         adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("000660:9",), None))
+    assert "000660:9" in str(unknown.value)
     assert str(root.resolve()) not in str(unknown.value)  # run `error` 로 나간다(#163)
-    with pytest.raises(ValueError, match="malformed security_id"):
+    # 형식이 틀린 id(지수 `idx:*`, GAP-09)도 같은 포트 예외다 — run 이 벤치마크 오류로 코드화한다
+    # (#361).
+    with pytest.raises(BacktestDataUnavailableError, match="malformed") as malformed:
         adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("000660:1",), "idx:코스피"))
+    assert "idx:코스피" in str(malformed.value)
 
 
 def test_lag_falls_back_to_source_constants_and_says_so_when_the_profile_is_absent(

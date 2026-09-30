@@ -260,11 +260,22 @@ def register_experiment_routes(
     @app.post(
         "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry",
         operation_id="retryExperimentTrial",
-        responses=rejected,
+        responses={
+            404: {
+                "model": ExperimentErrorResponse | BacktestStrategyNotFoundResponse,
+                "description": "The trial or its base strategy revision is missing",
+            },
+            409: {
+                "model": ExperimentErrorResponse | BacktestStrategyStaleResponse,
+                "description": "The trial is not retryable or the base revision changed",
+            },
+            422: admission[422],
+        },
     )
     def retry_experiment_trial(experiment_id: str, trial_index: int) -> ExperimentTrialState:
-        """실패·취소된 trial 을 새 attempt 로 다시 넘긴다."""
-        return experiments.retry(experiment_id, trial_index)
+        """실패·취소된 trial 을 새 attempt 로 다시 넘긴다. 기반 요청이 이제 접수되지 않으면 백테스트
+        시작과 같은 코드로 거절한다."""
+        return admitted(lambda: experiments.retry(experiment_id, trial_index))
 
     @app.post(
         "/api/v1/experiments/{experiment_id}/selections",

@@ -61,6 +61,8 @@ class TrialRun:
     status: RunStatus
     created_at: datetime
     role: TrialRunRole
+    # 완료된 실행의 전체 구간 세션 샤프(연율화 전). 워크포워드 창 고르기의 학습 점수다.
+    session_sharpe: float | None = None
 
 
 @dataclass(frozen=True)
@@ -170,7 +172,13 @@ def _group(trial_key: str, entries: list[TrialLedgerEntry]) -> TrialGroup:
     return TrialGroup(
         trial_key=trial_key,
         runs=tuple(
-            TrialRun(entry.run_id, entry.status, entry.created_at, _role(entry, first))
+            TrialRun(
+                entry.run_id,
+                entry.status,
+                entry.created_at,
+                _role(entry, first),
+                entry.session_sharpe,
+            )
             for entry in entries
         ),
         representative_run_id=None if first is None else first.run_id,

@@ -63,11 +63,12 @@ def test_a_trial_counts_once_and_its_first_completed_run_is_the_representative()
         "r2",
         0.07,
     )
-    assert [(run.run_id, run.role) for run in first.runs] == [
-        ("r1", TrialRunRole.RECHECK),
-        ("r2", TrialRunRole.COUNTED),
-        ("r3", TrialRunRole.NO_RESULT),
-        ("r4", TrialRunRole.PENDING),
+    # 재확인 실행도 자기 세션 샤프를 싣는다(워크포워드 창 고르기의 학습 점수).
+    assert [(run.run_id, run.role, run.session_sharpe) for run in first.runs] == [
+        ("r1", TrialRunRole.RECHECK, 0.05),
+        ("r2", TrialRunRole.COUNTED, 0.07),
+        ("r3", TrialRunRole.NO_RESULT, None),
+        ("r4", TrialRunRole.PENDING, None),
     ]
     assert second.representative_run_id is None
     assert [run.role for run in second.runs] == [TrialRunRole.NO_RESULT]

@@ -29,6 +29,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
 )
 from strategy_workbench.application.experiment_run.facade.ports import (
     AdmittedRun,
+    TrialResultUnreadableError,
     TrialRunRejectedError,
 )
 from strategy_workbench.application.strategy_design.facade.design import StrategyDesignService
@@ -50,7 +51,9 @@ from strategy_workbench.domain.backtest.facade.runs import (
     SavedRevisionReference,
 )
 from strategy_workbench.domain.backtest.facade.trials import (
+    TrialLedger,
     TrialLedgerEntry,
+    representative_sharpe,
     summarize_trial_ledger,
 )
 from strategy_workbench.domain.experiment.facade.design import (
@@ -132,8 +135,10 @@ class _FakeRuns:
         self.ledger_entries: list[TrialLedgerEntry] = []
         self.reject = False
         self.results: dict[str, BacktestRunResult] = {}
-        # `result` 를 읽을 때마다 부른다(락 밖에서 읽는지 본다).
-        self.on_result: Callable[[], None] | None = None
+        # 결과 파일을 읽을 수 없는 실행.
+        self.unreadable: set[str] = set()
+        # `trial_ledger` 를 읽을 때마다 부른다(락 밖에서 읽는지 본다).
+        self.on_ledger: Callable[[], None] | None = None
 
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
         if self.before_admit is not None:
@@ -145,6 +150,11 @@ class _FakeRuns:
             parameter_values={"scale": 1.0, "mode": "a", **request.parameter_values},
         )
         return AdmittedRun(resolved, summarize_trial_ledger("s-1", (), self.ledger_entries, ()))
+
+    def trial_ledger(self, lineage_id: str) -> TrialLedger:
+        if self.on_ledger is not None:
+            self.on_ledger()
+        return summarize_trial_ledger(lineage_id, (), self.ledger_entries, ())
 
     def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
         self.owners.add(owner)
@@ -165,12 +175,9 @@ class _FakeRuns:
             self.ledger_entries.append(TrialLedgerEntry(run_id, key, RunStatus.COMPLETED, _AT, _AT))
 
     def result(self, run_id: str) -> BacktestRunResult:
-        if self.on_result is not None:
-            self.on_result()
+        if run_id in self.unreadable:
+            raise TrialResultUnreadableError(f"result file is unreadable — run_id={run_id}")
         return self.results[run_id]
-
-    def rejection(self, error: Exception) -> TrialRunRejectedError | None:
-        return error if isinstance(error, TrialRunRejectedError) else None
 
     def sessions(self, start: date, end: date) -> tuple[date, ...]:
         """평일 세션."""
@@ -518,6 +525,34 @@ def test_recover_resubmits_unsubmitted_and_interrupted_trials_only(tmp_path: Pat
     assert len(runs.started) == 4 + 4 + 2
 
 
+def test_recover_skips_finished_and_unreadable_experiments(tmp_path: Path) -> None:
+    """#381 DEFECT-V3D-04: 지금 모델로 디코드되지 않는 실험 하나가 부팅을 막지 않는다. #384
+    DEFECT-V3D-10: 끝난 실험에는 제출 스레드·대기열 조작을 다시 두지 않는다."""
+    runs = _FakeRuns()
+    path = tmp_path / "research.sqlite3"
+    submissions: list[Callable[[], None]] = []
+    service = _service(runs, repository=SQLiteExperimentRepository(path), spawn=submissions.append)
+    finished = service.create(_request(split=_BEST)).record.experiment_id
+    submissions[0]()
+    _finish(runs, {f"run-{index}": _result(0.1) for index in range(4)})
+    service.advance(finished)
+    _finish(runs, {"run-4": _result(), "run-5": _result()})
+    # 제출 스레드가 돌기 전에 재시작한 두 실험. 하나는 저장된 설계를 지금 모델로 읽을 수 없다.
+    broken = service.create(_request()).record.experiment_id
+    waiting = service.create(_request()).record.experiment_id
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE experiments SET design_json = '{}' WHERE experiment_id = ?", (broken,)
+        )
+    pending: list[Callable[[], None]] = []
+
+    _service(runs, repository=SQLiteExperimentRepository(path), spawn=pending.append).recover()
+
+    assert service.get(finished).status is ExperimentStatus.COMPLETED
+    assert [owner for owner, _paused, _priority in runs.schedules] == [waiting]
+    assert len(pending) == 1
+
+
 def _interrupted_restart(tmp_path: Path) -> tuple[_FakeRuns, Path, str]:
     """trial 넷을 넘긴 뒤 재시작해 0·3 이 중단(interrupted)으로 닫힌 상태."""
     runs = _FakeRuns()
@@ -552,7 +587,24 @@ def test_a_retry_while_recovery_submits_does_not_repeat_an_attempt(tmp_path: Pat
 def test_an_interrupted_experiment_is_not_completed_until_recovery_resubmits(
     tmp_path: Path,
 ) -> None:
-    """#348 리뷰 P3-2: 복구가 넘기기 전·복구 제출이 실패해도 완료로 보이지 않는다."""
+    """#348 리뷰 P3-2: 복구가 넘기기 전에는 완료로 보이지 않는다."""
+    runs, path, experiment_id = _interrupted_restart(tmp_path)
+    after = _service(runs, repository=SQLiteExperimentRepository(path), spawn=lambda work: None)
+
+    after.recover()  # 제출 스레드가 아직 돌지 않았다
+
+    assert after.get(experiment_id).status is ExperimentStatus.RUNNING
+    assert [state.awaiting_recovery for state in after.trials(experiment_id)] == [
+        True,
+        False,
+        False,
+        True,
+    ]
+
+
+def test_a_refused_recovery_records_the_rejection_instead_of_hanging(tmp_path: Path) -> None:
+    """#380 DEFECT-V3D-02: 재시작 뒤 기반 재검사가 거절되면 남은 trial 마다 거절 attempt 를 남겨
+    실험이 끝난다. 재시도는 막지 않는다."""
     runs, path, experiment_id = _interrupted_restart(tmp_path)
     after = _service(runs, repository=SQLiteExperimentRepository(path))
 
@@ -560,22 +612,42 @@ def test_an_interrupted_experiment_is_not_completed_until_recovery_resubmits(
         raise TrialRunRejectedError("backtest.strategy.requires_upgrade", "frozen revision")
 
     runs.before_admit = refused
-    after.recover()  # 기반 검사가 거절돼 다시 넘기지 못한다
-    experiment = after.get(experiment_id)
+    after.recover()
 
-    assert experiment.status is ExperimentStatus.RUNNING
-    assert [state.awaiting_recovery for state in after.trials(experiment_id)] == [
-        True,
-        False,
-        False,
-        True,
+    trials = after.trials(experiment_id)
+    assert [(len(state.attempts), state.awaiting_recovery) for state in trials] == [
+        (2, False),
+        (1, False),
+        (1, False),
+        (2, False),
     ]
-    # 중단된 trial 은 실패로 보여 재시도할 수 있다(재시도는 막지 않는다).
-    retried = after.retry(experiment_id, 0)
-    assert (retried.status, experiment.trial_counts) == (
-        TrialStatus.QUEUED,
-        {TrialStatus.FAILED: 2, TrialStatus.COMPLETED: 2},
-    )
+    assert [trials[index].attempts[-1].error_code for index in (0, 3)] == [
+        "backtest.strategy.requires_upgrade"
+    ] * 2
+    assert len(runs.started) == 4
+    # 창을 고를 점수가 원장에 없어 두 창 모두 칸 없는 선택으로 끝난다.
+    assert after.advance(experiment_id) is True
+    assert after.get(experiment_id).status is ExperimentStatus.COMPLETED
+    assert after.retry(experiment_id, 0).status is TrialStatus.QUEUED
+
+
+def test_a_retry_refused_by_the_base_recheck_leaves_no_attempt() -> None:
+    """#380 DEFECT-V3D-02: 재시도의 기반 재검사 거절은 코드를 실은 오류로 올라간다(HTTP 는 실행
+    시작과 같은 코드로 옮긴다). attempt 는 늘지 않는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request()).record.experiment_id
+    runs.run_statuses["run-0"] = RunStatus.FAILED
+
+    def refused() -> None:
+        raise TrialRunRejectedError("backtest.strategy.stale", "revision hash changed")
+
+    runs.before_admit = refused
+    with pytest.raises(TrialRunRejectedError) as raised:
+        service.retry(experiment_id, 0)
+
+    assert raised.value.code == "backtest.strategy.stale"
+    assert len(service.trials(experiment_id)[0].attempts) == 1
 
 
 def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path) -> None:
@@ -608,9 +680,20 @@ _BEST = replace(_ROLLING, selection_rule=WindowSelectionRule.TRAIN_SHARPE_MAX)
 
 
 def _finish(runs: _FakeRuns, results: dict[str, BacktestRunResult]) -> None:
+    """실행 서비스처럼 결과를 남기고 그 세션 샤프를 원장에 적는다(창 고르기는 원장을 읽는다)."""
     for run_id, result in results.items():
         runs.run_statuses[run_id] = RunStatus.COMPLETED
         runs.results[run_id] = result
+        runs.ledger_entries.append(
+            TrialLedgerEntry(
+                run_id,
+                runs.keys[int(run_id.removeprefix("run-"))],
+                RunStatus.COMPLETED,
+                _AT,
+                _AT,
+                representative_sharpe(result),
+            )
+        )
 
 
 def test_each_window_runs_its_best_train_cell_on_the_test_window_as_a_recheck() -> None:
@@ -790,8 +873,8 @@ def test_a_rejected_base_recheck_records_the_windows_instead_of_hanging() -> Non
     assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
 
 
-def test_train_artifacts_are_read_outside_the_service_lock() -> None:
-    """#365 리뷰 P3-1: 학습 산출물을 읽는 동안 다른 실험의 조작이 서비스 락을 잡을 수 있다."""
+def test_train_scores_are_read_outside_the_service_lock() -> None:
+    """#365 리뷰 P3-1: 학습 점수(원장)를 읽는 동안 다른 실험의 조작이 서비스 락을 잡을 수 있다."""
     runs = _FakeRuns()
     service = _service(runs)
     experiment_id = service.create(_request(split=_BEST)).record.experiment_id
@@ -810,11 +893,37 @@ def test_train_artifacts_are_read_outside_the_service_lock() -> None:
         thread.start()
         thread.join()
 
-    runs.on_result = probe
+    runs.on_ledger = probe
     service.advance(experiment_id)
 
-    assert free == [True, True]
+    assert free == [True]
     assert len(runs.started) == 5
+
+
+def test_windows_are_picked_from_ledger_scores_without_reading_result_files() -> None:
+    """#377 V3-AUDIT-02: 학습 결과 파일을 읽을 수 없어도 원장에 적힌 점수로 창을 고른다. 검증
+    결과를 읽을 수 없으면 곡선 대신 이유를 싣는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    _finish(
+        runs,
+        {
+            "run-0": _result(0.2),
+            "run-1": _result(0.05),
+            "run-2": _result(0.1),
+            "run-3": _result(0.3),
+        },
+    )
+    runs.unreadable |= {"run-0", "run-1", "run-2", "run-3"}
+
+    assert service.advance(experiment_id) is True
+    _finish(runs, {"run-4": _result(), "run-5": _result()})
+    runs.unreadable.add("run-5")
+    report = service.walk_forward(experiment_id)
+
+    assert [window.pick.trial_index for window in report.windows] == [0, 3]
+    assert (report.curve, report.gap) == ((), WalkForwardGap.RESULT_UNREADABLE)
 
 
 def test_an_interrupted_test_run_is_resubmitted_with_the_same_cell() -> None:
@@ -883,6 +992,8 @@ def test_cancel_also_cancels_test_runs_and_stops_picking() -> None:
     assert ("run-4", experiment_id) in runs.cancelled
     assert service.advance(experiment_id) is True
     assert len(runs.started) == 5
+    # #377 V3-AUDIT-01: 남은 창은 더 고르지 않으므로 "진행 중" 이 아니라 취소가 이유다.
+    assert service.walk_forward(experiment_id).gap is WalkForwardGap.CANCELLED
 
 
 def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Path) -> None:

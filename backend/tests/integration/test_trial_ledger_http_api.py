@@ -63,11 +63,15 @@ def test_the_ledger_counts_a_run_once_and_the_preview_agrees() -> None:
         "reason": "recheck",
     }
     assert ledger["trial_count"] == 1
-    assert ledger["trials"][0]["runs"][0] | {"created_at": None} == {
+    counted = ledger["trials"][0]["runs"][0]
+    # 실행마다 자기 세션 샤프를 싣고, 대표 실행의 값이 시도의 대표 샤프다.
+    assert counted["session_sharpe"] == ledger["trials"][0]["representative_sharpe"]
+    assert counted | {"created_at": None, "session_sharpe": None} == {
         "run_id": run["run_id"],
         "status": "completed",
         "created_at": None,
         "role": "counted",
+        "session_sharpe": None,
     }
 
 

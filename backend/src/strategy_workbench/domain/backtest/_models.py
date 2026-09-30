@@ -544,6 +544,20 @@ RunFailureCode = Literal[
 ]
 RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
 
+# 실행 접수 거절 코드 어휘의 단일 정본. 시작 요청 422·404·409 detail 과 실험 attempt·창 선택의
+# `error_code` 가 같은 문자열이고, 프론트는 `backtest.error.<code>` 로 번역한다. 어떤 오류가 어느
+# 코드인지는 실행 유스케이스의 `rejection_code` 가 정한다.
+AdmissionRejectionCode = Literal[
+    "backtest.run.environment_required",
+    "backtest.run.research_window_violation",
+    "backtest.run.parameter_invalid",
+    "backtest.run.invalid",
+    "backtest.strategy.not_found",
+    "backtest.strategy.stale",
+    "backtest.strategy.requires_upgrade",
+    "portfolio.strategy.invalid",
+]
+
 
 @dataclass(frozen=True)
 class BacktestRunState:

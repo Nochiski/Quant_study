@@ -9280,6 +9280,16 @@
           "error_code": {
             "anyOf": [
               {
+                "enum": [
+                  "backtest.run.environment_required",
+                  "backtest.run.research_window_violation",
+                  "backtest.run.parameter_invalid",
+                  "backtest.run.invalid",
+                  "backtest.strategy.not_found",
+                  "backtest.strategy.stale",
+                  "backtest.strategy.requires_upgrade",
+                  "portfolio.strategy.invalid"
+                ],
                 "type": "string"
               },
               {
@@ -9528,6 +9538,17 @@
           "run_id": {
             "title": "Run Id",
             "type": "string"
+          },
+          "session_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Sharpe"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus"
@@ -10157,6 +10178,8 @@
         "description": "이어 붙인 곡선의 요약 지표(표본 밖 샤프·유지율)가 비는 이유. 화면은 번역만 한다.\n\n값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.",
         "enum": [
           "legacy_design",
+          "cancelled",
+          "result_unreadable",
           "test_failed",
           "no_cell",
           "pending"
@@ -10357,6 +10380,16 @@
           "error_code": {
             "anyOf": [
               {
+                "enum": [
+                  "backtest.run.environment_required",
+                  "backtest.run.research_window_violation",
+                  "backtest.run.parameter_invalid",
+                  "backtest.run.invalid",
+                  "backtest.strategy.not_found",
+                  "backtest.strategy.stale",
+                  "backtest.strategy.requires_upgrade",
+                  "portfolio.strategy.invalid"
+                ],
                 "type": "string"
               },
               {
@@ -12347,7 +12380,7 @@
     },
     "/api/v1/experiments/{experiment_id}/trials/{trial_index}/retry": {
       "post": {
-        "description": "실패·취소된 trial 을 새 attempt 로 다시 넘긴다.",
+        "description": "실패·취소된 trial 을 새 attempt 로 다시 넘긴다. 기반 요청이 이제 접수되지 않으면 백테스트\n시작과 같은 코드로 거절한다.",
         "operationId": "retryExperimentTrial",
         "parameters": [
           {
@@ -12384,31 +12417,47 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyNotFoundResponse"
+                    }
+                  ],
+                  "title": "Response 404 Retryexperimenttrial"
                 }
               }
             },
-            "description": "The experiment or trial is missing"
+            "description": "The trial or its base strategy revision is missing"
           },
           "409": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ExperimentErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BacktestStrategyStaleResponse"
+                    }
+                  ],
+                  "title": "Response 409 Retryexperimenttrial"
                 }
               }
             },
-            "description": "The experiment state refuses it"
+            "description": "The trial is not retryable or the base revision changed"
           },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ExperimentAdmissionErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "A coded experiment design or base run diagnostic"
           }
         },
         "summary": "Retry Experiment Trial"

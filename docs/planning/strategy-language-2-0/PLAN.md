@@ -6,7 +6,7 @@ current_phase: P4
 current_pr: P4-02
 active_prs: [P4-02]
 parallel_window: []
-last_updated: 2026-09-30T13:53:08+09:00
+last_updated: 2026-09-30T14:17:09+09:00
 planned_prs: 30
 merged_prs: 21
 integrated_prs: 0
@@ -30,7 +30,7 @@ progress_percent: 70
 | Active PR | `P4-02` |
 | Progress | `21 / 30 done (70%), main 21, integration 0` |
 | Approved | `21 / 30` |
-| Aggregated at | `2026-09-30 13:53 KST` |
+| Aggregated at | `2026-09-30 14:17 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -134,7 +134,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 
 ## 현재 작업 Packet
 
-현재 PR 은 `P4-02`(`IN_REVIEW` — P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392) r1 APPROVE 반영·머지 대기, P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395) r1 APPROVE 반영, 리드 결정 2026-09-30 — WORKFLOW P4-02 결정 블록)이다. 아래 P1-05 이하 절은
+현재 PR 은 `P4-02`(`IN_REVIEW` — P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392) MERGED(`bc8b0dd1`), P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395) r1 APPROVE 반영·main 병합·머지 대기, 리드 결정 2026-09-30 — WORKFLOW P4-02 결정 블록)이다. 아래 P1-05 이하 절은
 지난 PR 의 패킷 기록이고, P3-03 패킷은 P3 스택 절 끝에, P4-01a·P4-01b 패킷은 P4 스택 절에 있다.
 
 | 항목 | 값 |
@@ -1064,7 +1064,7 @@ Phase exit:
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
 | [x] | `P4-01` | `pipeline-projection.ts` (4단계 모델, `x-stage`, 팩터 요약 문장) | P3-03 | `MERGED` | 두 PR(리드 결정 2026-09-30): P4-01a [#347](https://github.com/Nochiski/Quant_study/pull/347)(`3b16345f` refactor·`50830b7e` `x-stage`·`398a14e2` 인프라 기준선) · `review_pr347` r1 APPROVE(`8af5f1b7`, P3 4 → P4-01b) · main 머지 `92bf38ee`(#347, 2026-09-30) → P4-01b [#367](https://github.com/Nochiski/Quant_study/pull/367)(`feat/lang2-p4-01b-pipeline-projection`, [#359](https://github.com/Nochiski/Quant_study/pull/359) 위 스택 → #359 머지 `7e7b2da9` 뒤 base main) · `review_pr367` r1 APPROVE(P2 2·P3 4 반영, 리드 결정 둘) · main 머지 `09aaf755`([#367](https://github.com/Nochiski/Quant_study/pull/367), 2026-09-30) |
-| [ ] | `P4-02` | 단계 카드 UI(거른다·합쳐서 고른다·비중을 준다), 실행 설정 띠 | P4-01 | `IN_REVIEW` | 두 PR(리드 결정 6 — a 끝 비테스트 src 13파일 +1136/−213): P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392)(`feat/lang2-p4-02-stage-cards`, main `09aaf755` 위) · `review_pr392` r1 APPROVE(P2 1·P3 4, 리드 지시로 머지 전 반영, 코드 tip `20153652`) → P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395)(`feat/lang2-p4-02b-stage-cards`, r1 반영된 #392 위로 rebase, `review_pr395` r1 APPROVE(P3 5, 옛 `ca3c18fa` 기준 — 테스트·문서 반영), base main) |
+| [ ] | `P4-02` | 단계 카드 UI(거른다·합쳐서 고른다·비중을 준다), 실행 설정 띠 | P4-01 | `IN_REVIEW` | 두 PR(리드 결정 6 — a 끝 비테스트 src 13파일 +1136/−213): P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392)(`feat/lang2-p4-02-stage-cards`, main `09aaf755` 위) · `review_pr392` r1 APPROVE(P2 1·P3 4, 리드 지시로 머지 전 반영, 코드 tip `20153652`, main 병합 `b9e4b915`·CI R2 타이밍 수정 `e2f9e47a`) · main 머지 `bc8b0dd1`(#392, 2026-09-30) → P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395)(`feat/lang2-p4-02b-stage-cards`, `review_pr395` r1 APPROVE(P3 5, 옛 `ca3c18fa` 기준 — 테스트·문서 반영), main `bc8b0dd1` 병합 `eebd4905`, 머지 대기) |
 | [ ] | `P4-03` | 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널 | P4-02 | `WAITING` | — |
 | [ ] | `P4-04` | 탭을 그래프·YAML 둘로, 기본 탭 그래프, Form·JSON 은퇴, 빈 화면 e2e, 식별자 0개 단언 | P4-03 | `WAITING` | — |
 
@@ -1167,6 +1167,7 @@ Phase exit:
 
 | PR | 명령 | 결과 | 일시 |
 |---|---|---|---|
+| `P4-02` | P4-02b main `bc8b0dd1` 병합 `eebd4905`: frontend `typecheck`·`lint`(전체)·`typecheck:e2e`, 변경 범위 vitest(edit-strategy·shared/config·pages·`document-routes`·`stylesheets`), Graph 관련 e2e(workflow·story 3), PLAN `-Check`·`conflict_markers` | tsc·lint 0 · Vitest 49 files 614/614 · e2e 17/17 · 표식 0 | 2026-09-30 |
 | `P4-02` | P4-02a main `227a655a` 병합(`b9e4b915`) 뒤: frontend `typecheck`·`lint`(전체)·`typecheck:e2e`, `test`(전체), Graph 관련 e2e(workflow·story 3). CI R2 실패 뒤 `e2f9e47a`: `PARSE_DELAY_MS` 4000 재현 조건에서 R1·R2, 평소 조건 반복 3회, route 파일 전체 | 병합 뒤 Vitest 91 files 1180/1180 · e2e 16/16 · CI R2 가 두 run 모두 "마지막 compile = 편집 전 원문"으로 실패 → 재현 조건에서 같은 실패 재현, 고친 뒤 재현 조건 2/2·반복 3/3·route 83/83 | 2026-09-30 |
 | `P4-02` | P4-02b r1 반영(테스트·문서만, 코드 tip `ce7c9cea` 그대로): frontend `typecheck`·변경 파일 `eslint`, 변경 범위 vitest(edit-strategy·shared/config·pages·`document-routes`·`stylesheets`), 리뷰 돌연변이 M5(목록 `aria-current` 제거)·M3(캔버스 밖 이름 손 목록)·M8(`const` 필터 제거)·M4c(캔버스 추가 버튼 disabled 무시) 재현 | tsc·eslint 0 · Vitest 49 files 611/611 · 네 돌연변이 모두 새 테스트가 잡음 | 2026-09-30 |
 | `P4-02` | P4-02b rebase 뒤 코드 tip `ce7c9cea`(#392 r1 `4d658d75` 위): frontend `typecheck`·`lint`(전체), 변경 범위 vitest(edit-strategy·shared/config·pages·`document-routes`·`stylesheets`), `node e2e/run-playwright.mjs`(포트 8235/5235) — workflow spec, Graph 탭 story spec 3개, rebase 중 커밋마다 `tsc --noEmit`(`git rebase --exec`) | tsc·lint 0 · Vitest 49 files 608/608 · e2e 16/16(기준선 그대로) · 커밋 넷 모두 타입 통과 | 2026-09-30 |
@@ -1193,6 +1194,7 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-30 — **P4-02a MERGED, P4-02b main 병합**. [#392](https://github.com/Nochiski/Quant_study/pull/392) 가 main 에 머지됐다(`bc8b0dd1`, P4-02a — 캔버스·카드 문장 틀·route R1·R2). 로컬 브랜치 `feat/lang2-p4-02-stage-cards` 는 지웠다. [#395](https://github.com/Nochiski/Quant_study/pull/395) 에 origin/main 을 merge 했다(`eebd4905`, force push 없음, 충돌은 PLAN 한 곳 — 양쪽 기록을 모두 살렸다). R1·R2 의 정착 대기(`data-settled`)는 main 에서 들어왔고, #395 가 더한 route 테스트 둘(문제 행 → 캔버스 카드·목록)은 편집하지 않아 같은 대기가 필요 없다. P4-02 상태 `IN_REVIEW` 유지 — #395 머지로 P4-02 가 끝난다.
 - 2026-09-30 — **P4-02a main 병합과 CI R2 타이밍 수정**([#392](https://github.com/Nochiski/Quant_study/pull/392)). 리드 머지 순서(#387 → #389 → #392)대로 main `227a655a` 를 merge 했다(`b9e4b915`, force push 없음, 충돌은 정본 대장 한 곳 — 검증 랩 두 행은 main, "그래프 표현 투영" 행은 `.card` 문장). 그 뒤 CI 두 run 에서 route R2 가 "마지막 compile 이 편집 전 원문"으로 실패했다. 원인은 테스트 타이밍이다: 빠른 러너에서 문서를 연 지 약 60ms 만에(첫 parse 150ms 전) 카드에 입력해, 빈 parse 로 그려진 캔버스가 적힌 칸을 미작성으로 보였고 확정이 insert-key 가 되어 parse 대기 중 구조 연산 보류(`pending`, 설계대로)로 버려졌다. `PARSE_DELAY_MS` 4000 으로 같은 실패를 재현했다. 테스트가 문서 상태 배지 `data-settled`(e2e `waitForSettledDocument` 와 같은 신호)를 기다린 뒤 편집하고, "마지막 compile" 대신 원문 일치 + 정착 + 그 원문의 compile 요청을 보게 고쳤다(`e2f9e47a`, 단언은 그대로). 관찰(후속 후보): 문서를 연 직후 첫 parse 전 약 150ms 동안 Form·캔버스가 스키마 기본값으로 그려진다 — 그 사이 편집은 보류 안내와 함께 버려진다. Form 부터 있던 동작이다.
 - 2026-09-30 — **P4-02b 리뷰 r1 반영**([#395](https://github.com/Nochiski/Quant_study/pull/395), `review_pr395` r1 APPROVE, 리드 지시). 코드는 그대로 두고 테스트·문서만 더했다. (1) P3-1: 빈 문서의 첫 문제(`/factors` "팩터를 하나 이상 추가하세요")를 Graph 탭에서 누르면 캔버스 알파 팩터 목록 group 이 `aria-current` 와 마지막 스크롤을 받는 route 테스트. (2) P3-2: `unstagedNames` 가 정확히 [전략 이름·전략 설명·탐색 파라미터]이고, 스키마 사본에서 `parameters` 에 단계를 주면 빠진다 — 손 목록·`const` 필터 제거를 구별한다. (3) P3-3: 캔버스 규칙 추가 버튼이 settling 이면 잠기고 사유를 설명으로 단다(P4-04 가 Form 목록을 걷어도 남는다). (4) P3-4: 캔버스 규칙은 참조되지 않아 삭제 거부가 일어나지 않는다(PR 본문 정정). 팩터 카드가 같은 거부를 쓸 때 이름으로 말하라는 한 줄을 WORKFLOW P4-03 acceptance 에 적었다. (5) P3-5: R2-1 주석을 제 테스트("scrolls to the editor row…") 앞으로 옮겼다. US-DM-07 비고 보강은 하지 않는다(리드).
 - 2026-09-30 — **P4-02b PR [#395](https://github.com/Nochiski/Quant_study/pull/395)**(base `feat/lang2-p4-02-stage-cards`). (1) 문제 행 이동: 캔버스가 그리는 카드 행·목록·항목 pointer(`pipelineCoversPointer`, 포함 규칙은 `coversPointer`)는 Graph 탭에 머문 채 그 카드로 간다. 캔버스의 단계는 schema 가 정하므로 `resolveDiagnosticDestination` 입력 `schemaLoaded` 를 `schema` 로 바꿨다. (2) 규칙 추가·삭제는 Form 목록과 같은 `listAddition`·`useItemRemoval` — a 에서 되돌린 두 추출을 쓰는 곳이 생긴 여기서 다시 뗐고, 삭제 거부 문장도 훅이 만든다. (3) "5 실행" 안내는 네 단계 아래 한 줄이다. "이 캔버스에 없는 것"은 단계 없는 섹션 이름을 스키마에서 뽑는다(`unstagedNames`). (4) US-DM-07 비고 한 줄, 상태 `예정` 유지. 리드 지시로 r1 반영된 #392 위로 rebase 했다(새 route 단언도 `lastVisibleScroll`). P4-02 상태 `IN_REVIEW`(a 는 r1 APPROVE 반영·머지 대기, b 는 `review_pr395` 리뷰 중).

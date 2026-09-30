@@ -79,6 +79,7 @@ from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataNotReadyError,
     BacktestDataQuery,
     BacktestDataset,
     CorporateActionRecord,
@@ -769,11 +770,10 @@ class EquityDuckdbAdapter:
         if self._catalog.has_macro(UNFOLDED_MACRO):
             return None
         reason = (
-            f"카탈로그에 백테스트가 읽는 매크로 {UNFOLDED_MACRO} 가 없어 실데이터 백테스트를 "
-            f"멈춘다 — {CATALOG_REBUILD} (catalog_macro_missing) — "
-            f"macros={list(self._catalog.macros)}"
+            f"카탈로그에 백테스트가 읽는 매크로 {UNFOLDED_MACRO} 가 없다 — {CATALOG_REBUILD} "
+            f"(catalog_macro_missing) — macros={list(self._catalog.macros)}"
         )
-        logger.warning(f"{reason} catalog={self._catalog.path}")
+        logger.warning(f"실데이터 백테스트를 멈춘다 — {reason} catalog={self._catalog.path}")
         return reason
 
     @property
@@ -1273,14 +1273,15 @@ class EquityDuckdbAdapter:
         if unknown:
             raise ValueError(f"unknown security_id — not in {SPAN_TABLE}: {unknown}")
         if FACTOR_TABLE not in self._builds:
-            raise EquityDuckdbSetupError(
-                f"{FACTOR_TABLE} not built — a backtest without the corporate-action feed is "
-                "silently wrong across splits"
+            raise BacktestDataNotReadyError(
+                f"원장 표 {FACTOR_TABLE} 이 없어 백테스트를 멈춘다 — 기업행위 사건 없이 돌리면 "
+                "분할·병합 구간의 손익이 조용히 틀린다. 원장을 받은 뒤(`ledger_sync`) 서버를 "
+                "다시 띄워야 한다 (table_missing)"
             )
         if self._event_feed_reason is not None:
-            raise EquityDuckdbSetupError(
-                "원장이 접지 못한 층 이동을 읽지 못해 백테스트를 멈춘다 — 사건 없이 돌리면 "
-                f"그 종목을 든 동안 손익이 층 배수만큼 튄다(#369) — {self._event_feed_reason}"
+            raise BacktestDataNotReadyError(
+                f"원장이 접지 못한 층 이동({UNFOLDED_MACRO})을 읽지 못해 백테스트를 멈춘다 — 사건 "
+                f"없이 돌리면 그 종목을 든 동안 손익이 층 배수만큼 튄다 — {self._event_feed_reason}"
             )
         tickers = tuple(sorted({ticker for ticker, _ in parsed.values()}))
         # 워밍업은 start 앞 거래일 달력으로 센다(`_window` 와 같은 달력). 모자라면 있는 만큼 읽는다.

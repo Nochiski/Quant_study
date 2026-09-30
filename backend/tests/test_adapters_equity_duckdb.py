@@ -46,7 +46,10 @@ from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
-from strategy_workbench.application.backtest_run.facade.ports import BacktestDataQuery
+from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataNotReadyError,
+    BacktestDataQuery,
+)
 from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
 from strategy_workbench.application.factor_research.facade.research import (
     FactorPreviewRequest,
@@ -1300,9 +1303,11 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
             for r in caplog.records
         ), code
         # 백테스트는 원장이 접지 못한 층 이동을 카탈로그 뷰로만 읽는다 — 표로 돌아가 술어를 다시
-        # 적지 않고 멈춘다(#369)
-        with pytest.raises(EquityDuckdbSetupError, match=code) as stopped:
+        # 적지 않고, run 이 코드화된 실패(`backtest.run.data_not_ready`)로 끝나게 멈춘다(#369).
+        # 조치는 사유 문장이 말한다
+        with pytest.raises(BacktestDataNotReadyError, match=code) as stopped:
             adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("005930:1",), None))
+        assert "ledger_sync catalog" in str(stopped.value) and "다시 띄워" in str(stopped.value)
         assert str(root.resolve()) not in str(stopped.value)
     # 원장 판은 meta 가 아니라 MANIFEST 에서 온다
     assert adapter.snapshot().snapshot_id.startswith(

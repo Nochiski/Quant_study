@@ -203,6 +203,11 @@ const progressStream = () =>
     { headers: { "Content-Type": "text/event-stream" } },
   );
 
+/** 실험 상세 머리의 상태 배지. 옆의 진행 수 문장에도 "완료"가 있어 배지만 본다. */
+const statusBadge = (id: string) =>
+  screen.getByRole("heading", { name: `실험 ${id}` }).nextElementSibling
+    ?.firstElementChild;
+
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
@@ -599,11 +604,57 @@ describe("experiments", () => {
     // 진행 스트림의 프레임과 닫힘이 상세를 다시 읽게 한다.
     await waitFor(() => expect(reads).toBeGreaterThanOrEqual(2));
     await waitFor(() =>
-      expect(
-        screen.getByRole("heading", { name: "실험 e-run" }).nextElementSibling,
-      ).toHaveTextContent("완료"),
+      expect(statusBadge("e-run")).toHaveTextContent(/완료$/u),
     );
   });
+
+  // #407 리뷰 P2-2: 실험이 끝나기 전에 스트림이 프레임 없이 끊겨도(서버 재시작 등) 보조 폴링이 화면을 맞춘다.
+  it("keeps reading a running experiment after its progress stream drops", async () => {
+    let reads = 0;
+    let trialReads = 0;
+    server.use(
+      http.get(`${API}/api/v1/experiments/:experimentId`, () => {
+        reads += 1;
+        return HttpResponse.json(
+          experiment("e-run", reads < 3 ? "running" : "completed"),
+        );
+      }),
+      http.get(`${API}/api/v1/experiments/:experimentId/trials`, () => {
+        trialReads += 1;
+        return HttpResponse.json([trialState(0, "running", null)]);
+      }),
+      http.get(`${API}/api/v1/experiments/:experimentId/walk-forward`, () =>
+        HttpResponse.json({
+          windows: [],
+          curve: [],
+          out_of_sample_sharpe: null,
+          retention: null,
+          gap: "pending",
+        }),
+      ),
+      // 프레임 없이 바로 닫힌다 — 실험은 아직 돈다.
+      http.get(
+        `${API}/api/v1/experiments/:experimentId/events`,
+        () =>
+          new HttpResponse(
+            new ReadableStream({
+              start(controller) {
+                controller.close();
+              },
+            }),
+            { headers: { "Content-Type": "text/event-stream" } },
+          ),
+      ),
+    );
+    mount("/research/experiments/e-run");
+
+    await waitFor(
+      () => expect(statusBadge("e-run")).toHaveTextContent(/완료$/u),
+      { timeout: 8_000 },
+    );
+    expect(reads).toBeGreaterThanOrEqual(3);
+    expect(trialReads).toBeGreaterThanOrEqual(2);
+  }, 12_000);
 
   it("announces an experiment that finishes while the app is open, but not one done before", async () => {
     let listed = 0;

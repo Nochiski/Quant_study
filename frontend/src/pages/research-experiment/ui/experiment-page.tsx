@@ -5,6 +5,7 @@ import {
   requestRejectionMessage,
 } from "../../../entities/backtest";
 import {
+  EXPERIMENT_POLL_MS,
   experimentQuery,
   experimentStatusLabel,
   experimentStatusTone,
@@ -47,11 +48,16 @@ const RunCell = ({ state }: { state: ExperimentTrialState }) => {
 const WalkForward = ({
   experimentId,
   trials,
+  refetchInterval,
 }: {
   experimentId: string;
   trials: ExperimentTrialState[];
+  refetchInterval: number | false;
 }) => {
-  const report = useQuery(experimentWalkForwardQuery(experimentId));
+  const report = useQuery({
+    ...experimentWalkForwardQuery(experimentId),
+    refetchInterval,
+  });
   if (report.data === undefined) return null;
   const { data } = report;
   return (
@@ -141,9 +147,15 @@ export const ExperimentPage = () => {
     from: "/research/experiments/$experimentId",
   });
   const experiment = useQuery(experimentQuery(experimentId));
-  const trials = useQuery(experimentTrialsQuery(experimentId));
+  const running = experiment.data?.finished === false;
+  // 스트림이 끝나기 전에 끊겨도 trial·워크포워드가 맞춰지게 실험 조회와 같은 주기로 보조로 다시 읽는다.
+  const refetchInterval = running ? EXPERIMENT_POLL_MS : false;
+  const trials = useQuery({
+    ...experimentTrialsQuery(experimentId),
+    refetchInterval,
+  });
   const retry = useRetryExperimentTrial(experimentId);
-  useExperimentProgress(experimentId, experiment.data?.finished === false);
+  useExperimentProgress(experimentId, running);
   if (experiment.isPending || trials.isPending)
     return (
       <p className="page page-state" role="status">
@@ -225,8 +237,11 @@ export const ExperimentPage = () => {
                   <td>#{state.trial.index + 1}</td>
                   <td>{valuesText(state.trial.parameter_values)}</td>
                   <td>
-                    {state.trial.window.train_start} ~{" "}
-                    {state.trial.window.train_end}
+                    {/* 창이 없는 trial(용량 확인, V4-04)은 기반 기간 전체를 돈다. */}
+                    {state.trial.window === null ||
+                    state.trial.window === undefined
+                      ? "—"
+                      : `${state.trial.window.train_start} ~ ${state.trial.window.train_end}`}
                   </td>
                   <td>
                     <Badge tone={trialStatusTone(state.status)}>
@@ -254,7 +269,11 @@ export const ExperimentPage = () => {
           </table>
         </div>
         {record.design.measured ? (
-          <WalkForward experimentId={experimentId} trials={trials.data} />
+          <WalkForward
+            experimentId={experimentId}
+            trials={trials.data}
+            refetchInterval={refetchInterval}
+          />
         ) : null}
       </div>
     </section>

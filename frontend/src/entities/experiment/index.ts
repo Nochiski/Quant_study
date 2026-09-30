@@ -1,4 +1,5 @@
 export {
+  EXPERIMENT_POLL_MS,
   experimentQuery,
   experimentTrialsQuery,
   experimentWalkForwardQuery,

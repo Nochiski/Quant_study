@@ -16,6 +16,9 @@ import {
 
 export const experimentsKey = () => ["experiments"] as const;
 
+/** 끝나지 않은 실험을 다시 읽는 주기. 목록과 실험 상세(스트림의 보조)가 같이 쓴다. */
+export const EXPERIMENT_POLL_MS = 2_000;
+
 /**
  * 실험 목록(최근에 만든 순, 응답의 `next_after` 로 다음 쪽을 더 읽는다)과 대기열 표면(슬롯 사용량·우선순위
  * 상한). 상태·진행 수·끝났는지(`finished`)는 backend 가 파생해 싣는다(spec D6). 읽은 쪽 어디에든 끝나지 않은
@@ -32,14 +35,20 @@ export const experimentsQuery = () =>
       query.state.data?.pages.some((page) =>
         page.items.some((item) => !item.finished),
       )
-        ? 2_000
+        ? EXPERIMENT_POLL_MS
         : false,
   });
 
+/**
+ * 실험 하나. 끝나지 않은 동안 목록과 같은 주기로 다시 읽는다 — 진행 스트림이 실험이 끝나기 전에 끊겨도(서버
+ * 재시작·네트워크) 화면이 멈추지 않게 하는 보조다(#407 리뷰 P2-2).
+ */
 export const experimentQuery = (experimentId: string) =>
   queryOptions({
     queryKey: [...experimentsKey(), experimentId],
     queryFn: () => strategyWorkbenchApi.getExperiment(experimentId),
+    refetchInterval: (query) =>
+      query.state.data?.finished === false ? EXPERIMENT_POLL_MS : false,
   });
 
 /**

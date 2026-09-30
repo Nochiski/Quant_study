@@ -115,6 +115,10 @@ const experimentRow = (page: Page, experimentId: string) =>
     .getByRole("row")
     .filter({ has: page.getByRole("link", { name: experimentId }) });
 
+/** 실험 행의 상태 칸(배지). 진행 수 칸에도 "실행 중"이 있어 행 전체로 단언하면 늘 참이다. */
+const experimentStatus = (page: Page, experimentId: string) =>
+  experimentRow(page, experimentId).getByRole("cell").nth(2);
+
 test(
   "US-SM-14 US-SM-15 실험을 표로 보고 같은 설정으로 다시 만들며, 대기열의 두 실험을 조작하고 완료 알림으로 후보를 연다",
   { tag: ["@story", "@US-SM-14", "@US-SM-15"] },
@@ -166,8 +170,8 @@ test(
     const [, second = ""] = await experimentIds(saved, 2);
 
     // US-SM-15: 앞 실험이 실험 몫 슬롯을 붙잡고 있는 동안 두 실험이 실행 중과 대기로 보이고 슬롯 사용량이 보인다.
-    await expect(experimentRow(page, first)).toContainText("실행 중");
-    await expect(experimentRow(page, second)).toContainText("대기");
+    await expect(experimentStatus(page, first)).toContainText("실행 중");
+    await expect(experimentStatus(page, second)).toContainText("대기");
     await expect(
       page.getByText(/동시 실행 슬롯 \d+ \/ \d+ 사용 중/u),
     ).toBeVisible();
@@ -176,7 +180,7 @@ test(
     await experimentRow(page, second)
       .getByRole("button", { name: "일시정지" })
       .click();
-    await expect(experimentRow(page, second)).toContainText("일시정지");
+    await expect(experimentStatus(page, second)).toContainText("일시정지");
     await experimentRow(page, second)
       .getByRole("button", { name: "재개" })
       .click();
@@ -189,9 +193,10 @@ test(
     await experimentRow(page, second)
       .getByRole("button", { name: "실험 취소 확인" })
       .click();
-    await expect(experimentRow(page, second)).toContainText("취소됨");
+    await expect(experimentStatus(page, second)).toContainText("취소됨");
 
     // 실험이 슬롯을 쓰는 동안에도 단일 백테스트는 기다리지 않고 끝난다.
+    await expect(experimentStatus(page, first)).toContainText("실행 중");
     const single = await startRun(baseRequest(saved));
     await expect
       .poll(() => runStatus(single), { timeout: TRIAL_HOLD_SECONDS * 500 })
@@ -201,7 +206,7 @@ test(
     await page.close();
     page = await context.newPage();
     await page.goto("/research/experiments");
-    await expect(experimentRow(page, first)).toContainText("실행 중");
+    await expect(experimentStatus(page, first)).toContainText("실행 중");
     await page.goto("/research/backtests");
     const notice = page
       .getByRole("status")
@@ -292,7 +297,7 @@ test(
     await experimentRow(page, experimentId)
       .getByRole("button", { name: "실험 취소 확인" })
       .click();
-    await expect(experimentRow(page, experimentId)).toContainText("취소됨");
+    await expect(experimentStatus(page, experimentId)).toContainText("취소됨");
     await expect
       .poll(() => runStatus(held), { timeout: 10_000 })
       .toBe("cancelled");

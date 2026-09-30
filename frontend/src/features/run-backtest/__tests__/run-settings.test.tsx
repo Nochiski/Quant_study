@@ -1266,7 +1266,7 @@ describe("backtest run actions", () => {
         }),
       ),
     );
-    renderWithQuery(
+    const view = renderWithQuery(
       <BacktestRunActions
         runId="run-shared"
         status="running"
@@ -1283,6 +1283,20 @@ describe("backtest run actions", () => {
     expect(
       screen.queryByRole("button", { name: "실행 취소" }),
     ).not.toBeInTheDocument();
+
+    // #407 리뷰 P2-1: 같은 화면이 다시 실행한 새 run 으로 넘어가면 앞 run 의 안내를 쓰지 않는다.
+    view.rerender(
+      <BacktestRunActions
+        runId="run-next"
+        status="running"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "실행 취소" }),
+    ).toBeInTheDocument();
   });
 
   it("renders a typed cancel 404 without leaking an unhandled rejection", async () => {

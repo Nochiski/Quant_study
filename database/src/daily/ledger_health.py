@@ -18,7 +18,7 @@ import sys
 from dataclasses import asdict, dataclass
 from enum import Enum
 
-from backfill_wise import REQ_COVERED, REQ_NONE  # 종목당 일일 요청 수의 정본
+from backfill_wise import REQ_NONE, req_covered_on  # 종목당 일일 요청 수의 정본(커버는 런 날짜로 고른다)
 from daily import calendar as _cal
 
 KST = dt.timezone(dt.timedelta(hours=9))
@@ -425,11 +425,12 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
         cov = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='covered' AND date(checked_at, '+9 hours')=?", (day,))
         none = _count(con, "SELECT COUNT(*) FROM ws_coverage WHERE status='none' AND date(checked_at, '+9 hours')=?", (day,))
         src, basis = "coverage", "ws_coverage.checked_at(호출 원장 없음 — 전환기 폴백)"
+    req_cov = req_covered_on(day)          # 재무 추가 3콜(10-01~) 전 런은 15
     if src is not None:
-        expected = cov * REQ_COVERED + none * REQ_NONE
+        expected = cov * req_cov + none * REQ_NONE
         out.append(Check("wise.req_identity", Level.REQUIRED, Status.PASS if expected == n_req else Status.FAIL,
                          {"expected": expected, "actual": n_req, "covered": cov, "none": none, "source": src},
-                         f"{day} {basis} 기준 covered×{REQ_COVERED} + none×{REQ_NONE} == n_req "
+                         f"{day} {basis} 기준 covered×{req_cov} + none×{REQ_NONE} == n_req "
                          "(무커버 4 = 목록 1 + 3개년 cF5001, 09-10 검수 D H1 이후)"))
         rate = cov / (cov + none) if (cov + none) else None
         out.append(Check("wise.cov_rate", Level.WARN, Status.SKIP if rate is None else (Status.PASS if rate >= 0.25 else Status.FAIL),
@@ -440,9 +441,9 @@ def check_wise(con: sqlite3.Connection, d_iso: str, next_iso: str) -> list[Check
         # 절대 밴드(15,500~15,700 · 2,560~2,570)는 무커버 4콜 전환(09-10)과 규모구분 갱신(09-11: 2,563→2,610)에
         # 모두 오탐을 냈다 — 기대치는 같은 covered·none(위 항등식과 동일 출처)에서 유도한다. 출처가 없으면 하한만 본다.
         if cov >= 0 and none >= 0:
-            exp_rows, exp_stocks = cov * REQ_COVERED + none * REQ_NONE, cov + none
+            exp_rows, exp_stocks = cov * req_cov + none * REQ_NONE, cov + none
             ok = n == exp_rows and s == exp_stocks and s >= 2400
-            expected = (f"{basis} 기준 rows == covered×{REQ_COVERED} + none×{REQ_NONE} ({exp_rows:,}) · "
+            expected = (f"{basis} 기준 rows == covered×{req_cov} + none×{REQ_NONE} ({exp_rows:,}) · "
                         f"stocks == covered+none ({exp_stocks:,}) · stocks >= 2,400")
         else:
             ok = n >= 15000 and s >= 2400

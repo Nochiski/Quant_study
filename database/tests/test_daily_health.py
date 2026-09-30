@@ -8,6 +8,7 @@ from daily import ledger_health as lh
 from wics_snapshot import L1, L2
 
 D, DP = "20260908", "20260907"          # 대상일(화), 직전 거래일(월)
+RC = lh.req_covered_on("2026-09-08")  # 그 날 런의 커버 종목당 요청 수(재무 추가 전 = 15)
 
 
 def _cal(tmp_path, holidays=()):
@@ -215,7 +216,7 @@ def _wise(tmp_path, *, cov=804, none=1759, n_req=None, raw_rows=None, raw_stocks
 
     n_req 기본값은 항등식대로. `call_log=False` 는 호출 원장이 없던 옛 판(폴백 경로) 재현용.
     """
-    n_req = n_req if n_req is not None else cov * lh.REQ_COVERED + none * lh.REQ_NONE
+    n_req = n_req if n_req is not None else cov * RC + none * lh.REQ_NONE
     raw_rows = n_req if raw_rows is None else raw_rows
     raw_stocks = cov + none if raw_stocks is None else raw_stocks
     run_at, checked_at, fetched_date = _WISE_SNAPSHOT[snapshot]
@@ -243,9 +244,9 @@ def test_wise_request_identity_counts_four_requests_per_uncovered_stock(tmp_path
     # 검수 D H1 후속: 무커버 판정이 3개년 cF5001 을 다 본 뒤에만 나므로 무커버 종목은 4콜(목록 1 + cF5001 3)이다.
     rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path)))
     ident = next(c for c in rep.checks if c.name == "wise.req_identity")
-    assert ident.status is lh.Status.PASS and ident.value["expected"] == 804 * lh.REQ_COVERED + 1759 * lh.REQ_NONE
+    assert ident.status is lh.Status.PASS and ident.value["expected"] == 804 * RC + 1759 * lh.REQ_NONE
     sub = tmp_path / "b"; sub.mkdir()
-    rep2 = lh.run(D, _paths(sub, wise=_wise(sub, n_req=804 * lh.REQ_COVERED + 1759 * 2)))
+    rep2 = lh.run(D, _paths(sub, wise=_wise(sub, n_req=804 * RC + 1759 * 2)))
     assert next(c for c in rep2.checks if c.name == "wise.req_identity").status is lh.Status.FAIL
 
 
@@ -280,7 +281,7 @@ def test_wise_raw_expectation_derives_from_coverage_not_a_fixed_band(tmp_path):
     # 2,560~2,570)는 오탐. 기대치 = covered×REQ_COVERED + none×REQ_NONE · stocks = covered+none.
     rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, cov=816, none=1794)))
     raw = next(c for c in rep.checks if c.name == "wise.raw")
-    assert raw.status is lh.Status.PASS and raw.value == {"rows": 816 * lh.REQ_COVERED + 1794 * lh.REQ_NONE, "stocks": 2610}
+    assert raw.status is lh.Status.PASS and raw.value == {"rows": 816 * RC + 1794 * lh.REQ_NONE, "stocks": 2610}
     sub = tmp_path / "b"; sub.mkdir()
     rep2 = lh.run(D, _paths(sub, wise=_wise(sub, cov=816, none=1794, raw_rows=19000)))
     assert next(c for c in rep2.checks if c.name == "wise.raw").status is lh.Status.FAIL
@@ -464,3 +465,9 @@ def test_wics_stale_or_thin_snapshot_only_warns(tmp_path):
     rep = lh.run(D, _paths(tmp_path, krx=_krx(b), wiseindex=_wics(b)), skip=frozenset({"wics"}))
     assert "wics.integrity" not in _by(rep) and _by(rep)["wics.skipped"].status is lh.Status.SKIP
 
+
+
+def test_wise_request_budget_follows_the_run_date():
+    """재무 추가 3콜(10-01 수집부터) 전 런은 15콜 — 전환 다음 날 아침에 전날(09-30) 런을 18 로 판정하면 거짓 FAIL."""
+    assert lh.req_covered_on("2026-09-30") == 15
+    assert lh.req_covered_on("2026-10-01") == 18

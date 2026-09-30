@@ -58,6 +58,10 @@ WORKERS = 10
 JITTER  = (0.05, 0.25)
 YYMMS   = 3          # 대상연도: CK=1(당해) 포함 최근 3개 — 2026E·2027E·2028E
 REQ_COVERED = 18     # 커버 종목의 일일 요청 수: 목록 1 + cF5001·cF5002 ×3 + 대체 축 8 + 재무 추가 3(FIN_REQUESTS). ledger_health 항등식이 읽는다
+# 재무 추가 3콜(FIN_REQUESTS 의 Q:IS·Y:BS·Y:CF)은 이 KST 수집일부터다. 그 전 런은 15콜로 받았으므로
+# 항등식도 런 날짜로 고른다 — 상수 하나로 두면 전환 다음 날 아침의 전날 판정·과거 재판정이 거짓 FAIL 한다.
+FIN_EXT_SINCE = "2026-10-01"
+REQ_COVERED_BEFORE_FIN_EXT = 15
 REQ_NONE    = 4      # 무커버 종목: 목록 1 + cF5001 ×3 — 3개년을 다 본 뒤에만 none (검수 D H1)
 
 DDL = """
@@ -133,6 +137,11 @@ def fetch(cmp_cd: str, ep: str, pkey: str, url: str) -> tuple[str, str, bytes, i
         return cmp_cd, f"exc/{type(e).__name__}", b"", 0, int((time.time() - t0) * 1000)
     finally:
         time.sleep(random.uniform(*JITTER))
+
+
+def req_covered_on(day_iso: str) -> int:
+    """그 KST 수집일(YYYY-MM-DD) 런의 커버 종목당 요청 수 — ledger_health `wise.req_identity`·`wise.raw` 가 읽는다."""
+    return REQ_COVERED if day_iso >= FIN_EXT_SINCE else REQ_COVERED_BEFORE_FIN_EXT
 
 
 def dt_today() -> str:

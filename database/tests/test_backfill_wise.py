@@ -53,6 +53,7 @@ def test_probe_fetch_failure_is_treated_as_covered():
 def test_request_budget_per_stock():
     # ledger_health.wise.req_identity 의 상수와 맞물린다: 커버 18(종전 15 + 재무 추가 3) · 무커버 4(목록 1 + cF5001 3)
     assert bw.REQ_COVERED == 15 + len(bw.FIN_REQUESTS) - 2 == 18 and bw.REQ_NONE == 4
+    assert bw.req_covered_on(bw.FIN_EXT_SINCE) == 18 and bw.req_covered_on("2026-09-30") == 15
 
 
 def test_fin_requests_add_quarterly_income_and_annual_bs_cf():

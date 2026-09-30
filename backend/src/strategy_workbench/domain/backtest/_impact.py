@@ -33,18 +33,23 @@ VOLATILITY_SESSIONS = 20
 # 체결가를 넘어 매도 체결가가 0 이하가 된다(run 이 죽는다). 상한은 1 미만이어야 매도가가 양수로
 # 남는다. 충격을 깎는 쪽은 낙관 편향이므로 매도가가 양수로 남는 선까지만 자르도록 크게 잡는다.
 MAX_IMPACT_FRACTION = 0.99
+# 워밍업 여유 배수. 창이 요구하는 세션 수의 이 배를 읽어, 워밍업 안 거래정지로 행이 빈 날을 더 앞
+# 행이 메운다 — 같은 세션·종목의 참여 한도·σ 가 측정 시작일에 따라 갈리지 않게 한다(#396 리뷰
+# P2-2). 정지가 여유보다 길면 첫 세션들의 창이 차지 않는다(알려진 한계).
+WARMUP_MARGIN_FACTOR = 2
 
 
 def cost_history_sessions(environment: RunEnvironment) -> int:
-    """비용 계산(참여 기준 ADV·√ 충격 σ)에 필요한 측정 구간 앞 워밍업 세션 수.
+    """비용 계산(참여 기준 ADV·√ 충격 σ)을 위해 읽을 측정 구간 앞 워밍업 세션 수. 워밍업 여유의
+    정본이다.
 
-    `sqrt` 는 ADV(20행)와 σ(수익률 20개 = 종가 21개)를 함께 쓴다. 참여 기준 `adv20` 의 워밍업이 더
-    길면(`participation_history_sessions`) 그만큼 읽는다.
+    창이 요구하는 행 수는 참여 기준 `adv20` 이 20행(`participation_history_sessions`), `sqrt` 가
+    ADV(20행)와 σ(수익률 20개 = 종가 21개)다. 그 최대의 `WARMUP_MARGIN_FACTOR` 배를 읽는다.
     """
-    participation = participation_history_sessions(environment)
+    needed = participation_history_sessions(environment)
     if environment.impact_model is ImpactModel.SQRT:
-        return max(participation, ADV_SESSIONS, VOLATILITY_SESSIONS + 1)
-    return participation
+        needed = max(needed, ADV_SESSIONS, VOLATILITY_SESSIONS + 1)
+    return WARMUP_MARGIN_FACTOR * needed
 
 
 def impact_scales(

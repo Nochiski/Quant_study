@@ -431,28 +431,31 @@ def test_adv20_averages_only_the_last_twenty_rows_including_warmup() -> None:
 
 
 def test_adv20_warmup_reads_past_suspended_days_so_the_start_date_does_not_zero_the_limit() -> None:
-    """워밍업은 20세션의 두 배를 읽는다(#396 리뷰 P2-2). 측정 시작 앞 40세션(k = 1..40, 거래대금
-    100 × k, 종가 10) 중 k = 30..32 가 거래정지로 행이 없다.
+    """워밍업은 20세션의 두 배를 읽는다(#396 리뷰 P2-2). 세션 k = 1..46(거래대금 100 × k,
+    종가 10) 중 k = 36..38 이 거래정지로 행이 없다. 같은 세션 k = 46 의 한도를 두 시작일로 잰다.
 
-    40세션을 읽으면 첫 측정 세션의 20행은 k = 18..29 와 33..40, 합 574 × 100 ÷ 20 ÷ 10 = 287주다. 앞
-    20세션만 읽었다면 거래대금이 있는 행이 17개라 0주였다 — 같은 세션의 한도가 시작일에 따라 갈린다.
+    - k = 46 에서 시작: 앞 40세션(k = 6..45)을 읽는다.
+    - k = 41 에서 시작: 앞 40세션(k = 1..40)을 읽고 k = 41..46 은 측정 구간이다.
+    두 실행 모두 k = 46 의 20행은 k = 39..45 와 23..35, 합 294 + 377 = 671 × 100 ÷ 20 ÷ 10 = 335.5
+    → 335주다. 앞 20세션(k = 26..45)만 읽었다면 거래대금이 있는 행이 17개라 0주였다 — 같은 세션의
+    한도가 시작일에 따라 갈렸다.
     """
     environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
     history = cost_history_sessions(environment)
-    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(history + 1)]
-    start = sessions[-1]
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(46)]
     rows = [
         (session, "A", 10.0, 100.0 * k)
         for k, session in enumerate(sessions, 1)
-        if k not in (30, 31, 32)
+        if k not in (36, 37, 38)
     ]
 
-    full = participation_volumes(environment, rows)
-    short = participation_volumes(environment, [row for row in rows if row[0] >= sessions[20]])
+    def limit(first_read: int) -> int | None:
+        read = [row for row in rows if row[0] >= sessions[first_read - 1]]
+        volumes = participation_volumes(environment, read)
+        return None if volumes is None else volumes[(sessions[-1], "A")]
 
     assert history == 40
-    assert full is not None and short is not None
-    assert (full[(start, "A")], short[(start, "A")]) == (287, 0)
+    assert (limit(46 - history), limit(41 - history), limit(46 - 20)) == (335, 335, 0)
 
 
 def test_fixed_bps_impact_leaves_the_engine_on_fixed_slippage() -> None:
@@ -541,8 +544,8 @@ def test_sqrt_volatility_uses_the_last_twenty_returns_and_skips_corporate_action
     # 100 → 200 은 2주를 1주로 합친 병합(구주 1주당 신주 0.5주)이다.
     adjusted = impact_scales(environment, rows, {(sessions[1], "A"): 0.5})
 
-    # 기본 참여 기준 `adv20` 의 워밍업(40)이 σ 창(종가 21개)보다 길다.
-    assert cost_history_sessions(environment) == 40
+    # σ 창(종가 21개)이 참여 기준 `adv20`(20행)보다 길어 21 × 여유 2 를 읽는다.
+    assert cost_history_sessions(environment) == 42
     assert plain is not None and adjusted is not None
 
     def expected(index: int, first_return: int) -> float:

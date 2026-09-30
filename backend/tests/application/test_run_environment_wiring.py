@@ -621,8 +621,8 @@ def test_sqrt_impact_reads_warmup_and_prices_fills_with_the_domain_scale(
     assert wait_for_terminal_run(runs, "impact-run").status.value == "completed"
 
     ((query, dataset),) = data.loads
-    # σ 창은 종가 21개지만 기본 참여 기준 `adv20` 의 워밍업(40)이 더 길다.
-    assert query.history_sessions_before_start == 40
+    # σ 창(종가 21개) × 워밍업 여유 2.
+    assert query.history_sessions_before_start == 42
     history = (*dataset.history_bars, *dataset.bars)
     warmed = _impact(environment, history, dataset.history_corporate_actions)
     unsplit = _impact(environment, history)

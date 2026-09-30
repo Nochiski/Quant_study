@@ -8,10 +8,8 @@ ADV 계산과 원화 → 주식 수 환산 규칙의 owner 는 이 파일 하나
 않으므로 체결 시점에 모르는 정보가 들어가지 않는다. 거래대금이 있는 앞선 행이 20개가 안 되면(측정
 구간 안 신규 상장 등) 0주라 그 세션은 체결하지 않고 잔량을 넘긴다 — 상장 초기 며칠의 큰 거래대금으로
 한도를 부풀리지 않는 보수 쪽이다(#342). 첫 세션들의 20행은 측정 구간 앞 워밍업 bar 가
-채운다(`participation_history_sessions`). 워밍업은 20세션의 두 배를 읽는다 — 워밍업 안에
-거래정지로 행이 빈 날이 있어도 더 앞 행으로 20개를 채워, 같은 세션·종목의 한도가 측정 시작일에
-따라 0주와 정상 값으로 갈리지 않게 한다(#396 리뷰 P2-2). 정지가 그보다 길면 여전히 0주다.
-워밍업은 측정이 아니라 연구 구간 판정을 받지 않는다.
+채운다(`participation_history_sessions` 이 필요한 행 수, 읽을 세션 수는 여유를 더한
+`_impact.py` 의 `cost_history_sessions`). 워밍업은 측정이 아니라 연구 구간 판정을 받지 않는다.
 
 한도는 floor(floor(ADV / 종가) × 참여율)로 두 번 내림한다. 한 번만 내림한 floor(ADV × 참여율 / 종가)
 보다 많아야 1주 적고, 대신 두 엔진 코어가 세션 거래량과 같은 정수 산술을 그대로 쓴다.
@@ -33,15 +31,12 @@ from datetime import date
 from ._models import ParticipationBasis, RunEnvironment
 
 ADV_SESSIONS = 20
-# 참여 기준 워밍업으로 읽는 세션 수. 창(`ADV_SESSIONS`)의 두 배라 워밍업 중 빈 날을 앞 행이 메운다.
-ADV_HISTORY_SESSIONS = 2 * ADV_SESSIONS
 
 
 def participation_history_sessions(environment: RunEnvironment) -> int:
-    """참여 기준 계산에 필요한 측정 구간 앞 워밍업 세션 수."""
-    return (
-        ADV_HISTORY_SESSIONS if environment.participation_basis is ParticipationBasis.ADV20 else 0
-    )
+    """참여 기준 계산에 필요한 측정 구간 앞 행 수. 읽을 세션 수(여유 포함)는
+    `cost_history_sessions` 가 정한다."""
+    return ADV_SESSIONS if environment.participation_basis is ParticipationBasis.ADV20 else 0
 
 
 def participation_volumes(

@@ -27,7 +27,7 @@ from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 
 _PINNED = (
     "backtest-engine-v4",
-    "6bccc626361eea1d21be1144f4ab5d9e9a06ebd85a58d1b3b6e9c9f4b33323ed",
+    "3590842330f865449f1d0ce0c996a0f9f1292f6e3ab685878ee4db0f9f3b40fa",
 )
 
 
@@ -41,11 +41,12 @@ def _rules_digest() -> str:
         digest.update(engine.event_store.trace_bytes())
         digest.update(engine.event_store.decision_tape_bytes())
     # ADV(20행)·σ(수익률 20개) 창이 차도록 25세션. 거래대금이 세션마다 달라 창 길이가 결과를 가른다.
-    # 10일은 거래정지라 bar 가 없고 그날의 1:2 분할은 다음 행에서 정산된다(#339).
+    # 23일은 거래정지라 bar 가 없고 그날의 1:2 분할은 다음 행(24일)에서 정산된다(#339). 정산 행 앞에
+    # 거래대금이 있는 행이 20개 넘게 있어야 참여 한도가 0 이 아니라 배수가 한도에 드러난다(#396).
     bars = [
-        (date(2024, 1, day), "A", 100.0 + day % 7, 1e6 * day) for day in range(1, 26) if day != 10
+        (date(2024, 1, day), "A", 100.0 + day % 7, 1e6 * day) for day in range(1, 26) if day != 23
     ]
-    settled = settlement_multipliers(bars, [(date(2024, 1, 10), "A", 2.0)])
+    settled = settlement_multipliers(bars, [(date(2024, 1, 23), "A", 2.0)])
     environment = RunEnvironment(
         start=date(2024, 1, 1),
         end=date(2024, 1, 25),

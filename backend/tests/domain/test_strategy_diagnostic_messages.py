@@ -580,6 +580,36 @@ def test_duplicate_node_diagnostic_names_the_repeated_id() -> None:
     )
 
 
+def test_empty_graph_asks_for_a_first_step_instead_of_a_missing_output() -> None:
+    """노드가 없는 그래프는 출력 진단 대신 첫 단계 안내 하나만 낸다(lang2 P4-03 결정 4).
+
+    "+ 팩터 추가"가 넣는 빈 레시피(`nodes: []`, `output_node_id: ""`)에 "출력 노드를 찾을 수
+    없습니다: node_id=''"는 사용자가 아직 하지 않은 일을 잘못이라고 말했다.
+    """
+    from strategy_workbench.domain.strategy.facade.validation import validate_strategy
+
+    validation = validate_factor_graph(_graph(output=""))
+
+    assert not validation.valid
+    assert [(i.code, i.node_id, i.path, i.message) for i in validation.issues] == [
+        ("factor.graph.empty", None, "nodes", "첫 단계를 추가하세요.")
+    ]
+
+    document = _document()
+    document["factors"].append(
+        {"factor_id": "factor_2", "direction": "high", "graph": {"nodes": [], "output_node_id": ""}}
+    )
+    hydrated = hydrate_strategy_document(document, identity=DRAFT)
+    assert hydrated.spec is not None, hydrated.issues
+    base = f"factors.{len(document['factors']) - 1}."
+
+    issues = validate_strategy(hydrated.spec).issues
+
+    assert [(i.code, i.path, i.message) for i in issues if i.path.startswith(base)] == [
+        ("strategy.expression.empty", base + "graph.nodes", "첫 단계를 추가하세요.")
+    ]
+
+
 def test_graph_diagnostics_reach_a_strategy_document_as_expression_codes() -> None:
     """전략 문서에 실린 그래프 진단은 `strategy.expression.*`다 — `factor.*`는 새지 않는다."""
     from strategy_workbench.domain.strategy.facade.validation import validate_strategy

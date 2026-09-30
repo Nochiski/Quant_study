@@ -12,6 +12,7 @@ from strategy_workbench.domain.analytics.facade.metrics import (
     EquityCurvePoint,
     MetricRegistry,
 )
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
 from strategy_workbench.domain.backtest.facade.runs import (
     AdmissionRejectionCode,
     BacktestRunSpec,
@@ -24,13 +25,16 @@ from strategy_workbench.domain.backtest.facade.trials import bankrupt, preview_t
 from strategy_workbench.domain.experiment.facade.design import (
     CellPlateau,
     ExperimentDesign,
+    ExperimentKind,
     ExperimentNotFoundError,
     ExperimentStateError,
     ExperimentTrial,
     GridIndex,
     InvalidExperimentSpecError,
+    SearchSpec,
     SplitSpec,
     WalkForwardGap,
+    WalkForwardWindow,
     build_search_spec,
     cell_outcomes,
     experiment_trial_key,
@@ -42,7 +46,13 @@ from strategy_workbench.domain.experiment.facade.design import (
     walk_forward_retention,
     window_gap,
 )
-from strategy_workbench.domain.experiment.facade.statistics import run_deflated_sharpe
+from strategy_workbench.domain.experiment.facade.statistics import (
+    CapacityLimit,
+    capacity_amounts,
+    capacity_limit,
+    execution_costs,
+    run_deflated_sharpe,
+)
 from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentControls,
     ExperimentStatus,
@@ -51,7 +61,7 @@ from strategy_workbench.domain.experiment.facade.trial import (
     experiment_status,
     trial_status,
 )
-from strategy_workbench.domain.strategy.facade.specification import ParameterValue
+from strategy_workbench.domain.strategy.facade.specification import ParameterValue, StrategySpec
 
 from .ports.outgoing.experiment_repository import (
     ExperimentRecord,
@@ -84,6 +94,15 @@ class ExperimentRequest:
     # parameter_id → 탐색 값. None 이면 정의가 허용하는 격자 값 전체다(`build_search_spec`).
     search: dict[str, list[ParameterValue] | None]
     split: SplitSpec
+
+
+@dataclass(frozen=True)
+class CapacitySweepRequest:
+    """용량 스윕 만들기·미리 계산 요청(V4-04). 기반 요청을 초기 자본만 바꿔 전체 구간으로 돌린다."""
+
+    run: BacktestRunSpec
+    # 돌릴 초기 자본(원). 서로 다른 양수 `MIN_CAPACITY_AMOUNTS`~`MAX_CAPACITY_AMOUNTS` 개다.
+    initial_cash: list[float]
 
 
 @dataclass(frozen=True)
@@ -160,6 +179,30 @@ class ParameterMap:
 
 
 @dataclass(frozen=True)
+class CapacityPoint:
+    """용량 스윕 금액 하나의 결과."""
+
+    trial_index: int
+    initial_cash: float
+    status: TrialStatus
+    # 원장에 적힌 전체 구간 세션 샤프(비용 후, 연율화 전). 완료되지 않았으면 None.
+    sharpe: float | None
+    # 가격 충격(슬리피지 포함) ÷ 체결 금액(bp), 주문 수량 가운데 체결되지 않은 비율. 완료되지
+    # 않았거나 결과 파일을 읽을 수 없거나 체결·주문이 없으면 None.
+    impact_cost_bps: float | None
+    unfilled_ratio: float | None
+
+
+@dataclass(frozen=True)
+class CapacityReport:
+    """용량 스윕 결과(V4-04). 한계 금액 규칙은 `domain/experiment/_capacity.py` 다."""
+
+    points: tuple[CapacityPoint, ...]
+    # 모든 금액이 끝나야 낸다. 도는·대기·복구 대기 금액이 있으면 None.
+    limit: CapacityLimit | None
+
+
+@dataclass(frozen=True)
 class ExperimentPage:
     items: tuple[Experiment, ...]
     # 다음 쪽을 물을 때 `after` 로 넘길 값. 마지막 쪽이면 None.
@@ -203,7 +246,14 @@ class ExperimentRunService:
 
     def preview(self, request: ExperimentRequest) -> ExperimentPreview:
         """제출과 같은 시도 키(`experiment_trial_key`)에 원장 규칙(`preview_trial`)을 쓴다."""
-        admitted, design = self._design(request)
+        return self._preview(*self._design(request))
+
+    def preview_capacity(self, request: CapacitySweepRequest) -> ExperimentPreview:
+        """용량 스윕의 미리 계산. 금액만 다른 실행은 한 시도라 N 은 많아야 1 늘어난다 — 기반
+        시도가 원장에 이미 있으면(결과를 본 실행에서 연 스윕) 늘지 않는다."""
+        return self._preview(*self._capacity_design(request))
+
+    def _preview(self, admitted: AdmittedRun, design: ExperimentDesign) -> ExperimentPreview:
         ledger = admitted.ledger
         trials = design.trials()
         keys = {experiment_trial_key(admitted.run, trial) for trial in trials}
@@ -220,11 +270,21 @@ class ExperimentRunService:
 
     def create(self, request: ExperimentRequest) -> Experiment:
         _, design = self._design(request)
+        return self._create(request.run, request.split, design)
+
+    def create_capacity(self, request: CapacitySweepRequest) -> Experiment:
+        """용량 스윕을 만들고 금액마다 기반 실행 구간 전체를 대기열에 넘긴다."""
+        _, design = self._capacity_design(request)
+        return self._create(request.run, None, design)
+
+    def _create(
+        self, run: BacktestRunSpec, split: SplitSpec | None, design: ExperimentDesign
+    ) -> Experiment:
         record = ExperimentRecord(
             experiment_id=self._new_id(),
             created_at=self._now(),
-            run=request.run,
-            split=request.split,
+            run=run,
+            split=split,
             design=design,
         )
         self._repository.add(record)
@@ -291,6 +351,7 @@ class ExperimentRunService:
         굳지 않게 한다. 취소한 실험은 끝났다(돌지 않은 조합은 시도가 아니다).
         """
         record = self._repository.get(experiment_id)
+        _require_kind(record, ExperimentKind.PARAMETER_SEARCH)
         state = self._trial_state(record, trial_index)
         if state.status is not TrialStatus.COMPLETED:
             raise ExperimentStateError(
@@ -329,17 +390,14 @@ class ExperimentRunService:
 
     def _design(self, request: ExperimentRequest) -> tuple[AdmittedRun, ExperimentDesign]:
         run = request.run
-        source = _base_source(run)
+        _base_source(run)
         if run.metric_windows:
             raise InvalidExperimentSpecError(
                 "experiment.base.invalid",
                 "실험의 측정 창은 분할 규칙이 정합니다. 기반 실행 요청에서 지표 창을 빼세요: "
                 f"metric_windows={len(run.metric_windows)}",
             )
-        admitted = self._runs.admit(run)
-        strategy, environment = admitted.run.strategy, admitted.run.environment
-        if strategy is None or environment is None:  # pragma: no cover - 접수 판정이 채운다
-            raise RuntimeError(f"admitted experiment base run is unresolved — source={source}")
+        admitted, strategy, environment = self._base(run)
         return admitted, ExperimentDesign(
             search=build_search_spec(strategy.parameters, request.search),
             parameter_values=admitted.run.parameter_values,
@@ -350,6 +408,30 @@ class ExperimentRunService:
             ),
             measured=True,
         )
+
+    def _capacity_design(
+        self, request: CapacitySweepRequest
+    ) -> tuple[AdmittedRun, ExperimentDesign]:
+        """기반 요청을 실험 기반 규칙(`_base`)으로 검사하고 금액 목록을 편다. 창·탐색 축은 없다."""
+        amounts = capacity_amounts(request.initial_cash)
+        admitted, _strategy, _environment = self._base(request.run)
+        return admitted, ExperimentDesign(
+            search=SearchSpec(()),
+            parameter_values=admitted.run.parameter_values,
+            windows=(),
+            kind=ExperimentKind.CAPACITY_SWEEP,
+            initial_cash=amounts,
+        )
+
+    def _base(self, run: BacktestRunSpec) -> tuple[AdmittedRun, StrategySpec, RunEnvironment]:
+        """실험 기반 요청을 검사한다 — 저장 리비전만 되고(spec D5) 실행 시작과 같은 접수 판정을
+        탄다."""
+        source = _base_source(run)
+        admitted = self._runs.admit(run)
+        strategy, environment = admitted.run.strategy, admitted.run.environment
+        if strategy is None or environment is None:  # pragma: no cover - 접수 판정이 채운다
+            raise RuntimeError(f"admitted experiment base run is unresolved — source={source}")
+        return admitted, strategy, environment
 
     def control(
         self, experiment_id: str, *, paused: bool | None = None, priority: int | None = None
@@ -428,7 +510,7 @@ class ExperimentRunService:
         고른 칸의 검증 실행은 그 칸의 시도 키로 원장에 적어 재확인이 된다 — 창은 N 을 늘리지
         않는다(V3-03 P2-1). 재시작으로 중단된 검증 실행은 같은 칸으로 다시 넘긴다. 기반 요청
         재검사가 거절되면 그 창들의 선택에 거절 코드를 남긴다. V3-05 이전 설계의 실험은 돌리지
-        않는다(`ExperimentDesign.measured`).
+        않는다(`ExperimentDesign.measured`). 창이 없는 용량 스윕도 거짓이라 돌리지 않는다.
         """
         record = self._repository.get(experiment_id)
         if record.cancelled_at is not None or not record.design.measured:
@@ -454,6 +536,7 @@ class ExperimentRunService:
         """창별 선택·검증 실행 결과와, 모든 창의 검증 실행이 완료됐으면 이어 붙인 곡선·표본 밖
         샤프·유지율(규칙은 `domain/experiment/_walk_forward.py`)."""
         record = self._repository.get(experiment_id)
+        _require_kind(record, ExperimentKind.PARAMETER_SEARCH)
         if not record.design.measured:
             return WalkForwardReport((), (), None, None, WalkForwardGap.LEGACY_DESIGN)
         picks = tuple(_latest_by_window(self._repository.picks(experiment_id)).values())
@@ -493,6 +576,46 @@ class ExperimentRunService:
             for state in states
         )
         return ParameterMap(plateau_map(record.design.search, cell_outcomes(trials)))
+
+    def capacity(self, experiment_id: str) -> CapacityReport:
+        """용량 스윕 금액별 비용 후 샤프·가격 충격·미체결 비율과, 모든 금액이 끝났으면 한계 금액
+        (규칙은 `domain/experiment/_capacity.py`). 샤프는 원장에서, 체결 비용은 결과 파일에서
+        읽는다."""
+        record = self._repository.get(experiment_id)
+        _require_kind(record, ExperimentKind.CAPACITY_SWEEP)
+        states = self._trial_states(record)
+        scores = self._train_scores(record)
+        points = tuple(
+            self._capacity_point(amount, state, scores)
+            for amount, state in zip(record.design.initial_cash, states, strict=True)
+        )
+        finished = all(state.status.is_terminal and not state.awaiting_recovery for state in states)
+        limit = (
+            capacity_limit((point.initial_cash, point.sharpe) for point in points)
+            if finished
+            else None
+        )
+        return CapacityReport(points, limit)
+
+    def _capacity_point(
+        self, amount: float, state: ExperimentTrialState, scores: Mapping[str, float | None]
+    ) -> CapacityPoint:
+        latest = state.attempts[-1].run_id if state.attempts else None
+        run_id = latest if state.status is TrialStatus.COMPLETED else None
+        costs = None
+        if run_id is not None:
+            try:
+                costs = execution_costs(self._runs.result(run_id).artifacts)
+            except TrialResultUnreadableError:
+                logger.exception("capacity result unreadable — run_id=%s", run_id)
+        return CapacityPoint(
+            trial_index=state.trial.index,
+            initial_cash=amount,
+            status=state.status,
+            sharpe=None if run_id is None else scores.get(run_id),
+            impact_cost_bps=None if costs is None else costs.impact_cost_bps,
+            unfilled_ratio=None if costs is None else costs.unfilled_ratio,
+        )
 
     def _open_windows(
         self, record: ExperimentRecord, states: tuple[ExperimentTrialState, ...]
@@ -536,6 +659,10 @@ class ExperimentRunService:
             sharpe = None if run_id is None else scores.get(run_id)
             if state.status is TrialStatus.COMPLETED and sharpe is not None:
                 cells[state.trial.grid_index] = sharpe
+        if record.split is None:  # pragma: no cover - 워크포워드는 분할이 있는 파라미터 탐색만 돈다
+            raise RuntimeError(
+                f"walk-forward without a split — experiment_id={record.experiment_id}"
+            )
         cell = pick_window_cell(cells, record.design.search.shape, record.split.selection_rule)
         if cell is None:
             return _Choice(None, None)
@@ -554,7 +681,7 @@ class ExperimentRunService:
         run_id = error_code = error = None
         if choice.trial_index is not None:
             trial = record.design.trials()[choice.trial_index]
-            window = trial.window
+            window = _window(trial)
             run_id, error_code, error = self._started(
                 record, base, trial, window.test_start, window.test_end
             )
@@ -580,9 +707,8 @@ class ExperimentRunService:
         *,
         attempt: int,
     ) -> None:
-        run_id, error_code, error = self._started(
-            record, base, trial, trial.window.train_start, trial.window.train_end
-        )
+        start, end = _train_range(record.run, trial)
+        run_id, error_code, error = self._started(record, base, trial, start, end)
         self._repository.add_attempt(
             TrialAttempt(
                 experiment_id=record.experiment_id,
@@ -727,7 +853,33 @@ def _run_request(
         base,
         environment=replace(environment, start=start, end=end),
         parameter_values=trial.parameter_values,
+        initial_cash=base.initial_cash if trial.initial_cash is None else trial.initial_cash,
     )
+
+
+def _train_range(base: BacktestRunSpec, trial: ExperimentTrial) -> tuple[date, date]:
+    """trial 이 도는 구간 — 창의 학습 구간(엠바고를 뺀 측정 끝까지), 용량 스윕은 기반 실행 구간."""
+    if trial.window is not None:
+        return trial.window.train_start, trial.window.train_end
+    if base.environment is None:  # pragma: no cover - `_base` 가 검사한 요청만 저장한다
+        raise RuntimeError(f"experiment base run has no run environment — trial={trial.index}")
+    return base.environment.start, base.environment.end
+
+
+def _window(trial: ExperimentTrial) -> WalkForwardWindow:
+    if trial.window is None:  # pragma: no cover - 워크포워드는 창이 있는 파라미터 탐색만 돈다
+        raise RuntimeError(f"walk-forward trial has no window — trial={trial.index}")
+    return trial.window
+
+
+def _require_kind(record: ExperimentRecord, kind: ExperimentKind) -> None:
+    """워크포워드·후보 선택은 파라미터 탐색에만, 용량 결과는 용량 스윕에만 뜻이 있다."""
+    if record.design.kind is not kind:
+        raise ExperimentStateError(
+            "experiment.kind.mismatch",
+            f"이 실험 종류에서는 할 수 없는 요청입니다: experiment_id={record.experiment_id} "
+            f"kind={record.design.kind} required={kind}",
+        )
 
 
 @dataclass(frozen=True)

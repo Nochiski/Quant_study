@@ -947,6 +947,75 @@ export type CandidateDecision = {
 export type CandidateSide = "long" | "short";
 
 /**
+ * CapacityLimit
+ */
+export type CapacityLimit = {
+  /**
+   * Amount
+   */
+  amount: number | null;
+  /**
+   * Beyond Tested
+   */
+  beyond_tested: boolean;
+};
+
+/**
+ * CapacityPoint
+ *
+ * 용량 스윕 금액 하나의 결과.
+ */
+export type CapacityPoint = {
+  /**
+   * Impact Cost Bps
+   */
+  impact_cost_bps: number | null;
+  /**
+   * Initial Cash
+   */
+  initial_cash: number;
+  /**
+   * Sharpe
+   */
+  sharpe: number | null;
+  status: TrialStatus;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+  /**
+   * Unfilled Ratio
+   */
+  unfilled_ratio: number | null;
+};
+
+/**
+ * CapacityReport
+ *
+ * 용량 스윕 결과(V4-04). 한계 금액 규칙은 `domain/experiment/_capacity.py` 다.
+ */
+export type CapacityReport = {
+  limit: CapacityLimit | null;
+  /**
+   * Points
+   */
+  points: Array<CapacityPoint>;
+};
+
+/**
+ * CapacitySweepRequest
+ *
+ * 용량 스윕 만들기·미리 계산 요청(V4-04). 기반 요청을 초기 자본만 바꿔 전체 구간으로 돌린다.
+ */
+export type CapacitySweepRequest = {
+  /**
+   * Initial Cash
+   */
+  initial_cash: Array<number>;
+  run: BacktestRunSpec;
+};
+
+/**
  * CellKind
  *
  * A numeric zero and unavailable data must never collapse into one value.
@@ -1666,6 +1735,11 @@ export type ExperimentControlsRequest = {
  */
 export type ExperimentDesign = {
   /**
+   * Initial Cash
+   */
+  initial_cash?: Array<number>;
+  kind?: ExperimentKind;
+  /**
    * Measured
    */
   measured?: boolean;
@@ -1695,6 +1769,8 @@ export type ExperimentErrorDetail = {
   code:
     | "experiment.base.invalid"
     | "experiment.base.unsaved"
+    | "experiment.capacity.invalid_amounts"
+    | "experiment.kind.mismatch"
     | "experiment.not_found"
     | "experiment.search.invalid_values"
     | "experiment.search.too_many_points"
@@ -1717,6 +1793,14 @@ export type ExperimentErrorDetail = {
 export type ExperimentErrorResponse = {
   detail: ExperimentErrorDetail;
 };
+
+/**
+ * ExperimentKind
+ *
+ * 실험 종류(spec D5). 용량 스윕은 초기 자본만 바꾼다 — 초기 자본은 시도 키 밖이라 금액들이 한
+ * 시도다.
+ */
+export type ExperimentKind = "parameter_search" | "capacity_sweep";
 
 /**
  * ExperimentPage
@@ -1786,7 +1870,7 @@ export type ExperimentRecord = {
    */
   experiment_id: string;
   run: BacktestRunSpec;
-  split: SplitSpec;
+  split: SplitSpec | null;
 };
 
 /**
@@ -1896,12 +1980,16 @@ export type ExperimentTrial = {
    */
   index: number;
   /**
+   * Initial Cash
+   */
+  initial_cash?: number | null;
+  /**
    * Parameter Values
    */
   parameter_values: {
     [key: string]: number | number | string | boolean;
   };
-  window: WalkForwardWindow;
+  window: WalkForwardWindow | null;
 };
 
 /**
@@ -7743,6 +7831,76 @@ export type CreateExperimentResponses = {
 export type CreateExperimentResponse =
   CreateExperimentResponses[keyof CreateExperimentResponses];
 
+export type CreateCapacitySweepData = {
+  body: CapacitySweepRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/experiments/capacity";
+};
+
+export type CreateCapacitySweepErrors = {
+  /**
+   * The base strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The base revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type CreateCapacitySweepError =
+  CreateCapacitySweepErrors[keyof CreateCapacitySweepErrors];
+
+export type CreateCapacitySweepResponses = {
+  /**
+   * Successful Response
+   */
+  202: Experiment;
+};
+
+export type CreateCapacitySweepResponse =
+  CreateCapacitySweepResponses[keyof CreateCapacitySweepResponses];
+
+export type PreviewCapacitySweepData = {
+  body: CapacitySweepRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/experiments/capacity/preview";
+};
+
+export type PreviewCapacitySweepErrors = {
+  /**
+   * The base strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The base revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type PreviewCapacitySweepError =
+  PreviewCapacitySweepErrors[keyof PreviewCapacitySweepErrors];
+
+export type PreviewCapacitySweepResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentPreview;
+};
+
+export type PreviewCapacitySweepResponse =
+  PreviewCapacitySweepResponses[keyof PreviewCapacitySweepResponses];
+
 export type PreviewExperimentData = {
   body: ExperimentRequest;
   path?: never;
@@ -7848,6 +8006,46 @@ export type CancelExperimentResponses = {
 
 export type CancelExperimentResponse =
   CancelExperimentResponses[keyof CancelExperimentResponses];
+
+export type GetExperimentCapacityData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/capacity";
+};
+
+export type GetExperimentCapacityErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentCapacityError =
+  GetExperimentCapacityErrors[keyof GetExperimentCapacityErrors];
+
+export type GetExperimentCapacityResponses = {
+  /**
+   * Successful Response
+   */
+  200: CapacityReport;
+};
+
+export type GetExperimentCapacityResponse =
+  GetExperimentCapacityResponses[keyof GetExperimentCapacityResponses];
 
 export type ControlExperimentData = {
   body: ExperimentControlsRequest;
@@ -8097,6 +8295,10 @@ export type GetExperimentWalkForwardErrors = {
    * The experiment or trial is missing
    */
   404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
   /**
    * Validation Error
    */

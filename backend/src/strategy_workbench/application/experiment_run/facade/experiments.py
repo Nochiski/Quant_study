@@ -1,4 +1,7 @@
 from strategy_workbench.application.experiment_run._service import (
+    CapacityPoint,
+    CapacityReport,
+    CapacitySweepRequest,
     Experiment,
     ExperimentPage,
     ExperimentPreview,
@@ -11,6 +14,9 @@ from strategy_workbench.application.experiment_run._service import (
 )
 
 __all__ = [
+    "CapacityPoint",
+    "CapacityReport",
+    "CapacitySweepRequest",
     "Experiment",
     "ExperimentPage",
     "ExperimentPreview",

@@ -1530,6 +1530,8 @@ const ko = {
     "분할 설정이 허용 범위를 벗어났습니다. 학습·검증 연수는 1 이상, 엠바고는 0 이상으로 두세요.",
   "backtest.error.experiment.split.no_window":
     "실행 기간이 학습 기간보다 짧아 검증할 창이 없습니다. 기간을 늘리거나 학습 연수를 줄이세요.",
+  "backtest.error.experiment.capacity.invalid_amounts":
+    "용량 확인 금액은 서로 다른 양수 3~12개여야 합니다. 겹치거나 0 이하인 금액을 빼세요.",
   "backtest.error.experiment.not_found": "실험을 찾을 수 없습니다. 실험 목록에서 다시 여세요.",
   "backtest.error.experiment.trial.not_found": "실험에 그 trial이 없습니다. 실험을 다시 여세요.",
   "backtest.error.experiment.trial.not_retryable":
@@ -1538,6 +1540,8 @@ const ko = {
     "완료된 trial만 후보로 고를 수 있습니다. trial이 끝난 뒤 고르세요.",
   "backtest.error.experiment.selection.not_finished":
     "실험의 trial이 모두 끝난 뒤에 후보를 고를 수 있습니다. 실험이 끝나기를 기다리거나 실험을 취소하세요.",
+  "backtest.error.experiment.kind.mismatch":
+    "이 실험 종류에서는 볼 수 없는 결과입니다. 워크포워드·후보 선택은 파라미터 탐색에서, 용량 결과는 용량 확인에서 보세요.",
   "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다. 어느 칸이 틀렸는지는 서버 사유를 보세요.",
   "trace.error.trace.engine.incompatible":
@@ -3523,6 +3527,8 @@ export const messages = {
       "The split settings are out of range. Use at least 1 training year and 1 test year and a non-negative embargo.",
     "backtest.error.experiment.split.no_window":
       "The run period is shorter than the training period, so there is no window to test. Lengthen the period or shorten the training years.",
+    "backtest.error.experiment.capacity.invalid_amounts":
+      "A capacity check needs 3 to 12 distinct positive amounts. Remove duplicate amounts and amounts of zero or less.",
     "backtest.error.experiment.not_found": "The experiment was not found. Open it again from the experiment list.",
     "backtest.error.experiment.trial.not_found": "The experiment has no such trial. Open the experiment again.",
     "backtest.error.experiment.trial.not_retryable":
@@ -3531,6 +3537,8 @@ export const messages = {
       "Only a completed trial can be chosen as a candidate. Choose it after the trial finishes.",
     "backtest.error.experiment.selection.not_finished":
       "A candidate can be chosen only after every trial of the experiment has finished. Wait for the experiment to finish or cancel it.",
+    "backtest.error.experiment.kind.mismatch":
+      "This result does not exist for this kind of experiment. Walk-forward and candidate selection belong to a parameter search, capacity results to a capacity check.",
     "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
     "trace.error.trace.request.invalid": "The trace request is invalid. See the server reason for the field.",
     "trace.error.trace.engine.incompatible":

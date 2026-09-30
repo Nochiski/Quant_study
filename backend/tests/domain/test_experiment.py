@@ -513,7 +513,10 @@ def test_trials_are_grid_cells_times_windows_in_a_fixed_order() -> None:
     trials = design.trials()
 
     # 칸(lookback 이 느린 축) × 창 순서이고, 탐색하지 않은 파라미터는 기반 해소 값 그대로다.
-    assert [(trial.index, trial.grid_index, trial.window.train_start) for trial in trials] == [
+    assert [
+        (trial.index, trial.grid_index, trial.window and trial.window.train_start)
+        for trial in trials
+    ] == [
         (0, (0, 0), date(2020, 1, 2)),
         (1, (0, 0), date(2021, 1, 2)),
         (2, (0, 1), date(2020, 1, 2)),

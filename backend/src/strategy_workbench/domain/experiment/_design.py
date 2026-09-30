@@ -1,12 +1,15 @@
-"""실험 설계 — 해소된 탐색 그리드와 창 목록에서 trial 을 편다(spec D5).
+"""실험 설계 — 해소된 탐색 그리드와 창 목록(파라미터 탐색) 또는 금액 목록(용량 스윕)에서 trial 을
+편다(spec D5).
 
-trial = (실험, 해소된 파라미터, 창)이다. 설계는 실험을 만들 때 한 번 정해 저장하고, trial 은 저장한
-설계에서 다시 편다. 전개 순서가 trial 의 `index` 이므로 같은 설계는 늘 같은 trial 목록을 낸다.
+trial = (실험, 해소된 파라미터, 창) 또는 (실험, 초기 자본)이다. 설계는 실험을 만들 때 한 번
+정해 저장하고, trial 은 저장한 설계에서 다시 편다. 전개 순서가 trial 의 `index` 이므로 같은 설계는
+늘 같은 trial 목록을 낸다.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from itertools import product
 
 from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec
@@ -17,13 +20,24 @@ from ._search import GridIndex, SearchSpec
 from ._walk_forward import WalkForwardWindow
 
 
+class ExperimentKind(StrEnum):
+    """실험 종류(spec D5). 용량 스윕은 초기 자본만 바꾼다 — 초기 자본은 시도 키 밖이라 금액들이 한
+    시도다."""
+
+    PARAMETER_SEARCH = "parameter_search"
+    CAPACITY_SWEEP = "capacity_sweep"
+
+
 @dataclass(frozen=True)
 class ExperimentTrial:
     index: int
     grid_index: GridIndex
     # 문서가 선언한 파라미터 전부의 해소 값.
     parameter_values: dict[str, ParameterValue]
-    window: WalkForwardWindow
+    # 파라미터 탐색 trial 의 창. 용량 스윕 trial 은 기반 실행 구간 전체라 None 이다.
+    window: WalkForwardWindow | None
+    # 용량 스윕 trial 의 초기 자본. 파라미터 탐색 trial 은 기반 실행의 초기 자본이라 None 이다.
+    initial_cash: float | None = None
 
 
 @dataclass(frozen=True)
@@ -33,11 +47,20 @@ class ExperimentDesign:
     parameter_values: dict[str, ParameterValue]
     windows: tuple[WalkForwardWindow, ...]
     # 창의 학습 끝이 엠바고를 뺀 측정 끝이다(`SplitSpec.measured_windows`, V3-05). 그 전에 만든
-    # 실험은 거짓으로 읽히고 워크포워드 검증을 돌리지 않는다 — 이전 의미 그대로 둔다.
+    # 실험은 거짓으로 읽히고 워크포워드 검증을 돌리지 않는다 — 이전 의미 그대로 둔다. 창이 없는 용량
+    # 스윕도 거짓이다.
     measured: bool = False
+    kind: ExperimentKind = ExperimentKind.PARAMETER_SEARCH
+    # 용량 스윕의 초기 자본(오름차순, `capacity_amounts`). 파라미터 탐색이면 비었다.
+    initial_cash: tuple[float, ...] = ()
 
     def trials(self) -> tuple[ExperimentTrial, ...]:
-        """칸(행 우선) × 창 순서로 편다. 한 칸의 창들이 붙어 있다."""
+        """칸(행 우선) × 창 순서로 편다. 한 칸의 창들이 붙어 있다. 용량 스윕은 금액 순이다."""
+        if self.kind is ExperimentKind.CAPACITY_SWEEP:
+            return tuple(
+                ExperimentTrial(index, (), dict(self.parameter_values), None, amount)
+                for index, amount in enumerate(self.initial_cash)
+            )
         return tuple(
             ExperimentTrial(
                 index,

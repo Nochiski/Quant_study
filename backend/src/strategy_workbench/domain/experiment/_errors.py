@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-# 실험 설계 입력(기반 리비전·탐색 공간·분할 규칙)이 실험을 만들 수 없는 값이다.
+# 실험 설계 입력(기반 리비전·탐색 공간·분할 규칙·용량 스윕 금액)이 실험을 만들 수 없는 값이다.
 EXPERIMENT_SPEC_CODES: frozenset[str] = frozenset(
     {
         "experiment.base.unsaved",
@@ -19,6 +19,7 @@ EXPERIMENT_SPEC_CODES: frozenset[str] = frozenset(
         "experiment.search.too_many_points",
         "experiment.split.invalid",
         "experiment.split.no_window",
+        "experiment.capacity.invalid_amounts",
     }
 )
 EXPERIMENT_NOT_FOUND_CODES: frozenset[str] = frozenset(
@@ -30,6 +31,7 @@ EXPERIMENT_STATE_CODES: frozenset[str] = frozenset(
         "experiment.trial.not_retryable",
         "experiment.selection.not_completed",
         "experiment.selection.not_finished",
+        "experiment.kind.mismatch",
     }
 )
 EXPERIMENT_CODES = EXPERIMENT_SPEC_CODES | EXPERIMENT_NOT_FOUND_CODES | EXPERIMENT_STATE_CODES

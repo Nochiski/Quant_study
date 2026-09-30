@@ -15,10 +15,6 @@ import { useEffect, useRef } from "react";
  * 새 `aria-current`가 이미 붙어 있다. jsdom에는 `scrollIntoView`가 없어 optional call로 부른다
  * (`shared/ui/command-palette.tsx`와 같은 방식).
  *
- * 탭 패널은 모두 마운트돼 있고 보이지 않는 탭은 `hidden`이다. 숨은 탭 안의 훅은 끌어오지 않는다 —
- * Form 탭에서 고른 pointer를 Graph 탭의 파이프라인 카드도 표시하는데(P4-02), 보이는 탭의 스크롤
- * 뒤에 숨은 탭이 한 번 더 스크롤하지 않게 한다. 탭 전환과 pointer 변경은 한 navigate로 함께 온다.
- *
  * @param signal 같은 pointer를 다시 고른 것도 새 요청으로 보게 하는 값. 문제 행을 두 번 누르면
  *   URL은 그대로라 pointer가 안 바뀌므로, 탐색 훅이 클릭마다 올리는 카운터를 같이 넘긴다
  *   (2차 리뷰 R2-2).
@@ -29,11 +25,9 @@ export const useRevealSelection = <El extends HTMLElement>(
 ) => {
   const container = useRef<El>(null);
   useEffect(() => {
-    const root = container.current;
-    if (selectedPointer === undefined || root?.closest("[hidden]") !== null)
-      return;
-    const found = root.querySelectorAll('[aria-current="true"]');
-    found[found.length - 1]?.scrollIntoView?.({ block: "nearest" });
+    if (selectedPointer === undefined) return;
+    const found = container.current?.querySelectorAll('[aria-current="true"]');
+    found?.[found.length - 1]?.scrollIntoView?.({ block: "nearest" });
   }, [selectedPointer, signal]);
   return container;
 };

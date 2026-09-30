@@ -3593,6 +3593,15 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
       delete (HTMLElement.prototype as { scrollIntoView?: unknown })
         .scrollIntoView;
   });
+  /**
+   * 보이는 탭이 마지막으로 끌어온 요소. 탭 패널은 모두 마운트돼 숨은 탭(`hidden`)의 reveal 도 mock 에
+   * 기록되지만, 브라우저는 박스 없는 요소의 스크롤을 무시한다(`[hidden]` 은 display:none) — 화면에서
+   * 일어나는 스크롤만 본다(#392 리뷰 P3-2).
+   */
+  const lastVisibleScroll = () =>
+    scrollIntoView.mock.contexts
+      .filter((element) => (element as Element).closest("[hidden]") === null)
+      .at(-1);
 
   it("shows the badge and the problem list while the Graph tab is selected", async () => {
     server.use(
@@ -3665,7 +3674,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     const editorRow = screen
       .getByRole("button", { name: "노드 편집: mom_252" })
       .closest("li");
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    expect(lastVisibleScroll()).toBe(editorRow);
     // 원인 문장이 그 노드 카드 안에 본문으로 붙는다(리뷰 차단 2). 선택한 노드 패널은 같은
     // 문장을 다시 그리지 않는다(2차 리뷰 P3).
     expect(editorRow).toHaveTextContent("window는 1 이상이고 lag는 0 이상이어야 합니다");
@@ -3712,7 +3721,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
       expect(editorRow).toHaveAttribute("aria-current", "true"),
     );
     expect(planNode).toHaveAttribute("aria-current", "true");
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(editorRow);
+    expect(lastVisibleScroll()).toBe(editorRow);
     // 경고도 같은 자리에 본문으로 붙는다(alert이 아니라 본문이다 — 리뷰 P3).
     expect(editorRow).toHaveTextContent("window가 깁니다");
   }, 15_000);
@@ -3798,7 +3807,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     const row = card.querySelector('.strategy-form__field[aria-current="true"]');
     expect(row).not.toBeNull();
     expect(row).toHaveTextContent("weight must be positive");
-    await waitFor(() => expect(scrollIntoView.mock.contexts.at(-1)).toBe(row));
+    await waitFor(() => expect(lastVisibleScroll()).toBe(row));
 
     // 같은 행을 다시 눌렀을 때도 끌어온다 — URL은 그대로라 reveal 신호가 대신 올라간다(2차 리뷰 R2-2).
     const before = scrollIntoView.mock.calls.length;
@@ -3806,7 +3815,7 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
     await waitFor(() =>
       expect(scrollIntoView.mock.calls.length).toBeGreaterThan(before),
     );
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(row);
+    expect(lastVisibleScroll()).toBe(row);
   }, 15_000);
 });
 

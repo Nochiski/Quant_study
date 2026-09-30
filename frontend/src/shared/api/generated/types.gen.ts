@@ -1335,6 +1335,16 @@ export type DatasetRevision = {
 };
 
 /**
+ * DiagnosticAnchor
+ *
+ * 진단이 가리키는 자리. 모르는 키·1.0 문법 힌트는 고칠 곳이 값이 아니라 키 자체다.
+ *
+ * 편집기는 자기 parse 지도(UTF-16)에서 이 자리를 다시 찾는다. 어느 코드가 키를 가리키는지는
+ * backend 가 정하고 frontend 는 목록을 옮겨 적지 않는다(#357 C-P3-13).
+ */
+export type DiagnosticAnchor = "value" | "key";
+
+/**
  * DiagnosticKind
  */
 export type DiagnosticKind =
@@ -4728,8 +4738,10 @@ export type SignalStep = {
  *
  * `range` is None only when the source has no node to point at (empty document).
  * `node_id` names the FactorGraph node a semantic issue is about, when known.
+ * `anchor` says whether `range` points at the key itself or at its value (`DiagnosticAnchor`).
  */
 export type SourceDiagnostic = {
+  anchor?: DiagnosticAnchor;
   /**
    * Code
    */

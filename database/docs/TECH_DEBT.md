@@ -1107,3 +1107,15 @@ uv run --project backend python database/scripts/run_mvp_backtest.py \
 - **위험성**: **silent corrupt**. 1분기 값이 3분기(`11014`) 라벨을 달고 실리면 ① 같은 (corp_code, bsns_year, '11014') 에 진짜 3분기가 오면서 `duplicate_vintage` 격리로 **양쪽 다 사라지거나**(행째 소실), 부딪히지 않으면 ② 3분기 누계로 읽혀 Q4 파생(`q4_*` = 사업보고서 − 3분기)과 CF 분기 파생(`cf_q_*`)이 **한 분기 어긋난 값**을 낸다 — 팩터 쪽에서는 부호가 뒤집힌 성장률로 나타난다. 어느 쪽도 게이트가 못 잡는다: `EG3_fin_std` 의 `n_fiscal_month_mismatch` 는 기록형이고, 25건은 EG7 전역 격리 비율에 묻힌다.
 - **조치(제안)**: 길이 대신 **회계연도 안의 위치**로 가른다. ① `period_to` 가 `corp.fiscal_month` 말일 + 3개월(= 회계연도 시작 + 3개월)이면 1분기, + 9개월이면 3분기 — `corp.fiscal_month` 는 현재값 스냅샷이라 결산월을 바꾼 법인은 문서 `period_from` 이 회계연도 시작과 같은지로 보조 판정한다. ② 또는 `period_from` = 회계연도 시작이면 1분기. 어느 쪽이든 `corp` 를 `fin_std` 입력으로 이미 고정하고 있어(후보 규칙이 `fiscal_month` 를 쓴다) 새 입력이 필요하지 않다. 바꾸면 기존 25건의 `report_code` 가 바뀌므로 EG5a 해시가 한 번 깨진다 — 재빌드 전후 건수 대조를 같이 남긴다.
 - **위치**: `src/equity/sql/fin_std.sql`, `src/equity/rules_s12.py`
+
+### B-41: 재무표를 고친 정정본은 정정 접수일에야 보인다 — 원본 수치 복원(4C) 보류 (2026-09-30 사용자 결정 A)
+
+- **상황**: DART API 는 정정이 있으면 정정본만 돌려준다. e1.22.0 이 재무표 무관 정정은 원본 공시일로 당겼지만, 재무표를 건드린 정정
+  (`disclosure_version.corr_has_fin_item` true·NULL)은 정정 접수일을 공개일로 둔다.
+- **인풋**: 2016~ `fin_std` 중 법정 기한(사업 120일·분기 75일)을 넘겨 찍힌 행 2,469(사업보고서 1,586/22,399 = 7.1%, e1.22.0 서버 판 m_20260930T113110).
+- **에러 위치**: `src/equity/sql/fin_std.sql` `redate` CTE(승계 조건 밖) · `head.avail_dt` — 판본은 `api_restated` 하나(`rules_s12.py:25-31`).
+- **위험성**: look-ahead 는 아니지만(보수적) 백테스트에서 정정이 잦은 회사의 재무가 정정일까지 1년 전 값이나 빈칸 → 체계적 편향.
+  소규모 4C 실험(`docs/research/2026-09-30-gpt-layer-debate.md` ③-2): 재무표 정정 사업보고서 120건 중 96건 판독, 핵심 4계정 같음 62.5% ·
+  바뀜 37.5%(중앙 10%). 바뀐 쪽은 정정값을 원본 날짜에 쓰면 look-ahead 라 원본 수치를 원본 날짜에 두는 판본 분리(4C,
+  `stg_fin_asreported`)만 정답. 원본 문서 ZIP 은 `data/raw/documents/{yyyy}/{rcept_no}.zip` 에 전부 캐시돼 있다.
+- **보류 이유**: 실시간 모델은 WISE 분기로 전환 예정(`docs/plans/2026-09-30-wise-quarterly.md`) — 이 편향은 백테스트 품질 문제다.

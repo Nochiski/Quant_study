@@ -140,6 +140,7 @@ export { StrategyOutline } from "./ui/strategy-outline";
 export { ContractInspector } from "./ui/contract-inspector";
 export { ExecutionPlanPanel } from "./ui/execution-plan-panel";
 export { FactorGraphPanel } from "./ui/factor-graph-panel";
+export { PipelinePanel } from "./ui/pipeline-panel";
 export { SnippetCatalog } from "./ui/snippet-catalog";
 export { StrategyProjectionPanel } from "./ui/strategy-projection-panel";
 export { StrategyDiffPanel } from "./ui/strategy-diff-panel";

@@ -1120,6 +1120,58 @@ const ko = {
   "strategy.field.node.group_field_id.summary": "{group_field_id}별",
   "recipe.summary.previous": "앞 단계",
   "recipe.summary.advanced": "노드 {count}개 · 고급",
+  // 그래프 1수준 캔버스(P4-02, 리드 결정 2026-09-30). 단계 영문 소제목, 카드 문장 틀 `.card`(enum 값 이름 키 →
+  // 앵커·목록 설명 키 순으로 찾고, `{<키>}` 자리에 같은 카드 필드의 컨트롤이 들어간다), 캔버스 chrome.
+  // 비율 칸은 입력 단위를 바꾸지 않고 틀이 예시로 단위를 말한다("0.1이 10%").
+  "strategy.stage.eligibility.term": "Universe",
+  "strategy.stage.signal.term": "Alpha",
+  "strategy.stage.portfolio.term": "Portfolio",
+  "strategy.stage.risk.term": "Risk",
+  "strategy.field.eligibility_step.rules.card":
+    "{field_id} 값이 {operator} 종목만 — 기준값 {value}",
+  "strategy.field.eligibility_rule.operator.value.top_percent.card":
+    "{field_id} {operator} 종목만 — 상위 비율 {value}(0.2가 20%)",
+  "strategy.field.eligibility_rule.operator.value.top_count.card":
+    "{field_id} {operator} 종목만 — 상위 {value}개",
+  "strategy.field.portfolio_step.liquidity_field_id.card":
+    "{liquidity_field_id} 값이 {minimum_liquidity} 이상인 종목만",
+  "strategy.field.signal_step.normalization.card": "팩터 점수는 {normalization}",
+  "strategy.field.signal_step.score_threshold.card":
+    "합산 점수가 {score_threshold}보다 낮은 종목은 뺀다",
+  "strategy.field.signal_step.regime_field_id.card":
+    "{regime_field_id} 값이 {regime_minimum} 이상인 종목만 담는다",
+  "strategy.field.portfolio_step.side.card": "매매 방향은 {side}",
+  "strategy.field.portfolio_step.side.value.long_short.card":
+    "매매 방향은 {side}, 공매도는 하위 {short_selection_count}종목",
+  "strategy.field.portfolio_step.weighting.card": "비중은 {weighting}",
+  "strategy.field.portfolio_step.weighting.value.risk.card":
+    "비중은 {weighting} — 위험 팩터 {risk_factor_id} 또는 위험 필드 {risk_field_id} 기준",
+  "strategy.field.portfolio_step.rebalance.card": "{rebalance} 다시 고른다",
+  "strategy.field.portfolio_step.rebalance.value.every_n_sessions.card":
+    "{rebalance}: {rebalance_every_n_sessions}거래일마다 다시 고른다",
+  "strategy.field.portfolio_step.selection_method.value.top_n.card":
+    "합산 점수 {selection_method} {selection_count}종목을 고른다",
+  "strategy.field.portfolio_step.selection_method.value.percentile.card":
+    "합산 점수 {selection_method} {selection_percentile}(0.1이 10%)를 고른다",
+  "strategy.contract.portfolio.turnover_buffer_count.card":
+    "갖고 있던 종목은 순위가 {turnover_buffer_count}칸 더 밀려도 계속 갖고 있는다",
+  "strategy.contract.portfolio.minimum_trade_weight.card":
+    "비중 변화가 {minimum_trade_weight}(0.01이 1%)보다 작으면 주문하지 않는다",
+  "strategy.contract.risk.gross_exposure.card":
+    "매수와 공매도를 더한 전체 비중은 {gross_exposure}(1이 100%)",
+  "strategy.field.risk_step.net_exposure.card":
+    "매수에서 공매도를 뺀 비중은 {net_exposure}(1이 100%)",
+  "strategy.contract.risk.max_name_weight.card":
+    "한 종목은 최대 {max_name_weight}(0.05가 5%)까지",
+  "strategy.contract.risk.max_sector_weight.card":
+    "한 섹터는 최대 {max_sector_weight}(0.3이 30%)까지",
+  "strategy.field.risk_step.sector_neutral.card":
+    "{sector_neutral} 섹터마다 매수·공매도 비중을 맞춘다",
+  "graph.pipeline.label": "전략 파이프라인",
+  "graph.pipeline.summary": "요약",
+  "graph.pipeline.stages": "전략 단계",
+  "graph.pipeline.item": "{index}번째 항목",
+  "graph.pipeline.unnamed": "이름 없는 항목",
   "run_environment.contract.participation_rate.description":
     "참여 기준 거래량 대비 주문이 한 세션에 차지할 수 있는 최대 비율입니다.",
   "run_environment.contract.fee_bps.description":
@@ -2979,6 +3031,59 @@ export const messages = {
     "strategy.field.node.group_field_id.summary": "by {group_field_id}",
     "recipe.summary.previous": "previous step",
     "recipe.summary.advanced": "{count} nodes · advanced",
+    // 그래프 1수준 캔버스(P4-02, 리드 결정 2026-09-30). 단계 영문 소제목, 카드 문장 틀 `.card`(enum 값 이름 키 →
+    // 앵커·목록 설명 키 순으로 찾고, `{<키>}` 자리에 같은 카드 필드의 컨트롤이 들어간다), 캔버스 chrome.
+    // 비율 칸은 입력 단위를 바꾸지 않고 틀이 예시로 단위를 말한다("0.1이 10%").
+    "strategy.stage.eligibility.term": "Universe",
+    "strategy.stage.signal.term": "Alpha",
+    "strategy.stage.portfolio.term": "Portfolio",
+    "strategy.stage.risk.term": "Risk",
+    "strategy.field.eligibility_step.rules.card":
+      "Only stocks whose {field_id} is {operator} — threshold {value}",
+    "strategy.field.eligibility_rule.operator.value.top_percent.card":
+      "Only stocks {operator} of {field_id} — top fraction {value} (0.2 means 20%)",
+    "strategy.field.eligibility_rule.operator.value.top_count.card":
+      "Only stocks {operator} of {field_id} — top {value}",
+    "strategy.field.portfolio_step.liquidity_field_id.card":
+      "Only stocks whose {liquidity_field_id} is at least {minimum_liquidity}",
+    "strategy.field.signal_step.normalization.card":
+      "Factor scores: {normalization}",
+    "strategy.field.signal_step.score_threshold.card":
+      "Drop stocks whose combined score is below {score_threshold}",
+    "strategy.field.signal_step.regime_field_id.card":
+      "Hold only stocks whose {regime_field_id} is at least {regime_minimum}",
+    "strategy.field.portfolio_step.side.card": "Direction: {side}",
+    "strategy.field.portfolio_step.side.value.long_short.card":
+      "Direction: {side}, shorting the bottom {short_selection_count} stocks",
+    "strategy.field.portfolio_step.weighting.card": "Weights: {weighting}",
+    "strategy.field.portfolio_step.weighting.value.risk.card":
+      "Weights: {weighting} — by risk factor {risk_factor_id} or risk field {risk_field_id}",
+    "strategy.field.portfolio_step.rebalance.card": "Re-pick {rebalance}",
+    "strategy.field.portfolio_step.rebalance.value.every_n_sessions.card":
+      "Re-pick {rebalance}: every {rebalance_every_n_sessions} sessions",
+    "strategy.field.portfolio_step.selection_method.value.top_n.card":
+      "Pick the {selection_method} {selection_count} stocks by combined score",
+    "strategy.field.portfolio_step.selection_method.value.percentile.card":
+      "Pick the {selection_method} {selection_percentile} (0.1 means 10%) by combined score",
+    "strategy.contract.portfolio.turnover_buffer_count.card":
+      "Keep a held stock until it falls {turnover_buffer_count} more places",
+    "strategy.contract.portfolio.minimum_trade_weight.card":
+      "Skip orders when the weight change is below {minimum_trade_weight} (0.01 means 1%)",
+    "strategy.contract.risk.gross_exposure.card":
+      "Total long plus short weight: {gross_exposure} (1 means 100%)",
+    "strategy.field.risk_step.net_exposure.card":
+      "Long minus short weight: {net_exposure} (1 means 100%)",
+    "strategy.contract.risk.max_name_weight.card":
+      "At most {max_name_weight} per stock (0.05 means 5%)",
+    "strategy.contract.risk.max_sector_weight.card":
+      "At most {max_sector_weight} per sector (0.3 means 30%)",
+    "strategy.field.risk_step.sector_neutral.card":
+      "{sector_neutral} Balance long and short weight within each sector",
+    "graph.pipeline.label": "Strategy pipeline",
+    "graph.pipeline.summary": "Summary",
+    "graph.pipeline.stages": "Strategy stages",
+    "graph.pipeline.item": "Item {index}",
+    "graph.pipeline.unnamed": "Unnamed item",
     "run_environment.contract.participation_rate.description":
       "Largest share of the participation-basis volume an order may take in one session.",
     "run_environment.contract.fee_bps.description":

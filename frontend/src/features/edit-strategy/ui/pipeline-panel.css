@@ -1,0 +1,155 @@
+/* Graph 탭 패널이 안쪽 여백을 가진다 — 캔버스는 아래 고급 편집기와의 간격만 둔다. */
+.pipeline {
+  display: grid;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+}
+
+.pipeline__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* 캔버스 맨 위 한 문장 요약 띠(spec D9). */
+.pipeline__summary {
+  flex: 1 1 24rem;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-medium);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.pipeline__canvas {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* 4단계 열. 좁은 폭에서는 두 열, 한 열로 쌓는다. */
+.pipeline__stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (max-width: 1100px) {
+  .pipeline__stages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .pipeline__stages {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pipeline__stage > [role="group"] {
+  display: grid;
+  align-content: start;
+  gap: var(--space-2);
+  height: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  background: var(--surface-raised);
+  box-sizing: border-box;
+}
+
+.pipeline__stage-title {
+  margin: 0;
+  font-size: var(--text-size-body);
+}
+
+.pipeline__stage-number {
+  color: var(--accent);
+}
+
+.pipeline__stage-term,
+.pipeline__stage-description,
+.pipeline__list-title,
+.pipeline__hint,
+.pipeline__row-name,
+.pipeline__action-name {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
+.pipeline__list {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.pipeline__card {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+}
+
+.pipeline__card[aria-current="true"] {
+  border-color: var(--accent);
+}
+
+/* 컨트롤이 한국어 문장 안에 들어간다(spec D9). */
+.pipeline__sentence,
+.pipeline__row {
+  margin: 0;
+  line-height: 2;
+}
+
+.pipeline__field input,
+.pipeline__field select {
+  max-width: 14rem;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface-panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.pipeline__field input[type="number"] {
+  width: 6rem;
+}
+
+/* 미작성 필드는 기본값이 흐린 placeholder 로 보인다(Form 과 같은 표시). */
+.pipeline__field[data-written="false"] input,
+.pipeline__field[data-written="false"] select {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+/* 지금 설정으로는 쓰이지 않는 칸은 카드 안에서 흐리게(WORKFLOW P4-02). */
+.pipeline__field[data-applicable="false"] {
+  opacity: 0.55;
+}
+
+.pipeline__invalid {
+  margin-left: var(--space-1);
+  color: var(--status-error);
+  font-size: var(--text-size-small);
+}
+
+.pipeline__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.pipeline__actions:empty {
+  display: none;
+}

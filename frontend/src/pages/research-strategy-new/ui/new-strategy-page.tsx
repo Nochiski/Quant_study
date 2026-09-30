@@ -10,6 +10,7 @@ import {
   DocumentStatus,
   DocumentToolbar,
   FactorGraphPanel,
+  PipelinePanel,
   RecoveryBanner,
   ServerDraftBanner,
   SnippetCatalog,
@@ -414,29 +415,44 @@ export const NewStrategyPage = () => {
             />
           ),
           graph: (
-            <FactorGraphPanel
-              state={executionPlans}
-              schema={assist.schema}
-              diagnostics={currentDiagnostics(document)}
-              selectedPointer={search.path}
-              revealSignal={problems.revealSignal}
-              editing={{
-                tree: form.tree,
-                transactions,
-                catalogs: {
+            <>
+              {/* 그래프 1수준(파이프라인) 캔버스 위, 고급 수준(노드 편집·실행 계획) 아래(P4-02). */}
+              <PipelinePanel
+                form={form}
+                schema={assist.schema}
+                transactions={transactions}
+                catalogs={{
                   equityFields:
                     assist.inspectorSource.equityCatalog?.fields ?? null,
-                },
-                operators: assist.operators,
-                onOpenForm: openForm,
-                documentKey: document.documentEpoch,
-              }}
-              onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
-              onOpenSource={(pointer) => {
-                outline.requestSourceReveal(pointer);
-                selectPointer(pointer, "outline");
-              }}
-            />
+                }}
+                onOpenGraph={openGraph}
+                selectedPointer={search.path}
+                revealSignal={problems.revealSignal}
+              />
+              <FactorGraphPanel
+                state={executionPlans}
+                schema={assist.schema}
+                diagnostics={currentDiagnostics(document)}
+                selectedPointer={search.path}
+                revealSignal={problems.revealSignal}
+                editing={{
+                  tree: form.tree,
+                  transactions,
+                  catalogs: {
+                    equityFields:
+                      assist.inspectorSource.equityCatalog?.fields ?? null,
+                  },
+                  operators: assist.operators,
+                  onOpenForm: openForm,
+                  documentKey: document.documentEpoch,
+                }}
+                onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+                onOpenSource={(pointer) => {
+                  outline.requestSourceReveal(pointer);
+                  selectPointer(pointer, "outline");
+                }}
+              />
+            </>
           ),
           diff: <StrategyDiffPanel state={document} active={view === "diff"} />,
         }}

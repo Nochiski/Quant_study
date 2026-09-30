@@ -206,6 +206,56 @@ export const fieldText = (
 /** 조각 자리 `{<키>}`·`{<키>.percent}`: 같은 카드 필드의 글자(`.percent`는 비율을 %로). */
 const PLACEHOLDER = /\{([a-z_]+)(\.percent)?\}/g;
 
+/** 문장 틀 조각: 글자, 또는 같은 카드 필드의 자리. 카드 문장은 자리에 그 필드의 컨트롤을 넣는다(P4-02). */
+export type SentencePiece = { text: string } | { key: string };
+
+/** 틀을 글자와 자리로 나눈다. 자리 규칙은 요약 조각과 같다(`.percent` 는 요약 표시 지시라 카드에선 뜻이 없다). */
+export const sentencePieces = (template: string): SentencePiece[] => {
+  const pieces: SentencePiece[] = [];
+  let last = 0;
+  for (const match of template.matchAll(PLACEHOLDER)) {
+    if (match.index > last)
+      pieces.push({ text: template.slice(last, match.index) });
+    pieces.push({ key: match[1]! });
+    last = match.index + match[0].length;
+  }
+  if (last < template.length) pieces.push({ text: template.slice(last) });
+  return pieces;
+};
+
+/**
+ * 카드 문장 틀(WORKFLOW P4-02 결정): 필드 순서로 enum 필드가 고른 값의 이름 키 아래 `.card` 를 먼저 찾고, 없으면
+ * `fallbackKey`(필드 카드는 앵커 설명 키, 목록 항목은 목록 설명 키) 아래 `.card` 다. 틀이 없으면 null — 카드는
+ * 이름 라벨 행으로 그린다. 어느 필드를 문장에 넣을지는 i18n 틀이 정하고 코드에 필드 목록이 없다.
+ */
+export const cardTemplate = (
+  fields: readonly FormField[],
+  fallbackKey: string | null,
+): string | null => {
+  for (const field of fields) {
+    if (field.control.kind !== "enum" || typeof field.value !== "string")
+      continue;
+    const labelKey = field.control.labelKeys?.[field.value];
+    const template =
+      labelKey === undefined ? null : tOptional(`${labelKey}.card`);
+    if (template !== null) return template;
+  }
+  return fallbackKey === null ? null : tOptional(`${fallbackKey}.card`);
+};
+
+/** 목록 항목의 이름: identity 를 기본값으로 삼는 필드(`label` ← `factor_id`)의 값, 없으면 identity 값. */
+export const itemName = (item: FormListItem): string | null => {
+  const named = item.fields.find(
+    (field) =>
+      field.defaultFrom !== null && field.defaultFrom === item.identityKey,
+  );
+  const value =
+    named === undefined
+      ? item.fields.find((field) => field.key === item.identityKey)?.value
+      : valueOf(named, item.fields);
+  return typeof value === "string" && value !== "" ? value : null;
+};
+
 /**
  * 필드 하나의 요약 조각: 설명 키 아래 `.summary`(enum은 고른 값의 이름 키 아래 `.summary`)에 같은 카드 필드의
  * 글자를 끼운다. 조각 키가 없거나, 적용되지 않거나, 끼울 값이 없으면 null.
@@ -261,16 +311,10 @@ export const strategySummary = (
     item.fields.find((field) => field.key === item.identityKey)?.value;
   const names: SummaryNames = {
     catalog,
-    // 참조가 가리키는 항목의 이름: identity를 기본값으로 삼는 필드(`label` ← `factor_id`), 없으면 id.
+    // 참조가 가리키는 항목의 이름(`itemName`).
     reference: (id) => {
       const item = items.find((candidate) => identity(candidate) === id);
-      const named = item?.fields.find(
-        (field) =>
-          field.defaultFrom !== null && field.defaultFrom === item.identityKey,
-      );
-      return item === undefined || named === undefined
-        ? null
-        : fieldText(named, item.fields, names);
+      return item === undefined ? null : itemName(item);
     },
   };
   const cardPart = (

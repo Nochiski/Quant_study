@@ -14,10 +14,12 @@ import {
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { DocumentDiagnostic } from "../model/document-state";
-import { projectForm } from "../model/form-projection";
+import { projectForm, type FormField } from "../model/form-projection";
 import { nodeSlotsByKind } from "../model/graph-transactions";
 import {
+  cardTemplate,
   projectPipeline,
+  sentencePieces,
   strategySummary,
   type PipelineProjection,
 } from "../model/pipeline-projection";
@@ -358,5 +360,92 @@ describe("요약 조각 구조", () => {
     expect(
       [...fragments.keys()].filter((key) => tOptional(key) !== null).length,
     ).toBeGreaterThan(30);
+  });
+});
+
+describe("카드 문장 틀", () => {
+  const templateOf = (source: string, anchor: string) => {
+    const card = pipelineOf(parseSource(source, "yaml"))
+      .stages.flatMap((stage) => stage.cards)
+      .find((item) => item.pointer === anchor)!;
+    const fields = card.rows.map((row) => row.field);
+    return cardTemplate(fields, fields[0]!.descriptionKey);
+  };
+
+  it("틀을 글자와 같은 카드 필드의 자리로 나눈다", () => {
+    expect(sentencePieces("{field_id} 값이 {value.percent} 이상")).toEqual([
+      { key: "field_id" },
+      { text: " 값이 " },
+      { key: "value" },
+      { text: " 이상" },
+    ]);
+  });
+
+  it("enum 이 고른 값의 틀을 먼저 찾고, 없으면 앵커 설명 키의 틀이다", () => {
+    const source = (side: string) =>
+      `schema_version: "1.2"\ntitle: ""\nportfolio:\n  side: ${side}\n`;
+    expect(templateOf(source("long_short"), "/portfolio/side")).toBe(
+      tOptional("strategy.field.portfolio_step.side.value.long_short.card"),
+    );
+    expect(templateOf(source("long_only"), "/portfolio/side")).toBe(
+      tOptional("strategy.field.portfolio_step.side.card"),
+    );
+  });
+
+  it("지금 스키마의 카드는 모두 틀을 가지고, 틀의 자리는 그 카드 필드로 풀리며, 사전의 틀은 모두 붙을 카드가 있다", () => {
+    // 자리가 풀리지 않으면 그 컨트롤이 문장에서 빠진다. 요약 조각 구조 테스트와 같은 방식으로, 카드·목록
+    // 항목(규칙 하나·팩터 둘인 문서)에서 틀 후보 키 → 그 카드의 필드 키를 모은다.
+    const pipeline = pipelineOf(idea("low_pbr_high_roe"));
+    const candidates = new Map<string, readonly string[]>();
+    const collect = (fields: readonly FormField[], fallback: string | null) => {
+      for (const stem of [
+        ...fields.flatMap((field) =>
+          field.control.kind === "enum"
+            ? Object.values(field.control.labelKeys ?? {})
+            : [],
+        ),
+        fallback,
+      ])
+        if (stem !== null)
+          candidates.set(
+            `${stem}.card`,
+            fields.map((field) => field.key),
+          );
+    };
+    const untemplated: string[] = [];
+    for (const stage of pipeline.stages) {
+      for (const card of stage.cards) {
+        const fields = card.rows.map((row) => row.field);
+        collect(fields, fields[0]!.descriptionKey);
+        if (cardTemplate(fields, fields[0]!.descriptionKey) === null)
+          untemplated.push(card.pointer);
+      }
+      for (const list of stage.lists)
+        for (const item of list.items)
+          collect(item.fields, list.descriptionKey);
+    }
+    expect(untemplated).toEqual([]);
+    const unresolved = [...candidates].flatMap(([key, keys]) =>
+      sentencePieces(tOptional(key) ?? "").flatMap((piece) =>
+        "key" in piece && !keys.includes(piece.key)
+          ? [`${key} {${piece.key}}`]
+          : [],
+      ),
+    );
+    expect(unresolved).toEqual([]);
+    const orphans = Object.keys(messages.ko).filter(
+      (key) =>
+        key.startsWith("strategy.") &&
+        key.endsWith(".card") &&
+        !candidates.has(key),
+    );
+    expect(orphans).toEqual([]);
+    // 순회가 헛돌지 않는지: 규칙 목록 틀을 포함해 번역이 있는 틀이 실제로 모였다.
+    expect(
+      tOptional("strategy.field.eligibility_step.rules.card"),
+    ).not.toBeNull();
+    expect(
+      [...candidates.keys()].filter((key) => tOptional(key) !== null).length,
+    ).toBeGreaterThan(20);
   });
 });

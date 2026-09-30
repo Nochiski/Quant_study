@@ -14,12 +14,13 @@ import type {
 } from "../../../shared/api";
 import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
-import type {
-  FormControl,
-  FormField,
-  FormListItem,
-  FormProjection,
-  FormSection,
+import {
+  catalogProfiles,
+  type FormControl,
+  type FormField,
+  type FormListItem,
+  type FormProjection,
+  type FormSection,
 } from "../model/form-projection";
 import type { CanonicalSnippet } from "../model/canonical-snippets";
 import type { DocumentDiagnostic } from "../model/document-state";
@@ -718,18 +719,24 @@ export const FieldActions = ({
   transactions,
   owner = FORM_OWNER,
   label = field.key,
+  prefix,
 }: {
   section: ObjectSection;
   field: FormField;
   transactions: SourceTransactions;
   owner?: string;
   label?: string;
+  /** 버튼이 하나라도 있을 때만 앞에 붙는 표시(카드는 행 이름을 보인다). */
+  prefix?: ReactNode;
 }) => {
   if (isPassiveControl(field.control)) return null;
-  const unset = unsetOperation(section, field);
+  const reset = field.written && !field.required;
+  const unset = field.value === null ? null : unsetOperation(section, field);
+  if (!reset && unset === null) return null;
   return (
     <>
-      {field.written && !field.required ? (
+      {prefix}
+      {reset ? (
         <Button
           size="small"
           tone="ghost"
@@ -741,7 +748,7 @@ export const FieldActions = ({
           {t("form.field.reset")}
         </Button>
       ) : null}
-      {unset !== null && field.value !== null ? (
+      {unset !== null ? (
         <Button
           size="small"
           tone="ghost"
@@ -1023,14 +1030,11 @@ export const FieldControl = (props: ControlProps) => {
 const catalogOptions = (
   catalog: Extract<FormControl, { kind: "catalog" }>["catalog"],
   catalogs: FormCatalogs,
-): { value: string; label: string }[] | null => {
-  if (catalog === "equity-field" && catalogs.equityFields !== null)
-    return catalogs.equityFields.map((profile) => ({
-      value: profile.field_id,
-      label: `${profile.field_id} · ${profile.label}`,
-    }));
-  return null;
-};
+): { value: string; label: string }[] | null =>
+  catalogProfiles(catalogs, catalog)?.map((profile) => ({
+    value: profile.field_id,
+    label: `${profile.field_id} · ${profile.label}`,
+  })) ?? null;
 
 const TextualControl = ({
   id,

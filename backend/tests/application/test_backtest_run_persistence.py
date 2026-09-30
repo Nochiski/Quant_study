@@ -36,7 +36,6 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunRepositoryPort,
-    BacktestRunSummary,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunNotFoundError,
@@ -53,7 +52,7 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.application.strategy_design.facade.ports import PageRequest
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
-from strategy_workbench.domain.backtest.facade.runs import ExecutionCore
+from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, StrategyProvenance
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.strategy.facade.specification import RebalanceFrequency
 from tests.backtest_run_wait import RawLoadBarrier, wait_for_terminal_run
@@ -161,13 +160,14 @@ def test_cancel_and_failure_transitions_survive_reopening_the_file(
 class _RefusingAdd(SQLiteBacktestRunRepository):
     def add(
         self,
-        summary: BacktestRunSummary,
+        run: BacktestRunState,
+        provenance: StrategyProvenance,
         request: BacktestRunSpec,
         *,
         lineage_id: str | None,
         trial_key: str,
     ) -> None:
-        raise ResearchStorageError(f"disk full — run_id={summary.run.run_id}")
+        raise ResearchStorageError(f"disk full — run_id={run.run_id}")
 
 
 def test_a_failed_accept_write_rejects_the_run(

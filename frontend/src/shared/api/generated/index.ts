@@ -536,6 +536,7 @@ export type {
   RollingMetricPoint,
   RunEnvironment,
   RunEnvironmentSchema,
+  RunKind,
   RunManifest,
   RunStatus,
   SaveDocumentRequest,

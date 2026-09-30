@@ -639,8 +639,21 @@ export type BacktestRunState = {
  * BacktestRunSummary
  *
  * One accepted run and the strategy meaning resolved before it started.
+ *
+ * 종류와 쓰는 실험은 저장소가 읽을 때 정한다. 사용자가 시작한 run 을 실험이 이어 쓰면(같은 입력
+ * 잇기) 실험 run 이다. `experiment_paused` 는 그 실험이 일시정지돼 대기 run 이 배정되지 않는다는
+ * 뜻이다.
  */
 export type BacktestRunSummary = {
+  /**
+   * Experiment Id
+   */
+  experiment_id: string | null;
+  /**
+   * Experiment Paused
+   */
+  experiment_paused: boolean;
+  kind: RunKind;
   run: BacktestRunState;
   strategy_provenance: StrategyProvenance;
 };
@@ -665,6 +678,10 @@ export type BacktestSeries = {
    * Rolling Sharpe
    */
   rolling_sharpe: Array<RollingMetricPoint>;
+  /**
+   * Rolling Sharpe Window Sessions
+   */
+  rolling_sharpe_window_sessions?: number | null;
 };
 
 /**
@@ -4183,6 +4200,13 @@ export type RunEnvironmentSchema = {
 };
 
 /**
+ * RunKind
+ *
+ * 백테스트 이력의 실행 종류(검증 랩 V5-03, #382). 실험이 쓴 run 이면 그 쓰임새다.
+ */
+export type RunKind = "single" | "experiment_trial" | "walk_forward_validation";
+
+/**
  * RunManifest
  *
  * What a finished run was made of.
@@ -7059,6 +7083,10 @@ export type ListBacktestsData = {
      * Strategy Id
      */
     strategy_id?: string | null;
+    /**
+     * Kind
+     */
+    kind?: RunKind | null;
   };
   url: "/api/v1/backtests";
 };

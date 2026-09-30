@@ -94,7 +94,13 @@ const resultFixture = (): BacktestRunResult => ({
   },
   metric_definitions: METRICS.map((item) => item.definition),
   metrics: METRICS.map((item) => item.value),
-  series: { equity: [], drawdown: [], monthly_returns: [], rolling_sharpe: [] },
+  series: {
+    equity: [],
+    drawdown: [],
+    monthly_returns: [],
+    rolling_sharpe: [],
+    rolling_sharpe_window_sessions: 126,
+  },
   artifacts: {
     snapshots: [],
     positions: [],

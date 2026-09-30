@@ -24,6 +24,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.run_repository i
     BacktestRunNotFoundError,
     BacktestRunRepositoryPort,
     BacktestRunSummary,
+    RunKind,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger import (
     TrialLedgerRecords,
@@ -48,6 +49,7 @@ __all__ = [
     "InvalidBarRecord",
     "MarketBarRecord",
     "ProgressCallback",
+    "RunKind",
     "RunCancelledError",
     "TrialLedgerRecords",
     "TrialLineageAlreadyMergedError",

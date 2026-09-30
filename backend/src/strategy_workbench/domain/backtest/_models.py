@@ -503,6 +503,9 @@ class BacktestSeries:
     drawdown: tuple[DrawdownPoint, ...]
     monthly_returns: tuple[MonthlyReturnPoint, ...]
     rolling_sharpe: tuple[RollingMetricPoint, ...]
+    # 롤링 샤프 창의 수익률 개수(#303). 기본값 None 은 이 칸이 없던 옛 `result.json` 을 410 없이
+    # 읽게 한다 — 그 run 이 쓰지 않은 창 길이를 지어내 채우지 않는다. 새 결과는 늘 값을 싣는다.
+    rolling_sharpe_window_sessions: int | None = None
 
 
 @dataclass(frozen=True)

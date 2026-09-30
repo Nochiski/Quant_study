@@ -10,6 +10,7 @@ import {
 import {
   strategyWorkbenchApi,
   type BacktestRunSpec,
+  type RunKind,
 } from "../../../shared/api";
 
 const terminal = new Set(["completed", "cancelled", "failed"]);
@@ -30,12 +31,18 @@ const retireBacktestHistoryQueries = async (
 };
 
 export const backtestHistoryQuery = (
-  page: { offset?: number; limit?: number; strategyId?: string } = {},
+  page: {
+    offset?: number;
+    limit?: number;
+    strategyId?: string;
+    kind?: RunKind;
+  } = {},
 ) =>
   queryOptions({
     queryKey: [
       ...backtestHistoryKey(),
       page.strategyId ?? null,
+      page.kind ?? null,
       page.offset ?? 0,
       page.limit ?? 50,
     ],
@@ -61,6 +68,35 @@ export const useRunEnvironmentSchema = () =>
   useQuery(runEnvironmentSchemaQuery());
 
 const trialPreviewKey = () => ["backtest", "trial-preview"] as const;
+const trialLedgerKey = () => ["backtest", "trial-ledger"] as const;
+
+/**
+ * 계열 시도 원장(검증 랩 spec D2). 시도 묶음·실행 역할(대표·재확인·대기·결과 없음)·N 은 backend 가 정하고
+ * 화면은 그대로 보인다.
+ */
+export const trialLedgerQuery = (strategyId: string) =>
+  queryOptions({
+    queryKey: [...trialLedgerKey(), strategyId],
+    queryFn: () => strategyWorkbenchApi.getTrialLedger(strategyId),
+  });
+
+/**
+ * 다른 계열을 이 계열에 합친다. 되돌릴 수 없다. 합치면 두 계열의 원장과 캐시한 시도 판정이 모두 옛 값이다.
+ */
+export const useMergeTrialLineage = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (merge: { strategyId: string; sourceStrategyId: string }) =>
+      strategyWorkbenchApi.mergeTrialLineage(
+        merge.strategyId,
+        merge.sourceStrategyId,
+      ),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: trialPreviewKey() });
+      return queryClient.invalidateQueries({ queryKey: trialLedgerKey() });
+    },
+  });
+};
 
 export const useStartBacktest = () => {
   const queryClient = useQueryClient();

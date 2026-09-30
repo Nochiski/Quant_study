@@ -104,6 +104,20 @@ describe("backtest run failure code vocabulary", () => {
     expect(untranslated(codes)).toEqual([]);
   });
 
+  // 계열 합치기 거절(검증 랩 V5-03)도 같은 번역 키 체계다. 전략 이력의 합치기 확인 창이 보인다.
+  it("translates every coded lineage merge refusal in both locales", () => {
+    const codes = rejectionCodes(
+      readOpenApi(),
+      "/api/v1/strategies/{strategy_id}/trials/merge",
+    );
+
+    expect([...codes].sort()).toEqual([
+      "backtest.lineage.already_merged",
+      "strategy.not_found",
+    ]);
+    expect(untranslated(codes)).toEqual([]);
+  });
+
   // 실험 경로의 거절(검증 랩 V3-03)도 같은 번역 키 체계다. 코드 목록은 backend 가 스키마 enum 으로 싣는다.
   it("translates every coded experiment rejection in both locales", () => {
     const openapi = readOpenApi();

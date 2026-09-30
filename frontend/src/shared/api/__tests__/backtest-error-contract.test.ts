@@ -5,6 +5,8 @@ import { readOpenApi, rejectionCodes } from "../../testing/openapi-codes";
 import type {
   BacktestRunState,
   StartBacktestErrors,
+  TrialAttempt,
+  WindowPick,
 } from "../generated/types.gen";
 
 type StartBacktest422 = StartBacktestErrors[422];
@@ -51,6 +53,23 @@ const RUN_FAILURE_CODES: Record<RunFailureCode, true> = {
   "backtest.run.equity_wiped_out": true,
   "backtest.run.internal": true,
   "backtest.run.interrupted": true,
+};
+
+type TrialRejectionCode = NonNullable<
+  TrialAttempt["error_code"] | WindowPick["error_code"]
+>;
+
+// 실험 trial·창 검증 제출의 접수 거절 코드(backend `AdmissionRejectionCode` → OpenAPI enum). 화면은
+// `backtest.error.<code>` 로 번역한다. 코드가 늘면 이 표가 타입 오류로 먼저 깨진다(#382 DEFECT-V3D-08).
+const TRIAL_REJECTION_CODES: Record<TrialRejectionCode, true> = {
+  "backtest.run.environment_required": true,
+  "backtest.run.research_window_violation": true,
+  "backtest.run.parameter_invalid": true,
+  "backtest.run.invalid": true,
+  "backtest.strategy.not_found": true,
+  "backtest.strategy.stale": true,
+  "backtest.strategy.requires_upgrade": true,
+  "portfolio.strategy.invalid": true,
 };
 
 const untranslated = (codes: Iterable<string>): string[] =>
@@ -116,6 +135,10 @@ describe("backtest run failure code vocabulary", () => {
       "strategy.not_found",
     ]);
     expect(untranslated(codes)).toEqual([]);
+  });
+
+  it("translates every experiment trial submission rejection in both locales", () => {
+    expect(untranslated(Object.keys(TRIAL_REJECTION_CODES))).toEqual([]);
   });
 
   // 실험 경로의 거절(검증 랩 V3-03)도 같은 번역 키 체계다. 코드 목록은 backend 가 스키마 enum 으로 싣는다.

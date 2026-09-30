@@ -33,6 +33,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     require_environment,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
+    AdmissionRejectionCode,
     BacktestRunResult,
     BacktestRunSpec,
     BacktestRunState,
@@ -1031,7 +1032,7 @@ class BacktestRunService:
 # 실행 접수 거절과 그 안정 키. HTTP 거절(시작·미리 계산·실험 기반 검사와, 같은 판정을 타는
 # 미리보기·추적 — #351)과 실험 trial 제출이 이 목록 하나를 쓴다. 하위 타입을 먼저 둔다.
 # 실행 설정 거절은 domain 오류 그대로다 — 봉인 구간·연구 하한 날짜도 그 오류가 싣는다.
-_REJECTION_CODES: tuple[tuple[type[Exception], str], ...] = (
+_REJECTION_CODES: tuple[tuple[type[Exception], AdmissionRejectionCode], ...] = (
     (MissingRunEnvironmentError, "backtest.run.environment_required"),
     (ResearchWindowViolationError, "backtest.run.research_window_violation"),
     (BacktestParameterValueError, "backtest.run.parameter_invalid"),
@@ -1043,7 +1044,7 @@ _REJECTION_CODES: tuple[tuple[type[Exception], str], ...] = (
 )
 
 
-def rejection_code(error: BaseException) -> str | None:
+def rejection_code(error: BaseException) -> AdmissionRejectionCode | None:
     """실행 접수 거절이면 그 코드, 아니면 None(예상 밖 오류)."""
     return next((code for kind, code in _REJECTION_CODES if isinstance(error, kind)), None)
 

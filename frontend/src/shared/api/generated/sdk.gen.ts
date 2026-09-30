@@ -750,7 +750,8 @@ export const listExperimentTrials = <ThrowOnError extends boolean = false>(
 /**
  * Retry Experiment Trial
  *
- * 실패·취소된 trial 을 새 attempt 로 다시 넘긴다.
+ * 실패·취소된 trial 을 새 attempt 로 다시 넘긴다. 기반 요청이 이제 접수되지 않으면 백테스트
+ * 시작과 같은 코드로 거절한다.
  */
 export const retryExperimentTrial = <ThrowOnError extends boolean = false>(
   options: Options<RetryExperimentTrialData, ThrowOnError>,

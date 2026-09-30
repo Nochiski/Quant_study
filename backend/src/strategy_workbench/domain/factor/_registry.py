@@ -35,8 +35,8 @@ class FactorPreference(StrEnum):
 class FactorAvailability(StrEnum):
     IMPLEMENTED = "implemented"
     CATALOG_ONLY = "catalog_only"
-    # 기본 graph 는 있지만 연결된 어댑터가 그 graph 의 필드를 주지 않는다. 정의에는 없고
-    # `factor_availability` 만 낸다(#370)
+    # 기본 graph 는 있지만 연결된 어댑터가 그 graph 의 필드를 주지 않는다. 레지스트리 정의에는
+    # 없고 `factor_availability` 만 낸다(#370)
     UNAVAILABLE = "unavailable"
 
 

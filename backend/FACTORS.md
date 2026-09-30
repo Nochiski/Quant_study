@@ -11,8 +11,8 @@ PR에서 사람이 맞춥니다.
 - 상태 `catalog_only`: ID와 데이터 요구사항은 예약됐지만 기본 실행 graph는 후속 구현 대상
 - 상태 `unavailable`: 기본 graph는 있지만 연결된 어댑터가 그 graph의 필드를 주지 않는다. 아래 표의
   상태가 아니라 팩터 카탈로그 응답과 AI 팩터 도구가 어댑터로 판정한 값이다(`factor_availability`,
-  이슈 #370). 실데이터 어댑터에는 원장에 없는 공매도 잔고 비율·실적 서프라이즈 필드가 없어
-  `short.short_balance_ratio`·`event.earnings_surprise`가 이 상태다
+  이슈 #370). 실데이터 어댑터가 주지 않는 필드(`equity_duckdb/_specs.py`의 `UNSUPPORTED_FIELDS`)를
+  읽는 팩터가 이 상태다
 - 모든 입력은 `available_date <= as_of`인 PIT 관측값만 사용
 - 가격 변화(수익률·모멘텀·이평·변동성·낙폭·고점 거리·베타)는 수정주가 `price.adj_close`(전방
   조정, 그날까지 적용·공개된 분할·증자·병합 계수만 곱해 과거 값이 바뀌지 않는다)를 읽는다. 원주가

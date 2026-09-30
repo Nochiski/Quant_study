@@ -25,11 +25,10 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategySummary,
 )
 from strategy_workbench.domain.strategy.facade.diff import DiffEntry, diff_strategy_specs
-from strategy_workbench.domain.strategy.facade.document import CURRENT_SCHEMA_VERSION
+from strategy_workbench.domain.strategy.facade.document import authoring_document
 from strategy_workbench.domain.strategy.facade.specification import (
     StrategyIdentity,
     StrategySpec,
-    canonical_strategy_json,
 )
 
 from ._service import CompiledDocument, CompileRequest, StrategyAuthoringService
@@ -176,13 +175,9 @@ def _view(record: StrategyRevisionRecord) -> StrategyDocument:
             False,
         )
     else:
-        # legacy JSON revision의 generated source는 항상 현재 schema 모양이다. 동결 1.0 row라도 잃을
-        # 주석이 없으므로 identity의 동결 표시만 현재 버전으로 바꿔 1.1 문서를 내보낸다 (spec D2).
-        current = replace(
-            record.spec,
-            identity=replace(record.spec.identity, schema_version=CURRENT_SCHEMA_VERSION),
-        )
-        source = canonical_strategy_json(current, indent=2) + "\n"
+        # 원문 없는 legacy JSON revision 은 spec 에서 사용자 문서를 다시 만든다 — 현재 판이고
+        # compile 이 붙인 승격 노드가 없다(`authoring_document`, spec D2·#353).
+        source = authoring_document(record.spec)
         format, source_hash, generated = SourceFormat.JSON, source_hash_of(source), True
     return StrategyDocument(
         strategy_id=record.strategy_id,

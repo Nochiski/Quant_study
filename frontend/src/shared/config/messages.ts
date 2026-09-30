@@ -122,6 +122,8 @@ const ko = {
   "backtest.actions.error":
     "실행 제어 요청에 실패했습니다. 상태를 새로 확인한 뒤 다시 시도하세요.",
   "backtest.result.chartEmpty": "이 구간에서 산출 가능한 값이 없습니다.",
+  "backtest.result.chartEmpty.rollingSharpe":
+    "실행이 롤링 창({sessions}세션)보다 짧아 롤링 샤프 값이 없습니다.",
   "backtest.result.chart": "차트",
   "backtest.result.kicker": "PROFESSIONAL RESULT",
   "backtest.result.title": "백테스트 결과",
@@ -1958,6 +1960,8 @@ export const messages = {
     "backtest.actions.error":
       "The run-control request failed. Refresh the status and try again.",
     "backtest.result.chartEmpty": "No value can be calculated for this range.",
+    "backtest.result.chartEmpty.rollingSharpe":
+      "The run is shorter than the rolling window ({sessions} sessions), so there are no rolling Sharpe values.",
     "backtest.result.chart": "chart",
     "backtest.result.kicker": "PROFESSIONAL RESULT",
     "backtest.result.title": "Backtest result",

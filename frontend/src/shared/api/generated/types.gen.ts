@@ -665,6 +665,10 @@ export type BacktestSeries = {
    * Rolling Sharpe
    */
   rolling_sharpe: Array<RollingMetricPoint>;
+  /**
+   * Rolling Sharpe Window Sessions
+   */
+  rolling_sharpe_window_sessions?: number | null;
 };
 
 /**

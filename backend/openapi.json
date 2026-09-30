@@ -954,6 +954,17 @@
             },
             "title": "Rolling Sharpe",
             "type": "array"
+          },
+          "rolling_sharpe_window_sessions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rolling Sharpe Window Sessions"
           }
         },
         "required": [

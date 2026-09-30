@@ -403,6 +403,7 @@ class BacktestEngineExecutorAdapter:
                 drawdown=full.drawdown_curve,
                 monthly_returns=full.monthly_returns,
                 rolling_sharpe=full.rolling_sharpe,
+                rolling_sharpe_window_sessions=full.rolling_sharpe_window_sessions,
             ),
             artifacts=artifacts,
         )

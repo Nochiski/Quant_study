@@ -46,9 +46,11 @@ const chartPath = (
 const LineChart = ({
   title,
   series,
+  emptyText = t("backtest.result.chartEmpty"),
 }: {
   title: string;
   series: ChartSeries[];
+  emptyText?: string;
 }) => {
   const finite = series.flatMap((item) =>
     item.values.filter((value): value is number => value !== null),
@@ -59,7 +61,7 @@ const LineChart = ({
         <header>
           <h4>{title}</h4>
         </header>
-        <p className="inline-state">{t("backtest.result.chartEmpty")}</p>
+        <p className="inline-state">{emptyText}</p>
       </section>
     );
   }
@@ -307,6 +309,17 @@ export const BacktestRunDetail = ({
             },
           ]}
           title={t("backtest.result.chart.rollingSharpe")}
+          // 창보다 짧은 실행만 창 길이로 이유를 말한다. 흔들림 0 등 다른 이유면 일반 문구다(#303).
+          emptyText={
+            result.series.rolling_sharpe_window_sessions != null &&
+            result.series.rolling_sharpe.length <=
+              result.series.rolling_sharpe_window_sessions
+              ? t("backtest.result.chartEmpty.rollingSharpe").replace(
+                  "{sessions}",
+                  String(result.series.rolling_sharpe_window_sessions),
+                )
+              : undefined
+          }
         />
         <LineChart
           series={[

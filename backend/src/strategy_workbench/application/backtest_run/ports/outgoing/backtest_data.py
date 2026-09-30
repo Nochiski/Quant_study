@@ -83,5 +83,14 @@ class BacktestDataNotReadyError(RuntimeError):
     """
 
 
+class BacktestDataUnavailableError(ValueError):
+    """질의의 종목 id 를 데이터 원천이 모른다 — 형식이 틀리거나 원천에 없다(#361).
+
+    tape 종목은 같은 어댑터의 유니버스에서 오므로 실제로는 실행 요청의 벤치마크 id 다. 사용자가
+    고칠 입력이라 run 은 서버 오류가 아니라 코드화된 실패로 끝난다. 두 어댑터가 같은 질의에 이
+    예외를 낸다 — 모르는 id 로 bar 를 지어내지 않는다.
+    """
+
+
 class BacktestDataPort(Protocol):
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset: ...

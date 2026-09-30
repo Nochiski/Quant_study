@@ -378,6 +378,8 @@ export type BacktestCancelResult = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -669,6 +671,8 @@ export type BacktestRunState = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -4793,8 +4797,9 @@ export type StartTurnRequest = {
  *
  * A stored revision as an editor sees it: exact source plus what it compiles to.
  *
- * `generated` is True when the revision predates document authoring (legacy JSON API) and the
- * source shown is a canonical JSON projection of the stored spec, not text an author wrote.
+ * `generated` 는 revision 이 문서 저작 이전(legacy JSON API)이라 보이는 원문이 작성자가 쓴 글이
+ * 아니라 저장된 spec 에서 만든 문서일 때 참이다 — 승격을 걷은 현재 판 문서
+ * (`authoring_document`)다.
  */
 export type StrategyDocument = {
   /**
@@ -6664,6 +6669,8 @@ export type WalkForwardWindowResult = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;

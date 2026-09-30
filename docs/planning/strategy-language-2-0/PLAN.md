@@ -6,7 +6,7 @@ current_phase: P4
 current_pr: P4-03
 active_prs: [P4-03]
 parallel_window: []
-last_updated: 2026-09-30T14:52:09+09:00
+last_updated: 2026-09-30T16:35:20+09:00
 planned_prs: 30
 merged_prs: 22
 integrated_prs: 0
@@ -30,7 +30,7 @@ progress_percent: 73
 | Active PR | `P4-03` |
 | Progress | `22 / 30 done (73%), main 22, integration 0` |
 | Approved | `22 / 30` |
-| Aggregated at | `2026-09-30 14:52 KST` |
+| Aggregated at | `2026-09-30 16:35 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지
@@ -134,7 +134,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 
 ## 현재 작업 Packet
 
-현재 PR 은 `P4-03`(`IN_PROGRESS` — P4-03a backend, 리드 결정 2026-09-30 — WORKFLOW P4-03 결정 블록)이다. 아래 P1-05 이하
+현재 PR 은 `P4-03`(`IN_PROGRESS` — P4-03a backend [#424](https://github.com/Nochiski/Quant_study/pull/424) 리뷰 대기, 리드 결정 2026-09-30 — WORKFLOW P4-03 결정 블록)이다. 아래 P1-05 이하
 절은 지난 PR 의 패킷 기록이고, P3-03 패킷은 P3 스택 절 끝에, P4-01a·P4-01b·P4-02 패킷은 P4 스택 절에 있다.
 
 | 항목 | 값 |
@@ -144,7 +144,7 @@ active PR 수와 병행 규칙은 [yaml-ui WORKFLOW 13.7절](../strategy-workben
 | Acceptance | WORKFLOW P4-03(리드 결정 2026-09-30 포함) 중 backend 몫 |
 | Non-goals | 팩터 카드·`renameFactor`·빈 팩터 추가 UI(P4-03b), 미리보기 패널 UI(P4-03c), 탭 개편·Form 은퇴(P4-04) |
 | Branch/worktree | `feat/lang2-p4-03a-backend` / `wt-run-concurrency`(재사용) |
-| Base SHA | main `29296bda`(#395 머지) + #416(#413) 의 PLAN 커밋 cherry-pick(P4-02 MERGED 기록, 같은 내용) |
+| Base SHA | main `2b27fa06`(PR 열기 전 `29296bda` 에서 옮김) + #416(#413) 의 PLAN 커밋 cherry-pick(P4-02 MERGED 기록, 같은 내용) |
 | Steps | ① PLAN·WORKFLOW 착수(리드 결정) → ② `factor.graph.empty` → ③ trace `summary` 계약(요약만 요청 허용, 사유별 수·masked·targets) → ④ OpenAPI·생성 SDK 재생성 → ⑤ 전체 게이트(backend `pytest`·`ruff`·`pyright`, `database/tests`, frontend `typecheck`·`test`, `api:generate` diff) |
 | Full gate | CI 전체 job green |
 
@@ -1076,7 +1076,7 @@ Phase exit:
 |---|---|---|---|---|---|
 | [x] | `P4-01` | `pipeline-projection.ts` (4단계 모델, `x-stage`, 팩터 요약 문장) | P3-03 | `MERGED` | 두 PR(리드 결정 2026-09-30): P4-01a [#347](https://github.com/Nochiski/Quant_study/pull/347)(`3b16345f` refactor·`50830b7e` `x-stage`·`398a14e2` 인프라 기준선) · `review_pr347` r1 APPROVE(`8af5f1b7`, P3 4 → P4-01b) · main 머지 `92bf38ee`(#347, 2026-09-30) → P4-01b [#367](https://github.com/Nochiski/Quant_study/pull/367)(`feat/lang2-p4-01b-pipeline-projection`, [#359](https://github.com/Nochiski/Quant_study/pull/359) 위 스택 → #359 머지 `7e7b2da9` 뒤 base main) · `review_pr367` r1 APPROVE(P2 2·P3 4 반영, 리드 결정 둘) · main 머지 `09aaf755`([#367](https://github.com/Nochiski/Quant_study/pull/367), 2026-09-30) |
 | [x] | `P4-02` | 단계 카드 UI(거른다·합쳐서 고른다·비중을 준다), 실행 설정 띠 | P4-01 | `MERGED` | 두 PR(리드 결정 6 — a 끝 비테스트 src 13파일 +1136/−213): P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392)(`feat/lang2-p4-02-stage-cards`, main `09aaf755` 위) · `review_pr392` r1 APPROVE(P2 1·P3 4, 리드 지시로 머지 전 반영, 코드 tip `20153652`, main 병합 `b9e4b915`·CI R2 타이밍 수정 `e2f9e47a`) · main 머지 `bc8b0dd1`(#392, 2026-09-30) → P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395)(`feat/lang2-p4-02b-stage-cards`, `review_pr395` r1 APPROVE(P3 5, 옛 `ca3c18fa` 기준 — 테스트·문서 반영), main `bc8b0dd1` 병합 `eebd4905`) · main 머지 `29296bda`([#395](https://github.com/Nochiski/Quant_study/pull/395), 2026-09-30) |
-| [ ] | `P4-03` | 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널 | P4-02 | `IN_PROGRESS` | 세 PR 스택(리드 결정 8): P4-03a(`feat/lang2-p4-03a-backend`, main `29296bda` 위) 착수 → P4-03b → P4-03c |
+| [ ] | `P4-03` | 팩터 카드, 빈 팩터 추가, 기준일 미리보기 패널 | P4-02 | `IN_PROGRESS` | 세 PR 스택(리드 결정 8): P4-03a [#424](https://github.com/Nochiski/Quant_study/pull/424)(`feat/lang2-p4-03a-backend`, main `2b27fa06` 위) 리뷰 대기 → P4-03b → P4-03c |
 | [ ] | `P4-04` | 탭을 그래프·YAML 둘로, 기본 탭 그래프, Form·JSON 은퇴, 빈 화면 e2e, 식별자 0개 단언 | P4-03 | `WAITING` | — |
 
 Phase exit:
@@ -1205,6 +1205,7 @@ Phase exit:
 | `P2-01` | `npm run typecheck` · `lint` · `test` · `build` (frontend) | 통과, Vitest 639(57 파일) | 2026-09-20 |
 ## 변경 기록
 
+- 2026-09-30 — **P4-03a PR [#424](https://github.com/Nochiski/Quant_study/pull/424)**(backend, 리뷰 대기). (1) 빈 그래프 진단 `factor.graph.empty`("첫 단계를 추가하세요.", path `nodes`, output_missing 대신, alias `strategy.expression.empty`). (2) 평가 값 `FactorValue.masked`(`_NodeEvaluator.masked_output` — 가린 칸에서 이력 부족 칸을 뺀 것이라 출력 노드 추적 상태 `masked` 와 같은 칸, `_warming_up` 한 정의). (3) 컴파일러가 trace 하는 프레임의 요약 `PortfolioFrameSummary`(universe·eligible·eligibility_failed·eligibility_rank_cut·missing·masked, 유니버스 멤버만, tape 해시 밖)를 센다. 결측 제외 = `MISSING_ELIGIBILITY`·`MISSING_FACTOR`(`MISSING_RISK` 는 선정 뒤 비중 단계라 뺐다). 원장 몫은 결측을 판정한 세 자리(1-pass 규칙 필드·팩터 값·2-pass 횡단면 필드)가 입력 `masked` 로 기록한다. (4) trace 응답 `summary`(`StrategyTraceSummary`: 수 + 그 기준일 targets 순위 순, 기준일이 신호일일 때만)와 `security_ids` 0개(요약만) 허용, OpenAPI·SDK 재생성. 기준일을 비우면 실행 설정 구간의 마지막 신호 프레임이다(종료일 자체는 신호일이 아닐 수 있어 P4-03c 는 기준일을 비워 보낸다). `factor_id` 는 필수로 둔다(응답 `plan_hash` 가 팩터 기준). 리드 결정 5 의 수 가운데 이름(`SecurityRef.name`)은 trace 서비스에 이름 원천이 없어 리드에게 물었다. SoT 규칙에 기준일 요약 행을 더했다.
 - 2026-09-30 — **P4-03 착수·설계 결정(리드)**. 구현자 설계 메모의 여덟 선택지에 리드가 답했다(WORKFLOW P4-03 결정 블록). (1) 카드 이름은 `label` 을 편집하고 `factor_id` 는 씨앗(`factor_<n>`, 캔버스에 안 보임)이다. rename 은 Form·YAML 경로의 `renameFactor` planner 로 하고, Form `factor_id` 행이 참조를 끊던 잠복 결함도 고친다 — WORKFLOW P4-03 의 "이름(`factor_id` 편집 = 참조 갱신 rename)" 문장을 이 결정으로 바꿨다. (2) 슬라이더 하한은 스키마 최솟값, 상한 3·단계 0.1 은 표시 전용, 숫자 칸 병기, 확정은 blur·pointerup 한 번. (3) 삭제 거부는 훅이 참조 목록만 돌려주고 화면이 이름을 만든다. (4) 빈 그래프는 backend `factor.graph.empty`("첫 단계를 추가하세요."). (5) 미리보기는 trace 응답 `summary` 블록(`security_ids` 없이도), N = 그 기준일 targets, 기준일 기본값 = 실행 설정 종료일, 수·masked 는 backend 가 센다. (6) 캔버스 아래 패널, 버튼 갱신·stale 배지, 자동 갱신 없음. (7) 카드 위 진단은 수 배지. (8) P4-03a backend → P4-03b 카드·추가 → P4-03c 미리보기, 스택 PR. P4-03a 는 main `29296bda` 에서 `feat/lang2-p4-03a-backend` 로 시작한다. #416(#413 첫 parse 전 로딩) 리뷰와 병행하므로 P4-02 MERGED 기록은 #416 의 PLAN 커밋을 cherry-pick 해 같은 내용으로 둔다. P4-03 상태 `IN_PROGRESS`.
 - 2026-09-30 — **P4-02 MERGED**. P4-02b [#395](https://github.com/Nochiski/Quant_study/pull/395) 가 main 에 머지돼(`29296bda`) P4-02 행을 `MERGED` 로 바꿨다(P4-02a [#392](https://github.com/Nochiski/Quant_study/pull/392) `bc8b0dd1`). 두 PR 로 그래프 1수준 캔버스(요약 띠·4단계 카드·문장 안 컨트롤·규칙 추가·삭제·"5 실행" 안내·문제 행 이동)가 들어왔다. #392 CI 에서 찾은 첫 parse 전 기본값 표시·편집 손실은 #413 으로 고친다(이 기록을 싣는 PR). 다음은 P4-03a 다 — 리드 결정 여덟 (카드는 `label` 편집·`factor_id` 씨앗, 슬라이더 하한은 스키마, 삭제 거부는 화면이 이름으로, `factor.graph.empty`, trace `summary` 블록, 캔버스 아래 버튼 갱신 패널, 카드 진단 수 배지, a·b·c 스택)은 P4-03a 착수 커밋에서 WORKFLOW 와 함께 적는다.
 - 2026-09-30 — **P4-02a MERGED, P4-02b main 병합**. [#392](https://github.com/Nochiski/Quant_study/pull/392) 가 main 에 머지됐다(`bc8b0dd1`, P4-02a — 캔버스·카드 문장 틀·route R1·R2). 로컬 브랜치 `feat/lang2-p4-02-stage-cards` 는 지웠다. [#395](https://github.com/Nochiski/Quant_study/pull/395) 에 origin/main 을 merge 했다(`eebd4905`, force push 없음, 충돌은 PLAN 한 곳 — 양쪽 기록을 모두 살렸다). R1·R2 의 정착 대기(`data-settled`)는 main 에서 들어왔고, #395 가 더한 route 테스트 둘(문제 행 → 캔버스 카드·목록)은 편집하지 않아 같은 대기가 필요 없다. P4-02 상태 `IN_REVIEW` 유지 — #395 머지로 P4-02 가 끝난다.

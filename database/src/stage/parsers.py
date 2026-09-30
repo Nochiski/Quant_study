@@ -341,12 +341,16 @@ def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
     기간 라벨(YYMM[0..5])은 행마다 period_label_1~6 으로 병기해 DATA1~6 과 짝을 보존한다. DATAQ* 는
     라벨이 blob 에 없어(QOQ/YOY 코멘트가 상대 위치만 말한다) 슬롯명 그대로 val_q* 컬럼에 둔다.
     키는 (cmp_cd, fetched_date, ep, seq=배열 위치) — cF4002 는 같은 ACCODE 가 여러 P_ACCODE 아래
-    반복된다(실측 1,614/1,614 blob).
+    반복된다(실측 1,614/1,614 blob). 같은 cF3002 의 다른 요청(pkey Q:IS·Y:BS·Y:CF — 분기 손익·연간
+    재무상태·현금흐름, 플랜 2026-09-30 T-Q2)은 키가 겹치므로 건너뛰고 세기만 한다(`_parse_periodic` 규약).
     """
     n_blobs: Counter[str] = Counter()
-    n_empty = n_failed = n_label_other = 0
+    n_empty = n_failed = n_label_other = n_skipped = 0
     out: list[dict[str, str | None]] = []
     for b in blobs:
+        if b.pkey != "Y":
+            n_skipped += 1
+            continue
         n_blobs[b.ep] += 1
         try:
             top, rows = _json_rows(b.body, "DATA")
@@ -384,7 +388,8 @@ def parse_fin_wise(blobs: Iterable[RawBlob]) -> ParseResult:
                             int(str(r["seq"]))))
     return ParseResult(rows=out, columns=FIN_WISE_COLUMNS, metrics={
         "n_blobs": dict(n_blobs), "n_empty": n_empty, "n_rows_emitted": len(out),
-        "n_parse_failed": n_failed, "n_value_mismatch": 0, "n_label_shape_other": n_label_other})
+        "n_parse_failed": n_failed, "n_value_mismatch": 0, "n_label_shape_other": n_label_other,
+        "n_skipped_pkey": n_skipped})
 
 
 ANALYST_COLUMNS: tuple[str, ...] = (

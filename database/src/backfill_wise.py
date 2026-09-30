@@ -39,11 +39,25 @@ KRX  = os.path.join(BASE_DIR, "data", "raw", "krx.db")
 WISE = "https://navercomp.wisereport.co.kr"
 # cF3002/cF4002 재무 기준: 주재무제표(연결 우선, 없으면 별도). DQ-5 참조
 FIN_GUBUN = "MAIN"
+# 커버 종목의 재무 화면 요청 (ep, pkey, 파라미터). pkey 가 원장 `ws_raw` 키의 구분자다.
+#   Y    — cF3002 연간 손익(+ DATAQ1~6 분기 칸 동봉, 단 직전 4분기 칸 DATAQ3 은 797종목 전부 없다)
+#   Y    — cF4002 재무비율
+#   Q:IS — cF3002 분기 손익: 실적 5분기 + 추정 1분기, 기간별 연결/별도 이름표 (플랜 2026-09-30 T-Q2)
+#   Y:BS — cF3002 연간 재무상태: 자산총계·*CAPEX (FCF/자산 원천, 결정 D-Q2)
+#   Y:CF — cF3002 연간 현금흐름: 영업활동으로인한현금흐름
+# 09-30 실측: rpt 0 손익 244계정 · 1 재무상태 251 · 2 현금흐름 312, frq=1·frqTyp=1 이 분기(FRQ=분기).
+FIN_REQUESTS: tuple[tuple[str, str, dict[str, str]], ...] = (
+    ("cF3002", "Y", {"frq": "0", "rpt": "0", "frqTyp": "0"}),
+    ("cF4002", "Y", {"frq": "0", "rpt": "5", "frqTyp": "0"}),
+    ("cF3002", "Q:IS", {"frq": "1", "rpt": "0", "frqTyp": "1"}),
+    ("cF3002", "Y:BS", {"frq": "0", "rpt": "1", "frqTyp": "0"}),
+    ("cF3002", "Y:CF", {"frq": "0", "rpt": "2", "frqTyp": "0"}),
+)
 UA   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 WORKERS = 10
 JITTER  = (0.05, 0.25)
 YYMMS   = 3          # 대상연도: CK=1(당해) 포함 최근 3개 — 2026E·2027E·2028E
-REQ_COVERED = 15     # 커버 종목의 일일 요청 수: 목록 1 + cF5001·cF5002 ×3 + 대체 축 8. ledger_health 항등식이 읽는다
+REQ_COVERED = 18     # 커버 종목의 일일 요청 수: 목록 1 + cF5001·cF5002 ×3 + 대체 축 8 + 재무 추가 3(FIN_REQUESTS). ledger_health 항등식이 읽는다
 REQ_NONE    = 4      # 무커버 종목: 목록 1 + cF5001 ×3 — 3개년을 다 본 뒤에만 none (검수 D H1)
 
 DDL = """
@@ -322,17 +336,16 @@ def main() -> None:
             # 온다. IFRSL(연결 고정)로 부르면 별도만 내는 회사(2026-09-26 실측 스테이지 808 중
             # 84, 예 샘씨엔에스 252990)의 값이 전부 NULL 로 와서 조용히 결측이 된다(DQ-5). 기준은 YYMM
             # 라벨의 "(IFRS연결)/(IFRS별도)" 로 stage `fs_basis` 에 그대로 남는다.
-            for ep, extra in (("cF3002", {"frq": "0", "rpt": "0", "frqTyp": "0"}),
-                              ("cF4002", {"frq": "0", "rpt": "5", "frqTyp": "0"})):
+            for ep, pk, extra in FIN_REQUESTS:
                 q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": FIN_GUBUN, "cn": "",
                                             "encparam": encparam(), **extra})
-                _, v, body, nb, ms = fetch(cmp_cd, ep, "Y", f"{WISE}/company/{ep}.aspx?{q}")
+                _, v, body, nb, ms = fetch(cmp_cd, ep, pk, f"{WISE}/company/{ep}.aspx?{q}")
                 if v == "ok" and body[:1] != b"{":
                     encparam(refresh=True)          # 토큰 만료 의심 — 1회 갱신 후 재시도
                     q = urllib.parse.urlencode({"cmp_cd": cmp_cd, "finGubun": FIN_GUBUN, "cn": "",
                                                 "encparam": encparam(), **extra})
-                    _, v, body, nb, ms = fetch(cmp_cd, ep, "Y", f"{WISE}/company/{ep}.aspx?{q}")
-                out.append((ep, "Y", v if body[:1] == b"{" or v != "ok" else "notjson",
+                    _, v, body, nb, ms = fetch(cmp_cd, ep, pk, f"{WISE}/company/{ep}.aspx?{q}")
+                out.append((ep, pk, v if body[:1] == b"{" or v != "ok" else "notjson",
                             body, nb, ms))
         return cmp_cd, covered, out
 

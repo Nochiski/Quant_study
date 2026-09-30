@@ -215,7 +215,7 @@ def _wise(tmp_path, *, cov=804, none=1759, n_req=None, raw_rows=None, raw_stocks
 
     n_req 기본값은 항등식대로. `call_log=False` 는 호출 원장이 없던 옛 판(폴백 경로) 재현용.
     """
-    n_req = n_req if n_req is not None else cov * 15 + none * 4
+    n_req = n_req if n_req is not None else cov * lh.REQ_COVERED + none * lh.REQ_NONE
     raw_rows = n_req if raw_rows is None else raw_rows
     raw_stocks = cov + none if raw_stocks is None else raw_stocks
     run_at, checked_at, fetched_date = _WISE_SNAPSHOT[snapshot]
@@ -243,9 +243,9 @@ def test_wise_request_identity_counts_four_requests_per_uncovered_stock(tmp_path
     # 검수 D H1 후속: 무커버 판정이 3개년 cF5001 을 다 본 뒤에만 나므로 무커버 종목은 4콜(목록 1 + cF5001 3)이다.
     rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path)))
     ident = next(c for c in rep.checks if c.name == "wise.req_identity")
-    assert ident.status is lh.Status.PASS and ident.value["expected"] == 804 * 15 + 1759 * 4
+    assert ident.status is lh.Status.PASS and ident.value["expected"] == 804 * lh.REQ_COVERED + 1759 * lh.REQ_NONE
     sub = tmp_path / "b"; sub.mkdir()
-    rep2 = lh.run(D, _paths(sub, wise=_wise(sub, n_req=804 * 15 + 1759 * 2)))
+    rep2 = lh.run(D, _paths(sub, wise=_wise(sub, n_req=804 * lh.REQ_COVERED + 1759 * 2)))
     assert next(c for c in rep2.checks if c.name == "wise.req_identity").status is lh.Status.FAIL
 
 
@@ -277,10 +277,10 @@ def test_wise_identity_falls_back_to_coverage_without_call_log(tmp_path):
 
 def test_wise_raw_expectation_derives_from_coverage_not_a_fixed_band(tmp_path):
     # 09-11 실측: 규모구분 갱신으로 유니버스 2,563→2,610, 무커버 4콜 → rows 19,416. 옛 절대 밴드(15,500~15,700 ·
-    # 2,560~2,570)는 오탐. 기대치 = covered×15 + none×4 · stocks = covered+none.
+    # 2,560~2,570)는 오탐. 기대치 = covered×REQ_COVERED + none×REQ_NONE · stocks = covered+none.
     rep = lh.run(D, _paths(tmp_path, wise=_wise(tmp_path, cov=816, none=1794)))
     raw = next(c for c in rep.checks if c.name == "wise.raw")
-    assert raw.status is lh.Status.PASS and raw.value == {"rows": 816 * 15 + 1794 * 4, "stocks": 2610}
+    assert raw.status is lh.Status.PASS and raw.value == {"rows": 816 * lh.REQ_COVERED + 1794 * lh.REQ_NONE, "stocks": 2610}
     sub = tmp_path / "b"; sub.mkdir()
     rep2 = lh.run(D, _paths(sub, wise=_wise(sub, cov=816, none=1794, raw_rows=19000)))
     assert next(c for c in rep2.checks if c.name == "wise.raw").status is lh.Status.FAIL

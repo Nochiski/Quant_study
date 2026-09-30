@@ -187,6 +187,18 @@ def test_fin_wise_parser_keeps_one_row_per_data_entry_with_period_labels() -> No
     assert res.rows[1]["seq"] == "1" and res.rows[1]["p_accode"] == "200000"
 
 
+def test_fin_wise_parser_reads_only_the_annual_income_request() -> None:
+    """같은 cF3002 로 분기 손익·연간 재무상태·현금흐름(pkey Q:IS·Y:BS·Y:CF, 플랜 2026-09-30 T-Q2)이 들어와도
+    stg_fin_wise 는 기존 pkey='Y' 만 읽는다 — 섞이면 (ticker, fetched_date, ep, seq) 키가 겹친다."""
+    body = _fin_blob([_fin_row("200000", "매출액(수익)")])
+    res = parsers.parse_fin_wise([_blob("005930", "cF3002", "Y", body),
+                                  _blob("005930", "cF3002", "Q:IS", body),
+                                  _blob("005930", "cF3002", "Y:BS", body),
+                                  _blob("005930", "cF3002", "Y:CF", body)])
+    assert res.metrics["n_rows_emitted"] == 1 and res.metrics["n_skipped_pkey"] == 3
+    assert res.metrics["n_blobs"] == {"cF3002": 1}
+
+
 def by_ticker(res: parsers.ParseResult) -> dict[str, dict[str, str | None]]:
     return {str(r["cmp_cd"]): r for r in res.rows}
 

@@ -51,8 +51,19 @@ def test_probe_fetch_failure_is_treated_as_covered():
 
 
 def test_request_budget_per_stock():
-    # ledger_health.wise.req_identity 의 상수와 맞물린다: 커버 15 · 무커버 4(목록 1 + cF5001 3)
-    assert bw.REQ_COVERED == 15 and bw.REQ_NONE == 4
+    # ledger_health.wise.req_identity 의 상수와 맞물린다: 커버 18(종전 15 + 재무 추가 3) · 무커버 4(목록 1 + cF5001 3)
+    assert bw.REQ_COVERED == 15 + len(bw.FIN_REQUESTS) - 2 == 18 and bw.REQ_NONE == 4
+
+
+def test_fin_requests_add_quarterly_income_and_annual_bs_cf():
+    """플랜 2026-09-30 T-Q2 — 분기 손익·연간 재무상태·현금흐름을 pkey 로 가른다. 기존 두 요청(pkey 'Y')은 그대로."""
+    got = {(ep, pk): extra for ep, pk, extra in bw.FIN_REQUESTS}
+    assert got[("cF3002", "Y")] == {"frq": "0", "rpt": "0", "frqTyp": "0"}
+    assert got[("cF4002", "Y")] == {"frq": "0", "rpt": "5", "frqTyp": "0"}
+    assert got[("cF3002", "Q:IS")] == {"frq": "1", "rpt": "0", "frqTyp": "1"}
+    assert got[("cF3002", "Y:BS")] == {"frq": "0", "rpt": "1", "frqTyp": "0"}
+    assert got[("cF3002", "Y:CF")] == {"frq": "0", "rpt": "2", "frqTyp": "0"}
+    assert len(got) == len(bw.FIN_REQUESTS) == 5          # (ep, pkey) 유일 = ws_raw 키가 안 겹친다
 
 
 def test_fin_screens_request_main_basis_not_consolidated_only():

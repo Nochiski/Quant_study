@@ -669,6 +669,8 @@ export type BacktestRunState = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -6631,6 +6633,8 @@ export type WalkForwardWindowResult = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;

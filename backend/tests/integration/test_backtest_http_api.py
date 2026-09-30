@@ -149,7 +149,7 @@ def _run_body(client: TestClient, core: str = "rust") -> dict[str, Any]:
         "strategy": spec,
         "core": core,
         "environment": _environment(),
-        "benchmark_security_id": "005930",
+        "benchmark_security_id": "sec-005930-1",
         "metric_windows": [
             {
                 "scope": "out_of_sample",
@@ -224,7 +224,7 @@ def test_backtest_lifecycle_exposes_progress_result_manifest_and_raw_artifacts(
     assert result["manifest"]["engine_core"] == "rust"
     assert len(result["manifest"]["run_fingerprint"]) == 64
     assert result["manifest"]["run_spec"]["strategy"] == _run_body(client)["strategy"]
-    assert result["manifest"]["run_spec"]["benchmark_security_id"] == "005930"
+    assert result["manifest"]["run_spec"]["benchmark_security_id"] == "sec-005930-1"
     assert result["manifest"]["metric_registry_version"] == "metric-registry-v5"
     assert {item["code"] for item in result["manifest"]["warnings"]} == {
         "corporate_action_feed_empty",
@@ -660,6 +660,57 @@ def test_equity_wipeout_ends_the_run_with_its_own_failure_code(
 
 
 @pytest.mark.parametrize(
+    ("start", "end", "status", "error_code"),
+    [
+        # 템플릿은 리밸런싱을 적지 않아 월별이다 — 달의 첫 세션에 고른다. 01-08~01-12 에는 달의 첫
+        # 세션(01-02)이 없어 한 번도 사지 않고, 12-26 부터면 01-02 에 산다.
+        ("2024-01-08", "2024-01-12", "failed", "backtest.run.no_positions"),
+        ("2023-12-26", "2024-01-12", "completed", None),
+    ],
+)
+def test_run_that_never_selects_a_position_ends_with_its_own_code(
+    start: str, end: str, status: str, error_code: str | None
+) -> None:
+    """한 번도 사지 않은 실행은 엔진 능력 거절(`backtest.run.invalid`)이 아니라 전용 코드로
+    끝난다(#360)."""
+    client = TestClient(build_http_app())
+    body = {
+        "strategy": client.get("/api/v1/strategies/template").json(),
+        "core": "python",
+        "environment": _environment(start=start, end=end),
+    }
+
+    accepted = client.post("/api/v1/backtests", json=body)
+
+    assert accepted.status_code == 202, accepted.text
+    state = _wait(client, accepted.json()["run"]["run_id"])
+    assert (state["status"], state["error_code"]) == (status, error_code), state
+    if error_code is not None:
+        assert "frames=0" in state["error"] and "rebalance=monthly" in state["error"]
+
+
+def test_unknown_benchmark_ends_the_run_before_the_tape_stage(tmp_path: Path) -> None:
+    """벤치마크 오타는 tape 계산을 다 쓴 뒤 서버 오류로 끝나지 않는다 — tape 앞 한 종목 조회에서
+    전용 코드로 멈춘다(#361). 접수(202)는 여전히 데이터를 읽지 않는다(#158)."""
+    run_id = "run-unknown-benchmark"
+    container = build_container(artifact_root=tmp_path / "unused")
+    backtests, barrier = _backtests_with_raw_load_barrier(container, tmp_path, run_id)
+    client = TestClient(_app_with_backtests(container, backtests))
+
+    body = {**_run_body(client, "python"), "benchmark_security_id": "KOSPI"}
+    try:
+        accepted = client.post("/api/v1/backtests", json=body)
+        assert accepted.status_code == 202, accepted.text
+        state = _wait(client, run_id)
+    finally:
+        barrier.release.set()
+
+    assert (state["status"], state["error_code"]) == ("failed", "backtest.run.benchmark_unknown")
+    assert "KOSPI" in state["error"]
+    assert not barrier.entered.is_set()  # tape 단계의 원시 관측 로딩에 들어가지 않았다
+
+
+@pytest.mark.parametrize(
     "failure",
     [RuntimeError("can't start new thread"), MemoryError("cannot allocate thread stack")],
 )
@@ -759,10 +810,12 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
     )
     from strategy_workbench.application.backtest_run._service import (
         InvalidBacktestRunError,
+        NoPositionsError,
         _failure_code,
     )
     from strategy_workbench.application.backtest_run.facade.ports import (
         BacktestDataNotReadyError,
+        BacktestDataUnavailableError,
         EquityWipedOutError,
     )
     from strategy_workbench.application.portfolio_design.facade.design import (
@@ -779,6 +832,8 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         _failure_code(InvalidBacktestRunError("x")),
         _failure_code(EquityWipedOutError("x")),
         _failure_code(BacktestDataNotReadyError("x")),
+        _failure_code(NoPositionsError("x")),
+        _failure_code(BacktestDataUnavailableError("x")),
         _failure_code(RuntimeError("x")),
     }
     # `interrupted` 는 예외가 아니라 재시작 때 서비스가 닫으며 붙인다(검증 랩 spec D3).
@@ -798,6 +853,8 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         "backtest.run.internal",
         "backtest.run.equity_wiped_out",
         "backtest.run.data_not_ready",
+        "backtest.run.no_positions",
+        "backtest.run.benchmark_unknown",
         "backtest.run.interrupted",
     }
 

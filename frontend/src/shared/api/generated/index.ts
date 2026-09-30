@@ -217,6 +217,7 @@ export type {
   DeleteStrategyDraftErrors,
   DeleteStrategyDraftResponse,
   DeleteStrategyDraftResponses,
+  DiagnosticAnchor,
   DiagnosticKind,
   DiagnosticSeverity,
   DiffEntry,

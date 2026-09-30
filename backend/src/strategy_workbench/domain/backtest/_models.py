@@ -113,19 +113,22 @@ class ImpactModel(StrEnum):
     SQRT = "sqrt"
 
 
-# 실행 설정 수치 필드의 범위·단위·설명 키. 1.1 까지는 전략 제약 카탈로그의 `/execution/*` 행이
+# 실행 설정 칸의 설명 키 네임스페이스(`run_environment.field.<칸>`). 스키마의 칸 키와 적용 조건 행이
+# 같은 값을 쓴다 — 전략 필드(`strategy.field.*`)와 섞지 않고, 진단 코드(`run_environment.required`
+# 등)와도 가른다(#357 C-P3-8).
+RUN_ENVIRONMENT_KEY_NAMESPACE = "run_environment.field"
+
+# 실행 설정 수치 필드의 범위·단위. 1.1 까지는 전략 제약 카탈로그의 `/execution/*` 행이
 # SoT 였고 여기서 필드 이름으로 다시 걸어 썼지만, 1.2 가 `execution` 섹션을 지우면서 그 행들이
 # 전략 문서 포인터를 잃었다. 그래서 owner 를 실행 설정이 있는 이 노드로 옮긴다(P2-03 결정 항목).
 # 포인터는 실행 설정 문서 기준(`/fee_bps` …)이고, `__post_init__` 검증과 런타임 스키마의
 # `minimum`/`maximum` 이 같은 행을 읽는다 — 수치를 두 곳에 적지 않는다.
 #
-# `code` 는 `strategy.*` 진단 레지스트리 밖의 `run_environment.*` 어휘다. 실행 설정 값은 전략
-# 문서 검증이 아니라 요청 검증에서 걸리므로 validator 코드 소유 규칙(`SEMANTIC_ONLY_CODES`)과
-# 섞이면 안 된다.
+# 범위 위반은 `__post_init__` 이 칸 이름을 실은 `InvalidRunFieldError` 로 거절한다(요청 검증 422
+# `backtest.run.field_invalid`). 진단 코드(`code`)는 전략 문서 validator 의 것이라 행에 없다.
 RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
     "participation_rate": ScalarConstraint(
         pointer="/participation_rate",
-        code="run_environment.participation",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.RATIO,
         display_unit="%",
@@ -133,54 +136,45 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         exclusive_minimum=True,
         maximum=1.0,
         example=0.1,
-        description_key="run_environment.contract.participation_rate",
         message="참여율은 0보다 크고 1 이하여야 합니다.",
     ),
     "fee_bps": ScalarConstraint(
         pointer="/fee_bps",
-        code="run_environment.cost",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
         example=15.0,
-        description_key="run_environment.contract.fee_bps",
         message="수수료는 0 이상의 숫자여야 합니다.",
     ),
     "slippage_bps": ScalarConstraint(
         pointer="/slippage_bps",
-        code="run_environment.cost",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
         example=10.0,
-        description_key="run_environment.contract.slippage_bps",
         message="슬리피지는 0 이상의 숫자여야 합니다.",
     ),
     # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다. 상한 10 은 그
     # 범위를 넉넉히 덮고 오타 입력(100·1000)을 막는다.
     "impact_coefficient": ScalarConstraint(
         pointer="/impact_coefficient",
-        code="run_environment.cost",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.RATIO,
         minimum=0.0,
         maximum=10.0,
         example=1.0,
-        description_key="run_environment.contract.impact_coefficient",
         message="가격 충격 계수는 0 이상 10 이하의 숫자여야 합니다.",
     ),
     # `sell_tax` 가 `custom` 일 때만 값이 있다(없으면 `None`). 범위 검사는 값이 있을 때만 한다.
     "sell_tax_bps": ScalarConstraint(
         pointer="/sell_tax_bps",
-        code="run_environment.cost",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
         example=20.0,
-        description_key="run_environment.contract.sell_tax_bps",
         message="매도 거래세는 0 이상의 숫자여야 합니다.",
     ),
 }
@@ -194,7 +188,7 @@ RUN_ENVIRONMENT_APPLICABILITY: dict[str, FieldApplicability] = {
     name: FieldApplicability(
         pointer=f"/{name}",
         conditions=(ApplicabilityCondition(f"/{mode_field}", equals=mode.value),),
-        description_key=RUN_ENVIRONMENT_CONSTRAINTS[name].description_key,
+        description_key=f"{RUN_ENVIRONMENT_KEY_NAMESPACE}.{name}",
     )
     for name, (mode_field, mode) in (
         ("slippage_bps", ("impact_model", ImpactModel.FIXED_BPS)),

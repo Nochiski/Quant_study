@@ -152,10 +152,8 @@ def test_constraint_rows_point_at_the_run_environment_document() -> None:
         "impact_coefficient": "/impact_coefficient",
         "sell_tax_bps": "/sell_tax_bps",
     }
-    # 진단 코드는 `strategy.*` validator 레지스트리 밖이다.
-    assert all(
-        row.code.startswith("run_environment.") for row in RUN_ENVIRONMENT_CONSTRAINTS.values()
-    )
+    # 진단 코드는 전략 문서 validator 의 것이다. 실행 설정 행은 코드를 내지 않는다(#357 C-P3-8).
+    assert {row.code for row in RUN_ENVIRONMENT_CONSTRAINTS.values()} == {""}
     assert not [row for row in scalar_constraint_index() if row.startswith("/execution/")]
 
 
@@ -274,7 +272,7 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
 def _read_when(mode_pointer: str, mode: str, name: str) -> dict[str, object]:
     return {
         "all_of": [{"pointer": mode_pointer, "equals": mode, "not_null": False}],
-        "description_key": f"run_environment.contract.{name}",
+        "description_key": f"run_environment.field.{name}",
         "owned_by_error": None,
     }
 

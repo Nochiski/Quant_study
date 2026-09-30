@@ -2191,6 +2191,32 @@ describe("FactorGraph read-only projection (P4-07)", () => {
     15_000,
   );
 
+  // #357 C-P3-16: 유니버스가 비어 실행 설정 전체가 무효여도 실행 계획 설명은 고른 결측 정책을 싣는다.
+  it.each(["/research/strategies/new", "/research/strategies/s1/revisions/2"])(
+    "sends the chosen missing policy to the plan explanation on %s before the settings are complete",
+    async (route) => {
+      localStorage.setItem(
+        `${RUN_ENVIRONMENT_STORAGE_PREFIX}:last`,
+        JSON.stringify({
+          ...Object.fromEntries(
+            Object.entries(RUN_ENVIRONMENT).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+          universe_id: "",
+          missing: "zero",
+        }),
+      );
+      server.use(...graphHandlers());
+      mount(`${route}?view=graph`);
+
+      await waitFor(() => expect(explainedGraphs).toHaveLength(1));
+      expect(explainedGraphs[0]).toMatchObject({ missing: "zero" });
+    },
+    15_000,
+  );
+
   it("keeps graph selection in the URL, then opens the exact YAML node", async () => {
     server.use(
       ...graphHandlers(),
@@ -3637,9 +3663,10 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
   const problemRow = (message: string | RegExp) =>
     screen.findByRole("button", { name: message });
 
-  /** 키 범위를 쓰는 유일한 진단 종류 — outline의 값 범위 reveal과 구별된다. */
+  /** 키 범위를 쓰는 진단(backend 가 `anchor: key` 로 알린다) — outline의 값 범위 reveal과 구별된다. */
   const UNKNOWN_TITLE_KEY = {
     code: "structure.unknown_key",
+    anchor: "key",
     kind: "structural",
     severity: "error",
     pointer: "/title",

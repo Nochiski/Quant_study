@@ -94,6 +94,9 @@ def test_unknown_key_points_at_the_key_itself() -> None:
     assert diagnostic["pointer"] == "/risk/max_name_wieght"
     start, end = diagnostic["range"]["start"], diagnostic["range"]["end"]
     assert source[start["offset"] : end["offset"]] == "max_name_wieght"
+    # 편집기도 자기 parse 지도에서 키를 짚는다. 어느 코드가 키를 가리키는지는 wire 가
+    # 알린다(#357 C-P3-13).
+    assert diagnostic["anchor"] == "key"
 
 
 def test_syntax_error_returns_a_positioned_syntax_diagnostic() -> None:

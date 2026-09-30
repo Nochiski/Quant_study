@@ -32,6 +32,7 @@ from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
     _fetchall,
     _parquet_table,
 )
+from strategy_workbench.adapters.outbound.equity_duckdb._source import CATALOG_REBUILD
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_SPECS,
     SOURCE_SPECS,
@@ -1311,12 +1312,19 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
         assert "price.close" in served and "consensus.target_price" in served, code
         assert not served & macro_fields, code
         assert _raw(adapter, fields=("price.close",)).ok
+        # compile 진단이 싣는 필드별 사유(#316). 조치 문장의 owner 는 `CATALOG_REBUILD` 하나다
+        unavailable = adapter.unavailable_factor_fields()
+        assert all(
+            code in unavailable[field_id] and CATALOG_REBUILD in unavailable[field_id]
+            for field_id in macro_fields
+        ), code
         for field_id in ("credit.margin_balance", "price.adj_close"):
             denied = _raw(adapter, fields=(field_id,))
             assert denied.status is DataLoadStatus.INVALID_QUERY
             assert denied.detail is not None and code in denied.detail, (code, field_id)
-            # 조치가 사유에 실린다 — 원천은 부팅 때 정해지므로 재시작까지 적는다
-            assert "ledger_sync catalog" in denied.detail and "다시 띄워" in denied.detail
+            # 조치가 사유에 실린다 — 원천은 부팅 때 정해지므로 재시작까지 적는다. compile 진단과
+            # 같은 문장이다
+            assert unavailable[field_id] in denied.detail
             # 사유는 질의 거절로 사용자에게 간다(#163)
             assert str(root.resolve()) not in denied.detail
         assert any(  # 부팅 로그에도 남는다
@@ -1328,7 +1336,7 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
         # 조치는 사유 문장이 말한다
         with pytest.raises(BacktestDataNotReadyError, match=code) as stopped:
             adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("005930:1",), None))
-        assert "ledger_sync catalog" in str(stopped.value) and "다시 띄워" in str(stopped.value)
+        assert CATALOG_REBUILD in str(stopped.value)  # compile 진단과 같은 조치 owner(#316)
         assert str(root.resolve()) not in str(stopped.value)
     # 원장 판은 meta 가 아니라 MANIFEST 에서 온다
     assert adapter.snapshot().snapshot_id.startswith(

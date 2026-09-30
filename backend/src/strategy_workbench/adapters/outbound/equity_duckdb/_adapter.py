@@ -70,7 +70,7 @@ import json
 import logging
 import re
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
@@ -1076,6 +1076,19 @@ class EquityDuckdbAdapter:
         """
         return self.resolve_factor_fields(tuple(self._fields)).fields
 
+    def unavailable_factor_fields(self) -> Mapping[str, str]:
+        """선언했지만 주지 않는 필드 → 사유(#316). compile 진단과 질의 거절이 같은 표를 읽는다.
+
+        부팅 검사가 원천을 뺀 필드는 그 원천의 사유(`catalog_*`, 조치 `CATALOG_REBUILD`)이고, 원장에
+        없는 필드는 `UNSUPPORTED_FIELDS` 의 사유다.
+        """
+        reasons = {
+            spec.field_id: reason
+            for spec in FIELD_SPECS
+            if (reason := self._source_reason[spec.source]) is not None
+        }
+        return reasons | UNSUPPORTED_FIELDS
+
     def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         """`RESEARCH_UNIVERSE_ID` 위의 raw 패널을 팩터 관측으로. status 가 없어 실패는 예외."""
         unknown = self._unknown_fields(query.required_field_ids)
@@ -1559,13 +1572,8 @@ class EquityDuckdbAdapter:
         unknown = sorted(set(field_ids) - set(self._fields))
         if not unknown:
             return None
-        notes = []
-        for field_id in unknown:
-            if field_id in UNSUPPORTED_FIELDS:
-                notes.append(f"{field_id}: {UNSUPPORTED_FIELDS[field_id]}")
-            elif field_id in FIELD_BY_ID:
-                reason = self._source_reason[FIELD_BY_ID[field_id].source]
-                notes.append(f"{field_id}: {reason}")
+        reasons = self.unavailable_factor_fields()
+        notes = [f"{field_id}: {reasons[field_id]}" for field_id in unknown if field_id in reasons]
         detail = (
             f"unavailable field_id — unknown_fields={unknown} "
             f"supported={sorted(self._fields)} (mock 대체 없음)."

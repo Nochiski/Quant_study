@@ -62,3 +62,30 @@ GPT 주장 중 코드 인용은 Claude 가 직접 열어 확인했다(아래 "�
   **정정이 잦은 회사가 체계적으로 다르게 처리되는 편향**. 정정으로 재무 수치가 실제로 바뀐 비율은 미측정.
 - 처방 후보: 원본 공시 접수일은 공시 목록에 있다. 수치가 안 바뀐 정정이면 원본 날짜로 당길 수 있으나, 바뀌었는지 알려면 원본 값이 필요 →
   문서 ZIP 재무표(4C) 소규모 복원 실험이 바로 이 용도. 2주 순서 2번을 "look-ahead 수정" → "정정일 편향 측정·4C 실험"으로 바꾼다.
+
+## 후속 실측 (09-30 17:30 KST)
+
+**③ 정정일 편향 — 재무표를 건드린 정정인가** (`logs/probe_corr{2,3}.py`, `disclosure_version.corr_has_fin_item` = 정정 항목 글에
+재무제표·재무상태표·손익계산서·현금흐름표·자본변동표·요약재무 키워드, `rules_s11.FIN_ITEM_KEYWORDS`)
+
+| 늦게 찍힌 4,657행 | 행 | 원본 연결 | 원본 날짜로 당기면(중앙) |
+|---|---|---|---|
+| 정정 · 재무표 **안 건드림** | 2,581 (55%) | 2,581 | 125일 앞당김 |
+| 정정 · 재무표 건드림(상한 — 주석만 고친 것 포함) | 1,758 (38%) | 1,758 | 250일 |
+| 정정 · 정정 첫 장 미해석 | 264 | 264 | 82일 |
+| 원본 지연 제출 | 54 | — | — |
+
+사업보고서만: 안 건드림 1,845 · 건드림 1,236 · 미해석 27. "안 건드림" 2,581건의 흔한 항목 = XI 투자자 보호 317 · 임원·직원 ·
+이사회 · 주주 · 감사의견. 키워드가 놓쳤을 수 있는 신호: 항목에 '재무에 관한 사항' 166 · 사유에 재작성·회계처리 30(예: 보험 자회사
+지급여력비율 — 재무표 아님). → **보수 규칙**: `corr_has_fin_item = false` 이고 항목에 '재무에 관한 사항' 이 없으면 원본 공시일로 당긴다
+(재무표 수치는 원본과 같으므로 시점 안전). 나머지는 정정일 유지 → 4C 실험 대상.
+
+**④ 모델 전이 의존 폐포** (`scratchpad/dep_closure.py` — fi `TABLE_SOURCES` + equity `inputs`·`input_columns` + stage `available.table`)
+- equity 31 중 **18 안 · 13 밖**(consensus_daily · dataset_profile · factor_readiness · holder_daily · index_daily · opinion_broker_daily ·
+  opinion_daily · ownership_snapshot · sample_table · shares_outstanding · short_daily · treasury_stock · universe_policy).
+- stage 67 중 **35 안 · 32 밖**(공시 이벤트 10 · 대주주 3 · v3 사본 4 · 호출 로그 4 · 공매도·대차 5 · 문서 본문/로그 2 등).
+- 선언 누락 검증: equity SQL 이 읽는 표는 전부 `inputs` 에 선언돼 있다. 규칙·게이트 코드의 FROM/JOIN 도 같은 모듈의 다른 표 몫
+  (예: rules_s15 의 대주주 참조는 holder_daily·ownership_snapshot 게이트, audit_opinion 은 stg_audit·corp 만).
+- **아침 stage 시간 3,594s 중 폐포 안 3,298s(92%) · 밖 296s(8%)** — 폐포 밖을 떼는 것은 실패 격리 효과가 주이고 속도는 5분뿐.
+- **fi_fin_summary 가 fin_std 를 안 읽으면 폐포에서 `fin_std`·`stg_fin` 이 빠진다** — stg_fin 1,535s(26분)가 아침 경로에서 사라진다.
+  WISE 분기(+연간 재무상태·현금흐름, 플랜 D-Q2) 전환이 곧 최대 병목 제거다.

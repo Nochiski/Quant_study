@@ -321,11 +321,8 @@ class BacktestRunService:
             self._emit(record, RunStatus.QUEUED, 0.0, "queued", message)
             # 저장이 실패하면 접수하지 않는다 — 기록 없는 run 이 돌면 재시작 뒤 흔적이 없다.
             self._repository.add(
-                BacktestRunSummary(
-                    record.state,
-                    provenance,
-                    RunKind.SINGLE if owner is None else RunKind.EXPERIMENT,
-                ),
+                record.state,
+                provenance,
                 request,
                 lineage_id=admission.lineage_id,
                 trial_key=key,

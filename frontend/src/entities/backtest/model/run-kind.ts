@@ -7,7 +7,8 @@ import { t, type MessageKey } from "../../../shared/config";
  */
 const RUN_KIND_LABELS: Record<RunKind, MessageKey> = {
   single: "backtest.runKind.single",
-  experiment: "backtest.runKind.experiment",
+  experiment_trial: "backtest.runKind.experiment_trial",
+  walk_forward_validation: "backtest.runKind.walk_forward_validation",
 };
 
 /** 백테스트 이력 종류 필터의 순서. */

@@ -10,6 +10,7 @@ import sqlite3
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -77,7 +78,18 @@ def _summary(run_id: str, *, strategy_id: str | None = None) -> BacktestRunSumma
             revision=None if strategy_id is None else 1,
         ),
         kind=RunKind.SINGLE,
+        experiment_id=None,
+        experiment_paused=False,
     )
+
+
+def _add(
+    repository: SQLiteBacktestRunRepository,
+    summary: BacktestRunSummary,
+    request: BacktestRunSpec,
+    **ledger: Any,
+) -> None:
+    repository.add(summary.run, summary.strategy_provenance, request, **ledger)
 
 
 _REQUESTS = {
@@ -102,7 +114,7 @@ _REQUESTS = {
 @pytest.mark.parametrize("kind", sorted(_REQUESTS))
 def test_the_accepted_request_survives_reopening_the_file(kind: str, tmp_path: Path) -> None:
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(_summary("run-1"), _REQUESTS[kind], **_NO_LINEAGE)
+    _add(SQLiteBacktestRunRepository(path), _summary("run-1"), _REQUESTS[kind], **_NO_LINEAGE)
 
     assert SQLiteBacktestRunRepository(path).request("run-1") == _REQUESTS[kind]
 
@@ -110,8 +122,11 @@ def test_the_accepted_request_survives_reopening_the_file(kind: str, tmp_path: P
 def test_parameter_values_keep_their_types_through_the_file(tmp_path: Path) -> None:
     """`20 == 20.0 == True` 라 요청 `==` 로는 타입이 바뀐 것을 못 본다. 값마다 타입을 대조한다."""
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(
-        _summary("run-1"), _REQUESTS["saved_revision"], **_NO_LINEAGE
+    _add(
+        SQLiteBacktestRunRepository(path),
+        _summary("run-1"),
+        _REQUESTS["saved_revision"],
+        **_NO_LINEAGE,
     )
 
     restored = SQLiteBacktestRunRepository(path).request("run-1").parameter_values
@@ -128,8 +143,11 @@ def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(
     path = tmp_path / "research.sqlite3"
     repository = SQLiteBacktestRunRepository(path)
     for run_id, strategy_id in (("run-1", "s-1"), ("run-2", None), ("run-3", "s-1")):
-        repository.add(
-            _summary(run_id, strategy_id=strategy_id), _REQUESTS["saved_revision"], **_NO_LINEAGE
+        _add(
+            repository,
+            _summary(run_id, strategy_id=strategy_id),
+            _REQUESTS["saved_revision"],
+            **_NO_LINEAGE,
         )
     completed = replace(
         _summary("run-3").run,
@@ -162,31 +180,50 @@ def test_states_list_newest_first_filter_by_strategy_and_report_unfinished(
     assert reopened.states([]) == {}
 
 
-def test_a_run_an_experiment_attempt_points_at_is_an_experiment_trial(tmp_path: Path) -> None:
-    # 실행 종류(검증 랩 V5-03)는 같은 파일의 실험 attempt 가 run 을 가리키는지로 정한다.
+def test_the_kind_and_owning_experiment_come_from_the_experiment_rows(tmp_path: Path) -> None:
+    # 실행 종류·쓰는 실험(검증 랩 V5-03, #382)은 같은 파일의 실험 attempt·워크포워드 창 선택이
+    # run 을 가리키는지로 정한다. 일시정지는 그 실험의 조작 행에서 읽는다.
     path = tmp_path / "research.sqlite3"
     repository = SQLiteBacktestRunRepository(path)
-    for run_id in ("run-1", "run-2"):
-        repository.add(_summary(run_id), _REQUESTS["saved_revision"], **_NO_LINEAGE)
+    for run_id in ("run-1", "run-2", "run-3"):
+        _add(repository, _summary(run_id), _REQUESTS["saved_revision"], **_NO_LINEAGE)
     with sqlite3.connect(path) as connection:
-        connection.execute(
-            "INSERT INTO experiments (experiment_id, created_at, design_json) VALUES (?, ?, ?)",
-            ("e-1", _AT.isoformat(), "{}"),
-        )
+        for experiment_id in ("e-1", "e-2"):
+            connection.execute(
+                "INSERT INTO experiments (experiment_id, created_at, design_json) VALUES (?, ?, ?)",
+                (experiment_id, _AT.isoformat(), "{}"),
+            )
         connection.execute(
             "INSERT INTO experiment_attempts "
             "(experiment_order, trial_index, attempt, created_at, run_id) VALUES (1, 0, 1, ?, ?)",
             (_AT.isoformat(), "run-2"),
         )
+        connection.execute(
+            "INSERT INTO experiment_window_picks (experiment_order, window_index, attempt, "
+            "trial_index, train_sharpe, created_at, run_id) VALUES (2, 0, 1, 0, 0.1, ?, ?)",
+            (_AT.isoformat(), "run-3"),
+        )
+        connection.execute(
+            "INSERT INTO experiment_controls (experiment_order, paused, priority) VALUES (2, 1, 1)"
+        )
 
-    assert [(item.run.run_id, item.kind) for item in repository.list(PageRequest()).items] == [
-        ("run-2", RunKind.EXPERIMENT),
-        ("run-1", RunKind.SINGLE),
+    owners = [
+        (item.run.run_id, item.kind, item.experiment_id, item.experiment_paused)
+        for item in repository.list(PageRequest()).items
     ]
-    for kind, run_ids in ((RunKind.EXPERIMENT, ["run-2"]), (RunKind.SINGLE, ["run-1"])):
+    assert owners == [
+        ("run-3", RunKind.WALK_FORWARD_VALIDATION, "e-2", True),
+        ("run-2", RunKind.EXPERIMENT_TRIAL, "e-1", False),
+        ("run-1", RunKind.SINGLE, None, False),
+    ]
+    for kind, run_id in (
+        (RunKind.SINGLE, "run-1"),
+        (RunKind.EXPERIMENT_TRIAL, "run-2"),
+        (RunKind.WALK_FORWARD_VALIDATION, "run-3"),
+    ):
         page = repository.list(PageRequest(), kind=kind)
-        assert ([item.run.run_id for item in page.items], page.total) == (run_ids, 1)
-    assert repository.get("run-2").kind is RunKind.EXPERIMENT
+        assert ([item.run.run_id for item in page.items], page.total) == ([run_id], 1)
+    assert repository.get("run-3").experiment_id == "e-2"
 
 
 def test_an_unknown_run_is_not_found(tmp_path: Path) -> None:
@@ -202,8 +239,11 @@ def test_an_unknown_run_is_not_found(tmp_path: Path) -> None:
 
 def test_a_stored_failure_code_outside_the_vocabulary_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "research.sqlite3"
-    SQLiteBacktestRunRepository(path).add(
-        _summary("run-1"), _REQUESTS["saved_revision"], **_NO_LINEAGE
+    _add(
+        SQLiteBacktestRunRepository(path),
+        _summary("run-1"),
+        _REQUESTS["saved_revision"],
+        **_NO_LINEAGE,
     )
     with sqlite3.connect(path) as connection:
         connection.execute("UPDATE backtest_runs SET error_code = 'backtest.run.gone'")

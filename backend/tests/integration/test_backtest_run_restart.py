@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
     SQLiteBacktestRunRepository,
 )
-from strategy_workbench.application.backtest_run.facade.runs import BacktestRunSummary, RunKind
 from strategy_workbench.bootstrap import _container
 from strategy_workbench.bootstrap.facade.container import (
     AssistantSettings,
@@ -155,11 +154,8 @@ def test_runs_left_unfinished_by_the_previous_process_are_closed_as_interrupted(
     }
     for run_id, status in statuses.items():
         repository.add(
-            BacktestRunSummary(
-                BacktestRunState(run_id, status, 0.5, "tape", "Compiling target tape", at, at),
-                StrategyProvenance(StrategySourceKind.SAVED_REVISION, "a" * 64, "1.2", "s-1", 1),
-                RunKind.SINGLE,
-            ),
+            BacktestRunState(run_id, status, 0.5, "tape", "Compiling target tape", at, at),
+            StrategyProvenance(StrategySourceKind.SAVED_REVISION, "a" * 64, "1.2", "s-1", 1),
             request,
             lineage_id="s-1",
             trial_key="b" * 64,

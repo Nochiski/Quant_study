@@ -1417,7 +1417,11 @@ const ko = {
     "고른 전략을 찾을 수 없습니다. 전략 목록을 새로 고친 뒤 다시 고르세요.",
   // 실행 종류(검증 랩 V5-03). 종류는 backend `RunKind` 가 정한다.
   "backtest.runKind.single": "단일 실행",
-  "backtest.runKind.experiment": "실험 시도",
+  "backtest.runKind.experiment_trial": "실험 시도",
+  "backtest.runKind.walk_forward_validation": "워크포워드 검증",
+  // 실험 run 이 쓰는 실험. 실험 화면(V5-01)이 생기기 전이라 id 만 보인다.
+  "history.backtests.experiment": "실험 {experiment}",
+  "history.backtests.experimentPaused": "실험 일시정지",
   // 실험 거절(검증 랩 V3-03). 코드 목록의 정본은 backend `domain/experiment/_errors.py` 이고 화면은 V5-01 이 붙인다.
   "backtest.error.experiment.base.unsaved":
     "실험은 저장한 전략 리비전으로만 만들 수 있습니다. 전략을 저장한 뒤 그 리비전으로 실험을 만드세요.",
@@ -3316,7 +3320,10 @@ export const messages = {
     "backtest.error.strategy.not_found":
       "The chosen strategy was not found. Refresh the strategy list and choose again.",
     "backtest.runKind.single": "Single run",
-    "backtest.runKind.experiment": "Experiment trial",
+    "backtest.runKind.experiment_trial": "Experiment trial",
+    "backtest.runKind.walk_forward_validation": "Walk-forward validation",
+    "history.backtests.experiment": "Experiment {experiment}",
+    "history.backtests.experimentPaused": "Experiment paused",
     "backtest.error.experiment.base.unsaved":
       "An experiment can only start from a saved strategy revision. Save the strategy, then create the experiment from that revision.",
     "backtest.error.experiment.base.invalid":

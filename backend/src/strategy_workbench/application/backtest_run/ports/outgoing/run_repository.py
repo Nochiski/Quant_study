@@ -27,26 +27,36 @@ class BacktestRunNotFoundError(KeyError):
 
 
 class RunKind(StrEnum):
-    """백테스트 이력의 실행 종류(검증 랩 V5-03). 실험이 쓴 run 이면 실험 시도다."""
+    """백테스트 이력의 실행 종류(검증 랩 V5-03, #382). 실험이 쓴 run 이면 그 쓰임새다."""
 
     SINGLE = "single"
-    EXPERIMENT = "experiment"
+    # 실험 trial(학습 창) 실행.
+    EXPERIMENT_TRIAL = "experiment_trial"
+    # 워크포워드 창마다 고른 칸의 검증 창 실행.
+    WALK_FORWARD_VALIDATION = "walk_forward_validation"
 
 
 @dataclass(frozen=True)
 class BacktestRunSummary:
-    """One accepted run and the strategy meaning resolved before it started."""
+    """One accepted run and the strategy meaning resolved before it started.
+
+    종류와 쓰는 실험은 저장소가 읽을 때 정한다. 사용자가 시작한 run 을 실험이 이어 쓰면(같은 입력
+    잇기) 실험 run 이다. `experiment_paused` 는 그 실험이 일시정지돼 대기 run 이 배정되지 않는다는
+    뜻이다.
+    """
 
     run: BacktestRunState
     strategy_provenance: StrategyProvenance
-    # 저장소가 읽을 때 정한다. 사용자가 시작한 run 을 실험이 이어 쓰면(같은 입력 잇기) 실험 시도다.
     kind: RunKind
+    experiment_id: str | None
+    experiment_paused: bool
 
 
 class BacktestRunRepositoryPort(TrialLedgerPort, Protocol):
     def add(
         self,
-        summary: BacktestRunSummary,
+        run: BacktestRunState,
+        provenance: StrategyProvenance,
         request: BacktestRunSpec,
         *,
         lineage_id: str | None,

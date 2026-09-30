@@ -71,13 +71,19 @@ const backtestSummary = ({
   status = "completed",
   saved = false,
   kind = "single",
+  experimentId = null,
+  paused = false,
 }: {
   runId: string;
   status?: "queued" | "running" | "completed" | "failed";
   saved?: boolean;
-  kind?: "single" | "experiment";
+  kind?: "single" | "experiment_trial" | "walk_forward_validation";
+  experimentId?: string | null;
+  paused?: boolean;
 }) => ({
   kind,
+  experiment_id: experimentId,
+  experiment_paused: paused,
   run: {
     run_id: runId,
     status,
@@ -232,7 +238,13 @@ const server = setupServer(
     const kind = url.searchParams.get("kind");
     const all = [
       backtestSummary({ runId: "run-inline" }),
-      backtestSummary({ runId: "run-saved", saved: true, kind: "experiment" }),
+      backtestSummary({
+        runId: "run-saved",
+        saved: true,
+        kind: "experiment_trial",
+        experimentId: "exp-7",
+        paused: true,
+      }),
     ];
     const filtered = all.filter(
       (item) =>
@@ -946,12 +958,17 @@ describe("App Shell routes", () => {
     const kindOf = async (runId: string) =>
       (await screen.findByText(runId)).closest("tr")!;
     expect(await kindOf("run-inline")).toHaveTextContent("단일 실행");
-    expect(await kindOf("run-saved")).toHaveTextContent("실험 시도");
+    // 실험 run 은 쓰는 실험과 일시정지 여부를 함께 보인다(#382). 실험 화면이 없어 링크는 아직 없다.
+    const experimentRun = await kindOf("run-saved");
+    expect(experimentRun).toHaveTextContent("실험 시도");
+    expect(experimentRun).toHaveTextContent("실험 exp-7");
+    expect(experimentRun).toHaveTextContent("실험 일시정지");
+    expect(await kindOf("run-inline")).not.toHaveTextContent("실험 일시정지");
 
     const kinds = screen.getByRole("group", { name: "종류" });
     await user.click(within(kinds).getByRole("button", { name: "실험 시도" }));
     await waitFor(() =>
-      expect(history.location.search).toContain("kind=experiment"),
+      expect(history.location.search).toContain("kind=experiment_trial"),
     );
     await waitFor(() =>
       expect(screen.queryByText("run-inline")).not.toBeInTheDocument(),

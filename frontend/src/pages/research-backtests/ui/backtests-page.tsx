@@ -289,6 +289,25 @@ export const BacktestsPage = () => {
                       </td>
                       <td>
                         <Badge tone="neutral">{runKindLabel(item.kind)}</Badge>
+                        {item.experiment_id === null ? null : (
+                          <>
+                            <br />
+                            <span className="data-list-page__hash">
+                              {t("history.backtests.experiment").replace(
+                                "{experiment}",
+                                item.experiment_id,
+                              )}
+                            </span>
+                          </>
+                        )}
+                        {item.experiment_paused ? (
+                          <>
+                            <br />
+                            <Badge tone="warn">
+                              {t("history.backtests.experimentPaused")}
+                            </Badge>
+                          </>
+                        ) : null}
                       </td>
                       <td>
                         <Badge tone={TONE[item.run.status]}>

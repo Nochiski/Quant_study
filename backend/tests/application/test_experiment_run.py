@@ -57,6 +57,7 @@ from strategy_workbench.domain.backtest.facade.trials import (
     summarize_trial_ledger,
 )
 from strategy_workbench.domain.experiment.facade.design import (
+    CellVerdict,
     ExperimentNotFoundError,
     ExperimentStateError,
     InvalidExperimentSpecError,
@@ -1108,3 +1109,46 @@ def test_an_experiment_from_a_version_4_file_keeps_its_old_meaning(tmp_path: Pat
     assert reopened.get(experiment_id).status is ExperimentStatus.COMPLETED
     report = reopened.walk_forward(experiment_id)
     assert (report.windows, report.gap) == ((), WalkForwardGap.LEGACY_DESIGN)
+
+
+def test_the_parameter_map_averages_ledger_train_scores_and_floors_a_bankrupt_cell() -> None:
+    """V4-03: 칸 점수는 창별 원장 학습 점수의 평균이고, 파산한 칸은 최하 점수로 이웃에 든다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    # scale 격자 -1, 0, 1 × 롤링 창 둘. trial 2k·2k+1 이 칸 (k,) 의 두 창이다.
+    experiment_id = service.create(_request(scale=None)).record.experiment_id
+    _finish(
+        runs,
+        {
+            "run-0": _result(0.2),
+            "run-1": _result(0.4),
+            "run-3": _result(0.6),
+            "run-4": _result(0.15),
+            "run-5": _result(0.25),
+        },
+    )
+    runs.run_statuses["run-2"] = RunStatus.FAILED
+    runs.error_codes["run-2"] = "backtest.run.equity_wiped_out"
+
+    cells = service.parameter_map(experiment_id).cells
+
+    # 칸 점수 (0,)=0.3, (2,)=0.2. 파산 칸 (1,) 은 최하 점수 min(0.2, 0) = 0 이라 두 칸의 이웃 평균이
+    # 모두 0 — 동점이면 좌표가 앞선 칸이 추천이다. 민감도: -1×0.8=-0.8 쪽 가장 가까운 격자값 0 은
+    # 파산이라 하락 1.0, 1×0.8=0.8 쪽도 0 이라 1.0. -1×1.2·1×1.2 쪽은 축 끝이다.
+    assert [
+        (cell.grid_index, cell.verdict, cell.score, cell.plateau_score, cell.sensitivity)
+        for cell in cells
+    ] == [
+        ((0,), CellVerdict.RECOMMENDED, pytest.approx(0.3), 0.0, pytest.approx(1.0)),
+        ((1,), CellVerdict.FAILED, None, None, None),
+        ((2,), CellVerdict.SCORED, pytest.approx(0.2), 0.0, pytest.approx(1.0)),
+    ]
+    # 비전략 실패(엔진 내부 오류)는 실패로 보이기만 하고 이웃 평균에서 빠진다.
+    runs.error_codes["run-2"] = "backtest.run.internal"
+    assert [
+        (cell.verdict, cell.plateau_score) for cell in service.parameter_map(experiment_id).cells
+    ] == [
+        (CellVerdict.RECOMMENDED, None),
+        (CellVerdict.FAILED, None),
+        (CellVerdict.SCORED, None),
+    ]

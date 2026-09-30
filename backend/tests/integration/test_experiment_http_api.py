@@ -1,5 +1,5 @@
-"""실험 HTTP(V3-03·V3-05) — 미리 계산과 실제 원장 증가, 워크포워드, 기반 리비전 제약, 코드화된
-거절(spec D2·D5)."""
+"""실험 HTTP(V3-03·V3-05·V4-03) — 미리 계산과 실제 원장 증가, 워크포워드, 파라미터 지도, 기반 리비전
+제약, 코드화된 거절(spec D2·D5)."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import TypeAdapter
 
@@ -168,6 +169,24 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
     tested = client.get(f"/api/v1/backtests/{picks[0]['run_id']}/result").json()
     assert tested["series"]["equity"][0]["session"] == "2022-01-04"
     assert tested["artifacts"]["orders"][0]["session"] == "2022-01-04"
+    # 파라미터 지도(V4-03): 칸 점수는 그 칸 두 학습 실행의 원장 세션 샤프 평균이다.
+    parameter_map = client.get(
+        f"/api/v1/experiments/{experiment['record']['experiment_id']}/parameter-map"
+    )
+    sharpes = {
+        run["run_id"]: run["session_sharpe"] for group in ledger["trials"] for run in group["runs"]
+    }
+    expected: dict[int, list[float]] = {}
+    for trial in trials.json():
+        expected.setdefault(trial["trial"]["grid_index"][0], []).append(
+            sharpes[trial["attempts"][0]["run_id"]]
+        )
+    assert parameter_map.status_code == 200, parameter_map.text
+    assert [cell["grid_index"] for cell in parameter_map.json()["cells"]] == [[0], [1], [2]]
+    assert [cell["score"] for cell in parameter_map.json()["cells"]] == pytest.approx(
+        [sum(values) / 2 for values in expected.values()]
+    )
+    assert [cell["verdict"] for cell in parameter_map.json()["cells"]].count("recommended") == 1
 
 
 def test_design_and_lookup_rejections_are_coded() -> None:
@@ -194,6 +213,7 @@ def test_design_and_lookup_rejections_are_coded() -> None:
         "sealed": client.post("/api/v1/experiments", json=sealed),
     }
     missing = client.get("/api/v1/experiments/missing")
+    missing_map = client.get("/api/v1/experiments/missing/parameter-map")
 
     assert {name: response.json()["detail"]["code"] for name, response in responses.items()} == {
         "inline": "experiment.base.unsaved",
@@ -207,6 +227,10 @@ def test_design_and_lookup_rejections_are_coded() -> None:
         TypeAdapter(ExperimentAdmissionErrorResponse).validate_python(response.json())
     assert (missing.status_code, missing.json()["detail"]["code"]) == (404, "experiment.not_found")
     TypeAdapter(ExperimentErrorResponse).validate_python(missing.json())
+    assert (missing_map.status_code, missing_map.json()["detail"]["code"]) == (
+        404,
+        "experiment.not_found",
+    )
     # 실험 기반 검사는 실행 요청이 아니므로 봉인 원장에 차단 기록을 남기지 않는다.
     sealed_lineage = sealed["run"]["strategy_source"]["strategy_id"]
     assert client.get(f"/api/v1/strategies/{sealed_lineage}/trials").json()["blocked"] == []

@@ -68,6 +68,9 @@ import type {
   GetEquityCatalogResponses,
   GetExperimentData,
   GetExperimentErrors,
+  GetExperimentParameterMapData,
+  GetExperimentParameterMapErrors,
+  GetExperimentParameterMapResponses,
   GetExperimentResponses,
   GetExperimentWalkForwardData,
   GetExperimentWalkForwardErrors,
@@ -713,6 +716,21 @@ export const streamExperimentEvents = <ThrowOnError extends boolean = false>(
     StreamExperimentEventsErrors,
     ThrowOnError
   >({ url: "/api/v1/experiments/{experiment_id}/events", ...options });
+
+/**
+ * Get Experiment Parameter Map
+ *
+ * 그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03). 판정 기준은 domain
+ * 상수이고 화면은 판정을 번역·칠하기만 한다(V5-04).
+ */
+export const getExperimentParameterMap = <ThrowOnError extends boolean = false>(
+  options: Options<GetExperimentParameterMapData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetExperimentParameterMapResponses,
+    GetExperimentParameterMapErrors,
+    ThrowOnError
+  >({ url: "/api/v1/experiments/{experiment_id}/parameter-map", ...options });
 
 /**
  * Select Experiment Trial

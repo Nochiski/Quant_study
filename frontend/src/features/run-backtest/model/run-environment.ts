@@ -1,6 +1,7 @@
 import {
   runEnvironmentDisplayValue,
   runEnvironmentWireNumber,
+  runEnvironmentWireText,
   type RunEnvironmentField,
 } from "../../../entities/backtest";
 import { projectApplicability, type RunEnvironment } from "../../../shared/api";
@@ -59,6 +60,25 @@ export const initialRunEnvironmentValues = (
           ? (field.defaultValue ?? "")
           : runEnvironmentDisplayValue(field, saved),
       ];
+    }),
+  );
+
+/**
+ * 저장할 칸(요청 단위): 스키마 기본값과 다른 칸만 남긴다. 기본값이 바뀌면 사용자가 손대지 않은 칸은 새
+ * 기본값을 따른다(#396 리뷰 P2-1). 칸 목록을 아직 모르면(스키마를 읽기 전) 가리지 않는다.
+ */
+export const runEnvironmentStoredValues = (
+  fields: readonly RunEnvironmentField[],
+  wire: RunEnvironmentValues,
+): RunEnvironmentValues =>
+  Object.fromEntries(
+    Object.entries(wire).filter(([name, value]) => {
+      const field = fields.find((candidate) => candidate.name === name);
+      return (
+        field?.defaultValue === null ||
+        field?.defaultValue === undefined ||
+        value !== runEnvironmentWireText(field, field.defaultValue)
+      );
     }),
   );
 

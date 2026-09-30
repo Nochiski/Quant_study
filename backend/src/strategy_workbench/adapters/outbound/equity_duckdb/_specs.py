@@ -117,6 +117,10 @@ class SourceSpec:
     가림 표시를 둔 원천은 필드를 하나만 낸다 — 팩터 평가기(`_value_spans`)가 가린 칸 경계를 필드마다
     따로 이어, 한 원천의 두 필드를 시점을 달리해 섞는 식은 같은 행의 층 이동을 건너도 결측이 되지
     않는다(필드를 더하려면 평가기를 먼저 원천 단위로 바꾼다, #349 리뷰 P3-3).
+
+    `omitted_is_zero` 는 그 원천의 `src_omitted`(원천이 행을 뺀 칸)가 원장 규약상 "그날 0" 이라는
+    선언이다. 참이면 어댑터가 그 칸을 값 0 의 SOURCE_OMITTED_ZERO 로 내고, 거짓이면 MISSING 으로
+    접는다(#371). 어느 원천이 참인가의 정본은 FIELD_MAP §1 「결측 어휘」다.
     """
 
     name: str
@@ -138,6 +142,7 @@ class SourceSpec:
     kind_expr: str | None = None
     required_columns: tuple[str, ...] = ()
     masked_expr: str | None = None
+    omitted_is_zero: bool = False
 
 
 @dataclass(frozen=True)
@@ -419,6 +424,8 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         requires=(SHORT_TABLE,),
         frequency=FieldFrequency.DAILY,
         kind_expr="fill_kind_short_kiwoom['kind']",
+        # 키움 공매도 샤드가 그 종목·그날을 처리하고 행을 뺐으면 그날 공매도가 없었다(FX-3-001)
+        omitted_is_zero=True,
     ),
     SourceSpec(
         name="lending_kiwoom",
@@ -505,15 +512,14 @@ _FIN_EVIDENCE = (
 )
 _FIN_DISCLOSURE = "DART 정기보고서 접수일(rcept_no 의 rcept_dt) — 정정본 접수번호를 API 가 돌려준다"
 
-# 격자 3테이블(S08~S10)의 결측 어휘를 소비층으로 옮길 때 접히는 축 — 프로필 description 에 그대로
-# 실어 소비자가 "왜 src_omitted 가 안 보이나" 를 코드가 아니라 카탈로그에서 읽게 한다.
+# 격자 3테이블(S08~S10)의 결측 어휘가 셀 종류로 옮겨지는 규칙 — 프로필 description 에 실어 소비자가
+# 카탈로그에서 읽게 한다. 원천별 대응의 정본은 FIELD_MAP §1 「결측 어휘」다.
 _FILL_KIND_NOTE = (
-    "값 없는 셀은 **0 이 아니라 NULL** 이고 이유는 `fill_kind` 가 나른다(DESIGN §9 결정 8). "
-    "셀 종류 대응은 measured→OBSERVED · not_collected→NOT_COLLECTED · empty_response→MISSING "
-    "이고, **`src_omitted` 는 SOURCE_OMITTED_ZERO 가 아니라 MISSING 으로 접힌다** — 워크벤치 "
-    "도메인이 SOURCE_OMITTED_ZERO 셀에 값을 요구하는데(`RawFieldValue.__post_init__`) equity 는 "
-    "그 자리를 NULL 로 두기로 했기 때문이다. 그래서 '0 으로 읽어도 되는 결측' 이라는 라벨은 "
-    "S19 `dataset_profile` 이 별도 축으로 실을 때까지 소비층에 도달하지 않는다"
+    "원장은 값 없는 셀을 **0 이 아니라 NULL** 로 두고 이유를 `fill_kind` 로 나른다(DESIGN §9 "
+    "결정 8). 셀 종류는 measured→OBSERVED · not_collected→NOT_COLLECTED · "
+    "empty_response→MISSING 이다. 원천이 행을 뺀 칸(src_omitted)은 원장 규약상 그날 0 인 원천"
+    "(키움 공매도)만 값 0 의 SOURCE_OMITTED_ZERO 이고, 나머지 원천은 0 으로 단정할 근거가 없어 "
+    "MISSING 이다"
 )
 
 FIELD_SPECS: tuple[FieldSpec, ...] = (
@@ -1090,6 +1096,8 @@ def _reject_unread_declarations(
       P3-1).
     - 가림 표시(`SourceSpec.masked_expr`)는 격자 질의(`_grid`)만 읽는다. LATEST 원천에 두면 셀이
       MASKED 가 되지 않아 결측 정책이 가린 셀을 다시 채운다(#311 리뷰 P3-3).
+    - 원천 생략 0(`SourceSpec.omitted_is_zero`)은 결측 사유 축(`kind_expr`)이 있어야 읽힌다. 없으면
+      계약 테스트는 mock 과 선언이 같다고 보는데 어댑터는 그 칸을 MISSING 으로 낸다(#371).
     """
     by_name = {spec.name: spec for spec in source_specs}
     misplaced = [
@@ -1108,6 +1116,9 @@ def _reject_unread_declarations(
     ]
     if unread:
         raise ValueError(f"masked_expr needs a GRID source — sources={unread}")
+    unread = [spec.name for spec in source_specs if spec.omitted_is_zero and spec.kind_expr is None]
+    if unread:
+        raise ValueError(f"omitted_is_zero needs a kind_expr — sources={unread}")
 
 
 _reject_unread_declarations(SOURCE_SPECS, FIELD_SPECS)

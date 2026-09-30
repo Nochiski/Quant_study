@@ -947,6 +947,88 @@ export type CandidateDecision = {
 export type CandidateSide = "long" | "short";
 
 /**
+ * CapacityGap
+ *
+ * 한계 금액을 확정하지 못했거나 시험 범위 끝에 걸린 이유. 화면은 번역만 한다.
+ */
+export type CapacityGap =
+  "pending" | "cancelled" | "no_positive_sharpe" | "beyond_tested";
+
+/**
+ * CapacityLimit
+ */
+export type CapacityLimit = {
+  /**
+   * Amount
+   */
+  amount: number | null;
+  /**
+   * Best Amount
+   */
+  best_amount: number | null;
+  gap: CapacityGap | null;
+  /**
+   * Threshold Sharpe
+   */
+  threshold_sharpe: number | null;
+};
+
+/**
+ * CapacityPoint
+ *
+ * 용량 스윕 금액 하나의 결과.
+ */
+export type CapacityPoint = {
+  /**
+   * Impact Cost Bps
+   */
+  impact_cost_bps: number | null;
+  /**
+   * Initial Cash
+   */
+  initial_cash: number;
+  /**
+   * Session Unfilled Ratio
+   */
+  session_unfilled_ratio: number | null;
+  /**
+   * Sharpe
+   */
+  sharpe: number | null;
+  status: TrialStatus;
+  /**
+   * Trial Index
+   */
+  trial_index: number;
+};
+
+/**
+ * CapacityReport
+ *
+ * 용량 스윕 결과(V4-04). 한계 금액 규칙은 `domain/experiment/_capacity.py` 다.
+ */
+export type CapacityReport = {
+  limit: CapacityLimit;
+  /**
+   * Points
+   */
+  points: Array<CapacityPoint>;
+};
+
+/**
+ * CapacitySweepRequest
+ *
+ * 용량 스윕 만들기·미리 계산 요청(V4-04). 기반 요청을 초기 자본만 바꿔 전체 구간으로 돌린다.
+ */
+export type CapacitySweepRequest = {
+  /**
+   * Initial Cash
+   */
+  initial_cash: Array<number>;
+  run: BacktestRunSpec;
+};
+
+/**
  * CellKind
  *
  * A numeric zero and unavailable data must never collapse into one value.
@@ -1666,6 +1748,11 @@ export type ExperimentControlsRequest = {
  */
 export type ExperimentDesign = {
   /**
+   * Initial Cash
+   */
+  initial_cash?: Array<number>;
+  kind?: ExperimentKind;
+  /**
    * Measured
    */
   measured?: boolean;
@@ -1695,6 +1782,9 @@ export type ExperimentErrorDetail = {
   code:
     | "experiment.base.invalid"
     | "experiment.base.unsaved"
+    | "experiment.capacity.base_not_run"
+    | "experiment.capacity.invalid_amounts"
+    | "experiment.kind.mismatch"
     | "experiment.not_found"
     | "experiment.search.invalid_values"
     | "experiment.search.too_many_points"
@@ -1717,6 +1807,14 @@ export type ExperimentErrorDetail = {
 export type ExperimentErrorResponse = {
   detail: ExperimentErrorDetail;
 };
+
+/**
+ * ExperimentKind
+ *
+ * 실험 종류(spec D5). 용량 스윕은 초기 자본만 바꾼다 — 초기 자본은 시도 키 밖이라 금액들이 한
+ * 시도다.
+ */
+export type ExperimentKind = "parameter_search" | "capacity_sweep";
 
 /**
  * ExperimentPage
@@ -1786,7 +1884,7 @@ export type ExperimentRecord = {
    */
   experiment_id: string;
   run: BacktestRunSpec;
-  split: SplitSpec;
+  split: SplitSpec | null;
 };
 
 /**
@@ -1896,12 +1994,16 @@ export type ExperimentTrial = {
    */
   index: number;
   /**
+   * Initial Cash
+   */
+  initial_cash?: number | null;
+  /**
    * Parameter Values
    */
   parameter_values: {
     [key: string]: number | number | string | boolean;
   };
-  window: WalkForwardWindow;
+  window: WalkForwardWindow | null;
 };
 
 /**
@@ -3191,7 +3293,9 @@ export type ParameterNode = {
  * 참여율을 곱할 기준 거래량(spec D7).
  *
  * `session_volume` 은 체결 세션의 거래량을, `adv20` 은 판단일까지 20세션 평균 거래대금을 판단일
- * 종가로 나눈 주식 수(`_participation.py`)를 뜻한다.
+ * 종가로 나눈 주식 수(`_participation.py`)를 뜻한다. 기본은 `adv20` 이다(#342 DOMAIN-V2-02) —
+ * `session_volume` 은 체결 시점에 모르는 그날 전체 거래량으로 시가 체결 수량을 정해 결과가 낙관
+ * 쪽이라, 옛 실행 설정과 견주는 선택지로만 남기고 결과에 경고를 붙인다.
  */
 export type ParticipationBasis = "session_volume" | "adv20";
 
@@ -6287,12 +6391,7 @@ export type TurnContextPayload = {
    * Diagnostics
    */
   diagnostics?: Array<string>;
-  /**
-   * Environment
-   */
-  environment?: {
-    [key: string]: unknown;
-  } | null;
+  environment?: RunEnvironment | null;
   /**
    * Source Format
    */
@@ -7743,6 +7842,76 @@ export type CreateExperimentResponses = {
 export type CreateExperimentResponse =
   CreateExperimentResponses[keyof CreateExperimentResponses];
 
+export type CreateCapacitySweepData = {
+  body: CapacitySweepRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/experiments/capacity";
+};
+
+export type CreateCapacitySweepErrors = {
+  /**
+   * The base strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The base revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type CreateCapacitySweepError =
+  CreateCapacitySweepErrors[keyof CreateCapacitySweepErrors];
+
+export type CreateCapacitySweepResponses = {
+  /**
+   * Successful Response
+   */
+  202: Experiment;
+};
+
+export type CreateCapacitySweepResponse =
+  CreateCapacitySweepResponses[keyof CreateCapacitySweepResponses];
+
+export type PreviewCapacitySweepData = {
+  body: CapacitySweepRequest;
+  path?: never;
+  query?: never;
+  url: "/api/v1/experiments/capacity/preview";
+};
+
+export type PreviewCapacitySweepErrors = {
+  /**
+   * The base strategy revision does not exist
+   */
+  404: BacktestStrategyNotFoundResponse;
+  /**
+   * The base revision hash differs from the expected hash
+   */
+  409: BacktestStrategyStaleResponse;
+  /**
+   * A coded experiment design or base run diagnostic
+   */
+  422: ExperimentAdmissionErrorResponse;
+};
+
+export type PreviewCapacitySweepError =
+  PreviewCapacitySweepErrors[keyof PreviewCapacitySweepErrors];
+
+export type PreviewCapacitySweepResponses = {
+  /**
+   * Successful Response
+   */
+  200: ExperimentPreview;
+};
+
+export type PreviewCapacitySweepResponse =
+  PreviewCapacitySweepResponses[keyof PreviewCapacitySweepResponses];
+
 export type PreviewExperimentData = {
   body: ExperimentRequest;
   path?: never;
@@ -7849,6 +8018,46 @@ export type CancelExperimentResponses = {
 export type CancelExperimentResponse =
   CancelExperimentResponses[keyof CancelExperimentResponses];
 
+export type GetExperimentCapacityData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/capacity";
+};
+
+export type GetExperimentCapacityErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentCapacityError =
+  GetExperimentCapacityErrors[keyof GetExperimentCapacityErrors];
+
+export type GetExperimentCapacityResponses = {
+  /**
+   * Successful Response
+   */
+  200: CapacityReport;
+};
+
+export type GetExperimentCapacityResponse =
+  GetExperimentCapacityResponses[keyof GetExperimentCapacityResponses];
+
 export type ControlExperimentData = {
   body: ExperimentControlsRequest;
   path: {
@@ -7935,6 +8144,10 @@ export type GetExperimentParameterMapErrors = {
    * The experiment or trial is missing
    */
   404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
   /**
    * Validation Error
    */
@@ -8097,6 +8310,10 @@ export type GetExperimentWalkForwardErrors = {
    * The experiment or trial is missing
    */
   404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
   /**
    * Validation Error
    */

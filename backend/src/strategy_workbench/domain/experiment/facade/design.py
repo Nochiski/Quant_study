@@ -1,5 +1,6 @@
 from strategy_workbench.domain.experiment._design import (
     ExperimentDesign,
+    ExperimentKind,
     ExperimentTrial,
     experiment_trial_key,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "CellVerdict",
     "ExperimentDesign",
     "ExperimentError",
+    "ExperimentKind",
     "ExperimentNotFoundError",
     "ExperimentStateError",
     "ExperimentTrial",

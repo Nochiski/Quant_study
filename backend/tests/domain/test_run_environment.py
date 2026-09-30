@@ -61,6 +61,8 @@ def test_defaults_match_the_design_contract() -> None:
         environment.fee_bps,
         environment.slippage_bps,
     ) == (0.1, 15.0, 10.0)
+    # 체결일 거래량은 look-ahead 라 기본은 판단일까지의 20일 평균 거래대금이다(#342 DOMAIN-V2-02).
+    assert environment.participation_basis is ParticipationBasis.ADV20
 
 
 def test_canonical_json_is_sorted_and_compact() -> None:
@@ -80,7 +82,7 @@ def test_environment_hash_splits_on_every_variable_field() -> None:
         replace(base, fee_bps=30.0),
         replace(base, slippage_bps=0.0),
         replace(base, participation_rate=1.0),
-        replace(base, participation_basis=ParticipationBasis.ADV20),
+        replace(base, participation_basis=ParticipationBasis.SESSION_VOLUME),
         replace(base, impact_model=ImpactModel.SQRT),
         replace(base, impact_coefficient=0.5),
         replace(base, missing=MissingPolicy.ZERO),
@@ -257,7 +259,7 @@ def test_schema_publishes_type_default_and_enum_for_every_field() -> None:
     assert properties["sell_tax_bps"]["default"] is None
     assert properties["sell_tax_bps"]["minimum"] == 0.0
     assert properties["participation_basis"]["enum"] == ["session_volume", "adv20"]
-    assert properties["participation_basis"]["default"] == "session_volume"
+    assert properties["participation_basis"]["default"] == "adv20"
     assert properties["impact_model"]["enum"] == ["fixed_bps", "sqrt"]
     assert properties["impact_model"]["default"] == "fixed_bps"
     assert properties["impact_coefficient"]["default"] == 1.0
@@ -377,21 +379,16 @@ def test_statutory_rate_changes_on_the_first_trade_date_that_settles_after_enact
 
 
 def test_session_volume_basis_leaves_the_engine_on_session_volume() -> None:
-    """기본값(`session_volume`)은 워밍업을 읽지 않고 기준 거래량도 넘기지 않는다 — 기존 실행
-    그대로다."""
-    environment = _environment()
+    """고른 `session_volume` 은 워밍업을 읽지 않고 기준 거래량도 넘기지 않는다(옛 실행 그대로)."""
+    environment = replace(_environment(), participation_basis=ParticipationBasis.SESSION_VOLUME)
 
-    assert environment.participation_basis is ParticipationBasis.SESSION_VOLUME
     assert cost_history_sessions(environment) == 0
     assert participation_volumes(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)]) is None
 
 
-def test_adv20_volume_is_the_prior_rows_average_value_over_the_decision_close() -> None:
-    """판단일(직전 행)까지의 거래대금 평균 ÷ 판단일 종가, 내림. 종목마다 따로 센다.
-
-    A: 첫 행은 앞선 행이 없어 0주. 1/3 은 1,000 ÷ 100 = 10주. 1/4 는 (1,000 + 3,000) / 2 ÷ 200 =
-    10주. 1/5 는 1/4 거래대금이 없어 평균에서 빠지므로 2,000 ÷ 50 = 40주. B 는 A 와 섞이지 않는다:
-    1/3 은 7,000 ÷ 70 = 100주.
+def test_adv20_gives_no_room_until_twenty_prior_rows_have_a_traded_value() -> None:
+    """거래대금이 있는 앞선 행이 20개가 안 되면 0주다(#342) — 상장 초기 며칠의 큰 거래대금으로
+    한도를 부풀리지 않는다. 종목마다 따로 세고, 거래대금이 없는 행(A 의 1/4)은 20개에 들지 않는다.
     """
     rows = [
         (date(2024, 1, 2), "A", 100.0, 1_000.0),
@@ -406,39 +403,70 @@ def test_adv20_volume_is_the_prior_rows_average_value_over_the_decision_close() 
         replace(_environment(), participation_basis=ParticipationBasis.ADV20), reversed(rows)
     )
 
-    assert volumes == {
-        (date(2024, 1, 2), "A"): 0,
-        (date(2024, 1, 2), "B"): 0,
-        (date(2024, 1, 3), "A"): 10,
-        (date(2024, 1, 3), "B"): 100,
-        (date(2024, 1, 4), "A"): 10,
-        (date(2024, 1, 5), "A"): 40,
-    }
+    assert volumes == {key: 0 for key in ((row[0], row[1]) for row in rows)}
 
 
 def test_adv20_averages_only_the_last_twenty_rows_including_warmup() -> None:
-    """첫 측정 세션의 평균은 워밍업 행에서 20행을 채운다. 거래대금 100 × k(k = 1..22), 종가 10.
+    """20행은 종목마다 거래대금이 있는 행만 센다(#396 리뷰 P3-2).
 
-    21번째 행: k = 1..20 평균 1,050 ÷ 10 = 105주. 22번째 행: k = 2..21 평균 1,150 ÷ 10 = 115주 —
-    가장 오래된 행이 창에서 빠진다.
+    A: 종가 10, 거래대금 100 × k(k = 1..23)이고 k = 6 행만 거래대금이 없다.
+    - k = 21 행: 앞선 20행 중 거래대금이 있는 행이 19개라 0주다(빈 행을 0 으로 세면 102주가 된다).
+    - k = 22 행: k = 1..21 중 6 을 뺀 20개, 합 225 × 100 ÷ 20 = 1,125 ÷ 10 = 112.5 → 112주.
+    - k = 23 행: 가장 오래된 k = 1 이 빠져 k = 2..22 중 6 을 뺀 20개,
+      합 246 × 100 ÷ 20 ÷ 10 = 123주.
+    B: 같은 세션들에 종가 5, 거래대금 1,000 인 21행. A 와 창을 나누지 않아 21번째 행이
+    1,000 ÷ 5 = 200주, 20번째 행은 앞선 행이 19개라 0주다.
     """
     environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
-    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(22)]
-    rows = [(session, "A", 10.0, 100.0 * k) for k, session in enumerate(sessions, 1)]
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(23)]
+    rows = [
+        (session, "A", 10.0, None if k == 6 else 100.0 * k) for k, session in enumerate(sessions, 1)
+    ] + [(session, "B", 5.0, 1_000.0) for session in sessions[:21]]
 
-    volumes = participation_volumes(environment, rows)
+    volumes = participation_volumes(environment, reversed(rows))
 
-    assert cost_history_sessions(environment) == 20
     assert volumes is not None
-    assert (volumes[(sessions[20], "A")], volumes[(sessions[21], "A")]) == (105, 115)
+    assert [volumes[(sessions[index], "A")] for index in (20, 21, 22)] == [0, 112, 123]
+    assert [volumes[(sessions[index], "B")] for index in (19, 20)] == [0, 200]
+
+
+def test_adv20_warmup_reads_past_suspended_days_so_the_start_date_does_not_zero_the_limit() -> None:
+    """워밍업은 20세션의 두 배를 읽는다(#396 리뷰 P2-2). 세션 k = 1..46(거래대금 100 × k,
+    종가 10) 중 k = 36..38 이 거래정지로 행이 없다. 같은 세션 k = 46 의 한도를 두 시작일로 잰다.
+
+    - k = 46 에서 시작: 앞 40세션(k = 6..45)을 읽는다.
+    - k = 41 에서 시작: 앞 40세션(k = 1..40)을 읽고 k = 41..46 은 측정 구간이다.
+    두 실행 모두 k = 46 의 20행은 k = 39..45 와 23..35, 합 294 + 377 = 671 × 100 ÷ 20 ÷ 10 = 335.5
+    → 335주다. 앞 20세션(k = 26..45)만 읽었다면 거래대금이 있는 행이 17개라 0주였다 — 같은 세션의
+    한도가 시작일에 따라 갈렸다.
+    """
+    environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
+    history = cost_history_sessions(environment)
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(46)]
+    rows = [
+        (session, "A", 10.0, 100.0 * k)
+        for k, session in enumerate(sessions, 1)
+        if k not in (36, 37, 38)
+    ]
+
+    def limit(first_read: int) -> int | None:
+        read = [row for row in rows if row[0] >= sessions[first_read - 1]]
+        volumes = participation_volumes(environment, read)
+        return None if volumes is None else volumes[(sessions[-1], "A")]
+
+    assert history == 40
+    assert (limit(46 - history), limit(41 - history), limit(46 - 20)) == (335, 335, 0)
 
 
 def test_fixed_bps_impact_leaves_the_engine_on_fixed_slippage() -> None:
-    """기본값(`fixed_bps`)은 충격 척도를 넘기지 않고 워밍업도 늘리지 않는다 — 기존 실행 그대로다."""
+    """기본값(`fixed_bps`)은 충격 척도를 넘기지 않고 워밍업도 늘리지 않는다 — 기존 실행 그대로다.
+
+    워밍업 40세션은 기본 참여 기준 `adv20` 의 몫이다(충격 모델 몫이 아니다).
+    """
     environment = _environment()
 
     assert environment.impact_model is ImpactModel.FIXED_BPS
-    assert cost_history_sessions(environment) == 0
+    assert cost_history_sessions(environment) == 40
     assert impact_scales(environment, [(date(2024, 1, 2), "A", 100.0, 1_000.0)], {}) is None
 
 
@@ -516,7 +544,8 @@ def test_sqrt_volatility_uses_the_last_twenty_returns_and_skips_corporate_action
     # 100 → 200 은 2주를 1주로 합친 병합(구주 1주당 신주 0.5주)이다.
     adjusted = impact_scales(environment, rows, {(sessions[1], "A"): 0.5})
 
-    assert cost_history_sessions(environment) == 21
+    # σ 창(종가 21개)이 참여 기준 `adv20`(20행)보다 길어 21 × 여유 2 를 읽는다.
+    assert cost_history_sessions(environment) == 42
     assert plain is not None and adjusted is not None
 
     def expected(index: int, first_return: int) -> float:
@@ -592,20 +621,20 @@ def test_a_split_on_a_halted_session_stays_out_of_the_sqrt_volatility() -> None:
 
 
 def test_the_adv_on_a_settlement_row_is_counted_in_post_action_shares() -> None:
-    """#339 DEFECT-V2A-2: 10주를 1주로 합친 병합(구주 1주당 0.1주)이 1/4 에 정산된다. 그 행의 주문·
-    체결·거래량은 병합 뒤 단위라, 판단일 종가 10 을 100 으로 바꿔 ADV = 1,000 ÷ 100 = 10주다 — 병합
-    전 종가로 나누면 100주로 한도가 10배 느슨해진다(낙관)."""
+    """#339 DEFECT-V2A-2: 앞선 20행(종가 10, 거래대금 1,000) 뒤 21번째 행에 10주를 1주로 합친
+    병합(구주 1주당 0.1주)이 정산된다. 그 행의 주문·체결·거래량은 병합 뒤 단위라, 판단일 종가 10 을
+    100 으로 바꿔 ADV = 1,000 ÷ 100 = 10주다 — 병합 전 종가로 나누면 100주로 한도가 10배 느슨해진다
+    (낙관). 다음 행은 판단일 종가가 이미 100 이라 그대로 10주다."""
+    sessions = [date(2024, 1, 1) + timedelta(days=offset) for offset in range(22)]
     rows = [
-        (date(2024, 1, 2), "A", 10.0, 1_000.0),
-        (date(2024, 1, 3), "A", 10.0, 1_000.0),
-        (date(2024, 1, 4), "A", 100.0, 1_000.0),
-        (date(2024, 1, 5), "A", 100.0, 1_000.0),
+        (session, "A", 10.0 if index < 20 else 100.0, 1_000.0)
+        for index, session in enumerate(sessions)
     ]
     environment = replace(_environment(), participation_basis=ParticipationBasis.ADV20)
 
     volumes = participation_volumes(
-        environment, rows, settlement_multipliers(rows, [(date(2024, 1, 4), "A", 0.1)])
+        environment, rows, settlement_multipliers(rows, [(sessions[20], "A", 0.1)])
     )
 
     assert volumes is not None
-    assert (volumes[(date(2024, 1, 4), "A")], volumes[(date(2024, 1, 5), "A")]) == (10, 10)
+    assert (volumes[(sessions[20], "A")], volumes[(sessions[21], "A")]) == (10, 10)

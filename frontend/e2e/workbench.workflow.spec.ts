@@ -1646,7 +1646,15 @@ test("레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화�
     const box = await card.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.width).toBeGreaterThanOrEqual(Math.min(400, width - 128));
     expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     await page.screenshot({ path: test.info().outputPath(`recipe-${width}.png`) });
+    const paletteSearch = recipe.getByRole("searchbox", { name: "연산자 검색" });
+    await paletteSearch.scrollIntoViewIfNeeded();
+    await expect(paletteSearch).toBeInViewport();
+    const searchBox = await paletteSearch.boundingBox();
+    expect(searchBox!.width).toBeGreaterThanOrEqual(Math.min(400, width - 128));
+    await page.screenshot({ path: test.info().outputPath(`recipe-palette-${width}.png`) });
   }
 });

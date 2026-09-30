@@ -39,6 +39,7 @@ export type RouterContext = {
 type StrategyDocumentSearch = {
   view?: StrategyView;
   compare?: boolean;
+  recipe?: boolean;
   path?: string;
   asOf?: string;
   security?: string;
@@ -57,6 +58,7 @@ const strategyDocumentSearch = (
   const path = typeof search.path === "string" ? search.path : undefined;
   return {
     view: migrateStrategyView(search.view),
+    recipe: search.recipe === true || search.recipe === "true" ? true : undefined,
     compare:
       search.compare === true || search.compare === "true" || search.view === "diff"
         ? true

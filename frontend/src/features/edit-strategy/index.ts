@@ -266,3 +266,5 @@ export {
   type GraphNodeProjection,
 } from "./model/factor-graph-projection";
 export { DirtyLeaveGuard } from "./ui/dirty-leave-guard";
+
+export { RecipePanel } from "./ui/recipe-panel";

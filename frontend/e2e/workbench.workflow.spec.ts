@@ -1538,6 +1538,7 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   await expect(pipeline).not.toContainText("구조 오류");
   await pipeline.getByRole("button", { name: /팩터.*추가/ }).click();
   await pipeline.getByRole("button", { name: /레시피 열기/ }).click();
+  await page.getByRole("region", { name: "팩터 레시피" }).getByRole("button", { name: "고급으로", exact: true }).click();
   const graph = page.getByRole("region", { name: "그래프 편집" });
   await graph.getByRole("button", { name: "데이터 필드 노드 추가", exact: true }).click();
   await graph.getByRole("group", { name: /선택한 노드/ })
@@ -1590,4 +1591,62 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   await leaveGuard.getByRole("button", { name: "나가기", exact: true }).click();
   await expect(page).toHaveURL(/\/backtests\//);
   await expect(page.getByRole("status", { name: "실행 상태" })).toContainText("completed", { timeout: 120_000 });
+});
+
+test("레시피에서 추가·수정·이동·삭제를 되돌리고 좁은 화면과 뒤로가기를 유지한다", async ({ page }) => {
+  await openEditor(page, "/research/strategies/new");
+  await replaceSource(page, 'schema_version: "1.2"\ntitle: "레시피 편집 검증"\n');
+  await page.getByRole("tab", { name: "그래프", exact: true }).click();
+  const pipeline = page.getByRole("region", { name: "전략 파이프라인" });
+  await pipeline.getByRole("button", { name: /팩터.*추가/ }).click();
+  await pipeline.getByRole("button", { name: /레시피 열기/ }).click();
+  const recipe = page.getByRole("region", { name: "팩터 레시피" });
+  await expect(recipe).toBeVisible();
+  await expect(page).toHaveURL((url) => url.searchParams.get("recipe") === "true");
+  await recipe.getByRole("button", { name: "데이터 필드 노드 추가", exact: true }).click();
+  await recipe.getByRole("combobox", { name: "데이터 필드 1", exact: true }).selectOption("price.adj_close");
+  await recipe.getByRole("button", { name: "단계 반영", exact: true }).click();
+  await expect(recipe.getByRole("article")).toHaveCount(1);
+  await recipe.getByRole("button", { name: "기간 평균 노드 추가", exact: true }).click();
+  const mean = recipe.getByRole("article", { name: "2. 기간 평균", exact: true });
+  await mean.getByRole("spinbutton", { name: /집계 기간/ }).fill("20");
+  await mean.getByRole("spinbutton", { name: /집계 기간/ }).press("Tab");
+  await expectPhase(page, "검증 통과");
+  const period = mean.getByRole("spinbutton", { name: /집계 기간/ });
+  await period.fill("99");
+  await period.press("Escape");
+  await expect(period).toHaveValue("20");
+  await recipe.getByRole("button", { name: "나누기 노드 추가", exact: true }).click();
+  await recipe.getByRole("button", { name: "취소", exact: true }).click();
+  await expect(recipe.getByRole("article")).toHaveCount(2);
+  await recipe.getByRole("button", { name: "부호 뒤집기 노드 추가", exact: true }).click();
+  await expect(recipe.getByRole("article")).toHaveCount(3);
+  await recipe.getByRole("article", { name: "3. 부호 뒤집기", exact: true }).getByRole("button", { name: "위로", exact: true }).click();
+  await expect(recipe.getByRole("article", { name: "2. 부호 뒤집기", exact: true })).toBeVisible();
+  await recipe.getByRole("article", { name: "2. 부호 뒤집기", exact: true }).getByRole("button", { name: "단계 삭제", exact: true }).click();
+  await expect(recipe.getByRole("article")).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "실행 취소", exact: true })).not.toHaveAttribute("aria-disabled", "true");
+  await page.getByRole("button", { name: "실행 취소", exact: true }).click();
+  await expect(recipe.getByRole("article")).toHaveCount(3);
+  await expect(page.getByRole("button", { name: "다시 실행", exact: true })).not.toHaveAttribute("aria-disabled", "true");
+  await page.getByRole("button", { name: "다시 실행", exact: true }).click();
+  await expect(recipe.getByRole("article")).toHaveCount(2);
+  await expectPhase(page, "검증 통과");
+  await expect(recipe).not.toContainText(/node_id|field_id|kind:/);
+  await recipe.getByRole("button", { name: "파이프라인으로", exact: true }).click();
+  await expect(recipe).toHaveCount(0);
+  await page.goBack();
+  await expect(recipe).toBeVisible();
+  await expect(recipe.getByRole("article")).toHaveCount(2);
+  for (const width of [1440, 640, 360]) {
+    await page.setViewportSize({ width, height: 900 });
+    await recipe.getByRole("button", { name: "1. 데이터 필드", exact: true }).click();
+    const card = recipe.getByRole("article", { name: "1. 데이터 필드", exact: true });
+    await expect(card).toBeInViewport();
+    const box = await card.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: test.info().outputPath(`recipe-${width}.png`) });
+  }
 });

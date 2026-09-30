@@ -679,6 +679,8 @@ export const FormFieldsEditor = ({
   planCommit,
   selectedPointer,
   sectionDiagnostics = true,
+  names,
+  showIdentifiers = true,
 }: {
   section: ObjectSection;
   transactions: SourceTransactions;
@@ -692,6 +694,8 @@ export const FormFieldsEditor = ({
    * 들고 있다, 2차 리뷰 P3).
    */
   sectionDiagnostics?: boolean;
+  names?: SummaryNames;
+  showIdentifiers?: boolean;
 }) => (
   <>
     {/* 그래프 노드 진단은 노드 **객체** pointer로 오므로 어느 필드도 흡수하지 않는다. 그런 진단이
@@ -702,6 +706,8 @@ export const FormFieldsEditor = ({
     {section.fields.map((field) => (
       <FormFieldRow
         key={field.pointer}
+        names={names}
+        showIdentifiers={showIdentifiers}
         section={section}
         field={field}
         transactions={transactions}
@@ -775,6 +781,8 @@ const FormFieldRow = ({
   owner = FORM_OWNER,
   planCommit,
   selectedPointer,
+  names,
+  showIdentifiers = true,
 }: {
   section: ObjectSection;
   field: FormField;
@@ -783,6 +791,8 @@ const FormFieldRow = ({
   owner?: string;
   planCommit?: CommitPlanner;
   selectedPointer?: string;
+  names?: SummaryNames;
+  showIdentifiers?: boolean;
 }) => {
   const id = useId();
   const labelId = `${id}-label`;
@@ -794,6 +804,7 @@ const FormFieldRow = ({
     transactions,
     owner,
     planCommit,
+    label: showIdentifiers ? field.key : tName(field.descriptionKey) ?? field.key,
   });
   const invalid = editing.invalid;
   const passive = isPassiveControl(field.control);
@@ -822,6 +833,7 @@ const FormFieldRow = ({
       labelId={labelId}
       describedBy={describedBy.length === 0 ? undefined : describedBy.join(" ")}
       field={field}
+      names={names}
       catalogs={catalogs}
       {...editing.control}
     />
@@ -835,7 +847,7 @@ const FormFieldRow = ({
       {/* 구분 공백은 형제 text node여야 한다: 요소 안에 넣으면 accname 계산이 그 요소의 결과를
           trim해 "이름key"로 붙어 읽힌다(P1-03 리뷰). */}
       {name === null ? null : " "}
-      <code className="strategy-form__key">{field.key}</code>
+      {showIdentifiers ? <code className="strategy-form__key">{field.key}</code> : null}
       {field.required ? <span aria-hidden="true"> *</span> : null}
       {(field.displayUnit ?? field.unit) ? (
         <>
@@ -862,12 +874,12 @@ const FormFieldRow = ({
         <span
           id={labelId}
           className="strategy-form__label"
-          title={field.templatePointer}
+          title={showIdentifiers ? field.templatePointer : undefined}
         >
           {labelBody}
         </span>
       ) : (
-        <label htmlFor={id} title={field.templatePointer}>
+        <label htmlFor={id} title={showIdentifiers ? field.templatePointer : undefined}>
           {labelBody}
         </label>
       )}
@@ -878,6 +890,7 @@ const FormFieldRow = ({
           field={field}
           transactions={transactions}
           owner={owner}
+          label={showIdentifiers ? field.key : name ?? field.key}
         />
         <SeverityBadge diagnostics={field.diagnostics} />
       </div>

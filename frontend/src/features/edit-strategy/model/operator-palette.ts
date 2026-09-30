@@ -150,13 +150,13 @@ export const filterPalette = (
 };
 
 /** 항목 한 줄의 보조 설명(arity·파라미터). 없으면 null. */
-export const entrySignature = (entry: PaletteEntry): string | null => {
+export const entrySignature = (entry: PaletteEntry, parameterLabels: readonly string[] = entry.params): string | null => {
   const parts: string[] = [];
   if (entry.arity !== null)
     parts.push(t("graph.palette.arity").replace("{count}", String(entry.arity)));
-  if (entry.params.length > 0)
+  if (parameterLabels.length > 0)
     parts.push(
-      t("graph.palette.params").replace("{params}", entry.params.join(", ")),
+      t("graph.palette.params").replace("{params}", parameterLabels.join(", ")),
     );
   return parts.length === 0 ? null : parts.join(" · ");
 };

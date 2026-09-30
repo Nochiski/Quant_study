@@ -10,6 +10,8 @@ import {
   DocumentStatus,
   DocumentToolbar,
   FactorGraphPanel,
+  RecipePanel,
+  factorIndexAtPointer,
   PipelinePanel,
   RecoveryBanner,
   ServerDraftBanner,
@@ -181,8 +183,8 @@ export const NewStrategyPage = () => {
       void navigate({
         to: ROUTE,
 
-        search: { ...search, path: pointer, view: "graph" },
-        replace: true,
+        search: { ...search, path: pointer, view: "graph", recipe: true },
+        resetScroll: false,
       });
     },
     [navigate, search],
@@ -397,6 +399,18 @@ export const NewStrategyPage = () => {
                 revealSignal={problems.revealSignal}
               />
               <StrategyPreviewPanel document={document} executionPlans={executionPlans} environment={runSettings.environment} />
+              {search.recipe && !form.firstParsePending && assist.schema !== null ? (
+                <RecipePanel
+                  tree={form.tree} schema={assist.schema}
+                  factorIndex={factorIndexAtPointer(search.path) ?? 0}
+                  transactions={transactions} catalogs={catalogs} operators={assist.operators}
+                  diagnostics={currentDiagnostics(document)} plans={executionPlans}
+                  selectedPointer={search.path} revealSignal={problems.revealSignal}
+                  onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+                  onAdvanced={() => void navigate({ to: ROUTE, search: { ...search, recipe: undefined }, resetScroll: false })}
+                  onBack={() => void navigate({ to: ROUTE, search: { ...search, recipe: undefined, path: undefined }, resetScroll: false })}
+                />
+              ) : (
               <FactorGraphPanel
                 state={executionPlans}
                 schema={assist.schema}
@@ -422,6 +436,7 @@ export const NewStrategyPage = () => {
                   selectPointer(pointer, "outline");
                 }}
               />
+              )}
             </>
           ),
         }}

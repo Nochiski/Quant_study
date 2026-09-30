@@ -113,3 +113,5 @@ export {
   type UpgradedDocument,
   type WalkForwardReport,
 } from "./strategy-workbench";
+
+export type { NodeValueType } from "./generated";

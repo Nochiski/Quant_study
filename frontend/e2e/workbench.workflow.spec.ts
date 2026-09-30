@@ -1566,9 +1566,11 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
       return ancestors;
     })),
   });
+  const selectedGraphScreenshot = test.info().outputPath("graph-selected.png");
+  await page.screenshot({ path: selectedGraphScreenshot });
   await test.info().attach("graph-selected", {
     contentType: "image/png",
-    body: await page.screenshot(),
+    path: selectedGraphScreenshot,
   });
   await expect(output).toBeInViewport();
   // 구조는 완성됐지만 이름은 필수다. 원문에서 이름을 적고 같은 그래프로 돌아온다.

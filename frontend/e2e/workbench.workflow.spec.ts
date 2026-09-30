@@ -941,18 +941,6 @@ test.describe("professional YAML workflow", () => {
         expected_spec_hash: "a".repeat(64),
       },
     };
-    // 상태마다 그 상태의 run 이 싣는 단계(backend `RunStage`, #362 DR-B-03)
-    const stageOf: Record<
-      BacktestRunState["status"],
-      BacktestRunState["stage"]
-    > = {
-      queued: "queued",
-      running: "engine",
-      cancel_requested: "cancellation",
-      cancelled: "cancelled",
-      completed: "completed",
-      failed: "failed",
-    };
     const runState = (
       runId: string,
       status: BacktestRunState["status"],
@@ -960,7 +948,7 @@ test.describe("professional YAML workflow", () => {
       run_id: runId,
       status,
       progress: status === "running" || status === "cancel_requested" ? 0.4 : 0,
-      stage: stageOf[status],
+      stage: "engine",
       message: status,
       created_at: "2026-09-06T00:00:00Z",
       updated_at: "2026-09-06T00:00:01Z",

@@ -541,7 +541,9 @@ class BacktestRunResult:
 
 # run 진행 단계 어휘의 단일 정본(도메인 리뷰 B DR-B-03). 실행 유스케이스만 단계를 정하고, 실행기는
 # 자기 작업 안의 비율과 설명만 보고한다 — engine 구간 동안 단계는 `engine` 하나다. 프론트가 단계를
-# 번역하면 이 어휘가 키 목록이다(#336 V1-07).
+# 번역하면 이 어휘가 키 목록이다(#336 V1-07). run 기록은 상태가 바뀔 때만 단계를 저장해 저장된 값도
+# 이 어휘 안이고, 저장소는 읽을 때 거르지 않는다 — 값의 이름을 바꾸거나 지우면 옛 기록(특히 종결
+# `completed`·`cancelled`·`failed`)이 OpenAPI enum 밖 값을 싣는다.
 RunStage = Literal[
     "queued",
     "tape",

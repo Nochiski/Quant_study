@@ -66,7 +66,7 @@ const untranslated = (codes: Iterable<string>): string[] =>
     ].filter((item): item is string => item !== null);
   });
 
-describe("backtest run failure code vocabulary", () => {
+describe("backtest API rejection code translations", () => {
   // run 실패 코드(`backtest.run.error.<code>`)의 문구 누락은 `BacktestRunFailure` 가 키를 `MessageKey` 로
   // 만들어 typecheck 가 막는다(#362 DR-B-08). 여기서는 코드 목록을 다시 적지 않는다.
 

@@ -525,6 +525,17 @@
             "type": "string"
           },
           "stage": {
+            "enum": [
+              "queued",
+              "tape",
+              "data",
+              "engine",
+              "artifact",
+              "cancellation",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -982,6 +993,17 @@
             "type": "string"
           },
           "stage": {
+            "enum": [
+              "queued",
+              "tape",
+              "data",
+              "engine",
+              "artifact",
+              "cancellation",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
             "title": "Stage",
             "type": "string"
           },

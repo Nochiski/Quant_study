@@ -402,7 +402,16 @@ export type BacktestCancelResult = {
   /**
    * Stage
    */
-  stage: string;
+  stage:
+    | "queued"
+    | "tape"
+    | "data"
+    | "engine"
+    | "artifact"
+    | "cancellation"
+    | "completed"
+    | "cancelled"
+    | "failed";
   status: RunStatus;
   /**
    * Updated At
@@ -691,7 +700,16 @@ export type BacktestRunState = {
   /**
    * Stage
    */
-  stage: string;
+  stage:
+    | "queued"
+    | "tape"
+    | "data"
+    | "engine"
+    | "artifact"
+    | "cancellation"
+    | "completed"
+    | "cancelled"
+    | "failed";
   status: RunStatus;
   /**
    * Updated At

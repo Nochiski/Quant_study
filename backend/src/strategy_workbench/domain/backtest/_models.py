@@ -539,13 +539,29 @@ class BacktestRunResult:
     artifacts: RawArtifactBundle
 
 
+# run 진행 단계 어휘의 단일 정본(도메인 리뷰 B DR-B-03). 실행 유스케이스만 단계를 정하고, 실행기는
+# 자기 작업 안의 비율과 설명만 보고한다 — engine 구간 동안 단계는 `engine` 하나다. 프론트가 단계를
+# 번역하면 이 어휘가 키 목록이다(#336 V1-07).
+RunStage = Literal[
+    "queued",
+    "tape",
+    "data",
+    "engine",
+    "artifact",
+    "cancellation",
+    "completed",
+    "cancelled",
+    "failed",
+]
+
+
 @dataclass(frozen=True)
 class RunProgressEvent:
     sequence: int
     run_id: str
     status: RunStatus
     progress: float
-    stage: str
+    stage: RunStage
     message: str
     occurred_at: datetime
 
@@ -593,7 +609,7 @@ class BacktestRunState:
     run_id: str
     status: RunStatus
     progress: float
-    stage: str
+    stage: RunStage
     message: str
     created_at: datetime
     updated_at: datetime

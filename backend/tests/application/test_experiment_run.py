@@ -192,7 +192,7 @@ class _FakeRuns:
                 run_id=run_id,
                 status=self.run_statuses[run_id],
                 progress=0.0,
-                stage="",
+                stage="queued",
                 message="",
                 created_at=_AT,
                 updated_at=_AT,

@@ -21,11 +21,21 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunState,
     RunProgressEvent,
+    RunStage,
     RunStatus,
 )
 
 _RUN = "run-1"
 _AT = datetime(2026, 9, 29, tzinfo=UTC)
+# 상태마다 그 상태에서 run 이 싣는 단계(`RunStage`). 스트림은 단계를 읽지 않는다
+_STAGE: dict[RunStatus, RunStage] = {
+    RunStatus.QUEUED: "queued",
+    RunStatus.RUNNING: "engine",
+    RunStatus.CANCEL_REQUESTED: "cancellation",
+    RunStatus.CANCELLED: "cancelled",
+    RunStatus.COMPLETED: "completed",
+    RunStatus.FAILED: "failed",
+}
 
 
 class _ScriptedRuns:
@@ -42,7 +52,7 @@ class _ScriptedRuns:
     def state(self, run_id: str) -> BacktestRunState:
         self._index = min(self._index + 1, len(self._steps) - 1)
         status = self._steps[self._index][0]
-        return BacktestRunState(run_id, status, 0.0, status.value, status.value, _AT, _AT)
+        return BacktestRunState(run_id, status, 0.0, _STAGE[status], status.value, _AT, _AT)
 
     def events(self, run_id: str, *, after_sequence: int = -1) -> tuple[RunProgressEvent, ...]:
         stored = self._steps[max(self._index, 0)][1]
@@ -50,7 +60,7 @@ class _ScriptedRuns:
 
 
 def _event(sequence: int, status: RunStatus) -> RunProgressEvent:
-    return RunProgressEvent(sequence, _RUN, status, 0.0, status.value, status.value, _AT)
+    return RunProgressEvent(sequence, _RUN, status, 0.0, _STAGE[status], status.value, _AT)
 
 
 def _run(runs: _ScriptedRuns, *, keepalive_seconds: float = 15.0) -> list[str]:

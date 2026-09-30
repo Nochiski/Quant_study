@@ -324,7 +324,7 @@ const server = setupServer(
       run_id: params.runId,
       status: "completed",
       progress: 1,
-      stage: "done",
+      stage: "completed",
       message: "Run completed",
       created_at: "2026-09-04T00:00:00Z",
       updated_at: "2026-09-04T00:00:01Z",

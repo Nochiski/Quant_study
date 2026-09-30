@@ -389,6 +389,7 @@ class StrategyAuthoringService:
                     if issue.severity is ValidationSeverity.ERROR
                     else DiagnosticSeverity.WARNING
                 ),
+                anchor=DiagnosticAnchor.VALUE,
                 node_id=issue.node_id,
             )
             for issue in validation.issues

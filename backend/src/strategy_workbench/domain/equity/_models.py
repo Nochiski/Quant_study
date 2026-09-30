@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime
-from enum import Enum
+from enum import Enum, StrEnum
 
 
 class DataLoadStatus(Enum):
@@ -35,6 +35,21 @@ class FieldValueType(Enum):
     RATIO = "ratio"
     COUNT = "count"
     CATEGORY = "category"
+
+
+class FieldFrequency(StrEnum):
+    """필드 값이 새로 나오는 주기. 워크벤치 어댑터가 `list_fields()` 로 내는 어휘다.
+
+    원장 `dataset_profile` 의 빈도(session·report 등)와는 다른 어휘다 — 두 어댑터가 같은 필드에
+    같은 빈도를 답하는지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 화면은
+    이 값마다 문구를 두므로(#350) 목록을 늘리면 frontend typecheck 가 문구를 요구한다.
+    """
+
+    DAILY = "daily"
+    MONTHLY = "monthly"
+    QUARTERLY = "quarterly"
+    ANNUAL = "annual"
+    EVENT = "event"
 
 
 @dataclass(frozen=True)
@@ -150,7 +165,7 @@ class DatasetFieldProfile:
     label: str
     unit: str
     value_type: FieldValueType
-    frequency: str
+    frequency: FieldFrequency
     available_date_basis: str
     recommended_lag_sessions: int
     description: str

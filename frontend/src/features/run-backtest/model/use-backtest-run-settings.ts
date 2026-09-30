@@ -1,13 +1,15 @@
 import { useCallback, useMemo, useState } from "react";
 
-import { useRunEnvironmentSchema } from "../../../entities/backtest";
+import {
+  runEnvironmentWireText,
+  useRunEnvironmentSchema,
+} from "../../../entities/backtest";
 import type { RunEnvironment } from "../../../shared/api";
 import { t } from "../../../shared/config";
 import {
   initialRunEnvironmentValues,
   runEnvironmentFields,
-  runEnvironmentValuesOf,
-  runEnvironmentWireValues,
+  runEnvironmentWireRecord,
   validateRunEnvironment,
   type RunEnvironmentField,
   type RunEnvironmentValidation,
@@ -77,7 +79,17 @@ const START_FIELD: keyof RunEnvironment = "start";
 /** 시작 거절을 한 번의 누름으로 고치는 교정(검증 랩 V5-05). */
 type RunRejectionFix = { label: string; apply: () => void };
 
-type ScopedValues = { key: string; values: RunEnvironmentValues };
+/**
+ * 사용자가 고친 실행 설정(전략별). `wire` 는 요청 단위 기록이다(저장값·업그레이드 응답과 같은 모양). 표시
+ * 값은 렌더 때 스키마로 파생하므로, 스키마를 읽기 전에 채운 값도 스키마가 오면 그대로 보인다 — 칸 목록이
+ * 없다고 빈 값으로 덮지 않는다(#352 C-P2-4). `typed` 는 사용자가 친 표시 문자열이다. 표시 단위가 다른 칸
+ * (참여율 %)에서 치는 도중의 "12." 를 요청 단위로 바꿨다 되돌리면 소수점이 사라지므로 친 문자열을 보인다.
+ */
+type ScopedValues = {
+  key: string;
+  wire: RunEnvironmentValues;
+  typed: RunEnvironmentValues;
+};
 /**
  * 덜 친 날짜 칸(브라우저 `validity.badInput`)의 이름. `settled` 는 칸을 떠날 때, `typing` 은 칸 안(키를 뗌·값이
  * 바뀜)에서 읽은 것이다. 실행 게이트는 둘 다 본다. 비워 둘 수 있는 OOS 칸의 표시는 `settled` 만 봐서, 빈 칸에
@@ -149,12 +161,16 @@ export const useBacktestRunSettings = (storageKey: string) => {
     () => readStored(storageKey) ?? readStored(LAST_USED),
     [storageKey],
   );
+  const scoped = edited !== null && edited.key === storageKey ? edited : null;
   const environmentValues = useMemo(
-    () =>
-      edited !== null && edited.key === storageKey
-        ? edited.values
-        : initialRunEnvironmentValues(environmentFields, stored),
-    [edited, environmentFields, storageKey, stored],
+    () => ({
+      ...initialRunEnvironmentValues(
+        environmentFields,
+        scoped === null ? stored : scoped.wire,
+      ),
+      ...scoped?.typed,
+    }),
+    [environmentFields, scoped, stored],
   );
   const dates =
     incompleteDates !== null && incompleteDates.key === storageKey
@@ -187,21 +203,27 @@ export const useBacktestRunSettings = (storageKey: string) => {
     ): void => setFields((current) => ({ ...current, [field]: value })),
     [],
   );
-  const replaceEnvironment = useCallback(
-    (next: RunEnvironmentValues): void => {
-      setEdited({ key: storageKey, values: next });
+  const edit = useCallback(
+    (wire: RunEnvironmentValues, typed: RunEnvironmentValues): void => {
+      setEdited({ key: storageKey, wire, typed });
       // 저장은 요청 단위로 한다 — 표시 단위(참여율 %)가 바뀌어도 저장값의 뜻은 그대로다.
-      writeStored(
-        storageKey,
-        runEnvironmentWireValues(environmentFields, next),
-      );
+      writeStored(storageKey, wire);
     },
-    [environmentFields, storageKey],
+    [storageKey],
   );
   const setEnvironmentValue = useCallback(
-    (name: string, value: string): void =>
-      replaceEnvironment({ ...environmentValues, [name]: value }),
-    [environmentValues, replaceEnvironment],
+    (name: string, value: string): void => {
+      const field = environmentFields.find(
+        (candidate) => candidate.name === name,
+      );
+      if (field === undefined) return;
+      const base = scoped ?? { wire: stored ?? {}, typed: {} };
+      edit(
+        { ...base.wire, [name]: runEnvironmentWireText(field, value) },
+        { ...base.typed, [name]: value },
+      );
+    },
+    [edit, environmentFields, scoped, stored],
   );
   /**
    * 날짜 칸(실행 설정 칸과 OOS 시작일)이 덜 쳐졌는지 칸이 알려 준다. 칸 안에서 난 일(`leaving` 거짓)은
@@ -288,11 +310,13 @@ export const useBacktestRunSettings = (storageKey: string) => {
     },
     [setEnvironmentValue],
   );
-  /** 업그레이드 응답처럼 완성된 실행 설정으로 칸 전부를 바꾼다(사용자가 누른 뒤에만 부른다). */
+  /**
+   * 업그레이드 응답처럼 완성된 실행 설정으로 칸 전부를 바꾼다(사용자가 누른 뒤에만 부른다). 스키마를 아직
+   * 읽지 못했어도 값을 그대로 들고, 스키마가 오면 그 값으로 칸을 채운다(#352 C-P2-4).
+   */
   const applyEnvironment = useCallback(
-    (next: RunEnvironment): void =>
-      replaceEnvironment(runEnvironmentValuesOf(environmentFields, next)),
-    [environmentFields, replaceEnvironment],
+    (next: RunEnvironment): void => edit(runEnvironmentWireRecord(next), {}),
+    [edit],
   );
 
   return {

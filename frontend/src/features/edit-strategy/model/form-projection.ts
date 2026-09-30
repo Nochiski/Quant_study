@@ -17,7 +17,7 @@ import type { DocumentDiagnostic } from "./document-state";
 import {
   projectApplicability,
   type DefaultResolver,
-} from "./field-applicability";
+} from "../../../shared/api";
 import {
   resolveRef,
   schemaAt,

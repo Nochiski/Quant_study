@@ -350,6 +350,65 @@ export type AssistantUnprocessableResponse = {
 };
 
 /**
+ * BacktestCancelResult
+ *
+ * 취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면
+ * `kept_by_owners` 가 참이다 — 화면은 이 칸으로 "실험이 쓰는 실행" 을 알린다(#382).
+ */
+export type BacktestCancelResult = {
+  /**
+   * Artifact Sha256
+   */
+  artifact_sha256?: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Error Code
+   */
+  error_code?:
+    | "portfolio.strategy.invalid"
+    | "portfolio.data.unavailable"
+    | "portfolio.raw_observation.invalid"
+    | "backtest.run.invalid"
+    | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
+    | "backtest.run.internal"
+    | "backtest.run.interrupted"
+    | null;
+  /**
+   * Kept By Owners
+   */
+  kept_by_owners?: boolean;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Progress
+   */
+  progress: number;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Stage
+   */
+  stage: string;
+  status: RunStatus;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+};
+
+/**
  * BacktestEnvironmentRequiredDetail
  *
  * 실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
@@ -609,6 +668,7 @@ export type BacktestRunState = {
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -1201,10 +1261,7 @@ export type DatasetFieldProfile = {
    * Field Id
    */
   field_id: string;
-  /**
-   * Frequency
-   */
-  frequency: string;
+  frequency: FieldFrequency;
   /**
    * Label
    */
@@ -1604,6 +1661,7 @@ export type ExperimentErrorDetail = {
     | "experiment.search.too_many_points"
     | "experiment.search.unknown_parameter"
     | "experiment.selection.not_completed"
+    | "experiment.selection.not_finished"
     | "experiment.split.invalid"
     | "experiment.split.no_window"
     | "experiment.trial.not_found"
@@ -1715,9 +1773,21 @@ export type ExperimentRequest = {
  */
 export type ExperimentSelection = {
   /**
+   * Deflated Sharpe
+   *
+   * 고른 trial 실행의 샤프를 고를 때의 계열 N·시도 대표 샤프 분산으로 깎은 DSR(0~1). 지표가 비었거나 분산을 낼 수 없으면 비어 있다.
+   */
+  deflated_sharpe?: number | null;
+  /**
    * Experiment Id
    */
   experiment_id: string;
+  /**
+   * Ledger Representative Sharpe
+   *
+   * 고른 trial 이 속한 시도의 계열 원장 대표 샤프. 세션 단위(연율화 전)이고 그 시도에서 처음 결과가 난 실행의 값이라 고른 trial 실행의 샤프(DSR 분자)가 아닐 수 있다.
+   */
+  ledger_representative_sharpe?: number | null;
   /**
    * Parameter Values
    */
@@ -1740,6 +1810,12 @@ export type ExperimentSelection = {
    * Strategy Id
    */
   strategy_id: string;
+  /**
+   * Trial Count
+   *
+   * 고를 때의 계열 시도 수 N(계열 원장).
+   */
+  trial_count?: number | null;
   /**
    * Trial Index
    */
@@ -1846,7 +1922,7 @@ export type FactorAnalytics = {
 /**
  * FactorAvailability
  */
-export type FactorAvailability = "implemented" | "catalog_only";
+export type FactorAvailability = "implemented" | "catalog_only" | "unavailable";
 
 /**
  * FactorCatalog
@@ -2360,7 +2436,7 @@ export type FieldCatalogFacets = {
   /**
    * Frequencies
    */
-  frequencies: Array<string>;
+  frequencies: Array<FieldFrequency>;
   /**
    * Units
    */
@@ -2503,6 +2579,18 @@ export type FieldCoverageCapability = {
    */
   venues: Array<string>;
 };
+
+/**
+ * FieldFrequency
+ *
+ * 필드 값이 새로 나오는 주기. 워크벤치 어댑터가 `list_fields()` 로 내는 어휘다.
+ *
+ * 원장 `dataset_profile` 의 빈도(session·report 등)와는 다른 어휘다 — 두 어댑터가 같은 필드에
+ * 같은 빈도를 답하는지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 화면은
+ * 이 값마다 문구를 두므로(#350) 목록을 늘리면 frontend typecheck 가 문구를 요구한다.
+ */
+export type FieldFrequency =
+  "daily" | "monthly" | "quarterly" | "annual" | "event";
 
 /**
  * FieldLag
@@ -5898,7 +5986,12 @@ export type TraceUnprocessableResponse = {
  * TraceValueStatus
  */
 export type TraceValueStatus =
-  "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
+  | "ok"
+  | "missing_input"
+  | "warm_up"
+  | "divide_by_zero"
+  | "group_missing"
+  | "masked";
 
 /**
  * TrialAttempt
@@ -6570,6 +6663,7 @@ export type WalkForwardWindowResult = {
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -7258,7 +7352,7 @@ export type CancelBacktestResponses = {
   /**
    * Successful Response
    */
-  200: BacktestRunState;
+  200: BacktestCancelResult;
 };
 
 export type CancelBacktestResponse =

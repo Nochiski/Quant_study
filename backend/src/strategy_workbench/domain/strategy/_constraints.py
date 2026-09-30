@@ -106,8 +106,8 @@ class ApplicabilityCondition:
     def describe(self) -> str:
         return f"{self.path} = {self.equals}" if self.equals is not None else f"{self.path} 설정"
 
-    def holds_for(self, spec: StrategySpec) -> bool:
-        value = resolve_scalar(spec, self.pointer)
+    def holds_for(self, document: object) -> bool:
+        value = resolve_scalar(document, self.pointer)
         if self.not_null:
             return value is not None
         return value is not None and str(getattr(value, "value", value)) == self.equals
@@ -138,8 +138,8 @@ class FieldApplicability:
         if not self.conditions:
             raise ValueError(f"field applicability needs a condition — pointer={self.pointer!r}")
 
-    def applies_to(self, spec: StrategySpec) -> bool:
-        return all(condition.holds_for(spec) for condition in self.conditions)
+    def applies_to(self, document: object) -> bool:
+        return all(condition.holds_for(document) for condition in self.conditions)
 
 
 FIELD_APPLICABILITY: tuple[FieldApplicability, ...] = (
@@ -441,9 +441,10 @@ def field_default(pointer: str) -> object:
     raise KeyError(f"unknown authoring pointer — pointer={pointer!r}")
 
 
-def resolve_scalar(spec: StrategySpec, pointer: str) -> object:
-    """Read the value at a scalar constraint pointer from a typed spec."""
-    current: object = spec
+def resolve_scalar(document: object, pointer: str) -> object:
+    """포인터를 속성으로 따라가 값을 읽는다. 전략 문서(`StrategySpec`)와 실행 설정
+    (`RunEnvironment`)처럼 포인터 모양의 dataclass 값이면 문서 종류를 가리지 않는다(#352)."""
+    current: object = document
     for segment in pointer.strip("/").split("/"):
         current = getattr(current, segment)
     return current

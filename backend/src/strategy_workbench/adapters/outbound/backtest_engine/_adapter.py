@@ -56,6 +56,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     impact_scales,
     participation_volumes,
     sell_tax_schedule,
+    settlement_multipliers,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     ENGINE_RULES_VERSION,
@@ -257,6 +258,22 @@ class BacktestEngineExecutorAdapter:
             (item.session, item.security_id, item.close, item.trading_value)
             for item in (*request.dataset.history_bars, *request.dataset.bars)
         ]
+        # 자본변동은 엔진처럼 사건 세션 이후 그 종목의 첫 행에서 정산된다(#339). 가격이 반비례로
+        # 확인된 사건만 판단일 종가를 정산 뒤 주식 단위로 바꾼다.
+        settled = settlement_multipliers(
+            cost_rows,
+            (
+                (
+                    item.session,
+                    item.security_id,
+                    float(item.ratio) if item.action_type in _PRICE_ADJUSTING_ACTIONS else 1.0,
+                )
+                for item in (
+                    *request.dataset.history_corporate_actions,
+                    *request.dataset.corporate_actions,
+                )
+            ),
+        )
         engine = BacktestEngine(
             RunConfig(
                 run_id=request.run_id,
@@ -284,18 +301,8 @@ class BacktestEngineExecutorAdapter:
                 ),
                 _columnar_feed(
                     request.dataset.bars,
-                    participation_volumes(environment, cost_rows),
-                    impact_scales(
-                        environment,
-                        cost_rows,
-                        {
-                            (item.session, item.security_id)
-                            for item in (
-                                *request.dataset.history_corporate_actions,
-                                *request.dataset.corporate_actions,
-                            )
-                        },
-                    ),
+                    participation_volumes(environment, cost_rows, settled),
+                    impact_scales(environment, cost_rows, settled),
                 ),
                 corporate_actions=corporate_actions,
                 universe=universe,

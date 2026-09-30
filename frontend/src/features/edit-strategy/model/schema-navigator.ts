@@ -5,12 +5,11 @@
  * sibling `kind` value in the document, so a `kind` change re-selects the allowed fields.
  */
 
-import type { ApplicableWhen } from "../../../shared/api";
+import { isApplicableWhen, type ApplicableWhen } from "../../../shared/api";
 import {
   decodePointerSegment,
   pointerSegments,
 } from "../../../shared/lib/yaml12";
-import { isApplicableWhen } from "./field-applicability";
 
 export type JsonSchema = Record<string, unknown>;
 

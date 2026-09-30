@@ -75,8 +75,12 @@ class TrialRunPort(Protocol):
         """
         ...
 
-    def trial_ledger(self, lineage_id: str) -> TrialLedger:
-        """계열 원장. 창 고르기는 실행마다 원장에 적힌 세션 샤프를 학습 점수로 읽는다."""
+    def trial_ledger(self, request: BacktestRunSpec) -> TrialLedger:
+        """기반 요청이 속한 계열의 원장. 계열은 실행 서비스가 실행 접수와 같은 규칙으로 정한다.
+
+        창 고르기는 실행마다 원장에 적힌 세션 샤프를 학습 점수로 읽고, 후보 선택은 N·시도 대표
+        샤프로 DSR 스냅숏을 낸다.
+        """
         ...
 
     def sessions(self, start: date, end: date) -> tuple[date, ...]:

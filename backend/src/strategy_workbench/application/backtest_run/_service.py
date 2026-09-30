@@ -4,7 +4,7 @@ import logging
 import re
 from collections import deque
 from collections.abc import Callable, Collection
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
 from threading import Event, RLock, Thread
 
@@ -34,6 +34,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
 )
 from strategy_workbench.domain.backtest.facade.runs import (
     AdmissionRejectionCode,
+    BacktestCancelResult,
     BacktestRunResult,
     BacktestRunSpec,
     BacktestRunState,
@@ -68,7 +69,11 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from ._gc_policy import full_collections_suspended
 from ._scheduler import RunQueue, experiment_slots
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
-from .ports.outgoing.backtest_data import BacktestDataPort, BacktestDataQuery
+from .ports.outgoing.backtest_data import (
+    BacktestDataNotReadyError,
+    BacktestDataPort,
+    BacktestDataQuery,
+)
 from .ports.outgoing.backtest_executor import (
     BacktestExecutionRequest,
     BacktestExecutorPort,
@@ -236,6 +241,8 @@ class BacktestRunService:
         self._now = now
         self._run_slots = run_slots
         self._records: dict[str, _RunRecord] = {}
+        # 끝난 run 은 최근 것만 메모리에 둔다(끝난 순). 상태·요청·결과의 정본은 저장소·산출물이다.
+        self._finished: deque[str] = deque()
         self._waiting: RunQueue[_RunRecord] = RunQueue()
         self._running = 0
         self._running_experiments = 0
@@ -290,11 +297,9 @@ class BacktestRunService:
                     and existing.provenance == provenance
                 ):
                     existing.owners.add(owner)
-                    if owner is None and existing in self._waiting:
-                        # 사용자가 이은 대기 run 은 단일 실행 레인으로 옮긴다.
-                        self._waiting.remove(existing)
-                        self._waiting.push(existing, None)
-                        self._dispatch()
+                    # 사용자가 이었으면 단일 실행 레인, 아니면 멈추지 않은 실험 레인으로 옮긴다.
+                    self._relane(existing)
+                    self._dispatch()
                     return BacktestStartResponse(existing.state)
             run_id = self._new_id()
             created = self._now()
@@ -332,7 +337,7 @@ class BacktestRunService:
             # 응답은 접수 시점 상태다. 스레드를 띄운 뒤 record.state 를 읽으면 이미 tape 단계로
             # 바뀌어 있을 수 있어 202 본문의 status 가 비결정이 된다.
             accepted = record.state
-            self._waiting.push(record, owner)
+            self._waiting.push(record, self._lane(record))
             self._dispatch()
         return BacktestStartResponse(accepted)
 
@@ -416,6 +421,12 @@ class BacktestRunService:
             raise BacktestParameterValueError(error) from error
         return preview_trial(None if lineage_id is None else self.trial_ledger(lineage_id), key)
 
+    def request_ledger(self, request: BacktestRunSpec) -> TrialLedger | None:
+        """요청이 속한 계열의 원장(`_lineage` 규칙). 계열이 없으면 None. 전략 검증은 하지 않는다."""
+        _spec, provenance = self._resolve(request)
+        lineage_id = self._lineage(request, provenance)
+        return None if lineage_id is None else self.trial_ledger(lineage_id)
+
     def trial_ledger(self, lineage_id: str) -> TrialLedger:
         """계열 원장 — 시도 묶음·재확인·N 제외 실행·차단한 시도.
 
@@ -444,6 +455,9 @@ class BacktestRunService:
         """
         with self._lock:
             self._waiting.configure(owner, paused=paused, weight=weight)
+            for record in self._records.values():
+                if owner in record.owners and len(record.owners) > 1:
+                    self._relane(record)
             self._dispatch()
 
     def states(self, run_ids: Collection[str]) -> dict[str, BacktestRunState]:
@@ -506,30 +520,24 @@ class BacktestRunService:
             )
         return self._artifact_store.load(run_id, sha256=state.artifact_sha256)
 
-    def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestRunState:
+    def cancel(self, run_id: str, *, owner: str | None = None) -> BacktestCancelResult:
         """`owner`(없으면 사용자)가 이 run 에서 빠진다. 남은 소유자가 없을 때만 run 을 취소한다.
 
-        실험만 쓰는 run 은 사용자가 취소해도 돌고, 그 실험을 취소하면 멈춘다.
+        실험만 쓰는 run 은 사용자가 취소해도 돌고(`kept_by_owners`), 그 실험을 취소하면 멈춘다.
+        남은 소유자가 있으면 대기 run 의 레인을 그들로 다시 고른다.
         """
         with self._lock:
             record = self._records.get(run_id)
             if record is None:
                 # 이 프로세스가 돌리지 않은 run 은 재시작 때 이미 종결됐다.
-                return self.state(run_id)
-            user_leaves_shared_wait = (
-                owner is None and None in record.owners and record in self._waiting
-            )
+                return _cancel_result(self.state(run_id), kept_by_owners=False)
             record.owners.discard(owner)
-            if user_leaves_shared_wait and record.owners:
-                # 사용자가 이어 단일 실행 레인에 올린 run 은 남은 실험의 레인으로 되돌린다.
-                self._waiting.remove(record)
-                self._waiting.push(record, next(iter(record.owners)))
-            if record.owners or record.state.status in (
-                RunStatus.COMPLETED,
-                RunStatus.CANCELLED,
-                RunStatus.FAILED,
-            ):
-                return record.state
+            if record.state.status in _SETTLED:
+                return _cancel_result(record.state, kept_by_owners=False)
+            if record.owners:
+                self._relane(record)
+                self._dispatch()
+                return _cancel_result(record.state, kept_by_owners=True)
             record.cancellation.set()
             if record in self._waiting:
                 # 스레드가 없는 대기 run 은 여기서 끝낸다. 자리가 날 때까지 `cancel_requested` 로
@@ -538,15 +546,27 @@ class BacktestRunService:
                 self._emit(
                     record, RunStatus.CANCELLED, record.state.progress, "cancelled", "Run cancelled"
                 )
-                return record.state
-            self._emit(
-                record,
-                RunStatus.CANCEL_REQUESTED,
-                record.state.progress,
-                "cancellation",
-                "Cancellation requested",
-            )
-            return record.state
+            else:
+                self._emit(
+                    record,
+                    RunStatus.CANCEL_REQUESTED,
+                    record.state.progress,
+                    "cancellation",
+                    "Cancellation requested",
+                )
+            return _cancel_result(record.state, kept_by_owners=False)
+
+    def _lane(self, record: _RunRecord) -> str | None:
+        """대기 run 의 레인. 사용자가 이었으면 단일 실행 레인이고, 아니면 일시정지하지 않은 소유
+        실험의 레인이다 — 일시정지는 그 run 의 소유 실험이 모두 멈췄을 때만 run 을 붙잡는다."""
+        if None in record.owners:
+            return None
+        owners = sorted(owner for owner in record.owners if owner is not None)
+        return next((owner for owner in owners if not self._waiting.is_paused(owner)), owners[0])
+
+    def _relane(self, record: _RunRecord) -> None:
+        """소유자나 일시정지가 바뀐 대기 run 을 맞는 레인으로 옮긴다. `self._lock` 안에서 부른다."""
+        self._waiting.move(record, self._lane(record))
 
     def events(self, run_id: str, *, after_sequence: int = -1) -> tuple[RunProgressEvent, ...]:
         """메모리 링의 진행 이벤트. 이 프로세스가 돌리지 않은 run 은 이벤트가 없다."""
@@ -890,13 +910,21 @@ class BacktestRunService:
                     cancelled_after_commit = True
                 else:
                     record.state = replace(record.state, artifact_sha256=commit.sha256)
-                    self._emit(
-                        record,
-                        RunStatus.COMPLETED,
-                        1.0,
-                        "completed",
-                        "Run completed",
-                    )
+                    try:
+                        self._emit(
+                            record,
+                            RunStatus.COMPLETED,
+                            1.0,
+                            "completed",
+                            "Run completed",
+                            durable=True,
+                        )
+                    except Exception:
+                        # 저장하지 못한 완료는 보이지 않는다 — 보이면 사용자가 본 결과를 원장이
+                        # 세지 않는다(N 과소, #381). 실행은 아래 실패 분기로 끝난다.
+                        record.state = replace(record.state, artifact_sha256=None)
+                        self._artifact_store.discard(run_id)
+                        raise
             if cancelled_after_commit:
                 self._artifact_store.discard(run_id)
                 raise RunCancelledError("run cancelled during artifact commit")
@@ -981,10 +1009,14 @@ class BacktestRunService:
         progress: float,
         stage: str,
         message: str,
+        *,
+        durable: bool = False,
     ) -> None:
+        """상태를 바꾸고 이벤트를 남긴다. `durable` 이면 저장이 먼저이고 실패하면 올린다(메모리
+        상태도 바꾸지 않는다). 아니면 상태가 바뀔 때만 저장하고 저장 실패는 삼킨다(`_persist`)."""
         occurred_at = self._now()
         previous = record.state.status
-        record.state = replace(
+        state = replace(
             record.state,
             status=status,
             progress=progress,
@@ -992,6 +1024,9 @@ class BacktestRunService:
             message=message,
             updated_at=occurred_at,
         )
+        if durable:
+            self._repository.update(state)
+        record.state = state
         record.events.append(
             RunProgressEvent(
                 sequence=record.events[-1].sequence + 1 if record.events else 0,
@@ -1004,14 +1039,26 @@ class BacktestRunService:
             )
         )
         # 상태가 바뀔 때만 저장한다(진행률은 메모리). 접수는 `start` 가 `add` 로 저장한다.
-        if status is not previous:
-            self._persist(record.state)
+        saved = durable
+        if status is not previous and not durable:
+            saved = self._persist(record.state)
+        # 종결이 저장된 run 만 사본을 버린다 — 저장하지 못한 run 의 사본을 버리면 저장소의 옛
+        # 상태(`queued`·`running`)로 되돌아가 끝난 run 이 다시 도는 것처럼 보인다.
+        if status in _SETTLED and saved:
+            self._retire(record)
 
-    def _persist(self, state: BacktestRunState) -> None:
-        """상태 전이를 저장한다. 실패해도 run 수명은 멈추지 않는다.
+    def _retire(self, record: _RunRecord) -> None:
+        """끝난 run 을 최근 목록에 넣고, 넘친 오래된 끝난 run 의 메모리 사본을 버린다(#332)."""
+        self._finished.append(record.state.run_id)
+        while len(self._finished) > _FINISHED_RECORDS_KEPT:
+            self._records.pop(self._finished.popleft(), None)
+
+    def _persist(self, state: BacktestRunState) -> bool:
+        """상태 전이를 저장하고 저장했는지 돌려준다. 실패해도 run 수명은 멈추지 않는다.
 
         run 스레드의 실패 분기가 다시 저장하다 터지면 레코드가 비종결로 굳는다. 이 프로세스에서는
-        메모리 상태가 계속 맞고, 저장되지 않은 전이는 재시작 때 `interrupted` 로 닫힌다.
+        메모리 상태가 계속 맞고(저장하지 못한 종결 run 은 사본을 버리지 않는다), 저장되지 않은
+        전이는 재시작 때 `interrupted` 로 닫힌다. 완료는 여기로 오지 않는다(`_emit(durable=True)`).
         """
         try:
             self._repository.update(state)
@@ -1022,11 +1069,26 @@ class BacktestRunService:
                 state.status,
                 state.stage,
             )
+            return False
+        return True
 
     @staticmethod
     def _raise_if_cancelled(record: _RunRecord) -> None:
         if record.cancellation.is_set():
             raise RunCancelledError("run cancelled")
+
+
+# 끝난 run 상태 집합과, 메모리에 사본을 남기는 최근 끝난 run 수. 이보다 오래 끝난 run 은
+# 저장소에서 읽고 진행 이벤트는 비어 있다.
+_SETTLED = (RunStatus.COMPLETED, RunStatus.CANCELLED, RunStatus.FAILED)
+_FINISHED_RECORDS_KEPT = 256
+
+
+def _cancel_result(state: BacktestRunState, *, kept_by_owners: bool) -> BacktestCancelResult:
+    return BacktestCancelResult(
+        **{item.name: getattr(state, item.name) for item in fields(BacktestRunState)},
+        kept_by_owners=kept_by_owners,
+    )
 
 
 # 실행 접수 거절과 그 안정 키. HTTP 거절(시작·미리 계산·실험 기반 검사와, 같은 판정을 타는
@@ -1062,6 +1124,8 @@ def _failure_code(error: BaseException) -> RunFailureCode:
         return "backtest.run.invalid"
     if isinstance(error, EquityWipedOutError):
         return "backtest.run.equity_wiped_out"
+    if isinstance(error, BacktestDataNotReadyError):
+        return "backtest.run.data_not_ready"
     return "backtest.run.internal"
 
 

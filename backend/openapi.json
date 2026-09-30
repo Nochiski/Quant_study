@@ -454,6 +454,99 @@
         "title": "AssistantUnprocessableResponse",
         "type": "object"
       },
+      "BacktestCancelResult": {
+        "description": "취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면\n`kept_by_owners` 가 참이다 — 화면은 이 칸으로 \"실험이 쓰는 실행\" 을 알린다(#382).",
+        "properties": {
+          "artifact_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Sha256"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "portfolio.strategy.invalid",
+                  "portfolio.data.unavailable",
+                  "portfolio.raw_observation.invalid",
+                  "backtest.run.invalid",
+                  "backtest.run.equity_wiped_out",
+                  "backtest.run.data_not_ready",
+                  "backtest.run.internal",
+                  "backtest.run.interrupted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "kept_by_owners": {
+            "default": false,
+            "title": "Kept By Owners",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "progress",
+          "stage",
+          "message",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BacktestCancelResult",
+        "type": "object"
+      },
       "BacktestEnvironmentRequiredDetail": {
         "description": "실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.",
         "properties": {
@@ -860,6 +953,7 @@
                   "portfolio.raw_observation.invalid",
                   "backtest.run.invalid",
                   "backtest.run.equity_wiped_out",
+                  "backtest.run.data_not_ready",
                   "backtest.run.internal",
                   "backtest.run.interrupted"
                 ],
@@ -1839,8 +1933,7 @@
             "type": "string"
           },
           "frequency": {
-            "title": "Frequency",
-            "type": "string"
+            "$ref": "#/components/schemas/FieldFrequency"
           },
           "label": {
             "title": "Label",
@@ -2449,6 +2542,7 @@
               "experiment.search.too_many_points",
               "experiment.search.unknown_parameter",
               "experiment.selection.not_completed",
+              "experiment.selection.not_finished",
               "experiment.split.invalid",
               "experiment.split.no_window",
               "experiment.trial.not_found",
@@ -2654,9 +2748,33 @@
       "ExperimentSelection": {
         "description": "사용자가 고른 후보 기록(spec D9). 되돌릴 수 없다.",
         "properties": {
+          "deflated_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "고른 trial 실행의 샤프를 고를 때의 계열 N·시도 대표 샤프 분산으로 깎은 DSR(0~1). 지표가 비었거나 분산을 낼 수 없으면 비어 있다.",
+            "title": "Deflated Sharpe"
+          },
           "experiment_id": {
             "title": "Experiment Id",
             "type": "string"
+          },
+          "ledger_representative_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "고른 trial 이 속한 시도의 계열 원장 대표 샤프. 세션 단위(연율화 전)이고 그 시도에서 처음 결과가 난 실행의 값이라 고른 trial 실행의 샤프(DSR 분자)가 아닐 수 있다.",
+            "title": "Ledger Representative Sharpe"
           },
           "parameter_values": {
             "additionalProperties": {
@@ -2694,6 +2812,18 @@
           "strategy_id": {
             "title": "Strategy Id",
             "type": "string"
+          },
+          "trial_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "고를 때의 계열 시도 수 N(계열 원장).",
+            "title": "Trial Count"
           },
           "trial_index": {
             "title": "Trial Index",
@@ -2905,7 +3035,8 @@
       "FactorAvailability": {
         "enum": [
           "implemented",
-          "catalog_only"
+          "catalog_only",
+          "unavailable"
         ],
         "title": "FactorAvailability",
         "type": "string"
@@ -3763,7 +3894,7 @@
           },
           "frequencies": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/FieldFrequency"
             },
             "title": "Frequencies",
             "type": "array"
@@ -4040,6 +4171,18 @@
         ],
         "title": "FieldCoverageCapability",
         "type": "object"
+      },
+      "FieldFrequency": {
+        "description": "필드 값이 새로 나오는 주기. 워크벤치 어댑터가 `list_fields()` 로 내는 어휘다.\n\n원장 `dataset_profile` 의 빈도(session·report 등)와는 다른 어휘다 — 두 어댑터가 같은 필드에\n같은 빈도를 답하는지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 화면은\n이 값마다 문구를 두므로(#350) 목록을 늘리면 frontend typecheck 가 문구를 요구한다.",
+        "enum": [
+          "daily",
+          "monthly",
+          "quarterly",
+          "annual",
+          "event"
+        ],
+        "title": "FieldFrequency",
+        "type": "string"
       },
       "FieldLag": {
         "properties": {
@@ -9249,7 +9392,8 @@
           "missing_input",
           "warm_up",
           "divide_by_zero",
-          "group_missing"
+          "group_missing",
+          "masked"
         ],
         "title": "TraceValueStatus",
         "type": "string"
@@ -10305,6 +10449,7 @@
                   "portfolio.raw_observation.invalid",
                   "backtest.run.invalid",
                   "backtest.run.equity_wiped_out",
+                  "backtest.run.data_not_ready",
                   "backtest.run.internal",
                   "backtest.run.interrupted"
                 ],
@@ -11399,6 +11544,7 @@
     },
     "/api/v1/backtests/{run_id}/cancel": {
       "post": {
+        "description": "사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다.",
         "operationId": "cancelBacktest",
         "parameters": [
           {
@@ -11416,7 +11562,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BacktestRunState"
+                  "$ref": "#/components/schemas/BacktestCancelResult"
                 }
               }
             },

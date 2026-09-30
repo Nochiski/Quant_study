@@ -46,9 +46,14 @@ from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
 from strategy_workbench.adapters.outbound.strategy_memory.facade.repository import (
     InMemoryStrategyRepository,
 )
-from strategy_workbench.application.backtest_run.facade.ports import BacktestDataQuery
+from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataNotReadyError,
+    BacktestDataQuery,
+    CorporateActionRecord,
+)
 from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
 from strategy_workbench.application.factor_research.facade.research import (
+    FactorCatalogQuery,
     FactorPreviewRequest,
     FactorResearchService,
 )
@@ -74,7 +79,10 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelResult,
     UniverseHistoryQuery,
 )
-from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
+from strategy_workbench.domain.factor.facade.registry import (
+    FactorAvailability,
+    build_default_factor_registry,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
     FactorGraph,
@@ -1034,8 +1042,33 @@ def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
 
     field_ids = tuple(profile.field_id for profile in adapter.list_fields())
     assert catalog == adapter.resolve_factor_fields(field_ids).fields
+    # `resolve_factor_fields` 는 모르는 id 를 버리므로 위 등식은 한 방향뿐이다. AI 팩터 도구가
+    # `list_fields` 로 가용성을 판정하므로 두 목록이 같은 집합임을 양방향으로 묶는다(#370)
+    assert {field.field_id for field in catalog} == set(field_ids)
     assert catalog, "필드가 하나도 없으면 compile 이 모든 필드를 없다고 본다"
     assert {field.value_type for field in catalog} == {NodeValueType.NUMERIC_SERIES}
+
+
+def test_factor_catalog_does_not_offer_a_factor_whose_field_the_ledger_lacks(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """#370(도메인 리뷰 A DR-A-02): 원장에 없는 필드(`UNSUPPORTED_FIELDS`)를 읽는 기본 graph 는
+    `implemented` 가 아니다. 편집기 예시 조각과 AI 도구가 실데이터에서 바로 compile 오류가 나는
+    팩터를 권하지 않는다. 가용성은 validate·preview 와 같은 필드 계약 port
+    (`resolve_factor_fields`)로 판정하고, compile 목록(`factor_field_catalog`)도 같은 메서드를
+    부른다.
+    """
+    service = FactorResearchService(build_default_factor_registry(), adapter, adapter)
+
+    def catalog(availability: FactorAvailability) -> set[str]:
+        query = FactorCatalogQuery(availability=(availability,), page_size=100)
+        return {definition.factor_id for definition in service.catalog(query).factors}
+
+    assert catalog(FactorAvailability.UNAVAILABLE) == {
+        "short.short_balance_ratio",
+        "event.earnings_surprise",
+    }
+    assert len(catalog(FactorAvailability.IMPLEMENTED)) == 5
 
 
 # ── BacktestDataPort ──────────────────────────────────────────────────────────
@@ -1124,6 +1157,55 @@ def test_backtest_dataset_drops_actions_after_the_last_bar_with_a_warning(
     assert dropped.severity is WarningSeverity.WARNING
     assert "dropped=1" in dropped.message and "000660:1@2024-01-10:reverse_split" in dropped.message
     assert all(_HANGUL.search(item.message) for item in dataset.warnings)
+
+
+def test_backtest_dataset_adjusts_an_unfolded_level_shift_by_the_base_price_ratio(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """원장이 계수를 못 낸 층 이동(`krx_base_inconsistent`)은 적용일 KRX 기준가 비로 수량을
+    바꾼다(#369).
+
+    엔진은 원주가 × 보유 수량으로 평가해, 사건 없이 bar 만 내면 층 배수가 곧 손익이다(실원장
+    025560 2020-06-11 종가 79 → 07-02 종가 3,700, ×46.8). 035420 은 01-10 에 정지했고 01-11
+    기준가가 정지일 종가의 10배다.
+    - 비의 분모는 앞 행(정지일 기준가 행) 종가 205,000 이라 비는 0.1 이다. 직전 거래 종가(01-09)
+      204,500 을 쓰면 0.09976 이고, 한 정지 구간에 재설정이 여럿이면 앞 재설정이 겹쳐 곱해진다.
+    - 01-09 의 늦게 공개된 ok 계수(뷰의 `factor_ok` 참)는 계수가 이미 층 이동을 설명한다 — 기준가
+      비로 한 번 더 조정하지 않아, 사건은 ok 계수 하나와 미접힘 하나뿐이다.
+    손계산: 01-09 종가 204,500 에 100주(2,045만 원) → 비 0.1 로 10주 → 01-11 종가 2,055,000 에
+    2,055만 원(+0.49%, 정지일 종가 변화 포함). 조정이 없으면 2억 550만 원(×10.05)이다.
+    """
+    dataset = adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("035420:1",), None))
+    shift = CorporateActionRecord(
+        WB_INCONSISTENT,
+        "035420:1",
+        "reverse_split",
+        "0.1",
+        "원장 미접힘·기준가 비 prev_close=205000 base=2050000",
+    )
+    assert dataset.corporate_actions == (
+        CorporateActionRecord(
+            WB_LATE_FACTOR, "035420:1", "reverse_split", "0.5", "035420:krx_base:2024-01-09"
+        ),
+        shift,
+    )
+    closes = {bar.session: bar.close for bar in dataset.bars}
+    assert WB_HALT_DATE not in closes  # 정지일은 bar 가 없다
+    held = 100 * float(shift.ratio)
+    assert held == 10
+    assert held * closes[WB_INCONSISTENT] / (100 * closes[WB_LATE_FACTOR]) - 1 == pytest.approx(
+        100_000 / 20_450_000
+    )
+    [warning] = [w for w in dataset.warnings if w.code == "equity.unfolded_level_shift"]
+    assert warning.severity is WarningSeverity.WARNING
+    assert "035420:1@2024-01-11 ratio=0.1 prev_close=205000 base=2050000" in warning.message
+    assert _HANGUL.search(warning.message)
+    # 워밍업 창의 층 이동은 충격 σ 만 읽는 사건이다 — 엔진 사건도 경고도 아니다
+    warmed = adapter.load_backtest_dataset(
+        BacktestDataQuery(END, END, ("035420:1",), None, history_sessions_before_start=2)
+    )
+    assert (warmed.corporate_actions, warmed.history_corporate_actions) == ((), (shift,))
+    assert "equity.unfolded_level_shift" not in {w.code for w in warmed.warnings}
 
 
 def test_backtest_dataset_counts_provisional_evening_rows_apart_from_invalid_ones(
@@ -1241,6 +1323,13 @@ def test_missing_or_stale_catalog_makes_macro_fields_unavailable(
             code in r.getMessage() and "ledger_sync catalog" in r.getMessage()
             for r in caplog.records
         ), code
+        # 백테스트는 원장이 접지 못한 층 이동을 카탈로그 뷰로만 읽는다 — 표로 돌아가 술어를 다시
+        # 적지 않고, run 이 코드화된 실패(`backtest.run.data_not_ready`)로 끝나게 멈춘다(#369).
+        # 조치는 사유 문장이 말한다
+        with pytest.raises(BacktestDataNotReadyError, match=code) as stopped:
+            adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("005930:1",), None))
+        assert "ledger_sync catalog" in str(stopped.value) and "다시 띄워" in str(stopped.value)
+        assert str(root.resolve()) not in str(stopped.value)
     # 원장 판은 meta 가 아니라 MANIFEST 에서 온다
     assert adapter.snapshot().snapshot_id.startswith(
         snapshot_id(table_builds(root)) + SNAPSHOT_CONTRACT_SEPARATOR
@@ -1487,16 +1576,19 @@ def test_catalog_locked_by_another_process_stops_boot_with_a_coded_error(tmp_pat
 
 
 def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) -> None:
-    """부팅 뒤 카탈로그가 잠겨도 매크로를 안 읽는 질의(원주가·유니버스·백테스트 bar)는 돈다 (#278).
+    """부팅 뒤 카탈로그가 잠겨도 매크로를 안 읽는 질의(원주가·유니버스)는 돈다 (#278).
 
     예전에는 질의마다 카탈로그를 열어, 잠긴 동안 가격 질의까지 원시 `IOException` 으로 죽었다.
-    매크로 원천(재무) 질의는 잠금이 풀릴 때까지 실패한다 — 빈 결과로 넘어가지 않는다.
+    매크로 원천(재무) 질의는 잠금이 풀릴 때까지 실패한다 — 빈 결과로 넘어가지 않는다. 백테스트
+    데이터도 원장이 접지 못한 층 이동을 카탈로그 뷰로 읽어(#369) 같이 실패한다 — 사건 없이 bar 만
+    내면 그 종목 손익이 층 배수만큼 튄다.
     """
     import duckdb
 
     root = build_workbench_root(tmp_path / "equity")
     booted = EquityDuckdbAdapter(root)
     fin = ("financial.book_equity",)
+    backtest = BacktestDataQuery(START, END, ("005930:1",), None)
     with subprocess.Popen(
         [sys.executable, "-c", _HOLD_CATALOG_FOR_WRITE, str(root / "equity.duckdb")],
         stdout=subprocess.PIPE,
@@ -1506,16 +1598,15 @@ def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) 
             assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
             assert _raw(booted, fields=("price.close",)).ok  # 표 원천만 읽는 격자
             assert booted.load_universe(UniverseHistoryQuery("XKRX", START, END)).ok
-            dataset = booted.load_backtest_dataset(
-                BacktestDataQuery(START, END, ("005930:1",), None)
-            )
-            assert dataset.bars
             locked = "|".join(re.escape(marker) for marker in _LOCK_CONFLICT_MARKERS)
             with pytest.raises(duckdb.IOException, match=locked):
                 _raw(booted, fields=fin)
+            with pytest.raises(duckdb.IOException, match=locked):
+                booted.load_backtest_dataset(backtest)
         finally:
             holder.kill()  # 나가면서 `Popen` 이 파이프를 닫고 종료를 기다린다
     assert _raw(booted, fields=fin).ok  # 잠금이 풀리면 다시 읽는다
+    assert booted.load_backtest_dataset(backtest).bars
 
 
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:

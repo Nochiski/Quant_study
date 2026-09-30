@@ -22,6 +22,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger imp
     TrialLineageAlreadyMergedError,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
+    BacktestCancelResult,
     BacktestRunResult,
     BacktestRunSpec,
     BacktestRunState,
@@ -46,6 +47,7 @@ __all__ = [
     "BacktestRunResult",
     "BacktestRunService",
     "BacktestRunSpec",
+    "BacktestCancelResult",
     "BacktestRunState",
     "BacktestRunSummary",
     "BacktestStartResponse",

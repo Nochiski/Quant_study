@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { cellKindCopy, type CellKind } from "../../../entities/dataset";
 import { t } from "../../../shared/config";
 import { useVirtualWindow } from "../../../shared/lib/virtual-window";
 import {
@@ -22,9 +23,14 @@ import {
   type LinkedTraceRow,
 } from "../model/linked-trace";
 import {
+  constraintEffectCopy,
+  contributionStatusCopy,
   exclusionReasonLabel,
+  traceStatusCopy,
+  type ConstraintEffect,
   type ExclusionReason,
-} from "../model/exclusion-reason";
+  type TraceStatus,
+} from "../model/trace-copy";
 import { projectTargetTapeRows } from "../model/target-tape";
 import type {
   StrategyDebuggerContext,
@@ -172,6 +178,31 @@ const VirtualTable = <Row,>({
   );
 };
 
+/** 노드 값·원시 셀·제약 결과는 backend 어휘 대신 문구로 보인다(#350). 색은 값에서 고른다. */
+const TraceStatusBadge = ({ status }: { status: TraceStatus }) => (
+  <Badge tone={status === "ok" ? "ok" : "warn"}>
+    {traceStatusCopy(status)}
+  </Badge>
+);
+
+const CellKindBadge = ({ kind }: { kind: CellKind }) => (
+  <Badge tone={kind === "observed" ? "ok" : "warn"}>{cellKindCopy(kind)}</Badge>
+);
+
+const ConstraintEffectBadge = ({ effect }: { effect: ConstraintEffect }) => (
+  <Badge
+    tone={
+      effect === "removed"
+        ? "error"
+        : effect === "adjusted"
+          ? "warn"
+          : "neutral"
+    }
+  >
+    {constraintEffectCopy(effect)}
+  </Badge>
+);
+
 /** 탈락·보류 사유는 사람 말이 먼저고 backend 코드는 보조 표기다(P3-01). */
 const ExclusionReasons = ({
   reasons,
@@ -245,9 +276,7 @@ const VirtualNodeChain = ({
             <span className="strategy-debugger__numeric">
               {formatNumber(nodeRow.value)}
             </span>
-            <Badge tone={nodeRow.status === "ok" ? "ok" : "warn"}>
-              {nodeRow.status}
-            </Badge>
+            <TraceStatusBadge status={nodeRow.status} />
           </span>
         );
       })}
@@ -372,17 +401,9 @@ const LinkedTraceResult = ({
                       ? t("debugger.value.selected")
                       : t("debugger.value.excluded")}
                   </Badge>
-                  <Badge
-                    tone={
-                      construction.constraint_effect === "removed"
-                        ? "error"
-                        : construction.constraint_effect === "adjusted"
-                          ? "warn"
-                          : "neutral"
-                    }
-                  >
-                    {construction.constraint_effect}
-                  </Badge>
+                  <ConstraintEffectBadge
+                    effect={construction.constraint_effect}
+                  />
                 </>
               )}
             </header>
@@ -399,9 +420,7 @@ const LinkedTraceResult = ({
                         <span className="strategy-debugger__numeric">
                           {formatNumber(field.value)}
                         </span>
-                        <Badge tone={field.kind === "observed" ? "ok" : "warn"}>
-                          {field.kind}
-                        </Badge>
+                        <CellKindBadge kind={field.kind} />
                         <small>{field.available_date}</small>
                       </span>
                     ))
@@ -438,7 +457,7 @@ const LinkedTraceResult = ({
                           <Badge
                             tone={contribution.status === "ok" ? "ok" : "warn"}
                           >
-                            {contribution.status}
+                            {contributionStatusCopy(contribution.status)}
                           </Badge>
                         </span>
                       ))}
@@ -474,17 +493,9 @@ const LinkedTraceResult = ({
                     <span className="strategy-debugger__stage-primary">
                       {formatWeight(construction.constrained_target_weight)}
                     </span>
-                    <Badge
-                      tone={
-                        construction.constraint_effect === "removed"
-                          ? "error"
-                          : construction.constraint_effect === "adjusted"
-                            ? "warn"
-                            : "neutral"
-                      }
-                    >
-                      {construction.constraint_effect}
-                    </Badge>
+                    <ConstraintEffectBadge
+                      effect={construction.constraint_effect}
+                    />
                   </li>
                   {construction.estimated_order_delta !== null ? (
                     <li>
@@ -550,9 +561,7 @@ const RawResult = ({ state }: { state: StrategyTraceState }) => {
           </td>
           <td>{row.available_date}</td>
           <td>
-            <Badge tone={row.kind === "observed" ? "ok" : "warn"}>
-              {row.kind}
-            </Badge>
+            <CellKindBadge kind={row.kind} />
           </td>
         </>
       )}
@@ -641,9 +650,7 @@ const TargetResult = ({
             {row.nodeStatus === null ? (
               "—"
             ) : (
-              <Badge tone={row.nodeStatus === "ok" ? "ok" : "warn"}>
-                {row.nodeStatus}
-              </Badge>
+              <TraceStatusBadge status={row.nodeStatus} />
             )}
           </td>
         </>
@@ -711,9 +718,7 @@ const NodeResult = ({
             {formatNumber(row.value)}
           </td>
           <td>
-            <Badge tone={row.status === "ok" ? "ok" : "warn"}>
-              {row.status}
-            </Badge>
+            <TraceStatusBadge status={row.status} />
           </td>
         </>
       )}

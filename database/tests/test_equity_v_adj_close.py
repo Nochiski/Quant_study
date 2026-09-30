@@ -7,6 +7,9 @@ available)). 그래서 계수가 적용일 다음 세션에 공개되면 적용�
 둔다. 적용일의 KRX 기준가 재설정은 그날 가격 데이터에 이미 보이므로 공개일과 무관하게 가린다(값은
 바꾸지 않는다). 그래서 늦은 ok 계수는 KRX 기준가로 적용일을 정한 것만 가린다 — 명목일로 적용일을 둔
 계수는 그날 재설정이 없어 가릴 근거가 없다(#301 리뷰 P3-1).
+
+적용일 술어의 정본은 `v_unfolded_event` 다(#369) — 백테스트 데이터 포트도 같은 뷰를 읽고, 그날 ok
+계수가 층 이동을 설명하지 않는 행(`factor_ok` 거짓)만 기준가 비로 보유 수량을 조정한다.
 """
 from __future__ import annotations
 
@@ -27,6 +30,9 @@ _EVENTS = (
     ("INCON", 5, 6, False, "krx_base_inconsistent", "krx_base_price"),  # 못 낸 재설정 — 층 이동
     ("RIGHTS", 5, 6, False, "unknown_price_only", "krx_base_price"),    # MVP 밖 기준가 변화
     ("NOMINAL", 5, 5, False, "no_price_match", "unmatched"),            # 명목일 사건 — 안 가림
+    # 기준가가 반증해 내려간 사건과 같은 날 그 기준가로 선 ok 계수 — 가리되 층 이동은 계수가 설명한다
+    ("PAIR", 5, 6, False, "krx_base_inconsistent", "krx_base_price"),
+    ("PAIR", 5, 5, True, "mktcap_neutral", "krx_base_price"),
 )
 
 
@@ -35,7 +41,8 @@ def _connect() -> duckdb.DuckDBPyConnection:
     con.execute("CREATE TEMP TABLE price_adj_daily (ticker VARCHAR, date DATE, adj_close DOUBLE, "
                 "available_date DATE)")
     con.executemany("INSERT INTO price_adj_daily VALUES (?, ?, ?, ?)",
-                    [(e[0], d, 100.0 + i, d) for e in _EVENTS for i, d in enumerate(_DAYS)])
+                    [(t, d, 100.0 + i, d) for t in dict.fromkeys(e[0] for e in _EVENTS)
+                     for i, d in enumerate(_DAYS)])
     con.execute("CREATE TEMP TABLE adj_factor (ticker VARCHAR, apply_date DATE, "
                 "available_date DATE, factor_ok BOOLEAN, factor_source VARCHAR, "
                 "apply_basis VARCHAR)")
@@ -44,7 +51,7 @@ def _connect() -> duckdb.DuckDBPyConnection:
                      for t, a, v, ok, src, basis in _EVENTS])
     made = views.install_temp_macros(
         con, {"price_adj_daily": "price_adj_daily", "adj_factor": "adj_factor"})
-    assert "v_adj_close" in made
+    assert {"v_unfolded_event", "v_adj_close"} <= set(made)
     return con
 
 
@@ -61,7 +68,16 @@ def _gaps(con: duckdb.DuckDBPyConnection, as_of: date = _LAST) -> dict[str, list
 def test_늦은_계수와_계수를_못_낸_기준가_재설정의_적용일_행만_가린다() -> None:
     assert _gaps(_connect()) == {
         "LATE": [_DAYS[3]], "LATE_NOMINAL": [], "ONTIME": [], "INCON": [_DAYS[5]],
-        "RIGHTS": [], "NOMINAL": []}
+        "RIGHTS": [], "NOMINAL": [], "PAIR": [_DAYS[5]]}
+
+
+def test_v_unfolded_event_는_가리는_적용일과_그날_ok_계수가_있는지를_낸다() -> None:
+    """`factor_ok` 가 거짓인 행만 어떤 계수도 층 이동을 접지 않은 날이다. as_of 는 적용일만 자른다."""
+    con = _connect()
+    sql = "SELECT ticker, apply_date, factor_ok FROM v_unfolded_event(?) ORDER BY 1"
+    assert con.execute(sql, [_LAST]).fetchall() == [
+        ("INCON", _DAYS[5], False), ("LATE", _DAYS[3], True), ("PAIR", _DAYS[5], True)]
+    assert con.execute(sql, [_DAYS[4]]).fetchall() == [("LATE", _DAYS[3], True)]
 
 
 def test_as_of_는_행만_자르고_가림은_공개일과_무관하다() -> None:

@@ -248,7 +248,7 @@ test(
       name: "동일 설정으로 다시 실행하지 못했습니다",
     });
     await expect(rejection).toContainText(
-      "전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+      "전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 실행하세요.",
     );
     await expect(rejection.getByRole("group")).toContainText(
       "got=start=2018-01-02",

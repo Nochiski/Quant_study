@@ -56,10 +56,10 @@ const SECURITY_IDS = ["sec-005930-1", "sec-000660-1", "sec-035420-1"];
 /** 화면이 숫자를 찍는 모양(`Intl.NumberFormat("en-US")`). 결측은 "—"라 여기에 맞지 않는다. */
 const NUMBER = /^-?\d[\d,]*(?:\.\d+)?$/u;
 /**
- * 상태 배지가 `ok`로 끝난다. 배지는 색 없이도 읽히도록 숨은 상태 낱말("✓정상")을 앞에 붙이므로
- * 끝만 본다. 결측(`missing`)·오류 상태는 여기에 맞지 않는다.
+ * 노드 값 상태 배지가 "계산됨"으로 끝난다(backend `ok`, #350). 배지는 색 없이도 읽히도록 숨은 상태
+ * 낱말("✓정상")을 앞에 붙이므로 끝만 본다. 결측·오류 상태는 여기에 맞지 않는다.
  */
-const STATUS_OK = /(?:^|[^a-z])ok$/u;
+const STATUS_OK = /계산됨$/u;
 
 test(
   "US-CS-02 두 원천 필드를 나눈 파생 팩터를 모멘텀과 결합해 계획·추적을 확인하고 백테스트한다",
@@ -109,7 +109,7 @@ test(
     });
 
     // 연결 추적(기본 탭): 종목마다 합성 점수에 두 팩터가 설정한 비중으로 기여하고, 파생 팩터의 기여도
-    // 계산 성공(ok)이다. 파생 팩터가 결측이면 여기서 ok가 아니거나 기여 항목이 빠진다.
+    // 계산 성공("반영됨")이다. 파생 팩터가 결측이면 여기서 "반영됨"이 아니거나 기여 항목이 빠진다.
     const linked = page.getByRole("list", { name: "연결 추적" });
     for (const securityId of SECURITY_IDS) {
       const pipeline = linked.getByRole("listitem", { name: securityId });
@@ -124,7 +124,7 @@ test(
           .first();
         await expect(contribution).toHaveText(
           new RegExp(
-            `^${factorId}\\s*high × ${weight}\\s*${NUMBER.source.slice(1, -1)}\\D*ok$`,
+            `^${factorId}\\s*high × ${weight}\\s*${NUMBER.source.slice(1, -1)}\\D*반영됨$`,
             "u",
           ),
         );

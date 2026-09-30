@@ -38,6 +38,14 @@ class TrialResultUnreadableError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class RunSlotUsage:
+    """동시 실행 슬롯 사용량(spec D6). 실험 목록 화면이 trial 수로 추정하지 않게 싣는다."""
+
+    total: int
+    running: int
+
+
+@dataclass(frozen=True)
 class AdmittedRun:
     """실행 접수 판정을 통과한 기반 요청과 그 계열 원장."""
 
@@ -89,6 +97,10 @@ class TrialRunPort(Protocol):
 
     def states(self, run_ids: Collection[str]) -> Mapping[str, BacktestRunState]:
         """여러 실행의 상태를 한 번에 읽는다."""
+        ...
+
+    def slot_usage(self) -> RunSlotUsage:
+        """지금 슬롯 수와 도는 실행 수."""
         ...
 
     def schedule(self, owner: str, *, paused: bool, priority: int) -> None:

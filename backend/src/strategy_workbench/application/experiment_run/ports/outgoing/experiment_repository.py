@@ -28,8 +28,8 @@ class ExperimentRecord:
     # 파라미터 탐색의 분할 규칙. 용량 스윕은 창이 없어 None 이다.
     split: SplitSpec | None
     design: ExperimentDesign
+    controls: ExperimentControls
     cancelled_at: datetime | None = None
-    controls: ExperimentControls = ExperimentControls()
 
 
 @dataclass(frozen=True)

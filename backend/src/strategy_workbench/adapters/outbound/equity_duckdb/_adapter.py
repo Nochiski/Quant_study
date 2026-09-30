@@ -145,6 +145,7 @@ from ._specs import (
     FACTOR_TABLE,
     FIELD_BY_ID,
     FIELD_NOT_IN_LEDGER,
+    FIELD_NOT_PROVIDED,
     FIELD_SPECS,
     POLICY_TABLE,
     PRICE_TABLE,
@@ -554,7 +555,7 @@ class EquityDuckdbAdapter:
         self._fields: dict[str, FieldSpec] = {
             spec.field_id: spec for spec in FIELD_SPECS if self._source_reason[spec.source] is None
         }
-        self._profile: dict[str, tuple[int, str]] = self._load_profile()
+        self._profile: dict[str, tuple[int, str] | None] = self._load_profile()
         self._warn_lag_fallback()
         self._coverage_cache: dict[str, tuple[float, date]] | None = None
         self._snapshot_id = field_contract_snapshot_id(ledger_snapshot_id, self._field_contract())
@@ -638,8 +639,11 @@ class EquityDuckdbAdapter:
             )
         return sessions
 
-    def _load_profile(self) -> dict[str, tuple[int, str]]:
+    def _load_profile(self) -> dict[str, tuple[int, str] | None]:
         """`dataset_profile` 의 field_id → (랙 세션, 근거). 표가 없으면 빈 dict(폴백).
+
+        키는 원장이 싣는 field_id 전부다 — 랙이 미확정인 행은 None(폴백)이고, 선언표 밖 필드의
+        사유 문장도 이 키로 가른다(`unavailable_factor_fields`, #373).
 
         equity 층이 필드마다 확정한 공개시차가 정본이다(TECH_DEBT §4). 어댑터의
         `SourceSpec.lag_sessions` 는 이 표가 없는 루트를 위한 폴백이며, 둘이 갈리면 대장이 이긴다.
@@ -663,9 +667,9 @@ class EquityDuckdbAdapter:
         finally:
             con.close()
         return {
-            str(field_id): (int(lag), str(basis))
+            str(field_id): None if lag is None else (int(lag), str(basis))
             for field_id, lag, basis in rows
-            if field_id is not None and lag is not None
+            if field_id is not None
         }
 
     def _warn_lag_fallback(self) -> None:
@@ -674,7 +678,7 @@ class EquityDuckdbAdapter:
         폴백 상수는 원장 선언과 같게 맞췄지만, 원장 선언이 바뀌면 이 루트에서만 조용히 어긋난다.
         근거 문자열의 `fallback` 표시만으로는 아무도 보지 않으므로 운영 로그에 남긴다.
         """
-        fallback = sorted(field_id for field_id in self._fields if field_id not in self._profile)
+        fallback = sorted(field_id for field_id in self._fields if not self._profile.get(field_id))
         if not fallback:
             return
         rest = len(fallback) - 10
@@ -1131,14 +1135,18 @@ class EquityDuckdbAdapter:
         """선언했지만 주지 않는 필드 → 사유(#316). compile 진단과 질의 거절이 같은 표를 읽는다.
 
         부팅 검사가 원천을 뺀 필드는 그 원천의 사유(조치 `CATALOG_REBUILD`·`LEDGER_SYNC`)이고,
-        원장에 없는 필드(`UNSUPPORTED_FIELDS`)는 `FIELD_NOT_IN_LEDGER` 한 문장이다.
+        내주지 않는 필드(`UNSUPPORTED_FIELDS`)는 원장 `dataset_profile` 에 있으면
+        `FIELD_NOT_PROVIDED`, 없으면 `FIELD_NOT_IN_LEDGER` 한 문장이다(#373).
         """
         reasons = {
             spec.field_id: reason
             for spec in FIELD_SPECS
             if (reason := self._source_reason[spec.source]) is not None
         }
-        return reasons | dict.fromkeys(UNSUPPORTED_FIELDS, FIELD_NOT_IN_LEDGER)
+        return reasons | {
+            field_id: FIELD_NOT_PROVIDED if field_id in self._profile else FIELD_NOT_IN_LEDGER
+            for field_id in UNSUPPORTED_FIELDS
+        }
 
     def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         """`RESEARCH_UNIVERSE_ID` 위의 raw 패널을 팩터 관측으로. status 가 없어 실패는 예외."""

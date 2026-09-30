@@ -39,6 +39,7 @@ from strategy_workbench.adapters.outbound.equity_duckdb._source import (
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
     FIELD_NOT_IN_LEDGER,
+    FIELD_NOT_PROVIDED,
     FIELD_SPECS,
     SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
@@ -565,6 +566,23 @@ def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
     # 읽는다(#316 리뷰 P3-1)
     assert FIELD_NOT_IN_LEDGER in result.detail
     assert UNSUPPORTED_FIELDS["classification.sector"] not in result.detail
+
+
+def test_a_field_the_ledger_carries_but_this_adapter_does_not_serve_says_so(
+    tmp_path: Path,
+) -> None:
+    """원장 `dataset_profile` 에 있는데 내주지 않는 필드를 "원장이 싣지 않는다"고 하지 않는다(#373).
+
+    실원장은 `flow.foreign_ownership`·`classification.sector` 부류를 싣는다. 가르는 기준은 부팅 때
+    읽은 `dataset_profile` 이다.
+    """
+    rows = [*WB_PROFILE_ROWS, ("flow.foreign_ownership", 1, "원장 날짜")]
+    adapter = EquityDuckdbAdapter(build_workbench_root(tmp_path / "equity", profile_rows=rows))
+
+    reasons = adapter.unavailable_factor_fields()
+
+    assert reasons["flow.foreign_ownership"] == FIELD_NOT_PROVIDED
+    assert reasons["credit.loan_value"] == FIELD_NOT_IN_LEDGER
 
 
 def test_queries_outside_calendar_coverage_are_no_data(

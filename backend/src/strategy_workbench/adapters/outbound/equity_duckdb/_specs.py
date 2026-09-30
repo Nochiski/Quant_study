@@ -1042,8 +1042,11 @@ FIELD_SPECS: tuple[FieldSpec, ...] = (
     ),
 )
 
-# 아래 필드의 사용자 대면 사유 한 문장 — compile 진단과 질의 거절이 싣는다(#316).
+# 아래 필드의 사용자 대면 사유 문장 — compile 진단과 질의 거절이 싣는다(#316). 원장
+# `dataset_profile` 에 그 field_id 가 있는지로 둘을 가른다(#373): 원장에 있는데 이 어댑터가 내주지
+# 않는 필드도 있다.
 FIELD_NOT_IN_LEDGER = "원장이 이 필드를 싣지 않는다"
+FIELD_NOT_PROVIDED = "원장에는 있지만 이 연결은 이 필드를 내주지 않는다"
 
 # FIELD_MAP §2 의 42 중 어댑터가 내지 않는 13 — field_id → 사유 메모. `list_fields()` 밖이고(mock
 # 폴백 금지, DESIGN §7) 메모는 원장 작업 기록이라 사용자에게 싣지 않는다.

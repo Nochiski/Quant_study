@@ -83,3 +83,21 @@ frontend 타입·ESLint·production build·E2E 타입 검사가 통과했고 edi
 conflict-marker·diff 검사는 통과했다. story 목록 검사는 브라우저 실행이 아니다.
 P4-03c의 관련 frontend 69개 및 backend trace 통합 75개도 이 환경에서 통과했다.
 이후 P4-04에는 backend/API 변경이 없어 backend 전체 suite를 다시 실행하지 않았다.
+
+## 공식 Windows CI 후속 확인
+
+저장된 클라우드 VM의 브라우저 설치 제한과 별개로, 기존 GitHub Actions의 pinned Chromium 설치와
+공식 runner 실행은 가능했다. PR427 `ff425356`의 run 36768630040은 전체 성공했고 browser 54개가 통과했다.
+추적 기준일 선택자는 이후 추적 폼 안의 정확 일치로 한 번 더 범위를 좁혔다.
+PR428의 최초 실패는 옛 URL 기대값·Form 문구·빈 제목·미저장 문서 이탈 확인 누락과 시각 기준선이었다.
+서버의 필수 제목 및 이탈 보호 계약은 유지하고 테스트가 실제 사용자 단계를 거치도록 수정했다.
+
+run 36770326341의 artifact 11124291288에서 1440/1920 light/dark actual 및 diff를 직접 검토했다.
+1440은 두 탭 구성, 1920은 추가로 undo/redo/status의 별도 줄 배치가 의도된 변화이며 겹침은 없었다.
+각 actual은 같은 실행의 재시도 이미지와 바이트가 같았다. 네 workbench 기준선만 공식 Windows 출력으로
+갱신했고 debugger 기준선·픽셀 허용 오차는 바꾸지 않았다. 전체 trace artifact가 32MiB 전달 한도를
+넘으므로 동일 GitHub CI에 시각 검토용 소형 artifact를 추가했다. 별도 공개 배포나 네트워크 정책 변경은 없다.
+
+별도 관찰된 Graph 빈 스크롤 영역은 제목 입력만으로 해결됐다고 판단하지 않는다. 제목이 빈 상태에서
+output 선택 후 컨트롤의 viewport 교차를 검사하고, 실패 시 조상 DOM의 scrollTop·크기 정보를 보관한다.
+이 재현 검사와 수정 후 전체 CI가 끝나기 전에는 Phase4 출구 조건을 완료로 표시하지 않는다.

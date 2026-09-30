@@ -193,6 +193,8 @@ jobs:
           path: |
             frontend/test-results/**/*-actual.png
             frontend/test-results/**/*-diff.png
+            frontend/test-results/**/test-failed-*.png
+            frontend/test-results/**/attachments/*.json
             frontend/test-results/**/error-context.md
           if-no-files-found: ignore
           retention-days: 7

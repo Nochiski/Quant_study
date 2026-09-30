@@ -1536,10 +1536,6 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   const pipeline = page.getByRole("region", { name: "전략 파이프라인" });
   await expect(pipeline).toBeVisible();
   await expect(pipeline).not.toContainText("구조 오류");
-  // 빈 제목은 구조 오류가 아니지만 backend 의미 검증에서 실행을 막는다. 제목은 원문에서 적는다.
-  await page.getByRole("tab", { name: "YAML", exact: true }).click();
-  await replaceSource(page, 'schema_version: "1.2"\ntitle: "빈 문서에서 만든 전략"\n');
-  await page.getByRole("tab", { name: "그래프", exact: true }).click();
   await pipeline.getByRole("button", { name: /팩터.*추가/ }).click();
   await pipeline.getByRole("button", { name: /레시피 열기/ }).click();
   const graph = page.getByRole("region", { name: "그래프 편집" });
@@ -1549,7 +1545,33 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   for (const operation of ["양끝 자르기", "순위"]) {
     await graph.getByRole("button", { name: `${operation} 노드 추가`, exact: true }).click();
   }
-  await graph.getByRole("combobox", { name: /출력 노드/ }).selectOption("rank");
+  const output = graph.getByRole("combobox", { name: /출력 노드/ });
+  await output.selectOption("rank");
+  // 빈 제목의 검증 오류가 생겨도 선택한 컨트롤이 빈 스크롤 영역 뒤로 사라지면 안 된다.
+  await expectPhase(page, "검증 오류");
+  await test.info().attach("graph-layout", {
+    contentType: "application/json",
+    body: JSON.stringify(await output.evaluate((element) => {
+      const ancestors = [];
+      for (let node: Element | null = element; node !== null; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        ancestors.push({
+          tag: node.tagName, className: node.className,
+          rect: node.getBoundingClientRect().toJSON(),
+          scrollTop: node.scrollTop, scrollHeight: node.scrollHeight,
+          clientHeight: node.clientHeight, overflow: style.overflow,
+          flex: style.flex, minHeight: style.minHeight,
+        });
+      }
+      return ancestors;
+    })),
+  });
+  await expect(output).toBeInViewport();
+  // 구조는 완성됐지만 이름은 필수다. 원문에서 이름을 적고 같은 그래프로 돌아온다.
+  await page.getByRole("tab", { name: "YAML", exact: true }).click();
+  const source = await currentSource(page);
+  await replaceSource(page, mustReplace(source, 'title: ""', 'title: "빈 문서에서 만든 전략"'));
+  await page.getByRole("tab", { name: "그래프", exact: true }).click();
   await expectPhase(page, "검증 통과");
   await expect(pipeline).not.toContainText(/_id|_node|kind:/);
   await fillRunEnvironment(page);
@@ -1557,5 +1579,9 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   await preview.getByRole("button", { name: "미리보기 새로고침" }).click();
   await expect(preview.getByRole("table", { name: "선정 종목" })).toBeVisible();
   await backtest(page).click();
+  // 미저장 초안의 실행 결과로 이동할 때도 기존 이탈 보호를 명시적으로 거친다.
+  const leaveGuard = page.getByRole("alertdialog", { name: "저장하지 않은 변경이 있습니다" });
+  await leaveGuard.getByRole("button", { name: "나가기", exact: true }).click();
   await expect(page).toHaveURL(/\/backtests\//);
+  await expect(page.getByRole("status", { name: "실행 상태" })).toContainText("completed", { timeout: 120_000 });
 });

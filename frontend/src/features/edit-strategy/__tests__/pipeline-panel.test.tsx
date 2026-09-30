@@ -44,7 +44,7 @@ const formOf = (
   const parse = parseSource(source, "yaml");
   return {
     projection: projectForm(SCHEMA, parse, diagnostics),
-    parsing: false,
+    firstParsePending: false,
     stale: false,
     tree: parse.status === "ok" ? parse.tree : {},
   };

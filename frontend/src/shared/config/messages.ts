@@ -1761,7 +1761,7 @@ const ko = {
   "form.panel.notice": "YAML source에 바로 반영 · undo 가능",
   "form.panel.enabled": "편집 가능",
   "form.panel.loading": "runtime schema를 불러오는 중입니다.",
-  "form.panel.parsing": "문서를 읽는 중입니다.",
+  "form.panel.firstParsePending": "문서를 읽는 중입니다.",
   "form.panel.staleBadge": "STALE",
   "form.panel.stale":
     "현재 텍스트가 구문 오류라 마지막 유효 parse를 보여줍니다. source를 고치면 컨트롤이 풀립니다.",
@@ -3764,7 +3764,7 @@ export const messages = {
     "form.panel.notice": "Applied to the YAML source directly · undoable",
     "form.panel.enabled": "Editable",
     "form.panel.loading": "Loading the runtime schema.",
-    "form.panel.parsing": "Reading the document.",
+    "form.panel.firstParsePending": "Reading the document.",
     "form.panel.staleBadge": "STALE",
     "form.panel.stale":
       "The current text has a syntax error, so the last valid parse is shown. Fix the source to unlock the controls.",

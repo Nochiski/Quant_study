@@ -19,13 +19,13 @@ import {
   type FormControl,
   type FormField,
   type FormListItem,
-  type FormProjection,
   type FormSection,
 } from "../model/form-projection";
 import type { CanonicalSnippet } from "../model/canonical-snippets";
 import { coversPointer } from "../model/diagnostic-navigation";
 import type { SummaryNames } from "../model/pipeline-projection";
 import type { DocumentDiagnostic } from "../model/document-state";
+import type { FormProjectionState } from "../model/use-form-projection";
 import {
   addPresetItemOperation,
   defaultFromValueOf,
@@ -59,22 +59,16 @@ export type FormCatalogs = {
 };
 
 type StrategyFormPanelProps = {
-  /** null이면 runtime schema를 아직 못 받았거나 첫 parse 전이다(`parsing`). */
-  projection: FormProjection | null;
+  /** 투영·STALE·첫 parse 대기·삭제 가드 tree 를 한 벌로 받는다(`useFormProjection`). */
+  form: FormProjectionState;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   /** 목록 항목 추가가 materialize할 runtime schema(projection과 같은 출처). 없으면 추가 버튼 비활성. */
   schema?: JsonSchema | null;
-  /** 현재 parse tree(삭제 가드의 참조 탐색용). 없으면 참조 없음으로 본다. */
-  tree?: unknown;
   /** 팩터 카탈로그 preset(스니펫 카탈로그의 예시 항목) — "예시 팩터에서 추가" 메뉴(튜토리얼 전용). */
   catalogSnippets?: readonly CanonicalSnippet[];
   /** 팩터 항목의 graph를 Graph 화면에서 열기(view=graph, pointer 선택). 없으면 버튼을 그리지 않는다. */
   onOpenGraph?: (pointer: string) => void;
-  /** 현재 텍스트가 parse되지 않아 마지막 유효 parse로 그렸다(P4-04). */
-  stale?: boolean;
-  /** 이 문서의 첫 parse 가 아직 오지 않았다 — 컨트롤 대신 "문서를 읽는 중"을 보인다(#413). */
-  parsing?: boolean;
   /** URL `path`(Graph "Form에서 열기" 등). 그 pointer 아래의 목록 항목을 `aria-current`로 강조한다(P5-03). */
   selectedPointer?: string;
   /**
@@ -92,17 +86,14 @@ const UNSET = "__unset__";
  * 목록 섹션(factors·rules·parameters)의 편집은 P4-03이 더한다.
  */
 export const StrategyFormPanel = ({
-  projection,
+  form: { projection, stale, firstParsePending, tree },
   transactions,
   catalogs,
   schema = null,
-  tree = {},
   catalogSnippets = [],
   onOpenGraph,
   selectedPointer,
   revealSignal,
-  stale = false,
-  parsing = false,
 }: StrategyFormPanelProps) => {
   const disabled = transactions.disabled;
   const container = useRevealSelection<HTMLElement>(
@@ -146,7 +137,11 @@ export const StrategyFormPanel = ({
       />
       {projection === null ? (
         <p className="strategy-form__state" role="status">
-          {t(parsing ? "form.panel.parsing" : "form.panel.loading")}
+          {t(
+            firstParsePending
+              ? "form.panel.firstParsePending"
+              : "form.panel.loading",
+          )}
         </p>
       ) : (
         projection.sections.map((section) => (

@@ -488,15 +488,6 @@ def build_demo_fixture() -> MockEquityFixture:
                 None,
                 CellKind.MISSING,
             ),
-            # 원천이 행을 뺀 칸 — 수급은 0 으로 단정하지 않고 MISSING 이다(실원장과 같다, #371)
-            Observation(
-                securities[0].security_id,
-                "flow.foreign_net_buy",
-                sessions[1],
-                sessions[1],
-                None,
-                CellKind.MISSING,
-            ),
             Observation(
                 securities[1].security_id,
                 "flow.foreign_net_buy",

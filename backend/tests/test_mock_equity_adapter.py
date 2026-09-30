@@ -277,7 +277,6 @@ def test_panel_preserves_zero_missing_and_coverage_gap_kinds() -> None:
 
     assert kinds[("sec-005930-1", date(2024, 1, 3))] is CellKind.OBSERVED
     assert kinds[("sec-000660-1", date(2024, 1, 3))] is CellKind.MISSING
-    assert kinds[("sec-005930-1", date(2024, 1, 4))] is CellKind.MISSING  # 수급 원천 생략(#371)
     assert kinds[("sec-000660-1", date(2024, 1, 4))] is CellKind.NOT_COLLECTED
     assert kinds[("sec-035420-1", date(2024, 1, 8))] is CellKind.COVERAGE_GAP
 

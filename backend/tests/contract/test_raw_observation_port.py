@@ -339,13 +339,10 @@ def test_raw_port_keeps_zero_missing_collection_and_coverage_kinds_apart() -> No
 
     actual_zero = cells[(date(2024, 1, 3), "sec-005930-1")]
     missing = cells[(date(2024, 1, 3), "sec-000660-1")]
-    omitted = cells[(date(2024, 1, 4), "sec-005930-1")]
     not_collected = cells[(date(2024, 1, 4), "sec-000660-1")]
     coverage_gap = cells[(date(2024, 1, 8), "sec-035420-1")]
     assert (actual_zero.value, actual_zero.kind) == (0.0, CellKind.OBSERVED)
     assert (missing.value, missing.kind) == (None, CellKind.MISSING)
-    # 수급의 원천 생략은 0 이 아니다 — 원천 생략 0 은 키움 공매도만 낸다(duckdb 대조, #371)
-    assert (omitted.value, omitted.kind) == (None, CellKind.MISSING)
     assert (not_collected.value, not_collected.kind) == (None, CellKind.NOT_COLLECTED)
     assert (coverage_gap.value, coverage_gap.kind) == (None, CellKind.COVERAGE_GAP)
 

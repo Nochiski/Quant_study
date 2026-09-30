@@ -382,13 +382,14 @@ describe("카드 문장 틀", () => {
   });
 
   it("enum 이 고른 값의 틀을 먼저 찾고, 없으면 앵커 설명 키의 틀이다", () => {
-    const source = (side: string) =>
-      `schema_version: "1.2"\ntitle: ""\nportfolio:\n  side: ${side}\n`;
-    expect(templateOf(source("long_short"), "/portfolio/side")).toBe(
-      tOptional("strategy.field.portfolio_step.side.value.long_short.card"),
-    );
-    expect(templateOf(source("long_only"), "/portfolio/side")).toBe(
-      tOptional("strategy.field.portfolio_step.side.card"),
+    const source = (rebalance: string) =>
+      `schema_version: "1.2"\ntitle: ""\nportfolio:\n  rebalance: ${rebalance}\n`;
+    const stem = "strategy.field.portfolio_step.rebalance";
+    expect(
+      templateOf(source("every_n_sessions"), "/portfolio/rebalance"),
+    ).toBe(tOptional(`${stem}.value.every_n_sessions.card`));
+    expect(templateOf(source("monthly"), "/portfolio/rebalance")).toBe(
+      tOptional(`${stem}.card`),
     );
   });
 

@@ -1141,8 +1141,6 @@ const ko = {
   "strategy.field.signal_step.regime_field_id.card":
     "{regime_field_id} 값이 {regime_minimum} 이상인 종목만 담는다",
   "strategy.field.portfolio_step.side.card": "매매 방향은 {side}",
-  "strategy.field.portfolio_step.side.value.long_short.card":
-    "매매 방향은 {side}, 공매도는 하위 {short_selection_count}종목",
   "strategy.field.portfolio_step.weighting.card": "비중은 {weighting}",
   "strategy.field.portfolio_step.weighting.value.risk.card":
     "비중은 {weighting} — 위험 팩터 {risk_factor_id} 또는 위험 필드 {risk_field_id} 기준",
@@ -3053,8 +3051,6 @@ export const messages = {
     "strategy.field.signal_step.regime_field_id.card":
       "Hold only stocks whose {regime_field_id} is at least {regime_minimum}",
     "strategy.field.portfolio_step.side.card": "Direction: {side}",
-    "strategy.field.portfolio_step.side.value.long_short.card":
-      "Direction: {side}, shorting the bottom {short_selection_count} stocks",
     "strategy.field.portfolio_step.weighting.card": "Weights: {weighting}",
     "strategy.field.portfolio_step.weighting.value.risk.card":
       "Weights: {weighting} — by risk factor {risk_factor_id} or risk field {risk_field_id}",

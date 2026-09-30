@@ -1846,7 +1846,7 @@ export type FactorAnalytics = {
 /**
  * FactorAvailability
  */
-export type FactorAvailability = "implemented" | "catalog_only";
+export type FactorAvailability = "implemented" | "catalog_only" | "unavailable";
 
 /**
  * FactorCatalog

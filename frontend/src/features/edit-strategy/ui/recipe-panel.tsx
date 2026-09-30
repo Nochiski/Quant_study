@@ -512,14 +512,14 @@ export const RecipePanel = ({
           <OperatorPalette
             groups={palette}
             parameterLabels={(entry) =>
-              entry.params.flatMap((key) => {
+              entry.params.map((key) => {
                 const name = tName(
                   slots
                     .get(entry.kind)
                     ?.settings.find((slot) => slot.key === key)?.facts
                     .descriptionKey,
                 );
-                return name === null ? [] : [name];
+                return name ?? key;
               })
             }
             disabledReason={busy ? t("graph.palette.settling") : null}

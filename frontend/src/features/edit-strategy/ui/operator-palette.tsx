@@ -119,7 +119,12 @@ const PaletteItem = ({
 }) => {
   const id = useId();
   const bodyId = `${id}-body`;
-  const signature = entrySignature(entry, parameterLabels?.(entry));
+  const labels = parameterLabels?.(entry);
+  const signature = entrySignature(entry, labels);
+  // 수식의 계산 구조는 보존하고, 레시피에서는 schema가 준 파라미터 표시 이름만 바꾼다.
+  const formula = entry.formula?.replace(/\b[a-zA-Z_]\w*\b/g, (token) =>
+    labels?.[entry.params.indexOf(token)] ?? token,
+  );
   return (
     <li className="factor-graph__palette-item">
       <button
@@ -142,7 +147,7 @@ const PaletteItem = ({
       */}
       <p id={bodyId} className="factor-graph__palette-body">
         {entry.description === null ? null : <span>{entry.description}</span>}
-        {entry.formula === null ? null : <code>{entry.formula}</code>}
+        {formula == null ? null : <code>{formula}</code>}
         {signature === null ? null : (
           <span className="factor-graph__palette-signature">{signature}</span>
         )}

@@ -11,13 +11,14 @@ import {
   type DocumentDiagnostic,
   type DocumentState,
 } from "../model/document-state";
-import { projectForm } from "../model/form-projection";
+import { projectForm, type FormProjection } from "../model/form-projection";
 import { draftOf } from "../model/form-transactions";
 import type { JsonSchema } from "../model/schema-navigator";
 import {
   useSourceTransactions,
   type SourceTransactions,
 } from "../model/use-source-transactions";
+import type { FormProjectionState } from "../model/use-form-projection";
 import { StrategyFormPanel } from "../ui/strategy-form-panel";
 
 afterEach(cleanup);
@@ -60,6 +61,17 @@ const stubTransactions = (
 
 const NO_CATALOGS = { equityFields: null };
 
+/** Form 패널 입력 한 벌(`useFormProjection` 모양) — 첫 parse 가 끝나 정착한 parse 로 그린다. */
+const settledForm = (
+  projection: FormProjection,
+  tree: unknown = {},
+): FormProjectionState => ({
+  projection,
+  firstParsePending: false,
+  stale: false,
+  tree,
+});
+
 const renderPanel = (
   source: string,
   transactions: SourceTransactions,
@@ -69,7 +81,7 @@ const renderPanel = (
   const projection = projectForm(SCHEMA, state.parse, diagnostics);
   render(
     <StrategyFormPanel
-      projection={projection}
+      form={settledForm(projection)}
       transactions={transactions}
       catalogs={NO_CATALOGS}
     />,
@@ -237,7 +249,7 @@ describe("StrategyFormPanel controls", () => {
     const state = { ...parsedState(MINIMAL), composing: true };
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [])}
+        form={settledForm(projectForm(SCHEMA, state.parse, []))}
         transactions={transactions}
         catalogs={NO_CATALOGS}
       />,
@@ -330,7 +342,7 @@ describe("StrategyFormPanel review follow-up (P4-02 1차)", () => {
     const projection = projectForm(SCHEMA, state.parse, []);
     const Harness = ({ failed }: { failed: boolean }) => (
       <StrategyFormPanel
-        projection={projection}
+        form={settledForm(projection)}
         transactions={stubTransactions({
           apply,
           feedback: failed
@@ -433,7 +445,7 @@ describe("StrategyFormPanel re-edit right after a commit (audit DEFECT-P5X-001)"
     const apply = vi.fn(() => true);
     const view = (source: string) => (
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, parsedState(source).parse, [])}
+        form={settledForm(projectForm(SCHEMA, parsedState(source).parse, []))}
         transactions={stubTransactions({ apply })}
         catalogs={NO_CATALOGS}
       />
@@ -628,7 +640,7 @@ describe("StrategyFormPanel reset on the last written field (audit R4)", () => {
             attach
           </button>
           <StrategyFormPanel
-            projection={projectForm(SCHEMA, state.parse, [])}
+            form={settledForm(projectForm(SCHEMA, state.parse, []))}
             transactions={transactions}
             catalogs={NO_CATALOGS}
           />
@@ -685,7 +697,7 @@ describe("StrategyFormPanel with the real transaction hook", () => {
             resync
           </button>
           <StrategyFormPanel
-            projection={projectForm(SCHEMA, state.parse, [])}
+            form={settledForm(projectForm(SCHEMA, state.parse, []))}
             transactions={transactions}
             catalogs={NO_CATALOGS}
           />
@@ -733,7 +745,7 @@ describe("인라인 오류 본문과 문제 행 reveal (P1-04)", () => {
     const state = parsedState(MINIMAL);
     return (
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [WEIGHT_ERROR])}
+        form={settledForm(projectForm(SCHEMA, state.parse, [WEIGHT_ERROR]))}
         transactions={stubTransactions()}
         catalogs={NO_CATALOGS}
         selectedPointer={selectedPointer}
@@ -764,14 +776,16 @@ describe("인라인 오류 본문과 문제 행 reveal (P1-04)", () => {
     const state = parsedState(MINIMAL);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [
-          WEIGHT_ERROR,
-          {
-            ...WEIGHT_ERROR,
-            pointer: "/portfolio/selection_count",
-            message: "종목 수가 너무 적습니다",
-          },
-        ])}
+        form={settledForm(
+          projectForm(SCHEMA, state.parse, [
+            WEIGHT_ERROR,
+            {
+              ...WEIGHT_ERROR,
+              pointer: "/portfolio/selection_count",
+              message: "종목 수가 너무 적습니다",
+            },
+          ]),
+        )}
         transactions={stubTransactions()}
         catalogs={NO_CATALOGS}
       />,
@@ -790,9 +804,11 @@ describe("인라인 오류 본문과 문제 행 reveal (P1-04)", () => {
     const state = parsedState(MINIMAL);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [
-          { ...WEIGHT_ERROR, severity: "warning", message: "조금 큽니다" },
-        ])}
+        form={settledForm(
+          projectForm(SCHEMA, state.parse, [
+            { ...WEIGHT_ERROR, severity: "warning", message: "조금 큽니다" },
+          ]),
+        )}
         transactions={stubTransactions()}
         catalogs={NO_CATALOGS}
       />,

@@ -38,6 +38,26 @@ describe("CodeEditor", () => {
     ).toBeInTheDocument();
   });
 
+  it("hands out its handle only once the editor view exists", async () => {
+    // 부모는 핸들을 받자마자 선택·포커스를 옮긴다(outline reveal). view 보다 핸들이 먼저 나가면 그
+    // 명령이 조용히 사라졌다 — 편집기 chunk 가 늦게 올 때만 나던 route 테스트 flake(#324)의 원인이다.
+    const announced: string[] = [];
+    const bind = (handle: CodeEditorHandle | null) => {
+      if (handle !== null) announced.push(handle.getText());
+    };
+    render(
+      <CodeEditor
+        ref={bind}
+        value={'title: "a"\n'}
+        language="yaml"
+        ariaLabel="편집기"
+        onChange={vi.fn()}
+      />,
+    );
+    await screen.findByRole("textbox", { name: "편집기" });
+    expect(announced[0]).toBe('title: "a"\n');
+  });
+
   it("reports text changes made through the handle and maps offsets to positions", async () => {
     const onSelectionChange = vi.fn();
     const { ref, onChange } = await mount({ onSelectionChange });

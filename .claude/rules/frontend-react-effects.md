@@ -17,9 +17,10 @@ paths:
 - 렌더 중에 ref의 `.current`를 읽거나 쓰지 않는다(`react-hooks/refs`). 읽는 쪽은 언제나 콜백이다.
 - 외부 등록(`history.block`, `addEventListener`)은 한 번만 하고 판정은 콜백 안에서 committed ref로
   한다. 등록 자체를 `disabled`·의존성 변경으로 껐다 켜면 그 전환도 passive effect 틈을 만든다.
+- `useImperativeHandle`로 부모에게 핸들을 넘기는 컴포넌트는 핸들이 부리는 외부 객체(CodeMirror view 등)를
+  그보다 먼저 layout effect에서 만든다. 핸들은 layout 단계에 붙으므로, passive effect에서 만든 객체는
+  부모가 핸들을 받는 순간 아직 없고 그때 보낸 명령(선택·포커스)이 조용히 사라진다(#324,
+  `code-editor.test.tsx`의 핸들 준비 테스트).
 - 이 계열의 회귀 테스트는 act 밖의 갱신(promise)으로 상태를 바꾸고, `MutationObserver`가 DOM 변화를
   본 microtask에서 콜백을 불러 새 값을 읽는지 단언한다(`use-committed-ref.test.tsx`,
   `dirty-leave-guard.test.tsx`, `strategy-ide.shortcut-gate.test.tsx`).
-- 기존 예외: `shared/ui/code-editor/code-editor-view.tsx`는 편집기 콜백용 ref를 **렌더 중에** 대입한다.
-  틈은 없지만(선행) 버려진 concurrent 렌더의 값이 남을 수 있어 이 규칙과 다르다 — 그 파일을 고칠 때
-  `useCommittedRef`로 옮긴다(별도 backlog). 새 코드에서 그 패턴을 따라 하지 않는다.

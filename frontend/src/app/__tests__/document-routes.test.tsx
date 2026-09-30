@@ -232,6 +232,9 @@ const RUN_ENVIRONMENT = {
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readBackendFixture("strategy_documents/run-environment-schema.json"),
 ) as Record<string, unknown>;
+const OPERATOR_CATALOG = JSON.parse(
+  readBackendFixture("strategy_documents/operator-catalog.json"),
+) as Record<string, unknown>;
 
 const server = setupServer(
   http.get(`${API}/api/v1/run-environments/schema`, () =>
@@ -327,6 +330,11 @@ const server = setupServer(
     }),
   ),
   http.get(`${API}/api/v1/backtests/:runId/result`, () => HttpResponse.error()),
+  // 편집 화면은 열릴 때마다 연산자 카탈로그를 읽는다(`useSchemaAssist`). 처리하지 않으면 모든 케이스가
+  // MSW 미처리 요청을 내는데, 그 로그는 실패한 케이스에만 찍혀 실패 원인처럼 보였다(#324).
+  http.get(`${API}/api/v1/strategy-documents/operators`, () =>
+    HttpResponse.json(OPERATOR_CATALOG),
+  ),
   http.get(`${API}/api/v1/strategy-documents/schema`, () =>
     HttpResponse.json({
       schema: { type: "object", properties: {}, additionalProperties: false },
@@ -692,7 +700,8 @@ describe("professional keyboard workflow (P6-03)", () => {
       expect(history.location.search).not.toContain("view=json");
     });
     const view = await editor();
-    // reveal은 route 전환 뒤 비동기로 선택을 옮긴다 — 부하 중에는 한 틱 늦는다(P5-03: 전체 실행 flake).
+    // 편집기 chunk 가 전환 뒤에 오면 reveal 은 편집기가 준비될 때 선택을 옮긴다. 준비 신호(핸들)는 view 가
+    // 선 뒤에만 나간다 — 먼저 나가면 reveal 이 빈 편집기에서 소비돼 선택이 비었다(#324).
     await waitFor(() =>
       expect(
         view.state.sliceDoc(

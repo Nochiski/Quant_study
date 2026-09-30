@@ -127,9 +127,11 @@ def _demote(factor: FactorSignal) -> FactorSignal:
 def demote_boolean_factor_outputs(spec: StrategySpec) -> StrategySpec:
     """`promote_boolean_factor_outputs` 가 붙인 노드를 걷어 낸 spec(사용자가 쓴 그래프).
 
-    표시 전용이다. 의미 diff 가 사용자가 쓴 변경만 말하게 할 때 쓴다(BACKLOG-014): 위치 비교는
-    사용자 노드 하나를 더할 때 끝에 붙은 승격 노드 셋을 "바뀐 것"으로 보인다. 승격은 사용자 그래프의
-    함수라 걷어 낸 두 spec 이 같으면 원래 spec(과 `spec_hash`)도 같다. 실행·해시에는 쓰지 않는다.
+    사용자에게 보이는 쪽에만 쓴다. 의미 diff 는 사용자가 쓴 변경만 말하게 할 때 쓴다(BACKLOG-014):
+    위치 비교는 사용자 노드 하나를 더할 때 끝에 붙은 승격 노드 셋을 "바뀐 것"으로 보인다. 원문 없는
+    revision 의 생성 원문(`_hydrate.authoring_document`)도 이것으로 걷는다 — 다시 compile 하면 같은
+    승격 spec 이 되어야 하므로 걷기는 손실 없는 역이어야 한다(#353). 승격은 사용자 그래프의 함수라
+    걷어 낸 두 spec 이 같으면 원래 spec(과 `spec_hash`)도 같다. 실행·해시에는 쓰지 않는다.
     """
     factors = tuple(_demote(factor) for factor in spec.factors)
     if factors == spec.factors:

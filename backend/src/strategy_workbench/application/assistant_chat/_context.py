@@ -33,7 +33,7 @@ from strategy_workbench.domain.assistant.facade.tools import (
     READ_CURRENT_STRATEGY,
     VALIDATE_STRATEGY_YAML,
 )
-from strategy_workbench.domain.factor.facade.registry import FactorRegistry
+from strategy_workbench.domain.factor.facade.registry import FactorRegistry, factor_availability
 from strategy_workbench.domain.strategy.facade.schema import strategy_document_schema
 
 from ._models import BacktestResultUnavailableError, ResultContext, TurnContext, compile_payload
@@ -139,13 +139,17 @@ class AssistantContextBuilder:
         }
 
     def _factor_catalog_payload(self) -> dict[str, object]:
+        # 가용성은 연결된 어댑터가 주는 필드로 판정한다(#370). 필드 목록은 `list_equity_fields`
+        # 가 보이는 것과 같은 답이고, 두 어댑터의 계약 테스트가 compile 의 필드 계약과 같은
+        # 집합임을 묶는다.
+        provided = {profile.field_id for profile in self._equity_data.list_fields()}
         return {
             "factors": [
                 {
                     "id": definition.factor_id,
                     "label": definition.label,
                     "direction": definition.preference.value,
-                    "availability": definition.availability.value,
+                    "availability": factor_availability(definition, provided).value,
                     "required_field_ids": list(definition.required_field_ids),
                 }
                 for definition in self._factor_registry.all()

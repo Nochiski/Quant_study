@@ -578,7 +578,7 @@ test.describe("professional YAML workflow", () => {
     await expect(pipeline660).toContainText("순위 2 · long");
     await expect(pipeline660).toContainText("50.00%");
     await expect(pipeline660).toContainText("5.00%");
-    await expect(pipeline660).toContainText("adjusted");
+    await expect(pipeline660).toContainText("제약으로 조정됨");
     const excludedPipeline = linkedList.getByRole("listitem", {
       name: "sec-005930-1",
       exact: true,
@@ -586,7 +586,7 @@ test.describe("professional YAML workflow", () => {
     await expect(excludedPipeline).toContainText("순위 3 · 없음");
     await expect(excludedPipeline).toContainText("outside_selection");
     await expect(excludedPipeline).toContainText("0.00%");
-    await expect(excludedPipeline).toContainText("not_selected");
+    await expect(excludedPipeline).toContainText("선택되지 않음");
 
     await workflow.getByRole("tab", { name: "TargetTape" }).click();
     const target = workflow.getByRole("region", {
@@ -597,7 +597,7 @@ test.describe("professional YAML workflow", () => {
     await expect(target660).toContainText("2");
     await expect(target660).toContainText("예");
     await expect(target660).toContainText("5.00%");
-    await expect(target660).toContainText("ok");
+    await expect(target660).toContainText("계산됨");
     const excludedTarget = rowFor(target, "sec-005930-1");
     await expect(excludedTarget).toContainText("3");
     await expect(excludedTarget).toContainText("아니요");
@@ -611,7 +611,7 @@ test.describe("professional YAML workflow", () => {
     await expect(raw660).toContainText("price.adj_close");
     await expect(raw660).toContainText("212,570");
     await expect(raw660).toContainText("2026-07-31");
-    await expect(raw660).toContainText("observed");
+    await expect(raw660).toContainText("관측값");
     await workflow.getByRole("tab", { name: "선택 노드" }).click();
     const selectedNode = workflow.getByRole("region", {
       name: "선택한 FactorGraph 노드의 실제 계산 결과",
@@ -621,7 +621,7 @@ test.describe("professional YAML workflow", () => {
     await expect(selected660).toContainText("time_series.momentum");
     await expect(selected660).toContainText("close=212,570");
     await expect(selected660).toContainText("0.02667014");
-    await expect(selected660).toContainText("ok");
+    await expect(selected660).toContainText("계산됨");
 
     const explanation = requireData(
       (

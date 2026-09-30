@@ -430,7 +430,9 @@ describe("StrategyDebugger", () => {
 
     await user.click(screen.getByRole("tab", { name: "선택 노드" }));
     expect(screen.getAllByText("cross_sectional.rank")).not.toHaveLength(0);
-    expect(screen.getByText("missing_input")).toBeInTheDocument();
+    // 노드 상태는 backend 원문이 아니라 문구로 보인다(#350).
+    expect(screen.getByText("입력 없음")).toBeInTheDocument();
+    expect(screen.queryByText("missing_input")).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "실행 계획" }));
     expect(screen.getByText("backend execution plan")).toBeInTheDocument();
   });
@@ -959,7 +961,7 @@ describe("StrategyDebugger", () => {
     );
     await user.click(screen.getByRole("button", { name: "추적 실행" }));
 
-    expect(await screen.findByText("source_omitted_zero")).toBeInTheDocument();
+    expect(await screen.findByText("원천 생략(0)")).toBeInTheDocument();
     expect(
       screen.getByText(
         (_content, element) =>
@@ -975,6 +977,54 @@ describe("StrategyDebugger", () => {
     ]);
     await user.click(screen.getByRole("tab", { name: "원시 데이터" }));
     expect(screen.getByText("flow.foreign_net_buy")).toBeInTheDocument();
+  });
+
+  // #350: 두 입력이 모두 값인데 사이에 원장이 가린 칸이 들어 결측이 된 노드 값은 "입력 없음"이 아니라
+  // "원장이 가림"이고, 원시 데이터의 가린 셀도 같은 말로 보인다.
+  it("says a node value and a raw cell the ledger masked as masked, not as a missing input", async () => {
+    server.use(
+      http.post(`${API}/api/v1/strategies/debug/trace`, async ({ request }) => {
+        requests.push((await request.json()) as StrategyTraceRequest);
+        const payload = traceResponse();
+        payload.trace.rows = payload.trace.rows.map((row) =>
+          row.security_id === "sec-b"
+            ? {
+                ...row,
+                status: "masked" as const,
+                inputs: [{ node_id: "winsorized", value: 0.4 }],
+              }
+            : row,
+        );
+        payload.raw = [
+          {
+            as_of: "2026-08-31",
+            security_id: "sec-b",
+            field_id: "credit.margin_balance",
+            value: null,
+            available_date: "2026-08-26",
+            kind: "masked",
+          },
+        ];
+        return HttpResponse.json(payload);
+      }),
+    );
+    const user = userEvent.setup();
+    renderDebugger(<StrategyDebugger {...props()} />);
+    await user.click(screen.getByRole("button", { name: "추적 실행" }));
+
+    const pipeline = await screen.findByRole("listitem", { name: "sec-b" });
+    // 원시 데이터 셀과 노드 칩이 같은 말이다.
+    expect(within(pipeline).getAllByText("원장이 가림")).toHaveLength(2);
+    await user.click(screen.getByRole("tab", { name: "선택 노드" }));
+    const node = screen.getByRole("region", {
+      name: "선택한 FactorGraph 노드의 실제 계산 결과",
+    });
+    const masked = within(node)
+      .getAllByRole("row")
+      .find((row) => row.textContent?.includes("sec-b") === true);
+    expect(masked).toHaveTextContent("winsorized=0.4");
+    expect(masked).toHaveTextContent("원장이 가림");
+    expect(within(node).queryByText("입력 없음")).not.toBeInTheDocument();
   });
 
   it("refetches the same exact owner through the query cache", async () => {

@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataQuery,
     BacktestDataset,
+    BacktestDataUnavailableError,
     MarketBarRecord,
     UniverseMembershipRecord,
 )
@@ -392,17 +393,23 @@ class MockEquityDataAdapter:
         return _business_day_index(session) - _business_day_index(session.replace(day=1)) >= 2
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
-        """Generate deterministic OHLCV until the real Equity DB adapter is selected."""
+        """Generate deterministic OHLCV until the real Equity DB adapter is selected.
+
+        요청한 종목과 벤치마크만 답한다. fixture 밖 id 는 duckdb 어댑터처럼
+        `BacktestDataUnavailableError` 로 거절하고, 요청하지 않은 벤치마크를 지어내지 않는다(#361).
+        세션이 없는 창도 duckdb 처럼 bar 없이 답한다 — 판단은 tape 단계 몫이다.
+        """
         history, sessions = _sessions_with_history(
             query.start, query.end, query.history_sessions_before_start
         )
-        if not sessions:
-            raise ValueError("mock backtest dataset requires at least one business session")
-        requested_ids = list(query.security_ids)
-        benchmark_id = query.benchmark_security_id or requested_ids[0]
-        if benchmark_id not in requested_ids:
-            requested_ids.append(benchmark_id)
-        security_ids = tuple(dict.fromkeys(requested_ids))
+        benchmark = () if query.benchmark_security_id is None else (query.benchmark_security_id,)
+        security_ids = tuple(dict.fromkeys((*query.security_ids, *benchmark)))
+        known = {membership.security.security_id for membership in self._memberships}
+        unknown = sorted(set(security_ids) - known)
+        if unknown:
+            raise BacktestDataUnavailableError(
+                f"unknown mock security_id — got={unknown} known={sorted(known)}"
+            )
         bars: list[MarketBarRecord] = []
         history_bars: list[MarketBarRecord] = []
         for security_index, security_id in enumerate(security_ids):
@@ -442,9 +449,10 @@ class MockEquityDataAdapter:
                     last_session=sessions[-1],
                 )
                 for security_id in security_ids
+                if sessions
             ),
             corporate_actions=(),
-            benchmark_security_id=benchmark_id,
+            benchmark_security_id=query.benchmark_security_id,
             warnings=(
                 DataWarning(
                     code="mock_equity_data",

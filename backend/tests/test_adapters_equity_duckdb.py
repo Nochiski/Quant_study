@@ -49,10 +49,12 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataNotReadyError,
     BacktestDataQuery,
+    BacktestDataUnavailableError,
     CorporateActionRecord,
 )
 from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
 from strategy_workbench.application.factor_research.facade.research import (
+    FactorCatalogQuery,
     FactorPreviewRequest,
     FactorResearchService,
 )
@@ -78,7 +80,10 @@ from strategy_workbench.domain.equity.facade.research_data import (
     ResearchPanelResult,
     UniverseHistoryQuery,
 )
-from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
+from strategy_workbench.domain.factor.facade.registry import (
+    FactorAvailability,
+    build_default_factor_registry,
+)
 from strategy_workbench.domain.strategy.facade.specification import (
     FactorDirection,
     FactorGraph,
@@ -1038,8 +1043,33 @@ def test_factor_field_catalog_lists_every_field_as_a_numeric_series(
 
     field_ids = tuple(profile.field_id for profile in adapter.list_fields())
     assert catalog == adapter.resolve_factor_fields(field_ids).fields
+    # `resolve_factor_fields` 는 모르는 id 를 버리므로 위 등식은 한 방향뿐이다. AI 팩터 도구가
+    # `list_fields` 로 가용성을 판정하므로 두 목록이 같은 집합임을 양방향으로 묶는다(#370)
+    assert {field.field_id for field in catalog} == set(field_ids)
     assert catalog, "필드가 하나도 없으면 compile 이 모든 필드를 없다고 본다"
     assert {field.value_type for field in catalog} == {NodeValueType.NUMERIC_SERIES}
+
+
+def test_factor_catalog_does_not_offer_a_factor_whose_field_the_ledger_lacks(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """#370(도메인 리뷰 A DR-A-02): 원장에 없는 필드(`UNSUPPORTED_FIELDS`)를 읽는 기본 graph 는
+    `implemented` 가 아니다. 편집기 예시 조각과 AI 도구가 실데이터에서 바로 compile 오류가 나는
+    팩터를 권하지 않는다. 가용성은 validate·preview 와 같은 필드 계약 port
+    (`resolve_factor_fields`)로 판정하고, compile 목록(`factor_field_catalog`)도 같은 메서드를
+    부른다.
+    """
+    service = FactorResearchService(build_default_factor_registry(), adapter, adapter)
+
+    def catalog(availability: FactorAvailability) -> set[str]:
+        query = FactorCatalogQuery(availability=(availability,), page_size=100)
+        return {definition.factor_id for definition in service.catalog(query).factors}
+
+    assert catalog(FactorAvailability.UNAVAILABLE) == {
+        "short.short_balance_ratio",
+        "event.earnings_surprise",
+    }
+    assert len(catalog(FactorAvailability.IMPLEMENTED)) == 5
 
 
 # ── BacktestDataPort ──────────────────────────────────────────────────────────
@@ -1215,11 +1245,15 @@ def test_backtest_dataset_reads_roots_without_the_basis_column(
 def test_backtest_dataset_refuses_unknown_and_index_ids(
     adapter: EquityDuckdbAdapter, root: Path
 ) -> None:
-    with pytest.raises(ValueError, match="unknown security_id") as unknown:
+    with pytest.raises(BacktestDataUnavailableError, match="unknown security_id") as unknown:
         adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("000660:9",), None))
+    assert "000660:9" in str(unknown.value)
     assert str(root.resolve()) not in str(unknown.value)  # run `error` 로 나간다(#163)
-    with pytest.raises(ValueError, match="malformed security_id"):
+    # 형식이 틀린 id(지수 `idx:*`, GAP-09)도 같은 포트 예외다 — run 이 벤치마크 오류로 코드화한다
+    # (#361).
+    with pytest.raises(BacktestDataUnavailableError, match="malformed") as malformed:
         adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("000660:1",), "idx:코스피"))
+    assert "idx:코스피" in str(malformed.value)
 
 
 def test_lag_falls_back_to_source_constants_and_says_so_when_the_profile_is_absent(

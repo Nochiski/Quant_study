@@ -137,6 +137,14 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
         json={"trial_index": 0, "reason": "   "},
     )
     assert blank.status_code == 422, blank.text
+    # 고를 때의 계열 N·대표 샤프·DSR 을 남긴다(V4-02).
+    selected = client.post(
+        f"/api/v1/experiments/{experiment['record']['experiment_id']}/selections",
+        json={"trial_index": 0, "reason": "학습 샤프가 가장 높다"},
+    ).json()
+    assert selected["trial_count"] == ledger["trial_count"]
+    assert selected["ledger_representative_sharpe"] == ledger["trials"][0]["representative_sharpe"]
+    assert 0.0 <= selected["deflated_sharpe"] <= 1.0
     walk_forward = client.get(
         f"/api/v1/experiments/{experiment['record']['experiment_id']}/walk-forward"
     ).json()

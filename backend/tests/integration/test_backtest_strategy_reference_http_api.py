@@ -61,7 +61,7 @@ def test_run_by_saved_revision_records_the_exact_revision_in_the_manifest() -> N
         "core": "python",
         "environment": _environment(),
         "initial_cash": 123_456_789,
-        "benchmark_security_id": "sec-benchmark",
+        "benchmark_security_id": "sec-005930-1",
         "annualization_days": 260,
         "metric_windows": [
             {

@@ -494,6 +494,8 @@
                   "backtest.run.invalid",
                   "backtest.run.equity_wiped_out",
                   "backtest.run.data_not_ready",
+                  "backtest.run.no_positions",
+                  "backtest.run.benchmark_unknown",
                   "backtest.run.internal",
                   "backtest.run.interrupted"
                 ],
@@ -954,6 +956,8 @@
                   "backtest.run.invalid",
                   "backtest.run.equity_wiped_out",
                   "backtest.run.data_not_ready",
+                  "backtest.run.no_positions",
+                  "backtest.run.benchmark_unknown",
                   "backtest.run.internal",
                   "backtest.run.interrupted"
                 ],
@@ -1933,8 +1937,7 @@
             "type": "string"
           },
           "frequency": {
-            "title": "Frequency",
-            "type": "string"
+            "$ref": "#/components/schemas/FieldFrequency"
           },
           "label": {
             "title": "Label",
@@ -2543,6 +2546,7 @@
               "experiment.search.too_many_points",
               "experiment.search.unknown_parameter",
               "experiment.selection.not_completed",
+              "experiment.selection.not_finished",
               "experiment.split.invalid",
               "experiment.split.no_window",
               "experiment.trial.not_found",
@@ -2748,9 +2752,33 @@
       "ExperimentSelection": {
         "description": "사용자가 고른 후보 기록(spec D9). 되돌릴 수 없다.",
         "properties": {
+          "deflated_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "고른 trial 실행의 샤프를 고를 때의 계열 N·시도 대표 샤프 분산으로 깎은 DSR(0~1). 지표가 비었거나 분산을 낼 수 없으면 비어 있다.",
+            "title": "Deflated Sharpe"
+          },
           "experiment_id": {
             "title": "Experiment Id",
             "type": "string"
+          },
+          "ledger_representative_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "고른 trial 이 속한 시도의 계열 원장 대표 샤프. 세션 단위(연율화 전)이고 그 시도에서 처음 결과가 난 실행의 값이라 고른 trial 실행의 샤프(DSR 분자)가 아닐 수 있다.",
+            "title": "Ledger Representative Sharpe"
           },
           "parameter_values": {
             "additionalProperties": {
@@ -2788,6 +2816,18 @@
           "strategy_id": {
             "title": "Strategy Id",
             "type": "string"
+          },
+          "trial_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "고를 때의 계열 시도 수 N(계열 원장).",
+            "title": "Trial Count"
           },
           "trial_index": {
             "title": "Trial Index",
@@ -2999,7 +3039,8 @@
       "FactorAvailability": {
         "enum": [
           "implemented",
-          "catalog_only"
+          "catalog_only",
+          "unavailable"
         ],
         "title": "FactorAvailability",
         "type": "string"
@@ -3857,7 +3898,7 @@
           },
           "frequencies": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/FieldFrequency"
             },
             "title": "Frequencies",
             "type": "array"
@@ -4134,6 +4175,18 @@
         ],
         "title": "FieldCoverageCapability",
         "type": "object"
+      },
+      "FieldFrequency": {
+        "description": "필드 값이 새로 나오는 주기. 워크벤치 어댑터가 `list_fields()` 로 내는 어휘다.\n\n원장 `dataset_profile` 의 빈도(session·report 등)와는 다른 어휘다 — 두 어댑터가 같은 필드에\n같은 빈도를 답하는지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 화면은\n이 값마다 문구를 두므로(#350) 목록을 늘리면 frontend typecheck 가 문구를 요구한다.",
+        "enum": [
+          "daily",
+          "monthly",
+          "quarterly",
+          "annual",
+          "event"
+        ],
+        "title": "FieldFrequency",
+        "type": "string"
       },
       "FieldLag": {
         "properties": {
@@ -7497,7 +7550,7 @@
         "type": "object"
       },
       "StrategyDocument": {
-        "description": "A stored revision as an editor sees it: exact source plus what it compiles to.\n\n`generated` is True when the revision predates document authoring (legacy JSON API) and the\nsource shown is a canonical JSON projection of the stored spec, not text an author wrote.",
+        "description": "A stored revision as an editor sees it: exact source plus what it compiles to.\n\n`generated` 는 revision 이 문서 저작 이전(legacy JSON API)이라 보이는 원문이 작성자가 쓴 글이\n아니라 저장된 spec 에서 만든 문서일 때 참이다 — 승격을 걷은 현재 판 문서\n(`authoring_document`)다.",
         "properties": {
           "created_at": {
             "format": "date-time",
@@ -9343,7 +9396,8 @@
           "missing_input",
           "warm_up",
           "divide_by_zero",
-          "group_missing"
+          "group_missing",
+          "masked"
         ],
         "title": "TraceValueStatus",
         "type": "string"
@@ -10398,6 +10452,8 @@
                   "backtest.run.invalid",
                   "backtest.run.equity_wiped_out",
                   "backtest.run.data_not_ready",
+                  "backtest.run.no_positions",
+                  "backtest.run.benchmark_unknown",
                   "backtest.run.internal",
                   "backtest.run.interrupted"
                 ],

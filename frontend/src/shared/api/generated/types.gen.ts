@@ -378,6 +378,8 @@ export type BacktestCancelResult = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -669,6 +671,8 @@ export type BacktestRunState = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -1261,10 +1265,7 @@ export type DatasetFieldProfile = {
    * Field Id
    */
   field_id: string;
-  /**
-   * Frequency
-   */
-  frequency: string;
+  frequency: FieldFrequency;
   /**
    * Label
    */
@@ -1664,6 +1665,7 @@ export type ExperimentErrorDetail = {
     | "experiment.search.too_many_points"
     | "experiment.search.unknown_parameter"
     | "experiment.selection.not_completed"
+    | "experiment.selection.not_finished"
     | "experiment.split.invalid"
     | "experiment.split.no_window"
     | "experiment.trial.not_found"
@@ -1775,9 +1777,21 @@ export type ExperimentRequest = {
  */
 export type ExperimentSelection = {
   /**
+   * Deflated Sharpe
+   *
+   * 고른 trial 실행의 샤프를 고를 때의 계열 N·시도 대표 샤프 분산으로 깎은 DSR(0~1). 지표가 비었거나 분산을 낼 수 없으면 비어 있다.
+   */
+  deflated_sharpe?: number | null;
+  /**
    * Experiment Id
    */
   experiment_id: string;
+  /**
+   * Ledger Representative Sharpe
+   *
+   * 고른 trial 이 속한 시도의 계열 원장 대표 샤프. 세션 단위(연율화 전)이고 그 시도에서 처음 결과가 난 실행의 값이라 고른 trial 실행의 샤프(DSR 분자)가 아닐 수 있다.
+   */
+  ledger_representative_sharpe?: number | null;
   /**
    * Parameter Values
    */
@@ -1800,6 +1814,12 @@ export type ExperimentSelection = {
    * Strategy Id
    */
   strategy_id: string;
+  /**
+   * Trial Count
+   *
+   * 고를 때의 계열 시도 수 N(계열 원장).
+   */
+  trial_count?: number | null;
   /**
    * Trial Index
    */
@@ -1906,7 +1926,7 @@ export type FactorAnalytics = {
 /**
  * FactorAvailability
  */
-export type FactorAvailability = "implemented" | "catalog_only";
+export type FactorAvailability = "implemented" | "catalog_only" | "unavailable";
 
 /**
  * FactorCatalog
@@ -2420,7 +2440,7 @@ export type FieldCatalogFacets = {
   /**
    * Frequencies
    */
-  frequencies: Array<string>;
+  frequencies: Array<FieldFrequency>;
   /**
    * Units
    */
@@ -2563,6 +2583,18 @@ export type FieldCoverageCapability = {
    */
   venues: Array<string>;
 };
+
+/**
+ * FieldFrequency
+ *
+ * 필드 값이 새로 나오는 주기. 워크벤치 어댑터가 `list_fields()` 로 내는 어휘다.
+ *
+ * 원장 `dataset_profile` 의 빈도(session·report 등)와는 다른 어휘다 — 두 어댑터가 같은 필드에
+ * 같은 빈도를 답하는지는 `tests/contract/test_equity_field_contract_parity.py` 가 본다. 화면은
+ * 이 값마다 문구를 두므로(#350) 목록을 늘리면 frontend typecheck 가 문구를 요구한다.
+ */
+export type FieldFrequency =
+  "daily" | "monthly" | "quarterly" | "annual" | "event";
 
 /**
  * FieldLag
@@ -4765,8 +4797,9 @@ export type StartTurnRequest = {
  *
  * A stored revision as an editor sees it: exact source plus what it compiles to.
  *
- * `generated` is True when the revision predates document authoring (legacy JSON API) and the
- * source shown is a canonical JSON projection of the stored spec, not text an author wrote.
+ * `generated` 는 revision 이 문서 저작 이전(legacy JSON API)이라 보이는 원문이 작성자가 쓴 글이
+ * 아니라 저장된 spec 에서 만든 문서일 때 참이다 — 승격을 걷은 현재 판 문서
+ * (`authoring_document`)다.
  */
 export type StrategyDocument = {
   /**
@@ -5958,7 +5991,12 @@ export type TraceUnprocessableResponse = {
  * TraceValueStatus
  */
 export type TraceValueStatus =
-  "ok" | "missing_input" | "warm_up" | "divide_by_zero" | "group_missing";
+  | "ok"
+  | "missing_input"
+  | "warm_up"
+  | "divide_by_zero"
+  | "group_missing"
+  | "masked";
 
 /**
  * TrialAttempt
@@ -6626,6 +6664,8 @@ export type WalkForwardWindowResult = {
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
     | "backtest.run.data_not_ready"
+    | "backtest.run.no_positions"
+    | "backtest.run.benchmark_unknown"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;

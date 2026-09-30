@@ -100,10 +100,11 @@ test(
       "create strategy document",
     );
 
-    // 첫 실행은 새 시도, 벤치마크만 바꾼 실행은 그 시도의 재확인이다.
+    // 첫 실행은 새 시도, 벤치마크만 바꾼 실행은 그 시도의 재확인이다. 벤치마크는 mock 어댑터의 종목
+    // 어휘여야 한다 — 모르는 id 는 run 첫 단계에서 거절된다(#361).
     const counted = await completedRun(request(first));
     const benchmarkOnly = await completedRun(
-      request(first, { benchmark_security_id: "005930" }),
+      request(first, { benchmark_security_id: "sec-005930-1" }),
     );
     // 선택 종목 수를 바꾼 리비전은 새 시도, 그 뒤 제목만 바꾼 리비전은 같은 시도의 재확인이다.
     const changed = await revise(

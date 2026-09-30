@@ -82,6 +82,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataNotReadyError,
     BacktestDataQuery,
     BacktestDataset,
+    BacktestDataUnavailableError,
     CorporateActionRecord,
     InvalidBarRecord,
     MarketBarRecord,
@@ -1252,7 +1253,8 @@ class EquityDuckdbAdapter:
     # ── BacktestDataPort ──────────────────────────────────────────────────────
 
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset:
-        """원주가 bar + 구간 + adj_factor 사건. `BacktestDataset` 에 status 가 없어 실패는 예외."""
+        """원주가 bar + 구간 + adj_factor 사건. `BacktestDataset` 에 status 가 없어 실패는 예외다 —
+        모르거나 형식이 틀린 종목 id 는 `BacktestDataUnavailableError`(#361)."""
         requested = list(query.security_ids)
         if query.benchmark_security_id is not None and query.benchmark_security_id not in requested:
             requested.append(query.benchmark_security_id)
@@ -1260,7 +1262,7 @@ class EquityDuckdbAdapter:
         for security_id in requested:
             item = _parse_security_id(security_id)
             if item is None:
-                raise ValueError(
+                raise BacktestDataUnavailableError(
                     f"malformed security_id — expected <ticker>{SECURITY_ID_SEP}<span_seq> "
                     f"got={security_id!r} (benchmark idx:* is not served — GAP-09)"
                 )
@@ -1271,7 +1273,9 @@ class EquityDuckdbAdapter:
         }
         unknown = sorted(sid for sid, key in parsed.items() if key not in spans)
         if unknown:
-            raise ValueError(f"unknown security_id — not in {SPAN_TABLE}: {unknown}")
+            raise BacktestDataUnavailableError(
+                f"unknown security_id — not in {SPAN_TABLE}: {unknown}"
+            )
         if FACTOR_TABLE not in self._builds:
             raise BacktestDataNotReadyError(
                 f"원장 표 {FACTOR_TABLE} 이 없어 백테스트를 멈춘다 — 기업행위 사건 없이 돌리면 "

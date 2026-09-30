@@ -25,6 +25,8 @@ from strategy_workbench.domain.factor.facade.expression import (
     CrossSectionalOperator,
     FactorGraph,
     FieldNode,
+    GroupNode,
+    GroupOperator,
     MissingPolicy,
     TimeSeriesNode,
     TimeSeriesOperator,
@@ -38,9 +40,11 @@ from strategy_workbench.domain.factor.facade.trace import evaluate_factor_graph_
 # 가 바뀌어 값이 한 번 갈렸다. 팩터 행렬 캐시는 코드베이스에 아직 없어 잘못된 히트는 불가능하고,
 # 영향은 이 골든 하나다(1.1 문서는 P2-09 업그레이더를 거쳐 들어온다).
 PLAN_HASH_1_2 = "e8bdd889366602ffa16c40e3c1d4de04c7f040f637252ec7217cf50679d13f4e"
-# 같은 그래프의 `zero` plan hash. #312 가 채움 자리를 옮기며 채우는 정책의 payload 에만 표지
-# (`missing_fill`)를 실어 값이 달라진 판을 갈랐다 — 평가 규칙 판본의 첫 사례(#375 DR-A-10)다.
+# 같은 그래프의 `zero`·`cross_sectional_median` plan hash. #312 가 채움 자리를 옮기며 채우는 정책의
+# payload 에만 표지(`missing_fill`)를 실어 값이 달라진 판을 갈랐다 — 평가 규칙 판본의 첫 사례
+# (#375 DR-A-10)다.
 PLAN_HASH_ZERO = "788aa0abc41bbe39f46ee622ac93b07f8aa3b54b4883aa04ca20c3a403fc4107"
+PLAN_HASH_MEDIAN = "0157de5f544bfa6370bbf2bfbee691302ff9b0c98fb09362baff4b19cd2187be"
 
 
 def _graph() -> FactorGraph:
@@ -304,6 +308,95 @@ def test_a_new_listing_gets_the_neutral_momentum_of_the_policy() -> None:
     assert ranks(MissingPolicy.DROP) == {"A": 1.0, "B": 0.0, "C": None}
 
 
+def test_a_group_input_is_filled_with_the_group_median() -> None:
+    """그룹 노드 입력의 `cross_sectional_median` 은 그룹 중앙값이다 — 그룹 안의 중립값이다
+    (#312 리뷰 P2-2).
+
+    하루, 섹터 X 가 A 10·B 11·C 모름, 섹터 Y 가 D 1·E 2 이고 F 는 섹터가 없는 5 다. C 를 X 의
+    중앙값 10.5 로 채우면 X 평균이 그대로라 중립화는 A −0.5·B 0.5·C 0.0, 순위는 A 0·B 1·C 0.5 다.
+    그날 전체 중앙값 5 로 채우면 X 평균이 26/3 으로 내려가 A 가 +1.33 으로 부호가 뒤집히고 C 는
+    그룹 바닥(순위 0)으로 간다. `zero` 는 그대로 0 이라 X 평균 7: 중립화 A 3·B 4·C −7, 순위
+    C 0·A 0.5·B 1. F 는 그룹이 없어 그룹 연산 값이 비고, 그래프 출력에서 같은 날 출력의
+    중앙값(중립화 0.0, 순위 0.5)이나 0 을 받는다 — 출력이 그룹 노드여도 출력 채움은 같다(P3-1).
+    """
+    day = date(2024, 1, 8)
+    rows = {
+        "A": ("X", 10.0),
+        "B": ("X", 11.0),
+        "C": ("X", None),
+        "D": ("Y", 1.0),
+        "E": ("Y", 2.0),
+        "F": (None, 5.0),
+    }
+    observations = tuple(
+        FactorObservation(
+            day,
+            security,
+            (FactorFieldValue("value", value), FactorFieldValue("sector", sector)),
+        )
+        for security, (sector, value) in rows.items()
+    )
+
+    def group(operator: GroupOperator, missing: MissingPolicy) -> dict[str, float | None]:
+        graph = FactorGraph(
+            nodes=(
+                FieldNode("value", "value", "field"),
+                GroupNode("out", operator, "value", "sector", "group"),
+            ),
+            output_node_id="out",
+        )
+        values = _values(graph, observations, missing)
+        return {security: values[(day, security)] for security in rows}
+
+    median = MissingPolicy.CROSS_SECTIONAL_MEDIAN
+    assert group(GroupOperator.NEUTRALIZE, median) == {
+        "A": -0.5, "B": 0.5, "C": 0.0, "D": -0.5, "E": 0.5, "F": 0.0,
+    }  # fmt: skip
+    assert group(GroupOperator.RANK, median) == {
+        "A": 0.0, "B": 1.0, "C": 0.5, "D": 0.0, "E": 1.0, "F": 0.5,
+    }  # fmt: skip
+    assert group(GroupOperator.NEUTRALIZE, MissingPolicy.ZERO) == {
+        "A": 3.0, "B": 4.0, "C": -7.0, "D": -0.5, "E": 0.5, "F": 0.0,
+    }  # fmt: skip
+    assert group(GroupOperator.RANK, MissingPolicy.ZERO) == {
+        "A": 0.5, "B": 1.0, "C": 0.0, "D": 0.0, "E": 1.0, "F": 0.0,
+    }  # fmt: skip
+
+
+def test_a_cell_the_ledger_masked_stays_out_of_the_rank_population() -> None:
+    """횡단면 입력 자리에서도 가린 칸은 채우지 않아 순위 모집단 밖이다(#298, #312 리뷰 P2-4).
+
+    하루, A 0.3·B 0.1·D 0.2 이고 C 는 원장이 가린 칸이다. `zero` 의 `rank(close)` 는 C 가 결측이고
+    나머지 셋의 순위 B 0·D 0.5·A 1 이다. C 를 0 으로 모집단에 넣었다가 뒤에서 지우면 B 가 1/3,
+    D 가 2/3 으로 움직인다(`median` 은 채운 값이 D 와 같아 순위가 그대로라 `zero` 로 본다).
+    """
+    day = date(2024, 1, 8)
+    cells = {
+        "A": FactorFieldValue("price.close", 0.3),
+        "B": FactorFieldValue("price.close", 0.1),
+        "C": FactorFieldValue("price.close", None, masked=True),
+        "D": FactorFieldValue("price.close", 0.2),
+    }
+    observations = tuple(
+        FactorObservation(day, security, (cell,)) for security, cell in cells.items()
+    )
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("close", "price.close", "field"),
+            CrossSectionalNode("rank", CrossSectionalOperator.RANK, "close", "cross_sectional"),
+        ),
+        output_node_id="rank",
+    )
+
+    values = _values(graph, observations, MissingPolicy.ZERO)
+    assert {security: values[(day, security)] for security in cells} == {
+        "A": 1.0,
+        "B": 0.0,
+        "C": None,
+        "D": 0.5,
+    }
+
+
 def test_a_day_without_any_value_is_not_filled() -> None:
     """같은 날 동료에 값이 하나도 없으면 `zero` 도 채우지 않는다 — 없는 팩터를 지어내지 않는다."""
     observations = tuple(
@@ -317,11 +410,12 @@ def test_a_day_without_any_value_is_not_filled() -> None:
 
 def test_only_filling_policies_carry_the_fill_stage_in_the_plan() -> None:
     """채우는 정책만 plan payload 에 채움 자리 표지를 싣는다 — drop 골든은 그대로다."""
-    zeroed = compile_factor_plan(
-        _graph(), registry_version="test-registry", missing=MissingPolicy.ZERO
-    )
-
-    assert zeroed.plan_hash == PLAN_HASH_ZERO
+    for policy, golden in (
+        (MissingPolicy.ZERO, PLAN_HASH_ZERO),
+        (MissingPolicy.CROSS_SECTIONAL_MEDIAN, PLAN_HASH_MEDIAN),
+    ):
+        plan = compile_factor_plan(_graph(), registry_version="test-registry", missing=policy)
+        assert plan.plan_hash == golden, policy
 
 
 def test_trace_evaluation_reads_the_same_argument() -> None:

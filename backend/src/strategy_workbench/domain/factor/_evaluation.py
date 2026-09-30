@@ -318,15 +318,41 @@ class _NodeEvaluator:
                 reached.update(indices[position + near : position + far + 1])
         return frozenset(reached)
 
-    def _filled_input(self, node_id: str) -> list[FactorComputedValue]:
-        """횡단면·그룹 노드가 읽는 입력 — 결측 정책으로 채운 사본(#312). 캐시 값은 그대로다."""
-        return _filled(
-            self._computed[node_id],
-            self._masked[node_id],
-            self._observations,
-            self._missing,
-            checkpoint=self._checkpoint,
-        )
+    def _filled(
+        self,
+        values: list[FactorComputedValue],
+        keep: frozenset[int],
+        group_field_id: str | None = None,
+    ) -> list[FactorComputedValue]:
+        """결측 정책의 채움 — 값이 횡단면으로 넘어가는 자리(횡단면·그룹 노드 입력, 그래프
+        출력)에서만 부르고 캐시 값은 그대로 둔다(#312).
+
+        `zero` 는 0, `cross_sectional_median` 은 그 자리의 연산이 묶는 동료의 중앙값이다 — 그룹
+        노드 입력은 (as_of, universe_member, 그룹), 나머지는 (as_of, universe_member). 그룹 연산에
+        그날 전체 중앙값을 넣으면 채운 종목이 그룹 바닥으로 가고 같은 그룹 종목의 중립화 값이
+        부호까지 뒤집힌다. 잎에서 채우면 채운 수준 값(잔고 0, 다른 종목의 자본총계)이 시계열 창과
+        비율로 새어 가짜 값을 만든다. 여기서는 팩터 값이 비었으면(입력이 비었거나 이력이 모자라) 그
+        자리에 정책의 중립값을 준다. 동료에 값이 하나도 없으면 채우지 않는다 — 없는 팩터를 지어내지
+        않는다. `keep` 은 원장이 가린 칸과 값의 구간에 가린 칸이 드는 칸이라(#298·#337) 어느 정책도
+        채우지 않는다.
+        """
+        if self._missing not in FILLING_MISSING_POLICIES:
+            return values
+        peers = _peer_indices(self._observations, group_field_id, checkpoint=self._checkpoint)
+        result = list(values)
+        for indices in _checkpointed(peers.values(), self._checkpoint):
+            available = [
+                number
+                for index in _checkpointed(indices, self._checkpoint)
+                if (number := _as_number(values[index])) is not None
+            ]
+            if not available:
+                continue
+            fill = 0.0 if self._missing is MissingPolicy.ZERO else median(available)
+            for index in _checkpointed(indices, self._checkpoint):
+                if result[index] is None and index not in keep:
+                    result[index] = fill
+        return result
 
     def _advance_within_node(self, node: ExpressionNode, fraction: float) -> None:
         self._progress(
@@ -405,14 +431,14 @@ class _NodeEvaluator:
         elif isinstance(node, CrossSectionalNode):
             values = _cross_sectional(
                 node,
-                self._filled_input(dependencies[0]),
+                self._filled(inputs[0], self._masked[dependencies[0]]),
                 self._observations,
                 checkpoint=self._checkpoint,
             )
         elif isinstance(node, GroupNode):
             values = _group_transform(
                 node,
-                self._filled_input(dependencies[0]),
+                self._filled(inputs[0], self._masked[dependencies[0]], node.group_field_id),
                 self._observations,
                 checkpoint=self._checkpoint,
             )
@@ -420,14 +446,10 @@ class _NodeEvaluator:
         # 가려진다(#337)
         for index in _checkpointed(masked, self._checkpoint):
             values[index] = None
-        # 그래프 출력은 합성의 정규화, 곧 횡단면으로 들어간다 — 횡단면·그룹 노드가 아니면 여기서
-        # 채운다(#312). 그 둘은 입력에서 이미 채웠다
-        if node_id == self._output_node_id and not isinstance(
-            node, (CrossSectionalNode, GroupNode)
-        ):
-            values = _filled(
-                values, masked, self._observations, self._missing, checkpoint=self._checkpoint
-            )
+        # 그래프 출력은 합성의 정규화, 곧 횡단면으로 들어가 늘 채운다(#312). 횡단면 출력에 남는
+        # 빈칸은 가린 칸과 값 없는 날뿐이라 그대로고, 그룹 출력은 그룹이 없는 행이 여기서 채워진다
+        if node_id == self._output_node_id:
+            values = self._filled(values, masked)
         _require_finite_values(
             node.node_id, values, self._observations, checkpoint=self._checkpoint
         )
@@ -513,42 +535,6 @@ def _field_values(
             else None
         )
     return values, frozenset(masked)
-
-
-def _filled(
-    values: list[FactorComputedValue],
-    keep: frozenset[int],
-    observations: tuple[FactorObservation, ...],
-    missing_policy: MissingPolicy,
-    *,
-    checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> list[FactorComputedValue]:
-    """결측 정책의 채움 — 값이 횡단면으로 넘어가는 자리(횡단면·그룹 노드 입력, 그래프 출력)에서만
-    부른다(#312).
-
-    `zero` 는 0, `cross_sectional_median` 은 같은 (as_of, universe_member) 동료의 그 값 중앙값이다.
-    잎에서 채우면 채운 수준 값(잔고 0, 다른 종목의 자본총계)이 시계열 창과 비율로 새어 가짜 값을
-    만든다. 여기서는 팩터 값이 비었으면(입력이 비었거나 이력이 모자라) 그 자리에 정책의 중립값을
-    준다. 같은 날 동료에 값이 하나도 없으면 채우지 않는다 — 없는 팩터를 지어내지 않는다. `keep` 은
-    원장이 가린 칸과 값의 구간에 가린 칸이 드는 칸이라(#298·#337) 어느 정책도 채우지 않는다.
-    """
-    if missing_policy not in FILLING_MISSING_POLICIES:
-        return values
-    result = list(values)
-    groups = _cross_section_indices(observations, checkpoint=checkpoint)
-    for indices in _checkpointed(groups.values(), checkpoint):
-        available = [
-            number
-            for index in _checkpointed(indices, checkpoint)
-            if (number := _as_number(values[index])) is not None
-        ]
-        if not available:
-            continue
-        fill = 0.0 if missing_policy is MissingPolicy.ZERO else median(available)
-        for index in _checkpointed(indices, checkpoint):
-            if result[index] is None and index not in keep:
-                result[index] = fill
-    return result
 
 
 def _binary(
@@ -655,7 +641,7 @@ def _cross_sectional(
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
     result: list[FactorComputedValue] = [None] * len(values)
-    groups = _cross_section_indices(observations, checkpoint=checkpoint)
+    groups = _peer_indices(observations, checkpoint=checkpoint)
     for indices in _checkpointed(groups.values(), checkpoint):
         numeric = [
             (index, number)
@@ -692,15 +678,7 @@ def _group_transform(
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> list[FactorComputedValue]:
-    grouped: dict[tuple[date, bool, str], list[int]] = {}
-    for index, observation in _checkpointed(enumerate(observations), checkpoint):
-        group = next(
-            (field.value for field in observation.fields if field.field_id == node.group_field_id),
-            None,
-        )
-        if isinstance(group, str):
-            key = (observation.as_of, observation.universe_member, group)
-            grouped.setdefault(key, []).append(index)
+    grouped = _peer_indices(observations, node.group_field_id, checkpoint=checkpoint)
     result: list[FactorComputedValue] = [None] * len(values)
     for indices in _checkpointed(grouped.values(), checkpoint):
         numeric = [
@@ -764,20 +742,31 @@ def _value_spans(node: ExpressionNode, inputs: list[_Spans]) -> _Spans:
     return hull
 
 
-def _cross_section_indices(
+def _peer_indices(
     observations: tuple[FactorObservation, ...],
+    group_field_id: str | None = None,
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
-) -> dict[tuple[date, bool], list[int]]:
-    """Peer groups for cross-sectional operators: one group per (as_of, universe_member).
+) -> dict[tuple[object, ...], list[int]]:
+    """횡단면 연산의 동료 — (as_of, universe_member)마다 한 묶음이고, `group_field_id` 를 주면
+    (그룹 연산과 그 입력 채움) 그룹 값마다 다시 나눈다. 그룹 값이 문자열이 아닌 행은 어느 그룹에도
+    들지 않는다.
 
-    Membership is part of the key so a non-member row cannot enter a member's cross-section
-    (D-001). Non-members are still grouped among themselves, which keeps the result list aligned
-    with `observations` positionally; the portfolio compiler drops those rows afterwards.
+    구성원 여부가 키에 있어 비구성원 행이 구성원의 횡단면에 들지 않는다(D-001). 비구성원도 저희끼리
+    묶어 결과 목록이 `observations` 와 자리로 맞고, 그 행은 포트폴리오 컴파일러가 뒤에서 뺀다.
     """
-    grouped: dict[tuple[date, bool], list[int]] = {}
+    grouped: dict[tuple[object, ...], list[int]] = {}
     for index, observation in _checkpointed(enumerate(observations), checkpoint):
-        grouped.setdefault((observation.as_of, observation.universe_member), []).append(index)
+        key: tuple[object, ...] = (observation.as_of, observation.universe_member)
+        if group_field_id is not None:
+            group = next(
+                (field.value for field in observation.fields if field.field_id == group_field_id),
+                None,
+            )
+            if not isinstance(group, str):
+                continue
+            key = (*key, group)
+        grouped.setdefault(key, []).append(index)
     return grouped
 
 

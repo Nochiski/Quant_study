@@ -761,7 +761,10 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         InvalidBacktestRunError,
         _failure_code,
     )
-    from strategy_workbench.application.backtest_run.facade.ports import EquityWipedOutError
+    from strategy_workbench.application.backtest_run.facade.ports import (
+        BacktestDataNotReadyError,
+        EquityWipedOutError,
+    )
     from strategy_workbench.application.portfolio_design.facade.design import (
         InvalidPortfolioRequestError,
         PortfolioSnapshotMismatchError,
@@ -775,6 +778,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
         _failure_code(PortfolioSnapshotMismatchError(expected="a", actual="b")),
         _failure_code(InvalidBacktestRunError("x")),
         _failure_code(EquityWipedOutError("x")),
+        _failure_code(BacktestDataNotReadyError("x")),
         _failure_code(RuntimeError("x")),
     }
     # `interrupted` 는 예외가 아니라 재시작 때 서비스가 닫으며 붙인다(검증 랩 spec D3).
@@ -793,6 +797,7 @@ def test_run_failure_codes_are_the_single_vocabulary_for_run_and_start_errors() 
     } == RUN_FAILURE_CODES - {
         "backtest.run.internal",
         "backtest.run.equity_wiped_out",
+        "backtest.run.data_not_ready",
         "backtest.run.interrupted",
     }
 

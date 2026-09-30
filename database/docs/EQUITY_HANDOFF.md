@@ -53,7 +53,7 @@
 
 `data/stage/` 의 원장 parquet 을 읽어 **29개 equity 표**(팩트·차원 25 + 선언표 3 —
 `declaration_table=True` 는 `universe_policy`·`dataset_profile`·`factor_readiness`)를 짓고,
-`equity.duckdb` 카탈로그(매크로 10)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
+`equity.duckdb` 카탈로그(매크로 11)와 워크벤치 어댑터(`equity_duckdb`, 필드 30)를 통해
 백테스트 파이프라인에 point-in-time 관측을 공급한다.
 
 - 코드: `database/src/equity/`
@@ -186,7 +186,7 @@ ssh kael-server "cd ~/quant-ledger && bash scripts/equity_gate_all.sh"
 표별 게이트 `metrics` 를 통째로 뽑아 baseline 근거로 쓰려면
 `database/scripts/equity_gate_metrics.py`(서버에서 `data/equity` 를 읽어 JSON 한 덩이).
 
-### 3-4. 카탈로그(뷰 매크로 10) · 소비자 계약(EG-C 6항)
+### 3-4. 카탈로그(뷰 매크로 11) · 소비자 계약(EG-C 6항)
 
 ```bash
 export QL_HOME=$HOME/quant-ledger PYTHONPATH=$HOME/quant-ledger/src
@@ -666,7 +666,7 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
 | 산출 SQL | `database/src/equity/sql/<table>.sql` |
 | 프레임(빌드·게이트·입력 고정·baseline·CLI) | `build.py`·`gates.py`·`inputs.py`·`baseline.py`·`__main__.py` |
 | 전방 조정가 표 | `rules_s23.py` · `sql/price_adj_daily.sql` — 소비 규약은 아래 「조정가 읽는 법」 |
-| 뷰 매크로 10 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`·`v_credit_balance`·`v_adj_close`) |
+| 뷰 매크로 11 | `views.py` (`v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_adj_price_fwd`·`v_adj_volume_fwd`·`v_firm_mktcap`·`v_consensus`·`v_fin_latest`·`v_credit_balance`·`v_unfolded_event`·`v_adj_close`) |
 | 카탈로그 publish + EG11·EG5c | `catalog.py` |
 | 소비자 계약 EG-C | `contract.py` |
 | 골든 픽스처 | `database/src/equity/fixtures/<table>.json` |
@@ -798,9 +798,5 @@ cd backend && uv run --extra parquet --extra equity server
 회귀 테스트는 `backend/tests/test_http_equity_env.py`.
 
 **기동 뒤 부팅 로그 경고** — duckdb 어댑터는 못 읽는 원천의 필드를 빼고 뜨며 로그에 경고를 남긴다. 코드는
-경고 문장 안 괄호에 있다. 필드를 뺀 `catalog_*` 경고는 카탈로그를 다시 만들고(`ledger_sync catalog` 또는
-`python -m equity … catalog`, 파일 손상이 의심되면 `ledger_sync verify` 먼저) 서버를 다시 띄운다.
-카탈로그 매크로를 더한 코드를 받은 뒤에도 그렇다(`catalog_macro_missing`). `profile_lag_fallback` 은
-필드를 빼지 않으니 `dataset_profile` 을 받는다(`ledger_sync`). 부팅을 멈추는 `catalog_locked`·
-`catalog_transient_error` 는 예외 문장의 조치를 따른다. 코드별 뜻과 카탈로그에 기대는 필드는
+경고 문장 안 괄호에 있다. 코드별 조치는 `LEDGER_SYNC.md` §5, 코드별 뜻과 카탈로그에 기대는 필드는
 `EQUITY_FIELD_MAP.md` §3 「부팅 검사」가 정본이다.

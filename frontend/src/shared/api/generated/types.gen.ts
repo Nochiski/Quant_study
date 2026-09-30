@@ -667,6 +667,7 @@ export type BacktestRunState = {
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -6628,6 +6629,7 @@ export type WalkForwardWindowResult = {
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;

@@ -74,5 +74,14 @@ class BacktestDataset:
     history_corporate_actions: tuple[CorporateActionRecord, ...] = ()
 
 
+class BacktestDataNotReadyError(RuntimeError):
+    """데이터 원천이 백테스트 데이터를 낼 준비가 안 됐다 — 원장 표나 카탈로그 뷰가 없거나
+    낡았다(#369).
+
+    사용자 입력이 아니라 운영 조치(카탈로그 재생성 등)로 풀린다. 무엇을 할지는 어댑터가 사유 문장에
+    싣고, run 은 서버 오류가 아니라 코드화된 실패로 끝난다.
+    """
+
+
 class BacktestDataPort(Protocol):
     def load_backtest_dataset(self, query: BacktestDataQuery) -> BacktestDataset: ...

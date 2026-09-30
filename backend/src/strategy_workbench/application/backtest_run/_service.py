@@ -69,7 +69,11 @@ from strategy_workbench.domain.strategy.facade.specification import (
 from ._gc_policy import full_collections_suspended
 from ._scheduler import RunQueue, experiment_slots
 from .ports.outgoing.artifact_store import BacktestArtifactStorePort
-from .ports.outgoing.backtest_data import BacktestDataPort, BacktestDataQuery
+from .ports.outgoing.backtest_data import (
+    BacktestDataNotReadyError,
+    BacktestDataPort,
+    BacktestDataQuery,
+)
 from .ports.outgoing.backtest_executor import (
     BacktestExecutionRequest,
     BacktestExecutorPort,
@@ -1114,6 +1118,8 @@ def _failure_code(error: BaseException) -> RunFailureCode:
         return "backtest.run.invalid"
     if isinstance(error, EquityWipedOutError):
         return "backtest.run.equity_wiped_out"
+    if isinstance(error, BacktestDataNotReadyError):
+        return "backtest.run.data_not_ready"
     return "backtest.run.internal"
 
 

@@ -960,6 +960,37 @@ export type CellKind =
   | "masked";
 
 /**
+ * CellPlateau
+ */
+export type CellPlateau = {
+  /**
+   * Grid Index
+   */
+  grid_index: Array<number>;
+  /**
+   * Plateau Score
+   */
+  plateau_score: number | null;
+  /**
+   * Score
+   */
+  score: number | null;
+  /**
+   * Sensitivity
+   */
+  sensitivity: number | null;
+  verdict: CellVerdict;
+};
+
+/**
+ * CellVerdict
+ *
+ * 칸 판정. 화면은 번역만 한다.
+ */
+export type CellVerdict =
+  "recommended" | "peak" | "failed" | "unscored" | "scored";
+
+/**
  * ChatMessageView
  *
  * 대화 메시지 하나. `turn_id`는 이 메시지를 만든 턴이다(C-03).
@@ -7866,6 +7897,44 @@ export type StreamExperimentEventsResponses = {
    */
   200: unknown;
 };
+
+export type GetExperimentParameterMapData = {
+  body?: never;
+  path: {
+    /**
+     * Experiment Id
+     */
+    experiment_id: string;
+  };
+  query?: never;
+  url: "/api/v1/experiments/{experiment_id}/parameter-map";
+};
+
+export type GetExperimentParameterMapErrors = {
+  /**
+   * The experiment or trial is missing
+   */
+  404: ExperimentErrorResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetExperimentParameterMapError =
+  GetExperimentParameterMapErrors[keyof GetExperimentParameterMapErrors];
+
+export type GetExperimentParameterMapResponses = {
+  /**
+   * Response Getexperimentparametermap
+   *
+   * Successful Response
+   */
+  200: Array<CellPlateau>;
+};
+
+export type GetExperimentParameterMapResponse =
+  GetExperimentParameterMapResponses[keyof GetExperimentParameterMapResponses];
 
 export type SelectExperimentTrialData = {
   body: ExperimentSelectionRequest;

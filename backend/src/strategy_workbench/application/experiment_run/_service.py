@@ -22,6 +22,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
 )
 from strategy_workbench.domain.backtest.facade.trials import preview_trial
 from strategy_workbench.domain.experiment.facade.design import (
+    CellPlateau,
     ExperimentDesign,
     ExperimentNotFoundError,
     ExperimentStateError,
@@ -31,9 +32,11 @@ from strategy_workbench.domain.experiment.facade.design import (
     SplitSpec,
     WalkForwardGap,
     build_search_spec,
+    cell_outcomes,
     experiment_trial_key,
     out_of_sample_sharpe,
     pick_window_cell,
+    plateau_map,
     stitch_out_of_sample,
     walk_forward_gap,
     walk_forward_retention,
@@ -461,6 +464,24 @@ class ExperimentRunService:
         oos = out_of_sample_sharpe(curve, self._registry, record.run.annualization_days)
         train = [pick.train_sharpe for pick in picks if pick.train_sharpe is not None]
         return WalkForwardReport(windows, curve, oos, walk_forward_retention(oos, train), None)
+
+    def parameter_map(self, experiment_id: str) -> tuple[CellPlateau, ...]:
+        """그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03, 규칙은
+        `domain/experiment/_plateau.py`). 칸 점수는 창별 학습 점수(원장 세션 샤프)의 평균이고,
+        끝나지 않은 칸은 점수 없음이다 — 도는 실험도 그때까지의 지도를 준다."""
+        record = self._repository.get(experiment_id)
+        states = self._trial_states(record)
+        scores = self._train_scores(record)
+        trials = (
+            (
+                state.trial.grid_index,
+                state.status,
+                state.awaiting_recovery,
+                scores.get(state.attempts[-1].run_id or "") if state.attempts else None,
+            )
+            for state in states
+        )
+        return plateau_map(record.design.search, *cell_outcomes(trials))
 
     def _open_windows(
         self, record: ExperimentRecord, states: tuple[ExperimentTrialState, ...]

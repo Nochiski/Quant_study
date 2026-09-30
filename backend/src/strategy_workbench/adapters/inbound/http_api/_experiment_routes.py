@@ -30,6 +30,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
 from strategy_workbench.application.experiment_run.facade.ports import ExperimentSelection
 from strategy_workbench.domain.experiment.facade.design import (
     EXPERIMENT_CODES,
+    CellPlateau,
     ExperimentError,
     ExperimentNotFoundError,
     ExperimentStateError,
@@ -248,6 +249,16 @@ def register_experiment_routes(
         """창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율(V3-05). 사용자 후보 선택
         (`selections`)과 다르다."""
         return experiments.walk_forward(experiment_id)
+
+    @app.get(
+        "/api/v1/experiments/{experiment_id}/parameter-map",
+        operation_id="getExperimentParameterMap",
+        responses={404: rejected[404]},
+    )
+    def get_experiment_parameter_map(experiment_id: str) -> tuple[CellPlateau, ...]:
+        """그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03). 판정 기준은 domain
+        상수이고 화면은 판정을 번역·칠하기만 한다(V5-04)."""
+        return experiments.parameter_map(experiment_id)
 
     @app.post(
         "/api/v1/experiments/{experiment_id}/cancel",

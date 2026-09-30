@@ -162,17 +162,6 @@ export const RUN_ENVIRONMENT = {
   universe_id: "krx.common-stock",
 } as const;
 
-/**
- * 실행 설정 패널이 요청에 싣는 `environment`: 값이 없는(null) 선택 칸은 싣지 않는다. 업그레이드 응답의
- * `environment` 처럼 모든 칸을 가진 값을 실행 요청과 비교할 때 쓴다.
- */
-export const requestedEnvironment = (
-  environment: Readonly<Record<string, unknown>>,
-): Record<string, unknown> =>
-  Object.fromEntries(
-    Object.entries(environment).filter(([, value]) => value !== null),
-  );
-
 const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
   readFileSync(
     resolve(
@@ -181,7 +170,37 @@ const RUN_ENVIRONMENT_SCHEMA = JSON.parse(
     ),
     "utf8",
   ),
-) as { properties: Record<string, { default?: unknown }> };
+) as {
+  properties: Record<
+    string,
+    {
+      default?: unknown;
+      "x-applicable-when"?: { all_of: { pointer: string; equals: string }[] };
+    }
+  >;
+};
+
+/**
+ * 실행 설정 패널이 요청에 싣는 `environment`: 값이 없는(null) 선택 칸과, 스키마 `x-applicable-when` 조건이
+ * 서지 않아 꺼진 칸(고정 bp 의 가격 충격 계수 등, #352)은 싣지 않는다. 업그레이드 응답의 `environment` 처럼
+ * 모든 칸을 가진 값을 실행 요청과 비교할 때 쓴다.
+ */
+export const requestedEnvironment = (
+  environment: Readonly<Record<string, unknown>>,
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(environment).filter(
+      ([name, value]) =>
+        value !== null &&
+        (
+          RUN_ENVIRONMENT_SCHEMA.properties[name]?.["x-applicable-when"]
+            ?.all_of ?? []
+        ).every(
+          (condition) =>
+            environment[condition.pointer.slice(1)] === condition.equals,
+        ),
+    ),
+  );
 
 /**
  * 실행 설정 스키마 기본값(`GET /api/v1/run-environments/schema`)에 기간·유니버스를 채운 요청 본문의

@@ -17,8 +17,10 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
 from strategy_workbench.domain.strategy.facade.constraints import (
+    ApplicabilityCondition,
     AppliedStage,
     ContractUnit,
+    FieldApplicability,
     ScalarConstraint,
 )
 from strategy_workbench.domain.strategy.facade.provenance import (
@@ -181,6 +183,24 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
     ),
 }
 
+# 모드에 따라 읽히는 실행 설정 칸(#352). 전략 문서의 `FIELD_APPLICABILITY` 와 같은 표기라 실행
+# 설정 스키마가 `x-applicable-when` 으로 발행하고, 패널은 조건이 서지 않는 칸을 끄고 요청에 싣지
+# 않으며 조건이 서는 칸은 비우지 못하게 한다. 모델은 세율 칸(`sell_tax_bps`) 행만 강제한다 — 조건이
+# 설 때만 값이 있어야 한다(`__post_init__`). 다른 칸은 조건이 서지 않으면 읽히지 않을 뿐이다.
+# 조건 문장은 따로 두지 않는다 — 패널은 칸을 끄기만 하므로 설명 키는 칸 자신의 것이다.
+RUN_ENVIRONMENT_APPLICABILITY: dict[str, FieldApplicability] = {
+    name: FieldApplicability(
+        pointer=f"/{name}",
+        conditions=(ApplicabilityCondition(f"/{mode_field}", equals=mode.value),),
+        description_key=RUN_ENVIRONMENT_CONSTRAINTS[name].description_key,
+    )
+    for name, (mode_field, mode) in (
+        ("slippage_bps", ("impact_model", ImpactModel.FIXED_BPS)),
+        ("impact_coefficient", ("impact_model", ImpactModel.SQRT)),
+        ("sell_tax_bps", ("sell_tax", SellTax.CUSTOM)),
+    )
+}
+
 # canonical JSON 이 `15` 와 `15.0` 으로 갈리지 않게 float 으로 정규화할 필드. 제약 행과 같은
 # 집합이므로 이름을 다시 적지 않는다.
 NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = tuple(RUN_ENVIRONMENT_CONSTRAINTS)
@@ -265,12 +285,14 @@ class RunEnvironment:
                 "run environment requires a universe id — "
                 f"universe_id={self.universe_id!r} range={self.start}..{self.end}",
             )
-        # 세율 칸은 `custom` 에서만 읽힌다. 다른 방식에 값이 오면 무엇이 적용됐는지 매니페스트만
+        # 세율 칸은 적용 조건이 설 때만 읽힌다. 다른 방식에 값이 오면 무엇이 적용됐는지 매니페스트만
         # 보고 알 수 없으므로 받지 않는다.
-        if (self.sell_tax is SellTax.CUSTOM) != (self.sell_tax_bps is not None):
+        rate = RUN_ENVIRONMENT_APPLICABILITY["sell_tax_bps"]
+        if rate.applies_to(self) != (self.sell_tax_bps is not None):
             raise InvalidRunFieldError(
                 "sell_tax_bps",
-                "sell_tax_bps is required when sell_tax is custom and must be absent otherwise — "
+                "sell_tax_bps is required exactly when "
+                f"{' and '.join(condition.describe() for condition in rate.conditions)} — "
                 f"sell_tax={self.sell_tax.value} sell_tax_bps={self.sell_tax_bps!r}",
             )
         for name, constraint in RUN_ENVIRONMENT_CONSTRAINTS.items():

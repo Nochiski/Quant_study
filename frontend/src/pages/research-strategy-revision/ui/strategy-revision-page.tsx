@@ -245,7 +245,7 @@ export const StrategyRevisionPage = () => {
     sourceView: stored.format,
     form: form.projection,
     tree: form.tree,
-    schemaLoaded: assist.schema !== null,
+    schema: assist.schema,
     onSelectPointer: (pointer) => selectPointer(pointer, "graph"),
     onOpenSource: openSourceAt,
   });

@@ -3689,6 +3689,47 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
 
   // plan이 ready면 읽기 전용 DAG 노드와 그 아래 편집기 행에 같은 pointer로 `aria-current`가
   // 둘 붙는다. 중첩된 두 reveal 훅이 같은 요소로 수렴해야 한다(2차 리뷰 R2-1).
+  it("keeps the Graph tab and reveals the pipeline card a stage problem points at (lang2 P4-02)", async () => {
+    server.use(
+      graphCompileWith([
+        {
+          code: "strategy.risk.max_name_weight",
+          kind: "semantic",
+          severity: "error",
+          pointer: "/risk/max_name_weight",
+          message: "종목 한도는 0보다 크고 1 이하여야 합니다.",
+        },
+      ]),
+      ...graphHandlers(),
+      revisionDocumentHandler(GRAPH_SOURCE),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/strategies/s1/revisions/2?view=graph");
+
+    const canvas = await screen.findByRole("region", {
+      name: "전략 파이프라인",
+    });
+    await user.click(await problemRow(/종목 한도는 0보다 크고 1 이하여야/));
+
+    // 단계 카드 행은 Graph 탭 맨 위 캔버스가 그린다 — 원문 탭으로 가지 않고 그 카드로 간다.
+    await waitFor(() => {
+      expect(history.location.search).toContain("view=graph");
+      expect(history.location.search).toContain(
+        "path=%2Frisk%2Fmax_name_weight",
+      );
+    });
+    const card = within(canvas).getByRole("group", {
+      name: "종목별 최대 목표 비중 한도",
+    });
+    await waitFor(() => expect(card).toHaveAttribute("aria-current", "true"));
+    expect(card).toHaveTextContent("종목 한도는 0보다 크고 1 이하여야 합니다.");
+    expect(lastVisibleScroll()).toBe(card);
+    expect(screen.getByRole("tab", { name: "Graph" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  }, 15_000);
+
   it("scrolls to the editor row, not the plan node, when both mark the same pointer", async () => {
     server.use(
       graphCompileWith([

@@ -1,6 +1,6 @@
 # Equity 필드 대응표 (`EQUITY_FIELD_MAP.md` v1.0, 2026-09-05)
 
-> 워크벤치 팩터 레지스트리(`backend/FACTORS.md`, `domain.factor.FactorRegistry` 50개)가 요구하는 **field_id 42종** ↔ equity 테이블·컬럼·뷰의 대응. 어댑터 `adapters/outbound/equity_duckdb`(워크벤치 5포트) 와 `backtest_engine/adapters/equity_duckdb.py`(커널 3포트) 구현의 사양이며, S00 의 `check_field_map.py` 가 레지스트리와의 집합 차 0 을 CI 로 확인한다.
+> 워크벤치 팩터 레지스트리(`backend/FACTORS.md`, `domain.factor.FactorRegistry` 50개)가 요구하는 **field_id 42종** ↔ equity 테이블·컬럼·뷰의 대응. 어댑터 `adapters/outbound/equity_duckdb`(워크벤치 5포트 — S07 의 커널 3포트 어댑터는 #372 로 걷었다) 구현의 사양이며, S00 의 `check_field_map.py` 가 레지스트리와의 집합 차 0 을 CI 로 확인한다.
 > 판정 어휘: **지원** = 컬럼이 있고 PIT 규칙이 닫힘 · **부분** = 재료는 있으나 조건(시작일·단위·의미)이 붙음 · **미지원** = 원천 없음(카탈로그에서 `unavailable` 로 명시, mock fallback 금지) · **미확인** = 슬라이스 착수 시 판정.
 > 출처: `reviews/2026-09-05-equity-workflow-proposal.md` §7-3 (오케스트레이터 검증 · `close_pt` → `close_idx` 정정).
 
@@ -19,7 +19,7 @@
 | `data_snapshot_id` | 워크벤치 어댑터가 `원장 판:필드 계약 판`으로 낸다(#235). 원장 판 = 카탈로그 생성 시 전 테이블 `build_id` 정렬 해시 = `equity.duckdb` 의 `snapshot_id` · 필드 계약 판 = 어댑터 선언표(`SOURCE_SPECS`·`FIELD_SPECS`, 사람용 문장 칸 제외)·카탈로그 매크로 본문·표 모양 코드 규칙의 판 16자리 | `FactorMatrixCacheKey` · run 지문 |
 | `previous_weight`·`forward_return` | equity 소유 아님 — 어댑터가 `0.0`·`None` 고정 | 포트 docstring |
 | 가격 조정 | **`price.close` = 원주가(불변)**, **`price.adj_close` = 표 `price_adj_daily.adj_close`**(**전방 조정**, 결정 09-05 · 산출처가 뷰 → 표로 바뀐 것은 S23 09-06. **워크벤치는 이 표를 카탈로그 뷰 `v_adj_close` 로 읽는다**(#220) — 원장이 그날 사건을 접지 못한 적용일 행(KRX 기준가 적용일에 늦게 공개된 ok 계수 · `krx_base_inconsistent`)은 원장이 가린 셀(MASKED, #298)이고, 그래서 조정가도 다시 카탈로그에 기댄다(없거나 낡으면 원천이 빠진다, 아래 「부팅 검사」 · DESIGN §5). 매크로 `v_adj_price_fwd` 는 표와 같은 값을 내는 읽기 경로이고 `EG3_price_adj_daily` 가 매 빌드 동일성을 증명한다: 각 행 d 에 apply_date ≤ d ∧ available_date ≤ d 인 계수의 share_factor 누적곱 — 첫 관측 수준 고정, 005930 2018-05-03 2,650,000 · 05-04 2,595,000; 값은 (security, date) 의 순수 함수라 창·asof 에 무관, `available_date` = greatest(원주가 공개일, 접힌 계수 공개일) = d). 차트·EG8 은 base = asof 인 `v_adj_price(asof)`. 레지스트리의 수익률·모멘텀·변동성 팩터는 `adj_close` 를 써야 한다 — 레지스트리 개정(결정 6)은 #218 로 끝났다: 가격 변화 팩터는 전부 `price.adj_close` 를 요구한다(`backend/FACTORS.md`) | 원칙 ② · GAP `price.close` · DESIGN §11 ① |
-| KRX 기준가(S06-2) | `price_daily.change_krw`(KRX 전일 대비)·`base_price_krw`(= close − change, 그날 기준가)는 **field_id 가 아니다** — `adj_factor` 의 `krx_base_price` 원천(계수·적용 세션의 정본)과 EG3 기록형이 읽는 내부 축. 어댑터는 노출하지 않고, `adj_factor.event_type` `unknown_krx`(corp_event 밖의 기준가 사건, 시총 불변)는 커널 어댑터가 share_factor 방향으로 SPLIT/REVERSE_SPLIT 로 보낸다 | DESIGN §4-2 v3 · GATES §9 S06-2 |
+| KRX 기준가(S06-2) | `price_daily.change_krw`(KRX 전일 대비)·`base_price_krw`(= close − change, 그날 기준가)는 **field_id 가 아니다** — `adj_factor` 의 `krx_base_price` 원천(계수·적용 세션의 정본)과 EG3 기록형이 읽는 내부 축. 어댑터는 노출하지 않고, `adj_factor.event_type` `unknown_krx`(corp_event 밖의 기준가 사건, 시총 불변)는 워크벤치 백테스트 데이터(`load_backtest_dataset`)가 share_factor 방향으로 split/reverse_split 로 보낸다 | DESIGN §4-2 v3 · GATES §9 S06-2 |
 
 ## 2. field_id 대응 (42)
 

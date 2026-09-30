@@ -1250,6 +1250,41 @@ describe("backtest run actions", () => {
     expect(replayedRequest).toEqual(acceptedRequest);
   });
 
+  it("says an experiment keeps a shared run instead of offering cancel again", async () => {
+    // #382: 내 몫은 빠졌지만 실험이 같은 실행을 써서 계속 돌면 응답의 `kept_by_owners` 로 알린다.
+    server.use(
+      http.post(`${API}/api/v1/backtests/:runId/cancel`, ({ params }) =>
+        HttpResponse.json({
+          run_id: params.runId,
+          status: "running",
+          progress: 0.4,
+          stage: "engine",
+          message: "Running engine",
+          created_at: "2026-09-30T00:00:00Z",
+          updated_at: "2026-09-30T00:00:01Z",
+          kept_by_owners: true,
+        }),
+      ),
+    );
+    renderWithQuery(
+      <BacktestRunActions
+        runId="run-shared"
+        status="running"
+        request={acceptedRequest}
+        onReplayed={vi.fn()}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "실행 취소" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "실험이 이 실행을 함께 쓰고 있어 계속 돕니다. 멈추려면 실험 화면에서 실험을 취소하세요.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "실행 취소" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders a typed cancel 404 without leaking an unhandled rejection", async () => {
     server.use(
       http.post(`${API}/api/v1/backtests/:runId/cancel`, () =>

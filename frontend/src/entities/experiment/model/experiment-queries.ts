@@ -7,6 +7,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useEffect } from "react";
 
 import {
   strategyWorkbenchApi,
@@ -92,4 +93,61 @@ export const useCancelExperiment = () => {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: experimentsKey() }),
   });
+};
+
+export const experimentTrialsQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "trials"],
+    queryFn: () => strategyWorkbenchApi.listExperimentTrials(experimentId),
+  });
+
+export const experimentWalkForwardQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "walk-forward"],
+    queryFn: () => strategyWorkbenchApi.getExperimentWalkForward(experimentId),
+  });
+
+/** 실패·취소로 끝난 trial 을 새 attempt 로 다시 넘긴다. 가능 여부는 trial 상태의 `retryable` 이다. */
+export const useRetryExperimentTrial = (experimentId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (trialIndex: number) =>
+      strategyWorkbenchApi.retryExperimentTrial(experimentId, trialIndex),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: [...experimentsKey(), experimentId],
+      }),
+  });
+};
+
+/**
+ * 진행 스트림(spec D6)을 구독한다. 프레임마다 그 실험의 조회(상세·trial·워크포워드)를 다시 읽고, 서버가
+ * 스트림을 닫으면(실험이 끝남) 한 번 더 읽는다. `open` 이 거짓이면 열지 않는다.
+ */
+export const useExperimentProgress = (experimentId: string, open: boolean) => {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    const refresh = () =>
+      queryClient.invalidateQueries({
+        queryKey: [...experimentsKey(), experimentId],
+      });
+    void (async () => {
+      try {
+        const { stream } = await strategyWorkbenchApi.openExperimentProgress(
+          experimentId,
+          controller.signal,
+        );
+        for await (const frame of stream) {
+          void frame;
+          await refresh();
+        }
+      } catch {
+        // 중단(화면을 떠남)이나 재연결 상한 소진은 아래 마지막 읽기로 정리한다.
+      }
+      if (!controller.signal.aborted) await refresh();
+    })();
+    return () => controller.abort();
+  }, [experimentId, open, queryClient]);
 };

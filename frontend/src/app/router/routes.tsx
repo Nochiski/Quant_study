@@ -28,6 +28,7 @@ import {
 import { t } from "../../shared/config";
 import { isJsonPointer } from "../../shared/lib/yaml12";
 import { AppShell } from "../../widgets/app-shell";
+import { ExperimentCompletionNotice } from "../../widgets/experiment-notice";
 
 /** Everything routes can read without importing the app: query cache and feature flags. */
 export type RouterContext = {
@@ -91,6 +92,10 @@ const ExperimentsPage = lazyRouteComponent(
   () => import("../../pages/research-experiments"),
   "ExperimentsPage",
 );
+const ExperimentPage = lazyRouteComponent(
+  () => import("../../pages/research-experiment"),
+  "ExperimentPage",
+);
 const NewExperimentPage = lazyRouteComponent(
   () => import("../../pages/research-experiment-new"),
   "NewExperimentPage",
@@ -145,6 +150,7 @@ const rootRoute = createRootRouteWithContext<RouterContext>()({
     return (
       <AppShell operationsEnabled={operationsEnabled}>
         <Outlet />
+        <ExperimentCompletionNotice />
       </AppShell>
     );
   },
@@ -244,6 +250,12 @@ const newExperimentRoute = createRoute({
   component: NewExperimentPage,
 });
 
+const experimentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/research/experiments/$experimentId",
+  component: ExperimentPage,
+});
+
 const operationsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/operations",
@@ -289,6 +301,7 @@ const routeTree = rootRoute.addChildren([
   backtestRunRoute,
   experimentsRoute,
   newExperimentRoute,
+  experimentRoute,
   settingsRoute,
   operationsRoute.addChildren([
     deploymentsRoute,

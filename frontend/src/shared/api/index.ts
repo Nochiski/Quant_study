@@ -58,6 +58,7 @@ export {
   type ApplicableWhen,
   type BacktestRunResult,
   type BacktestRunSpec,
+  type BacktestCancelResult,
   type BacktestRunState,
   type BacktestRunSummary,
   type BacktestStartResponse,
@@ -67,6 +68,7 @@ export {
   type DiffEntry,
   type Experiment,
   type ExperimentPage,
+  type ExperimentTrialState,
   type ExperimentPreview,
   type ExperimentRequest,
   type EquityCatalogQuery,
@@ -109,4 +111,5 @@ export {
   type TrialLedger,
   type TrialPreview,
   type UpgradedDocument,
+  type WalkForwardReport,
 } from "./strategy-workbench";

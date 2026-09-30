@@ -75,7 +75,12 @@ export const BacktestRunActions = ({
       role="group"
       aria-label={t("backtest.actions.title")}
     >
-      {active ? (
+      {active && cancel.data?.kept_by_owners === true ? (
+        // 내 몫은 빠졌지만 실험이 이 실행을 쓰고 있어 계속 돈다(#382). 멈추려면 실험을 취소한다.
+        <p className="backtest-run-actions__kept" role="status">
+          {t("backtest.actions.keptByExperiment")}
+        </p>
+      ) : active ? (
         <Button
           size="small"
           tone="danger"

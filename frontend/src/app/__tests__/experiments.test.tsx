@@ -157,6 +157,52 @@ const server = setupServer(
 
 const previews: unknown[] = [];
 
+const trialState = (
+  index: number,
+  status: string,
+  attempt: Record<string, unknown> | null,
+  retryable = false,
+) => ({
+  trial: {
+    index,
+    grid_index: [index],
+    parameter_values: { top_n: [10, 20][index % 2] },
+    window: WINDOWS[Math.floor(index / 2)],
+  },
+  status,
+  attempts:
+    attempt === null
+      ? []
+      : [
+          {
+            experiment_id: "e-run",
+            trial_index: index,
+            attempt: 1,
+            created_at: "2026-09-30T00:00:00Z",
+            ...attempt,
+          },
+        ],
+  awaiting_recovery: false,
+  retryable,
+  selectable: status === "completed",
+});
+
+/** 진행 스트림: 프레임 하나를 보내고 닫는다(실험이 끝났다). */
+const progressStream = () =>
+  new HttpResponse(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'id: 0\nevent: progress\ndata: {"status":"completed","trial_counts":{"completed":4}}\n\n',
+          ),
+        );
+        controller.close();
+      },
+    }),
+    { headers: { "Content-Type": "text/event-stream" } },
+  );
+
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
@@ -446,6 +492,151 @@ describe("experiments", () => {
       screen.getByRole("button", { name: "대기열에 넣기" }),
     ).toBeDisabled();
   });
+
+  it("monitors trials, retries a failed one and reads again when the progress stream moves", async () => {
+    let reads = 0;
+    let retried: string | null = null;
+    server.use(
+      http.get(`${API}/api/v1/experiments/:experimentId`, () => {
+        reads += 1;
+        return HttpResponse.json(
+          experiment("e-run", reads === 1 ? "running" : "completed"),
+        );
+      }),
+      http.get(`${API}/api/v1/experiments/:experimentId/trials`, () =>
+        HttpResponse.json([
+          trialState(0, "completed", { run_id: "run-trial-0000" }),
+          trialState(1, "failed", { run_id: "run-trial-0001" }, true),
+          trialState(
+            2,
+            "failed",
+            {
+              run_id: null,
+              error_code: "backtest.strategy.stale",
+              error: "revision changed",
+            },
+            true,
+          ),
+          trialState(3, "queued", null),
+        ]),
+      ),
+      http.get(`${API}/api/v1/experiments/:experimentId/walk-forward`, () =>
+        HttpResponse.json({
+          windows: [
+            {
+              pick: {
+                experiment_id: "e-run",
+                window_index: 0,
+                attempt: 1,
+                trial_index: 0,
+                train_sharpe: 0.0512,
+                created_at: "2026-09-30T00:00:00Z",
+                run_id: "run-test-00000",
+              },
+              run_status: "completed",
+              run_error_code: null,
+              gap: null,
+            },
+            {
+              pick: {
+                experiment_id: "e-run",
+                window_index: 1,
+                attempt: 1,
+                trial_index: null,
+                train_sharpe: null,
+                created_at: "2026-09-30T00:00:00Z",
+              },
+              run_status: null,
+              run_error_code: null,
+              gap: "no_cell",
+            },
+          ],
+          curve: [],
+          out_of_sample_sharpe: null,
+          retention: null,
+          gap: "no_cell",
+        }),
+      ),
+      http.get(
+        `${API}/api/v1/experiments/:experimentId/events`,
+        progressStream,
+      ),
+      http.post(
+        `${API}/api/v1/experiments/:experimentId/trials/:trialIndex/retry`,
+        ({ params }) => {
+          retried = String(params.trialIndex);
+          return HttpResponse.json(trialState(1, "queued", null));
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/experiments/e-run");
+
+    const trial = async (label: string) =>
+      (await screen.findByText(label)).closest("tr")!;
+    expect(await trial("#2")).toHaveTextContent("실패");
+    expect(await trial("#1")).toHaveTextContent("top_n 10");
+    expect(
+      within(await trial("#1")).getByRole("link", { name: "run-trial-00" }),
+    ).toHaveAttribute("href", "/research/backtests/run-trial-0000");
+    expect(await trial("#3")).toHaveTextContent(
+      "저장된 revision이 그사이 바뀌었습니다.",
+    );
+    // 다시 실행은 backend 가 `retryable` 로 준 trial 에만 있다.
+    expect(within(await trial("#1")).queryByRole("button")).toBeNull();
+    expect(within(await trial("#4")).queryByRole("button")).toBeNull();
+    await user.click(
+      within(await trial("#2")).getByRole("button", { name: "다시 실행" }),
+    );
+    await waitFor(() => expect(retried).toBe("1"));
+    // 워크포워드: 창마다 고른 칸·학습 점수·검증 실행, 요약이 비는 이유는 backend `gap` 을 번역한다.
+    const gap = "학습 결과가 있는 칸이 없는 창이 있어 요약을 비웠습니다.";
+    expect(screen.getByText(gap).tagName).toBe("P");
+    expect(
+      screen.getByRole("cell", { name: new RegExp(gap, "u") }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("0.0512")).toBeInTheDocument();
+    // 진행 스트림의 프레임과 닫힘이 상세를 다시 읽게 한다.
+    await waitFor(() => expect(reads).toBeGreaterThanOrEqual(2));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "실험 e-run" }).nextElementSibling,
+      ).toHaveTextContent("완료"),
+    );
+  });
+
+  it("announces an experiment that finishes while the app is open, but not one done before", async () => {
+    let listed = 0;
+    server.use(
+      http.get(`${API}/api/v1/experiments`, () => {
+        listed += 1;
+        return HttpResponse.json({
+          items: [
+            experiment("e-late", listed === 1 ? "running" : "completed"),
+            experiment("e-old", "completed"),
+          ],
+          next_after: null,
+          slots: { total: 3, running: 0 },
+          max_priority: 5,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    mount("/research/backtests");
+
+    const done = await screen.findByText("실험 e-late 완료", undefined, {
+      timeout: 5_000,
+    });
+    expect(screen.queryByText("실험 e-old 완료")).not.toBeInTheDocument();
+    const item = done.closest("[role='status']")!;
+    expect(
+      within(item as HTMLElement).getByRole("link", { name: "후보 보기" }),
+    ).toHaveAttribute("href", "/research/experiments/e-late");
+    await user.click(
+      within(item as HTMLElement).getByRole("button", { name: "닫기" }),
+    );
+    expect(screen.queryByText("실험 e-late 완료")).not.toBeInTheDocument();
+  }, 10_000);
 
   it("fills a new experiment with the search space and split of a finished one", async () => {
     usePreview();

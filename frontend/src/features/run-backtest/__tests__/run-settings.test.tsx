@@ -993,6 +993,52 @@ describe("run environment panel", () => {
 
   // #396 리뷰 P2-1: v1 저장값은 건드리지 않은 옛 기본값(`session_volume`)까지 담았다. 새 기본값 `adv20` 이
   // 그 값에 덮이지 않고, 나머지 저장값은 이어진다. 새로 쓰는 값은 v2 에 간다.
+  // #396 리뷰 P2-1: 기본값과 다른 칸만 저장한다. backend 가 기본값을 바꾸면 손대지 않은 칸은 새 기본값을 따른다.
+  it("stores only fields that differ from the schema default so a changed default reaches untouched fields", async () => {
+    const first = renderWithQuery(<Harness />);
+    const user = await openSettings();
+    await fillPeriodAndUniverse(user);
+    const fee = screen.getByRole("spinbutton", { name: /수수료/ });
+    await user.clear(fee);
+    await user.type(fee, "7");
+    expect(
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`) ??
+          "{}",
+      ),
+    ).toEqual({
+      start: "2021-01-01",
+      end: "2026-08-31",
+      universe_id: "krx.common-stock",
+      fee_bps: "7",
+    });
+    first.unmount();
+
+    const properties = RUN_ENVIRONMENT_SCHEMA.properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    servedSchema = {
+      ...RUN_ENVIRONMENT_SCHEMA,
+      properties: {
+        ...properties,
+        participation_basis: {
+          ...properties.participation_basis,
+          default: "session_volume",
+        },
+      },
+    };
+    renderWithQuery(<Harness />);
+    await openSettings();
+    await waitFor(() =>
+      expect(requestBody()?.environment).toEqual({
+        ...ENVIRONMENT,
+        participation_basis: "session_volume",
+        fee_bps: 7,
+      }),
+    );
+  });
+
   it("drops the participation basis remembered before the adv20 default and keeps the rest", async () => {
     localStorage.setItem(
       "quant-workbench.run-environment.v1:strategy-1",

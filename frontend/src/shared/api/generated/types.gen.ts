@@ -6198,12 +6198,7 @@ export type TurnContextPayload = {
    * Diagnostics
    */
   diagnostics?: Array<string>;
-  /**
-   * Environment
-   */
-  environment?: {
-    [key: string]: unknown;
-  } | null;
+  environment?: RunEnvironment | null;
   /**
    * Source Format
    */

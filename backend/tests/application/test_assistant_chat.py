@@ -57,6 +57,10 @@ from strategy_workbench.domain.assistant.facade.tools import (
     READ_CURRENT_STRATEGY,
     VALIDATE_STRATEGY_YAML,
 )
+from strategy_workbench.domain.backtest.facade.environment import (
+    RunEnvironment,
+    run_environment_canonical_json,
+)
 from strategy_workbench.domain.factor.facade.registry import build_default_factor_registry
 from strategy_workbench.domain.strategy.facade.schema import strategy_document_schema
 
@@ -78,10 +82,13 @@ TODAY = date(2026, 9, 20)
 VALID_YAML = "schema_version: '1.1'\ntitle: 모멘텀\n"
 INVALID_YAML = "schema_version: '1.1'\ntitle: 깨진 문서\n"
 DOCUMENT = DocumentRef(strategy_id="strategy-1", revision=3, draft_id=None)
+ENVIRONMENT = RunEnvironment(
+    start=date(2021, 1, 4), end=date(2026, 9, 1), universe_id="krx.common-stock"
+)
 CONTEXT = TurnContext(
     source_text="schema_version: '1.1'\ntitle: 현재 문서\n",
     source_format="yaml",
-    environment={"start": "2020-01-02", "end": "2026-09-01"},
+    environment=ENVIRONMENT,
     diagnostics=("strategy.factor.unknown /factors/0/factor_id",),
 )
 
@@ -299,7 +306,7 @@ def test_read_current_strategy_returns_the_turn_context() -> None:
     assert payload["source_text"] == CONTEXT.source_text
     assert payload["source_format"] == "yaml"
     assert payload["diagnostics"] == list(CONTEXT.diagnostics)
-    assert payload["environment"] == CONTEXT.environment
+    assert payload["environment"] == json.loads(run_environment_canonical_json(ENVIRONMENT))
 
 
 def test_validate_strategy_yaml_runs_the_compiler_port() -> None:

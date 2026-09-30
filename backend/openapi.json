@@ -9726,14 +9726,12 @@
           "environment": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/RunEnvironment"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Environment"
+            ]
           },
           "source_format": {
             "default": "yaml",

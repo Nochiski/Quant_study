@@ -3736,6 +3736,8 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     // 턴에는 지금 편집기 텍스트가 실린다(서버가 문서를 따로 들지 않는다).
     expect(assistantTurns[0].context.source_text).toBe(before);
     expect(assistantTurns[0].context.source_format).toBe("yaml");
+    // 실행 설정은 패널이 검증한 값만 싣는다. 실행 옵션 전체가 아니다(#355).
+    expect(assistantTurns[0].context.environment).toEqual(RUN_ENVIRONMENT);
 
     const proposed = 'schema_version: "1.2"\ntitle: "저변동 모멘텀"\n';
     act(() =>

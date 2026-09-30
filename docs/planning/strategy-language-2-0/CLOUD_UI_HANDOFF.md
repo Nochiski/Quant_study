@@ -101,3 +101,9 @@ run 36770326341의 artifact 11124291288에서 1440/1920 light/dark actual 및 di
 별도 관찰된 Graph 빈 스크롤 영역은 제목 입력만으로 해결됐다고 판단하지 않는다. 제목이 빈 상태에서
 output 선택 후 컨트롤의 viewport 교차를 검사하고, 실패 시 조상 DOM의 scrollTop·크기 정보를 보관한다.
 이 재현 검사와 수정 후 전체 CI가 끝나기 전에는 Phase4 출구 조건을 완료로 표시하지 않는다.
+
+Graph 빈 영역은 run 36772056605에서 viewport 교차율 0으로 재현됐다(browser 56개 통과, 해당 1개 실패).
+artifact 11124273518의 graph-layout 기록은 panel scrollTop=1978, window scrollTop=0,
+output y=3030.71875를 보여 줬다. 같은 문서의 pointer URL 변경이 router 기본 스크롤 초기화를 실행했다.
+새 문서/revision의 selectPointer에서만 resetScroll=false로 지정해 기존 reveal 경로가 스크롤을 소유하게 한다.
+선정·문서 원문·backend 의미에는 손대지 않는다. 새 CI로 viewport와 실제 캡처를 다시 검증한다.

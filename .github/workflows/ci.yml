@@ -186,7 +186,7 @@ jobs:
           retention-days: 7
       # 전체 trace 묶음은 커질 수 있어 렌더 검토에 필요한 이미지·문맥도 별도 보관한다.
       - name: Upload browser visual review artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-visual-review-${{ runner.os }}
@@ -195,6 +195,7 @@ jobs:
             frontend/test-results/**/*-diff.png
             frontend/test-results/**/test-failed-*.png
             frontend/test-results/**/attachments/*.json
+            frontend/test-results/**/attachments/*.png
             frontend/test-results/**/error-context.md
           if-no-files-found: ignore
           retention-days: 7

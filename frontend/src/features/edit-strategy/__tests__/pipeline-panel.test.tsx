@@ -489,7 +489,7 @@ describe("PipelinePanel", () => {
     expect(guide).toHaveTextContent("화면 위 실행 설정에서 고릅니다");
     // 단계 없는 섹션(`x-stage` 없음)의 이름이다. 문서 버전 스탬프(const)는 빠진다.
     expect(guide).toHaveTextContent(
-      "전략 이름·전략 설명·탐색 파라미터: YAML·Form 탭에서 고칩니다.",
+      "전략 이름·전략 설명·탐색 파라미터: YAML 탭에서 고칩니다.",
     );
     expect(guide).toHaveTextContent(
       "팩터 계산식: 아래 고급 편집기에서 고칩니다.",

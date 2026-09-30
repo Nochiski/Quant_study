@@ -150,6 +150,8 @@ export const NewStrategyPage = () => {
           view: origin === "outline" ? "yaml" : search.view,
         },
         replace: true,
+        // 문서 안 선택은 reveal 경로가 스크롤을 소유한다. URL 갱신이 페이지를 맨 위로 돌리면 안 된다.
+        resetScroll: false,
       });
     },
     [navigate, search],

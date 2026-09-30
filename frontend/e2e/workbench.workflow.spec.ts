@@ -1084,7 +1084,7 @@ test.describe("professional YAML workflow", () => {
     await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const form = page.getByRole("region", { name: "전략 파이프라인" });
     await expect(form).toBeVisible();
-    await expect(form.getByText("편집 가능")).toBeVisible();
+    await expect(form.getByRole("spinbutton", { name: "종목별 최대 목표 비중 한도" })).toBeEnabled();
     const risk = form;
     const weight = risk.getByRole("spinbutton", { name: "종목별 최대 목표 비중 한도" });
     await expect(weight).toHaveValue("0.05");
@@ -1536,6 +1536,10 @@ test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기
   const pipeline = page.getByRole("region", { name: "전략 파이프라인" });
   await expect(pipeline).toBeVisible();
   await expect(pipeline).not.toContainText("구조 오류");
+  // 빈 제목은 구조 오류가 아니지만 backend 의미 검증에서 실행을 막는다. 제목은 원문에서 적는다.
+  await page.getByRole("tab", { name: "YAML", exact: true }).click();
+  await replaceSource(page, 'schema_version: "1.2"\ntitle: "빈 문서에서 만든 전략"\n');
+  await page.getByRole("tab", { name: "그래프", exact: true }).click();
   await pipeline.getByRole("button", { name: /팩터.*추가/ }).click();
   await pipeline.getByRole("button", { name: /레시피 열기/ }).click();
   const graph = page.getByRole("region", { name: "그래프 편집" });

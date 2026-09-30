@@ -352,20 +352,29 @@ def _chain_start(document: Mapping[str, object]) -> str:
     )
 
 
-def upgrade_refusal(document: Mapping[str, object]) -> NotUpgradeableDocumentError | None:
+def upgrade_refusal(
+    document: Mapping[str, object],
+) -> NotUpgradeableDocumentError | UpgradeUnsupportedNodeError | None:
     """이 문서를 업그레이드 체인에 태울 수 없는 사유. 태울 수 있으면 None.
 
-    업그레이드 가능 판정의 공개 입구이고, `_chain_start` 와 같은 판정이다. compile 진단(hydrate)이
-    이 사유로 업그레이드 배너를 띄울 코드와 고칠 곳을 알리는 코드를 가른다. 업그레이더가 거절할
-    문서에 배너를 띄우면 누를 때마다 실패하는 버튼이 된다(#267 DEFECT-2).
+    업그레이드 가능 판정의 공개 입구다. compile 진단(hydrate)이 이 사유로 업그레이드 배너를 띄울
+    코드와 고칠 곳을 알리는 코드를 가른다. 업그레이더가 거절할 문서에 배너를 띄우면 누를 때마다
+    실패하는 버튼이 된다(#267 DEFECT-2).
 
-    체인을 시작할 수 있는지만 본다. 단계를 탄 뒤 검증(`apply_upgrade_steps`)에서 거절되는 드문
-    문서(세 겹 factors)는 배너가 뜬 뒤 422가 된다(알려진 한계, #322 리뷰 P3-3).
+    체인 시작 판정은 `_chain_start` 이고, 단계 안의 거절(은퇴 노드 `saved_*`)은 사본에 체인을 태워
+    업그레이드 API 와 같은 단계가 판정한다(#357 C-P3-10). 단계 뒤 검증에서 거절되는 드문 문서(세
+    겹 factors)는 배너가 뜬 뒤 422가 된다(알려진 한계, #322 리뷰 P3-3).
     """
     try:
         _chain_start(document)
     except NotUpgradeableDocumentError as refusal:
         return refusal
+    try:
+        upgrade_document(document)
+    except UpgradeUnsupportedNodeError as refusal:
+        return refusal
+    except NotUpgradeableDocumentError:
+        return None  # 위 알려진 한계
     return None
 
 

@@ -272,7 +272,11 @@ def test_an_explicit_normalization_is_kept() -> None:
 
 @pytest.mark.parametrize("kind", ["saved_factor", "saved_subgraph"])
 def test_saved_reference_nodes_refuse_the_upgrade(kind: str) -> None:
-    """spec D7: 실행 경로가 원래 없던 노드라 잃는 것이 없다. 조용히 지우지 않고 거절한다."""
+    """spec D7: 실행 경로가 원래 없던 노드라 잃는 것이 없다. 조용히 지우지 않고 거절한다.
+
+    compile 도 같은 거절을 읽어 배너 대신 고칠 곳을 알린다(#357 C-P3-10) — 배너를 띄우면 누를
+    때마다 422 인 버튼이 된다.
+    """
     document = _yaml("quality_momentum.v1_1.yaml")
     document["factors"][0]["graph"]["nodes"].append({"kind": kind, "node_id": "ref"})
 
@@ -282,6 +286,11 @@ def test_saved_reference_nodes_refuse_the_upgrade(kind: str) -> None:
     assert info.value.pointer == "/factors/0/graph/nodes/2/kind"
     assert info.value.code == "strategy_document.upgrade_unsupported_node"
     assert kind in str(info.value)
+    assert isinstance(upgrade_refusal(document), UpgradeUnsupportedNodeError)
+    issues = hydrate_strategy_document(document, identity=DRAFT).issues
+    version_issues = [issue for issue in issues if issue.pointer == "/schema_version"]
+    assert [issue.code for issue in version_issues] == ["structure.not_upgradeable_schema_version"]
+    assert version_issues[0].message == str(info.value)
 
 
 def test_upgrade_does_not_mutate_its_input() -> None:

@@ -1846,18 +1846,31 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       );
       mount("/research/strategies/s1/revisions/2");
       const view = await editor();
-      expect(view.state.doc.toString()).toBe(COMMENTED);
+      await settled(view, COMMENTED);
       return view;
     };
     /**
-     * `text` 가 compile 됐다 — compile 은 parse 가 편집을 따라온 뒤에만 나간다. 그 전에는 구조 연산(insert-key)이
-     * `pending` 으로 보류되므로 다음 편집 전에 기다린다.
+     * 편집기 원문이 `text` 이고 그 원문의 parse·compile 이 끝났다(문서 상태 배지 `data-settled` — compile 버전이
+     * 원문 버전을 따라잡았다. e2e `waitForSettledDocument` 와 같은 신호). 그 전에는 캔버스·Form 이 직전 parse 로
+     * 그려져 있다: 문서를 연 직후 첫 parse 전에는 적힌 칸도 미작성으로 보여 확정이 insert-key 가 되고, parse 가
+     * 따라오기 전의 구조 연산은 `pending` 으로 보류된다(#392 CI — 빠른 러너에서 첫 parse 전에 입력해 편집이
+     * 버려졌다).
      */
-    const compiled = (text: string, before: number) =>
+    const settled = (view: EditorView, text: string) =>
       waitFor(() => {
-        expect(compiledSources.length).toBeGreaterThan(before);
-        expect(compiledSources[compiledSources.length - 1]).toBe(text);
+        expect(view.state.doc.toString()).toBe(text);
+        expect(
+          screen.getByRole("status", { name: "문서 상태" }),
+        ).toHaveAttribute("data-settled", "true");
       });
+    /**
+     * `settled` 에 더해 그 원문으로 compile 요청이 나갔다. 마지막 요청일 필요는 없다 — 저장본 기준 compile
+     * (`savedCanonicalJson`)은 parse 를 기다리지 않고 저장 원문으로 따로 나간다.
+     */
+    const compiled = async (view: EditorView, text: string, before: number) => {
+      await settled(view, text);
+      expect(compiledSources.slice(before)).toContain(text);
+    };
 
     it("카드 문장 안의 컨트롤로 값을 바꾸면 YAML 그 줄만 바뀌고 compile 된다", async () => {
       const user = userEvent.setup();
@@ -1877,7 +1890,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       expect(within(await canvas()).getByRole("status")).toHaveTextContent(
         `${WEIGHT} 반영됨`,
       );
-      await compiled(EDITED, before);
+      await compiled(view, EDITED, before);
     });
 
     it("카드와 Form 행은 같은 편집을 같은 SourceOperation 으로 낸다(두 번째 경로 없음)", async () => {
@@ -1893,7 +1906,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       let before = compiledSources.length;
       await user.clear(weight);
       await user.type(weight, "0.1{Enter}");
-      await compiled(EDITED, before);
+      await compiled(view, EDITED, before);
       await user.selectOptions(
         (await canvasCard(SIDE)).getByRole("combobox", { name: SIDE }),
         "long_short",
@@ -1910,7 +1923,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       act(() => expect(undo(view)).toBe(true));
       act(() => expect(undo(view)).toBe(true));
       expect(view.state.doc.toString()).toBe(COMMENTED);
-      await compiled(COMMENTED, before);
+      await compiled(view, COMMENTED, before);
 
       await user.click(screen.getByRole("tab", { name: "Form" }));
       const risk = await formSection("risk");
@@ -1920,7 +1933,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       before = compiledSources.length;
       await user.clear(formWeight);
       await user.type(formWeight, "0.1{Enter}");
-      await compiled(EDITED, before);
+      await compiled(view, EDITED, before);
       await user.selectOptions(
         (await formSection("portfolio")).getByRole("combobox", {
           name: /\bside/,

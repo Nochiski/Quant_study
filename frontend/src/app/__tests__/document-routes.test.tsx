@@ -1855,10 +1855,9 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     };
     /**
      * 편집기 원문이 `text` 이고 그 원문의 parse·compile 이 끝났다(문서 상태 배지 `data-settled` — compile 버전이
-     * 원문 버전을 따라잡았다. e2e `waitForSettledDocument` 와 같은 신호). 그 전에는 캔버스·Form 이 직전 parse 로
-     * 그려져 있다: 문서를 연 직후 첫 parse 전에는 적힌 칸도 미작성으로 보여 확정이 insert-key 가 되고, parse 가
-     * 따라오기 전의 구조 연산은 `pending` 으로 보류된다(#392 CI — 빠른 러너에서 첫 parse 전에 입력해 편집이
-     * 버려졌다).
+     * 원문 버전을 따라잡았다. e2e `waitForSettledDocument` 와 같은 신호). 첫 parse 전에는 캔버스·Form 에 컨트롤이
+     * 없고(#413), 편집 직후에는 직전 parse 로 그려져 parse 가 따라오기 전의 구조 연산이 `pending` 으로
+     * 보류된다(#392 CI — 빠른 러너에서 parse 전에 입력해 편집이 버려졌다).
      */
     const settled = (view: EditorView, text: string) =>
       waitFor(() => {
@@ -1876,7 +1875,7 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       expect(compiledSources.slice(before)).toContain(text);
     };
 
-    it("첫 parse 전에는 Form·캔버스가 컨트롤 없이 문서를 읽는 중이라 말하고, parse 뒤에 적힌 값을 보인다 (#413)", async () => {
+    it("첫 parse 전에만 Form·캔버스·그래프 편집기가 컨트롤 없이 기다리고, 그 뒤 편집 직후에는 직전 parse 로 그린다 (#413)", async () => {
       // 스키마를 query cache 에 먼저 넣는다: 문서가 오는 순간 Form·캔버스를 막는 것은 첫 parse 하나뿐이라
       // "첫 parse 전"(150ms)이 스키마 대기(로딩)와 섞이지 않는다.
       server.use(
@@ -1903,6 +1902,10 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       });
       expect(within(canvas).queryByRole("spinbutton", { hidden: true })).toBeNull();
       expect(canvas).toHaveTextContent("문서를 읽는 중입니다.");
+      // 같은 탭의 고급 그래프 편집기도 빈 tree 로 "팩터가 없습니다"를 그리지 않고 기다린다(#416 리뷰 P2-2).
+      const graphEditor = () =>
+        screen.queryByRole("region", { name: "그래프 편집", hidden: true });
+      expect(graphEditor()).toBeNull();
 
       // parse 뒤: 적힌 값(0.05)이 두 화면에 보인다.
       await waitFor(() =>
@@ -1915,6 +1918,18 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
       ).toHaveValue(0.05);
       expect(
         within(canvas).getByRole("spinbutton", { name: WEIGHT, hidden: true }),
+      ).toHaveValue(0.05);
+      expect(graphEditor()).not.toBeNull();
+
+      // 첫 parse 뒤 편집 직후(디바운스)는 로딩으로 바꾸지 않고 직전 parse 로 그린다(DEFECT-P404-001,
+      // #416 리뷰 P2-1). 숨은 편집기는 role 로 찾지 못해 DOM 에서 view 를 얻는다.
+      const hidden = EditorView.findFromDOM(
+        globalThis.document.querySelector<HTMLElement>(".cm-content")!,
+      )!;
+      replaceText(hidden, EDITED);
+      expect(within(form).queryByText("문서를 읽는 중입니다.")).toBeNull();
+      expect(
+        within(form).getByRole("spinbutton", { name: /\bmax_name_weight/ }),
       ).toHaveValue(0.05);
     });
 

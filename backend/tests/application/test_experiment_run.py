@@ -59,6 +59,7 @@ from strategy_workbench.domain.backtest.facade.trials import (
     TrialLedgerEntry,
     representative_sharpe,
     summarize_trial_ledger,
+    trial_key,
 )
 from strategy_workbench.domain.experiment.facade.design import (
     CellVerdict,
@@ -71,7 +72,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     WalkForwardGap,
     WindowSelectionRule,
 )
-from strategy_workbench.domain.experiment.facade.statistics import CapacityLimit
+from strategy_workbench.domain.experiment.facade.statistics import CapacityGap, CapacityLimit
 from strategy_workbench.domain.experiment.facade.trial import (
     ExperimentControls,
     ExperimentStatus,
@@ -1164,25 +1165,46 @@ def test_the_parameter_map_averages_ledger_train_scores_and_floors_a_bankrupt_ce
 _AMOUNTS = [3e8, 1e8, 2e8]
 
 
+def _counted_base(runs: _FakeRuns) -> None:
+    """기반 설정으로 돌린 백테스트가 계열 원장에 결과를 냈다(결과 화면에서 연 스윕)."""
+    key = trial_key(runs.admit(_BASE).run)
+    runs.ledger_entries.append(
+        TrialLedgerEntry("run-base", key, RunStatus.COMPLETED, _AT, _AT, 0.03)
+    )
+
+
+def _sweep(runs: _FakeRuns, service: ExperimentRunService) -> str:
+    _counted_base(runs)
+    request = CapacitySweepRequest(run=_BASE, initial_cash=_AMOUNTS)
+    return service.create_capacity(request).record.experiment_id
+
+
 def _capacity_result(sharpe: float, ordered: str, filled: str) -> BacktestRunResult:
-    """1000원에 `filled` 주 체결(주당 슬리피지 1원), 주문 `ordered` 주."""
-    order = RawOrder("o", "d", date(2021, 1, 5), "KRX:005930", "buy", ordered, "market", "gtc")
+    """1000원에 `filled` 주 체결(주당 슬리피지 1원), DAY 주문 `ordered` 주."""
+    order = RawOrder("o", "d", date(2021, 1, 5), "KRX:005930", "buy", ordered, "market", "day")
     fill = RawFill("f", "o", date(2021, 1, 5), "KRX:005930", "buy", filled, 1000.0, 0.0, 1.0)
     return replace(_result(sharpe), artifacts=RawArtifactBundle((), (), (order,), (fill,), (), ()))
 
 
-def test_a_capacity_sweep_runs_every_amount_over_the_base_range_as_one_trial() -> None:
+def test_a_capacity_sweep_needs_a_counted_base_trial_and_never_adds_to_n() -> None:
+    """#410 리뷰 P2-3: 기반 시도가 원장에 결과를 냈어야 한다 — 스윕은 늘 그 시도의 재확인이다."""
     runs = _FakeRuns()
     service = _service(runs)
     request = CapacitySweepRequest(run=_BASE, initial_cash=_AMOUNTS)
 
+    for call in (service.preview_capacity, service.create_capacity):
+        with pytest.raises(InvalidExperimentSpecError) as refused:
+            call(request)
+        assert refused.value.code == "experiment.capacity.base_not_run"
+    assert runs.started == []
+    _counted_base(runs)
     preview = service.preview_capacity(request)
     experiment = service.create_capacity(request)
 
-    assert (preview.run_count, preview.new_trial_count, preview.trial_count_after) == (3, 1, 1)
+    assert (preview.run_count, preview.new_trial_count, preview.trial_count_after) == (3, 0, 1)
     assert experiment.record.design.kind is ExperimentKind.CAPACITY_SWEEP
     assert experiment.record.split is None
-    # 금액 순으로 기반 실행 구간 전체를 돈다. 초기 자본은 시도 키 밖이라 세 실행이 한 시도다.
+    # 금액 순으로 기반 실행 구간 전체를 돈다. 초기 자본은 시도 키 밖이라 세 실행이 기반과 한 시도다.
     assert [(r.initial_cash, r.environment and r.environment.start) for r in runs.started] == [
         (1e8, date(2021, 1, 4)),
         (2e8, date(2021, 1, 4)),
@@ -1190,20 +1212,17 @@ def test_a_capacity_sweep_runs_every_amount_over_the_base_range_as_one_trial() -
     ]
     assert {r.environment and r.environment.end for r in runs.started} == {date(2023, 6, 30)}
     assert [r.parameter_values for r in runs.started] == [{"scale": 1.0, "mode": "b"}] * 3
-    assert len(set(runs.keys)) == 1
+    assert set(runs.keys) == {runs.ledger_entries[0].trial_key}
     runs.complete_all()
-    # 기반 시도가 원장에 있으면(결과를 본 실행에서 연 스윕) N 은 늘지 않는다.
-    assert service.preview_capacity(request).new_trial_count == 0
+    assert runs.trial_ledger(_BASE).trial_count == 1
     assert service.advance(experiment.record.experiment_id) is True
     assert service.get(experiment.record.experiment_id).status is ExperimentStatus.COMPLETED
 
 
-def test_the_capacity_report_waits_for_every_amount_and_reads_costs_from_results() -> None:
+def test_the_capacity_report_settles_the_limit_only_when_every_amount_ran() -> None:
     runs = _FakeRuns()
     service = _service(runs)
-    experiment_id = service.create_capacity(
-        CapacitySweepRequest(run=_BASE, initial_cash=_AMOUNTS)
-    ).record.experiment_id
+    experiment_id = _sweep(runs, service)
     _finish(
         runs,
         {
@@ -1214,22 +1233,27 @@ def test_the_capacity_report_waits_for_every_amount_and_reads_costs_from_results
 
     pending = service.capacity(experiment_id)
 
-    # 3억은 아직 돈다 — 한계 금액을 내지 않는다. 충격 1원/1000원 = 10bp, 미체결 1 − 80/100.
+    # 3억은 아직 돈다 — 한계 금액을 확정하지 않는다. 충격 1원/1000원 = 10bp, 세션 미체결 1 − 80/100.
     assert [
-        (p.initial_cash, p.status, p.sharpe, p.impact_cost_bps, p.unfilled_ratio)
+        (p.initial_cash, p.status, p.sharpe, p.impact_cost_bps, p.session_unfilled_ratio)
         for p in pending.points
     ] == [
         (1e8, TrialStatus.COMPLETED, pytest.approx(0.04), pytest.approx(10.0), 0.0),
         (2e8, TrialStatus.COMPLETED, pytest.approx(0.05), pytest.approx(10.0), pytest.approx(0.2)),
         (3e8, TrialStatus.QUEUED, None, None, None),
     ]
-    assert pending.limit is None
-    # 3억은 파산했다 — 기준 밑이라 한계는 2억이다. 결과 파일을 못 읽는 금액은 비용만 빈다.
+    assert pending.limit == CapacityLimit(None, None, None, CapacityGap.PENDING)
+    # 재시작으로 중단돼 복구를 기다리는 금액도 아직 돈다.
+    runs.run_statuses["run-2"] = RunStatus.FAILED
+    runs.error_codes["run-2"] = "backtest.run.interrupted"
+    assert service.capacity(experiment_id).limit.gap is CapacityGap.PENDING
+    # 3억은 파산했다 — 기준 밑이라 한계는 2억이다. 결과 파일을 못 읽는 금액은 비용만 빈다(샤프는
+    # 원장에서 읽는다).
     runs.run_statuses["run-2"] = RunStatus.FAILED
     runs.error_codes["run-2"] = "backtest.run.equity_wiped_out"
     runs.unreadable.add("run-0")
     finished = service.capacity(experiment_id)
-    assert finished.limit == CapacityLimit(2e8, beyond_tested=False)
+    assert finished.limit == CapacityLimit(2e8, 2e8, pytest.approx(0.025), None)  # pyright: ignore[reportArgumentType]  # reason: 기준선은 부동소수 곱이다
     assert (finished.points[0].sharpe, finished.points[0].impact_cost_bps) == (
         pytest.approx(0.04),
         None,
@@ -1237,16 +1261,38 @@ def test_the_capacity_report_waits_for_every_amount_and_reads_costs_from_results
     assert finished.points[2].status is TrialStatus.FAILED
 
 
-def test_walk_forward_and_selection_belong_to_a_parameter_search_and_capacity_to_a_sweep() -> None:
+def test_a_cancelled_amount_leaves_the_capacity_limit_unsettled() -> None:
+    """#410 리뷰 P2-2: 돌지 않은 금액에서 곡선이 꺾였다고 하지 않는다."""
     runs = _FakeRuns()
     service = _service(runs)
-    sweep = service.create_capacity(CapacitySweepRequest(run=_BASE, initial_cash=_AMOUNTS))
+    experiment_id = _sweep(runs, service)
+    _finish(
+        runs,
+        {
+            "run-0": _capacity_result(0.05, "100", "100"),
+            "run-1": _capacity_result(0.049, "100", "100"),
+        },
+    )
+    service.cancel(experiment_id)
+    runs.run_statuses["run-2"] = RunStatus.CANCELLED
+
+    report = service.capacity(experiment_id)
+
+    assert report.points[2].status is TrialStatus.CANCELLED
+    assert report.limit == CapacityLimit(None, None, None, CapacityGap.CANCELLED)
+
+
+def test_kind_specific_results_are_refused_for_the_other_kind() -> None:
+    runs = _FakeRuns()
+    service = _service(runs)
+    sweep_id = _sweep(runs, service)
     search = service.create(_request())
     runs.complete_all()
 
     calls = {
-        "walk_forward": lambda: service.walk_forward(sweep.record.experiment_id),
-        "select": lambda: service.select(sweep.record.experiment_id, 0, "이유"),
+        "walk_forward": lambda: service.walk_forward(sweep_id),
+        "select": lambda: service.select(sweep_id, 0, "이유"),
+        "parameter_map": lambda: service.parameter_map(sweep_id),
         "capacity": lambda: service.capacity(search.record.experiment_id),
     }
     for name, call in calls.items():
@@ -1276,6 +1322,7 @@ def test_capacity_amounts_outside_the_rule_are_refused(amounts: list[float]) -> 
 def test_a_capacity_sweep_survives_reopening_the_research_database(tmp_path: Path) -> None:
     runs = _FakeRuns()
     path = tmp_path / "research.sqlite3"
+    _counted_base(runs)
     created = _service(runs, repository=SQLiteExperimentRepository(path)).create_capacity(
         CapacitySweepRequest(run=_BASE, initial_cash=_AMOUNTS)
     )

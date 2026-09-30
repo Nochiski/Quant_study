@@ -270,7 +270,7 @@ def register_experiment_routes(
     @app.get(
         "/api/v1/experiments/{experiment_id}/parameter-map",
         operation_id="getExperimentParameterMap",
-        responses={404: rejected[404]},
+        responses=rejected,
     )
     def get_experiment_parameter_map(experiment_id: str) -> ParameterMap:
         """그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03). 판정 기준은 domain

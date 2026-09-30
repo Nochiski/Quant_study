@@ -222,8 +222,9 @@ def test_a_capacity_sweep_from_a_finished_run_leaves_the_trial_count_as_it_was()
     assert all(point["status"] == "completed" for point in points)
     assert all(point["sharpe"] is not None for point in points)
     assert [point["impact_cost_bps"] for point in points] == pytest.approx([10.0] * 3, rel=1e-3)
-    assert all(0 <= point["unfilled_ratio"] <= 1 for point in points)
-    assert capacity["limit"] is not None
+    assert all(0 <= point["session_unfilled_ratio"] <= 1 for point in points)
+    # 모든 금액이 끝났으니 확정됐다(곡선 모양에 따라 한계 금액이나 "양수 샤프 없음").
+    assert capacity["limit"]["gap"] not in ("pending", "cancelled")
     # 스윕 실행 셋은 모두 기반 실행의 시도 키로 원장에 적힌 재확인이라 N 이 그대로다.
     assert ledger["trial_count"] == before
     (group,) = [
@@ -264,6 +265,11 @@ def test_design_and_lookup_rejections_are_coded() -> None:
             "/api/v1/experiments/capacity/preview",
             json={"run": request["run"], "initial_cash": [1e8, 1e8, 2e8]},
         ),
+        # 이 설정으로 돌린 백테스트가 아직 없다.
+        "capacity_base": client.post(
+            "/api/v1/experiments/capacity",
+            json={"run": request["run"], "initial_cash": [1e8, 1e9, 1e10]},
+        ),
     }
     missing = client.get("/api/v1/experiments/missing")
     missing_map = client.get("/api/v1/experiments/missing/parameter-map")
@@ -275,6 +281,7 @@ def test_design_and_lookup_rejections_are_coded() -> None:
         "field": "backtest.run.field_invalid",
         "sealed": "backtest.run.research_window_violation",
         "capacity": "experiment.capacity.invalid_amounts",
+        "capacity_base": "experiment.capacity.base_not_run",
     }
     for response in responses.values():
         assert response.status_code == 422, response.text

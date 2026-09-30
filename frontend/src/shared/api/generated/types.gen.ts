@@ -947,6 +947,14 @@ export type CandidateDecision = {
 export type CandidateSide = "long" | "short";
 
 /**
+ * CapacityGap
+ *
+ * 한계 금액을 확정하지 못했거나 시험 범위 끝에 걸린 이유. 화면은 번역만 한다.
+ */
+export type CapacityGap =
+  "pending" | "cancelled" | "no_positive_sharpe" | "beyond_tested";
+
+/**
  * CapacityLimit
  */
 export type CapacityLimit = {
@@ -955,9 +963,14 @@ export type CapacityLimit = {
    */
   amount: number | null;
   /**
-   * Beyond Tested
+   * Best Amount
    */
-  beyond_tested: boolean;
+  best_amount: number | null;
+  gap: CapacityGap | null;
+  /**
+   * Threshold Sharpe
+   */
+  threshold_sharpe: number | null;
 };
 
 /**
@@ -975,6 +988,10 @@ export type CapacityPoint = {
    */
   initial_cash: number;
   /**
+   * Session Unfilled Ratio
+   */
+  session_unfilled_ratio: number | null;
+  /**
    * Sharpe
    */
   sharpe: number | null;
@@ -983,10 +1000,6 @@ export type CapacityPoint = {
    * Trial Index
    */
   trial_index: number;
-  /**
-   * Unfilled Ratio
-   */
-  unfilled_ratio: number | null;
 };
 
 /**
@@ -995,7 +1008,7 @@ export type CapacityPoint = {
  * 용량 스윕 결과(V4-04). 한계 금액 규칙은 `domain/experiment/_capacity.py` 다.
  */
 export type CapacityReport = {
-  limit: CapacityLimit | null;
+  limit: CapacityLimit;
   /**
    * Points
    */
@@ -1769,6 +1782,7 @@ export type ExperimentErrorDetail = {
   code:
     | "experiment.base.invalid"
     | "experiment.base.unsaved"
+    | "experiment.capacity.base_not_run"
     | "experiment.capacity.invalid_amounts"
     | "experiment.kind.mismatch"
     | "experiment.not_found"
@@ -8133,6 +8147,10 @@ export type GetExperimentParameterMapErrors = {
    * The experiment or trial is missing
    */
   404: ExperimentErrorResponse;
+  /**
+   * The experiment state refuses it
+   */
+  409: ExperimentErrorResponse;
   /**
    * Validation Error
    */

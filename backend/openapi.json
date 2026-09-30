@@ -1418,6 +1418,17 @@
         "title": "CandidateSide",
         "type": "string"
       },
+      "CapacityGap": {
+        "description": "한계 금액을 확정하지 못했거나 시험 범위 끝에 걸린 이유. 화면은 번역만 한다.",
+        "enum": [
+          "pending",
+          "cancelled",
+          "no_positive_sharpe",
+          "beyond_tested"
+        ],
+        "title": "CapacityGap",
+        "type": "string"
+      },
       "CapacityLimit": {
         "properties": {
           "amount": {
@@ -1431,14 +1442,44 @@
             ],
             "title": "Amount"
           },
-          "beyond_tested": {
-            "title": "Beyond Tested",
-            "type": "boolean"
+          "best_amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Amount"
+          },
+          "gap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CapacityGap"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "threshold_sharpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold Sharpe"
           }
         },
         "required": [
           "amount",
-          "beyond_tested"
+          "best_amount",
+          "threshold_sharpe",
+          "gap"
         ],
         "title": "CapacityLimit",
         "type": "object"
@@ -1461,6 +1502,17 @@
             "title": "Initial Cash",
             "type": "number"
           },
+          "session_unfilled_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Unfilled Ratio"
+          },
           "sharpe": {
             "anyOf": [
               {
@@ -1478,17 +1530,6 @@
           "trial_index": {
             "title": "Trial Index",
             "type": "integer"
-          },
-          "unfilled_ratio": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Unfilled Ratio"
           }
         },
         "required": [
@@ -1497,7 +1538,7 @@
           "status",
           "sharpe",
           "impact_cost_bps",
-          "unfilled_ratio"
+          "session_unfilled_ratio"
         ],
         "title": "CapacityPoint",
         "type": "object"
@@ -1506,14 +1547,7 @@
         "description": "용량 스윕 결과(V4-04). 한계 금액 규칙은 `domain/experiment/_capacity.py` 다.",
         "properties": {
           "limit": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CapacityLimit"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/CapacityLimit"
           },
           "points": {
             "items": {
@@ -2769,6 +2803,7 @@
             "enum": [
               "experiment.base.invalid",
               "experiment.base.unsaved",
+              "experiment.capacity.base_not_run",
               "experiment.capacity.invalid_amounts",
               "experiment.kind.mismatch",
               "experiment.not_found",
@@ -12905,6 +12940,16 @@
               }
             },
             "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment state refuses it"
           },
           "422": {
             "content": {

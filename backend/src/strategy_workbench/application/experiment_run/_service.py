@@ -21,7 +21,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RunStatus,
     SavedRevisionReference,
 )
-from strategy_workbench.domain.backtest.facade.trials import bankrupt, preview_trial
+from strategy_workbench.domain.backtest.facade.trials import bankrupt, preview_trial, trial_key
 from strategy_workbench.domain.experiment.facade.design import (
     CellPlateau,
     ExperimentDesign,
@@ -187,10 +187,10 @@ class CapacityPoint:
     status: TrialStatus
     # 원장에 적힌 전체 구간 세션 샤프(비용 후, 연율화 전). 완료되지 않았으면 None.
     sharpe: float | None
-    # 가격 충격(슬리피지 포함) ÷ 체결 금액(bp), 주문 수량 가운데 체결되지 않은 비율. 완료되지
-    # 않았거나 결과 파일을 읽을 수 없거나 체결·주문이 없으면 None.
+    # 가격 충격(슬리피지 포함) ÷ 체결 금액(bp), 리밸런스 주문 수량 대비 그 세션 미체결 비율
+    # (`ExecutionCosts`). 완료되지 않았거나 결과 파일을 읽을 수 없거나 체결·주문이 없으면 None.
     impact_cost_bps: float | None
-    unfilled_ratio: float | None
+    session_unfilled_ratio: float | None
 
 
 @dataclass(frozen=True)
@@ -198,8 +198,8 @@ class CapacityReport:
     """용량 스윕 결과(V4-04). 한계 금액 규칙은 `domain/experiment/_capacity.py` 다."""
 
     points: tuple[CapacityPoint, ...]
-    # 모든 금액이 끝나야 낸다. 도는·대기·복구 대기 금액이 있으면 None.
-    limit: CapacityLimit | None
+    # 도는 금액·취소된 금액이 있으면 확정하지 않고 이유(`gap`)만 싣는다.
+    limit: CapacityLimit
 
 
 @dataclass(frozen=True)
@@ -249,8 +249,8 @@ class ExperimentRunService:
         return self._preview(*self._design(request))
 
     def preview_capacity(self, request: CapacitySweepRequest) -> ExperimentPreview:
-        """용량 스윕의 미리 계산. 금액만 다른 실행은 한 시도라 N 은 많아야 1 늘어난다 — 기반
-        시도가 원장에 이미 있으면(결과를 본 실행에서 연 스윕) 늘지 않는다."""
+        """용량 스윕의 미리 계산. 기반 시도가 원장에 있어야 해서(`_capacity_design`) 새 시도 수는
+        늘 0 이다."""
         return self._preview(*self._capacity_design(request))
 
     def _preview(self, admitted: AdmittedRun, design: ExperimentDesign) -> ExperimentPreview:
@@ -412,9 +412,21 @@ class ExperimentRunService:
     def _capacity_design(
         self, request: CapacitySweepRequest
     ) -> tuple[AdmittedRun, ExperimentDesign]:
-        """기반 요청을 실험 기반 규칙(`_base`)으로 검사하고 금액 목록을 편다. 창·탐색 축은 없다."""
+        """기반 요청을 실험 기반 규칙(`_base`)으로 검사하고 금액 목록을 편다. 창·탐색 축은 없다.
+
+        기반 시도가 계열 원장에 결과를 낸 시도(COUNTED)여야 한다 — 스윕 실행은 초기 자본만 달라 늘
+        그 시도의 재확인이라 N·대표 샤프가 바뀌지 않는다. 없으면 먼저 한 번 실행하라고 거절한다.
+        """
         amounts = capacity_amounts(request.initial_cash)
         admitted, _strategy, _environment = self._base(request.run)
+        base = preview_trial(admitted.ledger, trial_key(admitted.run))
+        if base.new_trial:
+            raise InvalidExperimentSpecError(
+                "experiment.capacity.base_not_run",
+                "용량 확인은 이 설정으로 돌린 백테스트 결과가 있어야 합니다. 먼저 이 설정으로 "
+                "백테스트를 한 번 실행하세요: "
+                f"lineage_id={base.lineage_id} trial_key={base.trial_key}",
+            )
         return admitted, ExperimentDesign(
             search=SearchSpec(()),
             parameter_values=admitted.run.parameter_values,
@@ -510,10 +522,10 @@ class ExperimentRunService:
         고른 칸의 검증 실행은 그 칸의 시도 키로 원장에 적어 재확인이 된다 — 창은 N 을 늘리지
         않는다(V3-03 P2-1). 재시작으로 중단된 검증 실행은 같은 칸으로 다시 넘긴다. 기반 요청
         재검사가 거절되면 그 창들의 선택에 거절 코드를 남긴다. V3-05 이전 설계의 실험은 돌리지
-        않는다(`ExperimentDesign.measured`). 창이 없는 용량 스윕도 거짓이라 돌리지 않는다.
+        않는다. 용량 스윕도 창이 없어 돌리지 않는다(`ExperimentDesign.walks_forward`).
         """
         record = self._repository.get(experiment_id)
-        if record.cancelled_at is not None or not record.design.measured:
+        if record.cancelled_at is not None or not record.design.walks_forward:
             return True
         states = self._trial_states(record)
         open_windows, _ = self._open_windows(record, states)
@@ -563,6 +575,7 @@ class ExperimentRunService:
         `domain/experiment/_plateau.py`). 칸 점수는 창별 학습 점수(원장 세션 샤프)의 평균이고,
         끝나지 않은 칸은 점수 없음이다 — 도는 실험도 그때까지의 지도를 준다."""
         record = self._repository.get(experiment_id)
+        _require_kind(record, ExperimentKind.PARAMETER_SEARCH)
         states = self._trial_states(record)
         scores = self._train_scores(record)
         trials = (
@@ -589,11 +602,12 @@ class ExperimentRunService:
             self._capacity_point(amount, state, scores)
             for amount, state in zip(record.design.initial_cash, states, strict=True)
         )
-        finished = all(state.status.is_terminal and not state.awaiting_recovery for state in states)
-        limit = (
-            capacity_limit((point.initial_cash, point.sharpe) for point in points)
-            if finished
-            else None
+        limit = capacity_limit(
+            ((point.initial_cash, point.sharpe) for point in points),
+            pending=any(
+                not state.status.is_terminal or state.awaiting_recovery for state in states
+            ),
+            cancelled=any(state.status is TrialStatus.CANCELLED for state in states),
         )
         return CapacityReport(points, limit)
 
@@ -614,7 +628,7 @@ class ExperimentRunService:
             status=state.status,
             sharpe=None if run_id is None else scores.get(run_id),
             impact_cost_bps=None if costs is None else costs.impact_cost_bps,
-            unfilled_ratio=None if costs is None else costs.unfilled_ratio,
+            session_unfilled_ratio=None if costs is None else costs.session_unfilled_ratio,
         )
 
     def _open_windows(
@@ -769,7 +783,7 @@ class ExperimentRunService:
         self, record: ExperimentRecord, states: tuple[ExperimentTrialState, ...]
     ) -> bool:
         """학습이 끝난 창의 검증 실행을 아직 넘기지 않았거나 그 실행이 끝나지 않았다."""
-        if not record.design.measured:
+        if not record.design.walks_forward:
             return False
         open_windows, waiting = self._open_windows(record, states)
         return waiting or any(

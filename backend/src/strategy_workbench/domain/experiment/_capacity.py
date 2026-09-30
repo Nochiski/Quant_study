@@ -11,12 +11,15 @@ import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import StrEnum
 
 from strategy_workbench.domain.backtest.facade.runs import RawArtifactBundle
 
 from ._errors import InvalidExperimentSpecError
 
-# 한계 금액 기준: 최고 샤프의 이 비율 밑으로 떨어지면 그 금액은 굴릴 수 없다(WORKFLOW V4-04).
+# 한계 금액 기준: 최고 샤프의 이 비율 밑으로 떨어지면 그 금액은 굴릴 수 없다(WORKFLOW V4-04 "최고
+# 샤프의 절반"). 고원의 봉우리 기준 `PEAK_NEIGHBOR_RATIO` 와 값만 같고 뜻이 다르다(그쪽은 이웃
+# 평균 ÷ 제 점수) — 한쪽을 바꿔도 다른 쪽이 따라 바뀌지 않게 따로 둔다.
 CAPACITY_SHARPE_RATIO = 0.5
 # 용량 스윕 금액 수. 곡선이 꺾이는 곳을 보려면 둘은 넘어야 하고, 금액마다 전체 구간을 한 번 돈다.
 MIN_CAPACITY_AMOUNTS = 3
@@ -30,16 +33,36 @@ class ExecutionCosts:
 
     # 가격 충격(슬리피지 포함) 합 ÷ 체결 금액 합, bp. 체결가에서 규칙 가격까지 거리다.
     impact_cost_bps: float | None
-    # 주문 수량 가운데 체결되지 않은 비율(주 단위). 참여 한도·매수 여력에 막힌 몫이다.
-    unfilled_ratio: float | None
+    # 리밸런스 주문 수량 대비 그 세션 미체결 비율(주 단위) — 참여 한도·매수 여력에 막힌 몫이다.
+    # 워크벤치 주문은 모두 DAY 라 잔량은 그 세션에 사라지고 다음 리밸런스가 새 주문으로 다시 낸다.
+    # 그래서 같은 부족분이 세션마다 다시 세어진다 — "끝내 못 채운 비율"이 아니다(목표 대비 달성은
+    # V4-04 2/2 의 달성 비중 차이가 잰다).
+    session_unfilled_ratio: float | None
+
+
+class CapacityGap(StrEnum):
+    """한계 금액을 확정하지 못했거나 시험 범위 끝에 걸린 이유. 화면은 번역만 한다."""
+
+    # 도는·대기·복구 대기 금액이 있다.
+    PENDING = "pending"
+    # 취소된 금액이 있다 — 돌지 않은 금액으로 곡선이 꺾였다고 하지 않는다(워크포워드 `cancelled`
+    # 와 같은 방향).
+    CANCELLED = "cancelled"
+    # 샤프가 난 금액이 없거나 최고 샤프가 0 이하다.
+    NO_POSITIVE_SHARPE = "no_positive_sharpe"
+    # 가장 큰 시험 금액까지 기준 위다 — 한계는 가장 큰 시험 금액이고 실제로는 그보다 클 수 있다.
+    BEYOND_TESTED = "beyond_tested"
 
 
 @dataclass(frozen=True)
 class CapacityLimit:
-    # 굴릴 수 있는 가장 큰 시험 금액. 최고 샤프가 0 이하이거나 샤프가 난 금액이 없으면 None.
+    # 굴릴 수 있는 가장 큰 시험 금액. 확정하지 못했으면 None(`gap`).
     amount: float | None
-    # 가장 큰 시험 금액까지 기준 밑으로 떨어지지 않았다 — 한계는 시험 범위 밖이다.
-    beyond_tested: bool
+    # 최고 샤프가 난 금액과 기준선(최고 샤프 × `CAPACITY_SHARPE_RATIO`, 세션 샤프). 화면이 기준을
+    # 다시 계산하지 않게 싣는다. 확정하지 못했으면 None.
+    best_amount: float | None
+    threshold_sharpe: float | None
+    gap: CapacityGap | None
 
 
 def capacity_amounts(values: Iterable[float]) -> tuple[float, ...]:
@@ -72,38 +95,42 @@ def capacity_amounts(values: Iterable[float]) -> tuple[float, ...]:
 
 
 def execution_costs(artifacts: RawArtifactBundle) -> ExecutionCosts:
-    """체결·주문 artifact 에서 가격 충격 비용과 미체결 비율을 낸다.
-
-    주문 수량은 주문마다 한 번 센다 — 참여 한도 잔량은 같은 주문으로 다음 세션에 이어 체결된다.
-    """
+    """체결·주문 artifact 에서 가격 충격 비용과 세션 미체결 비율을 낸다(주문은 모두 DAY 주문)."""
     traded = sum(fill.price * float(fill.quantity) for fill in artifacts.fills)
     impact = sum(fill.slippage_per_share * float(fill.quantity) for fill in artifacts.fills)
     ordered = sum(Decimal(order.quantity) for order in artifacts.orders)
     filled = sum(Decimal(fill.quantity) for fill in artifacts.fills)
     return ExecutionCosts(
         impact_cost_bps=impact / traded * _BPS if traded else None,
-        unfilled_ratio=float(1 - filled / ordered) if ordered else None,
+        session_unfilled_ratio=float(1 - filled / ordered) if ordered else None,
     )
 
 
-def capacity_limit(points: Iterable[tuple[float, float | None]]) -> CapacityLimit:
+def capacity_limit(
+    points: Iterable[tuple[float, float | None]], *, pending: bool = False, cancelled: bool = False
+) -> CapacityLimit:
     """`(초기 자본, 세션 샤프)` 에서 한계 금액을 낸다. 샤프가 없는 금액(실패·파산)은 기준 밑이다.
 
-    최고 샤프가 난 금액부터 금액 순으로 올라가며, 샤프가 최고의 `CAPACITY_SHARPE_RATIO` 밑으로
-    처음 떨어진 금액의 바로 앞 금액이 한계다 — 뒤에서 다시 오르는 금액은 운으로 보고 보지 않는다.
+    최고 샤프가 난 금액(동점이면 작은 금액)부터 금액 순으로 올라가며, 샤프가 최고의
+    `CAPACITY_SHARPE_RATIO` 밑으로 처음 떨어진 금액의 바로 앞 금액이 한계다. 보간하지 않는다. 뒤에서
+    다시 오르는 금액은 보지 않는다 — 비단조 곡선에서 용량을 부풀리지 않는 보수 쪽이다. 도는 금액이나
+    취소된 금액이 있으면 확정하지 않는다.
     """
+    if pending or cancelled:
+        return CapacityLimit(
+            None, None, None, CapacityGap.PENDING if pending else CapacityGap.CANCELLED
+        )
     ordered: Sequence[tuple[float, float | None]] = sorted(points)
     scored = [(amount, sharpe) for amount, sharpe in ordered if sharpe is not None]
-    if not scored:
-        return CapacityLimit(None, beyond_tested=False)
-    best_amount, best = max(scored, key=lambda point: point[1])
-    if best <= 0:
-        return CapacityLimit(None, beyond_tested=False)
+    best_amount, best = max(scored, key=lambda point: point[1], default=(None, 0.0))
+    if best_amount is None or best <= 0:
+        return CapacityLimit(None, None, None, CapacityGap.NO_POSITIVE_SHARPE)
+    threshold = CAPACITY_SHARPE_RATIO * best
     limit = best_amount
     for amount, sharpe in ordered:
         if amount <= best_amount:
             continue
-        if sharpe is None or sharpe < CAPACITY_SHARPE_RATIO * best:
-            return CapacityLimit(limit, beyond_tested=False)
+        if sharpe is None or sharpe < threshold:
+            return CapacityLimit(limit, best_amount, threshold, None)
         limit = amount
-    return CapacityLimit(limit, beyond_tested=True)
+    return CapacityLimit(limit, best_amount, threshold, CapacityGap.BEYOND_TESTED)

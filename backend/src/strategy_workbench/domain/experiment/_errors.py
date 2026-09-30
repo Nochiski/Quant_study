@@ -20,6 +20,7 @@ EXPERIMENT_SPEC_CODES: frozenset[str] = frozenset(
         "experiment.split.invalid",
         "experiment.split.no_window",
         "experiment.capacity.invalid_amounts",
+        "experiment.capacity.base_not_run",
     }
 )
 EXPERIMENT_NOT_FOUND_CODES: frozenset[str] = frozenset(

@@ -47,12 +47,16 @@ class ExperimentDesign:
     parameter_values: dict[str, ParameterValue]
     windows: tuple[WalkForwardWindow, ...]
     # 창의 학습 끝이 엠바고를 뺀 측정 끝이다(`SplitSpec.measured_windows`, V3-05). 그 전에 만든
-    # 실험은 거짓으로 읽히고 워크포워드 검증을 돌리지 않는다 — 이전 의미 그대로 둔다. 창이 없는 용량
-    # 스윕도 거짓이다.
+    # 실험은 거짓으로 읽히고 워크포워드 검증을 돌리지 않는다 — 이전 의미 그대로 둔다.
     measured: bool = False
     kind: ExperimentKind = ExperimentKind.PARAMETER_SEARCH
     # 용량 스윕의 초기 자본(오름차순, `capacity_amounts`). 파라미터 탐색이면 비었다.
     initial_cash: tuple[float, ...] = ()
+
+    @property
+    def walks_forward(self) -> bool:
+        """창별 선택·검증 실행을 돌리는 설계 — V3-05 이후 파라미터 탐색. 용량 스윕은 창이 없다."""
+        return self.kind is ExperimentKind.PARAMETER_SEARCH and self.measured
 
     def trials(self) -> tuple[ExperimentTrial, ...]:
         """칸(행 우선) × 창 순서로 편다. 한 칸의 창들이 붙어 있다. 용량 스윕은 금액 순이다."""

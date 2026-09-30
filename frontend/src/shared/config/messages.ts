@@ -1532,6 +1532,8 @@ const ko = {
     "실행 기간이 학습 기간보다 짧아 검증할 창이 없습니다. 기간을 늘리거나 학습 연수를 줄이세요.",
   "backtest.error.experiment.capacity.invalid_amounts":
     "용량 확인 금액은 서로 다른 양수 3~12개여야 합니다. 겹치거나 0 이하인 금액을 빼세요.",
+  "backtest.error.experiment.capacity.base_not_run":
+    "용량 확인은 이 설정으로 돌린 백테스트 결과가 있어야 합니다. 먼저 이 설정으로 백테스트를 한 번 실행하세요.",
   "backtest.error.experiment.not_found": "실험을 찾을 수 없습니다. 실험 목록에서 다시 여세요.",
   "backtest.error.experiment.trial.not_found": "실험에 그 trial이 없습니다. 실험을 다시 여세요.",
   "backtest.error.experiment.trial.not_retryable":
@@ -3529,6 +3531,8 @@ export const messages = {
       "The run period is shorter than the training period, so there is no window to test. Lengthen the period or shorten the training years.",
     "backtest.error.experiment.capacity.invalid_amounts":
       "A capacity check needs 3 to 12 distinct positive amounts. Remove duplicate amounts and amounts of zero or less.",
+    "backtest.error.experiment.capacity.base_not_run":
+      "A capacity check needs a backtest result with these settings. Run one backtest with these settings first.",
     "backtest.error.experiment.not_found": "The experiment was not found. Open it again from the experiment list.",
     "backtest.error.experiment.trial.not_found": "The experiment has no such trial. Open the experiment again.",
     "backtest.error.experiment.trial.not_retryable":

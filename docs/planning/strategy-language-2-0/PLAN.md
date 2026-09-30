@@ -2089,3 +2089,27 @@ P4-03b는 draft #426으로 보존했다. P4-03c는 기존 trace owner를 공유�
 ## 클라우드 P4-04 구현 기록 (2026-09-30)
 
 Graph/YAML 두 표현, 기본 Graph, 옛 view 마이그레이션, revision 별도 비교(compare 검색 상태), 저장된 JSON 바이트의 YAML 1.2 편집, 지연 편집기 준비 후 문제 위치 이동을 구현한다. 공유 컨트롤의 undo 뒤 같은 값 재입력 누락도 회귀 테스트로 수정한다. 최소 viewport는 360px로 선언하고 360/640px 클릭 및 빈 문서→팩터→세 노드→명시적 미리보기→백테스트 browser 검사를 추가한다. 자동 E2E·시각 검증은 차단 상태라 Phase 4 exit를 완료로 바꾸지 않는다.
+
+## 클라우드 P5-01 착수 및 책임 검토 (2026-09-30)
+
+P4-04 draft #428의 `33fd1739`에서 공식 CI 36773957515 전체가 성공했다(frontend 1216,
+browser 57, backend 3488/1 skipped, equity 1400, Rust 38). 시각 산출물 11125686355를 직접
+검토했고 기존 빈 그래프 스크롤 회귀도 통과했다. merge 상태를 뜻하지 않으며 기존 tracker 집계는 유지한다.
+
+후속 `feat/lang2-p5-01-recipe-transactions`는 그 head 위 스택이다. 기존 체인 투영·노드 씨앗·
+원문 planner를 재사용해 단계 연산만 추가한다. P5-02 팔레트/카드 UI는 아직 연결하지 않는다.
+검토 경로: backend runtime schema → schemaFacts/nodeSlotsByKind → projectRecipe →
+recipeTransaction → applyToTree/planSourceOperations → 기존 CodeMirror 단일 replaceRange.
+입력·설정 표나 데이터 DTO를 복제하지 않으며 계산/진단/해시는 backend 소유 그대로다.
+원문 범위 밖 바이트, 임의 연산열의 체인 유지와 tree 동치, 5개 아이디어 fixture의 생성 규칙을 검증한다.
+
+P5-03 전에는 #374의 기존 미리보기 경로 처리와 BACKLOG-016의 이진 팩터 동점 처리 결정을
+확정해야 한다. 현재 결정 없이 기존 부정확한 팩터 관측 포트를 새 UI에 연결하지 않는다.
+P6는 P5-03 뒤 라이브러리 ADR부터이며 아직 착수하지 않는다. #324의 별도 WIP와 #373·PR423·
+PR424·PR425 및 P4 draft 체인은 보존한다. 이번 단계에 실데이터/키/원장 변경은 없다.
+
+로컬 검증: frontend 전체 94파일/1229개 통과 후 원문 보존 회귀 2개를 추가했고,
+최종 레시피 테스트 15개가 통과했다(관련 4파일 79개도 통과). 타입·전체 lint·build,
+editor gzip 132.07KiB/200KiB, root story harness 40/35와 diff 검사를 통과했다.
+최종 SHA의 전체 CI 결과는 해당 draft PR 본문에 기록한다. 이 단계는 모델 계층이며
+레시피 UI가 완성됐다는 뜻이 아니다. 공식 브라우저 회귀 gate는 CI에서만 실행한다.

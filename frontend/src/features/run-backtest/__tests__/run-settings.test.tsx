@@ -149,11 +149,13 @@ const ENVIRONMENT: RunEnvironment = {
 const VALID: RunEnvironmentValidation = {
   valid: true,
   environment: ENVIRONMENT,
+  accepted: ENVIRONMENT,
   errors: {},
 };
 const INCOMPLETE: RunEnvironmentValidation = {
   valid: false,
   environment: null,
+  accepted: {},
   errors: { start: "required" },
 };
 

@@ -19,6 +19,7 @@ from strategy_workbench.application.assistant_chat.facade.profiles import Provid
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestArtifactUnreadableError,
+    BacktestCancelResult,
     BacktestParameterValueError,
     BacktestResultNotReadyError,
     BacktestRunNotFoundError,
@@ -536,7 +537,8 @@ def create_app(
         operation_id="cancelBacktest",
         responses=_backtest_run_not_found_responses(),
     )
-    def cancel_backtest(run_id: str) -> BacktestRunState:
+    def cancel_backtest(run_id: str) -> BacktestCancelResult:
+        """사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다."""
         try:
             return backtest_runs.cancel(run_id)
         except BacktestRunNotFoundError as error:

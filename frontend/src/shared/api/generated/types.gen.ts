@@ -350,6 +350,64 @@ export type AssistantUnprocessableResponse = {
 };
 
 /**
+ * BacktestCancelResult
+ *
+ * 취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면
+ * `kept_by_owners` 가 참이다 — 화면은 이 칸으로 "실험이 쓰는 실행" 을 알린다(#382).
+ */
+export type BacktestCancelResult = {
+  /**
+   * Artifact Sha256
+   */
+  artifact_sha256?: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Error Code
+   */
+  error_code?:
+    | "portfolio.strategy.invalid"
+    | "portfolio.data.unavailable"
+    | "portfolio.raw_observation.invalid"
+    | "backtest.run.invalid"
+    | "backtest.run.equity_wiped_out"
+    | "backtest.run.internal"
+    | "backtest.run.interrupted"
+    | null;
+  /**
+   * Kept By Owners
+   */
+  kept_by_owners?: boolean;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Progress
+   */
+  progress: number;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Stage
+   */
+  stage: string;
+  status: RunStatus;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+};
+
+/**
  * BacktestEnvironmentRequiredDetail
  *
  * 실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
@@ -7258,7 +7316,7 @@ export type CancelBacktestResponses = {
   /**
    * Successful Response
    */
-  200: BacktestRunState;
+  200: BacktestCancelResult;
 };
 
 export type CancelBacktestResponse =

@@ -62,3 +62,36 @@ def test_priority_weights_take_that_many_turns_and_paused_lanes_keep_their_place
     # 멈춘 B 는 건너뛰고, 대기 run 이 없으면 None 이다.
     assert while_paused == ["c1", "a3", "a4"]
     assert rest == ["b2", None]
+
+
+def test_a_lane_paused_mid_turn_gets_a_full_turn_when_resumed() -> None:
+    """#384 DEFECT-V3D-12: 차례 중에 멈춘 레인의 꺼낸 수가 다음 차례로 새지 않는다."""
+    queue: RunQueue[str] = RunQueue()
+    queue.configure("A", paused=False, weight=2)
+    for item in ("a1", "a2", "a3"):
+        queue.push(item, "A")
+    for item in ("b1", "b2"):
+        queue.push(item, "B")
+
+    first = queue.pop(experiments=True)
+    queue.configure("A", paused=True, weight=2)
+    while_paused = queue.pop(experiments=True)
+    queue.configure("A", paused=False, weight=2)
+    resumed = [queue.pop(experiments=True) for _ in range(3)]
+
+    # 남은 수(1)가 새면 a2 하나만 나가고 b2 로 넘어간다.
+    assert (first, while_paused, resumed) == ("a1", "b1", ["a2", "a3", "b2"])
+
+
+def test_moving_a_run_to_its_own_lane_keeps_its_place() -> None:
+    """#391 리뷰 P3-2: 레인이 그대로면 run 을 레인 맨 뒤로 보내지 않는다."""
+    queue: RunQueue[str] = RunQueue()
+    for item in ("a1", "a2"):
+        queue.push(item, "A")
+
+    queue.move("a1", "A")
+    queue.move("missing", "B")
+    kept = queue.pop(experiments=True)
+    queue.move("a2", "B")
+
+    assert (kept, queue.pop(experiments=True), queue.pop(experiments=True)) == ("a1", "a2", None)

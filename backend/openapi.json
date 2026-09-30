@@ -454,6 +454,98 @@
         "title": "AssistantUnprocessableResponse",
         "type": "object"
       },
+      "BacktestCancelResult": {
+        "description": "취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면\n`kept_by_owners` 가 참이다 — 화면은 이 칸으로 \"실험이 쓰는 실행\" 을 알린다(#382).",
+        "properties": {
+          "artifact_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Sha256"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "portfolio.strategy.invalid",
+                  "portfolio.data.unavailable",
+                  "portfolio.raw_observation.invalid",
+                  "backtest.run.invalid",
+                  "backtest.run.equity_wiped_out",
+                  "backtest.run.internal",
+                  "backtest.run.interrupted"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "kept_by_owners": {
+            "default": false,
+            "title": "Kept By Owners",
+            "type": "boolean"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "progress": {
+            "title": "Progress",
+            "type": "number"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "status",
+          "progress",
+          "stage",
+          "message",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BacktestCancelResult",
+        "type": "object"
+      },
       "BacktestEnvironmentRequiredDetail": {
         "description": "실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.",
         "properties": {
@@ -11399,6 +11491,7 @@
     },
     "/api/v1/backtests/{run_id}/cancel": {
       "post": {
+        "description": "사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다.",
         "operationId": "cancelBacktest",
         "parameters": [
           {
@@ -11416,7 +11509,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BacktestRunState"
+                  "$ref": "#/components/schemas/BacktestCancelResult"
                 }
               }
             },

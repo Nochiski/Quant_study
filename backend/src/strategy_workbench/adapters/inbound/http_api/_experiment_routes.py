@@ -19,6 +19,8 @@ from pydantic import Field
 from pydantic.config import JsonDict
 
 from strategy_workbench.application.experiment_run.facade.experiments import (
+    CapacityReport,
+    CapacitySweepRequest,
     Experiment,
     ExperimentPage,
     ExperimentPreview,
@@ -169,9 +171,24 @@ def register_experiment_routes(
         """실험을 만들고 trial 을 실행 대기열에 넘긴다. 기반은 저장한 리비전뿐이다."""
         return admitted(lambda: experiments.create(request))
 
+    def preview_capacity_sweep(request: CapacitySweepRequest) -> ExperimentPreview:
+        """용량 스윕 시작 전 미리 계산. 금액만 다른 실행은 한 시도라 N 은 많아야 1 늘어난다."""
+        return admitted(lambda: experiments.preview_capacity(request))
+
+    def create_capacity_sweep(request: CapacitySweepRequest) -> Experiment:
+        """용량 스윕(초기 자본만 바꾼 실행들, V4-04)을 만들고 금액마다 실행 대기열에 넘긴다."""
+        return admitted(lambda: experiments.create_capacity(request))
+
     for path, endpoint, operation_id, code in (
         ("/api/v1/experiments/preview", preview_experiment, "previewExperiment", 200),
         ("/api/v1/experiments", create_experiment, "createExperiment", 202),
+        (
+            "/api/v1/experiments/capacity/preview",
+            preview_capacity_sweep,
+            "previewCapacitySweep",
+            200,
+        ),
+        ("/api/v1/experiments/capacity", create_capacity_sweep, "createCapacitySweep", 202),
     ):
         app.router.add_api_route(
             path,
@@ -243,7 +260,7 @@ def register_experiment_routes(
     @app.get(
         "/api/v1/experiments/{experiment_id}/walk-forward",
         operation_id="getExperimentWalkForward",
-        responses={404: rejected[404]},
+        responses=rejected,
     )
     def get_experiment_walk_forward(experiment_id: str) -> WalkForwardReport:
         """창마다 자동으로 고른 칸과 검증 구간만 이어 붙인 곡선·유지율(V3-05). 사용자 후보 선택
@@ -253,12 +270,22 @@ def register_experiment_routes(
     @app.get(
         "/api/v1/experiments/{experiment_id}/parameter-map",
         operation_id="getExperimentParameterMap",
-        responses={404: rejected[404]},
+        responses=rejected,
     )
     def get_experiment_parameter_map(experiment_id: str) -> ParameterMap:
         """그리드 칸마다 추천·봉우리·실패 판정과 점수·고원 점수·민감도(V4-03). 판정 기준은 domain
         상수이고 화면은 판정을 번역·칠하기만 한다(V5-04)."""
         return experiments.parameter_map(experiment_id)
+
+    @app.get(
+        "/api/v1/experiments/{experiment_id}/capacity",
+        operation_id="getExperimentCapacity",
+        responses=rejected,
+    )
+    def get_experiment_capacity(experiment_id: str) -> CapacityReport:
+        """용량 스윕 금액별 비용 후 샤프·가격 충격·미체결 비율과 한계 금액(V4-04). 화면은
+        V5-06 이다."""
+        return experiments.capacity(experiment_id)
 
     @app.post(
         "/api/v1/experiments/{experiment_id}/cancel",

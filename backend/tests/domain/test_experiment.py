@@ -19,8 +19,10 @@ from strategy_workbench.domain.backtest.facade.runs import (
 from strategy_workbench.domain.experiment.facade.design import (
     MAX_GRID_POINTS,
     ExperimentDesign,
+    ExperimentKind,
     GridIndex,
     InvalidExperimentSpecError,
+    SearchSpec,
     SplitMode,
     SplitSpec,
     WalkForwardGap,
@@ -513,7 +515,10 @@ def test_trials_are_grid_cells_times_windows_in_a_fixed_order() -> None:
     trials = design.trials()
 
     # 칸(lookback 이 느린 축) × 창 순서이고, 탐색하지 않은 파라미터는 기반 해소 값 그대로다.
-    assert [(trial.index, trial.grid_index, trial.window.train_start) for trial in trials] == [
+    assert [
+        (trial.index, trial.grid_index, trial.window and trial.window.train_start)
+        for trial in trials
+    ] == [
         (0, (0, 0), date(2020, 1, 2)),
         (1, (0, 0), date(2021, 1, 2)),
         (2, (0, 1), date(2020, 1, 2)),
@@ -597,3 +602,14 @@ def test_a_paused_experiment_reads_paused_until_every_trial_ends() -> None:
 def test_experiment_priority_stays_inside_its_range(priority: object) -> None:
     with pytest.raises(ValueError, match="priority"):
         ExperimentControls(priority=priority)  # type: ignore[arg-type]  # 범위 밖 값을 일부러 넣는다
+
+
+def test_only_a_measured_parameter_search_walks_forward() -> None:
+    """V4-04: 워크포워드 여부는 종류로 가른다 — 용량 스윕은 창이 없어 측정 여부와 무관하게 돌지
+    않는다."""
+    search = SearchSpec(())
+    base = ExperimentDesign(search=search, parameter_values={}, windows=())
+
+    assert replace(base, measured=True).walks_forward is True
+    assert base.walks_forward is False
+    assert replace(base, measured=True, kind=ExperimentKind.CAPACITY_SWEEP).walks_forward is False

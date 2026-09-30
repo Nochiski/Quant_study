@@ -3,10 +3,10 @@ plan_version: 1
 project: validation-lab
 project_status: SELF_CHECK
 current_phase: V4
-current_pr: V4-02,V4-03
-active_prs: [V4-02, V4-03]
-parallel_window: [V4-02, V4-03]
-last_updated: 2026-09-30T12:55:09+09:00
+current_pr: V4-02,V4-03,V4-04
+active_prs: [V4-02, V4-03, V4-04]
+parallel_window: [V4-02, V4-03, V4-04]
+last_updated: 2026-09-30T14:29:25+09:00
 planned_prs: 28
 merged_prs: 17
 approved_prs: 17
@@ -25,11 +25,11 @@ progress_percent: 61
 |---|---|
 | Project status | `SELF_CHECK` |
 | Current phase | `V4` |
-| Current/next PR | `V4-02,V4-03` |
-| Active PR | `V4-02, V4-03` |
+| Current/next PR | `V4-02,V4-03,V4-04` |
+| Active PR | `V4-02, V4-03, V4-04` |
 | Progress | `17 / 28 merged (61%)` |
 | Approved | `17 / 28` |
-| Aggregated at | `2026-09-30 12:55 KST` |
+| Aggregated at | `2026-09-30 14:29 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -118,7 +118,7 @@ progress_percent: 61
 | [x] | `V4-01` | PSR 지표 | V0-01, #274 머지 | `MERGED` | [#363](https://github.com/Nochiski/Quant_study/pull/363) · `review_vlab_v4_01` APPROVE(P2-1·P3-1~3 반영) · main 머지 `838fd24d`(2026-09-30) |
 | [ ] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `SELF_CHECK` | [#385](https://github.com/Nochiski/Quant_study/pull/385) |
 | [ ] | `V4-03` | 고원·민감도 | V4-02 | `SELF_CHECK` | [#403](https://github.com/Nochiski/Quant_study/pull/403) |
-| [ ] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `PLANNED` | — |
+| [ ] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `SELF_CHECK` | [#410](https://github.com/Nochiski/Quant_study/pull/410) |
 | [ ] | `V4-05` | 팩터 회귀(시장·규모·가치·모멘텀, HAC) | V4-04 | `PLANNED` | — |
 
 ## V5 — 화면 (각 화면의 backend PR 뒤)

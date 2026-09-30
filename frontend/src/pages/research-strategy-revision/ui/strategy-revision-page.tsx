@@ -245,7 +245,7 @@ export const StrategyRevisionPage = () => {
     sourceView: stored.format,
     form: form.projection,
     tree: form.tree,
-    schemaLoaded: assist.schema !== null,
+    schema: assist.schema,
     onSelectPointer: (pointer) => selectPointer(pointer, "graph"),
     onOpenSource: openSourceAt,
   });
@@ -284,7 +284,7 @@ export const StrategyRevisionPage = () => {
   // 같은 훅을 써서 한쪽만 콜백을 잃지 않는다(Phase B 감사 NB-8).
   const strategyAssistant = useStrategyAssistant(proposalApply, document, {
     draftId: serverDraftId,
-    environment: runSettings.requestOptions,
+    environment: runSettings.environment,
     backtest: { canRun, settling: backtest.settling, run: runBacktest },
   });
   const selectSymbol = useCallback(

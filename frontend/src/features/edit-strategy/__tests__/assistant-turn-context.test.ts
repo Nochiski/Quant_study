@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { RunEnvironment } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
 import {
   assistantDocumentRef,
@@ -14,6 +15,11 @@ import {
 } from "../model/document-state";
 
 const SOURCE = 'schema_version: "1.2"\ntitle: "t"\n';
+const ENVIRONMENT: RunEnvironment = {
+  start: "2021-01-04",
+  end: "2021-12-30",
+  universe_id: "krx.common-stock",
+};
 
 const parsed = (state: DocumentState): DocumentState =>
   documentReducer(state, {
@@ -65,14 +71,12 @@ describe("assistantTurnContext", () => {
       },
     });
 
-    const turnContext = assistantTurnContext(compiled, {
-      start: "2021-01-01",
-    });
+    const turnContext = assistantTurnContext(compiled, ENVIRONMENT);
     expect(turnContext).toEqual({
       source_text: 'schema_version: "1.2"\ntitle: "edited"\n',
       source_format: "yaml",
       diagnostics: ["[error] /title: title 필드가 필요합니다."],
-      environment: { start: "2021-01-01" },
+      environment: ENVIRONMENT,
     });
   });
 
@@ -139,8 +143,7 @@ describe("useAssistantTurnContext", () => {
     let live = 'schema_version: "1.2"\ntitle: "편집기가 먼저"\n';
     const readSource = vi.fn(() => live);
     const { result, rerender } = renderHook(
-      ({ state }) =>
-        useAssistantTurnContext(state, readSource, { start: "2021-01-01" }),
+      ({ state }) => useAssistantTurnContext(state, readSource, ENVIRONMENT),
       { initialProps: { state: parsed(initialDocumentState("yaml", SOURCE)) } },
     );
     expect(result.current().source_text).toBe(live);
@@ -157,7 +160,7 @@ describe("useAssistantTurnContext", () => {
       source_text: live,
       source_format: "yaml",
       diagnostics: [],
-      environment: { start: "2021-01-01" },
+      environment: ENVIRONMENT,
     });
   });
 

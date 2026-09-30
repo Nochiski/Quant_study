@@ -112,7 +112,10 @@ DEFAULT_RUN_SLOTS = 2
 # 미탐을 모두 줄이는 쪽으로):
 #   - `root=`·`path=`·`file=`·`dir=`·`manifest=`(접미형 `equity_root=` 포함) 값은 모양과 무관하게
 #     전부 가린다(컨테이너 `/app`, MSYS `/c/Users`, 임의 루트 포함).
-#   - 드라이브(`C:\`)·UNC(`\\host\share`)·`file://` 은 어디 있든 가린다(모양만으로 경로).
+#   - 드라이브(`C:\`)·UNC(`\\host\share`)·`file://` 은 어디 있든 가린다(모양만으로 경로). 따옴표로
+#     감싼 드라이브·UNC 경로는 여는 따옴표와 같은 종류의 닫는 따옴표까지 가린다 — 공백이 든 경로
+#     (`C:\Users\John Smith\…`)나 다른 따옴표가 든 계정명(`"C:\Users\O'Brien\…"`)이 중간에 끊겨
+#     계정명이 새지 않게 한다(#318).
 #   - 키 없는 POSIX 문자열은 (a) 확장자 있는 파일(`/x/y/z.parquet`)과 (b) 계정명·서버 레이아웃을
 #     담는 루트(`/home`·`/Users`·`/tmp` 등) 아래 디렉터리만 가린다 — 서드파티 예외(`OSError`,
 #     duckdb)가 싣는 `'/home/<user>/...'` 를 잡되, `/data/universe_id` 같은 JSON Pointer 진단
@@ -124,7 +127,9 @@ _ABSOLUTE_PATH = re.compile(
     r"(?P<url>\b(?!file://)[A-Za-z][A-Za-z0-9+.\-]*://" + _PATH_CHARS + r"*)"
     r"|(?P<key>\b\w*(?:root|path|file|dir|directory|manifest)=)(?P<value>" + _PATH_CHARS + r"+)"
     r"|(?P<path>"
-    r"\bfile://" + _PATH_CHARS + r"*"
+    r"(?<=\")(?:[A-Za-z]:[\\/]|\\\\)[^\"\r\n]*(?=\")"
+    r"|(?<=')(?:[A-Za-z]:[\\/]|\\\\)[^'\r\n]*(?=')"
+    r"|\bfile://" + _PATH_CHARS + r"*"
     r"|\\\\" + _PATH_CHARS + r"+"
     r"|(?<!\w)[A-Za-z]:[\\/]" + _PATH_CHARS + r"*"
     r"|(?<![\w.:])/(?:[\w.\-~%+]+/)+[\w\-~%+]+\.\w+"

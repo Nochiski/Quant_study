@@ -30,6 +30,7 @@ from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
     _PARQUET_LIST,
     EVENT_TYPE_MAP,
     _fetchall,
+    _open,
     _parquet_table,
 )
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
@@ -1481,7 +1482,7 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
     import duckdb
 
     root = build_workbench_root(tmp_path / "equity")
-    real_connect = EquityDuckdbAdapter._connect
+    real_open = _open
 
     class _Interrupting:
         def __init__(self, inner: duckdb.DuckDBPyConnection) -> None:
@@ -1498,10 +1499,11 @@ def test_transient_duckdb_error_at_boot_is_not_cached_as_unavailable(
                 raise duckdb.InterruptException("simulated interrupt during DESCRIBE")
             return self._inner.execute(sql, *args)
 
+    # 부팅의 매크로 확인은 카탈로그를 직접 연다(질의용 `_connect` 는 잠김을 run 실패로 코드화한다,
+    # #318). 카탈로그 연결만 감싸 그 DESCRIBE 에서 일시 오류를 낸다 — 앞선 파일 확인은 SELECT 다.
     monkeypatch.setattr(
-        EquityDuckdbAdapter,
-        "_connect",
-        lambda self, sources: _Interrupting(real_connect(self, sources)),
+        f"{_ADAPTER}._open",
+        lambda path: real_open(path) if path is None else _Interrupting(real_open(path)),
     )
     with pytest.raises(EquityDuckdbSetupError, match="catalog_transient_error") as raised:
         EquityDuckdbAdapter(root)
@@ -1586,7 +1588,8 @@ def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) 
     예전에는 질의마다 카탈로그를 열어, 잠긴 동안 가격 질의까지 원시 `IOException` 으로 죽었다.
     매크로 원천(재무) 질의는 잠금이 풀릴 때까지 실패한다 — 빈 결과로 넘어가지 않는다. 백테스트
     데이터도 원장이 접지 못한 층 이동을 카탈로그 뷰로 읽어(#369) 같이 실패한다 — 사건 없이 bar 만
-    내면 그 종목 손익이 층 배수만큼 튄다.
+    내면 그 종목 손익이 층 배수만큼 튄다. 실패는 duckdb 원문(점유 프로세스 경로·PID·POSIX 계정명)
+    대신 조치만 담은 `catalog_locked` 사유다 — run 실패 사유로 화면에 나가기 때문이다(#318).
     """
     import duckdb
 
@@ -1603,15 +1606,48 @@ def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) 
             assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
             assert _raw(booted, fields=("price.close",)).ok  # 표 원천만 읽는 격자
             assert booted.load_universe(UniverseHistoryQuery("XKRX", START, END)).ok
-            locked = "|".join(re.escape(marker) for marker in _LOCK_CONFLICT_MARKERS)
-            with pytest.raises(duckdb.IOException, match=locked):
+            with pytest.raises(BacktestDataNotReadyError, match="catalog_locked") as macro:
                 _raw(booted, fields=fin)
-            with pytest.raises(duckdb.IOException, match=locked):
+            with pytest.raises(BacktestDataNotReadyError, match="catalog_locked") as dataset:
                 booted.load_backtest_dataset(backtest)
         finally:
             holder.kill()  # 나가면서 `Popen` 이 파이프를 닫고 종료를 기다린다
+    locked = "|".join(re.escape(marker) for marker in _LOCK_CONFLICT_MARKERS)
+    for stopped in (macro.value, dataset.value):
+        # 사유에는 원문이 없고, 원문은 예외 사슬로 서버 로그에 남는다
+        assert re.search(locked, str(stopped)) is None
+        assert str(root) not in str(stopped) and "PID" not in str(stopped)
+        assert isinstance(stopped.__cause__, duckdb.IOException)
+        assert re.search(locked, str(stopped.__cause__))
     assert _raw(booted, fields=fin).ok  # 잠금이 풀리면 다시 읽는다
     assert booted.load_backtest_dataset(backtest).bars
+
+
+def test_a_non_lock_catalog_error_after_boot_is_not_reported_as_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """질의 중 잠김이 아닌 카탈로그 오류(손상 등)는 `catalog_locked` 로 삼키지 않는다
+    (#406 리뷰 P3-1).
+
+    삼키면 손상된 카탈로그에 "그 작업이 끝난 뒤 다시 실행한다"를 안내해, 운영자가 기다리기만 하고
+    검증·재생성을 하지 않는다. 원래 duckdb 예외가 그대로 올라간다.
+    """
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    booted = EquityDuckdbAdapter(root)
+    corrupt = "IO Error: The file exists, but it is not a valid DuckDB database file!"
+
+    def open_corrupt(path: Path | None) -> duckdb.DuckDBPyConnection:
+        if path is None:
+            return _open(path)
+        raise duckdb.IOException(corrupt)
+
+    monkeypatch.setattr(f"{_ADAPTER}._open", open_corrupt)
+    with pytest.raises(duckdb.IOException, match="not a valid DuckDB database file"):
+        _raw(booted, fields=("financial.book_equity",))
+    with pytest.raises(duckdb.IOException, match="not a valid DuckDB database file"):
+        booted.load_backtest_dataset(BacktestDataQuery(START, END, ("005930:1",), None))
 
 
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:

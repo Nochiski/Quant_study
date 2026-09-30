@@ -1,11 +1,12 @@
 /**
  * 그래프 1수준(파이프라인) 캔버스(WORKFLOW P4-02, spec D9). `pipeline-projection.ts` 의 카드 모델을 그대로
- * 그린다: 맨 위 한 문장 요약, 단계 열, 카드 문장 안의 컨트롤. 컨트롤·확정·되돌리기는 Form 필드 행과 한
- * 경로다(`FieldControl`·`useFieldCommit`·`FieldActions`, 연산은 `form-transactions.ts`). 어느 필드를 어떤
- * 문장에 넣을지는 i18n 카드 틀(`cardTemplate`)이 정하고, 카드는 YAML 식별자(스키마 키·pointer)를 보이지 않는다
- * — 카탈로그·참조 선택지도 요약과 같은 이름 풀이(`pipelineNames`)로 이름만 보인다.
+ * 그린다: 맨 위 한 문장 요약, 단계 열, 카드 문장 안의 컨트롤, 규칙 추가·삭제, "5 실행" 안내. 컨트롤·확정·
+ * 되돌리기·항목 추가·삭제는 Form 과 한 경로다(`FieldControl`·`useFieldCommit`·`FieldActions`·`listAddition`·
+ * `useItemRemoval`, 연산은 `form-transactions.ts`). 어느 필드를 어떤 문장에 넣을지는 i18n 카드 틀
+ * (`cardTemplate`)이 정하고, 카드는 YAML 식별자(스키마 키·pointer)를 보이지 않는다 — 카탈로그·참조 선택지도
+ * 요약과 같은 이름 풀이(`pipelineNames`)로 이름만 보인다.
  */
-import { useId, useMemo } from "react";
+import { useId, useMemo, type ReactNode } from "react";
 
 import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
@@ -15,7 +16,7 @@ import {
   type FormListSection,
 } from "../model/form-projection";
 import { coversPointer } from "../model/diagnostic-navigation";
-import { itemSection } from "../model/form-transactions";
+import { itemSection, listAddition } from "../model/form-transactions";
 import {
   cardTemplate,
   itemName,
@@ -23,13 +24,18 @@ import {
   projectPipeline,
   sentencePieces,
   strategySummary,
+  unstagedNames,
   type CatalogNames,
   type PipelineRow,
   type PipelineStage,
   type SummaryNames,
 } from "../model/pipeline-projection";
 import type { JsonSchema } from "../model/schema-navigator";
-import { useFieldCommit } from "../model/use-field-editing";
+import {
+  NO_FOCUS,
+  useFieldCommit,
+  useItemRemoval,
+} from "../model/use-field-editing";
 import type { FormProjectionState } from "../model/use-form-projection";
 import { useRevealSelection } from "../model/use-reveal-selection";
 import type { SourceTransactions } from "../model/use-source-transactions";
@@ -48,6 +54,9 @@ const PIPELINE_OWNER = "pipeline";
 type CardContext = {
   /** 카탈로그·참조 선택지의 이름 풀이(요약 띠와 같은 것). */
   names: SummaryNames;
+  schema: JsonSchema;
+  /** 항목 삭제 거부(참조) 판정이 읽는 parse tree. */
+  tree: unknown;
   transactions: SourceTransactions;
   catalogs: FormCatalogs;
   selectedPointer: string | undefined;
@@ -91,10 +100,12 @@ export const PipelinePanel = ({
     )?.label ?? null;
   const disabled = transactions.disabled;
   const context: CardContext | null =
-    pipeline === null
+    pipeline === null || schema === null
       ? null
       : {
           names: pipelineNames(pipeline, catalogName),
+          schema,
+          tree: form.tree,
           transactions,
           catalogs,
           selectedPointer,
@@ -139,6 +150,10 @@ export const PipelinePanel = ({
                 context={context}
               />
             ))}
+            <ExecutionGuide
+              number={pipeline.stages.length + 1}
+              outside={unstagedNames(pipeline)}
+            />
           </ol>
         </fieldset>
       )}
@@ -190,8 +205,51 @@ const StageColumn = ({
 };
 
 /**
- * 목록. 문장 틀(`<목록 설명 키>.card`)이 있는 목록은 항목을 문장 카드로 그리고, 없는 목록(팩터 — 카드는
- * P4-03)은 항목 이름과 "그래프에서 열기"만 보인다.
+ * "5 실행" 안내(WORKFLOW P4-02 결정): 실행 설정은 전략 문서 밖이라 캔버스가 아니라 화면 위 실행 설정 띠에서
+ * 고른다. 이 캔버스에 없는 것 — 단계 없는 섹션(`unstagedNames`, 스키마가 정한다)과 팩터 계산식 — 이 어디 있는지도
+ * 말한다.
+ */
+const ExecutionGuide = ({
+  number,
+  outside,
+}: {
+  number: number;
+  outside: readonly string[];
+}) => {
+  const headingId = useId();
+  return (
+    <li className="pipeline__stage pipeline__stage--guide">
+      <div role="group" aria-labelledby={headingId}>
+        <h3 id={headingId} className="pipeline__stage-title">
+          <span className="pipeline__stage-number">{number}</span>{" "}
+          {t("graph.pipeline.execution")}{" "}
+          <span className="pipeline__stage-term" lang="en">
+            {t("graph.pipeline.execution.term")}
+          </span>
+        </h3>
+        <p className="pipeline__stage-description">
+          {t("graph.pipeline.execution.description")}
+        </p>
+        <p className="pipeline__list-title">{t("graph.pipeline.notHere")}</p>
+        <ul className="pipeline__guide">
+          {outside.length === 0 ? null : (
+            <li>
+              {t("graph.pipeline.notHere.document").replace(
+                "{names}",
+                outside.join("·"),
+              )}
+            </li>
+          )}
+          <li>{t("graph.pipeline.notHere.formula")}</li>
+        </ul>
+      </div>
+    </li>
+  );
+};
+
+/**
+ * 목록. 문장 틀(`<목록 설명 키>.card`)이 있는 목록(규칙)은 항목을 문장 카드로 그리고 추가·삭제를 둔다. 없는
+ * 목록(팩터 — 카드·추가는 P4-03)은 항목 이름과 "그래프에서 열기"만 보인다.
  */
 const StageList = ({
   list,
@@ -201,12 +259,26 @@ const StageList = ({
   context: CardContext;
 }) => {
   const notesId = useId();
+  const addReasonId = `${notesId}-add`;
   const title = tName(list.descriptionKey) ?? "";
   const sentences =
     list.descriptionKey !== null &&
     tOptional(`${list.descriptionKey}.card`) !== null;
+  // 규칙 항목은 union 이 아니라 `kind` 가 없다. union 목록(팩터)은 문장 목록이 아니다.
+  const addition = sentences
+    ? listAddition(context.schema, list, null, context.transactions.settling)
+    : null;
   return (
-    <div role="group" aria-label={title} className="pipeline__list">
+    <div
+      role="group"
+      aria-label={title}
+      className="pipeline__list"
+      aria-current={
+        coversPointer(list.pointer, context.selectedPointer)
+          ? "true"
+          : undefined
+      }
+    >
       <p className="pipeline__list-title">{title}</p>
       <DiagnosticNotes id={notesId} diagnostics={list.diagnostics} />
       {list.items.length === 0 ? (
@@ -214,26 +286,98 @@ const StageList = ({
       ) : null}
       {list.items.map((item, index) =>
         sentences ? (
-          <SentenceCard
+          <ListItemCard
             key={item.pointer}
+            list={list}
+            item={item}
             label={t("graph.pipeline.item").replace(
               "{index}",
               String(index + 1),
             )}
-            rows={item.fields.map((field) => ({
-              field,
-              section: itemSection(list, item),
-            }))}
-            template={cardTemplate(item.fields, list.descriptionKey)}
             context={context}
-            notes={item.diagnostics}
-            owner={item.pointer}
           />
         ) : (
           <NamedItem key={item.pointer} item={item} context={context} />
         ),
       )}
+      {addition !== null ? (
+        <div className="pipeline__actions">
+          <Button
+            size="small"
+            disabled={addition.blocked !== null}
+            aria-describedby={
+              addition.blocked === null ? undefined : addReasonId
+            }
+            onClick={() => {
+              if (addition.operation !== null)
+                context.transactions.apply(
+                  addition.operation,
+                  title,
+                  PIPELINE_OWNER,
+                  NO_FOCUS,
+                );
+            }}
+            aria-label={`${title} · ${t("form.list.add")}`}
+          >
+            {t("form.list.add")}
+          </Button>
+          {addition.blocked === null ? null : (
+            <span id={addReasonId} className="pipeline__hint">
+              {addition.blocked}
+            </span>
+          )}
+        </div>
+      ) : null}
     </div>
+  );
+};
+
+/** 문장 목록의 항목 카드: 항목 필드로 문장을 채우고 삭제를 둔다(Form 항목과 같은 `useItemRemoval`). */
+const ListItemCard = ({
+  list,
+  item,
+  label,
+  context,
+}: {
+  list: FormListSection;
+  item: FormListItem;
+  label: string;
+  context: CardContext;
+}) => {
+  const { blocked, remove } = useItemRemoval(
+    item,
+    context.tree,
+    context.transactions,
+    PIPELINE_OWNER,
+    label,
+  );
+  const section = itemSection(list, item);
+  return (
+    <SentenceCard
+      label={label}
+      rows={item.fields.map((field) => ({ field, section }))}
+      template={cardTemplate(item.fields, list.descriptionKey)}
+      context={context}
+      notes={item.diagnostics}
+      owner={item.pointer}
+    >
+      <div className="pipeline__actions">
+        <Button
+          size="small"
+          tone="danger"
+          onClick={remove}
+          disabled={context.transactions.settling}
+          aria-label={`${label} · ${t("form.list.remove")}`}
+        >
+          {t("form.list.remove")}
+        </Button>
+      </div>
+      {blocked === null ? null : (
+        <p className="strategy-form__invalid" role="alert">
+          {blocked}
+        </p>
+      )}
+    </SentenceCard>
   );
 };
 
@@ -298,6 +442,7 @@ const SentenceCard = ({
   context,
   notes = [],
   owner,
+  children,
 }: {
   label: string;
   rows: readonly PipelineRow[];
@@ -307,6 +452,8 @@ const SentenceCard = ({
   notes?: PipelineRow["field"]["diagnostics"];
   /** 선택 강조의 기준 pointer(목록 항목). 없으면 행 pointer 로 본다. */
   owner?: string;
+  /** 카드 끝에 붙는 항목 동작(삭제). */
+  children?: ReactNode;
 }) => {
   const cardId = useId();
   const pieces = template === null ? [] : sentencePieces(template);
@@ -325,7 +472,9 @@ const SentenceCard = ({
   const selected =
     owner !== undefined
       ? coversPointer(owner, context.selectedPointer)
-      : rows.some((row) => row.field.pointer === context.selectedPointer);
+      : rows.some((row) =>
+          coversPointer(row.field.pointer, context.selectedPointer),
+        );
   return (
     <div
       role="group"
@@ -382,6 +531,7 @@ const SentenceCard = ({
         />
       ))}
       <DiagnosticNotes id={`${cardId}-notes`} diagnostics={notes} />
+      {children}
     </div>
   );
 };

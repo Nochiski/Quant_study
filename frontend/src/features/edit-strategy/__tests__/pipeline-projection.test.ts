@@ -21,6 +21,7 @@ import {
   projectPipeline,
   sentencePieces,
   strategySummary,
+  unstagedNames,
   type PipelineProjection,
 } from "../model/pipeline-projection";
 import type { JsonSchema } from "../model/schema-navigator";
@@ -385,9 +386,9 @@ describe("카드 문장 틀", () => {
     const source = (rebalance: string) =>
       `schema_version: "1.2"\ntitle: ""\nportfolio:\n  rebalance: ${rebalance}\n`;
     const stem = "strategy.field.portfolio_step.rebalance";
-    expect(
-      templateOf(source("every_n_sessions"), "/portfolio/rebalance"),
-    ).toBe(tOptional(`${stem}.value.every_n_sessions.card`));
+    expect(templateOf(source("every_n_sessions"), "/portfolio/rebalance")).toBe(
+      tOptional(`${stem}.value.every_n_sessions.card`),
+    );
     expect(templateOf(source("monthly"), "/portfolio/rebalance")).toBe(
       tOptional(`${stem}.card`),
     );
@@ -448,5 +449,23 @@ describe("카드 문장 틀", () => {
     expect(
       [...candidates.keys()].filter((key) => tOptional(key) !== null).length,
     ).toBeGreaterThan(20);
+  });
+});
+
+describe("unstagedNames", () => {
+  it("캔버스 밖 이름은 단계 없는 섹션에서 나오고, 스키마 스탬프(const)는 빠지며, 스키마를 따라 바뀐다", () => {
+    expect(unstagedNames(pipelineOf(EMPTY))).toEqual([
+      "전략 이름",
+      "전략 설명",
+      "탐색 파라미터",
+    ]);
+    // 섹션에 단계가 생기면 안내에서도 빠진다 — 손 목록이면 조용히 틀린다(#395 리뷰 P3-2).
+    const staged = structuredClone(SCHEMA) as {
+      properties: Record<string, Record<string, unknown>>;
+    };
+    staged.properties.parameters!["x-stage"] = "signal";
+    expect(
+      unstagedNames(pipelineOf(EMPTY, [], staged as unknown as JsonSchema)),
+    ).toEqual(["전략 이름", "전략 설명"]);
   });
 });

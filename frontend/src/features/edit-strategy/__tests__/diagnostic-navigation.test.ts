@@ -27,7 +27,7 @@ const destination = (view: StrategyView, pointer: string) =>
     pointer,
     form: FORM,
     tree: TREE,
-    schemaLoaded: true,
+    schema: SCHEMA,
   });
 
 describe("formCoversPointer", () => {
@@ -71,11 +71,18 @@ describe("resolveDiagnosticDestination", () => {
     expect(destination("yaml", "")).toBe("source");
   });
 
-  it("keeps the Graph tab only when that graph is on screen", () => {
+  it("keeps the Graph tab when the pipeline canvas or the factor graph draws the pointer", () => {
     expect(destination("graph", "/factors/0/graph/nodes/1")).toBe(
       "current-view",
     );
-    expect(destination("graph", "/risk/max_name_weight")).toBe("source");
+    // 단계 카드 행·목록·항목은 Graph 탭 맨 위 캔버스가 그린다(P4-02).
+    expect(destination("graph", "/risk/max_name_weight")).toBe("current-view");
+    expect(destination("graph", "/eligibility/rules")).toBe("current-view");
+    expect(destination("graph", "/factors/0/weight")).toBe("current-view");
+    // 단계가 없는 섹션(전략 이름·파라미터)은 캔버스 밖이라 원문 탭으로 간다.
+    expect(destination("graph", "/title")).toBe("source");
+    expect(destination("graph", "/parameters")).toBe("source");
+    expect(destination("graph", "/nope")).toBe("source");
   });
 
   it("keeps the Form tab only when that card is on screen", () => {
@@ -98,7 +105,7 @@ describe("resolveDiagnosticDestination", () => {
         pointer: "/factors/0/graph/nodes/1",
         form: FORM,
         tree: TREE,
-        schemaLoaded: false,
+        schema: null,
       }),
     ).toBe("source");
   });

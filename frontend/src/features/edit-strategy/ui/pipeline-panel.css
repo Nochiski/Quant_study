@@ -74,6 +74,18 @@
   box-sizing: border-box;
 }
 
+/* "5 실행" 안내는 좁은 다섯째 열 대신 네 단계 아래 한 줄을 다 쓴다. */
+.pipeline__stage--guide {
+  grid-column: 1 / -1;
+}
+
+.pipeline__guide {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-size-small);
+}
+
 .pipeline__stage-title {
   margin: 0;
   font-size: var(--text-size-body);

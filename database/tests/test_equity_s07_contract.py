@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import duckdb
 import pytest
@@ -37,6 +38,19 @@ from equity.baseline import Baseline, load
 from equity.gates import GateStatus
 from stage import manifest
 from stage.gates import GateResult
+
+if TYPE_CHECKING:
+    from strategy_workbench.adapters.outbound.equity_duckdb.facade.provider import (
+        EquityDuckdbAdapter,
+    )
+    from strategy_workbench.application.backtest_run.facade.ports import (
+        BacktestDataQuery,
+        BacktestDataset,
+    )
+    from strategy_workbench.domain.equity.facade.research_data import (
+        UniverseHistoryQuery,
+        UniverseHistoryResult,
+    )
 
 STAGE_SLICE = Path(__file__).parent / "fixtures" / "stage_slice"
 SEED_S07 = Path(rules_s06.__file__).parent / "baseline_seed_s07.json"
@@ -203,6 +217,60 @@ def test_engine_src_가_없으면_예외(built: Path, tmp_path: Path) -> None:
 
 
 # ── 부정 픽스처 ──────────────────────────────────────────────────────────────
+
+def test_FX_N_어댑터의_무효_bar_오분류는_EGC01_FAIL(
+    built: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """정상 거래일을 무효 bar 로도 내면 값이 같아도 거절한다 — invalid_diff 판정의 회귀."""
+    wb = contract.load_adapter(contract.default_engine_src())
+    adapter_type = wb.provider.EquityDuckdbAdapter
+    load_dataset = adapter_type.load_backtest_dataset
+
+    def misclassify(
+        self: EquityDuckdbAdapter, query: BacktestDataQuery,
+    ) -> BacktestDataset:
+        data = load_dataset(self, query)
+        return replace(data, invalid_bars=(
+            *data.invalid_bars, wb.ports.InvalidBarRecord(date(2018, 5, 4), "005930:1"),
+        ))
+
+    monkeypatch.setattr(adapter_type, "load_backtest_dataset", misclassify)
+    result = contract.run(built, seed())
+    metrics = _metrics(result, "EGC-01")
+    assert metrics["n_mismatch"] == metrics["n_missing"] == metrics["n_extra"] == 0
+    assert metrics["n_invalid_diff"] == 1
+    assert _gate(result, "EGC-01").status is GateStatus.FAIL
+    assert not result.ok
+
+
+def test_FX_N_재상장_경계일_구성원_누락은_EGC03_FAIL(
+    built: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """구간·bar 는 맞아도 구간 첫날 종목 id 가 빠지면 거절한다 — member_mismatch 판정의 회귀."""
+    wb = contract.load_adapter(contract.default_engine_src())
+    adapter_type = wb.provider.EquityDuckdbAdapter
+    load_universe = adapter_type.load_universe
+
+    def omit_member(
+        self: EquityDuckdbAdapter, query: UniverseHistoryQuery,
+    ) -> UniverseHistoryResult:
+        result = load_universe(self, query)
+        return replace(result, points=tuple(
+            replace(point, members=tuple(
+                member for member in point.members
+                if not (point.session == date(2012, 7, 26) and member.security_id == "101970:1")
+            )) for point in result.points
+        ))
+
+    monkeypatch.setattr(adapter_type, "load_universe", omit_member)
+    result = contract.run(built, seed())
+    metrics = _metrics(result, "EGC-03")
+    assert metrics["n_span_mismatch"] == metrics["n_bar_outside_span"] == 0
+    assert metrics["n_coverage_gap_mismatch"] == 0
+    assert metrics["n_member_mismatch"] == 1
+    assert _gate(result, "EGC-03").status is GateStatus.FAIL
+    assert not result.ok
+
 
 def _copy_root(src: Path, dst: Path) -> Path:
     """사본 루트 — 카탈로그 매크로는 절대 경로로 원본을 가리키므로 사본 위에서 다시 쓴다."""

@@ -1,5 +1,10 @@
 import type { ReactNode } from "react";
 
+import {
+  cellKindCopy,
+  fieldFrequencyCopy,
+  fieldValueTypeCopy,
+} from "../../../entities/dataset";
 import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import {
   projectContractInspector,
@@ -7,10 +12,8 @@ import {
   type ContractCatalogProjection,
   type ContractInspectorSource,
 } from "../model/contract-inspector";
-import {
-  describeApplicabilityConditions,
-  type FieldApplicability,
-} from "../model/field-applicability";
+import type { FieldApplicability } from "../../../shared/api";
+import { describeApplicabilityConditions } from "../model/field-applicability";
 import { formatContractValue } from "../model/schema-navigator";
 import "./contract-inspector.css";
 
@@ -160,8 +163,8 @@ const CatalogDetails = ({
             t("dataset.catalog.dataset"),
             <code key="dataset">{field.dataset_id}</code>,
           ],
-          [t("contract.frequency"), field.frequency],
-          [t("contract.valueType"), field.value_type],
+          [t("contract.frequency"), fieldFrequencyCopy(field.frequency)],
+          [t("contract.valueType"), fieldValueTypeCopy(field.value_type)],
           [t("ide.inspector.unit"), field.unit],
           [t("contract.pointInTime"), yesNo(field.coverage.point_in_time)],
           [t("dataset.field.availability"), field.available_date_basis],
@@ -181,7 +184,8 @@ const CatalogDetails = ({
           [t("contract.venues"), field.coverage.venues.join(", ") || EMPTY],
           [
             t("contract.cellKinds"),
-            field.coverage.supported_cell_kinds.join(", ") || EMPTY,
+            field.coverage.supported_cell_kinds.map(cellKindCopy).join(", ") ||
+              EMPTY,
           ],
           [t("dataset.field.evidence"), field.evidence],
           [

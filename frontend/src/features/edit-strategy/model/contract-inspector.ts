@@ -5,23 +5,21 @@
  * module joins those responses to one selected RFC 6901 path; it never re-declares constraints,
  * allowed values, field definitions or factor definitions in the frontend.
  */
-import type {
-  FactorCatalog,
-  FieldContract,
-  ResearchCatalog,
-  StrategyDocumentContractResponse,
-  StrategyDocumentSchema,
+import {
+  projectApplicability,
+  type DefaultResolver,
+  type FactorCatalog,
+  type FieldApplicability,
+  type FieldContract,
+  type ResearchCatalog,
+  type StrategyDocumentContractResponse,
+  type StrategyDocumentSchema,
 } from "../../../shared/api";
 import {
   escapePointerSegment,
   templatePointer,
   valueAtPointer,
 } from "../../../shared/lib/yaml12";
-import {
-  projectApplicability,
-  type DefaultResolver,
-  type FieldApplicability,
-} from "./field-applicability";
 import {
   discriminatorAt,
   displayValue,

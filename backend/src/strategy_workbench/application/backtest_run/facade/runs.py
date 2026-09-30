@@ -16,11 +16,13 @@ from strategy_workbench.application.backtest_run.ports.outgoing.artifact_store i
 from strategy_workbench.application.backtest_run.ports.outgoing.run_repository import (
     BacktestRunNotFoundError,
     BacktestRunSummary,
+    RunKind,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger import (
     TrialLineageAlreadyMergedError,
 )
 from strategy_workbench.domain.backtest.facade.runs import (
+    BacktestCancelResult,
     BacktestRunResult,
     BacktestRunSpec,
     BacktestRunState,
@@ -45,6 +47,7 @@ __all__ = [
     "BacktestRunResult",
     "BacktestRunService",
     "BacktestRunSpec",
+    "BacktestCancelResult",
     "BacktestRunState",
     "BacktestRunSummary",
     "BacktestStartResponse",
@@ -53,6 +56,7 @@ __all__ = [
     "InvalidRunFieldError",
     "RunAdmission",
     "RunProgressEvent",
+    "RunKind",
     "RunStatus",
     "SavedRevisionReference",
     "StaleStrategyReferenceError",

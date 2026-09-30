@@ -17,9 +17,11 @@ import {
   getStrategyOperatorCatalog,
   getBacktestStatus,
   getRunEnvironmentSchema,
+  getTrialLedger,
   listBacktests,
   listStrategies,
   listStrategyRevisions,
+  mergeTrialLineage,
   previewBacktestTrial,
   reviseStrategyDocument,
   saveStrategyDraft,
@@ -61,6 +63,7 @@ import type {
   RevisionSummary,
   RunEnvironment,
   RunEnvironmentSchema,
+  RunKind,
   SaveDocumentRequest,
   SaveStrategyDraftRequest,
   SavedRevisionReference,
@@ -77,6 +80,7 @@ import type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TrialLedger,
   TrialPreview,
   UpgradedDocument,
 } from "./generated/types.gen";
@@ -201,8 +205,11 @@ const detailValues = (error: unknown): Record<string, string> => {
  */
 export const invalidDocumentSummary = (error: unknown): string | undefined => {
   if (errorCode(error) !== "strategy_document.invalid") return undefined;
-  const detail = (error as { detail: Partial<StrategyDocumentInvalidDetail> }).detail;
-  const diagnostics = Array.isArray(detail.diagnostics) ? detail.diagnostics : [];
+  const detail = (error as { detail: Partial<StrategyDocumentInvalidDetail> })
+    .detail;
+  const diagnostics = Array.isArray(detail.diagnostics)
+    ? detail.diagnostics
+    : [];
   const first =
     diagnostics.find((item) => item.severity === "error") ?? diagnostics[0];
   if (first === undefined) return undefined;
@@ -381,16 +388,42 @@ const unwrap = <T>(
 
 export const strategyWorkbenchApi = {
   async listBacktests(
-    page: { offset?: number; limit?: number; strategyId?: string } = {},
+    page: {
+      offset?: number;
+      limit?: number;
+      strategyId?: string;
+      kind?: RunKind;
+    } = {},
   ): Promise<PageBacktestRunSummary> {
     const response = await listBacktests({
       query: {
         offset: page.offset,
         limit: page.limit,
         strategy_id: page.strategyId,
+        kind: page.kind,
       },
     });
     return unwrap(response, "listBacktests");
+  },
+
+  /** 계열 시도 원장 — 시도 묶음·실행 역할·N(검증 랩 spec D2). 합쳐진 계열이면 남은 계열의 원장이다. */
+  async getTrialLedger(strategyId: string): Promise<TrialLedger> {
+    const response = await getTrialLedger({
+      path: { strategy_id: strategyId },
+    });
+    return unwrap(response, "getTrialLedger");
+  },
+
+  /** `sourceStrategyId` 계열을 `strategyId` 계열에 합친다. 되돌릴 수 없다. */
+  async mergeTrialLineage(
+    strategyId: string,
+    sourceStrategyId: string,
+  ): Promise<TrialLedger> {
+    const response = await mergeTrialLineage({
+      path: { strategy_id: strategyId },
+      body: { source_strategy_id: sourceStrategyId },
+    });
+    return unwrap(response, "mergeTrialLineage");
   },
 
   async startBacktest(spec: BacktestRunSpec): Promise<BacktestStartResponse> {
@@ -647,6 +680,7 @@ export type {
   RevisionSummary,
   RunEnvironment,
   RunEnvironmentSchema,
+  RunKind,
   SaveDocumentRequest,
   SaveStrategyDraftRequest,
   SavedRevisionReference,
@@ -660,6 +694,7 @@ export type {
   StrategySummary,
   StrategyTraceRequest,
   StrategyTraceResponse,
+  TrialLedger,
   TrialPreview,
   UpgradedDocument,
 };

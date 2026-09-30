@@ -66,7 +66,13 @@ const result = (): BacktestRunResult => ({
   },
   metric_definitions: [],
   metrics: [],
-  series: { equity: [], drawdown: [], monthly_returns: [], rolling_sharpe: [] },
+  series: {
+    equity: [],
+    drawdown: [],
+    monthly_returns: [],
+    rolling_sharpe: [],
+    rolling_sharpe_window_sessions: 126,
+  },
   artifacts: {
     snapshots: [],
     positions: [],
@@ -376,5 +382,62 @@ describe("청산 거래 표", () => {
     expect(
       screen.getByRole("columnheader", { name: "비용(수수료·세금)" }),
     ).toBeInTheDocument();
+  });
+});
+
+describe("롤링 샤프 차트", () => {
+  // 세 세션 곡선의 롤링 값이 모두 빈 결과. 창 길이는 backend 가 정한다(#303).
+  const emptyRolling = (windowSessions: number | null) => {
+    const base = result();
+    const sessions = ["2026-01-05", "2026-01-06", "2026-01-07"];
+    render(
+      <BacktestRunDetail
+        result={{
+          ...base,
+          series: {
+            ...base.series,
+            equity: sessions.map((session, index) => ({
+              session,
+              equity: 100 + index,
+              benchmark_equity: null,
+            })),
+            rolling_sharpe: sessions.map((session) => ({
+              session,
+              value: null,
+            })),
+            rolling_sharpe_window_sessions: windowSessions,
+          },
+        }}
+        environmentFields={FIELDS}
+      />,
+    );
+    const heading = screen.getByRole("heading", { name: "Rolling Sharpe" });
+    return within(heading.closest("section") as HTMLElement);
+  };
+
+  it("실행이 창보다 짧으면 결과가 알려 준 창 길이로 이유를 말한다", () => {
+    // 점 3개·창 3은 경계다: 수익률 2개라 창이 한 번도 차지 않는다.
+    expect(
+      emptyRolling(3).getByText(
+        "실행이 롤링 창(3세션)보다 짧아 롤링 샤프 값이 없습니다.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("창보다 긴데 값이 비면 창 탓으로 말하지 않고 일반 문구를 보인다", () => {
+    // 수익률 2개로 창(2)은 찼지만 흔들림 0 같은 다른 이유로 값이 없는 경우다.
+    const chart = emptyRolling(2);
+    expect(
+      chart.getByText("이 구간에서 산출 가능한 값이 없습니다."),
+    ).toBeInTheDocument();
+    expect(chart.queryByText(/롤링 창/u)).not.toBeInTheDocument();
+  });
+
+  it("창 길이를 싣지 않은 옛 결과면 일반 문구를 보인다", () => {
+    const chart = emptyRolling(null);
+    expect(
+      chart.getByText("이 구간에서 산출 가능한 값이 없습니다."),
+    ).toBeInTheDocument();
+    expect(chart.queryByText(/롤링 창/u)).not.toBeInTheDocument();
   });
 });

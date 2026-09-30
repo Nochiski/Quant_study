@@ -36,9 +36,9 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunRepositoryPort,
-    BacktestRunSummary,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestResultNotReadyError,
     BacktestRunNotFoundError,
     BacktestRunService,
     BacktestRunSpec,
@@ -53,7 +53,7 @@ from strategy_workbench.application.strategy_design.facade.design import Strateg
 from strategy_workbench.application.strategy_design.facade.ports import PageRequest
 from strategy_workbench.domain.analytics.facade.metrics import build_default_metric_registry
 from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
-from strategy_workbench.domain.backtest.facade.runs import ExecutionCore
+from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, StrategyProvenance
 from strategy_workbench.domain.equity.facade.research_data import DataLoadStatus
 from strategy_workbench.domain.strategy.facade.specification import RebalanceFrequency
 from tests.backtest_run_wait import RawLoadBarrier, wait_for_terminal_run
@@ -161,13 +161,14 @@ def test_cancel_and_failure_transitions_survive_reopening_the_file(
 class _RefusingAdd(SQLiteBacktestRunRepository):
     def add(
         self,
-        summary: BacktestRunSummary,
+        run: BacktestRunState,
+        provenance: StrategyProvenance,
         request: BacktestRunSpec,
         *,
         lineage_id: str | None,
         trial_key: str,
     ) -> None:
-        raise ResearchStorageError(f"disk full — run_id={summary.run.run_id}")
+        raise ResearchStorageError(f"disk full — run_id={run.run_id}")
 
 
 def test_a_failed_accept_write_rejects_the_run(
@@ -189,9 +190,11 @@ class _RefusingUpdate(SQLiteBacktestRunRepository):
         raise ResearchStorageError(f"disk full — run_id={state.run_id}")
 
 
-def test_a_failed_transition_write_is_logged_and_the_run_keeps_going(
+def test_a_completion_that_cannot_be_saved_is_not_shown(
     tmp_path: Path, barriers: list[RawLoadBarrier], caplog: pytest.LogCaptureFixture
 ) -> None:
+    """#381 DEFECT-V3D-05: 중간 전이 저장 실패는 로그만 남기고 run 은 이어 가지만, 완료는 저장돼야
+    알린다. 저장하지 못한 완료를 보이면 사용자가 본 결과를 원장이 세지 않는다(N 과소)."""
     repository = _RefusingUpdate()
     free = _open_barrier(barriers)
     free.release.set()
@@ -199,11 +202,40 @@ def test_a_failed_transition_write_is_logged_and_the_run_keeps_going(
 
     runs.start(_request())
 
-    assert wait_for_terminal_run(runs, "run-1").status is RunStatus.COMPLETED
-    assert runs.result("run-1").manifest.run_id == "run-1"
-    # 파일에는 접수 상태만 남았다. 재시작하면 `interrupted` 로 닫혀 거짓 완료가 남지 않는다.
+    ended = wait_for_terminal_run(runs, "run-1")
+    assert (ended.status, ended.error_code, ended.artifact_sha256) == (
+        RunStatus.FAILED,
+        "backtest.run.internal",
+        None,
+    )
+    with pytest.raises(BacktestResultNotReadyError):
+        runs.result("run-1")
+    # 파일에는 접수 상태만 남았다. 재시작하면 `interrupted` 로 닫힌다.
     assert repository.get("run-1").run.status is RunStatus.QUEUED
     assert "backtest run state could not be persisted — run_id=run-1" in caplog.text
+
+
+def test_only_recent_finished_runs_keep_an_in_memory_copy(
+    tmp_path: Path, barriers: list[RawLoadBarrier], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#332 V1-AUDIT-04: 끝난 run 의 메모리 사본(진행 이벤트)은 최근 것만 남는다. 상태·결과는
+    저장소·산출물이 정본이라 그대로 읽힌다."""
+    monkeypatch.setattr(
+        "strategy_workbench.application.backtest_run._service._FINISHED_RECORDS_KEPT", 1
+    )
+    free = _open_barrier(barriers)
+    free.release.set()
+    runs = _service(tmp_path, SQLiteBacktestRunRepository(), free, "old", "new")
+
+    runs.start(_request())
+    wait_for_terminal_run(runs, "old")
+    runs.start(_request(end=date(2024, 1, 11)))
+    wait_for_terminal_run(runs, "new")
+
+    assert runs.events("old") == ()
+    assert runs.events("new")[-1].status is RunStatus.COMPLETED
+    assert runs.state("old").status is RunStatus.COMPLETED
+    assert runs.result("old").manifest.run_id == "old"
 
 
 class _FrozenAfterAccept(SQLiteBacktestRunRepository):
@@ -228,3 +260,24 @@ def test_the_list_shows_the_in_process_state_of_a_running_run(
     assert item.run == runs.state("run-1")
     assert (item.run.status, item.run.stage) == (RunStatus.RUNNING, "tape")
     assert item.run.progress > 0
+
+
+def test_a_finished_run_whose_final_state_was_not_saved_keeps_its_copy(
+    tmp_path: Path, barriers: list[RawLoadBarrier], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#391 리뷰 P2-1: 종결 저장에 실패한 run 의 사본을 버리면 저장소의 옛 상태(`queued`)로
+    되돌아가 끝난 run 이 다시 도는 것처럼 보인다. 그런 run 은 사본을 남긴다."""
+    monkeypatch.setattr(
+        "strategy_workbench.application.backtest_run._service._FINISHED_RECORDS_KEPT", 1
+    )
+    free = _open_barrier(barriers)
+    free.release.set()
+    runs = _service(tmp_path, _RefusingUpdate(), free, "run-1", "run-2")
+
+    runs.start(_request())
+    assert wait_for_terminal_run(runs, "run-1").status is RunStatus.FAILED
+    runs.start(_request(end=date(2024, 1, 11)))
+    wait_for_terminal_run(runs, "run-2")
+
+    assert runs.state("run-1").status is RunStatus.FAILED
+    assert runs.events("run-1")[-1].status is RunStatus.FAILED

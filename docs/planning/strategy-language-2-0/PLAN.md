@@ -908,11 +908,20 @@ P3-02 결정과 확인(WORKFLOW 원문이 비워 둔 곳):
    (DEFECT-242-04). e2e 의 `REQUESTED_ENVIRONMENT` 는 요청 계약 단언이라 기본값을 손으로 적어 둔다. enum 은 select,
    숫자는 범위 검증이 붙은 입력, `format: date` 는 날짜 입력, `x-catalog: universe` 는 카탈로그 목록이 없어
    텍스트 입력이다(Form 의 universe 카탈로그 컨트롤과 같은 규칙).
-3. **명시 `environment` 의 422 는 필드 단위 구조로 바꾸지 않는다(결정 항목).** 패널이 같은 스키마의 범위·필수와
-   기간 순서(`start <= end`)를 빠른 피드백으로 먼저 막아, 필드 옆 오류는 패널이 스스로 낸다. 그래도 서버가
-   거절하면(스키마 밖 규칙) 기존 툴바 실패 문구가 backend detail 을 보인다. inbound 에서 `RunEnvironment` 를
-   다시 구성해 코드화된 detail 로 바꾸는 대안은 pydantic 메시지 문자열을 파싱하지 않고도 필드를 알 수 있게
-   하지만, 패널 검증이 같은 SoT 를 읽는 동안에는 도달 경로가 없어 계약만 넓힌다.
+3. **패널은 스키마가 말하는 규칙을 먼저 막고, 스키마 밖 규칙은 서버의 코드화된 거절로 고친다.** 패널이 같은
+   스키마의 범위·필수·enum 과 칸 적용 조건(`x-applicable-when` — 지금 모드에서 읽히지 않는 칸은 끄고 요청에
+   싣지 않으며 읽히는 칸은 비울 수 없다, #352)을 빠른 피드백으로 먼저 막아, 필드 옆 오류는 패널이 스스로
+   낸다. 스키마 밖 규칙은 둘이다. 기간 순서(`start <= end`)는 스키마에 두 칸을 견주는 표기가 없어 패널이 같은
+   규칙을 옮겨 적는다(`validateRunEnvironment`). 연구 하한(측정 시작일 ≥ 2020-01-02, V1-01)은
+   `RunEnvironment` 가 아니라 실행 관문(`require_research_window`)의 규칙이라 스키마에 없다 — 서버가
+   `backtest.run.research_window_violation`(detail 에 `research_start`)으로 거절하면 툴바가 그 날짜로
+   시작일을 옮기는 교정 버튼을 보인다(V5-05). 날짜 칸의 1900-01-01 ~ 9999-12-31 은 backend 규칙이 아니라
+   브라우저 날짜 입력의 연도를 4자리로 묶는 화면 범위다(#264). 그 밖의 요청 본문 검증 실패는
+   `backtest.run.field_invalid`(`field` = 본문 점 경로)로 코드화돼 툴바가 패널 칸 이름으로 말한다(#260,
+   추적·미리보기도 같은 코드 #351).
+   처음 결정(명시 `environment` 의 422 를 필드 단위 구조로 바꾸지 않는다 — 패널 검증이 같은 SoT 를 읽는
+   동안에는 도달 경로가 없다)은 매도 거래세 칸 사이 규칙(V2-01)과 연구 하한(V1-01)이 스키마 밖에 생기며
+   전제가 깨져 #260·#352 로 위와 같이 바뀌었다.
 4. **매니페스트 평면 비용 필드는 유지한다(NB-4(a)).** `RunManifest.fee_bps`·`slippage_bps`·
    `participation_rate` 는 `environment` 와 같은 값이지만, 이미 저장된 run 과 결과 설명 도구가 읽는
    필드라 지우면 OpenAPI·저장소 호환이 함께 움직인다. 화면(run 상세)은 `environment` 만 읽는다.

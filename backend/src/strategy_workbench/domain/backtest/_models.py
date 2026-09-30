@@ -17,8 +17,10 @@ from strategy_workbench.domain.analytics.facade.metrics import (
 )
 from strategy_workbench.domain.factor.facade.expression import MissingPolicy
 from strategy_workbench.domain.strategy.facade.constraints import (
+    ApplicabilityCondition,
     AppliedStage,
     ContractUnit,
+    FieldApplicability,
     ScalarConstraint,
 )
 from strategy_workbench.domain.strategy.facade.provenance import (
@@ -181,6 +183,24 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
     ),
 }
 
+# 모드에 따라 읽히는 실행 설정 칸(#352). 전략 문서의 `FIELD_APPLICABILITY` 와 같은 표기라 실행
+# 설정 스키마가 `x-applicable-when` 으로 발행하고, 패널은 조건이 서지 않는 칸을 끄고 요청에 싣지
+# 않으며 조건이 서는 칸은 비우지 못하게 한다. 모델은 세율 칸(`sell_tax_bps`) 행만 강제한다 — 조건이
+# 설 때만 값이 있어야 한다(`__post_init__`). 다른 칸은 조건이 서지 않으면 읽히지 않을 뿐이다.
+# 조건 문장은 따로 두지 않는다 — 패널은 칸을 끄기만 하므로 설명 키는 칸 자신의 것이다.
+RUN_ENVIRONMENT_APPLICABILITY: dict[str, FieldApplicability] = {
+    name: FieldApplicability(
+        pointer=f"/{name}",
+        conditions=(ApplicabilityCondition(f"/{mode_field}", equals=mode.value),),
+        description_key=RUN_ENVIRONMENT_CONSTRAINTS[name].description_key,
+    )
+    for name, (mode_field, mode) in (
+        ("slippage_bps", ("impact_model", ImpactModel.FIXED_BPS)),
+        ("impact_coefficient", ("impact_model", ImpactModel.SQRT)),
+        ("sell_tax_bps", ("sell_tax", SellTax.CUSTOM)),
+    )
+}
+
 # canonical JSON 이 `15` 와 `15.0` 으로 갈리지 않게 float 으로 정규화할 필드. 제약 행과 같은
 # 집합이므로 이름을 다시 적지 않는다.
 NUMERIC_ENVIRONMENT_FIELDS: tuple[str, ...] = tuple(RUN_ENVIRONMENT_CONSTRAINTS)
@@ -265,12 +285,14 @@ class RunEnvironment:
                 "run environment requires a universe id — "
                 f"universe_id={self.universe_id!r} range={self.start}..{self.end}",
             )
-        # 세율 칸은 `custom` 에서만 읽힌다. 다른 방식에 값이 오면 무엇이 적용됐는지 매니페스트만
+        # 세율 칸은 적용 조건이 설 때만 읽힌다. 다른 방식에 값이 오면 무엇이 적용됐는지 매니페스트만
         # 보고 알 수 없으므로 받지 않는다.
-        if (self.sell_tax is SellTax.CUSTOM) != (self.sell_tax_bps is not None):
+        rate = RUN_ENVIRONMENT_APPLICABILITY["sell_tax_bps"]
+        if rate.applies_to(self) != (self.sell_tax_bps is not None):
             raise InvalidRunFieldError(
                 "sell_tax_bps",
-                "sell_tax_bps is required when sell_tax is custom and must be absent otherwise — "
+                "sell_tax_bps is required exactly when "
+                f"{' and '.join(condition.describe() for condition in rate.conditions)} — "
                 f"sell_tax={self.sell_tax.value} sell_tax_bps={self.sell_tax_bps!r}",
             )
         for name, constraint in RUN_ENVIRONMENT_CONSTRAINTS.items():
@@ -503,6 +525,9 @@ class BacktestSeries:
     drawdown: tuple[DrawdownPoint, ...]
     monthly_returns: tuple[MonthlyReturnPoint, ...]
     rolling_sharpe: tuple[RollingMetricPoint, ...]
+    # 롤링 샤프 창의 수익률 개수(#303). 기본값 None 은 이 칸이 없던 옛 `result.json` 을 410 없이
+    # 읽게 한다 — 그 run 이 쓰지 않은 창 길이를 지어내 채우지 않는다. 새 결과는 늘 값을 싣는다.
+    rolling_sharpe_window_sessions: int | None = None
 
 
 @dataclass(frozen=True)
@@ -527,19 +552,36 @@ class RunProgressEvent:
 
 # run 실패 코드 어휘의 단일 정본. 앞 넷은 시작 요청 422 의 diagnostic 코드와 같은 문자열이고,
 # `equity_wiped_out` 은 전략이 자본을 다 잃어 엔진이 멈춘 실행, `internal` 은 분류되지 않은 내부
-# 오류, `interrupted` 는 서버가 다시 시작돼 끝나지 못한 run 이다(검증 랩 spec D3). 프론트는 이
-# 어휘를 `backtest.run.error.<code>` 로 번역한다 (시작 422 의 `backtest.error.*` 와 namespace 가
-# 다르다 — 툴바는 서버 detail 을 그대로 쓰는 화면이라 키를 합치면 detail 이 덮인다).
+# 오류, `interrupted` 는 서버가 다시 시작돼 끝나지 못한 run 이다(검증 랩 spec D3).
+# `data_not_ready` 는 데이터 원천이 백테스트 데이터를 낼 준비가 안 된 실행이다(원장 표·카탈로그 뷰가
+# 없거나 낡음, 조치는 서버 사유 문장, #369). 프론트는 이 어휘를 `backtest.run.error.<code>` 로
+# 번역한다 (시작 422 의 `backtest.error.*` 와 namespace 가 다르다 — 툴바는 서버 detail 을 그대로
+# 쓰는 화면이라 키를 합치면 detail 이 덮인다).
 RunFailureCode = Literal[
     "portfolio.strategy.invalid",
     "portfolio.data.unavailable",
     "portfolio.raw_observation.invalid",
     "backtest.run.invalid",
     "backtest.run.equity_wiped_out",
+    "backtest.run.data_not_ready",
     "backtest.run.internal",
     "backtest.run.interrupted",
 ]
 RUN_FAILURE_CODES: frozenset[str] = frozenset(get_args(RunFailureCode))
+
+# 실행 접수 거절 코드 어휘의 단일 정본. 시작 요청 422·404·409 detail 과 실험 attempt·창 선택의
+# `error_code` 가 같은 문자열이고, 프론트는 `backtest.error.<code>` 로 번역한다. 어떤 오류가 어느
+# 코드인지는 실행 유스케이스의 `rejection_code` 가 정한다.
+AdmissionRejectionCode = Literal[
+    "backtest.run.environment_required",
+    "backtest.run.research_window_violation",
+    "backtest.run.parameter_invalid",
+    "backtest.run.invalid",
+    "backtest.strategy.not_found",
+    "backtest.strategy.stale",
+    "backtest.strategy.requires_upgrade",
+    "portfolio.strategy.invalid",
+]
 
 
 @dataclass(frozen=True)
@@ -559,6 +601,14 @@ class BacktestRunState:
     # 산출물의 위치(서버 경로)는 싣지 않는다 — run 상태는 그대로 API 응답이고, 산출물은 저장소가
     # run_id 로 찾는다(#277).
     artifact_sha256: str | None = None
+
+
+@dataclass(frozen=True)
+class BacktestCancelResult(BacktestRunState):
+    """취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면
+    `kept_by_owners` 가 참이다 — 화면은 이 칸으로 "실험이 쓰는 실행" 을 알린다(#382)."""
+
+    kept_by_owners: bool = False
 
 
 @dataclass(frozen=True)

@@ -4,6 +4,24 @@ const ko = {
   "dataset.field.disclosure": "공개 기준",
   "dataset.field.evidence": "근거",
   "dataset.field.recommendedLag": "권장 랙",
+  // 필드 계약 어휘(owner backend `domain/equity`). 값마다 문구가 있어야 한다 — `entities/dataset` 의
+  // `field-copy.ts` 가 `tCode` 로 typecheck 에서 요구한다(#350).
+  "dataset.cellKind.observed": "관측값",
+  "dataset.cellKind.source_omitted_zero": "원천 생략(0)",
+  "dataset.cellKind.missing": "결측",
+  "dataset.cellKind.not_collected": "미수집",
+  "dataset.cellKind.coverage_gap": "수록 범위 밖",
+  "dataset.cellKind.masked": "원장이 가림",
+  "dataset.valueType.price": "가격",
+  "dataset.valueType.amount": "금액",
+  "dataset.valueType.ratio": "비율",
+  "dataset.valueType.count": "개수",
+  "dataset.valueType.category": "범주",
+  "dataset.frequency.daily": "일별",
+  "dataset.frequency.monthly": "월별",
+  "dataset.frequency.quarterly": "분기별",
+  "dataset.frequency.annual": "연간",
+  "dataset.frequency.event": "사건 발생 시",
   "ui.tabs.view": "표현 전환",
   "ui.splitHandle.resize": "패널 크기 조절",
   "ui.emptyState.noStrategies": "저장된 전략이 없습니다",
@@ -55,6 +73,8 @@ const ko = {
     "실행 요청이 이 환경에서 처리될 수 없습니다. 실행 설정과 엔진 능력을 확인하세요.",
   "backtest.run.error.backtest.run.equity_wiped_out":
     "세션 종료 자산이 0 이하가 되어 실행이 멈췄습니다(자본 잠식). 서버 오류가 아니라 전략이 자본을 모두 잃은 결과입니다. 레버리지·공매도 비중을 줄여 보세요.",
+  "backtest.run.error.backtest.run.data_not_ready":
+    "데이터 원장이 백테스트에 쓸 준비가 되지 않아 실행을 멈췄습니다(카탈로그를 다시 만들어야 하는 경우 등). 서버 사유에 적힌 조치를 한 뒤 다시 실행하세요.",
   "backtest.run.error.backtest.run.internal":
     "서버 내부 오류로 실행이 중단되었습니다. 서버 로그를 확인하세요.",
   "backtest.run.error.backtest.run.interrupted":
@@ -122,6 +142,8 @@ const ko = {
   "backtest.actions.error":
     "실행 제어 요청에 실패했습니다. 상태를 새로 확인한 뒤 다시 시도하세요.",
   "backtest.result.chartEmpty": "이 구간에서 산출 가능한 값이 없습니다.",
+  "backtest.result.chartEmpty.rollingSharpe":
+    "실행이 롤링 창({sessions}세션)보다 짧아 롤링 샤프 값이 없습니다.",
   "backtest.result.chart": "차트",
   "backtest.result.kicker": "PROFESSIONAL RESULT",
   "backtest.result.title": "백테스트 결과",
@@ -437,6 +459,21 @@ const ko = {
   "debugger.exclusion.missing_risk": "위험 값 없음(역가중 불가)",
   "debugger.exclusion.turnover_buffer": "회전 완충으로 보유 유지",
   "debugger.exclusion.minimum_trade": "최소 거래 비중 미만이라 이전 비중 유지",
+  // 추적 응답의 backend 어휘(owner backend enum). `features/debug-strategy` 의 `trace-copy.ts` 가
+  // `tCode` 로 값마다 문구를 요구한다(#350). `masked` 는 원장이 가린 칸 때문에 결측이 된 칸이다.
+  "debugger.status.ok": "계산됨",
+  "debugger.status.missing_input": "입력 없음",
+  "debugger.status.warm_up": "이력 부족",
+  "debugger.status.divide_by_zero": "0으로 나눔",
+  "debugger.status.group_missing": "그룹 없음",
+  "debugger.status.masked": "원장이 가림",
+  "debugger.contributionStatus.ok": "반영됨",
+  "debugger.contributionStatus.missing": "팩터 값 없음",
+  "debugger.contributionStatus.future_data": "기준일 이후에 공개된 값",
+  "debugger.constraintEffect.not_selected": "선택되지 않음",
+  "debugger.constraintEffect.unchanged": "제약 영향 없음",
+  "debugger.constraintEffect.adjusted": "제약으로 조정됨",
+  "debugger.constraintEffect.removed": "제약으로 제거됨",
   "debugger.column.target": "목표 비중",
   "debugger.column.nodeValue": "노드 값",
   "debugger.column.nodeStatus": "노드 상태",
@@ -1431,17 +1468,19 @@ const ko = {
   "backtest.start.failedGeneric":
     "서버가 실행 요청을 받지 않았습니다. 실행 설정과 전략 문서를 확인한 뒤 다시 시작하세요.",
   // 시작 거절(404·409·422)의 코드별 복구 문장. 코드 목록의 정본은 backend `startBacktest` 계약이고,
-  // `backtest-error-contract.test.ts` 가 `openapi.json` 과 대조한다(이슈 #260).
+  // `backtest-error-contract.test.ts` 가 `openapi.json` 과 대조한다(이슈 #260). 추적도 추적 고유 코드가
+  // 아니면 이 문장을 쓰므로(#351) 추적이 받는 코드의 문장은 두 동작에 맞는 "다시 실행하세요"로 끝낸다.
+  // 이름 없는 `field_invalid` 는 추적 전용 칸(`as_of`·`security_ids`)에도 오므로 칸을 가리지 않는다.
   "backtest.error.backtest.run.field_invalid":
-    "서버가 실행 설정의 값 하나를 받지 않았습니다. 전략 편집기의 실행 설정에서 서버 사유의 field 칸을 고친 뒤 다시 시작하세요.",
+    "서버가 요청의 값 하나를 받지 않았습니다. 서버 사유가 짚은 칸을 고친 뒤 다시 실행하세요.",
   "backtest.error.backtest.run.field_invalid.named":
-    "서버가 실행 설정의 {field} 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
+    "서버가 실행 설정의 {field} 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 실행하세요.",
   "backtest.error.backtest.run.invalid":
     "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
   "backtest.error.backtest.run.environment_required":
     "실행 설정이 없습니다. 실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
   "backtest.error.backtest.run.research_window_violation":
-    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 {research_start} 이후로 옮긴 뒤 다시 시작하세요.",
+    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 {research_start} 이후로 옮긴 뒤 다시 실행하세요.",
   "backtest.error.backtest.run.parameter_invalid":
     "전략 파라미터 {parameter_id}의 값을 쓸 수 없습니다. 문서에 선언된 파라미터인지, 값이 그 범위·선택지 안인지 확인한 뒤 다시 시작하세요.",
   "backtest.error.portfolio.strategy.invalid":
@@ -1463,6 +1502,15 @@ const ko = {
   // 계열 합치기 거절(검증 랩 V1-05). 화면은 V5-03 이 붙인다.
   "backtest.error.backtest.lineage.already_merged":
     "두 전략은 이미 같은 시도 계열입니다. 합칠 것이 없습니다.",
+  "backtest.error.strategy.not_found":
+    "고른 전략을 찾을 수 없습니다. 전략 목록을 새로 고친 뒤 다시 고르세요.",
+  // 실행 종류(검증 랩 V5-03). 종류는 backend `RunKind` 가 정한다.
+  "backtest.runKind.single": "단일 실행",
+  "backtest.runKind.experiment_trial": "실험 시도",
+  "backtest.runKind.walk_forward_validation": "워크포워드 검증",
+  // 실험 run 이 쓰는 실험. 실험 화면(V5-01)이 생기기 전이라 id 만 보인다.
+  "history.backtests.experiment": "실험 {experiment}",
+  "history.backtests.experimentPaused": "실험 일시정지",
   // 실험 거절(검증 랩 V3-03). 코드 목록의 정본은 backend `domain/experiment/_errors.py` 이고 화면은 V5-01 이 붙인다.
   "backtest.error.experiment.base.unsaved":
     "실험은 저장한 전략 리비전으로만 만들 수 있습니다. 전략을 저장한 뒤 그 리비전으로 실험을 만드세요.",
@@ -1620,6 +1668,38 @@ const ko = {
   "history.strategies.latest": "최신 revision",
   "history.strategies.updated": "최근 저장",
   "history.strategies.hash": "Spec hash",
+  "history.strategies.history": "전략 이력",
+  "history.revisions.tab": "리비전",
+  // 계열 시도 원장(검증 랩 V5-03, US-SM-12). 역할·N 은 backend 원장 집계가 정한다.
+  "history.trials.tab": "시도 원장",
+  "history.trials.loading": "시도 원장을 불러오는 중입니다.",
+  "history.trials.error": "시도 원장을 불러올 수 없습니다.",
+  "history.trials.empty": "아직 이 계열에서 실행한 백테스트가 없습니다.",
+  "history.trials.count": "계열 시도 수 {count}회",
+  "history.trials.mergedInto":
+    "이 전략의 시도는 {lineage} 계열에 합쳐져 있어 그 계열의 원장을 보입니다.",
+  "history.trials.caption": "시도 원장",
+  "history.trials.trial": "시도",
+  "history.trials.runs": "실행",
+  "history.trials.role.counted": "시도로 셈",
+  "history.trials.role.recheck": "재확인",
+  "history.trials.role.pending": "결과 대기",
+  "history.trials.role.no_result": "시도 수 제외",
+  "history.trials.blocked": "봉인 구간과 겹쳐 거절된 요청 · 시작일 {start}",
+  "history.trials.merge": "다른 계열과 합치기",
+  "history.trials.merge.title": "다른 계열과 합치기",
+  "history.trials.merge.description":
+    "같은 아이디어를 이어서 연구했다면 합쳐야 시도 수가 정직해집니다. 고른 전략의 시도가 {target} 계열로 들어와 함께 셉니다.",
+  "history.trials.merge.warning":
+    "합치기는 되돌릴 수 없습니다. 계열을 다시 나누거나 시도를 지우는 기능은 없습니다.",
+  "history.trials.merge.source": "합칠 전략",
+  "history.trials.merge.choose": "전략을 고르세요",
+  "history.trials.merge.noCandidates": "합칠 다른 저장 전략이 없습니다.",
+  "history.trials.merge.partial":
+    "저장 전략 {total}개 가운데 {shown}개만 고를 수 있습니다.",
+  "history.trials.merge.cancel": "취소",
+  "history.trials.merge.confirm": "합치기",
+  "history.trials.merge.failed": "계열을 합치지 못했습니다.",
   "history.revisions.loading": "Revision 이력을 불러오는 중입니다.",
   "history.revisions.error": "Revision 이력을 불러올 수 없습니다.",
   "history.revisions.empty": "저장된 revision이 없습니다.",
@@ -1640,6 +1720,9 @@ const ko = {
   "history.backtests.emptyTitle": "백테스트 실행 이력이 없습니다",
   "history.backtests.empty": "전략에서 백테스트를 실행하면 이곳에 표시됩니다.",
   "history.backtests.filteredEmpty": "이 전략으로 실행한 백테스트가 없습니다.",
+  "history.backtests.kindEmpty": "이 종류의 백테스트가 없습니다.",
+  "history.backtests.kind": "종류",
+  "history.backtests.kindAll": "전체",
   "history.backtests.caption": "백테스트 실행 이력",
   "history.backtests.pagination": "백테스트 이력 페이지",
   "history.backtests.filter": "Strategy ID",
@@ -1894,6 +1977,22 @@ export const messages = {
     "dataset.field.disclosure": "Disclosure basis",
     "dataset.field.evidence": "Evidence",
     "dataset.field.recommendedLag": "Recommended lag",
+    "dataset.cellKind.observed": "observed",
+    "dataset.cellKind.source_omitted_zero": "omitted by source (0)",
+    "dataset.cellKind.missing": "missing",
+    "dataset.cellKind.not_collected": "not collected",
+    "dataset.cellKind.coverage_gap": "outside coverage",
+    "dataset.cellKind.masked": "masked by the ledger",
+    "dataset.valueType.price": "price",
+    "dataset.valueType.amount": "amount",
+    "dataset.valueType.ratio": "ratio",
+    "dataset.valueType.count": "count",
+    "dataset.valueType.category": "category",
+    "dataset.frequency.daily": "daily",
+    "dataset.frequency.monthly": "monthly",
+    "dataset.frequency.quarterly": "quarterly",
+    "dataset.frequency.annual": "annual",
+    "dataset.frequency.event": "per event",
     "ui.tabs.view": "Switch view",
     "ui.splitHandle.resize": "Resize panel",
     "ui.emptyState.noStrategies": "No saved strategies",
@@ -1941,6 +2040,8 @@ export const messages = {
       "The run request cannot be processed in this environment. Check the run settings and engine capabilities.",
     "backtest.run.error.backtest.run.equity_wiped_out":
       "Equity fell to zero or below at a session close, so the run stopped (wiped out). This is the strategy losing all its capital, not a server error. Try lower leverage or short exposure.",
+    "backtest.run.error.backtest.run.data_not_ready":
+      "The data ledger is not ready for backtests (for example, its catalog needs rebuilding), so the run stopped. Take the action in the server reason, then run it again.",
     "backtest.run.error.backtest.run.internal":
       "The run stopped because of an internal server error. Check the server logs.",
     "backtest.run.error.backtest.run.interrupted":
@@ -2008,6 +2109,8 @@ export const messages = {
     "backtest.actions.error":
       "The run-control request failed. Refresh the status and try again.",
     "backtest.result.chartEmpty": "No value can be calculated for this range.",
+    "backtest.result.chartEmpty.rollingSharpe":
+      "The run is shorter than the rolling window ({sessions} sessions), so there are no rolling Sharpe values.",
     "backtest.result.chart": "chart",
     "backtest.result.kicker": "PROFESSIONAL RESULT",
     "backtest.result.title": "Backtest result",
@@ -2325,6 +2428,19 @@ export const messages = {
     "debugger.exclusion.missing_risk": "no risk value (inverse weighting impossible)",
     "debugger.exclusion.turnover_buffer": "kept by the turnover buffer",
     "debugger.exclusion.minimum_trade": "below the minimum trade, previous weight kept",
+    "debugger.status.ok": "computed",
+    "debugger.status.missing_input": "missing input",
+    "debugger.status.warm_up": "not enough history",
+    "debugger.status.divide_by_zero": "divided by zero",
+    "debugger.status.group_missing": "no group",
+    "debugger.status.masked": "masked by the ledger",
+    "debugger.contributionStatus.ok": "included",
+    "debugger.contributionStatus.missing": "no factor value",
+    "debugger.contributionStatus.future_data": "published after the as-of date",
+    "debugger.constraintEffect.not_selected": "not selected",
+    "debugger.constraintEffect.unchanged": "unchanged by constraints",
+    "debugger.constraintEffect.adjusted": "adjusted by constraints",
+    "debugger.constraintEffect.removed": "removed by constraints",
     "debugger.column.target": "Target weight",
     "debugger.column.nodeValue": "Node value",
     "debugger.column.nodeStatus": "Node status",
@@ -3349,15 +3465,15 @@ export const messages = {
     "backtest.start.failedGeneric":
       "The server did not accept the run request. Check the run settings and the strategy document, then start again.",
     "backtest.error.backtest.run.field_invalid":
-      "The server rejected a run settings value. Fix the field named in the server reason in the strategy editor's run settings, then start again.",
+      "The server rejected a value in the request. Fix the field the server reason points to, then run it again.",
     "backtest.error.backtest.run.field_invalid.named":
-      "The server rejected the {field} run setting. Fix that field in the strategy editor's run settings, then start again.",
+      "The server rejected the {field} run setting. Fix that field in the strategy editor's run settings, then run it again.",
     "backtest.error.backtest.run.invalid":
       "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy in the strategy editor.",
     "backtest.error.backtest.run.environment_required":
       "There are no run settings. Fill the start date, end date and universe in the run settings.",
     "backtest.error.backtest.run.research_window_violation":
-      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. In the strategy editor's run settings, move the start date to {research_start} or later, then start again.",
+      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. In the strategy editor's run settings, move the start date to {research_start} or later, then run it again.",
     "backtest.error.backtest.run.parameter_invalid":
       "The value for strategy parameter {parameter_id} cannot be used. Check that the document declares the parameter and that the value is within its range or choices, then start again.",
     "backtest.error.portfolio.strategy.invalid":
@@ -3376,6 +3492,13 @@ export const messages = {
       "This run's result file cannot be read. The file may be missing or damaged, or it is an old result saved before the result format changed. Loading it again will not help; run it again with the same settings.",
     "backtest.error.backtest.lineage.already_merged":
       "The two strategies are already one trial lineage. There is nothing to merge.",
+    "backtest.error.strategy.not_found":
+      "The chosen strategy was not found. Refresh the strategy list and choose again.",
+    "backtest.runKind.single": "Single run",
+    "backtest.runKind.experiment_trial": "Experiment trial",
+    "backtest.runKind.walk_forward_validation": "Walk-forward validation",
+    "history.backtests.experiment": "Experiment {experiment}",
+    "history.backtests.experimentPaused": "Experiment paused",
     "backtest.error.experiment.base.unsaved":
       "An experiment can only start from a saved strategy revision. Save the strategy, then create the experiment from that revision.",
     "backtest.error.experiment.base.invalid":
@@ -3533,6 +3656,37 @@ export const messages = {
     "history.strategies.latest": "Latest revision",
     "history.strategies.updated": "Last saved",
     "history.strategies.hash": "Spec hash",
+    "history.strategies.history": "Strategy history",
+    "history.revisions.tab": "Revisions",
+    "history.trials.tab": "Trial ledger",
+    "history.trials.loading": "Loading the trial ledger.",
+    "history.trials.error": "The trial ledger could not be loaded.",
+    "history.trials.empty": "No backtest has run in this lineage yet.",
+    "history.trials.count": "Lineage trial count: {count}",
+    "history.trials.mergedInto":
+      "This strategy's trials were merged into the {lineage} lineage, so that lineage's ledger is shown.",
+    "history.trials.caption": "Trial ledger",
+    "history.trials.trial": "Trial",
+    "history.trials.runs": "Runs",
+    "history.trials.role.counted": "Counted",
+    "history.trials.role.recheck": "Recheck",
+    "history.trials.role.pending": "Waiting for result",
+    "history.trials.role.no_result": "Not counted",
+    "history.trials.blocked": "Request refused for overlapping the sealed window · start {start}",
+    "history.trials.merge": "Merge another lineage",
+    "history.trials.merge.title": "Merge another lineage",
+    "history.trials.merge.description":
+      "If you kept researching the same idea, merge so the trial count stays honest. The chosen strategy's trials join the {target} lineage and are counted together.",
+    "history.trials.merge.warning":
+      "Merging cannot be undone. There is no way to split a lineage or delete trials.",
+    "history.trials.merge.source": "Strategy to merge",
+    "history.trials.merge.choose": "Choose a strategy",
+    "history.trials.merge.noCandidates": "There is no other saved strategy to merge.",
+    "history.trials.merge.partial":
+      "Only {shown} of {total} saved strategies can be chosen.",
+    "history.trials.merge.cancel": "Cancel",
+    "history.trials.merge.confirm": "Merge",
+    "history.trials.merge.failed": "The lineages could not be merged.",
     "history.revisions.loading": "Loading revision history.",
     "history.revisions.error": "Revision history could not be loaded.",
     "history.revisions.empty": "There are no saved revisions.",
@@ -3553,6 +3707,9 @@ export const messages = {
     "history.backtests.emptyTitle": "No backtest runs yet",
     "history.backtests.empty": "Run a strategy backtest to see it here.",
     "history.backtests.filteredEmpty": "No backtest used this strategy.",
+    "history.backtests.kindEmpty": "No backtest of this kind.",
+    "history.backtests.kind": "Kind",
+    "history.backtests.kindAll": "All",
     "history.backtests.caption": "Backtest run history",
     "history.backtests.pagination": "Backtest history pages",
     "history.backtests.filter": "Strategy ID",
@@ -3810,6 +3967,14 @@ export const tOptional = (key: string): string | null =>
   Object.prototype.hasOwnProperty.call(messages.ko, key)
     ? messages.ko[key as MessageKey]
     : null;
+
+/**
+ * backend 어휘(enum) 값 하나의 로케일 문구. 부르는 쪽이 키를 `<접두>.${값}` 으로 만들어 `MessageKey` 로
+ * 넘기므로, 생성 SDK 유니온에 값이 늘었는데 문구가 없으면 typecheck 가 깨진다(#293·#350). 생성 SDK 보다
+ * 새 값이 실려 오면 원문의 밑줄만 공백으로 바꿔 보인다 — 칸이 비지 않게 한다.
+ */
+export const tCode = (key: MessageKey, code: string): string =>
+  tOptional(key) ?? code.replaceAll("_", " ");
 
 /**
  * backend가 발행하는 설명 키(`x-description-key`, 연산자 카탈로그의 `description_key`)는 **stem**

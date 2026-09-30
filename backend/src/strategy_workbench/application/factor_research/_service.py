@@ -86,7 +86,14 @@ class FactorResearchService:
         self._observation_source = observation_source
 
     def catalog(self, query: FactorCatalogQuery | None = None) -> FactorCatalog:
-        return build_factor_catalog(self._registry, query or FactorCatalogQuery())
+        # 가용성은 validate·preview 와 같은 필드 계약 port 로 판정한다(#370). 두 어댑터의
+        # `factor_field_catalog`(compile 목록)도 같은 `resolve_factor_fields` 를 부른다.
+        declared = {
+            field_id for item in self._registry.all() for field_id in item.required_field_ids
+        }
+        resolved = self._metadata_source.resolve_factor_fields(tuple(sorted(declared)))
+        provided = {field.field_id for field in resolved.fields}
+        return build_factor_catalog(self._registry, query or FactorCatalogQuery(), provided)
 
     def validate(self, request: FactorGraphRequest) -> FactorGraphValidation:
         validation, _fields = self._validate_request(request)

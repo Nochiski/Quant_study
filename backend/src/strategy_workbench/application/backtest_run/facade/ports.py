@@ -4,6 +4,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.artifact_store i
     BacktestArtifactUnreadableError,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.backtest_data import (
+    BacktestDataNotReadyError,
     BacktestDataPort,
     BacktestDataQuery,
     BacktestDataset,
@@ -24,6 +25,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.run_repository i
     BacktestRunNotFoundError,
     BacktestRunRepositoryPort,
     BacktestRunSummary,
+    RunKind,
 )
 from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger import (
     TrialLedgerRecords,
@@ -33,6 +35,7 @@ from strategy_workbench.application.backtest_run.ports.outgoing.trial_ledger imp
 __all__ = [
     "ArtifactCommit",
     "BacktestArtifactStorePort",
+    "BacktestDataNotReadyError",
     "BacktestDataPort",
     "BacktestDataQuery",
     "BacktestDataset",
@@ -48,6 +51,7 @@ __all__ = [
     "InvalidBarRecord",
     "MarketBarRecord",
     "ProgressCallback",
+    "RunKind",
     "RunCancelledError",
     "TrialLedgerRecords",
     "TrialLineageAlreadyMergedError",

@@ -412,10 +412,20 @@ def test_a_shared_run_is_cancelled_only_when_every_owner_withdraws(
     port.release.set()
 
     assert joined == shared
-    assert after_user.status is RunStatus.RUNNING
-    assert after_user_on_experiment_run.status is RunStatus.QUEUED
-    assert after_experiment.status is RunStatus.CANCEL_REQUESTED
-    assert experiment_only.status is RunStatus.CANCELLED
+    # #382 DEFECT-V3D-06: 사용자 취소가 실험 때문에 걸리지 않았으면 응답이 그렇게 말한다.
+    assert (after_user.status, after_user.kept_by_owners) == (RunStatus.RUNNING, True)
+    assert (
+        after_user_on_experiment_run.status,
+        after_user_on_experiment_run.kept_by_owners,
+    ) == (RunStatus.QUEUED, True)
+    assert (after_experiment.status, after_experiment.kept_by_owners) == (
+        RunStatus.CANCEL_REQUESTED,
+        False,
+    )
+    assert (experiment_only.status, experiment_only.kept_by_owners) == (
+        RunStatus.CANCELLED,
+        False,
+    )
     assert wait_for_terminal_run(runs, shared).status is RunStatus.CANCELLED
 
 
@@ -519,6 +529,51 @@ def test_an_experiment_run_waiting_for_the_experiment_share_says_it_waits(
         "Waiting for a free run slot",
     )
     wait_for_terminal_run(runs, "e2")
+
+
+def test_a_paused_experiment_does_not_hold_a_run_another_experiment_joined(
+    gated_runs: _GatedRuns,
+) -> None:
+    """#380 DEFECT-V3D-01: 일시정지는 run 의 소유 실험이 모두 멈췄을 때만 run 을 붙잡는다.
+
+    일시정지한 A 의 대기 run 을 B 가 이으면 B 레인에서 뜨고, A 를 취소해도 멈추지 않는다.
+    """
+    runs, port, entries = gated_runs("a1", "a2")
+    runs.start(_request(end=date(2024, 1, 12)), owner="exp-a")
+    _wait_for_entries(entries, 1)
+    runs.start(_request(end=date(2024, 1, 11)), owner="exp-a")
+    runs.schedule("exp-a", paused=True, weight=1)
+
+    joined = runs.start(_request(end=date(2024, 1, 11)), owner="exp-b").run.run_id
+    runs.schedule("exp-b", paused=True, weight=1)
+    runs.schedule("exp-b", paused=False, weight=1)  # 둘 다 멈췄다 B 만 풀린다
+    port.release.set()
+
+    # A 가 멈춘 채여도 B 가 쓰는 run 은 뜬다.
+    assert joined == "a2"
+    assert wait_for_terminal_run(runs, "a2").status is RunStatus.COMPLETED
+    assert [end.day for end, _running in entries] == [12, 11]
+    assert runs.cancel(joined, owner="exp-a").kept_by_owners is False  # 이미 끝났다
+
+
+def test_cancelling_the_paused_first_owner_hands_the_run_to_the_remaining_one(
+    gated_runs: _GatedRuns,
+) -> None:
+    """#380 DEFECT-V3D-01(이슈 재현): 두 실험이 모두 멈춘 채 A 를 취소하고 B 를 풀면 run 이 뜬다."""
+    runs, port, entries = gated_runs("a1", "a2")
+    runs.start(_request(end=date(2024, 1, 12)), owner="exp-a")
+    _wait_for_entries(entries, 1)
+    runs.start(_request(end=date(2024, 1, 11)), owner="exp-a")
+    runs.schedule("exp-a", paused=True, weight=1)
+    runs.start(_request(end=date(2024, 1, 11)), owner="exp-b")
+    runs.schedule("exp-b", paused=True, weight=1)
+
+    withdrawn = runs.cancel("a2", owner="exp-a")
+    runs.schedule("exp-b", paused=False, weight=1)
+    port.release.set()
+
+    assert (withdrawn.status, withdrawn.kept_by_owners) == (RunStatus.QUEUED, True)
+    assert wait_for_terminal_run(runs, "a2").status is RunStatus.COMPLETED
 
 
 def test_a_paused_experiment_keeps_its_queued_runs_until_resumed(gated_runs: _GatedRuns) -> None:

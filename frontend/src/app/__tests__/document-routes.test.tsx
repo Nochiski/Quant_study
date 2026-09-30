@@ -209,7 +209,8 @@ let assistantStream: {
 
 /**
  * 실행 설정 패널의 마지막 사용값(P3-02). 화면 흐름 테스트는 사용자가 이미 기간·유니버스를 정해 둔
- * 상태에서 시작한다 — 패널 자체의 동작은 `features/run-backtest` 테스트가 본다.
+ * 상태에서 시작한다 — 패널 자체의 동작은 `features/run-backtest` 테스트가 본다. 요청에 실리는 모양 그대로라
+ * 고정 bp 에서 읽히지 않는 가격 충격 계수는 없다(#352).
  */
 const RUN_ENVIRONMENT = {
   market: "KRX",
@@ -225,7 +226,6 @@ const RUN_ENVIRONMENT = {
   fee_bps: 15,
   slippage_bps: 10,
   impact_model: "fixed_bps",
-  impact_coefficient: 1,
   sell_tax: "krx_statutory",
   missing: "drop",
 } as const;
@@ -2995,7 +2995,7 @@ describe("backtest from the editor (P3-05)", () => {
     const alert = await screen.findByRole("alert");
     // 거절이 가리킨 칸(`field`)을 실행 설정의 칸 이름으로 말한다.
     expect(alert).toHaveTextContent(
-      "백테스트 시작 실패: 서버가 실행 설정의 초기 자본 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
+      "백테스트 시작 실패: 서버가 실행 설정의 초기 자본 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 실행하세요.",
     );
     expect(alert).not.toHaveTextContent("API request failed");
     expect(alert).not.toHaveTextContent("status=422");
@@ -3071,7 +3071,7 @@ describe("backtest from the editor (P3-05)", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(
-      "백테스트 시작 실패: 시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+      "백테스트 시작 실패: 시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 실행하세요.",
     );
     await user.click(
       within(alert).getByRole("button", { name: "시작일을 2020-01-02로" }),
@@ -4138,4 +4138,54 @@ describe("새 전략 화면의 은퇴 버전 업그레이드 (#257)", () => {
       expect(posted).toEqual([{ format: "yaml", source: UPGRADED }]);
     },
   );
+
+  // #352 C-P2-4: 실행 설정 스키마를 읽기 전에 "실행 설정에 채우기"를 눌러도 옛 실행 설정과 마지막 사용값이
+  // 지워지지 않는다. 스키마가 늦게 오면 채운 값으로 칸이 서고 그 값으로 실행한다.
+  it("keeps the old run settings filled before the run environment schema arrives", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API}/api/v1/run-environments/schema`, async () => {
+        await gate;
+        return HttpResponse.json({
+          schema_hash: "run-env",
+          schema: RUN_ENVIRONMENT_SCHEMA,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    const retired = readBackendFixture(
+      "strategy_documents/quality_momentum.v1_1.yaml",
+    );
+    serveRetiredCompile(retired, []);
+    mount("/research/strategies/new");
+    const view = await editor();
+    replaceText(view, retired);
+    const banner = await screen.findByRole("region", {
+      name: "이전 schema 문서",
+    });
+    const upgrade = within(banner).getByRole("button", {
+      name: "현재 버전으로 업그레이드",
+    });
+    await waitFor(() => expect(upgrade).toBeEnabled());
+    await user.click(upgrade);
+    await user.click(
+      await within(banner).findByRole("button", { name: "실행 설정에 채우기" }),
+    );
+    expect(banner).toHaveTextContent("옛 문서의 실행 설정을 채웠습니다.");
+    expect(
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:last`) ?? "{}",
+      ),
+    ).toMatchObject({ start: OLD_ENVIRONMENT.start, end: OLD_ENVIRONMENT.end });
+
+    release();
+    const run = screen.getByRole("button", { name: /백테스트 실행/ });
+    await waitFor(() => expect(run).toBeEnabled());
+    await user.click(run);
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.environment).toEqual(OLD_ENVIRONMENT);
+  });
 });

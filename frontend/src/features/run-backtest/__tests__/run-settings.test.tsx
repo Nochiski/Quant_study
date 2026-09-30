@@ -137,7 +137,7 @@ const ENVIRONMENT: RunEnvironment = {
   universe_id: "krx.common-stock",
   timing: "next_open",
   participation_rate: 0.1,
-  participation_basis: "session_volume",
+  participation_basis: "adv20",
   fee_bps: 15,
   slippage_bps: 10,
   impact_model: "fixed_bps",
@@ -989,6 +989,39 @@ describe("run environment panel", () => {
       );
     expect(stored("strategy-1")).toEqual({ ...remembered, fee_bps: "7" });
     expect(stored("last")).toEqual({ ...remembered, fee_bps: "7" });
+  });
+
+  // #396 리뷰 P2-1: v1 저장값은 건드리지 않은 옛 기본값(`session_volume`)까지 담았다. 새 기본값 `adv20` 이
+  // 그 값에 덮이지 않고, 나머지 저장값은 이어진다. 새로 쓰는 값은 v2 에 간다.
+  it("drops the participation basis remembered before the adv20 default and keeps the rest", async () => {
+    localStorage.setItem(
+      "quant-workbench.run-environment.v1:strategy-1",
+      JSON.stringify({
+        start: "2021-01-01",
+        end: "2026-08-31",
+        universe_id: "krx.common-stock",
+        participation_basis: "session_volume",
+        fee_bps: "7",
+      }),
+    );
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+
+    await waitFor(() =>
+      expect(requestBody()?.environment).toEqual({
+        ...ENVIRONMENT,
+        fee_bps: 7,
+      }),
+    );
+    const slippage = screen.getByRole("spinbutton", { name: /슬리피지/ });
+    await user.clear(slippage);
+    await user.type(slippage, "12");
+    expect(
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`) ??
+          "{}",
+      ),
+    ).not.toHaveProperty("participation_basis");
   });
 
   it("replaces every field when an upgraded document's environment is applied", async () => {

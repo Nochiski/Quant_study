@@ -38,12 +38,13 @@ MAX_IMPACT_FRACTION = 0.99
 def cost_history_sessions(environment: RunEnvironment) -> int:
     """비용 계산(참여 기준 ADV·√ 충격 σ)에 필요한 측정 구간 앞 워밍업 세션 수.
 
-    `sqrt` 는 ADV(20행)와 σ(수익률 20개 = 종가 21개)를 함께 쓴다. 참여 기준이 요구하는 수는
-    `ADV_SESSIONS` 이하라 이 식에 포함된다.
+    `sqrt` 는 ADV(20행)와 σ(수익률 20개 = 종가 21개)를 함께 쓴다. 참여 기준 `adv20` 의 워밍업이 더
+    길면(`participation_history_sessions`) 그만큼 읽는다.
     """
+    participation = participation_history_sessions(environment)
     if environment.impact_model is ImpactModel.SQRT:
-        return max(ADV_SESSIONS, VOLATILITY_SESSIONS + 1)
-    return participation_history_sessions(environment)
+        return max(participation, ADV_SESSIONS, VOLATILITY_SESSIONS + 1)
+    return participation
 
 
 def impact_scales(
@@ -60,7 +61,8 @@ def impact_scales(
     if environment.impact_model is not ImpactModel.SQRT:
         return None
     rows = sorted(bars, key=lambda row: row[0])
-    adv = adv_shares(rows, settled)
+    # √ 충격은 있는 행만으로 잰다(참여 한도의 20행 조건과 다르다 — `adv_shares` 참고).
+    adv = adv_shares(rows, settled, minimum_rows=1)
     scales: dict[tuple[date, str], float] = {}
     returns: dict[str, deque[float]] = {}
     last_close: dict[str, float] = {}

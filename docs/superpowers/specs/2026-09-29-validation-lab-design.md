@@ -156,12 +156,13 @@
 | `sell_tax_bps` | `custom`일 때 매도 금액 대비 bp | 없음 |
 | `impact_model` | `fixed_bps`(지금의 슬리피지) · `sqrt`(√ 시장충격) | `fixed_bps` |
 | `impact_coefficient` | `sqrt`의 계수 k | 설계 PR에서 문헌값으로 정한다 |
-| `participation_basis` | `session_volume`(당일 거래량) · `adv20`(20일 평균 거래대금) | `session_volume` |
+| `participation_basis` | `session_volume`(당일 거래량) · `adv20`(20일 평균 거래대금) | `adv20`(#342: `session_volume` 은 체결일 전체 거래량을 써 look-ahead·낙관 쪽이라 선택지로만 남기고 결과에 경고) |
 
 - 법정 세율표의 owner는 `domain/backtest/_krx_tax.py` 하나다. 날짜 구간·시장별 행과 근거 법령·시행일을 함께
   적는다. **2026년 세율은 구현 PR에서 공포 법령으로 다시 확인한다.**
 - `environment_hash`는 표시만 되고 비교하는 곳이 없다. 칸을 더해 해시가 바뀌는 것을 그대로 두고 판본을 따로
-  두지 않는다. 시도 키는 D2의 기본값 생략 규칙으로 안정성을 따로 지킨다.
+  두지 않는다. 시도 키는 D2의 기본값 생략 규칙으로 안정성을 따로 지킨다. 기본값을 바꾸면 옛 기본값 실행과
+  새 기본값 실행이 같은 키가 되므로 시도 키의 기본값 판본(`TRIAL_KEY_DEFAULTS_VERSION`)을 올린다(#342).
 - `RunManifest`의 평면 비용 필드 대조(`NUMERIC_ENVIRONMENT_FIELDS`)는 평면 호환 집합을 따로 고정해
   새 제약 행이 `AttributeError`를 내지 않게 한다.
 - 두 엔진 코어(Python reference, Rust)에 매도 전용 비용, √ 충격, ADV 기준 참여 한도를 같은 의미로 넣고

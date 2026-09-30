@@ -26,8 +26,8 @@ from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
 from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 
 _PINNED = (
-    "backtest-engine-v3",
-    "4ff1ea06bb96fd497775579c4a0bbc691531f6062b14ae09f3245b75f1af694d",
+    "backtest-engine-v4",
+    "6bccc626361eea1d21be1144f4ab5d9e9a06ebd85a58d1b3b6e9c9f4b33323ed",
 )
 
 

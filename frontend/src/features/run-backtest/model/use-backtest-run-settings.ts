@@ -33,8 +33,15 @@ import {
  * 유니버스가 이어진다. 저장소를 쓸 수 없으면(사생활 모드 등) 조용히 스키마 기본값으로 시작한다.
  */
 export const RUN_ENVIRONMENT_STORAGE_PREFIX =
-  "quant-workbench.run-environment.v1";
+  "quant-workbench.run-environment.v2";
 const LAST_USED = "last";
+/**
+ * v1 은 참여 기준 기본값이 `session_volume` 이던 때 건드리지 않은 칸까지 모두 저장했다. 그 옛 기본값이 새
+ * 기본값 `adv20` 을 덮지 않게, v2 값이 없을 때 v1 을 읽되 참여 기준 칸은 버린다(#396 리뷰 P2-1). 스키마
+ * 기본값을 바꾸는 PR 은 판본을 올리고 여기서 그 칸을 버린다.
+ */
+const LEGACY_STORAGE_PREFIX = "quant-workbench.run-environment.v1";
+const LEGACY_DROPPED: readonly string[] = ["participation_basis"];
 
 const storage = (): Storage | null => {
   try {
@@ -44,9 +51,9 @@ const storage = (): Storage | null => {
   }
 };
 
-const readStored = (key: string): RunEnvironmentValues | null => {
+const readRecord = (storageKey: string): RunEnvironmentValues | null => {
   try {
-    const text = storage()?.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`);
+    const text = storage()?.getItem(storageKey);
     if (text === null || text === undefined) return null;
     const parsed: unknown = JSON.parse(text);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
@@ -59,6 +66,19 @@ const readStored = (key: string): RunEnvironmentValues | null => {
   } catch {
     return null;
   }
+};
+
+const readStored = (key: string): RunEnvironmentValues | null => {
+  const current = readRecord(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`);
+  if (current !== null) return current;
+  const legacy = readRecord(`${LEGACY_STORAGE_PREFIX}:${key}`);
+  return legacy === null
+    ? null
+    : Object.fromEntries(
+        Object.entries(legacy).filter(
+          ([name]) => !LEGACY_DROPPED.includes(name),
+        ),
+      );
 };
 
 const writeStored = (key: string, values: RunEnvironmentValues): void => {

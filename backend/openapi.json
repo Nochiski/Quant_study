@@ -5065,7 +5065,7 @@
         "type": "object"
       },
       "ParticipationBasis": {
-        "description": "참여율을 곱할 기준 거래량(spec D7).\n\n`session_volume` 은 체결 세션의 거래량을, `adv20` 은 판단일까지 20세션 평균 거래대금을 판단일\n종가로 나눈 주식 수(`_participation.py`)를 뜻한다.",
+        "description": "참여율을 곱할 기준 거래량(spec D7).\n\n`session_volume` 은 체결 세션의 거래량을, `adv20` 은 판단일까지 20세션 평균 거래대금을 판단일\n종가로 나눈 주식 수(`_participation.py`)를 뜻한다. 기본은 `adv20` 이다(#342 DOMAIN-V2-02) —\n`session_volume` 은 체결 시점에 모르는 그날 전체 거래량으로 시가 체결 수량을 정해 결과가 낙관\n쪽이라, 옛 실행 설정과 견주는 선택지로만 남기고 결과에 경고를 붙인다.",
         "enum": [
           "session_volume",
           "adv20"
@@ -6837,7 +6837,7 @@
           },
           "participation_basis": {
             "$ref": "#/components/schemas/ParticipationBasis",
-            "default": "session_volume"
+            "default": "adv20"
           },
           "participation_rate": {
             "default": 0.1,

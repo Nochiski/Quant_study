@@ -441,6 +441,7 @@ export type {
   PageRevisionSummary,
   PageStrategySummary,
   PanelPreviewCostEstimate,
+  ParameterMap,
   ParameterNode,
   ParticipationBasis,
   PortfolioCandidateTrace,

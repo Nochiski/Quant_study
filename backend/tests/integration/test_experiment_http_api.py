@@ -182,11 +182,11 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
             sharpes[trial["attempts"][0]["run_id"]]
         )
     assert parameter_map.status_code == 200, parameter_map.text
-    assert [cell["grid_index"] for cell in parameter_map.json()] == [[0], [1], [2]]
-    assert [cell["score"] for cell in parameter_map.json()] == pytest.approx(
+    assert [cell["grid_index"] for cell in parameter_map.json()["cells"]] == [[0], [1], [2]]
+    assert [cell["score"] for cell in parameter_map.json()["cells"]] == pytest.approx(
         [sum(values) / 2 for values in expected.values()]
     )
-    assert [cell["verdict"] for cell in parameter_map.json()].count("recommended") == 1
+    assert [cell["verdict"] for cell in parameter_map.json()["cells"]].count("recommended") == 1
 
 
 def test_design_and_lookup_rejections_are_coded() -> None:

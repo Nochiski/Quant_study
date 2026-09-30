@@ -144,13 +144,22 @@ def neighbor_mean(
     """`grid_neighbors` 칸 점수의 평균(자기 칸 제외, 수학 노트 5절 고원 점수).
 
     Args:
-        scores: 값이 있는 칸만 담는다. 실패한 칸은 넣지 않으며 평균에서 빠진다.
+        scores: 평균에 넣을 칸만 담는다. 무엇을 넣을지는 호출자가 정한다 — 창 선택은 실패 칸을
+            빼고, 파라미터 지도는 파산 칸을 최하 점수로 넣는다.
 
     Returns:
         값이 있는 이웃이 하나도 없으면 `None`.
     """
     values = [scores[cell] for cell in grid_neighbors(shape, index) if cell in scores]
     return sum(values) / len(values) if values else None
+
+
+def neighbor_rank(
+    scores: Mapping[GridIndex, float], shape: tuple[int, ...], index: GridIndex
+) -> float:
+    """이웃 평균 기준으로 칸을 줄 세우는 값 — 점수 있는 이웃이 없으면 자기 점수다."""
+    mean = neighbor_mean(scores, shape, index)
+    return scores[index] if mean is None else mean
 
 
 def _checked_axis_values(

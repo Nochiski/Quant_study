@@ -1130,22 +1130,25 @@ def test_the_parameter_map_averages_ledger_train_scores_and_floors_a_bankrupt_ce
     runs.run_statuses["run-2"] = RunStatus.FAILED
     runs.error_codes["run-2"] = "backtest.run.equity_wiped_out"
 
-    cells = service.parameter_map(experiment_id)
+    cells = service.parameter_map(experiment_id).cells
 
-    # 칸 점수 (0,)=0.3, (2,)=0.2. 파산 칸 (1,) 은 최하 점수 0.2 라 두 칸의 이웃 평균이 모두 0.2 —
-    # 동점이면 좌표가 앞선 칸이 추천이다. 민감도: -1×0.8=-0.8 쪽 가장 가까운 격자값 0 →
-    # (0.3-0.2)/0.3, 1×0.8=0.8 쪽 0 → 0. -1×1.2·1×1.2 쪽은 축 끝이다.
+    # 칸 점수 (0,)=0.3, (2,)=0.2. 파산 칸 (1,) 은 최하 점수 min(0.2, 0) = 0 이라 두 칸의 이웃 평균이
+    # 모두 0 — 동점이면 좌표가 앞선 칸이 추천이다. 민감도: -1×0.8=-0.8 쪽 가장 가까운 격자값 0 은
+    # 파산이라 하락 1.0, 1×0.8=0.8 쪽도 0 이라 1.0. -1×1.2·1×1.2 쪽은 축 끝이다.
     assert [
         (cell.grid_index, cell.verdict, cell.score, cell.plateau_score, cell.sensitivity)
         for cell in cells
     ] == [
-        (
-            (0,),
-            CellVerdict.RECOMMENDED,
-            pytest.approx(0.3),
-            pytest.approx(0.2),
-            pytest.approx(1 / 3),
-        ),
+        ((0,), CellVerdict.RECOMMENDED, pytest.approx(0.3), 0.0, pytest.approx(1.0)),
         ((1,), CellVerdict.FAILED, None, None, None),
-        ((2,), CellVerdict.SCORED, pytest.approx(0.2), pytest.approx(0.2), pytest.approx(0.0)),
+        ((2,), CellVerdict.SCORED, pytest.approx(0.2), 0.0, pytest.approx(1.0)),
+    ]
+    # 비전략 실패(엔진 내부 오류)는 실패로 보이기만 하고 이웃 평균에서 빠진다.
+    runs.error_codes["run-2"] = "backtest.run.internal"
+    assert [
+        (cell.verdict, cell.plateau_score) for cell in service.parameter_map(experiment_id).cells
+    ] == [
+        (CellVerdict.RECOMMENDED, None),
+        (CellVerdict.FAILED, None),
+        (CellVerdict.SCORED, None),
     ]

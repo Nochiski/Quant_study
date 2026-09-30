@@ -14,8 +14,10 @@ from strategy_workbench.domain.experiment._errors import (
 from strategy_workbench.domain.experiment._plateau import (
     PEAK_NEIGHBOR_RATIO,
     SENSITIVITY_STEP,
+    CellOutcomes,
     CellPlateau,
     CellVerdict,
+    bankrupt_score,
     cell_outcomes,
     plateau_map,
 )
@@ -49,6 +51,7 @@ __all__ = [
     "MAX_GRID_POINTS",
     "PEAK_NEIGHBOR_RATIO",
     "SENSITIVITY_STEP",
+    "CellOutcomes",
     "CellPlateau",
     "CellVerdict",
     "ExperimentDesign",
@@ -65,6 +68,7 @@ __all__ = [
     "WalkForwardGap",
     "WalkForwardWindow",
     "WindowSelectionRule",
+    "bankrupt_score",
     "build_search_spec",
     "cell_outcomes",
     "experiment_trial_key",

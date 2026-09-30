@@ -1473,6 +1473,20 @@
             ],
             "title": "Sensitivity"
           },
+          "sensitivity_cell": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sensitivity Cell"
+          },
           "verdict": {
             "$ref": "#/components/schemas/CellVerdict"
           }
@@ -1482,7 +1496,8 @@
           "verdict",
           "score",
           "plateau_score",
-          "sensitivity"
+          "sensitivity",
+          "sensitivity_cell"
         ],
         "title": "CellPlateau",
         "type": "object"
@@ -3003,6 +3018,11 @@
           },
           "awaiting_recovery": {
             "title": "Awaiting Recovery",
+            "type": "boolean"
+          },
+          "bankrupt": {
+            "default": false,
+            "title": "Bankrupt",
             "type": "boolean"
           },
           "status": {
@@ -5001,6 +5021,23 @@
           "returned_cells"
         ],
         "title": "PanelPreviewCostEstimate",
+        "type": "object"
+      },
+      "ParameterMap": {
+        "description": "파라미터 지도(V4-03). 칸 판정 규칙은 `domain/experiment/_plateau.py` 다.",
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/CellPlateau"
+            },
+            "title": "Cells",
+            "type": "array"
+          }
+        },
+        "required": [
+          "cells"
+        ],
+        "title": "ParameterMap",
         "type": "object"
       },
       "ParameterNode": {
@@ -12494,11 +12531,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/CellPlateau"
-                  },
-                  "title": "Response Getexperimentparametermap",
-                  "type": "array"
+                  "$ref": "#/components/schemas/ParameterMap"
                 }
               }
             },

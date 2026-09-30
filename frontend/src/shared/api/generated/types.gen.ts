@@ -979,6 +979,10 @@ export type CellPlateau = {
    * Sensitivity
    */
   sensitivity: number | null;
+  /**
+   * Sensitivity Cell
+   */
+  sensitivity_cell: Array<number> | null;
   verdict: CellVerdict;
 };
 
@@ -1912,6 +1916,10 @@ export type ExperimentTrialState = {
    * Awaiting Recovery
    */
   awaiting_recovery: boolean;
+  /**
+   * Bankrupt
+   */
+  bankrupt?: boolean;
   status: TrialStatus;
   trial: ExperimentTrial;
 };
@@ -3145,6 +3153,18 @@ export type PanelPreviewCostEstimate = {
    * Session Count
    */
   session_count: number;
+};
+
+/**
+ * ParameterMap
+ *
+ * 파라미터 지도(V4-03). 칸 판정 규칙은 `domain/experiment/_plateau.py` 다.
+ */
+export type ParameterMap = {
+  /**
+   * Cells
+   */
+  cells: Array<CellPlateau>;
 };
 
 /**
@@ -7926,11 +7946,9 @@ export type GetExperimentParameterMapError =
 
 export type GetExperimentParameterMapResponses = {
   /**
-   * Response Getexperimentparametermap
-   *
    * Successful Response
    */
-  200: Array<CellPlateau>;
+  200: ParameterMap;
 };
 
 export type GetExperimentParameterMapResponse =

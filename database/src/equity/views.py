@@ -638,8 +638,9 @@ def install_temp_macros(con: duckdb.DuckDBPyConnection, sources: dict[str, str],
                         names: tuple[str, ...] | None = None) -> list[str]:
     """`sources` 로 채울 수 있는 매크로를 TEMP MACRO 로 세션에 올린다. 만든 이름을 돌려준다.
 
-    `names` 를 주면 그 매크로와 그것이 부르는 매크로만 올린다 — 입력 열을 좁혀 읽는 빌드
-    세션(`input_columns`)에서 쓰지 않는 매크로가 없는 열에 바인딩하다 멈추지 않게 한다.
+    `names` 를 주면 그 매크로와 그것이 직접 부르는 매크로(`MACRO_DEPENDS` 한 단계)만 올린다 —
+    입력 열을 좁혀 읽는 빌드 세션(`input_columns`)에서 쓰지 않는 매크로가 없는 열에 바인딩하다
+    멈추지 않게 한다. 의존은 한 단계만 편다(지금 `MACRO_DEPENDS` 는 깊이 1 이다).
     `overrides[name]` 은 그 매크로의 템플릿을 바꿔 끼운다 — 부정 픽스처(FX-N-006 나눗셈)용.
     """
     wanted = (None if names is None

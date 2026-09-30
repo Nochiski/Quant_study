@@ -49,6 +49,7 @@ from strategy_workbench.adapters.outbound.strategy_memory.facade.repository impo
 from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestDataNotReadyError,
     BacktestDataQuery,
+    CorporateActionRecord,
 )
 from strategy_workbench.application.factor_research.facade.ports import FactorObservationQuery
 from strategy_workbench.application.factor_research.facade.research import (
@@ -1136,29 +1137,35 @@ def test_backtest_dataset_adjusts_an_unfolded_level_shift_by_the_base_price_rati
     바꾼다(#369).
 
     엔진은 원주가 × 보유 수량으로 평가해, 사건 없이 bar 만 내면 층 배수가 곧 손익이다(실원장
-    025560 2020-06-11 종가 79 → 07-02 종가 3,700, ×46.8). 035420 은 01-11 기준가가 앞 종가의
-    10배다. 손계산: 01-10 종가 205,000 에 100주(2,050만 원) → 비 205,000 ÷ 2,050,000 = 0.1 로
-    10주 → 01-11 종가 2,055,000 에 2,055만 원(+0.24%). 조정이 없으면 100주 × 2,055,000 =
-    2억 550만 원(×10.02)이다.
+    025560 2020-06-11 종가 79 → 07-02 종가 3,700, ×46.8). 035420 은 01-10 에 정지했고 01-11
+    기준가가 정지일 종가의 10배다.
+    - 비의 분모는 앞 행(정지일 기준가 행) 종가 205,000 이라 비는 0.1 이다. 직전 거래 종가(01-09)
+      204,500 을 쓰면 0.09976 이고, 한 정지 구간에 재설정이 여럿이면 앞 재설정이 겹쳐 곱해진다.
+    - 01-09 의 늦게 공개된 ok 계수(뷰의 `factor_ok` 참)는 계수가 이미 층 이동을 설명한다 — 기준가
+      비로 한 번 더 조정하지 않아, 사건은 ok 계수 하나와 미접힘 하나뿐이다.
+    손계산: 01-09 종가 204,500 에 100주(2,045만 원) → 비 0.1 로 10주 → 01-11 종가 2,055,000 에
+    2,055만 원(+0.49%, 정지일 종가 변화 포함). 조정이 없으면 2억 550만 원(×10.05)이다.
     """
-    before_shift = date(2024, 1, 10)
-    dataset = adapter.load_backtest_dataset(
-        BacktestDataQuery(before_shift, END, ("035420:1",), None)
+    dataset = adapter.load_backtest_dataset(BacktestDataQuery(START, END, ("035420:1",), None))
+    shift = CorporateActionRecord(
+        WB_INCONSISTENT,
+        "035420:1",
+        "reverse_split",
+        "0.1",
+        "원장 미접힘·기준가 비 prev_close=205000 base=2050000",
     )
-    shift = replace(
-        dataset.corporate_actions[0],
-        session=WB_INCONSISTENT,
-        security_id="035420:1",
-        action_type="reverse_split",
-        ratio="0.1",
-        detail="원장 미접힘·기준가 비 prev_close=205000 base=2050000",
+    assert dataset.corporate_actions == (
+        CorporateActionRecord(
+            WB_LATE_FACTOR, "035420:1", "reverse_split", "0.5", "035420:krx_base:2024-01-09"
+        ),
+        shift,
     )
-    assert dataset.corporate_actions == (shift,)
     closes = {bar.session: bar.close for bar in dataset.bars}
+    assert WB_HALT_DATE not in closes  # 정지일은 bar 가 없다
     held = 100 * float(shift.ratio)
     assert held == 10
-    assert held * closes[WB_INCONSISTENT] / (100 * closes[before_shift]) - 1 == pytest.approx(
-        50_000 / 20_500_000
+    assert held * closes[WB_INCONSISTENT] / (100 * closes[WB_LATE_FACTOR]) - 1 == pytest.approx(
+        100_000 / 20_450_000
     )
     [warning] = [w for w in dataset.warnings if w.code == "equity.unfolded_level_shift"]
     assert warning.severity is WarningSeverity.WARNING
@@ -1170,21 +1177,6 @@ def test_backtest_dataset_adjusts_an_unfolded_level_shift_by_the_base_price_rati
     )
     assert (warmed.corporate_actions, warmed.history_corporate_actions) == ((), (shift,))
     assert "equity.unfolded_level_shift" not in {w.code for w in warmed.warnings}
-
-
-def test_backtest_dataset_warns_without_adjusting_when_the_base_price_is_missing(
-    tmp_path: Path,
-) -> None:
-    """기준가가 비어 비를 세울 수 없는 층 이동은 수량을 조정하지 않고 경고만 남긴다(#369) — 비를
-    지어내지 않는다. 실원장 2020-03-19 이후에는 이런 사건이 없다."""
-    root = build_workbench_root(tmp_path / "equity", level_shift_base=False)
-    dataset = EquityDuckdbAdapter(root).load_backtest_dataset(
-        BacktestDataQuery(date(2024, 1, 10), END, ("035420:1",), None)
-    )
-    assert dataset.corporate_actions == ()
-    [warning] = [w for w in dataset.warnings if w.code == "equity.unfolded_level_shift"]
-    assert "조정하지 않았다" in warning.message
-    assert "035420:1@2024-01-11 prev_close=205000 base=None" in warning.message
 
 
 def test_backtest_dataset_counts_provisional_evening_rows_apart_from_invalid_ones(

@@ -89,12 +89,12 @@ def test_warmup_bars_are_answered_apart_and_leave_the_window_unchanged(
     )
 
 
-# duckdb 픽스처의 035420 은 01-11 에 원장이 계수를 못 낸 ×10 층 이동
-# (`krx_base_inconsistent`)이 있다.
+# duckdb 픽스처의 035420 은 01-10 정지 뒤 01-11 에 원장이 계수를 못 낸 ×10 층 이동
+# (`krx_base_inconsistent`)이 있다 — 01-09 bar 와 01-11 bar 사이다.
 LEVEL_CASES = [
     CASES[0],
     pytest.param(
-        "equity_duckdb", date(2024, 1, 10), date(2024, 1, 12), ("035420:1",), id="equity_duckdb"
+        "equity_duckdb", date(2024, 1, 9), date(2024, 1, 12), ("035420:1",), id="equity_duckdb"
     ),
 ]
 

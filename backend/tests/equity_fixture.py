@@ -110,7 +110,7 @@ def price_table(
     rows: list[PriceRow],
     shares_out: dict[str, int] | None = None,
     basis: list[str] | None = None,
-    base_prices: dict[tuple[str, date], float | None] | None = None,
+    base_prices: dict[tuple[str, date], float] | None = None,
 ) -> pa.Table:
     """`price_daily` 관심 컬럼. `price_kind` 는 S04 규칙대로 volume>0 → trade, =0 → reference.
 
@@ -122,8 +122,7 @@ def price_table(
     잠정). 주지 않으면 그 컬럼이 아예 없는 옛 판 루트(e1.5.0 등) 모양 그대로다.
 
     `base_prices` 를 주면 S06-2 의 KRX 기준가 컬럼 `base_price_krw` 를 붙인다. 평소처럼 같은 티커
-    앞 행 종가이고, 준 (ticker, date) 만 그 값이다(None 은 기준가를 싣지 못한 행). 행은 티커마다
-    날짜 순이어야 한다.
+    앞 행 종가이고, 준 (ticker, date) 만 그 값이다. 행은 티커마다 날짜 순이어야 한다.
     """
     volumes = [r[6] for r in rows]
     columns: dict[str, pa.Array] = {
@@ -898,13 +897,14 @@ def write_catalog(
 # 캘린더 13세션(2023-12-26 ~ 2024-01-12, backfill_end = 01-12). 종목:
 #   005930 common 전 구간 · 000660 common 전 구간, 2024-01-08 2:1 분할(apply=available=01-08) +
 #   01-10 정지(reference 행, status suspended) · 035420 common 01-04 상장, 주식수 미상(mktcap
-#   NULL) · 036220 common 재상장 2구간([12-26, 12-29]·[01-08, 01-12]) · 005935 preferred ·
-#   069500 etf.
+#   NULL), 01-10 정지 · 036220 common 재상장 2구간([12-26, 12-29]·[01-08, 01-12]) · 005935
+#   preferred · 069500 etf.
 #   adj_factor 에 005930 not-ok 행 1(계수 1) — 사건·조정에 나오면 안 된다. 035420 에는 조정 공백
 #   사건 셋(01-05 unknown_price_only · 01-09 다음 세션에 공개된 ok 계수 · 01-11
 #   krx_base_inconsistent)이 있다 — 원장 뷰 `v_adj_close` 는 뒤 둘의 적용일 행을 가린다(#220).
-#   01-11 은 KRX 기준가가 앞 종가의 `WB_LEVEL_SHIFT` 배로 재설정돼 원주가 층이 바뀐 날이다 —
-#   원장은 계수를 못 냈고 백테스트 데이터 포트가 기준가 비로 수량을 조정한다(#369).
+#   01-11 은 KRX 기준가가 앞 행(01-10 정지일 기준가 행) 종가의 `WB_LEVEL_SHIFT` 배로 재설정돼
+#   원주가 층이 바뀐 날이다 — 원장은 계수를 못 냈고 백테스트 데이터 포트가 기준가 비로 수량을
+#   조정한다(#369). 정지일 종가는 직전 거래 종가(01-09)와 달라 비의 분모를 가른다.
 # 정책: krx.all(TRUE) · krx.common-stock(sec_type='common' ∧ status='listed').
 
 WB_SESSIONS: tuple[date, ...] = (
@@ -1139,8 +1139,9 @@ def wb_close(ticker: str, session: date) -> float:
     return float(close)
 
 
-# 035420 층 이동일의 KRX 기준가 — 앞 세션(01-10) 종가 205,000 의 `WB_LEVEL_SHIFT` 배
-WB_LEVEL_SHIFT_BASE = WB_LEVEL_SHIFT * wb_close("035420", WB_SESSIONS[-3])
+# 035420 층 이동일의 KRX 기준가 — 앞 행(01-10 정지일) 종가 205,000 의 `WB_LEVEL_SHIFT` 배.
+# 직전 거래 종가(01-09) 204,500 이 분모면 비가 0.1 이 아니라 0.09976 이다
+WB_LEVEL_SHIFT_BASE = WB_LEVEL_SHIFT * wb_close("035420", WB_HALT_DATE)
 
 
 # `dataset_profile`(S19) 이 확정한 필드별 공개시차 — 서버 실측 모양 그대로다(랙 0 은 장중 가격
@@ -1204,7 +1205,6 @@ def build_workbench_root(
     inconsistent_ohlc: tuple[str, date] | None = None,
     profile_rows: list[tuple[str, int, str]] | None = None,
     extra_policy_rows: list[PolicyRow] | None = None,
-    level_shift_base: bool = True,
 ) -> Path:
     """워크벤치 어댑터 손 픽스처 equity_root 를 만든다.
 
@@ -1224,9 +1224,6 @@ def build_workbench_root(
 
     `profile_rows` 를 주면 `dataset_profile` 을 그 행으로 쓴다(기본 `WB_PROFILE_ROWS`). 일부 필드의
     행만 빠진 대장을 만들 때 쓴다.
-
-    `level_shift_base=False` 면 035420 층 이동일의 KRX 기준가가 비어 있다 — 원장이 계수도 기준가도
-    싣지 못한 층 이동이다.
     """
     prices: list[PriceRow] = []
     universe: list[UniverseRow] = []
@@ -1235,7 +1232,7 @@ def build_workbench_root(
             if not first <= session <= last:
                 continue
             close = wb_close(ticker, session)
-            halted = ticker == "000660" and session == WB_HALT_DATE
+            halted = ticker in ("000660", "035420") and session == WB_HALT_DATE
             prices.append(
                 (ticker, session, None, None, None, close, 0)
                 if halted
@@ -1275,9 +1272,7 @@ def build_workbench_root(
             prices,
             shares_out=WB_SHARES,
             basis=price_basis,
-            base_prices={
-                ("035420", WB_INCONSISTENT): WB_LEVEL_SHIFT_BASE if level_shift_base else None
-            },
+            base_prices={("035420", WB_INCONSISTENT): WB_LEVEL_SHIFT_BASE},
         ),
         year_column="date",
     )

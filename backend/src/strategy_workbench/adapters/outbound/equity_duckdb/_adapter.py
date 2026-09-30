@@ -1438,33 +1438,35 @@ class EquityDuckdbAdapter:
             for security_id in holders(ticker, session):
                 record(session, security_id, action_type, ratio, str(event_id))
         # 원장이 접지 못한 층 이동(#369)은 적용일 KRX 기준가 비(앞 행 종가 ÷ 기준가)만큼
-        # 보유 수량을 바꾸는 분할·병합으로 싣고 사건마다 경고한다. 비를 세울 수 없으면 조정
-        # 없이 경고만 남긴다.
+        # 보유 수량을 바꾸는 분할·병합으로 싣고 사건마다 경고한다. 원장은 그날의 기준가
+        # 후보(기준가와 앞 행 종가가 있는 행)에서만 이 사건을 내므로 비를 못 세우면 원장
+        # 모순이다 — 조정 없이 층 배수를 손익에 넣지 않고 멈춘다.
         unfolded: list[DataWarning] = []
         for ticker, raw_session, prev_close, base_price in unfolded_rows:
             session = _as_date(raw_session, f"{UNFOLDED_MACRO}.apply_date")
             prev = _as_float(prev_close, "price_daily.close")
             base = _as_float(base_price, "price_daily.base_price_krw")
-            ratio = prev / base if prev and base and min(prev, base) > 0 else None
+            if not (prev and base and min(prev, base) > 0):
+                raise ValueError(
+                    "unfolded level shift without a base-price ratio — the ledger emits these "
+                    f"only on base-price candidates — ticker={ticker} apply_date={session} "
+                    f"prev_close={prev_close!r} base_price_krw={base_price!r}"
+                )
+            ratio = prev / base
             prices = f"prev_close={prev_close} base={base_price}"
             for security_id in holders(ticker, session):
-                if ratio is None:
-                    message = (
-                        "원장이 계수를 내지 못한 층 이동인데 적용일 KRX 기준가 비를 세울 수 "
-                        "없어 보유 수량을 조정하지 않았다(들고 있으면 층 배수가 손익에 그대로 "
-                        f"든다) — {security_id}@{session} {prices}"
-                    )
-                else:
-                    kind = "split" if ratio > 1 else "reverse_split"
-                    record(session, security_id, kind, ratio, f"원장 미접힘·기준가 비 {prices}")
-                    message = (
-                        "원장이 계수를 내지 못한 층 이동을 적용일 KRX 기준가 비로 보유 수량을 "
-                        f"조정하는 사건으로 실었다 — {security_id}@{session} ratio={ratio!r} "
-                        f"{prices}"
-                    )
+                kind = "split" if ratio > 1 else "reverse_split"
+                record(session, security_id, kind, ratio, f"원장 미접힘·기준가 비 {prices}")
                 if session >= query.start:
                     unfolded.append(
-                        DataWarning(code="equity.unfolded_level_shift", message=message)
+                        DataWarning(
+                            code="equity.unfolded_level_shift",
+                            message=(
+                                "원장이 계수를 내지 못한 층 이동을 적용일 KRX 기준가 비로 보유 "
+                                f"수량을 조정하는 사건으로 실었다 — {security_id}@{session} "
+                                f"ratio={ratio!r} {prices}"
+                            ),
+                        )
                     )
         for records in (bars, history_bars):
             records.sort(key=lambda bar: (bar.session, bar.security_id))

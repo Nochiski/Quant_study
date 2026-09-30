@@ -43,6 +43,7 @@ from ._trace_models import (
     StrategyTraceRequest,
     StrategyTraceResponse,
     StrategyTraceRow,
+    StrategyTraceSummary,
 )
 from .ports.outgoing.raw_observations import RawObservation
 
@@ -207,7 +208,7 @@ class StrategyTraceService:
             cancelled=cancelled,
         )
         _raise_if_cancelled(cancelled)
-        target = _target_projection(
+        target, summary = _target_projection(
             pipeline.preview.tape.frames,
             resolved_as_of,
             set(request.security_ids),
@@ -232,6 +233,7 @@ class StrategyTraceService:
             raw=raw,
             raw_truncated=raw_truncated,
             target=target,
+            summary=summary,
             # 원시 관측 경고 뒤에 tape 컴파일 경고(섹터 제약 제외 등, 이슈 #203)를 붙인다.
             warnings=(
                 *pipeline.preview.warnings,
@@ -324,11 +326,11 @@ def _target_projection(
     construction_trace: PortfolioConstructionTrace | None,
     *,
     cancelled: Callable[[], bool] = lambda: False,
-) -> StrategyTargetTrace | None:
+) -> tuple[StrategyTargetTrace | None, StrategyTraceSummary | None]:
     _raise_if_cancelled(cancelled)
     frame = next((item for item in frames if item.signal_as_of == as_of), None)
     if frame is None:
-        return None
+        return None, None
     if construction_trace is None or construction_trace.signal_as_of != as_of:
         raise RuntimeError(
             f"portfolio compiler omitted the requested construction trace — as_of={as_of}"
@@ -353,6 +355,11 @@ def _target_projection(
         construction=tuple(
             item for item in construction_trace.candidates if item.security_id in security_ids
         ),
+    ), StrategyTraceSummary(
+        signal_as_of=frame.signal_as_of,
+        execution_on=frame.execution_on,
+        counts=construction_trace.summary,
+        targets=tuple(sorted(frame.targets, key=lambda item: (item.rank, item.security_id))),
     )
 
 

@@ -12,6 +12,7 @@ from strategy_workbench.domain.factor.facade.trace import TraceValueStatus
 from strategy_workbench.domain.portfolio.facade.construction import (
     CandidateDecision,
     PortfolioCandidateTrace,
+    PortfolioFrameSummary,
     TargetPosition,
 )
 from strategy_workbench.domain.strategy.facade.provenance import (
@@ -27,6 +28,7 @@ TraceComputedValue: TypeAlias = float | bool | None
 @dataclass(frozen=True)
 class StrategyTraceRequest:
     strategy_source: StrategySource
+    # 비우면 종목별 추적 없이 기준일 요약(`summary`)만 받는다(lang2 P4-03).
     security_ids: tuple[str, ...]
     factor_id: str
     # None asks the compiler-owned rebalance schedule for its latest executable signal frame.
@@ -47,7 +49,7 @@ class StrategyTraceRequest:
     def __post_init__(self) -> None:
         if not self.factor_id.strip():
             raise ValueError("trace factor_id must not be blank")
-        if not 1 <= len(self.security_ids) <= self.MAX_SECURITY_IDS:
+        if len(self.security_ids) > self.MAX_SECURITY_IDS:
             raise ValueError(
                 "trace security_ids count is out of range — "
                 f"count={len(self.security_ids)} max={self.MAX_SECURITY_IDS}"
@@ -129,6 +131,17 @@ class StrategyTargetTrace:
 
 
 @dataclass(frozen=True)
+class StrategyTraceSummary:
+    """기준일 미리보기가 그리는 수와 그날의 선정(lang2 P4-03). 수는 컴파일러가 센 그대로다."""
+
+    signal_as_of: date
+    execution_on: date
+    counts: PortfolioFrameSummary
+    # N = 전략이 그 기준일에 고른 종목 전부, 순위 순
+    targets: tuple[TargetPosition, ...]
+
+
+@dataclass(frozen=True)
 class StrategyTraceResponse:
     spec_hash: str
     snapshot_id: str
@@ -141,4 +154,6 @@ class StrategyTraceResponse:
     raw: tuple[RawStrategyTraceRow, ...]
     raw_truncated: bool
     target: StrategyTargetTrace | None
+    # `target` 처럼 기준일이 리밸런스 신호일일 때만 있다.
+    summary: StrategyTraceSummary | None = None
     warnings: tuple[str, ...] = ()

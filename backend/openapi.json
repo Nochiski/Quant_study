@@ -4125,6 +4125,11 @@
             "title": "As Of",
             "type": "string"
           },
+          "masked": {
+            "default": false,
+            "title": "Masked",
+            "type": "boolean"
+          },
           "security_id": {
             "title": "Security Id",
             "type": "string"
@@ -5453,6 +5458,45 @@
           "detail"
         ],
         "title": "PortfolioDataUnavailableDetail",
+        "type": "object"
+      },
+      "PortfolioFrameSummary": {
+        "description": "trace 한 프레임 전체의 선정 깔때기 수(기준일 미리보기, lang2 P4-03).\n\n유니버스 멤버만 센다. 한 종목이 사유를 여럿 가질 수 있어(규칙 탈락이면서 팩터 값 없음) 사유별\n수를 더해도 `universe` 가 되지 않으므로, 순위에 든 수(`eligible`)를 따로 싣는다. 소비자는 수를\n다시 세지 않는다.",
+        "properties": {
+          "eligibility_failed": {
+            "title": "Eligibility Failed",
+            "type": "integer"
+          },
+          "eligibility_rank_cut": {
+            "title": "Eligibility Rank Cut",
+            "type": "integer"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "integer"
+          },
+          "masked": {
+            "title": "Masked",
+            "type": "integer"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "universe": {
+            "title": "Universe",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "universe",
+          "eligible",
+          "eligibility_failed",
+          "eligibility_rank_cut",
+          "missing",
+          "masked"
+        ],
+        "title": "PortfolioFrameSummary",
         "type": "object"
       },
       "PortfolioPreview": {
@@ -8939,12 +8983,13 @@
             "type": "integer"
           },
           "security_ids": {
+            "description": "Securities to trace. An empty list skips per-security rows and returns only the as-of summary.",
             "items": {
               "minLength": 1,
               "type": "string"
             },
             "maxItems": 100,
-            "minItems": 1,
+            "minItems": 0,
             "title": "Security Ids",
             "type": "array",
             "uniqueItems": true
@@ -9032,6 +9077,16 @@
           "spec_hash": {
             "title": "Spec Hash",
             "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategyTraceSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "target": {
             "anyOf": [
@@ -9125,6 +9180,39 @@
           "inputs"
         ],
         "title": "StrategyTraceRow",
+        "type": "object"
+      },
+      "StrategyTraceSummary": {
+        "description": "기준일 미리보기가 그리는 수와 그날의 선정(lang2 P4-03). 수는 컴파일러가 센 그대로다.",
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/PortfolioFrameSummary"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/TargetPosition"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "signal_as_of",
+          "execution_on",
+          "counts",
+          "targets"
+        ],
+        "title": "StrategyTraceSummary",
         "type": "object"
       },
       "StrategyValidation": {

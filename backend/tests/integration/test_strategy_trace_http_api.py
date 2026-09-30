@@ -149,6 +149,36 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
         assert row["estimated_order_delta"] is None
 
 
+def test_a_summary_only_trace_returns_the_frame_counts_and_its_targets_by_rank() -> None:
+    """기준일 미리보기(lang2 P4-03)는 종목 없이 trace 를 불러 그날의 수와 선정 종목을 받는다.
+
+    요약은 종목을 골랐을 때와 같고, 선정 종목은 tape 의 그 프레임 targets 전부를 순위 순으로 싣는다.
+    """
+    client = TestClient(build_http_app())
+    spec, request = _inline_request(client)
+    full = client.post("/api/v1/strategies/debug/trace", json=request).json()
+
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={**request, "security_ids": [], "node_ids": [], "include_raw": False},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["summary"] == full["summary"]
+    assert (payload["trace"]["rows"], payload["raw"]) == ([], [])
+    assert (payload["target"]["targets"], payload["target"]["candidates"]) == ([], [])
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": spec, "environment": _environment()}
+    ).json()["tape"]
+    frame = next(item for item in preview["frames"] if item["signal_as_of"] == request["as_of"])
+    assert payload["summary"]["signal_as_of"] == frame["signal_as_of"]
+    assert payload["summary"]["targets"] == sorted(
+        frame["targets"], key=lambda item: (item["rank"], item["security_id"])
+    )
+    assert payload["summary"]["counts"]["universe"] == len(frame["candidates"])
+
+
 @pytest.mark.parametrize("end", ["2026-09-04", "2026-09-05"])
 def test_omitted_as_of_resolves_the_latest_executable_frame_for_inline_and_saved(
     end: str,
@@ -371,7 +401,10 @@ def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() ->
 def test_trace_reports_cells_across_a_ledger_masked_cell_as_masked() -> None:
     """#350: mock 의 000660 01-08 신용잔고는 원장이 가린 셀이다(`MOCK_MASKED_CREDIT`). 신용 랙이
     3세션이라 01-11 에 보이고, 그 셀을 품는 2세션 차이 창(01-11·01-12)도 가린 칸을 건넌다. 추적은
-    이 칸들을 입력 결측이 아니라 `masked` 로 싣는다 — 판정은 평가기가 한다."""
+    이 칸들을 입력 결측이 아니라 `masked` 로 싣는다 — 판정은 평가기가 한다.
+
+    기준일 요약(lang2 P4-03)도 같은 판정으로 01-11 의 팩터 결측 한 종목을 원장이 가린 몫으로 센다.
+    01-12 는 다음 체결일이 없어 프레임이 없고 요약도 없다."""
     client = TestClient(build_http_app())
     spec = client.get("/api/v1/strategies/template").json()
     spec["portfolio"].update({"rebalance": "every_n_sessions", "rebalance_every_n_sessions": 1})
@@ -399,6 +432,7 @@ def test_trace_reports_cells_across_a_ledger_masked_cell_as_masked() -> None:
     }
     statuses: dict[tuple[str, str], str] = {}
     raw_kinds: dict[str, str] = {}
+    missing: dict[str, tuple[int, int] | None] = {}
     for as_of in ("2024-01-10", "2024-01-11", "2024-01-12"):
         response = client.post("/api/v1/strategies/debug/trace", json={**base, "as_of": as_of})
         assert response.status_code == 200, response.text
@@ -407,6 +441,10 @@ def test_trace_reports_cells_across_a_ledger_masked_cell_as_masked() -> None:
             statuses[(row["node_id"], as_of)] = row["status"]
         raw_kinds[as_of] = next(
             row["kind"] for row in body["raw"] if row["field_id"] == "credit.margin_balance"
+        )
+        summary = body["summary"]
+        missing[as_of] = (
+            None if summary is None else (summary["counts"]["missing"], summary["counts"]["masked"])
         )
 
     assert statuses == {
@@ -418,6 +456,7 @@ def test_trace_reports_cells_across_a_ledger_masked_cell_as_masked() -> None:
         ("change", "2024-01-12"): "masked",
     }
     assert raw_kinds == {"2024-01-10": "observed", "2024-01-11": "masked", "2024-01-12": "observed"}
+    assert missing == {"2024-01-10": (0, 0), "2024-01-11": (1, 1), "2024-01-12": None}
 
 
 def test_saved_revision_trace_is_hash_guarded_and_errors_are_structured() -> None:
@@ -791,7 +830,7 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert {
         key: properties["security_ids"][key] for key in ("minItems", "maxItems", "uniqueItems")
     } == {
-        "minItems": 1,
+        "minItems": 0,
         "maxItems": 100,
         "uniqueItems": True,
     }

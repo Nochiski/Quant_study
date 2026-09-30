@@ -150,7 +150,8 @@ bootstrap ─> application + adapters
 `equity`(`uv sync --extra equity`, duckdb). 답하는 field_id의 정본은 선언표
 `adapters/outbound/equity_duckdb/_specs.py`(`FIELD_SPECS`)이고 지금 30개다(price 7·financial 8·consensus 6·
 flow 3·short 2·credit 1·event 3). 새 필드는 이 표에 한 행을 더한다. 표에 없는 field_id는 `list_fields()`
-밖이고 질의하면 `INVALID_QUERY`이며, 사유는 `UNSUPPORTED_FIELDS`가 적는다. 필드별 공개 랙의 정본은 원장
+밖이고 질의하면 `INVALID_QUERY`이며, 사유는 `FIELD_NOT_IN_LEDGER` 한 문장이다(필드별 메모는
+`UNSUPPORTED_FIELDS`, #316). 필드별 공개 랙의 정본은 원장
 `dataset_profile`의 `recommended_lag_sessions`이고 adapter가 부팅할 때 읽는다. 표가 없거나 행이 빠진
 필드는 `_specs.py`의 폴백 랙(`SourceSpec.lag_sessions`·`FieldSpec.lag_sessions`)으로 읽는데, 이 값은
 원장 선언의 사본이고 `tests/contract/test_equity_fallback_lag.py`가 원장 선언과 대조한다. 폴백을 쓰면

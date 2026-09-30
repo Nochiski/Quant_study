@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import date, timedelta
 
@@ -131,6 +131,10 @@ class MockEquityDataAdapter:
         """compile 이 읽는 필드 계약 전부(P2-07). `resolve_factor_fields` 와 같은 변환을 거친다."""
         field_ids = tuple(profile.field_id for profile in self._profiles)
         return self.resolve_factor_fields(field_ids).fields
+
+    def unavailable_factor_fields(self) -> Mapping[str, str]:
+        """mock 은 선언한 필드를 모두 준다 — 뺀 필드가 없다(#316)."""
+        return {}
 
     def load_universe(self, query: UniverseHistoryQuery) -> UniverseHistoryResult:
         sessions = tuple(

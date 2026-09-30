@@ -4,7 +4,7 @@ import logging
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from threading import RLock, Thread
 
@@ -54,6 +54,8 @@ from strategy_workbench.domain.experiment.facade.statistics import (
     run_deflated_sharpe,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
+    DEFAULT_EXPERIMENT_CONTROLS,
+    MAX_EXPERIMENT_PRIORITY,
     ExperimentControls,
     ExperimentStatus,
     TrialStatus,
@@ -72,6 +74,7 @@ from .ports.outgoing.experiment_repository import (
 )
 from .ports.outgoing.trial_runs import (
     AdmittedRun,
+    RunSlotUsage,
     TrialResultUnreadableError,
     TrialRunPort,
     TrialRunRejectedError,
@@ -92,7 +95,12 @@ class ExperimentRequest:
     # trial 마다 기간(창의 학습 구간)과 파라미터 값만 바꿔 실행할 기반 요청.
     run: BacktestRunSpec
     # parameter_id → 탐색 값. None 이면 정의가 허용하는 격자 값 전체다(`build_search_spec`).
-    search: dict[str, list[ParameterValue] | None]
+    search: dict[str, list[ParameterValue] | None] = field(
+        metadata={
+            "description": "parameter_id → 탐색 값 목록. 값이 null 이면 문서 정의가 허용하는 격자 "
+            "값 전체를 편다. 키가 없는 파라미터는 탐색하지 않고 기반 실행의 값을 쓴다."
+        }
+    )
     split: SplitSpec
 
 
@@ -128,6 +136,11 @@ class ExperimentTrialState:
     attempts: tuple[TrialAttempt, ...]
     # 최신 실행이 재시작으로 중단돼 복구가 다시 넘기기를 기다린다(`awaiting_recovery`).
     awaiting_recovery: bool
+    # 다시 실행할 수 있다(실패·취소로 끝났고 실험을 취소하지 않았다). `retry` 가 이 값으로 판정한다.
+    retryable: bool
+    # 후보로 고를 수 있다(완료했고 실험이 끝났다 — 취소한 실험은 끝났다). `select` 가 이 값으로
+    # 판정한다.
+    selectable: bool
     # 최신 실행이 파산으로 끝났다(`bankrupt`) — 비전략 실패와 달리 전략의 결과다.
     bankrupt: bool = False
 
@@ -139,6 +152,9 @@ class Experiment:
     # trial 상태별 수. 대기열 화면이 셈을 다시 하지 않게 싣는다.
     trial_counts: dict[TrialStatus, int]
     selections: tuple[ExperimentSelection, ...]
+    # 끝났다(완료·취소, `ExperimentStatus.is_terminal`). 화면이 조작 노출·다시 묻기를 이 값으로
+    # 가른다.
+    finished: bool
 
 
 @dataclass(frozen=True)
@@ -207,6 +223,9 @@ class ExperimentPage:
     items: tuple[Experiment, ...]
     # 다음 쪽을 물을 때 `after` 로 넘길 값. 마지막 쪽이면 None.
     next_after: str | None
+    # 대기열 화면이 보일 슬롯 사용량과 우선순위 상한(화면이 규칙을 복제하지 않게 싣는다).
+    slots: RunSlotUsage
+    max_priority: int
 
 
 def _spawn(work: Callable[[], None]) -> None:
@@ -286,6 +305,7 @@ class ExperimentRunService:
             run=run,
             split=split,
             design=design,
+            controls=DEFAULT_EXPERIMENT_CONTROLS,
         )
         self._repository.add(record)
         self._spawn(lambda: self._submit(record))
@@ -300,15 +320,30 @@ class ExperimentRunService:
         return ExperimentPage(
             items=tuple(self._experiment(record) for record in records[:limit]),
             next_after=records[limit - 1].experiment_id if len(records) > limit else None,
+            slots=self._runs.slot_usage(),
+            max_priority=MAX_EXPERIMENT_PRIORITY,
         )
 
     def trials(self, experiment_id: str) -> tuple[ExperimentTrialState, ...]:
         return self._trial_states(self._repository.get(experiment_id))
 
     def cancel(self, experiment_id: str) -> Experiment:
-        """아직 넘기지 않은 trial 은 넘기지 않고, 넘긴 실행은 취소를 요청한다. 되돌릴 수 없다."""
+        """아직 넘기지 않은 trial 은 넘기지 않고, 넘긴 실행은 취소를 요청한다. 되돌릴 수 없다.
+
+        이미 완료한 실험은 `experiment.cancel.completed` 로 거절한다 — 목록이 아직 도는 것으로 보인
+        틈에 누른 취소가 결과가 다 나온 실험을 취소로 바꾸지 않게 한다(#402 리뷰 P3-3). 완료 판정은
+        `experiment_status` 다. 취소한 실험을 다시 취소하면 그대로 돌려준다.
+        """
         with self._lock:
             record = self._repository.get(experiment_id)
+            if (
+                record.cancelled_at is None
+                and self._experiment(record).status is ExperimentStatus.COMPLETED
+            ):
+                raise ExperimentStateError(
+                    "experiment.cancel.completed",
+                    f"완료한 실험은 취소할 수 없습니다: experiment_id={experiment_id}",
+                )
             if record.cancelled_at is None:
                 self._repository.cancel(experiment_id, cancelled_at=self._now())
                 self._cancelled.add(experiment_id)
@@ -329,10 +364,7 @@ class ExperimentRunService:
         with self._lock:
             record = self._repository.get(experiment_id)
             state = self._trial_state(record, trial_index)
-            if record.cancelled_at is not None or state.status not in (
-                TrialStatus.FAILED,
-                TrialStatus.CANCELLED,
-            ):
+            if not state.retryable:
                 raise ExperimentStateError(
                     "experiment.trial.not_retryable",
                     "실패하거나 취소된 trial 만 다시 실행할 수 있고 취소한 실험은 다시 실행하지 "
@@ -359,11 +391,8 @@ class ExperimentRunService:
                 "완료된 trial 만 후보로 고를 수 있습니다: "
                 f"experiment_id={experiment_id} trial_index={trial_index} status={state.status}",
             )
-        unfinished = sum(
-            not (other.status.is_terminal and not other.awaiting_recovery)
-            for other in self._trial_states(record)
-        )
-        if unfinished and record.cancelled_at is None:
+        if not state.selectable:
+            unfinished = sum(not _finished(other) for other in self._trial_states(record))
             raise ExperimentStateError(
                 "experiment.selection.not_finished",
                 "실험의 trial 이 모두 끝난 뒤에 후보를 고를 수 있습니다: "
@@ -453,8 +482,8 @@ class ExperimentRunService:
         with self._lock:
             current = self._repository.get(experiment_id).controls
             controls = ExperimentControls(
-                current.paused if paused is None else paused,
-                current.priority if priority is None else priority,
+                paused=current.paused if paused is None else paused,
+                priority=current.priority if priority is None else priority,
             )
             self._repository.set_controls(experiment_id, controls)
             self._runs.schedule(experiment_id, paused=controls.paused, priority=controls.priority)
@@ -542,7 +571,7 @@ class ExperimentRunService:
                 for index, pick, choice in chosen:
                     if latest.get(index) == pick:  # 다른 제출이 그사이 고르지 않았다
                         self._pick(record, base, index, choice, pick)
-        return all(state.status.is_terminal and not state.awaiting_recovery for state in states)
+        return all(_finished(state) for state in states)
 
     def walk_forward(self, experiment_id: str) -> WalkForwardReport:
         """창별 선택·검증 실행 결과와, 모든 창의 검증 실행이 완료됐으면 이어 붙인 곡선·표본 밖
@@ -643,7 +672,7 @@ class ExperimentRunService:
         waiting = False
         for index in range(count):
             window_states = list(states[index::count])
-            if not all(s.status.is_terminal and not s.awaiting_recovery for s in window_states):
+            if not all(_finished(s) for s in window_states):
                 continue
             pick = picks.get(index)
             run = runs.get(pick.run_id) if pick is not None and pick.run_id else None
@@ -766,17 +795,19 @@ class ExperimentRunService:
     def _experiment(self, record: ExperimentRecord) -> Experiment:
         states = self._trial_states(record)
         statuses = [state.status for state in states]
+        status = experiment_status(
+            statuses,
+            cancelled=record.cancelled_at is not None,
+            paused=record.controls.paused,
+            pending=any(state.awaiting_recovery for state in states)
+            or self._walk_forward_pending(record, states),
+        )
         return Experiment(
             record=record,
-            status=experiment_status(
-                statuses,
-                cancelled=record.cancelled_at is not None,
-                paused=record.controls.paused,
-                pending=any(state.awaiting_recovery for state in states)
-                or self._walk_forward_pending(record, states),
-            ),
+            status=status,
             trial_counts=dict(Counter(statuses)),
             selections=self._repository.selections(record.experiment_id),
+            finished=status.is_terminal,
         )
 
     def _walk_forward_pending(
@@ -799,10 +830,14 @@ class ExperimentRunService:
             {group[-1].run_id for group in attempts.values() if group[-1].run_id is not None}
         )
         cancelled = record.cancelled_at is not None
-        return tuple(
+        states = tuple(
             _state(trial, tuple(attempts.get(trial.index, ())), cancelled, runs)
             for trial in record.design.trials()
         )
+        if cancelled or all(_finished(state) for state in states):
+            return states
+        # 실험이 끝나기 전에는 고르지 않는다 — 설계한 조합이 다 돌기 전의 N 으로 스냅숏이 굳는다.
+        return tuple(replace(state, selectable=False) for state in states)
 
     def _trial_state(self, record: ExperimentRecord, trial_index: int) -> ExperimentTrialState:
         states = self._trial_states(record)
@@ -814,6 +849,11 @@ class ExperimentRunService:
                 f"trials={len(states)}",
             )
         return states[trial_index]
+
+
+def _finished(state: ExperimentTrialState) -> bool:
+    """trial 이 끝났다(복구를 기다리지 않는다)."""
+    return state.status.is_terminal and not state.awaiting_recovery
 
 
 def _state(
@@ -834,7 +874,9 @@ def _state(
         status,
         attempts,
         awaiting_recovery(run),
-        run is not None and bankrupt(run.status, run.error_code),
+        retryable=not cancelled and status in (TrialStatus.FAILED, TrialStatus.CANCELLED),
+        selectable=status is TrialStatus.COMPLETED,
+        bankrupt=run is not None and bankrupt(run.status, run.error_code),
     )
 
 

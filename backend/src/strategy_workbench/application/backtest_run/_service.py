@@ -263,6 +263,11 @@ class BacktestRunService:
         self._lock = RLock()
         self._close_interrupted_runs()
 
+    def slot_usage(self) -> tuple[int, int]:
+        """(슬롯 수, 지금 도는 run 수)."""
+        with self._lock:
+            return self._run_slots, self._running
+
     def admit(self, request: BacktestRunSpec) -> RunAdmission:
         """시작과 같은 판정(preflight·엔진 호환성 포함)을 타되 접수하지 않는다.
 
@@ -490,6 +495,14 @@ class BacktestRunService:
             if record is not None:
                 return record.state
         return self._repository.get(run_id).run
+
+    def summary(self, run_id: str) -> BacktestRunSummary:
+        """이력 한 행(실행 종류·소유 실험·provenance). 이 프로세스가 도는 run 은 메모리 상태로
+        덮는다."""
+        stored = self._repository.get(run_id)
+        with self._lock:
+            record = self._records.get(run_id)
+            return stored if record is None else replace(stored, run=record.state)
 
     def request(self, run_id: str) -> BacktestRunSpec:
         """접수한 원본 요청을 돌려준다(저장소가 정본).

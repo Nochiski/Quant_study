@@ -1,14 +1,19 @@
 import { client } from "./generated/client.gen";
 import {
   cancelBacktest,
+  cancelExperiment,
   compileStrategyDocument,
+  controlExperiment,
+  createExperiment,
   createStrategyDocument,
   deleteStrategyDraft,
   diffStrategyRevisions,
   explainFactorGraph,
   getEquityCatalog,
+  getExperiment,
   getFactorCatalog,
   getBacktestRequest,
+  getBacktestSummary,
   getBacktestResult,
   getStrategyDraft,
   getStrategyDocument,
@@ -19,10 +24,12 @@ import {
   getRunEnvironmentSchema,
   getTrialLedger,
   listBacktests,
+  listExperiments,
   listStrategies,
   listStrategyRevisions,
   mergeTrialLineage,
   previewBacktestTrial,
+  previewExperiment,
   reviseStrategyDocument,
   saveStrategyDraft,
   startBacktest,
@@ -40,6 +47,11 @@ import type {
   CompiledDocument,
   DatasetFieldProfile,
   DiffEntry,
+  Experiment,
+  ExperimentControlsRequest,
+  ExperimentPage,
+  ExperimentPreview,
+  ExperimentRequest,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,
@@ -426,6 +438,52 @@ export const strategyWorkbenchApi = {
     return unwrap(response, "mergeTrialLineage");
   },
 
+  /** 실험 목록(최근에 만든 순)과 대기열 표면(슬롯 사용량·우선순위 상한, 검증 랩 spec D6). */
+  /** 최근에 만든 순 한 쪽. `after` 는 앞 쪽 응답의 `next_after` 다. */
+  async listExperiments(after?: string): Promise<ExperimentPage> {
+    const response = await listExperiments({ query: { after } });
+    return unwrap(response, "listExperiments");
+  },
+
+  async getExperiment(experimentId: string): Promise<Experiment> {
+    const response = await getExperiment({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "getExperiment");
+  },
+
+  /** 시작 전 미리 계산 — 조합·실행 수와 계열 시도 수 변화(spec D2). */
+  async previewExperiment(
+    request: ExperimentRequest,
+  ): Promise<ExperimentPreview> {
+    const response = await previewExperiment({ body: request });
+    return unwrap(response, "previewExperiment");
+  },
+
+  async createExperiment(request: ExperimentRequest): Promise<Experiment> {
+    const response = await createExperiment({ body: request });
+    return unwrap(response, "createExperiment");
+  },
+
+  /** 일시정지·재개·우선순위. 보내지 않은 칸은 그대로다. */
+  async controlExperiment(
+    experimentId: string,
+    controls: ExperimentControlsRequest,
+  ): Promise<Experiment> {
+    const response = await controlExperiment({
+      path: { experiment_id: experimentId },
+      body: controls,
+    });
+    return unwrap(response, "controlExperiment");
+  },
+
+  async cancelExperiment(experimentId: string): Promise<Experiment> {
+    const response = await cancelExperiment({
+      path: { experiment_id: experimentId },
+    });
+    return unwrap(response, "cancelExperiment");
+  },
+
   async startBacktest(spec: BacktestRunSpec): Promise<BacktestStartResponse> {
     const response = await startBacktest({ body: spec });
     return unwrap(response, "startBacktest");
@@ -440,6 +498,12 @@ export const strategyWorkbenchApi = {
   async getBacktestStatus(runId: string): Promise<BacktestRunState> {
     const response = await getBacktestStatus({ path: { run_id: runId } });
     return unwrap(response, "getBacktestStatus");
+  },
+
+  /** 이력 한 행 — 실행 종류(단일·실험 trial·워크포워드 검증)는 서버 판정이다. */
+  async getBacktestSummary(runId: string): Promise<BacktestRunSummary> {
+    const response = await getBacktestSummary({ path: { run_id: runId } });
+    return unwrap(response, "getBacktestSummary");
   },
 
   async getBacktestRequest(runId: string): Promise<BacktestRunSpec> {
@@ -659,6 +723,11 @@ export type {
   CompiledDocument,
   DatasetFieldProfile,
   DiffEntry,
+  Experiment,
+  ExperimentControlsRequest,
+  ExperimentPage,
+  ExperimentPreview,
+  ExperimentRequest,
   FactorCatalog,
   FactorDefinition,
   FactorExplanation,

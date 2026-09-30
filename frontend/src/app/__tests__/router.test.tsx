@@ -330,6 +330,10 @@ const server = setupServer(
       updated_at: "2026-09-04T00:00:01Z",
     }),
   ),
+  // 결과 화면은 실행 종류를 서버 판정으로 읽는다(단일 실행에만 실험 만들기 링크).
+  http.get(`${API}/api/v1/backtests/:runId/summary`, () =>
+    HttpResponse.json({ kind: "single" }),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/request`, () =>
     HttpResponse.json({
       strategy: spec(0, "Rerun fixture"),
@@ -1158,6 +1162,28 @@ describe("App Shell routes", () => {
       "백테스트 이력을 불러올 수 없습니다",
     );
     expect(screen.getByRole("button", { name: "다시 시도" })).toBeEnabled();
+  });
+
+  // #402 리뷰 P2-2: 실험 trial·검증 실행의 요청은 창 구간과 칸 값으로 좁혀져 있어 새 실험의 기반이 되지 않는다.
+  it("offers a new experiment only from a single run", async () => {
+    mount("/research/backtests/run-single");
+    expect(
+      await screen.findByRole("link", { name: "이 실행으로 실험 만들기" }),
+    ).toHaveAttribute("href", "/research/experiments/new?run=run-single");
+    cleanup();
+
+    server.use(
+      http.get(`${API}/api/v1/backtests/:runId/summary`, () =>
+        HttpResponse.json({ kind: "experiment_trial" }),
+      ),
+    );
+    mount("/research/backtests/run-trial");
+    expect(
+      await screen.findByRole("status", { name: "실행 상태" }),
+    ).toHaveTextContent("completed");
+    expect(
+      screen.queryByRole("link", { name: "이 실행으로 실험 만들기" }),
+    ).toBeNull();
   });
 
   it("shows the server-owned failure reason of a failed backtest run", async () => {

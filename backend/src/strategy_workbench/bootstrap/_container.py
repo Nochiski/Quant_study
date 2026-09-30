@@ -59,6 +59,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
 )
 from strategy_workbench.application.experiment_run.facade.ports import (
     AdmittedRun,
+    RunSlotUsage,
     TrialResultUnreadableError,
     TrialRunRejectedError,
 )
@@ -315,6 +316,10 @@ class _RunServiceTrialRuns:
 
     def states(self, run_ids: Collection[str]) -> Mapping[str, BacktestRunState]:
         return self._runs.states(run_ids)
+
+    def slot_usage(self) -> RunSlotUsage:
+        total, running = self._runs.slot_usage()
+        return RunSlotUsage(total=total, running=running)
 
     def schedule(self, owner: str, *, paused: bool, priority: int) -> None:
         self._runs.schedule(owner, paused=paused, weight=priority)

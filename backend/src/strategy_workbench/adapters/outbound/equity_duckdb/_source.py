@@ -30,6 +30,9 @@ CATALOG_REBUILD = (
     "카탈로그를 다시 만든 뒤(`ledger_sync catalog` 또는 `python -m equity catalog`) 서버를 다시 "
     "띄워야 한다"
 )
+# 원장 표를 받는 조치 — 표가 없어 원천을 빼거나 백테스트를 멈춘 사유(`table_missing`)가 이 문구로
+# 조치를 알린다(#316).
+LEDGER_SYNC = "원장을 받은 뒤(`ledger_sync`) 서버를 다시 띄워야 한다"
 
 logger = logging.getLogger(__name__)
 

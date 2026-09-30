@@ -1679,6 +1679,10 @@ export type ExecutionTiming = "next_open";
  * Experiment
  */
 export type Experiment = {
+  /**
+   * Finished
+   */
+  finished: boolean;
   record: ExperimentRecord;
   /**
    * Selections
@@ -1732,16 +1736,19 @@ export type ExperimentAdmissionErrorResponse = {
  *
  * 실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은
  * 끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.
+ *
+ * 칸에 기본값을 두지 않는다 — 응답 스키마에서 늘 있는 칸이라 화면이 기본값을 복제하지 않는다(#402
+ * 리뷰 P3-1). 만든 실험의 처음 값은 `DEFAULT_EXPERIMENT_CONTROLS` 하나다.
  */
 export type ExperimentControls = {
   /**
    * Paused
    */
-  paused?: boolean;
+  paused: boolean;
   /**
    * Priority
    */
-  priority?: number;
+  priority: number;
 };
 
 /**
@@ -1800,6 +1807,7 @@ export type ExperimentErrorDetail = {
   code:
     | "experiment.base.invalid"
     | "experiment.base.unsaved"
+    | "experiment.cancel.completed"
     | "experiment.capacity.base_not_run"
     | "experiment.capacity.invalid_amounts"
     | "experiment.kind.mismatch"
@@ -1843,9 +1851,14 @@ export type ExperimentPage = {
    */
   items: Array<Experiment>;
   /**
+   * Max Priority
+   */
+  max_priority: number;
+  /**
    * Next After
    */
   next_after: string | null;
+  slots: RunSlotUsage;
 };
 
 /**
@@ -1891,7 +1904,7 @@ export type ExperimentRecord = {
    * Cancelled At
    */
   cancelled_at?: string | null;
-  controls?: ExperimentControls;
+  controls: ExperimentControls;
   /**
    * Created At
    */
@@ -1914,6 +1927,8 @@ export type ExperimentRequest = {
   run: BacktestRunSpec;
   /**
    * Search
+   *
+   * parameter_id → 탐색 값 목록. 값이 null 이면 문서 정의가 허용하는 격자 값 전체를 편다. 키가 없는 파라미터는 탐색하지 않고 기반 실행의 값을 쓴다.
    */
   search: {
     [key: string]: Array<number | number | string | boolean> | null;
@@ -2040,6 +2055,14 @@ export type ExperimentTrialState = {
    * Bankrupt
    */
   bankrupt?: boolean;
+  /**
+   * Retryable
+   */
+  retryable: boolean;
+  /**
+   * Selectable
+   */
+  selectable: boolean;
   status: TrialStatus;
   trial: ExperimentTrial;
 };
@@ -4543,6 +4566,22 @@ export type RunManifest = {
    * Warnings
    */
   warnings?: Array<DataWarning>;
+};
+
+/**
+ * RunSlotUsage
+ *
+ * 동시 실행 슬롯 사용량(spec D6). 실험 목록 화면이 trial 수로 추정하지 않게 싣는다.
+ */
+export type RunSlotUsage = {
+  /**
+   * Running
+   */
+  running: number;
+  /**
+   * Total
+   */
+  total: number;
 };
 
 /**
@@ -7651,6 +7690,42 @@ export type GetBacktestResultResponses = {
 export type GetBacktestResultResponse =
   GetBacktestResultResponses[keyof GetBacktestResultResponses];
 
+export type GetBacktestSummaryData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/summary";
+};
+
+export type GetBacktestSummaryErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestSummaryError =
+  GetBacktestSummaryErrors[keyof GetBacktestSummaryErrors];
+
+export type GetBacktestSummaryResponses = {
+  /**
+   * Successful Response
+   */
+  200: BacktestRunSummary;
+};
+
+export type GetBacktestSummaryResponse =
+  GetBacktestSummaryResponses[keyof GetBacktestSummaryResponses];
+
 export type GetEquityCatalogData = {
   body?: never;
   path?: never;
@@ -8017,6 +8092,10 @@ export type CancelExperimentErrors = {
    * The experiment or trial is missing
    */
   404: ExperimentErrorResponse;
+  /**
+   * The experiment has completed
+   */
+  409: ExperimentErrorResponse;
   /**
    * Validation Error
    */

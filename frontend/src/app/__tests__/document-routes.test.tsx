@@ -312,6 +312,10 @@ const server = setupServer(
     started.push((await request.json()) as Record<string, unknown>);
     return HttpResponse.json(acceptedRun(), { status: 202 });
   }),
+  // 결과 화면은 실행 종류를 서버 판정으로 읽는다(단일 실행에만 실험 만들기 링크).
+  http.get(`${API}/api/v1/backtests/:runId/summary`, () =>
+    HttpResponse.json({ kind: "single" }),
+  ),
   http.get(`${API}/api/v1/backtests/:runId/request`, () =>
     HttpResponse.json(started.at(-1) ?? {}),
   ),

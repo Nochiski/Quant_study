@@ -26,7 +26,11 @@ EXPERIMENT_NOT_FOUND_CODES: frozenset[str] = frozenset(
 )
 # 실험·trial 의 지금 상태로는 받을 수 없는 요청이다.
 EXPERIMENT_STATE_CODES: frozenset[str] = frozenset(
-    {"experiment.trial.not_retryable", "experiment.selection.not_completed"}
+    {
+        "experiment.trial.not_retryable",
+        "experiment.selection.not_completed",
+        "experiment.selection.not_finished",
+    }
 )
 EXPERIMENT_CODES = EXPERIMENT_SPEC_CODES | EXPERIMENT_NOT_FOUND_CODES | EXPERIMENT_STATE_CODES
 

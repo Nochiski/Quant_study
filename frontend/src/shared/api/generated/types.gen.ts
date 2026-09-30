@@ -1661,6 +1661,7 @@ export type ExperimentErrorDetail = {
     | "experiment.search.too_many_points"
     | "experiment.search.unknown_parameter"
     | "experiment.selection.not_completed"
+    | "experiment.selection.not_finished"
     | "experiment.split.invalid"
     | "experiment.split.no_window"
     | "experiment.trial.not_found"
@@ -1772,9 +1773,21 @@ export type ExperimentRequest = {
  */
 export type ExperimentSelection = {
   /**
+   * Deflated Sharpe
+   *
+   * 고른 trial 실행의 샤프를 고를 때의 계열 N·시도 대표 샤프 분산으로 깎은 DSR(0~1). 지표가 비었거나 분산을 낼 수 없으면 비어 있다.
+   */
+  deflated_sharpe?: number | null;
+  /**
    * Experiment Id
    */
   experiment_id: string;
+  /**
+   * Ledger Representative Sharpe
+   *
+   * 고른 trial 이 속한 시도의 계열 원장 대표 샤프. 세션 단위(연율화 전)이고 그 시도에서 처음 결과가 난 실행의 값이라 고른 trial 실행의 샤프(DSR 분자)가 아닐 수 있다.
+   */
+  ledger_representative_sharpe?: number | null;
   /**
    * Parameter Values
    */
@@ -1797,6 +1810,12 @@ export type ExperimentSelection = {
    * Strategy Id
    */
   strategy_id: string;
+  /**
+   * Trial Count
+   *
+   * 고를 때의 계열 시도 수 N(계열 원장).
+   */
+  trial_count?: number | null;
   /**
    * Trial Index
    */

@@ -1,0 +1,6 @@
+{
+ "_note": ["e1.22.0 — corr_has_fin_item 키워드에 '재무에 관한' 추가. 정정 행에서 false → true 로만 바뀐다. 링크·날짜 확인 불변."],
+ "expect": [
+  {"column": "corr_has_fin_item", "kind": "value_changed", "where": "is_correction AND before_corr_has_fin_item = false AND corr_has_fin_item", "note": "키워드 보수화"}
+ ]
+}

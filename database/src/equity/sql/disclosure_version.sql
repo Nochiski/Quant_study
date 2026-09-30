@@ -220,7 +220,8 @@ SELECT
     CASE WHEN NOT v.is_correction OR v.items IS NULL THEN NULL
          ELSE (v.items LIKE '%재무제표%' OR v.items LIKE '%재무상태표%'
                OR v.items LIKE '%손익계산서%' OR v.items LIKE '%현금흐름표%'
-               OR v.items LIKE '%자본변동표%' OR v.items LIKE '%요약재무%')
+               OR v.items LIKE '%자본변동표%' OR v.items LIKE '%요약재무%'
+               OR v.items LIKE '%재무에 관한%')
     END                                                               AS corr_has_fin_item,
     bk.first_correction_dt,
     CAST(coalesce(bk.n_corrections, 0) AS BIGINT)                      AS n_corrections,

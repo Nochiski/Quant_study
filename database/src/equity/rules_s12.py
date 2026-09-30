@@ -26,7 +26,9 @@ fin_map 에 이미 있으므로 새 계정이 아니라 FIELD_MAP §3 의 판정
 **판본**: 4A 는 DART API 가 주는 최신 판본만 있으므로 `vintage_kind='api_restated'` 한 종류이고
 `restated_unknown=true` 다. 원본·정정 판본은 4C(S14, 문서층 P2 `stg_fin_asreported`) 몫이다.
 API 는 정정이 있으면 정정본의 `rcept_no` 를 돌려주므로 `available_date` = 그 접수일이고
-`rcept_dt − period_end` 가 1년을 넘는 행이 실제로 있다(절단본 최대 445일).
+`rcept_dt − period_end` 가 1년을 넘는 행이 실제로 있다(절단본 최대 445일). 단 원본부터 그 판까지의
+정정이 모두 재무표를 건드리지 않았으면 수치가 원본과 같으므로 공개일은 원본 접수일이다
+(09-30 — 그 행은 `available_date < rcept_dt`. 서버 실측 2016~ 늦게 찍힌 4,657행 중 재무표 무관 정정 2,581).
 
 **매출 기준 두 축**: `revenue_basis` 는 그 행의 매출이 어느 규칙에서 나왔는지를,
 `revenue_basis_prev` 는 **직전 회계연도 같은 보고서**(`bsns_year` − 1 · 같은 `report_code`·
@@ -383,8 +385,24 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
                  "THEN '11013' ELSE '11014' END))"),
         "n_period_end_after_rcept": _n(ctx, f'SELECT count(*) FROM "{v}" '
                                             "WHERE period_end > rcept_dt"),
+        # 공개일 = 판 접수일. 예외는 원본 공시일을 승계한 정정본(09-30) 하나이고 그 행은 공개일이
+        # 접수일보다 이르다 — 늦거나 NULL 이 갈리면 규칙이 어긋난 것이다.
         "n_available_ne_rcept_dt": _n(ctx, f'SELECT count(*) FROM "{v}" '
-                                           "WHERE available_date IS DISTINCT FROM rcept_dt"),
+                                           "WHERE (available_date IS NULL) <> (rcept_dt IS NULL) "
+                                           "OR available_date > rcept_dt"),
+        # 승계 행(available_date < rcept_dt)은 `.sql` 의 `redate` 를 베끼지 않고 disclosure_version 에서
+        # 다시 증언받는다: 이 판이 정정이고, 연결된 원본 접수일이 공개일과 같고, 첫 장 원본 제출일이
+        # 확인됐고, 원본부터 이 판까지 재무표를 건드린 정정이 없다.
+        "n_orig_filing_unwitnessed": _n(
+            ctx, f'SELECT count(*) FROM "{v}" o WHERE o.available_date < o.rcept_dt '
+                 "AND NOT EXISTS (SELECT 1 FROM disclosure_version c "
+                 "JOIN disclosure_version g ON g.rcept_no = c.orig_rcept_no "
+                 "WHERE c.rcept_no = o.rcept_no AND c.is_correction "
+                 "AND g.rcept_dt = o.available_date "
+                 "AND c.date_check IN ('exact', 'off_1d') "
+                 "AND NOT EXISTS (SELECT 1 FROM disclosure_version x "
+                 "WHERE x.orig_rcept_no = c.orig_rcept_no AND x.is_correction "
+                 "AND x.rcept_no <= c.rcept_no AND x.corr_has_fin_item IS NOT FALSE))"),
         # 파생 블록 — 구성 보고서가 넷이 아니면 q4 값이 남아 있으면 안 된다(부분합 금지)
         "n_q4_partial_sum": _n(
             ctx, f'SELECT count(*) FROM "{v}" WHERE coalesce(q4_derived_n_rows, 0) < 4 AND ('
@@ -426,6 +444,9 @@ def eg3_fin_std(ctx: EquityGateContext) -> GateResult:
         # corp.fiscal_month 검산 — **기록형**이다. `corp.fiscal_month` 는 현재값 스냅샷이라
         # 결산월을 바꾼 법인의 과거 사업보고서는 정상적으로 어긋난다(DESIGN §11 "결산월 변경은
         # 문서 period_to 로 해소"). 폐기형으로 두면 그 법인 하나가 서버 빌드를 죽인다.
+        # **기록형**. 원본 공시일을 승계한 정정본 수(09-30) — 정정일 편향을 얼마나 되돌렸나.
+        "n_available_orig_filing": _n(ctx, f'SELECT count(*) FROM "{v}" '
+                                           "WHERE available_date < rcept_dt"),
         "n_fiscal_month_mismatch": _n(
             ctx, f'SELECT count(*) FROM "{v}" o JOIN corp c USING (corp_code) '
                  "WHERE o.report_code = '11011' AND c.fiscal_month IS NOT NULL "
@@ -921,7 +942,8 @@ FIN_STD = register(EquityTable(
     inputs=("stg_fin", "stg_doc_meta", "stg_disclosure", "disclosure_version", "corp"),
     partition_class="receipt_axis",
     partition_key_expr="CAST(substr(rcept_no, 1, 4) AS INTEGER)",
-    available_rule="column:rcept_dt — DART 접수일(derived). 파생 컬럼은 구성 행 max 를 동반",
+    available_rule=("column:rcept_dt — DART 접수일(derived). 재무표를 안 건드린 정정본은 원본 접수일"
+                    "(available_date < rcept_dt 로 드러난다). 파생 컬럼은 구성 행 max 를 동반"),
     # GATES §3-⑫ — 표준계정 행이 하나라도 있는 (corp, bsns_year, reprt_code, fs_div) 그룹 수
     eg1_lhs_sql='SELECT count(*) FROM "out_pq"',
     eg1_rhs_sql=("SELECT count(*) FROM (SELECT DISTINCT corp_code, bsns_year, reprt_code, fs_div "
@@ -938,7 +960,10 @@ FIN_STD = register(EquityTable(
         "stg_disclosure": ("rcept_no", "rcept_dt", "observed_date"),
         # 링크 판본을 같이 고정한다(EG6_fin_std 무매칭 비대칭이 읽는다). `stg_rcept_dt_map` 은
         # 실재하지 않아 접수일 원천은 `stg_disclosure.rcept_dt` 다(GATES §9).
-        "disclosure_version": ("rcept_no", "corp_code", "kind", "period_label"),
+        # 정정본의 원본 공시일 승계(09-30)는 정정 여부·원본 링크·재무표 정정 여부·첫 장 날짜 확인을 읽는다.
+        "disclosure_version": ("rcept_no", "corp_code", "kind", "period_label", "rcept_dt",
+                               "is_correction", "orig_rcept_no", "corr_has_fin_item",
+                               "date_check"),
         "corp": ("corp_code", "fiscal_month")},
     available_basis=("derived",),
     content_date_column="period_end",

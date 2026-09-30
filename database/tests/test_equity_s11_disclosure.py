@@ -117,7 +117,7 @@ def test_링크_상태와_날짜_확인축_분포(built: build.BuildResult) -> N
     assert m["n_by_date_check"] == DATE_CHECK
     assert m["n_by_kind"] == KIND_COUNTS
     assert m["n_linked_originals"] == 82
-    assert m["n_corr_has_fin_item"] == 39
+    assert m["n_corr_has_fin_item"] == 42     # 09-30 키워드 "재무에 관한" 추가로 39 → 42
 
 
 def test_E_G6a_와_E_G6b_비율(built: build.BuildResult) -> None:

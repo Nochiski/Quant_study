@@ -53,7 +53,8 @@
 -- 잡았다. 매출도 같은 꼴로 `no_is_statement`(IS·CIS 행 없음) 와 `unmapped` 로 갈린다 — 한 낱말
 -- (`unavailable`)로 묶여 있던 동안 DQ-6·DQ-8 같은 대응 실패가 게이트 숫자에 안 보였다.
 --
--- PIT: `available_date = rcept_dt`(derived, `stg_disclosure`). `stg_rcept_dt_map` 은 stage 에
+-- PIT: `available_date = rcept_dt`(derived, `stg_disclosure`) — 단 재무표를 안 건드린 정정본은 원본
+-- 접수일(`redate` CTE — 그 행만 `available_date < rcept_dt`, basis 는 둘 다 derived). `stg_rcept_dt_map` 은 stage 에
 -- 실재하지 않는다(GATES §9). 판본은 `api_restated` 하나 · `restated_unknown = true`(4A).
 -- 격리 4종: non_krw · period_unresolved · rcept_lag_out_of_range · duplicate_vintage.
 WITH _acct(metric, tier, kind, tokens, sjs, agg, require_tag, basis, family) AS (
@@ -161,6 +162,25 @@ dt AS (
     QUALIFY row_number() OVER (PARTITION BY rcept_no
                                ORDER BY observed_date NULLS LAST, rcept_dt NULLS LAST) = 1
 ),
+redate AS (
+    -- 정정본의 원본 공시일 승계(09-30, `docs/research/2026-09-30-gpt-layer-debate.md` ③).
+    -- DART API 는 정정이 있으면 정정본만 돌려주므로 이 판의 값은 정정본이다. 원본부터 이 판까지의
+    -- **모든 정정**이 재무표를 건드리지 않았으면(`corr_has_fin_item = false` — 첫 장 미해석 NULL 은
+    -- 건드린 것으로 본다) 재무 수치는 원본과 같으므로 공개일은 원본 접수일이다. 정정 첫 장의 원본
+    -- 제출일이 연결된 원본 접수일과 1일 안(`date_check` exact·off_1d)일 때만 — 연결이 흔들리면
+    -- 정정 접수일을 지킨다. `disclosure_version` 은 rcept_no grain(유일)이다.
+    SELECT c.rcept_no, o.rcept_dt                                AS orig_rcept_dt
+    FROM disclosure_version c
+    JOIN disclosure_version o ON o.rcept_no = c.orig_rcept_no
+    WHERE c.is_correction
+      AND c.date_check IN ('exact', 'off_1d')
+      AND o.rcept_dt < c.rcept_dt
+      AND NOT EXISTS (
+          SELECT 1 FROM disclosure_version x
+          WHERE x.orig_rcept_no = c.orig_rcept_no AND x.is_correction
+            AND x.rcept_no <= c.rcept_no
+            AND x.corr_has_fin_item IS NOT FALSE)
+),
 req AS (
     -- 대체 규칙의 발동 조건(fin_map.REVENUE_FALLBACK.require) — 태그 존재 여부
     SELECT corp_code, bsns_year, reprt_code, fs_div,
@@ -248,12 +268,16 @@ doc AS (
                                ORDER BY period_to, period_from, doc_acode) = 1
 ),
 head AS (
+    -- `rcept_dt` 는 이 판의 접수일(기간 판정·접수 지연 격리는 이 축), `avail_dt` 는 공개일 축이다 —
+    -- 원본 공시일을 승계한 정정본만 둘이 갈린다(`redate`) — 그 행은 `available_date < rcept_dt` 로 드러난다.
     SELECT g.*,
            d.rcept_dt,
+           coalesce(rd.orig_rcept_dt, d.rcept_dt)                AS avail_dt,
            m.period_from, m.period_to, m.doc_acode,
            c.fiscal_month
     FROM grp g
     LEFT JOIN dt d ON d.rcept_no = g.rcept_no
+    LEFT JOIN redate rd ON rd.rcept_no = g.rcept_no
     LEFT JOIN doc m ON m.rcept_no = g.rcept_no
     LEFT JOIN corp c ON c.corp_code = g.corp_code
 ),
@@ -284,6 +308,7 @@ pe_inf AS (
 ),
 resolved AS (
     SELECT h.corp_code, h.bsns_year, h.reprt_code, h.fs_div, h.rcept_no, h.rcept_dt,
+           h.avail_dt,
            h.currency, h.is_krw_group,
            h.period_from                                         AS period_start,
            CASE WHEN h.period_to IS NOT NULL THEN h.period_to
@@ -344,7 +369,7 @@ q4meta AS (
     -- 구성 보고서 수(최대 4)와 그 접수일의 max — 파생 컬럼의 공개시점(DESIGN §3)
     SELECT corp_code, bsns_year, fs_div,
            count(DISTINCT reprt_code)                            AS n_rows,
-           max(rcept_dt)                                         AS available_date
+           max(avail_dt)                                         AS available_date
     FROM head
     WHERE reprt_code IN (SELECT reprt_code FROM _rcode)
     GROUP BY corp_code, bsns_year, fs_div
@@ -366,7 +391,7 @@ cfqmeta AS (
     SELECT s.corp_code, s.bsns_year, s.reprt_code, s.fs_div,
            CASE WHEN s.reprt_code = '11013' THEN 1
                 WHEN p.rcept_no IS NOT NULL THEN 2 ELSE 1 END    AS n_rows,
-           greatest(s.rcept_dt, coalesce(p.rcept_dt, s.rcept_dt)) AS available_date
+           greatest(s.avail_dt, coalesce(p.avail_dt, s.avail_dt)) AS available_date
     FROM head s
     LEFT JOIN head p
       ON p.corp_code = s.corp_code AND p.bsns_year = s.bsns_year AND p.fs_div = s.fs_div
@@ -550,7 +575,7 @@ SELECT
     cq.cf_operating_q, cq.cf_investing_q, cq.cf_financing_q, cq.capex_q,
     cm.n_rows                                                   AS cf_q_n_rows,
     cm.available_date                                           AS cf_q_available_date,
-    j.rcept_dt                                                  AS available_date,
+    j.avail_dt                                                  AS available_date,
     'derived'                                                   AS available_basis,
     coalesce(j.pre_reject,
              CASE WHEN d.n_grain > 1 THEN 'duplicate_vintage' END) AS reject_reason

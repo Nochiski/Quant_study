@@ -37,6 +37,7 @@ N_SRC = 226
 N_OUT = 220
 N_REJECT = 6
 N_PREV_FILLED = 178                    # 직전 회계연도 같은 보고서를 찾은 행 (나머지 42 는 첫 해)
+N_ORIG_FILING = 8                      # 원본 공시일을 승계한 정정본 행 (09-30 규칙)
 REPORT_CODES = {"11011": 57, "11012": 56, "11013": 56, "11014": 51}
 SEC = "20190401004781"                 # 삼성전자 2018 사업보고서
 SEC_2Q = "20180814001113"
@@ -212,11 +213,14 @@ def test_현금흐름은_누계이고_분기_파생이_따로_붙는다(rows: di
     assert rows[SEC_3Q]["cf_q_available_date"] == rows[SEC_3Q]["rcept_dt"]
 
 
-def test_PIT_축은_접수일이다(rows: dict[str, dict[str, object]]) -> None:
+def test_PIT_축은_접수일이고_재무표_무관_정정만_원본일을_잇는다(
+        rows: dict[str, dict[str, object]]) -> None:
+    # 절단본 실측(09-30): 220 중 8행이 재무표를 안 건드린 정정본 — 공개일만 원본 접수일로 당겨진다
+    moved = [r for r in rows.values() if r["available_date"] != r["rcept_dt"]]
+    assert len(moved) == N_ORIG_FILING
     for r in rows.values():
-        assert r["available_date"] == r["rcept_dt"]
         assert r["available_basis"] == "derived"
-        assert r["period_end"] <= r["rcept_dt"]
+        assert r["period_end"] <= r["available_date"] <= r["rcept_dt"]
 
 
 def test_계정_커버율이_기록된다(built: build.BuildResult) -> None:
@@ -397,25 +401,36 @@ def _fixture_file(tmp_path: Path, name: str, key: str, column: str, expect: obje
 def _hand_build(make_stage_tree, tmp_path: Path, corps: list[tuple[str, str | None]],
                 reports: list[tuple[str, str, str, str, date, date | None, str | None]],
                 fin: list[dict[str, object]], fixture: tuple[str, str, object],
-                duplicate_disclosure: bool = False, **bl: object) -> build.BuildResult:
+                duplicate_disclosure: bool = False,
+                report_names: dict[str, str] | None = None,
+                extra_disclosures: list[tuple[str, str, str, date]] | None = None,
+                corrections: list[dict[str, object]] | None = None,
+                **bl: object) -> build.BuildResult:
     """corps = [(corp_code, acc_mt)] · reports = [(rcept, corp, year, reprt, rcept_dt,
     period_to, doc_acode)] — period_to 가 None 이면 문서가 없는 그룹이다.
-    `duplicate_disclosure` 는 첫 접수의 재수집 판본을 `stg_disclosure` 에 하나 더 실는다."""
+    `duplicate_disclosure` 는 첫 접수의 재수집 판본을 `stg_disclosure` 에 하나 더 실는다.
+    정정 판본 시험용: `report_names` 는 접수번호별 공시명(기본 '사업보고서 (YYYY.12)'),
+    `extra_disclosures` = [(rcept, corp, report_nm, rcept_dt)] 는 재무 행이 없는 공시(원본·중간 정정),
+    `corrections` 는 `stg_doc_correction` 행(기본 = 첫 접수 한 행)."""
+    names = report_names or {}
     tree = make_stage_tree(tmp_path, "stg_corp_map",
                            [{"corp_code": c, "ticker": f"{i:06d}", "corp_name_current": c}
                             for i, (c, _) in enumerate(corps)])
     make_stage_tree(tmp_path, "stg_company",
                     [{"corp_code": c, "acc_mt": m, "induty_code_current": "26",
                       "observed_date": date(2026, 1, 1)} for c, m in corps])
-    disclosures = [{"rcept_no": r, "rcept_dt": dt, "corp_code": c,
-                    "report_nm": f"사업보고서 ({y}.12)", "is_correction": False,
+    listed = [(r, c, names.get(r, f"사업보고서 ({y}.12)"), dt)
+              for r, c, y, _rc, dt, _pt, _ac in reports] + list(extra_disclosures or [])
+    disclosures = [{"rcept_no": r, "rcept_dt": dt, "corp_code": c, "report_nm": nm,
+                    "is_correction": nm.startswith(("[기재정정]", "[첨부정정]")),
                     "rm_corrected_later": False, "observed_date": OBSERVED}
-                   for r, c, y, _rc, dt, _pt, _ac in reports]
+                   for r, c, nm, dt in listed]
     if duplicate_disclosure:
         disclosures.append({**disclosures[0], "observed_date": date(2026, 9, 3)})
     make_stage_tree(tmp_path, "stg_disclosure", disclosures,
                     partition_class="receipt_axis")
     make_stage_tree(tmp_path, "stg_doc_correction",
+                    corrections if corrections is not None else
                     [{"rcept_no": reports[0][0], "page_found": True,
                       "filed_date": reports[0][4], "filed_date_status": "parsed",
                       "reason_raw": "", "items": ""}], partition_class="receipt_axis")
@@ -562,6 +577,78 @@ def test_부정_같은_grain_으로_접히면_둘_다_격리된다(make_stage_tr
     assert {x["corp_code"] for x in rej} == {"00000001"}
     assert {x["reject_reason"] for x in rej} == {"duplicate_vintage"}
     assert dict(_gate(r, "EG7").metrics["reject_by_reason"]) == {"duplicate_vintage": 2}
+
+
+# ── 정정본의 원본 공시일 승계 (09-30, `docs/research/2026-09-30-gpt-layer-debate.md` ③) ──────
+# DART API 는 정정이 있으면 정정본만 돌려준다. 원본부터 그 판까지의 정정이 모두 재무표를 건드리지
+# 않았으면 재무 수치는 원본과 같으므로 공개일은 원본 접수일이다. 하나라도 건드렸거나 판단할 수
+# 없으면(정정 첫 장 미해석·원본 제출일 불일치) 정정 접수일을 지킨다.
+_ORIG = ("20210330000001", date(2021, 3, 30))
+_NONFIN = "VIII. 임원 및 직원 등에 관한 사항 1. 임원 및 직원의 현황"
+_FIN_SECTION = "III. 재무에 관한 사항 8. 기타 재무에 관한 사항"
+
+
+def _correction_row(make_stage_tree, tmp_path: Path,
+                    chain: list[tuple[str, date, str | None, date]]) -> dict[str, object]:
+    """chain = [(정정 접수번호, 접수일, 정정 항목(None = 첫 장 미해석), 첫 장의 원본 제출일)] — 마지막이
+    API 가 돌려준 판(재무 행의 접수번호)이다. 원본은 `_ORIG`."""
+    corps = [("00000001", "12")]
+    last, last_dt = chain[-1][0], chain[-1][1]
+    reports = [(last, "00000001", "2020", "11011", last_dt, date(2020, 12, 31), "11011")]
+    fin = [_fin_row("00000001", "2020", "11011", last, sj="IS",
+                    account_id="ifrs-full_Revenue", account_nm="매출액", amount=100.0)]
+    corr_nm = "[기재정정]사업보고서 (2020.12)"
+    extra = [(_ORIG[0], "00000001", "사업보고서 (2020.12)", _ORIG[1])] + [
+        (r, "00000001", corr_nm, dt) for r, dt, _it, _fd in chain[:-1]]
+    corrections = [{"rcept_no": r, "page_found": True, "filed_date": fd,
+                    "filed_date_status": "parsed", "reason_raw": "기재정정",
+                    "items": None if it is None else json.dumps([{"항목": it}], ensure_ascii=False)}
+                   for r, _dt, it, fd in chain]
+    r = _hand_build(make_stage_tree, tmp_path, corps, reports, fin, (last, "rcept_no", last),
+                    report_names={r: corr_nm for r, *_ in chain}, extra_disclosures=extra,
+                    corrections=corrections)
+    assert r.ok, [(g.name, g.status.value, g.detail) for g in r.gates]
+    assert r.out_dir is not None
+    out = _rows(r.out_dir)
+    assert len(out) == 1
+    return out[0]
+
+
+def test_재무표를_안_건드린_정정은_원본_공시일을_이어받는다(make_stage_tree, tmp_path: Path) -> None:
+    row = _correction_row(make_stage_tree, tmp_path,
+                          [("20210615000002", date(2021, 6, 15), _NONFIN, _ORIG[1])])
+    assert row["rcept_no"] == "20210615000002"
+    assert row["rcept_dt"] == date(2021, 6, 15)            # 판의 접수일은 그대로다
+    assert row["available_date"] == _ORIG[1]              # 공개일만 원본 접수일로 당겨진다
+    assert row["available_basis"] == "derived"
+
+
+def test_재무에_관한_사항을_고친_정정은_정정일을_지킨다(make_stage_tree, tmp_path: Path) -> None:
+    row = _correction_row(make_stage_tree, tmp_path,
+                          [("20210615000002", date(2021, 6, 15), _FIN_SECTION, _ORIG[1])])
+    assert row["available_date"] == date(2021, 6, 15)
+    assert row["available_basis"] == "derived"
+
+
+def test_중간_정정이_재무표를_고쳤으면_정정일을_지킨다(make_stage_tree, tmp_path: Path) -> None:
+    row = _correction_row(make_stage_tree, tmp_path, [
+        ("20210510000002", date(2021, 5, 10), "III. 재무에 관한 사항 2. 연결재무제표", _ORIG[1]),
+        ("20210615000003", date(2021, 6, 15), _NONFIN, _ORIG[1])])
+    assert row["rcept_no"] == "20210615000003"
+    assert row["available_date"] == date(2021, 6, 15)
+    assert row["available_basis"] == "derived"
+
+
+@pytest.mark.parametrize("items, filed", [
+    (None, _ORIG[1]),                        # 정정 첫 장 미해석 → 판단 불가
+    (_NONFIN, date(2021, 2, 1)),             # 첫 장의 원본 제출일이 연결된 원본과 어긋난다
+])
+def test_판단할_수_없으면_정정일을_지킨다(make_stage_tree, tmp_path: Path,
+                                     items: str | None, filed: date) -> None:
+    row = _correction_row(make_stage_tree, tmp_path,
+                          [("20210615000002", date(2021, 6, 15), items, filed)])
+    assert row["available_date"] == date(2021, 6, 15)
+    assert row["available_basis"] == "derived"
 
 
 def test_부정_접수지연_상한_밖은_격리된다(make_stage_tree, tmp_path: Path) -> None:

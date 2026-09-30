@@ -25,7 +25,7 @@ if TYPE_CHECKING:                       # 순환 import 회피 — gates 가 mod
     ExtraGate = Callable[[EquityGateContext], GateResult]
     DeclareHook = Callable[["duckdb.DuckDBPyConnection", "EquityTable"], None]
 
-RULES_VERSION = "e1.21.0"                # BuildRecord.rules_version 에 실린다.
+RULES_VERSION = "e1.22.0"                # BuildRecord.rules_version 에 실린다.
 # 규칙(sql/*.sql·rules_*.py·게이트 술어)이 산출을 바꾸는 변경이면 반드시 올린다 — EG5a 는 같은
 # 판본의 직전 빌드하고만 해시를 비교하고, 판본이 다르면 skip(rules_changed) 한다(09-05 corp_event
 # 4차·S05-4 실측).
@@ -198,6 +198,14 @@ RULES_VERSION = "e1.21.0"                # BuildRecord.rules_version 에 실린�
 #             20 이상인 그룹의 비율이 0.5 이상 떨어지거나 0 이 되면 FAIL 한다(0.05 이상·영향
 #             5건 이상은 기록형 warn). DQ-6(금융 템플릿 순이익 전건 NULL)·DQ-8(capex 311사
 #             NULL)이 EG7 3% 를 안 넘은 이유는 분모가 「만들어진 행」이었기 때문이다.
+# e1.22.0: 정정본의 원본 공시일 승계(09-30, `docs/research/2026-09-30-gpt-layer-debate.md` ③ · 사용자 승인).
+#          DART API 는 정정본만 돌려주므로 `fin_std` 공개일이 정정 접수일이 되어 2016~ 행의 5%(사업보고서
+#          13.9%)가 법정 기한을 한참 넘겨 찍혔다(백테스트에서 정정일까지 재무가 안 보이는 편향). 원본부터
+#          그 판까지 정정이 모두 재무표를 건드리지 않았고 첫 장 원본 제출일이 확인되면 공개일 = 원본 접수일
+#          (판 `rcept_dt` 는 그대로 — 그 행만 `available_date < rcept_dt`, basis 어휘는 derived 그대로).
+#          파생 공개일(q4·cf_q)도 같은 축. `disclosure_version.corr_has_fin_item` 키워드에 '재무에 관한'
+#          추가(보수화). 게이트: `n_available_ne_rcept_dt`(늦게 찍힘 금지)·`n_orig_filing_unwitnessed`(0 필수)
+#          · `n_available_orig_filing`(기록형).
 
 # ── 빌드 판(basis) — 저녁 잠정판 / 아침 확정판 (플랜 v2 §4 B.1·B.2) ────────────
 # 어휘·접두어·빌드 id 규약은 **stage 가 정본**이다(`stage.model.BASIS_PREFIX`) — 두 층이 같은

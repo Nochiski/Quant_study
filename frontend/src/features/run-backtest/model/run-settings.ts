@@ -10,10 +10,7 @@ export type BacktestRunSettingsFields = {
   oosStart: string;
 };
 
-/**
- * 실행 코어 선택지와 이름 키. `Record` 라 요청 계약(`BacktestRunSpec["core"]`)에 코어가 늘거나 줄면
- * typecheck 가 선택지 누락을 잡는다(#357 C-P3-14).
- */
+/** 코어 선택지. 요청 계약에 코어가 늘거나 줄면 typecheck 가 잡는다(#357 C-P3-14, 대체는 #336). */
 export const EXECUTION_CORE_LABELS: Record<
   BacktestRunSettingsFields["core"],
   MessageKey

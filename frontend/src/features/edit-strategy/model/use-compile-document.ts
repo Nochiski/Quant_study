@@ -41,8 +41,8 @@ const rangeFor = (
     }
   }
   if (parse) {
-    // 키 자체를 가리키는 진단(모르는 키·1.0 문법 힌트)은 backend 가 `anchor` 로 알린다 — 어느 코드가
-    // 키를 가리키는지 여기 옮겨 적지 않는다(#357 C-P3-13). 나머지는 값을 말하므로 값 범위를 먼저 쓴다.
+    // 키 자체를 가리키는 진단(예: 모르는 키)은 backend 가 `anchor` 로 알린다 — 어느 코드가 키를
+    // 가리키는지 여기 옮겨 적지 않는다(#357 C-P3-13). 나머지는 값을 말하므로 값 범위를 먼저 쓴다.
     const exact =
       diagnostic.anchor === "key"
         ? parse.keyRanges.get(diagnostic.pointer)

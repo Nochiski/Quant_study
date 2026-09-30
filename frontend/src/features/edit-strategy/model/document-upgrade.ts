@@ -32,8 +32,7 @@ export const upgradeWarningTitle = (code: UpgradeWarningCode): string =>
  * 된다(P1-05 DEFECT-P105-001과 같은 모순). 진단 문장이 제자리에서 고칠 방법을 말한다.
  * - `structure.legacy_shape`: 버전 줄은 현재 버전인데 본문에 1.0 문법이 섞였다. backend는 문서가 선언한
  *   버전을 믿어 업그레이드하지 않는다(lang2 Phase 2 감사 NB-1).
- * - `structure.not_upgradeable_schema_version`: 모르는 버전이거나, 선언한 은퇴 버전보다 옛 문법이
- *   섞였다(#267 DEFECT-2).
+ * - `structure.not_upgradeable_schema_version`: backend `upgrade_refusal`이 거절한 문서다(#267 DEFECT-2).
  */
 const UPGRADE_SUGGESTING_CODES = new Set([
   "structure.unsupported_schema_version",

@@ -212,7 +212,7 @@ class SQLiteBacktestRunRepository:
             entries = connection.execute(
                 f"""
                 SELECT run_id, trial_key, status, created_at, updated_at, session_sharpe,
-                    metric_registry_version
+                    metric_registry_version, error_code
                 FROM trial_ledger JOIN backtest_runs USING (accepted_order)
                 WHERE {where} ORDER BY accepted_order
                 """,
@@ -238,6 +238,7 @@ class SQLiteBacktestRunRepository:
                         updated_at=datetime.fromisoformat(row["updated_at"]),
                         session_sharpe=row["session_sharpe"],
                         metric_registry_version=row["metric_registry_version"],
+                        error_code=row["error_code"],
                     )
                     for row in entries
                 ),

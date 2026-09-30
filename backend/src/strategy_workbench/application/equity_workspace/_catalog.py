@@ -6,6 +6,7 @@ from math import ceil
 from strategy_workbench.domain.equity.facade.research_data import (
     DatasetFieldProfile,
     DataSnapshot,
+    FieldFrequency,
 )
 
 
@@ -31,7 +32,7 @@ class FieldCatalogQuery:
 class FieldCatalogFacets:
     dataset_ids: tuple[str, ...]
     units: tuple[str, ...]
-    frequencies: tuple[str, ...]
+    frequencies: tuple[FieldFrequency, ...]
 
 
 @dataclass(frozen=True)

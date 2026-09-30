@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { backtestStartRejectionMessage } from "../../../entities/backtest";
 import { ApiRequestError } from "../../../shared/api";
+import { tOptional } from "../../../shared/config";
 import {
   readOpenApi,
   rejectionCodes,
@@ -102,6 +103,15 @@ describe("trace rejection code vocabulary (#351)", () => {
           GENERIC,
       ),
     ).toEqual([]);
+    // 같은 거절을 두 벌 번역하지 않는다: 백테스트 API 와 같은 코드는 `backtest.error.<code>` 만 문장을 갖는다
+    // (#351 리뷰 P3-4).
+    expect(
+      codes.filter(
+        (code) =>
+          tOptional(`trace.error.${code}`) !== null &&
+          tOptional(`backtest.error.${code}`) !== null,
+      ),
+    ).toEqual([]);
   });
 
   it("says a run settings rejection with the backtest start sentence and its dates", () => {
@@ -130,5 +140,24 @@ describe("trace rejection code vocabulary (#351)", () => {
       "2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고",
     );
     expect(traceErrorMessage(rejection)).not.toContain("{research_start}");
+    // 백테스트 시작과 같은 문장이라 두 동작에 맞는 동사로 끝난다(#351 리뷰 P3-1).
+    expect(traceErrorMessage(rejection)).toMatch(/다시 실행하세요\.$/u);
+  });
+
+  it("does not point a trace input rejection at the run settings (#351 리뷰 P3-2)", () => {
+    // 추적 전용 칸(`as_of`·`security_ids`)의 본문 검증 실패도 `backtest.run.field_invalid` 로 온다.
+    const rejection = new ApiRequestError(
+      "traceStrategy",
+      422,
+      "backtest.run.field_invalid",
+      "as_of must be an ISO date",
+      null,
+      null,
+      "as_of",
+    );
+
+    expect(traceErrorMessage(rejection)).toBe(
+      "서버가 요청의 값 하나를 받지 않았습니다. 서버 사유가 짚은 칸을 고친 뒤 다시 실행하세요.",
+    );
   });
 });

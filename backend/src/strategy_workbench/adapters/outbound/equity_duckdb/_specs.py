@@ -40,7 +40,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from strategy_workbench.domain.equity.facade.research_data import FieldValueType
+from strategy_workbench.domain.equity.facade.research_data import (
+    FieldFrequency,
+    FieldValueType,
+)
 
 PRICE_TABLE = "price_daily"
 CALENDAR_TABLE = "trading_calendar"
@@ -135,7 +138,7 @@ class SourceSpec:
     lag_sessions: int
     lag_basis: str
     requires: tuple[str, ...]
-    frequency: str
+    frequency: FieldFrequency
     kind_expr: str | None = None
     required_columns: tuple[str, ...] = ()
     masked_expr: str | None = None
@@ -233,7 +236,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=0,
         lag_basis=_PRICE_LAG_BASIS,
         requires=(PRICE_TABLE,),
-        frequency="daily",
+        frequency=FieldFrequency.DAILY,
     ),
     SourceSpec(
         name="adj",
@@ -255,7 +258,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=0,
         lag_basis=_ADJ_LAG_BASIS,
         requires=(ADJ_TABLE, FACTOR_TABLE, ADJ_MACRO),
-        frequency="daily",
+        frequency=FieldFrequency.DAILY,
         masked_expr="adj_gap",
     ),
     SourceSpec(
@@ -277,7 +280,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_DART_LAG_BASIS,
         requires=(FIN_TABLE, DISCLOSURE_TABLE, CORP_TICKER_TABLE, FIN_MACRO),
-        frequency="quarterly",
+        frequency=FieldFrequency.QUARTERLY,
         # #225 전에 만든 카탈로그의 v_fin_latest 에는 이 열이 없다 — 재생성 전까지 재무만 뺀다.
         required_columns=("period_frontier",),
     ),
@@ -298,7 +301,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_CONSENSUS_LAG_BASIS,
         requires=(CONSENSUS_TABLE, CONSENSUS_MACRO),
-        frequency="monthly",
+        frequency=FieldFrequency.MONTHLY,
     ),
     SourceSpec(
         name="consensus_revenue",
@@ -316,7 +319,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_CONSENSUS_LAG_BASIS,
         requires=(CONSENSUS_TABLE, CONSENSUS_MACRO),
-        frequency="monthly",
+        frequency=FieldFrequency.MONTHLY,
     ),
     SourceSpec(
         name="opinion",
@@ -336,7 +339,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_OPINION_LAG_BASIS,
         requires=(OPINION_TABLE,),
-        frequency="daily",
+        frequency=FieldFrequency.DAILY,
     ),
     SourceSpec(
         name="dividend",
@@ -356,7 +359,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_DART_LAG_BASIS,
         requires=(DIVIDEND_TABLE, CORP_TICKER_TABLE),
-        frequency="annual",
+        frequency=FieldFrequency.ANNUAL,
     ),
     SourceSpec(
         name="buyback",
@@ -374,7 +377,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_DART_LAG_BASIS,
         requires=(EVENT_TABLE,),
-        frequency="event",
+        frequency=FieldFrequency.EVENT,
     ),
     # ── 격자 3테이블 (S08~S10) — `fill_kind` 축을 갖는 GRID 원천 ──────────────
     SourceSpec(
@@ -400,7 +403,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_GRID_LAG_BASIS,
         requires=(FLOW_TABLE,),
-        frequency="daily",
+        frequency=FieldFrequency.DAILY,
         kind_expr="fill_kind['kind']",
     ),
     SourceSpec(
@@ -419,7 +422,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_GRID_LAG_BASIS,
         requires=(SHORT_TABLE,),
-        frequency="daily",
+        frequency=FieldFrequency.DAILY,
         kind_expr="fill_kind_short_kiwoom['kind']",
         # 키움 공매도 샤드가 그 종목·그날을 처리하고 행을 뺐으면 그날 공매도가 없었다(FX-3-001)
         omitted_is_zero=True,
@@ -440,7 +443,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_GRID_LAG_BASIS,
         requires=(SHORT_TABLE,),
-        frequency="daily",
+        frequency=FieldFrequency.DAILY,
         kind_expr="fill_kind_lending_kiwoom['kind']",
     ),
     SourceSpec(
@@ -462,7 +465,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=3,
         lag_basis=_CREDIT_LAG_BASIS,
         requires=(CREDIT_TABLE, EVENT_TABLE, CREDIT_MACRO),
-        frequency="daily",
+        frequency=FieldFrequency.DAILY,
         kind_expr="fill_kind['kind']",
         masked_expr="bonus_window",
     ),
@@ -482,7 +485,7 @@ SOURCE_SPECS: tuple[SourceSpec, ...] = (
         lag_sessions=1,
         lag_basis=_DART_LAG_BASIS,
         requires=(HOLDER_TABLE, CORP_TICKER_TABLE),
-        frequency="event",
+        frequency=FieldFrequency.EVENT,
     ),
 )
 

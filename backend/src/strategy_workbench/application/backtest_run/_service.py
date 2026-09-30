@@ -421,6 +421,12 @@ class BacktestRunService:
             raise BacktestParameterValueError(error) from error
         return preview_trial(None if lineage_id is None else self.trial_ledger(lineage_id), key)
 
+    def request_ledger(self, request: BacktestRunSpec) -> TrialLedger | None:
+        """요청이 속한 계열의 원장(`_lineage` 규칙). 계열이 없으면 None. 전략 검증은 하지 않는다."""
+        _spec, provenance = self._resolve(request)
+        lineage_id = self._lineage(request, provenance)
+        return None if lineage_id is None else self.trial_ledger(lineage_id)
+
     def trial_ledger(self, lineage_id: str) -> TrialLedger:
         """계열 원장 — 시도 묶음·재확인·N 제외 실행·차단한 시도.
 

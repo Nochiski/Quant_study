@@ -9,11 +9,12 @@ import json
 import logging
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 
 import pytest
 
+from strategy_workbench.adapters.outbound.equity_mock._fixture import build_demo_fixture
 from strategy_workbench.adapters.outbound.equity_mock.facade.provider import (
     MockEquityDataAdapter,
 )
@@ -287,6 +288,33 @@ def test_list_factor_catalog_reports_direction_and_availability() -> None:
     assert isinstance(first, dict)
     assert set(first) == {"id", "label", "direction", "availability", "required_field_ids"}
     assert len(factors) == len(registry.all())
+
+
+def test_list_factor_catalog_judges_availability_by_the_connected_adapter_fields() -> None:
+    """#370: 연결된 어댑터가 주지 않는 필드를 읽는 구현 팩터는 `unavailable` 이다.
+
+    실데이터 어댑터에는 공매도 잔고 비율·실적 서프라이즈 필드가 없다. 모델이 이 둘을 예시로 골라
+    검증 도구로 되돌아오며 턴 예산을 쓰지 않게, 필드를 뺀 mock 어댑터로 같은 상황을 만든다.
+    """
+    missing = {"short.short_balance_ratio", "event.earnings_surprise"}
+    fixture = build_demo_fixture()
+    profiles = tuple(profile for profile in fixture.profiles if profile.field_id not in missing)
+    builder = AssistantContextBuilder(
+        equity_data=MockEquityDataAdapter(replace(fixture, profiles=profiles)),
+        factor_registry=build_default_factor_registry(),
+        compiler=FakeStrategyCompiler(),
+        backtest_results=FakeBacktestResults(),
+        today=lambda: TODAY,
+    )
+
+    call = ToolCall(call_id="call-1", name=LIST_FACTOR_CATALOG, arguments={})
+    result = builder.tool_result(call, CONTEXT)
+
+    availability = {
+        item["id"]: item["availability"] for item in json.loads(result.content)["factors"]
+    }
+    assert {factor for factor, value in availability.items() if value == "unavailable"} == missing
+    assert list(availability.values()).count("implemented") == 5
 
 
 def test_read_current_strategy_returns_the_turn_context() -> None:

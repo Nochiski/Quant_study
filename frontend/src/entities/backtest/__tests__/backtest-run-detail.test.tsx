@@ -387,7 +387,7 @@ describe("청산 거래 표", () => {
 
 describe("롤링 샤프 차트", () => {
   // 세 세션 곡선의 롤링 값이 모두 빈 결과. 창 길이는 backend 가 정한다(#303).
-  const emptyRolling = (windowSessions: number) => {
+  const emptyRolling = (windowSessions: number | null) => {
     const base = result();
     const sessions = ["2026-01-05", "2026-01-06", "2026-01-07"];
     render(
@@ -427,6 +427,14 @@ describe("롤링 샤프 차트", () => {
   it("창보다 긴데 값이 비면 창 탓으로 말하지 않고 일반 문구를 보인다", () => {
     // 수익률 2개로 창(2)은 찼지만 흔들림 0 같은 다른 이유로 값이 없는 경우다.
     const chart = emptyRolling(2);
+    expect(
+      chart.getByText("이 구간에서 산출 가능한 값이 없습니다."),
+    ).toBeInTheDocument();
+    expect(chart.queryByText(/롤링 창/u)).not.toBeInTheDocument();
+  });
+
+  it("창 길이를 싣지 않은 옛 결과면 일반 문구를 보인다", () => {
+    const chart = emptyRolling(null);
     expect(
       chart.getByText("이 구간에서 산출 가능한 값이 없습니다."),
     ).toBeInTheDocument();

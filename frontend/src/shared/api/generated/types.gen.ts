@@ -668,7 +668,7 @@ export type BacktestSeries = {
   /**
    * Rolling Sharpe Window Sessions
    */
-  rolling_sharpe_window_sessions: number;
+  rolling_sharpe_window_sessions?: number | null;
 };
 
 /**

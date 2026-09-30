@@ -237,6 +237,21 @@ def test_a_committed_result_loads_back_equal_in_every_field(tmp_path: Path) -> N
     assert [type(value) for value in choice.choices] == [str, int, bool]
 
 
+def test_a_result_file_written_before_the_rolling_window_field_still_loads(tmp_path: Path) -> None:
+    """#303 전에 쓴 `result.json` 에는 롤링 창 칸이 없다. 410 대신 None 으로 읽힌다."""
+    store = LocalArtifactStore(tmp_path)
+    store.commit(_result())
+    result_path = tmp_path / "run-safe-001" / "result.json"
+    payload = result_path.read_bytes()
+    old = payload.replace(b',"rolling_sharpe_window_sessions":126', b"")
+    assert old != payload
+    result_path.write_bytes(old)
+
+    loaded = store.load("run-safe-001", sha256=hashlib.sha256(old).hexdigest())
+
+    assert loaded.series.rolling_sharpe_window_sessions is None
+
+
 def test_a_missing_altered_or_undecodable_result_file_is_a_coded_error(tmp_path: Path) -> None:
     store = LocalArtifactStore(tmp_path)
     commit = store.commit(_result())

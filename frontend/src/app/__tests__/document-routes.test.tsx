@@ -1822,6 +1822,114 @@ describe("StrategySpec JSON projection and editable Form (P4-06 → P4-04)", () 
     for (const run of screen.getAllByRole("button", { name: /백테스트 실행/ }))
       expect(run).toBeDisabled();
   });
+
+  // 그래프 1수준 캔버스(lang2 P4-02, 리드 결정 4): 카드 문장 안의 컨트롤은 Form 행과 한 경로다.
+  describe("그래프 1수준 캔버스 (lang2 P4-02)", () => {
+    const COMMENTED =
+      '# 문서 머리말\nschema_version: "1.2"\ntitle: 퀄리티 모멘텀 # 제목 메모\nrisk:\n  # 집중도 상한\n  max_name_weight: 0.05\n';
+    const WEIGHT = "종목별 최대 목표 비중 한도";
+    const SIDE = "매매 방향";
+    const EDITED = COMMENTED.replace(
+      "max_name_weight: 0.05",
+      "max_name_weight: 0.1",
+    );
+    const canvas = () =>
+      screen.findByRole("region", { name: "전략 파이프라인" });
+    const canvasCard = async (name: string) =>
+      within(await within(await canvas()).findByRole("group", { name }));
+    const openCommented = async () => {
+      server.use(
+        http.get(
+          `${API}/api/v1/strategies/:strategyId/revisions/:revision/document`,
+          () => HttpResponse.json(document("s1", 2, COMMENTED)),
+        ),
+      );
+      mount("/research/strategies/s1/revisions/2");
+      const view = await editor();
+      expect(view.state.doc.toString()).toBe(COMMENTED);
+      return view;
+    };
+    /**
+     * `text` 가 compile 됐다 — compile 은 parse 가 편집을 따라온 뒤에만 나간다. 그 전에는 구조 연산(insert-key)이
+     * `pending` 으로 보류되므로 다음 편집 전에 기다린다.
+     */
+    const compiled = (text: string, before: number) =>
+      waitFor(() => {
+        expect(compiledSources.length).toBeGreaterThan(before);
+        expect(compiledSources[compiledSources.length - 1]).toBe(text);
+      });
+
+    it("카드 문장 안의 컨트롤로 값을 바꾸면 YAML 그 줄만 바뀌고 compile 된다", async () => {
+      const user = userEvent.setup();
+      const view = await openCommented();
+      const before = compiledSources.length;
+
+      await user.click(screen.getByRole("tab", { name: "Graph" }));
+      const weight = (await canvasCard(WEIGHT)).getByRole("spinbutton", {
+        name: WEIGHT,
+      });
+      expect(weight).toHaveValue(0.05);
+      await user.clear(weight);
+      await user.type(weight, "0.1{Enter}");
+
+      // 주석·다른 줄은 그대로, 그 값 한 줄만 바뀐다.
+      await waitFor(() => expect(view.state.doc.toString()).toBe(EDITED));
+      expect(within(await canvas()).getByRole("status")).toHaveTextContent(
+        `${WEIGHT} 반영됨`,
+      );
+      await compiled(EDITED, before);
+    });
+
+    it("카드와 Form 행은 같은 편집을 같은 SourceOperation 으로 낸다(두 번째 경로 없음)", async () => {
+      // 적힌 값 바꾸기(replace)와 없는 섹션에 키 넣기(insert-key)를 카드로 한 결과가 Form 행으로 한 결과와
+      // 바이트 단위로 같고, 편집마다 실행 취소 한 번이다.
+      const user = userEvent.setup();
+      const view = await openCommented();
+
+      await user.click(screen.getByRole("tab", { name: "Graph" }));
+      const weight = (await canvasCard(WEIGHT)).getByRole("spinbutton", {
+        name: WEIGHT,
+      });
+      let before = compiledSources.length;
+      await user.clear(weight);
+      await user.type(weight, "0.1{Enter}");
+      await compiled(EDITED, before);
+      await user.selectOptions(
+        (await canvasCard(SIDE)).getByRole("combobox", { name: SIDE }),
+        "long_short",
+      );
+      await waitFor(() =>
+        expect(view.state.doc.toString()).toBe(
+          `${EDITED}portfolio:\n  side: long_short\n`,
+        ),
+      );
+      const byCard = view.state.doc.toString();
+
+      await user.click(screen.getByRole("tab", { name: "YAML" }));
+      before = compiledSources.length;
+      act(() => expect(undo(view)).toBe(true));
+      act(() => expect(undo(view)).toBe(true));
+      expect(view.state.doc.toString()).toBe(COMMENTED);
+      await compiled(COMMENTED, before);
+
+      await user.click(screen.getByRole("tab", { name: "Form" }));
+      const risk = await formSection("risk");
+      const formWeight = risk.getByRole("spinbutton", {
+        name: /\bmax_name_weight/,
+      });
+      before = compiledSources.length;
+      await user.clear(formWeight);
+      await user.type(formWeight, "0.1{Enter}");
+      await compiled(EDITED, before);
+      await user.selectOptions(
+        (await formSection("portfolio")).getByRole("combobox", {
+          name: /\bside/,
+        }),
+        "long_short",
+      );
+      await waitFor(() => expect(view.state.doc.toString()).toBe(byCard));
+    });
+  });
 });
 
 /** 같은 그래프 문서를 compile하되 진단만 바꿔 답한다. */

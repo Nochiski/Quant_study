@@ -3731,6 +3731,12 @@ describe("AI 어시스턴트 제안 적용 (B-04)", () => {
     mount("/research/strategies/new");
     const view = await editor();
     const before = view.state.doc.toString();
+    // 실행 옵션 칸이 틀려도 턴은 실행 설정을 싣는다(#355 위험성의 두 번째 경우).
+    await user.click(screen.getByLabelText("실행 설정 열기"));
+    fireEvent.change(
+      screen.getByRole("spinbutton", { name: "초기 자본 (KRW)" }),
+      { target: { value: "0" } },
+    );
     const stream = await askAssistant(user);
 
     // 턴에는 지금 편집기 텍스트가 실린다(서버가 문서를 따로 들지 않는다).

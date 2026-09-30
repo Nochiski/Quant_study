@@ -1,4 +1,5 @@
-// 어시스턴트 어휘의 단일 입구는 `entities/assistant`다 — 생성 SDK 타입을 여기서 직접 들여오지 않는다.
+// 어시스턴트 어휘(생성 SDK 의 어시스턴트 타입)는 `entities/assistant`로만 들여온다. 실행 설정
+// `RunEnvironment`는 어시스턴트 어휘가 아니므로 `shared/api`에서 읽는다.
 import type {
   DocumentRefView,
   TurnContextPayload,

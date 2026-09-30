@@ -8,6 +8,7 @@ from statistics import mean, median, pstdev
 from typing import TypeAlias, TypeGuard, TypeVar
 
 from ._nodes import (
+    FILLING_MISSING_POLICIES,
     BinaryNode,
     BinaryOperator,
     ComparisonNode,
@@ -255,6 +256,7 @@ class _NodeEvaluator:
         progress: Callable[[float], None],
     ) -> None:
         self._nodes = {node.node_id: node for node in graph.nodes}
+        self._output_node_id = graph.output_node_id
         self._parameter_values = {
             parameter.parameter_id: parameter.value for parameter in parameters
         }
@@ -316,6 +318,16 @@ class _NodeEvaluator:
                 reached.update(indices[position + near : position + far + 1])
         return frozenset(reached)
 
+    def _filled_input(self, node_id: str) -> list[FactorComputedValue]:
+        """횡단면·그룹 노드가 읽는 입력 — 결측 정책으로 채운 사본(#312). 캐시 값은 그대로다."""
+        return _filled(
+            self._computed[node_id],
+            self._masked[node_id],
+            self._observations,
+            self._missing,
+            checkpoint=self._checkpoint,
+        )
+
     def _advance_within_node(self, node: ExpressionNode, fraction: float) -> None:
         self._progress(
             (self._completed_weight + fraction * _node_progress_weight(node)) / self._total_weight
@@ -340,7 +352,7 @@ class _NodeEvaluator:
         values: list[FactorComputedValue]
         if isinstance(node, FieldNode):
             values, masked = _field_values(
-                self._observations, node.field_id, self._missing, checkpoint=self._checkpoint
+                self._observations, node.field_id, checkpoint=self._checkpoint
             )
             self._boundaries[node.field_id] = self._located(masked)
         elif isinstance(node, ConstantNode):
@@ -392,16 +404,30 @@ class _NodeEvaluator:
             )
         elif isinstance(node, CrossSectionalNode):
             values = _cross_sectional(
-                node, inputs[0], self._observations, checkpoint=self._checkpoint
+                node,
+                self._filled_input(dependencies[0]),
+                self._observations,
+                checkpoint=self._checkpoint,
             )
         elif isinstance(node, GroupNode):
             values = _group_transform(
-                node, inputs[0], self._observations, checkpoint=self._checkpoint
+                node,
+                self._filled_input(dependencies[0]),
+                self._observations,
+                checkpoint=self._checkpoint,
             )
         # 구간에 가린 칸이 드는 칸은 결측이다 — 두 값을 섞는 연산은 입력이 모두 값이어도 여기서
         # 가려진다(#337)
         for index in _checkpointed(masked, self._checkpoint):
             values[index] = None
+        # 그래프 출력은 합성의 정규화, 곧 횡단면으로 들어간다 — 횡단면·그룹 노드가 아니면 여기서
+        # 채운다(#312). 그 둘은 입력에서 이미 채웠다
+        if node_id == self._output_node_id and not isinstance(
+            node, (CrossSectionalNode, GroupNode)
+        ):
+            values = _filled(
+                values, masked, self._observations, self._missing, checkpoint=self._checkpoint
+            )
         _require_finite_values(
             node.node_id, values, self._observations, checkpoint=self._checkpoint
         )
@@ -467,43 +493,62 @@ def _require_finite_values(
 def _field_values(
     observations: tuple[FactorObservation, ...],
     field_id: str,
-    missing_policy: MissingPolicy,
     *,
     checkpoint: Callable[[], None] = _noop_checkpoint,
 ) -> tuple[list[FactorComputedValue], frozenset[int]]:
-    """필드 값과, 그 가운데 원장이 가린 셀(MASKED)의 관측 index 를 관측을 한 번 훑어 낸다(#298)."""
-    raw: list[float | None] = []
+    """필드 원값과, 그 가운데 원장이 가린 셀(MASKED)의 관측 index 를 관측을 한 번 훑어 낸다(#298).
+
+    잎은 채우지 않는다 — 시계열 창·이항 연산은 모르는 결측을 결측으로 본다(#312, `_filled`).
+    """
+    values: list[FactorComputedValue] = []
     masked: set[int] = set()
     for index, observation in _checkpointed(enumerate(observations), checkpoint):
         cell = {field.field_id: field for field in observation.fields}.get(field_id)
         if cell is not None and cell.masked:
             masked.add(index)
         value = None if cell is None else cell.value
-        raw.append(
+        values.append(
             float(value)
             if isinstance(value, (int, float)) and not isinstance(value, bool)
             else None
         )
-    # 결측 정책은 모르는 값만 채운다. 원장이 가린 셀은 비워 둔다(#298).
-    values: list[FactorComputedValue] = list(raw)
-    if missing_policy is MissingPolicy.ZERO:
-        values = [
-            0.0 if value is None and index not in masked else value
-            for index, value in enumerate(raw)
-        ]
-    elif missing_policy is MissingPolicy.CROSS_SECTIONAL_MEDIAN:
-        by_date = _cross_section_indices(observations, checkpoint=checkpoint)
-        for indices in _checkpointed(by_date.values(), checkpoint):
-            available = [
-                value
-                for index in _checkpointed(indices, checkpoint)
-                if (value := raw[index]) is not None
-            ]
-            fill = median(available) if available else None
-            for index in _checkpointed(indices, checkpoint):
-                if values[index] is None and index not in masked:
-                    values[index] = fill
     return values, frozenset(masked)
+
+
+def _filled(
+    values: list[FactorComputedValue],
+    keep: frozenset[int],
+    observations: tuple[FactorObservation, ...],
+    missing_policy: MissingPolicy,
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> list[FactorComputedValue]:
+    """결측 정책의 채움 — 값이 횡단면으로 넘어가는 자리(횡단면·그룹 노드 입력, 그래프 출력)에서만
+    부른다(#312).
+
+    `zero` 는 0, `cross_sectional_median` 은 같은 (as_of, universe_member) 동료의 그 값 중앙값이다.
+    잎에서 채우면 채운 수준 값(잔고 0, 다른 종목의 자본총계)이 시계열 창과 비율로 새어 가짜 값을
+    만든다. 여기서는 팩터 값이 비었으면(입력이 비었거나 이력이 모자라) 그 자리에 정책의 중립값을
+    준다. 같은 날 동료에 값이 하나도 없으면 채우지 않는다 — 없는 팩터를 지어내지 않는다. `keep` 은
+    원장이 가린 칸과 값의 구간에 가린 칸이 드는 칸이라(#298·#337) 어느 정책도 채우지 않는다.
+    """
+    if missing_policy not in FILLING_MISSING_POLICIES:
+        return values
+    result = list(values)
+    groups = _cross_section_indices(observations, checkpoint=checkpoint)
+    for indices in _checkpointed(groups.values(), checkpoint):
+        available = [
+            number
+            for index in _checkpointed(indices, checkpoint)
+            if (number := _as_number(values[index])) is not None
+        ]
+        if not available:
+            continue
+        fill = 0.0 if missing_policy is MissingPolicy.ZERO else median(available)
+        for index in _checkpointed(indices, checkpoint):
+            if result[index] is None and index not in keep:
+                result[index] = fill
+    return result
 
 
 def _binary(

@@ -1414,17 +1414,19 @@ const ko = {
   "backtest.start.failedGeneric":
     "서버가 실행 요청을 받지 않았습니다. 실행 설정과 전략 문서를 확인한 뒤 다시 시작하세요.",
   // 시작 거절(404·409·422)의 코드별 복구 문장. 코드 목록의 정본은 backend `startBacktest` 계약이고,
-  // `backtest-error-contract.test.ts` 가 `openapi.json` 과 대조한다(이슈 #260).
+  // `backtest-error-contract.test.ts` 가 `openapi.json` 과 대조한다(이슈 #260). 추적도 추적 고유 코드가
+  // 아니면 이 문장을 쓰므로(#351) 추적이 받는 코드의 문장은 두 동작에 맞는 "다시 실행하세요"로 끝낸다.
+  // 이름 없는 `field_invalid` 는 추적 전용 칸(`as_of`·`security_ids`)에도 오므로 칸을 가리지 않는다.
   "backtest.error.backtest.run.field_invalid":
-    "서버가 실행 설정의 값 하나를 받지 않았습니다. 전략 편집기의 실행 설정에서 서버 사유의 field 칸을 고친 뒤 다시 시작하세요.",
+    "서버가 요청의 값 하나를 받지 않았습니다. 서버 사유가 짚은 칸을 고친 뒤 다시 실행하세요.",
   "backtest.error.backtest.run.field_invalid.named":
-    "서버가 실행 설정의 {field} 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
+    "서버가 실행 설정의 {field} 칸 값을 받지 않았습니다. 전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 실행하세요.",
   "backtest.error.backtest.run.invalid":
     "이 실행 요청은 시작할 수 없습니다. 서버 사유를 보고 전략 편집기에서 실행 설정(기간·OOS 시작일)이나 전략을 고치세요.",
   "backtest.error.backtest.run.environment_required":
     "실행 설정이 없습니다. 실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
   "backtest.error.backtest.run.research_window_violation":
-    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 {research_start} 이후로 옮긴 뒤 다시 시작하세요.",
+    "시작일이 연구 구간 밖입니다. {sealed_start}~{sealed_end}은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 {research_start} 이후로 옮긴 뒤 다시 실행하세요.",
   "backtest.error.backtest.run.parameter_invalid":
     "전략 파라미터 {parameter_id}의 값을 쓸 수 없습니다. 문서에 선언된 파라미터인지, 값이 그 범위·선택지 안인지 확인한 뒤 다시 시작하세요.",
   "backtest.error.portfolio.strategy.invalid":
@@ -3310,15 +3312,15 @@ export const messages = {
     "backtest.start.failedGeneric":
       "The server did not accept the run request. Check the run settings and the strategy document, then start again.",
     "backtest.error.backtest.run.field_invalid":
-      "The server rejected a run settings value. Fix the field named in the server reason in the strategy editor's run settings, then start again.",
+      "The server rejected a value in the request. Fix the field the server reason points to, then run it again.",
     "backtest.error.backtest.run.field_invalid.named":
-      "The server rejected the {field} run setting. Fix that field in the strategy editor's run settings, then start again.",
+      "The server rejected the {field} run setting. Fix that field in the strategy editor's run settings, then run it again.",
     "backtest.error.backtest.run.invalid":
       "This run request cannot start. Read the server reason and fix the run settings (period, OOS start) or the strategy in the strategy editor.",
     "backtest.error.backtest.run.environment_required":
       "There are no run settings. Fill the start date, end date and universe in the run settings.",
     "backtest.error.backtest.run.research_window_violation":
-      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. In the strategy editor's run settings, move the start date to {research_start} or later, then start again.",
+      "The start date is outside the research window. {sealed_start} to {sealed_end} is the sealed holdout and earlier dates are not measured. In the strategy editor's run settings, move the start date to {research_start} or later, then run it again.",
     "backtest.error.backtest.run.parameter_invalid":
       "The value for strategy parameter {parameter_id} cannot be used. Check that the document declares the parameter and that the value is within its range or choices, then start again.",
     "backtest.error.portfolio.strategy.invalid":

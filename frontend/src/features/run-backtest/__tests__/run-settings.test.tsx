@@ -1067,7 +1067,7 @@ describe("backtest run actions", () => {
     );
     // 결과 화면에는 실행 설정 패널이 없다 — 문장이 고칠 곳을 말한다(#270 P3-R3).
     expect(alert).toHaveTextContent(
-      "전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 시작하세요.",
+      "전략 편집기의 실행 설정에서 그 칸을 고친 뒤 다시 실행하세요.",
     );
     expect(alert).not.toHaveTextContent("API request failed");
     const reason = within(alert).getByRole("group");
@@ -1109,7 +1109,7 @@ describe("backtest run actions", () => {
     const alert = await screen.findByRole("alert");
     await waitFor(() =>
       expect(alert).toHaveTextContent(
-        "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 시작하세요.",
+        "시작일이 연구 구간 밖입니다. 2016-01-01~2019-12-31은 홀드아웃으로 봉인돼 있고 그 앞도 측정하지 않습니다. 전략 편집기의 실행 설정에서 시작일을 2020-01-02 이후로 옮긴 뒤 다시 실행하세요.",
       ),
     );
     expect(alert).not.toHaveTextContent("{");

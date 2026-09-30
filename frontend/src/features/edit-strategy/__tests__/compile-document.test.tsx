@@ -323,13 +323,14 @@ describe("toDocumentDiagnostics", () => {
     });
   });
 
-  it("points an unknown-key diagnostic at the misspelled key, not its value", () => {
+  it("points a key-anchored diagnostic at the misspelled key, not its value", () => {
     const text = "risk:\n  max_name_wieght: 0.05\n";
     const parse = parseSource(text, "yaml");
     const [diagnostic] = toDocumentDiagnostics(
       [
         {
           code: "structure.unknown_key",
+          anchor: "key",
           kind: "structural",
           severity: "error",
           pointer: "/risk/max_name_wieght",

@@ -3598,9 +3598,10 @@ describe("problems and the document status badge follow no tab (P1-01)", () => {
   const problemRow = (message: string | RegExp) =>
     screen.findByRole("button", { name: message });
 
-  /** 키 범위를 쓰는 유일한 진단 종류 — outline의 값 범위 reveal과 구별된다. */
+  /** 키 범위를 쓰는 진단(backend 가 `anchor: key` 로 알린다) — outline의 값 범위 reveal과 구별된다. */
   const UNKNOWN_TITLE_KEY = {
     code: "structure.unknown_key",
+    anchor: "key",
     kind: "structural",
     severity: "error",
     pointer: "/title",

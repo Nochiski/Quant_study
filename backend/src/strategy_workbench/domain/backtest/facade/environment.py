@@ -23,7 +23,10 @@ from strategy_workbench.domain.backtest._models import (
     RunEnvironment,
     SellTax,
 )
-from strategy_workbench.domain.backtest._participation import participation_volumes
+from strategy_workbench.domain.backtest._participation import (
+    participation_volumes,
+    settlement_multipliers,
+)
 from strategy_workbench.domain.backtest._requirement import (
     MissingRunEnvironmentError,
     require_environment,
@@ -68,6 +71,7 @@ __all__ = [
     "environment_hash",
     "impact_scales",
     "participation_volumes",
+    "settlement_multipliers",
     "require_environment",
     "require_research_window",
     "run_environment_canonical_json",

@@ -350,6 +350,65 @@ export type AssistantUnprocessableResponse = {
 };
 
 /**
+ * BacktestCancelResult
+ *
+ * 취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면
+ * `kept_by_owners` 가 참이다 — 화면은 이 칸으로 "실험이 쓰는 실행" 을 알린다(#382).
+ */
+export type BacktestCancelResult = {
+  /**
+   * Artifact Sha256
+   */
+  artifact_sha256?: string | null;
+  /**
+   * Created At
+   */
+  created_at: string;
+  /**
+   * Error
+   */
+  error?: string | null;
+  /**
+   * Error Code
+   */
+  error_code?:
+    | "portfolio.strategy.invalid"
+    | "portfolio.data.unavailable"
+    | "portfolio.raw_observation.invalid"
+    | "backtest.run.invalid"
+    | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
+    | "backtest.run.internal"
+    | "backtest.run.interrupted"
+    | null;
+  /**
+   * Kept By Owners
+   */
+  kept_by_owners?: boolean;
+  /**
+   * Message
+   */
+  message: string;
+  /**
+   * Progress
+   */
+  progress: number;
+  /**
+   * Run Id
+   */
+  run_id: string;
+  /**
+   * Stage
+   */
+  stage: string;
+  status: RunStatus;
+  /**
+   * Updated At
+   */
+  updated_at: string;
+};
+
+/**
  * BacktestEnvironmentRequiredDetail
  *
  * 실행 설정 없이 들어온 실행 요청. schema 1.2 문서는 문서에 실행 설정을 담지 않는다.
@@ -609,6 +668,7 @@ export type BacktestRunState = {
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -5935,7 +5995,16 @@ export type TrialAttempt = {
   /**
    * Error Code
    */
-  error_code?: string | null;
+  error_code?:
+    | "backtest.run.environment_required"
+    | "backtest.run.research_window_violation"
+    | "backtest.run.parameter_invalid"
+    | "backtest.run.invalid"
+    | "backtest.strategy.not_found"
+    | "backtest.strategy.stale"
+    | "backtest.strategy.requires_upgrade"
+    | "portfolio.strategy.invalid"
+    | null;
   /**
    * Experiment Id
    */
@@ -6090,6 +6159,10 @@ export type TrialRun = {
    * Run Id
    */
   run_id: string;
+  /**
+   * Session Sharpe
+   */
+  session_sharpe?: number | null;
   status: RunStatus;
 };
 
@@ -6495,7 +6568,12 @@ export type ValidationSeverity = "error" | "warning";
  * 값의 정의 순서가 우선순위다 — 끝난 결과(실패·칸 없음)가 아직 도는 창보다 앞선다.
  */
 export type WalkForwardGap =
-  "legacy_design" | "test_failed" | "no_cell" | "pending";
+  | "legacy_design"
+  | "cancelled"
+  | "result_unreadable"
+  | "test_failed"
+  | "no_cell"
+  | "pending";
 
 /**
  * WalkForwardReport
@@ -6566,6 +6644,7 @@ export type WalkForwardWindowResult = {
     | "portfolio.raw_observation.invalid"
     | "backtest.run.invalid"
     | "backtest.run.equity_wiped_out"
+    | "backtest.run.data_not_ready"
     | "backtest.run.internal"
     | "backtest.run.interrupted"
     | null;
@@ -6607,7 +6686,16 @@ export type WindowPick = {
   /**
    * Error Code
    */
-  error_code?: string | null;
+  error_code?:
+    | "backtest.run.environment_required"
+    | "backtest.run.research_window_violation"
+    | "backtest.run.parameter_invalid"
+    | "backtest.run.invalid"
+    | "backtest.strategy.not_found"
+    | "backtest.strategy.stale"
+    | "backtest.strategy.requires_upgrade"
+    | "portfolio.strategy.invalid"
+    | null;
   /**
    * Experiment Id
    */
@@ -7245,7 +7333,7 @@ export type CancelBacktestResponses = {
   /**
    * Successful Response
    */
-  200: BacktestRunState;
+  200: BacktestCancelResult;
 };
 
 export type CancelBacktestResponse =
@@ -7849,17 +7937,21 @@ export type RetryExperimentTrialData = {
 
 export type RetryExperimentTrialErrors = {
   /**
-   * The experiment or trial is missing
+   * Response 404 Retryexperimenttrial
+   *
+   * The trial or its base strategy revision is missing
    */
-  404: ExperimentErrorResponse;
+  404: ExperimentErrorResponse | BacktestStrategyNotFoundResponse;
   /**
-   * The experiment state refuses it
+   * Response 409 Retryexperimenttrial
+   *
+   * The trial is not retryable or the base revision changed
    */
-  409: ExperimentErrorResponse;
+  409: ExperimentErrorResponse | BacktestStrategyStaleResponse;
   /**
-   * Validation Error
+   * A coded experiment design or base run diagnostic
    */
-  422: HttpValidationError;
+  422: ExperimentAdmissionErrorResponse;
 };
 
 export type RetryExperimentTrialError =

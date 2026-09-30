@@ -20,13 +20,14 @@ from strategy_workbench.domain.backtest.facade.environment import (
     RunEnvironment,
     impact_scales,
     participation_volumes,
+    settlement_multipliers,
 )
 from strategy_workbench.domain.backtest.facade.runs import ENGINE_RULES_VERSION
 from tests.test_core_parity import ENGINE_SCENARIOS, _session_scenarios
 
 _PINNED = (
-    "backtest-engine-v2",
-    "e647a32fbc815186d6af8037489b66065032c362afbd3eb9ab0883ceb943c43d",
+    "backtest-engine-v3",
+    "4ff1ea06bb96fd497775579c4a0bbc691531f6062b14ae09f3245b75f1af694d",
 )
 
 
@@ -40,7 +41,11 @@ def _rules_digest() -> str:
         digest.update(engine.event_store.trace_bytes())
         digest.update(engine.event_store.decision_tape_bytes())
     # ADV(20행)·σ(수익률 20개) 창이 차도록 25세션. 거래대금이 세션마다 달라 창 길이가 결과를 가른다.
-    bars = [(date(2024, 1, day), "A", 100.0 + day % 7, 1e6 * day) for day in range(1, 26)]
+    # 10일은 거래정지라 bar 가 없고 그날의 1:2 분할은 다음 행에서 정산된다(#339).
+    bars = [
+        (date(2024, 1, day), "A", 100.0 + day % 7, 1e6 * day) for day in range(1, 26) if day != 10
+    ]
+    settled = settlement_multipliers(bars, [(date(2024, 1, 10), "A", 2.0)])
     environment = RunEnvironment(
         start=date(2024, 1, 1),
         end=date(2024, 1, 25),
@@ -48,8 +53,8 @@ def _rules_digest() -> str:
         impact_model=ImpactModel.SQRT,
         participation_basis=ParticipationBasis.ADV20,
     )
-    scales = impact_scales(environment, bars, set()) or {}
-    volumes = participation_volumes(environment, bars) or {}
+    scales = impact_scales(environment, bars, settled) or {}
+    volumes = participation_volumes(environment, bars, settled) or {}
     rules = (
         STATUTORY_SELL_TAX_BPS,
         MAX_IMPACT_FRACTION,

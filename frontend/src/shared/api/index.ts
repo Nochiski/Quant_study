@@ -44,6 +44,13 @@ export type {
   UsageView,
 } from "./generated/types.gen";
 export {
+  isApplicableWhen,
+  projectApplicability,
+  type ApplicabilityCondition,
+  type DefaultResolver,
+  type FieldApplicability,
+} from "./field-applicability";
+export {
   ApiRequestError,
   configureStrategyWorkbenchApi,
   failureReason,

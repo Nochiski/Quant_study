@@ -479,6 +479,8 @@ export const getBacktestStatus = <ThrowOnError extends boolean = false>(
 
 /**
  * Cancel Backtest
+ *
+ * 사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다.
  */
 export const cancelBacktest = <ThrowOnError extends boolean = false>(
   options: Options<CancelBacktestData, ThrowOnError>,
@@ -750,7 +752,8 @@ export const listExperimentTrials = <ThrowOnError extends boolean = false>(
 /**
  * Retry Experiment Trial
  *
- * 실패·취소된 trial 을 새 attempt 로 다시 넘긴다.
+ * 실패·취소된 trial 을 새 attempt 로 다시 넘긴다. 기반 요청이 이제 접수되지 않으면 백테스트
+ * 시작과 같은 코드로 거절한다.
  */
 export const retryExperimentTrial = <ThrowOnError extends boolean = false>(
   options: Options<RetryExperimentTrialData, ThrowOnError>,

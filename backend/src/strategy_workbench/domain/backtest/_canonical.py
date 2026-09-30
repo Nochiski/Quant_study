@@ -12,7 +12,7 @@ from ._models import BacktestRunSpec, RunEnvironment
 # 체결 결과나 비용 규칙(법정 세율표·ADV·σ 창·충격 상한·척도 공식)을 바꾸는 PR 은 이 값을 올린다 —
 # `tests/test_engine_rules_version.py` 가 규칙 digest 와 짝으로 고정한다(#335). 올리지 않으면 같은
 # 지문으로 옛 규칙의 결과를 공유한다.
-ENGINE_RULES_VERSION = "backtest-engine-v2"
+ENGINE_RULES_VERSION = "backtest-engine-v3"
 
 
 def backtest_run_fingerprint(

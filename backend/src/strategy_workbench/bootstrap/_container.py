@@ -34,6 +34,7 @@ from strategy_workbench.application.assistant_chat.facade.chat import AssistantC
 from strategy_workbench.application.assistant_chat.facade.profiles import ProviderProfileService
 from strategy_workbench.application.assistant_chat.facade.turns import AssistantTurnRunner
 from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestArtifactUnreadableError,
     BacktestExecutionRequest,
     BacktestExecutorPort,
     CancellationCheck,
@@ -46,6 +47,7 @@ from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
     BacktestRunSpec,
     BacktestRunState,
+    TrialLedger,
     rejection_code,
 )
 from strategy_workbench.application.equity_workspace.facade.ports import EquityDataPort
@@ -57,6 +59,7 @@ from strategy_workbench.application.experiment_run.facade.experiments import (
 )
 from strategy_workbench.application.experiment_run.facade.ports import (
     AdmittedRun,
+    TrialResultUnreadableError,
     TrialRunRejectedError,
 )
 from strategy_workbench.application.factor_research.facade.research import (
@@ -254,8 +257,8 @@ class _RunServiceTrialRuns:
     """`TrialRunPort` 구현: 실행 서비스를 감싼다(검증 랩 spec D6).
 
     어시스턴트의 `_RunServiceBacktestResults` 와 같은 모양이다. 실험이 `backtest_run` 유스케이스를
-    import 하지 않도록 bootstrap 이 감싼다. trial 제출은 요청 스레드 밖에서 돌므로 접수 거절
-    (`rejection_code` 가 코드를 주는 오류)만 `TrialRunRejectedError` 로 옮겨 attempt 에 남기게 한다.
+    import 하지 않도록 bootstrap 이 감싼다. 접수 거절(`rejection_code` 가 코드를 주는 오류)은
+    `TrialRunRejectedError` 로, 결과 파일 읽기 실패는 `TrialResultUnreadableError` 로 옮긴다.
     """
 
     def __init__(
@@ -270,22 +273,24 @@ class _RunServiceTrialRuns:
         self._held_run_ids = held_run_ids
 
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
-        admission = self._runs.admit(request)
+        try:
+            admission = self._runs.admit(request)
+        except Exception as error:
+            rejected = _rejected(error)
+            if rejected is None:
+                raise
+            raise rejected from error
         if admission.lineage_id is None:  # pragma: no cover - 실험은 저장 리비전으로만 만든다
             raise RuntimeError(
                 f"experiment base run has no lineage — spec_hash={admission.provenance.spec_hash}"
             )
         return AdmittedRun(admission.spec, self._runs.trial_ledger(admission.lineage_id))
 
-    def rejection(self, error: Exception) -> TrialRunRejectedError | None:
-        code = rejection_code(error)
-        return None if code is None else TrialRunRejectedError(code, str(error))
-
     def start(self, request: BacktestRunSpec, *, trial_key: str, owner: str) -> str:
         try:
             run_id = self._runs.start(request, owner=owner, trial_key_override=trial_key).run.run_id
         except Exception as error:
-            rejected = self.rejection(error)
+            rejected = _rejected(error)
             if rejected is None:
                 raise
             raise rejected from error
@@ -294,7 +299,13 @@ class _RunServiceTrialRuns:
         return run_id
 
     def result(self, run_id: str) -> BacktestRunResult:
-        return self._runs.result(run_id)
+        try:
+            return self._runs.result(run_id)
+        except BacktestArtifactUnreadableError as error:
+            raise TrialResultUnreadableError(str(error)) from error
+
+    def trial_ledger(self, lineage_id: str) -> TrialLedger:
+        return self._runs.trial_ledger(lineage_id)
 
     def sessions(self, start: date, end: date) -> tuple[date, ...]:
         return self._equity_data.trading_sessions(start, end)
@@ -307,6 +318,12 @@ class _RunServiceTrialRuns:
 
     def cancel(self, run_id: str, *, owner: str) -> None:
         self._runs.cancel(run_id, owner=owner)
+
+
+def _rejected(error: Exception) -> TrialRunRejectedError | None:
+    """접수 거절이면 코드를 실은 `TrialRunRejectedError`, 아니면 None(예상 밖 오류)."""
+    code = rejection_code(error)
+    return None if code is None else TrialRunRejectedError(code, str(error))
 
 
 class _TrialHold:

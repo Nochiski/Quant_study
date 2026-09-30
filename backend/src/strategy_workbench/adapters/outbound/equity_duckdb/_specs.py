@@ -70,6 +70,8 @@ CONSENSUS_MACRO = "v_consensus"
 FIN_MACRO = "v_fin_latest"
 CREDIT_MACRO = "v_credit_balance"
 ADJ_MACRO = "v_adj_close"
+# 원장이 접지 못한 사건(#369) — 필드 원천이 아니라 백테스트 사건 피드가 읽는다
+UNFOLDED_MACRO = "v_unfolded_event"
 
 REQUIRED_TABLES = (CALENDAR_TABLE, SPAN_TABLE, UNIVERSE_TABLE, POLICY_TABLE, PRICE_TABLE)
 

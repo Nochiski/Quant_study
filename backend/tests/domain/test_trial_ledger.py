@@ -49,7 +49,8 @@ def test_a_trial_counts_once_and_its_first_completed_run_is_the_representative()
         (
             _entry("r1", _A, RunStatus.COMPLETED, done_after_minutes=9, sharpe=0.05),
             _entry("r2", _A, RunStatus.COMPLETED, done_after_minutes=3, sharpe=0.07),
-            _entry("r3", _A, RunStatus.FAILED),
+            # 커밋 뒤 취소·완료 저장 실패처럼 결과 없이 끝났는데 샤프가 적힌 실행(#390 리뷰 P3-1).
+            _entry("r3", _A, RunStatus.FAILED, sharpe=0.2),
             _entry("r4", _A, RunStatus.RUNNING),
             _entry("r5", _B, RunStatus.CANCELLED),
         ),
@@ -63,11 +64,12 @@ def test_a_trial_counts_once_and_its_first_completed_run_is_the_representative()
         "r2",
         0.07,
     )
-    assert [(run.run_id, run.role) for run in first.runs] == [
-        ("r1", TrialRunRole.RECHECK),
-        ("r2", TrialRunRole.COUNTED),
-        ("r3", TrialRunRole.NO_RESULT),
-        ("r4", TrialRunRole.PENDING),
+    # 재확인 실행도 자기 세션 샤프를 싣는다(워크포워드 창 고르기의 학습 점수).
+    assert [(run.run_id, run.role, run.session_sharpe) for run in first.runs] == [
+        ("r1", TrialRunRole.RECHECK, 0.05),
+        ("r2", TrialRunRole.COUNTED, 0.07),
+        ("r3", TrialRunRole.NO_RESULT, None),
+        ("r4", TrialRunRole.PENDING, None),
     ]
     assert second.representative_run_id is None
     assert [run.role for run in second.runs] == [TrialRunRole.NO_RESULT]

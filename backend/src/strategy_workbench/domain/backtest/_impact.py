@@ -7,7 +7,8 @@
 - k 는 `impact_coefficient`. 기본 1.0 은 Tóth 외 2011 의 "Y 는 1 안팎"과 도쿄증권거래소 전 종목 평균
   0.84(Sato·Kanazawa 2024)를 보수적으로 올린 값이다.
 - σ일은 판단일(그 종목의 t 직전 행)까지 최근 20개 종가 대 종가 수익률의 표본 표준편차다. 가격이
-  원주가라 자본변동 세션에서 끝나는 수익률은 변동성이 아니므로 뺀다.
+  원주가라 자본변동 정산 행(엔진처럼 사건 세션 이후 그 종목의 첫 행, `settlement_multipliers`)에서
+  끝나는 수익률은 변동성이 아니므로 뺀다.
 - ADV 는 참여 기준 `adv20` 과 같은 주식 수(`adv_shares`, 내림하지 않음)다. 참여 기준과 무관하게 늘
   ADV 를 쓴다 — 문헌의 V 는 일평균 거래량이고, 체결 세션 거래량은 체결 시점에 모르는 값이다.
 - 수익률이 2개 미만이면(측정 구간 안 신규 상장의 첫 세션들) 척도는 0 이다. ADV 가 0 인 경우(앞선
@@ -20,7 +21,7 @@ from __future__ import annotations
 import math
 import operator
 from collections import deque
-from collections.abc import Iterable, Sequence, Set
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 
 from ._models import ImpactModel, RunEnvironment
@@ -48,18 +49,18 @@ def cost_history_sessions(environment: RunEnvironment) -> int:
 def impact_scales(
     environment: RunEnvironment,
     bars: Iterable[tuple[date, str, float, float | None]],
-    action_sessions: Set[tuple[date, str]],
+    settled: Mapping[tuple[date, str], float],
 ) -> dict[tuple[date, str], float] | None:
     """`(세션, 종목, 종가, 거래대금)` 행마다 √ 충격 척도 k × σ일 / √ADV.
 
-    `fixed_bps` 면 `None` 이다 — 엔진이 고정 bp 슬리피지를 쓴다. `action_sessions` 는 자본변동이
-    적용된 `(세션, 종목)` 이다. 워밍업 행과 워밍업 구간 자본변동을 함께 넘겨야 첫 세션들의 창이
-    찬다.
+    `fixed_bps` 면 `None` 이다 — 엔진이 고정 bp 슬리피지를 쓴다. `settled` 는 자본변동 정산 행과
+    가격 배수(`settlement_multipliers`)다. 워밍업 행과 워밍업 구간 자본변동을 함께 넘겨야 첫
+    세션들의 창이 찬다.
     """
     if environment.impact_model is not ImpactModel.SQRT:
         return None
     rows = sorted(bars, key=lambda row: row[0])
-    adv = adv_shares(rows)
+    adv = adv_shares(rows, settled)
     scales: dict[tuple[date, str], float] = {}
     returns: dict[str, deque[float]] = {}
     last_close: dict[str, float] = {}
@@ -72,7 +73,7 @@ def impact_scales(
             else 0.0
         )
         previous_close = last_close.get(security_id)
-        if previous_close and key not in action_sessions:
+        if previous_close and key not in settled:
             window.append(close / previous_close - 1)
         last_close[security_id] = close
     return scales

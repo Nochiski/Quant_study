@@ -13,6 +13,7 @@ from datetime import date
 from typing import Protocol
 
 from strategy_workbench.domain.backtest.facade.runs import (
+    AdmissionRejectionCode,
     BacktestRunResult,
     BacktestRunSpec,
     BacktestRunState,
@@ -21,11 +22,19 @@ from strategy_workbench.domain.backtest.facade.trials import TrialLedger
 
 
 class TrialRunRejectedError(RuntimeError):
-    """실행 서비스가 trial 실행 요청을 접수하지 않았다. `code` 는 실행 접수 거절 코드다."""
+    """실행 서비스가 요청을 접수하지 않았다. `code` 는 실행 접수 거절 코드다.
 
-    def __init__(self, code: str, message: str) -> None:
+    감싼 실행 서비스의 원래 거절은 `__cause__` 로 남는다 — 실험 만들기·재시도의 inbound 가 실행
+    시작과 같은 HTTP 거절로 옮긴다.
+    """
+
+    def __init__(self, code: AdmissionRejectionCode, message: str) -> None:
         super().__init__(message)
-        self.code = code
+        self.code: AdmissionRejectionCode = code
+
+
+class TrialResultUnreadableError(RuntimeError):
+    """완료된 실행의 결과 파일을 읽을 수 없다(지워졌거나 기록한 해시·지금 모델과 다르다)."""
 
 
 @dataclass(frozen=True)
@@ -39,18 +48,11 @@ class AdmittedRun:
 
 class TrialRunPort(Protocol):
     def admit(self, request: BacktestRunSpec) -> AdmittedRun:
-        """실행 시작과 같은 판정(preflight 포함)으로 검사하되 접수하지 않는다.
+        """실행 시작과 같은 판정(preflight 포함)으로 검사하되 접수하지 않는다. 실행 요청이 아니므로
+        봉인 원장에 남기지 않는다.
 
-        거절은 감싼 실행 서비스의 접수 오류 그대로 올라가고, inbound 가 실행 접수와 같은 코드로
-        옮긴다. 실행 요청이 아니므로 봉인 원장에 남기지 않는다.
-        """
-        ...
-
-    def rejection(self, error: Exception) -> TrialRunRejectedError | None:
-        """`admit` 이 올린 오류가 접수 거절이면 코드를 실은 오류, 아니면 None(예상 밖 오류).
-
-        실험을 만들 때는 거절을 그대로 올려 inbound 가 옮기고, 워크포워드 검증 실행처럼 요청
-        스레드 밖에서 다시 검사할 때는 이것으로 코드를 받아 기록한다.
+        Raises:
+            TrialRunRejectedError: 실행 서비스가 요청을 접수하지 않는다.
         """
         ...
 
@@ -66,7 +68,15 @@ class TrialRunPort(Protocol):
         ...
 
     def result(self, run_id: str) -> BacktestRunResult:
-        """완료된 실행의 결과(창별 선택의 학습 점수·이어 붙인 검증 곡선)."""
+        """완료된 실행의 결과(이어 붙인 검증 곡선).
+
+        Raises:
+            TrialResultUnreadableError: 결과 파일을 읽을 수 없다.
+        """
+        ...
+
+    def trial_ledger(self, lineage_id: str) -> TrialLedger:
+        """계열 원장. 창 고르기는 실행마다 원장에 적힌 세션 샤프를 학습 점수로 읽는다."""
         ...
 
     def sessions(self, start: date, end: date) -> tuple[date, ...]:

@@ -90,6 +90,7 @@ export type {
   AssistantTurnContextMismatchDetail,
   AssistantTurnInProgressDetail,
   AssistantUnprocessableResponse,
+  BacktestCancelResult,
   BacktestEnvironmentRequiredDetail,
   BacktestParameterInvalidDetail,
   BacktestResearchWindowViolationDetail,

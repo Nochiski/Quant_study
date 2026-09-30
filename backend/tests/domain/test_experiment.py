@@ -460,9 +460,21 @@ def test_window_gap_says_why_a_window_stays_off_the_curve(
 def test_a_finished_failure_outranks_windows_still_running() -> None:
     gaps = [None, WalkForwardGap.PENDING, WalkForwardGap.NO_CELL, WalkForwardGap.TEST_FAILED]
 
-    assert walk_forward_gap(gaps) is WalkForwardGap.TEST_FAILED
-    assert walk_forward_gap(gaps[:3]) is WalkForwardGap.NO_CELL
-    assert walk_forward_gap([None, None]) is None
+    assert walk_forward_gap(gaps, cancelled=False) is WalkForwardGap.TEST_FAILED
+    assert walk_forward_gap(gaps[:3], cancelled=False) is WalkForwardGap.NO_CELL
+    assert walk_forward_gap([None, None], cancelled=False) is None
+
+
+def test_a_cancelled_experiment_reports_cancelled_unless_every_window_finished() -> None:
+    """#377 V3-AUDIT-01: 취소한 실험은 남은 창을 더 고르지 않으므로 "진행 중" 으로 남기지 않는다."""
+    assert walk_forward_gap([None, WalkForwardGap.PENDING], cancelled=True) is (
+        WalkForwardGap.CANCELLED
+    )
+    assert walk_forward_gap([WalkForwardGap.TEST_FAILED], cancelled=True) is (
+        WalkForwardGap.CANCELLED
+    )
+    # 취소 전에 모든 창의 검증이 끝났으면 요약을 그대로 낸다.
+    assert walk_forward_gap([None, None], cancelled=True) is None
 
 
 @pytest.mark.parametrize(

@@ -117,6 +117,9 @@ const server = setupServer(
   http.get(`${API}/api/v1/strategy-drafts/:draftId`, () =>
     HttpResponse.json({ detail: { code: "x" } }, { status: 404 }),
   ),
+  http.get(`${API}/api/v1/backtests`, () =>
+    HttpResponse.json({ items: [], total: 0, offset: 0, limit: 25 }),
+  ),
   http.get(`${API}/api/v1/experiments`, () =>
     HttpResponse.json({
       items: [
@@ -283,6 +286,60 @@ describe("experiments", () => {
     await waitFor(() => expect(cancelled).toEqual(["e-run"]));
   });
 
+  // #402 리뷰 P2-1·P3-2: 뒤쪽 실험도 커서로 열어 조작하고, 조작 거절은 코드 번역으로 말한다.
+  it("pages through the list with the response cursor and translates a refused control", async () => {
+    const afters: (string | null)[] = [];
+    server.use(
+      http.get(`${API}/api/v1/experiments`, ({ request }) => {
+        const after = new URL(request.url).searchParams.get("after");
+        afters.push(after);
+        return HttpResponse.json({
+          items: [
+            experiment(after === null ? "e-new" : "e-old", "paused", {
+              paused: true,
+              priority: 1,
+            }),
+          ],
+          next_after: after === null ? "e-new" : null,
+          slots: { total: 3, running: 0 },
+          max_priority: 5,
+        });
+      }),
+      http.patch(`${API}/api/v1/experiments/:experimentId/controls`, () =>
+        HttpResponse.json(
+          {
+            detail: {
+              code: "experiment.not_found",
+              message: "experiment_id=e-old",
+            },
+          },
+          { status: 404 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    const history = mount("/research/experiments");
+
+    expect(await screen.findByText("e-new")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "처음 쪽으로" })).toBeNull();
+    await user.click(screen.getByRole("link", { name: "다음" }));
+    expect(await screen.findByText("e-old")).toBeInTheDocument();
+    expect(history.location.search).toContain("after=e-new");
+    expect(afters).toEqual([null, "e-new"]);
+    expect(screen.queryByRole("link", { name: "다음" })).toBeNull();
+    expect(screen.getByRole("link", { name: "처음 쪽으로" })).toHaveAttribute(
+      "href",
+      "/research/experiments",
+    );
+
+    await user.click(screen.getByRole("button", { name: "재개" }));
+    expect(
+      await screen.findByText(
+        "실험을 찾을 수 없습니다. 실험 목록에서 다시 여세요.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("points to the backtest result when there is no experiment yet", async () => {
     server.use(
       http.get(`${API}/api/v1/experiments`, () =>
@@ -320,6 +377,10 @@ describe("experiments", () => {
     expect(summary).toHaveTextContent(
       "조합 1개 · 창 2개 · 백테스트 실행 2회 · 계열 시도 수 4회 → 5회",
     );
+    // 기반이 무엇인지 한 줄로 보인다(#402 리뷰 P2-2).
+    expect(
+      screen.getByText("기반 s1 · v2 · 연구 기간 2021-01-04 ~ 2025-12-30"),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("checkbox", { name: "탐색: top_n" }));
     await waitFor(() =>
       expect(summary).toHaveTextContent(

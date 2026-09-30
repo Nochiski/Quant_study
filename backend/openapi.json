@@ -3024,6 +3024,7 @@
                 }
               ]
             },
+            "description": "parameter_id → 탐색 값 목록. 값이 null 이면 문서 정의가 허용하는 격자 값 전체를 편다. 키가 없는 파라미터는 탐색하지 않고 기반 실행의 값을 쓴다.",
             "title": "Search",
             "type": "object"
           },
@@ -12128,6 +12129,56 @@
           }
         },
         "summary": "Get Backtest Result"
+      }
+    },
+    "/api/v1/backtests/{run_id}/summary": {
+      "get": {
+        "description": "이력 한 행. 결과 화면이 실행 종류(단일·실험 trial·워크포워드 검증)를 서버 판정으로\n읽는다.",
+        "operationId": "getBacktestSummary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestRunNotFoundResponse"
+                }
+              }
+            },
+            "description": "The backtest run does not exist"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Backtest Summary"
       }
     },
     "/api/v1/equity/catalog": {

@@ -11,21 +11,20 @@ import {
   strategyWorkbenchApi,
   type ExperimentRequest,
 } from "../../../shared/api";
+import { isExperimentSettled } from "./experiment-status";
 
 export const experimentsKey = () => ["experiments"] as const;
 
-const settled = new Set(["completed", "cancelled"]);
-
 /**
- * 실험 목록과 대기열 표면(슬롯 사용량·우선순위 상한). 상태·진행 수는 backend 가 파생해 싣고(spec D6), 끝나지
- * 않은 실험이 있으면 2초마다 다시 묻는다.
+ * 실험 목록 한 쪽과 대기열 표면(슬롯 사용량·우선순위 상한). 상태·진행 수는 backend 가 파생해 싣고(spec D6), 이
+ * 쪽에 끝나지 않은 실험이 있으면 2초마다 다시 묻는다. `after` 는 앞 쪽 응답의 `next_after` 다.
  */
-export const experimentsQuery = () =>
+export const experimentsQuery = (after?: string) =>
   queryOptions({
-    queryKey: [...experimentsKey(), "list"],
-    queryFn: () => strategyWorkbenchApi.listExperiments(),
+    queryKey: [...experimentsKey(), "list", after ?? null],
+    queryFn: () => strategyWorkbenchApi.listExperiments(after),
     refetchInterval: (query) =>
-      query.state.data?.items.some((item) => !settled.has(item.status))
+      query.state.data?.items.some((item) => !isExperimentSettled(item.status))
         ? 2_000
         : false,
   });

@@ -389,6 +389,26 @@ def test_cancel_stops_submission_and_cancels_submitted_runs() -> None:
     assert not any(state.retryable for state in service.trials(experiment_id))
 
 
+def test_cancelling_a_completed_experiment_leaves_it_completed() -> None:
+    """#402 리뷰 P3-3: 목록이 아직 도는 것으로 보인 틈에 누른 취소가 결과가 다 나온 실험을 취소로
+    바꾸지 않는다."""
+    runs = _FakeRuns()
+    service = _service(runs)
+    experiment_id = service.create(_request(split=_BEST)).record.experiment_id
+    _finish(runs, {f"run-{index}": _result(0.1 * (index + 1)) for index in range(4)})
+    assert service.advance(experiment_id) is True
+    runs.complete_all()
+    assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
+
+    after = service.cancel(experiment_id)
+
+    assert (after.status, after.record.cancelled_at, runs.cancelled) == (
+        ExperimentStatus.COMPLETED,
+        None,
+        [],
+    )
+
+
 def test_cancel_requests_cancellation_of_every_submitted_run_once() -> None:
     runs = _FakeRuns()
     service = _service(runs)
@@ -495,11 +515,16 @@ def test_a_candidate_is_chosen_only_after_the_experiment_has_finished() -> None:
     service = _service(runs)
     experiment_id = service.create(_request()).record.experiment_id
     _finish(runs, {"run-2": _result()})
+    # 화면이 읽는 `selectable` 도 같은 판정이다 — 완료한 trial 이라도 실험이 끝나기 전에는 거짓이다.
+    unfinished_selectable = service.trials(experiment_id)[2].selectable
 
     with pytest.raises(ExperimentStateError) as raised:
         service.select(experiment_id, 2, "학습 샤프가 가장 높다")
     service.cancel(experiment_id)
+    assert service.trials(experiment_id)[2].selectable
     selection = service.select(experiment_id, 2, "학습 샤프가 가장 높다")
+
+    assert not unfinished_selectable
 
     assert raised.value.code == "experiment.selection.not_finished"
     assert "unfinished_trials=3" in str(raised.value)

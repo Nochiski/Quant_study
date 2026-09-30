@@ -1901,6 +1901,8 @@ export type ExperimentRequest = {
   run: BacktestRunSpec;
   /**
    * Search
+   *
+   * parameter_id → 탐색 값 목록. 값이 null 이면 문서 정의가 허용하는 격자 값 전체를 편다. 키가 없는 파라미터는 탐색하지 않고 기반 실행의 값을 쓴다.
    */
   search: {
     [key: string]: Array<number | number | string | boolean> | null;
@@ -7661,6 +7663,42 @@ export type GetBacktestResultResponses = {
 
 export type GetBacktestResultResponse =
   GetBacktestResultResponses[keyof GetBacktestResultResponses];
+
+export type GetBacktestSummaryData = {
+  body?: never;
+  path: {
+    /**
+     * Run Id
+     */
+    run_id: string;
+  };
+  query?: never;
+  url: "/api/v1/backtests/{run_id}/summary";
+};
+
+export type GetBacktestSummaryErrors = {
+  /**
+   * The backtest run does not exist
+   */
+  404: BacktestRunNotFoundResponse;
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError;
+};
+
+export type GetBacktestSummaryError =
+  GetBacktestSummaryErrors[keyof GetBacktestSummaryErrors];
+
+export type GetBacktestSummaryResponses = {
+  /**
+   * Successful Response
+   */
+  200: BacktestRunSummary;
+};
+
+export type GetBacktestSummaryResponse =
+  GetBacktestSummaryResponses[keyof GetBacktestSummaryResponses];
 
 export type GetEquityCatalogData = {
   body?: never;

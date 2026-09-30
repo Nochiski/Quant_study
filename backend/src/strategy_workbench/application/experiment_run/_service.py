@@ -4,7 +4,7 @@ import logging
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from threading import RLock, Thread
 
@@ -94,7 +94,12 @@ class ExperimentRequest:
     # trial 마다 기간(창의 학습 구간)과 파라미터 값만 바꿔 실행할 기반 요청.
     run: BacktestRunSpec
     # parameter_id → 탐색 값. None 이면 정의가 허용하는 격자 값 전체다(`build_search_spec`).
-    search: dict[str, list[ParameterValue] | None]
+    search: dict[str, list[ParameterValue] | None] = field(
+        metadata={
+            "description": "parameter_id → 탐색 값 목록. 값이 null 이면 문서 정의가 허용하는 격자 "
+            "값 전체를 편다. 키가 없는 파라미터는 탐색하지 않고 기반 실행의 값을 쓴다."
+        }
+    )
     split: SplitSpec
 
 
@@ -318,10 +323,17 @@ class ExperimentRunService:
         return self._trial_states(self._repository.get(experiment_id))
 
     def cancel(self, experiment_id: str) -> Experiment:
-        """아직 넘기지 않은 trial 은 넘기지 않고, 넘긴 실행은 취소를 요청한다. 되돌릴 수 없다."""
+        """아직 넘기지 않은 trial 은 넘기지 않고, 넘긴 실행은 취소를 요청한다. 되돌릴 수 없다.
+
+        이미 끝난(완료) 실험은 그대로 둔다 — 목록이 아직 도는 것으로 보인 틈에 누른 취소가 결과가
+        다 나온 실험을 취소로 바꾸지 않게 한다(#402 리뷰 P3-3). 완료 판정은 `experiment_status` 다.
+        """
         with self._lock:
             record = self._repository.get(experiment_id)
-            if record.cancelled_at is None:
+            if (
+                record.cancelled_at is None
+                and self._experiment(record).status is not ExperimentStatus.COMPLETED
+            ):
                 self._repository.cancel(experiment_id, cancelled_at=self._now())
                 self._cancelled.add(experiment_id)
                 for run in (

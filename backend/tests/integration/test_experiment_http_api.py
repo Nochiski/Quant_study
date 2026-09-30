@@ -104,8 +104,10 @@ def _wait_until_finished(client: TestClient, experiment_id: str) -> dict[str, An
     raise AssertionError(f"experiment did not finish — experiment_id={experiment_id}")
 
 
-def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
-    client = TestClient(build_http_app())
+def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Path) -> None:
+    # 실행 종류는 실행 기록과 실험 기록을 한 research DB 에서 잇는다(파일이 없으면 저장소마다
+    # 메모리 DB 다).
+    client = TestClient(build_http_app(research_db_path=tmp_path / "research.sqlite3"))
     request = _experiment(client)
     lineage = request["run"]["strategy_source"]["strategy_id"]
 
@@ -161,6 +163,15 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment() -> None:
         trial["attempts"][0]["run_id"] for trial in trials.json()
     } | {pick["run_id"] for pick in picks}
     assert [pick["window_index"] for pick in picks] == [0, 1]
+    # 결과 화면이 읽는 실행 한 행(#402 리뷰 P2-2): 종류는 서버가 가른다. 실험 run 을 기반으로 새
+    # 실험을 만들지 않게 화면은 단일 실행에만 "이 실행으로 실험 만들기"를 보인다.
+    single = client.post("/api/v1/backtests", json=request["run"]).json()["run"]["run_id"]
+    kinds = [
+        client.get(f"/api/v1/backtests/{run_id}/summary").json()["kind"]
+        for run_id in (single, trials.json()[0]["attempts"][0]["run_id"], picks[0]["run_id"])
+    ]
+    assert kinds == ["single", "experiment_trial", "walk_forward_validation"]
+    assert client.get("/api/v1/backtests/missing/summary").status_code == 404
     assert [window["run_status"] for window in walk_forward["windows"]] == ["completed"] * 2
     # 곡선은 검증 창(2022-01-04 ~ 2023-01-03, 2023-01-04 ~ 2023-06-30) 세션만 잇는다. 학습 점수처럼
     # 창마다 첫 스냅숏부터 세므로 둘째 창 첫 세션 2023-01-04 점은 없고 학습 구간 세션도 없다.

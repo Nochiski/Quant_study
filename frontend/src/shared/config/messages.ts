@@ -1820,6 +1820,9 @@ const ko = {
   "experiments.new.train": "학습",
   "experiments.new.test": "검증",
   "experiments.new.enqueue": "대기열에 넣기",
+  "experiments.new.base": "기반 {strategy} · v{revision} · 연구 기간 {start} ~ {end}",
+  "experiments.firstPage": "처음 쪽으로",
+  "experiments.pagination": "실험 목록 쪽",
   "problems.compileUnavailable":
     "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요.",
   "form.panel.label": "Form 편집",
@@ -3886,6 +3889,10 @@ export const messages = {
     "experiments.new.train": "Train",
     "experiments.new.test": "Test",
     "experiments.new.enqueue": "Add to queue",
+    "experiments.new.base":
+      "Base {strategy} · v{revision} · research period {start} to {end}",
+    "experiments.firstPage": "First page",
+    "experiments.pagination": "Experiment list pages",
     "problems.compileUnavailable":
       "The validation server could not be reached, so this text is unverified. Try again shortly.",
     "form.panel.label": "Form editing",
@@ -4118,6 +4125,16 @@ export const messages = {
 } as const;
 
 export const t = (key: MessageKey): string => messages.ko[key];
+
+/** `{name}` 자리표시자를 값으로 채운 문장. */
+export const tFill = (
+  key: MessageKey,
+  values: Readonly<Record<string, unknown>>,
+): string =>
+  Object.entries(values).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
+    t(key),
+  );
 
 /** Resolve a backend-provided description key without pretending an unknown key is translated. */
 export const tOptional = (key: string): string | null =>

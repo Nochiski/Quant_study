@@ -131,6 +131,11 @@ const backtestHistorySearch = (
 const textOf = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
 
+/** 실험 목록의 쪽: 앞 쪽 응답의 `next_after`(없으면 첫 쪽). */
+const experimentsSearch = (
+  search: Record<string, unknown>,
+): { after?: string } => ({ after: textOf(search.after) });
+
 /** 새 실험의 기반: 백테스트 실행(`run`) 또는 같은 설정으로 다시 만들 실험(`from`). */
 const newExperimentSearch = (
   search: Record<string, unknown>,
@@ -234,6 +239,7 @@ const backtestRunRoute = createRoute({
 const experimentsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/research/experiments",
+  validateSearch: experimentsSearch,
   component: ExperimentsPage,
 });
 

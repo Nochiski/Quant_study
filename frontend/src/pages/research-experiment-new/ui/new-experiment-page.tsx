@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useId, useState } from "react";
 
 import {
-  backtestErrorSentence,
+  requestRejectionMessage,
   useBacktestRequest,
   type BacktestRunSpec,
 } from "../../../entities/backtest";
@@ -13,15 +13,16 @@ import {
   type ExperimentRequest,
 } from "../../../entities/experiment";
 import { strategyDocumentQuery } from "../../../entities/strategy";
-import { ApiRequestError, failureReason } from "../../../shared/api";
-import { t, type MessageKey } from "../../../shared/config";
+import { failureReason } from "../../../shared/api";
+import { t, tFill, type MessageKey } from "../../../shared/config";
 import { Link, useNavigate, useSearch } from "../../../shared/lib/router";
 import { Button, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
 
-type Split = ExperimentRequest["split"];
+// 화면의 분할은 고르는 기준까지 늘 값이 있다. 기준이 빠진 기록은 처음 값(`INITIAL_SPLIT`)의 기준으로 채운다.
+type Split = Required<ExperimentRequest["split"]>;
 type Search = ExperimentRequest["search"];
-type Rule = NonNullable<Split["selection_rule"]>;
+type Rule = Split["selection_rule"];
 
 const RULES: Record<Rule, MessageKey> = {
   neighbor_mean_sharpe_max: "experiments.new.rule.neighbor_mean_sharpe_max",
@@ -41,17 +42,9 @@ const INITIAL_SPLIT: Split = {
   selection_rule: "neighbor_mean_sharpe_max",
 };
 
-const fill = (key: MessageKey, values: Record<string, unknown>) =>
-  Object.entries(values).reduce(
-    (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
-    t(key),
-  );
-
 /** 미리 계산·만들기 거절 문장. 코드 번역은 백테스트 거절과 같은 `backtest.error.<code>` 체계다. */
 const rejection = (error: unknown): string =>
-  (error instanceof ApiRequestError
-    ? backtestErrorSentence(error.code ?? null, null, error.values)
-    : null) ?? t("experiments.new.failed");
+  requestRejectionMessage(error, "experiments.new.failed");
 
 const NumberField = ({
   label,
@@ -113,6 +106,17 @@ const Form = ({
   const parameters = document.data?.spec.parameters ?? [];
   return (
     <div className="data-list-page__panel">
+      {/* 기반이 무엇인지 한 줄로 보인다 — 어떤 전략·리비전·연구 기간을 나눠 도는지(#402 리뷰 P2-2). */}
+      {source?.kind === "saved_revision" && base.environment ? (
+        <p>
+          {tFill("experiments.new.base", {
+            strategy: source.strategy_id,
+            revision: source.revision,
+            start: base.environment.start,
+            end: base.environment.end,
+          })}
+        </p>
+      ) : null}
       <div className="data-list-page__scroll">
         <table className="data-list-page__table">
           <caption>{t("experiments.new.space")}</caption>
@@ -189,7 +193,7 @@ const Form = ({
         />
         <select
           aria-label={t("experiments.new.rule")}
-          value={split.selection_rule ?? "neighbor_mean_sharpe_max"}
+          value={split.selection_rule}
           onChange={(event) =>
             setSplit({ ...split, selection_rule: event.target.value as Rule })
           }
@@ -212,7 +216,7 @@ const Form = ({
       ) : (
         <>
           <p role="status" aria-label={t("experiments.new.summary")}>
-            {fill("experiments.new.counts", {
+            {tFill("experiments.new.counts", {
               combinations: preview.data.combination_count,
               windows: preview.data.design.windows.length,
               runs: preview.data.run_count,
@@ -232,7 +236,7 @@ const Form = ({
               </thead>
               <tbody>
                 {preview.data.design.windows.map((window, index) => (
-                  <tr key={window.train_start}>
+                  <tr key={window.test_start}>
                     <td>{index + 1}</td>
                     <td>
                       {window.train_start} ~ {window.train_end}
@@ -322,7 +326,7 @@ export const NewExperimentPage = () => {
               axis.values,
             ]),
           )}
-          initialSplit={origin.data.record.split}
+          initialSplit={{ ...INITIAL_SPLIT, ...origin.data.record.split }}
         />
       ) : request.data !== undefined ? (
         <Form

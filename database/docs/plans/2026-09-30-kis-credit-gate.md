@@ -113,3 +113,17 @@
 - 저녁 체인(`daily_evening.sh`)은 이미 소스별 독립 실행(09-23 키움 rc=1 · DART rc=2 · WISE rc=0 이 각각 돌았다) — 변경 없음.
 - 09-23 저녁 키움 `JSONDecodeError`(응답이 JSON 아님) · DART `periodic_followed unresolved=1` — 일회성, 09-28 저녁부터 rc=0.
 - DART `rcept_dt` 가 `rcept_no` 날짜보다 늦은 23행(장 마감 뒤 제출 → 다음 영업일 게재) — 가용 시점이 표기보다 이르므로 look-ahead 아님.
+
+## 8. 실행 결과 (2026-09-30 13:10 KST, 커밋 204c5d87, 배포 rev 204c5d87)
+
+- **GK1 통과** — `database/tests` 1,681 passed · ruff · pyright 0. 재현 테스트 3개(연휴 재실행 · 신용잔고 없는 종목 · 3% 결손)는
+  수정 전 코드에서 서버 로그와 같은 이유로 실패하는 것을 먼저 확인했다(`n_rows(this run)=0 … dup_skipped=4`).
+  셸 테스트 4개(`tests/test_daily_ledger_sh.py`)는 옛 스크립트가 루트를 고정해 수정 전 재현은 불가 — 새 동작만 검증.
+- **GK2 통과** — 서버 `ledger_health --date 20260929 --out logs/verify_kis_gk2`(운영 리포트 비덮어쓰기):
+  `kis.credit.rows` pass `{expected 2530, got 2522, ratio 0.9968, distinct_ok True, requested 2655}`.
+- **GK3 비율 판정 통과, 종목당 1행 하위 검사는 재생에 부적합** — `logs/verify_kis_gate.py`: 판정일 32개 비율 최저 0.9968 · 최고 0.9996 ·
+  판정 1회 3.8초. 다만 원장 전체 기준 "종목당 1행" 이 오래된 판정일 31개에서 위반으로 나왔다. 원인: KIS 가 과거 `deal_date` 행의
+  `stck_prpr` 를 뒤늦게 바꿔 보내고(예: 0099X0 의 09-22 행 2,180 → 2,300, 09-28·09-29 수집), 원장은 값이 다른 행을 정정으로
+  보존한다(DEFECT-A-03 설계). 그래서 날짜가 오래될수록 행이 쌓인다(08-10 은 +49). 운영 판정은 영향 없음 — 수집기는 이번 런
+  적재분(`since`)으로, 건전성 검사는 막 들어온 D−2 로 보며 옛 코드도 같은 논리였다(09-23 은 2,522 = 2,522).
+- **GK4 대기** — 10-01(목) 06:00 실운영 로그.

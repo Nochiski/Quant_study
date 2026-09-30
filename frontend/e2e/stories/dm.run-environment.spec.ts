@@ -209,8 +209,8 @@ test(
     await expect(summary).toContainText(RUN_ENVIRONMENT.start);
 
     // 모드에 따라 읽히는 칸(#352): 매도 거래세율은 "직접 입력"에서만, 가격 충격 계수는 √ 에서만, 슬리피지는
-    // 고정 bp 에서만 켜진다. 켜진 세율 칸이 비면 띠가 그 칸을 채우라고 막고, 방식을 되돌리면 꺼진 칸은 실행을
-    // 막지 않는다.
+    // 고정 bp 에서만 켜진다. 켜진 세율 칸이 비면 띠가 그 칸을 채우라고 막고, 방식을 되돌리면 꺼진 칸에 남은
+    // 세율 값은 실행을 막지 않는다 — 아래 실제 실행이 그 값을 싣지 않은 요청을 서버가 받는지 본다(#343 V2-07).
     await toggle.click();
     const taxMethod = page.getByRole("combobox", { name: "매도 거래세" });
     const taxRate = page.getByRole("spinbutton", {
@@ -234,9 +234,11 @@ test(
     );
     await expect(backtest(page)).toBeDisabled();
     await toggle.click();
+    await taxRate.fill("12");
     await taxMethod.selectOption("krx_statutory");
     await impactModel.selectOption("fixed_bps");
     await expect(taxRate).toBeDisabled();
+    await expect(taxRate).toHaveValue("12");
     await expect(slippage).toBeEnabled();
     await toggle.click();
     await expect(backtest(page)).toBeEnabled();

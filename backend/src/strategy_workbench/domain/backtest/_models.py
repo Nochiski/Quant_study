@@ -185,9 +185,9 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
 
 # 모드에 따라 읽히는 실행 설정 칸(#352). 전략 문서의 `FIELD_APPLICABILITY` 와 같은 표기라 실행
 # 설정 스키마가 `x-applicable-when` 으로 발행하고, 패널은 조건이 서지 않는 칸을 끄고 요청에 싣지
-# 않으며 조건이 서는 칸은 비우지 못하게 한다. 기본값이 없는 칸(`sell_tax_bps`)은 조건이 설 때만
-# 값이 있다 — `__post_init__` 이 같은 행으로 판정한다. 기본값이 있는 칸은 조건이 서지 않으면 읽히지
-# 않을 뿐이다. 조건 문장은 따로 두지 않는다 — 패널은 칸을 끄기만 하므로 설명 키는 칸 자신의 것이다.
+# 않으며 조건이 서는 칸은 비우지 못하게 한다. 모델은 세율 칸(`sell_tax_bps`) 행만 강제한다 — 조건이
+# 설 때만 값이 있어야 한다(`__post_init__`). 다른 칸은 조건이 서지 않으면 읽히지 않을 뿐이다.
+# 조건 문장은 따로 두지 않는다 — 패널은 칸을 끄기만 하므로 설명 키는 칸 자신의 것이다.
 RUN_ENVIRONMENT_APPLICABILITY: dict[str, FieldApplicability] = {
     name: FieldApplicability(
         pointer=f"/{name}",

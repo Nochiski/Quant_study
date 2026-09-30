@@ -957,6 +957,40 @@ describe("run environment panel", () => {
     expect(screen.getByLabelText(/^시작일/)).toHaveValue("2021-01-01");
   });
 
+  // #387 리뷰 P3-2: 아직 고치지 않은 패널의 첫 편집은 저장값 위에서 한다. 한 칸만 고쳐도 나머지 저장값이
+  // 칸·요청·저장(전략별·마지막 사용값)에 남는다 — 빈 기록에서 시작하면 한 칸짜리 기록이 저장값을 덮는다.
+  it("edits one field on top of the remembered environment and keeps the rest", async () => {
+    const remembered = {
+      start: "2021-01-01",
+      end: "2026-08-31",
+      universe_id: "krx.common-stock",
+      participation_rate: "0.2",
+    };
+    localStorage.setItem(
+      `${RUN_ENVIRONMENT_STORAGE_PREFIX}:strategy-1`,
+      JSON.stringify(remembered),
+    );
+    renderWithQuery(<Harness />);
+    const user = await openSettings();
+
+    const fee = screen.getByRole("spinbutton", { name: /수수료/ });
+    await user.clear(fee);
+    await user.type(fee, "7");
+
+    expect(requestBody()?.environment).toEqual({
+      ...ENVIRONMENT,
+      participation_rate: 0.2,
+      fee_bps: 7,
+    });
+    const stored = (key: string): unknown =>
+      JSON.parse(
+        localStorage.getItem(`${RUN_ENVIRONMENT_STORAGE_PREFIX}:${key}`) ??
+          "null",
+      );
+    expect(stored("strategy-1")).toEqual({ ...remembered, fee_bps: "7" });
+    expect(stored("last")).toEqual({ ...remembered, fee_bps: "7" });
+  });
+
   it("replaces every field when an upgraded document's environment is applied", async () => {
     renderWithQuery(<Harness />);
     const user = await openSettings();

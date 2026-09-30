@@ -1589,6 +1589,33 @@ def test_catalog_locked_after_boot_fails_only_the_macro_queries(tmp_path: Path) 
     assert booted.load_backtest_dataset(backtest).bars
 
 
+def test_a_non_lock_catalog_error_after_boot_is_not_reported_as_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """질의 중 잠김이 아닌 카탈로그 오류(손상 등)는 `catalog_locked` 로 삼키지 않는다
+    (#406 리뷰 P3-1).
+
+    삼키면 손상된 카탈로그에 "그 작업이 끝난 뒤 다시 실행한다"를 안내해, 운영자가 기다리기만 하고
+    검증·재생성을 하지 않는다. 원래 duckdb 예외가 그대로 올라간다.
+    """
+    import duckdb
+
+    root = build_workbench_root(tmp_path / "equity")
+    booted = EquityDuckdbAdapter(root)
+    corrupt = "IO Error: The file exists, but it is not a valid DuckDB database file!"
+
+    def open_corrupt(path: Path | None) -> duckdb.DuckDBPyConnection:
+        if path is None:
+            return _open(path)
+        raise duckdb.IOException(corrupt)
+
+    monkeypatch.setattr(f"{_ADAPTER}._open", open_corrupt)
+    with pytest.raises(duckdb.IOException, match="not a valid DuckDB database file"):
+        _raw(booted, fields=("financial.book_equity",))
+    with pytest.raises(duckdb.IOException, match="not a valid DuckDB database file"):
+        booted.load_backtest_dataset(BacktestDataQuery(START, END, ("005930:1",), None))
+
+
 def test_missing_required_table_fails_at_construction(tmp_path: Path) -> None:
     root = build_workbench_root(tmp_path / "equity")
     (root / "universe_policy" / "MANIFEST.json").unlink()

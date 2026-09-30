@@ -3,6 +3,7 @@
  * `SourceOperation` 하나로 바꾸고, 입력 텍스트를 스키마 컨트롤 규칙으로 읽는다. 텍스트 편집과 preflight는
  * `planSourceOperation`의 몫이고 여기서는 fragment를 조립하지 않는다.
  */
+import { t } from "../../../shared/config";
 import { findReferences, type DocumentReference } from "./document-references";
 import type {
   FormControl,
@@ -315,3 +316,29 @@ export const placeholderOf = (
     : field.hasDefault
       ? field.defaultValue
       : defaultFromValueOf(section.fields, field);
+
+/**
+ * 목록 항목 추가 연산과 막힌 사유. 추가·preset·삭제(위치 pointer 연산)만 직전 편집의 parse 가 따라올 때까지
+ * 잠근다(P5-03 리뷰 DEFECT-133-01; 항목 필드·Graph 열기는 열어 둔다 — 3차 P2). 구조 변경 직후의 스칼라 확정은
+ * 훅이 pending 으로 보류한다. Form 목록과 파이프라인 카드 목록이 같이 쓴다.
+ */
+export const listAddition = (
+  schema: JsonSchema | null,
+  section: ListSection,
+  kind: string | null,
+  settling: boolean,
+): { operation: SourceOperation | null; blocked: string | null } => {
+  const operation =
+    schema === null ? null : addItemOperation(schema, section, kind);
+  return {
+    operation,
+    blocked:
+      schema === null
+        ? t("form.list.addNoSchema")
+        : operation === null
+          ? t("form.list.addBlocked")
+          : settling
+            ? t("form.list.addSettling")
+            : null,
+  };
+};

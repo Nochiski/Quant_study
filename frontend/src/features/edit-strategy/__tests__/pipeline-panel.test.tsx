@@ -1,7 +1,7 @@
 /**
  * 그래프 1수준 캔버스(WORKFLOW P4-02): 단계 열·요약 띠·문장 안 컨트롤. 입력은 backend runtime schema fixture 와
- * `ideas/*.yaml` 이고, 캔버스가 내는 연산은 Form 필드 행과 같은 것(`fieldOperation`·`resetOperation`·
- * `unsetOperation`)이어야 한다.
+ * `ideas/*.yaml` 이고, 캔버스가 내는 연산은 Form 과 같은 것(`fieldOperation`·`resetOperation`·`unsetOperation`·
+ * `listAddition`·`removeItemOperation`)이어야 한다.
  */
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -11,9 +11,15 @@ import type { DatasetFieldProfile } from "../../../shared/api";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import type { DocumentDiagnostic } from "../model/document-state";
-import { projectForm, type FormSection } from "../model/form-projection";
+import {
+  projectForm,
+  type FormListSection,
+  type FormSection,
+} from "../model/form-projection";
 import {
   fieldOperation,
+  listAddition,
+  removeItemOperation,
   resetOperation,
   unsetOperation,
   type ObjectSection,
@@ -95,6 +101,12 @@ const objectSection = (sections: FormSection[], key: string): ObjectSection => {
   if (found === undefined || found.kind !== "object") throw new Error(key);
   return found;
 };
+
+const rulesOf = (source: string): FormListSection =>
+  objectSection(
+    projectForm(SCHEMA, parseSource(source, "yaml"), []).sections,
+    "eligibility",
+  ).lists.find((list) => list.key === "rules")!;
 
 describe("PipelinePanel", () => {
   it("단계 이름·영문 소제목·한 줄 설명 아래 카드를 두고, 맨 위에 한 문장 요약을 보인다", () => {
@@ -288,5 +300,50 @@ describe("PipelinePanel", () => {
     expect(
       screen.getByRole("group", { name: "점수 정규화" }),
     ).toHaveTextContent("단위가 다른 팩터를 원값 그대로 더합니다");
+  });
+
+  it("규칙 목록은 Form 목록과 같은 연산으로 항목을 더하고 지운다", async () => {
+    const user = userEvent.setup();
+    const source = idea("low_pbr_high_roe");
+    const { transactions } = renderPanel(source);
+    const rules = screen.getByRole("group", { name: "거르기 규칙 목록" });
+
+    await user.click(
+      within(rules).getByRole("button", {
+        name: "거르기 규칙 목록 · 항목 추가",
+      }),
+    );
+    await user.click(
+      within(rules).getByRole("button", { name: "1번째 항목 · 삭제" }),
+    );
+
+    const list = rulesOf(source);
+    expect(transactions.apply).toHaveBeenNthCalledWith(
+      1,
+      listAddition(SCHEMA, list, null, false).operation,
+      "거르기 규칙 목록",
+      "pipeline",
+      NO_FOCUS,
+    );
+    expect(transactions.apply).toHaveBeenNthCalledWith(
+      2,
+      removeItemOperation(list.items[0]!),
+      "1번째 항목",
+      "pipeline",
+      NO_FOCUS,
+    );
+  });
+
+  it("5 실행 안내는 실행 설정 자리와 캔버스 밖에 남는 것을 스키마대로 말한다", () => {
+    renderPanel(EMPTY);
+    const guide = screen.getByRole("group", { name: "5 실행 Execution" });
+    expect(guide).toHaveTextContent("화면 위 실행 설정에서 고릅니다");
+    // 단계 없는 섹션(`x-stage` 없음)의 이름이다. 문서 버전 스탬프(const)는 빠진다.
+    expect(guide).toHaveTextContent(
+      "전략 이름·전략 설명·탐색 파라미터: YAML·Form 탭에서 고칩니다.",
+    );
+    expect(guide).toHaveTextContent(
+      "팩터 계산식: 아래 고급 편집기에서 고칩니다.",
+    );
   });
 });

@@ -2,9 +2,9 @@
 
 Only a source that compiles without error-severity diagnostics is stored, and it is stored
 exactly (text, format, `source_hash`) inside the revision envelope (P1-06). Identity is assigned
-here, outside the source (authoring ADR D3). A legacy revision created through the JSON spec API
-has no source; `get` regenerates a canonical JSON document for it and says so (`generated=True`,
-`origin=legacy_json`) so an editor never mistakes the projection for the author's text.
+here, outside the source (authoring ADR D3). JSON spec API 로 만든 legacy revision 은 원문이
+없어, `get` 이 승격을 걷은 현재 판 문서(`authoring_document`)를 만들어 주고 그 사실을 알린다
+(`generated=True`, `origin=legacy_json`) — 편집기가 그 글을 작성자의 원문으로 오해하지 않게 한다.
 """
 
 from __future__ import annotations
@@ -52,8 +52,9 @@ class ReviseDocumentRequest:
 class StrategyDocument:
     """A stored revision as an editor sees it: exact source plus what it compiles to.
 
-    `generated` is True when the revision predates document authoring (legacy JSON API) and the
-    source shown is a canonical JSON projection of the stored spec, not text an author wrote.
+    `generated` 는 revision 이 문서 저작 이전(legacy JSON API)이라 보이는 원문이 작성자가 쓴 글이
+    아니라 저장된 spec 에서 만든 문서일 때 참이다 — 승격을 걷은 현재 판 문서
+    (`authoring_document`)다.
     """
 
     strategy_id: str

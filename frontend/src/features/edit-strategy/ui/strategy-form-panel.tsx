@@ -24,19 +24,16 @@ import {
 } from "../model/form-projection";
 import type { CanonicalSnippet } from "../model/canonical-snippets";
 import { coversPointer } from "../model/diagnostic-navigation";
-import type { DocumentReference } from "../model/document-references";
 import type { SummaryNames } from "../model/pipeline-projection";
 import type { DocumentDiagnostic } from "../model/document-state";
 import {
-  addItemOperation,
   addPresetItemOperation,
   defaultFromValueOf,
   draftOf,
   itemKinds,
   itemSection,
+  listAddition,
   parseDraft,
-  removalBlockers,
-  removeItemOperation,
   resetOperation,
   unsetOperation,
   type InvalidDraft,
@@ -49,6 +46,7 @@ import {
   FORM_OWNER,
   NO_FOCUS,
   useFieldCommit,
+  useItemRemoval,
   type CommitPlanner,
 } from "../model/use-field-editing";
 import { useRevealSelection } from "../model/use-reveal-selection";
@@ -341,8 +339,12 @@ const FormListSectionView = ({
   const kinds = schema === null ? null : itemKinds(schema, section);
   const [kind, setKind] = useState<string>("");
   const chosenKind = kinds === null ? null : kind || (kinds[0] ?? "");
-  const addOperation =
-    schema === null ? null : addItemOperation(schema, section, chosenKind);
+  const addition = listAddition(
+    schema,
+    section,
+    chosenKind,
+    transactions.settling,
+  );
   const presets = catalogSnippets.filter(
     (snippet) =>
       snippet.kind === "factor" && snippet.sectionKey === section.key,
@@ -362,17 +364,8 @@ const FormListSectionView = ({
     selectedPointer,
     revealSignal,
   );
-  // 추가·preset·삭제(위치 pointer 연산)만 직전 편집의 parse가 따라올 때까지 잠근다(P5-03 리뷰 DEFECT-133-01;
-  // 항목 필드·Graph 열기는 열어 둔다 — 3차 P2). 구조 변경 직후의 스칼라 확정은 훅이 pending으로 보류한다.
   const settling = transactions.settling;
-  const addBlocked =
-    schema === null
-      ? t("form.list.addNoSchema")
-      : addOperation === null
-        ? t("form.list.addBlocked")
-        : settling
-          ? t("form.list.addSettling")
-          : null;
+  const addBlocked = addition.blocked;
   return (
     <fieldset className="strategy-form__section" disabled={disabled}>
       <legend>
@@ -408,9 +401,9 @@ const FormListSectionView = ({
             disabled={addBlocked !== null}
             aria-describedby={addBlocked === null ? undefined : addReasonId}
             onClick={() => {
-              if (addOperation !== null)
+              if (addition.operation !== null)
                 transactions.apply(
-                  addOperation,
+                  addition.operation,
                   section.key,
                   FORM_OWNER,
                   NO_FOCUS,
@@ -496,32 +489,12 @@ const FormListItemView = ({
   onOpenGraph: ((pointer: string) => void) | undefined;
   selectedPointer: string | undefined;
 }) => {
-  // 삭제 거부 안내는 그 판정을 낸 문서(tree)에만 붙는다. 문서가 바뀌면(재색인 포함) 렌더 중 파생으로
-  // 사라진다 — React key가 pointer(인덱스)라 인스턴스가 다른 항목에 재사용될 수 있다(리뷰 P2-2).
   const notesId = useId();
-  const [blockers, setBlockers] = useState<{
-    tree: unknown;
-    references: DocumentReference[];
-  } | null>(null);
-  const blocked = blockers !== null && blockers.tree === tree ? blockers.references : null;
+  const { blocked, remove } = useItemRemoval(item, tree, transactions);
   const asSection = itemSection(section, item);
   const graphField = item.fields.find(
     (field) => field.control.kind === "graph-link",
   );
-  const remove = (): void => {
-    const references = removalBlockers(tree, item);
-    if (references.length > 0) {
-      setBlockers({ tree, references });
-      return;
-    }
-    setBlockers(null);
-    transactions.apply(
-      removeItemOperation(item),
-      item.summary,
-      FORM_OWNER,
-      NO_FOCUS,
-    );
-  };
   const selected = coversPointer(item.pointer, selectedPointer);
   return (
     <section
@@ -562,18 +535,10 @@ const FormListItemView = ({
           {t("form.list.remove")}
         </Button>
       </header>
-      {/*
-        Graph 노드 삭제 거부는 노드 표시 이름으로 말하지만(P1-04) 여기는 pointer 그대로다.
-        목록 항목을 붙잡는 참조는 문서 전역이라(`/portfolio/signal_factor_id` 같은 자리) 이름보다
-        위치가 더 정확하고, pointer를 표시 이름으로 옮기는 규칙은 아직 owner가 없는 새 사실이다.
-        의도적 제외이며 PLAN P1-04 Non-goals에 적었다.
-      */}
+      {/* Graph 노드 삭제 거부는 노드 표시 이름으로 말하지만(P1-04) 여기는 pointer 그대로다(`useItemRemoval`). */}
       {blocked !== null ? (
         <p className="strategy-form__invalid" role="alert">
-          {t("form.list.blocked").replace(
-            "{pointers}",
-            blocked.map((reference) => reference.pointer).join(", "),
-          )}
+          {blocked}
         </p>
       ) : null}
       <DiagnosticNotes id={notesId} diagnostics={item.diagnostics} />

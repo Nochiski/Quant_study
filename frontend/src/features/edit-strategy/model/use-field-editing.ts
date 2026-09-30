@@ -1,14 +1,17 @@
 /**
- * 필드 편집의 상태 훅(WORKFLOW P4-02). Form 행·Graph 편집기·파이프라인 카드가 같은 확정 경로를 쓴다 — 연산은
- * `form-transactions.ts` 가 만들고, 여기는 적용과 안내 상태만 든다.
+ * 필드·목록 항목 편집의 상태 훅(WORKFLOW P4-02). Form 행·Graph 편집기·파이프라인 카드가 같은 확정·삭제 경로를
+ * 쓴다 — 연산은 `form-transactions.ts` 가 만들고, 여기는 적용과 안내 상태만 든다.
  */
 import { useState } from "react";
 
 import { t } from "../../../shared/config";
-import type { FormField } from "./form-projection";
+import type { DocumentReference } from "./document-references";
+import type { FormField, FormListItem } from "./form-projection";
 import {
   fieldOperation,
   placeholderOf,
+  removalBlockers,
+  removeItemOperation,
   type InvalidDraft,
   type ObjectSection,
 } from "./form-transactions";
@@ -82,4 +85,44 @@ export const useFieldCommit = ({
         setInvalid(t(`form.invalid.${reason}`)),
     },
   };
+};
+
+/**
+ * 목록 항목 삭제와 거부 안내. 다른 곳이 참조하면 지우지 않고 참조 위치를 담은 안내 문장을 돌려준다(Form
+ * 항목과 파이프라인 카드가 같은 문장). 거부 안내는 그 판정을 낸 문서(tree)에만 붙는다 — 문서가
+ * 바뀌면(재색인 포함) 렌더 중 파생으로 사라진다. React key 가 pointer(인덱스)라 인스턴스가 다른 항목에
+ * 재사용될 수 있다(리뷰 P2-2).
+ *
+ * 안내는 pointer 그대로다. 목록 항목을 붙잡는 참조는 문서 전역이라(`/portfolio/signal_factor_id` 같은
+ * 자리) 이름보다 위치가 더 정확하고, pointer를 표시 이름으로 옮기는 규칙은 아직 owner가 없는 새
+ * 사실이다. 의도적 제외이며 PLAN P1-04 Non-goals에 적었다.
+ */
+export const useItemRemoval = (
+  item: FormListItem,
+  tree: unknown,
+  transactions: SourceTransactions,
+  owner: string = FORM_OWNER,
+  label: string = item.summary,
+) => {
+  const [blockers, setBlockers] = useState<{
+    tree: unknown;
+    references: DocumentReference[];
+  } | null>(null);
+  const blocked =
+    blockers !== null && blockers.tree === tree
+      ? t("form.list.blocked").replace(
+          "{pointers}",
+          blockers.references.map((reference) => reference.pointer).join(", "),
+        )
+      : null;
+  const remove = (): void => {
+    const references = removalBlockers(tree, item);
+    if (references.length > 0) {
+      setBlockers({ tree, references });
+      return;
+    }
+    setBlockers(null);
+    transactions.apply(removeItemOperation(item), label, owner, NO_FOCUS);
+  };
+  return { blocked, remove };
 };

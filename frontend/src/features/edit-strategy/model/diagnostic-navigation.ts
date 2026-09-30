@@ -4,6 +4,11 @@ import type {
   FormSection,
 } from "./form-projection";
 import { authoredFactors } from "./graph-transactions";
+import {
+  projectPipeline,
+  type PipelineProjection,
+} from "./pipeline-projection";
+import type { JsonSchema } from "./schema-navigator";
 import type { StrategyView } from "./strategy-views";
 import { factorGraphPointer, factorIndexAtPointer } from "./use-execution-plans";
 
@@ -71,6 +76,23 @@ export const graphCoversPointer = (tree: unknown, pointer: string): boolean => {
   return index < authoredFactors(tree).length;
 };
 
+/**
+ * Graph 탭 맨 위 파이프라인 캔버스(P4-02)가 그 pointer의 카드·목록 항목을 그리는가. 단계가 없는
+ * 섹션(`unstaged` — 전략 이름·설명·파라미터)은 캔버스 밖이라 들어오지 않는다.
+ */
+export const pipelineCoversPointer = (
+  pipeline: PipelineProjection,
+  pointer: string,
+): boolean =>
+  pipeline.stages.some((stage) =>
+    [
+      ...stage.cards.flatMap((card) =>
+        card.rows.map((row) => row.field.pointer),
+      ),
+      ...stage.lists.flatMap(listOwners),
+    ].some((owner) => coversPointer(owner, pointer)),
+  );
+
 export type DiagnosticDestinationInput = {
   /** 지금 선택된 탭. */
   view: StrategyView;
@@ -83,11 +105,12 @@ export type DiagnosticDestinationInput = {
   /** Form·Graph가 함께 읽는 parse tree. */
   tree: unknown;
   /**
-   * runtime schema가 도착했는가. Form·Graph 편집 표면은 둘 다 schema 없이는 렌더되지 않는다
-   * (`factor-graph-panel.tsx`의 `editing.schema === null → null`). `form !== null`로 대신 보면
-   * Graph 판정이 Form 투영의 구현 세부에 묶이므로 page가 명시로 넘긴다(2차 리뷰 R2-4).
+   * runtime schema(아직 없으면 null). Form·Graph 편집 표면은 둘 다 schema 없이는 렌더되지 않고
+   * (`factor-graph-panel.tsx`의 `editing.schema === null → null`), 파이프라인 캔버스의 단계도 schema가
+   * 정한다. `form !== null`로 대신 보면 Graph 판정이 Form 투영의 구현 세부에 묶이므로 page가 명시로
+   * 넘긴다(2차 리뷰 R2-4).
    */
-  schemaLoaded: boolean;
+  schema: JsonSchema | null;
 };
 
 export const resolveDiagnosticDestination = ({
@@ -96,18 +119,22 @@ export const resolveDiagnosticDestination = ({
   pointer,
   form,
   tree,
-  schemaLoaded,
+  schema,
 }: DiagnosticDestinationInput): DiagnosticDestination => {
   // 문서 전체를 가리키는 진단(구문 오류 등)은 어느 카드에도 속하지 않는다.
   if (pointer === "") return "source";
   if (view === sourceView) return "source";
   if (view === "form") return formCoversPointer(form, pointer) ? "current-view" : "source";
   // runtime schema가 아직 없으면 그래프 편집 표면 자체가 렌더되지 않아 그릴 카드가 없다
-  // (P1-01 리뷰 P2-2 변형).
-  if (view === "graph")
-    return schemaLoaded && graphCoversPointer(tree, pointer)
-      ? "current-view"
-      : "source";
+  // (P1-01 리뷰 P2-2 변형). 있으면 위 파이프라인 캔버스와 아래 고급 편집기가 함께 그린다(P4-02).
+  if (view === "graph") {
+    if (schema === null) return "source";
+    const drawn =
+      graphCoversPointer(tree, pointer) ||
+      (form !== null &&
+        pipelineCoversPointer(projectPipeline(schema, form, tree), pointer));
+    return drawn ? "current-view" : "source";
+  }
   // JSON 투영·Diff는 읽기 전용이라 선택을 받지 않는다.
   return "source";
 };

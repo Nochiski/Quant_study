@@ -8,6 +8,7 @@ import {
   type DocumentState,
 } from "./document-state";
 import type { FormProjection } from "./form-projection";
+import type { JsonSchema } from "./schema-navigator";
 import { deduplicateDiagnostics } from "./problem-list";
 import type { StrategyView } from "./strategy-views";
 
@@ -21,8 +22,8 @@ export type DiagnosticNavigationOptions = {
   form: FormProjection | null;
   /** Form·Graph가 함께 읽는 parse tree. */
   tree: unknown;
-  /** runtime schema가 도착했는가(Form·Graph 편집 표면의 렌더 조건). */
-  schemaLoaded: boolean;
+  /** runtime schema(Form·Graph 편집 표면의 렌더 조건, 파이프라인 캔버스의 단계). 아직 없으면 null. */
+  schema: JsonSchema | null;
   /** 지금 탭을 지킨 채 pointer를 선택한다. */
   onSelectPointer: (pointer: string) => void;
   /** 원문 탭으로 전환한다. pointer가 문서 전체면 undefined가 온다. */
@@ -60,7 +61,7 @@ export const useDiagnosticNavigation = ({
   sourceView,
   form,
   tree,
-  schemaLoaded,
+  schema,
   onSelectPointer,
   onOpenSource,
 }: DiagnosticNavigationOptions): DiagnosticNavigation => {
@@ -106,7 +107,7 @@ export const useDiagnosticNavigation = ({
         pointer: diagnostic.pointer,
         form,
         tree,
-        schemaLoaded,
+        schema,
       });
       if (destination === "current-view") {
         pending.current = null;
@@ -127,7 +128,7 @@ export const useDiagnosticNavigation = ({
       onOpenSource,
       onSelectPointer,
       reveal,
-      schemaLoaded,
+      schema,
       sourceView,
       tree,
       view,

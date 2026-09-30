@@ -254,6 +254,25 @@ export const itemName = (item: FormListItem): string | null => {
 };
 
 /**
+ * 캔버스 밖에 남는 것(단계 없는 섹션)의 이름: 필드와 목록의 설명 키 이름, 스키마 스탬프(`const`)는 뺀다.
+ * 무엇이 빠지는지는 스키마 `x-stage` 가 정하므로 안내 카드가 목록을 손으로 적지 않는다(P4-02).
+ */
+export const unstagedNames = (pipeline: PipelineProjection): string[] =>
+  pipeline.unstaged
+    .flatMap((section) =>
+      section.kind === "list"
+        ? [section.descriptionKey]
+        : [
+            ...section.fields
+              .filter((field) => field.control.kind !== "const")
+              .map((field) => field.descriptionKey),
+            ...section.lists.map((list) => list.descriptionKey),
+          ],
+    )
+    .map((key) => tName(key))
+    .filter((name): name is string => name !== null);
+
+/**
  * 필드 하나의 요약 조각: 설명 키 아래 `.summary`(enum은 고른 값의 이름 키 아래 `.summary`)에 같은 카드 필드의
  * 글자를 끼운다. 조각 키가 없거나, 적용되지 않거나, 끼울 값이 없으면 null.
  */

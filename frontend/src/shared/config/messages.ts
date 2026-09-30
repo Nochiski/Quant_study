@@ -1606,6 +1606,8 @@ const ko = {
   "history.trials.merge.source": "합칠 전략",
   "history.trials.merge.choose": "전략을 고르세요",
   "history.trials.merge.noCandidates": "합칠 다른 저장 전략이 없습니다.",
+  "history.trials.merge.partial":
+    "저장 전략 {total}개 가운데 {shown}개만 고를 수 있습니다.",
   "history.trials.merge.cancel": "취소",
   "history.trials.merge.confirm": "합치기",
   "history.trials.merge.failed": "계열을 합치지 못했습니다.",
@@ -3507,6 +3509,8 @@ export const messages = {
     "history.trials.merge.source": "Strategy to merge",
     "history.trials.merge.choose": "Choose a strategy",
     "history.trials.merge.noCandidates": "There is no other saved strategy to merge.",
+    "history.trials.merge.partial":
+      "Only {shown} of {total} saved strategies can be chosen.",
     "history.trials.merge.cancel": "Cancel",
     "history.trials.merge.confirm": "Merge",
     "history.trials.merge.failed": "The lineages could not be merged.",

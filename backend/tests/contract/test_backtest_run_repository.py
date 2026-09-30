@@ -226,6 +226,52 @@ def test_the_kind_and_owning_experiment_come_from_the_experiment_rows(tmp_path: 
     assert repository.get("run-3").experiment_id == "e-2"
 
 
+def test_kind_filters_stay_exact_with_rejected_attempts_among_many_runs(tmp_path: Path) -> None:
+    # #386 리뷰 P2-1: 역조회를 비상관 집계로 바꿨다. 거절된 attempt(run_id NULL)가 섞여도 단일 실행
+    # 필터가 비지 않아야 한다. 규모별 시간은 PR 본문에 쟀고 여기서는 결과만 본다.
+    path = tmp_path / "research.sqlite3"
+    repository = SQLiteBacktestRunRepository(path)
+    runs, at = 2_000, _AT.isoformat()
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            "INSERT INTO backtest_runs (run_id, status, progress, stage, message, created_at, "
+            "updated_at, strategy_kind, spec_hash, schema_version, request_json) "
+            "VALUES (?, 'completed', 1.0, 'completed', 'done', ?, ?, 'inline_draft', ?, '1.2', "
+            "'{}')",
+            [(f"run-{index}", at, at, "a" * 64) for index in range(runs)],
+        )
+        connection.execute(
+            "INSERT INTO experiments (experiment_id, created_at, design_json) "
+            "VALUES ('e-1', ?, '{}')",
+            (at,),
+        )
+        # 짝수 run 은 attempt 가 가리키고 홀수 자리 attempt 는 거절돼 run 이 없다. 4 로 나눠 1 남는
+        # run 은 창 선택이 가리킨다.
+        connection.executemany(
+            "INSERT INTO experiment_attempts (experiment_order, trial_index, attempt, created_at, "
+            "run_id, error_code, error) VALUES (1, ?, 1, ?, ?, ?, ?)",
+            [
+                (index, at, f"run-{index}", None, None)
+                if index % 2 == 0
+                else (index, at, None, "backtest.run.invalid", "rejected")
+                for index in range(runs)
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO experiment_window_picks (experiment_order, window_index, attempt, "
+            "trial_index, train_sharpe, created_at, run_id) VALUES (1, ?, 1, 0, 0.1, ?, ?)",
+            [(index, at, f"run-{index}") for index in range(1, runs, 4)],
+        )
+
+    totals = {kind: repository.list(PageRequest(limit=1), kind=kind).total for kind in RunKind}
+    assert totals == {
+        RunKind.SINGLE: 500,
+        RunKind.EXPERIMENT_TRIAL: 1_000,
+        RunKind.WALK_FORWARD_VALIDATION: 500,
+    }
+    assert len(repository.states([f"run-{index}" for index in range(runs)])) == runs
+
+
 def test_an_unknown_run_is_not_found(tmp_path: Path) -> None:
     repository = SQLiteBacktestRunRepository(tmp_path / "research.sqlite3")
 

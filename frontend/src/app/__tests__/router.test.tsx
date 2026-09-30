@@ -844,7 +844,15 @@ describe("App Shell routes", () => {
     const dialog = within(ledger).getByRole("dialog", {
       name: "다른 계열과 합치기",
     });
-    expect(dialog).toHaveTextContent("합치기는 되돌릴 수 없습니다.");
+    // 되돌릴 수 없다는 경고가 창의 설명이고, 포커스는 창 안 첫 조작(취소)에 있다.
+    expect(dialog).toHaveAccessibleDescription(
+      "합치기는 되돌릴 수 없습니다. 계열을 다시 나누거나 시도를 지우는 기능은 없습니다.",
+    );
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "취소" }),
+      ).toHaveFocus(),
+    );
     const confirm = within(dialog).getByRole("button", { name: "합치기" });
     expect(confirm).toBeDisabled();
     await user.selectOptions(
@@ -949,6 +957,90 @@ describe("App Shell routes", () => {
     );
     expect(await screen.findByText("run-saved")).toBeInTheDocument();
     expect(screen.queryByText("run-inline")).not.toBeInTheDocument();
+  });
+
+  it("closes the merge dialog on Escape, returns focus, and says when candidates are cut", async () => {
+    // #386 리뷰 P3-2·P3-5: 닫으면 연 자리로 포커스가 돌아오고, 후보가 한 쪽을 넘으면 잘렸다고 말한다.
+    server.use(
+      http.get(`${API}/api/v1/strategies`, () =>
+        HttpResponse.json({
+          items: [
+            {
+              strategy_id: "s1",
+              latest_revision: 2,
+              requires_upgrade: false,
+              title: "Alpha strategy",
+              spec_hash: "a".repeat(64),
+              updated_at: "2026-09-05T00:00:00Z",
+            },
+            {
+              strategy_id: "s2",
+              latest_revision: 1,
+              requires_upgrade: false,
+              title: "Beta strategy",
+              spec_hash: "b".repeat(64),
+              updated_at: "2026-09-04T00:00:00Z",
+            },
+          ],
+          total: 600,
+          offset: 0,
+          limit: 500,
+        }),
+      ),
+      http.get(`${API}/api/v1/strategies/:strategyId/trials`, () =>
+        HttpResponse.json(trialLedger(1)),
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/strategies");
+    const ledger = await openTrialLedger(user);
+    const opener = within(ledger).getByRole("button", {
+      name: "다른 계열과 합치기",
+    });
+    await user.click(opener);
+    const dialog = within(ledger).getByRole("dialog");
+    expect(
+      await within(dialog).findByText(
+        "저장 전략 600개 가운데 2개만 고를 수 있습니다.",
+      ),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "취소" }),
+      ).toHaveFocus(),
+    );
+
+    await user.keyboard("{Escape}");
+    expect(within(ledger).queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
+  it("ignores an unknown kind in the URL and shows every run", async () => {
+    // #386 리뷰 P3-4: 모르는 종류는 버리고 거르지 않은 목록을 보인다(서버에 싣지 않는다).
+    const kinds: (string | null)[] = [];
+    server.use(
+      http.get(`${API}/api/v1/backtests`, ({ request }) => {
+        kinds.push(new URL(request.url).searchParams.get("kind"));
+        return HttpResponse.json({
+          items: [
+            backtestSummary({ runId: "run-inline" }),
+            backtestSummary({ runId: "run-saved", kind: "experiment_trial" }),
+          ],
+          total: 2,
+          offset: 0,
+          limit: 25,
+        });
+      }),
+    );
+    mount("/research/backtests?kind=bogus");
+    expect(await screen.findByText("run-inline")).toBeInTheDocument();
+    expect(screen.getByText("run-saved")).toBeInTheDocument();
+    expect(kinds).toEqual([null]);
+    expect(
+      within(screen.getByRole("group", { name: "종류" })).getByRole("button", {
+        name: "전체",
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("labels each run's kind and filters the history by kind", async () => {

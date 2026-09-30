@@ -51,8 +51,9 @@ const MergeDialog = ({
   onClose: () => void;
 }) => {
   const titleId = useId();
+  const warningId = useId();
   const selectId = useId();
-  const select = useRef<HTMLSelectElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
   const [source, setSource] = useState("");
   const candidates = useQuery(
     strategiesQuery({ offset: 0, limit: CANDIDATE_LIMIT }),
@@ -62,13 +63,21 @@ const MergeDialog = ({
     candidates.data?.items.filter((item) => item.strategy_id !== strategyId) ??
     [];
 
+  // 연 자리를 기억해 창 안 첫 조작(취소)으로 옮기고, 닫히면 돌려준다(`dirty-leave-guard.tsx` 와 같은 모양).
   useEffect(() => {
-    select.current?.focus();
-  }, [candidates.isSuccess]);
+    const opener = document.activeElement as HTMLElement | null;
+    queueMicrotask(() => cancel.current?.focus());
+    return () => {
+      queueMicrotask(() => {
+        if (opener?.isConnected) opener.focus();
+      });
+    };
+  }, []);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Escape") return;
     event.preventDefault();
+    event.stopPropagation();
     onClose();
   };
 
@@ -76,6 +85,7 @@ const MergeDialog = ({
     <div
       role="dialog"
       aria-labelledby={titleId}
+      aria-describedby={warningId}
       className="trial-ledger__dialog"
       onKeyDown={onKeyDown}
     >
@@ -86,7 +96,7 @@ const MergeDialog = ({
           strategyLabel,
         )}
       </p>
-      <p className="trial-ledger__warning">
+      <p id={warningId} className="trial-ledger__warning">
         {t("history.trials.merge.warning")}
       </p>
       {candidates.isPending ? (
@@ -99,24 +109,32 @@ const MergeDialog = ({
       ) : others.length === 0 ? (
         <p>{t("history.trials.merge.noCandidates")}</p>
       ) : (
-        <p className="data-list-page__filter">
-          <label htmlFor={selectId}>{t("history.trials.merge.source")}</label>
-          <select
-            id={selectId}
-            ref={select}
-            value={source}
-            onChange={(event) => setSource(event.target.value)}
-          >
-            <option value="">{t("history.trials.merge.choose")}</option>
-            {others.map((item) => (
-              <option key={item.strategy_id} value={item.strategy_id}>
-                {item.title
-                  ? `${item.title} (${item.strategy_id})`
-                  : item.strategy_id}
-              </option>
-            ))}
-          </select>
-        </p>
+        <>
+          {candidates.data.total > candidates.data.items.length ? (
+            <p>
+              {t("history.trials.merge.partial")
+                .replace("{shown}", String(candidates.data.items.length))
+                .replace("{total}", String(candidates.data.total))}
+            </p>
+          ) : null}
+          <p className="data-list-page__filter">
+            <label htmlFor={selectId}>{t("history.trials.merge.source")}</label>
+            <select
+              id={selectId}
+              value={source}
+              onChange={(event) => setSource(event.target.value)}
+            >
+              <option value="">{t("history.trials.merge.choose")}</option>
+              {others.map((item) => (
+                <option key={item.strategy_id} value={item.strategy_id}>
+                  {item.title
+                    ? `${item.title} (${item.strategy_id})`
+                    : item.strategy_id}
+                </option>
+              ))}
+            </select>
+          </p>
+        </>
       )}
       {merge.isError ? (
         <FailureNotice
@@ -131,7 +149,7 @@ const MergeDialog = ({
         />
       ) : null}
       <span className="data-list-page__actions">
-        <Button size="small" tone="ghost" onClick={onClose}>
+        <Button ref={cancel} size="small" tone="ghost" onClick={onClose}>
           {t("history.trials.merge.cancel")}
         </Button>
         <Button
@@ -192,15 +210,14 @@ export const TrialLedgerPanel = ({
             ? null
             : ` ${t("history.trials.mergedInto").replace("{lineage}", data.lineage_id)}`}
         </p>
-        {merging ? null : (
-          <Button
-            size="small"
-            tone="secondary"
-            onClick={() => setMerging(true)}
-          >
-            {t("history.trials.merge")}
-          </Button>
-        )}
+        <Button
+          size="small"
+          tone="secondary"
+          aria-expanded={merging}
+          onClick={() => setMerging(true)}
+        >
+          {t("history.trials.merge")}
+        </Button>
       </div>
       {merging ? (
         <MergeDialog

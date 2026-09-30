@@ -39,27 +39,32 @@ _SUMMARY_COLUMNS = """
 """
 # 실행 종류와 쓰는 실험(검증 랩 V5-03, #382)은 저장하지 않고 같은 파일에서 읽는다. 실험 attempt 가
 # 가리키면 실험 trial, 워크포워드 창 선택이 가리키면 검증 창 실행이다(둘 다면 attempt 가 먼저).
+# 역조회는 비상관 집계라 문장당 한 번 만들어진다(run_id 에 인덱스가 없어 상관 서브쿼리면 run 수 ×
+# attempt 수로 커진다, #386 리뷰 P2-1). 거절된 attempt·고를 칸 없는 창은 run_id 가 NULL 이라 뺀다.
 _RUNS = f"""(
-    SELECT *, CASE
-        WHEN trial_owner IS NOT NULL THEN '{RunKind.EXPERIMENT_TRIAL.value}'
-        WHEN pick_owner IS NOT NULL THEN '{RunKind.WALK_FORWARD_VALIDATION.value}'
-        ELSE '{RunKind.SINGLE.value}' END AS kind,
-        COALESCE(trial_owner, pick_owner) AS owner_order
-    FROM (
-        SELECT backtest_runs.*,
-            (SELECT experiment_order FROM experiment_attempts AS a
-             WHERE a.run_id = backtest_runs.run_id ORDER BY attempt_order LIMIT 1) AS trial_owner,
-            (SELECT experiment_order FROM experiment_window_picks AS p
-             WHERE p.run_id = backtest_runs.run_id ORDER BY pick_order LIMIT 1) AS pick_owner
-        FROM backtest_runs
-    )
+    SELECT backtest_runs.*,
+        CASE
+            WHEN trials.owner IS NOT NULL THEN '{RunKind.EXPERIMENT_TRIAL.value}'
+            WHEN picks.owner IS NOT NULL THEN '{RunKind.WALK_FORWARD_VALIDATION.value}'
+            ELSE '{RunKind.SINGLE.value}'
+        END AS kind,
+        experiments.experiment_id AS experiment_id,
+        COALESCE(experiment_controls.paused, 0) AS experiment_paused
+    FROM backtest_runs
+    LEFT JOIN (
+        SELECT run_id, MIN(experiment_order) AS owner FROM experiment_attempts
+        WHERE run_id IS NOT NULL GROUP BY run_id
+    ) AS trials USING (run_id)
+    LEFT JOIN (
+        SELECT run_id, MIN(experiment_order) AS owner FROM experiment_window_picks
+        WHERE run_id IS NOT NULL GROUP BY run_id
+    ) AS picks USING (run_id)
+    LEFT JOIN experiments
+        ON experiments.experiment_order = COALESCE(trials.owner, picks.owner)
+    LEFT JOIN experiment_controls
+        ON experiment_controls.experiment_order = experiments.experiment_order
 )"""
-_READ_COLUMNS = f"""{_SUMMARY_COLUMNS}, kind,
-    (SELECT experiment_id FROM experiments AS e
-     WHERE e.experiment_order = owner_order) AS experiment_id,
-    (SELECT paused FROM experiment_controls AS c
-     WHERE c.experiment_order = owner_order) AS experiment_paused
-"""
+_READ_COLUMNS = f"{_SUMMARY_COLUMNS}, kind, experiment_id, experiment_paused"
 
 
 class SQLiteBacktestRunRepository:

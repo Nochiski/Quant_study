@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict
 from datetime import date
 from functools import cached_property
 
@@ -37,7 +38,7 @@ from strategy_workbench.domain.strategy.facade.schema import strategy_document_s
 
 from ._models import BacktestResultUnavailableError, ResultContext, TurnContext, compile_payload
 from ._prompt import RESULT_EXPLAIN_PROMPT_TEMPLATE, SYSTEM_PROMPT_TEMPLATE
-from ._result_context import summarize_backtest_result
+from ._result_context import _plain, summarize_backtest_result
 from .ports.outgoing.backtest_results import BacktestResultPort
 from .ports.outgoing.strategy_compiler import StrategyCompilerPort
 
@@ -196,7 +197,7 @@ def _current_strategy_payload(context: TurnContext) -> dict[str, object]:
     return {
         "source_text": context.source_text,
         "source_format": context.source_format,
-        "environment": dict(context.environment) if context.environment is not None else None,
+        "environment": None if context.environment is None else _plain(asdict(context.environment)),
         "diagnostics": list(context.diagnostics),
     }
 

@@ -358,10 +358,11 @@ def test_trace_preserves_raw_zero_missing_collection_and_coverage_semantics() ->
         raw_by_key[("2024-01-03", "sec-000660-1")]["value"],
         raw_by_key[("2024-01-03", "sec-000660-1")]["kind"],
     ) == (None, "missing")
+    # 수급의 원천 생략은 0 이 아니라 결측이다(#371)
     assert (
         raw_by_key[("2024-01-04", "sec-005930-1")]["value"],
         raw_by_key[("2024-01-04", "sec-005930-1")]["kind"],
-    ) == (0.0, "source_omitted_zero")
+    ) == (None, "missing")
     assert (
         raw_by_key[("2024-01-04", "sec-000660-1")]["value"],
         raw_by_key[("2024-01-04", "sec-000660-1")]["kind"],

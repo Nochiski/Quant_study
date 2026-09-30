@@ -615,7 +615,9 @@ parquet 을 직접 읽는 소비자는 규약을 지킬 수 있지만 `list_fiel
   아직 안 된다**. 워크벤치 어댑터가 `idx:코스피` 형태 주소를 알아보아야 한다. 예약 접두는
   FIELD_MAP §1 에 어휘로 있고 `BacktestDataQuery.benchmark_security_id` 그릇도 이미 있다.
   엔진 계약 변경이라 커널 쪽과 함께 정한다.
-- **`src_omitted` → `CellKind` 라벨 손실**(DESIGN §11 ⑪) — 워크벤치 도메인이 값 없는
+- ~~`src_omitted` → `CellKind` 라벨 손실~~ — **해소(워크벤치 #371, 2026-09-30)**: 키움 공매도는 어댑터가
+  값 0 의 `SOURCE_OMITTED_ZERO` 로 내고 수급·대차·신용은 MISSING 그대로다(정본 FIELD_MAP §1).
+  옛 서술: (DESIGN §11 ⑪) — 워크벤치 도메인이 값 없는
   `SOURCE_OMITTED_ZERO` 를 거부해 S21-3 이 MISSING 으로 접었다. 소비층이 "0 으로 읽어도 되는 결측"과
   "그냥 결측"을 구분하지 못한다. 해소는 (a) `dataset_profile` 이 값 축·지식 축을 분리하거나
   (b) 워크벤치 도메인 계약 변경.

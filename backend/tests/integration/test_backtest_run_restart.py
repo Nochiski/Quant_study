@@ -169,8 +169,10 @@ def test_runs_left_unfinished_by_the_previous_process_are_closed_as_interrupted(
         assert state["status"] == "failed"
         assert state["error_code"] == "backtest.run.interrupted"
         assert f"status={statuses[run_id].value} stage=tape" in state["error"]
-        # 취소도 이미 닫힌 상태를 그대로 돌려준다.
-        assert client.post(f"/api/v1/backtests/{run_id}/cancel").json() == state
+        # 취소도 이미 닫힌 상태를 그대로 돌려준다(다른 소유자 때문에 계속 도는 run 이 아니다).
+        assert client.post(f"/api/v1/backtests/{run_id}/cancel").json() == state | {
+            "kept_by_owners": False
+        }
     assert client.get("/api/v1/backtests/completed").json()["status"] == "completed"
 
 

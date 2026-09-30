@@ -38,6 +38,7 @@ from strategy_workbench.application.backtest_run.facade.ports import (
     BacktestRunRepositoryPort,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
+    BacktestResultNotReadyError,
     BacktestRunNotFoundError,
     BacktestRunService,
     BacktestRunSpec,
@@ -189,9 +190,11 @@ class _RefusingUpdate(SQLiteBacktestRunRepository):
         raise ResearchStorageError(f"disk full — run_id={state.run_id}")
 
 
-def test_a_failed_transition_write_is_logged_and_the_run_keeps_going(
+def test_a_completion_that_cannot_be_saved_is_not_shown(
     tmp_path: Path, barriers: list[RawLoadBarrier], caplog: pytest.LogCaptureFixture
 ) -> None:
+    """#381 DEFECT-V3D-05: 중간 전이 저장 실패는 로그만 남기고 run 은 이어 가지만, 완료는 저장돼야
+    알린다. 저장하지 못한 완료를 보이면 사용자가 본 결과를 원장이 세지 않는다(N 과소)."""
     repository = _RefusingUpdate()
     free = _open_barrier(barriers)
     free.release.set()
@@ -199,11 +202,40 @@ def test_a_failed_transition_write_is_logged_and_the_run_keeps_going(
 
     runs.start(_request())
 
-    assert wait_for_terminal_run(runs, "run-1").status is RunStatus.COMPLETED
-    assert runs.result("run-1").manifest.run_id == "run-1"
-    # 파일에는 접수 상태만 남았다. 재시작하면 `interrupted` 로 닫혀 거짓 완료가 남지 않는다.
+    ended = wait_for_terminal_run(runs, "run-1")
+    assert (ended.status, ended.error_code, ended.artifact_sha256) == (
+        RunStatus.FAILED,
+        "backtest.run.internal",
+        None,
+    )
+    with pytest.raises(BacktestResultNotReadyError):
+        runs.result("run-1")
+    # 파일에는 접수 상태만 남았다. 재시작하면 `interrupted` 로 닫힌다.
     assert repository.get("run-1").run.status is RunStatus.QUEUED
     assert "backtest run state could not be persisted — run_id=run-1" in caplog.text
+
+
+def test_only_recent_finished_runs_keep_an_in_memory_copy(
+    tmp_path: Path, barriers: list[RawLoadBarrier], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#332 V1-AUDIT-04: 끝난 run 의 메모리 사본(진행 이벤트)은 최근 것만 남는다. 상태·결과는
+    저장소·산출물이 정본이라 그대로 읽힌다."""
+    monkeypatch.setattr(
+        "strategy_workbench.application.backtest_run._service._FINISHED_RECORDS_KEPT", 1
+    )
+    free = _open_barrier(barriers)
+    free.release.set()
+    runs = _service(tmp_path, SQLiteBacktestRunRepository(), free, "old", "new")
+
+    runs.start(_request())
+    wait_for_terminal_run(runs, "old")
+    runs.start(_request(end=date(2024, 1, 11)))
+    wait_for_terminal_run(runs, "new")
+
+    assert runs.events("old") == ()
+    assert runs.events("new")[-1].status is RunStatus.COMPLETED
+    assert runs.state("old").status is RunStatus.COMPLETED
+    assert runs.result("old").manifest.run_id == "old"
 
 
 class _FrozenAfterAccept(SQLiteBacktestRunRepository):

@@ -479,6 +479,8 @@ export const getBacktestStatus = <ThrowOnError extends boolean = false>(
 
 /**
  * Cancel Backtest
+ *
+ * 사용자가 run 에서 빠진다. 실험이 써서 계속 돌면 `kept_by_owners` 가 참이다.
  */
 export const cancelBacktest = <ThrowOnError extends boolean = false>(
   options: Options<CancelBacktestData, ThrowOnError>,

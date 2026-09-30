@@ -579,5 +579,13 @@ class BacktestRunState:
 
 
 @dataclass(frozen=True)
+class BacktestCancelResult(BacktestRunState):
+    """취소 요청 뒤의 run 상태. 요청자는 빠졌지만 다른 소유자(실험)가 써서 run 이 계속 돌면
+    `kept_by_owners` 가 참이다 — 화면은 이 칸으로 "실험이 쓰는 실행" 을 알린다(#382)."""
+
+    kept_by_owners: bool = False
+
+
+@dataclass(frozen=True)
 class BacktestStartResponse:
     run: BacktestRunState

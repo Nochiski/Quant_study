@@ -6,6 +6,7 @@ from strategy_workbench.domain.backtest._canonical import (
 from strategy_workbench.domain.backtest._models import (
     RUN_FAILURE_CODES,
     AdmissionRejectionCode,
+    BacktestCancelResult,
     BacktestRunResult,
     BacktestRunSpec,
     BacktestRunState,
@@ -41,6 +42,7 @@ __all__ = [
     "BacktestRunResult",
     "BacktestRunSpec",
     "RUN_FAILURE_CODES",
+    "BacktestCancelResult",
     "BacktestRunState",
     "RunFailureCode",
     "AdmissionRejectionCode",

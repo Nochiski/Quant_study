@@ -48,7 +48,9 @@ date) 의 값, `LATEST` 는 (security, cutoff) 의 값이라 질의 창을 바�
 생존편향 방지). `load_factor_observations` 는 유니버스 인자가 없어 `RESEARCH_UNIVERSE_ID` 로 답한다.
 `load_backtest_dataset` 은 원주가 bar(`price_kind='reference'` 행·GAP-14 행·저녁 잠정 행 미방출,
 경고로 **각각** 건수 기록) + `security_span` 구간 + `adj_factor` factor_ok 행(S07 과 같은 유형
-매핑)이며 `adj_factor` 가 없으면 예외다 — 분할 구간을 사건 없이 돌리는 백테스트는 조용히 틀린다.
+매핑) + 원장이 접지 못한 층 이동(카탈로그 뷰 `v_unfolded_event` 의 `factor_ok` 거짓 행 — 적용일
+KRX 기준가 비로 수량을 바꾸는 분할·병합, 사건마다 경고, #369)이다. `adj_factor` 가 없거나 그 뷰를
+읽을 수 없는 카탈로그면 예외다 — 분할 구간을 사건 없이 돌리는 백테스트는 조용히 틀린다.
 저녁 잠정 행(`basis='evening'`, 규칙 e1.15.0)은 KRX 확정 전 키움 종가라 확정 행과 한 카운터에
 섞지 않는다: "그날 데이터가 깨졌다"(`invalid_bars`)와 "잠정이라 뺐다"(`n_provisional`)는 다른
 사실이다.
@@ -77,6 +79,7 @@ from threading import Event, Thread
 from typing import TYPE_CHECKING
 
 from strategy_workbench.application.backtest_run.facade.ports import (
+    BacktestDataNotReadyError,
     BacktestDataQuery,
     BacktestDataset,
     CorporateActionRecord,
@@ -146,6 +149,7 @@ from ._specs import (
     SOURCE_BY_NAME,
     SOURCE_SPECS,
     SPAN_TABLE,
+    UNFOLDED_MACRO,
     UNIVERSE_TABLE,
     UNSUPPORTED_FIELDS,
     FieldSpec,
@@ -478,7 +482,8 @@ class EquityDuckdbAdapter:
         equity_root: `trading_calendar`·`security_span`·`universe_daily`·`universe_policy`·
             `price_daily` MANIFEST 가 있는 equity 루트. 나머지 테이블·`equity.duckdb` 매크로는
             선택이며 없으면 그 원천의 field_id 가 `list_fields()` 에서 빠진다
-            (`load_backtest_dataset` 만은 `adj_factor` 를 요구해 예외를 던진다).
+            (`load_backtest_dataset` 만은 `adj_factor` 와 카탈로그 뷰 `v_unfolded_event` 를 요구해
+            예외를 던진다).
 
     Raises:
         EquityDuckdbSetupError: duckdb 미설치 · 필수 테이블 미빌드 · MANIFEST 손상 ·
@@ -503,6 +508,7 @@ class EquityDuckdbAdapter:
         self._catalog: CatalogState = self._checked_catalog(
             read_catalog(self._root, ledger_snapshot_id)
         )
+        self._event_feed_reason = self._unfolded_event_unavailable_reason()
         self._sessions: tuple[date, ...] = self._load_sessions()
         self._session_index = {session: index for index, session in enumerate(self._sessions)}
         self._policies: dict[str, tuple[str, ...]] = self._load_policies()
@@ -541,9 +547,10 @@ class EquityDuckdbAdapter:
         """`sources` 를 읽을 연결 — 매크로 원천이 있으면 카탈로그를 read_only 로 연다(#278).
 
         표 원천은 parquet 를 절대 경로로 읽어(`TableBuild.parquet_source`) 메모리 연결로 충분하다.
-        매크로를 읽지 않는 질의(유니버스·표 원천 격자·백테스트 bar)까지 카탈로그를 열면, 부팅 뒤
-        다른 프로세스가 카탈로그를 쓰기 모드로 잡은 동안 그 질의도 실패한다. 쓸 수 없는
-        카탈로그(stale 등)는 열지 않는다 — 옛 판본을 가리키는 매크로를 조용히 읽지 않게 한다.
+        매크로를 읽지 않는 질의(유니버스·표 원천 격자)까지 카탈로그를 열면, 부팅 뒤 다른 프로세스가
+        카탈로그를 쓰기 모드로 잡은 동안 그 질의도 실패한다. 백테스트 데이터는 층 이동 사건을
+        카탈로그 뷰로 읽어 카탈로그를 연다(#369). 쓸 수 없는 카탈로그(stale 등)는 열지 않는다 —
+        옛 판본을 가리키는 매크로를 조용히 읽지 않게 한다.
         """
         macro = self._catalog.usable and any(source.is_macro for source in sources)
         return _open(self._catalog.path if macro else None)
@@ -749,6 +756,24 @@ class EquityDuckdbAdapter:
             f"필드를 뺀다 — {CATALOG_REBUILD} (catalog_columns_missing) — missing={missing}"
         )
         logger.warning(f"{reason} catalog={self._catalog.path}")
+        return reason
+
+    def _unfolded_event_unavailable_reason(self) -> str | None:
+        """백테스트 사건 피드가 읽는 원장 뷰 `v_unfolded_event`(#369)를 쓸 수 없으면 왜인지.
+
+        매크로 원천과 같은 카탈로그 규칙이다 — 표(`adj_factor`)로 돌아가 술어를 다시 적지 않는다.
+        없거나 낡은 카탈로그는 `read_catalog` 가 이미 경고했고, 매크로만 없는 루트(코드를 받고
+        카탈로그를 다시 만들지 않았다)는 여기서 부팅 로그에 남긴다.
+        """
+        if not self._catalog.usable:
+            return self._catalog.reason
+        if self._catalog.has_macro(UNFOLDED_MACRO):
+            return None
+        reason = (
+            f"카탈로그에 백테스트가 읽는 매크로 {UNFOLDED_MACRO} 가 없다 — {CATALOG_REBUILD} "
+            f"(catalog_macro_missing) — macros={list(self._catalog.macros)}"
+        )
+        logger.warning(f"실데이터 백테스트를 멈춘다 — {reason} catalog={self._catalog.path}")
         return reason
 
     @property
@@ -1248,16 +1273,22 @@ class EquityDuckdbAdapter:
         if unknown:
             raise ValueError(f"unknown security_id — not in {SPAN_TABLE}: {unknown}")
         if FACTOR_TABLE not in self._builds:
-            raise EquityDuckdbSetupError(
-                f"{FACTOR_TABLE} not built — a backtest without the corporate-action feed is "
-                "silently wrong across splits"
+            raise BacktestDataNotReadyError(
+                f"원장 표 {FACTOR_TABLE} 이 없어 백테스트를 멈춘다 — 기업행위 사건 없이 돌리면 "
+                "분할·병합 구간의 손익이 조용히 틀린다. 원장을 받은 뒤(`ledger_sync`) 서버를 "
+                "다시 띄워야 한다 (table_missing)"
+            )
+        if self._event_feed_reason is not None:
+            raise BacktestDataNotReadyError(
+                f"원장이 접지 못한 층 이동({UNFOLDED_MACRO})을 읽지 못해 백테스트를 멈춘다 — 사건 "
+                f"없이 돌리면 그 종목을 든 동안 손익이 층 배수만큼 튄다 — {self._event_feed_reason}"
             )
         tickers = tuple(sorted({ticker for ticker, _ in parsed.values()}))
         # 워밍업은 start 앞 거래일 달력으로 센다(`_window` 와 같은 달력). 모자라면 있는 만큼 읽는다.
         warmup = query.history_sessions_before_start
         first = max(bisect_left(self._sessions, query.start) - warmup, 0)
         read_from = min(query.start, self._sessions[first]) if warmup else query.start
-        con = _open(None)
+        con = _open(self._catalog.path)  # 층 이동 사건을 카탈로그 뷰로 읽는다(#369)
         try:
             price_columns = {
                 str(row[0])
@@ -1277,19 +1308,38 @@ class EquityDuckdbAdapter:
                 """,
                 [_keys_param(tickers)],
             ).fetchall()
-            factor_columns = {
-                str(row[0])
-                for row in con.execute(
-                    f"DESCRIBE SELECT * FROM {self._source(FACTOR_TABLE)}"
-                ).fetchall()
-            }
-            ts_column = "apply_date" if "apply_date" in factor_columns else "effective_date"
             factor_rows = con.execute(
                 f"""
-                SELECT ticker, event_id, event_type, share_factor, {ts_column}
+                SELECT ticker, event_id, event_type, share_factor, apply_date
                 FROM {self._source(FACTOR_TABLE)}
                 WHERE factor_ok AND ticker IN (SELECT {_KEYS_SQL})
-                ORDER BY ticker, {ts_column}, event_id
+                ORDER BY ticker, apply_date, event_id
+                """,
+                [_keys_param(tickers)],
+            ).fetchall()
+            # 원장이 접지 못한 층 이동(`v_unfolded_event` 의 `factor_ok` 거짓 행)과 적용일
+            # KRX 기준가, 그 앞 행 종가. PIT: 기준가는 적용일 개장 전에 공표되는 값이라 수량
+            # 조정이 미래 가격을 읽지 않는다. 어느 재설정이 미접힘인지는 원장이 다음 세션
+            # 정보로 가르지만(뷰의 PIT 예외) 수량 조정은 들고 있는 포지션의 회계라 전략
+            # 판단(target tape)이 읽지 않는다. 앞 행은 정지일 기준가 행을 포함한다 — 원장
+            # 기준가 원천이 비를 재는 분모(`sql/adj_factor.sql` bp)와 같아, 한 정지 구간에
+            # 재설정이 여럿이어도 비가 겹쳐 곱해지지 않는다.
+            unfolded_rows = con.execute(
+                f"""
+                WITH ev AS (
+                    SELECT ticker, apply_date FROM {UNFOLDED_MACRO}({_lit(query.end)})
+                    WHERE NOT factor_ok AND apply_date >= {_lit(read_from)}
+                      AND ticker IN (SELECT {_KEYS_SQL})
+                ),
+                px AS (
+                    SELECT ticker, date, close, base_price_krw FROM {self._source(PRICE_TABLE)}
+                    WHERE ticker IN (SELECT ticker FROM ev)
+                )
+                SELECT e.ticker, e.apply_date, p.close, b.base_price_krw
+                FROM ev e
+                LEFT JOIN px b ON b.ticker = e.ticker AND b.date = e.apply_date
+                ASOF LEFT JOIN px p ON p.ticker = e.ticker AND e.apply_date > p.date
+                ORDER BY e.ticker, e.apply_date
                 """,
                 [_keys_param(tickers)],
             ).fetchall()
@@ -1343,10 +1393,26 @@ class EquityDuckdbAdapter:
                 )
         actions: list[CorporateActionRecord] = []
         history_actions: list[CorporateActionRecord] = []
+
+        def holders(ticker: object, session: date) -> list[str]:
+            """구간이 세션을 품는 요청 종목 id. 읽은 창 [read_from, end] 밖 세션이면 없다."""
+            return [
+                security_id
+                for security_id, key in by_ticker[str(ticker)]
+                if spans[key].first_date <= session <= spans[key].last_date
+                and read_from <= session <= query.end
+            ]
+
+        def record(session: date, security_id: str, kind: str, ratio: float, detail: str) -> None:
+            # 창 앞 워밍업 사건은 엔진에 넘기지 않는다 — 충격 σ 가 분할 날 수익률을 빼는 데만 쓴다
+            (actions if session >= query.start else history_actions).append(
+                CorporateActionRecord(session, security_id, kind, repr(ratio), detail)
+            )
+
         for ticker, event_id, event_type, share_factor, raw_ts in factor_rows:
             if raw_ts is None:
-                raise ValueError(f"{ts_column} is NULL on a factor_ok row — event_id={event_id}")
-            session = _as_date(raw_ts, ts_column)
+                raise ValueError(f"apply_date is NULL on a factor_ok row — event_id={event_id}")
+            session = _as_date(raw_ts, "apply_date")
             ratio = _as_float(share_factor, "share_factor")
             if str(event_type) in RATIO_DIRECTED_EVENT_TYPES:
                 if ratio is None or ratio == 1:
@@ -1369,17 +1435,37 @@ class EquityDuckdbAdapter:
                     f"share_factor direction contradicts event_type — event_id={event_id} "
                     f"event_type={event_type} share_factor={share_factor!r}"
                 )
-            for security_id, key in by_ticker[str(ticker)]:
-                span = spans[key]
-                in_span = span.first_date <= session <= span.last_date
-                if in_span and read_from <= session <= query.end:
-                    (actions if session >= query.start else history_actions).append(
-                        CorporateActionRecord(
-                            session=session,
-                            security_id=security_id,
-                            action_type=action_type,
-                            ratio=repr(ratio),
-                            detail=str(event_id),
+            for security_id in holders(ticker, session):
+                record(session, security_id, action_type, ratio, str(event_id))
+        # 원장이 접지 못한 층 이동(#369)은 적용일 KRX 기준가 비(앞 행 종가 ÷ 기준가)만큼
+        # 보유 수량을 바꾸는 분할·병합으로 싣고 사건마다 경고한다. 원장은 그날의 기준가
+        # 후보(기준가와 앞 행 종가가 있는 행)에서만 이 사건을 내므로 비를 못 세우면 원장
+        # 모순이다 — 조정 없이 층 배수를 손익에 넣지 않고 멈춘다.
+        unfolded: list[DataWarning] = []
+        for ticker, raw_session, prev_close, base_price in unfolded_rows:
+            session = _as_date(raw_session, f"{UNFOLDED_MACRO}.apply_date")
+            prev = _as_float(prev_close, "price_daily.close")
+            base = _as_float(base_price, "price_daily.base_price_krw")
+            if not (prev and base and min(prev, base) > 0):
+                raise ValueError(
+                    "unfolded level shift without a base-price ratio — the ledger emits these "
+                    f"only on base-price candidates — ticker={ticker} apply_date={session} "
+                    f"prev_close={prev_close!r} base_price_krw={base_price!r}"
+                )
+            ratio = prev / base
+            prices = f"prev_close={prev_close} base={base_price}"
+            for security_id in holders(ticker, session):
+                kind = "split" if ratio > 1 else "reverse_split"
+                record(session, security_id, kind, ratio, f"원장 미접힘·기준가 비 {prices}")
+                if session >= query.start:
+                    unfolded.append(
+                        DataWarning(
+                            code="equity.unfolded_level_shift",
+                            message=(
+                                "원장이 계수를 내지 못한 층 이동을 적용일 KRX 기준가 비로 보유 "
+                                f"수량을 조정하는 사건으로 실었다 — {security_id}@{session} "
+                                f"ratio={ratio!r} {prices}"
+                            ),
                         )
                     )
         for records in (bars, history_bars):
@@ -1454,6 +1540,7 @@ class EquityDuckdbAdapter:
                     ),
                 )
             )
+        warnings.extend(unfolded)
         return BacktestDataset(
             data_snapshot_id=self._snapshot_id,
             bars=tuple(bars),

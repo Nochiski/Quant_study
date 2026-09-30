@@ -2,9 +2,9 @@
 
 S06 이 내는 4개: `v_cum_adj`·`v_adj_price`·`v_adj_volume`·`v_firm_mktcap` + S21 후속(09-05, 전방
 조정) 2개: `v_adj_price_fwd`·`v_adj_volume_fwd` + S17 1개: `v_consensus` + S21 본판 1개:
-`v_fin_latest` + #249 1개: `v_credit_balance`(무상증자 척도 창을 가린 신용잔고) + #220 1개:
-`v_adj_close`(조정 공백 적용일을 가린 수정주가). 본문은 하나의 템플릿이고
-읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
+`v_fin_latest` + #249 1개: `v_credit_balance`(무상증자 척도 창을 가린 신용잔고) + #220·#369 2개:
+`v_unfolded_event`(원장이 접지 못한 사건) · `v_adj_close`(그 적용일을 가린 수정주가). 본문은 하나의
+템플릿이고 읽는 자리(`{price_daily}` 등)만 두 방식으로 채운다 —
   카탈로그: `render_macros(equity_root)` 가 커밋된 테이블의 MANIFEST 파티션 경로(**절대경로**,
             P1c)를 `read_parquet([...])` 로 넣어 `catalog.write_catalog` 에 준다.
   게이트  : `install_temp_macros(con, {...})` 가 같은 본문을 빌드 세션의 TEMP VIEW 이름(`out_pq` 등)
@@ -99,6 +99,7 @@ SIGNATURES: dict[str, str] = {
     "v_consensus": "v_consensus(as_of, lag_override := NULL)",
     "v_fin_latest": "v_fin_latest(as_of, lag_override := NULL, vintage := 'restated')",
     "v_credit_balance": "v_credit_balance(as_of)",
+    "v_unfolded_event": "v_unfolded_event(as_of)",
     "v_adj_close": "v_adj_close(as_of)",
 }
 MACRO_INPUTS: dict[str, tuple[str, ...]] = {
@@ -111,11 +112,13 @@ MACRO_INPUTS: dict[str, tuple[str, ...]] = {
     "v_consensus": ("consensus_daily", "trading_calendar"),
     "v_fin_latest": ("fin_std", "disclosure_version", "trading_calendar"),
     "v_credit_balance": ("credit_daily", "corp_event", "trading_calendar"),
-    "v_adj_close": ("price_adj_daily", "adj_factor"),
+    "v_unfolded_event": ("adj_factor",),
+    "v_adj_close": ("price_adj_daily",),
 }
 # 매크로가 다른 매크로를 부르는 경우 — 같은 카탈로그(또는 같은 세션)에 함께 있어야 한다.
 MACRO_DEPENDS: dict[str, tuple[str, ...]] = {
-    "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",)}
+    "v_adj_price": ("v_cum_adj",), "v_adj_volume": ("v_cum_adj",),
+    "v_adj_close": ("v_unfolded_event",)}
 # 뷰가 값이 틀려 일부러 가린 행의 표시 열 — 참이면 그 행 값이 NULL 이다. 워크벤치 어댑터는 이 열을
 # 셀 종류 MASKED 로 읽고(`SourceSpec.masked_expr`), 실행 결측 정책은 그 셀을 채우지 않는다(#298).
 # 무엇을 가리나는 뷰 본문이 정하고, 이 선언과 어댑터 배선이 같은지는 backend 계약 테스트가 본다.
@@ -532,40 +535,49 @@ SELECT ticker, date,
        bonus_window, available_date, available_basis
 FROM bal
 """,
-    # 수정주가의 조정 공백(#220). S23 표 `price_adj_daily` 의 adj_close 를 그대로 내되, 원장이
-    # 그날 사건을 접지 못한 **적용일 행**만 결측으로 낸다 — 그 행의 원주가는 이미 사건 뒤 척도인데
-    # 누적 계수는 사건 전이라 값이 틀린다. 표는 parquet 소비자와 조정 규칙의 저장본이라 그대로
-    # 두고, 가림은 이 뷰(작은 사건 집합과의 조인)가 한다.
+    # 원장이 접지 못한 사건(#220·#369) — 원장 표(`price_adj_daily`)가 그날 층 이동을 접지 못한
+    # (ticker, 적용일)이다. "접지 못함" 술어의 정본이고, 소비자는 처리만 고른다: `v_adj_close` 는
+    # 적용일 행을 가리고(팩터 경로), 백테스트 데이터 포트(backend `equity_duckdb`)는 `factor_ok`
+    # 가 거짓인 행만 적용일 KRX 기준가 비로 보유 수량을 조정한다(손익 경로).
     #   ① KRX 기준가로 적용일을 정한(`apply_basis = 'krx_base_price'`) ok 계수가 늦게 공개된
     #      사건(`available_date > apply_date`) — fold_date 가 적용일 다음 세션이라 적용일 하루에
     #      스파이크가 선다(실원장 2020-03-19 이후 57건, 최대 38배). 다음 행부터는 접혀 있다.
     #   ② `krx_base_inconsistent` — KRX 기준가는 바뀌었는데 주식수 비와 곱이 안 맞아 계수를 못
     #      낸 사건. 적용일에 층이 영구히 바뀐다(295건, 적용일 점프 중앙값 약 2.9배).
-    #   창 연산은 창 안에 결측이 하나라도 있으면 결측이라, 가린 행을 품는 창이 모두 결측이 된다
-    #   (틀린 값 대신 결측). `unknown_price_only`(유상 권리락 등 MVP 밖 기준가 변화, 적용일 점프
-    #   중앙값 약 6%)와 명목일 사건(no_price_match·ratio_null 등 — 적용일에 점프가 거의 없다)은
-    #   가리지 않는다. 명목일·가격 매칭으로 적용일을 정한 늦은 ok 계수도 가리지 않는다 — 그날
-    #   기준가 재설정이 없어 아래 PIT 근거가 서지 않는다(2020-03-19 이후 17행, 그날 값 오차
-    #   −12%~+10%).
+    #   `factor_ok` 는 그 (ticker, 적용일)에 ok 계수가 하나라도 있는가다. 참이면 층 이동은 그 계수가
+    #   설명한다 — ① 이거나, 기준가가 반증해 ② 로 내려간 사건과 같은 날 그 기준가로 선 ok 계수다
+    #   (`sql/adj_factor.sql` 의 conflict·bp_new). 거짓이면 어떤 계수도 그날 층 이동을 접지 않는다.
+    #   `unknown_price_only`(유상 권리락 등 MVP 밖 기준가 변화, 적용일 점프 중앙값 약 6%)와 명목일
+    #   사건(no_price_match·ratio_null 등 — 적용일에 점프가 거의 없다)은 싣지 않는다. 명목일·가격
+    #   매칭으로 적용일을 정한 늦은 ok 계수도 싣지 않는다 — 그날 기준가 재설정이 없어 아래 PIT 근거가
+    #   서지 않는다(2020-03-19 이후 17행, 그날 값 오차 −12%~+10%).
     #   PIT: 공백 사건 대부분은 원장상 적용일 다음 세션에 공개되지만, 적용일의 KRX 기준가 재설정은
-    #   그날 가격 데이터(랙 0)에 이미 보인다. 가림은 값을 바꾸지 않고 결측만 만들어 그날 모르는
-    #   정보를 새지 않으므로 공개일을 기다리지 않는다. 공개 전 계수를 접는 것은 아니다(fold 규칙은
-    #   S23 그대로). as_of 는 행 절단으로만 작용한다. 예외: 그날 보이는 재설정 가운데 무엇을
-    #   가릴지는 다음 세션 정보(늦은 공시·주식수 랙 1)로 갈린다 — 영향은 적용일 as_of 에 랙 0 으로
-    #   그 행을 읽는 셀뿐이다(기본 12-1 모멘텀은 랙 21 이라 무관).
+    #   그날 가격 데이터(랙 0)에 이미 보인다. 그래서 공개일을 기다리지 않고 as_of 는 적용일 절단으로만
+    #   작용한다. 예외: 그날 보이는 재설정 가운데 무엇을 싣는지는 다음 세션 정보(늦은 공시·주식수
+    #   랙 1)로 갈린다 — 소비자마다 영향 범위를 적는다.
+    "v_unfolded_event": """
+SELECT ticker, apply_date, bool_or(factor_ok) AS factor_ok
+FROM {adj_factor}
+WHERE apply_date <= as_of
+GROUP BY ticker, apply_date
+HAVING bool_or((factor_ok AND available_date > apply_date AND apply_basis = 'krx_base_price')
+               OR (NOT factor_ok AND factor_source = 'krx_base_inconsistent'))
+""",
+    # 수정주가의 조정 공백(#220). S23 표 `price_adj_daily` 의 adj_close 를 그대로 내되, 원장이
+    # 그날 사건을 접지 못한 **적용일 행**(`v_unfolded_event`)만 결측으로 낸다 — 그 행의 원주가는
+    # 이미 사건 뒤 척도인데 누적 계수는 사건 전이라 값이 틀린다. 표는 parquet 소비자와 조정 규칙의
+    # 저장본이라 그대로 두고, 가림은 이 뷰(작은 사건 집합과의 조인)가 한다. 창 연산은 창 안에
+    # 결측이 하나라도 있으면 결측이라, 가린 행을 품는 창이 모두 결측이 된다(틀린 값 대신 결측).
+    # 가림은 값을 바꾸지 않고 결측만 만들어 그날 모르는 정보를 새지 않는다. 공개 전 계수를 접는 것은
+    # 아니다(fold 규칙은 S23 그대로). as_of 는 행 절단으로만 작용한다. 사건 술어의 PIT 예외가 닿는
+    # 셀은 적용일 as_of 에 랙 0 으로 그 행을 읽는 셀뿐이다(기본 12-1 모멘텀은 랙 21 이라 무관).
     "v_adj_close": """
-WITH gap AS (
-    SELECT DISTINCT ticker, apply_date
-    FROM {adj_factor}
-    WHERE (factor_ok AND available_date > apply_date AND apply_basis = 'krx_base_price')
-       OR (NOT factor_ok AND factor_source = 'krx_base_inconsistent')
-)
 SELECT a.ticker, a.date,
        CASE WHEN g.ticker IS NULL THEN a.adj_close END AS adj_close,
        g.ticker IS NOT NULL                             AS adj_gap,
        a.available_date
 FROM {price_adj_daily} a
-LEFT JOIN gap g ON g.ticker = a.ticker AND g.apply_date = a.date
+LEFT JOIN v_unfolded_event(as_of) g ON g.ticker = a.ticker AND g.apply_date = a.date
 WHERE a.date <= as_of
 """,
 }
@@ -622,13 +634,21 @@ def render_macros(equity_root: Path) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def install_temp_macros(con: duckdb.DuckDBPyConnection, sources: dict[str, str],
-                        overrides: dict[str, str] | None = None) -> list[str]:
+                        overrides: dict[str, str] | None = None,
+                        names: tuple[str, ...] | None = None) -> list[str]:
     """`sources` 로 채울 수 있는 매크로를 TEMP MACRO 로 세션에 올린다. 만든 이름을 돌려준다.
 
+    `names` 를 주면 그 매크로와 그것이 직접 부르는 매크로(`MACRO_DEPENDS` 한 단계)만 올린다 —
+    입력 열을 좁혀 읽는 빌드 세션(`input_columns`)에서 쓰지 않는 매크로가 없는 열에 바인딩하다
+    멈추지 않게 한다. 의존은 한 단계만 편다(지금 `MACRO_DEPENDS` 는 깊이 1 이다).
     `overrides[name]` 은 그 매크로의 템플릿을 바꿔 끼운다 — 부정 픽스처(FX-N-006 나눗셈)용.
     """
+    wanted = (None if names is None
+              else {*names, *(d for n in names for d in MACRO_DEPENDS.get(n, ()))})
     made: list[str] = []
     for name, sig in SIGNATURES.items():
+        if wanted is not None and name not in wanted:
+            continue
         if any(t not in sources for t in MACRO_INPUTS[name]):
             continue
         if any(d not in made for d in MACRO_DEPENDS.get(name, ())):

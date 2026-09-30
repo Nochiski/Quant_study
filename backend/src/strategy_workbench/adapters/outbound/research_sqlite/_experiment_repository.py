@@ -68,6 +68,14 @@ class SQLiteExperimentRepository:
             raise _not_found(experiment_id)
         return _record(row)
 
+    def open_ids(self) -> tuple[str, ...]:
+        with self._database.transaction(write=False) as connection:
+            rows = connection.execute(
+                "SELECT experiment_id FROM experiments WHERE cancelled_at IS NULL "
+                "ORDER BY experiment_order"
+            ).fetchall()
+        return tuple(row["experiment_id"] for row in rows)
+
     def list(self, *, after: str | None, limit: int) -> tuple[ExperimentRecord, ...]:
         with self._database.transaction(write=False) as connection:
             rows = connection.execute(

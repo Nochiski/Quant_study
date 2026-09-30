@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from strategy_workbench.domain.backtest.facade.runs import BacktestRunSpec
+from strategy_workbench.domain.backtest.facade.runs import AdmissionRejectionCode, BacktestRunSpec
 from strategy_workbench.domain.experiment.facade.design import ExperimentDesign, SplitSpec
 from strategy_workbench.domain.experiment.facade.trial import ExperimentControls
 from strategy_workbench.domain.strategy.facade.specification import ParameterValue
@@ -42,7 +42,7 @@ class TrialAttempt:
     created_at: datetime
     run_id: str | None = None
     # 실행 접수 거절 코드(화면 번역 키 `backtest.error.<code>`)와 실행 서비스의 거절 문장.
-    error_code: str | None = None
+    error_code: AdmissionRejectionCode | None = None
     error: str | None = None
 
     def __post_init__(self) -> None:
@@ -73,7 +73,7 @@ class WindowPick:
     train_sharpe: float | None
     created_at: datetime
     run_id: str | None = None
-    error_code: str | None = None
+    error_code: AdmissionRejectionCode | None = None
     error: str | None = None
 
 
@@ -95,6 +95,10 @@ class ExperimentRepositoryPort(Protocol):
 
     def get(self, experiment_id: str) -> ExperimentRecord:
         """없으면 `ExperimentNotFoundError`(`experiment.not_found`)."""
+        ...
+
+    def open_ids(self) -> tuple[str, ...]:
+        """취소하지 않은 실험 id(만든 순). 기록을 디코드하지 않는다(재시작 복구가 하나씩 읽는다)."""
         ...
 
     def list(self, *, after: str | None, limit: int) -> tuple[ExperimentRecord, ...]:

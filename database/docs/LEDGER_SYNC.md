@@ -98,10 +98,12 @@ project 만, 없으면 mock 릴리스 게이트만 돈다 — `frontend/e2e/READ
 `catalog` 산출물이다(서버 것으로 덮으면 워크벤치의 stale-catalog 가드가 무력화된다).
 
 워크벤치 duckdb 어댑터는 뜰 때 원천마다 카탈로그 매크로를 읽을 수 있는지 보고, 못 읽는 원천의 필드만
-빼고 뜬다. 부팅 로그에 필드를 뺀 `catalog_*` 경고가 남으면 로컬 카탈로그를 다시 만들고
-(`ledger_sync catalog`) 워크벤치를 다시 띄운다. 카탈로그 매크로를 더한 코드를 받은 뒤에도 한 번 다시
-만든다 — 그 전까지는 새 매크로를 읽는 필드가 `catalog_macro_missing` 으로 빠진다(수정주가가 빠지면
-가격 변화 팩터가 모두 멈춘다). 일일 `sync` 도 카탈로그를 다시 만든다. 파일 손상이 의심되면 만들기
+빼고 뜬다. 백테스트가 읽는 매크로(`v_unfolded_event`, 원장이 접지 못한 층 이동)를 못 읽으면 실데이터
+백테스트가 `backtest.run.data_not_ready` 로 멈춘다. 부팅 로그에 `catalog_*` 경고가 남으면 로컬
+카탈로그를 다시 만들고(`ledger_sync catalog`) 워크벤치를 다시 띄운다. 카탈로그 매크로를 더한 코드를
+받은 뒤에도 한 번 다시 만든다 — 그 전까지는 새 매크로를 읽는 필드가 `catalog_macro_missing` 으로
+빠지고(수정주가가 빠지면 가격 변화 팩터가 모두 멈춘다), 백테스트가 읽는 매크로면 실데이터 백테스트가
+멈춘다. 일일 `sync` 도 카탈로그를 다시 만든다. 파일 손상이 의심되면 만들기
 전에 `verify --offline` 으로 파티션 해시부터 확인한다. `profile_lag_fallback` 은 카탈로그 재생성으로
 풀리지 않는다 — `sync` 로 `dataset_profile` 표를 받는다. 부팅을 멈추는 `catalog_locked`·
 `catalog_transient_error` 는 예외 문장의 조치를 따른다. 코드별 뜻과 카탈로그에 기대는 필드는

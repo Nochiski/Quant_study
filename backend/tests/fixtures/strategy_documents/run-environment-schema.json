@@ -89,7 +89,18 @@
       "x-display-unit": "bp",
       "examples": [
         10.0
-      ]
+      ],
+      "x-applicable-when": {
+        "all_of": [
+          {
+            "pointer": "/impact_model",
+            "equals": "fixed_bps",
+            "not_null": false
+          }
+        ],
+        "description_key": "run_environment.contract.slippage_bps",
+        "owned_by_error": null
+      }
     },
     "impact_model": {
       "type": "string",
@@ -110,7 +121,18 @@
       "maximum": 10.0,
       "examples": [
         1.0
-      ]
+      ],
+      "x-applicable-when": {
+        "all_of": [
+          {
+            "pointer": "/impact_model",
+            "equals": "sqrt",
+            "not_null": false
+          }
+        ],
+        "description_key": "run_environment.contract.impact_coefficient",
+        "owned_by_error": null
+      }
     },
     "sell_tax": {
       "type": "string",
@@ -139,7 +161,18 @@
       "x-display-unit": "bp",
       "examples": [
         20.0
-      ]
+      ],
+      "x-applicable-when": {
+        "all_of": [
+          {
+            "pointer": "/sell_tax",
+            "equals": "custom",
+            "not_null": false
+          }
+        ],
+        "description_key": "run_environment.contract.sell_tax_bps",
+        "owned_by_error": null
+      }
     },
     "missing": {
       "type": "string",

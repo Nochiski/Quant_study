@@ -233,6 +233,10 @@ class WalkForwardGap(StrEnum):
 
     # 창이 엠바고를 뺀 측정 창이 아닌 V3-05 이전 실험이라 워크포워드 검증을 돌리지 않는다.
     LEGACY_DESIGN = "legacy_design"
+    # 실험을 취소해 남은 창을 고르거나 검증하지 않는다(`walk_forward_gap(cancelled=True)`).
+    CANCELLED = "cancelled"
+    # 모든 창의 검증 실행은 완료됐지만 그 결과 파일을 읽을 수 없어 곡선을 잇지 못한다.
+    RESULT_UNREADABLE = "result_unreadable"
     # 검증 실행이 실패·취소로 끝났거나 접수가 거절된 창이 있다. 남은 창만 이으면 낙관 쪽 누락이다.
     TEST_FAILED = "test_failed"
     # 학습에서 대표 샤프가 난 칸이 없는 창이 있다.
@@ -261,9 +265,16 @@ def window_gap(has_cell: bool, test_run: BacktestRunState | None) -> WalkForward
     return WalkForwardGap.PENDING
 
 
-def walk_forward_gap(gaps: Sequence[WalkForwardGap | None]) -> WalkForwardGap | None:
-    """창별 이유 가운데 우선순위가 가장 높은 것. 모두 None 이면 None(요약 지표를 낸다)."""
-    return next((gap for gap in WalkForwardGap if gap in gaps), None)
+def walk_forward_gap(
+    gaps: Sequence[WalkForwardGap | None], *, cancelled: bool
+) -> WalkForwardGap | None:
+    """창별 이유 가운데 우선순위가 가장 높은 것. 모두 None 이면 None(요약 지표를 낸다).
+
+    취소한 실험은 빈 창이 하나라도 있으면 취소가 이유다 — 남은 창은 더 고르거나 검증하지 않으므로
+    "진행 중"으로 남기지 않는다. 취소 전에 모든 창이 완료됐으면 요약을 그대로 낸다.
+    """
+    gap = next((gap for gap in WalkForwardGap if gap in gaps), None)
+    return WalkForwardGap.CANCELLED if cancelled and gap is not None else gap
 
 
 def walk_forward_retention(

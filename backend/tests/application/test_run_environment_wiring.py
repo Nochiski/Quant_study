@@ -78,6 +78,7 @@ from strategy_workbench.domain.backtest.facade.environment import (
     environment_hash,
     impact_scales,
     participation_volumes,
+    settlement_multipliers,
 )
 from strategy_workbench.domain.backtest.facade.runs import ExecutionCore, MetricWindow
 from strategy_workbench.domain.factor.facade.expression import (
@@ -569,10 +570,22 @@ def _impact(
     bars: tuple[MarketBarRecord, ...],
     actions: tuple[CorporateActionRecord, ...] = (),
 ) -> dict[tuple[date, str], float]:
+    rows = [(bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars]
+    confirmed = ("split", "reverse_split")
     scales = impact_scales(
         environment,
-        ((bar.session, bar.security_id, bar.close, bar.trading_value) for bar in bars),
-        {(action.session, action.security_id) for action in actions},
+        rows,
+        settlement_multipliers(
+            rows,
+            (
+                (
+                    action.session,
+                    action.security_id,
+                    float(action.ratio) if action.action_type in confirmed else 1.0,
+                )
+                for action in actions
+            ),
+        ),
     )
     assert scales is not None
     return scales

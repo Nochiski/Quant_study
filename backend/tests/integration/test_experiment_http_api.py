@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,25 @@ from strategy_workbench.adapters.inbound.http_api._experiment_routes import (
     ExperimentAdmissionErrorResponse,
     ExperimentErrorResponse,
 )
+from strategy_workbench.adapters.outbound.research_sqlite.facade.repository import (
+    SQLiteExperimentRepository,
+)
+from strategy_workbench.application.experiment_run.facade.ports import (
+    ExperimentRecord,
+    TrialAttempt,
+)
 from strategy_workbench.bootstrap.facade.http import build_http_app
+from strategy_workbench.domain.backtest.facade.environment import RunEnvironment
+from strategy_workbench.domain.backtest.facade.runs import (
+    BacktestRunSpec,
+    SavedRevisionReference,
+)
+from strategy_workbench.domain.experiment.facade.design import (
+    ExperimentDesign,
+    SplitMode,
+    SplitSpec,
+    build_search_spec,
+)
 from tests.frozen_revision_rows import FROZEN_SPEC_HASH, seed_frozen_rows
 
 _SPLIT = {"mode": "rolling", "train_years": 1, "test_years": 1, "embargo_sessions": 0}
@@ -207,6 +226,63 @@ def test_a_frozen_revision_cannot_be_the_base(tmp_path: Path) -> None:
 
     assert response.status_code == 422, response.text
     assert response.json()["detail"]["code"] == "backtest.strategy.requires_upgrade"
+
+
+def test_a_base_that_is_no_longer_admitted_is_recorded_and_refused_with_its_code(
+    tmp_path: Path,
+) -> None:
+    """#380 DEFECT-V3D-02: 만든 뒤 기반 리비전이 동결된 실험. 재시작 복구는 남은 trial 에 거절
+    attempt 를 남겨 멈추지 않고, 재시도는 백테스트 시작과 같은 코드(422)로 거절한다."""
+    strategy_path = tmp_path / "strategies.sqlite3"
+    research_path = tmp_path / "research.sqlite3"
+    seed_frozen_rows(strategy_path)
+    split = SplitSpec(mode=SplitMode.ROLLING, train_years=1, test_years=1, embargo_sessions=0)
+    at = datetime(2026, 9, 30, tzinfo=UTC)
+    repository = SQLiteExperimentRepository(research_path)
+    repository.add(
+        ExperimentRecord(
+            experiment_id="frozen-experiment",
+            created_at=at,
+            run=BacktestRunSpec(
+                strategy_source=SavedRevisionReference(
+                    "frozen-doc", 1, FROZEN_SPEC_HASH, "saved_revision"
+                ),
+                environment=RunEnvironment(
+                    start=date(2021, 1, 4), end=date(2023, 6, 30), universe_id="krx.common-stock"
+                ),
+            ),
+            split=split,
+            design=ExperimentDesign(
+                search=build_search_spec((), {}),
+                parameter_values={},
+                windows=split.windows(date(2021, 1, 4), date(2023, 6, 30)),
+                measured=True,
+            ),
+        )
+    )
+    # 창 0 학습은 이미 거절로 실패했고, 창 1 학습은 넘기기 전에 서버가 내려갔다.
+    repository.add_attempt(
+        TrialAttempt("frozen-experiment", 0, 1, at, error_code="backtest.run.invalid", error="x")
+    )
+
+    client = TestClient(
+        build_http_app(strategy_repository_path=strategy_path, research_db_path=research_path)
+    )
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        trials = client.get("/api/v1/experiments/frozen-experiment/trials").json()
+        if trials[1]["attempts"]:
+            break
+        time.sleep(0.1)
+    retried = client.post("/api/v1/experiments/frozen-experiment/trials/0/retry")
+
+    assert [attempt["error_code"] for attempt in trials[1]["attempts"]] == [
+        "backtest.strategy.requires_upgrade"
+    ]
+    assert retried.status_code == 422, retried.text
+    assert retried.json()["detail"]["code"] == "backtest.strategy.requires_upgrade"
+    experiment = client.get("/api/v1/experiments/frozen-experiment").json()
+    assert experiment["status"] == "completed"
 
 
 def test_a_held_experiment_can_be_paused_streamed_and_cancelled() -> None:

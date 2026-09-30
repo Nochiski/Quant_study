@@ -1,9 +1,10 @@
+import { isApplicableWhen, type ApplicableWhen } from "../../../shared/api";
 import { tName, tOptional } from "../../../shared/config";
 
 /**
  * 실행 설정(`RunEnvironment`) 스키마의 필드 모델(P3-02, spec D6).
  *
- * 필드 목록·순서·enum·기본값·범위·단위·설명 키·카탈로그는 전부 실행 설정 스키마
+ * 필드 목록·순서·enum·기본값·범위·단위·설명 키·카탈로그·적용 조건은 전부 실행 설정 스키마
  * (`GET /api/v1/run-environments/schema`)에서 읽는다. 필드 이름을 여기 손으로 적지 않는다 — 생성 SDK
  * 타입에는 범위가 없어(pydantic 이 `__post_init__` 를 보지 못한다) 그 타입만 믿으면 서버가 거부할 값을
  * 유효하다고 본다. 실행 설정 패널(입력)과 run 상세(기록 표시)가 같은 모델을 읽는다.
@@ -35,6 +36,8 @@ export type RunEnvironmentField = {
   descriptionKey: string | null;
   /** `x-catalog`. 목록 endpoint 가 없는 카탈로그(`universe`)는 텍스트 입력이다. */
   catalog: string | null;
+  /** `x-applicable-when`: 이 칸을 읽는 모드(예: 직접 입력 세율은 `sell_tax = custom`). 없으면 늘 읽힌다. */
+  applicableWhen: ApplicableWhen | null;
 };
 
 type Json = Record<string, unknown>;
@@ -110,6 +113,9 @@ export const runEnvironmentFields = (schema: Json): RunEnvironmentField[] => {
         scale,
         descriptionKey: stringOrNull(node["x-description-key"]),
         catalog: stringOrNull(node["x-catalog"]),
+        applicableWhen: isApplicableWhen(node["x-applicable-when"])
+          ? node["x-applicable-when"]
+          : null,
       },
     ];
   });

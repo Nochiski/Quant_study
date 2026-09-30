@@ -7,10 +7,8 @@ import {
   type ContractCatalogProjection,
   type ContractInspectorSource,
 } from "../model/contract-inspector";
-import {
-  describeApplicabilityConditions,
-  type FieldApplicability,
-} from "../model/field-applicability";
+import type { FieldApplicability } from "../../../shared/api";
+import { describeApplicabilityConditions } from "../model/field-applicability";
 import { formatContractValue } from "../model/schema-navigator";
 import "./contract-inspector.css";
 

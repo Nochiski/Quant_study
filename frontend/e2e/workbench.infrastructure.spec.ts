@@ -76,6 +76,8 @@ const openWorkbench = async (page: Page) => {
 
   const navigation = await page.goto("/research/strategies/new");
   expect(navigation?.ok()).toBe(true);
+  await expect(page.getByRole("tab", { name: "그래프", exact: true })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "YAML", exact: true }).click();
   await expect(editor(page)).toBeVisible();
   await expect(
     page.getByText("서버 초안 동기화됨", { exact: true }),

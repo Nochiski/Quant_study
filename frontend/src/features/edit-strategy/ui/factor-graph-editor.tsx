@@ -56,7 +56,7 @@ type FactorGraphEditorProps = {
   /** plan projection이 없을 때는 팩터 선택도 편집기가 맡는다. */
   factorSelect: boolean;
   /** "Form에서 열기": 이 팩터의 Form 항목으로 간다(P5-03 왕복, pointer `/factors/N`). */
-  onOpenForm?: (pointer: string) => void;
+  onOpenSource?: (pointer: string) => void;
 };
 
 /**
@@ -77,7 +77,7 @@ export const FactorGraphEditor = ({
   revealSignal,
   onSelectPointer,
   factorSelect,
-  onOpenForm,
+  onOpenSource,
 }: FactorGraphEditorProps) => {
   const container = useRevealSelection<HTMLElement>(
     selectedPointer,
@@ -254,14 +254,14 @@ export const FactorGraphEditor = ({
           ) : (
             <Badge tone="ok">{t("graph.editable")}</Badge>
           )}
-          {onOpenForm !== undefined ? (
+          {onOpenSource !== undefined ? (
             <Button
               size="small"
               tone="ghost"
-              onClick={() => onOpenForm(factorPointer)}
-              aria-label={`${activeFactorId} · ${t("graph.openForm")}`}
+              onClick={() => onOpenSource(factorPointer)}
+              aria-label={`${activeFactorId} · ${t("graph.openSource")}`}
             >
-              {t("graph.openForm")}
+              {t("graph.openSource")}
             </Button>
           ) : null}
         </div>

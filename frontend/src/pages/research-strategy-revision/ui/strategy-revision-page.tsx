@@ -18,15 +18,12 @@ import {
   ServerDraftBanner,
   SnippetCatalog,
   SourceEditor,
-  StrategyFormPanel,
-  StrategyProjectionPanel,
   StrategyDiffPanel,
   StrategyOutline,
   UpgradeBanner,
   PROJECTION_VIEWS,
   canValidateDocument,
   currentDiagnostics,
-  projectStrategySpec,
   revisionDraftId,
   saveStatusText,
   saveStatusTone,
@@ -155,14 +152,8 @@ export const StrategyRevisionPage = () => {
     document.compiledVersion === document.sourceVersion
       ? document.compiled
       : null;
-  const projection = projectStrategySpec(document);
-  const availableViews: readonly StrategyView[] =
-    stored.format === "yaml"
-      ? PROJECTION_VIEWS
-      : ["json", "form", "graph", "diff"];
-  const requested: StrategyView = search.view ?? stored.format;
-  const implemented = availableViews.includes(requested);
-  const view: StrategyView = implemented ? requested : stored.format;
+  const availableViews: readonly StrategyView[] = PROJECTION_VIEWS;
+  const view: StrategyView = search.view === "yaml" ? "yaml" : "graph";
   // Include route params as well as the validated search generation; the debug feature only
   // compares this opaque lease and never interprets router state.
   const debuggerPublicationOwner = JSON.stringify([
@@ -182,7 +173,7 @@ export const StrategyRevisionPage = () => {
         search: {
           ...search,
           path,
-          view: origin === "outline" ? undefined : search.view,
+          view: origin === "outline" ? "yaml" : search.view,
         },
         replace: true,
       });
@@ -192,7 +183,7 @@ export const StrategyRevisionPage = () => {
   const outline = useOutlineNavigation({
     state: document,
     schema: assist.schema,
-    revealSelectedPointer: view === stored.format,
+    revealSelectedPointer: view === "yaml",
     selectedPointer: search.path,
     onSelectedPointer: selectPointer,
   });
@@ -202,7 +193,7 @@ export const StrategyRevisionPage = () => {
   const snippets = useSnippetInsertion(
     document,
     assist.snippetSource,
-    view === stored.format,
+    view === "yaml",
     transactions,
   );
   const form = useFormProjection(document, assist.schema);
@@ -220,17 +211,6 @@ export const StrategyRevisionPage = () => {
     },
     [navigate, search, revision, strategyId],
   );
-  const openForm = useCallback(
-    (pointer: string): void => {
-      void navigate({
-        to: ROUTE,
-        params: { strategyId, revision },
-        search: { ...search, path: pointer, view: "form" },
-        replace: true,
-      });
-    },
-    [navigate, search, revision, strategyId],
-  );
   const openSourceAt = useCallback(
     (pointer: string | undefined): void => {
       if (pointer !== undefined) outline.requestSourceReveal(pointer);
@@ -243,7 +223,7 @@ export const StrategyRevisionPage = () => {
   const problems = useDiagnosticNavigation({
     state: document,
     view,
-    sourceView: stored.format,
+    sourceView: "yaml",
     form: form.projection,
     tree: form.tree,
     schema: assist.schema,
@@ -367,7 +347,7 @@ export const StrategyRevisionPage = () => {
         onSelectSymbol={selectSymbol}
         saveTone={saveStatusTone(document, status)}
         view={view}
-        sourceView={stored.format}
+        sourceView="yaml"
         availableViews={availableViews}
         onViewChange={(next) =>
           void navigate({
@@ -375,7 +355,7 @@ export const StrategyRevisionPage = () => {
             params: { strategyId, revision },
             search: {
               ...search,
-              view: next === stored.format ? undefined : next,
+              view: next,
             },
             replace: true,
           })
@@ -419,23 +399,23 @@ export const StrategyRevisionPage = () => {
             runStatus={backtest.status}
           />
         }
+        comparisonOpen={search.compare}
+        onComparisonOpenChange={(open) =>
+          void navigate({
+            to: ROUTE,
+            params: { strategyId, revision },
+            search: { ...search, compare: open || undefined },
+            replace: true,
+          })
+        }
+        revisionDiff={(active) => (
+          <StrategyDiffPanel
+            state={document}
+            active={active}
+            revision={{ strategyId, currentRevision: Number(revision) }}
+          />
+        )}
         projections={{
-          json:
-            stored.format === "yaml" ? (
-              <StrategyProjectionPanel projection={projection} />
-            ) : undefined,
-          form: (
-            <StrategyFormPanel
-              form={form}
-              schema={assist.schema}
-              transactions={transactions}
-              catalogs={catalogs}
-              catalogSnippets={snippets.snippets}
-              onOpenGraph={openGraph}
-              selectedPointer={search.path}
-              revealSignal={problems.revealSignal}
-            />
-          ),
           graph: (
             <>
               {/* 그래프 1수준(파이프라인) 캔버스 위, 고급 수준(노드 편집·실행 계획) 아래(P4-02). */}
@@ -464,7 +444,7 @@ export const StrategyRevisionPage = () => {
                         transactions,
                         catalogs,
                         operators: assist.operators,
-                        onOpenForm: openForm,
+                        onOpenSource: openSourceAt,
                         documentKey: document.documentEpoch,
                       }
                 }
@@ -475,16 +455,6 @@ export const StrategyRevisionPage = () => {
                 }}
               />
             </>
-          ),
-          diff: (
-            <StrategyDiffPanel
-              state={document}
-              active={view === "diff"}
-              revision={{
-                strategyId,
-                currentRevision: Number(revision),
-              }}
-            />
           ),
         }}
         notice={
@@ -574,11 +544,6 @@ export const StrategyRevisionPage = () => {
         }
         editor={
           <>
-            {implemented ? null : (
-              <p className="page-state" role="status">
-                {t("page.revision.viewPending")} ({requested.toUpperCase()})
-              </p>
-            )}
             {autosave.recovery ? (
               <RecoveryBanner recovery={autosave.recovery} />
             ) : null}

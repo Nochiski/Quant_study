@@ -32,7 +32,7 @@ export type FactorGraphEditing = {
   /** 연산자 카탈로그(P1-03). 팔레트가 읽는다 — 없으면 노드 kind만 보인다. */
   operators?: OperatorCatalogState;
   /** Graph → Form 왕복(P5-03). */
-  onOpenForm?: (pointer: string) => void;
+  onOpenSource?: (pointer: string) => void;
   /** 문서 경계(`documentEpoch`). 바뀌면 "재계산 중"에 쓰는 직전 투영을 버린다(3차 P1). */
   documentKey?: unknown;
 };
@@ -374,7 +374,7 @@ export const FactorGraphPanel = ({
         revealSignal={revealSignal}
         onSelectPointer={onSelectPointer}
         factorSelect={factorSelect}
-        onOpenForm={editing.onOpenForm}
+        onOpenSource={editing.onOpenSource}
       />
     );
   };

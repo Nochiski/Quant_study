@@ -148,7 +148,7 @@ const RevisionRows = ({
                         strategyId,
                         revision: String(revision.revision),
                       }}
-                      search={{ view: "diff" }}
+                      search={{ view: "graph", compare: true }}
                     >
                       Diff
                     </Link>

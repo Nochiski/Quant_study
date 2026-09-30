@@ -3,6 +3,7 @@
   --ide-gutter: var(--space-5);
   display: flex;
   flex-direction: column;
+  min-width: 360px;
   min-height: 100vh;
   background: var(--surface-canvas);
 }
@@ -229,7 +230,7 @@
  * 하단 6px이 조용한 사각지대가 됐다). 포커스 링 클립은 링을 탭 안쪽에 그려 푼다(아래).
  */
 .ide__editor-tabs .ui-tabs {
-  flex: 1;
+  flex: 1 0 100%;
   min-width: 0;
   overflow-x: auto;
   border-bottom: 0;
@@ -548,4 +549,9 @@
   .ide__results {
     grid-template-columns: 1fr;
   }
+}
+
+.ide__revision-diff {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
 }

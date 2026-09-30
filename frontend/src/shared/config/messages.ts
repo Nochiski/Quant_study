@@ -1,4 +1,6 @@
 const ko = {
+  "ide.view.graph": "그래프",
+  "ide.revision.diff": "리비전 변경 비교",
   "strategy.preview.title": "선정 미리보기",
   "strategy.preview.stale": "이전 요청 · 새로고침 필요",
   "strategy.preview.date": "기준일 (선택)",
@@ -2113,6 +2115,8 @@ export type MessageKey = keyof typeof ko;
 export const messages = {
   ko,
   en: {
+    "ide.view.graph": "Graph",
+    "ide.revision.diff": "Revision changes",
     "strategy.preview.title": "Selection preview",
     "strategy.preview.stale": "Outdated request · refresh needed",
     "strategy.preview.date": "As-of date (optional)",

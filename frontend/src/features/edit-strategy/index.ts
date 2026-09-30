@@ -18,6 +18,7 @@ export {
 } from "./model/document-state";
 export {
   PROJECTION_VIEWS,
+  migrateStrategyView,
   STRATEGY_VIEWS,
   type StrategyView,
 } from "./model/strategy-views";
@@ -142,7 +143,6 @@ export { ExecutionPlanPanel } from "./ui/execution-plan-panel";
 export { FactorGraphPanel } from "./ui/factor-graph-panel";
 export { PipelinePanel } from "./ui/pipeline-panel";
 export { SnippetCatalog } from "./ui/snippet-catalog";
-export { StrategyProjectionPanel } from "./ui/strategy-projection-panel";
 export { StrategyDiffPanel } from "./ui/strategy-diff-panel";
 export {
   diffCanonicalJson,
@@ -230,7 +230,7 @@ export {
 // 흘러 들어가 직접 import하지 않는다). 공개 API는 실제 소비자가 있는 것만 둔다 — 넓히면 slice
 // 내부 리팩터가 밖으로 샌다(리뷰 P3, `frontend-fsd.md`).
 export type { OperatorCatalogState } from "./model/operator-palette";
-export { StrategyFormPanel, type FormCatalogs } from "./ui/strategy-form-panel";
+export { type FormCatalogs } from "./ui/strategy-form-panel";
 export { FactorGraphEditor } from "./ui/factor-graph-editor";
 export {
   buildCanonicalSnippetCatalog,

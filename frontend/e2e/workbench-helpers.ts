@@ -47,6 +47,7 @@ export const backtest = (page: Page) =>
 export const openEditor = async (page: Page, url: string) => {
   const response = await page.goto(url);
   expect(response?.ok()).toBe(true);
+  await page.getByRole("tab", { name: "YAML", exact: true }).click();
   await expect(editor(page)).toBeVisible();
 };
 
@@ -111,6 +112,7 @@ export const saveAndWaitForRevision = async (page: Page, revision: number) => {
     ),
   );
   await expectPhase(page, "저장됨");
+  await page.getByRole("tab", { name: "YAML", exact: true }).click();
 };
 
 /** 은퇴 버전 문서의 안내 배너. 문구는 버전 중립이다 — 어느 버전이 은퇴했는지는 backend 가 판정한다. */

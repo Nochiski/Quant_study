@@ -273,6 +273,7 @@ page.on("request", (request) => {
 
 try {
   await page.goto(`${frontendUrl}/research/strategies/new`);
+  await page.getByRole("tab", { name: "YAML", exact: true }).click();
   await expect(editor(page)).toBeVisible();
   // 빈 템플릿의 검증이 끝나기 전에 찍으면 실행마다 배지·문제 목록이 달라진다(구문 통과 / 검증 오류).
   await expectPhase(page, "검증 오류");
@@ -358,7 +359,7 @@ try {
     ),
   ).toBeVisible();
   await expect(documentStatus).toContainText("저장됨");
-  await page.getByRole("tab", { name: "Diff", exact: true }).click();
+  await page.getByRole("button", { name: "리비전 변경 비교", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "StrategySpec Diff" }),
   ).toContainText("/title");
@@ -577,6 +578,7 @@ try {
   await page.goto(
     `${frontendUrl}/research/strategies/${strategyId}/revisions/2`,
   );
+  await page.getByRole("tab", { name: "YAML", exact: true }).click();
   await expect(editor(page)).toBeVisible();
   // 검증이 끝난 뒤 찍는다 — 분석 중이면 배지가 `구문 통과`로 찍힌다(#263 리뷰 P3-1).
   await expectPhase(page, "저장됨");
@@ -586,14 +588,11 @@ try {
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
 
-  // 8절: Form 탭(섹션별 필드)과 Graph 탭(노드 목록 + 선택한 노드 속성).
-  await page.getByRole("tab", { name: "Form", exact: true }).click();
-  await expect(page.getByRole("tabpanel", { name: "Form" })).toContainText(
-    "max_name_weight",
-  );
-  await capture(page, "13-form-editing.png");
+  // 8절: 파이프라인 카드와 같은 탭의 고급 노드 편집기.
+  await page.getByRole("tab", { name: "그래프", exact: true }).click();
+  await expect(page.getByRole("region", { name: "전략 파이프라인" })).toBeVisible();
+  await capture(page, "13-pipeline-editing.png");
 
-  await page.getByRole("tab", { name: "Graph", exact: true }).click();
   const graphEditor = page.getByRole("region", { name: "그래프 편집" });
   await expect(graphEditor).toBeVisible();
   await graphEditor
@@ -612,6 +611,7 @@ try {
   await page.goto(
     `${frontendUrl}/research/strategies/${retiredStrategyId}/revisions/1`,
   );
+  await page.getByRole("tab", { name: "YAML", exact: true }).click();
   await expect(editor(page)).toBeVisible();
   const upgradeBanner = page.getByRole("region", { name: "이전 schema 문서" });
   await expect(upgradeBanner).toContainText(
@@ -626,11 +626,12 @@ try {
 
   // 8절 Graph: 조건형 아이디어의 비교 출력(참/거짓)에 compile 이 붙인 승격 노드.
   await page.goto(`${frontendUrl}/research/strategies/new`);
+  await page.getByRole("tab", { name: "YAML", exact: true }).click();
   await expect(editor(page)).toBeVisible();
   await replaceSource(page, promotedIdea);
   await expectPhase(page, "검증 통과");
   await closeCompletion(page);
-  await page.getByRole("tab", { name: "Graph", exact: true }).click();
+  await page.getByRole("tab", { name: "그래프", exact: true }).click();
   const promotedNode = page.getByRole("button", {
     name: "그래프 노드 선택: 참/거짓을 1/0으로",
     exact: true,

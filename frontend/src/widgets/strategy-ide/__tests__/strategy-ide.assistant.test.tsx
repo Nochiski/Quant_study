@@ -247,7 +247,7 @@ describe("StrategyIde assistant 슬롯", () => {
       screen.getByRole("complementary", { name: "AI 어시스턴트" }),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Graph" }));
+    await user.click(screen.getByRole("tab", { name: "그래프" }));
     expect(await screen.findByText("graph projection")).toBeInTheDocument();
     expect(
       screen.getByRole("complementary", { name: "AI 어시스턴트" }),

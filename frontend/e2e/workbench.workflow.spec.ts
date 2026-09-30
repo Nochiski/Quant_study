@@ -183,7 +183,7 @@ test.describe("professional YAML workflow", () => {
   }) => {
     await openEditor(page, "/?step=portfolio&run=bt-old");
     await expect(page).toHaveURL(
-      /\/research\/strategies\/new\?draft=draft-[a-f0-9]{32}$/u,
+      /\/research\/strategies\/new\?.*draft=draft-[a-f0-9]{32}/u,
     );
     expect(page.url()).not.toContain("step=");
     expect(page.url()).not.toContain("run=");
@@ -193,7 +193,7 @@ test.describe("professional YAML workflow", () => {
 
     await openEditor(page, "/legacy/builder?step=risk&run=bt-old");
     await expect(page).toHaveURL(
-      /\/research\/strategies\/new\?draft=draft-[a-f0-9]{32}$/u,
+      /\/research\/strategies\/new\?.*draft=draft-[a-f0-9]{32}/u,
     );
     await expect(page.getByRole("link", { name: "기존 편집기" })).toHaveCount(
       0,
@@ -293,7 +293,7 @@ test.describe("professional YAML workflow", () => {
     await saveAndWaitForRevision(page, 2);
     const v2Url = `${new URL(page.url()).pathname}`;
 
-    await page.getByRole("tab", { name: "Diff", exact: true }).click();
+    await page.getByRole("button", { name: "리비전 변경 비교", exact: true }).click();
     const diff = page.getByRole("region", { name: "StrategySpec Diff" });
     await expect(diff).toBeVisible();
     await expect(diff.getByText("저장 revision 비교")).toBeVisible();
@@ -894,7 +894,7 @@ test.describe("professional YAML workflow", () => {
         .getByRole("row")
         .filter({ hasText: `v${revision}` });
       const diffLink = revisionRow.getByRole("link", { name: "Diff" });
-      const expectedHref = `/research/strategies/${strategyId}/revisions/${revision}?view=diff`;
+      const expectedHref = `/research/strategies/${strategyId}/revisions/${revision}?view=graph&compare=true`;
       await expect(diffLink).toHaveAttribute("href", expectedHref);
       await diffLink.click();
       const navigated = new URL(workflow.url());
@@ -1081,18 +1081,18 @@ test.describe("professional YAML workflow", () => {
     await saveAndWaitForRevision(page, 1);
     const { strategyId } = strategyIdentity(page);
 
-    await page.getByRole("tab", { name: "Form", exact: true }).click();
-    const form = page.getByRole("region", { name: "Form 편집" });
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
+    const form = page.getByRole("region", { name: "전략 파이프라인" });
     await expect(form).toBeVisible();
     await expect(form.getByText("편집 가능")).toBeVisible();
-    const risk = form.getByRole("group", { name: /\brisk\b/ });
-    const weight = risk.getByRole("spinbutton", { name: /\bmax_name_weight/ });
+    const risk = form;
+    const weight = risk.getByRole("spinbutton", { name: "종목별 최대 목표 비중 한도" });
     await expect(weight).toHaveValue("0.05");
     await weight.fill("0.1");
     await weight.press("Enter");
     await expect(
       form.getByRole("status").filter({ hasText: "반영됨" }),
-    ).toContainText("max_name_weight 반영됨");
+    ).toContainText("종목별 최대 목표 비중 한도 반영됨");
 
     await page.getByRole("tab", { name: "YAML", exact: true }).click();
     // Form 편집은 hidden 편집기에 범위 교체 한 번이므로 GOLDEN의 주석·순서가 그대로다.
@@ -1123,33 +1123,7 @@ test.describe("professional YAML workflow", () => {
     expect(formSaved.spec_hash).toBe(yamlSaved.spec_hash);
     expect(formSaved.source_hash).toBe(yamlSaved.source_hash);
 
-    // 예시 팩터 추가 → source에 항목이 생기고 검증을 통과하며 Graph 화면에 새 팩터가 보인다.
-    await page.getByRole("tab", { name: "Form", exact: true }).click();
-    const factors = form.getByRole("group", { name: /\bfactors\b/ });
-    const catalog = factors.getByRole("combobox", {
-      name: "factors · 예시 팩터에서 추가",
-    });
-    const options = catalog.locator("option:not([disabled])");
-    await expect.poll(async () => options.count()).toBeGreaterThan(1);
-    const addedId = await options.nth(1).getAttribute("value");
-    await catalog.selectOption({ index: 1 });
-    await expect(
-      form.getByRole("status").filter({ hasText: "반영됨" }),
-    ).toBeVisible();
-    await page.getByRole("tab", { name: "YAML", exact: true }).click();
-    const withFactor = await currentSource(page);
-    expect(withFactor).toContain(
-      `factor_id: ${addedId!.replace("factor:", "")}`,
-    );
-    expect(
-      withFactor.startsWith(viaYaml.slice(0, viaYaml.indexOf("factors:"))),
-    ).toBe(true);
-    await expectPhase(page, "검증 통과");
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
-    // Graph 화면(실행 plan 기반)의 팩터 선택에 새 팩터가 들어온다.
-    await expect(page.getByRole("tabpanel", { name: "Graph" })).toContainText(
-      addedId!.replace("factor:", ""),
-    );
+    // 팩터 추가는 아래 빈 문서 → 세 노드 흐름이 검증한다.
   });
 
   test("adds a node in the Graph editor, rewires an input, refreshes the plan and saves", { tag: ["@story", "@US-SM-08", "@US-CS-01"] }, async ({
@@ -1163,7 +1137,7 @@ test.describe("professional YAML workflow", () => {
     const { strategyId } = strategyIdentity(page);
 
     const baseSource = await currentSource(page);
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
     await expect(editor).toBeVisible();
     await expect(editor.getByText("편집 가능")).toBeVisible();
@@ -1187,14 +1161,14 @@ test.describe("professional YAML workflow", () => {
     await undoButton.click();
     expect(
       await page
-        .getByRole("tab", { name: "Graph", exact: true })
+        .getByRole("tab", { name: "그래프", exact: true })
         .getAttribute("aria-selected"),
     ).toBe("true");
     await expect(redoButton).not.toHaveAttribute("aria-disabled", "true");
     // 트랜잭션 한 번 = 되돌리기 한 단계: YAML 원문이 노드 추가 전으로 정확히 돌아온다.
     await page.getByRole("tab", { name: "YAML", exact: true }).click();
     expect(await currentSource(page)).toBe(baseSource);
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
     await redoButton.click();
     // 되돌리기는 선택까지 되살리지 않는다(선택 pointer는 URL, 문서 이력 밖) — 노드를 다시 고른다.
     await editor.getByRole("button", { name: "노드 편집: field" }).click();
@@ -1226,7 +1200,7 @@ test.describe("professional YAML workflow", () => {
     await expectPhase(page, "검증 통과");
     expect(
       await page
-        .getByRole("tab", { name: "Graph", exact: true })
+        .getByRole("tab", { name: "그래프", exact: true })
         .getAttribute("aria-selected"),
     ).toBe("true");
 
@@ -1269,16 +1243,16 @@ test.describe("professional YAML workflow", () => {
     expect(saved.source_hash).toBe(compiled.source_hash);
 
     // plan 투영(DAG 카드)에 새 노드가 들어온다.
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
     await expect(
       page
-        .getByRole("tabpanel", { name: "Graph" })
+        .getByRole("tabpanel", { name: "그래프" })
         .getByRole("button", { name: "그래프 노드 선택: field" }),
     ).toBeVisible();
 
     // Graph → Form 왕복.
-    await editor.getByRole("button", { name: /Form에서 열기/ }).click();
-    await expect(page.getByRole("region", { name: "Form 편집" })).toBeVisible();
+    await editor.getByRole("button", { name: /소스에서 열기/ }).click();
+    await expect(page.getByRole("textbox", { name: "편집기" })).toBeVisible();
   });
 
   test("picks the operator first in the palette and the document stays valid (P1-04)", async ({
@@ -1288,7 +1262,7 @@ test.describe("professional YAML workflow", () => {
     await replaceSource(page, GOLDEN.replace("퀄리티 모멘텀", "P1-04 E2E 팔레트"));
     await expectPhase(page, "검증 통과");
 
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const editor = page.getByRole("region", { name: "그래프 편집" });
     const palette = editor.getByRole("group", { name: "연산자 팔레트" });
     await expect(palette).toBeVisible();
@@ -1347,7 +1321,7 @@ test.describe("professional YAML workflow", () => {
     await replaceSource(page, withTrailingNode);
     await expectPhase(page, "검증 오류");
 
-    await page.getByRole("tab", { name: "Graph", exact: true }).click();
+    await page.getByRole("tab", { name: "그래프", exact: true }).click();
     const editorRegion = page.getByRole("region", { name: "그래프 편집" });
     await expect(editorRegion).toBeVisible();
     // 원인 문장이 그 노드 카드 안에 본문으로 있다.
@@ -1536,4 +1510,48 @@ test.describe("professional YAML workflow", () => {
       revisions.getByRole("row").filter({ hasText: `v${nextRevision}` }),
     ).not.toContainText("이전 버전 동결");
   });
+});
+
+// P4-04: 실제 브라우저에서만 판정할 수 있는 폭·클릭 조건. 단위 DOM 테스트로 대체하지 않는다.
+for (const width of [360, 640]) {
+  test(`그래프와 YAML 탭은 ${width}px에서 폭을 갖고 클릭된다`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/research/strategies/new");
+    const graph = page.getByRole("tab", { name: "그래프", exact: true });
+    const yaml = page.getByRole("tab", { name: "YAML", exact: true });
+    await expect(graph).toHaveAttribute("aria-selected", "true");
+    for (const tab of [graph, yaml]) {
+      await expect(tab).toBeVisible();
+      const box = await tab.boundingBox();
+      expect(box?.width).toBeGreaterThan(0);
+      await tab.click();
+      await expect(tab).toHaveAttribute("aria-selected", "true");
+    }
+    await expect(editor(page)).toBeVisible();
+  });
+}
+
+test("빈 그래프에서 팩터·세 노드를 만들고 명시적 미리보기 뒤 백테스트한다", async ({ page }) => {
+  await page.goto("/research/strategies/new");
+  const pipeline = page.getByRole("region", { name: "전략 파이프라인" });
+  await expect(pipeline).toBeVisible();
+  await expect(pipeline).not.toContainText("구조 오류");
+  await pipeline.getByRole("button", { name: /팩터.*추가/ }).click();
+  await pipeline.getByRole("button", { name: /레시피 열기/ }).click();
+  const graph = page.getByRole("region", { name: "그래프 편집" });
+  await graph.getByRole("button", { name: "데이터 필드 노드 추가", exact: true }).click();
+  await graph.getByRole("group", { name: /선택한 노드/ })
+    .getByRole("combobox", { name: /\bfield_id/ }).selectOption("price.close");
+  for (const operation of ["양끝 자르기", "순위"]) {
+    await graph.getByRole("button", { name: `${operation} 노드 추가`, exact: true }).click();
+  }
+  await graph.getByRole("combobox", { name: /출력 노드/ }).selectOption("rank");
+  await expectPhase(page, "검증 통과");
+  await expect(pipeline).not.toContainText(/_id|_node|kind:/);
+  await fillRunEnvironment(page);
+  const preview = page.getByRole("region", { name: "선정 미리보기" });
+  await preview.getByRole("button", { name: "미리보기 새로고침" }).click();
+  await expect(preview.getByRole("table", { name: "선정 종목" })).toBeVisible();
+  await backtest(page).click();
+  await expect(page).toHaveURL(/\/backtests\//);
 });

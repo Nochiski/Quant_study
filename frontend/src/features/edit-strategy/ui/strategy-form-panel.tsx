@@ -1129,6 +1129,8 @@ const TextualControl = ({
   };
   const numeric = control.kind === "number";
   const edit = (value: string): void => {
+    // 새 입력은 새 확정 시도다. undo로 같은 원문 값에 돌아와도 이전 성공 기록에 막히지 않는다.
+    submitted.current = null;
     setDraft(value);
     setPristine(false);
   };

@@ -32,8 +32,12 @@ from strategy_workbench.adapters.outbound.equity_duckdb._adapter import (
     _fetchall,
     _parquet_table,
 )
-from strategy_workbench.adapters.outbound.equity_duckdb._source import CATALOG_REBUILD
+from strategy_workbench.adapters.outbound.equity_duckdb._source import (
+    CATALOG_REBUILD,
+    LEDGER_SYNC,
+)
 from strategy_workbench.adapters.outbound.equity_duckdb._specs import (
+    FIELD_NOT_IN_LEDGER,
     FIELD_SPECS,
     SOURCE_SPECS,
     UNSUPPORTED_FIELDS,
@@ -548,15 +552,11 @@ def test_unavailable_field_is_a_failure_value_naming_the_supported_set(
     assert result.status is DataLoadStatus.INVALID_QUERY and result.observations == ()
     assert result.detail is not None
     assert "unavailable" in result.detail and "classification.sector" in result.detail
-    assert "현재값 라벨" in result.detail  # 사유를 그대로 붙인다
     assert "price.adj_close" in result.detail  # supported 목록
-    # 격자 3테이블이 서도 남는 미지원은 사유가 셋으로 갈린다 — 컬럼 부재 · 원천 부재 · 안 굽기
-    ownership = _raw(adapter, fields=("flow.foreign_ownership",))
-    assert ownership.detail is not None and "S08-2" in ownership.detail
-    net_buy = _raw(adapter, fields=("credit.net_buy",))
-    assert net_buy.detail is not None and "39컬럼에 순매수 축이 없다" in net_buy.detail
-    ratio = _raw(adapter, fields=("short.short_balance_ratio",))
-    assert ratio.detail is not None and "셀 하나로 굽지 않는다" in ratio.detail
+    # 사유는 한 문장이고 필드별 메모(원장 작업 기록)는 싣지 않는다 — compile 진단도 같은 표를
+    # 읽는다(#316 리뷰 P3-1)
+    assert FIELD_NOT_IN_LEDGER in result.detail
+    assert UNSUPPORTED_FIELDS["classification.sector"] not in result.detail
 
 
 def test_queries_outside_calendar_coverage_are_no_data(
@@ -1686,7 +1686,11 @@ def degraded_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "no panel cells",
             lambda a: a.load_panel(ResearchPanelQuery(START, END, ("036220:1",), ("price.close",))),
         ),
-        ("equity tables not built", lambda a: _raw(a, fields=("flow.foreign_net_buy",))),
+        # 조치가 사유에 실린다 — 백테스트를 멈춘 사유와 같은 owner(#316 리뷰 P3-1)
+        (
+            f"{LEDGER_SYNC} (table_missing)",
+            lambda a: _raw(a, fields=("flow.foreign_net_buy",)),
+        ),
         ("catalog_missing", lambda a: _raw(a, fields=("financial.book_equity",))),
     ],
     ids=["no-sessions", "no-members", "no-panel-cells", "table-not-built", "meta-missing"],

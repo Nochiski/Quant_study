@@ -126,6 +126,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 
 from ._source import (
     CATALOG_REBUILD,
+    LEDGER_SYNC,
     CatalogState,
     EquityDuckdbSetupError,
     TableBuild,
@@ -140,6 +141,7 @@ from ._specs import (
     CORP_TICKER_TABLE,
     FACTOR_TABLE,
     FIELD_BY_ID,
+    FIELD_NOT_IN_LEDGER,
     FIELD_SPECS,
     POLICY_TABLE,
     PRICE_TABLE,
@@ -692,7 +694,10 @@ class EquityDuckdbAdapter:
         tables = [name for name in spec.requires if name not in macros]
         absent = [table for table in tables if table not in self._builds]
         if absent:
-            return f"equity tables not built — missing={absent}"
+            return (
+                f"원장 표가 없어 이 원천의 필드를 뺀다 — {LEDGER_SYNC} (table_missing) — "
+                f"missing={absent}"
+            )
         if not macros:
             return None
         if not self._catalog.usable:
@@ -1079,15 +1084,15 @@ class EquityDuckdbAdapter:
     def unavailable_factor_fields(self) -> Mapping[str, str]:
         """선언했지만 주지 않는 필드 → 사유(#316). compile 진단과 질의 거절이 같은 표를 읽는다.
 
-        부팅 검사가 원천을 뺀 필드는 그 원천의 사유(`catalog_*`, 조치 `CATALOG_REBUILD`)이고, 원장에
-        없는 필드는 `UNSUPPORTED_FIELDS` 의 사유다.
+        부팅 검사가 원천을 뺀 필드는 그 원천의 사유(조치 `CATALOG_REBUILD`·`LEDGER_SYNC`)이고,
+        원장에 없는 필드(`UNSUPPORTED_FIELDS`)는 `FIELD_NOT_IN_LEDGER` 한 문장이다.
         """
         reasons = {
             spec.field_id: reason
             for spec in FIELD_SPECS
             if (reason := self._source_reason[spec.source]) is not None
         }
-        return reasons | UNSUPPORTED_FIELDS
+        return reasons | dict.fromkeys(UNSUPPORTED_FIELDS, FIELD_NOT_IN_LEDGER)
 
     def load_factor_observations(self, query: FactorObservationQuery) -> FactorObservationSet:
         """`RESEARCH_UNIVERSE_ID` 위의 raw 패널을 팩터 관측으로. status 가 없어 실패는 예외."""
@@ -1288,8 +1293,7 @@ class EquityDuckdbAdapter:
         if FACTOR_TABLE not in self._builds:
             raise BacktestDataNotReadyError(
                 f"원장 표 {FACTOR_TABLE} 이 없어 백테스트를 멈춘다 — 기업행위 사건 없이 돌리면 "
-                "분할·병합 구간의 손익이 조용히 틀린다. 원장을 받은 뒤(`ledger_sync`) 서버를 "
-                "다시 띄워야 한다 (table_missing)"
+                f"분할·병합 구간의 손익이 조용히 틀린다. {LEDGER_SYNC} (table_missing)"
             )
         if self._event_feed_reason is not None:
             raise BacktestDataNotReadyError(

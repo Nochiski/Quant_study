@@ -100,6 +100,11 @@ from .ports.outgoing.raw_observations import (
 
 _T = TypeVar("_T")
 _CHECKPOINT_BATCH = 256
+# 계산 예외의 원문(영문)은 문장 뒤 기계 디테일로만 싣는다(error-messages.md, #357 C-P3-17).
+_NON_FINITE_SENTENCE = (
+    "계산 중에 NaN·무한대가 나와 결과를 만들 수 없습니다. 값이 넘칠 만큼 큰 곱셈·나눗셈이 없는지 "
+    "확인하세요"
+)
 
 PipelineProgress = Callable[[float, str], None]
 """파이프라인 안의 완료 비율(0~1, 단조 증가)과 사람이 읽는 현재 작업 설명을 받는 콜백."""
@@ -422,7 +427,7 @@ class PortfolioDesignService:
                 issue = semantic_issue(
                     "strategy.expression.calculation_non_finite",
                     f"factors.{factor_index}.graph.nodes.{node_index}",
-                    str(error),
+                    f"{_NON_FINITE_SENTENCE} — {error}",
                     node_id=error.node_id,
                 )
                 raise InvalidPortfolioRequestError(
@@ -486,7 +491,7 @@ class PortfolioDesignService:
             issue = semantic_issue(
                 "strategy.expression.calculation_non_finite",
                 "portfolio",
-                str(error),
+                f"{_NON_FINITE_SENTENCE} — {error}",
             )
             raise InvalidPortfolioRequestError(
                 StrategyValidation(valid=False, issues=(issue,))

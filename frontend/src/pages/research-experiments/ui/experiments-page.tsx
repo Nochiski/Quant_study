@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { requestRejectionMessage } from "../../../entities/backtest";
@@ -6,22 +6,15 @@ import {
   experimentStatusLabel,
   experimentStatusTone,
   experimentsQuery,
-  isExperimentSettled,
   useCancelExperiment,
   useControlExperiment,
   type Experiment,
 } from "../../../entities/experiment";
 import { failureReason } from "../../../shared/api";
 import { t, tFill } from "../../../shared/config";
-import { Link, useSearch } from "../../../shared/lib/router";
+import { Link } from "../../../shared/lib/router";
 import { Badge, Button, EmptyState, FailureNotice } from "../../../shared/ui";
 import "../../../shared/ui/data-list.css";
-
-/** 실험 조작 값. backend 는 늘 싣지만 스키마에서 기본값 칸이라 선택 칸이다 — 폴백은 여기 한 곳이다. */
-const controlsOf = (item: Experiment) => ({
-  paused: item.record.controls?.paused ?? false,
-  priority: item.record.controls?.priority ?? 1,
-});
 
 /** 실험 한 줄의 조작. 대기열 규칙(슬롯·배정·우선순위 상한)은 backend 가 적용한다(spec D6). */
 const Actions = ({
@@ -35,12 +28,12 @@ const Actions = ({
   const control = useControlExperiment();
   const cancel = useCancelExperiment();
   const id = item.record.experiment_id;
-  const { paused, priority } = controlsOf(item);
+  const { paused, priority } = item.record.controls;
   const failure = control.error ?? cancel.error;
   return (
     <>
       <span className="data-list-page__actions">
-        {isExperimentSettled(item.status) ? null : (
+        {item.finished ? null : (
           <>
             <Button
               size="small"
@@ -113,8 +106,10 @@ const Actions = ({
 };
 
 export const ExperimentsPage = () => {
-  const { after } = useSearch({ from: "/research/experiments" });
-  const experiments = useQuery(experimentsQuery(after));
+  const experiments = useInfiniteQuery(experimentsQuery());
+  // 슬롯 사용량·우선순위 상한은 첫 쪽 응답의 값이다(쪽마다 같은 서버 상태를 싣는다).
+  const first = experiments.data?.pages[0];
+  const items = experiments.data?.pages.flatMap((page) => page.items) ?? [];
   return (
     <section
       className="page data-list-page"
@@ -130,7 +125,7 @@ export const ExperimentsPage = () => {
         <p className="page-state" role="status">
           {t("page.loading")}
         </p>
-      ) : experiments.isError ? (
+      ) : experiments.isError || first === undefined ? (
         <div className="page-state page-state--error" role="alert">
           <p>{t("experiments.error")}</p>
           <Button tone="ghost" onClick={() => experiments.refetch()}>
@@ -140,9 +135,9 @@ export const ExperimentsPage = () => {
       ) : (
         <div className="data-list-page__panel">
           <p className="data-list-page__filter" role="status">
-            {tFill("experiments.slots", experiments.data.slots)}
+            {tFill("experiments.slots", first.slots)}
           </p>
-          {experiments.data.items.length === 0 ? (
+          {items.length === 0 ? (
             <EmptyState
               title={t("experiments.emptyTitle")}
               description={t("experiments.empty")}
@@ -173,7 +168,7 @@ export const ExperimentsPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {experiments.data.items.map((item) => {
+                  {items.map((item) => {
                     const counts = item.trial_counts;
                     const source = item.record.run.strategy_source;
                     return (
@@ -202,11 +197,11 @@ export const ExperimentsPage = () => {
                             failed: counts.failed ?? 0,
                           })}
                         </td>
-                        <td>{controlsOf(item).priority}</td>
+                        <td>{item.record.controls.priority}</td>
                         <td>
                           <Actions
                             item={item}
-                            maxPriority={experiments.data.max_priority}
+                            maxPriority={first.max_priority}
                           />
                         </td>
                       </tr>
@@ -216,27 +211,16 @@ export const ExperimentsPage = () => {
               </table>
             </div>
           )}
-          {/* 목록은 커서 쪽 넘김이다(응답의 `next_after`). 뒤쪽 실험도 재개·취소할 수 있어야 한다(#402 리뷰 P2-1). */}
-          {after === undefined && experiments.data.next_after == null ? null : (
-            <nav
-              className="data-list-page__actions"
-              aria-label={t("experiments.pagination")}
+          {/* 뒤쪽 실험도 재개·취소할 수 있게 응답의 `next_after` 로 더 읽는다(#402 리뷰 P2-1). */}
+          {experiments.hasNextPage ? (
+            <Button
+              tone="ghost"
+              disabled={experiments.isFetchingNextPage}
+              onClick={() => void experiments.fetchNextPage()}
             >
-              {after === undefined ? null : (
-                <Link to="/research/experiments" search={{}}>
-                  {t("experiments.firstPage")}
-                </Link>
-              )}
-              {experiments.data.next_after == null ? null : (
-                <Link
-                  to="/research/experiments"
-                  search={{ after: experiments.data.next_after }}
-                >
-                  {t("history.next")}
-                </Link>
-              )}
-            </nav>
-          )}
+              {t("experiments.more")}
+            </Button>
+          ) : null}
         </div>
       )}
     </section>

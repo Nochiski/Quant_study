@@ -2602,6 +2602,10 @@
       },
       "Experiment": {
         "properties": {
+          "finished": {
+            "title": "Finished",
+            "type": "boolean"
+          },
           "record": {
             "$ref": "#/components/schemas/ExperimentRecord"
           },
@@ -2630,7 +2634,8 @@
           "record",
           "status",
           "trial_counts",
-          "selections"
+          "selections",
+          "finished"
         ],
         "title": "Experiment",
         "type": "object"
@@ -2691,19 +2696,21 @@
         "type": "object"
       },
       "ExperimentControls": {
-        "description": "실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은\n끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.",
+        "description": "실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은\n끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.\n\n칸에 기본값을 두지 않는다 — 응답 스키마에서 늘 있는 칸이라 화면이 기본값을 복제하지 않는다(#402\n리뷰 P3-1). 만든 실험의 처음 값은 `DEFAULT_EXPERIMENT_CONTROLS` 하나다.",
         "properties": {
           "paused": {
-            "default": false,
             "title": "Paused",
             "type": "boolean"
           },
           "priority": {
-            "default": 1,
             "title": "Priority",
             "type": "integer"
           }
         },
+        "required": [
+          "paused",
+          "priority"
+        ],
         "title": "ExperimentControls",
         "type": "object"
       },
@@ -2803,6 +2810,7 @@
             "enum": [
               "experiment.base.invalid",
               "experiment.base.unsaved",
+              "experiment.cancel.completed",
               "experiment.capacity.base_not_run",
               "experiment.capacity.invalid_amounts",
               "experiment.kind.mismatch",
@@ -2949,11 +2957,7 @@
             "title": "Cancelled At"
           },
           "controls": {
-            "$ref": "#/components/schemas/ExperimentControls",
-            "default": {
-              "paused": false,
-              "priority": 1
-            }
+            "$ref": "#/components/schemas/ExperimentControls"
           },
           "created_at": {
             "format": "date-time",
@@ -2986,7 +2990,8 @@
           "created_at",
           "run",
           "split",
-          "design"
+          "design",
+          "controls"
         ],
         "title": "ExperimentRecord",
         "type": "object"
@@ -12811,6 +12816,16 @@
               }
             },
             "description": "The experiment or trial is missing"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentErrorResponse"
+                }
+              }
+            },
+            "description": "The experiment has completed"
           },
           "422": {
             "content": {

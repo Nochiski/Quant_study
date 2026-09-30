@@ -1661,6 +1661,10 @@ export type ExecutionTiming = "next_open";
  * Experiment
  */
 export type Experiment = {
+  /**
+   * Finished
+   */
+  finished: boolean;
   record: ExperimentRecord;
   /**
    * Selections
@@ -1714,16 +1718,19 @@ export type ExperimentAdmissionErrorResponse = {
  *
  * 실험 단위 대기열 조작(spec D6). 일시정지한 실험의 대기 trial 은 배정되지 않고, 도는 trial 은
  * 끝까지 돈다. `RunStatus` 에는 값을 더하지 않는다.
+ *
+ * 칸에 기본값을 두지 않는다 — 응답 스키마에서 늘 있는 칸이라 화면이 기본값을 복제하지 않는다(#402
+ * 리뷰 P3-1). 만든 실험의 처음 값은 `DEFAULT_EXPERIMENT_CONTROLS` 하나다.
  */
 export type ExperimentControls = {
   /**
    * Paused
    */
-  paused?: boolean;
+  paused: boolean;
   /**
    * Priority
    */
-  priority?: number;
+  priority: number;
 };
 
 /**
@@ -1782,6 +1789,7 @@ export type ExperimentErrorDetail = {
   code:
     | "experiment.base.invalid"
     | "experiment.base.unsaved"
+    | "experiment.cancel.completed"
     | "experiment.capacity.base_not_run"
     | "experiment.capacity.invalid_amounts"
     | "experiment.kind.mismatch"
@@ -1878,7 +1886,7 @@ export type ExperimentRecord = {
    * Cancelled At
    */
   cancelled_at?: string | null;
-  controls?: ExperimentControls;
+  controls: ExperimentControls;
   /**
    * Created At
    */
@@ -8066,6 +8074,10 @@ export type CancelExperimentErrors = {
    * The experiment or trial is missing
    */
   404: ExperimentErrorResponse;
+  /**
+   * The experiment has completed
+   */
+  409: ExperimentErrorResponse;
   /**
    * Validation Error
    */

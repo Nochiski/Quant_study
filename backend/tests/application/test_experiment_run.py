@@ -75,6 +75,7 @@ from strategy_workbench.domain.experiment.facade.design import (
 )
 from strategy_workbench.domain.experiment.facade.statistics import CapacityGap, CapacityLimit
 from strategy_workbench.domain.experiment.facade.trial import (
+    DEFAULT_EXPERIMENT_CONTROLS,
     ExperimentControls,
     ExperimentStatus,
     TrialStatus,
@@ -389,9 +390,9 @@ def test_cancel_stops_submission_and_cancels_submitted_runs() -> None:
     assert not any(state.retryable for state in service.trials(experiment_id))
 
 
-def test_cancelling_a_completed_experiment_leaves_it_completed() -> None:
+def test_cancelling_a_completed_experiment_is_refused_and_leaves_it_completed() -> None:
     """#402 리뷰 P3-3: 목록이 아직 도는 것으로 보인 틈에 누른 취소가 결과가 다 나온 실험을 취소로
-    바꾸지 않는다."""
+    바꾸지 않고 `experiment.cancel.completed` 로 거절한다."""
     runs = _FakeRuns()
     service = _service(runs)
     experiment_id = service.create(_request(split=_BEST)).record.experiment_id
@@ -400,10 +401,14 @@ def test_cancelling_a_completed_experiment_leaves_it_completed() -> None:
     runs.complete_all()
     assert service.get(experiment_id).status is ExperimentStatus.COMPLETED
 
-    after = service.cancel(experiment_id)
+    with pytest.raises(ExperimentStateError) as raised:
+        service.cancel(experiment_id)
+    after = service.get(experiment_id)
 
-    assert (after.status, after.record.cancelled_at, runs.cancelled) == (
+    assert raised.value.code == "experiment.cancel.completed"
+    assert (after.status, after.finished, after.record.cancelled_at, runs.cancelled) == (
         ExperimentStatus.COMPLETED,
+        True,
         None,
         [],
     )
@@ -801,9 +806,9 @@ def test_a_version_3_research_file_upgrades_with_default_controls(tmp_path: Path
     before = reopened.get(experiment_id)
     after = reopened.control(experiment_id, paused=True)
 
-    assert before.record.controls == ExperimentControls()
+    assert before.record.controls == DEFAULT_EXPERIMENT_CONTROLS
     assert [len(state.attempts) for state in reopened.trials(experiment_id)] == [1, 1, 1, 1]
-    assert after.record.controls == ExperimentControls(paused=True)
+    assert after.record.controls == ExperimentControls(paused=True, priority=1)
 
 
 # 워크포워드(V3-05). 칸 두 개(scale -1 → (0,), 1 → (1,)) × 롤링 창 두 개라 trial 0·1 이 칸 (0,) 의

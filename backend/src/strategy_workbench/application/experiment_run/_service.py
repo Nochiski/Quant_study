@@ -54,6 +54,7 @@ from strategy_workbench.domain.experiment.facade.statistics import (
     run_deflated_sharpe,
 )
 from strategy_workbench.domain.experiment.facade.trial import (
+    DEFAULT_EXPERIMENT_CONTROLS,
     MAX_EXPERIMENT_PRIORITY,
     ExperimentControls,
     ExperimentStatus,
@@ -151,6 +152,9 @@ class Experiment:
     # trial 상태별 수. 대기열 화면이 셈을 다시 하지 않게 싣는다.
     trial_counts: dict[TrialStatus, int]
     selections: tuple[ExperimentSelection, ...]
+    # 끝났다(완료·취소, `ExperimentStatus.is_terminal`). 화면이 조작 노출·다시 묻기를 이 값으로
+    # 가른다.
+    finished: bool
 
 
 @dataclass(frozen=True)
@@ -301,6 +305,7 @@ class ExperimentRunService:
             run=run,
             split=split,
             design=design,
+            controls=DEFAULT_EXPERIMENT_CONTROLS,
         )
         self._repository.add(record)
         self._spawn(lambda: self._submit(record))
@@ -325,15 +330,21 @@ class ExperimentRunService:
     def cancel(self, experiment_id: str) -> Experiment:
         """아직 넘기지 않은 trial 은 넘기지 않고, 넘긴 실행은 취소를 요청한다. 되돌릴 수 없다.
 
-        이미 끝난(완료) 실험은 그대로 둔다 — 목록이 아직 도는 것으로 보인 틈에 누른 취소가 결과가
-        다 나온 실험을 취소로 바꾸지 않게 한다(#402 리뷰 P3-3). 완료 판정은 `experiment_status` 다.
+        이미 완료한 실험은 `experiment.cancel.completed` 로 거절한다 — 목록이 아직 도는 것으로 보인
+        틈에 누른 취소가 결과가 다 나온 실험을 취소로 바꾸지 않게 한다(#402 리뷰 P3-3). 완료 판정은
+        `experiment_status` 다. 취소한 실험을 다시 취소하면 그대로 돌려준다.
         """
         with self._lock:
             record = self._repository.get(experiment_id)
             if (
                 record.cancelled_at is None
-                and self._experiment(record).status is not ExperimentStatus.COMPLETED
+                and self._experiment(record).status is ExperimentStatus.COMPLETED
             ):
+                raise ExperimentStateError(
+                    "experiment.cancel.completed",
+                    f"완료한 실험은 취소할 수 없습니다: experiment_id={experiment_id}",
+                )
+            if record.cancelled_at is None:
                 self._repository.cancel(experiment_id, cancelled_at=self._now())
                 self._cancelled.add(experiment_id)
                 for run in (
@@ -471,8 +482,8 @@ class ExperimentRunService:
         with self._lock:
             current = self._repository.get(experiment_id).controls
             controls = ExperimentControls(
-                current.paused if paused is None else paused,
-                current.priority if priority is None else priority,
+                paused=current.paused if paused is None else paused,
+                priority=current.priority if priority is None else priority,
             )
             self._repository.set_controls(experiment_id, controls)
             self._runs.schedule(experiment_id, paused=controls.paused, priority=controls.priority)
@@ -784,17 +795,19 @@ class ExperimentRunService:
     def _experiment(self, record: ExperimentRecord) -> Experiment:
         states = self._trial_states(record)
         statuses = [state.status for state in states]
+        status = experiment_status(
+            statuses,
+            cancelled=record.cancelled_at is not None,
+            paused=record.controls.paused,
+            pending=any(state.awaiting_recovery for state in states)
+            or self._walk_forward_pending(record, states),
+        )
         return Experiment(
             record=record,
-            status=experiment_status(
-                statuses,
-                cancelled=record.cancelled_at is not None,
-                paused=record.controls.paused,
-                pending=any(state.awaiting_recovery for state in states)
-                or self._walk_forward_pending(record, states),
-            ),
+            status=status,
             trial_counts=dict(Counter(statuses)),
             selections=self._repository.selections(record.experiment_id),
+            finished=status.is_terminal,
         )
 
     def _walk_forward_pending(

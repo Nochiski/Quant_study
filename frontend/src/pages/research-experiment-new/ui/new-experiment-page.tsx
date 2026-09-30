@@ -236,7 +236,7 @@ const Form = ({
               </thead>
               <tbody>
                 {preview.data.design.windows.map((window, index) => (
-                  <tr key={window.test_start}>
+                  <tr key={index}>
                     <td>{index + 1}</td>
                     <td>
                       {window.train_start} ~ {window.train_end}

@@ -36,6 +36,7 @@ from strategy_workbench.domain.experiment.facade.design import (
     SplitSpec,
     build_search_spec,
 )
+from strategy_workbench.domain.experiment.facade.trial import DEFAULT_EXPERIMENT_CONTROLS
 from tests.backtest_run_wait import wait_for_terminal_state
 from tests.frozen_revision_rows import FROZEN_SPEC_HASH, seed_frozen_rows
 
@@ -171,6 +172,14 @@ def test_the_preview_equals_the_ledger_growth_after_the_experiment(tmp_path: Pat
         for run_id in (single, trials.json()[0]["attempts"][0]["run_id"], picks[0]["run_id"])
     ]
     assert kinds == ["single", "experiment_trial", "walk_forward_validation"]
+    # 끝난 실험의 취소는 409 로 거절한다(#402 리뷰 P3-3). 끝났는지는 응답의 `finished` 가 싣는다.
+    refused = client.post(f"/api/v1/experiments/{experiment['record']['experiment_id']}/cancel")
+    assert (refused.status_code, refused.json()["detail"]["code"]) == (
+        409,
+        "experiment.cancel.completed",
+    )
+    assert experiment["finished"] is True
+    assert experiment["record"]["controls"] == {"paused": False, "priority": 1}
     assert client.get("/api/v1/backtests/missing/summary").status_code == 404
     assert [window["run_status"] for window in walk_forward["windows"]] == ["completed"] * 2
     # 곡선은 검증 창(2022-01-04 ~ 2023-01-03, 2023-01-04 ~ 2023-06-30) 세션만 잇는다. 학습 점수처럼
@@ -368,6 +377,7 @@ def test_a_base_that_is_no_longer_admitted_is_recorded_and_refused_with_its_code
                 windows=split.windows(date(2021, 1, 4), date(2023, 6, 30)),
                 measured=True,
             ),
+            controls=DEFAULT_EXPERIMENT_CONTROLS,
         )
     )
     # 창 0 학습은 이미 거절로 실패했고, 창 1 학습은 넘기기 전에 서버가 내려갔다.

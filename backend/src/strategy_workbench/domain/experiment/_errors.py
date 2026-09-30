@@ -33,6 +33,7 @@ EXPERIMENT_STATE_CODES: frozenset[str] = frozenset(
         "experiment.selection.not_completed",
         "experiment.selection.not_finished",
         "experiment.kind.mismatch",
+        "experiment.cancel.completed",
     }
 )
 EXPERIMENT_CODES = EXPERIMENT_SPEC_CODES | EXPERIMENT_NOT_FOUND_CODES | EXPERIMENT_STATE_CODES

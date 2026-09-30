@@ -84,6 +84,7 @@ const experiment = (
   status,
   trial_counts: { completed: 3, running: 1, failed: 1, queued: 3 },
   selections: [],
+  finished: status === "completed" || status === "cancelled",
 });
 
 const document = {
@@ -287,55 +288,80 @@ describe("experiments", () => {
   });
 
   // #402 리뷰 P2-1·P3-2: 뒤쪽 실험도 커서로 열어 조작하고, 조작 거절은 코드 번역으로 말한다.
-  it("pages through the list with the response cursor and translates a refused control", async () => {
+  // #402 리뷰 P2-1: 21번째 뒤로 밀린 일시정지 실험도 "더 보기"로 읽어 재개한다.
+  it("loads more experiments with the response cursor and resumes a paused one past the first page", async () => {
     const afters: (string | null)[] = [];
+    const controls: unknown[] = [];
     server.use(
       http.get(`${API}/api/v1/experiments`, ({ request }) => {
         const after = new URL(request.url).searchParams.get("after");
         afters.push(after);
         return HttpResponse.json({
-          items: [
-            experiment(after === null ? "e-new" : "e-old", "paused", {
-              paused: true,
-              priority: 1,
-            }),
-          ],
-          next_after: after === null ? "e-new" : null,
-          slots: { total: 3, running: 0 },
+          items:
+            after === null
+              ? Array.from({ length: 20 }, (_, index) =>
+                  experiment(`e-${index + 1}`, "running"),
+                )
+              : [
+                  experiment("e-old", "paused", {
+                    paused: true,
+                    priority: 1,
+                  }),
+                ],
+          next_after: after === null ? "e-20" : null,
+          slots: { total: 3, running: 2 },
           max_priority: 5,
         });
       }),
-      http.patch(`${API}/api/v1/experiments/:experimentId/controls`, () =>
+      http.patch(
+        `${API}/api/v1/experiments/:experimentId/controls`,
+        async ({ params, request }) => {
+          controls.push([params.experimentId, await request.json()]);
+          return HttpResponse.json(experiment("e-old", "queued"));
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    mount("/research/experiments");
+
+    expect(await screen.findByText("e-20")).toBeInTheDocument();
+    expect(screen.queryByText("e-old")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "실험 더 보기" }));
+    const row = (await screen.findByText("e-old")).closest("tr")!;
+    expect(afters.slice(0, 2)).toEqual([null, "e-20"]);
+    expect(screen.queryByRole("button", { name: "실험 더 보기" })).toBeNull();
+    await user.click(within(row).getByRole("button", { name: "재개" }));
+    await waitFor(() =>
+      expect(controls).toEqual([["e-old", { paused: false }]]),
+    );
+  });
+
+  // #402 리뷰 P3-2·P3-3: 조작 거절도 코드로 번역한다 — 이미 완료한 실험의 취소는 backend 가 거절한다.
+  it("translates a refused control with its code", async () => {
+    server.use(
+      http.post(`${API}/api/v1/experiments/:experimentId/cancel`, () =>
         HttpResponse.json(
           {
             detail: {
-              code: "experiment.not_found",
-              message: "experiment_id=e-old",
+              code: "experiment.cancel.completed",
+              message: "experiment_id=e-run",
             },
           },
-          { status: 404 },
+          { status: 409 },
         ),
       ),
     );
     const user = userEvent.setup();
-    const history = mount("/research/experiments");
+    mount("/research/experiments");
 
-    expect(await screen.findByText("e-new")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "처음 쪽으로" })).toBeNull();
-    await user.click(screen.getByRole("link", { name: "다음" }));
-    expect(await screen.findByText("e-old")).toBeInTheDocument();
-    expect(history.location.search).toContain("after=e-new");
-    expect(afters).toEqual([null, "e-new"]);
-    expect(screen.queryByRole("link", { name: "다음" })).toBeNull();
-    expect(screen.getByRole("link", { name: "처음 쪽으로" })).toHaveAttribute(
-      "href",
-      "/research/experiments",
+    const row = (await screen.findByText("e-run")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "취소" }));
+    await user.click(
+      within(row).getByRole("button", { name: "실험 취소 확인" }),
     );
-
-    await user.click(screen.getByRole("button", { name: "재개" }));
     expect(
       await screen.findByText(
-        "실험을 찾을 수 없습니다. 실험 목록에서 다시 여세요.",
+        "이미 완료한 실험이라 취소하지 않았습니다. 결과는 그대로 남아 있습니다.",
       ),
     ).toBeInTheDocument();
   });

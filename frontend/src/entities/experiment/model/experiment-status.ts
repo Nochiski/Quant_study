@@ -18,9 +18,5 @@ const STATUS: Record<ExperimentStatus, { label: MessageKey; tone: BadgeTone }> =
 export const experimentStatusLabel = (status: ExperimentStatus): string =>
   t(STATUS[status].label);
 
-/** 끝난 실험(완료·취소). 목록 다시 묻기와 조작 노출이 같은 판정을 쓴다. */
-export const isExperimentSettled = (status: ExperimentStatus): boolean =>
-  status === "completed" || status === "cancelled";
-
 export const experimentStatusTone = (status: ExperimentStatus): BadgeTone =>
   STATUS[status].tone;

@@ -10,7 +10,6 @@ export {
 export {
   experimentStatusLabel,
   experimentStatusTone,
-  isExperimentSettled,
 } from "./model/experiment-status";
 export type {
   Experiment,

@@ -290,7 +290,10 @@ def register_experiment_routes(
     @app.post(
         "/api/v1/experiments/{experiment_id}/cancel",
         operation_id="cancelExperiment",
-        responses={404: rejected[404]},
+        responses={
+            404: rejected[404],
+            409: {"model": ExperimentErrorResponse, "description": "The experiment has completed"},
+        },
     )
     def cancel_experiment(experiment_id: str) -> Experiment:
         return experiments.cancel(experiment_id)

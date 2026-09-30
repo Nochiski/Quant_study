@@ -1553,6 +1553,8 @@ const ko = {
     "실험의 trial이 모두 끝난 뒤에 후보를 고를 수 있습니다. 실험이 끝나기를 기다리거나 실험을 취소하세요.",
   "backtest.error.experiment.kind.mismatch":
     "이 실험 종류에서는 볼 수 없는 결과입니다. 워크포워드·후보 선택은 파라미터 탐색에서, 용량 결과는 용량 확인에서 보세요.",
+  "backtest.error.experiment.cancel.completed":
+    "이미 완료한 실험이라 취소하지 않았습니다. 결과는 그대로 남아 있습니다.",
   "trace.error.trace.strategy.requires_upgrade": "저장된 이전 schema revision은 추적할 수 없습니다. 업그레이드 후 새 revision으로 저장하세요.",
   "trace.error.trace.request.invalid": "추적 요청이 올바르지 않습니다. 어느 칸이 틀렸는지는 서버 사유를 보세요.",
   "trace.error.trace.engine.incompatible":
@@ -1821,8 +1823,7 @@ const ko = {
   "experiments.new.test": "검증",
   "experiments.new.enqueue": "대기열에 넣기",
   "experiments.new.base": "기반 {strategy} · v{revision} · 연구 기간 {start} ~ {end}",
-  "experiments.firstPage": "처음 쪽으로",
-  "experiments.pagination": "실험 목록 쪽",
+  "experiments.more": "실험 더 보기",
   "problems.compileUnavailable":
     "검증 서버에 연결할 수 없어 이 텍스트를 확인하지 못했습니다. 잠시 후 다시 시도하세요.",
   "form.panel.label": "Form 편집",
@@ -3623,6 +3624,8 @@ export const messages = {
       "A candidate can be chosen only after every trial of the experiment has finished. Wait for the experiment to finish or cancel it.",
     "backtest.error.experiment.kind.mismatch":
       "This result does not exist for this kind of experiment. Walk-forward and candidate selection belong to a parameter search, capacity results to a capacity check.",
+    "backtest.error.experiment.cancel.completed":
+      "The experiment has already completed, so it was not cancelled. Its results are kept.",
     "trace.error.trace.strategy.requires_upgrade": "A stored older-schema revision cannot be traced. Upgrade it and save a new revision first.",
     "trace.error.trace.request.invalid": "The trace request is invalid. See the server reason for the field.",
     "trace.error.trace.engine.incompatible":
@@ -3891,8 +3894,7 @@ export const messages = {
     "experiments.new.enqueue": "Add to queue",
     "experiments.new.base":
       "Base {strategy} · v{revision} · research period {start} to {end}",
-    "experiments.firstPage": "First page",
-    "experiments.pagination": "Experiment list pages",
+    "experiments.more": "Show more experiments",
     "problems.compileUnavailable":
       "The validation server could not be reached, so this text is unverified. Try again shortly.",
     "form.panel.label": "Form editing",

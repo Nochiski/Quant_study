@@ -66,6 +66,9 @@ import type {
   GetBacktestStatusData,
   GetBacktestStatusErrors,
   GetBacktestStatusResponses,
+  GetBacktestSummaryData,
+  GetBacktestSummaryErrors,
+  GetBacktestSummaryResponses,
   GetEquityCatalogData,
   GetEquityCatalogErrors,
   GetEquityCatalogResponses,
@@ -540,6 +543,21 @@ export const getBacktestResult = <ThrowOnError extends boolean = false>(
     GetBacktestResultErrors,
     ThrowOnError
   >({ url: "/api/v1/backtests/{run_id}/result", ...options });
+
+/**
+ * Get Backtest Summary
+ *
+ * 이력 한 행. 결과 화면이 실행 종류(단일·실험 trial·워크포워드 검증)를 서버 판정으로
+ * 읽는다.
+ */
+export const getBacktestSummary = <ThrowOnError extends boolean = false>(
+  options: Options<GetBacktestSummaryData, ThrowOnError>,
+) =>
+  (options.client ?? client).get<
+    GetBacktestSummaryResponses,
+    GetBacktestSummaryErrors,
+    ThrowOnError
+  >({ url: "/api/v1/backtests/{run_id}/summary", ...options });
 
 /**
  * Equity Catalog

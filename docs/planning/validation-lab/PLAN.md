@@ -2,11 +2,11 @@
 plan_version: 1
 project: validation-lab
 project_status: SELF_CHECK
-current_phase: V4
-current_pr: V4-02,V4-03,V4-04
-active_prs: [V4-02, V4-03, V4-04]
-parallel_window: [V4-02, V4-03, V4-04]
-last_updated: 2026-09-30T14:29:25+09:00
+current_phase: V4,V5
+current_pr: V4-02,V4-03,V4-04,V5-01
+active_prs: [V4-02, V4-03, V4-04, V5-01]
+parallel_window: [V4-02, V4-03, V4-04, V5-01]
+last_updated: 2026-09-30T15:46:05+09:00
 planned_prs: 28
 merged_prs: 17
 approved_prs: 17
@@ -24,12 +24,12 @@ progress_percent: 61
 | Field | Value |
 |---|---|
 | Project status | `SELF_CHECK` |
-| Current phase | `V4` |
-| Current/next PR | `V4-02,V4-03,V4-04` |
-| Active PR | `V4-02, V4-03, V4-04` |
+| Current phase | `V4,V5` |
+| Current/next PR | `V4-02,V4-03,V4-04,V5-01` |
+| Active PR | `V4-02, V4-03, V4-04, V5-01` |
 | Progress | `17 / 28 merged (61%)` |
 | Approved | `17 / 28` |
-| Aggregated at | `2026-09-30 14:29 KST` |
+| Aggregated at | `2026-09-30 15:46 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. frontmatter와 위 표, Phase 집계는
@@ -72,7 +72,7 @@ progress_percent: 61
 | V2 | Cost realism: sell tax, ADV participation, sqrt impact | 3 | 3 | `MERGED` |
 | V3 | Experiment backend, async queue, walk-forward | 5 | 5 | `MERGED` |
 | V4 | Validation statistics: PSR, DSR, plateau, capacity, factor regression | 5 | 1 | `SELF_CHECK` |
-| V5 | Screens (after lang2 merge signal) | 7 | 2 | `WAITING` |
+| V5 | Screens (after lang2 merge signal) | 7 | 2 | `SELF_CHECK` |
 | V6 | Holdout one-time opening | 2 | 0 | `WAITING` |
 | **Total** |  | **28** | **17** | **61%** |
 <!-- PLAN:PHASES:END -->
@@ -125,7 +125,7 @@ progress_percent: 61
 
 | 완료 | PR | 결과물 | Dependency | 상태 | Review |
 |---|---|---|---|---|---|
-| [ ] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04 | `PLANNED` | — |
+| [ ] | `V5-01` | 실험 라우트·대기열·모니터·완료 알림 | V3-04 | `SELF_CHECK` | [#402](https://github.com/Nochiski/Quant_study/pull/402) 스택 1/2(목록·대기열 조작·새 실험·backend 칸), [#407](https://github.com/Nochiski/Quant_study/pull/407) 2/2(모니터·진행 스트림·완료 알림·스토리 e2e) |
 | [ ] | `V5-02` | 결과 검증 카드·튼튼한지 확인하기·AI 검증 요약 | V5-01, V3-05, V4-02, V4-03 | `PLANNED` | — |
 | [x] | `V5-03` | 백테스트 이력 종류 칼럼·전략 이력 원장 탭·계열 합치기 | V1-05 | `MERGED` | [#386](https://github.com/Nochiski/Quant_study/pull/386) · main 머지 `3f6b3853`(2026-09-30) |
 | [ ] | `V5-04` | 후보 탐색 히트맵·선택 | V5-01, V4-03 | `PLANNED` | — |

@@ -292,12 +292,16 @@ export const BacktestsPage = () => {
                         {item.experiment_id === null ? null : (
                           <>
                             <br />
-                            <span className="data-list-page__hash">
+                            <Link
+                              className="data-list-page__hash"
+                              to="/research/experiments/$experimentId"
+                              params={{ experimentId: item.experiment_id }}
+                            >
                               {t("history.backtests.experiment").replace(
                                 "{experiment}",
                                 item.experiment_id,
                               )}
-                            </span>
+                            </Link>
                           </>
                         )}
                         {item.experiment_paused ? (

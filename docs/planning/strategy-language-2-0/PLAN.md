@@ -6,7 +6,7 @@ current_phase: P4
 current_pr: P4-03
 active_prs: [P4-03]
 parallel_window: []
-last_updated: 2026-09-30T17:22:02+09:00
+last_updated: 2026-09-30T17:30:15+09:00
 planned_prs: 30
 merged_prs: 22
 integrated_prs: 0
@@ -30,7 +30,7 @@ progress_percent: 73
 | Active PR | `P4-03` |
 | Progress | `22 / 30 done (73%), main 22, integration 0` |
 | Approved | `22 / 30` |
-| Aggregated at | `2026-09-30 17:22 KST` |
+| Aggregated at | `2026-09-30 17:30 KST` |
 <!-- PLAN:SUMMARY:END -->
 
 진척도는 PR tracker의 `[x]` 수를 기준으로 계산한다. `[x]` 는 대상 브랜치에 머지된 PR 이다 — main 머지

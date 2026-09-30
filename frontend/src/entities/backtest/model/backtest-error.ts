@@ -1,4 +1,5 @@
-import { t, tOptional } from "../../../shared/config";
+import { ApiRequestError } from "../../../shared/api";
+import { t, tOptional, type MessageKey } from "../../../shared/config";
 
 /**
  * 실행 API가 코드로 답한 거절·실패의 번역 `backtest.error.<code>`. 시작 거절(`startBacktest` 404·409·422)과
@@ -31,6 +32,18 @@ export const backtestErrorSentence = (
         sentence,
       );
 };
+
+/**
+ * 코드로 답한 요청 거절(`ApiRequestError`)의 번역 문장. 코드가 없거나 번역이 없으면 `fallback` 문구다 — 실험
+ * 미리 계산·만들기·조작처럼 실행 접수와 같은 코드 체계를 쓰는 화면이 같은 규칙으로 말한다.
+ */
+export const requestRejectionMessage = (
+  error: unknown,
+  fallback: MessageKey,
+): string =>
+  (error instanceof ApiRequestError
+    ? backtestErrorSentence(error.code ?? null, null, error.values)
+    : null) ?? t(fallback);
 
 /**
  * 백테스트 시작 거절 한 문장. 편집기 툴바와 결과 화면 재실행이 같은 규칙을 쓴다(#260, #268 리뷰 P3-3). 번역이

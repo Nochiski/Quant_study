@@ -25,6 +25,7 @@ import {
   type SourceOperation,
 } from "../model/source-transactions";
 import type { SourceTransactions } from "../model/use-source-transactions";
+import type { FormProjectionState } from "../model/use-form-projection";
 import { StrategyFormPanel } from "../ui/strategy-form-panel";
 
 afterEach(cleanup);
@@ -62,6 +63,15 @@ const parsedState = (source: string): DocumentState => {
     parsedVersion: base.sourceVersion,
   };
 };
+
+/** Form 패널 입력 한 벌(`useFormProjection` 모양) — 정착한 parse 의 투영과 삭제 가드 tree. */
+const formOf = (state: DocumentState): FormProjectionState => ({
+  projection: projectForm(SCHEMA, state.parse, []),
+  firstParsePending: false,
+  stale: false,
+  tree:
+    state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {},
+});
 
 const listSection = (source: string, key: string): ListSection => {
   const found = projectForm(
@@ -298,13 +308,8 @@ describe("StrategyFormPanel list sections", () => {
     const state = parsedState(source);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [])}
+        form={formOf(state)}
         schema={SCHEMA}
-        tree={
-          state.parse !== null && state.parse.status === "ok"
-            ? state.parse.tree
-            : {}
-        }
         transactions={transactions}
         catalogs={{ equityFields: null }}
         catalogSnippets={buildCanonicalSnippetCatalog({
@@ -333,7 +338,7 @@ describe("StrategyFormPanel list sections", () => {
     const state = parsedState(VERBOSE);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [])}
+        form={formOf(state)}
         schema={null}
         transactions={stub()}
         catalogs={{ equityFields: null }}
@@ -532,9 +537,8 @@ describe("StrategyFormPanel list sections", () => {
     const state = parsedState(VERBOSE);
     render(
       <StrategyFormPanel
-        projection={projectForm(SCHEMA, state.parse, [])}
+        form={formOf(state)}
         schema={SCHEMA}
-        tree={state.parse !== null && state.parse.status === "ok" ? state.parse.tree : {}}
         transactions={stub()}
         catalogs={{ equityFields: null }}
         selectedPointer="/factors/0"
@@ -587,13 +591,8 @@ describe("StrategyFormPanel list sections", () => {
       const state = parsedState(text);
       return (
         <StrategyFormPanel
-          projection={projectForm(SCHEMA, state.parse, [])}
+          form={formOf(state)}
           schema={SCHEMA}
-          tree={
-            state.parse !== null && state.parse.status === "ok"
-              ? state.parse.tree
-              : {}
-          }
           transactions={stub()}
           catalogs={{ equityFields: null }}
         />

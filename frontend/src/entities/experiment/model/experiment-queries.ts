@@ -1,0 +1,162 @@
+import {
+  infiniteQueryOptions,
+  keepPreviousData,
+  queryOptions,
+  skipToken,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useEffect } from "react";
+
+import {
+  strategyWorkbenchApi,
+  type ExperimentRequest,
+} from "../../../shared/api";
+
+export const experimentsKey = () => ["experiments"] as const;
+
+/** 끝나지 않은 실험을 다시 읽는 주기. 목록과 실험 상세(스트림의 보조)가 같이 쓴다. */
+export const EXPERIMENT_POLL_MS = 2_000;
+
+/**
+ * 실험 목록(최근에 만든 순, 응답의 `next_after` 로 다음 쪽을 더 읽는다)과 대기열 표면(슬롯 사용량·우선순위
+ * 상한). 상태·진행 수·끝났는지(`finished`)는 backend 가 파생해 싣는다(spec D6). 읽은 쪽 어디에든 끝나지 않은
+ * 실험이 있으면 2초마다 읽은 쪽을 모두 다시 읽는다 — 뒤쪽의 일시정지한 실험도 재개·취소할 수 있다(#402
+ * 리뷰 P2-1).
+ */
+export const experimentsQuery = () =>
+  infiniteQueryOptions({
+    queryKey: [...experimentsKey(), "list"],
+    queryFn: ({ pageParam }) => strategyWorkbenchApi.listExperiments(pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (page) => page.next_after ?? undefined,
+    refetchInterval: (query) =>
+      query.state.data?.pages.some((page) =>
+        page.items.some((item) => !item.finished),
+      )
+        ? EXPERIMENT_POLL_MS
+        : false,
+  });
+
+/**
+ * 실험 하나. 끝나지 않은 동안 목록과 같은 주기로 다시 읽는다 — 진행 스트림이 실험이 끝나기 전에 끊겨도(서버
+ * 재시작·네트워크) 화면이 멈추지 않게 하는 보조다(#407 리뷰 P2-2).
+ */
+export const experimentQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId],
+    queryFn: () => strategyWorkbenchApi.getExperiment(experimentId),
+    refetchInterval: (query) =>
+      query.state.data?.finished === false ? EXPERIMENT_POLL_MS : false,
+  });
+
+/**
+ * 시작 전 미리 계산(spec D2). 조합·실행 수·창·시도 수 변화는 backend 가 정한다. 거절은 같은 요청이면 늘
+ * 같으므로 다시 묻지 않는다.
+ */
+export const useExperimentPreview = (request: ExperimentRequest | null) =>
+  useQuery({
+    queryKey: [...experimentsKey(), "preview", request],
+    queryFn:
+      request === null
+        ? skipToken
+        : () => strategyWorkbenchApi.previewExperiment(request),
+    retry: false,
+    // 칸을 바꾸는 동안 앞 계산을 보여 둔다(새 계산이 오면 바뀐다).
+    placeholderData: keepPreviousData,
+  });
+
+export const useCreateExperiment = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: ExperimentRequest) =>
+      strategyWorkbenchApi.createExperiment(request),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: experimentsKey() }),
+  });
+};
+
+/** 일시정지·재개·우선순위와 취소. 대기열 규칙은 backend 가 적용하고 화면은 목록을 다시 읽는다. */
+export const useControlExperiment = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      experimentId,
+      ...controls
+    }: {
+      experimentId: string;
+      paused?: boolean;
+      priority?: number;
+    }) => strategyWorkbenchApi.controlExperiment(experimentId, controls),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: experimentsKey() }),
+  });
+};
+
+export const useCancelExperiment = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (experimentId: string) =>
+      strategyWorkbenchApi.cancelExperiment(experimentId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: experimentsKey() }),
+  });
+};
+
+export const experimentTrialsQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "trials"],
+    queryFn: () => strategyWorkbenchApi.listExperimentTrials(experimentId),
+  });
+
+export const experimentWalkForwardQuery = (experimentId: string) =>
+  queryOptions({
+    queryKey: [...experimentsKey(), experimentId, "walk-forward"],
+    queryFn: () => strategyWorkbenchApi.getExperimentWalkForward(experimentId),
+  });
+
+/** 실패·취소로 끝난 trial 을 새 attempt 로 다시 넘긴다. 가능 여부는 trial 상태의 `retryable` 이다. */
+export const useRetryExperimentTrial = (experimentId: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (trialIndex: number) =>
+      strategyWorkbenchApi.retryExperimentTrial(experimentId, trialIndex),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: [...experimentsKey(), experimentId],
+      }),
+  });
+};
+
+/**
+ * 진행 스트림(spec D6)을 구독한다. 프레임마다 그 실험의 조회(상세·trial·워크포워드)를 다시 읽고, 서버가
+ * 스트림을 닫으면(실험이 끝남) 한 번 더 읽는다. `open` 이 거짓이면 열지 않는다.
+ */
+export const useExperimentProgress = (experimentId: string, open: boolean) => {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    const refresh = () =>
+      queryClient.invalidateQueries({
+        queryKey: [...experimentsKey(), experimentId],
+      });
+    void (async () => {
+      try {
+        const { stream } = await strategyWorkbenchApi.openExperimentProgress(
+          experimentId,
+          controller.signal,
+        );
+        for await (const frame of stream) {
+          void frame;
+          await refresh();
+        }
+      } catch {
+        // 중단(화면을 떠남)이나 재연결 상한 소진은 아래 마지막 읽기로 정리한다.
+      }
+      if (!controller.signal.aborted) await refresh();
+    })();
+    return () => controller.abort();
+  }, [experimentId, open, queryClient]);
+};

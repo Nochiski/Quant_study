@@ -5,7 +5,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import pytest
 from fastapi import FastAPI
@@ -29,7 +29,9 @@ from strategy_workbench.adapters.outbound.research_sqlite.facade.repository impo
 )
 from strategy_workbench.application.backtest_run.facade.ports import (
     ArtifactCommit,
+    BacktestDataNotReadyError,
     BacktestDataPort,
+    BacktestDataQuery,
 )
 from strategy_workbench.application.backtest_run.facade.runs import (
     BacktestRunService,
@@ -88,6 +90,7 @@ def _backtests_with_raw_load_barrier(
     run_id: str,
     *,
     failure: Exception | None = None,
+    data_source: BacktestDataPort | None = None,
 ) -> tuple[BacktestRunService, RawLoadBarrier]:
     adapter = cast(MockEquityDataAdapter, container.equity_data)
     barrier = RawLoadBarrier(adapter, failure=failure)
@@ -100,7 +103,7 @@ def _backtests_with_raw_load_barrier(
     backtests = BacktestRunService(
         portfolio_design,
         container.strategy_repository,
-        cast(BacktestDataPort, container.equity_data),
+        data_source or cast(BacktestDataPort, container.equity_data),
         BacktestEngineExecutorAdapter(build_default_metric_registry()),
         LocalArtifactStore(tmp_path / "artifacts"),
         run_repository=SQLiteBacktestRunRepository(),
@@ -689,15 +692,40 @@ def test_run_that_never_selects_a_position_ends_with_its_own_code(
         assert "frames=0" in state["error"] and "rebalance=monthly" in state["error"]
 
 
-def test_unknown_benchmark_ends_the_run_before_the_tape_stage(tmp_path: Path) -> None:
-    """벤치마크 오타는 tape 계산을 다 쓴 뒤 서버 오류로 끝나지 않는다 — tape 앞 한 종목 조회에서
-    전용 코드로 멈춘다(#361). 접수(202)는 여전히 데이터를 읽지 않는다(#158)."""
-    run_id = "run-unknown-benchmark"
+class _LedgerNotReady:
+    """카탈로그가 백테스트 뷰를 싣지 않은 데이터 포트 — 벤치마크가 없어도 tape 앞에서
+    멈춰야 한다."""
+
+    def load_backtest_dataset(self, query: BacktestDataQuery) -> NoReturn:
+        raise BacktestDataNotReadyError(
+            f"카탈로그에 백테스트가 읽는 매크로가 없다 (catalog_macro_missing) — query={query}"
+        )
+
+
+@pytest.mark.parametrize(
+    ("benchmark", "data_source", "error_code", "reason"),
+    [
+        ("KOSPI", None, "backtest.run.benchmark_unknown", "KOSPI"),
+        (None, _LedgerNotReady(), "backtest.run.data_not_ready", "catalog_macro_missing"),
+    ],
+)
+def test_data_port_failures_end_the_run_before_the_tape_stage(
+    tmp_path: Path,
+    benchmark: str | None,
+    data_source: BacktestDataPort | None,
+    error_code: str,
+    reason: str,
+) -> None:
+    """벤치마크 오타(#361)와 원장 준비 부족(#369)은 tape 계산을 다 쓴 뒤 알리지 않는다 — tape 앞
+    데이터 포트 확인에서 전용 코드로 멈춘다. 접수(202)는 여전히 데이터를 읽지 않는다(#158)."""
+    run_id = "run-data-port-failure"
     container = build_container(artifact_root=tmp_path / "unused")
-    backtests, barrier = _backtests_with_raw_load_barrier(container, tmp_path, run_id)
+    backtests, barrier = _backtests_with_raw_load_barrier(
+        container, tmp_path, run_id, data_source=data_source
+    )
     client = TestClient(_app_with_backtests(container, backtests))
 
-    body = {**_run_body(client, "python"), "benchmark_security_id": "KOSPI"}
+    body = {**_run_body(client, "python"), "benchmark_security_id": benchmark}
     try:
         accepted = client.post("/api/v1/backtests", json=body)
         assert accepted.status_code == 202, accepted.text
@@ -705,8 +733,8 @@ def test_unknown_benchmark_ends_the_run_before_the_tape_stage(tmp_path: Path) ->
     finally:
         barrier.release.set()
 
-    assert (state["status"], state["error_code"]) == ("failed", "backtest.run.benchmark_unknown")
-    assert "KOSPI" in state["error"]
+    assert (state["status"], state["error_code"]) == ("failed", error_code)
+    assert reason in state["error"]
     assert not barrier.entered.is_set()  # tape 단계의 원시 관측 로딩에 들어가지 않았다
 
 

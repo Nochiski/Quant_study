@@ -397,12 +397,11 @@ class MockEquityDataAdapter:
 
         요청한 종목과 벤치마크만 답한다. fixture 밖 id 는 duckdb 어댑터처럼
         `BacktestDataUnavailableError` 로 거절하고, 요청하지 않은 벤치마크를 지어내지 않는다(#361).
+        세션이 없는 창도 duckdb 처럼 bar 없이 답한다 — 판단은 tape 단계 몫이다.
         """
         history, sessions = _sessions_with_history(
             query.start, query.end, query.history_sessions_before_start
         )
-        if not sessions:
-            raise ValueError("mock backtest dataset requires at least one business session")
         benchmark = () if query.benchmark_security_id is None else (query.benchmark_security_id,)
         security_ids = tuple(dict.fromkeys((*query.security_ids, *benchmark)))
         known = {membership.security.security_id for membership in self._memberships}
@@ -450,6 +449,7 @@ class MockEquityDataAdapter:
                     last_session=sessions[-1],
                 )
                 for security_id in security_ids
+                if sessions
             ),
             corporate_actions=(),
             benchmark_security_id=query.benchmark_security_id,

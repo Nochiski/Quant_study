@@ -159,3 +159,18 @@ def test_unknown_benchmark_ids_are_refused_not_invented(
         _adapter(request, name).load_backtest_dataset(
             BacktestDataQuery(start, end, security_ids, benchmark)
         )
+
+
+@pytest.mark.parametrize(
+    ("name", "security_id"), [("mock", "sec-005930-1"), ("equity_duckdb", "005930:1")]
+)
+def test_a_window_without_sessions_is_answered_without_bars(
+    request: pytest.FixtureRequest, name: str, security_id: str
+) -> None:
+    """2024-01-06~07 은 토·일이다. 세션이 없는 창도 두 어댑터가 예외 없이 bar 없이 답한다 — 한쪽만
+    던지면 벤치마크를 둔 실행이 tape 앞 확인에서 서버 오류로 끝난다."""
+    dataset = _adapter(request, name).load_backtest_dataset(
+        BacktestDataQuery(date(2024, 1, 6), date(2024, 1, 7), (security_id,), security_id)
+    )
+
+    assert (dataset.bars, dataset.history_bars) == ((), ())

@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { messages, tOptional } from "../../config";
+import { messages } from "../../config";
 import { readOpenApi, rejectionCodes } from "../../testing/openapi-codes";
 import type {
-  BacktestRunState,
   StartBacktestErrors,
   TrialAttempt,
   WindowPick,
@@ -41,23 +40,6 @@ const classify = (response: StartBacktest422): string => {
   }
 };
 
-type RunFailureCode = NonNullable<BacktestRunState["error_code"]>;
-
-// backend `RunFailureCode` 어휘(OpenAPI enum → 생성 타입)와 run 페이지 번역 키의 동기화. 코드가 늘면 이 표가
-// 타입 오류로 먼저 깨지고, 번역이 빠지면 아래 단언이 깨진다(이슈 #158).
-const RUN_FAILURE_CODES: Record<RunFailureCode, true> = {
-  "portfolio.strategy.invalid": true,
-  "portfolio.data.unavailable": true,
-  "portfolio.raw_observation.invalid": true,
-  "backtest.run.invalid": true,
-  "backtest.run.equity_wiped_out": true,
-  "backtest.run.data_not_ready": true,
-  "backtest.run.no_positions": true,
-  "backtest.run.benchmark_unknown": true,
-  "backtest.run.internal": true,
-  "backtest.run.interrupted": true,
-};
-
 type TrialRejectionCode = NonNullable<
   TrialAttempt["error_code"] | WindowPick["error_code"]
 >;
@@ -85,11 +67,8 @@ const untranslated = (codes: Iterable<string>): string[] =>
   });
 
 describe("backtest run failure code vocabulary", () => {
-  it("has a translated recovery message for every run failure code", () => {
-    for (const code of Object.keys(RUN_FAILURE_CODES)) {
-      expect(tOptional(`backtest.run.error.${code}`), code).not.toBeNull();
-    }
-  });
+  // run 실패 코드(`backtest.run.error.<code>`)의 문구 누락은 `BacktestRunFailure` 가 키를 `MessageKey` 로
+  // 만들어 typecheck 가 막는다(#362 DR-B-08). 여기서는 코드 목록을 다시 적지 않는다.
 
   // 이슈 #260: 툴바는 시작 거절을 `backtest.error.<code>` 번역으로 보인다. 키가 빠지면 일반 문구로 떨어져
   // 무엇을 고칠지 말하지 못한다. 실행 시 계약 파일(backend `openapi.json`)과 대조한다.

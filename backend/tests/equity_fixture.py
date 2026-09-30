@@ -1103,6 +1103,9 @@ WB_SHORT_ROWS: list[ShortRow] = [
      ("empty_response", "shard_empty"), ("measured", "unit_ok")),
     ("000660", WB_SPLIT_DATE, 2_000, 100_000_000, 7_000,
      ("measured", "shard_done"), ("measured", "unit_ok")),
+    # 대차의 src_omitted — 잔고라 원천이 행을 뺐다고 0 이 되지 않는다(#371 리뷰 P3-1)
+    ("000660", date(2024, 1, 9), None, None, None,
+     ("not_collected", "none"), ("src_omitted", "shard_done")),
 ]
 # 신용잔고 랙은 원장처럼 3세션이다(이슈 #246). 행을 01-04~01-09 에 두어 랙 뒤에 보이는 세션이
 # 01-09~01-12 로 캘린더 안에 들어오게 한다.

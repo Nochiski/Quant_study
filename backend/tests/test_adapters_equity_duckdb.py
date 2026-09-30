@@ -877,6 +877,9 @@ def test_grid_fields_carry_the_missing_reason_and_never_a_synthetic_zero(
     sale = _cell(result, seen(date(2024, 1, 9)), "005930:1", "short.short_sale_value")
     assert (sale.value, sale.kind) == (0.0, CellKind.SOURCE_OMITTED_ZERO)
     assert _field(result, seen(date(2024, 1, 9)), "005930:1", "short.borrowed_quantity") == 12_345.0
+    # 대차의 src_omitted 는 잔고라 0 이 아니다 — 원천 생략 0 은 공매도 축만이다(#371 리뷰 P3-1)
+    lent = _cell(result, seen(date(2024, 1, 9)), "000660:1", "short.borrowed_quantity")
+    assert (lent.value, lent.kind) == (None, CellKind.MISSING)
     assert (
         _field(  # 음수 보존
             result, seen(WB_HALT_DATE), "005930:1", "short.borrowed_quantity"
@@ -1811,6 +1814,43 @@ def test_truthful_pipeline_momentum_across_a_split_is_continuous_on_adj_close(
 
     assert momentum("price.adj_close") == pytest.approx(104_000 / 103_000 - 1)  # 전방 조정
     assert momentum("price.close") == pytest.approx(52_000 / 103_000 - 1)
+
+
+def test_source_omitted_zero_enters_factor_windows_on_both_paths(
+    adapter: EquityDuckdbAdapter,
+) -> None:
+    """키움 공매도의 원천 생략 0 은 팩터 연구·실행 두 경로에서 값으로 창에 든다(#371 리뷰 P3-2).
+
+    005930 공매도 대금은 01-08 measured 70,000,000 · 01-09 src_omitted 이고 랙 1 이라 01-09·01-10
+    에 보인다. 01-10 의 2세션 평균은 기본 결측 정책(drop)에서 (70,000,000 + 0) / 2 다 — 0 을
+    모르는 결측으로 접으면 창이 서지 않는다. 연구 경로는 `load_factor_observations`, 실행 경로는
+    원시 관측을 팩터 관측으로 옮기는 파이프라인을 지난다.
+    """
+    graph = FactorGraph(
+        nodes=(
+            FieldNode("sv", "short.short_sale_value", "field"),
+            TimeSeriesNode("avg", TimeSeriesOperator.MEAN, "sv", 2, "time_series"),
+        ),
+        output_node_id="avg",
+    )
+    registry = build_default_factor_registry()
+    research = FactorResearchService(registry, adapter, adapter).preview(
+        FactorPreviewRequest(graph, START, END)
+    )
+    spec = _momentum_spec("short.short_sale_value")
+    spec = replace(spec, factors=(replace(spec.factors[0], graph=graph),))
+    pipeline = PortfolioDesignService(
+        adapter,
+        BacktestEnginePortfolioAdapter(),
+        factor_metadata=adapter,
+        factor_registry_version=registry.version,
+    ).run_pipeline(PortfolioPreviewRequest(spec, environment=_environment()))
+    key = (date(2024, 1, 10), "005930:1")
+    values = [
+        {(v.as_of, v.security_id): v.value for v in evaluated}
+        for evaluated in (research.evaluation.values, pipeline.factor_evaluations[0].values)
+    ]
+    assert [found[key] for found in values] == [pytest.approx(35_000_000)] * 2
 
 
 def test_raw_load_reports_monotonic_progress_ending_at_one(adapter: EquityDuckdbAdapter) -> None:

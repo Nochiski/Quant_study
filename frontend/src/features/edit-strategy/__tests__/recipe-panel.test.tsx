@@ -108,8 +108,9 @@ const addHead = async (user: ReturnType<typeof userEvent.setup>) => {
 
 describe("레시피 단계 패널", () => {
   it("빈 그래프에서 필드를 물어 추가하고 기존 컨트롤로 설정·이동·삭제한다", async () => {
-    const { user, source } = setup();
+    const { user, source } = setup(blank.replace("    label: 팩터\n", ""));
     await addHead(user);
+    expect(screen.getByRole("region", { name: "팩터 레시피" }).textContent).not.toMatch(/factor_id|field_id|node_id|kind:/);
     await user.click(
       screen.getByRole("button", { name: "기간 평균 노드 추가" }),
     );

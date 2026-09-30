@@ -1364,12 +1364,12 @@ const ko = {
   "strategy.operator.group.neutralize.description":
     "같은 날 같은 그룹의 평균을 뺍니다. 섹터 효과를 걷어낼 때 씁니다.",
   "strategy.operator.group.neutralize.formula":
-    "x - group_field_id별 평균",
+    "x - 그룹별 평균",
   "strategy.operator.group.rank": "그룹 안 순위",
   "strategy.operator.group.rank.description":
     "같은 날 같은 그룹 안에서 매긴 0~1 순위입니다.",
   "strategy.operator.group.rank.formula":
-    "(group_field_id별 순위 - 1) / (그룹 종목 수 - 1)",
+    "(그룹 내 순위 - 1) / (그룹 종목 수 - 1)",
   "strategy.operator.comparison.gt": "초과",
   "strategy.operator.comparison.gt.description":
     "왼쪽이 오른쪽보다 크면 참입니다.",
@@ -3534,12 +3534,12 @@ export const messages = {
     "strategy.operator.group.neutralize.description":
       "Subtracts the group mean of that day, stripping the sector effect.",
     "strategy.operator.group.neutralize.formula":
-      "x - mean per group_field_id",
+      "x - group mean",
     "strategy.operator.group.rank": "Group rank",
     "strategy.operator.group.rank.description":
       "A 0-1 rank taken within the group on that day.",
     "strategy.operator.group.rank.formula":
-      "(rank within group_field_id - 1) / (group count - 1)",
+      "(rank within group - 1) / (group count - 1)",
     "strategy.operator.comparison.gt": "Greater than",
     "strategy.operator.comparison.gt.description":
       "True where the left input exceeds the right.",

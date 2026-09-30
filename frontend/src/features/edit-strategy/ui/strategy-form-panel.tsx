@@ -910,7 +910,7 @@ const FormFieldRow = ({
             draftOf(field.defaultValue) || "null",
           )}
         </p>
-      ) : !field.written && field.defaultFrom !== null ? (
+      ) : !field.written && field.defaultFrom !== null && showIdentifiers ? (
         <p className="strategy-form__hint">
           {t("form.field.defaultFromHint")
             .replace("{key}", field.defaultFrom)

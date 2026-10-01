@@ -39,6 +39,7 @@ afterEach(cleanup);
 const setup = (
   initial = blank,
   extra: {
+    selectedPointer?: string;
     blocked?: boolean;
     diagnostics?: React.ComponentProps<typeof RecipePanel>["diagnostics"];
     definitions?: OperatorDefinition[];
@@ -49,7 +50,9 @@ const setup = (
   const onAdvanced = vi.fn();
   function Harness() {
     const [source, setSource] = useState(initial);
-    const [path, setPath] = useState<string | undefined>("/factors/0/graph");
+    const [path, setPath] = useState<string | undefined>(
+      extra.selectedPointer ?? "/factors/0/graph",
+    );
     const parsed = parseSource(source, "yaml");
     if (parsed.status !== "ok") throw new Error("원문 파싱 실패");
     const transactions: SourceTransactions = {
@@ -107,6 +110,36 @@ const addHead = async (user: ReturnType<typeof userEvent.setup>) => {
 };
 
 describe("레시피 단계 패널", () => {
+  it.each(["", "/window"])(
+    "11개 노드에서 뒤 단계 선택%s를 앞 부가 입력으로 오인하지 않고 다음에 삽입한다",
+    async (suffix) => {
+      const nodes = [
+        { kind: "field", node_id: "head", field_id: "price.adj_close" },
+        { kind: "field", node_id: "side", field_id: "price.volume" },
+        {
+          kind: "binary", node_id: "divide", operator: "divide",
+          left_node_id: "head", right_node_id: "side",
+        },
+        ...Array.from({ length: 8 }, (_, index) => ({
+          kind: "time_series", node_id: `mean_${index}`, operator: "mean",
+          input_node_id: index === 0 ? "divide" : `mean_${index - 1}`, window: 20,
+        })),
+      ];
+      const { user, source } = setup(JSON.stringify({
+        schema_version: "1.2", title: "긴 레시피",
+        factors: [{ factor_id: "alpha", graph: { nodes, output_node_id: "mean_7" } }],
+      }), { selectedPointer: `/factors/0/graph/nodes/10${suffix}` });
+      expect(screen.getByRole("article", { name: "10. 기간 평균" })).toHaveAttribute("aria-current", "true");
+      expect(screen.getByRole("article", { name: "2. 나누기" })).not.toHaveAttribute("aria-current");
+      await user.click(screen.getByRole("button", { name: "부호 뒤집기 노드 추가" }));
+      const parsed = parseSource(source(), "yaml");
+      if (parsed.status !== "ok") throw new Error("원문 파싱 실패");
+      expect(parsed.tree).toMatchObject({ factors: [{ graph: {
+        output_node_id: "negate",
+        nodes: [...nodes, { node_id: "negate", input_node_id: "mean_7" }],
+      } }] });
+    },
+  );
   it("빈 그래프에서 필드를 물어 추가하고 기존 컨트롤로 설정·이동·삭제한다", async () => {
     const { user, source } = setup(blank.replace("    label: 팩터\n", ""));
     await addHead(user);

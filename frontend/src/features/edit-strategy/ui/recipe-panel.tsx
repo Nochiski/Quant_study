@@ -166,7 +166,10 @@ export const RecipePanel = ({
       selectedPointer === link.pointer ||
       selectedPointer?.startsWith(`${link.pointer}/`) ||
       link.operands.some(
-        (pointer) => pointer !== null && selectedPointer?.startsWith(pointer),
+        (pointer) =>
+          pointer !== null &&
+          (selectedPointer === pointer ||
+            selectedPointer?.startsWith(`${pointer}/`)),
       ),
   );
   const replacement =

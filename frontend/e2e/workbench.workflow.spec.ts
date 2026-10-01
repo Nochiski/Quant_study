@@ -948,7 +948,7 @@ test.describe("professional YAML workflow", () => {
       run_id: runId,
       status,
       progress: status === "running" || status === "cancel_requested" ? 0.4 : 0,
-      stage: status,
+      stage: "engine",
       message: status,
       created_at: "2026-09-06T00:00:00Z",
       updated_at: "2026-09-06T00:00:01Z",

@@ -99,6 +99,7 @@ const NO_FIELDS: readonly RunEnvironmentField[] = [];
 
 /** 연구 구간 거절이 고치라는 칸(요청 본문의 `environment.start`). */
 const START_FIELD: keyof RunEnvironment = "start";
+/** 실행 계획 설명이 따로 싣는 결측 정책 칸(#357 C-P3-16). */
 
 /** 시작 거절을 한 번의 누름으로 고치는 교정(검증 랩 V5-05). */
 type RunRejectionFix = { label: string; apply: () => void };
@@ -203,7 +204,7 @@ export const useBacktestRunSettings = (storageKey: string) => {
   const environment = useMemo<RunEnvironmentValidation>(
     () =>
       environmentFields.length === 0
-        ? { valid: false, environment: null, errors: {} }
+        ? { valid: false, environment: null, accepted: {}, errors: {} }
         : validateRunEnvironment(
             environmentFields,
             environmentValues,
@@ -368,8 +369,13 @@ export const useBacktestRunSettings = (storageKey: string) => {
     /** 서버 거절의 `field`(요청 본문 점 경로) → 패널 칸 이름. 모르면 null. */
     runFieldLabel: fieldLabel,
     rejectionFix,
-    /** 검증을 통과한 실행 설정. 추적·실행 계획 요청이 같은 값을 싣는다. 없으면 null. */
+    /** 검증을 통과한 실행 설정. 추적 요청이 같은 값을 싣는다. 없으면 null. */
     environment: environment.valid ? environment.environment : null,
+    /**
+     * 결측 정책 칸 값. 실행 계획 설명도 실행과 같은 정책을 싣는데, 기간·유니버스 같은 다른 칸이 비었다고
+     * 기본 정책의 계획을 보이면 안 되므로 이 칸만 따로 낸다(#357 C-P3-16). 칸이 없거나 틀렸으면 null 이다.
+     */
+    missing: environment.accepted.missing ?? null,
     environmentErrors: environment.errors,
     /**
      * 막힌 칸의 종류. 빈 칸뿐이면 "missing"(요약 띠 버튼이 "실행 설정 채우기"), 값이 틀린 칸이 있으면

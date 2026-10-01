@@ -63,16 +63,6 @@ class LocalArtifactStore:
             with result_path.open("xb") as stream:
                 stream.write(payload)
                 stream.flush()
-            manifest_payload = json.dumps(
-                _json_value(result.manifest),
-                ensure_ascii=False,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-            with (staging / "manifest.json").open("xb") as stream:
-                stream.write(manifest_payload)
-                stream.flush()
             staging.replace(target)
         except BaseException:
             if staging.exists() and staging.parent == self._root:

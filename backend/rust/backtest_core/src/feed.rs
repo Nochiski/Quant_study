@@ -317,6 +317,21 @@ impl PersistentFeed {
         self.offsets[index]..self.offsets[index + 1]
     }
 
+    /// 행의 유동성 캡 기준 거래량 — 참여 기준 거래량이 있으면 그 값, 없으면 세션 거래량
+    /// (Python `Bar.cap_volume`).
+    fn cap_volume_at(&self, row: usize) -> i64 {
+        self.liquidity_volumes
+            .as_ref()
+            .map_or(self.volumes[row], |values| values[row])
+    }
+
+    /// 세션의 한 종목 유동성 캡 기준 거래량. 그 세션에 종목 bar 가 없으면 None.
+    pub(crate) fn cap_volume(&self, index: usize, instrument_id: u32) -> Option<i64> {
+        self.row_range(index)
+            .find(|&row| self.instrument_ids[row] == instrument_id)
+            .map(|row| self.cap_volume_at(row))
+    }
+
     /// 세션 타임스탬프와 그날 bar 표. key는 등록부 문자열을 빌려준다 — MARKET 처리는
     /// key를 읽기만 하므로 세션마다 종목 수만큼 `String`을 새로 만들 이유가 없다.
     pub(crate) fn session_market(&self, index: usize) -> (&str, HashMap<&str, BarTuple>) {
@@ -331,9 +346,7 @@ impl PersistentFeed {
                         self.highs[row],
                         self.lows[row],
                         self.volumes[row],
-                        self.liquidity_volumes
-                            .as_ref()
-                            .map_or(self.volumes[row], |values| values[row]),
+                        self.cap_volume_at(row),
                         self.impact_scales
                             .as_ref()
                             .map_or(0.0, |values| values[row]),

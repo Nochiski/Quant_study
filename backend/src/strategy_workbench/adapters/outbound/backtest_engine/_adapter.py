@@ -69,6 +69,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RawFill,
     RawOrder,
     RawPosition,
+    RawRounding,
     RawSnapshot,
     RawTrade,
     RunManifest,
@@ -232,7 +233,7 @@ class BacktestEngineExecutorAdapter:
         # 진행 값은 이 실행기 작업 안의 완료 비율(0~1)이다(`ProgressCallback` 계약). 준비 0.35,
         # 엔진 루프가 끝난 뒤 지표 계산 0.78, 산출물 고정 0.88 이다. run 진행 막대의 engine 구간
         # 배치(84~92%)는 유스케이스가 정한다(이슈 #162).
-        progress(0.35, "engine.prepare", "Preparing market feed and strategy")
+        progress(0.35, "Preparing market feed and strategy")
         universe = UniverseResult(
             memberships=tuple(
                 Membership(
@@ -312,7 +313,7 @@ class BacktestEngineExecutorAdapter:
             # 커널 예외를 포트 어휘로 옮긴다 — application 은 커널을 import 하지 않는다(#285).
             raise EquityWipedOutError(str(error)) from error
         self._check_cancelled(cancelled)
-        progress(0.78, "analytics", "Calculating professional metrics")
+        progress(0.78, "Calculating professional metrics")
         # 엔진 결과는 columnar 테이블로 받는다 — 공개 Event 객체는 여기서 곧바로 raw
         # artifact로 다시 옮겨질 중간 산물일 뿐이라 만들 이유가 없다.
         tables = engine.event_store.result_tables()
@@ -370,7 +371,7 @@ class BacktestEngineExecutorAdapter:
                         reason=MetricUnavailableReason.NO_OBSERVATIONS_IN_SCOPE,
                     )
                 )
-        progress(0.88, "artifacts", "Freezing raw run artifacts")
+        progress(0.88, "Freezing raw run artifacts")
         return BacktestRunResult(
             manifest=RunManifest(
                 run_id=request.run_id,
@@ -733,6 +734,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             price=price,
             fee=fee,
             slippage_per_share=slippage_per_share,
+            cap_volume=cap_volume,
         )
         for (
             fill_id,
@@ -744,6 +746,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             price,
             fee,
             slippage_per_share,
+            cap_volume,
         ) in tables.fills
     )
     raw_costs = tuple(
@@ -754,6 +757,15 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             amount=amount,
         )
         for session_index, kind, instrument_index, amount in tables.costs
+    )
+    roundings = tuple(
+        RawRounding(
+            session=session_dates[session_index],
+            security_id=security_ids[instrument_index],
+            target_notional=target_notional,
+            rounded_notional=rounded_notional,
+        )
+        for session_index, instrument_index, target_notional, rounded_notional in tables.roundings
     )
     trades = _closed_trades(tables, session_dates, security_ids)
     outcomes = tuple(
@@ -767,7 +779,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
         for item in trades
     )
     return (
-        RawArtifactBundle(snapshots, positions, orders, fills, raw_costs, trades),
+        RawArtifactBundle(snapshots, positions, orders, fills, raw_costs, trades, roundings),
         outcomes,
     )
 
@@ -807,6 +819,7 @@ def _closed_trades(
             price,
             fee,
             slippage_per_share,
+            _cap_volume,
         ) = row
         security_id = security_ids[instrument_index]
         session = session_dates[session_index]

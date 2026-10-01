@@ -213,7 +213,13 @@ def test_partial_trace_keeps_decision_when_submit_fails_after_recording(
     with pytest.raises(ValueError, match="submit exploded"):
         engine.run(ScriptedStrategy(script=(target_70pct(),)), DataFeed(GOLDEN_BARS))
     kinds = [record.kind for record in engine.event_store.records]
-    assert kinds == [RecordKind.MARKET, RecordKind.SNAPSHOT, RecordKind.DECISION]
+    # Rust 라우팅은 끝나 목표 금액 → 수량 반올림 기록(V4-04)까지 남았다.
+    assert kinds == [
+        RecordKind.MARKET,
+        RecordKind.SNAPSHOT,
+        RecordKind.DECISION,
+        RecordKind.ROUNDING,
+    ]
     decision = engine.event_store.decisions()[0]
     assert decision.decision_id == "D-000001"
     assert decision.decision.actions == (target_70pct(),)

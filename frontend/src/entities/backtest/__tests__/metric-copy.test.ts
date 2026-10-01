@@ -3,7 +3,11 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { MetricValue } from "../../../shared/api";
 import { messages, type MessageKey } from "../../../shared/config";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
-import { metricPlainCopy, metricUnavailableCopy } from "../model/metric-copy";
+import {
+  HIGHLIGHTED_METRIC_IDS,
+  metricPlainCopy,
+  metricUnavailableCopy,
+} from "../model/metric-copy";
 
 /**
  * backend Metric Registry의 id 목록(결과 설명 spec R4). backend 테스트가 이 파일과 registry가
@@ -19,6 +23,13 @@ describe("지표 쉬운 이름·뜻", () => {
   it("registry 목록이 비어 있지 않다", () => {
     // 목록이 비면 아래 검사가 공허하게 통과한다. 그 통과가 이 가드의 유일한 실패 모드다.
     expect(ids.length).toBeGreaterThan(0);
+  });
+
+  it("결과 화면 강조 지표는 모두 registry id 다", () => {
+    // 없는 id 는 강조 칸에서 조용히 빠진다 — registry id 가 바뀌면 여기서 깨진다(#362 DR-B-09)
+    expect(HIGHLIGHTED_METRIC_IDS.filter((id) => !ids.includes(id))).toEqual(
+      [],
+    );
   });
 
   it.each(ids)("%s는 ko 쉬운 이름과 한 줄 뜻이 있다", (id) => {

@@ -42,7 +42,7 @@ class _ScriptedRuns:
     def state(self, run_id: str) -> BacktestRunState:
         self._index = min(self._index + 1, len(self._steps) - 1)
         status = self._steps[self._index][0]
-        return BacktestRunState(run_id, status, 0.0, status.value, status.value, _AT, _AT)
+        return BacktestRunState(run_id, status, 0.0, "engine", status.value, _AT, _AT)
 
     def events(self, run_id: str, *, after_sequence: int = -1) -> tuple[RunProgressEvent, ...]:
         stored = self._steps[max(self._index, 0)][1]
@@ -50,7 +50,7 @@ class _ScriptedRuns:
 
 
 def _event(sequence: int, status: RunStatus) -> RunProgressEvent:
-    return RunProgressEvent(sequence, _RUN, status, 0.0, status.value, status.value, _AT)
+    return RunProgressEvent(sequence, _RUN, status, 0.0, "engine", status.value, _AT)
 
 
 def _run(runs: _ScriptedRuns, *, keepalive_seconds: float = 15.0) -> list[str]:

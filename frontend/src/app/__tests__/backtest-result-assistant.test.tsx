@@ -123,7 +123,7 @@ const server = setupServer(
       run_id: params.runId,
       status: runStatus,
       progress: runStatus === "completed" ? 1 : 0.5,
-      stage: runStatus === "completed" ? "done" : "engine",
+      stage: runStatus === "completed" ? "completed" : "engine",
       message: runStatus === "completed" ? "Run completed" : "Running",
       created_at: "2026-09-27T00:00:00Z",
       updated_at: "2026-09-27T00:00:01Z",

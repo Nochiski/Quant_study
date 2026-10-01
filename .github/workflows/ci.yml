@@ -197,6 +197,7 @@ jobs:
             frontend/test-results/**/attachments/*.json
             frontend/test-results/**/attachments/*.png
             frontend/test-results/**/graph-selected.png
+            frontend/test-results/**/recipe-*.png
             frontend/test-results/**/error-context.md
           if-no-files-found: ignore
           retention-days: 7

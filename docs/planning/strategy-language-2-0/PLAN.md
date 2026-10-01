@@ -2118,3 +2118,28 @@ PR424·PR425 및 P4 draft 체인은 보존한다. 이번 단계에 실데이터/
 editor gzip 132.07KiB/200KiB, root story harness 40/35와 diff 검사를 통과했다.
 최종 SHA의 전체 CI 결과는 해당 draft PR 본문에 기록한다. 이 단계는 모델 계층이며
 레시피 UI가 완성됐다는 뜻이 아니다. 공식 브라우저 회귀 gate는 CI에서만 실행한다.
+
+## 클라우드 P5-02 구현·책임 검토 (2026-09-30)
+
+P5-01 draft #429의 `65cb6d8a`는 공식 CI 36777317991 전체 성공이다. 후속 P5-02는
+`feat/lang2-p5-02-recipe-ui`로 분리했다. recipe=true URL로 파이프라인의 레시피 열기를 연결하고,
+고급 편집기와 뒤로가기 이력을 보존한다. 새 전략/revision 모두 같은 RecipePanel을 쓴다.
+
+카탈로그·schema → 기존 operatorPalette/nodeSlotsByKind → projectRecipe → RecipePanel →
+recipeTransaction → SourceTransactions/planSourceOperations → 단일 CodeMirror 편집을 대조했다.
+입력 슬롯·노드 기본값·참조 재배선을 UI에 복제하지 않는다. 설정 확정/취소는 기존 FormFieldsEditor/
+FieldControl/useFieldCommit이고, 같은 컨트롤에 표시 이름과 식별자 접힘 옵션만 더했다.
+연산자 가용성은 카탈로그 그대로, 결과 타입·단위는 현재 backend 실행 계획 그대로다.
+선정·팩터 계산·hash·진단 판정은 추가하지 않았다. P5-01의 계획 모델만 재사용하며 별도 문서를 저장하지 않는다.
+팔레트 CSS는 재사용 컴포넌트가 소유한다. 입력 선택 초안/교체 상태는 tree와 factorPointer에 묶는다.
+
+공식 브라우저 검사는 빈 문서 → 팩터 → 레시피 필드/평균/부호 → 설정 수정과 Escape 취소 →
+추가 입력 취소 → 이동/삭제/undo/redo → 파이프라인 복귀/브라우저 뒤로가기와 1440/640/360px를 확인한다.
+시각 산출물은 recipe-*.png로 보관한다. 최종 SHA별 결과는 draft PR 본문에 기록한다.
+
+P5-03 결정 확인: #374는 open이고 댓글/확정 ADR은 없다. 기존 factors/preview를 폐기하고 기존
+전략 추적/portfolio 평가 경로를 확장할지, URL을 유지하되 같은 RawObservationPort·평가기로
+재구현할지 결정해야 한다. BACKLOG-016도 보조 팩터로 동점을 해소할지 동점 전원을 균등 보유할지
+미정이다(후자는 selection_count 초과 정책도 필요). 현재 UI에서 어느 쪽도 임의 구현하지 않는다.
+
+- P5-02 공식 CI 캡처 후속: 360px에서 기존 좌측 구조 패널이 레시피 폭을 약 30px로 압축하는 문제를 확인했다. 767px 이하 IDE는 구조·편집기를 세로 배치하고 상단 액션을 줄바꿈한다. 화면 안에 들어오는지만 보던 검사를 카드 가독 폭과 문서 가로 넘침 검사로 강화했다.

@@ -13,6 +13,8 @@ import {
   DocumentStatus,
   DocumentToolbar,
   FactorGraphPanel,
+  RecipePanel,
+  factorIndexAtPointer,
   PipelinePanel,
   RecoveryBanner,
   ServerDraftBanner,
@@ -208,8 +210,8 @@ export const StrategyRevisionPage = () => {
       void navigate({
         to: ROUTE,
         params: { strategyId, revision },
-        search: { ...search, path: pointer, view: "graph" },
-        replace: true,
+        search: { ...search, path: pointer, view: "graph", recipe: true },
+        resetScroll: false,
       });
     },
     [navigate, search, revision, strategyId],
@@ -432,6 +434,18 @@ export const StrategyRevisionPage = () => {
                 revealSignal={problems.revealSignal}
               />
               <StrategyPreviewPanel document={document} executionPlans={executionPlans} environment={runSettings.environment} />
+              {search.recipe && !form.firstParsePending && assist.schema !== null ? (
+                <RecipePanel
+                  tree={form.tree} schema={assist.schema}
+                  factorIndex={factorIndexAtPointer(search.path) ?? 0}
+                  transactions={transactions} catalogs={catalogs} operators={assist.operators}
+                  diagnostics={currentDiagnostics(document)} plans={executionPlans}
+                  selectedPointer={search.path} revealSignal={problems.revealSignal}
+                  onSelectPointer={(pointer) => selectPointer(pointer, "graph")}
+                  onAdvanced={() => void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, recipe: undefined }, resetScroll: false })}
+                  onBack={() => void navigate({ to: ROUTE, params: { strategyId, revision }, search: { ...search, recipe: undefined, path: undefined }, resetScroll: false })}
+                />
+              ) : (
               <FactorGraphPanel
                 state={executionPlans}
                 schema={assist.schema}
@@ -457,6 +471,7 @@ export const StrategyRevisionPage = () => {
                   selectPointer(pointer, "outline");
                 }}
               />
+              )}
             </>
           ),
         }}

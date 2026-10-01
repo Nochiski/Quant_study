@@ -555,3 +555,41 @@
   padding: var(--space-3) var(--space-4);
   border-top: 1px solid var(--border);
 }
+
+/* 좁은 화면에서는 구조 패널이 편집기의 가독 폭을 빼앗지 않게 세로로 배치한다.
+ * 패널 열림·닫힘과 저장된 폭은 그대로 두고, 가로 크기 조절 손잡이만 숨긴다. */
+@media (max-width: 767px) {
+  .ide {
+    --ide-gutter: var(--space-2);
+    min-width: 0;
+  }
+  .ide__body {
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .ide__left {
+    max-width: 100%;
+  }
+  .ide__body > .ui-split-handle--vertical {
+    display: none;
+  }
+  .ide__topbar {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-2);
+  }
+  .ide__breadcrumb,
+  .ide__topbar-status {
+    flex: 1 1 100%;
+    min-width: 0;
+    text-align: left;
+  }
+  .ide__topbar-actions,
+  .ide__editor-header,
+  .ide__editor-actions {
+    flex-wrap: wrap;
+  }
+  .ide__topbar-actions .ui-button {
+    white-space: nowrap;
+  }
+}

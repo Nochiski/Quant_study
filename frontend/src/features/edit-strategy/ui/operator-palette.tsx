@@ -9,6 +9,8 @@ import {
   type PaletteGroup,
 } from "../model/operator-palette";
 
+import "./operator-palette.css";
+
 type OperatorPaletteProps = {
   groups: readonly PaletteGroup[];
   /**
@@ -20,6 +22,7 @@ type OperatorPaletteProps = {
   /** 카탈로그를 아직 못 받았을 때의 안내. 팔레트는 노드 kind만으로 계속 그린다. */
   catalogNote: string | null;
   onPick: (entry: PaletteEntry) => void;
+  parameterLabels?: (entry: PaletteEntry) => readonly string[];
 };
 
 /**
@@ -33,6 +36,7 @@ export const OperatorPalette = ({
   disabledReason,
   catalogNote,
   onPick,
+  parameterLabels,
 }: OperatorPaletteProps) => {
   const [query, setQuery] = useState("");
   const id = useId();
@@ -85,6 +89,7 @@ export const OperatorPalette = ({
                   <PaletteItem
                     key={entry.id}
                     entry={entry}
+                    parameterLabels={parameterLabels}
                     describedBy={describedBy}
                     disabled={disabledReason !== null}
                     onPick={onPick}
@@ -104,15 +109,22 @@ const PaletteItem = ({
   describedBy,
   disabled,
   onPick,
+  parameterLabels,
 }: {
   entry: PaletteEntry;
   describedBy: readonly string[];
   disabled: boolean;
   onPick: (entry: PaletteEntry) => void;
+  parameterLabels?: (entry: PaletteEntry) => readonly string[];
 }) => {
   const id = useId();
   const bodyId = `${id}-body`;
-  const signature = entrySignature(entry);
+  const labels = parameterLabels?.(entry);
+  const signature = entrySignature(entry, labels);
+  // 수식의 계산 구조는 보존하고, 레시피에서는 schema가 준 파라미터 표시 이름만 바꾼다.
+  const formula = entry.formula?.replace(/\b[a-zA-Z_]\w*\b/g, (token) =>
+    labels?.[entry.params.indexOf(token)] ?? token,
+  );
   return (
     <li className="factor-graph__palette-item">
       <button
@@ -135,7 +147,7 @@ const PaletteItem = ({
       */}
       <p id={bodyId} className="factor-graph__palette-body">
         {entry.description === null ? null : <span>{entry.description}</span>}
-        {entry.formula === null ? null : <code>{entry.formula}</code>}
+        {formula == null ? null : <code>{formula}</code>}
         {signature === null ? null : (
           <span className="factor-graph__palette-signature">{signature}</span>
         )}

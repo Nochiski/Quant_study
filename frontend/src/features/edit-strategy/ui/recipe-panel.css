@@ -1,0 +1,66 @@
+.recipe {
+  min-width: 0;
+  padding: var(--space-4);
+}
+.recipe__toolbar,
+.recipe__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.recipe__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.recipe__step,
+.recipe__header,
+.recipe__picker {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-medium);
+  padding: var(--space-3);
+  margin-block: var(--space-3);
+}
+.recipe__step[aria-current="true"] {
+  outline: 2px solid var(--accent);
+}
+.recipe__step fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.recipe__arrow {
+  display: block;
+  text-align: center;
+}
+.recipe__picker label {
+  display: grid;
+  gap: var(--space-2);
+  margin-block: var(--space-2);
+}
+.recipe select,
+.recipe input {
+  max-width: 100%;
+  min-width: 0;
+}
+.recipe pre {
+  overflow: auto;
+}
+@media (max-width: 640px) {
+  /* IDE 탭 패널이 이미 바깥 여백을 갖는다. 작은 화면에서는 두 겹으로 소비하지 않는다. */
+  .recipe {
+    padding-inline: 0;
+  }
+  .recipe .strategy-form__field {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .recipe .strategy-form__control {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+}

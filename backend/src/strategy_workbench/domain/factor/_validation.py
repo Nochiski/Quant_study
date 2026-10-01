@@ -81,6 +81,7 @@ FACTOR_GRAPH_CODES: frozenset[str] = frozenset(
         "factor.graph.branch_unit",
         "factor.graph.cycle",
         "factor.graph.duplicate_node",
+        "factor.graph.empty",
         "factor.graph.field_missing",
         "factor.graph.group_field_missing",
         "factor.graph.group_field_type",
@@ -167,7 +168,12 @@ def validate_factor_graph(
                 )
             )
         seen_node_ids.add(node.node_id)
-    if graph.output_node_id not in nodes:
+    if not graph.nodes:
+        # 노드가 없는 그래프("+ 팩터 추가"가 넣는 빈 레시피)는 출력을 잘못 가리킨 것이 아니라
+        # 아직 단계가 없는 것이다. 코드가 다르면 캔버스가 첫 단계 추가 안내를 코드로 고른다
+        # (P4-03 결정 4).
+        issues.append(_issue("factor.graph.empty", None, "nodes", "첫 단계를 추가하세요."))
+    elif graph.output_node_id not in nodes:
         issues.append(
             _issue(
                 "factor.graph.output_missing",

@@ -485,6 +485,8 @@ def _last_valid_sessions(ctx: _Ctx, tickers: list[str]) -> dict[tuple[str, int],
         f"JOIN {ctx.source('security_span')} s "
         f"  ON s.ticker = p.ticker AND p.date BETWEEN s.first_date AND s.last_date "
         f"WHERE p.ticker IN ({_lit(tickers)}) AND p.price_kind = 'trade' "
+        f"  AND p.open IS NOT NULL AND p.high IS NOT NULL "
+        f"  AND p.low IS NOT NULL AND p.close IS NOT NULL "
         f"  AND least(p.open, p.high, p.low, p.close) > 0 "
         f"  AND p.high >= greatest(p.open, p.close) AND p.low <= least(p.open, p.close) "
         f"GROUP BY 1, 2")

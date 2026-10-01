@@ -170,7 +170,9 @@ def test_preflight_without_an_environment_is_refused_too() -> None:
 
 def test_trace_without_an_environment_is_refused_like_preview() -> None:
     """세 경로가 같은 domain 오류로 거절하고, inbound 가 같은 접수 거절 코드로 낸다(#351)."""
-    traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
+    traces = StrategyTraceService(
+        _portfolio(), InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
 
     with pytest.raises(MissingRunEnvironmentError, match="requested_by=strategy.trace"):
         traces.trace(
@@ -196,7 +198,9 @@ RESEARCH_FLOOR = date(2020, 1, 2)
 def test_preview_and_trace_measuring_the_sealed_window_are_coded_request_errors() -> None:
     """봉인 구간 마지막 날부터 측정하면 preview·trace 가 같은 domain 오류로 거절한다(spec D1)."""
     sealed = replace(_environment(), start=SEALED_LAST_DAY)
-    traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
+    traces = StrategyTraceService(
+        _portfolio(), InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
 
     with pytest.raises(ResearchWindowViolationError) as preview:
         _portfolio().run_pipeline(PortfolioPreviewRequest(_spec(), environment=sealed))
@@ -293,7 +297,9 @@ def test_explicit_environment_narrows_the_observation_window() -> None:
 
 def test_trace_reads_the_explicit_environment_range() -> None:
     spec = _spec()
-    traces = StrategyTraceService(_portfolio(), InMemoryStrategyRepository())
+    traces = StrategyTraceService(
+        _portfolio(), InMemoryStrategyRepository(), MockEquityDataAdapter.demo()
+    )
     source = InlineDraft(spec, "inline_draft", "a" * 64)
     narrowed = replace(_environment(), end=date(2024, 1, 10))
 

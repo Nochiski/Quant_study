@@ -37,6 +37,7 @@ from ._construction_trace import (
     PortfolioCandidateTrace,
     PortfolioConstraintEffect,
     PortfolioConstructionTrace,
+    PortfolioFrameSummary,
     PortfolioTraceSelection,
     TargetTapeTraceResult,
 )
@@ -76,6 +77,12 @@ _BLOCKING_EXCLUSIONS: frozenset[ExclusionReason] = frozenset(
         ExclusionReason.REGIME_BLOCKED,
         ExclusionReason.LIQUIDITY_FAILED,
     }
+)
+
+# 값이 없어 순위에 들지 못한 사유 — 프레임 요약의 "결측 제외"(lang2 P4-03). 규칙 위반·순위 컷과
+# 달리 데이터가 고르지 못하게 한 종목이다. `MISSING_RISK` 는 선정 뒤 비중 단계의 일이라 넣지 않는다.
+_MISSING_VALUE_EXCLUSIONS: frozenset[ExclusionReason] = frozenset(
+    {ExclusionReason.MISSING_ELIGIBILITY, ExclusionReason.MISSING_FACTOR}
 )
 
 
@@ -296,6 +303,7 @@ def _compile_target_tape(
                 signal_as_of=signal_as_of,
                 execution_on=execution_on,
                 candidates=frame_result.trace_candidates,
+                summary=_frame_summary(frame.candidates, checkpoint=checkpoint),
             )
             _require_finite_tree(
                 construction_trace,
@@ -549,6 +557,32 @@ def _compile_frame(
         ),
         trace_candidates=trace_candidates,
         unknown_sector_ids=weight_result.unknown_sector_ids,
+    )
+
+
+def _frame_summary(
+    candidates: tuple[CandidateDecision, ...],
+    *,
+    checkpoint: Callable[[], None] = _noop_checkpoint,
+) -> PortfolioFrameSummary:
+    """프레임 후보의 최종 사유로 선정 깔때기를 센다. 유니버스 밖 종목은 세지 않는다."""
+    members = [
+        item
+        for item in _checkpointed(candidates, checkpoint)
+        if ExclusionReason.NOT_IN_UNIVERSE not in item.exclusion_reasons
+    ]
+    return PortfolioFrameSummary(
+        universe=len(members),
+        eligible=sum(item.eligible for item in members),
+        eligibility_failed=sum(
+            ExclusionReason.ELIGIBILITY_FAILED in item.exclusion_reasons for item in members
+        ),
+        eligibility_rank_cut=sum(
+            ExclusionReason.ELIGIBILITY_RANK_CUT in item.exclusion_reasons for item in members
+        ),
+        missing=sum(
+            not _MISSING_VALUE_EXCLUSIONS.isdisjoint(item.exclusion_reasons) for item in members
+        ),
     )
 
 

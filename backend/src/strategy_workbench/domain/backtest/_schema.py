@@ -13,7 +13,12 @@ from typing import Any
 from strategy_workbench.domain.strategy.facade.schema import dataclass_json_schema
 
 from ._canonical import canonical_json_hash
-from ._models import RUN_ENVIRONMENT_APPLICABILITY, RUN_ENVIRONMENT_CONSTRAINTS, RunEnvironment
+from ._models import (
+    RUN_ENVIRONMENT_APPLICABILITY,
+    RUN_ENVIRONMENT_CONSTRAINTS,
+    RUN_ENVIRONMENT_KEY_NAMESPACE,
+    RunEnvironment,
+)
 
 RUN_ENVIRONMENT_SCHEMA_ID = "urn:strategy-workbench:run-environment:1"
 
@@ -30,6 +35,7 @@ def run_environment_schema() -> dict[str, Any]:
         schema_id=RUN_ENVIRONMENT_SCHEMA_ID,
         constraints={f"/{name}": row for name, row in RUN_ENVIRONMENT_CONSTRAINTS.items()},
         applicability={row.pointer: row for row in RUN_ENVIRONMENT_APPLICABILITY.values()},
+        property_namespace=RUN_ENVIRONMENT_KEY_NAMESPACE,
     )
 
 

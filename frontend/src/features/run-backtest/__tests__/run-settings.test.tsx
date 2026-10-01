@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -148,11 +149,13 @@ const ENVIRONMENT: RunEnvironment = {
 const VALID: RunEnvironmentValidation = {
   valid: true,
   environment: ENVIRONMENT,
+  accepted: ENVIRONMENT,
   errors: {},
 };
 const INCOMPLETE: RunEnvironmentValidation = {
   valid: false,
   environment: null,
+  accepted: {},
   errors: { start: "required" },
 };
 
@@ -471,6 +474,24 @@ describe("run environment panel", () => {
     expect(screen.getByTestId("blocked")).toHaveTextContent(
       "실행 설정에서 시작일·종료일·유니버스 칸을 채우세요.",
     );
+  });
+
+  // #357 C-P3-16: 실행 계획 설명은 결측 정책 칸만 따로 싣는다. 기간·유니버스가 비었다고 기본 정책의
+  // 계획을 보이면 고른 정책과 다른 `plan_hash` 가 된다.
+  it("hands out the missing policy while the period and universe are still empty", async () => {
+    const { result } = renderHook(() => useBacktestRunSettings("strategy-1"), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={new QueryClient()}>
+          {children}
+        </QueryClientProvider>
+      ),
+    });
+    await waitFor(() => expect(result.current.missing).toBe("drop"));
+
+    act(() => result.current.setEnvironmentValue("missing", "zero"));
+
+    expect(result.current.missing).toBe("zero");
+    expect(result.current.environment).toBeNull();
   });
 
   it("opens the panel at the first empty field from the summary band", async () => {

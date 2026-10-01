@@ -113,19 +113,22 @@ class ImpactModel(StrEnum):
     SQRT = "sqrt"
 
 
-# 실행 설정 수치 필드의 범위·단위·설명 키. 1.1 까지는 전략 제약 카탈로그의 `/execution/*` 행이
+# 실행 설정 칸의 설명 키 네임스페이스(`run_environment.field.<칸>`). 스키마의 칸 키와 적용 조건 행이
+# 같은 값을 쓴다 — 전략 필드(`strategy.field.*`)와 섞지 않고, 진단 코드(`run_environment.required`
+# 등)와도 가른다(#357 C-P3-8).
+RUN_ENVIRONMENT_KEY_NAMESPACE = "run_environment.field"
+
+# 실행 설정 수치 필드의 범위·단위. 1.1 까지는 전략 제약 카탈로그의 `/execution/*` 행이
 # SoT 였고 여기서 필드 이름으로 다시 걸어 썼지만, 1.2 가 `execution` 섹션을 지우면서 그 행들이
 # 전략 문서 포인터를 잃었다. 그래서 owner 를 실행 설정이 있는 이 노드로 옮긴다(P2-03 결정 항목).
 # 포인터는 실행 설정 문서 기준(`/fee_bps` …)이고, `__post_init__` 검증과 런타임 스키마의
 # `minimum`/`maximum` 이 같은 행을 읽는다 — 수치를 두 곳에 적지 않는다.
 #
-# `code` 는 `strategy.*` 진단 레지스트리 밖의 `run_environment.*` 어휘다. 실행 설정 값은 전략
-# 문서 검증이 아니라 요청 검증에서 걸리므로 validator 코드 소유 규칙(`SEMANTIC_ONLY_CODES`)과
-# 섞이면 안 된다.
+# 범위 위반은 `__post_init__` 이 칸 이름을 실은 `InvalidRunFieldError` 로 거절한다(요청 검증 422
+# `backtest.run.field_invalid`). 진단 코드(`code`)는 전략 문서 validator 의 것이라 행에 없다.
 RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
     "participation_rate": ScalarConstraint(
         pointer="/participation_rate",
-        code="run_environment.participation",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.RATIO,
         display_unit="%",
@@ -133,54 +136,45 @@ RUN_ENVIRONMENT_CONSTRAINTS: dict[str, ScalarConstraint] = {
         exclusive_minimum=True,
         maximum=1.0,
         example=0.1,
-        description_key="run_environment.contract.participation_rate",
         message="참여율은 0보다 크고 1 이하여야 합니다.",
     ),
     "fee_bps": ScalarConstraint(
         pointer="/fee_bps",
-        code="run_environment.cost",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
         example=15.0,
-        description_key="run_environment.contract.fee_bps",
         message="수수료는 0 이상의 숫자여야 합니다.",
     ),
     "slippage_bps": ScalarConstraint(
         pointer="/slippage_bps",
-        code="run_environment.cost",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
         example=10.0,
-        description_key="run_environment.contract.slippage_bps",
         message="슬리피지는 0 이상의 숫자여야 합니다.",
     ),
     # √ 충격의 계수 k(무차원). 기본 1.0 은 문헌의 "1 안팎"(`_impact.py` 머리말)이다. 상한 10 은 그
     # 범위를 넉넉히 덮고 오타 입력(100·1000)을 막는다.
     "impact_coefficient": ScalarConstraint(
         pointer="/impact_coefficient",
-        code="run_environment.cost",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.RATIO,
         minimum=0.0,
         maximum=10.0,
         example=1.0,
-        description_key="run_environment.contract.impact_coefficient",
         message="가격 충격 계수는 0 이상 10 이하의 숫자여야 합니다.",
     ),
     # `sell_tax` 가 `custom` 일 때만 값이 있다(없으면 `None`). 범위 검사는 값이 있을 때만 한다.
     "sell_tax_bps": ScalarConstraint(
         pointer="/sell_tax_bps",
-        code="run_environment.cost",
         stage=AppliedStage.EXECUTION,
         unit=ContractUnit.BASIS_POINTS,
         display_unit="bp",
         minimum=0.0,
         example=20.0,
-        description_key="run_environment.contract.sell_tax_bps",
         message="매도 거래세는 0 이상의 숫자여야 합니다.",
     ),
 }
@@ -194,7 +188,7 @@ RUN_ENVIRONMENT_APPLICABILITY: dict[str, FieldApplicability] = {
     name: FieldApplicability(
         pointer=f"/{name}",
         conditions=(ApplicabilityCondition(f"/{mode_field}", equals=mode.value),),
-        description_key=RUN_ENVIRONMENT_CONSTRAINTS[name].description_key,
+        description_key=f"{RUN_ENVIRONMENT_KEY_NAMESPACE}.{name}",
     )
     for name, (mode_field, mode) in (
         ("slippage_bps", ("impact_model", ImpactModel.FIXED_BPS)),
@@ -541,13 +535,31 @@ class BacktestRunResult:
     artifacts: RawArtifactBundle
 
 
+# run 진행 단계 어휘의 단일 정본(도메인 리뷰 B DR-B-03). 실행 유스케이스만 단계를 정하고, 실행기는
+# 자기 작업 안의 비율과 설명만 보고한다 — engine 구간 동안 단계는 `engine` 하나다. 프론트가 단계를
+# 번역하면 이 어휘가 키 목록이다(#336 V1-07). run 기록은 상태가 바뀔 때만 단계를 저장해 저장된 값도
+# 이 어휘 안이고, 저장소는 읽을 때 거르지 않는다 — 값의 이름을 바꾸거나 지우면 옛 기록(특히 종결
+# `completed`·`cancelled`·`failed`)이 OpenAPI enum 밖 값을 싣는다.
+RunStage = Literal[
+    "queued",
+    "tape",
+    "data",
+    "engine",
+    "artifact",
+    "cancellation",
+    "completed",
+    "cancelled",
+    "failed",
+]
+
+
 @dataclass(frozen=True)
 class RunProgressEvent:
     sequence: int
     run_id: str
     status: RunStatus
     progress: float
-    stage: str
+    stage: RunStage
     message: str
     occurred_at: datetime
 
@@ -558,9 +570,9 @@ class RunProgressEvent:
 # `data_not_ready` 는 데이터 원천이 백테스트 데이터를 낼 준비가 안 된 실행이다(원장 표·카탈로그 뷰가
 # 없거나 낡음, 조치는 서버 사유 문장, #369). `no_positions` 는 tape 가 한 번도 종목을 고르지 않은
 # 실행(기간 안 리밸런싱일이 없거나 선정이 빔, #360), `benchmark_unknown` 은 데이터 원천이 모르는
-# 벤치마크 id 다(#361). 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다 (시작 422 의
-# `backtest.error.*` 와 namespace 가 다르다 — 툴바는 서버 detail 을 그대로 쓰는 화면이라 키를 합치면
-# detail 이 덮인다).
+# 벤치마크 id 다(#361). 프론트는 이 어휘를 `backtest.run.error.<code>` 로 번역한다. 시작 422 의
+# `backtest.error.*` 와 키를 나누는 까닭은 같은 코드라도 시작 거절은 실행 전에 고칠 것을, run 실패는
+# 실행 중에 난 일을 말하기 때문이다(`frontend-api-state.md`).
 RunFailureCode = Literal[
     "portfolio.strategy.invalid",
     "portfolio.data.unavailable",
@@ -595,7 +607,7 @@ class BacktestRunState:
     run_id: str
     status: RunStatus
     progress: float
-    stage: str
+    stage: RunStage
     message: str
     created_at: datetime
     updated_at: datetime

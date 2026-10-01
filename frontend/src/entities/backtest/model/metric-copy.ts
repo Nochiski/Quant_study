@@ -5,6 +5,20 @@ import { tCode, tDescription, tName } from "../../../shared/config";
 export type MetricPlainCopy = { name: string; description: string };
 
 /**
+ * 결과 화면 맨 위에 강조하는 지표(registry `metric_id`, 화면 순서). registry 에 없는 id 는 강조 칸에서
+ * 조용히 빠지므로 backend 골든(`metric_ids.json`)의 부분집합임을 테스트가 본다(#362 DR-B-09).
+ */
+export const HIGHLIGHTED_METRIC_IDS = [
+  "total_return",
+  "sharpe",
+  "sharpe_standard_error",
+  "max_drawdown",
+  "calmar",
+  "turnover",
+  "trade_count",
+] as const;
+
+/**
  * backend Metric Registry의 `metric_id`로 쉬운 이름·뜻을 찾는다(결과 설명 spec R4).
  *
  * 키 stem은 `backtest.metric.<metric_id>`다. 지표의 공식·방향·단위는 registry가, 로케일 문장은

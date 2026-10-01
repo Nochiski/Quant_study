@@ -312,6 +312,34 @@ def test_FX_N_close_변조_사본은_EGC01_만_FAIL(built: Path, tmp_path: Path)
     assert not r.ok and r.failed_report is not None and r.failed_report.exists()
 
 
+@pytest.mark.parametrize("price", ["open", "high", "low", "close"])
+def test_EGC04_NULL_OHLC_행은_사건_정산_bar가_아니다(
+    built: Path, tmp_path: Path, price: str,
+) -> None:
+    """사건 뒤 거래 행의 OHLC 하나가 NULL이면 제품이 뺀 사건을 게이트도 기대하지 않는다.
+
+    DuckDB의 least/greatest는 NULL을 건너뛰므로 open·close 결측도 명시적으로 제외해야 한다.
+    """
+    root = _copy_root(built, tmp_path / "equity")
+    _rewrite_partition(
+        root, "price_daily",
+        "SELECT * REPLACE (CASE WHEN ticker = '005930' AND date >= DATE '2018-05-04' "
+        f"THEN NULL ELSE {price} END AS {price}) FROM {{src}}",
+    )
+    wb = contract.load_adapter(contract.default_engine_src())
+    data = wb.provider.EquityDuckdbAdapter(root).load_backtest_dataset(
+        wb.ports.BacktestDataQuery(date(2018, 5, 4), BACKFILL_END, ("005930:1", "005935:1"), None),
+    )
+    assert not any(bar.security_id == "005930:1" for bar in data.bars)
+    assert any(row.security_id == "005930:1" for row in data.invalid_bars)
+    assert not any(action.detail == "005930:split:2018-05-04" for action in data.corporate_actions)
+    result = contract.run(root, seed())
+    metrics = _metrics(result, "EGC-04")
+    assert metrics["n_factor_without_bar_after"] == 1
+    assert metrics["n_only_factor"] == metrics["n_only_adapter"] == 0
+    assert _gate(result, "EGC-04").status is GateStatus.PASS
+
+
 def test_FX_N_재상장_구간_합친_사본은_EGC03_FAIL(built: Path, tmp_path: Path) -> None:
     """036220 두 구간을 하나로 뭉치면 ③ 이 재상장 종목 수로 잡는다. 구성원은 `universe_daily` 가
     정하므로 공백 기간에 036220 이 나타나지 않고(② pass), 합친 구간의 bar 는 구간 안이라 ①·⑤ 도

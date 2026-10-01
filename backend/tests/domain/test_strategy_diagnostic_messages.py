@@ -14,6 +14,7 @@ frontend가 아니라 여기 있다. 기계가 읽는 디테일(`got=`·`expecte
 
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import re
@@ -24,6 +25,7 @@ from typing import Any
 
 import pytest
 
+import strategy_workbench
 from strategy_workbench.adapters.outbound.document_codec.facade.codec import RuamelDocumentCodec
 from strategy_workbench.application.strategy_authoring.ports.outgoing.document_codec import (
     CodecLimits,
@@ -39,6 +41,7 @@ from strategy_workbench.domain.factor.facade.expression import (
 )
 from strategy_workbench.domain.factor.facade.validation import validate_factor_graph
 from strategy_workbench.domain.strategy._hydrate import _hydrate
+from strategy_workbench.domain.strategy.facade.constraints import STRATEGY_SCALAR_CONSTRAINTS
 from strategy_workbench.domain.strategy.facade.document import (
     CURRENT_SCHEMA_VERSION,
     FROZEN_SCHEMA_VERSIONS,
@@ -484,6 +487,49 @@ def test_no_english_sentence_reaches_the_reader(code: str, message: str) -> None
     assert not returned, f"{code}: 영어 원문이 돌아왔다 — {returned}"
 
 
+# 진단을 만드는 함수 → 문장 인자의 자리. `_issue` 는 구조 진단(hydrate)과 팩터 그래프 진단이다.
+_MESSAGE_ARGUMENT = {"semantic_issue": 2, "_issue": 3}
+
+
+def _sentence_head(message: ast.expr) -> str | None:
+    """문장 식의 첫 글자 조각. 변수·속성으로 받거나 자리표시자로 시작하면 None."""
+    if isinstance(message, ast.BinOp):
+        return _sentence_head(message.left)
+    if isinstance(message, ast.JoinedStr) and message.values:
+        return _sentence_head(message.values[0])
+    if isinstance(message, ast.Constant) and isinstance(message.value, str):
+        return message.value
+    return None
+
+
+def test_every_diagnostic_sentence_written_in_the_backend_opens_in_korean() -> None:
+    """compile 진단을 만드는 호출 지점의 문장을 전수로 훑는다(#357 C-P3-17).
+
+    위 golden 은 구조·codec 코드만 본다. `strategy.*` 문장은 validator·application 호출 지점마다
+    따로 적혀 있어, 영어 문장 하나(`strategy.number.non_finite`)가 테스트 없이 남았었다. 문장을
+    변수로 받는 지점(제약 행 `message`, 변수로 시작하는 f-string)은 훑을 수 없다. 제약 행만 따로
+    본다.
+    """
+    heads: list[tuple[str, str]] = []
+    for path in Path(strategy_workbench.__file__).parent.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            index = _MESSAGE_ARGUMENT.get(node.func.id)
+            if index is None:
+                continue
+            head = _sentence_head(node.args[index])
+            if head is not None:
+                heads.append((f"{path.name}:{node.lineno}", head))
+
+    assert len(heads) > 50, "훑기가 호출 지점을 찾지 못했다"
+    # 첫 `:`·` — ` 앞(문장)에 한글이 있어야 한다 — 뒤의 조각만 한글인 영어 문장도 잡는다.
+    sentences = [(site, re.split(r":| — ", head, maxsplit=1)[0]) for site, head in heads]
+    assert [site for site, sentence in sentences if not _HANGUL.search(sentence)] == []
+    rows = STRATEGY_SCALAR_CONSTRAINTS
+    assert [row.path for row in rows if not _HANGUL.search(row.message)] == []
+
+
 @pytest.mark.parametrize(
     ("name", "mutate", "expected"),
     [
@@ -578,6 +624,36 @@ def test_duplicate_node_diagnostic_names_the_repeated_id() -> None:
     assert duplicates[0].message == (
         "앞에서 이미 쓴 node_id입니다. 다른 이름을 붙여 주세요 — node_id='px'"
     )
+
+
+def test_empty_graph_asks_for_a_first_step_instead_of_a_missing_output() -> None:
+    """노드가 없는 그래프는 출력 진단 대신 첫 단계 안내 하나만 낸다(lang2 P4-03 결정 4).
+
+    "+ 팩터 추가"가 넣는 빈 레시피(`nodes: []`, `output_node_id: ""`)에 "출력 노드를 찾을 수
+    없습니다: node_id=''"는 사용자가 아직 하지 않은 일을 잘못이라고 말했다.
+    """
+    from strategy_workbench.domain.strategy.facade.validation import validate_strategy
+
+    validation = validate_factor_graph(_graph(output=""))
+
+    assert not validation.valid
+    assert [(i.code, i.node_id, i.path, i.message) for i in validation.issues] == [
+        ("factor.graph.empty", None, "nodes", "첫 단계를 추가하세요.")
+    ]
+
+    document = _document()
+    document["factors"].append(
+        {"factor_id": "factor_2", "direction": "high", "graph": {"nodes": [], "output_node_id": ""}}
+    )
+    hydrated = hydrate_strategy_document(document, identity=DRAFT)
+    assert hydrated.spec is not None, hydrated.issues
+    base = f"factors.{len(document['factors']) - 1}."
+
+    issues = validate_strategy(hydrated.spec).issues
+
+    assert [(i.code, i.path, i.message) for i in issues if i.path.startswith(base)] == [
+        ("strategy.expression.empty", base + "graph.nodes", "첫 단계를 추가하세요.")
+    ]
 
 
 def test_graph_diagnostics_reach_a_strategy_document_as_expression_codes() -> None:

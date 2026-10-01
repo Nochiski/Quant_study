@@ -149,6 +149,42 @@ def test_inline_trace_matches_preview_target_and_is_deterministic() -> None:
         assert row["estimated_order_delta"] is None
 
 
+def test_a_summary_only_trace_returns_the_frame_counts_and_its_targets_by_rank() -> None:
+    """기준일 미리보기(lang2 P4-03)는 종목 없이 trace 를 불러 그날의 수와 선정 종목을 받는다.
+
+    요약은 종목을 골랐을 때와 같고, 선정 종목은 tape 의 그 프레임 targets 전부를 순위 순으로 싣는다.
+    """
+    client = TestClient(build_http_app())
+    spec, request = _inline_request(client)
+    full = client.post("/api/v1/strategies/debug/trace", json=request).json()
+
+    response = client.post(
+        "/api/v1/strategies/debug/trace",
+        json={**request, "security_ids": [], "node_ids": [], "include_raw": False},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["summary"] == full["summary"]
+    assert (payload["trace"]["rows"], payload["raw"]) == ([], [])
+    assert (payload["target"]["targets"], payload["target"]["candidates"]) == ([], [])
+    preview = client.post(
+        "/api/v1/portfolio/preview", json={"spec": spec, "environment": _environment()}
+    ).json()["tape"]
+    frame = next(item for item in preview["frames"] if item["signal_as_of"] == request["as_of"])
+    assert payload["summary"]["signal_as_of"] == frame["signal_as_of"]
+    rows = payload["summary"]["targets"]
+    assert [row["position"] for row in rows] == sorted(
+        frame["targets"], key=lambda item: (item["rank"], item["security_id"])
+    )
+    # 이름은 실행 설정의 유니버스에서 backend 가 붙인다(mock fixture 의 종목 셋).
+    names = {"sec-005930-1": "삼성전자", "sec-000660-1": "SK하이닉스", "sec-035420-1": "NAVER"}
+    assert [row["security"]["name"] for row in rows] == [
+        names[row["position"]["security_id"]] for row in rows
+    ]
+    assert payload["summary"]["counts"]["universe"] == len(frame["candidates"])
+
+
 @pytest.mark.parametrize("end", ["2026-09-04", "2026-09-05"])
 def test_omitted_as_of_resolves_the_latest_executable_frame_for_inline_and_saved(
     end: str,
@@ -791,7 +827,7 @@ def test_trace_openapi_contract_exposes_bounded_source_union() -> None:
     assert {
         key: properties["security_ids"][key] for key in ("minItems", "maxItems", "uniqueItems")
     } == {
-        "minItems": 1,
+        "minItems": 0,
         "maxItems": 100,
         "uniqueItems": True,
     }

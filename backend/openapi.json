@@ -525,6 +525,17 @@
             "type": "string"
           },
           "stage": {
+            "enum": [
+              "queued",
+              "tape",
+              "data",
+              "engine",
+              "artifact",
+              "cancellation",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -982,6 +993,17 @@
             "type": "string"
           },
           "stage": {
+            "enum": [
+              "queued",
+              "tape",
+              "data",
+              "engine",
+              "artifact",
+              "cancellation",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -2245,6 +2267,15 @@
         ],
         "title": "DatasetRevision",
         "type": "object"
+      },
+      "DiagnosticAnchor": {
+        "description": "진단이 가리키는 자리. 고칠 곳이 값이 아니라 키 자체인 진단(예: 모르는 키)은 키다.\n\n편집기는 자기 parse 지도(UTF-16)에서 이 자리를 다시 찾는다. 어느 코드가 키를 가리키는지는\nbackend 가 정하고 frontend 는 목록을 옮겨 적지 않는다(#357 C-P3-13).",
+        "enum": [
+          "value",
+          "key"
+        ],
+        "title": "DiagnosticAnchor",
+        "type": "string"
       },
       "DiagnosticKind": {
         "enum": [
@@ -5480,6 +5511,40 @@
         "title": "PortfolioDataUnavailableDetail",
         "type": "object"
       },
+      "PortfolioFrameSummary": {
+        "description": "trace 한 프레임 전체의 선정 깔때기 수(기준일 미리보기, lang2 P4-03).\n\n유니버스 멤버만 센다. 한 종목이 사유를 여럿 가질 수 있어(규칙 탈락이면서 팩터 값 없음) 사유별\n수를 더해도 `universe` 가 되지 않으므로, 순위에 든 수(`eligible`)를 따로 싣는다. 소비자는 수를\n다시 세지 않는다.",
+        "properties": {
+          "eligibility_failed": {
+            "title": "Eligibility Failed",
+            "type": "integer"
+          },
+          "eligibility_rank_cut": {
+            "title": "Eligibility Rank Cut",
+            "type": "integer"
+          },
+          "eligible": {
+            "title": "Eligible",
+            "type": "integer"
+          },
+          "missing": {
+            "title": "Missing",
+            "type": "integer"
+          },
+          "universe": {
+            "title": "Universe",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "universe",
+          "eligible",
+          "eligibility_failed",
+          "eligibility_rank_cut",
+          "missing"
+        ],
+        "title": "PortfolioFrameSummary",
+        "type": "object"
+      },
       "PortfolioPreview": {
         "description": "The tape a run will consume, plus the caveats the observation source reported.\n\n`warnings` are the raw observation adapter's own messages, passed through verbatim. They ride\ninto `RunManifest.warnings` so a caveat visible in the preview cannot disappear from the run\nthat used the same data.",
         "properties": {
@@ -7732,8 +7797,11 @@
         "type": "object"
       },
       "SourceDiagnostic": {
-        "description": "One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.\n\n`range` is None only when the source has no node to point at (empty document).\n`node_id` names the FactorGraph node a semantic issue is about, when known.",
+        "description": "One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.\n\n`range` is None only when the source has no node to point at (empty document).\n`node_id` names the FactorGraph node a semantic issue is about, when known.\n`anchor` 도 `severity` 처럼 기본값 없이 늘 보낸다 — `range` 가 키 자체를 가리키는지 값을\n가리키는지다(`DiagnosticAnchor`). 새 생성 지점이 빠뜨리면 타입이 잡는다(#418 리뷰 P3-3).",
         "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/DiagnosticAnchor"
+          },
           "code": {
             "title": "Code",
             "type": "string"
@@ -7779,7 +7847,8 @@
           "kind",
           "pointer",
           "message",
-          "severity"
+          "severity",
+          "anchor"
         ],
         "title": "SourceDiagnostic",
         "type": "object"
@@ -8983,12 +9052,13 @@
             "type": "integer"
           },
           "security_ids": {
+            "description": "Securities to trace. An empty list skips per-security rows and returns only the as-of summary.",
             "items": {
               "minLength": 1,
               "type": "string"
             },
             "maxItems": 100,
-            "minItems": 1,
+            "minItems": 0,
             "title": "Security Ids",
             "type": "array",
             "uniqueItems": true
@@ -9076,6 +9146,16 @@
           "spec_hash": {
             "title": "Spec Hash",
             "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StrategyTraceSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "target": {
             "anyOf": [
@@ -9169,6 +9249,63 @@
           "inputs"
         ],
         "title": "StrategyTraceRow",
+        "type": "object"
+      },
+      "StrategyTraceSummary": {
+        "description": "기준일 미리보기가 그리는 수와 그날의 선정(lang2 P4-03). 수는 컴파일러가 센 그대로다.",
+        "properties": {
+          "counts": {
+            "$ref": "#/components/schemas/PortfolioFrameSummary"
+          },
+          "execution_on": {
+            "format": "date",
+            "title": "Execution On",
+            "type": "string"
+          },
+          "signal_as_of": {
+            "format": "date",
+            "title": "Signal As Of",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyTraceSummaryTarget"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "signal_as_of",
+          "execution_on",
+          "counts",
+          "targets"
+        ],
+        "title": "StrategyTraceSummary",
+        "type": "object"
+      },
+      "StrategyTraceSummaryTarget": {
+        "description": "선정 종목 한 줄. 이름·티커는 실행 설정의 유니버스에서 찾고, 모르면 `security` 가 None.",
+        "properties": {
+          "position": {
+            "$ref": "#/components/schemas/TargetPosition"
+          },
+          "security": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SecurityRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "position",
+          "security"
+        ],
+        "title": "StrategyTraceSummaryTarget",
         "type": "object"
       },
       "StrategyValidation": {

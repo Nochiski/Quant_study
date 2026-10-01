@@ -10,6 +10,7 @@ from strategy_workbench.application.strategy_design.facade.ports import (
     StrategyRepositoryPort,
 )
 from strategy_workbench.domain.backtest.facade.environment import require_environment
+from strategy_workbench.domain.equity.facade.research_data import SecurityRef
 from strategy_workbench.domain.factor.facade.trace import TraceSelection
 from strategy_workbench.domain.portfolio.facade.construction import (
     PortfolioConstructionTrace,
@@ -43,8 +44,11 @@ from ._trace_models import (
     StrategyTraceRequest,
     StrategyTraceResponse,
     StrategyTraceRow,
+    StrategyTraceSummary,
+    StrategyTraceSummaryTarget,
 )
 from .ports.outgoing.raw_observations import RawObservation
+from .ports.outgoing.security_directory import SecurityDirectoryPort
 
 MAX_RAW_ROWS = 2_000
 
@@ -84,9 +88,11 @@ class StrategyTraceService:
         self,
         portfolio_design: PortfolioDesignService,
         strategy_repository: StrategyRepositoryPort,
+        securities: SecurityDirectoryPort,
     ) -> None:
         self._portfolio_design = portfolio_design
         self._strategy_repository = strategy_repository
+        self._securities = securities
 
     def trace(
         self,
@@ -207,11 +213,14 @@ class StrategyTraceService:
             cancelled=cancelled,
         )
         _raise_if_cancelled(cancelled)
-        target = _target_projection(
+        target, summary = _target_projection(
             pipeline.preview.tape.frames,
             resolved_as_of,
             set(request.security_ids),
             pipeline.construction_trace,
+            lambda: self._securities.universe_securities(
+                environment.market.value, environment.universe_id, resolved_as_of
+            ),
             cancelled=cancelled,
         )
         return StrategyTraceResponse(
@@ -232,6 +241,7 @@ class StrategyTraceService:
             raw=raw,
             raw_truncated=raw_truncated,
             target=target,
+            summary=summary,
             # 원시 관측 경고 뒤에 tape 컴파일 경고(섹터 제약 제외 등, 이슈 #203)를 붙인다.
             warnings=(
                 *pipeline.preview.warnings,
@@ -322,13 +332,15 @@ def _target_projection(
     as_of: date,
     security_ids: set[str],
     construction_trace: PortfolioConstructionTrace | None,
+    securities: Callable[[], tuple[SecurityRef, ...]],
     *,
     cancelled: Callable[[], bool] = lambda: False,
-) -> StrategyTargetTrace | None:
+) -> tuple[StrategyTargetTrace | None, StrategyTraceSummary | None]:
+    """요청 종목의 대상 추적과 프레임 요약. 이름은 선정 종목이 있을 때만 `securities` 로 찾는다."""
     _raise_if_cancelled(cancelled)
     frame = next((item for item in frames if item.signal_as_of == as_of), None)
     if frame is None:
-        return None
+        return None, None
     if construction_trace is None or construction_trace.signal_as_of != as_of:
         raise RuntimeError(
             f"portfolio compiler omitted the requested construction trace — as_of={as_of}"
@@ -345,6 +357,7 @@ def _target_projection(
             _raise_if_cancelled(cancelled)
         if item.security_id in security_ids:
             candidates.append(item)
+    names = {ref.security_id: ref for ref in securities()} if frame.targets else {}
     return StrategyTargetTrace(
         signal_as_of=frame.signal_as_of,
         execution_on=frame.execution_on,
@@ -352,6 +365,14 @@ def _target_projection(
         candidates=tuple(candidates),
         construction=tuple(
             item for item in construction_trace.candidates if item.security_id in security_ids
+        ),
+    ), StrategyTraceSummary(
+        signal_as_of=frame.signal_as_of,
+        execution_on=frame.execution_on,
+        counts=construction_trace.summary,
+        targets=tuple(
+            StrategyTraceSummaryTarget(position=item, security=names.get(item.security_id))
+            for item in sorted(frame.targets, key=lambda item: (item.rank, item.security_id))
         ),
     )
 

@@ -272,7 +272,11 @@ def test_an_explicit_normalization_is_kept() -> None:
 
 @pytest.mark.parametrize("kind", ["saved_factor", "saved_subgraph"])
 def test_saved_reference_nodes_refuse_the_upgrade(kind: str) -> None:
-    """spec D7: 실행 경로가 원래 없던 노드라 잃는 것이 없다. 조용히 지우지 않고 거절한다."""
+    """spec D7: 실행 경로가 원래 없던 노드라 잃는 것이 없다. 조용히 지우지 않고 거절한다.
+
+    compile 도 같은 거절을 읽어 배너 대신 고칠 곳을 알린다(#357 C-P3-10) — 배너를 띄우면 누를
+    때마다 422 인 버튼이 된다.
+    """
     document = _yaml("quality_momentum.v1_1.yaml")
     document["factors"][0]["graph"]["nodes"].append({"kind": kind, "node_id": "ref"})
 
@@ -282,6 +286,28 @@ def test_saved_reference_nodes_refuse_the_upgrade(kind: str) -> None:
     assert info.value.pointer == "/factors/0/graph/nodes/2/kind"
     assert info.value.code == "strategy_document.upgrade_unsupported_node"
     assert kind in str(info.value)
+    assert isinstance(upgrade_refusal(document), UpgradeUnsupportedNodeError)
+    issues = hydrate_strategy_document(document, identity=DRAFT).issues
+    version_issues = [issue for issue in issues if issue.pointer == "/schema_version"]
+    assert [issue.code for issue in version_issues] == ["structure.not_upgradeable_schema_version"]
+    assert version_issues[0].message == str(info.value)
+
+
+def test_a_1_0_document_names_the_retired_node_where_its_author_wrote_it() -> None:
+    """1.0 의 두 겹 factors 문서도 거절 자리가 원문 pointer 다(#418 리뷰 P3-4).
+
+    평탄화 뒤 자리(`/factors/0/…`)를 말하면 1.0 작성자는 문서에 없는 자리를 찾게 된다. 1.0 → 1.1 만
+    올리는 호출은 `saved_*` 를 받아 주던 버전에서 멈추므로 거절하지 않는다.
+    """
+    document = _yaml("quality_momentum.v1_0.yaml")
+    nodes = document["factors"]["factors"][0]["graph"]["nodes"]
+    nodes.append({"kind": "saved_factor", "node_id": "ref"})
+
+    refusal = upgrade_refusal(document)
+
+    assert isinstance(refusal, UpgradeUnsupportedNodeError)
+    assert refusal.pointer == f"/factors/factors/0/graph/nodes/{len(nodes) - 1}/kind"
+    assert upgrade_document(document, until=V1_1).source_version == V1_0
 
 
 def test_upgrade_does_not_mutate_its_input() -> None:
@@ -565,7 +591,7 @@ def test_stage_step_order_is_declared_and_flattening_precedes_node_rules() -> No
     names = {version: [name for name, _ in steps] for version, steps in UPGRADE_STEPS.items()}
     assert names == {
         V1_0: ["flatten_factors", "remove_dead_fields", "unary_aliases"],
-        V1_1: ["reject_saved_nodes", "strip_execution_settings", "explicit_normalization"],
+        V1_1: ["strip_execution_settings", "explicit_normalization"],
     }
 
 

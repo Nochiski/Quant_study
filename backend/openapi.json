@@ -525,6 +525,17 @@
             "type": "string"
           },
           "stage": {
+            "enum": [
+              "queued",
+              "tape",
+              "data",
+              "engine",
+              "artifact",
+              "cancellation",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -982,6 +993,17 @@
             "type": "string"
           },
           "stage": {
+            "enum": [
+              "queued",
+              "tape",
+              "data",
+              "engine",
+              "artifact",
+              "cancellation",
+              "completed",
+              "cancelled",
+              "failed"
+            ],
             "title": "Stage",
             "type": "string"
           },
@@ -1502,6 +1524,28 @@
             "title": "Initial Cash",
             "type": "number"
           },
+          "participation_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Participation Rate"
+          },
+          "rounding_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounding Error"
+          },
           "session_unfilled_ratio": {
             "anyOf": [
               {
@@ -1538,7 +1582,9 @@
           "status",
           "sharpe",
           "impact_cost_bps",
-          "session_unfilled_ratio"
+          "session_unfilled_ratio",
+          "participation_rate",
+          "rounding_error"
         ],
         "title": "CapacityPoint",
         "type": "object"
@@ -2245,6 +2291,15 @@
         ],
         "title": "DatasetRevision",
         "type": "object"
+      },
+      "DiagnosticAnchor": {
+        "description": "진단이 가리키는 자리. 고칠 곳이 값이 아니라 키 자체인 진단(예: 모르는 키)은 키다.\n\n편집기는 자기 parse 지도(UTF-16)에서 이 자리를 다시 찾는다. 어느 코드가 키를 가리키는지는\nbackend 가 정하고 frontend 는 목록을 옮겨 적지 않는다(#357 C-P3-13).",
+        "enum": [
+          "value",
+          "key"
+        ],
+        "title": "DiagnosticAnchor",
+        "type": "string"
       },
       "DiagnosticKind": {
         "enum": [
@@ -6058,8 +6113,16 @@
             "title": "Positions",
             "type": "array"
           },
+          "roundings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RawRounding"
+            },
+            "title": "Roundings",
+            "type": "array"
+          },
           "schema_version": {
-            "default": "backtest-artifacts-v1",
+            "default": "backtest-artifacts-v2",
             "title": "Schema Version",
             "type": "string"
           },
@@ -6127,6 +6190,17 @@
       },
       "RawFill": {
         "properties": {
+          "cap_volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Volume"
+          },
           "fee": {
             "title": "Fee",
             "type": "number"
@@ -6270,6 +6344,36 @@
           "unrealized_pnl"
         ],
         "title": "RawPosition",
+        "type": "object"
+      },
+      "RawRounding": {
+        "description": "라우터가 목표 금액 Δ(목표 − 현재 평가액)를 1주 단위 수량 × 판단 세션 종가로 내린 기록\n(V4-04 2/2). 부호가 있고, 1주 미만이라 주문이 나가지 않은 목표도 남는다.",
+        "properties": {
+          "rounded_notional": {
+            "title": "Rounded Notional",
+            "type": "number"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "target_notional": {
+            "title": "Target Notional",
+            "type": "number"
+          }
+        },
+        "required": [
+          "session",
+          "security_id",
+          "target_notional",
+          "rounded_notional"
+        ],
+        "title": "RawRounding",
         "type": "object"
       },
       "RawSnapshot": {
@@ -7766,8 +7870,11 @@
         "type": "object"
       },
       "SourceDiagnostic": {
-        "description": "One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.\n\n`range` is None only when the source has no node to point at (empty document).\n`node_id` names the FactorGraph node a semantic issue is about, when known.",
+        "description": "One diagnostic. `severity` is always sent (no default) so the wire schema marks it required.\n\n`range` is None only when the source has no node to point at (empty document).\n`node_id` names the FactorGraph node a semantic issue is about, when known.\n`anchor` 도 `severity` 처럼 기본값 없이 늘 보낸다 — `range` 가 키 자체를 가리키는지 값을\n가리키는지다(`DiagnosticAnchor`). 새 생성 지점이 빠뜨리면 타입이 잡는다(#418 리뷰 P3-3).",
         "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/DiagnosticAnchor"
+          },
           "code": {
             "title": "Code",
             "type": "string"
@@ -7813,7 +7920,8 @@
           "kind",
           "pointer",
           "message",
-          "severity"
+          "severity",
+          "anchor"
         ],
         "title": "SourceDiagnostic",
         "type": "object"

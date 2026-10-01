@@ -1,4 +1,5 @@
 import type { BacktestRunSpec } from "../../../shared/api";
+import type { MessageKey } from "../../../shared/config";
 import type { RunEnvironmentValidation } from "./run-environment";
 
 export type BacktestRunSettingsFields = {
@@ -7,6 +8,15 @@ export type BacktestRunSettingsFields = {
   benchmarkSecurityId: string;
   annualizationDays: string;
   oosStart: string;
+};
+
+/** 코어 선택지. 요청 계약에 코어가 늘거나 줄면 typecheck 가 잡는다(#357 C-P3-14, 대체는 #336). */
+export const EXECUTION_CORE_LABELS: Record<
+  BacktestRunSettingsFields["core"],
+  MessageKey
+> = {
+  rust: "backtest.settings.core.rust",
+  python: "backtest.settings.core.python",
 };
 
 /** OOS 시작일 칸의 이름(`data-run-field`). 덜 친 날짜 표시와 오류 → 칸 초점이 같은 이름을 쓴다. */

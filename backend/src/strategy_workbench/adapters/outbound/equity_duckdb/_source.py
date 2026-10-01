@@ -2,11 +2,11 @@
 
 DESIGN §2 판본 규약: `<equity_root>/<table>/MANIFEST.json` 의 `current_build` → 그 BuildRecord 의
 `partitions[].path` 디렉토리만 읽는다(`v=*` glob 금지 — keep=3 GC 로 구버전이 공존한다).
-커널 어댑터 `backtest_engine.adapters.equity_duckdb.resolve_table` 과 같은 규약이지만 패키지 경계
-(`.claude/rules/backend-package-boundary.md`: 커널 접근은 `adapters/outbound/backtest_engine` 만)
-때문에 import 하지 않고 여기서 다시 쓴다. `snapshot_id` 규칙은 `equity.catalog.snapshot_id`
-(전 테이블 `table=build` 정렬 해시 16자리)와 같아야 카탈로그 meta 와 대조할 수 있다. 이 값은
-원장 판이고, 어댑터가 뒤에 필드 계약 판을 붙여 워크벤치 데이터 스냅샷 id 를 만든다(#235).
+규약의 정본은 원장(`database/src/equity`)이지만 backend 는 그 패키지를 import 하지 않아 여기서 다시
+쓴다. `snapshot_id` 규칙은 `equity.catalog.snapshot_id`(전 테이블 `table=build` 정렬 해시
+16자리)와 같아야 카탈로그 meta 와 대조할 수 있다 — 갈리면 카탈로그가 낡은 것으로 보여 백테스트
+데이터를 거절하고, 원장 소비자 계약 EG-C 가 서버 빌드마다 이 어댑터로 그 대조를 밟는다(#372). 이
+값은 원장 판이고, 어댑터가 뒤에 필드 계약 판을 붙여 워크벤치 데이터 스냅샷 id 를 만든다(#235).
 
 여기서 나는 예외는 전부 환경·설정 오류(빌드 안 된 테이블, 깨진 MANIFEST)다 — 질의 시점의 도메인
 실패(데이터 없음 등)는 어댑터가 포트 결과 값으로 돌려준다.

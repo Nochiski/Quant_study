@@ -220,5 +220,22 @@ test(
     ).toContainText("/schema_version");
     await expect(banner).toHaveCount(0);
     await expect(save(page)).toBeDisabled();
+
+    // 새 형식에 없는 저장 팩터 참조 노드가 있는 옛 문서도 업그레이더가 거절한다. 배너 대신 그 노드를
+    // 지우거나 옮겨 적으라고 말한다(#357 C-P3-10).
+    await replaceSource(
+      page,
+      v11.replace(
+        "      nodes:\n",
+        "      nodes:\n        - kind: saved_factor\n          node_id: saved\n",
+      ),
+    );
+    await expectPhase(page, "구조 오류");
+    await expect(
+      row(
+        "저장한 팩터·부분 그래프를 참조하는 노드는 새 형식에 없어 업그레이드할 수 없습니다.",
+      ),
+    ).toContainText("/schema_version");
+    await expect(banner).toHaveCount(0);
   },
 );

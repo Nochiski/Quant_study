@@ -194,8 +194,9 @@ REFERENCE_KIND = "reference"
 # NULL). 옛 판 루트(e1.5.0 등)에는 컬럼 자체가 없고 그때는 전 행이 확정이다.
 BASIS_COLUMN = "basis"
 CONFIRMED_BASIS = "krx"
-# adj_factor.event_type → 커널 CorporateActionType 값 (S07 `EVENT_TYPE_MAP` 과 같은 판단: ok 행은
-# 전부 시총 불변이라 주식수 증가는 split, 감소는 reverse_split 로 보내 수량이 조정되게 한다)
+# adj_factor.event_type → 커널 CorporateActionType 값. ok 행은 전부 시총 불변이라 주식수 증가는
+# split, 감소는 reverse_split 로 보내 수량이 조정되게 한다. 원장 소비자 계약 EG-C ④
+# (`database/src/equity/contract.py`)가 서버 빌드마다 이 어댑터의 사건을 `adj_factor` 와 대조한다.
 EVENT_TYPE_MAP: dict[str, str] = {
     "split": "split",
     "bonus": "split",
@@ -203,9 +204,9 @@ EVENT_TYPE_MAP: dict[str, str] = {
     "capred": "reverse_split",
 }
 # S06-2 의 KRX 기준가 원천이 만든 사건 — `corp_event` 에 없어 유형을 모른다(기준가 변화 + 같은 날
-# 주식수 변화, 시총 불변). 방향은 share_factor 가 정한다: > 1 → split, < 1 → reverse_split.
-# 엔진 어댑터(`backtest_engine/adapters/equity_duckdb.py::RATIO_DIRECTED_EVENT_TYPES`)와 **같은
-# 어휘를 써야 한다** — 한쪽만 알면 같은 데이터로 한쪽에서만 run 이 죽는다(서버 factor_ok 55행).
+# 주식수 변화, 시총 불변). 방향은 share_factor 가 정한다: > 1 → split, < 1 → reverse_split
+# (서버 factor_ok 55행). 어휘 밖 ok 행은 run 을 멈추므로 원장이 새 유형을 내면 EG-C ④ 가 먼저
+# 잡는다.
 # `unknown_price_only`(기준가만 변화)는 항상 factor_ok=false 라 여기 오지 않고, ok 로 실려 오면
 # 어휘 밖이 맞다 — 시총 불변이 아닌 사건을 분할로 적용하면 안 된다.
 RATIO_DIRECTED_EVENT_TYPES: frozenset[str] = frozenset({"unknown_krx"})
@@ -1435,8 +1436,7 @@ class EquityDuckdbAdapter:
         for ticker, raw_date, open_, high, low, close, volume, value, kind, basis in price_rows:
             session = _as_date(raw_date, "price_daily.date")
             if basis is not None and str(basis) != CONFIRMED_BASIS:
-                # 저녁 잠정 행 — 확정 전 키움 종가라 bar 로 내보내지 않는다(엔진 어댑터
-                # `backtest_engine/adapters/equity_duckdb.py` 와 같은 판단). 구간 루프 **밖**에서
+                # 저녁 잠정 행 — 확정 전 키움 종가라 bar 로 내보내지 않는다. 구간 루프 **밖**에서
                 # 세는 이유: `security_span` 은 KRX 축(stg_listing_daily)이라 저녁 판에서도 D 에
                 # 멈춰 T 행이 아래 구간 필터에 조용히 걸린다 — 안에서 세면 건수가 0 이 된다.
                 n_provisional += 1

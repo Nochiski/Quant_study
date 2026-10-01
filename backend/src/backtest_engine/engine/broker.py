@@ -373,4 +373,5 @@ class BrokerSim:
             price=quote.price,
             fee=self.fee_for(notional),
             slippage_per_share=quote.slippage_per_share,
+            cap_volume=bar.cap_volume,
         )

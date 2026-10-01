@@ -5,11 +5,12 @@
  */
 import { t } from "../../../shared/config";
 import { findReferences, type DocumentReference } from "./document-references";
-import type {
-  FormControl,
-  FormField,
-  FormListItem,
-  FormSection,
+import {
+  identityKeyOf,
+  type FormControl,
+  type FormField,
+  type FormListItem,
+  type FormSection,
 } from "./form-projection";
 import {
   materializeSchemaValue,
@@ -203,12 +204,38 @@ export const addItemOperation = (
   }
   if (node === null) return null;
   try {
-    return appendOperation(section, materializeSchemaValue(schema, node));
+    return appendOperation(
+      section,
+      seedIdentity(schema, node, section, materializeSchemaValue(schema, node)),
+    );
   } catch (error) {
     if (error instanceof UnsupportedSchemaShape) return null;
     throw error;
   }
 };
+
+/**
+ * 새 항목의 identity 씨앗(WORKFLOW P4-03): 스키마 `x-authoring-identity` 필드가 비었으면 `<네임스페이스>_<n>`
+ * (목록에 없는 가장 작은 n, `factor_1`)을 넣는다. 네임스페이스는 identity 키에서 온다(`factor_id` → `factor`,
+ * 삭제 가드와 같은 규칙). 빈 id 는 compile 이 곧바로 거절해 새 항목 하나가 문서 전체를 막았다.
+ */
+const seedIdentity = (
+  schema: JsonSchema,
+  node: JsonSchema,
+  section: ListSection,
+  value: unknown,
+): unknown => {
+  const key = identityKeyOf(schema, node);
+  if (key === null || !isRecord(value) || value[key] !== "") return value;
+  const namespace = key.slice(0, -"_id".length);
+  const taken = new Set(section.items.map((item) => identityOf(item, key)));
+  let n = 1;
+  while (taken.has(`${namespace}_${n}`)) n += 1;
+  return { ...value, [key]: `${namespace}_${n}` };
+};
+
+const identityOf = (item: FormListItem, key: string | null): unknown =>
+  item.fields.find((field) => field.key === key)?.value;
 
 /** 미리 만든 값(팩터 카탈로그 preset 등)을 항목으로 추가. */
 export const addPresetItemOperation = (
@@ -278,15 +305,63 @@ export const removalBlockers = (
         writtenString(field),
     );
   if (identity === undefined) return [];
-  const namespace = identity.key.slice(0, -"_id".length);
+  return identityReferences(tree, item, identity.key, identity.value as string);
+};
+
+/** `key`(`<namespace>_id`) 값 `id` 를 항목 밖에서 참조하는 자리. 스코프 규칙(`REFERENCE_SCOPES`)을 탄다. */
+const identityReferences = (
+  tree: unknown,
+  item: FormListItem,
+  key: string,
+  id: string,
+): DocumentReference[] => {
+  const namespace = key.slice(0, -"_id".length);
   const within = REFERENCE_SCOPES[namespace]?.(item.pointer) ?? null;
   return findReferences(
     tree,
     namespace,
-    identity.value as string,
+    id,
     item.pointer,
     within === null ? {} : { within },
   );
+};
+
+/**
+ * 목록 항목 identity(`factor_id`·`parameter_id`) 변경(WORKFLOW P4-03 결정 1, Graph `renameNode` 와 같은 모양).
+ * 빈 값이나 같은 목록 다른 항목의 id 면 거부하고, 아니면 정의 자리와 문서의 참조를 함께 바꾸는 연산 목록이다 —
+ * 훅이 한 트랜잭션(undo 1회)으로 합친다. 예전 Form identity 행은 정의만 바꿔 참조(`risk_factor_id` 등)가 끊겼다.
+ */
+export const renameIdentity = (
+  tree: unknown,
+  section: ListSection,
+  item: FormListItem,
+  nextId: string,
+): SourceOperation[] | { invalid: "emptyIdentity" | "duplicateIdentity" } => {
+  const field = item.fields.find(({ key }) => key === item.identityKey);
+  if (field === undefined) return [];
+  if (nextId === "") return { invalid: "emptyIdentity" };
+  if (
+    section.items.some(
+      (other) =>
+        other.pointer !== item.pointer &&
+        identityOf(other, field.key) === nextId,
+    )
+  )
+    return { invalid: "duplicateIdentity" };
+  const definition = fieldOperation(itemSection(section, item), field, nextId);
+  const current = typeof field.value === "string" ? field.value : "";
+  if (!field.written || current === "" || current === nextId)
+    return [definition];
+  return [
+    definition,
+    ...identityReferences(tree, item, field.key, current).map(
+      (reference): SourceOperation => ({
+        kind: "replace-scalar",
+        pointer: reference.pointer,
+        value: nextId,
+      }),
+    ),
+  ];
 };
 
 export const removeItemOperation = (item: FormListItem): SourceOperation => ({

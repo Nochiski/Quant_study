@@ -200,11 +200,14 @@ export const fieldText = (
   );
 };
 
-/** 조각 자리 `{<키>}`·`{<키>.percent}`: 같은 카드 필드의 글자(`.percent`는 비율을 %로). */
-const PLACEHOLDER = /\{([a-z_]+)(\.percent)?\}/g;
+/**
+ * 조각 자리 `{<키>}`·`{<키>.percent}`·`{<키>.slider}`: 같은 카드 필드의 글자(`.percent` 는 요약에서 비율을 %로)
+ * 또는 컨트롤(`.slider` 는 카드에서 숫자 칸 옆에 끄는 막대를 둔다, WORKFLOW P4-03 결정 2).
+ */
+const PLACEHOLDER = /\{([a-z_]+)(\.percent|\.slider)?\}/g;
 
 /** 문장 틀 조각: 글자, 또는 같은 카드 필드의 자리. 카드 문장은 자리에 그 필드의 컨트롤을 넣는다(P4-02). */
-export type SentencePiece = { text: string } | { key: string };
+export type SentencePiece = { text: string } | { key: string; slider: boolean };
 
 /** 틀을 글자와 자리로 나눈다. 자리 규칙은 요약 조각과 같다(`.percent` 는 요약 표시 지시라 카드에선 뜻이 없다). */
 export const sentencePieces = (template: string): SentencePiece[] => {
@@ -213,7 +216,7 @@ export const sentencePieces = (template: string): SentencePiece[] => {
   for (const match of template.matchAll(PLACEHOLDER)) {
     if (match.index > last)
       pieces.push({ text: template.slice(last, match.index) });
-    pieces.push({ key: match[1]! });
+    pieces.push({ key: match[1]!, slider: match[2] === ".slider" });
     last = match.index + match[0].length;
   }
   if (last < template.length) pieces.push({ text: template.slice(last) });
@@ -294,12 +297,12 @@ export const fieldFragment = (
   let missing = false;
   const filled = template.replace(
     PLACEHOLDER,
-    (_, name: string, percent?: string) => {
+    (_, name: string, suffix?: string) => {
       const source = card.find((sibling) => sibling.key === name);
       const text =
         source === undefined
           ? null
-          : fieldText(source, card, names, percent !== undefined);
+          : fieldText(source, card, names, suffix === ".percent");
       missing ||= text === null;
       return text ?? "";
     },
@@ -331,6 +334,26 @@ export const pipelineNames = (
       return item === undefined ? null : itemName(item);
     },
   };
+};
+
+/**
+ * 문서 자리(pointer)의 화면 이름: 그 필드를 담은 섹션·항목 이름과 필드 이름("리스크 제약 · 위험 팩터"). 캔버스의
+ * 삭제 거부 문장이 pointer 대신 쓴다(WORKFLOW P4-03 결정 3). 이름을 하나도 모르면 pointer 그대로다.
+ */
+export const placeName = (
+  schema: JsonSchema,
+  tree: unknown,
+  pointer: string,
+): string => {
+  const nameAt = (at: string): string | null => {
+    const node = schemaAt(schema, at, tree)?.node;
+    return node === undefined ? null : tName(schemaFacts(node).descriptionKey);
+  };
+  const parts = [
+    nameAt(pointer.slice(0, pointer.lastIndexOf("/"))),
+    nameAt(pointer),
+  ].filter((part): part is string => part !== null);
+  return parts.length === 0 ? pointer : parts.join(" · ");
 };
 
 /**

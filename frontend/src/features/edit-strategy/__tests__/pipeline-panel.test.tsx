@@ -3,7 +3,13 @@
  * `ideas/*.yaml` 이고, 캔버스가 내는 연산은 Form 과 같은 것(`fieldOperation`·`resetOperation`·`unsetOperation`·
  * `listAddition`·`removeItemOperation`)이어야 한다.
  */
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -106,6 +112,16 @@ const objectSection = (sections: FormSection[], key: string): ObjectSection => {
   return found;
 };
 
+const objectFactors = (source: string): FormListSection => {
+  const found = projectForm(
+    SCHEMA,
+    parseSource(source, "yaml"),
+    [],
+  ).sections.find((section) => section.key === "factors");
+  if (found === undefined || found.kind !== "list") throw new Error("factors");
+  return found;
+};
+
 const rulesOf = (source: string): FormListSection =>
   objectSection(
     projectForm(SCHEMA, parseSource(source, "yaml"), []).sections,
@@ -171,7 +187,7 @@ describe("PipelinePanel", () => {
     );
   });
 
-  it("규칙은 문장 카드, 팩터는 이름과 그래프 열기로 보이고 YAML 식별자는 보이지 않는다", async () => {
+  it("규칙과 팩터는 문장 카드이고, 팩터 카드는 이름·방향·가중치·레시피 줄로 보이며 YAML 식별자는 없다", async () => {
     const user = userEvent.setup();
     const { container, onOpenGraph } = renderPanel(idea("low_pbr_high_roe"));
 
@@ -182,15 +198,127 @@ describe("PipelinePanel", () => {
       within(rule).getByRole("combobox", { name: "비교 방식" }),
     ).toHaveValue("gt");
 
+    // 팩터 카드(WORKFLOW P4-03): 이름은 `label` 을 편집하고 `factor_id` 칸은 없다(결정 1).
     const factors = screen.getByRole("group", { name: "알파 팩터" });
-    expect(within(factors).getByText("PBR")).toBeInTheDocument();
+    const pbr = within(factors).getByRole("group", { name: "PBR" });
+    expect(within(pbr).getByRole("textbox", { name: "표시 이름" })).toHaveValue(
+      "PBR",
+    );
+    expect(
+      within(pbr).getByRole("combobox", { name: "선호 방향" }),
+    ).toHaveDisplayValue("작을수록 좋음");
+    expect(within(pbr).getByRole("slider", { name: "가중치" })).toHaveValue(
+      "1",
+    );
+    expect(
+      within(pbr).getByRole("spinbutton", { name: "가중치" }),
+    ).toBeInTheDocument();
+    expect(
+      within(pbr).queryByRole("textbox", { name: "팩터 이름" }),
+    ).toBeNull();
+    expect(pbr).toHaveTextContent(/→/);
     await user.click(
-      within(factors).getByRole("button", { name: "ROE · Graph에서 열기" }),
+      within(factors).getByRole("button", { name: "ROE · 레시피 열기" }),
     );
     expect(onOpenGraph).toHaveBeenCalledWith("/factors/1/graph");
 
     // P4-04 의 "파이프라인 수준 DOM 에 식별자 0개" e2e 단언의 선행 가드.
     expect(container.textContent).not.toMatch(/_id|_node|kind:/);
+  });
+
+  it("가중치 막대는 끄는 동안 숫자 칸만 따라가고 뗄 때 한 번 확정한다 (결정 2)", () => {
+    const { transactions } = renderPanel(idea("low_pbr_high_roe"));
+    const pbr = within(
+      within(screen.getByRole("group", { name: "알파 팩터" })).getByRole(
+        "group",
+        { name: "PBR" },
+      ),
+    );
+    const slider = pbr.getByRole("slider", { name: "가중치" });
+    // 스키마에 범위가 없는 칸이라 하한 0·상한 3·단계 0.1 은 표시 전용 값이다.
+    expect(slider).toHaveAttribute("min", "0");
+    expect(slider).toHaveAttribute("max", "3");
+    expect(slider).toHaveAttribute("step", "0.1");
+
+    fireEvent.change(slider, { target: { value: "1.5" } });
+    fireEvent.change(slider, { target: { value: "2" } });
+    expect(pbr.getByRole("spinbutton", { name: "가중치" })).toHaveValue(2);
+    expect(transactions.apply).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(slider);
+    fireEvent.blur(slider);
+    expect(transactions.apply).toHaveBeenCalledTimes(1);
+    expect(transactions.apply).toHaveBeenCalledWith(
+      {
+        kind: "insert-key",
+        parentPointer: "/factors/0",
+        key: "weight",
+        value: 2,
+      },
+      "가중치",
+      "pipeline",
+      NO_FOCUS,
+    );
+  });
+
+  it("팩터 추가는 factor_<n> 씨앗으로 빈 레시피를 넣고, 빈 레시피 카드는 backend 문장을 보인다", async () => {
+    const user = userEvent.setup();
+    const empty = `${idea("low_pbr_high_roe")}`.replace(
+      "factors:\n",
+      "factors:\n  - factor_id: factor_1\n    direction: high\n    graph: { nodes: [], output_node_id: '' }\n",
+    );
+    const { transactions } = renderPanel(empty, {
+      diagnostics: [
+        {
+          ...diagnostic("/factors/0/graph/nodes", "첫 단계를 추가하세요."),
+          code: "strategy.expression.empty",
+        },
+      ],
+    });
+    const factors = screen.getByRole("group", { name: "알파 팩터" });
+    // 이름이 없는 팩터의 카드 이름은 backend 가 채울 이름(`factor_id`)이다 — 입력 칸의 자리표시로만 보인다.
+    const fresh = within(factors).getByRole("group", { name: "factor_1" });
+    expect(fresh).toHaveTextContent("첫 단계를 추가하세요.");
+    expect(
+      within(fresh).getByRole("textbox", { name: "표시 이름" }),
+    ).toHaveAttribute("placeholder", "factor_1");
+
+    await user.click(
+      within(factors).getByRole("button", { name: "알파 팩터 · 항목 추가" }),
+    );
+    const list = objectFactors(empty);
+    expect(transactions.apply).toHaveBeenCalledWith(
+      listAddition(SCHEMA, list, null, false).operation,
+      "알파 팩터",
+      "pipeline",
+      NO_FOCUS,
+    );
+    expect(listAddition(SCHEMA, list, null, false).operation).toMatchObject({
+      value: {
+        factor_id: "factor_2",
+        graph: { nodes: [], output_node_id: "" },
+      },
+    });
+  });
+
+  it("팩터 카드 삭제 거부는 참조 자리를 pointer 대신 이름으로 말한다 (결정 3)", async () => {
+    const user = userEvent.setup();
+    const { transactions } = renderPanel(idea("inverse_volatility"));
+    const factors = screen.getByRole("group", { name: "알파 팩터" });
+
+    await user.click(
+      within(factors).getByRole("button", { name: "60일 변동성 · 삭제" }),
+    );
+
+    expect(transactions.apply).not.toHaveBeenCalled();
+    const alert = within(factors).getByRole("alert");
+    expect(alert).toHaveTextContent(
+      t("graph.pipeline.removeBlocked").replace(
+        "{places}",
+        "리스크 제약 · 위험 팩터",
+      ),
+    );
+    expect(alert).not.toHaveTextContent("/risk");
   });
 
   it("카탈로그·참조 선택지는 식별자 대신 요약과 같은 이름을 보인다", () => {
@@ -217,7 +345,7 @@ describe("PipelinePanel", () => {
     expect(source).not.toHaveTextContent(/momentum_12_1|volatility_60/);
   });
 
-  it("팩터 이름 카드는 자기 필드의 진단만 보이고 그래프 안 진단은 아래 고급 편집기에 맡긴다", () => {
+  it("팩터 카드는 자기 필드의 진단을 본문으로, 그래프 안 진단은 수 배지로만 보인다 (결정 7)", () => {
     renderPanel(idea("low_pbr_high_roe"), {
       diagnostics: [
         diagnostic("/factors/0/graph/nodes/0", "노드 문장"),
@@ -229,6 +357,9 @@ describe("PipelinePanel", () => {
     ).getByRole("group", { name: "PBR" });
     expect(factor).toHaveTextContent("가중치 문장");
     expect(factor).not.toHaveTextContent("노드 문장");
+    expect(factor).toHaveTextContent(
+      t("form.badge.error").replace("{count}", "1"),
+    );
   });
 
   it("비중 카드의 위험 필드는 카드 앵커(portfolio)가 아니라 자기 섹션(risk)으로 확정한다", async () => {

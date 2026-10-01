@@ -34,6 +34,7 @@ import {
   itemSection,
   listAddition,
   parseDraft,
+  renameIdentity,
   resetOperation,
   unsetOperation,
   type InvalidDraft,
@@ -223,7 +224,7 @@ const FormSectionView = ({
             {` · ${t("form.section.omitted")}`}
           </span>
         )}
-        {severityBadge(section)}
+        <SeverityBadge diagnostics={section.diagnostics} />
       </legend>
       <DiagnosticNotes id={notesId} diagnostics={section.diagnostics} />
       <div hidden={!open}>
@@ -376,7 +377,7 @@ const FormListSectionView = ({
         <span className="strategy-form__hint">
           {` · ${t("form.list.count").replace("{count}", String(section.items.length))}`}
         </span>
-        {severityBadge(section)}
+        <SeverityBadge diagnostics={section.diagnostics} />
       </legend>
       <DiagnosticNotes id={notesId} diagnostics={section.diagnostics} />
       <div hidden={!open}>
@@ -493,6 +494,11 @@ const FormListItemView = ({
   const graphField = item.fields.find(
     (field) => field.control.kind === "graph-link",
   );
+  // identity 확정은 rename 이다: 정의와 문서의 참조를 한 트랜잭션으로 바꾼다(WORKFLOW P4-03 결정 1).
+  const planIdentity: CommitPlanner = (field, value) =>
+    field.key === item.identityKey
+      ? renameIdentity(tree, section, item, draftOf(value))
+      : null;
   const selected = coversPointer(item.pointer, selectedPointer);
   return (
     <section
@@ -504,7 +510,7 @@ const FormListItemView = ({
         <strong>
           <code>{item.summary}</code>
         </strong>
-        {severityBadge(item)}
+        <SeverityBadge diagnostics={item.diagnostics} />
         {item.branches !== null ? (
           <span className="strategy-form__hint">
             {t("form.list.branchNeeded").replace(
@@ -533,10 +539,13 @@ const FormListItemView = ({
           {t("form.list.remove")}
         </Button>
       </header>
-      {/* Graph 노드 삭제 거부는 노드 표시 이름으로 말하지만(P1-04) 여기는 pointer 그대로다(`useItemRemoval`). */}
+      {/* Form 삭제 거부는 P4-04 까지 pointer 그대로다. 캔버스는 스키마 사실로 자리 이름을 쓴다(WORKFLOW P4-03 결정 3). */}
       {blocked !== null ? (
         <p className="strategy-form__invalid" role="alert">
-          {blocked}
+          {t("form.list.blocked").replace(
+            "{pointers}",
+            blocked.map((reference) => reference.pointer).join(", "),
+          )}
         </p>
       ) : null}
       <DiagnosticNotes id={notesId} diagnostics={item.diagnostics} />
@@ -547,6 +556,7 @@ const FormListItemView = ({
           field={field}
           transactions={transactions}
           catalogs={catalogs}
+          planCommit={planIdentity}
           selectedPointer={selectedPointer}
         />
       ))}
@@ -558,11 +568,13 @@ const FormListItemView = ({
  * 개수 배지. 본문은 `DiagnosticNotes`가 카드·필드 옆에 인라인으로 보인다 — 예전에는 첫 메시지를
  * `title`에만 담아 hover 없는 입력(키보드·터치·스크린리더)에서 원인을 읽을 수 없었다(WORKFLOW P1-04).
  */
-const severityBadge = (owner: {
+export const SeverityBadge = ({
+  diagnostics,
+}: {
   diagnostics: DocumentDiagnostic[];
 }): ReactNode => {
-  const errors = owner.diagnostics.filter((d) => d.severity === "error");
-  const warnings = owner.diagnostics.filter((d) => d.severity === "warning");
+  const errors = diagnostics.filter((d) => d.severity === "error");
+  const warnings = diagnostics.filter((d) => d.severity === "warning");
   if (errors.length === 0 && warnings.length === 0) return null;
   return (
     <Badge tone={errors.length > 0 ? "error" : "warn"}>
@@ -867,7 +879,7 @@ const FormFieldRow = ({
           transactions={transactions}
           owner={owner}
         />
-        {severityBadge(field)}
+        <SeverityBadge diagnostics={field.diagnostics} />
       </div>
       {invalid !== null ? (
         <p id={invalidId} className="strategy-form__invalid" role="alert">
@@ -927,7 +939,12 @@ type ControlProps = {
   onCommit: (value: Scalar) => boolean;
   onValid: () => void;
   onInvalid: (reason: InvalidDraft) => void;
+  /** 숫자 칸 옆 끄는 막대(캔버스 카드). 확정은 끌기를 마칠 때 한 번이다 — 끄는 동안은 입력 칸만 따라간다. */
+  slider?: SliderRange;
 };
+
+/** 막대의 표시 범위. 값 검증은 여전히 컨트롤 규칙(`parseDraft`)과 backend 몫이다. */
+export type SliderRange = { min: number; max: number; step: number };
 
 /** 컨트롤별 커밋 규칙: 텍스트류는 blur/Enter에서 바뀐 값만, 선택류는 변경 즉시. Escape는 입력 취소. */
 export const FieldControl = (props: ControlProps) => {
@@ -1046,6 +1063,7 @@ const TextualControl = ({
   onCommit,
   onValid,
   onInvalid,
+  slider,
 }: ControlProps) => {
   const committed = draftOf(field.value);
   const [draft, setDraft] = useState(committed);
@@ -1110,7 +1128,11 @@ const TextualControl = ({
     }
   };
   const numeric = control.kind === "number";
-  return (
+  const edit = (value: string): void => {
+    setDraft(value);
+    setPristine(false);
+  };
+  const input = (
     <input
       id={id}
       aria-label={ariaLabel}
@@ -1124,12 +1146,30 @@ const TextualControl = ({
       placeholder={
         placeholderValue === undefined ? undefined : draftOf(placeholderValue)
       }
-      onChange={(event) => {
-        setDraft(event.target.value);
-        setPristine(false);
-      }}
+      onChange={(event) => edit(event.target.value)}
       onBlur={() => submit(false)}
       onKeyDown={onKeyDown}
     />
+  );
+  if (slider === undefined || !numeric) return input;
+  // 막대는 입력 칸과 같은 draft 를 움직이고, 끌기(포인터)나 키 조작을 마칠 때 한 번 확정한다(WORKFLOW P4-03 결정 2).
+  const shown = Number(draft === "" ? draftOf(placeholderValue) : draft);
+  return (
+    <>
+      <input
+        type="range"
+        aria-label={ariaLabel}
+        aria-describedby={describedBy}
+        min={slider.min}
+        max={slider.max}
+        step={slider.step}
+        value={Number.isFinite(shown) ? shown : slider.min}
+        onChange={(event) => edit(event.target.value)}
+        onPointerUp={() => submit(false)}
+        onKeyUp={() => submit(false)}
+        onBlur={() => submit(false)}
+      />
+      {input}
+    </>
   );
 };

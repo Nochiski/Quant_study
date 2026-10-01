@@ -12,6 +12,7 @@ import { t, tDescription, tName, tOptional } from "../../../shared/config";
 import { Badge, Button } from "../../../shared/ui";
 import {
   catalogProfiles,
+  type FormField,
   type FormListItem,
   type FormListSection,
 } from "../model/form-projection";
@@ -21,6 +22,7 @@ import {
   cardTemplate,
   itemName,
   pipelineNames,
+  placeName,
   projectPipeline,
   sentencePieces,
   strategySummary,
@@ -30,6 +32,7 @@ import {
   type PipelineStage,
   type SummaryNames,
 } from "../model/pipeline-projection";
+import { recipeSummary } from "../model/recipe-projection";
 import type { JsonSchema } from "../model/schema-navigator";
 import {
   NO_FOCUS,
@@ -43,7 +46,9 @@ import {
   DiagnosticNotes,
   FieldActions,
   FieldControl,
+  SeverityBadge,
   type FormCatalogs,
+  type SliderRange,
 } from "./strategy-form-panel";
 import { TransactionFeedbackNote } from "./transaction-feedback";
 import "./pipeline-panel.css";
@@ -252,8 +257,7 @@ const ExecutionGuide = ({
 };
 
 /**
- * 목록. 문장 틀(`<목록 설명 키>.card`)이 있는 목록(규칙)은 항목을 문장 카드로 그리고 추가·삭제를 둔다. 없는
- * 목록(팩터 — 카드·추가는 P4-03)은 항목 이름과 "그래프에서 열기"만 보인다.
+ * 목록(규칙·팩터). 항목은 문장 카드(틀 `<목록 설명 키>.card`)이고 추가·삭제는 Form 목록과 같은 연산이다.
  */
 const StageList = ({
   list,
@@ -265,13 +269,13 @@ const StageList = ({
   const notesId = useId();
   const addReasonId = `${notesId}-add`;
   const title = tName(list.descriptionKey) ?? "";
-  const sentences =
-    list.descriptionKey !== null &&
-    tOptional(`${list.descriptionKey}.card`) !== null;
-  // 규칙 항목은 union 이 아니라 `kind` 가 없다. union 목록(팩터)은 문장 목록이 아니다.
-  const addition = sentences
-    ? listAddition(context.schema, list, null, context.transactions.settling)
-    : null;
+  // 캔버스 목록(규칙·팩터) 항목은 union 이 아니라 `kind` 가 없다.
+  const addition = listAddition(
+    context.schema,
+    list,
+    null,
+    context.transactions.settling,
+  );
   return (
     <div
       role="group"
@@ -288,55 +292,51 @@ const StageList = ({
       {list.items.length === 0 ? (
         <p className="pipeline__hint">{t("form.list.empty")}</p>
       ) : null}
-      {list.items.map((item, index) =>
-        sentences ? (
-          <ListItemCard
-            key={item.pointer}
-            list={list}
-            item={item}
-            label={t("graph.pipeline.item").replace(
-              "{index}",
-              String(index + 1),
-            )}
-            context={context}
-          />
-        ) : (
-          <NamedItem key={item.pointer} item={item} context={context} />
-        ),
-      )}
-      {addition !== null ? (
-        <div className="pipeline__actions">
-          <Button
-            size="small"
-            disabled={addition.blocked !== null}
-            aria-describedby={
-              addition.blocked === null ? undefined : addReasonId
-            }
-            onClick={() => {
-              if (addition.operation !== null)
-                context.transactions.apply(
-                  addition.operation,
-                  title,
-                  PIPELINE_OWNER,
-                  NO_FOCUS,
-                );
-            }}
-            aria-label={`${title} · ${t("form.list.add")}`}
-          >
-            {t("form.list.add")}
-          </Button>
-          {addition.blocked === null ? null : (
-            <span id={addReasonId} className="pipeline__hint">
-              {addition.blocked}
-            </span>
-          )}
-        </div>
-      ) : null}
+      {list.items.map((item, index) => (
+        <ListItemCard
+          key={item.pointer}
+          list={list}
+          item={item}
+          label={
+            itemName(item) ??
+            t("graph.pipeline.item").replace("{index}", String(index + 1))
+          }
+          context={context}
+        />
+      ))}
+      <div className="pipeline__actions">
+        <Button
+          size="small"
+          disabled={addition.blocked !== null}
+          aria-describedby={addition.blocked === null ? undefined : addReasonId}
+          onClick={() => {
+            if (addition.operation !== null)
+              context.transactions.apply(
+                addition.operation,
+                title,
+                PIPELINE_OWNER,
+                NO_FOCUS,
+              );
+          }}
+          aria-label={`${title} · ${t("form.list.add")}`}
+        >
+          {t("form.list.add")}
+        </Button>
+        {addition.blocked === null ? null : (
+          <span id={addReasonId} className="pipeline__hint">
+            {addition.blocked}
+          </span>
+        )}
+      </div>
     </div>
   );
 };
 
-/** 문장 목록의 항목 카드: 항목 필드로 문장을 채우고 삭제를 둔다(Form 항목과 같은 `useItemRemoval`). */
+/**
+ * 목록 항목 카드: 항목 필드로 문장을 채우고 삭제를 둔다(Form 항목과 같은 `useItemRemoval`). identity(`factor_id`)는
+ * YAML 식별자라 카드에 두지 않는다 — 이름은 `label` 이 맡고 rename 은 Form·YAML 몫이다(WORKFLOW P4-03 결정 1).
+ * 팩터의 계산 그래프는 레시피 줄(`RecipeLine`)로 보인다. 삭제 거부는 참조 자리를 이름으로 말한다(결정 3).
+ */
 const ListItemCard = ({
   list,
   item,
@@ -356,15 +356,26 @@ const ListItemCard = ({
     label,
   );
   const section = itemSection(list, item);
+  const graph = item.fields.find(
+    (field) => field.control.kind === "graph-link",
+  );
+  const identity = item.fields.find((field) => field.key === item.identityKey);
+  const shown = item.fields.filter(
+    (field) => field !== graph && field !== identity,
+  );
   return (
     <SentenceCard
       label={label}
-      rows={item.fields.map((field) => ({ field, section }))}
+      rows={shown.map((field) => ({ field, section }))}
       template={cardTemplate(item.fields, list.descriptionKey)}
       context={context}
-      notes={item.diagnostics}
+      // 칸이 없는 identity 의 진단은 카드 본문으로 남긴다.
+      notes={[...item.diagnostics, ...(identity?.diagnostics ?? [])]}
       owner={item.pointer}
     >
+      {graph === undefined ? null : (
+        <RecipeLine item={item} graph={graph} label={label} context={context} />
+      )}
       <div className="pipeline__actions">
         <Button
           size="small"
@@ -378,59 +389,64 @@ const ListItemCard = ({
       </div>
       {blocked === null ? null : (
         <p className="strategy-form__invalid" role="alert">
-          {blocked}
+          {t("graph.pipeline.removeBlocked").replace(
+            "{places}",
+            [
+              ...new Set(
+                blocked.map((reference) =>
+                  placeName(context.schema, context.tree, reference.pointer),
+                ),
+              ),
+            ].join(", "),
+          )}
         </p>
       )}
     </SentenceCard>
   );
 };
 
-const NamedItem = ({
+/**
+ * 팩터 카드의 레시피 줄: 계산 그래프 요약 문장(`recipeSummary`)과 "레시피 열기"(P5 전까지 고급 편집기). 그래프 안
+ * 진단은 수 배지만 두고 본문은 고급 편집기가 노드에 붙인다(결정 7). 단계가 없는 그래프는 요약 대신 backend
+ * 진단 문장("첫 단계를 추가하세요.")을 그대로 보인다.
+ */
+const RecipeLine = ({
   item,
+  graph,
+  label,
   context,
 }: {
   item: FormListItem;
+  graph: FormField;
+  label: string;
   context: CardContext;
 }) => {
   const notesId = useId();
-  const name = itemName(item) ?? t("graph.pipeline.unnamed");
-  const graph = item.fields.find(
-    (field) => field.control.kind === "graph-link",
+  const summary = recipeSummary(
+    context.schema,
+    context.tree,
+    item.pointer,
+    context.names.catalog,
   );
   return (
-    <div
-      role="group"
-      aria-label={name}
-      className="pipeline__card"
-      aria-current={
-        coversPointer(item.pointer, context.selectedPointer)
-          ? "true"
-          : undefined
-      }
-    >
-      <p className="pipeline__sentence">
-        <strong>{name}</strong>
-      </p>
-      {graph !== undefined && context.onOpenGraph !== undefined ? (
+    <div className="pipeline__actions">
+      {summary === null ? (
+        <DiagnosticNotes id={notesId} diagnostics={graph.diagnostics} />
+      ) : (
+        <p className="pipeline__hint">
+          {summary} <SeverityBadge diagnostics={graph.diagnostics} />
+        </p>
+      )}
+      {context.onOpenGraph === undefined ? null : (
         <Button
           size="small"
           tone="ghost"
           onClick={() => context.onOpenGraph?.(graph.pointer)}
-          aria-label={`${name} · ${t("form.field.openGraph")}`}
+          aria-label={`${label} · ${t("graph.pipeline.openRecipe")}`}
         >
-          {t("form.field.openGraph")}
+          {t("graph.pipeline.openRecipe")}
         </Button>
-      ) : null}
-      {/* 그래프 안의 진단은 같은 탭 아래 고급 편집기가 노드 카드에 붙인다 — 여기서 다시 쓰지 않는다. */}
-      <DiagnosticNotes
-        id={notesId}
-        diagnostics={[
-          ...item.diagnostics,
-          ...item.fields
-            .filter((field) => field !== graph)
-            .flatMap((field) => field.diagnostics),
-        ]}
-      />
+      )}
     </div>
   );
 };
@@ -497,6 +513,7 @@ const SentenceCard = ({
                 row={byKey.get(piece.key)!}
                 notesId={notesIdOf(byKey.get(piece.key)!)}
                 context={context}
+                slider={piece.slider}
               />
             ) : null,
           )}
@@ -540,15 +557,31 @@ const SentenceCard = ({
   );
 };
 
+/**
+ * 캔버스 막대의 범위(WORKFLOW P4-03 결정 2): 스키마 범위가 있으면 그 값, 없으면 표시 전용 하한 0·상한 3이고 단계는
+ * 0.1(정수 칸은 1)이다. 범위 밖 값은 옆 숫자 칸으로 넣고, 값 검증은 스키마·backend 몫이다.
+ */
+const sliderRange = (control: FormField["control"]): SliderRange | undefined =>
+  control.kind !== "number"
+    ? undefined
+    : {
+        min: control.min?.value ?? 0,
+        max: control.max?.value ?? 3,
+        step: control.integer ? 1 : 0.1,
+      };
+
 /** 문장 안의 컨트롤 하나. 확정·무효 안내는 Form 행과 같은 훅이고, 이름은 `aria-label`(필드 이름)이다. */
 const InlineField = ({
   row,
   notesId,
   context,
+  slider = false,
 }: {
   row: PipelineRow;
   notesId: string;
   context: CardContext;
+  /** 틀 자리 `{<키>.slider}`: 숫자 칸 옆에 끄는 막대를 둔다. */
+  slider?: boolean;
 }) => {
   const id = useId();
   const invalidId = `${id}-invalid`;
@@ -585,6 +618,7 @@ const InlineField = ({
         field={field}
         catalogs={context.catalogs}
         names={context.names}
+        slider={slider ? sliderRange(field.control) : undefined}
         {...editing.control}
       />
       {field.applicable === false ? (

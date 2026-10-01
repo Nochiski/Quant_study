@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { FactorDefinition } from "../../../shared/api";
+import { t } from "../../../shared/config";
 import { parseSource } from "../../../shared/lib/yaml12";
 import { readBackendFixture } from "../../../shared/testing/backend-fixtures";
 import { buildCanonicalSnippetCatalog } from "../model/canonical-snippets";
@@ -132,15 +133,23 @@ describe("list transactions (P4-03)", () => {
     const factors = listSection(VERBOSE, "factors");
     expect(itemKinds(SCHEMA, factors)).toBeNull();
     const added = addItemOperation(SCHEMA, factors);
+    // identity(`x-authoring-identity`)는 빈 값 대신 목록에 없는 가장 작은 `factor_<n>` 이다(WORKFLOW P4-03).
     expect(added).toMatchObject({
       kind: "insert-item",
       parentPointer: "/factors",
       value: {
-        factor_id: "",
+        factor_id: "factor_1",
         direction: "high",
         weight: 1,
         graph: { nodes: [], output_node_id: "" },
       },
+    });
+    const taken = listSection(
+      VERBOSE.replace("factor_id: momentum", "factor_id: factor_1"),
+      "factors",
+    );
+    expect(addItemOperation(SCHEMA, taken)).toMatchObject({
+      value: { factor_id: "factor_2" },
     });
   });
 
@@ -630,6 +639,55 @@ describe("StrategyFormPanel list sections", () => {
     expect(transactions.apply).toHaveBeenLastCalledWith(
       { kind: "remove", pointer: "/factors/1" },
       "blend",
+      "form",
+      { focusEditor: false },
+    );
+  });
+
+  it("identity 행 확정은 문서의 참조까지 한 번에 바꾸는 rename 이고, 빈 값·중복은 거부한다 (WORKFLOW P4-03 결정 1)", async () => {
+    // 예전에는 `factor_id` 만 바꿔 `risk_factor_id` 가 없는 팩터를 가리켰다.
+    const user = userEvent.setup();
+    const transactions = stub();
+    const source = VERBOSE.replace(
+      "portfolio:\n",
+      "  - factor_id: blend\n    direction: high\n    graph:\n      nodes: []\n      output_node_id: \"\"\nportfolio:\n",
+    ).replace(
+      "  max_name_weight: 0.05\n",
+      "  max_name_weight: 0.05\n  risk_factor_id: momentum\n",
+    );
+    renderList(source, transactions);
+    const momentum = within(
+      screen.getByRole("region", { name: "factors · momentum" }),
+    );
+    const identity = momentum.getByRole("textbox", { name: /\bfactor_id/ });
+
+    for (const [typed, reason] of [
+      ["blend", "form.invalid.duplicateIdentity"],
+      ["", "form.invalid.emptyIdentity"],
+    ] as const) {
+      await user.clear(identity);
+      if (typed !== "") await user.type(identity, typed);
+      await user.keyboard("{Enter}");
+      expect(momentum.getByRole("alert")).toHaveTextContent(t(reason));
+    }
+    expect(transactions.apply).not.toHaveBeenCalled();
+
+    await user.clear(identity);
+    await user.type(identity, "mom{Enter}");
+    expect(transactions.apply).toHaveBeenCalledWith(
+      [
+        {
+          kind: "replace-scalar",
+          pointer: "/factors/0/factor_id",
+          value: "mom",
+        },
+        {
+          kind: "replace-scalar",
+          pointer: "/risk/risk_factor_id",
+          value: "mom",
+        },
+      ],
+      "factor_id",
       "form",
       { focusEditor: false },
     );

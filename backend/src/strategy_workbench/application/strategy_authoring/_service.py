@@ -64,13 +64,13 @@ from strategy_workbench.domain.strategy.facade.validation import (
 )
 
 from .ports.outgoing.document_codec import (
+    DiagnosticAnchor,
     DiagnosticKind,
     DiagnosticSeverity,
     DocumentCodecPort,
     ParsedDocument,
     SourceDiagnostic,
     SourceFormat,
-    SourceRange,
 )
 from .ports.outgoing.field_catalog import FieldCatalogPort
 
@@ -367,14 +367,7 @@ class StrategyAuthoringService:
         hydration = hydrate_strategy_document(parsed.tree, identity=DRAFT_IDENTITY)
         if not hydration.ok or hydration.spec is None:
             diagnostics = tuple(
-                SourceDiagnostic(
-                    code=issue.code,
-                    kind=DiagnosticKind.STRUCTURAL,
-                    pointer=issue.pointer,
-                    message=issue.message,
-                    severity=DiagnosticSeverity.ERROR,
-                    range=_structural_range(parsed, issue.code, issue.pointer),
-                )
+                _structural_diagnostic(parsed, issue.code, issue.pointer, issue.message)
                 for issue in hydration.issues
             )
             return _rejected(parsed, schema_version, diagnostics)
@@ -404,6 +397,7 @@ class StrategyAuthoringService:
                     if issue.severity is ValidationSeverity.ERROR
                     else DiagnosticSeverity.WARNING
                 ),
+                anchor=DiagnosticAnchor.VALUE,
                 node_id=issue.node_id,
             )
             for issue in validation.issues
@@ -441,11 +435,20 @@ def _rejected(
 _KEY_RANGE_CODES = frozenset({"structure.unknown_key", LEGACY_SHAPE_CODE})
 
 
-def _structural_range(parsed: ParsedDocument, code: str, pointer: str) -> SourceRange | None:
-    # An unknown key exists in the source: point at the key itself, not its value.
-    if code in _KEY_RANGE_CODES and pointer in parsed.key_ranges:
-        return parsed.key_ranges[pointer]
-    return parsed.locate(pointer)
+def _structural_diagnostic(
+    parsed: ParsedDocument, code: str, pointer: str, message: str
+) -> SourceDiagnostic:
+    anchor = DiagnosticAnchor.KEY if code in _KEY_RANGE_CODES else DiagnosticAnchor.VALUE
+    key_range = parsed.key_ranges.get(pointer) if anchor is DiagnosticAnchor.KEY else None
+    return SourceDiagnostic(
+        code=code,
+        kind=DiagnosticKind.STRUCTURAL,
+        pointer=pointer,
+        message=message,
+        severity=DiagnosticSeverity.ERROR,
+        range=key_range or parsed.locate(pointer),
+        anchor=anchor,
+    )
 
 
 def _environment_of(

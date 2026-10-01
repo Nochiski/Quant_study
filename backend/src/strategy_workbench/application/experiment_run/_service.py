@@ -207,6 +207,12 @@ class CapacityPoint:
     # (`ExecutionCosts`). 완료되지 않았거나 결과 파일을 읽을 수 없거나 체결·주문이 없으면 None.
     impact_cost_bps: float | None
     session_unfilled_ratio: float | None
+    # 체결 수량 ÷ 체결한 날의 유동성 캡 기준 거래량(거래량 가중 평균). 기준 거래량이 없는 옛 결과면
+    # None.
+    participation_rate: float | None
+    # 목표 금액 Δ 대비 1주 단위로 내려 못 산·못 판 금액 비율(`ExecutionCosts`). 기록이 없는 옛
+    # 결과면 None.
+    rounding_error: float | None
 
 
 @dataclass(frozen=True)
@@ -658,6 +664,8 @@ class ExperimentRunService:
             sharpe=None if run_id is None else scores.get(run_id),
             impact_cost_bps=None if costs is None else costs.impact_cost_bps,
             session_unfilled_ratio=None if costs is None else costs.session_unfilled_ratio,
+            participation_rate=None if costs is None else costs.participation_rate,
+            rounding_error=None if costs is None else costs.rounding_error,
         )
 
     def _open_windows(

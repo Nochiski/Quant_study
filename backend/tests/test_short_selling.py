@@ -60,6 +60,7 @@ def fill(side: Side, quantity: int, price: float, seq: int = 1, fee: float = 0.0
         price=price,
         fee=fee,
         slippage_per_share=0.0,
+        cap_volume=1_000,
     )
 
 

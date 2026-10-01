@@ -7,6 +7,7 @@ import { t, tOptional } from "../../../shared/config";
 import { useId, useRef } from "react";
 import {
   EXPLAINING_WARNING_CODES,
+  HIGHLIGHTED_METRIC_IDS,
   metricPlainCopy,
   metricUnavailableCopy,
 } from "../model/metric-copy";
@@ -222,16 +223,6 @@ export const BacktestRunDetail = ({
       .filter((item) => item.scope === "full")
       .map((item) => [item.metric_id, item]),
   );
-  const highlights = [
-    "total_return",
-    "sharpe",
-    "sharpe_standard_error",
-    "max_drawdown",
-    "calmar",
-    "turnover",
-    "trade_count",
-  ];
-
   return (
     <article className="run-detail" aria-labelledby={titleId}>
       <header className="run-detail__header">
@@ -250,7 +241,7 @@ export const BacktestRunDetail = ({
         className="metric-highlights"
         aria-label={t("backtest.result.highlights")}
       >
-        {highlights.map((metricId) => {
+        {HIGHLIGHTED_METRIC_IDS.map((metricId) => {
           const metric = fullMetrics.get(metricId);
           const definition = definitions.get(metricId);
           if (metric === undefined || definition === undefined) return null;

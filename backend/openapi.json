@@ -1524,6 +1524,28 @@
             "title": "Initial Cash",
             "type": "number"
           },
+          "participation_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Participation Rate"
+          },
+          "rounding_error": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounding Error"
+          },
           "session_unfilled_ratio": {
             "anyOf": [
               {
@@ -1560,7 +1582,9 @@
           "status",
           "sharpe",
           "impact_cost_bps",
-          "session_unfilled_ratio"
+          "session_unfilled_ratio",
+          "participation_rate",
+          "rounding_error"
         ],
         "title": "CapacityPoint",
         "type": "object"
@@ -6089,8 +6113,16 @@
             "title": "Positions",
             "type": "array"
           },
+          "roundings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RawRounding"
+            },
+            "title": "Roundings",
+            "type": "array"
+          },
           "schema_version": {
-            "default": "backtest-artifacts-v1",
+            "default": "backtest-artifacts-v2",
             "title": "Schema Version",
             "type": "string"
           },
@@ -6158,6 +6190,17 @@
       },
       "RawFill": {
         "properties": {
+          "cap_volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Volume"
+          },
           "fee": {
             "title": "Fee",
             "type": "number"
@@ -6301,6 +6344,36 @@
           "unrealized_pnl"
         ],
         "title": "RawPosition",
+        "type": "object"
+      },
+      "RawRounding": {
+        "description": "라우터가 목표 금액 Δ(목표 − 현재 평가액)를 1주 단위 수량 × 판단 세션 종가로 내린 기록\n(V4-04 2/2). 부호가 있고, 1주 미만이라 주문이 나가지 않은 목표도 남는다.",
+        "properties": {
+          "rounded_notional": {
+            "title": "Rounded Notional",
+            "type": "number"
+          },
+          "security_id": {
+            "title": "Security Id",
+            "type": "string"
+          },
+          "session": {
+            "format": "date",
+            "title": "Session",
+            "type": "string"
+          },
+          "target_notional": {
+            "title": "Target Notional",
+            "type": "number"
+          }
+        },
+        "required": [
+          "session",
+          "security_id",
+          "target_notional",
+          "rounded_notional"
+        ],
+        "title": "RawRounding",
         "type": "object"
       },
       "RawSnapshot": {

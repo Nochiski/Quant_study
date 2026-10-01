@@ -69,6 +69,7 @@ from strategy_workbench.domain.backtest.facade.runs import (
     RawFill,
     RawOrder,
     RawPosition,
+    RawRounding,
     RawSnapshot,
     RawTrade,
     RunManifest,
@@ -733,6 +734,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             price=price,
             fee=fee,
             slippage_per_share=slippage_per_share,
+            cap_volume=cap_volume,
         )
         for (
             fill_id,
@@ -744,6 +746,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             price,
             fee,
             slippage_per_share,
+            cap_volume,
         ) in tables.fills
     )
     raw_costs = tuple(
@@ -754,6 +757,15 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
             amount=amount,
         )
         for session_index, kind, instrument_index, amount in tables.costs
+    )
+    roundings = tuple(
+        RawRounding(
+            session=session_dates[session_index],
+            security_id=security_ids[instrument_index],
+            target_notional=target_notional,
+            rounded_notional=rounded_notional,
+        )
+        for session_index, instrument_index, target_notional, rounded_notional in tables.roundings
     )
     trades = _closed_trades(tables, session_dates, security_ids)
     outcomes = tuple(
@@ -767,7 +779,7 @@ def _artifacts(tables: ResultTables) -> tuple[RawArtifactBundle, tuple[TradeOutc
         for item in trades
     )
     return (
-        RawArtifactBundle(snapshots, positions, orders, fills, raw_costs, trades),
+        RawArtifactBundle(snapshots, positions, orders, fills, raw_costs, trades, roundings),
         outcomes,
     )
 
@@ -807,6 +819,7 @@ def _closed_trades(
             price,
             fee,
             slippage_per_share,
+            _cap_volume,
         ) = row
         security_id = security_ids[instrument_index]
         session = session_dates[session_index]

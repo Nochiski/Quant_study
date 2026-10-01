@@ -18,7 +18,7 @@ _SAMSUNG = InstrumentId(venue="KRX", symbol="005930", asset_class=AssetClass.EQU
 
 
 def _tables(
-    *fills: tuple[str, str, int, int, str, int, float, float, float],
+    *fills: tuple[str, str, int, int, str, int, float, float, float, int],
     costs: tuple[tuple[int, str, int | None, float], ...] = (),
 ) -> ResultTables:
     sessions = tuple(datetime(2026, 1, day, tzinfo=UTC) for day in (5, 6, 7))
@@ -30,6 +30,7 @@ def _tables(
         orders=(),
         fills=fills,
         costs=costs,
+        roundings=(),
         fill_totals=FillTotals(traded_notional=0.0, total_fees=0.0, total_slippage_cost=0.0),
     )
 
@@ -43,8 +44,8 @@ def _quantities(tables: ResultTables) -> list[str]:
 def test_closed_trade_quantity_is_a_plain_integer_string_like_fills() -> None:
     # 700주 매수 → 전량 청산: 예전에는 "7E+2".
     tables = _tables(
-        ("f1", "o1", 0, 0, "buy", 700, 100.0, 0.0, 0.0),
-        ("f2", "o2", 1, 0, "sell", 700, 110.0, 0.0, 0.0),
+        ("f1", "o1", 0, 0, "buy", 700, 100.0, 0.0, 0.0, 10_000),
+        ("f2", "o2", 1, 0, "sell", 700, 110.0, 0.0, 0.0, 10_000),
     )
     assert _quantities(tables) == ["700"]
 
@@ -52,9 +53,9 @@ def test_closed_trade_quantity_is_a_plain_integer_string_like_fills() -> None:
 def test_closed_trade_quantity_keeps_partial_exits_and_round_numbers_plain() -> None:
     # 1000주 중 100주 → 900주 순서로 청산: 둘 다 정수 문자열이고 10의 거듭제곱도 지수 표기가 아니다.
     tables = _tables(
-        ("f1", "o1", 0, 0, "buy", 1000, 100.0, 0.0, 0.0),
-        ("f2", "o2", 1, 0, "sell", 100, 110.0, 0.0, 0.0),
-        ("f3", "o3", 2, 0, "sell", 900, 120.0, 0.0, 0.0),
+        ("f1", "o1", 0, 0, "buy", 1000, 100.0, 0.0, 0.0, 10_000),
+        ("f2", "o2", 1, 0, "sell", 100, 110.0, 0.0, 0.0, 10_000),
+        ("f3", "o3", 2, 0, "sell", 900, 120.0, 0.0, 0.0, 10_000),
     )
     assert _quantities(tables) == ["100", "900"]
     for quantity in _quantities(tables):
@@ -67,9 +68,9 @@ def test_closed_trade_costs_include_the_sell_tax_recorded_after_each_sell() -> N
     100주 @100 매수 → 같은 세션에 40주 @110, 60주 @120 매도. 세금은 체결 순서대로 8.8, 14.4.
     """
     tables = _tables(
-        ("f1", "o1", 0, 0, "buy", 100, 100.0, 0.0, 0.0),
-        ("f2", "o2", 1, 0, "sell", 40, 110.0, 1.0, 0.0),
-        ("f3", "o3", 1, 0, "sell", 60, 120.0, 1.0, 0.0),
+        ("f1", "o1", 0, 0, "buy", 100, 100.0, 0.0, 0.0, 10_000),
+        ("f2", "o2", 1, 0, "sell", 40, 110.0, 1.0, 0.0, 10_000),
+        ("f3", "o3", 1, 0, "sell", 60, 120.0, 1.0, 0.0, 10_000),
         costs=((1, "sell_tax", 0, 8.8), (1, "sell_tax", 0, 14.4), (2, "short_borrow", 0, 5.0)),
     )
     session_dates = tuple(ts.date() for ts in tables.sessions)

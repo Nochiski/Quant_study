@@ -118,7 +118,7 @@ progress_percent: 61
 | [x] | `V4-01` | PSR 지표 | V0-01, #274 머지 | `MERGED` | [#363](https://github.com/Nochiski/Quant_study/pull/363) · `review_vlab_v4_01` APPROVE(P2-1·P3-1~3 반영) · main 머지 `838fd24d`(2026-09-30) |
 | [ ] | `V4-02` | DSR·선택 기록 | V4-01, V3-05 | `SELF_CHECK` | [#385](https://github.com/Nochiski/Quant_study/pull/385) |
 | [ ] | `V4-03` | 고원·민감도 | V4-02 | `SELF_CHECK` | [#403](https://github.com/Nochiski/Quant_study/pull/403) |
-| [ ] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `SELF_CHECK` | [#410](https://github.com/Nochiski/Quant_study/pull/410) |
+| [ ] | `V4-04` | 용량 스윕 | V4-03, V2-03 | `SELF_CHECK` | [#410](https://github.com/Nochiski/Quant_study/pull/410) 1/2 · [#422](https://github.com/Nochiski/Quant_study/pull/422) 2/2 |
 | [ ] | `V4-05` | 팩터 회귀(시장·규모·가치·모멘텀, HAC) | V4-04 | `PLANNED` | — |
 
 ## V5 — 화면 (각 화면의 backend PR 뒤)

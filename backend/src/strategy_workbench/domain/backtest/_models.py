@@ -480,6 +480,9 @@ class RawFill:
     price: float
     fee: float
     slippage_per_share: float
+    # 체결 세션의 유동성 캡 기준 거래량 — 엔진이 참여 한도를 곱한 값이다(V4-04 2/2). 그 전에 쓴
+    # `result.json`(`backtest-artifacts-v1`)에는 없어 None 으로 읽힌다.
+    cap_volume: int | None = None
 
 
 @dataclass(frozen=True)
@@ -505,6 +508,18 @@ class RawTrade:
 
 
 @dataclass(frozen=True)
+class RawRounding:
+    """라우터가 목표 금액 Δ(목표 − 현재 평가액)를 1주 단위 수량 × 판단 세션 종가로 내린 기록
+    (V4-04 2/2). 부호가 있고, 1주 미만이라 주문이 나가지 않은 목표도 남는다.
+    """
+
+    session: date
+    security_id: str
+    target_notional: float
+    rounded_notional: float
+
+
+@dataclass(frozen=True)
 class RawArtifactBundle:
     snapshots: tuple[RawSnapshot, ...]
     positions: tuple[RawPosition, ...]
@@ -512,7 +527,11 @@ class RawArtifactBundle:
     fills: tuple[RawFill, ...]
     costs: tuple[RawCost, ...]
     trades: tuple[RawTrade, ...]
-    schema_version: str = "backtest-artifacts-v1"
+    # 목표 금액 → 수량 반올림 기록. v1 파일에는 없어 비어 읽힌다.
+    roundings: tuple[RawRounding, ...] = ()
+    # v2: 체결에 `cap_volume` 을, 번들에 `roundings` 를 싣는다. v1 파일도 같은 모델로 읽는다(빈 칸은
+    # None·빈 튜플).
+    schema_version: str = "backtest-artifacts-v2"
 
 
 @dataclass(frozen=True)
